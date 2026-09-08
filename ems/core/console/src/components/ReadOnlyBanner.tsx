@@ -46,7 +46,7 @@ export default function ReadOnlyBanner() {
         background: 'var(--cims-warning-on-soft)', color: 'var(--card)', padding: '8px 16px',
         fontSize: 13, lineHeight: 1.5, display: 'flex', gap: 12, alignItems: 'baseline',
       }}>
-        <strong style={{ whiteSpace: 'nowrap' }}>설정 되돌림</strong>
+        <strong className="whitespace-nowrap">설정 되돌림</strong>
         <span>
           방금 저장한 설정으로는 OAM 이 기동하지 못해 <b>직전 정상 설정으로 되돌렸습니다</b>
           ({st.config_rolled_back}). 실패한 설정은 서버에 <code>config.json.failed-*</code> 로
@@ -67,7 +67,7 @@ export default function ReadOnlyBanner() {
       background: 'var(--destructive)', color: 'var(--destructive-foreground)', padding: '8px 16px',
       fontSize: 13, lineHeight: 1.5, display: 'flex', gap: 12, alignItems: 'baseline',
     }}>
-      <strong style={{ whiteSpace: 'nowrap' }}>읽기 전용</strong>
+      <strong className="whitespace-nowrap">읽기 전용</strong>
       <span>
         이 OAM 은 관리 데이터의 소유권(리스)을 갖고 있지 않아 <b>변경이 거부됩니다</b>.
         조회는 정상입니다. 다른 노드가 Active 이거나(절체 중), 같은 노드에서 OAM 이 이중

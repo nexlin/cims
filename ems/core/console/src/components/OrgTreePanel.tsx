@@ -68,9 +68,9 @@ export default function OrgTreePanel({ selectedPath, onSelect, style, fill }: Or
 
   return (
     <div className="panel" style={{ minWidth: 150, maxWidth: 180, width: 150, ...(fill ? { height: '100%' } : {}), ...style }}>
-      <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="panel-header flex justify-between items-center">
         <span className="panel-title">조직</span>
-        <Button variant="ghost" style={{ fontSize: 11 }}
+        <Button className="text-xs" variant="ghost"
           onClick={() => { onSelect(null, '전체'); }}>전체</Button>
       </div>
       <div style={{ overflowY: 'auto', ...(fill ? { flex: 1, minHeight: 0 } : { maxHeight: 500 }) }}>
@@ -98,7 +98,7 @@ export default function OrgTreePanel({ selectedPath, onSelect, style, fill }: Or
             </div>
           )
         })}
-        {flat.length === 0 && <div style={{ padding: 12, fontSize: 12, color: 'var(--muted-foreground)' }}>조직 없음</div>}
+        {flat.length === 0 && <div className="p-3 text-sm text-muted-foreground">조직 없음</div>}
       </div>
     </div>
   )

@@ -83,14 +83,12 @@ function HealthCheckPanel({ agent }: { agent: Agent }) {
               {data.ha.journal_tail && data.ha.journal_tail.length > 0 && (
                 <details className="group mt-1.5">
                   {/* 네이티브 마커(삼각형 글리프)를 끄고 Lucide 로 바꾼다 */}
-                  <summary className="flex cursor-pointer list-none items-center gap-1 text-xs
-                                      text-muted-foreground [&::-webkit-details-marker]:hidden">
+                  <summary className="flex cursor-pointer list-none items-center gap-1 text-xs text-muted-foreground [&::-webkit-details-marker]:hidden">
                     <ChevronRight size={12} className="group-open:hidden" />
                     <ChevronDown size={12} className="hidden group-open:inline" />
                     journal tail ({data.ha.journal_tail.length} lines)
                   </summary>
-                  <pre className="mt-1 max-h-[200px] overflow-auto rounded-sm border border-border
-                                  bg-muted p-2 font-mono text-xs">
+                  <pre className="mt-1 max-h-[200px] overflow-auto rounded-sm border border-border bg-muted p-2 font-mono text-xs">
                     {data.ha.journal_tail.join('\n')}
                   </pre>
                 </details>

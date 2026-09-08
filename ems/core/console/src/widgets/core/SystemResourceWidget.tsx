@@ -50,7 +50,7 @@ function Area({ data, color, pct }: { data: number[]; color: string; pct: boolea
   const pts = data.map((v, i) => xy(v, i).map(n => n.toFixed(1)).join(',')).join(' ')
   const [lx, ly] = xy(data[data.length - 1], data.length - 1)
   return (
-    <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ display: 'block' }}>
+    <svg className="block" width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
       {/* 기준선(바닥) */}
       <line x1={pad} y1={h - pad} x2={w - pad} y2={h - pad} stroke="var(--border)" strokeWidth={0.5} />
       <polygon points={`${pad},${h - pad} ${pts} ${w - pad},${h - pad}`} fill={color} opacity={0.16} />
@@ -96,25 +96,24 @@ function SystemResourceWidget() {
   const fmt = (v: number | null, pct: boolean) => v == null ? '—' : pct ? `${Math.round(v)}%` : fmtRate(v)
 
   return (
-    <div className="panel" style={{ padding: 16 }}>
-      <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 14, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+    <div className="panel p-4">
+      <div className="font-semibold mb-2 text-base flex items-center gap-2.5 flex-wrap">
         시스템 리소스 ({rows.length})
         {stale && <span title="갱신 일시 실패 — 직전 값"
         className="inline-flex items-center gap-1 text-xs" style={{ color: C_AMBER }}>
         <AlertTriangle size={11} /> 갱신 지연</span>}
-        <span style={{ display: 'inline-flex', gap: 10, fontSize: 12, fontWeight: 400 }}>
+        <span className="inline-flex gap-2.5 text-sm font-normal">
           {ALL_METRICS.map(m => (
-            <label key={m.k} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, cursor: 'pointer', color: 'var(--muted-foreground)' }}>
+            <label className="inline-flex items-center gap-[3px] cursor-pointer text-muted-foreground" key={m.k}>
               <input type="checkbox" checked={sel.has(m.k)} onChange={() => toggle(m.k)} />{m.label}
             </label>
           ))}
         </span>
-        <a onClick={() => navigate('/deploy/servers')}
-           style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 500, color: 'var(--primary)', cursor: 'pointer' }}>서버 →</a>
+        <a className="ml-auto text-sm font-medium text-primary cursor-pointer" onClick={() => navigate('/deploy/servers')}>서버 →</a>
       </div>
 
       {rows.length === 0 ? (
-        <div style={{ padding: '20px 4px', fontSize: 13, color: 'var(--muted-foreground)', textAlign: 'center' }}>
+        <div className="py-5 px-1 text-md text-muted-foreground text-center">
           {loaded ? '표시할 서버가 없습니다.' : '불러오는 중…'}
         </div>
       ) : (
@@ -139,7 +138,7 @@ function SystemResourceWidget() {
                               padding: '8px 4px', overflow: 'hidden', ...rowBd }}>
                   <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
                                  background: s.online ? C_GREEN : C_RED }} />
-                  <span title={s.host} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.host}</span>
+                  <span className="overflow-hidden text-ellipsis whitespace-nowrap" title={s.host}>{s.host}</span>
                   {!s.online && <span style={{ fontSize: 10, color: C_RED, flexShrink: 0 }}>offline</span>}
                 </div>
                 {cols.map(c => {

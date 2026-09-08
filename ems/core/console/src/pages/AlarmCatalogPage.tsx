@@ -37,14 +37,14 @@ export function AlarmCatalogTable() {
   }, [items, q])
 
   return (
-      <div className="panel" style={{ padding: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-          <div style={{ fontWeight: 600, fontSize: 14 }}>알람 카탈로그 ({filtered.length})</div>
-          <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
+      <div className="panel p-4">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="font-semibold text-base">알람 카탈로그 ({filtered.length})</div>
+          <span className="text-sm text-muted-foreground">
             정의 코드 사전 — OAM 평가 규칙 + 모듈 자기보고 등록분
           </span>
-          <Input  style={{ marginLeft: 'auto', width: 240 }}
-                 placeholder="코드/클래스/조치 검색" value={q} onChange={e => setQ(e.target.value)} />
+          <Input className="ml-auto w-[240px]"
+                 placeholder="코드/클래스/조치 검색" value={q} onChange={e => setQ(e.target.value)}/>
         </div>
         {!loaded ? (
           <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div>
@@ -56,13 +56,13 @@ export function AlarmCatalogTable() {
           <DataTable sticky>
             <thead>
               <tr>
-                <Th style={{ width: 110 }}>code</Th>
-                <Th style={{ width: 150 }}>클래스(type)</Th>
-                <Th style={{ width: 90 }}>severity</Th>
-                <Th style={{ width: 130 }}>eventType</Th>
+                <Th className="w-[110px]">code</Th>
+                <Th className="w-[150px]">클래스(type)</Th>
+                <Th className="w-[90px]">severity</Th>
+                <Th className="w-[130px]">eventType</Th>
                 <Th>영향 (effect)</Th>
                 <Th>권장 조치</Th>
-                <Th style={{ width: 110 }}>출처</Th>
+                <Th className="w-[110px]">출처</Th>
               </tr>
             </thead>
             <tbody>
@@ -70,13 +70,13 @@ export function AlarmCatalogTable() {
                 const sev = c.perceived_severity || ''
                 return (
                   <tr key={c.code} title={c.probable_cause ? `probableCause: ${c.probable_cause}` : undefined}>
-                    <Td style={{ fontFamily: 'monospace', fontSize: 12 }}>{c.code}</Td>
+                    <Td className="font-mono text-sm">{c.code}</Td>
                     <Td title={c.type}>{alarmTypeLabel(c.type)}</Td>
                     <Td>{sev ? <Badge variant={sevBadgeClass(sev)} >{sev}</Badge> : '—'}</Td>
-                    <Td style={{ fontSize: 12 }}>{c.event_type || '—'}</Td>
-                    <Td style={{ fontSize: 12 }}>{c.effect || '—'}</Td>
-                    <Td style={{ fontSize: 12 }}>{c.recommended_action || '—'}</Td>
-                    <Td style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{c.origin}</Td>
+                    <Td className="text-sm">{c.event_type || '—'}</Td>
+                    <Td className="text-sm">{c.effect || '—'}</Td>
+                    <Td className="text-sm">{c.recommended_action || '—'}</Td>
+                    <Td className="text-xs text-muted-foreground">{c.origin}</Td>
                   </tr>
                 )
               })}
@@ -99,22 +99,21 @@ export function AlarmRulesTable() {
   if (rules.rules.length === 0) return <div className="panel"><EmptyState title="등록된 평가 규칙 없음" /></div>
   return (
         <div className="panel">
-          <div style={{ padding: '10px 16px', fontWeight: 600, fontSize: 13, borderBottom: '1px solid var(--border)',
-                        display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div className="py-2.5 px-4 font-semibold text-md border-b border-border flex items-center gap-2">
             활성 평가 규칙 ({rules.rules.length})
-            <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted-foreground)' }}>
+            <span className="text-xs font-normal text-muted-foreground">
               점검 주기 {rules.sweep_sec}초 · {rules.editable ? '편집 가능' : '읽기 전용 (oam.json 설정 기반)'}
             </span>
           </div>
           <DataTable sticky>
             <thead>
               <tr>
-                <Th style={{ width: 90 }}>심각도</Th>
-                <Th style={{ width: 110 }}>코드</Th>
-                <Th style={{ width: 130 }}>클래스</Th>
-                <Th style={{ width: 90 }}>대상</Th>
+                <Th className="w-[90px]">심각도</Th>
+                <Th className="w-[110px]">코드</Th>
+                <Th className="w-[130px]">클래스</Th>
+                <Th className="w-[90px]">대상</Th>
                 <Th>지표</Th>
-                <Th style={{ width: 200 }}>발생 조건</Th>
+                <Th className="w-[200px]">발생 조건</Th>
               </tr>
             </thead>
             <tbody>
@@ -122,14 +121,14 @@ export function AlarmRulesTable() {
                 <tr key={`${r.code}-${r.target || r.mo_instance || r.scope}-${i}`}
                     title={[r.effect && `영향: ${r.effect}`, r.recommended_action && `조치: ${r.recommended_action}`].filter(Boolean).join('\n')}>
                   <Td><Badge variant={sevBadgeClass(severityOf(r))} >{severityOf(r)}</Badge></Td>
-                  <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.code || '-'}</Td>
+                  <Td className="font-mono text-xs">{r.code || '-'}</Td>
                   <Td>{alarmTypeLabel(r.type)}</Td>
-                  <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.target || r.scope || '-'}</Td>
+                  <Td className="font-mono text-xs">{r.target || r.scope || '-'}</Td>
                   <Td>
                     {r.metric}
-                    {r.mo_instance && <code style={{ marginLeft: 6, fontSize: 11, color: 'var(--muted-foreground)' }}>{r.mo_instance}</code>}
+                    {r.mo_instance && <code className="ml-1.5 text-xs text-muted-foreground">{r.mo_instance}</code>}
                   </Td>
-                  <Td style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                  <Td className="font-mono text-sm">
                     {r.condition}
                     {r.threshold != null && (
                       <span style={{ marginLeft: 6, color: 'var(--muted-foreground)', fontFamily: 'inherit' }}>

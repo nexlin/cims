@@ -81,22 +81,21 @@ export default function ConsoleAccountsPage() {
   }
 
   return (
-    <div style={{ padding: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-        <h2 style={{ margin: 0, fontSize: 18 }}>콘솔 계정</h2>
-        <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>
+    <div className="p-4">
+      <div className="flex items-center gap-3 mb-3">
+        <h2 className="m-0 text-xl">콘솔 계정</h2>
+        <span className="text-sm text-muted-foreground">
           OAM 로그인 계정 (가입자와 분리). 내장 admin 계정은 oam.json 으로 관리되어 표시되지 않습니다.
         </span>
         {!adding && !editId && (
-          <Button variant="default" style={{ marginLeft: 'auto' }} onClick={startAdd}>
+          <Button className="ml-auto" variant="default" onClick={startAdd}>
             <Plus size={14} /> 계정 추가
           </Button>
         )}
       </div>
 
       {(adding || editId) && (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap',
-                      padding: 12, background: 'var(--secondary)', borderRadius: 8, marginBottom: 12 }}>
+        <div className="flex gap-2 items-end flex-wrap p-3 bg-secondary rounded-md mb-3">
           <Field label="아이디 *" w={150}>
             <Input  value={form.login_id} disabled={!!editId} autoFocus={!editId}
                    onChange={e => setForm({ ...form, login_id: e.target.value })} />
@@ -123,7 +122,7 @@ export default function ConsoleAccountsPage() {
                      onChange={e => setForm({ ...form, password: e.target.value })} />
             </Field>
           )}
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div className="flex gap-1.5">
             <Button variant="default" disabled={busy} onClick={editId ? submitEdit : submitAdd}>
               {editId ? '저장' : '생성'}
             </Button>
@@ -132,15 +131,15 @@ export default function ConsoleAccountsPage() {
         </div>
       )}
 
-      <table className="table" style={{ width: '100%' }}>
+      <table className="table w-full">
         <thead>
           <tr>
-            <th style={{ textAlign: 'left' }}>아이디</th>
-            <th style={{ textAlign: 'left' }}>이름</th>
-            <th style={{ textAlign: 'left' }}>권한</th>
-            <th style={{ textAlign: 'left' }}>이메일</th>
-            <th style={{ textAlign: 'left' }}>수정시각</th>
-            <th style={{ width: 120 }}></th>
+            <th className="text-left">아이디</th>
+            <th className="text-left">이름</th>
+            <th className="text-left">권한</th>
+            <th className="text-left">이메일</th>
+            <th className="text-left">수정시각</th>
+            <th className="w-[120px]"></th>
           </tr>
         </thead>
         <tbody>
@@ -153,7 +152,7 @@ export default function ConsoleAccountsPage() {
               <td><Badge >{ROLE_LABELS[a.role]}</Badge></td>
               <td className="text-sm text-muted-foreground">{a.email || '—'}</td>
               <td className="text-sm text-muted-foreground">{a.update_time || '—'}</td>
-              <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+              <td className="text-right whitespace-nowrap">
                 <IconBtn title="편집" onClick={() => startEdit(a)}><Pencil size={14} /></IconBtn>
                 <IconBtn title="비밀번호 재설정" onClick={() => resetPassword(a)}><KeyRound size={14} /></IconBtn>
                 <IconBtn title="삭제" tone="danger" onClick={() => remove(a)}><Trash2 size={14} /></IconBtn>
@@ -169,7 +168,7 @@ export default function ConsoleAccountsPage() {
 function Field({ label, w, children }: { label: string; w?: number; children: React.ReactNode }) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 3, width: w }}>
-      <span className="text-sm text-muted-foreground" style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{label}</span>
+      <span className="text-xs text-muted-foreground">{label}</span>
       {children}
     </label>
   )
@@ -179,8 +178,8 @@ function IconBtn({ title, tone, onClick, children }: {
   title: string; tone?: 'danger'; onClick: () => void; children: React.ReactNode
 }) {
   return (
-    <Button variant={tone === 'danger' ? 'destructive' : 'outline'}
-            title={title} onClick={onClick} style={{ marginLeft: 4 }}>
+    <Button className="ml-1" variant={tone === 'danger' ? 'destructive' : 'outline'}
+            title={title} onClick={onClick}>
       {children}
     </Button>
   )

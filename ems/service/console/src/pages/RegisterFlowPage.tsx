@@ -41,37 +41,33 @@ export default function RegisterFlowPage() {
   const backToForm = () => { setFlow(null); setError(null); setPageState('form') }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="flex flex-col h-full">
       {/* ── 툴바 ── */}
-      <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--foreground)', whiteSpace: 'nowrap' }}>
+      <div className="toolbar flex-wrap gap-2">
+        <span className="font-semibold text-md text-foreground whitespace-nowrap">
           메세지 이력
         </span>
 
         {pageState === 'flow' && (
-          <Button onClick={backToForm} style={{ marginRight: 4 }}><ArrowLeft size={13} /> 검색</Button>
+          <Button className="mr-1" onClick={backToForm}><ArrowLeft size={13} /> 검색</Button>
         )}
 
         {pageState === 'form' && (
           <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <label style={{ fontSize: 12, color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}>사용자 ID</label>
-              <input
+            <div className="flex items-center gap-1.5">
+              <label className="text-sm text-muted-foreground whitespace-nowrap">사용자 ID</label>
+              <input className="w-[160px] py-1 px-2 rounded-[4px] border border-border text-md font-mono"
                 value={user}
                 onChange={e => setUser(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && search()}
-                placeholder="예: +821000000001"
-                style={{ width: 160, padding: '4px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 13, fontFamily: 'monospace' }}
-              />
+                placeholder="예: +821000000001"/>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <label style={{ fontSize: 12, color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}>날짜</label>
-              <input
+            <div className="flex items-center gap-1.5">
+              <label className="text-sm text-muted-foreground whitespace-nowrap">날짜</label>
+              <input className="py-1 px-2 rounded-[4px] border border-border text-md"
                 type="date"
                 value={date}
-                onChange={e => setDate(e.target.value)}
-                style={{ padding: '4px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 13 }}
-              />
+                onChange={e => setDate(e.target.value)}/>
             </div>
             <Button variant="default"
               onClick={search}
@@ -83,13 +79,13 @@ export default function RegisterFlowPage() {
         )}
 
         {pageState === 'flow' && flow && (
-          <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
+          <span className="text-sm text-muted-foreground">
             {flow.user} / {flow.date}
           </span>
         )}
 
         {error && (
-          <span style={{ fontSize: 12, color: 'var(--destructive)', marginLeft: 4 }}>{error}</span>
+          <span className="text-sm text-destructive ml-1">{error}</span>
         )}
       </div>
 

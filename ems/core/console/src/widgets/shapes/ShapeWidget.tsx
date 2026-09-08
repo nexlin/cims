@@ -113,42 +113,40 @@ function ShapeWidgetBody({ shape, config }: { shape: WidgetShape; config?: Recor
  return data
   }, [data, shape, seriesControlled, busSeries])
 
- const body = catError ? <div style={{ color: 'var(--destructive)', fontSize: 13 }}>※ 소스 카탈로그: {catError}</div>
+ const body = catError ? <div className="text-destructive text-md">※ 소스 카탈로그: {catError}</div>
     : catLoading && sources.length === 0 ? <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">소스 카탈로그 로딩 중...</div>
     : !src ? <EmptyState title="소스를 선택하세요" />
     : loading && !data ? <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중...</div>
-    : err ? <div style={{ color: 'var(--destructive)', fontSize: 13 }}>※ {err}</div>
+    : err ? <div className="text-destructive text-md">※ {err}</div>
     : shown ? <Renderer data={shown as never} />
     : <EmptyState title="데이터 없음" />
 
   // 지표 카드는 chrome 최소화 — 값만. 소스·지표는 편집 모드 [⚙] 에서 정한다.
  if (shape === 'stat') {
- return <div className="panel" style={{ padding: 10, display: 'flex', flexDirection: 'column' }}>{body}</div>
+ return <div className="panel p-2.5 flex flex-col">{body}</div>
   }
 
  return (
-    <div className="panel" style={{ padding: 12, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <div style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+    <div className="panel p-3 flex flex-col min-h-0">
+      <div className="flex-none flex items-center gap-2 mb-2.5 flex-wrap">
         {/* 제목 — 배치에서 지정(config.title)한 이름이 우선. 소스가 고정된 화면에서는 소스명보다
             "무엇을 그리는가"(호 시도 추이, 종료 사유 분포)가 읽기 쉽다. */}
-        <span style={{ fontWeight: 600, fontSize: 13 }}>
+        <span className="font-semibold text-md">
           {typeof config?.title === 'string' && config.title ? config.title : SHAPE_LABELS[shape]}
         </span>
         {src?.needsControls !== false && (controlled ? (
           // 페이지 컨트롤이 조건을 소유 — 값만 표기(중복 컨트롤 제거).
-          <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
+          <span className="text-xs text-muted-foreground">
             {from} ~ {to} · {GRAN_LABELS[gran] ?? gran}
           </span>
         ) : (
           // 페이지 컨트롤이 없는 배치 — 자기 구간 컨트롤을 쓴다(감당 못 할 단위는 비활성).
           <>
-            <Input type="datetime-local" value={from.replace(' ', 'T').slice(0, 16)}
- onChange={e => setOwnRange(r => ({ ...r, from: e.target.value.replace('T', ' ') }))}
- style={{ width: 176, fontSize: 12 }} />
-            <span style={{ color: 'var(--muted-foreground)' }}>~</span>
-            <Input type="datetime-local" value={to.replace(' ', 'T').slice(0, 16)}
- onChange={e => setOwnRange(r => ({ ...r, to: e.target.value.replace('T', ' ') }))}
- style={{ width: 176, fontSize: 12 }} />
+            <Input className="w-[176px] text-sm" type="datetime-local" value={from.replace(' ', 'T').slice(0, 16)}
+ onChange={e => setOwnRange(r => ({ ...r, from: e.target.value.replace('T', ' ') }))}/>
+            <span className="text-muted-foreground">~</span>
+            <Input className="w-[176px] text-sm" type="datetime-local" value={to.replace(' ', 'T').slice(0, 16)}
+ onChange={e => setOwnRange(r => ({ ...r, to: e.target.value.replace('T', ' ') }))}/>
             <ToggleGroup type="single" value={gran} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
  onValueChange={(v: string) => v && setOwnGran(v)}>
               {Object.entries(GRAN_LABELS).map(([g, lb]) => (
@@ -157,7 +155,7 @@ function ShapeWidgetBody({ shape, config }: { shape: WidgetShape; config?: Recor
             </ToggleGroup>
           </>
         ))}
-        <Button style={{ marginLeft: 'auto' }} onClick={() => void load()} title="다시 조회"><RotateCw size={14} /></Button>
+        <Button className="ml-auto" onClick={() => void load()} title="다시 조회"><RotateCw size={14} /></Button>
       </div>
       {/* 본문은 남은 높이를 전부 받는다 — 차트는 그 높이를 채우고(비율 렌더), 표는 넘치면 스크롤. */}
       <div className="scroll-fill">{body}</div>
@@ -208,7 +206,7 @@ function SeriesSelectBody({ config }: { config?: Record<string, unknown> }) {
 
  const active = sel.split(',').map(x => x.trim()).filter(Boolean)
 
- if (err) return <div style={{ color: 'var(--destructive)', fontSize: 13 }}>※ {err}</div>
+ if (err) return <div className="text-destructive text-md">※ {err}</div>
  if (!data) return <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">{catLoading ? '소스 카탈로그 로딩 중...' : '로딩 중...'}</div>
 
  const totals = (k: string) => data.buckets.reduce((a, b) => a + (b.values[k] || 0), 0)
@@ -231,7 +229,7 @@ function SeriesSelectBody({ config }: { config?: Record<string, unknown> }) {
  const single = shownSeries.length <= 1
 
  return (
-    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+    <div className="flex gap-2.5 flex-wrap">
       {/* '전체' 타일 — 계열이 아니라 **전부 선택** 버튼이다. 계열은 서로 겹치지 않으므로
           전부 켠 막대가 곧 전체이고, 그래서 전체를 따로 쌓을 계열로 두지 않는다. */}
       <button type="button" onClick={() => setSel('')} title={`${allLabel} — 모든 계열 표시`}
@@ -242,9 +240,9 @@ function SeriesSelectBody({ config }: { config?: Record<string, unknown> }) {
  borderLeft: `4px solid ${allOn ? 'var(--primary)' : 'var(--border)'}`,
  opacity: allOn ? 1 : 0.5,
               }}>
-        <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{allLabel}</div>
-        <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--foreground)', marginTop: 3 }}>
-          {grand}<span style={{ fontSize: 12, color: 'var(--muted-foreground)', marginLeft: 2 }}>건</span>
+        <div className="text-sm text-muted-foreground">{allLabel}</div>
+        <div className="text-[22px] font-bold text-foreground mt-[3px]">
+          {grand}<span className="text-sm text-muted-foreground ml-0.5">건</span>
         </div>
       </button>
       {!single && shownSeries.map(sp => {
@@ -259,12 +257,12 @@ function SeriesSelectBody({ config }: { config?: Record<string, unknown> }) {
  borderLeft: `4px solid ${on ? sp.color : 'var(--border)'}`,
  opacity: on ? 1 : 0.5,
                   }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted-foreground)' }}>
+            <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
               <span style={{ width: 9, height: 9, borderRadius: 2, background: on ? sp.color : 'var(--border)' }} />
               {sp.label}
             </div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--foreground)', marginTop: 3 }}>
-              {totals(sp.key)}<span style={{ fontSize: 12, color: 'var(--muted-foreground)', marginLeft: 2 }}>건</span>
+            <div className="text-[22px] font-bold text-foreground mt-[3px]">
+              {totals(sp.key)}<span className="text-sm text-muted-foreground ml-0.5">건</span>
             </div>
           </button>
         )

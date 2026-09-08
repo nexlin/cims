@@ -8,16 +8,16 @@ function HealthDotsWidget() {
   // 로딩 중에도 자리를 지킨다(팝인 방지) — 점만 흐리게.
   if (!data) {
     return (
-      <div style={{ display: 'flex', gap: 12, opacity: 0.5 }}>
+      <div className="flex gap-3 opacity-50">
         {['CSP', 'CMP', 'DB'].map(n => (
-          <span key={n} style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{n} …</span>
+          <span className="text-sm text-muted-foreground" key={n}>{n} …</span>
         ))}
       </div>
     )
   }
   const h = data.health
   return (
-    <div style={{ display: 'flex', gap: 12 }}>
+    <div className="flex gap-3">
       {[
         { name: 'CSP', status: h.csp },
         { name: 'CMP', status: h.cmp },
@@ -25,8 +25,8 @@ function HealthDotsWidget() {
       ].map(s => (
         <div key={s.name} style={{ flex: 1, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
           <StatusDot status={s.status} />
-          <span style={{ fontWeight: 600 }}>{s.name}</span>
-          <span style={{ marginLeft: 'auto', fontSize: 13, color: 'var(--muted-foreground)' }}>
+          <span className="font-semibold">{s.name}</span>
+          <span className="ml-auto text-md text-muted-foreground">
             {s.status === 'up' ? '정상' : '연결 끊김'}
           </span>
         </div>

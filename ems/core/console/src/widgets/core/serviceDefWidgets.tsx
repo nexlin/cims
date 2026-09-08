@@ -49,14 +49,13 @@ function Header({ title, count, action, loading, error }: {
   title: string; count?: number; action?: React.ReactNode; loading?: boolean; error?: string
 }) {
   return (
-    <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', flex: 'none',
-                  display: 'flex', alignItems: 'center', gap: 8 }}>
-      <span style={{ fontWeight: 600, fontSize: 14 }}>
+    <div className="py-2.5 px-4 border-b border-border flex-none flex items-center gap-2">
+      <span className="font-semibold text-base">
         {title}{count != null && ` (${count})`}
       </span>
-      {loading && <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>· 갱신 중…</span>}
-      {error && <span style={{ fontSize: 11, color: 'var(--destructive)' }}>· 조회 실패</span>}
-      {action && <span style={{ marginLeft: 'auto' }}>{action}</span>}
+      {loading && <span className="text-xs text-muted-foreground">· 갱신 중…</span>}
+      {error && <span className="text-xs text-destructive">· 조회 실패</span>}
+      {action && <span className="ml-auto">{action}</span>}
     </div>
   )
 }
@@ -77,7 +76,7 @@ function RowActions({ onEdit, onRemove }: { onEdit: () => void; onRemove: () => 
   return (
     <Td className="flex gap-1">
       <Button onClick={onEdit}>수정</Button>
-      <Button style={{ color: 'var(--destructive)' }}
+      <Button className="text-destructive"
               onClick={onRemove}>삭제</Button>
     </Td>
   )
@@ -90,16 +89,16 @@ function ServicePicker() {
   const [, setSvcId] = usePageParam('svc')
   const [adding, setAdding] = useState(false)
   return (
-    <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
-      <span style={{ fontSize: 13, color: 'var(--muted-foreground)' }}>서비스</span>
+    <div className="toolbar flex-wrap gap-2">
+      <span className="text-md text-muted-foreground">서비스</span>
       <Select value={toSel(svc?.id ?? '')} onValueChange={(v: string) => setSvcId(fromSel(v))}>
-        <SelectTrigger style={{ width: 200, fontSize: 13 }}><SelectValue /></SelectTrigger>
+        <SelectTrigger className="w-[200px] text-md"><SelectValue /></SelectTrigger>
         <SelectContent>
           {list.length === 0 && <SelectItem value={NONE}>{loading ? '로딩 중…' : '(등록된 서비스 없음)'}</SelectItem>}
           {list.map(s => <SelectItem key={s.id} value={s.id}>{s.label || s.id}</SelectItem>)}
         </SelectContent>
       </Select>
-      <Button variant="default" style={{ marginLeft: 'auto' }}
+      <Button className="ml-auto" variant="default"
               onClick={() => setAdding(true)}><Plus size={13} /> 서비스 추가</Button>
       {adding && <ServiceForm initial={null} onClose={() => setAdding(false)}
                               onSaved={reload} />}
@@ -126,17 +125,17 @@ function ServiceHeaderBlock() {
   }
 
   return (
-    <div className="panel" style={{ padding: 0, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
-        {!svc ? <span style={{ color: 'var(--muted-foreground)', fontSize: 13 }}>
+    <div className="panel p-0 flex flex-col">
+      <div className="py-3 px-4 flex items-center gap-2">
+        {!svc ? <span className="text-muted-foreground text-md">
           {loading ? '로딩 중…' : error ? '조회 실패' : '서비스를 선택하세요'}</span> : (
           <>
-            <span style={{ fontWeight: 600 }}>{svc.label || svc.id}</span>
-            <code style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{svc.id}</code>
-            <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+            <span className="font-semibold">{svc.label || svc.id}</span>
+            <code className="text-xs text-muted-foreground">{svc.id}</code>
+            <span className="ml-auto flex gap-1.5">
               <Button title="고급 — 전체 JSON 직접 편집"
                       onClick={() => setJson(JSON.stringify(svc, null, 2))}>JSON</Button>
-              <Button style={{ color: 'var(--destructive)' }}
+              <Button className="text-destructive"
                       onClick={remove}>삭제</Button>
             </span>
           </>
@@ -169,7 +168,7 @@ function JsonEditor({ initial, title, onClose, onSaved }: {
   }
   return (
     <Modal title={title} onClose={onClose} width={640}>
-      <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 8 }}>
+      <div className="text-sm text-muted-foreground mb-2">
         modules[].name/port/proto/controllable · alert_rules[].type/severity/check/threshold · data_sources[].id/label/shapes/endpoint/map
       </div>
       <textarea value={text} onChange={e => setText(e.target.value)} spellCheck={false}
@@ -204,9 +203,9 @@ function ModulesBlock() {
   }
 
   return (
-    <div className="panel" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <div className="panel flex flex-col min-h-0">
       <Header title="모듈" count={mods.length} loading={loading} error={error}
-              action={<span style={{ display: 'flex', gap: 6 }}>
+              action={<span className="flex gap-1.5">
                 <EditToggle on={editMode} disabled={!svc} onToggle={() => setEditMode(v => !v)} />
                 <Button disabled={!svc}
                         onClick={() => setEdit({ index: null })}><Plus size={13} /> 모듈</Button>
@@ -214,9 +213,9 @@ function ModulesBlock() {
       <div className="scroll-fill">
         {mods.length === 0 ? <Empty text={svc ? '등록된 모듈 없음' : '서비스를 선택하세요'} /> : (
           <DataTable sticky>
-            <thead><tr><Th>이름</Th><Th style={{ width: 70 }}>포트</Th><Th style={{ width: 60 }}>proto</Th>
-              <Th style={{ width: 64 }}>제어</Th>
-              {editMode && <Th style={{ width: 118 }} />}</tr></thead>
+            <thead><tr><Th>이름</Th><Th className="w-[70px]">포트</Th><Th className="w-[60px]">proto</Th>
+              <Th className="w-[64px]">제어</Th>
+              {editMode && <Th className="w-[118px]"/>}</tr></thead>
             <tbody>
               {mods.map((m, i) => (
                 <tr key={m.name}>
@@ -258,9 +257,9 @@ function AlertRulesBlock() {
   }
 
   return (
-    <div className="panel" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <div className="panel flex flex-col min-h-0">
       <Header title="알람 규칙" count={rules.length} loading={loading} error={error}
-              action={<span style={{ display: 'flex', gap: 6 }}>
+              action={<span className="flex gap-1.5">
                 <EditToggle on={editMode} disabled={!svc} onToggle={() => setEditMode(v => !v)} />
                 <Button disabled={!svc}
                         onClick={() => setEdit({ index: null })}><Plus size={13} /> 규칙</Button>
@@ -268,8 +267,8 @@ function AlertRulesBlock() {
       <div className="scroll-fill">
         {rules.length === 0 ? <Empty text={svc ? '등록된 알람 규칙 없음' : '서비스를 선택하세요'} /> : (
           <DataTable sticky>
-            <thead><tr><Th style={{ width: 100 }}>코드</Th><Th>클래스</Th><Th style={{ width: 90 }}>심각도</Th>
-              <Th>소스</Th>{editMode && <Th style={{ width: 118 }} />}</tr></thead>
+            <thead><tr><Th className="w-[100px]">코드</Th><Th>클래스</Th><Th className="w-[90px]">심각도</Th>
+              <Th>소스</Th>{editMode && <Th className="w-[118px]"/>}</tr></thead>
             <tbody>
               {rules.map((r, i) => {
                 const sev = r.perceived_severity || r.severity || 'warning'
@@ -279,10 +278,10 @@ function AlertRulesBlock() {
                   <tr key={`${r.code}-${r.mo_instance || r.target || i}`}
                       title={[r.effect && `영향: ${r.effect}`,
                               r.recommended_action && `조치: ${r.recommended_action}`].filter(Boolean).join('\n')}>
-                    <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.code || '—'}</Td>
+                    <Td className="font-mono text-xs">{r.code || '—'}</Td>
                     <Td>{r.type}</Td>
                     <Td><Badge variant={cls} >{sev}</Badge></Td>
-                    <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>
+                    <Td className="font-mono text-xs">
                       {r.mo_instance || (r.target ? `(관측 신원)/${r.target}` : '—')}</Td>
                     {editMode && <RowActions onEdit={() => setEdit({ index: i })} onRemove={() => remove(i)} />}
                   </tr>
@@ -319,9 +318,9 @@ function DataSourcesBlock() {
   }
 
   return (
-    <div className="panel" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <div className="panel flex flex-col min-h-0">
       <Header title="데이터 소스" count={sources.length} loading={loading} error={error}
-              action={<span style={{ display: 'flex', gap: 6 }}>
+              action={<span className="flex gap-1.5">
                 <EditToggle on={editMode} disabled={!svc} onToggle={() => setEditMode(v => !v)} />
                 <Button disabled={!svc}
                         onClick={() => setEdit({ index: null })}><Plus size={13} /> 데이터 소스</Button>
@@ -331,15 +330,15 @@ function DataSourcesBlock() {
           <Empty text={svc ? 'shape 위젯에 노출할 차트/표/지표/분포 소스를 등록하세요' : '서비스를 선택하세요'} />
         ) : (
           <DataTable sticky>
-            <thead><tr><Th style={{ width: 130 }}>id</Th><Th>이름</Th><Th style={{ width: 150 }}>shapes</Th>
-              <Th>endpoint</Th>{editMode && <Th style={{ width: 118 }} />}</tr></thead>
+            <thead><tr><Th className="w-[130px]">id</Th><Th>이름</Th><Th className="w-[150px]">shapes</Th>
+              <Th>endpoint</Th>{editMode && <Th className="w-[118px]"/>}</tr></thead>
             <tbody>
               {sources.map((d, i) => (
                 <tr key={d.id}>
-                  <Td><code style={{ fontSize: 11 }}>{d.id}</code></Td>
+                  <Td><code className="text-xs">{d.id}</code></Td>
                   <Td>{d.label}</Td>
-                  <Td style={{ fontSize: 11 }}>{(d.shapes || []).join(', ')}</Td>
-                  <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{d.endpoint}</Td>
+                  <Td className="text-xs">{(d.shapes || []).join(', ')}</Td>
+                  <Td className="font-mono text-xs">{d.endpoint}</Td>
                   {editMode && <RowActions onEdit={() => setEdit({ index: i })} onRemove={() => remove(i)} />}
                 </tr>
               ))}

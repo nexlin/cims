@@ -55,8 +55,8 @@ export default function DocsPage() {
   }, [active])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-      <div style={{ display: 'flex', gap: 4, padding: '8px 12px', borderBottom: '1px solid var(--border)', background: 'var(--muted)', flexShrink: 0, flexWrap: 'wrap', alignItems: 'center' }}>
+    <div className="flex flex-col flex-1 min-h-0">
+      <div className="flex gap-1 py-2 px-3 border-b border-border bg-muted shrink-0 flex-wrap items-center">
         {DOCS.map(d => (
           <button key={d.id}
             onClick={() => setActive(d.id)}
@@ -69,7 +69,7 @@ export default function DocsPage() {
             {d.title}
           </button>
         ))}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, alignItems: 'center' }}>
+        <div className="ml-auto flex gap-1 items-center">
           {DOCS.map(d => (
             <a key={d.id} href={d.file} download
               style={{ fontSize: 10, color: 'var(--muted-foreground)', textDecoration: 'none', padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 3 }}>
@@ -82,8 +82,8 @@ export default function DocsPage() {
           </a>
         </div>
       </div>
-      <div style={{ flex: 1, overflow: 'auto', padding: '16px 24px' }}>
-        {loading ? <div style={{ color: 'var(--muted-foreground)' }}>로딩 중...</div> :
+      <div className="flex-1 overflow-auto py-4 px-6">
+        {loading ? <div className="text-muted-foreground">로딩 중...</div> :
           <div className="docs-content"
             dangerouslySetInnerHTML={{ __html: renderMd(content) }}
           />

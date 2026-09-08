@@ -28,12 +28,12 @@ export function StatCard({ label, value, sub, unit, series, hint }: {
 }) {
   return (
     <div style={{ ...CARD_BOX, justifyContent: 'center' }} title={hint}>
-      <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginBottom: 2 }}>{label}</div>
+      <div className="text-xs text-muted-foreground mb-0.5">{label}</div>
       <div style={{ fontSize: 20, fontWeight: 700, lineHeight: 1.15 }}>
         {value}
-        {unit && <span style={{ fontSize: 11, color: 'var(--muted-foreground)', marginLeft: 3 }}>{unit}</span>}
+        {unit && <span className="text-xs text-muted-foreground ml-[3px]">{unit}</span>}
       </div>
-      {sub && <div style={{ fontSize: 10, color: 'var(--muted-foreground)', marginTop: 1 }}>{sub}</div>}
+      {sub && <div className="text-[10px] text-muted-foreground mt-px">{sub}</div>}
       {series && <Sparkline data={series} height={16} />}
     </div>
   )
@@ -81,7 +81,7 @@ export const HEALTH_METRICS: MetricDef[] = [
 function CardSkeleton({ label }: { label: string }) {
   return (
     <div style={{ ...CARD_BOX, justifyContent: 'center' }}>
-      <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginBottom: 6 }}>{label}</div>
+      <div className="text-xs text-muted-foreground mb-1.5">{label}</div>
       <div style={{ height: 20, background: 'var(--secondary)', borderRadius: 4, opacity: 0.6 }} />
     </div>
   )

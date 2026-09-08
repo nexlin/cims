@@ -334,15 +334,15 @@ export default function PttHistoryPage() {
   }, [open])
 
  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 480 }}
+    <div className="flex flex-col h-full min-h-[480px]"
  onClick={() => dd && setDd(null)}>
 
       {/* ── 툴바 1: 기간 · 검색 ── */}
       <div className="toolbar">
         <Button variant="ghost" disabled={range !== 'day'}
  onClick={() => setDate(d => shiftDay(d, -1))} title="이전 날"><ChevronLeft size={13} /></Button>
-        <Input type="date" value={date} style={{ width: 150 }}
- onChange={e => setDate(e.target.value)} aria-label="조회 날짜" />
+        <Input className="w-[150px]" type="date" value={date}
+ onChange={e => setDate(e.target.value)} aria-label="조회 날짜"/>
         <Button variant="ghost" disabled={range !== 'day' || date >= todayStr()}
  onClick={() => setDate(d => shiftDay(d, 1))} title="다음 날"><ChevronRight size={13} /></Button>
         {/* 기간 프리셋 — P2 의 days/from·to 를 화면에서 쓰는 자리 */}
@@ -354,26 +354,26 @@ export default function PttHistoryPage() {
         </ToggleGroup>
         {range === 'custom' && (
           <>
-            <Input type="date" value={fromDate} style={{ width: 150 }}
- max={toDate} onChange={e => setFrom(e.target.value)} aria-label="시작 날짜" />
-            <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>~</span>
-            <Input type="date" value={toDate} style={{ width: 150 }}
- min={fromDate} max={todayStr()} onChange={e => setTo(e.target.value)} aria-label="종료 날짜" />
+            <Input className="w-[150px]" type="date" value={fromDate}
+ max={toDate} onChange={e => setFrom(e.target.value)} aria-label="시작 날짜"/>
+            <span className="text-muted-foreground text-sm">~</span>
+            <Input className="w-[150px]" type="date" value={toDate}
+ min={fromDate} max={todayStr()} onChange={e => setTo(e.target.value)} aria-label="종료 날짜"/>
           </>
         )}
-        <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
-        <Input className="flex-1" placeholder="그룹·번호·세션키 검색" style={{ maxWidth: 240 }}
- value={searchInput} onChange={e => setSearchInput(e.target.value)} />
+        <div className="w-[1px] h-[20px] bg-border"/>
+        <Input className="flex-1 max-w-[240px]" placeholder="그룹·번호·세션키 검색"
+ value={searchInput} onChange={e => setSearchInput(e.target.value)}/>
         {q && <Button variant="ghost" onClick={() => setSearchInput('')}>검색 해제</Button>}
         <Button variant="default" onClick={load}>새로고침</Button>
-        <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--muted-foreground)', cursor: 'pointer' }}>
+        <label className="ml-auto flex items-center gap-1 text-sm text-muted-foreground cursor-pointer">
           <input type="checkbox" checked={autoRefresh} onChange={e => setAR(e.target.checked)} />
           자동갱신
         </label>
       </div>
 
       {/* ── 툴바 2: 종류 · 그룹 · 사람 ── */}
-      <div className="toolbar" style={{ borderTop: 'none' }}>
+      <div className="toolbar border-t-0">
         <span style={{ fontSize: 11.5, color: 'var(--muted-foreground)' }}>종류</span>
         <ToggleGroup type="multiple" value={[...kinds]} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
  onValueChange={(v: string[]) => { if (v.length) setKinds(new Set(v as PttSessionKind[])) }}>
@@ -381,7 +381,7 @@ export default function PttHistoryPage() {
             <ToggleGroupItem key={k.id} value={k.id}>{k.label}</ToggleGroupItem>
           ))}
         </ToggleGroup>
-        <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
+        <div className="w-[1px] h-[20px] bg-border"/>
 
         <GroupFilter summaries={summaries} selected={groupKeys} open={dd === 'group'}
  onToggleMenu={() => setDd(v => (v === 'group' ? null : 'group'))}
@@ -393,31 +393,31 @@ export default function PttHistoryPage() {
           <Button variant="default" onClick={() => setHour('')}>{hour}시 <X size={12} /></Button>
         )}
 
-        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted-foreground)' }}>
+        <span className="ml-auto text-sm text-muted-foreground">
           {loading ? '조회 중…' : <>
-            <b style={{ color: 'var(--foreground)' }}>{total}</b>건
-            {liveRows.length > 0 && <> · 진행중 <b style={{ color: 'var(--cims-success)' }}>{liveRows.length}</b></>}
+            <b className="text-foreground">{total}</b>건
+            {liveRows.length > 0 && <> · 진행중 <b className="text-success">{liveRows.length}</b></>}
             {' · 발화 합 '}{fmtSpeechMs(speechSum)}
           </>}
         </span>
       </div>
 
       {/* ── 시간대 밴드 — 목록 위 전체 폭 (필터이자 그날의 분포) ── */}
-      <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)', background: 'var(--muted)' }}>
+      <div className="py-2 px-3.5 border-b border-border bg-muted">
         <HourHeatmap hours={hours} sel={hour} onPick={h => { setHour(prev => (prev === h ? '' : h)); setPage(0) }} />
       </div>
 
       {/* ── 본문 = 좌 세션 목록(요약 카드) · 우 선택 세션(발언 + 이벤트) ── */}
-      <div ref={bodyRef} style={{ flex: 1, display: 'flex', minHeight: 0, position: 'relative' }}>
+      <div className="flex-1 flex min-h-0 relative" ref={bodyRef}>
         <div style={{
  flex: wide ? `0 0 ${listWidth}px` : '0 0 100%', minWidth: 0,
  display: 'flex', flexDirection: 'column',
         }}>
           {/* 목록 머리 — 표 헤더가 없어진 자리의 정렬 컨트롤 */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>
+          <div className="flex items-center gap-1.5 py-1.5 px-2.5 border-b border-border">
             <span style={{ fontSize: 11.5, color: 'var(--muted-foreground)' }}>정렬</span>
             <Select value={toSel(sort)} onValueChange={(v: string) => { setSort(fromSel(v) as SortKey); setPage(0) }}>
-              <SelectTrigger style={{ width: 96, padding: '2px 6px', fontSize: 12 }}><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-[96px] py-0.5 px-1.5 text-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {(Object.keys(SORT_LABEL) as SortKey[]).map(k => <SelectItem key={k} value={k}>{SORT_LABEL[k]}</SelectItem>)}
               </SelectContent>
@@ -431,7 +431,7 @@ export default function PttHistoryPage() {
             </span>
           </div>
 
-          <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div className="flex-1 overflow-y-auto py-2 px-2.5 flex flex-col gap-1.5">
             {(!rows.length && !liveRows.length && !loading) ? (
               <EmptyState title="조건에 맞는 세션이 없습니다" className="p-[24px]" />
             ) : (
@@ -446,12 +446,12 @@ export default function PttHistoryPage() {
             )}
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderTop: '1px solid var(--border)', fontSize: 12, color: 'var(--muted-foreground)' }}>
+          <div className="flex items-center gap-1.5 py-1.5 px-2.5 border-t border-border text-sm text-muted-foreground">
             <Button variant="ghost" disabled={page <= 0} onClick={() => setPage(p => p - 1)}>‹</Button>
             <span>{page + 1} / {pages}</span>
             <Button variant="ghost" disabled={page + 1 >= pages} onClick={() => setPage(p => p + 1)}>›</Button>
             <Select value={String(ps)} onValueChange={(v: string) => { setPs(Number(v)); setPage(0) }}>
-              <SelectTrigger style={{ width: 78, marginLeft: 'auto', padding: '2px 6px', fontSize: 12 }}><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-[78px] ml-auto py-0.5 px-1.5 text-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {PAGE_SIZES.map(n => <SelectItem key={n} value={String(n)}>{n}개</SelectItem>)}
               </SelectContent>
@@ -516,7 +516,7 @@ function SectionLabel({ label, n, live }: { label: string; n: number; live?: boo
  fontSize: 10.5, fontWeight: 700, letterSpacing: '.08em',
  textTransform: 'uppercase', color: 'var(--muted-foreground)',
     }}>
-      {live && <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--cims-success)' }} />}
+      {live && <span className="w-[6px] h-[6px] rounded-full bg-success"/>}
       {label}
       <span style={{ fontWeight: 600, letterSpacing: 0, textTransform: 'none', opacity: .75 }}>{n}</span>
     </div>
@@ -548,7 +548,7 @@ function SessionCard({ r, sel, names, onSelect }: {
  background: sel ? 'var(--cims-brand-soft)' : 'var(--card)',
  display: 'flex', flexDirection: 'column', gap: 4,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+      <div className="flex items-center gap-[5px] flex-wrap">
         <Badge variant={KIND_BADGE[r.kind] || 'neutralSoft'} >{KIND_LABEL[r.kind] || r.kind}</Badge>
         {duplex && <Badge variant="brandSoft" >전이중</Badge>}
         {/* 상태는 카드마다 명시 — 구역 라벨은 스크롤하면 시야에서 사라진다 */}
@@ -564,12 +564,12 @@ function SessionCard({ r, sel, names, onSelect }: {
         {r.kind === 'group' && r.mcptt_group_id && <> · {r.mcptt_group_id}</>}
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'var(--muted-foreground)' }}>
-        <span>턴 <b style={{ color: 'var(--foreground)' }}>{r.turn_count ?? r.segment_count ?? 0}</b></span>
-        <span>화자 <b style={{ color: 'var(--foreground)' }}>{r.speaker_count ?? ((r.people || []).length || 0)}</b></span>
-        <span>발화 <b style={{ color: 'var(--foreground)' }}>{fmtSpeechMs(r.total_speech_ms)}</b></span>
-        {maxCon > 1 && <Badge variant="brandSoft" style={{ fontSize: 9 }}>동시 {maxCon}</Badge>}
-        {r.initiator && <span style={{ marginLeft: 'auto' }}>개시 <Person id={r.initiator} names={names} /></span>}
+      <div className="flex items-center gap-2 flex-wrap text-xs text-muted-foreground">
+        <span>턴 <b className="text-foreground">{r.turn_count ?? r.segment_count ?? 0}</b></span>
+        <span>화자 <b className="text-foreground">{r.speaker_count ?? ((r.people || []).length || 0)}</b></span>
+        <span>발화 <b className="text-foreground">{fmtSpeechMs(r.total_speech_ms)}</b></span>
+        {maxCon > 1 && <Badge className="text-[9px]" variant="brandSoft">동시 {maxCon}</Badge>}
+        {r.initiator && <span className="ml-auto">개시 <Person id={r.initiator} names={names} /></span>}
       </div>
     </div>
   )
@@ -610,10 +610,7 @@ function SessionPane({ r, detail, names, audio, overlay, flowLoading, onFlow, on
     >
       {/* 머리 — 세션 정체성 + 동작. 동작을 카드가 아니라 여기에 두는 것은 카드 크기를
           선택 여부와 무관하게 고정하기 위해서다 (좁은 화면에선 카드가 가려지기도 한다). */}
-      <div style={{
- display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px',
- borderBottom: '1px solid var(--border)', background: 'var(--card)',
-      }}>
+      <div className="flex items-center gap-1.5 py-2 px-3 border-b border-border bg-card">
         <Badge variant={KIND_BADGE[r.kind] || 'neutralSoft'} >{KIND_LABEL[r.kind] || r.kind}</Badge>
         {duplex && <Badge variant="brandSoft" >전이중</Badge>}
         <Badge variant={live ? 'successSoft' : 'neutralSoft'} >{live ? '진행중' : '종료'}</Badge>
@@ -621,13 +618,13 @@ function SessionPane({ r, detail, names, audio, overlay, flowLoading, onFlow, on
           <Target r={r} names={names} />
         </span>
         {r.floor_control === 'on' && r.floor_policy && (
-          <Badge variant="neutralSoft" style={{ fontSize: 9, flex: '0 0 auto' }}
+          <Badge className="text-[9px] flex-none" variant="neutralSoft"
  title="세션 당시 동시 발언 정책 (TS 24.380)">
             {r.floor_policy === 'multi' ? `multi · 최대 ${r.max_talkers || '?'}명`
               : r.floor_policy === 'dual' ? 'dual · 2명' : 'single'}
           </Badge>
         )}
-        <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 4, flex: '0 0 auto' }}>
+        <span className="ml-auto inline-flex gap-1 flex-none">
           <Button disabled={flowLoading} onClick={onFlow}>Flow</Button>
           <Button onClick={onPlayAll}><Play size={11} className="mr-1 inline align-[-1px]" />전체</Button>
           <Button variant="ghost" onClick={onClose} title="닫기 (Esc)"><X size={14} /></Button>
@@ -668,9 +665,9 @@ function HourHeatmap({ hours, sel, onPick }: {
  return (
     <div>
       <div style={{ fontSize: 11.5, color: 'var(--muted-foreground)', marginBottom: 5 }}>
-        시간대별 세션 <span style={{ opacity: .75 }}>· 색 진할수록 많음 · 클릭 → 그 시간대만</span>
+        시간대별 세션 <span className="opacity-75">· 색 진할수록 많음 · 클릭 → 그 시간대만</span>
       </div>
-      <div style={{ display: 'flex', gap: 2 }}>
+      <div className="flex gap-0.5">
         {cells.map(c => {
  const ratio = c.v > 0 ? 0.18 + 0.82 * (c.v / max) : 0
  const on = sel === c.h
@@ -708,7 +705,7 @@ function GroupFilter({ summaries, selected, open, onToggleMenu, onChange }: {
     .filter(([, s]) => (s.kind || 'group') === 'group')
     .sort((a, b) => (b[1].last_window || '').localeCompare(a[1].last_window || ''))
  return (
-    <div style={{ position: 'relative' }} onClick={e => e.stopPropagation()}>
+    <div className="relative" onClick={e => e.stopPropagation()}>
       <Button variant={selected.size ? 'default' : 'outline'} onClick={onToggleMenu}>
         {selected.size ? `그룹 ${selected.size}` : '그룹'} <ChevronDown size={12} />
       </Button>
@@ -727,12 +724,12 @@ function GroupFilter({ summaries, selected, open, onToggleMenu, onChange }: {
  onChange(n)
               }} />
               <span>{s.name || s.mcptt_group_id || key}</span>
-              <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>{s.mcptt_group_id}</span>
+              <span className="text-sm text-muted-foreground">{s.mcptt_group_id}</span>
             </label>
           ))}
           {selected.size > 0 && (
-            <div style={{ padding: '4px 8px' }}>
-              <button className="link-btn" style={{ fontSize: 12 }} onClick={() => onChange(new Set())}>전체 해제</button>
+            <div className="py-1 px-2">
+              <button className="link-btn text-sm" onClick={() => onChange(new Set())}>전체 해제</button>
             </div>
           )}
         </div>
@@ -758,7 +755,7 @@ function PersonFilter({ value, candidates, names, open, onToggleMenu, onChange }
  return candidates.filter(p => p.toLowerCase().includes(s) || names.nameOf(p).toLowerCase().includes(s))
   }, [candidates, input, names])
  return (
-    <div style={{ position: 'relative' }} onClick={e => e.stopPropagation()}>
+    <div className="relative" onClick={e => e.stopPropagation()}>
       <Button variant={value ? 'default' : 'outline'}
  title={value ? names.tipOf(value) : undefined}
  onClick={() => (value ? onChange('') : onToggleMenu())}>
@@ -780,7 +777,7 @@ function PersonFilter({ value, candidates, names, open, onToggleMenu, onChange }
             <div key={p} onClick={() => onChange(p)} title={names.tipOf(p)}
  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px', borderRadius: 6, fontSize: 12.5, cursor: 'pointer' }}>
               <span>{names.nameOf(p)}</span>
-              {names.person(p) && <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{p}</span>}
+              {names.person(p) && <span className="text-muted-foreground text-xs">{p}</span>}
             </div>
           ))}
           {shown.length === 0 && <EmptyState title="표시할 참여자가 없습니다" className="p-[10px] text-[12px]" />}

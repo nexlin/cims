@@ -85,7 +85,7 @@ export default function AlarmIndicator() {
               <ToggleGroupItem value="alarms">활성 알람 ({active.length})</ToggleGroupItem>
               <ToggleGroupItem value="events">최근 이벤트 ({recentEvents.length})</ToggleGroupItem>
             </ToggleGroup>
-            <Button variant="ghost" style={{ marginLeft: 'auto' }}
+            <Button className="ml-auto" variant="ghost"
  onClick={() => setOpen(false)} aria-label="닫기"><X size={16} /></Button>
           </div>
           <div className="alarm-drawer-body">
@@ -96,20 +96,20 @@ export default function AlarmIndicator() {
  const sev = severityOf(a)
  return (
                 <div key={a.alarm_id || a.type} className="alarm-drawer-row">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div className="flex items-center gap-1.5">
                     <Badge variant={SEV_BADGE[sev] || 'neutralSoft'} >{sev}</Badge>
-                    <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{a.code}</span>
+                    <span className="font-mono text-xs">{a.code}</span>
                     {(a.occurrences || 1) > 1 && (
                       <Badge variant="neutralSoft" >×{a.occurrences}</Badge>
                     )}
-                    <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)' }}>{a.ts}</span>
+                    <span className="ml-auto text-xs text-muted-foreground">{a.ts}</span>
                   </div>
-                  <div style={{ marginTop: 3 }}>{a.message}</div>
-                  <div style={{ marginTop: 4, display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <span style={{ fontSize: 11, color: 'var(--muted-foreground)', fontFamily: 'monospace' }}>
+                  <div className="mt-[3px]">{a.message}</div>
+                  <div className="mt-1 flex gap-2 items-center">
+                    <span className="text-xs text-muted-foreground font-mono">
                       {a.source?.mo_instance}
                     </span>
-                    <span style={{ marginLeft: 'auto' }} />
+                    <span className="ml-auto"/>
                     {a.acked
                       ? <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                         <Check size={12} /> {a.ackUser || '승인'}</span>
@@ -125,12 +125,12 @@ export default function AlarmIndicator() {
             )}
             {tab === 'events' && recentEvents.map((ev, i) => (
               <div key={i} className="alarm-drawer-row">
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <div className="flex gap-1.5 items-center">
                   <Badge variant="neutralSoft" >{ev.kind}</Badge>
-                  <span style={{ fontSize: 12 }}>{ev.type}</span>
-                  <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)' }}>{ev.ts}</span>
+                  <span className="text-sm">{ev.type}</span>
+                  <span className="ml-auto text-xs text-muted-foreground">{ev.ts}</span>
                 </div>
-                <div style={{ marginTop: 3, fontSize: 12 }}>{ev.message}</div>
+                <div className="mt-[3px] text-sm">{ev.message}</div>
               </div>
             ))}
           </div>

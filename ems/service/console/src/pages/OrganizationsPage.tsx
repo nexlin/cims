@@ -203,7 +203,7 @@ export default function OrganizationsPage() {
           <DataTable sticky>
             <thead>
               <tr>
-                <Th style={{ width: 36 }}>
+                <Th className="w-[36px]">
                   <input type="checkbox"
                     checked={flat.length > 0 && flat.every(n => selected.has(n.id))}
                     onChange={() => {
@@ -212,10 +212,10 @@ export default function OrganizationsPage() {
                     }} />
                 </Th>
                 <Th>조직명</Th>
-                <Th style={{ width: 120 }}>코드</Th>
-                <Th style={{ width: 160 }}>상위 조직</Th>
-                <Th style={{ width: 80 }}>정렬</Th>
-                <Th style={{ width: 120 }}>작업</Th>
+                <Th className="w-[120px]">코드</Th>
+                <Th className="w-[160px]">상위 조직</Th>
+                <Th className="w-[80px]">정렬</Th>
+                <Th className="w-[120px]">작업</Th>
               </tr>
             </thead>
             <tbody>
@@ -237,9 +237,9 @@ export default function OrganizationsPage() {
                     {/* 조직명 (트리 인덴트) */}
                     <Td>
                       {isEditing ? (
-                        <Input  value={editForm.name}
+                        <Input className="w-full" value={editForm.name}
                           onChange={e => setEditForm({ ...editForm, name: e.target.value })}
-                          style={{ width: '100%' }} autoFocus />
+                           autoFocus/>
                       ) : (
                         <div style={{ paddingLeft: n.depth * 20, display: 'flex', alignItems: 'center', gap: 4 }}>
                           <span
@@ -250,7 +250,7 @@ export default function OrganizationsPage() {
               ? (isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />)
               : <Dot size={12} className="text-muted-foreground" />}
                           </span>
-                          <span style={{ fontWeight: 500 }}>{n.name}</span>
+                          <span className="font-medium">{n.name}</span>
                         </div>
                       )}
                     </Td>
@@ -269,7 +269,7 @@ export default function OrganizationsPage() {
                     <Td>
                       {isEditing ? (
                         <Select value={toSel(editForm.parent_id == null ? '' : String(editForm.parent_id))} onValueChange={(v: string) => setEditForm({ ...editForm, parent_id: fromSel(v) ? Number(fromSel(v)) : null })}>
-                          <SelectTrigger style={{ width: '100%' }}><SelectValue /></SelectTrigger>
+                          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value={NONE}>없음</SelectItem>
                             {parentOptions(n.id).map(o => <SelectItem key={o.id} value={String(o.id)}>{o.name}</SelectItem>)}
@@ -283,9 +283,8 @@ export default function OrganizationsPage() {
                     {/* 정렬 */}
                     <Td>
                       {isEditing ? (
-                        <Input  type="number" value={editForm.sort_order}
-                          onChange={e => setEditForm({ ...editForm, sort_order: Number(e.target.value) })}
-                          style={{ width: '100%' }} />
+                        <Input className="w-full" type="number" value={editForm.sort_order}
+                          onChange={e => setEditForm({ ...editForm, sort_order: Number(e.target.value) })}/>
                       ) : (
                         <span className="text-sm text-muted-foreground">{n.sort_order}</span>
                       )}
@@ -314,16 +313,16 @@ export default function OrganizationsPage() {
                       <Td></Td>
                       <Td>
                         <div style={{ paddingLeft: addDepth * 20 }}>
-                          <Input  placeholder="조직명 *" value={addForm.name}
+                          <Input className="w-full" placeholder="조직명 *" value={addForm.name}
                             onChange={e => setAddForm({ ...addForm, name: e.target.value })}
-                            autoFocus style={{ width: '100%' }} />
+                            autoFocus/>
                         </div>
                       </Td>
-                      <Td><Input  placeholder="코드 *" value={addForm.code}
-                        onChange={e => setAddForm({ ...addForm, code: e.target.value })} style={{ width: '100%' }} /></Td>
+                      <Td><Input className="w-full" placeholder="코드 *" value={addForm.code}
+                        onChange={e => setAddForm({ ...addForm, code: e.target.value })}/></Td>
                       <Td><span className="text-sm text-muted-foreground">{n.name}</span></Td>
-                      <Td><Input  type="number" value={addForm.sort_order}
-                        onChange={e => setAddForm({ ...addForm, sort_order: Number(e.target.value) })} style={{ width: '100%' }} /></Td>
+                      <Td><Input className="w-full" type="number" value={addForm.sort_order}
+                        onChange={e => setAddForm({ ...addForm, sort_order: Number(e.target.value) })}/></Td>
                       <Td className="flex gap-1.5">
                         <Button variant="default" onClick={saveAdd}>저장</Button>
                         <Button variant="ghost" onClick={cancelAdd}>취소</Button>
@@ -338,22 +337,22 @@ export default function OrganizationsPage() {
               {adding && addAfterId === null ? (
                 <tr style={{ background: 'rgba(74,144,217,0.08)' }}>
                   <Td></Td>
-                  <Td><Input  placeholder="조직명 *" value={addForm.name}
+                  <Td><Input className="w-full" placeholder="조직명 *" value={addForm.name}
                     onChange={e => setAddForm({ ...addForm, name: e.target.value })}
-                    autoFocus style={{ width: '100%' }} /></Td>
-                  <Td><Input  placeholder="코드 *" value={addForm.code}
-                    onChange={e => setAddForm({ ...addForm, code: e.target.value })} style={{ width: '100%' }} /></Td>
+                    autoFocus/></Td>
+                  <Td><Input className="w-full" placeholder="코드 *" value={addForm.code}
+                    onChange={e => setAddForm({ ...addForm, code: e.target.value })}/></Td>
                   <Td>
                     <Select value={toSel(addForm.parent_id == null ? '' : String(addForm.parent_id))} onValueChange={(v: string) => setAddForm({ ...addForm, parent_id: fromSel(v) ? Number(fromSel(v)) : null })}>
-                      <SelectTrigger style={{ width: '100%' }}><SelectValue /></SelectTrigger>
+                      <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value={NONE}>없음 (최상위)</SelectItem>
                         {orgs.map(o => <SelectItem key={o.id} value={String(o.id)}>{o.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </Td>
-                  <Td><Input  type="number" value={addForm.sort_order}
-                    onChange={e => setAddForm({ ...addForm, sort_order: Number(e.target.value) })} style={{ width: '100%' }} /></Td>
+                  <Td><Input className="w-full" type="number" value={addForm.sort_order}
+                    onChange={e => setAddForm({ ...addForm, sort_order: Number(e.target.value) })}/></Td>
                   <Td className="flex gap-1.5">
                     <Button variant="default" onClick={saveAdd}>저장</Button>
                     <Button variant="ghost" onClick={cancelAdd}>취소</Button>
@@ -361,9 +360,8 @@ export default function OrganizationsPage() {
                 </tr>
               ) : !adding && (
                 <tr>
-                  <Td colSpan={6} style={{ textAlign: 'center' }}>
-                    <Button variant="ghost" onClick={() => startAdd(null, null)}
-                      style={{ color: 'var(--primary)', fontSize: 12 }}>
+                  <Td className="text-center" colSpan={6}>
+                    <Button className="text-primary text-sm" variant="ghost" onClick={() => startAdd(null, null)}>
                       <Plus size={13} /> 조직 추가
                     </Button>
                   </Td>
@@ -378,23 +376,23 @@ export default function OrganizationsPage() {
       {importOpen && (
         <Modal title="조직 Excel 가져오기" onClose={() => { setImportOpen(false); setImportResult(null) }}>
             <div>
-              <p style={{ marginBottom: 12 }}>조직 계층을 Excel(.xlsx)로 일괄 등록합니다.</p>
-              <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
+              <p className="mb-3">조직 계층을 Excel(.xlsx)로 일괄 등록합니다.</p>
+              <div className="flex gap-3 items-center mb-4">
                 <Button asChild variant="default" size="default">
                   <label className="cursor-pointer">
                     파일 선택
-                    <input type="file" accept=".xlsx" onChange={handleImport} style={{ display: 'none' }} />
+                    <input className="hidden" type="file" accept=".xlsx" onChange={handleImport}/>
                   </label>
                 </Button>
                 <Button asChild size="default"><a href={orgApi.templateUrl} download>템플릿 다운로드</a></Button>
                 {importLoading && <span className="text-sm text-muted-foreground">처리 중...</span>}
               </div>
               {importResult && (
-                <div style={{ background: 'var(--card)', borderRadius: 8, padding: 16 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 8 }}>결과</div>
-                  <div style={{ fontSize: 14 }}>생성: <strong>{importResult.created}</strong>건, 수정: <strong>{importResult.updated}</strong>건</div>
+                <div className="bg-card rounded-md p-4">
+                  <div className="font-semibold mb-2">결과</div>
+                  <div className="text-base">생성: <strong>{importResult.created}</strong>건, 수정: <strong>{importResult.updated}</strong>건</div>
                   {importResult.errors.length > 0 && (
-                    <div style={{ marginTop: 8, color: 'var(--destructive)', fontSize: 12 }}>
+                    <div className="mt-2 text-destructive text-sm">
                       {importResult.errors.map((e, i) => <div key={i}>행 {e.row}: {e.error}</div>)}
                     </div>
                   )}

@@ -132,23 +132,22 @@ export default function PackageUploadModal({ onClose, onDone }: {
 
   return (
     <Modal title="패키지 업로드" onClose={closeModal} width={760}>
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div className="flex gap-2.5 items-center flex-wrap">
         <Button asChild size="default">
           <label htmlFor="pkg-files" className="cursor-pointer">
             <FolderOpen size={13} className="inline align-[-2px]" /> 파일 선택 (여러 개 가능)
           </label>
         </Button>
-        <input id="pkg-files" type="file" accept=".tar.gz,.tgz" multiple
-          style={{ display: 'none' }}
-          onChange={e => { addFiles(e.target.files); e.target.value = '' }} />
+        <input className="hidden" id="pkg-files" type="file" accept=".tar.gz,.tgz" multiple
+          onChange={e => { addFiles(e.target.files); e.target.value = '' }}/>
         {rows.length > 0 && (
-          <span className="text-muted" style={{ fontSize: 12 }}>
+          <span className="text-muted text-sm">
             총 {rows.length} · 대기 {stats.pending} · 완료 {stats.done} · 실패 {stats.failed}
           </span>
         )}
       </div>
 
-      <div style={{ marginTop: 10, fontSize: 12, color: 'var(--muted-foreground)' }}>
+      <div className="mt-2.5 text-sm text-muted-foreground">
         ℹ 각 파일 내부의 <code>meta.json</code> 으로 이름/버전/설명/빌드정보 자동 추출.
         동일 (모듈명, 버전) 이 이미 있으면 자동으로 덮어씁니다.
       </div>
@@ -160,10 +159,10 @@ export default function PackageUploadModal({ onClose, onDone }: {
           <thead>
             <tr>
               <Th>파일</Th>
-              <Th style={{ width: 80 }}>크기</Th>
+              <Th className="w-[80px]">크기</Th>
               <Th>진행</Th>
-              <Th style={{ width: 100 }}>상태</Th>
-              <Th style={{ width: 70 }}>작업</Th>
+              <Th className="w-[100px]">상태</Th>
+              <Th className="w-[70px]">작업</Th>
             </tr>
           </thead>
           <tbody>
@@ -175,7 +174,7 @@ export default function PackageUploadModal({ onClose, onDone }: {
         </DataTable>
       )}
 
-      <div className="flex justify-end gap-2.5 pt-5" style={{ marginTop: 16 }}>
+      <div className="flex justify-end gap-2.5 pt-5 mt-4">
         <Button size="default" onClick={closeModal}>닫기</Button>
         <Button variant="default" size="default" disabled={busy || stats.pending === 0}
           onClick={uploadAll}>
@@ -215,10 +214,10 @@ function UploadProgressRow({ row, onAbort, onRemove, onRetry }: {
       <Td>
         {(row.state === 'uploading' || row.state === 'done') && (
           <>
-            <div style={{ width: 240, height: 8, background: 'var(--muted)', borderRadius: 4, overflow: 'hidden' }}>
+            <div className="w-[240px] h-[8px] bg-muted rounded-[4px] overflow-hidden">
               <div style={bar(row.state === 'done' ? 'var(--cims-success)' : 'var(--cims-info)')} />
             </div>
-            <span className="text-muted" style={{ fontSize: 11 }}>
+            <span className="text-muted text-xs">
               {row.pct}% · {fmtSize(row.loaded)}/{fmtSize(row.file.size)}
               {row.speedBps > 0 && row.state === 'uploading' && (
                 <> · {fmtSpeed(row.speedBps)} · ETA {fmtEta(eta)}</>
@@ -227,13 +226,13 @@ function UploadProgressRow({ row, onAbort, onRemove, onRetry }: {
           </>
         )}
         {row.state === 'failed' && (
-          <span style={{ color: 'var(--destructive)', fontSize: 12 }}>{row.msg}</span>
+          <span className="text-destructive text-sm">{row.msg}</span>
         )}
       </Td>
       <Td>
         <Badge variant={sb.tone}>{sb.label}</Badge>
         {row.msg && row.state === 'done' && (
-          <div style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>{row.msg}</div>
+          <div className="text-[10px] text-muted-foreground">{row.msg}</div>
         )}
       </Td>
       <Td>

@@ -73,11 +73,10 @@ function TileBlock({ tile }: { tile: SummaryTile }) {
 function HeadBlock({ badge, badgeClass }: { badge: string; badgeClass: BadgeTone }) {
   const navigate = useNavigate()
   return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+    <div className="flex-1 min-h-0 flex items-center gap-2">
       <Badge variant={badgeClass} >{badge}</Badge>
-      <button className="link-btn" title="서비스 현황으로 이동"
-              onClick={() => navigate('/service/status')}
-              style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+      <button className="link-btn ml-auto inline-flex items-center gap-1 text-sm" title="서비스 현황으로 이동"
+              onClick={() => navigate('/service/status')}>
         서비스 현황 <ArrowRight size={14} />
       </button>
     </div>

@@ -21,7 +21,7 @@ function ActivePttWidget() {
   const rows = data?.active_ptt ?? []
   return (
     <div className="panel">
-      <div style={{ padding: '12px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)' }}>
+      <div className="py-3 px-4 font-semibold text-base border-b border-border">
         PTT 활성 그룹 ({rows.length}건)
       </div>
       {rows.length === 0 ? <EmptyState title="활성 그룹 세션 없음" /> : (
@@ -29,7 +29,7 @@ function ActivePttWidget() {
         <thead><tr><Th>그룹</Th><Th>발신자</Th><Th>상태</Th><Th>시작</Th></tr></thead>
         <tbody>
           {rows.map(c => (
-            <tr key={c.call_id} style={{ cursor: 'pointer' }}
+            <tr className="cursor-pointer" key={c.call_id}
               onClick={() => setFlowId(c.call_id)}
               title="행 클릭: 메시지 플로우 / 번호 클릭: 가입자 상세">
               <Td>{c.group_id}</Td>

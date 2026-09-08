@@ -48,7 +48,7 @@ export default function AdminElevateDialog({ onClose, onElevated }: {
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1200,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }} onClick={onClose}>
-      <div style={{ background: 'var(--card)', borderRadius: 6, width: 380, padding: 24 }}
+      <div className="bg-card rounded-sm w-[380px] p-6"
            onClick={e => e.stopPropagation()}>
         <h3 className="mb-1.5 flex items-center gap-1.5 text-lg font-semibold">
           <ShieldCheck size={16} /> 관리자 인증 (승격)</h3>
@@ -56,7 +56,7 @@ export default function AdminElevateDialog({ onClose, onElevated }: {
           시스템/서버 구성·패키지 설치 변경은 admin 권한이 필요합니다.
           admin 계정으로 인증하면 <b>30분간</b> 이 브라우저 탭에서 변경이 허용됩니다.
         </p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="flex flex-col gap-2">
           <Input  placeholder="admin 계정 ID" value={loginId}
                  onChange={e => setLoginId(e.target.value)} disabled={working} />
           <Input  type="password" placeholder="패스워드" value={password}
@@ -64,8 +64,8 @@ export default function AdminElevateDialog({ onClose, onElevated }: {
                  onKeyDown={e => { if (e.key === 'Enter') void submit() }}
                  autoFocus />
         </div>
-        {error && <div style={{ color: 'var(--destructive)', fontSize: 12, marginTop: 8 }}>{error}</div>}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+        {error && <div className="text-destructive text-sm mt-2">{error}</div>}
+        <div className="flex justify-end gap-2 mt-4">
           <Button size="default" onClick={onClose} disabled={working}>취소</Button>
           <Button variant="default" size="default" onClick={() => void submit()} disabled={working}>
             {working ? '인증 중…' : '인증'}

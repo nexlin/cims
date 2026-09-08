@@ -170,19 +170,19 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
   return (
     <Modal title="메뉴 편집" onClose={onClose} width={760}>
       {/* 영역(그룹핑) */}
-      <div style={{ marginBottom: 14 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-          <b style={{ fontSize: 13 }}>영역 (메뉴 그룹핑)</b>
+      <div className="mb-3.5">
+        <div className="flex items-center gap-2 mb-1.5">
+          <b className="text-md">영역 (메뉴 그룹핑)</b>
           <span style={muted}>운용/관리처럼 사이드바를 크게 나누는 묶음 — 라벨 변경·영역 추가 가능</span>
-          <Button style={{ marginLeft: 'auto' }} onClick={addArea}>
+          <Button className="ml-auto" onClick={addArea}>
             <Plus size={13} /> 영역 추가
           </Button>
         </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        <div className="flex flex-wrap gap-2">
           {areas.map(a => (
-            <span key={a.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              <Input  style={{ width: 130 }} value={a.label}
-                onChange={e => setAreaLabel(a.key, e.target.value)} />
+            <span className="inline-flex items-center gap-1" key={a.key}>
+              <Input className="w-[130px]" value={a.label}
+                onChange={e => setAreaLabel(a.key, e.target.value)}/>
               {!a.builtin && (
                 <Button title="영역 삭제 (소속 메뉴는 관리로 이동)"
                   onClick={() => removeArea(a.key)}><Trash2 size={13} /></Button>
@@ -193,10 +193,10 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
       </div>
 
       {/* 섹션 목록 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <b style={{ fontSize: 13 }}>메뉴</b>
+      <div className="flex items-center gap-2 mb-1.5">
+        <b className="text-md">메뉴</b>
         <span style={muted}>시스템·릴리스는 잠금 (이름변경/숨김/이동 불가)</span>
-        <Button style={{ marginLeft: 'auto' }} onClick={addGroup}>
+        <Button className="ml-auto" onClick={addGroup}>
           <Plus size={13} /> 메뉴 그룹 추가
         </Button>
       </div>
@@ -206,22 +206,21 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
             borderBottom: '1px solid var(--border)', padding: '6px 8px',
             background: 'var(--muted)', opacity: r.hidden ? 0.55 : 1,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2 }}>
+            <div className="flex items-center gap-1.5">
+              <span className="inline-flex flex-col gap-0.5">
                 <Button style={{ padding: '0 4px', lineHeight: 1 }}
                   disabled={i === 0} onClick={() => move(i, -1)}><ChevronUp size={13} /></Button>
                 <Button style={{ padding: '0 4px', lineHeight: 1 }}
                   disabled={i === rows.length - 1} onClick={() => move(i, 1)}><ChevronDown size={13} /></Button>
               </span>
               {r.locked
-                ? <span title="잠금 — 시스템/릴리스 메뉴는 편집할 수 없습니다"
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 5, width: 190, fontSize: 13 }}>
+                ? <span className="inline-flex items-center gap-[5px] w-[190px] text-md" title="잠금 — 시스템/릴리스 메뉴는 편집할 수 없습니다">
                     <Lock size={13} /> {r.defaultLabel}
                   </span>
-                : <Input  style={{ width: 190 }} value={r.label}
-                    placeholder={r.defaultLabel} onChange={e => patchRow(i, { label: e.target.value })} />}
+                : <Input className="w-[190px]" value={r.label}
+                    placeholder={r.defaultLabel} onChange={e => patchRow(i, { label: e.target.value })}/>}
               <Select value={toSel(r.area)} onValueChange={(v: string) => patchRow(i, { area: fromSel(v) })} disabled={r.locked}>
-                <SelectTrigger style={{ width: 120 }} title="소속 영역"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="w-[120px]" title="소속 영역"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {areas.map(a => <SelectItem key={a.key} value={a.key}>{a.label}</SelectItem>)}
                 </SelectContent>
@@ -233,7 +232,7 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
               {r.custom ? (
                 <>
                   <span style={{ ...muted, border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px' }}>커스텀</span>
-                  <Button style={{ marginLeft: 'auto' }}
+                  <Button className="ml-auto"
                     title="그룹 삭제" onClick={() => removeCustom(i)}><Trash2 size={13} /></Button>
                 </>
               ) : (!r.locked && r.label !== r.defaultLabel &&
@@ -243,9 +242,9 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
             {r.custom && (
               <div style={{ margin: '6px 0 2px 34px' }}>
                 {r.pages.map((p, pi) => (
-                  <div key={p.slug} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                    <Input  style={{ width: 210 }} value={p.title}
-                      onChange={e => setPageTitle(i, pi, e.target.value)} />
+                  <div className="flex items-center gap-1.5 mb-1" key={p.slug}>
+                    <Input className="w-[210px]" value={p.title}
+                      onChange={e => setPageTitle(i, pi, e.target.value)}/>
                     <code style={muted}>/custom/{p.slug}</code>
                     <Button title="페이지 삭제"
                       onClick={() => removePage(i, pi)}><Trash2 size={13} /></Button>
@@ -263,9 +262,8 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
         ))}
       </div>
 
-      <div className="flex justify-end gap-2.5 pt-5" style={{ marginTop: 14 }}>
-        <Button size="default" onClick={resetDefault} disabled={saving}
-                style={{ marginRight: 'auto' }}>기본값으로</Button>
+      <div className="flex justify-end gap-2.5 pt-5 mt-3.5">
+        <Button className="mr-auto" size="default" onClick={resetDefault} disabled={saving}>기본값으로</Button>
         <Button size="default" onClick={onClose} disabled={saving}>취소</Button>
         <Button variant="default" size="default" onClick={save} disabled={saving}>
           {saving ? '저장 중...' : '저장'}

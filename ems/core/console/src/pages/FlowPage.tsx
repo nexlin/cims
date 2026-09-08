@@ -224,7 +224,7 @@ function FlowDiagram({ actors, messages, selIdx, onSelect }: FlowDiagramProps) {
     <div ref={containerRef} style={{ flex: '1 1 50%', overflow: 'auto', minWidth: 0, borderRight: '1px solid var(--border)' }}>
       {/* 노드 헤더 (sticky) */}
       <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--card)', borderBottom: '1px solid #e0e2ea' }}>
-        <svg width={svgWidth} height={HEAD_H} style={{ fontFamily: 'monospace', fontSize: 12, display: 'block' }}>
+        <svg className="font-mono text-sm block" width={svgWidth} height={HEAD_H}>
           {actors.map(a => {
             const x = actorX(a, actors, colW)
             return (
@@ -240,11 +240,9 @@ function FlowDiagram({ actors, messages, selIdx, onSelect }: FlowDiagramProps) {
         </svg>
       </div>
       {/* 메시지 Flow */}
-      <svg
+      <svg className="font-mono text-sm select-none cursor-default block"
         width={svgWidth}
-        height={messages.length * ROW_H + 20}
-        style={{ fontFamily: 'monospace', fontSize: 12, userSelect: 'none', cursor: 'default', display: 'block' }}
-      >
+        height={messages.length * ROW_H + 20}>
         {actors.map(a => {
           const x = actorX(a, actors, colW)
           return <line key={a} x1={x} y1={0} x2={x} y2={messages.length * ROW_H + 10}
@@ -259,7 +257,7 @@ function FlowDiagram({ actors, messages, selIdx, onSelect }: FlowDiagramProps) {
           const arrowTip = dir !== 0 ? x2 - dir * 10 : x2
           const isSelected = selIdx === i
           return (
-            <g key={i} style={{ cursor: 'pointer' }} onClick={() => onSelect(i)}>
+            <g className="cursor-pointer" key={i} onClick={() => onSelect(i)}>
               <rect x={0} y={y} width={svgWidth} height={ROW_H}
                 fill={isSelected ? '#dbeafe' : 'transparent'} />
               <text x={4} y={y + 14} fill="#6b7280" fontSize={10}>{msg.ts.slice(0, 12)}</text>
@@ -320,12 +318,10 @@ export function SequenceDiagram({ messages: rawMessages, onSelect, selectedIdx }
     : MARGIN_L * 2 + (ACTORS.length - 1) * colW
 
   return (
-    <div ref={containerRef} style={{ width: '100%', overflowX: 'auto' }}>
-    <svg
+    <div className="w-full overflow-x-auto" ref={containerRef}>
+    <svg className="font-mono text-sm select-none cursor-default block"
       width={width}
-      height={height}
-      style={{ fontFamily: 'monospace', fontSize: 12, userSelect: 'none', cursor: 'default', display: 'block' }}
-    >
+      height={height}>
       {/* ── 헤더: actor 이름 + 수직선 ── */}
       {ACTORS.map(a => {
         const x = actorX(a, ACTORS, colW)
@@ -355,7 +351,7 @@ export function SequenceDiagram({ messages: rawMessages, onSelect, selectedIdx }
         const bgColor = isSelected ? '#dbeafe' : 'transparent'
 
         return (
-          <g key={i} style={{ cursor: 'pointer' }} onClick={() => onSelect(i)}>
+          <g className="cursor-pointer" key={i} onClick={() => onSelect(i)}>
             {/* 행 배경 */}
             <rect x={0} y={y} width={width} height={ROW_H}
               fill={bgColor} opacity={1} />
@@ -447,7 +443,7 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
                       <span style={{ display: 'inline-block', padding: '1px 5px', borderRadius: 3,
                         fontSize: 9, fontWeight: 700, color: '#fff',
                         background: d === 'TX' ? '#2563eb' : '#16a34a' }}>{d}</span>
-                    ) : <span style={{ color: 'var(--muted-foreground)' }}>\u2014</span>
+                    ) : <span className="text-muted-foreground">\u2014</span>
                   })()}
                 </td>
                 <td style={tdStyle}>
@@ -464,7 +460,7 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
                   </span>
                 </td>
                 <td style={{ ...tdStyle, fontWeight: 600, color: msgColor(msg) }}>
-                  {msgLabel(msg as ColoredMsg)}{msg.detail ? <span style={{ fontWeight: 400, color: 'var(--muted-foreground)' }}>({msg.detail})</span> : ''}
+                  {msgLabel(msg as ColoredMsg)}{msg.detail ? <span className="font-normal text-muted-foreground">({msg.detail})</span> : ''}
                 </td>
               </tr>
             )
@@ -606,10 +602,10 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
     <>
       {/* 노드 필터 */}
       {Object.keys(allNodes).length > 0 && (
-        <div style={{ display: 'flex', gap: 12, padding: '6px 16px', borderBottom: '1px solid var(--border)', fontSize: 13, alignItems: 'center' }}>
-          <span style={{ color: 'var(--muted-foreground)', fontWeight: 500 }}>노드:</span>
+        <div className="flex gap-3 py-1.5 px-4 border-b border-border text-md items-center">
+          <span className="text-muted-foreground font-medium">노드:</span>
           {Object.keys(allNodes).map(node => (
-            <label key={node} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+            <label className="flex items-center gap-1 cursor-pointer" key={node}>
               <input type="checkbox" checked={enabledNodes.has(node)}
                 onChange={() => setEnabledNodes(prev => {
                   const next = new Set(prev)
@@ -617,23 +613,23 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
                   return next
                 })} />
               {(node || '').toUpperCase()}
-              <span style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>({allNodes[node]?.length || 0})</span>
+              <span className="text-muted-foreground text-xs">({allNodes[node]?.length || 0})</span>
             </label>
           ))}
 
           {/* 색상 범례 — 응답은 요청과 같은 색(점선 화살표), 실패(4xx+)만 빨강 */}
-          <span style={{ marginLeft: 'auto', display: 'flex', gap: 10, fontSize: 11, color: 'var(--muted-foreground)', flexWrap: 'wrap', alignItems: 'center' }}>
+          <span className="ml-auto flex gap-2.5 text-xs text-muted-foreground flex-wrap items-center">
             {[
               ['등록', '#4b8cda'], ['구독/알림', '#8e5ad8'], ['호 제어', '#0d9488'],
               ['실패응답', '#d64545'],
               ['CMP제어', '#e6832a'], ['CSC(XCAP)', '#2ecc71'],
             ].map(([name, c]) => (
-              <span key={name} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+              <span className="flex items-center gap-[3px]" key={name}>
                 <span style={{ width: 10, height: 10, borderRadius: 2, background: c, display: 'inline-block' }} />
                 {name}
               </span>
             ))}
-            <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+            <span className="flex items-center gap-[3px]">
               <svg width={22} height={10}><line x1={0} y1={5} x2={22} y2={5} stroke="#8a9ab0" strokeWidth={1.5} strokeDasharray="5 3" /></svg>
               응답 (요청과 같은 색)
             </span>
@@ -652,7 +648,7 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
         const ACTORS = deriveActors(normalizedMsgs)
 
         return (
-          <div style={{ display: 'flex', height: '100%', gap: 0 }}>
+          <div className="flex h-full gap-0">
             {/* ── 좌측: 시퀀스 다이어그램 ── */}
             <FlowDiagram actors={ACTORS} messages={normalizedMsgs} selIdx={selIdx} onSelect={handleSelect} />
 
@@ -666,11 +662,11 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
               <div style={{ flex: '1 1 50%', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderTop: '1px solid #e0e2ea', minHeight: 0 }}>
                 {selected ? (
                   <>
-                    <div style={{ flex: '0 0 auto', padding: '8px 12px', display: 'flex', gap: 8, alignItems: 'center', borderBottom: '1px solid var(--border)', background: 'var(--muted)' }}>
+                    <div className="flex-none py-2 px-3 flex gap-2 items-center border-b border-border bg-muted">
                       <Badge  style={{ backgroundColor: protoColor(selected.proto), color: '#fff' }}>{selected.proto}</Badge>
-                      <span style={{ fontWeight: 600, fontSize: 12 }}>{selected.label}</span>
+                      <span className="font-semibold text-sm">{selected.label}</span>
                       <span className="text-sm text-muted-foreground">{actorLabel(selected.from)} {'\u2192'} {actorLabel(selected.to)}</span>
-                      <span className="text-sm text-muted-foreground" style={{ marginLeft: 'auto' }}>{selected.ts}</span>
+                      <span className="text-sm text-muted-foreground ml-auto">{selected.ts}</span>
                     </div>
                     <pre style={{
                       flex: 1, margin: 0, padding: 12, overflow: 'auto',
@@ -697,7 +693,7 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
   // inline: Modal 래핑 없이 페이지 안에 바로 렌더
   if (inline) {
     return (
-      <div style={{ flex: 1, minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div className="flex-1 min-h-0 h-full flex flex-col overflow-hidden">
         {inner}
       </div>
     )

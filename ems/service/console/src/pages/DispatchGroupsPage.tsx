@@ -37,7 +37,7 @@ const SCOPE_HINT: Record<MonitorScope, string> = {
 const PTT_LABEL: Record<PttListen, string> = { none: '없음', listed: '지정 그룹', all: '전체' }
 
 function Caret({ open }: { open: boolean }) {
-  return <span style={{ color: 'var(--muted-foreground)', display: 'inline-flex' }}>
+  return <span className="text-muted-foreground inline-flex">
     {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
   </span>
 }
@@ -108,15 +108,15 @@ export default function DispatchGroupsPage() {
   const cols: Column<DispatchGroup>[] = [
     { key: 'exp', header: '', width: 26, render: g => <Caret open={openId === g.id} /> },
     { key: 'name', header: '그룹명', sortable: true, render: g => (
-      <span><span style={{ fontWeight: 600 }}>{g.name}</span>
-        {g.monitor_scope !== 'none' && <Badge variant="dangerSoft"  style={{ fontSize: 9, marginLeft: 4 }} title={`감청 범위: ${SCOPE_LABEL[g.monitor_scope]}`}>감청</Badge>}
-        {g.ptt_listen !== 'none' && <Badge variant="warningSoft"  style={{ fontSize: 9, marginLeft: 2 }} title={`PTT 청취: ${PTT_LABEL[g.ptt_listen]}`}>PTT청취</Badge>}
+      <span><span className="font-semibold">{g.name}</span>
+        {g.monitor_scope !== 'none' && <Badge className="text-[9px] ml-1" variant="dangerSoft" title={`감청 범위: ${SCOPE_LABEL[g.monitor_scope]}`}>감청</Badge>}
+        {g.ptt_listen !== 'none' && <Badge className="text-[9px] ml-0.5" variant="warningSoft" title={`PTT 청취: ${PTT_LABEL[g.ptt_listen]}`}>PTT청취</Badge>}
       </span>
     ) },
     { key: 'id', header: 'ID', width: 120, sortable: true, render: g => <span className="text-sm text-muted-foreground">{g.id}</span> },
     { key: 'pilot', header: '대표번호', width: 110, sortable: true, sortValue: g => g.pilot_id || '', render: g => g.pilot_id
-      ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Radio size={12} style={{ color: 'var(--primary)' }} /><span className="text-sm text-muted-foreground">{g.pilot_id}</span></span>
-      : <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>—</span> },
+      ? <span className="inline-flex items-center gap-1"><Radio className="text-primary" size={12}/><span className="text-sm text-muted-foreground">{g.pilot_id}</span></span>
+      : <span className="text-sm text-muted-foreground">—</span> },
     { key: 'alert', header: '호출', width: 90, render: g => <span className="text-sm text-muted-foreground">{g.pilot_id ? (g.alert_mode === 'parallel' ? `병렬 ${g.no_answer_sec}s` : `순차 ${g.no_answer_sec}s`) : '—'}</span> },
     { key: 'overflow', header: '넘김', width: 110, render: g => <span className="text-sm text-muted-foreground">{g.overflow_target || '—'}</span> },
     { key: 'scope', header: '감청', width: 90, render: g => <span className="text-sm text-muted-foreground">{SCOPE_LABEL[g.monitor_scope]}</span> },
@@ -133,18 +133,18 @@ export default function DispatchGroupsPage() {
   const openGroup = openId ? groups.find(g => g.id === openId) : undefined
 
   return (
-    <div style={{ display: 'flex', gap: 16, alignItems: 'stretch', flex: 1, minHeight: 0 }}>
+    <div className="flex gap-4 items-stretch flex-1 min-h-0">
       <OrgTreePanel fill selectedPath={orgScope} onSelect={(p, n) => { setOrgScope(p); setOrgName(n) }}
         style={{ flex: '0 0 200px', width: 200, maxWidth: 200 }} />
 
-      <div className="panel" style={{ flex: 1, minWidth: 0 }}>
+      <div className="panel flex-1 min-w-0">
         <div className="toolbar">
-          <span style={{ fontWeight: 600, fontSize: 13 }}>{orgName}</span>
-          <Input className="flex-1" placeholder="그룹명·ID·대표번호 검색" value={search}
-            onChange={e => setSearch(e.target.value)} style={{ maxWidth: 220 }} />
+          <span className="font-semibold text-md">{orgName}</span>
+          <Input className="flex-1 max-w-[220px]" placeholder="그룹명·ID·대표번호 검색" value={search}
+            onChange={e => setSearch(e.target.value)}/>
           {search && <Button variant="ghost" onClick={() => setSearch('')}
         aria-label="검색어 지우기"><X size={13} /></Button>}
-          <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          <span className="ml-auto flex gap-1.5">
             {canWrite && !notMigrated && (
               <Button variant="default" onClick={() => { setOpenId(null); setAdding(a => !a) }}><Plus size={13} /> 관제 그룹</Button>
             )}
@@ -152,15 +152,15 @@ export default function DispatchGroupsPage() {
         </div>
 
         {notMigrated && (
-          <div style={{ padding: '10px 16px', fontSize: 12, color: 'var(--muted-foreground)', borderBottom: '1px solid var(--border)', background: 'var(--muted)' }}>
+          <div className="py-2.5 px-4 text-sm text-muted-foreground border-b border-border bg-muted">
             DB 에 <code>dispatch_groups</code> 테이블이 없습니다 — <code>sql/migrate_dispatch_groups.sql</code> 적용 후 사용할 수 있습니다.
             당겨받기는 가입자 <code>pickup_group</code> 축으로 계속 동작합니다.
           </div>
         )}
 
         {adding && (
-          <div style={{ borderBottom: '1px solid var(--border)', background: 'var(--muted)', padding: '12px 16px' }}>
-            <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--primary)', marginBottom: 8 }}>새 관제 그룹</div>
+          <div className="border-b border-border bg-muted py-3 px-4">
+            <div className="font-semibold text-sm text-primary mb-2">새 관제 그룹</div>
             <GroupDrawer mode="add" orgs={orgs} isManager={hasRole(me, 'manager')} canWrite={canWrite} allGroups={groups} pttGroups={pttGroups}
               callIndex={callIndex} nameOf={nameOf} groupOfUser={groupOfUser} orgScope={orgScope} orgPathOf={orgPathOf}
               onClose={() => setAdding(false)} onSaved={() => { setAdding(false); load() }} reload={load} />
@@ -170,7 +170,7 @@ export default function DispatchGroupsPage() {
         <DataTable<DispatchGroup> columns={cols} rows={rows} rowKey={g => g.id} loading={loading}
           onRowClick={g => toggleOpen(g.id)} expandedKey={openId}
           renderExpanded={openGroup ? () => (
-            <div style={{ padding: '12px 16px' }}>
+            <div className="py-3 px-4">
               <GroupDrawer key={openGroup.id} mode="view" group={openGroup} orgs={orgs} isManager={hasRole(me, 'manager')} canWrite={canWrite}
                 allGroups={groups} pttGroups={pttGroups} callIndex={callIndex} nameOf={nameOf} groupOfUser={groupOfUser}
                 orgScope={orgScope} orgPathOf={orgPathOf}
@@ -270,7 +270,7 @@ function GroupDrawer(p: DrawerProps) {
   const monitoring = (existing?.monitor_scope || 'none') !== 'none' || (existing?.ptt_listen || 'none') !== 'none'
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
+    <div className="flex flex-col gap-2.5 text-md">
       {editing ? (
         <FieldRow>
           <Field label="그룹명 *" w={170}><Input  autoFocus value={form.name || ''} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
@@ -330,25 +330,25 @@ function GroupDrawer(p: DrawerProps) {
               </SelectContent>
             </Select>
           </Field>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <div className="flex gap-1.5 items-center">
             <Button variant="default" onClick={save}>저장</Button>
             <Button variant="ghost" onClick={() => isNew ? p.onClose() : setEditing(false)}>취소</Button>
           </div>
           <div style={{ flexBasis: '100%', fontSize: 11, color: 'var(--muted-foreground)' }}>감청 범위: {SCOPE_HINT[form.monitor_scope || 'none']}</div>
         </FieldRow>
       ) : existing && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', fontSize: 12 }}>
+        <div className="flex items-center gap-4 flex-wrap text-sm">
           <span className="text-sm text-muted-foreground">ID {existing.id}</span>
           <span className="text-sm text-muted-foreground">대표번호 {existing.pilot_id ? `${existing.pilot_id} (${existing.service_ref || '—'}, ${existing.alert_mode === 'parallel' ? '병렬' : '순차'} ${existing.no_answer_sec}s, 통화중 ${existing.busy_members === 'skip' ? '제외' : '호출'})` : '없음'}</span>
           <span className="text-sm text-muted-foreground">넘김 {existing.overflow_target || '—'}</span>
           <span className="text-sm text-muted-foreground">감청 {SCOPE_LABEL[existing.monitor_scope]}</span>
           <span className="text-sm text-muted-foreground">PTT 청취 {PTT_LABEL[existing.ptt_listen]}{existing.ptt_listen !== 'none' ? ` (${existing.listen_visibility === 'hidden' ? '은닉' : '투명'})` : ''}</span>
-          {p.canWrite && <Button style={{ marginLeft: 'auto' }} onClick={() => setEditing(true)}>속성 편집</Button>}
+          {p.canWrite && <Button className="ml-auto" onClick={() => setEditing(true)}>속성 편집</Button>}
         </div>
       )}
 
       {existing && (existing.monitor_scope === 'listed' || existing.ptt_listen === 'listed') && (
-        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+        <div className="flex gap-4 flex-wrap">
           {existing.monitor_scope === 'listed' && (
             <TargetPicker title="감청 대상 그룹" icon={<Headphones size={12} />} canEdit={p.isManager}
               options={p.allGroups.filter(g => g.id !== existing.id).map(g => ({ value: g.id, label: `${g.name} (${g.id})` }))}
@@ -381,14 +381,14 @@ function TargetPicker({ title, icon, options, value, canEdit, onSave }: {
   const dirty = sel.size !== value.length || value.some(v => !sel.has(v))
   return (
     <div style={{ flex: '1 1 280px', border: '1px solid var(--border)', borderRadius: 10, padding: '8px 10px', background: 'var(--card)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
-        {icon} {title} <Badge variant="neutralSoft"  style={{ fontSize: 10 }}>{sel.size}</Badge>
-        {canEdit && dirty && <Button variant="default" style={{ marginLeft: 'auto' }} onClick={() => onSave(Array.from(sel))}>저장</Button>}
+      <div className="flex items-center gap-1.5 text-sm font-semibold mb-1.5">
+        {icon} {title} <Badge className="text-[10px]" variant="neutralSoft">{sel.size}</Badge>
+        {canEdit && dirty && <Button className="ml-auto" variant="default" onClick={() => onSave(Array.from(sel))}>저장</Button>}
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: 12, maxHeight: 120, overflowY: 'auto' }}>
-        {options.length === 0 && <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>선택 가능한 그룹 없음</span>}
+        {options.length === 0 && <span className="text-sm text-muted-foreground">선택 가능한 그룹 없음</span>}
         {options.map(o => (
-          <label key={o.value} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <label className="inline-flex items-center gap-1" key={o.value}>
             <input type="checkbox" disabled={!canEdit} checked={sel.has(o.value)}
               onChange={() => setSel(s => { const n = new Set(s); if (n.has(o.value)) n.delete(o.value); else n.add(o.value); return n })} />
             {o.label}
@@ -431,25 +431,25 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
   const panel: React.CSSProperties = { display: 'flex', flexDirection: 'column', minWidth: 0, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: 'var(--card)' }
 
   return (
-    <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-      {lockedReason && <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginBottom: 6 }}>{lockedReason}</div>}
-      <div style={{ display: 'flex', alignItems: 'stretch', gap: 10, height: 320 }}>
+    <div className="mt-2.5 border-t border-border pt-3">
+      {lockedReason && <div className="text-xs text-muted-foreground mb-1.5">{lockedReason}</div>}
+      <div className="flex items-stretch gap-2.5 h-[320px]">
         <div style={{ ...panel, flex: 1 }}>
-          <div style={panelHead}>멤버 <Badge variant="brandSoft"  style={{ fontSize: 10 }}>{members.length}</Badge>
-            <span style={{ marginLeft: 'auto', fontWeight: 400, color: 'var(--muted-foreground)', fontSize: 11 }}>순서 = 순차 호출·포크 상한 절삭 순</span></div>
-          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          <div style={panelHead}>멤버 <Badge className="text-[10px]" variant="brandSoft">{members.length}</Badge>
+            <span className="ml-auto font-normal text-muted-foreground text-xs">순서 = 순차 호출·포크 상한 절삭 순</span></div>
+          <div className="flex-1 min-h-0 overflow-y-auto">
             {members.length === 0
-              ? <div className="text-sm text-muted-foreground" style={{ padding: 14, fontSize: 12, textAlign: 'center', color: 'var(--muted-foreground)' }}>멤버 없음<br />우측에서 가입자를 선택해 <ArrowLeft size={11} style={{ verticalAlign: '-1px' }} /> 추가</div>
+              ? <div className="p-3.5 text-sm text-center text-muted-foreground">멤버 없음<br />우측에서 가입자를 선택해 <ArrowLeft size={11} style={{ verticalAlign: '-1px' }} /> 추가</div>
               : members.map(m => (
                 <div key={m.user_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', fontSize: 12,
                   borderLeft: selMembers.has(m.user_id) ? '3px solid var(--primary)' : '3px solid transparent' }}>
                   {canManage && <input type="checkbox" checked={selMembers.has(m.user_id)} onChange={() => toggle(setSelMembers, m.user_id)} />}
-                  <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
-                    <span style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{nameOf.get(m.user_id) || '—'}</span>
-                    <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{m.user_id}</span>
+                  <span className="flex flex-col min-w-0 flex-1">
+                    <span className="font-semibold whitespace-nowrap overflow-hidden text-ellipsis">{nameOf.get(m.user_id) || '—'}</span>
+                    <span className="text-muted-foreground text-xs">{m.user_id}</span>
                   </span>
-                  <Input  type="number" title="alert_order" disabled={!canManage} value={m.alert_order} style={{ width: 54 }}
-                    onChange={e => onSaveOrder(m.user_id, Number(e.target.value))} />
+                  <Input className="w-[54px]" type="number" title="alert_order" disabled={!canManage} value={m.alert_order}
+                    onChange={e => onSaveOrder(m.user_id, Number(e.target.value))}/>
                   {canManage && <IconBtn title="제거" tone="danger" onClick={() => doRemove([m.user_id])}><ArrowRight size={ICON} /></IconBtn>}
                 </div>
               ))}
@@ -458,25 +458,23 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
 
         {canManage && (
           <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, alignSelf: 'center' }}>
-            <Button variant="default" disabled={busy || picked.size === 0} onClick={() => doAdd(Array.from(picked))}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}><ArrowLeft size={14} /> 추가{picked.size ? ` ${picked.size}` : ''}</Button>
-            <Button disabled={busy || selMembers.size === 0} onClick={() => doRemove(Array.from(selMembers))}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>제거{selMembers.size ? ` ${selMembers.size}` : ''} <ArrowRight size={14} /></Button>
+            <Button className="inline-flex items-center gap-1 whitespace-nowrap" variant="default" disabled={busy || picked.size === 0} onClick={() => doAdd(Array.from(picked))}><ArrowLeft size={14} /> 추가{picked.size ? ` ${picked.size}` : ''}</Button>
+            <Button className="inline-flex items-center gap-1 whitespace-nowrap" disabled={busy || selMembers.size === 0} onClick={() => doRemove(Array.from(selMembers))}>제거{selMembers.size ? ` ${selMembers.size}` : ''} <ArrowRight size={14} /></Button>
           </div>
         )}
 
         <div style={{ ...panel, flex: 1.3 }}>
-          <div style={panelHead}>VoLTE 가입자 <Badge variant="neutralSoft"  style={{ fontSize: 10 }}>{candidates.length}</Badge></div>
-          <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+          <div style={panelHead}>VoLTE 가입자 <Badge className="text-[10px]" variant="neutralSoft">{candidates.length}</Badge></div>
+          <div className="flex flex-1 min-h-0">
             <OrgTreePanel fill selectedPath={treeScope} onSelect={(pth, n) => { setTreeScope(pth); setTreeName(n) }}
               style={{ flex: '0 0 150px', width: 150, maxWidth: 150, border: 'none', borderRight: '1px solid var(--border)', borderRadius: 0 }} />
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>
-                <Input className="flex-1" placeholder={`${treeName} 내 검색`} value={q} onChange={e => setQ(e.target.value)} style={{ flex: 1, fontSize: 12 }} />
+            <div className="flex-1 min-w-0 flex flex-col">
+              <div className="flex items-center gap-1.5 py-1.5 px-2 border-b border-border">
+                <Input className="flex-1 text-sm" placeholder={`${treeName} 내 검색`} value={q} onChange={e => setQ(e.target.value)}/>
               </div>
-              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+              <div className="flex-1 min-h-0 overflow-y-auto">
                 {candidates.length === 0
-                  ? <div className="text-sm text-muted-foreground" style={{ padding: 14, fontSize: 12, textAlign: 'center', color: 'var(--muted-foreground)' }}>{callIndex.length ? `${treeName}에 추가할 가입자 없음` : '불러오는 중...'}</div>
+                  ? <div className="p-3.5 text-sm text-center text-muted-foreground">{callIndex.length ? `${treeName}에 추가할 가입자 없음` : '불러오는 중...'}</div>
                   : candidates.map(c => {
                     const other = groupOfUser.get(c.value)
                     return (
@@ -484,11 +482,11 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
                         style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', fontSize: 12, cursor: 'pointer',
                           borderLeft: picked.has(c.value) ? '3px solid var(--primary)' : '3px solid transparent' }}>
                         <input type="checkbox" checked={picked.has(c.value)} readOnly tabIndex={-1} />
-                        <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
-                          <span style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.userName}</span>
-                          <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{c.value}{c.orgCode ? ` · ${c.orgCode}` : ''}</span>
+                        <span className="flex flex-col min-w-0 flex-1">
+                          <span className="font-semibold whitespace-nowrap overflow-hidden text-ellipsis">{c.userName}</span>
+                          <span className="text-muted-foreground text-xs">{c.value}{c.orgCode ? ` · ${c.orgCode}` : ''}</span>
                         </span>
-                        {other && other !== selfId && <Badge variant="warningSoft"  style={{ fontSize: 9 }} title="다른 관제 그룹 소속 — 추가하면 이동(가입자당 그룹 하나)">{other}</Badge>}
+                        {other && other !== selfId && <Badge className="text-[9px]" variant="warningSoft" title="다른 관제 그룹 소속 — 추가하면 이동(가입자당 그룹 하나)">{other}</Badge>}
                       </div>
                     )
                   })}
@@ -497,7 +495,7 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
           </div>
         </div>
       </div>
-      {canManage && <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 6 }}>가입자 더블클릭 = 바로 추가 · 다른 그룹 소속 가입자는 추가 시 이동한다 · 반영은 다음 REGISTER 갱신부터</div>}
+      {canManage && <div className="text-xs text-muted-foreground mt-1.5">가입자 더블클릭 = 바로 추가 · 다른 그룹 소속 가입자는 추가 시 이동한다 · 반영은 다음 REGISTER 갱신부터</div>}
     </div>
   )
 }
@@ -505,7 +503,7 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
 function Field({ label, children, w }: { label: string; children: React.ReactNode; w?: number | string }) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 2, width: w, flex: w ? undefined : '1 1 150px', minWidth: 110 }}>
-      <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{label}</span>
+      <span className="text-xs text-muted-foreground">{label}</span>
       {children}
     </label>
   )

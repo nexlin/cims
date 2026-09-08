@@ -61,10 +61,10 @@ function SystemCardsWidget() {
 
   const onOpen = () => navigate('/deploy/servers')
   return (
-    <div className="panel" style={{ padding: 16 }}>
-      <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 14, display: 'flex', alignItems: 'center' }}>
+    <div className="panel p-4">
+      <div className="font-semibold mb-2.5 text-base flex items-center">
         시스템 ({systems.length})
-        <a onClick={onOpen} style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 500, color: 'var(--primary)', cursor: 'pointer' }}>
+        <a className="ml-auto text-sm font-medium text-primary cursor-pointer" onClick={onOpen}>
           시스템/인프라 →
         </a>
       </div>
@@ -81,13 +81,13 @@ function SystemCardsWidget() {
                  style={{ background: 'var(--card)', border: '1px solid var(--border)',
                           borderRadius: 'var(--radius)', padding: '12px 14px', cursor: 'pointer' }}
                  title={`${s.name} — ${MODE_TIP[s.mode]}\n온라인 ${s.online}/${s.total}`}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <div className="flex items-center gap-1.5 mb-2">
                 <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: dot }} />
-                <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+                <span className="font-semibold overflow-hidden text-ellipsis whitespace-nowrap">{s.name}</span>
                 <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, color: 'var(--cims-on-solid)',
                                background: MODE_COLOR[s.mode], padding: '1px 6px', borderRadius: 3 }}>{s.mode}</span>
               </div>
-              <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
+              <div className="text-sm text-muted-foreground">
                 온라인 <b style={{ color: healthy ? 'var(--cims-success)' : 'inherit' }}>{s.online}</b>/{s.total}
               </div>
             </div>

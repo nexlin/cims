@@ -13,7 +13,7 @@ import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 export function DaysButtons({ days, onChange }: { days: number; onChange: (d: number) => void }) {
  return (
     <>
-      <span style={{ fontSize: 13, color: 'var(--muted-foreground)' }}>기간:</span>
+      <span className="text-md text-muted-foreground">기간:</span>
       <ToggleGroup type="single" value={String(days)} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
  onValueChange={(v: string) => v && onChange(Number(v))}>
         {[1, 7, 30, 90].map(d => (
@@ -38,13 +38,12 @@ export function Pager({ page, count, pageSize, onPage, unit = '건' }: {
  const from = cur * pageSize + 1
  const to = Math.min(count, (cur + 1) * pageSize)
  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', fontSize: 12,
- color: 'var(--muted-foreground)', borderTop: '1px solid var(--border)', flex: 'none' }}>
+    <div className="flex items-center gap-2 py-1.5 px-3 text-sm text-muted-foreground border-t border-border flex-none">
       <span>{from}–{to} / {count}{unit}</span>
-      <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
+      <span className="ml-auto flex items-center gap-1">
         <Button variant="ghost" disabled={cur === 0} onClick={() => onPage(0)}><ChevronsLeft size={14} /></Button>
         <Button variant="ghost" disabled={cur === 0} onClick={() => onPage(cur - 1)} title="이전 페이지"><ChevronLeft size={14} /></Button>
-        <span style={{ minWidth: 56, textAlign: 'center' }}>{cur + 1} / {totalPages}</span>
+        <span className="min-w-[56px] text-center">{cur + 1} / {totalPages}</span>
         <Button variant="ghost" disabled={cur >= totalPages - 1} onClick={() => onPage(cur + 1)} title="다음 페이지"><ChevronRight size={14} /></Button>
         <Button variant="ghost" disabled={cur >= totalPages - 1} onClick={() => onPage(totalPages - 1)}><ChevronsRight size={14} /></Button>
       </span>
@@ -69,7 +68,7 @@ export function AlarmEventTabs() {
 export function PeriodDaysControl() {
  const [days, setDays] = usePageParam('days')
  return (
-    <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
+    <div className="toolbar flex-wrap gap-2">
       <DaysButtons days={Number(days) || 7} onChange={d => setDays(String(d))} />
     </div>
   )

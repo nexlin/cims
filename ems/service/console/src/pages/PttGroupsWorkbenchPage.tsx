@@ -30,7 +30,7 @@ const MAX_TALKERS_LIMIT = 8
 
 
 function Caret({ open }: { open: boolean }) {
-  return <span style={{ color: 'var(--muted-foreground)', display: 'inline-flex' }}>
+  return <span className="text-muted-foreground inline-flex">
     {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
   </span>
 }
@@ -100,10 +100,10 @@ export default function PttGroupsWorkbenchPage() {
   const groupCols: Column<GroupExt>[] = [
     { key: 'exp', header: '', width: 26, render: g => <Caret open={openId === g.id} /> },
     { key: 'name', header: '그룹명', sortable: true, render: g => (
-      <span><span style={{ fontWeight: 600 }}>{g.name}</span>
-        {g.encryption && <Badge variant="successSoft"  style={{ fontSize: 9, marginLeft: 4 }}>암호</Badge>}
-        {g.emergency_call && <Badge variant="dangerSoft"  style={{ fontSize: 9, marginLeft: 2 }}>긴급</Badge>}
-        {g.video_enabled && <Badge variant="brandSoft"  style={{ fontSize: 9, marginLeft: 2 }}>영상</Badge>}
+      <span><span className="font-semibold">{g.name}</span>
+        {g.encryption && <Badge className="text-[9px] ml-1" variant="successSoft">암호</Badge>}
+        {g.emergency_call && <Badge className="text-[9px] ml-0.5" variant="dangerSoft">긴급</Badge>}
+        {g.video_enabled && <Badge className="text-[9px] ml-0.5" variant="brandSoft">영상</Badge>}
       </span>
     ) },
     { key: 'id', header: 'ID', width: 130, sortable: true, render: g => <span className="text-sm text-muted-foreground">{g.id}</span> },
@@ -111,9 +111,9 @@ export default function PttGroupsWorkbenchPage() {
     { key: 'priority', header: '우선', width: 56, align: 'center', sortable: true, sortValue: g => g.priority ?? 5, render: g => g.priority ?? 5 },
     { key: 'floor', header: '동시발언', width: 78, align: 'center', render: g => {
       const fp = g.floor_policy || 'single'
-      if (fp === 'single') return <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }} title="한 명씩 발언">단일</span>
-      if (fp === 'dual') return <Badge variant="warningSoft"  style={{ fontSize: 9 }} title="평시 1명, 긴급·임박자만 끼어들기">긴급</Badge>
-      return <Badge variant="brandSoft"  style={{ fontSize: 9 }} title={`정원 ${g.max_talkers ?? 2}명까지 동시 발언`}>{g.max_talkers ?? 2}명</Badge>
+      if (fp === 'single') return <span className="text-sm text-muted-foreground" title="한 명씩 발언">단일</span>
+      if (fp === 'dual') return <Badge className="text-[9px]" variant="warningSoft" title="평시 1명, 긴급·임박자만 끼어들기">긴급</Badge>
+      return <Badge className="text-[9px]" variant="brandSoft" title={`정원 ${g.max_talkers ?? 2}명까지 동시 발언`}>{g.max_talkers ?? 2}명</Badge>
     } },
     { key: 'owner', header: '소유자', width: 110, render: g => <span className="text-sm text-muted-foreground">{g.authorized_user_name || g.authorized_user || '—'}</span> },
     { key: 'org', header: '조직', width: 130, render: g => <span className="text-sm text-muted-foreground">{orgs.find(o => o.code === g.org_code)?.name || g.org_code || '—'}</span> },
@@ -129,20 +129,20 @@ export default function PttGroupsWorkbenchPage() {
   const openGroup = openId ? groups.find(g => g.id === openId) : undefined
 
   return (
-    <div style={{ display: 'flex', gap: 16, alignItems: 'stretch', flex: 1, minHeight: 0 }}>
+    <div className="flex gap-4 items-stretch flex-1 min-h-0">
       {/* 좌: 조직 트리 (공유 스코프) */}
       <OrgTreePanel fill selectedPath={orgScope} onSelect={(p, n) => { setOrgScope(p); setOrgName(n) }}
         style={{ flex: '0 0 200px', width: 200, maxWidth: 200 }} />
 
       {/* 중: 패널 = 툴바 + 테이블 */}
-      <div className="panel" style={{ flex: 1, minWidth: 0 }}>
+      <div className="panel flex-1 min-w-0">
         <div className="toolbar">
-          <span style={{ fontWeight: 600, fontSize: 13 }}>{orgName}</span>
-          <Input className="flex-1" placeholder="그룹명·ID 검색" value={search}
-            onChange={e => setSearch(e.target.value)} style={{ maxWidth: 220 }} />
+          <span className="font-semibold text-md">{orgName}</span>
+          <Input className="flex-1 max-w-[220px]" placeholder="그룹명·ID 검색" value={search}
+            onChange={e => setSearch(e.target.value)}/>
           {search && <Button variant="ghost" onClick={() => setSearch('')}
         aria-label="검색어 지우기"><X size={13} /></Button>}
-          <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          <span className="ml-auto flex gap-1.5">
             {canGroupCreate && (
               <Button variant="default" onClick={() => { setOpenId(null); setAdding(a => !a) }}><Plus size={13} /> 그룹</Button>
             )}
@@ -151,8 +151,8 @@ export default function PttGroupsWorkbenchPage() {
 
         {/* 신규 그룹 추가 (테이블 위 블록) */}
         {adding && (
-          <div style={{ borderBottom: '1px solid var(--border)', background: 'var(--muted)', padding: '12px 16px' }}>
-            <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--primary)', marginBottom: 8 }}>새 PTT 그룹</div>
+          <div className="border-b border-border bg-muted py-3 px-4">
+            <div className="font-semibold text-sm text-primary mb-2">새 PTT 그룹</div>
             <GroupDrawer mode="add" orgs={orgs} me={me} canGroupCreate={canGroupCreate}
               pttIndex={pttIndex} userIndex={userIndex} pttName={pttName} orgScope={orgScope} orgPathOf={orgPathOf}
               onClose={() => setAdding(false)} onSaved={() => { setAdding(false); load() }} reload={load} />
@@ -163,7 +163,7 @@ export default function PttGroupsWorkbenchPage() {
           onRowClick={g => toggleOpen(g.id)}
           expandedKey={openId}
           renderExpanded={openGroup ? () => (
-            <div style={{ padding: '12px 16px' }}>
+            <div className="py-3 px-4">
               <GroupDrawer key={openGroup.id} mode="view" group={openGroup} orgs={orgs} me={me} canGroupCreate={canGroupCreate}
                 pttIndex={pttIndex} userIndex={userIndex} pttName={pttName} orgScope={orgScope} orgPathOf={orgPathOf}
                 onClose={() => setOpenId(null)} onSaved={() => { setOpenId(null); load() }} reload={load} />
@@ -272,7 +272,7 @@ function GroupDrawer(p: GroupDrawerProps) {
   ]
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
+    <div className="flex flex-col gap-2.5 text-md">
       {/* ── 탭 (콘솔 표준 밑줄 탭) ── */}
       {existing && (
         <div role="tablist" aria-label="그룹 상세"
@@ -346,8 +346,8 @@ function GroupDrawer(p: GroupDrawerProps) {
           )}
           {allowOwner && <Field label="소유자 (가입자 검색)" w={230}>
             {form.authorized_user_id != null
-              ? <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Badge variant="brandSoft"  style={{ fontSize: 11 }}>{ownerName || `user#${form.authorized_user_id}`}</Badge>
+              ? <div className="flex items-center gap-1.5">
+                  <Badge className="text-xs" variant="brandSoft">{ownerName || `user#${form.authorized_user_id}`}</Badge>
                   <Button variant="ghost" onClick={() => { setForm({ ...form, authorized_user_id: null }); setOwnerName('') }}>변경</Button>
                 </div>
               : <SubscriberPicker kind="user" index={p.userIndex} orgScope={p.orgScope} orgPathOf={p.orgPathOf}
@@ -364,17 +364,17 @@ function GroupDrawer(p: GroupDrawerProps) {
             </Select>
           </Field>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', alignSelf: 'center', flexWrap: 'wrap' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.encryption || false} onChange={e => setForm({ ...form, encryption: e.target.checked })} />암호</label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.video_enabled || false} onChange={e => setForm({ ...form, video_enabled: e.target.checked })} />영상</label>
-            <label title="allow-MCPTT-emergency-call — 긴급·임박위험 condition 공통 허용 게이트" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.emergency_call || false} onChange={e => setForm({ ...form, emergency_call: e.target.checked })} />긴급콜</label>
-            <label title="allow-MCPTT-emergency-alert — 위험 통지(위치·신원) 전파 허용, 통화와 무관하게 동작" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.emergency_alert ?? true} onChange={e => setForm({ ...form, emergency_alert: e.target.checked })} />긴급경보</label>
-            <label title="on-network-allow-conference-state — 멤버가 그룹 세션의 참가자 정보(conference 이벤트)를 구독할 수 있음. 끄면 CSP 가 403 (관제사 청취 범위는 별도)" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.allow_conference_state ?? true} onChange={e => setForm({ ...form, allow_conference_state: e.target.checked })} />참가자 정보 구독</label>
-            <label title="mcdata-allow-short-data-service (그룹 메시징, TS 24.481)" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.allow_sds ?? true} onChange={e => setForm({ ...form, allow_sds: e.target.checked })} />메시징</label>
-            <label title="mcdata-allow-file-distribution (그룹 파일전송)" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.allow_fd || false} onChange={e => setForm({ ...form, allow_fd: e.target.checked })} />파일전송</label>
+            <label className="flex items-center gap-1"><input type="checkbox" checked={form.encryption || false} onChange={e => setForm({ ...form, encryption: e.target.checked })} />암호</label>
+            <label className="flex items-center gap-1"><input type="checkbox" checked={form.video_enabled || false} onChange={e => setForm({ ...form, video_enabled: e.target.checked })} />영상</label>
+            <label className="flex items-center gap-1" title="allow-MCPTT-emergency-call — 긴급·임박위험 condition 공통 허용 게이트"><input type="checkbox" checked={form.emergency_call || false} onChange={e => setForm({ ...form, emergency_call: e.target.checked })} />긴급콜</label>
+            <label className="flex items-center gap-1" title="allow-MCPTT-emergency-alert — 위험 통지(위치·신원) 전파 허용, 통화와 무관하게 동작"><input type="checkbox" checked={form.emergency_alert ?? true} onChange={e => setForm({ ...form, emergency_alert: e.target.checked })} />긴급경보</label>
+            <label className="flex items-center gap-1" title="on-network-allow-conference-state — 멤버가 그룹 세션의 참가자 정보(conference 이벤트)를 구독할 수 있음. 끄면 CSP 가 403 (관제사 청취 범위는 별도)"><input type="checkbox" checked={form.allow_conference_state ?? true} onChange={e => setForm({ ...form, allow_conference_state: e.target.checked })} />참가자 정보 구독</label>
+            <label className="flex items-center gap-1" title="mcdata-allow-short-data-service (그룹 메시징, TS 24.481)"><input type="checkbox" checked={form.allow_sds ?? true} onChange={e => setForm({ ...form, allow_sds: e.target.checked })} />메시징</label>
+            <label className="flex items-center gap-1" title="mcdata-allow-file-distribution (그룹 파일전송)"><input type="checkbox" checked={form.allow_fd || false} onChange={e => setForm({ ...form, allow_fd: e.target.checked })} />파일전송</label>
           </div>
           <Field label="메시지 최대(byte)" w={110}><Input  type="number" title="mcdata-on-network-max-data-size-for-SDS (0=무제한)" value={form.max_sds_size ?? 10000} onChange={e => setForm({ ...form, max_sds_size: Number(e.target.value) })} /></Field>
           <Field label="자동수신 최대(byte)" w={120}><Input  type="number" title="mcdata-on-network-max-data-size-auto-recv (파일 자동 다운로드 임계)" value={form.max_auto_recv ?? 1048576} onChange={e => setForm({ ...form, max_auto_recv: Number(e.target.value) })} /></Field>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <div className="flex gap-1.5 items-center">
             <Button variant="default" onClick={save}>저장</Button>
             <Button variant="ghost" onClick={() => isNew ? p.onClose() : setEditing(false)}>취소</Button>
           </div>
@@ -382,7 +382,7 @@ function GroupDrawer(p: GroupDrawerProps) {
           <div style={{ flexBasis: '100%', fontSize: 11, color: 'var(--muted-foreground)' }}>동시 발언: {floorPolicyHint[form.floor_policy || 'single']}</div>
         </FieldRow>
       ) : existing && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', fontSize: 12 }}>
+        <div className="flex items-center gap-4 flex-wrap text-sm">
           <span className="text-sm text-muted-foreground">ID {existing.id}</span>
           <span className="text-sm text-muted-foreground">타입 {existing.group_type || 'prearranged'}</span>
           <span className="text-sm text-muted-foreground">우선순위 {existing.priority ?? 5}</span>
@@ -390,7 +390,7 @@ function GroupDrawer(p: GroupDrawerProps) {
             : (existing.floor_policy === 'dual' ? '듀얼(긴급 끼어들기)' : `멀티(${existing.max_talkers ?? 2}명 동시)`)}</span>
           <span className="text-sm text-muted-foreground">소유자 {existing.authorized_user_name || existing.authorized_user || '—'}</span>
           <span className="text-sm text-muted-foreground">조직 {p.orgs.find(o => o.code === existing.org_code)?.name || existing.org_code || '—'}</span>
-          {canManage && <Button style={{ marginLeft: 'auto' }} onClick={() => setEditing(true)}>그룹 속성 편집</Button>}
+          {canManage && <Button className="ml-auto" onClick={() => setEditing(true)}>그룹 속성 편집</Button>}
         </div>
       )}
 
@@ -408,7 +408,7 @@ function GroupDrawer(p: GroupDrawerProps) {
 
 // 멤버/후보 공용 우선순위 칩
 function PriChip({ n }: { n: number }) {
-  return <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted-foreground)', background: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 999, padding: '1px 7px' }}>P{n}</span>
+  return <span className="text-[10px] font-semibold text-muted-foreground bg-muted border border-border rounded-full py-px px-[7px]">P{n}</span>
 }
 
 // ── 멤버 행 (좌측 패널) — 선택 + 우선순위/역할 인라인 편집 ──
@@ -429,18 +429,18 @@ function MemberRow({ m, name, selected, canManage, onToggle, onSave, onRemove }:
       background: editing ? 'rgba(74,144,217,0.08)' : selected ? 'rgba(74,144,217,0.06)' : undefined,
     }}>
       {canManage && <input type="checkbox" checked={selected} onChange={() => onToggle(m.user_id)} />}
-      <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
-        <span style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+      <span className="flex flex-col min-w-0 flex-1">
+        <span className="font-semibold whitespace-nowrap overflow-hidden text-ellipsis">
           {name || '—'}
           {!editing && m.role === 'chair' && <Crown size={11} style={{ marginLeft: 4, verticalAlign: '-1px', color: 'var(--cims-warning)' }} />}
         </span>
-        <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{m.user_id}</span>
+        <span className="text-muted-foreground text-xs">{m.user_id}</span>
       </span>
       {editing ? (
         <>
-          <Input  type="number" value={pri} title="우선순위" onChange={e => setPri(Number(e.target.value))} style={{ width: 52 }} />
+          <Input className="w-[52px]" type="number" value={pri} title="우선순위" onChange={e => setPri(Number(e.target.value))}/>
           <Select value={toSel(role)} onValueChange={(v: string) => setRole(fromSel(v) as 'chair' | 'participant')}>
-            <SelectTrigger style={{ width: 104 }}><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-[104px]"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="participant">participant</SelectItem>
               <SelectItem value="chair">chair (의장)</SelectItem>
@@ -516,25 +516,25 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
   }
 
   const panelHead: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 600 }
-  const countChip = (n: number, tone?: 'primary') => <Badge variant={tone === 'primary' ? 'brandSoft' : 'neutralSoft'}  style={{ fontSize: 10 }}>{n}</Badge>
+  const countChip = (n: number, tone?: 'primary') => <Badge className="text-[10px]" variant={tone === 'primary' ? 'brandSoft' : 'neutralSoft'}>{n}</Badge>
   const panel: React.CSSProperties = { display: 'flex', flexDirection: 'column', minWidth: 0, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: 'var(--card)' }
 
   return (
-    <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-      <div style={{ display: 'flex', alignItems: 'stretch', gap: 10, height: 360 }}>
+    <div className="mt-2.5 border-t border-border pt-3">
+      <div className="flex items-stretch gap-2.5 h-[360px]">
         {/* ── 좌: 등록된 멤버 ── */}
         <div style={{ ...panel, flex: 1 }}>
           <div style={panelHead}>
             등록된 멤버 {countChip(members.length, 'primary')}
             {canManage && members.length > 0 && (
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 'auto', fontWeight: 400, color: 'var(--muted-foreground)' }}>
+              <label className="inline-flex items-center gap-1 ml-auto font-normal text-muted-foreground">
                 <input type="checkbox" checked={allMemSel} onChange={toggleAllMem} /> 전체
               </label>
             )}
           </div>
-          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          <div className="flex-1 min-h-0 overflow-y-auto">
             {members.length === 0
-              ? <div className="text-sm text-muted-foreground" style={{ padding: 14, fontSize: 12, textAlign: 'center', color: 'var(--muted-foreground)' }}>멤버 없음<br />우측에서 가입자를 선택해 <ArrowLeft size={11} style={{ verticalAlign: '-1px' }} /> 추가</div>
+              ? <div className="p-3.5 text-sm text-center text-muted-foreground">멤버 없음<br />우측에서 가입자를 선택해 <ArrowLeft size={11} style={{ verticalAlign: '-1px' }} /> 추가</div>
               : members.map(m => (
                 <MemberRow key={m.user_id} m={m} name={pttName.get(m.user_id)} selected={selMembers.has(m.user_id)}
                   canManage={canManage} onToggle={toggleMem} onSave={onSaveMember} onRemove={uid => doRemove([uid])} />
@@ -545,12 +545,12 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
         {/* ── 중앙: 이동 버튼 ── */}
         {canManage && (
           <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, alignSelf: 'center' }}>
-            <Button variant="default" disabled={busy || picked.size === 0} title="선택 가입자 추가"
-              onClick={() => doAdd(Array.from(picked))} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+            <Button className="inline-flex items-center gap-1 whitespace-nowrap" variant="default" disabled={busy || picked.size === 0} title="선택 가입자 추가"
+              onClick={() => doAdd(Array.from(picked))}>
               <ArrowLeft size={14} /> 추가{picked.size ? ` ${picked.size}` : ''}
             </Button>
-            <Button disabled={busy || selMembers.size === 0} title="선택 멤버 제거"
-              onClick={() => doRemove(Array.from(selMembers))} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+            <Button className="inline-flex items-center gap-1 whitespace-nowrap" disabled={busy || selMembers.size === 0} title="선택 멤버 제거"
+              onClick={() => doRemove(Array.from(selMembers))}>
               제거{selMembers.size ? ` ${selMembers.size}` : ''} <ArrowRight size={14} />
             </Button>
           </div>
@@ -560,11 +560,11 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
         <div style={{ ...panel, flex: 1.3 }}>
           <div style={panelHead}>
             가입자 추가 {countChip(candidates.length)}
-            <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8, fontWeight: 400, color: 'var(--muted-foreground)' }}>
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>P
-                <Input  type="number" value={bulkPri} title="추가 시 적용할 우선순위" onChange={e => setBulkPri(Number(e.target.value))} style={{ width: 46 }} /></label>
+            <span className="ml-auto inline-flex items-center gap-2 font-normal text-muted-foreground">
+              <label className="inline-flex items-center gap-[3px]">P
+                <Input className="w-[46px]" type="number" value={bulkPri} title="추가 시 적용할 우선순위" onChange={e => setBulkPri(Number(e.target.value))}/></label>
               <Select value={toSel(bulkRole)} onValueChange={(v: string) => setBulkRole(fromSel(v) as 'chair' | 'participant')}>
-                <SelectTrigger title="추가 시 적용할 역할" style={{ width: 116 }}><SelectValue /></SelectTrigger>
+                <SelectTrigger className="w-[116px]" title="추가 시 적용할 역할"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="participant">participant</SelectItem>
                   <SelectItem value="chair">chair (의장)</SelectItem>
@@ -572,24 +572,24 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
               </Select>
             </span>
           </div>
-          <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+          <div className="flex flex-1 min-h-0">
             {/* 조직 트리 */}
             <OrgTreePanel fill selectedPath={treeScope} onSelect={(pth, n) => { setTreeScope(pth); setTreeName(n) }}
               style={{ flex: '0 0 150px', width: 150, maxWidth: 150, border: 'none', borderRight: '1px solid var(--border)', borderRadius: 0 }} />
             {/* 후보 리스트 */}
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>
-                <Input className="flex-1" autoFocus placeholder={`${treeName} 내 검색`} value={q} onChange={e => setQ(e.target.value)} style={{ flex: 1, fontSize: 12 }} />
+            <div className="flex-1 min-w-0 flex flex-col">
+              <div className="flex items-center gap-1.5 py-1.5 px-2 border-b border-border">
+                <Input className="flex-1 text-sm" autoFocus placeholder={`${treeName} 내 검색`} value={q} onChange={e => setQ(e.target.value)}/>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', fontSize: 11, color: 'var(--muted-foreground)', borderBottom: '1px solid var(--border)' }}>
-                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <div className="flex items-center gap-1.5 py-1 px-2 text-xs text-muted-foreground border-b border-border">
+                <label className="inline-flex items-center gap-1">
                   <input type="checkbox" checked={allCandPicked} onChange={toggleAllCand} disabled={candidates.length === 0} /> 전체 선택
                 </label>
-                <span style={{ marginLeft: 'auto', color: 'var(--primary)', fontWeight: 600 }}>선택 {picked.size}</span>
+                <span className="ml-auto text-primary font-semibold">선택 {picked.size}</span>
               </div>
-              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+              <div className="flex-1 min-h-0 overflow-y-auto">
                 {candidates.length === 0
-                  ? <div className="text-sm text-muted-foreground" style={{ padding: 14, fontSize: 12, textAlign: 'center', color: 'var(--muted-foreground)' }}>{pttIndex.length ? `${treeName}에 추가할 가입자 없음` : '불러오는 중...'}</div>
+                  ? <div className="p-3.5 text-sm text-center text-muted-foreground">{pttIndex.length ? `${treeName}에 추가할 가입자 없음` : '불러오는 중...'}</div>
                   : candidates.map(c => (
                     <div key={c.value} onDoubleClick={() => canManage && doAdd([c.value])}
                       style={{
@@ -599,9 +599,9 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
                       }}
                       onClick={() => canManage && toggleCand(c.value)}>
                       <input type="checkbox" checked={picked.has(c.value)} readOnly tabIndex={-1} />
-                      <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
-                        <span style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.userName}</span>
-                        <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{c.value}{c.orgCode ? ` · ${c.orgCode}` : ''}</span>
+                      <span className="flex flex-col min-w-0 flex-1">
+                        <span className="font-semibold whitespace-nowrap overflow-hidden text-ellipsis">{c.userName}</span>
+                        <span className="text-muted-foreground text-xs">{c.value}{c.orgCode ? ` · ${c.orgCode}` : ''}</span>
                       </span>
                     </div>
                   ))}
@@ -610,7 +610,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
           </div>
         </div>
       </div>
-      {canManage && <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 6 }}>가입자 더블클릭 = 바로 추가 · 체크 후 <ArrowLeft size={10} style={{ verticalAlign: '-1px' }} /> 추가 = 일괄 추가(우측 P·역할 적용)</div>}
+      {canManage && <div className="text-xs text-muted-foreground mt-1.5">가입자 더블클릭 = 바로 추가 · 체크 후 <ArrowLeft size={10} style={{ verticalAlign: '-1px' }} /> 추가 = 일괄 추가(우측 P·역할 적용)</div>}
     </div>
   )
 }
@@ -619,7 +619,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
 function Field({ label, children, w }: { label: string; children: React.ReactNode; w?: number | string }) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 2, width: w, flex: w ? undefined : '1 1 150px', minWidth: 110 }}>
-      <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{label}</span>
+      <span className="text-xs text-muted-foreground">{label}</span>
       {children}
     </label>
   )

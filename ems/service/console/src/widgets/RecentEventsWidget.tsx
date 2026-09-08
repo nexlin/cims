@@ -42,22 +42,19 @@ function RecentEventsWidget() {
   return (
     <div className="panel">
       {/* 헤더 — 총 건수(24h) + 이력 이동 */}
-      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--muted)',
-                    display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ fontWeight: 600, fontSize: 14 }}>최근 이벤트 ({recentEvents.length})</span>
-        <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>최근 24시간 · 정상 동작 통지</span>
+      <div className="py-3 px-4 border-b border-border bg-muted flex items-center gap-2.5">
+        <span className="font-semibold text-base">최근 이벤트 ({recentEvents.length})</span>
+        <span className="text-xs text-muted-foreground">최근 24시간 · 정상 동작 통지</span>
         {error && (
           <span title="조회 실패 — 표시가 최신이 아닐 수 있음"
                 className="inline-flex items-center gap-1 text-sm font-semibold text-destructive">
             <AlertTriangle size={13} /> 조회 실패</span>
         )}
-        <a href="#" onClick={e => { e.preventDefault(); navigate('/alerts/history') }}
-           style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 500 }}>이력 →</a>
+        <a className="ml-auto text-sm font-medium" href="#" onClick={e => { e.preventDefault(); navigate('/alerts/history') }}>이력 →</a>
       </div>
 
       {/* kind 요약 타일 — 클릭 시 필터(재클릭 해제) */}
-      <div style={{ display: 'flex', gap: 8, padding: '10px 16px', flexWrap: 'wrap',
-                    borderBottom: '1px solid var(--border)' }}>
+      <div className="flex gap-2 py-2.5 px-4 flex-wrap border-b border-border">
         {tiles.map(kind => {
           const n = counts[kind] || 0
           const sel = filter === kind
@@ -97,11 +94,11 @@ function RecentEventsWidget() {
           <DataTable sticky>
             <thead>
               <tr>
-                <Th style={{ width: 96 }}>구분</Th>
-                <Th style={{ width: 118 }}>코드</Th>
-                <Th style={{ width: 168 }}>소스(MO)</Th>
+                <Th className="w-[96px]">구분</Th>
+                <Th className="w-[118px]">코드</Th>
+                <Th className="w-[168px]">소스(MO)</Th>
                 <Th>메시지</Th>
-                <Th style={{ width: 150 }}>시각</Th>
+                <Th className="w-[150px]">시각</Th>
               </tr>
             </thead>
             <tbody>
@@ -110,8 +107,8 @@ function RecentEventsWidget() {
                 return (
                   <tr key={`${e.code || e.type}-${e.ts}-${i}`}>
                     <Td><Badge variant={KIND_BADGE[kind] || 'neutralSoft'} >{KIND_LABEL[kind] || kind}</Badge></Td>
-                    <Td><code style={{ fontSize: 11 }}>{e.code || e.type}</code></Td>
-                    <Td><code style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{e.source?.mo_instance || '-'}</code></Td>
+                    <Td><code className="text-xs">{e.code || e.type}</code></Td>
+                    <Td><code className="text-xs text-muted-foreground">{e.source?.mo_instance || '-'}</code></Td>
                     <Td>{e.message}</Td>
                     <Td className="text-sm text-muted-foreground">{e.ts}</Td>
                   </tr>

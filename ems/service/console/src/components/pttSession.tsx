@@ -260,10 +260,10 @@ export function DayHeatmap({ days, selectedDay, onPick }: {
  const valOf = (d: DayAgg) => (metric === 'turns' ? d.turns : d.speakers)
  const max = Math.max(1, ...days.map(valOf))
  return (
-    <div style={{ marginBottom: 4 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-        <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--muted-foreground)' }}>일별 활동</span>
-        <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>색 진할수록 많음 · 클릭→해당 일 시간대 보기</span>
+    <div className="mb-1">
+      <div className="flex items-center gap-2 mb-1">
+        <span className="font-semibold text-sm text-muted-foreground">일별 활동</span>
+        <span className="text-xs text-muted-foreground">색 진할수록 많음 · 클릭→해당 일 시간대 보기</span>
         <ToggleGroup type="single" value={metric} className="ml-auto shrink-0 rounded-md bg-muted p-[3px]"
  onValueChange={(v: string) => v && setMetric(v as typeof metric)}>
           <ToggleGroupItem value="turns">발언 턴</ToggleGroupItem>
@@ -286,7 +286,7 @@ export function DayHeatmap({ days, selectedDay, onPick }: {
  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
  fontSize: 10, color: ratio > 0.55 ? 'var(--cims-on-solid)' : 'var(--muted-foreground)', position: 'relative', overflow: 'hidden',
               }}>
-              <span style={{ fontSize: 11, fontWeight: 700 }}>{v > 0 ? v : ''}</span>
+              <span className="text-xs font-bold">{v > 0 ? v : ''}</span>
               <span style={{ fontSize: 9, opacity: 0.85 }}>{fmtDayShort(d.day)}</span>
               {d.active && <span style={{ position: 'absolute', top: 2, right: 2, width: 5, height: 5, borderRadius: '50%', background: 'var(--cims-success)',
                 // 셀 배경이 밝든 어둡든 읽히도록 표면색 링을 두른다
@@ -321,10 +321,10 @@ export function ActivityHeatmap({ sessions, selectedDir, onPick }: {
  const valOf = (list?: PttSession[]) => (list || []).reduce((n, s) => n + one(s), 0)
  const max = Math.max(1, ...Array.from(byHour.values(), valOf))
  return (
-    <div style={{ marginBottom: 4 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-        <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--muted-foreground)' }}>시간대별 활동</span>
-        <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>색 진할수록 많음 · 숫자=값 · 클릭→펼치기</span>
+    <div className="mb-1">
+      <div className="flex items-center gap-2 mb-1">
+        <span className="font-semibold text-sm text-muted-foreground">시간대별 활동</span>
+        <span className="text-xs text-muted-foreground">색 진할수록 많음 · 숫자=값 · 클릭→펼치기</span>
         <ToggleGroup type="single" value={metric} className="ml-auto shrink-0 rounded-md bg-muted p-[3px]"
  onValueChange={(v: string) => v && setMetric(v as typeof metric)}>
           <ToggleGroupItem value="turns">발언 턴</ToggleGroupItem>
@@ -356,7 +356,7 @@ export function ActivityHeatmap({ sessions, selectedDir, onPick }: {
  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
  fontSize: 10, color: ratio > 0.55 ? 'var(--cims-on-solid)' : 'var(--muted-foreground)', position: 'relative',
               }}>
-              <span style={{ fontSize: 11, fontWeight: 600 }}>{v > 0 ? v : ''}</span>
+              <span className="text-xs font-semibold">{v > 0 ? v : ''}</span>
               <span style={{ fontSize: 8, opacity: 0.8 }}>
                 {String(h).padStart(2, '0')}{list && list.length > 1 ? ` ·${list.length}` : ''}
               </span>
@@ -408,25 +408,25 @@ export function SessionRow({ sess, isOpen, detail, storeKey, isDuplex, audio, fl
         <td style={{ ...tdStyle, textAlign: 'right' }}>
           {sess.turn_count ?? sess.segment_count ?? 0}
           {sess.turn_count != null && sess.segment_count != null && sess.turn_count !== sess.segment_count && (
-            <span style={{ color: 'var(--muted-foreground)', fontSize: 11 }}> / {sess.segment_count}세그</span>
+            <span className="text-muted-foreground text-xs"> / {sess.segment_count}세그</span>
           )}
         </td>
         <td style={{ ...tdStyle, textAlign: 'right' }}>{sess.speaker_count ?? 0}</td>
         <td style={{ ...tdStyle, textAlign: 'right' }}>
           {maxCon > 1
-            ? <Badge variant="brandSoft" style={{ fontSize: 10 }}>{maxCon}명</Badge>
-            : <span style={{ color: 'var(--muted-foreground)' }}>—</span>}
+            ? <Badge className="text-[10px]" variant="brandSoft">{maxCon}명</Badge>
+            : <span className="text-muted-foreground">—</span>}
         </td>
         <td style={{ ...tdStyle, textAlign: 'right' }} className="text-sm text-muted-foreground">{fmtSpeechMs(sess.total_speech_ms)}</td>
         <td style={{ ...tdStyle, textAlign: 'right' }} onClick={e => e.stopPropagation()}>
-          <Button style={{ marginRight: 4 }} disabled={flowLoading} onClick={onFlow}>Flow</Button>
+          <Button className="mr-1" disabled={flowLoading} onClick={onFlow}>Flow</Button>
           <Button onClick={onPlayAll}><Play size={11} className="mr-1 inline align-[-1px]" />전체</Button>
         </td>
       </tr>
       {isOpen && (
         <tr>
-          <td colSpan={9} style={{ padding: 0, background: 'var(--muted)', borderTop: '1px solid var(--border)' }}>
-            <div style={{ padding: '12px 16px' }}>
+          <td className="p-0 bg-muted border-t border-border" colSpan={9}>
+            <div className="py-3 px-4">
               {!detail || detail.loading ? (
                 <div className="flex min-h-0 flex-1 items-center justify-center text-center text-muted-foreground p-[12px]">상세 로딩 중...</div>
               ) : (
@@ -512,14 +512,11 @@ export function SessionDetail({ detail, sess, recId, isDuplex, audio, layout = '
  const maxCon = sess.max_concurrent ?? 0
 
  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div className="flex flex-col gap-3">
       {/* 지표 — 발언 턴/세그먼트, 발화 구간/누적을 분리해 동시 발언을 왜곡 없이 읽는다.
           드로어(panel)에서는 좌측 요약 카드가 이 자리를 대신하므로 싣지 않는다 —
           같은 수치를 두 번 그리면 정작 봐야 할 발언·이벤트가 아래로 밀린다. */}
-      <div style={{
- display: 'flex', gap: 18, flexWrap: 'wrap', padding: '9px 12px',
- background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 6,
-      }}>
+      <div className="flex gap-[18px] flex-wrap py-[9px] px-3 bg-card border border-border rounded-sm">
         <Metric k="발언 턴" v={String(sess.turn_count ?? allTurns.length)} s="건" />
         <Metric k="녹취 세그먼트" v={String(sess.segment_count ?? detail.segments.length)} s="개" />
         {maxCon > 1 && <Metric k="최대 동시 발언" v={String(maxCon)} s="명" />}
@@ -546,10 +543,10 @@ export function SessionDetail({ detail, sess, recId, isDuplex, audio, layout = '
       {isDuplex ? (
         // ── 전이중(floor 없음) — 발언 턴이 없으므로 통화형 플레이어 ──
  detail.segments.filter(s => s.status !== 'recording').map(seg => (
-          <div key={seg.seq} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span style={{ fontWeight: 600, fontSize: 13 }}>통화 녹취</span>
-              <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>
+          <div className="flex flex-col gap-1.5" key={seg.seq}>
+            <div className="flex items-baseline gap-2">
+              <span className="font-semibold text-md">통화 녹취</span>
+              <span className="text-sm text-muted-foreground">
                 {fmtShortTime(seg.start_time)} ~ {fmtShortTime(seg.end_time)} · {fmtSpeechMs(seg.duration_ms)}
               </span>
             </div>
@@ -663,18 +660,18 @@ function PanelDetail({ detail, recId, isDuplex, audio, names, turns, speakerOrde
   {on ? <ChevronRight size={12} /> : <ChevronDown size={12} />}</span>
 
  return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+    <div className="flex-1 min-h-0 flex flex-col">
       {/* ① 참여자 — 입퇴장·역할 + 발언 통계 */}
       <div style={{ ...secStyle('part'), display: 'flex', flexDirection: 'column', padding: fold.part ? '8px 14px' : '8px 14px 0' }}>
         <div {...foldHeaderProps('part')}>
-          <span style={{ fontWeight: 600, fontSize: 13 }}>{chev(fold.part)}참여자</span>
-          <span className="text-sm text-muted-foreground" style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{parts.length}명</span>
+          <span className="font-semibold text-md">{chev(fold.part)}참여자</span>
+          <span className="text-xs text-muted-foreground">{parts.length}명</span>
         </div>
-        {!fold.part && <div style={{ minHeight: 0, overflowY: 'auto', paddingBottom: 8 }}>
+        {!fold.part && <div className="min-h-0 overflow-y-auto pb-2">
           {parts.length === 0 ? (
-            <div className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>참여자 기록이 없습니다</div>
+            <div className="text-sm text-muted-foreground">참여자 기록이 없습니다</div>
           ) : (
-            <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)' }}>
+            <div className="border border-border rounded-sm bg-card">
               {parts.map((p, i) => (
                 <div key={p.id} style={{
  display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px', fontSize: 12,
@@ -686,16 +683,15 @@ function PanelDetail({ detail, recId, isDuplex, audio, names, turns, speakerOrde
  background: speakerOrder.includes(p.id) ? spkColor(speakerOrder, p.id) : 'var(--secondary)',
  border: speakerOrder.includes(p.id) ? undefined : '1px solid var(--border)',
                   }} />
-                  <Person id={p.id} names={names}
- style={{ fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} />
-                  {p.role === 'initiator' && <Badge variant="neutralSoft" style={{ fontSize: 9 }}>개시자</Badge>}
+                  <Person className="font-semibold min-w-0 overflow-hidden text-ellipsis whitespace-nowrap" id={p.id} names={names}/>
+                  {p.role === 'initiator' && <Badge className="text-[9px]" variant="neutralSoft">개시자</Badge>}
                   {(p.join || p.leave) && (
-                    <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>
+                    <span className="text-muted-foreground text-xs">
                       {fmtShortTime(p.join)} ~ {p.leave ? fmtShortTime(p.leave) : (live ? '참여중' : '--')}
                     </span>
                   )}
-                  <span className="text-sm text-muted-foreground" style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}>
-                    턴 <b style={{ color: 'var(--foreground)' }}>{p.n}</b> · 발화 <b style={{ color: 'var(--foreground)' }}>{fmtSpeechMs(p.ms)}</b>
+                  <span className="ml-auto text-xs text-muted-foreground whitespace-nowrap">
+                    턴 <b className="text-foreground">{p.n}</b> · 발화 <b className="text-foreground">{fmtSpeechMs(p.ms)}</b>
                   </span>
                 </div>
               ))}
@@ -709,12 +705,12 @@ function PanelDetail({ detail, recId, isDuplex, audio, names, turns, speakerOrde
         {isDuplex ? (
           <>
             <div {...foldHeaderProps('talk')}>
-              <span style={{ fontWeight: 600, fontSize: 13 }}>{chev(fold.talk)}통화 녹취</span>
+              <span className="font-semibold text-md">{chev(fold.talk)}통화 녹취</span>
             </div>
-            {!fold.talk && <div style={{ minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {!fold.talk && <div className="min-h-0 overflow-y-auto flex flex-col gap-2">
               {detail.segments.filter(s => s.status !== 'recording').map(seg => (
-                <div key={seg.seq} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>
+                <div className="flex flex-col gap-1" key={seg.seq}>
+                  <span className="text-muted-foreground text-xs">
                     {fmtShortTime(seg.start_time)} ~ {fmtShortTime(seg.end_time)} · {fmtSpeechMs(seg.duration_ms)}
                   </span>
                   {recId && (
@@ -730,9 +726,9 @@ function PanelDetail({ detail, recId, isDuplex, audio, names, turns, speakerOrde
         ) : turns.length === 0 ? (
           <>
             <div {...foldHeaderProps('talk')}>
-              <span style={{ fontWeight: 600, fontSize: 13 }}>{chev(fold.talk)}발언권 타임라인</span>
+              <span className="font-semibold text-md">{chev(fold.talk)}발언권 타임라인</span>
             </div>
-            {!fold.talk && <div className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>발언 녹취가 없습니다</div>}
+            {!fold.talk && <div className="text-sm text-muted-foreground">발언 녹취가 없습니다</div>}
           </>
         ) : (
           <LaneTimebar turns={turns} speakerOrder={speakerOrder} recId={recId} audio={audio} names={names}
@@ -759,8 +755,8 @@ export function Metric({ k, v, s, hint }: { k: string; v: string; s: string; hin
  return (
     <div title={hint}>
       <div style={{ fontSize: 10.5, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-foreground)', fontWeight: 600 }}>{k}</div>
-      <div className="text-sm text-muted-foreground" style={{ fontSize: 15, fontWeight: 700, marginTop: 1 }}>
-        {v}{s && <small style={{ fontSize: 11, fontWeight: 500, color: 'var(--muted-foreground)', marginLeft: 3 }}>{s}</small>}
+      <div className="text-muted-foreground text-[15px] font-bold mt-px">
+        {v}{s && <small className="text-xs font-medium text-muted-foreground ml-[3px]">{s}</small>}
       </div>
     </div>
   )
@@ -809,15 +805,15 @@ export function EventTimeline({ floor, events, participants, turns, speakerOrder
 
  return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, ...(fill ? { minHeight: 0 } : {}) }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div className="flex items-center gap-2">
         <span onClick={onToggle}
  style={{ fontWeight: 600, fontSize: 13, ...(onToggle ? { cursor: 'pointer', userSelect: 'none' as const } : {}) }}
  title={onToggle ? (collapsed ? '펼치기' : '접기') : undefined}>
           {onToggle && <span className="mr-1 inline-flex text-muted-foreground">
         {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}</span>}이벤트 타임라인
         </span>
-        <span className="text-sm text-muted-foreground" style={{ fontSize: 11 }}>발언권 중재 · 입퇴장</span>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+        <span className="text-muted-foreground text-xs">발언권 중재 · 입퇴장</span>
+        <div className="ml-auto flex gap-1">
           {chips.map(c => (
             <Button
  key={c.key}
@@ -836,7 +832,7 @@ export function EventTimeline({ floor, events, participants, turns, speakerOrder
       </div>
 
       {!collapsed && (shown.length === 0 ? (
-        <div className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>표시할 항목이 없습니다</div>
+        <div className="text-sm text-muted-foreground">표시할 항목이 없습니다</div>
       ) : (
         <div style={{
           // fill 구획에서는 내용만큼 서고, 구획이 줄면 목록만 스크롤 (헤더는 밀리지 않는다)
@@ -861,13 +857,13 @@ export function EventTimeline({ floor, events, participants, turns, speakerOrder
  const disp = getEventDisplay(ev.type)
  return (
               <div key={`e${i}`} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 10px', fontSize: 12, borderTop: border, borderLeft: '4px solid transparent' }}>
-                <span className="text-sm text-muted-foreground" style={{ minWidth: 70, color: 'var(--muted-foreground)' }}>{fmtShortTime(ev.ts)}</span>
+                <span className="text-sm min-w-[70px] text-muted-foreground">{fmtShortTime(ev.ts)}</span>
                 <span style={{ minWidth: 30, display: 'inline-flex', justifyContent: 'center', color: disp.color }}><disp.icon size={13} /></span>
-                <span style={{ color: 'var(--foreground)' }}>
-                  {ev.member && <><Person id={ev.member} names={names} style={{ fontWeight: 500 }} />{' '}</>}
+                <span className="text-foreground">
+                  {ev.member && <><Person className="font-medium" id={ev.member} names={names}/>{' '}</>}
                   {disp.label}
                   {ev.type === 'member_join' && ev.role === 'initiator' &&
-                    <Badge variant="neutralSoft" style={{ fontSize: 9, marginLeft: 6 }}>개시자</Badge>}
+                    <Badge className="text-[9px] ml-1.5" variant="neutralSoft">개시자</Badge>}
                   {ev.duration != null && <span className="text-sm text-muted-foreground"> ({fmtDur(ev.duration)})</span>}
                 </span>
               </div>
@@ -949,14 +945,12 @@ export function FloorRow({ f, speakerOrder, names, border, role, turn, recId, au
  borderLeft: `4px solid ${turn ? uColor : 'transparent'}`,
  background: isPlaying ? 'var(--accent)' : undefined,
          }}>
-      <span className="text-sm text-muted-foreground" style={{ minWidth: 70 }}>{fmtShortTime(f.ts)}</span>
+      <span className="text-sm text-muted-foreground min-w-[70px]">{fmtShortTime(f.ts)}</span>
       {turn ? (
-        <Button variant={isPlaying ? 'default' : 'outline'}
+        <Button className="min-w-[30px] py-px px-1.5" variant={isPlaying ? 'default' : 'outline'}
  disabled={!recId || !turn.playable}
- style={{ minWidth: 30, padding: '1px 6px' }}
  onClick={() => recId && audio?.play(recId, turn.seq, slot)}
- title={turn.playable ? (turn.multi ? '이 화자만 재생 (동시 발언은 타임바의 “동시 N” 이 믹스)' : '재생/정지') : '녹취중'}
-        >
+ title={turn.playable ? (turn.multi ? '이 화자만 재생 (동시 발언은 타임바의 “동시 N” 이 믹스)' : '재생/정지') : '녹취중'}>
           {isPrep ? '…' : isPlaying ? <Pause size={13} /> : <Play size={13} />}
         </Button>
       ) : (
@@ -966,14 +960,14 @@ export function FloorRow({ f, speakerOrder, names, border, role, turn, recId, au
       {f.user
         ? <Person id={f.user} names={names} style={{ color: uColor, fontWeight: 600 }} />
         : <span style={{ color: uColor }}>-</span>}
-      {role && <Badge variant="neutralSoft" style={{ fontSize: 9 }}>{role}</Badge>}
+      {role && <Badge className="text-[9px]" variant="neutralSoft">{role}</Badge>}
       {f.prio != null && f.prio >= 0 && <span className="text-sm text-muted-foreground">prio {f.prio}</span>}
-      {f.preempt && <span className="text-sm text-muted-foreground" style={{ color: 'var(--cims-warning)' }}><ArrowLeft size={11} /> 선점 {who(f.preempted_from)}</span>}
-      {f.tier && f.tier !== 'normal' && <Badge variant="dangerSoft" style={{ fontSize: 9 }}>{f.tier}</Badge>}
-      {extras.length > 0 && <span className="text-sm text-muted-foreground" style={{ fontSize: 11 }}>{extras.join(' · ')}</span>}
-      {turn?.hasVideo && <Badge variant="brandSoft" style={{ fontSize: 9 }}>영상</Badge>}
-      {turn && !turn.playable && <Badge variant="brandSoft" style={{ fontSize: 9 }}>녹취중</Badge>}
-      {turn && <span className="text-sm text-muted-foreground" style={{ marginLeft: 'auto', fontSize: 11 }}>{fmtMmss(turn.durMs)}</span>}
+      {f.preempt && <span className="text-sm text-warning"><ArrowLeft size={11} /> 선점 {who(f.preempted_from)}</span>}
+      {f.tier && f.tier !== 'normal' && <Badge className="text-[9px]" variant="dangerSoft">{f.tier}</Badge>}
+      {extras.length > 0 && <span className="text-muted-foreground text-xs">{extras.join(' · ')}</span>}
+      {turn?.hasVideo && <Badge className="text-[9px]" variant="brandSoft">영상</Badge>}
+      {turn && !turn.playable && <Badge className="text-[9px]" variant="brandSoft">녹취중</Badge>}
+      {turn && <span className="text-muted-foreground ml-auto text-xs">{fmtMmss(turn.durMs)}</span>}
       <span className="text-sm text-muted-foreground" style={{ marginLeft: turn ? undefined : 'auto', fontSize: 10, opacity: .7 }}>{f.op}</span>
     </div>
   )
@@ -1157,21 +1151,21 @@ function LaneTimebar({ turns, speakerOrder, recId, audio, names, fill, collapsed
           {onToggle && <span className="mr-1 inline-flex text-muted-foreground">
         {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}</span>}발언권 타임라인
         </span>
-        <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>{fmtClock(spanStart)} ~ {fmtClock(spanEnd)} · {fmtSpeechMs(span)}</span>
+        <span className="text-sm text-muted-foreground">{fmtClock(spanStart)} ~ {fmtClock(spanEnd)} · {fmtSpeechMs(span)}</span>
         {maxCon > 1 && (
           <span style={{ fontSize: 11.5, color: 'var(--muted-foreground)' }}>· 최대 동시 발언 {maxCon}명</span>
         )}
         {!collapsed && zoomed && (
-          <span className="text-sm text-muted-foreground" style={{ fontSize: 11, color: 'var(--primary)' }}>
+          <span className="text-xs text-primary">
             · 보이는 구간 {fmtClock(vFrom)} ~ {fmtClock(vTo)}
           </span>
         )}
         {!collapsed && (
-          <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+          <span className="ml-auto inline-flex items-center gap-[3px]">
             <Button variant="ghost" disabled={!zoomed} onClick={() => panBy(-0.5)} title="왼쪽으로 이동 (반 화면)">‹</Button>
             <Button variant="ghost" disabled={!zoomed} onClick={() => panBy(0.5)} title="오른쪽으로 이동 (반 화면)">›</Button>
             <Button variant="ghost" disabled={zoom <= ZOOM_MIN} onClick={() => zoomBy(0.5)} title="축소 — 시간폭 넓히기">−</Button>
-            <span className="text-sm text-muted-foreground" style={{ fontSize: 11, minWidth: 32, textAlign: 'center', color: 'var(--muted-foreground)' }}>
+            <span className="text-xs min-w-[32px] text-center text-muted-foreground">
               {zoom < 10 ? Number(zoom.toFixed(1)) : Math.round(zoom)}×
             </span>
             <Button variant="ghost" disabled={zoom >= ZOOM_MAX} onClick={() => zoomBy(2)} title="확대 — 시간폭 좁히기">+</Button>
@@ -1186,7 +1180,7 @@ function LaneTimebar({ turns, speakerOrder, recId, audio, names, fill, collapsed
         // 내용이 적으면 박스도 내용만큼만 선다 (구획이 내용 크기 기반이라 grow 하지 않는다)
         ...(fill ? { flex: '0 1 auto', minHeight: 0, overflowY: 'auto' as const } : {}),
       }}>
-        <div style={{ display: 'flex', alignItems: 'stretch' }}>
+        <div className="flex items-stretch">
           {/* 화자 이름 열 — 확대·이동해도 고정 */}
           <div style={{ flex: `0 0 ${LANE_LABEL_W}px`, minWidth: 0 }}>
             <div style={{ height: bandsH }} />
@@ -1196,16 +1190,16 @@ function LaneTimebar({ turns, speakerOrder, recId, audio, names, fill, collapsed
  overflow: 'hidden', whiteSpace: 'nowrap', paddingRight: 8,
               }}>
                 <span style={{ width: 8, height: 8, borderRadius: 2, background: spkColor(speakerOrder, spk), flex: '0 0 auto' }} />
-                <Person id={spk} names={names} style={{ overflow: 'hidden', textOverflow: 'ellipsis' }} />
+                <Person className="overflow-hidden text-ellipsis" id={spk} names={names}/>
               </div>
             ))}
-            <div style={{ height: 18 }} />
+            <div className="h-[18px]"/>
           </div>
 
           {/* 트랙 — 배율만큼 넓힌 콘텐츠를 가로 스크롤로 옮겨 본다.
               가로 스크롤바는 감춘다(scroll-nobar): 확대할 때 바가 생기며 박스 높이가
               늘어나면 아래 내용이 밀린다. 위치·이동은 아래 위치 막대가 맡는다. */}
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+          <div className="flex-1 min-w-0 flex flex-col">
             <div
  ref={scRef}
  className="scroll-nobar"
@@ -1284,7 +1278,7 @@ function LaneTimebar({ turns, speakerOrder, recId, audio, names, fill, collapsed
                   )
                 })}
                 {/* 시각 눈금 — 보이는 구간에만 (배율이 오르면 간격도 촘촘해진다) */}
-                <div style={{ position: 'relative', height: 18, marginTop: 3 }}>
+                <div className="relative h-[18px] mt-[3px]">
                   {ticks.map(t => (
                     <span key={t} className="text-sm text-muted-foreground" style={{
  position: 'absolute', left: `${pct(t)}%`, transform: 'translateX(-50%)',

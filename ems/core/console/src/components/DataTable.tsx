@@ -111,8 +111,8 @@ export function DataTable<T>(props: DataTableProps<T>) {
   const colCount = columns.length + (selectable ? 1 : 0)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
-      <div className="flex-1 overflow-x-auto" style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
+    <div className="flex flex-col min-h-0 flex-1">
+      <div className="overflow-x-auto overflow-y-auto flex-1 min-h-0">
       <TableFrame sticky>
         <thead>
           <tr>
@@ -135,9 +135,9 @@ export function DataTable<T>(props: DataTableProps<T>) {
         </thead>
         <tbody>
           {loading ? (
-            <tr><Td colSpan={colCount} className="py-8 text-center text-muted-foreground" style={{ textAlign: 'center', padding: 24 }}>로딩 중...</Td></tr>
+            <tr><Td colSpan={colCount} className="py-8 text-muted-foreground text-center p-6">로딩 중...</Td></tr>
           ) : pageRows.length === 0 ? (
-            <tr><Td colSpan={colCount} className="py-8 text-center text-muted-foreground" style={{ textAlign: 'center', padding: 24 }}>{emptyText}</Td></tr>
+            <tr><Td colSpan={colCount} className="py-8 text-muted-foreground text-center p-6">{emptyText}</Td></tr>
           ) : pageRows.map(r => {
             const k = rowKey(r)
             const isActive = activeRowKey != null && activeRowKey === k
@@ -178,9 +178,9 @@ export function DataTable<T>(props: DataTableProps<T>) {
       </div>
 
       {pageSize > 0 && sorted.length > pageSize && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', fontSize: 12, color: 'var(--muted-foreground)', borderTop: '1px solid var(--border)' }}>
+        <div className="flex items-center gap-2 py-2 px-3 text-sm text-muted-foreground border-t border-border">
           <span>{sorted.length}건</span>
-          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span className="ml-auto flex items-center gap-1.5">
             <Button variant="ghost" disabled={safePage === 0} onClick={() => setPage(Math.max(0, safePage - 1))} title="이전 페이지"><ChevronLeft size={14} /></Button>
             <span>{safePage + 1} / {totalPages}</span>
             <Button variant="ghost" disabled={safePage >= totalPages - 1} onClick={() => setPage(Math.min(totalPages - 1, safePage + 1))} title="다음 페이지"><ChevronRight size={14} /></Button>

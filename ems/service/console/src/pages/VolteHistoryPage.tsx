@@ -63,7 +63,7 @@ function HourHeatmap({ hours, selHour, onPick }: { hours: Record<string, number>
  const cells = Array.from({ length: 24 }, (_, h) => ({ h: String(h).padStart(2, '0'), v: hours[String(h).padStart(2, '0')] || 0 }))
  const max = Math.max(1, ...cells.map(c => c.v))
  return (
-    <div style={{ display: 'flex', gap: 2, marginBottom: 10, paddingTop: 2 }}>
+    <div className="flex gap-0.5 mb-2.5 pt-0.5">
       {cells.map(c => {
  const ratio = c.v > 0 ? 0.18 + 0.82 * (c.v / max) : 0
  const on = selHour === c.h
@@ -205,23 +205,23 @@ export default function VolteHistoryPage() {
  const selNode = orgs.find(o => o.code === selOrg)
 
  return (
-    <div className="panel" style={{ padding: 10 }}>
+    <div className="panel p-2.5">
       {/* 상단 검색/날짜/표시수 */}
-      <div className="toolbar" style={{ marginBottom: 8 }}>
-        <Input type="date" value={fDate} onChange={e => setFD(e.target.value)} style={{ width: 150 }} />
-        <Input className="flex-1" placeholder="가입자 이름/번호 검색" value={searchInput}
- onChange={e => setSearchInput(e.target.value)} style={{ maxWidth: 240 }} />
+      <div className="toolbar mb-2">
+        <Input className="w-[150px]" type="date" value={fDate} onChange={e => setFD(e.target.value)}/>
+        <Input className="flex-1 max-w-[240px]" placeholder="가입자 이름/번호 검색" value={searchInput}
+ onChange={e => setSearchInput(e.target.value)}/>
         {q && <Button variant="ghost" onClick={() => setSearchInput('')}>검색 해제</Button>}
-        <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>
+        <span className="text-muted-foreground text-sm">
           {selNode ? `부서: ${selNode.name}` : '전체'}{q ? `  &  검색: "${q}"` : ''}{selHour ? `  &  ${selHour}시` : ''}
         </span>
-        <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--muted-foreground)', cursor: 'pointer' }}>
+        <label className="ml-auto flex items-center gap-1 text-sm text-muted-foreground cursor-pointer">
           <input type="checkbox" checked={autoRefresh} onChange={e => setAR(e.target.checked)} />자동갱신
         </label>
-        <label style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
+        <label className="text-sm text-muted-foreground">
           표시{' '}
           <Select value={String(ps)} onValueChange={(v: string) => { setPs(Number(v)); setPage(0) }}>
-            <SelectTrigger style={{ width: 'auto', padding: '2px 6px', display: 'inline-block' }}><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-auto py-0.5 px-1.5 inline-block"><SelectValue /></SelectTrigger>
             <SelectContent>
               {PAGE_SIZES.map(n => <SelectItem key={n} value={String(n)}>{n}건</SelectItem>)}
             </SelectContent>
@@ -229,7 +229,7 @@ export default function VolteHistoryPage() {
         </label>
       </div>
 
-      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+      <div className="flex gap-2.5 items-start">
         {/* 좌: 부서 트리 */}
         <div style={{ flex: '0 0 220px', minHeight: 0, overflow: 'auto', borderRight: '1px solid var(--border)', paddingRight: 6 }}>
           <div onClick={() => setSelOrg('')}
@@ -248,12 +248,12 @@ export default function VolteHistoryPage() {
         </div>
 
         {/* 우: 히트맵 + 호 목록 */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <div className="flex-1 min-w-0 flex flex-col min-h-0">
           {/* 시간대 히트맵 */}
-          <div style={{ flexShrink: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
-              <span style={{ fontSize: 12, fontWeight: 600 }}>시간대별 호 분포</span>
-              <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>{fDate} · 총 {dayTotal}건</span>
+          <div className="shrink-0">
+            <div className="flex items-baseline gap-2 mb-1">
+              <span className="text-sm font-semibold">시간대별 호 분포</span>
+              <span className="text-sm text-muted-foreground">{fDate} · 총 {dayTotal}건</span>
               <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: 'var(--primary)',
  background: 'color-mix(in srgb, var(--primary) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--primary) 35%, transparent)',
  borderRadius: 10, padding: '1px 10px' }}>
@@ -264,7 +264,7 @@ export default function VolteHistoryPage() {
           </div>
 
           {/* 호 목록 — 헤더(고정)·본문(스크롤, 항목없어도 영역 유지)·테일(고정) 항상 표시 */}
-          <div className="scroll-fill" style={{ border: '1px solid var(--border)', borderRadius: 6 }}>
+          <div className="scroll-fill border border-border rounded-sm">
             <DataTable sticky className="[&_td]:text-sm">
               <thead>
                 <tr>
@@ -282,9 +282,9 @@ export default function VolteHistoryPage() {
               </thead>
               <tbody>
                 {loading
-                  ? <tr><Td colSpan={10} style={{ textAlign: 'center', color: 'var(--muted-foreground)', padding: 24 }}>로딩 중...</Td></tr>
+                  ? <tr><Td className="text-center text-muted-foreground p-6" colSpan={10}>로딩 중...</Td></tr>
                   : logs.length === 0
-                    ? <tr><Td colSpan={10} style={{ textAlign: 'center', color: 'var(--muted-foreground)', padding: 24 }}>이력 없음</Td></tr>
+                    ? <tr><Td className="text-center text-muted-foreground p-6" colSpan={10}>이력 없음</Td></tr>
                     : logs.map(l => {
  const isOpen = expandedCall === callKey(l)
  const st = callState(l.state)
@@ -306,8 +306,8 @@ export default function VolteHistoryPage() {
           </div>
 
           {/* 페이지네이션 (항상 표시) */}
-          <div className="toolbar" style={{ justifyContent: 'flex-end', gap: 8, borderTop: '1px solid var(--border)', flexShrink: 0, paddingTop: 6 }}>
-            <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>총 {total.toLocaleString()}건 · {page + 1}/{totalPages}</span>
+          <div className="toolbar justify-end gap-2 border-t border-border shrink-0 pt-1.5">
+            <span className="text-sm text-muted-foreground">총 {total.toLocaleString()}건 · {page + 1}/{totalPages}</span>
             <Button variant="ghost" disabled={page === 0} onClick={() => { setPage(page - 1); load(page - 1) }}>이전</Button>
             <Button variant="ghost" disabled={page >= totalPages - 1} onClick={() => { setPage(page + 1); load(page + 1) }}>다음</Button>
           </div>
@@ -344,10 +344,10 @@ function CallRow({ l, isOpen, st, dur, flow, onToggle, onOpenDiagram, onOpenRec 
       <tr onClick={onToggle} style={{ cursor: 'pointer', borderTop: '1px solid var(--border)', background: isOpen ? 'var(--accent)' : 'transparent' }}>
         <Td align="center" className="whitespace-nowrap text-muted-foreground">
                   {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</Td>
-        <Td className="whitespace-nowrap"><Badge variant={l.call_type === 'volte_video' ? 'brandSoft' : 'neutralSoft'} style={{ fontSize: 10 }}>{l.call_type === 'volte_video' ? '영상' : '음성'}</Badge></Td>
+        <Td className="whitespace-nowrap"><Badge className="text-[10px]" variant={l.call_type === 'volte_video' ? 'brandSoft' : 'neutralSoft'}>{l.call_type === 'volte_video' ? '영상' : '음성'}</Badge></Td>
         <Td className="whitespace-nowrap">
           <span style={{ fontWeight: 600, color: CALLER_C }}>{l.initiator}</span>
-          <span style={{ color: 'var(--muted-foreground)' }}> → </span>
+          <span className="text-muted-foreground"> → </span>
           <span style={{ fontWeight: 600, color: CALLEE_C }}>{l.callee || '—'}</span>
         </Td>
         <Td align="center" className="whitespace-nowrap"><Badge variant={st.cls} >{st.label}</Badge></Td>
@@ -359,13 +359,13 @@ function CallRow({ l, isOpen, st, dur, flow, onToggle, onOpenDiagram, onOpenRec 
         <Td align="center" className="whitespace-nowrap" onClick={e => e.stopPropagation()}>
           {l.has_recording
             ? <Button onClick={onOpenRec}>&#9654; 녹취</Button>
-            : <span style={{ color: 'var(--muted-foreground)' }}>—</span>}
+            : <span className="text-muted-foreground">—</span>}
         </Td>
       </tr>
       {isOpen && (
         <tr>
           <Td colSpan={10} className="h-auto bg-muted p-0">
-            <div style={{ padding: '10px 14px' }}>
+            <div className="py-2.5 px-3.5">
               <CallDetailPanel l={l} flow={flow} onOpenDiagram={onOpenDiagram} />
             </div>
           </Td>
@@ -413,18 +413,18 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
 
 
  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div className="flex flex-col gap-2.5">
       {/* 좌(다이어그램/메시지) 우(상세) — 녹취는 행의 녹취 컬럼 버튼으로 */}
-      <div style={{ display: 'flex', gap: 12, alignItems: 'stretch', flexWrap: 'wrap' }}>
+      <div className="flex gap-3 items-stretch flex-wrap">
         {/* 좌 */}
         <div style={{ flex: '1 1 460px', minWidth: 320, display: 'flex', flexDirection: 'column', gap: 8 }}>
           {/* 시퀀스 다이어그램 */}
-          <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', borderBottom: '1px solid var(--border)' }}>
-              <span style={{ fontWeight: 600, fontSize: 12 }}>시퀀스 다이어그램</span>
+          <div className="border border-border rounded-sm bg-card">
+            <div className="flex items-center gap-2 py-[5px] px-2.5 border-b border-border">
+              <span className="font-semibold text-sm">시퀀스 다이어그램</span>
               {/* 노드별 표시 토글(뱃지) — CSP/CMP(/CSC). 끄면 해당 노드 메시지 숨김. */}
               {availNodes.length > 1 && (
-                <span style={{ display: 'inline-flex', gap: 4, marginLeft: 4 }}>
+                <span className="inline-flex gap-1 ml-1">
                   {availNodes.map(n => {
  const on = !offNodes.has(n)
  const color = NODE_COLOR[n] || 'var(--muted-foreground)'
@@ -438,22 +438,22 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
                   })}
                 </span>
               )}
-              <Button style={{ marginLeft: 'auto', padding: '1px 8px', fontSize: 11 }} onClick={onOpenDiagram}><Maximize2 size={11} /> 최대화</Button>
+              <Button className="ml-auto py-px px-2 text-xs" onClick={onOpenDiagram}><Maximize2 size={11} /> 최대화</Button>
             </div>
-            <div style={{ maxHeight: 230, overflow: 'auto', padding: 6 }}>
+            <div className="max-h-[230px] overflow-auto p-1.5">
               {flow?.loading ? <div className="flex min-h-0 flex-1 items-center justify-center text-center text-muted-foreground p-[8px]">로딩 중...</div>
                 : msgs.length > 0 ? <SequenceDiagram messages={msgs} selectedIdx={selIdx} onSelect={select} />
-                  : <div className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)', padding: 6 }}>메시지 없음</div>}
+                  : <div className="text-sm text-muted-foreground p-1.5">메시지 없음</div>}
             </div>
           </div>
           {/* 메시지 이력 */}
-          <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)' }}>
-            <div style={{ padding: '5px 10px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 12 }}>
-              메시지 이력 {msgs.length > 0 && <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>{msgs.length}건</span>}
+          <div className="border border-border rounded-sm bg-card">
+            <div className="py-[5px] px-2.5 border-b border-border font-semibold text-sm">
+              메시지 이력 {msgs.length > 0 && <span className="text-sm text-muted-foreground">{msgs.length}건</span>}
             </div>
-            <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+            <div className="max-h-[260px] overflow-y-auto">
               {flow?.loading ? <div className="flex min-h-0 flex-1 items-center justify-center text-center text-muted-foreground p-[8px]">로딩 중...</div>
-                : msgs.length === 0 ? <div className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)', padding: 8 }}>메시지 없음</div>
+                : msgs.length === 0 ? <div className="text-sm text-muted-foreground p-2">메시지 없음</div>
                   : (
                     <DataTable sticky>
                       <thead>
@@ -476,12 +476,12 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
  style={{ borderTop: '1px solid var(--border)', cursor: 'pointer', background: sel ? 'var(--accent)' : undefined }}>
                               <Td align="right" className="whitespace-nowrap text-sm text-muted-foreground">{i + 1}</Td>
                               <Td className="whitespace-nowrap text-sm text-muted-foreground">{fmtClock(m.ts)}</Td>
-                              <Td className="whitespace-nowrap text-sm">{actorLbl(m.from)}<span style={{ color: 'var(--muted-foreground)' }}>→</span>{actorLbl(m.to)}</Td>
+                              <Td className="whitespace-nowrap text-sm">{actorLbl(m.from)}<span className="text-muted-foreground">→</span>{actorLbl(m.to)}</Td>
                               <Td className="whitespace-nowrap text-[10px] text-muted-foreground">{(m.nodeId || m.node || '').toUpperCase()}</Td>
                               <Td className="whitespace-nowrap text-sm">{(() => {
  const d = inferDir(m)
  return d ? <span style={{ fontSize: 9, fontWeight: 700, color: '#fff', background: d === 'TX' ? '#2563eb' : '#16a34a', borderRadius: 3, padding: '1px 5px' }}>{d}</span>
-                                  : <span style={{ color: 'var(--muted-foreground)' }}>—</span>
+                                  : <span className="text-muted-foreground">—</span>
                               })()}</Td>
                               <Td className="whitespace-nowrap text-sm"><span style={{ fontSize: 9, fontWeight: 700, color: '#fff', background: protoColor(proto), borderRadius: 3, padding: '1px 5px' }}>{proto}</span></Td>
                               <Td className="whitespace-nowrap text-sm font-semibold" style={{ color: protoColor(proto) }}>{m.label || ''}</Td>
@@ -497,10 +497,10 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
 
         {/* 우: 메시지 상세 */}
         <div style={{ flex: '1 1 340px', minWidth: 280, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: '5px 10px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 12 }}>
+          <div className="py-[5px] px-2.5 border-b border-border font-semibold text-sm">
             메시지 상세 {selIdx != null && msgs[selIdx] && <span className="text-sm text-muted-foreground" style={{ color: protoColor(msgs[selIdx].proto || 'SIP') }}>· {msgs[selIdx].label}</span>}
           </div>
-          <div style={{ flex: 1, overflow: 'auto', minHeight: 200, maxHeight: 508 }}>
+          <div className="flex-1 overflow-auto min-h-[200px] max-h-[508px]">
             {selIdx == null ? <EmptyState title="왼쪽에서 메시지를 선택하세요" className="p-[16px] text-[12px]" />
               : bodyLoading ? <div className="flex min-h-0 flex-1 items-center justify-center text-center text-muted-foreground p-[16px]">본문 로딩 중...</div>
                 : <pre style={{ margin: 0, padding: 10, fontSize: 11, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontFamily: 'monospace' }}>{formatMsgBody(body)}</pre>}

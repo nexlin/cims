@@ -359,13 +359,13 @@ export default function ServicesPage() {
 
   return (
     <div>
-      <div style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-        <h3 style={{ margin: 0 }}>패키징</h3>
-        <span className="text-muted" style={{ fontSize: 13 }}>
+      <div className="mb-4 flex gap-3 items-center flex-wrap">
+        <h3 className="m-0">패키징</h3>
+        <span className="text-muted text-md">
           빌드 → 시험 실행 → 패키징 → 다운로드. 신규 패키지 등록/편집은{' '}
           <Link to="/deploy/packages">배포 &gt; 패키지</Link> 에서.
         </span>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div className="ml-auto flex gap-2 items-center">
           {manifest ? (
             <Badge variant="neutralSolid"
                   title={`manifest_sha=${manifest._self_sha256 || '-'}\ngit=${manifestGit}\nts=${manifestTs}`}>
@@ -373,20 +373,17 @@ export default function ServicesPage() {
               {manifestSha ? `manifest=${manifestSha}…` : ''}
             </Badge>
           ) : (
-            <span className="text-muted" style={{ fontSize: 12 }}>패키지 미생성</span>
+            <span className="text-muted text-sm">패키지 미생성</span>
           )}
           {/* 빌드 + 패키징 통합 — 입력 버전을 -v 로 전달 (pkg.json 갱신) + tarball 산출 */}
-          <input
+          <input className="w-[110px] text-md py-1 px-2 border border-border rounded-[4px]"
             type="text"
             list="all-versions"
             value={globalVersion}
             onChange={e => setGlobalVersion(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') void startRelease() }}
             placeholder="v1.2.3"
-            title="빌드 & 패키징할 버전 (cims.sh build -v + pkg --no-bump). 비워두면 현재 pkg.json 버전 유지."
-            style={{ width: 110, fontSize: 13, padding: '4px 8px',
-                     border: '1px solid var(--border)', borderRadius: 4 }}
-          />
+            title="빌드 & 패키징할 버전 (cims.sh build -v + pkg --no-bump). 비워두면 현재 pkg.json 버전 유지."/>
           <datalist id="all-versions">
             {allVersions.map(v => <option key={v} value={v} />)}
           </datalist>
@@ -407,10 +404,7 @@ export default function ServicesPage() {
         </div>
       </div>
 
-      <div style={{
-        display: 'flex', gap: 16, alignItems: 'stretch',
-        flex: 1, minHeight: 320,
-      }}>
+      <div className="flex gap-4 items-stretch flex-1 min-h-[320px]">
         <div style={{ flex: '3 1 0', minWidth: 0, overflow: 'auto' }}>
       {loading ? (
         <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중...</div>
@@ -428,19 +422,15 @@ export default function ServicesPage() {
             const running = s?.running ?? false
             const disabled = busy[card.key]
             return (
-              <div key={card.key} style={{
-                border: '1px solid var(--border)', borderRadius: 6,
-                background: 'var(--card)', padding: 12,
-                display: 'flex', flexDirection: 'column', gap: 10,
-              }}>
+              <div className="border border-border rounded-sm bg-card p-3 flex flex-col gap-2.5" key={card.key}>
                 {/* 헤더 — 모듈명 + critical */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div className="flex items-center gap-2">
                   <span style={{ fontFamily: 'monospace', fontWeight: 'bold', fontSize: 14 }}>
                     {card.key}
                   </span>
                   {card.critical && <Badge variant="warningSolid">critical</Badge>}
                   {!card.hasProcess && <Badge variant="infoSolid">원격</Badge>}
-                  <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)' }}>
+                  <span className="ml-auto text-xs text-muted-foreground">
                     {card.label}
                   </span>
                 </div>
@@ -454,8 +444,8 @@ export default function ServicesPage() {
                   columnGap: 16, rowGap: 8,
                 }}>
                   {/* ¹ 설정 — 템플릿/설정 편집 (버전 선택은 ³ 로 이동) */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, minWidth: 0 }}>
-                    <span style={{ color: 'var(--muted-foreground)', fontWeight: 500, minWidth: 50 }}>¹ 설정</span>
+                  <div className="flex items-center gap-1.5 text-sm min-w-0">
+                    <span className="text-muted-foreground font-medium min-w-[50px]">¹ 설정</span>
                     <Button
                       disabled={versions.length === 0}
                       onClick={() => openTemplate(card.key, true)}
@@ -470,22 +460,22 @@ export default function ServicesPage() {
                       <Badge variant="dangerSolid" title="설정 변경 후 재시작 필요">!</Badge>
                     )}
                     {versions.length === 0 && (
-                      <Link to="/deploy/packages" style={{ fontSize: 11, color: 'var(--muted-foreground)', marginLeft: 'auto' }}
+                      <Link className="text-xs text-muted-foreground ml-auto" to="/deploy/packages"
                             title="신규 패키지 등록">등록</Link>
                     )}
                   </div>
 
                   {/* ² 실행 — hasProcess 카드만, 빈 셀로 정렬 유지 */}
                   {card.hasProcess ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, minWidth: 0 }}>
-                      <span style={{ color: 'var(--muted-foreground)', fontWeight: 500, minWidth: 50 }}>² 실행</span>
+                    <div className="flex items-center gap-1.5 text-sm min-w-0">
+                      <span className="text-muted-foreground font-medium min-w-[50px]">² 실행</span>
                       <Badge variant={running ? 'successSolid' : 'neutralSolid'} className="min-w-10 justify-center">
                         {running ? 'on' : 'off'}
                       </Badge>
-                      <span style={{ color: 'var(--muted-foreground)', fontFamily: 'monospace', fontSize: 11 }}>
+                      <span className="text-muted-foreground font-mono text-xs">
                         {running ? `pid=${s?.pid ?? '?'}` : '—'}
                       </span>
-                      <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+                      <div className="ml-auto flex gap-1">
                         <Button variant={running ? 'destructive' : 'outline'}
                           disabled={disabled}
                           onClick={() => toggleRunning(card.key, running, !!card.critical)}
@@ -502,8 +492,8 @@ export default function ServicesPage() {
                       </div>
                     </div>
                   ) : (
-                    <div style={{ fontSize: 11, color: 'var(--muted-foreground)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ minWidth: 50 }}>² 실행</span>
+                    <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      <span className="min-w-[50px]">² 실행</span>
                       <span>(원격 — 로컬 실행 없음)</span>
                     </div>
                   )}
@@ -512,14 +502,12 @@ export default function ServicesPage() {
                   <div style={{ gridColumn: '1 / -1',
                                 display: 'flex', alignItems: 'center', gap: 6,
                                 fontSize: 12, flexWrap: 'wrap', minWidth: 0 }}>
-                    <span style={{ color: 'var(--muted-foreground)', fontWeight: 500, minWidth: 50 }}>³ 다운로드</span>
+                    <span className="text-muted-foreground font-medium min-w-[50px]">³ 다운로드</span>
                     {variantTars.map(({ v, tar }) => (
-                      <Button key={v}
+                      <Button className="text-xs py-0.5 px-1.5 font-mono" key={v}
                         disabled={!tar}
                         title={tar ? `${tar.name} (${fmtSize(tar.size)})` : `${v} tarball 없음 — 먼저 [패키징]`}
-                        onClick={() => { void downloadTarball(v) }}
-                        style={{ fontSize: 11, padding: '2px 6px',
-                                 fontFamily: 'monospace' }}>
+                        onClick={() => { void downloadTarball(v) }}>
                         <Download size={12} /> {v}{tar?.version ? ` v${tar.version}` : ''}
                       </Button>
                     ))}
@@ -535,12 +523,7 @@ export default function ServicesPage() {
           flex: '2 1 0', minWidth: 0,
           display: 'flex', flexDirection: 'column',
         }}>
-          <div style={{
-            padding: 12, borderRadius: 4,
-            background: 'var(--muted)', color: 'var(--foreground)', fontFamily: 'monospace', fontSize: 12,
-            display: 'flex', flexDirection: 'column',
-            minHeight: 0, flex: 1, overflow: 'hidden',
-          }}>
+          <div className="p-3 rounded-[4px] bg-muted text-foreground font-mono text-sm flex flex-col min-h-0 flex-1 overflow-hidden">
             {(() => {
               // activeJob 진행 중이면 항상 job, 그 외엔 마지막 갱신 출처
               const showJob = !!activeJob || (terminalSource === 'job' && jobStatus)
@@ -576,18 +559,14 @@ export default function ServicesPage() {
                 : '$ 전체 빌드 / 패키지화 / 모듈 시작·정지·재시작 시 출력이 여기에 표시됩니다.\n'
               return (
                 <>
-                  <div style={{ marginBottom: 6, display: 'flex', justifyContent: 'space-between', flex: '0 0 auto' }}>
+                  <div className="mb-1.5 flex justify-between flex-none">
                     <span>
                       <Badge variant={tagTone} className="mr-2">{tagText}</Badge>
                       {meta && <span>{meta}</span>}
                     </span>
                     {right && <span>{right}</span>}
                   </div>
-                  <pre style={{
-                    margin: 0, flex: 1, minHeight: 0,
-                    overflow: 'auto', whiteSpace: 'pre-wrap',
-                    background: 'var(--muted)', padding: 8, borderRadius: 4,
-                  }}>
+                  <pre className="m-0 flex-1 min-h-0 overflow-auto whitespace-pre-wrap bg-muted p-2 rounded-[4px]">
                     {content}
                   </pre>
                 </>
@@ -604,38 +583,29 @@ export default function ServicesPage() {
           title={`설정 템플릿 — ${templateModal.module} (v${templateModal.pkg.version})${editing ? ' · 편집 중' : ''}`}
           onClose={() => { if (!saving) setTemplateModal(null) }}
         >
-          <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <div style={{ flex: 1, overflow: 'auto', padding: 20 }}>
+          <div className="flex flex-col h-full">
+            <div className="flex-1 overflow-auto p-5">
               {editing ? (
                 <>
                   <textarea
-                    className="rounded-md border border-border px-2.5 py-2 outline-none transition-colors focus-visible:border-primary focus-visible:shadow-focus"
-                    style={{
-                      width: '100%', height: '100%', minHeight: 400,
-                      fontFamily: 'monospace', fontSize: 12, lineHeight: 1.5,
-                      background: 'var(--muted)', color: 'var(--foreground)',
-                    }}
+                    className="rounded-md border border-border px-2.5 py-2 outline-none transition-colors focus-visible:border-primary focus-visible:shadow-focus w-full h-full min-h-[400px] font-mono text-sm leading-normal bg-muted text-foreground"
                     value={editText}
                     onChange={e => setEditText(e.target.value)}
-                    spellCheck={false}
-                  />
-                  {editError && <div className="auth-error" style={{ marginTop: 8 }}>{editError}</div>}
-                  <div className="text-muted" style={{ fontSize: 12, marginTop: 8 }}>
+                    spellCheck={false}/>
+                  {editError && <div className="auth-error mt-2">{editError}</div>}
+                  <div className="text-muted text-sm mt-2">
                     최상위 object. `sections[]`, `collections[]` 스키마. 저장 시 재배포되는 deployment 가 새 템플릿으로 overlay 됩니다.
                   </div>
                 </>
               ) : templateModal.pkg.config_template ? (
-                <pre style={{
-                  background: 'var(--muted)', color: 'var(--foreground)', padding: 12, borderRadius: 4,
-                  fontSize: 12, overflow: 'auto', margin: 0,
-                }}>
+                <pre className="bg-muted text-foreground p-3 rounded-[4px] text-sm overflow-auto m-0">
                   {JSON.stringify(templateModal.pkg.config_template, null, 2)}
                 </pre>
               ) : (
                 <EmptyState title="이 패키지에 config_template 이 포함되어 있지 않습니다. 편집 버튼으로 생성할 수 있습니다." />
               )}
             </div>
-            <div className="flex justify-end gap-2.5 pt-5" style={{ flex: '0 0 auto' }}>
+            <div className="flex justify-end gap-2.5 pt-5 flex-none">
               {editing ? (
                 <>
                   <Button size="default" onClick={() => { setEditing(false); setEditError('') }} disabled={saving}>취소</Button>

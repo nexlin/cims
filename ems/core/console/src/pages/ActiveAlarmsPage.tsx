@@ -30,8 +30,8 @@ function AlarmDetail({ a, onAck, onComment }: {
 }) {
   const [text, setText] = useState('')
   const item = (label: string, value?: string | null) => value ? (
-    <div style={{ display: 'flex', gap: 8, fontSize: 12 }}>
-      <span style={{ color: 'var(--muted-foreground)', minWidth: 90, flexShrink: 0 }}>{label}</span>
+    <div className="flex gap-2 text-sm">
+      <span className="text-muted-foreground min-w-[90px] shrink-0">{label}</span>
       <span>{value}</span>
     </div>
   ) : null
@@ -46,24 +46,24 @@ function AlarmDetail({ a, onAck, onComment }: {
       {(a.occurrences ?? 1) > 1 && item('재통지', `해제 없이 ${a.occurrences}회 — 최근 ${fmtTime(a.last_open_ts)}`)}
       {a.acked && item('승인', `${a.ackUser || ''}`)}
       {(a.comments?.length ?? 0) > 0 && (
-        <div style={{ fontSize: 12 }}>
-          <div style={{ color: 'var(--muted-foreground)', marginBottom: 2 }}>코멘트</div>
+        <div className="text-sm">
+          <div className="text-muted-foreground mb-0.5">코멘트</div>
           {a.comments!.map((c, i) => (
             <div key={i} style={{ padding: '2px 0 2px 8px', borderLeft: '2px solid var(--border)' }}>
-              <span style={{ color: 'var(--muted-foreground)' }}>{c.user || ''} {fmtTime(c.ts)}</span> — {c.text}
+              <span className="text-muted-foreground">{c.user || ''} {fmtTime(c.ts)}</span> — {c.text}
             </div>
           ))}
         </div>
       )}
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 2 }}>
+      <div className="flex gap-1.5 items-center mt-0.5">
         {!a.acked && (
           <Button disabled={!a.alarm_id} onClick={() => onAck(a.alarm_id)}>승인</Button>
         )}
-        <Input  style={{ width: 280 }} placeholder="코멘트 입력 후 Enter"
+        <Input className="w-[280px]" placeholder="코멘트 입력 후 Enter"
                value={text} onChange={e => setText(e.target.value)}
                onKeyDown={e => {
                  if (e.key === 'Enter' && text.trim()) { onComment(a.alarm_id, text.trim()); setText('') }
-               }} />
+               }}/>
       </div>
     </div>
   )
@@ -84,7 +84,7 @@ export function AlarmSeverityTile({ sev }: { sev: string }) {
         background: 'var(--card)', borderRadius: 'var(--radius)', padding: '12px 16px',
         border: on ? '1px solid var(--primary)' : '1px solid var(--border)',
       }}>
-      <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{SEVERITY_LABEL[sev] || sev}</div>
+      <div className="text-sm text-muted-foreground">{SEVERITY_LABEL[sev] || sev}</div>
       <div style={{ fontSize: 24, fontWeight: 700,
                     color: n > 0 && (sev === 'critical' || sev === 'major') ? 'var(--destructive)' : 'var(--foreground)' }}>
         {n}
@@ -125,9 +125,9 @@ export function ActiveAlarmList() {
   return (
     <div className="widget-stack">
 
-      <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <Input className="flex-1" style={{ width: 260 }} placeholder="코드/소스/메시지 검색"
-               value={q} onChange={e => setQ(e.target.value)} />
+      <div className="toolbar flex-wrap gap-2">
+        <Input className="flex-1 w-[260px]" placeholder="코드/소스/메시지 검색"
+               value={q} onChange={e => setQ(e.target.value)}/>
         <span style={{ marginLeft: 'auto', fontSize: 12, color: error ? 'var(--destructive)' : 'var(--muted-foreground)' }}>
           {error ? '갱신 실패 — 표시가 최신이 아닐 수 있음' : lastUpdated ? `갱신 ${fmtTime(new Date(lastUpdated).toISOString())} · 라이브` : ''}
         </span>
@@ -135,7 +135,7 @@ export function ActiveAlarmList() {
       </div>
 
       <div className="panel">
-        <div style={{ padding: '12px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)' }}>
+        <div className="py-3 px-4 font-semibold text-base border-b border-border">
           활성 알람 ({rows.length}건{sevFilter || q ? ` / 전체 ${active.length}` : ''})
         </div>
         {!loaded ? (
@@ -146,14 +146,14 @@ export function ActiveAlarmList() {
           <DataTable sticky>
             <thead>
               <tr>
-                <Th style={{ width: 90 }}>심각도</Th>
-                <Th style={{ width: 100 }}>코드</Th>
-                <Th style={{ width: 120 }}>클래스</Th>
-                <Th style={{ width: 170 }}>소스</Th>
+                <Th className="w-[90px]">심각도</Th>
+                <Th className="w-[100px]">코드</Th>
+                <Th className="w-[120px]">클래스</Th>
+                <Th className="w-[170px]">소스</Th>
                 <Th>메시지</Th>
-                <Th style={{ width: 145 }}>발생 시각</Th>
-                <Th style={{ width: 100 }}>경과</Th>
-                <Th style={{ width: 90 }}>승인</Th>
+                <Th className="w-[145px]">발생 시각</Th>
+                <Th className="w-[100px]">경과</Th>
+                <Th className="w-[90px]">승인</Th>
               </tr>
             </thead>
             <tbody>
@@ -164,9 +164,9 @@ export function ActiveAlarmList() {
                   <tr key={key} onClick={() => setExpanded(open ? null : key)}
                       style={{ cursor: 'pointer', background: open ? 'var(--accent)' : undefined }}>
                     <Td><Badge variant={sevBadgeClass(severityOf(a))} >{severityOf(a)}</Badge></Td>
-                    <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{a.code || '-'}</Td>
+                    <Td className="font-mono text-xs">{a.code || '-'}</Td>
                     <Td>{alarmTypeLabel(a.type)}</Td>
-                    <Td><code style={{ fontSize: 11 }} title={a.source?.mo_instance || ''}>
+                    <Td><code className="text-xs" title={a.source?.mo_instance || ''}>
                       {a.source?.mo_label || a.source?.mo_instance || '-'}</code></Td>
                     <Td>
                       {a.message}
@@ -187,12 +187,12 @@ export function ActiveAlarmList() {
                       {a.acked
                         ? <span className="inline-flex items-center gap-1 text-xs text-[var(--cims-success)]">
                       <Check size={12} /> {a.ackUser || '승인'}</span>
-                        : <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>미승인</span>}
+                        : <span className="text-muted-foreground text-sm">미승인</span>}
                     </Td>
                   </tr>,
                   open && (
                     <tr key={`${key}-detail`}>
-                      <Td colSpan={8} style={{ padding: 0, background: 'var(--accent)' }}>
+                      <Td className="p-0 bg-accent" colSpan={8}>
                         <AlarmDetail a={a} onAck={ack} onComment={comment} />
                       </Td>
                     </tr>

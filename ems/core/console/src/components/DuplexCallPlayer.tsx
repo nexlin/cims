@@ -116,33 +116,23 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
   const ratio = totalMs > 0 ? Math.min(1, pos / totalMs) : 0
 
   return (
-    <div style={{
-      border: '1px solid var(--border)', borderRadius: 8, padding: '13px 14px',
-      background: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 11,
-    }}>
+    <div className="border border-border rounded-md py-[13px] px-3.5 bg-muted flex flex-col gap-[11px]">
       {/* ── transport ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-        <Button variant="default" size="default"
+      <div className="flex items-center gap-[11px]">
+        <Button className="w-[34px] h-[34px] rounded-full p-0 flex-none flex items-center justify-center text-md" variant="default" size="default"
           onClick={toggle}
           disabled={prep || !!err}
-          title={playing ? '일시정지' : '재생'}
-          style={{
-            width: 34, height: 34, borderRadius: '50%', padding: 0, flex: '0 0 auto',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13,
-          }}
-        >
+          title={playing ? '일시정지' : '재생'}>
           {prep ? '…' : playing ? <Pause size={13} /> : <Play size={13} />}
         </Button>
-        <span className="text-sm text-muted-foreground" style={{ fontSize: 12, color: 'var(--muted-foreground)', minWidth: 38 }}>
+        <span className="text-sm text-muted-foreground min-w-[38px]">
           {fmtMs(pos)}
         </span>
-        <div
+        <div className="flex-1 h-[5px] rounded-full bg-border relative cursor-pointer"
           onClick={e => {
             const r = e.currentTarget.getBoundingClientRect()
             seekTo((e.clientX - r.left) / r.width)
-          }}
-          style={{ flex: 1, height: 5, borderRadius: 999, background: 'var(--border)', position: 'relative', cursor: 'pointer' }}
-        >
+          }}>
           <div style={{ position: 'absolute', inset: '0 auto 0 0', width: `${ratio * 100}%`, background: 'var(--primary)', borderRadius: 999 }} />
           <div style={{
             position: 'absolute', left: `${ratio * 100}%`, top: '50%', width: 12, height: 12,
@@ -150,11 +140,11 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
             boxShadow: '0 0 0 3px var(--card)',
           }} />
         </div>
-        <span className="text-sm text-muted-foreground" style={{ fontSize: 12, color: 'var(--muted-foreground)', minWidth: 38 }}>
+        <span className="text-sm text-muted-foreground min-w-[38px]">
           {fmtMs(totalMs)}
         </span>
         <Select value={toSel(sel)} onValueChange={(v: string) => setSel(fromSel(v))}>
-          <SelectTrigger style={{ fontSize: 12, padding: '4px 9px', width: 'auto' }} title="믹스 = 통화에서 실제로 들린 소리 / 단독 = 해당 화자만"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="text-sm py-1 px-[9px] w-auto" title="믹스 = 통화에서 실제로 들린 소리 / 단독 = 해당 화자만"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value={MIX}>믹스 (양측)</SelectItem>
             {audioTracks.map(t => (
@@ -164,7 +154,7 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
         </Select>
       </div>
 
-      {err && <div style={{ fontSize: 11, color: 'var(--destructive)' }}>{err}</div>}
+      {err && <div className="text-xs text-destructive">{err}</div>}
 
       {/* ── 화자별 파형 레인 ── */}
       {audioTracks.map(t => {
@@ -173,20 +163,18 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
         const arr = peaks[String(t.slot)] || []
         const dim = sel !== MIX && Number(sel) !== t.slot
         return (
-          <div key={t.slot} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div className="flex items-center gap-2" key={t.slot}>
             {/* 표시는 이름(labelOf), 번호는 hover — 이력 화면 공통 규약 */}
             <div title={spk} style={{ flex: '0 0 128px', fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
               <span style={{ width: 8, height: 8, borderRadius: 2, background: color, flex: '0 0 auto' }} />
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name(spk)}</span>
-              <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)', fontSize: 10 }}>슬롯 {t.slot}</span>
+              <span className="overflow-hidden text-ellipsis whitespace-nowrap">{name(spk)}</span>
+              <span className="text-muted-foreground text-[10px]">슬롯 {t.slot}</span>
             </div>
-            <div
+            <div className="flex-1 h-[30px] flex items-end gap-px cursor-pointer relative"
               onClick={e => {
                 const r = e.currentTarget.getBoundingClientRect()
                 seekTo((e.clientX - r.left) / r.width)
-              }}
-              style={{ flex: 1, height: 30, display: 'flex', alignItems: 'flex-end', gap: 1, cursor: 'pointer', position: 'relative' }}
-            >
+              }}>
               {arr.length === 0 ? (
                 <div style={{ width: '100%', height: 1, background: 'var(--border)', alignSelf: 'center' }} />
               ) : arr.map((v, i) => (
@@ -206,14 +194,12 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
         )
       })}
 
-      <audio
+      <audio className="hidden"
         ref={audioRef}
-        style={{ display: 'none' }}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={() => { setPlaying(false); setPos(0) }}
-        onTimeUpdate={e => setPos(e.currentTarget.currentTime * 1000)}
-      />
+        onTimeUpdate={e => setPos(e.currentTarget.currentTime * 1000)}/>
     </div>
   )
 }

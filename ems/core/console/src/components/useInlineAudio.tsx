@@ -79,7 +79,7 @@ export function useInlineAudio(onError: (m: string) => void): InlineAudio {
   useEffect(() => () => { abortRef.current?.abort() }, [])
 
   const node = (
-    <audio ref={audioRef} style={{ display: 'none' }} onEnded={() => setPlaying(null)} />
+    <audio className="hidden" ref={audioRef} onEnded={() => setPlaying(null)}/>
   )
   return { play, stop, playing, preparing, node }
 }

@@ -17,12 +17,12 @@ function AlertBannerWidget() {
       border: '1px solid color-mix(in srgb, var(--destructive) 35%, var(--border))',
       borderRadius: 'var(--radius)', padding: 12,
     }}>
-      <div style={{ fontWeight: 600, color: 'var(--destructive)', marginBottom: 4, display: 'flex', alignItems: 'center' }}>
+      <div className="font-semibold text-destructive mb-1 flex items-center">
         알람 ({severe.length})
-        <a href="/alerts/history" style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 500, color: 'var(--destructive)' }}>이력 보기 →</a>
+        <a className="ml-auto text-sm font-medium text-destructive" href="/alerts/history">이력 보기 →</a>
       </div>
       {severe.map((a, i) => (
-        <div key={`${a.alarm_id || a.type}-${i}`} style={{ fontSize: 13 }}>
+        <div className="text-md" key={`${a.alarm_id || a.type}-${i}`}>
           {a.message}
           {a.acked && <span className="ml-1.5 inline-flex items-center gap-1 text-xs text-muted-foreground">
         <Check size={12} /> {a.ackUser || '승인'}</span>}

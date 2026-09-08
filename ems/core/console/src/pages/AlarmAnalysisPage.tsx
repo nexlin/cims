@@ -36,7 +36,7 @@ function Tile({ label, value, accent }: { label: string; value: ReactNode; accen
                   border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 10,
                   display: 'flex', flexDirection: 'column',
                   justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
-      <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 4 }}>{label}</div>
+      <div className="text-sm text-muted-foreground mb-1">{label}</div>
       <div style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.1,
                     color: accent ? 'var(--destructive)' : 'var(--foreground)' }}>{value}</div>
     </div>
@@ -47,8 +47,8 @@ function Tile({ label, value, accent }: { label: string; value: ReactNode; accen
 function ShareBar({ n, max, color = 'var(--primary)' }: { n: number; max: number; color?: string }) {
   const pct = max > 0 ? Math.round((n / max) * 100) : 0
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <div style={{ width: 64, height: 6, background: 'var(--border)', borderRadius: 3, flex: 'none' }}>
+    <div className="flex items-center gap-2">
+      <div className="w-[64px] h-[6px] bg-border rounded-[3px] flex-none">
         <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 3, opacity: 0.85 }} />
       </div>
       <span>{n}</span>
@@ -57,7 +57,7 @@ function ShareBar({ n, max, color = 'var(--primary)' }: { n: number; max: number
 }
 
 function DailyBars({ data, height = 48 }: { data: { date: string; opens: number }[]; height?: number }) {
-  if (data.length === 0) return <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>—</div>
+  if (data.length === 0) return <div className="text-sm text-muted-foreground">—</div>
   const max = Math.max(1, ...data.map(d => d.opens))
   return (
     <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: height + 14 }}>
@@ -68,7 +68,7 @@ function DailyBars({ data, height = 48 }: { data: { date: string; opens: number 
         const labelEvery = data.length > 60 ? 7 : data.length > 21 ? 3 : 1
         const showLabel = i % labelEvery === 0 || i === data.length - 1
         return (
-          <div key={d.date} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 0 }}
+          <div className="flex-1 flex flex-col items-center min-w-0" key={d.date}
             title={`${d.date}: ${d.opens}건`}>
             <div style={{
               width: '100%',
@@ -93,10 +93,10 @@ function SeverityDist({ bySev }: { bySev: Record<string, number> }) {
   const order = Object.keys(SEV_RANK).sort((a, b) => SEV_RANK[b] - SEV_RANK[a])
   const entries = order.filter(s => (bySev[s] || 0) > 0).map(s => [s, bySev[s]] as const)
   const total = entries.reduce((a, [, n]) => a + n, 0)
-  if (total === 0) return <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>—</div>
+  if (total === 0) return <div className="text-sm text-muted-foreground">—</div>
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ display: 'flex', height: 10, borderRadius: 5, overflow: 'hidden' }}>
+    <div className="flex flex-col gap-1.5">
+      <div className="flex h-[10px] rounded-[5px] overflow-hidden">
         {entries.map(([s, n]) => (
           <div key={s} title={`${s}: ${n}건`}
                style={{ width: `${(n / total) * 100}%`, background: SEV_COLOR[s] || 'var(--muted-foreground)' }} />
@@ -104,7 +104,7 @@ function SeverityDist({ bySev }: { bySev: Record<string, number> }) {
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', fontSize: 11, color: 'var(--muted-foreground)' }}>
         {entries.map(([s, n]) => (
-          <span key={s} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <span className="inline-flex items-center gap-1" key={s}>
             <span style={{ width: 8, height: 8, borderRadius: 2, background: SEV_COLOR[s] || 'var(--muted-foreground)' }} />
             {s} {n}
           </span>
@@ -117,11 +117,10 @@ function SeverityDist({ bySev }: { bySev: Record<string, number> }) {
 // 분석 표를 담는 패널 골격 — 제목 고정 + 표 내부 스크롤
 function TablePanel({ title, action, children }: { title: ReactNode; action?: ReactNode; children: ReactNode }) {
   return (
-    <div className="panel" style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '10px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)',
-                    flex: 'none', display: 'flex', alignItems: 'center', gap: 8 }}>
+    <div className="panel flex-1 min-w-0 min-h-0 flex flex-col">
+      <div className="py-2.5 px-4 font-semibold text-base border-b border-border flex-none flex items-center gap-2">
         {title}
-        {action && <span style={{ marginLeft: 'auto', fontWeight: 400 }}>{action}</span>}
+        {action && <span className="ml-auto font-normal">{action}</span>}
       </div>
       <div className="scroll-fill">{children}</div>
     </div>
@@ -172,8 +171,8 @@ function Block({ title, loading, error, children, pad = true }: {
         <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 6, flex: 'none',
                       padding: pad ? 0 : '10px 16px 6px' }}>
           {title}
-          {loading && <span style={{ marginLeft: 6 }}>· 갱신 중…</span>}
-          {error && <span style={{ marginLeft: 6, color: 'var(--destructive)' }}>· 조회 실패</span>}
+          {loading && <span className="ml-1.5">· 갱신 중…</span>}
+          {error && <span className="ml-1.5 text-destructive">· 조회 실패</span>}
         </div>
       )}
       {children}
@@ -267,36 +266,36 @@ export function AlarmByCodeBlock() {
                 <DataTable sticky>
                   <thead>
                     <tr>
-                      <Th style={{ width: 110 }}>코드</Th>
-                      <Th style={{ width: 120 }}>클래스</Th>
-                      <Th style={{ width: 160 }}>소스</Th>
-                      <Th style={{ width: 95 }}>심각도</Th>
-                      <Th style={{ width: 130 }}>발생</Th>
-                      <Th style={{ width: 60, textAlign: 'right' }}>해소</Th>
-                      <Th style={{ width: 80 }}>현재 상태</Th>
-                      <Th style={{ width: 110, textAlign: 'right' }}>평균 지속</Th>
+                      <Th className="w-[110px]">코드</Th>
+                      <Th className="w-[120px]">클래스</Th>
+                      <Th className="w-[160px]">소스</Th>
+                      <Th className="w-[95px]">심각도</Th>
+                      <Th className="w-[130px]">발생</Th>
+                      <Th className="w-[60px] text-right">해소</Th>
+                      <Th className="w-[80px]">현재 상태</Th>
+                      <Th className="w-[110px] text-right">평균 지속</Th>
                       <Th>마지막 이벤트</Th>
                     </tr>
                   </thead>
                   <tbody>
                     {byCode.map((s, i) => (
                       <tr key={s.key || `${s.type}-${i}`}>
-                        <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{s.code || '-'}</Td>
+                        <Td className="font-mono text-xs">{s.code || '-'}</Td>
                         <Td>{alarmTypeLabel(s.type)}</Td>
-                        <Td><code style={{ fontSize: 11 }}>{s.mo_instance || '-'}</code></Td>
+                        <Td><code className="text-xs">{s.mo_instance || '-'}</code></Td>
                         <Td>
                           {s.perceived_severity
                             ? <Badge variant={sevBadgeClass(s.perceived_severity)} >{s.perceived_severity}</Badge>
                             : '-'}
                         </Td>
                         <Td><ShareBar n={s.opens} max={maxCodeOpens} /></Td>
-                        <Td style={{ textAlign: 'right' }}>{s.resolved}</Td>
+                        <Td className="text-right">{s.resolved}</Td>
                         <Td>
                           {s.currently_open
                             ? <Badge variant="dangerSoft" >OPEN</Badge>
-                            : <span style={{ color: 'var(--muted-foreground)' }}>정상</span>}
+                            : <span className="text-muted-foreground">정상</span>}
                         </Td>
-                        <Td style={{ textAlign: 'right' }}>
+                        <Td className="text-right">
                           {s.avg_duration_sec != null ? formatSec(Math.round(s.avg_duration_sec)) : '-'}
                         </Td>
                         <Td className="text-sm text-muted-foreground">{s.last_ts ? fmtTime(s.last_ts) : '-'}</Td>
@@ -336,22 +335,22 @@ export function AlarmByTypeBlock() {
                   <thead>
                     <tr>
                       <Th>클래스</Th>
-                      <Th style={{ width: 70, textAlign: 'right' }}>코드 수</Th>
-                      <Th style={{ width: 130 }}>발생</Th>
-                      <Th style={{ width: 60, textAlign: 'right' }}>해소</Th>
-                      <Th style={{ width: 70, textAlign: 'right' }}>미해소</Th>
-                      <Th style={{ width: 145 }}>마지막</Th>
+                      <Th className="w-[70px] text-right">코드 수</Th>
+                      <Th className="w-[130px]">발생</Th>
+                      <Th className="w-[60px] text-right">해소</Th>
+                      <Th className="w-[70px] text-right">미해소</Th>
+                      <Th className="w-[145px]">마지막</Th>
                     </tr>
                   </thead>
                   <tbody>
                     {byType.map(t => (
                       <tr key={t.type}>
                         <Td>{alarmTypeLabel(t.type)}
-                          <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--muted-foreground)', fontFamily: 'monospace' }}>{t.type}</span>
+                          <span className="ml-1.5 text-xs text-muted-foreground font-mono">{t.type}</span>
                         </Td>
-                        <Td style={{ textAlign: 'right' }}>{t.codes.size || '-'}</Td>
+                        <Td className="text-right">{t.codes.size || '-'}</Td>
                         <Td><ShareBar n={t.opens} max={maxTypeOpens} /></Td>
-                        <Td style={{ textAlign: 'right' }}>{t.resolved}</Td>
+                        <Td className="text-right">{t.resolved}</Td>
                         <Td style={{ textAlign: 'right', color: t.open > 0 ? 'var(--destructive)' : undefined }}>{t.open}</Td>
                         <Td className="text-sm text-muted-foreground">{t.last ? fmtTime(t.last) : '-'}</Td>
                       </tr>
@@ -423,7 +422,7 @@ export function EventTotalTile({ tile }: { tile: AnalysisTile }) {
     <Tile label={tile.label} value={truncated ? (
       <>
         {n}
-        <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--destructive)' }}>
+        <div className="text-xs font-normal text-destructive">
           최신 {FETCH_LIMIT}건만 집계 (기간을 좁히세요)
         </div>
       </>
@@ -458,11 +457,11 @@ export function EventByTypeBlock() {
                 <DataTable sticky>
                   <thead>
                     <tr>
-                      <Th style={{ width: 90 }}>분류</Th>
-                      <Th style={{ width: 110 }}>코드</Th>
+                      <Th className="w-[90px]">분류</Th>
+                      <Th className="w-[110px]">코드</Th>
                       <Th>유형</Th>
-                      <Th style={{ width: 140 }}>건수</Th>
-                      <Th style={{ width: 145 }}>마지막</Th>
+                      <Th className="w-[140px]">건수</Th>
+                      <Th className="w-[145px]">마지막</Th>
                     </tr>
                   </thead>
                   <tbody>
@@ -473,9 +472,9 @@ export function EventByTypeBlock() {
                             {EVENT_KIND_LABEL[t.kind || ''] || t.kind || '-'}
                           </Badge>
                         </Td>
-                        <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{t.code || '-'}</Td>
+                        <Td className="font-mono text-xs">{t.code || '-'}</Td>
                         <Td>{eventTypeLabel(t.type)}
-                          <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--muted-foreground)', fontFamily: 'monospace' }}>{t.type}</span>
+                          <span className="ml-1.5 text-xs text-muted-foreground font-mono">{t.type}</span>
                         </Td>
                         <Td><ShareBar n={t.count} max={maxTypeCount} /></Td>
                         <Td className="text-sm text-muted-foreground">{t.last ? fmtTime(t.last) : '-'}</Td>
@@ -500,14 +499,14 @@ export function EventBySourceBlock() {
                   <thead>
                     <tr>
                       <Th>소스</Th>
-                      <Th style={{ width: 140 }}>건수</Th>
-                      <Th style={{ width: 145 }}>마지막</Th>
+                      <Th className="w-[140px]">건수</Th>
+                      <Th className="w-[145px]">마지막</Th>
                     </tr>
                   </thead>
                   <tbody>
                     {bySource.map(t => (
                       <tr key={t.source}>
-                        <Td><code style={{ fontSize: 11 }}>{t.source}</code></Td>
+                        <Td><code className="text-xs">{t.source}</code></Td>
                         <Td><ShareBar n={t.count} max={maxSrcCount} /></Td>
                         <Td className="text-sm text-muted-foreground">{t.last ? fmtTime(t.last) : '-'}</Td>
                       </tr>

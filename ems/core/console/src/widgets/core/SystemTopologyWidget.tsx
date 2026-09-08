@@ -82,10 +82,10 @@ function NodeBox({ n, sevByMo, onClick }: { n: Node; sevByMo: Map<string, number
       {/* 헤더: 상태점 + 호스트 + [A/S 상태]·[M/B 설정] 단축 배지(hover=풀워드) + 버전 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 10px 6px' }}>
         <span style={{ width: 9, height: 9, borderRadius: '50%', background: col, display: 'inline-block', flexShrink: 0 }} />
-        <b style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.host}</b>
+        <b className="text-md overflow-hidden text-ellipsis whitespace-nowrap">{n.host}</b>
         {!n.online
           ? <span style={{ fontSize: 10, color: C_RED, flexShrink: 0 }}>offline</span>
-          : <span style={{ display: 'inline-flex', gap: 3, flexShrink: 0 }}>
+          : <span className="inline-flex gap-[3px] shrink-0">
               {/* 상태 A/S — 채움 배지 */}
               <span title={n.active ? 'Active (현재 서비스 중)' : 'Standby (대기)'}
                     style={{ ...STATE_BADGE, background: n.active ? C_GREEN : 'var(--secondary)',
@@ -101,13 +101,13 @@ function NodeBox({ n, sevByMo, onClick }: { n: Node; sevByMo: Map<string, number
                 <AlertTriangle size={12} style={{ color: C_AMBER }}
               aria-label="절체됨 — 설정 선호 노드와 현재 Active 가 다름" />}
             </span>}
-        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--muted-foreground)', flexShrink: 0 }}>{n.version ? `v${n.version}` : ''}</span>
+        <span className="ml-auto text-[10px] text-muted-foreground shrink-0">{n.version ? `v${n.version}` : ''}</span>
       </div>
       {/* 모듈 칩 */}
       <div style={{ borderTop: '1px solid var(--border)', padding: '6px 10px 8px', display: 'flex', flexWrap: 'wrap', gap: 5,
                     background: 'var(--muted)' }}>
         {n.modules.length === 0
-          ? <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>(설치된 모듈 없음)</span>
+          ? <span className="text-xs text-muted-foreground">(설치된 모듈 없음)</span>
           : n.modules.map(m => <ModuleChip key={m.name} host={n.host} module={m.name}
                                            running={n.online && m.running} sevByMo={sevByMo} />)}
       </div>
@@ -129,22 +129,21 @@ function ExternalBox({ sys, status, onClick }: { sys: ExternalSystem; status?: P
     <div onClick={onClick} title="클릭: 외부 시스템 관리"
          style={{ border: `2px dashed ${col}`, borderRadius: 8, padding: '8px 10px', minWidth: 150,
                   background: 'var(--card)', cursor: 'pointer' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div className="flex items-center gap-1.5">
         <span style={{ width: 9, height: 9, borderRadius: '50%', background: col, display: 'inline-block' }} />
-        <b style={{ fontSize: 13 }}>{sys.name}</b>
-        <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, color: 'var(--card)', background: 'var(--cims-info)' }}>외부</span>
-        <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, border: '1px solid var(--border)', color: 'var(--muted-foreground)' }}>
+        <b className="text-md">{sys.name}</b>
+        <span className="text-[10px] py-px px-[5px] rounded-[3px] text-card bg-info">외부</span>
+        <span className="text-[10px] py-px px-[5px] rounded-[3px] border border-border text-muted-foreground">
           {EXT_TYPE_LABEL[sys.type] || sys.type}</span>
       </div>
-      <div style={{ marginTop: 4 }}>
+      <div className="mt-1">
         {(sys.endpoints || []).map((e, i) => (
-          <span key={i} style={{ fontSize: 11, padding: '1px 6px', border: '1px solid var(--border)',
-                                 borderRadius: 10, marginRight: 4, marginTop: 3, display: 'inline-block' }}>
-            <code style={{ fontSize: 11 }}>{e.host}:{e.port}</code></span>
+          <span className="text-xs py-px px-1.5 border border-border rounded-[10px] mr-1 mt-[3px] inline-block" key={i}>
+            <code className="text-xs">{e.host}:{e.port}</code></span>
         ))}
       </div>
       {hasProbe && st === 'up' && status?.latency_ms != null &&
-        <div style={{ fontSize: 10, color: 'var(--muted-foreground)', marginTop: 2 }}>{status.latency_ms}ms</div>}
+        <div className="text-[10px] text-muted-foreground mt-0.5">{status.latency_ms}ms</div>}
     </div>
   )
 }
@@ -242,11 +241,10 @@ function SystemTopologyWidget() {
   }
 
   return (
-    <div className="panel" style={{ padding: 16 }}>
-      <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 14, display: 'flex', alignItems: 'center' }}>
+    <div className="panel p-4">
+      <div className="font-semibold mb-3 text-base flex items-center">
         시스템 형상 ({systems.length}{ext.length > 0 ? ` + 외부 ${ext.length}` : ''})
-        <a onClick={() => navigate('/deploy/servers')}
-           style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 500, color: 'var(--primary)', cursor: 'pointer' }}>시스템/인프라 →</a>
+        <a className="ml-auto text-sm font-medium text-primary cursor-pointer" onClick={() => navigate('/deploy/servers')}>시스템/인프라 →</a>
       </div>
       {/* 데이터가 없어도 카드(패널)는 유지한다 — null 을 돌려주면 로딩 동안 위젯이 통째로
           사라졌다가 팝인하고, 시스템이 0대면 카드 자체가 영영 안 보인다. */}
@@ -263,15 +261,15 @@ function SystemTopologyWidget() {
           return (
             <div key={s.key} style={{ border: `1px solid var(--border)`, borderLeft: `4px solid ${dot}`,
                                       borderRadius: 8, padding: '10px 14px', background: 'var(--muted)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <div className="flex items-center gap-2 mb-2">
                 <span style={{ width: 10, height: 10, borderRadius: '50%', background: dot, display: 'inline-block' }} />
-                <b style={{ fontSize: 13 }}>{s.name}</b>
+                <b className="text-md">{s.name}</b>
                 <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, color: 'var(--cims-on-solid)', background: mb.c }}>{mb.t}</span>
                 {s.mode === 'AS' && s.nodes.length > 1 &&
                   <span className="inline-flex items-center gap-0.5 text-xs text-muted-foreground">
               <ArrowLeftRight size={11} /> VRRP</span>}
-                {s.vip && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)' }}>
-                  <Diamond size={10} className="inline align-[-1px]" /> VIP <code style={{ fontSize: 11 }}>{s.vip}</code>{s.vipSlot ? ` /${s.vipSlot}` : ''}</span>}
+                {s.vip && <span className="ml-auto text-xs text-muted-foreground">
+                  <Diamond size={10} className="inline align-[-1px]" /> VIP <code className="text-xs">{s.vip}</code>{s.vipSlot ? ` /${s.vipSlot}` : ''}</span>}
               </div>
               {/* 노드 — 수에 따라 균형 그리드 (2→2열, 4→2x2 ...). */}
               <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, minmax(150px, 1fr))`, gap: 10 }}>
@@ -287,9 +285,9 @@ function SystemTopologyWidget() {
         {ext.length > 0 && (
           <div style={{ border: `1px dashed var(--border)`, borderLeft: `4px dashed ${C_EXT}`,
                         borderRadius: 8, padding: '10px 14px', background: 'var(--muted)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <div className="flex items-center gap-2 mb-2">
               <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, color: 'var(--cims-on-solid)', background: C_EXT }}>외부 시스템</span>
-              <b style={{ fontSize: 13 }}>External</b>
+              <b className="text-md">External</b>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: `repeat(${gridCols(ext.length)}, minmax(150px, 1fr))`, gap: 10 }}>
               {ext.map(s => (
@@ -301,9 +299,9 @@ function SystemTopologyWidget() {
         )}
       </div>
       {/* 상태 범례 */}
-      <div style={{ display: 'flex', gap: 14, marginTop: 10, fontSize: 11, color: 'var(--muted-foreground)', flexWrap: 'wrap' }}>
+      <div className="flex gap-3.5 mt-2.5 text-xs text-muted-foreground flex-wrap">
         {[['정상', C_GREEN], ['경고', C_AMBER], ['장애/오프라인', C_RED], ['설치됨·미기동', C_GRAY], ['외부', C_EXT]].map(([t, c]) => (
-          <span key={t as string} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <span className="inline-flex items-center gap-1" key={t as string}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: c as string, display: 'inline-block' }} />{t}
           </span>
         ))}

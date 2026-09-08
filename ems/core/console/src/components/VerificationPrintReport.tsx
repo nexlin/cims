@@ -177,7 +177,7 @@ export function VerificationPrintReport({
 
       {/* 1. 검증결과 요약 */}
       <h2 style={sectionH()}>1. 검증결과 요약</h2>
-      <div style={{ fontSize: 12, marginBottom: 12 }}>
+      <div className="text-sm mb-3">
         본 검증은 6단계 파이프라인 (S1 정적검사 → S2 빌드 → S3 스모크 → S4 패키지화 → S5 로컬배포 → S6 통합검증) 으로
         구성된 절차에 따라 수행되었습니다. 각 단계는 이전 단계의 PASS 를 전제로 진행되며,
         S4 의 패키지 manifest hash 가 S6 검증 시점과 매칭되어 빌드 산출물의 무결성(immutability)을 보장합니다.
@@ -213,7 +213,7 @@ export function VerificationPrintReport({
       </table>
 
       {/* 단계별 요약 표 */}
-      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>1.1 단계별 요약</div>
+      <div className="text-sm font-bold mb-1.5">1.1 단계별 요약</div>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, marginBottom: 12 }}>
         <thead>
           <tr>
@@ -347,7 +347,7 @@ export function VerificationPrintReport({
                   borderLeft: `2px solid ${statusColor(itStatus)}33`,
                   pageBreakInside: 'avoid', breakInside: 'avoid',
                 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 2 }}>
+                  <div className="text-xs font-bold mb-0.5">
                     <code style={{ fontSize: 11, color: statusColor(itStatus) }}>{it.id}</code>
                     {' '}— {it.name}
                     {isGroup && <span style={{ color: '#6b7280', fontWeight: 500, fontSize: 10 }}>{' '}(그룹: 자식 {children.length}개)</span>}

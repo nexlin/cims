@@ -29,7 +29,7 @@ export function MyLayoutHeader() {
   const confirm = useConfirm()
   const s = useMyLayout(show)
   return (
-    <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
+    <div className="toolbar flex-wrap gap-2">
       <Badge  style={{ background: s.source === 'override' ? 'var(--primary)' : 'var(--secondary)' }}>
         {s.source === 'override' ? '개인 구성' : '프로파일 기본'}
       </Badge>
@@ -38,7 +38,7 @@ export function MyLayoutHeader() {
         구성은 서버(계정별)에 저장되어 기기·세션을 넘어 따라갑니다. 위젯 가용성은 서비스 설치/상태에
         따릅니다 — 모든 위젯 API 는 서버에서 권한을 재확인합니다.
       </InfoDot>
-      <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+      <span className="ml-auto flex gap-1.5">
         <Button variant="default" onClick={() => void myLayout.save(show)}
                 disabled={s.saving || !s.dirty}>저장</Button>
         <Button onClick={() => void myLayout.load(show)}
@@ -60,18 +60,18 @@ export function MyLayoutProfile() {
   const { show } = useToast()
   const s = useMyLayout(show)
   return (
-    <div className="panel" style={{ padding: 14, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <div style={{ fontWeight: 600, marginBottom: 8, flex: 'none' }}>프로파일</div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+    <div className="panel p-3.5 flex flex-col min-h-0">
+      <div className="font-semibold mb-2 flex-none">프로파일</div>
+      <div className="flex gap-2 flex-wrap items-center">
         <Select value={toSel(s.baseProfile)} onValueChange={(v: string) => myLayout.setBaseProfile(fromSel(v))}>
-          <SelectTrigger style={{ width: 200 }}><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-[200px]"><SelectValue /></SelectTrigger>
           <SelectContent>
             {s.profiles.map(p => <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>)}
           </SelectContent>
         </Select>
         <Button onClick={() => myLayout.applyProfile(s.baseProfile)}
                 title="선택한 프로파일의 기본 위젯 세트로 교체">이 프로파일 적용</Button>
-        <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
+        <span className="text-sm text-muted-foreground">
           설치된 서비스: {s.installed.length ? s.installed.join(', ') : '없음'}
         </span>
       </div>
@@ -102,11 +102,11 @@ export function MyLayoutWidgets() {
   }, [s.catalog, s.dashboard])
 
   return (
-    <div className="panel" style={{ padding: 14, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flex: 'none' }}>
-        <div style={{ fontWeight: 600 }}>대시보드 위젯 ({s.dashboard.length})</div>
+    <div className="panel p-3.5 flex flex-col min-h-0">
+      <div className="flex items-center gap-2 mb-2.5 flex-none">
+        <div className="font-semibold">대시보드 위젯 ({s.dashboard.length})</div>
         <Select value={toSel("")} onValueChange={(v: string) => myLayout.add(fromSel(v))}>
-          <SelectTrigger style={{ width: 240, marginLeft: 'auto', fontSize: 13 }}><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-[240px] ml-auto text-md"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value={NONE}>+ 위젯 추가…</SelectItem>
             {addable.map(g => (
@@ -138,18 +138,18 @@ export function MyLayoutWidgets() {
                 border: '1px solid var(--border)', borderRadius: 6, marginBottom: 6,
                 opacity: w && !w.available ? 0.7 : 1,
               }}>
-                <span style={{ fontWeight: 500 }}>{w?.title ?? id}</span>
-                {w && <Badge  style={{ fontSize: 11 }}>{AREA_LABEL[w.area]}</Badge>}
-                {w?.requires_service && <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{w.requires_service}</span>}
+                <span className="font-medium">{w?.title ?? id}</span>
+                {w && <Badge className="text-xs">{AREA_LABEL[w.area]}</Badge>}
+                {w?.requires_service && <span className="text-xs text-muted-foreground">{w.requires_service}</span>}
                 {note && <span className="inline-flex items-center gap-1 text-xs text-warning-on">
         <AlertTriangle size={12} /> {note}</span>}
-                <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>({id})</span>
-                <span style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+                <span className="text-xs text-muted-foreground">({id})</span>
+                <span className="ml-auto flex gap-1">
                   <Button onClick={() => myLayout.move(i, -1)} disabled={i === 0} title="위로"><ArrowUp size={13} /></Button>
                   <Button onClick={() => myLayout.move(i, 1)}
                           disabled={i === s.dashboard.length - 1} title="아래로"><ArrowDown size={13} /></Button>
-                  <Button onClick={() => myLayout.remove(i)} title="제거"
-                          style={{ color: 'var(--destructive)' }} aria-label="삭제"><X size={13} /></Button>
+                  <Button className="text-destructive" onClick={() => myLayout.remove(i)} title="제거"
+                           aria-label="삭제"><X size={13} /></Button>
                 </span>
               </li>
             )

@@ -26,8 +26,7 @@ export default function Modal({ title, onClose, children, wide, fullscreen, widt
   if (fullscreen) {
     // 상단 헤더 높이와 사이드바 폭은 CSS 변수(--header-h, --sidebar-w)로 주입된다.
     return (
-      <div className="fixed bottom-0 right-0 z-[100] flex flex-col bg-background shadow-[0_0_0_1px_var(--border)]
-                      left-[var(--sidebar-w,220px)] top-[var(--header-h,48px)]">
+      <div className="fixed bottom-0 right-0 z-[100] flex flex-col bg-background shadow-[0_0_0_1px_var(--border)] left-[var(--sidebar-w,220px)] top-[var(--header-h,48px)]">
         <div className="flex shrink-0 items-center justify-between border-b border-border bg-card px-5 py-4">
           <span className="text-md font-medium">{title}</span>
           <button onClick={onClose} aria-label="닫기"

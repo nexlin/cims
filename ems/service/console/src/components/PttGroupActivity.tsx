@@ -146,16 +146,16 @@ export default function PttGroupActivity({ storeKey }: {
   }
 
  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 12, color: 'var(--muted-foreground)', fontWeight: 600 }}>최근</span>
+    <div className="flex flex-col gap-2.5">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-sm text-muted-foreground font-semibold">최근</span>
         <ToggleGroup type="single" value={String(rangeDays)} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
  onValueChange={(v: string) => v && setRangeDays(Number(v))}>
           {RANGE_OPTIONS.map(d => (
             <ToggleGroupItem key={d} value={String(d)}>{d}일</ToggleGroupItem>
           ))}
         </ToggleGroup>
-        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted-foreground)' }}>
+        <span className="ml-auto text-sm text-muted-foreground">
           {loading ? '조회 중…' : `세션 ${sessions.length}건`}
         </span>
       </div>
@@ -169,11 +169,11 @@ export default function PttGroupActivity({ storeKey }: {
           {daySessions.length === 0 && !loading ? (
             <EmptyState title="이 날짜에 세션이 없습니다" className="p-[16px]" />
           ) : (
-            <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-              <div style={{ overflowX: 'auto' }}>
+            <div className="border border-border rounded-md overflow-hidden">
+              <div className="overflow-x-auto">
                 <DataTable sticky className="[&_td]:text-sm">
                   <thead>
-                    <tr style={{ background: 'var(--muted)', textAlign: 'left' }}>
+                    <tr className="bg-muted text-left">
                       <Th style={{ ...thStyle, width: 24, cursor: 'default' }}></Th>
                       <Th style={{ ...thStyle, cursor: 'default' }}>세션</Th>
                       <Th style={{ ...thStyle, cursor: 'default' }}>시각</Th>

@@ -36,10 +36,10 @@ export function AbnFilter() {
  const s = useAbnormal(show)
  const { critical } = abnDerived(s)
  return (
-    <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
-      <Input type="date" value={s.date} style={{ width: 150 }}
- onChange={e => abnormal.setDate(e.target.value)} />
-      <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>범위</span>
+    <div className="toolbar flex-wrap gap-2">
+      <Input className="w-[150px]" type="date" value={s.date}
+ onChange={e => abnormal.setDate(e.target.value)}/>
+      <span className="text-sm text-muted-foreground">범위</span>
       <ToggleGroup type="single" value={String(s.days)} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
  onValueChange={(v: string) => v && abnormal.setDays(Number(v))}>
         {RANGE.map(d => (
@@ -56,11 +56,11 @@ export function AbnFilter() {
       </InfoDot>
       {/* 조치가 필요한 신호는 접지 않는다 — 설명과 달리 매번 봐야 한다. */}
       {critical > 0 && (
-        <span style={{ color: 'var(--destructive)', fontWeight: 700, fontSize: 12 }}>
+        <span className="text-destructive font-bold text-sm">
           <AlertTriangle size={13} className="inline align-[-2px]" /> 외부에서 인증 성공(2xx)한 세션 있음 — 즉시 점검
         </span>
       )}
-      {s.data && <span className="text-sm text-muted-foreground" style={{ marginLeft: 'auto' }}>총 {s.data.total}건 탐지</span>}
+      {s.data && <span className="text-sm text-muted-foreground ml-auto">총 {s.data.total}건 탐지</span>}
     </div>
   )
 }
@@ -105,15 +105,15 @@ export function AbnTopIps() {
  const s = useAbnormal(show)
  const { topIps } = abnDerived(s)
  return (
-    <div className="panel" style={{ padding: 12, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, flex: 'none' }}>발신 IP 상위 (차단 후보)</div>
+    <div className="panel p-3 flex flex-col min-h-0">
+      <div className="text-sm font-semibold mb-2 flex-none">발신 IP 상위 (차단 후보)</div>
       {topIps.length === 0 ? <EmptyState title="해당 기간 발신 IP 없음" /> : (
         <div className="scroll-fill" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignContent: 'flex-start' }}>
           {topIps.map(([ip, n]) => (
             <span key={ip} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 24,
  padding: '3px 10px', borderRadius: 14, background: 'rgba(220,38,38,0.08)',
  fontSize: 12, fontFamily: 'monospace' }}>
-              {ip}<b style={{ color: 'var(--destructive)' }}>{n}</b>
+              {ip}<b className="text-destructive">{n}</b>
             </span>
           ))}
         </div>
@@ -128,20 +128,20 @@ export function AbnTable() {
  const s = useAbnormal(show)
  const { sessions, pageRows, pageCount } = abnDerived(s)
  return (
-    <div className="panel" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <div className="panel flex flex-col min-h-0">
       {s.loading ? <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중...</div> : (
         <>
           <div className="scroll-fill">
             <DataTable sticky>
               <thead>
                 <tr>
-                  <Th style={{ width: 92 }}>최근 시각</Th>
-                  <Th style={{ width: 56 }}>심각도</Th>
-                  <Th style={{ width: 130 }}>발신 IP</Th>
+                  <Th className="w-[92px]">최근 시각</Th>
+                  <Th className="w-[56px]">심각도</Th>
+                  <Th className="w-[130px]">발신 IP</Th>
                   <Th>발신 → 착신</Th>
-                  <Th style={{ width: 96 }}>UA</Th>
-                  <Th style={{ width: 56, textAlign: 'right' }}>시도</Th>
-                  <Th style={{ width: 110 }}>메서드/응답</Th>
+                  <Th className="w-[96px]">UA</Th>
+                  <Th className="w-[56px] text-right">시도</Th>
+                  <Th className="w-[110px]">메서드/응답</Th>
                   <Th>사유</Th>
                 </tr>
               </thead>
@@ -150,21 +150,21 @@ export function AbnTable() {
  const sev = SEV[x.severity] || SEV.minor
  return (
                     <tr key={i}>
-                      <Td style={{ fontSize: 11 }} className="text-sm text-muted-foreground">{s.days > 1 ? `${x.date.slice(5)} ` : ''}{(x.last_ts || '').slice(0, 8)}</Td>
+                      <Td  className="text-muted-foreground text-xs">{s.days > 1 ? `${x.date.slice(5)} ` : ''}{(x.last_ts || '').slice(0, 8)}</Td>
                       <Td><Badge style={{ background: sev.bg, color: 'var(--cims-on-solid)', fontSize: 10 }}>{sev.label}</Badge></Td>
-                      <Td style={{ fontSize: 12, fontFamily: 'monospace' }}>{x.peer_ip || '-'}</Td>
-                      <Td style={{ fontSize: 11, fontFamily: 'monospace' }}>
-                        <span style={{ color: 'var(--muted-foreground)' }}>{x.caller || '?'}</span>
+                      <Td className="text-sm font-mono">{x.peer_ip || '-'}</Td>
+                      <Td className="text-xs font-mono">
+                        <span className="text-muted-foreground">{x.caller || '?'}</span>
                         <span style={{ margin: '0 4px' }}>→</span>
                         <span>{x.callee || '?'}</span>
                       </Td>
-                      <Td style={{ fontSize: 11 }}>{x.ua || '-'}</Td>
+                      <Td className="text-xs">{x.ua || '-'}</Td>
                       <Td style={{ fontSize: 12, textAlign: 'right', fontWeight: x.attempts > 5 ? 700 : 400 }}>{x.attempts}</Td>
-                      <Td style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>
+                      <Td className="text-[10px] text-muted-foreground">
                         {x.methods.join(',') || '-'}{x.statuses.length > 0 && <span> / {x.statuses.join(',')}</span>}
                       </Td>
                       <Td>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                        <div className="flex flex-wrap gap-[3px]">
                           {x.reasons.map(r => {
  const rl = REASON_LABEL[r] || { label: r, color: 'var(--muted-foreground)' }
  return <Badge key={r} style={{ fontSize: 9, color: rl.color, border: `1px solid ${rl.color}`, background: 'transparent' }}>{rl.label}</Badge>
@@ -182,13 +182,13 @@ export function AbnTable() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
  padding: '8px 0', flex: 'none', borderTop: '1px solid var(--border)' }}>
               <Button disabled={s.page === 0} onClick={() => abnormal.setPage(s.page - 1)}>← 이전</Button>
-              <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
+              <span className="text-sm text-muted-foreground">
                 {s.page * s.pageSize + 1}–{Math.min((s.page + 1) * s.pageSize, sessions.length)} / {sessions.length}건
                 (페이지 {s.page + 1}/{pageCount})
               </span>
               <Button disabled={s.page >= pageCount - 1} onClick={() => abnormal.setPage(s.page + 1)}>다음 →</Button>
               <Select value={String(s.pageSize)} onValueChange={(v: string) => abnormal.setPageSize(Number(v))}>
-                <SelectTrigger style={{ fontSize: 12, padding: '2px 4px' }}><SelectValue /></SelectTrigger>
+                <SelectTrigger className="text-sm py-0.5 px-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {[50, 100, 200, 500].map(n => <SelectItem key={n} value={String(n)}>{n}/쪽</SelectItem>)}
                 </SelectContent>
@@ -208,13 +208,12 @@ function KpiCard({ label, value, unit, tone }: {
 }) {
  const color = tone === 'warn' ? 'var(--destructive)' : tone === 'ok' ? 'var(--cims-success)' : 'var(--foreground)'
  return (
-    <div className="panel" style={{ padding: 10, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column',
- justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
-        <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 4 }}>{label}</div>
+    <div className="panel p-2.5 flex flex-col">
+      <div className="flex-auto min-h-0 flex flex-col justify-center items-center text-center">
+        <div className="text-sm text-muted-foreground mb-1">{label}</div>
         <div style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.1, color }}>
           {value}
-          {unit && <span style={{ fontSize: 12, color: 'var(--muted-foreground)', marginLeft: 2 }}>{unit}</span>}
+          {unit && <span className="text-sm text-muted-foreground ml-0.5">{unit}</span>}
         </div>
       </div>
     </div>

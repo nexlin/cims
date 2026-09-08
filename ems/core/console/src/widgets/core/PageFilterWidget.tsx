@@ -56,16 +56,14 @@ function PageFilterWidget({ config }: WidgetProps) {
  const reset = () => { const r = defaultRange(); applyRange(r.from, r.to) }
 
  return (
-    <div className="panel" style={{ padding: '10px 12px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontWeight: 600, fontSize: 13 }}>조회 구간</span>
-        <Input type="datetime-local" value={toInput(from)}
- onChange={e => applyRange(fromInput(e.target.value), to)}
- style={{ width: 190, fontSize: 12 }} />
-        <span style={{ color: 'var(--muted-foreground)' }}>~</span>
-        <Input type="datetime-local" value={toInput(to)}
- onChange={e => applyRange(from, fromInput(e.target.value))}
- style={{ width: 190, fontSize: 12 }} />
+    <div className="panel py-2.5 px-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="font-semibold text-md">조회 구간</span>
+        <Input className="w-[190px] text-sm" type="datetime-local" value={toInput(from)}
+ onChange={e => applyRange(fromInput(e.target.value), to)}/>
+        <span className="text-muted-foreground">~</span>
+        <Input className="w-[190px] text-sm" type="datetime-local" value={toInput(to)}
+ onChange={e => applyRange(from, fromInput(e.target.value))}/>
         {PRESETS.map(p => (
           <Button key={p.key} onClick={() => applyPreset(p.days)}>{p.label}</Button>
         ))}

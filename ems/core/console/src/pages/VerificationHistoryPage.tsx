@@ -121,7 +121,7 @@ function scopeLabel(scope: string): string {
 function RunListRow({ run, onClick }: { run: RunHistoryItem; onClick: () => void }) {
   const t = run.totals || {}
   return (
-    <tr onClick={onClick} style={{ cursor: 'pointer' }}>
+    <tr className="cursor-pointer" onClick={onClick}>
       <td style={{ ...td, fontFamily: 'monospace', fontSize: 11 }} title={`run_id=${run.id}`}>
         {fmtRunIdShort(run.id)}
       </td>
@@ -133,7 +133,7 @@ function RunListRow({ run, onClick }: { run: RunHistoryItem; onClick: () => void
       <td style={{ ...td, fontSize: 12, color: 'var(--muted-foreground)' }}>
         {(t.pass ?? 0)} / {(t.fail ?? 0)} / {(t.skip ?? 0)}
         {t.blocked ? ` / ${t.blocked}` : ''}
-        <span style={{ color: 'var(--muted-foreground)', marginLeft: 6 }}>(P/F/S)</span>
+        <span className="text-muted-foreground ml-1.5">(P/F/S)</span>
       </td>
       <td style={td}>{fmtDuration(run.elapsed_ms)}</td>
       <td style={{ ...td, fontFamily: 'monospace', fontSize: 11, color: 'var(--muted-foreground)' }}>
@@ -176,10 +176,10 @@ function DetailModal({ run, onClose, onDelete }: {
       <div className="verify-history-modal" style={modal} onClick={e => e.stopPropagation()}>
         <header style={modalHeader}>
           <div>
-            <div style={{ fontSize: 18, fontWeight: 700 }} title={`run_id=${run.id}`}>
+            <div className="text-xl font-bold" title={`run_id=${run.id}`}>
               회차 {fmtRunIdShort(run.id)}
             </div>
-            <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginTop: 4 }}>
+            <div className="text-sm text-muted-foreground mt-1">
               {fmtDate(run.started_at)} ~ {fmtDate(run.finished_at)} ({fmtDuration(run.elapsed_ms)})
             </div>
           </div>
@@ -220,7 +220,7 @@ function DetailModal({ run, onClose, onDelete }: {
           <Field label="Host" value={run.host || '-'} />
           <Field label="Git" value={`${run.git_branch}@${run.git_sha}`} />
           <Field label="Pkg manifest hash" value={
-            <span style={{ fontFamily: 'monospace', fontSize: 11 }}>
+            <span className="font-mono text-xs">
               {run.pkg_manifest_hash || '-'}
             </span>
           } />
@@ -279,7 +279,7 @@ function DetailModal({ run, onClose, onDelete }: {
                     <td style={td}>{fmtDuration(p.elapsed_ms)}</td>
                   </tr>
                   {(grouped.childrenByParent[p.id] || []).map(c => (
-                    <tr key={c.id} style={{ background: 'var(--muted)' }}>
+                    <tr className="bg-muted" key={c.id}>
                       <td style={td}>{c.idx}</td>
                       <td style={{ ...td, paddingLeft: 32, fontFamily: 'monospace', fontSize: 11, color: 'var(--muted-foreground)' }}>
                         └ {c.id}
@@ -306,7 +306,7 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
       <div style={{ fontSize: 11, color: 'var(--muted-foreground)', textTransform: 'uppercase' }}>{label}</div>
-      <div style={{ fontSize: 13, color: 'var(--foreground)', marginTop: 2 }}>{value}</div>
+      <div className="text-md text-foreground mt-0.5">{value}</div>
     </div>
   )
 }
@@ -314,7 +314,7 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
 function Total({ label, value, color = 'var(--foreground)' }: { label: string; value: number | string; color?: string }) {
   return (
     <div style={totalCell}>
-      <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{label}</div>
+      <div className="text-xs text-muted-foreground">{label}</div>
       <div style={{ fontSize: 22, fontWeight: 700, color }}>{value}</div>
     </div>
   )
@@ -339,9 +339,9 @@ function StatsPanel({
     padding: 12, fontSize: 12,
   }), [])
   return (
-    <div style={{ marginBottom: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-        <span style={{ fontSize: 14, fontWeight: 600 }}>통계 (최근 {days}일)</span>
+    <div className="mb-4">
+      <div className="flex items-center gap-3 mb-2">
+        <span className="text-base font-semibold">통계 (최근 {days}일)</span>
         <Select value={String(days)} onValueChange={(v: string) => setDays(Number(v))}>
           <SelectTrigger style={selectStyle}><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -361,7 +361,7 @@ function StatsPanel({
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
           {/* overall */}
           <div style={card}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>종합</div>
+            <div className="font-semibold mb-1.5">종합</div>
             <KpiGrid items={[
               { label: '전체 회차', value: `${stats.overall.runs}회` },
               { label: '성공률', value: `${stats.overall.success_rate}%`,
@@ -375,12 +375,12 @@ function StatsPanel({
           </div>
           {/* by scope */}
           <div style={card}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>scope 별 성공률</div>
+            <div className="font-semibold mb-1.5">scope 별 성공률</div>
             <ScopeTable rows={stats.by_scope} />
           </div>
           {/* timeline sparkline */}
           <div style={card}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>회차 추세 ({stats.timeline.length}건)</div>
+            <div className="font-semibold mb-1.5">회차 추세 ({stats.timeline.length}건)</div>
             <Sparkline timeline={stats.timeline} />
           </div>
         </div>
@@ -394,7 +394,7 @@ function KpiGrid({ items }: { items: { label: string; value: string; color?: str
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
       {items.map(it => (
         <div key={it.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-          <span style={{ color: 'var(--muted-foreground)' }}>{it.label}</span>
+          <span className="text-muted-foreground">{it.label}</span>
           <span style={{ fontWeight: 600, color: it.color || 'var(--foreground)' }}>{it.value}</span>
         </div>
       ))}
@@ -403,28 +403,28 @@ function KpiGrid({ items }: { items: { label: string; value: string; color?: str
 }
 
 function ScopeTable({ rows }: { rows: RunsStatsResponse['by_scope'] }) {
-  if (rows.length === 0) return <div style={{ color: 'var(--muted-foreground)' }}>없음</div>
+  if (rows.length === 0) return <div className="text-muted-foreground">없음</div>
   return (
     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
       <thead>
-        <tr style={{ borderBottom: '1px solid var(--border)' }}>
-          <th style={{ textAlign: 'left',  padding: '4px 6px' }}>scope</th>
-          <th style={{ textAlign: 'right', padding: '4px 6px' }}>회차</th>
-          <th style={{ textAlign: 'right', padding: '4px 6px' }}>성공률</th>
-          <th style={{ textAlign: 'right', padding: '4px 6px' }}>평균</th>
+        <tr className="border-b border-border">
+          <th className="text-left py-1 px-1.5">scope</th>
+          <th className="text-right py-1 px-1.5">회차</th>
+          <th className="text-right py-1 px-1.5">성공률</th>
+          <th className="text-right py-1 px-1.5">평균</th>
         </tr>
       </thead>
       <tbody>
         {rows.map(r => (
           <tr key={r.scope} style={{ borderBottom: '1px dashed var(--border)' }}>
-            <td style={{ padding: '3px 6px' }}>{r.scope}</td>
-            <td style={{ padding: '3px 6px', textAlign: 'right' }}>{r.runs}</td>
+            <td className="py-[3px] px-1.5">{r.scope}</td>
+            <td className="py-[3px] px-1.5 text-right">{r.runs}</td>
             <td style={{
               padding: '3px 6px', textAlign: 'right', fontWeight: 600,
               color: r.success_rate >= 80 ? 'var(--cims-success)'
                      : r.success_rate >= 50 ? 'var(--cims-warning)' : 'var(--destructive)',
             }}>{r.success_rate}%</td>
-            <td style={{ padding: '3px 6px', textAlign: 'right' }}>{fmtMsShort(r.avg_elapsed_ms)}</td>
+            <td className="py-[3px] px-1.5 text-right">{fmtMsShort(r.avg_elapsed_ms)}</td>
           </tr>
         ))}
       </tbody>
@@ -434,7 +434,7 @@ function ScopeTable({ rows }: { rows: RunsStatsResponse['by_scope'] }) {
 
 /** 회차별 verdict + elapsed 시계열 — inline SVG sparkline (라이브러리 의존 X). */
 function Sparkline({ timeline }: { timeline: RunsStatsResponse['timeline'] }) {
-  if (timeline.length === 0) return <div style={{ color: 'var(--muted-foreground)' }}>데이터 없음</div>
+  if (timeline.length === 0) return <div className="text-muted-foreground">데이터 없음</div>
   const W = 380
   const H = 70
   const PAD_X = 4
@@ -442,7 +442,7 @@ function Sparkline({ timeline }: { timeline: RunsStatsResponse['timeline'] }) {
   const maxElapsed = Math.max(1, ...timeline.map(t => t.elapsed_ms))
   const stepX = (W - PAD_X * 2) / Math.max(1, timeline.length - 1)
   return (
-    <svg width={W} height={H + 18} style={{ display: 'block' }}>
+    <svg className="block" width={W} height={H + 18}>
       {/* 좌표축: 하단선 */}
       <line x1={PAD_X} y1={H - PAD_Y} x2={W - PAD_X} y2={H - PAD_Y}
             stroke="var(--border)" strokeWidth={1} />
@@ -549,7 +549,7 @@ export default function VerificationHistoryPage() {
   const curPage = Math.floor(offset / limit) + 1
 
   return (
-    <div className="verify-history-page" style={{ padding: 20 }}>
+    <div className="verify-history-page p-5">
       <style>{`
         @media print {
           @page { margin: 3mm 15mm 2mm 15mm; size: A4; }
@@ -589,9 +589,9 @@ export default function VerificationHistoryPage() {
           }
         }
       `}</style>
-      <header style={{ marginBottom: 16, display: 'flex', alignItems: 'baseline', gap: 16 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700 }}>검증 이력</h1>
-        <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
+      <header className="mb-4 flex items-baseline gap-4">
+        <h1 className="text-[22px] font-bold">검증 이력</h1>
+        <span className="text-sm text-muted-foreground">
           총 {total} 회차
         </span>
         <button onClick={() => { load(); loadStats() }} style={{ ...btnSecondary, marginLeft: 'auto' }}><RotateCw size={13} /> 새로고침</button>
@@ -601,7 +601,7 @@ export default function VerificationHistoryPage() {
       <StatsPanel stats={stats} days={statsDays} setDays={setStatsDays} err={statsErr} />
 
       {/* 필터 */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div className="flex gap-3 mb-3 items-center flex-wrap">
         <label style={filterLabel}>
           Stage:
           <Select value={toSel(stage === '' ? '' : String(stage))}
@@ -628,12 +628,12 @@ export default function VerificationHistoryPage() {
           </Select>
         </label>
         {error && (
-          <span style={{ color: 'var(--destructive)', fontSize: 12, marginLeft: 12 }}>{error}</span>
+          <span className="text-destructive text-sm ml-3">{error}</span>
         )}
       </div>
 
       {/* list 표 */}
-      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 6, overflow: 'auto' }}>
+      <div className="bg-card border border-border rounded-sm overflow-auto">
         <table style={tableStyle}>
           <thead>
             <tr>
@@ -664,10 +664,10 @@ export default function VerificationHistoryPage() {
 
       {/* 페이지 네비게이션 */}
       {totalPages > 1 && (
-        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
+        <div className="mt-3 flex items-center gap-2 justify-center">
           <button style={btnSecondary} disabled={offset === 0}
                   onClick={() => setOffset(Math.max(0, offset - limit))}><ArrowLeft size={13} /> 이전</button>
-          <span style={{ fontSize: 13, color: 'var(--foreground)' }}>
+          <span className="text-md text-foreground">
             {curPage} / {totalPages}
           </span>
           <button style={btnSecondary} disabled={offset + limit >= total}

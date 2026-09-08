@@ -292,7 +292,7 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
   }
 
  const body = (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div className="flex flex-col h-full">
         {loading ? (
           <div className="flex min-h-0 flex-1 items-center justify-center text-center text-muted-foreground p-[40px]">로딩 중...</div>
         ) : !template ? (
@@ -454,10 +454,7 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
   }
 
  return (
-    <div style={{
- border: '1px solid var(--border)', borderRadius: 6, marginBottom: 12,
- background: 'var(--muted)',
-    }}>
+    <div className="border border-border rounded-sm mb-3 bg-muted">
       <div onClick={() => setCollapsed(c => !c)}
  style={{
  padding: '8px 14px', cursor: 'pointer', userSelect: 'none',
@@ -468,26 +465,24 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
         <span className="text-primary">
           {collapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
         </span>
-        <b style={{ color: 'var(--primary)' }}>변경 사항 ({changed.size})</b>
-        <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
+        <b className="text-primary">변경 사항 ({changed.size})</b>
+        <span className="text-xs text-muted-foreground">
           <RotateCcw size={12} /> 재기동 {restartKeys.length} · <Zap size={12} /> 즉시 {hotKeys.length}
         </span>
-        <button onClick={(e) => { e.stopPropagation(); onResetAll() }}
- style={{ marginLeft: 'auto', fontSize: 11, padding: '2px 8px',
- background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer' }}>
+        <button className="ml-auto text-xs py-0.5 px-2 bg-card border border-border rounded-[3px] cursor-pointer" onClick={(e) => { e.stopPropagation(); onResetAll() }}>
           전체 초기화
         </button>
       </div>
       {!collapsed && (
-        <div style={{ padding: 8, maxHeight: 240, overflow: 'auto' }}>
+        <div className="p-2 max-h-[240px] overflow-auto">
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
-              <tr style={{ color: 'var(--muted-foreground)' }}>
-                <th style={{ textAlign: 'left', padding: '4px 6px', width: 220 }}>필드</th>
-                <th style={{ textAlign: 'left', padding: '4px 6px' }}>옛 값</th>
-                <th style={{ width: 30, textAlign: 'center' }} aria-label="바뀜"><ArrowRight size={12} /></th>
-                <th style={{ textAlign: 'left', padding: '4px 6px' }}>새 값</th>
-                <th style={{ width: 60, textAlign: 'center' }}></th>
+              <tr className="text-muted-foreground">
+                <th className="text-left py-1 px-1.5 w-[220px]">필드</th>
+                <th className="text-left py-1 px-1.5">옛 값</th>
+                <th className="w-[30px] text-center" aria-label="바뀜"><ArrowRight size={12} /></th>
+                <th className="text-left py-1 px-1.5">새 값</th>
+                <th className="w-[60px] text-center"></th>
               </tr>
             </thead>
             <tbody>
@@ -495,21 +490,21 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
  const f = fieldByKey.get(k)
  const restart = f?.restart !== false
  return (
-                  <tr key={k} style={{ borderTop: '1px solid var(--border)' }}>
-                    <td style={{ padding: '4px 6px' }}>
+                  <tr className="border-t border-border" key={k}>
+                    <td className="py-1 px-1.5">
                       <span title={k}>{f?.label ?? k}</span>
                       <span style={{ marginLeft: 4, fontSize: 10, color: restart ? 'var(--destructive)' : 'var(--cims-success)' }}>
                         {restart ? <RotateCcw size={12} /> : <Zap size={12} />}
                       </span>
                     </td>
-                    <td style={{ padding: '4px 6px', color: 'var(--muted-foreground)', fontFamily: 'monospace' }}>
+                    <td className="py-1 px-1.5 text-muted-foreground font-mono">
                       {display(initial[k])}
                     </td>
-                    <td style={{ textAlign: 'center', color: 'var(--primary)' }}>→</td>
-                    <td style={{ padding: '4px 6px', color: 'var(--primary)', fontFamily: 'monospace' }}>
+                    <td className="text-center text-primary">→</td>
+                    <td className="py-1 px-1.5 text-primary font-mono">
                       {display(values[k])}
                     </td>
-                    <td style={{ textAlign: 'center' }}>
+                    <td className="text-center">
                       <Button variant="ghost" size="iconSm" onClick={() => onReset(k)}
  title="이 필드만 초기화">
                         <RotateCcw />
@@ -654,29 +649,26 @@ export function StoreMigrateFooter({ groupId, mountPoint, dirty, onDone }: {
   }
 
  return (
-    <div style={{
- marginTop: 12, padding: '8px 10px', borderRadius: 4, fontSize: 12, lineHeight: 1.6,
- background: 'var(--cims-warning-soft)', border: '1px solid var(--border)',
-    }}>
+    <div className="mt-3 py-2 px-2.5 rounded-[4px] text-sm leading-[1.6] bg-warning-soft border border-border">
       <b>경로를 바꾸려면 이관을 쓰세요.</b> 저장은 경로만 바꾸고 <b>데이터를 옮기지
       않습니다</b> — 새 경로에 빈 store 가 생기거나, 마운트가 없으면 OAM 이 기동을
       거부합니다. 이관은 정지 → 복사 → 기동을 한 번에 처리합니다. 이 값은 <b>멤버 간
       동일해야</b> 하므로 공통 설정입니다 — 최초 지정은 부트스트랩 설치가 담당합니다.
       {groupId ? (
-        <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="mt-2 flex gap-2 items-center flex-wrap">
           <Button variant="default" disabled={busy || !mp}
  onClick={migrate}
  title="현재 입력된 마운트 지점으로 관리 store 를 이관 (콘솔 30초 단절)">
             {busy ? '이관 요청 중…' : <><ArrowRight size={13} /> {mp || '(마운트 지점)'} 으로 이관</>}
           </Button>
           {dirty && (
-            <span style={{ color: 'var(--cims-warning)' }}>
+            <span className="text-warning">
               편집한 값이 있습니다 — 저장 대신 이 버튼을 쓰세요.
             </span>
           )}
         </div>
       ) : (
-        <div style={{ marginTop: 6, color: 'var(--muted-foreground)' }}>
+        <div className="mt-1.5 text-muted-foreground">
           이관은 HA 그룹 멤버에서만 실행할 수 있습니다 (이관 대상 노드 선정이 그룹 기준).
           단일 노드는 부트스트랩 재설치 또는 그룹 편성 후 실행하세요.
         </div>

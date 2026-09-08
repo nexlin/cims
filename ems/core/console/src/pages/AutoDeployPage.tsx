@@ -229,12 +229,12 @@ export default function AutoDeployPage() {
   const ready = bpId != null && invId != null && errCount === 0
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%', overflow: 'auto', padding: 14 }}>
+    <div className="flex flex-col gap-3 h-full overflow-auto p-3.5">
 
       {/* ── 1. 문서 선택/업로드 ── */}
       <section style={SEC}>
         <h3 style={H3}>① 배포 정의</h3>
-        <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+        <div className="flex gap-5 flex-wrap">
           <DocPicker label="블루프린트 (blueprint.yaml)" hint="무엇을 어떤 구조로 깔 것인가"
             items={blueprints.map(b => ({ id: b.id, label: b.name }))}
             value={bpId} onChange={setBpId} disabled={!canEdit}
@@ -249,13 +249,13 @@ export default function AutoDeployPage() {
       {/* ── 2. 검토·편집 ── */}
       {(bpId != null || invId != null) && (
         <section style={SEC}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+          <div className="flex items-center gap-2.5 mb-2">
             <h3 style={{ ...H3, margin: 0 }}>② 검토·편집</h3>
             <Seg value={doc} onChange={v => setDoc(v as Doc)}
                  options={[{ v: 'blueprint', l: '블루프린트' }, { v: 'inventory', l: '인벤토리' }]} />
             <Seg value={view} onChange={v => setView(v as View)}
                  options={[{ v: 'form', l: '구성 보기' }, { v: 'raw', l: '원문 보기' }]} />
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+            <div className="ml-auto flex gap-1.5">
               {doc === 'blueprint' && bpId != null && (
                 <Button asChild>
                   <a href={blueprintRawUrl(bpId)} download><Download size={13} /> YAML 내려받기</a>
@@ -301,7 +301,7 @@ export default function AutoDeployPage() {
                 <span style={{ color: i.level === 'error' ? 'var(--destructive)' : 'var(--cims-warning)', fontWeight: 700 }}>
                   {i.level === 'error' ? 'ERROR' : 'WARN'}
                 </span>
-                <code style={{ color: 'var(--muted-foreground)' }}>{i.path}</code>
+                <code className="text-muted-foreground">{i.path}</code>
                 <span>{i.message}</span>
               </div>
             ))}
@@ -312,7 +312,7 @@ export default function AutoDeployPage() {
       {/* ── 3. 사전 확인 + 계획 ── */}
       <section style={SEC}>
         <h3 style={H3}>③ 사전 확인</h3>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="flex gap-2 flex-wrap items-center">
           <Button disabled={!canEdit || !!busy || invId == null}
                   onClick={doValidate}>검증</Button>
           <Button disabled={!canEdit || !!busy || invId == null}
@@ -323,7 +323,7 @@ export default function AutoDeployPage() {
                   onClick={doPlan}>계획 확인 (dry-run)</Button>
           <Button variant="default" disabled={!canEdit || !!busy || !ready || !plan}
                   onClick={doApply} title={!plan ? '먼저 [계획 확인]' : ''}><Play size={13} /> 배포 실행</Button>
-          {busy && <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{busy}…</span>}
+          {busy && <span className="text-sm text-muted-foreground">{busy}…</span>}
         </div>
 
         {preflight && (
@@ -364,7 +364,7 @@ export default function AutoDeployPage() {
                     {r.status}</td>
                   <td>{r.progress.done}/{r.progress.total}
                       {r.progress.failed > 0 && ` (실패 ${r.progress.failed})`}</td>
-                  <td style={{ color: 'var(--muted-foreground)' }}>{r.created_at}</td>
+                  <td className="text-muted-foreground">{r.created_at}</td>
                   <td><Button
                               onClick={() => provisionApi.getRun(r.id).then(setRun)}>열기</Button></td>
                 </tr>
@@ -387,7 +387,7 @@ const H3: React.CSSProperties = { fontSize: 13.5, fontWeight: 700, margin: '0 0 
 function Seg({ value, onChange, options }:
              { value: string; onChange: (v: string) => void; options: Array<{ v: string; l: string }> }) {
   return (
-    <div style={{ display: 'inline-flex', border: '1px solid var(--border)', borderRadius: 4 }}>
+    <div className="inline-flex border border-border rounded-[4px]">
       {options.map(o => (
         <button key={o.v} onClick={() => onChange(o.v)}
                 style={{
@@ -408,13 +408,13 @@ function DocPicker({ label, hint, items, value, onChange, onUpload, disabled }: 
 }) {
   const ref = useRef<HTMLInputElement>(null)
   return (
-    <div style={{ minWidth: 320, flex: 1 }}>
+    <div className="min-w-[320px] flex-1">
       <div style={{ fontSize: 12.5, fontWeight: 600 }}>{label}</div>
       <div style={{ fontSize: 11.5, color: 'var(--muted-foreground)', marginBottom: 5 }}>{hint}</div>
-      <div style={{ display: 'flex', gap: 6 }}>
+      <div className="flex gap-1.5">
         <Select value={toSel(value == null ? '' : String(value))}
                 onValueChange={(v: string) => onChange(fromSel(v) ? Number(fromSel(v)) : null)} disabled={disabled}>
-          <SelectTrigger style={{ flex: 1 }}><SelectValue /></SelectTrigger>
+          <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value={NONE}>— 선택 —</SelectItem>
             {items.map(i => <SelectItem key={i.id} value={String(i.id)}>{i.label}</SelectItem>)}
@@ -439,9 +439,7 @@ function RawEditor({ value, onChange, issues, disabled, placeholder }: {
   return (
     <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 4,
                   fontFamily: 'monospace', fontSize: 12.5, maxHeight: 420 }}>
-      <div style={{ padding: '8px 6px', textAlign: 'right', color: 'var(--muted-foreground)',
-                    background: 'var(--background)', userSelect: 'none', overflow: 'hidden',
-                    borderRight: '1px solid var(--border)', minWidth: 42 }}>
+      <div className="py-2 px-1.5 text-right text-muted-foreground bg-background select-none overflow-hidden border-r border-border min-w-[42px]">
         {Array.from({ length: lines }, (_, i) => <div key={i} style={{ lineHeight: '18px' }}>{i + 1}</div>)}
       </div>
       <textarea value={value} onChange={e => onChange(e.target.value)}
@@ -457,7 +455,7 @@ function RawEditor({ value, onChange, issues, disabled, placeholder }: {
             <div key={n} style={{ marginBottom: 6,
                                   color: i.level === 'error' ? 'var(--destructive)' : 'var(--cims-warning)' }}>
               {i.path.replace(/^[a-z]+:/, '')}<br />
-              <span style={{ color: 'var(--muted-foreground)' }}>{i.message}</span>
+              <span className="text-muted-foreground">{i.message}</span>
             </div>
           ))}
         </div>
@@ -483,16 +481,15 @@ function BlueprintForm({ doc, issues }: { doc: Record<string, unknown> | null; i
   const errFor = (p: string) => issues.find(i => i.path.includes(p))
   return (
     <div style={{ fontSize: 12.5 }}>
-      <div style={{ marginBottom: 8, color: 'var(--muted-foreground)' }}>
-        <b style={{ color: 'var(--foreground)' }}>{String(doc.name || '')}</b>
+      <div className="mb-2 text-muted-foreground">
+        <b className="text-foreground">{String(doc.name || '')}</b>
         {doc.description ? ` — ${doc.description}` : ''}
         {order.length > 0 && <> · 기동 순서: {order.join(' → ')}</>}
       </div>
       {systems.map((s, i) => (
-        <div key={i} style={{ border: '1px solid var(--border)', borderRadius: 4,
-                              padding: 10, marginBottom: 8 }}>
-          <div style={{ fontWeight: 700 }}>
-            {s.name} <span style={{ fontWeight: 400, color: 'var(--muted-foreground)' }}>· {s.mode}</span>
+        <div className="border border-border rounded-[4px] p-2.5 mb-2" key={i}>
+          <div className="font-bold">
+            {s.name} <span className="font-normal text-muted-foreground">· {s.mode}</span>
             {errFor(`systems[${i}]`) && <AlertTriangle size={13} className="ml-2 inline text-destructive" />}
           </div>
           <div style={{ color: 'var(--muted-foreground)', margin: '4px 0' }}>
@@ -500,7 +497,7 @@ function BlueprintForm({ doc, issues }: { doc: Record<string, unknown> | null; i
             {(s.vips || []).length > 0 &&
               <> · VIP: {(s.vips || []).map(v => `${v.ip}/${v.prefix}@${v.interface}`).join(', ')}</>}
           </div>
-          <table className="table" style={{ fontSize: 12 }}>
+          <table className="table text-sm">
             <thead><tr><th>패키지</th><th>버전</th><th>프로세스</th><th>설정</th><th>컬렉션</th><th>기동</th></tr></thead>
             <tbody>
               {(s.modules || []).map((m, j) => (
@@ -545,19 +542,19 @@ function InventoryForm({ view, onChange, disabled, issues }: {
             return (
               <tr key={i} style={bad ? { background: 'rgba(231,76,60,.08)' } : undefined}>
                 <td>{s.name}
-                  {pre && <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
+                  {pre && <div className="text-xs text-muted-foreground">
                     agent 기설치 — SSH 안 함</div>}
                 </td>
-                <td><input value={s.host || ''} disabled={disabled} style={{ width: 130 }}
-                           onChange={e => set(i, { host: e.target.value })} /></td>
-                <td><input value={s.ssh?.user || ''} disabled={lock} style={{ width: 90 }}
-                           onChange={e => set(i, { ssh: { ...s.ssh, user: e.target.value } })} /></td>
-                <td><input type="number" value={s.ssh?.port ?? 22} disabled={lock} style={{ width: 64 }}
-                           onChange={e => set(i, { ssh: { ...s.ssh, port: Number(e.target.value) } })} /></td>
-                <td><input type="password" placeholder={pre ? '—' : '변경 안 함'}
-                           disabled={lock} style={{ width: 110 }}
+                <td><input className="w-[130px]" value={s.host || ''} disabled={disabled}
+                           onChange={e => set(i, { host: e.target.value })}/></td>
+                <td><input className="w-[90px]" value={s.ssh?.user || ''} disabled={lock}
+                           onChange={e => set(i, { ssh: { ...s.ssh, user: e.target.value } })}/></td>
+                <td><input className="w-[64px]" type="number" value={s.ssh?.port ?? 22} disabled={lock}
+                           onChange={e => set(i, { ssh: { ...s.ssh, port: Number(e.target.value) } })}/></td>
+                <td><input className="w-[110px]" type="password" placeholder={pre ? '—' : '변경 안 함'}
+                           disabled={lock}
                            value={s.ssh?.password === '••••' ? '' : (s.ssh?.password || '')}
-                           onChange={e => set(i, { ssh: { ...s.ssh, password: e.target.value } })} /></td>
+                           onChange={e => set(i, { ssh: { ...s.ssh, password: e.target.value } })}/></td>
                 <td>
                   <Select value={toSel(s.sudo?.method || 'password')} onValueChange={(v: string) => set(i, { sudo: { ...s.sudo, method: fromSel(v) } })} disabled={lock}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -567,10 +564,10 @@ function InventoryForm({ view, onChange, disabled, issues }: {
                     </SelectContent>
                   </Select>
                 </td>
-                <td><input type="password" placeholder={pre ? '—' : '변경 안 함'}
-                           disabled={lock} style={{ width: 110 }}
+                <td><input className="w-[110px]" type="password" placeholder={pre ? '—' : '변경 안 함'}
+                           disabled={lock}
                            value={s.sudo?.password === '••••' ? '' : (s.sudo?.password || '')}
-                           onChange={e => set(i, { sudo: { ...s.sudo, password: e.target.value } })} /></td>
+                           onChange={e => set(i, { sudo: { ...s.sudo, password: e.target.value } })}/></td>
               </tr>
             )
           })}
@@ -589,16 +586,16 @@ function PlanView({ phases }: { phases: PlanPhase[] }) {
     <section style={SEC}>
       <h3 style={H3}>계획 — 총 {total} 단계 (아직 아무것도 바뀌지 않았습니다)</h3>
       {phases.map(ph => (
-        <div key={ph.key} style={{ marginBottom: 8 }}>
+        <div className="mb-2" key={ph.key}>
           <div style={{ fontSize: 12.5, fontWeight: 600 }}>
             {ph.key} · {ph.title}
-            {ph.serial && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--cims-warning)' }}>순차</span>}
-            <span style={{ marginLeft: 8, fontWeight: 400, color: 'var(--muted-foreground)' }}>
+            {ph.serial && <span className="ml-1.5 text-xs text-warning">순차</span>}
+            <span className="ml-2 font-normal text-muted-foreground">
               {PHASE_HINT[ph.key] || ''}
             </span>
           </div>
-          {ph.error && <div style={{ color: 'var(--destructive)', fontSize: 12 }}>{ph.error}</div>}
-          <div style={{ paddingLeft: 14, fontSize: 12, color: 'var(--muted-foreground)' }}>
+          {ph.error && <div className="text-destructive text-sm">{ph.error}</div>}
+          <div className="pl-3.5 text-sm text-muted-foreground">
             {ph.steps.map((s, i) => (
               <div key={i}>· {s.target} — {String(s.action || '')}</div>
             ))}
@@ -619,7 +616,7 @@ function RunView({ run, onAction, busy, canEdit }: {
   const total = run.phases.reduce((n, p) => n + p.steps.length, 0)
   return (
     <section style={SEC}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+      <div className="flex items-center gap-2.5 mb-2">
         <h3 style={{ ...H3, margin: 0 }}>
           run #{run.id} — {run.blueprint}
           <span style={{
@@ -628,8 +625,8 @@ function RunView({ run, onAction, busy, canEdit }: {
                  : run.status === 'failed' ? 'var(--destructive)' : 'var(--cims-info)',
           }}>{run.status}{running && ' ⋯'}</span>
         </h3>
-        <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{done}/{total}</span>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+        <span className="text-sm text-muted-foreground">{done}/{total}</span>
+        <div className="ml-auto flex gap-1.5">
           {running && <Button disabled={!canEdit || !!busy}
                               onClick={() => onAction('abort')}><Square size={13} /> 중단</Button>}
           {!running && run.status !== 'succeeded' &&
@@ -643,30 +640,30 @@ function RunView({ run, onAction, busy, canEdit }: {
 
       {run.error && <div style={{ color: 'var(--destructive)', fontSize: 12.5, marginBottom: 8 }}>{run.error}</div>}
       {run.rollback && (
-        <div style={{ fontSize: 12, marginBottom: 8 }}>
+        <div className="text-sm mb-2">
           롤백: 되돌림 {run.rollback.undone.length}건
           {run.rollback.failed.length > 0 &&
-            <span style={{ color: 'var(--destructive)' }}> · 실패 {run.rollback.failed.join(' ; ')}</span>}
+            <span className="text-destructive"> · 실패 {run.rollback.failed.join(' ; ')}</span>}
         </div>
       )}
 
       {run.phases.map(ph => (
-        <div key={ph.key} style={{ marginBottom: 6 }}>
+        <div className="mb-1.5" key={ph.key}>
           <div style={{ fontSize: 12.5, fontWeight: 600 }}>
             {ph.key} · {ph.title}
-            <span style={{ marginLeft: 8, fontWeight: 400, color: 'var(--muted-foreground)' }}>{ph.status}</span>
+            <span className="ml-2 font-normal text-muted-foreground">{ph.status}</span>
           </div>
-          <div style={{ paddingLeft: 12 }}>
+          <div className="pl-3">
             {ph.steps.map((s, i) => (
               <div key={i} style={{ fontSize: 12, padding: '1px 0' }}>
                 <span style={{ color: STEP_COLOR[s.status], fontWeight: 700, marginRight: 6 }}>
                   {STEP_ICON[s.status] || '·'}
                 </span>
-                <span style={{ display: 'inline-block', minWidth: 150 }}>{s.target}</span>
+                <span className="inline-block min-w-[150px]">{s.target}</span>
                 <span style={{ color: s.status === 'failed' ? 'var(--destructive)' : 'var(--muted-foreground)' }}>
                   {s.detail || s.error || ''}
                 </span>
-                {s.elapsed_sec ? <span style={{ color: 'var(--muted-foreground)' }}> ({s.elapsed_sec}s)</span> : null}
+                {s.elapsed_sec ? <span className="text-muted-foreground"> ({s.elapsed_sec}s)</span> : null}
               </div>
             ))}
           </div>

@@ -39,7 +39,7 @@ function SourcePickerWidget({ config }: WidgetProps) {
         ))}
       </ToggleGroup>
       {cands.length === 0 && (
-        <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
+        <span className="text-sm text-muted-foreground">
           {loading ? '소스 로딩…' : '(후보 소스 없음)'}
         </span>
       )}

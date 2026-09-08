@@ -96,9 +96,8 @@ export default function SubscriberPicker({
   }
 
   return (
-    <div ref={boxRef} style={{ position: 'relative', flex: 1, minWidth: 0 }}>
-      <Input
-        style={{ width: '100%', fontSize: 12 }}
+    <div className="relative flex-1 min-w-0" ref={boxRef}>
+      <Input className="w-full text-sm"
         placeholder={placeholder ?? (kind === 'user' ? '이름/조직 검색' : '이름·번호 검색')}
         value={q}
         autoFocus={autoFocus}
@@ -110,8 +109,7 @@ export default function SubscriberPicker({
           else if (e.key === 'ArrowUp') { e.preventDefault(); setActiveIdx(i => Math.max(0, i - 1)) }
           else if (e.key === 'Enter') { e.preventDefault(); if (matches[activeIdx]) choose(matches[activeIdx]) }
           else if (e.key === 'Escape') setOpen(false)
-        }}
-      />
+        }}/>
       {open && (
         <div style={{
           position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
@@ -119,9 +117,9 @@ export default function SubscriberPicker({
           marginTop: 2, maxHeight: 240, overflowY: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
         }}>
           {all.length === 0 ? (
-            <div style={{ padding: 10, fontSize: 12, color: 'var(--muted-foreground)' }}>불러오는 중...</div>
+            <div className="p-2.5 text-sm text-muted-foreground">불러오는 중...</div>
           ) : matches.length === 0 ? (
-            <div style={{ padding: 10, fontSize: 12, color: 'var(--muted-foreground)' }}>일치하는 가입자 없음</div>
+            <div className="p-2.5 text-sm text-muted-foreground">일치하는 가입자 없음</div>
           ) : matches.map((it, i) => (
             <div key={it.value + ':' + it.userId}
               onMouseDown={e => { e.preventDefault(); choose(it) }}
@@ -130,8 +128,8 @@ export default function SubscriberPicker({
                 display: 'flex', justifyContent: 'space-between', gap: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 12,
                 background: i === activeIdx ? 'rgba(74,144,217,0.12)' : undefined,
               }}>
-              <span style={{ fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.label}</span>
-              <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}>
+              <span className="font-medium whitespace-nowrap overflow-hidden text-ellipsis">{it.label}</span>
+              <span className="text-sm text-muted-foreground whitespace-nowrap">
                 {it.sub}{it.orgCode ? ` · ${it.orgCode}` : ''}
               </span>
             </div>

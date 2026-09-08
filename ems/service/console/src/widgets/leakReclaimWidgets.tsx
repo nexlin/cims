@@ -58,15 +58,14 @@ function CountCard({ label, value, tone, loading, error }: {
 }) {
   const color = tone === 'warn' ? 'var(--destructive)' : tone === 'ok' ? 'var(--cims-success)' : 'var(--foreground)'
   return (
-    <div className="panel" style={{ padding: 10, display: 'flex', flexDirection: 'column' }}>
+    <div className="panel p-2.5 flex flex-col">
       <div style={CARD}>
-        <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 4 }}>
+        <div className="text-sm text-muted-foreground mb-1">
           {label}{loading && ' ·'}
         </div>
         {error
-          ? <div style={{ fontSize: 12, color: 'var(--destructive)' }}>조회 실패</div>
-          : <div style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.1, color }}>{value}<span
-              style={{ fontSize: 12, color: 'var(--muted-foreground)', marginLeft: 2 }}>건</span></div>}
+          ? <div className="text-sm text-destructive">조회 실패</div>
+          : <div style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.1, color }}>{value}<span className="text-sm text-muted-foreground ml-0.5">건</span></div>}
       </div>
     </div>
   )
@@ -94,17 +93,17 @@ function ByNodeBlock() {
   const { data, loading, error } = useReclaims()
   const rows = Object.entries(data?.by_node ?? {}).sort((a, b) => b[1] - a[1])
   return (
-    <div className="panel" style={{ padding: 12, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 6, flex: 'none' }}>
-        노드별 회수{loading && ' · 갱신 중…'}{error && <span style={{ color: 'var(--destructive)' }}> · 조회 실패</span>}
+    <div className="panel p-3 flex flex-col min-h-0">
+      <div className="text-sm text-muted-foreground mb-1.5 flex-none">
+        노드별 회수{loading && ' · 갱신 중…'}{error && <span className="text-destructive"> · 조회 실패</span>}
       </div>
       {rows.length === 0 ? <EmptyState title="회수 없음" className="text-[12px]" /> : (
         <div className="scroll-fill">
           <DataTable sticky className="[&_td]:text-sm">
-            <thead><tr><Th>노드</Th><Th style={{ width: 70, textAlign: 'right' }}>건수</Th></tr></thead>
+            <thead><tr><Th>노드</Th><Th className="w-[70px] text-right">건수</Th></tr></thead>
             <tbody>
               {rows.map(([node, n]) => (
-                <tr key={node}><Td>{node}</Td><Td style={{ textAlign: 'right' }}>{n}</Td></tr>
+                <tr key={node}><Td>{node}</Td><Td className="text-right">{n}</Td></tr>
               ))}
             </tbody>
           </DataTable>
@@ -121,18 +120,18 @@ function FilterBlock() {
   const { data, loading, error, reload } = useReclaims()
   const n = data?.counts.total ?? 0
   return (
-    <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
-      <Input type="date" value={date || todayIso()} style={{ width: 150 }}
-             onChange={e => setDate(e.target.value)} />
+    <div className="toolbar flex-wrap gap-2">
+      <Input className="w-[150px]" type="date" value={date || todayIso()}
+             onChange={e => setDate(e.target.value)}/>
       <Button variant="ghost" title="다시 조회" onClick={reload}><RotateCw size={14} /></Button>
       <InfoDot label="누수 회수란?">
         CMP sweeper 가 회수한 <b>고아 relay</b> 목록입니다. 정상 운영에서는 <b>0건</b>이 기대값이며,
         항목이 나타나면 CSP 비정상 종료(crash) 또는 teardown 누락으로 누수된 relay 를
         안전망이 회수한 것입니다.
       </InfoDot>
-      {loading && <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>갱신 중…</span>}
-      {error && <span style={{ fontSize: 12, color: 'var(--destructive)' }}>조회 실패</span>}
-      <span className="text-sm text-muted-foreground" style={{ marginLeft: 'auto' }}>총 {n}건 회수</span>
+      {loading && <span className="text-sm text-muted-foreground">갱신 중…</span>}
+      {error && <span className="text-sm text-destructive">조회 실패</span>}
+      <span className="text-sm text-muted-foreground ml-auto">총 {n}건 회수</span>
     </div>
   )
 }
@@ -141,40 +140,39 @@ function ListBlock() {
   const { data, loading, error } = useReclaims()
   const items = data?.items ?? []
   return (
-    <div className="panel" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <div style={{ padding: '10px 16px', fontWeight: 600, fontSize: 14, flex: 'none',
-                    borderBottom: '1px solid var(--border)' }}>
+    <div className="panel flex flex-col min-h-0">
+      <div className="py-2.5 px-4 font-semibold text-base flex-none border-b border-border">
         회수 세션 ({items.length}건)
-        {loading && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted-foreground)' }}> · 갱신 중…</span>}
-        {error && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--destructive)' }}> · 조회 실패</span>}
+        {loading && <span className="text-xs font-normal text-muted-foreground"> · 갱신 중…</span>}
+        {error && <span className="text-xs font-normal text-destructive"> · 조회 실패</span>}
       </div>
       <div className="scroll-fill">
         <DataTable sticky>
           <thead>
             <tr>
-              <Th style={{ width: 110 }}>시각</Th>
-              <Th style={{ width: 70 }}>노드</Th>
+              <Th className="w-[110px]">시각</Th>
+              <Th className="w-[70px]">노드</Th>
               <Th>session_id</Th>
               <Th>sesid</Th>
-              <Th style={{ width: 70 }}>service</Th>
+              <Th className="w-[70px]">service</Th>
               <Th>reason</Th>
-              <Th style={{ width: 80 }}>점유(초)</Th>
+              <Th className="w-[80px]">점유(초)</Th>
             </tr>
           </thead>
           <tbody>
             {items.map((it, i) => (
               <tr key={i}>
-                <Td style={{ fontSize: 12 }}>{it.ts}</Td>
-                <Td style={{ fontSize: 12 }}>{it.node}</Td>
-                <Td style={{ fontSize: 12, fontFamily: 'monospace' }}>{it.session_id}</Td>
-                <Td style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--muted-foreground)' }}>{it.sesid}</Td>
-                <Td style={{ fontSize: 12 }}>{it.service}</Td>
-                <Td style={{ fontSize: 12 }}>
+                <Td className="text-sm">{it.ts}</Td>
+                <Td className="text-sm">{it.node}</Td>
+                <Td className="text-sm font-mono">{it.session_id}</Td>
+                <Td className="text-xs font-mono text-muted-foreground">{it.sesid}</Td>
+                <Td className="text-sm">{it.service}</Td>
+                <Td className="text-sm">
                   <span style={{ color: it.reason === 'hold_timeout' ? 'var(--destructive)' : 'var(--foreground)' }}>
                     {REASON_LABEL[it.reason] || it.reason}
                   </span>
                 </Td>
-                <Td style={{ fontSize: 12, textAlign: 'right' }}>{it.held_sec}</Td>
+                <Td className="text-sm text-right">{it.held_sec}</Td>
               </tr>
             ))}
             {items.length === 0 && (

@@ -105,16 +105,16 @@ export function AuditEventsSection() {
 
   return (
     <>
-      <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8, flex: 'none' }}>
+      <div className="toolbar flex-wrap gap-2 flex-none">
         <Select value={toSel(filterType)} onValueChange={(v: string) => setFilterType(fromSel(v))}>
-          <SelectTrigger style={{ width: 170 }}><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-[170px]"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value={NONE}>유형 전체</SelectItem>
             {types.map(t => <SelectItem key={t} value={t}>{eventTypeLabel(t)}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={toSel(filterPhase)} onValueChange={(v: string) => setFilterPhase(fromSel(v))}>
-          <SelectTrigger style={{ width: 110 }}><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-[110px]"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value={NONE}>단계 전체</SelectItem>
             <SelectItem value="started">시작</SelectItem>
@@ -122,21 +122,21 @@ export function AuditEventsSection() {
             <SelectItem value="denied">거절</SelectItem>
           </SelectContent>
         </Select>
-        <Input className="flex-1" style={{ width: 220 }} placeholder="행위자/그룹/세션/대상 검색"
-               value={q} onChange={e => setQ(e.target.value)} />
-        <Button variant="ghost" onClick={exportCsv} style={{ marginLeft: 'auto' }}
+        <Input className="flex-1 w-[220px]" placeholder="행위자/그룹/세션/대상 검색"
+               value={q} onChange={e => setQ(e.target.value)}/>
+        <Button className="ml-auto" variant="ghost" onClick={exportCsv}
                 disabled={filtered.length === 0}>CSV</Button>
         <Button variant="ghost" onClick={load} title="새로고침"><RotateCw size={14} /></Button>
       </div>
 
-      <div className="panel" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '10px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)', flex: 'none' }}>
+      <div className="panel flex-1 min-h-0 flex flex-col">
+        <div className="py-2.5 px-4 font-semibold text-base border-b border-border flex-none">
           감사 이력 ({filtered.length}건)
-          <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: 'var(--muted-foreground)' }}>
+          <span className="ml-2 text-xs font-normal text-muted-foreground">
             합법감청(E-AUD-016) 시작·종료·거절 — 열람은 운영 관리자 이상
           </span>
           {events.length >= FETCH_LIMIT && (
-            <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: 'var(--destructive)' }}>
+            <span className="ml-2 text-xs font-normal text-destructive">
               레코드 {FETCH_LIMIT}건 상한 도달 — 기간을 좁혀야 전체가 보입니다
             </span>
           )}
@@ -153,15 +153,15 @@ export function AuditEventsSection() {
             <DataTable sticky>
               <thead>
                 <tr>
-                  <Th style={{ width: 150 }}>시각</Th>
-                  <Th style={{ width: 130 }}>유형</Th>
-                  <Th style={{ width: 70 }}>단계</Th>
-                  <Th style={{ width: 150 }}>행위자(감청자)</Th>
-                  <Th style={{ width: 130 }}>관제 그룹</Th>
-                  <Th style={{ width: 170 }}>세션</Th>
-                  <Th style={{ width: 200 }}>대상</Th>
-                  <Th style={{ width: 120 }}>방식</Th>
-                  <Th style={{ width: 90 }}>시간</Th>
+                  <Th className="w-[150px]">시각</Th>
+                  <Th className="w-[130px]">유형</Th>
+                  <Th className="w-[70px]">단계</Th>
+                  <Th className="w-[150px]">행위자(감청자)</Th>
+                  <Th className="w-[130px]">관제 그룹</Th>
+                  <Th className="w-[170px]">세션</Th>
+                  <Th className="w-[200px]">대상</Th>
+                  <Th className="w-[120px]">방식</Th>
+                  <Th className="w-[90px]">시간</Th>
                   <Th>메시지</Th>
                 </tr>
               </thead>
@@ -172,14 +172,14 @@ export function AuditEventsSection() {
                   return (
                     <tr key={`${ev.ts}-${pageStart + i}`}>
                       <Td className="text-sm text-muted-foreground">{fmtTime(ev.ts)}</Td>
-                      <Td>{eventTypeLabel(ev.type)}<div style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--muted-foreground)' }}>{ev.code || ''}</div></Td>
+                      <Td>{eventTypeLabel(ev.type)}<div className="font-mono text-[10px] text-muted-foreground">{ev.code || ''}</div></Td>
                       <Td>{p.phase
                         ? <Badge variant={PHASE_BADGE[p.phase] || 'neutralSoft'} >{PHASE_LABEL[p.phase] || p.phase}</Badge>
                         : '-'}</Td>
-                      <Td><code style={{ fontSize: 11 }}>{p.monitor || '-'}</code></Td>
-                      <Td><code style={{ fontSize: 11 }}>{p.group || '-'}</code></Td>
-                      <Td><code style={{ fontSize: 11 }} title={p.sesid}>{p.session || '-'}</code></Td>
-                      <Td><code style={{ fontSize: 11 }}>{targets || '-'}</code></Td>
+                      <Td><code className="text-xs">{p.monitor || '-'}</code></Td>
+                      <Td><code className="text-xs">{p.group || '-'}</code></Td>
+                      <Td><code className="text-xs" title={p.sesid}>{p.session || '-'}</code></Td>
+                      <Td><code className="text-xs">{targets || '-'}</code></Td>
                       <Td>{p.tap_mode ? (TAP_LABEL[p.tap_mode] || p.tap_mode) : '-'}</Td>
                       <Td>{fmtDur(p.dur_ms)}</Td>
                       <Td title={ev.source?.mo_instance}>{ev.message}</Td>

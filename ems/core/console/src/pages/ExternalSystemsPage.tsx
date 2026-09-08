@@ -76,21 +76,21 @@ function EditModal({ initial, onClose, onSaved }: {
     <Modal title={initial ? `외부 시스템 수정 — ${initial.name}` : '외부 시스템 등록'} onClose={onClose} width={560}>
       <div style={row}>
         <label style={lbl}>이름</label>
-        <input value={f.name} onChange={e => setF(s => ({ ...s, name: e.target.value }))}
-               style={{ width: '100%' }} placeholder="예: 외부 가입자 DB" />
+        <input className="w-full" value={f.name} onChange={e => setF(s => ({ ...s, name: e.target.value }))}
+                placeholder="예: 외부 가입자 DB"/>
       </div>
       <div style={{ ...row, display: 'flex', gap: 12 }}>
-        <div style={{ flex: 1 }}>
+        <div className="flex-1">
           <label style={lbl}>유형</label>
           <Select value={toSel(f.type)} onValueChange={(v: string) => setF(s => ({ ...s, type: fromSel(v) as ExternalSystemType }))}>
-            <SelectTrigger style={{ width: '100%' }}><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
               {TYPES.map(t => <SelectItem key={t} value={t}>{TYPE_LABEL[t]}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
-        <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end' }}>
-          <label style={{ fontSize: 13 }}>
+        <div className="flex-1 flex items-end">
+          <label className="text-md">
             <input type="checkbox" checked={f.enabled ?? true}
                    onChange={e => setF(s => ({ ...s, enabled: e.target.checked }))} /> 활성(형상 표시)
           </label>
@@ -99,19 +99,19 @@ function EditModal({ initial, onClose, onSaved }: {
       <div style={row}>
         <label style={lbl}>엔드포인트</label>
         {f.endpoints.map((e, i) => (
-          <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
+          <div className="flex gap-1.5 mb-1" key={i}>
             <input value={e.host} onChange={ev => setEp(i, { host: ev.target.value })} placeholder="host/IP" style={{ flex: 2 }} />
-            <input type="number" value={e.port || ''} onChange={ev => setEp(i, { port: parseInt(ev.target.value) || 0 })} placeholder="port" style={{ flex: 1 }} />
-            <input value={e.label || ''} onChange={ev => setEp(i, { label: ev.target.value })} placeholder="label(선택)" style={{ flex: 1 }} />
+            <input className="flex-1" type="number" value={e.port || ''} onChange={ev => setEp(i, { port: parseInt(ev.target.value) || 0 })} placeholder="port"/>
+            <input className="flex-1" value={e.label || ''} onChange={ev => setEp(i, { label: ev.target.value })} placeholder="label(선택)"/>
             <Button size="default" onClick={() => rmEp(i)} aria-label="엔드포인트 삭제"
                     disabled={f.endpoints.length <= 1}><X size={13} /></Button>
           </div>
         ))}
-        <Button size="default" onClick={addEp} style={{ fontSize: 12 }}>+ 엔드포인트</Button>
+        <Button className="text-sm" size="default" onClick={addEp}>+ 엔드포인트</Button>
       </div>
       <div style={row}>
         <label style={lbl}>상태 점검(probe)</label>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <div className="flex gap-1.5 items-center">
           <Select value={toSel(f.probe?.mode || 'none')} onValueChange={(v: string) => setF(s => ({ ...s, probe: { ...(s.probe || {}), mode: fromSel(v) as ProbeMode } }))}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -120,22 +120,22 @@ function EditModal({ initial, onClose, onSaved }: {
           </Select>
           <input value={f.probe?.host || ''} onChange={e => setF(s => ({ ...s, probe: { ...(s.probe || { mode: 'tcp' }), host: e.target.value } }))}
                  placeholder="host(미지정=ep1)" style={{ flex: 2 }} />
-          <input type="number" value={f.probe?.port || ''} onChange={e => setF(s => ({ ...s, probe: { ...(s.probe || { mode: 'tcp' }), port: parseInt(e.target.value) || undefined } }))}
-                 placeholder="port" style={{ flex: 1 }} />
-          <input type="number" value={f.probe?.timeout ?? 2} onChange={e => setF(s => ({ ...s, probe: { ...(s.probe || { mode: 'tcp' }), timeout: parseFloat(e.target.value) || 2 } }))}
-                 placeholder="timeout" style={{ width: 70 }} title="timeout(s)" />
+          <input className="flex-1" type="number" value={f.probe?.port || ''} onChange={e => setF(s => ({ ...s, probe: { ...(s.probe || { mode: 'tcp' }), port: parseInt(e.target.value) || undefined } }))}
+                 placeholder="port"/>
+          <input className="w-[70px]" type="number" value={f.probe?.timeout ?? 2} onChange={e => setF(s => ({ ...s, probe: { ...(s.probe || { mode: 'tcp' }), timeout: parseFloat(e.target.value) || 2 } }))}
+                 placeholder="timeout" title="timeout(s)"/>
         </div>
-        <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 2 }}>tcp 만 구현 — http/icmp 는 미확인 처리.</div>
+        <div className="text-xs text-muted-foreground mt-0.5">tcp 만 구현 — http/icmp 는 미확인 처리.</div>
       </div>
       <div style={row}>
         <label style={lbl}>설명</label>
-        <input value={f.description || ''} onChange={e => setF(s => ({ ...s, description: e.target.value }))} style={{ width: '100%' }} />
+        <input className="w-full" value={f.description || ''} onChange={e => setF(s => ({ ...s, description: e.target.value }))}/>
       </div>
       <div style={row}>
         <label style={lbl}>태그 (쉼표 구분)</label>
-        <input value={tagText} onChange={e => setTagText(e.target.value)} style={{ width: '100%' }} placeholder="prod, db" />
+        <input className="w-full" value={tagText} onChange={e => setTagText(e.target.value)} placeholder="prod, db"/>
       </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+      <div className="flex justify-end gap-2 mt-2">
         <Button size="default" onClick={onClose}>취소</Button>
         <Button variant="default" size="default" onClick={save} disabled={saving}>{saving ? '저장 중…' : '저장'}</Button>
       </div>
@@ -175,16 +175,16 @@ export default function ExternalSystemsPage() {
   }
 
   return (
-    <div className="panel" style={{ padding: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+    <div className="panel p-4">
+      <div className="flex items-center mb-3">
         <div>
-          <div style={{ fontWeight: 600, fontSize: 15 }}>외부 시스템 ({items.length})</div>
-          <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>외부 DB·모니터링·스토리지 등 등록 — 대시보드 시스템 형상에 표시.</div>
+          <div className="font-semibold text-[15px]">외부 시스템 ({items.length})</div>
+          <div className="text-sm text-muted-foreground">외부 DB·모니터링·스토리지 등 등록 — 대시보드 시스템 형상에 표시.</div>
         </div>
-        <Button variant="default" size="default" style={{ marginLeft: 'auto' }} onClick={() => setEditing('new')}>+ 외부 시스템 추가</Button>
+        <Button className="ml-auto" variant="default" size="default" onClick={() => setEditing('new')}>+ 외부 시스템 추가</Button>
       </div>
-      {loading ? <div style={{ padding: 20, color: 'var(--muted-foreground)' }}>불러오는 중…</div>
-        : items.length === 0 ? <div style={{ padding: 20, color: 'var(--muted-foreground)' }}>등록된 외부 시스템이 없습니다.</div>
+      {loading ? <div className="p-5 text-muted-foreground">불러오는 중…</div>
+        : items.length === 0 ? <div className="p-5 text-muted-foreground">등록된 외부 시스템이 없습니다.</div>
         : (
         <DataTable sticky>
           <thead><tr>
@@ -193,17 +193,17 @@ export default function ExternalSystemsPage() {
           <tbody>
             {items.map(s => (
               <tr key={s.id}>
-                <Td>{(s.probe?.mode ?? 'none') !== 'none' ? <StatusDot st={status.get(s.id)} /> : <span style={{ color: 'var(--muted-foreground)' }}>—</span>}</Td>
-                <Td><b>{s.name}</b>{s.description && <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{s.description}</div>}</Td>
-                <Td><span style={{ fontSize: 11, padding: '1px 6px', border: '1px solid var(--border)', borderRadius: 3 }}>{TYPE_LABEL[s.type]}</span></Td>
-                <Td>{(s.endpoints || []).map((e, i) => <code key={i} style={{ fontSize: 11, marginRight: 6 }}>{e.host}:{e.port}</code>)}</Td>
-                <Td>{(s.tags || []).map(t => <span key={t} style={{ fontSize: 10, padding: '1px 5px', background: 'var(--secondary)', borderRadius: 8, marginRight: 3 }}>{t}</span>)}</Td>
+                <Td>{(s.probe?.mode ?? 'none') !== 'none' ? <StatusDot st={status.get(s.id)} /> : <span className="text-muted-foreground">—</span>}</Td>
+                <Td><b>{s.name}</b>{s.description && <div className="text-xs text-muted-foreground">{s.description}</div>}</Td>
+                <Td><span className="text-xs py-px px-1.5 border border-border rounded-[3px]">{TYPE_LABEL[s.type]}</span></Td>
+                <Td>{(s.endpoints || []).map((e, i) => <code className="text-xs mr-1.5" key={i}>{e.host}:{e.port}</code>)}</Td>
+                <Td>{(s.tags || []).map(t => <span className="text-[10px] py-px px-[5px] bg-secondary rounded-md mr-[3px]" key={t}>{t}</span>)}</Td>
                 <Td>{s.enabled ? <Check size={13} className="text-[var(--cims-success)]" /> : '—'}</Td>
-                <Td style={{ whiteSpace: 'nowrap' }}>
+                <Td className="whitespace-nowrap">
                   {(s.probe?.mode ?? 'none') !== 'none' &&
-                    <Button size="default" style={{ fontSize: 12, marginRight: 4 }} onClick={() => probeNow(s)}>점검</Button>}
-                  <Button size="default" style={{ fontSize: 12, marginRight: 4 }} onClick={() => setEditing(s)}>편집</Button>
-                  <Button size="default" style={{ fontSize: 12 }} onClick={() => remove(s)}>삭제</Button>
+                    <Button className="text-sm mr-1" size="default" onClick={() => probeNow(s)}>점검</Button>}
+                  <Button className="text-sm mr-1" size="default" onClick={() => setEditing(s)}>편집</Button>
+                  <Button className="text-sm" size="default" onClick={() => remove(s)}>삭제</Button>
                 </Td>
               </tr>
             ))}

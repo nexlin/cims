@@ -229,13 +229,13 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
   }
 
   if (playable.length === 0) {
-    return <div style={{ padding: 24, textAlign: 'center', color: 'var(--muted-foreground)' }}>재생 가능한 세그먼트가 없습니다</div>
+    return <div className="p-6 text-center text-muted-foreground">재생 가능한 세그먼트가 없습니다</div>
   }
 
   const totalDuration = selectedSegs.reduce((sum, s) => sum + s.duration_ms, 0)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="flex flex-col h-full">
 
       {/* ── 헤더 ── */}
       <div style={{
@@ -252,19 +252,13 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
               : `${caller || ''} \u2192 ${callee || ''}`}
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <div className="flex items-center gap-1">
           {onMaximize && (
-            <button onClick={onMaximize}
-              style={{ background: 'none', border: 'none', fontSize: 16, cursor: 'pointer',
-                color: 'var(--muted-foreground)', padding: '2px 6px', lineHeight: 1 }}
+            <button className="border-0 text-lg cursor-pointer text-muted-foreground py-0.5 px-1.5 leading-none" onClick={onMaximize}
               title="최대화"><Maximize2 size={13} /></button>
           )}
           {onClose && (
-            <button onClick={onClose}
-              style={{
-                background: 'none', border: 'none', fontSize: 20, cursor: 'pointer',
-                color: 'var(--muted-foreground)', padding: '4px 8px', lineHeight: 1,
-              }}
+            <button className="border-0 text-2xl cursor-pointer text-muted-foreground py-1 px-2 leading-none" onClick={onClose}
               title="닫기">X</button>
           )}
         </div>
@@ -306,29 +300,23 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
                 pointerEvents: 'none', overflow: 'hidden',
               }}>
                 <span>{wallTime}</span>
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{speakerInfo}</span>
+                <span className="overflow-hidden text-ellipsis whitespace-nowrap">{speakerInfo}</span>
               </div>
             )}
           </div>
         ) : (
-          <audio
+          <audio className="w-full"
             ref={audioRef}
             controls
             onTimeUpdate={handleTimeUpdate}
             onEnded={handleEnded}
             onPlay={() => setIsPlaying(true)}
-            onPause={() => setIsPlaying(false)}
-            style={{ width: '100%' }}
-          />
+            onPause={() => setIsPlaying(false)}/>
         )}
 
         {/* 변환 진행 / 오류 안내 — 변환 완료 시 자동 재생 (닫았다 다시 열 필요 없음) */}
         {preparingSeq != null && (
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            marginTop: 8, padding: '8px 12px', borderRadius: 6,
-            background: 'var(--secondary)', fontSize: 13,
-          }}>
+          <div className="flex items-center gap-2 mt-2 py-2 px-3 rounded-sm bg-secondary text-md">
             <Badge variant="brandSoft"  style={{ fontSize: 10, animation: 'pulse 1.5s infinite' }}>변환중</Badge>
             <span>녹취를 변환하고 있습니다… 완료되면 자동으로 재생됩니다.</span>
           </div>
@@ -352,26 +340,23 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
           padding: '4px 20px', fontSize: 13,
           background: 'var(--secondary)', margin: '0 20px', borderRadius: 4,
         }}>
-          <span style={{ fontFamily: 'monospace' }}>{wallTime}</span>
-          <span style={{ fontWeight: 600 }}>
+          <span className="font-mono">{wallTime}</span>
+          <span className="font-semibold">
             {callType === 'ptt' ? `화자: ${speakerInfo}` : speakerInfo}
           </span>
-          <span style={{ color: 'var(--muted-foreground)' }}>
+          <span className="text-muted-foreground">
             {currentIdx + 1} / {selectedSegs.length}
           </span>
         </div>
       )}
 
       {/* ── 재생 컨트롤 ── */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 10,
-        padding: '8px 20px', borderBottom: '1px solid var(--border)',
-      }}>
+      <div className="flex items-center gap-2.5 py-2 px-5 border-b border-border">
         <Button variant="default" onClick={handlePlayAll}
           disabled={selectedSegs.length === 0}>
           선택 재생 ({selectedSegs.length}건 / {fmtMs(totalDuration)})
         </Button>
-        <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
+        <span className="text-sm text-muted-foreground">
           전체 {playable.length}건
         </span>
       </div>
@@ -381,16 +366,16 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
         <DataTable sticky>
           <thead>
             <tr>
-              <Th style={{ width: 32 }}>
+              <Th className="w-[32px]">
                 <input type="checkbox"
                   checked={checked.size === playable.length}
                   onChange={toggleAll} />
               </Th>
-              <Th style={{ width: 32 }}>#</Th>
+              <Th className="w-[32px]">#</Th>
               {callType === 'ptt' && <Th>화자</Th>}
               <Th>시간 구간</Th>
-              <Th style={{ width: 60 }}>길이</Th>
-              <Th style={{ width: 56 }}>상태</Th>
+              <Th className="w-[60px]">길이</Th>
+              <Th className="w-[56px]">상태</Th>
             </tr>
           </thead>
           <tbody>
@@ -421,12 +406,12 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
                     {preparingSeq === seg.seq
                       ? <Badge variant="brandSoft"  style={{ fontSize: 10, whiteSpace: 'nowrap', animation: 'pulse 1.5s infinite' }}>변환중</Badge>
                       : seg.status === 'ready'
-                      ? <Badge variant="successSoft"  style={{ fontSize: 10, whiteSpace: 'nowrap' }}>완료</Badge>
+                      ? <Badge className="text-[10px] whitespace-nowrap" variant="successSoft">완료</Badge>
                       : seg.status === 'raw'
-                      ? <Badge variant="neutralSoft"  style={{ fontSize: 10, whiteSpace: 'nowrap' }}>미변환</Badge>
+                      ? <Badge className="text-[10px] whitespace-nowrap" variant="neutralSoft">미변환</Badge>
                       : seg.status === 'transcoding'
-                      ? <Badge variant="brandSoft"  style={{ fontSize: 10, whiteSpace: 'nowrap' }}>변환중</Badge>
-                      : <Badge variant="dangerSoft"  style={{ fontSize: 10, whiteSpace: 'nowrap' }}
+                      ? <Badge className="text-[10px] whitespace-nowrap" variant="brandSoft">변환중</Badge>
+                      : <Badge className="text-[10px] whitespace-nowrap" variant="dangerSoft"
                           title={seg.status_reason || '변환 실패 — 클릭 시 재시도'}>재생불가</Badge>}
                   </Td>
                 </tr>

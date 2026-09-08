@@ -122,18 +122,14 @@ export default function PackagesPage() {
  if (loading) return <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중...</div>
 
  return (
-    <div style={{ display: 'flex', gap: 16, flex: 1, minHeight: 0 }}>
+    <div className="flex gap-4 flex-1 min-h-0">
       {/* ── 좌측: 모듈 목록 ── */}
-      <div style={{
- width: 280, flex: '0 0 auto', display: 'flex', flexDirection: 'column',
- border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)', overflow: 'hidden',
-      }}>
-        <div style={{ padding: 10, borderBottom: '1px solid var(--border)', display: 'flex', gap: 6 }}>
-          <Input placeholder="모듈 검색..."
- value={filter} onChange={e => setFilter(e.target.value)}
- style={{ flex: 1 }} />
+      <div className="w-[280px] flex-none flex flex-col border border-border rounded-sm bg-card overflow-hidden">
+        <div className="p-2.5 border-b border-border flex gap-1.5">
+          <Input className="flex-1" placeholder="모듈 검색..."
+ value={filter} onChange={e => setFilter(e.target.value)}/>
         </div>
-        <div style={{ flex: 1, overflow: 'auto' }}>
+        <div className="flex-1 overflow-auto">
           {filteredModules.length === 0 ? (
             <EmptyState title={modules.length === 0 ? '등록된 모듈 없음' : '검색 결과 없음'} className="p-[20px]" />
           ) : (
@@ -144,17 +140,14 @@ export default function PackagesPage() {
             ))
           )}
         </div>
-        <div style={{ padding: 10, borderTop: '1px solid var(--border)' }}>
-          <Button variant="default" size="default" style={{ width: '100%' }}
+        <div className="p-2.5 border-t border-border">
+          <Button className="w-full" variant="default" size="default"
  onClick={() => setUploadOpen(true)}><Plus size={13} /> 패키지 업로드</Button>
         </div>
       </div>
 
       {/* ── 우측: 선택 모듈 상세 ── */}
-      <div style={{
- flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden',
- border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)',
-      }}>
+      <div className="flex-1 flex flex-col overflow-hidden border border-border rounded-sm bg-card">
         {!selectedModule ? (
           <EmptyState title="좌측에서 모듈을 선택하거나, 새 패키지를 업로드하세요" className="p-[40px]" />
         ) : (
@@ -184,14 +177,11 @@ function ModuleRow({ mod, active, onClick }: {
  borderLeft: `3px solid ${active ? 'var(--cims-info)' : 'transparent'}`,
  cursor: 'pointer', borderBottom: '1px solid var(--border)',
       }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-        <b style={{ fontSize: 14 }}>{mod.name}</b>
-        <span style={{
- marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)',
- background: 'var(--secondary)', padding: '1px 6px', borderRadius: 10,
-        }}>{mod.versions.length}</span>
+      <div className="flex items-baseline gap-1.5">
+        <b className="text-base">{mod.name}</b>
+        <span className="ml-auto text-xs text-muted-foreground bg-secondary py-px px-1.5 rounded-[10px]">{mod.versions.length}</span>
       </div>
-      <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 3 }}>
+      <div className="text-xs text-muted-foreground mt-[3px]">
         최신 v{mod.latest.version} · {fmtRelTime(mod.lastUploadedAt)}
       </div>
     </button>
@@ -223,23 +213,23 @@ function ModuleDetail({ mod, depCountByPkgId, deployments, onDelete }: {
  return (
     <>
       {/* 헤더 */}
-      <div style={{ padding: 16, borderBottom: '1px solid var(--border)' }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-          <h3 style={{ margin: 0 }}>{mod.name}</h3>
-          <span style={{ color: 'var(--muted-foreground)', fontSize: 13 }}>({mod.versions.length}개 버전)</span>
-          <span style={{ marginLeft: 'auto', color: 'var(--muted-foreground)', fontSize: 12 }}>
+      <div className="p-4 border-b border-border">
+        <div className="flex items-baseline gap-2.5">
+          <h3 className="m-0">{mod.name}</h3>
+          <span className="text-muted-foreground text-md">({mod.versions.length}개 버전)</span>
+          <span className="ml-auto text-muted-foreground text-sm">
             총 {fmtSize(mod.totalSize)}
           </span>
         </div>
         {mod.latest.description && (
-          <div style={{ marginTop: 6, fontSize: 12, color: 'var(--muted-foreground)' }}>
+          <div className="mt-1.5 text-sm text-muted-foreground">
             {mod.latest.description}
           </div>
         )}
       </div>
 
       {/* 버전 리스트 */}
-      <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+      <div className="flex-1 overflow-auto p-4">
         {mod.versions.map(v => (
           <VersionRow key={v.id} pkg={v}
  isLatest={v.id === mod.latest.id}
@@ -275,55 +265,48 @@ function VersionRow({ pkg: p, isLatest, expanded, onToggle,
  border: '1px solid var(--border)', borderRadius: 6, marginBottom: 8,
  background: isLatest ? 'var(--muted)' : 'var(--card)',
     }}>
-      <div onClick={onToggle}
- style={{
- display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
- cursor: 'pointer', userSelect: 'none',
-        }}>
+      <div className="flex items-center gap-2.5 py-2.5 px-3.5 cursor-pointer select-none" onClick={onToggle}>
         <span className="text-muted-foreground">
                     {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
-        <b style={{ fontSize: 14 }}>v{p.version}</b>
+        <b className="text-base">v{p.version}</b>
         {isLatest && (
           <Badge variant="successSolid">최신</Badge>
         )}
-        <span style={{ color: 'var(--muted-foreground)', fontSize: 12, marginLeft: 8 }}>
+        <span className="text-muted-foreground text-sm ml-2">
           {fmtRelTime(p.uploaded_at)}
         </span>
-        <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>· {fmtSize(p.file_size)}</span>
+        <span className="text-muted-foreground text-sm">· {fmtSize(p.file_size)}</span>
         {depCount > 0 && (
-          <span style={{
- marginLeft: 'auto', fontSize: 11, color: 'var(--primary)',
- background: 'var(--cims-brand-soft)', padding: '2px 8px', borderRadius: 10,
-          }}>배포 {depCount}곳</span>
+          <span className="ml-auto text-xs text-primary bg-brandsoft py-0.5 px-2 rounded-[10px]">배포 {depCount}곳</span>
         )}
       </div>
 
       {expanded && (
-        <div style={{ borderTop: '1px solid var(--border)', padding: '10px 14px', fontSize: 12, color: 'var(--muted-foreground)' }}>
+        <div className="border-t border-border py-2.5 px-3.5 text-sm text-muted-foreground">
           <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', rowGap: 4, columnGap: 10 }}>
-            <span style={{ color: 'var(--muted-foreground)' }}>파일</span>
+            <span className="text-muted-foreground">파일</span>
             <code style={{ fontSize: 11, wordBreak: 'break-all' }}>{p.file_path}</code>
-            <span style={{ color: 'var(--muted-foreground)' }}>SHA256</span>
-            <code style={{ fontSize: 11 }}>{p.sha256.substring(0, 32)}…</code>
-            <span style={{ color: 'var(--muted-foreground)' }}>업로드</span>
+            <span className="text-muted-foreground">SHA256</span>
+            <code className="text-xs">{p.sha256.substring(0, 32)}…</code>
+            <span className="text-muted-foreground">업로드</span>
             <span>
               {p.uploaded_at || '—'}
-              {p.uploaded_by && <span style={{ color: 'var(--muted-foreground)' }}> · {p.uploaded_by}</span>}
+              {p.uploaded_by && <span className="text-muted-foreground"> · {p.uploaded_by}</span>}
             </span>
             {p.description && <>
-              <span style={{ color: 'var(--muted-foreground)' }}>설명</span>
+              <span className="text-muted-foreground">설명</span>
               <span>{p.description}</span>
             </>}
           </div>
 
-          <div style={{ marginTop: 10, display: 'flex', gap: 6 }}>
+          <div className="mt-2.5 flex gap-1.5">
             <Button
  disabled={depCount === 0}
  onClick={onShowDeployments}
  title={depCount === 0 ? '배포된 곳 없음' : '배포 대상 보기'}>
               배포 대상 보기 ({depCount})
             </Button>
-            <Button variant="destructive" style={{ marginLeft: 'auto' }}
+            <Button className="ml-auto" variant="destructive"
  onClick={onDelete}>삭제</Button>
           </div>
         </div>
@@ -358,19 +341,19 @@ function DeploymentsForPackageModal({ pkg, deployments, onClose }: {
                     <Td>
                       {d.agent_name ? agentDisplayName(d.agent_name) : `#${d.agent_id}`}
                       {d.agent_name && agentDisplayName(d.agent_name) !== d.agent_name && (
-                        <span style={{ fontSize: 11, color: 'var(--muted-foreground)', marginLeft: 6 }}>({d.agent_name})</span>
+                        <span className="text-xs text-muted-foreground ml-1.5">({d.agent_name})</span>
                       )}
                     </Td>
                     <Td>{d.process_name || '—'}</Td>
                     <Td>{depEffectiveStatus(d)}</Td>
-                    <Td style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{d.deployed_at || '—'}</Td>
+                    <Td className="text-sm text-muted-foreground">{d.deployed_at || '—'}</Td>
                   </tr>
                 ))}
               </tbody>
             </DataTable>
           )}
         </div>
-        <div className="flex justify-end gap-2.5 pt-5" style={{ marginTop: 16 }}>
+        <div className="flex justify-end gap-2.5 pt-5 mt-4">
           <Button size="default" onClick={onClose}>닫기</Button>
         </div>
     </Modal>

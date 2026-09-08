@@ -115,8 +115,8 @@ function pairEvents(events: AlertEvent[]): AlertRow[] {
 function DetailItem({ label, value }: { label: string; value?: string | null }) {
   if (!value) return null
   return (
-    <div style={{ display: 'flex', gap: 8, fontSize: 12 }}>
-      <span style={{ color: 'var(--muted-foreground)', minWidth: 90, flexShrink: 0 }}>{label}</span>
+    <div className="flex gap-2 text-sm">
+      <span className="text-muted-foreground min-w-[90px] shrink-0">{label}</span>
       <span>{value}</span>
     </div>
   )
@@ -175,34 +175,34 @@ export function AlarmHistoryFilter() {
       ]))
   }
   return (
-    <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
+    <div className="toolbar flex-wrap gap-2">
       {/* 기간과 필터는 **한 줄 한 블록** — 조회 조건이 두 덩어리로 갈려 보이지 않게. */}
       <DaysButtons days={days} onChange={d => setDays(String(d))} />
       <span style={{ width: 1, alignSelf: 'stretch', margin: '0 4px', background: 'var(--border)' }} />
       <Select value={toSel(f.sev)} onValueChange={(v: string) => alertsFilter.setAlarm({ sev: fromSel(v) })}>
-        <SelectTrigger style={{ width: 108 }}><SelectValue /></SelectTrigger>
+        <SelectTrigger className="w-[108px]"><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectItem value={NONE}>심각도 전체</SelectItem>
           {['critical', 'major', 'minor', 'warning', 'indeterminate'].map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
         </SelectContent>
       </Select>
       <Select value={toSel(f.code)} onValueChange={(v: string) => alertsFilter.setAlarm({ code: fromSel(v) })}>
-        <SelectTrigger style={{ width: 124 }}><SelectValue /></SelectTrigger>
+        <SelectTrigger className="w-[124px]"><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectItem value={NONE}>코드 전체</SelectItem>
           {codes.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
         </SelectContent>
       </Select>
       <Select value={toSel(f.type)} onValueChange={(v: string) => alertsFilter.setAlarm({ type: fromSel(v) })}>
-        <SelectTrigger style={{ width: 132 }}><SelectValue /></SelectTrigger>
+        <SelectTrigger className="w-[132px]"><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectItem value={NONE}>클래스 전체</SelectItem>
           {types.map(t => <SelectItem key={t} value={t}>{alarmTypeLabel(t)}</SelectItem>)}
         </SelectContent>
       </Select>
-      <Input className="flex-1" style={{ width: 170 }} placeholder="소스/메시지 검색"
-             value={f.q} onChange={e => alertsFilter.setAlarm({ q: e.target.value })} />
-      <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, whiteSpace: 'nowrap' }}>
+      <Input className="flex-1 w-[170px]" placeholder="소스/메시지 검색"
+             value={f.q} onChange={e => alertsFilter.setAlarm({ q: e.target.value })}/>
+      <label className="flex items-center gap-1 text-md whitespace-nowrap">
         <input type="checkbox" checked={f.showResolved}
                onChange={e => alertsFilter.setAlarm({ showResolved: e.target.checked })} />
         해소 포함
@@ -210,14 +210,14 @@ export function AlarmHistoryFilter() {
       <Button variant="ghost" onClick={exportCsv} disabled={rows.length === 0}>CSV</Button>
       {/* 실시간 감시 — 켜면 30초마다 자동 조회. 갱신 시각을 함께 보여준다: 값이 안 바뀌는
           구간에서 "멈춘 것"과 "새 알람이 없는 것"을 구별할 수 없으면 토글을 믿지 못한다. */}
-      <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, whiteSpace: 'nowrap' }}
+      <label className="flex items-center gap-1 text-md whitespace-nowrap"
              title={`켜면 ${HISTORY_POLL_MS / 1000}초마다 자동 조회`}>
         <input type="checkbox" checked={f.live}
                onChange={e => alertsFilter.setAlarm({ live: e.target.checked })} />
         실시간 감시
       </label>
       {f.live && (
-        <span style={{ fontSize: 12, color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}>
+        <span className="text-sm text-muted-foreground whitespace-nowrap">
           {updatedAt ? `갱신 ${fmtTime(new Date(updatedAt).toISOString())}` : '대기 중'}
         </span>
       )}
@@ -249,11 +249,11 @@ export function AlarmsSection() {
   }, [reload, show])
 
   return (
-      <div className="panel" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '10px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)', flex: 'none' }}>
-          알람 이력 ({rows.length}건{openCount > 0 && <span style={{ color: 'var(--destructive)' }}> · 미해소 {openCount}</span>})
+      <div className="panel flex-1 min-h-0 flex flex-col">
+        <div className="py-2.5 px-4 font-semibold text-base border-b border-border flex-none">
+          알람 이력 ({rows.length}건{openCount > 0 && <span className="text-destructive"> · 미해소 {openCount}</span>})
           {events.length >= FETCH_LIMIT && (
-            <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: 'var(--destructive)' }}>
+            <span className="ml-2 text-xs font-normal text-destructive">
               레코드 {FETCH_LIMIT}건 상한 도달 — 기간을 좁혀야 전체가 보입니다
             </span>
           )}
@@ -268,15 +268,15 @@ export function AlarmsSection() {
             <DataTable sticky>
               <thead>
                 <tr>
-                  <Th style={{ width: 90 }}>심각도</Th>
-                  <Th style={{ width: 100 }}>코드</Th>
-                  <Th style={{ width: 120 }}>클래스</Th>
-                  <Th style={{ width: 160 }}>소스</Th>
-                  <Th style={{ width: 80 }}>감지</Th>
+                  <Th className="w-[90px]">심각도</Th>
+                  <Th className="w-[100px]">코드</Th>
+                  <Th className="w-[120px]">클래스</Th>
+                  <Th className="w-[160px]">소스</Th>
+                  <Th className="w-[80px]">감지</Th>
                   <Th>메시지</Th>
-                  <Th style={{ width: 145 }}>발생 시각</Th>
-                  <Th style={{ width: 145 }}>해제 시각</Th>
-                  <Th style={{ width: 90 }}>지속</Th>
+                  <Th className="w-[145px]">발생 시각</Th>
+                  <Th className="w-[145px]">해제 시각</Th>
+                  <Th className="w-[90px]">지속</Th>
                 </tr>
               </thead>
               <tbody>
@@ -300,14 +300,14 @@ export function AlarmsSection() {
                           </span>
                         )}
                       </Td>
-                      <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.code || '-'}</Td>
+                      <Td className="font-mono text-xs">{r.code || '-'}</Td>
                       <Td>{alarmTypeLabel(r.type)}</Td>
-                      <Td><code style={{ fontSize: 11 }} title={r.source?.mo_instance || ''}>
+                      <Td><code className="text-xs" title={r.source?.mo_instance || ''}>
                         {r.source?.mo_label || r.source?.mo_instance || '-'}</code></Td>
-                      <Td style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{r.source?.detected_by || '-'}</Td>
+                      <Td className="text-xs text-muted-foreground">{r.source?.detected_by || '-'}</Td>
                       <Td>
                         {r.message}
-                        {isOpen && <span style={{ marginLeft: 8, color: 'var(--destructive)', fontSize: 11, fontWeight: 600 }}>OPEN</span>}
+                        {isOpen && <span className="ml-2 text-destructive text-xs font-semibold">OPEN</span>}
                         {(r.occurrences ?? 1) > 1 && (
                           <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: 'var(--muted-foreground)',
                                          border: '1px solid var(--border)', borderRadius: 3, padding: '0 3px' }}
@@ -325,7 +325,7 @@ export function AlarmsSection() {
                       </Td>
                       <Td className="text-sm text-muted-foreground">
                         {r.preWindow
-                          ? <span style={{ color: 'var(--muted-foreground)' }}>창 이전</span>
+                          ? <span className="text-muted-foreground">창 이전</span>
                           : fmtTime(r.ts)}
                       </Td>
                       <Td className="text-sm text-muted-foreground">{r.resolved_at ? fmtTime(r.resolved_at) : '—'}</Td>
@@ -333,7 +333,7 @@ export function AlarmsSection() {
                     </tr>,
                     open && (
                       <tr key={`${key}-detail`}>
-                        <Td colSpan={9} style={{ padding: 0, background: 'var(--accent)' }}>
+                        <Td className="p-0 bg-accent" colSpan={9}>
                           <AlarmHistoryDetail r={r} isOpen={isOpen} onAck={ackAlarm} onComment={commentAlarm} />
                         </Td>
                       </tr>
@@ -374,8 +374,8 @@ function AlarmHistoryDetail({ r, isOpen, onAck, onComment }: {
       )}
       {r.preWindow && <DetailItem label="비고" value="발생 시각이 조회 기간 밖 — 해소 기록만 표시" />}
       {(r.changes?.length ?? 0) > 0 && (
-        <div style={{ fontSize: 12 }}>
-          <div style={{ color: 'var(--muted-foreground)', marginBottom: 2 }}>severity 변경 이력</div>
+        <div className="text-sm">
+          <div className="text-muted-foreground mb-0.5">severity 변경 이력</div>
           {r.changes!.map((c, i) => (
             <div key={i} style={{ padding: '2px 0 2px 8px', borderLeft: '2px solid var(--border)' }}>
               <span className="text-sm text-muted-foreground">{fmtTime(c.ts)}</span> — {c.from} → {c.to}
@@ -392,25 +392,25 @@ function AlarmHistoryDetail({ r, isOpen, onAck, onComment }: {
         <DetailItem label="승인" value={`${r.ack_user || ''} ${r.ack_time ? fmtTime(r.ack_time) : ''}`} />
       )}
       {(r.comments?.length ?? 0) > 0 && (
-        <div style={{ fontSize: 12 }}>
-          <div style={{ color: 'var(--muted-foreground)', marginBottom: 2 }}>코멘트</div>
+        <div className="text-sm">
+          <div className="text-muted-foreground mb-0.5">코멘트</div>
           {r.comments!.map((c, i) => (
             <div key={i} style={{ padding: '2px 0 2px 8px', borderLeft: '2px solid var(--border)' }}>
-              <span style={{ color: 'var(--muted-foreground)' }}>{c.user || ''} {fmtTime(c.ts)}</span> — {c.text}
+              <span className="text-muted-foreground">{c.user || ''} {fmtTime(c.ts)}</span> — {c.text}
             </div>
           ))}
         </div>
       )}
       {isOpen && (
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 2 }}>
+        <div className="flex gap-1.5 items-center mt-0.5">
           {r.ack_state !== 'acknowledged' && (
             <Button disabled={!r.alarm_id} onClick={() => onAck(r.alarm_id)}>승인</Button>
           )}
-          <Input  style={{ width: 280 }} placeholder="코멘트 입력 후 Enter"
+          <Input className="w-[280px]" placeholder="코멘트 입력 후 Enter"
                  value={text} onChange={e => setText(e.target.value)}
                  onKeyDown={e => {
                    if (e.key === 'Enter' && text.trim()) { onComment(r.alarm_id, text.trim()); setText('') }
-                 }} />
+                 }}/>
         </div>
       )}
     </div>
@@ -475,11 +475,11 @@ export function EventHistoryFilter() {
       filtered.map(e => [e.ts, e.kind || '', e.code || '', e.type, e.source?.mo_instance || '', e.message]))
   }
   return (
-    <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
+    <div className="toolbar flex-wrap gap-2">
       <DaysButtons days={days} onChange={d => setDays(String(d))} />
       <span style={{ width: 1, alignSelf: 'stretch', margin: '0 4px', background: 'var(--border)' }} />
       <Select value={toSel(f.kind)} onValueChange={(v: string) => alertsFilter.setEvent({ kind: fromSel(v) })}>
-        <SelectTrigger style={{ width: 116 }}><SelectValue /></SelectTrigger>
+        <SelectTrigger className="w-[116px]"><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectItem value={NONE}>분류 전체</SelectItem>
           <SelectItem value="stateChange">상태 변화</SelectItem>
@@ -487,25 +487,25 @@ export function EventHistoryFilter() {
         </SelectContent>
       </Select>
       <Select value={toSel(f.type)} onValueChange={(v: string) => alertsFilter.setEvent({ type: fromSel(v) })}>
-        <SelectTrigger style={{ width: 152 }}><SelectValue /></SelectTrigger>
+        <SelectTrigger className="w-[152px]"><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectItem value={NONE}>유형 전체</SelectItem>
           {types.map(t => <SelectItem key={t} value={t}>{eventTypeLabel(t)}</SelectItem>)}
         </SelectContent>
       </Select>
-      <Input className="flex-1" style={{ width: 180 }} placeholder="코드/소스/메시지 검색"
-             value={f.q} onChange={e => alertsFilter.setEvent({ q: e.target.value })} />
+      <Input className="flex-1 w-[180px]" placeholder="코드/소스/메시지 검색"
+             value={f.q} onChange={e => alertsFilter.setEvent({ q: e.target.value })}/>
       <Button variant="ghost" onClick={exportCsv} disabled={filtered.length === 0}>CSV</Button>
       {/* 실시간 감시 — 켜면 30초마다 자동 조회. 갱신 시각을 함께 보여준다: 값이 안 바뀌는
           구간에서 "멈춘 것"과 "새 알람이 없는 것"을 구별할 수 없으면 토글을 믿지 못한다. */}
-      <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, whiteSpace: 'nowrap' }}
+      <label className="flex items-center gap-1 text-md whitespace-nowrap"
              title={`켜면 ${HISTORY_POLL_MS / 1000}초마다 자동 조회`}>
         <input type="checkbox" checked={f.live}
                onChange={e => alertsFilter.setEvent({ live: e.target.checked })} />
         실시간 감시
       </label>
       {f.live && (
-        <span style={{ fontSize: 12, color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}>
+        <span className="text-sm text-muted-foreground whitespace-nowrap">
           {updatedAt ? `갱신 ${fmtTime(new Date(updatedAt).toISOString())}` : '대기 중'}
         </span>
       )}
@@ -522,11 +522,11 @@ export function EventsSection() {
   const pageGroups = groups.slice(pageStart, pageStart + PAGE_SIZE)
 
   return (
-      <div className="panel" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '10px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)', flex: 'none' }}>
+      <div className="panel flex-1 min-h-0 flex flex-col">
+        <div className="py-2.5 px-4 font-semibold text-base border-b border-border flex-none">
           이벤트 이력 ({filtered.length}건 · {groups.length}묶음)
           {events.length >= FETCH_LIMIT && (
-            <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: 'var(--destructive)' }}>
+            <span className="ml-2 text-xs font-normal text-destructive">
               레코드 {FETCH_LIMIT}건 상한 도달 — 기간을 좁혀야 전체가 보입니다
             </span>
           )}
@@ -541,11 +541,11 @@ export function EventsSection() {
             <DataTable sticky>
               <thead>
                 <tr>
-                  <Th style={{ width: 230 }}>시각</Th>
-                  <Th style={{ width: 90 }}>분류</Th>
-                  <Th style={{ width: 100 }}>코드</Th>
-                  <Th style={{ width: 140 }}>유형</Th>
-                  <Th style={{ width: 170 }}>소스</Th>
+                  <Th className="w-[230px]">시각</Th>
+                  <Th className="w-[90px]">분류</Th>
+                  <Th className="w-[100px]">코드</Th>
+                  <Th className="w-[140px]">유형</Th>
+                  <Th className="w-[170px]">소스</Th>
                   <Th>메시지</Th>
                 </tr>
               </thead>
@@ -568,9 +568,9 @@ export function EventsSection() {
                           {EVENT_KIND_LABEL[ev.kind || ''] || ev.kind || '-'}
                         </Badge>
                       </Td>
-                      <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{ev.code || '-'}</Td>
+                      <Td className="font-mono text-xs">{ev.code || '-'}</Td>
                       <Td>{eventTypeLabel(ev.type)}</Td>
-                      <Td><code style={{ fontSize: 11 }}>{ev.source?.mo_instance || '-'}</code></Td>
+                      <Td><code className="text-xs">{ev.source?.mo_instance || '-'}</code></Td>
                       <Td title={ev.source?.detected_by}>
                         {ev.message}
                         {n > 1 && (
@@ -584,20 +584,20 @@ export function EventsSection() {
                     </tr>,
                     open && (
                       <tr key={`${key}-detail`}>
-                        <Td colSpan={6} style={{ padding: 0, background: 'var(--accent)' }}>
+                        <Td className="p-0 bg-accent" colSpan={6}>
                           <div style={{ padding: '8px 16px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
                             {g.items.slice(0, 100).map((e2, i2) => (
                               <div key={i2} style={{ fontSize: 12, padding: '2px 0 2px 8px', borderLeft: '2px solid var(--border)' }}>
                                 <span className="text-sm text-muted-foreground">{fmtTime(e2.ts)}</span> — {e2.message}
                                 {e2.params && Object.keys(e2.params).length > 0 && (
-                                  <code style={{ marginLeft: 8, fontSize: 11, color: 'var(--muted-foreground)' }}>
+                                  <code className="ml-2 text-xs text-muted-foreground">
                                     {JSON.stringify(e2.params)}
                                   </code>
                                 )}
                               </div>
                             ))}
                             {n > 100 && (
-                              <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>… 외 {n - 100}건 (CSV 로 전체 내보내기)</div>
+                              <div className="text-xs text-muted-foreground">… 외 {n - 100}건 (CSV 로 전체 내보내기)</div>
                             )}
                           </div>
                         </Td>

@@ -17,8 +17,8 @@ import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 // ── 공용 입력 조각 ──────────────────────────────────────────────
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 12 }}>
-      <span style={{ color: 'var(--muted-foreground)' }}>{label}{hint && <i style={{ marginLeft: 6, opacity: 0.7 }}>{hint}</i>}</span>
+    <label className="flex flex-col gap-[3px] text-sm">
+      <span className="text-muted-foreground">{label}{hint && <i style={{ marginLeft: 6, opacity: 0.7 }}>{hint}</i>}</span>
       {children}
     </label>
   )
@@ -70,7 +70,7 @@ export function ServiceForm({ initial, onClose, onSaved }: {
 
   return (
     <Modal title={isNew ? '새 서비스 정의' : `서비스 정의 — ${initial!.id}`} onClose={onClose} width={440}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div className="flex flex-col gap-3">
         <Field label="서비스 id" hint="(예: cims — 만든 뒤 바꿀 수 없음)">
           <Input  style={inp} value={id} disabled={!isNew}
                  onChange={e => setId(e.target.value)} placeholder="myservice" />
@@ -79,7 +79,7 @@ export function ServiceForm({ initial, onClose, onSaved }: {
           <Input  style={inp} value={label}
                  onChange={e => setLabel(e.target.value)} placeholder="My Service" />
         </Field>
-        <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
+        <div className="text-xs text-muted-foreground">
           모듈 · 알람 규칙 · 데이터 소스는 각 위젯에서 항목별로 추가/편집합니다.
         </div>
       </div>
@@ -127,7 +127,7 @@ export function ModuleForm({ svc, index, onClose, onSaved }: {
 
   return (
     <Modal title={index == null ? `모듈 추가 — ${svc.id}` : `모듈 편집 — ${cur?.name}`} onClose={onClose} width={460}>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+      <div className="flex gap-2.5 flex-wrap items-end">
         <Field label="이름"><Input  style={{ ...inp, width: 140 }} value={m.name}
           onChange={e => up({ name: e.target.value })} /></Field>
         <Field label="포트"><Input  style={{ ...inp, width: 90 }} type="number" value={m.port ?? ''}
@@ -138,7 +138,7 @@ export function ModuleForm({ svc, index, onClose, onSaved }: {
             <SelectItem value={NONE}>—</SelectItem><SelectItem value="tcp">tcp</SelectItem><SelectItem value="udp">udp</SelectItem>
   </SelectContent>
 </Select></Field>
-        <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4, paddingBottom: 6 }}>
+        <label className="text-sm flex items-center gap-1 pb-1.5">
           <input type="checkbox" checked={!!m.controllable} onChange={e => up({ controllable: e.target.checked })} />제어
         </label>
       </div>
@@ -179,7 +179,7 @@ export function AlertRuleForm({ svc, index, onClose, onSaved }: {
            onClose={onClose} width={720}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '65vh', overflowY: 'auto' }}>
               {/* 1행: 클래스 / 코드 / 심각도 / check */}
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div className="flex gap-2 flex-wrap items-end">
                 <Field label="클래스(type)"><Select value={toSel(r.type)} onValueChange={(v: string) => up({ type: fromSel(v) })}>
   <SelectTrigger style={{ ...inp, width: 130 }}><SelectValue /></SelectTrigger>
   <SelectContent>
@@ -202,7 +202,7 @@ export function AlertRuleForm({ svc, index, onClose, onSaved }: {
 </Select></Field>
               </div>
               {/* 2행: event_type / probable_cause / mo_class / mo_instance / 조건부 target·threshold */}
-              <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div className="flex gap-2 mt-1.5 flex-wrap items-end">
                 <Field label="event_type"><Select value={toSel(r.event_type ?? 'processingError')} onValueChange={(v: string) => up({ event_type: fromSel(v) })}>
   <SelectTrigger style={{ ...inp, width: 140 }}><SelectValue /></SelectTrigger>
   <SelectContent>
@@ -227,7 +227,7 @@ export function AlertRuleForm({ svc, index, onClose, onSaved }: {
                     onChange={e => up({ threshold: e.target.value ? Number(e.target.value) : undefined })} /></Field>)}
               </div>
               {/* 3행: metric / 메시지 */}
-              <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+              <div className="flex gap-2 mt-1.5 flex-wrap">
                 <Field label="metric(표시명)"><Input  style={{ ...inp, width: 120 }} value={r.metric ?? ''}
                   onChange={e => up({ metric: e.target.value })} /></Field>
                 <Field label="발생 메시지" hint="({mo} 치환)"><Input  style={{ ...inp, width: 200 }} value={r.msg_open ?? ''}
@@ -236,7 +236,7 @@ export function AlertRuleForm({ svc, index, onClose, onSaved }: {
                   onChange={e => up({ msg_close: e.target.value })} /></Field>
               </div>
               {/* 4행: effect / recommended_action (운영 runbook) */}
-              <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+              <div className="flex gap-2 mt-1.5 flex-wrap">
                 <Field label="영향(effect)"><Input  style={{ ...inp, width: 240 }} value={r.effect ?? ''}
                   onChange={e => up({ effect: e.target.value })} /></Field>
                 <Field label="권장 조치(action)"><Input  style={{ ...inp, width: 240 }} value={r.recommended_action ?? ''}
@@ -321,25 +321,25 @@ export function DataSourceForm({ svc, index, onClose, onSaved }: {
   return (
     <Modal title={index != null ? `데이터 소스 편집 — ${existing?.id}` : '데이터 소스 추가'} onClose={onClose} width={680}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxHeight: '70vh', overflowY: 'auto' }}>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <div className="flex gap-3 flex-wrap">
           <Field label="id"><Input  style={{ ...inp, width: 180 }} value={id} onChange={e => setId(e.target.value)} /></Field>
           <Field label="표시명"><Input  style={{ ...inp, width: 160 }} value={label} onChange={e => setLabel(e.target.value)} /></Field>
         </div>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div className="flex gap-3 items-end flex-wrap">
           <Field label="endpoint" hint="(REST 경로)"><Input  style={{ ...inp, width: 300 }} value={endpoint}
             onChange={e => setEndpoint(e.target.value)} placeholder="/stats/messages/sip" /></Field>
-          <div style={{ display: 'flex', gap: 10, paddingBottom: 6, fontSize: 12 }}>
-            <span style={{ color: 'var(--muted-foreground)' }}>query:</span>
-            <label style={{ display: 'flex', gap: 4 }}><input type="checkbox" checked={qDate} onChange={e => setQDate(e.target.checked)} />date</label>
-            <label style={{ display: 'flex', gap: 4 }}><input type="checkbox" checked={qGran} onChange={e => setQGran(e.target.checked)} />granularity</label>
+          <div className="flex gap-2.5 pb-1.5 text-sm">
+            <span className="text-muted-foreground">query:</span>
+            <label className="flex gap-1"><input type="checkbox" checked={qDate} onChange={e => setQDate(e.target.checked)} />date</label>
+            <label className="flex gap-1"><input type="checkbox" checked={qGran} onChange={e => setQGran(e.target.checked)} />granularity</label>
           </div>
         </div>
 
         <div>
-          <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 4 }}>지원 shape (선택한 것만 매핑 입력)</div>
-          <div style={{ display: 'flex', gap: 14, fontSize: 13 }}>
+          <div className="text-sm text-muted-foreground mb-1">지원 shape (선택한 것만 매핑 입력)</div>
+          <div className="flex gap-3.5 text-md">
             {SHAPES.map(s => (
-              <label key={s} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <label className="flex gap-1 items-center" key={s}>
                 <input type="checkbox" checked={shapes.has(s)} onChange={() => toggleShape(s)} />{SHAPE_LABEL[s]}
               </label>
             ))}
@@ -349,8 +349,8 @@ export function DataSourceForm({ svc, index, onClose, onSaved }: {
         {/* shape별 매핑 */}
         {shapes.has('time-bar') && (
           <div style={rowCard}>
-            <b style={{ fontSize: 12 }}>시계열 차트 매핑</b>
-            <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+            <b className="text-sm">시계열 차트 매핑</b>
+            <div className="flex gap-2 mt-1.5 flex-wrap">
               <Field label="from" hint="(배열 경로)"><Input  style={{ ...inp, width: 160 }} value={tbFrom} onChange={e => setTbFrom(e.target.value)} placeholder="buckets / voip.buckets" /></Field>
               <Field label="label" hint="(필드 후보, 쉼표)"><Input  style={{ ...inp, width: 130 }} value={tbLabel} onChange={e => setTbLabel(e.target.value)} placeholder="hour, date" /></Field>
               <Field label="value"><Input  style={{ ...inp, width: 110 }} value={tbValue} onChange={e => setTbValue(e.target.value)} placeholder="count" /></Field>
@@ -359,12 +359,12 @@ export function DataSourceForm({ svc, index, onClose, onSaved }: {
         )}
         {shapes.has('kpi') && (
           <div style={rowCard}>
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <b style={{ fontSize: 12 }}>KPI 항목 ({kpiItems.length})</b>
-              <span style={{ marginLeft: 'auto' }}><Btn onClick={() => setKpiItems(it => [...it, { label: '', path: '' }])}><Plus size={13} /> 항목</Btn></span>
+            <div className="flex items-center">
+              <b className="text-sm">KPI 항목 ({kpiItems.length})</b>
+              <span className="ml-auto"><Btn onClick={() => setKpiItems(it => [...it, { label: '', path: '' }])}><Plus size={13} /> 항목</Btn></span>
             </div>
             {kpiItems.map((k, i) => (
-              <div key={i} style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'flex-end' }}>
+              <div className="flex gap-2 mt-1.5 items-end" key={i}>
                 <Field label="라벨"><Input  style={{ ...inp, width: 110 }} value={k.label} onChange={e => upKpi(i, { label: e.target.value })} /></Field>
                 <Field label="path"><Input  style={{ ...inp, width: 160 }} value={k.path} onChange={e => upKpi(i, { path: e.target.value })} placeholder="voip.total_attempts" /></Field>
                 <Field label="단위"><Input  style={{ ...inp, width: 50 }} value={k.unit ?? ''} onChange={e => upKpi(i, { unit: e.target.value })} /></Field>
@@ -374,15 +374,15 @@ export function DataSourceForm({ svc, index, onClose, onSaved }: {
                     <SelectItem value={NONE}>—</SelectItem><SelectItem value="duration">duration</SelectItem>
   </SelectContent>
 </Select></Field>
-                <span style={{ paddingBottom: 4 }}><Btn danger onClick={() => setKpiItems(it => it.filter((_, x) => x !== i))}><X size={12} /></Btn></span>
+                <span className="pb-1"><Btn danger onClick={() => setKpiItems(it => it.filter((_, x) => x !== i))}><X size={12} /></Btn></span>
               </div>
             ))}
           </div>
         )}
         {shapes.has('distribution') && (
           <div style={rowCard}>
-            <b style={{ fontSize: 12 }}>분포 매핑</b>
-            <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+            <b className="text-sm">분포 매핑</b>
+            <div className="flex gap-2 mt-1.5 flex-wrap">
               <Field label="fromObject" hint="(dict 경로)"><Input  style={{ ...inp, width: 180 }} value={distObj} onChange={e => setDistObj(e.target.value)} placeholder="voip.end_reasons" /></Field>
               <Field label="totalPath" hint="(분모)"><Input  style={{ ...inp, width: 180 }} value={distTotal} onChange={e => setDistTotal(e.target.value)} placeholder="voip.total_attempts" /></Field>
             </div>
@@ -390,8 +390,8 @@ export function DataSourceForm({ svc, index, onClose, onSaved }: {
         )}
         {shapes.has('table') && (
           <div style={rowCard}>
-            <b style={{ fontSize: 12 }}>표 매핑</b>
-            <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+            <b className="text-sm">표 매핑</b>
+            <div className="flex gap-2 mt-1.5 flex-wrap">
               <Field label="fromObject" hint="(dict 경로)"><Input  style={{ ...inp, width: 180 }} value={tblObj} onChange={e => setTblObj(e.target.value)} placeholder="method_counts" /></Field>
               <Field label="컬럼" hint="(키, 값 — 쉼표)"><Input  style={{ ...inp, width: 160 }} value={tblCols} onChange={e => setTblCols(e.target.value)} placeholder="메서드, 건수" /></Field>
             </div>

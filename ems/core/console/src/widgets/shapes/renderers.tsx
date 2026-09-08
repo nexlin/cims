@@ -44,20 +44,18 @@ export function TimeBarChart({ data }: { data: TimeBarData }) {
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'flex-end', gap: 2, padding: '0 4px' }}>
       {buckets.map((b, i) => (
-        <div key={i} style={{ flex: 1, minWidth: 0, height: '100%',
-                              display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <div style={{ flex: 'none', fontSize: 10, color: 'var(--muted-foreground)', marginBottom: 2 }}>
+        <div className="flex-1 min-w-0 h-full flex flex-col items-center" key={i}>
+          <div className="flex-none text-[10px] text-muted-foreground mb-0.5">
             {b.value > 0 && i % every === 0 ? b.value : ''}
           </div>
           {/* 막대 영역 — 남은 높이 전부. 막대는 그 안에서 값 비율만큼 차지한다. */}
-          <div style={{ flex: 1, minHeight: 0, width: '100%',
-                        display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+          <div className="flex-1 min-h-0 w-full flex items-end justify-center">
             <div title={`${b.label}: ${b.value}${unit || ''}`}
                  style={{ width: '100%', maxWidth: 32, height: `${(b.value / max) * 100}%`, minHeight: 2,
                           background: 'var(--primary)', borderRadius: '2px 2px 0 0' }} />
           </div>
           {/* 라벨은 몇 칸 걸러 하나만 — 막대는 다 보이되 글자만 솎는다(겹쳐 뭉개지는 것보다 낫다). */}
-          <div style={{ flex: 'none', fontSize: 10, color: 'var(--muted-foreground)', marginTop: 2 }}>
+          <div className="flex-none text-[10px] text-muted-foreground mt-0.5">
             {i % every === 0 ? labels[i] : ''}
           </div>
         </div>
@@ -96,19 +94,18 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
   const hoveredBucket = hover ? buckets.find(b => String(b.label) === hover.bucket) : undefined
 
   return (
-    <div ref={wrap} style={{ position: 'relative', flex: 1, minHeight: 0,
-                             display: 'flex', flexDirection: 'column' }}
+    <div className="relative flex-1 min-h-0 flex flex-col" ref={wrap}
          onMouseLeave={() => setHover(null)}>
-      <div style={{ flex: 'none', display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 8 }}>
+      <div className="flex-none flex gap-3.5 flex-wrap mb-2">
         {series.map(sp => (
-          <span key={sp.key} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12 }}>
+          <span className="flex items-center gap-[5px] text-sm" key={sp.key}>
             <span style={{ width: 10, height: 10, borderRadius: 2, background: sp.color }} />
             {sp.label}
           </span>
         ))}
       </div>
       {overlap.length > 0 && (
-        <div style={{ flex: 'none', fontSize: 11, color: 'var(--muted-foreground)', marginBottom: 8 }}>
+        <div className="flex-none text-xs text-muted-foreground mb-2">
           ※ {overlap.map(sp => sp.label).join(' · ')} 은(는) 다른 계열을 포함합니다 — 함께 쌓으면 합계가 중복됩니다.
         </div>
       )}
@@ -117,11 +114,8 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
           const total = sum(b)
           const on = hover?.bucket === String(b.label)
           return (
-            <div key={i} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column',
-                                  alignItems: 'center', height: '100%' }}>
-              <div style={{ flex: 1, width: '100%', minHeight: 0, display: 'flex',
-                            flexDirection: 'column-reverse', alignItems: 'center',
-                            justifyContent: 'flex-start' }}>
+            <div className="flex-1 min-w-0 flex flex-col items-center h-full" key={i}>
+              <div className="flex-1 w-full min-h-0 flex flex-col-reverse items-center justify-start">
                 {/* column-reverse — 선언 순서 첫 계열이 바닥에 깔린다 */}
                 {series.map(sp => {
                   const v = b.values[sp.key] || 0
@@ -136,8 +130,7 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
                   )
                 })}
                 {total === 0 && (
-                  <div onMouseMove={e => move(e, String(b.label), '', 0)}
-                       style={{ width: '100%', maxWidth: 26, height: 2, background: 'var(--border)' }} />
+                  <div className="w-full max-w-[26px] h-[2px] bg-border" onMouseMove={e => move(e, String(b.label), '', 0)}/>
                 )}
               </div>
               <div style={{ flex: 'none', fontSize: 10, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden',
@@ -156,7 +149,7 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
           background: 'var(--card)', border: '1px solid var(--border)',
           borderRadius: 'var(--radius)', boxShadow: 'var(--cims-elevation-lg)', padding: '8px 10px', fontSize: 12,
         }}>
-          <div style={{ color: 'var(--muted-foreground)', marginBottom: 5 }}>{hover.bucket}</div>
+          <div className="text-muted-foreground mb-[5px]">{hover.bucket}</div>
           {series.map(sp => {
             const v = hoveredBucket.values[sp.key] || 0
             const cur = sp.key === hover.key
@@ -164,7 +157,7 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
               <div key={sp.key} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2,
                                          fontWeight: cur ? 700 : 400, opacity: cur || v > 0 ? 1 : 0.5 }}>
                 <span style={{ width: 8, height: 8, borderRadius: 2, background: sp.color, flex: 'none' }} />
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
                   {sp.label}
                 </span>
                 <span>{v}{unit || ''}</span>
@@ -172,9 +165,8 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
             )
           })}
           {series.length > 1 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, paddingTop: 5,
-                          borderTop: '1px solid var(--border)', color: 'var(--muted-foreground)' }}>
-              <span>합계</span><span style={{ fontWeight: 700, color: 'var(--foreground)' }}>{hover.total}{unit || ''}</span>
+            <div className="flex justify-between mt-1.5 pt-[5px] border-t border-border text-muted-foreground">
+              <span>합계</span><span className="font-bold text-foreground">{hover.total}{unit || ''}</span>
             </div>
           )}
         </div>
@@ -185,13 +177,13 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
 
 export function KpiCards({ data }: { data: KpiData }) {
   return (
-    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+    <div className="flex gap-3 flex-wrap">
       {data.items.map((k, i) => (
         <div key={i} style={{ flex: '1 1 120px', background: 'var(--card)', border: '1px solid var(--border)',
                               borderRadius: 'var(--radius)', padding: '14px 16px', textAlign: 'center' }}>
-          <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 4 }}>{k.label}</div>
-          <div style={{ fontSize: 24, fontWeight: 700 }}>
-            {k.value}<span style={{ fontSize: 12, color: 'var(--muted-foreground)', marginLeft: 2 }}>{k.unit}</span>
+          <div className="text-sm text-muted-foreground mb-1">{k.label}</div>
+          <div className="text-3xl font-bold">
+            {k.value}<span className="text-sm text-muted-foreground ml-0.5">{k.unit}</span>
           </div>
         </div>
       ))}
@@ -204,11 +196,10 @@ export function StatValue({ data }: { data: KpiData }) {
   const k = data.items[0]
   if (!k) return <EmptyState title="지표 없음" className="text-[12px]" />
   return (
-    <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column',
-                  justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
-      <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 4 }}>{k.label}</div>
+    <div className="flex-auto min-h-0 flex flex-col justify-center items-center text-center">
+      <div className="text-sm text-muted-foreground mb-1">{k.label}</div>
       <div style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.1 }}>
-        {k.value}<span style={{ fontSize: 12, color: 'var(--muted-foreground)', marginLeft: 2 }}>{k.unit}</span>
+        {k.value}<span className="text-sm text-muted-foreground ml-0.5">{k.unit}</span>
       </div>
     </div>
   )
@@ -223,9 +214,9 @@ export function DistributionBars({ data }: { data: DistributionData }) {
   return (
     <div onMouseLeave={() => setHover(null)}>
       {seg && (
-        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 8 }}>
+        <div className="flex gap-3.5 flex-wrap mb-2">
           {series!.map(sp => (
-            <span key={sp.key} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12 }}>
+            <span className="flex items-center gap-[5px] text-sm" key={sp.key}>
               <span style={{ width: 10, height: 10, borderRadius: 2, background: sp.color }} />
               {sp.label}
             </span>
@@ -236,9 +227,9 @@ export function DistributionBars({ data }: { data: DistributionData }) {
         const pct = total > 0 ? Math.round(it.value / total * 100) : 0
         const on = hover?.i === i
         return (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-            <div style={{ width: 90, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.label || 'unknown'}</div>
-            <div style={{ flex: 1, background: 'var(--secondary)', borderRadius: 4, height: 18, display: 'flex', overflow: 'hidden' }}>
+          <div className="flex items-center gap-2 mb-1.5" key={i}>
+            <div className="w-[90px] text-md overflow-hidden text-ellipsis whitespace-nowrap">{it.label || 'unknown'}</div>
+            <div className="flex-1 bg-secondary rounded-[4px] h-[18px] flex overflow-hidden">
               {seg ? series!.map(sp => {
                 const v = it.parts?.[sp.key] || 0
                 if (v <= 0) return null
@@ -268,11 +259,11 @@ export function DistributionBars({ data }: { data: DistributionData }) {
 export function KvTable({ data }: { data: TableData }) {
   return (
     <DataTable sticky className="[&_td]:text-sm">
-      <thead><tr><Th>{data.columns[0]}</Th><Th style={{ width: 90, textAlign: 'right' }}>{data.columns[1]}</Th></tr></thead>
+      <thead><tr><Th>{data.columns[0]}</Th><Th className="w-[90px] text-right">{data.columns[1]}</Th></tr></thead>
       <tbody>
         {data.rows.length === 0 ? <tr><Td colSpan={2} className="py-8 text-center text-muted-foreground">데이터 없음</Td></tr>
           : data.rows.map((r, i) => (
-            <tr key={i}><Td>{r.key}</Td><Td style={{ textAlign: 'right', fontWeight: 600 }}>{r.value}</Td></tr>
+            <tr key={i}><Td>{r.key}</Td><Td className="text-right font-semibold">{r.value}</Td></tr>
           ))}
       </tbody>
     </DataTable>
@@ -314,13 +305,13 @@ export function MatrixTable({ data }: { data: MatrixData }) {
     return <EmptyState title="데이터 없음" />
   }
   return (
-    <div style={{ overflow: 'auto', maxHeight: '100%' }}>
+    <div className="overflow-auto max-h-full">
       <DataTable sticky className="[&_td]:text-sm">
         <thead>
           <tr>
             <Th style={{ ...stickyL, zIndex: 2 }}>시각</Th>
             {data.columns.map(c => (
-              <Th key={c.key} style={{ textAlign: 'right', whiteSpace: 'nowrap' }}
+              <Th className="text-right whitespace-nowrap" key={c.key}
                   title={`전 구간 ${c.total}${c.unit ?? data.unit ?? '건'}`}>
                 {c.label}{c.unit === '%' ? ' (%)' : ''}
               </Th>
@@ -355,7 +346,7 @@ export function MatrixTable({ data }: { data: MatrixData }) {
       {/* 각주 — 비율 열은 이름만으로 분자·분모를 알 수 없다. 표를 보는 자리에서 바로 읽히게
           표 바로 아래 둔다(별도 도움말로 빼면 아무도 찾아가지 않는다). */}
       {data.notes?.length ? (
-        <div style={{ marginTop: 8, fontSize: 11, color: 'var(--muted-foreground)', lineHeight: 1.7 }}>
+        <div className="mt-2 text-xs text-muted-foreground leading-[1.7]">
           {data.notes.map(n => <div key={n}>{n}</div>)}
         </div>
       ) : null}

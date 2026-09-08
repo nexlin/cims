@@ -488,7 +488,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
         </ToggleGroup>
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto', padding: 20 }}>
+      <div className="flex-1 overflow-auto p-5">
         {!template ? (
           // A3 안내 그대로 (aa-group.md) — 모듈에 템플릿이 없으면 설정할 것이 없다
           <EmptyState title="이 패키지에는 config_template 이 없습니다 — 설정 항목 없음" />
@@ -560,7 +560,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
  if (!coll || !baseDep || !editorSource) return <EmptyState title="collection 을 찾을 수 없음" />
  return (
               <>
-                <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 10 }}>
+                <div className="text-sm text-muted-foreground mb-2.5">
                   편집 대상: <b>{baseMemberName}</b>
                   {autoSyncOn
                     ? ' — 저장 시 그룹 멤버 전체로 즉시 전파됩니다.'
@@ -578,8 +578,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
           /* ── 멤버 비교 표 ── */
  !configView ? <div className="flex min-h-0 flex-1 items-center justify-center text-center text-muted-foreground p-[20px]">로딩 중...</div> : (
             <>
-              <div style={{ fontSize: 12, marginBottom: 12, display: 'flex', gap: 12,
- alignItems: 'center', flexWrap: 'wrap' }}>
+              <div className="text-sm mb-3 flex gap-3 items-center flex-wrap">
                 <span className="inline-flex items-center gap-1 text-[var(--cims-success)]">
                   <Link2 size={13} /> 공통 일치 {summary.ok}
                 </span>
@@ -589,37 +588,33 @@ export function GroupConfigCompareView({ group, members: liveMembers,
                   : 'inline-flex items-center gap-1 text-muted-foreground'}>
                   <AlertTriangle size={13} /> 드리프트 {summary.drift}
                 </span>
-                <span style={{ color: 'var(--muted-foreground)' }}>개별 {summary.individual}</span>
+                <span className="text-muted-foreground">개별 {summary.individual}</span>
                 {!isAS && (
-                  <span style={{ color: 'var(--muted-foreground)' }}>
+                  <span className="text-muted-foreground">
                     · AA 그룹 — 동기화 없음, 편집은 각 서버의 [패키지 설정] 탭
                   </span>
                 )}
               </div>
               {undeployedMembers.length > 0 && (
-                <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 12 }}>
+                <div className="text-sm text-muted-foreground mb-3">
                   미배포 멤버: {undeployedMembers.map(m => m.name).join(', ')}
                 </div>
               )}
               {template.sections.map(sec => (
-                <div key={sec.key} style={{ border: '1px solid var(--border)', borderRadius: 6,
- marginBottom: 12, background: 'var(--card)', overflow: 'hidden' }}>
-                  <div style={{ padding: '10px 14px', background: 'var(--muted)',
- borderBottom: '1px solid var(--border)',
- display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <div className="border border-border rounded-sm mb-3 bg-card overflow-hidden" key={sec.key}>
+                  <div className="py-2.5 px-3.5 bg-muted border-b border-border flex items-baseline gap-2">
                     <b>{sec.title}</b>
                     {sec.description && (
-                      <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>— {sec.description}</span>
+                      <span className="text-xs text-muted-foreground">— {sec.description}</span>
                     )}
                   </div>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                     <thead>
-                      <tr style={{ color: 'var(--muted-foreground)' }}>
-                        <th style={{ textAlign: 'left', padding: '6px 14px', width: 240 }}>필드</th>
-                        <th style={{ width: 70, textAlign: 'center' }}>구분</th>
+                      <tr className="text-muted-foreground">
+                        <th className="text-left py-1.5 px-3.5 w-[240px]">필드</th>
+                        <th className="w-[70px] text-center">구분</th>
                         {deployedMembers.map(m => (
-                          <th key={m.id} style={{ textAlign: 'left', padding: '6px 10px',
- cursor: 'pointer', color: 'var(--primary)' }}
+                          <th className="text-left py-1.5 px-2.5 cursor-pointer text-primary" key={m.id}
  title={`${m.name} 의 설정 편집으로 이동`}
  onClick={() => onSelectMember(m.id, effectivePkgName)}>
                             <span className="inline-flex items-center gap-1">
@@ -641,17 +636,17 @@ export function GroupConfigCompareView({ group, members: liveMembers,
  const st = cellState(f)
  return (
                           <tr key={f.key} style={{ borderTop: '1px solid var(--border)', ...stateStyle[st] }}>
-                            <td style={{ padding: '6px 14px' }} title={f.key}>
+                            <td className="py-1.5 px-3.5" title={f.key}>
                               {f.label || f.key}
                             </td>
-                            <td style={{ textAlign: 'center' }}>
+                            <td className="text-center">
                               {syncKeys.has(f.key)
                                 ? (st === 'drift'
                                     ? <AlertTriangle size={13} className="inline text-warning-on"
  aria-label="드리프트" />
                                     : <Link2 size={13} className="inline text-[var(--cims-success)]"
  aria-label="그룹 공통" />)
-                                : <span title="서버별 고유값 — 동기화 대상 아님" style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>개별</span>}
+                                : <span className="text-[10px] text-muted-foreground" title="서버별 고유값 — 동기화 대상 아님">개별</span>}
                             </td>
                             {deployedMembers.map(m => {
  const cell = memberValue(m.id, f)

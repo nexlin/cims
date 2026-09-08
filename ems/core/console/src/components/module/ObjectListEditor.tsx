@@ -49,20 +49,20 @@ export function ObjectListEditor({ field, value, onChange, renderCell, ensureOne
   return (
     <div style={{ border: '1px dashed var(--border)', borderRadius: 4, padding: 6 }}>
       {display.length === 0 ? (
-        <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginBottom: 4 }}>항목 없음</div>
+        <div className="text-xs text-muted-foreground mb-1">항목 없음</div>
       ) : (
-        <table style={{ width: '100%', fontSize: 12 }}>
+        <table className="w-full text-sm">
           <thead>
             <tr>
-              {itemFields.map(f => <th key={f.key} style={{ textAlign: 'left' }}>{f.label}</th>)}
-              <th style={{ width: 40 }}></th>
+              {itemFields.map(f => <th className="text-left" key={f.key}>{f.label}</th>)}
+              <th className="w-[40px]"></th>
             </tr>
           </thead>
           <tbody>
             {display.map((it, i) => (
               <tr key={i}>
                 {itemFields.map(f => (
-                  <td key={f.key} style={{ padding: '2px 4px' }}>
+                  <td className="py-0.5 px-1" key={f.key}>
                     {cell(f, it[f.key], (v) => updateItemField(i, f.key, v))}
                   </td>
                 ))}
@@ -75,7 +75,7 @@ export function ObjectListEditor({ field, value, onChange, renderCell, ensureOne
           </tbody>
         </table>
       )}
-      <Button onClick={addItem} style={{ marginTop: 4 }}><Plus size={13} /> 항목</Button>
+      <Button className="mt-1" onClick={addItem}><Plus size={13} /> 항목</Button>
     </div>
   )
 }

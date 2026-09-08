@@ -84,13 +84,13 @@ function Gauge({ label, pool }: { label: string; pool: Pool }) {
  const total = pool.total || 0, used = pool.used || 0
  const pct = total > 0 ? Math.round((used / total) * 100) : 0
  return (
-    <div style={{ minWidth: 220, flex: 1 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 3 }}>
+    <div className="min-w-[220px] flex-1">
+      <div className="flex justify-between gap-2.5 text-sm text-muted-foreground mb-[3px]">
         {/* 라벨이 길면 줄이고(수치가 밀려 겹치지 않게) 전체 문구는 툴팁으로 */}
-        <span title={label} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
-        <span style={{ whiteSpace: 'nowrap' }}>{used} / {total} ({pct}%)</span>
+        <span className="overflow-hidden text-ellipsis whitespace-nowrap" title={label}>{label}</span>
+        <span className="whitespace-nowrap">{used} / {total} ({pct}%)</span>
       </div>
-      <div style={{ height: 8, borderRadius: 4, background: 'var(--border)', overflow: 'hidden' }}>
+      <div className="h-[8px] rounded-[4px] bg-border overflow-hidden">
         <div style={{ width: `${Math.min(100, pct)}%`, height: '100%', background: poolColor(pct), transition: 'width .3s' }} />
       </div>
     </div>
@@ -98,10 +98,10 @@ function Gauge({ label, pool }: { label: string; pool: Pool }) {
 }
 function Kpi({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string }) {
  return (
-    <div style={{ display: 'flex', flexDirection: 'column', minWidth: 80 }}>
-      <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{label}</span>
+    <div className="flex flex-col min-w-[80px]">
+      <span className="text-sm text-muted-foreground">{label}</span>
       <span style={{ fontSize: 20, fontWeight: 700, lineHeight: 1.2 }}>{value}</span>
-      {sub && <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{sub}</span>}
+      {sub && <span className="text-xs text-muted-foreground">{sub}</span>}
     </div>
   )
 }
@@ -112,8 +112,8 @@ export function VolteKpiCard() {
  const live = useServiceLive()
  const v = live?.volte.kpi
  return (
-    <div className="panel" style={{ padding: 14 }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 22, alignItems: 'center' }}>
+    <div className="panel p-3.5">
+      <div className="flex flex-wrap gap-[22px] items-center">
         <Badge variant="brandSoft" style={{ alignSelf: 'flex-start' }}>VoLTE</Badge>
         <Kpi label="통화 중" value={v?.active ?? '-'} />
         <Kpi label="호출 중" value={v?.ringing ?? '-'} />
@@ -130,8 +130,8 @@ export function PttKpiCard() {
  const live = useServiceLive()
  const p = live?.ptt.kpi
  return (
-    <div className="panel" style={{ padding: 14 }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 22, alignItems: 'center' }}>
+    <div className="panel p-3.5">
+      <div className="flex flex-wrap gap-[22px] items-center">
         <Badge variant="successSoft" style={{ alignSelf: 'flex-start' }}>PTT</Badge>
         <Kpi label="발언 중" value={p?.talking ?? '-'} sub="그룹" />
         <Kpi label="최근 5분 발언" value={p?.recent_active ?? '-'} sub="그룹" />
@@ -173,9 +173,9 @@ const AXIS_W = 92   // 좌측 지표 라벨 폭 — 히트맵 셀 영역과 시�
 function HeatRow({ label, points, metric, rgb }: { label: string; points: TrendPoint[]; metric: TrendMetric; rgb: string }) {
  const max = Math.max(1, ...points.map(p => p[metric]))
  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+    <div className="flex items-center gap-2 mb-[3px]">
       <span style={{ width: AXIS_W, fontSize: 12, color: 'var(--muted-foreground)', textAlign: 'right', flexShrink: 0 }}>{label}</span>
-      <div style={{ display: 'flex', gap: 1, flex: 1 }}>
+      <div className="flex gap-px flex-1">
         {points.map((p, i) => {
  const v = p[metric]
  const ratio = v > 0 ? 0.18 + 0.82 * (v / max) : 0
@@ -207,9 +207,9 @@ function TrendAxis({ points }: { points: TrendPoint[] }) {
  for (let i = 0; i < n; i += step) ticks.push(i)
  if (ticks[ticks.length - 1] !== n - 1) ticks.push(n - 1)
  return (
-    <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+    <div className="flex gap-2 mt-0.5">
       <span style={{ width: AXIS_W, flexShrink: 0 }} />
-      <div style={{ position: 'relative', flex: 1, height: 14 }}>
+      <div className="relative flex-1 h-[14px]">
         {ticks.map((i, idx) => {
  const t = points[i].t
  const prevT = idx > 0 ? points[ticks[idx - 1]].t : null
@@ -224,7 +224,7 @@ function TrendAxis({ points }: { points: TrendPoint[] }) {
  else { style.left = `${pct}%`; style.transform = 'translateX(-50%)' }
  return (
             <span key={i} style={style}>
-              {showDate && <span style={{ color: 'var(--foreground)', fontWeight: 600, marginRight: 3 }}>{md(t)}</span>}
+              {showDate && <span className="text-foreground font-semibold mr-[3px]">{md(t)}</span>}
               {hm(t)}
             </span>
           )
@@ -244,17 +244,17 @@ export function TrendCard() {
   }, [win, show])
  const points = data?.points ?? []
  return (
-    <div className="panel" style={{ padding: '10px 14px' }}>
-      <div className="toolbar" style={{ marginBottom: 8 }}>
-        <span style={{ fontSize: 13, fontWeight: 600 }}>사용량 추세</span>
-        <span style={{ fontSize: 12, color: 'var(--muted-foreground)', marginLeft: 4 }}>최근</span>
+    <div className="panel py-2.5 px-3.5">
+      <div className="toolbar mb-2">
+        <span className="text-md font-semibold">사용량 추세</span>
+        <span className="text-sm text-muted-foreground ml-1">최근</span>
         <ToggleGroup type="single" value={win} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
  onValueChange={(v: string) => v && setWin(v)}>
           {TREND_WINS.map(w => (
             <ToggleGroupItem key={w.k} value={w.k}>{w.label}</ToggleGroupItem>
           ))}
         </ToggleGroup>
-        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)' }}>
+        <span className="ml-auto text-xs text-muted-foreground">
           {points.length ? `${clockOf(points[0].t)} ~ ${clockOf(points[points.length - 1].t)} · ${points.length}구간 (${bucketLabel(data?.bucket_sec ?? 0)})` : ''}
         </span>
       </div>
@@ -280,10 +280,10 @@ export function AnomalyCard() {
           : <><Check size={13} className="inline align-[-2px]" /> 이상 징후 없음</>}
       </div>
       {anomalies.map((a, i) => (
-        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 3 }}>
+        <div className="flex items-center gap-2 text-md mb-[3px]" key={i}>
           <Badge variant="dangerSoft" >{a.kind === 'volte' ? 'VoLTE' : 'PTT'}</Badge>
           <span>{a.detail}</span>
-          <span style={{ color: 'var(--muted-foreground)' }}>{a.label}</span>
+          <span className="text-muted-foreground">{a.label}</span>
         </div>
       ))}
     </div>
@@ -312,11 +312,11 @@ export function VolteCallsCard() {
                 <Td><PinBtn on={pinned} onClick={e => { e.stopPropagation(); toggle(c.call_id) }} /></Td>
                 <Td><Badge variant={ring ? 'brandSoft' : 'successSoft'} >{ring ? '호출 중' : '통화 중'}</Badge>{warn && <AlertTriangle size={12} className="ml-1 inline text-destructive"
  aria-label={c.anomalies.map(a => a.detail).join(', ')} />}</Td>
-                <Td><b>{c.caller || '-'}</b> <span style={{ color: 'var(--muted-foreground)' }}>→</span> {c.callee || '-'}</Td>
+                <Td><b>{c.caller || '-'}</b> <span className="text-muted-foreground">→</span> {c.callee || '-'}</Td>
                 <Td>{c.video ? '영상' : '음성'}</Td>
                 <Td className="text-sm text-muted-foreground">{fmtDur(elapsedSec(c.invite_time, now, c.duration_sec))}</Td>
                 <Td className="text-sm text-muted-foreground">{c.media_node || '-'}</Td>
-                <Td className="text-sm text-muted-foreground" title={c.call_id} style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.call_id}</Td>
+                <Td className="text-sm text-muted-foreground max-w-[140px] overflow-hidden text-ellipsis whitespace-nowrap" title={c.call_id}>{c.call_id}</Td>
                 <Td><Button variant="ghost" onClick={() => navigate('/service/history/volte')}>이력 <ChevronRight size={12} /></Button></Td>
               </tr>
             )
@@ -339,11 +339,11 @@ function MemberDrill({ group }: { group: string }) {
  statsApi.pttMembers(group, page, MEMBER_LIMIT).then(d => { if (live) setData(d) }).catch(e => show(String(e), 'err'))
  return () => { live = false }
   }, [group, page, show])
- if (!data) return <div className="text-sm text-muted-foreground" style={{ padding: 8 }}>멤버 로딩...</div>
+ if (!data) return <div className="text-sm text-muted-foreground p-2">멤버 로딩...</div>
  const pages = Math.max(1, Math.ceil(data.total / MEMBER_LIMIT))
  return (
-    <div style={{ padding: '6px 4px' }}>
-      <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 4 }}>
+    <div className="py-1.5 px-1">
+      <div className="text-sm text-muted-foreground mb-1">
         멤버 {data.total}명 · 현재 참여 {data.active_count}명 · {page}/{pages} 페이지
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 14px' }}>
@@ -358,7 +358,7 @@ function MemberDrill({ group }: { group: string }) {
         ))}
       </div>
       {pages > 1 && (
-        <div style={{ marginTop: 6 }}>
+        <div className="mt-1.5">
           <Button variant="ghost" disabled={page <= 1} onClick={e => { e.stopPropagation(); setPage(p => p - 1) }}>이전</Button>
           <Button variant="ghost" disabled={page >= pages} onClick={e => { e.stopPropagation(); setPage(p => p + 1) }}>다음</Button>
         </div>
@@ -403,7 +403,7 @@ export function PttGroupsCard() {
                 </tr>
                 {isOpen && (
                   <tr>
-                    <Td colSpan={8} style={{ background: 'var(--accent)' }}>
+                    <Td className="bg-accent" colSpan={8}>
                       <MemberDrill group={g.group_id} />
                       {g.floor_held_sec !== undefined && <span className="mx-2 inline-flex items-center gap-1 text-sm text-destructive">
                     <AlertTriangle size={12} /> floor {fmtDur(g.floor_held_sec)} 점유</span>}
@@ -443,7 +443,7 @@ export function EventFeedCard() {
  return (
     <div className="panel">
       <DataTable sticky>
-        <thead><tr><Th style={{ width: 96 }}>시각</Th><Th style={{ width: 70 }}>구분</Th><Th>이벤트</Th></tr></thead>
+        <thead><tr><Th className="w-[96px]">시각</Th><Th className="w-[70px]">구분</Th><Th>이벤트</Th></tr></thead>
         <tbody>
           {events.map((e, i) => (
             <tr key={i}>
@@ -467,17 +467,17 @@ function SubscriberRows({ subs }: { subs: Subscriber[] }) {
       <tbody>
         {subs.map(s => (
           <tr key={s.person_id}>
-            <Td style={{ fontWeight: 600 }}>{s.name}</Td>
-            <Td className="text-sm text-muted-foreground" style={{ whiteSpace: 'nowrap' }}>{s.org_path || '-'}</Td>
+            <Td className="font-semibold">{s.name}</Td>
+            <Td className="text-sm text-muted-foreground whitespace-nowrap">{s.org_path || '-'}</Td>
             <Td className="text-sm text-muted-foreground">{s.volte?.msisdn || '-'}</Td>
             <Td>{s.volte ? <><OnlineDot on={s.volte.online} />{s.volte.online ? '접속' : '미접속'}</> : <span className="text-sm text-muted-foreground">-</span>}</Td>
             <Td>{s.volte?.calls && s.volte.calls.length > 0
-              ? s.volte.calls.map((c, i) => <Badge variant={c.state === 'active' ? 'successSoft' : 'brandSoft'} key={i} style={{ marginRight: 4 }}>{c.state === 'active' ? '통화' : '호출'} {c.role === 'caller' ? '→' : '←'} {c.peer}</Badge>)
+              ? s.volte.calls.map((c, i) => <Badge className="mr-1" variant={c.state === 'active' ? 'successSoft' : 'brandSoft'} key={i}>{c.state === 'active' ? '통화' : '호출'} {c.role === 'caller' ? '→' : '←'} {c.peer}</Badge>)
               : <span className="text-sm text-muted-foreground">{s.volte?.online ? '대기' : '-'}</span>}</Td>
             <Td className="text-sm text-muted-foreground">{s.ptt?.msisdn || '-'}</Td>
             <Td>{s.ptt ? <><OnlineDot on={s.ptt.online} />{s.ptt.online ? '접속' : '미접속'}</> : <span className="text-sm text-muted-foreground">-</span>}</Td>
             <Td>{s.ptt?.groups && s.ptt.groups.length > 0
-              ? s.ptt.groups.map((g, i) => <Badge variant="successSoft" key={i} style={{ marginRight: 4 }}>
+              ? s.ptt.groups.map((g, i) => <Badge className="mr-1" variant="successSoft" key={i}>
                         <Mic size={11} className="inline align-[-1px]" /> {g.group_id}</Badge>)
               : <span className="text-sm text-muted-foreground">{s.ptt?.online ? '대기' : '-'}</span>}</Td>
           </tr>
@@ -529,31 +529,30 @@ export function OrgStatsCard() {
  const totalPages = Math.max(1, Math.ceil(total / limit))
 
  return (
-    <div className="panel" style={{ padding: 10 }}>
+    <div className="panel p-2.5">
       {dbDegraded && (
-        <div style={{ marginBottom: 8, padding: '6px 10px', borderRadius: 4, fontSize: 12,
- background: 'var(--cims-warning-soft)', color: 'var(--cims-warning)', border: '1px solid var(--border)' }}>
+        <div className="mb-2 py-1.5 px-2.5 rounded-[4px] text-sm bg-warning-soft text-warning border border-border">
           DB 조회 실패 — 구성원/등록 수는 표시되지 않습니다 (활성 세션·발언자는 정상). 상세는 OAM 로그 참조.
         </div>
       )}
-      <div className="toolbar" style={{ marginBottom: 8 }}>
-        <Input className="flex-1" placeholder="가입자 이름/번호 검색 (전체)" value={searchInput}
- onChange={e => setSearchInput(e.target.value)} style={{ maxWidth: 280 }} />
+      <div className="toolbar mb-2">
+        <Input className="flex-1 max-w-[280px]" placeholder="가입자 이름/번호 검색 (전체)" value={searchInput}
+ onChange={e => setSearchInput(e.target.value)}/>
         {q && <Button variant="ghost" onClick={() => setSearchInput('')}>검색 해제</Button>}
-        <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>
+        <span className="text-muted-foreground text-sm">
           {selNode ? `부서: ${selNode.name} (${selNode.members}명)` : ''}{selNode && q ? '  &  ' : ''}{q ? `검색: "${q}"` : ''}
         </span>
-        <label style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted-foreground)' }}>
+        <label className="ml-auto text-sm text-muted-foreground">
           표시{' '}
           <Select value={String(limit)} onValueChange={(v: string) => { setLimit(Number(v)); setPage(1) }}>
-            <SelectTrigger style={{ width: 'auto', padding: '2px 6px', display: 'inline-block' }}><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-auto py-0.5 px-1.5 inline-block"><SelectValue /></SelectTrigger>
             <SelectContent>
               {PAGE_SIZES.map(n => <SelectItem key={n} value={String(n)}>{n}명</SelectItem>)}
             </SelectContent>
           </Select>
         </label>
       </div>
-      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+      <div className="flex gap-2.5 items-start">
         {/* 부서 트리 */}
         <div style={{ flex: '0 0 230px', maxHeight: 520, overflow: 'auto', borderRight: '1px solid var(--border)', paddingRight: 6 }}>
           {orgs.length === 0 ? <Loading /> : orgs.map(o => (
@@ -562,23 +561,23 @@ export function OrgStatsCard() {
  background: sel === o.code ? 'rgba(80,120,255,.12)' : undefined,
  fontWeight: o.depth === 0 ? 700 : o.depth === 1 ? 600 : 400 }}>
               {o.name} <span className="text-sm text-muted-foreground">({o.members})</span>
-              {o.active_volte > 0 && <Badge variant="brandSoft" style={{ marginLeft: 4 }}>
+              {o.active_volte > 0 && <Badge className="ml-1" variant="brandSoft">
                     <Phone size={11} className="inline align-[-1px]" />{o.active_volte}</Badge>}
-              {o.ptt_talking > 0 && <Badge variant="successSoft" style={{ marginLeft: 4 }}>
+              {o.ptt_talking > 0 && <Badge className="ml-1" variant="successSoft">
                     <Mic size={11} className="inline align-[-1px]" />{o.ptt_talking}</Badge>}
             </div>
           ))}
         </div>
         {/* 구성원 로스터 — 헤더(고정)·본문(스크롤)·페이지(고정) */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', maxHeight: 520 }}>
+        <div className="flex-1 min-w-0 flex flex-col max-h-[520px]">
           <div className="scroll-fill">
             {!roster ? <Loading />
               : roster.subscribers.length === 0 ? <EmptyState title={q ? '검색 결과 없음' : '구성원 없음'} />
               : <SubscriberRows subs={roster.subscribers} />}
           </div>
           {roster && roster.subscribers.length > 0 && (
-            <div className="toolbar" style={{ justifyContent: 'flex-end', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
-              <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>총 {total.toLocaleString()}명 · {page}/{totalPages}</span>
+            <div className="toolbar justify-end border-t border-border shrink-0">
+              <span className="text-muted-foreground text-sm">총 {total.toLocaleString()}명 · {page}/{totalPages}</span>
               <Button variant="ghost" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>이전</Button>
               <Button variant="ghost" disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>다음</Button>
             </div>
@@ -635,7 +634,7 @@ export function SubscriberLookup() {
           {tabBtn('online', '접속 중', counts.online)}
           {tabBtn('all', '전체', counts.all)}
         </ToggleGroup>
-        <Input className="flex-1" placeholder="이름/번호 검색" value={searchInput} onChange={e => setSearchInput(e.target.value)} style={{ maxWidth: 200 }} />
+        <Input className="flex-1 max-w-[200px]" placeholder="이름/번호 검색" value={searchInput} onChange={e => setSearchInput(e.target.value)}/>
       </div>
       {loading ? <Loading />
         : subs.length === 0 ? <EmptyState title={status === 'active' ? '이용 중인 가입자가 없습니다' : q ? '검색 결과가 없습니다' : '가입자가 없습니다'} />
@@ -646,24 +645,24 @@ export function SubscriberLookup() {
               <tbody>
                 {subs.map(s => (
                   <tr key={s.person_id}>
-                    <Td style={{ fontWeight: 600 }}>{s.name}</Td>
+                    <Td className="font-semibold">{s.name}</Td>
                     <Td className="text-sm text-muted-foreground">{s.volte?.msisdn || '-'}</Td>
                     <Td>{s.volte ? <><OnlineDot on={s.volte.online} />{s.volte.online ? '접속' : '미접속'}</> : <span className="text-sm text-muted-foreground">-</span>}</Td>
                     <Td>{s.volte?.calls && s.volte.calls.length > 0
-                      ? s.volte.calls.map((c, i) => <Badge variant={c.state === 'active' ? 'successSoft' : 'brandSoft'} key={i} style={{ marginRight: 4 }}>{c.state === 'active' ? '통화 중' : '호출 중'} {c.role === 'caller' ? '→' : '←'} {c.peer}</Badge>)
+                      ? s.volte.calls.map((c, i) => <Badge className="mr-1" variant={c.state === 'active' ? 'successSoft' : 'brandSoft'} key={i}>{c.state === 'active' ? '통화 중' : '호출 중'} {c.role === 'caller' ? '→' : '←'} {c.peer}</Badge>)
                       : <span className="text-sm text-muted-foreground">{s.volte?.online ? '대기' : '-'}</span>}</Td>
                     <Td className="text-sm text-muted-foreground">{s.ptt?.msisdn || '-'}</Td>
                     <Td>{s.ptt ? <><OnlineDot on={s.ptt.online} />{s.ptt.online ? '접속' : '미접속'}</> : <span className="text-sm text-muted-foreground">-</span>}</Td>
                     <Td>{s.ptt?.groups && s.ptt.groups.length > 0
-                      ? s.ptt.groups.map((g, i) => <Badge variant="successSoft" key={i} style={{ marginRight: 4 }}>참여 그룹 {g.group_id} ({g.active_members}/{g.total_members})</Badge>)
+                      ? s.ptt.groups.map((g, i) => <Badge className="mr-1" variant="successSoft" key={i}>참여 그룹 {g.group_id} ({g.active_members}/{g.total_members})</Badge>)
                       : <span className="text-sm text-muted-foreground">{s.ptt?.online ? '대기' : '-'}</span>}</Td>
                   </tr>
                 ))}
               </tbody>
             </DataTable>
             {totalPages > 1 && (
-              <div className="toolbar" style={{ justifyContent: 'flex-end', borderTop: '1px solid var(--border)' }}>
-                <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>총 {total.toLocaleString()}건 · {page}/{totalPages}</span>
+              <div className="toolbar justify-end border-t border-border">
+                <span className="text-muted-foreground text-sm">총 {total.toLocaleString()}건 · {page}/{totalPages}</span>
                 <Button variant="ghost" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>이전</Button>
                 <Button variant="ghost" disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>다음</Button>
               </div>
@@ -688,7 +687,7 @@ export function ServiceDetailTabs() {
   )
  return (
     <div className="widget-stack">
-      <div className="toolbar" style={{ flexWrap: 'wrap' }}>
+      <div className="toolbar flex-wrap">
         <ToggleGroup type="single" value={tab} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
  onValueChange={(v2: string) => v2 && setTab(v2 as typeof tab)}>
           {tb('events', '라이브 이벤트')}
@@ -696,7 +695,7 @@ export function ServiceDetailTabs() {
           {tb('volte', 'VoLTE 호', v?.active)}
           {tb('ptt', 'PTT 그룹', p?.recent_active)}
         </ToggleGroup>
-        <span style={{ marginLeft: 'auto', color: 'var(--muted-foreground)', fontSize: 12 }}>5초 자동 갱신{live?.ts ? ` · ${new Date(live.ts).toLocaleTimeString('ko-KR')}` : ''}</span>
+        <span className="ml-auto text-muted-foreground text-sm">5초 자동 갱신{live?.ts ? ` · ${new Date(live.ts).toLocaleTimeString('ko-KR')}` : ''}</span>
       </div>
       {tab === 'events' && <EventFeedCard />}
       {tab === 'org' && <OrgStatsCard />}
@@ -710,11 +709,11 @@ export function ServiceDetailTabs() {
 export default function ServiceStatusPage() {
  return (
     <div>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+      <div className="flex gap-2.5 flex-wrap mb-3.5">
         <div style={{ flex: '1 1 460px' }}><VolteKpiCard /></div>
         <div style={{ flex: '1 1 460px' }}><PttKpiCard /></div>
       </div>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+      <div className="flex gap-2.5 flex-wrap mb-3.5">
         <div style={{ flex: '1 1 460px' }}><TrendCard /></div>
         <div style={{ flex: '1 1 460px' }}><AnomalyCard /></div>
       </div>

@@ -235,8 +235,8 @@ function Shell() {
                   <label>새 비밀번호 확인</label>
                   <Input  type="password" value={newPw2} onChange={e => setNewPw2(e.target.value)} />
                 </div>
-                {chgError && <div className="auth-error" style={{ marginTop: 12 }}>{chgError}</div>}
-                {chgOk && <div className="auth-ok" style={{ marginTop: 12 }}>{chgOk}</div>}
+                {chgError && <div className="auth-error mt-3">{chgError}</div>}
+                {chgOk && <div className="auth-ok mt-3">{chgOk}</div>}
               <div className="flex justify-end gap-2.5 pt-5">
                 <Button size="default" type="button" onClick={() => setShowChgPw(false)}>취소</Button>
                 <Button variant="default" size="default" type="submit">변경</Button>

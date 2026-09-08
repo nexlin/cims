@@ -57,25 +57,21 @@ function ActiveAlarmsWidget() {
   return (
     <div className="panel">
       {/* 헤더 — 총 건수 + 폴링 실패 표기 + 이력/카탈로그 이동 */}
-      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--muted)',
-                    display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ fontWeight: 600, fontSize: 14 }}>활성 알람 ({active.length})</span>
+      <div className="py-3 px-4 border-b border-border bg-muted flex items-center gap-2.5">
+        <span className="font-semibold text-base">활성 알람 ({active.length})</span>
         {error && (
           <span title="알람 조회 실패 — 표시가 최신이 아닐 수 있음 (표시 없음 ≠ 정상)"
                 className="inline-flex items-center gap-1 text-sm font-semibold text-destructive">
             <AlertTriangle size={13} /> 조회 실패</span>
         )}
-        <span style={{ marginLeft: 'auto', display: 'flex', gap: 12 }}>
-          <a href="#" onClick={e => { e.preventDefault(); navigate('/alerts/active') }}
-             style={{ fontSize: 12, fontWeight: 500 }}>활성 전체 →</a>
-          <a href="#" onClick={e => { e.preventDefault(); navigate('/alerts/catalog') }}
-             style={{ fontSize: 12, fontWeight: 500, color: 'var(--muted-foreground)' }}>카탈로그</a>
+        <span className="ml-auto flex gap-3">
+          <a className="text-sm font-medium" href="#" onClick={e => { e.preventDefault(); navigate('/alerts/active') }}>활성 전체 →</a>
+          <a className="text-sm font-medium text-muted-foreground" href="#" onClick={e => { e.preventDefault(); navigate('/alerts/catalog') }}>카탈로그</a>
         </span>
       </div>
 
       {/* severity 요약 타일 — 클릭 시 해당 심각도로 필터(재클릭 해제) */}
-      <div style={{ display: 'flex', gap: 8, padding: '10px 16px', flexWrap: 'wrap',
-                    borderBottom: '1px solid var(--border)' }}>
+      <div className="flex gap-2 py-2.5 px-4 flex-wrap border-b border-border">
         {tiles.map(sev => {
           const n = counts[sev] || 0
           const sel = filter === sev
@@ -113,11 +109,11 @@ function ActiveAlarmsWidget() {
           <DataTable sticky>
             <thead>
               <tr>
-                <Th style={{ width: 92 }}>심각도</Th>
-                <Th style={{ width: 118 }}>코드</Th>
-                <Th style={{ width: 168 }}>소스(MO)</Th>
+                <Th className="w-[92px]">심각도</Th>
+                <Th className="w-[118px]">코드</Th>
+                <Th className="w-[168px]">소스(MO)</Th>
                 <Th>메시지</Th>
-                <Th style={{ width: 96 }}>승인</Th>
+                <Th className="w-[96px]">승인</Th>
               </tr>
             </thead>
             <tbody>
@@ -128,18 +124,18 @@ function ActiveAlarmsWidget() {
                   <tr key={`${a.alarm_id || a.type}-${i}`}
                       style={severe ? { background: `color-mix(in srgb, ${SEV_COLOR[sev]} 7%, transparent)` } : undefined}>
                     <Td style={severe ? { boxShadow: `inset 3px 0 0 ${SEV_COLOR[sev]}` } : undefined}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <span className="inline-flex items-center gap-1.5">
                         <Dot sev={sev} />
-                        <span style={{ fontSize: 11, fontWeight: 600 }}>{SEV_LABEL[sev] || sev}</span>
+                        <span className="text-xs font-semibold">{SEV_LABEL[sev] || sev}</span>
                       </span>
                     </Td>
                     <Td>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                        <code style={{ fontSize: 11 }}>{a.code || a.type}</code>
+                      <span className="inline-flex items-center gap-[5px]">
+                        <code className="text-xs">{a.code || a.type}</code>
                         {(a.occurrences || 1) > 1 && <Badge variant="neutralSoft" >×{a.occurrences}</Badge>}
                       </span>
                     </Td>
-                    <Td><code style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{a.source?.mo_instance || '-'}</code></Td>
+                    <Td><code className="text-xs text-muted-foreground">{a.source?.mo_instance || '-'}</code></Td>
                     <Td>{a.message}</Td>
                     <Td>
                       {a.acked

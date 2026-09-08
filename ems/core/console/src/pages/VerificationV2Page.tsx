@@ -295,10 +295,7 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
                   }}>
                     {st.title}
                   </div>
-                  <div style={{
-                    fontSize: 11, color: 'var(--muted-foreground)',
-                    marginTop: 3, fontWeight: 500,
-                  }}>
+                  <div className="text-xs text-muted-foreground mt-[3px] font-medium">
                     {isBlocked ? '차단됨' : `${done}/${total}`}
                   </div>
                 </div>
@@ -347,12 +344,7 @@ function GlobalHeader({
     return 'PENDING'
   })()
   return (
-    <div style={{
-      display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap',
-      background: 'var(--card)',
-      border: '1px solid var(--border)',
-      borderRadius: 8, padding: 12, marginBottom: 12,
-    }}>
+    <div className="flex gap-3 items-center flex-wrap bg-card border border-border rounded-md p-3 mb-3">
       {/* 시작/중단 toggle 버튼 — 크기 고정 */}
       <button
         onClick={onPipelineToggle}
@@ -391,10 +383,7 @@ function GlobalHeader({
       </button>
 
       {/* 재개 지점 dropdown — Run 옆 */}
-      <label style={{
-        display: 'flex', alignItems: 'center', gap: 6,
-        fontSize: 12, color: 'var(--muted-foreground)',
-      }}>
+      <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
         <Flag size={13} className="inline align-[-2px]" /> 재개 지점:
         <Select value={String(resumeStage)} onValueChange={(v: string) => setResumeStage(Number(v))} disabled={running}>
           <SelectTrigger style={{
@@ -412,29 +401,16 @@ function GlobalHeader({
         </Select>
       </label>
 
-      <div style={{
-        marginLeft: 'auto',
-        display: 'flex', alignItems: 'center', gap: 8,
-        padding: '6px 12px', background: 'var(--muted)',
-        borderRadius: 6, fontSize: 12,
-      }}>
+      <div className="ml-auto flex items-center gap-2 py-1.5 px-3 bg-muted rounded-sm text-sm">
         <span className="inline-flex items-center gap-1 text-muted-foreground">
                   <Package size={13} /> 마지막 패키지:</span>
-        <code style={{ fontSize: 11, fontWeight: 600 }}>cims-2026.04.29-a3f2b1c</code>
+        <code className="text-xs font-semibold">cims-2026.04.29-a3f2b1c</code>
         <span style={{ color: statusColor('PASS') }}>(S4 <CircleCheck size={12} className="inline align-[-2px]" />)</span>
       </div>
 
-      <button
+      <button className="py-1.5 px-3 h-[36px] bg-card border border-border rounded-sm text-sm font-semibold cursor-pointer"
         onClick={onPrintReport}
-        title="검증 보고서 PDF 출력 (모든 stage 펼침 → 인쇄)"
-        style={{
-          padding: '6px 12px', height: 36,
-          background: 'var(--card)',
-          border: '1px solid var(--border)',
-          borderRadius: 6, fontSize: 12, fontWeight: 600,
-          cursor: 'pointer',
-        }}
-      >
+        title="검증 보고서 PDF 출력 (모든 stage 펼침 → 인쇄)">
         <FileText size={13} className="inline align-[-2px]" /> 보고서 출력
       </button>
 
@@ -499,7 +475,7 @@ function StageRow({
         }}
         onClick={onToggle}
       >
-        <span className="v2-no-print" style={{ fontSize: 14, color: 'var(--muted-foreground)' }}>
+        <span className="v2-no-print text-base text-muted-foreground">
           {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         </span>
         <div style={{
@@ -510,8 +486,8 @@ function StageRow({
         }}>
           {isBlocked ? <Ban size={13} /> : stage.num}
         </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>
+        <div className="flex-1">
+          <div className="text-base font-semibold">
             {stage.id} · {stage.title}
             <span style={{ marginLeft: 8, fontSize: 12, color: statusColor(status), fontWeight: 500 }}>
               {statusIcon(status)} {statusLabel(status)}
@@ -526,9 +502,9 @@ function StageRow({
               </span>
             )}
           </div>
-          <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{stage.desc}</div>
+          <div className="text-xs text-muted-foreground">{stage.desc}</div>
         </div>
-        <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
+        <div className="text-xs text-muted-foreground">
           {done}/{total} 완료 · {fmtMs(elapsed)}
         </div>
         <button
@@ -553,26 +529,26 @@ function StageRow({
 
       {/* 펼침 영역 */}
       {expanded && (
-        <div style={{ padding: 12 }}>
+        <div className="p-3">
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
             <colgroup>
-              <col style={{ width: 32 }} />
-              <col style={{ width: 36 }} />
+              <col className="w-[32px]"/>
+              <col className="w-[36px]"/>
               <col style={{ width: '28%' }} />
               <col style={{ width: '42%' }} />
-              <col style={{ width: 120 }} />
-              <col style={{ width: 70 }} />
-              <col style={{ width: 90 }} />
+              <col className="w-[120px]"/>
+              <col className="w-[70px]"/>
+              <col className="w-[90px]"/>
             </colgroup>
             <thead>
-              <tr style={{ background: 'var(--muted)', textAlign: 'left' }}>
-                <th style={{ padding: '6px 8px' }}></th>
-                <th style={{ padding: '6px 8px' }}>#</th>
-                <th style={{ padding: '6px 8px' }}>항목</th>
-                <th style={{ padding: '6px 8px' }}>설명</th>
-                <th style={{ padding: '6px 8px' }}>진행률</th>
-                <th style={{ padding: '6px 8px', textAlign: 'right' }}>소요</th>
-                <th style={{ padding: '6px 8px' }}>결과</th>
+              <tr className="bg-muted text-left">
+                <th className="py-1.5 px-2"></th>
+                <th className="py-1.5 px-2">#</th>
+                <th className="py-1.5 px-2">항목</th>
+                <th className="py-1.5 px-2">설명</th>
+                <th className="py-1.5 px-2">진행률</th>
+                <th className="py-1.5 px-2 text-right">소요</th>
+                <th className="py-1.5 px-2">결과</th>
               </tr>
             </thead>
             <tbody>
@@ -596,7 +572,7 @@ function StageRow({
                       opacity: itBlocked ? 0.7 : 1,
                     }}
                     title={itBlocked ? '선행 stage FAIL 로 차단됨 — 함수 호출 없이 BLOCKED' : undefined}>
-                      <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                      <td className="py-1.5 px-2 text-center">
                         {isGroup ? (
                           <GroupCheckbox
                             checked={checked}
@@ -613,45 +589,43 @@ function StageRow({
                           />
                         )}
                       </td>
-                      <td style={{ padding: '6px 8px', color: 'var(--muted-foreground)' }}>{idx + 1}</td>
-                      <td style={{ padding: '6px 8px' }}>
+                      <td className="py-1.5 px-2 text-muted-foreground">{idx + 1}</td>
+                      <td className="py-1.5 px-2">
                         {isGroup && (
-                          <span
-                            onClick={() => toggleGroup(it.id)}
-                            style={{ cursor: 'pointer', marginRight: 4, color: 'var(--muted-foreground)' }}
-                          >
+                          <span className="cursor-pointer mr-1 text-muted-foreground"
+                            onClick={() => toggleGroup(it.id)}>
                             {groupOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                           </span>
                         )}
-                        <code style={{ fontSize: 11, fontWeight: 600 }}>{it.id}</code>
+                        <code className="text-xs font-semibold">{it.id}</code>
                         <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginLeft: isGroup ? 16 : 0 }}>
                           {it.name}
                           {isGroup && groupInfo && (
-                            <span style={{ marginLeft: 6, color: 'var(--muted-foreground)' }}>
+                            <span className="ml-1.5 text-muted-foreground">
                               ({groupInfo.doneCount}/{groupInfo.totalCount} 자식)
                             </span>
                           )}
                         </div>
                       </td>
-                      <td style={{ padding: '6px 8px', color: 'var(--muted-foreground)', fontSize: 11 }}>
+                      <td className="py-1.5 px-2 text-muted-foreground text-xs">
                         {it.desc || '—'}
                       </td>
-                      <td style={{ padding: '6px 8px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <div style={{ flex: 1, height: 6, background: 'var(--secondary)', borderRadius: 3, overflow: 'hidden' }}>
+                      <td className="py-1.5 px-2">
+                        <div className="flex items-center gap-1.5">
+                          <div className="flex-1 h-[6px] bg-secondary rounded-[3px] overflow-hidden">
                             <div style={{
                               width: `${itPct}%`, height: '100%',
                               background: itDone ? statusColor(itStatus) : 'var(--cims-info)',
                               transition: 'width 0.3s',
                             }} />
                           </div>
-                          <span style={{ minWidth: 30, textAlign: 'right', fontSize: 10 }}>{itPct}%</span>
+                          <span className="min-w-[30px] text-right text-[10px]">{itPct}%</span>
                         </div>
                       </td>
-                      <td style={{ padding: '6px 8px', textAlign: 'right', fontSize: 10, color: 'var(--muted-foreground)' }}>
+                      <td className="py-1.5 px-2 text-right text-[10px] text-muted-foreground">
                         {itDone || isGroup ? fmtMs(it.elapsedMs || stage.items.filter(c => c.parent === it.id).reduce((s, c) => s + c.elapsedMs, 0)) : '–'}
                       </td>
-                      <td style={{ padding: '6px 8px' }}>
+                      <td className="py-1.5 px-2">
                         <span style={{ color: statusColor(itStatus), fontWeight: 600 }}>
                           {statusIcon(itStatus)} {statusLabel(itStatus)}
                         </span>
@@ -669,7 +643,7 @@ function StageRow({
                           opacity: cBlocked ? 0.7 : 1,
                         }}
                         title={cBlocked ? '선행 stage FAIL 로 차단됨' : undefined}>
-                          <td style={{ padding: '4px 8px', textAlign: 'center' }}>
+                          <td className="py-1 px-2 text-center">
                             <input
                               type="checkbox"
                               checked={cChecked}
@@ -677,33 +651,33 @@ function StageRow({
                               disabled={anyRunning}
                             />
                           </td>
-                          <td style={{ padding: '4px 8px', color: 'var(--muted-foreground)', fontSize: 10 }}>
+                          <td className="py-1 px-2 text-muted-foreground text-[10px]">
                             {idx + 1}.{ci + 1}
                           </td>
-                          <td style={{ padding: '4px 8px', paddingLeft: 32 }}>
-                            <code style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>
+                          <td className="py-1 px-2 pl-8">
+                            <code className="text-[10px] text-muted-foreground">
                               └ {c.id.split('.').pop()}
                             </code>
-                            <div style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>{c.name}</div>
+                            <div className="text-[10px] text-muted-foreground">{c.name}</div>
                           </td>
-                          <td style={{ padding: '4px 8px', color: 'var(--muted-foreground)', fontSize: 10 }}>
+                          <td className="py-1 px-2 text-muted-foreground text-[10px]">
                             {c.desc || '—'}
                           </td>
-                          <td style={{ padding: '4px 8px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                              <div style={{ flex: 1, height: 4, background: 'var(--secondary)', borderRadius: 2, overflow: 'hidden' }}>
+                          <td className="py-1 px-2">
+                            <div className="flex items-center gap-1">
+                              <div className="flex-1 h-[4px] bg-secondary rounded-[2px] overflow-hidden">
                                 <div style={{
                                   width: `${cPct}%`, height: '100%',
                                   background: cDone ? statusColor(c.status) : 'var(--cims-info)',
                                 }} />
                               </div>
-                              <span style={{ minWidth: 26, textAlign: 'right', fontSize: 9 }}>{cPct}%</span>
+                              <span className="min-w-[26px] text-right text-[9px]">{cPct}%</span>
                             </div>
                           </td>
-                          <td style={{ padding: '4px 8px', textAlign: 'right', fontSize: 9, color: 'var(--muted-foreground)' }}>
+                          <td className="py-1 px-2 text-right text-[9px] text-muted-foreground">
                             {cDone ? fmtMs(c.elapsedMs) : '–'}
                           </td>
-                          <td style={{ padding: '4px 8px' }}>
+                          <td className="py-1 px-2">
                             <span style={{ color: statusColor(c.status), fontWeight: 500, fontSize: 10 }}>
                               {statusIcon(c.status)} {statusLabel(c.status)}
                             </span>
@@ -962,7 +936,7 @@ export default function VerificationV2Page() {
   }, [jobId])
 
   return (
-    <div className="verify-page" style={{ padding: 16, maxWidth: 1400, margin: '0 auto' }}>
+    <div className="verify-page p-4 max-w-[1400px] mx-auto">
       <style>{`
         @media print {
           @page { margin: 3mm 15mm 2mm 15mm; size: A4; }
@@ -1014,29 +988,25 @@ export default function VerificationV2Page() {
         }
       `}</style>
 
-      <div className="v2-no-print" style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-        <h2 style={{ margin: 0, fontSize: 18 }}>검증 — 6단계 파이프라인</h2>
-        <span style={{
-          fontSize: 10, padding: '2px 8px',
-          background: 'var(--cims-success-soft)', color: 'var(--cims-success)',
-          borderRadius: 4, fontWeight: 600,
-        }}>
+      <div className="v2-no-print flex items-center gap-3 mb-3">
+        <h2 className="m-0 text-xl">검증 — 6단계 파이프라인</h2>
+        <span className="text-[10px] py-0.5 px-2 bg-success-soft text-success rounded-[4px] font-semibold">
           LIVE
         </span>
         {loading && (
-          <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>로딩 중…</span>
+          <span className="text-sm text-muted-foreground">로딩 중…</span>
         )}
         {error && (
-          <span style={{ fontSize: 12, color: 'var(--destructive)', maxWidth: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span className="text-sm text-destructive max-w-[600px] overflow-hidden text-ellipsis whitespace-nowrap">
             <AlertTriangle size={13} className="inline align-[-2px]" /> {error}
           </span>
         )}
         {lastRunId !== null && (
-          <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
+          <span className="text-sm text-muted-foreground">
             마지막 회차: <a href="/release/verify-history">#{lastRunId}</a>
           </span>
         )}
-        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)' }}>
+        <span className="ml-auto text-xs text-muted-foreground">
           이력: <a href="/release/verify-history">/release/verify-history</a>
         </span>
       </div>

@@ -90,9 +90,9 @@ function CopyBlock({ label, text, mono, pre }: {
     if (await copyText(text)) { setCopied(true); setTimeout(() => setCopied(false), 1200) }
   }
   return (
-    <div style={{ marginBottom: 8 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
-        <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{label}</span>
+    <div className="mb-2">
+      <div className="flex items-center gap-2 mb-[3px]">
+        <span className="text-xs text-muted-foreground">{label}</span>
         <Button variant="ghost" onClick={copy}>{copied ? '복사됨' : '복사'}</Button>
       </div>
       {pre ? (
@@ -110,7 +110,7 @@ function CopyBlock({ label, text, mono, pre }: {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{ marginTop: 12 }}>
+    <div className="mt-3">
       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted-foreground)',
                     letterSpacing: '0.04em', marginBottom: 6 }}>{title}</div>
       {children}
@@ -127,22 +127,21 @@ function ApiRow({ a }: { a: ApiDoc }) {
 
   return (
     <div style={{ borderBottom: '1px solid var(--border)', padding: '10px 0' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <Badge variant={METHOD_COLOR[a.method.toUpperCase()] || 'neutralSoft'}
-              style={{ minWidth: 54, textAlign: 'center' }}>{a.method.toUpperCase()}</Badge>
+      <div className="flex items-center gap-2 flex-wrap">
+        <Badge className="min-w-[54px] text-center" variant={METHOD_COLOR[a.method.toUpperCase()] || 'neutralSoft'}>{a.method.toUpperCase()}</Badge>
         <code style={{ fontSize: 12.5, wordBreak: 'break-all' }}>{a.path}</code>
         {a.module && <Badge variant="neutralSoft"  title="이 API 를 제공하는 모듈">{a.module}</Badge>}
-        <span style={{ flex: 1 }} />
+        <span className="flex-1"/>
         <Button variant="ghost" onClick={() => setOpen(o => !o)}>
           {open ? '접기' : '상세'}
         </Button>
       </div>
       {a.summary && (
-        <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginTop: 4 }}>{a.summary}</div>
+        <div className="text-sm text-muted-foreground mt-1">{a.summary}</div>
       )}
 
       {open && (
-        <div style={{ marginTop: 6, paddingLeft: 4 }}>
+        <div className="mt-1.5 pl-1">
           <Section title="요청">
             <CopyBlock label="경로" text={a.path} mono />
             <CopyBlock label="curl 예시" text={toCurl(a)} pre />
@@ -164,13 +163,13 @@ function ApiRow({ a }: { a: ApiDoc }) {
                 </tbody>
               </DataTable>
             ) : (
-              <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>파라미터 없음</div>
+              <div className="text-sm text-muted-foreground">파라미터 없음</div>
             )}
           </Section>
 
           <Section title="응답">
             {a.response && (
-              <div style={{ fontSize: 12, marginBottom: 6 }}><code>{a.response}</code></div>
+              <div className="text-sm mb-1.5"><code>{a.response}</code></div>
             )}
             {fields.length > 0 && (
               <DataTable sticky className="[&_td]:text-sm">
@@ -190,7 +189,7 @@ function ApiRow({ a }: { a: ApiDoc }) {
               </DataTable>
             )}
             {a.example !== undefined && (
-              <div style={{ marginTop: 8 }}>
+              <div className="mt-2">
                 <CopyBlock label="예시 (합성 데이터)"
                            text={JSON.stringify(a.example, null, 2)} pre />
               </div>
@@ -216,13 +215,13 @@ function ApiRow({ a }: { a: ApiDoc }) {
           )}
 
           <Section title="비고">
-            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, display: 'grid', gap: 3 }}>
+            <ul className="m-0 pl-[18px] text-sm grid gap-[3px]">
               {notes.map((n, i) => <li key={i}>{n}</li>)}
               {a.auth && <li><b>인증</b> — {authText(a.auth)}
                 {typeof a.auth !== 'string' && (a.auth as ApiDocAuth).token_from && (
                   <> · 토큰 발급: <code>{(a.auth as ApiDocAuth).token_from}</code></>
                 )}</li>}
-              <li style={{ color: 'var(--muted-foreground)' }}><b>id</b> — <code>{a.id}</code></li>
+              <li className="text-muted-foreground"><b>id</b> — <code>{a.id}</code></li>
             </ul>
           </Section>
         </div>
@@ -286,7 +285,7 @@ export default function WidgetApiBadge({ ids, title, overlay, sourceIds }: {
         <Modal title={`${'</>'} ${title || '위젯'} — 사용 API`} onClose={() => setOpen(false)}
                width="min(940px, 96vw)">
             <div>
-              <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 10 }}>
+              <div className="text-sm text-muted-foreground mb-2.5">
                 {docs.length}건. 각 API 를 구현한 모듈이 선언한 정보이며, 모듈이 설치·가용할 때만 표시됩니다.
                 예시는 합성 데이터입니다.
               </div>
