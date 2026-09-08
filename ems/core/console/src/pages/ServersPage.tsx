@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, ChevronRight, Hourglass, Lock, LockOpen, Pencil, Play, RefreshCw, RotateCw, Search, ShieldCheck, Square, Stethoscope, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, ChevronRight, Hourglass, Lock, LockOpen, Pencil, Play, RefreshCw, RotateCw, Search, ShieldCheck, Stethoscope, Trash2 } from 'lucide-react'
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Alert } from '../components/ui/alert'
@@ -33,7 +33,7 @@ import { ApiError } from '../api/client'
 import { useToast } from '../components/Toast'
 import { InfoDot } from '../components/InfoDot'
 import Modal from '../components/Modal'
-import { agentStatusColor, depStatusColor, depEffectiveStatus, fmtRelTime } from './deploy/deployHelpers'
+import { agentStatusColor, depEffectiveStatus, fmtRelTime } from './deploy/deployHelpers'
 import ModuleConfigModal, { sectionForScope } from '../components/module/ModuleConfigModal'
 import { GroupConfigCompareView } from '../components/group/GroupConfigCompareView'
 import HealthCheckModal from '../components/HealthCheckModal'
@@ -2557,15 +2557,6 @@ function ControlTab({ agent: a, deployments, packages, onJob }: {
 
 // 모듈 상태 셀 — 실측(depEffectiveStatus) 단일 표시. running/stopped 는 실제
 // 프로세스 상태 그 자체다 (metric 주기상 최대 30초 지연만 존재).
-function DepStatusCell({ dep: d }: { dep: Deployment }) {
-  const shown = depEffectiveStatus(d)
-  return (
-    <span className="tag" style={{
-      background: depStatusColor(shown), color: '#fff', fontSize: 10, padding: '1px 6px', borderRadius: 3,
-    }}>{shown}</span>
-  )
-}
-
 // 프로세스 제어 버튼 3종 — ControlTab(서버)·GroupControlMatrix(그룹) 공용.
 // pending(미설치) 은 전부 비활성 — 설치는 [패키지 설치] 탭.
 /**
@@ -2724,56 +2715,73 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
 
   // 멤버 서버 셀에 붙는 유지보수 토글 (AS 만).
   const maintCtl = (agentId: number) => isAS ? (
-    <div style={{ marginTop: 6, display: 'flex', gap: 4 }}>
-      <button className="btn btn--sm" style={{ fontSize: 11, padding: '1px 6px' }}
-              disabled={!!busy} onClick={() => doMaintenance(agentId, true)}
+    <div className="mt-1.5 flex gap-1.5" onClick={e => e.stopPropagation()}>
+      <Button disabled={!!busy} onClick={() => doMaintenance(agentId, true)}
               title="이 노드를 승격 대상에서 제외(유지보수). 모듈 정지 + 이 노드로 절체 안 됨.">
-        🔧 점검
-      </button>
-      <button className="btn btn--sm" style={{ fontSize: 11, padding: '1px 6px' }}
-              disabled={!!busy} onClick={() => doMaintenance(agentId, false)}
+        점검
+      </Button>
+      <Button disabled={!!busy} onClick={() => doMaintenance(agentId, false)}
               title="유지보수 해제 — role 기반 재기동으로 standby 재합류.">
         복귀
-      </button>
+      </Button>
     </div>
   ) : null
 
+  // 시안 G4(121:2535)의 상단 Danger 경고 — **VIP 가 있는 그룹에서만** 유효하다
+  // (decisions.md §7). 대체 경로가 없다는 사실을 일괄 버튼 바로 위에서 알린다.
+  const vipIp = ((group.vip_bindings || []).find(b => /admin|oam|mgmt/i.test(b.slot || ''))
+                 || (group.vip_bindings || [])[0])?.ip || group.vip || ''
   return (
-    <div style={{ padding: 20, overflow: 'auto' }}>
-      <h4 style={{ marginTop: 0 }}>멤버별 프로세스 제어 — {group.name}</h4>
-      <p style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
-        그룹 멤버 전체의 모듈 프로세스 상태를 한눈에 보고 시작/재시작/정지합니다.
-        설치/재설치/롤백은 [패키지 설치] 탭에서 수행합니다.
-      </p>
-      {/* 그룹 일괄 제어 바 — 서비스 의도 전환(무장/비무장) + 수동 절체 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-                    padding: '10px 12px', marginBottom: 12, background: 'var(--muted)',
-                    border: '1px solid var(--border)', borderRadius: 4 }}>
-        <span style={{ fontSize: 12, fontWeight: 600 }}>그룹 일괄 제어</span>
-        <button className="btn btn--sm btn--primary" disabled={!!busy}
-                onClick={() => batch('start')}
-                title="그룹 서비스 시작 — 서비스 의도를 running 으로 두고 무장(VIP 활성). 기준 멤버가 Active 로 기동.">
-          <Play size={13} /> 일괄 시작
-        </button>
-        <button className="btn btn--sm" disabled={!!busy}
-                onClick={() => batch('restart')}
-                title="그룹 전 멤버 재시작 — AS 는 standby 먼저, active 는 유예 하에 재시작(절체 없음, 순단 1회).">
-          ⟳ 일괄 재시작
-        </button>
-        <button className="btn btn--sm btn--danger" disabled={!!busy}
-                onClick={() => batch('stop')}
-                title="그룹 서비스 중지 — 의도를 stopped 로 두고 비무장(VIP 내려감) + 전 모듈 정지.">
-          <Square size={13} /> 일괄 중지
-        </button>
-        {isAS && (
-          <button className="btn btn--sm" disabled={!!busy || group.active_agent_id == null}
-                  onClick={() => doFailover()}
-                  title={group.active_agent_id == null
-                    ? 'Active 판정 불가 — 잠시 후 재시도'
-                    : '수동 절체 — 현재 Active 에서 Standby 로 서비스를 넘김(스위치오버).'}>
-            ⇄ 수동 절체{activeName ? ` (현재 ${activeName})` : ''}
-          </button>
+    <div className="overflow-auto px-4 pt-3.5">
+      {vipIp && (
+        <Alert variant="danger" className="mb-5">
+          <div className="font-medium">동시 정지·재시작은 VIP 서비스 중단을 유발합니다</div>
+          <div className="mt-0.5 text-xs opacity-90">
+            {group.name} 그룹은 VRRP vrid {group.vrid} 로 VIP {vipIp} 을 서비스합니다.
+            멤버 {group.members.length}대를 동시에 내리면 대체 경로가 없습니다.
+          </div>
+        </Alert>
+      )}
+      {/* 그룹 일괄 제어 — 프로세스 제어와 HA 절체는 위험도가 달라 **구분선으로 가른다**
+          (decisions.md §6 · 시안 409:5152). */}
+      <div className="rounded-lg bg-muted p-3.5">
+        <div className="text-md font-semibold">그룹 일괄 제어</div>
+        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+          <Button disabled={!!busy} onClick={() => batch('start')}
+                  title="그룹 서비스 시작 — 서비스 의도를 running 으로 두고 무장(VIP 활성). 기준 멤버가 Active 로 기동.">
+            일괄 시작
+          </Button>
+          <Button disabled={!!busy} onClick={() => batch('restart')}
+                  title="그룹 전 멤버 재시작 — AS 는 standby 먼저, active 는 유예 하에 재시작(절체 없음, 순단 1회).">
+            일괄 재시작
+          </Button>
+          <Button variant="destructive" disabled={!!busy} onClick={() => batch('stop')}
+                  title="그룹 서비스 중지 — 의도를 stopped 로 두고 비무장(VIP 내려감) + 전 모듈 정지.">
+            일괄 중지
+          </Button>
+          {isAS && (
+            <>
+              <span className="mx-1.5 h-5 w-px shrink-0 bg-border-strong" aria-hidden />
+              <Button disabled={!!busy || group.active_agent_id == null}
+                      onClick={() => doFailover()}
+                      title={group.active_agent_id == null
+                        ? 'Active 판정 불가 — 잠시 후 재시도'
+                        : '수동 절체 — 현재 Active 에서 Standby 로 서비스를 넘김(스위치오버).'}>
+                수동 절체{activeName ? ` (현재 ${activeName})` : ''}
+              </Button>
+            </>
+          )}
+        </div>
+        {isAS && group.active_agent_id == null && (
+          // 비활성 사유는 눈에 보이게 (contracts.md §Button)
+          <div className="mt-1.5 text-xs text-muted-foreground">
+            [수동 절체] 는 Active 노드가 판정된 뒤 열립니다.
+          </div>
         )}
+      </div>
+      <div className="mt-5">
+        <TitleRow title="멤버별 프로세스 제어"
+                  hint="설치 · 재설치 · 롤백은 [패키지 설치] 탭에서 수행합니다" />
       </div>
       {/* 절체 래치 — 그 노드는 승격 불가다. 노드 로컬 판정이라 예전에는 콘솔에 아무 표시가
           없어, 래치 걸린 노드로는 절체가 영영 안 되는 것을 운영자가 알 수 없었다(실측). */}
@@ -2817,65 +2825,81 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
           {group.failover_op.error && <span style={{ color: '#c62828' }}> · 오류: {group.failover_op.error}</span>}
         </div>
       )}
-      <table className="data-table">
+      {/* 컬럼 폭은 Figma G4(185:2874) 실측. **행 = 멤버 하나**이고 모듈은 셀 안에서 쌓인다 —
+          모듈마다 행을 나누면 같은 멤버 안에도 가로줄이 생겨 "멤버 간 비교" 라는 이 표의
+          목적이 흐려진다. */}
+      <DataTable className="mt-2.5">
         <thead>
-          <tr><th>서버</th><th>서버 상태</th><th>모듈 · 버전</th><th>모듈 상태</th><th style={{ width: 220 }}>제어</th></tr>
+          <tr>
+            <Th width={170}>서버</Th>
+            <Th width={120}>서버 상태</Th>
+            <Th width={200}>모듈 · 버전</Th>
+            <Th width={110}>모듈 상태</Th>
+            <Th width={222}>제어</Th>
+          </tr>
         </thead>
         <tbody>
           {group.members.map(m => {
             const ag = agents.find(a => a.id === m.agent_id)
             const deps = (depsByAgent.get(m.agent_id) || []).filter(d => d.status !== 'removed')
-            const serverCells = (
-              <>
-                <td style={{ cursor: 'pointer' }} onClick={() => onSelectMember(m.agent_id)}
+            return (
+              <tr key={m.agent_id}>
+                <Td className="cursor-pointer align-top"
+                    onClick={() => onSelectMember(m.agent_id)}
                     title="클릭 시 해당 서버 선택">
-                  <b>{agentDisplayName(ag?.name || `#${m.agent_id}`)}</b>
-                  <span onClick={e => e.stopPropagation()}>{maintCtl(m.agent_id)}</span>
-                </td>
-                <td>
-                  <span style={{ color: agentStatusColor(ag?.status || 'offline').bar, fontSize: 12 }}>
-                    ● {ag?.status || '—'}
-                  </span>
-                </td>
-              </>
-            )
-            if (deps.length === 0) {
-              return (
-                <tr key={m.agent_id}>
-                  {serverCells}
-                  <td colSpan={3} style={{ color: 'var(--muted-foreground)' }}>배포된 모듈 없음</td>
-                </tr>
-              )
-            }
-            return deps.map((d, i) => (
-              <tr key={`${m.agent_id}:${d.id}`}>
-                {i === 0 ? (
+                  {agentDisplayName(ag?.name || `#${m.agent_id}`)}
+                  {maintCtl(m.agent_id)}
+                </Td>
+                <Td className="align-top">
+                  <StatusDot status={ag?.status || 'offline'} />
+                </Td>
+                {deps.length === 0 ? (
+                  // ES-3 — 행은 남기고 이 셀만 문구로, 제어 버튼은 내지 않는다
+                  <Td colSpan={3} className="align-top text-muted-foreground">배포된 모듈 없음</Td>
+                ) : (
                   <>
-                    <td rowSpan={deps.length} style={{ cursor: 'pointer', verticalAlign: 'top' }}
-                        onClick={() => onSelectMember(m.agent_id)} title="클릭 시 해당 서버 선택">
-                      <b>{agentDisplayName(ag?.name || `#${m.agent_id}`)}</b>
-                      <span onClick={e => e.stopPropagation()}>{maintCtl(m.agent_id)}</span>
-                    </td>
-                    <td rowSpan={deps.length} style={{ verticalAlign: 'top' }}>
-                      <span style={{ color: agentStatusColor(ag?.status || 'offline').bar, fontSize: 12 }}>
-                        ● {ag?.status || '—'}
-                      </span>
-                    </td>
+                    <Td className="align-top">
+                      <div className="flex flex-col gap-2.5">
+                        {deps.map(d => (
+                          <span key={d.id} className="flex h-[26px] items-center gap-1.5"
+                                title={d.process_name && d.process_name !== d.package_name
+                                  ? `프로세스: ${d.process_name}` : undefined}>
+                            {d.package_name}
+                            <span className="font-mono text-sm text-muted-foreground">
+                              v{d.package_version}
+                            </span>
+                          </span>
+                        ))}
+                      </div>
+                    </Td>
+                    <Td className="align-top">
+                      <div className="flex flex-col gap-2.5">
+                        {deps.map(d => (
+                          <span key={d.id} className="flex h-[26px] items-center">
+                            <StatusDot tone={depTone(depEffectiveStatus(d))}
+                                       label={depEffectiveStatus(d)} />
+                          </span>
+                        ))}
+                      </div>
+                    </Td>
+                    <Td className="align-top">
+                      <div className="flex flex-col gap-2.5">
+                        {deps.map(d => (
+                          <ProcessControlButtons key={d.id} dep={d} agent={ag} onJob={onJob} />
+                        ))}
+                      </div>
+                    </Td>
                   </>
-                ) : null}
-                <td style={{ fontSize: 12 }}>
-                  <b>{d.process_name || d.package_name}</b>{' '}
-                  <span style={{ color: 'var(--muted-foreground)' }}>{d.package_name} v{d.package_version}</span>
-                </td>
-                <td>
-                  <DepStatusCell dep={d} />
-                </td>
-                <td><ProcessControlButtons dep={d} agent={ag} onJob={onJob} /></td>
+                )}
               </tr>
-            ))
+            )
           })}
         </tbody>
-      </table>
+      </DataTable>
+      <div className="mt-2.5 text-xs text-muted-foreground">
+        uptime · PID · 메모리는 멤버 상세(트리에서 서버 선택)에서 확인합니다.
+        그룹 화면은 멤버 간 상태 일치 여부에 집중합니다.
+      </div>
     </div>
   )
 }
