@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Maximize2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Maximize2, Play } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { callsApi, type CallLog } from '@core/api/calls'
 import { statsApi, type OrgStat } from '@core/api/stats'
@@ -79,7 +79,7 @@ function HourHeatmap({ hours, selHour, onPick }: { hours: Record<string, number>
  fontWeight: on ? 700 : undefined,
  background: on && c.v === 0 ? 'color-mix(in srgb, var(--primary) 10%, transparent)'
                 : c.v > 0 ? `color-mix(in srgb, var(--primary) ${Math.round(ratio * 100)}%, var(--card))` : 'var(--secondary)',
- color: ratio > 0.55 ? '#fff' : 'var(--foreground)',
+ color: ratio > 0.55 ? 'var(--cims-on-solid)' : 'var(--foreground)',
             }}>
             <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.3, height: 16 }}>{c.v > 0 ? c.v : ' '}</div>
             <div style={{ fontSize: 9, lineHeight: 1.3, height: 12, color: ratio > 0.55 ? 'rgba(255,255,255,.8)' : 'var(--muted-foreground)' }}>{c.h}</div>
@@ -358,7 +358,7 @@ function CallRow({ l, isOpen, st, dur, flow, onToggle, onOpenDiagram, onOpenRec 
         <Td className="whitespace-nowrap text-sm text-muted-foreground">{l.end_reason_ko || l.end_reason || '—'}</Td>
         <Td align="center" className="whitespace-nowrap" onClick={e => e.stopPropagation()}>
           {l.has_recording
-            ? <Button onClick={onOpenRec}>&#9654; 녹취</Button>
+            ? <Button onClick={onOpenRec}><Play size={11} className="mr-1 inline align-[-1px]" />녹취</Button>
             : <span className="text-muted-foreground">—</span>}
         </Td>
       </tr>
@@ -431,7 +431,7 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
  return (
                       <button key={n} onClick={() => toggleNode(n)} title={`${NODE_LABEL[n] || n.toUpperCase()} 메시지 표시/숨김`}
  style={{ fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 10, cursor: 'pointer',
- border: `1px solid ${color}`, color: on ? '#fff' : color, background: on ? color : 'transparent', opacity: on ? 1 : 0.55 }}>
+ border: `1px solid ${color}`, color: on ? 'var(--cims-on-solid)' : color, background: on ? color : 'transparent', opacity: on ? 1 : 0.55 }}>
                         {NODE_LABEL[n] || n.toUpperCase()}
                       </button>
                     )
@@ -480,10 +480,10 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
                               <Td className="whitespace-nowrap text-[10px] text-muted-foreground">{(m.nodeId || m.node || '').toUpperCase()}</Td>
                               <Td className="whitespace-nowrap text-sm">{(() => {
  const d = inferDir(m)
- return d ? <span style={{ fontSize: 9, fontWeight: 700, color: '#fff', background: d === 'TX' ? '#2563eb' : '#16a34a', borderRadius: 3, padding: '1px 5px' }}>{d}</span>
+ return d ? <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--cims-on-solid)', background: d === 'TX' ? '#2563eb' : '#16a34a', borderRadius: 3, padding: '1px 5px' }}>{d}</span>
                                   : <span className="text-muted-foreground">—</span>
                               })()}</Td>
-                              <Td className="whitespace-nowrap text-sm"><span style={{ fontSize: 9, fontWeight: 700, color: '#fff', background: protoColor(proto), borderRadius: 3, padding: '1px 5px' }}>{proto}</span></Td>
+                              <Td className="whitespace-nowrap text-sm"><span style={{ fontSize: 9, fontWeight: 700, color: 'var(--cims-on-solid)', background: protoColor(proto), borderRadius: 3, padding: '1px 5px' }}>{proto}</span></Td>
                               <Td className="whitespace-nowrap text-sm font-semibold" style={{ color: protoColor(proto) }}>{m.label || ''}</Td>
                             </tr>
                           )

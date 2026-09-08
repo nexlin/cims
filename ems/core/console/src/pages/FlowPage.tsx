@@ -223,15 +223,15 @@ function FlowDiagram({ actors, messages, selIdx, onSelect }: FlowDiagramProps) {
   return (
     <div ref={containerRef} style={{ flex: '1 1 50%', overflow: 'auto', minWidth: 0, borderRight: '1px solid var(--border)' }}>
       {/* 노드 헤더 (sticky) */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--card)', borderBottom: '1px solid #e0e2ea' }}>
+      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--card)', borderBottom: '1px solid var(--border)' }}>
         <svg className="font-mono text-sm block" width={svgWidth} height={HEAD_H}>
           {actors.map(a => {
             const x = actorX(a, actors, colW)
             return (
               <g key={a}>
                 <rect x={x - 45} y={8} width={90} height={28} rx={4}
-                  fill="#ffffff" stroke="#2563eb" strokeWidth={1.5} />
-                <text x={x} y={26} textAnchor="middle" fill="#1a1d2e" fontWeight="bold" fontSize={11}>
+                  fill="var(--card)" stroke="var(--cims-info)" strokeWidth={1.5} />
+                <text x={x} y={26} textAnchor="middle" fill="var(--foreground)" fontWeight="bold" fontSize={11}>
                   {actorLabel(a)}
                 </text>
               </g>
@@ -246,7 +246,7 @@ function FlowDiagram({ actors, messages, selIdx, onSelect }: FlowDiagramProps) {
         {actors.map(a => {
           const x = actorX(a, actors, colW)
           return <line key={a} x1={x} y1={0} x2={x} y2={messages.length * ROW_H + 10}
-            stroke="#d0d5dd" strokeWidth={1} strokeDasharray="4 3" />
+            stroke="var(--border)" strokeWidth={1} strokeDasharray="4 3" />
         })}
         {messages.map((msg, i) => {
           const y   = i * ROW_H
@@ -259,8 +259,8 @@ function FlowDiagram({ actors, messages, selIdx, onSelect }: FlowDiagramProps) {
           return (
             <g className="cursor-pointer" key={i} onClick={() => onSelect(i)}>
               <rect x={0} y={y} width={svgWidth} height={ROW_H}
-                fill={isSelected ? '#dbeafe' : 'transparent'} />
-              <text x={4} y={y + 14} fill="#6b7280" fontSize={10}>{msg.ts.slice(0, 12)}</text>
+                fill={isSelected ? 'var(--cims-brand-soft)' : 'transparent'} />
+              <text x={4} y={y + 14} fill="var(--muted-foreground)" fontSize={10}>{msg.ts.slice(0, 12)}</text>
               {dir !== 0 && <>
                 <line x1={x1} y1={y + ARROW_Y_OFFSET} x2={arrowTip} y2={y + ARROW_Y_OFFSET}
                   stroke={col} strokeWidth={isSelected ? 2 : 1.5}
@@ -328,13 +328,13 @@ export function SequenceDiagram({ messages: rawMessages, onSelect, selectedIdx }
         return (
           <g key={a}>
             <rect x={x - 45} y={8} width={90} height={28} rx={4}
-              fill="#ffffff" stroke="#2563eb" strokeWidth={1.5} />
-            <text x={x} y={26} textAnchor="middle" fill="#1a1d2e" fontWeight="bold">
+              fill="var(--card)" stroke="var(--cims-info)" strokeWidth={1.5} />
+            <text x={x} y={26} textAnchor="middle" fill="var(--foreground)" fontWeight="bold">
               {actorLabel(a)}
             </text>
             {/* 수직 생명선 */}
             <line x1={x} y1={38} x2={x} y2={height - 10}
-              stroke="#d0d5dd" strokeWidth={1} strokeDasharray="4 3" />
+              stroke="var(--border)" strokeWidth={1} strokeDasharray="4 3" />
           </g>
         )
       })}
@@ -348,7 +348,7 @@ export function SequenceDiagram({ messages: rawMessages, onSelect, selectedIdx }
         const dir = x2 > x1 ? 1 : -1
         const arrowTip = x2 - dir * 10
         const isSelected = selectedIdx === i
-        const bgColor = isSelected ? '#dbeafe' : 'transparent'
+        const bgColor = isSelected ? 'var(--cims-brand-soft)' : 'transparent'
 
         return (
           <g className="cursor-pointer" key={i} onClick={() => onSelect(i)}>
@@ -357,7 +357,7 @@ export function SequenceDiagram({ messages: rawMessages, onSelect, selectedIdx }
               fill={bgColor} opacity={1} />
 
             {/* 타임스탬프 */}
-            <text x={4} y={y + 14} fill="#6b7280" fontSize={10}>{msg.ts.slice(0, 12)}</text>
+            <text x={4} y={y + 14} fill="var(--muted-foreground)" fontSize={10}>{msg.ts.slice(0, 12)}</text>
 
             {/* 화살선 (응답은 점선) */}
             <line x1={x1} y1={y + ARROW_Y_OFFSET} x2={arrowTip} y2={y + ARROW_Y_OFFSET}
@@ -399,7 +399,7 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
     <div style={{
       overflowY: 'auto',
       height: '100%',
-      border: '1px solid #e0e2ea',
+      border: '1px solid var(--border)',
       borderRadius: 6,
       background: 'var(--card)',
     }}>
@@ -429,8 +429,8 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
               >
                 <td style={tdStyle}>{i + 1}</td>
                 <td style={tdStyle}>{msg.ts.slice(0, 12)}</td>
-                <td style={{ ...tdStyle, color: '#1a1d2e' }}>
-                  {actorLabel(msg.from)}<span style={{ color: '#7a8fa8' }}>{'\u2192'}</span>{actorLabel(msg.to)}
+                <td style={{ ...tdStyle, color: 'var(--foreground)' }}>
+                  {actorLabel(msg.from)}<span style={{ color: 'var(--muted-foreground)' }}>{'\u2192'}</span>{actorLabel(msg.to)}
                 </td>
                 <td style={{ ...tdStyle, color: 'var(--muted-foreground)', fontSize: 10 }}>
                   {/* \uae30\ub85d \uc8fc\uccb4 \ud504\ub85c\uc138\uc2a4\uba85+ID (flow \ud30c\uc77c \uc18c\uc720\uc790, \uc608: CSP_01) \u2014 nodeId \uc5c6\uc73c\uba74(\uad6c \uc751\ub2f5) node \ub85c \ud3f4\ubc31 */}
@@ -441,7 +441,7 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
                     const d = inferDir(msg)
                     return d ? (
                       <span style={{ display: 'inline-block', padding: '1px 5px', borderRadius: 3,
-                        fontSize: 9, fontWeight: 700, color: '#fff',
+                        fontSize: 9, fontWeight: 700, color: 'var(--cims-on-solid)',
                         background: d === 'TX' ? '#2563eb' : '#16a34a' }}>{d}</span>
                     ) : <span className="text-muted-foreground">\u2014</span>
                   })()}
@@ -453,7 +453,7 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
                     borderRadius: 3,
                     fontSize: 10,
                     fontWeight: 600,
-                    color: '#fff',
+                    color: 'var(--cims-on-solid)',
                     background: protoColor(msg.proto),
                   }}>
                     {msg.proto}
@@ -476,15 +476,15 @@ const thStyle: React.CSSProperties = {
   padding: '6px 8px',
   color: 'var(--muted-foreground)',
   fontWeight: 600,
-  borderBottom: '1px solid #e0e2ea',
+  borderBottom: '1px solid var(--border)',
   whiteSpace: 'nowrap',
 }
 
 const tdStyle: React.CSSProperties = {
   padding: '4px 8px',
-  color: '#8a9ab0',
+  color: 'var(--muted-foreground)',
   whiteSpace: 'nowrap',
-  borderBottom: '1px solid #e0e2ea',
+  borderBottom: '1px solid var(--border)',
 }
 
 // ── main ─────────────────────────────────────────────────────────────────
@@ -630,7 +630,7 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
               </span>
             ))}
             <span className="flex items-center gap-[3px]">
-              <svg width={22} height={10}><line x1={0} y1={5} x2={22} y2={5} stroke="#8a9ab0" strokeWidth={1.5} strokeDasharray="5 3" /></svg>
+              <svg width={22} height={10}><line x1={0} y1={5} x2={22} y2={5} stroke="var(--muted-foreground)" strokeWidth={1.5} strokeDasharray="5 3" /></svg>
               응답 (요청과 같은 색)
             </span>
           </span>
@@ -659,11 +659,11 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
                 <MessageList messages={messages} selectedIdx={selIdx} onSelect={handleSelect} />
               </div>
               {/* 메시지 상세 (하단 50%) */}
-              <div style={{ flex: '1 1 50%', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderTop: '1px solid #e0e2ea', minHeight: 0 }}>
+              <div style={{ flex: '1 1 50%', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderTop: '1px solid var(--border)', minHeight: 0 }}>
                 {selected ? (
                   <>
                     <div className="flex-none py-2 px-3 flex gap-2 items-center border-b border-border bg-muted">
-                      <Badge  style={{ backgroundColor: protoColor(selected.proto), color: '#fff' }}>{selected.proto}</Badge>
+                      <Badge  style={{ backgroundColor: protoColor(selected.proto), color: 'var(--cims-on-solid)' }}>{selected.proto}</Badge>
                       <span className="font-semibold text-sm">{selected.label}</span>
                       <span className="text-sm text-muted-foreground">{actorLabel(selected.from)} {'\u2192'} {actorLabel(selected.to)}</span>
                       <span className="text-sm text-muted-foreground ml-auto">{selected.ts}</span>
@@ -671,14 +671,14 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
                     <pre style={{
                       flex: 1, margin: 0, padding: 12, overflow: 'auto',
                       background: 'var(--card)', fontSize: 12, lineHeight: 1.5,
-                      color: '#1a1d2e', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                      color: 'var(--foreground)', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
                       minHeight: 0,
                     }}>
                       {bodyLoading ? '...' : (formatMsgBody(bodyText) || '(body 없음)')}
                     </pre>
                   </>
                 ) : (
-                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8a9ab0', fontSize: 13 }}>
+                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted-foreground)', fontSize: 13 }}>
                     메시지를 선택하세요
                   </div>
                 )}
