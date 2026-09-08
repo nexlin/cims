@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import type { ConfigTemplateField } from '../../api/deployment'
 import { Button } from '@core/components/ui/button'
 import { Plus, X } from 'lucide-react'
+import { Input } from '@core/components/ui/input'
 
 type Item = Record<string, unknown>
 
@@ -120,19 +121,19 @@ function defaultCell(f: ConfigTemplateField, v: unknown, on: (nv: unknown) => vo
   }
   if (f.type === 'int') {
     return (
-      <input className="form-input" type="number" min={f.min} max={f.max}
+      <Input  type="number" min={f.min} max={f.max}
         value={v === null || v === undefined ? '' : Number(v)}
         onChange={e => on(e.target.value === '' ? null : Number(e.target.value))} />
     )
   }
   if (f.type === 'password') {
     return (
-      <input className="form-input" type="password" value={(v as string) ?? ''}
+      <Input  type="password" value={(v as string) ?? ''}
         onChange={e => on(e.target.value)} />
     )
   }
   return (
-    <input className="form-input" type="text" value={(v as string) ?? ''}
+    <Input  type="text" value={(v as string) ?? ''}
       onChange={e => on(e.target.value)} />
   )
 }

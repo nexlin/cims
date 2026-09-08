@@ -11,6 +11,7 @@ import { usePageParam } from '../widgets/pageParams'
 import { eventTypeLabel, fmtTime, downloadCsv } from '../utils/alarmLabels'
 import { RotateCw } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
+import { Input } from '@core/components/ui/input'
 
 const PAGE_SIZE = 20
 const FETCH_LIMIT = 5000
@@ -109,7 +110,7 @@ export function AuditEventsSection() {
           <option value="ended">종료</option>
           <option value="denied">거절</option>
         </select>
-        <input className="search-input" style={{ width: 220 }} placeholder="행위자/그룹/세션/대상 검색"
+        <Input className="flex-1" style={{ width: 220 }} placeholder="행위자/그룹/세션/대상 검색"
                value={q} onChange={e => setQ(e.target.value)} />
         <Button variant="ghost" onClick={exportCsv} style={{ marginLeft: 'auto' }}
                 disabled={filtered.length === 0}>CSV</Button>

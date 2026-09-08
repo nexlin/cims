@@ -12,6 +12,7 @@ import { authApi } from '../api/auth'
 import { setElevatedToken } from '../api/client'
 import { roleRank } from '../utils/permissions'
 import { Button } from '@core/components/ui/button'
+import { Input } from '@core/components/ui/input'
 
 export default function AdminElevateDialog({ onClose, onElevated }: {
   onClose: () => void
@@ -56,9 +57,9 @@ export default function AdminElevateDialog({ onClose, onElevated }: {
           admin 계정으로 인증하면 <b>30분간</b> 이 브라우저 탭에서 변경이 허용됩니다.
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <input className="form-input" placeholder="admin 계정 ID" value={loginId}
+          <Input  placeholder="admin 계정 ID" value={loginId}
                  onChange={e => setLoginId(e.target.value)} disabled={working} />
-          <input className="form-input" type="password" placeholder="패스워드" value={password}
+          <Input  type="password" placeholder="패스워드" value={password}
                  onChange={e => setPassword(e.target.value)} disabled={working}
                  onKeyDown={e => { if (e.key === 'Enter') void submit() }}
                  autoFocus />

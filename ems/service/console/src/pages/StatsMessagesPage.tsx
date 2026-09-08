@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '@core/api/client'
 import { useToast } from '@core/components/Toast'
 import { Button } from '@core/components/ui/button'
+import { Input } from '@core/components/ui/input'
 
 interface MsgStats {
   date: string
@@ -30,7 +31,7 @@ export default function StatsMessagesPage({ iface }: { iface: string }) {
   return (
     <div>
       <div className="toolbar">
-        <input type="date" className="form-input" value={date} onChange={e => setDate(e.target.value)} style={{ width: 150 }} />
+        <Input type="date" value={date} onChange={e => setDate(e.target.value)} style={{ width: 150 }} />
         <Button variant="default" onClick={load}>조회</Button>
         {data && <span className="ts" style={{ marginLeft: 'auto' }}>총 {data.total}건</span>}
       </div>

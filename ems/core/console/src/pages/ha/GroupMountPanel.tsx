@@ -206,20 +206,20 @@ export function GroupMountPanel({ declared, members, applying, onApply }: {
             <tr className="bg-warning-soft">
               <Td>
                 <ImeSafeInput value={target} onCommit={setTarget} placeholder={MOUNT_DEFAULTS.target}
-                              className="form-input font-mono" />
+                              className="font-mono" />
               </Td>
               <Td>
                 <ImeSafeInput value={source} onCommit={setSource} placeholder={MOUNT_DEFAULTS.source}
-                              className="form-input font-mono" />
+                              className="font-mono" />
               </Td>
               <Td>
-                <select value={fstype} onChange={e => setFstype(e.target.value)} className="form-input">
+                <select value={fstype} onChange={e => setFstype(e.target.value)}>
                   {FSTYPES.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
               </Td>
               <Td>
                 <ImeSafeInput value={options} onCommit={setOptions} placeholder={MOUNT_DEFAULTS.options}
-                              className="form-input font-mono" />
+                              className="font-mono" />
               </Td>
               <Td colSpan={2}>
                 {/* 빈칸이어도 활성 — 그대로 누르면 위 placeholder 값이 그대로 적용된다. */}

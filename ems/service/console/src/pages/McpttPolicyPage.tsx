@@ -5,6 +5,7 @@ import { InfoDot } from '@core/components/InfoDot'
 import { useAuth } from '@core/contexts/AuthContext'
 import { hasRole } from '@core/utils/permissions'
 import { Button } from '@core/components/ui/button'
+import { Input } from '@core/components/ui/input'
 
 // ── MCPTT 정책 (TS 24.484 service-config) ────────────────────────────────────
 //  시스템 전역 1건. 단말이 XCAP 으로 이 문서를 받아 **시스템 정책 게이트**로 쓰고, 사용자별 인가
@@ -114,7 +115,7 @@ export default function McpttPolicyPage() {
           <div key={String(f.key)} title={f.tag}
             style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px',
                      border: '1px solid var(--border)', borderRadius: 6 }}>
-            <input className="form-input" type="number" min={f.min} max={f.max} disabled={!canEdit}
+            <Input  type="number" min={f.min} max={f.max} disabled={!canEdit}
               style={{ width: 90 }} value={Number(form[f.key])}
               onChange={e => setForm({ ...form, [f.key]: Number(e.target.value) })} />
             <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>

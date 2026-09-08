@@ -10,6 +10,7 @@ import {
   type ConsoleAccount, type ConsoleRole,
 } from '../api/consoleAccounts'
 import { Button } from '@core/components/ui/button'
+import { Input } from '@core/components/ui/input'
 
 type Form = { login_id: string; name: string; role: ConsoleRole; email: string; password: string }
 const EMPTY: Form = { login_id: '', name: '', role: 'operator', email: '', password: '' }
@@ -94,11 +95,11 @@ export default function ConsoleAccountsPage() {
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap',
                       padding: 12, background: 'var(--secondary)', borderRadius: 8, marginBottom: 12 }}>
           <Field label="아이디 *" w={150}>
-            <input className="form-input" value={form.login_id} disabled={!!editId} autoFocus={!editId}
+            <Input  value={form.login_id} disabled={!!editId} autoFocus={!editId}
                    onChange={e => setForm({ ...form, login_id: e.target.value })} />
           </Field>
           <Field label="이름" w={140}>
-            <input className="form-input" value={form.name} autoFocus={!!editId}
+            <Input  value={form.name} autoFocus={!!editId}
                    onChange={e => setForm({ ...form, name: e.target.value })} />
           </Field>
           <Field label="권한" w={130}>
@@ -108,12 +109,12 @@ export default function ConsoleAccountsPage() {
             </select>
           </Field>
           <Field label="이메일" w={180}>
-            <input className="form-input" value={form.email}
+            <Input  value={form.email}
                    onChange={e => setForm({ ...form, email: e.target.value })} />
           </Field>
           {!editId && (
             <Field label="비밀번호 *" w={150}>
-              <input className="form-input" type="password" value={form.password}
+              <Input  type="password" value={form.password}
                      onChange={e => setForm({ ...form, password: e.target.value })} />
             </Field>
           )}

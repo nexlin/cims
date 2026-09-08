@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { usersApi, type UserSummary } from '../api/users'
+import { Input } from '@core/components/ui/input'
 
 // ── 가입자/번호 자동완성 피커 ─────────────────────────────────
 //  PTT 그룹 멤버·착신전환 등에서 raw MSISDN 수기입력을 대체.
@@ -96,8 +97,7 @@ export default function SubscriberPicker({
 
   return (
     <div ref={boxRef} style={{ position: 'relative', flex: 1, minWidth: 0 }}>
-      <input
-        className="form-input"
+      <Input
         style={{ width: '100%', fontSize: 12 }}
         placeholder={placeholder ?? (kind === 'user' ? '이름/조직 검색' : '이름·번호 검색')}
         value={q}

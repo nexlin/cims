@@ -19,6 +19,7 @@ import { usePageParam, todayIso } from '@core/widgets/pageParams'
 import type { WidgetDef, WidgetPlacement } from '@core/widgets/types'
 import { RotateCw } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
+import { Input } from '@core/components/ui/input'
 
 interface ReclaimItem {
   ts: string; node: string; session_id: string; sesid: string
@@ -119,7 +120,7 @@ function FilterBlock() {
   const n = data?.counts.total ?? 0
   return (
     <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
-      <input type="date" className="form-input" value={date || todayIso()} style={{ width: 150 }}
+      <Input type="date" value={date || todayIso()} style={{ width: 150 }}
              onChange={e => setDate(e.target.value)} />
       <Button variant="ghost" title="다시 조회" onClick={reload}><RotateCw size={14} /></Button>
       <InfoDot label="누수 회수란?">

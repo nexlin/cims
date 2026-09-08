@@ -8,6 +8,7 @@ import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { DataTable, Th, Td, orDash } from '../../components/custom/data-table'
 import { useConfirm } from '../../components/custom/confirm'
+import { Input } from '@core/components/ui/input'
 
 // ServiceIpPanel — 인터페이스별 cims-managed IP 추가/삭제 + specific route 관리.
 // 모델: 각 IP 가 row (iface, ip 단위). agent 가 보고한 interfaces.managed=true 인 IP 만
@@ -203,7 +204,7 @@ export function ServiceIpPanel({ title, section = 'both', interfaces, storedRows
                         {isVip ? (
                           <span className="text-muted-foreground">{slot || '—'}</span>
                         ) : (
-                          <ImeSafeInput value={slot} placeholder="(용도)" className="form-input"
+                          <ImeSafeInput value={slot} placeholder="(용도)"
                                         onCommit={(v) => {
                                           if (v !== slot) onUpdateSlot(iface, ni.ip, ni.mask, v)
                                         }} />
@@ -239,7 +240,7 @@ export function ServiceIpPanel({ title, section = 'both', interfaces, storedRows
           {addOpen && (
             <tr className="bg-warning-soft">
               <Td>
-                <select value={addIface} onChange={e => setAddIface(e.target.value)} className="form-input">
+                <select value={addIface} onChange={e => setAddIface(e.target.value)}>
                   {addableIfaces.length === 0 && <option value="">(없음)</option>}
                   {addableIfaces.map(name => <option key={name} value={name}>{name}</option>)}
                 </select>
@@ -247,19 +248,18 @@ export function ServiceIpPanel({ title, section = 'both', interfaces, storedRows
               <Td>
                 <div className="flex items-center gap-1.5">
                   <span className="inline-block w-[120px]">
-                    <input value={addIp} placeholder="10.0.3.45" className="form-input font-mono"
+                    <Input value={addIp} placeholder="10.0.3.45" className="font-mono"
                            onChange={e => setAddIp(e.target.value)} />
                   </span>
                   <span className="text-muted-foreground">/</span>
                   <span className="inline-block w-[56px]">
-                    <input type="number" value={addMask} className="form-input font-mono"
+                    <Input type="number" value={addMask} className="font-mono"
                            onChange={e => setAddMask(parseInt(e.target.value) || 24)} />
                   </span>
                 </div>
               </Td>
               <Td>
-                <ImeSafeInput value={addSlot} onCommit={setAddSlot} placeholder="(용도)"
-                              className="form-input" />
+                <ImeSafeInput value={addSlot} onCommit={setAddSlot} placeholder="(용도)" />
               </Td>
               <Td colSpan={2} align="right">
                 <div className="flex items-center justify-end gap-1.5">
@@ -324,13 +324,12 @@ export function ServiceIpPanel({ title, section = 'both', interfaces, storedRows
                   <Td mono>{r.dst}</Td>
                   <Td>
                     <span className="inline-block w-[140px]">
-                      <input value={routeEditVia} className="form-input font-mono"
+                      <Input value={routeEditVia} className="font-mono"
                              onChange={e => setRouteEditVia(e.target.value)} />
                     </span>
                   </Td>
                   <Td>
-                    <select value={routeEditDev} onChange={e => setRouteEditDev(e.target.value)}
-                            className="form-input">
+                    <select value={routeEditDev} onChange={e => setRouteEditDev(e.target.value)}>
                       {routableIfaces.map(d => <option key={d} value={d}>{d}</option>)}
                     </select>
                   </Td>
@@ -370,15 +369,15 @@ export function ServiceIpPanel({ title, section = 'both', interfaces, storedRows
           {routeAddOpen && (
             <tr className="bg-warning-soft">
               <Td>
-                <input value={routeDst} placeholder="192.168.100.0/24" className="form-input font-mono"
+                <Input value={routeDst} placeholder="192.168.100.0/24" className="font-mono"
                        onChange={e => setRouteDst(e.target.value)} />
               </Td>
               <Td>
-                <input value={routeVia} placeholder="10.0.3.1" className="form-input font-mono"
+                <Input value={routeVia} placeholder="10.0.3.1" className="font-mono"
                        onChange={e => setRouteVia(e.target.value)} />
               </Td>
               <Td>
-                <select value={routeDev} onChange={e => setRouteDev(e.target.value)} className="form-input">
+                <select value={routeDev} onChange={e => setRouteDev(e.target.value)}>
                   {routableIfaces.map(d => <option key={d} value={d}>{d}</option>)}
                   {routableIfaces.length === 0 && <option value="">(없음)</option>}
                 </select>

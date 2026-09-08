@@ -4,6 +4,7 @@ import { statsApi, type MessagesResponse, type ServiceStatsResponse,
 import { useToast } from '@core/components/Toast'
 import { RotateCw } from 'lucide-react'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
+import { Input } from '@core/components/ui/input'
 
 type SubTab = 'messages' | 'service'
 type Granularity = '1m' | '5m' | '10m' | '1h' | '1d' | '1w' | '1M' | '1y'
@@ -195,7 +196,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
 
         <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 8px' }} />
 
-        <input className="form-input" type="date" value={date}
+        <Input  type="date" value={date}
           onChange={e => setDate(e.target.value)} style={{ width: 150 }} />
 
         {subTab === 'service' && (

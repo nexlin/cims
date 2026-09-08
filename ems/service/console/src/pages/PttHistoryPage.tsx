@@ -26,6 +26,7 @@ import {
 } from '@svc/components/pttSession'
 import { Button } from '@core/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
+import { Input } from '@core/components/ui/input'
 
 // ── 종류 ────────────────────────────────────────────────────────
 // group = TS 24.481 그룹 문서를 갖는 편성 엔티티, private = 1:1 (TS 24.379 §11.1),
@@ -334,7 +335,7 @@ export default function PttHistoryPage() {
       <div className="toolbar">
         <Button variant="ghost" disabled={range !== 'day'}
                 onClick={() => setDate(d => shiftDay(d, -1))} title="이전 날"><ChevronLeft size={13} /></Button>
-        <input type="date" className="form-input" value={date} style={{ width: 150 }}
+        <Input type="date" value={date} style={{ width: 150 }}
                onChange={e => setDate(e.target.value)} aria-label="조회 날짜" />
         <Button variant="ghost" disabled={range !== 'day' || date >= todayStr()}
                 onClick={() => setDate(d => shiftDay(d, 1))} title="다음 날"><ChevronRight size={13} /></Button>
@@ -347,15 +348,15 @@ export default function PttHistoryPage() {
         </ToggleGroup>
         {range === 'custom' && (
           <>
-            <input type="date" className="form-input" value={fromDate} style={{ width: 150 }}
+            <Input type="date" value={fromDate} style={{ width: 150 }}
                    max={toDate} onChange={e => setFrom(e.target.value)} aria-label="시작 날짜" />
             <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>~</span>
-            <input type="date" className="form-input" value={toDate} style={{ width: 150 }}
+            <Input type="date" value={toDate} style={{ width: 150 }}
                    min={fromDate} max={todayStr()} onChange={e => setTo(e.target.value)} aria-label="종료 날짜" />
           </>
         )}
         <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
-        <input className="search-input" placeholder="그룹·번호·세션키 검색" style={{ maxWidth: 240 }}
+        <Input className="flex-1" placeholder="그룹·번호·세션키 검색" style={{ maxWidth: 240 }}
                value={searchInput} onChange={e => setSearchInput(e.target.value)} />
         {q && <Button variant="ghost" onClick={() => setSearchInput('')}>검색 해제</Button>}
         <Button variant="default" onClick={load}>새로고침</Button>
@@ -763,7 +764,7 @@ function PersonFilter({ value, candidates, names, open, onToggleMenu, onChange }
           borderRadius: 8, boxShadow: 'var(--cims-elevation-lg)',
         }}>
           <div style={{ padding: '2px 4px 6px' }}>
-            <input className="form-input" autoFocus placeholder="이름·번호로 찾기 (Enter=번호 직접)"
+            <Input  autoFocus placeholder="이름·번호로 찾기 (Enter=번호 직접)"
                    value={input} onChange={e => setInput(e.target.value)}
                    onKeyDown={e => { if (e.key === 'Enter' && input.trim()) onChange(input.trim()) }} />
           </div>

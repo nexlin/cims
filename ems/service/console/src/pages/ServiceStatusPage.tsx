@@ -9,6 +9,7 @@ import {
 import { useToast } from '@core/components/Toast'
 import { Button } from '@core/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
+import { Input } from '@core/components/ui/input'
 
 // ── 공통 유틸 ─────────────────────────────────────────────
 export function fmtDur(sec: number): string {
@@ -532,7 +533,7 @@ export function OrgStatsCard() {
         </div>
       )}
       <div className="toolbar" style={{ marginBottom: 8 }}>
-        <input className="search-input" placeholder="가입자 이름/번호 검색 (전체)" value={searchInput}
+        <Input className="flex-1" placeholder="가입자 이름/번호 검색 (전체)" value={searchInput}
           onChange={e => setSearchInput(e.target.value)} style={{ maxWidth: 280 }} />
         {q && <Button variant="ghost" onClick={() => setSearchInput('')}>검색 해제</Button>}
         <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>
@@ -628,7 +629,7 @@ export function SubscriberLookup() {
           {tabBtn('online', '접속 중', counts.online)}
           {tabBtn('all', '전체', counts.all)}
         </ToggleGroup>
-        <input className="search-input" placeholder="이름/번호 검색" value={searchInput} onChange={e => setSearchInput(e.target.value)} style={{ maxWidth: 200 }} />
+        <Input className="flex-1" placeholder="이름/번호 검색" value={searchInput} onChange={e => setSearchInput(e.target.value)} style={{ maxWidth: 200 }} />
       </div>
       {loading ? <Loading />
         : subs.length === 0 ? <div className="empty">{status === 'active' ? '이용 중인 가입자가 없습니다' : q ? '검색 결과가 없습니다' : '가입자가 없습니다'}</div>

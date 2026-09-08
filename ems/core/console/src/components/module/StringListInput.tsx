@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Input } from '@core/components/ui/input'
 
 /** string_list/ref_list 콤마 구분 입력 ↔ string[].
  *  배열 파생값(join)으로 input 을 직접 그리면 타이핑한 끝 콤마가 빈 조각 필터로
@@ -20,7 +21,7 @@ export default function StringListInput({ value, placeholder, onChange }: {
     if (parse(text).join(', ') !== canonical) setText(canonical)
   }
   return (
-    <input className="form-input" type="text" value={text}
+    <Input  type="text" value={text}
       placeholder={placeholder || '콤마로 구분'}
       onChange={e => {
         setText(e.target.value)

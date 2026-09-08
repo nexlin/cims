@@ -23,6 +23,7 @@ import {
   fmtTime, durationBetween, downloadCsv,
 } from '../utils/alarmLabels'
 import { Button } from '@core/components/ui/button'
+import { Input } from '@core/components/ui/input'
 
 const PAGE_SIZE = 20
 const FETCH_LIMIT = 5000   // 서버 상한 — 창 안 레코드가 이보다 많으면 최신순 절단(표기)
@@ -188,7 +189,7 @@ export function AlarmHistoryFilter() {
         <option value="">클래스 전체</option>
         {types.map(t => <option key={t} value={t}>{alarmTypeLabel(t)}</option>)}
       </select>
-      <input className="search-input" style={{ width: 170 }} placeholder="소스/메시지 검색"
+      <Input className="flex-1" style={{ width: 170 }} placeholder="소스/메시지 검색"
              value={f.q} onChange={e => alertsFilter.setAlarm({ q: e.target.value })} />
       <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, whiteSpace: 'nowrap' }}>
         <input type="checkbox" checked={f.showResolved}
@@ -394,7 +395,7 @@ function AlarmHistoryDetail({ r, isOpen, onAck, onComment }: {
           {r.ack_state !== 'acknowledged' && (
             <Button disabled={!r.alarm_id} onClick={() => onAck(r.alarm_id)}>승인</Button>
           )}
-          <input className="form-input" style={{ width: 280 }} placeholder="코멘트 입력 후 Enter"
+          <Input  style={{ width: 280 }} placeholder="코멘트 입력 후 Enter"
                  value={text} onChange={e => setText(e.target.value)}
                  onKeyDown={e => {
                    if (e.key === 'Enter' && text.trim()) { onComment(r.alarm_id, text.trim()); setText('') }
@@ -477,7 +478,7 @@ export function EventHistoryFilter() {
         <option value="">유형 전체</option>
         {types.map(t => <option key={t} value={t}>{eventTypeLabel(t)}</option>)}
       </select>
-      <input className="search-input" style={{ width: 180 }} placeholder="코드/소스/메시지 검색"
+      <Input className="flex-1" style={{ width: 180 }} placeholder="코드/소스/메시지 검색"
              value={f.q} onChange={e => alertsFilter.setEvent({ q: e.target.value })} />
       <Button variant="ghost" onClick={exportCsv} disabled={filtered.length === 0}>CSV</Button>
       {/* 실시간 감시 — 켜면 30초마다 자동 조회. 갱신 시각을 함께 보여준다: 값이 안 바뀌는

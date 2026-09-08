@@ -25,6 +25,7 @@ import { GRID_COLS, GRID_ROWS } from './widgets/gridLayout'
 import type { ComponentType } from 'react'
 import './index.css'
 import { Button } from '@core/components/ui/button'
+import { Input } from '@core/components/ui/input'
 
 const SIDEBAR_COLLAPSED_KEY = 'cims_sidebar_collapsed'
 
@@ -232,11 +233,11 @@ function Shell() {
               <div className="modal-body">
                 <div className="form-grid">
                   <label>현재 비밀번호</label>
-                  <input className="form-input" type="password" value={oldPw} onChange={e => setOldPw(e.target.value)} />
+                  <Input  type="password" value={oldPw} onChange={e => setOldPw(e.target.value)} />
                   <label>새 비밀번호</label>
-                  <input className="form-input" type="password" value={newPw} onChange={e => setNewPw(e.target.value)} />
+                  <Input  type="password" value={newPw} onChange={e => setNewPw(e.target.value)} />
                   <label>새 비밀번호 확인</label>
-                  <input className="form-input" type="password" value={newPw2} onChange={e => setNewPw2(e.target.value)} />
+                  <Input  type="password" value={newPw2} onChange={e => setNewPw2(e.target.value)} />
                 </div>
                 {chgError && <div className="auth-error" style={{ marginTop: 12 }}>{chgError}</div>}
                 {chgOk && <div className="auth-ok" style={{ marginTop: 12 }}>{chgOk}</div>}

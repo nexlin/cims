@@ -14,6 +14,7 @@ import {
 } from '../pageParams'
 import { Button } from '@core/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
+import { Input } from '@core/components/ui/input'
 
 // 'YYYY-MM-DD HH:MM' ↔ datetime-local('YYYY-MM-DDTHH:MM')
 const toInput = (v: string) => (v || '').replace(' ', 'T').slice(0, 16)
@@ -58,11 +59,11 @@ function PageFilterWidget({ config }: WidgetProps) {
     <div className="panel" style={{ padding: '10px 12px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <span style={{ fontWeight: 600, fontSize: 13 }}>조회 구간</span>
-        <input className="form-input" type="datetime-local" value={toInput(from)}
+        <Input  type="datetime-local" value={toInput(from)}
                onChange={e => applyRange(fromInput(e.target.value), to)}
                style={{ width: 190, fontSize: 12 }} />
         <span style={{ color: 'var(--muted-foreground)' }}>~</span>
-        <input className="form-input" type="datetime-local" value={toInput(to)}
+        <Input  type="datetime-local" value={toInput(to)}
                onChange={e => applyRange(from, fromInput(e.target.value))}
                style={{ width: 190, fontSize: 12 }} />
         {PRESETS.map(p => (

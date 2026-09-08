@@ -14,6 +14,7 @@ import { useToast } from '@core/components/Toast'
 import { useAuth } from '@core/contexts/AuthContext'
 import { hasRole } from '@core/utils/permissions'
 import { Button } from '@core/components/ui/button'
+import { Input } from '@core/components/ui/input'
 
 // ── 관제 그룹 (dispatch_center.md §3) ─────────────────────────
 //  관제 그룹 = 픽업 그룹 + (선택) 대표번호 + (선택) 감청 범위. id 가 곧 가입자 pickup_group 값이라
@@ -136,7 +137,7 @@ export default function DispatchGroupsPage() {
       <div className="panel" style={{ flex: 1, minWidth: 0 }}>
         <div className="toolbar">
           <span style={{ fontWeight: 600, fontSize: 13 }}>{orgName}</span>
-          <input className="search-input" placeholder="그룹명·ID·대표번호 검색" value={search}
+          <Input className="flex-1" placeholder="그룹명·ID·대표번호 검색" value={search}
             onChange={e => setSearch(e.target.value)} style={{ maxWidth: 220 }} />
           {search && <Button variant="ghost" onClick={() => setSearch('')}
         aria-label="검색어 지우기"><X size={13} /></Button>}
@@ -269,23 +270,23 @@ function GroupDrawer(p: DrawerProps) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
       {editing ? (
         <FieldRow>
-          <Field label="그룹명 *" w={170}><input className="form-input" autoFocus value={form.name || ''} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
-          <Field label="대표번호" w={120}><input className="form-input" placeholder="예: 7000" title="다이얼 가능한 주소 — 가입 번호와 겹치면 409" value={form.pilot_id || ''} onChange={e => setForm({ ...form, pilot_id: e.target.value.trim() })} /></Field>
-          <Field label="접속서비스" w={110}><input className="form-input" placeholder="volte" title="대표번호가 속한 접속서비스 name — 도메인·SRTP 정책" value={form.service_ref || ''} onChange={e => setForm({ ...form, service_ref: e.target.value.trim() })} /></Field>
+          <Field label="그룹명 *" w={170}><Input  autoFocus value={form.name || ''} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
+          <Field label="대표번호" w={120}><Input  placeholder="예: 7000" title="다이얼 가능한 주소 — 가입 번호와 겹치면 409" value={form.pilot_id || ''} onChange={e => setForm({ ...form, pilot_id: e.target.value.trim() })} /></Field>
+          <Field label="접속서비스" w={110}><Input  placeholder="volte" title="대표번호가 속한 접속서비스 name — 도메인·SRTP 정책" value={form.service_ref || ''} onChange={e => setForm({ ...form, service_ref: e.target.value.trim() })} /></Field>
           <Field label="호출 방식" w={120}>
             <select className="form-input" value={form.alert_mode || 'parallel'} onChange={e => setForm({ ...form, alert_mode: e.target.value as DispatchGroup['alert_mode'] })}>
               <option value="parallel">병렬 (전원 동시)</option>
               <option value="sequential">순차 (후속)</option>
             </select>
           </Field>
-          <Field label="무응답(초)" w={80}><input className="form-input" type="number" min={5} value={form.no_answer_sec ?? 30} onChange={e => setForm({ ...form, no_answer_sec: Number(e.target.value) })} /></Field>
+          <Field label="무응답(초)" w={80}><Input  type="number" min={5} value={form.no_answer_sec ?? 30} onChange={e => setForm({ ...form, no_answer_sec: Number(e.target.value) })} /></Field>
           <Field label="통화 중 그룹원" w={120}>
             <select className="form-input" value={form.busy_members || 'skip'} onChange={e => setForm({ ...form, busy_members: e.target.value as DispatchGroup['busy_members'] })}>
               <option value="skip">호출 안 함</option>
               <option value="alert">호출 (통화대기)</option>
             </select>
           </Field>
-          <Field label="무응답 넘김" w={130}><input className="form-input" placeholder="대표번호/내선" value={form.overflow_target || ''} onChange={e => setForm({ ...form, overflow_target: e.target.value.trim() })} /></Field>
+          <Field label="무응답 넘김" w={130}><Input  placeholder="대표번호/내선" value={form.overflow_target || ''} onChange={e => setForm({ ...form, overflow_target: e.target.value.trim() })} /></Field>
           <Field label="조직" w={170}>
             <select className="form-input" value={form.org_id ?? ''} onChange={e => setForm({ ...form, org_id: e.target.value ? Number(e.target.value) : null })}>
               <option value="">없음</option>
@@ -426,7 +427,7 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
                     <span style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{nameOf.get(m.user_id) || '—'}</span>
                     <span className="ts" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{m.user_id}</span>
                   </span>
-                  <input className="form-input" type="number" title="alert_order" disabled={!canManage} value={m.alert_order} style={{ width: 54 }}
+                  <Input  type="number" title="alert_order" disabled={!canManage} value={m.alert_order} style={{ width: 54 }}
                     onChange={e => onSaveOrder(m.user_id, Number(e.target.value))} />
                   {canManage && <IconBtn title="제거" tone="danger" onClick={() => doRemove([m.user_id])}><ArrowRight size={ICON} /></IconBtn>}
                 </div>
@@ -450,7 +451,7 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
               style={{ flex: '0 0 150px', width: 150, maxWidth: 150, border: 'none', borderRight: '1px solid var(--border)', borderRadius: 0 }} />
             <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>
-                <input className="search-input" placeholder={`${treeName} 내 검색`} value={q} onChange={e => setQ(e.target.value)} style={{ flex: 1, fontSize: 12 }} />
+                <Input className="flex-1" placeholder={`${treeName} 내 검색`} value={q} onChange={e => setQ(e.target.value)} style={{ flex: 1, fontSize: 12 }} />
               </div>
               <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
                 {candidates.length === 0

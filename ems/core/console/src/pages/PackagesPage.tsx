@@ -7,6 +7,7 @@ import PackageUploadModal from './deploy/PackageUploadModal'
 import { fmtSize, fmtRelTime, depEffectiveStatus } from './deploy/deployHelpers'
 import { agentDisplayName } from '../components/agentDisplay'
 import { Button } from '@core/components/ui/button'
+import { Input } from '@core/components/ui/input'
 
 interface ModuleGroup {
   name: string
@@ -124,7 +125,7 @@ export default function PackagesPage() {
         border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)', overflow: 'hidden',
       }}>
         <div style={{ padding: 10, borderBottom: '1px solid var(--border)', display: 'flex', gap: 6 }}>
-          <input className="form-input" placeholder="모듈 검색..."
+          <Input  placeholder="모듈 검색..."
             value={filter} onChange={e => setFilter(e.target.value)}
             style={{ flex: 1 }} />
         </div>

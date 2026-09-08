@@ -80,7 +80,7 @@ export function OamUrlPanel({ title, current, vipCandidate, applying, onApply, o
         <span className="inline-block w-[300px]">
           <ImeSafeInput value={draft} onCommit={setDraft}
                         placeholder={suggested || 'https://<OAM 또는 VIP>:4419'}
-                        className="form-input font-mono" />
+                        className="font-mono" />
         </span>
         {suggested && draft.trim() !== suggested && (
           <Button variant="ghost" onClick={() => setDraft(suggested)}

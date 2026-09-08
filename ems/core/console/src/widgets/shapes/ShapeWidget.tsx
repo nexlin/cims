@@ -13,6 +13,7 @@ import { TimeBarChart, SeriesBarChart, StatValue, DistributionBars, KvTable, Mat
 import { RotateCw } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
+import { Input } from '@core/components/ui/input'
 
 const RENDERERS = {
   'time-bar': TimeBarChart, 'series-bar': SeriesBarChart,
@@ -140,11 +141,11 @@ function ShapeWidgetBody({ shape, config }: { shape: WidgetShape; config?: Recor
         ) : (
           // 페이지 컨트롤이 없는 배치 — 자기 구간 컨트롤을 쓴다(감당 못 할 단위는 비활성).
           <>
-            <input className="form-input" type="datetime-local" value={from.replace(' ', 'T').slice(0, 16)}
+            <Input  type="datetime-local" value={from.replace(' ', 'T').slice(0, 16)}
                    onChange={e => setOwnRange(r => ({ ...r, from: e.target.value.replace('T', ' ') }))}
                    style={{ width: 176, fontSize: 12 }} />
             <span style={{ color: 'var(--muted-foreground)' }}>~</span>
-            <input className="form-input" type="datetime-local" value={to.replace(' ', 'T').slice(0, 16)}
+            <Input  type="datetime-local" value={to.replace(' ', 'T').slice(0, 16)}
                    onChange={e => setOwnRange(r => ({ ...r, to: e.target.value.replace('T', ' ') }))}
                    style={{ width: 176, fontSize: 12 }} />
             <ToggleGroup type="single" value={gran} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"

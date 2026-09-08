@@ -111,7 +111,7 @@ export function NetTuningPanel({ title, agent, applying, onApply }: {
                   <div className="flex items-center gap-1.5">
                     <span className="inline-block w-[140px]">
                       <ImeSafeInput value={rps[name] ?? ''} onCommit={v => setRps(p => ({ ...p, [name]: v }))}
-                                    placeholder={recMask} className="form-input font-mono" />
+                                    placeholder={recMask} className="font-mono" />
                     </span>
                     <Button variant="ghost" disabled={applying}
                             onClick={() => setRps(p => ({ ...p, [name]: recMask }))}>전체코어</Button>
@@ -141,7 +141,7 @@ export function NetTuningPanel({ title, agent, applying, onApply }: {
               <Td>
                 <span className="inline-block w-[140px]">
                   <ImeSafeInput value={sysctl[f.key] ?? ''} onCommit={v => setSysctl(p => ({ ...p, [f.key]: v }))}
-                                placeholder={String(f.def)} className="form-input font-mono" />
+                                placeholder={String(f.def)} className="font-mono" />
                 </span>
               </Td>
               <Td className="text-xs font-normal text-muted-foreground">{f.hint}</Td>

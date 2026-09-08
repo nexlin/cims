@@ -5,6 +5,7 @@ import IconBtn from '@core/components/IconBtn'
 import { orgApi, type Organization, type OrgInput } from '@core/api/organizations'
 import { useToast } from '@core/components/Toast'
 import { Button } from '@core/components/ui/button'
+import { Input } from '@core/components/ui/input'
 
 // ── 트리 빌더 ───────────────────────────────────────────────
 interface TreeNode extends Organization {
@@ -232,7 +233,7 @@ export default function OrganizationsPage() {
                     {/* 조직명 (트리 인덴트) */}
                     <td>
                       {isEditing ? (
-                        <input className="form-input" value={editForm.name}
+                        <Input  value={editForm.name}
                           onChange={e => setEditForm({ ...editForm, name: e.target.value })}
                           style={{ width: '100%' }} autoFocus />
                       ) : (
@@ -253,7 +254,7 @@ export default function OrganizationsPage() {
                     {/* 코드 */}
                     <td>
                       {isEditing ? (
-                        <input className="form-input" value={editForm.code} disabled
+                        <Input  value={editForm.code} disabled
                           style={{ width: '100%', opacity: 0.6 }} />
                       ) : (
                         <span className="ts">{n.code}</span>
@@ -277,7 +278,7 @@ export default function OrganizationsPage() {
                     {/* 정렬 */}
                     <td>
                       {isEditing ? (
-                        <input className="form-input" type="number" value={editForm.sort_order}
+                        <Input  type="number" value={editForm.sort_order}
                           onChange={e => setEditForm({ ...editForm, sort_order: Number(e.target.value) })}
                           style={{ width: '100%' }} />
                       ) : (
@@ -308,15 +309,15 @@ export default function OrganizationsPage() {
                       <td></td>
                       <td>
                         <div style={{ paddingLeft: addDepth * 20 }}>
-                          <input className="form-input" placeholder="조직명 *" value={addForm.name}
+                          <Input  placeholder="조직명 *" value={addForm.name}
                             onChange={e => setAddForm({ ...addForm, name: e.target.value })}
                             autoFocus style={{ width: '100%' }} />
                         </div>
                       </td>
-                      <td><input className="form-input" placeholder="코드 *" value={addForm.code}
+                      <td><Input  placeholder="코드 *" value={addForm.code}
                         onChange={e => setAddForm({ ...addForm, code: e.target.value })} style={{ width: '100%' }} /></td>
                       <td><span className="ts">{n.name}</span></td>
-                      <td><input className="form-input" type="number" value={addForm.sort_order}
+                      <td><Input  type="number" value={addForm.sort_order}
                         onChange={e => setAddForm({ ...addForm, sort_order: Number(e.target.value) })} style={{ width: '100%' }} /></td>
                       <td className="actions">
                         <Button variant="default" onClick={saveAdd}>저장</Button>
@@ -332,10 +333,10 @@ export default function OrganizationsPage() {
               {adding && addAfterId === null ? (
                 <tr style={{ background: 'rgba(74,144,217,0.08)' }}>
                   <td></td>
-                  <td><input className="form-input" placeholder="조직명 *" value={addForm.name}
+                  <td><Input  placeholder="조직명 *" value={addForm.name}
                     onChange={e => setAddForm({ ...addForm, name: e.target.value })}
                     autoFocus style={{ width: '100%' }} /></td>
-                  <td><input className="form-input" placeholder="코드 *" value={addForm.code}
+                  <td><Input  placeholder="코드 *" value={addForm.code}
                     onChange={e => setAddForm({ ...addForm, code: e.target.value })} style={{ width: '100%' }} /></td>
                   <td>
                     <select className="form-input" value={addForm.parent_id ?? ''}
@@ -345,7 +346,7 @@ export default function OrganizationsPage() {
                       {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
                     </select>
                   </td>
-                  <td><input className="form-input" type="number" value={addForm.sort_order}
+                  <td><Input  type="number" value={addForm.sort_order}
                     onChange={e => setAddForm({ ...addForm, sort_order: Number(e.target.value) })} style={{ width: '100%' }} /></td>
                   <td className="actions">
                     <Button variant="default" onClick={saveAdd}>저장</Button>

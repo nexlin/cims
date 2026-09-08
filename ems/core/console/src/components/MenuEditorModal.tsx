@@ -16,6 +16,7 @@ import {
   type CustomSectionDef, type CustomPageDef,
 } from '../menu'
 import { Button } from '@core/components/ui/button'
+import { Input } from '@core/components/ui/input'
 
 interface SectionRow {
   key: string
@@ -178,7 +179,7 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {areas.map(a => (
             <span key={a.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              <input className="form-input" style={{ width: 130 }} value={a.label}
+              <Input  style={{ width: 130 }} value={a.label}
                 onChange={e => setAreaLabel(a.key, e.target.value)} />
               {!a.builtin && (
                 <Button title="영역 삭제 (소속 메뉴는 관리로 이동)"
@@ -215,7 +216,7 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
                     style={{ display: 'inline-flex', alignItems: 'center', gap: 5, width: 190, fontSize: 13 }}>
                     <Lock size={13} /> {r.defaultLabel}
                   </span>
-                : <input className="form-input" style={{ width: 190 }} value={r.label}
+                : <Input  style={{ width: 190 }} value={r.label}
                     placeholder={r.defaultLabel} onChange={e => patchRow(i, { label: e.target.value })} />}
               <select className="form-input" style={{ width: 120 }} value={r.area} disabled={r.locked}
                 title="소속 영역" onChange={e => patchRow(i, { area: e.target.value })}>
@@ -239,7 +240,7 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
               <div style={{ margin: '6px 0 2px 34px' }}>
                 {r.pages.map((p, pi) => (
                   <div key={p.slug} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                    <input className="form-input" style={{ width: 210 }} value={p.title}
+                    <Input  style={{ width: 210 }} value={p.title}
                       onChange={e => setPageTitle(i, pi, e.target.value)} />
                     <code style={muted}>/custom/{p.slug}</code>
                     <Button title="페이지 삭제"

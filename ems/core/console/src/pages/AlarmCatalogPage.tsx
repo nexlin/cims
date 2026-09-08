@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { alertsApi, type AlarmCatalogItem, type AlertRulesResponse } from '../api/alerts'
 import { alarmTypeLabel, sevBadgeClass, severityOf } from '../utils/alarmLabels'
+import { Input } from '@core/components/ui/input'
 
 // ── 알람 코드 사전 (검색 + 표) ──────────────────────────────────────────
 export function AlarmCatalogTable() {
@@ -38,7 +39,7 @@ export function AlarmCatalogTable() {
           <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
             정의 코드 사전 — OAM 평가 규칙 + 모듈 자기보고 등록분
           </span>
-          <input className="form-input" style={{ marginLeft: 'auto', width: 240 }}
+          <Input  style={{ marginLeft: 'auto', width: 240 }}
                  placeholder="코드/클래스/조치 검색" value={q} onChange={e => setQ(e.target.value)} />
         </div>
         {!loaded ? (

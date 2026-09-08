@@ -11,6 +11,7 @@ import { InfoDot } from '@core/components/InfoDot'
 import { abnDerived, abnormal, useAbnormal } from './abnormalStore'
 import { Button } from '@core/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
+import { Input } from '@core/components/ui/input'
 
 const REASON_LABEL: Record<string, { label: string; color: string }> = {
   external_ip:  { label: '외부 IP',     color: 'var(--cims-warning)' },
@@ -32,7 +33,7 @@ export function AbnFilter() {
   const { critical } = abnDerived(s)
   return (
     <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
-      <input type="date" className="form-input" value={s.date} style={{ width: 150 }}
+      <Input type="date" value={s.date} style={{ width: 150 }}
              onChange={e => abnormal.setDate(e.target.value)} />
       <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>범위</span>
       <ToggleGroup type="single" value={String(s.days)} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"

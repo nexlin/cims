@@ -45,6 +45,7 @@ import { hasRole } from '../utils/permissions'
 import AdminElevateDialog from '../components/AdminElevateDialog'
 import { clearElevatedToken, elevationActive } from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
+import { Input } from '@core/components/ui/input'
 
 type Selection =
   | { kind: 'agent'; id: number }
@@ -1200,18 +1201,18 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
                                : '메모 · 저장 시 전 멤버 반영 (AA 는 VRRP 인증 없음)'}>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <FormField label="그룹 이름" required help="트리와 대시보드에 표시되는 이름">
-              <input className="form-input" value={editName}
+              <Input  value={editName}
                      onChange={e => setEditName(e.target.value)} />
             </FormField>
             {isAS && (
               <FormField label="auth_pass" required
                          help="VRRP 인증 비밀번호 — 멤버 간 동일해야 합니다 (최대 8글자)">
-                <input type="password" className="form-input" maxLength={8}
+                <Input type="password" maxLength={8}
                        value={editAuthPass} onChange={e => setEditAuthPass(e.target.value)} />
               </FormField>
             )}
             <FormField label="note" help="운영 메모 (선택)">
-              <input className="form-input" value={editNote}
+              <Input  value={editNote}
                      onChange={e => setEditNote(e.target.value)} />
             </FormField>
           </div>
@@ -1425,14 +1426,14 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
                       </Td>
                       <Td>
                         {vipManual ? (
-                          <input className="form-input font-mono" value={b.ip}
+                          <Input className="font-mono" value={b.ip}
                                  onChange={e => updateBinding(b.bid, { ip: e.target.value })}
                                  placeholder="121.161.164.140"
                                  style={{ width: 130, fontSize: 11, padding: 2 }} />
                         ) : info?.prefix ? (
                           <span className="inline-flex items-center gap-0.5">
                             <span className="font-mono text-muted-foreground">{info.prefix}</span>
-                            <input className="form-input font-mono" value={host}
+                            <Input className="font-mono" value={host}
                                    onChange={e => changeBindingHost(b.bid, e.target.value)}
                                    placeholder="host"
                                    style={{ width: 60, fontSize: 11, padding: 2 }} />
@@ -1446,7 +1447,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
                       </Td>
                       <Td mono>
                         {vipManual ? (
-                          <input className="form-input" type="number" min={8} max={32}
+                          <Input  type="number" min={8} max={32}
                                  value={b.mask || 24}
                                  onChange={e => updateBinding(b.bid, { mask: Number(e.target.value) || 24 })}
                                  style={{ width: 55, fontSize: 11, padding: 2 }} />
@@ -1460,7 +1461,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
                                 <span className="w-[54px] overflow-hidden text-ellipsis">
                                   {m.agent ? agentDisplayName(m.agent.name) : `#${m.agent_id}`}
                                 </span>
-                                <input className="form-input font-mono"
+                                <Input className="font-mono"
                                        value={b.memberIfaces?.[m.agent_id] || ''}
                                        onChange={e => updateBinding(b.bid, {
                                          memberIfaces: { ...(b.memberIfaces || {}),
@@ -1625,44 +1626,44 @@ function FailoverSection({ value, onChange, open, onToggle, dirty }: {
         <div className="p-3">
           <div className="grid grid-cols-1 gap-x-6 gap-y-4 lg:grid-cols-3">
             <FormField label="감시 주기 (초)" help="기본 1초 · 범위 0.5~5초">
-              <input type="number" min={0.5} max={5} step={0.5} className="form-input"
+              <Input type="number" min={0.5} max={5} step={0.5}
                      value={value.advert_int}
                      onChange={e => set('advert_int', Number(e.target.value) || 1)} />
             </FormField>
             <FormField label="점검 주기 (초)" help="health check 실행 간격">
-              <input type="number" min={1} max={60} className="form-input"
+              <Input type="number" min={1} max={60}
                      value={value.health.interval}
                      onChange={e => setHealth('interval', Number(e.target.value) || 2)} />
             </FormField>
             <FormField label="제한 시간 (초)" help="health check 응답 대기 한도">
-              <input type="number" min={1} max={60} className="form-input"
+              <Input type="number" min={1} max={60}
                      value={value.health.timeout}
                      onChange={e => setHealth('timeout', Number(e.target.value) || 3)} />
             </FormField>
 
             <FormField label="장애 판정 (회)" help="연속 실패 N회 → 절체. 절체까지 ≈ 점검주기 × 이 값">
-              <input type="number" min={1} max={60} className="form-input"
+              <Input type="number" min={1} max={60}
                      value={value.health.fall}
                      onChange={e => setHealth('fall', Number(e.target.value) || 2)} />
             </FormField>
             <FormField label="복귀 판정 (회)" help="연속 성공 N회 → 정상">
-              <input type="number" min={1} max={60} className="form-input"
+              <Input type="number" min={1} max={60}
                      value={value.health.rise}
                      onChange={e => setHealth('rise', Number(e.target.value) || 2)} />
             </FormField>
             <FormField label="승격 유예 (초)" help="기본 30초 (0 = 유예 없음) — 승격 직후 cold 모듈 기동 시간 흡수">
-              <input type="number" min={0} max={600} className="form-input"
+              <Input type="number" min={0} max={600}
                      value={value.health.grace_sec ?? 30}
                      onChange={e => setHealth('grace_sec', Number(e.target.value) || 0)} />
             </FormField>
 
             <FormField label="재기동 임계 (회)" help="윈도우 내 연속 실패 횟수 — 넘으면 로컬 재기동을 포기하고 절체">
-              <input type="number" min={1} max={20} className="form-input"
+              <Input type="number" min={1} max={20}
                      value={rl.max_fails}
                      onChange={e => setRestart('max_fails', Number(e.target.value) || 3)} />
             </FormField>
             <FormField label="판정 윈도우 (초)" help="기본 300초">
-              <input type="number" min={10} max={3600} className="form-input"
+              <Input type="number" min={10} max={3600}
                      value={rl.window_sec}
                      onChange={e => setRestart('window_sec', Number(e.target.value) || 300)} />
             </FormField>
@@ -1675,7 +1676,7 @@ function FailoverSection({ value, onChange, open, onToggle, dirty }: {
             </FormField>
             {value.preempt === 'preempt' && (
               <FormField label="복귀 지연 (초)" help="옛 MASTER 가 돌아온 뒤 권한 회수 전 안정화 대기">
-                <input type="number" min={0} max={300} className="form-input"
+                <Input type="number" min={0} max={300}
                        value={value.preempt_delay}
                        onChange={e => set('preempt_delay', Number(e.target.value) || 0)} />
               </FormField>
@@ -3294,7 +3295,7 @@ function AddMemberModal({ group, serverName, mountSuggestion, onClose, onSubmit 
     <Modal title={`${group.name} — 멤버 추가`} onClose={onClose} width={620}>
       <div className="form-grid">
         <label>서버 이름 *</label>
-        <input className="form-input" value={name} disabled={busy}
+        <Input  value={name} disabled={busy}
                onChange={e => setName(e.target.value)} />
         <label style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border)',
                         paddingTop: 10, marginTop: 4 }}>
@@ -3308,11 +3309,11 @@ function AddMemberModal({ group, serverName, mountSuggestion, onClose, onSubmit 
         {mountOn ? (
           <>
             <label>원본 *</label>
-            <input className="form-input" value={mnt.source} disabled={busy}
+            <Input  value={mnt.source} disabled={busy}
                    placeholder="예: nas.example:/export/cims"
                    onChange={e => setMnt(m => ({ ...m, source: e.target.value }))} />
             <label>붙일 위치 *</label>
-            <input className="form-input" value={mnt.target} disabled={busy}
+            <Input  value={mnt.target} disabled={busy}
                    placeholder="/mnt/cims"
                    onChange={e => setMnt(m => ({ ...m, target: e.target.value }))} />
             <label>파일시스템 *</label>
@@ -3521,7 +3522,7 @@ function SystemCreateModal({ onClose, onDone, onCreated, saAgents, mountSuggesti
       {!results ? (
         <div className="flex flex-col gap-3.5">
           <FormField label="이름" required help="트리와 대시보드에 표시되는 이름 (예: Control-Server)">
-            <input className="form-input" value={name} placeholder="예: Control-Server"
+            <Input  value={name} placeholder="예: Control-Server"
               onChange={e => setName(e.target.value)} disabled={creating} />
           </FormField>
           <FormField label="유형" required>
@@ -3535,7 +3536,7 @@ function SystemCreateModal({ onClose, onDone, onCreated, saAgents, mountSuggesti
           {mode === 'active_standby' && (
             <>
               <FormField label="auth_pass" required help="VRRP 인증 비밀번호 — 멤버 간 동일 (최대 8글자)">
-                <input className="form-input" value={authPass} type="password"
+                <Input  value={authPass} type="password"
                   onChange={e => setAuthPass(e.target.value)} disabled={creating} maxLength={8} />
               </FormField>
               {[0, 1].map(i => (
@@ -3575,12 +3576,12 @@ function SystemCreateModal({ onClose, onDone, onCreated, saAgents, mountSuggesti
           {showMount && mountOn && (
             <>
               <FormField label="원본" required>
-                <input className="form-input font-mono" value={mnt.source} disabled={creating}
+                <Input className="font-mono" value={mnt.source} disabled={creating}
                   placeholder="예: nas.example:/export/cims"
                   onChange={e => setMnt(m => ({ ...m, source: e.target.value }))} />
               </FormField>
               <FormField label="붙일 위치" required>
-                <input className="form-input font-mono" value={mnt.target} disabled={creating}
+                <Input className="font-mono" value={mnt.target} disabled={creating}
                   placeholder="/mnt/cims"
                   onChange={e => setMnt(m => ({ ...m, target: e.target.value }))} />
               </FormField>
@@ -3881,7 +3882,7 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
                 {processOptions.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
             ) : (
-              <input className="form-input" value={processName}
+              <Input  value={processName}
                 onChange={e => setProcessName(e.target.value)}
                 placeholder={selectedPkg.name.toUpperCase()} />
             )}
@@ -3899,7 +3900,7 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
         )}
 
         <label>메모</label>
-        <input className="form-input" value={note} onChange={e => setNote(e.target.value)} />
+        <Input  value={note} onChange={e => setNote(e.target.value)} />
       </div>
       <div style={{ marginTop: 12, fontSize: 12, color: 'var(--muted-foreground)' }}>
         ℹ 추가 후 <b>pending</b> 상태로 생성됩니다. 설정을 확인한 뒤

@@ -9,6 +9,7 @@ import { ObjectListEditor } from './ObjectListEditor'
 import { useConfirm } from '../custom/confirm'
 import { Button } from '@core/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
+import { Input } from '@core/components/ui/input'
 
 type Record_ = Record<string, unknown>
 
@@ -522,7 +523,7 @@ function renderInput(f: ConfigTemplateField, value: unknown, onChange: (v: unkno
   }
   if (f.type === 'int') {
     return (
-      <input className="form-input" type="number"
+      <Input  type="number"
         min={f.min} max={f.max}
         value={value === null || value === undefined ? '' : Number(value)}
         onChange={e => onChange(e.target.value === '' ? null : Number(e.target.value))} />
@@ -530,7 +531,7 @@ function renderInput(f: ConfigTemplateField, value: unknown, onChange: (v: unkno
   }
   if (f.type === 'password') {
     return (
-      <input className="form-input" type="password"
+      <Input  type="password"
         value={(value as string) ?? ''}
         onChange={e => onChange(e.target.value)} />
     )
@@ -566,7 +567,7 @@ function renderInput(f: ConfigTemplateField, value: unknown, onChange: (v: unkno
     )
   }
   return (
-    <input className="form-input" type="text"
+    <Input  type="text"
       value={(value as string) ?? ''}
       onChange={e => onChange(e.target.value)} />
   )

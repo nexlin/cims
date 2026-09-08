@@ -12,6 +12,7 @@ import { alarmTypeLabel, sevBadgeClass, fmtTime, formatSec, SEVERITY_LABEL } fro
 import { usePageParam } from '../widgets/pageParams'
 import { Check, MessageSquare, RotateCw } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
+import { Input } from '@core/components/ui/input'
 
 function elapsedSince(ts?: string): string {
   const t = new Date(ts || '').getTime()
@@ -55,7 +56,7 @@ function AlarmDetail({ a, onAck, onComment }: {
         {!a.acked && (
           <Button disabled={!a.alarm_id} onClick={() => onAck(a.alarm_id)}>승인</Button>
         )}
-        <input className="form-input" style={{ width: 280 }} placeholder="코멘트 입력 후 Enter"
+        <Input  style={{ width: 280 }} placeholder="코멘트 입력 후 Enter"
                value={text} onChange={e => setText(e.target.value)}
                onKeyDown={e => {
                  if (e.key === 'Enter' && text.trim()) { onComment(a.alarm_id, text.trim()); setText('') }
@@ -122,7 +123,7 @@ export function ActiveAlarmList() {
     <div className="widget-stack">
 
       <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <input className="search-input" style={{ width: 260 }} placeholder="코드/소스/메시지 검색"
+        <Input className="flex-1" style={{ width: 260 }} placeholder="코드/소스/메시지 검색"
                value={q} onChange={e => setQ(e.target.value)} />
         <span style={{ marginLeft: 'auto', fontSize: 12, color: error ? 'var(--destructive)' : 'var(--muted-foreground)' }}>
           {error ? '갱신 실패 — 표시가 최신이 아닐 수 있음' : lastUpdated ? `갱신 ${fmtTime(new Date(lastUpdated).toISOString())} · 라이브` : ''}

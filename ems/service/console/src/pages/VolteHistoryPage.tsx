@@ -8,6 +8,7 @@ import FlowPage, { SequenceDiagram } from '@core/pages/FlowPage'
 import SegmentPlayer from '@core/components/SegmentPlayer'
 import { useToast } from '@core/components/Toast'
 import { Button } from '@core/components/ui/button'
+import { Input } from '@core/components/ui/input'
 
 function fmtDur(s: number | null) { if (!s || s <= 0) return '—'; const m = Math.floor(s / 60); return m > 0 ? `${m}분 ${s % 60}초` : `${s}초` }
 function fmtClock(iso: string | null | undefined) {
@@ -202,8 +203,8 @@ export default function VolteHistoryPage() {
     <div className="panel" style={{ padding: 10 }}>
       {/* 상단 검색/날짜/표시수 */}
       <div className="toolbar" style={{ marginBottom: 8 }}>
-        <input type="date" className="form-input" value={fDate} onChange={e => setFD(e.target.value)} style={{ width: 150 }} />
-        <input className="search-input" placeholder="가입자 이름/번호 검색" value={searchInput}
+        <Input type="date" value={fDate} onChange={e => setFD(e.target.value)} style={{ width: 150 }} />
+        <Input className="flex-1" placeholder="가입자 이름/번호 검색" value={searchInput}
           onChange={e => setSearchInput(e.target.value)} style={{ maxWidth: 240 }} />
         {q && <Button variant="ghost" onClick={() => setSearchInput('')}>검색 해제</Button>}
         <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>

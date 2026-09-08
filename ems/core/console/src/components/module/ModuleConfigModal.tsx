@@ -20,6 +20,7 @@ import { StickySaveBar } from '../custom/sticky-save-bar'
 import { useConfirm } from '../custom/confirm'
 import { Alert } from '../ui/alert'
 import { ToggleGroup, ToggleGroupItem } from '../ui/toggle-group'
+import { Input } from '@core/components/ui/input'
 
 export type FieldValue = string | number | boolean | null | string[]
 // 'scalar' = 필드(sections) 탭, 나머지 문자열 = collection.key
@@ -770,7 +771,7 @@ function renderInput(f: ConfigTemplateField, value: FieldValue, onChange: (v: Fi
   }
   if (f.type === 'int') {
     return (
-      <input className="form-input" type="number"
+      <Input  type="number"
         min={f.min} max={f.max}
         value={value === null || value === undefined ? '' : Number(value)}
         onChange={e => {
@@ -781,7 +782,7 @@ function renderInput(f: ConfigTemplateField, value: FieldValue, onChange: (v: Fi
   }
   if (f.type === 'password') {
     return (
-      <input className="form-input" type="password"
+      <Input  type="password"
         value={(value as string) ?? ''}
         onChange={e => onChange(e.target.value)} />
     )
@@ -803,7 +804,7 @@ function renderInput(f: ConfigTemplateField, value: FieldValue, onChange: (v: Fi
   }
   // string / path
   return (
-    <input className="form-input" type="text"
+    <Input  type="text"
       value={(value as string) ?? ''}
       onChange={e => onChange(e.target.value)} />
   )

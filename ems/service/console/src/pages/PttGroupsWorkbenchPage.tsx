@@ -13,6 +13,7 @@ import PttGroupActivity from '@svc/components/PttGroupActivity'
 import { useAuth } from '@core/contexts/AuthContext'
 import { canCreateGroup, canManageGroup, hasRole } from '@core/utils/permissions'
 import { Button } from '@core/components/ui/button'
+import { Input } from '@core/components/ui/input'
 
 // ── PTT 그룹 워크벤치 ─────────────────────────────────────────
 //  좌: 조직트리(공유 스코프) | 그룹 DataTable | 행 확장: 속성 편집 + 멤버(다중선택 추가).
@@ -134,7 +135,7 @@ export default function PttGroupsWorkbenchPage() {
       <div className="panel" style={{ flex: 1, minWidth: 0 }}>
         <div className="toolbar">
           <span style={{ fontWeight: 600, fontSize: 13 }}>{orgName}</span>
-          <input className="search-input" placeholder="그룹명·ID 검색" value={search}
+          <Input className="flex-1" placeholder="그룹명·ID 검색" value={search}
             onChange={e => setSearch(e.target.value)} style={{ maxWidth: 220 }} />
           {search && <Button variant="ghost" onClick={() => setSearch('')}
         aria-label="검색어 지우기"><X size={13} /></Button>}
@@ -304,8 +305,8 @@ function GroupDrawer(p: GroupDrawerProps) {
       {/* ── 속성 ── */}
       {editing ? (
         <FieldRow>
-          {isNew && <Field label="그룹 ID *" w={130}><input className="form-input" autoFocus value={form.id || ''} onChange={e => setForm({ ...form, id: e.target.value })} /></Field>}
-          <Field label="그룹명 *" w={160}><input className="form-input" value={form.name || ''} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
+          {isNew && <Field label="그룹 ID *" w={130}><Input  autoFocus value={form.id || ''} onChange={e => setForm({ ...form, id: e.target.value })} /></Field>}
+          <Field label="그룹명 *" w={160}><Input  value={form.name || ''} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
           <Field label="타입" w={150}>
             <select className="form-input" value={form.group_type || 'prearranged'} onChange={e => setForm({ ...form, group_type: e.target.value as GroupExt['group_type'] })}>
               <option value="prearranged">prearranged</option>
@@ -313,7 +314,7 @@ function GroupDrawer(p: GroupDrawerProps) {
               <option value="broadcast">broadcast</option>
             </select>
           </Field>
-          <Field label="우선순위" w={80}><input className="form-input" type="number" value={form.priority ?? 5} onChange={e => setForm({ ...form, priority: Number(e.target.value) })} /></Field>
+          <Field label="우선순위" w={80}><Input  type="number" value={form.priority ?? 5} onChange={e => setForm({ ...form, priority: Number(e.target.value) })} /></Field>
           <Field label="동시 발언" w={110}>
             <select className="form-input" title="floor 동시 발언 정책 — CSP 가 CMP 로 발행"
               value={form.floor_policy || 'single'}
@@ -330,7 +331,7 @@ function GroupDrawer(p: GroupDrawerProps) {
           </Field>
           {form.floor_policy === 'multi' && (
             <Field label={`동시 발언자 수 (2~${MAX_TALKERS_LIMIT})`} w={130}>
-              <input className="form-input" type="number" min={2} max={MAX_TALKERS_LIMIT}
+              <Input  type="number" min={2} max={MAX_TALKERS_LIMIT}
                 title="CMP 화자 슬롯 수 — 이 수만큼 동시에 발언할 수 있다"
                 value={form.max_talkers ?? 2}
                 onChange={e => setForm({ ...form, max_talkers: Number(e.target.value) })} />
@@ -361,8 +362,8 @@ function GroupDrawer(p: GroupDrawerProps) {
             <label title="mcdata-allow-short-data-service (그룹 메시징, TS 24.481)" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.allow_sds ?? true} onChange={e => setForm({ ...form, allow_sds: e.target.checked })} />메시징</label>
             <label title="mcdata-allow-file-distribution (그룹 파일전송)" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.allow_fd || false} onChange={e => setForm({ ...form, allow_fd: e.target.checked })} />파일전송</label>
           </div>
-          <Field label="메시지 최대(byte)" w={110}><input className="form-input" type="number" title="mcdata-on-network-max-data-size-for-SDS (0=무제한)" value={form.max_sds_size ?? 10000} onChange={e => setForm({ ...form, max_sds_size: Number(e.target.value) })} /></Field>
-          <Field label="자동수신 최대(byte)" w={120}><input className="form-input" type="number" title="mcdata-on-network-max-data-size-auto-recv (파일 자동 다운로드 임계)" value={form.max_auto_recv ?? 1048576} onChange={e => setForm({ ...form, max_auto_recv: Number(e.target.value) })} /></Field>
+          <Field label="메시지 최대(byte)" w={110}><Input  type="number" title="mcdata-on-network-max-data-size-for-SDS (0=무제한)" value={form.max_sds_size ?? 10000} onChange={e => setForm({ ...form, max_sds_size: Number(e.target.value) })} /></Field>
+          <Field label="자동수신 최대(byte)" w={120}><Input  type="number" title="mcdata-on-network-max-data-size-auto-recv (파일 자동 다운로드 임계)" value={form.max_auto_recv ?? 1048576} onChange={e => setForm({ ...form, max_auto_recv: Number(e.target.value) })} /></Field>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <Button variant="default" onClick={save}>저장</Button>
             <Button variant="ghost" onClick={() => isNew ? p.onClose() : setEditing(false)}>취소</Button>
@@ -427,7 +428,7 @@ function MemberRow({ m, name, selected, canManage, onToggle, onSave, onRemove }:
       </span>
       {editing ? (
         <>
-          <input className="form-input" type="number" value={pri} title="우선순위" onChange={e => setPri(Number(e.target.value))} style={{ width: 52 }} />
+          <Input  type="number" value={pri} title="우선순위" onChange={e => setPri(Number(e.target.value))} style={{ width: 52 }} />
           <select className="form-input" value={role} onChange={e => setRole(e.target.value as 'chair' | 'participant')} style={{ width: 104 }}>
             <option value="participant">participant</option>
             <option value="chair">chair (의장)</option>
@@ -548,7 +549,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
             가입자 추가 {countChip(candidates.length)}
             <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8, fontWeight: 400, color: 'var(--muted-foreground)' }}>
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>P
-                <input className="form-input" type="number" value={bulkPri} title="추가 시 적용할 우선순위" onChange={e => setBulkPri(Number(e.target.value))} style={{ width: 46 }} /></label>
+                <Input  type="number" value={bulkPri} title="추가 시 적용할 우선순위" onChange={e => setBulkPri(Number(e.target.value))} style={{ width: 46 }} /></label>
               <select className="form-input" value={bulkRole} title="추가 시 적용할 역할" onChange={e => setBulkRole(e.target.value as 'chair' | 'participant')} style={{ width: 116 }}>
                 <option value="participant">participant</option>
                 <option value="chair">chair (의장)</option>
@@ -562,7 +563,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
             {/* 후보 리스트 */}
             <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>
-                <input className="search-input" autoFocus placeholder={`${treeName} 내 검색`} value={q} onChange={e => setQ(e.target.value)} style={{ flex: 1, fontSize: 12 }} />
+                <Input className="flex-1" autoFocus placeholder={`${treeName} 내 검색`} value={q} onChange={e => setQ(e.target.value)} style={{ flex: 1, fontSize: 12 }} />
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', fontSize: 11, color: 'var(--muted-foreground)', borderBottom: '1px solid var(--border)' }}>
                 <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
