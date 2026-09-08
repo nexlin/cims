@@ -3,10 +3,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Modal from '../Modal'
 import { useToast } from '../Toast'
 import {
-  deploymentApi, effectiveScope,
-  type Deployment, type ConfigTemplate, type ConfigTemplateField,
-  type ConfigTemplateSection, type ConfigScope, type DeploymentConfigHa,
-  type ConfigValueSrc,
+ deploymentApi, effectiveScope,
+ type Deployment, type ConfigTemplate, type ConfigTemplateField,
+ type ConfigTemplateSection, type ConfigScope, type DeploymentConfigHa,
+ type ConfigValueSrc,
 } from '../../api/deployment'
 import ModuleConfigEditor, { type ModuleConfigEditorSource } from './ModuleConfigEditor'
 import StringListInput from './StringListInput'
@@ -23,6 +23,7 @@ import { ToggleGroup, ToggleGroupItem } from '../ui/toggle-group'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { fromSel, toSel } from '@core/components/custom/select-value'
+import { EmptyState } from '@core/components/custom/empty-state'
 
 export type FieldValue = string | number | boolean | null | string[]
 // 'scalar' = 필드(sections) 탭, 나머지 문자열 = collection.key
@@ -30,279 +31,277 @@ type Tab = 'scalar' | string
 
 export type ModuleConfigSource =
   | { type: 'deployment'; deployment: Deployment }
-  | { type: 'module';     name: string; version?: string }
+  | { type: 'module'; name: string; version?: string }
 
 interface Props {
-  source: ModuleConfigSource
-  onClose: () => void
-  onDone?: () => void | Promise<void>
+ source: ModuleConfigSource
+ onClose: () => void
+ onDone?: () => void | Promise<void>
   /** 그룹 공통 설정으로 가는 통로 — 시안 S3 의 [그룹 공통 설정 편집 →] (159:3166) */
-  onOpenGroupConfig?: (groupId: number) => void
+ onOpenGroupConfig?: (groupId: number) => void
   // true 면 Modal 오버레이 없이 패널만 렌더 (시스템/인프라 [패키지 설정] 탭의 페이지 임베드).
-  inline?: boolean
+ inline?: boolean
 }
 
 /**
  * 모듈 설정 모달 — deployment 모드 (배포 > 서버) / module 모드 (빌드 · 검증 > 모듈관리) 공용.
  *
  *  - deployment 모드: agent_deployment 레코드 대상. PUT → 이 서버에만 저장 +
- *    update_config job (그룹 전파 없음).
+ * update_config job (그룹 전파 없음).
  *    · AS 그룹 멤버: **서버 개별(유효 scope=system) 설정만** 노출 — 공통(service)
  *      설정·컬렉션은 그룹 탭(GroupConfigCompareView)이 유일한 편집 창구 (R4).
  *    · AA 그룹·standalone: 동기화 개념 없음 — 전체 섹션·컬렉션 편집.
  *  - module 모드:     Phase 1 로컬. PUT → build/dist/config.json (scalar) /
- *                     build/dist/{name}/config/*.jsonl (collection) + 로컬 PID SIGUSR1.
+ * build/dist/{name}/config/*.jsonl (collection) + 로컬 PID SIGUSR1.
  */
 export default function ModuleConfigModal({ source: sourceProp, onClose, onDone, inline,
-                                           onOpenGroupConfig }: Props) {
+ onOpenGroupConfig }: Props) {
   // 부모(ServersPage 등)가 주기 폴링으로 재렌더하며 source 객체를 매번 새로 만들면
   // fetch/editor 의 useEffect 가 재실행돼 편집값이 서버 값으로 덮어써진다 —
   // mount 시점 스냅샷으로 identity 고정 (모듈 전환은 caller 가 key 로 리마운트).
-  const [source] = useState(sourceProp)
-  const { show } = useToast()
-  const [loading, setLoading]     = useState(true)
-  const [saving, setSaving]       = useState(false)
-  const [template, setTemplate]   = useState<ConfigTemplate | null>(null)
-  const [values, setValues]       = useState<Record<string, FieldValue>>({})
-  const [initial, setInitial]     = useState<Record<string, FieldValue>>({})
+ const [source] = useState(sourceProp)
+ const { show } = useToast()
+ const [loading, setLoading]     = useState(true)
+ const [saving, setSaving]       = useState(false)
+ const [template, setTemplate]   = useState<ConfigTemplate | null>(null)
+ const [values, setValues]       = useState<Record<string, FieldValue>>({})
+ const [initial, setInitial]     = useState<Record<string, FieldValue>>({})
   // 값의 출처 — 'injected' 는 배포 시 OAM 이 채운 값(운영자 입력 아님). 배지 표시용.
-  const [srcMap, setSrcMap]       = useState<Record<string, ConfigValueSrc>>({})
-  const [appliedAt, setAppliedAt] = useState<string | null>(null)
-  const [tab, setTab]             = useState<Tab>('scalar')
+ const [srcMap, setSrcMap]       = useState<Record<string, ConfigValueSrc>>({})
+ const [appliedAt, setAppliedAt] = useState<string | null>(null)
+ const [tab, setTab]             = useState<Tab>('scalar')
   // HA 그룹 컨텍스트 (deployment 모드 + 그룹 멤버일 때만) — 있으면 공통/개별 탭 분리.
-  const [ha, setHa]               = useState<DeploymentConfigHa | null>(null)
+ const [ha, setHa]               = useState<DeploymentConfigHa | null>(null)
 
   // 제목/식별자
-  const title = source.type === 'deployment'
+ const title = source.type === 'deployment'
     ? `${source.deployment.package_name} v${source.deployment.package_version} — 설정`
     : `${source.name}${source.version ? ` v${source.version}` : ''} — 설정 (로컬)`
 
   // 설치 전(pending) — 저장은 overlay 로 보존되고 설치 시 반영. 프로세스가 없어 restart 불가.
-  const isPending = source.type === 'deployment' && source.deployment.status === 'pending'
+ const isPending = source.type === 'deployment' && source.deployment.status === 'pending'
 
   // Editor 에 전달할 source — 매 렌더마다 새 객체를 만들면 Editor 가 useEffect 재실행 →
   // 편집 중이던 행이 서버 응답으로 덮어써진다. identity 고정 필수.
-  const editorSource: ModuleConfigEditorSource = useMemo(
+ const editorSource: ModuleConfigEditorSource = useMemo(
     () => source.type === 'deployment'
       ? { type: 'deployment', deploymentId: source.deployment.id }
-      : { type: 'module',     moduleName: source.name },
-    [source]
+      : { type: 'module', moduleName: source.name },
+ [source]
   )
 
   // AS 그룹 멤버 — 이 화면은 서버 개별(system) 설정 전용, 공통은 그룹 탭에서 (R4).
   // AA/standalone/module 모드는 전체 편집.
-  const asMember = source.type === 'deployment' && ha?.mode === 'active_standby'
-  const svcFieldCount = useMemo(
+ const asMember = source.type === 'deployment' && ha?.mode === 'active_standby'
+ const svcFieldCount = useMemo(
     () => template ? serviceScopeKeys(template).length : 0, [template])
-  const sysSections = useMemo(
+ const sysSections = useMemo(
     () => template ? template.sections.map(s => sectionForScope(s, 'system'))
                        .filter((s): s is ConfigTemplateSection => !!s) : [],
-    [template])
-  const visibleSections = asMember ? sysSections : (template?.sections ?? [])
-  const visibleCollections = useMemo(
+ [template])
+ const visibleSections = asMember ? sysSections : (template?.sections ?? [])
+ const visibleCollections = useMemo(
     () => (template?.collections || []).filter(
-      c => !asMember || (c.scope ?? 'service') === 'system'),
-    [template, asMember])
+ c => !asMember || (c.scope ?? 'service') === 'system'),
+ [template, asMember])
   // 제목·개수 — 그룹 멤버면 「서버 개별 설정」, 아니면 「설정」 (시안 S3 / SA3)
-  const scalarTitle = asMember ? '서버 개별 설정' : '설정'
-  const modName = source.type === 'deployment'
+ const scalarTitle = asMember ? '서버 개별 설정' : '설정'
+ const modName = source.type === 'deployment'
     ? (source.deployment.package_name || '모듈') : source.name
-  const scalarCount = visibleSections.reduce((n, sec) => n + sec.fields.length, 0)
+ const scalarCount = visibleSections.reduce((n, sec) => n + sec.fields.length, 0)
 
   // source 분기 fetch
-  const fetchConfig = useCallback(async () => {
-    if (source.type === 'deployment') {
-      const r = await deploymentApi.getDeploymentConfig(source.deployment.id)
-      return {
-        template: r.template,
-        config:   r.config || {},
+ const fetchConfig = useCallback(async () => {
+ if (source.type === 'deployment') {
+ const r = await deploymentApi.getDeploymentConfig(source.deployment.id)
+ return {
+ template: r.template,
+ config: r.config || {},
         // 노드에 실제로 들어가는 값 — 화면은 이걸 그린다(§아래 load 주석).
-        effective: r.effective ?? null,
-        appliedAt: r.config_applied_at,
-        ha:       r.ha ?? null,
+ effective: r.effective ?? null,
+ appliedAt: r.config_applied_at,
+ ha: r.ha ?? null,
       }
     }
     // 모듈 모드(소스트리 dev)는 overlay 파일이 곧 적용 설정이라 주입이 없다 — effective 불필요.
-    const r = await deploymentApi.getModuleConfig(source.name)
-    return {
-      template:  r.template,
-      config:    r.current || {},
-      effective: null,
-      appliedAt: null,
-      ha:        null,
+ const r = await deploymentApi.getModuleConfig(source.name)
+ return {
+ template: r.template,
+ config: r.current || {},
+ effective: null,
+ appliedAt: null,
+ ha: null,
     }
   }, [source])
 
   // source 분기 save — 항상 이 서버(또는 로컬 모듈)에만 저장. 그룹 전파 없음.
-  const saveConfig = useCallback(async (vals: Record<string, FieldValue>,
-                                        changedKeys: Set<string>) => {
-    if (source.type === 'deployment') {
+ const saveConfig = useCallback(async (vals: Record<string, FieldValue>,
+ changedKeys: Set<string>) => {
+ if (source.type === 'deployment') {
       // 변경된 키만 전송 — 서버는 기존 overlay 에 병합한다. 전체 값을 되돌려 보내면
       // 화면에 빈칸으로 보이던 값(다른 노드에서 만들어진 _infra 시크릿 등)이 빈 값으로
       // 덮여 사라진다(시크릿 소실 → 전면 401). 시크릿은 조회 시 마스킹돼 오므로
       // 손대지 않은 필드는 애초에 changed 에 들어오지 않는다.
-      const payload: Record<string, FieldValue> = {}
-      for (const k of changedKeys) payload[k] = vals[k]
-      const r = await deploymentApi.putDeploymentConfig(source.deployment.id, payload, true)
+ const payload: Record<string, FieldValue> = {}
+ for (const k of changedKeys) payload[k] = vals[k]
+ const r = await deploymentApi.putDeploymentConfig(source.deployment.id, payload, true)
       // overlay 는 config_template 선언 키만 담는다 — 템플릿 밖 키는 저장되지 않고
       // pruned_keys 로 돌아온다. 조용히 사라지면 안 되므로 결과 문구에 싣는다.
-      const pruned = r.pruned_keys?.length
+ const pruned = r.pruned_keys?.length
         ? ` · 미저장(템플릿에 없는 키): ${r.pruned_keys.join(', ')}` : ''
-      return {
-        ok: true,
-        message: (r.job_id ? `저장됨. update_config job #${r.job_id}` : '저장됨') + pruned,
+ return {
+ ok: true,
+ message: (r.job_id ? `저장됨. update_config job #${r.job_id}` : '저장됨') + pruned,
       }
     }
     // module 모드: 변경된 키만 보냄 (not_owned_by_module 오류 회피 위해 모든 키 아닌 템플릿 소유 키만)
-    const payload: Record<string, unknown> = {}
-    for (const k of changedKeys) payload[k] = vals[k]
-    const r = await deploymentApi.putModuleConfig(source.name, payload)
-    return {
-      ok: true,
-      message: `${r.applied}개 저장${r.removed ? ` · ${r.removed}개 제거` : ''}${r.restart_required ? ' · 재시작 필요' : ''}`,
+ const payload: Record<string, unknown> = {}
+ for (const k of changedKeys) payload[k] = vals[k]
+ const r = await deploymentApi.putModuleConfig(source.name, payload)
+ return {
+ ok: true,
+ message: `${r.applied}개 저장${r.removed ? ` · ${r.removed}개 제거` : ''}${r.restart_required ? ' · 재시작 필요' : ''}`,
     }
   }, [source])
 
-  const load = useCallback(async () => {
-    try {
-      const r = await fetchConfig()
-      setTemplate(r.template)
-      setAppliedAt(r.appliedAt)
+ const load = useCallback(async () => {
+ try {
+ const r = await fetchConfig()
+ setTemplate(r.template)
+ setAppliedAt(r.appliedAt)
       // 표시 기준 = **노드에 실제로 들어가는 값**(`effective`). overlay 만 그리면
       // 배포 시 주입되는 값(JWT 시크릿·store 경로 등)이 빈칸으로 보여 "설정 안 됨"으로
       // 오해되고, 주입이 overlay 를 덮는 키는 화면과 노드가 다른 상태가 드러나지 않는다.
       // `src === 'default'` 는 템플릿 기본값이므로 위젯 타입에 맞는 `defaultValue(f)` 를
       // 쓴다 — 빈 기본값(''/[]/null)은 실체화에서 제외되므로 그 값을 그대로 넣으면
       // 배열/불린 위젯이 깨진다. `effective` 없는 응답(구 OAM·모듈 모드)은 종전 규칙.
-      const base: Record<string, FieldValue> = {}
-      if (r.template) {
-        for (const s of r.template.sections) {
-          for (const f of s.fields) {
-            const eff = r.effective?.[f.key]
-            if (eff && eff.src !== 'default') {
-              base[f.key] = eff.v as FieldValue
+ const base: Record<string, FieldValue> = {}
+ if (r.template) {
+ for (const s of r.template.sections) {
+ for (const f of s.fields) {
+ const eff = r.effective?.[f.key]
+ if (eff && eff.src !== 'default') {
+ base[f.key] = eff.v as FieldValue
             } else if (!r.effective) {
-              const existing = r.config[f.key]
-              base[f.key] = existing !== undefined
+ const existing = r.config[f.key]
+ base[f.key] = existing !== undefined
                 ? (existing as FieldValue)
                 : defaultValue(f)
             } else {
-              base[f.key] = defaultValue(f)
+ base[f.key] = defaultValue(f)
             }
           }
         }
       }
-      for (const [k, v] of Object.entries(r.config)) {
-        if (!(k in base)) base[k] = v as FieldValue
+ for (const [k, v] of Object.entries(r.config)) {
+ if (!(k in base)) base[k] = v as FieldValue
       }
-      setValues(base)
-      setInitial(base)
-      setSrcMap(Object.fromEntries(
+ setValues(base)
+ setInitial(base)
+ setSrcMap(Object.fromEntries(
         Object.entries(r.effective || {}).map(([k, c]) => [k, c.src])))
-      setHa(r.ha)
+ setHa(r.ha)
     } catch (e) {
-      show((e as Error).message, 'err')
+ show((e as Error).message, 'err')
     } finally {
-      setLoading(false)
+ setLoading(false)
     }
   }, [fetchConfig, show])
 
-  useEffect(() => { void load() }, [load])
+ useEffect(() => { void load() }, [load])
 
   // 변경된 필드 추적 — string[] 은 참조가 아닌 내용 비교 (StringListInput 이 새 배열을
   // 반환해도 값이 같으면 미변경 — 체크된 배열 필드의 불필요한 피어 전파 차단)
-  const changed = useMemo(() => {
-    const s = new Set<string>()
-    for (const k of new Set([...Object.keys(values), ...Object.keys(initial)])) {
-      if (!fieldValueEq(values[k], initial[k])) s.add(k)
+ const changed = useMemo(() => {
+ const s = new Set<string>()
+ for (const k of new Set([...Object.keys(values), ...Object.keys(initial)])) {
+ if (!fieldValueEq(values[k], initial[k])) s.add(k)
     }
-    return s
+ return s
   }, [values, initial])
 
   // 이 화면 필드 중 재기동이 필요한 것이 있는가 — 변경 0건일 때 저장바가 쓰는 값.
   // (변경이 있으면 아래 restartRequired 가 **바뀐 것만** 보고 판정한다.)
-  const scopeNeedsRestart = useMemo(
+ const scopeNeedsRestart = useMemo(
     () => visibleSections.some(sec => sec.fields.some(f => f.restart !== false)),
-    [visibleSections])
+ [visibleSections])
 
   // 변경된 필드 중 restart:true 포함 여부
-  const restartRequired = useMemo(() => {
-    if (!template) return false
-    for (const s of template.sections) {
-      for (const f of s.fields) {
-        if (changed.has(f.key) && (f.restart !== false)) return true
+ const restartRequired = useMemo(() => {
+ if (!template) return false
+ for (const s of template.sections) {
+ for (const f of s.fields) {
+ if (changed.has(f.key) && (f.restart !== false)) return true
       }
     }
-    return false
+ return false
   }, [template, changed])
   // 저장바 표시용 — 변경이 있으면 바뀐 것만, 없으면 이 화면 성격을 알린다.
-  const barRestart = changed.size > 0 ? restartRequired : scopeNeedsRestart
+ const barRestart = changed.size > 0 ? restartRequired : scopeNeedsRestart
 
   // 저장 전 validation — required + range. 이 화면에 보이는 필드만 검사
   // (AS 멤버는 공통 필드가 숨겨져 있어 사용자가 고칠 수 없으므로 대상 제외).
-  function validate(): string | null {
-    if (!template) return null
-    for (const s of visibleSections) {
-      for (const f of s.fields) {
-        const v = values[f.key]
-        if (f.required && (v === '' || v === null || v === undefined)) {
-          return `필수 항목 비어있음: ${f.label} (${f.key})`
+ function validate(): string | null {
+ if (!template) return null
+ for (const s of visibleSections) {
+ for (const f of s.fields) {
+ const v = values[f.key]
+ if (f.required && (v === '' || v === null || v === undefined)) {
+ return `필수 항목 비어있음: ${f.label} (${f.key})`
         }
-        if (f.type === 'int' && typeof v === 'number') {
-          if (f.min !== undefined && v < f.min) return `${f.label}: ${v} < min(${f.min})`
-          if (f.max !== undefined && v > f.max) return `${f.label}: ${v} > max(${f.max})`
+ if (f.type === 'int' && typeof v === 'number') {
+ if (f.min !== undefined && v < f.min) return `${f.label}: ${v} < min(${f.min})`
+ if (f.max !== undefined && v > f.max) return `${f.label}: ${v} > max(${f.max})`
         }
       }
     }
-    return null
+ return null
   }
 
-  async function save(opts: { restartAfter?: boolean } = {}) {
-    if (changed.size === 0) { show('변경된 항목 없음', 'err'); return }
-    const err = validate()
-    if (err) { show(err, 'err'); return }
-    setSaving(true)
-    try {
-      const r = await saveConfig(values, changed)
-      show(r.message, 'ok')
+ async function save(opts: { restartAfter?: boolean } = {}) {
+ if (changed.size === 0) { show('변경된 항목 없음', 'err'); return }
+ const err = validate()
+ if (err) { show(err, 'err'); return }
+ setSaving(true)
+ try {
+ const r = await saveConfig(values, changed)
+ show(r.message, 'ok')
       // 재기동 옵션 (deployment 모드 + restart_required + restartAfter true)
-      if (opts.restartAfter && source.type === 'deployment') {
-        try {
-          const jr = await deploymentApi.queueJob(source.deployment.id, 'restart')
-          show(`재기동 큐 등록 (#${jr.job_id})`, 'ok')
+ if (opts.restartAfter && source.type === 'deployment') {
+ try {
+ const jr = await deploymentApi.queueJob(source.deployment.id, 'restart')
+ show(`재기동 큐 등록 (#${jr.job_id})`, 'ok')
         } catch (e) {
-          show(`재기동 실패: ${(e as Error).message}`, 'err')
+ show(`재기동 실패: ${(e as Error).message}`, 'err')
         }
       }
-      if (onDone) await onDone()
-      if (source.type === 'deployment') {
+ if (onDone) await onDone()
+ if (source.type === 'deployment') {
         // 저장 성공 = 현재 값이 새 기준값 — inline 임베드(패키지 설정 탭)는 onClose 가
         // no-op 이라 여기서 리셋하지 않으면 changed 가 남아 저장 버튼이 계속 활성.
-        setInitial(values)
-        onClose()
+ setInitial(values)
+ onClose()
       } else {
-        await load()
+ await load()
       }
     } catch (e) {
-      show((e as Error).message, 'err')
+ show((e as Error).message, 'err')
     } finally {
-      setSaving(false)
+ setSaving(false)
     }
   }
 
-  const body = (
+ const body = (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         {loading ? (
-          <div className="empty" style={{ padding: 40 }}>로딩 중...</div>
+          <div className="flex min-h-0 flex-1 items-center justify-center text-center text-muted-foreground p-[40px]">로딩 중...</div>
         ) : !template ? (
-          <div className="empty" style={{ padding: 20 }}>
-            이 패키지에는 <code>config_template.json</code> 이 포함되어 있지 않습니다.
-            <br/>설정 가능한 항목이 없습니다.
-          </div>
+          <EmptyState title={<>이 패키지에는 <code>config_template.json</code> 이 포함되어 있지 않습니다.</>}
+                      description="설정 가능한 항목이 없습니다." />
         ) : (
           <>
             {/* linkRow — 정본 Figma S3 `linkRow`(159:3164): 제목 + 범례 + 우측
-                [그룹 공통 설정 편집 →]. 컬렉션이 있는 모듈은 제목 자리에 세그먼트를 둔다
+ [그룹 공통 설정 편집 →]. 컬렉션이 있는 모듈은 제목 자리에 세그먼트를 둔다
                 (시안 G3 의 `공통 설정 | 멤버 비교` 와 같은 자리·같은 모양). */}
             <div className="flex shrink-0 items-center gap-2 px-4 pb-2.5 pt-3.5">
               {visibleCollections.length === 0 ? (
@@ -311,7 +310,7 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
                 </span>
               ) : (
                 <ToggleGroup type="single" value={tab} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
-                             onValueChange={(v: string) => v && setTab(v)}>
+ onValueChange={(v: string) => v && setTab(v)}>
                   <ToggleGroupItem value="scalar">{scalarTitle} ({scalarCount})</ToggleGroupItem>
                   {visibleCollections.map(c => (
                     <ToggleGroupItem key={c.key} value={c.key}>{c.title}</ToggleGroupItem>
@@ -324,8 +323,8 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
               </span>
               {asMember && ha && onOpenGroupConfig && (
                 <Button variant="ghost" className="ml-auto shrink-0"
-                        onClick={() => onOpenGroupConfig(ha.group_id)}
-                        title={`그룹 ${ha.group_name} 의 [패키지 설정] 으로 이동`}>
+ onClick={() => onOpenGroupConfig(ha.group_id)}
+ title={`그룹 ${ha.group_name} 의 [패키지 설정] 으로 이동`}>
                   그룹 공통 설정 편집 <ArrowRight />
                 </Button>
               )}
@@ -349,21 +348,21 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
                   )}
                   {changed.size > 0 && (
                     <ChangeSummaryPanel template={template} values={values} initial={initial}
-                      changed={changed}
-                      onReset={(k) => setValues(p => ({ ...p, [k]: initial[k] }))}
-                      onResetAll={() => setValues({ ...initial })} />
+ changed={changed}
+ onReset={(k) => setValues(p => ({ ...p, [k]: initial[k] }))}
+ onResetAll={() => setValues({ ...initial })} />
                   )}
                   {visibleSections.map(sec => (
                     <SectionBlock key={sec.key} section={sec} values={values}
-                      initial={initial} changed={changed}
-                      srcOf={(k) => srcMap[k]}
-                      onChange={(k, v) => setValues(p => ({ ...p, [k]: v }))}
-                      onReset={(k) => setValues(p => ({ ...p, [k]: initial[k] }))}
-                      footer={sec.key === 'store'
+ initial={initial} changed={changed}
+ srcOf={(k) => srcMap[k]}
+ onChange={(k, v) => setValues(p => ({ ...p, [k]: v }))}
+ onReset={(k) => setValues(p => ({ ...p, [k]: initial[k] }))}
+ footer={sec.key === 'store'
                         ? <StoreMigrateFooter groupId={ha?.group_id ?? null}
-                            mountPoint={String(values['CimsRuntimeMount'] ?? '')}
-                            dirty={changed.has('CimsRuntimeMount') || changed.has('CimsRuntimeDir')}
-                            onDone={onDone} />
+ mountPoint={String(values['CimsRuntimeMount'] ?? '')}
+ dirty={changed.has('CimsRuntimeMount') || changed.has('CimsRuntimeDir')}
+ onDone={onDone} />
                         : undefined} />
                   ))}
                   {isPending && (
@@ -375,9 +374,9 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
                 </>
               ) : (
                 (() => {
-                  const coll = visibleCollections.find(c => c.key === tab)
-                  if (!coll) return <div className="empty">collection 을 찾을 수 없음</div>
-                  return <ModuleConfigEditor source={editorSource} collection={coll} />
+ const coll = visibleCollections.find(c => c.key === tab)
+ if (!coll) return <EmptyState title="collection 을 찾을 수 없음" />
+ return <ModuleConfigEditor source={editorSource} collection={coll} />
                 })()
               )}
             </div>
@@ -388,21 +387,21 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
             `재기동`, 아니면 `즉시`. 저장 후 재기동은 별도 버튼이 아니라 저장의 옵션이다. */}
         {template && tab === 'scalar' && (
           <StickySaveBar
-            badge={<Badge variant="neutralSoft">{barRestart ? '재기동' : '즉시'}</Badge>}
-            note={isPending
+ badge={<Badge variant="neutralSoft">{barRestart ? '재기동' : '즉시'}</Badge>}
+ note={isPending
               ? '아직 설치 전 — 저장한 값은 [패키지 설치] 탭의 설치 실행 시 반영됩니다'
               : barRestart
                 ? `저장 후 ${modName} 을 재기동하면 새 설정이 적용됩니다`
                 : '저장 즉시 반영됩니다'}
-            saveLabel={`저장 (${changed.size} 변경)`}
-            disabled={changed.size === 0}
-            saving={saving}
-            extra={!inline
+ saveLabel={`저장 (${changed.size} 변경)`}
+ disabled={changed.size === 0}
+ saving={saving}
+ extra={!inline
               ? <Button variant="outline" onClick={onClose}>닫기</Button>
               : undefined}
-            onRevert={() => setValues({ ...initial })}
-            onSave={() => void save({
-              restartAfter: source.type === 'deployment' && restartRequired && !isPending,
+ onRevert={() => setValues({ ...initial })}
+ onSave={() => void save({
+ restartAfter: source.type === 'deployment' && restartRequired && !isPending,
             })} />
         )}
         {!inline && !(template && tab === 'scalar') && (
@@ -412,8 +411,8 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
         )}
       </div>
   )
-  if (inline) return body
-  return (
+ if (inline) return body
+ return (
     <Modal title={title} onClose={onClose} fullscreen>
       {body}
     </Modal>
@@ -424,47 +423,47 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
 // 필드 오버라이드(f.scope) 덕에 한 섹션이 서버/그룹 화면에 나뉘어 나타날 수 있다
 // (예: csp media_server 는 그룹 화면, media_server.LocalIp 만 서버 화면).
 export function sectionForScope(sec: ConfigTemplateSection, scope: ConfigScope): ConfigTemplateSection | null {
-  const fields = sec.fields.filter(f => effectiveScope(f, sec.scope) === scope)
-  if (fields.length === 0) return null
-  return { ...sec, fields }
+ const fields = sec.fields.filter(f => effectiveScope(f, sec.scope) === scope)
+ if (fields.length === 0) return null
+ return { ...sec, fields }
 }
 
 function ChangeSummaryPanel({ template, values, initial, changed, onReset, onResetAll }: {
-  template: ConfigTemplate
-  values: Record<string, FieldValue>
-  initial: Record<string, FieldValue>
-  changed: Set<string>
-  onReset: (key: string) => void
-  onResetAll: () => void
+ template: ConfigTemplate
+ values: Record<string, FieldValue>
+ initial: Record<string, FieldValue>
+ changed: Set<string>
+ onReset: (key: string) => void
+ onResetAll: () => void
 }) {
-  const [collapsed, setCollapsed] = useState(false)
+ const [collapsed, setCollapsed] = useState(false)
   // key → field 매핑 (label + restart 추출)
-  const fieldByKey = useMemo(() => {
-    const m = new Map<string, ConfigTemplateField>()
-    for (const s of template.sections) for (const f of s.fields) m.set(f.key, f)
-    return m
+ const fieldByKey = useMemo(() => {
+ const m = new Map<string, ConfigTemplateField>()
+ for (const s of template.sections) for (const f of s.fields) m.set(f.key, f)
+ return m
   }, [template])
 
-  const restartKeys = Array.from(changed).filter(k => (fieldByKey.get(k)?.restart !== false))
-  const hotKeys     = Array.from(changed).filter(k => (fieldByKey.get(k)?.restart === false))
+ const restartKeys = Array.from(changed).filter(k => (fieldByKey.get(k)?.restart !== false))
+ const hotKeys     = Array.from(changed).filter(k => (fieldByKey.get(k)?.restart === false))
 
-  function display(v: FieldValue): string {
-    if (v === null || v === undefined || v === '') return '(빈 값)'
-    if (typeof v === 'boolean') return v ? 'true' : 'false'
-    return String(v)
+ function display(v: FieldValue): string {
+ if (v === null || v === undefined || v === '') return '(빈 값)'
+ if (typeof v === 'boolean') return v ? 'true' : 'false'
+ return String(v)
   }
 
-  return (
+ return (
     <div style={{
-      border: '1px solid var(--border)', borderRadius: 6, marginBottom: 12,
-      background: 'var(--muted)',
+ border: '1px solid var(--border)', borderRadius: 6, marginBottom: 12,
+ background: 'var(--muted)',
     }}>
       <div onClick={() => setCollapsed(c => !c)}
-        style={{
-          padding: '8px 14px', cursor: 'pointer', userSelect: 'none',
-          display: 'flex', alignItems: 'center', gap: 8,
-          background: 'var(--cims-brand-soft)', borderBottom: collapsed ? 'none' : '1px solid var(--border)',
-          borderRadius: '6px 6px 0 0',
+ style={{
+ padding: '8px 14px', cursor: 'pointer', userSelect: 'none',
+ display: 'flex', alignItems: 'center', gap: 8,
+ background: 'var(--cims-brand-soft)', borderBottom: collapsed ? 'none' : '1px solid var(--border)',
+ borderRadius: '6px 6px 0 0',
         }}>
         <span className="text-primary">
           {collapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
@@ -474,8 +473,8 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
           <RotateCcw size={12} /> 재기동 {restartKeys.length} · <Zap size={12} /> 즉시 {hotKeys.length}
         </span>
         <button onClick={(e) => { e.stopPropagation(); onResetAll() }}
-                style={{ marginLeft: 'auto', fontSize: 11, padding: '2px 8px',
-                         background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer' }}>
+ style={{ marginLeft: 'auto', fontSize: 11, padding: '2px 8px',
+ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer' }}>
           전체 초기화
         </button>
       </div>
@@ -493,9 +492,9 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
             </thead>
             <tbody>
               {Array.from(changed).map(k => {
-                const f = fieldByKey.get(k)
-                const restart = f?.restart !== false
-                return (
+ const f = fieldByKey.get(k)
+ const restart = f?.restart !== false
+ return (
                   <tr key={k} style={{ borderTop: '1px solid var(--border)' }}>
                     <td style={{ padding: '4px 6px' }}>
                       <span title={k}>{f?.label ?? k}</span>
@@ -512,7 +511,7 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
                     </td>
                     <td style={{ textAlign: 'center' }}>
                       <Button variant="ghost" size="iconSm" onClick={() => onReset(k)}
-                              title="이 필드만 초기화">
+ title="이 필드만 초기화">
                         <RotateCcw />
                       </Button>
                     </td>
@@ -528,57 +527,57 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
 }
 
 export function SectionBlock({ section, values, initial, changed, onChange, onReset, footer,
-                               srcOf, markerOf }: {
-  section: {
-    key: string; title: string; description?: string
-    fields: ConfigTemplateField[]
-    hidden?: boolean
-    groups?: { key: string; title: string; description?: string }[]
+ srcOf, markerOf }: {
+ section: {
+ key: string; title: string; description?: string
+ fields: ConfigTemplateField[]
+ hidden?: boolean
+ groups?: { key: string; title: string; description?: string }[]
   }
-  values: Record<string, FieldValue>
-  initial: Record<string, FieldValue>
-  changed: Set<string>
-  onChange: (key: string, v: FieldValue) => void
-  onReset: (key: string) => void
+ values: Record<string, FieldValue>
+ initial: Record<string, FieldValue>
+ changed: Set<string>
+ onChange: (key: string, v: FieldValue) => void
+ onReset: (key: string) => void
   /** 섹션 하단 액션 — 저장만으로는 적용되지 않는 값(관리 store 경로 등)의 정규 경로. */
-  footer?: React.ReactNode
+ footer?: React.ReactNode
   /** 값의 출처 — `injected`(배포 시 자동 채움)를 배지로 드러낸다. 없으면 배지 없음. */
-  srcOf?: (key: string) => ConfigValueSrc | undefined
+ srcOf?: (key: string) => ConfigValueSrc | undefined
   /** 마커 자리에 덧붙일 배지 — 그룹 화면의 `드리프트` 처럼 화면마다 다른 표식 (시안 G3-1 209:3255). */
-  markerOf?: (key: string) => React.ReactNode
+ markerOf?: (key: string) => React.ReactNode
 }) {
   // 접힘 상태는 SubSection 이 갖는다 — `hidden` 섹션(인프라)만 기본 접힘.
   // 모든 필드 노출 (고급/숨김 구분 제거).
-  const visibleFields = section.fields
+ const visibleFields = section.fields
 
   // 필드를 group 단위로 묶기 — groups 정의 없으면 단일 묶음.
   // 그룹 선언된 순서대로 정렬하고, 소속 없는 필드는 '기타' 로.
-  const groupDefs = section.groups || []
-  type Bucket = { key: string; title: string; description?: string; fields: ConfigTemplateField[] }
-  const buckets: Bucket[] = []
-  if (groupDefs.length === 0) {
-    buckets.push({ key: '__all__', title: '', fields: visibleFields })
+ const groupDefs = section.groups || []
+ type Bucket = { key: string; title: string; description?: string; fields: ConfigTemplateField[] }
+ const buckets: Bucket[] = []
+ if (groupDefs.length === 0) {
+ buckets.push({ key: '__all__', title: '', fields: visibleFields })
   } else {
-    const byKey = new Map<string, Bucket>()
-    for (const g of groupDefs) {
-      const b: Bucket = { key: g.key, title: g.title, description: g.description, fields: [] }
-      byKey.set(g.key, b); buckets.push(b)
+ const byKey = new Map<string, Bucket>()
+ for (const g of groupDefs) {
+ const b: Bucket = { key: g.key, title: g.title, description: g.description, fields: [] }
+ byKey.set(g.key, b); buckets.push(b)
     }
-    const misc: Bucket = { key: '__misc__', title: '기타', fields: [] }
-    for (const f of visibleFields) {
-      const target = f.group && byKey.get(f.group)
-      if (target) target.fields.push(f)
-      else misc.fields.push(f)
+ const misc: Bucket = { key: '__misc__', title: '기타', fields: [] }
+ for (const f of visibleFields) {
+ const target = f.group && byKey.get(f.group)
+ if (target) target.fields.push(f)
+ else misc.fields.push(f)
     }
-    if (misc.fields.length) buckets.push(misc)
+ if (misc.fields.length) buckets.push(misc)
   }
-  const nonEmptyBuckets = buckets.filter(b => b.fields.length > 0)
+ const nonEmptyBuckets = buckets.filter(b => b.fields.length > 0)
 
   // 시안(Figma S3 93:2208·169:2826)은 섹션을 카드로 감싸지 않는다 — 접힘 머리 + 들여쓴 본문뿐.
   // `Infrastructure` 처럼 `hidden` 인 섹션은 기본 접힘으로 열고, 「내부 전용」임을 힌트로 알린다.
-  const hint = [section.hidden ? '내부 전용' : '', section.description || '']
+ const hint = [section.hidden ? '내부 전용' : '', section.description || '']
     .filter(Boolean).join(' · ')
-  return (
+ return (
     <SubSection title={section.title} hint={hint || undefined} defaultOpen={!section.hidden}>
       {nonEmptyBuckets.map((b, idx) => (
         <div key={b.key} className={idx === nonEmptyBuckets.length - 1 ? undefined : 'mb-4'}>
@@ -595,13 +594,13 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
           <div className="flex flex-col gap-3.5">
             {b.fields.map(f => (
               <FieldRow key={f.key} field={f}
-                value={values[f.key]}
-                initialValue={initial[f.key]}
-                isChanged={changed.has(f.key)}
-                src={srcOf?.(f.key)}
-                markerExtra={markerOf?.(f.key)}
-                onChange={v => onChange(f.key, v)}
-                onReset={() => onReset(f.key)} />
+ value={values[f.key]}
+ initialValue={initial[f.key]}
+ isChanged={changed.has(f.key)}
+ src={srcOf?.(f.key)}
+ markerExtra={markerOf?.(f.key)}
+ onChange={v => onChange(f.key, v)}
+ onReset={() => onReset(f.key)} />
             ))}
           </div>
         </div>
@@ -626,38 +625,38 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
  * "두 값이 같은가" 를 검사하는 코드가 따라붙는다.
  */
 export function StoreMigrateFooter({ groupId, mountPoint, dirty, onDone }: {
-  groupId: number | null
-  mountPoint: string
-  dirty: boolean
-  onDone?: () => void | Promise<void>
+ groupId: number | null
+ mountPoint: string
+ dirty: boolean
+ onDone?: () => void | Promise<void>
 }) {
-  const { show } = useToast()
-  const confirm = useConfirm()
-  const [busy, setBusy] = useState(false)
-  const mp = mountPoint.trim().replace(/\/+$/, '')
+ const { show } = useToast()
+ const confirm = useConfirm()
+ const [busy, setBusy] = useState(false)
+ const mp = mountPoint.trim().replace(/\/+$/, '')
 
-  async function migrate() {
-    if (!groupId) return
-    if (!await confirm({ title: '관리 store 이관', tone: 'danger', confirmLabel: '이관', body: <>
+ async function migrate() {
+ if (!groupId) return
+ if (!await confirm({ title: '관리 store 이관', tone: 'danger', confirmLabel: '이관', body: <>
       관리 데이터를 이 경로로 이관합니다.
       <div className="mt-1 font-mono text-xs">{mp}/runtime</div>
       <div className="mt-2">OAM 이 정지 → 복사 → 재기동되므로 콘솔이 30초 내외 끊깁니다.</div>
       <div className="mt-1">대상에 이전 데이터가 있으면 .stale-&lt;시각&gt; 으로 보관하고 덮어씁니다.</div>
       <div className="mt-2">진행할까요?</div>
     </> })) return
-    setBusy(true)
-    try {
-      const r = await haGroupsApi.migrateSharedStore(groupId, mp)
-      show(`관리 store 이관 개시 — ${r.detail || r.runtime_dir}`, 'ok')
-      await onDone?.()
+ setBusy(true)
+ try {
+ const r = await haGroupsApi.migrateSharedStore(groupId, mp)
+ show(`관리 store 이관 개시 — ${r.detail || r.runtime_dir}`, 'ok')
+ await onDone?.()
     } catch (e) { show((e as Error).message, 'err') }
-    finally { setBusy(false) }
+ finally { setBusy(false) }
   }
 
-  return (
+ return (
     <div style={{
-      marginTop: 12, padding: '8px 10px', borderRadius: 4, fontSize: 12, lineHeight: 1.6,
-      background: 'var(--cims-warning-soft)', border: '1px solid var(--border)',
+ marginTop: 12, padding: '8px 10px', borderRadius: 4, fontSize: 12, lineHeight: 1.6,
+ background: 'var(--cims-warning-soft)', border: '1px solid var(--border)',
     }}>
       <b>경로를 바꾸려면 이관을 쓰세요.</b> 저장은 경로만 바꾸고 <b>데이터를 옮기지
       않습니다</b> — 새 경로에 빈 store 가 생기거나, 마운트가 없으면 OAM 이 기동을
@@ -666,8 +665,8 @@ export function StoreMigrateFooter({ groupId, mountPoint, dirty, onDone }: {
       {groupId ? (
         <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <Button variant="default" disabled={busy || !mp}
-                  onClick={migrate}
-                  title="현재 입력된 마운트 지점으로 관리 store 를 이관 (콘솔 30초 단절)">
+ onClick={migrate}
+ title="현재 입력된 마운트 지점으로 관리 store 를 이관 (콘솔 30초 단절)">
             {busy ? '이관 요청 중…' : <><ArrowRight size={13} /> {mp || '(마운트 지점)'} 으로 이관</>}
           </Button>
           {dirty && (
@@ -696,30 +695,30 @@ export function StoreMigrateFooter({ groupId, mountPoint, dirty, onDone }: {
  * (구 화면은 재기동을 빨강으로 칠해 전 필드가 경고처럼 보였다).
  */
 function FieldRow({ field, value, initialValue, isChanged, src, markerExtra, onChange, onReset }: {
-  field: ConfigTemplateField
-  value: FieldValue
-  initialValue: FieldValue
-  isChanged: boolean
+ field: ConfigTemplateField
+ value: FieldValue
+ initialValue: FieldValue
+ isChanged: boolean
   /** 값의 출처. `injected` = 운영자가 입력한 값이 아니라 배포 시 OAM 이 채운 값. */
-  src?: ConfigValueSrc
+ src?: ConfigValueSrc
   /** 마커 자리에 세로로 덧붙는 배지 (그룹 화면의 `드리프트`) */
-  markerExtra?: React.ReactNode
-  onChange: (v: FieldValue) => void
-  onReset: () => void
+ markerExtra?: React.ReactNode
+ onChange: (v: FieldValue) => void
+ onReset: () => void
 }) {
-  const needsRestart = field.restart !== false
-  return (
+ const needsRestart = field.restart !== false
+ return (
     <FormField
-      changed={isChanged}
-      required={field.required}
-      label={
+ changed={isChanged}
+ required={field.required}
+ label={
         <>
           {field.label}
           {/* 자동 채움·변경 표식은 시안에 없지만 지우지 않는다 — 값의 출처와 미저장 변경은
               화면에서만 알 수 있는 사실이다 (정본 문서 §1 「시안의 침묵은 삭제 지시가 아님」). */}
           {src === 'injected' && !isChanged && (
             <Badge variant="brandSoft" className="ml-1.5 align-[1px]"
-                   title={'배포 시 OAM 이 채운 값입니다 — 이 서버 설정에 저장된 값이 아닙니다. '
+ title={'배포 시 OAM 이 채운 값입니다 — 이 서버 설정에 저장된 값이 아닙니다. '
                         + '노드에는 이 값이 들어갑니다. 일부 키(시크릿·관리망 대역)는 저장하더라도 '
                         + '배포 시 OAM 값으로 다시 채워집니다.'}>
               자동 채움
@@ -728,24 +727,24 @@ function FieldRow({ field, value, initialValue, isChanged, src, markerExtra, onC
           {isChanged && <Dot size={14} className="ml-0.5 inline text-primary" aria-label="저장하지 않은 변경" />}
         </>
       }
-      help={
-        !needsRestart && field.reload_hint
+ help={
+ !needsRestart && field.reload_hint
           ? <span className="inline-flex items-center gap-1 text-[var(--cims-success)]">
               <Zap size={11} /> {field.reload_hint}
             </span>
           : field.help
       }
-      aside={isChanged
+ aside={isChanged
         ? <Button variant="ghost" size="iconSm" onClick={onReset}
-                  title={`초기값으로 되돌림: ${initialValue === null || initialValue === '' ? '(빈 값)' : String(initialValue)}`}>
+ title={`초기값으로 되돌림: ${initialValue === null || initialValue === '' ? '(빈 값)' : String(initialValue)}`}>
             <RotateCcw />
           </Button>
         : undefined}
-      marker={
+ marker={
         // 시안은 마커를 세로로 쌓는다 (209:3255 — `재기동` 위, `드리프트` 아래)
         <span className="flex flex-col items-start gap-1">
           <Badge variant="neutralSoft"
-                 title={needsRestart ? '저장 후 재기동해야 반영됩니다' : '저장 즉시 반영됩니다'}>
+ title={needsRestart ? '저장 후 재기동해야 반영됩니다' : '저장 즉시 반영됩니다'}>
             {needsRestart ? '재기동' : '즉시'}
           </Badge>
           {markerExtra}
@@ -757,14 +756,14 @@ function FieldRow({ field, value, initialValue, isChanged, src, markerExtra, onC
 }
 
 function renderInput(f: ConfigTemplateField, value: FieldValue, onChange: (v: FieldValue) => void) {
-  if (f.type === 'bool') {
-    return (
+ if (f.type === 'bool') {
+ return (
       <input type="checkbox" checked={!!value}
-        onChange={e => onChange(e.target.checked)} />
+ onChange={e => onChange(e.target.checked)} />
     )
   }
-  if (f.type === 'enum') {
-    return (
+ if (f.type === 'enum') {
+ return (
       <Select value={toSel((value as string) ?? '')} onValueChange={(v: string) => onChange(fromSel(v))}>
         <SelectTrigger><SelectValue /></SelectTrigger>
         <SelectContent>
@@ -773,74 +772,74 @@ function renderInput(f: ConfigTemplateField, value: FieldValue, onChange: (v: Fi
       </Select>
     )
   }
-  if (f.type === 'int') {
-    return (
-      <Input  type="number"
-        min={f.min} max={f.max}
-        value={value === null || value === undefined ? '' : Number(value)}
-        onChange={e => {
-          const s = e.target.value
-          onChange(s === '' ? null : Number(s))
+ if (f.type === 'int') {
+ return (
+      <Input type="number"
+ min={f.min} max={f.max}
+ value={value === null || value === undefined ? '' : Number(value)}
+ onChange={e => {
+ const s = e.target.value
+ onChange(s === '' ? null : Number(s))
         }} />
     )
   }
-  if (f.type === 'password') {
-    return (
-      <Input  type="password"
-        value={(value as string) ?? ''}
-        onChange={e => onChange(e.target.value)} />
+ if (f.type === 'password') {
+ return (
+      <Input type="password"
+ value={(value as string) ?? ''}
+ onChange={e => onChange(e.target.value)} />
     )
   }
-  if (f.type === 'string_list' || f.type === 'ref_list') {
+ if (f.type === 'string_list' || f.type === 'ref_list') {
     // 콤마 분리 입력 ↔ 문자열 배열 (ModuleConfigEditor 와 동일 동작).
-    return (
+ return (
       <StringListInput value={value}
-        placeholder="콤마로 구분 (예: 10.0.1.48:9000, 10.0.1.49:9000)"
-        onChange={onChange} />
+ placeholder="콤마로 구분 (예: 10.0.1.48:9000, 10.0.1.49:9000)"
+ onChange={onChange} />
     )
   }
-  if (f.type === 'object_list') {
+ if (f.type === 'object_list') {
     // ip/port 등 구조화 항목 리스트. 값이 비면 빈 1행 표시 + [추가] 로 추가(최소 1행 유지).
-    return (
+ return (
       <ObjectListEditor field={f} value={value}
-        onChange={(v) => onChange(v as FieldValue)} ensureOne />
+ onChange={(v) => onChange(v as FieldValue)} ensureOne />
     )
   }
   // string / path
-  return (
-    <Input  type="text"
-      value={(value as string) ?? ''}
-      onChange={e => onChange(e.target.value)} />
+ return (
+    <Input type="text"
+ value={(value as string) ?? ''}
+ onChange={e => onChange(e.target.value)} />
   )
 }
 
 export function defaultValue(f: ConfigTemplateField): FieldValue {
-  if (f.default !== undefined && f.default !== null) {
-    return f.default as FieldValue
+ if (f.default !== undefined && f.default !== null) {
+ return f.default as FieldValue
   }
-  switch (f.type) {
-    case 'bool': return false
-    case 'int':  return 0
-    default:     return ''
+ switch (f.type) {
+ case 'bool': return false
+ case 'int': return 0
+ default: return ''
   }
 }
 
 // FieldValue 내용 비교 — string[] 은 참조가 아닌 원소 비교 (changed 오탐 방지).
 export function fieldValueEq(a: FieldValue | undefined, b: FieldValue | undefined): boolean {
-  if (Array.isArray(a) || Array.isArray(b)) return JSON.stringify(a) === JSON.stringify(b)
-  return a === b
+ if (Array.isArray(a) || Array.isArray(b)) return JSON.stringify(a) === JSON.stringify(b)
+ return a === b
 }
 
 // 유효 scope(field.scope ?? section.scope)=service 인 필드 키 — 그룹 동기화 복사
 // 대상(공통 탭 필드). ModuleConfigModal 과 GroupConfigCompareView 가 동일 규칙 공유,
 // 백엔드 handlers.agents._service_scope_keys 와도 일치해야 한다.
 export function serviceScopeKeys(t: ConfigTemplate | null): string[] {
-  if (!t) return []
-  const out: string[] = []
-  for (const s of t.sections) {
-    for (const f of s.fields) {
-      if (effectiveScope(f, s.scope) === 'service') out.push(f.key)
+ if (!t) return []
+ const out: string[] = []
+ for (const s of t.sections) {
+ for (const f of s.fields) {
+ if (effectiveScope(f, s.scope) === 'service') out.push(f.key)
     }
   }
-  return out
+ return out
 }

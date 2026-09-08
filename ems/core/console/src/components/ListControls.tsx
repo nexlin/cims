@@ -11,11 +11,11 @@ import { Button } from '@core/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 
 export function DaysButtons({ days, onChange }: { days: number; onChange: (d: number) => void }) {
-  return (
+ return (
     <>
       <span style={{ fontSize: 13, color: 'var(--muted-foreground)' }}>기간:</span>
       <ToggleGroup type="single" value={String(days)} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
-                   onValueChange={(v: string) => v && onChange(Number(v))}>
+ onValueChange={(v: string) => v && onChange(Number(v))}>
         {[1, 7, 30, 90].map(d => (
           <ToggleGroupItem key={d} value={String(d)}>{d === 1 ? '오늘' : `${d}일`}</ToggleGroupItem>
         ))}
@@ -26,20 +26,20 @@ export function DaysButtons({ days, onChange }: { days: number; onChange: (d: nu
 
 // 페이지 내비게이션 — «/» 는 처음/끝, Chevron 은 한 페이지 이동. count=0 이면 렌더 생략.
 export function Pager({ page, count, pageSize, onPage, unit = '건' }: {
-  page: number
-  count: number
-  pageSize: number
-  onPage: (p: number) => void
-  unit?: string
+ page: number
+ count: number
+ pageSize: number
+ onPage: (p: number) => void
+ unit?: string
 }) {
-  if (count === 0) return null
-  const totalPages = Math.max(1, Math.ceil(count / pageSize))
-  const cur = Math.min(page, totalPages - 1)
-  const from = cur * pageSize + 1
-  const to = Math.min(count, (cur + 1) * pageSize)
-  return (
+ if (count === 0) return null
+ const totalPages = Math.max(1, Math.ceil(count / pageSize))
+ const cur = Math.min(page, totalPages - 1)
+ const from = cur * pageSize + 1
+ const to = Math.min(count, (cur + 1) * pageSize)
+ return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', fontSize: 12,
-                  color: 'var(--muted-foreground)', borderTop: '1px solid var(--border)', flex: 'none' }}>
+ color: 'var(--muted-foreground)', borderTop: '1px solid var(--border)', flex: 'none' }}>
       <span>{from}–{to} / {count}{unit}</span>
       <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
         <Button variant="ghost" disabled={cur === 0} onClick={() => onPage(0)}><ChevronsLeft size={14} /></Button>
@@ -54,11 +54,11 @@ export function Pager({ page, count, pageSize, onPage, unit = '건' }: {
 
 // 알람/이벤트 전환 — 기존 화면과 같은 탭 모양(카드 껍데기 없음). 파라미터 `atab` 을 읽고 쓴다.
 export function AlarmEventTabs() {
-  const [tab, setTab] = usePageParam('atab')
-  const cur = tab || 'alarms'
-  return (
+ const [tab, setTab] = usePageParam('atab')
+ const cur = tab || 'alarms'
+ return (
     <ToggleGroup type="single" value={cur} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
-                 onValueChange={(v: string) => v && setTab(v)}>
+ onValueChange={(v: string) => v && setTab(v)}>
       <ToggleGroupItem value="alarms">알람</ToggleGroupItem>
       <ToggleGroupItem value="events">이벤트</ToggleGroupItem>
     </ToggleGroup>
@@ -67,8 +67,8 @@ export function AlarmEventTabs() {
 
 // 기간 선택 — 파라미터 `days` 를 읽고 쓴다. 카드(panel)로 감싸지 않는다(툴바 바 모습 그대로).
 export function PeriodDaysControl() {
-  const [days, setDays] = usePageParam('days')
-  return (
+ const [days, setDays] = usePageParam('days')
+ return (
     <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
       <DaysButtons days={Number(days) || 7} onChange={d => setDays(String(d))} />
     </div>

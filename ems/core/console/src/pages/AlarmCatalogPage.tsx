@@ -11,6 +11,8 @@ import { alarmTypeLabel, sevBadgeClass, severityOf } from '../utils/alarmLabels'
 import { Input } from '@core/components/ui/input'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { Badge } from '@core/components/ui/badge'
+import { EmptyState } from '@core/components/custom/empty-state'
+import { Alert } from '@core/components/ui/alert'
 
 // ── 알람 코드 사전 (검색 + 표) ──────────────────────────────────────────
 export function AlarmCatalogTable() {
@@ -45,11 +47,11 @@ export function AlarmCatalogTable() {
                  placeholder="코드/클래스/조치 검색" value={q} onChange={e => setQ(e.target.value)} />
         </div>
         {!loaded ? (
-          <div className="empty">로딩 중…</div>
+          <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div>
         ) : error ? (
-          <div className="empty" style={{ color: 'var(--destructive)' }}>조회 실패: {error}</div>
+          <Alert variant="danger">조회 실패: {error}</Alert>
         ) : filtered.length === 0 ? (
-          <div className="empty">항목 없음</div>
+          <EmptyState title="항목 없음" />
         ) : (
           <DataTable sticky>
             <thead>
@@ -92,9 +94,9 @@ export function AlarmRulesTable() {
   useEffect(() => {
     alertsApi.rules().then(setRules).catch(e => setErr((e as Error).message))
   }, [])
-  if (err) return <div className="panel"><div className="empty" style={{ color: 'var(--destructive)' }}>규칙 조회 실패: {err}</div></div>
-  if (!rules) return <div className="panel"><div className="empty">로딩 중…</div></div>
-  if (rules.rules.length === 0) return <div className="panel"><div className="empty">등록된 평가 규칙 없음</div></div>
+  if (err) return <div className="panel"><Alert variant="danger">규칙 조회 실패: {err}</Alert></div>
+  if (!rules) return <div className="panel"><div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div></div>
+  if (rules.rules.length === 0) return <div className="panel"><EmptyState title="등록된 평가 규칙 없음" /></div>
   return (
         <div className="panel">
           <div style={{ padding: '10px 16px', fontWeight: 600, fontSize: 13, borderBottom: '1px solid var(--border)',

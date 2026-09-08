@@ -251,7 +251,7 @@ function SystemTopologyWidget() {
       {/* 데이터가 없어도 카드(패널)는 유지한다 — null 을 돌려주면 로딩 동안 위젯이 통째로
           사라졌다가 팝인하고, 시스템이 0대면 카드 자체가 영영 안 보인다. */}
       {systems.length === 0 && ext.length === 0 && (
-        <div className="empty">{loaded ? '등록된 시스템이 없습니다.' : '불러오는 중…'}</div>
+        <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">{loaded ? '등록된 시스템이 없습니다.' : '불러오는 중…'}</div>
       )}
       {/* 시스템 카드들 — 다중일 때 좌우로 흐르도록 auto-fit 그리드 (상하좌우 균등). */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 14, alignItems: 'start' }}>

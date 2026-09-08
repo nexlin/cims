@@ -21,6 +21,7 @@ import { RotateCw } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { EmptyState } from '@core/components/custom/empty-state'
 
 interface ReclaimItem {
   ts: string; node: string; session_id: string; sesid: string
@@ -97,7 +98,7 @@ function ByNodeBlock() {
       <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 6, flex: 'none' }}>
         노드별 회수{loading && ' · 갱신 중…'}{error && <span style={{ color: 'var(--destructive)' }}> · 조회 실패</span>}
       </div>
-      {rows.length === 0 ? <div className="empty" style={{ fontSize: 12 }}>회수 없음</div> : (
+      {rows.length === 0 ? <EmptyState title="회수 없음" className="text-[12px]" /> : (
         <div className="scroll-fill">
           <DataTable sticky className="[&_td]:text-sm">
             <thead><tr><Th>노드</Th><Th style={{ width: 70, textAlign: 'right' }}>건수</Th></tr></thead>

@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { flowApi, formatMsgBody, type FlowMessage } from '../api/flow'
 import Modal from '../components/Modal'
 import { Badge } from '@core/components/ui/badge'
+import { EmptyState } from '@core/components/custom/empty-state'
+import { Alert } from '@core/components/ui/alert'
 
 /** ts "HH:MM:SS.uuuuuu" 에서 hour 추출 */
 function hourFromTs(ts: string): string | undefined {
@@ -639,11 +641,11 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
         </div>
       )}
 
-      {loading && <div className="empty">로딩 중…</div>}
-      {error   && <div className="empty" style={{ color: 'var(--destructive)' }}>오류: {error}</div>}
+      {loading && <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div>}
+      {error   && <Alert variant="danger">오류: {error}</Alert>}
 
       {!loading && !error && messages.length === 0 && (
-        <div className="empty">메시지 기록이 없습니다.</div>
+        <EmptyState title="메시지 기록이 없습니다." />
       )}
 
       {!loading && !error && messages.length > 0 && (() => {

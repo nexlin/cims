@@ -23,6 +23,8 @@ import {
 import { Button } from '@core/components/ui/button'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { Badge } from '@core/components/ui/badge'
+import { EmptyState } from '@core/components/custom/empty-state'
+import { Alert } from '@core/components/ui/alert'
 
 const FETCH_LIMIT = 5000   // 이벤트 탭 서버 상한 — 초과 시 최신순 절단(표기)
 
@@ -256,12 +258,12 @@ export function AlarmByCodeBlock() {
   }
   return (
     <>
-      {loading && byCode.length === 0 ? <div className="panel"><div className="empty">로딩 중…</div></div>
-        : error ? <div className="panel"><div className="empty" style={{ color: 'var(--destructive)' }}>조회 실패: {error}</div></div> : (
+      {loading && byCode.length === 0 ? <div className="panel"><div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div></div>
+        : error ? <div className="panel"><Alert variant="danger">조회 실패: {error}</Alert></div> : (
             <TablePanel title={<>코드별 분석 ({byCode.length}종)</>}
                         action={<Button variant="ghost" onClick={exportCsv}
                                         disabled={byCode.length === 0}>CSV</Button>}>
-              {byCode.length === 0 ? <div className="empty">기간 내 알람 없음</div> : (
+              {byCode.length === 0 ? <EmptyState title="기간 내 알람 없음" /> : (
                 <DataTable sticky>
                   <thead>
                     <tr>
@@ -325,11 +327,11 @@ export function AlarmByTypeBlock() {
     return [...m.values()].sort((a, b) => b.opens - a.opens || b.last.localeCompare(a.last))
   }, [stats])
   const maxTypeOpens = Math.max(1, ...byType.map(t => t.opens))
-  if (loading && byType.length === 0) return <div className="panel"><div className="empty">로딩 중…</div></div>
-  if (error) return <div className="panel"><div className="empty" style={{ color: 'var(--destructive)' }}>조회 실패: {error}</div></div>
+  if (loading && byType.length === 0) return <div className="panel"><div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div></div>
+  if (error) return <div className="panel"><Alert variant="danger">조회 실패: {error}</Alert></div>
   return (
             <TablePanel title={<>유형(클래스)별 분석 ({byType.length}종)</>}>
-              {byType.length === 0 ? <div className="empty">기간 내 알람 없음</div> : (
+              {byType.length === 0 ? <EmptyState title="기간 내 알람 없음" /> : (
                 <DataTable sticky>
                   <thead>
                     <tr>
@@ -446,13 +448,13 @@ export function EventByTypeBlock() {
       ['분류', '코드', '유형', '건수', '마지막'],
       byType.map(t => [EVENT_KIND_LABEL[t.kind || ''] || t.kind || '', t.code || '', t.type, t.count, t.last]))
   }
-  if (loading && byType.length === 0) return <div className="panel"><div className="empty">로딩 중…</div></div>
-  if (error) return <div className="panel"><div className="empty" style={{ color: 'var(--destructive)' }}>조회 실패: {error}</div></div>
+  if (loading && byType.length === 0) return <div className="panel"><div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div></div>
+  if (error) return <div className="panel"><Alert variant="danger">조회 실패: {error}</Alert></div>
   return (
             <TablePanel title={<>유형별 발생 ({byType.length}종)</>}
                         action={<Button variant="ghost" onClick={exportCsv}
                                         disabled={byType.length === 0}>CSV</Button>}>
-              {byType.length === 0 ? <div className="empty">기간 내 이벤트 없음</div> : (
+              {byType.length === 0 ? <EmptyState title="기간 내 이벤트 없음" /> : (
                 <DataTable sticky>
                   <thead>
                     <tr>
@@ -489,11 +491,11 @@ export function EventByTypeBlock() {
 export function EventBySourceBlock() {
   const { bySource, loading, error } = useEventAggs()
   const maxSrcCount = Math.max(1, ...bySource.map(t => t.count))
-  if (loading && bySource.length === 0) return <div className="panel"><div className="empty">로딩 중…</div></div>
-  if (error) return <div className="panel"><div className="empty" style={{ color: 'var(--destructive)' }}>조회 실패: {error}</div></div>
+  if (loading && bySource.length === 0) return <div className="panel"><div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div></div>
+  if (error) return <div className="panel"><Alert variant="danger">조회 실패: {error}</Alert></div>
   return (
             <TablePanel title={<>소스별 발생 ({bySource.length}곳)</>}>
-              {bySource.length === 0 ? <div className="empty">기간 내 이벤트 없음</div> : (
+              {bySource.length === 0 ? <EmptyState title="기간 내 이벤트 없음" /> : (
                 <DataTable sticky>
                   <thead>
                     <tr>

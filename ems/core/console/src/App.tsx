@@ -26,6 +26,7 @@ import type { ComponentType } from 'react'
 import './index.css'
 import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
+import { EmptyState } from '@core/components/custom/empty-state'
 
 const SIDEBAR_COLLAPSED_KEY = 'cims_sidebar_collapsed'
 
@@ -120,17 +121,16 @@ function RouteGuard({ children, route }: { children: React.ReactNode; route: Rou
   const { user } = useAuth()
   const devMode = useDevMode()
   if (!canAccessRoute(user, route)) {
-    return <div className="empty" style={{ marginTop: 80 }}>접근 권한이 없습니다</div>
+    return <EmptyState title="접근 권한이 없습니다" className="mt-[80px]" />
   }
   // 개발 기능(릴리스 등)은 개발자 모드에서만 — 권한이 아닌 화면 모드 분리
   if (route.devOnly && !devMode) {
     return (
-      <div className="empty" style={{ marginTop: 80, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-        <div>이 메뉴는 <b>개발자 모드</b>에서 사용합니다 (빌드·검증·패키징).</div>
-        <Button variant="default" onClick={() => setDevMode(true)}>
-          {'</>'} 개발자 모드 켜기
-        </Button>
-      </div>
+      <EmptyState className="mt-20"
+                  title={<>이 메뉴는 <b>개발자 모드</b>에서 사용합니다 (빌드·검증·패키징).</>}
+                  action={<Button variant="default" onClick={() => setDevMode(true)}>
+                    {'</>'} 개발자 모드 켜기
+                  </Button>} />
     )
   }
   return <>{children}</>

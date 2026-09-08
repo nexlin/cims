@@ -17,6 +17,7 @@ import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { Badge } from '@core/components/ui/badge'
 import type { BadgeTone } from '@core/components/ui/badge'
+import { EmptyState } from '@core/components/custom/empty-state'
 
 const PAGE_SIZE = 20
 const FETCH_LIMIT = 5000
@@ -141,11 +142,11 @@ export function AuditEventsSection() {
           )}
         </div>
         {loading ? (
-          <div className="empty">로딩 중…</div>
+          <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div>
         ) : forbidden ? (
-          <div className="empty">감사 이력 열람 권한이 없습니다 (운영 관리자 이상)</div>
+          <EmptyState title="감사 이력 열람 권한이 없습니다 (운영 관리자 이상)" />
         ) : filtered.length === 0 ? (
-          <div className="empty">기록된 감사 이벤트 없음</div>
+          <EmptyState title="기록된 감사 이벤트 없음" />
         ) : (
           <>
             <div className="scroll-fill">

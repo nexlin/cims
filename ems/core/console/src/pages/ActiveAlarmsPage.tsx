@@ -15,6 +15,7 @@ import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { Badge } from '@core/components/ui/badge'
+import { EmptyState } from '@core/components/custom/empty-state'
 
 function elapsedSince(ts?: string): string {
   const t = new Date(ts || '').getTime()
@@ -138,9 +139,9 @@ export function ActiveAlarmList() {
           활성 알람 ({rows.length}건{sevFilter || q ? ` / 전체 ${active.length}` : ''})
         </div>
         {!loaded ? (
-          <div className="empty">로딩 중…</div>
+          <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div>
         ) : rows.length === 0 ? (
-          <div className="empty">{active.length === 0 ? '활성 알람 없음' : '필터 결과 없음'}</div>
+          <EmptyState title={active.length === 0 ? '활성 알람 없음' : '필터 결과 없음'} />
         ) : (
           <DataTable sticky>
             <thead>

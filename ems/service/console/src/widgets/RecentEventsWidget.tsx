@@ -13,6 +13,7 @@ import { Button } from '@core/components/ui/button'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { Badge } from '@core/components/ui/badge'
 import type { BadgeTone } from '@core/components/ui/badge'
+import { EmptyState } from '@core/components/custom/empty-state'
 
 // kind = 이벤트 스트림의 1차 축 (표준화 §3.6 — DOMAIN 약어 STC/AUD). 고정 순서.
 const KIND_ORDER = ['stateChange', 'audit'] as const
@@ -86,11 +87,11 @@ function RecentEventsWidget() {
 
       {/* 이벤트 목록 */}
       {!loaded && recentEvents.length === 0 ? (
-        <div className="empty">로딩 중…</div>
+        <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div>
       ) : recentEvents.length === 0 ? (
-        <div className="empty">최근 24시간 이벤트 없음</div>
+        <EmptyState title="최근 24시간 이벤트 없음" />
       ) : rows.length === 0 ? (
-        <div className="empty">해당 종류의 이벤트 없음</div>
+        <EmptyState title="해당 종류의 이벤트 없음" />
       ) : (
         <div className="table-wrap">
           <DataTable sticky>

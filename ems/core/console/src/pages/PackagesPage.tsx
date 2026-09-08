@@ -10,160 +10,157 @@ import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { Badge } from '@core/components/ui/badge'
+import { EmptyState } from '@core/components/custom/empty-state'
 
 interface ModuleGroup {
-  name: string
-  versions: SipPackage[]
-  latest: SipPackage
-  totalSize: number
-  lastUploadedAt: string | null
+ name: string
+ versions: SipPackage[]
+ latest: SipPackage
+ totalSize: number
+ lastUploadedAt: string | null
 }
 
 export default function PackagesPage() {
-  const { show } = useToast()
-  const confirm = useConfirm()
-  const [packages, setPackages] = useState<SipPackage[]>([])
-  const [deployments, setDeployments] = useState<Deployment[]>([])
-  const [loading, setLoading] = useState(true)
-  const [selected, setSelected] = useState<string | null>(null)
-  const [filter, setFilter] = useState('')
-  const [uploadOpen, setUploadOpen] = useState(false)
+ const { show } = useToast()
+ const confirm = useConfirm()
+ const [packages, setPackages] = useState<SipPackage[]>([])
+ const [deployments, setDeployments] = useState<Deployment[]>([])
+ const [loading, setLoading] = useState(true)
+ const [selected, setSelected] = useState<string | null>(null)
+ const [filter, setFilter] = useState('')
+ const [uploadOpen, setUploadOpen] = useState(false)
 
-  const load = useCallback(async () => {
-    try {
-      const [p, d] = await Promise.all([
-        deploymentApi.listPackages(),
-        deploymentApi.listDeployments(),
+ const load = useCallback(async () => {
+ try {
+ const [p, d] = await Promise.all([
+ deploymentApi.listPackages(),
+ deploymentApi.listDeployments(),
       ])
-      setPackages(p); setDeployments(d)
+ setPackages(p); setDeployments(d)
     } catch (e) { show((e as Error).message, 'err') }
-    finally { setLoading(false) }
+ finally { setLoading(false) }
   }, [show])
 
-  useEffect(() => { void load() }, [load])
-  useEffect(() => {
-    const iv = setInterval(() => void load(), 2_000)   // 실측 상태 자동 갱신 (제어 탭과 일관)
-    return () => clearInterval(iv)
+ useEffect(() => { void load() }, [load])
+ useEffect(() => {
+ const iv = setInterval(() => void load(), 2_000)   // 실측 상태 자동 갱신 (제어 탭과 일관)
+ return () => clearInterval(iv)
   }, [load])
 
-  const modules = useMemo<ModuleGroup[]>(() => {
-    const m = new Map<string, SipPackage[]>()
-    for (const p of packages) {
-      if (!m.has(p.name)) m.set(p.name, [])
-      m.get(p.name)!.push(p)
+ const modules = useMemo<ModuleGroup[]>(() => {
+ const m = new Map<string, SipPackage[]>()
+ for (const p of packages) {
+ if (!m.has(p.name)) m.set(p.name, [])
+ m.get(p.name)!.push(p)
     }
-    const out: ModuleGroup[] = []
-    for (const [name, vers] of m) {
-      const sorted = [...vers].sort((a, b) => {
+ const out: ModuleGroup[] = []
+ for (const [name, vers] of m) {
+ const sorted = [...vers].sort((a, b) => {
         // 최신순: uploaded_at 내림차순 → id 내림차순
-        const ta = a.uploaded_at ? Date.parse(a.uploaded_at) : 0
-        const tb = b.uploaded_at ? Date.parse(b.uploaded_at) : 0
-        if (tb !== ta) return tb - ta
-        return b.id - a.id
+ const ta = a.uploaded_at ? Date.parse(a.uploaded_at) : 0
+ const tb = b.uploaded_at ? Date.parse(b.uploaded_at) : 0
+ if (tb !== ta) return tb - ta
+ return b.id - a.id
       })
-      out.push({
-        name,
-        versions: sorted,
-        latest: sorted[0],
-        totalSize: sorted.reduce((s, v) => s + (v.file_size || 0), 0),
-        lastUploadedAt: sorted[0].uploaded_at,
+ out.push({
+ name,
+ versions: sorted,
+ latest: sorted[0],
+ totalSize: sorted.reduce((s, v) => s + (v.file_size || 0), 0),
+ lastUploadedAt: sorted[0].uploaded_at,
       })
     }
-    return out.sort((a, b) => a.name.localeCompare(b.name))
+ return out.sort((a, b) => a.name.localeCompare(b.name))
   }, [packages])
 
-  const filteredModules = useMemo(() => {
-    const q = filter.trim().toLowerCase()
-    if (!q) return modules
-    return modules.filter(m => m.name.toLowerCase().includes(q))
+ const filteredModules = useMemo(() => {
+ const q = filter.trim().toLowerCase()
+ if (!q) return modules
+ return modules.filter(m => m.name.toLowerCase().includes(q))
   }, [modules, filter])
 
   // 선택된 모듈 자동 보정 (삭제/로드 후)
-  useEffect(() => {
-    if (loading) return
-    if (modules.length === 0) { setSelected(null); return }
-    if (!selected || !modules.find(m => m.name === selected)) {
-      setSelected(modules[0].name)
+ useEffect(() => {
+ if (loading) return
+ if (modules.length === 0) { setSelected(null); return }
+ if (!selected || !modules.find(m => m.name === selected)) {
+ setSelected(modules[0].name)
     }
   }, [modules, selected, loading])
 
-  const selectedModule = useMemo(
+ const selectedModule = useMemo(
     () => modules.find(m => m.name === selected) || null,
-    [modules, selected]
+ [modules, selected]
   )
 
   // 패키지별 배포 참조 수
-  const depCountByPkgId = useMemo(() => {
-    const m = new Map<number, number>()
-    for (const d of deployments) {
-      m.set(d.package_id, (m.get(d.package_id) || 0) + 1)
+ const depCountByPkgId = useMemo(() => {
+ const m = new Map<number, number>()
+ for (const d of deployments) {
+ m.set(d.package_id, (m.get(d.package_id) || 0) + 1)
     }
-    return m
+ return m
   }, [deployments])
 
-  async function removePackage(p: SipPackage) {
-    const refs = depCountByPkgId.get(p.id) || 0
-    if (refs > 0) {
-      if (!await confirm({ title: '패키지 삭제', tone: 'danger', confirmLabel: '삭제',
-        body: `${p.name} v${p.version} 은 ${refs}곳에 배포되어 있습니다. 계속 삭제할까요?` })) return
+ async function removePackage(p: SipPackage) {
+ const refs = depCountByPkgId.get(p.id) || 0
+ if (refs > 0) {
+ if (!await confirm({ title: '패키지 삭제', tone: 'danger', confirmLabel: '삭제',
+ body: `${p.name} v${p.version} 은 ${refs}곳에 배포되어 있습니다. 계속 삭제할까요?` })) return
     } else {
-      if (!await confirm({ title: '패키지 삭제', tone: 'danger', confirmLabel: '삭제',
-        body: `${p.name} v${p.version} 을 삭제할까요?` })) return
+ if (!await confirm({ title: '패키지 삭제', tone: 'danger', confirmLabel: '삭제',
+ body: `${p.name} v${p.version} 을 삭제할까요?` })) return
     }
-    try {
-      await deploymentApi.deletePackage(p.id)
-      show('삭제됨', 'ok')
-      await load()
+ try {
+ await deploymentApi.deletePackage(p.id)
+ show('삭제됨', 'ok')
+ await load()
     } catch (e) { show((e as Error).message, 'err') }
   }
 
-  if (loading) return <div className="empty">로딩 중...</div>
+ if (loading) return <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중...</div>
 
-  return (
+ return (
     <div style={{ display: 'flex', gap: 16, flex: 1, minHeight: 0 }}>
       {/* ── 좌측: 모듈 목록 ── */}
       <div style={{
-        width: 280, flex: '0 0 auto', display: 'flex', flexDirection: 'column',
-        border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)', overflow: 'hidden',
+ width: 280, flex: '0 0 auto', display: 'flex', flexDirection: 'column',
+ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)', overflow: 'hidden',
       }}>
         <div style={{ padding: 10, borderBottom: '1px solid var(--border)', display: 'flex', gap: 6 }}>
-          <Input  placeholder="모듈 검색..."
-            value={filter} onChange={e => setFilter(e.target.value)}
-            style={{ flex: 1 }} />
+          <Input placeholder="모듈 검색..."
+ value={filter} onChange={e => setFilter(e.target.value)}
+ style={{ flex: 1 }} />
         </div>
         <div style={{ flex: 1, overflow: 'auto' }}>
           {filteredModules.length === 0 ? (
-            <div className="empty" style={{ padding: 20 }}>
-              {modules.length === 0 ? '등록된 모듈 없음' : '검색 결과 없음'}
-            </div>
+            <EmptyState title={modules.length === 0 ? '등록된 모듈 없음' : '검색 결과 없음'} className="p-[20px]" />
           ) : (
-            filteredModules.map(m => (
+ filteredModules.map(m => (
               <ModuleRow key={m.name} mod={m}
-                active={m.name === selected}
-                onClick={() => setSelected(m.name)} />
+ active={m.name === selected}
+ onClick={() => setSelected(m.name)} />
             ))
           )}
         </div>
         <div style={{ padding: 10, borderTop: '1px solid var(--border)' }}>
           <Button variant="default" size="default" style={{ width: '100%' }}
-            onClick={() => setUploadOpen(true)}><Plus size={13} /> 패키지 업로드</Button>
+ onClick={() => setUploadOpen(true)}><Plus size={13} /> 패키지 업로드</Button>
         </div>
       </div>
 
       {/* ── 우측: 선택 모듈 상세 ── */}
       <div style={{
-        flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)',
+ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)',
       }}>
         {!selectedModule ? (
-          <div className="empty" style={{ padding: 40 }}>
-            좌측에서 모듈을 선택하거나, 새 패키지를 업로드하세요
-          </div>
+          <EmptyState title="좌측에서 모듈을 선택하거나, 새 패키지를 업로드하세요" className="p-[40px]" />
         ) : (
           <ModuleDetail mod={selectedModule}
-            depCountByPkgId={depCountByPkgId}
-            deployments={deployments}
-            onDelete={removePackage} />
+ depCountByPkgId={depCountByPkgId}
+ deployments={deployments}
+ onDelete={removePackage} />
         )}
       </div>
 
@@ -176,21 +173,21 @@ export default function PackagesPage() {
 // ──────────────────────────────────────────────────────────────
 
 function ModuleRow({ mod, active, onClick }: {
-  mod: ModuleGroup; active: boolean; onClick: () => void
+ mod: ModuleGroup; active: boolean; onClick: () => void
 }) {
-  return (
+ return (
     <button onClick={onClick}
-      style={{
-        display: 'block', width: '100%', textAlign: 'left',
-        padding: '10px 12px', border: 'none', background: active ? 'var(--cims-brand-soft)' : 'transparent',
-        borderLeft: `3px solid ${active ? 'var(--cims-info)' : 'transparent'}`,
-        cursor: 'pointer', borderBottom: '1px solid var(--border)',
+ style={{
+ display: 'block', width: '100%', textAlign: 'left',
+ padding: '10px 12px', border: 'none', background: active ? 'var(--cims-brand-soft)' : 'transparent',
+ borderLeft: `3px solid ${active ? 'var(--cims-info)' : 'transparent'}`,
+ cursor: 'pointer', borderBottom: '1px solid var(--border)',
       }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
         <b style={{ fontSize: 14 }}>{mod.name}</b>
         <span style={{
-          marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)',
-          background: 'var(--secondary)', padding: '1px 6px', borderRadius: 10,
+ marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)',
+ background: 'var(--secondary)', padding: '1px 6px', borderRadius: 10,
         }}>{mod.versions.length}</span>
       </div>
       <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 3 }}>
@@ -201,28 +198,28 @@ function ModuleRow({ mod, active, onClick }: {
 }
 
 function ModuleDetail({ mod, depCountByPkgId, deployments, onDelete }: {
-  mod: ModuleGroup
-  depCountByPkgId: Map<number, number>
-  deployments: Deployment[]
-  onDelete: (p: SipPackage) => void
+ mod: ModuleGroup
+ depCountByPkgId: Map<number, number>
+ deployments: Deployment[]
+ onDelete: (p: SipPackage) => void
 }) {
-  const [expanded, setExpanded] = useState<Set<number>>(() => new Set([mod.latest.id]))
-  const [depViewFor, setDepViewFor] = useState<SipPackage | null>(null)
+ const [expanded, setExpanded] = useState<Set<number>>(() => new Set([mod.latest.id]))
+ const [depViewFor, setDepViewFor] = useState<SipPackage | null>(null)
 
   // 선택 모듈 바뀌면 최신만 펼치게 초기화
-  useEffect(() => {
-    setExpanded(new Set([mod.latest.id]))
+ useEffect(() => {
+ setExpanded(new Set([mod.latest.id]))
   }, [mod.name, mod.latest.id])
 
-  function toggle(id: number) {
-    setExpanded(s => {
-      const n = new Set(s)
-      if (n.has(id)) n.delete(id); else n.add(id)
-      return n
+ function toggle(id: number) {
+ setExpanded(s => {
+ const n = new Set(s)
+ if (n.has(id)) n.delete(id); else n.add(id)
+ return n
     })
   }
 
-  return (
+ return (
     <>
       {/* 헤더 */}
       <div style={{ padding: 16, borderBottom: '1px solid var(--border)' }}>
@@ -244,43 +241,43 @@ function ModuleDetail({ mod, depCountByPkgId, deployments, onDelete }: {
       <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
         {mod.versions.map(v => (
           <VersionRow key={v.id} pkg={v}
-            isLatest={v.id === mod.latest.id}
-            expanded={expanded.has(v.id)}
-            onToggle={() => toggle(v.id)}
-            depCount={depCountByPkgId.get(v.id) || 0}
-            onShowDeployments={() => setDepViewFor(v)}
-            onDelete={() => onDelete(v)} />
+ isLatest={v.id === mod.latest.id}
+ expanded={expanded.has(v.id)}
+ onToggle={() => toggle(v.id)}
+ depCount={depCountByPkgId.get(v.id) || 0}
+ onShowDeployments={() => setDepViewFor(v)}
+ onDelete={() => onDelete(v)} />
         ))}
       </div>
 
       {depViewFor && (
         <DeploymentsForPackageModal pkg={depViewFor}
-          deployments={deployments.filter(d => d.package_id === depViewFor.id)}
-          onClose={() => setDepViewFor(null)} />
+ deployments={deployments.filter(d => d.package_id === depViewFor.id)}
+ onClose={() => setDepViewFor(null)} />
       )}
     </>
   )
 }
 
 function VersionRow({ pkg: p, isLatest, expanded, onToggle,
-                     depCount, onShowDeployments, onDelete }: {
-  pkg: SipPackage
-  isLatest: boolean
-  expanded: boolean
-  onToggle: () => void
-  depCount: number
-  onShowDeployments: () => void
-  onDelete: () => void
+ depCount, onShowDeployments, onDelete }: {
+ pkg: SipPackage
+ isLatest: boolean
+ expanded: boolean
+ onToggle: () => void
+ depCount: number
+ onShowDeployments: () => void
+ onDelete: () => void
 }) {
-  return (
+ return (
     <div style={{
-      border: '1px solid var(--border)', borderRadius: 6, marginBottom: 8,
-      background: isLatest ? 'var(--muted)' : 'var(--card)',
+ border: '1px solid var(--border)', borderRadius: 6, marginBottom: 8,
+ background: isLatest ? 'var(--muted)' : 'var(--card)',
     }}>
       <div onClick={onToggle}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
-          cursor: 'pointer', userSelect: 'none',
+ style={{
+ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
+ cursor: 'pointer', userSelect: 'none',
         }}>
         <span className="text-muted-foreground">
                     {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
@@ -294,8 +291,8 @@ function VersionRow({ pkg: p, isLatest, expanded, onToggle,
         <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>· {fmtSize(p.file_size)}</span>
         {depCount > 0 && (
           <span style={{
-            marginLeft: 'auto', fontSize: 11, color: 'var(--primary)',
-            background: 'var(--cims-brand-soft)', padding: '2px 8px', borderRadius: 10,
+ marginLeft: 'auto', fontSize: 11, color: 'var(--primary)',
+ background: 'var(--cims-brand-soft)', padding: '2px 8px', borderRadius: 10,
           }}>배포 {depCount}곳</span>
         )}
       </div>
@@ -320,13 +317,13 @@ function VersionRow({ pkg: p, isLatest, expanded, onToggle,
 
           <div style={{ marginTop: 10, display: 'flex', gap: 6 }}>
             <Button
-              disabled={depCount === 0}
-              onClick={onShowDeployments}
-              title={depCount === 0 ? '배포된 곳 없음' : '배포 대상 보기'}>
+ disabled={depCount === 0}
+ onClick={onShowDeployments}
+ title={depCount === 0 ? '배포된 곳 없음' : '배포 대상 보기'}>
               배포 대상 보기 ({depCount})
             </Button>
             <Button variant="destructive" style={{ marginLeft: 'auto' }}
-              onClick={onDelete}>삭제</Button>
+ onClick={onDelete}>삭제</Button>
           </div>
         </div>
       )}
@@ -335,11 +332,11 @@ function VersionRow({ pkg: p, isLatest, expanded, onToggle,
 }
 
 function DeploymentsForPackageModal({ pkg, deployments, onClose }: {
-  pkg: SipPackage
-  deployments: Deployment[]
-  onClose: () => void
+ pkg: SipPackage
+ deployments: Deployment[]
+ onClose: () => void
 }) {
-  return (
+ return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box" style={{ width: 640 }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
@@ -348,7 +345,7 @@ function DeploymentsForPackageModal({ pkg, deployments, onClose }: {
         </div>
         <div className="modal-body">
           {deployments.length === 0 ? (
-            <div className="empty">배포된 곳 없음</div>
+            <EmptyState title="배포된 곳 없음" />
           ) : (
             <DataTable sticky>
               <thead>

@@ -70,7 +70,7 @@ function SystemCardsWidget() {
       </div>
       {/* 데이터가 없어도 카드는 유지 — null 을 돌려주면 로딩 동안 위젯이 사라졌다 팝인한다. */}
       {systems.length === 0 && (
-        <div className="empty">{loaded ? '등록된 시스템이 없습니다.' : '불러오는 중…'}</div>
+        <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">{loaded ? '등록된 시스템이 없습니다.' : '불러오는 중…'}</div>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
         {systems.map(s => {

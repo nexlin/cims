@@ -3,6 +3,7 @@ import { flowApi, type FlowMessage } from '@core/api/flow'
 import FlowPage from '@core/pages/FlowPage'
 import { Button } from '@core/components/ui/button'
 import { ArrowLeft } from 'lucide-react'
+import { EmptyState } from '@core/components/custom/empty-state'
 
 type PageState = 'form' | 'flow'
 
@@ -94,15 +95,9 @@ export default function RegisterFlowPage() {
 
       {/* ── form: 안내 ── */}
       {pageState === 'form' && (
-        <div className="empty" style={{ flex: 1 }}>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 14, marginBottom: 8 }}>사용자 ID를 입력하고 조회하세요</div>
-            <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
-              해당 날짜에 이 사용자가 주고받은 모든 메시지 흐름이 표시됩니다
-              (REGISTER · SUBSCRIBE · PUBLISH · INVITE/BYE 호 처리 · NOTIFY 등)
-            </div>
-          </div>
-        </div>
+        <EmptyState className="flex-1 justify-center"
+                    title="사용자 ID를 입력하고 조회하세요"
+                    description="해당 날짜에 이 사용자가 주고받은 모든 메시지 흐름이 표시됩니다 (REGISTER · SUBSCRIBE · PUBLISH · INVITE/BYE 호 처리 · NOTIFY 등)" />
       )}
 
       {/* ── flow: FlowPage (Modal 없이 페이지 내 바로 표시) ── */}

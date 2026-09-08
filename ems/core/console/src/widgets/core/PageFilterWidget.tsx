@@ -10,7 +10,7 @@ import { RotateCcw } from 'lucide-react'
 import type { WidgetDef, WidgetProps } from '../types'
 import {
   GRAN_LABELS, GRAN_MAX_DAYS, bestGran, defaultRange, fmtDt, granFits,
-  usePageControl, usePageParam, useSetPageParams,
+ usePageControl, usePageParam, useSetPageParams,
 } from '../pageParams'
 import { Button } from '@core/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
@@ -28,44 +28,44 @@ const PRESETS: { key: string; label: string; days: number }[] = [
 ]
 
 function PageFilterWidget({ config }: WidgetProps) {
-  usePageControl('period')
-  const [from, setFrom] = usePageParam('from')
-  const [to, setTo] = usePageParam('to')
-  const [gran, setGran] = usePageParam('gran')
-  const setMany = useSetPageParams()
+ usePageControl('period')
+ const [from, setFrom] = usePageParam('from')
+ const [to, setTo] = usePageParam('to')
+ const [gran, setGran] = usePageParam('gran')
+ const setMany = useSetPageParams()
   // 집계 단위가 없는 조회(일자 단위 목록 등)에서는 단위 버튼을 감춘다.
-  const showGran = config?.showGran !== false
+ const showGran = config?.showGran !== false
 
   // 구간을 바꾸면 지금 단위가 감당 못 할 수 있다 — 그때만 자동 승격.
   // from·to(+gran)는 **한 번에** 쓴다. 나눠 쓰면 앞의 갱신이 사라진다(pageParams setParams 주석).
-  const applyRange = (f: string, t: string) => {
-    const nextGran = showGran && !granFits(f, t, gran) ? bestGran(f, t) : ''
-    if (setMany) {
-      setMany({ from: f, to: t, ...(nextGran ? { gran: nextGran } : {}) })
+ const applyRange = (f: string, t: string) => {
+ const nextGran = showGran && !granFits(f, t, gran) ? bestGran(f, t) : ''
+ if (setMany) {
+ setMany({ from: f, to: t, ...(nextGran ? { gran: nextGran } : {}) })
     } else {
-      setFrom(f); setTo(t)
-      if (nextGran) setGran(nextGran)
+ setFrom(f); setTo(t)
+ if (nextGran) setGran(nextGran)
     }
   }
-  const applyPreset = (days: number) => {
-    const now = new Date()
-    const f = days === 0 ? new Date(now.getFullYear(), now.getMonth(), now.getDate())
+ const applyPreset = (days: number) => {
+ const now = new Date()
+ const f = days === 0 ? new Date(now.getFullYear(), now.getMonth(), now.getDate())
                          : new Date(now.getTime() - days * 86400000)
-    applyRange(fmtDt(f), fmtDt(now))
+ applyRange(fmtDt(f), fmtDt(now))
   }
-  const reset = () => { const r = defaultRange(); applyRange(r.from, r.to) }
+ const reset = () => { const r = defaultRange(); applyRange(r.from, r.to) }
 
-  return (
+ return (
     <div className="panel" style={{ padding: '10px 12px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <span style={{ fontWeight: 600, fontSize: 13 }}>조회 구간</span>
-        <Input  type="datetime-local" value={toInput(from)}
-               onChange={e => applyRange(fromInput(e.target.value), to)}
-               style={{ width: 190, fontSize: 12 }} />
+        <Input type="datetime-local" value={toInput(from)}
+ onChange={e => applyRange(fromInput(e.target.value), to)}
+ style={{ width: 190, fontSize: 12 }} />
         <span style={{ color: 'var(--muted-foreground)' }}>~</span>
-        <Input  type="datetime-local" value={toInput(to)}
-               onChange={e => applyRange(from, fromInput(e.target.value))}
-               style={{ width: 190, fontSize: 12 }} />
+        <Input type="datetime-local" value={toInput(to)}
+ onChange={e => applyRange(from, fromInput(e.target.value))}
+ style={{ width: 190, fontSize: 12 }} />
         {PRESETS.map(p => (
           <Button key={p.key} onClick={() => applyPreset(p.days)}>{p.label}</Button>
         ))}
@@ -75,13 +75,13 @@ function PageFilterWidget({ config }: WidgetProps) {
           <>
             <div style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 4px' }} />
             <ToggleGroup type="single" value={gran} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
-                         onValueChange={(v: string) => v && setGran(v)}>
+ onValueChange={(v: string) => v && setGran(v)}>
               {Object.entries(GRAN_LABELS).map(([g, label]) => {
-                const fits = granFits(from, to, g)
-                const lim = GRAN_MAX_DAYS[g]
-                return (
+ const fits = granFits(from, to, g)
+ const lim = GRAN_MAX_DAYS[g]
+ return (
                   <ToggleGroupItem key={g} value={g} disabled={!fits}
-                                   title={fits ? undefined : `${label} 단위는 ${lim}일까지 볼 수 있습니다`}>{label}</ToggleGroupItem>
+ title={fits ? undefined : `${label} 단위는 ${lim}일까지 볼 수 있습니다`}>{label}</ToggleGroupItem>
                 )
               })}
             </ToggleGroup>
@@ -93,10 +93,10 @@ function PageFilterWidget({ config }: WidgetProps) {
 }
 
 export const pageFilterWidget: WidgetDef = {
-  id: 'core.page-filter',
-  title: '조회 조건 (구간·단위)',
-  category: 'control',
-  component: PageFilterWidget,
-  configFields: [{ key: 'showGran', label: '단위 버튼', type: 'bool' }],
-  defaultSize: { w: 12, h: 4 },
+ id: 'core.page-filter',
+ title: '조회 조건 (구간·단위)',
+ category: 'control',
+ component: PageFilterWidget,
+ configFields: [{ key: 'showGran', label: '단위 버튼', type: 'bool' }],
+ defaultSize: { w: 12, h: 4 },
 }

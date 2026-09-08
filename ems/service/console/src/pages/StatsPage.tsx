@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { statsApi, type MessagesResponse, type ServiceStatsResponse,
-         type CallsResponse, type CallCell } from '@core/api/stats'
+ type CallsResponse, type CallCell } from '@core/api/stats'
 import { useToast } from '@core/components/Toast'
 import { RotateCw } from 'lucide-react'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
@@ -21,33 +21,33 @@ const GRAN_LABELS: Record<Granularity, string> = {
 
  
 function BarChart({ data, labelKey, valueKey, maxH = 160 }: {
-  data: Array<any>; labelKey: string; valueKey: string; maxH?: number
+ data: Array<any>; labelKey: string; valueKey: string; maxH?: number
 }) {
   // 시간(hour) 축은 0~23 연속으로 채움 — API 가 데이터 있는 버킷만 주면
   // 막대 2~3개가 축 맥락 없이 떠 보이는 문제 방지.
-  if (labelKey === 'hour' && data.length > 0 && data.length < 24) {
-    const byHour = new Map(data.map(d => [Number(d.hour), d]))
-    data = Array.from({ length: 24 }, (_, h) => byHour.get(h) ?? { hour: h, [valueKey]: 0 })
+ if (labelKey === 'hour' && data.length > 0 && data.length < 24) {
+ const byHour = new Map(data.map(d => [Number(d.hour), d]))
+ data = Array.from({ length: 24 }, (_, h) => byHour.get(h) ?? { hour: h, [valueKey]: 0 })
   }
-  const vals = data.map(d => Number(d[valueKey]) || 0)
-  const max = Math.max(...vals, 1)
+ const vals = data.map(d => Number(d[valueKey]) || 0)
+ const max = Math.max(...vals, 1)
 
-  if (data.length === 0 || vals.every(v => v === 0)) {
-    return (
+ if (data.length === 0 || vals.every(v => v === 0)) {
+ return (
       <div style={{ height: maxH, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    color: 'var(--muted-foreground)', fontSize: 13, background: 'var(--secondary)',
-                    borderRadius: 6 }}>
+ color: 'var(--muted-foreground)', fontSize: 13, background: 'var(--secondary)',
+ borderRadius: 6 }}>
         해당 기간 데이터 없음
       </div>
     )
   }
 
-  return (
+ return (
     <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: maxH, padding: '0 4px' }}>
       {data.map((d, i) => {
-        const v = vals[i]
-        const h = Math.max(v / max * (maxH - 20), 2)
-        return (
+ const v = vals[i]
+ const h = Math.max(v / max * (maxH - 20), 2)
+ return (
           <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <div style={{ fontSize: 10, color: 'var(--muted-foreground)', marginBottom: 2 }}>{v > 0 ? v : ''}</div>
             <div style={{ width: '100%', maxWidth: 32, height: h, background: 'var(--primary)', borderRadius: '2px 2px 0 0' }} />
@@ -62,9 +62,9 @@ function BarChart({ data, labelKey, valueKey, maxH = 160 }: {
 // sub — 비율 카드의 분자/분모. 비율만 보여주면 "3건 중 2건" 인지 "3만건 중 2만건" 인지
 // 구분되지 않아 같은 66.7% 를 같은 무게로 읽게 된다.
 function KpiCard({ label, value, unit, sub }: {
-  label: string; value: string | number; unit?: string; sub?: string
+ label: string; value: string | number; unit?: string; sub?: string
 }) {
-  return (
+ return (
     <div style={{ flex: '1 1 140px', minWidth: 140, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '14px 16px', textAlign: 'center' }}>
       <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 24, fontWeight: 700 }}>{value}<span style={{ fontSize: 12, color: 'var(--muted-foreground)', marginLeft: 2 }}>{unit}</span></div>
@@ -82,13 +82,13 @@ function KpiCard({ label, value, unit, sub }: {
  * 가 된다. 그래서 PTT 에는 성공률·완료율 자리를 비우고 소통률과 참여율만 낸다.
  */
 function CallKpis({ cell, source, kind }: {
-  cell?: CallCell
-  source?: string
-  kind: 'volte' | 'ptt'
+ cell?: CallCell
+ source?: string
+ kind: 'volte' | 'ptt'
 }) {
-  if (!cell) return null
-  const scan = source === 'scan'
-  return (
+ if (!cell) return null
+ const scan = source === 'scan'
+ return (
     <div>
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         {kind === 'volte' ? (
@@ -96,23 +96,23 @@ function CallKpis({ cell, source, kind }: {
             <KpiCard label="호 시도" value={cell.attempts} unit="건" />
             <KpiCard label="성공" value={cell.sessions} unit="건" />
             <KpiCard label="성공률" value={cell.success_rate} unit="%"
-                     sub={`성립 ${cell.sessions} / 시도 ${cell.attempts}`} />
+ sub={`성립 ${cell.sessions} / 시도 ${cell.attempts}`} />
             <KpiCard label="소통률" value={cell.talk_rate} unit="%"
-                     sub={`통화 ${cell.talked} / 시도 ${cell.attempts}`} />
+ sub={`통화 ${cell.talked} / 시도 ${cell.attempts}`} />
             <KpiCard label="완료율" value={cell.completion_rate} unit="%"
-                     sub={`정상종료 ${cell.completed} / 성립 ${cell.sessions}`} />
+ sub={`정상종료 ${cell.completed} / 성립 ${cell.sessions}`} />
           </>
         ) : (
           <>
             <KpiCard label="세션" value={cell.sessions} unit="건" />
             <KpiCard label="소통률" value={cell.talk_rate_sessions} unit="%"
-                     sub={`발언있음 ${cell.talked} / 세션 ${cell.sessions}`} />
+ sub={`발언있음 ${cell.talked} / 세션 ${cell.sessions}`} />
             <KpiCard label="참여율" value={cell.join_rate} unit="%"
-                     sub={`참여 ${cell.legs_joined} / 초대 ${cell.legs_invited}`} />
+ sub={`참여 ${cell.legs_joined} / 초대 ${cell.legs_invited}`} />
           </>
         )}
         <KpiCard label={kind === 'ptt' ? '평균 세션 시간' : '평균 통화시간'}
-                 value={fmtDuration(cell.avg_duration_sec)} />
+ value={fmtDuration(cell.avg_duration_sec)} />
         {kind === 'volte' && <KpiCard label="평균 접속지연" value={cell.avg_pdd_ms} unit="ms" />}
       </div>
       {(scan || cell.open > 0 || cell.late_dropped > 0) && (
@@ -127,61 +127,61 @@ function CallKpis({ cell, source, kind }: {
 }
 
 function fmtDuration(sec: number): string {
-  const m = Math.floor(sec / 60)
-  const s = Math.round(sec % 60)
-  return `${m}:${String(s).padStart(2, '0')}`
+ const m = Math.floor(sec / 60)
+ const s = Math.round(sec % 60)
+ return `${m}:${String(s).padStart(2, '0')}`
 }
 
 export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType } = {}) {
-  const { show } = useToast()
-  const [subTab, setSubTab] = useState<SubTab>('service')
-  const [gran, setGran] = useState<Granularity>('1h')
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
-  const [svcType, setSvcType] = useState<SvcType>(initialSvcType ?? 'volte')
+ const { show } = useToast()
+ const [subTab, setSubTab] = useState<SubTab>('service')
+ const [gran, setGran] = useState<Granularity>('1h')
+ const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+ const [svcType, setSvcType] = useState<SvcType>(initialSvcType ?? 'volte')
 
   // 메시지 통계
-  const [msgData, setMsgData] = useState<MessagesResponse | null>(null)
+ const [msgData, setMsgData] = useState<MessagesResponse | null>(null)
   // 서비스 통계
-  const [svcData, setSvcData] = useState<ServiceStatsResponse | null>(null)
-  const [callsData, setCallsData] = useState<CallsResponse | null>(null)
-  const [loading, setLoading] = useState(false)
+ const [svcData, setSvcData] = useState<ServiceStatsResponse | null>(null)
+ const [callsData, setCallsData] = useState<CallsResponse | null>(null)
+ const [loading, setLoading] = useState(false)
 
-  const loadMessages = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await statsApi.messages({ date, granularity: gran })
-      setMsgData(res)
+ const loadMessages = useCallback(async () => {
+ setLoading(true)
+ try {
+ const res = await statsApi.messages({ date, granularity: gran })
+ setMsgData(res)
     } catch (e: unknown) { show(String(e), 'err') }
-    finally { setLoading(false) }
+ finally { setLoading(false) }
   }, [date, gran, show])
 
-  const loadService = useCallback(async () => {
-    setLoading(true)
-    try {
+ const loadService = useCallback(async () => {
+ setLoading(true)
+ try {
       // 호 지표(성공률·소통률·완료율·참여율)는 1분 집계 위의 /stats/calls 가 낸다.
       // /stats/service/* 는 그룹별 빈도처럼 집계에 없는 축만 담당한다.
-      const [res, calls] = await Promise.all([
-        statsApi.service(svcType, { date, granularity: gran }),
-        statsApi.calls({ date, granularity: gran, svc: svcType }),
+ const [res, calls] = await Promise.all([
+ statsApi.service(svcType, { date, granularity: gran }),
+ statsApi.calls({ date, granularity: gran, svc: svcType }),
       ])
-      setSvcData(res)
-      setCallsData(calls)
+ setSvcData(res)
+ setCallsData(calls)
     } catch (e: unknown) { show(String(e), 'err') }
-    finally { setLoading(false) }
+ finally { setLoading(false) }
   }, [date, gran, svcType, show])
 
-  useEffect(() => {
-    if (subTab === 'messages') loadMessages()
-    else loadService()
+ useEffect(() => {
+ if (subTab === 'messages') loadMessages()
+ else loadService()
   }, [subTab, loadMessages, loadService])
 
-  return (
+ return (
     <div>
 
       {/* 서브탭 + 필터 */}
       <div className="toolbar" style={{ flexWrap: 'wrap' }}>
         <ToggleGroup type="single" value={subTab} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
-                     onValueChange={(v: string) => v && setSubTab(v as typeof subTab)}>
+ onValueChange={(v: string) => v && setSubTab(v as typeof subTab)}>
           <ToggleGroupItem value="service">서비스 통계</ToggleGroupItem>
           <ToggleGroupItem value="messages">메시지 통계</ToggleGroupItem>
         </ToggleGroup>
@@ -190,7 +190,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
 
         {/* 시간 단위 */}
         <ToggleGroup type="single" value={gran} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
-                     onValueChange={(v: string) => v && setGran(v as Granularity)}>
+ onValueChange={(v: string) => v && setGran(v as Granularity)}>
           {(Object.entries(GRAN_LABELS) as [Granularity, string][]).map(([g, label]) => (
             <ToggleGroupItem key={g} value={g}>{label}</ToggleGroupItem>
           ))}
@@ -198,8 +198,8 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
 
         <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 8px' }} />
 
-        <Input  type="date" value={date}
-          onChange={e => setDate(e.target.value)} style={{ width: 150 }} />
+        <Input type="date" value={date}
+ onChange={e => setDate(e.target.value)} style={{ width: 150 }} />
 
         {subTab === 'service' && (
           <Select value={toSel(svcType)} onValueChange={(v: string) => setSvcType(fromSel(v) as SvcType)}>
@@ -213,7 +213,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
       </div>
 
       {/* 재조회 중에도 기존 데이터 유지 — 전체가 '로딩 중' 으로 갈리는 레이아웃 점프 방지 */}
-      {loading && !msgData && !svcData && <div className="empty">로딩 중...</div>}
+      {loading && !msgData && !svcData && <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중...</div>}
       {loading && (msgData || svcData) && (
         <div style={{ fontSize: 12, color: 'var(--muted-foreground)', padding: '2px 4px' }}><RotateCw size={12} style={{ verticalAlign: '-2px' }} /> 갱신 중…</div>
       )}
@@ -239,18 +239,18 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
           <div className="panel" style={{ padding: 16 }}>
             <div style={{ fontWeight: 600, marginBottom: 12 }}>호 시도 수 추이</div>
             <BarChart
-              data={svcData.volte.buckets}
-              labelKey={svcData.volte.buckets[0]?.hour !== undefined ? 'hour' : 'date'}
-              valueKey="attempts" />
+ data={svcData.volte.buckets}
+ labelKey={svcData.volte.buckets[0]?.hour !== undefined ? 'hour' : 'date'}
+ valueKey="attempts" />
           </div>
 
           {Object.keys(svcData.volte.end_reasons).length > 0 && (
             <div className="panel" style={{ padding: 16 }}>
               <div style={{ fontWeight: 600, marginBottom: 12 }}>종료 사유 분포</div>
               {Object.entries(svcData.volte.end_reasons).sort((a, b) => b[1] - a[1]).map(([reason, cnt]) => {
-                const pct = svcData.volte!.total_attempts > 0
+ const pct = svcData.volte!.total_attempts > 0
                   ? Math.round(cnt / svcData.volte!.total_attempts * 100) : 0
-                return (
+ return (
                   <div key={reason} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                     <div style={{ width: 80, fontSize: 13 }}>{reason || 'unknown'}</div>
                     <div style={{ flex: 1, background: 'var(--secondary)', borderRadius: 4, height: 18 }}>
@@ -273,9 +273,9 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
           <div className="panel" style={{ padding: 16 }}>
             <div style={{ fontWeight: 600, marginBottom: 12 }}>그룹콜 수 추이</div>
             <BarChart
-              data={svcData.ptt.buckets}
-              labelKey={svcData.ptt.buckets[0]?.hour !== undefined ? 'hour' : 'date'}
-              valueKey="calls" />
+ data={svcData.ptt.buckets}
+ labelKey={svcData.ptt.buckets[0]?.hour !== undefined ? 'hour' : 'date'}
+ valueKey="calls" />
           </div>
 
           {Object.keys(svcData.ptt.by_group).length > 0 && (

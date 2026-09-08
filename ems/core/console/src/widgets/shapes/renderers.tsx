@@ -7,6 +7,7 @@ import { useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { TimeBarData, SeriesBarData, KpiData, DistributionData, TableData, MatrixData } from './types'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { EmptyState } from '@core/components/custom/empty-state'
 
 // ── 시간축 공용 ────────────────────────────────────────────────────────────
 
@@ -36,7 +37,7 @@ export function TimeBarChart({ data }: { data: TimeBarData }) {
   const { buckets, unit } = data
   const vals = buckets.map(b => b.value)
   const max = Math.max(...vals, 1)
-  if (buckets.length === 0) return <div className="empty">데이터 없음</div>
+  if (buckets.length === 0) return <EmptyState title="데이터 없음" />
   const labels = compactLabels(buckets.map(b => b.label))
   // 라벨·값은 몇 칸 걸러 하나만 — 막대는 다 보이되 글자만 솎는다(겹쳐 뭉개지는 것보다 낫다).
   const every = Math.ceil(buckets.length / 24)
@@ -75,8 +76,8 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
     { x: number; y: number; bucket: string; key: string; total: number } | null>(null)
   const wrap = useRef<HTMLDivElement>(null)
 
-  if (series.length === 0) return <div className="empty">표시할 계열을 선택하세요</div>
-  if (buckets.length === 0) return <div className="empty">데이터 없음</div>
+  if (series.length === 0) return <EmptyState title="표시할 계열을 선택하세요" />
+  if (buckets.length === 0) return <EmptyState title="데이터 없음" />
 
   const sum = (b: typeof buckets[number]) => series.reduce((a, sp) => a + (b.values[sp.key] || 0), 0)
   const max = Math.max(1, ...buckets.map(sum))
@@ -201,7 +202,7 @@ export function KpiCards({ data }: { data: KpiData }) {
 // 지표 카드 — 값 하나. 카드가 자기 칸을 채우고 값은 세로 중앙.
 export function StatValue({ data }: { data: KpiData }) {
   const k = data.items[0]
-  if (!k) return <div className="empty" style={{ fontSize: 12 }}>지표 없음</div>
+  if (!k) return <EmptyState title="지표 없음" className="text-[12px]" />
   return (
     <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column',
                   justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
@@ -216,7 +217,7 @@ export function StatValue({ data }: { data: KpiData }) {
 export function DistributionBars({ data }: { data: DistributionData }) {
   const { items, total, series } = data
   const [hover, setHover] = useState<{ i: number; key: string } | null>(null)
-  if (items.length === 0) return <div className="empty">데이터 없음</div>
+  if (items.length === 0) return <EmptyState title="데이터 없음" />
   // 계열이 선언돼 있으면 막대 하나를 계열별 조각으로 나눠 색칠한다(시계열 차트와 같은 색).
   const seg = (series ?? []).length > 0
   return (
@@ -310,7 +311,7 @@ export function MatrixTable({ data }: { data: MatrixData }) {
   }
 
   if (data.rows.length === 0 || data.columns.length === 0) {
-    return <div className="empty">데이터 없음</div>
+    return <EmptyState title="데이터 없음" />
   }
   return (
     <div style={{ overflow: 'auto', maxHeight: '100%' }}>

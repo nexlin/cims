@@ -10,7 +10,7 @@ function CspRolesWidget() {
     return (
       <div className="panel" style={{ padding: 16 }}>
         <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>CSP 모듈 역할</div>
-        <div className="empty">불러오는 중…</div>
+        <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">불러오는 중…</div>
       </div>
     )
   }

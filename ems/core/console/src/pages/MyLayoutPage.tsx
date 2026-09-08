@@ -19,6 +19,7 @@ import { Button } from '@core/components/ui/button'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 import { Badge } from '@core/components/ui/badge'
+import { EmptyState } from '@core/components/custom/empty-state'
 
 const AREA_LABEL: Record<WidgetArea, string> = { ops: '운용', admin: '관리' }
 
@@ -123,9 +124,9 @@ export function MyLayoutWidgets() {
       </div>
 
       {s.loading ? (
-        <div className="empty">불러오는 중…</div>
+        <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">불러오는 중…</div>
       ) : s.dashboard.length === 0 ? (
-        <div className="empty">위젯이 없습니다 — 위 [+ 위젯 추가] 또는 프로파일을 적용하세요.</div>
+        <EmptyState title="위젯이 없습니다 — 위 [+ 위젯 추가] 또는 프로파일을 적용하세요." />
       ) : (
         <ul className="scroll-fill" style={{ listStyle: 'none', margin: 0, padding: 0, gap: 6 }}>
           {s.dashboard.map((id, i) => {

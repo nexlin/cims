@@ -11,7 +11,7 @@ import { cn } from '@core/lib/utils'
  * 핸드오프 `empty-state.tsx` 는 `border-dashed` 인데 그림에는 없어 그림을 따랐다.
  */
 export function EmptyState({ title, description, action, className }: {
-  title: string
+  title: ReactNode
   description?: string
   action?: ReactNode
   className?: string

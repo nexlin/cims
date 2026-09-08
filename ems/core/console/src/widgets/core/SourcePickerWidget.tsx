@@ -15,25 +15,25 @@ import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 
 // 'a, b , c' → ['a','b','c'] (빈 항목 제거). 편집기 [⚙] 에서 한 줄로 편집할 수 있게 문자열로 받는다.
 function idList(v: unknown): string[] {
-  return typeof v === 'string' ? v.split(',').map(s => s.trim()).filter(Boolean) : []
+ return typeof v === 'string' ? v.split(',').map(s => s.trim()).filter(Boolean) : []
 }
 
 function SourcePickerWidget({ config }: WidgetProps) {
-  usePageControl('source')
-  const [src, setSrc] = usePageParam('src')
-  const { sources: catalog, loading } = useDataSourceCatalog()
-  const shape = (typeof config?.shape === 'string' ? config.shape : 'time-bar') as ShapeKind
-  const want = idList(config?.sources)
+ usePageControl('source')
+ const [src, setSrc] = usePageParam('src')
+ const { sources: catalog, loading } = useDataSourceCatalog()
+ const shape = (typeof config?.shape === 'string' ? config.shape : 'time-bar') as ShapeKind
+ const want = idList(config?.sources)
   // 열거된 후보는 **적힌 순서대로** 보인다(배치가 정한 순서 = 화면 순서).
-  const cands = want.length
+ const cands = want.length
     ? want.map(id => catalog.find(s => s.id === id)).filter((s): s is NonNullable<typeof s> => !!s)
     : sourcesForShape(shape, catalog)
   // 선택값이 후보 밖(첫 진입·후보 변경)이면 첫 후보를 활성으로 본다.
-  const active = cands.some(s => s.id === src) ? src : (cands[0]?.id ?? '')
-  return (
+ const active = cands.some(s => s.id === src) ? src : (cands[0]?.id ?? '')
+ return (
     <div className="tab-nav">
       <ToggleGroup type="single" value={active} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
-                   onValueChange={(v: string) => v && setSrc(v)}>
+ onValueChange={(v: string) => v && setSrc(v)}>
         {cands.map(s => (
           <ToggleGroupItem key={s.id} value={s.id}>{s.label}</ToggleGroupItem>
         ))}
@@ -48,13 +48,13 @@ function SourcePickerWidget({ config }: WidgetProps) {
 }
 
 export const sourcePickerWidget: WidgetDef = {
-  id: 'core.source-picker',
-  title: '대상 선택 (데이터 소스)',
-  category: 'control',
-  component: SourcePickerWidget,
-  configFields: [
+ id: 'core.source-picker',
+ title: '대상 선택 (데이터 소스)',
+ category: 'control',
+ component: SourcePickerWidget,
+ configFields: [
     { key: 'sources', label: '후보 소스 id (쉼표)', type: 'text',
-      placeholder: 'cims.msg.sip, cims.msg.cmp' },
+ placeholder: 'cims.msg.sip, cims.msg.cmp' },
   ],
-  defaultSize: { w: 12, h: 3 },
+ defaultSize: { w: 12, h: 3 },
 }

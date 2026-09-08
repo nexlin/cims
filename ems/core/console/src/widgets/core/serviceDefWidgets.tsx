@@ -31,6 +31,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { Badge } from '@core/components/ui/badge'
+import { EmptyState } from '@core/components/custom/empty-state'
 
 // 목록은 조건이 없어 키가 하나 — 위젯이 몇 개든 조회는 1회.
 const useDescriptorsRaw = makeSharedByKey(() => serviceDescriptorsApi.list())
@@ -61,7 +62,7 @@ function Header({ title, count, action, loading, error }: {
 }
 
 function Empty({ text }: { text: string }) {
-  return <div className="empty" style={{ fontSize: 12 }}>{text}</div>
+  return <EmptyState title={text} className="text-[12px]" />
 }
 
 // 행마다 [수정][삭제] 가 늘 떠 있으면 표가 산만하다 — 헤더의 [편집] 토글을 켰을 때만 보인다.

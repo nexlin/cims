@@ -17,6 +17,7 @@ import {
 import { Button } from '@core/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
+import { EmptyState } from '@core/components/custom/empty-state'
 
 type Doc = 'blueprint' | 'inventory'
 type View = 'form' | 'raw'
@@ -476,7 +477,7 @@ interface BpSystem { name?: string; mode?: string; members?: Array<{ server?: st
 // (시스템/모듈/컬렉션의 자유 구조를 폼으로 안전하게 편집하려면 스키마 UI 가 필요한데,
 //  그건 콘솔 [패키지 설정] 탭이 이미 하는 일이라 배포 후 그쪽에서 조정하는 편이 낫다.)
 function BlueprintForm({ doc, issues }: { doc: Record<string, unknown> | null; issues: ProvIssue[] }) {
-  if (!doc) return <div className="empty">블루프린트를 선택하세요</div>
+  if (!doc) return <EmptyState title="블루프린트를 선택하세요" />
   const systems = (doc.systems as BpSystem[]) || []
   const order = (doc.start_order as string[]) || []
   const errFor = (p: string) => issues.find(i => i.path.includes(p))
@@ -523,7 +524,7 @@ function InventoryForm({ view, onChange, disabled, issues }: {
   view: InventoryView | null; onChange: (v: InventoryView) => void
   disabled: boolean; issues: ProvIssue[]
 }) {
-  if (!view) return <div className="empty">인벤토리를 선택하세요</div>
+  if (!view) return <EmptyState title="인벤토리를 선택하세요" />
   const set = (idx: number, patch: Partial<InventoryView['servers'][0]>) => {
     const servers = view.servers.map((s, i) => i === idx ? { ...s, ...patch } : s)
     onChange({ ...view, servers })

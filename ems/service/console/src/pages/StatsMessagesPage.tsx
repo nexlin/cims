@@ -37,7 +37,7 @@ export default function StatsMessagesPage({ iface }: { iface: string }) {
         {data && <span className="ts" style={{ marginLeft: 'auto' }}>총 {data.total}건</span>}
       </div>
 
-      {loading ? <div className="empty">로딩 중...</div> : data && (
+      {loading ? <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중...</div> : data && (
         <div style={{ display: 'flex', gap: 24 }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>시간대별 메시지 수</div>

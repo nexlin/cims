@@ -28,6 +28,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { Badge } from '@core/components/ui/badge'
+import { EmptyState } from '@core/components/custom/empty-state'
 
 const PAGE_SIZE = 20
 const FETCH_LIMIT = 5000   // 서버 상한 — 창 안 레코드가 이보다 많으면 최신순 절단(표기)
@@ -258,9 +259,9 @@ export function AlarmsSection() {
           )}
         </div>
         {loading ? (
-          <div className="empty">로딩 중…</div>
+          <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div>
         ) : rows.length === 0 ? (
-          <div className="empty">기록된 알람 없음</div>
+          <EmptyState title="기록된 알람 없음" />
         ) : (
           <>
             <div className="scroll-fill">
@@ -531,9 +532,9 @@ export function EventsSection() {
           )}
         </div>
         {loading ? (
-          <div className="empty">로딩 중…</div>
+          <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div>
         ) : groups.length === 0 ? (
-          <div className="empty">기록된 이벤트 없음</div>
+          <EmptyState title="기록된 이벤트 없음" />
         ) : (
           <>
             <div className="scroll-fill">

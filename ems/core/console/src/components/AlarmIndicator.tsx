@@ -15,63 +15,64 @@ import { Badge } from './ui/badge'
 import { Button } from '@core/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 import type { BadgeTone } from '@core/components/ui/badge'
+import { EmptyState } from '@core/components/custom/empty-state'
 
 const SEV_BADGE: Record<string, BadgeTone> = {
-  critical: 'dangerSoft', major: 'dangerSoft', minor: 'warningSoft',
-  warning: 'warningSoft', indeterminate: 'brandSoft',
+ critical: 'dangerSoft', major: 'dangerSoft', minor: 'warningSoft',
+ warning: 'warningSoft', indeterminate: 'brandSoft',
 }
 
 // 전이 토스트 배선 — 셸에 1개만 렌더 (AlarmIndicator 내부에서 함께 처리).
 function useAlarmToasts() {
-  const { show } = useToast()
-  const navigate = useNavigate()
-  useEffect(() => onAlarmTransition(ts => {
-    for (const t of ts) {
-      const sev = severityOf(t.alarm)
-      const head = t.kind === 'moreSevere' ? `알람 승격(${sev})` : `알람 발생(${sev})`
-      show(`${head} — ${t.alarm.message || t.alarm.type}`, 'alarm',
+ const { show } = useToast()
+ const navigate = useNavigate()
+ useEffect(() => onAlarmTransition(ts => {
+ for (const t of ts) {
+ const sev = severityOf(t.alarm)
+ const head = t.kind === 'moreSevere' ? `알람 승격(${sev})` : `알람 발생(${sev})`
+ show(`${head} — ${t.alarm.message || t.alarm.type}`, 'alarm',
            { sticky: true, onClick: () => navigate('/alerts/active') })
     }
   }), [show, navigate])
 }
 
 export default function AlarmIndicator() {
-  const { active, recentEvents, loaded, error } = useAlarms()
-  const [open, setOpen] = useState(false)
-  const [tab, setTab] = useState<'alarms' | 'events'>('alarms')
-  const navigate = useNavigate()
-  const { show } = useToast()
-  useAlarmToasts()
+ const { active, recentEvents, loaded, error } = useAlarms()
+ const [open, setOpen] = useState(false)
+ const [tab, setTab] = useState<'alarms' | 'events'>('alarms')
+ const navigate = useNavigate()
+ const { show } = useToast()
+ useAlarmToasts()
 
-  const top = active[0] ? severityOf(active[0]) : ''
+ const top = active[0] ? severityOf(active[0]) : ''
   // 카운트 배지 톤 — 0건은 Neutral(경고색 금지, DESIGN-RULES §1-7), 조회 실패는 Danger.
-  const badgeTone = error ? 'dangerSolid'
+ const badgeTone = error ? 'dangerSolid'
     : active.length === 0 ? 'neutralSoft'
     : (top === 'critical' || top === 'major') ? 'dangerSolid'
     : (top === 'minor' || top === 'warning') ? 'warningSolid'
     : 'infoSolid'
 
-  const ack = async (alarmId?: string) => {
-    if (!alarmId) return
-    try {
-      await alertsApi.ack(alarmId)
-      show('알람 승인됨', 'ok')
-      refreshAlarms()
+ const ack = async (alarmId?: string) => {
+ if (!alarmId) return
+ try {
+ await alertsApi.ack(alarmId)
+ show('알람 승인됨', 'ok')
+ refreshAlarms()
     } catch (e) {
-      show(`승인 실패: ${(e as Error).message}`, 'err')
+ show(`승인 실패: ${(e as Error).message}`, 'err')
     }
   }
 
-  return (
+ return (
     <>
       {/* 트리거 — 시안 AppBar 의 `util/알람`(벨 + 카운트 배지, Figma 457:5431).
           0건도 배지를 지우지 않는다: "표시 없음 = 정상"과 "표시 없음 = 표시 고장"을
           구분해야 한다(alarm_pipeline.md §8.2). 대신 DESIGN-RULES §1-7 대로 0건은
           경고색이 아니라 Neutral 로 낸다. */}
       <button className="relative flex items-center gap-1.5 rounded-md px-2 py-1.5 text-neutral hover:bg-sidebar-accent"
-              onClick={() => setOpen(o => !o)}
-              aria-label={loaded ? `활성 알람 ${active.length}건` : '알람 로드 중'}
-              title={error ? '알람 조회 실패 — 표시가 최신이 아닐 수 있음'
+ onClick={() => setOpen(o => !o)}
+ aria-label={loaded ? `활성 알람 ${active.length}건` : '알람 로드 중'}
+ title={error ? '알람 조회 실패 — 표시가 최신이 아닐 수 있음'
                            : loaded ? `활성 알람 ${active.length}건` : '알람 로드 중'}>
         <Bell size={16} />
         <Badge variant={badgeTone}>{loaded ? active.length : '…'}{error ? ' !' : ''}</Badge>
@@ -80,20 +81,20 @@ export default function AlarmIndicator() {
         <div className="alarm-drawer">
           <div className="tab-bar" style={{ padding: '8px 14px 0' }}>
             <ToggleGroup type="single" value={tab} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
-                         onValueChange={(v: string) => v && setTab(v as typeof tab)}>
+ onValueChange={(v: string) => v && setTab(v as typeof tab)}>
               <ToggleGroupItem value="alarms">활성 알람 ({active.length})</ToggleGroupItem>
               <ToggleGroupItem value="events">최근 이벤트 ({recentEvents.length})</ToggleGroupItem>
             </ToggleGroup>
             <Button variant="ghost" style={{ marginLeft: 'auto' }}
-                    onClick={() => setOpen(false)} aria-label="닫기"><X size={16} /></Button>
+ onClick={() => setOpen(false)} aria-label="닫기"><X size={16} /></Button>
           </div>
           <div className="alarm-drawer-body">
             {tab === 'alarms' && active.length === 0 && (
-              <div className="empty" style={{ padding: 20 }}>활성 알람 없음</div>
+              <EmptyState title="활성 알람 없음" className="p-[20px]" />
             )}
             {tab === 'alarms' && active.map(a => {
-              const sev = severityOf(a)
-              return (
+ const sev = severityOf(a)
+ return (
                 <div key={a.alarm_id || a.type} className="alarm-drawer-row">
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <Badge variant={SEV_BADGE[sev] || 'neutralSoft'} >{sev}</Badge>
@@ -114,13 +115,13 @@ export default function AlarmIndicator() {
                         <Check size={12} /> {a.ackUser || '승인'}</span>
                       : <Button variant="ghost" onClick={() => ack(a.alarm_id)}>승인</Button>}
                     <Button variant="ghost"
-                            onClick={() => { setOpen(false); navigate('/alerts/active') }}>이동</Button>
+ onClick={() => { setOpen(false); navigate('/alerts/active') }}>이동</Button>
                   </div>
                 </div>
               )
             })}
             {tab === 'events' && recentEvents.length === 0 && (
-              <div className="empty" style={{ padding: 20 }}>최근 24시간 이벤트 없음</div>
+              <EmptyState title="최근 24시간 이벤트 없음" className="p-[20px]" />
             )}
             {tab === 'events' && recentEvents.map((ev, i) => (
               <div key={i} className="alarm-drawer-row">

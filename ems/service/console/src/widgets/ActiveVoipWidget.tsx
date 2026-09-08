@@ -7,6 +7,7 @@ import FlowPage from '@core/pages/FlowPage'
 import { fmtTime } from './shared'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { Badge } from '@core/components/ui/badge'
+import { EmptyState } from '@core/components/custom/empty-state'
 
 function ActiveVoipWidget() {
   const navigate = useNavigate()
@@ -23,7 +24,7 @@ function ActiveVoipWidget() {
       <div style={{ padding: '12px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)' }}>
         VoIP 활성 통화 ({rows.length}건)
       </div>
-      {rows.length === 0 ? <div className="empty">활성 통화 없음</div> : (
+      {rows.length === 0 ? <EmptyState title="활성 통화 없음" /> : (
       <DataTable sticky>
         <thead><tr><Th>발신</Th><Th>착신</Th><Th>상태</Th><Th>시작</Th></tr></thead>
         <tbody>

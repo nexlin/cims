@@ -15,6 +15,7 @@ import type { WidgetDef } from '@core/widgets/types'
 import { Button } from '@core/components/ui/button'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { Badge } from '@core/components/ui/badge'
+import { EmptyState } from '@core/components/custom/empty-state'
 
 // 요약 타일에 항상 노출하는 상위 4단계(고정 순서). indeterminate/cleared 는 건수 있을 때만.
 const TILE_ORDER = ['critical', 'major', 'minor', 'warning'] as const
@@ -102,13 +103,11 @@ function ActiveAlarmsWidget() {
 
       {/* 활성 알람 목록 */}
       {!loaded ? (
-        <div className="empty">로딩 중…</div>
+        <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div>
       ) : active.length === 0 ? (
-        <div className="empty" style={{ color: 'var(--cims-success)' }}>
-          <Check size={13} className="inline align-[-2px]" /> 활성 알람 없음{error ? ' (단, 마지막 조회 실패 — 최신이 아닐 수 있음)' : ''}
-        </div>
+        <EmptyState title={<span className="text-success"><Check size={13} className="inline align-[-2px]" /> 활성 알람 없음{error ? ' (단, 마지막 조회 실패 — 최신이 아닐 수 있음)' : ''}</span>} />
       ) : rows.length === 0 ? (
-        <div className="empty">해당 심각도의 활성 알람 없음</div>
+        <EmptyState title="해당 심각도의 활성 알람 없음" />
       ) : (
         <div className="table-wrap">
           <DataTable sticky>

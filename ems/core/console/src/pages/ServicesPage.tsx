@@ -10,6 +10,7 @@ import Modal from '../components/Modal'
 import ModuleConfigModal from '../components/module/ModuleConfigModal'
 import { Button } from '@core/components/ui/button'
 import { Badge, type BadgeTone } from '@core/components/ui/badge'
+import { EmptyState } from '@core/components/custom/empty-state'
 
 type SvcState = { running: boolean; pid?: number }
 
@@ -412,7 +413,7 @@ export default function ServicesPage() {
       }}>
         <div style={{ flex: '3 1 0', minWidth: 0, overflow: 'auto' }}>
       {loading ? (
-        <div className="empty">로딩 중...</div>
+        <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중...</div>
       ) : (
         <div style={{
           display: 'grid',
@@ -631,7 +632,7 @@ export default function ServicesPage() {
                   {JSON.stringify(templateModal.pkg.config_template, null, 2)}
                 </pre>
               ) : (
-                <div className="empty">이 패키지에 config_template 이 포함되어 있지 않습니다. 편집 버튼으로 생성할 수 있습니다.</div>
+                <EmptyState title="이 패키지에 config_template 이 포함되어 있지 않습니다. 편집 버튼으로 생성할 수 있습니다." />
               )}
             </div>
             <div className="modal-footer" style={{ flex: '0 0 auto' }}>

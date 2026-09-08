@@ -197,7 +197,7 @@ export default function OrganizationsPage() {
       </div>
 
       {/* 테이블 */}
-      {loading ? <div className="empty">로딩 중...</div> : (
+      {loading ? <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중...</div> : (
         <div className="table-wrap">
           <DataTable sticky>
             <thead>

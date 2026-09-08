@@ -8,6 +8,7 @@ import { fmtSize, fmtSpeed, fmtEta } from './deployHelpers'
 import { Button } from '@core/components/ui/button'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { Badge, type BadgeTone } from '@core/components/ui/badge'
+import { EmptyState } from '@core/components/custom/empty-state'
 
 interface UploadRow {
   id: string
@@ -153,7 +154,7 @@ export default function PackageUploadModal({ onClose, onDone }: {
       </div>
 
       {rows.length === 0 ? (
-        <div className="empty" style={{ marginTop: 16 }}>업로드할 파일을 선택하세요</div>
+        <EmptyState title="업로드할 파일을 선택하세요" className="mt-[16px]" />
       ) : (
         <DataTable sticky>
           <thead>
