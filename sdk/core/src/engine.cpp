@@ -238,6 +238,7 @@ struct McpttSession {
     bool isPrivate = false;
     bool fullDuplex = false;             // mc_no_floor_ctrl — floor 없이 마이크 상시
     bool listenOnly = false;
+    bool emergency = false, imminentPeril = false;   // 발신 옵션 — CallInfo 투영(projectMcptt) 의 원본
     bool micOpen = false;                // floor Granted 로 열림
     std::string pendingAppSdp;           // 송신 SDP 에 주입할 m=application 섹션
     std::unique_ptr<floor::Participant> floor;
@@ -264,6 +265,18 @@ public:
     std::unique_ptr<McpttSession> mcptt;
     bool recvOnly = false;               // 감청 Join 등 청취 전용 평문 leg (a=recvonly, 마이크 없음)
     int accountId() const { return accountId_; }
+
+    /** MCPTT 세션 신원을 CallInfo 에 투영. 발신은 makeCall 이 동기적으로 onCallState(CALLING) 를 부르므로
+     *  첫 스냅샷부터 isMcptt/groupId 가 실려야 앱이 호 종류를 잠시라도 VoLTE 로 읽지 않는다 — startMcptt 의
+     *  사후 기록과 onCallState 가 같은 값을 쓴다. 착신은 INVITE 의 mcptt-info(mi) 가 이미 채웠으므로 건드리지 않는다. */
+    void projectMcptt(CallInfo& c) const {
+        if (!mcptt || c.isMcptt) return;
+        c.isMcptt = true; c.groupId = mcptt->groupId;
+        c.mcptt.present = true; c.mcptt.sessionType = mcptt->isPrivate ? "private" : "prearranged";
+        c.mcptt.privateCall = mcptt->isPrivate; c.mcptt.noFloorCtrl = mcptt->fullDuplex;
+        c.mcptt.emergency = mcptt->emergency; c.mcptt.imminentPeril = mcptt->imminentPeril;
+        c.halfDuplex = !mcptt->fullDuplex; c.listenOnly = mcptt->listenOnly;
+    }
 
     /** 청취 전용 leg — 로컬 SDP 의 audio 방향을 recvonly 로 (서버가 PTT_JOIN recv_only / tap 으로 해석). */
     static std::string forceRecvOnly(const std::string& w) {
@@ -369,6 +382,7 @@ public:
         bool changed = false;
         o_->updateCall(id, [&](CallInfo& c) {
             c.accountId = accountId_;
+            projectMcptt(c);
             c.remoteUri = ci.remoteUri;
             c.lastCode = ci.lastStatusCode;
             c.lastReason = ci.lastReason;
@@ -1003,6 +1017,8 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
     call->mcptt->isPrivate = isPrivate;
     call->mcptt->fullDuplex = isPrivate && opts.fullDuplex;
     call->mcptt->listenOnly = opts.listenOnly;
+    call->mcptt->emergency = opts.emergency;
+    call->mcptt->imminentPeril = opts.imminentPeril;
     const std::string mcpttId = cfg.effectiveMcpttId();
     // floor 소켓은 makeCall 전에 — makeCall 이 동기적으로 onCallSdpCreated 를 부르며 로컬 offer 에 포트를 광고한다.
     if (!call->mcptt->fullDuplex) {
@@ -1037,11 +1053,8 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
     call->sealCallId(callId);
     o->updateCall(callId, [&](CallInfo& c) {
         c.accountId = accountId; c.dir = CallDir::Outgoing; c.state = CallState::Outgoing;
-        c.remoteUri = "sip:" + id + "@" + cfg.domain; c.isMcptt = true; c.groupId = id;
-        c.mcptt.present = true; c.mcptt.sessionType = isPrivate ? "private" : "prearranged";
-        c.mcptt.emergency = opts.emergency; c.mcptt.imminentPeril = opts.imminentPeril;
-        c.mcptt.privateCall = isPrivate; c.mcptt.noFloorCtrl = call->mcptt->fullDuplex;
-        c.halfDuplex = !call->mcptt->fullDuplex; c.listenOnly = opts.listenOnly;
+        c.remoteUri = "sip:" + id + "@" + cfg.domain;
+        call->projectMcptt(c);                                            // onCallState(CALLING) 가 먼저 투영했으면 no-op
     });
     o->calls[callId] = std::move(call);
     o->log(3, std::string(isPrivate ? "private call " : "group call ") + id + " → call " + std::to_string(callId));

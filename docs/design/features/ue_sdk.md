@@ -135,6 +135,10 @@ sdk/core/
 
 API 는 **명령(즉시 `Result`/id 반환, 프로토콜 결과는 이벤트)** · **상태 스냅샷(조회)** · **이벤트(리스너 1개)** 세 갈래다.
 플랫폼 SDK 는 이 셋을 각자의 관용구(Kotlin `StateFlow`/`SharedFlow`, C++ 콜백)로 옮기기만 한다.
+호 스냅샷(`CallInfo`)은 **첫 이벤트부터 호 종류가 확정**돼 있다 — MCPTT 발신(`joinGroupCall`/`startPrivateCall`)은
+`onCallState(outgoing)` 첫 스냅샷에 이미 `isMcptt`·`groupId`·`mcptt{sessionType, privateCall, noFloorCtrl,
+emergency, imminentPeril}`·`halfDuplex`·`listenOnly` 가 실린다(엔진이 makeCall 콜백 안에서 세션 신원을 투영).
+앱은 그 값으로 세션 종류를 파생해도 되고, 이후 스냅샷에서 종류가 바뀌는 일은 없다.
 
 C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 **id 로** 다룬다(`addAccount → accountId`,
 `dial → callId`, `answer(callId)` …). 바인딩이 단순하고 수명 문제(콜백 중 객체 삭제)가 없기 때문이다. 아래 표의
