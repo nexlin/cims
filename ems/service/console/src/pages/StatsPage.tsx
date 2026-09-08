@@ -5,6 +5,8 @@ import { useToast } from '@core/components/Toast'
 import { RotateCw } from 'lucide-react'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 import { Input } from '@core/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { fromSel, toSel } from '@core/components/custom/select-value'
 
 type SubTab = 'messages' | 'service'
 type Granularity = '1m' | '5m' | '10m' | '1h' | '1d' | '1w' | '1M' | '1y'
@@ -200,10 +202,13 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
           onChange={e => setDate(e.target.value)} style={{ width: 150 }} />
 
         {subTab === 'service' && (
-          <select className="form-input" value={svcType} onChange={e => setSvcType(e.target.value as SvcType)} style={{ width: 100 }}>
-            <option value="volte">VoIP</option>
-            <option value="ptt">PTT</option>
-          </select>
+          <Select value={toSel(svcType)} onValueChange={(v: string) => setSvcType(fromSel(v) as SvcType)}>
+            <SelectTrigger style={{ width: 100 }}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="volte">VoIP</SelectItem>
+              <SelectItem value="ptt">PTT</SelectItem>
+            </SelectContent>
+          </Select>
         )}
       </div>
 

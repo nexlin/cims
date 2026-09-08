@@ -12,6 +12,8 @@ import { Button } from '../../components/ui/button'
 import { DataTable, Th, Td, orDash } from '../../components/custom/data-table'
 import { StatusDot } from '../../components/custom/status-dot'
 import { useConfirm } from '../../components/custom/confirm'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { fromSel, toSel } from '@core/components/custom/select-value'
 
 const FSTYPES = ['nfs', 'nfs4', 'cifs', 'ext4', 'ext3', 'xfs', 'btrfs']
 
@@ -111,9 +113,12 @@ export function MountPanel({ title, mounts, applying, onApply }: {
                               className="font-mono" />
               </Td>
               <Td>
-                <select value={fstype} onChange={e => setFstype(e.target.value)}>
-                  {FSTYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
+                <Select value={toSel(fstype)} onValueChange={(v: string) => setFstype(fromSel(v))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {FSTYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </Td>
               <Td>
                 <ImeSafeInput value={options} onCommit={setOptions} placeholder="defaults"

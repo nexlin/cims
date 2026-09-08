@@ -14,6 +14,8 @@ import { useAuth } from '@core/contexts/AuthContext'
 import { canCreateGroup, canManageGroup, hasRole } from '@core/utils/permissions'
 import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 
 // ── PTT 그룹 워크벤치 ─────────────────────────────────────────
 //  좌: 조직트리(공유 스코프) | 그룹 DataTable | 행 확장: 속성 편집 + 멤버(다중선택 추가).
@@ -308,26 +310,30 @@ function GroupDrawer(p: GroupDrawerProps) {
           {isNew && <Field label="그룹 ID *" w={130}><Input  autoFocus value={form.id || ''} onChange={e => setForm({ ...form, id: e.target.value })} /></Field>}
           <Field label="그룹명 *" w={160}><Input  value={form.name || ''} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
           <Field label="타입" w={150}>
-            <select className="form-input" value={form.group_type || 'prearranged'} onChange={e => setForm({ ...form, group_type: e.target.value as GroupExt['group_type'] })}>
-              <option value="prearranged">prearranged</option>
-              <option value="chat">chat</option>
-              <option value="broadcast">broadcast</option>
-            </select>
+            <Select value={toSel(form.group_type || 'prearranged')} onValueChange={(v: string) => setForm({ ...form, group_type: fromSel(v) as GroupExt['group_type'] })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="prearranged">prearranged</SelectItem>
+                <SelectItem value="chat">chat</SelectItem>
+                <SelectItem value="broadcast">broadcast</SelectItem>
+              </SelectContent>
+            </Select>
           </Field>
           <Field label="우선순위" w={80}><Input  type="number" value={form.priority ?? 5} onChange={e => setForm({ ...form, priority: Number(e.target.value) })} /></Field>
           <Field label="동시 발언" w={110}>
-            <select className="form-input" title="floor 동시 발언 정책 — CSP 가 CMP 로 발행"
-              value={form.floor_policy || 'single'}
-              onChange={e => {
-                const fp = e.target.value as GroupExt['floor_policy']
+            <Select value={toSel(form.floor_policy || 'single')} onValueChange={(v: string) => {
+                const fp = fromSel(v) as GroupExt['floor_policy']
                 // multi 로 바꿀 때 정원이 범위 밖이면 기본 2 로 — 저장 거절(400) 을 미리 막는다.
                 const mt = fp === 'multi' ? Math.min(Math.max(form.max_talkers ?? 2, 2), MAX_TALKERS_LIMIT) : 2
                 setForm({ ...form, floor_policy: fp, max_talkers: mt })
               }}>
-              <option value="single">단일 — 한 명씩</option>
-              <option value="dual">듀얼 — 긴급 끼어들기</option>
-              <option value="multi">멀티 — N명 동시</option>
-            </select>
+              <SelectTrigger title="floor 동시 발언 정책 — CSP 가 CMP 로 발행"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="single">단일 — 한 명씩</SelectItem>
+                <SelectItem value="dual">듀얼 — 긴급 끼어들기</SelectItem>
+                <SelectItem value="multi">멀티 — N명 동시</SelectItem>
+              </SelectContent>
+            </Select>
           </Field>
           {form.floor_policy === 'multi' && (
             <Field label={`동시 발언자 수 (2~${MAX_TALKERS_LIMIT})`} w={130}>
@@ -348,10 +354,13 @@ function GroupDrawer(p: GroupDrawerProps) {
                   onPick={it => { setForm({ ...form, authorized_user_id: Number(it.value) }); setOwnerName(it.label) }} />}
           </Field>}
           <Field label="조직 코드" w={170}>
-            <select className="form-input" value={form.org_code || ''} onChange={e => setForm({ ...form, org_code: e.target.value })}>
-              <option value="">없음</option>
-              {p.orgs.map(o => <option key={o.id} value={o.code}>{o.name} ({o.code})</option>)}
-            </select>
+            <Select value={toSel(form.org_code || '')} onValueChange={(v: string) => setForm({ ...form, org_code: fromSel(v) })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE}>없음</SelectItem>
+                {p.orgs.map(o => <SelectItem key={o.id} value={o.code}>{o.name} ({o.code})</SelectItem>)}
+              </SelectContent>
+            </Select>
           </Field>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', alignSelf: 'center', flexWrap: 'wrap' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={form.encryption || false} onChange={e => setForm({ ...form, encryption: e.target.checked })} />암호</label>
@@ -429,10 +438,13 @@ function MemberRow({ m, name, selected, canManage, onToggle, onSave, onRemove }:
       {editing ? (
         <>
           <Input  type="number" value={pri} title="우선순위" onChange={e => setPri(Number(e.target.value))} style={{ width: 52 }} />
-          <select className="form-input" value={role} onChange={e => setRole(e.target.value as 'chair' | 'participant')} style={{ width: 104 }}>
-            <option value="participant">participant</option>
-            <option value="chair">chair (의장)</option>
-          </select>
+          <Select value={toSel(role)} onValueChange={(v: string) => setRole(fromSel(v) as 'chair' | 'participant')}>
+            <SelectTrigger style={{ width: 104 }}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="participant">participant</SelectItem>
+              <SelectItem value="chair">chair (의장)</SelectItem>
+            </SelectContent>
+          </Select>
           <IconBtn title="저장" tone="primary" onClick={() => { onSave(m.user_id, pri, role); setEditing(false) }}><Check size={ICON} /></IconBtn>
           <IconBtn title="취소" onClick={() => { setPri(m.priority); setRole(m.role === 'chair' ? 'chair' : 'participant'); setEditing(false) }}><X size={ICON} /></IconBtn>
         </>
@@ -550,10 +562,13 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
             <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8, fontWeight: 400, color: 'var(--muted-foreground)' }}>
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>P
                 <Input  type="number" value={bulkPri} title="추가 시 적용할 우선순위" onChange={e => setBulkPri(Number(e.target.value))} style={{ width: 46 }} /></label>
-              <select className="form-input" value={bulkRole} title="추가 시 적용할 역할" onChange={e => setBulkRole(e.target.value as 'chair' | 'participant')} style={{ width: 116 }}>
-                <option value="participant">participant</option>
-                <option value="chair">chair (의장)</option>
-              </select>
+              <Select value={toSel(bulkRole)} onValueChange={(v: string) => setBulkRole(fromSel(v) as 'chair' | 'participant')}>
+                <SelectTrigger title="추가 시 적용할 역할" style={{ width: 116 }}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="participant">participant</SelectItem>
+                  <SelectItem value="chair">chair (의장)</SelectItem>
+                </SelectContent>
+              </Select>
             </span>
           </div>
           <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>

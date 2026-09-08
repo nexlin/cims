@@ -9,6 +9,8 @@ import { Button } from '../../components/ui/button'
 import { DataTable, Th, Td, orDash } from '../../components/custom/data-table'
 import { useConfirm } from '../../components/custom/confirm'
 import { Input } from '@core/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 
 // ServiceIpPanel — 인터페이스별 cims-managed IP 추가/삭제 + specific route 관리.
 // 모델: 각 IP 가 row (iface, ip 단위). agent 가 보고한 interfaces.managed=true 인 IP 만
@@ -240,10 +242,13 @@ export function ServiceIpPanel({ title, section = 'both', interfaces, storedRows
           {addOpen && (
             <tr className="bg-warning-soft">
               <Td>
-                <select value={addIface} onChange={e => setAddIface(e.target.value)}>
-                  {addableIfaces.length === 0 && <option value="">(없음)</option>}
-                  {addableIfaces.map(name => <option key={name} value={name}>{name}</option>)}
-                </select>
+                <Select value={toSel(addIface)} onValueChange={(v: string) => setAddIface(fromSel(v))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {addableIfaces.length === 0 && <SelectItem value={NONE}>(없음)</SelectItem>}
+                    {addableIfaces.map(name => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </Td>
               <Td>
                 <div className="flex items-center gap-1.5">
@@ -329,9 +334,12 @@ export function ServiceIpPanel({ title, section = 'both', interfaces, storedRows
                     </span>
                   </Td>
                   <Td>
-                    <select value={routeEditDev} onChange={e => setRouteEditDev(e.target.value)}>
-                      {routableIfaces.map(d => <option key={d} value={d}>{d}</option>)}
-                    </select>
+                    <Select value={toSel(routeEditDev)} onValueChange={(v: string) => setRouteEditDev(fromSel(v))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {routableIfaces.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
                   </Td>
                   <Td>{ownerChip}</Td>
                   <Td align="right">
@@ -377,10 +385,13 @@ export function ServiceIpPanel({ title, section = 'both', interfaces, storedRows
                        onChange={e => setRouteVia(e.target.value)} />
               </Td>
               <Td>
-                <select value={routeDev} onChange={e => setRouteDev(e.target.value)}>
-                  {routableIfaces.map(d => <option key={d} value={d}>{d}</option>)}
-                  {routableIfaces.length === 0 && <option value="">(없음)</option>}
-                </select>
+                <Select value={toSel(routeDev)} onValueChange={(v: string) => setRouteDev(fromSel(v))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {routableIfaces.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                    {routableIfaces.length === 0 && <SelectItem value={NONE}>(없음)</SelectItem>}
+                  </SelectContent>
+                </Select>
               </Td>
               <Td colSpan={2} align="right">
                 <div className="flex items-center justify-end gap-1.5">

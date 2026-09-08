@@ -10,6 +10,8 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { recordingsApi, type RecordingSegment, type SegmentTrack } from '../api/recordings'
 import { waitSegmentReady } from './useInlineAudio'
 import { Button } from '@core/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { fromSel, toSel } from '@core/components/custom/select-value'
 
 interface Props {
   recordingId: string
@@ -151,18 +153,15 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
         <span className="ts" style={{ fontSize: 12, color: 'var(--muted-foreground)', minWidth: 38 }}>
           {fmtMs(totalMs)}
         </span>
-        <select
-          value={sel}
-          onChange={e => setSel(e.target.value)}
-          className="form-input"
-          style={{ fontSize: 12, padding: '4px 9px', width: 'auto' }}
-          title="믹스 = 통화에서 실제로 들린 소리 / 단독 = 해당 화자만"
-        >
-          <option value={MIX}>믹스 (양측)</option>
-          {audioTracks.map(t => (
-            <option key={t.slot} value={String(t.slot)}>{name(trackSpeaker(t))} 단독</option>
-          ))}
-        </select>
+        <Select value={toSel(sel)} onValueChange={(v: string) => setSel(fromSel(v))}>
+          <SelectTrigger style={{ fontSize: 12, padding: '4px 9px', width: 'auto' }} title="믹스 = 통화에서 실제로 들린 소리 / 단독 = 해당 화자만"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={MIX}>믹스 (양측)</SelectItem>
+            {audioTracks.map(t => (
+              <SelectItem key={t.slot} value={String(t.slot)}>{name(trackSpeaker(t))} 단독</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {err && <div style={{ fontSize: 11, color: 'var(--destructive)' }}>{err}</div>}

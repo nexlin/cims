@@ -9,6 +9,7 @@ import SegmentPlayer from '@core/components/SegmentPlayer'
 import { useToast } from '@core/components/Toast'
 import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 
 function fmtDur(s: number | null) { if (!s || s <= 0) return '—'; const m = Math.floor(s / 60); return m > 0 ? `${m}분 ${s % 60}초` : `${s}초` }
 function fmtClock(iso: string | null | undefined) {
@@ -215,10 +216,12 @@ export default function VolteHistoryPage() {
         </label>
         <label style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
           표시{' '}
-          <select className="form-input" value={ps} onChange={e => { setPs(Number(e.target.value)); setPage(0) }}
-            style={{ width: 'auto', padding: '2px 6px', display: 'inline-block' }}>
-            {PAGE_SIZES.map(n => <option key={n} value={n}>{n}건</option>)}
-          </select>
+          <Select value={String(ps)} onValueChange={(v: string) => { setPs(Number(v)); setPage(0) }}>
+            <SelectTrigger style={{ width: 'auto', padding: '2px 6px', display: 'inline-block' }}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {PAGE_SIZES.map(n => <SelectItem key={n} value={String(n)}>{n}건</SelectItem>)}
+            </SelectContent>
+          </Select>
         </label>
       </div>
 

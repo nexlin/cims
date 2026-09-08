@@ -10,6 +10,7 @@ import { useToast } from '@core/components/Toast'
 import { Button } from '@core/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 import { Input } from '@core/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 
 // ── 공통 유틸 ─────────────────────────────────────────────
 export function fmtDur(sec: number): string {
@@ -541,10 +542,12 @@ export function OrgStatsCard() {
         </span>
         <label style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted-foreground)' }}>
           표시{' '}
-          <select className="form-input" value={limit} onChange={e => { setLimit(Number(e.target.value)); setPage(1) }}
-            style={{ width: 'auto', padding: '2px 6px', display: 'inline-block' }}>
-            {PAGE_SIZES.map(n => <option key={n} value={n}>{n}명</option>)}
-          </select>
+          <Select value={String(limit)} onValueChange={(v: string) => { setLimit(Number(v)); setPage(1) }}>
+            <SelectTrigger style={{ width: 'auto', padding: '2px 6px', display: 'inline-block' }}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {PAGE_SIZES.map(n => <SelectItem key={n} value={String(n)}>{n}명</SelectItem>)}
+            </SelectContent>
+          </Select>
         </label>
       </div>
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>

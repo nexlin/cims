@@ -6,6 +6,17 @@ import { Check, ChevronDown, ChevronUp } from "lucide-react"
 
 import { cn } from "@core/lib/utils"
 
+/**
+ * 정본 = Figma `02 Components` Sec/Select (18:27) — Default·Focus·Disabled 3상태.
+ * 실측(18:2): 컨트롤 높이 **36**(`h-9`) · 좌우 10 · 글자 13px · 라운드 8 · 채움 `--surface` ·
+ * 우측 chevron **14**. 라벨·도움말은 `FormField` 가 감싼다 (Input 과 같은 세트).
+ * shadcn 기본값에서 고친 것은 Input 과 같은 셋 — 그림자 없음 · 포커스는 `shadow-focus` ·
+ * **비활성에 불투명도 대신 토큰**. 이유는 `input.tsx` 주석 참조.
+ *
+ * **`SelectItem` 의 value 에 빈 문자열을 쓰지 않는다** — Radix 가 던진다(빈 값은 placeholder
+ * 전용). 네이티브 `<option value="">전체</option>` 를 옮길 때는 `'*'` 같은 표식을 두고
+ * 상태 경계에서 되돌린다.
+ */
 const Select = SelectPrimitive.Root
 
 const SelectGroup = SelectPrimitive.Group
@@ -19,14 +30,18 @@ const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex h-9 w-full items-center justify-between whitespace-nowrap rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm ring-offset-background data-[placeholder]:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
+      "flex h-9 w-full items-center justify-between whitespace-nowrap rounded-md border border-border bg-card px-2.5 text-md text-foreground transition-colors",
+      "data-[placeholder]:text-muted-foreground [&>span]:line-clamp-1",
+      "focus:border-primary focus:outline-none focus:shadow-focus",
+      "aria-[invalid=true]:border-destructive",
+      "disabled:cursor-not-allowed disabled:bg-secondary disabled:text-muted-foreground",
       className
     )}
     {...props}
   >
     {children}
     <SelectPrimitive.Icon asChild>
-      <ChevronDown className="h-4 w-4 opacity-50" />
+      <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
     </SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>
 ))

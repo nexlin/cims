@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, Fragment, useCallback } from 'react'
 
 import { verifyApi, type VerifyStagesOverview, type ItemsProgress, type VerifyEnvResponse } from '../api/verification'
 import { VerificationPrintReport } from '../components/VerificationPrintReport'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 
 // ─────────────────────────────────────────────────────────────
 // 검증 — 6단계 (S1~S6) + 그룹핑
@@ -395,22 +396,20 @@ function GlobalHeader({
         fontSize: 12, color: 'var(--muted-foreground)',
       }}>
         <Flag size={13} className="inline align-[-2px]" /> 재개 지점:
-        <select
-          value={resumeStage}
-          onChange={e => setResumeStage(Number(e.target.value))}
-          disabled={running}
-          style={{
+        <Select value={String(resumeStage)} onValueChange={(v: string) => setResumeStage(Number(v))} disabled={running}>
+          <SelectTrigger style={{
             padding: '6px 8px', borderRadius: 4,
             border: '1px solid var(--cims-info-soft)',
             background: 'var(--cims-brand-soft)', color: 'var(--primary)',
             fontSize: 12, fontWeight: 600,
             cursor: running ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {stages.map(s => (
-            <option key={s.id} value={s.num}>{s.id} · {s.title}</option>
-          ))}
-        </select>
+          }}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {stages.map(s => (
+              <SelectItem key={s.id} value={String(s.num)}>{s.id} · {s.title}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </label>
 
       <div style={{

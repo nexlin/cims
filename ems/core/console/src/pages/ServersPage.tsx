@@ -46,6 +46,8 @@ import AdminElevateDialog from '../components/AdminElevateDialog'
 import { clearElevatedToken, elevationActive } from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
 import { Input } from '@core/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 
 type Selection =
   | { kind: 'agent'; id: number }
@@ -1417,12 +1419,13 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
                   return (
                     <tr key={b.bid} className="bg-warning-soft">
                       <Td>
-                        <select className="form-input" value={b.slot}
-                                onChange={e => changeBindingSlot(b.bid, e.target.value)}
-                                style={{ width: 110, fontSize: 11, padding: 2 }}>
-                          <option value="">{vipManual ? '(용도 없음)' : '(용도 선택)'}</option>
-                          {availableSlots.map(s => <option key={s} value={s}>{s}</option>)}
-                        </select>
+                        <Select value={toSel(b.slot)} onValueChange={(v: string) => changeBindingSlot(b.bid, fromSel(v))}>
+                          <SelectTrigger style={{ width: 110, fontSize: 11, padding: 2 }}><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={NONE}>{vipManual ? '(용도 없음)' : '(용도 선택)'}</SelectItem>
+                            {availableSlots.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
                       </Td>
                       <Td>
                         {vipManual ? (
@@ -1668,11 +1671,13 @@ function FailoverSection({ value, onChange, open, onToggle, dirty }: {
                      onChange={e => setRestart('window_sec', Number(e.target.value) || 300)} />
             </FormField>
             <FormField label="권한 복귀 정책" help="자동 복귀 선택 시 복구 노드가 MASTER 를 회수한다">
-              <select className="form-input" value={value.preempt}
-                      onChange={e => set('preempt', e.target.value as 'preempt' | 'nopreempt')}>
-                <option value="nopreempt">복귀 없음 (운영 안정)</option>
-                <option value="preempt">자동 복귀 (priority 우선)</option>
-              </select>
+              <Select value={toSel(value.preempt)} onValueChange={(v: string) => set('preempt', fromSel(v) as 'preempt' | 'nopreempt')}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="nopreempt">복귀 없음 (운영 안정)</SelectItem>
+                  <SelectItem value="preempt">자동 복귀 (priority 우선)</SelectItem>
+                </SelectContent>
+              </Select>
             </FormField>
             {value.preempt === 'preempt' && (
               <FormField label="복귀 지연 (초)" help="옛 MASTER 가 돌아온 뒤 권한 회수 전 안정화 대기">
@@ -1810,15 +1815,15 @@ function ModuleSpecSection({ group, deployments, onReload }: {
                               onCheckedChange={v => setSup(m, v === true)} />
                   </Td>
                   <Td>
-                    {/* `.form-input` 이 width:100% 라 클래스로는 못 좁힌다 — 감싸서 폭을 준다 */}
+                    {/* SelectTrigger 가 `w-full` 이라 클래스로는 못 좁힌다 — 감싸서 폭을 준다 */}
                     <span className="inline-block w-[110px]">
-                    <select value={sp.ha.failover_mode}
-                            onChange={e => setMode(m, e.target.value as 'cold' | 'hot')}
-                            className="form-input"
-                            disabled={group.mode !== 'active_standby'}>
-                      <option value="cold">cold</option>
-                      <option value="hot">hot</option>
-                    </select>
+                    <Select value={toSel(sp.ha.failover_mode)} onValueChange={(v: string) => setMode(m, fromSel(v) as 'cold' | 'hot')} disabled={group.mode !== 'active_standby'}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="cold">cold</SelectItem>
+                        <SelectItem value="hot">hot</SelectItem>
+                      </SelectContent>
+                    </Select>
                     </span>
                   </Td>
                   <Td>
@@ -1827,14 +1832,15 @@ function ModuleSpecSection({ group, deployments, onReload }: {
                   </Td>
                   <Td>
                     <span className="inline-block w-[150px]">
-                    <select value={sp.safety?.class ?? 'unknown'}
-                            onChange={e => setSafety(m, e.target.value as SafetyClass)}
-                            className="form-input">
-                      <option value="stateless">stateless</option>
-                      <option value="read_only">read_only</option>
-                      <option value="shared_writer">shared_writer</option>
-                      <option value="unknown">unknown</option>
-                    </select>
+                    <Select value={toSel(sp.safety?.class ?? 'unknown')} onValueChange={(v: string) => setSafety(m, fromSel(v) as SafetyClass)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="stateless">stateless</SelectItem>
+                        <SelectItem value="read_only">read_only</SelectItem>
+                        <SelectItem value="shared_writer">shared_writer</SelectItem>
+                        <SelectItem value="unknown">unknown</SelectItem>
+                      </SelectContent>
+                    </Select>
                     </span>
                   </Td>
                 </tr>
@@ -3317,12 +3323,14 @@ function AddMemberModal({ group, serverName, mountSuggestion, onClose, onSubmit 
                    placeholder="/mnt/cims"
                    onChange={e => setMnt(m => ({ ...m, target: e.target.value }))} />
             <label>파일시스템 *</label>
-            <select className="form-input" value={mnt.fstype} disabled={busy}
-                    onChange={e => setMnt(m => ({ ...m, fstype: e.target.value }))}>
-              {['nfs4', 'nfs', 'cifs', 'ext4', 'ext3', 'xfs', 'btrfs'].map(f => (
-                <option key={f} value={f}>{f}</option>
-              ))}
-            </select>
+            <Select value={toSel(mnt.fstype)} onValueChange={(v: string) => setMnt(m => ({ ...m, fstype: fromSel(v) }))} disabled={busy}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {['nfs4', 'nfs', 'cifs', 'ext4', 'ext3', 'xfs', 'btrfs'].map(f => (
+                  <SelectItem key={f} value={f}>{f}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <label style={{ gridColumn: '1 / -1', fontSize: 11,
                             color: mntValid ? 'var(--muted-foreground)' : 'var(--destructive)' }}>
               {mntValid
@@ -3526,12 +3534,14 @@ function SystemCreateModal({ onClose, onDone, onCreated, saAgents, mountSuggesti
               onChange={e => setName(e.target.value)} disabled={creating} />
           </FormField>
           <FormField label="유형" required>
-            <select className="form-input" value={mode} onChange={e => setMode(e.target.value as SystemMode)}
-                    disabled={creating}>
-              <option value="active_standby">AS — Active/Standby (master + backup 2서버 자동)</option>
-              <option value="all_active">AA — All Active (다중화, 그룹만 생성 + 이후 멤버 추가)</option>
-              <option value="standalone">Standalone — 단일 서버 (HA 그룹 없음)</option>
-            </select>
+            <Select value={toSel(mode)} onValueChange={(v: string) => setMode(fromSel(v) as SystemMode)} disabled={creating}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="active_standby">AS — Active/Standby (master + backup 2서버 자동)</SelectItem>
+                <SelectItem value="all_active">AA — All Active (다중화, 그룹만 생성 + 이후 멤버 추가)</SelectItem>
+                <SelectItem value="standalone">Standalone — 단일 서버 (HA 그룹 없음)</SelectItem>
+              </SelectContent>
+            </Select>
           </FormField>
           {mode === 'active_standby' && (
             <>
@@ -3541,19 +3551,21 @@ function SystemCreateModal({ onClose, onDone, onCreated, saAgents, mountSuggesti
               </FormField>
               {[0, 1].map(i => (
                 <FormField key={i} label={`멤버 ${i + 1} (${i === 0 ? 'master' : 'backup'})`}>
-                  <select className="form-input" value={memberSel[i]} disabled={creating}
-                    onChange={e => setMemberSel(prev => {
+                  <Select value={String(memberSel[i])} onValueChange={(v: string) => setMemberSel(prev => {
                       const next: [number, number] = [...prev] as [number, number]
-                      next[i] = Number(e.target.value)
+                      next[i] = Number(v)
                       return next
-                    })}>
-                    <option value={0}>신규 서버 생성 — {name || '<이름>'}-{String(i + 1).padStart(2, '0')}</option>
-                    {saAgents.map(a => (
-                      <option key={a.id} value={a.id} disabled={memberSel[1 - i] === a.id}>
-                        기존 서버 편입: {agentDisplayName(a.name)} ({a.status}{a.hostname ? ` · ${a.hostname}` : ''})
-                      </option>
-                    ))}
-                  </select>
+                    })} disabled={creating}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="0">신규 서버 생성 — {name || '<이름>'}-{String(i + 1).padStart(2, '0')}</SelectItem>
+                      {saAgents.map(a => (
+                        <SelectItem key={a.id} value={String(a.id)} disabled={memberSel[1 - i] === a.id}>
+                          기존 서버 편입: {agentDisplayName(a.name)} ({a.status}{a.hostname ? ` · ${a.hostname}` : ''})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </FormField>
               ))}
             </>
@@ -3591,12 +3603,14 @@ function SystemCreateModal({ onClose, onDone, onCreated, saAgents, mountSuggesti
                            : undefined}
                          error={mntValid ? undefined
                            : '원본과 붙일 위치(절대경로)를 입력하세요 — 비우면 마운트를 적용하지 않습니다.'}>
-                <select className="form-input" value={mnt.fstype} disabled={creating}
-                  onChange={e => setMnt(m => ({ ...m, fstype: e.target.value }))}>
-                  {['nfs4', 'nfs', 'cifs', 'ext4', 'ext3', 'xfs', 'btrfs'].map(f => (
-                    <option key={f} value={f}>{f}</option>
-                  ))}
-                </select>
+                <Select value={toSel(mnt.fstype)} onValueChange={(v: string) => setMnt(m => ({ ...m, fstype: fromSel(v) }))} disabled={creating}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {['nfs4', 'nfs', 'cifs', 'ext4', 'ext3', 'xfs', 'btrfs'].map(f => (
+                      <SelectItem key={f} value={f}>{f}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </FormField>
             </>
           )}
@@ -3720,15 +3734,17 @@ function DeploymentUpgradeModal({ dep: d, packages, onClose, onDone }: {
       ) : (
         <>
           <label style={{ display: 'block', fontSize: 12, marginBottom: 4 }}>올릴 버전</label>
-          <select className="input" style={{ width: '100%' }} value={pkgId}
-                  onChange={e => setPkgId(Number(e.target.value))}>
-            {cands.map((p, i) => (
-              <option key={p.id} value={p.id}>
-                v{p.version}{i === 0 ? '  (최신 업로드)' : ''}
-                {p.uploaded_at ? `  — ${fmtRelTime(p.uploaded_at)}` : ''}
-              </option>
-            ))}
-          </select>
+          <Select value={String(pkgId)} onValueChange={(v: string) => setPkgId(Number(v))}>
+            <SelectTrigger className="input" style={{ width: '100%' }}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {cands.map((p, i) => (
+                <SelectItem key={p.id} value={String(p.id)}>
+                  v{p.version}{i === 0 ? '  (최신 업로드)' : ''}
+                  {p.uploaded_at ? `  — ${fmtRelTime(p.uploaded_at)}` : ''}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginTop: 10, lineHeight: 1.7 }}>
             · 파일만 설치되고 <b>자동으로 시작하지 않습니다</b> — 확인 후 [패키지 제어] 에서 시작하세요.<br />
             · 설정은 이관됩니다(collection + 배포 설정). 새 항목은 기본값.<br />
@@ -3849,38 +3865,44 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
       )}
       <div className="form-grid">
         <label>1. 모듈 *</label>
-        <select className="form-input" value={moduleName}
-          onChange={e => setModuleName(e.target.value)}>
-          <option value="">(선택)</option>
-          {moduleNames.map(m => {
-            const mm = moduleMismatch(m)
-            return (
-              <option key={m} value={m} disabled={!!mm}>
-                {m} ({pkgsByModule.get(m)!.length}개 버전){mm ? ` — ${mm}` : ''}
-              </option>
-            )
-          })}
-        </select>
+        <Select value={toSel(moduleName)} onValueChange={(v: string) => setModuleName(fromSel(v))}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NONE}>(선택)</SelectItem>
+            {moduleNames.map(m => {
+              const mm = moduleMismatch(m)
+              return (
+                <SelectItem key={m} value={m} disabled={!!mm}>
+                  {m} ({pkgsByModule.get(m)!.length}개 버전){mm ? ` — ${mm}` : ''}
+                </SelectItem>
+              )
+            })}
+          </SelectContent>
+        </Select>
 
         <label>2. 버전 *</label>
-        <select className="form-input" value={pkgId} disabled={!moduleName}
-          onChange={e => setPkgId(Number(e.target.value))}>
-          <option value={0}>(선택)</option>
-          {versions.map((p, i) => (
-            <option key={p.id} value={p.id}>
-              v{p.version}{i === 0 ? '  (최신)' : ''}
-            </option>
-          ))}
-        </select>
+        <Select value={String(pkgId)} onValueChange={(v: string) => setPkgId(Number(v))} disabled={!moduleName}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="0">(선택)</SelectItem>
+            {versions.map((p, i) => (
+              <SelectItem key={p.id} value={String(p.id)}>
+                v{p.version}{i === 0 ? '  (최신)' : ''}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
         {selectedPkg && (
           <>
             <label>3. 모듈 이름 *</label>
             {processOptions.length > 1 ? (
-              <select className="form-input" value={processName}
-                onChange={e => setProcessName(e.target.value)}>
-                {processOptions.map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
+              <Select value={toSel(processName)} onValueChange={(v: string) => setProcessName(fromSel(v))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {processOptions.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                </SelectContent>
+              </Select>
             ) : (
               <Input  value={processName}
                 onChange={e => setProcessName(e.target.value)}

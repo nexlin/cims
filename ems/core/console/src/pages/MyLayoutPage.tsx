@@ -16,6 +16,8 @@ import { InfoDot } from '../components/InfoDot'
 import { widgetUnavailableNote, type CatalogWidget, type WidgetArea } from '../api/consoleLayouts'
 import { myLayout, useMyLayout } from './myLayoutStore'
 import { Button } from '@core/components/ui/button'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 
 const AREA_LABEL: Record<WidgetArea, string> = { ops: '운용', admin: '관리' }
 
@@ -59,10 +61,12 @@ export function MyLayoutProfile() {
     <div className="panel" style={{ padding: 14, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={{ fontWeight: 600, marginBottom: 8, flex: 'none' }}>프로파일</div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <select className="form-input" value={s.baseProfile} style={{ width: 200 }}
-                onChange={e => myLayout.setBaseProfile(e.target.value)}>
-          {s.profiles.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
-        </select>
+        <Select value={toSel(s.baseProfile)} onValueChange={(v: string) => myLayout.setBaseProfile(fromSel(v))}>
+          <SelectTrigger style={{ width: 200 }}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {s.profiles.map(p => <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <Button onClick={() => myLayout.applyProfile(s.baseProfile)}
                 title="선택한 프로파일의 기본 위젯 세트로 교체">이 프로파일 적용</Button>
         <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
@@ -99,19 +103,22 @@ export function MyLayoutWidgets() {
     <div className="panel" style={{ padding: 14, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flex: 'none' }}>
         <div style={{ fontWeight: 600 }}>대시보드 위젯 ({s.dashboard.length})</div>
-        <select className="form-input" value="" style={{ width: 240, marginLeft: 'auto', fontSize: 13 }}
-                onChange={e => myLayout.add(e.target.value)}>
-          <option value="">+ 위젯 추가…</option>
-          {addable.map(g => (
-            <optgroup key={g.area} label={AREA_LABEL[g.area]}>
-              {g.widgets.map(w => (
-                <option key={w.id} value={w.id} disabled={!w.available}>
-                  {w.title}{w.available ? '' : ' — 설치 후 사용 가능'}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
+        <Select value={toSel("")} onValueChange={(v: string) => myLayout.add(fromSel(v))}>
+          <SelectTrigger style={{ width: 240, marginLeft: 'auto', fontSize: 13 }}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NONE}>+ 위젯 추가…</SelectItem>
+            {addable.map(g => (
+              <SelectGroup key={g.area}>
+                <SelectLabel>{AREA_LABEL[g.area]}</SelectLabel>
+                {g.widgets.map(w => (
+                  <SelectItem key={w.id} value={w.id} disabled={!w.available}>
+                    {w.title}{w.available ? '' : ' — 설치 후 사용 가능'}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {s.loading ? (

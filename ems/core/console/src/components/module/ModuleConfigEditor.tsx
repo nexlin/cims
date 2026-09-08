@@ -10,6 +10,8 @@ import { useConfirm } from '../custom/confirm'
 import { Button } from '@core/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 import { Input } from '@core/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 
 type Record_ = Record<string, unknown>
 
@@ -515,10 +517,12 @@ function renderInput(f: ConfigTemplateField, value: unknown, onChange: (v: unkno
   }
   if (f.type === 'enum') {
     return (
-      <select className="form-input" value={(value as string) ?? ''}
-        onChange={e => onChange(e.target.value)}>
-        {(f.options || []).map(o => <option key={o} value={o}>{o}</option>)}
-      </select>
+      <Select value={toSel((value as string) ?? '')} onValueChange={(v: string) => onChange(fromSel(v))}>
+        <SelectTrigger><SelectValue /></SelectTrigger>
+        <SelectContent>
+          {(f.options || []).map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+        </SelectContent>
+      </Select>
     )
   }
   if (f.type === 'int') {
@@ -539,11 +543,13 @@ function renderInput(f: ConfigTemplateField, value: unknown, onChange: (v: unkno
   if (f.type === 'ref') {
     const options = (f.ref_collection && refOpts[f.ref_collection]) || []
     return (
-      <select className="form-input" value={(value as string) ?? ''}
-        onChange={e => onChange(e.target.value)}>
-        <option value="">(선택 안함)</option>
-        {options.map(o => <option key={o} value={o}>{o}</option>)}
-      </select>
+      <Select value={toSel((value as string) ?? '')} onValueChange={(v: string) => onChange(fromSel(v))}>
+        <SelectTrigger><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value={NONE}>(선택 안함)</SelectItem>
+          {options.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+        </SelectContent>
+      </Select>
     )
   }
   if (f.type === 'string_list') {

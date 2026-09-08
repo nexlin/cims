@@ -21,6 +21,8 @@ import { useConfirm } from '../custom/confirm'
 import { Alert } from '../ui/alert'
 import { ToggleGroup, ToggleGroupItem } from '../ui/toggle-group'
 import { Input } from '@core/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { fromSel, toSel } from '@core/components/custom/select-value'
 
 export type FieldValue = string | number | boolean | null | string[]
 // 'scalar' = 필드(sections) 탭, 나머지 문자열 = collection.key
@@ -763,10 +765,12 @@ function renderInput(f: ConfigTemplateField, value: FieldValue, onChange: (v: Fi
   }
   if (f.type === 'enum') {
     return (
-      <select className="form-input" value={(value as string) ?? ''}
-        onChange={e => onChange(e.target.value)}>
-        {(f.options || []).map(o => <option key={o} value={o}>{o}</option>)}
-      </select>
+      <Select value={toSel((value as string) ?? '')} onValueChange={(v: string) => onChange(fromSel(v))}>
+        <SelectTrigger><SelectValue /></SelectTrigger>
+        <SelectContent>
+          {(f.options || []).map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+        </SelectContent>
+      </Select>
     )
   }
   if (f.type === 'int') {

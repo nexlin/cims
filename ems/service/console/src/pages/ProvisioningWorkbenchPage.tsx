@@ -13,6 +13,8 @@ import { useAuth } from '@core/contexts/AuthContext'
 import { canWriteConfig } from '@core/utils/permissions'
 import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 
 // ── 사용자 프로비저닝 워크벤치 (사용자 = 가입, 번호 등록이 가입 행위) ──────────
 //  좌: 조직트리(공유 스코프) | 상단 탭: 사용자/VoLTE 번호/PTT 번호.
@@ -378,10 +380,13 @@ function UserBasicForm({ mode, initial, orgOpts, defaultOrg, onSubmit, onCancel 
       <Field label="로그인 ID" w={130}><Input  placeholder="예: test001" value={form.login_id || ''} onChange={e => setForm({ ...form, login_id: e.target.value })} /></Field>
       <Field label={mode === 'add' ? '비밀번호' : '비밀번호(변경 시)'} w={140}><Input  type="password" placeholder={mode === 'add' ? '' : '미변경'} value={form.passwd || ''} onChange={e => setForm({ ...form, passwd: e.target.value })} /></Field>
       <Field label="조직" w={200}>
-        <select className="form-input" value={form.org_id} onChange={e => setForm({ ...form, org_id: e.target.value })}>
-          <option value="">없음</option>
-          {orgOpts.map(o => <option key={o.code} value={o.code}>{o.label}</option>)}
-        </select>
+        <Select value={toSel(form.org_id)} onValueChange={(v: string) => setForm({ ...form, org_id: fromSel(v) })}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NONE}>없음</SelectItem>
+            {orgOpts.map(o => <SelectItem key={o.code} value={o.code}>{o.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </Field>
       <Field label="설명"><Input  value={form.details || ''} onChange={e => setForm({ ...form, details: e.target.value })} /></Field>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -490,19 +495,23 @@ function PttProfileRow({ pid, msisdn, canWrite }: { pid: number; msisdn: string;
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12, padding: '4px 0' }}>
         <strong>{msisdn}</strong>
         <label className="ts">SOS 대상
-          <select className="form-input" style={{ marginLeft: 4 }} value={form.emergency_group_mode}
-            onChange={e => setForm({ ...form, emergency_group_mode: e.target.value as McpttProfile['emergency_group_mode'] })}>
-            <option value="DedicatedGroup">{MODE_LABEL.DedicatedGroup}</option>
-            <option value="UseCurrentlySelectedGroup">{MODE_LABEL.UseCurrentlySelectedGroup}</option>
-          </select>
+          <Select value={toSel(form.emergency_group_mode)} onValueChange={(v: string) => setForm({ ...form, emergency_group_mode: fromSel(v) as McpttProfile['emergency_group_mode'] })}>
+            <SelectTrigger style={{ marginLeft: 4 }}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="DedicatedGroup">{MODE_LABEL.DedicatedGroup}</SelectItem>
+              <SelectItem value="UseCurrentlySelectedGroup">{MODE_LABEL.UseCurrentlySelectedGroup}</SelectItem>
+            </SelectContent>
+          </Select>
         </label>
         {form.emergency_group_mode === 'DedicatedGroup' && (
           <label className="ts">긴급그룹
-            <select className="form-input" style={{ marginLeft: 4 }} value={form.emergency_group_id || ''}
-              onChange={e => setForm({ ...form, emergency_group_id: e.target.value || null })}>
-              <option value="">(미지정)</option>
-              {groups.map(g => <option key={g.id} value={g.id}>{g.name || g.id}</option>)}
-            </select>
+            <Select value={toSel(form.emergency_group_id || '')} onValueChange={(v: string) => setForm({ ...form, emergency_group_id: fromSel(v) || null })}>
+              <SelectTrigger style={{ marginLeft: 4 }}><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE}>(미지정)</SelectItem>
+                {groups.map(g => <SelectItem key={g.id} value={g.id}>{g.name || g.id}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </label>
         )}
         <label className="ts"><input type="checkbox" checked={form.allow_emergency_call}
@@ -515,11 +524,13 @@ function PttProfileRow({ pid, msisdn, canWrite }: { pid: number; msisdn: string;
           onChange={e => setForm({ ...form, allow_emergency_private_call: e.target.checked })} /> 긴급 사설콜</label>
         {form.allow_emergency_private_call && (
           <label className="ts">사설 대상
-            <select className="form-input" style={{ marginLeft: 4 }} value={form.private_emergency_mode}
-              onChange={e => setForm({ ...form, private_emergency_mode: e.target.value as McpttProfile['private_emergency_mode'] })}>
-              <option value="LocallyDetermined">{PRIV_MODE_LABEL.LocallyDetermined}</option>
-              <option value="UsePreConfigured">{PRIV_MODE_LABEL.UsePreConfigured}</option>
-            </select>
+            <Select value={toSel(form.private_emergency_mode)} onValueChange={(v: string) => setForm({ ...form, private_emergency_mode: fromSel(v) as McpttProfile['private_emergency_mode'] })}>
+              <SelectTrigger style={{ marginLeft: 4 }}><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="LocallyDetermined">{PRIV_MODE_LABEL.LocallyDetermined}</SelectItem>
+                <SelectItem value="UsePreConfigured">{PRIV_MODE_LABEL.UsePreConfigured}</SelectItem>
+              </SelectContent>
+            </Select>
           </label>
         )}
         {form.allow_emergency_private_call && form.private_emergency_mode === 'UsePreConfigured' && (
@@ -598,9 +609,12 @@ interface AddNum { id: string; imsi: string; svcCat: string; passwd: string; sip
 //   K/OPc 는 응답에 오지 않는다(aka_provisioned 로 보관 여부만) — 입력 시에만 전송, 전송하면 SQN 0 리셋.
 const HEX32 = /^[0-9a-fA-F]{32}$/
 function AuthSelect({ value, onChange }: { value: AuthScheme | undefined; onChange: (v: AuthScheme) => void }) {
-  return <select className="form-input" title="digest=SIP Digest(H(A1)) / aka=IMS AKA(K/OPc — 보호 채널 강제)" value={value || 'digest'} onChange={e => onChange(e.target.value as AuthScheme)}>
-    <option value="digest">Digest</option><option value="aka">AKA</option>
-  </select>
+  return <Select value={toSel(value || 'digest')} onValueChange={(v: string) => onChange(fromSel(v) as AuthScheme)}>
+   <SelectTrigger title="digest=SIP Digest(H(A1)) / aka=IMS AKA(K/OPc — 보호 채널 강제)"><SelectValue /></SelectTrigger>
+   <SelectContent>
+      <SelectItem value="digest">Digest</SelectItem><SelectItem value="aka">AKA</SelectItem>
+   </SelectContent>
+ </Select>
 }
 function AuthBadge({ sub }: { sub: Subscription }) {
   if (sub.auth_scheme !== 'aka') return <span className="ts">Digest</span>
@@ -628,9 +642,12 @@ const TRANSPORT_OPTS: Array<{ v: SipTransport | ''; label: string }> = [
   { v: '', label: '자유' }, { v: 'UDP', label: 'UDP' }, { v: 'TCP', label: 'TCP' }, { v: 'TLS', label: 'TLS (강제)' },
 ]
 function TransportSelect({ value, onChange }: { value: SipTransport | '' | null | undefined; onChange: (v: SipTransport | '') => void }) {
-  return <select className="form-input" title="TLS=서버 집행(비-TLS 요청 403) / UDP·TCP=단말 힌트 / 자유=단말 선택" value={value || ''} onChange={e => onChange(e.target.value as SipTransport | '')}>
-    {TRANSPORT_OPTS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
-  </select>
+  return <Select value={toSel(value || '')} onValueChange={(v: string) => onChange(fromSel(v) as SipTransport | '')}>
+   <SelectTrigger title="TLS=서버 집행(비-TLS 요청 403) / UDP·TCP=단말 힌트 / 자유=단말 선택"><SelectValue /></SelectTrigger>
+   <SelectContent>
+      {TRANSPORT_OPTS.map(o => <SelectItem key={o.v} value={o.v}>{o.label}</SelectItem>)}
+   </SelectContent>
+ </Select>
 }
 function TransportBadge({ v, aka }: { v?: SipTransport | null; aka?: boolean }) {
   if (aka) return <TransportFixedAka />
@@ -731,9 +748,12 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
             return (
               <tr key={rk(r.svc, r.sub.id)} style={{ background: hi && !ed ? 'rgba(74,144,217,0.10)' : undefined }}>
                 <td>{ed
-                  ? <select className="form-input" value={editForm.service_ref || ''} onChange={e => setEditForm({ ...editForm, service_ref: e.target.value })}>
-                      {catalog.filter(c => c.svc === r.svc).map(c => <option key={c.ref} value={c.ref}>{c.ref}</option>)}
-                    </select>
+                  ? <Select value={toSel(editForm.service_ref || '')} onValueChange={(v: string) => setEditForm({ ...editForm, service_ref: fromSel(v) })}>
+   <SelectTrigger><SelectValue /></SelectTrigger>
+   <SelectContent>
+                        {catalog.filter(c => c.svc === r.svc).map(c => <SelectItem key={c.ref} value={c.ref}>{c.ref}</SelectItem>)}
+   </SelectContent>
+ </Select>
                   : <SvcBadge svc={r.svc} />}</td>
                 <td><strong>{r.sub.id}</strong></td>
                 <td>{ed ? <Input  type="password" placeholder="변경 시 입력" value={editForm.passwd || ''} onChange={e => setEditForm({ ...editForm, passwd: e.target.value })} /> : <span className="ts">••••</span>}</td>
@@ -763,9 +783,12 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
           })}
           {adding && (
             <tr style={{ background: 'rgba(74,144,217,0.06)' }}>
-              <td><select className="form-input" value={addForm.svcCat} onChange={e => setAddForm({ ...addForm, svcCat: e.target.value })}>
-                {catalog.map(c => <option key={svcVal(c)} value={svcVal(c)}>{c.ref} ({c.svc === 'call' ? 'VoLTE' : 'McPTT'})</option>)}
-              </select></td>
+              <td><Select value={toSel(addForm.svcCat)} onValueChange={(v: string) => setAddForm({ ...addForm, svcCat: fromSel(v) })}>
+  <SelectTrigger><SelectValue /></SelectTrigger>
+  <SelectContent>
+                  {catalog.map(c => <SelectItem key={svcVal(c)} value={svcVal(c)}>{c.ref} ({c.svc === 'call' ? 'VoLTE' : 'McPTT'})</SelectItem>)}
+  </SelectContent>
+</Select></td>
               <td><Input  placeholder={addIsCall ? '+8213…' : '+825…'} autoFocus value={addForm.id} onChange={e => setAddForm({ ...addForm, id: e.target.value })} /></td>
               <td><Input  type="password" placeholder={addForm.auth_scheme === 'aka' ? '암호(선택)' : '암호 *'} value={addForm.passwd} onChange={e => setAddForm({ ...addForm, passwd: e.target.value })} /></td>
               <td><Input  placeholder="SIM IMSI *" value={addForm.imsi} onChange={e => setAddForm({ ...addForm, imsi: e.target.value })} /></td>
@@ -852,9 +875,12 @@ function NumberAddForm({ svc, catalog, userIndex, orgScope, orgPathOf, onAdded, 
       {/* 번호 정보 */}
       <FieldRow>
         <Field label="서비스" w={150}>
-          <select className="form-input" value={serviceRef} onChange={e => setServiceRef(e.target.value)}>
-            {(svcCatalog.length ? svcCatalog : [{ svc, ref: serviceRef }]).map(c => <option key={c.ref} value={c.ref}>{c.ref}</option>)}
-          </select>
+          <Select value={toSel(serviceRef)} onValueChange={(v: string) => setServiceRef(fromSel(v))}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {(svcCatalog.length ? svcCatalog : [{ svc, ref: serviceRef }]).map(c => <SelectItem key={c.ref} value={c.ref}>{c.ref}</SelectItem>)}
+            </SelectContent>
+          </Select>
         </Field>
         <Field label="MSISDN *" w={150}><Input  placeholder={isCall ? '+8213…' : '+825…'} value={msisdn} onChange={e => setMsisdn(e.target.value)} /></Field>
         <Field label="IMSI *" w={170}><Input  placeholder="SIM IMSI" value={imsi} onChange={e => setImsi(e.target.value)} /></Field>

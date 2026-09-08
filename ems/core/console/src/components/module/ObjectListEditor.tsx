@@ -3,6 +3,8 @@ import type { ConfigTemplateField } from '../../api/deployment'
 import { Button } from '@core/components/ui/button'
 import { Plus, X } from 'lucide-react'
 import { Input } from '@core/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { fromSel, toSel } from '@core/components/custom/select-value'
 
 type Item = Record<string, unknown>
 
@@ -114,9 +116,12 @@ function defaultCell(f: ConfigTemplateField, v: unknown, on: (nv: unknown) => vo
   }
   if (f.type === 'enum') {
     return (
-      <select className="form-input" value={(v as string) ?? ''} onChange={e => on(e.target.value)}>
-        {(f.options || []).map(o => <option key={o} value={o}>{o}</option>)}
-      </select>
+      <Select value={toSel((v as string) ?? '')} onValueChange={(v: string) => on(fromSel(v))}>
+        <SelectTrigger><SelectValue /></SelectTrigger>
+        <SelectContent>
+          {(f.options || []).map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+        </SelectContent>
+      </Select>
     )
   }
   if (f.type === 'int') {

@@ -12,6 +12,8 @@ import { eventTypeLabel, fmtTime, downloadCsv } from '../utils/alarmLabels'
 import { RotateCw } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 
 const PAGE_SIZE = 20
 const FETCH_LIMIT = 5000
@@ -100,16 +102,22 @@ export function AuditEventsSection() {
   return (
     <>
       <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8, flex: 'none' }}>
-        <select className="form-input" value={filterType} onChange={e => setFilterType(e.target.value)} style={{ width: 170 }}>
-          <option value="">유형 전체</option>
-          {types.map(t => <option key={t} value={t}>{eventTypeLabel(t)}</option>)}
-        </select>
-        <select className="form-input" value={filterPhase} onChange={e => setFilterPhase(e.target.value)} style={{ width: 110 }}>
-          <option value="">단계 전체</option>
-          <option value="started">시작</option>
-          <option value="ended">종료</option>
-          <option value="denied">거절</option>
-        </select>
+        <Select value={toSel(filterType)} onValueChange={(v: string) => setFilterType(fromSel(v))}>
+          <SelectTrigger style={{ width: 170 }}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NONE}>유형 전체</SelectItem>
+            {types.map(t => <SelectItem key={t} value={t}>{eventTypeLabel(t)}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={toSel(filterPhase)} onValueChange={(v: string) => setFilterPhase(fromSel(v))}>
+          <SelectTrigger style={{ width: 110 }}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NONE}>단계 전체</SelectItem>
+            <SelectItem value="started">시작</SelectItem>
+            <SelectItem value="ended">종료</SelectItem>
+            <SelectItem value="denied">거절</SelectItem>
+          </SelectContent>
+        </Select>
         <Input className="flex-1" style={{ width: 220 }} placeholder="행위자/그룹/세션/대상 검색"
                value={q} onChange={e => setQ(e.target.value)} />
         <Button variant="ghost" onClick={exportCsv} style={{ marginLeft: 'auto' }}

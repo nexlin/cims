@@ -11,6 +11,8 @@ import {
   type Endpoint, type ProbeMode, type ProbeResult,
 } from '../api/external_systems'
 import { Button } from '@core/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { fromSel, toSel } from '@core/components/custom/select-value'
 
 const TYPE_LABEL: Record<ExternalSystemType, string> = {
   db: 'DB', monitoring: '모니터링', storage: '스토리지', auth: '인증', other: '기타',
@@ -79,10 +81,12 @@ function EditModal({ initial, onClose, onSaved }: {
       <div style={{ ...row, display: 'flex', gap: 12 }}>
         <div style={{ flex: 1 }}>
           <label style={lbl}>유형</label>
-          <select value={f.type} onChange={e => setF(s => ({ ...s, type: e.target.value as ExternalSystemType }))}
-                  style={{ width: '100%' }}>
-            {TYPES.map(t => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
-          </select>
+          <Select value={toSel(f.type)} onValueChange={(v: string) => setF(s => ({ ...s, type: fromSel(v) as ExternalSystemType }))}>
+            <SelectTrigger style={{ width: '100%' }}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {TYPES.map(t => <SelectItem key={t} value={t}>{TYPE_LABEL[t]}</SelectItem>)}
+            </SelectContent>
+          </Select>
         </div>
         <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end' }}>
           <label style={{ fontSize: 13 }}>
@@ -107,9 +111,12 @@ function EditModal({ initial, onClose, onSaved }: {
       <div style={row}>
         <label style={lbl}>상태 점검(probe)</label>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <select value={f.probe?.mode || 'none'} onChange={e => setF(s => ({ ...s, probe: { ...(s.probe || {}), mode: e.target.value as ProbeMode } }))}>
-            {PROBE_MODES.map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
+          <Select value={toSel(f.probe?.mode || 'none')} onValueChange={(v: string) => setF(s => ({ ...s, probe: { ...(s.probe || {}), mode: fromSel(v) as ProbeMode } }))}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {PROBE_MODES.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+            </SelectContent>
+          </Select>
           <input value={f.probe?.host || ''} onChange={e => setF(s => ({ ...s, probe: { ...(s.probe || { mode: 'tcp' }), host: e.target.value } }))}
                  placeholder="host(미지정=ep1)" style={{ flex: 2 }} />
           <input type="number" value={f.probe?.port || ''} onChange={e => setF(s => ({ ...s, probe: { ...(s.probe || { mode: 'tcp' }), port: parseInt(e.target.value) || undefined } }))}

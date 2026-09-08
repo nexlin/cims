@@ -15,6 +15,8 @@ import { useAuth } from '@core/contexts/AuthContext'
 import { hasRole } from '@core/utils/permissions'
 import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 
 // ── 관제 그룹 (dispatch_center.md §3) ─────────────────────────
 //  관제 그룹 = 픽업 그룹 + (선택) 대표번호 + (선택) 감청 범위. id 가 곧 가입자 pickup_group 값이라
@@ -274,40 +276,58 @@ function GroupDrawer(p: DrawerProps) {
           <Field label="대표번호" w={120}><Input  placeholder="예: 7000" title="다이얼 가능한 주소 — 가입 번호와 겹치면 409" value={form.pilot_id || ''} onChange={e => setForm({ ...form, pilot_id: e.target.value.trim() })} /></Field>
           <Field label="접속서비스" w={110}><Input  placeholder="volte" title="대표번호가 속한 접속서비스 name — 도메인·SRTP 정책" value={form.service_ref || ''} onChange={e => setForm({ ...form, service_ref: e.target.value.trim() })} /></Field>
           <Field label="호출 방식" w={120}>
-            <select className="form-input" value={form.alert_mode || 'parallel'} onChange={e => setForm({ ...form, alert_mode: e.target.value as DispatchGroup['alert_mode'] })}>
-              <option value="parallel">병렬 (전원 동시)</option>
-              <option value="sequential">순차 (후속)</option>
-            </select>
+            <Select value={toSel(form.alert_mode || 'parallel')} onValueChange={(v: string) => setForm({ ...form, alert_mode: fromSel(v) as DispatchGroup['alert_mode'] })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="parallel">병렬 (전원 동시)</SelectItem>
+                <SelectItem value="sequential">순차 (후속)</SelectItem>
+              </SelectContent>
+            </Select>
           </Field>
           <Field label="무응답(초)" w={80}><Input  type="number" min={5} value={form.no_answer_sec ?? 30} onChange={e => setForm({ ...form, no_answer_sec: Number(e.target.value) })} /></Field>
           <Field label="통화 중 그룹원" w={120}>
-            <select className="form-input" value={form.busy_members || 'skip'} onChange={e => setForm({ ...form, busy_members: e.target.value as DispatchGroup['busy_members'] })}>
-              <option value="skip">호출 안 함</option>
-              <option value="alert">호출 (통화대기)</option>
-            </select>
+            <Select value={toSel(form.busy_members || 'skip')} onValueChange={(v: string) => setForm({ ...form, busy_members: fromSel(v) as DispatchGroup['busy_members'] })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="skip">호출 안 함</SelectItem>
+                <SelectItem value="alert">호출 (통화대기)</SelectItem>
+              </SelectContent>
+            </Select>
           </Field>
           <Field label="무응답 넘김" w={130}><Input  placeholder="대표번호/내선" value={form.overflow_target || ''} onChange={e => setForm({ ...form, overflow_target: e.target.value.trim() })} /></Field>
           <Field label="조직" w={170}>
-            <select className="form-input" value={form.org_id ?? ''} onChange={e => setForm({ ...form, org_id: e.target.value ? Number(e.target.value) : null })}>
-              <option value="">없음</option>
-              {p.orgs.map(o => <option key={o.id} value={o.id}>{o.name} ({o.code})</option>)}
-            </select>
+            <Select value={toSel(form.org_id == null ? '' : String(form.org_id))} onValueChange={(v: string) => setForm({ ...form, org_id: fromSel(v) ? Number(fromSel(v)) : null })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE}>없음</SelectItem>
+                {p.orgs.map(o => <SelectItem key={o.id} value={String(o.id)}>{o.name} ({o.code})</SelectItem>)}
+              </SelectContent>
+            </Select>
           </Field>
           <Field label={`감청 범위${scopeLocked ? ' (manager)' : ''}`} w={130}>
-            <select className="form-input" disabled={scopeLocked} title="업무망 합법감청 — dialog 감시·Join 청취 범위. manager 만 변경" value={form.monitor_scope || 'none'} onChange={e => setForm({ ...form, monitor_scope: e.target.value as MonitorScope })}>
-              {(Object.keys(SCOPE_LABEL) as MonitorScope[]).map(k => <option key={k} value={k}>{SCOPE_LABEL[k]}</option>)}
-            </select>
+            <Select value={toSel(form.monitor_scope || 'none')} onValueChange={(v: string) => setForm({ ...form, monitor_scope: fromSel(v) as MonitorScope })} disabled={scopeLocked}>
+              <SelectTrigger title="업무망 합법감청 — dialog 감시·Join 청취 범위. manager 만 변경"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(Object.keys(SCOPE_LABEL) as MonitorScope[]).map(k => <SelectItem key={k} value={k}>{SCOPE_LABEL[k]}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </Field>
           <Field label={`PTT 청취${scopeLocked ? ' (manager)' : ''}`} w={110}>
-            <select className="form-input" disabled={scopeLocked} title="PTT 그룹콜 청취 범위 — 멤버는 allow_ambient_listening 자격도 필요" value={form.ptt_listen || 'none'} onChange={e => setForm({ ...form, ptt_listen: e.target.value as PttListen })}>
-              {(Object.keys(PTT_LABEL) as PttListen[]).map(k => <option key={k} value={k}>{PTT_LABEL[k]}</option>)}
-            </select>
+            <Select value={toSel(form.ptt_listen || 'none')} onValueChange={(v: string) => setForm({ ...form, ptt_listen: fromSel(v) as PttListen })} disabled={scopeLocked}>
+              <SelectTrigger title="PTT 그룹콜 청취 범위 — 멤버는 allow_ambient_listening 자격도 필요"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(Object.keys(PTT_LABEL) as PttListen[]).map(k => <SelectItem key={k} value={k}>{PTT_LABEL[k]}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </Field>
           <Field label="청취 노출" w={110}>
-            <select className="form-input" title="PTT 청취 멤버를 로스터에 보이는가" value={form.listen_visibility || 'hidden'} onChange={e => setForm({ ...form, listen_visibility: e.target.value as DispatchGroup['listen_visibility'] })}>
-              <option value="hidden">은닉</option>
-              <option value="visible">투명 (청취 중 표시)</option>
-            </select>
+            <Select value={toSel(form.listen_visibility || 'hidden')} onValueChange={(v: string) => setForm({ ...form, listen_visibility: fromSel(v) as DispatchGroup['listen_visibility'] })}>
+              <SelectTrigger title="PTT 청취 멤버를 로스터에 보이는가"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="hidden">은닉</SelectItem>
+                <SelectItem value="visible">투명 (청취 중 표시)</SelectItem>
+              </SelectContent>
+            </Select>
           </Field>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <Button variant="default" onClick={save}>저장</Button>

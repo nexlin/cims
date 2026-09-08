@@ -12,6 +12,8 @@ import {
   VerificationPrintReport,
   type ReportStage, type ReportItem, type ItemStatus as ReportItemStatus,
 } from '../components/VerificationPrintReport'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 
 const STAGE_DESC: Record<number, string> = {
   1: 'lint / format / unit test',
@@ -340,15 +342,14 @@ function StatsPanel({
     <div style={{ marginBottom: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
         <span style={{ fontSize: 14, fontWeight: 600 }}>통계 (최근 {days}일)</span>
-        <select
-          value={days}
-          onChange={e => setDays(Number(e.target.value))}
-          style={selectStyle}
-        >
-          {[7, 14, 30, 60, 90].map(d => (
-            <option key={d} value={d}>{d}일</option>
-          ))}
-        </select>
+        <Select value={String(days)} onValueChange={(v: string) => setDays(Number(v))}>
+          <SelectTrigger style={selectStyle}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {[7, 14, 30, 60, 90].map(d => (
+              <SelectItem key={d} value={String(d)}>{d}일</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         {err && <span className="inline-flex items-center gap-1 text-xs text-destructive">
         <AlertTriangle size={12} /> {err}</span>}
       </div>
@@ -603,21 +604,28 @@ export default function VerificationHistoryPage() {
       <div style={{ display: 'flex', gap: 12, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap' }}>
         <label style={filterLabel}>
           Stage:
-          <select value={stage} onChange={e => { setOffset(0); setStage(e.target.value === '' ? '' : Number(e.target.value)) }} style={selectStyle}>
-            <option value="">전체</option>
-            {[1, 2, 3, 4, 5, 6].map(n => (
-              <option key={n} value={n}>S{n} {STAGE_LABEL[n]}</option>
-            ))}
-          </select>
+          <Select value={toSel(stage === '' ? '' : String(stage))}
+                  onValueChange={(v: string) => { setOffset(0); setStage(fromSel(v) === '' ? '' : Number(fromSel(v))) }}>
+            <SelectTrigger style={selectStyle}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NONE}>전체</SelectItem>
+              {[1, 2, 3, 4, 5, 6].map(n => (
+                <SelectItem key={n} value={String(n)}>S{n} {STAGE_LABEL[n]}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </label>
         <label style={filterLabel}>
           Verdict:
-          <select value={verdict} onChange={e => { setOffset(0); setVerdict(e.target.value) }} style={selectStyle}>
-            <option value="">전체</option>
-            <option value="PASS">PASS</option>
-            <option value="FAIL">FAIL</option>
-            <option value="UNKNOWN">UNKNOWN</option>
-          </select>
+          <Select value={toSel(verdict)} onValueChange={(v: string) => { setOffset(0); setVerdict(fromSel(v)) }}>
+            <SelectTrigger style={selectStyle}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NONE}>전체</SelectItem>
+              <SelectItem value="PASS">PASS</SelectItem>
+              <SelectItem value="FAIL">FAIL</SelectItem>
+              <SelectItem value="UNKNOWN">UNKNOWN</SelectItem>
+            </SelectContent>
+          </Select>
         </label>
         {error && (
           <span style={{ color: 'var(--destructive)', fontSize: 12, marginLeft: 12 }}>{error}</span>

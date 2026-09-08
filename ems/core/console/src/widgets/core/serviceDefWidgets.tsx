@@ -27,6 +27,8 @@ import { makeSharedByKey } from '../sharedFetch'
 import { usePageControl, usePageParam } from '../pageParams'
 import type { WidgetDef } from '../types'
 import { Button } from '@core/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 
 // 목록은 조건이 없어 키가 하나 — 위젯이 몇 개든 조회는 1회.
 const useDescriptorsRaw = makeSharedByKey(() => serviceDescriptorsApi.list())
@@ -87,11 +89,13 @@ function ServicePicker() {
   return (
     <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
       <span style={{ fontSize: 13, color: 'var(--muted-foreground)' }}>서비스</span>
-      <select className="form-input" style={{ width: 200, fontSize: 13 }}
-              value={svc?.id ?? ''} onChange={e => setSvcId(e.target.value)}>
-        {list.length === 0 && <option value="">{loading ? '로딩 중…' : '(등록된 서비스 없음)'}</option>}
-        {list.map(s => <option key={s.id} value={s.id}>{s.label || s.id}</option>)}
-      </select>
+      <Select value={toSel(svc?.id ?? '')} onValueChange={(v: string) => setSvcId(fromSel(v))}>
+        <SelectTrigger style={{ width: 200, fontSize: 13 }}><SelectValue /></SelectTrigger>
+        <SelectContent>
+          {list.length === 0 && <SelectItem value={NONE}>{loading ? '로딩 중…' : '(등록된 서비스 없음)'}</SelectItem>}
+          {list.map(s => <SelectItem key={s.id} value={s.id}>{s.label || s.id}</SelectItem>)}
+        </SelectContent>
+      </Select>
       <Button variant="default" style={{ marginLeft: 'auto' }}
               onClick={() => setAdding(true)}><Plus size={13} /> 서비스 추가</Button>
       {adding && <ServiceForm initial={null} onClose={() => setAdding(false)}

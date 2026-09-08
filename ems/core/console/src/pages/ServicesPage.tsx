@@ -613,7 +613,7 @@ export default function ServicesPage() {
               {editing ? (
                 <>
                   <textarea
-                    className="form-input"
+                    className="rounded-md border border-border px-2.5 py-2 outline-none transition-colors focus-visible:border-primary focus-visible:shadow-focus"
                     style={{
                       width: '100%', height: '100%', minHeight: 400,
                       fontFamily: 'monospace', fontSize: 12, lineHeight: 1.5,

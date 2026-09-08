@@ -6,6 +6,8 @@ import { orgApi, type Organization, type OrgInput } from '@core/api/organization
 import { useToast } from '@core/components/Toast'
 import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 
 // ── 트리 빌더 ───────────────────────────────────────────────
 interface TreeNode extends Organization {
@@ -264,12 +266,13 @@ export default function OrganizationsPage() {
                     {/* 상위 조직 */}
                     <td>
                       {isEditing ? (
-                        <select className="form-input" value={editForm.parent_id ?? ''}
-                          onChange={e => setEditForm({ ...editForm, parent_id: e.target.value ? Number(e.target.value) : null })}
-                          style={{ width: '100%' }}>
-                          <option value="">없음</option>
-                          {parentOptions(n.id).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-                        </select>
+                        <Select value={toSel(editForm.parent_id == null ? '' : String(editForm.parent_id))} onValueChange={(v: string) => setEditForm({ ...editForm, parent_id: fromSel(v) ? Number(fromSel(v)) : null })}>
+                          <SelectTrigger style={{ width: '100%' }}><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={NONE}>없음</SelectItem>
+                            {parentOptions(n.id).map(o => <SelectItem key={o.id} value={String(o.id)}>{o.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
                       ) : (
                         <span className="ts">{orgs.find(o => o.id === n.parent_id)?.name || '—'}</span>
                       )}
@@ -339,12 +342,13 @@ export default function OrganizationsPage() {
                   <td><Input  placeholder="코드 *" value={addForm.code}
                     onChange={e => setAddForm({ ...addForm, code: e.target.value })} style={{ width: '100%' }} /></td>
                   <td>
-                    <select className="form-input" value={addForm.parent_id ?? ''}
-                      onChange={e => setAddForm({ ...addForm, parent_id: e.target.value ? Number(e.target.value) : null })}
-                      style={{ width: '100%' }}>
-                      <option value="">없음 (최상위)</option>
-                      {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-                    </select>
+                    <Select value={toSel(addForm.parent_id == null ? '' : String(addForm.parent_id))} onValueChange={(v: string) => setAddForm({ ...addForm, parent_id: fromSel(v) ? Number(fromSel(v)) : null })}>
+                      <SelectTrigger style={{ width: '100%' }}><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NONE}>없음 (최상위)</SelectItem>
+                        {orgs.map(o => <SelectItem key={o.id} value={String(o.id)}>{o.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
                   </td>
                   <td><Input  type="number" value={addForm.sort_order}
                     onChange={e => setAddForm({ ...addForm, sort_order: Number(e.target.value) })} style={{ width: '100%' }} /></td>

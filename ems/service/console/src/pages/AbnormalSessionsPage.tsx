@@ -12,6 +12,7 @@ import { abnDerived, abnormal, useAbnormal } from './abnormalStore'
 import { Button } from '@core/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 import { Input } from '@core/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 
 const REASON_LABEL: Record<string, { label: string; color: string }> = {
   external_ip:  { label: '외부 IP',     color: 'var(--cims-warning)' },
@@ -183,10 +184,12 @@ export function AbnTable() {
                 (페이지 {s.page + 1}/{pageCount})
               </span>
               <Button disabled={s.page >= pageCount - 1} onClick={() => abnormal.setPage(s.page + 1)}>다음 →</Button>
-              <select value={s.pageSize} style={{ fontSize: 12, padding: '2px 4px' }}
-                      onChange={e => abnormal.setPageSize(Number(e.target.value))}>
-                {[50, 100, 200, 500].map(n => <option key={n} value={n}>{n}/쪽</option>)}
-              </select>
+              <Select value={String(s.pageSize)} onValueChange={(v: string) => abnormal.setPageSize(Number(v))}>
+                <SelectTrigger style={{ fontSize: 12, padding: '2px 4px' }}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {[50, 100, 200, 500].map(n => <SelectItem key={n} value={String(n)}>{n}/쪽</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
           )}
         </>

@@ -15,6 +15,8 @@ import {
   type ProvIssue, type PlanPhase, type Run, type RunSummary, type PreflightRow,
 } from '../api/provision'
 import { Button } from '@core/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 
 type Doc = 'blueprint' | 'inventory'
 type View = 'form' | 'raw'
@@ -409,12 +411,14 @@ function DocPicker({ label, hint, items, value, onChange, onUpload, disabled }: 
       <div style={{ fontSize: 12.5, fontWeight: 600 }}>{label}</div>
       <div style={{ fontSize: 11.5, color: 'var(--muted-foreground)', marginBottom: 5 }}>{hint}</div>
       <div style={{ display: 'flex', gap: 6 }}>
-        <select value={value ?? ''} disabled={disabled}
-                onChange={e => onChange(e.target.value ? Number(e.target.value) : null)}
-                style={{ flex: 1 }}>
-          <option value="">— 선택 —</option>
-          {items.map(i => <option key={i.id} value={i.id}>{i.label}</option>)}
-        </select>
+        <Select value={toSel(value == null ? '' : String(value))}
+                onValueChange={(v: string) => onChange(fromSel(v) ? Number(fromSel(v)) : null)} disabled={disabled}>
+          <SelectTrigger style={{ flex: 1 }}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NONE}>— 선택 —</SelectItem>
+            {items.map(i => <SelectItem key={i.id} value={String(i.id)}>{i.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <Button disabled={disabled}
                 onClick={() => ref.current?.click()}>⤒ 업로드</Button>
         <input ref={ref} type="file" accept=".yaml,.yml" hidden
@@ -554,11 +558,13 @@ function InventoryForm({ view, onChange, disabled, issues }: {
                            value={s.ssh?.password === '••••' ? '' : (s.ssh?.password || '')}
                            onChange={e => set(i, { ssh: { ...s.ssh, password: e.target.value } })} /></td>
                 <td>
-                  <select value={s.sudo?.method || 'password'} disabled={lock}
-                          onChange={e => set(i, { sudo: { ...s.sudo, method: e.target.value } })}>
-                    <option value="password">password</option>
-                    <option value="nopasswd">nopasswd</option>
-                  </select>
+                  <Select value={toSel(s.sudo?.method || 'password')} onValueChange={(v: string) => set(i, { sudo: { ...s.sudo, method: fromSel(v) } })} disabled={lock}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="password">password</SelectItem>
+                      <SelectItem value="nopasswd">nopasswd</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </td>
                 <td><input type="password" placeholder={pre ? '—' : '변경 안 함'}
                            disabled={lock} style={{ width: 110 }}

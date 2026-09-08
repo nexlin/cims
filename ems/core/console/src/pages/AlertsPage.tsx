@@ -24,6 +24,8 @@ import {
 } from '../utils/alarmLabels'
 import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 
 const PAGE_SIZE = 20
 const FETCH_LIMIT = 5000   // 서버 상한 — 창 안 레코드가 이보다 많으면 최신순 절단(표기)
@@ -174,21 +176,27 @@ export function AlarmHistoryFilter() {
       {/* 기간과 필터는 **한 줄 한 블록** — 조회 조건이 두 덩어리로 갈려 보이지 않게. */}
       <DaysButtons days={days} onChange={d => setDays(String(d))} />
       <span style={{ width: 1, alignSelf: 'stretch', margin: '0 4px', background: 'var(--border)' }} />
-      <select className="form-input" value={f.sev} style={{ width: 108 }}
-              onChange={e => alertsFilter.setAlarm({ sev: e.target.value })}>
-        <option value="">심각도 전체</option>
-        {['critical', 'major', 'minor', 'warning', 'indeterminate'].map(s => <option key={s} value={s}>{s}</option>)}
-      </select>
-      <select className="form-input" value={f.code} style={{ width: 124 }}
-              onChange={e => alertsFilter.setAlarm({ code: e.target.value })}>
-        <option value="">코드 전체</option>
-        {codes.map(c => <option key={c} value={c}>{c}</option>)}
-      </select>
-      <select className="form-input" value={f.type} style={{ width: 132 }}
-              onChange={e => alertsFilter.setAlarm({ type: e.target.value })}>
-        <option value="">클래스 전체</option>
-        {types.map(t => <option key={t} value={t}>{alarmTypeLabel(t)}</option>)}
-      </select>
+      <Select value={toSel(f.sev)} onValueChange={(v: string) => alertsFilter.setAlarm({ sev: fromSel(v) })}>
+        <SelectTrigger style={{ width: 108 }}><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value={NONE}>심각도 전체</SelectItem>
+          {['critical', 'major', 'minor', 'warning', 'indeterminate'].map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+        </SelectContent>
+      </Select>
+      <Select value={toSel(f.code)} onValueChange={(v: string) => alertsFilter.setAlarm({ code: fromSel(v) })}>
+        <SelectTrigger style={{ width: 124 }}><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value={NONE}>코드 전체</SelectItem>
+          {codes.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+        </SelectContent>
+      </Select>
+      <Select value={toSel(f.type)} onValueChange={(v: string) => alertsFilter.setAlarm({ type: fromSel(v) })}>
+        <SelectTrigger style={{ width: 132 }}><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value={NONE}>클래스 전체</SelectItem>
+          {types.map(t => <SelectItem key={t} value={t}>{alarmTypeLabel(t)}</SelectItem>)}
+        </SelectContent>
+      </Select>
       <Input className="flex-1" style={{ width: 170 }} placeholder="소스/메시지 검색"
              value={f.q} onChange={e => alertsFilter.setAlarm({ q: e.target.value })} />
       <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, whiteSpace: 'nowrap' }}>
@@ -467,17 +475,21 @@ export function EventHistoryFilter() {
     <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
       <DaysButtons days={days} onChange={d => setDays(String(d))} />
       <span style={{ width: 1, alignSelf: 'stretch', margin: '0 4px', background: 'var(--border)' }} />
-      <select className="form-input" value={f.kind} style={{ width: 116 }}
-              onChange={e => alertsFilter.setEvent({ kind: e.target.value })}>
-        <option value="">분류 전체</option>
-        <option value="stateChange">상태 변화</option>
-        <option value="audit">감사</option>
-      </select>
-      <select className="form-input" value={f.type} style={{ width: 152 }}
-              onChange={e => alertsFilter.setEvent({ type: e.target.value })}>
-        <option value="">유형 전체</option>
-        {types.map(t => <option key={t} value={t}>{eventTypeLabel(t)}</option>)}
-      </select>
+      <Select value={toSel(f.kind)} onValueChange={(v: string) => alertsFilter.setEvent({ kind: fromSel(v) })}>
+        <SelectTrigger style={{ width: 116 }}><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value={NONE}>분류 전체</SelectItem>
+          <SelectItem value="stateChange">상태 변화</SelectItem>
+          <SelectItem value="audit">감사</SelectItem>
+        </SelectContent>
+      </Select>
+      <Select value={toSel(f.type)} onValueChange={(v: string) => alertsFilter.setEvent({ type: fromSel(v) })}>
+        <SelectTrigger style={{ width: 152 }}><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value={NONE}>유형 전체</SelectItem>
+          {types.map(t => <SelectItem key={t} value={t}>{eventTypeLabel(t)}</SelectItem>)}
+        </SelectContent>
+      </Select>
       <Input className="flex-1" style={{ width: 180 }} placeholder="코드/소스/메시지 검색"
              value={f.q} onChange={e => alertsFilter.setEvent({ q: e.target.value })} />
       <Button variant="ghost" onClick={exportCsv} disabled={filtered.length === 0}>CSV</Button>

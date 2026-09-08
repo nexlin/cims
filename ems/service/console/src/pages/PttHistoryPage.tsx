@@ -27,6 +27,8 @@ import {
 import { Button } from '@core/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 import { Input } from '@core/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { fromSel, toSel } from '@core/components/custom/select-value'
 
 // ── 종류 ────────────────────────────────────────────────────────
 // group = TS 24.481 그룹 문서를 갖는 편성 엔티티, private = 1:1 (TS 24.379 §11.1),
@@ -410,10 +412,12 @@ export default function PttHistoryPage() {
           {/* 목록 머리 — 표 헤더가 없어진 자리의 정렬 컨트롤 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>
             <span style={{ fontSize: 11.5, color: 'var(--muted-foreground)' }}>정렬</span>
-            <select className="form-input" style={{ width: 96, padding: '2px 6px', fontSize: 12 }}
-                    value={sort} onChange={e => { setSort(e.target.value as SortKey); setPage(0) }}>
-              {(Object.keys(SORT_LABEL) as SortKey[]).map(k => <option key={k} value={k}>{SORT_LABEL[k]}</option>)}
-            </select>
+            <Select value={toSel(sort)} onValueChange={(v: string) => { setSort(fromSel(v) as SortKey); setPage(0) }}>
+              <SelectTrigger style={{ width: 96, padding: '2px 6px', fontSize: 12 }}><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(Object.keys(SORT_LABEL) as SortKey[]).map(k => <SelectItem key={k} value={k}>{SORT_LABEL[k]}</SelectItem>)}
+              </SelectContent>
+            </Select>
             <Button variant="ghost" title={order === 'desc' ? '내림차순' : '오름차순'}
                     onClick={() => setOrder(o => (o === 'desc' ? 'asc' : 'desc'))}>
               {order === 'desc' ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
@@ -442,10 +446,12 @@ export default function PttHistoryPage() {
             <Button variant="ghost" disabled={page <= 0} onClick={() => setPage(p => p - 1)}>‹</Button>
             <span>{page + 1} / {pages}</span>
             <Button variant="ghost" disabled={page + 1 >= pages} onClick={() => setPage(p => p + 1)}>›</Button>
-            <select className="form-input" style={{ width: 78, marginLeft: 'auto', padding: '2px 6px', fontSize: 12 }} value={ps}
-                    onChange={e => { setPs(Number(e.target.value)); setPage(0) }}>
-              {PAGE_SIZES.map(n => <option key={n} value={n}>{n}개</option>)}
-            </select>
+            <Select value={String(ps)} onValueChange={(v: string) => { setPs(Number(v)); setPage(0) }}>
+              <SelectTrigger style={{ width: 78, marginLeft: 'auto', padding: '2px 6px', fontSize: 12 }}><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZES.map(n => <SelectItem key={n} value={String(n)}>{n}개</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 

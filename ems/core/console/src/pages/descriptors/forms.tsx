@@ -11,6 +11,8 @@ import {
 import type { DataSourceSpec } from '../../widgets/shapes/dataSourceSpec'
 import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 
 // ── 공용 입력 조각 ──────────────────────────────────────────────
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
@@ -130,9 +132,12 @@ export function ModuleForm({ svc, index, onClose, onSaved }: {
           onChange={e => up({ name: e.target.value })} /></Field>
         <Field label="포트"><Input  style={{ ...inp, width: 90 }} type="number" value={m.port ?? ''}
           onChange={e => up({ port: e.target.value ? Number(e.target.value) : undefined })} /></Field>
-        <Field label="proto"><select className="form-input" style={{ ...inp, width: 80 }} value={m.proto ?? ''}
-          onChange={e => up({ proto: e.target.value || undefined })}>
-          <option value="">—</option><option value="tcp">tcp</option><option value="udp">udp</option></select></Field>
+        <Field label="proto"><Select value={toSel(m.proto ?? '')} onValueChange={(v: string) => up({ proto: fromSel(v) || undefined })}>
+  <SelectTrigger style={{ ...inp, width: 80 }}><SelectValue /></SelectTrigger>
+  <SelectContent>
+            <SelectItem value={NONE}>—</SelectItem><SelectItem value="tcp">tcp</SelectItem><SelectItem value="udp">udp</SelectItem>
+  </SelectContent>
+</Select></Field>
         <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4, paddingBottom: 6 }}>
           <input type="checkbox" checked={!!m.controllable} onChange={e => up({ controllable: e.target.checked })} />제어
         </label>
@@ -175,28 +180,43 @@ export function AlertRuleForm({ svc, index, onClose, onSaved }: {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '65vh', overflowY: 'auto' }}>
               {/* 1행: 클래스 / 코드 / 심각도 / check */}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                <Field label="클래스(type)"><select className="form-input" style={{ ...inp, width: 130 }} value={r.type}
-                  onChange={e => up({ type: e.target.value })}>
-                  {ALARM_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}</select></Field>
+                <Field label="클래스(type)"><Select value={toSel(r.type)} onValueChange={(v: string) => up({ type: fromSel(v) })}>
+  <SelectTrigger style={{ ...inp, width: 130 }}><SelectValue /></SelectTrigger>
+  <SelectContent>
+                    {ALARM_CLASSES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+  </SelectContent>
+</Select></Field>
                 <Field label="code"><Input  style={{ ...inp, width: 110 }} value={r.code ?? ''}
                   onChange={e => up({ code: e.target.value })} placeholder="A-PRC-001" /></Field>
-                <Field label="심각도"><select className="form-input" style={{ ...inp, width: 100 }} value={r.perceived_severity ?? r.severity ?? 'warning'}
-                  onChange={e => up({ perceived_severity: e.target.value })}>
-                  {SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}</select></Field>
-                <Field label="check"><select className="form-input" style={{ ...inp, width: 120 }} value={r.check ?? ''}
-                  onChange={e => up({ check: e.target.value })}>
-                  {CHECKS.map(c => <option key={c} value={c}>{c}</option>)}</select></Field>
+                <Field label="심각도"><Select value={toSel(r.perceived_severity ?? r.severity ?? 'warning')} onValueChange={(v: string) => up({ perceived_severity: fromSel(v) })}>
+  <SelectTrigger style={{ ...inp, width: 100 }}><SelectValue /></SelectTrigger>
+  <SelectContent>
+                    {SEVERITIES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+  </SelectContent>
+</Select></Field>
+                <Field label="check"><Select value={toSel(r.check ?? '')} onValueChange={(v: string) => up({ check: fromSel(v) })}>
+  <SelectTrigger style={{ ...inp, width: 120 }}><SelectValue /></SelectTrigger>
+  <SelectContent>
+                    {CHECKS.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+  </SelectContent>
+</Select></Field>
               </div>
               {/* 2행: event_type / probable_cause / mo_class / mo_instance / 조건부 target·threshold */}
               <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                <Field label="event_type"><select className="form-input" style={{ ...inp, width: 140 }} value={r.event_type ?? 'processingError'}
-                  onChange={e => up({ event_type: e.target.value })}>
-                  {EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></Field>
+                <Field label="event_type"><Select value={toSel(r.event_type ?? 'processingError')} onValueChange={(v: string) => up({ event_type: fromSel(v) })}>
+  <SelectTrigger style={{ ...inp, width: 140 }}><SelectValue /></SelectTrigger>
+  <SelectContent>
+                    {EVENT_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+  </SelectContent>
+</Select></Field>
                 <Field label="probable_cause"><Input  style={{ ...inp, width: 160 }} value={r.probable_cause ?? ''}
                   onChange={e => up({ probable_cause: e.target.value })} placeholder="softwareError" /></Field>
-                <Field label="mo_class"><select className="form-input" style={{ ...inp, width: 100 }} value={r.mo_class ?? 'service'}
-                  onChange={e => up({ mo_class: e.target.value })}>
-                  {MO_CLASSES.map(m => <option key={m} value={m}>{m}</option>)}</select></Field>
+                <Field label="mo_class"><Select value={toSel(r.mo_class ?? 'service')} onValueChange={(v: string) => up({ mo_class: fromSel(v) })}>
+  <SelectTrigger style={{ ...inp, width: 100 }}><SelectValue /></SelectTrigger>
+  <SelectContent>
+                    {MO_CLASSES.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+  </SelectContent>
+</Select></Field>
                 <Field label="mo_instance" hint="(소스, service)"><Input  style={{ ...inp, width: 120 }} value={r.mo_instance ?? ''}
                   onChange={e => up({ mo_instance: e.target.value })} placeholder="비우면 관측 신원으로 합성" /></Field>
                 {(r.check === 'process_unresponsive' || r.check === 'service_unresponsive' || r.check === 'process_down') && (
@@ -348,8 +368,12 @@ export function DataSourceForm({ svc, index, onClose, onSaved }: {
                 <Field label="라벨"><Input  style={{ ...inp, width: 110 }} value={k.label} onChange={e => upKpi(i, { label: e.target.value })} /></Field>
                 <Field label="path"><Input  style={{ ...inp, width: 160 }} value={k.path} onChange={e => upKpi(i, { path: e.target.value })} placeholder="voip.total_attempts" /></Field>
                 <Field label="단위"><Input  style={{ ...inp, width: 50 }} value={k.unit ?? ''} onChange={e => upKpi(i, { unit: e.target.value })} /></Field>
-                <Field label="format"><select className="form-input" style={{ ...inp, width: 90 }} value={k.format ?? ''} onChange={e => upKpi(i, { format: e.target.value || undefined })}>
-                  <option value="">—</option><option value="duration">duration</option></select></Field>
+                <Field label="format"><Select value={toSel(k.format ?? '')} onValueChange={(v: string) => upKpi(i, { format: fromSel(v) || undefined })}>
+  <SelectTrigger style={{ ...inp, width: 90 }}><SelectValue /></SelectTrigger>
+  <SelectContent>
+                    <SelectItem value={NONE}>—</SelectItem><SelectItem value="duration">duration</SelectItem>
+  </SelectContent>
+</Select></Field>
                 <span style={{ paddingBottom: 4 }}><Btn danger onClick={() => setKpiItems(it => it.filter((_, x) => x !== i))}><X size={12} /></Btn></span>
               </div>
             ))}

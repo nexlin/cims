@@ -17,6 +17,8 @@ import {
 } from '../menu'
 import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { fromSel, toSel } from '@core/components/custom/select-value'
 
 interface SectionRow {
   key: string
@@ -218,10 +220,12 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
                   </span>
                 : <Input  style={{ width: 190 }} value={r.label}
                     placeholder={r.defaultLabel} onChange={e => patchRow(i, { label: e.target.value })} />}
-              <select className="form-input" style={{ width: 120 }} value={r.area} disabled={r.locked}
-                title="소속 영역" onChange={e => patchRow(i, { area: e.target.value })}>
-                {areas.map(a => <option key={a.key} value={a.key}>{a.label}</option>)}
-              </select>
+              <Select value={toSel(r.area)} onValueChange={(v: string) => patchRow(i, { area: fromSel(v) })} disabled={r.locked}>
+                <SelectTrigger style={{ width: 120 }} title="소속 영역"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {areas.map(a => <SelectItem key={a.key} value={a.key}>{a.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, opacity: r.locked ? 0.4 : 1 }}>
                 <input type="checkbox" checked={r.hidden} disabled={r.locked}
                   onChange={() => patchRow(i, { hidden: !r.hidden })} /> 숨김
