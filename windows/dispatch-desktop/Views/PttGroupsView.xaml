@@ -22,7 +22,7 @@
                     <DataTemplate DataType="{x:Type vm:GroupAdminRow}">
                         <Border Style="{StaticResource LogRow}">
                             <DockPanel>
-                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Visibility="{Binding CanManage, Converter={StaticResource BoolToVis}}">
                                     <Button Style="{StaticResource Btn.Xs}" Content="편집" Command="{Binding DataContext.EditGroupCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}" Margin="0,0,4,0" />
                                     <Button Style="{StaticResource Btn.Xs.Danger}" Content="삭제" Command="{Binding DataContext.DeleteGroupCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}" />
                                 </StackPanel>

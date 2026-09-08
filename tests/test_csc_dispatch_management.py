@@ -480,6 +480,75 @@ class ServiceCatalogTests(unittest.TestCase):
         self.assertEqual(dd._services(cfg)["ptt"], [{"name": "ptt", "domain": "ptt.example"}])
 
 
+class _GroupsCur:
+    """_groups_in_scope 가 내는 SQL 만 흉내 — ptt_groups 5개(g1 TEAM01 소속·g2 조직 없음·g3 조직 없음·g4 TEAM02·g5 내 소유)."""
+
+    GROUPS = [
+        {"id": 1, "mcptt_group_id": "g001", "name": "a", "org_code": "TEAM01", "authorized_user_id": 9, "group_type": "prearranged"},
+        {"id": 2, "mcptt_group_id": "g002", "name": "b", "org_code": None, "authorized_user_id": 9, "group_type": "prearranged"},
+        {"id": 3, "mcptt_group_id": "g003", "name": "c", "org_code": None, "authorized_user_id": None, "group_type": "prearranged"},
+        {"id": 4, "mcptt_group_id": "g004", "name": "d", "org_code": "TEAM02", "authorized_user_id": None, "group_type": "chat"},
+        {"id": 5, "mcptt_group_id": "g005", "name": "e", "org_code": None, "authorized_user_id": 5020, "group_type": "prearranged"},
+    ]
+
+    def __init__(self, ptt_listen, targets, member_groups):
+        self.ptt_listen, self.targets, self.member_groups = ptt_listen, targets, member_groups
+        self._rows = []
+
+    def execute(self, q, args=None):
+        if q.startswith("SELECT id, mcptt_group_id, name, org_code"):
+            self._rows = list(self.GROUPS)
+        elif q.startswith("SELECT group_id, COUNT(*)"):
+            self._rows = [{"group_id": 1, "n": 3}, {"group_id": 2, "n": 4}]
+        elif q.startswith("SELECT ptt_listen FROM dispatch_groups"):
+            self._rows = [{"ptt_listen": self.ptt_listen}]
+        elif q.startswith("SELECT ptt_group_id FROM dispatch_group_ptt_targets"):
+            self._rows = [{"ptt_group_id": i} for i in self.targets]
+        elif q.startswith("SELECT gm.group_id FROM ptt_group_members"):
+            self._rows = [{"group_id": i} for i in self.member_groups]
+        else:
+            raise AssertionError("unexpected SQL: " + q)
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+    def fetchall(self):
+        return list(self._rows)
+
+
+class GroupsInScopeTests(unittest.TestCase):
+    """PTT 그룹 관리 열거 = 관리 범위 ∪ 내 소유 ∪ 청취 범위 ∪ 멤버 그룹, canManage 는 관리 범위·소유만(GMS 게이트와 동일)."""
+
+    OWN = {"groupId": "dg-1", "directoryAdmin": "own", "orgCode": "TEAM01", "orgCodes": {"TEAM01"}}
+
+    def _ids(self, rows, key=None):
+        return [r["id"] for r in rows if key is None or r[key]]
+
+    def test_own_scope_shows_listen_and_member_groups_read_only(self):
+        rows = dd._groups_in_scope(_GroupsCur("listed", targets={2, 3}, member_groups={3}), self.OWN, 5020)
+        self.assertEqual(self._ids(rows), ["g001", "g002", "g003", "g005"])          # g004(TEAM02) 만 밖
+        self.assertEqual(self._ids(rows, "canManage"), ["g001", "g005"])            # 범위 안 조직 · 내 소유
+        self.assertEqual(self._ids(rows, "inListenScope"), ["g002", "g003"])
+        self.assertEqual(self._ids(rows, "isMember"), ["g003"])
+        self.assertEqual(rows[0]["memberCount"], 3)
+
+    def test_listen_all_shows_everything(self):
+        rows = dd._groups_in_scope(_GroupsCur("all", targets=set(), member_groups=set()), self.OWN, 5020)
+        self.assertEqual(len(rows), 5)
+        self.assertTrue(all(r["inListenScope"] for r in rows))
+        self.assertEqual(self._ids(rows, "canManage"), ["g001", "g005"])
+
+    def test_no_listen_no_member_is_manage_only(self):
+        rows = dd._groups_in_scope(_GroupsCur("none", targets=set(), member_groups=set()), self.OWN, None)
+        self.assertEqual(self._ids(rows), ["g001"])
+
+    def test_all_scope_manages_everything(self):
+        sc = {"groupId": "dg-1", "directoryAdmin": "all", "orgCode": "", "orgCodes": None}
+        rows = dd._groups_in_scope(_GroupsCur("none", targets=set(), member_groups=set()), sc, 5020)
+        self.assertEqual(len(rows), 5)
+        self.assertTrue(all(r["canManage"] for r in rows))
+
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -172,7 +172,9 @@ public sealed class ManagementClient
             if (root.TryGetProperty("groups", out var ga) && ga.ValueKind == JsonValueKind.Array)
                 foreach (var g in ga.EnumerateArray())
                     list.Add(new ManagedGroup(Str(g, "id"), Str(g, "uri"), Str(g, "name"), Int(g, "memberCount"), Bool(g, "isOwner"),
-                                              Str(g, "orgCode"), Str(g, "sessionType"), Str(g, "etag")));
+                                              Str(g, "orgCode"), Str(g, "sessionType"), Str(g, "etag"),
+                                              CanManage: !g.TryGetProperty("canManage", out var cm) || cm.ValueKind != JsonValueKind.False,   // 구 서버(필드 없음) = 종전대로 전부 관리 가능
+                                              InListenScope: Bool(g, "inListenScope"), IsMember: Bool(g, "isMember")));
             return list;
         });
     }

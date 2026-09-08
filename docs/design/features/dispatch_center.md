@@ -115,7 +115,9 @@ ambient 플래그·녹취 탭)의 연장으로 구성한다. **INVITE 경로에 
   자기 자신 삭제 불가(`409 self_delete`). 번호 변경(다른 msisdn) = 종전 회선 삭제 + 신규 개설이라 SIP 비밀번호 필수.
 - **PTT 그룹**: 관리 범위 안 그룹(`org_code` 가 범위 안 또는 내 소유)은 소유자가 아니어도 GMS XCAP GET/PUT/DELETE 를
   허용하고(소유권은 바뀌지 않는다 — `authorized_user_id` 유지), 신규 생성은 `allow_create_group` 없이도 된다.
-  관리용 열거는 `GET /provisioning/directory/groups`(멤버 그룹 목록과 별개).
+  관리용 열거는 `GET /provisioning/directory/groups`(멤버 그룹 목록과 별개) — 관리 범위 안 ∪ 내 소유 ∪ 관제 그룹 청취 범위(`ptt_listen`
+  all|listed) ∪ 내 멤버 그룹을 주고, 행마다 `canManage`(관리 범위 안 또는 소유 = GMS 게이트 판정)·`inListenScope`·`isMember` 를 싣는다.
+  관리 권한이 없는 청취·멤버 그룹은 보기 전용으로 보인다.
 - **감사**: 모든 쓰기는 `E-AUD-006 config_change`(actor = 관제사 msisdn, entity = organization|user|subscription|ptt_profile,
   reason = `dispatch_directory`).
 

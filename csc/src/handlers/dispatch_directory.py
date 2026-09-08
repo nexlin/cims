@@ -254,8 +254,30 @@ def _admin_view(cur, config, scope: dict) -> dict:
     }
 
 
+def _visible_group_sets(cur, scope: dict, my_uid) -> Tuple[set, set]:
+    """(청취 범위 ptt_groups.id 집합 | None=전체, 내 멤버 그룹 ptt_groups.id 집합) — 관제 그룹 ptt_listen(all|listed) 은
+    provisioning/me dispatch.pttTargets 와 같은 원천(dispatch_group_ptt_targets), 멤버십은 ptt_group_members(내 PTT 회선)."""
+    listen: Optional[set] = set()
+    cur.execute("SELECT ptt_listen FROM dispatch_groups WHERE id=%s", (scope["groupId"],))
+    r = cur.fetchone()
+    mode = (r['ptt_listen'] if isinstance(r, dict) else (r[0] if r else None)) or 'none'
+    if mode == 'all':
+        listen = None
+    elif mode == 'listed':
+        cur.execute("SELECT ptt_group_id FROM dispatch_group_ptt_targets WHERE group_id=%s", (scope["groupId"],))
+        listen = {(x['ptt_group_id'] if isinstance(x, dict) else x[0]) for x in cur.fetchall()}
+    member: set = set()
+    if my_uid is not None:
+        cur.execute("SELECT gm.group_id FROM ptt_group_members gm JOIN ptt_subscriptions ps ON ps.id=gm.user_id WHERE ps.user_id=%s", (my_uid,))
+        member = {(x['group_id'] if isinstance(x, dict) else x[0]) for x in cur.fetchall()}
+    return listen, member
+
+
 def _groups_in_scope(cur, scope: dict, my_uid) -> list:
-    """범위 안 PTT 그룹 — org_code 가 범위 안이거나 내가 소유한 것. GMS 목록(멤버 그룹)과 별개의 관리용 열거."""
+    """관제사에게 보이는 PTT 그룹 = 관리 범위(org_code 가 범위 안) ∪ 내 소유 ∪ 관제 그룹 청취 범위 ∪ 내 멤버 그룹.
+    행마다 canManage(관리 범위 안 또는 내 소유 — GMS PUT/DELETE 게이트 mcptt._admin_manages_group 와 같은 판정)를 실어
+    앱이 편집/삭제를 그 행에만 연다. 청취·멤버 그룹은 관제사가 매일 다루는 그룹이라 관리 권한이 없어도 목록에는 보여야 한다
+    (조직 미지정 그룹이 own 범위에서 통째로 사라지지 않게). GMS 목록(멤버 그룹)과 별개의 관리용 열거."""
     cur.execute("SELECT id, mcptt_group_id, name, org_code, authorized_user_id, group_type FROM ptt_groups ORDER BY name, mcptt_group_id")
     rows = cur.fetchall()
     ids = [r['id'] for r in rows]
@@ -264,17 +286,22 @@ def _groups_in_scope(cur, scope: dict, my_uid) -> list:
         cur.execute("SELECT group_id, COUNT(*) AS n FROM ptt_group_members WHERE group_id IN (%s) GROUP BY group_id"
                     % ",".join(["%s"] * len(ids)), ids)
         counts = {r['group_id']: int(r['n']) for r in cur.fetchall()}
+    listen, member = _visible_group_sets(cur, scope, my_uid)
     out = []
     for r in rows:
         owner = r.get('authorized_user_id')
         is_owner = my_uid is not None and owner == my_uid
-        if not (in_scope(scope, r.get('org_code') or '') or is_owner):
+        can_manage = in_scope(scope, r.get('org_code') or '') or is_owner
+        in_listen = listen is None or r['id'] in listen
+        is_member = r['id'] in member
+        if not (can_manage or in_listen or is_member):
             continue
         gid = r['mcptt_group_id']
         grp = _m.GROUPS.get(_m._group_uri(gid)) or {}
         out.append({"id": gid, "uri": _m._group_uri(gid), "name": r.get('name') or gid,
                     "memberCount": counts.get(r['id'], 0), "isOwner": is_owner, "orgCode": r.get('org_code') or '',
-                    "sessionType": r.get('group_type') or 'prearranged', "etag": grp.get('etag') or ''})
+                    "sessionType": r.get('group_type') or 'prearranged', "etag": grp.get('etag') or '',
+                    "canManage": bool(can_manage), "inListenScope": bool(in_listen), "isMember": is_member})
     return out
 
 

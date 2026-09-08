@@ -16,7 +16,9 @@ public sealed class GroupAdminRow
     public GroupAdminRow(ManagedGroup g, string orgPath) { G = g; OrgPath = orgPath; }
     public string Name => G.Name;
     public string Id => G.Id;
-    public string Meta => $"{G.MemberCount}명 · {SessionTypeText}{(G.IsOwner ? " · 내 그룹" : "")}";
+    public string Meta => $"{G.MemberCount}명 · {SessionTypeText}{(G.IsOwner ? " · 내 그룹" : "")}{(G.IsMember ? " · 멤버" : "")}{(!G.CanManage && G.InListenScope ? " · 청취 범위" : "")}";
+    /// <summary>편집·삭제 버튼 — 관리 범위 밖(청취·멤버로만 보이는) 행은 숨긴다(서버 GMS 게이트가 어차피 403).</summary>
+    public bool CanManage => G.CanManage;
     public string SessionTypeText => G.SessionType switch { "chat" => "채팅", "broadcast" => "방송", _ => "사전편성" };
     /// <summary>GroupEditViewModel 이 받는 항목 — 목록 ETag 는 편집 창이 문서 GET 으로 다시 받는다.</summary>
     public GroupInfo ToGroupInfo() => new(G.Id, G.Uri, G.Name, G.MemberCount) { IsOwner = G.IsOwner, Etag = G.ETag };
@@ -58,13 +60,15 @@ public sealed partial class GroupAdminViewModel : ObservableObject
         var r = await m.ListGroupsAsync();
         Busy = false;
         if (!r.Ok) { Error = ResponseText.Describe(ResponseText.Area.Management, r.Code, r.Reason); return; }
-        _all = r.Value; Hint = $"관리 범위 안 PTT 그룹 {_all.Count}개";
+        _all = r.Value;
+        int manageable = _all.Count(g => g.CanManage);
+        Hint = manageable == _all.Count ? $"관리 범위 안 PTT 그룹 {_all.Count}개" : $"PTT 그룹 {_all.Count}개 · 관리 가능 {manageable}개(나머지는 청취 범위·멤버 그룹 — 보기만)";
         Filter();
     }
 
     private void FromSession()
     {
-        _all = _s.Groups.Where(g => g.IsMember).Select(g => new ManagedGroup(g.Id, g.Uri, g.Name, g.MemberCount, g.IsOwner, "", "prearranged", g.Etag)).ToList();
+        _all = _s.Groups.Where(g => g.IsMember).Select(g => new ManagedGroup(g.Id, g.Uri, g.Name, g.MemberCount, g.IsOwner, "", "prearranged", g.Etag, CanManage: g.IsOwner, IsMember: true)).ToList();
         Filter();
     }
 
@@ -93,7 +97,7 @@ public sealed partial class GroupAdminViewModel : ObservableObject
     [RelayCommand] private void EditGroup(GroupAdminRow? row)
     {
         row ??= Selected;
-        if (row is null) return;
+        if (row is null || !row.CanManage) return;                    // 더블클릭 경로 — 보기 전용 행은 편집 창을 열지 않는다
         var vm = new GroupEditViewModel(_s, row.ToGroupInfo());
         vm.Saved += async (_, _) => await LoadAsync();
         EditRequested?.Invoke(this, vm);

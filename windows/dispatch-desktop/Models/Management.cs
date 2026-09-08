@@ -45,7 +45,10 @@ public sealed class NumberInput
 }
 
 /// <summary>관리 범위 안 PTT 그룹(GET /provisioning/directory/groups) — 멤버가 아니어도 보인다.</summary>
-public sealed record ManagedGroup(string Id, string Uri, string Name, int MemberCount, bool IsOwner, string OrgCode, string SessionType, string ETag);
+/// <summary>관리 화면의 PTT 그룹 행(GET /provisioning/directory/groups) — 보이는 범위 = 관리 범위 ∪ 내 소유 ∪ 청취 범위 ∪ 멤버 그룹,
+/// 편집·삭제는 CanManage(관리 범위 안 또는 내 소유 — 서버 GMS 게이트와 같은 판정) 인 행만.</summary>
+public sealed record ManagedGroup(string Id, string Uri, string Name, int MemberCount, bool IsOwner, string OrgCode, string SessionType, string ETag,
+                                  bool CanManage = true, bool InListenScope = false, bool IsMember = false);
 
 /// <summary>녹취 세그먼트(OAM handlers/recording.py 세그먼트 항목 중 앱이 쓰는 것).</summary>
 public sealed record RecordingSegment(int Seq, string Type, string SpeakerId, DateTime? Start, DateTime? End, int DurationMs, bool HasVideo,
