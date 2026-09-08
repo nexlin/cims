@@ -5,6 +5,7 @@ import { useToast } from '../../components/Toast'
 import { ApiError } from '../../api/client'
 import { deploymentApi } from '../../api/deployment'
 import { fmtSize, fmtSpeed, fmtEta } from './deployHelpers'
+import { Button } from '@core/components/ui/button'
 
 interface UploadRow {
   id: string
@@ -129,9 +130,11 @@ export default function PackageUploadModal({ onClose, onDone }: {
   return (
     <Modal title="패키지 업로드" onClose={closeModal} width={760}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <label htmlFor="pkg-files" className="btn btn--outline" style={{ cursor: 'pointer' }}>
-          <FolderOpen size={13} className="inline align-[-2px]" /> 파일 선택 (여러 개 가능)
-        </label>
+        <Button asChild size="default">
+          <label htmlFor="pkg-files" className="cursor-pointer">
+            <FolderOpen size={13} className="inline align-[-2px]" /> 파일 선택 (여러 개 가능)
+          </label>
+        </Button>
         <input id="pkg-files" type="file" accept=".tar.gz,.tgz" multiple
           style={{ display: 'none' }}
           onChange={e => { addFiles(e.target.files); e.target.value = '' }} />
@@ -170,11 +173,11 @@ export default function PackageUploadModal({ onClose, onDone }: {
       )}
 
       <div className="modal-footer" style={{ marginTop: 16 }}>
-        <button className="btn btn--outline" onClick={closeModal}>닫기</button>
-        <button className="btn btn--primary" disabled={busy || stats.pending === 0}
+        <Button size="default" onClick={closeModal}>닫기</Button>
+        <Button variant="default" size="default" disabled={busy || stats.pending === 0}
           onClick={uploadAll}>
           {busy ? '업로드 중...' : stats.pending > 0 ? `업로드 (${stats.pending}개)` : '완료'}
-        </button>
+        </Button>
       </div>
     </Modal>
   )
@@ -234,13 +237,13 @@ function UploadProgressRow({ row, onAbort, onRemove, onRetry }: {
       </td>
       <td>
         {row.state === 'uploading' && (
-          <button className="btn btn--sm btn--outline" onClick={onAbort}><X size={12} /> 취소</button>
+          <Button onClick={onAbort}><X size={12} /> 취소</Button>
         )}
         {row.state === 'failed' && (
-          <button className="btn btn--sm" onClick={onRetry}>재시도</button>
+          <Button onClick={onRetry}>재시도</Button>
         )}
         {(row.state === 'pending' || row.state === 'aborted') && (
-          <button className="btn btn--sm btn--outline" onClick={onRemove}>제거</button>
+          <Button onClick={onRemove}>제거</Button>
         )}
       </td>
     </tr>

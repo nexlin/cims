@@ -6,14 +6,14 @@
 // 각 위젯이 그것을 읽는다(알람 심각도↔목록과 같은 구조). 덕분에 서비스마다 카드를 반복하지 않고
 // "하나를 골라 그 서비스의 3종을 본다"가 되어 위젯으로 떼어낼 수 있다.
 //
-// 편집 경로는 **항목 단위 인라인 CRUD 로 통일**한다 — 각 위젯이 자기 컬렉션의 [＋ 추가]/[편집]/[✕] 를
+// 편집 경로는 **항목 단위 인라인 CRUD 로 통일**한다 — 각 위젯이 자기 컬렉션의 [추가]/[편집]/[삭제] 를
 // 온전히 담당한다. 예전에는 데이터 소스만 인라인이고 모듈·알람 규칙은 서비스 편집 모달 안에 있어
 // 같은 성격인데 조작 방법이 갈렸다.
 //
 // **배치 단위는 화면 전체가 카드 하나**(`core.service-defs`)다 — 고른 서비스가 곧 아래 세 컬렉션의
 // 의미라, 선택을 떼거나 컬렉션 하나만 떼어 놓으면 무엇에 대한 목록인지 알 수 없다. 카드 안 구성은
 // SERVICE_DEF_CARD_ROWS 선언이 정본이고, 블록은 아래 위젯들을 id 로 그대로 쓴다(CardLayout).
-import { Check } from 'lucide-react'
+import { Check, Plus } from 'lucide-react'
 import { useConfirm } from '../../components/custom/confirm'
 import { useState } from 'react'
 import { makeCardWidget } from '../CardLayout'
@@ -26,6 +26,7 @@ import { useToast } from '../../components/Toast'
 import { makeSharedByKey } from '../sharedFetch'
 import { usePageControl, usePageParam } from '../pageParams'
 import type { WidgetDef } from '../types'
+import { Button } from '@core/components/ui/button'
 
 // 목록은 조건이 없어 키가 하나 — 위젯이 몇 개든 조회는 1회.
 const useDescriptorsRaw = makeSharedByKey(() => serviceDescriptorsApi.list())
@@ -62,17 +63,17 @@ function Empty({ text }: { text: string }) {
 // 행마다 [수정][삭제] 가 늘 떠 있으면 표가 산만하다 — 헤더의 [편집] 토글을 켰을 때만 보인다.
 function EditToggle({ on, disabled, onToggle }: { on: boolean; disabled?: boolean; onToggle: () => void }) {
   return (
-    <button className={`btn btn--sm ${on ? 'btn--primary' : 'btn--outline'}`} disabled={disabled}
-            title={on ? '수정·삭제 버튼 숨기기' : '행별 수정·삭제 보기'} onClick={onToggle}>편집</button>
+    <Button variant={on ? 'default' : 'outline'} disabled={disabled}
+            title={on ? '수정·삭제 버튼 숨기기' : '행별 수정·삭제 보기'} onClick={onToggle}>편집</Button>
   )
 }
 
 function RowActions({ onEdit, onRemove }: { onEdit: () => void; onRemove: () => void }) {
   return (
     <td style={{ display: 'flex', gap: 4 }}>
-      <button className="btn btn--sm btn--outline" onClick={onEdit}>수정</button>
-      <button className="btn btn--sm btn--outline" style={{ color: 'var(--destructive)' }}
-              onClick={onRemove}>삭제</button>
+      <Button onClick={onEdit}>수정</Button>
+      <Button style={{ color: 'var(--destructive)' }}
+              onClick={onRemove}>삭제</Button>
     </td>
   )
 }
@@ -91,8 +92,8 @@ function ServicePicker() {
         {list.length === 0 && <option value="">{loading ? '로딩 중…' : '(등록된 서비스 없음)'}</option>}
         {list.map(s => <option key={s.id} value={s.id}>{s.label || s.id}</option>)}
       </select>
-      <button className="btn btn--sm btn--primary" style={{ marginLeft: 'auto' }}
-              onClick={() => setAdding(true)}>＋ 서비스 추가</button>
+      <Button variant="default" style={{ marginLeft: 'auto' }}
+              onClick={() => setAdding(true)}><Plus size={13} /> 서비스 추가</Button>
       {adding && <ServiceForm initial={null} onClose={() => setAdding(false)}
                               onSaved={reload} />}
     </div>
@@ -126,10 +127,10 @@ function ServiceHeaderBlock() {
             <span style={{ fontWeight: 600 }}>{svc.label || svc.id}</span>
             <code style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{svc.id}</code>
             <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-              <button className="btn btn--sm btn--outline" title="고급 — 전체 JSON 직접 편집"
-                      onClick={() => setJson(JSON.stringify(svc, null, 2))}>JSON</button>
-              <button className="btn btn--sm btn--outline" style={{ color: 'var(--destructive)' }}
-                      onClick={remove}>삭제</button>
+              <Button title="고급 — 전체 JSON 직접 편집"
+                      onClick={() => setJson(JSON.stringify(svc, null, 2))}>JSON</Button>
+              <Button style={{ color: 'var(--destructive)' }}
+                      onClick={remove}>삭제</Button>
             </span>
           </>
         )}
@@ -169,8 +170,8 @@ function JsonEditor({ initial, title, onClose, onSaved }: {
                  padding: 10, border: '1px solid var(--border)', borderRadius: 'var(--radius)',
                  background: 'var(--muted)', color: 'var(--foreground)', resize: 'vertical' }} />
       <div className="modal-footer">
-        <button className="btn btn--outline" onClick={onClose} disabled={saving}>취소</button>
-        <button className="btn btn--primary" onClick={save} disabled={saving}>저장</button>
+        <Button size="default" onClick={onClose} disabled={saving}>취소</Button>
+        <Button variant="default" size="default" onClick={save} disabled={saving}>저장</Button>
       </div>
     </Modal>
   )
@@ -200,8 +201,8 @@ function ModulesBlock() {
       <Header title="모듈" count={mods.length} loading={loading} error={error}
               action={<span style={{ display: 'flex', gap: 6 }}>
                 <EditToggle on={editMode} disabled={!svc} onToggle={() => setEditMode(v => !v)} />
-                <button className="btn btn--sm btn--outline" disabled={!svc}
-                        onClick={() => setEdit({ index: null })}>＋ 모듈</button>
+                <Button disabled={!svc}
+                        onClick={() => setEdit({ index: null })}><Plus size={13} /> 모듈</Button>
               </span>} />
       <div className="scroll-fill">
         {mods.length === 0 ? <Empty text={svc ? '등록된 모듈 없음' : '서비스를 선택하세요'} /> : (
@@ -254,8 +255,8 @@ function AlertRulesBlock() {
       <Header title="알람 규칙" count={rules.length} loading={loading} error={error}
               action={<span style={{ display: 'flex', gap: 6 }}>
                 <EditToggle on={editMode} disabled={!svc} onToggle={() => setEditMode(v => !v)} />
-                <button className="btn btn--sm btn--outline" disabled={!svc}
-                        onClick={() => setEdit({ index: null })}>＋ 규칙</button>
+                <Button disabled={!svc}
+                        onClick={() => setEdit({ index: null })}><Plus size={13} /> 규칙</Button>
               </span>} />
       <div className="scroll-fill">
         {rules.length === 0 ? <Empty text={svc ? '등록된 알람 규칙 없음' : '서비스를 선택하세요'} /> : (
@@ -315,8 +316,8 @@ function DataSourcesBlock() {
       <Header title="데이터 소스" count={sources.length} loading={loading} error={error}
               action={<span style={{ display: 'flex', gap: 6 }}>
                 <EditToggle on={editMode} disabled={!svc} onToggle={() => setEditMode(v => !v)} />
-                <button className="btn btn--sm btn--outline" disabled={!svc}
-                        onClick={() => setEdit({ index: null })}>＋ 데이터 소스</button>
+                <Button disabled={!svc}
+                        onClick={() => setEdit({ index: null })}><Plus size={13} /> 데이터 소스</Button>
               </span>} />
       <div className="scroll-fill">
         {sources.length === 0 ? (

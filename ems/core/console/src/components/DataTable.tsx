@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from 'lucide-react'
+import { Button } from '@core/components/ui/button'
 
 // ── 공통 데이터 테이블 ────────────────────────────────────────
 //  구성(조직/사용자/번호/PTT그룹) 4페이지의 중복 테이블 로직을 흡수하는 단일 컴포넌트.
@@ -41,7 +42,7 @@ interface DataTableProps<T> {
   // 페이징 (0/미지정 = 페이징 없음)
   pageSize?: number
 
-  // 표 아래 좌측에 끼워넣을 추가 노드(예: '＋ 추가' 행)
+  // 표 아래 좌측에 끼워넣을 추가 노드(예: '추가' 행)
   footer?: React.ReactNode
 }
 
@@ -179,9 +180,9 @@ export function DataTable<T>(props: DataTableProps<T>) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', fontSize: 12, color: 'var(--muted-foreground)', borderTop: '1px solid var(--border)' }}>
           <span>{sorted.length}건</span>
           <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <button className="btn btn--ghost btn--sm" disabled={safePage === 0} onClick={() => setPage(Math.max(0, safePage - 1))} title="이전 페이지"><ChevronLeft size={14} /></button>
+            <Button variant="ghost" disabled={safePage === 0} onClick={() => setPage(Math.max(0, safePage - 1))} title="이전 페이지"><ChevronLeft size={14} /></Button>
             <span>{safePage + 1} / {totalPages}</span>
-            <button className="btn btn--ghost btn--sm" disabled={safePage >= totalPages - 1} onClick={() => setPage(Math.min(totalPages - 1, safePage + 1))} title="다음 페이지"><ChevronRight size={14} /></button>
+            <Button variant="ghost" disabled={safePage >= totalPages - 1} onClick={() => setPage(Math.min(totalPages - 1, safePage + 1))} title="다음 페이지"><ChevronRight size={14} /></Button>
           </span>
         </div>
       )}

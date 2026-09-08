@@ -9,6 +9,7 @@ import { Pause, Play } from 'lucide-react'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { recordingsApi, type RecordingSegment, type SegmentTrack } from '../api/recordings'
 import { waitSegmentReady } from './useInlineAudio'
+import { Button } from '@core/components/ui/button'
 
 interface Props {
   recordingId: string
@@ -119,8 +120,7 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
     }}>
       {/* ── transport ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-        <button
-          className="btn btn--primary"
+        <Button variant="default" size="default"
           onClick={toggle}
           disabled={prep || !!err}
           title={playing ? '일시정지' : '재생'}
@@ -130,7 +130,7 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
           }}
         >
           {prep ? '…' : playing ? <Pause size={13} /> : <Play size={13} />}
-        </button>
+        </Button>
         <span className="ts" style={{ fontSize: 12, color: 'var(--muted-foreground)', minWidth: 38 }}>
           {fmtMs(pos)}
         </span>

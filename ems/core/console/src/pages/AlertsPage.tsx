@@ -10,7 +10,7 @@
 //   목록은 화면 내 고정 높이 + 페이지 내비게이션(Pager)으로 넘긴다 — 페이지 스크롤 누적 없음.
 //   필터는 전부 클라이언트에서 건다 — 서버 type 필터는 type 필드가 없는 ack/comment
 //   레코드를 떨어뜨려 승인·코멘트 표시가 소실되기 때문(전 레코드 수신 후 행 단위 필터).
-import { Check, MessageSquare, RotateCw } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, MessageSquare, RotateCw } from 'lucide-react'
 import { useState, useCallback, useMemo } from 'react'
 import { alertsApi, eventsApi, type AlertEvent, type EventRecord } from '../api/alerts'
 import { useToast } from '../components/Toast'
@@ -22,6 +22,7 @@ import {
   alarmTypeLabel, eventTypeLabel, EVENT_KIND_LABEL, sevBadgeClass, severityOf,
   fmtTime, durationBetween, downloadCsv,
 } from '../utils/alarmLabels'
+import { Button } from '@core/components/ui/button'
 
 const PAGE_SIZE = 20
 const FETCH_LIMIT = 5000   // 서버 상한 — 창 안 레코드가 이보다 많으면 최신순 절단(표기)
@@ -194,7 +195,7 @@ export function AlarmHistoryFilter() {
                onChange={e => alertsFilter.setAlarm({ showResolved: e.target.checked })} />
         해소 포함
       </label>
-      <button className="btn btn--ghost btn--sm" onClick={exportCsv} disabled={rows.length === 0}>CSV</button>
+      <Button variant="ghost" onClick={exportCsv} disabled={rows.length === 0}>CSV</Button>
       {/* 실시간 감시 — 켜면 30초마다 자동 조회. 갱신 시각을 함께 보여준다: 값이 안 바뀌는
           구간에서 "멈춘 것"과 "새 알람이 없는 것"을 구별할 수 없으면 토글을 믿지 못한다. */}
       <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, whiteSpace: 'nowrap' }}
@@ -208,7 +209,7 @@ export function AlarmHistoryFilter() {
           {updatedAt ? `갱신 ${fmtTime(new Date(updatedAt).toISOString())}` : '대기 중'}
         </span>
       )}
-      <button className="btn btn--ghost btn--sm" onClick={reload} title="새로고침"><RotateCw size={14} /></button>
+      <Button variant="ghost" onClick={reload} title="새로고침"><RotateCw size={14} /></Button>
     </div>
   )
 }
@@ -283,7 +284,7 @@ export function AlarmsSection() {
                           <span title={`severity 변경 ${r.changes!.length}회 — 상세는 행 클릭`}
                                 style={{ marginLeft: 4, fontSize: 11,
                                          color: lastChange.trend === 'moreSevere' ? 'var(--destructive)' : 'var(--muted-foreground)' }}>
-                            {lastChange.trend === 'moreSevere' ? '↑' : '↓'}{r.changes!.length}
+                            {lastChange.trend === 'moreSevere' ? <ArrowUp size={11} /> : <ArrowDown size={11} />}{r.changes!.length}
                           </span>
                         )}
                       </td>
@@ -391,7 +392,7 @@ function AlarmHistoryDetail({ r, isOpen, onAck, onComment }: {
       {isOpen && (
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 2 }}>
           {r.ack_state !== 'acknowledged' && (
-            <button className="btn btn--sm btn--outline" disabled={!r.alarm_id} onClick={() => onAck(r.alarm_id)}>승인</button>
+            <Button disabled={!r.alarm_id} onClick={() => onAck(r.alarm_id)}>승인</Button>
           )}
           <input className="form-input" style={{ width: 280 }} placeholder="코멘트 입력 후 Enter"
                  value={text} onChange={e => setText(e.target.value)}
@@ -478,7 +479,7 @@ export function EventHistoryFilter() {
       </select>
       <input className="search-input" style={{ width: 180 }} placeholder="코드/소스/메시지 검색"
              value={f.q} onChange={e => alertsFilter.setEvent({ q: e.target.value })} />
-      <button className="btn btn--ghost btn--sm" onClick={exportCsv} disabled={filtered.length === 0}>CSV</button>
+      <Button variant="ghost" onClick={exportCsv} disabled={filtered.length === 0}>CSV</Button>
       {/* 실시간 감시 — 켜면 30초마다 자동 조회. 갱신 시각을 함께 보여준다: 값이 안 바뀌는
           구간에서 "멈춘 것"과 "새 알람이 없는 것"을 구별할 수 없으면 토글을 믿지 못한다. */}
       <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, whiteSpace: 'nowrap' }}
@@ -492,7 +493,7 @@ export function EventHistoryFilter() {
           {updatedAt ? `갱신 ${fmtTime(new Date(updatedAt).toISOString())}` : '대기 중'}
         </span>
       )}
-      <button className="btn btn--ghost btn--sm" onClick={reload} title="새로고침"><RotateCw size={14} /></button>
+      <Button variant="ghost" onClick={reload} title="새로고침"><RotateCw size={14} /></Button>
     </div>
   )
 }

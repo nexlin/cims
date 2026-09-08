@@ -15,6 +15,7 @@ import { Code2 } from 'lucide-react'
 import { useDevMode } from '../hooks/useDevMode'
 import { loadApiDocs, type ApiDoc, type ApiDocAuth } from '../api/apiDocs'
 import { useDataSourceCatalogPassive } from '../widgets/shapes/sourceRegistry'
+import { Button } from '@core/components/ui/button'
 
 const METHOD_COLOR: Record<string, string> = {
   GET: 'badge--green', POST: 'badge--blue', PUT: 'badge--yellow', DELETE: 'badge--red',
@@ -90,7 +91,7 @@ function CopyBlock({ label, text, mono, pre }: {
     <div style={{ marginBottom: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
         <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{label}</span>
-        <button className="btn btn--ghost btn--sm" onClick={copy}>{copied ? '복사됨' : '복사'}</button>
+        <Button variant="ghost" onClick={copy}>{copied ? '복사됨' : '복사'}</Button>
       </div>
       {pre ? (
         <pre style={{ margin: 0, padding: '8px 10px', background: 'var(--background)',
@@ -130,9 +131,9 @@ function ApiRow({ a }: { a: ApiDoc }) {
         <code style={{ fontSize: 12.5, wordBreak: 'break-all' }}>{a.path}</code>
         {a.module && <span className="badge badge--gray" title="이 API 를 제공하는 모듈">{a.module}</span>}
         <span style={{ flex: 1 }} />
-        <button className="btn btn--ghost btn--sm" onClick={() => setOpen(o => !o)}>
+        <Button variant="ghost" onClick={() => setOpen(o => !o)}>
           {open ? '접기' : '상세'}
-        </button>
+        </Button>
       </div>
       {a.summary && (
         <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginTop: 4 }}>{a.summary}</div>

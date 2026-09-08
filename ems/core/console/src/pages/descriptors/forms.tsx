@@ -1,6 +1,6 @@
 // 서비스 정의 / 데이터 소스 폼 입력 화면 — JSON 직접 편집 대신 구조화 폼.
 // 복잡한 map 매핑은 "고급(JSON)" 토글로 fallback 제공.
-import { X } from 'lucide-react'
+import { Plus, X } from 'lucide-react'
 import { useState } from 'react'
 import Modal from '../../components/Modal'
 import { useToast } from '../../components/Toast'
@@ -9,6 +9,7 @@ import {
   type ServiceDescriptor, type ServiceModule, type AlertRule,
 } from '../../api/serviceDescriptors'
 import type { DataSourceSpec } from '../../widgets/shapes/dataSourceSpec'
+import { Button } from '@core/components/ui/button'
 
 // ── 공용 입력 조각 ──────────────────────────────────────────────
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
@@ -24,8 +25,8 @@ const rowCard: React.CSSProperties = {
   border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 10, marginBottom: 8, background: 'var(--muted)',
 }
 function Btn({ onClick, children, danger, disabled }: { onClick: () => void; children: React.ReactNode; danger?: boolean; disabled?: boolean }) {
-  return <button type="button" className="btn btn--sm btn--outline" disabled={disabled}
-    style={danger ? { color: 'var(--destructive)' } : undefined} onClick={onClick}>{children}</button>
+  return <Button type="button" disabled={disabled}
+    style={danger ? { color: 'var(--destructive)' } : undefined} onClick={onClick}>{children}</Button>
 }
 
 const SHAPES = ['time-bar', 'kpi', 'distribution', 'table'] as const
@@ -81,7 +82,7 @@ export function ServiceForm({ initial, onClose, onSaved }: {
       </div>
       <div className="modal-footer">
         <Btn onClick={onClose} disabled={saving}>취소</Btn>
-        <button className="btn btn--primary" onClick={save} disabled={saving}>저장</button>
+        <Button variant="default" size="default" onClick={save} disabled={saving}>저장</Button>
       </div>
     </Modal>
   )
@@ -137,7 +138,7 @@ export function ModuleForm({ svc, index, onClose, onSaved }: {
       </div>
       <div className="modal-footer">
         <Btn onClick={onClose} disabled={saving}>취소</Btn>
-        <button className="btn btn--primary" onClick={save} disabled={saving}>저장</button>
+        <Button variant="default" size="default" onClick={save} disabled={saving}>저장</Button>
       </div>
     </Modal>
   )
@@ -223,7 +224,7 @@ export function AlertRuleForm({ svc, index, onClose, onSaved }: {
       </div>
       <div className="modal-footer">
         <Btn onClick={onClose} disabled={saving}>취소</Btn>
-        <button className="btn btn--primary" onClick={save} disabled={saving}>저장</button>
+        <Button variant="default" size="default" onClick={save} disabled={saving}>저장</Button>
       </div>
     </Modal>
   )
@@ -339,7 +340,7 @@ export function DataSourceForm({ svc, index, onClose, onSaved }: {
           <div style={rowCard}>
             <div style={{ display: 'flex', alignItems: 'center' }}>
               <b style={{ fontSize: 12 }}>KPI 항목 ({kpiItems.length})</b>
-              <span style={{ marginLeft: 'auto' }}><Btn onClick={() => setKpiItems(it => [...it, { label: '', path: '' }])}>＋ 항목</Btn></span>
+              <span style={{ marginLeft: 'auto' }}><Btn onClick={() => setKpiItems(it => [...it, { label: '', path: '' }])}><Plus size={13} /> 항목</Btn></span>
             </div>
             {kpiItems.map((k, i) => (
               <div key={i} style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'flex-end' }}>
@@ -374,7 +375,7 @@ export function DataSourceForm({ svc, index, onClose, onSaved }: {
       </div>
       <div className="modal-footer">
         <Btn onClick={onClose} disabled={saving}>취소</Btn>
-        <button className="btn btn--primary" onClick={save} disabled={saving}>저장</button>
+        <Button variant="default" size="default" onClick={save} disabled={saving}>저장</Button>
       </div>
     </Modal>
   )

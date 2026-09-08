@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight, Dot, Pencil, Plus, RotateCw, Trash2, X } fro
 import IconBtn from '@core/components/IconBtn'
 import { orgApi, type Organization, type OrgInput } from '@core/api/organizations'
 import { useToast } from '@core/components/Toast'
+import { Button } from '@core/components/ui/button'
 
 // ── 트리 빌더 ───────────────────────────────────────────────
 interface TreeNode extends Organization {
@@ -182,13 +183,13 @@ export default function OrganizationsPage() {
     <div className="page">
       {/* 툴바 */}
       <div className="toolbar">
-        <button className="btn btn--outline" onClick={() => setImportOpen(true)}>Excel 가져오기</button>
+        <Button size="default" onClick={() => setImportOpen(true)}>Excel 가져오기</Button>
         {selected.size > 0 && (
-          <button className="btn btn--danger" onClick={handleBatchDelete}>
+          <Button variant="destructive" size="default" onClick={handleBatchDelete}>
             선택 삭제 ({selected.size}건)
-          </button>
+          </Button>
         )}
-        <button className="btn btn--ghost btn--sm" onClick={load} title="새로고침"><RotateCw size={14} /></button>
+        <Button variant="ghost" onClick={load} title="새로고침"><RotateCw size={14} /></Button>
       </div>
 
       {/* 테이블 */}
@@ -288,8 +289,8 @@ export default function OrganizationsPage() {
                     <td className="actions">
                       {isEditing ? (
                         <>
-                          <button className="btn btn--sm btn--primary" onClick={saveEdit}>저장</button>
-                          <button className="btn btn--sm btn--ghost" onClick={cancelEdit}>취소</button>
+                          <Button variant="default" onClick={saveEdit}>저장</Button>
+                          <Button variant="ghost" onClick={cancelEdit}>취소</Button>
                         </>
                       ) : (
                         <>
@@ -318,8 +319,8 @@ export default function OrganizationsPage() {
                       <td><input className="form-input" type="number" value={addForm.sort_order}
                         onChange={e => setAddForm({ ...addForm, sort_order: Number(e.target.value) })} style={{ width: '100%' }} /></td>
                       <td className="actions">
-                        <button className="btn btn--sm btn--primary" onClick={saveAdd}>저장</button>
-                        <button className="btn btn--sm btn--ghost" onClick={cancelAdd}>취소</button>
+                        <Button variant="default" onClick={saveAdd}>저장</Button>
+                        <Button variant="ghost" onClick={cancelAdd}>취소</Button>
                       </td>
                     </tr>
                   )}
@@ -347,17 +348,17 @@ export default function OrganizationsPage() {
                   <td><input className="form-input" type="number" value={addForm.sort_order}
                     onChange={e => setAddForm({ ...addForm, sort_order: Number(e.target.value) })} style={{ width: '100%' }} /></td>
                   <td className="actions">
-                    <button className="btn btn--sm btn--primary" onClick={saveAdd}>저장</button>
-                    <button className="btn btn--sm btn--ghost" onClick={cancelAdd}>취소</button>
+                    <Button variant="default" onClick={saveAdd}>저장</Button>
+                    <Button variant="ghost" onClick={cancelAdd}>취소</Button>
                   </td>
                 </tr>
               ) : !adding && (
                 <tr>
                   <td colSpan={6} style={{ textAlign: 'center' }}>
-                    <button className="btn btn--ghost btn--sm" onClick={() => startAdd(null, null)}
+                    <Button variant="ghost" onClick={() => startAdd(null, null)}
                       style={{ color: 'var(--primary)', fontSize: 12 }}>
-                      ＋ 조직 추가
-                    </button>
+                      <Plus size={13} /> 조직 추가
+                    </Button>
                   </td>
                 </tr>
               )}
@@ -378,11 +379,13 @@ export default function OrganizationsPage() {
             <div className="modal-body">
               <p style={{ marginBottom: 12 }}>조직 계층을 Excel(.xlsx)로 일괄 등록합니다.</p>
               <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
-                <label className="btn btn--primary" style={{ cursor: 'pointer' }}>
-                  파일 선택
-                  <input type="file" accept=".xlsx" onChange={handleImport} style={{ display: 'none' }} />
-                </label>
-                <a href={orgApi.templateUrl} className="btn btn--outline" download>템플릿 다운로드</a>
+                <Button asChild variant="default" size="default">
+                  <label className="cursor-pointer">
+                    파일 선택
+                    <input type="file" accept=".xlsx" onChange={handleImport} style={{ display: 'none' }} />
+                  </label>
+                </Button>
+                <Button asChild size="default"><a href={orgApi.templateUrl} download>템플릿 다운로드</a></Button>
                 {importLoading && <span className="ts">처리 중...</span>}
               </div>
               {importResult && (
@@ -398,7 +401,7 @@ export default function OrganizationsPage() {
               )}
             </div>
             <div className="modal-footer">
-              <button className="btn btn--ghost" onClick={() => { setImportOpen(false); setImportResult(null) }}>닫기</button>
+              <Button variant="ghost" size="default" onClick={() => { setImportOpen(false); setImportResult(null) }}>닫기</Button>
             </div>
           </div>
         </div>

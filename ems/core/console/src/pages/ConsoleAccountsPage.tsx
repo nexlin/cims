@@ -9,6 +9,7 @@ import {
   consoleAccountsApi, CONSOLE_ROLES,
   type ConsoleAccount, type ConsoleRole,
 } from '../api/consoleAccounts'
+import { Button } from '@core/components/ui/button'
 
 type Form = { login_id: string; name: string; role: ConsoleRole; email: string; password: string }
 const EMPTY: Form = { login_id: '', name: '', role: 'operator', email: '', password: '' }
@@ -83,9 +84,9 @@ export default function ConsoleAccountsPage() {
           OAM 로그인 계정 (가입자와 분리). 내장 admin 계정은 oam.json 으로 관리되어 표시되지 않습니다.
         </span>
         {!adding && !editId && (
-          <button className="btn btn--sm btn--primary" style={{ marginLeft: 'auto' }} onClick={startAdd}>
+          <Button variant="default" style={{ marginLeft: 'auto' }} onClick={startAdd}>
             <Plus size={14} /> 계정 추가
-          </button>
+          </Button>
         )}
       </div>
 
@@ -117,10 +118,10 @@ export default function ConsoleAccountsPage() {
             </Field>
           )}
           <div style={{ display: 'flex', gap: 6 }}>
-            <button className="btn btn--sm btn--primary" disabled={busy} onClick={editId ? submitEdit : submitAdd}>
+            <Button variant="default" disabled={busy} onClick={editId ? submitEdit : submitAdd}>
               {editId ? '저장' : '생성'}
-            </button>
-            <button className="btn btn--sm btn--ghost" onClick={cancel}>취소</button>
+            </Button>
+            <Button variant="ghost" onClick={cancel}>취소</Button>
           </div>
         </div>
       )}
@@ -172,9 +173,9 @@ function IconBtn({ title, tone, onClick, children }: {
   title: string; tone?: 'danger'; onClick: () => void; children: React.ReactNode
 }) {
   return (
-    <button className={`btn btn--icon btn--sm${tone === 'danger' ? ' btn--danger' : ''}`}
+    <Button variant={tone === 'danger' ? 'destructive' : 'outline'}
             title={title} onClick={onClick} style={{ marginLeft: 4 }}>
       {children}
-    </button>
+    </Button>
   )
 }

@@ -6,18 +6,18 @@
 //   하므로 소유 선언(usePageControl)은 여기서 하지 않는다.
 
 import { usePageParam } from '../widgets/pageParams'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
+import { Button } from '@core/components/ui/button'
 
 export function DaysButtons({ days, onChange }: { days: number; onChange: (d: number) => void }) {
   return (
     <>
       <span style={{ fontSize: 13, color: 'var(--muted-foreground)' }}>기간:</span>
       {[1, 7, 30, 90].map(d => (
-        <button key={d}
-          className={`btn btn--sm ${days === d ? 'btn--primary' : 'btn--ghost'}`}
+        <Button variant={days === d ? 'default' : 'ghost'} key={d}
           onClick={() => onChange(d)}>
           {d === 1 ? '오늘' : `${d}일`}
-        </button>
+        </Button>
       ))}
     </>
   )
@@ -41,11 +41,11 @@ export function Pager({ page, count, pageSize, onPage, unit = '건' }: {
                   color: 'var(--muted-foreground)', borderTop: '1px solid var(--border)', flex: 'none' }}>
       <span>{from}–{to} / {count}{unit}</span>
       <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
-        <button className="btn btn--ghost btn--sm" disabled={cur === 0} onClick={() => onPage(0)}>«</button>
-        <button className="btn btn--ghost btn--sm" disabled={cur === 0} onClick={() => onPage(cur - 1)} title="이전 페이지"><ChevronLeft size={14} /></button>
+        <Button variant="ghost" disabled={cur === 0} onClick={() => onPage(0)}><ChevronsLeft size={14} /></Button>
+        <Button variant="ghost" disabled={cur === 0} onClick={() => onPage(cur - 1)} title="이전 페이지"><ChevronLeft size={14} /></Button>
         <span style={{ minWidth: 56, textAlign: 'center' }}>{cur + 1} / {totalPages}</span>
-        <button className="btn btn--ghost btn--sm" disabled={cur >= totalPages - 1} onClick={() => onPage(cur + 1)} title="다음 페이지"><ChevronRight size={14} /></button>
-        <button className="btn btn--ghost btn--sm" disabled={cur >= totalPages - 1} onClick={() => onPage(totalPages - 1)}>»</button>
+        <Button variant="ghost" disabled={cur >= totalPages - 1} onClick={() => onPage(cur + 1)} title="다음 페이지"><ChevronRight size={14} /></Button>
+        <Button variant="ghost" disabled={cur >= totalPages - 1} onClick={() => onPage(totalPages - 1)}><ChevronsRight size={14} /></Button>
       </span>
     </div>
   )

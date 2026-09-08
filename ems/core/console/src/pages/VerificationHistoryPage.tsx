@@ -1,5 +1,5 @@
 import { useConfirm } from '../components/custom/confirm'
-import { AlertTriangle, ChevronDown, FileText, RotateCw } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRight, ChevronDown, FileText, RotateCw } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 
 import {
@@ -658,12 +658,12 @@ export default function VerificationHistoryPage() {
       {totalPages > 1 && (
         <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
           <button style={btnSecondary} disabled={offset === 0}
-                  onClick={() => setOffset(Math.max(0, offset - limit))}>← 이전</button>
+                  onClick={() => setOffset(Math.max(0, offset - limit))}><ArrowLeft size={13} /> 이전</button>
           <span style={{ fontSize: 13, color: 'var(--foreground)' }}>
             {curPage} / {totalPages}
           </span>
           <button style={btnSecondary} disabled={offset + limit >= total}
-                  onClick={() => setOffset(offset + limit)}>다음 →</button>
+                  onClick={() => setOffset(offset + limit)}>다음 <ArrowRight size={13} /></button>
         </div>
       )}
 

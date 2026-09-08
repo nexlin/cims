@@ -15,6 +15,7 @@ import {
   type MenuConfig, type MenuItemOverride, type MenuAreaDef,
   type CustomSectionDef, type CustomPageDef,
 } from '../menu'
+import { Button } from '@core/components/ui/button'
 
 interface SectionRow {
   key: string
@@ -170,9 +171,9 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
           <b style={{ fontSize: 13 }}>영역 (메뉴 그룹핑)</b>
           <span style={muted}>운용/관리처럼 사이드바를 크게 나누는 묶음 — 라벨 변경·영역 추가 가능</span>
-          <button className="btn btn--sm btn--outline" style={{ marginLeft: 'auto' }} onClick={addArea}>
+          <Button style={{ marginLeft: 'auto' }} onClick={addArea}>
             <Plus size={13} /> 영역 추가
-          </button>
+          </Button>
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {areas.map(a => (
@@ -180,8 +181,8 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
               <input className="form-input" style={{ width: 130 }} value={a.label}
                 onChange={e => setAreaLabel(a.key, e.target.value)} />
               {!a.builtin && (
-                <button className="btn btn--sm btn--outline" title="영역 삭제 (소속 메뉴는 관리로 이동)"
-                  onClick={() => removeArea(a.key)}><Trash2 size={13} /></button>
+                <Button title="영역 삭제 (소속 메뉴는 관리로 이동)"
+                  onClick={() => removeArea(a.key)}><Trash2 size={13} /></Button>
               )}
             </span>
           ))}
@@ -192,9 +193,9 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         <b style={{ fontSize: 13 }}>메뉴</b>
         <span style={muted}>시스템·릴리스는 잠금 (이름변경/숨김/이동 불가)</span>
-        <button className="btn btn--sm btn--outline" style={{ marginLeft: 'auto' }} onClick={addGroup}>
+        <Button style={{ marginLeft: 'auto' }} onClick={addGroup}>
           <Plus size={13} /> 메뉴 그룹 추가
-        </button>
+        </Button>
       </div>
       <div style={{ maxHeight: 420, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
         {rows.map((r, i) => (
@@ -204,10 +205,10 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2 }}>
-                <button className="btn btn--sm btn--outline" style={{ padding: '0 4px', lineHeight: 1 }}
-                  disabled={i === 0} onClick={() => move(i, -1)}><ChevronUp size={13} /></button>
-                <button className="btn btn--sm btn--outline" style={{ padding: '0 4px', lineHeight: 1 }}
-                  disabled={i === rows.length - 1} onClick={() => move(i, 1)}><ChevronDown size={13} /></button>
+                <Button style={{ padding: '0 4px', lineHeight: 1 }}
+                  disabled={i === 0} onClick={() => move(i, -1)}><ChevronUp size={13} /></Button>
+                <Button style={{ padding: '0 4px', lineHeight: 1 }}
+                  disabled={i === rows.length - 1} onClick={() => move(i, 1)}><ChevronDown size={13} /></Button>
               </span>
               {r.locked
                 ? <span title="잠금 — 시스템/릴리스 메뉴는 편집할 수 없습니다"
@@ -227,8 +228,8 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
               {r.custom ? (
                 <>
                   <span style={{ ...muted, border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px' }}>커스텀</span>
-                  <button className="btn btn--sm btn--outline" style={{ marginLeft: 'auto' }}
-                    title="그룹 삭제" onClick={() => removeCustom(i)}><Trash2 size={13} /></button>
+                  <Button style={{ marginLeft: 'auto' }}
+                    title="그룹 삭제" onClick={() => removeCustom(i)}><Trash2 size={13} /></Button>
                 </>
               ) : (!r.locked && r.label !== r.defaultLabel &&
                 <span style={{ ...muted, marginLeft: 'auto' }}>기본: {r.defaultLabel}</span>
@@ -241,13 +242,13 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
                     <input className="form-input" style={{ width: 210 }} value={p.title}
                       onChange={e => setPageTitle(i, pi, e.target.value)} />
                     <code style={muted}>/custom/{p.slug}</code>
-                    <button className="btn btn--sm btn--outline" title="페이지 삭제"
-                      onClick={() => removePage(i, pi)}><Trash2 size={13} /></button>
+                    <Button title="페이지 삭제"
+                      onClick={() => removePage(i, pi)}><Trash2 size={13} /></Button>
                   </div>
                 ))}
-                <button className="btn btn--sm btn--outline" onClick={() => addPage(i)}>
+                <Button onClick={() => addPage(i)}>
                   <Plus size={13} /> 페이지 추가
-                </button>
+                </Button>
                 <span style={{ ...muted, marginLeft: 8 }}>
                   페이지는 빈 위젯 보드로 생성 — 저장 후 해당 페이지에서 위젯을 배치하세요
                 </span>
@@ -258,12 +259,12 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="modal-footer" style={{ marginTop: 14 }}>
-        <button className="btn btn--outline" onClick={resetDefault} disabled={saving}
-                style={{ marginRight: 'auto' }}>기본값으로</button>
-        <button className="btn btn--outline" onClick={onClose} disabled={saving}>취소</button>
-        <button className="btn btn--primary" onClick={save} disabled={saving}>
+        <Button size="default" onClick={resetDefault} disabled={saving}
+                style={{ marginRight: 'auto' }}>기본값으로</Button>
+        <Button size="default" onClick={onClose} disabled={saving}>취소</Button>
+        <Button variant="default" size="default" onClick={save} disabled={saving}>
           {saving ? '저장 중...' : '저장'}
-        </button>
+        </Button>
       </div>
     </Modal>
   )

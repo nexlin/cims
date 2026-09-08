@@ -10,6 +10,7 @@ import {
   type ExternalSystem, type ExternalSystemInput, type ExternalSystemType,
   type Endpoint, type ProbeMode, type ProbeResult,
 } from '../api/external_systems'
+import { Button } from '@core/components/ui/button'
 
 const TYPE_LABEL: Record<ExternalSystemType, string> = {
   db: 'DB', monitoring: '모니터링', storage: '스토리지', auth: '인증', other: '기타',
@@ -97,11 +98,11 @@ function EditModal({ initial, onClose, onSaved }: {
             <input value={e.host} onChange={ev => setEp(i, { host: ev.target.value })} placeholder="host/IP" style={{ flex: 2 }} />
             <input type="number" value={e.port || ''} onChange={ev => setEp(i, { port: parseInt(ev.target.value) || 0 })} placeholder="port" style={{ flex: 1 }} />
             <input value={e.label || ''} onChange={ev => setEp(i, { label: ev.target.value })} placeholder="label(선택)" style={{ flex: 1 }} />
-            <button className="btn btn--outline" onClick={() => rmEp(i)} aria-label="엔드포인트 삭제"
-                    disabled={f.endpoints.length <= 1}><X size={13} /></button>
+            <Button size="default" onClick={() => rmEp(i)} aria-label="엔드포인트 삭제"
+                    disabled={f.endpoints.length <= 1}><X size={13} /></Button>
           </div>
         ))}
-        <button className="btn btn--outline" onClick={addEp} style={{ fontSize: 12 }}>+ 엔드포인트</button>
+        <Button size="default" onClick={addEp} style={{ fontSize: 12 }}>+ 엔드포인트</Button>
       </div>
       <div style={row}>
         <label style={lbl}>상태 점검(probe)</label>
@@ -127,8 +128,8 @@ function EditModal({ initial, onClose, onSaved }: {
         <input value={tagText} onChange={e => setTagText(e.target.value)} style={{ width: '100%' }} placeholder="prod, db" />
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-        <button className="btn btn--outline" onClick={onClose}>취소</button>
-        <button className="btn btn--primary" onClick={save} disabled={saving}>{saving ? '저장 중…' : '저장'}</button>
+        <Button size="default" onClick={onClose}>취소</Button>
+        <Button variant="default" size="default" onClick={save} disabled={saving}>{saving ? '저장 중…' : '저장'}</Button>
       </div>
     </Modal>
   )
@@ -172,7 +173,7 @@ export default function ExternalSystemsPage() {
           <div style={{ fontWeight: 600, fontSize: 15 }}>외부 시스템 ({items.length})</div>
           <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>외부 DB·모니터링·스토리지 등 등록 — 대시보드 시스템 형상에 표시.</div>
         </div>
-        <button className="btn btn--primary" style={{ marginLeft: 'auto' }} onClick={() => setEditing('new')}>+ 외부 시스템 추가</button>
+        <Button variant="default" size="default" style={{ marginLeft: 'auto' }} onClick={() => setEditing('new')}>+ 외부 시스템 추가</Button>
       </div>
       {loading ? <div style={{ padding: 20, color: 'var(--muted-foreground)' }}>불러오는 중…</div>
         : items.length === 0 ? <div style={{ padding: 20, color: 'var(--muted-foreground)' }}>등록된 외부 시스템이 없습니다.</div>
@@ -192,9 +193,9 @@ export default function ExternalSystemsPage() {
                 <td>{s.enabled ? <Check size={13} className="text-[var(--cims-success)]" /> : '—'}</td>
                 <td style={{ whiteSpace: 'nowrap' }}>
                   {(s.probe?.mode ?? 'none') !== 'none' &&
-                    <button className="btn btn--outline" style={{ fontSize: 12, marginRight: 4 }} onClick={() => probeNow(s)}>점검</button>}
-                  <button className="btn btn--outline" style={{ fontSize: 12, marginRight: 4 }} onClick={() => setEditing(s)}>편집</button>
-                  <button className="btn btn--outline" style={{ fontSize: 12 }} onClick={() => remove(s)}>삭제</button>
+                    <Button size="default" style={{ fontSize: 12, marginRight: 4 }} onClick={() => probeNow(s)}>점검</Button>}
+                  <Button size="default" style={{ fontSize: 12, marginRight: 4 }} onClick={() => setEditing(s)}>편집</Button>
+                  <Button size="default" style={{ fontSize: 12 }} onClick={() => remove(s)}>삭제</Button>
                 </td>
               </tr>
             ))}

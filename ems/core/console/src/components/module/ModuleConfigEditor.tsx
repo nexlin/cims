@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, RotateCw, Zap } from 'lucide-react'
+import { AlertTriangle, Check, Plus, RotateCw, Zap } from 'lucide-react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../Toast'
 import {
@@ -7,6 +7,7 @@ import {
 import StringListInput from './StringListInput'
 import { ObjectListEditor } from './ObjectListEditor'
 import { useConfirm } from '../custom/confirm'
+import { Button } from '@core/components/ui/button'
 
 type Record_ = Record<string, unknown>
 
@@ -283,13 +284,11 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
       {allTags.length > 0 && (
         <div style={{ marginBottom: 8, display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
           <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>태그 필터:</span>
-          <button
-            className={`btn btn--sm ${tagFilter === '' ? 'btn--primary' : 'btn--outline'}`}
-            onClick={() => setTagFilter('')}>전체</button>
+          <Button variant={tagFilter === '' ? 'default' : 'outline'}
+            onClick={() => setTagFilter('')}>전체</Button>
           {allTags.map(t => (
-            <button key={t}
-              className={`btn btn--sm ${tagFilter === t ? 'btn--primary' : 'btn--outline'}`}
-              onClick={() => setTagFilter(t)}>{t}</button>
+            <Button variant={tagFilter === t ? 'default' : 'outline'} key={t}
+              onClick={() => setTagFilter(t)}>{t}</Button>
           ))}
         </div>
       )}
@@ -305,7 +304,7 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
         <tbody>
           {visibleIdx.length === 0 ? (
             <tr><td colSpan={summaryFields.length + 1} style={{ textAlign: 'center', color: 'var(--muted-foreground)', padding: 20 }}>
-              {records.length === 0 ? '행 없음 — "＋ 추가" 로 생성' : '태그 필터 결과 없음'}
+              {records.length === 0 ? '행 없음 — [추가] 로 생성' : '태그 필터 결과 없음'}
             </td></tr>
           ) : (
             visibleIdx.map(i => {
@@ -350,13 +349,13 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
       )}
 
       <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
-        <button className="btn btn--sm btn--outline" onClick={addRow}>＋ 추가</button>
-        <button className="btn btn--sm btn--outline" onClick={reload} disabled={saving}><RotateCw size={13} /> 다시 로드</button>
+        <Button onClick={addRow}><Plus size={13} /> 추가</Button>
+        <Button onClick={reload} disabled={saving}><RotateCw size={13} /> 다시 로드</Button>
         <span style={{ marginLeft: 'auto' }}>
-          <button className="btn btn--sm btn--primary" onClick={save}
+          <Button variant="default" onClick={save}
             disabled={!dirty || saving}>
             {saving ? '저장 중...' : `저장 (${records.length}개)`}
-          </button>
+          </Button>
         </span>
       </div>
     </div>
@@ -434,10 +433,10 @@ function RowDisplay({ row, summaryFields, active, onEdit, onRemove }: {
       ))}
       <td>
         <div style={{ display: 'flex', gap: 4 }}>
-          <button className="btn btn--sm" onClick={onEdit}>
+          <Button onClick={onEdit}>
             {active ? '닫기' : '편집'}
-          </button>
-          <button className="btn btn--sm btn--danger" onClick={onRemove}>삭제</button>
+          </Button>
+          <Button variant="destructive" onClick={onRemove}>삭제</Button>
         </div>
       </td>
     </tr>

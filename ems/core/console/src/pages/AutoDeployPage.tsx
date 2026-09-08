@@ -5,7 +5,7 @@
 // 걸리며 run 이력·재개·롤백이 영속 화면을 필요로 한다.
 import type React from 'react'
 import { useConfirm } from '../components/custom/confirm'
-import { AlertTriangle, Ban, Check, Dot, Hourglass, Minus, Play, RotateCw, Square, Undo2, X } from 'lucide-react'
+import { AlertTriangle, Ban, Check, Dot, Download, Hourglass, Minus, Play, RotateCw, Square, Undo2, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useToast } from '../components/Toast'
 import { useAdminCapable } from '../hooks/useAdminCapable'
@@ -14,6 +14,7 @@ import {
   type BlueprintSummary, type InventorySummary, type InventoryView,
   type ProvIssue, type PlanPhase, type Run, type RunSummary, type PreflightRow,
 } from '../api/provision'
+import { Button } from '@core/components/ui/button'
 
 type Doc = 'blueprint' | 'inventory'
 type View = 'form' | 'raw'
@@ -253,17 +254,17 @@ export default function AutoDeployPage() {
                  options={[{ v: 'form', l: '구성 보기' }, { v: 'raw', l: '원문 보기' }]} />
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
               {doc === 'blueprint' && bpId != null && (
-                <a className="btn btn--sm btn--outline" href={blueprintRawUrl(bpId)} download>
-                  ⤓ YAML 내려받기
-                </a>
+                <Button asChild>
+                  <a href={blueprintRawUrl(bpId)} download><Download size={13} /> YAML 내려받기</a>
+                </Button>
               )}
               {view === 'raw' && (
-                <button className="btn btn--sm btn--primary" disabled={!canEdit || !!busy}
-                        onClick={saveRaw}>저장 (주석 유지)</button>
+                <Button variant="default" disabled={!canEdit || !!busy}
+                        onClick={saveRaw}>저장 (주석 유지)</Button>
               )}
               {view === 'form' && doc === 'inventory' && (
-                <button className="btn btn--sm btn--primary" disabled={!canEdit || !!busy}
-                        onClick={saveForm}>저장</button>
+                <Button variant="default" disabled={!canEdit || !!busy}
+                        onClick={saveForm}>저장</Button>
               )}
             </div>
           </div>
@@ -309,16 +310,16 @@ export default function AutoDeployPage() {
       <section style={SEC}>
         <h3 style={H3}>③ 사전 확인</h3>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <button className="btn btn--sm btn--outline" disabled={!canEdit || !!busy || invId == null}
-                  onClick={doValidate}>검증</button>
-          <button className="btn btn--sm btn--outline" disabled={!canEdit || !!busy || invId == null}
+          <Button disabled={!canEdit || !!busy || invId == null}
+                  onClick={doValidate}>검증</Button>
+          <Button disabled={!canEdit || !!busy || invId == null}
                   onClick={doPreflight} title="SSH·sudo 접속만 확인 — 아무것도 바꾸지 않습니다">
             접속 확인 (SSH/sudo)
-          </button>
-          <button className="btn btn--sm btn--outline" disabled={!canEdit || !!busy || !ready}
-                  onClick={doPlan}>계획 확인 (dry-run)</button>
-          <button className="btn btn--sm btn--primary" disabled={!canEdit || !!busy || !ready || !plan}
-                  onClick={doApply} title={!plan ? '먼저 [계획 확인]' : ''}><Play size={13} /> 배포 실행</button>
+          </Button>
+          <Button disabled={!canEdit || !!busy || !ready}
+                  onClick={doPlan}>계획 확인 (dry-run)</Button>
+          <Button variant="default" disabled={!canEdit || !!busy || !ready || !plan}
+                  onClick={doApply} title={!plan ? '먼저 [계획 확인]' : ''}><Play size={13} /> 배포 실행</Button>
           {busy && <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{busy}…</span>}
         </div>
 
@@ -361,8 +362,8 @@ export default function AutoDeployPage() {
                   <td>{r.progress.done}/{r.progress.total}
                       {r.progress.failed > 0 && ` (실패 ${r.progress.failed})`}</td>
                   <td style={{ color: 'var(--muted-foreground)' }}>{r.created_at}</td>
-                  <td><button className="btn btn--sm btn--outline"
-                              onClick={() => provisionApi.getRun(r.id).then(setRun)}>열기</button></td>
+                  <td><Button
+                              onClick={() => provisionApi.getRun(r.id).then(setRun)}>열기</Button></td>
                 </tr>
               ))}
             </tbody>
@@ -414,8 +415,8 @@ function DocPicker({ label, hint, items, value, onChange, onUpload, disabled }: 
           <option value="">— 선택 —</option>
           {items.map(i => <option key={i.id} value={i.id}>{i.label}</option>)}
         </select>
-        <button className="btn btn--sm btn--outline" disabled={disabled}
-                onClick={() => ref.current?.click()}>⤒ 업로드</button>
+        <Button disabled={disabled}
+                onClick={() => ref.current?.click()}>⤒ 업로드</Button>
         <input ref={ref} type="file" accept=".yaml,.yml" hidden
                onChange={e => { const f = e.target.files?.[0]; if (f) onUpload(f); e.target.value = '' }} />
       </div>
@@ -622,14 +623,14 @@ function RunView({ run, onAction, busy, canEdit }: {
         </h3>
         <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{done}/{total}</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-          {running && <button className="btn btn--sm btn--outline" disabled={!canEdit || !!busy}
-                              onClick={() => onAction('abort')}><Square size={13} /> 중단</button>}
+          {running && <Button disabled={!canEdit || !!busy}
+                              onClick={() => onAction('abort')}><Square size={13} /> 중단</Button>}
           {!running && run.status !== 'succeeded' &&
-            <button className="btn btn--sm btn--primary" disabled={!canEdit || !!busy}
-                    onClick={() => onAction('resume')}><RotateCw size={13} /> 재개</button>}
+            <Button variant="default" disabled={!canEdit || !!busy}
+                    onClick={() => onAction('resume')}><RotateCw size={13} /> 재개</Button>}
           {!running && (run.created || []).length > 0 &&
-            <button className="btn btn--sm btn--outline" disabled={!canEdit || !!busy}
-                    onClick={() => onAction('rollback')}><Undo2 size={13} /> 롤백</button>}
+            <Button disabled={!canEdit || !!busy}
+                    onClick={() => onAction('rollback')}><Undo2 size={13} /> 롤백</Button>}
         </div>
       </div>
 

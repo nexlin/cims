@@ -7,6 +7,7 @@ import { flowApi, formatMsgBody, type FlowMessage } from '@core/api/flow'
 import FlowPage, { SequenceDiagram } from '@core/pages/FlowPage'
 import SegmentPlayer from '@core/components/SegmentPlayer'
 import { useToast } from '@core/components/Toast'
+import { Button } from '@core/components/ui/button'
 
 function fmtDur(s: number | null) { if (!s || s <= 0) return '—'; const m = Math.floor(s / 60); return m > 0 ? `${m}분 ${s % 60}초` : `${s}초` }
 function fmtClock(iso: string | null | undefined) {
@@ -204,7 +205,7 @@ export default function VolteHistoryPage() {
         <input type="date" className="form-input" value={fDate} onChange={e => setFD(e.target.value)} style={{ width: 150 }} />
         <input className="search-input" placeholder="가입자 이름/번호 검색" value={searchInput}
           onChange={e => setSearchInput(e.target.value)} style={{ maxWidth: 240 }} />
-        {q && <button className="btn btn--sm btn--ghost" onClick={() => setSearchInput('')}>검색 해제</button>}
+        {q && <Button variant="ghost" onClick={() => setSearchInput('')}>검색 해제</Button>}
         <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>
           {selNode ? `부서: ${selNode.name}` : '전체'}{q ? `  &  검색: "${q}"` : ''}{selHour ? `  &  ${selHour}시` : ''}
         </span>
@@ -299,8 +300,8 @@ export default function VolteHistoryPage() {
           {/* 페이지네이션 (항상 표시) */}
           <div className="toolbar" style={{ justifyContent: 'flex-end', gap: 8, borderTop: '1px solid var(--border)', flexShrink: 0, paddingTop: 6 }}>
             <span className="ts" style={{ color: 'var(--muted-foreground)' }}>총 {total.toLocaleString()}건 · {page + 1}/{totalPages}</span>
-            <button className="btn btn--sm btn--ghost" disabled={page === 0} onClick={() => { setPage(page - 1); load(page - 1) }}>이전</button>
-            <button className="btn btn--sm btn--ghost" disabled={page >= totalPages - 1} onClick={() => { setPage(page + 1); load(page + 1) }}>다음</button>
+            <Button variant="ghost" disabled={page === 0} onClick={() => { setPage(page - 1); load(page - 1) }}>이전</Button>
+            <Button variant="ghost" disabled={page >= totalPages - 1} onClick={() => { setPage(page + 1); load(page + 1) }}>다음</Button>
           </div>
         </div>
       </div>
@@ -353,7 +354,7 @@ function CallRow({ l, isOpen, st, dur, flow, onToggle, onOpenDiagram, onOpenRec 
         <td style={tdS} className="ts">{l.end_reason_ko || l.end_reason || '—'}</td>
         <td style={{ ...tdS, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
           {l.has_recording
-            ? <button className="btn btn--sm btn--outline" onClick={onOpenRec}>&#9654; 녹취</button>
+            ? <Button onClick={onOpenRec}>&#9654; 녹취</Button>
             : <span style={{ color: 'var(--muted-foreground)' }}>—</span>}
         </td>
       </tr>
@@ -435,7 +436,7 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
                   })}
                 </span>
               )}
-              <button className="btn btn--sm btn--outline" style={{ marginLeft: 'auto', padding: '1px 8px', fontSize: 11 }} onClick={onOpenDiagram}><Maximize2 size={11} /> 최대화</button>
+              <Button style={{ marginLeft: 'auto', padding: '1px 8px', fontSize: 11 }} onClick={onOpenDiagram}><Maximize2 size={11} /> 최대화</Button>
             </div>
             <div style={{ maxHeight: 230, overflow: 'auto', padding: 6 }}>
               {flow?.loading ? <div className="empty" style={{ padding: 8 }}>로딩 중...</div>

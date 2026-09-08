@@ -5,7 +5,7 @@
  * (평면 목록에서 오든, 그룹 활동에서 오든) 표현도 한 벌이어야 한다.
  */
 
-import { ArrowRight, ChevronDown, ChevronRight, Circle, Diamond, Dot, Pause, Play, Plus, Settings, Square, X, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, Circle, Diamond, Dot, Pause, Play, Plus, Settings, Square, X, type LucideIcon } from 'lucide-react'
 import {
   useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback,
   type CSSProperties,
@@ -15,6 +15,7 @@ import type { RecordingSegment } from '@core/api/recordings'
 import DuplexCallPlayer from '@core/components/DuplexCallPlayer'
 import { samePlay, type InlineAudio } from '@core/components/useInlineAudio'
 import { useDirectory, type Directory } from '@core/components/useDirectory'
+import { Button } from '@core/components/ui/button'
 
 
 export function fmtShortTime(iso: string | null | undefined) {
@@ -262,8 +263,8 @@ export function DayHeatmap({ days, selectedDay, onPick }: {
         <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--muted-foreground)' }}>일별 활동</span>
         <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>색 진할수록 많음 · 클릭→해당 일 시간대 보기</span>
         <span style={{ marginLeft: 'auto' }}>
-          <button className={`btn btn--sm ${metric === 'turns' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setMetric('turns')}>발언 턴</button>
-          <button className={`btn btn--sm ${metric === 'speakers' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setMetric('speakers')}>화자수</button>
+          <Button variant={metric === 'turns' ? 'default' : 'ghost'} onClick={() => setMetric('turns')}>발언 턴</Button>
+          <Button variant={metric === 'speakers' ? 'default' : 'ghost'} onClick={() => setMetric('speakers')}>화자수</Button>
         </span>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))`, gap: 3 }}>
@@ -322,8 +323,8 @@ export function ActivityHeatmap({ sessions, selectedDir, onPick }: {
         <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--muted-foreground)' }}>시간대별 활동</span>
         <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>색 진할수록 많음 · 숫자=값 · 클릭→펼치기</span>
         <span style={{ marginLeft: 'auto' }}>
-          <button className={`btn btn--sm ${metric === 'turns' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setMetric('turns')}>발언 턴</button>
-          <button className={`btn btn--sm ${metric === 'speakers' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setMetric('speakers')}>화자수</button>
+          <Button variant={metric === 'turns' ? 'default' : 'ghost'} onClick={() => setMetric('turns')}>발언 턴</Button>
+          <Button variant={metric === 'speakers' ? 'default' : 'ghost'} onClick={() => setMetric('speakers')}>화자수</Button>
         </span>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(24, 1fr)', gap: 3 }}>
@@ -414,8 +415,8 @@ export function SessionRow({ sess, isOpen, detail, storeKey, isDuplex, audio, fl
         </td>
         <td style={{ ...tdStyle, textAlign: 'right' }} className="ts">{fmtSpeechMs(sess.total_speech_ms)}</td>
         <td style={{ ...tdStyle, textAlign: 'right' }} onClick={e => e.stopPropagation()}>
-          <button className="btn btn--sm btn--outline" style={{ marginRight: 4 }} disabled={flowLoading} onClick={onFlow}>Flow</button>
-          <button className="btn btn--sm btn--outline" onClick={onPlayAll}><Play size={11} className="mr-1 inline align-[-1px]" />전체</button>
+          <Button style={{ marginRight: 4 }} disabled={flowLoading} onClick={onFlow}>Flow</Button>
+          <Button onClick={onPlayAll}><Play size={11} className="mr-1 inline align-[-1px]" />전체</Button>
         </td>
       </tr>
       {isOpen && (
@@ -814,10 +815,9 @@ export function EventTimeline({ floor, events, participants, turns, speakerOrder
         <span className="ts" style={{ fontSize: 11 }}>발언권 중재 · 입퇴장</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
           {chips.map(c => (
-            <button
+            <Button
               key={c.key}
               onClick={() => setLayers(l => ({ ...l, [c.key]: !l[c.key] }))}
-              className="btn btn--sm"
               style={{
                 padding: '2px 8px', fontSize: 11,
                 border: `1px solid ${layers[c.key] ? c.color : 'var(--border)'}`,
@@ -826,7 +826,7 @@ export function EventTimeline({ floor, events, participants, turns, speakerOrder
               }}
             >
               {c.label} {counts[c.key]}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
@@ -947,15 +947,14 @@ export function FloorRow({ f, speakerOrder, names, border, role, turn, recId, au
          }}>
       <span className="ts" style={{ minWidth: 70 }}>{fmtShortTime(f.ts)}</span>
       {turn ? (
-        <button
-          className={`btn btn--sm ${isPlaying ? 'btn--primary' : 'btn--outline'}`}
+        <Button variant={isPlaying ? 'default' : 'outline'}
           disabled={!recId || !turn.playable}
           style={{ minWidth: 30, padding: '1px 6px' }}
           onClick={() => recId && audio?.play(recId, turn.seq, slot)}
           title={turn.playable ? (turn.multi ? '이 화자만 재생 (동시 발언은 타임바의 “동시 N” 이 믹스)' : '재생/정지') : '녹취중'}
         >
           {isPrep ? '…' : isPlaying ? <Pause size={13} /> : <Play size={13} />}
-        </button>
+        </Button>
       ) : (
         <span style={{ minWidth: 30, textAlign: 'center', color: st.color }}><Diamond size={11} /></span>
       )}
@@ -965,7 +964,7 @@ export function FloorRow({ f, speakerOrder, names, border, role, turn, recId, au
         : <span style={{ color: uColor }}>-</span>}
       {role && <span className="badge badge--gray" style={{ fontSize: 9 }}>{role}</span>}
       {f.prio != null && f.prio >= 0 && <span className="ts">prio {f.prio}</span>}
-      {f.preempt && <span className="ts" style={{ color: 'var(--cims-warning)' }}>← 선점 {who(f.preempted_from)}</span>}
+      {f.preempt && <span className="ts" style={{ color: 'var(--cims-warning)' }}><ArrowLeft size={11} /> 선점 {who(f.preempted_from)}</span>}
       {f.tier && f.tier !== 'normal' && <span className="badge badge--red" style={{ fontSize: 9 }}>{f.tier}</span>}
       {extras.length > 0 && <span className="ts" style={{ fontSize: 11 }}>{extras.join(' · ')}</span>}
       {turn?.hasVideo && <span className="badge badge--blue" style={{ fontSize: 9 }}>영상</span>}
@@ -1165,14 +1164,14 @@ function LaneTimebar({ turns, speakerOrder, recId, audio, names, fill, collapsed
         )}
         {!collapsed && (
           <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-            <button className="btn btn--sm btn--ghost" disabled={!zoomed} onClick={() => panBy(-0.5)} title="왼쪽으로 이동 (반 화면)">‹</button>
-            <button className="btn btn--sm btn--ghost" disabled={!zoomed} onClick={() => panBy(0.5)} title="오른쪽으로 이동 (반 화면)">›</button>
-            <button className="btn btn--sm btn--ghost" disabled={zoom <= ZOOM_MIN} onClick={() => zoomBy(0.5)} title="축소 — 시간폭 넓히기">−</button>
+            <Button variant="ghost" disabled={!zoomed} onClick={() => panBy(-0.5)} title="왼쪽으로 이동 (반 화면)">‹</Button>
+            <Button variant="ghost" disabled={!zoomed} onClick={() => panBy(0.5)} title="오른쪽으로 이동 (반 화면)">›</Button>
+            <Button variant="ghost" disabled={zoom <= ZOOM_MIN} onClick={() => zoomBy(0.5)} title="축소 — 시간폭 넓히기">−</Button>
             <span className="ts" style={{ fontSize: 11, minWidth: 32, textAlign: 'center', color: 'var(--muted-foreground)' }}>
               {zoom < 10 ? Number(zoom.toFixed(1)) : Math.round(zoom)}×
             </span>
-            <button className="btn btn--sm btn--ghost" disabled={zoom >= ZOOM_MAX} onClick={() => zoomBy(2)} title="확대 — 시간폭 좁히기">+</button>
-            <button className="btn btn--sm btn--outline" disabled={!zoomed} onClick={resetZoom} title="전체 구간 보기">전체</button>
+            <Button variant="ghost" disabled={zoom >= ZOOM_MAX} onClick={() => zoomBy(2)} title="확대 — 시간폭 좁히기">+</Button>
+            <Button disabled={!zoomed} onClick={resetZoom} title="전체 구간 보기">전체</Button>
           </span>
         )}
       </div>

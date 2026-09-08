@@ -12,6 +12,7 @@ import { alertsApi } from '@core/api/alerts'
 import { SEV_COLOR, refreshAlarms, severityOf, useAlarms } from '@core/widgets/useAlarms'
 import { useToast } from '@core/components/Toast'
 import type { WidgetDef } from '@core/widgets/types'
+import { Button } from '@core/components/ui/button'
 
 // 요약 타일에 항상 노출하는 상위 4단계(고정 순서). indeterminate/cleared 는 건수 있을 때만.
 const TILE_ORDER = ['critical', 'major', 'minor', 'warning'] as const
@@ -92,8 +93,8 @@ function ActiveAlarmsWidget() {
           )
         })}
         {filter && (
-          <button onClick={() => setFilter(null)} className="btn btn--ghost btn--sm"
-                  style={{ marginLeft: 'auto', alignSelf: 'center' }}>전체 보기</button>
+          <Button variant="ghost" onClick={() => setFilter(null)}
+                  style={{ marginLeft: 'auto', alignSelf: 'center' }}>전체 보기</Button>
         )}
       </div>
 
@@ -143,7 +144,7 @@ function ActiveAlarmsWidget() {
                       {a.acked
                         ? <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                       <Check size={12} /> {a.ackUser || '승인'}</span>
-                        : <button className="btn btn--ghost btn--sm" onClick={() => ack(a.alarm_id)}>승인</button>}
+                        : <Button variant="ghost" onClick={() => ack(a.alarm_id)}>승인</Button>}
                     </td>
                   </tr>
                 )

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { orgApi, type Organization } from '../api/organizations'
 import { ChevronDown, ChevronRight, Dot } from 'lucide-react'
+import { Button } from '@core/components/ui/button'
 
 interface TreeNode extends Organization {
   children: TreeNode[]
@@ -69,8 +70,8 @@ export default function OrgTreePanel({ selectedPath, onSelect, style, fill }: Or
     <div className="panel" style={{ minWidth: 150, maxWidth: 180, width: 150, ...(fill ? { height: '100%' } : {}), ...style }}>
       <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span className="panel-title">조직</span>
-        <button className="btn btn--ghost btn--sm" style={{ fontSize: 11 }}
-          onClick={() => { onSelect(null, '전체'); }}>전체</button>
+        <Button variant="ghost" style={{ fontSize: 11 }}
+          onClick={() => { onSelect(null, '전체'); }}>전체</Button>
       </div>
       <div style={{ overflowY: 'auto', ...(fill ? { flex: 1, minHeight: 0 } : { maxHeight: 500 }) }}>
         {flat.map(n => {

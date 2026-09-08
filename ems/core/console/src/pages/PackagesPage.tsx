@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Plus, X } from 'lucide-react'
 import { useConfirm } from '../components/custom/confirm'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { deploymentApi, type SipPackage, type Deployment } from '../api/deployment'
@@ -6,6 +6,7 @@ import { useToast } from '../components/Toast'
 import PackageUploadModal from './deploy/PackageUploadModal'
 import { fmtSize, fmtRelTime, depEffectiveStatus } from './deploy/deployHelpers'
 import { agentDisplayName } from '../components/agentDisplay'
+import { Button } from '@core/components/ui/button'
 
 interface ModuleGroup {
   name: string
@@ -141,8 +142,8 @@ export default function PackagesPage() {
           )}
         </div>
         <div style={{ padding: 10, borderTop: '1px solid var(--border)' }}>
-          <button className="btn btn--primary" style={{ width: '100%' }}
-            onClick={() => setUploadOpen(true)}>＋ 패키지 업로드</button>
+          <Button variant="default" size="default" style={{ width: '100%' }}
+            onClick={() => setUploadOpen(true)}><Plus size={13} /> 패키지 업로드</Button>
         </div>
       </div>
 
@@ -318,14 +319,14 @@ function VersionRow({ pkg: p, isLatest, expanded, onToggle,
           </div>
 
           <div style={{ marginTop: 10, display: 'flex', gap: 6 }}>
-            <button className="btn btn--sm"
+            <Button
               disabled={depCount === 0}
               onClick={onShowDeployments}
               title={depCount === 0 ? '배포된 곳 없음' : '배포 대상 보기'}>
               배포 대상 보기 ({depCount})
-            </button>
-            <button className="btn btn--sm btn--danger" style={{ marginLeft: 'auto' }}
-              onClick={onDelete}>삭제</button>
+            </Button>
+            <Button variant="destructive" style={{ marginLeft: 'auto' }}
+              onClick={onDelete}>삭제</Button>
           </div>
         </div>
       )}
@@ -377,7 +378,7 @@ function DeploymentsForPackageModal({ pkg, deployments, onClose }: {
           )}
         </div>
         <div className="modal-footer" style={{ marginTop: 16 }}>
-          <button className="btn btn--outline" onClick={onClose}>닫기</button>
+          <Button size="default" onClick={onClose}>닫기</Button>
         </div>
       </div>
     </div>

@@ -3,6 +3,7 @@ import { statsApi, type MessagesResponse, type ServiceStatsResponse,
          type CallsResponse, type CallCell } from '@core/api/stats'
 import { useToast } from '@core/components/Toast'
 import { RotateCw } from 'lucide-react'
+import { Button } from '@core/components/ui/button'
 
 type SubTab = 'messages' | 'service'
 type Granularity = '1m' | '5m' | '10m' | '1h' | '1d' | '1w' | '1M' | '1y'
@@ -185,11 +186,10 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
 
         {/* 시간 단위 */}
         {(Object.entries(GRAN_LABELS) as [Granularity, string][]).map(([g, label]) => (
-          <button key={g}
-            className={`btn btn--sm ${gran === g ? 'btn--primary' : 'btn--ghost'}`}
+          <Button variant={gran === g ? 'default' : 'ghost'} key={g}
             onClick={() => setGran(g)}>
             {label}
-          </button>
+          </Button>
         ))}
 
         <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 8px' }} />

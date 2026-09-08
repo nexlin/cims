@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAlarms } from '@core/widgets/useAlarms'
 import type { EventRecord } from '@core/api/alerts'
 import type { WidgetDef } from '@core/widgets/types'
+import { Button } from '@core/components/ui/button'
 
 // kind = 이벤트 스트림의 1차 축 (표준화 §3.6 — DOMAIN 약어 STC/AUD). 고정 순서.
 const KIND_ORDER = ['stateChange', 'audit'] as const
@@ -75,8 +76,8 @@ function RecentEventsWidget() {
           )
         })}
         {filter && (
-          <button onClick={() => setFilter(null)} className="btn btn--ghost btn--sm"
-                  style={{ marginLeft: 'auto', alignSelf: 'center' }}>전체 보기</button>
+          <Button variant="ghost" onClick={() => setFilter(null)}
+                  style={{ marginLeft: 'auto', alignSelf: 'center' }}>전체 보기</Button>
         )}
       </div>
 

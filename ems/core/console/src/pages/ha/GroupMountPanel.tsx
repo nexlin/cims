@@ -81,7 +81,7 @@ export function GroupMountPanel({ declared, members, applying, onApply }: {
     setSource(''); setTarget(''); setOptions(MOUNT_DEFAULTS.options)
   }
   // 빈칸은 placeholder 로 보여준 기본값으로 채운다 — 대부분의 노드가 같은 NAS 를 같은
-  // 경로로 붙이므로, 표준 구성이면 [＋ 마운트 추가] → [전 멤버에 추가] 두 번이면 끝난다.
+  // 경로로 붙이므로, 표준 구성이면 [마운트 추가] → [전 멤버에 추가] 두 번이면 끝난다.
   const commitAdd = () => {
     const t = target.trim()  || MOUNT_DEFAULTS.target
     const s = source.trim()  || MOUNT_DEFAULTS.source

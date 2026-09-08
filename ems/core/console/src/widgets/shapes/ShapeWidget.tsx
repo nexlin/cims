@@ -11,6 +11,7 @@ import { catalogSources, sourcesForShape, useDataSourceCatalog, loadSource } fro
 import { GRAN_LABELS, defaultRange, granFits, useHasPageControl, usePageParam, usePageControl } from '../pageParams'
 import { TimeBarChart, SeriesBarChart, StatValue, DistributionBars, KvTable, MatrixTable } from './renderers'
 import { RotateCw } from 'lucide-react'
+import { Button } from '@core/components/ui/button'
 
 const RENDERERS = {
   'time-bar': TimeBarChart, 'series-bar': SeriesBarChart,
@@ -146,13 +147,13 @@ function ShapeWidgetBody({ shape, config }: { shape: WidgetShape; config?: Recor
                    onChange={e => setOwnRange(r => ({ ...r, to: e.target.value.replace('T', ' ') }))}
                    style={{ width: 176, fontSize: 12 }} />
             {Object.entries(GRAN_LABELS).map(([g, lb]) => (
-              <button key={g} className={`btn btn--sm ${gran === g ? 'btn--primary' : 'btn--ghost'}`}
+              <Button variant={gran === g ? 'default' : 'ghost'} key={g}
                       disabled={!granFits(from, to, g)}
-                      onClick={() => setOwnGran(g)}>{lb}</button>
+                      onClick={() => setOwnGran(g)}>{lb}</Button>
             ))}
           </>
         ))}
-        <button className="btn btn--sm btn--outline" style={{ marginLeft: 'auto' }} onClick={() => void load()} title="다시 조회"><RotateCw size={14} /></button>
+        <Button style={{ marginLeft: 'auto' }} onClick={() => void load()} title="다시 조회"><RotateCw size={14} /></Button>
       </div>
       {/* 본문은 남은 높이를 전부 받는다 — 차트는 그 높이를 채우고(비율 렌더), 표는 넘치면 스크롤. */}
       <div className="scroll-fill">{body}</div>

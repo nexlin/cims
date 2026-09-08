@@ -24,6 +24,7 @@ import {
   SessionDetail, Person, recIdOf, dateOf, detailKey, fmtShortTime, fmtDur, fmtSpeechMs,
   type DetailState,
 } from '@svc/components/pttSession'
+import { Button } from '@core/components/ui/button'
 
 // ── 종류 ────────────────────────────────────────────────────────
 // group = TS 24.481 그룹 문서를 갖는 편성 엔티티, private = 1:1 (TS 24.379 §11.1),
@@ -330,18 +331,18 @@ export default function PttHistoryPage() {
 
       {/* ── 툴바 1: 기간 · 검색 ── */}
       <div className="toolbar">
-        <button className="btn btn--sm btn--ghost" disabled={range !== 'day'}
-                onClick={() => setDate(d => shiftDay(d, -1))} title="이전 날">‹</button>
+        <Button variant="ghost" disabled={range !== 'day'}
+                onClick={() => setDate(d => shiftDay(d, -1))} title="이전 날">‹</Button>
         <input type="date" className="form-input" value={date} style={{ width: 150 }}
                onChange={e => setDate(e.target.value)} aria-label="조회 날짜" />
-        <button className="btn btn--sm btn--ghost" disabled={range !== 'day' || date >= todayStr()}
-                onClick={() => setDate(d => shiftDay(d, 1))} title="다음 날">›</button>
+        <Button variant="ghost" disabled={range !== 'day' || date >= todayStr()}
+                onClick={() => setDate(d => shiftDay(d, 1))} title="다음 날">›</Button>
         {/* 기간 프리셋 — P2 의 days/from·to 를 화면에서 쓰는 자리 */}
         {RANGES.map(r => (
-          <button key={r.id} className={`btn btn--sm ${range === r.id ? 'btn--primary' : 'btn--outline'}`}
+          <Button variant={range === r.id ? 'default' : 'outline'} key={r.id}
                   onClick={() => { setRange(r.id); if (r.id === 'day') setDate(todayStr()) }}>
             {r.label}
-          </button>
+          </Button>
         ))}
         {range === 'custom' && (
           <>
@@ -355,8 +356,8 @@ export default function PttHistoryPage() {
         <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
         <input className="search-input" placeholder="그룹·번호·세션키 검색" style={{ maxWidth: 240 }}
                value={searchInput} onChange={e => setSearchInput(e.target.value)} />
-        {q && <button className="btn btn--sm btn--ghost" onClick={() => setSearchInput('')}>검색 해제</button>}
-        <button className="btn btn--primary btn--sm" onClick={load}>새로고침</button>
+        {q && <Button variant="ghost" onClick={() => setSearchInput('')}>검색 해제</Button>}
+        <Button variant="default" onClick={load}>새로고침</Button>
         <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--muted-foreground)', cursor: 'pointer' }}>
           <input type="checkbox" checked={autoRefresh} onChange={e => setAR(e.target.checked)} />
           자동갱신
@@ -367,14 +368,14 @@ export default function PttHistoryPage() {
       <div className="toolbar" style={{ borderTop: 'none' }}>
         <span style={{ fontSize: 11.5, color: 'var(--muted-foreground)' }}>종류</span>
         {KINDS.map(k => (
-          <button key={k.id} className={`btn btn--sm ${kinds.has(k.id) ? 'btn--primary' : 'btn--outline'}`}
+          <Button variant={kinds.has(k.id) ? 'default' : 'outline'} key={k.id}
                   onClick={() => setKinds(prev => {
                     const n = new Set(prev)
                     if (n.has(k.id)) { if (n.size > 1) n.delete(k.id) } else n.add(k.id)
                     return n
                   })}>
             {k.label}
-          </button>
+          </Button>
         ))}
         <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
 
@@ -385,7 +386,7 @@ export default function PttHistoryPage() {
                       onToggleMenu={() => setDd(v => (v === 'person' ? null : 'person'))}
                       onChange={v => { setPerson(v); setDd(null) }} />
         {hour && (
-          <button className="btn btn--sm btn--primary" onClick={() => setHour('')}>{hour}시 <X size={12} /></button>
+          <Button variant="default" onClick={() => setHour('')}>{hour}시 <X size={12} /></Button>
         )}
 
         <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted-foreground)' }}>
@@ -415,10 +416,10 @@ export default function PttHistoryPage() {
                     value={sort} onChange={e => { setSort(e.target.value as SortKey); setPage(0) }}>
               {(Object.keys(SORT_LABEL) as SortKey[]).map(k => <option key={k} value={k}>{SORT_LABEL[k]}</option>)}
             </select>
-            <button className="btn btn--sm btn--ghost" title={order === 'desc' ? '내림차순' : '오름차순'}
+            <Button variant="ghost" title={order === 'desc' ? '내림차순' : '오름차순'}
                     onClick={() => setOrder(o => (o === 'desc' ? 'asc' : 'desc'))}>
               {order === 'desc' ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
-            </button>
+            </Button>
             <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--muted-foreground)' }}>
               {loading ? '조회 중…' : `${total}건`}
             </span>
@@ -440,9 +441,9 @@ export default function PttHistoryPage() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderTop: '1px solid var(--border)', fontSize: 12, color: 'var(--muted-foreground)' }}>
-            <button className="btn btn--sm btn--ghost" disabled={page <= 0} onClick={() => setPage(p => p - 1)}>‹</button>
+            <Button variant="ghost" disabled={page <= 0} onClick={() => setPage(p => p - 1)}>‹</Button>
             <span>{page + 1} / {pages}</span>
-            <button className="btn btn--sm btn--ghost" disabled={page + 1 >= pages} onClick={() => setPage(p => p + 1)}>›</button>
+            <Button variant="ghost" disabled={page + 1 >= pages} onClick={() => setPage(p => p + 1)}>›</Button>
             <select className="form-input" style={{ width: 78, marginLeft: 'auto', padding: '2px 6px', fontSize: 12 }} value={ps}
                     onChange={e => { setPs(Number(e.target.value)); setPage(0) }}>
               {PAGE_SIZES.map(n => <option key={n} value={n}>{n}개</option>)}
@@ -622,9 +623,9 @@ function SessionPane({ r, detail, names, audio, overlay, flowLoading, onFlow, on
           </span>
         )}
         <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 4, flex: '0 0 auto' }}>
-          <button className="btn btn--sm btn--outline" disabled={flowLoading} onClick={onFlow}>Flow</button>
-          <button className="btn btn--sm btn--outline" onClick={onPlayAll}><Play size={11} className="mr-1 inline align-[-1px]" />전체</button>
-          <button className="btn btn--sm btn--ghost" onClick={onClose} title="닫기 (Esc)"><X size={14} /></button>
+          <Button disabled={flowLoading} onClick={onFlow}>Flow</Button>
+          <Button onClick={onPlayAll}><Play size={11} className="mr-1 inline align-[-1px]" />전체</Button>
+          <Button variant="ghost" onClick={onClose} title="닫기 (Esc)"><X size={14} /></Button>
         </span>
       </div>
 
@@ -703,9 +704,9 @@ function GroupFilter({ summaries, selected, open, onToggleMenu, onChange }: {
     .sort((a, b) => (b[1].last_window || '').localeCompare(a[1].last_window || ''))
   return (
     <div style={{ position: 'relative' }} onClick={e => e.stopPropagation()}>
-      <button className={`btn btn--sm ${selected.size ? 'btn--primary' : 'btn--outline'}`} onClick={onToggleMenu}>
+      <Button variant={selected.size ? 'default' : 'outline'} onClick={onToggleMenu}>
         {selected.size ? `그룹 ${selected.size}` : '그룹'} <ChevronDown size={12} />
-      </button>
+      </Button>
       {open && (
         <div style={{
           position: 'absolute', zIndex: 30, top: 'calc(100% + 4px)', left: 0, minWidth: 240, maxHeight: 320,
@@ -753,11 +754,11 @@ function PersonFilter({ value, candidates, names, open, onToggleMenu, onChange }
   }, [candidates, input, names])
   return (
     <div style={{ position: 'relative' }} onClick={e => e.stopPropagation()}>
-      <button className={`btn btn--sm ${value ? 'btn--primary' : 'btn--outline'}`}
+      <Button variant={value ? 'default' : 'outline'}
               title={value ? names.tipOf(value) : undefined}
               onClick={() => (value ? onChange('') : onToggleMenu())}>
         {value ? <>사람 {names.nameOf(value)} <X size={12} /></> : <>사람 <ChevronDown size={12} /></>}
-      </button>
+      </Button>
       {open && !value && (
         <div style={{
           position: 'absolute', zIndex: 30, top: 'calc(100% + 4px)', left: 0, minWidth: 230, maxHeight: 320,

@@ -10,6 +10,7 @@ import { Pager } from '../components/ListControls'
 import { usePageParam } from '../widgets/pageParams'
 import { eventTypeLabel, fmtTime, downloadCsv } from '../utils/alarmLabels'
 import { RotateCw } from 'lucide-react'
+import { Button } from '@core/components/ui/button'
 
 const PAGE_SIZE = 20
 const FETCH_LIMIT = 5000
@@ -110,9 +111,9 @@ export function AuditEventsSection() {
         </select>
         <input className="search-input" style={{ width: 220 }} placeholder="행위자/그룹/세션/대상 검색"
                value={q} onChange={e => setQ(e.target.value)} />
-        <button className="btn btn--ghost btn--sm" onClick={exportCsv} style={{ marginLeft: 'auto' }}
-                disabled={filtered.length === 0}>CSV</button>
-        <button className="btn btn--ghost btn--sm" onClick={load} title="새로고침"><RotateCw size={14} /></button>
+        <Button variant="ghost" onClick={exportCsv} style={{ marginLeft: 'auto' }}
+                disabled={filtered.length === 0}>CSV</Button>
+        <Button variant="ghost" onClick={load} title="새로고침"><RotateCw size={14} /></Button>
       </div>
 
       <div className="panel" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>

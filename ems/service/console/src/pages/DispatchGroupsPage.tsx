@@ -1,7 +1,7 @@
 import { useConfirm } from '@core/components/custom/confirm'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import IconBtn from '@core/components/IconBtn'
-import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, Headphones, Pencil, Radio, Trash2, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, Headphones, Pencil, Plus, Radio, Trash2, X } from 'lucide-react'
 import { dispatchApi, type DispatchGroup, type DispatchGroupInput, type DispatchMember,
   type MonitorScope, type PttListen } from '@core/api/dispatch'
 import { usersApi, type UserSummary } from '@core/api/users'
@@ -13,6 +13,7 @@ import { buildPickIndex, type PickItem } from '@core/components/SubscriberPicker
 import { useToast } from '@core/components/Toast'
 import { useAuth } from '@core/contexts/AuthContext'
 import { hasRole } from '@core/utils/permissions'
+import { Button } from '@core/components/ui/button'
 
 // ── 관제 그룹 (dispatch_center.md §3) ─────────────────────────
 //  관제 그룹 = 픽업 그룹 + (선택) 대표번호 + (선택) 감청 범위. id 가 곧 가입자 pickup_group 값이라
@@ -137,11 +138,11 @@ export default function DispatchGroupsPage() {
           <span style={{ fontWeight: 600, fontSize: 13 }}>{orgName}</span>
           <input className="search-input" placeholder="그룹명·ID·대표번호 검색" value={search}
             onChange={e => setSearch(e.target.value)} style={{ maxWidth: 220 }} />
-          {search && <button className="btn btn--ghost btn--sm" onClick={() => setSearch('')}
-        aria-label="검색어 지우기"><X size={13} /></button>}
+          {search && <Button variant="ghost" onClick={() => setSearch('')}
+        aria-label="검색어 지우기"><X size={13} /></Button>}
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
             {canWrite && !notMigrated && (
-              <button className="btn btn--primary btn--sm" onClick={() => { setOpenId(null); setAdding(a => !a) }}>＋ 관제 그룹</button>
+              <Button variant="default" onClick={() => { setOpenId(null); setAdding(a => !a) }}><Plus size={13} /> 관제 그룹</Button>
             )}
           </span>
         </div>
@@ -308,8 +309,8 @@ function GroupDrawer(p: DrawerProps) {
             </select>
           </Field>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <button className="btn btn--sm btn--primary" onClick={save}>저장</button>
-            <button className="btn btn--sm btn--ghost" onClick={() => isNew ? p.onClose() : setEditing(false)}>취소</button>
+            <Button variant="default" onClick={save}>저장</Button>
+            <Button variant="ghost" onClick={() => isNew ? p.onClose() : setEditing(false)}>취소</Button>
           </div>
           <div style={{ flexBasis: '100%', fontSize: 11, color: 'var(--muted-foreground)' }}>감청 범위: {SCOPE_HINT[form.monitor_scope || 'none']}</div>
         </FieldRow>
@@ -320,7 +321,7 @@ function GroupDrawer(p: DrawerProps) {
           <span className="ts">넘김 {existing.overflow_target || '—'}</span>
           <span className="ts">감청 {SCOPE_LABEL[existing.monitor_scope]}</span>
           <span className="ts">PTT 청취 {PTT_LABEL[existing.ptt_listen]}{existing.ptt_listen !== 'none' ? ` (${existing.listen_visibility === 'hidden' ? '은닉' : '투명'})` : ''}</span>
-          {p.canWrite && <button className="btn btn--sm btn--outline" style={{ marginLeft: 'auto' }} onClick={() => setEditing(true)}>속성 편집</button>}
+          {p.canWrite && <Button style={{ marginLeft: 'auto' }} onClick={() => setEditing(true)}>속성 편집</Button>}
         </div>
       )}
 
@@ -360,7 +361,7 @@ function TargetPicker({ title, icon, options, value, canEdit, onSave }: {
     <div style={{ flex: '1 1 280px', border: '1px solid var(--border)', borderRadius: 10, padding: '8px 10px', background: 'var(--card)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
         {icon} {title} <span className="badge badge--gray" style={{ fontSize: 10 }}>{sel.size}</span>
-        {canEdit && dirty && <button className="btn btn--sm btn--primary" style={{ marginLeft: 'auto' }} onClick={() => onSave(Array.from(sel))}>저장</button>}
+        {canEdit && dirty && <Button variant="default" style={{ marginLeft: 'auto' }} onClick={() => onSave(Array.from(sel))}>저장</Button>}
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: 12, maxHeight: 120, overflowY: 'auto' }}>
         {options.length === 0 && <span className="ts" style={{ color: 'var(--muted-foreground)' }}>선택 가능한 그룹 없음</span>}
@@ -435,10 +436,10 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
 
         {canManage && (
           <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, alignSelf: 'center' }}>
-            <button className="btn btn--primary btn--sm" disabled={busy || picked.size === 0} onClick={() => doAdd(Array.from(picked))}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}><ArrowLeft size={14} /> 추가{picked.size ? ` ${picked.size}` : ''}</button>
-            <button className="btn btn--outline btn--sm" disabled={busy || selMembers.size === 0} onClick={() => doRemove(Array.from(selMembers))}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>제거{selMembers.size ? ` ${selMembers.size}` : ''} <ArrowRight size={14} /></button>
+            <Button variant="default" disabled={busy || picked.size === 0} onClick={() => doAdd(Array.from(picked))}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}><ArrowLeft size={14} /> 추가{picked.size ? ` ${picked.size}` : ''}</Button>
+            <Button disabled={busy || selMembers.size === 0} onClick={() => doRemove(Array.from(selMembers))}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>제거{selMembers.size ? ` ${selMembers.size}` : ''} <ArrowRight size={14} /></Button>
           </div>
         )}
 

@@ -12,6 +12,7 @@ import {
   GRAN_LABELS, GRAN_MAX_DAYS, bestGran, defaultRange, fmtDt, granFits,
   usePageControl, usePageParam, useSetPageParams,
 } from '../pageParams'
+import { Button } from '@core/components/ui/button'
 
 // 'YYYY-MM-DD HH:MM' ↔ datetime-local('YYYY-MM-DDTHH:MM')
 const toInput = (v: string) => (v || '').replace(' ', 'T').slice(0, 16)
@@ -64,9 +65,9 @@ function PageFilterWidget({ config }: WidgetProps) {
                onChange={e => applyRange(from, fromInput(e.target.value))}
                style={{ width: 190, fontSize: 12 }} />
         {PRESETS.map(p => (
-          <button key={p.key} className="btn btn--sm" onClick={() => applyPreset(p.days)}>{p.label}</button>
+          <Button key={p.key} onClick={() => applyPreset(p.days)}>{p.label}</Button>
         ))}
-        <button className="btn btn--sm btn--ghost" title="오늘 00:00 ~ 지금" onClick={reset} aria-label="기간 초기화"><RotateCcw size={13} /></button>
+        <Button variant="ghost" title="오늘 00:00 ~ 지금" onClick={reset} aria-label="기간 초기화"><RotateCcw size={13} /></Button>
 
         {showGran && (
           <>
@@ -75,10 +76,10 @@ function PageFilterWidget({ config }: WidgetProps) {
               const fits = granFits(from, to, g)
               const lim = GRAN_MAX_DAYS[g]
               return (
-                <button key={g} className={`btn btn--sm ${gran === g ? 'btn--primary' : 'btn--ghost'}`}
+                <Button variant={gran === g ? 'default' : 'ghost'} key={g}
                         disabled={!fits}
                         title={fits ? undefined : `${label} 단위는 ${lim}일까지 볼 수 있습니다`}
-                        onClick={() => setGran(g)}>{label}</button>
+                        onClick={() => setGran(g)}>{label}</Button>
               )
             })}
           </>

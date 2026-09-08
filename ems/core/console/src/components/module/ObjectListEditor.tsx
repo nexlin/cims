@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
 import type { ConfigTemplateField } from '../../api/deployment'
+import { Button } from '@core/components/ui/button'
+import { Plus, X } from 'lucide-react'
 
 type Item = Record<string, unknown>
 
@@ -62,15 +64,15 @@ export function ObjectListEditor({ field, value, onChange, renderCell, ensureOne
                   </td>
                 ))}
                 <td>
-                  <button className="btn btn--sm btn--danger" onClick={() => removeItem(i)}
-                    disabled={ensureOne && display.length <= 1}>×</button>
+                  <Button variant="destructive" onClick={() => removeItem(i)}
+                    disabled={ensureOne && display.length <= 1}><X size={13} /></Button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
-      <button className="btn btn--sm btn--outline" onClick={addItem} style={{ marginTop: 4 }}>＋ 항목</button>
+      <Button onClick={addItem} style={{ marginTop: 4 }}><Plus size={13} /> 항목</Button>
     </div>
   )
 }

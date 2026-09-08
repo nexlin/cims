@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowDown, ArrowRight, ArrowUp, Check, ChevronDown, ChevronRight, Copy, Hourglass, Lock, LockOpen, Pencil, RefreshCw, RotateCw, Search, ShieldCheck, Stethoscope, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowRight, ArrowUp, Check, ChevronDown, ChevronRight, Copy, Hourglass, Lock, LockOpen, Pencil, Plus, RefreshCw, RotateCw, Search, ShieldCheck, Stethoscope, Trash2, X } from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Alert } from '../components/ui/alert'
@@ -568,12 +568,12 @@ export default function ServersPage() {
           {/* 시스템 추가 — 시스템 목록 바로 아래. 구성 작업이므로 [시스템/서버 구성] 탭에서만 노출 */}
           {pageTab === 'infra' && (
             <div className="shrink-0 p-2.5">
-              <button className="btn btn--primary" style={{ width: '100%', height: 36 }}
+              <Button variant="default" size="default" style={{ width: '100%', height: 36 }}
                       onClick={() => setSystemModalOpen(true)}
                       disabled={!canEdit}
                       title={canEdit ? 'AS 이중화 (서버 2 자동) / AA 다중화 / SA 단일 서버' : 'admin 권한 필요 (관리자 인증)'}>
-                ＋ 시스템 추가
-              </button>
+                <Plus size={13} /> 시스템 추가
+              </Button>
             </div>
           )}
         </div>
@@ -893,7 +893,7 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick, onRe
                   border: '1px solid var(--destructive)', background: 'var(--card)', color: 'var(--destructive)',
                   fontSize: 10, padding: '0 5px', borderRadius: 3, cursor: 'pointer',
                   fontWeight: 600,
-                }}>×</button>
+                }}><X size={11} /></button>
       )}
     </div>
   )
@@ -1911,18 +1911,18 @@ function ServerContextBar({ a, onApprove, onRevoke, onRemove, onRename, onUpgrad
 
       <div className="ml-auto flex items-center gap-1.5">
         {a.status === 'pending' && (
-          <button className="btn btn--sm btn--primary" onClick={() => onApprove(a)}>승인</button>
+          <Button variant="default" onClick={() => onApprove(a)}>승인</Button>
         )}
         {(a.status === 'online' || a.status === 'offline') && (
           <>
-            <button className="btn btn--sm" onClick={() => onMetrics(a)}>메트릭</button>
-            <button className="btn btn--sm" onClick={() => onHealthCheck(a)}
+            <Button onClick={() => onMetrics(a)}>메트릭</Button>
+            <Button onClick={() => onHealthCheck(a)}
               disabled={a.status !== 'online'} title="keepalived + 모듈 + VIP 실시간 점검 (sync REST)">
               <Stethoscope size={13} /> 점검
-            </button>
+            </Button>
             <DropdownMenu>
-              <DropdownMenuTrigger className="btn btn--sm" title="그 밖의 서버 액션">
-                더보기 <ChevronDown size={13} />
+              <DropdownMenuTrigger asChild>
+                <Button title="그 밖의 서버 액션">더보기 <ChevronDown size={13} /></Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuItem disabled={a.status !== 'online'} onSelect={() => onRestart(a)}
@@ -1962,11 +1962,11 @@ function ServerContextBar({ a, onApprove, onRevoke, onRemove, onRename, onUpgrad
           </>
         )}
         {a.status !== 'online' && a.status !== 'offline' && a.status !== 'pending' && (
-          <button className="btn btn--sm btn--outline" onClick={() => onRemove(a)}
+          <Button onClick={() => onRemove(a)}
                   disabled={a.ha_group?.mode === 'active_standby'}
                   title={a.ha_group?.mode === 'active_standby'
                     ? 'AS 그룹의 멤버는 단독 삭제 불가 — 그룹 삭제로만 가능'
-                    : '서버 삭제 (관련 deployment 도 같이 제거)'}>삭제</button>
+                    : '서버 삭제 (관련 deployment 도 같이 제거)'}>삭제</Button>
         )}
       </div>
     </div>
@@ -1997,14 +1997,14 @@ function GroupContextBar({ group, memberCount, onOpenConfig, onDeleteSystem }: {
       <Badge variant="neutralSoft">그룹 · 노드 {memberCount}</Badge>
       <span className="font-mono text-xs text-muted-foreground">#{group.id} · vrid {group.vrid}</span>
       <div className="ml-auto flex items-center gap-1.5">
-        <button className="btn btn--sm" onClick={onOpenConfig}
+        <Button onClick={onOpenConfig}
                 title="멤버별 설정값 나란히 비교 (읽기 전용) — 편집은 각 멤버 서버의 패키지 설정 탭">
           <Search size={13} /> 설정 비교
-        </button>
-        <button className="btn btn--sm btn--danger" onClick={() => onDeleteSystem(group)}
+        </Button>
+        <Button variant="destructive" onClick={() => onDeleteSystem(group)}
                 title="HA 그룹 + 모든 멤버 일괄 삭제">
           <Trash2 size={13} /> 시스템 삭제
-        </button>
+        </Button>
       </div>
     </div>
   )
@@ -3185,9 +3185,9 @@ function InstallSection({ agent: a, autoRegenSignal }: {
               borderRadius: 4, fontSize: 12, whiteSpace: 'pre-wrap', margin: 0,
               opacity: expired ? 0.5 : 1,
             }}>{data.install_command}</pre>
-            <button className="btn btn--sm btn--outline"
+            <Button
               style={{ position: 'absolute', top: 8, right: 8 }}
-              onClick={copy} disabled={expired}>{copied ? <Check size={12} /> : <Copy size={12} />} 복사</button>
+              onClick={copy} disabled={expired}>{copied ? <Check size={12} /> : <Copy size={12} />} 복사</Button>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
             <div style={{ fontSize: 12, color: expired ? 'var(--destructive)' : 'var(--foreground)' }}>
@@ -3197,10 +3197,10 @@ function InstallSection({ agent: a, autoRegenSignal }: {
                   : <>token 만료까지 약 <b>{minsLeft}분</b> (만료 시각: {expiresAt})</>
                 : <>token 만료 시각 미상</>}
             </div>
-            <button className="btn btn--sm" onClick={regenerate} disabled={regenerating}
+            <Button onClick={regenerate} disabled={regenerating}
                     style={{ marginLeft: 'auto' }}>
               {regenerating ? '재발급 중...' : <><RotateCw size={13} /> 재발급</>}
-            </button>
+            </Button>
           </div>
           <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 6 }}>
             실행 후 <code>./init.sh</code> 로 sudoers + enrollment + systemd unit 일괄 설정 (sudo 비번 1회).
@@ -3340,18 +3340,18 @@ function AddMemberModal({ group, serverName, mountSuggestion, onClose, onSubmit 
         )}
       </div>
       <div className="modal-footer" style={{ marginTop: 16 }}>
-        <button className="btn" onClick={onClose} disabled={busy}>취소</button>
-        <button className="btn btn--primary" disabled={busy || !name.trim() || (mountOn && !mntValid)}
+        <Button size="default" onClick={onClose} disabled={busy}>취소</Button>
+        <Button variant="default" size="default" disabled={busy || !name.trim() || (mountOn && !mntValid)}
                 onClick={async () => {
                   setBusy(true)
                   try {
                     await onSubmit(name.trim(), mountOn
                       ? [{ ...mnt, target: mnt.target.trim().replace(/\/+$/, '') }]
-                      : [])   // [] = 마운트하지 않음(명시) — 그룹 선언 상속 안 함
+                      : []) // [] = 마운트하지 않음(명시) — 그룹 선언 상속 안 함
                   } finally { setBusy(false) }
                 }}>
           {busy ? '추가 중…' : '추가'}
-        </button>
+        </Button>
       </div>
     </Modal>
   )
@@ -3393,15 +3393,15 @@ function PendingMemberModal({ info, onClose }: {
           background: 'var(--muted)', color: 'var(--foreground)', padding: 12, paddingRight: 88,
           borderRadius: 4, fontSize: 12, whiteSpace: 'pre-wrap', margin: 0,
         }}>{info.install_command}</pre>
-        <button className="btn btn--sm btn--outline"
+        <Button
           style={{ position: 'absolute', top: 8, right: 8 }}
-          onClick={copy}>{copied ? <Check size={12} /> : <Copy size={12} />} 복사</button>
+          onClick={copy}>{copied ? <Check size={12} /> : <Copy size={12} />} 복사</Button>
       </div>
       <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 6 }}>
         token: <code>{info.enrollment_token}</code>
       </div>
       <div className="modal-footer" style={{ marginTop: 16 }}>
-        <button className="btn btn--primary" onClick={onClose}>닫기</button>
+        <Button variant="default" size="default" onClick={onClose}>닫기</Button>
       </div>
     </Modal>
   )
@@ -3736,11 +3736,11 @@ function DeploymentUpgradeModal({ dep: d, packages, onClose, onDone }: {
         </>
       )}
       <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-        <button className="btn btn--sm" onClick={onClose}>취소</button>
-        <button className="btn btn--sm btn--primary" disabled={!target || busy}
+        <Button onClick={onClose}>취소</Button>
+        <Button variant="default" disabled={!target || busy}
           onClick={() => run()}>
           {busy ? '진행 중…' : target ? `v${target.version} 로 업그레이드` : '업그레이드'}
-        </button>
+        </Button>
       </div>
     </Modal>
   )
@@ -3913,9 +3913,9 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
         </div>
       )}
       <div className="modal-footer" style={{ marginTop: 16 }}>
-        <button className="btn btn--outline" onClick={onClose}>취소</button>
-        <button className="btn btn--primary" onClick={create}
-                disabled={!!selectedMismatch}>추가</button>
+        <Button size="default" onClick={onClose}>취소</Button>
+        <Button variant="default" size="default" onClick={create}
+                disabled={!!selectedMismatch}>추가</Button>
       </div>
     </Modal>
   )

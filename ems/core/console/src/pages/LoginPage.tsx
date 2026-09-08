@@ -2,6 +2,7 @@ import { KeyRound, Radio } from 'lucide-react'
 import { useState } from 'react'
 import { authApi } from '../api/auth'
 import { useAuth } from '../contexts/AuthContext'
+import { Button } from '@core/components/ui/button'
 
 type Mode = 'login' | 'register' | 'change_pw'
 
@@ -77,12 +78,12 @@ export default function LoginPage() {
               value={pw2} onChange={e => setPw2(e.target.value)} />
             {error && <div className="auth-error">{error}</div>}
             {ok    && <div className="auth-ok">{ok}</div>}
-            <button className="btn btn--primary" type="submit" disabled={loading}>
+            <Button variant="default" size="default" className="w-full" type="submit" disabled={loading}>
               {loading ? '변경 중...' : '변경'}
-            </button>
-            <button className="btn btn--ghost" type="button" onClick={() => { reset(); setMode('login') }}>
+            </Button>
+            <Button variant="ghost" size="default" className="w-full" type="button" onClick={() => { reset(); setMode('login') }}>
               취소
-            </button>
+            </Button>
           </form>
         </div>
       </div>
@@ -108,13 +109,13 @@ export default function LoginPage() {
             <input className="form-input" type="password" placeholder="비밀번호"
               value={pw} onChange={e => setPw(e.target.value)} />
             {error && <div className="auth-error">{error}</div>}
-            <button className="btn btn--primary" type="submit" disabled={loading}>
+            <Button variant="default" size="default" className="w-full" type="submit" disabled={loading}>
               {loading ? '로그인 중...' : '로그인'}
-            </button>
-            <button className="btn btn--ghost auth-switch" type="button"
+            </Button>
+            <Button variant="link" size="default" className="auth-switch" type="button"
               onClick={() => { reset(); setMode('register') }}>
               계정이 없으신가요? 회원가입
-            </button>
+            </Button>
           </form>
         )}
 
@@ -130,13 +131,13 @@ export default function LoginPage() {
             <input className="form-input" type="password" placeholder="비밀번호 확인"
               value={pw2} onChange={e => setPw2(e.target.value)} />
             {error && <div className="auth-error">{error}</div>}
-            <button className="btn btn--primary" type="submit" disabled={loading}>
+            <Button variant="default" size="default" className="w-full" type="submit" disabled={loading}>
               {loading ? '가입 중...' : '가입하기'}
-            </button>
-            <button className="btn btn--ghost auth-switch" type="button"
+            </Button>
+            <Button variant="link" size="default" className="auth-switch" type="button"
               onClick={() => { reset(); setMode('login') }}>
               이미 계정이 있으신가요? 로그인
-            </button>
+            </Button>
           </form>
         )}
       </div>

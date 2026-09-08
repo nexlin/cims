@@ -8,13 +8,14 @@
 // 운영자가 카드 안에서 재배치할 수 있다(console_platform §3.0.1). 세 블록이 같은 편집 초안을
 // 봐야 하므로 상태는 모듈 store(`myLayoutStore.ts`)로 끌어올렸다.
 import { StatusDot } from '../components/custom/status-dot'
-import { AlertTriangle, X } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, X } from 'lucide-react'
 import { useConfirm } from '../components/custom/confirm'
 import { useMemo } from 'react'
 import { useToast } from '../components/Toast'
 import { InfoDot } from '../components/InfoDot'
 import { widgetUnavailableNote, type CatalogWidget, type WidgetArea } from '../api/consoleLayouts'
 import { myLayout, useMyLayout } from './myLayoutStore'
+import { Button } from '@core/components/ui/button'
 
 const AREA_LABEL: Record<WidgetArea, string> = { ops: '운용', admin: '관리' }
 
@@ -34,17 +35,17 @@ export function MyLayoutHeader() {
         따릅니다 — 모든 위젯 API 는 서버에서 권한을 재확인합니다.
       </InfoDot>
       <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-        <button className="btn btn--sm btn--primary" onClick={() => void myLayout.save(show)}
-                disabled={s.saving || !s.dirty}>저장</button>
-        <button className="btn btn--sm" onClick={() => void myLayout.load(show)}
-                disabled={s.saving}>되돌리기</button>
-        <button className="btn btn--sm" disabled={s.saving} title="개인 구성 삭제 → 프로파일 기본"
+        <Button variant="default" onClick={() => void myLayout.save(show)}
+                disabled={s.saving || !s.dirty}>저장</Button>
+        <Button onClick={() => void myLayout.load(show)}
+                disabled={s.saving}>되돌리기</Button>
+        <Button disabled={s.saving} title="개인 구성 삭제 → 프로파일 기본"
                 onClick={() => void (async () => {
                   if (await confirm({ title: '개인 구성 초기화', tone: 'danger', confirmLabel: '초기화',
                     body: '개인 구성을 삭제하고 프로파일 기본값으로 되돌릴까요?' })) myLayout.reset(show)
                 })()}>
           초기화
-        </button>
+        </Button>
       </span>
     </div>
   )
@@ -62,8 +63,8 @@ export function MyLayoutProfile() {
                 onChange={e => myLayout.setBaseProfile(e.target.value)}>
           {s.profiles.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
         </select>
-        <button className="btn btn--sm" onClick={() => myLayout.applyProfile(s.baseProfile)}
-                title="선택한 프로파일의 기본 위젯 세트로 교체">이 프로파일 적용</button>
+        <Button onClick={() => myLayout.applyProfile(s.baseProfile)}
+                title="선택한 프로파일의 기본 위젯 세트로 교체">이 프로파일 적용</Button>
         <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
           설치된 서비스: {s.installed.length ? s.installed.join(', ') : '없음'}
         </span>
@@ -135,11 +136,11 @@ export function MyLayoutWidgets() {
         <AlertTriangle size={12} /> {note}</span>}
                 <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>({id})</span>
                 <span style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
-                  <button className="btn btn--sm" onClick={() => myLayout.move(i, -1)} disabled={i === 0} title="위로">↑</button>
-                  <button className="btn btn--sm" onClick={() => myLayout.move(i, 1)}
-                          disabled={i === s.dashboard.length - 1} title="아래로">↓</button>
-                  <button className="btn btn--sm" onClick={() => myLayout.remove(i)} title="제거"
-                          style={{ color: 'var(--destructive)' }} aria-label="삭제"><X size={13} /></button>
+                  <Button onClick={() => myLayout.move(i, -1)} disabled={i === 0} title="위로"><ArrowUp size={13} /></Button>
+                  <Button onClick={() => myLayout.move(i, 1)}
+                          disabled={i === s.dashboard.length - 1} title="아래로"><ArrowDown size={13} /></Button>
+                  <Button onClick={() => myLayout.remove(i)} title="제거"
+                          style={{ color: 'var(--destructive)' }} aria-label="삭제"><X size={13} /></Button>
                 </span>
               </li>
             )

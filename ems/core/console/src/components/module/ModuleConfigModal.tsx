@@ -483,7 +483,7 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
               <tr style={{ color: 'var(--muted-foreground)' }}>
                 <th style={{ textAlign: 'left', padding: '4px 6px', width: 220 }}>필드</th>
                 <th style={{ textAlign: 'left', padding: '4px 6px' }}>옛 값</th>
-                <th style={{ width: 30, textAlign: 'center' }}>→</th>
+                <th style={{ width: 30, textAlign: 'center' }} aria-label="바뀜"><ArrowRight size={12} /></th>
                 <th style={{ textAlign: 'left', padding: '4px 6px' }}>새 값</th>
                 <th style={{ width: 60, textAlign: 'center' }}></th>
               </tr>
@@ -662,11 +662,11 @@ export function StoreMigrateFooter({ groupId, mountPoint, dirty, onDone }: {
       동일해야</b> 하므로 공통 설정입니다 — 최초 지정은 부트스트랩 설치가 담당합니다.
       {groupId ? (
         <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className="btn btn--sm btn--primary" disabled={busy || !mp}
+          <Button variant="default" disabled={busy || !mp}
                   onClick={migrate}
                   title="현재 입력된 마운트 지점으로 관리 store 를 이관 (콘솔 30초 단절)">
-            {busy ? '이관 요청 중…' : `⇢ ${mp || '(마운트 지점)'} 으로 이관`}
-          </button>
+            {busy ? '이관 요청 중…' : <><ArrowRight size={13} /> {mp || '(마운트 지점)'} 으로 이관</>}
+          </Button>
           {dirty && (
             <span style={{ color: 'var(--cims-warning)' }}>
               편집한 값이 있습니다 — 저장 대신 이 버튼을 쓰세요.
@@ -795,7 +795,7 @@ function renderInput(f: ConfigTemplateField, value: FieldValue, onChange: (v: Fi
     )
   }
   if (f.type === 'object_list') {
-    // ip/port 등 구조화 항목 리스트. 값이 비면 빈 1행 표시 + ＋로 추가(최소 1행 유지).
+    // ip/port 등 구조화 항목 리스트. 값이 비면 빈 1행 표시 + [추가] 로 추가(최소 1행 유지).
     return (
       <ObjectListEditor field={f} value={value}
         onChange={(v) => onChange(v as FieldValue)} ensureOne />

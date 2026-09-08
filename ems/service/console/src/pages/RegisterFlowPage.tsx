@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { flowApi, type FlowMessage } from '@core/api/flow'
 import FlowPage from '@core/pages/FlowPage'
+import { Button } from '@core/components/ui/button'
+import { ArrowLeft } from 'lucide-react'
 
 type PageState = 'form' | 'flow'
 
@@ -46,7 +48,7 @@ export default function RegisterFlowPage() {
         </span>
 
         {pageState === 'flow' && (
-          <button className="btn btn--sm" onClick={backToForm} style={{ marginRight: 4 }}>← 검색</button>
+          <Button onClick={backToForm} style={{ marginRight: 4 }}><ArrowLeft size={13} /> 검색</Button>
         )}
 
         {pageState === 'form' && (
@@ -70,13 +72,12 @@ export default function RegisterFlowPage() {
                 style={{ padding: '4px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 13 }}
               />
             </div>
-            <button
-              className="btn btn--primary btn--sm"
+            <Button variant="default"
               onClick={search}
               disabled={loading || !user.trim()}
             >
               {loading ? '조회 중…' : '조회'}
-            </button>
+            </Button>
           </>
         )}
 

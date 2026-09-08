@@ -1,5 +1,5 @@
 import { useConfirm } from '../components/custom/confirm'
-import { Play, RotateCw, Square, Trash2 } from 'lucide-react'
+import { Download, Play, RotateCw, Square, Trash2 } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { servicesApi, parseServiceStatus, type ServiceName, type ServiceAction } from '../api/services'
@@ -8,6 +8,7 @@ import { buildApi, type BuildJobStatus, type ManifestResponse } from '../api/bui
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
 import ModuleConfigModal from '../components/module/ModuleConfigModal'
+import { Button } from '@core/components/ui/button'
 
 type SvcState = { running: boolean; pid?: number }
 
@@ -387,20 +388,20 @@ export default function ServicesPage() {
           <datalist id="all-versions">
             {allVersions.map(v => <option key={v} value={v} />)}
           </datalist>
-          <button className="btn btn--primary" disabled={!!activeJob} onClick={() => { void startRelease() }}
+          <Button variant="default" size="default" disabled={!!activeJob} onClick={() => { void startRelease() }}
                   title="빌드 + 패키징 한 번에 (cmake + make + npm + tarball 12종). 5~15분.">
             {activeJob?.kind === 'release' ? '진행 중…'
               : activeJob?.kind === 'build' ? '빌드 중…'
               : activeJob?.kind === 'pkg' ? '패키징 중…'
               : <><Play size={13} /> 빌드 & 패키징</>}
-          </button>
-          <button className="btn btn--danger" disabled={!!activeJob} onClick={() => { void cleanPackages() }}
+          </Button>
+          <Button variant="destructive" size="default" disabled={!!activeJob} onClick={() => { void cleanPackages() }}
                   title="패키지 산출물 (tarball 들 + manifest.json) 삭제. 빌드 결과는 유지.">
             <Trash2 size={13} className="inline align-[-2px]" /> 정리
-          </button>
-          <button className="btn btn--outline" onClick={() => { void load(); void loadPackages(); void loadManifest() }}>
+          </Button>
+          <Button size="default" onClick={() => { void load(); void loadPackages(); void loadManifest() }}>
             <RotateCw size={13} /> 새로고침
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -453,15 +454,15 @@ export default function ServicesPage() {
                   {/* ¹ 설정 — 템플릿/설정 편집 (버전 선택은 ³ 로 이동) */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, minWidth: 0 }}>
                     <span style={{ color: 'var(--muted-foreground)', fontWeight: 500, minWidth: 50 }}>¹ 설정</span>
-                    <button className="btn btn--sm btn--outline"
+                    <Button
                       disabled={versions.length === 0}
                       onClick={() => openTemplate(card.key, true)}
-                      title="설정 템플릿 편집">템플릿</button>
+                      title="설정 템플릿 편집">템플릿</Button>
                     {card.hasProcess && (
-                      <button className="btn btn--sm btn--outline"
+                      <Button
                         disabled={versions.length === 0}
                         onClick={() => setConfigModule(card.key)}
-                        title="모듈 설정 편집">설정</button>
+                        title="모듈 설정 편집">설정</Button>
                     )}
                     {needsRestart[card.key] && (
                       <span className="tag" style={{ background: 'var(--destructive)', color: 'var(--cims-on-solid)' }}
@@ -487,20 +488,19 @@ export default function ServicesPage() {
                         {running ? `pid=${s?.pid ?? '?'}` : '—'}
                       </span>
                       <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
-                        <button
-                          className={`btn btn--sm${running ? ' btn--danger' : ''}`}
+                        <Button variant={running ? 'destructive' : 'outline'}
                           disabled={disabled}
                           onClick={() => toggleRunning(card.key, running, !!card.critical)}
                           title={running ? '종료' : '기동'}
                         >
                           {running ? <Square size={12} /> : <Play size={12} />}
-                        </button>
-                        <button className="btn btn--sm btn--outline"
+                        </Button>
+                        <Button
                           disabled={disabled || !running}
                           onClick={() => act(card.key, 'restart', !!card.critical)}
                           title="재기동">
                           <RotateCw size={12} />
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   ) : (
@@ -516,14 +516,14 @@ export default function ServicesPage() {
                                 fontSize: 12, flexWrap: 'wrap', minWidth: 0 }}>
                     <span style={{ color: 'var(--muted-foreground)', fontWeight: 500, minWidth: 50 }}>³ 다운로드</span>
                     {variantTars.map(({ v, tar }) => (
-                      <button key={v} className="btn btn--sm btn--outline"
+                      <Button key={v}
                         disabled={!tar}
                         title={tar ? `${tar.name} (${fmtSize(tar.size)})` : `${v} tarball 없음 — 먼저 [패키징]`}
                         onClick={() => { void downloadTarball(v) }}
                         style={{ fontSize: 11, padding: '2px 6px',
                                  fontFamily: 'monospace' }}>
-                        ⤓ {v}{tar?.version ? ` v${tar.version}` : ''}
-                      </button>
+                        <Download size={12} /> {v}{tar?.version ? ` v${tar.version}` : ''}
+                      </Button>
                     ))}
                   </div>
                 </div>
@@ -642,15 +642,15 @@ export default function ServicesPage() {
             <div className="modal-footer" style={{ flex: '0 0 auto' }}>
               {editing ? (
                 <>
-                  <button className="btn btn--outline" onClick={() => { setEditing(false); setEditError('') }} disabled={saving}>취소</button>
-                  <button className="btn btn--primary" onClick={saveEdit} disabled={saving}>
+                  <Button size="default" onClick={() => { setEditing(false); setEditError('') }} disabled={saving}>취소</Button>
+                  <Button variant="default" size="default" onClick={saveEdit} disabled={saving}>
                     {saving ? '저장 중...' : '저장'}
-                  </button>
+                  </Button>
                 </>
               ) : (
                 <>
-                  <button className="btn btn--outline" onClick={() => setTemplateModal(null)}>닫기</button>
-                  <button className="btn btn--primary" onClick={startEdit}>편집</button>
+                  <Button size="default" onClick={() => setTemplateModal(null)}>닫기</Button>
+                  <Button variant="default" size="default" onClick={startEdit}>편집</Button>
                 </>
               )}
             </div>

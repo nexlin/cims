@@ -12,6 +12,7 @@ import { alertsApi } from '../api/alerts'
 import { onAlarmTransition, refreshAlarms, severityOf, useAlarms } from '../widgets/useAlarms'
 import { useToast } from './Toast'
 import { Badge } from './ui/badge'
+import { Button } from '@core/components/ui/button'
 
 const SEV_BADGE: Record<string, string> = {
   critical: 'badge--red', major: 'badge--red', minor: 'badge--yellow',
@@ -80,8 +81,8 @@ export default function AlarmIndicator() {
                     onClick={() => setTab('alarms')}>활성 알람 ({active.length})</button>
             <button className={`tab-btn ${tab === 'events' ? 'tab-btn--active' : ''}`}
                     onClick={() => setTab('events')}>최근 이벤트 ({recentEvents.length})</button>
-            <button className="btn btn--ghost btn--sm" style={{ marginLeft: 'auto' }}
-                    onClick={() => setOpen(false)} aria-label="닫기"><X size={16} /></button>
+            <Button variant="ghost" style={{ marginLeft: 'auto' }}
+                    onClick={() => setOpen(false)} aria-label="닫기"><X size={16} /></Button>
           </div>
           <div className="alarm-drawer-body">
             {tab === 'alarms' && active.length === 0 && (
@@ -108,9 +109,9 @@ export default function AlarmIndicator() {
                     {a.acked
                       ? <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                         <Check size={12} /> {a.ackUser || '승인'}</span>
-                      : <button className="btn btn--ghost btn--sm" onClick={() => ack(a.alarm_id)}>승인</button>}
-                    <button className="btn btn--ghost btn--sm"
-                            onClick={() => { setOpen(false); navigate('/alerts/active') }}>이동</button>
+                      : <Button variant="ghost" onClick={() => ack(a.alarm_id)}>승인</Button>}
+                    <Button variant="ghost"
+                            onClick={() => { setOpen(false); navigate('/alerts/active') }}>이동</Button>
                   </div>
                 </div>
               )

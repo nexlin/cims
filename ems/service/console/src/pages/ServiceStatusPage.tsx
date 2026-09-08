@@ -7,6 +7,7 @@ import {
   type ServiceEvent, type OrgStat, type PttMembersResponse, type TrendPoint, type TrendMetric,
 } from '@core/api/stats'
 import { useToast } from '@core/components/Toast'
+import { Button } from '@core/components/ui/button'
 
 // ── 공통 유틸 ─────────────────────────────────────────────
 export function fmtDur(sec: number): string {
@@ -70,8 +71,8 @@ function OnlineDot({ on }: { on: boolean }) {
   return <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: on ? 'var(--cims-success)' : 'var(--muted-foreground)', marginRight: 6 }} />
 }
 function PinBtn({ on, onClick }: { on: boolean; onClick: (e: React.MouseEvent) => void }) {
-  return <button className="btn btn--sm btn--ghost" title={on ? '고정 해제' : '고정'} onClick={onClick} style={{ padding: '0 6px', opacity: on ? 1 : 0.35 }} aria-label={on ? '고정 해제' : '고정'}>
-    <Pin size={13} /></button>
+  return <Button variant="ghost" title={on ? '고정 해제' : '고정'} onClick={onClick} style={{ padding: '0 6px', opacity: on ? 1 : 0.35 }} aria-label={on ? '고정 해제' : '고정'}>
+    <Pin size={13} /></Button>
 }
 function Gauge({ label, pool }: { label: string; pool: Pool }) {
   const total = pool.total || 0, used = pool.used || 0
@@ -242,7 +243,7 @@ export function TrendCard() {
         <span style={{ fontSize: 13, fontWeight: 600 }}>사용량 추세</span>
         <span style={{ fontSize: 12, color: 'var(--muted-foreground)', marginLeft: 4 }}>최근</span>
         {TREND_WINS.map(w => (
-          <button key={w.k} className={`btn btn--sm ${win === w.k ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setWin(w.k)}>{w.label}</button>
+          <Button variant={win === w.k ? 'default' : 'ghost'} key={w.k} onClick={() => setWin(w.k)}>{w.label}</Button>
         ))}
         <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)' }}>
           {points.length ? `${clockOf(points[0].t)} ~ ${clockOf(points[points.length - 1].t)} · ${points.length}구간 (${bucketLabel(data?.bucket_sec ?? 0)})` : ''}
@@ -307,7 +308,7 @@ export function VolteCallsCard() {
                 <td className="ts">{fmtDur(elapsedSec(c.invite_time, now, c.duration_sec))}</td>
                 <td className="ts">{c.media_node || '-'}</td>
                 <td className="ts" title={c.call_id} style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.call_id}</td>
-                <td><button className="btn btn--sm btn--ghost" onClick={() => navigate('/service/history/volte')}>이력 <ChevronRight size={12} /></button></td>
+                <td><Button variant="ghost" onClick={() => navigate('/service/history/volte')}>이력 <ChevronRight size={12} /></Button></td>
               </tr>
             )
           })}
@@ -349,8 +350,8 @@ function MemberDrill({ group }: { group: string }) {
       </div>
       {pages > 1 && (
         <div style={{ marginTop: 6 }}>
-          <button className="btn btn--sm btn--ghost" disabled={page <= 1} onClick={e => { e.stopPropagation(); setPage(p => p - 1) }}>이전</button>
-          <button className="btn btn--sm btn--ghost" disabled={page >= pages} onClick={e => { e.stopPropagation(); setPage(p => p + 1) }}>다음</button>
+          <Button variant="ghost" disabled={page <= 1} onClick={e => { e.stopPropagation(); setPage(p => p - 1) }}>이전</Button>
+          <Button variant="ghost" disabled={page >= pages} onClick={e => { e.stopPropagation(); setPage(p => p + 1) }}>다음</Button>
         </div>
       )}
     </div>
@@ -389,7 +390,7 @@ export function PttGroupsCard() {
                     aria-label={g.anomalies.map(a => a.detail).join(', ')} />}</td>
                   <td className="ts">{g.last_floor ? new Date(g.last_floor).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}</td>
                   <td className="ts">{g.floor_count ?? 0}</td>
-                  <td><button className="btn btn--sm btn--ghost" onClick={e => { e.stopPropagation(); navigate('/service/history/ptt') }}>이력 <ChevronRight size={12} /></button></td>
+                  <td><Button variant="ghost" onClick={e => { e.stopPropagation(); navigate('/service/history/ptt') }}>이력 <ChevronRight size={12} /></Button></td>
                 </tr>
                 {isOpen && (
                   <tr>
@@ -529,7 +530,7 @@ export function OrgStatsCard() {
       <div className="toolbar" style={{ marginBottom: 8 }}>
         <input className="search-input" placeholder="가입자 이름/번호 검색 (전체)" value={searchInput}
           onChange={e => setSearchInput(e.target.value)} style={{ maxWidth: 280 }} />
-        {q && <button className="btn btn--sm btn--ghost" onClick={() => setSearchInput('')}>검색 해제</button>}
+        {q && <Button variant="ghost" onClick={() => setSearchInput('')}>검색 해제</Button>}
         <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>
           {selNode ? `부서: ${selNode.name} (${selNode.members}명)` : ''}{selNode && q ? '  &  ' : ''}{q ? `검색: "${q}"` : ''}
         </span>
@@ -567,8 +568,8 @@ export function OrgStatsCard() {
           {roster && roster.subscribers.length > 0 && (
             <div className="toolbar" style={{ justifyContent: 'flex-end', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
               <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>총 {total.toLocaleString()}명 · {page}/{totalPages}</span>
-              <button className="btn btn--sm btn--ghost" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>이전</button>
-              <button className="btn btn--sm btn--ghost" disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>다음</button>
+              <Button variant="ghost" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>이전</Button>
+              <Button variant="ghost" disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>다음</Button>
             </div>
           )}
         </div>
@@ -612,7 +613,7 @@ export function SubscriberLookup() {
   const total = data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / LOOKUP_LIMIT))
   const tabBtn = (s: 'active' | 'online' | 'all', label: string, n: number) => (
-    <button className={`btn btn--sm ${status === s ? 'btn--primary' : 'btn--ghost'}`} onClick={() => { setStatus(s); setPage(1) }}>{label} ({n})</button>
+    <Button variant={status === s ? 'default' : 'ghost'} onClick={() => { setStatus(s); setPage(1) }}>{label} ({n})</Button>
   )
   return (
     <div>
@@ -649,8 +650,8 @@ export function SubscriberLookup() {
             {totalPages > 1 && (
               <div className="toolbar" style={{ justifyContent: 'flex-end', borderTop: '1px solid var(--border)' }}>
                 <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>총 {total.toLocaleString()}건 · {page}/{totalPages}</span>
-                <button className="btn btn--sm btn--ghost" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>이전</button>
-                <button className="btn btn--sm btn--ghost" disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>다음</button>
+                <Button variant="ghost" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>이전</Button>
+                <Button variant="ghost" disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>다음</Button>
               </div>
             )}
           </div>
@@ -667,9 +668,9 @@ export function ServiceDetailTabs() {
   const v = live?.volte.kpi
   const p = live?.ptt.kpi
   const tb = (t: typeof tab, label: string, n?: number) => (
-    <button className={`btn btn--sm ${tab === t ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setTab(t)}>
+    <Button variant={tab === t ? 'default' : 'ghost'} onClick={() => setTab(t)}>
       {label}{n !== undefined && n !== null ? ` (${n})` : ''}
-    </button>
+    </Button>
   )
   return (
     <div className="widget-stack">

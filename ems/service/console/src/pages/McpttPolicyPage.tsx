@@ -4,6 +4,7 @@ import { useToast } from '@core/components/Toast'
 import { InfoDot } from '@core/components/InfoDot'
 import { useAuth } from '@core/contexts/AuthContext'
 import { hasRole } from '@core/utils/permissions'
+import { Button } from '@core/components/ui/button'
 
 // ── MCPTT 정책 (TS 24.484 service-config) ────────────────────────────────────
 //  시스템 전역 1건. 단말이 XCAP 으로 이 문서를 받아 **시스템 정책 게이트**로 쓰고, 사용자별 인가
@@ -128,12 +129,12 @@ export default function McpttPolicyPage() {
       </section>
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <button className="btn btn--sm btn--primary" disabled={!canEdit || !dirty || saving} onClick={save}>
+        <Button variant="default" disabled={!canEdit || !dirty || saving} onClick={save}>
           {saving ? '저장 중…' : '저장'}
-        </button>
-        <button className="btn btn--sm btn--ghost" disabled={!dirty || saving} onClick={() => cfg && setForm(cfg)}>
+        </Button>
+        <Button variant="ghost" disabled={!dirty || saving} onClick={() => cfg && setForm(cfg)}>
           되돌리기
-        </button>
+        </Button>
         {!canEdit && <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>변경 권한이 없습니다(manager 이상).</span>}
       </div>
 

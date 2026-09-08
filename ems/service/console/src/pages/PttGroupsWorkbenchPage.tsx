@@ -1,7 +1,7 @@
 import { useConfirm } from '@core/components/custom/confirm'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import IconBtn from '@core/components/IconBtn'
-import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Crown, Pencil, Trash2, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Crown, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { groupsApi, type Group, type GroupInput, type Member } from '@core/api/groups'
 import { usersApi, type UserSummary } from '@core/api/users'
 import { orgApi, type Organization } from '@core/api/organizations'
@@ -12,6 +12,7 @@ import { useToast } from '@core/components/Toast'
 import PttGroupActivity from '@svc/components/PttGroupActivity'
 import { useAuth } from '@core/contexts/AuthContext'
 import { canCreateGroup, canManageGroup, hasRole } from '@core/utils/permissions'
+import { Button } from '@core/components/ui/button'
 
 // ── PTT 그룹 워크벤치 ─────────────────────────────────────────
 //  좌: 조직트리(공유 스코프) | 그룹 DataTable | 행 확장: 속성 편집 + 멤버(다중선택 추가).
@@ -135,11 +136,11 @@ export default function PttGroupsWorkbenchPage() {
           <span style={{ fontWeight: 600, fontSize: 13 }}>{orgName}</span>
           <input className="search-input" placeholder="그룹명·ID 검색" value={search}
             onChange={e => setSearch(e.target.value)} style={{ maxWidth: 220 }} />
-          {search && <button className="btn btn--ghost btn--sm" onClick={() => setSearch('')}
-        aria-label="검색어 지우기"><X size={13} /></button>}
+          {search && <Button variant="ghost" onClick={() => setSearch('')}
+        aria-label="검색어 지우기"><X size={13} /></Button>}
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
             {canGroupCreate && (
-              <button className="btn btn--primary btn--sm" onClick={() => { setOpenId(null); setAdding(a => !a) }}>＋ 그룹</button>
+              <Button variant="default" onClick={() => { setOpenId(null); setAdding(a => !a) }}><Plus size={13} /> 그룹</Button>
             )}
           </span>
         </div>
@@ -339,7 +340,7 @@ function GroupDrawer(p: GroupDrawerProps) {
             {form.authorized_user_id != null
               ? <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span className="badge badge--blue" style={{ fontSize: 11 }}>{ownerName || `user#${form.authorized_user_id}`}</span>
-                  <button className="btn btn--ghost btn--sm" onClick={() => { setForm({ ...form, authorized_user_id: null }); setOwnerName('') }}>변경</button>
+                  <Button variant="ghost" onClick={() => { setForm({ ...form, authorized_user_id: null }); setOwnerName('') }}>변경</Button>
                 </div>
               : <SubscriberPicker kind="user" index={p.userIndex} orgScope={p.orgScope} orgPathOf={p.orgPathOf}
                   placeholder={isNew && !hasRole(p.me, 'manager') ? '비우면 본인' : '소유자 이름 검색'}
@@ -363,8 +364,8 @@ function GroupDrawer(p: GroupDrawerProps) {
           <Field label="메시지 최대(byte)" w={110}><input className="form-input" type="number" title="mcdata-on-network-max-data-size-for-SDS (0=무제한)" value={form.max_sds_size ?? 10000} onChange={e => setForm({ ...form, max_sds_size: Number(e.target.value) })} /></Field>
           <Field label="자동수신 최대(byte)" w={120}><input className="form-input" type="number" title="mcdata-on-network-max-data-size-auto-recv (파일 자동 다운로드 임계)" value={form.max_auto_recv ?? 1048576} onChange={e => setForm({ ...form, max_auto_recv: Number(e.target.value) })} /></Field>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <button className="btn btn--sm btn--primary" onClick={save}>저장</button>
-            <button className="btn btn--sm btn--ghost" onClick={() => isNew ? p.onClose() : setEditing(false)}>취소</button>
+            <Button variant="default" onClick={save}>저장</Button>
+            <Button variant="ghost" onClick={() => isNew ? p.onClose() : setEditing(false)}>취소</Button>
           </div>
           <div style={{ flexBasis: '100%', fontSize: 11, color: 'var(--muted-foreground)' }}>타입: {groupTypeHint[form.group_type || 'prearranged']}</div>
           <div style={{ flexBasis: '100%', fontSize: 11, color: 'var(--muted-foreground)' }}>동시 발언: {floorPolicyHint[form.floor_policy || 'single']}</div>
@@ -378,7 +379,7 @@ function GroupDrawer(p: GroupDrawerProps) {
             : (existing.floor_policy === 'dual' ? '듀얼(긴급 끼어들기)' : `멀티(${existing.max_talkers ?? 2}명 동시)`)}</span>
           <span className="ts">소유자 {existing.authorized_user_name || existing.authorized_user || '—'}</span>
           <span className="ts">조직 {p.orgs.find(o => o.code === existing.org_code)?.name || existing.org_code || '—'}</span>
-          {canManage && <button className="btn btn--sm btn--outline" style={{ marginLeft: 'auto' }} onClick={() => setEditing(true)}>그룹 속성 편집</button>}
+          {canManage && <Button style={{ marginLeft: 'auto' }} onClick={() => setEditing(true)}>그룹 속성 편집</Button>}
         </div>
       )}
 
@@ -530,14 +531,14 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
         {/* ── 중앙: 이동 버튼 ── */}
         {canManage && (
           <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, alignSelf: 'center' }}>
-            <button className="btn btn--primary btn--sm" disabled={busy || picked.size === 0} title="선택 가입자 추가"
+            <Button variant="default" disabled={busy || picked.size === 0} title="선택 가입자 추가"
               onClick={() => doAdd(Array.from(picked))} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
               <ArrowLeft size={14} /> 추가{picked.size ? ` ${picked.size}` : ''}
-            </button>
-            <button className="btn btn--outline btn--sm" disabled={busy || selMembers.size === 0} title="선택 멤버 제거"
+            </Button>
+            <Button disabled={busy || selMembers.size === 0} title="선택 멤버 제거"
               onClick={() => doRemove(Array.from(selMembers))} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
               제거{selMembers.size ? ` ${selMembers.size}` : ''} <ArrowRight size={14} />
-            </button>
+            </Button>
           </div>
         )}
 

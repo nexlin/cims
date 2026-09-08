@@ -9,6 +9,7 @@ import { AlertTriangle } from 'lucide-react'
 import { useToast } from '@core/components/Toast'
 import { InfoDot } from '@core/components/InfoDot'
 import { abnDerived, abnormal, useAbnormal } from './abnormalStore'
+import { Button } from '@core/components/ui/button'
 
 const REASON_LABEL: Record<string, { label: string; color: string }> = {
   external_ip:  { label: '외부 IP',     color: 'var(--cims-warning)' },
@@ -35,11 +36,11 @@ export function AbnFilter() {
       <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>범위</span>
       <span style={{ display: 'flex', gap: 2 }}>
         {RANGE.map(d => (
-          <button key={d} className={`btn btn--sm ${s.days === d ? 'btn--primary' : 'btn--ghost'}`}
-                  onClick={() => abnormal.setDays(d)}>{d}일</button>
+          <Button variant={s.days === d ? 'default' : 'ghost'} key={d}
+                  onClick={() => abnormal.setDays(d)}>{d}일</Button>
         ))}
       </span>
-      <button className="btn btn--primary btn--sm" onClick={() => void abnormal.load(show)}>조회</button>
+      <Button variant="default" onClick={() => void abnormal.load(show)}>조회</Button>
       {/* 화면의 뜻은 한 번 읽으면 되는 설명이라 ⓘ 로 접는다. */}
       <InfoDot label="비정상 세션이란?">
         공개 SIP 포트(VIP)로 유입되는 <b>인터넷발 스캐닝·사기 호 시도</b>입니다. CSP 는 인증(<b>401</b>)으로
@@ -174,12 +175,12 @@ export function AbnTable() {
           {sessions.length > s.pageSize && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
                           padding: '8px 0', flex: 'none', borderTop: '1px solid var(--border)' }}>
-              <button className="btn btn--sm" disabled={s.page === 0} onClick={() => abnormal.setPage(s.page - 1)}>← 이전</button>
+              <Button disabled={s.page === 0} onClick={() => abnormal.setPage(s.page - 1)}>← 이전</Button>
               <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
                 {s.page * s.pageSize + 1}–{Math.min((s.page + 1) * s.pageSize, sessions.length)} / {sessions.length}건
                 (페이지 {s.page + 1}/{pageCount})
               </span>
-              <button className="btn btn--sm" disabled={s.page >= pageCount - 1} onClick={() => abnormal.setPage(s.page + 1)}>다음 →</button>
+              <Button disabled={s.page >= pageCount - 1} onClick={() => abnormal.setPage(s.page + 1)}>다음 →</Button>
               <select value={s.pageSize} style={{ fontSize: 12, padding: '2px 4px' }}
                       onChange={e => abnormal.setPageSize(Number(e.target.value))}>
                 {[50, 100, 200, 500].map(n => <option key={n} value={n}>{n}/쪽</option>)}

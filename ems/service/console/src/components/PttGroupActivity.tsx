@@ -20,6 +20,7 @@ import {
   recIdOf, dateOf, detailKey, dayOf, hourOf, thStyle,
   type DayAgg, type DetailState,
 } from '@svc/components/pttSession'
+import { Button } from '@core/components/ui/button'
 
 export default function PttGroupActivity({ storeKey }: {
   /** 녹취 저장 키 = ptt_groups.id (surrogate). mcptt_group_id 가 바뀌어도 불변이라
@@ -148,8 +149,8 @@ export default function PttGroupActivity({ storeKey }: {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 12, color: 'var(--muted-foreground)', fontWeight: 600 }}>최근</span>
         {RANGE_OPTIONS.map(d => (
-          <button key={d} className={`btn btn--sm ${rangeDays === d ? 'btn--primary' : 'btn--ghost'}`}
-                  onClick={() => setRangeDays(d)}>{d}일</button>
+          <Button variant={rangeDays === d ? 'default' : 'ghost'} key={d}
+                  onClick={() => setRangeDays(d)}>{d}일</Button>
         ))}
         <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted-foreground)' }}>
           {loading ? '조회 중…' : `세션 ${sessions.length}건`}

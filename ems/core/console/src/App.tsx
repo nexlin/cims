@@ -24,6 +24,7 @@ import type { WidgetProps, PageLayout } from './widgets/types'
 import { GRID_COLS, GRID_ROWS } from './widgets/gridLayout'
 import type { ComponentType } from 'react'
 import './index.css'
+import { Button } from '@core/components/ui/button'
 
 const SIDEBAR_COLLAPSED_KEY = 'cims_sidebar_collapsed'
 
@@ -125,9 +126,9 @@ function RouteGuard({ children, route }: { children: React.ReactNode; route: Rou
     return (
       <div className="empty" style={{ marginTop: 80, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
         <div>이 메뉴는 <b>개발자 모드</b>에서 사용합니다 (빌드·검증·패키징).</div>
-        <button className="btn btn--primary btn--sm" onClick={() => setDevMode(true)}>
+        <Button variant="default" onClick={() => setDevMode(true)}>
           {'</>'} 개발자 모드 켜기
-        </button>
+        </Button>
       </div>
     )
   }
@@ -241,8 +242,8 @@ function Shell() {
                 {chgOk && <div className="auth-ok" style={{ marginTop: 12 }}>{chgOk}</div>}
               </div>
               <div className="modal-footer">
-                <button className="btn btn--outline" type="button" onClick={() => setShowChgPw(false)}>취소</button>
-                <button className="btn btn--primary" type="submit">변경</button>
+                <Button size="default" type="button" onClick={() => setShowChgPw(false)}>취소</Button>
+                <Button variant="default" size="default" type="submit">변경</Button>
               </div>
             </form>
           </div>

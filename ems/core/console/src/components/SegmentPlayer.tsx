@@ -1,6 +1,7 @@
 import { AlertTriangle, Maximize2, Play } from 'lucide-react'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { recordingsApi, type RecordingSegment } from '../api/recordings'
+import { Button } from '@core/components/ui/button'
 
 interface SegmentPlayerProps {
   segments: RecordingSegment[]
@@ -337,7 +338,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
             background: 'rgba(220,38,38,0.08)', color: 'var(--destructive)', fontSize: 13,
           }}>
             <span className="inline-flex items-center gap-1"><AlertTriangle size={13} /> 재생 준비 실패: {prepError}</span>
-            <button className="btn btn--sm" onClick={() => { if (current) loadSegment(current, true) }}>다시 시도</button>
+            <Button onClick={() => { if (current) loadSegment(current, true) }}>다시 시도</Button>
           </div>
         )}
       </div>
@@ -364,10 +365,10 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
         display: 'flex', alignItems: 'center', gap: 10,
         padding: '8px 20px', borderBottom: '1px solid var(--border)',
       }}>
-        <button className="btn btn--primary btn--sm" onClick={handlePlayAll}
+        <Button variant="default" onClick={handlePlayAll}
           disabled={selectedSegs.length === 0}>
           선택 재생 ({selectedSegs.length}건 / {fmtMs(totalDuration)})
-        </button>
+        </Button>
         <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
           전체 {playable.length}건
         </span>

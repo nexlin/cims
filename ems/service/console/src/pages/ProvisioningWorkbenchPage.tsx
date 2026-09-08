@@ -1,7 +1,7 @@
 import { useConfirm } from '@core/components/custom/confirm'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import IconBtn from '@core/components/IconBtn'
-import { AlertTriangle, Check, ChevronDown, ChevronRight, Pencil, Trash2, X } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { usersApi, type UserSummary, type Subscription, type UserInput, type McpttProfile, type SipTransport, type AuthScheme, type ImportResult } from '@core/api/users'
 import { groupsApi, type Group } from '@core/api/groups'
 import { orgApi, type Organization } from '@core/api/organizations'
@@ -11,6 +11,7 @@ import SubscriberPicker, { buildPickIndex, type PickItem } from '@core/component
 import { useToast } from '@core/components/Toast'
 import { useAuth } from '@core/contexts/AuthContext'
 import { canWriteConfig } from '@core/utils/permissions'
+import { Button } from '@core/components/ui/button'
 
 // ── 사용자 프로비저닝 워크벤치 (사용자 = 가입, 번호 등록이 가입 행위) ──────────
 //  좌: 조직트리(공유 스코프) | 상단 탭: 사용자/VoLTE 번호/PTT 번호.
@@ -263,18 +264,18 @@ export default function ProvisioningWorkbenchPage() {
           <span style={{ fontWeight: 600, fontSize: 13 }}>{orgName}</span>
           <input className="search-input" placeholder="이름·번호·ID 검색" value={search}
             onChange={e => setSearch(e.target.value)} style={{ maxWidth: 220 }} />
-          {search && <button className="btn btn--ghost btn--sm" onClick={() => setSearch('')}
-        aria-label="검색어 지우기"><X size={13} /></button>}
+          {search && <Button variant="ghost" onClick={() => setSearch('')}
+        aria-label="검색어 지우기"><X size={13} /></Button>}
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
             {tab === 'users' && canWrite && <>
-              <button className="btn btn--outline btn--sm" onClick={() => setImportOpen(true)}>Excel 가져오기</button>
-              {selected.size > 0 && <button className="btn btn--danger btn--sm" onClick={batchDeleteUsers}>선택 삭제 ({selected.size})</button>}
-              <button className="btn btn--primary btn--sm" onClick={() => { setAddUserOpen(v => !v); setExp(null) }}>＋ 사용자</button>
+              <Button onClick={() => setImportOpen(true)}>Excel 가져오기</Button>
+              {selected.size > 0 && <Button variant="destructive" onClick={batchDeleteUsers}>선택 삭제 ({selected.size})</Button>}
+              <Button variant="default" onClick={() => { setAddUserOpen(v => !v); setExp(null) }}><Plus size={13} /> 사용자</Button>
             </>}
             {(tab === 'volte' || tab === 'ptt') && canWrite && (
-              <button className="btn btn--primary btn--sm" onClick={() => { setAddNumSvc(tab === 'volte' ? 'call' : 'ptt'); setExp(null) }}>
-                ＋ {tab === 'volte' ? 'VoLTE' : 'PTT'} 번호
-              </button>
+              <Button variant="default" onClick={() => { setAddNumSvc(tab === 'volte' ? 'call' : 'ptt'); setExp(null) }}>
+                <Plus size={13} /> {tab === 'volte' ? 'VoLTE' : 'PTT'} 번호
+              </Button>
             )}
           </span>
         </div>
@@ -383,8 +384,8 @@ function UserBasicForm({ mode, initial, orgOpts, defaultOrg, onSubmit, onCancel 
       </Field>
       <Field label="설명"><input className="form-input" value={form.details || ''} onChange={e => setForm({ ...form, details: e.target.value })} /></Field>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-        <button className="btn btn--sm btn--primary" disabled={busy} onClick={submit}>{mode === 'add' ? '생성' : '저장'}</button>
-        <button className="btn btn--sm btn--ghost" onClick={onCancel}>취소</button>
+        <Button variant="default" disabled={busy} onClick={submit}>{mode === 'add' ? '생성' : '저장'}</Button>
+        <Button variant="ghost" onClick={onCancel}>취소</Button>
       </div>
     </FieldRow>
   )
@@ -417,7 +418,7 @@ function UserDetail({ user, catalog, orgOpts, canWrite, initialEdit, highlight, 
           <span><b style={{ fontSize: 13 }}>{user.name}</b>{user.title && <span className="ts" style={{ marginLeft: 6 }}>{user.title}</span>}</span>
           <span className="ts">조직 {orgPath}</span>
           {user.details && <span className="ts">{user.details}</span>}
-          {canWrite && <button className="btn btn--sm btn--outline" style={{ marginLeft: 'auto' }} onClick={() => setEditing(true)}>기본정보 편집</button>}
+          {canWrite && <Button style={{ marginLeft: 'auto' }} onClick={() => setEditing(true)}>기본정보 편집</Button>}
         </div>
       )}
 
@@ -721,7 +722,7 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
           </tr>
         </thead>
         <tbody>
-          {rows.length === 0 && !adding && <tr><td colSpan={10} className="empty-cell" style={{ padding: 12 }}>번호 없음 — 아래 ＋ 번호 추가</td></tr>}
+          {rows.length === 0 && !adding && <tr><td colSpan={10} className="empty-cell" style={{ padding: 12 }}>번호 없음 — 아래 [번호 추가]</td></tr>}
           {rows.map(r => {
             const ed = editKey === rk(r.svc, r.sub.id)
             const isCall = r.svc === 'call'
@@ -776,8 +777,8 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
               <td>{addIsCall ? <input className="form-input" placeholder="대상" value={addForm.forward_id} onChange={e => setAddForm({ ...addForm, forward_id: e.target.value })} /> : <span className="ts">—</span>}</td>
               <td><input className="form-input" placeholder="픽업그룹" value={addForm.pickup_group} onChange={e => setAddForm({ ...addForm, pickup_group: e.target.value })} /></td>
               <td className="actions">
-                <button className="btn btn--sm btn--primary" onClick={add}>추가</button>
-                <button className="btn btn--sm btn--ghost" onClick={() => { setAdding(false); setAddForm(newAdd()) }}>취소</button>
+                <Button variant="default" onClick={add}>추가</Button>
+                <Button variant="ghost" onClick={() => { setAdding(false); setAddForm(newAdd()) }}>취소</Button>
               </td>
             </tr>
           )}
@@ -785,7 +786,7 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
       </table>
       </div>
       {canWrite && !adding && (
-        <button className="btn btn--ghost btn--sm" style={{ color: 'var(--primary)', fontSize: 12, marginTop: 4 }} onClick={() => { setAdding(true); setEditKey(null) }}>＋ 번호 추가</button>
+        <Button variant="ghost" style={{ color: 'var(--primary)', fontSize: 12, marginTop: 4 }} onClick={() => { setAdding(true); setEditKey(null) }}><Plus size={13} /> 번호 추가</Button>
       )}
     </div>
   )
@@ -841,7 +842,7 @@ function NumberAddForm({ svc, catalog, userIndex, orgScope, orgPathOf, onAdded, 
           {pick
             ? <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span className="badge badge--blue" style={{ fontSize: 11 }}>{pick.label}</span>
-                <button className="btn btn--ghost btn--sm" onClick={() => setPick(null)}>변경</button>
+                <Button variant="ghost" onClick={() => setPick(null)}>변경</Button>
               </div>
             : <SubscriberPicker kind="user" index={userIndex} orgScope={orgScope} orgPathOf={orgPathOf}
                 onPick={setPick} placeholder="가입자 이름·로그인ID 검색·선택" autoFocus />}
@@ -864,8 +865,8 @@ function NumberAddForm({ svc, catalog, userIndex, orgScope, orgPathOf, onAdded, 
         {isCall && <Field label="착신전환" w={130}><input className="form-input" placeholder="대상" value={forwardId} onChange={e => setForwardId(e.target.value)} /></Field>}
         <Field label="픽업그룹" w={130}><input className="form-input" placeholder="빈 값=조직 폴백" title="당겨받기 그룹 — 같은 값끼리 픽업 가능. 반영은 다음 등록 갱신부터" value={pickupGroup} onChange={e => setPickupGroup(e.target.value)} /></Field>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <button className="btn btn--sm btn--primary" disabled={busy} onClick={add}>추가</button>
-          <button className="btn btn--sm btn--ghost" onClick={onCancel}>취소</button>
+          <Button variant="default" disabled={busy} onClick={add}>추가</Button>
+          <Button variant="ghost" onClick={onCancel}>취소</Button>
         </div>
       </FieldRow>
     </div>
@@ -899,8 +900,10 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
         <div className="modal-body">
           <p style={{ marginBottom: 12 }}>사용자 + VoLTE/PTT 번호를 한 Excel(.xlsx)로 일괄 등록합니다.</p>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
-            <label className="btn btn--primary" style={{ cursor: 'pointer' }}>파일 선택<input type="file" accept=".xlsx" onChange={onFile} style={{ display: 'none' }} /></label>
-            <a href={usersApi.templateUrl} className="btn btn--outline" download>템플릿 다운로드</a>
+            <Button asChild variant="default" size="default">
+              <label className="cursor-pointer">파일 선택<input type="file" accept=".xlsx" onChange={onFile} style={{ display: 'none' }} /></label>
+            </Button>
+            <Button asChild size="default"><a href={usersApi.templateUrl} download>템플릿 다운로드</a></Button>
             {busy && <span className="ts">처리 중...</span>}
           </div>
           {result && (
@@ -926,7 +929,7 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
             </div>
           )}
         </div>
-        <div className="modal-footer"><button className="btn btn--ghost" onClick={onClose}>닫기</button></div>
+        <div className="modal-footer"><Button variant="ghost" size="default" onClick={onClose}>닫기</Button></div>
       </div>
     </div>
   )

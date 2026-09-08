@@ -11,6 +11,7 @@ import { useState } from 'react'
 import { authApi } from '../api/auth'
 import { setElevatedToken } from '../api/client'
 import { roleRank } from '../utils/permissions'
+import { Button } from '@core/components/ui/button'
 
 export default function AdminElevateDialog({ onClose, onElevated }: {
   onClose: () => void
@@ -64,10 +65,10 @@ export default function AdminElevateDialog({ onClose, onElevated }: {
         </div>
         {error && <div style={{ color: 'var(--destructive)', fontSize: 12, marginTop: 8 }}>{error}</div>}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-          <button className="btn btn--outline" onClick={onClose} disabled={working}>취소</button>
-          <button className="btn btn--primary" onClick={() => void submit()} disabled={working}>
+          <Button size="default" onClick={onClose} disabled={working}>취소</Button>
+          <Button variant="default" size="default" onClick={() => void submit()} disabled={working}>
             {working ? '인증 중…' : '인증'}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

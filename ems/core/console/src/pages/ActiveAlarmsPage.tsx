@@ -11,6 +11,7 @@ import { useAlarms, refreshAlarms, severityOf, type ActiveAlarm } from '../widge
 import { alarmTypeLabel, sevBadgeClass, fmtTime, formatSec, SEVERITY_LABEL } from '../utils/alarmLabels'
 import { usePageParam } from '../widgets/pageParams'
 import { Check, MessageSquare, RotateCw } from 'lucide-react'
+import { Button } from '@core/components/ui/button'
 
 function elapsedSince(ts?: string): string {
   const t = new Date(ts || '').getTime()
@@ -52,7 +53,7 @@ function AlarmDetail({ a, onAck, onComment }: {
       )}
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 2 }}>
         {!a.acked && (
-          <button className="btn btn--sm btn--outline" disabled={!a.alarm_id} onClick={() => onAck(a.alarm_id)}>승인</button>
+          <Button disabled={!a.alarm_id} onClick={() => onAck(a.alarm_id)}>승인</Button>
         )}
         <input className="form-input" style={{ width: 280 }} placeholder="코멘트 입력 후 Enter"
                value={text} onChange={e => setText(e.target.value)}
@@ -126,7 +127,7 @@ export function ActiveAlarmList() {
         <span style={{ marginLeft: 'auto', fontSize: 12, color: error ? 'var(--destructive)' : 'var(--muted-foreground)' }}>
           {error ? '갱신 실패 — 표시가 최신이 아닐 수 있음' : lastUpdated ? `갱신 ${fmtTime(new Date(lastUpdated).toISOString())} · 라이브` : ''}
         </span>
-        <button className="btn btn--ghost btn--sm" onClick={refreshAlarms} title="새로고침"><RotateCw size={14} /></button>
+        <Button variant="ghost" onClick={refreshAlarms} title="새로고침"><RotateCw size={14} /></Button>
       </div>
 
       <div className="panel">

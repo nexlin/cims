@@ -20,6 +20,7 @@ import {
   alarmTypeLabel, eventTypeLabel, EVENT_KIND_LABEL, sevBadgeClass,
   fmtTime, formatSec, downloadCsv,
 } from '../utils/alarmLabels'
+import { Button } from '@core/components/ui/button'
 
 const FETCH_LIMIT = 5000   // 이벤트 탭 서버 상한 — 초과 시 최신순 절단(표기)
 
@@ -256,8 +257,8 @@ export function AlarmByCodeBlock() {
       {loading && byCode.length === 0 ? <div className="panel"><div className="empty">로딩 중…</div></div>
         : error ? <div className="panel"><div className="empty" style={{ color: 'var(--destructive)' }}>조회 실패: {error}</div></div> : (
             <TablePanel title={<>코드별 분석 ({byCode.length}종)</>}
-                        action={<button className="btn btn--ghost btn--sm" onClick={exportCsv}
-                                        disabled={byCode.length === 0}>CSV</button>}>
+                        action={<Button variant="ghost" onClick={exportCsv}
+                                        disabled={byCode.length === 0}>CSV</Button>}>
               {byCode.length === 0 ? <div className="empty">기간 내 알람 없음</div> : (
                 <table className="data-table">
                   <thead>
@@ -447,8 +448,8 @@ export function EventByTypeBlock() {
   if (error) return <div className="panel"><div className="empty" style={{ color: 'var(--destructive)' }}>조회 실패: {error}</div></div>
   return (
             <TablePanel title={<>유형별 발생 ({byType.length}종)</>}
-                        action={<button className="btn btn--ghost btn--sm" onClick={exportCsv}
-                                        disabled={byType.length === 0}>CSV</button>}>
+                        action={<Button variant="ghost" onClick={exportCsv}
+                                        disabled={byType.length === 0}>CSV</Button>}>
               {byType.length === 0 ? <div className="empty">기간 내 이벤트 없음</div> : (
                 <table className="data-table">
                   <thead>
