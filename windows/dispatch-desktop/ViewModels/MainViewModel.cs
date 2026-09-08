@@ -63,8 +63,9 @@ public sealed partial class MainViewModel : ObservableObject
         GroupsScreen = new GroupAdminViewModel(session);
         AdminScreen = new DirectoryAdminViewModel(session);
         Summary = new DispatchSummaryViewModel(session, PttChannels, CallDesk, Desk);
-        AdminScreen.PropertyChanged += (_, e) => { if (e.PropertyName is nameof(DirectoryAdminViewModel.IsEditing)) OnPropertyChanged(nameof(AdminEditing)); };
+        AdminScreen.PropertyChanged += (_, e) => { if (e.PropertyName is nameof(DirectoryAdminViewModel.IsDirty)) OnPropertyChanged(nameof(AdminEditing)); };
         GroupsScreen.EditRequested += (_, g) => GroupEditRequested?.Invoke(this, g);
+        GroupsScreen.ChannelRequested += (_, id) => { Screen = AppScreen.Dispatch; PttChannels.FocusGroup(id); };   // [채널로] — 채널 카드로(없으면 합류)
         PttActivity.HistoryRequested += (_, _) => ShowHistory("ptt");
         CallActivity.HistoryRequested += (_, _) => ShowHistory("call");
         session.ProfileApplied += (_, _) => { _screensLoaded = false; OnPropertyChanged(nameof(CanManage)); OnPropertyChanged(nameof(ManageHint)); };
@@ -112,8 +113,8 @@ public sealed partial class MainViewModel : ObservableObject
     // ── 최상위 메뉴(§3.4) ──
     public bool CanManage => Session.CanManageDirectory;
     public string ManageHint => CanManage ? "" : "조직/구성원·번호 관리는 관제 그룹의 관리 범위(콘솔 구성 > 관제 그룹 > 관리 범위)가 있어야 합니다. PTT 그룹은 내 소유 그룹만 편집합니다.";
-    /// <summary>[관리] 메뉴 점 배지 — 편집 폼이 열려 있다(전환을 막지 않는다).</summary>
-    public bool AdminEditing => AdminScreen.IsEditing;
+    /// <summary>[관리] 메뉴 점 배지 — 저장하지 않은 변경이 있다(전환을 막지 않는다).</summary>
+    public bool AdminEditing => AdminScreen.IsDirty;
     public bool IsDispatch => Screen == AppScreen.Dispatch;
     public string ScreenTitle => AppScreens.Title(Screen);
 
@@ -203,6 +204,7 @@ public sealed partial class MainViewModel : ObservableObject
         Session.Tick(now);
         Desk.Tick(now);
         PttChannels.Tick();
+        if (Screen == AppScreen.PttGroups || PoppedOut.Contains(AppScreen.PttGroups)) GroupsScreen.Tick();
         PttActivity.Tick();
         CallActivity.Tick();
         CallDesk.Refresh();

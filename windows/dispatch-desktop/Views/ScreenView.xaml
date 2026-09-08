@@ -31,7 +31,7 @@
                     <TextBlock Style="{StaticResource Hint}" Text=" · GMS XCAP (TS 24.481)" />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Visibility="{Binding Screen, ElementName=Root, Converter={StaticResource EqToVis}, ConverterParameter=Admin}">
-                    <Border Style="{StaticResource Badge.Pilot}" Visibility="{Binding AdminScreen.IsEditing, Converter={StaticResource BoolToVis}}"><TextBlock Text="편집 중 — 저장하지 않음" /></Border>
+                    <Border Style="{StaticResource Badge.Pilot}" Visibility="{Binding AdminScreen.IsDirty, Converter={StaticResource BoolToVis}}"><TextBlock Text="저장하지 않은 변경" /></Border>
                     <TextBlock Style="{StaticResource Hint}" Text="{Binding AdminScreen.ScopeText}" />
                 </StackPanel>
             </DockPanel>

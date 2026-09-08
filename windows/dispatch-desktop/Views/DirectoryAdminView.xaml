@@ -26,92 +26,108 @@
             </DockPanel>
         </Border>
         <DockPanel Margin="10" IsEnabled="{Binding Busy, Converter={StaticResource Not}}">
-            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
-                <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Sm}" Content="↻ 새로고침" Command="{Binding RefreshCommand}" />
-                <TextBox DockPanel.Dock="Right" Style="{StaticResource Field}" Width="220" Height="26" Margin="0,0,8,0" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" ToolTip="이름·아이디·번호 검색" />
-                <TextBlock Style="{StaticResource Hint}" Foreground="{DynamicResource Brush.Emg}" Text="{Binding Error}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                           Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}" />
-            </DockPanel>
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="250" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="380" />
                 </Grid.ColumnDefinitions>
-                <!-- 조직 트리 -->
-                <DockPanel Grid.Column="0" Margin="0,0,10,0">
-                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
-                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                            <Button Style="{StaticResource Btn.Xs.Pri}" Content="새 조직" Command="{Binding NewOrgCommand}" Margin="0,0,4,0" />
-                            <Button Style="{StaticResource Btn.Xs}" Content="편집" Command="{Binding BeginEditOrgCommand}" Margin="0,0,4,0" />
-                            <Button Style="{StaticResource Btn.Xs.Danger}" Content="삭제" Command="{Binding DeleteOrgCommand}" />
-                        </StackPanel>
-                        <TextBlock Style="{StaticResource SectionHeader}" Text="조직" VerticalAlignment="Center" />
+                <!-- 조직 트리 — 머리 [+ 새 조직], 바닥 [편집][삭제](시안 §4.5) -->
+                <Border Grid.Column="0" Style="{StaticResource Card}" Padding="0" Margin="0,0,10,0">
+                    <DockPanel>
+                        <Border DockPanel.Dock="Top" Style="{StaticResource LogHeader}" Padding="12,8">
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="+ 새 조직" Command="{Binding NewOrgCommand}" />
+                                <TextBlock Text="조직" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center" />
+                            </DockPanel>
+                        </Border>
+                        <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0" Padding="10,8">
+                            <StackPanel Orientation="Horizontal">
+                                <Button Style="{StaticResource Btn.Xs}" Content="편집" Command="{Binding BeginEditOrgCommand}" Margin="0,0,4,0" />
+                                <Button Style="{StaticResource Btn.Xs.Danger}" Content="삭제" Command="{Binding DeleteOrgCommand}" />
+                            </StackPanel>
+                        </Border>
+                        <ListBox Style="{StaticResource PlainList}" ItemsSource="{Binding Orgs}" SelectedItem="{Binding SelectedOrg}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate DataType="{x:Type vm:OrgRow}">
+                                    <Border Style="{StaticResource LogRow}" Padding="10,0" Height="30">
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Right" Style="{StaticResource Muted}" Text="{Binding CountText}" FontSize="11" VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding Label}" FontFamily="{StaticResource Font.Mono}" VerticalAlignment="Center" ToolTip="{Binding Code}" />
+                                        </DockPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
                     </DockPanel>
-                    <ListBox Style="{StaticResource PlainList}" ItemsSource="{Binding Orgs}" SelectedItem="{Binding SelectedOrg}">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate DataType="{x:Type vm:OrgRow}">
-                                <Border Style="{StaticResource LogRow}">
-                                    <DockPanel>
-                                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource Muted}" Text="{Binding CountText}" FontSize="11" VerticalAlignment="Center" />
-                                        <TextBlock Text="{Binding Label}" FontFamily="{StaticResource Font.Mono}" VerticalAlignment="Center" ToolTip="{Binding Code}" />
-                                    </DockPanel>
-                                </Border>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                </DockPanel>
-                <!-- 구성원 -->
-                <DockPanel Grid.Column="1" Margin="0,0,10,0">
-                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
-                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                            <Button Style="{StaticResource Btn.Xs.Pri}" Content="새 구성원" Command="{Binding NewMemberCommand}" Margin="0,0,4,0" />
-                            <Button Style="{StaticResource Btn.Xs}" Content="편집" Command="{Binding EditMemberCommand}" Margin="0,0,4,0" />
-                            <Button Style="{StaticResource Btn.Xs.Danger}" Content="삭제" Command="{Binding DeleteMemberCommand}" />
-                        </StackPanel>
-                        <TextBlock Style="{StaticResource SectionHeader}" Text="구성원" VerticalAlignment="Center" />
-                        <TextBlock Style="{StaticResource Muted}" FontSize="12" VerticalAlignment="Center" Margin="8,0,0,0">
-                            <Run Text="{Binding Members.Count, Mode=OneWay}" /><Run Text="명" />
-                        </TextBlock>
-                    </DockPanel>
-                    <ListBox Style="{StaticResource PlainList}" ItemsSource="{Binding Members}" SelectedItem="{Binding SelectedMember}" MouseDoubleClick="Members_DoubleClick">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate DataType="{x:Type vm:MemberRow}">
-                                <Border Style="{StaticResource LogRow}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="150" />
-                                            <ColumnDefinition Width="150" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                            <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="{Binding Name}" FontWeight="Medium" />
-                                                <TextBlock Style="{StaticResource Muted}" Text="{Binding Title}" FontSize="12" Margin="6,0,0,0" />
+                </Border>
+                <!-- 구성원 표 — 머리 "구성원 N명 · 조직 하위 포함" + 검색 + [+ 새 구성원], 열 = 이름·직함·소속 | VoLTE | PTT | 자격 -->
+                <Border Grid.Column="1" Style="{StaticResource Card}" Padding="0" Margin="0,0,10,0">
+                    <DockPanel>
+                        <Border DockPanel.Dock="Top" Style="{StaticResource LogHeader}" Padding="12,8">
+                            <DockPanel>
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                    <TextBox Style="{StaticResource Field}" Width="200" Height="26" Margin="0,0,8,0" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" ToolTip="이름·아이디·번호 검색" />
+                                    <Button Style="{StaticResource Btn.Sm}" Content="↻" ToolTip="새로고침" Command="{Binding RefreshCommand}" Margin="0,0,6,0" />
+                                    <Button Style="{StaticResource Btn.Sm.Pri}" Content="+ 새 구성원" Command="{Binding NewMemberCommand}" />
+                                </StackPanel>
+                                <TextBlock VerticalAlignment="Center" FontSize="13">
+                                    <Run Text="구성원" FontWeight="SemiBold" /><Run Text="  " /><Run Text="{Binding MemberHeader, Mode=OneWay}" Foreground="{DynamicResource Brush.Muted}" FontSize="12.5" />
+                                </TextBlock>
+                                <TextBlock Style="{StaticResource Hint}" Foreground="{DynamicResource Brush.Emg}" Text="{Binding Error}" VerticalAlignment="Center" Margin="12,0,0,0" TextTrimming="CharacterEllipsis"
+                                           Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}" />
+                            </DockPanel>
+                        </Border>
+                        <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,0,1" Padding="12,6">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="140" />
+                                    <ColumnDefinition Width="140" />
+                                    <ColumnDefinition Width="160" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Style="{StaticResource Hint}" Text="이름 · 직함 · 소속" />
+                                <TextBlock Grid.Column="1" Style="{StaticResource Hint}" Text="VoLTE" />
+                                <TextBlock Grid.Column="2" Style="{StaticResource Hint}" Text="PTT" />
+                                <TextBlock Grid.Column="3" Style="{StaticResource Hint}" Text="자격" />
+                            </Grid>
+                        </Border>
+                        <ListBox Style="{StaticResource PlainList}" ItemsSource="{Binding Members}" SelectedItem="{Binding SelectedMember}" MouseDoubleClick="Members_DoubleClick">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate DataType="{x:Type vm:MemberRow}">
+                                    <Border Style="{StaticResource LogRow}" Padding="12,5">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="140" />
+                                                <ColumnDefinition Width="140" />
+                                                <ColumnDefinition Width="160" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                    <TextBlock Style="{StaticResource Muted}" Text="{Binding Title}" FontSize="12" Margin="6,0,0,0" VerticalAlignment="Bottom" />
+                                                </StackPanel>
+                                                <TextBlock Style="{StaticResource Muted}" Text="{Binding OrgPath}" FontSize="11" TextTrimming="CharacterEllipsis" />
                                             </StackPanel>
-                                            <TextBlock Style="{StaticResource Muted}" Text="{Binding OrgPath}" FontSize="11" TextTrimming="CharacterEllipsis" />
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                            <TextBlock Style="{StaticResource Hint}" Text="VoLTE" FontSize="10" />
-                                            <TextBlock Style="{StaticResource Mono}" Text="{Binding VolteText}" FontSize="12" />
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                                            <TextBlock Style="{StaticResource Hint}" Text="PTT" FontSize="10" />
-                                            <TextBlock Style="{StaticResource Mono}" Text="{Binding PttText}" FontSize="12" />
-                                        </StackPanel>
-                                        <Border Grid.Column="3" Style="{StaticResource Badge}" VerticalAlignment="Center" Visibility="{Binding Flags, Converter={StaticResource StrToVis}}"><TextBlock Text="{Binding Flags}" /></Border>
-                                    </Grid>
-                                </Border>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                </DockPanel>
+                                            <TextBlock Grid.Column="1" Style="{StaticResource Mono}" Text="{Binding VolteCell}" FontSize="12.5" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="2" Style="{StaticResource Mono}" Text="{Binding PttCell}" FontSize="12.5" VerticalAlignment="Center" />
+                                            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <Border Style="{StaticResource Badge.Member}" Visibility="{Binding CanCreateGroup, Converter={StaticResource BoolToVis}}"><TextBlock Text="그룹 생성" /></Border>
+                                                <Border Style="{StaticResource Badge.Listen}" Margin="4,0,0,0" Visibility="{Binding CanAmbientListen, Converter={StaticResource BoolToVis}}"><TextBlock Text="원격 청취" /></Border>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+                </Border>
                 <!-- 편집 폼 -->
                 <Border Grid.Column="2" Style="{StaticResource Card}" Padding="12">
                     <Grid>
                         <TextBlock TextWrapping="Wrap" VerticalAlignment="Center" TextAlignment="Center"
-                                   Text="조직이나 구성원을 골라 [편집], 또는 [새 조직]/[새 구성원].&#10;&#10;번호(VoLTE·PTT 회선)는 구성원 편집 폼에서 개설·변경·삭제합니다. 새 회선과 번호 변경에는 SIP 비밀번호가 필요합니다(서버가 H(A1) 로만 보관).">
+                                   Text="구성원을 클릭하면 여기서 바로 편집합니다. 조직은 트리에서 골라 [편집], 새로 만들려면 [+ 새 조직]/[+ 새 구성원].&#10;&#10;번호(VoLTE·PTT 회선)는 구성원 폼에서 개설·변경·삭제합니다. 새 회선과 번호 변경에는 SIP 비밀번호가 필요합니다(서버가 H(A1) 로만 보관).">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock" BasedOn="{StaticResource Hint}">
                                     <Setter Property="Visibility" Value="Visible" />
@@ -141,7 +157,10 @@
                         <!-- 구성원 폼 -->
                         <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding MemberEditing, Converter={StaticResource BoolToVis}}">
                             <StackPanel Margin="0,0,6,0">
-                                <TextBlock Style="{StaticResource SectionHeader}" Text="{Binding MemberFormTitle}" Margin="0,0,0,8" />
+                                <DockPanel Margin="0,0,0,8">
+                                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs.Danger}" Content="삭제" Command="{Binding DeleteMemberCommand}" Visibility="{Binding MemberIsNew, Converter={StaticResource NotToVis}}" ToolTip="구성원과 VoLTE/PTT 회선을 삭제" />
+                                    <TextBlock Style="{StaticResource SectionHeader}" Text="{Binding MemberFormTitle}" VerticalAlignment="Center" />
+                                </DockPanel>
                                 <UniformGrid Columns="2">
                                     <StackPanel Margin="0,0,6,0">
                                         <TextBlock Text="이름" Style="{StaticResource Hint}" />

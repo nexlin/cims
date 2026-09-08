@@ -2,6 +2,7 @@
 // 왼쪽 조직 트리(선택 = 하위 포함 필터) · 가운데 구성원 목록 · 오른쪽 편집 폼(구성원 속성 + 회선 둘 + PTT 자격). 쓰기는 전부 서버가
 // 판정(범위 밖 403·번호 충돌 409·H(A1) 재결박 400)하고 앱은 사전(ResponseText.Area.Management)으로 문구만 낸다. 저장 뒤 한 벌을 다시 받는다.
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DispatchDesktop.Models;
@@ -40,6 +41,10 @@ public sealed class MemberRow
     public string Flags => Info.Ptt?.Profile is { } pf
         ? string.Join(" ", new[] { pf.GetValueOrDefault("allowCreateGroup") ? "그룹생성" : "", pf.GetValueOrDefault("allowAmbientListening") ? "청취" : "" }.Where(x => x.Length > 0))
         : "";
+    public bool CanCreateGroup => Info.Ptt?.Profile?.GetValueOrDefault("allowCreateGroup") == true;
+    public bool CanAmbientListen => Info.Ptt?.Profile?.GetValueOrDefault("allowAmbientListening") == true;
+    public string VolteCell => VolteText.Length > 0 ? VolteText : "–";
+    public string PttCell => PttText.Length > 0 ? PttText : "–";
 }
 
 public sealed partial class DirectoryAdminViewModel : ObservableObject
@@ -72,7 +77,7 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
     [ObservableProperty] private string _orgName = "";
     [ObservableProperty] private OrgRow? _orgParent;
     [ObservableProperty] private int _orgSort;
-    public string OrgFormTitle => OrgIsNew ? "새 조직" : $"조직 편집 — {OrgCode}";
+    public string OrgFormTitle => OrgIsNew ? "새 조직" : $"조직 편집 — {OrgName}";
 
     // ── 구성원 폼 ──
     [ObservableProperty] private bool _memberEditing;
@@ -95,12 +100,24 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
     [ObservableProperty] private bool _allowAmbientListening;
     private string _origVolte = "", _origPtt = "";
     private bool _origCreate, _origAmbient;
-    public string MemberFormTitle => MemberIsNew ? "새 구성원" : $"구성원 편집 — {EditName}";
+    public string MemberFormTitle => MemberIsNew ? "새 구성원" : $"편집 — {EditName}";
     public bool HasVolte => _origVolte.Length > 0;
     public bool HasPtt => _origPtt.Length > 0;
     public bool HasError => Error.Length > 0;
-    /// <summary>편집 폼이 열려 있다 — [관리] 메뉴의 점 배지(§3.4). 화면을 오가도 폼은 유지된다.</summary>
+    /// <summary>편집 폼이 열려 있다. 화면을 오가도 폼은 유지된다.</summary>
     public bool IsEditing => OrgEditing || MemberEditing;
+    /// <summary>저장하지 않은 변경이 있다 — [관리] 메뉴 점 배지·화면 머리 "저장하지 않은 변경"(§3.4). 행 클릭만으로 폼이 열리므로 열림≠변경.</summary>
+    public bool IsDirty => IsEditing && Fingerprint() != _formBase;
+    private string _formBase = "";
+    private string Fingerprint() => string.Join("\u001f", EditName, EditOrg?.Code, EditTitle, EditLoginId, EditPassword, VolteNumber, VolteService?.Name, VolteTransport, VoltePassword,
+                                                PttNumber, PttService?.Name, PttTransport, PttPassword, AllowCreateGroup, AllowAmbientListening, OrgCode, OrgName, OrgParent?.Code, OrgSort);
+    private void MarkClean() { _formBase = Fingerprint(); OnPropertyChanged(nameof(IsDirty)); }
+    protected override void OnPropertyChanged(PropertyChangedEventArgs e)
+    {
+        base.OnPropertyChanged(e);
+        if (e.PropertyName is not (nameof(IsDirty) or nameof(HasError) or nameof(Error) or nameof(Busy) or nameof(Loaded) or nameof(ScopeText) or nameof(MemberHeader) or nameof(Search)))
+            base.OnPropertyChanged(new PropertyChangedEventArgs(nameof(IsDirty)));
+    }
 
     /// <summary>확인 대화상자 — 창이 붙인다(제목, 본문) → 예/아니오.</summary>
     public Func<string, string, bool>? Confirm { get; set; }
@@ -110,10 +127,27 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
     partial void OnOrgEditingChanged(bool value) => OnPropertyChanged(nameof(IsEditing));
     partial void OnMemberEditingChanged(bool value) => OnPropertyChanged(nameof(IsEditing));
     partial void OnOrgCodeChanged(string value) => OnPropertyChanged(nameof(OrgFormTitle));
+    partial void OnOrgNameChanged(string value) => OnPropertyChanged(nameof(OrgFormTitle));
     partial void OnMemberIsNewChanged(bool value) => OnPropertyChanged(nameof(MemberFormTitle));
     partial void OnEditNameChanged(string value) => OnPropertyChanged(nameof(MemberFormTitle));
     partial void OnSearchChanged(string value) => Filter();
-    partial void OnSelectedOrgChanged(OrgRow? value) => Filter();
+    partial void OnSelectedOrgChanged(OrgRow? value) { Filter(); OnPropertyChanged(nameof(MemberHeader)); }
+    /// <summary>행 한 번 클릭 = 오른쪽 폼(§4.5 시안). 같은 구성원을 편집 중이면(재필터로 다시 선택될 때) 입력을 지우지 않는다.</summary>
+    private MemberRow? _prevMember;
+    partial void OnSelectedMemberChanged(MemberRow? value)
+    {
+        if (value is null) { _prevMember = null; return; }
+        if (MemberEditing && !MemberIsNew && EditUserId == value.UserId) { _prevMember = value; return; }
+        if (IsDirty && Confirm?.Invoke("변경 버림", "저장하지 않은 변경이 있습니다. 버리고 다른 항목으로 넘어갈까요?") == false)
+        {
+            var back = _prevMember; SelectedMember = back;             // 되돌림 — 같은 구성원이라 위 가드에서 멈춘다
+            return;
+        }
+        _prevMember = value;
+        EditMember();
+    }
+    /// <summary>구성원 머리 — "N명 · {선택 조직} 하위 포함".</summary>
+    public string MemberHeader => SelectedOrg is null ? $"{Members.Count}명 · 범위 전체" : $"{Members.Count}명 · {SelectedOrg.Name} 하위 포함";
 
     public async Task LoadAsync(bool force = false)
     {
@@ -196,6 +230,7 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
             Members.Add(new MemberRow(m, OrgPathOf(_view.Orgs, m.Org), _s.Directory));
         }
         SelectedMember = Members.FirstOrDefault(x => x.UserId == keep);
+        OnPropertyChanged(nameof(MemberHeader));
     }
 
     private async Task<bool> RunAsync(Task<CimsUe.Result<CimsUe.HttpResponse>> op, string what)
@@ -214,12 +249,14 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
     [RelayCommand] private void NewOrg()
     {
         OrgIsNew = true; OrgCode = ""; OrgName = ""; OrgSort = 0; OrgParent = SelectedOrg; OrgEditing = true; MemberEditing = false;
+        MarkClean();
     }
     [RelayCommand] private void BeginEditOrg()
     {
         if (SelectedOrg is null) return;
         OrgIsNew = false; OrgCode = SelectedOrg.Code; OrgName = SelectedOrg.Name; OrgParent = Orgs.FirstOrDefault(o => o.Code == SelectedOrg.Parent);
         OrgSort = _view?.Orgs.FirstOrDefault(o => o.Code == SelectedOrg.Code)?.Sort ?? 0; OrgEditing = true; MemberEditing = false;
+        MarkClean();
     }
     [RelayCommand] private void CancelOrg() => OrgEditing = false;
     [RelayCommand] private async Task SaveOrg()
@@ -248,6 +285,7 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
         AllowCreateGroup = false; AllowAmbientListening = false; _origVolte = _origPtt = ""; _origCreate = _origAmbient = false;
         OnPropertyChanged(nameof(HasVolte)); OnPropertyChanged(nameof(HasPtt));
         MemberEditing = true; OrgEditing = false;
+        MarkClean();
     }
     [RelayCommand] private void EditMember()
     {
@@ -263,6 +301,7 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
         _origVolte = VolteNumber; _origPtt = PttNumber; _origCreate = AllowCreateGroup; _origAmbient = AllowAmbientListening;
         OnPropertyChanged(nameof(HasVolte)); OnPropertyChanged(nameof(HasPtt));
         MemberEditing = true; OrgEditing = false;
+        MarkClean();
     }
     [RelayCommand] private void CancelMember() => MemberEditing = false;
 
