@@ -15,6 +15,7 @@ import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
+import { DataTable as TableFrame, Th, Td } from '@core/components/custom/data-table'
 
 // ── 사용자 프로비저닝 워크벤치 (사용자 = 가입, 번호 등록이 가입 행위) ──────────
 //  좌: 조직트리(공유 스코프) | 상단 탭: 사용자/VoLTE 번호/PTT 번호.
@@ -724,52 +725,52 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
   return (
     <div>
       <div className="table-wrap">
-      <table className="data-table" style={{ fontSize: 12 }}>
+      <TableFrame sticky className="[&_td]:text-sm">
         <thead>
           <tr>
-            <th style={{ width: 150 }}>서비스</th>
-            <th style={{ width: 140 }}>MSISDN</th>
-            <th style={{ width: 100 }}>비밀번호</th>
-            <th>IMSI</th>
-            <th style={{ width: 96 }} title="TLS=서버 집행(비-TLS 채널 요청 403) / UDP·TCP=단말 힌트 / 자유=단말 선택">채널</th>
-            <th style={{ width: 150 }} title="Digest=SIP Digest(H(A1)) / AKA=IMS AKA(K/OPc — CSC AuC 암호화 보관, 보호 채널 강제)">인증</th>
-            <th style={{ width: 56, textAlign: 'center' }}>DND</th>
-            <th style={{ width: 110 }}>착신전환</th>
-            <th style={{ width: 100 }} title="당겨받기 그룹 — 같은 값끼리 픽업 가능. 빈 값=조직(org) 폴백. 반영은 다음 등록 갱신부터">픽업그룹</th>
-            <th style={{ width: 110 }}></th>
+            <Th style={{ width: 150 }}>서비스</Th>
+            <Th style={{ width: 140 }}>MSISDN</Th>
+            <Th style={{ width: 100 }}>비밀번호</Th>
+            <Th>IMSI</Th>
+            <Th style={{ width: 96 }} title="TLS=서버 집행(비-TLS 채널 요청 403) / UDP·TCP=단말 힌트 / 자유=단말 선택">채널</Th>
+            <Th style={{ width: 150 }} title="Digest=SIP Digest(H(A1)) / AKA=IMS AKA(K/OPc — CSC AuC 암호화 보관, 보호 채널 강제)">인증</Th>
+            <Th style={{ width: 56, textAlign: 'center' }}>DND</Th>
+            <Th style={{ width: 110 }}>착신전환</Th>
+            <Th style={{ width: 100 }} title="당겨받기 그룹 — 같은 값끼리 픽업 가능. 빈 값=조직(org) 폴백. 반영은 다음 등록 갱신부터">픽업그룹</Th>
+            <Th style={{ width: 110 }}></Th>
           </tr>
         </thead>
         <tbody>
-          {rows.length === 0 && !adding && <tr><td colSpan={10} className="empty-cell" style={{ padding: 12 }}>번호 없음 — 아래 [번호 추가]</td></tr>}
+          {rows.length === 0 && !adding && <tr><Td colSpan={10} className="py-8 text-center text-muted-foreground" style={{ padding: 12 }}>번호 없음 — 아래 [번호 추가]</Td></tr>}
           {rows.map(r => {
             const ed = editKey === rk(r.svc, r.sub.id)
             const isCall = r.svc === 'call'
             const hi = highlight && r.sub.id === highlight
             return (
               <tr key={rk(r.svc, r.sub.id)} style={{ background: hi && !ed ? 'rgba(74,144,217,0.10)' : undefined }}>
-                <td>{ed
+                <Td>{ed
                   ? <Select value={toSel(editForm.service_ref || '')} onValueChange={(v: string) => setEditForm({ ...editForm, service_ref: fromSel(v) })}>
    <SelectTrigger><SelectValue /></SelectTrigger>
    <SelectContent>
                         {catalog.filter(c => c.svc === r.svc).map(c => <SelectItem key={c.ref} value={c.ref}>{c.ref}</SelectItem>)}
    </SelectContent>
  </Select>
-                  : <SvcBadge svc={r.svc} />}</td>
-                <td><strong>{r.sub.id}</strong></td>
-                <td>{ed ? <Input  type="password" placeholder="변경 시 입력" value={editForm.passwd || ''} onChange={e => setEditForm({ ...editForm, passwd: e.target.value })} /> : <span className="ts">••••</span>}</td>
-                <td>{ed ? <Input  placeholder="SIM IMSI" value={editForm.imsi || ''} onChange={e => setEditForm({ ...editForm, imsi: e.target.value })} /> : <span className="ts">{r.sub.imsi || '—'}</span>}</td>
-                <td>{ed ? (editForm.auth_scheme === 'aka' ? <TransportFixedAka /> : <TransportSelect value={editForm.sip_transport} onChange={v => setEditForm({ ...editForm, sip_transport: v || null })} />) : <TransportBadge v={r.sub.sip_transport} aka={r.sub.auth_scheme === 'aka'} />}</td>
-                <td>{ed ? <>
+                  : <SvcBadge svc={r.svc} />}</Td>
+                <Td><strong>{r.sub.id}</strong></Td>
+                <Td>{ed ? <Input  type="password" placeholder="변경 시 입력" value={editForm.passwd || ''} onChange={e => setEditForm({ ...editForm, passwd: e.target.value })} /> : <span className="ts">••••</span>}</Td>
+                <Td>{ed ? <Input  placeholder="SIM IMSI" value={editForm.imsi || ''} onChange={e => setEditForm({ ...editForm, imsi: e.target.value })} /> : <span className="ts">{r.sub.imsi || '—'}</span>}</Td>
+                <Td>{ed ? (editForm.auth_scheme === 'aka' ? <TransportFixedAka /> : <TransportSelect value={editForm.sip_transport} onChange={v => setEditForm({ ...editForm, sip_transport: v || null })} />) : <TransportBadge v={r.sub.sip_transport} aka={r.sub.auth_scheme === 'aka'} />}</Td>
+                <Td>{ed ? <>
                   <AuthSelect value={editForm.auth_scheme} onChange={v => setEditForm({ ...editForm, auth_scheme: v })} />
                   {editForm.auth_scheme === 'aka' && <AkaKeyInputs k={editForm.k || ''} opc={editForm.opc || ''} keep={!!r.sub.aka_provisioned} onChange={(k, opc) => setEditForm({ ...editForm, k, opc })} />}
-                </> : <AuthBadge sub={r.sub} />}</td>
-                <td style={{ textAlign: 'center' }}>{!isCall ? <span className="ts">—</span> : ed ? <input type="checkbox" checked={editForm.dnd || false} onChange={e => setEditForm({ ...editForm, dnd: e.target.checked })} /> : (r.sub.dnd ? <span className="badge badge--red" style={{ fontSize: 9 }}>ON</span> : <span className="ts">—</span>)}</td>
-                <td>{!isCall ? <span className="ts">—</span> : ed ? <Input  placeholder="대상" value={editForm.forward_id || ''} onChange={e => setEditForm({ ...editForm, forward_id: e.target.value })} /> : <span className="ts">{r.sub.forward_id || '—'}</span>}</td>
-                <td>{ed ? ((r.sub.pickup_group || '').startsWith('dg-')
+                </> : <AuthBadge sub={r.sub} />}</Td>
+                <Td style={{ textAlign: 'center' }}>{!isCall ? <span className="ts">—</span> : ed ? <input type="checkbox" checked={editForm.dnd || false} onChange={e => setEditForm({ ...editForm, dnd: e.target.checked })} /> : (r.sub.dnd ? <span className="badge badge--red" style={{ fontSize: 9 }}>ON</span> : <span className="ts">—</span>)}</Td>
+                <Td>{!isCall ? <span className="ts">—</span> : ed ? <Input  placeholder="대상" value={editForm.forward_id || ''} onChange={e => setEditForm({ ...editForm, forward_id: e.target.value })} /> : <span className="ts">{r.sub.forward_id || '—'}</span>}</Td>
+                <Td>{ed ? ((r.sub.pickup_group || '').startsWith('dg-')
                     ? <span className="badge badge--blue" style={{ fontSize: 10 }} title="관제 그룹 멤버십에서 파생 — 관리 › 관제 그룹에서 변경">{r.sub.pickup_group}</span>
                     : <Input  placeholder="예: control-room-1" title="자유 문자열 픽업 그룹 — 관제 그룹(대표번호·감청)은 관리 › 관제 그룹" value={editForm.pickup_group || ''} onChange={e => setEditForm({ ...editForm, pickup_group: e.target.value })} />)
-                  : <span className="ts" title={(r.sub.pickup_group || '').startsWith('dg-') ? '관제 그룹 (파생)' : undefined}>{r.sub.pickup_group || '—'}</span>}</td>
-                <td className="actions">
+                  : <span className="ts" title={(r.sub.pickup_group || '').startsWith('dg-') ? '관제 그룹 (파생)' : undefined}>{r.sub.pickup_group || '—'}</span>}</Td>
+                <Td className="actions">
                   {!canWrite ? <span className="ts">—</span> : ed ? <>
                     <IconBtn title="저장" tone="primary" onClick={() => saveEdit(r)}><Check size={ICON} /></IconBtn>
                     <IconBtn title="취소" onClick={() => setEditKey(null)}><X size={ICON} /></IconBtn>
@@ -777,37 +778,37 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
                     <IconBtn title="편집" onClick={() => startEdit(r)}><Pencil size={ICON} /></IconBtn>
                     <IconBtn title="삭제" tone="danger" onClick={() => del(r)}><Trash2 size={ICON} /></IconBtn>
                   </>}
-                </td>
+                </Td>
               </tr>
             )
           })}
           {adding && (
             <tr style={{ background: 'rgba(74,144,217,0.06)' }}>
-              <td><Select value={toSel(addForm.svcCat)} onValueChange={(v: string) => setAddForm({ ...addForm, svcCat: fromSel(v) })}>
+              <Td><Select value={toSel(addForm.svcCat)} onValueChange={(v: string) => setAddForm({ ...addForm, svcCat: fromSel(v) })}>
   <SelectTrigger><SelectValue /></SelectTrigger>
   <SelectContent>
                   {catalog.map(c => <SelectItem key={svcVal(c)} value={svcVal(c)}>{c.ref} ({c.svc === 'call' ? 'VoLTE' : 'McPTT'})</SelectItem>)}
   </SelectContent>
-</Select></td>
-              <td><Input  placeholder={addIsCall ? '+8213…' : '+825…'} autoFocus value={addForm.id} onChange={e => setAddForm({ ...addForm, id: e.target.value })} /></td>
-              <td><Input  type="password" placeholder={addForm.auth_scheme === 'aka' ? '암호(선택)' : '암호 *'} value={addForm.passwd} onChange={e => setAddForm({ ...addForm, passwd: e.target.value })} /></td>
-              <td><Input  placeholder="SIM IMSI *" value={addForm.imsi} onChange={e => setAddForm({ ...addForm, imsi: e.target.value })} /></td>
-              <td>{addForm.auth_scheme === 'aka' ? <TransportFixedAka /> : <TransportSelect value={addForm.sip_transport} onChange={v => setAddForm({ ...addForm, sip_transport: v })} />}</td>
-              <td>
+</Select></Td>
+              <Td><Input  placeholder={addIsCall ? '+8213…' : '+825…'} autoFocus value={addForm.id} onChange={e => setAddForm({ ...addForm, id: e.target.value })} /></Td>
+              <Td><Input  type="password" placeholder={addForm.auth_scheme === 'aka' ? '암호(선택)' : '암호 *'} value={addForm.passwd} onChange={e => setAddForm({ ...addForm, passwd: e.target.value })} /></Td>
+              <Td><Input  placeholder="SIM IMSI *" value={addForm.imsi} onChange={e => setAddForm({ ...addForm, imsi: e.target.value })} /></Td>
+              <Td>{addForm.auth_scheme === 'aka' ? <TransportFixedAka /> : <TransportSelect value={addForm.sip_transport} onChange={v => setAddForm({ ...addForm, sip_transport: v })} />}</Td>
+              <Td>
                 <AuthSelect value={addForm.auth_scheme} onChange={v => setAddForm({ ...addForm, auth_scheme: v })} />
                 {addForm.auth_scheme === 'aka' && <AkaKeyInputs k={addForm.k} opc={addForm.opc} onChange={(k, opc) => setAddForm({ ...addForm, k, opc })} />}
-              </td>
-              <td style={{ textAlign: 'center' }}>{addIsCall ? <input type="checkbox" checked={addForm.dnd} onChange={e => setAddForm({ ...addForm, dnd: e.target.checked })} /> : <span className="ts">—</span>}</td>
-              <td>{addIsCall ? <Input  placeholder="대상" value={addForm.forward_id} onChange={e => setAddForm({ ...addForm, forward_id: e.target.value })} /> : <span className="ts">—</span>}</td>
-              <td><Input  placeholder="픽업그룹" value={addForm.pickup_group} onChange={e => setAddForm({ ...addForm, pickup_group: e.target.value })} /></td>
-              <td className="actions">
+              </Td>
+              <Td style={{ textAlign: 'center' }}>{addIsCall ? <input type="checkbox" checked={addForm.dnd} onChange={e => setAddForm({ ...addForm, dnd: e.target.checked })} /> : <span className="ts">—</span>}</Td>
+              <Td>{addIsCall ? <Input  placeholder="대상" value={addForm.forward_id} onChange={e => setAddForm({ ...addForm, forward_id: e.target.value })} /> : <span className="ts">—</span>}</Td>
+              <Td><Input  placeholder="픽업그룹" value={addForm.pickup_group} onChange={e => setAddForm({ ...addForm, pickup_group: e.target.value })} /></Td>
+              <Td className="actions">
                 <Button variant="default" onClick={add}>추가</Button>
                 <Button variant="ghost" onClick={() => { setAdding(false); setAddForm(newAdd()) }}>취소</Button>
-              </td>
+              </Td>
             </tr>
           )}
         </tbody>
-      </table>
+      </TableFrame>
       </div>
       {canWrite && !adding && (
         <Button variant="ghost" style={{ color: 'var(--primary)', fontSize: 12, marginTop: 4 }} onClick={() => { setAdding(true); setEditKey(null) }}><Plus size={13} /> 번호 추가</Button>
@@ -946,10 +947,10 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
                 <div style={{ marginTop: 10, fontSize: 12 }}>
                   <div style={{ fontWeight: 600, marginBottom: 4 }}>생성된 비밀번호 <span className="ts" style={{ fontWeight: 400 }}>— 서버는 H(A1) 만 저장하므로 지금 기록하지 않으면 복구할 수 없습니다</span></div>
                   <div className="table-wrap" style={{ maxHeight: 220, overflow: 'auto' }}>
-                    <table className="data-table" style={{ fontSize: 12 }}>
-                      <thead><tr><th>시트</th><th>행</th><th>MSISDN</th><th>비밀번호</th></tr></thead>
-                      <tbody>{result.credentials!.map((c, i) => <tr key={i}><td>{c.sheet}</td><td>{c.row}</td><td>{c.msisdn}</td><td><code>{c.password}</code></td></tr>)}</tbody>
-                    </table>
+                    <TableFrame sticky className="[&_td]:text-sm">
+                      <thead><tr><Th>시트</Th><Th>행</Th><Th>MSISDN</Th><Th>비밀번호</Th></tr></thead>
+                      <tbody>{result.credentials!.map((c, i) => <tr key={i}><Td>{c.sheet}</Td><Td>{c.row}</Td><Td>{c.msisdn}</Td><Td><code>{c.password}</code></Td></tr>)}</tbody>
+                    </TableFrame>
                   </div>
                 </div>
               )}

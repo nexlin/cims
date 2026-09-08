@@ -5,6 +5,7 @@ import { useSharedHealth } from '@core/widgets/useSharedHealth'
 import type { WidgetDef } from '@core/widgets/types'
 import FlowPage from '@core/pages/FlowPage'
 import { fmtTime } from './shared'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 function ActiveVoipWidget() {
   const navigate = useNavigate()
@@ -22,21 +23,21 @@ function ActiveVoipWidget() {
         VoIP 활성 통화 ({rows.length}건)
       </div>
       {rows.length === 0 ? <div className="empty">활성 통화 없음</div> : (
-      <table className="data-table">
-        <thead><tr><th>발신</th><th>착신</th><th>상태</th><th>시작</th></tr></thead>
+      <DataTable sticky>
+        <thead><tr><Th>발신</Th><Th>착신</Th><Th>상태</Th><Th>시작</Th></tr></thead>
         <tbody>
           {rows.map(c => (
             <tr key={c.call_id} style={{ cursor: 'pointer' }}
               onClick={() => setFlowId(c.call_id)}
               title="행 클릭: 메시지 플로우 / 번호 클릭: 가입자 상세">
-              <td><a href="#" onClick={e => gotoSubscriber(e, c.initiator)}>{c.initiator}</a></td>
-              <td><a href="#" onClick={e => gotoSubscriber(e, c.callee)}>{c.callee}</a></td>
-              <td><span className={`badge ${c.state === 'active' ? 'badge--green' : 'badge--blue'}`}>{c.state}</span></td>
-              <td className="ts">{fmtTime(c.invite_time)}</td>
+              <Td><a href="#" onClick={e => gotoSubscriber(e, c.initiator)}>{c.initiator}</a></Td>
+              <Td><a href="#" onClick={e => gotoSubscriber(e, c.callee)}>{c.callee}</a></Td>
+              <Td><span className={`badge ${c.state === 'active' ? 'badge--green' : 'badge--blue'}`}>{c.state}</span></Td>
+              <Td className="ts">{fmtTime(c.invite_time)}</Td>
             </tr>
           ))}
         </tbody>
-      </table>
+      </DataTable>
       )}
       {flowId && <FlowPage callId={flowId} callType="volte" onClose={() => setFlowId(null)} />}
     </div>

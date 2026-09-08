@@ -6,6 +6,7 @@
 import { useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { TimeBarData, SeriesBarData, KpiData, DistributionData, TableData, MatrixData } from './types'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 // ── 시간축 공용 ────────────────────────────────────────────────────────────
 
@@ -265,15 +266,15 @@ export function DistributionBars({ data }: { data: DistributionData }) {
 
 export function KvTable({ data }: { data: TableData }) {
   return (
-    <table className="data-table" style={{ fontSize: 12 }}>
-      <thead><tr><th>{data.columns[0]}</th><th style={{ width: 90, textAlign: 'right' }}>{data.columns[1]}</th></tr></thead>
+    <DataTable sticky className="[&_td]:text-sm">
+      <thead><tr><Th>{data.columns[0]}</Th><Th style={{ width: 90, textAlign: 'right' }}>{data.columns[1]}</Th></tr></thead>
       <tbody>
-        {data.rows.length === 0 ? <tr><td colSpan={2} className="empty-cell">데이터 없음</td></tr>
+        {data.rows.length === 0 ? <tr><Td colSpan={2} className="py-8 text-center text-muted-foreground">데이터 없음</Td></tr>
           : data.rows.map((r, i) => (
-            <tr key={i}><td>{r.key}</td><td style={{ textAlign: 'right', fontWeight: 600 }}>{r.value}</td></tr>
+            <tr key={i}><Td>{r.key}</Td><Td style={{ textAlign: 'right', fontWeight: 600 }}>{r.value}</Td></tr>
           ))}
       </tbody>
-    </table>
+    </DataTable>
   )
 }
 
@@ -313,43 +314,43 @@ export function MatrixTable({ data }: { data: MatrixData }) {
   }
   return (
     <div style={{ overflow: 'auto', maxHeight: '100%' }}>
-      <table className="data-table" style={{ fontSize: 12, borderCollapse: 'separate', borderSpacing: 0 }}>
+      <DataTable sticky className="[&_td]:text-sm">
         <thead>
           <tr>
-            <th style={{ ...stickyL, zIndex: 2 }}>시각</th>
+            <Th style={{ ...stickyL, zIndex: 2 }}>시각</Th>
             {data.columns.map(c => (
-              <th key={c.key} style={{ textAlign: 'right', whiteSpace: 'nowrap' }}
+              <Th key={c.key} style={{ textAlign: 'right', whiteSpace: 'nowrap' }}
                   title={`전 구간 ${c.total}${c.unit ?? data.unit ?? '건'}`}>
                 {c.label}{c.unit === '%' ? ' (%)' : ''}
-              </th>
+              </Th>
             ))}
-            {data.rowTotal && <th style={{ ...stickyR, zIndex: 2, textAlign: 'right' }}>합계</th>}
+            {data.rowTotal && <Th style={{ ...stickyR, zIndex: 2, textAlign: 'right' }}>합계</Th>}
           </tr>
         </thead>
         <tbody>
           {data.rows.map(r => (
             <tr key={r.label}>
-              <td style={stickyL}>{r.label}</td>
+              <Td style={stickyL}>{r.label}</Td>
               {data.columns.map(c => {
                 const v = r.cells[c.key] ?? 0
-                return <td key={c.key} style={numTd(v, cellBg(c.key, v))}>{v}</td>
+                return <Td key={c.key} style={numTd(v, cellBg(c.key, v))}>{v}</Td>
               })}
               {data.rowTotal &&
-                <td style={{ ...stickyR, ...numTd(r.total), fontWeight: 700 }}>{r.total}</td>}
+                <Td style={{ ...stickyR, ...numTd(r.total), fontWeight: 700 }}>{r.total}</Td>}
             </tr>
           ))}
         </tbody>
         <tfoot>
           <tr>
-            <td style={{ ...stickyL, fontWeight: 700 }}>{data.rowTotal ? '합계' : '전 구간'}</td>
+            <Td style={{ ...stickyL, fontWeight: 700 }}>{data.rowTotal ? '합계' : '전 구간'}</Td>
             {data.columns.map(c => (
-              <td key={c.key} style={{ ...numTd(c.total), fontWeight: 700 }}>{c.total}</td>
+              <Td key={c.key} style={{ ...numTd(c.total), fontWeight: 700 }}>{c.total}</Td>
             ))}
             {data.rowTotal &&
-              <td style={{ ...stickyR, ...numTd(data.grandTotal), fontWeight: 700 }}>{data.grandTotal}</td>}
+              <Td style={{ ...stickyR, ...numTd(data.grandTotal), fontWeight: 700 }}>{data.grandTotal}</Td>}
           </tr>
         </tfoot>
-      </table>
+      </DataTable>
       {/* 각주 — 비율 열은 이름만으로 분자·분모를 알 수 없다. 표를 보는 자리에서 바로 읽히게
           표 바로 아래 둔다(별도 도움말로 빼면 아무도 찾아가지 않는다). */}
       {data.notes?.length ? (

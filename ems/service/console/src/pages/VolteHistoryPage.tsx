@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight, Maximize2 } from 'lucide-react'
-import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { callsApi, type CallLog } from '@core/api/calls'
 import { statsApi, type OrgStat } from '@core/api/stats'
 import { recordingsApi, type RecordingSegment } from '@core/api/recordings'
@@ -10,6 +10,7 @@ import { useToast } from '@core/components/Toast'
 import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 function fmtDur(s: number | null) { if (!s || s <= 0) return '—'; const m = Math.floor(s / 60); return m > 0 ? `${m}분 ${s % 60}초` : `${s}초` }
 function fmtClock(iso: string | null | undefined) {
@@ -198,7 +199,6 @@ export default function VolteHistoryPage() {
   const totalPages = Math.max(1, Math.ceil(total / ps))
   const dayTotal = useMemo(() => Object.values(hours).reduce((a, b) => a + b, 0), [hours])
   const selNode = orgs.find(o => o.code === selOrg)
-  const thS: CSSProperties = { padding: '7px 10px', fontWeight: 600, color: 'var(--muted-foreground)', textAlign: 'left', whiteSpace: 'nowrap', position: 'sticky', top: 0, background: 'var(--card)', zIndex: 1 }
 
   return (
     <div className="panel" style={{ padding: 10 }}>
@@ -261,26 +261,26 @@ export default function VolteHistoryPage() {
 
           {/* 호 목록 — 헤더(고정)·본문(스크롤, 항목없어도 영역 유지)·테일(고정) 항상 표시 */}
           <div className="scroll-fill" style={{ border: '1px solid var(--border)', borderRadius: 6 }}>
-            <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <DataTable sticky className="[&_td]:text-sm">
               <thead>
                 <tr>
-                  <th style={{ ...thS, width: 24 }}></th>
-                  <th style={thS}>유형</th>
-                  <th style={thS}>발신 → 착신</th>
-                  <th style={{ ...thS, textAlign: 'center' }}>상태</th>
-                  <th style={thS}>시작시간</th>
-                  <th style={thS}>응답시간</th>
-                  <th style={thS}>종료시간</th>
-                  <th style={{ ...thS, textAlign: 'right' }}>통화시간</th>
-                  <th style={thS}>종료사유</th>
-                  <th style={{ ...thS, textAlign: 'center' }}>녹취</th>
+                  <Th width={24}></Th>
+                  <Th>유형</Th>
+                  <Th>발신 → 착신</Th>
+                  <Th align="center">상태</Th>
+                  <Th>시작시간</Th>
+                  <Th>응답시간</Th>
+                  <Th>종료시간</Th>
+                  <Th align="right">통화시간</Th>
+                  <Th>종료사유</Th>
+                  <Th align="center">녹취</Th>
                 </tr>
               </thead>
               <tbody>
                 {loading
-                  ? <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--muted-foreground)', padding: 24 }}>로딩 중...</td></tr>
+                  ? <tr><Td colSpan={10} style={{ textAlign: 'center', color: 'var(--muted-foreground)', padding: 24 }}>로딩 중...</Td></tr>
                   : logs.length === 0
-                    ? <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--muted-foreground)', padding: 24 }}>이력 없음</td></tr>
+                    ? <tr><Td colSpan={10} style={{ textAlign: 'center', color: 'var(--muted-foreground)', padding: 24 }}>이력 없음</Td></tr>
                     : logs.map(l => {
                       const isOpen = expandedCall === callKey(l)
                       const st = callState(l.state)
@@ -298,7 +298,7 @@ export default function VolteHistoryPage() {
                       )
                     })}
               </tbody>
-            </table>
+            </DataTable>
           </div>
 
           {/* 페이지네이션 (항상 표시) */}
@@ -327,7 +327,6 @@ export default function VolteHistoryPage() {
 // ════════════════════════════════════════════════════════════════
 // 호 단위 accordion 행 (헤더 + 펼침: 녹취 + 다이어그램/메시지/상세)
 // ════════════════════════════════════════════════════════════════
-const tdS: CSSProperties = { padding: '6px 10px', whiteSpace: 'nowrap' }
 
 function CallRow({ l, isOpen, st, dur, flow, onToggle, onOpenDiagram, onOpenRec }: {
   l: CallLog
@@ -342,33 +341,33 @@ function CallRow({ l, isOpen, st, dur, flow, onToggle, onOpenDiagram, onOpenRec 
   return (
     <>
       <tr onClick={onToggle} style={{ cursor: 'pointer', borderTop: '1px solid var(--border)', background: isOpen ? 'var(--accent)' : 'transparent' }}>
-        <td style={{ ...tdS, textAlign: 'center', color: 'var(--muted-foreground)' }}>
-                  {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</td>
-        <td style={tdS}><span className={`badge ${l.call_type === 'volte_video' ? 'badge--blue' : 'badge--gray'}`} style={{ fontSize: 10 }}>{l.call_type === 'volte_video' ? '영상' : '음성'}</span></td>
-        <td style={tdS}>
+        <Td align="center" className="whitespace-nowrap text-muted-foreground">
+                  {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</Td>
+        <Td className="whitespace-nowrap"><span className={`badge ${l.call_type === 'volte_video' ? 'badge--blue' : 'badge--gray'}`} style={{ fontSize: 10 }}>{l.call_type === 'volte_video' ? '영상' : '음성'}</span></Td>
+        <Td className="whitespace-nowrap">
           <span style={{ fontWeight: 600, color: CALLER_C }}>{l.initiator}</span>
           <span style={{ color: 'var(--muted-foreground)' }}> → </span>
           <span style={{ fontWeight: 600, color: CALLEE_C }}>{l.callee || '—'}</span>
-        </td>
-        <td style={{ ...tdS, textAlign: 'center' }}><span className={`badge ${st.cls}`}>{st.label}</span></td>
-        <td style={tdS} className="ts">{fmtClock(l.invite_time)}</td>
-        <td style={tdS} className="ts">{fmtClock(l.answer_time)}</td>
-        <td style={tdS} className="ts">{fmtClock(l.end_time)}</td>
-        <td style={{ ...tdS, textAlign: 'right' }} className="ts">{fmtDur(dur)}</td>
-        <td style={tdS} className="ts">{l.end_reason_ko || l.end_reason || '—'}</td>
-        <td style={{ ...tdS, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+        </Td>
+        <Td align="center" className="whitespace-nowrap"><span className={`badge ${st.cls}`}>{st.label}</span></Td>
+        <Td className="whitespace-nowrap ts">{fmtClock(l.invite_time)}</Td>
+        <Td className="whitespace-nowrap ts">{fmtClock(l.answer_time)}</Td>
+        <Td className="whitespace-nowrap ts">{fmtClock(l.end_time)}</Td>
+        <Td align="right" className="whitespace-nowrap ts">{fmtDur(dur)}</Td>
+        <Td className="whitespace-nowrap ts">{l.end_reason_ko || l.end_reason || '—'}</Td>
+        <Td align="center" className="whitespace-nowrap" onClick={e => e.stopPropagation()}>
           {l.has_recording
             ? <Button onClick={onOpenRec}>&#9654; 녹취</Button>
             : <span style={{ color: 'var(--muted-foreground)' }}>—</span>}
-        </td>
+        </Td>
       </tr>
       {isOpen && (
         <tr>
-          <td colSpan={10} style={{ padding: 0, background: 'var(--muted)', borderTop: '1px solid var(--border)' }}>
+          <Td colSpan={10} className="h-auto bg-muted p-0">
             <div style={{ padding: '10px 14px' }}>
               <CallDetailPanel l={l} flow={flow} onOpenDiagram={onOpenDiagram} />
             </div>
-          </td>
+          </Td>
         </tr>
       )}
     </>
@@ -411,8 +410,6 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
       .finally(() => setBodyLoading(false))
   }
 
-  const dS: CSSProperties = { padding: '3px 8px', whiteSpace: 'nowrap', fontSize: 12 }
-  const hS: CSSProperties = { padding: '4px 8px', fontWeight: 600, color: 'var(--muted-foreground)', textAlign: 'left', fontSize: 11 }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -457,16 +454,16 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
               {flow?.loading ? <div className="empty" style={{ padding: 8 }}>로딩 중...</div>
                 : msgs.length === 0 ? <div className="ts" style={{ color: 'var(--muted-foreground)', padding: 8 }}>메시지 없음</div>
                   : (
-                    <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <DataTable sticky>
                       <thead>
-                        <tr style={{ background: 'var(--secondary)', position: 'sticky', top: 0 }}>
-                          <th style={{ ...hS, width: 28, textAlign: 'right' }}>#</th>
-                          <th style={hS}>시간</th>
-                          <th style={hS}>From→To</th>
-                          <th style={hS}>모듈</th>
-                          <th style={hS}>TX/RX</th>
-                          <th style={hS}>프로토콜</th>
-                          <th style={hS}>Method</th>
+                        <tr>
+                          <Th width={28} align="right">#</Th>
+                          <Th>시간</Th>
+                          <Th>From→To</Th>
+                          <Th>모듈</Th>
+                          <Th>TX/RX</Th>
+                          <Th>프로토콜</Th>
+                          <Th>Method</Th>
                         </tr>
                       </thead>
                       <tbody>
@@ -476,22 +473,22 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
                           return (
                             <tr key={i} onClick={() => select(i)}
                               style={{ borderTop: '1px solid var(--border)', cursor: 'pointer', background: sel ? 'var(--accent)' : undefined }}>
-                              <td style={{ ...dS, textAlign: 'right', color: 'var(--muted-foreground)' }}>{i + 1}</td>
-                              <td style={dS} className="ts">{fmtClock(m.ts)}</td>
-                              <td style={dS}>{actorLbl(m.from)}<span style={{ color: 'var(--muted-foreground)' }}>→</span>{actorLbl(m.to)}</td>
-                              <td style={{ ...dS, color: 'var(--muted-foreground)', fontSize: 10 }}>{(m.nodeId || m.node || '').toUpperCase()}</td>
-                              <td style={dS}>{(() => {
+                              <Td align="right" className="whitespace-nowrap text-sm text-muted-foreground">{i + 1}</Td>
+                              <Td className="whitespace-nowrap text-sm ts">{fmtClock(m.ts)}</Td>
+                              <Td className="whitespace-nowrap text-sm">{actorLbl(m.from)}<span style={{ color: 'var(--muted-foreground)' }}>→</span>{actorLbl(m.to)}</Td>
+                              <Td className="whitespace-nowrap text-[10px] text-muted-foreground">{(m.nodeId || m.node || '').toUpperCase()}</Td>
+                              <Td className="whitespace-nowrap text-sm">{(() => {
                                 const d = inferDir(m)
                                 return d ? <span style={{ fontSize: 9, fontWeight: 700, color: '#fff', background: d === 'TX' ? '#2563eb' : '#16a34a', borderRadius: 3, padding: '1px 5px' }}>{d}</span>
                                   : <span style={{ color: 'var(--muted-foreground)' }}>—</span>
-                              })()}</td>
-                              <td style={dS}><span style={{ fontSize: 9, fontWeight: 700, color: '#fff', background: protoColor(proto), borderRadius: 3, padding: '1px 5px' }}>{proto}</span></td>
-                              <td style={{ ...dS, fontWeight: 600, color: protoColor(proto) }}>{m.label || ''}</td>
+                              })()}</Td>
+                              <Td className="whitespace-nowrap text-sm"><span style={{ fontSize: 9, fontWeight: 700, color: '#fff', background: protoColor(proto), borderRadius: 3, padding: '1px 5px' }}>{proto}</span></Td>
+                              <Td className="whitespace-nowrap text-sm font-semibold" style={{ color: protoColor(proto) }}>{m.label || ''}</Td>
                             </tr>
                           )
                         })}
                       </tbody>
-                    </table>
+                    </DataTable>
                   )}
             </div>
           </div>

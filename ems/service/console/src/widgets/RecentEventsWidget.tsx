@@ -10,6 +10,7 @@ import { useAlarms } from '@core/widgets/useAlarms'
 import type { EventRecord } from '@core/api/alerts'
 import type { WidgetDef } from '@core/widgets/types'
 import { Button } from '@core/components/ui/button'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 // kind = 이벤트 스트림의 1차 축 (표준화 §3.6 — DOMAIN 약어 STC/AUD). 고정 순서.
 const KIND_ORDER = ['stateChange', 'audit'] as const
@@ -90,14 +91,14 @@ function RecentEventsWidget() {
         <div className="empty">해당 종류의 이벤트 없음</div>
       ) : (
         <div className="table-wrap">
-          <table className="data-table" style={{ fontSize: 13 }}>
+          <DataTable sticky>
             <thead>
               <tr>
-                <th style={{ width: 96 }}>구분</th>
-                <th style={{ width: 118 }}>코드</th>
-                <th style={{ width: 168 }}>소스(MO)</th>
-                <th>메시지</th>
-                <th style={{ width: 150 }}>시각</th>
+                <Th style={{ width: 96 }}>구분</Th>
+                <Th style={{ width: 118 }}>코드</Th>
+                <Th style={{ width: 168 }}>소스(MO)</Th>
+                <Th>메시지</Th>
+                <Th style={{ width: 150 }}>시각</Th>
               </tr>
             </thead>
             <tbody>
@@ -105,16 +106,16 @@ function RecentEventsWidget() {
                 const kind = kindOf(e)
                 return (
                   <tr key={`${e.code || e.type}-${e.ts}-${i}`}>
-                    <td><span className={`badge ${KIND_BADGE[kind] || 'badge--gray'}`}>{KIND_LABEL[kind] || kind}</span></td>
-                    <td><code style={{ fontSize: 11 }}>{e.code || e.type}</code></td>
-                    <td><code style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{e.source?.mo_instance || '-'}</code></td>
-                    <td>{e.message}</td>
-                    <td className="ts">{e.ts}</td>
+                    <Td><span className={`badge ${KIND_BADGE[kind] || 'badge--gray'}`}>{KIND_LABEL[kind] || kind}</span></Td>
+                    <Td><code style={{ fontSize: 11 }}>{e.code || e.type}</code></Td>
+                    <Td><code style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{e.source?.mo_instance || '-'}</code></Td>
+                    <Td>{e.message}</Td>
+                    <Td className="ts">{e.ts}</Td>
                   </tr>
                 )
               })}
             </tbody>
-          </table>
+          </DataTable>
         </div>
       )}
     </div>

@@ -8,6 +8,7 @@ import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 // ── 트리 빌더 ───────────────────────────────────────────────
 interface TreeNode extends Organization {
@@ -198,27 +199,27 @@ export default function OrganizationsPage() {
       {/* 테이블 */}
       {loading ? <div className="empty">로딩 중...</div> : (
         <div className="table-wrap">
-          <table className="data-table">
+          <DataTable sticky>
             <thead>
               <tr>
-                <th style={{ width: 36 }}>
+                <Th style={{ width: 36 }}>
                   <input type="checkbox"
                     checked={flat.length > 0 && flat.every(n => selected.has(n.id))}
                     onChange={() => {
                       if (flat.every(n => selected.has(n.id))) setSelected(new Set())
                       else setSelected(new Set(flat.map(n => n.id)))
                     }} />
-                </th>
-                <th>조직명</th>
-                <th style={{ width: 120 }}>코드</th>
-                <th style={{ width: 160 }}>상위 조직</th>
-                <th style={{ width: 80 }}>정렬</th>
-                <th style={{ width: 120 }}>작업</th>
+                </Th>
+                <Th>조직명</Th>
+                <Th style={{ width: 120 }}>코드</Th>
+                <Th style={{ width: 160 }}>상위 조직</Th>
+                <Th style={{ width: 80 }}>정렬</Th>
+                <Th style={{ width: 120 }}>작업</Th>
               </tr>
             </thead>
             <tbody>
               {flat.length === 0 && !adding ? (
-                <tr><td colSpan={6} className="empty-cell">조직이 없습니다</td></tr>
+                <tr><Td colSpan={6} className="py-8 text-center text-muted-foreground">조직이 없습니다</Td></tr>
               ) : flat.map(n => {
                 const isEditing = editId === n.id
                 const hasChildren = n.children.length > 0
@@ -228,12 +229,12 @@ export default function OrganizationsPage() {
                 return (
                   <React.Fragment key={n.id}>
                   <tr style={selected.has(n.id) ? { background: 'rgba(74,144,217,0.08)' } : undefined}>
-                    <td onClick={e => e.stopPropagation()}>
+                    <Td onClick={e => e.stopPropagation()}>
                       <input type="checkbox" checked={selected.has(n.id)} onChange={() => toggleSelect(n.id)} />
-                    </td>
+                    </Td>
 
                     {/* 조직명 (트리 인덴트) */}
-                    <td>
+                    <Td>
                       {isEditing ? (
                         <Input  value={editForm.name}
                           onChange={e => setEditForm({ ...editForm, name: e.target.value })}
@@ -251,20 +252,20 @@ export default function OrganizationsPage() {
                           <span style={{ fontWeight: 500 }}>{n.name}</span>
                         </div>
                       )}
-                    </td>
+                    </Td>
 
                     {/* 코드 */}
-                    <td>
+                    <Td>
                       {isEditing ? (
                         <Input  value={editForm.code} disabled
                           style={{ width: '100%', opacity: 0.6 }} />
                       ) : (
                         <span className="ts">{n.code}</span>
                       )}
-                    </td>
+                    </Td>
 
                     {/* 상위 조직 */}
-                    <td>
+                    <Td>
                       {isEditing ? (
                         <Select value={toSel(editForm.parent_id == null ? '' : String(editForm.parent_id))} onValueChange={(v: string) => setEditForm({ ...editForm, parent_id: fromSel(v) ? Number(fromSel(v)) : null })}>
                           <SelectTrigger style={{ width: '100%' }}><SelectValue /></SelectTrigger>
@@ -276,10 +277,10 @@ export default function OrganizationsPage() {
                       ) : (
                         <span className="ts">{orgs.find(o => o.id === n.parent_id)?.name || '—'}</span>
                       )}
-                    </td>
+                    </Td>
 
                     {/* 정렬 */}
-                    <td>
+                    <Td>
                       {isEditing ? (
                         <Input  type="number" value={editForm.sort_order}
                           onChange={e => setEditForm({ ...editForm, sort_order: Number(e.target.value) })}
@@ -287,10 +288,10 @@ export default function OrganizationsPage() {
                       ) : (
                         <span className="ts">{n.sort_order}</span>
                       )}
-                    </td>
+                    </Td>
 
                     {/* 작업 */}
-                    <td className="actions">
+                    <Td className="actions">
                       {isEditing ? (
                         <>
                           <Button variant="default" onClick={saveEdit}>저장</Button>
@@ -304,28 +305,28 @@ export default function OrganizationsPage() {
                           <IconBtn title="삭제" tone="danger" onClick={() => handleDelete(n.id)}><Trash2 size={14} /></IconBtn>
                         </>
                       )}
-                    </td>
+                    </Td>
                   </tr>
                   {/* 하위 추가 행: 이 행 바로 아래 */}
                   {adding && addAfterId === n.id && (
                     <tr style={{ background: 'rgba(74,144,217,0.08)' }}>
-                      <td></td>
-                      <td>
+                      <Td></Td>
+                      <Td>
                         <div style={{ paddingLeft: addDepth * 20 }}>
                           <Input  placeholder="조직명 *" value={addForm.name}
                             onChange={e => setAddForm({ ...addForm, name: e.target.value })}
                             autoFocus style={{ width: '100%' }} />
                         </div>
-                      </td>
-                      <td><Input  placeholder="코드 *" value={addForm.code}
-                        onChange={e => setAddForm({ ...addForm, code: e.target.value })} style={{ width: '100%' }} /></td>
-                      <td><span className="ts">{n.name}</span></td>
-                      <td><Input  type="number" value={addForm.sort_order}
-                        onChange={e => setAddForm({ ...addForm, sort_order: Number(e.target.value) })} style={{ width: '100%' }} /></td>
-                      <td className="actions">
+                      </Td>
+                      <Td><Input  placeholder="코드 *" value={addForm.code}
+                        onChange={e => setAddForm({ ...addForm, code: e.target.value })} style={{ width: '100%' }} /></Td>
+                      <Td><span className="ts">{n.name}</span></Td>
+                      <Td><Input  type="number" value={addForm.sort_order}
+                        onChange={e => setAddForm({ ...addForm, sort_order: Number(e.target.value) })} style={{ width: '100%' }} /></Td>
+                      <Td className="actions">
                         <Button variant="default" onClick={saveAdd}>저장</Button>
                         <Button variant="ghost" onClick={cancelAdd}>취소</Button>
-                      </td>
+                      </Td>
                     </tr>
                   )}
                   </React.Fragment>
@@ -335,13 +336,13 @@ export default function OrganizationsPage() {
               {/* 맨 아래: 최상위 추가 행 */}
               {adding && addAfterId === null ? (
                 <tr style={{ background: 'rgba(74,144,217,0.08)' }}>
-                  <td></td>
-                  <td><Input  placeholder="조직명 *" value={addForm.name}
+                  <Td></Td>
+                  <Td><Input  placeholder="조직명 *" value={addForm.name}
                     onChange={e => setAddForm({ ...addForm, name: e.target.value })}
-                    autoFocus style={{ width: '100%' }} /></td>
-                  <td><Input  placeholder="코드 *" value={addForm.code}
-                    onChange={e => setAddForm({ ...addForm, code: e.target.value })} style={{ width: '100%' }} /></td>
-                  <td>
+                    autoFocus style={{ width: '100%' }} /></Td>
+                  <Td><Input  placeholder="코드 *" value={addForm.code}
+                    onChange={e => setAddForm({ ...addForm, code: e.target.value })} style={{ width: '100%' }} /></Td>
+                  <Td>
                     <Select value={toSel(addForm.parent_id == null ? '' : String(addForm.parent_id))} onValueChange={(v: string) => setAddForm({ ...addForm, parent_id: fromSel(v) ? Number(fromSel(v)) : null })}>
                       <SelectTrigger style={{ width: '100%' }}><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -349,26 +350,26 @@ export default function OrganizationsPage() {
                         {orgs.map(o => <SelectItem key={o.id} value={String(o.id)}>{o.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
-                  </td>
-                  <td><Input  type="number" value={addForm.sort_order}
-                    onChange={e => setAddForm({ ...addForm, sort_order: Number(e.target.value) })} style={{ width: '100%' }} /></td>
-                  <td className="actions">
+                  </Td>
+                  <Td><Input  type="number" value={addForm.sort_order}
+                    onChange={e => setAddForm({ ...addForm, sort_order: Number(e.target.value) })} style={{ width: '100%' }} /></Td>
+                  <Td className="actions">
                     <Button variant="default" onClick={saveAdd}>저장</Button>
                     <Button variant="ghost" onClick={cancelAdd}>취소</Button>
-                  </td>
+                  </Td>
                 </tr>
               ) : !adding && (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: 'center' }}>
+                  <Td colSpan={6} style={{ textAlign: 'center' }}>
                     <Button variant="ghost" onClick={() => startAdd(null, null)}
                       style={{ color: 'var(--primary)', fontSize: 12 }}>
                       <Plus size={13} /> 조직 추가
                     </Button>
-                  </td>
+                  </Td>
                 </tr>
               )}
             </tbody>
-          </table>
+          </DataTable>
         </div>
       )}
 

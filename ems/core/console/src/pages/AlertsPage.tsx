@@ -26,6 +26,7 @@ import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 const PAGE_SIZE = 20
 const FETCH_LIMIT = 5000   // 서버 상한 — 창 안 레코드가 이보다 많으면 최신순 절단(표기)
@@ -262,18 +263,18 @@ export function AlarmsSection() {
         ) : (
           <>
             <div className="scroll-fill">
-            <table className="data-table">
+            <DataTable sticky>
               <thead>
                 <tr>
-                  <th style={{ width: 90 }}>심각도</th>
-                  <th style={{ width: 100 }}>코드</th>
-                  <th style={{ width: 120 }}>클래스</th>
-                  <th style={{ width: 160 }}>소스</th>
-                  <th style={{ width: 80 }}>감지</th>
-                  <th>메시지</th>
-                  <th style={{ width: 145 }}>발생 시각</th>
-                  <th style={{ width: 145 }}>해제 시각</th>
-                  <th style={{ width: 90 }}>지속</th>
+                  <Th style={{ width: 90 }}>심각도</Th>
+                  <Th style={{ width: 100 }}>코드</Th>
+                  <Th style={{ width: 120 }}>클래스</Th>
+                  <Th style={{ width: 160 }}>소스</Th>
+                  <Th style={{ width: 80 }}>감지</Th>
+                  <Th>메시지</Th>
+                  <Th style={{ width: 145 }}>발생 시각</Th>
+                  <Th style={{ width: 145 }}>해제 시각</Th>
+                  <Th style={{ width: 90 }}>지속</Th>
                 </tr>
               </thead>
               <tbody>
@@ -287,7 +288,7 @@ export function AlarmsSection() {
                     <tr key={key} onClick={() => setExpanded(open ? null : key)}
                         style={{ cursor: 'pointer',
                                  background: open ? 'var(--accent)' : isOpen ? 'rgba(220, 53, 69, 0.08)' : undefined }}>
-                      <td>
+                      <Td>
                         <span className={`badge ${sevBadgeClass(sev)}`}>{sev}</span>
                         {lastChange && (
                           <span title={`severity 변경 ${r.changes!.length}회 — 상세는 행 클릭`}
@@ -296,13 +297,13 @@ export function AlarmsSection() {
                             {lastChange.trend === 'moreSevere' ? <ArrowUp size={11} /> : <ArrowDown size={11} />}{r.changes!.length}
                           </span>
                         )}
-                      </td>
-                      <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.code || '-'}</td>
-                      <td>{alarmTypeLabel(r.type)}</td>
-                      <td><code style={{ fontSize: 11 }} title={r.source?.mo_instance || ''}>
-                        {r.source?.mo_label || r.source?.mo_instance || '-'}</code></td>
-                      <td style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{r.source?.detected_by || '-'}</td>
-                      <td>
+                      </Td>
+                      <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.code || '-'}</Td>
+                      <Td>{alarmTypeLabel(r.type)}</Td>
+                      <Td><code style={{ fontSize: 11 }} title={r.source?.mo_instance || ''}>
+                        {r.source?.mo_label || r.source?.mo_instance || '-'}</code></Td>
+                      <Td style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{r.source?.detected_by || '-'}</Td>
+                      <Td>
                         {r.message}
                         {isOpen && <span style={{ marginLeft: 8, color: 'var(--destructive)', fontSize: 11, fontWeight: 600 }}>OPEN</span>}
                         {(r.occurrences ?? 1) > 1 && (
@@ -319,26 +320,26 @@ export function AlarmsSection() {
                         {r.ack_state === 'acknowledged' && (
                           <Check size={12} className="ml-1.5 inline text-[var(--cims-success)]" aria-label="승인됨" />
                         )}
-                      </td>
-                      <td className="ts">
+                      </Td>
+                      <Td className="ts">
                         {r.preWindow
                           ? <span style={{ color: 'var(--muted-foreground)' }}>창 이전</span>
                           : fmtTime(r.ts)}
-                      </td>
-                      <td className="ts">{r.resolved_at ? fmtTime(r.resolved_at) : '—'}</td>
-                      <td>{r.duration || (isOpen ? '진행 중' : '-')}</td>
+                      </Td>
+                      <Td className="ts">{r.resolved_at ? fmtTime(r.resolved_at) : '—'}</Td>
+                      <Td>{r.duration || (isOpen ? '진행 중' : '-')}</Td>
                     </tr>,
                     open && (
                       <tr key={`${key}-detail`}>
-                        <td colSpan={9} style={{ padding: 0, background: 'var(--accent)' }}>
+                        <Td colSpan={9} style={{ padding: 0, background: 'var(--accent)' }}>
                           <AlarmHistoryDetail r={r} isOpen={isOpen} onAck={ackAlarm} onComment={commentAlarm} />
-                        </td>
+                        </Td>
                       </tr>
                     ),
                   ]
                 })}
               </tbody>
-            </table>
+            </DataTable>
             </div>
             <Pager page={f.page} count={rows.length} pageSize={PAGE_SIZE}
                    onPage={pg => alertsFilter.setAlarm({ page: pg })} />
@@ -535,15 +536,15 @@ export function EventsSection() {
         ) : (
           <>
             <div className="scroll-fill">
-            <table className="data-table">
+            <DataTable sticky>
               <thead>
                 <tr>
-                  <th style={{ width: 230 }}>시각</th>
-                  <th style={{ width: 90 }}>분류</th>
-                  <th style={{ width: 100 }}>코드</th>
-                  <th style={{ width: 140 }}>유형</th>
-                  <th style={{ width: 170 }}>소스</th>
-                  <th>메시지</th>
+                  <Th style={{ width: 230 }}>시각</Th>
+                  <Th style={{ width: 90 }}>분류</Th>
+                  <Th style={{ width: 100 }}>코드</Th>
+                  <Th style={{ width: 140 }}>유형</Th>
+                  <Th style={{ width: 170 }}>소스</Th>
+                  <Th>메시지</Th>
                 </tr>
               </thead>
               <tbody>
@@ -555,20 +556,20 @@ export function EventsSection() {
                   return [
                     <tr key={key} onClick={() => n > 1 && setExpanded(open ? null : key)}
                         style={{ cursor: n > 1 ? 'pointer' : undefined, background: open ? 'var(--accent)' : undefined }}>
-                      <td className="ts">
+                      <Td className="ts">
                         {n > 1
                           ? <>{fmtTime(g.last.ts)} ~ {fmtTime(ev.ts)}</>
                           : fmtTime(ev.ts)}
-                      </td>
-                      <td>
+                      </Td>
+                      <Td>
                         <span className={`badge ${ev.kind === 'audit' ? 'badge--gray' : 'badge--blue'}`}>
                           {EVENT_KIND_LABEL[ev.kind || ''] || ev.kind || '-'}
                         </span>
-                      </td>
-                      <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{ev.code || '-'}</td>
-                      <td>{eventTypeLabel(ev.type)}</td>
-                      <td><code style={{ fontSize: 11 }}>{ev.source?.mo_instance || '-'}</code></td>
-                      <td title={ev.source?.detected_by}>
+                      </Td>
+                      <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{ev.code || '-'}</Td>
+                      <Td>{eventTypeLabel(ev.type)}</Td>
+                      <Td><code style={{ fontSize: 11 }}>{ev.source?.mo_instance || '-'}</code></Td>
+                      <Td title={ev.source?.detected_by}>
                         {ev.message}
                         {n > 1 && (
                           <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: 'var(--muted-foreground)',
@@ -577,11 +578,11 @@ export function EventsSection() {
                             ×{n}
                           </span>
                         )}
-                      </td>
+                      </Td>
                     </tr>,
                     open && (
                       <tr key={`${key}-detail`}>
-                        <td colSpan={6} style={{ padding: 0, background: 'var(--accent)' }}>
+                        <Td colSpan={6} style={{ padding: 0, background: 'var(--accent)' }}>
                           <div style={{ padding: '8px 16px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
                             {g.items.slice(0, 100).map((e2, i2) => (
                               <div key={i2} style={{ fontSize: 12, padding: '2px 0 2px 8px', borderLeft: '2px solid var(--border)' }}>
@@ -597,13 +598,13 @@ export function EventsSection() {
                               <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>… 외 {n - 100}건 (CSV 로 전체 내보내기)</div>
                             )}
                           </div>
-                        </td>
+                        </Td>
                       </tr>
                     ),
                   ]
                 })}
               </tbody>
-            </table>
+            </DataTable>
             </div>
             <Pager page={f.page} count={groups.length} pageSize={PAGE_SIZE} unit="묶음"
                    onPage={pg => alertsFilter.setEvent({ page: pg })} />

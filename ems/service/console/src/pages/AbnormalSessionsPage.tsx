@@ -13,6 +13,7 @@ import { Button } from '@core/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 const REASON_LABEL: Record<string, { label: string; color: string }> = {
   external_ip:  { label: '외부 IP',     color: 'var(--cims-warning)' },
@@ -129,17 +130,17 @@ export function AbnTable() {
       {s.loading ? <div className="empty">로딩 중...</div> : (
         <>
           <div className="scroll-fill">
-            <table className="data-table">
+            <DataTable sticky>
               <thead>
                 <tr>
-                  <th style={{ width: 92 }}>최근 시각</th>
-                  <th style={{ width: 56 }}>심각도</th>
-                  <th style={{ width: 130 }}>발신 IP</th>
-                  <th>발신 → 착신</th>
-                  <th style={{ width: 96 }}>UA</th>
-                  <th style={{ width: 56, textAlign: 'right' }}>시도</th>
-                  <th style={{ width: 110 }}>메서드/응답</th>
-                  <th>사유</th>
+                  <Th style={{ width: 92 }}>최근 시각</Th>
+                  <Th style={{ width: 56 }}>심각도</Th>
+                  <Th style={{ width: 130 }}>발신 IP</Th>
+                  <Th>발신 → 착신</Th>
+                  <Th style={{ width: 96 }}>UA</Th>
+                  <Th style={{ width: 56, textAlign: 'right' }}>시도</Th>
+                  <Th style={{ width: 110 }}>메서드/응답</Th>
+                  <Th>사유</Th>
                 </tr>
               </thead>
               <tbody>
@@ -147,33 +148,33 @@ export function AbnTable() {
                   const sev = SEV[x.severity] || SEV.minor
                   return (
                     <tr key={i}>
-                      <td style={{ fontSize: 11 }} className="ts">{s.days > 1 ? `${x.date.slice(5)} ` : ''}{(x.last_ts || '').slice(0, 8)}</td>
-                      <td><span className="badge" style={{ background: sev.bg, color: 'var(--cims-on-solid)', fontSize: 10 }}>{sev.label}</span></td>
-                      <td style={{ fontSize: 12, fontFamily: 'monospace' }}>{x.peer_ip || '-'}</td>
-                      <td style={{ fontSize: 11, fontFamily: 'monospace' }}>
+                      <Td style={{ fontSize: 11 }} className="ts">{s.days > 1 ? `${x.date.slice(5)} ` : ''}{(x.last_ts || '').slice(0, 8)}</Td>
+                      <Td><span className="badge" style={{ background: sev.bg, color: 'var(--cims-on-solid)', fontSize: 10 }}>{sev.label}</span></Td>
+                      <Td style={{ fontSize: 12, fontFamily: 'monospace' }}>{x.peer_ip || '-'}</Td>
+                      <Td style={{ fontSize: 11, fontFamily: 'monospace' }}>
                         <span style={{ color: 'var(--muted-foreground)' }}>{x.caller || '?'}</span>
                         <span style={{ margin: '0 4px' }}>→</span>
                         <span>{x.callee || '?'}</span>
-                      </td>
-                      <td style={{ fontSize: 11 }}>{x.ua || '-'}</td>
-                      <td style={{ fontSize: 12, textAlign: 'right', fontWeight: x.attempts > 5 ? 700 : 400 }}>{x.attempts}</td>
-                      <td style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>
+                      </Td>
+                      <Td style={{ fontSize: 11 }}>{x.ua || '-'}</Td>
+                      <Td style={{ fontSize: 12, textAlign: 'right', fontWeight: x.attempts > 5 ? 700 : 400 }}>{x.attempts}</Td>
+                      <Td style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>
                         {x.methods.join(',') || '-'}{x.statuses.length > 0 && <span> / {x.statuses.join(',')}</span>}
-                      </td>
-                      <td>
+                      </Td>
+                      <Td>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
                           {x.reasons.map(r => {
                             const rl = REASON_LABEL[r] || { label: r, color: 'var(--muted-foreground)' }
                             return <span key={r} className="badge" style={{ fontSize: 9, color: rl.color, border: `1px solid ${rl.color}`, background: 'transparent' }}>{rl.label}</span>
                           })}
                         </div>
-                      </td>
+                      </Td>
                     </tr>
                   )
                 })}
-                {sessions.length === 0 && <tr><td colSpan={8} className="empty-cell">탐지된 비정상 세션 없음</td></tr>}
+                {sessions.length === 0 && <tr><Td colSpan={8} className="py-8 text-center text-muted-foreground">탐지된 비정상 세션 없음</Td></tr>}
               </tbody>
-            </table>
+            </DataTable>
           </div>
           {sessions.length > s.pageSize && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,

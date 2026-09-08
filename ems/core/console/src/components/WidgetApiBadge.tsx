@@ -16,6 +16,7 @@ import { useDevMode } from '../hooks/useDevMode'
 import { loadApiDocs, type ApiDoc, type ApiDocAuth } from '../api/apiDocs'
 import { useDataSourceCatalogPassive } from '../widgets/shapes/sourceRegistry'
 import { Button } from '@core/components/ui/button'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 const METHOD_COLOR: Record<string, string> = {
   GET: 'badge--green', POST: 'badge--blue', PUT: 'badge--yellow', DELETE: 'badge--red',
@@ -145,22 +146,22 @@ function ApiRow({ a }: { a: ApiDoc }) {
             <CopyBlock label="경로" text={a.path} mono />
             <CopyBlock label="curl 예시" text={toCurl(a)} pre />
             {params.length > 0 ? (
-              <table className="data-table" style={{ fontSize: 12 }}>
+              <DataTable sticky className="[&_td]:text-sm">
                 <thead>
-                  <tr><th>파라미터</th><th>위치</th><th>타입</th><th>필수</th><th>설명</th></tr>
+                  <tr><Th>파라미터</Th><Th>위치</Th><Th>타입</Th><Th>필수</Th><Th>설명</Th></tr>
                 </thead>
                 <tbody>
                   {params.map(p => (
                     <tr key={`${p.in}:${p.name}`}>
-                      <td><code>{p.name}</code></td>
-                      <td>{p.in}</td>
-                      <td>{p.type || 'string'}{p.enum ? ` (${p.enum.join(' | ')})` : ''}</td>
-                      <td>{p.required ? '예' : '—'}</td>
-                      <td>{p.desc || ''}</td>
+                      <Td><code>{p.name}</code></Td>
+                      <Td>{p.in}</Td>
+                      <Td>{p.type || 'string'}{p.enum ? ` (${p.enum.join(' | ')})` : ''}</Td>
+                      <Td>{p.required ? '예' : '—'}</Td>
+                      <Td>{p.desc || ''}</Td>
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </DataTable>
             ) : (
               <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>파라미터 없음</div>
             )}
@@ -171,21 +172,21 @@ function ApiRow({ a }: { a: ApiDoc }) {
               <div style={{ fontSize: 12, marginBottom: 6 }}><code>{a.response}</code></div>
             )}
             {fields.length > 0 && (
-              <table className="data-table" style={{ fontSize: 12 }}>
+              <DataTable sticky className="[&_td]:text-sm">
                 <thead>
-                  <tr><th>필드</th><th>타입</th><th>단위</th><th>설명</th></tr>
+                  <tr><Th>필드</Th><Th>타입</Th><Th>단위</Th><Th>설명</Th></tr>
                 </thead>
                 <tbody>
                   {fields.map((f, i) => (
                     <tr key={`${f.name}-${i}`}>
-                      <td><code>{f.name}</code></td>
-                      <td>{f.type || 'string'}{f.enum ? ` (${f.enum.join(' | ')})` : ''}</td>
-                      <td>{f.unit || '—'}</td>
-                      <td>{f.desc || ''}</td>
+                      <Td><code>{f.name}</code></Td>
+                      <Td>{f.type || 'string'}{f.enum ? ` (${f.enum.join(' | ')})` : ''}</Td>
+                      <Td>{f.unit || '—'}</Td>
+                      <Td>{f.desc || ''}</Td>
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </DataTable>
             )}
             {a.example !== undefined && (
               <div style={{ marginTop: 8 }}>
@@ -197,19 +198,19 @@ function ApiRow({ a }: { a: ApiDoc }) {
 
           {errors.length > 0 && (
             <Section title="오류">
-              <table className="data-table" style={{ fontSize: 12 }}>
-                <thead><tr><th>status</th><th>조건</th><th>본문</th></tr></thead>
+              <DataTable sticky className="[&_td]:text-sm">
+                <thead><tr><Th>status</Th><Th>조건</Th><Th>본문</Th></tr></thead>
                 <tbody>
                   {errors.map((e, i) => (
                     <tr key={`${e.status}-${i}`}>
-                      <td><b>{e.status}</b></td>
-                      <td>{e.when || ''}</td>
-                      <td>{e.body !== undefined
-                        ? <code style={{ fontSize: 11.5 }}>{JSON.stringify(e.body)}</code> : '—'}</td>
+                      <Td><b>{e.status}</b></Td>
+                      <Td>{e.when || ''}</Td>
+                      <Td>{e.body !== undefined
+                        ? <code style={{ fontSize: 11.5 }}>{JSON.stringify(e.body)}</code> : '—'}</Td>
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </DataTable>
             </Section>
           )}
 

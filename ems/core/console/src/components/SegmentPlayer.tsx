@@ -2,6 +2,7 @@ import { AlertTriangle, Maximize2, Play } from 'lucide-react'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { recordingsApi, type RecordingSegment } from '../api/recordings'
 import { Button } from '@core/components/ui/button'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 interface SegmentPlayerProps {
   segments: RecordingSegment[]
@@ -376,19 +377,19 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
 
       {/* ── 세그먼트 목록 ── */}
       <div style={{ flex: 1, overflowY: 'auto', padding: compact ? '0 12px 8px' : '0 20px 12px', maxHeight: compact ? 150 : undefined }}>
-        <table className="data-table" style={{ fontSize: 13 }}>
+        <DataTable sticky>
           <thead>
             <tr>
-              <th style={{ width: 32 }}>
+              <Th style={{ width: 32 }}>
                 <input type="checkbox"
                   checked={checked.size === playable.length}
                   onChange={toggleAll} />
-              </th>
-              <th style={{ width: 32 }}>#</th>
-              {callType === 'ptt' && <th>화자</th>}
-              <th>시간 구간</th>
-              <th style={{ width: 60 }}>길이</th>
-              <th style={{ width: 56 }}>상태</th>
+              </Th>
+              <Th style={{ width: 32 }}>#</Th>
+              {callType === 'ptt' && <Th>화자</Th>}
+              <Th>시간 구간</Th>
+              <Th style={{ width: 60 }}>길이</Th>
+              <Th style={{ width: 56 }}>상태</Th>
             </tr>
           </thead>
           <tbody>
@@ -407,15 +408,15 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
                   }}
                   onClick={() => handleSegClick(seg)}
                 >
-                  <td onClick={e => e.stopPropagation()}>
+                  <Td onClick={e => e.stopPropagation()}>
                     <input type="checkbox" checked={isChecked}
                       onChange={() => toggleCheck(seg.seq)} />
-                  </td>
-                  <td>{isActive && isPlaying ? <Play size={11} /> : seg.seq}</td>
-                  {callType === 'ptt' && <td>{segSpeakers(seg)}</td>}
-                  <td className="ts">{fmtTimeRange(seg.start_time, seg.end_time)}</td>
-                  <td className="ts">{fmtMs(seg.duration_ms)}</td>
-                  <td>
+                  </Td>
+                  <Td>{isActive && isPlaying ? <Play size={11} /> : seg.seq}</Td>
+                  {callType === 'ptt' && <Td>{segSpeakers(seg)}</Td>}
+                  <Td className="ts">{fmtTimeRange(seg.start_time, seg.end_time)}</Td>
+                  <Td className="ts">{fmtMs(seg.duration_ms)}</Td>
+                  <Td>
                     {preparingSeq === seg.seq
                       ? <span className="badge badge--blue" style={{ fontSize: 10, whiteSpace: 'nowrap', animation: 'pulse 1.5s infinite' }}>변환중</span>
                       : seg.status === 'ready'
@@ -426,25 +427,25 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
                       ? <span className="badge badge--blue" style={{ fontSize: 10, whiteSpace: 'nowrap' }}>변환중</span>
                       : <span className="badge badge--red" style={{ fontSize: 10, whiteSpace: 'nowrap' }}
                           title={seg.status_reason || '변환 실패 — 클릭 시 재시도'}>재생불가</span>}
-                  </td>
+                  </Td>
                 </tr>
               )
             })}
             {/* 녹취 중 세그먼트 */}
             {segments.filter(s => s.status === 'recording').map(seg => (
               <tr key={`rec_${seg.seq}`} style={{ opacity: 0.4 }}>
-                <td><input type="checkbox" disabled /></td>
-                <td>{seg.seq}</td>
-                {callType === 'ptt' && <td>{segSpeakers(seg)}</td>}
-                <td className="ts">{fmtTimeRange(seg.start_time, null)}</td>
-                <td>-</td>
-                <td>
+                <Td><input type="checkbox" disabled /></Td>
+                <Td>{seg.seq}</Td>
+                {callType === 'ptt' && <Td>{segSpeakers(seg)}</Td>}
+                <Td className="ts">{fmtTimeRange(seg.start_time, null)}</Td>
+                <Td>-</Td>
+                <Td>
                   <span className="badge badge--blue" style={{ fontSize: 10, whiteSpace: 'nowrap', animation: 'pulse 1.5s infinite' }}>녹취중</span>
-                </td>
+                </Td>
               </tr>
             ))}
           </tbody>
-        </table>
+        </DataTable>
       </div>
     </div>
   )

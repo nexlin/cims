@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { alertsApi, type AlarmCatalogItem, type AlertRulesResponse } from '../api/alerts'
 import { alarmTypeLabel, sevBadgeClass, severityOf } from '../utils/alarmLabels'
 import { Input } from '@core/components/ui/input'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 // ── 알람 코드 사전 (검색 + 표) ──────────────────────────────────────────
 export function AlarmCatalogTable() {
@@ -49,16 +50,16 @@ export function AlarmCatalogTable() {
         ) : filtered.length === 0 ? (
           <div className="empty">항목 없음</div>
         ) : (
-          <table className="data-table" style={{ fontSize: 13 }}>
+          <DataTable sticky>
             <thead>
               <tr>
-                <th style={{ width: 110 }}>code</th>
-                <th style={{ width: 150 }}>클래스(type)</th>
-                <th style={{ width: 90 }}>severity</th>
-                <th style={{ width: 130 }}>eventType</th>
-                <th>영향 (effect)</th>
-                <th>권장 조치</th>
-                <th style={{ width: 110 }}>출처</th>
+                <Th style={{ width: 110 }}>code</Th>
+                <Th style={{ width: 150 }}>클래스(type)</Th>
+                <Th style={{ width: 90 }}>severity</Th>
+                <Th style={{ width: 130 }}>eventType</Th>
+                <Th>영향 (effect)</Th>
+                <Th>권장 조치</Th>
+                <Th style={{ width: 110 }}>출처</Th>
               </tr>
             </thead>
             <tbody>
@@ -66,18 +67,18 @@ export function AlarmCatalogTable() {
                 const sev = c.perceived_severity || ''
                 return (
                   <tr key={c.code} title={c.probable_cause ? `probableCause: ${c.probable_cause}` : undefined}>
-                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{c.code}</td>
-                    <td title={c.type}>{alarmTypeLabel(c.type)}</td>
-                    <td>{sev ? <span className={`badge ${sevBadgeClass(sev)}`}>{sev}</span> : '—'}</td>
-                    <td style={{ fontSize: 12 }}>{c.event_type || '—'}</td>
-                    <td style={{ fontSize: 12 }}>{c.effect || '—'}</td>
-                    <td style={{ fontSize: 12 }}>{c.recommended_action || '—'}</td>
-                    <td style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{c.origin}</td>
+                    <Td style={{ fontFamily: 'monospace', fontSize: 12 }}>{c.code}</Td>
+                    <Td title={c.type}>{alarmTypeLabel(c.type)}</Td>
+                    <Td>{sev ? <span className={`badge ${sevBadgeClass(sev)}`}>{sev}</span> : '—'}</Td>
+                    <Td style={{ fontSize: 12 }}>{c.event_type || '—'}</Td>
+                    <Td style={{ fontSize: 12 }}>{c.effect || '—'}</Td>
+                    <Td style={{ fontSize: 12 }}>{c.recommended_action || '—'}</Td>
+                    <Td style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{c.origin}</Td>
                   </tr>
                 )
               })}
             </tbody>
-          </table>
+          </DataTable>
         )}
       </div>
   )
@@ -102,41 +103,41 @@ export function AlarmRulesTable() {
               점검 주기 {rules.sweep_sec}초 · {rules.editable ? '편집 가능' : '읽기 전용 (oam.json 설정 기반)'}
             </span>
           </div>
-          <table className="data-table">
+          <DataTable sticky>
             <thead>
               <tr>
-                <th style={{ width: 90 }}>심각도</th>
-                <th style={{ width: 110 }}>코드</th>
-                <th style={{ width: 130 }}>클래스</th>
-                <th style={{ width: 90 }}>대상</th>
-                <th>지표</th>
-                <th style={{ width: 200 }}>발생 조건</th>
+                <Th style={{ width: 90 }}>심각도</Th>
+                <Th style={{ width: 110 }}>코드</Th>
+                <Th style={{ width: 130 }}>클래스</Th>
+                <Th style={{ width: 90 }}>대상</Th>
+                <Th>지표</Th>
+                <Th style={{ width: 200 }}>발생 조건</Th>
               </tr>
             </thead>
             <tbody>
               {rules.rules.map((r, i) => (
                 <tr key={`${r.code}-${r.target || r.mo_instance || r.scope}-${i}`}
                     title={[r.effect && `영향: ${r.effect}`, r.recommended_action && `조치: ${r.recommended_action}`].filter(Boolean).join('\n')}>
-                  <td><span className={`badge ${sevBadgeClass(severityOf(r))}`}>{severityOf(r)}</span></td>
-                  <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.code || '-'}</td>
-                  <td>{alarmTypeLabel(r.type)}</td>
-                  <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.target || r.scope || '-'}</td>
-                  <td>
+                  <Td><span className={`badge ${sevBadgeClass(severityOf(r))}`}>{severityOf(r)}</span></Td>
+                  <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.code || '-'}</Td>
+                  <Td>{alarmTypeLabel(r.type)}</Td>
+                  <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.target || r.scope || '-'}</Td>
+                  <Td>
                     {r.metric}
                     {r.mo_instance && <code style={{ marginLeft: 6, fontSize: 11, color: 'var(--muted-foreground)' }}>{r.mo_instance}</code>}
-                  </td>
-                  <td style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                  </Td>
+                  <Td style={{ fontFamily: 'monospace', fontSize: 12 }}>
                     {r.condition}
                     {r.threshold != null && (
                       <span style={{ marginLeft: 6, color: 'var(--muted-foreground)', fontFamily: 'inherit' }}>
                         (threshold {r.threshold}{r.unit || ''})
                       </span>
                     )}
-                  </td>
+                  </Td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </DataTable>
         </div>
   )
 }

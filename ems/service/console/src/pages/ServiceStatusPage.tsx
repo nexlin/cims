@@ -11,6 +11,7 @@ import { Button } from '@core/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 // ── 공통 유틸 ─────────────────────────────────────────────
 export function fmtDur(sec: number): string {
@@ -299,27 +300,27 @@ export function VolteCallsCard() {
   const sorted = [...calls].sort((a, b) => (pins.has(b.call_id) ? 1 : 0) - (pins.has(a.call_id) ? 1 : 0))
   return (
     <div className="panel">
-      <table className="data-table">
-        <thead><tr><th></th><th>상태</th><th>발신 → 착신</th><th>유형</th><th>경과</th><th>미디어 노드</th><th>호 ID</th><th></th></tr></thead>
+      <DataTable sticky>
+        <thead><tr><Th></Th><Th>상태</Th><Th>발신 → 착신</Th><Th>유형</Th><Th>경과</Th><Th>미디어 노드</Th><Th>호 ID</Th><Th></Th></tr></thead>
         <tbody>
           {sorted.map((c: VolteCall) => {
             const ring = c.state === 'ringing', warn = c.anomalies.length > 0, pinned = pins.has(c.call_id)
             return (
               <tr key={c.call_id} style={pinned ? { background: 'rgba(80,120,255,.08)' } : warn ? { background: 'rgba(220,50,50,.06)' } : undefined}>
-                <td><PinBtn on={pinned} onClick={e => { e.stopPropagation(); toggle(c.call_id) }} /></td>
-                <td><span className={`badge ${ring ? 'badge--blue' : 'badge--green'}`}>{ring ? '호출 중' : '통화 중'}</span>{warn && <AlertTriangle size={12} className="ml-1 inline text-destructive"
-                    aria-label={c.anomalies.map(a => a.detail).join(', ')} />}</td>
-                <td><b>{c.caller || '-'}</b> <span style={{ color: 'var(--muted-foreground)' }}>→</span> {c.callee || '-'}</td>
-                <td>{c.video ? '영상' : '음성'}</td>
-                <td className="ts">{fmtDur(elapsedSec(c.invite_time, now, c.duration_sec))}</td>
-                <td className="ts">{c.media_node || '-'}</td>
-                <td className="ts" title={c.call_id} style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.call_id}</td>
-                <td><Button variant="ghost" onClick={() => navigate('/service/history/volte')}>이력 <ChevronRight size={12} /></Button></td>
+                <Td><PinBtn on={pinned} onClick={e => { e.stopPropagation(); toggle(c.call_id) }} /></Td>
+                <Td><span className={`badge ${ring ? 'badge--blue' : 'badge--green'}`}>{ring ? '호출 중' : '통화 중'}</span>{warn && <AlertTriangle size={12} className="ml-1 inline text-destructive"
+                    aria-label={c.anomalies.map(a => a.detail).join(', ')} />}</Td>
+                <Td><b>{c.caller || '-'}</b> <span style={{ color: 'var(--muted-foreground)' }}>→</span> {c.callee || '-'}</Td>
+                <Td>{c.video ? '영상' : '음성'}</Td>
+                <Td className="ts">{fmtDur(elapsedSec(c.invite_time, now, c.duration_sec))}</Td>
+                <Td className="ts">{c.media_node || '-'}</Td>
+                <Td className="ts" title={c.call_id} style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.call_id}</Td>
+                <Td><Button variant="ghost" onClick={() => navigate('/service/history/volte')}>이력 <ChevronRight size={12} /></Button></Td>
               </tr>
             )
           })}
         </tbody>
-      </table>
+      </DataTable>
     </div>
   )
 }
@@ -377,41 +378,41 @@ export function PttGroupsCard() {
   const sorted = [...groups].sort((a, b) => (pins.has(b.group_id) ? 1 : 0) - (pins.has(a.group_id) ? 1 : 0))
   return (
     <div className="panel">
-      <table className="data-table">
-        <thead><tr><th></th><th>그룹</th><th>유형</th><th>참여</th><th>현재 화자</th><th>최근 발언</th><th>발언수(5m)</th><th></th></tr></thead>
+      <DataTable sticky>
+        <thead><tr><Th></Th><Th>그룹</Th><Th>유형</Th><Th>참여</Th><Th>현재 화자</Th><Th>최근 발언</Th><Th>발언수(5m)</Th><Th></Th></tr></thead>
         <tbody>
           {sorted.map((g: PttGroup) => {
             const isOpen = open === g.group_id, warn = g.anomalies.length > 0, pinned = pins.has(g.group_id)
             return (
               <Fragment key={g.group_id}>
                 <tr style={{ cursor: 'pointer', ...(pinned ? { background: 'rgba(80,120,255,.08)' } : warn ? { background: 'rgba(220,50,50,.06)' } : {}) }} onClick={() => setOpen(isOpen ? null : g.group_id)}>
-                  <td><PinBtn on={pinned} onClick={e => { e.stopPropagation(); toggle(g.group_id) }} /></td>
-                  <td><span className="text-muted-foreground">
-                    {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span> <b>{g.name}</b> <span className="ts">{g.group_id !== g.name ? `(${g.group_id})` : ''}</span></td>
-                  <td><span className="badge">{typeLabel(g.type)}</span></td>
-                  <td className="ts">{g.active_members} / {g.total_members}</td>
-                  <td>{g.floor_holder
+                  <Td><PinBtn on={pinned} onClick={e => { e.stopPropagation(); toggle(g.group_id) }} /></Td>
+                  <Td><span className="text-muted-foreground">
+                    {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span> <b>{g.name}</b> <span className="ts">{g.group_id !== g.name ? `(${g.group_id})` : ''}</span></Td>
+                  <Td><span className="badge">{typeLabel(g.type)}</span></Td>
+                  <Td className="ts">{g.active_members} / {g.total_members}</Td>
+                  <Td>{g.floor_holder
                   ? <span className="inline-flex items-center gap-1 font-semibold text-primary">
                       <Mic size={12} /> {g.floor_holder}</span> : <span className="ts">(없음)</span>}{warn && <AlertTriangle size={12} className="ml-1 inline text-destructive"
-                    aria-label={g.anomalies.map(a => a.detail).join(', ')} />}</td>
-                  <td className="ts">{g.last_floor ? new Date(g.last_floor).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}</td>
-                  <td className="ts">{g.floor_count ?? 0}</td>
-                  <td><Button variant="ghost" onClick={e => { e.stopPropagation(); navigate('/service/history/ptt') }}>이력 <ChevronRight size={12} /></Button></td>
+                    aria-label={g.anomalies.map(a => a.detail).join(', ')} />}</Td>
+                  <Td className="ts">{g.last_floor ? new Date(g.last_floor).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}</Td>
+                  <Td className="ts">{g.floor_count ?? 0}</Td>
+                  <Td><Button variant="ghost" onClick={e => { e.stopPropagation(); navigate('/service/history/ptt') }}>이력 <ChevronRight size={12} /></Button></Td>
                 </tr>
                 {isOpen && (
                   <tr>
-                    <td colSpan={8} style={{ background: 'var(--accent)' }}>
+                    <Td colSpan={8} style={{ background: 'var(--accent)' }}>
                       <MemberDrill group={g.group_id} />
                       {g.floor_held_sec !== undefined && <span className="mx-2 inline-flex items-center gap-1 text-sm text-destructive">
                     <AlertTriangle size={12} /> floor {fmtDur(g.floor_held_sec)} 점유</span>}
-                    </td>
+                    </Td>
                   </tr>
                 )}
               </Fragment>
             )
           })}
         </tbody>
-      </table>
+      </DataTable>
     </div>
   )
 }
@@ -439,18 +440,18 @@ export function EventFeedCard() {
   if (events.length === 0) return <div className="empty">최근 이벤트가 없습니다</div>
   return (
     <div className="panel">
-      <table className="data-table">
-        <thead><tr><th style={{ width: 96 }}>시각</th><th style={{ width: 70 }}>구분</th><th>이벤트</th></tr></thead>
+      <DataTable sticky>
+        <thead><tr><Th style={{ width: 96 }}>시각</Th><Th style={{ width: 70 }}>구분</Th><Th>이벤트</Th></tr></thead>
         <tbody>
           {events.map((e, i) => (
             <tr key={i}>
-              <td className="ts">{new Date(e.ts).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</td>
-              <td><span className={`badge ${e.kind === 'volte' ? 'badge--blue' : 'badge--green'}`}>{e.kind === 'volte' ? 'VoLTE' : 'PTT'}</span></td>
-              <td>{EV_ICON[e.type] ?? <Dot size={12} className="inline align-[-2px]" />} {e.detail}</td>
+              <Td className="ts">{new Date(e.ts).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</Td>
+              <Td><span className={`badge ${e.kind === 'volte' ? 'badge--blue' : 'badge--green'}`}>{e.kind === 'volte' ? 'VoLTE' : 'PTT'}</span></Td>
+              <Td>{EV_ICON[e.type] ?? <Dot size={12} className="inline align-[-2px]" />} {e.detail}</Td>
             </tr>
           ))}
         </tbody>
-      </table>
+      </DataTable>
     </div>
   )
 }
@@ -459,28 +460,28 @@ export function EventFeedCard() {
 // 구성원 로스터 표 (가입자 상태) — 부서 선택/검색 결과 공용
 function SubscriberRows({ subs }: { subs: Subscriber[] }) {
   return (
-    <table className="data-table">
-      <thead><tr><th>이름</th><th>부서</th><th>VoLTE 번호</th><th>VoLTE</th><th>VoLTE 통화</th><th>PTT 번호</th><th>PTT</th><th>PTT 서비스</th></tr></thead>
+    <DataTable sticky>
+      <thead><tr><Th>이름</Th><Th>부서</Th><Th>VoLTE 번호</Th><Th>VoLTE</Th><Th>VoLTE 통화</Th><Th>PTT 번호</Th><Th>PTT</Th><Th>PTT 서비스</Th></tr></thead>
       <tbody>
         {subs.map(s => (
           <tr key={s.person_id}>
-            <td style={{ fontWeight: 600 }}>{s.name}</td>
-            <td className="ts" style={{ whiteSpace: 'nowrap' }}>{s.org_path || '-'}</td>
-            <td className="ts">{s.volte?.msisdn || '-'}</td>
-            <td>{s.volte ? <><OnlineDot on={s.volte.online} />{s.volte.online ? '접속' : '미접속'}</> : <span className="ts">-</span>}</td>
-            <td>{s.volte?.calls && s.volte.calls.length > 0
+            <Td style={{ fontWeight: 600 }}>{s.name}</Td>
+            <Td className="ts" style={{ whiteSpace: 'nowrap' }}>{s.org_path || '-'}</Td>
+            <Td className="ts">{s.volte?.msisdn || '-'}</Td>
+            <Td>{s.volte ? <><OnlineDot on={s.volte.online} />{s.volte.online ? '접속' : '미접속'}</> : <span className="ts">-</span>}</Td>
+            <Td>{s.volte?.calls && s.volte.calls.length > 0
               ? s.volte.calls.map((c, i) => <span key={i} className={`badge ${c.state === 'active' ? 'badge--green' : 'badge--blue'}`} style={{ marginRight: 4 }}>{c.state === 'active' ? '통화' : '호출'} {c.role === 'caller' ? '→' : '←'} {c.peer}</span>)
-              : <span className="ts">{s.volte?.online ? '대기' : '-'}</span>}</td>
-            <td className="ts">{s.ptt?.msisdn || '-'}</td>
-            <td>{s.ptt ? <><OnlineDot on={s.ptt.online} />{s.ptt.online ? '접속' : '미접속'}</> : <span className="ts">-</span>}</td>
-            <td>{s.ptt?.groups && s.ptt.groups.length > 0
+              : <span className="ts">{s.volte?.online ? '대기' : '-'}</span>}</Td>
+            <Td className="ts">{s.ptt?.msisdn || '-'}</Td>
+            <Td>{s.ptt ? <><OnlineDot on={s.ptt.online} />{s.ptt.online ? '접속' : '미접속'}</> : <span className="ts">-</span>}</Td>
+            <Td>{s.ptt?.groups && s.ptt.groups.length > 0
               ? s.ptt.groups.map((g, i) => <span key={i} className="badge badge--green" style={{ marginRight: 4 }}>
                         <Mic size={11} className="inline align-[-1px]" /> {g.group_id}</span>)
-              : <span className="ts">{s.ptt?.online ? '대기' : '-'}</span>}</td>
+              : <span className="ts">{s.ptt?.online ? '대기' : '-'}</span>}</Td>
           </tr>
         ))}
       </tbody>
-    </table>
+    </DataTable>
   )
 }
 
@@ -638,26 +639,26 @@ export function SubscriberLookup() {
         : subs.length === 0 ? <div className="empty">{status === 'active' ? '이용 중인 가입자가 없습니다' : q ? '검색 결과가 없습니다' : '가입자가 없습니다'}</div>
         : (
           <div className="panel">
-            <table className="data-table">
-              <thead><tr><th>이름</th><th>VoLTE 번호</th><th>VoLTE 접속</th><th>VoLTE 통화</th><th>PTT 번호</th><th>PTT 접속</th><th>PTT 서비스</th></tr></thead>
+            <DataTable sticky>
+              <thead><tr><Th>이름</Th><Th>VoLTE 번호</Th><Th>VoLTE 접속</Th><Th>VoLTE 통화</Th><Th>PTT 번호</Th><Th>PTT 접속</Th><Th>PTT 서비스</Th></tr></thead>
               <tbody>
                 {subs.map(s => (
                   <tr key={s.person_id}>
-                    <td style={{ fontWeight: 600 }}>{s.name}</td>
-                    <td className="ts">{s.volte?.msisdn || '-'}</td>
-                    <td>{s.volte ? <><OnlineDot on={s.volte.online} />{s.volte.online ? '접속' : '미접속'}</> : <span className="ts">-</span>}</td>
-                    <td>{s.volte?.calls && s.volte.calls.length > 0
+                    <Td style={{ fontWeight: 600 }}>{s.name}</Td>
+                    <Td className="ts">{s.volte?.msisdn || '-'}</Td>
+                    <Td>{s.volte ? <><OnlineDot on={s.volte.online} />{s.volte.online ? '접속' : '미접속'}</> : <span className="ts">-</span>}</Td>
+                    <Td>{s.volte?.calls && s.volte.calls.length > 0
                       ? s.volte.calls.map((c, i) => <span key={i} className={`badge ${c.state === 'active' ? 'badge--green' : 'badge--blue'}`} style={{ marginRight: 4 }}>{c.state === 'active' ? '통화 중' : '호출 중'} {c.role === 'caller' ? '→' : '←'} {c.peer}</span>)
-                      : <span className="ts">{s.volte?.online ? '대기' : '-'}</span>}</td>
-                    <td className="ts">{s.ptt?.msisdn || '-'}</td>
-                    <td>{s.ptt ? <><OnlineDot on={s.ptt.online} />{s.ptt.online ? '접속' : '미접속'}</> : <span className="ts">-</span>}</td>
-                    <td>{s.ptt?.groups && s.ptt.groups.length > 0
+                      : <span className="ts">{s.volte?.online ? '대기' : '-'}</span>}</Td>
+                    <Td className="ts">{s.ptt?.msisdn || '-'}</Td>
+                    <Td>{s.ptt ? <><OnlineDot on={s.ptt.online} />{s.ptt.online ? '접속' : '미접속'}</> : <span className="ts">-</span>}</Td>
+                    <Td>{s.ptt?.groups && s.ptt.groups.length > 0
                       ? s.ptt.groups.map((g, i) => <span key={i} className="badge badge--green" style={{ marginRight: 4 }}>참여 그룹 {g.group_id} ({g.active_members}/{g.total_members})</span>)
-                      : <span className="ts">{s.ptt?.online ? '대기' : '-'}</span>}</td>
+                      : <span className="ts">{s.ptt?.online ? '대기' : '-'}</span>}</Td>
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </DataTable>
             {totalPages > 1 && (
               <div className="toolbar" style={{ justifyContent: 'flex-end', borderTop: '1px solid var(--border)' }}>
                 <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>총 {total.toLocaleString()}건 · {page}/{totalPages}</span>

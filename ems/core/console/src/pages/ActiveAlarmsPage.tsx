@@ -13,6 +13,7 @@ import { usePageParam } from '../widgets/pageParams'
 import { Check, MessageSquare, RotateCw } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 function elapsedSince(ts?: string): string {
   const t = new Date(ts || '').getTime()
@@ -140,17 +141,17 @@ export function ActiveAlarmList() {
         ) : rows.length === 0 ? (
           <div className="empty">{active.length === 0 ? '활성 알람 없음' : '필터 결과 없음'}</div>
         ) : (
-          <table className="data-table">
+          <DataTable sticky>
             <thead>
               <tr>
-                <th style={{ width: 90 }}>심각도</th>
-                <th style={{ width: 100 }}>코드</th>
-                <th style={{ width: 120 }}>클래스</th>
-                <th style={{ width: 170 }}>소스</th>
-                <th>메시지</th>
-                <th style={{ width: 145 }}>발생 시각</th>
-                <th style={{ width: 100 }}>경과</th>
-                <th style={{ width: 90 }}>승인</th>
+                <Th style={{ width: 90 }}>심각도</Th>
+                <Th style={{ width: 100 }}>코드</Th>
+                <Th style={{ width: 120 }}>클래스</Th>
+                <Th style={{ width: 170 }}>소스</Th>
+                <Th>메시지</Th>
+                <Th style={{ width: 145 }}>발생 시각</Th>
+                <Th style={{ width: 100 }}>경과</Th>
+                <Th style={{ width: 90 }}>승인</Th>
               </tr>
             </thead>
             <tbody>
@@ -160,12 +161,12 @@ export function ActiveAlarmList() {
                 return [
                   <tr key={key} onClick={() => setExpanded(open ? null : key)}
                       style={{ cursor: 'pointer', background: open ? 'var(--accent)' : undefined }}>
-                    <td><span className={`badge ${sevBadgeClass(severityOf(a))}`}>{severityOf(a)}</span></td>
-                    <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{a.code || '-'}</td>
-                    <td>{alarmTypeLabel(a.type)}</td>
-                    <td><code style={{ fontSize: 11 }} title={a.source?.mo_instance || ''}>
-                      {a.source?.mo_label || a.source?.mo_instance || '-'}</code></td>
-                    <td>
+                    <Td><span className={`badge ${sevBadgeClass(severityOf(a))}`}>{severityOf(a)}</span></Td>
+                    <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{a.code || '-'}</Td>
+                    <Td>{alarmTypeLabel(a.type)}</Td>
+                    <Td><code style={{ fontSize: 11 }} title={a.source?.mo_instance || ''}>
+                      {a.source?.mo_label || a.source?.mo_instance || '-'}</code></Td>
+                    <Td>
                       {a.message}
                       {(a.occurrences ?? 1) > 1 && (
                         <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: 'var(--muted-foreground)',
@@ -177,27 +178,27 @@ export function ActiveAlarmList() {
                         <span className="ml-1.5 inline-flex items-center gap-0.5 text-xs text-muted-foreground">
                       <MessageSquare size={11} />{a.comments!.length}</span>
                       )}
-                    </td>
-                    <td className="ts">{fmtTime(a.ts)}</td>
-                    <td>{elapsedSince(a.ts)}</td>
-                    <td>
+                    </Td>
+                    <Td className="ts">{fmtTime(a.ts)}</Td>
+                    <Td>{elapsedSince(a.ts)}</Td>
+                    <Td>
                       {a.acked
                         ? <span className="inline-flex items-center gap-1 text-xs text-[var(--cims-success)]">
                       <Check size={12} /> {a.ackUser || '승인'}</span>
                         : <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>미승인</span>}
-                    </td>
+                    </Td>
                   </tr>,
                   open && (
                     <tr key={`${key}-detail`}>
-                      <td colSpan={8} style={{ padding: 0, background: 'var(--accent)' }}>
+                      <Td colSpan={8} style={{ padding: 0, background: 'var(--accent)' }}>
                         <AlarmDetail a={a} onAck={ack} onComment={comment} />
-                      </td>
+                      </Td>
                     </tr>
                   ),
                 ]
               })}
             </tbody>
-          </table>
+          </DataTable>
         )}
       </div>
     </div>

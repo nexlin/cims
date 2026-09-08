@@ -20,6 +20,7 @@ import type { WidgetDef, WidgetPlacement } from '@core/widgets/types'
 import { RotateCw } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 interface ReclaimItem {
   ts: string; node: string; session_id: string; sesid: string
@@ -98,14 +99,14 @@ function ByNodeBlock() {
       </div>
       {rows.length === 0 ? <div className="empty" style={{ fontSize: 12 }}>회수 없음</div> : (
         <div className="scroll-fill">
-          <table className="data-table" style={{ fontSize: 12 }}>
-            <thead><tr><th>노드</th><th style={{ width: 70, textAlign: 'right' }}>건수</th></tr></thead>
+          <DataTable sticky className="[&_td]:text-sm">
+            <thead><tr><Th>노드</Th><Th style={{ width: 70, textAlign: 'right' }}>건수</Th></tr></thead>
             <tbody>
               {rows.map(([node, n]) => (
-                <tr key={node}><td>{node}</td><td style={{ textAlign: 'right' }}>{n}</td></tr>
+                <tr key={node}><Td>{node}</Td><Td style={{ textAlign: 'right' }}>{n}</Td></tr>
               ))}
             </tbody>
-          </table>
+          </DataTable>
         </div>
       )}
     </div>
@@ -147,39 +148,39 @@ function ListBlock() {
         {error && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--destructive)' }}> · 조회 실패</span>}
       </div>
       <div className="scroll-fill">
-        <table className="data-table">
+        <DataTable sticky>
           <thead>
             <tr>
-              <th style={{ width: 110 }}>시각</th>
-              <th style={{ width: 70 }}>노드</th>
-              <th>session_id</th>
-              <th>sesid</th>
-              <th style={{ width: 70 }}>service</th>
-              <th>reason</th>
-              <th style={{ width: 80 }}>점유(초)</th>
+              <Th style={{ width: 110 }}>시각</Th>
+              <Th style={{ width: 70 }}>노드</Th>
+              <Th>session_id</Th>
+              <Th>sesid</Th>
+              <Th style={{ width: 70 }}>service</Th>
+              <Th>reason</Th>
+              <Th style={{ width: 80 }}>점유(초)</Th>
             </tr>
           </thead>
           <tbody>
             {items.map((it, i) => (
               <tr key={i}>
-                <td style={{ fontSize: 12 }}>{it.ts}</td>
-                <td style={{ fontSize: 12 }}>{it.node}</td>
-                <td style={{ fontSize: 12, fontFamily: 'monospace' }}>{it.session_id}</td>
-                <td style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--muted-foreground)' }}>{it.sesid}</td>
-                <td style={{ fontSize: 12 }}>{it.service}</td>
-                <td style={{ fontSize: 12 }}>
+                <Td style={{ fontSize: 12 }}>{it.ts}</Td>
+                <Td style={{ fontSize: 12 }}>{it.node}</Td>
+                <Td style={{ fontSize: 12, fontFamily: 'monospace' }}>{it.session_id}</Td>
+                <Td style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--muted-foreground)' }}>{it.sesid}</Td>
+                <Td style={{ fontSize: 12 }}>{it.service}</Td>
+                <Td style={{ fontSize: 12 }}>
                   <span style={{ color: it.reason === 'hold_timeout' ? 'var(--destructive)' : 'var(--foreground)' }}>
                     {REASON_LABEL[it.reason] || it.reason}
                   </span>
-                </td>
-                <td style={{ fontSize: 12, textAlign: 'right' }}>{it.held_sec}</td>
+                </Td>
+                <Td style={{ fontSize: 12, textAlign: 'right' }}>{it.held_sec}</Td>
               </tr>
             ))}
             {items.length === 0 && (
-              <tr><td colSpan={7} className="empty-cell">회수된 누수 세션 없음 (정상)</td></tr>
+              <tr><Td colSpan={7} className="py-8 text-center text-muted-foreground">회수된 누수 세션 없음 (정상)</Td></tr>
             )}
           </tbody>
-        </table>
+        </DataTable>
       </div>
     </div>
   )

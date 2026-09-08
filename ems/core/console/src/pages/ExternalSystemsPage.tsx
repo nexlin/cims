@@ -13,6 +13,7 @@ import {
 import { Button } from '@core/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { fromSel, toSel } from '@core/components/custom/select-value'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 const TYPE_LABEL: Record<ExternalSystemType, string> = {
   db: 'DB', monitoring: '모니터링', storage: '스토리지', auth: '인증', other: '기타',
@@ -185,29 +186,29 @@ export default function ExternalSystemsPage() {
       {loading ? <div style={{ padding: 20, color: 'var(--muted-foreground)' }}>불러오는 중…</div>
         : items.length === 0 ? <div style={{ padding: 20, color: 'var(--muted-foreground)' }}>등록된 외부 시스템이 없습니다.</div>
         : (
-        <table className="data-table" style={{ fontSize: 13 }}>
+        <DataTable sticky>
           <thead><tr>
-            <th>상태</th><th>이름</th><th>유형</th><th>엔드포인트</th><th>태그</th><th>활성</th><th>작업</th>
+            <Th>상태</Th><Th>이름</Th><Th>유형</Th><Th>엔드포인트</Th><Th>태그</Th><Th>활성</Th><Th>작업</Th>
           </tr></thead>
           <tbody>
             {items.map(s => (
               <tr key={s.id}>
-                <td>{(s.probe?.mode ?? 'none') !== 'none' ? <StatusDot st={status.get(s.id)} /> : <span style={{ color: 'var(--muted-foreground)' }}>—</span>}</td>
-                <td><b>{s.name}</b>{s.description && <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{s.description}</div>}</td>
-                <td><span style={{ fontSize: 11, padding: '1px 6px', border: '1px solid var(--border)', borderRadius: 3 }}>{TYPE_LABEL[s.type]}</span></td>
-                <td>{(s.endpoints || []).map((e, i) => <code key={i} style={{ fontSize: 11, marginRight: 6 }}>{e.host}:{e.port}</code>)}</td>
-                <td>{(s.tags || []).map(t => <span key={t} style={{ fontSize: 10, padding: '1px 5px', background: 'var(--secondary)', borderRadius: 8, marginRight: 3 }}>{t}</span>)}</td>
-                <td>{s.enabled ? <Check size={13} className="text-[var(--cims-success)]" /> : '—'}</td>
-                <td style={{ whiteSpace: 'nowrap' }}>
+                <Td>{(s.probe?.mode ?? 'none') !== 'none' ? <StatusDot st={status.get(s.id)} /> : <span style={{ color: 'var(--muted-foreground)' }}>—</span>}</Td>
+                <Td><b>{s.name}</b>{s.description && <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{s.description}</div>}</Td>
+                <Td><span style={{ fontSize: 11, padding: '1px 6px', border: '1px solid var(--border)', borderRadius: 3 }}>{TYPE_LABEL[s.type]}</span></Td>
+                <Td>{(s.endpoints || []).map((e, i) => <code key={i} style={{ fontSize: 11, marginRight: 6 }}>{e.host}:{e.port}</code>)}</Td>
+                <Td>{(s.tags || []).map(t => <span key={t} style={{ fontSize: 10, padding: '1px 5px', background: 'var(--secondary)', borderRadius: 8, marginRight: 3 }}>{t}</span>)}</Td>
+                <Td>{s.enabled ? <Check size={13} className="text-[var(--cims-success)]" /> : '—'}</Td>
+                <Td style={{ whiteSpace: 'nowrap' }}>
                   {(s.probe?.mode ?? 'none') !== 'none' &&
                     <Button size="default" style={{ fontSize: 12, marginRight: 4 }} onClick={() => probeNow(s)}>점검</Button>}
                   <Button size="default" style={{ fontSize: 12, marginRight: 4 }} onClick={() => setEditing(s)}>편집</Button>
                   <Button size="default" style={{ fontSize: 12 }} onClick={() => remove(s)}>삭제</Button>
-                </td>
+                </Td>
               </tr>
             ))}
           </tbody>
-        </table>
+        </DataTable>
       )}
       {editing && (
         <EditModal initial={editing === 'new' ? null : editing}

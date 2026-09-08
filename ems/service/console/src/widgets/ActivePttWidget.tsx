@@ -5,6 +5,7 @@ import { useSharedHealth } from '@core/widgets/useSharedHealth'
 import type { WidgetDef } from '@core/widgets/types'
 import FlowPage from '@core/pages/FlowPage'
 import { fmtTime } from './shared'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 function ActivePttWidget() {
   const navigate = useNavigate()
@@ -22,21 +23,21 @@ function ActivePttWidget() {
         PTT 활성 그룹 ({rows.length}건)
       </div>
       {rows.length === 0 ? <div className="empty">활성 그룹 세션 없음</div> : (
-      <table className="data-table">
-        <thead><tr><th>그룹</th><th>발신자</th><th>상태</th><th>시작</th></tr></thead>
+      <DataTable sticky>
+        <thead><tr><Th>그룹</Th><Th>발신자</Th><Th>상태</Th><Th>시작</Th></tr></thead>
         <tbody>
           {rows.map(c => (
             <tr key={c.call_id} style={{ cursor: 'pointer' }}
               onClick={() => setFlowId(c.call_id)}
               title="행 클릭: 메시지 플로우 / 번호 클릭: 가입자 상세">
-              <td>{c.group_id}</td>
-              <td><a href="#" onClick={e => gotoSubscriber(e, c.initiator)}>{c.initiator}</a></td>
-              <td><span className="badge badge--green">{c.state}</span></td>
-              <td className="ts">{fmtTime(c.invite_time)}</td>
+              <Td>{c.group_id}</Td>
+              <Td><a href="#" onClick={e => gotoSubscriber(e, c.initiator)}>{c.initiator}</a></Td>
+              <Td><span className="badge badge--green">{c.state}</span></Td>
+              <Td className="ts">{fmtTime(c.invite_time)}</Td>
             </tr>
           ))}
         </tbody>
-      </table>
+      </DataTable>
       )}
       {flowId && <FlowPage callId={flowId} callType="ptt" onClose={() => setFlowId(null)} />}
     </div>

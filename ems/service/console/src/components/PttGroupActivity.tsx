@@ -21,6 +21,7 @@ import {
   type DayAgg, type DetailState,
 } from '@svc/components/pttSession'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
+import { DataTable, Th } from '@core/components/custom/data-table'
 
 export default function PttGroupActivity({ storeKey }: {
   /** 녹취 저장 키 = ptt_groups.id (surrogate). mcptt_group_id 가 바뀌어도 불변이라
@@ -170,18 +171,18 @@ export default function PttGroupActivity({ storeKey }: {
           ) : (
             <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
               <div style={{ overflowX: 'auto' }}>
-                <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <DataTable sticky className="[&_td]:text-sm">
                   <thead>
                     <tr style={{ background: 'var(--muted)', textAlign: 'left' }}>
-                      <th style={{ ...thStyle, width: 24, cursor: 'default' }}></th>
-                      <th style={{ ...thStyle, cursor: 'default' }}>세션</th>
-                      <th style={{ ...thStyle, cursor: 'default' }}>시각</th>
-                      <th style={{ ...thStyle, cursor: 'default', textAlign: 'center' }}>상태</th>
-                      <th style={{ ...thStyle, cursor: 'default', textAlign: 'right' }}>발언 턴</th>
-                      <th style={{ ...thStyle, cursor: 'default', textAlign: 'right' }}>화자</th>
-                      <th style={{ ...thStyle, cursor: 'default', textAlign: 'right' }}>동시</th>
-                      <th style={{ ...thStyle, cursor: 'default', textAlign: 'right' }}>발화</th>
-                      <th style={{ ...thStyle, cursor: 'default', textAlign: 'right' }}>동작</th>
+                      <Th style={{ ...thStyle, width: 24, cursor: 'default' }}></Th>
+                      <Th style={{ ...thStyle, cursor: 'default' }}>세션</Th>
+                      <Th style={{ ...thStyle, cursor: 'default' }}>시각</Th>
+                      <Th style={{ ...thStyle, cursor: 'default', textAlign: 'center' }}>상태</Th>
+                      <Th style={{ ...thStyle, cursor: 'default', textAlign: 'right' }}>발언 턴</Th>
+                      <Th style={{ ...thStyle, cursor: 'default', textAlign: 'right' }}>화자</Th>
+                      <Th style={{ ...thStyle, cursor: 'default', textAlign: 'right' }}>동시</Th>
+                      <Th style={{ ...thStyle, cursor: 'default', textAlign: 'right' }}>발화</Th>
+                      <Th style={{ ...thStyle, cursor: 'default', textAlign: 'right' }}>동작</Th>
                     </tr>
                   </thead>
                   <tbody>
@@ -200,7 +201,7 @@ export default function PttGroupActivity({ storeKey }: {
                       />
                     ))}
                   </tbody>
-                </table>
+                </DataTable>
               </div>
             </div>
           )}

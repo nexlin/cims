@@ -13,6 +13,7 @@ import { SEV_COLOR, refreshAlarms, severityOf, useAlarms } from '@core/widgets/u
 import { useToast } from '@core/components/Toast'
 import type { WidgetDef } from '@core/widgets/types'
 import { Button } from '@core/components/ui/button'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 // 요약 타일에 항상 노출하는 상위 4단계(고정 순서). indeterminate/cleared 는 건수 있을 때만.
 const TILE_ORDER = ['critical', 'major', 'minor', 'warning'] as const
@@ -109,14 +110,14 @@ function ActiveAlarmsWidget() {
         <div className="empty">해당 심각도의 활성 알람 없음</div>
       ) : (
         <div className="table-wrap">
-          <table className="data-table" style={{ fontSize: 13 }}>
+          <DataTable sticky>
             <thead>
               <tr>
-                <th style={{ width: 92 }}>심각도</th>
-                <th style={{ width: 118 }}>코드</th>
-                <th style={{ width: 168 }}>소스(MO)</th>
-                <th>메시지</th>
-                <th style={{ width: 96 }}>승인</th>
+                <Th style={{ width: 92 }}>심각도</Th>
+                <Th style={{ width: 118 }}>코드</Th>
+                <Th style={{ width: 168 }}>소스(MO)</Th>
+                <Th>메시지</Th>
+                <Th style={{ width: 96 }}>승인</Th>
               </tr>
             </thead>
             <tbody>
@@ -126,31 +127,31 @@ function ActiveAlarmsWidget() {
                 return (
                   <tr key={`${a.alarm_id || a.type}-${i}`}
                       style={severe ? { background: `color-mix(in srgb, ${SEV_COLOR[sev]} 7%, transparent)` } : undefined}>
-                    <td style={severe ? { boxShadow: `inset 3px 0 0 ${SEV_COLOR[sev]}` } : undefined}>
+                    <Td style={severe ? { boxShadow: `inset 3px 0 0 ${SEV_COLOR[sev]}` } : undefined}>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                         <Dot sev={sev} />
                         <span style={{ fontSize: 11, fontWeight: 600 }}>{SEV_LABEL[sev] || sev}</span>
                       </span>
-                    </td>
-                    <td>
+                    </Td>
+                    <Td>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                         <code style={{ fontSize: 11 }}>{a.code || a.type}</code>
                         {(a.occurrences || 1) > 1 && <span className="badge badge--gray">×{a.occurrences}</span>}
                       </span>
-                    </td>
-                    <td><code style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{a.source?.mo_instance || '-'}</code></td>
-                    <td>{a.message}</td>
-                    <td>
+                    </Td>
+                    <Td><code style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{a.source?.mo_instance || '-'}</code></Td>
+                    <Td>{a.message}</Td>
+                    <Td>
                       {a.acked
                         ? <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                       <Check size={12} /> {a.ackUser || '승인'}</span>
                         : <Button variant="ghost" onClick={() => ack(a.alarm_id)}>승인</Button>}
-                    </td>
+                    </Td>
                   </tr>
                 )
               })}
             </tbody>
-          </table>
+          </DataTable>
         </div>
       )}
     </div>

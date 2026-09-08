@@ -21,6 +21,7 @@ import {
   fmtTime, formatSec, downloadCsv,
 } from '../utils/alarmLabels'
 import { Button } from '@core/components/ui/button'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 const FETCH_LIMIT = 5000   // 이벤트 탭 서버 상한 — 초과 시 최신순 절단(표기)
 
@@ -260,46 +261,46 @@ export function AlarmByCodeBlock() {
                         action={<Button variant="ghost" onClick={exportCsv}
                                         disabled={byCode.length === 0}>CSV</Button>}>
               {byCode.length === 0 ? <div className="empty">기간 내 알람 없음</div> : (
-                <table className="data-table">
+                <DataTable sticky>
                   <thead>
                     <tr>
-                      <th style={{ width: 110 }}>코드</th>
-                      <th style={{ width: 120 }}>클래스</th>
-                      <th style={{ width: 160 }}>소스</th>
-                      <th style={{ width: 95 }}>심각도</th>
-                      <th style={{ width: 130 }}>발생</th>
-                      <th style={{ width: 60, textAlign: 'right' }}>해소</th>
-                      <th style={{ width: 80 }}>현재 상태</th>
-                      <th style={{ width: 110, textAlign: 'right' }}>평균 지속</th>
-                      <th>마지막 이벤트</th>
+                      <Th style={{ width: 110 }}>코드</Th>
+                      <Th style={{ width: 120 }}>클래스</Th>
+                      <Th style={{ width: 160 }}>소스</Th>
+                      <Th style={{ width: 95 }}>심각도</Th>
+                      <Th style={{ width: 130 }}>발생</Th>
+                      <Th style={{ width: 60, textAlign: 'right' }}>해소</Th>
+                      <Th style={{ width: 80 }}>현재 상태</Th>
+                      <Th style={{ width: 110, textAlign: 'right' }}>평균 지속</Th>
+                      <Th>마지막 이벤트</Th>
                     </tr>
                   </thead>
                   <tbody>
                     {byCode.map((s, i) => (
                       <tr key={s.key || `${s.type}-${i}`}>
-                        <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{s.code || '-'}</td>
-                        <td>{alarmTypeLabel(s.type)}</td>
-                        <td><code style={{ fontSize: 11 }}>{s.mo_instance || '-'}</code></td>
-                        <td>
+                        <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{s.code || '-'}</Td>
+                        <Td>{alarmTypeLabel(s.type)}</Td>
+                        <Td><code style={{ fontSize: 11 }}>{s.mo_instance || '-'}</code></Td>
+                        <Td>
                           {s.perceived_severity
                             ? <span className={`badge ${sevBadgeClass(s.perceived_severity)}`}>{s.perceived_severity}</span>
                             : '-'}
-                        </td>
-                        <td><ShareBar n={s.opens} max={maxCodeOpens} /></td>
-                        <td style={{ textAlign: 'right' }}>{s.resolved}</td>
-                        <td>
+                        </Td>
+                        <Td><ShareBar n={s.opens} max={maxCodeOpens} /></Td>
+                        <Td style={{ textAlign: 'right' }}>{s.resolved}</Td>
+                        <Td>
                           {s.currently_open
                             ? <span className="badge badge--red">OPEN</span>
                             : <span style={{ color: 'var(--muted-foreground)' }}>정상</span>}
-                        </td>
-                        <td style={{ textAlign: 'right' }}>
+                        </Td>
+                        <Td style={{ textAlign: 'right' }}>
                           {s.avg_duration_sec != null ? formatSec(Math.round(s.avg_duration_sec)) : '-'}
-                        </td>
-                        <td className="ts">{s.last_ts ? fmtTime(s.last_ts) : '-'}</td>
+                        </Td>
+                        <Td className="ts">{s.last_ts ? fmtTime(s.last_ts) : '-'}</Td>
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </DataTable>
               )}
             </TablePanel>
       )}
@@ -328,32 +329,32 @@ export function AlarmByTypeBlock() {
   return (
             <TablePanel title={<>유형(클래스)별 분석 ({byType.length}종)</>}>
               {byType.length === 0 ? <div className="empty">기간 내 알람 없음</div> : (
-                <table className="data-table">
+                <DataTable sticky>
                   <thead>
                     <tr>
-                      <th>클래스</th>
-                      <th style={{ width: 70, textAlign: 'right' }}>코드 수</th>
-                      <th style={{ width: 130 }}>발생</th>
-                      <th style={{ width: 60, textAlign: 'right' }}>해소</th>
-                      <th style={{ width: 70, textAlign: 'right' }}>미해소</th>
-                      <th style={{ width: 145 }}>마지막</th>
+                      <Th>클래스</Th>
+                      <Th style={{ width: 70, textAlign: 'right' }}>코드 수</Th>
+                      <Th style={{ width: 130 }}>발생</Th>
+                      <Th style={{ width: 60, textAlign: 'right' }}>해소</Th>
+                      <Th style={{ width: 70, textAlign: 'right' }}>미해소</Th>
+                      <Th style={{ width: 145 }}>마지막</Th>
                     </tr>
                   </thead>
                   <tbody>
                     {byType.map(t => (
                       <tr key={t.type}>
-                        <td>{alarmTypeLabel(t.type)}
+                        <Td>{alarmTypeLabel(t.type)}
                           <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--muted-foreground)', fontFamily: 'monospace' }}>{t.type}</span>
-                        </td>
-                        <td style={{ textAlign: 'right' }}>{t.codes.size || '-'}</td>
-                        <td><ShareBar n={t.opens} max={maxTypeOpens} /></td>
-                        <td style={{ textAlign: 'right' }}>{t.resolved}</td>
-                        <td style={{ textAlign: 'right', color: t.open > 0 ? 'var(--destructive)' : undefined }}>{t.open}</td>
-                        <td className="ts">{t.last ? fmtTime(t.last) : '-'}</td>
+                        </Td>
+                        <Td style={{ textAlign: 'right' }}>{t.codes.size || '-'}</Td>
+                        <Td><ShareBar n={t.opens} max={maxTypeOpens} /></Td>
+                        <Td style={{ textAlign: 'right' }}>{t.resolved}</Td>
+                        <Td style={{ textAlign: 'right', color: t.open > 0 ? 'var(--destructive)' : undefined }}>{t.open}</Td>
+                        <Td className="ts">{t.last ? fmtTime(t.last) : '-'}</Td>
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </DataTable>
               )}
             </TablePanel>
   )
@@ -451,34 +452,34 @@ export function EventByTypeBlock() {
                         action={<Button variant="ghost" onClick={exportCsv}
                                         disabled={byType.length === 0}>CSV</Button>}>
               {byType.length === 0 ? <div className="empty">기간 내 이벤트 없음</div> : (
-                <table className="data-table">
+                <DataTable sticky>
                   <thead>
                     <tr>
-                      <th style={{ width: 90 }}>분류</th>
-                      <th style={{ width: 110 }}>코드</th>
-                      <th>유형</th>
-                      <th style={{ width: 140 }}>건수</th>
-                      <th style={{ width: 145 }}>마지막</th>
+                      <Th style={{ width: 90 }}>분류</Th>
+                      <Th style={{ width: 110 }}>코드</Th>
+                      <Th>유형</Th>
+                      <Th style={{ width: 140 }}>건수</Th>
+                      <Th style={{ width: 145 }}>마지막</Th>
                     </tr>
                   </thead>
                   <tbody>
                     {byType.map(t => (
                       <tr key={t.key}>
-                        <td>
+                        <Td>
                           <span className={`badge ${t.kind === 'audit' ? 'badge--gray' : 'badge--blue'}`}>
                             {EVENT_KIND_LABEL[t.kind || ''] || t.kind || '-'}
                           </span>
-                        </td>
-                        <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{t.code || '-'}</td>
-                        <td>{eventTypeLabel(t.type)}
+                        </Td>
+                        <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{t.code || '-'}</Td>
+                        <Td>{eventTypeLabel(t.type)}
                           <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--muted-foreground)', fontFamily: 'monospace' }}>{t.type}</span>
-                        </td>
-                        <td><ShareBar n={t.count} max={maxTypeCount} /></td>
-                        <td className="ts">{t.last ? fmtTime(t.last) : '-'}</td>
+                        </Td>
+                        <Td><ShareBar n={t.count} max={maxTypeCount} /></Td>
+                        <Td className="ts">{t.last ? fmtTime(t.last) : '-'}</Td>
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </DataTable>
               )}
             </TablePanel>
   )
@@ -492,24 +493,24 @@ export function EventBySourceBlock() {
   return (
             <TablePanel title={<>소스별 발생 ({bySource.length}곳)</>}>
               {bySource.length === 0 ? <div className="empty">기간 내 이벤트 없음</div> : (
-                <table className="data-table">
+                <DataTable sticky>
                   <thead>
                     <tr>
-                      <th>소스</th>
-                      <th style={{ width: 140 }}>건수</th>
-                      <th style={{ width: 145 }}>마지막</th>
+                      <Th>소스</Th>
+                      <Th style={{ width: 140 }}>건수</Th>
+                      <Th style={{ width: 145 }}>마지막</Th>
                     </tr>
                   </thead>
                   <tbody>
                     {bySource.map(t => (
                       <tr key={t.source}>
-                        <td><code style={{ fontSize: 11 }}>{t.source}</code></td>
-                        <td><ShareBar n={t.count} max={maxSrcCount} /></td>
-                        <td className="ts">{t.last ? fmtTime(t.last) : '-'}</td>
+                        <Td><code style={{ fontSize: 11 }}>{t.source}</code></Td>
+                        <Td><ShareBar n={t.count} max={maxSrcCount} /></Td>
+                        <Td className="ts">{t.last ? fmtTime(t.last) : '-'}</Td>
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </DataTable>
               )}
             </TablePanel>
   )

@@ -6,6 +6,7 @@ import { ApiError } from '../../api/client'
 import { deploymentApi } from '../../api/deployment'
 import { fmtSize, fmtSpeed, fmtEta } from './deployHelpers'
 import { Button } from '@core/components/ui/button'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 interface UploadRow {
   id: string
@@ -153,14 +154,14 @@ export default function PackageUploadModal({ onClose, onDone }: {
       {rows.length === 0 ? (
         <div className="empty" style={{ marginTop: 16 }}>업로드할 파일을 선택하세요</div>
       ) : (
-        <table className="data-table" style={{ marginTop: 12 }}>
+        <DataTable sticky>
           <thead>
             <tr>
-              <th>파일</th>
-              <th style={{ width: 80 }}>크기</th>
-              <th>진행</th>
-              <th style={{ width: 100 }}>상태</th>
-              <th style={{ width: 70 }}>작업</th>
+              <Th>파일</Th>
+              <Th style={{ width: 80 }}>크기</Th>
+              <Th>진행</Th>
+              <Th style={{ width: 100 }}>상태</Th>
+              <Th style={{ width: 70 }}>작업</Th>
             </tr>
           </thead>
           <tbody>
@@ -169,7 +170,7 @@ export default function PackageUploadModal({ onClose, onDone }: {
               onRemove={() => setRows(rs => rs.filter(x => x.id !== r.id))}
               onRetry={() => uploadOne(r, false)} />)}
           </tbody>
-        </table>
+        </DataTable>
       )}
 
       <div className="modal-footer" style={{ marginTop: 16 }}>
@@ -207,9 +208,9 @@ function UploadProgressRow({ row, onAbort, onRemove, onRetry }: {
 
   return (
     <tr>
-      <td style={{ fontSize: 12, fontFamily: 'monospace' }}>{row.file.name}</td>
-      <td style={{ fontSize: 12 }}>{fmtSize(row.file.size)}</td>
-      <td>
+      <Td mono>{row.file.name}</Td>
+      <Td className="text-sm">{fmtSize(row.file.size)}</Td>
+      <Td>
         {(row.state === 'uploading' || row.state === 'done') && (
           <>
             <div style={{ width: 240, height: 8, background: 'var(--muted)', borderRadius: 4, overflow: 'hidden' }}>
@@ -226,16 +227,16 @@ function UploadProgressRow({ row, onAbort, onRemove, onRetry }: {
         {row.state === 'failed' && (
           <span style={{ color: 'var(--destructive)', fontSize: 12 }}>{row.msg}</span>
         )}
-      </td>
-      <td>
+      </Td>
+      <Td>
         <span className="tag" style={{
           background: sb.bg, color: 'var(--cims-on-solid)', fontSize: 10, padding: '1px 6px', borderRadius: 3,
         }}>{sb.label}</span>
         {row.msg && row.state === 'done' && (
           <div style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>{row.msg}</div>
         )}
-      </td>
-      <td>
+      </Td>
+      <Td>
         {row.state === 'uploading' && (
           <Button onClick={onAbort}><X size={12} /> 취소</Button>
         )}
@@ -245,7 +246,7 @@ function UploadProgressRow({ row, onAbort, onRemove, onRetry }: {
         {(row.state === 'pending' || row.state === 'aborted') && (
           <Button onClick={onRemove}>제거</Button>
         )}
-      </td>
+      </Td>
     </tr>
   )
 }

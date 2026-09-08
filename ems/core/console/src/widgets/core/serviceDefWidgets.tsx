@@ -29,6 +29,7 @@ import type { WidgetDef } from '../types'
 import { Button } from '@core/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 // 목록은 조건이 없어 키가 하나 — 위젯이 몇 개든 조회는 1회.
 const useDescriptorsRaw = makeSharedByKey(() => serviceDescriptorsApi.list())
@@ -72,11 +73,11 @@ function EditToggle({ on, disabled, onToggle }: { on: boolean; disabled?: boolea
 
 function RowActions({ onEdit, onRemove }: { onEdit: () => void; onRemove: () => void }) {
   return (
-    <td style={{ display: 'flex', gap: 4 }}>
+    <Td className="flex gap-1">
       <Button onClick={onEdit}>수정</Button>
       <Button style={{ color: 'var(--destructive)' }}
               onClick={onRemove}>삭제</Button>
-    </td>
+    </Td>
   )
 }
 
@@ -210,22 +211,22 @@ function ModulesBlock() {
               </span>} />
       <div className="scroll-fill">
         {mods.length === 0 ? <Empty text={svc ? '등록된 모듈 없음' : '서비스를 선택하세요'} /> : (
-          <table className="data-table" style={{ margin: 0 }}>
-            <thead><tr><th>이름</th><th style={{ width: 70 }}>포트</th><th style={{ width: 60 }}>proto</th>
-              <th style={{ width: 64 }}>제어</th>
-              {editMode && <th style={{ width: 118 }} />}</tr></thead>
+          <DataTable sticky>
+            <thead><tr><Th>이름</Th><Th style={{ width: 70 }}>포트</Th><Th style={{ width: 60 }}>proto</Th>
+              <Th style={{ width: 64 }}>제어</Th>
+              {editMode && <Th style={{ width: 118 }} />}</tr></thead>
             <tbody>
               {mods.map((m, i) => (
                 <tr key={m.name}>
-                  <td><b>{m.name}</b></td>
-                  <td>{m.port ?? '—'}</td>
-                  <td>{m.proto ?? '—'}</td>
-                  <td>{m.controllable ? <Check size={13} className="text-[var(--cims-success)]" /> : ''}</td>
+                  <Td><b>{m.name}</b></Td>
+                  <Td>{m.port ?? '—'}</Td>
+                  <Td>{m.proto ?? '—'}</Td>
+                  <Td>{m.controllable ? <Check size={13} className="text-[var(--cims-success)]" /> : ''}</Td>
                   {editMode && <RowActions onEdit={() => setEdit({ index: i })} onRemove={() => remove(i)} />}
                 </tr>
               ))}
             </tbody>
-          </table>
+          </DataTable>
         )}
       </div>
       {edit && svc && (
@@ -264,9 +265,9 @@ function AlertRulesBlock() {
               </span>} />
       <div className="scroll-fill">
         {rules.length === 0 ? <Empty text={svc ? '등록된 알람 규칙 없음' : '서비스를 선택하세요'} /> : (
-          <table className="data-table" style={{ margin: 0 }}>
-            <thead><tr><th style={{ width: 100 }}>코드</th><th>클래스</th><th style={{ width: 90 }}>심각도</th>
-              <th>소스</th>{editMode && <th style={{ width: 118 }} />}</tr></thead>
+          <DataTable sticky>
+            <thead><tr><Th style={{ width: 100 }}>코드</Th><Th>클래스</Th><Th style={{ width: 90 }}>심각도</Th>
+              <Th>소스</Th>{editMode && <Th style={{ width: 118 }} />}</tr></thead>
             <tbody>
               {rules.map((r, i) => {
                 const sev = r.perceived_severity || r.severity || 'warning'
@@ -276,17 +277,17 @@ function AlertRulesBlock() {
                   <tr key={`${r.code}-${r.mo_instance || r.target || i}`}
                       title={[r.effect && `영향: ${r.effect}`,
                               r.recommended_action && `조치: ${r.recommended_action}`].filter(Boolean).join('\n')}>
-                    <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.code || '—'}</td>
-                    <td>{r.type}</td>
-                    <td><span className={`badge ${cls}`}>{sev}</span></td>
-                    <td style={{ fontFamily: 'monospace', fontSize: 11 }}>
-                      {r.mo_instance || (r.target ? `(관측 신원)/${r.target}` : '—')}</td>
+                    <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.code || '—'}</Td>
+                    <Td>{r.type}</Td>
+                    <Td><span className={`badge ${cls}`}>{sev}</span></Td>
+                    <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>
+                      {r.mo_instance || (r.target ? `(관측 신원)/${r.target}` : '—')}</Td>
                     {editMode && <RowActions onEdit={() => setEdit({ index: i })} onRemove={() => remove(i)} />}
                   </tr>
                 )
               })}
             </tbody>
-          </table>
+          </DataTable>
         )}
       </div>
       {edit && svc && (
@@ -327,21 +328,21 @@ function DataSourcesBlock() {
         {sources.length === 0 ? (
           <Empty text={svc ? 'shape 위젯에 노출할 차트/표/지표/분포 소스를 등록하세요' : '서비스를 선택하세요'} />
         ) : (
-          <table className="data-table" style={{ margin: 0 }}>
-            <thead><tr><th style={{ width: 130 }}>id</th><th>이름</th><th style={{ width: 150 }}>shapes</th>
-              <th>endpoint</th>{editMode && <th style={{ width: 118 }} />}</tr></thead>
+          <DataTable sticky>
+            <thead><tr><Th style={{ width: 130 }}>id</Th><Th>이름</Th><Th style={{ width: 150 }}>shapes</Th>
+              <Th>endpoint</Th>{editMode && <Th style={{ width: 118 }} />}</tr></thead>
             <tbody>
               {sources.map((d, i) => (
                 <tr key={d.id}>
-                  <td><code style={{ fontSize: 11 }}>{d.id}</code></td>
-                  <td>{d.label}</td>
-                  <td style={{ fontSize: 11 }}>{(d.shapes || []).join(', ')}</td>
-                  <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{d.endpoint}</td>
+                  <Td><code style={{ fontSize: 11 }}>{d.id}</code></Td>
+                  <Td>{d.label}</Td>
+                  <Td style={{ fontSize: 11 }}>{(d.shapes || []).join(', ')}</Td>
+                  <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{d.endpoint}</Td>
                   {editMode && <RowActions onEdit={() => setEdit({ index: i })} onRemove={() => remove(i)} />}
                 </tr>
               ))}
             </tbody>
-          </table>
+          </DataTable>
         )}
       </div>
       {edit && svc && (

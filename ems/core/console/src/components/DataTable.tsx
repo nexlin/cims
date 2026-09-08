@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
+import { DataTable as TableFrame, Th, Td } from '@core/components/custom/data-table'
 
 // ── 공통 데이터 테이블 ────────────────────────────────────────
 //  구성(조직/사용자/번호/PTT그룹) 4페이지의 중복 테이블 로직을 흡수하는 단일 컴포넌트.
@@ -112,31 +113,31 @@ export function DataTable<T>(props: DataTableProps<T>) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
       <div className="table-wrap" style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
-      <table className="data-table">
+      <TableFrame sticky>
         <thead>
           <tr>
             {selectable && (
-              <th style={{ width: 36, position: 'sticky', top: 0, zIndex: 2 }}>
+              <Th style={{ width: 36, position: 'sticky', top: 0, zIndex: 2 }}>
                 <input type="checkbox" checked={!!allOnPageSelected} onChange={toggleSelectAll} />
-              </th>
+              </Th>
             )}
             {columns.map(c => (
-              <th key={c.key}
+              <Th key={c.key}
                 style={{ width: c.width, textAlign: c.align, cursor: c.sortable ? 'pointer' : undefined, userSelect: 'none', position: 'sticky', top: 0, zIndex: 2 }}
                 onClick={() => toggleSort(c)}>
                 {c.header}
                 {c.sortable && sortKey === c.key && (
                   <span style={{ marginLeft: 4, display: 'inline-flex', verticalAlign: '-2px' }}>{sortDir === 'asc' ? <ChevronUp size={12} /> : sortDir === 'desc' ? <ChevronDown size={12} /> : null}</span>
                 )}
-              </th>
+              </Th>
             ))}
           </tr>
         </thead>
         <tbody>
           {loading ? (
-            <tr><td colSpan={colCount} className="empty-cell" style={{ textAlign: 'center', padding: 24 }}>로딩 중...</td></tr>
+            <tr><Td colSpan={colCount} className="py-8 text-center text-muted-foreground" style={{ textAlign: 'center', padding: 24 }}>로딩 중...</Td></tr>
           ) : pageRows.length === 0 ? (
-            <tr><td colSpan={colCount} className="empty-cell" style={{ textAlign: 'center', padding: 24 }}>{emptyText}</td></tr>
+            <tr><Td colSpan={colCount} className="py-8 text-center text-muted-foreground" style={{ textAlign: 'center', padding: 24 }}>{emptyText}</Td></tr>
           ) : pageRows.map(r => {
             const k = rowKey(r)
             const isActive = activeRowKey != null && activeRowKey === k
@@ -151,21 +152,21 @@ export function DataTable<T>(props: DataTableProps<T>) {
                   background: (isActive || isExpanded) ? 'rgba(74,144,217,0.15)' : isSel ? 'rgba(74,144,217,0.08)' : undefined,
                 }}>
                 {selectable && (
-                  <td onClick={e => e.stopPropagation()}>
+                  <Td onClick={e => e.stopPropagation()}>
                     <input type="checkbox" checked={!!isSel} onChange={() => toggleSelectOne(k)} />
-                  </td>
+                  </Td>
                 )}
                 {columns.map(c => (
-                  <td key={c.key} style={{ textAlign: c.align }}>
+                  <Td key={c.key} style={{ textAlign: c.align }}>
                     {c.render ? c.render(r) : String((r as Record<string, unknown>)[c.key] ?? '')}
-                  </td>
+                  </Td>
                 ))}
               </tr>
               {isExpanded && (
                 <tr className="row--expanded">
-                  <td colSpan={colCount} style={{ padding: 0, background: 'var(--muted)', boxShadow: 'inset 0 4px 6px -5px rgba(0,0,0,0.35)' }}>
+                  <Td colSpan={colCount} style={{ padding: 0, background: 'var(--muted)', boxShadow: 'inset 0 4px 6px -5px rgba(0,0,0,0.35)' }}>
                     {renderExpanded!(r)}
-                  </td>
+                  </Td>
                 </tr>
               )}
               </React.Fragment>
@@ -173,7 +174,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
           })}
           {footer}
         </tbody>
-      </table>
+      </TableFrame>
       </div>
 
       {pageSize > 0 && sorted.length > pageSize && (

@@ -8,6 +8,7 @@ import { fmtSize, fmtRelTime, depEffectiveStatus } from './deploy/deployHelpers'
 import { agentDisplayName } from '../components/agentDisplay'
 import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 interface ModuleGroup {
   name: string
@@ -351,31 +352,31 @@ function DeploymentsForPackageModal({ pkg, deployments, onClose }: {
           {deployments.length === 0 ? (
             <div className="empty">배포된 곳 없음</div>
           ) : (
-            <table className="data-table">
+            <DataTable sticky>
               <thead>
                 <tr>
-                  <th>서버</th>
-                  <th>서비스</th>
-                  <th>상태</th>
-                  <th>배포 시각</th>
+                  <Th>서버</Th>
+                  <Th>서비스</Th>
+                  <Th>상태</Th>
+                  <Th>배포 시각</Th>
                 </tr>
               </thead>
               <tbody>
                 {deployments.map(d => (
                   <tr key={d.id}>
-                    <td>
+                    <Td>
                       {d.agent_name ? agentDisplayName(d.agent_name) : `#${d.agent_id}`}
                       {d.agent_name && agentDisplayName(d.agent_name) !== d.agent_name && (
                         <span style={{ fontSize: 11, color: 'var(--muted-foreground)', marginLeft: 6 }}>({d.agent_name})</span>
                       )}
-                    </td>
-                    <td>{d.process_name || '—'}</td>
-                    <td>{depEffectiveStatus(d)}</td>
-                    <td style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{d.deployed_at || '—'}</td>
+                    </Td>
+                    <Td>{d.process_name || '—'}</Td>
+                    <Td>{depEffectiveStatus(d)}</Td>
+                    <Td style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{d.deployed_at || '—'}</Td>
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </DataTable>
           )}
         </div>
         <div className="modal-footer" style={{ marginTop: 16 }}>

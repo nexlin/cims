@@ -3,6 +3,7 @@ import { api } from '@core/api/client'
 import { useToast } from '@core/components/Toast'
 import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 interface MsgStats {
   date: string
@@ -56,15 +57,15 @@ export default function StatsMessagesPage({ iface }: { iface: string }) {
 
           <div style={{ width: 300 }}>
             <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>메서드별 카운트</div>
-            <table className="data-table">
-              <thead><tr><th>메서드</th><th style={{ width: 80 }}>건수</th></tr></thead>
+            <DataTable sticky>
+              <thead><tr><Th>메서드</Th><Th style={{ width: 80 }}>건수</Th></tr></thead>
               <tbody>
                 {Object.entries(data.method_counts).map(([m, c]) => (
-                  <tr key={m}><td style={{ fontSize: 12 }}>{m}</td><td style={{ fontSize: 12, textAlign: 'right', fontWeight: 600 }}>{c}</td></tr>
+                  <tr key={m}><Td style={{ fontSize: 12 }}>{m}</Td><Td style={{ fontSize: 12, textAlign: 'right', fontWeight: 600 }}>{c}</Td></tr>
                 ))}
-                {Object.keys(data.method_counts).length === 0 && <tr><td colSpan={2} className="empty-cell">데이터 없음</td></tr>}
+                {Object.keys(data.method_counts).length === 0 && <tr><Td colSpan={2} className="py-8 text-center text-muted-foreground">데이터 없음</Td></tr>}
               </tbody>
-            </table>
+            </DataTable>
           </div>
         </div>
       )}

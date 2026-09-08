@@ -14,6 +14,7 @@ import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 const PAGE_SIZE = 20
 const FETCH_LIMIT = 5000
@@ -146,19 +147,19 @@ export function AuditEventsSection() {
         ) : (
           <>
             <div className="scroll-fill">
-            <table className="data-table">
+            <DataTable sticky>
               <thead>
                 <tr>
-                  <th style={{ width: 150 }}>시각</th>
-                  <th style={{ width: 130 }}>유형</th>
-                  <th style={{ width: 70 }}>단계</th>
-                  <th style={{ width: 150 }}>행위자(감청자)</th>
-                  <th style={{ width: 130 }}>관제 그룹</th>
-                  <th style={{ width: 170 }}>세션</th>
-                  <th style={{ width: 200 }}>대상</th>
-                  <th style={{ width: 120 }}>방식</th>
-                  <th style={{ width: 90 }}>시간</th>
-                  <th>메시지</th>
+                  <Th style={{ width: 150 }}>시각</Th>
+                  <Th style={{ width: 130 }}>유형</Th>
+                  <Th style={{ width: 70 }}>단계</Th>
+                  <Th style={{ width: 150 }}>행위자(감청자)</Th>
+                  <Th style={{ width: 130 }}>관제 그룹</Th>
+                  <Th style={{ width: 170 }}>세션</Th>
+                  <Th style={{ width: 200 }}>대상</Th>
+                  <Th style={{ width: 120 }}>방식</Th>
+                  <Th style={{ width: 90 }}>시간</Th>
+                  <Th>메시지</Th>
                 </tr>
               </thead>
               <tbody>
@@ -167,23 +168,23 @@ export function AuditEventsSection() {
                   const targets = [p.target_a, p.target_b].filter(Boolean).join(' / ')
                   return (
                     <tr key={`${ev.ts}-${pageStart + i}`}>
-                      <td className="ts">{fmtTime(ev.ts)}</td>
-                      <td>{eventTypeLabel(ev.type)}<div style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--muted-foreground)' }}>{ev.code || ''}</div></td>
-                      <td>{p.phase
+                      <Td className="ts">{fmtTime(ev.ts)}</Td>
+                      <Td>{eventTypeLabel(ev.type)}<div style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--muted-foreground)' }}>{ev.code || ''}</div></Td>
+                      <Td>{p.phase
                         ? <span className={`badge ${PHASE_BADGE[p.phase] || 'badge--gray'}`}>{PHASE_LABEL[p.phase] || p.phase}</span>
-                        : '-'}</td>
-                      <td><code style={{ fontSize: 11 }}>{p.monitor || '-'}</code></td>
-                      <td><code style={{ fontSize: 11 }}>{p.group || '-'}</code></td>
-                      <td><code style={{ fontSize: 11 }} title={p.sesid}>{p.session || '-'}</code></td>
-                      <td><code style={{ fontSize: 11 }}>{targets || '-'}</code></td>
-                      <td>{p.tap_mode ? (TAP_LABEL[p.tap_mode] || p.tap_mode) : '-'}</td>
-                      <td>{fmtDur(p.dur_ms)}</td>
-                      <td title={ev.source?.mo_instance}>{ev.message}</td>
+                        : '-'}</Td>
+                      <Td><code style={{ fontSize: 11 }}>{p.monitor || '-'}</code></Td>
+                      <Td><code style={{ fontSize: 11 }}>{p.group || '-'}</code></Td>
+                      <Td><code style={{ fontSize: 11 }} title={p.sesid}>{p.session || '-'}</code></Td>
+                      <Td><code style={{ fontSize: 11 }}>{targets || '-'}</code></Td>
+                      <Td>{p.tap_mode ? (TAP_LABEL[p.tap_mode] || p.tap_mode) : '-'}</Td>
+                      <Td>{fmtDur(p.dur_ms)}</Td>
+                      <Td title={ev.source?.mo_instance}>{ev.message}</Td>
                     </tr>
                   )
                 })}
               </tbody>
-            </table>
+            </DataTable>
             </div>
             <Pager page={page} count={filtered.length} pageSize={PAGE_SIZE} onPage={setPage} />
           </>

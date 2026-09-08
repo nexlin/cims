@@ -12,6 +12,7 @@ import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 type Record_ = Record<string, unknown>
 
@@ -299,18 +300,18 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
       )}
 
       {/* 행 목록 */}
-      <table className="data-table" style={{ width: '100%' }}>
+      <DataTable sticky>
         <thead>
           <tr>
-            {summaryFields.map(f => <th key={f.key}>{f.label}</th>)}
-            <th style={{ width: 160 }}>작업</th>
+            {summaryFields.map(f => <Th key={f.key}>{f.label}</Th>)}
+            <Th style={{ width: 160 }}>작업</Th>
           </tr>
         </thead>
         <tbody>
           {visibleIdx.length === 0 ? (
-            <tr><td colSpan={summaryFields.length + 1} style={{ textAlign: 'center', color: 'var(--muted-foreground)', padding: 20 }}>
+            <tr><Td colSpan={summaryFields.length + 1} style={{ textAlign: 'center', color: 'var(--muted-foreground)', padding: 20 }}>
               {records.length === 0 ? '행 없음 — [추가] 로 생성' : '태그 필터 결과 없음'}
-            </td></tr>
+            </Td></tr>
           ) : (
             visibleIdx.map(i => {
               const r = records[i]
@@ -324,7 +325,7 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
             })
           )}
         </tbody>
-      </table>
+      </DataTable>
 
       {/* 편집 영역 */}
       {editingIdx !== null && records[editingIdx] && (
@@ -432,18 +433,18 @@ function RowDisplay({ row, summaryFields, active, onEdit, onRemove }: {
   return (
     <tr style={{ background: active ? 'var(--cims-brand-soft)' : undefined }}>
       {summaryFields.map(f => (
-        <td key={f.key} style={{ fontSize: 12 }}>
+        <Td key={f.key} className="text-sm">
           {formatValue(row[f.key], f)}
-        </td>
+        </Td>
       ))}
-      <td>
+      <Td>
         <div style={{ display: 'flex', gap: 4 }}>
           <Button onClick={onEdit}>
             {active ? '닫기' : '편집'}
           </Button>
           <Button variant="destructive" onClick={onRemove}>삭제</Button>
         </div>
-      </td>
+      </Td>
     </tr>
   )
 }
