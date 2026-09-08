@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(_REPO_ROOT, "csc", "src"))
 import services.mcptt as m  # noqa: E402
 from httpsrv.handler import HandlerArgs  # noqa: E402
 
-PTT_DOM = "ptt.mnc033.mcc450.3gppnetwork.org"
+PTT_DOM = "ptt.cims.example.kr"
 OWNER_LOGIN, OWNER_UID, OWNER_PTT = "disp01", 5020, "+82510001001"
 OTHER_LOGIN, OTHER_UID, OTHER_PTT = "disp02", 5021, "+82510001002"
 

@@ -138,7 +138,7 @@ class RequireScopeTest(unittest.TestCase):
 
 
 class IssuerDerivationTest(unittest.TestCase):
-    D = "ptt.mnc033.mcc450.3gppnetwork.org"
+    D = "ptt.cims.example.kr"
 
     def test_derived_from_ptt_domain(self):
         self.assertEqual(m.resolve_idms_identity({}, self.D, ""),

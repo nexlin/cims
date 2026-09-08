@@ -241,7 +241,7 @@ cmp_config:
 subscribers:
   source: file              # file | db
   users:
-    - { sip_id: "+82571900001", auth_id: "4503382571900001", domain: "ptt.mnc033.mcc450.3gppnetwork.org", passwd: "123456" }
+    - { sip_id: "+82571900001", auth_id: "4503382571900001", domain: "ptt.cims.example.kr", passwd: "123456" }
   volte_bindings:
     - { user: "+82571900001", service: volte-basic }
   ptt_bindings:

@@ -48,8 +48,13 @@
 4. 단말 **재로그인** — 새 도메인·IdMS issuer 를 받는다(프로비저닝 ETag 변경). 리프레시 토큰은 무효.
 5. 시뮬레이터·검증 상수(`cspsim -domain`, `cimsue-cli --domain`, `verify/lib/common/subscribers.py`, 시험 코드 리터럴)와 블루프린트 YAML 을 갱신한다.
 
-## 4. 현재 상태 (.48)
+## 4. 적용 상태
 
-dev 실행본과 테스트베드 배포본(배포 #31 csc, #34 csp)은 아직 `ims.mnc033.mcc450.3gppnetwork.org` /
-`ptt.mnc033.mcc450.3gppnetwork.org` 로 동작한다(`access_services.jsonl`·csc 프로비저닝·검증 상수 전부).
-이 문서의 값으로 전환하는 작업은 §3 순서대로 서버 → 가입자 H(A1) → 단말 → 검증 도구 순으로 진행한다.
+소스·개발/시험 서버(및 그 배포본)의 서버·도구 측은 이 문서의 값(`volte.cims.example.kr` /
+`ptt.cims.example.kr`)으로 전환돼 있다 — CSP 접속서비스(`volte`/`mcptt`)·CSC 프로비저닝·IdMS 유도
+(issuer `idms.ptt.cims.example.kr`)·전 Digest 가입자 H(A1)·검증 상수(`subscribers.py` 등)·블루프린트·
+시뮬레이터 인자. 새 도메인 REGISTER 는 실측 200, 구 도메인 REGISTER 는 403 으로 거절된다.
+
+단말은 §3-4 대로 재로그인해야 새 프로비저닝(도메인·IdMS issuer)을 받아 등록이 회복된다 —
+전환 시점에 등록돼 있던 바인딩·발급 토큰은 무효가 된다. 레거시 도메인으로 남아 있는 별도
+환경(독립 실행본 등)은 §3 순서대로 전환한다.

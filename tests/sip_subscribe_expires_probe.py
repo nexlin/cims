@@ -6,7 +6,7 @@
 오는지 (3) Expires:0 해지에 200 + terminated NOTIFY 가 오는지 본다. 등록 없이 UDP 로 직접 보낸다(구독은 등록을 요구하지 않음).
 
   python3 tests/sip_subscribe_expires_probe.py --host 10.0.2.45 --port 15060 --user +82500000004 \
-      --target sip:cms_psi@ptt.mnc033.mcc450.3gppnetwork.org --expires 4294967295
+      --target sip:cms_psi@ptt.cims.example.kr --expires 4294967295
 """
 import argparse, hashlib, os, random, re, socket, sys, time, uuid
 
@@ -90,9 +90,9 @@ def hdr(msg, name):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--host', default='121.161.164.45'); ap.add_argument('--port', type=int, default=15060)
-    ap.add_argument('--user', default='+82500000011'); ap.add_argument('--domain', default='ptt.mnc033.mcc450.3gppnetwork.org')
+    ap.add_argument('--user', default='+82500000011'); ap.add_argument('--domain', default='ptt.cims.example.kr')
     ap.add_argument('--impi', default=''); ap.add_argument('--password', default='1234')
-    ap.add_argument('--target', default='sip:cms_psi@ptt.mnc033.mcc450.3gppnetwork.org')
+    ap.add_argument('--target', default='sip:cms_psi@ptt.cims.example.kr')
     ap.add_argument('--expires', default='4294967295'); ap.add_argument('--wait', type=float, default=3.0)
     ap.add_argument('--no-unregister', action='store_true', help='끝에 REGISTER Expires:0 을 보내지 않음(실단말 계정이면 필수 — CSP 해지는 바인딩 전체 삭제)')
     args = ap.parse_args()

@@ -47,8 +47,8 @@ csp_config:
   access_services:
     - name:           volte-basic
       kind:           volte
-      domain:         ims.mnc033.mcc450.3gppnetwork.org
-      auth_realm:     ims.mnc033.mcc450.3gppnetwork.org
+      domain:         volte.cims.example.kr
+      auth_realm:     volte.cims.example.kr
       inbound_policy: default-inbound
       priority:       100
       enabled:        true
@@ -78,11 +78,11 @@ subscribers:
   users:
     - sip_id:   "+821357007001"
       auth_id:  "450033100000001"
-      domain:   ims.mnc033.mcc450.3gppnetwork.org
+      domain:   volte.cims.example.kr
       passwd:   "123456"
     - sip_id:   "+821357007002"
       auth_id:  "450033100000002"
-      domain:   ims.mnc033.mcc450.3gppnetwork.org
+      domain:   volte.cims.example.kr
       passwd:   "123456"
   volte_bindings:
     - { user: "+821357007001", service: volte-basic }
@@ -101,8 +101,8 @@ verify:
       cmd:    cspsim
       args:   { server_ip: 127.0.0.1, local_ip: 127.0.0.1, count: 1,
                 user: "+821357007001",
-                auth_id: "450033100000001@ims.mnc033.mcc450.3gppnetwork.org",
-                domain: ims.mnc033.mcc450.3gppnetwork.org,
+                auth_id: "450033100000001@volte.cims.example.kr",
+                domain: volte.cims.example.kr,
                 password: "123456", mode: volte, scenario: register }
       expect: 'Registered\s*:\s*1\s*/\s*1'
 
@@ -111,8 +111,8 @@ verify:
       cmd:    cspsim
       args:   { server_ip: 127.0.0.1, local_ip: 127.0.0.1, count: 2,
                 user: "+821357007001",
-                auth_id: "450033100000001@ims.mnc033.mcc450.3gppnetwork.org",
-                domain: ims.mnc033.mcc450.3gppnetwork.org,
+                auth_id: "450033100000001@volte.cims.example.kr",
+                domain: volte.cims.example.kr,
                 password: "123456", mode: volte, scenario: call, call_duration: 5 }
       expect: 'Call OK/End\s*:\s*2'
 

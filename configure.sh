@@ -97,7 +97,7 @@ ${BOLD}데이터베이스:${NC}
   --db-password PWD  DB 비밀번호 (기본: cims1234)
 
 ${BOLD}도메인:${NC}
-  --volte-domain DOM  VoLTE SIP 도메인 / 인증 Realm (기본: ims.mnc001.mcc001.3gppnetwork.org)
+  --volte-domain DOM  VoLTE SIP 도메인 / 인증 Realm (기본: volte.cims.example.kr)
   --ptt-domain   DOM  PTT 그룹 통화 SIP 도메인 (기본: volte-domain의 ims→ptt 치환)
   --volte-service N   VoLTE 접속서비스 이름 = CSP access_services.name = 가입 service_ref (기본: volte)
   --ptt-service   N   PTT 접속서비스 이름 (기본: ptt) — csc.json Provisioning.Services.<kind>.name 으로 기록
@@ -115,7 +115,7 @@ ${BOLD}보안:${NC}
 ${BOLD}예시:${NC}
   # 단일 서버 배포
   $(basename "$0") --local-ip 192.168.1.10 --db-password mypass \\
-                   --volte-domain ims.mnc033.mcc450.3gppnetwork.org
+                   --volte-domain volte.cims.example.kr
 
   # 다중 서버 배포
   $(basename "$0") --csp-ip 192.168.1.10 --cmp-ip 192.168.1.11 \\
@@ -210,10 +210,10 @@ if [[ $INTERACTIVE == "yes" ]]; then
     ask DB_PASSWORD "DB_PASSWORD" "$_pw_label"
 
     ask VOLTE_DOMAIN "VOLTE_DOMAIN (SIP 도메인/인증 Realm)" \
-        "${VOLTE_DOMAIN:-ims.mnc033.mcc450.3gppnetwork.org}"
-    _volte_eff="${VOLTE_DOMAIN:-ims.mnc033.mcc450.3gppnetwork.org}"
+        "${VOLTE_DOMAIN:-volte.cims.example.kr}"
+    _volte_eff="${VOLTE_DOMAIN:-volte.cims.example.kr}"
     ask PTT_DOMAIN "PTT_DOMAIN (기본=ims→ptt 치환)" \
-        "${PTT_DOMAIN:-$(echo "$_volte_eff" | sed 's/^ims\./ptt./')}"
+        "${PTT_DOMAIN:-$(echo "$_volte_eff" | sed 's/^volte\./ptt./')}"
     ask VOLTE_SERVICE "VOLTE_SERVICE (CSP 접속서비스 name = 가입 service_ref)" "${VOLTE_SERVICE:-volte}"
     ask PTT_SERVICE   "PTT_SERVICE   (CSP 접속서비스 name = 가입 service_ref)" "${PTT_SERVICE:-ptt}"
     ask COUNTRY_CODE "COUNTRY_CODE (홈 국가코드, E.164 digits)" "${COUNTRY_CODE:-82}"
@@ -270,8 +270,8 @@ CSC_HOST="${CSC_HOST:-$LOCAL_IP}"
 CSC_IP="$CSC_HOST"            # 템플릿 @CSC_IP@ 별칭 (csp Setup.Csc.Host)
 OAM_IP="${OAM_IP:-$LOCAL_IP}" # 템플릿 @OAM_IP@ — 모듈 FM 자기보고 목적지 (이중화 시 관리평면 VIP)
 DB_HOST="${DB_HOST:-127.0.0.1}"
-VOLTE_DOMAIN="${VOLTE_DOMAIN:-ims.mnc033.mcc450.3gppnetwork.org}"
-PTT_DOMAIN="${PTT_DOMAIN:-$(echo "$VOLTE_DOMAIN" | sed 's/^ims\./ptt./')}"
+VOLTE_DOMAIN="${VOLTE_DOMAIN:-volte.cims.example.kr}"
+PTT_DOMAIN="${PTT_DOMAIN:-$(echo "$VOLTE_DOMAIN" | sed 's/^volte\./ptt./')}"
 # 접속서비스 이름 — CSP 패키지 기본 접속서비스(csp/pkg.json access_services: volte/ptt)와 같은 이름.
 #   가입자 service_ref 가 이 이름을 참조하므로 CSP 의 실제 access_services.name 과 일치해야 한다
 #   (csc 는 CSP 컬렉션을 읽지 않는다 — Provisioning.Services.<kind> 의 다른 키들과 같은 운영 규약).

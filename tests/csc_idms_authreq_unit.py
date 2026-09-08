@@ -47,8 +47,8 @@ def check(cond, msg):
 
 def cfg(**over):
     base = {
-        'IdMs': {'Domain': 'ptt.mnc033.mcc450.3gppnetwork.org', 'JwtSecret': 'unit'},
-        'Provisioning': {'Services': {'ptt': {'domain': 'ptt.mnc033.mcc450.3gppnetwork.org'}}},
+        'IdMs': {'Domain': 'ptt.cims.example.kr', 'JwtSecret': 'unit'},
+        'Provisioning': {'Services': {'ptt': {'domain': 'ptt.cims.example.kr'}}},
         'McpttServer': {'Port': 4430},
         'CimsRuntimeDir': _TMP,
     }
@@ -95,7 +95,7 @@ def main():
     minidom.parseString(xml0.encode())
     check('<T132>6</T132>' in xml0 and '<name>CIMS</name>' in xml0, "기본값 문서(T132=6, name=CIMS)")
     check('PLMN="45033"' in xml0, "PLMN 도메인 유도 45033")
-    check('<MCPTT-Service-Details>' in xml0 and 'sip:mcptt_psi@ptt.mnc033.mcc450.3gppnetwork.org' in xml0,
+    check('<MCPTT-Service-Details>' in xml0 and 'sip:mcptt_psi@ptt.cims.example.kr' in xml0,
           "anyExt MCPTT-Service-Details 기본 on + Server-URI 유도")
     check('<MCData-Service-Details>' not in xml0, "MCData-Service-Details 기본 off")
     check(xml0.rstrip().endswith('</mcptt-UE-initial-configuration>') and
@@ -181,7 +181,7 @@ def main():
     check(r.status == 200, "② 미지 scope 비거절")
 
     # 입력칸 이름 설정화
-    mcptt.apply_config(cfg(IdMs={'Domain': 'ptt.mnc033.mcc450.3gppnetwork.org', 'JwtSecret': 'unit',
+    mcptt.apply_config(cfg(IdMs={'Domain': 'ptt.cims.example.kr', 'JwtSecret': 'unit',
                                  'FormLoginField': 'j_username', 'FormPasswordField': 'j_password'}))
     r = run(mcptt.handle_auth_req(args('GET', pkce_ctx()), {}))
     inputs = form_inputs(r.body)
@@ -231,7 +231,7 @@ def main():
     check(r.status == 405, "PUT → 405")
 
     # redirect_uri 허용목록
-    mcptt.apply_config(cfg(IdMs={'Domain': 'ptt.mnc033.mcc450.3gppnetwork.org', 'JwtSecret': 'unit',
+    mcptt.apply_config(cfg(IdMs={'Domain': 'ptt.cims.example.kr', 'JwtSecret': 'unit',
                                  'RedirectUriAllow': ['https://localhost/callback', 'cims://cb']}))
     r = run(mcptt.handle_auth_req(args('GET', pkce_ctx()), {}))
     check(r.status == 200, "허용목록: 등록된 redirect_uri → 폼 200")
@@ -243,7 +243,7 @@ def main():
     r = run(mcptt.handle_auth_req(args('POST', body=dict(pkce_ctx(redirect_uri='https://evil/cb'),
                                                           username='test004', password='1234')), {}))
     check(r.status == 400, "허용목록: 미등록 redirect_uri → 400 (POST)")
-    mcptt.apply_config(cfg(IdMs={'Domain': 'ptt.mnc033.mcc450.3gppnetwork.org', 'JwtSecret': 'unit',
+    mcptt.apply_config(cfg(IdMs={'Domain': 'ptt.cims.example.kr', 'JwtSecret': 'unit',
                                  'RedirectUriAllow': 'https://a/cb, https://localhost/callback'}))
     r = run(mcptt.handle_auth_req(args('GET', pkce_ctx()), {}))
     check(r.status == 200 and mcptt.IDMS_REDIRECT_URI_ALLOW == ['https://a/cb', 'https://localhost/callback'],

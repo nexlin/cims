@@ -17,8 +17,8 @@ import tempfile
 from . import db as _db
 
 
-VOLTE_DOMAIN = "ims.mnc033.mcc450.3gppnetwork.org"
-MCPTT_DOMAIN = "ptt.mnc033.mcc450.3gppnetwork.org"
+VOLTE_DOMAIN = "volte.cims.example.kr"
+MCPTT_DOMAIN = "ptt.cims.example.kr"
 
 
 def _num(msisdn: str) -> int:

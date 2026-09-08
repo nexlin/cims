@@ -31,7 +31,7 @@ volte_loop(){
   while [ "$(date +%s)" -lt "$DEADLINE" ] && [ ! -f "$STOP" ]; do
     c=$((c+1)); log "VoLTE launch #$c"
     "$SIM" -server_ip "$SRV" -server_port 5060 -mode volte -scenario call \
-      -domain ims.mnc033.mcc450.3gppnetwork.org -cps 1 -ht 10 -calls 1000000 \
+      -domain volte.cims.example.kr -cps 1 -ht 10 -calls 1000000 \
       -db "$DB" -count 60 -db_offset 0 -no_video -media_dir "$CIMS/tests/media" 2>&1 \
       | grep --line-buffered -avE "$NOISE" >> "$VLOG"
     log "VoLTE exited #$c — restart in 5s"
@@ -45,7 +45,7 @@ ptt_loop(){
   while [ "$(date +%s)" -lt "$DEADLINE" ] && [ ! -f "$STOP" ]; do
     c=$((c+1)); log "PTT launch #$c"
     "$SIM" -server_ip "$SRV" -server_port 5060 -mode ptt -group g001 -scenario group-call \
-      -domain ptt.mnc033.mcc450.3gppnetwork.org -count 40 -floor_hold 10 -floor_loop \
+      -domain ptt.cims.example.kr -count 40 -floor_hold 10 -floor_loop \
       -db "$DB" -no_video -media_dir "$CIMS/tests/media" 2>&1 \
       | grep --line-buffered -avE "$NOISE" >> "$PLOG"
     log "PTT exited #$c — restart in 5s"

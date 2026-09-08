@@ -204,7 +204,7 @@
           "key": "Provisioning.Services.volte.domain",
           "label": "VoLTE 도메인",
           "type": "string",
-          "default": "ims.mnc033.mcc450.3gppnetwork.org",
+          "default": "volte.cims.example.kr",
           "deploy_value": "@VOLTE_DOMAIN@",
           "restart": true,
           "help": "Digest username = imsi@도메인. CSP 의 VoLTE access_service 도메인과 일치해야 등록된다."
@@ -285,7 +285,7 @@
           "key": "Provisioning.Services.ptt.domain",
           "label": "PTT 도메인",
           "type": "string",
-          "default": "ptt.mnc033.mcc450.3gppnetwork.org",
+          "default": "ptt.cims.example.kr",
           "deploy_value": "@PTT_DOMAIN@",
           "restart": true,
           "help": "PTT access_service 도메인. MCPTT ID 와는 별개."

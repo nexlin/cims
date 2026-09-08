@@ -32,7 +32,7 @@ ptt_loop(){
   while [ "$(date +%s)" -lt "$DEADLINE" ] && [ ! -f "$STOP" ]; do
     c=$((c+1)); log "PTT launch #$c"
     "$SIM" -server_ip "$SRV" -server_port 5060 -mode ptt -group g001 -scenario group-call \
-      -domain ptt.mnc033.mcc450.3gppnetwork.org -count 40 -floor_hold 10 -floor_rounds "$ROUNDS" \
+      -domain ptt.cims.example.kr -count 40 -floor_hold 10 -floor_rounds "$ROUNDS" \
       -call_duration 1800 \
       -db "$DB" -no_video -media_dir "$CIMS/tests/media" 2>&1 \
       | grep --line-buffered -avE "$NOISE" >> "$PLOG"

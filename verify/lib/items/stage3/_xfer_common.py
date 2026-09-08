@@ -26,7 +26,7 @@ from ...common.subscribers import (
 from ...common.csp_notify import notify_csp_event
 
 # scn_srtp 와 동일 상수 (common.subscribers)
-VOLTE_DOMAIN = "ims.mnc033.mcc450.3gppnetwork.org"
+VOLTE_DOMAIN = "volte.cims.example.kr"
 VOLTE_TABLE = "volte_subscriptions"
 
 
