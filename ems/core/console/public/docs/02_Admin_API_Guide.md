@@ -61,7 +61,7 @@ curl -k -X POST https://192.168.0.2:4421/api/v1/auth/login \
     "ptt_subscriptions": [
       {
         "id": "+821030432632",
-        "auth_id": "4503382103043263@ptt.mnc033.mcc450.3gppnetwork.org",
+        "auth_id": "4503382103043263@ptt.cims.example.kr",
         "passwd": "1234",
         "dnd": false,
         "forward_id": "",
@@ -189,7 +189,7 @@ curl -k -X GET https://192.168.0.2:4421/api/v1/auth/me \
   "ptt_subscriptions": [
     {
       "id": "+821030432632",
-      "auth_id": "4503382103043263@ptt.mnc033.mcc450.3gppnetwork.org",
+      "auth_id": "4503382103043263@ptt.cims.example.kr",
       "passwd": "1234",
       "dnd": false,
       "forward_id": "",
@@ -276,7 +276,7 @@ curl -k -X GET https://192.168.0.2:4421/api/v1/users \
     "ptt_subscriptions": [
       {
         "id": "+82571900001",
-        "auth_id": "4503382571900001@ptt.mnc033.mcc450.3gppnetwork.org",
+        "auth_id": "4503382571900001@ptt.cims.example.kr",
         "passwd": "123456",
         "dnd": false,
         "forward_id": "",
@@ -572,7 +572,7 @@ Content-Type: application/json
 ```json
 {
   "id": "+82571900001",
-  "auth_id": "4503382571900001@ptt.mnc033.mcc450.3gppnetwork.org",
+  "auth_id": "4503382571900001@ptt.cims.example.kr",
   "passwd": "123456",
   "dnd": false,
   "forward_id": ""
@@ -589,7 +589,7 @@ Content-Type: application/json
 | MNC | 033 | Mobile Network Code |
 | MSISDN | 82571900001 | 국가코드 포함 전화번호 (+ 제외) |
 
-> 예시: `+82571900001` → auth_id: `4503382571900001@ptt.mnc033.mcc450.3gppnetwork.org`
+> 예시: `+82571900001` → auth_id: `4503382571900001@ptt.cims.example.kr`
 > 구성: MCC(450) + MNC(33) + MSISDN(82571900001) = `4503382571900001`
 
 **curl 예시:**
@@ -599,7 +599,7 @@ curl -k -X POST https://192.168.0.2:4421/api/v1/users/1/ptt \
   -H "Content-Type: application/json" \
   -d '{
     "id": "+82571900001",
-    "auth_id": "4503382571900001@ptt.mnc033.mcc450.3gppnetwork.org",
+    "auth_id": "4503382571900001@ptt.cims.example.kr",
     "passwd": "123456"
   }'
 ```
@@ -608,7 +608,7 @@ curl -k -X POST https://192.168.0.2:4421/api/v1/users/1/ptt \
 ```json
 {
   "id": "+82571900001",
-  "auth_id": "4503382571900001@ptt.mnc033.mcc450.3gppnetwork.org",
+  "auth_id": "4503382571900001@ptt.cims.example.kr",
   "passwd": "123456",
   "dnd": false,
   "forward_id": "",
@@ -637,7 +637,7 @@ Content-Type: application/json
 ```json
 {
   "id": "+82571900001",
-  "auth_id": "4503382571900001@ptt.mnc033.mcc450.3gppnetwork.org",
+  "auth_id": "4503382571900001@ptt.cims.example.kr",
   "passwd": "newpwd789",
   "dnd": true,
   "forward_id": "",

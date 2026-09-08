@@ -76,7 +76,7 @@ CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
   "CmpIp": "192.168.0.2",
   "CmpPort": 9000,
   "LocalCmpPort": 9001,
-  "PttRealm": "ptt.mnc033.mcc450.3gppnetwork.org",
+  "PttRealm": "ptt.cims.example.kr",
   "DataFolder": "../csp",
   "Database": {
     "Host": "127.0.0.1",

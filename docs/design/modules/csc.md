@@ -454,7 +454,7 @@ UE                    IdMS (CSC:4430)      UE                              IdMS 
 ```json
 {
   "sub": "test003",
-  "iss": "idms.ptt.mnc033.mcc450.3gppnetwork.org",
+  "iss": "idms.ptt.cims.example.kr",
   "aud": "mcptt_client",
   "client_id": "MCPTT_UE",
   "mcptt_id": "tel:+82500000003",

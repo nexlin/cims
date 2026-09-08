@@ -82,7 +82,7 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
                                    { "transport": "TCP", "port": 15060 },
                                    { "transport": "TLS", "port": 15061 } ],
                    "default": "UDP",
-                   "domain": "ims.mnc033.mcc450.3gppnetwork.org" },
+                   "domain": "volte.cims.example.kr" },
       "account": { "msisdn": "+821300000001", "imsi": "450330000000001",
                    "authId": "", "sipHa1": "5f4dcc3b5aa765d61d8327deb882cf99", "sipPassword": null }
     },
@@ -91,7 +91,7 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
       "sip":     { "host": "<PSP host>", "port": 15061, "transport": "TLS",
                    "transports": [ { "transport": "TLS", "port": 15061 } ],
                    "default": "TLS", "enforced": true, "mediaSecurity": "optional",
-                   "domain": "ptt.mnc033.mcc450.3gppnetwork.org" },
+                   "domain": "ptt.cims.example.kr" },
       "account": { "msisdn": "+821300000001", "imsi": "450330000000002",
                    "authId": "", "sipHa1": null, "sipPassword": null, "mcpttId": "tel:+821300000001" }
     }

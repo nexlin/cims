@@ -313,7 +313,7 @@ TLS 로 등록·통화한다. 구성 요소는 다음과 같다.
 ```json
 "sip": {
   "host": "121.161.164.45",
-  "domain": "ptt.mnc033.mcc450.3gppnetwork.org",
+  "domain": "ptt.cims.example.kr",
   "transports": [ { "transport": "UDP", "port": 15060 },
                   { "transport": "TCP", "port": 15060 },
                   { "transport": "TLS", "port": 15061 } ],

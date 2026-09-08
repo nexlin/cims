@@ -16,7 +16,7 @@
 | 빌드 baseline | AGP 9.2.1 / Gradle 9.4.1 / Kotlin 2.4.0 / compileSdk 37 / minSdk 26 / JVM target 17 |
 | 라이선스 | GPL 공개 |
 | 타깃 | UNIWA 러기드/PoC 안드로이드(arm64-v8a, 실기기 보유) |
-| 테스트 서버 | CSP SIP `121.161.164.47:15060`(UDP 가정 — 실측), realm/domain `ims.mnc033.mcc450.3gppnetwork.org` |
+| 테스트 서버 | CSP SIP `121.161.164.47:15060`(UDP 가정 — 실측), realm/domain `volte.cims.example.kr` |
 
 이미 구현됨: `SipAccountConfig`(serverHost/Port/transport/domain/msisdn/displayName/loginId/authId/password/expiresSec; `aor=sip:msisdn@domain`; `effectiveAuthId`) + `ConfigStore`(SharedPreferences). volte-client 첫 실행 `ConfigScreen` + `HomeScreen`(코덱점검 + 비활성 REGISTER placeholder). **M0 게이트 통과**(실기기 AMR-WB ENC+DEC·H.264 MediaCodec 존재 + AMR-WB 루프백 실시간 처리량 충족).
 
@@ -343,7 +343,7 @@ private fun buildAccountConfig(c: SipAccountConfig): AccountConfig {
 
 ### 3.3 라우팅·realm 함정
 
-- **proxies vs registrarUri**: 테스트 도메인(`ims.mnc033...`)은 공인 DNS 미해석 → registrarUri host를 도메인으로 두면 일부 빌드에서 registrarUri 자체 DNS 조회를 먼저 시도해 지연/실패할 수 있다. **`proxies`에 실제 IP:port(`;lr`) route를 강제**하고 idUri/registrarUri host는 규격상 domain 유지. M1.1 1차 시도에서 막히면 차선책으로 registrarUri/idUri host도 서버 IP로 두는 변형을 준비(verify-on-machine).
+- **proxies vs registrarUri**: 테스트 도메인(`volte.cims.example.kr`)은 공인 DNS 미해석 → registrarUri host를 도메인으로 두면 일부 빌드에서 registrarUri 자체 DNS 조회를 먼저 시도해 지연/실패할 수 있다. **`proxies`에 실제 IP:port(`;lr`) route를 강제**하고 idUri/registrarUri host는 규격상 domain 유지. M1.1 1차 시도에서 막히면 차선책으로 registrarUri/idUri host도 서버 IP로 두는 변형을 준비(verify-on-machine).
 - **realm**: challenge realm = `EffectiveRealm`(auth_realm 우선, 없으면 service.domain — `CspServiceMap.cpp:112`)이고 **username 의 `@` 뒤 domain(=`svc.domain`)과는 별개 변수**다. 핵심: **서버는 클라이언트가 보낸 realm 을 검증하지 않고 그대로 A1=MD5(username:realm:password) 계산에 넣는다**(`CscfModule.cpp:150`). 따라서 서버측은 realm 값이 challenge 와 달라도 인증이 깨지지 않는다 — **무한 401 위험은 순수 PJSIP 클라이언트측 동작**(`AuthCredInfo.realm`이 challenge realm 과 불일치하면 PJSIP 가 그 credential 을 챌린지에 적용하지 않아 Authorization 미전송). 그러므로 `AuthCredInfo.realm = "*"`(challenge realm echo)가 **가장 견고**하다(도메인 하드코딩/오타 위험 제거).
 - NAT 환경에서 rport(pjsip 기본 활성)·필요시 STUN 점검.
 

@@ -112,7 +112,7 @@ TTL(1 h) 안에 소멸한다.
 | `IDMS_ISSUER` (`iss`, discovery `issuer`) | `IdMs.Issuer` > `McpttServer.PublicUrl`(URL 형 — TS 33.180 B.2.1.2 "IdM 서버의 URL") > `idms.<IDMS_DOMAIN>` |
 | `KMS_URI` | `IdMs.KmsUri` > `kms.<IDMS_DOMAIN>` |
 
-`iss` 는 토큰과 discovery 에 같은 문자열로 실린다. `PublicUrl` 미설정 배포는 FQDN 형(`idms.ptt.mnc033.mcc450.3gppnetwork.org`)
+`iss` 는 토큰과 discovery 에 같은 문자열로 실린다. `PublicUrl` 미설정 배포는 FQDN 형(`idms.ptt.cims.example.kr`)
 이다. URL 형으로 고정하려면 `McpttServer.PublicUrl` 을 단말이 실제로 도달하는 하나의 주소로 명시한다(내부/공인 두 경로가
 있으면 그중 하나를 택해야 한다 — `iss` 는 하나).
 
