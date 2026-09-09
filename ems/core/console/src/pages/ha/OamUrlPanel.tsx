@@ -77,15 +77,13 @@ export function OamUrlPanel({ title, current, vipCandidate, applying, onApply, o
         )}
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
+        {/* 도안(408:5150)에는 [이 서버 적용][전체 적용] 둘뿐이고 `VIP 채우기` 는 없다 —
+            권장 VIP 는 placeholder 로만 제시한다(§7-39). */}
         <span className="inline-block w-[300px]">
           <ImeSafeInput value={draft} onCommit={setDraft}
                         placeholder={suggested || 'https://<OAM 또는 VIP>:4419'}
                         className="font-mono" />
         </span>
-        {suggested && draft.trim() !== suggested && (
-          <Button variant="ghost" onClick={() => setDraft(suggested)}
-                  title="이 서버가 속한 관리평면 그룹의 VIP">VIP 채우기</Button>
-        )}
         <Button variant="outline"
                 disabled={!!applying || !valid || norm === cur}
                 onClick={() => onApply(norm)}

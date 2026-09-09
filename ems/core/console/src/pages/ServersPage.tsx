@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowDown, ArrowRight, ArrowUp, Check, ChevronDown, ChevronRight, Copy, Hourglass, Lock, LockOpen, Pencil, Plus, RefreshCw, RotateCw, ShieldCheck, Stethoscope, Trash2, X } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, Copy, Hourglass, Lock, LockOpen, Pencil, Plus, RefreshCw, RotateCw, ShieldCheck, Stethoscope, Trash2, X } from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Alert } from '../components/ui/alert'
@@ -818,11 +818,6 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
               <span className="shrink-0 text-muted-foreground" onClick={e => { e.stopPropagation(); onToggleExpand(g.id) }}>{isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
               <TreeRole>{modeChip}</TreeRole>
               <span className={`min-w-0 flex-1 truncate font-medium ${isSelected ? 'text-brandsoft-on' : ''}`}>{g.name}</span>
-              {g.vip && (
-                <span className="shrink-0 text-xs text-muted-foreground" title={`VIP ${g.vip}/${g.vip_mask}`}>
-                  VIP {g.vip}
-                </span>
-              )}
               <span className="shrink-0 text-xs text-muted-foreground">{members.length}</span>
               {canAddMember && <TreeControl icon="plus" onClick={() => onAddMember(g)}
  title="새 멤버 자동 생성 (이름 자동, install_command 발급)" />}
@@ -830,7 +825,6 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
             {isOpen && members.map(a => (
               <ServerTreeRow key={a.id} agent={a}
  depCount={(depsByAgent.get(a.id) || []).length}
- role={g.mode === 'active_standby' ? a.ha_group?.role : undefined}
  active={selection?.kind === 'agent' && selection.id === a.id}
  indent
  onClick={() => onSelect({ kind: 'agent', id: a.id })}
@@ -852,9 +846,6 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
             <span className="size-3.5 shrink-0" aria-hidden />
             <TreeRole>SA</TreeRole>
             <span className={`min-w-0 flex-1 truncate font-medium ${isSelected ? 'text-brandsoft-on' : ''}`}>{agentDisplayName(a.name)}</span>
-            <span className="shrink-0 text-xs text-muted-foreground">{a.ip_address || '—'}</span>
-            <span className={`size-[7px] shrink-0 rounded-full ${statusDotClass(a.status)}`}
- title={a.status} aria-hidden />
             <span className="shrink-0 text-xs text-muted-foreground">
               {(depsByAgent.get(a.id) || []).length}m
             </span>
@@ -865,10 +856,9 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
   )
 }
 
-function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick, onRemove }: {
+function ServerTreeRow({ agent: a, depCount, active, indent, onClick, onRemove }: {
  agent: Agent
  depCount: number
- role?: 'master' | 'backup'
  active: boolean
  indent?: boolean
  onClick: () => void
@@ -883,11 +873,6 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick, onRe
       <span className={`size-[7px] shrink-0 rounded-full ${statusDotClass(a.status)}`}
  title={a.status} aria-hidden />
       <span className={`min-w-0 flex-1 truncate ${active ? 'text-brandsoft-on' : ''}`}>{agentDisplayName(a.name)}</span>
-      {role && (
-        <TreeRole title={role === 'master' ? 'Master — priority 100 (절체 우선순위)' : 'Backup — priority 90'}>
-          {role === 'master' ? 'M' : 'B'}
-        </TreeRole>
-      )}
       {/* 멤버 행 meta 는 도안이 **mono 10px** 이다(19:18) — 그룹 행 meta(11px)와 다르다 */}
       <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{depCount}m</span>
       {onRemove && <TreeControl icon="x" onClick={onRemove}
@@ -903,6 +888,8 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick, onRe
  * 계약(12px · 좌우 6 · 상하 2 · 테두리 있음)과 다르다. AS·AA·SA 가 **같은 색**이다 —
  * 이중화 방식은 살아있는 상태가 아니라 분류라서 톤을 갈라 쓰지 않는다(DESIGN-RULES §2).
  * 10px 은 Typography 컬렉션 밖의 값인데 도안도 토큰이 아니라 생값 10 을 썼다 — 그대로 옮긴다.
+ * **Group 종류에만 붙는다** — 도안 Node 종류에는 role 슬롯이 없다(멤버 역할 M/B 는 AS 그룹
+ * 멤버 표에 있다).
  */
 function TreeRole({ children, title }: { children: ReactNode; title?: string }) {
   return (
@@ -1375,21 +1362,12 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
  title="VIP 없음"
  description="all_active 그룹은 비워둬도 됩니다 (keepalived 안 깔림). active_standby 는 1개 이상 권장." />
               {availableSlots.length === 0 && (
-                // 조치 지점이 **다른 화면**이라 해당 멤버로 가는 바로가기를 함께 둔다
-                // (empty-states.md ES-1 의 주석). 선택만 바꾸면 그 서버의 네트워크 섹션이 펼쳐진다.
+                // 도안 SectionMessage(A1 `189:3260`)는 **제목 + 본문 두 줄뿐**이다 — 조치 지점이
+                // 다른 화면이라 멤버 바로가기 버튼을 함께 뒀었는데 도안에 없어 걷었다(§7-39).
                 <Alert variant="warning" className="mt-2">
                   <div className="font-medium">멤버 서버에 용도(service IP) 가 없습니다</div>
                   <div className="mt-0.5 text-xs">
                     멤버의 [네트워크] 탭에서 IP 별 용도를 입력해야 VIP 를 자동 매핑할 수 있습니다.
-                  </div>
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    {memberAgents.map(m => (
-                      <Button key={m.agent_id} variant="outline"
- onClick={() => onSelectMember(m.agent_id)}>
-                        {m.agent ? agentDisplayName(m.agent.name) : `#${m.agent_id}`} 네트워크로
-                        <ArrowRight />
-                      </Button>
-                    ))}
                   </div>
                 </Alert>
               )}
