@@ -2835,10 +2835,7 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
           .filter(a => Object.values(a.ha_state || {}).some(v => v?.latched))
  if (!latched.length) return null
  return (
-          <div role="alert" style={{
- marginBottom: 12, padding: '8px 12px', borderRadius: 4, fontSize: 12,
- background: 'var(--destructive)', color: 'var(--destructive-foreground)', lineHeight: 1.6,
-          }}>
+          <div role="alert" className="mb-3 rounded-sm bg-destructive px-3 py-2 text-sm leading-[1.6] text-destructive-foreground">
             <b>절체 래치 — 승격 불가: {latched.map(a => agentDisplayName(a.name)).join(', ')}</b>
             <div className="mt-1">
               이 노드는 이전 장애 판정이 걸려 있어 <b>절체 대상이 되지 않습니다.</b> 원인을
@@ -3272,8 +3269,7 @@ function AddMemberModal({ group, serverName, mountSuggestion, onClose, onSubmit 
         <label>서버 이름 *</label>
         <Input value={name} disabled={busy}
  onChange={e => setName(e.target.value)} />
-        <label style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border)',
- paddingTop: 10, marginTop: 4 }}>
+        <label className="col-span-full mt-1 border-t border-border pt-2.5">
           <Checkbox  checked={mountOn} disabled={busy} onCheckedChange={(c) => setMountOn((c === true))} />
           {' '}공유 스토리지 마운트를 함께 적용
           <span className="text-xs text-muted-foreground">
@@ -3310,7 +3306,7 @@ function AddMemberModal({ group, serverName, mountSuggestion, onClose, onSubmit 
             </label>
           </>
         ) : (
-          <label style={{ gridColumn: '1 / -1', fontSize: 11, color: 'var(--cims-warning)' }}>
+          <label className="col-span-full text-xs text-warning">
             이 서버는 <b>마운트 없이</b> 등록됩니다 — 공유 store·서비스 로그를 쓰는 모듈이라면
             나중에 [마운트 관리]에서 직접 추가해야 합니다.
           </label>
@@ -3885,11 +3881,9 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
         <b>설치</b> → <b>Start</b> 순으로 진행하세요.
       </div>
       {selectedMismatch && (
-        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--destructive)',
- padding: '6px 10px', background: 'var(--cims-danger-soft)', border: '1px solid var(--cims-danger-soft)',
- borderRadius: 4 }}>
+        <Alert variant="danger" className="mt-2">
           <AlertTriangle size={13} className="inline align-[-2px]" /> {selectedMismatch} — install 시 backend 400 reject
-        </div>
+        </Alert>
       )}
       <div className="flex justify-end gap-2.5 pt-5 mt-4">
         <Button size="default" onClick={onClose}>취소</Button>

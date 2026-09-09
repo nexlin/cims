@@ -150,7 +150,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
                 onClick={onRowClick ? () => onRowClick(r) : undefined}
                 style={{
                   cursor: onRowClick ? 'pointer' : undefined,
-                  background: (isActive || isExpanded) ? 'rgba(74,144,217,0.15)' : isSel ? 'rgba(74,144,217,0.08)' : undefined,
+                  background: (isActive || isExpanded) ? 'var(--cims-brand-soft)' : isSel ? 'var(--cims-brand-soft)' : undefined,
                 }}>
                 {selectable && (
                   <Td onClick={e => e.stopPropagation()}>
@@ -165,7 +165,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
               </tr>
               {isExpanded && (
                 <tr className="row--expanded">
-                  <Td colSpan={colCount} style={{ padding: 0, background: 'var(--muted)', boxShadow: 'inset 0 4px 6px -5px rgba(0,0,0,0.35)' }}>
+                  <Td colSpan={colCount} className="p-0 bg-muted shadow-[inset_0_4px_6px_-5px_rgb(16_24_40/0.35)]">
                     {renderExpanded!(r)}
                   </Td>
                 </tr>

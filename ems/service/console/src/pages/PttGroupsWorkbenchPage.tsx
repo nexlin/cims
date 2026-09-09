@@ -424,7 +424,7 @@ function MemberRow({ m, name, selected, canManage, onToggle, onSave, onRemove }:
     <div style={{
       display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', fontSize: 12,
       borderLeft: selected ? '3px solid var(--primary)' : '3px solid transparent',
-      background: editing ? 'rgba(74,144,217,0.08)' : selected ? 'rgba(74,144,217,0.06)' : undefined,
+      background: editing ? 'var(--cims-brand-soft)' : selected ? 'var(--cims-brand-soft)' : undefined,
     }}>
       {canManage && <Checkbox  checked={selected} onCheckedChange={() => onToggle(m.user_id)} />}
       <span className="flex flex-col min-w-0 flex-1">
@@ -590,7 +590,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
                       style={{
                         display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', fontSize: 12, cursor: 'pointer',
                         borderLeft: picked.has(c.value) ? '3px solid var(--primary)' : '3px solid transparent',
-                        background: picked.has(c.value) ? 'rgba(74,144,217,0.06)' : undefined,
+                        background: picked.has(c.value) ? 'var(--cims-brand-soft)' : undefined,
                       }}
                       onClick={() => canManage && toggleCand(c.value)}>
                       <Checkbox checked={picked.has(c.value)} tabIndex={-1} className="pointer-events-none" />

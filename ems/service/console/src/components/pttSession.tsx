@@ -286,9 +286,7 @@ export function DayHeatmap({ days, selectedDay, onPick }: {
               }}>
               <span className="text-xs font-bold">{v > 0 ? v : ''}</span>
               <span className="text-xs opacity-85">{fmtDayShort(d.day)}</span>
-              {d.active && <span style={{ position: 'absolute', top: 2, right: 2, width: 5, height: 5, borderRadius: '50%', background: 'var(--cims-success)',
-                // 셀 배경이 밝든 어둡든 읽히도록 표면색 링을 두른다
- boxShadow: '0 0 0 1px var(--card)' }} />}
+              {d.active && <span className="absolute right-0.5 top-0.5 size-[5px] rounded-full bg-success shadow-[0_0_0_1px_var(--card)]" />}
             </div>
           )
         })}
@@ -329,7 +327,7 @@ export function ActivityHeatmap({ sessions, selectedDir, onPick }: {
           <ToggleGroupItem value="speakers">화자수</ToggleGroupItem>
         </ToggleGroup>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(24, 1fr)', gap: 3 }}>
+      <div className="grid grid-cols-[repeat(24,1fr)] gap-[3px]">
         {Array.from({ length: 24 }, (_, h) => {
  const list = byHour.get(h)
  const sess = list?.[0]
@@ -358,9 +356,7 @@ export function ActivityHeatmap({ sessions, selectedDir, onPick }: {
               <span className="text-xs opacity-80">
                 {String(h).padStart(2, '0')}{list && list.length > 1 ? ` ·${list.length}` : ''}
               </span>
-              {active && <span style={{ position: 'absolute', top: 2, right: 2, width: 5, height: 5, borderRadius: '50%', background: 'var(--cims-success)',
-                // 셀 배경이 밝든 어둡든 읽히도록 표면색 링을 두른다
- boxShadow: '0 0 0 1px var(--card)' }} />}
+              {active && <span className="absolute right-0.5 top-0.5 size-[5px] rounded-full bg-success shadow-[0_0_0_1px_var(--card)]" />}
             </div>
           )
         })}
@@ -752,7 +748,7 @@ function PanelDetail({ detail, recId, isDuplex, audio, names, turns, speakerOrde
 export function Metric({ k, v, s, hint }: { k: string; v: string; s: string; hint?: string }) {
  return (
     <div title={hint}>
-      <div style={{ fontSize: 10.5, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-foreground)', fontWeight: 600 }}>{k}</div>
+      <div className="text-xs font-semibold uppercase tracking-[.06em] text-muted-foreground">{k}</div>
       <div className="text-muted-foreground text-base font-bold mt-px">
         {v}{s && <small className="text-xs font-medium text-muted-foreground ml-[3px]">{s}</small>}
       </div>

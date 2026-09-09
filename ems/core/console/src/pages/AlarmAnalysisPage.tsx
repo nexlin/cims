@@ -99,7 +99,7 @@ function SeverityDist({ bySev }: { bySev: Record<string, number> }) {
                style={{ width: `${(n / total) * 100}%`, background: SEV_COLOR[s] || 'var(--muted-foreground)' }} />
         ))}
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', fontSize: 11, color: 'var(--muted-foreground)' }}>
+      <div className="flex flex-wrap gap-y-0.5 gap-x-3 text-xs text-muted-foreground">
         {entries.map(([s, n]) => (
           <span className="inline-flex items-center gap-1" key={s}>
             <span style={{ width: 8, height: 8, borderRadius: 2, background: SEV_COLOR[s] || 'var(--muted-foreground)' }} />

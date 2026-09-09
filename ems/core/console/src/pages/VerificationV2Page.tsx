@@ -1,3 +1,4 @@
+import { Button } from '@core/components/ui/button'
 import { Badge } from '@core/components/ui/badge'
 import { useConfirm } from '../components/custom/confirm'
 import { AlertTriangle, Ban, ChevronDown, ChevronRight, CircleCheck, CircleX, Eraser, FileText, Flag, Hourglass, Package, Pause, Play, SkipForward, Square } from 'lucide-react'
@@ -237,14 +238,7 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
               }}
             >
               {isResume && (
-                <div style={{
-                  position: 'absolute', top: -18, left: '50%', transform: 'translateX(-50%)',
-                  background: 'var(--cims-info)', color: 'var(--cims-on-solid)',
-                  fontSize: 10, fontWeight: 700,
-                  padding: '2px 8px', borderRadius: 10,
-                  whiteSpace: 'nowrap', boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                  zIndex: 1,
-                }}>
+                <div className="absolute -top-[18px] left-1/2 z-[1] -translate-x-1/2 whitespace-nowrap rounded-md bg-info px-2 py-0.5 text-xs font-bold text-white shadow-sm">
                   <Flag size={13} className="inline align-[-2px]" /> 재개 지점
                 </div>
               )}
@@ -258,15 +252,7 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
                 position: 'relative',
               }}>
                 {isBlocked && (
-                  <div style={{
-                    position: 'absolute', top: 4, right: 4,
-                    width: 28, height: 28, borderRadius: 14,
-                    background: 'var(--cims-warning-on-soft)', color: 'var(--cims-on-solid)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 14, fontWeight: 700,
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-                    zIndex: 2,
-                  }} title="선행 stage FAIL 로 차단됨">
+                  <div className="absolute right-1 top-1 z-[2] flex size-7 items-center justify-center rounded-full bg-warning-on text-base font-bold text-white shadow-sm" title="선행 stage FAIL 로 차단됨">
                     <Ban size={16} />
                   </div>
                 )}
@@ -336,41 +322,21 @@ function GlobalHeader({
   return (
     <div className="flex gap-3 items-center flex-wrap bg-card border border-border rounded-md p-3 mb-3">
       {/* 시작/중단 toggle 버튼 — 크기 고정 */}
-      <button
+      <Button size="default" className="min-w-40"
+        variant={running ? 'destructive' : 'default'}
         onClick={onPipelineToggle}
-        disabled={prepResetRunning}
-        style={{
-          minWidth: 160, height: 36,
-          padding: '0 16px',
-          background: running ? 'var(--destructive)' : 'var(--cims-info)',
-          color: 'var(--cims-on-solid)', border: 'none', borderRadius: 6,
-          fontSize: 13, fontWeight: 700,
-          cursor: prepResetRunning ? 'not-allowed' : 'pointer',
-          opacity: prepResetRunning ? 0.5 : 1,
-          transition: 'background 0.2s',
-        }}
-      >
+        disabled={prepResetRunning}>
         {running ? <><Square size={13} /> 전체검증 중단</> : <><Play size={13} /> 전체검증</>}
-      </button>
+      </Button>
 
       {/* 데이터 초기화 (prep-reset) — 검증 회차에서 분리된 사전 cleanup */}
-      <button
+      {/* dist·로그·DB 일부를 지우는 **전체 범위** 파괴적 액션이라 Danger (contracts.md §Button) */}
+      <Button size="default" variant="destructive" className="min-w-36"
         onClick={onPrepReset}
         disabled={anyOtherRunning}
-        title="dev/배포본 dist/, 로그, DB 일부 wipe (가입자/그룹은 보존). 회차 진입 전 1회 실행 권장."
-        style={{
-          minWidth: 140, height: 36,
-          padding: '0 14px',
-          background: prepResetRunning ? 'var(--destructive)' : 'var(--cims-warning-on-soft)',   // 흰 글자 대비 4.6
-          color: 'var(--cims-on-solid)', border: 'none', borderRadius: 6,
-          fontSize: 12, fontWeight: 600,
-          cursor: anyOtherRunning ? 'not-allowed' : 'pointer',
-          opacity: anyOtherRunning ? 0.5 : 1,
-          transition: 'background 0.2s',
-        }}
-      >
+        title="dev/배포본 dist/, 로그, DB 일부 wipe (가입자/그룹은 보존). 회차 진입 전 1회 실행 권장.">
         {prepResetRunning ? <><Square size={13} /> 초기화 중단</> : <><Eraser size={13} /> 데이터 초기화</>}
-      </button>
+      </Button>
 
       {/* 재개 지점 dropdown — Run 옆 */}
       <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -398,17 +364,14 @@ function GlobalHeader({
         <span style={{ color: statusColor('PASS') }}>(S4 <CircleCheck size={12} className="inline align-[-2px]" />)</span>
       </div>
 
-      <button className="py-1.5 px-3 h-[36px] bg-card border border-border rounded-sm text-sm font-semibold cursor-pointer"
+      <Button variant="outline" size="default"
         onClick={onPrintReport}
         title="검증 보고서 PDF 출력 (모든 stage 펼침 → 인쇄)">
         <FileText size={13} className="inline align-[-2px]" /> 보고서 출력
-      </button>
+      </Button>
 
-      <div style={{
-        padding: '4px 10px',
-        background: statusColor(overallStatus as ItemStatus), color: 'var(--cims-on-solid)',
-        borderRadius: 4, fontSize: 11, fontWeight: 600,
-      }}>
+      <div className="rounded-sm px-2.5 py-1 text-xs font-semibold text-white"
+           style={{ background: statusColor(overallStatus as ItemStatus) }}>
         전체: {statusIcon(overallStatus as ItemStatus)} {statusLabel(overallStatus as ItemStatus)}
       </div>
     </div>
@@ -483,11 +446,7 @@ function StageRow({
               {statusIcon(status)} {statusLabel(status)}
             </span>
             {isBlocked && (
-              <span style={{
-                marginLeft: 8, fontSize: 10, fontWeight: 700,
-                padding: '1px 6px', borderRadius: 3,
-                background: 'var(--cims-warning-on-soft)', color: 'var(--cims-on-solid)', letterSpacing: 0.3,
-              }}>
+              <span className="ml-2 rounded-sm bg-warning-on px-1.5 py-px text-xs font-bold tracking-[0.3px] text-white">
                 선행 FAIL 로 자동 차단
               </span>
             )}
@@ -497,24 +456,13 @@ function StageRow({
         <div className="text-xs text-muted-foreground">
           {done}/{total} 완료 · {fmtMs(elapsed)}
         </div>
-        <button
-          className="v2-no-print"
+        <Button className="v2-no-print min-w-[110px]"
+          variant={isThisRunning ? 'destructive' : 'outline'}
           onClick={e => { e.stopPropagation(); onStageToggle() }}
           disabled={anyRunning && !isThisRunning}
-          title={isThisRunning ? `${stage.id} 단독 실행 중단` : `${stage.id} 만 실행`}
-          style={{
-            minWidth: 110, height: 28,
-            padding: '0 12px', fontSize: 12, fontWeight: 600,
-            background: isThisRunning ? 'var(--destructive)' : 'var(--card)',
-            color: isThisRunning ? 'var(--cims-on-solid)' : 'var(--foreground)',
-            border: `1px solid ${isThisRunning ? 'var(--destructive)' : 'var(--border)'}`,
-            borderRadius: 4,
-            cursor: (anyRunning && !isThisRunning) ? 'not-allowed' : 'pointer',
-            opacity: (anyRunning && !isThisRunning) ? 0.5 : 1,
-          }}
-        >
+          title={isThisRunning ? `${stage.id} 단독 실행 중단` : `${stage.id} 만 실행`}>
           {isThisRunning ? <><Square size={12} /> 중단</> : <><Play size={12} /> 검증</>}
-        </button>
+        </Button>
       </div>
 
       {/* 펼침 영역 */}
@@ -994,15 +942,7 @@ export default function VerificationV2Page() {
       </div>
 
       {stageGate && (
-        <div
-          className="v2-no-print"
-          style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            padding: '8px 12px', marginBottom: 10,
-            background: 'var(--cims-warning-soft)', border: '1px solid var(--cims-warning-soft)',
-            borderRadius: 6, fontSize: 12, color: 'var(--cims-warning-on-soft)',
-          }}
-        >
+        <div className="v2-no-print mb-2.5 flex items-center gap-2 rounded-sm border border-warning-soft bg-warning-soft px-3 py-2 text-sm text-warning-on">
           <Ban size={16} />
           <span>
             <b>Stage Gate 발동</b> — Stage <b>S{stageGate.first_failed}</b> 의 FAIL 로
@@ -1067,13 +1007,7 @@ export default function VerificationV2Page() {
         />
       ))}
 
-      <div className="v2-no-print" style={{
-        marginTop: 16, padding: 12,
-        background: 'var(--muted)',
-        border: '1px dashed var(--border)',
-        borderRadius: 6,
-        fontSize: 11, color: 'var(--muted-foreground)',
-      }}>
+      <div className="v2-no-print mt-4 rounded-sm border border-dashed border-border bg-muted p-3 text-xs text-muted-foreground">
         <b>ℹ 안내</b>
         <ul className="my-1.5 mx-0 pl-5">
           <li>전체검증 — Stepper 의 재개 지점부터 시작 (S1=처음이면 <code>pipeline-full</code> preset)</li>

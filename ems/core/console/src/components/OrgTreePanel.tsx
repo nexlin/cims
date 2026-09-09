@@ -89,7 +89,7 @@ export default function OrgTreePanel({ selectedPath, onSelect, style, className,
               style={{
                 display: 'flex', alignItems: 'center', gap: 4,
                 paddingLeft: 8 + n.depth * 16, paddingRight: 8, paddingTop: 5, paddingBottom: 5,
-                background: isSelected ? 'rgba(74,144,217,0.15)' : undefined,
+                background: isSelected ? 'var(--cims-brand-soft)' : undefined,
                 cursor: 'pointer', fontSize: 12,
               }}
               onClick={() => onSelect(n.code_path || n.code, n.name)}

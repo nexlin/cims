@@ -22,7 +22,7 @@ function Block({ widgetId, config }: WidgetPlacement) {
   const Comp = getWidget(widgetId)?.component
   if (!Comp) {
     return (
-      <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card" style={{ padding: 12, color: 'var(--destructive)', fontSize: 12 }}>
+      <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-3 text-destructive text-sm" >
         알 수 없는 블록: <code>{widgetId}</code>
       </div>
     )

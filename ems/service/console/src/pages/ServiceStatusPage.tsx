@@ -142,7 +142,7 @@ export function PttKpiCard() {
         {live && <Gauge label="PTT 그룹 풀(동시 그룹·floor)" pool={live.capacity.ptt_rtp} />}
       </div>
       {live && live.capacity.nodes.length > 1 && (
-        <div style={{ borderTop: '1px dashed var(--border)', marginTop: 10, paddingTop: 8, display: 'flex', flexWrap: 'wrap', gap: 18, fontSize: 12, color: 'var(--muted-foreground)' }}>
+        <div className="border-t border-dashed border-border mt-2.5 pt-2 flex flex-wrap gap-[18px] text-sm text-muted-foreground">
           <span>미디어 노드 분산:</span>
           {live.capacity.nodes.map(n => (
             <span key={n.host}>
@@ -161,17 +161,19 @@ const TREND_WINS: { k: string; label: string }[] = [
   { k: '2h', label: '2시간' }, { k: '4h', label: '4시간' }, { k: '8h', label: '8시간' },
   { k: '16h', label: '16시간' }, { k: '24h', label: '24시간' },
 ]
-const TREND_SERIES: { key: TrendMetric; label: string; rgb: string }[] = [
-  { key: 'volte_active', label: 'VoLTE 동시통화', rgb: '37,99,235' },
-  { key: 'volte_calls', label: 'VoLTE 발생 호', rgb: '59,130,246' },
-  { key: 'ptt_grants', label: 'PTT 발언 수', rgb: '22,163,74' },
-  { key: 'ptt_speakers', label: 'PTT 발언자', rgb: '5,150,105' },
-  { key: 'ptt_groups', label: 'PTT 활성그룹', rgb: '217,142,0' },
+// 히트맵 계열색 — **`--chart-*` 토큰**을 쓴다(§9: 계열색은 팔레트를 토큰으로 정의한 뒤 쓴다).
+// 농도는 `color-mix` 로 만든다 — rgb 삼원색을 박아 두면 다크 테마에서 그대로 남는다.
+const TREND_SERIES: { key: TrendMetric; label: string; token: string }[] = [
+  { key: 'volte_active', label: 'VoLTE 동시통화', token: '--chart-1' },
+  { key: 'volte_calls', label: 'VoLTE 발생 호', token: '--chart-6' },
+  { key: 'ptt_grants', label: 'PTT 발언 수', token: '--chart-7' },
+  { key: 'ptt_speakers', label: 'PTT 발언자', token: '--chart-4' },
+  { key: 'ptt_groups', label: 'PTT 활성그룹', token: '--chart-2' },
 ]
 function clockOf(t: number) { return new Date(t * 1000).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }
 function bucketLabel(sec: number) { return sec >= 3600 ? `${Math.round(sec / 3600)}시간 간격` : `${Math.round(sec / 60)}분 간격` }
 const AXIS_W = 92   // 좌측 지표 라벨 폭 — 히트맵 셀 영역과 시간축 정렬용
-function HeatRow({ label, points, metric, rgb }: { label: string; points: TrendPoint[]; metric: TrendMetric; rgb: string }) {
+function HeatRow({ label, points, metric, token }: { label: string; points: TrendPoint[]; metric: TrendMetric; token: string }) {
  const max = Math.max(1, ...points.map(p => p[metric]))
  return (
     <div className="flex items-center gap-2 mb-[3px]">
@@ -185,7 +187,9 @@ function HeatRow({ label, points, metric, rgb }: { label: string; points: TrendP
  style={{
  flex: 1, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center',
  fontSize: 10, lineHeight: 1, borderRadius: 2,
- background: v > 0 ? `rgba(${rgb},${ratio.toFixed(3)})` : 'var(--border)',
+ background: v > 0
+                  ? `color-mix(in srgb, var(${token}) ${(ratio * 100).toFixed(1)}%, transparent)`
+                  : 'var(--border)',
  color: ratio > 0.55 ? 'var(--cims-on-solid)' : 'var(--foreground)',
               }}>
               {v > 0 ? v : ''}
@@ -261,7 +265,7 @@ export function TrendCard() {
       </div>
       {!data ? <Loading /> : <>
         {TREND_SERIES.map(s => (
-          <HeatRow key={s.key} label={s.label} points={points} metric={s.key} rgb={s.rgb} />
+          <HeatRow key={s.key} label={s.label} points={points} metric={s.key} token={s.token} />
         ))}
         <TrendAxis points={points} />
       </>}
@@ -309,7 +313,7 @@ export function VolteCallsCard() {
           {sorted.map((c: VolteCall) => {
  const ring = c.state === 'ringing', warn = c.anomalies.length > 0, pinned = pins.has(c.call_id)
  return (
-              <tr key={c.call_id} style={pinned ? { background: 'rgba(80,120,255,.08)' } : warn ? { background: 'rgba(220,50,50,.06)' } : undefined}>
+              <tr key={c.call_id} style={pinned ? { background: 'var(--cims-brand-soft)' } : warn ? { background: 'var(--cims-danger-soft)' } : undefined}>
                 <Td><PinBtn on={pinned} onClick={e => { e.stopPropagation(); toggle(c.call_id) }} /></Td>
                 <Td><Badge variant={ring ? 'brandSoft' : 'successSoft'} >{ring ? '호출 중' : '통화 중'}</Badge>{warn && <AlertTriangle size={12} className="ml-1 inline text-destructive"
  aria-label={c.anomalies.map(a => a.detail).join(', ')} />}</Td>
@@ -388,7 +392,7 @@ export function PttGroupsCard() {
  const isOpen = open === g.group_id, warn = g.anomalies.length > 0, pinned = pins.has(g.group_id)
  return (
               <Fragment key={g.group_id}>
-                <tr style={{ cursor: 'pointer', ...(pinned ? { background: 'rgba(80,120,255,.08)' } : warn ? { background: 'rgba(220,50,50,.06)' } : {}) }} onClick={() => setOpen(isOpen ? null : g.group_id)}>
+                <tr style={{ cursor: 'pointer', ...(pinned ? { background: 'var(--cims-brand-soft)' } : warn ? { background: 'var(--cims-danger-soft)' } : {}) }} onClick={() => setOpen(isOpen ? null : g.group_id)}>
                   <Td><PinBtn on={pinned} onClick={e => { e.stopPropagation(); toggle(g.group_id) }} /></Td>
                   <Td><span className="text-muted-foreground">
                     {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span> <b>{g.name}</b> <span className="text-sm text-muted-foreground">{g.group_id !== g.name ? `(${g.group_id})` : ''}</span></Td>
@@ -559,7 +563,7 @@ export function OrgStatsCard() {
           {orgs.length === 0 ? <Loading /> : orgs.map(o => (
             <div key={o.code} onClick={() => { setSel(o.code); setPage(1) }}
  style={{ cursor: 'pointer', padding: '4px 6px', paddingLeft: 6 + o.depth * 16, borderRadius: 4, fontSize: 13,
- background: sel === o.code ? 'rgba(80,120,255,.12)' : undefined,
+ background: sel === o.code ? 'var(--cims-brand-soft)' : undefined,
  fontWeight: o.depth === 0 ? 700 : o.depth === 1 ? 600 : 400 }}>
               {o.name} <span className="text-sm text-muted-foreground">({o.members})</span>
               {o.active_volte > 0 && <Badge className="ml-1" variant="brandSoft">

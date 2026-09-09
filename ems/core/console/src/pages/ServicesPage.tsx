@@ -438,12 +438,7 @@ export default function ServicesPage() {
 
                 {/* 본문 — 2 col x 2 row 그리드: ¹³ / ²⁴.
                     한 행에 두 영역이 좌우로 놓여 컴팩트한 가로 와이드 카드. */}
-                <div style={{
-                  borderTop: '1px solid var(--border)', paddingTop: 8,
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
-                  columnGap: 16, rowGap: 8,
-                }}>
+                <div className="border-t border-border pt-2 grid grid-cols-[1fr_1fr] gap-x-4 gap-y-2">
                   {/* ¹ 설정 — 템플릿/설정 편집 (버전 선택은 ³ 로 이동) */}
                   <div className="flex items-center gap-1.5 text-sm min-w-0">
                     <span className="text-muted-foreground font-medium min-w-[50px]">¹ 설정</span>
@@ -583,8 +578,7 @@ export default function ServicesPage() {
             <div className="flex-1 overflow-auto p-5">
               {editing ? (
                 <>
-                  <textarea
-                    className="rounded-md border border-border px-2.5 py-2 outline-none transition-colors focus-visible:border-primary focus-visible:shadow-focus w-full h-full min-h-[400px] font-mono text-sm leading-normal bg-muted text-foreground"
+                  <textarea className="rounded-md border border-border px-2.5 py-2 outline-none transition-colors focus-visible:border-primary focus-visible:shadow-focus w-full h-full min-h-[400px] font-mono text-sm leading-normal bg-muted text-foreground"
                     value={editText}
                     onChange={e => setEditText(e.target.value)}
                     spellCheck={false}/>

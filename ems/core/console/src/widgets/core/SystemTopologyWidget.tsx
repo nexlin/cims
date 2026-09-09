@@ -45,9 +45,9 @@ interface Node { agentId: number; host: string; online: boolean; role?: string; 
 interface Sys { key: string; name: string; mode: 'AS' | 'AA' | 'SA'; vip?: string; vipSlot?: string; nodes: Node[] }
 
 function chipTint(rank: number, running: boolean): string {
-  if (rank >= 3) return 'rgba(231,76,60,0.12)'
-  if (rank >= 1) return 'rgba(245,158,11,0.13)'
-  return running ? 'rgba(34,197,94,0.10)' : 'var(--secondary)'
+  if (rank >= 3) return 'var(--cims-danger-soft)'
+  if (rank >= 1) return 'var(--cims-warning-soft)'
+  return running ? 'var(--cims-success-soft)' : 'var(--secondary)'
 }
 
 function ModuleChip({ host, module, running, sevByMo }: { host: string; module: string; running: boolean; sevByMo: Map<string, number> }) {

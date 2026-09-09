@@ -148,7 +148,7 @@ function SystemResourceWidget() {
                   const warnish = c.pct && v != null && v >= WARN - 15 && v < WARN
                   const color = c.pct && v != null ? pctColor(v) : C_PRIMARY
                   // 임계 셀 배경 틴트 — 위험(빨강)/경고(주황) 한눈에 (EMS 관례).
-                  const tint = hot ? 'rgba(231,76,60,0.07)' : warnish ? 'rgba(245,158,11,0.07)' : undefined
+                  const tint = hot ? 'var(--cims-danger-soft)' : warnish ? 'var(--cims-warning-soft)' : undefined
                   return (
                     <div key={c.k} style={{ opacity: s.online ? 1 : 0.5, padding: '8px 6px 6px', position: 'relative',
                                             background: tint, ...rowBd }}>

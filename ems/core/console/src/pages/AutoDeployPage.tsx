@@ -3,6 +3,8 @@
 //
 // 독립 페이지다(시스템/인프라의 탭이 아님): 좌측 서버 트리를 쓰지 않고, 실행이 수 분
 // 걸리며 run 이력·재개·롤백이 영속 화면을 필요로 한다.
+import { Input } from '@core/components/ui/input'
+import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 import type React from 'react'
 import { useConfirm } from '../components/custom/confirm'
 import { AlertTriangle, Ban, Check, Dot, Download, Hourglass, Minus, Play, RotateCw, Square, Undo2, X } from 'lucide-react'
@@ -382,17 +384,12 @@ export default function AutoDeployPage() {
 
 function Seg({ value, onChange, options }:
              { value: string; onChange: (v: string) => void; options: Array<{ v: string; l: string }> }) {
+  // 한 축에서 하나를 고르는 묶음 = 시안 `SegmentedItem`(17:26) — ToggleGroup 이다 (§7-19).
   return (
-    <div className="inline-flex border border-border rounded-sm">
-      {options.map(o => (
-        <button key={o.v} onClick={() => onChange(o.v)}
-                style={{
-                  padding: '3px 12px', fontSize: 12, border: 'none', cursor: 'pointer',
-                  background: value === o.v ? 'var(--cims-info)' : 'transparent',
-                  color: value === o.v ? 'var(--cims-on-solid)' : 'var(--muted-foreground)',
-                }}>{o.l}</button>
-      ))}
-    </div>
+    <ToggleGroup type="single" value={value} className="w-fit justify-start rounded-md bg-muted p-[3px]"
+                 onValueChange={(v: string) => v && onChange(v)}>
+      {options.map(o => <ToggleGroupItem key={o.v} value={o.v}>{o.l}</ToggleGroupItem>)}
+    </ToggleGroup>
   )
 }
 
@@ -438,11 +435,7 @@ function RawEditor({ value, onChange, issues, disabled, placeholder }: {
         {Array.from({ length: lines }, (_, i) => <div key={i} className="leading-[18px]">{i + 1}</div>)}
       </div>
       <textarea value={value} onChange={e => onChange(e.target.value)}
-                disabled={disabled} placeholder={placeholder} spellCheck={false}
-                style={{ flex: 1, border: 'none', outline: 'none', resize: 'vertical',
-                         padding: 8, minHeight: 260, lineHeight: '18px',
-                         fontFamily: 'monospace', fontSize: 12.5,
-                         background: 'transparent', color: 'var(--foreground)' }} />
+                disabled={disabled} placeholder={placeholder} spellCheck={false} className="flex-1 border-0 outline-none resize-y p-2 min-h-[260px] leading-[18px] font-mono text-sm bg-transparent text-foreground" />
       {issues.length > 0 && (
         <div className="flex-[0_0_220px] p-2 border-l border-border overflow-auto text-xs">
           {issues.map((i, n) => (
@@ -534,18 +527,18 @@ function InventoryForm({ view, onChange, disabled, issues }: {
             const pre = !!s.agent_preinstalled
             const lock = disabled || pre
             return (
-              <tr key={i} style={bad ? { background: 'rgba(231,76,60,.08)' } : undefined}>
+              <tr key={i} style={bad ? { background: 'var(--cims-danger-soft)' } : undefined}>
                 <Td>{s.name}
                   {pre && <div className="text-xs text-muted-foreground">
                     agent 기설치 — SSH 안 함</div>}
                 </Td>
-                <Td><input className="w-[130px]" value={s.host || ''} disabled={disabled}
+                <Td><Input className="w-[130px]" value={s.host || ''} disabled={disabled}
                            onChange={e => set(i, { host: e.target.value })}/></Td>
-                <Td><input className="w-[90px]" value={s.ssh?.user || ''} disabled={lock}
+                <Td><Input className="w-[90px]" value={s.ssh?.user || ''} disabled={lock}
                            onChange={e => set(i, { ssh: { ...s.ssh, user: e.target.value } })}/></Td>
-                <Td><input className="w-[64px]" type="number" value={s.ssh?.port ?? 22} disabled={lock}
+                <Td><Input className="w-[64px]" type="number" value={s.ssh?.port ?? 22} disabled={lock}
                            onChange={e => set(i, { ssh: { ...s.ssh, port: Number(e.target.value) } })}/></Td>
-                <Td><input className="w-[110px]" type="password" placeholder={pre ? '—' : '변경 안 함'}
+                <Td><Input className="w-[110px]" type="password" placeholder={pre ? '—' : '변경 안 함'}
                            disabled={lock}
                            value={s.ssh?.password === '••••' ? '' : (s.ssh?.password || '')}
                            onChange={e => set(i, { ssh: { ...s.ssh, password: e.target.value } })}/></Td>
@@ -558,7 +551,7 @@ function InventoryForm({ view, onChange, disabled, issues }: {
                     </SelectContent>
                   </Select>
                 </Td>
-                <Td><input className="w-[110px]" type="password" placeholder={pre ? '—' : '변경 안 함'}
+                <Td><Input className="w-[110px]" type="password" placeholder={pre ? '—' : '변경 안 함'}
                            disabled={lock}
                            value={s.sudo?.password === '••••' ? '' : (s.sudo?.password || '')}
                            onChange={e => set(i, { sudo: { ...s.sudo, password: e.target.value } })}/></Td>

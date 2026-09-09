@@ -111,11 +111,7 @@ export default function SubscriberPicker({
           else if (e.key === 'Escape') setOpen(false)
         }}/>
       {open && (
-        <div style={{
-          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
-          background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 6,
-          marginTop: 2, maxHeight: 240, overflowY: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
-        }}>
+        <div className="absolute top-full left-0 right-0 z-[50] bg-card border border-border rounded-sm mt-0.5 max-h-[240px] overflow-y-auto shadow-lg">
           {all.length === 0 ? (
             <div className="p-2.5 text-sm text-muted-foreground">불러오는 중...</div>
           ) : matches.length === 0 ? (
@@ -126,7 +122,7 @@ export default function SubscriberPicker({
               onMouseEnter={() => setActiveIdx(i)}
               style={{
                 display: 'flex', justifyContent: 'space-between', gap: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 12,
-                background: i === activeIdx ? 'rgba(74,144,217,0.12)' : undefined,
+                background: i === activeIdx ? 'var(--cims-brand-soft)' : undefined,
               }}>
               <span className="font-medium whitespace-nowrap overflow-hidden text-ellipsis">{it.label}</span>
               <span className="text-sm text-muted-foreground whitespace-nowrap">

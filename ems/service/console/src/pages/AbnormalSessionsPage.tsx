@@ -110,9 +110,7 @@ export function AbnTopIps() {
       {topIps.length === 0 ? <EmptyState title="해당 기간 발신 IP 없음" /> : (
         <div className="scroll-fill flex min-h-0 flex-1 flex-row flex-wrap content-start gap-2 overflow-auto">
           {topIps.map(([ip, n]) => (
-            <span key={ip} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 24,
- padding: '3px 10px', borderRadius: 14, background: 'rgba(220,38,38,0.08)',
- fontSize: 12, fontFamily: 'monospace' }}>
+            <span key={ip} className="inline-flex items-center gap-1.5 h-6 py-[3px] px-2.5 rounded-lg bg-dangersoft text-sm font-mono">
               {ip}<b className="text-destructive">{n}</b>
             </span>
           ))}
@@ -150,7 +148,7 @@ export function AbnTable() {
  const sev = SEV[x.severity] || SEV.minor
  return (
                     <tr key={i}>
-                      <Td  className="text-muted-foreground text-xs">{s.days > 1 ? `${x.date.slice(5)} ` : ''}{(x.last_ts || '').slice(0, 8)}</Td>
+                      <Td className="text-muted-foreground text-xs">{s.days > 1 ? `${x.date.slice(5)} ` : ''}{(x.last_ts || '').slice(0, 8)}</Td>
                       <Td><Badge style={{ background: sev.bg, color: 'var(--cims-on-solid)', fontSize: 10 }}>{sev.label}</Badge></Td>
                       <Td className="text-sm font-mono">{x.peer_ip || '-'}</Td>
                       <Td className="text-xs font-mono">

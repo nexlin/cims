@@ -745,7 +745,7 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
             const isCall = r.svc === 'call'
             const hi = highlight && r.sub.id === highlight
             return (
-              <tr key={rk(r.svc, r.sub.id)} style={{ background: hi && !ed ? 'rgba(74,144,217,0.10)' : undefined }}>
+              <tr key={rk(r.svc, r.sub.id)} style={{ background: hi && !ed ? 'var(--cims-brand-soft)' : undefined }}>
                 <Td>{ed
                   ? <Select value={toSel(editForm.service_ref || '')} onValueChange={(v: string) => setEditForm({ ...editForm, service_ref: fromSel(v) })}>
    <SelectTrigger><SelectValue /></SelectTrigger>
@@ -781,7 +781,7 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
             )
           })}
           {adding && (
-            <tr style={{ background: 'rgba(74,144,217,0.06)' }}>
+            <tr className="bg-brandsoft">
               <Td><Select value={toSel(addForm.svcCat)} onValueChange={(v: string) => setAddForm({ ...addForm, svcCat: fromSel(v) })}>
   <SelectTrigger><SelectValue /></SelectTrigger>
   <SelectContent>

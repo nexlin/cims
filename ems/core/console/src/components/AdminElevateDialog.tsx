@@ -44,10 +44,7 @@ export default function AdminElevateDialog({ onClose, onElevated }: {
   }
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1200,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-    }} onClick={onClose}>
+    <div className="fixed inset-0 bg-black/40 z-[1200] flex items-center justify-center" onClick={onClose}>
       <div className="bg-card rounded-sm w-[380px] p-6"
            onClick={e => e.stopPropagation()}>
         <h3 className="mb-1.5 flex items-center gap-1.5 text-lg font-semibold">

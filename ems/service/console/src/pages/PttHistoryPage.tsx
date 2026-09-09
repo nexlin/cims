@@ -466,11 +466,7 @@ export default function PttHistoryPage() {
  onMouseDown={onSplitDown}
  onDoubleClick={resetSplit}
  title="드래그로 폭 조정 · 더블클릭으로 기본 폭"
- style={{
- flex: '0 0 5px', cursor: 'col-resize', background: 'var(--border)',
-              // 잡기 쉬우라고 실제 폭보다 넓게 — 가운데 1px 만 선으로 보인다
- backgroundClip: 'content-box', borderLeft: '2px solid var(--background)', borderRight: '2px solid var(--background)',
-            }}
+ className="shrink-0 grow-0 basis-[5px] cursor-col-resize border-x-2 border-background bg-border [background-clip:content-box]"
           />
         )}
 
@@ -512,11 +508,7 @@ export default function PttHistoryPage() {
 // ════════════════════════════════════════════════════════════════
 function SectionLabel({ label, n, live }: { label: string; n: number; live?: boolean }) {
  return (
-    <div style={{
- display: 'flex', alignItems: 'center', gap: 5, padding: '4px 2px 1px',
- fontSize: 10.5, fontWeight: 700, letterSpacing: '.08em',
- textTransform: 'uppercase', color: 'var(--muted-foreground)',
-    }}>
+    <div className="flex items-center gap-1.5 px-0.5 pb-px pt-1 text-xs font-bold uppercase tracking-[.08em] text-muted-foreground">
       {live && <span className="w-[6px] h-[6px] rounded-full bg-success"/>}
       {label}
       <span className="font-semibold normal-case tracking-normal opacity-75">{n}</span>
@@ -648,7 +640,7 @@ function SessionPane({ r, detail, names, audio, overlay, flowLoading, onFlow, on
  return (
     <>
       <div onClick={onClose}
- style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.35)', zIndex: 20 }} />
+ className="absolute inset-0 z-20 bg-black/40" />
       {body}
     </>
   )
@@ -711,11 +703,7 @@ function GroupFilter({ summaries, selected, open, onToggleMenu, onChange }: {
         {selected.size ? `그룹 ${selected.size}` : '그룹'} <ChevronDown size={12} />
       </Button>
       {open && (
-        <div style={{
- position: 'absolute', zIndex: 30, top: 'calc(100% + 4px)', left: 0, minWidth: 240, maxHeight: 320,
- overflowY: 'auto', padding: 6, background: 'var(--card)', border: '1px solid var(--border)',
- borderRadius: 8, boxShadow: 'var(--cims-elevation-lg)',
-        }}>
+        <div className="absolute left-0 top-[calc(100%+4px)] z-30 max-h-80 min-w-60 overflow-y-auto rounded-md border border-border bg-card p-1.5 shadow-lg">
           {opts.length === 0 && <EmptyState title="녹취가 있는 그룹이 없습니다" className="p-[12px] text-sm" />}
           {opts.map(([key, s]) => (
             <label className="flex items-center gap-[7px] py-[5px] px-2 rounded-sm text-sm cursor-pointer" key={key}>
@@ -763,11 +751,7 @@ function PersonFilter({ value, candidates, names, open, onToggleMenu, onChange }
         {value ? <>사람 {names.nameOf(value)} <X size={12} /></> : <>사람 <ChevronDown size={12} /></>}
       </Button>
       {open && !value && (
-        <div style={{
- position: 'absolute', zIndex: 30, top: 'calc(100% + 4px)', left: 0, minWidth: 230, maxHeight: 320,
- overflowY: 'auto', padding: 6, background: 'var(--card)', border: '1px solid var(--border)',
- borderRadius: 8, boxShadow: 'var(--cims-elevation-lg)',
-        }}>
+        <div className="absolute left-0 top-[calc(100%+4px)] z-30 max-h-80 min-w-[230px] overflow-y-auto rounded-md border border-border bg-card p-1.5 shadow-lg">
           <div className="pt-0.5 px-1 pb-1.5">
             <Input autoFocus placeholder="이름·번호로 찾기 (Enter=번호 직접)"
  value={input} onChange={e => setInput(e.target.value)}

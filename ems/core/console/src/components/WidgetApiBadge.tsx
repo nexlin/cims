@@ -110,8 +110,7 @@ function CopyBlock({ label, text, mono, pre }: {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="mt-3">
-      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted-foreground)',
-                    letterSpacing: '0.04em', marginBottom: 6 }}>{title}</div>
+      <div className="text-xs font-bold text-muted-foreground tracking-[0.04em] mb-1.5">{title}</div>
       {children}
     </div>
   )

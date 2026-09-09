@@ -42,10 +42,7 @@ export default function ReadOnlyBanner() {
   // 조용히 넘어가면 운영자는 자기 설정이 적용된 줄 안다.
   if (st?.config_rolled_back) {
     return (
-      <div role="alert" style={{
-        background: 'var(--cims-warning-on-soft)', color: 'var(--card)', padding: '8px 16px',
-        fontSize: 13, lineHeight: 1.5, display: 'flex', gap: 12, alignItems: 'baseline',
-      }}>
+      <div role="alert" className="bg-warning-on text-card py-2 px-4 text-md leading-[1.5] flex gap-3 items-baseline">
         <strong className="whitespace-nowrap">설정 되돌림</strong>
         <span>
           방금 저장한 설정으로는 OAM 이 기동하지 못해 <b>직전 정상 설정으로 되돌렸습니다</b>
@@ -63,10 +60,7 @@ export default function ReadOnlyBanner() {
     : `node=${st.lease?.node_id || '?'} epoch=${st.lease?.epoch ?? '?'}`
 
   return (
-    <div role="alert" style={{
-      background: 'var(--destructive)', color: 'var(--destructive-foreground)', padding: '8px 16px',
-      fontSize: 13, lineHeight: 1.5, display: 'flex', gap: 12, alignItems: 'baseline',
-    }}>
+    <div role="alert" className="bg-destructive text-destructive-foreground py-2 px-4 text-md leading-[1.5] flex gap-3 items-baseline">
       <strong className="whitespace-nowrap">읽기 전용</strong>
       <span>
         이 OAM 은 관리 데이터의 소유권(리스)을 갖고 있지 않아 <b>변경이 거부됩니다</b>.

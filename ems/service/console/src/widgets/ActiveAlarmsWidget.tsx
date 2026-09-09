@@ -60,8 +60,7 @@ function ActiveAlarmsWidget() {
       <div className="py-3 px-4 border-b border-border bg-muted flex items-center gap-2.5">
         <span className="font-semibold text-base">활성 알람 ({active.length})</span>
         {error && (
-          <span title="알람 조회 실패 — 표시가 최신이 아닐 수 있음 (표시 없음 ≠ 정상)"
-                className="inline-flex items-center gap-1 text-sm font-semibold text-destructive">
+          <span title="알람 조회 실패 — 표시가 최신이 아닐 수 있음 (표시 없음 ≠ 정상)" className="inline-flex items-center gap-1 text-sm font-semibold text-destructive">
             <AlertTriangle size={13} /> 조회 실패</span>
         )}
         <span className="ml-auto flex gap-3">
@@ -87,7 +86,7 @@ function ActiveAlarmsWidget() {
                     }}>
               <Dot sev={sev} />
               <span className="min-w-3.5 text-xl font-bold [font-variant-numeric:tabular-nums]">{n}</span>
-              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted-foreground)', letterSpacing: '.3px' }}>{SEV_LABEL[sev]}</span>
+              <span className="text-xs font-semibold text-muted-foreground tracking-[.3px]">{SEV_LABEL[sev]}</span>
             </button>
           )
         })}

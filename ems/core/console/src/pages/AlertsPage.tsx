@@ -288,7 +288,7 @@ export function AlarmsSection() {
                   return [
                     <tr key={key} onClick={() => setExpanded(open ? null : key)}
                         style={{ cursor: 'pointer',
-                                 background: open ? 'var(--accent)' : isOpen ? 'rgba(220, 53, 69, 0.08)' : undefined }}>
+                                 background: open ? 'var(--accent)' : isOpen ? 'var(--cims-danger-soft)' : undefined }}>
                       <Td>
                         <Badge variant={sevBadgeClass(sev)} >{sev}</Badge>
                         {lastChange && (

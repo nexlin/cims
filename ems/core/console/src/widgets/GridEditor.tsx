@@ -89,7 +89,7 @@ function WidgetConfigPanel({ placement, def, onConfig, onClose }: {
         )
       })}
       {fields.length === 0 && (
-        <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>이 위젯은 배치 설정 항목이 없습니다.</div>
+        <div className="text-xs text-muted-foreground">이 위젯은 배치 설정 항목이 없습니다.</div>
       )}
       <Button onClick={onClose} className="self-end">닫기</Button>
     </div>
@@ -240,8 +240,7 @@ export function GridEditor({ widgets, gap = GRID_GAP, preview = false, nested = 
   const activeResize = drag?.kind === 'resize' ? drag.key : -1
 
   return (
-    <div ref={canvasRef}
-         className={`${nested ? 'card-canvas card-canvas--edit' : 'grid-canvas grid-canvas--edit'}`
+    <div ref={canvasRef} className={`${nested ? 'card-canvas card-canvas--edit' : 'grid-canvas grid-canvas--edit'}`
                     + `${drag ? ' grid-canvas--dragging' : ''}`
                     + `${preview ? ' grid-canvas--preview' : ''}`
                     + `${inside ? ' grid-canvas--inside' : ''}`}
@@ -268,8 +267,7 @@ export function GridEditor({ widgets, gap = GRID_GAP, preview = false, nested = 
         // ⚙ 로 할 수 있는 일이 있는가 — 카드 안 편집 또는 배치 설정 항목.
         const hasCfg = !!def?.cardLayout || (def?.configFields?.length ?? 0) > 0
         return (
-          <div key={`${p.widgetId}-${i}`}
-               className={`grid-widget${isMove || isResize ? ' grid-widget--dragging' : ''}`
+          <div key={`${p.widgetId}-${i}`} className={`grid-widget${isMove || isResize ? ' grid-widget--dragging' : ''}`
                           + `${cfgOpen === i ? ' grid-widget--cfg' : ''}`
                           + `${p.locked ? ' grid-widget--locked' : ''}`
                           + `${editingInside ? ' grid-widget--inside' : ''}`
@@ -281,7 +279,7 @@ export function GridEditor({ widgets, gap = GRID_GAP, preview = false, nested = 
               <b className="grid-widget-title">{p.title || def?.title || p.widgetId}</b>
               <span className="grid-widget-id">({p.widgetId})</span>
               {p.visibleWhen && (
-                <span className="grid-size-badge" style={{ color: 'var(--primary)' }}
+                <span className="grid-size-badge text-primary" 
                       title={`${p.visibleWhen.param}=${p.visibleWhen.equals} 일 때만 표시(탭)`}>
                   {p.visibleWhen.param}={p.visibleWhen.equals}
                 </span>
@@ -309,8 +307,7 @@ export function GridEditor({ widgets, gap = GRID_GAP, preview = false, nested = 
               {/* 잠금 — 캔버스가 고정 예산이라 다른 위젯을 키우면 누군가는 줄어든다.
                   잠긴 카드는 그 대상에서 빠지고 자리도 고정된다. */}
               {!editingInside && <>
-              <Button size="iconSm"
-                      className={cn('relative z-[7]', !(onEditInside && def?.cardLayout) && 'ml-auto',
+              <Button size="iconSm" className={cn('relative z-[7]', !(onEditInside && def?.cardLayout) && 'ml-auto',
                                     p.locked && 'text-primary')}
                       title={p.locked ? '잠금 해제 — 다른 위젯을 키울 때 이 카드가 줄어들 수 있음'
                                       : '잠금 — 위치·크기 고정(다른 위젯을 키워도 안 줄어듦)'}
@@ -347,7 +344,7 @@ export function GridEditor({ widgets, gap = GRID_GAP, preview = false, nested = 
               {editingInside && inside ? (
                 <GridEditor nested widgets={inside.layout} gap={gap} onChange={inside.onChange} />
               ) : Comp ? <Comp config={p.config} />
-                    : <div style={{ color: 'var(--destructive)', fontSize: 12, padding: 8 }}>알 수 없는 위젯: {p.widgetId}</div>}
+                    : <div className="text-destructive text-sm p-2">알 수 없는 위젯: {p.widgetId}</div>}
             </div>
             {!p.locked && !inside && RESIZE_HANDLES.map(rh => (
               <div key={rh.dir} className={rh.cls} title="크기 조절"
@@ -364,7 +361,7 @@ export function GridEditor({ widgets, gap = GRID_GAP, preview = false, nested = 
       )}
 
       {widgets.length === 0 && (
-        <div style={{ gridColumn: '1 / span 12', color: 'var(--muted-foreground)', fontSize: 13, padding: 20, textAlign: 'center' }}>
+        <div className="col-span-12 p-5 text-center text-md text-muted-foreground">
           {nested ? '블록이 없습니다' : '위젯이 없습니다'} — 상단 [+ 위젯 추가]로 배치하세요.
         </div>
       )}

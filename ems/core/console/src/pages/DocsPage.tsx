@@ -72,13 +72,11 @@ export default function DocsPage() {
         ))}
         <div className="ml-auto flex gap-1 items-center">
           {DOCS.map(d => (
-            <a key={d.id} href={d.file} download
-              style={{ fontSize: 10, color: 'var(--muted-foreground)', textDecoration: 'none', padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 3 }}>
+            <a key={d.id} href={d.file} download className="text-xs text-muted-foreground no-underline py-[3px] px-1.5 border border-border rounded-sm">
               {d.title}.md
             </a>
           ))}
-          <a href="/docs/CIMS_Technical_Document.pptx" download
-            style={{ fontSize: 11, color: 'var(--primary)', textDecoration: 'none', padding: '4px 8px', border: '1px solid var(--cims-info)', borderRadius: 4, fontWeight: 600 }}>
+          <a href="/docs/CIMS_Technical_Document.pptx" download className="text-xs text-primary no-underline py-1 px-2 border border-info rounded-sm font-semibold">
             PPT
           </a>
         </div>

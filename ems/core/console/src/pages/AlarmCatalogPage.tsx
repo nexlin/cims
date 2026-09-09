@@ -131,7 +131,7 @@ export function AlarmRulesTable() {
                   <Td className="font-mono text-sm">
                     {r.condition}
                     {r.threshold != null && (
-                      <span style={{ marginLeft: 6, color: 'var(--muted-foreground)', fontFamily: 'inherit' }}>
+                      <span className="ml-1.5 text-muted-foreground">
                         (threshold {r.threshold}{r.unit || ''})
                       </span>
                     )}

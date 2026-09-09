@@ -83,7 +83,7 @@ function HourHeatmap({ hours, selHour, onPick }: { hours: Record<string, number>
  color: ratio > 0.55 ? 'var(--cims-on-solid)' : 'var(--foreground)',
             }}>
             <div className="text-sm font-semibold leading-[1.3] h-[16px]">{c.v > 0 ? c.v : ' '}</div>
-            <div style={{ fontSize: 9, lineHeight: 1.3, height: 12, color: ratio > 0.55 ? 'rgba(255,255,255,.8)' : 'var(--muted-foreground)' }}>{c.h}</div>
+            <div className={`h-3 text-xs leading-[1.3] ${ratio > 0.55 ? 'text-white/80' : 'text-muted-foreground'}`}>{c.h}</div>
           </div>
         )
       })}
@@ -235,13 +235,13 @@ export default function VolteHistoryPage() {
         <div className="flex-[0_0_220px] min-h-0 overflow-auto border-r border-border pr-1.5">
           <div onClick={() => setSelOrg('')}
  style={{ cursor: 'pointer', padding: '4px 6px', borderRadius: 4, fontSize: 13, fontWeight: 700,
- background: selOrg === '' ? 'rgba(80,120,255,.12)' : undefined }}>
+ background: selOrg === '' ? 'var(--cims-brand-soft)' : undefined }}>
             전체 호이력
           </div>
           {orgs.map(o => (
             <div key={o.code} onClick={() => setSelOrg(o.code)}
  style={{ cursor: 'pointer', padding: '4px 6px', paddingLeft: 6 + o.depth * 16, borderRadius: 4, fontSize: 13,
- background: selOrg === o.code ? 'rgba(80,120,255,.12)' : undefined,
+ background: selOrg === o.code ? 'var(--cims-brand-soft)' : undefined,
  fontWeight: o.depth === 0 ? 700 : o.depth === 1 ? 600 : 400 }}>
               {o.name} <span className="text-sm text-muted-foreground">({o.members})</span>
             </div>

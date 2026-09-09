@@ -76,7 +76,7 @@ function CardSkeleton({ label }: { label: string }) {
   return (
     <div className="flex min-h-0 flex-[1_1_auto] flex-col justify-center rounded-md border border-border bg-card px-3 py-2.5 text-center">
       <div className="text-xs text-muted-foreground mb-1.5">{label}</div>
-      <div style={{ height: 20, background: 'var(--secondary)', borderRadius: 4, opacity: 0.6 }} />
+      <div className="h-5 bg-secondary rounded-sm opacity-60" />
     </div>
   )
 }

@@ -46,8 +46,7 @@ function RecentEventsWidget() {
         <span className="font-semibold text-base">최근 이벤트 ({recentEvents.length})</span>
         <span className="text-xs text-muted-foreground">최근 24시간 · 정상 동작 통지</span>
         {error && (
-          <span title="조회 실패 — 표시가 최신이 아닐 수 있음"
-                className="inline-flex items-center gap-1 text-sm font-semibold text-destructive">
+          <span title="조회 실패 — 표시가 최신이 아닐 수 있음" className="inline-flex items-center gap-1 text-sm font-semibold text-destructive">
             <AlertTriangle size={13} /> 조회 실패</span>
         )}
         <a className="ml-auto inline-flex items-center gap-1 text-sm font-medium" href="#" onClick={e => { e.preventDefault(); navigate('/alerts/history') }}>이력 <ArrowRight size={13} /></a>
@@ -70,7 +69,7 @@ function RecentEventsWidget() {
                       opacity: n === 0 && !sel ? 0.5 : 1,
                     }}>
               <span className="min-w-3.5 text-xl font-bold [font-variant-numeric:tabular-nums]">{n}</span>
-              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted-foreground)', letterSpacing: '.3px' }}>
+              <span className="text-xs font-semibold text-muted-foreground tracking-[.3px]">
                 {label} <span className="opacity-70">{KIND_ABBR[kind] || ''}</span>
               </span>
             </button>

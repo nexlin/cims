@@ -229,7 +229,7 @@ export default function OrganizationsPage() {
 
                 return (
                   <React.Fragment key={n.id}>
-                  <tr style={selected.has(n.id) ? { background: 'rgba(74,144,217,0.08)' } : undefined}>
+                  <tr style={selected.has(n.id) ? { background: 'var(--cims-brand-soft)' } : undefined}>
                     <Td onClick={e => e.stopPropagation()}>
                       <Checkbox  checked={selected.has(n.id)} onCheckedChange={() => toggleSelect(n.id)} />
                     </Td>
@@ -258,8 +258,7 @@ export default function OrganizationsPage() {
                     {/* 코드 */}
                     <Td>
                       {isEditing ? (
-                        <Input  value={editForm.code} disabled
-                          className="w-full opacity-60" />
+                        <Input  value={editForm.code} disabled className="w-full opacity-60" />
                       ) : (
                         <span className="text-sm text-muted-foreground">{n.code}</span>
                       )}
@@ -309,7 +308,7 @@ export default function OrganizationsPage() {
                   </tr>
                   {/* 하위 추가 행: 이 행 바로 아래 */}
                   {adding && addAfterId === n.id && (
-                    <tr style={{ background: 'rgba(74,144,217,0.08)' }}>
+                    <tr className="bg-brandsoft">
                       <Td></Td>
                       <Td>
                         <div style={{ paddingLeft: addDepth * 20 }}>
@@ -335,7 +334,7 @@ export default function OrganizationsPage() {
 
               {/* 맨 아래: 최상위 추가 행 */}
               {adding && addAfterId === null ? (
-                <tr style={{ background: 'rgba(74,144,217,0.08)' }}>
+                <tr className="bg-brandsoft">
                   <Td></Td>
                   <Td><Input className="w-full" placeholder="조직명 *" value={addForm.name}
                     onChange={e => setAddForm({ ...addForm, name: e.target.value })}
