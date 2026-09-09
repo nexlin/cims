@@ -34,10 +34,11 @@ export function SubSection({ title, count, hint, right, defaultOpen = true, leve
           <span className="w-4 shrink-0 text-foreground">
             {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           </span>
-          <span className="text-md font-semibold">
+          {/* 제목은 줄이지 않는다 — 긴 힌트가 들어오면 **힌트가 잘린다**(도안의 hint 는 한 줄). */}
+          <span className="shrink-0 text-md font-semibold">
             {title}{count !== undefined && ` (${count})`}
           </span>
-          {hint && <span className="truncate text-xs font-normal text-muted-foreground">{hint}</span>}
+          {hint && <span className="min-w-0 truncate text-xs font-normal text-muted-foreground">{hint}</span>}
           {right && <span className="ml-auto flex shrink-0 items-center gap-1.5 pr-1">{right}</span>}
         </button>
         {open && <div className="pb-4 pt-3">{children}</div>}
@@ -51,10 +52,10 @@ export function SubSection({ title, count, hint, right, defaultOpen = true, leve
         <span className="w-3.5 shrink-0 text-muted-foreground">
           {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
         </span>
-        <span className="text-md font-medium">
+        <span className="shrink-0 text-md font-medium">
           {title}{count !== undefined && ` (${count})`}
         </span>
-        {hint && <span className="truncate text-xs text-muted-foreground">{hint}</span>}
+        {hint && <span className="min-w-0 truncate text-xs text-muted-foreground">{hint}</span>}
         {right && <span className="ml-auto flex shrink-0 items-center gap-1.5 pr-1">{right}</span>}
       </button>
       {/* 본문 = 시안 `SectionBody`(174:2860) 그대로 — 폭 8 의 빈 레일 + `border-l`

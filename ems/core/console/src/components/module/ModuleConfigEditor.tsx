@@ -12,7 +12,7 @@ import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
-import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { DataTable, Th, Td, TrLink } from '@core/components/custom/data-table'
 import { Checkbox } from '@core/components/ui/checkbox'
 
 type Record_ = Record<string, unknown>
@@ -328,10 +328,7 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
           <div className="flex items-center gap-2.5 mb-2">
             <b className="text-md">행 #{editingIdx + 1} 편집</b>
           </div>
-          <div style={{
- display: 'grid', gridTemplateColumns: '160px 1fr',
- rowGap: 8, columnGap: 10, alignItems: 'start',
-          }}>
+          <div className="grid grid-cols-[160px_1fr] items-start gap-x-2.5 gap-y-2">
             {visibleFields.map(f => (
               <FieldEditor key={f.key} field={f}
  value={records[editingIdx][f.key]}
@@ -403,10 +400,9 @@ function AccessServiceSecurityHints({ record, localNodes }: { record: Record_; l
   }
  if (lines.length === 0) return null
  return (
-    <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: 4,
- borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+    <div className="col-span-full flex flex-col gap-1 border-t border-border pt-2">
       {lines.map((l, i) => (
-        <div key={i} style={{ fontSize: 11.5, color: l.ok ? 'var(--muted-foreground)' : 'var(--cims-warning)' }}>
+        <div key={i} className={`text-xs ${l.ok ? 'text-muted-foreground' : 'text-warning-on'}`}>
           {l.ok ? <Check size={12} className="inline align-[-2px]" />
                        : <AlertTriangle size={12} className="inline align-[-2px]" />} {l.text}
         </div>
@@ -423,7 +419,8 @@ function RowDisplay({ row, summaryFields, active, onEdit, onRemove }: {
  onRemove: () => void
 }) {
  return (
-    <tr style={{ background: active ? 'var(--cims-brand-soft)' : undefined }}>
+    // 선택 행 강조는 `TrLink` 가 맡는다 — 시안 표 계약상 행 배경은 **선택·hover 피드백 전용**이다.
+    <TrLink selected={active}>
       {summaryFields.map(f => (
         <Td key={f.key} className="text-sm">
           {formatValue(row[f.key], f)}
@@ -434,10 +431,11 @@ function RowDisplay({ row, summaryFields, active, onEdit, onRemove }: {
           <Button onClick={onEdit}>
             {active ? '닫기' : '편집'}
           </Button>
-          <Button variant="destructive" onClick={onRemove}>삭제</Button>
+          {/* 행 단위 파괴적 액션은 Secondary (contracts.md §Button — Danger 는 그룹/전체 단위) */}
+          <Button variant="outline" onClick={onRemove}>삭제</Button>
         </div>
       </Td>
-    </tr>
+    </TrLink>
   )
 }
 

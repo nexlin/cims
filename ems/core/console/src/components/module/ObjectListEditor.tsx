@@ -6,6 +6,7 @@ import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { fromSel, toSel } from '@core/components/custom/select-value'
 import { Checkbox } from '@core/components/ui/checkbox'
+import { DataTable, Td, Th } from '@core/components/custom/data-table'
 
 type Item = Record<string, unknown>
 
@@ -47,36 +48,43 @@ export function ObjectListEditor({ field, value, onChange, renderCell, ensureOne
 
   const cell = renderCell || defaultCell
 
+  // 정본 = Figma G3-3 `Table · CMP probe 엔드포인트`(214:3718) — **시안 표 껍데기**다.
+  // 머리띠(37) + 행(38) + 마지막 칸 우측의 `×`, 표 아래 8 띄우고 [+ 항목](55×26).
+  // 구 화면은 점선 상자 + 스타일 없는 표 + **빨간 Danger 삭제 버튼**이었다 — 행 단위
+  // 파괴적 액션은 Danger 가 아니다(contracts.md §Button).
   return (
-    <div style={{ border: '1px dashed var(--border)', borderRadius: 4, padding: 6 }}>
+    <div className="flex flex-col gap-2">
       {display.length === 0 ? (
-        <div className="text-xs text-muted-foreground mb-1">항목 없음</div>
+        <div className="text-xs text-muted-foreground">항목 없음</div>
       ) : (
-        <table className="w-full text-sm">
+        <DataTable>
           <thead>
             <tr>
-              {itemFields.map(f => <th className="text-left" key={f.key}>{f.label}</th>)}
-              <th className="w-[40px]"></th>
+              {itemFields.map(f => <Th key={f.key}>{f.label}</Th>)}
+              <Th align="right" width={60} />
             </tr>
           </thead>
           <tbody>
             {display.map((it, i) => (
               <tr key={i}>
                 {itemFields.map(f => (
-                  <td className="py-0.5 px-1" key={f.key}>
+                  <Td className="py-1.5" key={f.key}>
                     {cell(f, it[f.key], (v) => updateItemField(i, f.key, v))}
-                  </td>
+                  </Td>
                 ))}
-                <td>
-                  <Button variant="destructive" onClick={() => removeItem(i)}
-                    disabled={ensureOne && display.length <= 1}><X size={13} /></Button>
-                </td>
+                <Td align="right" className="py-1.5">
+                  <Button variant="ghost" size="iconSm" onClick={() => removeItem(i)}
+ disabled={ensureOne && display.length <= 1}
+ title="이 항목 삭제"><X /></Button>
+                </Td>
               </tr>
             ))}
           </tbody>
-        </table>
+        </DataTable>
       )}
-      <Button className="mt-1" onClick={addItem}><Plus size={13} /> 항목</Button>
+      <div>
+        <Button variant="outline" onClick={addItem}><Plus /> 항목</Button>
+      </div>
     </div>
   )
 }
