@@ -128,7 +128,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
                 onClick={() => toggleSort(c)}>
                 {c.header}
                 {c.sortable && sortKey === c.key && (
-                  <span style={{ marginLeft: 4, display: 'inline-flex', verticalAlign: '-2px' }}>{sortDir === 'asc' ? <ChevronUp size={12} /> : sortDir === 'desc' ? <ChevronDown size={12} /> : null}</span>
+                  <span className="ml-1 inline-flex align-[-2px]">{sortDir === 'asc' ? <ChevronUp size={12} /> : sortDir === 'desc' ? <ChevronDown size={12} /> : null}</span>
                 )}
               </Th>
             ))}

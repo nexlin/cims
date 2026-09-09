@@ -334,7 +334,7 @@ function GroupDrawer(p: DrawerProps) {
             <Button variant="default" onClick={save}>저장</Button>
             <Button variant="ghost" onClick={() => isNew ? p.onClose() : setEditing(false)}>취소</Button>
           </div>
-          <div style={{ flexBasis: '100%', fontSize: 11, color: 'var(--muted-foreground)' }}>감청 범위: {SCOPE_HINT[form.monitor_scope || 'none']}</div>
+          <div className="basis-full text-xs text-muted-foreground">감청 범위: {SCOPE_HINT[form.monitor_scope || 'none']}</div>
         </FieldRow>
       ) : existing && (
         <div className="flex items-center gap-4 flex-wrap text-sm">
@@ -385,7 +385,7 @@ function TargetPicker({ title, icon, options, value, canEdit, onSave }: {
         {icon} {title} <Badge  variant="neutralSoft">{sel.size}</Badge>
         {canEdit && dirty && <Button className="ml-auto" variant="default" onClick={() => onSave(Array.from(sel))}>저장</Button>}
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: 12, maxHeight: 120, overflowY: 'auto' }}>
+      <div className="flex max-h-[120px] flex-wrap gap-x-3 gap-y-1 overflow-y-auto text-sm">
         {options.length === 0 && <span className="text-sm text-muted-foreground">선택 가능한 그룹 없음</span>}
         {options.map(o => (
           <label className="inline-flex items-center gap-1" key={o.value}>
@@ -426,21 +426,18 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
   async function doAdd(ids: string[]) { if (!ids.length) return; setBusy(true); await onAdd(ids); setBusy(false); setPicked(new Set()) }
   async function doRemove(ids: string[]) { if (!ids.length) return; setBusy(true); await onRemove(ids); setBusy(false); setSelMembers(new Set()) }
 
-  const panelHead: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 600 }
-  const panel: React.CSSProperties = { display: 'flex', flexDirection: 'column', minWidth: 0, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: 'var(--card)' }
-
   return (
     <div className="mt-2.5 border-t border-border pt-3">
       {lockedReason && <div className="text-xs text-muted-foreground mb-1.5">{lockedReason}</div>}
       <div className="flex items-stretch gap-2.5 h-[320px]">
-        <div style={{ ...panel, flex: 1 }}>
-          <div style={panelHead}>멤버 <Badge  variant="brandSoft">{members.length}</Badge>
+        <div className="flex min-w-0 flex-col overflow-hidden rounded-md border border-border bg-card flex-1">
+          <div className="flex items-center gap-2 border-b border-border px-2.5 py-2 text-sm font-semibold">멤버 <Badge  variant="brandSoft">{members.length}</Badge>
             <span className="ml-auto font-normal text-muted-foreground text-xs">순서 = 순차 호출·포크 상한 절삭 순</span></div>
           <div className="flex-1 min-h-0 overflow-y-auto">
             {members.length === 0
-              ? <div className="p-3.5 text-sm text-center text-muted-foreground">멤버 없음<br />우측에서 가입자를 선택해 <ArrowLeft size={11} style={{ verticalAlign: '-1px' }} /> 추가</div>
+              ? <div className="p-3.5 text-sm text-center text-muted-foreground">멤버 없음<br />우측에서 가입자를 선택해 <ArrowLeft size={11} className="inline align-[-1px]" /> 추가</div>
               : members.map(m => (
-                <div key={m.user_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', fontSize: 12,
+                <div key={m.user_id} className="flex items-center gap-2 px-2.5 py-1.5 text-sm" style={{
                   borderLeft: selMembers.has(m.user_id) ? '3px solid var(--primary)' : '3px solid transparent' }}>
                   {canManage && <Checkbox  checked={selMembers.has(m.user_id)} onCheckedChange={() => toggle(setSelMembers, m.user_id)} />}
                   <span className="flex flex-col min-w-0 flex-1">
@@ -462,8 +459,8 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
           </div>
         )}
 
-        <div style={{ ...panel, flex: 1.3 }}>
-          <div style={panelHead}>VoLTE 가입자 <Badge  variant="neutralSoft">{candidates.length}</Badge></div>
+        <div className="flex min-w-0 flex-col overflow-hidden rounded-md border border-border bg-card flex-[1.3]">
+          <div className="flex items-center gap-2 border-b border-border px-2.5 py-2 text-sm font-semibold">VoLTE 가입자 <Badge  variant="neutralSoft">{candidates.length}</Badge></div>
           <div className="flex flex-1 min-h-0">
             <OrgTreePanel className="flex-[0_0_150px] w-[150px] max-w-[150px] border-0 border-r border-border rounded-none" fill selectedPath={treeScope} onSelect={(pth, n) => { setTreeScope(pth); setTreeName(n) }}/>
             <div className="flex-1 min-w-0 flex flex-col">
@@ -477,7 +474,7 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
                     const other = groupOfUser.get(c.value)
                     return (
                       <div key={c.value} onDoubleClick={() => canManage && doAdd([c.value])} onClick={() => canManage && toggle(setPicked, c.value)}
-                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', fontSize: 12, cursor: 'pointer',
+                        className="flex cursor-pointer items-center gap-2 px-2.5 py-1.5 text-sm" style={{
                           borderLeft: picked.has(c.value) ? '3px solid var(--primary)' : '3px solid transparent' }}>
                         <Checkbox checked={picked.has(c.value)} tabIndex={-1} className="pointer-events-none" />
                         <span className="flex flex-col min-w-0 flex-1">
@@ -500,12 +497,12 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
 
 function Field({ label, children, w }: { label: string; children: React.ReactNode; w?: number | string }) {
   return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 2, width: w, flex: w ? undefined : '1 1 150px', minWidth: 110 }}>
+    <label className="flex min-w-[110px] flex-col gap-0.5" style={{ width: w, flex: w ? undefined : '1 1 150px' }}>
       <span className="text-xs text-muted-foreground">{label}</span>
       {children}
     </label>
   )
 }
 function FieldRow({ children }: { children: React.ReactNode }) {
-  return <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 12px', alignItems: 'flex-end' }}>{children}</div>
+  return <div className="flex flex-wrap items-end gap-x-3 gap-y-2">{children}</div>
 }

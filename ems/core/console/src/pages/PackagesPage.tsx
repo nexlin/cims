@@ -283,7 +283,7 @@ function VersionRow({ pkg: p, isLatest, expanded, onToggle,
 
       {expanded && (
         <div className="border-t border-border py-2.5 px-3.5 text-sm text-muted-foreground">
-          <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', rowGap: 4, columnGap: 10 }}>
+          <div className="grid grid-cols-[90px_1fr] gap-x-2.5 gap-y-1">
             <span className="text-muted-foreground">파일</span>
             <code className="text-xs break-all">{p.file_path}</code>
             <span className="text-muted-foreground">SHA256</span>

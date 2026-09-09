@@ -86,7 +86,7 @@ function ActiveAlarmsWidget() {
                       opacity: n === 0 && !sel ? 0.5 : 1,
                     }}>
               <Dot sev={sev} />
-              <span style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', minWidth: 14 }}>{n}</span>
+              <span className="min-w-3.5 text-xl font-bold [font-variant-numeric:tabular-nums]">{n}</span>
               <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted-foreground)', letterSpacing: '.3px' }}>{SEV_LABEL[sev]}</span>
             </button>
           )

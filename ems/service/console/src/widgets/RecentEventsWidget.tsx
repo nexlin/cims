@@ -69,9 +69,9 @@ function RecentEventsWidget() {
                       background: sel ? 'var(--cims-brand-soft)' : 'var(--card)',
                       opacity: n === 0 && !sel ? 0.5 : 1,
                     }}>
-              <span style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', minWidth: 14 }}>{n}</span>
+              <span className="min-w-3.5 text-xl font-bold [font-variant-numeric:tabular-nums]">{n}</span>
               <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted-foreground)', letterSpacing: '.3px' }}>
-                {label} <span style={{ opacity: .7 }}>{KIND_ABBR[kind] || ''}</span>
+                {label} <span className="opacity-70">{KIND_ABBR[kind] || ''}</span>
               </span>
             </button>
           )

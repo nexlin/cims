@@ -347,7 +347,7 @@ function Field({ label, children, w }: { label: string; children: React.ReactNod
   )
 }
 function FieldRow({ children }: { children: React.ReactNode }) {
-  return <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 12px', alignItems: 'flex-end' }}>{children}</div>
+  return <div className="flex flex-wrap items-end gap-x-3 gap-y-2">{children}</div>
 }
 
 // ── 사용자 기본정보 폼 (추가 + 편집 공용) ──

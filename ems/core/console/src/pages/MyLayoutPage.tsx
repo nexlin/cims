@@ -128,7 +128,7 @@ export function MyLayoutWidgets() {
       ) : s.dashboard.length === 0 ? (
         <EmptyState title="위젯이 없습니다 — 위 [+ 위젯 추가] 또는 프로파일을 적용하세요." />
       ) : (
-        <ul className="scroll-fill flex min-h-0 flex-1 flex-col overflow-auto" style={{ listStyle: 'none', margin: 0, padding: 0, gap: 6 }}>
+        <ul className="scroll-fill m-0 flex min-h-0 flex-1 list-none flex-col gap-1.5 overflow-auto p-0">
           {s.dashboard.map((id, i) => {
             const w = byId[id]
             const note = w ? widgetUnavailableNote(w) : '카탈로그에 없는 위젯(권한/서비스 변경)'

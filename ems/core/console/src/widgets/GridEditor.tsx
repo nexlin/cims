@@ -292,7 +292,7 @@ export function GridEditor({ widgets, gap = GRID_GAP, preview = false, nested = 
               {/* 사용 API — 개발자 모드에서만. 배치하면서 이 위젯이 뭘 부르는지 바로 확인. */}
               <WidgetApiBadge ids={def?.apis} sourceIds={def?.apiSources?.(p.config)} title={def?.title ?? p.widgetId} />
               {editingInside && inside && (
-                <span style={{ marginLeft: 'auto', display: 'flex', gap: 4, position: 'relative', zIndex: 7 }}
+                <span className="relative z-[7] ml-auto flex gap-1"
                       onPointerDown={e => e.stopPropagation()}>
                   <Button title="마지막 변경 한 수만 취소"
                           onClick={inside.onUndo} disabled={inside.saving || !inside.canUndo}><Undo2 size={13} /> 되돌리기</Button>

@@ -1,3 +1,4 @@
+import { Button } from '@core/components/ui/button'
 import { useConfirm } from '../components/custom/confirm'
 import { AlertTriangle, ArrowLeft, ArrowRight, ChevronDown, FileText, RotateCw } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo } from 'react'
@@ -123,28 +124,28 @@ function RunListRow({ run, onClick }: { run: RunHistoryItem; onClick: () => void
   const t = run.totals || {}
   return (
     <tr className="cursor-pointer" onClick={onClick}>
-      <td style={{ ...td, fontFamily: 'monospace', fontSize: 11 }} title={`run_id=${run.id}`}>
+      <td className="border-b border-border px-3 py-2 font-mono text-xs" title={`run_id=${run.id}`}>
         {fmtRunIdShort(run.id)}
       </td>
-      <td style={td}>{fmtDate(run.started_at)}</td>
-      <td style={td}>{scopeLabel(run.scope)}</td>
-      <td style={{ ...td, color: VERDICT_COLOR[run.verdict] || 'var(--foreground)', fontWeight: 600 }}>
+      <td className="border-b border-border px-3 py-2">{fmtDate(run.started_at)}</td>
+      <td className="border-b border-border px-3 py-2">{scopeLabel(run.scope)}</td>
+      <td className="border-b border-border px-3 py-2 font-semibold" style={{ color: VERDICT_COLOR[run.verdict] || 'var(--foreground)' }}>
         {run.verdict}
       </td>
-      <td style={{ ...td, fontSize: 12, color: 'var(--muted-foreground)' }}>
+      <td className="border-b border-border px-3 py-2 text-sm text-muted-foreground">
         {(t.pass ?? 0)} / {(t.fail ?? 0)} / {(t.skip ?? 0)}
         {t.blocked ? ` / ${t.blocked}` : ''}
         <span className="text-muted-foreground ml-1.5">(P/F/S)</span>
       </td>
-      <td style={td}>{fmtDuration(run.elapsed_ms)}</td>
-      <td style={{ ...td, fontFamily: 'monospace', fontSize: 11, color: 'var(--muted-foreground)' }}>
+      <td className="border-b border-border px-3 py-2">{fmtDuration(run.elapsed_ms)}</td>
+      <td className="border-b border-border px-3 py-2 font-mono text-xs text-muted-foreground">
         {run.git_branch && <span>{run.git_branch}@</span>}
         <span>{run.git_sha || '-'}</span>
       </td>
-      <td style={{ ...td, fontFamily: 'monospace', fontSize: 11, color: 'var(--muted-foreground)' }}>
+      <td className="border-b border-border px-3 py-2 font-mono text-xs text-muted-foreground">
         {run.pkg_manifest_hash ? run.pkg_manifest_hash.slice(0, 10) + '…' : '-'}
       </td>
-      <td style={{ ...td, fontSize: 11, color: 'var(--muted-foreground)' }}>{run.trigger}</td>
+      <td className="border-b border-border px-3 py-2 text-xs text-muted-foreground">{run.trigger}</td>
     </tr>
   )
 }
@@ -173,9 +174,9 @@ function DetailModal({ run, onClose, onDelete }: {
   }, [run.items])
 
   return (
-    <div className="verify-history-modal-backdrop" style={modalBackdrop} onClick={onClose}>
-      <div className="verify-history-modal" style={modal} onClick={e => e.stopPropagation()}>
-        <header style={modalHeader}>
+    <div className="verify-history-modal-backdrop fixed inset-0 z-[1000] flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div className="verify-history-modal flex max-h-[90vh] w-[90vw] max-w-[1100px] flex-col overflow-auto rounded-md bg-card" onClick={e => e.stopPropagation()}>
+        <header className="flex items-center justify-between border-b border-border px-5 py-4">
           <div>
             <div className="text-xl font-bold" title={`run_id=${run.id}`}>
               회차 {fmtRunIdShort(run.id)}
@@ -185,16 +186,16 @@ function DetailModal({ run, onClose, onDelete }: {
             </div>
           </div>
           <div>
-            <button style={btnSecondary} onClick={() => window.print()} title="이 회차를 PDF 보고서로 인쇄">
+            <Button variant="outline" onClick={() => window.print()} title="이 회차를 PDF 보고서로 인쇄">
               <FileText size={13} className="inline align-[-2px]" /> PDF 인쇄
-            </button>
-            <button style={{ ...btnDanger, marginLeft: 8 }} onClick={() => void (async () => {
+            </Button>
+            <Button variant="destructive" className="ml-2" onClick={() => void (async () => {
               if (await confirm({ title: '회차 삭제', tone: 'danger', confirmLabel: '삭제',
                 body: `회차 ${fmtRunIdShort(run.id)} 를 삭제할까요? 이 작업은 되돌릴 수 없습니다.` })) {
                 onDelete(run.id)
               }
-            })()}>삭제</button>
-            <button style={{ ...btnPrimary, marginLeft: 8 }} onClick={onClose}>닫기</button>
+            })()}>삭제</Button>
+            <Button variant="default" className="ml-2" onClick={onClose}>닫기</Button>
           </div>
         </header>
 
@@ -212,7 +213,7 @@ function DetailModal({ run, onClose, onDelete }: {
           }}
         />
 
-        <div style={{ padding: '12px 20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div className="grid grid-cols-2 gap-3 px-5 py-3">
           <Field label="Scope" value={scopeLabel(run.scope)} />
           <Field label="Verdict" value={
             <span style={{ color: VERDICT_COLOR[run.verdict], fontWeight: 700 }}>{run.verdict}</span>
@@ -239,7 +240,7 @@ function DetailModal({ run, onClose, onDelete }: {
 
         {/* totals 박스 */}
         <div className="pt-0 px-5 pb-3">
-          <div style={totalsBox}>
+          <div className="flex gap-4 rounded-sm border border-border bg-muted p-3">
             <Total label="총" value={run.totals?.total ?? '-'} />
             <Total label="PASS" value={run.totals?.pass ?? 0} color="var(--cims-success)" />
             <Total label="FAIL" value={run.totals?.fail ?? 0} color="var(--destructive)" />
@@ -253,44 +254,44 @@ function DetailModal({ run, onClose, onDelete }: {
         {/* 항목별 표 */}
         <div className="pt-0 px-5 pb-5 overflow-auto">
           <h3 className="text-base font-semibold mt-2 mx-0 mb-1.5">항목별 결과</h3>
-          <table style={tableStyle}>
+          <table className="w-full border-collapse text-md">
             <thead>
               <tr>
-                <th style={th}>#</th>
-                <th style={th}>ID</th>
-                <th style={th}>Stage</th>
-                <th style={th}>이름</th>
-                <th style={th}>상태</th>
-                <th style={th}>소요</th>
+                <th className="border-b border-border bg-muted px-3 py-2 text-left text-xs text-muted-foreground">#</th>
+                <th className="border-b border-border bg-muted px-3 py-2 text-left text-xs text-muted-foreground">ID</th>
+                <th className="border-b border-border bg-muted px-3 py-2 text-left text-xs text-muted-foreground">Stage</th>
+                <th className="border-b border-border bg-muted px-3 py-2 text-left text-xs text-muted-foreground">이름</th>
+                <th className="border-b border-border bg-muted px-3 py-2 text-left text-xs text-muted-foreground">상태</th>
+                <th className="border-b border-border bg-muted px-3 py-2 text-left text-xs text-muted-foreground">소요</th>
               </tr>
             </thead>
             <tbody>
               {grouped.parents.map(p => (
                 <>
                   <tr key={p.id}>
-                    <td style={td}>{p.idx}</td>
-                    <td style={{ ...td, fontFamily: 'monospace', fontSize: 11, fontWeight: p.is_group ? 700 : 400 }}>
-                      {p.is_group ? <ChevronDown size={12} style={{ verticalAlign: '-2px', marginRight: 3 }} /> : null}{p.id}
+                    <td className="border-b border-border px-3 py-2">{p.idx}</td>
+                    <td className="border-b border-border px-3 py-2 font-mono text-xs" style={{ fontWeight: p.is_group ? 700 : 400 }}>
+                      {p.is_group ? <ChevronDown size={12} className="mr-1 inline align-[-2px]" /> : null}{p.id}
                     </td>
-                    <td style={td}>S{p.stage}</td>
-                    <td style={td}>{p.name}</td>
-                    <td style={{ ...td, color: STATUS_COLOR[p.status] || 'var(--foreground)', fontWeight: 600 }}>
+                    <td className="border-b border-border px-3 py-2">S{p.stage}</td>
+                    <td className="border-b border-border px-3 py-2">{p.name}</td>
+                    <td className="border-b border-border px-3 py-2 font-semibold" style={{ color: STATUS_COLOR[p.status] || 'var(--foreground)' }}>
                       {p.status}
                     </td>
-                    <td style={td}>{fmtDuration(p.elapsed_ms)}</td>
+                    <td className="border-b border-border px-3 py-2">{fmtDuration(p.elapsed_ms)}</td>
                   </tr>
                   {(grouped.childrenByParent[p.id] || []).map(c => (
                     <tr className="bg-muted" key={c.id}>
-                      <td style={td}>{c.idx}</td>
-                      <td style={{ ...td, paddingLeft: 32, fontFamily: 'monospace', fontSize: 11, color: 'var(--muted-foreground)' }}>
+                      <td className="border-b border-border px-3 py-2">{c.idx}</td>
+                      <td className="border-b border-border px-3 py-2 pl-8 font-mono text-xs text-muted-foreground">
                         └ {c.id}
                       </td>
-                      <td style={td}>S{c.stage}</td>
-                      <td style={td}>{c.name}</td>
-                      <td style={{ ...td, color: STATUS_COLOR[c.status] || 'var(--foreground)' }}>
+                      <td className="border-b border-border px-3 py-2">S{c.stage}</td>
+                      <td className="border-b border-border px-3 py-2">{c.name}</td>
+                      <td className="border-b border-border px-3 py-2" style={{ color: STATUS_COLOR[c.status] || 'var(--foreground)' }}>
                         {c.status}
                       </td>
-                      <td style={td}>{fmtDuration(c.elapsed_ms)}</td>
+                      <td className="border-b border-border px-3 py-2">{fmtDuration(c.elapsed_ms)}</td>
                     </tr>
                   ))}
                 </>
@@ -314,9 +315,9 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
 
 function Total({ label, value, color = 'var(--foreground)' }: { label: string; value: number | string; color?: string }) {
   return (
-    <div style={totalCell}>
+    <div className="min-w-20 text-center">
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, color }}>{value}</div>
+      <div className="text-2xl font-bold" style={{ color }}>{value}</div>
     </div>
   )
 }
@@ -335,16 +336,12 @@ function StatsPanel({
   setDays: (n: number) => void
   err: string | null
 }) {
-  const card = useMemo<React.CSSProperties>(() => ({
-    background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 6,
-    padding: 12, fontSize: 12,
-  }), [])
   return (
     <div className="mb-4">
       <div className="flex items-center gap-3 mb-2">
         <span className="text-base font-semibold">통계 (최근 {days}일)</span>
         <Select value={String(days)} onValueChange={(v: string) => setDays(Number(v))}>
-          <SelectTrigger style={selectStyle}><SelectValue /></SelectTrigger>
+          <SelectTrigger><SelectValue /></SelectTrigger>
           <SelectContent>
             {[7, 14, 30, 60, 90].map(d => (
               <SelectItem key={d} value={String(d)}>{d}일</SelectItem>
@@ -355,13 +352,13 @@ function StatsPanel({
         <AlertTriangle size={12} /> {err}</span>}
       </div>
       {stats === null ? (
-        <div style={{ ...card, color: 'var(--muted-foreground)' }}>로딩 중…</div>
+        <div className="rounded-md border border-border bg-card p-3 text-muted-foreground">로딩 중…</div>
       ) : stats.overall.runs === 0 ? (
-        <div style={{ ...card, color: 'var(--muted-foreground)' }}>해당 기간 회차 없음</div>
+        <div className="rounded-md border border-border bg-card p-3 text-muted-foreground">해당 기간 회차 없음</div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+        <div className="grid grid-cols-3 gap-3">
           {/* overall */}
-          <div style={card}>
+          <div className="rounded-md border border-border bg-card p-3">
             <div className="font-semibold mb-1.5">종합</div>
             <KpiGrid items={[
               { label: '전체 회차', value: `${stats.overall.runs}회` },
@@ -375,12 +372,12 @@ function StatsPanel({
             ]} />
           </div>
           {/* by scope */}
-          <div style={card}>
+          <div className="rounded-md border border-border bg-card p-3">
             <div className="font-semibold mb-1.5">scope 별 성공률</div>
             <ScopeTable rows={stats.by_scope} />
           </div>
           {/* timeline sparkline */}
-          <div style={card}>
+          <div className="rounded-md border border-border bg-card p-3">
             <div className="font-semibold mb-1.5">회차 추세 ({stats.timeline.length}건)</div>
             <Sparkline timeline={stats.timeline} />
           </div>
@@ -392,11 +389,11 @@ function StatsPanel({
 
 function KpiGrid({ items }: { items: { label: string; value: string; color?: string }[] }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+    <div className="grid grid-cols-2 gap-1">
       {items.map(it => (
         <div className="flex justify-between py-0.5 px-0" key={it.label}>
           <span className="text-muted-foreground">{it.label}</span>
-          <span style={{ fontWeight: 600, color: it.color || 'var(--foreground)' }}>{it.value}</span>
+          <span className="font-semibold" style={{ color: it.color || 'var(--foreground)' }}>{it.value}</span>
         </div>
       ))}
     </div>
@@ -406,7 +403,7 @@ function KpiGrid({ items }: { items: { label: string; value: string; color?: str
 function ScopeTable({ rows }: { rows: RunsStatsResponse['by_scope'] }) {
   if (rows.length === 0) return <div className="text-muted-foreground">없음</div>
   return (
-    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+    <table className="w-full border-collapse text-xs">
       <thead>
         <tr className="border-b border-border">
           <th className="text-left py-1 px-1.5">scope</th>
@@ -417,14 +414,12 @@ function ScopeTable({ rows }: { rows: RunsStatsResponse['by_scope'] }) {
       </thead>
       <tbody>
         {rows.map(r => (
-          <tr key={r.scope} style={{ borderBottom: '1px dashed var(--border)' }}>
+          <tr key={r.scope} className="border-b border-dashed border-border">
             <td className="py-[3px] px-1.5">{r.scope}</td>
             <td className="py-[3px] px-1.5 text-right">{r.runs}</td>
-            <td style={{
-              padding: '3px 6px', textAlign: 'right', fontWeight: 600,
-              color: r.success_rate >= 80 ? 'var(--cims-success)'
-                     : r.success_rate >= 50 ? 'var(--cims-warning)' : 'var(--destructive)',
-            }}>{r.success_rate}%</td>
+            <td className={`px-1.5 py-[3px] text-right font-semibold ${
+              r.success_rate >= 80 ? 'text-success' : r.success_rate >= 50 ? 'text-warning' : 'text-destructive'}`}>
+              {r.success_rate}%</td>
             <td className="py-[3px] px-1.5 text-right">{fmtMsShort(r.avg_elapsed_ms)}</td>
           </tr>
         ))}
@@ -479,7 +474,6 @@ function fmtMsShort(ms: number): string {
   const secs = Math.floor((ms % 60_000) / 1000)
   return `${mins}m${secs.toString().padStart(2, '0')}s`
 }
-
 
 export default function VerificationHistoryPage() {
   const { show } = useToast()
@@ -596,7 +590,7 @@ export default function VerificationHistoryPage() {
         <span className="text-sm text-muted-foreground">
           총 {total} 회차
         </span>
-        <button onClick={() => { load(); loadStats() }} style={{ ...btnSecondary, marginLeft: 'auto' }}><RotateCw size={13} /> 새로고침</button>
+        <Button variant="outline" className="ml-auto" onClick={() => { load(); loadStats() }}><RotateCw size={13} /> 새로고침</Button>
       </header>
 
       {/* 통계 패널 */}
@@ -604,11 +598,11 @@ export default function VerificationHistoryPage() {
 
       {/* 필터 */}
       <div className="flex gap-3 mb-3 items-center flex-wrap">
-        <label style={filterLabel}>
+        <label className="inline-flex items-center gap-1.5 text-md text-foreground">
           Stage:
           <Select value={toSel(stage === '' ? '' : String(stage))}
                   onValueChange={(v: string) => { setOffset(0); setStage(fromSel(v) === '' ? '' : Number(fromSel(v))) }}>
-            <SelectTrigger style={selectStyle}><SelectValue /></SelectTrigger>
+            <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value={NONE}>전체</SelectItem>
               {[1, 2, 3, 4, 5, 6].map(n => (
@@ -617,10 +611,10 @@ export default function VerificationHistoryPage() {
             </SelectContent>
           </Select>
         </label>
-        <label style={filterLabel}>
+        <label className="inline-flex items-center gap-1.5 text-md text-foreground">
           Verdict:
           <Select value={toSel(verdict)} onValueChange={(v: string) => { setOffset(0); setVerdict(fromSel(v)) }}>
-            <SelectTrigger style={selectStyle}><SelectValue /></SelectTrigger>
+            <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value={NONE}>전체</SelectItem>
               <SelectItem value="PASS">PASS</SelectItem>
@@ -636,25 +630,25 @@ export default function VerificationHistoryPage() {
 
       {/* list 표 */}
       <div className="bg-card border border-border rounded-sm overflow-auto">
-        <table style={tableStyle}>
+        <table className="w-full border-collapse text-md">
           <thead>
             <tr>
-              <th style={th}>#</th>
-              <th style={th}>시작 시각</th>
-              <th style={th}>Scope</th>
-              <th style={th}>Verdict</th>
-              <th style={th}>P/F/S</th>
-              <th style={th}>소요</th>
-              <th style={th}>Git</th>
-              <th style={th}>Pkg hash</th>
-              <th style={th}>Trigger</th>
+              <th className="border-b border-border bg-muted px-3 py-2 text-left text-xs text-muted-foreground">#</th>
+              <th className="border-b border-border bg-muted px-3 py-2 text-left text-xs text-muted-foreground">시작 시각</th>
+              <th className="border-b border-border bg-muted px-3 py-2 text-left text-xs text-muted-foreground">Scope</th>
+              <th className="border-b border-border bg-muted px-3 py-2 text-left text-xs text-muted-foreground">Verdict</th>
+              <th className="border-b border-border bg-muted px-3 py-2 text-left text-xs text-muted-foreground">P/F/S</th>
+              <th className="border-b border-border bg-muted px-3 py-2 text-left text-xs text-muted-foreground">소요</th>
+              <th className="border-b border-border bg-muted px-3 py-2 text-left text-xs text-muted-foreground">Git</th>
+              <th className="border-b border-border bg-muted px-3 py-2 text-left text-xs text-muted-foreground">Pkg hash</th>
+              <th className="border-b border-border bg-muted px-3 py-2 text-left text-xs text-muted-foreground">Trigger</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={9} style={{ ...td, textAlign: 'center', padding: 20, color: 'var(--muted-foreground)' }}>로딩 중…</td></tr>
+              <tr><td colSpan={9} className="border-b border-border px-3 py-2 p-5 text-center text-muted-foreground">로딩 중…</td></tr>
             ) : runs.length === 0 ? (
-              <tr><td colSpan={9} style={{ ...td, textAlign: 'center', padding: 20, color: 'var(--muted-foreground)' }}>회차 없음</td></tr>
+              <tr><td colSpan={9} className="border-b border-border px-3 py-2 p-5 text-center text-muted-foreground">회차 없음</td></tr>
             ) : (
               runs.map(r => (
                 <RunListRow key={r.id} run={r} onClick={() => openDetail(r.id)} />
@@ -667,13 +661,13 @@ export default function VerificationHistoryPage() {
       {/* 페이지 네비게이션 */}
       {totalPages > 1 && (
         <div className="mt-3 flex items-center gap-2 justify-center">
-          <button style={btnSecondary} disabled={offset === 0}
-                  onClick={() => setOffset(Math.max(0, offset - limit))}><ArrowLeft size={13} /> 이전</button>
+          <Button variant="outline" disabled={offset === 0}
+                  onClick={() => setOffset(Math.max(0, offset - limit))}><ArrowLeft size={13} /> 이전</Button>
           <span className="text-md text-foreground">
             {curPage} / {totalPages}
           </span>
-          <button style={btnSecondary} disabled={offset + limit >= total}
-                  onClick={() => setOffset(offset + limit)}>다음 <ArrowRight size={13} /></button>
+          <Button variant="outline" disabled={offset + limit >= total}
+                  onClick={() => setOffset(offset + limit)}>다음 <ArrowRight size={13} /></Button>
         </div>
       )}
 
@@ -687,56 +681,3 @@ export default function VerificationHistoryPage() {
 // ─────────────────────────────────────────────────────────────
 // 스타일
 // ─────────────────────────────────────────────────────────────
-const tableStyle: React.CSSProperties = {
-  width: '100%', borderCollapse: 'collapse', fontSize: 13,
-}
-const th: React.CSSProperties = {
-  padding: '8px 12px', borderBottom: '1px solid var(--border)',
-  textAlign: 'left', background: 'var(--muted)',
-  fontSize: 11, color: 'var(--muted-foreground)', textTransform: 'uppercase',
-  position: 'sticky', top: 0, zIndex: 1,
-}
-const td: React.CSSProperties = {
-  padding: '8px 12px', borderBottom: '1px solid var(--border)',
-}
-const filterLabel: React.CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 6,
-  fontSize: 13, color: 'var(--foreground)',
-}
-const selectStyle: React.CSSProperties = {
-  padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 4,
-  background: 'var(--card)', fontSize: 13,
-}
-const btnPrimary: React.CSSProperties = {
-  padding: '6px 14px', border: 'none', borderRadius: 4,
-  background: 'var(--cims-info)', color: 'var(--cims-on-solid)', fontSize: 13, cursor: 'pointer',
-}
-const btnSecondary: React.CSSProperties = {
-  padding: '6px 14px', border: '1px solid var(--border)', borderRadius: 4,
-  background: 'var(--card)', color: 'var(--foreground)', fontSize: 13, cursor: 'pointer',
-}
-const btnDanger: React.CSSProperties = {
-  padding: '6px 14px', border: 'none', borderRadius: 4,
-  background: 'var(--destructive)', color: 'var(--cims-on-solid)', fontSize: 13, cursor: 'pointer',
-}
-const modalBackdrop: React.CSSProperties = {
-  position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
-  display: 'flex', justifyContent: 'center', alignItems: 'center',
-  zIndex: 1000,
-}
-const modal: React.CSSProperties = {
-  background: 'var(--card)', borderRadius: 8, width: '90vw', maxWidth: 1100,
-  maxHeight: '90vh', overflow: 'auto',
-  display: 'flex', flexDirection: 'column',
-}
-const modalHeader: React.CSSProperties = {
-  padding: '16px 20px', borderBottom: '1px solid var(--border)',
-  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-}
-const totalsBox: React.CSSProperties = {
-  display: 'flex', gap: 16, padding: 12,
-  background: 'var(--muted)', borderRadius: 6, border: '1px solid var(--border)',
-}
-const totalCell: React.CSSProperties = {
-  textAlign: 'center', minWidth: 80,
-}

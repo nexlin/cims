@@ -233,8 +233,8 @@ export default function AutoDeployPage() {
     <div className="flex flex-col gap-3 h-full overflow-auto p-3.5">
 
       {/* ── 1. 문서 선택/업로드 ── */}
-      <section style={SEC}>
-        <h3 style={H3}>① 배포 정의</h3>
+      <section className="rounded-sm border border-border bg-card p-3">
+        <h3 className="mb-2 mt-0 text-md font-bold">① 배포 정의</h3>
         <div className="flex gap-5 flex-wrap">
           <DocPicker label="블루프린트 (blueprint.yaml)" hint="무엇을 어떤 구조로 깔 것인가"
             items={blueprints.map(b => ({ id: b.id, label: b.name }))}
@@ -249,9 +249,9 @@ export default function AutoDeployPage() {
 
       {/* ── 2. 검토·편집 ── */}
       {(bpId != null || invId != null) && (
-        <section style={SEC}>
+        <section className="rounded-sm border border-border bg-card p-3">
           <div className="flex items-center gap-2.5 mb-2">
-            <h3 style={{ ...H3, margin: 0 }}>② 검토·편집</h3>
+            <h3 className="m-0 text-md font-bold">② 검토·편집</h3>
             <Seg value={doc} onChange={v => setDoc(v as Doc)}
                  options={[{ v: 'blueprint', l: '블루프린트' }, { v: 'inventory', l: '인벤토리' }]} />
             <Seg value={view} onChange={v => setView(v as View)}
@@ -294,8 +294,8 @@ export default function AutoDeployPage() {
 
       {/* ── 지적 목록 ── */}
       {issues.length > 0 && (
-        <section style={{ ...SEC, borderColor: errCount ? 'var(--destructive)' : 'var(--cims-warning)' }}>
-          <h3 style={H3}>검증 결과 — 오류 {errCount} · 경고 {issues.length - errCount}</h3>
+        <section className={`rounded-sm border border-border bg-card p-3 ${errCount ? 'border-destructive' : 'border-warning'}`}>
+          <h3 className="mb-2 mt-0 text-md font-bold">검증 결과 — 오류 {errCount} · 경고 {issues.length - errCount}</h3>
           <div className="max-h-[180px] overflow-auto text-sm">
             {issues.map((i, n) => (
               <div className="py-[3px] px-0 flex gap-2" key={n}>
@@ -311,8 +311,8 @@ export default function AutoDeployPage() {
       )}
 
       {/* ── 3. 사전 확인 + 계획 ── */}
-      <section style={SEC}>
-        <h3 style={H3}>③ 사전 확인</h3>
+      <section className="rounded-sm border border-border bg-card p-3">
+        <h3 className="mb-2 mt-0 text-md font-bold">③ 사전 확인</h3>
         <div className="flex gap-2 flex-wrap items-center">
           <Button disabled={!canEdit || !!busy || invId == null}
                   onClick={doValidate}>검증</Button>
@@ -352,8 +352,8 @@ export default function AutoDeployPage() {
 
       {/* ── 최근 run ── */}
       {runs.length > 0 && !run && (
-        <section style={SEC}>
-          <h3 style={H3}>최근 배포</h3>
+        <section className="rounded-sm border border-border bg-card p-3">
+          <h3 className="mb-2 mt-0 text-md font-bold">최근 배포</h3>
           <DataTable sticky className="text-sm">
             <thead><tr><Th>#</Th><Th>블루프린트</Th><Th>상태</Th><Th>진행</Th><Th>시각</Th><Th /></tr></thead>
             <tbody>
@@ -379,11 +379,6 @@ export default function AutoDeployPage() {
 }
 
 // ── 하위 컴포넌트 ─────────────────────────────────────────────
-
-const SEC: React.CSSProperties = {
-  border: '1px solid var(--border)', borderRadius: 6, padding: 12, background: 'var(--card)',
-}
-const H3: React.CSSProperties = { fontSize: 13.5, fontWeight: 700, margin: '0 0 8px' }
 
 function Seg({ value, onChange, options }:
              { value: string; onChange: (v: string) => void; options: Array<{ v: string; l: string }> }) {
@@ -440,7 +435,7 @@ function RawEditor({ value, onChange, issues, disabled, placeholder }: {
   return (
     <div className="flex border border-border rounded-sm font-mono text-sm max-h-[420px]">
       <div className="py-2 px-1.5 text-right text-muted-foreground bg-background select-none overflow-hidden border-r border-border min-w-[42px]">
-        {Array.from({ length: lines }, (_, i) => <div key={i} style={{ lineHeight: '18px' }}>{i + 1}</div>)}
+        {Array.from({ length: lines }, (_, i) => <div key={i} className="leading-[18px]">{i + 1}</div>)}
       </div>
       <textarea value={value} onChange={e => onChange(e.target.value)}
                 disabled={disabled} placeholder={placeholder} spellCheck={false}
@@ -582,8 +577,8 @@ function InventoryForm({ view, onChange, disabled, issues }: {
 function PlanView({ phases }: { phases: PlanPhase[] }) {
   const total = phases.reduce((n, p) => n + p.steps.length, 0)
   return (
-    <section style={SEC}>
-      <h3 style={H3}>계획 — 총 {total} 단계 (아직 아무것도 바뀌지 않았습니다)</h3>
+    <section className="rounded-sm border border-border bg-card p-3">
+      <h3 className="mb-2 mt-0 text-md font-bold">계획 — 총 {total} 단계 (아직 아무것도 바뀌지 않았습니다)</h3>
       {phases.map(ph => (
         <div className="mb-2" key={ph.key}>
           <div className="text-sm font-semibold">
@@ -614,9 +609,9 @@ function RunView({ run, onAction, busy, canEdit }: {
     n + p.steps.filter(s => s.status === 'done' || s.status === 'skipped').length, 0)
   const total = run.phases.reduce((n, p) => n + p.steps.length, 0)
   return (
-    <section style={SEC}>
+    <section className="rounded-sm border border-border bg-card p-3">
       <div className="flex items-center gap-2.5 mb-2">
-        <h3 style={{ ...H3, margin: 0 }}>
+        <h3 className="m-0 text-md font-bold">
           run #{run.id} — {run.blueprint}
           <span style={{
             marginLeft: 10, fontWeight: 400,

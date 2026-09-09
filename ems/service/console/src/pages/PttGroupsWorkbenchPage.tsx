@@ -29,7 +29,6 @@ const ICON = 14
 /** CMP 화자 슬롯 상한(MCPTT_MAX_TALKER_SLOTS) — 초과 값은 CMP 가 BAD_REQUEST 로 거절한다. */
 const MAX_TALKERS_LIMIT = 8
 
-
 function Caret({ open }: { open: boolean }) {
   return <span className="text-muted-foreground inline-flex">
     {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
@@ -377,8 +376,8 @@ function GroupDrawer(p: GroupDrawerProps) {
             <Button variant="default" onClick={save}>저장</Button>
             <Button variant="ghost" onClick={() => isNew ? p.onClose() : setEditing(false)}>취소</Button>
           </div>
-          <div style={{ flexBasis: '100%', fontSize: 11, color: 'var(--muted-foreground)' }}>타입: {groupTypeHint[form.group_type || 'prearranged']}</div>
-          <div style={{ flexBasis: '100%', fontSize: 11, color: 'var(--muted-foreground)' }}>동시 발언: {floorPolicyHint[form.floor_policy || 'single']}</div>
+          <div className="basis-full text-xs text-muted-foreground">타입: {groupTypeHint[form.group_type || 'prearranged']}</div>
+          <div className="basis-full text-xs text-muted-foreground">동시 발언: {floorPolicyHint[form.floor_policy || 'single']}</div>
         </FieldRow>
       ) : existing && (
         <div className="flex items-center gap-4 flex-wrap text-sm">
@@ -431,7 +430,7 @@ function MemberRow({ m, name, selected, canManage, onToggle, onSave, onRemove }:
       <span className="flex flex-col min-w-0 flex-1">
         <span className="font-semibold whitespace-nowrap overflow-hidden text-ellipsis">
           {name || '—'}
-          {!editing && m.role === 'chair' && <Crown size={11} style={{ marginLeft: 4, verticalAlign: '-1px', color: 'var(--cims-warning)' }} />}
+          {!editing && m.role === 'chair' && <Crown size={11} className="ml-1 inline align-[-1px] text-warning" />}
         </span>
         <span className="text-muted-foreground text-xs">{m.user_id}</span>
       </span>
@@ -514,16 +513,14 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
     setBusy(true); await onRemove(ids); setBusy(false); setSelMembers(new Set())
   }
 
-  const panelHead: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 600 }
   const countChip = (n: number, tone?: 'primary') => <Badge  variant={tone === 'primary' ? 'brandSoft' : 'neutralSoft'}>{n}</Badge>
-  const panel: React.CSSProperties = { display: 'flex', flexDirection: 'column', minWidth: 0, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: 'var(--card)' }
 
   return (
     <div className="mt-2.5 border-t border-border pt-3">
       <div className="flex items-stretch gap-2.5 h-[360px]">
         {/* ── 좌: 등록된 멤버 ── */}
-        <div style={{ ...panel, flex: 1 }}>
-          <div style={panelHead}>
+        <div className="flex min-w-0 flex-col overflow-hidden rounded-md border border-border bg-card flex-1">
+          <div className="flex items-center gap-2 border-b border-border px-2.5 py-2 text-sm font-semibold">
             등록된 멤버 {countChip(members.length, 'primary')}
             {canManage && members.length > 0 && (
               <label className="inline-flex items-center gap-1 ml-auto font-normal text-muted-foreground">
@@ -533,7 +530,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto">
             {members.length === 0
-              ? <div className="p-3.5 text-sm text-center text-muted-foreground">멤버 없음<br />우측에서 가입자를 선택해 <ArrowLeft size={11} style={{ verticalAlign: '-1px' }} /> 추가</div>
+              ? <div className="p-3.5 text-sm text-center text-muted-foreground">멤버 없음<br />우측에서 가입자를 선택해 <ArrowLeft size={11} className="inline align-[-1px]" /> 추가</div>
               : members.map(m => (
                 <MemberRow key={m.user_id} m={m} name={pttName.get(m.user_id)} selected={selMembers.has(m.user_id)}
                   canManage={canManage} onToggle={toggleMem} onSave={onSaveMember} onRemove={uid => doRemove([uid])} />
@@ -556,8 +553,8 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
         )}
 
         {/* ── 우: 조직트리 + PTT 가입자 ── */}
-        <div style={{ ...panel, flex: 1.3 }}>
-          <div style={panelHead}>
+        <div className="flex min-w-0 flex-col overflow-hidden rounded-md border border-border bg-card flex-[1.3]">
+          <div className="flex items-center gap-2 border-b border-border px-2.5 py-2 text-sm font-semibold">
             가입자 추가 {countChip(candidates.length)}
             <span className="ml-auto inline-flex items-center gap-2 font-normal text-muted-foreground">
               <label className="inline-flex items-center gap-[3px]">P
@@ -608,7 +605,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
           </div>
         </div>
       </div>
-      {canManage && <div className="text-xs text-muted-foreground mt-1.5">가입자 더블클릭 = 바로 추가 · 체크 후 <ArrowLeft size={10} style={{ verticalAlign: '-1px' }} /> 추가 = 일괄 추가(우측 P·역할 적용)</div>}
+      {canManage && <div className="text-xs text-muted-foreground mt-1.5">가입자 더블클릭 = 바로 추가 · 체크 후 <ArrowLeft size={10} className="inline align-[-1px]" /> 추가 = 일괄 추가(우측 P·역할 적용)</div>}
     </div>
   )
 }
@@ -616,12 +613,12 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
 // 가로 wrap 레이아웃용 컴팩트 필드. w 지정 없으면 flex-grow.
 function Field({ label, children, w }: { label: string; children: React.ReactNode; w?: number | string }) {
   return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 2, width: w, flex: w ? undefined : '1 1 150px', minWidth: 110 }}>
+    <label className="flex min-w-[110px] flex-col gap-0.5" style={{ width: w, flex: w ? undefined : '1 1 150px' }}>
       <span className="text-xs text-muted-foreground">{label}</span>
       {children}
     </label>
   )
 }
 function FieldRow({ children }: { children: React.ReactNode }) {
-  return <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 12px', alignItems: 'flex-end' }}>{children}</div>
+  return <div className="flex flex-wrap items-end gap-x-3 gap-y-2">{children}</div>
 }

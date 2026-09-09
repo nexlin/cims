@@ -124,7 +124,7 @@ function SystemResourceWidget() {
           <div className="text-xs text-muted-foreground font-semibold pt-0 px-1 pb-1.5">서버</div>
           {cols.map(c => (
             <div className="text-xs text-muted-foreground text-center font-semibold pt-0 px-1 pb-1.5" key={c.k}>
-              {c.label} <span style={{ fontWeight: 400, opacity: 0.7 }}>{c.pct ? '%' : 'rate'}</span>
+              {c.label} <span className="font-normal opacity-70">{c.pct ? '%' : 'rate'}</span>
             </div>
           ))}
           {/* 서버별 행 */}

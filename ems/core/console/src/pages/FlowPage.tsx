@@ -398,16 +398,16 @@ interface MessageListProps {
 function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
   return (
     <div className="overflow-y-auto h-full border border-border rounded-sm bg-card">
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: 'monospace' }}>
+      <table className="w-full border-collapse font-mono text-sm">
         <thead>
           <tr className="sticky t-0 bg-muted z-[1]">
-            <th style={thStyle}>#</th>
-            <th style={thStyle}>시간</th>
-            <th style={thStyle}>From→To</th>
-            <th style={thStyle}>모듈</th>
-            <th style={thStyle}>TX/RX</th>
-            <th style={thStyle}>프로토콜</th>
-            <th style={thStyle}>Method</th>
+            <th className="whitespace-nowrap border-b border-border px-2 py-1.5 text-left font-semibold text-muted-foreground">#</th>
+            <th className="whitespace-nowrap border-b border-border px-2 py-1.5 text-left font-semibold text-muted-foreground">시간</th>
+            <th className="whitespace-nowrap border-b border-border px-2 py-1.5 text-left font-semibold text-muted-foreground">From→To</th>
+            <th className="whitespace-nowrap border-b border-border px-2 py-1.5 text-left font-semibold text-muted-foreground">모듈</th>
+            <th className="whitespace-nowrap border-b border-border px-2 py-1.5 text-left font-semibold text-muted-foreground">TX/RX</th>
+            <th className="whitespace-nowrap border-b border-border px-2 py-1.5 text-left font-semibold text-muted-foreground">프로토콜</th>
+            <th className="whitespace-nowrap border-b border-border px-2 py-1.5 text-left font-semibold text-muted-foreground">Method</th>
           </tr>
         </thead>
         <tbody>
@@ -422,16 +422,16 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
                   background: isSelected ? 'var(--cims-brand-soft)' : 'transparent',
                 }}
               >
-                <td style={tdStyle}>{i + 1}</td>
-                <td style={tdStyle}>{msg.ts.slice(0, 12)}</td>
-                <td style={{ ...tdStyle, color: 'var(--foreground)' }}>
+                <td className="whitespace-nowrap border-b border-border px-2 py-1 text-muted-foreground">{i + 1}</td>
+                <td className="whitespace-nowrap border-b border-border px-2 py-1 text-muted-foreground">{msg.ts.slice(0, 12)}</td>
+                <td className="whitespace-nowrap border-b border-border px-2 py-1 text-foreground">
                   {actorLabel(msg.from)}<span className="text-muted-foreground">{'\u2192'}</span>{actorLabel(msg.to)}
                 </td>
-                <td style={{ ...tdStyle, color: 'var(--muted-foreground)', fontSize: 10 }}>
+                <td className="whitespace-nowrap border-b border-border px-2 py-1 text-xs text-muted-foreground">
                   {/* \uae30\ub85d \uc8fc\uccb4 \ud504\ub85c\uc138\uc2a4\uba85+ID (flow \ud30c\uc77c \uc18c\uc720\uc790, \uc608: CSP_01) \u2014 nodeId \uc5c6\uc73c\uba74(\uad6c \uc751\ub2f5) node \ub85c \ud3f4\ubc31 */}
                   {(msg.nodeId || msg.node || '').toUpperCase()}
                 </td>
-                <td style={tdStyle}>
+                <td className="whitespace-nowrap border-b border-border px-2 py-1 text-muted-foreground">
                   {(() => {
                     const d = inferDir(msg)
                     return d ? (
@@ -441,7 +441,7 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
                     ) : <span className="text-muted-foreground">\u2014</span>
                   })()}
                 </td>
-                <td style={tdStyle}>
+                <td className="whitespace-nowrap border-b border-border px-2 py-1 text-muted-foreground">
                   <span style={{
                     display: 'inline-block',
                     padding: '1px 6px',
@@ -454,7 +454,7 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
                     {msg.proto}
                   </span>
                 </td>
-                <td style={{ ...tdStyle, fontWeight: 600, color: msgColor(msg) }}>
+                <td className="whitespace-nowrap border-b border-border px-2 py-1 text-muted-foreground font-semibold" style={{ color: msgColor(msg) }}>
                   {msgLabel(msg as ColoredMsg)}{msg.detail ? <span className="font-normal text-muted-foreground">({msg.detail})</span> : ''}
                 </td>
               </tr>
@@ -464,22 +464,6 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
       </table>
     </div>
   )
-}
-
-const thStyle: React.CSSProperties = {
-  textAlign: 'left',
-  padding: '6px 8px',
-  color: 'var(--muted-foreground)',
-  fontWeight: 600,
-  borderBottom: '1px solid var(--border)',
-  whiteSpace: 'nowrap',
-}
-
-const tdStyle: React.CSSProperties = {
-  padding: '4px 8px',
-  color: 'var(--muted-foreground)',
-  whiteSpace: 'nowrap',
-  borderBottom: '1px solid var(--border)',
 }
 
 // ── main ─────────────────────────────────────────────────────────────────

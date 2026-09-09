@@ -520,12 +520,12 @@ function StageRow({
       {/* 펼침 영역 */}
       {expanded && (
         <div className="p-3">
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
+          <table className="w-full table-fixed border-collapse text-sm">
             <colgroup>
               <col className="w-[32px]"/>
               <col className="w-[36px]"/>
-              <col style={{ width: '28%' }} />
-              <col style={{ width: '42%' }} />
+              <col className="w-[28%]" />
+              <col className="w-[42%]" />
               <col className="w-[120px]"/>
               <col className="w-[70px]"/>
               <col className="w-[90px]"/>

@@ -97,10 +97,6 @@ function TabCount({ n }: { n: number }) {
   )
 }
 // fieldset 잠금 래퍼 — 내부 input/button 일괄 disable (조회는 가능)
-const LOCK_FIELDSET_STYLE: React.CSSProperties = {
- border: 0, margin: 0, padding: 0, minWidth: 0,
- flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden',
-}
 
 export default function ServersPage() {
  const { show } = useToast()
@@ -685,7 +681,7 @@ export default function ServersPage() {
                 }} />
             ) : (
               // infra/install: 조회는 operator+, 변이는 admin/승격 — fieldset 일괄 잠금
-              <fieldset disabled={!canEdit} style={LOCK_FIELDSET_STYLE}>
+              <fieldset disabled={!canEdit} className="m-0 flex min-w-0 flex-1 flex-col overflow-hidden border-0 p-0">
                 <ServerInspector agent={selectedAgent} mode={pageTab} reinstallSignal={reinstallSignal}
  deployments={depsByAgent.get(selectedAgent.id) || []}
  packages={packages}
@@ -723,7 +719,7 @@ export default function ServersPage() {
  depsByAgent={depsByAgent}
  onSelectMember={(aid) => setSelection({ kind: 'agent', id: aid })} />
             ) : pageTab === 'control' ? (
-              <fieldset disabled={!canEdit} style={LOCK_FIELDSET_STYLE}>
+              <fieldset disabled={!canEdit} className="m-0 flex min-w-0 flex-1 flex-col overflow-hidden border-0 p-0">
                 <GroupControlMatrix group={selectedGroup} agents={agents}
  depsByAgent={depsByAgent}
  onJob={queueJob}
@@ -731,7 +727,7 @@ export default function ServersPage() {
  onReload={load} />
               </fieldset>
             ) : (
-              <fieldset disabled={!canEdit} style={LOCK_FIELDSET_STYLE}>
+              <fieldset disabled={!canEdit} className="m-0 flex min-w-0 flex-1 flex-col overflow-hidden border-0 p-0">
                 <GroupInspector group={selectedGroup} agents={agents}
  onSelectMember={(aid) => setSelection({ kind: 'agent', id: aid })}
  onReload={load}
@@ -1688,7 +1684,6 @@ function FailoverSection({ value, onChange, dirty }: {
   )
 }
 
-
 // ──────────────────────────────────────────────────────────────
 //  모듈 운영 명세 (패키지 설정 — 그룹 선택) : 프로세스 감시 / 절체 모드 / 절체 관여
 //  앱 config.json 과 물리 분리된 group.module_specs → agent modules/<mod>/service.json.
@@ -1843,7 +1838,6 @@ function ModuleSpecSection({ group, deployments, onReload }: {
     </div>
   )
 }
-
 
 // ──────────────────────────────────────────────────────────────
 //  Inspector (선택된 서버 상세)
@@ -3905,7 +3899,6 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
     </Modal>
   )
 }
-
 
 function MetricsModal({ agent, onClose }: { agent: Agent; onClose: () => void }) {
  const { show } = useToast()

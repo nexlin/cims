@@ -135,8 +135,6 @@ export function Person({ id, names, style, className }: {
  return <span className={className} style={style} title={names.tipOf(id)}>{names.nameOf(id)}</span>
 }
 
-export const thStyle: CSSProperties = { padding: '7px 10px', fontWeight: 600, color: 'var(--muted-foreground)', cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }
-export const tdStyle: CSSProperties = { padding: '6px 10px', whiteSpace: 'nowrap' }
 export const RANGE_OPTIONS = [5, 10, 20, 30]
 // 세션키 파싱 — 'S{yyyymmddHHMMSSuuuuuu}_{n}'(세션 디렉터리) 또는 'YYYYMMDDHH'(구 녹취).
 // 어느 쪽이든 앞 10자리 숫자가 시작 시간버킷이라 날짜·시각 추출은 한 가지로 끝난다.
@@ -287,7 +285,7 @@ export function DayHeatmap({ days, selectedDay, onPick }: {
  fontSize: 10, color: ratio > 0.55 ? 'var(--cims-on-solid)' : 'var(--muted-foreground)', position: 'relative', overflow: 'hidden',
               }}>
               <span className="text-xs font-bold">{v > 0 ? v : ''}</span>
-              <span style={{ fontSize: 9, opacity: 0.85 }}>{fmtDayShort(d.day)}</span>
+              <span className="text-xs opacity-85">{fmtDayShort(d.day)}</span>
               {d.active && <span style={{ position: 'absolute', top: 2, right: 2, width: 5, height: 5, borderRadius: '50%', background: 'var(--cims-success)',
                 // 셀 배경이 밝든 어둡든 읽히도록 표면색 링을 두른다
  boxShadow: '0 0 0 1px var(--card)' }} />}
@@ -357,7 +355,7 @@ export function ActivityHeatmap({ sessions, selectedDir, onPick }: {
  fontSize: 10, color: ratio > 0.55 ? 'var(--cims-on-solid)' : 'var(--muted-foreground)', position: 'relative',
               }}>
               <span className="text-xs font-semibold">{v > 0 ? v : ''}</span>
-              <span style={{ fontSize: 8, opacity: 0.8 }}>
+              <span className="text-xs opacity-80">
                 {String(h).padStart(2, '0')}{list && list.length > 1 ? ` ·${list.length}` : ''}
               </span>
               {active && <span style={{ position: 'absolute', top: 2, right: 2, width: 5, height: 5, borderRadius: '50%', background: 'var(--cims-success)',
@@ -397,28 +395,28 @@ export function SessionRow({ sess, isOpen, detail, storeKey, isDuplex, audio, fl
  background: isOpen ? 'var(--accent)' : 'transparent',
         }}
       >
-        <td style={{ ...tdStyle, textAlign: 'center', color: 'var(--muted-foreground)' }}>{isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</td>
-        <td style={{ ...tdStyle, fontWeight: 600 }}>{fmtWindow(sess.dir)}</td>
-        <td style={tdStyle} className="text-sm text-muted-foreground">
+        <td className="whitespace-nowrap px-2.5 py-1.5 text-center text-muted-foreground">{isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</td>
+        <td className="whitespace-nowrap px-2.5 py-1.5 font-semibold">{fmtWindow(sess.dir)}</td>
+        <td className="whitespace-nowrap px-2.5 py-1.5 text-sm text-muted-foreground">
           {fmtShortTime(sess.start_time)} ~ {sess.state === 'active' ? 'active' : fmtShortTime(sess.end_time)}
         </td>
-        <td style={{ ...tdStyle, textAlign: 'center' }}>
+        <td className="whitespace-nowrap px-2.5 py-1.5 text-center">
           <Badge variant={sess.state === 'active' ? 'successSoft' : 'neutralSoft'} >{sess.state === 'active' ? '진행중' : '종료'}</Badge>
         </td>
-        <td style={{ ...tdStyle, textAlign: 'right' }}>
+        <td className="whitespace-nowrap px-2.5 py-1.5 text-right">
           {sess.turn_count ?? sess.segment_count ?? 0}
           {sess.turn_count != null && sess.segment_count != null && sess.turn_count !== sess.segment_count && (
             <span className="text-muted-foreground text-xs"> / {sess.segment_count}세그</span>
           )}
         </td>
-        <td style={{ ...tdStyle, textAlign: 'right' }}>{sess.speaker_count ?? 0}</td>
-        <td style={{ ...tdStyle, textAlign: 'right' }}>
+        <td className="whitespace-nowrap px-2.5 py-1.5 text-right">{sess.speaker_count ?? 0}</td>
+        <td className="whitespace-nowrap px-2.5 py-1.5 text-right">
           {maxCon > 1
             ? <Badge  variant="brandSoft">{maxCon}명</Badge>
             : <span className="text-muted-foreground">—</span>}
         </td>
-        <td style={{ ...tdStyle, textAlign: 'right' }} className="text-sm text-muted-foreground">{fmtSpeechMs(sess.total_speech_ms)}</td>
-        <td style={{ ...tdStyle, textAlign: 'right' }} onClick={e => e.stopPropagation()}>
+        <td className="whitespace-nowrap px-2.5 py-1.5 text-right text-sm text-muted-foreground">{fmtSpeechMs(sess.total_speech_ms)}</td>
+        <td className="whitespace-nowrap px-2.5 py-1.5 text-right" onClick={e => e.stopPropagation()}>
           <Button className="mr-1" disabled={flowLoading} onClick={onFlow}>Flow</Button>
           <Button onClick={onPlayAll}><Play size={11} className="mr-1 inline align-[-1px]" />전체</Button>
         </td>

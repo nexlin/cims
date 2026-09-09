@@ -293,9 +293,6 @@ export function MatrixTable({ data }: { data: MatrixData }) {
     color: v ? 'var(--foreground)' : 'var(--muted-foreground)', opacity: v ? 1 : 0.45,
     fontWeight: v ? 600 : 400, background: bg, whiteSpace: 'nowrap',
   })
-  const stickyL: CSSProperties = {
-    position: 'sticky', left: 0, background: 'var(--card)', zIndex: 1, whiteSpace: 'nowrap',
-  }
   const stickyR: CSSProperties = {
     position: 'sticky', right: 0, background: 'var(--card)', zIndex: 1,
   }
@@ -308,32 +305,32 @@ export function MatrixTable({ data }: { data: MatrixData }) {
       <DataTable sticky className="[&_td]:text-sm">
         <thead>
           <tr>
-            <Th style={{ ...stickyL, zIndex: 2 }}>시각</Th>
+            <Th className="sticky left-0 z-[1] whitespace-nowrap bg-card z-[2]">시각</Th>
             {data.columns.map(c => (
               <Th className="text-right whitespace-nowrap" key={c.key}
                   title={`전 구간 ${c.total}${c.unit ?? data.unit ?? '건'}`}>
                 {c.label}{c.unit === '%' ? ' (%)' : ''}
               </Th>
             ))}
-            {data.rowTotal && <Th style={{ ...stickyR, zIndex: 2, textAlign: 'right' }}>합계</Th>}
+            {data.rowTotal && <Th align="right" className="sticky right-0 z-[1] bg-card z-[2]">합계</Th>}
           </tr>
         </thead>
         <tbody>
           {data.rows.map(r => (
             <tr key={r.label}>
-              <Td style={stickyL}>{r.label}</Td>
+              <Td className="sticky left-0 z-[1] whitespace-nowrap bg-card">{r.label}</Td>
               {data.columns.map(c => {
                 const v = r.cells[c.key] ?? 0
                 return <Td key={c.key} style={numTd(v, cellBg(c.key, v))}>{v}</Td>
               })}
               {data.rowTotal &&
-                <Td style={{ ...stickyR, ...numTd(r.total), fontWeight: 700 }}>{r.total}</Td>}
+                <Td className="sticky right-0 z-[1] bg-card font-bold" style={{ ...numTd(r.total) }}>{r.total}</Td>}
             </tr>
           ))}
         </tbody>
         <tfoot>
           <tr>
-            <Td style={{ ...stickyL, fontWeight: 700 }}>{data.rowTotal ? '합계' : '전 구간'}</Td>
+            <Td className="sticky left-0 z-[1] whitespace-nowrap bg-card font-bold">{data.rowTotal ? '합계' : '전 구간'}</Td>
             {data.columns.map(c => (
               <Td key={c.key} style={{ ...numTd(c.total), fontWeight: 700 }}>{c.total}</Td>
             ))}

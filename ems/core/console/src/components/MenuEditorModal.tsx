@@ -167,14 +167,13 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
     finally { setSaving(false) }
   }
 
-  const muted = { fontSize: 11, color: 'var(--muted-foreground)' } as const
   return (
     <Modal title="메뉴 편집" onClose={onClose} width={760}>
       {/* 영역(그룹핑) */}
       <div className="mb-3.5">
         <div className="flex items-center gap-2 mb-1.5">
           <b className="text-md">영역 (메뉴 그룹핑)</b>
-          <span style={muted}>운용/관리처럼 사이드바를 크게 나누는 묶음 — 라벨 변경·영역 추가 가능</span>
+          <span className="text-xs text-muted-foreground">운용/관리처럼 사이드바를 크게 나누는 묶음 — 라벨 변경·영역 추가 가능</span>
           <Button className="ml-auto" onClick={addArea}>
             <Plus size={13} /> 영역 추가
           </Button>
@@ -196,7 +195,7 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
       {/* 섹션 목록 */}
       <div className="flex items-center gap-2 mb-1.5">
         <b className="text-md">메뉴</b>
-        <span style={muted}>시스템·릴리스는 잠금 (이름변경/숨김/이동 불가)</span>
+        <span className="text-xs text-muted-foreground">시스템·릴리스는 잠금 (이름변경/숨김/이동 불가)</span>
         <Button className="ml-auto" onClick={addGroup}>
           <Plus size={13} /> 메뉴 그룹 추가
         </Button>
@@ -226,17 +225,17 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
                   {areas.map(a => <SelectItem key={a.key} value={a.key}>{a.label}</SelectItem>)}
                 </SelectContent>
               </Select>
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, opacity: r.locked ? 0.4 : 1 }}>
+              <label className={`inline-flex items-center gap-1 text-sm ${r.locked ? 'opacity-40' : ''}`}>
                 <Checkbox  checked={r.hidden} disabled={r.locked} onCheckedChange={() => patchRow(i, { hidden: !r.hidden })} /> 숨김
               </label>
               {r.custom ? (
                 <>
-                  <span style={{ ...muted, border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px' }}>커스텀</span>
+                  <span className="rounded-sm border border-border px-1.5 py-px text-xs text-muted-foreground">커스텀</span>
                   <Button className="ml-auto"
                     title="그룹 삭제" onClick={() => removeCustom(i)}><Trash2 size={13} /></Button>
                 </>
               ) : (!r.locked && r.label !== r.defaultLabel &&
-                <span style={{ ...muted, marginLeft: 'auto' }}>기본: {r.defaultLabel}</span>
+                <span className="ml-auto text-xs text-muted-foreground">기본: {r.defaultLabel}</span>
               )}
             </div>
             {r.custom && (
@@ -245,7 +244,7 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
                   <div className="flex items-center gap-1.5 mb-1" key={p.slug}>
                     <Input className="w-[210px]" value={p.title}
                       onChange={e => setPageTitle(i, pi, e.target.value)}/>
-                    <code style={muted}>/custom/{p.slug}</code>
+                    <code className="text-xs text-muted-foreground">/custom/{p.slug}</code>
                     <Button title="페이지 삭제"
                       onClick={() => removePage(i, pi)}><Trash2 size={13} /></Button>
                   </div>
@@ -253,7 +252,7 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
                 <Button onClick={() => addPage(i)}>
                   <Plus size={13} /> 페이지 추가
                 </Button>
-                <span style={{ ...muted, marginLeft: 8 }}>
+                <span className="ml-2 text-xs text-muted-foreground">
                   페이지는 빈 위젯 보드로 생성 — 저장 후 해당 페이지에서 위젯을 배치하세요
                 </span>
               </div>

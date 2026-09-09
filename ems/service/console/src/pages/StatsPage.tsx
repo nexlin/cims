@@ -215,7 +215,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
       {/* 재조회 중에도 기존 데이터 유지 — 전체가 '로딩 중' 으로 갈리는 레이아웃 점프 방지 */}
       {loading && !msgData && !svcData && <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중...</div>}
       {loading && (msgData || svcData) && (
-        <div className="text-sm text-muted-foreground py-0.5 px-1"><RotateCw size={12} style={{ verticalAlign: '-2px' }} /> 갱신 중…</div>
+        <div className="text-sm text-muted-foreground py-0.5 px-1"><RotateCw size={12} className="inline align-[-2px]" /> 갱신 중…</div>
       )}
 
       {/* 메시지 통계 */}

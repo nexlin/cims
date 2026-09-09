@@ -7,7 +7,6 @@
 //
 // 데이터는 전부 `stats.health` 응답 1개에서 나온다. useSharedHealth 가 모듈 싱글톤 폴러라 카드를
 // 몇 장 띄워도 호출은 5초당 1회로 동일하다(분해에 따른 부하 증가 없음).
-import type { CSSProperties } from 'react'
 import { useSharedHealth, type HistorySample } from '@core/widgets/useSharedHealth'
 import type { HealthResponse } from '@core/api/stats'
 import type { WidgetDef } from '@core/widgets/types'
@@ -16,18 +15,13 @@ import { Sparkline } from './shared'
 
 // 카드 상자 — flex 컬럼(내용 세로 중앙). 위젯 1장으로 배치되면 grid 칸을 채우고(flex:1),
 // 묶음(StatCardsRow)에서는 grid 자식이라 flex 속성이 무시돼 같은 모양이 된다.
-const CARD_BOX: CSSProperties = {
-  flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column',
-  background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-  padding: '10px 12px', textAlign: 'center', boxSizing: 'border-box',
-}
 
 // hint = 이 수치가 무엇을 세는지(툴팁). 라벨만으로는 헷갈리는 지표에만 단다.
 export function StatCard({ label, value, sub, unit, series, hint }: {
   label: string; value: string | number; sub?: string; unit?: string; series?: number[]; hint?: string
 }) {
   return (
-    <div style={{ ...CARD_BOX, justifyContent: 'center' }} title={hint}>
+    <div className="flex min-h-0 flex-[1_1_auto] flex-col justify-center rounded-md border border-border bg-card px-3 py-2.5 text-center" title={hint}>
       <div className="text-xs text-muted-foreground mb-0.5">{label}</div>
       <div className="text-2xl font-bold leading-[1.15]">
         {value}
@@ -80,7 +74,7 @@ export const HEALTH_METRICS: MetricDef[] = [
 // 로딩 중 자리 확보(팝인 방지) — 카드 1장 크기의 스켈레톤.
 function CardSkeleton({ label }: { label: string }) {
   return (
-    <div style={{ ...CARD_BOX, justifyContent: 'center' }}>
+    <div className="flex min-h-0 flex-[1_1_auto] flex-col justify-center rounded-md border border-border bg-card px-3 py-2.5 text-center">
       <div className="text-xs text-muted-foreground mb-1.5">{label}</div>
       <div style={{ height: 20, background: 'var(--secondary)', borderRadius: 4, opacity: 0.6 }} />
     </div>

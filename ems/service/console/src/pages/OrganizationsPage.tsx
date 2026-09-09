@@ -259,7 +259,7 @@ export default function OrganizationsPage() {
                     <Td>
                       {isEditing ? (
                         <Input  value={editForm.code} disabled
-                          style={{ width: '100%', opacity: 0.6 }} />
+                          className="w-full opacity-60" />
                       ) : (
                         <span className="text-sm text-muted-foreground">{n.code}</span>
                       )}

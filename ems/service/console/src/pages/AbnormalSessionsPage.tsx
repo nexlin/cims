@@ -108,7 +108,7 @@ export function AbnTopIps() {
     <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-3 flex flex-col min-h-0">
       <div className="text-sm font-semibold mb-2 flex-none">발신 IP 상위 (차단 후보)</div>
       {topIps.length === 0 ? <EmptyState title="해당 기간 발신 IP 없음" /> : (
-        <div className="scroll-fill flex min-h-0 flex-1 flex-col overflow-auto" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignContent: 'flex-start' }}>
+        <div className="scroll-fill flex min-h-0 flex-1 flex-row flex-wrap content-start gap-2 overflow-auto">
           {topIps.map(([ip, n]) => (
             <span key={ip} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 24,
  padding: '3px 10px', borderRadius: 14, background: 'rgba(220,38,38,0.08)',
@@ -210,7 +210,7 @@ function KpiCard({ label, value, unit, tone }: {
     <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-2.5 flex flex-col">
       <div className="flex-auto min-h-0 flex flex-col justify-center items-center text-center">
         <div className="text-sm text-muted-foreground mb-1">{label}</div>
-        <div style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.1, color }}>
+        <div className="text-3xl font-bold leading-[1.1]" style={{ color }}>
           {value}
           {unit && <span className="text-sm text-muted-foreground ml-0.5">{unit}</span>}
         </div>

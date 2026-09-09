@@ -347,7 +347,7 @@ function MemberDrill({ group }: { group: string }) {
       <div className="text-sm text-muted-foreground mb-1">
         멤버 {data.total}명 · 현재 참여 {data.active_count}명 · {page}/{pages} 페이지
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 14px' }}>
+      <div className="flex flex-wrap gap-x-3.5 gap-y-0.5">
         {data.members.map(m => (
           <span key={m.msisdn} style={{ fontSize: 12, minWidth: 200, color: m.active ? 'var(--foreground)' : 'var(--muted-foreground)' }}>
             {m.talking ? <Mic size={12} className="inline align-[-2px] text-primary" />

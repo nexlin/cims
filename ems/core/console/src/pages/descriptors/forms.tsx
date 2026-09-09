@@ -19,18 +19,14 @@ import { Checkbox } from '@core/components/ui/checkbox'
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <label className="flex flex-col gap-[3px] text-sm">
-      <span className="text-muted-foreground">{label}{hint && <i style={{ marginLeft: 6, opacity: 0.7 }}>{hint}</i>}</span>
+      <span className="text-muted-foreground">{label}{hint && <i className="ml-1.5 opacity-70">{hint}</i>}</span>
       {children}
     </label>
   )
 }
-const inp: React.CSSProperties = { fontSize: 13 }
-const rowCard: React.CSSProperties = {
-  border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 10, marginBottom: 8, background: 'var(--muted)',
-}
 function Btn({ onClick, children, danger, disabled }: { onClick: () => void; children: React.ReactNode; danger?: boolean; disabled?: boolean }) {
   return <Button type="button" disabled={disabled}
-    style={danger ? { color: 'var(--destructive)' } : undefined} onClick={onClick}>{children}</Button>
+    className={danger ? 'text-destructive' : undefined} onClick={onClick}>{children}</Button>
 }
 
 const SHAPES = ['time-bar', 'kpi', 'distribution', 'table'] as const
@@ -73,11 +69,11 @@ export function ServiceForm({ initial, onClose, onSaved }: {
     <Modal title={isNew ? '새 서비스 정의' : `서비스 정의 — ${initial!.id}`} onClose={onClose} width={440}>
       <div className="flex flex-col gap-3">
         <Field label="서비스 id" hint="(예: cims — 만든 뒤 바꿀 수 없음)">
-          <Input  style={inp} value={id} disabled={!isNew}
+          <Input value={id} disabled={!isNew}
                  onChange={e => setId(e.target.value)} placeholder="myservice" />
         </Field>
         <Field label="표시명">
-          <Input  style={inp} value={label}
+          <Input value={label}
                  onChange={e => setLabel(e.target.value)} placeholder="My Service" />
         </Field>
         <div className="text-xs text-muted-foreground">
@@ -129,12 +125,12 @@ export function ModuleForm({ svc, index, onClose, onSaved }: {
   return (
     <Modal title={index == null ? `모듈 추가 — ${svc.id}` : `모듈 편집 — ${cur?.name}`} onClose={onClose} width={460}>
       <div className="flex gap-2.5 flex-wrap items-end">
-        <Field label="이름"><Input  style={{ ...inp, width: 140 }} value={m.name}
+        <Field label="이름"><Input  className="w-[140px]" value={m.name}
           onChange={e => up({ name: e.target.value })} /></Field>
-        <Field label="포트"><Input  style={{ ...inp, width: 90 }} type="number" value={m.port ?? ''}
+        <Field label="포트"><Input  className="w-[90px]" type="number" value={m.port ?? ''}
           onChange={e => up({ port: e.target.value ? Number(e.target.value) : undefined })} /></Field>
         <Field label="proto"><Select value={toSel(m.proto ?? '')} onValueChange={(v: string) => up({ proto: fromSel(v) || undefined })}>
-  <SelectTrigger style={{ ...inp, width: 80 }}><SelectValue /></SelectTrigger>
+  <SelectTrigger className="w-[80px]"><SelectValue /></SelectTrigger>
   <SelectContent>
             <SelectItem value={NONE}>—</SelectItem><SelectItem value="tcp">tcp</SelectItem><SelectItem value="udp">udp</SelectItem>
   </SelectContent>
@@ -178,25 +174,25 @@ export function AlertRuleForm({ svc, index, onClose, onSaved }: {
   return (
     <Modal title={index == null ? `알람 규칙 추가 — ${svc.id}` : `알람 규칙 편집 — ${cur?.code || cur?.type}`}
            onClose={onClose} width={720}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '65vh', overflowY: 'auto' }}>
+      <div className="flex max-h-[65vh] flex-col gap-2 overflow-y-auto">
               {/* 1행: 클래스 / 코드 / 심각도 / check */}
               <div className="flex gap-2 flex-wrap items-end">
                 <Field label="클래스(type)"><Select value={toSel(r.type)} onValueChange={(v: string) => up({ type: fromSel(v) })}>
-  <SelectTrigger style={{ ...inp, width: 130 }}><SelectValue /></SelectTrigger>
+  <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
   <SelectContent>
                     {ALARM_CLASSES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
   </SelectContent>
 </Select></Field>
-                <Field label="code"><Input  style={{ ...inp, width: 110 }} value={r.code ?? ''}
+                <Field label="code"><Input  className="w-[110px]" value={r.code ?? ''}
                   onChange={e => up({ code: e.target.value })} placeholder="A-PRC-001" /></Field>
                 <Field label="심각도"><Select value={toSel(r.perceived_severity ?? r.severity ?? 'warning')} onValueChange={(v: string) => up({ perceived_severity: fromSel(v) })}>
-  <SelectTrigger style={{ ...inp, width: 100 }}><SelectValue /></SelectTrigger>
+  <SelectTrigger className="w-[100px]"><SelectValue /></SelectTrigger>
   <SelectContent>
                     {SEVERITIES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
   </SelectContent>
 </Select></Field>
                 <Field label="check"><Select value={toSel(r.check ?? '')} onValueChange={(v: string) => up({ check: fromSel(v) })}>
-  <SelectTrigger style={{ ...inp, width: 120 }}><SelectValue /></SelectTrigger>
+  <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
   <SelectContent>
                     {CHECKS.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
   </SelectContent>
@@ -205,42 +201,42 @@ export function AlertRuleForm({ svc, index, onClose, onSaved }: {
               {/* 2행: event_type / probable_cause / mo_class / mo_instance / 조건부 target·threshold */}
               <div className="flex gap-2 mt-1.5 flex-wrap items-end">
                 <Field label="event_type"><Select value={toSel(r.event_type ?? 'processingError')} onValueChange={(v: string) => up({ event_type: fromSel(v) })}>
-  <SelectTrigger style={{ ...inp, width: 140 }}><SelectValue /></SelectTrigger>
+  <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
   <SelectContent>
                     {EVENT_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
   </SelectContent>
 </Select></Field>
-                <Field label="probable_cause"><Input  style={{ ...inp, width: 160 }} value={r.probable_cause ?? ''}
+                <Field label="probable_cause"><Input  className="w-[160px]" value={r.probable_cause ?? ''}
                   onChange={e => up({ probable_cause: e.target.value })} placeholder="softwareError" /></Field>
                 <Field label="mo_class"><Select value={toSel(r.mo_class ?? 'service')} onValueChange={(v: string) => up({ mo_class: fromSel(v) })}>
-  <SelectTrigger style={{ ...inp, width: 100 }}><SelectValue /></SelectTrigger>
+  <SelectTrigger className="w-[100px]"><SelectValue /></SelectTrigger>
   <SelectContent>
                     {MO_CLASSES.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
   </SelectContent>
 </Select></Field>
-                <Field label="mo_instance" hint="(소스, service)"><Input  style={{ ...inp, width: 120 }} value={r.mo_instance ?? ''}
+                <Field label="mo_instance" hint="(소스, service)"><Input  className="w-[120px]" value={r.mo_instance ?? ''}
                   onChange={e => up({ mo_instance: e.target.value })} placeholder="비우면 관측 신원으로 합성" /></Field>
                 {(r.check === 'process_unresponsive' || r.check === 'service_unresponsive' || r.check === 'process_down') && (
-                  <Field label="target" hint="(모듈명)"><Input  style={{ ...inp, width: 80 }} value={r.target ?? ''}
+                  <Field label="target" hint="(모듈명)"><Input  className="w-[80px]" value={r.target ?? ''}
                     onChange={e => up({ target: e.target.value })} /></Field>)}
                 {(r.check === 'rtp_pct_gte' || r.check === 'disk_high') && (
-                  <Field label="threshold"><Input  style={{ ...inp, width: 80 }} type="number" value={r.threshold ?? ''}
+                  <Field label="threshold"><Input  className="w-[80px]" type="number" value={r.threshold ?? ''}
                     onChange={e => up({ threshold: e.target.value ? Number(e.target.value) : undefined })} /></Field>)}
               </div>
               {/* 3행: metric / 메시지 */}
               <div className="flex gap-2 mt-1.5 flex-wrap">
-                <Field label="metric(표시명)"><Input  style={{ ...inp, width: 120 }} value={r.metric ?? ''}
+                <Field label="metric(표시명)"><Input  className="w-[120px]" value={r.metric ?? ''}
                   onChange={e => up({ metric: e.target.value })} /></Field>
-                <Field label="발생 메시지" hint="({mo} 치환)"><Input  style={{ ...inp, width: 200 }} value={r.msg_open ?? ''}
+                <Field label="발생 메시지" hint="({mo} 치환)"><Input  className="w-[200px]" value={r.msg_open ?? ''}
                   onChange={e => up({ msg_open: e.target.value })} /></Field>
-                <Field label="해제 메시지"><Input  style={{ ...inp, width: 160 }} value={r.msg_close ?? ''}
+                <Field label="해제 메시지"><Input  className="w-[160px]" value={r.msg_close ?? ''}
                   onChange={e => up({ msg_close: e.target.value })} /></Field>
               </div>
               {/* 4행: effect / recommended_action (운영 runbook) */}
               <div className="flex gap-2 mt-1.5 flex-wrap">
-                <Field label="영향(effect)"><Input  style={{ ...inp, width: 240 }} value={r.effect ?? ''}
+                <Field label="영향(effect)"><Input  className="w-[240px]" value={r.effect ?? ''}
                   onChange={e => up({ effect: e.target.value })} /></Field>
-                <Field label="권장 조치(action)"><Input  style={{ ...inp, width: 240 }} value={r.recommended_action ?? ''}
+                <Field label="권장 조치(action)"><Input  className="w-[240px]" value={r.recommended_action ?? ''}
                   onChange={e => up({ recommended_action: e.target.value })} /></Field>
               </div>
       </div>
@@ -321,13 +317,13 @@ export function DataSourceForm({ svc, index, onClose, onSaved }: {
 
   return (
     <Modal title={index != null ? `데이터 소스 편집 — ${existing?.id}` : '데이터 소스 추가'} onClose={onClose} width={680}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxHeight: '70vh', overflowY: 'auto' }}>
+      <div className="flex max-h-[70vh] flex-col gap-3.5 overflow-y-auto">
         <div className="flex gap-3 flex-wrap">
-          <Field label="id"><Input  style={{ ...inp, width: 180 }} value={id} onChange={e => setId(e.target.value)} /></Field>
-          <Field label="표시명"><Input  style={{ ...inp, width: 160 }} value={label} onChange={e => setLabel(e.target.value)} /></Field>
+          <Field label="id"><Input  className="w-[180px]" value={id} onChange={e => setId(e.target.value)} /></Field>
+          <Field label="표시명"><Input  className="w-[160px]" value={label} onChange={e => setLabel(e.target.value)} /></Field>
         </div>
         <div className="flex gap-3 items-end flex-wrap">
-          <Field label="endpoint" hint="(REST 경로)"><Input  style={{ ...inp, width: 300 }} value={endpoint}
+          <Field label="endpoint" hint="(REST 경로)"><Input  className="w-[300px]" value={endpoint}
             onChange={e => setEndpoint(e.target.value)} placeholder="/stats/messages/sip" /></Field>
           <div className="flex gap-2.5 pb-1.5 text-sm">
             <span className="text-muted-foreground">query:</span>
@@ -349,28 +345,28 @@ export function DataSourceForm({ svc, index, onClose, onSaved }: {
 
         {/* shape별 매핑 */}
         {shapes.has('time-bar') && (
-          <div style={rowCard}>
+          <div className="mb-2 rounded-md border border-border bg-muted p-2.5">
             <b className="text-sm">시계열 차트 매핑</b>
             <div className="flex gap-2 mt-1.5 flex-wrap">
-              <Field label="from" hint="(배열 경로)"><Input  style={{ ...inp, width: 160 }} value={tbFrom} onChange={e => setTbFrom(e.target.value)} placeholder="buckets / voip.buckets" /></Field>
-              <Field label="label" hint="(필드 후보, 쉼표)"><Input  style={{ ...inp, width: 130 }} value={tbLabel} onChange={e => setTbLabel(e.target.value)} placeholder="hour, date" /></Field>
-              <Field label="value"><Input  style={{ ...inp, width: 110 }} value={tbValue} onChange={e => setTbValue(e.target.value)} placeholder="count" /></Field>
+              <Field label="from" hint="(배열 경로)"><Input  className="w-[160px]" value={tbFrom} onChange={e => setTbFrom(e.target.value)} placeholder="buckets / voip.buckets" /></Field>
+              <Field label="label" hint="(필드 후보, 쉼표)"><Input  className="w-[130px]" value={tbLabel} onChange={e => setTbLabel(e.target.value)} placeholder="hour, date" /></Field>
+              <Field label="value"><Input  className="w-[110px]" value={tbValue} onChange={e => setTbValue(e.target.value)} placeholder="count" /></Field>
             </div>
           </div>
         )}
         {shapes.has('kpi') && (
-          <div style={rowCard}>
+          <div className="mb-2 rounded-md border border-border bg-muted p-2.5">
             <div className="flex items-center">
               <b className="text-sm">KPI 항목 ({kpiItems.length})</b>
               <span className="ml-auto"><Btn onClick={() => setKpiItems(it => [...it, { label: '', path: '' }])}><Plus size={13} /> 항목</Btn></span>
             </div>
             {kpiItems.map((k, i) => (
               <div className="flex gap-2 mt-1.5 items-end" key={i}>
-                <Field label="라벨"><Input  style={{ ...inp, width: 110 }} value={k.label} onChange={e => upKpi(i, { label: e.target.value })} /></Field>
-                <Field label="path"><Input  style={{ ...inp, width: 160 }} value={k.path} onChange={e => upKpi(i, { path: e.target.value })} placeholder="voip.total_attempts" /></Field>
-                <Field label="단위"><Input  style={{ ...inp, width: 50 }} value={k.unit ?? ''} onChange={e => upKpi(i, { unit: e.target.value })} /></Field>
+                <Field label="라벨"><Input  className="w-[110px]" value={k.label} onChange={e => upKpi(i, { label: e.target.value })} /></Field>
+                <Field label="path"><Input  className="w-[160px]" value={k.path} onChange={e => upKpi(i, { path: e.target.value })} placeholder="voip.total_attempts" /></Field>
+                <Field label="단위"><Input  className="w-[50px]" value={k.unit ?? ''} onChange={e => upKpi(i, { unit: e.target.value })} /></Field>
                 <Field label="format"><Select value={toSel(k.format ?? '')} onValueChange={(v: string) => upKpi(i, { format: fromSel(v) || undefined })}>
-  <SelectTrigger style={{ ...inp, width: 90 }}><SelectValue /></SelectTrigger>
+  <SelectTrigger className="w-[90px]"><SelectValue /></SelectTrigger>
   <SelectContent>
                     <SelectItem value={NONE}>—</SelectItem><SelectItem value="duration">duration</SelectItem>
   </SelectContent>
@@ -381,20 +377,20 @@ export function DataSourceForm({ svc, index, onClose, onSaved }: {
           </div>
         )}
         {shapes.has('distribution') && (
-          <div style={rowCard}>
+          <div className="mb-2 rounded-md border border-border bg-muted p-2.5">
             <b className="text-sm">분포 매핑</b>
             <div className="flex gap-2 mt-1.5 flex-wrap">
-              <Field label="fromObject" hint="(dict 경로)"><Input  style={{ ...inp, width: 180 }} value={distObj} onChange={e => setDistObj(e.target.value)} placeholder="voip.end_reasons" /></Field>
-              <Field label="totalPath" hint="(분모)"><Input  style={{ ...inp, width: 180 }} value={distTotal} onChange={e => setDistTotal(e.target.value)} placeholder="voip.total_attempts" /></Field>
+              <Field label="fromObject" hint="(dict 경로)"><Input  className="w-[180px]" value={distObj} onChange={e => setDistObj(e.target.value)} placeholder="voip.end_reasons" /></Field>
+              <Field label="totalPath" hint="(분모)"><Input  className="w-[180px]" value={distTotal} onChange={e => setDistTotal(e.target.value)} placeholder="voip.total_attempts" /></Field>
             </div>
           </div>
         )}
         {shapes.has('table') && (
-          <div style={rowCard}>
+          <div className="mb-2 rounded-md border border-border bg-muted p-2.5">
             <b className="text-sm">표 매핑</b>
             <div className="flex gap-2 mt-1.5 flex-wrap">
-              <Field label="fromObject" hint="(dict 경로)"><Input  style={{ ...inp, width: 180 }} value={tblObj} onChange={e => setTblObj(e.target.value)} placeholder="method_counts" /></Field>
-              <Field label="컬럼" hint="(키, 값 — 쉼표)"><Input  style={{ ...inp, width: 160 }} value={tblCols} onChange={e => setTblCols(e.target.value)} placeholder="메서드, 건수" /></Field>
+              <Field label="fromObject" hint="(dict 경로)"><Input  className="w-[180px]" value={tblObj} onChange={e => setTblObj(e.target.value)} placeholder="method_counts" /></Field>
+              <Field label="컬럼" hint="(키, 값 — 쉼표)"><Input  className="w-[160px]" value={tblCols} onChange={e => setTblCols(e.target.value)} placeholder="메서드, 건수" /></Field>
             </div>
           </div>
         )}

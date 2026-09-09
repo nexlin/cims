@@ -18,7 +18,7 @@ export function Sparkline({ data, color = 'var(--primary)', height = 24 }: { dat
     return `${x.toFixed(1)},${y.toFixed(1)}`
   }).join(' ')
   return (
-    <svg width={w} height={h} style={{ display: 'block', margin: '4px auto 0' }}>
+    <svg width={w} height={h} className="mx-auto mb-0 mt-1 block">
       <polyline points={pts} fill="none" stroke={color} strokeWidth={1.5}
         strokeLinecap="round" strokeLinejoin="round" />
     </svg>

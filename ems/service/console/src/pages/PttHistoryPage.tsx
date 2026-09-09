@@ -519,7 +519,7 @@ function SectionLabel({ label, n, live }: { label: string; n: number; live?: boo
     }}>
       {live && <span className="w-[6px] h-[6px] rounded-full bg-success"/>}
       {label}
-      <span style={{ fontWeight: 600, letterSpacing: 0, textTransform: 'none', opacity: .75 }}>{n}</span>
+      <span className="font-semibold normal-case tracking-normal opacity-75">{n}</span>
     </div>
   )
 }
@@ -681,10 +681,10 @@ function HourHeatmap({ hours, sel, onPick }: {
  background: c.v > 0 ? `color-mix(in srgb, var(--primary) ${Math.round(ratio * 100)}%, var(--card))` : 'var(--muted)',
  color: ratio > 0.55 ? 'var(--cims-on-solid)' : 'var(--foreground)',
                  }}>
-              <div style={{ fontSize: 11.5, fontWeight: 600, lineHeight: 1.3, height: 16, fontVariantNumeric: 'tabular-nums' }}>
+              <div className="h-4 text-sm font-semibold leading-[1.3] [font-variant-numeric:tabular-nums]">
                 {c.v > 0 ? c.v : ' '}
               </div>
-              <div style={{ fontSize: 9, lineHeight: 1.3, height: 12, opacity: .8, fontVariantNumeric: 'tabular-nums' }}>{c.h}</div>
+              <div className="h-3 text-xs leading-[1.3] opacity-80 [font-variant-numeric:tabular-nums]">{c.h}</div>
             </div>
           )
         })}

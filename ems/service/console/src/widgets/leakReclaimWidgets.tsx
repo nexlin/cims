@@ -9,7 +9,6 @@
 // 각각 위젯이라 카드 안 편집으로 재배치할 수 있다(console_platform §3.0.1).
 // 지표 4개는 서로 다른 축(총 회수 / 무RTP / RTP후 미해제 / 노드별)이라 낱개다(§3.1).
 // 조회는 날짜(페이지 파라미터 `date`)를 키로 공유하므로 블록이 몇 개든 요청은 1회다(makeSharedByKey).
-import { type CSSProperties } from 'react'
 import { api } from '@core/api/client'
 import { InfoDot } from '@core/components/InfoDot'
 import { makeCardWidget } from '@core/widgets/CardLayout'
@@ -48,10 +47,6 @@ function useReclaims() {
 }
 
 // 지표 카드 — 통계 화면의 지표 카드(shape.stat)와 같은 모양으로 통일.
-const CARD: CSSProperties = {
-  flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column',
-  justifyContent: 'center', alignItems: 'center', textAlign: 'center',
-}
 
 function CountCard({ label, value, tone, loading, error }: {
   label: string; value: number; tone?: 'ok' | 'warn'; loading?: boolean; error?: string
@@ -59,13 +54,13 @@ function CountCard({ label, value, tone, loading, error }: {
   const color = tone === 'warn' ? 'var(--destructive)' : tone === 'ok' ? 'var(--cims-success)' : 'var(--foreground)'
   return (
     <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-2.5 flex flex-col">
-      <div style={CARD}>
+      <div className="flex min-h-0 flex-[1_1_auto] flex-col items-center justify-center text-center">
         <div className="text-sm text-muted-foreground mb-1">
           {label}{loading && ' ·'}
         </div>
         {error
           ? <div className="text-sm text-destructive">조회 실패</div>
-          : <div style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.1, color }}>{value}<span className="text-sm text-muted-foreground ml-0.5">건</span></div>}
+          : <div className="text-3xl font-bold leading-[1.1]" style={{ color }}>{value}<span className="text-sm text-muted-foreground ml-0.5">건</span></div>}
       </div>
     </div>
   )

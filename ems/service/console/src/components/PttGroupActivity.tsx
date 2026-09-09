@@ -17,7 +17,7 @@ import { useInlineAudio } from '@core/components/useInlineAudio'
 import { useToast } from '@core/components/Toast'
 import {
   DayHeatmap, ActivityHeatmap, SessionRow, RANGE_OPTIONS,
- recIdOf, dateOf, detailKey, dayOf, hourOf, thStyle,
+ recIdOf, dateOf, detailKey, dayOf, hourOf,
  type DayAgg, type DetailState,
 } from '@svc/components/pttSession'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
@@ -174,15 +174,15 @@ export default function PttGroupActivity({ storeKey }: {
                 <DataTable sticky className="[&_td]:text-sm">
                   <thead>
                     <tr className="bg-muted text-left">
-                      <Th style={{ ...thStyle, width: 24, cursor: 'default' }}></Th>
-                      <Th style={{ ...thStyle, cursor: 'default' }}>세션</Th>
-                      <Th style={{ ...thStyle, cursor: 'default' }}>시각</Th>
-                      <Th style={{ ...thStyle, cursor: 'default', textAlign: 'center' }}>상태</Th>
-                      <Th style={{ ...thStyle, cursor: 'default', textAlign: 'right' }}>발언 턴</Th>
-                      <Th style={{ ...thStyle, cursor: 'default', textAlign: 'right' }}>화자</Th>
-                      <Th style={{ ...thStyle, cursor: 'default', textAlign: 'right' }}>동시</Th>
-                      <Th style={{ ...thStyle, cursor: 'default', textAlign: 'right' }}>발화</Th>
-                      <Th style={{ ...thStyle, cursor: 'default', textAlign: 'right' }}>동작</Th>
+                      <Th width={24} className="cursor-default"></Th>
+                      <Th className="cursor-default">세션</Th>
+                      <Th className="cursor-default">시각</Th>
+                      <Th align="center" className="cursor-default">상태</Th>
+                      <Th align="right" className="cursor-default">발언 턴</Th>
+                      <Th align="right" className="cursor-default">화자</Th>
+                      <Th align="right" className="cursor-default">동시</Th>
+                      <Th align="right" className="cursor-default">발화</Th>
+                      <Th align="right" className="cursor-default">동작</Th>
                     </tr>
                   </thead>
                   <tbody>

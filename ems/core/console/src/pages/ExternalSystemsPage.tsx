@@ -29,7 +29,7 @@ function StatusDot({ st }: { st?: ProbeResult }) {
   const c = s === 'up' ? 'var(--cims-success)' : s === 'down' ? 'var(--destructive)' : 'var(--muted-foreground)'
   const label = s === 'up' ? `정상${st?.latency_ms != null ? ` ${st.latency_ms}ms` : ''}`
     : s === 'down' ? '응답없음' : '미확인'
-  return <span title={label}><span style={{ display: 'inline-block', width: 9, height: 9,
+  return <span title={label}><span className="inline-block size-[9px] rounded-full" style={{
     borderRadius: '50%', background: c, marginRight: 6 }} />{label}</span>
 }
 
@@ -72,19 +72,16 @@ function EditModal({ initial, onClose, onSaved }: {
     finally { setSaving(false) }
   }
 
-  const lbl = { fontSize: 12, color: 'var(--muted-foreground)', display: 'block', marginBottom: 4 } as const
-  const row = { marginBottom: 12 } as const
-
   return (
     <Modal title={initial ? `외부 시스템 수정 — ${initial.name}` : '외부 시스템 등록'} onClose={onClose} width={560}>
-      <div style={row}>
-        <label style={lbl}>이름</label>
+      <div className="mb-3">
+        <label className="mb-1 block text-sm text-muted-foreground">이름</label>
         <Input className="w-full" value={f.name} onChange={e => setF(s => ({ ...s, name: e.target.value }))}
                 placeholder="예: 외부 가입자 DB"/>
       </div>
-      <div style={{ ...row, display: 'flex', gap: 12 }}>
+      <div className="mb-3 flex gap-3">
         <div className="flex-1">
-          <label style={lbl}>유형</label>
+          <label className="mb-1 block text-sm text-muted-foreground">유형</label>
           <Select value={toSel(f.type)} onValueChange={(v: string) => setF(s => ({ ...s, type: fromSel(v) as ExternalSystemType }))}>
             <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -98,11 +95,11 @@ function EditModal({ initial, onClose, onSaved }: {
           </label>
         </div>
       </div>
-      <div style={row}>
-        <label style={lbl}>엔드포인트</label>
+      <div className="mb-3">
+        <label className="mb-1 block text-sm text-muted-foreground">엔드포인트</label>
         {f.endpoints.map((e, i) => (
           <div className="flex gap-1.5 mb-1" key={i}>
-            <Input value={e.host} onChange={ev => setEp(i, { host: ev.target.value })} placeholder="host/IP" style={{ flex: 2 }} />
+            <Input value={e.host} onChange={ev => setEp(i, { host: ev.target.value })} placeholder="host/IP" className="flex-[2]" />
             <Input className="flex-1" type="number" value={e.port || ''} onChange={ev => setEp(i, { port: parseInt(ev.target.value) || 0 })} placeholder="port"/>
             <Input className="flex-1" value={e.label || ''} onChange={ev => setEp(i, { label: ev.target.value })} placeholder="label(선택)"/>
             <Button size="default" onClick={() => rmEp(i)} aria-label="엔드포인트 삭제"
@@ -111,8 +108,8 @@ function EditModal({ initial, onClose, onSaved }: {
         ))}
         <Button className="text-sm" size="default" onClick={addEp}>+ 엔드포인트</Button>
       </div>
-      <div style={row}>
-        <label style={lbl}>상태 점검(probe)</label>
+      <div className="mb-3">
+        <label className="mb-1 block text-sm text-muted-foreground">상태 점검(probe)</label>
         <div className="flex gap-1.5 items-center">
           <Select value={toSel(f.probe?.mode || 'none')} onValueChange={(v: string) => setF(s => ({ ...s, probe: { ...(s.probe || {}), mode: fromSel(v) as ProbeMode } }))}>
             <SelectTrigger><SelectValue /></SelectTrigger>
@@ -121,7 +118,7 @@ function EditModal({ initial, onClose, onSaved }: {
             </SelectContent>
           </Select>
           <Input value={f.probe?.host || ''} onChange={e => setF(s => ({ ...s, probe: { ...(s.probe || { mode: 'tcp' }), host: e.target.value } }))}
-                 placeholder="host(미지정=ep1)" style={{ flex: 2 }} />
+                 placeholder="host(미지정=ep1)" className="flex-[2]" />
           <Input className="flex-1" type="number" value={f.probe?.port || ''} onChange={e => setF(s => ({ ...s, probe: { ...(s.probe || { mode: 'tcp' }), port: parseInt(e.target.value) || undefined } }))}
                  placeholder="port"/>
           <Input className="w-[70px]" type="number" value={f.probe?.timeout ?? 2} onChange={e => setF(s => ({ ...s, probe: { ...(s.probe || { mode: 'tcp' }), timeout: parseFloat(e.target.value) || 2 } }))}
@@ -129,12 +126,12 @@ function EditModal({ initial, onClose, onSaved }: {
         </div>
         <div className="text-xs text-muted-foreground mt-0.5">tcp 만 구현 — http/icmp 는 미확인 처리.</div>
       </div>
-      <div style={row}>
-        <label style={lbl}>설명</label>
+      <div className="mb-3">
+        <label className="mb-1 block text-sm text-muted-foreground">설명</label>
         <Input className="w-full" value={f.description || ''} onChange={e => setF(s => ({ ...s, description: e.target.value }))}/>
       </div>
-      <div style={row}>
-        <label style={lbl}>태그 (쉼표 구분)</label>
+      <div className="mb-3">
+        <label className="mb-1 block text-sm text-muted-foreground">태그 (쉼표 구분)</label>
         <Input className="w-full" value={tagText} onChange={e => setTagText(e.target.value)} placeholder="prod, db"/>
       </div>
       <div className="flex justify-end gap-2 mt-2">

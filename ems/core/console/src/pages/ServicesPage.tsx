@@ -426,7 +426,7 @@ export default function ServicesPage() {
               <div className="border border-border rounded-sm bg-card p-3 flex flex-col gap-2.5" key={card.key}>
                 {/* 헤더 — 모듈명 + critical */}
                 <div className="flex items-center gap-2">
-                  <span style={{ fontFamily: 'monospace', fontWeight: 'bold', fontSize: 14 }}>
+                  <span className="font-mono text-base font-bold">
                     {card.key}
                   </span>
                   {card.critical && <Badge variant="warningSolid">critical</Badge>}
@@ -500,9 +500,7 @@ export default function ServicesPage() {
                   )}
 
                   {/* ³ 다운로드 — 헤더 ▣ 패키징 산출 tarball. 라벨에 모듈명 + 버전 (실수 방지). */}
-                  <div style={{ gridColumn: '1 / -1',
-                                display: 'flex', alignItems: 'center', gap: 6,
-                                fontSize: 12, flexWrap: 'wrap', minWidth: 0 }}>
+                  <div className="col-span-full flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
                     <span className="text-muted-foreground font-medium min-w-[50px]">³ 다운로드</span>
                     {variantTars.map(({ v, tar }) => (
                       <Button className="text-xs py-0.5 px-1.5 font-mono" key={v}
