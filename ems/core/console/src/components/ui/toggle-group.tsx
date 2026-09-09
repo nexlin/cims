@@ -19,7 +19,9 @@ const ToggleGroup = React.forwardRef<
 >(({ className, variant, size, children, ...props }, ref) => (
   <ToggleGroupPrimitive.Root
     ref={ref}
-    className={cn("flex items-center justify-center gap-1", className)}
+    // `flex-wrap` — 시안은 세그먼트가 둘뿐이지만(G3 `공통 설정 | 멤버 비교`) csp 처럼
+    // 컬렉션이 9개인 모듈은 한 줄에 11칸이 되어 패널 밖으로 잘려 나갔다(뒤쪽 칸 클릭 불가).
+    className={cn("flex flex-wrap items-center justify-center gap-1", className)}
     {...props}
   >
     <ToggleGroupContext.Provider value={{ variant, size }}>
