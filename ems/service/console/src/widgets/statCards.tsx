@@ -33,7 +33,7 @@ export function StatCard({ label, value, sub, unit, series, hint }: {
         {value}
         {unit && <span className="text-xs text-muted-foreground ml-[3px]">{unit}</span>}
       </div>
-      {sub && <div className="text-[10px] text-muted-foreground mt-px">{sub}</div>}
+      {sub && <div className="text-xs text-muted-foreground mt-px">{sub}</div>}
       {series && <Sparkline data={series} height={16} />}
     </div>
   )

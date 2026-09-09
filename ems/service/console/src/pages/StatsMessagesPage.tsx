@@ -50,7 +50,7 @@ export default function StatsMessagesPage({ iface }: { iface: string }) {
                 </div>
               ))}
             </div>
-            <div className="flex gap-0.5 text-[9px] text-muted-foreground mt-0.5">
+            <div className="flex gap-0.5 text-xs text-muted-foreground mt-0.5">
               {data.buckets.map(b => <div className="flex-1 text-center" key={b.hour}>{b.hour}</div>)}
             </div>
           </div>

@@ -1,34 +1,10 @@
-import type { Agent, Deployment } from '../../api/deployment'
+import type { Deployment } from '../../api/deployment'
 
 export const SERVICE_KINDS = [
   'csp', 'cmp', 'psp', 'pmp', 'isp', 'imp',
   'csc', 'console', 'phone', 'cwrtc',
 ]
 
-// 상태 색은 **토큰만** 쓴다 (DESIGN-RULES §1-1). hex 를 박아 두면 다크 모드에서 그대로
-// 남아 배경과 대비가 무너진다 — 상태 표시가 안 보이는 것이 실제 결함이었다.
-export function agentStatusColor(s: Agent['status']) {
-  const m: Record<Agent['status'], { bar: string; border: string }> = {
-    pending:  { bar: 'var(--cims-warning-on-soft)', border: 'var(--border)' },
-    approved: { bar: 'var(--cims-info)',            border: 'var(--cims-info-soft)' },
-    online:   { bar: 'var(--cims-success-on-soft)', border: 'var(--cims-success-soft)' },
-    offline:  { bar: 'var(--muted-foreground)',     border: 'var(--border)' },
-    error:    { bar: 'var(--destructive)',          border: 'var(--cims-danger-soft)' },
-    revoked:  { bar: 'var(--muted-foreground)',     border: 'var(--border)' },
-  }
-  return m[s] || m.offline
-}
-
-export function depStatusColor(s: Deployment['status']) {
-  return {
-    pending:   'var(--cims-warning-on-soft)',
-    deploying: 'var(--cims-info)',
-    running:   'var(--cims-success-on-soft)',
-    stopped:   'var(--muted-foreground)',
-    failed:    'var(--destructive)',
-    removed:   'var(--muted-foreground)',
-  }[s] || 'var(--muted-foreground)'
-}
 
 // 실측(live_state) 최우선 유효 상태 — 실제로 떠 있을 때만 running, 안 떠 있으면 절대
 // running 으로 보이지 않는다. status(job 결과=의도)는 실측이 없을 때만(오프라인·최초 보고

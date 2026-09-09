@@ -2,7 +2,8 @@
 // 구성을 그리고, 각 서버/모듈 상태색을 **활성 알람 등급**으로 구동(offline/critical/major 🔴,
 // minor/warning 🟡, 정상 🟢, 설치만 되고 미기동 ⚪).
 // 서비스 무지(범용 인프라). 형상 폴링 15s, 알람은 전역 store 구독. 비관리자/오류 시 빈.
-import { AlertTriangle, ArrowLeftRight, Diamond } from 'lucide-react'
+import { Badge } from '@core/components/ui/badge'
+import { AlertTriangle, ArrowLeftRight, ArrowRight, Diamond } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { haGroupsApi, type HaGroup } from '../../api/ha_groups'
@@ -101,7 +102,7 @@ function NodeBox({ n, sevByMo, onClick }: { n: Node; sevByMo: Map<string, number
                 <AlertTriangle size={12} style={{ color: C_AMBER }}
               aria-label="절체됨 — 설정 선호 노드와 현재 Active 가 다름" />}
             </span>}
-        <span className="ml-auto text-[10px] text-muted-foreground shrink-0">{n.version ? `v${n.version}` : ''}</span>
+        <span className="ml-auto text-xs text-muted-foreground shrink-0">{n.version ? `v${n.version}` : ''}</span>
       </div>
       {/* 모듈 칩 */}
       <div className="border-t border-border pt-1.5 px-2.5 pb-2 flex flex-wrap gap-[5px] bg-muted">
@@ -131,18 +132,17 @@ function ExternalBox({ sys, status, onClick }: { sys: ExternalSystem; status?: P
       <div className="flex items-center gap-1.5">
         <span style={{ width: 9, height: 9, borderRadius: '50%', background: col, display: 'inline-block' }} />
         <b className="text-md">{sys.name}</b>
-        <span className="text-[10px] py-px px-[5px] rounded-[3px] text-card bg-info">외부</span>
-        <span className="text-[10px] py-px px-[5px] rounded-[3px] border border-border text-muted-foreground">
-          {EXT_TYPE_LABEL[sys.type] || sys.type}</span>
+        <Badge variant="infoSolid">외부</Badge>
+        <Badge variant="neutralSoft">{EXT_TYPE_LABEL[sys.type] || sys.type}</Badge>
       </div>
       <div className="mt-1">
         {(sys.endpoints || []).map((e, i) => (
-          <span className="text-xs py-px px-1.5 border border-border rounded-[10px] mr-1 mt-[3px] inline-block" key={i}>
-            <code className="text-xs">{e.host}:{e.port}</code></span>
+          <Badge variant="neutralSoft" className="mr-1 mt-[3px] font-mono font-normal" key={i}>
+            {e.host}:{e.port}</Badge>
         ))}
       </div>
       {hasProbe && st === 'up' && status?.latency_ms != null &&
-        <div className="text-[10px] text-muted-foreground mt-0.5">{status.latency_ms}ms</div>}
+        <div className="text-xs text-muted-foreground mt-0.5">{status.latency_ms}ms</div>}
     </div>
   )
 }
@@ -243,7 +243,7 @@ function SystemTopologyWidget() {
     <div className="panel p-4">
       <div className="font-semibold mb-3 text-base flex items-center">
         시스템 형상 ({systems.length}{ext.length > 0 ? ` + 외부 ${ext.length}` : ''})
-        <a className="ml-auto text-sm font-medium text-primary cursor-pointer" onClick={() => navigate('/deploy/servers')}>시스템/인프라 →</a>
+        <a className="ml-auto inline-flex items-center gap-1 text-sm font-medium text-primary cursor-pointer" onClick={() => navigate('/deploy/servers')}>시스템/인프라 <ArrowRight size={13} /></a>
       </div>
       {/* 데이터가 없어도 카드(패널)는 유지한다 — null 을 돌려주면 로딩 동안 위젯이 통째로
           사라졌다가 팝인하고, 시스템이 0대면 카드 자체가 영영 안 보인다. */}

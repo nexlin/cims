@@ -296,7 +296,7 @@ export default function AutoDeployPage() {
       {issues.length > 0 && (
         <section style={{ ...SEC, borderColor: errCount ? 'var(--destructive)' : 'var(--cims-warning)' }}>
           <h3 style={H3}>검증 결과 — 오류 {errCount} · 경고 {issues.length - errCount}</h3>
-          <div className="max-h-[180px] overflow-auto text-[12.5px]">
+          <div className="max-h-[180px] overflow-auto text-sm">
             {issues.map((i, n) => (
               <div className="py-[3px] px-0 flex gap-2" key={n}>
                 <span style={{ color: i.level === 'error' ? 'var(--destructive)' : 'var(--cims-warning)', fontWeight: 700 }}>
@@ -328,7 +328,7 @@ export default function AutoDeployPage() {
         </div>
 
         {preflight && (
-          <DataTable sticky className="mt-2.5 text-[12.5px]">
+          <DataTable sticky className="mt-2.5 text-sm">
             <thead><tr><Th>서버</Th><Th>host</Th><Th>인증</Th><Th>OS</Th><Th>계정</Th><Th>sudo</Th><Th>결과</Th></tr></thead>
             <tbody>
               {preflight.map(r => (
@@ -354,7 +354,7 @@ export default function AutoDeployPage() {
       {runs.length > 0 && !run && (
         <section style={SEC}>
           <h3 style={H3}>최근 배포</h3>
-          <DataTable sticky className="text-[12.5px]">
+          <DataTable sticky className="text-sm">
             <thead><tr><Th>#</Th><Th>블루프린트</Th><Th>상태</Th><Th>진행</Th><Th>시각</Th><Th /></tr></thead>
             <tbody>
               {runs.map(r => (
@@ -388,7 +388,7 @@ const H3: React.CSSProperties = { fontSize: 13.5, fontWeight: 700, margin: '0 0 
 function Seg({ value, onChange, options }:
              { value: string; onChange: (v: string) => void; options: Array<{ v: string; l: string }> }) {
   return (
-    <div className="inline-flex border border-border rounded-[4px]">
+    <div className="inline-flex border border-border rounded-sm">
       {options.map(o => (
         <button key={o.v} onClick={() => onChange(o.v)}
                 style={{
@@ -410,8 +410,8 @@ function DocPicker({ label, hint, items, value, onChange, onUpload, disabled }: 
   const ref = useRef<HTMLInputElement>(null)
   return (
     <div className="min-w-[320px] flex-1">
-      <div className="text-[12.5px] font-semibold">{label}</div>
-      <div className="text-[11.5px] text-muted-foreground mb-[5px]">{hint}</div>
+      <div className="text-sm font-semibold">{label}</div>
+      <div className="text-xs text-muted-foreground mb-[5px]">{hint}</div>
       <div className="flex gap-1.5">
         <Select value={toSel(value == null ? '' : String(value))}
                 onValueChange={(v: string) => onChange(fromSel(v) ? Number(fromSel(v)) : null)} disabled={disabled}>
@@ -438,7 +438,7 @@ function RawEditor({ value, onChange, issues, disabled, placeholder }: {
 }) {
   const lines = value ? value.split('\n').length : 1
   return (
-    <div className="flex border border-border rounded-[4px] font-mono text-[12.5px] max-h-[420px]">
+    <div className="flex border border-border rounded-sm font-mono text-sm max-h-[420px]">
       <div className="py-2 px-1.5 text-right text-muted-foreground bg-background select-none overflow-hidden border-r border-border min-w-[42px]">
         {Array.from({ length: lines }, (_, i) => <div key={i} style={{ lineHeight: '18px' }}>{i + 1}</div>)}
       </div>
@@ -449,7 +449,7 @@ function RawEditor({ value, onChange, issues, disabled, placeholder }: {
                          fontFamily: 'monospace', fontSize: 12.5,
                          background: 'transparent', color: 'var(--foreground)' }} />
       {issues.length > 0 && (
-        <div className="flex-[0_0_220px] p-2 border-l border-border overflow-auto text-[11.5px]">
+        <div className="flex-[0_0_220px] p-2 border-l border-border overflow-auto text-xs">
           {issues.map((i, n) => (
             <div key={n} style={{ marginBottom: 6,
                                   color: i.level === 'error' ? 'var(--destructive)' : 'var(--cims-warning)' }}>
@@ -479,14 +479,14 @@ function BlueprintForm({ doc, issues }: { doc: Record<string, unknown> | null; i
   const order = (doc.start_order as string[]) || []
   const errFor = (p: string) => issues.find(i => i.path.includes(p))
   return (
-    <div className="text-[12.5px]">
+    <div className="text-sm">
       <div className="mb-2 text-muted-foreground">
         <b className="text-foreground">{String(doc.name || '')}</b>
         {doc.description ? ` — ${doc.description}` : ''}
         {order.length > 0 && <> · 기동 순서: {order.join(' → ')}</>}
       </div>
       {systems.map((s, i) => (
-        <div className="border border-border rounded-[4px] p-2.5 mb-2" key={i}>
+        <div className="border border-border rounded-sm p-2.5 mb-2" key={i}>
           <div className="font-bold">
             {s.name} <span className="font-normal text-muted-foreground">· {s.mode}</span>
             {errFor(`systems[${i}]`) && <AlertTriangle size={13} className="ml-2 inline text-destructive" />}
@@ -527,7 +527,7 @@ function InventoryForm({ view, onChange, disabled, issues }: {
   }
   return (
     <div>
-      <DataTable sticky className="text-[12.5px]">
+      <DataTable sticky className="text-sm">
         <thead>
           <tr><Th>서버 논리명</Th><Th>host</Th><Th>SSH 계정</Th><Th>포트</Th>
               <Th>SSH 비밀번호</Th><Th>sudo</Th><Th>sudo 비밀번호</Th></tr>
@@ -572,7 +572,7 @@ function InventoryForm({ view, onChange, disabled, issues }: {
           })}
         </tbody>
       </DataTable>
-      <div className="text-[11.5px] text-muted-foreground mt-1.5">
+      <div className="text-xs text-muted-foreground mt-1.5">
         비밀번호 칸을 비워 두면 저장된 값이 유지됩니다. 서버 추가·삭제는 [원문 보기]에서 하세요.
       </div>
     </div>
@@ -586,7 +586,7 @@ function PlanView({ phases }: { phases: PlanPhase[] }) {
       <h3 style={H3}>계획 — 총 {total} 단계 (아직 아무것도 바뀌지 않았습니다)</h3>
       {phases.map(ph => (
         <div className="mb-2" key={ph.key}>
-          <div className="text-[12.5px] font-semibold">
+          <div className="text-sm font-semibold">
             {ph.key} · {ph.title}
             {ph.serial && <span className="ml-1.5 text-xs text-warning">순차</span>}
             <span className="ml-2 font-normal text-muted-foreground">
@@ -637,7 +637,7 @@ function RunView({ run, onAction, busy, canEdit }: {
         </div>
       </div>
 
-      {run.error && <div className="text-destructive text-[12.5px] mb-2">{run.error}</div>}
+      {run.error && <div className="text-destructive text-sm mb-2">{run.error}</div>}
       {run.rollback && (
         <div className="text-sm mb-2">
           롤백: 되돌림 {run.rollback.undone.length}건
@@ -648,7 +648,7 @@ function RunView({ run, onAction, busy, canEdit }: {
 
       {run.phases.map(ph => (
         <div className="mb-1.5" key={ph.key}>
-          <div className="text-[12.5px] font-semibold">
+          <div className="text-sm font-semibold">
             {ph.key} · {ph.title}
             <span className="ml-2 font-normal text-muted-foreground">{ph.status}</span>
           </div>

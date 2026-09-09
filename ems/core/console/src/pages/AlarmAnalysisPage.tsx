@@ -45,7 +45,7 @@ function ShareBar({ n, max, color = 'var(--primary)' }: { n: number; max: number
   const pct = max > 0 ? Math.round((n / max) * 100) : 0
   return (
     <div className="flex items-center gap-2">
-      <div className="w-[64px] h-[6px] bg-border rounded-[3px] flex-none">
+      <div className="w-[64px] h-1.5 bg-border rounded-full flex-none">
         <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 3, opacity: 0.85 }} />
       </div>
       <span>{n}</span>
@@ -93,7 +93,7 @@ function SeverityDist({ bySev }: { bySev: Record<string, number> }) {
   if (total === 0) return <div className="text-sm text-muted-foreground">—</div>
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="flex h-[10px] rounded-[5px] overflow-hidden">
+      <div className="flex h-2.5 rounded-full overflow-hidden">
         {entries.map(([s, n]) => (
           <div key={s} title={`${s}: ${n}건`}
                style={{ width: `${(n / total) * 100}%`, background: SEV_COLOR[s] || 'var(--muted-foreground)' }} />

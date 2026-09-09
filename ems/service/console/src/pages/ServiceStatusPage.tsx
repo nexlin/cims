@@ -1,3 +1,4 @@
+import { Alert } from '@core/components/ui/alert'
 import { AlertTriangle, Ban, Check, ChevronDown, ChevronRight, Dot, Mic, MicOff, Phone, PhoneOff, Pin, UserMinus, UserPlus } from 'lucide-react'
 import { useState, useEffect, useCallback, useReducer, Fragment, type CSSProperties } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
@@ -90,7 +91,7 @@ function Gauge({ label, pool }: { label: string; pool: Pool }) {
         <span className="overflow-hidden text-ellipsis whitespace-nowrap" title={label}>{label}</span>
         <span className="whitespace-nowrap">{used} / {total} ({pct}%)</span>
       </div>
-      <div className="h-[8px] rounded-[4px] bg-border overflow-hidden">
+      <div className="h-2 rounded-full bg-border overflow-hidden">
         <div style={{ width: `${Math.min(100, pct)}%`, height: '100%', background: poolColor(pct), transition: 'width .3s' }} />
       </div>
     </div>
@@ -531,9 +532,9 @@ export function OrgStatsCard() {
  return (
     <div className="panel p-2.5">
       {dbDegraded && (
-        <div className="mb-2 py-1.5 px-2.5 rounded-[4px] text-sm bg-warning-soft text-warning border border-border">
+        <Alert variant="warning" className="mb-2">
           DB 조회 실패 — 구성원/등록 수는 표시되지 않습니다 (활성 세션·발언자는 정상). 상세는 OAM 로그 참조.
-        </div>
+        </Alert>
       )}
       <div className="toolbar mb-2">
         <Input className="flex-1 max-w-[280px]" placeholder="가입자 이름/번호 검색 (전체)" value={searchInput}

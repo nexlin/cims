@@ -1,3 +1,4 @@
+import { Alert } from '@core/components/ui/alert'
 import { AlertTriangle, Check, Plus, RotateCw, Zap } from 'lucide-react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../Toast'
@@ -264,7 +265,7 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
 
       {/* T2 drift 배너 — ha_group 멤버 정합 불일치 */}
       {drift.detected && (
-        <div className="bg-warning-soft border border-border rounded-[4px] py-2 px-3 mb-2.5 text-sm text-warning">
+        <Alert variant="warning" className="mb-2.5">
           <AlertTriangle size={13} className="inline align-[-2px]" /> HA 그룹 멤버 간 정합 불일치 — 양 멤버의 jsonl 이 다릅니다.
           {drift.peers.length > 0 && (
             <span className="ml-2">
@@ -272,7 +273,7 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
             </span>
           )}
           <span className="ml-2">정합은 그룹 선택 → [설정 비교] 뷰의 [동기화]로 맞춥니다.</span>
-        </div>
+        </Alert>
       )}
       {!drift.detected && drift.peers.length > 1 && (
         <div className="text-xs text-success mb-2">
@@ -448,7 +449,7 @@ function CheckboxList({ options, value, onChange, emptyText }: {
 }) {
  const selected = new Set(Array.isArray(value) ? (value as unknown[]).map(String) : [])
  return (
-    <div className="flex flex-col gap-0.5 max-h-[120px] overflow-y-auto border border-border rounded-[4px] p-1">
+    <div className="flex flex-col gap-0.5 max-h-[120px] overflow-y-auto border border-border rounded-sm p-1">
       {options.length === 0 ? (
         <div className="text-xs text-muted-foreground">{emptyText || '(항목 없음)'}</div>
       ) : options.map(o => (

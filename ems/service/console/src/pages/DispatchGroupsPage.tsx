@@ -110,8 +110,8 @@ export default function DispatchGroupsPage() {
     { key: 'exp', header: '', width: 26, render: g => <Caret open={openId === g.id} /> },
     { key: 'name', header: '그룹명', sortable: true, render: g => (
       <span><span className="font-semibold">{g.name}</span>
-        {g.monitor_scope !== 'none' && <Badge className="text-[9px] ml-1" variant="dangerSoft" title={`감청 범위: ${SCOPE_LABEL[g.monitor_scope]}`}>감청</Badge>}
-        {g.ptt_listen !== 'none' && <Badge className="text-[9px] ml-0.5" variant="warningSoft" title={`PTT 청취: ${PTT_LABEL[g.ptt_listen]}`}>PTT청취</Badge>}
+        {g.monitor_scope !== 'none' && <Badge className="ml-1" variant="dangerSoft" title={`감청 범위: ${SCOPE_LABEL[g.monitor_scope]}`}>감청</Badge>}
+        {g.ptt_listen !== 'none' && <Badge className="ml-0.5" variant="warningSoft" title={`PTT 청취: ${PTT_LABEL[g.ptt_listen]}`}>PTT청취</Badge>}
       </span>
     ) },
     { key: 'id', header: 'ID', width: 120, sortable: true, render: g => <span className="text-sm text-muted-foreground">{g.id}</span> },
@@ -380,9 +380,9 @@ function TargetPicker({ title, icon, options, value, canEdit, onSave }: {
   useEffect(() => { setSel(new Set(value)) }, [value])
   const dirty = sel.size !== value.length || value.some(v => !sel.has(v))
   return (
-    <div className="flex-[1_1_280px] border border-border rounded-[10px] py-2 px-2.5 bg-card">
+    <div className="flex-[1_1_280px] border border-border rounded-md py-2 px-2.5 bg-card">
       <div className="flex items-center gap-1.5 text-sm font-semibold mb-1.5">
-        {icon} {title} <Badge className="text-[10px]" variant="neutralSoft">{sel.size}</Badge>
+        {icon} {title} <Badge  variant="neutralSoft">{sel.size}</Badge>
         {canEdit && dirty && <Button className="ml-auto" variant="default" onClick={() => onSave(Array.from(sel))}>저장</Button>}
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: 12, maxHeight: 120, overflowY: 'auto' }}>
@@ -434,7 +434,7 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
       {lockedReason && <div className="text-xs text-muted-foreground mb-1.5">{lockedReason}</div>}
       <div className="flex items-stretch gap-2.5 h-[320px]">
         <div style={{ ...panel, flex: 1 }}>
-          <div style={panelHead}>멤버 <Badge className="text-[10px]" variant="brandSoft">{members.length}</Badge>
+          <div style={panelHead}>멤버 <Badge  variant="brandSoft">{members.length}</Badge>
             <span className="ml-auto font-normal text-muted-foreground text-xs">순서 = 순차 호출·포크 상한 절삭 순</span></div>
           <div className="flex-1 min-h-0 overflow-y-auto">
             {members.length === 0
@@ -463,7 +463,7 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
         )}
 
         <div style={{ ...panel, flex: 1.3 }}>
-          <div style={panelHead}>VoLTE 가입자 <Badge className="text-[10px]" variant="neutralSoft">{candidates.length}</Badge></div>
+          <div style={panelHead}>VoLTE 가입자 <Badge  variant="neutralSoft">{candidates.length}</Badge></div>
           <div className="flex flex-1 min-h-0">
             <OrgTreePanel className="flex-[0_0_150px] w-[150px] max-w-[150px] border-0 border-r border-border rounded-none" fill selectedPath={treeScope} onSelect={(pth, n) => { setTreeScope(pth); setTreeName(n) }}/>
             <div className="flex-1 min-w-0 flex flex-col">
@@ -484,7 +484,7 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
                           <span className="font-semibold whitespace-nowrap overflow-hidden text-ellipsis">{c.userName}</span>
                           <span className="text-muted-foreground text-xs">{c.value}{c.orgCode ? ` · ${c.orgCode}` : ''}</span>
                         </span>
-                        {other && other !== selfId && <Badge className="text-[9px]" variant="warningSoft" title="다른 관제 그룹 소속 — 추가하면 이동(가입자당 그룹 하나)">{other}</Badge>}
+                        {other && other !== selfId && <Badge  variant="warningSoft" title="다른 관제 그룹 소속 — 추가하면 이동(가입자당 그룹 하나)">{other}</Badge>}
                       </div>
                     )
                   })}

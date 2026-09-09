@@ -308,10 +308,10 @@ export function AlarmsSection() {
                         {r.message}
                         {isOpen && <span className="ml-2 text-destructive text-xs font-semibold">OPEN</span>}
                         {(r.occurrences ?? 1) > 1 && (
-                          <span className="ml-1.5 text-[10px] font-semibold text-muted-foreground border border-border rounded-[3px] py-0 px-[3px]"
-                                title={`해제 없이 ${r.occurrences}회 재통지 — 최근 ${r.last_open_ts ? fmtTime(r.last_open_ts) : ''}`}>
+                          <Badge variant="neutralSoft" className="ml-1.5 align-[1px]"
+                                 title={`해제 없이 ${r.occurrences}회 재통지 — 최근 ${r.last_open_ts ? fmtTime(r.last_open_ts) : ''}`}>
                             ×{r.occurrences}
-                          </span>
+                          </Badge>
                         )}
                         {(r.comments?.length ?? 0) > 0 && (
                           <span className="ml-1.5 inline-flex items-center gap-0.5 text-xs text-muted-foreground">
@@ -571,10 +571,10 @@ export function EventsSection() {
                       <Td title={ev.source?.detected_by}>
                         {ev.message}
                         {n > 1 && (
-                          <span className="ml-1.5 text-[10px] font-semibold text-muted-foreground border border-border rounded-[3px] py-0 px-[3px]"
-                                title="연속 반복 — 클릭해 개별 통지 열람">
+                          <Badge variant="neutralSoft" className="ml-1.5 align-[1px]"
+                                 title="연속 반복 — 클릭해 개별 통지 열람">
                             ×{n}
-                          </span>
+                          </Badge>
                         )}
                       </Td>
                     </tr>,

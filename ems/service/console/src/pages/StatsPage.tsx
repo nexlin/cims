@@ -49,9 +49,9 @@ function BarChart({ data, labelKey, valueKey, maxH = 160 }: {
  const h = Math.max(v / max * (maxH - 20), 2)
  return (
           <div className="flex-1 flex flex-col items-center" key={i}>
-            <div className="text-[10px] text-muted-foreground mb-0.5">{v > 0 ? v : ''}</div>
+            <div className="text-xs text-muted-foreground mb-0.5">{v > 0 ? v : ''}</div>
             <div style={{ width: '100%', maxWidth: 32, height: h, background: 'var(--primary)', borderRadius: '2px 2px 0 0' }} />
-            <div className="text-[10px] text-muted-foreground mt-0.5">{String(d[labelKey])}</div>
+            <div className="text-xs text-muted-foreground mt-0.5">{String(d[labelKey])}</div>
           </div>
         )
       })}
@@ -253,7 +253,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
  return (
                   <div className="flex items-center gap-2 mb-1.5" key={reason}>
                     <div className="w-[80px] text-md">{reason || 'unknown'}</div>
-                    <div className="flex-1 bg-secondary rounded-[4px] h-[18px]">
+                    <div className="flex-1 bg-secondary rounded-sm h-[18px]">
                       <div style={{ width: `${pct}%`, background: 'var(--primary)', borderRadius: 4, height: 18, minWidth: pct > 0 ? 4 : 0 }} />
                     </div>
                     <div className="w-[60px] text-sm text-right text-muted-foreground">{cnt}건 ({pct}%)</div>
@@ -284,7 +284,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
               {Object.entries(svcData.ptt.by_group).sort((a, b) => b[1] - a[1]).map(([gid, cnt]) => (
                 <div className="flex items-center gap-2 mb-1.5" key={gid}>
                   <div className="w-[80px] text-md">그룹 {gid}</div>
-                  <div className="flex-1 bg-secondary rounded-[4px] h-[18px]">
+                  <div className="flex-1 bg-secondary rounded-sm h-[18px]">
                     <div style={{ width: `${Math.round(cnt / svcData.ptt!.total_calls * 100)}%`, background: 'var(--primary)', borderRadius: 4, height: 18, minWidth: 4 }} />
                   </div>
                   <div className="w-[50px] text-sm text-right text-muted-foreground">{cnt}건</div>

@@ -172,7 +172,7 @@ export function AuditEventsSection() {
                   return (
                     <tr key={`${ev.ts}-${pageStart + i}`}>
                       <Td className="text-sm text-muted-foreground">{fmtTime(ev.ts)}</Td>
-                      <Td>{eventTypeLabel(ev.type)}<div className="font-mono text-[10px] text-muted-foreground">{ev.code || ''}</div></Td>
+                      <Td>{eventTypeLabel(ev.type)}<div className="font-mono text-xs text-muted-foreground">{ev.code || ''}</div></Td>
                       <Td>{p.phase
                         ? <Badge variant={PHASE_BADGE[p.phase] || 'neutralSoft'} >{PHASE_LABEL[p.phase] || p.phase}</Badge>
                         : '-'}</Td>

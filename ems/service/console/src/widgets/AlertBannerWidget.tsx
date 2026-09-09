@@ -1,7 +1,7 @@
 // CIMS 위젯 — 심각 알람 배너. 표준 알람 스트림(/alerts)의 활성 critical/major 만 표시 —
 // sweeper/자기보고의 open/close/ack 상태와 항상 일치한다 (자체 임계 판정 없음).
 // 정상이면 렌더 안 함. 데이터는 전역 알람 store 구독 (alarm_pipeline.md §8.2 구독 1원화).
-import { Check } from 'lucide-react'
+import { ArrowRight, Check } from 'lucide-react'
 import type { WidgetDef } from '@core/widgets/types'
 import { severityOf, useAlarms } from '@core/widgets/useAlarms'
 
@@ -19,7 +19,7 @@ function AlertBannerWidget() {
     }}>
       <div className="font-semibold text-destructive mb-1 flex items-center">
         알람 ({severe.length})
-        <a className="ml-auto text-sm font-medium text-destructive" href="/alerts/history">이력 보기 →</a>
+        <a className="ml-auto inline-flex items-center gap-1 text-sm font-medium text-destructive" href="/alerts/history">이력 보기 <ArrowRight size={13} /></a>
       </div>
       {severe.map((a, i) => (
         <div className="text-md" key={`${a.alarm_id || a.type}-${i}`}>

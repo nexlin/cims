@@ -97,7 +97,7 @@ function ByNodeBlock() {
       <div className="text-sm text-muted-foreground mb-1.5 flex-none">
         노드별 회수{loading && ' · 갱신 중…'}{error && <span className="text-destructive"> · 조회 실패</span>}
       </div>
-      {rows.length === 0 ? <EmptyState title="회수 없음" className="text-[12px]" /> : (
+      {rows.length === 0 ? <EmptyState title="회수 없음" className="text-sm" /> : (
         <div className="scroll-fill">
           <DataTable sticky className="[&_td]:text-sm">
             <thead><tr><Th>노드</Th><Th className="w-[70px] text-right">건수</Th></tr></thead>

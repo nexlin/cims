@@ -592,7 +592,7 @@ export default function VerificationHistoryPage() {
         }
       `}</style>
       <header className="mb-4 flex items-baseline gap-4">
-        <h1 className="text-[22px] font-bold">검증 이력</h1>
+        <h1 className="text-2xl font-bold">검증 이력</h1>
         <span className="text-sm text-muted-foreground">
           총 {total} 회차
         </span>

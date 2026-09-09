@@ -336,7 +336,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
 
       {/* 음성 재생 시 정보 바 */}
       {!isVideo && wallTime && (
-        <div className="flex justify-between items-center py-1 px-5 text-md bg-secondary my-0 mx-5 rounded-[4px]">
+        <div className="flex justify-between items-center py-1 px-5 text-md bg-secondary my-0 mx-5 rounded-sm">
           <span className="font-mono">{wallTime}</span>
           <span className="font-semibold">
             {callType === 'ptt' ? `화자: ${speakerInfo}` : speakerInfo}
@@ -401,12 +401,12 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
                     {preparingSeq === seg.seq
                       ? <Badge variant="brandSoft"  style={{ fontSize: 10, whiteSpace: 'nowrap', animation: 'pulse 1.5s infinite' }}>변환중</Badge>
                       : seg.status === 'ready'
-                      ? <Badge className="text-[10px] whitespace-nowrap" variant="successSoft">완료</Badge>
+                      ? <Badge className="whitespace-nowrap" variant="successSoft">완료</Badge>
                       : seg.status === 'raw'
-                      ? <Badge className="text-[10px] whitespace-nowrap" variant="neutralSoft">미변환</Badge>
+                      ? <Badge className="whitespace-nowrap" variant="neutralSoft">미변환</Badge>
                       : seg.status === 'transcoding'
-                      ? <Badge className="text-[10px] whitespace-nowrap" variant="brandSoft">변환중</Badge>
-                      : <Badge className="text-[10px] whitespace-nowrap" variant="dangerSoft"
+                      ? <Badge className="whitespace-nowrap" variant="brandSoft">변환중</Badge>
+                      : <Badge className="whitespace-nowrap" variant="dangerSoft"
                           title={seg.status_reason || '변환 실패 — 클릭 시 재시도'}>재생불가</Badge>}
                   </Td>
                 </tr>

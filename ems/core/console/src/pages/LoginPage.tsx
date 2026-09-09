@@ -99,7 +99,7 @@ export default function LoginPage() {
       <div className="auth-card">
         <div className="auth-logo">
           <Radio size={32} className="text-primary" />
-          <span className="app-logo-text text-[22px]">CIMS</span>
+          <span className="app-logo-text text-2xl">CIMS</span>
         </div>
 
         {mode === 'login' && (

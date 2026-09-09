@@ -45,7 +45,7 @@ export function TimeBarChart({ data }: { data: TimeBarData }) {
     <div className="flex-1 min-h-0 flex items-end gap-0.5 py-0 px-1">
       {buckets.map((b, i) => (
         <div className="flex-1 min-w-0 h-full flex flex-col items-center" key={i}>
-          <div className="flex-none text-[10px] text-muted-foreground mb-0.5">
+          <div className="flex-none text-xs text-muted-foreground mb-0.5">
             {b.value > 0 && i % every === 0 ? b.value : ''}
           </div>
           {/* 막대 영역 — 남은 높이 전부. 막대는 그 안에서 값 비율만큼 차지한다. */}
@@ -55,7 +55,7 @@ export function TimeBarChart({ data }: { data: TimeBarData }) {
                           background: 'var(--primary)', borderRadius: '2px 2px 0 0' }} />
           </div>
           {/* 라벨은 몇 칸 걸러 하나만 — 막대는 다 보이되 글자만 솎는다(겹쳐 뭉개지는 것보다 낫다). */}
-          <div className="flex-none text-[10px] text-muted-foreground mt-0.5">
+          <div className="flex-none text-xs text-muted-foreground mt-0.5">
             {i % every === 0 ? labels[i] : ''}
           </div>
         </div>
@@ -193,7 +193,7 @@ export function KpiCards({ data }: { data: KpiData }) {
 // 지표 카드 — 값 하나. 카드가 자기 칸을 채우고 값은 세로 중앙.
 export function StatValue({ data }: { data: KpiData }) {
   const k = data.items[0]
-  if (!k) return <EmptyState title="지표 없음" className="text-[12px]" />
+  if (!k) return <EmptyState title="지표 없음" className="text-sm" />
   return (
     <div className="flex-auto min-h-0 flex flex-col justify-center items-center text-center">
       <div className="text-sm text-muted-foreground mb-1">{k.label}</div>
@@ -228,7 +228,7 @@ export function DistributionBars({ data }: { data: DistributionData }) {
         return (
           <div className="flex items-center gap-2 mb-1.5" key={i}>
             <div className="w-[90px] text-md overflow-hidden text-ellipsis whitespace-nowrap">{it.label || 'unknown'}</div>
-            <div className="flex-1 bg-secondary rounded-[4px] h-[18px] flex overflow-hidden">
+            <div className="flex-1 bg-secondary rounded-sm h-[18px] flex overflow-hidden">
               {seg ? series!.map(sp => {
                 const v = it.parts?.[sp.key] || 0
                 if (v <= 0) return null

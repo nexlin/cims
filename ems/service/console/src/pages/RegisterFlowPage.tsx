@@ -1,3 +1,4 @@
+import { Input } from '@core/components/ui/input'
 import { useState } from 'react'
 import { flowApi, type FlowMessage } from '@core/api/flow'
 import FlowPage from '@core/pages/FlowPage'
@@ -56,7 +57,7 @@ export default function RegisterFlowPage() {
           <>
             <div className="flex items-center gap-1.5">
               <label className="text-sm text-muted-foreground whitespace-nowrap">사용자 ID</label>
-              <input className="w-[160px] py-1 px-2 rounded-[4px] border border-border text-md font-mono"
+              <Input className="w-[160px] font-mono"
                 value={user}
                 onChange={e => setUser(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && search()}
@@ -64,7 +65,7 @@ export default function RegisterFlowPage() {
             </div>
             <div className="flex items-center gap-1.5">
               <label className="text-sm text-muted-foreground whitespace-nowrap">날짜</label>
-              <input className="py-1 px-2 rounded-[4px] border border-border text-md"
+              <Input
                 type="date"
                 value={date}
                 onChange={e => setDate(e.target.value)}/>

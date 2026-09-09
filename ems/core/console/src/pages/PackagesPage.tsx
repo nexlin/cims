@@ -179,7 +179,7 @@ function ModuleRow({ mod, active, onClick }: {
       }}>
       <div className="flex items-baseline gap-1.5">
         <b className="text-base">{mod.name}</b>
-        <span className="ml-auto text-xs text-muted-foreground bg-secondary py-px px-1.5 rounded-[10px]">{mod.versions.length}</span>
+        <Badge variant="neutralSoft" className="ml-auto">{mod.versions.length}</Badge>
       </div>
       <div className="text-xs text-muted-foreground mt-[3px]">
         최신 v{mod.latest.version} · {fmtRelTime(mod.lastUploadedAt)}
@@ -277,7 +277,7 @@ function VersionRow({ pkg: p, isLatest, expanded, onToggle,
         </span>
         <span className="text-muted-foreground text-sm">· {fmtSize(p.file_size)}</span>
         {depCount > 0 && (
-          <span className="ml-auto text-xs text-primary bg-brandsoft py-0.5 px-2 rounded-[10px]">배포 {depCount}곳</span>
+          <Badge variant="brandSoft" className="ml-auto">배포 {depCount}곳</Badge>
         )}
       </div>
 

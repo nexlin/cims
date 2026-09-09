@@ -214,7 +214,7 @@ function UploadProgressRow({ row, onAbort, onRemove, onRetry }: {
       <Td>
         {(row.state === 'uploading' || row.state === 'done') && (
           <>
-            <div className="w-[240px] h-[8px] bg-muted rounded-[4px] overflow-hidden">
+            <div className="w-60 h-2 bg-muted rounded-full overflow-hidden">
               <div style={bar(row.state === 'done' ? 'var(--cims-success)' : 'var(--cims-info)')} />
             </div>
             <span className="text-muted-foreground text-xs">
@@ -232,7 +232,7 @@ function UploadProgressRow({ row, onAbort, onRemove, onRetry }: {
       <Td>
         <Badge variant={sb.tone}>{sb.label}</Badge>
         {row.msg && row.state === 'done' && (
-          <div className="text-[10px] text-muted-foreground">{row.msg}</div>
+          <div className="text-xs text-muted-foreground">{row.msg}</div>
         )}
       </Td>
       <Td>

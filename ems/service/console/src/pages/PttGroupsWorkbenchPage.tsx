@@ -102,9 +102,9 @@ export default function PttGroupsWorkbenchPage() {
     { key: 'exp', header: '', width: 26, render: g => <Caret open={openId === g.id} /> },
     { key: 'name', header: '그룹명', sortable: true, render: g => (
       <span><span className="font-semibold">{g.name}</span>
-        {g.encryption && <Badge className="text-[9px] ml-1" variant="successSoft">암호</Badge>}
-        {g.emergency_call && <Badge className="text-[9px] ml-0.5" variant="dangerSoft">긴급</Badge>}
-        {g.video_enabled && <Badge className="text-[9px] ml-0.5" variant="brandSoft">영상</Badge>}
+        {g.encryption && <Badge className="ml-1" variant="successSoft">암호</Badge>}
+        {g.emergency_call && <Badge className="ml-0.5" variant="dangerSoft">긴급</Badge>}
+        {g.video_enabled && <Badge className="ml-0.5" variant="brandSoft">영상</Badge>}
       </span>
     ) },
     { key: 'id', header: 'ID', width: 130, sortable: true, render: g => <span className="text-sm text-muted-foreground">{g.id}</span> },
@@ -113,8 +113,8 @@ export default function PttGroupsWorkbenchPage() {
     { key: 'floor', header: '동시발언', width: 78, align: 'center', render: g => {
       const fp = g.floor_policy || 'single'
       if (fp === 'single') return <span className="text-sm text-muted-foreground" title="한 명씩 발언">단일</span>
-      if (fp === 'dual') return <Badge className="text-[9px]" variant="warningSoft" title="평시 1명, 긴급·임박자만 끼어들기">긴급</Badge>
-      return <Badge className="text-[9px]" variant="brandSoft" title={`정원 ${g.max_talkers ?? 2}명까지 동시 발언`}>{g.max_talkers ?? 2}명</Badge>
+      if (fp === 'dual') return <Badge  variant="warningSoft" title="평시 1명, 긴급·임박자만 끼어들기">긴급</Badge>
+      return <Badge  variant="brandSoft" title={`정원 ${g.max_talkers ?? 2}명까지 동시 발언`}>{g.max_talkers ?? 2}명</Badge>
     } },
     { key: 'owner', header: '소유자', width: 110, render: g => <span className="text-sm text-muted-foreground">{g.authorized_user_name || g.authorized_user || '—'}</span> },
     { key: 'org', header: '조직', width: 130, render: g => <span className="text-sm text-muted-foreground">{orgs.find(o => o.code === g.org_code)?.name || g.org_code || '—'}</span> },
@@ -293,7 +293,7 @@ function GroupDrawer(p: GroupDrawerProps) {
             )
           })}
           {tab === 'activity' && (
-            <span className="ml-2.5 self-center pb-0.5 text-[11.5px] text-muted-foreground">
+            <span className="ml-2.5 self-center pb-0.5 text-xs text-muted-foreground">
               이 그룹의 세션만 — 전체 세션은 <b>서비스 › 이력 › PTT 이력</b>
             </span>
           )}
@@ -407,7 +407,7 @@ function GroupDrawer(p: GroupDrawerProps) {
 
 // 멤버/후보 공용 우선순위 칩
 function PriChip({ n }: { n: number }) {
-  return <span className="text-[10px] font-semibold text-muted-foreground bg-muted border border-border rounded-full py-px px-[7px]">P{n}</span>
+  return <span className="text-xs font-semibold text-muted-foreground bg-muted border border-border rounded-full py-px px-[7px]">P{n}</span>
 }
 
 // ── 멤버 행 (좌측 패널) — 선택 + 우선순위/역할 인라인 편집 ──
@@ -515,7 +515,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
   }
 
   const panelHead: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 600 }
-  const countChip = (n: number, tone?: 'primary') => <Badge className="text-[10px]" variant={tone === 'primary' ? 'brandSoft' : 'neutralSoft'}>{n}</Badge>
+  const countChip = (n: number, tone?: 'primary') => <Badge  variant={tone === 'primary' ? 'brandSoft' : 'neutralSoft'}>{n}</Badge>
   const panel: React.CSSProperties = { display: 'flex', flexDirection: 'column', minWidth: 0, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: 'var(--card)' }
 
   return (

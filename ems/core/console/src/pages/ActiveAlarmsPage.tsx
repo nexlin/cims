@@ -171,9 +171,7 @@ export function ActiveAlarmList() {
                     <Td>
                       {a.message}
                       {(a.occurrences ?? 1) > 1 && (
-                        <span className="ml-1.5 text-[10px] font-semibold text-muted-foreground border border-border rounded-[3px] py-0 px-[3px]">
-                          ×{a.occurrences}
-                        </span>
+                        <Badge variant="neutralSoft" className="ml-1.5 align-[1px]">×{a.occurrences}</Badge>
                       )}
                       {(a.comments?.length ?? 0) > 0 && (
                         <span className="ml-1.5 inline-flex items-center gap-0.5 text-xs text-muted-foreground">

@@ -5,7 +5,7 @@
 //   헤더 드로어/이력 탭). 배너 역할(critical/major 강조)을 흡수 — 심각 알람 행에 좌측 강조선.
 //   데이터는 전역 알람 store 구독 1원화(alarm_pipeline.md §8.2, 개별 fetch 없음). 폴링 실패는
 //   "표시 없음 ≠ 정상" 을 위해 명시(error). 타일 클릭 = 해당 severity 로 목록 필터.
-import { AlertTriangle, Check } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Check } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { alertsApi } from '@core/api/alerts'
@@ -65,7 +65,7 @@ function ActiveAlarmsWidget() {
             <AlertTriangle size={13} /> 조회 실패</span>
         )}
         <span className="ml-auto flex gap-3">
-          <a className="text-sm font-medium" href="#" onClick={e => { e.preventDefault(); navigate('/alerts/active') }}>활성 전체 →</a>
+          <a className="inline-flex items-center gap-1 text-sm font-medium" href="#" onClick={e => { e.preventDefault(); navigate('/alerts/active') }}>활성 전체 <ArrowRight size={13} /></a>
           <a className="text-sm font-medium text-muted-foreground" href="#" onClick={e => { e.preventDefault(); navigate('/alerts/catalog') }}>카탈로그</a>
         </span>
       </div>

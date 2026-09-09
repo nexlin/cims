@@ -241,7 +241,7 @@ function SeriesSelectBody({ config }: { config?: Record<string, unknown> }) {
  opacity: allOn ? 1 : 0.5,
               }}>
         <div className="text-sm text-muted-foreground">{allLabel}</div>
-        <div className="text-[22px] font-bold text-foreground mt-[3px]">
+        <div className="text-2xl font-bold text-foreground mt-[3px]">
           {grand}<span className="text-sm text-muted-foreground ml-0.5">건</span>
         </div>
       </button>
@@ -261,7 +261,7 @@ function SeriesSelectBody({ config }: { config?: Record<string, unknown> }) {
               <span style={{ width: 9, height: 9, borderRadius: 2, background: on ? sp.color : 'var(--border)' }} />
               {sp.label}
             </div>
-            <div className="text-[22px] font-bold text-foreground mt-[3px]">
+            <div className="text-2xl font-bold text-foreground mt-[3px]">
               {totals(sp.key)}<span className="text-sm text-muted-foreground ml-0.5">건</span>
             </div>
           </button>

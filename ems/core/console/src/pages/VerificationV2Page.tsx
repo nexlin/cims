@@ -1,3 +1,4 @@
+import { Badge } from '@core/components/ui/badge'
 import { useConfirm } from '../components/custom/confirm'
 import { AlertTriangle, Ban, ChevronDown, ChevronRight, CircleCheck, CircleX, Eraser, FileText, Flag, Hourglass, Package, Pause, Play, SkipForward, Square } from 'lucide-react'
 import { useState, useEffect, Fragment, useCallback } from 'react'
@@ -598,17 +599,17 @@ function StageRow({
                       </td>
                       <td className="py-1.5 px-2">
                         <div className="flex items-center gap-1.5">
-                          <div className="flex-1 h-[6px] bg-secondary rounded-[3px] overflow-hidden">
+                          <div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden">
                             <div style={{
                               width: `${itPct}%`, height: '100%',
                               background: itDone ? statusColor(itStatus) : 'var(--cims-info)',
                               transition: 'width 0.3s',
                             }} />
                           </div>
-                          <span className="min-w-[30px] text-right text-[10px]">{itPct}%</span>
+                          <span className="min-w-[30px] text-right text-xs">{itPct}%</span>
                         </div>
                       </td>
-                      <td className="py-1.5 px-2 text-right text-[10px] text-muted-foreground">
+                      <td className="py-1.5 px-2 text-right text-xs text-muted-foreground">
                         {itDone || isGroup ? fmtMs(it.elapsedMs || stage.items.filter(c => c.parent === it.id).reduce((s, c) => s + c.elapsedMs, 0)) : '–'}
                       </td>
                       <td className="py-1.5 px-2">
@@ -634,30 +635,30 @@ function StageRow({
                               checked={cChecked}
                               disabled={anyRunning} onCheckedChange={() => toggleItemSelect(c.id)} />
                           </td>
-                          <td className="py-1 px-2 text-muted-foreground text-[10px]">
+                          <td className="py-1 px-2 text-muted-foreground text-xs">
                             {idx + 1}.{ci + 1}
                           </td>
                           <td className="py-1 px-2 pl-8">
-                            <code className="text-[10px] text-muted-foreground">
+                            <code className="text-xs text-muted-foreground">
                               └ {c.id.split('.').pop()}
                             </code>
-                            <div className="text-[10px] text-muted-foreground">{c.name}</div>
+                            <div className="text-xs text-muted-foreground">{c.name}</div>
                           </td>
-                          <td className="py-1 px-2 text-muted-foreground text-[10px]">
+                          <td className="py-1 px-2 text-muted-foreground text-xs">
                             {c.desc || '—'}
                           </td>
                           <td className="py-1 px-2">
                             <div className="flex items-center gap-1">
-                              <div className="flex-1 h-[4px] bg-secondary rounded-[2px] overflow-hidden">
+                              <div className="flex-1 h-1 bg-secondary rounded-full overflow-hidden">
                                 <div style={{
                                   width: `${cPct}%`, height: '100%',
                                   background: cDone ? statusColor(c.status) : 'var(--cims-info)',
                                 }} />
                               </div>
-                              <span className="min-w-[26px] text-right text-[9px]">{cPct}%</span>
+                              <span className="min-w-[26px] text-right text-xs">{cPct}%</span>
                             </div>
                           </td>
-                          <td className="py-1 px-2 text-right text-[9px] text-muted-foreground">
+                          <td className="py-1 px-2 text-right text-xs text-muted-foreground">
                             {cDone ? fmtMs(c.elapsedMs) : '–'}
                           </td>
                           <td className="py-1 px-2">
@@ -973,9 +974,7 @@ export default function VerificationV2Page() {
 
       <div className="v2-no-print flex items-center gap-3 mb-3">
         <h2 className="m-0 text-xl">검증 — 6단계 파이프라인</h2>
-        <span className="text-[10px] py-0.5 px-2 bg-success-soft text-success rounded-[4px] font-semibold">
-          LIVE
-        </span>
+        <Badge variant="successSoft">LIVE</Badge>
         {loading && (
           <span className="text-sm text-muted-foreground">로딩 중…</span>
         )}

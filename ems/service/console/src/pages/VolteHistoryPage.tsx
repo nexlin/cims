@@ -345,7 +345,7 @@ function CallRow({ l, isOpen, st, dur, flow, onToggle, onOpenDiagram, onOpenRec 
       <tr onClick={onToggle} style={{ cursor: 'pointer', borderTop: '1px solid var(--border)', background: isOpen ? 'var(--accent)' : 'transparent' }}>
         <Td align="center" className="whitespace-nowrap text-muted-foreground">
                   {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</Td>
-        <Td className="whitespace-nowrap"><Badge className="text-[10px]" variant={l.call_type === 'volte_video' ? 'brandSoft' : 'neutralSoft'}>{l.call_type === 'volte_video' ? '영상' : '음성'}</Badge></Td>
+        <Td className="whitespace-nowrap"><Badge  variant={l.call_type === 'volte_video' ? 'brandSoft' : 'neutralSoft'}>{l.call_type === 'volte_video' ? '영상' : '음성'}</Badge></Td>
         <Td className="whitespace-nowrap">
           <span style={{ fontWeight: 600, color: CALLER_C }}>{l.initiator}</span>
           <span className="text-muted-foreground"> → </span>
@@ -478,7 +478,7 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
                               <Td align="right" className="whitespace-nowrap text-sm text-muted-foreground">{i + 1}</Td>
                               <Td className="whitespace-nowrap text-sm text-muted-foreground">{fmtClock(m.ts)}</Td>
                               <Td className="whitespace-nowrap text-sm">{actorLbl(m.from)}<span className="text-muted-foreground">→</span>{actorLbl(m.to)}</Td>
-                              <Td className="whitespace-nowrap text-[10px] text-muted-foreground">{(m.nodeId || m.node || '').toUpperCase()}</Td>
+                              <Td className="whitespace-nowrap text-xs text-muted-foreground">{(m.nodeId || m.node || '').toUpperCase()}</Td>
                               <Td className="whitespace-nowrap text-sm">{(() => {
  const d = inferDir(m)
  return d ? <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--cims-on-solid)', background: d === 'TX' ? '#2563eb' : '#16a34a', borderRadius: 3, padding: '1px 5px' }}>{d}</span>
@@ -502,7 +502,7 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
             메시지 상세 {selIdx != null && msgs[selIdx] && <span className="text-sm text-muted-foreground" style={{ color: protoColor(msgs[selIdx].proto || 'SIP') }}>· {msgs[selIdx].label}</span>}
           </div>
           <div className="flex-1 overflow-auto min-h-[200px] max-h-[508px]">
-            {selIdx == null ? <EmptyState title="왼쪽에서 메시지를 선택하세요" className="p-[16px] text-[12px]" />
+            {selIdx == null ? <EmptyState title="왼쪽에서 메시지를 선택하세요" className="p-[16px] text-sm" />
               : bodyLoading ? <div className="flex min-h-0 flex-1 items-center justify-center text-center text-muted-foreground p-[16px]">본문 로딩 중...</div>
                 : <pre className="m-0 p-2.5 text-xs leading-[1.5] whitespace-pre-wrap break-all font-mono">{formatMsgBody(body)}</pre>}
           </div>

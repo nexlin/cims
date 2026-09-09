@@ -414,7 +414,7 @@ export function SessionRow({ sess, isOpen, detail, storeKey, isDuplex, audio, fl
         <td style={{ ...tdStyle, textAlign: 'right' }}>{sess.speaker_count ?? 0}</td>
         <td style={{ ...tdStyle, textAlign: 'right' }}>
           {maxCon > 1
-            ? <Badge className="text-[10px]" variant="brandSoft">{maxCon}명</Badge>
+            ? <Badge  variant="brandSoft">{maxCon}명</Badge>
             : <span className="text-muted-foreground">—</span>}
         </td>
         <td style={{ ...tdStyle, textAlign: 'right' }} className="text-sm text-muted-foreground">{fmtSpeechMs(sess.total_speech_ms)}</td>
@@ -684,7 +684,7 @@ function PanelDetail({ detail, recId, isDuplex, audio, names, turns, speakerOrde
  border: speakerOrder.includes(p.id) ? undefined : '1px solid var(--border)',
                   }} />
                   <Person className="font-semibold min-w-0 overflow-hidden text-ellipsis whitespace-nowrap" id={p.id} names={names}/>
-                  {p.role === 'initiator' && <Badge className="text-[9px]" variant="neutralSoft">개시자</Badge>}
+                  {p.role === 'initiator' && <Badge  variant="neutralSoft">개시자</Badge>}
                   {(p.join || p.leave) && (
                     <span className="text-muted-foreground text-xs">
                       {fmtShortTime(p.join)} ~ {p.leave ? fmtShortTime(p.leave) : (live ? '참여중' : '--')}
@@ -755,7 +755,7 @@ export function Metric({ k, v, s, hint }: { k: string; v: string; s: string; hin
  return (
     <div title={hint}>
       <div style={{ fontSize: 10.5, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-foreground)', fontWeight: 600 }}>{k}</div>
-      <div className="text-muted-foreground text-[15px] font-bold mt-px">
+      <div className="text-muted-foreground text-base font-bold mt-px">
         {v}{s && <small className="text-xs font-medium text-muted-foreground ml-[3px]">{s}</small>}
       </div>
     </div>
@@ -863,7 +863,7 @@ export function EventTimeline({ floor, events, participants, turns, speakerOrder
                   {ev.member && <><Person className="font-medium" id={ev.member} names={names}/>{' '}</>}
                   {disp.label}
                   {ev.type === 'member_join' && ev.role === 'initiator' &&
-                    <Badge className="text-[9px] ml-1.5" variant="neutralSoft">개시자</Badge>}
+                    <Badge className="ml-1.5" variant="neutralSoft">개시자</Badge>}
                   {ev.duration != null && <span className="text-sm text-muted-foreground"> ({fmtDur(ev.duration)})</span>}
                 </span>
               </div>
@@ -960,13 +960,13 @@ export function FloorRow({ f, speakerOrder, names, border, role, turn, recId, au
       {f.user
         ? <Person id={f.user} names={names} style={{ color: uColor, fontWeight: 600 }} />
         : <span style={{ color: uColor }}>-</span>}
-      {role && <Badge className="text-[9px]" variant="neutralSoft">{role}</Badge>}
+      {role && <Badge  variant="neutralSoft">{role}</Badge>}
       {f.prio != null && f.prio >= 0 && <span className="text-sm text-muted-foreground">prio {f.prio}</span>}
       {f.preempt && <span className="text-sm text-warning"><ArrowLeft size={11} /> 선점 {who(f.preempted_from)}</span>}
-      {f.tier && f.tier !== 'normal' && <Badge className="text-[9px]" variant="dangerSoft">{f.tier}</Badge>}
+      {f.tier && f.tier !== 'normal' && <Badge  variant="dangerSoft">{f.tier}</Badge>}
       {extras.length > 0 && <span className="text-muted-foreground text-xs">{extras.join(' · ')}</span>}
-      {turn?.hasVideo && <Badge className="text-[9px]" variant="brandSoft">영상</Badge>}
-      {turn && !turn.playable && <Badge className="text-[9px]" variant="brandSoft">녹취중</Badge>}
+      {turn?.hasVideo && <Badge  variant="brandSoft">영상</Badge>}
+      {turn && !turn.playable && <Badge  variant="brandSoft">녹취중</Badge>}
       {turn && <span className="text-muted-foreground ml-auto text-xs">{fmtMmss(turn.durMs)}</span>}
       <span className="text-sm text-muted-foreground" style={{ marginLeft: turn ? undefined : 'auto', fontSize: 10, opacity: .7 }}>{f.op}</span>
     </div>
@@ -1153,7 +1153,7 @@ function LaneTimebar({ turns, speakerOrder, recId, audio, names, fill, collapsed
         </span>
         <span className="text-sm text-muted-foreground">{fmtClock(spanStart)} ~ {fmtClock(spanEnd)} · {fmtSpeechMs(span)}</span>
         {maxCon > 1 && (
-          <span className="text-[11.5px] text-muted-foreground">· 최대 동시 발언 {maxCon}명</span>
+          <span className="text-xs text-muted-foreground">· 최대 동시 발언 {maxCon}명</span>
         )}
         {!collapsed && zoomed && (
           <span className="text-xs text-primary">

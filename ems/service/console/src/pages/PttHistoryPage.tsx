@@ -375,7 +375,7 @@ export default function PttHistoryPage() {
 
       {/* ── 툴바 2: 종류 · 그룹 · 사람 ── */}
       <div className="toolbar border-t-0">
-        <span className="text-[11.5px] text-muted-foreground">종류</span>
+        <span className="text-xs text-muted-foreground">종류</span>
         <ToggleGroup type="multiple" value={[...kinds]} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
  onValueChange={(v: string[]) => { if (v.length) setKinds(new Set(v as PttSessionKind[])) }}>
           {KINDS.map(k => (
@@ -416,7 +416,7 @@ export default function PttHistoryPage() {
         }}>
           {/* 목록 머리 — 표 헤더가 없어진 자리의 정렬 컨트롤 */}
           <div className="flex items-center gap-1.5 py-1.5 px-2.5 border-b border-border">
-            <span className="text-[11.5px] text-muted-foreground">정렬</span>
+            <span className="text-xs text-muted-foreground">정렬</span>
             <Select value={toSel(sort)} onValueChange={(v: string) => { setSort(fromSel(v) as SortKey); setPage(0) }}>
               <SelectTrigger className="w-[96px] py-0.5 px-1.5 text-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -427,7 +427,7 @@ export default function PttHistoryPage() {
  onClick={() => setOrder(o => (o === 'desc' ? 'asc' : 'desc'))}>
               {order === 'desc' ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
             </Button>
-            <span className="ml-auto text-[11.5px] text-muted-foreground">
+            <span className="ml-auto text-xs text-muted-foreground">
               {loading ? '조회 중…' : `${total}건`}
             </span>
           </div>
@@ -483,7 +483,7 @@ export default function PttHistoryPage() {
  onClose={() => setOpen(null)}
             />
           : wide && (
-            <div className="flex-1 flex items-center justify-center text-muted-foreground text-[12.5px]">
+            <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
               왼쪽에서 세션을 고르면 발언·이벤트가 여기 나옵니다
             </div>
           )}
@@ -554,12 +554,12 @@ function SessionCard({ r, sel, names, onSelect }: {
         {duplex && <Badge variant="brandSoft" >전이중</Badge>}
         {/* 상태는 카드마다 명시 — 구역 라벨은 스크롤하면 시야에서 사라진다 */}
         <Badge variant={live ? 'successSoft' : 'neutralSoft'} >{live ? '진행중' : '종료'}</Badge>
-        <span className="font-semibold text-[12.5px] min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+        <span className="font-semibold text-sm min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
           <Target r={r} names={names} />
         </span>
       </div>
 
-      <div className="text-muted-foreground text-[11.5px]">
+      <div className="text-muted-foreground text-xs">
         {fmtShortTime(r.start_time)} ~ {live ? '진행중' : fmtShortTime(r.end_time)}
         {dur != null && <> · {fmtDur(dur)}</>}
         {r.kind === 'group' && r.mcptt_group_id && <> · {r.mcptt_group_id}</>}
@@ -569,7 +569,7 @@ function SessionCard({ r, sel, names, onSelect }: {
         <span>턴 <b className="text-foreground">{r.turn_count ?? r.segment_count ?? 0}</b></span>
         <span>화자 <b className="text-foreground">{r.speaker_count ?? ((r.people || []).length || 0)}</b></span>
         <span>발화 <b className="text-foreground">{fmtSpeechMs(r.total_speech_ms)}</b></span>
-        {maxCon > 1 && <Badge className="text-[9px]" variant="brandSoft">동시 {maxCon}</Badge>}
+        {maxCon > 1 && <Badge  variant="brandSoft">동시 {maxCon}</Badge>}
         {r.initiator && <span className="ml-auto">개시 <Person id={r.initiator} names={names} /></span>}
       </div>
     </div>
@@ -615,11 +615,11 @@ function SessionPane({ r, detail, names, audio, overlay, flowLoading, onFlow, on
         <Badge variant={KIND_BADGE[r.kind] || 'neutralSoft'} >{KIND_LABEL[r.kind] || r.kind}</Badge>
         {duplex && <Badge variant="brandSoft" >전이중</Badge>}
         <Badge variant={live ? 'successSoft' : 'neutralSoft'} >{live ? '진행중' : '종료'}</Badge>
-        <span className="font-semibold text-[12.5px] min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+        <span className="font-semibold text-sm min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
           <Target r={r} names={names} />
         </span>
         {r.floor_control === 'on' && r.floor_policy && (
-          <Badge className="text-[9px] flex-none" variant="neutralSoft"
+          <Badge className="flex-none" variant="neutralSoft"
  title="세션 당시 동시 발언 정책 (TS 24.380)">
             {r.floor_policy === 'multi' ? `multi · 최대 ${r.max_talkers || '?'}명`
               : r.floor_policy === 'dual' ? 'dual · 2명' : 'single'}
@@ -665,7 +665,7 @@ function HourHeatmap({ hours, sel, onPick }: {
  const max = Math.max(1, ...cells.map(c => c.v))
  return (
     <div>
-      <div className="text-[11.5px] text-muted-foreground mb-[5px]">
+      <div className="text-xs text-muted-foreground mb-[5px]">
         시간대별 세션 <span className="opacity-75">· 색 진할수록 많음 · 클릭 → 그 시간대만</span>
       </div>
       <div className="flex gap-0.5">
@@ -716,9 +716,9 @@ function GroupFilter({ summaries, selected, open, onToggleMenu, onChange }: {
  overflowY: 'auto', padding: 6, background: 'var(--card)', border: '1px solid var(--border)',
  borderRadius: 8, boxShadow: 'var(--cims-elevation-lg)',
         }}>
-          {opts.length === 0 && <EmptyState title="녹취가 있는 그룹이 없습니다" className="p-[12px] text-[12px]" />}
+          {opts.length === 0 && <EmptyState title="녹취가 있는 그룹이 없습니다" className="p-[12px] text-sm" />}
           {opts.map(([key, s]) => (
-            <label className="flex items-center gap-[7px] py-[5px] px-2 rounded-sm text-[12.5px] cursor-pointer" key={key}>
+            <label className="flex items-center gap-[7px] py-[5px] px-2 rounded-sm text-sm cursor-pointer" key={key}>
               <Checkbox  checked={selected.has(key)} onCheckedChange={() => {
  const n = new Set(selected)
  if (n.has(key)) n.delete(key); else n.add(key)
@@ -775,12 +775,12 @@ function PersonFilter({ value, candidates, names, open, onToggleMenu, onChange }
           </div>
           {/* 현재 목록에 등장한 참여자 — 발언하지 않은 참가자도 포함된다 */}
           {shown.slice(0, 40).map(p => (
-            <div className="flex items-center gap-1.5 py-[5px] px-2 rounded-sm text-[12.5px] cursor-pointer" key={p} onClick={() => onChange(p)} title={names.tipOf(p)}>
+            <div className="flex items-center gap-1.5 py-[5px] px-2 rounded-sm text-sm cursor-pointer" key={p} onClick={() => onChange(p)} title={names.tipOf(p)}>
               <span>{names.nameOf(p)}</span>
               {names.person(p) && <span className="text-muted-foreground text-xs">{p}</span>}
             </div>
           ))}
-          {shown.length === 0 && <EmptyState title="표시할 참여자가 없습니다" className="p-[10px] text-[12px]" />}
+          {shown.length === 0 && <EmptyState title="표시할 참여자가 없습니다" className="p-[10px] text-sm" />}
         </div>
       )}
     </div>

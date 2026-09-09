@@ -1,3 +1,4 @@
+import { Input } from '@core/components/ui/input'
 import { useConfirm } from '../components/custom/confirm'
 import { Download, Play, RotateCw, Square, Trash2 } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo } from 'react'
@@ -376,7 +377,7 @@ export default function ServicesPage() {
             <span className="text-muted-foreground text-sm">패키지 미생성</span>
           )}
           {/* 빌드 + 패키징 통합 — 입력 버전을 -v 로 전달 (pkg.json 갱신) + tarball 산출 */}
-          <input className="w-[110px] text-md py-1 px-2 border border-border rounded-[4px]"
+          <Input className="w-[110px]"
             type="text"
             list="all-versions"
             value={globalVersion}
@@ -520,7 +521,7 @@ export default function ServicesPage() {
       )}
         </div>
         <div className="flex-[2_1_0] min-w-0 flex flex-col">
-          <div className="p-3 rounded-[4px] bg-muted text-foreground font-mono text-sm flex flex-col min-h-0 flex-1 overflow-hidden">
+          <div className="p-3 rounded-sm bg-muted text-foreground font-mono text-sm flex flex-col min-h-0 flex-1 overflow-hidden">
             {(() => {
               // activeJob 진행 중이면 항상 job, 그 외엔 마지막 갱신 출처
               const showJob = !!activeJob || (terminalSource === 'job' && jobStatus)
@@ -563,7 +564,7 @@ export default function ServicesPage() {
                     </span>
                     {right && <span>{right}</span>}
                   </div>
-                  <pre className="m-0 flex-1 min-h-0 overflow-auto whitespace-pre-wrap bg-muted p-2 rounded-[4px]">
+                  <pre className="m-0 flex-1 min-h-0 overflow-auto whitespace-pre-wrap bg-muted p-2 rounded-sm">
                     {content}
                   </pre>
                 </>
@@ -595,7 +596,7 @@ export default function ServicesPage() {
                   </div>
                 </>
               ) : templateModal.pkg.config_template ? (
-                <pre className="bg-muted text-foreground p-3 rounded-[4px] text-sm overflow-auto m-0">
+                <pre className="bg-muted text-foreground p-3 rounded-sm text-sm overflow-auto m-0">
                   {JSON.stringify(templateModal.pkg.config_template, null, 2)}
                 </pre>
               ) : (

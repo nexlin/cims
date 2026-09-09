@@ -165,10 +165,10 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
         return (
           <div className="flex items-center gap-2" key={t.slot}>
             {/* 표시는 이름(labelOf), 번호는 hover — 이력 화면 공통 규약 */}
-            <div className="flex-[0_0_128px] text-[11.5px] flex items-center gap-[5px] min-w-0" title={spk}>
+            <div className="flex-[0_0_128px] text-xs flex items-center gap-[5px] min-w-0" title={spk}>
               <span style={{ width: 8, height: 8, borderRadius: 2, background: color, flex: '0 0 auto' }} />
               <span className="overflow-hidden text-ellipsis whitespace-nowrap">{name(spk)}</span>
-              <span className="text-muted-foreground text-[10px]">슬롯 {t.slot}</span>
+              <span className="text-muted-foreground text-xs">슬롯 {t.slot}</span>
             </div>
             <div className="flex-1 h-[30px] flex items-end gap-px cursor-pointer relative"
               onClick={e => {

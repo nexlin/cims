@@ -5,7 +5,7 @@
 // **화면 = 카드 하나**(`cims.abnormal-sessions`)이고 안의 네 블록(조회 조건 · 지표 · 발신 IP 상위 ·
 // 세션 표)은 각각 위젯이라 카드 안 편집으로 재배치할 수 있다(console_platform §3.0.1).
 // 네 블록이 같은 조회 조건·결과를 봐야 하므로 상태는 모듈 store(`abnormalStore.ts`)에 둔다.
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRight } from 'lucide-react'
 import { useToast } from '@core/components/Toast'
 import { InfoDot } from '@core/components/InfoDot'
 import { abnDerived, abnormal, useAbnormal } from './abnormalStore'
@@ -160,7 +160,7 @@ export function AbnTable() {
                       </Td>
                       <Td className="text-xs">{x.ua || '-'}</Td>
                       <Td style={{ fontSize: 12, textAlign: 'right', fontWeight: x.attempts > 5 ? 700 : 400 }}>{x.attempts}</Td>
-                      <Td className="text-[10px] text-muted-foreground">
+                      <Td className="text-xs text-muted-foreground">
                         {x.methods.join(',') || '-'}{x.statuses.length > 0 && <span> / {x.statuses.join(',')}</span>}
                       </Td>
                       <Td>
@@ -180,12 +180,12 @@ export function AbnTable() {
           </div>
           {sessions.length > s.pageSize && (
             <div className="flex items-center justify-center gap-2.5 py-2 px-0 flex-none border-t border-border">
-              <Button disabled={s.page === 0} onClick={() => abnormal.setPage(s.page - 1)}>← 이전</Button>
+              <Button disabled={s.page === 0} onClick={() => abnormal.setPage(s.page - 1)}><ArrowLeft /> 이전</Button>
               <span className="text-sm text-muted-foreground">
                 {s.page * s.pageSize + 1}–{Math.min((s.page + 1) * s.pageSize, sessions.length)} / {sessions.length}건
                 (페이지 {s.page + 1}/{pageCount})
               </span>
-              <Button disabled={s.page >= pageCount - 1} onClick={() => abnormal.setPage(s.page + 1)}>다음 →</Button>
+              <Button disabled={s.page >= pageCount - 1} onClick={() => abnormal.setPage(s.page + 1)}>다음 <ArrowRight /></Button>
               <Select value={String(s.pageSize)} onValueChange={(v: string) => abnormal.setPageSize(Number(v))}>
                 <SelectTrigger className="text-sm py-0.5 px-1"><SelectValue /></SelectTrigger>
                 <SelectContent>

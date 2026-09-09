@@ -503,7 +503,7 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
                     <td className="py-1 px-1.5 text-muted-foreground font-mono">
                       {display(initial[k])}
                     </td>
-                    <td className="text-center text-primary">→</td>
+                    <td className="text-center text-primary"><ArrowRight size={12} className="inline" /></td>
                     <td className="py-1 px-1.5 text-primary font-mono">
                       {display(values[k])}
                     </td>

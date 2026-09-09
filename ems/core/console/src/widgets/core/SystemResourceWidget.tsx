@@ -1,6 +1,6 @@
 // 코어 위젯 — 시스템 리소스(차트). 서버별 CPU/메모리/디스크/네트워크 추이를 area 차트로.
 // 지표는 체크박스로 모두 또는 선택한 것만 동시 표시. agent metric(2s 수집, tail-read) 사용.
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, ArrowRight } from 'lucide-react'
 import { useState, useEffect, useCallback, Fragment } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { deploymentApi, type Agent, type AgentMetric } from '../../api/deployment'
@@ -110,7 +110,7 @@ function SystemResourceWidget() {
             </label>
           ))}
         </span>
-        <a className="ml-auto text-sm font-medium text-primary cursor-pointer" onClick={() => navigate('/deploy/servers')}>서버 →</a>
+        <a className="ml-auto inline-flex items-center gap-1 text-sm font-medium text-primary cursor-pointer" onClick={() => navigate('/deploy/servers')}>서버 <ArrowRight size={13} /></a>
       </div>
 
       {rows.length === 0 ? (

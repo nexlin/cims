@@ -33,7 +33,7 @@ import { splitPrefixHost } from './ha/helpers'
 import { ApiError } from '../api/client'
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
-import { agentStatusColor, depEffectiveStatus, fmtRelTime } from './deploy/deployHelpers'
+import { depEffectiveStatus, fmtRelTime } from './deploy/deployHelpers'
 import ModuleConfigModal, { sectionForScope } from '../components/module/ModuleConfigModal'
 import { GroupConfigCompareView } from '../components/group/GroupConfigCompareView'
 import HealthCheckModal from '../components/HealthCheckModal'
@@ -813,31 +813,24 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
  const isOpen = expanded.has(g.id)
  const isSelected = selection?.kind === 'group' && selection.id === g.id
  const modeChip = g.mode === 'active_standby' ? 'AS' : 'AA'
- const modeColor = g.mode === 'active_standby' ? 'var(--cims-info)' : 'var(--cims-success)'
  const canAddMember = g.mode === 'all_active'  // AS 는 master/backup 2 fixed
  return (
           <div key={g.id}>
             <div onClick={() => onSelect({ kind: 'group', id: g.id })}
- style={{
- display: 'flex', alignItems: 'center', gap: 6, padding: '8px 10px',
- borderBottom: '1px solid var(--border)', cursor: 'pointer',
- background: isSelected ? 'var(--cims-brand-soft)' : 'var(--muted)',
-                 }}>
+ className={`flex cursor-pointer items-center gap-1.5 border-b border-border px-2.5 py-2 ${
+ isSelected ? 'bg-brandsoft' : 'bg-muted'}`}>
               <span className="w-[14px] text-muted-foreground" onClick={e => { e.stopPropagation(); onToggleExpand(g.id) }}>{isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
-              <span style={{
- background: modeColor, color: 'var(--cims-on-solid)', fontSize: 10,
- padding: '1px 5px', borderRadius: 3,
-              }}>{modeChip}</span>
+              <Badge variant={g.mode === 'active_standby' ? 'infoSolid' : 'successSolid'}>{modeChip}</Badge>
               <b className="flex-1">{g.name}</b>
               {g.vip && (
-                <span className="text-[10px] text-muted-foreground" title={`VIP ${g.vip}/${g.vip_mask}`}>
+                <span className="text-xs text-muted-foreground" title={`VIP ${g.vip}/${g.vip_mask}`}>
                   VIP {g.vip}
                 </span>
               )}
               <span className="text-xs text-muted-foreground">{members.length}</span>
               {canAddMember && (
-                <button className="border border-border bg-card text-info text-xs py-0 px-1.5 rounded-[3px] cursor-pointer font-semibold" onClick={e => { e.stopPropagation(); onAddMember(g) }}
- title="새 멤버 자동 생성 (이름 자동, install_command 발급)">+</button>
+                <Button variant="outline" size="iconSm" onClick={e => { e.stopPropagation(); onAddMember(g) }}
+ title="새 멤버 자동 생성 (이름 자동, install_command 발급)"><Plus /></Button>
               )}
             </div>
             {isOpen && members.map(a => (
@@ -855,22 +848,17 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
       {/* Standalone — 그룹화 없이 각자 시스템 row */}
       {standalone.map(a => {
  const isSelected = selection?.kind === 'agent' && selection.id === a.id
- const sc = agentStatusColor(a.status)
  return (
           <div key={`sa-${a.id}`}
  onClick={() => onSelect({ kind: 'agent', id: a.id })}
- style={{
- display: 'flex', alignItems: 'center', gap: 6, padding: '8px 10px',
- borderBottom: '1px solid var(--border)', cursor: 'pointer',
- background: isSelected ? 'var(--cims-brand-soft)' : 'var(--muted)',
-               }}>
+ className={`flex cursor-pointer items-center gap-1.5 border-b border-border px-2.5 py-2 ${
+ isSelected ? 'bg-brandsoft' : 'bg-muted'}`}>
             <span className="w-[14px]"/>  {/* expand 자리 비움 — group 정렬 맞춤 */}
-            <span className="bg-muted-foreground text-white text-[10px] py-px px-[5px] rounded-[3px]">SA</span>
+            <Badge variant="neutralSolid">SA</Badge>
             <b className="flex-1">{agentDisplayName(a.name)}</b>
-            <span className="text-[10px] text-muted-foreground">{a.ip_address || '—'}</span>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: sc.bar,
- display: 'inline-block', marginLeft: 4 }} />
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-xs text-muted-foreground">{a.ip_address || '—'}</span>
+            <StatusDot status={a.status} label="" className="ml-1" />
+            <span className="text-xs text-muted-foreground">
               {(depsByAgent.get(a.id) || []).length}m
             </span>
           </div>
@@ -889,28 +877,25 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick, onRe
  onClick: () => void
  onRemove?: () => void   // AA 멤버만 제공 — 그룹에서 멤버 제거 (agent 자체는 standalone 으로 남음)
 }) {
- const sc = agentStatusColor(a.status)
  return (
     <div onClick={onClick}
- style={{
- display: 'flex', alignItems: 'center', gap: 6,
- padding: '6px 10px', paddingLeft: indent ? 32 : 10,
- borderBottom: '1px solid var(--border)', cursor: 'pointer',
- background: active ? 'var(--cims-brand-soft)' : undefined,
-         }}>
-      <span style={{ width: 8, height: 8, borderRadius: '50%', background: sc.bar }} />
-      <span style={{ flex: 1, fontWeight: active ? 600 : 400 }}>{agentDisplayName(a.name)}</span>
+ className={`flex cursor-pointer items-center gap-1.5 border-b border-border py-1.5 pr-2.5 ${
+ indent ? 'pl-8' : 'pl-2.5'} ${active ? 'bg-brandsoft' : ''}`}>
+      <StatusDot status={a.status} label="" />
+      <span className={`flex-1 ${active ? 'font-semibold' : ''}`}>{agentDisplayName(a.name)}</span>
       {role && (
-        <span title={role === 'master' ? 'Master — priority 100 (절체 우선순위)' : 'Backup — priority 90'}
- style={{
- fontSize: 10, padding: '1px 5px', borderRadius: 3, fontWeight: 600,
- background: role === 'master' ? 'var(--cims-info)' : 'var(--muted-foreground)', color: 'var(--cims-on-solid)',
-              }}>{role === 'master' ? 'M' : 'B'}</span>
+        <Badge variant={role === 'master' ? 'infoSolid' : 'neutralSolid'}
+ title={role === 'master' ? 'Master — priority 100 (절체 우선순위)' : 'Backup — priority 90'}>
+          {role === 'master' ? 'M' : 'B'}
+        </Badge>
       )}
-      <span className="text-[10px] text-muted-foreground">{depCount}m</span>
+      <span className="text-xs text-muted-foreground">{depCount}m</span>
       {onRemove && (
-        <button className="border border-destructive bg-card text-destructive text-[10px] py-0 px-[5px] rounded-[3px] cursor-pointer font-semibold" onClick={e => { e.stopPropagation(); onRemove() }}
- title="그룹에서 멤버 제거 (agent 자체는 standalone 으로 유지)"><X size={11} /></button>
+        // 트리 행의 [멤버 제거] 는 도안(TreePanel 458:6956)이 붉게 그렸다 — §7-14 대로 그림을 따른다
+        <Button variant="outline" size="iconSm"
+ className="border-destructive text-destructive"
+ onClick={e => { e.stopPropagation(); onRemove() }}
+ title="그룹에서 멤버 제거 (agent 자체는 standalone 으로 유지)"><X /></Button>
       )}
     </div>
   )
@@ -3387,7 +3372,7 @@ function PendingMemberModal({ info, onClose }: {
         </div>
       )}
       <div className="relative">
-        <pre className="bg-muted text-foreground p-3 pr-[88px] rounded-[4px] text-sm whitespace-pre-wrap m-0">{info.install_command}</pre>
+        <pre className="bg-muted text-foreground p-3 pr-[88px] rounded-sm text-sm whitespace-pre-wrap m-0">{info.install_command}</pre>
         <Button className="absolute t-[8px] r-[8px]"
  onClick={copy}>{copied ? <Check size={12} /> : <Copy size={12} />} 복사</Button>
       </div>
@@ -3838,10 +3823,10 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
  return (
     <Modal title={`${agent.name} — 모듈 추가`} onClose={onClose} width={600}>
       {agent.ha_group && (
-        <div className="text-sm text-muted-foreground mb-2 py-1.5 px-2.5 bg-brandsoft border border-info-soft rounded-[4px]">
+        <Alert variant="info" className="mb-2">
           이 agent 는 HA 그룹 <b>{agent.ha_group.name}</b> (mode={agent.ha_group.mode}, role={agent.ha_group.role}) 소속 —
           {' '}<b>{agent.ha_group.mode}</b> 가능 모듈 + standalone 모듈만 install 가능
-        </div>
+        </Alert>
       )}
       <div className="form-grid">
         <label>1. 모듈 *</label>
@@ -3890,7 +3875,7 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
             )}
 
             <label>4. 설명</label>
-            <div className="border border-border rounded-[4px] p-2 text-md text-foreground whitespace-pre-wrap min-h-[36px]">
+            <div className="border border-border rounded-sm p-2 text-md text-foreground whitespace-pre-wrap min-h-[36px]">
               {selectedPkg.description
                 ? selectedPkg.description
                 : <span className="text-muted-foreground text-sm">(패키지에 설명 없음)</span>}

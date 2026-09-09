@@ -1,5 +1,6 @@
 // 외부 시스템 관리 — 외부 DB / 모니터링 / 스토리지 / 인증 등 등록. 대시보드 시스템 형상에 표시.
 // file_store 컬렉션(OAM /api/v1/external-systems) 기반 CRUD + TCP 라이브니스 probe.
+import { Badge } from '@core/components/ui/badge'
 import { Check, X } from 'lucide-react'
 import { useConfirm } from '../components/custom/confirm'
 import { useState, useEffect, useCallback } from 'react'
@@ -179,7 +180,7 @@ export default function ExternalSystemsPage() {
     <div className="panel p-4">
       <div className="flex items-center mb-3">
         <div>
-          <div className="font-semibold text-[15px]">외부 시스템 ({items.length})</div>
+          <div className="font-semibold text-base">외부 시스템 ({items.length})</div>
           <div className="text-sm text-muted-foreground">외부 DB·모니터링·스토리지 등 등록 — 대시보드 시스템 형상에 표시.</div>
         </div>
         <Button className="ml-auto" variant="default" size="default" onClick={() => setEditing('new')}>+ 외부 시스템 추가</Button>
@@ -196,9 +197,9 @@ export default function ExternalSystemsPage() {
               <tr key={s.id}>
                 <Td>{(s.probe?.mode ?? 'none') !== 'none' ? <StatusDot st={status.get(s.id)} /> : <span className="text-muted-foreground">—</span>}</Td>
                 <Td><b>{s.name}</b>{s.description && <div className="text-xs text-muted-foreground">{s.description}</div>}</Td>
-                <Td><span className="text-xs py-px px-1.5 border border-border rounded-[3px]">{TYPE_LABEL[s.type]}</span></Td>
+                <Td><Badge variant="neutralSoft">{TYPE_LABEL[s.type]}</Badge></Td>
                 <Td>{(s.endpoints || []).map((e, i) => <code className="text-xs mr-1.5" key={i}>{e.host}:{e.port}</code>)}</Td>
-                <Td>{(s.tags || []).map(t => <span className="text-[10px] py-px px-[5px] bg-secondary rounded-md mr-[3px]" key={t}>{t}</span>)}</Td>
+                <Td>{(s.tags || []).map(t => <span className="text-xs py-px px-[5px] bg-secondary rounded-md mr-[3px]" key={t}>{t}</span>)}</Td>
                 <Td>{s.enabled ? <Check size={13} className="text-success" /> : '—'}</Td>
                 <Td className="whitespace-nowrap">
                   {(s.probe?.mode ?? 'none') !== 'none' &&

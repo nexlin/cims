@@ -142,7 +142,7 @@ export default function PttGroupActivity({ storeKey }: {
   }
 
  if (!storeKey) {
- return <EmptyState title="아직 통화 기록이 없는 그룹입니다 — 첫 그룹콜 이후 활동이 쌓입니다." className="p-[24px] text-[12.5px]" />
+ return <EmptyState title="아직 통화 기록이 없는 그룹입니다 — 첫 그룹콜 이후 활동이 쌓입니다." className="p-[24px] text-sm" />
   }
 
  return (
@@ -205,7 +205,7 @@ export default function PttGroupActivity({ storeKey }: {
               </div>
             </div>
           )}
-          <div className="text-[11.5px] text-muted-foreground">
+          <div className="text-xs text-muted-foreground">
             선택 일자 {day.slice(4, 6)}/{day.slice(6, 8)} · {daySessions.length}세션
             {daySessions.length > 0 && ` · ${new Set(daySessions.map(s => hourOf(s.dir))).size}개 시간대`}
           </div>
