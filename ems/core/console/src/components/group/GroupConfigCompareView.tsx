@@ -16,7 +16,7 @@
 //  데이터가 새 템플릿에 얹히지 않게 한다. 정본: oam_base_service_split.md §14.6.
 //
 //  서버 개별(scope=system) 설정은 여기 없음 — 각 서버 선택 → [패키지 설정] 탭.
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, ArrowUpRight } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../Toast'
 import {
@@ -67,6 +67,17 @@ const SYNC_REASON: Record<string, string> = {
  no_peers:                 '비교할 멤버 없음 (단일 배포)',
  active_has_no_deployment: 'ACTIVE 노드에 이 패키지 미배포',
  package_not_deployed:     '그룹에 이 패키지 배포 없음',
+}
+
+// 배열 값의 한 항목을 한 줄로 — object_list 항목({ip, port})은 도안처럼 `ip:port` 로 잇는다
+// (G3-4 233:4045 의 `CMP probe 엔드포인트` 셀은 항목마다 줄을 바꾼다).
+function itemText(f: ConfigTemplateField, x: unknown): string {
+ if (x && typeof x === 'object' && !Array.isArray(x)) {
+ const rec = x as Record<string, unknown>
+ const keys = f.item_schema?.fields.map(k => k.key) ?? Object.keys(rec)
+ return keys.map(k => rec[k]).filter(v => v !== undefined && v !== null && v !== '').join(':')
+  }
+ return String(x)
 }
 
 export function GroupConfigCompareView({ group, members: liveMembers,
@@ -629,6 +640,8 @@ export function GroupConfigCompareView({ group, members: liveMembers,
                               <span className="font-mono font-normal">
  v{depByAgent.get(m.id)?.package_version || '?'}
                               </span>
+                              {/* 이 셀이 「그 멤버 편집으로 가는 통로」임을 알리는 표식 (G3-4 233:4045) */}
+                              <ArrowUpRight size={13} />
                             </span>
                           </Th>
                         ))}
@@ -659,7 +672,11 @@ export function GroupConfigCompareView({ group, members: liveMembers,
                                 <Td key={m.id} mono className="cursor-pointer align-top"
  title={SRC_HINT[cell.src]}
  onClick={() => onSelectMember(m.id, effectivePkgName)}>
-                                  {display(f, cell.v)}
+                                  {Array.isArray(cell.v) && cell.v.length > 0
+                                    ? (cell.v as unknown[]).map((x, n) => (
+                                        <div key={n}>{itemText(f, x)}</div>
+                                      ))
+                                    : display(f, cell.v)}
                                   {/* 출처는 값 아래 한 줄로 (시안은 `미설정` 을 둘째 줄에 둔다) */}
                                   {muted && (
                                     <div className="font-sans text-xs font-normal text-muted-foreground">

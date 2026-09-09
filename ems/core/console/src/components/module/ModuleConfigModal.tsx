@@ -715,6 +715,8 @@ function FieldRow({ field, value, initialValue, isChanged, src, markerExtra, onC
     <FormField
  changed={isChanged}
  required={field.required}
+      // bool 은 라벨을 체크박스 오른쪽에 붙여 **한 줄**로 (시안 221:3984)
+ inlineLabel={field.type === 'bool'}
  label={
         <>
           {field.label}

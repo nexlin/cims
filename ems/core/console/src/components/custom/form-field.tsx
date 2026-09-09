@@ -14,7 +14,8 @@ import { cn } from '@core/lib/utils'
  * S3·SA3·G3-1 은 마커를 입력칸 높이 가운데에 뒀지만 그 세 장은 전부 한 줄짜리 입력만 있어
  * 이 경우를 정하지 못한다 — **모든 필드 유형이 다 나오는 도안(G3-3)이 결정한다.**
  */
-export function FormField({ label, required, help, error, marker, aside, changed, children, className }: {
+export function FormField({ label, required, help, error, marker, aside, changed,
+                            inlineLabel, children, className }: {
   label: ReactNode
   required?: boolean
   help?: ReactNode
@@ -23,19 +24,37 @@ export function FormField({ label, required, help, error, marker, aside, changed
   aside?: ReactNode
   /** 저장 전 변경된 필드 — 라벨을 브랜드색으로 들어 올린다 */
   changed?: boolean
+  /**
+   * 체크박스처럼 **컨트롤이 라벨보다 작은** 값 — 라벨을 위에 두지 않고 컨트롤 오른쪽에
+   * 붙여 한 줄로 그린다. 정본 = Figma G3-5 `field · checkbox`(221:3984):
+   * `checkboxRow` = Checkbox 16 + 8 + 라벨(12px), 필드 높이 **18**.
+   * 라벨을 위에 두면 체크박스 한 칸에 세 줄(라벨·박스·도움말)이 나가 폼이 늘어진다.
+   */
+  inlineLabel?: boolean
   children: ReactNode
   className?: string
 }) {
+  const labelText = (
+    <span className={cn('text-sm font-medium', changed && 'text-primary')}>
+      {label}{required && <span className="ml-0.5 text-destructive">*</span>}
+    </span>
+  )
   return (
     <label className={cn('flex items-start gap-2.5', className)}>
       <span className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <span className={cn('text-sm font-medium', changed && 'text-primary')}>
-          {label}{required && <span className="ml-0.5 text-destructive">*</span>}
-        </span>
-        <span className="flex items-center gap-2.5">
-          <span className="min-w-0 flex-1">{children}</span>
-          {aside}
-        </span>
+        {inlineLabel ? (
+          <span className="flex items-center gap-2">
+            {children}{labelText}{aside}
+          </span>
+        ) : (
+          <>
+            {labelText}
+            <span className="flex items-center gap-2.5">
+              <span className="min-w-0 flex-1">{children}</span>
+              {aside}
+            </span>
+          </>
+        )}
         {(error || help) && (
           <span className={cn('text-xs', error ? 'text-destructive' : 'text-muted-foreground')}>
             {error || help}
