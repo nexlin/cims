@@ -16,7 +16,7 @@
 //  데이터가 새 템플릿에 얹히지 않게 한다. 정본: oam_base_service_split.md §14.6.
 //
 //  서버 개별(scope=system) 설정은 여기 없음 — 각 서버 선택 → [패키지 설정] 탭.
-import { AlertTriangle, ArrowUpRight, Link2 } from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../Toast'
 import {
@@ -34,6 +34,8 @@ import { Alert } from '../ui/alert'
 import { EmptyState } from '../custom/empty-state'
 import { Badge } from '../ui/badge'
 import { SyncStatusRow } from '../custom/sync-status-row'
+import { SubSection } from '../custom/collapsible-section'
+import { DataTable, Td, Th } from '../custom/data-table'
 import { ToggleGroup, ToggleGroupItem } from '../ui/toggle-group'
 import {
   SectionBlock, StoreMigrateFooter, defaultValue, serviceScopeKeys, fieldValueEq, type FieldValue,
@@ -401,12 +403,6 @@ export function GroupConfigCompareView({ group, members: liveMembers,
  return { ok, drift, individual }
   }, [template, syncKeys, driftKeys])
 
- const stateStyle: Record<CellState, React.CSSProperties> = {
- ok:         { background: 'var(--cims-success-soft)' },
- drift:      { background: 'var(--cims-warning-soft)' },
- individual: {},
-  }
-
  if (groupPkgNames.length === 0) {
     // ES-2 — 탭 본문 전체가 이 한 장으로 대체된다. 모듈 칩·세그먼트·저장바 모두 내지 않는다.
  return (
@@ -433,10 +429,10 @@ export function GroupConfigCompareView({ group, members: liveMembers,
  return (
             <button key={name} onClick={() => setSelectedPkgName(name)}
  aria-pressed={active}
- className={`flex h-8 items-center gap-2 rounded-md border px-3 text-md transition-colors ${
+ className={`flex h-8 items-center gap-[7px] rounded-full border px-3 text-base font-semibold transition-colors ${
  active
-                        ? 'border-primary bg-brandsoft font-semibold text-brandsoft-on'
-                        : 'border-border bg-background text-foreground hover:bg-accent'}`}>
+                        ? 'border-primary bg-brandsoft text-brandsoft-on'
+                        : 'border-border bg-card text-foreground hover:bg-accent'}`}>
               {name}
               <span className={`font-mono text-sm font-normal ${
  vers.length > 1 ? 'text-warning-on' : 'text-muted-foreground'}`}
@@ -592,56 +588,49 @@ export function GroupConfigCompareView({ group, members: liveMembers,
           /* ── 멤버 비교 표 ── */
  !configView ? <div className="flex min-h-0 flex-1 items-center justify-center text-center text-muted-foreground p-[20px]">로딩 중...</div> : (
             <>
-              <div className="text-sm mb-3 flex gap-3 items-center flex-wrap">
-                <span className="inline-flex items-center gap-1 text-success">
-                  <Link2 size={13} /> 공통 일치 {summary.ok}
-                </span>
-                {/* 0건에 경고색을 쓰지 않는다 (DESIGN-RULES §1-7) */}
-                <span className={summary.drift
-                  ? 'inline-flex items-center gap-1 font-semibold text-warning-on'
-                  : 'inline-flex items-center gap-1 text-muted-foreground'}>
-                  <AlertTriangle size={13} /> 드리프트 {summary.drift}
-                </span>
-                <span className="text-muted-foreground">개별 {summary.individual}</span>
+              {/* 요약 — 시안 G3-2(162:2565)는 **배지 셋**이다(아이콘 없음).
+                  0건에 경고색을 쓰지 않는다 (DESIGN-RULES §1-7). */}
+              <div className="mb-3 flex flex-wrap items-center gap-1.5">
+                <Badge variant="brandSoft">공통 일치 {summary.ok}</Badge>
+                <Badge variant={summary.drift ? 'warningSoft' : 'neutralSoft'}>
+                  드리프트 {summary.drift}
+                </Badge>
+                <Badge variant="neutralSoft">개별 {summary.individual}</Badge>
                 {!isAS && (
-                  <span className="text-muted-foreground">
-                    · AA 그룹 — 동기화 없음, 편집은 각 서버의 [패키지 설정] 탭
+                  <span className="text-xs text-muted-foreground">
+                    AA 그룹 — 동기화 없음, 편집은 각 서버의 [패키지 설정] 탭
                   </span>
                 )}
               </div>
               {undeployedMembers.length > 0 && (
-                <div className="text-sm text-muted-foreground mb-3">
+                <div className="mb-3 text-sm text-muted-foreground">
                   미배포 멤버: {undeployedMembers.map(m => m.name).join(', ')}
                 </div>
               )}
+              {/* 섹션은 카드가 아니라 **Level 2 접힘 머리 + 레일 + 표** 다 (162:2565).
+                  구 화면은 회색 머리띠를 얹은 카드였고 행 전체를 초록/노랑으로 칠했다 —
+                  시안 표 계약은 「행 배경 tint 로 상태를 나타내지 않는다」(§Table). */}
               {template.sections.map(sec => (
-                <div className="border border-border rounded-sm mb-3 bg-card overflow-hidden" key={sec.key}>
-                  <div className="py-2.5 px-3.5 bg-muted border-b border-border flex items-baseline gap-2">
-                    <b>{sec.title}</b>
-                    {sec.description && (
-                      <span className="text-xs text-muted-foreground">— {sec.description}</span>
-                    )}
-                  </div>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <SubSection key={sec.key} title={sec.title} hint={sec.description}>
+                  <DataTable>
                     <thead>
-                      <tr className="text-muted-foreground">
-                        <th className="text-left py-1.5 px-3.5 w-[240px]">필드</th>
-                        <th className="w-[70px] text-center">구분</th>
+                      <tr>
+                        <Th width={240}>필드</Th>
+                        <Th width={84} align="center">구분</Th>
                         {deployedMembers.map(m => (
-                          <th className="text-left py-1.5 px-2.5 cursor-pointer text-primary" key={m.id}
+                          <Th key={m.id} className="cursor-pointer"
  title={`${m.name} 의 설정 편집으로 이동`}
  onClick={() => onSelectMember(m.id, effectivePkgName)}>
-                            <span className="inline-flex items-center gap-1">
+                            <span className="inline-flex items-center gap-1.5">
                               {m.name}
                               {activeAid === m.id && (
                                 <span className="size-1.5 rounded-full bg-success" title="ACTIVE" />
                               )}
-                              <span className="font-mono text-xs font-normal text-muted-foreground">
+                              <span className="font-mono font-normal">
  v{depByAgent.get(m.id)?.package_version || '?'}
                               </span>
-                              <ArrowUpRight size={13} />
                             </span>
-                          </th>
+                          </Th>
                         ))}
                       </tr>
                     </thead>
@@ -649,45 +638,43 @@ export function GroupConfigCompareView({ group, members: liveMembers,
                       {sec.fields.map(f => {
  const st = cellState(f)
  return (
-                          <tr key={f.key} style={{ borderTop: '1px solid var(--border)', ...stateStyle[st] }}>
-                            <td className="py-1.5 px-3.5" title={f.key}>
-                              {f.label || f.key}
-                            </td>
-                            <td className="text-center">
-                              {syncKeys.has(f.key)
-                                ? (st === 'drift'
-                                    ? <AlertTriangle size={13} className="inline text-warning-on"
- aria-label="드리프트" />
-                                    : <Link2 size={13} className="inline text-success"
- aria-label="그룹 공통" />)
-                                : <span className="text-[10px] text-muted-foreground" title="서버별 고유값 — 동기화 대상 아님">개별</span>}
-                            </td>
+                          <tr key={f.key}>
+                            <Td className="align-top" title={f.key}>{f.label || f.key}</Td>
+                            <Td align="center" className="align-top">
+                              {st === 'individual' ? (
+                                <Badge variant="neutralSoft"
+ title="서버별 고유값 — 동기화 대상 아님">개별</Badge>
+                              ) : st === 'drift' ? (
+                                <Badge variant="warningSoft"
+ title="멤버 간 값이 다르다 — 교정 대상">드리프트</Badge>
+                              ) : (
+                                <Badge variant="brandSoft"
+ title="그룹 공통 — 멤버 간 일치">공통</Badge>
+                              )}
+                            </Td>
                             {deployedMembers.map(m => {
  const cell = memberValue(m.id, f)
  const muted = cell.src !== 'overlay'
  return (
-                                <td key={m.id}
- style={{ padding: '6px 10px', fontFamily: 'monospace',
- cursor: 'pointer',
- color: muted ? 'var(--muted-foreground)' : undefined,
- fontStyle: muted ? 'italic' : undefined }}
+                                <Td key={m.id} mono className="cursor-pointer align-top"
  title={SRC_HINT[cell.src]}
  onClick={() => onSelectMember(m.id, effectivePkgName)}>
                                   {display(f, cell.v)}
+                                  {/* 출처는 값 아래 한 줄로 (시안은 `미설정` 을 둘째 줄에 둔다) */}
                                   {muted && (
-                                    <span style={{ fontSize: 10, marginLeft: 5, fontStyle: 'normal' }}>
-                                      {cell.src === 'injected' ? '(주입)' : '(미설정)'}
-                                    </span>
+                                    <div className="font-sans text-xs font-normal text-muted-foreground">
+                                      {cell.src === 'injected' ? '주입' : '미설정'}
+                                    </div>
                                   )}
-                                </td>
+                                </Td>
                               )
                             })}
                           </tr>
                         )
                       })}
                     </tbody>
-                  </table>
-                </div>
+                  </DataTable>
+                </SubSection>
               ))}
             </>
           )

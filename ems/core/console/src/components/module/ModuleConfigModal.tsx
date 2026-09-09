@@ -105,8 +105,9 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
     () => (template?.collections || []).filter(
  c => !asMember || (c.scope ?? 'service') === 'system'),
  [template, asMember])
-  // 제목·개수 — 그룹 멤버면 「서버 개별 설정」, 아니면 「설정」 (시안 S3 / SA3)
- const scalarTitle = asMember ? '서버 개별 설정' : '설정'
+  // 제목 — **서버(배포) 화면이면 언제나 「서버 개별 설정」**. AS 그룹 멤버(S3 159:3164)와
+  // 단독 서버(SA3 462:7876) 도안이 같은 말을 쓴다. 소스트리 모듈 편집(dev)만 「설정」.
+ const scalarTitle = source.type === 'deployment' ? '서버 개별 설정' : '설정'
  const modName = source.type === 'deployment'
     ? (source.deployment.package_name || '모듈') : source.name
  const scalarCount = visibleSections.reduce((n, sec) => n + sec.fields.length, 0)
@@ -306,12 +307,16 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
                 (시안 G3 의 `공통 설정 | 멤버 비교` 와 같은 자리·같은 모양). */}
             <div className="flex shrink-0 items-center gap-2 px-4 pb-2.5 pt-3.5">
               {visibleCollections.length === 0 ? (
-                <span className="shrink-0 text-md font-semibold">
+                // 제목 = 14px SemiBold + **필드 개수** (SA3 462:7876 `서버 개별 설정 (13)`).
+                // S3 도안(169:2822)만 개수가 빠져 있고 SA3 도안·글 스펙 둘 다 붙였다.
+                <span className="shrink-0 text-base font-semibold">
                   {scalarTitle} ({scalarCount})
                 </span>
               ) : (
                 <ToggleGroup type="single" value={tab} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
  onValueChange={(v: string) => v && setTab(v)}>
+                  {/* 컬렉션이 있는 모듈만 세그먼트 — 여기서는 G3 도안(`공통 설정 (9) |
+                      멤버 비교`)을 따라 개수를 단다. 위 제목 형태와 다른 이유가 이것이다. */}
                   <ToggleGroupItem value="scalar">{scalarTitle} ({scalarCount})</ToggleGroupItem>
                   {visibleCollections.map(c => (
                     <ToggleGroupItem key={c.key} value={c.key}>{c.title}</ToggleGroupItem>
@@ -455,28 +460,25 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
   }
 
  return (
-    <div className="border border-border rounded-sm mb-3 bg-muted">
-      <div onClick={() => setCollapsed(c => !c)}
- style={{
- padding: '8px 14px', cursor: 'pointer', userSelect: 'none',
- display: 'flex', alignItems: 'center', gap: 8,
- background: 'var(--cims-brand-soft)', borderBottom: collapsed ? 'none' : '1px solid var(--border)',
- borderRadius: '6px 6px 0 0',
-        }}>
+    <div className="mb-3 rounded-sm border border-border bg-muted">
+      <button type="button" onClick={() => setCollapsed(c => !c)}
+              className={`flex w-full select-none items-center gap-2 rounded-t-sm bg-brandsoft px-3.5 py-2 text-left${
+                          collapsed ? '' : ' border-b border-border'}`}>
         <span className="text-primary">
           {collapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
         </span>
         <b className="text-primary">변경 사항 ({changed.size})</b>
-        <span className="text-xs text-muted-foreground">
+        <span className="flex items-center gap-1 text-xs text-muted-foreground">
           <RotateCcw size={12} /> 재기동 {restartKeys.length} · <Zap size={12} /> 즉시 {hotKeys.length}
         </span>
-        <button className="ml-auto text-xs py-0.5 px-2 bg-card border border-border rounded-[3px] cursor-pointer" onClick={(e) => { e.stopPropagation(); onResetAll() }}>
+        <Button variant="outline" className="ml-auto"
+                onClick={(e) => { e.stopPropagation(); onResetAll() }}>
           전체 초기화
-        </button>
-      </div>
+        </Button>
+      </button>
       {!collapsed && (
-        <div className="p-2 max-h-[240px] overflow-auto">
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+        <div className="max-h-[240px] overflow-auto p-2">
+          <table className="w-full border-collapse text-sm">
             <thead>
               <tr className="text-muted-foreground">
                 <th className="text-left py-1 px-1.5 w-[220px]">필드</th>
@@ -494,7 +496,7 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
                   <tr className="border-t border-border" key={k}>
                     <td className="py-1 px-1.5">
                       <span title={k}>{f?.label ?? k}</span>
-                      <span style={{ marginLeft: 4, fontSize: 10, color: restart ? 'var(--destructive)' : 'var(--cims-success)' }}>
+                      <span className={`ml-1 ${restart ? 'text-destructive' : 'text-success'}`}>
                         {restart ? <RotateCcw size={12} /> : <Zap size={12} />}
                       </span>
                     </td>
@@ -570,11 +572,13 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
  const nonEmptyBuckets = buckets.filter(b => b.fields.length > 0)
 
   // 시안(Figma S3 93:2208·169:2826)은 섹션을 카드로 감싸지 않는다 — 접힘 머리 + 들여쓴 본문뿐.
-  // `Infrastructure` 처럼 `hidden` 인 섹션은 기본 접힘으로 열고, 「내부 전용」임을 힌트로 알린다.
+  // **기본 펼침**이다. `server-scope.md` 는 `Infrastructure (내부 전용)` 를 「기본 접힘」이라
+  // 썼지만 도안(174:2860)은 본문까지 펼쳐 그렸다 — 글 스펙과 그림이 어긋나면 그림이 정본
+  // (CLAUDE.md). 「내부 전용」은 접는 대신 힌트로 알린다. 접기 기능 자체는 그대로 있다.
  const hint = [section.hidden ? '내부 전용' : '', section.description || '']
     .filter(Boolean).join(' · ')
  return (
-    <SubSection title={section.title} hint={hint || undefined} defaultOpen={!section.hidden}>
+    <SubSection title={section.title} hint={hint || undefined}>
       {nonEmptyBuckets.map((b, idx) => (
         <div key={b.key} className={idx === nonEmptyBuckets.length - 1 ? undefined : 'mb-4'}>
           {b.title && (
@@ -650,29 +654,34 @@ export function StoreMigrateFooter({ groupId, mountPoint, dirty, onDone }: {
   }
 
  return (
-    <div className="mt-3 py-2 px-2.5 rounded-[4px] text-sm leading-[1.6] bg-warning-soft border border-border">
-      <b>경로를 바꾸려면 이관을 쓰세요.</b> 저장은 경로만 바꾸고 <b>데이터를 옮기지
-      않습니다</b> — 새 경로에 빈 store 가 생기거나, 마운트가 없으면 OAM 이 기동을
-      거부합니다. 이관은 정지 → 복사 → 기동을 한 번에 처리합니다. 이 값은 <b>멤버 간
-      동일해야</b> 하므로 공통 설정입니다 — 최초 지정은 부트스트랩 설치가 담당합니다.
+    // 시안 G3-1 의 `관리 store` 섹션 꼬리는 **박스가 아니라 안내문 + Secondary 버튼**이다
+    // (구 화면은 노란 경고 상자였다 — 매번 떠 있어 경고로 읽히지 않았다).
+    // Primary 는 화면당 1개(저장바)라 여기는 outline 이다.
+    <div className="mt-2.5 flex flex-col gap-2.5">
+      <p className="text-xs leading-[1.6] text-muted-foreground">
+        <b>경로를 바꾸려면 이관을 쓰세요.</b> 저장은 경로만 바꾸고 <b>데이터를 옮기지
+        않습니다</b> — 새 경로에 빈 store 가 생기거나, 마운트가 없으면 OAM 이 기동을
+        거부합니다. 이관은 정지 → 복사 → 기동을 한 번에 처리합니다. 이 값은 <b>멤버 간
+        동일해야</b> 하므로 공통 설정입니다 — 최초 지정은 부트스트랩 설치가 담당합니다.
+      </p>
       {groupId ? (
-        <div className="mt-2 flex gap-2 items-center flex-wrap">
-          <Button variant="default" disabled={busy || !mp}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" disabled={busy || !mp}
  onClick={migrate}
  title="현재 입력된 마운트 지점으로 관리 store 를 이관 (콘솔 30초 단절)">
-            {busy ? '이관 요청 중…' : <><ArrowRight size={13} /> {mp || '(마운트 지점)'} 으로 이관</>}
+            {busy ? '이관 요청 중…' : <><ArrowRight /> {mp || '(마운트 지점)'} 으로 이관</>}
           </Button>
           {dirty && (
-            <span className="text-warning">
+            <span className="text-xs text-warning-on">
               편집한 값이 있습니다 — 저장 대신 이 버튼을 쓰세요.
             </span>
           )}
         </div>
       ) : (
-        <div className="mt-1.5 text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           이관은 HA 그룹 멤버에서만 실행할 수 있습니다 (이관 대상 노드 선정이 그룹 기준).
           단일 노드는 부트스트랩 재설치 또는 그룹 편성 후 실행하세요.
-        </div>
+        </p>
       )}
     </div>
   )

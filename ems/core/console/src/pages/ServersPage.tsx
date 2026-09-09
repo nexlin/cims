@@ -1781,9 +1781,10 @@ function ModuleSpecSection({ group, deployments, onReload }: {
     // 시안 G3-1(164:2765~164:2819): 접힘 머리 + 표 + 안내문 + **표 아래** [운영 명세 적용].
     // 구 화면은 머리 우측에 [▶ 적용] 이 있어 접힌 상태에서도 노출됐다 — 계약상 접힌 섹션에
     // 저장/적용 버튼을 두지 않는다.
+    // **기본 펼침** — `as-group.md` 는 「접힘」이라 썼지만 도안은 표까지 펼쳐 그렸다(그림이 정본).
     <div className="mb-4">
-      <SubSection
- title="모듈 운영 명세 (감시 · 절체 모드)" defaultOpen={false}
+      <SubSection level={1}
+ title="모듈 운영 명세 (감시 · 절체 모드)"
  hint="config.json 과 별개 파일(service.json)로 각 노드에 저장 · agent 가 감시·절체 판정에 사용">
         <DataTable>
           <thead>
@@ -2141,17 +2142,19 @@ function AgentConfigTab({ deployments, packages, onDone, onOpenGroupConfig }: {
  return (
             <button key={d.id} onClick={() => setSelDep(d.id)}
  aria-pressed={active}
- className={`flex h-8 items-center gap-2 rounded-md border px-3 text-md transition-colors ${
+ className={`flex h-8 items-center gap-[7px] rounded-full border px-3 text-base font-semibold transition-colors ${
  active
-                        ? 'border-primary bg-brandsoft font-semibold text-brandsoft-on'
-                        : 'border-border bg-background text-foreground hover:bg-accent'}`}>
+                        ? 'border-primary bg-brandsoft text-brandsoft-on'
+                        : 'border-border bg-card text-foreground hover:bg-accent'}`}>
               {d.package_name}
               <span className="font-mono text-sm font-normal text-muted-foreground">
  v{d.package_version}
               </span>
               {n !== null && (
-                <span className={`inline-flex h-4 min-w-5 items-center justify-center rounded-full px-1 text-xs ${
- active ? 'bg-primary text-primary-foreground' : 'bg-neutral-soft text-neutral-on'}`}>
+                // 도안 `count`(291:5173) 실측 — 20×16 알약. 채움만 칩 배경과 한 단 어긋나게
+                // 두고(선택=`--surface` / 비선택=`--bg-soft`) 글자는 양쪽 다 muted 다.
+                <span className={`inline-flex h-4 min-w-5 items-center justify-center rounded-full px-1.5 text-sm font-semibold text-muted-foreground ${
+ active ? 'bg-card' : 'bg-muted'}`}>
                   {n}
                 </span>
               )}

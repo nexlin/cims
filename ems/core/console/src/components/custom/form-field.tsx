@@ -23,14 +23,16 @@ export function FormField({ label, required, help, error, marker, aside, changed
   className?: string
 }) {
   return (
-    <label className={cn('flex flex-col gap-1', className)}>
+    <label className={cn('flex flex-col gap-1.5', className)}>
       <span className={cn('text-sm font-medium', changed && 'text-primary')}>
         {label}{required && <span className="ml-0.5 text-destructive">*</span>}
       </span>
       <span className="flex items-center gap-2.5">
         <span className="min-w-0 flex-1">{children}</span>
         {aside}
-        {marker && <span className="shrink-0">{marker}</span>}
+        {/* 마커 자리는 **폭 고정 62** (시안 252:4699) — `재기동`(44)·`즉시`(32) 어느 쪽이
+            들어와도 입력칸 오른쪽 끝이 필드마다 흔들리지 않는다. */}
+        {marker && <span className="w-[62px] shrink-0">{marker}</span>}
       </span>
       {(error || help) && (
         <span className={cn('text-xs', error ? 'text-destructive' : 'text-muted-foreground')}>

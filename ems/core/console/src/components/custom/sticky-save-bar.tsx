@@ -27,19 +27,22 @@ export function StickySaveBar({ badge, note, saveLabel, disabled, saving,
   className?: string
 }) {
   return (
-    <div className={cn('flex shrink-0 items-center gap-3 border-t border-border bg-card px-4 py-2.5',
+    // 실측(459:7238) — 좌우 16 · 상하 12 · 요소 사이 10, 위 테두리 1.
+    <div className={cn('flex shrink-0 items-center gap-2.5 border-t border-border bg-card px-4 py-3',
                        className)}>
       {badge}
-      <span className="truncate text-xs text-muted-foreground">{note}</span>
-      <div className="ml-auto flex shrink-0 items-center gap-1.5">
+      <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{note}</span>
+      <div className="flex shrink-0 items-center gap-2.5">
         {extra}
+        {/* 저장바 버튼만 **md**(h36 · 좌우 14 · 13px Medium) 다 — 바 높이 60 =
+            상하 12 + 36 이 그 실측이다. 다른 자리의 기본 sm(26)과 다른 유일한 예외. */}
         {onRevert && (
-          <Button variant="ghost" onClick={onRevert} disabled={disabled || saving}
+          <Button variant="ghost" size="default" onClick={onRevert} disabled={disabled || saving}
                   title="저장하지 않은 변경을 되돌린다">
             <ArrowLeft /> 되돌리기
           </Button>
         )}
-        <Button variant="default" onClick={onSave} disabled={disabled || saving}>
+        <Button variant="default" size="default" onClick={onSave} disabled={disabled || saving}>
           <Check /> {saving ? '저장 중…' : saveLabel}
         </Button>
       </div>

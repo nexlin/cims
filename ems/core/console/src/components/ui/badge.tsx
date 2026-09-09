@@ -10,7 +10,8 @@ const badgeVariants = cva(
   // Soft = 값·분류 표시(기본) / Solid = 개수·심각도처럼 눈에 띄어야 하는 것에만.
   // Soft 는 **테두리가 있다** — 채움 `--*-soft`, 테두리·글자 `--*-on-soft` (Figma 실측).
   // 핸드오프 `badge-variants.ts` 는 `border-transparent` 인데 그림과 어긋나 그림을 따랐다.
-  "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-sm font-semibold leading-4 whitespace-nowrap transition-colors focus-visible:shadow-focus",
+  // 실측(16:8) — 라운드 **6**(`radius/sm`, 알약 아님) · 좌우 6 · 상하 2 · 12px SemiBold · 줄높이 1.2.
+  "inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-sm font-semibold leading-[1.2] whitespace-nowrap transition-colors focus-visible:shadow-focus",
   {
     variants: {
       variant: {
