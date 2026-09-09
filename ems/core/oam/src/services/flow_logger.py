@@ -1855,7 +1855,9 @@ def _ptt_index_rows(date: str = None, days: int = None,
 
     범위 우선순위: from/to > date > days > 최근 90일.
     진행중 세션은 인덱스에 없으므로(종료돼야 확정된다) 상태 파일에서 얹고, 같은 세션이
-    오늘 인덱스에 'ended' 로 들어가 있으면 실시간 쪽으로 갈아 끼운다."""
+    오늘 인덱스에 'ended' 로 들어가 있으면 실시간 쪽으로 갈아 끼운다. 진행중은 **조회
+    범위와 무관하게 전량** 이다 — 어제 시작해 아직 열린 세션도 오늘 보기에 있어야 그 안에서
+    일어난 오늘의 통화가 보인다(recording.md 'PTT 세션 이력' 진행중 구역)."""
     from datetime import timedelta as _td
 
     def _digits8(v):
@@ -1866,30 +1868,22 @@ def _ptt_index_rows(date: str = None, days: int = None,
     day_digits = _digits8(date)
     if d_from or d_to:
         rows = ptt_index.range_days(d_from or d_to, d_to or d_from)
-        scope = None if not (d_from and d_to) else (min(d_from, d_to), max(d_from, d_to))
-        if scope is None:
-            one = d_from or d_to
-            scope = (one, one)
     elif day_digits:
         rows = list(ptt_index.day(day_digits))
-        scope = (day_digits, day_digits)
     else:
         n = days if (days and days > 0) else 90
         today = datetime.now()
         d0 = (today - _td(days=n - 1)).strftime("%Y%m%d")
         d1 = today.strftime("%Y%m%d")
         rows = ptt_index.range_days(d0, d1)
-        scope = (d0, d1)
 
+    # 진행중은 시작일이 조회 범위 밖이어도 얹는다 — 시작일로 걸러내면 어제 시작해 아직 열린
+    #   세션 안에서 일어난 오늘의 통화가 어느 날짜 보기에도 나오지 않는다.
     live = ptt_index.live()
     if live:
         live_ids = {(l.get("group_key"), l.get("key")) for l in live}
         rows = [r for r in rows if (r.get("group_key"), r.get("key")) not in live_ids]
-        for l in live:
-            sd = ptt_index.ses_start_day(l.get("key", ""))
-            if scope and sd and not (scope[0] <= sd <= scope[1]):
-                continue        # 조회 범위 밖에서 시작한 세션은 넣지 않는다
-            rows.append(l)
+        rows.extend(live)
     rows.sort(key=lambda r: (r.get("start") or "", r.get("key") or ""), reverse=True)
     return rows
 

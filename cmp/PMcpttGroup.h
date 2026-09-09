@@ -623,6 +623,8 @@ public:
     /** sesDir = PTT_GROUP_ADD 의 session_dir. 기록 자리는 dir/{시간버킷}/{sesDir}/ 이다. */
     void setRecording(bool enable, const std::string& dir, const std::string& sesDir = "");
     bool isRecordEnabled() const { return _recordEnable; }
+    /** 현재 기록 중인 세션 디렉터리 이름 — 기존 그룹에 다른 session_dir 이 오면 재지정 판정의 근거. */
+    const std::string& recordSesDir() const { return _recordSesDir; }
     void startRecording();
     void stopRecording();
 };
