@@ -353,6 +353,19 @@ def main():
               "OnNetwork MaxAffiliationsN2·MaxSimultaneousTransmissionsN7")
         bad = [e for e in root.iter(UP + 'entry') if e.find(f'{UP}uri-entry') is None]
         check(not bad, f"모든 entry 에 uri-entry (빈 entry {len(bad)}건)")
+        # §8.3.2.1 "shall" 요소 — 대상 미지정에도 항상 존재해야 한다(외부 SDK 가 mandatory 로 읽음)
+        st_el = root.find(f'{UP}Status')
+        check(st_el is not None and (st_el.text or '').strip() in ('true', 'false'), "루트 <Status> (§8.3.2.1 3)")
+        gc = root.find(f'{UP}Common/{UP}MCPTT-group-call')
+        check(gc is not None and all(gc.find(f'{UP}{t}/{UP}MCPTTGroupInitiation/{UP}entry' if t != 'EmergencyAlert' else f'{UP}{t}/{UP}entry') is not None
+                                     for t in ('EmergencyCall', 'ImminentPerilCall', 'EmergencyAlert')),
+              "MCPTT-group-call EmergencyCall·ImminentPerilCall·EmergencyAlert + entry (8e)")
+        pr = root.find(f'{UP}Common/{UP}PrivateCall/{UP}EmergencyCall/{UP}MCPTTPrivateRecipient')
+        check(pr is not None and pr.find(f'{UP}entry') is not None and pr.find(f'{UP}ProSeUserID-entry/{UP}User-Info-ID') is not None,
+              "PrivateCall/EmergencyCall/MCPTTPrivateRecipient entry + ProSeUserID-entry (8d)")
+        check(on is not None and on.find(f'{UP}PrivateEmergencyAlert/{UP}entry') is not None, "OnNetwork/PrivateEmergencyAlert entry (10f)")
+        al = root.find(f'{UP}Common/{UP}UserAlias/{UP}alias-entry')
+        check(al is not None and al.get('index') is not None, "alias-entry index 속성(병기)")
         rs = root.find('{urn:ietf:params:xml:ns:common-policy}ruleset')
         check(rs is not None and rs.find('.//' + UP + 'allow-emergency-group-call') is not None,
               "common-policy ruleset + allow-* 인가 요소")

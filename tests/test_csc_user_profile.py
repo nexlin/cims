@@ -3,7 +3,7 @@
 규격 단말은 이 문서에서 그룹 목록(<OnNetwork><MCPTTGroupInfo>)·연락처(<PrivateCallList>)·긴급 대상·인가를 읽는다.
 검사: XSD 요소 집합/순서(OnNetworkType 에 MCPTTUserID 없음, EntryType 은 uri-entry 필수), 그룹 목록 = 소속 그룹
 (소유만 한 그룹 제외, 소유 소속 그룹은 cims:authorized-user), ImplicitAffiliations = 소속 전체, 연락처 = 동료 멤버,
-긴급그룹 미지정(DedicatedGroup) = Emergency 요소 부재(빈 entry 금지), UseCurrentlySelectedGroup 폴백 uri-entry,
+긴급 요소는 항상 존재(§8.3.2.1 shall) — 미지정은 entry-info 폴백 + ruleset 미인가, ProSe User-Info-ID 영값, 루트 Status·alias index,
 common-policy ruleset, escape, ETag 내용 파생, 단말 정규식 호환(첫 MCPTTGroupInitiation = EmergencyCall).
 
   python3 -m unittest tests.test_csc_user_profile
@@ -96,14 +96,33 @@ class UserProfileDocTest(unittest.TestCase):
         uris = sorted(e.find("up:uri-entry", NS).text for e in root.findall("up:Common/up:PrivateCall/up:PrivateCallList/up:PrivateCallURI", NS))
         self.assertEqual(uris, sorted([PEER, PEER2]), "동료 멤버(본인 제외, 중복 제거), 외부인 제외")
 
-    def test_emergency_unconfigured_omits_elements(self):
-        _, root, _ = self._doc()   # PTT_PROFILES 부재 = DedicatedGroup + 긴급그룹 미지정
+    def test_emergency_unconfigured_elements_present_with_fallback(self):
+        """§8.3.2.1 8d)ii·8e)ii~iv·10f) 필수 요소는 대상 미지정에도 항상 존재 — entry-info 폴백 + ruleset 미인가."""
+        _, root, _ = self._doc()   # PTT_PROFILES 부재 = DedicatedGroup+긴급그룹 미지정, LocallyDetermined+수신자 미지정
         gc = root.find("up:Common/up:MCPTT-group-call", NS)
-        self.assertIsNone(gc.find("up:EmergencyCall", NS))
-        self.assertIsNone(gc.find("up:ImminentPerilCall", NS))
-        self.assertIsNone(gc.find("up:EmergencyAlert", NS))
-        self.assertIsNone(root.find("up:OnNetwork/up:PrivateEmergencyAlert", NS))
-        self.assertIsNone(root.find("up:Common/up:PrivateCall/up:EmergencyCall", NS))
+        for tag in ("EmergencyCall/up:MCPTTGroupInitiation", "ImminentPerilCall/up:MCPTTGroupInitiation", "EmergencyAlert"):
+            e = gc.find(f"up:{tag}/up:entry", NS)
+            self.assertIsNotNone(e, tag)
+            self.assertEqual((e.get("entry-info"), e.find("up:uri-entry", NS).text), ("UseCurrentlySelectedGroup", "tel:g001"),
+                             f"{tag}: 미지정 → 선택 그룹 사용 + 폴백 = 첫 소속 그룹")
+        pr = root.find("up:Common/up:PrivateCall/up:EmergencyCall/up:MCPTTPrivateRecipient", NS)
+        self.assertIsNotNone(pr)
+        e = pr.find("up:entry", NS)
+        self.assertEqual((e.get("entry-info"), e.find("up:uri-entry", NS).text), ("LocallyDetermined", PEER),
+                         "미지정 → 발신자 선택 + 폴백 = 첫 연락처")
+        self.assertEqual(pr.find("up:ProSeUserID-entry/up:User-Info-ID", NS).text, "000000000000", "ProSe 필수 자식 = 6옥텟 영값")
+        pea = root.find("up:OnNetwork/up:PrivateEmergencyAlert/up:entry", NS)
+        self.assertEqual((pea.get("entry-info"), pea.find("up:uri-entry", NS).text), ("LocallyDetermined", PEER))
+        # 인가는 요소 유무가 아니라 ruleset — 그룹 대상 미지정이면 false(CSP 403 과 일치), 사설은 LocallyDetermined 라 true
+        acts = root.find("cp:ruleset/cp:rule/cp:actions", NS)
+        self.assertEqual(acts.find("up:allow-emergency-group-call", NS).text, "false")
+        self.assertEqual(acts.find("up:allow-activate-emergency-alert", NS).text, "false")
+        self.assertEqual(acts.find("up:allow-emergency-private-call", NS).text, "true")
+
+    def test_root_status_and_alias_index(self):
+        _, root, _ = self._doc()
+        self.assertEqual(root.find("up:Status", NS).text, "true", "§8.3.2.1 3) shall include one <Status>")
+        self.assertEqual(root.find("up:Common/up:UserAlias/up:alias-entry", NS).get("index"), "1")
 
     def test_emergency_dedicated_group_configured(self):
         m.PTT_PROFILES["+82500000001"] = dict(m.DEFAULT_USER_PROFILE, emergency_group_mode="DedicatedGroup",
@@ -118,6 +137,10 @@ class UserProfileDocTest(unittest.TestCase):
         pr = root.find("up:Common/up:PrivateCall/up:EmergencyCall/up:MCPTTPrivateRecipient/up:entry", NS)
         self.assertEqual((pr.get("entry-info"), pr.find("up:uri-entry", NS).text), ("UsePreConfigured", "tel:+82500000002"))
         self.assertEqual(root.find("up:OnNetwork/up:PrivateEmergencyAlert/up:entry/up:uri-entry", NS).text, "tel:+82500000002")
+        self.assertEqual(root.find("up:Common/up:PrivateCall/up:EmergencyCall/up:MCPTTPrivateRecipient/up:ProSeUserID-entry/up:User-Info-ID", NS).text,
+                         "000000000000")
+        acts = root.find("cp:ruleset/cp:rule/cp:actions", NS)
+        self.assertEqual(acts.find("up:allow-emergency-group-call", NS).text, "true", "전용 그룹 지정 → 인가 유지")
         # 단말 정규식 호환: 첫 <MCPTTGroupInitiation> 블록이 EmergencyCall 의 것
         gi = re.search(r"<MCPTTGroupInitiation>(.*?)</MCPTTGroupInitiation>", xml, re.S).group(1)
         self.assertIn('entry-info="DedicatedGroup"', gi); self.assertIn("<uri-entry>tel:g002</uri-entry>", gi)

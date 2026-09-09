@@ -1379,13 +1379,17 @@ def get_user_profile_xml(user_uri, owner_uid=None):
       - 연락처 = 내 그룹의 동료 멤버 → <Common><PrivateCall><PrivateCallList>(그룹 문서로 이미 보이는 범위라 추가 노출 없음).
       - 긴급 = ptt_user_profile(emergency_group_mode/id·private_emergency_mode/recipient) → MCPTT-group-call 의
         EmergencyCall/ImminentPerilCall/EmergencyAlert, PrivateCall 의 EmergencyCall(MCPTTPrivateRecipient), OnNetwork 의
-        PrivateEmergencyAlert. **DedicatedGroup 모드에 긴급그룹 미지정 = 긴급 개시 미인가 상태**(mcptt_emergency_modes.md)
-        → 해당 요소를 싣지 않는다(EntryType 은 uri-entry 필수라 빈 entry 는 스키마 위반). 단말은 entry 부재를
-        "전용 긴급그룹 미지정"으로 본다(현행 동작 유지). UseCurrentlySelectedGroup 의 uri-entry 는 미선택 시 폴백
-        (지정 그룹 > 첫 소속 그룹, §8.3.2.7).
+        PrivateEmergencyAlert. §8.3.2.1 8d)ii·8e)ii~iv·10f) 가 "shall" 로 요구하는 요소라 **항상 싣는다** — 대상이
+        미지정이면 entry-info 로 표현한다: 그룹은 `UseCurrentlySelectedGroup`(uri-entry = 폴백 그룹: 지정 그룹 > 첫 소속
+        그룹, §8.3.2.7), 사설은 `LocallyDetermined`(uri-entry = 폴백 수신자: 지정 수신자 > 첫 연락처). 개시 **인가**는
+        요소 유무가 아니라 <cp:ruleset> 의 allow-* 가 말한다 — DedicatedGroup 모드에 긴급그룹 미지정이면 그룹 긴급
+        개시·경보를, UsePreConfigured 모드에 수신자 미지정이면 긴급 사설콜을 false 로 내린다(CSP 의 403 판정과 일치,
+        mcptt_emergency_modes.md). MCPTTPrivateRecipient 는 XSD sequence 상 ProSeUserID-entry(User-Info-ID 6옥텟 hex)가
+        필수 자식이라 off-network 미지원인 우리는 영값(000000000000)을 싣는다.
       - 상한 = mcptt_service_config.max_affiliations_n2(MaxAffiliationsN2) + UserProfile.*(N6·N7·Priority·조직명).
       - 인가 = <cp:ruleset>(RFC 4745 common-policy) — actions 자식은 규격 요소 + cims 확장(ad hoc·그룹 생성).
-    ProSe(off-network) 요소(ProSeUserID-entry 등)는 싣지 않는다. 텍스트는 전부 escape. ETag 는 내용 파생."""
+    루트 <Status>true</Status>(§8.3.2.1 3, 프로파일 활성)·alias-entry index 속성(선택이나 필수로 읽는 단말이 있어 병기).
+    텍스트는 전부 escape. ETag 는 내용 파생."""
     user = USERS.get(user_uri)
     if not user:
         return None, None
@@ -1426,21 +1430,34 @@ def get_user_profile_xml(user_uri, owner_uid=None):
             contacts.setdefault(_norm_mcptt_uri(u), (u, mbr.get('name') or u))
     contact_entries = ''.join(et('PrivateCallURI', u, n) for _, (u, n) in sorted(contacts.items()))
 
-    # 긴급 그룹 대상 entry
-    eg_entry = ''
-    if mode == 'DedicatedGroup':
-        if egid:
-            eg_uri = _group_uri(egid)
-            eg_entry = et('entry', eg_uri, GROUPS.get(eg_uri, {}).get('display_name'), 'DedicatedGroup')
-    else:
-        fb = _group_uri(egid) if egid else (my_groups[0][0] if my_groups else '')
-        if fb:
-            eg_entry = et('entry', fb, GROUPS.get(fb, {}).get('display_name'), 'UseCurrentlySelectedGroup')
-    # 긴급 사설콜 수신자 entry — 사전 지정된 경우만(LocallyDetermined/미지정은 대상 URI 가 없어 entry 를 싣지 않는다)
-    pr_entry = et('entry', f"tel:{precip}", None, 'UsePreConfigured') if (pmode == 'UsePreConfigured' and precip) else ''
+    # 긴급 그룹 대상 entry — 항상 존재(§8.3.2.1 8e). 전용 그룹이 지정돼 있으면 DedicatedGroup, 아니면(모드가
+    #   UseCurrentlySelectedGroup 이거나 DedicatedGroup 인데 미지정) UseCurrentlySelectedGroup + 폴백 uri-entry
+    #   (지정 그룹 > 첫 소속 그룹 > 본인 URI — 소속 그룹이 없는 퇴화 케이스, 그룹콜 자체가 불가하므로 무해).
+    dedicated = bool(mode == 'DedicatedGroup' and egid)
+    eg_uri = _group_uri(egid) if egid else (my_groups[0][0] if my_groups else user_uri)
+    eg_entry = et('entry', eg_uri, GROUPS.get(eg_uri, {}).get('display_name'),
+                  'DedicatedGroup' if dedicated else 'UseCurrentlySelectedGroup')
+    # 긴급 사설콜 수신자 entry — 항상 존재(§8.3.2.1 8d·10f). 사전 지정이면 UsePreConfigured, 아니면 LocallyDetermined
+    #   + 폴백 uri-entry(§8.3.2.7: 선택 상대가 없을 때 쓰는 값 — 지정 수신자 > 첫 연락처 > 본인 URI(퇴화)).
+    preconfigured = bool(pmode == 'UsePreConfigured' and precip)
+    first_contact = sorted(contacts.items())[0][1][0] if contacts else None
+    pr_uri = f"tel:{precip}" if precip else (first_contact or user_uri)
+    pr_entry = et('entry', pr_uri, None, 'UsePreConfigured' if preconfigured else 'LocallyDetermined')
+    # ProSe(off-network) 미지원 — MCPTTPrivateRecipientEntryType 의 필수 자식 ProSeUserID-entry 는 User-Info-ID 영값
+    #   (6옥텟 hex, §8.3.2.7 "shall be 6 octets")로 채운다.
+    prose_entry = '<ProSeUserID-entry><User-Info-ID>000000000000</User-Info-ID></ProSeUserID-entry>'
 
     def _b(k, default=True):
         return "true" if prof.get(k, default) else "false"
+
+    # 인가 = 운영자 allow_* AND 대상 결정 가능 여부 — DedicatedGroup 모드에 긴급그룹 미지정이면 그룹 긴급 개시·경보,
+    #   UsePreConfigured 모드에 수신자 미지정이면 긴급 사설콜을 미인가로 내린다(CSP 의 403 판정과 같은 규칙,
+    #   mcptt_emergency_modes.md §5). 요소 생략이 아니라 ruleset 이 인가를 말하는 것이 규격의 방식이다.
+    group_target_ok = not (mode == 'DedicatedGroup' and not egid)
+    private_target_ok = not (pmode == 'UsePreConfigured' and not precip)
+
+    def _ba(k, ok, default=True):
+        return "true" if (prof.get(k, default) and ok) else "false"
 
     org = str(_user_profile_cfg('MissionCriticalOrganization') or _ue_init_cfg('Name') or _UE_INIT_DEFAULTS['Name'])
     n6 = int(_user_profile_cfg('MaxSimultaneousCallsN6'))
@@ -1449,17 +1466,19 @@ def get_user_profile_xml(user_uri, owner_uid=None):
     n2 = int(SERVICE_CONFIG.get('max_affiliations_n2') or 0)
 
     # <Common>
-    common = f'<UserAlias><alias-entry>{esc(display_name)}</alias-entry></UserAlias>'
+    # alias-entry 의 index 는 XSD 상 선택(IndexType, use 없음)이지만 필수로 읽는 단말이 있어 병기한다(규격 위반 아님).
+    common = f'<UserAlias><alias-entry index="1">{esc(display_name)}</alias-entry></UserAlias>'
     common += et('MCPTTUserID', user_uri)
-    if contact_entries or pr_entry:
-        pc_list = contact_entries or et('PrivateCallURI', f"tel:{precip}")
-        pc_emerg = f'<EmergencyCall><MCPTTPrivateRecipient>{pr_entry}</MCPTTPrivateRecipient></EmergencyCall>' if pr_entry else ''
-        common += f'<PrivateCall><PrivateCallList>{pc_list}</PrivateCallList>{pc_emerg}</PrivateCall>'
+    # PrivateCall 은 항상(8d "shall include one"). PrivateCallList 는 "one or more" 라 연락처가 없으면 폴백 수신자
+    #   (지정 수신자 > 본인 URI — 퇴화) 하나를 싣는다. MCPTTPrivateCallType 은 sequence: PrivateCallList → EmergencyCall.
+    pc_list = contact_entries or et('PrivateCallURI', pr_uri)
+    pc_emerg = f'<EmergencyCall><MCPTTPrivateRecipient>{pr_entry}{prose_entry}</MCPTTPrivateRecipient></EmergencyCall>'
+    common += f'<PrivateCall><PrivateCallList>{pc_list}</PrivateCallList>{pc_emerg}</PrivateCall>'
     gc = f'<MaxSimultaneousCallsN6>{n6}</MaxSimultaneousCallsN6>'
-    if eg_entry:   # EmergencyCall 을 ImminentPerilCall 앞에 — 첫 MCPTTGroupInitiation 을 SOS 대상으로 읽는 단말 호환
-        gc += f'<EmergencyCall><MCPTTGroupInitiation>{eg_entry}</MCPTTGroupInitiation></EmergencyCall>'
-        gc += f'<ImminentPerilCall><MCPTTGroupInitiation>{eg_entry}</MCPTTGroupInitiation></ImminentPerilCall>'
-        gc += f'<EmergencyAlert>{eg_entry}</EmergencyAlert>'
+    # EmergencyCall 을 ImminentPerilCall 앞에 — 첫 MCPTTGroupInitiation 을 SOS 대상으로 읽는 단말 호환
+    gc += f'<EmergencyCall><MCPTTGroupInitiation>{eg_entry}</MCPTTGroupInitiation></EmergencyCall>'
+    gc += f'<ImminentPerilCall><MCPTTGroupInitiation>{eg_entry}</MCPTTGroupInitiation></ImminentPerilCall>'
+    gc += f'<EmergencyAlert>{eg_entry}</EmergencyAlert>'
     gc += f'<Priority>{prio}</Priority>'
     common += f'<MCPTT-group-call>{gc}</MCPTT-group-call>'
     common += f'<MissionCriticalOrganization>{esc(org)}</MissionCriticalOrganization>'
@@ -1472,8 +1491,7 @@ def get_user_profile_xml(user_uri, owner_uid=None):
     if implicit_entries:
         on += f'<ImplicitAffiliations>{implicit_entries}</ImplicitAffiliations>'
     on += f'<MaxSimultaneousTransmissionsN7>{n7}</MaxSimultaneousTransmissionsN7>'
-    if pr_entry:
-        on += f'<PrivateEmergencyAlert>{pr_entry}</PrivateEmergencyAlert>'
+    on += f'<PrivateEmergencyAlert>{pr_entry}</PrivateEmergencyAlert>'   # 10f) "shall include one"
 
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <mcptt-user-profile xmlns="urn:3gpp:mcptt:user-profile:1.0"
@@ -1482,14 +1500,15 @@ def get_user_profile_xml(user_uri, owner_uid=None):
   xmlns:cims="urn:cims:mcptt:ext:1.0"
   XUI-URI="{esc(user_uri)}" user-profile-index="1">
   <Name xml:lang="en">{esc(display_name)}</Name>
+  <Status>true</Status>
   <Common index="1">{common}</Common>
   <cp:ruleset>
     <cp:rule id="mcptt-user-authorisation">
       <cp:actions>
-        <allow-emergency-group-call>{_b('allow_emergency_call')}</allow-emergency-group-call>
-        <allow-activate-emergency-alert>{_b('allow_emergency_alert')}</allow-activate-emergency-alert>
-        <allow-cancel-emergency-alert>{_b('allow_emergency_alert')}</allow-cancel-emergency-alert>
-        <allow-emergency-private-call>{_b('allow_emergency_private_call')}</allow-emergency-private-call>
+        <allow-emergency-group-call>{_ba('allow_emergency_call', group_target_ok)}</allow-emergency-group-call>
+        <allow-activate-emergency-alert>{_ba('allow_emergency_alert', group_target_ok)}</allow-activate-emergency-alert>
+        <allow-cancel-emergency-alert>{_ba('allow_emergency_alert', group_target_ok)}</allow-cancel-emergency-alert>
+        <allow-emergency-private-call>{_ba('allow_emergency_private_call', private_target_ok)}</allow-emergency-private-call>
         <allow-ambient-listening>{_b('allow_ambient_listening', False)}</allow-ambient-listening>
         <cims:allow-adhoc-group-call>{_b('allow_adhoc_call')}</cims:allow-adhoc-group-call>
         <cims:allow-create-group>{_b('allow_create_group', False)}</cims:allow-create-group>

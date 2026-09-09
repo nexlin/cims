@@ -176,8 +176,8 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
   발신자 취소로 자동 해제, [닫기]는 로컬 표시만 제거. 이력 이벤트 `ALERT/ALERT_IN/ALERT_END`.
 - **단말 SOS 대상 결정** (새 긴급콜 — 통화 중이면 항상 현재 주채널 통화 격상): user-profile
   문서의 `MCPTTGroupInitiation` entry-info 를 따른다 — `DedicatedGroup`(기본)이면 프로비저닝된
-  전용 긴급그룹(미지정 시 서버는 EmergencyCall/EmergencyAlert 요소를 싣지 않고 — EntryType 은 uri-entry 필수 —
-  단말은 "전용 긴급그룹 미지정" 불발), `UseCurrentlySelectedGroup` 이면(uri-entry = 미선택 시 폴백 그룹)
+  전용 긴급그룹(미지정이어도 문서는 TS 24.484 §8.3.2.1 이 "shall" 로 요구하는 EmergencyCall/ImminentPerilCall/EmergencyAlert 를
+  항상 싣되 entry-info 를 `UseCurrentlySelectedGroup`(uri-entry = 폴백 그룹)으로 내리고, 개시 인가는 ruleset `allow-emergency-group-call`=false 로 표현 — 단말은 ruleset 으로 차단, 서버도 403), `UseCurrentlySelectedGroup` 이면(uri-entry = 미선택 시 폴백 그룹)
   **선택 그룹 = 마지막 주채널**(`ChannelStore.lastPrimary` 영속 — 참여 전부 이탈 후에도 유지,
   이력 없으면 그룹 목록 첫 그룹 폴백). 프로파일 미수신이면 선택 그룹으로 현행 유지(서버
   게이트가 최종 판정). 경보 MESSAGE 도 같은 대상 그룹으로 보낸다(`EmergencyAlert` entry 공통).
