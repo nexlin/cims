@@ -574,11 +574,13 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
   // 시안(Figma S3 93:2208·169:2826)은 섹션을 카드로 감싸지 않는다 — 접힘 머리 + 들여쓴 본문뿐.
   // **기본 펼침**이다. `server-scope.md` 는 `Infrastructure (내부 전용)` 를 「기본 접힘」이라
   // 썼지만 도안(174:2860)은 본문까지 펼쳐 그렸다 — 글 스펙과 그림이 어긋나면 그림이 정본
-  // (CLAUDE.md). 「내부 전용」은 접는 대신 힌트로 알린다. 접기 기능 자체는 그대로 있다.
- const hint = [section.hidden ? '내부 전용' : '', section.description || '']
-    .filter(Boolean).join(' · ')
+  // (CLAUDE.md). 접기 기능 자체는 그대로 있다.
+  // 힌트는 템플릿 설명 그대로다 — `hidden` 이라고 「내부 전용」을 앞에 덧붙이지 않는다.
+  // 도안의 힌트가 `UI 비노출 인프라 값 · …` 하나이고, 제목이 이미 `(내부 전용)` 이라
+  // 덧붙이면 같은 말이 두 번 나온다.
+ const hint = section.description || undefined
  return (
-    <SubSection title={section.title} hint={hint || undefined}>
+    <SubSection title={section.title} hint={hint}>
       {nonEmptyBuckets.map((b, idx) => (
         <div key={b.key} className={idx === nonEmptyBuckets.length - 1 ? undefined : 'mb-4'}>
           {b.title && (
