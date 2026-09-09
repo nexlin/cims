@@ -287,9 +287,11 @@ export default function WidgetApiBadge({ ids, title, overlay, sourceIds }: {
           컴포넌트 트리**를 타고 버블링하므로, portal 뒤에도 pointer 이벤트를 여기서 끊어야 드래그
           핸들이 반응하지 않는다 (안 끊으면 모달 클릭이 위젯 이동으로 먹혀 닫기 버튼조차 안 눌린다). */}
       {open && (
-        /* 크기 고정 — API 항목 수·상세 펼침과 무관하게 항상 같은 창. */
+        /* 크기 고정 — API 항목 수·상세 펼침과 무관하게 항상 같은 창.
+           **높이도 못박는다** — T3-10 에서 Radix Dialog 로 옮길 때 `Modal` 이 `width` 만
+           받아 height 가 빠졌고, 그 뒤로 창이 내용만큼 쪼그라들었다(항목 1건이면 183px). */
         <Modal title={`${'</>'} ${title || '위젯'} — 사용 API`} onClose={() => setOpen(false)}
-               width="min(940px, 96vw)">
+               width="min(940px, 96vw)" height="min(76vh, calc(100vh - 80px))">
             <div>
               <div className="text-sm text-muted-foreground mb-2.5">
                 {docs.length}건. 각 API 를 구현한 모듈이 선언한 정보이며, 모듈이 설치·가용할 때만 표시됩니다.

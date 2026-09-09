@@ -20,9 +20,15 @@ interface Props {
   wide?: boolean
   fullscreen?: boolean
   width?: number | string
+  /**
+   * 창 높이를 **못박는다**. 기본은 내용만큼 늘어나는데(`DialogContent` 는 flex 컬럼 +
+   * `max-h`), 목록 창은 항목 수·상세 펼침에 따라 창이 커졌다 작아졌다 하면 읽기 어렵다.
+   * 높이를 주면 본문(`min-h-0 flex-1 overflow-auto`)이 스크롤을 받는다.
+   */
+  height?: number | string
 }
 
-export default function Modal({ title, onClose, children, wide, fullscreen, width }: Props) {
+export default function Modal({ title, onClose, children, wide, fullscreen, width, height }: Props) {
   if (fullscreen) {
     // 상단 헤더 높이와 사이드바 폭은 CSS 변수(--header-h, --sidebar-w)로 주입된다.
     return (
@@ -41,7 +47,10 @@ export default function Modal({ title, onClose, children, wide, fullscreen, widt
 
   return (
     <Dialog open onOpenChange={open => { if (!open) onClose() }}>
-      <DialogContent style={width ? { width, maxWidth: 'calc(100vw - 40px)' } : undefined}
+      <DialogContent style={{
+                       ...(width ? { width, maxWidth: 'calc(100vw - 40px)' } : {}),
+                       ...(height ? { height } : {}),
+                     }}
                      className={wide ? 'max-w-[620px]' : 'max-w-[480px]'}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>

@@ -4,26 +4,15 @@
 // 그래서 기본은 점 하나이고, 누를 때만 펼친다(hover 는 native title 로 요약이 뜬다).
 import { Info } from 'lucide-react'
 import { cn } from '@core/lib/utils'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
+import { useDismiss } from '@core/hooks/useDismiss'
 
 export function InfoDot({ label, children }: { label?: string; children: ReactNode }) {
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLSpanElement>(null)
 
   // 바깥 클릭 / Esc 로 닫는다 — 열어둔 채 다른 조작을 하면 시야를 가린다.
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      if (box.current && !box.current.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+  useDismiss(open, box, () => setOpen(false))
 
   return (
     <span className="relative inline-flex" ref={box}>

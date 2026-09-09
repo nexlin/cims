@@ -6,7 +6,8 @@
 //   - 토스트: critical/major open·moreSevere 승격만 수동 닫기 토스트 — minor 이하/close 는
 //     배지 갱신만, 이벤트는 토스트 없음 (§8.2 소음 통제).
 import { Bell, Check, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useDismiss } from '@core/hooks/useDismiss'
 import { useNavigate } from 'react-router-dom'
 import { alertsApi } from '../api/alerts'
 import { onAlarmTransition, refreshAlarms, severityOf, useAlarms } from '../widgets/useAlarms'
@@ -39,7 +40,11 @@ function useAlarmToasts() {
 export default function AlarmIndicator() {
  const { active, recentEvents, loaded, error } = useAlarms()
  const [open, setOpen] = useState(false)
+ const box = useRef<HTMLDivElement>(null)
  const [tab, setTab] = useState<'alarms' | 'events'>('alarms')
+  // 톱니바퀴·계정 메뉴(Radix DropdownMenu)와 같은 조작감 — 바깥 클릭·Esc 로 닫는다.
+  // 시트 2 에 Drawer 컴포넌트가 없어 직접 만든 패널이라 이 동작을 스스로 갖춘다.
+ useDismiss(open, box, () => setOpen(false))
  const navigate = useNavigate()
  const { show } = useToast()
  useAlarmToasts()
@@ -64,7 +69,9 @@ export default function AlarmIndicator() {
   }
 
  return (
-    <>
+    // 트리거와 드로어를 한 래퍼에 둔다 — 바깥 클릭 판정의 경계다. 트리거가 안에 있어야
+    // 「벨을 다시 눌러 닫기」가 바깥 클릭으로 두 번 처리되지 않는다.
+    <div ref={box} className="contents">
       {/* 트리거 — 시안 AppBar 의 `util/알람`(벨 + 카운트 배지, Figma 457:5431).
           0건도 배지를 지우지 않는다: "표시 없음 = 정상"과 "표시 없음 = 표시 고장"을
           구분해야 한다(alarm_pipeline.md §8.2). 대신 DESIGN-RULES §1-7 대로 0건은
@@ -137,6 +144,6 @@ export default function AlarmIndicator() {
           </div>
         </div>
       )}
-    </>
+    </div>
   )
 }
