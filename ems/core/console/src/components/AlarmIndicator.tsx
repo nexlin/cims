@@ -42,7 +42,8 @@ export default function AlarmIndicator() {
  const [open, setOpen] = useState(false)
  const box = useRef<HTMLDivElement>(null)
  const [tab, setTab] = useState<'alarms' | 'events'>('alarms')
-  // 톱니바퀴·계정 메뉴(Radix DropdownMenu)와 같은 조작감 — 바깥 클릭·Esc 로 닫는다.
+  // Esc 로 닫는다. 바깥 **클릭**은 아래 차단층이 처리한다 — 그 층이 화면 전체를 덮으므로
+  // 이 훅의 바깥 mousedown 경로는 여기서는 타지 않는다(InfoDot 은 두 경로 다 쓴다).
   // 시트 2 에 Drawer 컴포넌트가 없어 직접 만든 패널이라 이 동작을 스스로 갖춘다.
  useDismiss(open, box, () => setOpen(false))
  const navigate = useNavigate()
@@ -84,6 +85,14 @@ export default function AlarmIndicator() {
         <Bell size={16} />
         <Badge variant={badgeTone}>{loaded ? active.length : '…'}{error ? ' !' : ''}</Badge>
       </button>
+      {open && (
+        // 바깥 클릭을 **삼키는** 층. 톱니·계정 메뉴는 Radix `DropdownMenu`(modal)라 열린
+        // 동안 바깥을 누르면 **닫히기만** 하고 그 버튼은 눌리지 않는다. 이게 없으면
+        // 드로어는 닫히면서 누른 버튼까지 실행돼(톱니창이 바로 열림) 조작감이 달라진다.
+        // `mousedown` 에서 끊는 이유 — click 까지 기다리면 이미 그 버튼이 반응한다.
+        <div className="fixed inset-0 z-[149]"
+             onMouseDown={e => { e.preventDefault(); setOpen(false) }} />
+      )}
       {open && (
         <div role="dialog" aria-label="알람 드로어"
              className="fixed bottom-0 right-0 top-[58px] z-[150] flex w-[380px] max-w-[90vw] flex-col border-l border-border bg-card shadow-lg">
