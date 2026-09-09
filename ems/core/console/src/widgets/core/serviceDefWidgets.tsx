@@ -89,7 +89,7 @@ function ServicePicker() {
   const [, setSvcId] = usePageParam('svc')
   const [adding, setAdding] = useState(false)
   return (
-    <div className="toolbar flex-wrap gap-2">
+    <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3 flex-wrap gap-2">
       <span className="text-md text-muted-foreground">서비스</span>
       <Select value={toSel(svc?.id ?? '')} onValueChange={(v: string) => setSvcId(fromSel(v))}>
         <SelectTrigger className="w-[200px] text-md"><SelectValue /></SelectTrigger>
@@ -125,7 +125,7 @@ function ServiceHeaderBlock() {
   }
 
   return (
-    <div className="panel p-0 flex flex-col">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-0 flex flex-col">
       <div className="py-3 px-4 flex items-center gap-2">
         {!svc ? <span className="text-muted-foreground text-md">
           {loading ? '로딩 중…' : error ? '조회 실패' : '서비스를 선택하세요'}</span> : (
@@ -203,14 +203,14 @@ function ModulesBlock() {
   }
 
   return (
-    <div className="panel flex flex-col min-h-0">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card flex flex-col min-h-0">
       <Header title="모듈" count={mods.length} loading={loading} error={error}
               action={<span className="flex gap-1.5">
                 <EditToggle on={editMode} disabled={!svc} onToggle={() => setEditMode(v => !v)} />
                 <Button disabled={!svc}
                         onClick={() => setEdit({ index: null })}><Plus size={13} /> 모듈</Button>
               </span>} />
-      <div className="scroll-fill">
+      <div className="scroll-fill flex min-h-0 flex-1 flex-col overflow-auto">
         {mods.length === 0 ? <Empty text={svc ? '등록된 모듈 없음' : '서비스를 선택하세요'} /> : (
           <DataTable sticky>
             <thead><tr><Th>이름</Th><Th className="w-[70px]">포트</Th><Th className="w-[60px]">proto</Th>
@@ -257,14 +257,14 @@ function AlertRulesBlock() {
   }
 
   return (
-    <div className="panel flex flex-col min-h-0">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card flex flex-col min-h-0">
       <Header title="알람 규칙" count={rules.length} loading={loading} error={error}
               action={<span className="flex gap-1.5">
                 <EditToggle on={editMode} disabled={!svc} onToggle={() => setEditMode(v => !v)} />
                 <Button disabled={!svc}
                         onClick={() => setEdit({ index: null })}><Plus size={13} /> 규칙</Button>
               </span>} />
-      <div className="scroll-fill">
+      <div className="scroll-fill flex min-h-0 flex-1 flex-col overflow-auto">
         {rules.length === 0 ? <Empty text={svc ? '등록된 알람 규칙 없음' : '서비스를 선택하세요'} /> : (
           <DataTable sticky>
             <thead><tr><Th className="w-[100px]">코드</Th><Th>클래스</Th><Th className="w-[90px]">심각도</Th>
@@ -318,14 +318,14 @@ function DataSourcesBlock() {
   }
 
   return (
-    <div className="panel flex flex-col min-h-0">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card flex flex-col min-h-0">
       <Header title="데이터 소스" count={sources.length} loading={loading} error={error}
               action={<span className="flex gap-1.5">
                 <EditToggle on={editMode} disabled={!svc} onToggle={() => setEditMode(v => !v)} />
                 <Button disabled={!svc}
                         onClick={() => setEdit({ index: null })}><Plus size={13} /> 데이터 소스</Button>
               </span>} />
-      <div className="scroll-fill">
+      <div className="scroll-fill flex min-h-0 flex-1 flex-col overflow-auto">
         {sources.length === 0 ? (
           <Empty text={svc ? 'shape 위젯에 노출할 차트/표/지표/분포 소스를 등록하세요' : '서비스를 선택하세요'} />
         ) : (

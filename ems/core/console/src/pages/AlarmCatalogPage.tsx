@@ -37,7 +37,7 @@ export function AlarmCatalogTable() {
   }, [items, q])
 
   return (
-      <div className="panel p-4">
+      <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-4">
         <div className="flex items-center gap-3 mb-3">
           <div className="font-semibold text-base">알람 카탈로그 ({filtered.length})</div>
           <span className="text-sm text-muted-foreground">
@@ -94,11 +94,11 @@ export function AlarmRulesTable() {
   useEffect(() => {
     alertsApi.rules().then(setRules).catch(e => setErr((e as Error).message))
   }, [])
-  if (err) return <div className="panel"><Alert variant="danger">규칙 조회 실패: {err}</Alert></div>
-  if (!rules) return <div className="panel"><div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div></div>
-  if (rules.rules.length === 0) return <div className="panel"><EmptyState title="등록된 평가 규칙 없음" /></div>
+  if (err) return <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card"><Alert variant="danger">규칙 조회 실패: {err}</Alert></div>
+  if (!rules) return <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card"><div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div></div>
+  if (rules.rules.length === 0) return <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card"><EmptyState title="등록된 평가 규칙 없음" /></div>
   return (
-        <div className="panel">
+        <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card">
           <div className="py-2.5 px-4 font-semibold text-md border-b border-border flex items-center gap-2">
             활성 평가 규칙 ({rules.rules.length})
             <span className="text-xs font-normal text-muted-foreground">

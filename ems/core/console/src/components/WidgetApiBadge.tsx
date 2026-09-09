@@ -8,6 +8,7 @@
 // 보기 모드: 위젯 래퍼 우상단 오버레이. 편집 모드: 위젯 카드 헤더에 인라인.
 // 상세는 요청/응답/오류/비고 4개 섹션이고, 경로·curl·예시는 **내용을 먼저 보여주고** 옆의 [복사]로 담는다.
 
+import { cn } from '@core/lib/utils'
 import { useEffect, useState } from 'react'
 import { Code2 } from 'lucide-react'
 import { useDevMode } from '../hooks/useDevMode'
@@ -267,11 +268,17 @@ export default function WidgetApiBadge({ ids, title, overlay, sourceIds }: {
 
   return (
     <>
-      <button className={overlay ? 'widget-api-badge widget-api-badge--overlay' : 'widget-api-badge'}
+      <button className={cn(
+                'inline-flex items-center gap-1 whitespace-nowrap rounded-sm border border-border',
+                'bg-card px-1.5 text-xs leading-relaxed text-[var(--dev-accent)]',
+                'hover:border-[var(--dev-accent)]',
+                // 오버레이는 위젯 우상단에 겹친다. `width:auto` 를 명시하는 이유는
+                // 래퍼의 `.widget-fixed > * { width:100% }` 가 배지에도 걸려 제목을 가렸기 때문.
+                overlay && 'absolute right-1 top-1 z-[4] w-auto max-w-none opacity-35 transition-opacity hover:opacity-100')}
               onClick={e => { e.stopPropagation(); setOpen(true) }}
               onPointerDown={e => e.stopPropagation()}
               title="이 위젯이 사용하는 API (개발자 모드)">
-        <Code2 size={12} style={{ verticalAlign: '-2px' }} /> API {docs.length}
+        <Code2 size={12} /> API {docs.length}
       </button>
 
       {/* 모달은 document.body 로 portal — 편집 모드에서 배지가 카드 헤더(.grid-drag-handle) 안에 있어

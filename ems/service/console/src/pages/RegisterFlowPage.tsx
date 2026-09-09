@@ -44,7 +44,7 @@ export default function RegisterFlowPage() {
   return (
     <div className="flex flex-col h-full">
       {/* ── 툴바 ── */}
-      <div className="toolbar flex-wrap gap-2">
+      <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3 flex-wrap gap-2">
         <span className="font-semibold text-md text-foreground whitespace-nowrap">
           메세지 이력
         </span>

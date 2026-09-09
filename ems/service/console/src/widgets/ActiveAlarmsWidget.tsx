@@ -55,7 +55,7 @@ function ActiveAlarmsWidget() {
   }
 
   return (
-    <div className="panel">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card">
       {/* 헤더 — 총 건수 + 폴링 실패 표기 + 이력/카탈로그 이동 */}
       <div className="py-3 px-4 border-b border-border bg-muted flex items-center gap-2.5">
         <span className="font-semibold text-base">활성 알람 ({active.length})</span>

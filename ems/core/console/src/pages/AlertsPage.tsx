@@ -176,7 +176,7 @@ export function AlarmHistoryFilter() {
       ]))
   }
   return (
-    <div className="toolbar flex-wrap gap-2">
+    <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3 flex-wrap gap-2">
       {/* 기간과 필터는 **한 줄 한 블록** — 조회 조건이 두 덩어리로 갈려 보이지 않게. */}
       <DaysButtons days={days} onChange={d => setDays(String(d))} />
       <span className="w-[1px] self-stretch my-0 mx-1 bg-border"/>
@@ -248,7 +248,7 @@ export function AlarmsSection() {
   }, [reload, show])
 
   return (
-      <div className="panel flex-1 min-h-0 flex flex-col">
+      <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card flex-1 min-h-0 flex flex-col">
         <div className="py-2.5 px-4 font-semibold text-base border-b border-border flex-none">
           알람 이력 ({rows.length}건{openCount > 0 && <span className="text-destructive"> · 미해소 {openCount}</span>})
           {events.length >= FETCH_LIMIT && (
@@ -263,7 +263,7 @@ export function AlarmsSection() {
           <EmptyState title="기록된 알람 없음" />
         ) : (
           <>
-            <div className="scroll-fill">
+            <div className="scroll-fill flex min-h-0 flex-1 flex-col overflow-auto">
             <DataTable sticky>
               <thead>
                 <tr>
@@ -473,7 +473,7 @@ export function EventHistoryFilter() {
       filtered.map(e => [e.ts, e.kind || '', e.code || '', e.type, e.source?.mo_instance || '', e.message]))
   }
   return (
-    <div className="toolbar flex-wrap gap-2">
+    <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3 flex-wrap gap-2">
       <DaysButtons days={days} onChange={d => setDays(String(d))} />
       <span className="w-[1px] self-stretch my-0 mx-1 bg-border"/>
       <Select value={toSel(f.kind)} onValueChange={(v: string) => alertsFilter.setEvent({ kind: fromSel(v) })}>
@@ -519,7 +519,7 @@ export function EventsSection() {
   const pageGroups = groups.slice(pageStart, pageStart + PAGE_SIZE)
 
   return (
-      <div className="panel flex-1 min-h-0 flex flex-col">
+      <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card flex-1 min-h-0 flex flex-col">
         <div className="py-2.5 px-4 font-semibold text-base border-b border-border flex-none">
           이벤트 이력 ({filtered.length}건 · {groups.length}묶음)
           {events.length >= FETCH_LIMIT && (
@@ -534,7 +534,7 @@ export function EventsSection() {
           <EmptyState title="기록된 이벤트 없음" />
         ) : (
           <>
-            <div className="scroll-fill">
+            <div className="scroll-fill flex min-h-0 flex-1 flex-col overflow-auto">
             <DataTable sticky>
               <thead>
                 <tr>

@@ -97,7 +97,7 @@ function SystemResourceWidget() {
   const fmt = (v: number | null, pct: boolean) => v == null ? '—' : pct ? `${Math.round(v)}%` : fmtRate(v)
 
   return (
-    <div className="panel p-4">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-4">
       <div className="font-semibold mb-2 text-base flex items-center gap-2.5 flex-wrap">
         시스템 리소스 ({rows.length})
         {stale && <span title="갱신 일시 실패 — 직전 값"

@@ -135,8 +135,8 @@ export default function PttGroupsWorkbenchPage() {
       <OrgTreePanel className="flex-[0_0_200px] w-[200px] max-w-[200px]" fill selectedPath={orgScope} onSelect={(p, n) => { setOrgScope(p); setOrgName(n) }}/>
 
       {/* 중: 패널 = 툴바 + 테이블 */}
-      <div className="panel flex-1 min-w-0">
-        <div className="toolbar">
+      <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card flex-1 min-w-0">
+        <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3">
           <span className="font-semibold text-md">{orgName}</span>
           <Input className="flex-1 max-w-[220px]" placeholder="그룹명·ID 검색" value={search}
             onChange={e => setSearch(e.target.value)}/>

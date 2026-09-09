@@ -31,7 +31,7 @@ export default function StatsMessagesPage({ iface }: { iface: string }) {
 
   return (
     <div>
-      <div className="toolbar">
+      <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3">
         <Input className="w-[150px]" type="date" value={date} onChange={e => setDate(e.target.value)}/>
         <Button variant="default" onClick={load}>조회</Button>
         {data && <span className="text-sm text-muted-foreground ml-auto">총 {data.total}건</span>}

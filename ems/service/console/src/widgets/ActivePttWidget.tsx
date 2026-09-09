@@ -20,7 +20,7 @@ function ActivePttWidget() {
   }
   const rows = data?.active_ptt ?? []
   return (
-    <div className="panel">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card">
       <div className="py-3 px-4 font-semibold text-base border-b border-border">
         PTT 활성 그룹 ({rows.length}건)
       </div>

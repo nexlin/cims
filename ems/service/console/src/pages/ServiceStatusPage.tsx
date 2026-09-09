@@ -113,7 +113,7 @@ export function VolteKpiCard() {
  const live = useServiceLive()
  const v = live?.volte.kpi
  return (
-    <div className="panel p-3.5">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-3.5">
       <div className="flex flex-wrap gap-[22px] items-center">
         <Badge className="self-start" variant="brandSoft">VoLTE</Badge>
         <Kpi label="통화 중" value={v?.active ?? '-'} />
@@ -131,7 +131,7 @@ export function PttKpiCard() {
  const live = useServiceLive()
  const p = live?.ptt.kpi
  return (
-    <div className="panel p-3.5">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-3.5">
       <div className="flex flex-wrap gap-[22px] items-center">
         <Badge className="self-start" variant="successSoft">PTT</Badge>
         <Kpi label="발언 중" value={p?.talking ?? '-'} sub="그룹" />
@@ -245,8 +245,8 @@ export function TrendCard() {
   }, [win, show])
  const points = data?.points ?? []
  return (
-    <div className="panel py-2.5 px-3.5">
-      <div className="toolbar mb-2">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card py-2.5 px-3.5">
+      <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3 mb-2">
         <span className="text-md font-semibold">사용량 추세</span>
         <span className="text-sm text-muted-foreground ml-1">최근</span>
         <ToggleGroup type="single" value={win} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
@@ -274,7 +274,7 @@ export function AnomalyCard() {
  const live = useServiceLive()
  const anomalies: Anomaly[] = live?.anomalies ?? []
  return (
-    <div className="panel" style={{ padding: '10px 14px', borderLeft: `3px solid ${anomalies.length ? 'var(--destructive)' : 'var(--cims-success)'}` }}>
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card" style={{ padding: '10px 14px', borderLeft: `3px solid ${anomalies.length ? 'var(--destructive)' : 'var(--cims-success)'}` }}>
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: anomalies.length ? 6 : 0, color: anomalies.length ? 'var(--destructive)' : 'var(--cims-success)' }}>
         {anomalies.length
           ? <><AlertTriangle size={13} className="inline align-[-2px]" /> 이상 징후 ({anomalies.length})</>
@@ -298,11 +298,11 @@ export function VolteCallsCard() {
  const now = useNowTick()
  const { pins, toggle } = usePins('svc.pins.volte')
  const calls = live?.volte.calls ?? []
- if (!live) return <div className="panel"><Loading /></div>
+ if (!live) return <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card"><Loading /></div>
  if (calls.length === 0) return <EmptyState title="현재 통화 중인 호가 없습니다" />
  const sorted = [...calls].sort((a, b) => (pins.has(b.call_id) ? 1 : 0) - (pins.has(a.call_id) ? 1 : 0))
  return (
-    <div className="panel">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card">
       <DataTable sticky>
         <thead><tr><Th></Th><Th>상태</Th><Th>발신 → 착신</Th><Th>유형</Th><Th>경과</Th><Th>미디어 노드</Th><Th>호 ID</Th><Th></Th></tr></thead>
         <tbody>
@@ -375,12 +375,12 @@ export function PttGroupsCard() {
  const { pins, toggle } = usePins('svc.pins.ptt')
  const [open, setOpen] = useState<string | null>(null)   // 멤버 drill 열린 그룹(1개)
  const groups = live?.ptt.groups ?? []   // 백엔드가 발언 활동순으로 정렬
- if (!live) return <div className="panel"><Loading /></div>
+ if (!live) return <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card"><Loading /></div>
  if (groups.length === 0) return <EmptyState title="현재 발언 중이거나 최근 활동한 그룹이 없습니다" />
  const typeLabel = (t: string) => t || '-'
  const sorted = [...groups].sort((a, b) => (pins.has(b.group_id) ? 1 : 0) - (pins.has(a.group_id) ? 1 : 0))
  return (
-    <div className="panel">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card">
       <DataTable sticky>
         <thead><tr><Th></Th><Th>그룹</Th><Th>유형</Th><Th>참여</Th><Th>현재 화자</Th><Th>최근 발언</Th><Th>발언수(5m)</Th><Th></Th></tr></thead>
         <tbody>
@@ -439,10 +439,10 @@ export function EventFeedCard() {
  catch (e: unknown) { show(String(e), 'err') } finally { setLoading(false) }
   }, [show])
  useEffect(() => { load(); const iv = setInterval(load, 5000); return () => clearInterval(iv) }, [load])
- if (loading) return <div className="panel"><Loading /></div>
+ if (loading) return <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card"><Loading /></div>
  if (events.length === 0) return <EmptyState title="최근 이벤트가 없습니다" />
  return (
-    <div className="panel">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card">
       <DataTable sticky>
         <thead><tr><Th className="w-[96px]">시각</Th><Th className="w-[70px]">구분</Th><Th>이벤트</Th></tr></thead>
         <tbody>
@@ -530,13 +530,13 @@ export function OrgStatsCard() {
  const totalPages = Math.max(1, Math.ceil(total / limit))
 
  return (
-    <div className="panel p-2.5">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-2.5">
       {dbDegraded && (
         <Alert variant="warning" className="mb-2">
           DB 조회 실패 — 구성원/등록 수는 표시되지 않습니다 (활성 세션·발언자는 정상). 상세는 OAM 로그 참조.
         </Alert>
       )}
-      <div className="toolbar mb-2">
+      <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3 mb-2">
         <Input className="flex-1 max-w-[280px]" placeholder="가입자 이름/번호 검색 (전체)" value={searchInput}
  onChange={e => setSearchInput(e.target.value)}/>
         {q && <Button variant="ghost" onClick={() => setSearchInput('')}>검색 해제</Button>}
@@ -571,13 +571,13 @@ export function OrgStatsCard() {
         </div>
         {/* 구성원 로스터 — 헤더(고정)·본문(스크롤)·페이지(고정) */}
         <div className="flex-1 min-w-0 flex flex-col max-h-[520px]">
-          <div className="scroll-fill">
+          <div className="scroll-fill flex min-h-0 flex-1 flex-col overflow-auto">
             {!roster ? <Loading />
               : roster.subscribers.length === 0 ? <EmptyState title={q ? '검색 결과 없음' : '구성원 없음'} />
               : <SubscriberRows subs={roster.subscribers} />}
           </div>
           {roster && roster.subscribers.length > 0 && (
-            <div className="toolbar justify-end border-t border-border shrink-0">
+            <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3 justify-end border-t border-border shrink-0">
               <span className="text-muted-foreground text-sm">총 {total.toLocaleString()}명 · {page}/{totalPages}</span>
               <Button variant="ghost" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>이전</Button>
               <Button variant="ghost" disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>다음</Button>
@@ -628,7 +628,7 @@ export function SubscriberLookup() {
   )
  return (
     <div>
-      <div className="toolbar">
+      <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3">
         <ToggleGroup type="single" value={status} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
  onValueChange={(v: string) => { if (v) { setStatus(v as typeof status); setPage(1) } }}>
           {tabBtn('active', '이용 중', counts.active)}
@@ -640,7 +640,7 @@ export function SubscriberLookup() {
       {loading ? <Loading />
         : subs.length === 0 ? <EmptyState title={status === 'active' ? '이용 중인 가입자가 없습니다' : q ? '검색 결과가 없습니다' : '가입자가 없습니다'} />
         : (
-          <div className="panel">
+          <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card">
             <DataTable sticky>
               <thead><tr><Th>이름</Th><Th>VoLTE 번호</Th><Th>VoLTE 접속</Th><Th>VoLTE 통화</Th><Th>PTT 번호</Th><Th>PTT 접속</Th><Th>PTT 서비스</Th></tr></thead>
               <tbody>
@@ -662,7 +662,7 @@ export function SubscriberLookup() {
               </tbody>
             </DataTable>
             {totalPages > 1 && (
-              <div className="toolbar justify-end border-t border-border">
+              <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3 justify-end border-t border-border">
                 <span className="text-muted-foreground text-sm">총 {total.toLocaleString()}건 · {page}/{totalPages}</span>
                 <Button variant="ghost" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>이전</Button>
                 <Button variant="ghost" disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>다음</Button>
@@ -688,7 +688,7 @@ export function ServiceDetailTabs() {
   )
  return (
     <div className="widget-stack">
-      <div className="toolbar flex-wrap">
+      <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3 flex-wrap">
         <ToggleGroup type="single" value={tab} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
  onValueChange={(v2: string) => v2 && setTab(v2 as typeof tab)}>
           {tb('events', '라이브 이벤트')}

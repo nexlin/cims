@@ -291,11 +291,11 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
   const editControls = (
     <div className="layout-edit-headerbar">
       {!editing ? (
-        <Button variant="default" className="layout-edit-fab" onClick={beginEdit}
+        <Button variant="default" className="opacity-85 hover:opacity-100" onClick={beginEdit}
                 title="이 페이지를 위젯으로 편집"><Pencil size={13} /> 편집</Button>
       ) : (
         <>
-          <span className="layout-edit-hint">
+          <span className="whitespace-nowrap text-sm font-semibold text-primary">
             {insideLayout
               ? `카드 안 편집: ${insideAt?.title || insideDef?.title || insideAt?.widgetId}`
               : '편집 중'}
@@ -324,7 +324,7 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
                  onChange={e => { const g = parseInt(e.target.value); applyDraft(d => ({ ...d, gap: g })) }}
                  style={{ width: 64 }} title={`카드 사이 간격 ${draft?.gap ?? GRID_GAP}px`} />
           {/* 세로 예산 — 캔버스가 화면 한 장이라 남은 행이 곧 배치 여력이다. */}
-          <span className="layout-edit-budget"
+          <span className="whitespace-nowrap text-xs text-muted-foreground"
                 title={`화면 한 장 = ${GRID_ROWS}행. 위젯을 키우면 잠기지 않은 위젯이 그만큼 줄어든다.`}
                 style={{ color: freeRows === 0 ? 'var(--destructive)' : undefined }}>
             남은 세로 {freeRows}/{GRID_ROWS}행

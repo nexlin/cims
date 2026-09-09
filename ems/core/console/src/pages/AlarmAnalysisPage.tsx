@@ -114,12 +114,12 @@ function SeverityDist({ bySev }: { bySev: Record<string, number> }) {
 // 분석 표를 담는 패널 골격 — 제목 고정 + 표 내부 스크롤
 function TablePanel({ title, action, children }: { title: ReactNode; action?: ReactNode; children: ReactNode }) {
   return (
-    <div className="panel flex-1 min-w-0 min-h-0 flex flex-col">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card flex-1 min-w-0 min-h-0 flex flex-col">
       <div className="py-2.5 px-4 font-semibold text-base border-b border-border flex-none flex items-center gap-2">
         {title}
         {action && <span className="ml-auto font-normal">{action}</span>}
       </div>
-      <div className="scroll-fill">{children}</div>
+      <div className="scroll-fill flex min-h-0 flex-1 flex-col overflow-auto">{children}</div>
     </div>
   )
 }
@@ -163,7 +163,7 @@ function Block({ title, loading, error, children, pad = true }: {
   title?: ReactNode; loading?: boolean; error?: string; children: ReactNode; pad?: boolean
 }) {
   return (
-    <div className="panel" style={{ padding: pad ? '10px 16px' : 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card" style={{ padding: pad ? '10px 16px' : 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       {title && (
         <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 6, flex: 'none',
                       padding: pad ? 0 : '10px 16px 6px' }}>
@@ -254,8 +254,8 @@ export function AlarmByCodeBlock() {
   }
   return (
     <>
-      {loading && byCode.length === 0 ? <div className="panel"><div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div></div>
-        : error ? <div className="panel"><Alert variant="danger">조회 실패: {error}</Alert></div> : (
+      {loading && byCode.length === 0 ? <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card"><div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div></div>
+        : error ? <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card"><Alert variant="danger">조회 실패: {error}</Alert></div> : (
             <TablePanel title={<>코드별 분석 ({byCode.length}종)</>}
                         action={<Button variant="ghost" onClick={exportCsv}
                                         disabled={byCode.length === 0}>CSV</Button>}>
@@ -323,8 +323,8 @@ export function AlarmByTypeBlock() {
     return [...m.values()].sort((a, b) => b.opens - a.opens || b.last.localeCompare(a.last))
   }, [stats])
   const maxTypeOpens = Math.max(1, ...byType.map(t => t.opens))
-  if (loading && byType.length === 0) return <div className="panel"><div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div></div>
-  if (error) return <div className="panel"><Alert variant="danger">조회 실패: {error}</Alert></div>
+  if (loading && byType.length === 0) return <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card"><div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div></div>
+  if (error) return <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card"><Alert variant="danger">조회 실패: {error}</Alert></div>
   return (
             <TablePanel title={<>유형(클래스)별 분석 ({byType.length}종)</>}>
               {byType.length === 0 ? <EmptyState title="기간 내 알람 없음" /> : (
@@ -444,8 +444,8 @@ export function EventByTypeBlock() {
       ['분류', '코드', '유형', '건수', '마지막'],
       byType.map(t => [EVENT_KIND_LABEL[t.kind || ''] || t.kind || '', t.code || '', t.type, t.count, t.last]))
   }
-  if (loading && byType.length === 0) return <div className="panel"><div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div></div>
-  if (error) return <div className="panel"><Alert variant="danger">조회 실패: {error}</Alert></div>
+  if (loading && byType.length === 0) return <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card"><div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div></div>
+  if (error) return <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card"><Alert variant="danger">조회 실패: {error}</Alert></div>
   return (
             <TablePanel title={<>유형별 발생 ({byType.length}종)</>}
                         action={<Button variant="ghost" onClick={exportCsv}
@@ -487,8 +487,8 @@ export function EventByTypeBlock() {
 export function EventBySourceBlock() {
   const { bySource, loading, error } = useEventAggs()
   const maxSrcCount = Math.max(1, ...bySource.map(t => t.count))
-  if (loading && bySource.length === 0) return <div className="panel"><div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div></div>
-  if (error) return <div className="panel"><Alert variant="danger">조회 실패: {error}</Alert></div>
+  if (loading && bySource.length === 0) return <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card"><div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중…</div></div>
+  if (error) return <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card"><Alert variant="danger">조회 실패: {error}</Alert></div>
   return (
             <TablePanel title={<>소스별 발생 ({bySource.length}곳)</>}>
               {bySource.length === 0 ? <EmptyState title="기간 내 이벤트 없음" /> : (

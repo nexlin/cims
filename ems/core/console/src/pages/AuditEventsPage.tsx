@@ -105,7 +105,7 @@ export function AuditEventsSection() {
 
   return (
     <>
-      <div className="toolbar flex-wrap gap-2 flex-none">
+      <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3 flex-wrap gap-2 flex-none">
         <Select value={toSel(filterType)} onValueChange={(v: string) => setFilterType(fromSel(v))}>
           <SelectTrigger className="w-[170px]"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -129,7 +129,7 @@ export function AuditEventsSection() {
         <Button variant="ghost" onClick={load} title="새로고침"><RotateCw size={14} /></Button>
       </div>
 
-      <div className="panel flex-1 min-h-0 flex flex-col">
+      <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card flex-1 min-h-0 flex flex-col">
         <div className="py-2.5 px-4 font-semibold text-base border-b border-border flex-none">
           감사 이력 ({filtered.length}건)
           <span className="ml-2 text-xs font-normal text-muted-foreground">
@@ -149,7 +149,7 @@ export function AuditEventsSection() {
           <EmptyState title="기록된 감사 이벤트 없음" />
         ) : (
           <>
-            <div className="scroll-fill">
+            <div className="scroll-fill flex min-h-0 flex-1 flex-col overflow-auto">
             <DataTable sticky>
               <thead>
                 <tr>

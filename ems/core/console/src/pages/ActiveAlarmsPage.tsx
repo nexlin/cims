@@ -125,7 +125,7 @@ export function ActiveAlarmList() {
   return (
     <div className="widget-stack">
 
-      <div className="toolbar flex-wrap gap-2">
+      <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3 flex-wrap gap-2">
         <Input className="flex-1 w-[260px]" placeholder="코드/소스/메시지 검색"
                value={q} onChange={e => setQ(e.target.value)}/>
         <span style={{ marginLeft: 'auto', fontSize: 12, color: error ? 'var(--destructive)' : 'var(--muted-foreground)' }}>
@@ -134,7 +134,7 @@ export function ActiveAlarmList() {
         <Button variant="ghost" onClick={refreshAlarms} title="새로고침"><RotateCw size={14} /></Button>
       </div>
 
-      <div className="panel">
+      <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card">
         <div className="py-3 px-4 font-semibold text-base border-b border-border">
           활성 알람 ({rows.length}건{sevFilter || q ? ` / 전체 ${active.length}` : ''})
         </div>

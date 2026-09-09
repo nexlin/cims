@@ -240,7 +240,7 @@ function SystemTopologyWidget() {
   }
 
   return (
-    <div className="panel p-4">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-4">
       <div className="font-semibold mb-3 text-base flex items-center">
         시스템 형상 ({systems.length}{ext.length > 0 ? ` + 외부 ${ext.length}` : ''})
         <a className="ml-auto inline-flex items-center gap-1 text-sm font-medium text-primary cursor-pointer" onClick={() => navigate('/deploy/servers')}>시스템/인프라 <ArrowRight size={13} /></a>

@@ -339,7 +339,7 @@ export default function PttHistoryPage() {
  onClick={() => dd && setDd(null)}>
 
       {/* ── 툴바 1: 기간 · 검색 ── */}
-      <div className="toolbar">
+      <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3">
         <Button variant="ghost" disabled={range !== 'day'}
  onClick={() => setDate(d => shiftDay(d, -1))} title="이전 날"><ChevronLeft size={13} /></Button>
         <Input className="w-[150px]" type="date" value={date}
@@ -374,7 +374,7 @@ export default function PttHistoryPage() {
       </div>
 
       {/* ── 툴바 2: 종류 · 그룹 · 사람 ── */}
-      <div className="toolbar border-t-0">
+      <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3 border-t-0">
         <span className="text-xs text-muted-foreground">종류</span>
         <ToggleGroup type="multiple" value={[...kinds]} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
  onValueChange={(v: string[]) => { if (v.length) setKinds(new Set(v as PttSessionKind[])) }}>

@@ -31,7 +31,7 @@ function SourcePickerWidget({ config }: WidgetProps) {
   // 선택값이 후보 밖(첫 진입·후보 변경)이면 첫 후보를 활성으로 본다.
  const active = cands.some(s => s.id === src) ? src : (cands[0]?.id ?? '')
  return (
-    <div className="tab-nav">
+    <div className="tab-nav flex gap-1">
       <ToggleGroup type="single" value={active} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
  onValueChange={(v: string) => v && setSrc(v)}>
         {cands.map(s => (

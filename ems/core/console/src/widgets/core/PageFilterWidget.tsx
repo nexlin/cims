@@ -56,7 +56,7 @@ function PageFilterWidget({ config }: WidgetProps) {
  const reset = () => { const r = defaultRange(); applyRange(r.from, r.to) }
 
  return (
-    <div className="panel py-2.5 px-3">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card py-2.5 px-3">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="font-semibold text-md">조회 구간</span>
         <Input className="w-[190px] text-sm" type="datetime-local" value={toInput(from)}

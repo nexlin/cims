@@ -123,11 +123,11 @@ function ShapeWidgetBody({ shape, config }: { shape: WidgetShape; config?: Recor
 
   // 지표 카드는 chrome 최소화 — 값만. 소스·지표는 편집 모드 [⚙] 에서 정한다.
  if (shape === 'stat') {
- return <div className="panel p-2.5 flex flex-col">{body}</div>
+ return <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-2.5 flex flex-col">{body}</div>
   }
 
  return (
-    <div className="panel p-3 flex flex-col min-h-0">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-3 flex flex-col min-h-0">
       <div className="flex-none flex items-center gap-2 mb-2.5 flex-wrap">
         {/* 제목 — 배치에서 지정(config.title)한 이름이 우선. 소스가 고정된 화면에서는 소스명보다
             "무엇을 그리는가"(호 시도 추이, 종료 사유 분포)가 읽기 쉽다. */}
@@ -158,7 +158,7 @@ function ShapeWidgetBody({ shape, config }: { shape: WidgetShape; config?: Recor
         <Button className="ml-auto" onClick={() => void load()} title="다시 조회"><RotateCw size={14} /></Button>
       </div>
       {/* 본문은 남은 높이를 전부 받는다 — 차트는 그 높이를 채우고(비율 렌더), 표는 넘치면 스크롤. */}
-      <div className="scroll-fill">{body}</div>
+      <div className="scroll-fill flex min-h-0 flex-1 flex-col overflow-auto">{body}</div>
     </div>
   )
 }

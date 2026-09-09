@@ -206,9 +206,9 @@ export default function VolteHistoryPage() {
  const selNode = orgs.find(o => o.code === selOrg)
 
  return (
-    <div className="panel p-2.5">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-2.5">
       {/* 상단 검색/날짜/표시수 */}
-      <div className="toolbar mb-2">
+      <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3 mb-2">
         <Input className="w-[150px]" type="date" value={fDate} onChange={e => setFD(e.target.value)}/>
         <Input className="flex-1 max-w-[240px]" placeholder="가입자 이름/번호 검색" value={searchInput}
  onChange={e => setSearchInput(e.target.value)}/>
@@ -265,7 +265,7 @@ export default function VolteHistoryPage() {
           </div>
 
           {/* 호 목록 — 헤더(고정)·본문(스크롤, 항목없어도 영역 유지)·테일(고정) 항상 표시 */}
-          <div className="scroll-fill border border-border rounded-sm">
+          <div className="scroll-fill flex min-h-0 flex-1 flex-col overflow-auto border border-border rounded-sm">
             <DataTable sticky className="[&_td]:text-sm">
               <thead>
                 <tr>
@@ -307,7 +307,7 @@ export default function VolteHistoryPage() {
           </div>
 
           {/* 페이지네이션 (항상 표시) */}
-          <div className="toolbar justify-end gap-2 border-t border-border shrink-0 pt-1.5">
+          <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3 justify-end gap-2 border-t border-border shrink-0 pt-1.5">
             <span className="text-sm text-muted-foreground">총 {total.toLocaleString()}건 · {page + 1}/{totalPages}</span>
             <Button variant="ghost" disabled={page === 0} onClick={() => { setPage(page - 1); load(page - 1) }}>이전</Button>
             <Button variant="ghost" disabled={page >= totalPages - 1} onClick={() => { setPage(page + 1); load(page + 1) }}>다음</Button>

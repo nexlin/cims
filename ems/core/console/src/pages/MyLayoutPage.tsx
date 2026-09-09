@@ -29,7 +29,7 @@ export function MyLayoutHeader() {
   const confirm = useConfirm()
   const s = useMyLayout(show)
   return (
-    <div className="toolbar flex-wrap gap-2">
+    <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3 flex-wrap gap-2">
       <Badge  style={{ background: s.source === 'override' ? 'var(--primary)' : 'var(--secondary)' }}>
         {s.source === 'override' ? '개인 구성' : '프로파일 기본'}
       </Badge>
@@ -60,7 +60,7 @@ export function MyLayoutProfile() {
   const { show } = useToast()
   const s = useMyLayout(show)
   return (
-    <div className="panel p-3.5 flex flex-col min-h-0">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-3.5 flex flex-col min-h-0">
       <div className="font-semibold mb-2 flex-none">프로파일</div>
       <div className="flex gap-2 flex-wrap items-center">
         <Select value={toSel(s.baseProfile)} onValueChange={(v: string) => myLayout.setBaseProfile(fromSel(v))}>
@@ -102,7 +102,7 @@ export function MyLayoutWidgets() {
   }, [s.catalog, s.dashboard])
 
   return (
-    <div className="panel p-3.5 flex flex-col min-h-0">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-3.5 flex flex-col min-h-0">
       <div className="flex items-center gap-2 mb-2.5 flex-none">
         <div className="font-semibold">대시보드 위젯 ({s.dashboard.length})</div>
         <Select value={toSel("")} onValueChange={(v: string) => myLayout.add(fromSel(v))}>
@@ -128,7 +128,7 @@ export function MyLayoutWidgets() {
       ) : s.dashboard.length === 0 ? (
         <EmptyState title="위젯이 없습니다 — 위 [+ 위젯 추가] 또는 프로파일을 적용하세요." />
       ) : (
-        <ul className="scroll-fill" style={{ listStyle: 'none', margin: 0, padding: 0, gap: 6 }}>
+        <ul className="scroll-fill flex min-h-0 flex-1 flex-col overflow-auto" style={{ listStyle: 'none', margin: 0, padding: 0, gap: 6 }}>
           {s.dashboard.map((id, i) => {
             const w = byId[id]
             const note = w ? widgetUnavailableNote(w) : '카탈로그에 없는 위젯(권한/서비스 변경)'

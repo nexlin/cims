@@ -74,8 +74,8 @@ export default function OrgTreePanel({ selectedPath, onSelect, style, className,
     // 항상 진다(twMerge 는 클래스끼리만 판정한다). 실제로 200px 지정이 150px 로 죽었다.
     <div className={cn('panel min-w-[150px] w-[150px] max-w-[180px]', fill && 'h-full', className)}
          style={style}>
-      <div className="panel-header flex justify-between items-center">
-        <span className="panel-title">조직</span>
+      <div className="flex items-center justify-between border-b border-border bg-muted px-4 py-3">
+        <span className="font-semibold">조직</span>
         <Button className="text-xs" variant="ghost"
           onClick={() => { onSelect(null, '전체'); }}>전체</Button>
       </div>

@@ -1,3 +1,4 @@
+import { cn } from '@core/lib/utils'
 import { useState, useEffect } from 'react'
 
 const DOCS = [
@@ -84,7 +85,26 @@ export default function DocsPage() {
       </div>
       <div className="flex-1 overflow-auto py-4 px-6">
         {loading ? <div className="text-muted-foreground">로딩 중...</div> :
-          <div className="docs-content"
+          // 마크다운은 `dangerouslySetInnerHTML` 로 들어오므로 자식 태그에 클래스를 못 붙인다.
+          // 그래서 컨테이너에서 **임의 선택자 변형**으로 토큰을 건다 — 별도 CSS 파일을 두지 않는다.
+          <div className={cn(
+                 'max-w-[900px] text-base leading-[1.7] text-foreground',
+                 '[&_h1]:mb-3 [&_h1]:mt-6 [&_h1]:border-b-2 [&_h1]:border-primary [&_h1]:pb-1.5 [&_h1]:text-3xl [&_h1]:font-bold',
+                 '[&_h2]:mb-2 [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:text-primary',
+                 '[&_h3]:mb-1.5 [&_h3]:mt-4 [&_h3]:text-lg [&_h3]:font-semibold',
+                 '[&_strong]:font-semibold',
+                 '[&_li]:ml-5 [&_li]:list-disc',
+                 '[&_code]:rounded-sm [&_code]:bg-secondary [&_code]:px-1.5 [&_code]:py-px [&_code]:font-mono [&_code]:text-md',
+                 // 코드 블록 — 구 CSS 는 `#1e1e2e`/`#cdd6f4` 를 박아 다크 테마와 무관하게 어두웠다.
+                 '[&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-sm [&_pre]:border [&_pre]:border-border',
+                 '[&_pre]:bg-secondary [&_pre]:px-3.5 [&_pre]:py-3 [&_pre]:text-sm [&_pre]:leading-[1.35]',
+                 '[&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-foreground',
+                 '[&_table]:my-2 [&_table]:border-collapse',
+                 '[&_td]:border [&_td]:border-border [&_td]:px-2.5 [&_td]:py-1 [&_td]:text-md',
+                 '[&_tr:first-child_td]:bg-secondary [&_tr:first-child_td]:font-semibold',
+                 '[&_blockquote]:my-2 [&_blockquote]:border-l-[3px] [&_blockquote]:border-primary',
+                 '[&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground',
+               )}
             dangerouslySetInnerHTML={{ __html: renderMd(content) }}
           />
         }

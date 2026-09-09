@@ -179,7 +179,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
     <div>
 
       {/* 서브탭 + 필터 */}
-      <div className="toolbar flex-wrap">
+      <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3 flex-wrap">
         <ToggleGroup type="single" value={subTab} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
  onValueChange={(v: string) => v && setSubTab(v as typeof subTab)}>
           <ToggleGroupItem value="service">서비스 통계</ToggleGroupItem>
@@ -220,7 +220,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
 
       {/* 메시지 통계 */}
       {subTab === 'messages' && msgData && (
-        <div className="panel p-4">
+        <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-4">
           <div className="font-semibold mb-3">메시지 통계 — {msgData.date}</div>
           <BarChart data={msgData.buckets} labelKey="hour" valueKey="total" />
           <div className="flex gap-4 mt-3 text-md">
@@ -236,7 +236,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
         <>
           <CallKpis cell={callsData?.totals?.volte} source={callsData?.source} kind="volte" />
 
-          <div className="panel p-4">
+          <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-4">
             <div className="font-semibold mb-3">호 시도 수 추이</div>
             <BarChart
  data={svcData.volte.buckets}
@@ -245,7 +245,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
           </div>
 
           {Object.keys(svcData.volte.end_reasons).length > 0 && (
-            <div className="panel p-4">
+            <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-4">
               <div className="font-semibold mb-3">종료 사유 분포</div>
               {Object.entries(svcData.volte.end_reasons).sort((a, b) => b[1] - a[1]).map(([reason, cnt]) => {
  const pct = svcData.volte!.total_attempts > 0
@@ -270,7 +270,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
         <>
           <CallKpis cell={callsData?.totals?.ptt} source={callsData?.source} kind="ptt" />
 
-          <div className="panel p-4">
+          <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-4">
             <div className="font-semibold mb-3">그룹콜 수 추이</div>
             <BarChart
  data={svcData.ptt.buckets}
@@ -279,7 +279,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
           </div>
 
           {Object.keys(svcData.ptt.by_group).length > 0 && (
-            <div className="panel p-4">
+            <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-4">
               <div className="font-semibold mb-3">그룹별 사용 빈도</div>
               {Object.entries(svcData.ptt.by_group).sort((a, b) => b[1] - a[1]).map(([gid, cnt]) => (
                 <div className="flex items-center gap-2 mb-1.5" key={gid}>

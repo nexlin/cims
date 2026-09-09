@@ -250,9 +250,9 @@ export default function ProvisioningWorkbenchPage() {
       <OrgTreePanel className="flex-[0_0_200px] w-[200px] max-w-[200px]" fill selectedPath={orgScope} onSelect={(p, n) => { setOrgScope(p); setOrgName(n) }}/>
 
       {/* 중: 패널 = 탭 헤더 + 툴바 + 테이블 */}
-      <div className="panel flex-1 min-w-0">
+      <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card flex-1 min-w-0">
         {/* 탭 헤더 */}
-        <div className="panel-header flex gap-0.5 py-0 px-2 items-stretch">
+        <div className="flex items-stretch gap-0.5 border-b border-border bg-muted px-2">
           {TABS.map(t => (
             <button key={t.k} onClick={() => setTab(t.k)}
               style={{
@@ -266,7 +266,7 @@ export default function ProvisioningWorkbenchPage() {
         </div>
 
         {/* 툴바 */}
-        <div className="toolbar">
+        <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3">
           <span className="font-semibold text-md">{orgName}</span>
           <Input className="flex-1 max-w-[220px]" placeholder="이름·번호·ID 검색" value={search}
             onChange={e => setSearch(e.target.value)}/>

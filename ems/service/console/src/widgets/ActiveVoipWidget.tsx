@@ -20,7 +20,7 @@ function ActiveVoipWidget() {
   }
   const rows = data?.active_voip ?? []
   return (
-    <div className="panel">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card">
       <div className="py-3 px-4 font-semibold text-base border-b border-border">
         VoIP 활성 통화 ({rows.length}건)
       </div>

@@ -15,7 +15,7 @@ export default function IconBtn({ title, onClick, tone, disabled, children }: {
   return (
     <Button title={title} aria-label={title} onClick={onClick} disabled={disabled}
       variant={tone === 'primary' ? 'default' : 'ghost'} size="iconSm"
-      className={tone === 'danger' ? 'icon-btn--danger text-destructive' : undefined}>
+      className={tone === 'danger' ? 'text-destructive hover:bg-dangersoft' : undefined}>
       {children}
     </Button>
   )

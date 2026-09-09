@@ -78,8 +78,9 @@ export default function AlarmIndicator() {
         <Badge variant={badgeTone}>{loaded ? active.length : '…'}{error ? ' !' : ''}</Badge>
       </button>
       {open && (
-        <div className="alarm-drawer">
-          <div className="tab-bar pt-2 px-3.5 pb-0">
+        <div role="dialog" aria-label="알람 드로어"
+             className="fixed bottom-0 right-0 top-[58px] z-[150] flex w-[380px] max-w-[90vw] flex-col border-l border-border bg-card shadow-lg">
+          <div className="flex gap-0.5 border-b-2 border-border pt-2 px-3.5 pb-0">
             <ToggleGroup type="single" value={tab} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
  onValueChange={(v: string) => v && setTab(v as typeof tab)}>
               <ToggleGroupItem value="alarms">활성 알람 ({active.length})</ToggleGroupItem>
@@ -88,14 +89,14 @@ export default function AlarmIndicator() {
             <Button className="ml-auto" variant="ghost"
  onClick={() => setOpen(false)} aria-label="닫기"><X size={16} /></Button>
           </div>
-          <div className="alarm-drawer-body">
+          <div className="min-h-0 flex-1 overflow-y-auto">
             {tab === 'alarms' && active.length === 0 && (
               <EmptyState title="활성 알람 없음" className="p-[20px]" />
             )}
             {tab === 'alarms' && active.map(a => {
  const sev = severityOf(a)
  return (
-                <div key={a.alarm_id || a.type} className="alarm-drawer-row">
+                <div key={a.alarm_id || a.type} className="border-b border-border px-3.5 py-2.5 text-md">
                   <div className="flex items-center gap-1.5">
                     <Badge variant={SEV_BADGE[sev] || 'neutralSoft'} >{sev}</Badge>
                     <span className="font-mono text-xs">{a.code}</span>
@@ -124,7 +125,7 @@ export default function AlarmIndicator() {
               <EmptyState title="최근 24시간 이벤트 없음" className="p-[20px]" />
             )}
             {tab === 'events' && recentEvents.map((ev, i) => (
-              <div key={i} className="alarm-drawer-row">
+              <div key={i} className="border-b border-border px-3.5 py-2.5 text-md">
                 <div className="flex gap-1.5 items-center">
                   <Badge variant="neutralSoft" >{ev.kind}</Badge>
                   <span className="text-sm">{ev.type}</span>

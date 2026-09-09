@@ -186,9 +186,9 @@ export default function OrganizationsPage() {
   }
 
   return (
-    <div className="page">
+    <div className="flex flex-col gap-4">
       {/* 툴바 */}
-      <div className="toolbar">
+      <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3">
         <Button size="default" onClick={() => setImportOpen(true)}>Excel 가져오기</Button>
         {selected.size > 0 && (
           <Button variant="destructive" size="default" onClick={handleBatchDelete}>

@@ -232,9 +232,9 @@ body {
   transition: background-color .2s ease, color .2s ease;
 }
 
-/* 부드러운 테마 전환 */
-.panel, .data-table th, .modal-box, .btn, .form-input, .search-input,
-.sidebar, .app-header, .auth-card, .badge {
+/* 부드러운 테마 전환 — 컴포넌트는 각자 `transition-colors` 를 갖는다(shadcn 계약).
+   여기 남기는 것은 **큰 면**뿐이다: 화면 전체가 한 번에 바뀌어야 깜빡임이 없다. */
+.app-layout, .app-header, .sidebar, .panel {
   transition: background-color .2s ease, border-color .2s ease, color .2s ease;
 }
 
@@ -254,24 +254,14 @@ body {
 
 /* 포커스 링 */
 :focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }:root[data-theme="dark"] .docs-content code,
-:root[data-theme="dark"] .docs-content tr:first-child td { background: var(--secondary); }.app-logo-text { font-size: 18px; font-weight: 700; letter-spacing: -.3px; color: var(--primary); }
 
-.tab-nav { display: flex; gap: 4px; }
 /* ── Page / panel layout ───────────────────────────────────── */
-.page { display: flex; flex-direction: column; gap: 16px; }
 /* `.panel` 은 **2D 격자 레이아웃의 훅**이기도 해서 이름을 남긴다(`.widget-fixed > .panel` 등).
    시각 속성은 시트 2 계약에 맞춘다 — 도안 표면에 그림자가 없다(T2 실측, `/deploy/servers`).
    `--cims-elevation-sm` 토큰 자체는 떠 있는 것(드롭다운·모달)이 쓴다. */
-.panel {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  flex: 1;
-}
+/* `.panel` 자체에는 **아무 선언도 없다** — 시각(채움·테두리·라운드)과 배치(flex)는 전부
+   호출부의 유틸리티로 옮겼다(T6-1). 이름만 남기는 이유는 아래 2D 격자 규칙이 이걸 훅으로
+   잡기 때문이다(`.widget-fixed > .panel` 등) — 이름을 걷으면 위젯 한 칸의 채우기가 깨진다. */
 /* 위젯 높이 고정(h 지정) — 래퍼가 flex(height 고정), 내부 패널이 그 높이를 채우고 넘치면 스크롤. */
 .widget-fixed > .panel { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .widget-fixed > * { width: 100%; }
@@ -292,7 +282,7 @@ body {
 
 /* 위젯 본문의 스크롤 영역 — 내용이 넘치면 스크롤하고, 비었을 때 안내가 중앙에 오도록 flex 컬럼.
    (block 이면 .empty 가 위쪽에 붙어 카드 아래가 휑하게 남는다) */
-.scroll-fill { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+/* `.scroll-fill` 도 선언 없는 훅이다 (T6-1). */
 
 /* 카드 하나 안의 블록 배치(widgets/CardLayout.tsx) — **바깥 캔버스와 같은 48×48 셀 그리드**를
    카드 박스에 그대로 깐다(min-size 없음: 카드가 주는 크기가 곧 캔버스). 그래서 좌표·편집기·잠금
@@ -324,202 +314,11 @@ body {
   overflow: auto;
 }
 
-.panel-header {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--muted);
-}
-.panel-title { font-weight: 600; }
-.panel-title small { font-weight: 400; color: var(--muted-foreground); font-size: 12px; }
-
 /* ── Toolbar ───────────────────────────────────────────────── */
-.toolbar {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--muted);
-}.data-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-.data-table th, .data-table td {
-  padding: 10px 14px;
-  text-align: left;
-  border-bottom: 1px solid var(--border);
-  font-size: 13px;
-}
-.data-table th {
-  background: var(--muted);
-  font-weight: 600;
-  color: var(--muted-foreground);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: .3px;
-  position: sticky;   /* 위젯 축소 시에도 컬럼 헤더 고정 (스크롤 컨테이너=.panel) */
-  top: 0;
-  z-index: 2;
-}
-.data-table tbody tr:hover { background: var(--accent); }
-.data-table tbody tr.row--selected { background: var(--cims-brand-soft); }.ts { color: var(--muted-foreground); font-size: 12px; }
-/* ── Badges ────────────────────────────────────────────────── */
-.badge {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 600;
-}
+/* `.toolbar` 도 선언 없는 훅이다 (T6-1) — `.widget-stack > .toolbar` 등이 잡는다. */
 /* ── Detail tab bar ────────────────────────────────────────── */
-.tab-bar {
-  display: flex;
-  gap: 2px;
-  border-bottom: 2px solid var(--border);
-  margin-bottom: 16px;
-}
-.tab-bar .tab-btn { border-radius: var(--radius) var(--radius) 0 0; }
-/* ── Empty state ───────────────────────────────────────────── */
-/* 빈 상태 안내("활성 알람 없음" 등) — 남은 영역 전체의 중앙에 둔다.
-   부모가 flex 컬럼이면 남은 공간을 채우고 그 안에서 중앙, 아니면 예전처럼 자연 높이. */
-.empty {
-  padding: 32px; text-align: center; color: var(--muted-foreground);
-  flex: 1 1 auto; min-height: 0;
-  display: flex; align-items: center; justify-content: center;
-}
-/* ── Forms ─────────────────────────────────────────────────── */
-.form-grid {
-  display: grid;
-  grid-template-columns: 120px 1fr;
-  gap: 10px 16px;
-  align-items: center;
-}
-.form-grid label { font-size: 13px; color: var(--muted-foreground); font-weight: 500; }
-/* toggle */
-.toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; }
-.toggle input { display: none; }.toggle input:checked ~ .toggle-track { background: var(--primary); }
-.toggle input:checked ~ .toggle-track::after { transform: translateX(18px); }
-/* ── Modal ─────────────────────────────────────────────────── */
-.modal-overlay {
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,.4);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 100;
-}.detail-list dt { font-weight: 600; color: var(--muted-foreground); font-size: 12px; }
-.detail-list dd { font-size: 13px; word-break: break-all; }
-/* ── Toast ─────────────────────────────────────────────────── */
-.toast-stack {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  z-index: 200;
-}
-.toast {
-  padding: 10px 18px;
-  border-radius: var(--radius);
-  font-size: 13px;
-  font-weight: 500;
-  box-shadow: 0 4px 12px rgba(0,0,0,.15);
-  animation: slide-in .2s ease;
-}.toast-close {
-  background: none;
-  border: none;
-  color: inherit;
-  opacity: .75;
-  cursor: pointer;
-  font-size: 12px;
-  padding: 0 2px;
-}
-.toast-close:hover { opacity: 1; }.alarm-indicator .dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-}
-.alarm-drawer {
-  position: fixed;
-  top: var(--header-h);
-  right: 0;
-  bottom: 0;
-  width: 380px;
-  max-width: 90vw;
-  background: var(--card);
-  border-left: 1px solid var(--border);
-  box-shadow: var(--cims-elevation-lg);
-  z-index: 150;
-  display: flex;
-  flex-direction: column;
-}
-.alarm-drawer-body { flex: 1; overflow-y: auto; }
-.alarm-drawer-row {
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-  font-size: 13px;
-}
 
-@keyframes slide-in {
-  from { transform: translateX(40px); opacity: 0; }
-  to   { transform: translateX(0);    opacity: 1; }
-}
-/* ── Auth wrap ─────────────────────────────────────────────── */
-.auth-wrap {
-  display: flex; align-items: center; justify-content: center;
-  min-height: 100vh; background: var(--background);
-}
-.auth-card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 40px 36px;
-  width: 360px;
-  box-shadow: 0 4px 24px rgba(0,0,0,.10);
-  display: flex; flex-direction: column; align-items: center; gap: 24px;
-}
-.auth-logo {
-  display: flex; align-items: center; gap: 10px;
-  font-size: 28px;
-}
-.auth-title {
-  font-size: 17px; font-weight: 700; text-align: center;
-  color: var(--foreground);
-}
-.auth-form {
-  width: 100%; display: flex; flex-direction: column; gap: 10px;
-}
-.auth-form .btn { width: 100%; padding: 10px; font-size: 14px; }
-.auth-error { color: var(--destructive); font-size: 12px; text-align: center; }
-.auth-ok    { color: var(--cims-success);        font-size: 12px; text-align: center; }
-.auth-switch {
-  color: var(--primary); font-size: 12px; text-align: center;
-  background: none; border: none; cursor: pointer; text-decoration: underline;
-}
-.auth-loading {
-  display: flex; align-items: center; justify-content: center;
-  height: 100vh; font-size: 16px; color: var(--muted-foreground);
-}
-/* ── Docs viewer ─────────────────────────────────────────── */
-.docs-content { font-size: 14px; line-height: 1.7; color: var(--foreground); max-width: 900px; }
-.docs-content .md-pre {
-  background: var(--secondary); border: 1px solid var(--border); border-radius: 6px;
-  padding: 12px 14px; overflow-x: auto; line-height: 1.35; font-size: 12px;
-}
-.docs-content .md-pre code { background: none; padding: 0; color: var(--foreground); }
-.docs-content .md-table { border-collapse: collapse; margin: 8px 0; }
-.docs-content .md-table td { border: 1px solid var(--border); padding: 4px 10px; font-size: 13px; }
-.docs-content h1 { font-size: 22px; font-weight: 700; margin: 24px 0 12px; padding-bottom: 6px; border-bottom: 2px solid var(--primary); }
-.docs-content h2 { font-size: 18px; font-weight: 700; margin: 20px 0 8px; color: var(--primary); }
-.docs-content h3 { font-size: 15px; font-weight: 600; margin: 16px 0 6px; }
-.docs-content code { background: var(--secondary); padding: 1px 5px; border-radius: 3px; font-size: 13px; font-family: 'Consolas', monospace; }
-.docs-content pre { background: #1e1e2e; color: #cdd6f4; padding: 14px; border-radius: 6px; overflow-x: auto; margin: 8px 0; }
-.docs-content pre code { background: none; color: inherit; padding: 0; font-size: 12px; }
-.docs-content li { margin-left: 20px; list-style: disc; }
-.docs-content td { padding: 4px 10px; border: 1px solid var(--border); font-size: 13px; }
-.docs-content tr:first-child td { font-weight: 600; background: var(--secondary); }
-.docs-content strong { font-weight: 600; }
-.docs-content blockquote { border-left: 3px solid var(--primary); padding-left: 12px; color: var(--muted-foreground); margin: 8px 0; }
+/* ── Forms ─────────────────────────────────────────────────── */
 
 /* ── Layout (Header + Sidebar + Content) ──────── */
 .app-layout {
@@ -554,7 +353,6 @@ body {
   display: flex; align-items: center; gap: 6px;
   flex-wrap: nowrap; min-width: 0; white-space: nowrap;
 }
-.layout-edit-headerbar .form-input { min-width: 0; }
 
 /* ── Sidebar ────────────────────────────────────── */
 /* 시각 속성은 Tailwind 로 옮겼다(components/Sidebar.tsx) — 여기 남는 것은 **그리드 배치**뿐이다.
@@ -570,12 +368,8 @@ body {
   display: flex; flex-direction: column;
 }/* 라우트 본문 래퍼 — 위젯 캔버스가 "남은 높이 전부"를 definite 하게 받도록 flex 사슬을 이어준다.
    그리드 행이 `1fr` 이라 캔버스에 확정 높이가 없으면 트랙이 내용 높이로 쪼그라든다. */
-.app-content-body {
-  /* breadcrumb(PageHeaderRow)가 위에 붙으므로 본문 위 여백은 시안 실측 14px.
-     좌우는 breadcrumb 와 같은 20px 로 맞춘다 (Figma S1: Main 안 x=20, Content y=56). */
-  padding: 14px 20px 20px; flex: 1; min-height: 0;
-  display: flex; flex-direction: column;
-}
+
+/* 본문 래퍼가 남은 높이를 위젯 캔버스에 그대로 넘긴다 (flex 사슬) */
 .app-content-body > .layout-host { flex: 1; min-height: 0; }
 
 /* ── 위젯 편집 컨트롤 (글로벌 헤더 슬롯으로 portal — 2026-06-10) ─────────
@@ -585,11 +379,6 @@ body {
 /* 캔버스는 남은 높이를 받되 **설계 캔버스보다 작아지지는 않는다**(.grid-canvas 의 min-height).
    여기서 min-height:0 을 주면 그 하한이 무력화돼 트랙(1fr)이 내용 높이로 쪼그라든다. */
 .layout-host > .grid-canvas { flex: 1; }
-.layout-edit-budget { font-size: 11px; color: var(--muted-foreground); white-space: nowrap; }
-.icon-btn--danger:hover { background: color-mix(in srgb, var(--destructive) 12%, transparent); }
-.layout-edit-fab { opacity: 0.85; }
-.layout-edit-fab:hover { opacity: 1; }
-.layout-edit-hint { font-size: 12px; color: var(--primary); font-weight: 600; white-space: nowrap; }
 
 /* ── 자유 2D 그리드 (GridRenderer 뷰 + GridEditor 편집) ────────────────────
    위젯 배치를 48열 × 48행 셀 그리드에 grid-column/grid-row 로 절대 배치.
@@ -645,7 +434,7 @@ body {
 /* 배치 단위 표시 이름(placement.title) — 위젯이 자체 제목을 안 그리는 경우(단일 지표 카드 등)와
    같은 위젯을 여러 벌 놓고 구분해야 할 때 렌더러가 얹는 캡션. */
 .widget-caption {
-  flex: none; font-size: 11.5px; font-weight: 600; color: var(--muted-foreground);
+  flex: none; font-size: 12px; font-weight: 600; color: var(--muted-foreground);
   padding: 0 2px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
@@ -660,32 +449,22 @@ body {
 }
 .grid-config-row { display: flex; align-items: center; gap: 6px; }
 .grid-config-row > span { flex: none; width: 64px; color: var(--muted-foreground); }
-.grid-config-row > .form-input { flex: 1; min-width: 0; font-size: 11px; padding: 2px 6px; }
 
 .grid-size-badge {
-  font-size: 10px; color: var(--muted-foreground);
-  border: 1px solid var(--border); border-radius: 4px; padding: 0 4px;
+  font-size: 11px; color: var(--muted-foreground);
+  border: 1px solid var(--border); border-radius: 6px; padding: 0 4px;
 }
 .grid-widget--dragging { z-index: 20; box-shadow: var(--cims-elevation-lg); opacity: 0.95; }
 .grid-widget--dragging .grid-drag-handle { cursor: grabbing; }
 
 /* [API] 배지 — 개발자 모드에서 위젯이 쓰는 API 를 연다. 편집 카드 헤더는 인라인,
    보기 모드는 위젯 우상단 오버레이(평소 흐리게, hover 시 또렷하게 — 내용 가림 최소화). */
-.widget-api-badge {
-  font-size: 10px; line-height: 1.6; white-space: nowrap; cursor: pointer;
-  color: var(--dev-accent); background: var(--card);
-  border: 1px solid var(--border); border-radius: 4px; padding: 0 5px;
-}
-.widget-api-badge:hover { border-color: var(--dev-accent); }
+
 .widget-api-host { position: relative; }
-.widget-api-badge--overlay {
-  position: absolute; top: 4px; right: 4px; z-index: 4;
-  /* width:auto 명시 — 래퍼의 `.widget-fixed > * { width:100% }`(L174)가 배지에도 걸려
-     상단 전체를 덮고 위젯 제목을 가렸다. 뒤에 오는 같은 특이도 규칙이라 이걸로 상쇄된다. */
-  width: auto; max-width: none;
-  opacity: 0.35; transition: opacity 0.12s;
-}
-.widget-api-host:hover > .widget-api-badge--overlay { opacity: 1; }
+
+/* 호버 시 또렷하게 — 배지 자체의 `hover:opacity-100` 은 배지 위에 올렸을 때만 걸린다.
+   위젯 어디에 올려도 보이게 하려면 이 부모 훅이 필요하다(유틸리티로는 불가). */
+.widget-api-host:hover > button { opacity: 1; }
 /* 8방향 리사이즈 핸들 — 모서리(n/s=세로, e/w=가로) + 귀퉁이(양방향). 카드 경계에 살짝 겹쳐 잡기 쉽게. */
 .grid-rz { position: absolute; z-index: 5; touch-action: none; }
 .grid-rz-n { top: -3px; left: 12px; right: 12px; height: 8px; cursor: ns-resize; }
@@ -745,25 +524,3 @@ body {
    (.grid-canvas 의 min-width/min-height + .app-content 의 overflow). 예전의 단일열 collapse
    media query 는 그래서 제거했다. */
 
-/* ── ⓘ 말풍선 (components/InfoDot) ── */
-.info-dot-wrap { position: relative; display: inline-flex; }
-.info-dot {
-  border: none; background: none; cursor: pointer; padding: 0 2px; line-height: 1;
-  font-size: 14px; color: var(--muted-foreground);
-}
-.info-dot:hover, .info-dot--open { color: var(--primary); }
-.info-pop {
-  position: absolute; top: calc(100% + 8px); left: -6px; z-index: 40;
-  width: max-content; max-width: 340px;
-  background: var(--card); color: var(--foreground);
-  border: 1px solid var(--border); border-radius: var(--radius);
-  box-shadow: var(--cims-elevation-lg); padding: 10px 12px;
-  font-size: 12px; font-weight: 400; line-height: 1.55; text-align: left; white-space: normal;
-}
-/* 말풍선 꼬리 — 테두리 삼각형 위에 배경 삼각형을 겹쳐 선이 이어져 보이게 한다. */
-.info-pop::before, .info-pop::after {
-  content: ''; position: absolute; bottom: 100%; left: 10px;
-  border: 6px solid transparent;
-}
-.info-pop::before { border-bottom-color: var(--border); }
-.info-pop::after  { border-bottom-color: var(--card); margin-bottom: -1px; }

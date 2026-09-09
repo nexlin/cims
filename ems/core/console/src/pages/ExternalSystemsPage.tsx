@@ -177,7 +177,7 @@ export default function ExternalSystemsPage() {
   }
 
   return (
-    <div className="panel p-4">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-4">
       <div className="flex items-center mb-3">
         <div>
           <div className="font-semibold text-base">외부 시스템 ({items.length})</div>

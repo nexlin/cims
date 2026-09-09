@@ -30,7 +30,7 @@ export function widgetHeightCss(h?: number): string | undefined {
 
 function UnknownWidget({ id }: { id: string }) {
   return (
-    <div className="panel p-3 text-destructive text-sm">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-3 text-destructive text-sm">
       알 수 없는 위젯: <code>{id}</code> (서비스 pack 미설치 또는 제거됨)
     </div>
   )

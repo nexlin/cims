@@ -40,7 +40,7 @@ function RecentEventsWidget() {
   const rows = filter ? recentEvents.filter(e => kindOf(e) === filter) : recentEvents
 
   return (
-    <div className="panel">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card">
       {/* 헤더 — 총 건수(24h) + 이력 이동 */}
       <div className="py-3 px-4 border-b border-border bg-muted flex items-center gap-2.5">
         <span className="font-semibold text-base">최근 이벤트 ({recentEvents.length})</span>

@@ -68,7 +68,7 @@ export function AlarmEventTabs() {
 export function PeriodDaysControl() {
  const [days, setDays] = usePageParam('days')
  return (
-    <div className="toolbar flex-wrap gap-2">
+    <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3 flex-wrap gap-2">
       <DaysButtons days={Number(days) || 7} onChange={d => setDays(String(d))} />
     </div>
   )

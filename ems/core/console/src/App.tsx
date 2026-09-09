@@ -150,7 +150,7 @@ function Shell() {
   const [newPw, setNewPw] = useState('')
   const [newPw2, setNewPw2] = useState('')
 
-  if (loading) return <div className="auth-loading">로딩 중...</div>
+  if (loading) return <div className="flex min-h-screen items-center justify-center text-muted-foreground">로딩 중...</div>
   if (!user) return <LoginPage />
 
   function toggleSidebar() {
@@ -195,7 +195,7 @@ function Shell() {
           <ReadOnlyBanner />
           {/* breadcrumb 한 줄 (시안 PageHeaderRow) — 전 화면 공통, 본문 위 */}
           <PageHeaderRow />
-          <div className="app-content-body">
+          <div className="app-content-body flex min-h-0 flex-1 flex-col px-5 pb-5 pt-3.5">
             <Routes>
               <Route path="/" element={<Navigate to={HOME_PATH} replace />} />
               {/* 옛 경로 호환 — 알람 이력은 /alerts/history 로 이전 */}
@@ -229,7 +229,7 @@ function Shell() {
         <Modal title={<span className="inline-flex items-center gap-1.5"><KeyRound size={16} /> 비밀번호 변경</span>}
                onClose={() => setShowChgPw(false)}>
             <form onSubmit={handleChangePassword}>
-                <div className="form-grid">
+                <div className="grid grid-cols-[120px_1fr] items-center gap-x-4 gap-y-2.5 [&_label]:text-md [&_label]:font-medium [&_label]:text-muted-foreground">
                   <label>현재 비밀번호</label>
                   <Input  type="password" value={oldPw} onChange={e => setOldPw(e.target.value)} />
                   <label>새 비밀번호</label>
@@ -237,8 +237,8 @@ function Shell() {
                   <label>새 비밀번호 확인</label>
                   <Input  type="password" value={newPw2} onChange={e => setNewPw2(e.target.value)} />
                 </div>
-                {chgError && <div className="auth-error mt-3">{chgError}</div>}
-                {chgOk && <div className="auth-ok mt-3">{chgOk}</div>}
+                {chgError && <div className="mt-3 text-center text-sm text-destructive">{chgError}</div>}
+                {chgOk && <div className="mt-3 text-center text-sm text-success">{chgOk}</div>}
               <div className="flex justify-end gap-2.5 pt-5">
                 <Button size="default" type="button" onClick={() => setShowChgPw(false)}>취소</Button>
                 <Button variant="default" size="default" type="submit">변경</Button>

@@ -3274,7 +3274,7 @@ function AddMemberModal({ group, serverName, mountSuggestion, onClose, onSubmit 
 
  return (
     <Modal title={`${group.name} — 멤버 추가`} onClose={onClose} width={620}>
-      <div className="form-grid">
+      <div className="grid grid-cols-[120px_1fr] items-center gap-x-4 gap-y-2.5 [&_label]:text-md [&_label]:font-medium [&_label]:text-muted-foreground">
         <label>서버 이름 *</label>
         <Input value={name} disabled={busy}
  onChange={e => setName(e.target.value)} />
@@ -3828,7 +3828,7 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
           {' '}<b>{agent.ha_group.mode}</b> 가능 모듈 + standalone 모듈만 install 가능
         </Alert>
       )}
-      <div className="form-grid">
+      <div className="grid grid-cols-[120px_1fr] items-center gap-x-4 gap-y-2.5 [&_label]:text-md [&_label]:font-medium [&_label]:text-muted-foreground">
         <label>1. 모듈 *</label>
         <Select value={toSel(moduleName)} onValueChange={(v: string) => setModuleName(fromSel(v))}>
           <SelectTrigger><SelectValue /></SelectTrigger>

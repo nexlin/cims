@@ -61,7 +61,7 @@ function SystemCardsWidget() {
 
   const onOpen = () => navigate('/deploy/servers')
   return (
-    <div className="panel p-4">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-4">
       <div className="font-semibold mb-2.5 text-base flex items-center">
         시스템 ({systems.length})
         <a className="ml-auto text-sm font-medium text-primary cursor-pointer" onClick={onOpen}>

@@ -36,7 +36,7 @@ export function AbnFilter() {
  const s = useAbnormal(show)
  const { critical } = abnDerived(s)
  return (
-    <div className="toolbar flex-wrap gap-2">
+    <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3 flex-wrap gap-2">
       <Input className="w-[150px]" type="date" value={s.date}
  onChange={e => abnormal.setDate(e.target.value)}/>
       <span className="text-sm text-muted-foreground">범위</span>
@@ -105,10 +105,10 @@ export function AbnTopIps() {
  const s = useAbnormal(show)
  const { topIps } = abnDerived(s)
  return (
-    <div className="panel p-3 flex flex-col min-h-0">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-3 flex flex-col min-h-0">
       <div className="text-sm font-semibold mb-2 flex-none">발신 IP 상위 (차단 후보)</div>
       {topIps.length === 0 ? <EmptyState title="해당 기간 발신 IP 없음" /> : (
-        <div className="scroll-fill" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignContent: 'flex-start' }}>
+        <div className="scroll-fill flex min-h-0 flex-1 flex-col overflow-auto" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignContent: 'flex-start' }}>
           {topIps.map(([ip, n]) => (
             <span key={ip} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 24,
  padding: '3px 10px', borderRadius: 14, background: 'rgba(220,38,38,0.08)',
@@ -128,10 +128,10 @@ export function AbnTable() {
  const s = useAbnormal(show)
  const { sessions, pageRows, pageCount } = abnDerived(s)
  return (
-    <div className="panel flex flex-col min-h-0">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card flex flex-col min-h-0">
       {s.loading ? <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중...</div> : (
         <>
-          <div className="scroll-fill">
+          <div className="scroll-fill flex min-h-0 flex-1 flex-col overflow-auto">
             <DataTable sticky>
               <thead>
                 <tr>
@@ -207,7 +207,7 @@ function KpiCard({ label, value, unit, tone }: {
 }) {
  const color = tone === 'warn' ? 'var(--destructive)' : tone === 'ok' ? 'var(--cims-success)' : 'var(--foreground)'
  return (
-    <div className="panel p-2.5 flex flex-col">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-2.5 flex flex-col">
       <div className="flex-auto min-h-0 flex flex-col justify-center items-center text-center">
         <div className="text-sm text-muted-foreground mb-1">{label}</div>
         <div style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.1, color }}>

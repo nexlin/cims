@@ -590,7 +590,7 @@ export default function ServicesPage() {
                     value={editText}
                     onChange={e => setEditText(e.target.value)}
                     spellCheck={false}/>
-                  {editError && <div className="auth-error mt-2">{editError}</div>}
+                  {editError && <div className="mt-2 text-center text-sm text-destructive">{editError}</div>}
                   <div className="text-muted-foreground text-sm mt-2">
                     최상위 object. `sections[]`, `collections[]` 스키마. 저장 시 재배포되는 deployment 가 새 템플릿으로 overlay 됩니다.
                   </div>

@@ -8,14 +8,14 @@ function CspRolesWidget() {
   // 로딩 중에도 카드는 유지 — null 을 돌려주면 위젯이 통째로 사라졌다 팝인한다.
   if (!data) {
     return (
-      <div className="panel p-4">
+      <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-4">
         <div className="font-semibold mb-2 text-base">CSP 모듈 역할</div>
         <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">불러오는 중…</div>
       </div>
     )
   }
   return (
-    <div className="panel p-4">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-4">
       <div className="font-semibold mb-2 text-base">CSP 모듈 역할</div>
       <div className="flex gap-4 flex-wrap">
         {Object.entries(data.csp.roles).map(([k, v]) => (

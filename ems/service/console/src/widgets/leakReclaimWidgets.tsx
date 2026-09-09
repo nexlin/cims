@@ -58,7 +58,7 @@ function CountCard({ label, value, tone, loading, error }: {
 }) {
   const color = tone === 'warn' ? 'var(--destructive)' : tone === 'ok' ? 'var(--cims-success)' : 'var(--foreground)'
   return (
-    <div className="panel p-2.5 flex flex-col">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-2.5 flex flex-col">
       <div style={CARD}>
         <div className="text-sm text-muted-foreground mb-1">
           {label}{loading && ' ·'}
@@ -93,12 +93,12 @@ function ByNodeBlock() {
   const { data, loading, error } = useReclaims()
   const rows = Object.entries(data?.by_node ?? {}).sort((a, b) => b[1] - a[1])
   return (
-    <div className="panel p-3 flex flex-col min-h-0">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card p-3 flex flex-col min-h-0">
       <div className="text-sm text-muted-foreground mb-1.5 flex-none">
         노드별 회수{loading && ' · 갱신 중…'}{error && <span className="text-destructive"> · 조회 실패</span>}
       </div>
       {rows.length === 0 ? <EmptyState title="회수 없음" className="text-sm" /> : (
-        <div className="scroll-fill">
+        <div className="scroll-fill flex min-h-0 flex-1 flex-col overflow-auto">
           <DataTable sticky className="[&_td]:text-sm">
             <thead><tr><Th>노드</Th><Th className="w-[70px] text-right">건수</Th></tr></thead>
             <tbody>
@@ -120,7 +120,7 @@ function FilterBlock() {
   const { data, loading, error, reload } = useReclaims()
   const n = data?.counts.total ?? 0
   return (
-    <div className="toolbar flex-wrap gap-2">
+    <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3 flex-wrap gap-2">
       <Input className="w-[150px]" type="date" value={date || todayIso()}
              onChange={e => setDate(e.target.value)}/>
       <Button variant="ghost" title="다시 조회" onClick={reload}><RotateCw size={14} /></Button>
@@ -140,13 +140,13 @@ function ListBlock() {
   const { data, loading, error } = useReclaims()
   const items = data?.items ?? []
   return (
-    <div className="panel flex flex-col min-h-0">
+    <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card flex flex-col min-h-0">
       <div className="py-2.5 px-4 font-semibold text-base flex-none border-b border-border">
         회수 세션 ({items.length}건)
         {loading && <span className="text-xs font-normal text-muted-foreground"> · 갱신 중…</span>}
         {error && <span className="text-xs font-normal text-destructive"> · 조회 실패</span>}
       </div>
-      <div className="scroll-fill">
+      <div className="scroll-fill flex min-h-0 flex-1 flex-col overflow-auto">
         <DataTable sticky>
           <thead>
             <tr>
