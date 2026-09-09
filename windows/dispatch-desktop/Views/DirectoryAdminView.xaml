@@ -47,7 +47,7 @@
                                 <Button Style="{StaticResource Btn.Xs.Danger}" Content="삭제" Command="{Binding DeleteOrgCommand}" />
                             </StackPanel>
                         </Border>
-                        <ListBox Style="{StaticResource PlainList}" ItemsSource="{Binding Orgs}" SelectedItem="{Binding SelectedOrg}">
+                        <ListBox Style="{StaticResource SelectList}" ItemsSource="{Binding Orgs}" SelectedItem="{Binding SelectedOrg}">
                             <ListBox.ItemTemplate>
                                 <DataTemplate DataType="{x:Type vm:OrgRow}">
                                     <Border Style="{StaticResource LogRow}" Padding="10,0" Height="30">
@@ -92,7 +92,7 @@
                                 <TextBlock Grid.Column="3" Style="{StaticResource Hint}" Text="자격" />
                             </Grid>
                         </Border>
-                        <ListBox Style="{StaticResource PlainList}" ItemsSource="{Binding Members}" SelectedItem="{Binding SelectedMember}" MouseDoubleClick="Members_DoubleClick">
+                        <ListBox Style="{StaticResource SelectList}" ItemsSource="{Binding Members}" SelectedItem="{Binding SelectedMember}" MouseDoubleClick="Members_DoubleClick">
                             <ListBox.ItemTemplate>
                                 <DataTemplate DataType="{x:Type vm:MemberRow}">
                                     <Border Style="{StaticResource LogRow}" Padding="12,5">

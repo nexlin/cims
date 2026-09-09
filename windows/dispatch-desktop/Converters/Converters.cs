@@ -135,3 +135,27 @@ public sealed class NotNullToVisibilityConverter : IValueConverter
     public object Convert(object? value, Type t, object? p, CultureInfo c) => value is null ? Visibility.Collapsed : Visibility.Visible;
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotSupportedException();
 }
+
+/// <summary>비율(0~1) × 실제 폭 → 길이(px). 타임바의 발언 턴 막대 위치/폭 — values[0]=비율, values[1]=트랙 ActualWidth.</summary>
+public sealed class RatioToLengthConverter : IMultiValueConverter
+{
+    public object Convert(object[] values, Type t, object? p, CultureInfo c)
+    {
+        double ratio = values.Length > 0 && values[0] is double r ? r : 0;
+        double width = values.Length > 1 && values[1] is double w ? w : 0;
+        return Math.Max(0, Math.Clamp(ratio, 0, 1) * width);
+    }
+    public object[] ConvertBack(object v, Type[] t, object? p, CultureInfo c) => throw new NotSupportedException();
+}
+
+/// <summary>배율 × 실제 폭 → 길이(px). 발언 타임라인 트랙 폭(뷰포트 × 확대 배율) — values[0]=배율(1 이상), values[1]=뷰포트 폭.</summary>
+public sealed class ScaleToLengthConverter : IMultiValueConverter
+{
+    public object Convert(object[] values, Type t, object? p, CultureInfo c)
+    {
+        double scale = values.Length > 0 && values[0] is double s && s > 0 ? s : 1;
+        double width = values.Length > 1 && values[1] is double w ? w : 0;
+        return Math.Max(0, scale * width);
+    }
+    public object[] ConvertBack(object v, Type[] t, object? p, CultureInfo c) => throw new NotSupportedException();
+}

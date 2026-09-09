@@ -9,7 +9,8 @@
 //    PUT    /provisioning/directory/members/{id}/volte|ptt {msisdn,imsi,serviceRef,sipTransport,password}  DELETE 〃
 //    PUT    /provisioning/directory/members/{id}/ptt/profile {allowCreateGroup,…}
 //    GET    /provisioning/directory/groups                → {groups[]}
-//    GET    /provisioning/history?kind=&since=&until=&limit=  (창 조회 — 하루 단위, 항목 recordingId/hasRecording)
+//    GET    /provisioning/history?kind=&since=&until=&limit=  (창 조회 — 하루 단위, 항목 recordingId/hasRecording + 종류별 확장 필드, 최상위 hours)
+//    GET    /provisioning/history/ptt/{recordingId}       → {session, participants[], events[], floor[], hasRecording} (PTT 세션 상세)
 //    GET    /provisioning/recordings/{id}                 → 세션·세그먼트 메타(OAM 녹취 API 응답 그대로)
 //    GET    /provisioning/recordings/{id}/segments/{seq}/audio?slot=&retry=  → 200 MP4 · 202 변환 중(재시도) · 500 실패
 //  앱은 경로와 JSON 만 알고 인증·전송은 SDK. 오류 본문 `error` 는 ResponseText(Area.Management/Recording) 사전이 문구로 바꾼다.
@@ -180,16 +181,53 @@ public sealed class ManagementClient
     }
 
     // ── 이력 창 조회 ──
-    /// <summary>[from, to] 창의 이력(시각 오름차순). 서버 스캔은 48 시간 버킷 상한이라 호출자가 하루 단위로 나눈다.</summary>
-    public async Task<Result<IReadOnlyList<HistoryEntry>>> QueryHistoryAsync(HistoryKind kind, DateTime from, DateTime to, int limit = 1000, CancellationToken ct = default)
+    /// <summary>[from, to] 창의 이력(시각 오름차순) + 시간대 분포. 서버 스캔은 48 시간 버킷 상한이라 호출자가 하루 단위로 나눈다.
+    /// PTT 창 조회는 서버가 콘솔 PTT 이력의 읽기 모델(OAM 세션 인덱스)을 프록시해 발언 지표·종류·참여자를 채운다.</summary>
+    public async Task<Result<HistoryPage>> QueryHistoryAsync(HistoryKind kind, DateTime from, DateTime to, int limit = 1000, CancellationToken ct = default)
     {
         string path = $"/provisioning/history?kind={HistoryClient.KindName(kind)}&since={Enc(from.ToString("yyyy-MM-ddTHH:mm:ss"))}" +
                       $"&until={Enc(to.ToString("yyyy-MM-ddTHH:mm:ss"))}&limit={Math.Clamp(limit, 1, 1000)}";
         var r = await SendAsync("GET", path, null, null, ct);
-        if (!r.Ok) return Result<IReadOnlyList<HistoryEntry>>.Fail(r.Code, r.Reason);
-        try { return Result<IReadOnlyList<HistoryEntry>>.Success(HistoryClient.Parse(kind, r.Value.Text).Items); }
-        catch (JsonException ex) { return Result<IReadOnlyList<HistoryEntry>>.Fail(-2, "응답 해석 실패: " + ex.Message); }
+        if (!r.Ok) return Result<HistoryPage>.Fail(r.Code, r.Reason);
+        try
+        {
+            var (items, next, hours) = HistoryClient.Parse(kind, r.Value.Text);
+            return Result<HistoryPage>.Success(new HistoryPage(items, next, hours));
+        }
+        catch (JsonException ex) { return Result<HistoryPage>.Fail(-2, "응답 해석 실패: " + ex.Message); }
     }
+
+    /// <summary>PTT 세션 상세 — 참여자·입퇴장 이벤트·floor 타임라인(GET /provisioning/history/ptt/{recordingId}, 범위 게이트 + OAM 프록시).</summary>
+    public async Task<Result<PttSessionDetail>> GetPttSessionDetailAsync(string recordingId, CancellationToken ct = default)
+    {
+        string path = "/provisioning/history/ptt/" + string.Join('/', recordingId.Split('/').Select(Enc));
+        var r = await SendAsync("GET", path, null, null, ct);
+        return Map(r, root => ParsePttSessionDetail(root, recordingId));
+    }
+
+    internal static PttSessionDetail ParsePttSessionDetail(JsonElement root, string recordingId)
+    {
+        var parts = new List<PttParticipant>();
+        if (root.TryGetProperty("participants", out var pa) && pa.ValueKind == JsonValueKind.Array)
+            foreach (var p in pa.EnumerateArray())
+                if (Str(p, "msisdn") is { Length: > 0 } id)
+                    parts.Add(new PttParticipant(id, Str(p, "role"), HistoryClient.Time(p, "join_time"), HistoryClient.Time(p, "leave_time")));
+        var events = new List<PttEvent>();
+        if (root.TryGetProperty("events", out var ea) && ea.ValueKind == JsonValueKind.Array)
+            foreach (var e in ea.EnumerateArray())
+                events.Add(new PttEvent(HistoryClient.Time(e, "ts"), Str(e, "type"), Str(e, "member"), Str(e, "role"), NInt(e, "duration")));
+        var floor = new List<PttFloorEvent>();
+        if (root.TryGetProperty("floor", out var fa) && fa.ValueKind == JsonValueKind.Array)
+            foreach (var f in fa.EnumerateArray())
+                floor.Add(new PttFloorEvent(HistoryClient.Time(f, "ts"), Str(f, "op"), Str(f, "user"), NInt(f, "slot"), NInt(f, "prio"), NInt(f, "talkers"),
+                                            Str(f, "policy"), Bool(f, "preempt"), Str(f, "preempted_from"), Str(f, "reason"), NInt(f, "cause"),
+                                            Str(f, "owner"), NInt(f, "pos"), NInt(f, "qsize"), Str(f, "revoked"), NInt(f, "removed"),
+                                            NInt(f, "grace_sec"), NInt(f, "idle_ms"), Str(f, "preempted_by")));
+        return new PttSessionDetail(Str(root, "recordingId").Length > 0 ? Str(root, "recordingId") : recordingId, parts, events, floor, Bool(root, "hasRecording"));
+    }
+
+    private static int? NInt(JsonElement e, string name) =>
+        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out int n) ? n : null;
 
     // ── 녹취 ──
     private static string RecPath(string id) => "/provisioning/recordings/" + string.Join('/', id.Split('/').Select(Enc));
@@ -209,8 +247,18 @@ public sealed class ManagementClient
                 var ids = new List<string>();
                 if (s.TryGetProperty("speaker_ids", out var si) && si.ValueKind == JsonValueKind.Array)
                     foreach (var x in si.EnumerateArray()) if (x.ValueKind == JsonValueKind.String) ids.Add(x.GetString() ?? "");
+                // 슬롯 트랙(동시 발언·전이중) — 발언 턴은 트랙의 화자 구간(speakers[])이다
+                var tracks = new List<SegmentTrack>();
+                if (s.TryGetProperty("tracks", out var ta) && ta.ValueKind == JsonValueKind.Array)
+                    foreach (var tr in ta.EnumerateArray())
+                    {
+                        var spans = new List<SpeakerSpan>();
+                        if (tr.TryGetProperty("speakers", out var spa) && spa.ValueKind == JsonValueKind.Array)
+                            foreach (var sp in spa.EnumerateArray()) spans.Add(new SpeakerSpan(Str(sp, "id"), Int(sp, "offset_ms"), Int(sp, "dur_ms")));
+                        tracks.Add(new SegmentTrack(Int(tr, "slot"), Str(tr, "kind"), spans, Bool(tr, "has_video"), Str(tr, "status")));
+                    }
                 segs.Add(new RecordingSegment(Int(s, "seq"), Str(s, "type"), Str(s, "speaker_id"), Time(s, "start_time"), Time(s, "end_time"),
-                                              Int(s, "duration_ms"), Bool(s, "has_video"), Str(s, "status"), ids, Int(s, "talker_count")));
+                                              Int(s, "duration_ms"), Bool(s, "has_video"), Str(s, "status"), ids, Int(s, "talker_count")) { Tracks = tracks });
             }
         return new RecordingInfo(Str(root, "id").Length > 0 ? Str(root, "id") : id, Str(root, "call_type"), Str(root, "caller"), Str(root, "callee"),
                                  Str(root, "group_id"), Time(root, "start_time"), Time(root, "end_time"), Int(root, "duration"), Str(root, "status"), segs);
@@ -227,6 +275,16 @@ public sealed class ManagementClient
         if (slot is not null) q.Add("slot=" + slot.Value);
         if (retry) q.Add("retry=1");
         string full = q.Count > 0 ? path + "?" + string.Join('&', q) : path;
+        // 로컬 캐시 — 같은 세그먼트(·슬롯)는 한 번만 받는다. 재변환(retry)이 아니면 있는 파일을 그대로 튼다. 재생 중인 파일은
+        // MediaElement 가 잠고 있어 덮어쓰면 IOException("The process cannot access the file") 이라, 다시 받을 때는 새 이름으로 쓴다.
+        string dir = Path.Combine(Path.GetTempPath(), "CIMS", AppPaths.AppName, "rec");
+        string baseName = $"{Sanitize(id)}_{seq}_{(slot?.ToString() ?? "mix")}";
+        string file = Path.Combine(dir, baseName + ".mp4");
+        try
+        {
+            if (!retry && File.Exists(file) && new FileInfo(file).Length > 0) return Result<string>.Success(file);
+        }
+        catch (IOException) { }
         var deadline = DateTime.UtcNow.AddSeconds(120);
         int delay = 700;
         while (true)
@@ -234,10 +292,21 @@ public sealed class ManagementClient
             var r = await _csc.RequestAsync(token, "GET", full, null, null, "*/*", null, null, ct);
             if (r.Ok && r.Value.Status == 200)
             {
-                string dir = Path.Combine(Path.GetTempPath(), "CIMS", AppPaths.AppName, "rec");
-                Directory.CreateDirectory(dir);
-                string file = Path.Combine(dir, $"{Sanitize(id)}_{seq}_{(slot?.ToString() ?? "mix")}.mp4");
-                await File.WriteAllBytesAsync(file, r.Value.Body, ct);
+                try
+                {
+                    Directory.CreateDirectory(dir);
+                    try { await File.WriteAllBytesAsync(file, r.Value.Body, ct); }
+                    catch (IOException)
+                    {
+                        file = Path.Combine(dir, $"{baseName}_{DateTime.UtcNow.Ticks}.mp4");        // 잠긴 파일 — 새 이름으로
+                        await File.WriteAllBytesAsync(file, r.Value.Body, ct);
+                    }
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _log.Warn($"recording audio {id} seq={seq}: cannot write temp file — {ex.Message}");
+                    return Result<string>.Fail(-3, "임시 파일을 쓸 수 없습니다 — " + ex.Message);
+                }
                 return Result<string>.Success(file);
             }
             if (r.Ok && r.Value.Status == 202)

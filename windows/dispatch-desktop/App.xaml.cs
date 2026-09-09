@@ -83,6 +83,13 @@ public partial class App : Application
                                 ?? (e.Args.Contains("--ui-preview-management", StringComparer.OrdinalIgnoreCase) ? "admin" : null);
             if (screenArg is not null && _mainVm is not null)
                 _mainVm.Screen = screenArg.ToLowerInvariant() switch { "history" => Models.AppScreen.History, "groups" => Models.AppScreen.PttGroups, _ => Models.AppScreen.Admin };
+            // --ui-preview-history=call|ptt: 이력 화면(§4.6)에 표본 하루를 심어(시간대 밴드·표/카드·선택 세션 패널) 서버 없이 그려 본다.
+            if (e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-history=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] is { Length: > 0 } histKind && _mainVm is not null)
+                _mainVm.HistoryScreen.SeedPreview(histKind.Equals("ptt", StringComparison.OrdinalIgnoreCase) ? Models.HistoryKind.Ptt : Models.HistoryKind.Call);
+            // --ui-preview-zoom=<배율>: 발언 타임라인 확대 상태로 그려 본다(눈금·트랙 폭·가로 스크롤).
+            if (e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-zoom=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] is { Length: > 0 } zoomArg && _mainVm is not null
+                && double.TryParse(zoomArg, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double z))
+                _mainVm.HistoryScreen.TalkZoom = Math.Clamp(z, 1, ViewModels.SessionHistoryViewModel.TalkZoomMax);
             // --ui-preview-shot=<png>: 주 창을 그려 PNG 로 저장하고 종료 — 화면 잠금·원격 세션에서도 XAML 점검이 되게(화면 캡처가 아니라 WPF 렌더).
             if (e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-shot=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] is { Length: > 0 } shot && _main is not null)
             {
@@ -155,7 +162,17 @@ public partial class App : Application
     public void ApplyTheme(string theme)
     {
         var dict = Resources.MergedDictionaries;
-        var uri = new Uri(theme == "dark" ? "Themes/Dark.xaml" : "Themes/Light.xaml", UriKind.Relative);
+        bool dark = theme == "dark";
+        // AvalonDock VS2013 테마 사전은 **앱 전역**에도 병합한다 — DockingManager.Theme 만 놓으면 도킹 크롬이 상태를 바꿀 때(탭 전환·캡션 버튼 글리프)
+        //   ComponentResourceKey(ToolWindowTab*·PanelBorderBrush …) 조회가 매니저 밖(별창·팝업·어도너)에서 실패해 "Resource not found" 경고가 계속 난다.
+        var dockUri = new Uri($"pack://application:,,,/AvalonDock.Themes.VS2013;component/{(dark ? "DarkTheme" : "LightTheme")}.xaml");
+        var dock = dict.FirstOrDefault(d => d.Source is not null && d.Source.OriginalString.Contains("AvalonDock.Themes.VS2013", StringComparison.OrdinalIgnoreCase));
+        if (dock is null || !dock.Source!.OriginalString.EndsWith(dockUri.OriginalString[dockUri.OriginalString.LastIndexOf('/')..], StringComparison.OrdinalIgnoreCase))
+        {
+            if (dock is not null) dict.Remove(dock);
+            dict.Insert(0, new ResourceDictionary { Source = dockUri });
+        }
+        var uri = new Uri(dark ? "Themes/Dark.xaml" : "Themes/Light.xaml", UriKind.Relative);
         var current = dict.FirstOrDefault(d => d.Source is not null && d.Source.OriginalString.Contains("Themes/", StringComparison.OrdinalIgnoreCase) && !d.Source.OriginalString.Contains("Styles"));
         if (current is not null && current.Source!.OriginalString.EndsWith(uri.OriginalString, StringComparison.OrdinalIgnoreCase)) return;
         if (current is not null) dict.Remove(current);

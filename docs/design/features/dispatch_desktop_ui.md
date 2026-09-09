@@ -310,12 +310,32 @@ terminated = 부재 1건(내 leg 가 응답 없이 끝난 것은 동료가 받�
 끝난 통화·PTT 세션의 **날짜 창 조회 + 녹취 재생**. 활성 = 관제 그룹 소속(범위는 서버 `monitor_scope`/`ptt_listen`). 진행 중·오늘의 실시간 흐름은 관제 ②④ 가 정본이고
 ②④ 머리의 [이력에서 보기]가 종류를 맞춰 이곳으로 넘어온다.
 
-- 도구줄: 종류 세그먼트 [통화(VoLTE) | PTT 세션] · 날짜 [◀] DatePicker [▶] [오늘](하루 단위 창 조회 — 서버 스캔 48 시간 버킷 상한, 미래로는 못 간다) · 검색 · 요약 · [조회].
-  종류·날짜가 바뀌면 자동 조회.
-- 행: 시각·종류·상대/그룹·응답/부재·길이·긴급/녹취 배지(최근이 위). 녹취 행 선택 → 오른쪽 **녹취 패널**: 세그먼트 목록(순번·발언자·길이·상태) → [▶ 재생](MP4/AAC 를 받아
-  `MediaElement` 로 — 202 변환 중이면 0.7→1.5초 간격 최대 120초 대기 문구) · [정지] · [다시 변환](failed 표식 제거). 재생은 로컬 내역 ④ 에 "녹취 재생" 행, 서버 감사
-  `E-AUD-016 tap_mode=recording`. 임시 파일 `%TEMP%\CIMS\dispatch-desktop\rec`(화면을 떠날 때 6시간 지난 것 정리). 화면을 떠나거나 별창으로 옮기면 재생은 멈춘다.
-- 서버 계약 [android_ue_provisioning.md §3-2/§3-4](android_ue_provisioning.md).
+구성은 콘솔 `/service/history/volte`·`/service/history/ptt` 와 같다 — 관제사가 콘솔에서 보던 것과 같은 열·카드·타임라인을 앱에서 본다
+(콘솔의 SIP Flow 다이어그램은 운영자 진단용이라 싣지 않는다).
+
+- 도구줄: 종류 세그먼트 [통화(VoLTE) | PTT 세션] · 날짜 [◀] DatePicker [▶] [오늘](하루 단위 창 조회 — 서버 스캔 48 시간 버킷 상한, 미래로는 못 간다) ·
+  검색(상대·그룹·참여자) · 요약(건수·진행중·녹취·PTT 발화 합) · [조회]. 종류·날짜가 바뀌면 자동 조회하고 시간대 필터는 해제된다.
+- **시간대 밴드**(도구줄 아래 전체 폭, 24칸): 그날의 분포(응답 `hours` — 통화 INVITE·PTT 세션 시작 기준, 진할수록 많음)이자 필터 — 칸 클릭 = 그 시간대만,
+  다시 클릭·[전체 시간] = 해제. 건수 0 칸은 무시.
+- **통화 — 표**(콘솔 VoLTE 이력과 같은 열, 최근이 위): 유형(음성/영상) · 발신 → 착신(이름 있으면 이름) · 상태(종료/통화중/호출중) · 시작 · 응답 · 종료 · 통화시간 ·
+  종료사유(정상종료/무응답/통화중/거절/오류/시간초과/비정상 종료) · 긴급/녹취 배지. 통화는 상세가 따로 없어 **한 줄이 곧 상세** — 오른쪽 패널 없이 표가
+  전체 폭이고, 녹취 있는 행을 고르면 표 **아래 녹취 띠**(상대 · 상태 · 세그먼트 칩 · [▶ 재생]·[정지]·[다시 변환])만 나온다.
+- **PTT — 세션 요약 카드**(좌, 콘솔 SessionCard): 종류(그룹/1:1/임시) · 전이중 · 진행중/종료 · 긴급 · 대상(그룹 이름 / 1:1 `A ↔ B` / 임시 `A 외 n명`) · 시작~종료 · 길이 ·
+  그룹 id · 턴/화자/발화 · 동시 n · 개시자 · 녹취 배지. 카드 선택 → 오른쪽 **세션 패널**(콘솔 SessionPane — 세션 패널이 주역이라 목록 1 : 패널 3, 경계 드래그로
+  조절·더블클릭 = 기본, 종류를 바꾸면 기본으로):
+  머리(종류·전이중·상태·대상·floor 정책 배지 · [▶ 전체]·[정지]) → 지표 띠(발언 턴·녹취 세그먼트·최대 동시 발언·발화 구간·발화 누적·화자) →
+  ① 참여자(입퇴장 기록 ∪ 화자 — 색점 = 레인 색, 개시자 배지, 입장~퇴장, 턴·발화) → ② 발언 타임라인(화자 레인 위 턴 막대, 세션 시간축 + 눈금 행 — **막대 클릭 = 그 턴 재생**,
+  동시 발언 세그먼트는 단독 트랙 `slot`. **확대·축소** = [−]·[+]·[1:1] 버튼 / Ctrl+휠(커서 기준) ×1.25 단계·최대 ×64, 확대 상태에서 빈 곳 드래그·Shift+휠로 가로 이동,
+  눈금 간격은 배율에 따라 1초~1시간 중 자동 — 콘솔 LaneTimebar 와 같은 조작) → ③ 이벤트 타임라인(floor 중재 op 8종 + 입퇴장 시간순, [발언권 n]·[멤버 n] 층 토글, op 별 부가 정보 = 선점·동시·대기 순번·
+  거절 사유·회수 유예) → 녹취(아래 고정 — 세그먼트 목록·[▶ 세그먼트 재생]·[다시 변환]).
+  발언 턴은 녹취 세그먼트 `tracks[].speakers[]`(콘솔 segTurns 와 같은 해석)에서, 참여자·이벤트·floor 는 `GET /provisioning/history/ptt/{recordingId}` 에서,
+  지표·종류·참여자 수는 목록 항목의 확장 필드에서 온다(서버가 OAM 세션 인덱스를 범위 게이트 뒤에서 프록시 — 스캔 폴백이면 지표 0).
+- **녹취 재생**: 세그먼트 목록(순번·발언자·길이·상태) → [▶ 재생](MP4/AAC 를 받아 `MediaElement` 로 — 202 변환 중이면 0.7→1.5초 간격 최대 120초 대기 문구) · [정지] ·
+  [다시 변환](failed 표식 제거) · PTT [▶ 전체](재생 가능한 세그먼트를 순서대로). 재생은 로컬 내역 ④ 에 "녹취 재생" 행, 서버 감사 `E-AUD-016 tap_mode=recording`.
+  임시 파일 `%TEMP%\CIMS\dispatch-desktop\rec`(화면을 떠날 때 6시간 지난 것 정리). 화면을 떠나거나 별창으로 옮기면 재생은 멈춘다.
+- 서버 계약 [android_ue_provisioning.md §3-2/§3-2a/§3-4](android_ue_provisioning.md). 구현 `ViewModels/SessionHistoryViewModel.cs`(`HistoryRow`·`HourCell`·
+  `SpeakerLane/TurnBar`·`TimelineItem`, 표시 사전 = 콘솔 `pttSession.tsx` 의 EVENT_ICONS/FLOOR_OPS/DENY_REASON 문구) · `Views/HistoryView.xaml`.
+  개발 스위치 `--ui-preview --ui-preview-screen=history --ui-preview-history=call|ptt [--ui-preview-shot=<png>]` = 서버 없이 표본 하루를 심어 그려 본다.
 
 ### 4.7 PTT 그룹 화면 ([PTT 그룹] F3)
 
@@ -534,8 +554,8 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
     2.5 초 주기. 로그인 직후 `kind=call&limit=1` 탐침 — 404/501 이면 서버 미구현으로 조용히 꺼지고, 403 이면 범위 밖으로 꺼진다(재시도 없음).
     CSC 에 닿지 않으면(재배포·망 단절) 주기를 지수 백오프(최대 30 초)로 늘리고 경고는 단절·복구 시 한 번씩만 남긴다 — 복구되면 커서 그대로 이어 받는다.
   - 응답(앱이 읽는 것 — 서버 계약 [android_ue_provisioning.md §3-2](android_ue_provisioning.md), 필드 추가는 무시): `{ "items": [ { "id", "time"(ISO 8601+offset),
-    "kind", "event", "from", "to", "group"(URI), "duration"(초), "emergency", "text" } ], "next": "<다음 커서>" }` + 응답 헤더 `ETag`(If-None-Match→304).
-    `id` 가 중복 제거 키, `items` 는 `time` 오름차순. `event` = call.answered/missed·ptt.session.start/end·message.sds(②)/sms(④) — 앱이 이름표로
+    "kind", "event", "from", "to", "group"(URI), "duration"(초), "emergency", "text" } ], "next": "<다음 커서>", "hours": {…} }` + 응답 헤더 `ETag`(If-None-Match→304).
+    `id` 가 중복 제거 키, `items` 는 `time` 오름차순. 종류별 확장 필드(§3-2 — 상태·시각·종료사유·PTT 지표)는 파서가 읽어 두지만 ②④ 병합은 쓰지 않는다(이력 화면 §4.6 전용). `event` = call.answered/missed·ptt.session.start/end·message.sds(②)/sms(④) — 앱이 이름표로
     ②(ptt·그룹 sds)·④(call·1:1 sms) 행에 매핑한다(상세 문구 = 길이 또는 이름표 한글). 내가 당사자인 항목과 **대표번호 호**(로컬 dialog 가 정본, §4.3)는
     건너뛰고, 넣는 행은 `IsOthers` 로 표시해 데스크 응대·부재 집계에서 뺀다.
   - 내가 당사자(`from`/`to` 가 내 PTT·VoLTE 번호)인 항목은 로컬 행이 이미 있어 건너뛴다. 이름은 주소록으로, 그룹은 GMS 목록 이름으로 표시.

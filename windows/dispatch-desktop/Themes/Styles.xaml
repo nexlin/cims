@@ -17,6 +17,8 @@
     <c:NullToVisibilityConverter x:Key="NullToVis" />
     <c:NotNullToVisibilityConverter x:Key="NotNullToVis" />
     <c:RegStateToBrushConverter x:Key="RegBrush" />
+    <c:RatioToLengthConverter x:Key="RatioLen" />
+    <c:ScaleToLengthConverter x:Key="ScaleLen" />
     <BooleanToVisibilityConverter x:Key="B2V" />
 
     <FontFamily x:Key="Font.Ui">Pretendard, Malgun Gothic, Segoe UI, sans-serif</FontFamily>
@@ -340,6 +342,40 @@
                         <Setter.Value>
                             <ControlTemplate TargetType="ListBoxItem">
                                 <ContentPresenter />
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- 고르는 목록 — PlainList 는 행이 포커스를 받지 않아(Focusable=False) WPF 가 마우스 클릭으로 선택하지 못한다(ListBoxItem 은 Focus() 성공 시에만
+         선택한다). SelectedItem 을 쓰는 목록(이력 행·세션 카드·세그먼트·관리 조직/구성원)은 이 스타일 — 포커스 가능 + 마우스오버/선택 표시(좌측 3px 띠) -->
+    <Style TargetType="ListBox" x:Key="SelectList" BasedOn="{StaticResource PlainList}">
+        <Setter Property="ItemContainerStyle">
+            <Setter.Value>
+                <Style TargetType="ListBoxItem">
+                    <Setter Property="Padding" Value="0" />
+                    <Setter Property="Margin" Value="0" />
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <Setter Property="Focusable" Value="True" />
+                    <Setter Property="Background" Value="Transparent" />
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="ListBoxItem">
+                                <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="Transparent" BorderThickness="3,0,0,0" SnapsToDevicePixels="True">
+                                    <ContentPresenter />
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Hover}" />
+                                    </Trigger>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" />
+                                        <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" />
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
                             </ControlTemplate>
                         </Setter.Value>
                     </Setter>

@@ -50,10 +50,18 @@ public sealed class NumberInput
 public sealed record ManagedGroup(string Id, string Uri, string Name, int MemberCount, bool IsOwner, string OrgCode, string SessionType, string ETag,
                                   bool CanManage = true, bool InListenScope = false, bool IsMember = false);
 
+/// <summary>슬롯 트랙 안의 화자 구간(세그먼트 시작 기준 offset).</summary>
+public sealed record SpeakerSpan(string Id, int OffsetMs, int DurMs);
+
+/// <summary>녹취 세그먼트의 슬롯 트랙(동시 발언·전이중 private call) — Kind audio|video, Slot = PTT 슬롯 번호(VoIP 는 -1).</summary>
+public sealed record SegmentTrack(int Slot, string Kind, IReadOnlyList<SpeakerSpan> Speakers, bool HasVideo, string Status);
+
 /// <summary>녹취 세그먼트(OAM handlers/recording.py 세그먼트 항목 중 앱이 쓰는 것).</summary>
 public sealed record RecordingSegment(int Seq, string Type, string SpeakerId, DateTime? Start, DateTime? End, int DurationMs, bool HasVideo,
                                       string Status, IReadOnlyList<string> SpeakerIds, int TalkerCount)
 {
+    /// <summary>슬롯 트랙(발언 턴 = 화자 구간 — 콘솔 segTurns 와 같은 해석). 없으면 세그먼트 전체가 대표 화자의 한 턴.</summary>
+    public IReadOnlyList<SegmentTrack> Tracks { get; init; } = Array.Empty<SegmentTrack>();
     public string Label => Type == "ptt" ? (SpeakerIds.Count > 1 ? $"#{Seq} {string.Join(", ", SpeakerIds)}" : $"#{Seq} {SpeakerId}") : $"#{Seq}";
     public string DurationText => TimeSpan.FromMilliseconds(Math.Max(0, DurationMs)).ToString(@"mm\:ss");
 }
