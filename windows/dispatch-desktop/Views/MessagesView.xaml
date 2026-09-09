@@ -6,10 +6,10 @@
              xmlns:v="clr-namespace:DispatchDesktop.Views"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
              d:DataContext="{d:DesignInstance vm:MessagesViewModelBase}" x:Name="Root">
-    <!-- 메시지 공용 뷰 — 스레드 칩 → 말풍선 → 입력 (MCData SDS ① / SMS·LMS ③) -->
+    <!-- 메시지 공용 뷰 — 스레드 칩 → 말풍선 → 입력 (④ PTT 메시지 패널 / ③ [문자] 팝오버). HeaderVisible=False 면 호스트가 머리를 그린다 -->
     <Border Style="{StaticResource Sub}">
         <DockPanel>
-            <Border DockPanel.Dock="Top" Style="{StaticResource SubHeader}">
+            <Border DockPanel.Dock="Top" Style="{StaticResource SubHeader}" Visibility="{Binding HeaderVisible, ElementName=Root, Converter={StaticResource BoolToVis}}">
                 <DockPanel>
                     <TextBlock Style="{StaticResource SectionHeader}" Text="{Binding Title, ElementName=Root}" />
                     <TextBlock Style="{StaticResource Muted}" Text="{Binding Subtitle, ElementName=Root}" Margin="8,0,0,0" FontSize="12" VerticalAlignment="Center" />

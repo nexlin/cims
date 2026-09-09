@@ -36,6 +36,12 @@ public sealed class AppSettings
     public bool ConfirmCloseMonitor { get; set; } = true;
     public int MaxMonitorWindows { get; set; } = 4;
     public bool FollowChannelThread { get; set; } = true;
+    /// <summary>⑤ PTT 이벤트 — 포커스 채널 따라가기(기본 켬, §4.4).</summary>
+    public bool FollowChannelEvents { get; set; } = true;
+    /// <summary>잠금 발언(§4.1) — PTT 를 클릭으로 누름 유지(풋스위치·긴 공지용). 기본 꺼짐.</summary>
+    public bool LockTalk { get; set; } = false;
+    /// <summary>② 관리 범위 섹션 펼침 상태(기본 접힘, §4.2).</summary>
+    public bool ScopedManageExpanded { get; set; } = false;
     public bool MinimizeToTray { get; set; } = true;
     public int MessageRetentionDays { get; set; } = 30;
 
@@ -44,10 +50,6 @@ public sealed class AppSettings
     public string Theme { get; set; } = "light";
     /// <summary>pad | book | recent — 일반통화 발신 세그먼트, 마지막 선택 기억(§4.3).</summary>
     public string OriginateMode { get; set; } = "book";
-    /// <summary>card | tile</summary>
-    public string ChannelViewMode { get; set; } = "card";
-    /// <summary>카드로 보일 채널(그룹 id). 비면 멤버 그룹 전부.</summary>
-    public List<string> SelectedChannels { get; set; } = new();
     /// <summary>주소록 CSV 경로 재지정(비면 %APPDATA% 의 directory.csv, 없으면 앱 옆 directory.sample.csv).</summary>
     public string DirectoryCsv { get; set; } = "";
     public int LogLevel { get; set; } = 3;

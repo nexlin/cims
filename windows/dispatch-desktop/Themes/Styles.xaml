@@ -396,4 +396,49 @@
         <Setter Property="BorderThickness" Value="0,0,0,1" />
         <Setter Property="Padding" Value="10,3" />
     </Style>
+    <!-- 팝오버 본문(§4.4 공통) — 앵커 아래, 그림자. 폭은 쓰는 곳이 정한다(발신 520 · ▦ 500 · 문자 440 · DTMF/전달 280) -->
+    <Style TargetType="Border" x:Key="PopPanel">
+        <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Margin" Value="0,4,12,12" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="Effect"><Setter.Value><DropShadowEffect BlurRadius="16" ShadowDepth="3" Opacity="0.22" /></Setter.Value></Setter>
+    </Style>
+    <!-- 패널 안 섹션 라벨("청취 범위 · 3", "대표번호 대기열 1") -->
+    <Style TargetType="TextBlock" x:Key="SectionLabel">
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Muted}" />
+        <Setter Property="Margin" Value="2,6,0,4" />
+    </Style>
+    <!-- 채널 카드 상태 점(§4 공통) — 대기 빈 원 · 진행 녹색 · 사설콜 청록 · 긴급 빨강. 카드 DataTemplate 트리거가 Fill 을 바꾼다 -->
+    <Style TargetType="Ellipse" x:Key="StateDot">
+        <Setter Property="Width" Value="10" />
+        <Setter Property="Height" Value="10" />
+        <Setter Property="Fill" Value="Transparent" />
+        <Setter Property="Stroke" Value="{DynamicResource Brush.Wire}" />
+        <Setter Property="StrokeThickness" Value="1.5" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Margin" Value="0,0,6,0" />
+    </Style>
+    <!-- 채널 카드(①②) — 2줄 58px, 포커스 3줄. 얇은 패딩 -->
+    <Style TargetType="Border" x:Key="ChannelCard" BasedOn="{StaticResource Card}">
+        <Setter Property="Padding" Value="8,6" />
+        <Setter Property="Margin" Value="0,0,0,6" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <!-- 발언 바 PTT 버튼(40px) — 대기 녹색 외곽 · 요청 주황 · 발언 녹색 채움 · 거부 빨강 -->
+    <Style TargetType="Button" x:Key="Btn.Ptt" BasedOn="{StaticResource Btn}">
+        <Setter Property="Height" Value="40" />
+        <Setter Property="MinWidth" Value="120" />
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="BorderThickness" Value="2" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Talk}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Talk}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
+    </Style>
 </ResourceDictionary>

@@ -17,6 +17,20 @@ public sealed class SmsMessagesViewModel : MessagesViewModelBase
     }
 
     public string GatewayText => "외부망 게이트웨이 미구성";
+    /// <summary>[문자] 팝오버 보내기 줄 — 받는 사람(내선·가입자). 사람 메뉴·그룹원 칩·주소록 [문자] 는 이 칸을 채워 연다.</summary>
+    private string _recipient = "";
+    public string Recipient { get => _recipient; set { if (SetProperty(ref _recipient, value)) OnPropertyChanged(nameof(CanOpenRecipient)); } }
+    public bool CanOpenRecipient => Recipient.Trim().Length > 0;
+    public CommunityToolkit.Mvvm.Input.RelayCommand OpenRecipientCommand => _openRecipient ??= new(() => { string r = Recipient.Trim(); if (r.Length == 0) return; OpenNumber(Resolve(r)); Recipient = ""; });
+    private CommunityToolkit.Mvvm.Input.RelayCommand? _openRecipient;
+    /// <summary>이름이면 주소록 번호로, 로컬 표기면 원본으로.</summary>
+    private string Resolve(string input)
+    {
+        var byName = S.Directory.CallBook.FirstOrDefault(c => c.Name.Equals(input, StringComparison.OrdinalIgnoreCase));
+        if (byName is not null) return byName.Number;
+        var byLocal = S.Directory.CallBook.FirstOrDefault(c => DirectoryService.Normalize(S.Directory.DisplayNumber(c.Number)) == DirectoryService.Normalize(input));
+        return byLocal?.Number ?? input;
+    }
     public string CountText => Input.Length > SmsLimit ? $"{Input.Length}자 LMS" : $"{Input.Length}/{SmsLimit} SMS";
     public bool SelectedIsExternal => Selected?.IsExternal == true;
 

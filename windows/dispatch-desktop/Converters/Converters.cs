@@ -58,10 +58,11 @@ public sealed class ZeroToVisibilityConverter : IValueConverter
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotSupportedException();
 }
 
+/// <summary>문자열이 있으면 Visible. parameter "invert" = 비었을 때 Visible(입력란 자리표시자).</summary>
 public sealed class StringToVisibilityConverter : IValueConverter
 {
     public object Convert(object? value, Type t, object? p, CultureInfo c) =>
-        string.IsNullOrEmpty(value as string) ? Visibility.Collapsed : Visibility.Visible;
+        string.IsNullOrEmpty(value as string) == (p is string s && s == "invert") ? Visibility.Visible : Visibility.Collapsed;
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotSupportedException();
 }
 

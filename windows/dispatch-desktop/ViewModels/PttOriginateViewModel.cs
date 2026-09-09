@@ -45,7 +45,8 @@ public sealed partial class PttOriginateViewModel : ObservableObject
 
     public event EventHandler<GroupInfo>? MessageGroupRequested;
     public event EventHandler<string>? MessageUserRequested;
-    public event EventHandler<GroupInfo>? AddChannelRequested;
+    /// <summary>그룹 행 [채널로] — ①② 카드 포커스.</summary>
+    public event EventHandler<GroupInfo>? ChannelRequested;
     /// <summary>그룹 생성/편집/삭제 — 창·확인은 MainWindow 몫(GMS XCAP, 본인 소유만).</summary>
     public event EventHandler? NewGroupRequested;
     public event EventHandler<GroupInfo>? EditGroupRequested;
@@ -76,6 +77,7 @@ public sealed partial class PttOriginateViewModel : ObservableObject
     public string StartText => IsPrivate ? "사설콜 발신" : $"애드혹 발신 ({AdhocSelection.Count}명)";
     public bool CanStart => IsPrivate ? Target.Trim().Length > 0 : AdhocSelection.Count > 0;
     public string UserCount => $"{Users.Count}명";
+    public string GroupCount => $"{Groups.Count}개";
 
     partial void OnModeChanged(string value) { OnPropertyChanged(nameof(IsPrivate)); OnPropertyChanged(nameof(IsAdhoc)); OnPropertyChanged(nameof(StartText)); OnPropertyChanged(nameof(CanStart)); }
     partial void OnBookChanged(string value) { OnPropertyChanged(nameof(IsUsers)); OnPropertyChanged(nameof(IsGroups)); OnPropertyChanged(nameof(IsPadBook)); }
@@ -118,6 +120,7 @@ public sealed partial class PttOriginateViewModel : ObservableObject
     {
         Groups.Clear();
         foreach (var g in _s.Groups.Where(g => g.IsMember)) Groups.Add(g);
+        OnPropertyChanged(nameof(GroupCount));
     }
 
     private void Filter()
@@ -173,6 +176,18 @@ public sealed partial class PttOriginateViewModel : ObservableObject
     }
 
     [RelayCommand] private void Pad(string key) { Mode = "private"; Target += key; }
+    /// <summary>입력란이 포커스를 잃으면 제안 목록을 접는다.</summary>
+    public void ClearSuggestions() { Suggestions.Clear(); OnPropertyChanged(nameof(HasSuggestions)); }
+    /// <summary>팝오버 [취소] — 애드혹 구성 중엔 바깥 클릭으로 닫히지 않으므로 여기서만 닫는다. 선택은 비운다.</summary>
+    [RelayCommand] private void Close()
+    {
+        foreach (var u in AdhocSelection.ToList()) u.Checked = false;
+        AdhocSelection.Clear(); OnPropertyChanged(nameof(StartText)); OnPropertyChanged(nameof(CanStart));
+        CloseRequested?.Invoke(this, EventArgs.Empty);
+    }
+    public event EventHandler? CloseRequested;
+    /// <summary>애드혹 구성 중(대상이 하나라도 있음) — 바깥 클릭에 닫히지 않는다.</summary>
+    public bool IsComposingAdhoc => IsAdhoc && AdhocSelection.Count > 0;
     [RelayCommand] private void Backspace() { if (Target.Length > 0) Target = Target[..^1]; }
     [RelayCommand] private void Clear() => Target = "";
     [RelayCommand] private void Pick(PttUserRow u) { Target = u.DisplayNumber; Suggestions.Clear(); OnPropertyChanged(nameof(HasSuggestions)); }
@@ -190,7 +205,19 @@ public sealed partial class PttOriginateViewModel : ObservableObject
     [RelayCommand] private void RemoveAdhoc(PttUserRow u) { if (u.Checked) ToggleAdhoc(u); }
     [RelayCommand] private void MessageUser(PttUserRow u) => MessageUserRequested?.Invoke(this, u.Number);
     [RelayCommand] private void MessageGroup(GroupInfo g) => MessageGroupRequested?.Invoke(this, g);
-    [RelayCommand] private void AddChannel(GroupInfo g) => AddChannelRequested?.Invoke(this, g);
+    [RelayCommand] private void Channel(GroupInfo g) => ChannelRequested?.Invoke(this, g);
+
+    /// <summary>사람 메뉴 [애드혹에 추가] — 번호로 주소록 행을 찾아 체크(없으면 안내).</summary>
+    public void AddAdhoc(string number)
+    {
+        string n = DirectoryService.Normalize(number);
+        var u = _allUsers.FirstOrDefault(x => DirectoryService.Normalize(x.Number) == n);
+        if (u is null) { _s.Notify.Warn("PTT 주소록에 없는 번호", number); return; }
+        Mode = "adhoc";
+        if (!AdhocSelection.Contains(u)) { AdhocSelection.Add(u); u.Checked = true; OnPropertyChanged(nameof(StartText)); OnPropertyChanged(nameof(CanStart)); }
+    }
+    /// <summary>사람 메뉴 [사설콜] — 대상 번호로 즉시 반이중 발신.</summary>
+    public void PrivateCallTo(string number) { Mode = "private"; FullDuplex = false; Target = _s.Directory.DisplayNumber(number); Start(); }
 
     // 그룹 관리(§4.1 [그룹] 탭) — 창·삭제 확인은 MainWindow
     [RelayCommand] private void NewGroup() => NewGroupRequested?.Invoke(this, EventArgs.Empty);

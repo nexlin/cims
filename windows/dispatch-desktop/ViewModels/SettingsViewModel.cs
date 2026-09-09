@@ -1,4 +1,4 @@
-// 설정 창 — 오디오(§7)·핫키(§8)·관제·표시·채널 선택. 저장 = settings.json + 즉시 적용(오디오 재적용·핫키 재등록·테마).
+// 설정 창 — 오디오(§7)·핫키(§8)·관제·표시·주소록. 저장 = settings.json + 즉시 적용(오디오 재적용·핫키 재등록·테마).
 using System.Collections.ObjectModel;
 using CimsUe.Platform;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -20,13 +20,6 @@ public sealed partial class HotKeyRow : ObservableObject
     partial void OnTextChanged(string value) => OnPropertyChanged(nameof(IsValid));
 }
 
-public sealed partial class ChannelChoice : ObservableObject
-{
-    public GroupInfo Group { get; }
-    [ObservableProperty] private bool _selected;
-    public ChannelChoice(GroupInfo g, bool sel) { Group = g; _selected = sel; }
-}
-
 public sealed partial class SettingsViewModel : ObservableObject
 {
     private readonly DispatchSession _s;
@@ -45,13 +38,13 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _confirmCloseMonitor;
     [ObservableProperty] private int _maxMonitorWindows;
     [ObservableProperty] private bool _followChannelThread;
+    [ObservableProperty] private bool _lockTalk;
     [ObservableProperty] private bool _minimizeToTray;
     [ObservableProperty] private int _messageRetentionDays;
     [ObservableProperty] private string _theme;
     [ObservableProperty] private string _directoryCsv;
     [ObservableProperty] private int _logLevel;
     [ObservableProperty] private bool _autoStart;
-    public ObservableCollection<ChannelChoice> Channels { get; } = new();
     public string DirectoryLoadedFrom => _s.Directory.LoadedFrom ?? "(없음)";
     public string LogsPath => AppPaths.Logs;
 
@@ -63,7 +56,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         var c = s.Settings.Current;
         _captureDevice = c.CaptureDevice; _headsetDevice = c.HeadsetDevice; _speakerDevice = c.SpeakerDevice; _speakerRouteEnabled = c.SpeakerRouteEnabled;
         _autoReturnToPreferredDevice = c.AutoReturnToPreferredDevice; _pickupFeatureCode = c.PickupFeatureCode; _autoHoldOnAnswer = c.AutoHoldOnAnswer;
-        _confirmCloseMonitor = c.ConfirmCloseMonitor; _maxMonitorWindows = c.MaxMonitorWindows; _followChannelThread = c.FollowChannelThread;
+        _confirmCloseMonitor = c.ConfirmCloseMonitor; _maxMonitorWindows = c.MaxMonitorWindows; _followChannelThread = c.FollowChannelThread; _lockTalk = c.LockTalk;
         _minimizeToTray = c.MinimizeToTray; _messageRetentionDays = c.MessageRetentionDays; _theme = c.Theme; _directoryCsv = c.DirectoryCsv; _logLevel = c.LogLevel;
         _autoStart = CimsUe.Platform.AutoStart.IsEnabled(AppPaths.InstanceName);
         LoadDevices();
@@ -73,7 +66,6 @@ public sealed partial class SettingsViewModel : ObservableObject
             row.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(HotKeyRow.IsValid)) { OnPropertyChanged(nameof(CanSave)); OnPropertyChanged(nameof(HotKeyError)); } };
             HotKeys.Add(row);
         }
-        foreach (var g in s.Groups.Where(g => g.IsMember)) Channels.Add(new ChannelChoice(g, c.SelectedChannels.Count == 0 || c.SelectedChannels.Contains(g.Id)));
     }
 
     /// <summary>해석되지 않는 핫키 문자열이 있으면 저장하지 않는다 — 조용히 등록만 빠지던 것을 막는다.</summary>
@@ -108,10 +100,9 @@ public sealed partial class SettingsViewModel : ObservableObject
         {
             c.CaptureDevice = CaptureDevice; c.HeadsetDevice = HeadsetDevice; c.SpeakerDevice = SpeakerDevice; c.SpeakerRouteEnabled = SpeakerRouteEnabled;
             c.AutoReturnToPreferredDevice = AutoReturnToPreferredDevice; c.PickupFeatureCode = PickupFeatureCode.Trim(); c.AutoHoldOnAnswer = AutoHoldOnAnswer;
-            c.ConfirmCloseMonitor = ConfirmCloseMonitor; c.MaxMonitorWindows = Math.Clamp(MaxMonitorWindows, 1, 16); c.FollowChannelThread = FollowChannelThread;
+            c.ConfirmCloseMonitor = ConfirmCloseMonitor; c.MaxMonitorWindows = Math.Clamp(MaxMonitorWindows, 1, 16); c.FollowChannelThread = FollowChannelThread; c.LockTalk = LockTalk;
             c.MinimizeToTray = MinimizeToTray; c.MessageRetentionDays = Math.Clamp(MessageRetentionDays, 1, 365); c.Theme = Theme; c.DirectoryCsv = DirectoryCsv.Trim(); c.LogLevel = LogLevel;
             foreach (var h in HotKeys) c.HotKeys[h.Name] = h.Text.Trim();
-            c.SelectedChannels = Channels.All(x => x.Selected) ? new List<string>() : Channels.Where(x => x.Selected).Select(x => x.Group.Id).ToList();
         });
         var conflicts = _hotKeys.Apply(_s.Settings.Current.HotKeys);
         foreach (var h in HotKeys) h.Conflict = conflicts.Contains(h.Name);

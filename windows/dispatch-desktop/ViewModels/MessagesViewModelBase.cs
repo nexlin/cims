@@ -45,7 +45,7 @@ public abstract partial class MessagesViewModelBase : ObservableObject
     {
         if (ThreadMap.TryGetValue(key, out var t)) { if (title.Length > 0 && t.Title != title) t.Title = title; return t; }
         t = new MessageThread(key, Kind, title.Length > 0 ? title : key) { IsGroup = isGroup, IsExternal = isExternal };
-        t.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(MessageThread.Unread)) OnPropertyChanged(nameof(UnreadTotal)); };
+        t.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(MessageThread.Unread)) { OnPropertyChanged(nameof(UnreadTotal)); RaiseUnread(); } };
         ThreadMap[key] = t;
         Threads.Add(t);
         return t;
@@ -75,6 +75,12 @@ public abstract partial class MessagesViewModelBase : ObservableObject
     public void SelectKey(string key, string title, bool isGroup) => Selected = Thread(key, title, isGroup);
 
     [RelayCommand] private void SelectThread(MessageThread t) => Selected = t;
+    /// <summary>④ 머리 [● 따라가기] 토글 — 설정에 저장.</summary>
+    [RelayCommand] private void ToggleFollow() { FollowChannel = !FollowChannel; S.Settings.Update(x => x.FollowChannelThread = FollowChannel); }
+    /// <summary>스레드 키의 미읽음(① 카드 ✉ n 배지).</summary>
+    public int UnreadOf(string key) => ThreadMap.TryGetValue(key, out var t) ? t.Unread : 0;
+    public event EventHandler? UnreadChanged;
+    protected void RaiseUnread() => UnreadChanged?.Invoke(this, EventArgs.Empty);
     [RelayCommand] private void Send() => SendCore();
     [RelayCommand] private void Resend(Message m) => ResendCore(m);
     protected abstract void SendCore();

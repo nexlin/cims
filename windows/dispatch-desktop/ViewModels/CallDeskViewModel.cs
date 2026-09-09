@@ -41,7 +41,10 @@ public sealed partial class MemberChip : ObservableObject
     [RelayCommand] private void Pickup() => _s.Pickup(Extension);
     [RelayCommand] private void Monitor() { if (Dialog is not null) _s.JoinMonitor(Dialog); }
     [RelayCommand] private void Fill() => FillRequested?.Invoke(this, Extension);
+    /// <summary>우클릭 → 사람 메뉴(§4.1).</summary>
+    [RelayCommand] private void Menu() => MenuRequested?.Invoke(this, Extension);
     public event EventHandler<string>? FillRequested;
+    public event EventHandler<string>? MenuRequested;
 }
 
 /// <summary>대기열 항목 — 대표번호에 걸려온 호 하나(발신자 기준). 서버가 포크 leg 마다 dialog 를 내므로(서버 요청서 §6-7) 같은 발신자의
@@ -82,7 +85,11 @@ public sealed partial class CallCard : ObservableObject
     private readonly DispatchSession _s;
     public SessionItem Session { get; }
     [ObservableProperty] private string _transferTarget = "";
+    /// <summary>[전달 ▾] 팝오버(대상 입력 + 그룹원 칩).</summary>
     [ObservableProperty] private bool _transferOpen;
+    /// <summary>[DTMF ▾] 팝오버 — 카드 옆 3×4 패드, 통화 중 DTMF 는 여기(§4.3).</summary>
+    [ObservableProperty] private bool _dtmfOpen;
+    [ObservableProperty] private string _dtmfSent = "";
     public CallCard(DispatchSession s, SessionItem item) { _s = s; Session = item; item.PropertyChanged += (_, _) => Refresh(); }
 
     public string Title => Session.Title;
@@ -105,14 +112,17 @@ public sealed partial class CallCard : ObservableObject
     [RelayCommand] private void Resume() => _s.Resume(Session);
     [RelayCommand] private void Mute() => _s.ToggleMute(Session);
     [RelayCommand] private void Route() => _s.ToggleRoute(Session);
-    [RelayCommand] private void Dtmf() => DtmfRequested?.Invoke(this, Session);
-    [RelayCommand] private void OpenTransfer() => TransferOpen = !TransferOpen;
+    [RelayCommand] private void OpenDtmf() { DtmfOpen = !DtmfOpen; if (DtmfOpen) TransferOpen = false; }
+    [RelayCommand] private void Dtmf(string key) { if (_s.Dtmf(Session, key).Ok) DtmfSent = (DtmfSent + key).Length > 24 ? key : DtmfSent + key; }
+    [RelayCommand] private void OpenTransfer() { TransferOpen = !TransferOpen; if (TransferOpen) DtmfOpen = false; }
     [RelayCommand] private void TransferBlind() { if (TransferTarget.Trim().Length > 0 && _s.TransferBlind(Session, TransferTarget.Trim()).Ok) { TransferOpen = false; TransferTarget = ""; } }
     [RelayCommand] private void Consult() { if (TransferTarget.Trim().Length > 0 && _s.StartConsult(Session, TransferTarget.Trim()).Ok) { TransferOpen = false; TransferTarget = ""; } }
     [RelayCommand] private void Complete() => _s.CompleteConsult(Session);
     [RelayCommand] private void CancelConsult() => _s.CancelConsult(Session);
     [RelayCommand] private void PickMember(string ext) => TransferTarget = ext;
-    public event EventHandler<SessionItem>? DtmfRequested;
+    /// <summary>상대 이름 클릭 → 사람 메뉴.</summary>
+    [RelayCommand] private void Menu() => MenuRequested?.Invoke(this, Session.Info.RemoteUri);
+    public event EventHandler<string>? MenuRequested;
 }
 
 public sealed partial class CallDeskViewModel : ObservableObject
@@ -126,7 +136,9 @@ public sealed partial class CallDeskViewModel : ObservableObject
     public IReadOnlyList<string> MemberExtensions => Members.Where(m => !m.IsMe).Select(m => m.Extension).ToList();
 
     public event EventHandler<string>? FillRequested;
-    public event EventHandler<SessionItem>? DtmfRequested;
+    public event EventHandler<string>? MenuRequested;
+    /// <summary>오늘 데스크 칩 클릭 → ⑥ 필터(all|pilot|missed|outgoing|transfer|monitor).</summary>
+    public event EventHandler<string>? DeskFilterRequested;
 
     public CallDeskViewModel(DispatchSession s)
     {
@@ -135,7 +147,8 @@ public sealed partial class CallDeskViewModel : ObservableObject
         s.Directory.Changed += (_, _) => RebuildMembers();
         s.DialogChanged += (_, d) => OnDialog(d);
         s.DialogEnded += (_, d) => OnDialog(d);
-        s.SessionAdded += (_, item) => { if (item.IsVolteCall) { var c = new CallCard(s, item); c.DtmfRequested += (_, x) => DtmfRequested?.Invoke(this, x); Calls.Add(c); } Refresh(); };
+        s.SessionAdded += (_, item) => { if (item.IsVolteCall) { var c = new CallCard(s, item); c.MenuRequested += (_, n) => MenuRequested?.Invoke(this, n); Calls.Add(c); } Refresh(); };
+        s.Activity.Call.CollectionChanged += (_, _) => RefreshDesk();
         s.SessionEnded += (_, item) => { var c = Calls.FirstOrDefault(x => x.Session == item); if (c is not null) Calls.Remove(c); Refresh(); };
         s.SessionChanged += (_, _) => Refresh();
         // 로그아웃은 Sessions/Dialogs 를 Clear 한다(개별 Ended 이벤트 없음) — VM 이 앱 수명 동안 살아 있으니 투영도 함께 비운다
@@ -154,11 +167,19 @@ public sealed partial class CallDeskViewModel : ObservableObject
     }
 
     public bool HasDesk => _s.HasDesk;
-    // 이 데스크의 집계 — 대표번호 착신(내 응답·동료 응답)과 내 직접 착신. 서버 이력의 타인 간 통화(IsOthers)는 제외.
-    public int TodayAnswered => _s.Activity.Call.Count(r => r.Kind == ActivityKind.Incoming && !r.IsOthers && r.Time.Date == DateTime.Today);
-    public int TodayMissed => _s.Activity.Call.Count(r => r.IsMissed && !r.IsOthers && r.Time.Date == DateTime.Today);
-    public string EmptyQueueText => $"대기 호 없음 · 오늘 응대 {TodayAnswered} · 부재 {TodayMissed}";
+    // 오늘 데스크(§4.3) — 이 데스크의 집계: 대표번호 착신(내 응답·동료 응답)과 내 직접 착신. 서버 이력의 타인 간 통화(IsOthers)는 제외.
+    private IEnumerable<ActivityRow> Today => _s.Activity.Call.Where(r => !r.IsOthers && r.Time.Date == DateTime.Today);
+    public int TodayAnswered => Today.Count(r => r.Kind == ActivityKind.Incoming);
+    public int TodayMissed => Today.Count(r => r.IsMissed);
+    public int TodayOutgoing => Today.Count(r => r.Kind == ActivityKind.Outgoing);
+    public int TodayTransfer => Today.Count(r => r.Kind == ActivityKind.Transfer);
+    public int TodayMonitor => Today.Count(r => r.Kind == ActivityKind.ListenStart);
+    public string EmptyQueueText => "대기 호 없음";
     public bool QueueEmpty => Queue.Count == 0;
+    public int QueueCount => Queue.Count;
+    public string PilotText => _s.PilotId.Length > 0 ? "대표 " + UserPartConverter.UserPart(_s.PilotId) : "";
+    private void RefreshDesk() { foreach (var p in new[] { nameof(TodayAnswered), nameof(TodayMissed), nameof(TodayOutgoing), nameof(TodayTransfer), nameof(TodayMonitor) }) OnPropertyChanged(p); }
+    [RelayCommand] private void DeskFilter(string f) => DeskFilterRequested?.Invoke(this, f);
 
     private void RebuildMembers()
     {
@@ -170,6 +191,7 @@ public sealed partial class CallDeskViewModel : ObservableObject
         {
             var chip = new MemberChip(_s, c.Number, c.Name, c.Number == me);
             chip.FillRequested += (_, e) => FillRequested?.Invoke(this, e);
+            chip.MenuRequested += (_, e) => MenuRequested?.Invoke(this, e);
             chip.Dialog = _s.Dialogs.FirstOrDefault(d => d.WatchedNumber == c.Number);
             Members.Add(chip);
         }
@@ -218,11 +240,20 @@ public sealed partial class CallDeskViewModel : ObservableObject
         Refresh();
     }
 
+    /// <summary>스냅샷 재구성(재기동·재로그인) — 내 통화 카드를 Sessions 에서 다시 만든다(이벤트로 못 받은 세션).</summary>
+    public void Rebuild()
+    {
+        Calls.Clear();
+        foreach (var item in _s.Sessions.Where(x => x.IsVolteCall)) { var c = new CallCard(_s, item); c.MenuRequested += (_, n) => MenuRequested?.Invoke(this, n); Calls.Add(c); }
+        RefreshDesk();
+        Refresh();
+    }
+
     public void Refresh()
     {
         foreach (var m in Members) m.Refresh();
         foreach (var q in Queue) q.Refresh();
         foreach (var c in Calls) c.Refresh();
-        OnPropertyChanged(nameof(EmptyQueueText)); OnPropertyChanged(nameof(QueueEmpty));
+        OnPropertyChanged(nameof(EmptyQueueText)); OnPropertyChanged(nameof(QueueEmpty)); OnPropertyChanged(nameof(QueueCount)); OnPropertyChanged(nameof(PilotText));
     }
 }

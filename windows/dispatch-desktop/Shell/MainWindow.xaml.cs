@@ -1,5 +1,5 @@
-// 주 창 — 도킹 배치 잠금·프리셋(AvalonDock 직렬화)·감청 창 관리(§5)·앱 포커스 핫키(§8, 화면 전환 F1~F4 포함)·화면 별창 관리(§3.4)·
-// 트레이 최소화·종료 확인(§6).
+// 주 창 — 도킹 배치 잠금·프리셋(AvalonDock 직렬화, 3×2 패널 6개)·감청 창 관리(§5)·앱 포커스 핫키(§8: Ctrl+n·Ctrl+Shift+n·Ctrl+K·Ctrl+M·Esc·화면 전환 F1~F4)·
+// 화면 별창 관리(§3.4)·통합 검색 팝업 키 처리·트레이 최소화·종료 확인(§6).
 using System.ComponentModel;
 using System.IO;
 using System.Windows;
@@ -71,10 +71,11 @@ public partial class MainWindow : Window
         using var sr = new StringReader(xml);
         try { ser.Deserialize(sr); }
         catch (Exception ex) { _vm.Session.Log.Warn("layout deserialize: " + ex.Message); }
-        // 저장 XML 에 없던 패널은 사라지지 않도록 확인 — 없으면 왼쪽 열 끝에 붙인다
+        // 저장 XML 에 없던 패널은 사라지지 않도록 확인 — 없으면 루트 끝에 붙인다(구 프리셋은 LayoutStore 버전 불일치로 이미 버려져 여기 오지 않는다)
         var present = Anchorables.Select(a => a.ContentId).ToHashSet();
+        var titles = new Dictionary<string, string> { ["mych"] = "⋮⋮ ① 내 채널", ["scoped"] = "⋮⋮ ② 범위 채널", ["call"] = "⋮⋮ ③ 일반통화", ["pttmsg"] = "⋮⋮ ④ PTT 메시지", ["pttlog"] = "⋮⋮ ⑤ PTT 이벤트", ["calllog"] = "⋮⋮ ⑥ 일반통화 내역" };
         foreach (var (id, content) in contents)
-            if (!present.Contains(id)) Dock.Layout.RootPanel.Children.Add(new LayoutAnchorablePane(new LayoutAnchorable { ContentId = id, Title = id, Content = content, CanClose = false, CanHide = false }));
+            if (!present.Contains(id)) Dock.Layout.RootPanel.Children.Add(new LayoutAnchorablePane(new LayoutAnchorable { ContentId = id, Title = titles.GetValueOrDefault(id, id), Content = content, CanClose = false, CanHide = false }));
     }
 
     private void ApplyPreset(string name, bool restoreWindow = false)
@@ -166,7 +167,14 @@ public partial class MainWindow : Window
         // 입력란에 포커스가 있으면 "글자를 넣는 키"만 양보한다 — 관리 화면은 입력 폼투성이라 여기서 다 버리면 폴백 PTT·화면 전환이 죽는다
         if (Keyboard.FocusedElement is System.Windows.Controls.Primitives.TextBoxBase or System.Windows.Controls.PasswordBox && IsTypingKey(e)) return;
         var map = _vm.Session.Settings.Current.HotKeys;
+        // Ctrl+Shift+n = 발언 대상 토글(다중) · Ctrl+n = 포커스 + 단일 발언 대상
+        if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && e.Key >= Key.D1 && e.Key <= Key.D9) { _vm.ToggleChannel(e.Key - Key.D0); e.Handled = true; return; }
         if (Keyboard.Modifiers == ModifierKeys.Control && e.Key >= Key.D1 && e.Key <= Key.D9) { _vm.SelectChannel(e.Key - Key.D0); e.Handled = true; return; }
+        // Ctrl+K 통합 검색 · Ctrl+M 문자 팝오버
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.K && !e.IsRepeat) { _vm.People.SearchOpen = !_vm.People.SearchOpen; if (_vm.People.SearchOpen && !IsActive) Activate(); e.Handled = true; return; }
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.M && !e.IsRepeat) { _vm.SmsOpen = !_vm.SmsOpen; if (_vm.SmsOpen) _vm.Screen = AppScreen.Dispatch; e.Handled = true; return; }
+        // Esc = 팝오버·메뉴 닫기(애드혹 구성 중인 발신 팝오버는 [취소]로만)
+        if (Keyboard.Modifiers == ModifierKeys.None && e.Key == Key.Escape && CloseTransients()) { e.Handled = true; return; }
         foreach (var name in HotKeyMap.LocalNames)
             if (map.TryGetValue(name, out var t) && CimsUe.Platform.HotKey.TryParse(t, out var hk) && Matches(hk, e)) { _vm.OnHotKey(name, true); e.Handled = true; return; }
         // 전역 핫키 등록에 실패한 키(충돌)는 앱 포커스에서라도 동작
@@ -182,12 +190,38 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>입력란이 소비할 키인가 — 수식키(Ctrl/Alt/Win) 없는, F키가 아닌 키.</summary>
+    /// <summary>입력란이 소비할 키인가 — 수식키(Ctrl/Alt/Win) 없는, F키·Esc 가 아닌 키.</summary>
     private static bool IsTypingKey(KeyEventArgs e)
     {
         if ((Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Windows)) != 0) return false;
         var k = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (k == Key.Escape) return false;
         return k is < Key.F1 or > Key.F24;
+    }
+
+    /// <summary>열린 팝오버·메뉴를 닫는다 — 하나라도 닫았으면 true.</summary>
+    private bool CloseTransients()
+    {
+        bool any = false;
+        if (_vm.People.MenuOpen) { _vm.People.MenuOpen = false; any = true; }
+        if (_vm.People.SearchOpen) { _vm.People.SearchOpen = false; any = true; }
+        if (_vm.SmsOpen) { _vm.SmsOpen = false; any = true; }
+        if (_vm.CallOriginateOpen) { _vm.CallOriginateOpen = false; any = true; }
+        if (_vm.PttOriginateOpen && !_vm.PttOriginate.IsComposingAdhoc) { _vm.PttOriginateOpen = false; any = true; }
+        return any;
+    }
+
+    // ── 통합 검색 팝업(Ctrl+K) — 열리면 입력란 포커스, ↑↓ 이동 · Enter 첫 행동 ──
+    private void SearchPop_Opened(object sender, EventArgs e) => Dispatcher.BeginInvoke(() => { SearchBox.Focus(); SearchBox.SelectAll(); });
+    private void SearchBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case Key.Down: _vm.People.Move(+1); e.Handled = true; break;
+            case Key.Up: _vm.People.Move(-1); e.Handled = true; break;
+            case Key.Enter: _vm.People.Enter(); e.Handled = true; break;
+            case Key.Escape: _vm.People.SearchOpen = false; e.Handled = true; break;
+        }
     }
 
     private void OnKeyUp(object sender, KeyEventArgs e)

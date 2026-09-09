@@ -4,18 +4,19 @@
              xmlns:vm="clr-namespace:DispatchDesktop.ViewModels"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
              d:DataContext="{d:DesignInstance vm:MainViewModel}">
-    <!-- 관제 요약 띠(§3.5) — 관제 밖 화면 상단 32px 상시: 선택 채널 + 발언 상태 + PTT · 대표번호 대기열 · 내 통화 · 감청 창 · [관제로 F1] -->
+    <!-- 관제 요약 띠(§3.5) — 관제 밖 화면 상단 32px 상시: 발언 대상(① 체크 집합) + 발언 상태 + PTT · 대표번호 대기열 · 문자 미읽음 · 내 통화 · 감청 창 · [관제로 F1] -->
     <Border Height="32" Background="{DynamicResource Brush.BgSoft}" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,0,1" Padding="14,0">
         <DockPanel VerticalAlignment="Center" DataContext="{Binding Summary}">
             <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Sm}" Height="24" Command="{Binding DataContext.ReturnToDispatchCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" ToolTip="관제 캔버스로 (F1)">
                 <TextBlock><Run Text="관제로" /><Run Text="  F1" Foreground="{DynamicResource Brush.Muted}" FontFamily="{StaticResource Font.Mono}" FontSize="11" /></TextBlock>
             </Button>
             <StackPanel Orientation="Horizontal">
-                <!-- 선택 채널 -->
-                <TextBlock Style="{StaticResource Muted}" Text="선택 채널" FontSize="12.5" VerticalAlignment="Center" Margin="0,0,8,0" />
-                <TextBlock Text="{Binding ChannelName}" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center" />
-                <Border Style="{StaticResource Badge.Emg}" Margin="6,0,0,0" Visibility="{Binding IsEmergency, Converter={StaticResource BoolToVis}}"><TextBlock Text="긴급" /></Border>
-                <TextBlock Style="{StaticResource MonoMuted}" Text="{Binding ChannelHotKey}" FontSize="11" VerticalAlignment="Center" Margin="6,0,14,0" />
+                <!-- 발언 대상 -->
+                <TextBlock Style="{StaticResource Muted}" Text="발언 대상" FontSize="12.5" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <TextBlock Text="{Binding TargetCount}" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center" Margin="0,0,6,0" Visibility="{Binding HasTargets, Converter={StaticResource BoolToVis}}" />
+                <TextBlock Text="{Binding TargetNames}" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center" MaxWidth="260" TextTrimming="CharacterEllipsis" />
+                <Border Style="{StaticResource Badge.Emg}" Margin="6,0,14,0" Visibility="{Binding IsEmergency, Converter={StaticResource BoolToVis}}"><TextBlock Text="긴급" /></Border>
+                <Border Width="1" Height="18" Background="{DynamicResource Brush.Border}" Margin="8,0,14,0" />
                 <!-- 발언 상태 -->
                 <Border Style="{StaticResource Badge.Talk}" Visibility="{Binding IsSpeaking, Converter={StaticResource BoolToVis}}"><TextBlock Text="내 발언 중" /></Border>
                 <Border Style="{StaticResource Badge.Pilot}" Visibility="{Binding IsRequesting, Converter={StaticResource BoolToVis}}"><TextBlock Text="{Binding FloorText}" /></Border>
@@ -51,6 +52,8 @@
                         </Style>
                     </TextBlock.Style>
                 </TextBlock>
+                <TextBlock Style="{StaticResource Muted}" Text="문자" FontSize="12.5" VerticalAlignment="Center" Margin="14,0,6,0" Visibility="{Binding HasSmsUnread, Converter={StaticResource BoolToVis}}" />
+                <TextBlock Text="{Binding SmsUnread}" FontWeight="SemiBold" FontSize="12.5" Foreground="{DynamicResource Brush.Ring}" VerticalAlignment="Center" Visibility="{Binding HasSmsUnread, Converter={StaticResource BoolToVis}}" />
                 <TextBlock Style="{StaticResource Muted}" Text="내 통화" FontSize="12.5" VerticalAlignment="Center" Margin="18,0,6,0" />
                 <TextBlock Text="{Binding CallsText}" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center" />
                 <Border Width="1" Height="18" Background="{DynamicResource Brush.Border}" Margin="16,0" />

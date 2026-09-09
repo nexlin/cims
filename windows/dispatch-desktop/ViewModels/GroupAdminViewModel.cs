@@ -44,6 +44,10 @@ public sealed partial class GroupAdminViewModel : ObservableObject
 {
     private readonly DispatchSession _s;
     private IReadOnlyList<ManagedGroup> _all = Array.Empty<ManagedGroup>();
+    /// <summary>범위 안 그룹 전부(필터 전) — ② 범위 채널의 관리 범위 섹션 소스.</summary>
+    public IReadOnlyList<ManagedGroup> All => _all;
+    /// <summary>목록을 (재)적재했다 — ② 가 재구성한다.</summary>
+    public event EventHandler? Loaded;
 
     public GroupAdminViewModel(DispatchSession s)
     {
@@ -178,12 +182,14 @@ public sealed partial class GroupAdminViewModel : ObservableObject
         int manageable = _all.Count(g => g.CanManage);
         Hint = manageable == _all.Count ? "관리 범위 안 그룹 전부" : $"관리 가능 {manageable}개 · 나머지는 청취 범위·멤버 그룹(보기만)";
         Filter();
+        Loaded?.Invoke(this, EventArgs.Empty);
     }
 
     private void FromSession()
     {
         _all = _s.Groups.Where(g => g.IsMember).Select(g => new ManagedGroup(g.Id, g.Uri, g.Name, g.MemberCount, g.IsOwner, "", "prearranged", g.Etag, CanManage: g.IsOwner, IsMember: true)).ToList();
         Filter();
+        Loaded?.Invoke(this, EventArgs.Empty);
     }
 
     private void Filter()
@@ -222,6 +228,9 @@ public sealed partial class GroupAdminViewModel : ObservableObject
         if (row is not null) Selected = row;
         Open(new GroupEditViewModel(_s, row?.ToGroupInfo() ?? g));
     }
+
+    /// <summary>② [+ 새 채널] — 드로어에 새 그룹 폼.</summary>
+    public void NewExternal() { if (CanCreate && !IsEditing) Open(new GroupEditViewModel(_s, null)); }
 
     private void Open(GroupEditViewModel vm)
     {
