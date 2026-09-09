@@ -33,7 +33,6 @@ public partial class MainWindow : Window
         vm.Desk.PresetApplyRequested += (_, name) => ApplyPreset(name);
         vm.Desk.PresetSaveRequested += (_, name) => SavePreset(name);
         vm.Desk.SettingsRequested += (_, _) => OpenSettings();
-        vm.GroupEditRequested += (_, g) => { var w = new GroupEditWindow(g) { Owner = _screens.TryGetValue(AppScreen.PttGroups, out var sw) && sw.IsActive ? sw : this }; w.ShowDialog(); };
         vm.ScreenPopOutRequested += (_, s) => OpenScreenWindow(s);
         vm.DispatchActivateRequested += (_, _) => { if (!IsActive) Activate(); };
         ScreenHost.ActivateFloatingRequested += (_, s) => { if (_screens.TryGetValue(s, out var w)) w.BringToFront(); };

@@ -42,8 +42,7 @@ public sealed partial class MainViewModel : ObservableObject
     public event EventHandler<SessionItem>? MonitorWindowRequested;
     public event EventHandler<SessionItem>? MonitorWindowActivateRequested;
     public event EventHandler<SessionItem>? MonitorWindowCloseRequested;
-    /// <summary>PTT 그룹 편집 창(생성 = 인자 null)·삭제 확인 요청 — 창은 MainWindow.</summary>
-    public event EventHandler<GroupEditViewModel>? GroupEditRequested;
+    /// <summary>PTT 그룹 삭제 확인 요청 — 대화상자는 MainWindow.</summary>
     public event EventHandler<GroupInfo>? GroupDeleteRequested;
 
     public MainViewModel(DispatchSession session, LayoutStore layout, HotKeyMap hotKeys)
@@ -64,7 +63,6 @@ public sealed partial class MainViewModel : ObservableObject
         AdminScreen = new DirectoryAdminViewModel(session);
         Summary = new DispatchSummaryViewModel(session, PttChannels, CallDesk, Desk);
         AdminScreen.PropertyChanged += (_, e) => { if (e.PropertyName is nameof(DirectoryAdminViewModel.IsDirty)) OnPropertyChanged(nameof(AdminEditing)); };
-        GroupsScreen.EditRequested += (_, g) => GroupEditRequested?.Invoke(this, g);
         GroupsScreen.ChannelRequested += (_, id) => { Screen = AppScreen.Dispatch; PttChannels.FocusGroup(id); };   // [채널로] — 채널 카드로(없으면 합류)
         PttActivity.HistoryRequested += (_, _) => ShowHistory("ptt");
         CallActivity.HistoryRequested += (_, _) => ShowHistory("call");
@@ -75,8 +73,9 @@ public sealed partial class MainViewModel : ObservableObject
         PttOriginate.MessageGroupRequested += (_, g) => McData.OpenGroup(g);
         PttOriginate.MessageUserRequested += (_, n) => McData.OpenUser(n);
         PttOriginate.AddChannelRequested += (_, g) => { Session.Settings.Update(s => { if (s.SelectedChannels.Count > 0 && !s.SelectedChannels.Contains(g.Id)) s.SelectedChannels.Add(g.Id); }); PttChannels.FocusGroup(g.Id); };
-        PttOriginate.NewGroupRequested += (_, _) => GroupEditRequested?.Invoke(this, new GroupEditViewModel(Session, null));
-        PttOriginate.EditGroupRequested += (_, g) => GroupEditRequested?.Invoke(this, new GroupEditViewModel(Session, g));
+        // ① 주소록 [그룹] 탭의 [새 그룹]/[편집] — 별창 없이 [PTT 그룹] 화면(§4.7)의 인라인 폼으로
+        PttOriginate.NewGroupRequested += (_, _) => { Screen = AppScreen.PttGroups; GroupsScreen.NewGroupCommand.Execute(null); };
+        PttOriginate.EditGroupRequested += (_, g) => { Screen = AppScreen.PttGroups; GroupsScreen.EditExternal(g); };
         PttOriginate.DeleteGroupRequested += (_, g) => GroupDeleteRequested?.Invoke(this, g);
         PttActivity.ChannelRequested += (_, id) => PttChannels.FocusGroup(id);
         PttActivity.WindowRequested += (_, s) => MonitorWindowActivateRequested?.Invoke(this, s);

@@ -1,6 +1,7 @@
-// 관리 창 › PTT 그룹 탭(§4.5.2) — 관리 범위 안 PTT 그룹 전부(`/provisioning/directory/groups`, 멤버가 아니어도)를 열거하고
-// 생성·편집·삭제는 종전 GMS XCAP 경로(GroupEditWindow → CscClient.PutGroup/DeleteGroup)를 그대로 쓴다 — 서버가 관리 범위로
-// 소유자가 아닌 그룹의 PUT/DELETE 도 허용(dispatch_center.md §3.4). 관리 범위가 없으면 GMS 목록의 내 소유 그룹만 보인다.
+// [PTT 그룹] 화면(§4.7) — 관리 범위 안 PTT 그룹 전부(`/provisioning/directory/groups`, 멤버가 아니어도)를 왼쪽 좁은 목록으로 열거하고,
+// 오른쪽 카드에 선택 그룹 상세를 보인다. [편집]/[+ 새 그룹]은 같은 카드 자리에 GroupEditViewModel 폼을 인라인으로 띄운다(Editor — 별창 없음).
+// 생성·편집·삭제는 GMS XCAP 경로(CscClient.PutGroup/DeleteGroup) — 서버가 관리 범위로 소유자가 아닌 그룹의 PUT/DELETE 도 허용
+// (dispatch_center.md §3.4). 관리 범위가 없으면 GMS 목록의 내 소유 그룹만 보인다.
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -26,7 +27,7 @@ public sealed partial class GroupAdminRow : ObservableObject
     /// <summary>소유자 열 — 목록엔 소유 여부만 있어 내 것은 "이름(나)", 나머지는 상세(문서 GET)가 채운다.</summary>
     [ObservableProperty] private string _ownerText = "";
     public string SessionTypeText => G.SessionType switch { "chat" => "채팅", "broadcast" => "방송", _ => "사전편성" };
-    /// <summary>GroupEditViewModel 이 받는 항목 — 목록 ETag 는 편집 창이 문서 GET 으로 다시 받는다.</summary>
+    /// <summary>GroupEditViewModel 이 받는 항목 — 목록 ETag 는 편집 폼이 문서 GET 으로 다시 받는다.</summary>
     public GroupInfo ToGroupInfo() => new(G.Id, G.Uri, G.Name, G.MemberCount) { IsOwner = G.IsOwner, Etag = G.ETag };
 }
 
@@ -66,6 +67,9 @@ public sealed partial class GroupAdminViewModel : ObservableObject
     [ObservableProperty] private CimsUe.GroupDoc? _detailDoc;
     public ObservableCollection<GroupDetailMember> DetailMembers { get; } = new();
     public bool HasDetail => Selected is not null;
+    /// <summary>상세(보기) 카드 — 편집 중이면 같은 자리에 폼이 대신 뜬다.</summary>
+    public bool ShowDetail => HasDetail && !IsEditing;
+    public bool ShowPlaceholder => !HasDetail && !IsEditing;
     public string DetailOwner => DetailDoc is null ? "" : OwnerLabel(DetailDoc.AuthorizedUser);
     public string DetailOrg => Selected is null ? "" : (Selected.OrgPath.Length > 0 ? Selected.OrgPath : "—");
     public string DetailPolicy => DetailDoc is null ? "" : $"우선순위 {DetailDoc.Priority} · 긴급 {(DetailDoc.EmergencyCall ? "허용" : "불가")} · {(DetailDoc.SessionType switch { "chat" => "채팅", "broadcast" => "방송", _ => "사전편성" })}";
@@ -80,14 +84,24 @@ public sealed partial class GroupAdminViewModel : ObservableObject
     public bool HasError => Error.Length > 0;
     public bool CanCreate => _s.CanCreateGroups;
 
-    /// <summary>편집 창(생성 = 새 VM)·삭제 확인 — 창이 붙인다.</summary>
-    public event EventHandler<GroupEditViewModel>? EditRequested;
+    /// <summary>삭제 확인 — 뷰가 붙인다.</summary>
     public Func<string, string, bool>? Confirm { get; set; }
+
+    // ── 인라인 편집기(§4.7) — 상세 카드 자리에 폼. 편집 중엔 목록·[+ 새 그룹]을 잠가 편집 대상이 바뀌지 않게 한다(저장·취소로만 나온다) ──
+    [ObservableProperty] private GroupEditViewModel? _editor;
+    public bool IsEditing => Editor is not null;
+    public bool ListEnabled => !Busy && !IsEditing;
+    public string EditorTitle => Editor?.Title ?? "";
+    partial void OnEditorChanged(GroupEditViewModel? value)
+    {
+        foreach (var p in new[] { nameof(IsEditing), nameof(ListEnabled), nameof(EditorTitle), nameof(ShowDetail), nameof(ShowPlaceholder) }) OnPropertyChanged(p);
+    }
+    partial void OnBusyChanged(bool value) => OnPropertyChanged(nameof(ListEnabled));
 
     partial void OnErrorChanged(string value) => OnPropertyChanged(nameof(HasError));
     partial void OnSearchChanged(string value) => Filter();
     partial void OnListFilterChanged(string value) => Filter();
-    partial void OnSelectedChanged(GroupAdminRow? value) { OnPropertyChanged(nameof(HasDetail)); OnPropertyChanged(nameof(DetailOrg)); _ = LoadDetailAsync(value); }
+    partial void OnSelectedChanged(GroupAdminRow? value) { OnPropertyChanged(nameof(HasDetail)); OnPropertyChanged(nameof(ShowDetail)); OnPropertyChanged(nameof(ShowPlaceholder)); OnPropertyChanged(nameof(DetailOrg)); _ = LoadDetailAsync(value); }
     partial void OnDetailDocChanged(CimsUe.GroupDoc? value)
     {
         foreach (var p in new[] { nameof(DetailOwner), nameof(DetailPolicy), nameof(DetailCapability), nameof(DetailListenVisibility), nameof(DetailHasSession) }) OnPropertyChanged(p);
@@ -191,20 +205,36 @@ public sealed partial class GroupAdminViewModel : ObservableObject
 
     [RelayCommand] private Task Refresh() => LoadAsync();
 
-    [RelayCommand] private void NewGroup()
-    {
-        var vm = new GroupEditViewModel(_s, null);
-        vm.Saved += async (_, _) => await LoadAsync();
-        EditRequested?.Invoke(this, vm);
-    }
+    [RelayCommand] private void NewGroup() { if (CanCreate && !IsEditing) Open(new GroupEditViewModel(_s, null)); }
 
     [RelayCommand] private void EditGroup(GroupAdminRow? row)
     {
         row ??= Selected;
-        if (row is null || !row.CanManage) return;                    // 더블클릭 경로 — 보기 전용 행은 편집 창을 열지 않는다
-        var vm = new GroupEditViewModel(_s, row.ToGroupInfo());
-        vm.Saved += async (_, _) => await LoadAsync();
-        EditRequested?.Invoke(this, vm);
+        if (row is null || !row.CanManage || IsEditing) return;       // 더블클릭 경로 — 보기 전용 행은 폼을 열지 않는다
+        Open(new GroupEditViewModel(_s, row.ToGroupInfo()));
+    }
+
+    /// <summary>다른 화면(①의 PTT 주소록 [그룹] 탭)에서 온 편집 요청 — 그 그룹 행을 고르고 폼을 연다(목록이 아직 없으면 폼만).</summary>
+    public void EditExternal(GroupInfo g)
+    {
+        if (IsEditing) return;
+        var row = Groups.FirstOrDefault(x => x.Id == g.Id);
+        if (row is not null) Selected = row;
+        Open(new GroupEditViewModel(_s, row?.ToGroupInfo() ?? g));
+    }
+
+    private void Open(GroupEditViewModel vm)
+    {
+        vm.Cancelled += (_, _) => { if (Editor == vm) Editor = null; };
+        vm.Saved += async (_, _) =>
+        {
+            string id = vm.GroupId.Trim();
+            if (Editor == vm) Editor = null;
+            await LoadAsync();                                          // 목록·상세 재조회 — 새 그룹이면 그 행으로
+            var row = Groups.FirstOrDefault(x => x.Id == id);
+            if (row is not null) Selected = row;
+        };
+        Editor = vm;
     }
 
     [RelayCommand] private async Task DeleteGroup(GroupAdminRow? row)

@@ -196,8 +196,8 @@
 
 - **PTT 주소록**: 세그먼트 [사용자|그룹]. 사용자 행 = 이름·PTT 번호·현재 상태(어느 채널에서 발언/참여 중 — 로스터에서 파생)·[사설]·[☐ 애드혹].
   그룹 행 = 이름·멤버 수·[채널에 추가]·[메시지] + 내 소유 그룹(`is_owner`)이면 "내 그룹" 배지·[편집]·[삭제]. 탭 머리 = [↻ 새로고침]·[새 그룹](자격
-  `ptt.allowCreateGroup` 일 때만). [새 그룹]/[편집] → `GroupEditWindow`(이름·id·세션 종류·우선순위·최대 참가자·긴급/SDS/FD/영상/affiliation/암호화 +
-  멤버 = PTT 주소록에서 추가·의장 토글) → GMS XCAP PUT(편집은 `If-Match`, 412 = 재편집 안내) → 목록 재조회(`RefreshGroupsAsync` — 새 그룹
+  `ptt.allowCreateGroup` 일 때만). [새 그룹]/[편집] → [PTT 그룹] 화면(§4.7)으로 전환해 그 그룹의 **인라인 편집 폼**(`GroupEditView` — 이름·id·세션 종류·
+  우선순위·최대 참가자·긴급/SDS/FD/영상/affiliation/암호화 + 멤버 = PTT 주소록에서 추가·의장 토글; 별창 없음) → GMS XCAP PUT(편집은 `If-Match`, 412 = 재편집 안내) → 목록 재조회(`RefreshGroupsAsync` — 새 그룹
   affiliation·conference 구독, 사라진 그룹 해제). [삭제] = 확인 후 XCAP DELETE. 서버발 변경은 `xcap-diff`(`sip:gms_psi@…`) NOTIFY 로 자동 재조회.
   검색 공통. 소스는 §13(GMS 그룹 문서 멤버 + 프로비저닝 → 사용자 목록 API 후속).
 - 애드혹 임시 그룹 id 는 앱이 만든다(mcptt_emergency_modes.md §6 규약; `adhoc-`·`priv-` 는 편성 그룹 예약어). 채널 영속·affiliation·로스터 구독 대상이
@@ -339,14 +339,18 @@ terminated = 부재 1건(내 leg 가 응답 없이 끝난 것은 동료가 받�
 
 ### 4.7 PTT 그룹 화면 ([PTT 그룹] F3)
 
-두 카드 — 왼쪽 **표**, 오른쪽 **선택 그룹 상세**(GridSplitter). 표 머리 = "그룹 N개" · 필터 칩 [전체|멤버|내 소유] · 검색(그룹명·id) · [↻] · [+ 새 그룹]; 열 = 그룹 · id · 소속(조직 경로) ·
-멤버 수 · 관계(멤버 › 청취 범위 › 소유 › 범위 배지) · 소유자 · 행 [편집][삭제](`canManage` 행만). 소유자 열은 내 것은 "이름(나)", 나머지는 상세 조회(문서 GET)가 채운다.
-**행 한 번 클릭 = 상세**: 머리(이름 · id · [멤버]·[세션 진행 중] 배지) · 소유자 · 소속 · 정책(우선순위·긴급 허용·세션 종류) · 청취 노출(은닉/투명) · 능력(SDS·FD·영상·암호화·affiliation) ·
-"멤버 N / affiliation M" 과 멤버 목록(이름·번호·의장, 상태 = 발언 중/참여/미참가, 나) — 로스터·발언은 1초 틱으로 갱신 · 바닥 [채널로](관제 캔버스의 채널 카드로, 멤버 그룹이면 합류) [편집…].
+두 카드 — 왼쪽 **좁은 그룹 목록**(§4.6 PTT 세션 카드와 같은 1 : 3 비율, GridSplitter), 오른쪽 **선택 그룹 카드**. 목록 머리 = "그룹 N개" · [↻] · [+ 새 그룹] / 필터 칩 [전체|멤버|내 소유] ·
+검색(그룹명·id); 행 = 관계 배지(멤버 › 청취 범위 › 소유 › 범위) · 그룹명 · 멤버 수 / id · 소속(조직 경로) 두 줄 카드.
+**행 한 번 클릭 = 상세**: 머리(이름 · id · [멤버]·[세션 진행 중] 배지 · [편집](`canManage` 행만)) · 소유자(내 것은 "이름(나)", 나머지는 문서 GET 이 채움) · 소속 · 정책(우선순위·긴급 허용·세션 종류) ·
+청취 노출(은닉/투명) · 능력(SDS·FD·영상·암호화·affiliation) · "멤버 N / affiliation M" 과 멤버 목록(이름·번호·의장, 상태 = 발언 중/참여/미참가, 나) — 로스터·발언은 1초 틱으로 갱신 ·
+바닥 [삭제](`canManage` 행만) [채널로](관제 캔버스의 채널 카드로, 멤버 그룹이면 합류).
+**[편집]·[+ 새 그룹]·행 더블클릭 = 같은 카드 자리의 인라인 편집 폼**(`GroupEditView`, 별창 없음) — 왼쪽 속성 · 오른쪽 멤버(PTT 주소록 후보 ↔ 선택, 의장 토글) · 바닥 [취소][저장/그룹 만들기].
+편집 중엔 목록·[↻]·[+ 새 그룹]이 잠겨 편집 대상이 바뀌지 않는다(저장·취소로만 나온다). 저장 뒤 목록을 재조회하고 그 그룹(새 그룹이면 응답 uri 의 id)을 선택해 상세로 돌아온다.
+§4.1 주소록 [그룹] 탭의 [새 그룹]/[편집]도 이 화면으로 전환해 같은 폼을 연다.
 목록 원천 = `GET /provisioning/directory/groups`(**관리 범위 안(org_code) ∪ 내 소유 ∪ 관제 그룹 청취 범위(`ptt_listen`) ∪ 내 멤버 그룹**, 멤버가 아니어도) — 행의 `canManage`(관리 범위 안 또는 내 소유,
 서버 GMS 게이트와 같은 판정)가 참인 행에만 [편집]/[삭제]·상세 [편집…]이 보이고, 청취 범위·멤버로만 보이는 행은 보기 전용이다(조직 미지정 그룹이 `own` 범위에서 통째로 사라지지 않게).
-생성·편집·삭제 → 종전 `GroupEditWindow`(GMS XCAP PUT/DELETE — 관리 범위 안이면 소유자가 아니어도 서버가 허용). 관리 범위가 없으면 GMS 목록의 내 멤버 그룹만 보이고 내 소유만 편집한다.
-§4.1 주소록 [그룹] 탭의 생성·편집·삭제는 그대로 둔다(멤버 그룹의 빠른 경로). 서버 계약 [mcptt_api.md §2](../../api/mcptt_api.md).
+생성·편집·삭제 = GMS XCAP PUT/DELETE(`CscClient.PutGroup/DeleteGroup` — 관리 범위 안이면 소유자가 아니어도 서버가 허용). 관리 범위가 없으면 GMS 목록의 내 멤버 그룹만 보이고 내 소유만 편집한다.
+§4.1 주소록 [그룹] 탭의 [삭제]는 그대로 둔다(멤버 그룹의 빠른 경로). 서버 계약 [mcptt_api.md §2](../../api/mcptt_api.md).
 
 ## 5. 감청 창 (팝업)
 
@@ -491,7 +495,7 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
     CallActivityViewModel       ④ — 세션 행(dialog 쌍 결합) + 최근 기록
     MonitorWindowViewModel      감청 창 하나(join 호 또는 listenOnly 그룹콜) · MediaSource 미터
     DirectoryAdminViewModel     [관리] 화면(§4.5) — 조직 트리·구성원·편집 폼, `IsEditing`(메뉴 점 배지)
-    GroupAdminViewModel         [PTT 그룹] 화면(§4.7) — 범위 안 그룹 목록·GroupEditViewModel 재사용
+    GroupAdminViewModel         [PTT 그룹] 화면(§4.7) — 범위 안 그룹 목록·상세, `Editor`(GroupEditViewModel) = 상세 카드 자리의 인라인 편집 폼(GroupEditView)
     SessionHistoryViewModel     [이력] 화면(§4.6) — 하루 창 조회(`ShiftDate`)·녹취 세그먼트·재생 상태
     LoginViewModel · SettingsViewModel
   Models/  SessionKind: isMcptt&&listenOnly→PTT 청취(창) · isMcptt&&privateCall→사설콜(①) · groupId adhoc-→애드혹(①) · isMcptt→멤버 채널(①) ·
@@ -536,7 +540,7 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
 - **PTT 그룹 생성·편집·삭제를 관제 앱에서** — 경로는 **GMS XCAP**(TS 24.481, 생성 주체 = 권한 있는 가입자 = 관제사, PKCE 토큰)로 확정.
   관리 API `/api/v1/ptt/groups`([admin_api.md](../../api/admin_api.md) §6)는 콘솔 토큰 전용으로 그대로 둔다. 자격 = `ptt_user_profile.allow_group_creation`
   (프로비저닝 `ptt.allowCreateGroup`), 편집·삭제 = 본인 소유(`authorized_user_id`) 그룹만 — 서버 구현 요청은 위 요청서 §1.
-  앱: PTT 주소록 [그룹] 탭 [새 그룹]·행 [편집]·[삭제] → `GroupEditWindow` → `CscClient.PutGroup/DeleteGroup` → `RefreshGroupsAsync`
+  앱: [PTT 그룹] 화면 인라인 폼(`GroupEditView`, 주소록 [그룹] 탭 [새 그룹]·[편집]도 여기로)·[삭제] → `CscClient.PutGroup/DeleteGroup` → `RefreshGroupsAsync`
   (GMS 목록 재조회 + 신규 그룹 affiliation·conference 구독, 삭제 그룹 해제).
 - **조직·구성원·번호 관리 = 관리 화면(§4.5)** — 관제 그룹 `directory_admin` 범위 안에서 앱이 직접 편집하고(`/provisioning/directory/*`), 관제 그룹 편성
   (멤버·대표번호·감청/청취/관리 범위)은 여전히 콘솔 `구성 > 관제 그룹` 몫이다. 남은 것: 조직 트리 드래그 이동, 구성원 일괄 가져오기(CSV — 콘솔 import 와 같은 형식,

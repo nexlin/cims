@@ -61,7 +61,8 @@ public partial class MessagesView : UserControl
 
     private void ScrollToEnd()
     {
-        if (List.Items.Count > 0) Dispatcher.BeginInvoke(() => List.ScrollIntoView(List.Items[List.Items.Count - 1]));
+        // 항목 수는 지연 실행 시점에 다시 본다 — 채널 따라가기로 빈 스레드로 바뀐 뒤 실행되면 Items[-1] 이 된다.
+        Dispatcher.BeginInvoke(() => { int n = List.Items.Count; if (n > 0) List.ScrollIntoView(List.Items[n - 1]); });
     }
 
     private void Input_KeyDown(object sender, KeyEventArgs e)

@@ -1,4 +1,4 @@
-// [PTT 그룹] 화면 본문(§4.7) 코드비하인드 — 확인 대화상자(소유 창 기준)·더블클릭만. 편집 창은 MainViewModel.GroupEditRequested 로 MainWindow 가 연다.
+// [PTT 그룹] 화면 본문(§4.7) 코드비하인드 — 확인 대화상자(소유 창 기준)·더블클릭(= 상세 카드 자리의 인라인 편집 폼)만.
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;

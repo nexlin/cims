@@ -541,7 +541,14 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         _playCts = new CancellationTokenSource();
         var ct = _playCts.Token;
         LoadingAudio = true; RecordingStatus = "오디오 받는 중…";
-        var r = await m.FetchSegmentAudioAsync(rec.Id, seg.Seq, slot, retry, st => RecordingStatus = st, ct);
+        Result<string> r;
+        try { r = await m.FetchSegmentAudioAsync(rec.Id, seg.Seq, slot, retry, st => RecordingStatus = st, ct); }
+        catch (OperationCanceledException) { LoadingAudio = false; return; }
+        catch (Exception ex)                                                     // 임시 파일·전송 오류는 상태 띠로 — 명령 예외로 새면 앱 오류 대화상자가 뜬다
+        {
+            _s.Log.Warn($"recording play {rec.Id} #{seg.Seq}: {ex.Message}");
+            LoadingAudio = false; RecordingStatus = "재생 실패 — " + ex.Message; _playQueue.Clear(); return;
+        }
         LoadingAudio = false;
         if (ct.IsCancellationRequested) return;
         if (!r.Ok) { RecordingStatus = ResponseText.Describe(ResponseText.Area.Recording, r.Code, r.Reason); _playQueue.Clear(); return; }
@@ -655,7 +662,15 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
             string dir = Path.Combine(Path.GetTempPath(), "CIMS", AppPaths.AppName, "rec");
             if (!Directory.Exists(dir)) return;
             foreach (var f in Directory.EnumerateFiles(dir, "*.mp4"))
-                try { if (File.GetLastWriteTimeUtc(f) < DateTime.UtcNow.AddHours(-6)) File.Delete(f); } catch (IOException) { }
+                try
+                {
+                    // 6시간 지난 파일과, 잠긴 정본 대신 새 이름으로 받은 사본(<정본>_<ticks>.mp4 — ManagementClient.FetchSegmentAudioAsync)은 지운다.
+                    // 아직 재생기가 물고 있는 파일은 IOException 으로 건너뛰고 다음 정리 때 지워진다.
+                    bool copy = System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileNameWithoutExtension(f), @"_\d{15,}$");
+                    if (copy || File.GetLastWriteTimeUtc(f) < DateTime.UtcNow.AddHours(-6)) File.Delete(f);
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
         }
         catch (Exception) { }
     }
