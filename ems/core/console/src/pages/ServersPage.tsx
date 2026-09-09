@@ -6,7 +6,7 @@ import { Badge } from '../components/ui/badge'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '../components/ui/dropdown-menu'
-import { StatusDot, type StatusTone } from '../components/custom/status-dot'
+import { StatusDot, statusDotClass, type StatusTone } from '../components/custom/status-dot'
 import { Button } from '../components/ui/button'
 import { DataTable, Th, Td, orDash } from '../components/custom/data-table'
 import { EmptyState } from '../components/custom/empty-state'
@@ -568,23 +568,22 @@ export default function ServersPage() {
       {/* 페이지 탭 — 좌측 선택(서버/그룹) 공유, 우측 내용 전환 */}
       {/* 좌측 트리 + 우측 Inspector */}
       <div className="flex-1 flex gap-3 overflow-hidden">
-        {/* 좌측 트리 */}
-        {/* 좌측 TreePanel — 정본 = Figma Sec/TreePanel (458:6714).
-            폭 300 · 안쪽 여백 10 · 헤더 30 · 검색 34 · 트리 항목 32(간격 2) · 하단 버튼 36 */}
-        <div className="flex w-[300px] shrink-0 flex-col overflow-hidden rounded-md border border-border bg-card">
-          <div className="flex h-[30px] shrink-0 items-baseline gap-2 px-3.5 pt-3">
-            <span className="text-base font-semibold">시스템</span>
-            <span className="text-xs text-muted-foreground">
+        {/* 좌측 TreePanel — 정본 = Figma Sec/TreePanel (458:6714) 실측:
+            폭 300 · 라운드 14 · 안쪽 여백 10/12 · 헤더 30(아래 10) · 검색 34 · 간격 10
+            · 트리 항목 32(사이 2) · 하단 [+ 시스템 추가] 36. */}
+        <div className="flex w-[300px] shrink-0 flex-col overflow-hidden rounded-lg border border-border bg-card px-2.5 py-3">
+          <div className="flex shrink-0 items-center gap-2 px-1 pb-2.5">
+            <span className="shrink-0 text-base font-semibold">시스템</span>
+            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
               시스템 {haGroups.length} · 서버 {serverCount}
             </span>
           </div>
-          <div className="shrink-0 px-2.5 pt-1">
-            {/* 높이 34 는 도안 실측값이다(TreePanel 458:6714) — 계약 기본 33 을 덮는다. */}
-            <Input value={treeQuery} onChange={e => setTreeQuery(e.target.value)}
-                   placeholder="서버 이름·IP 검색" aria-label="서버 이름·IP 검색"
-                   className="h-[34px]" />
-          </div>
-          <div className="flex-1 overflow-auto px-2.5 pt-2.5">
+          {/* 검색칸만 TextInput 계약(17:29 — 높이 33 · 채움 --surface · 12px)과 갈린다.
+              이 화면 도안(458:6699)이 높이 34 · 채움 --bg-soft · 13px 이라 §7-14 대로 그림을 따른다. */}
+          <Input value={treeQuery} onChange={e => setTreeQuery(e.target.value)}
+                 placeholder="서버 이름·IP 검색" aria-label="서버 이름·IP 검색"
+                 className="h-[34px] shrink-0 bg-muted text-md" />
+          <div className="mt-2.5 flex-1 overflow-auto">
             <ServerTree
  haGroups={shownGroups}
  groupedAgents={shownAgents}
@@ -596,16 +595,15 @@ export default function ServersPage() {
  onAddMember={addMemberToGroup}
  onRemoveMember={removeMemberFromGroup} />
           </div>
-          {/* 시스템 추가 — 시스템 목록 바로 아래. 구성 작업이므로 [시스템/서버 구성] 탭에서만 노출 */}
+          {/* 시스템 추가 — 시스템 목록 바로 아래. 구성 작업이므로 [시스템/서버 구성] 탭에서만 노출.
+              도안(458:6713)은 아이콘 14(계약 md 는 16) · 라벨은 남는 폭 안에서 가운데다. */}
           {pageTab === 'infra' && (
-            <div className="shrink-0 p-2.5">
-              <Button className="w-full h-[36px]" variant="default" size="default"
+            <Button className="mt-2.5 w-full shrink-0 [&_svg]:size-3.5" variant="default" size="default"
  onClick={() => setSystemModalOpen(true)}
  disabled={!canEdit}
  title={canEdit ? 'AS 이중화 (서버 2 자동) / AA 다중화 / SA 단일 서버' : 'admin 권한 필요 (관리자 인증)'}>
-                <Plus size={13} /> 시스템 추가
-              </Button>
-            </div>
+              <Plus /><span className="flex-1 text-center">시스템 추가</span>
+            </Button>
           )}
         </div>
         {/* 우측 열 — 시안 RightColumn: ContextBar(60) → Tabs(31) → 본문.
@@ -802,7 +800,8 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
 }) {
  const standalone = groupedAgents.get(-1) || []
  return (
-    <div className="text-md">
+    // 항목 사이 간격 2 — 도안 tree(458:6702)는 `flex-col gap 2` 다. **구분선이 없다.**
+    <div className="flex flex-col gap-0.5 text-md">
       {/* HA groups */}
       {haGroups.map(g => {
  const members = groupedAgents.get(g.id) || []
@@ -811,23 +810,22 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
  const modeChip = g.mode === 'active_standby' ? 'AS' : 'AA'
  const canAddMember = g.mode === 'all_active'  // AS 는 master/backup 2 fixed
  return (
-          <div key={g.id}>
-            <div onClick={() => onSelect({ kind: 'group', id: g.id })}
- className={`flex cursor-pointer items-center gap-1.5 border-b border-border px-2.5 py-2 ${
- isSelected ? 'bg-brandsoft' : 'bg-muted'}`}>
-              <span className="w-[14px] text-muted-foreground" onClick={e => { e.stopPropagation(); onToggleExpand(g.id) }}>{isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
-              <Badge variant={g.mode === 'active_standby' ? 'infoSolid' : 'successSolid'}>{modeChip}</Badge>
-              <b className="flex-1">{g.name}</b>
+          <div key={g.id} className="flex flex-col gap-0.5">
+            <div role="treeitem" aria-selected={isSelected}
+ onClick={() => onSelect({ kind: 'group', id: g.id })}
+ className={`flex cursor-pointer items-center gap-1.5 rounded-sm px-2 py-1.5 ${
+ isSelected ? 'bg-brandsoft' : 'hover:bg-accent'}`}>
+              <span className="shrink-0 text-muted-foreground" onClick={e => { e.stopPropagation(); onToggleExpand(g.id) }}>{isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
+              <TreeRole>{modeChip}</TreeRole>
+              <span className={`min-w-0 flex-1 truncate font-medium ${isSelected ? 'text-brandsoft-on' : ''}`}>{g.name}</span>
               {g.vip && (
-                <span className="text-xs text-muted-foreground" title={`VIP ${g.vip}/${g.vip_mask}`}>
+                <span className="shrink-0 text-xs text-muted-foreground" title={`VIP ${g.vip}/${g.vip_mask}`}>
                   VIP {g.vip}
                 </span>
               )}
-              <span className="text-xs text-muted-foreground">{members.length}</span>
-              {canAddMember && (
-                <Button variant="outline" size="iconSm" onClick={e => { e.stopPropagation(); onAddMember(g) }}
- title="새 멤버 자동 생성 (이름 자동, install_command 발급)"><Plus /></Button>
-              )}
+              <span className="shrink-0 text-xs text-muted-foreground">{members.length}</span>
+              {canAddMember && <TreeControl icon="plus" onClick={() => onAddMember(g)}
+ title="새 멤버 자동 생성 (이름 자동, install_command 발급)" />}
             </div>
             {isOpen && members.map(a => (
               <ServerTreeRow key={a.id} agent={a}
@@ -841,20 +839,23 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
           </div>
         )
       })}
-      {/* Standalone — 그룹화 없이 각자 시스템 row */}
+      {/* Standalone — 그룹화 없이 각자 시스템 row. 도안(SA1 461:7476)은 **Group 종류**에
+          role=SA · label=서버명 · meta=모듈 수다. 접을 자식이 없으니 caret 자리는 비워
+          정렬만 맞춘다(동작 없는 펼침 표시를 두지 않는다). */}
       {standalone.map(a => {
  const isSelected = selection?.kind === 'agent' && selection.id === a.id
  return (
-          <div key={`sa-${a.id}`}
+          <div key={`sa-${a.id}`} role="treeitem" aria-selected={isSelected}
  onClick={() => onSelect({ kind: 'agent', id: a.id })}
- className={`flex cursor-pointer items-center gap-1.5 border-b border-border px-2.5 py-2 ${
- isSelected ? 'bg-brandsoft' : 'bg-muted'}`}>
-            <span className="w-[14px]"/>  {/* expand 자리 비움 — group 정렬 맞춤 */}
-            <Badge variant="neutralSolid">SA</Badge>
-            <b className="flex-1">{agentDisplayName(a.name)}</b>
-            <span className="text-xs text-muted-foreground">{a.ip_address || '—'}</span>
-            <StatusDot status={a.status} label="" className="ml-1" />
-            <span className="text-xs text-muted-foreground">
+ className={`flex cursor-pointer items-center gap-1.5 rounded-sm px-2 py-1.5 ${
+ isSelected ? 'bg-brandsoft' : 'hover:bg-accent'}`}>
+            <span className="size-3.5 shrink-0" aria-hidden />
+            <TreeRole>SA</TreeRole>
+            <span className={`min-w-0 flex-1 truncate font-medium ${isSelected ? 'text-brandsoft-on' : ''}`}>{agentDisplayName(a.name)}</span>
+            <span className="shrink-0 text-xs text-muted-foreground">{a.ip_address || '—'}</span>
+            <span className={`size-[7px] shrink-0 rounded-full ${statusDotClass(a.status)}`}
+ title={a.status} aria-hidden />
+            <span className="shrink-0 text-xs text-muted-foreground">
               {(depsByAgent.get(a.id) || []).length}m
             </span>
           </div>
@@ -874,26 +875,63 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick, onRe
  onRemove?: () => void   // AA 멤버만 제공 — 그룹에서 멤버 제거 (agent 자체는 standalone 으로 남음)
 }) {
  return (
-    <div onClick={onClick}
- className={`flex cursor-pointer items-center gap-1.5 border-b border-border py-1.5 pr-2.5 ${
- indent ? 'pl-8' : 'pl-2.5'} ${active ? 'bg-brandsoft' : ''}`}>
-      <StatusDot status={a.status} label="" />
-      <span className={`flex-1 ${active ? 'font-semibold' : ''}`}>{agentDisplayName(a.name)}</span>
+    <div role="treeitem" aria-selected={active} onClick={onClick}
+ className={`flex cursor-pointer items-center gap-1.5 rounded-sm px-2 py-1.5 ${
+ active ? 'bg-brandsoft' : 'hover:bg-accent'}`}>
+      {/* indent 10 — 도안 TreeItem Node(19:15). 그룹 행의 caret 14 자리를 대신한다 */}
+      {indent && <span className="size-2.5 shrink-0" aria-hidden />}
+      <span className={`size-[7px] shrink-0 rounded-full ${statusDotClass(a.status)}`}
+ title={a.status} aria-hidden />
+      <span className={`min-w-0 flex-1 truncate ${active ? 'text-brandsoft-on' : ''}`}>{agentDisplayName(a.name)}</span>
       {role && (
-        <Badge variant={role === 'master' ? 'infoSolid' : 'neutralSolid'}
- title={role === 'master' ? 'Master — priority 100 (절체 우선순위)' : 'Backup — priority 90'}>
+        <TreeRole title={role === 'master' ? 'Master — priority 100 (절체 우선순위)' : 'Backup — priority 90'}>
           {role === 'master' ? 'M' : 'B'}
-        </Badge>
+        </TreeRole>
       )}
-      <span className="text-xs text-muted-foreground">{depCount}m</span>
-      {onRemove && (
-        // 트리 행의 [멤버 제거] 는 도안(TreePanel 458:6956)이 붉게 그렸다 — §7-14 대로 그림을 따른다
-        <Button variant="outline" size="iconSm"
- className="border-destructive text-destructive"
- onClick={e => { e.stopPropagation(); onRemove() }}
- title="그룹에서 멤버 제거 (agent 자체는 standalone 으로 유지)"><X /></Button>
-      )}
+      {/* 멤버 행 meta 는 도안이 **mono 10px** 이다(19:18) — 그룹 행 meta(11px)와 다르다 */}
+      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{depCount}m</span>
+      {onRemove && <TreeControl icon="x" onClick={onRemove}
+ title="그룹에서 멤버 제거 (agent 자체는 standalone 으로 유지)" />}
     </div>
+  )
+}
+
+/**
+ * 트리 행의 역할 칩 — 정본 = Figma TreeItem `role`(19:4) 실측:
+ * 채움 `--primary-soft` · 글자 `--primary-on-soft` · 라운드 6 · 좌우 4 · 10px SemiBold · 줄높이 1.2.
+ * **Badge 가 아니다** — 도안이 Badge 인스턴스가 아니라 TreeItem 안의 자체 칩이고 값도 Badge
+ * 계약(12px · 좌우 6 · 상하 2 · 테두리 있음)과 다르다. AS·AA·SA 가 **같은 색**이다 —
+ * 이중화 방식은 살아있는 상태가 아니라 분류라서 톤을 갈라 쓰지 않는다(DESIGN-RULES §2).
+ * 10px 은 Typography 컬렉션 밖의 값인데 도안도 토큰이 아니라 생값 10 을 썼다 — 그대로 옮긴다.
+ */
+function TreeRole({ children, title }: { children: ReactNode; title?: string }) {
+  return (
+    <span title={title}
+          className="shrink-0 rounded-sm bg-brandsoft px-1 text-[10px] font-semibold leading-[1.2] text-brandsoft-on">
+      {children}
+    </span>
+  )
+}
+
+/**
+ * 트리 행의 액션 — 정본 = Figma TreeItem `control`(그룹 452:94 · 멤버 452:100) 실측:
+ * **버튼 껍데기 없이** 14px 아이콘만, 색 `--text-muted`, 획 2(14 뷰박스 기준 = lucide 3.43).
+ * 붉게 그린 곳은 도안에 없다 — 이전 구현의 `border-destructive` 는 근거 없는 값이었다.
+ * `hasControl` 은 AA(all_active)에서만 켠다 — 그룹 행 `+`(새 멤버 자동 생성), 멤버 행
+ * `×`(그룹에서 제거). AS 는 서버 2대 고정이라 항상 끈다.
+ */
+function TreeControl({ icon, title, onClick }: {
+ icon: 'plus' | 'x'
+ title: string
+ onClick: () => void
+}) {
+ const Icon = icon === 'plus' ? Plus : X
+ return (
+    <button type="button" title={title} aria-label={title}
+ onClick={e => { e.stopPropagation(); onClick() }}
+ className="shrink-0 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:shadow-focus">
+      <Icon size={14} strokeWidth={3.43} />
+    </button>
   )
 }
 

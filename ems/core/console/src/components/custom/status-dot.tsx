@@ -35,6 +35,14 @@ export function toneForStatus(status: string): StatusTone {
   }
 }
 
+/**
+ * 상태 → 점 채움 클래스. **점만** 쓰는 자리(트리 행 — 도안 TreeItem `dot` 은 7px 원 하나)를
+ * 위해 톤 맵을 열어 둔다. 라벨이 붙는 곳은 `StatusDot` 을 그대로 쓴다.
+ */
+export function statusDotClass(status?: string, tone?: StatusTone) {
+  return TONE[tone ?? toneForStatus(status ?? '')]
+}
+
 export function StatusDot({ status, label, tone, className, title }: {
   status?: string
   label?: string

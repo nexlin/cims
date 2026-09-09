@@ -141,7 +141,7 @@ shadcn 대응표는 거기가 정본이다. 어긋나면 Figma 가 맞다.
 | Switch | Off·On | `81:43` |
 | SegmentedItem | Default·Selected | `17:26` |
 | TabItem | Default·Selected | `18:43` |
-| TreeItem | Group·Node × Default·Selected | `19:25` |
+| TreeItem | Group·Node × Default·Selected × `hasControl` | `19:24` (쇼케이스 `19:25`) |
 | CollapsibleSectionHeader | Level 1·2 × Expanded·Collapsed | `19:37` |
 | SectionMessage | Info·Warning·Danger·Success | `20:23` |
 | Toast | Info·Success·Warning·Danger | `393:117` |
@@ -186,6 +186,19 @@ shadcn 매핑은 `components/MAPPING.md` — 18종은 `npx shadcn@latest add` �
   오른쪽 폭 **62 고정** 마커(사이 10). **마커는 라벨 줄에 맞춰 위로 붙인다** — 표가 들어가는
   필드에서는 가운데 정렬이 성립하지 않는다(§7-28). 라벨·도움말은 마커 밑으로 흐르지 않는다
 - **MenuItem Disabled** — 우측에 사유를 짧게 (`그룹 삭제로만 가능`).
+- **TreeItem** — 행은 라운드 6 · 좌우 8 · 상하 6 · 간격 6 이고 **구분선이 없다**(`tree` 는
+  `flex-col gap 2`). 선택 행만 `--primary-soft` 로 칠하고 라벨을 `--primary-on-soft` 로 바꾼다
+  (굵기는 안 바꾼다). Group = caret 14 → 역할 칩 → 라벨 Medium 13 → meta 11px → `control`,
+  Node = indent 10 → 점 7 → 라벨 Regular 13 → meta **mono 10px** → `control`.
+  **역할 칩(`AS`/`AA`/`SA`)은 Badge 가 아니다** — TreeItem 자체 칩(`19:4`): 채움 `--primary-soft` ·
+  글자 `--primary-on-soft` · 테두리 없음 · 라운드 6 · 좌우 4 · 10px SemiBold. **세 값이 같은 색**이다
+  (이중화 방식은 살아있는 상태가 아니라 분류). **`control` 도 Button 이 아니다** — 껍데기 없는 14px
+  아이콘, 색 `--text-muted`, 획 2(lucide `strokeWidth` 3.43). `hasControl` 은 **AA 에서만** —
+  그룹 행 `+`(새 멤버 자동 생성) · 멤버 행 `×`(그룹에서 제거, agent 는 standalone 유지).
+  AS 는 서버 2대 고정이라 항상 끈다 (§7-38)
+- **TreePanel** — 폭 300 · 라운드 **14** · 안쪽 10/12 · 헤더(제목 14px Semi + 개수 11px muted,
+  아래 10·좌우 4) · 검색 **34 · `--bg-soft` · 13px**(TextInput 계약 33·`--surface`·12px 을 이 화면
+  그림이 덮는다) · 간격 10 · 트리 · `grow` · `[+ 시스템 추가]` 36(아이콘 14, 라벨은 남는 폭에서 가운데)
 
 ## 5. 토큰
 
@@ -400,6 +413,7 @@ Figma MCP 커넥터(`claude.ai Figma`)가 붙어 있으면 **링크를 사람에
 | 35 | **T8 이 API 배지를 깨뜨렸다** — 개발자 모드 `[API n]` 배지가 위젯 **우상단**이 아니라 상단 전폭으로 길게 늘어났다 (사용자 지적) | 2D 격자의 `.widget-fixed > * { width: 100% }` 가 원인이다. `index.css` 는 `@tailwind utilities` **뒤**에 있어 같은 명시도에서 유틸리티를 이긴다 — 그래서 `w-auto` 가 먹지 않았다. 옛 CSS 는 `.widget-api-badge--overlay { width: auto }` 로 **뒤에 오는 같은 명시도 규칙**을 써서 상쇄하고 있었고, 그 주석에 이유까지 적혀 있었는데 T6 에서 유틸리티로 옮기며 그 장치를 잃었다 | `!w-auto` — 이 한 자리에는 `!` 가 **정확한 도구**다. 격자 규칙(플랫폼 레이아웃)을 한 요소만 예외로 빼는 것이고, CSS 쪽에 예외 규칙을 새로 만들면 「화면을 그리는 CSS 는 없다」(§7-32)가 다시 흐려진다. **같은 갈래를 훑는 검사기를 만들었다** — `~/.cims-scratch/css-vs-tw.mjs`(§8.3). `tw-override-check.py` 는 소스만 보므로 `X > *` 같은 **다른 클래스의 자손 규칙**은 원리적으로 못 잡는다. 전 라우트를 훑어 나머지 13건은 값이 같거나(`flex-1`=`flex:1 1 0%`) 격자가 이기는 것이 설계대로(위젯 안 패널 스크롤)임을 확인했다 | 격자 CSS 우선 + ①층 |
 | 36 | **API 팝업 크기 고정이 풀렸고, 알람 드로어는 바깥을 눌러도 닫히지 않았다** (사용자 지적) | ①팝업은 원래 `width: min(940px,96vw)` + **`height: min(76vh, calc(100vh-80px))`** 로 크기를 못박아 「항목 수·상세 펼침과 무관하게 항상 같은 창」이었다. **T3-10 에서 Radix Dialog 로 옮길 때 `Modal` 이 `width` 만 받아 height 가 빠졌고**, 그 뒤로 내용만큼 쪼그라들었다(항목 1건이면 183px). T6/T8 이 아니라 T3-10 부터 그랬는데 배지를 고치며 눈에 걸렸다. ②알람 드로어는 `{open && <div>}` 뿐이라 **바깥 클릭·Esc 로 닫히지 않았다** — 벨을 다시 누르거나 ✕ 를 눌러야 했다. 헤더의 톱니바퀴·계정 메뉴는 Radix `DropdownMenu` 라 그 동작을 공짜로 얻는데 드로어만 달랐다 | ①`Modal` 에 `height` prop 을 넣어 `width` 와 대칭으로 만들고 원래 값을 되살렸다(940×912 실측). ②시트 2 에 **Drawer/Popover 가 없다** — 새 컴포넌트를 만들지 않고, `InfoDot` 이 이미 갖고 있던 「바깥 mousedown + Esc」 패턴을 `hooks/useDismiss.ts` 로 뽑아 드로어와 InfoDot 이 같이 쓴다. 트리거를 판정 래퍼 안에 둬서 「벨 다시 눌러 닫기」가 바깥 클릭으로 두 번 처리되지 않게 했다. 6가지 경우(열기·바깥·재열기·Esc·안쪽 클릭 유지·토글) 실측 통과 | ②층 + 시안 침묵 |
 | 37 | **§7-36 의 드로어 닫기가 아직 톱니·계정 메뉴와 달랐다** — 「알람창 열어놓고 톱니를 누르면 알람창이 닫히기만 하는 게 아니라 톱니창이 열려버린다」(사용자) | Radix `DropdownMenu` 는 기본이 **modal** 이라 열린 동안 바깥 포인터를 **삼킨다** — 톱니 메뉴를 열고 [편집]을 누르면 메뉴만 닫히고 편집은 실행되지 않는다. §7-36 이 넣은 `useDismiss` 는 `document` 의 `mousedown` 리스너라 **닫기만 하고 이벤트는 그대로 통과**한다 — 그래서 드로어는 닫히면서 누른 버튼까지 실행됐다. 닫히는 것만 같고 **그 다음에 무엇이 일어나는가**가 달랐다 | 드로어가 열린 동안 화면 전체를 덮는 **차단층**(`fixed inset-0 z-[149]`, 드로어는 z-150)을 두고 그 층의 `mousedown` 에서 닫는다. Radix 의 modal 층과 같은 원리다(바깥 포인터가 아무 것도 못 맞힌다). `mousedown` 에서 끊는 이유 — `click` 까지 기다리면 이미 그 버튼이 반응한다. 실측으로 **Radix 와의 동형**을 확인했다: 톱니 메뉴가 열린 동안 Playwright `.click()` 이 「가려짐」으로 거부되는데, 드로어도 똑같이 거부된다. 검증 항목도 넣었다(`verify.mjs` — 「바깥 클릭에 닫히고 그 버튼은 안 눌림」·「Esc 로 닫힘」). **교훈**: 「닫힌다」만 보고 통과시킨 것이 §7-36 의 실수다 — 상호작용은 *그 다음 상태*까지 대조해야 한다 | ②층 |
+| 38 | **시스템 트리가 시트 3 과 달랐다** — 「AS, AA 같은 부분 색상도 다르고 크기도 다르고 그리고 AA부분에 추가 삭제 버튼들도 다르게 생겼고」(사용자) | ①**역할 칩은 Badge 가 아니다.** 도안의 `AS`/`AA`/`SA` 는 Badge 인스턴스가 아니라 TreeItem 안의 자체 칩(`19:4`) — 실측 채움 `--primary-soft` · 글자 `--primary-on-soft` · **테두리 없음** · 라운드 6 · 좌우 4 · **10px** SemiBold · 줄높이 1.2. **AS·AA·SA 가 전부 같은 색**이다. 코드는 `Badge infoSolid`(AS)/`successSolid`(AA)/`neutralSolid`(SA)/`infoSolid`·`neutralSolid`(M/B) — 모드마다 다른 색의 **솔리드 알약**에 12px·좌우 6·상하 2·테두리까지 있었다 ②**AA 의 `+`/`×` 는 버튼이 아니다.** 도안 `control`(그룹 `452:94` · 멤버 `452:100`)은 **껍데기 없는 14px 아이콘** 하나, 색 `--text-muted`(`#64748b`), 획 2(14 뷰박스 = lucide `strokeWidth` 3.43). 코드는 `Button variant="outline" size="iconSm"`(26px 정사각·테두리)였고 `×` 에는 `border-destructive text-destructive` 까지 얹혀 있었다 — **도안에 붉은 것은 없다.** 그 자리의 「§7-14 대로 도안이 붉게 그렸다」는 주석은 실측하지 않은 거짓이었다 ③**행 사이에 구분선이 없다.** `tree`(`458:6702`)는 `flex-col gap 2` 이고 각 행이 라운드 6 · 좌우 8 · 상하 6 · 간격 6, **선택 행만** `--primary-soft` 로 칠하고 라벨을 `--primary-on-soft` 로 바꾼다. 코드는 모든 행에 `border-b` 가 있었고 그룹 행은 `bg-muted` 로 회색 띠였다 ④멤버 행은 `indent` 10 자리 + **7px** 점(StatusDot 의 점은 6 이고 항상 라벨 span 을 달고 나온다) + 라벨 Regular 13 + meta **mono 10px**. 그룹 행 meta 는 Pretendard 11px ⑤패널 껍데기: 라운드 **14**(코드 8) · 안쪽 10/12 · 헤더 `아래 10·좌우 4` · 검색 **34 · `--bg-soft` · 13px** · 간격 10 · `[+ 시스템 추가]` 36 에 아이콘 **14**(md 계약은 16)·라벨은 남는 폭에서 가운데 | 도안 실측대로 전부 고쳤다. 역할 칩은 `TreeRole`, 액션은 `TreeControl` 로 파일 안에 두고 왜 Badge/Button 이 아닌지 값과 함께 적었다. 검색칸이 TextInput 계약(33·`--surface`·12px)과 갈리는 것은 **§7-14 대로 그 화면 그림이 이긴다**. **10px 은 Typography 컬렉션 밖**인데 도안도 토큰이 아니라 생값 10 을 두 곳(역할 칩·멤버 meta)에 썼다 — 그 둘만 그대로 옮기고 나머지는 스케일을 지킨다. hover 는 도안에 상태가 없어 참조 구현(`tree-panel.tsx`)의 `bg-accent` 를 쓴다(불투명도는 안 쓴다). **도안에 자리가 없는 것은 지우지 않았다** — 그룹 행의 `VIP`, SA 행의 IP·상태점, 멤버 행의 M/B 는 살아있는 정보라 §7-1·#2 선례대로 보존하고 **도안의 어휘로만** 다시 그렸다(같은 역할 칩, 같은 11px muted meta). 트리를 도안과 글자 그대로 맞추려면 이 셋을 빼면 된다 — 지우는 쪽이 맞다면 말해달라. 선택 행에서는 역할 칩이 배경과 같은 색이라 글자만 남는데 **도안(SA1 `461:7476`)도 똑같다** — 안 고친다 | 그림이 정본 (+ 「시안에 없으면 지우지 않는다」) |
 
 `decisions.md` 의 나머지 항목(§1 헤더 재정리 · §3 ContextBar 4탭 유지 · §4 더보기 묶기 ·
 §5 build/git 컬럼 분리 · §6 일괄 제어 분리 · §7 제안 3건 · §8 웹 결함 8건)은 **전부 시안을 따른다** —
