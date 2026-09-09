@@ -127,6 +127,7 @@ PSP_NOTIFY_PORT = 4421
 PROVISIONING = {}            # config Provisioning: {"Services":{"volte":{host,port,tcp_port,tls_port,transport,domain}, "ptt":{...}}}
 _SERVICE_LOG_DIR = ''        # ServiceLogging.Dir (NAS 공유) — 통합 이력 조회(/provisioning/history) 백엔드
 _DB_CONFIG = None            # CimsDatabase (가입자 라이브 조회용)
+_OAM_CONFIG: dict = {}       # Recording.OamUrl / Fm.OamIp — 통합 이력 PTT 창 조회의 OAM 세션 인덱스 프록시용
 _MCPTT_PORT = 4430           # csc McpttServer.Port (응답 csc.port)
 # 단말이 도달하는 MCPTT 서비스(IdMS/GMS/CMS/KMS) 공개 base URL — **단일 정본**.
 #   McpttServer.PublicUrl 설정값(정규화: 스킴 필수·후행 / 제거). 비면 요청 Host 유도(올인원).
@@ -308,8 +309,10 @@ def apply_config(config):
                     f"PSP={PSP_NOTIFY_IP or '(unset)'}:{PSP_NOTIFY_PORT}")
 
     # 자동 프로비저닝(/provisioning/me) — DB 핸들 + 서비스별 시그널링/도메인 매핑 보관.
-    global _DB_CONFIG, PROVISIONING, _MCPTT_PORT, _MCPTT_PUBLIC_URL, _SERVICE_LOG_DIR
+    global _DB_CONFIG, PROVISIONING, _MCPTT_PORT, _MCPTT_PUBLIC_URL, _SERVICE_LOG_DIR, _OAM_CONFIG
     _DB_CONFIG = db_config
+    # 통합 이력 PTT 창 조회가 OAM 세션 인덱스를 프록시할 때의 접속 설정(dispatch_recordings._oam_base/_http 와 같은 키).
+    _OAM_CONFIG = {k: config.get(k) for k in ('Recording', 'Fm') if config.get(k) is not None}
     PROVISIONING = config.get('Provisioning', {}) or {}
     _sl = config.get('ServiceLogging', {}) or {}
     _SERVICE_LOG_DIR = str(_sl.get('Dir', '') or config.get('ServiceLogDir', config.get('MsgLogDir', '')) or '').strip()
@@ -3158,8 +3161,13 @@ async def handle_provisioning_history(args: HandlerArgs, kwargs: dict) -> Handle
                 if r:
                     user_id = r[0]
                     break
+            group_key_of = {}
             if user_id is not None:
                 scope = _dispatch_scope_sets(cur, user_id)
+                # 청취 그룹 → 녹취 저장 키(ptt_groups.id) — PTT 창 조회가 OAM 세션 인덱스를 그 키로 좁힌다.
+                if kind == "ptt" and until_dt is not None and scope and scope.get("ptt_groups"):
+                    cur.execute("SELECT id, mcptt_group_id FROM ptt_groups")
+                    group_key_of = {str(r[0]): r[1] for r in (cur.fetchall() or [])}
         finally:
             conn.close()
     except Exception as e:
@@ -3170,11 +3178,25 @@ async def handle_provisioning_history(args: HandlerArgs, kwargs: dict) -> Handle
     if not scope:
         return HandlerResult(status=403, body={"error": "no_monitor_scope"}, media_type="application/json")
 
-    items, next_since = _dh.query(_SERVICE_LOG_DIR, kind, scope, since_dt, limit, until_dt)
+    # PTT 창 조회(이력 화면) = 콘솔 PTT 이력의 읽기 모델(OAM ptt_index — 발언 턴·화자·발화·동시 발언·참여자)을 프록시.
+    #   범위 = 청취 그룹의 저장 키. OAM 에 닿지 않으면 파일 스캔으로 폴백(지표 없음). 폴링(until 없음)은 파일 스캔.
+    items = None
+    if kind == "ptt" and until_dt is not None:
+        from handlers import dispatch_recordings as _dr
+        w_since, w_until = _dh.window(since_dt, until_dt)
+        keys = {k for k, g in group_key_of.items() if g in scope["ptt_groups"]}
+        oam_items = _dr.fetch_ptt_sessions(_OAM_CONFIG, w_since, w_until, keys)
+        if oam_items is not None:
+            rows = [r for r in (_dh.ptt_row_from_oam(it, _SERVICE_LOG_DIR) for it in oam_items)
+                    if r and r["groupId"] in scope["ptt_groups"]]
+            items, next_since, hours = _dh.finish_rows(rows, w_since, w_until, limit)
+    if items is None:
+        items, next_since, hours = _dh.query_ex(_SERVICE_LOG_DIR, kind, scope, since_dt, limit, until_dt)
     # 앱(HistoryClient) 와이어 계약 — dispatch_desktop_ui.md §13 / android_ue_provisioning.md §3-2.
-    #   items[]{id,time,kind,event,from,to,group,duration,emergency,text,recordingId,hasRecording} + 최상위 next + 응답 ETag/304.
+    #   items[]{id,time,kind,event,from,to,group,duration,emergency,text,recordingId,hasRecording + 종류별 확장 필드}
+    #   + 최상위 next·hours(시간대 분포) + 응답 ETag/304.
     wire = [_dh.format_item(r) for r in items]
-    body = {"items": wire, "next": next_since}
+    body = {"items": wire, "next": next_since, "hours": hours}
     etag = _content_etag_json(body)
     inm = args.headers.get('if-none-match') or args.headers.get('If-None-Match')
     if inm and inm == etag:

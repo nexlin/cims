@@ -466,7 +466,13 @@ TS 24.379 **ambient listening**(`session-type=ambient-listening`, remote-init �
   `hist_kind`·`count` 포함)로 남기고 열람은 §5.7 과 같은 manager 게이트를 받는다.
 - **창 조회**: 같은 API 에 `until` 을 주면 [since, until] 창(관제 앱 [이력] 화면 — 하루 단위 페이지)이고,
   없으면 폴링 커서다. 종료분 항목에는 녹취 식별자 `recordingId`(세션 디렉터리의 `ServiceLogging.Dir` 상대 경로 — OAM
-  `/api/v1/recordings/{id}` 와 같은 키)와 `hasRecording` 이 실린다.
+  `/api/v1/recordings/{id}` 와 같은 키)와 `hasRecording` 이 실린다. 항목에는 콘솔 VoLTE/PTT 이력과 같은 열을 그릴 종류별 확장
+  필드(통화 = 상태·시작/응답/종료·종료사유, PTT = 종류·발언 턴/화자/발화/동시 발언·참여자·floor 축)와 최상위 시간대 분포 `hours` 가
+  함께 실린다. **PTT 창 조회는 OAM 세션 인덱스(`/api/v1/ptt/sessions`, 콘솔 PTT 이력의 읽기 모델)를 청취 그룹의 저장 키로 좁혀
+  프록시**하고(집계값은 CMP `segments.jsonl` 에서 나오므로 CSC 가 재구현하지 않는다) OAM 미도달 시 파일 스캔으로 폴백한다.
+  **PTT 세션 상세**(참여자·입퇴장·floor 타임라인)는 `GET /provisioning/history/ptt/{recordingId}` — §5.7b 와 같은 범위 게이트 +
+  OAM `/api/v1/ptt/history/{group_key}/{session}`·`/floor` 프록시(계약 [android_ue_provisioning.md §3-2a](android_ue_provisioning.md),
+  감사 `tap_mode=history`·`hist_kind=ptt_session`).
 
 ### 5.7b 녹취 열람·재생 (관제 앱)
 

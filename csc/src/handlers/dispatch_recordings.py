@@ -5,6 +5,10 @@ android_ue_provisioning.md §3-2.
   GET /provisioning/recordings/{id}                                  세션·세그먼트 메타(OAM `/api/v1/recordings/{id}` 응답 그대로)
   GET /provisioning/recordings/{id}/segments/{seq}/audio?slot=&retry=  MP4(AAC) 본체 · 202 {status:transcoding|recording} · 500 failed
   GET /provisioning/recordings/{id}/segments/{seq}/peaks?slot=         파형 {seq,slot,buckets,peaks[]}
+  GET /provisioning/history/ptt/{id}                                   PTT 세션 상세 {session, participants[], events[], floor[], hasRecording}
+                                                                       (OAM `/api/v1/ptt/history/{group_key}/{session}` + `/floor` 합본)
+  fetch_ptt_sessions(...)                                              `/provisioning/history?kind=ptt&until=` 창 조회가 쓰는 OAM 세션 인덱스
+                                                                       (`/api/v1/ptt/sessions`) 프록시 — 호출자 mcptt.handle_provisioning_history
 
 `id` = 세션 디렉터리의 ServiceLogDir 상대 경로(`/provisioning/history` 항목의 `recordingId`, OAM 녹취 API 와 같은 키).
 CSC 는 **범위 게이트 + 프록시**만 한다 — 원시 RTP → MP4 변환·캐시·다중 버킷 결합은 oam-svc `handlers/recording.py` 하나가
@@ -194,6 +198,143 @@ async def handle_recordings(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
                          headers={'Content-Type': ct})
 
 
+# ── PTT 세션 이력 — OAM 세션 인덱스 창 조회 + 세션 상세 프록시 ─────────────────────────────────────────────
+#   콘솔 PTT 이력(`/service/history/ptt`)의 읽기 모델(ptt_index — 발언 턴·화자·발화·동시 발언·참여자·floor 타임라인)을
+#   관제 앱 [이력] 화면이 같은 값으로 보게 한다. CSC 는 여기서도 **범위 게이트 + 프록시**만 한다.
+_HIST_PTT_BASE = '/provisioning/history/ptt'
+_TIMEOUT_INDEX = (5.0, 30.0)
+_SES_RE = _dh._SES_KEY_RE
+
+
+def fetch_ptt_sessions(config: dict, since_dt, until_dt, group_keys: set):
+    """OAM `/api/v1/ptt/sessions` (세션 축 평면 목록 — 콘솔 PTT 이력) 창 조회. group_keys = 청취 범위 그룹의 녹취 저장 키
+    (`ptt_groups.id`) — OAM 은 그룹 세션만 그 키로 좁힌다(1:1·임시는 그룹 엔티티가 아니라 관제 범위 밖).
+    반환 = 항목 목록, 실패(OAM 미도달·비정상 응답) 는 None — 호출자가 파일 스캔으로 폴백한다."""
+    if not group_keys:
+        return []
+    params = {"group_key": ",".join(sorted(str(k) for k in group_keys)), "limit": "1000"}
+    f, t = since_dt.strftime("%Y-%m-%d"), until_dt.strftime("%Y-%m-%d")
+    if f == t:
+        params["date"] = f
+    else:
+        params["from"], params["to"] = f, t
+    url = _oam_base(config) + "/api/v1/ptt/sessions"
+    try:
+        r = _http(config).get(url, params=params, headers={'Accept': 'application/json'}, timeout=_TIMEOUT_INDEX)
+    except requests.RequestException as e:
+        logger.log_warning(f"[provisioning/history] OAM ptt index unreachable {url}: {e} — falling back to file scan")
+        return None
+    if r.status_code != 200:
+        logger.log_warning(f"[provisioning/history] OAM ptt index {url} → {r.status_code} — falling back to file scan")
+        return None
+    try:
+        body = json.loads(r.content.decode('utf-8') or '{}')
+    except ValueError:
+        return None
+    items = body.get('items') if isinstance(body, dict) else None
+    return items if isinstance(items, list) else None
+
+
+def _ptt_session_ref(rec_id: str):
+    """녹취 id `ptt/{저장키}/{Y}/{M}/{D}/{H}[/{세션키}]` → (group_key, OAM session dir). 구 녹취(세션키 없음)는 시간창 YYYYMMDDHH."""
+    parts = rec_id.split('/')
+    if len(parts) < 6 or parts[0] != 'ptt':
+        return None, None
+    key = parts[1]
+    last = parts[-1]
+    if _SES_RE.match(last):
+        return key, last
+    if len(parts) == 6:
+        return key, ''.join(parts[2:6])
+    return None, None
+
+
+async def handle_ptt_session_detail(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    """GET /provisioning/history/ptt/{recordingId} — 세션 상세(참여자·입퇴장 이벤트·floor 타임라인). 범위 게이트는 녹취와 같고,
+    본문은 OAM `/api/v1/ptt/history/{group_key}/{session}` + `…/floor` 를 합친 것. 열람은 감사 E-AUD-016(tap_mode=history)."""
+    config = kwargs.get('config', {}) or {}
+    if handler_args.method.upper() != 'GET':
+        return _json(405, {'error': 'Method Not Allowed'})
+    token = _m.extract_token(handler_args.headers.get('authorization') or handler_args.headers.get('Authorization'))
+    if not token:
+        return _json(401, {"error": "invalid_token"})
+    sc = token.get('scope') or []
+    if isinstance(sc, str):
+        sc = sc.split()
+    if sc and _m.SCOPE_PROVISIONING not in sc:
+        return _json(403, {"error": "insufficient_scope", "required": _m.SCOPE_PROVISIONING})
+
+    path = urlparse(handler_args.full_path).path
+    if not path.startswith(_HIST_PTT_BASE + '/'):
+        return _json(400, {'error': 'invalid_recording_id'})
+    rec_id = '/'.join(unquote(p) for p in path[len(_HIST_PTT_BASE) + 1:].split('/') if p)
+    if not _safe_id(rec_id):
+        return _json(400, {'error': 'invalid_recording_id'})
+    group_key, ses_dir = _ptt_session_ref(rec_id)
+    if not group_key:
+        return _json(400, {'error': 'invalid_recording_id'})
+    sl_dir = _m._SERVICE_LOG_DIR
+    if not sl_dir or not os.path.isdir(sl_dir):
+        return _json(503, {'error': 'service_log_unavailable'})
+    if not os.path.isdir(os.path.join(sl_dir, rec_id)):
+        return _json(404, {'error': 'not_found'})
+    try:
+        msisdn, scope, group_key_of = _scope_sets(config, token)
+    except Exception as e:
+        logger.log_error(f"[provisioning/history/ptt] DB error: {e}")
+        return _json(503, {"error": "db_error", "detail": str(e)})
+    if not scope:
+        return _json(403, {"error": "no_monitor_scope"})
+    if not in_scope(sl_dir, rec_id, scope, group_key_of):
+        return _json(403, {"error": "out_of_scope"})
+
+    base = _oam_base(config) + f"/api/v1/ptt/history/{quote(group_key, safe='')}/{quote(ses_dir, safe='')}"
+    try:
+        r1 = _http(config).get(base, headers={'Accept': 'application/json'}, timeout=_TIMEOUT_INDEX)
+        r2 = _http(config).get(base + "/floor", headers={'Accept': 'application/json'}, timeout=_TIMEOUT_INDEX)
+    except requests.RequestException as e:
+        logger.log_error(f"[provisioning/history/ptt] OAM unreachable {base}: {e}")
+        return _json(502, {'error': 'oam_unreachable', 'detail': str(e)})
+    if r1.status_code != 200:
+        try:
+            body = json.loads(r1.content.decode('utf-8') or '{}')
+        except ValueError:
+            body = {'error': 'oam_error'}
+        return _json(r1.status_code, body if isinstance(body, dict) else {'error': 'oam_error'})
+    try:
+        j1 = json.loads(r1.content.decode('utf-8') or '{}')
+    except ValueError:
+        return _json(502, {'error': 'oam_bad_response'})
+    floor = []
+    if r2.status_code == 200:
+        try:
+            floor = (json.loads(r2.content.decode('utf-8') or '{}') or {}).get('floor') or []
+        except ValueError:
+            floor = []
+    body = {
+        "recordingId": rec_id,
+        "session": j1.get('session') or {},
+        "participants": j1.get('participants') or [],
+        "events": j1.get('events') or [],
+        "floor": floor,
+        "hasRecording": bool(j1.get('has_recording')),
+    }
+    try:
+        from services import fm_reporter as _fm
+        fr = _fm.get()
+        if fr is not None:
+            fr.send_event('call_monitored', kind='audit', mo=f"{fr.node}/csc",
+                          params={"monitor": msisdn, "group": scope["groupId"], "tap_mode": "history",
+                                  "hist_kind": "ptt_session", "recording": rec_id, "count": 1},
+                          message=f"{msisdn} read ptt session {rec_id}")
+    except Exception as e:
+        logger.log_warning(f"[provisioning/history/ptt] audit emit failed: {e}")
+    logger.log_info(f"[provisioning/history/ptt] {msisdn} {rec_id} → participants={len(body['participants'])} "
+                    f"events={len(body['events'])} floor={len(floor)}")
+    return _json(200, body)
+
+
 CSC_RECORDINGS_HANDLER_LIST = [
     (_BASE, handle_recordings, {}),
+    (_HIST_PTT_BASE, handle_ptt_session_detail, {}),      # 가장 긴 접두 우선 — /provisioning/history(목록) 보다 먼저 잡힌다
 ]

@@ -30,7 +30,7 @@ import handlers.dispatch as hd  # noqa: E402
 import handlers.dispatch_directory as dd  # noqa: E402
 import handlers.dispatch_recordings as dr  # noqa: E402
 from httpsrv.handler import HandlerArgs  # noqa: E402
-from tests.test_csc_provisioning_history import _Tree  # noqa: E402
+from tests.test_csc_provisioning_history import _Tree, _now_parts  # noqa: E402
 
 # organizations: (id, code, name, parent_id, sort)
 ORGS = [(1, "CORP", "CIMS", None, 0), (2, "DIV1", "제1본부", 1, 1), (3, "TEAM01", "팀01", 2, 1),
@@ -173,7 +173,8 @@ class RoutingTests(unittest.TestCase):
         paths = {p for p, _h, _k in dd.CSC_DIRECTORY_ADMIN_HANDLER_LIST}
         self.assertEqual(paths, {"/provisioning/directory/admin", "/provisioning/directory/orgs",
                                  "/provisioning/directory/members", "/provisioning/directory/groups"})
-        self.assertEqual([p for p, _h, _k in dr.CSC_RECORDINGS_HANDLER_LIST], ["/provisioning/recordings"])
+        self.assertEqual([p for p, _h, _k in dr.CSC_RECORDINGS_HANDLER_LIST],
+                         ["/provisioning/recordings", "/provisioning/history/ptt"])
 
 
 class _Ctx:
@@ -621,3 +622,117 @@ class MemberWriteTests(unittest.TestCase):
         audit = next(c for c in self.calls if c[0] == "audit" and c[1] == "ptt_profile")
         self.assertEqual(audit[3]["allowAmbientListening"], False)
         self.assertEqual(audit[3]["allowCreateGroup"], True)
+
+
+class PttSessionDetailTests(unittest.TestCase):
+    """GET /provisioning/history/ptt/{recordingId} — 녹취와 같은 범위 게이트 + OAM 세션 이벤트/floor 합본 프록시."""
+
+    def test_session_ref(self):
+        self.assertEqual(dr._ptt_session_ref("ptt/3/2026/09/06/19/S20260906190102000000_1"), ("3", "S20260906190102000000_1"))
+        self.assertEqual(dr._ptt_session_ref("ptt/3/2026/09/06/19"), ("3", "2026090619"))          # 구 녹취 = 시간창
+        self.assertEqual(dr._ptt_session_ref("volte/2026/09/06/19/010/0100/c1.d"), (None, None))
+        self.assertEqual(dr._ptt_session_ref("ptt/3"), (None, None))
+
+    def test_fetch_ptt_sessions_params_and_failures(self):
+        calls = []
+
+        class _Resp:
+            def __init__(self, status, content):
+                self.status_code, self.headers, self.content = status, {"content-type": "application/json"}, content
+
+        class _Http:
+            status = 200
+            def get(self, url, params=None, headers=None, timeout=None):
+                calls.append((url, params))
+                return _Resp(_Http.status, json.dumps({"items": [{"dir": "S1_1"}]}).encode())
+        saved = dr._http
+        dr._http = lambda cfg: _Http()
+        try:
+            from datetime import datetime as _dt
+            cfg = {"Fm": {"OamIp": "10.0.0.1"}}
+            self.assertEqual(dr.fetch_ptt_sessions(cfg, _dt(2026, 9, 6), _dt(2026, 9, 6, 23), set()), [])   # 범위 그룹 없음 → OAM 호출 안 함
+            self.assertEqual(calls, [])
+            items = dr.fetch_ptt_sessions(cfg, _dt(2026, 9, 6, 0, 0), _dt(2026, 9, 6, 23, 59), {"3", "1"})
+            self.assertEqual(items, [{"dir": "S1_1"}])
+            self.assertEqual(calls[-1][0], "https://10.0.0.1:4419/api/v1/ptt/sessions")
+            self.assertEqual(calls[-1][1], {"group_key": "1,3", "limit": "1000", "date": "2026-09-06"})
+            dr.fetch_ptt_sessions(cfg, _dt(2026, 9, 5, 23, 0), _dt(2026, 9, 6, 1, 0), {"3"})
+            self.assertEqual((calls[-1][1]["from"], calls[-1][1]["to"]), ("2026-09-05", "2026-09-06"))
+            _Http.status = 500
+            self.assertIsNone(dr.fetch_ptt_sessions(cfg, _dt(2026, 9, 6), _dt(2026, 9, 6, 23), {"3"}))       # 비정상 → 폴백 신호
+        finally:
+            dr._http = saved
+
+    def test_detail_gate_and_proxy(self):
+        t = _Tree()
+        # 세션키형 디렉터리(콘솔/OAM 세션 인덱스 키) — 구 녹취형은 _Tree.ptt 가 만든다
+        y, mo, d, h = _now_parts(t.now)
+        ses = "S20260906190102000000_1"
+        os.makedirs(os.path.join(t.sl, "ptt", "1", y, mo, d, h, ses), exist_ok=True)
+        with open(os.path.join(t.sl, "ptt", "1", y, mo, d, h, ses, "session.json"), "w") as f:
+            json.dump({"mcptt_group_id": "g002", "sesid": "ses-9", "start_time": t.ts(5)}, f)
+        rec = f"ptt/1/{y}/{mo}/{d}/{h}/{ses}"
+        import services as _svc_pkg
+        saved = (m.extract_token, m._SERVICE_LOG_DIR, dr._scope_sets, dr._http,
+                 sys.modules.get("services.fm_reporter"), getattr(_svc_pkg, "fm_reporter", None))
+        audits = []
+        fake_fm = types.SimpleNamespace(get=lambda: types.SimpleNamespace(node="n1", send_event=lambda *a, **k: audits.append(k)))
+        sys.modules["services.fm_reporter"] = fake_fm
+        _svc_pkg.fm_reporter = fake_fm
+        try:
+            token = {"sub": "disp01", "mcptt_id": "tel:+821310001001", "scope": [m.SCOPE_PROVISIONING]}
+            m.extract_token = lambda hdr: token if hdr else None
+            m._SERVICE_LOG_DIR = t.sl
+            dr._scope_sets = lambda cfg, tok: ("+821310001001", {"groupId": "dg1", "members": set(), "ptt_groups": {"g002"}}, {"1": "g002"})
+            calls = []
+
+            class _Resp:
+                def __init__(self, status, content):
+                    self.status_code, self.headers, self.content = status, {"content-type": "application/json"}, content
+
+            class _Http:
+                def get(self, url, params=None, headers=None, timeout=None):
+                    calls.append(url)
+                    if url.endswith("/floor"):
+                        return _Resp(200, json.dumps({"floor": [{"ts": "2026-09-06T19:01:03", "op": "GRANT", "user": "+8250001"}]}).encode())
+                    return _Resp(200, json.dumps({"session": {"sesid": "ses-9"}, "events": [{"ts": "2026-09-06T19:01:02", "type": "session_start"}],
+                                                  "participants": [{"msisdn": "+8250001", "role": "initiator", "join_time": None, "leave_time": None}],
+                                                  "has_recording": True}).encode())
+            dr._http = lambda cfg: _Http()
+
+            def call(path, token_hdr="Bearer x"):
+                a = HandlerArgs("GET", path, "127.0.0.1", 0, headers={"authorization": token_hdr} if token_hdr else {}, query_params={})
+                return asyncio.run(dr.handle_ptt_session_detail(a, {"config": {"Fm": {"OamIp": "10.0.0.1"}}}))
+
+            self.assertEqual(call("/provisioning/history/ptt/" + rec, token_hdr="").status, 401)
+            self.assertEqual(call("/provisioning/history/ptt/../x").status, 400)
+            self.assertEqual(call("/provisioning/history/ptt/volte/2026/09/06/19/a/b/c.d").status, 400)
+            self.assertEqual(call("/provisioning/history/ptt/ptt/1/2026/01/01/00/S20260101000000000000_1").status, 404)
+            r = call("/provisioning/history/ptt/" + rec)
+            self.assertEqual(r.status, 200)
+            self.assertEqual(r.body["recordingId"], rec)
+            self.assertEqual(r.body["session"]["sesid"], "ses-9")
+            self.assertEqual(r.body["participants"][0]["role"], "initiator")
+            self.assertEqual(r.body["events"][0]["type"], "session_start")
+            self.assertEqual(r.body["floor"][0]["op"], "GRANT")
+            self.assertTrue(r.body["hasRecording"])
+            self.assertEqual(calls, [f"https://10.0.0.1:4419/api/v1/ptt/history/1/{ses}",
+                                     f"https://10.0.0.1:4419/api/v1/ptt/history/1/{ses}/floor"])
+            self.assertEqual([a["params"]["tap_mode"] for a in audits], ["history"])
+            self.assertEqual(audits[0]["params"]["hist_kind"], "ptt_session")
+            # 범위 밖 / 관제 미소속
+            dr._scope_sets = lambda cfg, tok: ("+821310001001", {"groupId": "dg1", "members": set(), "ptt_groups": {"g009"}}, {})
+            self.assertEqual(call("/provisioning/history/ptt/" + rec).body["error"], "out_of_scope")
+            dr._scope_sets = lambda cfg, tok: ("+821310001001", None, {})
+            self.assertEqual(call("/provisioning/history/ptt/" + rec).body["error"], "no_monitor_scope")
+        finally:
+            m.extract_token, m._SERVICE_LOG_DIR, dr._scope_sets, dr._http, fm_mod, fm_attr = saved
+            if fm_mod is None:
+                sys.modules.pop("services.fm_reporter", None)
+            else:
+                sys.modules["services.fm_reporter"] = fm_mod
+            if fm_attr is None:
+                if hasattr(_svc_pkg, "fm_reporter"):
+                    delattr(_svc_pkg, "fm_reporter")
+            else:
+                _svc_pkg.fm_reporter = fm_attr

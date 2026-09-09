@@ -249,6 +249,23 @@ RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②P
 - `recordingId`(종료분 call·ptt): 녹취 식별자 = 세션 디렉터리의 `ServiceLogging.Dir` 상대 경로(OAM `/api/v1/recordings/{id}`
   와 같은 키, `/` 구분 — 세그먼트별 percent-encoding). live 항목·message 는 `""`. `hasRecording` = `segments.jsonl` 존재.
   재생은 §3-4.
+- **종류별 확장 필드**(관제 앱 [이력] 화면이 콘솔 VoLTE/PTT 이력과 같은 열·카드를 그리는 데 쓴다. 폴링 병합은 읽지 않는다.
+  값이 없으면 `""`/`0`/`[]`):
+  - call: `callType`(volte|volte_video) · `state`(ended|active|ringing) · `inviteTime` · `answerTime` · `endTime`(ISO8601+offset) ·
+    `endReason`(normal|no_answer|busy|rejected|error|timeout|incomplete — 문구는 앱 사전) · `sipStatus`.
+  - ptt: `sessionKind`(group|private|adhoc) · `state`(ended|active) · `startTime` · `endTime` · `groupName` · `memberCount` · `people[]`(참여자) ·
+    `turnCount`(발언 턴) · `speakerCount` · `totalSpeechMs`(발화 구간 합, 겹침 1회) · `talkMs`(화자별 누적) · `maxConcurrent` ·
+    `floorControl`(on|off|"") · `floorPolicy`(single|dual|multi) · `maxTalkers`.
+- 최상위 `hours`: 시간대(HH) → 건수 — 통화는 INVITE, PTT 는 세션 시작 시각 기준(콘솔 `/call/logs`·`/ptt/sessions` 의 `hours` 와 같은 축),
+  `limit` 절삭 **전** 창 안 전체 행으로 센다(앱 시간대 밴드 = 그날의 분포이자 필터).
+- **PTT 창 조회의 백엔드**(`kind=ptt` + `until`): 발언 지표는 CMP `segments.jsonl` 을 집계한 OAM 세션 인덱스(ptt_index — 콘솔 PTT 이력의
+  읽기 모델)에만 있으므로, CSC 가 OAM `GET /api/v1/ptt/sessions?date|from,to&group_key=<청취 그룹의 ptt_groups.id 목록>` 을 프록시해
+  같은 항목 형태로 바꾼다(`services/dispatch_history.ptt_row_from_oam`, `recordingId` 는 콘솔 `recIdOf` 와 같은 규칙, `id` 는 스캔 경로와
+  같은 우선순위 sesid→call_id→dir). OAM 에 닿지 않으면 파일 스캔으로 폴백한다(지표 0). 폴링(until 없음)은 파일 스캔이다.
+  파일 스캔의 **진행 중 판정**은 `state/ptt/*.json`(CSP 가 참가자마다 쓰고 떠나면 지운다)에 세션이 있는지로 한다 — 시간 버킷의
+  `session.json` 은 세션 시작 스냅샷이라 `state`/`end_time` 이 비어 있어도 진행 중이 아니다(콘솔 ptt_index 와 같은 기준). 종료 시각은
+  `events.jsonl` 의 `session_end`(없으면 마지막 이벤트) 또는 `segments.jsonl` 의 마지막 `end_time`.
+  OAM 주소 = csc.json `Recording.OamUrl`(비면 `https://{Fm.OamIp}:4419`) — 녹취 프록시(§3-4)와 같은 설정.
 - 응답 헤더 `ETag`. 단말이 `If-None-Match` 로 같은 값을 보내면 **304**(본문 없음, 폴링 대역 절약). 변경 없는 304 는
   감사하지 않는다 — 실제 열람(새 항목/최초)만 `E-AUD-016` 로 남긴다.
 
@@ -260,8 +277,30 @@ RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②P
   당사자 모르게 이력을 여는 동작이라 감사 대상(manager 열람, [dispatch_center.md §5.7](dispatch_center.md)).
 
 > 백엔드는 CSP/CSC 가 공유 NAS(`ServiceLogging.Dir`)에 남기는 파일 SoT(콘솔 `flow_logger` 가 읽는 것과 같은
-> 파일)를 관제 그룹 범위로만 걸러 주는 얇은 구독자 뷰다 — 콘솔 이력 API(oam-svc)를 재구현하지 않는다.
+> 파일)를 관제 그룹 범위로만 걸러 주는 얇은 구독자 뷰다 — 콘솔 이력 API(oam-svc)를 재구현하지 않는다(집계가 필요한 PTT
+> 창 조회·세션 상세는 그 API 를 범위 게이트 뒤에서 **프록시**한다).
 > 1:1 SDS/SMS 는 CSP `Setup.McData.StoreOneToOneSds` 를 켜야 보관된다([mcdata_messaging.md §4.3](mcdata_messaging.md)).
+
+### 3-2a. `GET /provisioning/history/ptt/{recordingId}` — PTT 세션 상세
+
+관제 앱 [이력] 화면이 PTT 세션을 고르면 부르는 상세(참여자·입퇴장 이벤트·floor 타임라인). `recordingId` 는 §3-2 항목의 것
+(`ptt/{저장키}/{Y}/{M}/{D}/{H}[/{세션키}]`, 세그먼트별 percent-encoding). 범위 게이트는 §3-4 녹취와 같다(저장키 → 청취 그룹,
+`session.json` 대조 폴백 · 범위 밖 403 · 경로 이탈 400 · 관제 미소속 403 · 세션 디렉터리 없음 404). 본문은 OAM
+`GET /api/v1/ptt/history/{group_key}/{session}` + `…/floor` 를 합친 것(구 녹취형은 session = 시간창 `YYYYMMDDHH`):
+
+```json
+{ "recordingId": "ptt/1/2026/09/08/09/S20260908091000000000_1",
+  "session": { "...session.json 스냅샷 + session_id, windows[]" },
+  "participants": [ { "msisdn": "+82…", "role": "initiator|member", "join_time": "…", "leave_time": null } ],
+  "events":       [ { "ts": "…", "type": "session_start|session_end|member_join|member_leave|member_invite|config_change", "member": "+82…", "role": "initiator" } ],
+  "floor":        [ { "ts": "…", "op": "GRANT|RELEASE|IDLE|REVOKE|REVOKE_END|QUEUE|QUEUE_CANCEL|DENY", "user": "+82…", "slot": 0, "talkers": 1,
+                      "policy": "dual", "preempt": false, "reason": "recv_only", "owner": "+82…", "pos": 1, "qsize": 1, "grace_sec": 3, "idle_ms": 300 } ],
+  "hasRecording": true }
+```
+시각은 파일의 naive-local ISO 그대로(앱은 로컬로 해석). 발언 턴은 이 응답이 아니라 §3-4 녹취 세그먼트의 `tracks[].speakers[]`
+(콘솔 `segTurns` 와 같은 해석)에서 만든다. 열람은 감사 `E-AUD-016 call_monitored`(`tap_mode=history`, `hist_kind=ptt_session`, `recording`).
+OAM 미도달 502 `oam_unreachable`. 구현 `csc/src/handlers/dispatch_recordings.py` `handle_ptt_session_detail`(경로 등록은 가장 긴 접두 우선 —
+`/provisioning/history` 목록보다 먼저 잡힌다).
 
 ## 3-3. Contract — `/provisioning/directory/{admin,orgs,members,groups}` (관제 앱 관리 평면)
 
