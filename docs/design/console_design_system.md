@@ -397,6 +397,7 @@ Figma MCP 커넥터(`claude.ai Figma`)가 붙어 있으면 **링크를 사람에
 | 33 | **「대시보드·장애·서비스·성능·구성 메뉴 전부 끝났나」** 확인. §7-32 는 CSS **파일**을 걷었지, JS 안에 **스타일 객체로 만든 평행 체계**는 세지 않았다 | `style={{ ... }}`·`style={obj}` 중 **정적인 것 142곳**이 남아 있었다 — `forms.tsx`(구성>서비스 정의) 35 · `ExternalSystemsPage` 14 · `AutoDeployPage` 14(`SEC`·`H3`) · `VerificationHistoryPage` 21(`th`·`td`·`btnPrimary/Secondary/Danger`·`modalBackdrop`·`modal`·`modalHeader`·`totalsBox`·`tableStyle`·`selectStyle`) · PTT 화면들(`thStyle`·`tdStyle`) · `DispatchGroups`/`PttGroupsWorkbench`(`panel`·`panelHead`) · `statCards`(`CARD_BOX`) · `ServersPage`(`LOCK_FIELDSET_STYLE`) 등. 인라인 `style` 은 **클래스를 이긴다** — `forms.tsx` 의 `style={inp}`(13px)가 `Input` 계약(12px)을 덮고 있었고, `PttGroupActivity` 는 `<Th style={{...thStyle}}>` 로 **계약 컴포넌트 위에** 인라인을 얹고 있었다. `VerificationHistoryPage` 의 회차 상세는 **손으로 만든 모달**이라 포커스 트랩·Esc 가 없었다(§7-23 이 9개를 옮길 때 빠졌다) | 전부 유틸리티/계약 컴포넌트로. 표는 `Th`/`Td`, 버튼은 `Button` 변형, 카드는 토큰. 클래스 이름이 `@media print` 훅인 것(`verify-history-modal*`)은 이름만 남기고 시각만 옮겼다. **정적 인라인 style 142 → 8곳** — 남은 8은 `...style` prop 통과(4) · 데이터에서 오는 `color`(3) · Sparkline `height`(1) 로 전부 값이 런타임에 정해지는 것이다. 예외 두 파일(`VerificationPrintReport`=인쇄 보고서, `SegmentPlayer`=영상 무대)은 §9 그대로 | ①층 |
 | 34 | **「그래서 전부 된 거 맞나」에 답하려고 아직 안 센 층을 찾았다** — 그 결과 셋이 더 나왔다 | ①**`rgba()` 로 박힌 색 29곳.** hex 검사(`#rrggbb`)가 통째로 놓친 갈래다. `rgba(74,144,217,…)`(=#4A90D9)는 **토큰에 아예 없는 파랑**인데 선택 행 틴트로 12개 화면에 퍼져 있었다. 위험 `rgba(220,53,69/231,76,60/220,38,38)` · 경고 `rgba(245,158,11)` · 정상 `rgba(34,197,94)` · 오버레이 `rgba(0,0,0,.18~.45)` 도 같은 갈래. `ServiceStatusPage` 의 히트맵은 계열색 rgb 삼원색을 배열에 박아 두고 알파를 만들어 썼다. ②**완전 정적 인라인 style 45곳** — 앞선 검사가 `'var(--…)'` 를 *동적*으로 잘못 세어 빠졌다. ③**`VerificationV2Page` 의 액션 버튼 4개**(전체검증·데이터 초기화·보고서 출력·stage 검증)가 인라인 style 로 만든 버튼이었고, `AutoDeployPage` 는 손으로 만든 세그먼트 + **테두리 없는 네이티브 input 5개**(§7-24 가 ExternalSystemsPage 에서 잡은 그 결함) | 색은 전부 토큰으로(선택 틴트=`brandsoft`, 위험=`dangersoft`, 경고·정상=각 soft, 오버레이=`bg-black/40`, 그림자=`--cims-elevation-*`). 히트맵 계열색은 **`--chart-*` + `color-mix`** 로 바꿨다 — 삼원색을 박아 두면 다크에서 그대로 남는다. 정적 style 45곳은 CSS-in-JS→유틸리티 변환기를 만들어 기계로 옮기고(22파일) 남은 11곳은 손으로. 버튼은 `Button` 변형, 세그먼트는 `ToggleGroup`, input 은 `Input`. **결과: 완전 정적 인라인 style 0 · 토큰 아닌 rgba 0 · 스케일 밖 반경·글자 0 · Tailwind 팔레트 색 0.** 남은 인라인 style 240곳은 전부 런타임 값(상태색·좌표·퍼센트)이다 | ①층·②층 |
 | — | **여백·치수의 임의 px(`p-[3px]`·`w-[110px]` 등 407곳)은 위반이 아니다** | `spacing` 을 px 고정 allow-list 로 둔 이유는 **rem 기반 스케일이 `:root` 14px 때문에 어긋나는 것**을 막으려는 것이다. 임의값 `[3px]` 은 이미 px 고정이라 그 문제가 없다. 게다가 도안 자체가 3·5·7·11·13·18·22 와 컬럼 폭 110·130·190·349 를 쓴다 | **실측값을 그대로 쓴다.** 라운드·글자 크기는 Figma 에 닫힌 토큰 컬렉션(sm/md/lg, xs~4xl)이 있어 벗어나면 위반이지만, 여백·치수에는 그런 컬렉션이 없다 | 판정 근거 |
+| 35 | **T8 이 API 배지를 깨뜨렸다** — 개발자 모드 `[API n]` 배지가 위젯 **우상단**이 아니라 상단 전폭으로 길게 늘어났다 (사용자 지적) | 2D 격자의 `.widget-fixed > * { width: 100% }` 가 원인이다. `index.css` 는 `@tailwind utilities` **뒤**에 있어 같은 명시도에서 유틸리티를 이긴다 — 그래서 `w-auto` 가 먹지 않았다. 옛 CSS 는 `.widget-api-badge--overlay { width: auto }` 로 **뒤에 오는 같은 명시도 규칙**을 써서 상쇄하고 있었고, 그 주석에 이유까지 적혀 있었는데 T6 에서 유틸리티로 옮기며 그 장치를 잃었다 | `!w-auto` — 이 한 자리에는 `!` 가 **정확한 도구**다. 격자 규칙(플랫폼 레이아웃)을 한 요소만 예외로 빼는 것이고, CSS 쪽에 예외 규칙을 새로 만들면 「화면을 그리는 CSS 는 없다」(§7-32)가 다시 흐려진다. **같은 갈래를 훑는 검사기를 만들었다** — `~/.cims-scratch/css-vs-tw.mjs`(§8.3). `tw-override-check.py` 는 소스만 보므로 `X > *` 같은 **다른 클래스의 자손 규칙**은 원리적으로 못 잡는다. 전 라우트를 훑어 나머지 13건은 값이 같거나(`flex-1`=`flex:1 1 0%`) 격자가 이기는 것이 설계대로(위젯 안 패널 스크롤)임을 확인했다 | 격자 CSS 우선 + ①층 |
 
 `decisions.md` 의 나머지 항목(§1 헤더 재정리 · §3 ContextBar 4탭 유지 · §4 더보기 묶기 ·
 §5 build/git 컬럼 분리 · §6 일괄 제어 분리 · §7 제안 3건 · §8 웹 결함 8건)은 **전부 시안을 따른다** —
@@ -429,6 +430,14 @@ muted 글자는 `text-muted-foreground` 가 맞다) · `table`(5곳 — 전부 `
 `background` 가 남아 있어 `px-5 gap-3 h-[58px] bg-[…]` 가 전부 덮였고, 빌드도 통과했다.
 
 → 컴포넌트를 옮길 때마다 **`~/.cims-scratch/tw-override-check.py <옮긴 tsx…>`** 를 돌린다.
+
+**소스 검사만으로는 반쪽이다 — 자손 규칙은 DOM 이 있어야 보인다.** `tw-override-check.py` 는
+`className` 과 같은 클래스명을 쓰는 규칙만 대조하므로 `.widget-fixed > * { width:100% }` 처럼
+**다른 클래스에 걸린 자손·자식 규칙**이 유틸리티를 덮는 것을 못 잡는다(§7-35 에서 실제로 났다 —
+API 배지가 상단 전폭으로 늘어났다). → **`~/.cims-scratch/css-vs-tw.mjs`** 를 함께 돌린다.
+남은 격자 CSS 규칙 29개를 전 라우트의 실제 DOM 에 대고, CSS 선언값이 계산값과 같은데
+같은 속성의 유틸리티가 붙어 있으면(=CSS 가 이겼으면) 보고한다. 격자가 이기는 것이 설계대로인
+곳(위젯 안 패널 스크롤)은 스크립트 안 `EXPECTED` 에 적어 둔다.
 클래스가 겹치는 것만이 아니라 **같은 CSS 속성을 건드리는 경우**만 잡아 준다. 지울 수 없는
 레거시 규칙(예: `grid-area`, 인쇄용 숨김)은 그 속성만 남기고 나머지를 걷는다.
 

@@ -271,9 +271,11 @@ export default function WidgetApiBadge({ ids, title, overlay, sourceIds }: {
                 'inline-flex items-center gap-1 whitespace-nowrap rounded-sm border border-border',
                 'bg-card px-1.5 text-xs leading-relaxed text-[var(--dev-accent)]',
                 'hover:border-[var(--dev-accent)]',
-                // 오버레이는 위젯 우상단에 겹친다. `width:auto` 를 명시하는 이유는
-                // 래퍼의 `.widget-fixed > * { width:100% }` 가 배지에도 걸려 제목을 가렸기 때문.
-                overlay && 'absolute right-1 top-1 z-[4] w-auto max-w-none opacity-35 transition-opacity hover:opacity-100')}
+                // 오버레이는 위젯 우상단에 겹친다. 폭에 `!` 를 붙이는 이유가 있다 —
+                // 2D 격자의 `.widget-fixed > * { width:100% }` 는 index.css 가 `@tailwind`
+                // **뒤에** 있어 같은 명시도에서 유틸리티를 이긴다. `w-auto` 만 쓰면 배지가
+                // 상단 전폭으로 늘어나 위젯 제목을 가린다 (T6 에서 실제로 그렇게 났다).
+                overlay && 'absolute right-1 top-1 z-[4] !w-auto max-w-none opacity-35 transition-opacity hover:opacity-100')}
               onClick={e => { e.stopPropagation(); setOpen(true) }}
               onPointerDown={e => e.stopPropagation()}
               title="이 위젯이 사용하는 API (개발자 모드)">
