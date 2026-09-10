@@ -94,6 +94,15 @@ public static class ResponseText
         "invalid_recording_id" => "녹취 식별자가 잘못됐습니다",
         "service_log_unavailable" => "서버 녹취 저장소에 닿지 않습니다",
         "db_unavailable" or "db_error" => "서버 DB 오류 — 잠시 후 다시 시도",
+        // admin.py 가입 경로의 문장형 오류(토큰이 아니라 문장) — 회선 PUT/개설에서 그대로 올라온다
+        _ when error.StartsWith("passwd required when imsi or service_ref", StringComparison.Ordinal)
+            => "저장된 IMSI·접속서비스와 달라 H(A1) 재결박이 필요합니다 — SIP 비밀번호를 함께 입력하세요",
+        _ when error.StartsWith("password required when changing the number", StringComparison.Ordinal)
+            => "번호를 바꾸려면 SIP 비밀번호가 필요합니다(H(A1) 재결박)",
+        _ when error.StartsWith("service_ref required to derive ha1", StringComparison.Ordinal)
+            => "접속서비스를 알 수 없어 H(A1) 을 만들 수 없습니다 — 접속서비스를 고르세요. 목록이 비어 있으면 서버 csc.json Provisioning.Services 설정이 필요합니다(운영자)",
+        _ when error.StartsWith("imsi required", StringComparison.Ordinal) => "IMSI 가 필요합니다(비우면 번호 숫자로 채워집니다)",
+        _ when error.StartsWith("sip_transport must be", StringComparison.Ordinal) => "SIP transport 는 UDP/TCP/TLS 중 하나여야 합니다",
         _ => null,
     };
 

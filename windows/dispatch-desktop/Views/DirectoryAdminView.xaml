@@ -199,6 +199,9 @@
                                                 <ComboBox Style="{StaticResource FieldCombo}" ItemsSource="{Binding Transports}" SelectedItem="{Binding VolteTransport}" Margin="0,2,0,6" />
                                             </StackPanel>
                                         </UniformGrid>
+                                        <TextBlock Style="{StaticResource Hint}" Foreground="{DynamicResource Brush.Emg}" TextWrapping="Wrap" Margin="0,0,0,6"
+                                                   Text="접속서비스 목록이 비어 있습니다 — 서버(CSC)가 후보를 내려주지 않아 회선 개설이 실패합니다. 운영자에게 csc.json Provisioning.Services 설정을 요청하세요."
+                                                   Visibility="{Binding NoVolteServices, Converter={StaticResource BoolToVis}}" />
                                         <TextBlock Text="SIP 비밀번호 (개설·번호 변경 시 필수)" Style="{StaticResource Hint}" />
                                         <PasswordBox x:Name="VoltePw" Style="{StaticResource FieldPw}" PasswordChanged="VoltePw_Changed" Margin="0,2,0,0" />
                                     </StackPanel>
@@ -219,6 +222,9 @@
                                                 <ComboBox Style="{StaticResource FieldCombo}" ItemsSource="{Binding Transports}" SelectedItem="{Binding PttTransport}" Margin="0,2,0,6" />
                                             </StackPanel>
                                         </UniformGrid>
+                                        <TextBlock Style="{StaticResource Hint}" Foreground="{DynamicResource Brush.Emg}" TextWrapping="Wrap" Margin="0,0,0,6"
+                                                   Text="접속서비스 목록이 비어 있습니다 — 서버(CSC)가 후보를 내려주지 않아 회선 개설이 실패합니다. 운영자에게 csc.json Provisioning.Services 설정을 요청하세요."
+                                                   Visibility="{Binding NoPttServices, Converter={StaticResource BoolToVis}}" />
                                         <TextBlock Text="SIP 비밀번호 (개설·번호 변경 시 필수)" Style="{StaticResource Hint}" />
                                         <PasswordBox x:Name="PttPw" Style="{StaticResource FieldPw}" PasswordChanged="PttPw_Changed" Margin="0,2,0,6" />
                                         <CheckBox Style="{StaticResource Switch}" Content="PTT 그룹 생성 자격 (allow-create-group)" IsChecked="{Binding AllowCreateGroup}" Margin="0,2,0,6" />

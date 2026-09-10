@@ -387,32 +387,8 @@
         </Setter>
     </Style>
 
-    <!-- 입력 -->
-    <Style TargetType="TextBox" x:Key="Field">
-        <Setter Property="Height" Value="30" />
-        <Setter Property="Padding" Value="8,0" />
-        <Setter Property="VerticalContentAlignment" Value="Center" />
-        <Setter Property="Background" Value="{DynamicResource Brush.BgSoft}" />
-        <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="FontSize" Value="13" />
-        <Setter Property="CaretBrush" Value="{DynamicResource Brush.Text}" />
-    </Style>
-    <Style TargetType="ComboBox" x:Key="FieldCombo">
-        <Setter Property="Height" Value="30" />
-        <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
-        <Setter Property="FontSize" Value="13" />
-    </Style>
-    <Style TargetType="PasswordBox" x:Key="FieldPw">
-        <Setter Property="Height" Value="30" />
-        <Setter Property="Padding" Value="8,0" />
-        <Setter Property="VerticalContentAlignment" Value="Center" />
-        <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
-        <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
-        <Setter Property="FontSize" Value="13" />
-    </Style>
+    <!-- 입력(폼 필드 Field·FieldCombo·FieldPw)은 Controls.xaml — 기본 컨트롤 테마 템플릿을 BasedOn 으로 물려받아야 하므로 그 사전에 함께 둔다 -->
+
 
     <!-- 목록 — 선택 강조 없는 얇은 ListBox -->
     <Style TargetType="ListBox" x:Key="PlainList">

@@ -322,7 +322,11 @@
 왼쪽 **서브내비**(200px — "조직 · 구성원 · 번호" 한 항목 + 후속 항목 자리 "CSV 가져오기(예정)", 아래에 범위 안내) | 본문 = 세 카드. 왼쪽 **조직 트리**(범위 안, 선택 = 하위 포함 필터,
 머리 [+ 새 조직] · 바닥 [편집][삭제]) · 가운데 **구성원 표**(머리 "구성원 N명 · {조직} 하위 포함" + 검색 + [+ 새 구성원], 열 = 이름·직함·소속 | VoLTE | PTT | 자격("그룹 생성"/"원격 청취" 배지),
 **행 한 번 클릭 = 오른쪽 폼에 바로 편집**) · 오른쪽 **편집 폼**("편집 — 이름", 머리 오른쪽 [삭제]) — 구성원 속성(이름·직함·소속·로그인 아이디/비밀번호) +
-**VoLTE 번호 / PTT 번호** 카드(번호·접속서비스·SIP transport·SIP 비밀번호 — 비우면 회선 삭제, 새 회선·번호 변경은 비밀번호 필수(서버가 H(A1) 로만 보관)) + PTT 자격 토글(그룹 생성·원격 청취).
+**VoLTE 번호 / PTT 번호** 카드(번호·접속서비스·SIP transport·SIP 비밀번호 — 비우면 회선 삭제, 새 회선·번호 변경·접속서비스 변경은 비밀번호 필수(서버가 H(A1) 로만 보관)) + PTT 자격 토글(그룹 생성·원격 청취).
+접속서비스 후보 = 서버 `services.<kind>[]`. 기존 회선은 **저장된 서비스를 그대로 선택**(후보에 없으면 그 이름을 후보에 넣어 보인다, 저장값이 비면 비움 = 서버가 현재값 유지) — 첫 후보로 바꿔 넣으면
+저장마다 "서비스 변경 → 재결박 비밀번호 필요(400)" 가 나기 때문. 같은 번호 PUT 은 저장된 IMSI 를 그대로 싣고(서버는 IMSI 가 없으면 번호 숫자로 채워 "IMSI 변경" 으로 오판), 번호가 바뀌면 새 회선이라 비운다.
+바뀐 것이 없는 회선은 보내지 않는다. 후보가 0건이면 카드에 경고(서버 csc.json `Provisioning.Services` / access_services 미러 — server_todo T9)하고 회선 개설 저장을 앱에서 막는다. 서버의 문장형 오류
+(`passwd required when imsi or service_ref changes` 등)는 `ResponseText.ForManagementError` 접두 매칭으로 번역한다.
 저장 뒤 한 벌 재조회 + 전화번호부 동기화. 서버 계약 [android_ue_provisioning.md §3-3](android_ue_provisioning.md) — 범위 밖 403·번호 충돌 409 등은 서버 판정, 앱은
 사전(`ResponseText.Area.Management`) 문구.
 
@@ -558,7 +562,17 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
             DispatchStripView(요약 띠 — PTT 누름/뗌만 코드비하인드) · ScreenView(화면 호스트 — 머리·[별창으로]·자리표시자, 화면 VM 타입별 DataTemplate) ·
             HistoryView(MediaElement — Loaded~Unloaded 사이에만 재생 이벤트 구독) · PttGroupsView · GroupEditView(화면 인라인 + 드로어 공용) · DirectoryAdminView(서브내비 + 3열)
   Themes/   Light/Dark(같은 키) · Styles(패널·카드·ChannelCard·StateDot·PopPanel·SectionLabel·Btn.Ptt·버튼·배지·칩·미터)  Converters/  표시 규약 변환기(StrToVis `invert` = 자리표시자)
+  publish.ps1                   배포 패키지 — 설치 없이 다른 PC 에서 실행되는 self-contained 게시(win-x64) → `build-win/dist/CimsDispatch-<버전>-win-x64.zip`(아래 "배포")
 ```
+
+**배포(다른 PC 에서 설치 없이 실행)** — `powershell -ExecutionPolicy Bypass -File windows/dispatch-desktop/publish.ps1`. 전제는 sdk/windows 슈퍼빌드
+산출물(`build-win/sdk/bin/cimsue.dll` + OpenSSL 런타임). 패키지 한 폴더에 .NET 런타임(self-contained 폴더 게시 — 단일 파일은 네이티브 DLL 추출 경로가 `NativeLoader`
+탐색과 어긋나 쓰지 않음), `runtimes/win-x64/native/`(cimsue.dll·libcrypto·libssl), MSVC 14 CRT(msvcp140·vcruntime140·vcruntime140_1 — cimsue.dll·OpenSSL 이 /MD 링크),
+`e_sqlite3.dll`, `directory.sample.csv`, README.txt 를 담는다. 대상 PC 요구 = Windows 10 1809+/11 x64 뿐. 진입점은 둘 — `CimsDispatch.exe`(apphost) 와
+`CimsDispatch-run.cmd`: Windows 11 Smart App Control 이 켜진 PC 는 미서명 apphost 를 파일 평판으로 차단하므로, Microsoft 서명 dotnet 뮤서(`dotnet.exe` +
+`host/fxr/<ver>/hostfxr.dll`, 게시된 런타임과 같은 버전)를 동봉하고 `.cmd` 가 콘솔 창 없이 `dotnet.exe CimsDispatch.dll` 로 같은 앱을 띄운다(hostfxr 가 runtimeconfig
+`includedFrameworks` 를 보고 앱 폴더의 런타임을 쓴다 — SAC 는 exe 만 막고 이 앱의 관리/네이티브 DLL 은 통과, 개발 PC 실측). 사용자 데이터는 `%APPDATA%\CIMS\dispatch-desktop`.
+코드 서명·MSIX 는 향후 과제(서명 인증서가 생기면 apphost 하나로 충분해 `.cmd` 진입점을 거둔다).
 
 - 도킹 라이브러리 = **AvalonDock(Dirkster, MS-PL)**. 잠금은 각 패널의 `CanMove`/`CanFloat` 를 끄고, 접기는 AvalonDock auto-hide, 별창은 float, 프리셋은
   `XmlLayoutSerializer` XML 을 `layout.json` 에 이름별로 보관("기본 배치" 는 XAML 기본). 패널 집합(ContentId)이 바뀌면 `LayoutStore.CurrentVersion` 을 올려 저장 XML 을 버린다.
@@ -591,7 +605,8 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
   `sip:priv-…|adhoc-…|g002@<ptt 도메인>`, 확장 `<mcptt session-type initiator emergency imminent-peril/>`). 앱: 같은 remote 의 dialog 를 한 카드로
   묶고(참가자 = 감시 회선 중 그 세션에 있는 사람), `session-type` 이 `private|adhoc` 이면 타인 세션 카드, 그 외는 ①/② 그룹 카드의 참가 정보로 흡수.
   [청취] = 세션 URI 로 `joinGroupCall(listenOnly)`, 참가자 전부가 필요하면 세션 URI conference 구독 — 둘 다 서버의 즉석 세션 관측 인가(참가자
-  `monitor_scope`)를 받아 403 이면 `Area.PttListen` 문구. `members[]` 에 `volteAor=""` 인 PTT 전용 가입자가 올 수 있다(`monitorScope=all`).
+  `monitor_scope`)를 받아 403 이면 `Area.PttListen` 문구. `members[]` 에 `volteAor=""` 인 PTT 전용 가입자가 올 수 있다(`monitorScope=all`) — 앱은 이들을 VoLTE dialog
+  감시·③ 띠에서 뺀다(`DirectoryService.SetMembers`, extension 은 표시 라벨이라 주소로 쓰지 않음). PTT dialog 구독이 SDK 에 생기면 `pttId` 로 붙인다.
   SDK: `dialogWatch` 가 PTT 계정으로도 구독하고 `<mcptt>` 확장을 이벤트 필드로 노출해야 한다.
 - **발언 세트 저장**(`talksets.json`)·**잠금 발언** 설정·**관리 범위 섹션 기본 접힘** 상태 기억은 앱 로컬 설정.
 - **주소록 소스 = 서버 회사 전화번호부** `GET /provisioning/directory?service=volte|ptt`([android_ue_provisioning.md](android_ue_provisioning.md) §3-1 — 조직 트리 +

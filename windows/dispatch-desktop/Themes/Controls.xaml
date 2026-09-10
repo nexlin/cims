@@ -308,6 +308,26 @@
             </Setter.Value>
         </Setter>
     </Style>
+    <!-- 폼 필드 변형 — x:Key 스타일은 암시 스타일을 자동으로 잇지 않으므로(BasedOn 없으면 시스템 기본 템플릿 = 다크 테마에서 흰 드롭다운·흰 상자) 여기서 BasedOn 으로 잇는다.
+         Styles.xaml 은 이 사전보다 먼저 병합되어 {x:Type} 참조를 못 하므로 세 스타일은 여기 둔다 -->
+    <Style TargetType="TextBox" x:Key="Field" BasedOn="{StaticResource {x:Type TextBox}}">
+        <Setter Property="Height" Value="30" />
+        <Setter Property="Padding" Value="8,0" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Background" Value="{DynamicResource Brush.BgSoft}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="FontSize" Value="13" />
+    </Style>
+    <Style TargetType="ComboBox" x:Key="FieldCombo" BasedOn="{StaticResource {x:Type ComboBox}}">
+        <Setter Property="Height" Value="30" />
+    </Style>
+    <Style TargetType="PasswordBox" x:Key="FieldPw" BasedOn="{StaticResource {x:Type PasswordBox}}">
+        <Setter Property="Height" Value="30" />
+        <Setter Property="Padding" Value="8,0" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="FontSize" Value="13" />
+    </Style>
     <Style TargetType="GridSplitter">
         <Setter Property="Background" Value="Transparent" />
     </Style>

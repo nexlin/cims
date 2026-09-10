@@ -35,6 +35,7 @@ cmake --build build-win --config Release
 build-win\bin\Release\cimsue_test.exe                      (단위시험 S1-UE-UNIT — 코어 + C API)
 build-win\sdk\bin\cimsue-cli.exe --server <CSP> --port 5060 --domain <D> --msisdn <M> --imsi <I> --ha1 <HEX> register
 dotnet build sdk/windows/dotnet/CimsUe -c Release          (F2 — 파사드)
+powershell -ExecutionPolicy Bypass -File windows/dispatch-desktop/publish.ps1   (관제조작반 앱 배포 zip — 설치 없이 다른 PC 에서 실행, dispatch_desktop_ui.md §11 "배포")
 ```
 
 산출물 `build-win/sdk/{bin,lib,include}` 가 배포 zip 의 원본이다(`.dll`/`.lib` 은 커밋하지 않는다). 파사드 NuGet 패키지는
@@ -43,7 +44,8 @@ dotnet build sdk/windows/dotnet/CimsUe -c Release          (F2 — 파사드)
 코어 오브젝트를 직접 링크한다(`sdk/core/CMakeLists.txt`).
 
 > Smart App Control 이 켜진 PC 는 새로 링크한 미서명 exe 를 파일별 평판으로 간헐 차단한다("Application Control policy has blocked
-> this file"). 재빌드·재시도로 풀리기도 하며, 정책 변경은 개발자 본인의 결정이다.
+> this file"). 재빌드·재시도로 풀리기도 하며, 정책 변경은 개발자 본인의 결정이다. 개발 실행은 apphost 대신 `dotnet <출력>\CimsDispatch.dll` 로 띄우면
+> 막히지 않고, 배포 패키지는 같은 이유로 서명된 dotnet 뮤서 진입점(`CimsDispatch-run.cmd`)을 함께 둔다.
 
 ## 상태
 

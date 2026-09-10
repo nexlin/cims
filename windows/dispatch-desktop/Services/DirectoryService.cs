@@ -222,8 +222,10 @@ public sealed class DirectoryService
         foreach (var m in all)
         {
             string aor = Converters.UserPartConverter.UserPart(m.VolteAor);
-            string number = aor.Length > 0 ? aor : m.Extension;
-            if (number.Length == 0) continue;
+            // VoLTE 회선 없는 PTT 전용 가입자(volteAor="" — monitorScope=all, android_ue_provisioning.md §3)는 VoLTE dialog 감시 대상이 아니다.
+            //   extension 은 표시 라벨이라 주소로 쓰면 엉뚱한 구독(404/403)만 남긴다. PTT 세션 가시성(pttId dialog)은 SDK 과제(dispatch_desktop_ui.md §13).
+            if (aor.Length == 0) continue;
+            string number = aor;
             string name = m.Name.Length > 0 && m.Extension.Length > 0 && aor.Length > 0 ? $"{m.Name} {m.Extension}" : m.Name;
             bool desk = !hasGroupIds || (deskGroupId.Length > 0 && string.Equals(m.GroupId, deskGroupId, StringComparison.Ordinal));
             var c = new Contact(ContactKind.Extension, number, name, desk ? new[] { "server", "member" } : new[] { "server", "watch" });

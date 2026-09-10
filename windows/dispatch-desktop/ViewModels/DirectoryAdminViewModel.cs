@@ -99,7 +99,11 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
     [ObservableProperty] private bool _allowCreateGroup;
     [ObservableProperty] private bool _allowAmbientListening;
     private string _origVolte = "", _origPtt = "";
+    private string _origVolteImsi = "", _origPttImsi = "";           // 저장된 IMSI — 같은 번호로 PUT 할 때 그대로 실어 서버의 H(A1) 재결박 오판을 막는다
     private bool _origCreate, _origAmbient;
+    /// <summary>서버가 접속서비스 후보를 하나도 내려주지 않았다 — 회선 개설이 400 으로 실패하므로 폼에 경고한다(서버 csc.json Provisioning.Services / access_services 미러).</summary>
+    public bool NoVolteServices => VolteServices.Count == 0;
+    public bool NoPttServices => PttServices.Count == 0;
     public string MemberFormTitle => MemberIsNew ? "새 구성원" : $"편집 — {EditName}";
     public bool HasVolte => _origVolte.Length > 0;
     public bool HasPtt => _origPtt.Length > 0;
@@ -168,6 +172,7 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
         ScopeText = v.Scope.DirectoryAdmin == "all" ? "관리 범위: 전체 조직" : $"관리 범위: {OrgPathOf(v.Orgs, v.Scope.OrgCode)} 하위";
         VolteServices.Clear(); PttServices.Clear();
         foreach (var s in v.Services) (s.Kind == "ptt" ? PttServices : VolteServices).Add(s);
+        OnPropertyChanged(nameof(NoVolteServices)); OnPropertyChanged(nameof(NoPttServices));
         string keepOrg = SelectedOrg?.Code ?? "";
         Orgs.Clear();
         var byParent = v.Orgs.GroupBy(o => o.Parent).ToDictionary(g => g.Key, g => g.OrderBy(x => x.Sort).ThenBy(x => x.Name).ToList());
@@ -282,31 +287,43 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
         MemberIsNew = true; EditUserId = 0; EditName = ""; EditOrg = SelectedOrg ?? Orgs.FirstOrDefault(); EditTitle = ""; EditLoginId = ""; EditPassword = "";
         VolteNumber = ""; VolteService = VolteServices.FirstOrDefault(); VolteTransport = "TLS"; VoltePassword = "";
         PttNumber = ""; PttService = PttServices.FirstOrDefault(); PttTransport = "TLS"; PttPassword = "";
-        AllowCreateGroup = false; AllowAmbientListening = false; _origVolte = _origPtt = ""; _origCreate = _origAmbient = false;
+        AllowCreateGroup = false; AllowAmbientListening = false; _origVolte = _origPtt = _origVolteImsi = _origPttImsi = ""; _origCreate = _origAmbient = false;
         OnPropertyChanged(nameof(HasVolte)); OnPropertyChanged(nameof(HasPtt));
         MemberEditing = true; OrgEditing = false;
         MarkClean();
+    }
+
+    /// <summary>회선의 접속서비스 선택값. 새 회선 = 첫 후보. 기존 회선 = 저장된 이름 그대로 — 목록에 없으면 그 이름을 후보에 넣어 보이고(선택 = 현재값 = 변경 없음),
+    /// 저장값이 비었으면 비워 둔다(서버가 현재값 유지). 저장값 대신 첫 후보로 바꿔 놓으면 저장할 때마다 "서비스 변경 → H(A1) 재결박 비밀번호 필요(400)" 가 난다.</summary>
+    private static ServiceRef? PickService(ObservableCollection<ServiceRef> list, string kind, NumberInfo? line)
+    {
+        if (line is null) return list.FirstOrDefault();
+        if (line.ServiceRef.Length == 0) return null;
+        var hit = list.FirstOrDefault(s => s.Name == line.ServiceRef);
+        if (hit is null) { hit = new ServiceRef(kind, line.ServiceRef, ""); list.Add(hit); }
+        return hit;
     }
     [RelayCommand] private void EditMember()
     {
         if (SelectedMember is null) return;
         var i = SelectedMember.Info;
         MemberIsNew = false; EditUserId = i.UserId; EditName = i.Name; EditOrg = Orgs.FirstOrDefault(o => o.Code == i.Org); EditTitle = i.Title; EditLoginId = i.LoginId; EditPassword = "";
-        VolteNumber = i.Volte?.Msisdn ?? ""; VolteService = VolteServices.FirstOrDefault(s => s.Name == i.Volte?.ServiceRef) ?? VolteServices.FirstOrDefault();
+        VolteNumber = i.Volte?.Msisdn ?? ""; VolteService = PickService(VolteServices, "volte", i.Volte);
         VolteTransport = i.Volte?.SipTransport is { Length: > 0 } vt ? vt : "TLS"; VoltePassword = "";
-        PttNumber = i.Ptt?.Msisdn ?? ""; PttService = PttServices.FirstOrDefault(s => s.Name == i.Ptt?.ServiceRef) ?? PttServices.FirstOrDefault();
+        PttNumber = i.Ptt?.Msisdn ?? ""; PttService = PickService(PttServices, "ptt", i.Ptt);
         PttTransport = i.Ptt?.SipTransport is { Length: > 0 } pt ? pt : "TLS"; PttPassword = "";
         AllowCreateGroup = i.Ptt?.Profile?.GetValueOrDefault("allowCreateGroup") == true;
         AllowAmbientListening = i.Ptt?.Profile?.GetValueOrDefault("allowAmbientListening") == true;
         _origVolte = VolteNumber; _origPtt = PttNumber; _origCreate = AllowCreateGroup; _origAmbient = AllowAmbientListening;
+        _origVolteImsi = i.Volte?.Imsi ?? ""; _origPttImsi = i.Ptt?.Imsi ?? "";
         OnPropertyChanged(nameof(HasVolte)); OnPropertyChanged(nameof(HasPtt));
         MemberEditing = true; OrgEditing = false;
         MarkClean();
     }
     [RelayCommand] private void CancelMember() => MemberEditing = false;
 
-    private NumberInput? NumberOf(string number, ServiceRef? svc, string transport, string password) =>
-        number.Trim().Length == 0 ? null : new NumberInput { Msisdn = number.Trim(), ServiceRef = svc?.Name ?? "", SipTransport = transport, Password = password };
+    private NumberInput? NumberOf(string number, ServiceRef? svc, string transport, string password, string imsi = "") =>
+        number.Trim().Length == 0 ? null : new NumberInput { Msisdn = number.Trim(), Imsi = imsi, ServiceRef = svc?.Name ?? "", SipTransport = transport, Password = password };
 
     [RelayCommand] private async Task SaveMember()
     {
@@ -316,6 +333,8 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
         if (MemberIsNew)
         {
             if ((volte.Length > 0 && VoltePassword.Length == 0) || (ptt.Length > 0 && PttPassword.Length == 0)) { Error = "새 회선에는 SIP 비밀번호가 필요합니다(H(A1) 결박)"; return; }
+            if ((volte.Length > 0 && VolteService is null) || (ptt.Length > 0 && PttService is null))
+            { Error = "회선을 개설하려면 접속서비스가 필요합니다 — 목록이 비어 있으면 서버 설정(운영자) 문제입니다"; return; }
             var input = new MemberInput { Name = EditName.Trim(), Org = EditOrg.Code, Title = EditTitle.Trim(), LoginId = EditLoginId.Trim(), Password = EditPassword,
                                           Volte = NumberOf(volte, VolteService, VolteTransport, VoltePassword), Ptt = NumberOf(ptt, PttService, PttTransport, PttPassword) };
             Busy = true; Error = "";
@@ -333,18 +352,26 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
         long uid = EditUserId;
         var upd = new MemberInput { Name = EditName.Trim(), Org = EditOrg.Code, Title = EditTitle.Trim(), LoginId = EditLoginId.Trim(), Password = EditPassword };
         if (!await RunAsync(m.UpdateMemberAsync(uid, upd), "구성원 저장")) return;
-        // 회선 — 번호가 바뀌었거나 비밀번호를 넣었으면 PUT(개설/변경/재결박), 비웠으면 DELETE
-        foreach (var (kind, number, orig, svc, tr, pw) in new[] { ("volte", volte, _origVolte, VolteService, VolteTransport, VoltePassword), ("ptt", ptt, _origPtt, PttService, PttTransport, PttPassword) })
+        // 회선 — 번호·접속서비스가 바뀌었거나 비밀번호를 넣었으면 PUT(개설/변경/재결박), 비웠으면 DELETE. 바뀐 것이 없으면 보내지 않는다.
+        //   접속서비스는 골랐을 때만 변경으로 본다(비어 있으면 서버가 현재값 유지). 같은 번호면 저장된 IMSI 를 그대로 실어 서버가 "IMSI 변경" 으로 오판하지 않게 한다
+        //   (서버는 IMSI 가 없으면 번호 숫자로 채우므로, 실제 IMSI 가 다른 회선은 비밀번호 없는 PUT 이 400 이 된다). 번호가 바뀌면 새 회선이라 IMSI 를 비운다.
+        foreach (var (kind, number, orig, origImsi, svc, tr, pw) in new[] { ("volte", volte, _origVolte, _origVolteImsi, VolteService, VolteTransport, VoltePassword),
+                                                                            ("ptt", ptt, _origPtt, _origPttImsi, PttService, PttTransport, PttPassword) })
         {
+            bool serviceChanged = svc is not null && svc.Name != OrigService(kind);
             if (number.Length == 0 && orig.Length > 0)
             {
                 if (Confirm?.Invoke("회선 삭제", $"{(kind == "volte" ? "VoLTE" : "PTT")} 번호 {orig} 를 삭제할까요? 단말 등록이 끊깁니다.") != true) continue;
                 if (!await RunAsync(m.DeleteNumberAsync(uid, kind), $"{kind} 회선 삭제")) return;
             }
-            else if (number.Length > 0 && (number != orig || pw.Length > 0 || (svc?.Name ?? "") != OrigService(kind)))
+            else if (number.Length > 0 && (number != orig || pw.Length > 0 || serviceChanged))
             {
-                if ((number != orig) && pw.Length == 0) { Error = $"{(kind == "volte" ? "VoLTE" : "PTT")} 번호를 바꾸려면 SIP 비밀번호가 필요합니다(H(A1) 재결박)"; return; }
-                if (!await RunAsync(m.PutNumberAsync(uid, kind, NumberOf(number, svc, tr, pw)!), $"{kind} 회선 {(orig.Length == 0 ? "개설" : "변경")}")) return;
+                string what = kind == "volte" ? "VoLTE" : "PTT";
+                if (orig.Length == 0 && svc is null) { Error = $"{what} 회선을 개설하려면 접속서비스가 필요합니다 — 목록이 비어 있으면 서버 설정(운영자) 문제입니다"; return; }
+                if ((number != orig || (orig.Length > 0 && serviceChanged)) && pw.Length == 0)
+                { Error = $"{what} {(number != orig ? "번호" : "접속서비스")}를 바꾸려면 SIP 비밀번호가 필요합니다(H(A1) 재결박)"; return; }
+                var input = NumberOf(number, svc, tr, pw, number == orig ? origImsi : "")!;
+                if (!await RunAsync(m.PutNumberAsync(uid, kind, input), $"{kind} 회선 {(orig.Length == 0 ? "개설" : "변경")}")) return;
             }
         }
         if (ptt.Length > 0 && (AllowCreateGroup != _origCreate || AllowAmbientListening != _origAmbient))
