@@ -210,8 +210,8 @@
                                         <PasswordBox x:Name="VoltePw" Style="{StaticResource FieldPw}" PasswordChanged="VoltePw_Changed" Margin="0,2,0,0" />
                                     </StackPanel>
                                 </Border>
-                                <!-- VoIP 회선(유선 — 데스크폰·소프트폰·관제석) — voip 접속서비스 후보만, 기본 TLS(UDP/TCP/TLS/ANY), IMSI 는 서버가 번호 숫자로, 인증 digest.
-                                     내선 라벨·픽업 그룹은 서버 파생값이라 읽기전용 표시(픽업 그룹 편성은 콘솔 전화 그룹) -->
+                                <!-- VoIP 회선(유선 — 데스크폰·소프트폰·관제석) — voip 접속서비스 후보만(서버 400 service_kind_mismatch·serviceRef 필수), 기본 TLS(UDP/TCP/TLS/ANY),
+                                     IMSI 는 서버가 번호 숫자로, 인증 digest. 픽업 그룹은 서버 파생값(콘솔 전화 그룹 편성)이라 서버가 실어 줄 때만 읽기전용 표시. 내선은 서버 엔티티가 아니다(§13). -->
                                 <Border Style="{StaticResource Sub}" Margin="0,0,0,6" Padding="8">
                                     <StackPanel>
                                         <TextBlock Style="{StaticResource SectionHeader}" Text="VoIP 번호 (유선)" Margin="0,0,0,4" />
@@ -230,16 +230,10 @@
                                         <TextBlock Style="{StaticResource Hint}" Foreground="{DynamicResource Brush.Emg}" TextWrapping="Wrap" Margin="0,0,0,6"
                                                    Text="유선(voip) 접속서비스 후보가 없습니다 — 서버(CSC)가 후보를 내려주지 않아 회선 개설이 실패합니다. 운영자에게 접속서비스(kind=voip) 등록을 요청하세요."
                                                    Visibility="{Binding NoVoipServices, Converter={StaticResource BoolToVis}}" />
-                                        <UniformGrid Columns="2" Visibility="{Binding HasVoipDerived, Converter={StaticResource BoolToVis}}" Margin="0,0,0,6">
-                                            <StackPanel Margin="0,0,6,0">
-                                                <TextBlock Text="내선 라벨 (서버 파생, 읽기전용)" Style="{StaticResource Hint}" />
-                                                <TextBox Style="{StaticResource Field}" Text="{Binding VoipExtension, Mode=OneWay}" IsReadOnly="True" IsTabStop="False" FontFamily="{StaticResource Font.Mono}" Margin="0,2,0,0" />
-                                            </StackPanel>
-                                            <StackPanel>
-                                                <TextBlock Text="픽업 그룹 (콘솔 전화 그룹에서 편성, 읽기전용)" Style="{StaticResource Hint}" />
-                                                <TextBox Style="{StaticResource Field}" Text="{Binding VoipPickupGroup, Mode=OneWay}" IsReadOnly="True" IsTabStop="False" FontFamily="{StaticResource Font.Mono}" Margin="0,2,0,0" />
-                                            </StackPanel>
-                                        </UniformGrid>
+                                        <StackPanel Visibility="{Binding HasVoipDerived, Converter={StaticResource BoolToVis}}" Margin="0,0,0,6">
+                                            <TextBlock Text="픽업 그룹 (콘솔 전화 그룹에서 편성, 읽기전용)" Style="{StaticResource Hint}" />
+                                            <TextBox Style="{StaticResource Field}" Text="{Binding VoipPickupGroup, Mode=OneWay}" IsReadOnly="True" IsTabStop="False" FontFamily="{StaticResource Font.Mono}" Margin="0,2,0,0" />
+                                        </StackPanel>
                                         <TextBlock Text="SIP 비밀번호 (개설·번호 변경 시 필수)" Style="{StaticResource Hint}" />
                                         <PasswordBox x:Name="VoipPw" Style="{StaticResource FieldPw}" PasswordChanged="VoipPw_Changed" Margin="0,2,0,0" />
                                     </StackPanel>

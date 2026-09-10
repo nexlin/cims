@@ -116,10 +116,9 @@ public sealed class ManagementClient
             prof = new Dictionary<string, bool>(StringComparer.Ordinal);
             foreach (var kv in p.EnumerateObject()) prof[kv.Name] = kv.Value.ValueKind == JsonValueKind.True;
         }
-        // 내선 라벨·픽업 그룹은 읽기전용 표시 — 서버가 실어 줄 때만(유선 회선)
+        // 픽업 그룹은 읽기전용 표시 — 서버가 실어 줄 때만(현행 와이어에는 없다. 편성은 콘솔 전화 그룹)
         string pickup = Str(n, "pickupGroup"); if (pickup.Length == 0) pickup = Str(n, "pickup_group");
-        return new NumberInfo(Str(n, "msisdn"), Str(n, "imsi"), Str(n, "serviceRef"), Str(n, "sipTransport"), Str(n, "authScheme"), prof,
-                              Str(n, "extension"), pickup);
+        return new NumberInfo(Str(n, "msisdn"), Str(n, "imsi"), Str(n, "serviceRef"), Str(n, "sipTransport"), Str(n, "authScheme"), prof, pickup);
     }
 
     public Task<Result<HttpResponse>> CreateOrgAsync(string code, string name, string parent, int sort, CancellationToken ct = default) =>

@@ -30,9 +30,10 @@ public static class SipTransports
 }
 
 /// <summary>가입(번호) — 회선 하나(volte·voip·ptt). Profile 은 PTT 회선의 자격 플래그(없으면 null).
-/// Extension(내선 라벨)·PickupGroup(픽업 그룹 = 전화 그룹 id 파생)은 유선 회선의 읽기전용 표시 — 서버가 실어 주면 보인다.</summary>
+/// PickupGroup(픽업 그룹 = 전화 그룹 id, 콘솔 전화 그룹 멤버십에서 서버가 파생)은 읽기전용 표시 — 현행 와이어(`{msisdn,imsi,serviceRef,sipTransport,authScheme}`)에는
+/// 없고 서버가 `pickupGroup` 을 실어 줄 때만 보인다. 내선은 서버 엔티티가 아니라 주소록 표시 라벨(dispatch_desktop_ui.md §13)이라 여기 없다.</summary>
 public sealed record NumberInfo(string Msisdn, string Imsi, string ServiceRef, string SipTransport, string AuthScheme,
-                                IReadOnlyDictionary<string, bool>? Profile, string Extension = "", string PickupGroup = "");
+                                IReadOnlyDictionary<string, bool>? Profile, string PickupGroup = "");
 
 /// <summary>구성원(person) + 회선 셋(종류당 하나).</summary>
 public sealed record MemberInfo(long UserId, string Name, string LoginId, string Org, string Title, NumberInfo? Volte, NumberInfo? Voip, NumberInfo? Ptt)

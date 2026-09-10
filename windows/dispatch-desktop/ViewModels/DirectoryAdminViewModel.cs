@@ -104,8 +104,7 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
     [ObservableProperty] private ServiceRef? _voipService;
     [ObservableProperty] private string _voipTransport = "TLS";
     [ObservableProperty] private string _voipPassword = "";
-    [ObservableProperty] private string _voipExtension = "";          // 읽기전용 표시 — 내선 라벨(서버 파생)
-    [ObservableProperty] private string _voipPickupGroup = "";        // 읽기전용 표시 — 픽업 그룹(전화 그룹 id 파생, 콘솔 전화 그룹에서 편성)
+    [ObservableProperty] private string _voipPickupGroup = "";        // 읽기전용 표시 — 픽업 그룹(전화 그룹 id 파생, 콘솔 전화 그룹에서 편성). 서버가 실어 줄 때만
     [ObservableProperty] private string _pttNumber = "";
     [ObservableProperty] private ServiceRef? _pttService;
     [ObservableProperty] private string _pttTransport = "TLS";
@@ -123,8 +122,8 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
     public bool HasVolte => _origVolte.Length > 0;
     public bool HasVoip => _origVoip.Length > 0;
     public bool HasPtt => _origPtt.Length > 0;
-    /// <summary>유선 회선의 읽기전용 줄(내선 라벨 · 픽업 그룹)에 보일 것이 있다.</summary>
-    public bool HasVoipDerived => VoipExtension.Length > 0 || VoipPickupGroup.Length > 0;
+    /// <summary>유선 회선의 읽기전용 줄(픽업 그룹)에 보일 것이 있다 — 서버가 `pickupGroup` 을 실어 줄 때만.</summary>
+    public bool HasVoipDerived => VoipPickupGroup.Length > 0;
     public bool HasError => Error.Length > 0;
     /// <summary>편집 폼이 열려 있다. 화면을 오가도 폼은 유지된다.</summary>
     public bool IsEditing => OrgEditing || MemberEditing;
@@ -146,7 +145,6 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
     public Func<string, string, bool>? Confirm { get; set; }
 
     partial void OnErrorChanged(string value) => OnPropertyChanged(nameof(HasError));
-    partial void OnVoipExtensionChanged(string value) => OnPropertyChanged(nameof(HasVoipDerived));
     partial void OnVoipPickupGroupChanged(string value) => OnPropertyChanged(nameof(HasVoipDerived));
     partial void OnOrgIsNewChanged(bool value) => OnPropertyChanged(nameof(OrgFormTitle));
     partial void OnOrgEditingChanged(bool value) => OnPropertyChanged(nameof(IsEditing));
@@ -308,7 +306,7 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
         MemberIsNew = true; EditUserId = 0; EditName = ""; EditOrg = SelectedOrg ?? Orgs.FirstOrDefault(); EditTitle = ""; EditLoginId = ""; EditPassword = "";
         // 카드마다 자기 버킷의 첫 후보 — 버킷이 갈렸으므로 종류를 건너뛰는 폴백은 없다. 기본 transport 는 셋 다 TLS(관제 소프트폰 규약).
         VolteNumber = ""; VolteService = VolteServices.FirstOrDefault(); VolteTransport = "TLS"; VoltePassword = "";
-        VoipNumber = ""; VoipService = VoipServices.FirstOrDefault(); VoipTransport = "TLS"; VoipPassword = ""; VoipExtension = ""; VoipPickupGroup = "";
+        VoipNumber = ""; VoipService = VoipServices.FirstOrDefault(); VoipTransport = "TLS"; VoipPassword = ""; VoipPickupGroup = "";
         PttNumber = ""; PttService = PttServices.FirstOrDefault(); PttTransport = "TLS"; PttPassword = "";
         AllowCreateGroup = false; AllowAmbientListening = false; _origVolte = _origVoip = _origPtt = _origVolteImsi = _origVoipImsi = _origPttImsi = ""; _origCreate = false;
         OnPropertyChanged(nameof(HasVolte)); OnPropertyChanged(nameof(HasVoip)); OnPropertyChanged(nameof(HasPtt));
@@ -336,7 +334,7 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
         VolteTransport = i.Volte is null ? "TLS" : SipTransports.Normalize(i.Volte.SipTransport); VoltePassword = "";
         VoipNumber = i.Voip?.Msisdn ?? ""; VoipService = PickService(VoipServices, LineKind.Voip, i.Voip);
         VoipTransport = i.Voip is null ? "TLS" : SipTransports.Normalize(i.Voip.SipTransport); VoipPassword = "";
-        VoipExtension = i.Voip?.Extension ?? ""; VoipPickupGroup = i.Voip?.PickupGroup ?? "";
+        VoipPickupGroup = i.Voip?.PickupGroup ?? "";
         PttNumber = i.Ptt?.Msisdn ?? ""; PttService = PickService(PttServices, LineKind.Ptt, i.Ptt);
         PttTransport = i.Ptt is null ? "TLS" : SipTransports.Normalize(i.Ptt.SipTransport); PttPassword = "";
         AllowCreateGroup = i.Ptt?.Profile?.GetValueOrDefault("allowCreateGroup") == true;

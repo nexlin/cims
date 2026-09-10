@@ -324,7 +324,8 @@
 **행 한 번 클릭 = 오른쪽 폼에 바로 편집**) · 오른쪽 **편집 폼**("편집 — 이름", 머리 오른쪽 [삭제]) — 구성원 속성(이름·직함·소속·로그인 아이디/비밀번호) +
 **회선 카드 셋 = VoLTE 번호(이동) / VoIP 번호(유선) / PTT 번호**(번호·접속서비스·SIP transport·SIP 비밀번호 — 비우면 회선 삭제, 새 회선·번호 변경·접속서비스 변경은 비밀번호 필수(서버가 H(A1) 로만 보관)) + PTT 자격 토글(그룹 생성·원격 청취 — 청취는 표시만, 역할 배정의 결과).
 회선 종류(와이어 kind `volte`·`voip`·`ptt`)는 `members[].{kind}`·`services.{kind}[]`·`PUT …/members/{id}/{kind}`·목록 열까지 한 축으로 갈라진다 — 서버가 종류당 첫 회선만 내리므로 이동·유선 회선을 둘 다 가진 관제사도 둘 다 관리된다.
-카드별 차이는 콘솔 매트릭스와 같다: VoIP 카드 = `voip` 후보만 · 기본 TLS 에 UDP/TCP/TLS/**ANY** 선택 · IMSI 는 서버가 번호 숫자로 · 인증 digest 만 · **내선 라벨·픽업 그룹은 읽기전용 표시**(서버 파생, 픽업 그룹 편성은 콘솔 전화 그룹); VoLTE 카드는 AKA 를 다루지 않는다(digest).
+카드별 차이는 콘솔 매트릭스와 같다: VoIP 카드 = `voip` 후보만 · 기본 TLS 에 UDP/TCP/TLS/**ANY** 선택 · IMSI 는 서버가 번호 숫자로 · 인증 digest 만 · `voip` 접속서비스는 **필수**(서버 400 `service_ref required for voip`·다른 kind 서비스는 `service_kind_mismatch`) · **픽업 그룹은 읽기전용 표시**(콘솔 전화 그룹 멤버십에서 서버가 파생 — 현행 와이어 `{msisdn,imsi,serviceRef,sipTransport,authScheme}` 에는 없어 서버가 `pickupGroup` 을 실어 줄 때만 보인다. 내선은 서버 엔티티가 아니라 주소록 표시 라벨(§13)); VoLTE 카드는 AKA 를 다루지 않는다(digest).
+오류 문구 사전(`ResponseText.ForManagementError`)은 서버 토큰을 그대로 받는다 — `number_exists` 는 `where`(가입 테이블 이름 | `phone_groups` = 대표번호 주소 공간)로 문구를 가르고, `schema_not_migrated` 는 detail 의 `voip_subscriptions` 로 유선 테이블 미이관을 구분한다.
 SIP transport 콤보는 **ANY** 를 포함한 넷(콘솔 라벨과 같다) — ANY 는 "가입자 override 없음(서버 NULL, 접속서비스 기본을 따른다)" 의 **양방향 명시값**이라 다른 값에서 되돌릴 수 있다. transport 만 바뀐 회선도 PUT 한다(H(A1) 무관, 비밀번호 불필요).
 접속서비스 후보 = 서버 `services.<kind>[]`(항목이 `kind` 를 실으면 그것을 따른다 — 전환기 서버는 voip 항목을 volte 버킷에 함께 실었다). 기존 회선은 **저장된 서비스를 그대로 선택**(후보에 없으면 그 이름을 후보에 넣어 보인다, 저장값이 비면 비움 = 서버가 현재값 유지) — 첫 후보로 바꿔 넣으면
 저장마다 "서비스 변경 → 재결박 비밀번호 필요(400)" 가 나기 때문. 같은 번호 PUT 은 저장된 IMSI 를 그대로 싣고(서버는 IMSI 가 없으면 번호 숫자로 채워 "IMSI 변경" 으로 오판), 번호가 바뀌면 새 회선이라 비운다.

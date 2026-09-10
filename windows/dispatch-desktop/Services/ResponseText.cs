@@ -74,20 +74,30 @@ public static class ResponseText
         _ => null,
     };
 
-    /// <summary>관리 API 오류 본문의 `error` 값 → 문구(dispatch_directory.py · dispatch_recordings.py). 없으면 null.</summary>
-    public static string? ForManagementError(string error, string detail) => error switch
+    /// <summary>관리 API 오류 본문의 `error` 값 → 문구(dispatch_directory.py · dispatch_recordings.py · admin.py 가입 경로). 없으면 null.
+    /// where = `number_exists` 의 충돌 위치(가입 테이블 이름 또는 `phone_groups` = 대표번호 주소 공간, dispatch_center.md §8.2).</summary>
+    public static string? ForManagementError(string error, string detail, string where = "") => error switch
     {
         "no_directory_admin" => "관리 권한이 없습니다 — 관제 그룹의 관리 범위(directory_admin)를 콘솔에서 부여해야 합니다",
         "out_of_scope" => "관리 범위 밖의 조직·구성원입니다",
         "insufficient_scope" => "토큰 권한이 부족합니다 — 다시 로그인하세요",
         "not_editable" => "원격 청취 자격은 관제 앱에서 바꿀 수 없습니다 — 콘솔에서 역할(청취 범위)로 부여합니다",
-        "schema_not_migrated" => "서버 DB 마이그레이션이 필요합니다 (관리자 문의)",
+        "schema_not_migrated" => detail.Contains("voip_subscriptions", StringComparison.Ordinal)
+            ? "유선 VoIP 회선 테이블이 아직 없습니다 — 서버 DB 마이그레이션(migrate_voip_subscriptions.sql)이 필요합니다(운영자)"
+            : "서버 DB 마이그레이션이 필요합니다 (관리자 문의)",
         "code_exists" => "같은 코드의 조직이 이미 있습니다",
         "unknown_parent" => "상위 조직이 없습니다",
         "unknown_org" => "소속 조직이 없습니다",
         "cyclic_parent" => "자기 하위 조직으로 옮길 수 없습니다",
         "not_empty" => detail.Contains("members") ? "구성원이 남아 있는 조직은 지울 수 없습니다" : "하위 조직이 남아 있는 조직은 지울 수 없습니다",
-        "number_exists" => "다른 구성원이 쓰는 번호입니다",
+        "number_exists" => where switch
+        {
+            "phone_groups" => "전화 그룹의 대표번호로 쓰이는 번호입니다 — 가입 번호로 개설할 수 없습니다",
+            "volte_subscriptions" => "다른 VoLTE 회선이 쓰는 번호입니다",
+            "voip_subscriptions" => "다른 VoIP 회선이 쓰는 번호입니다",
+            "ptt_subscriptions" => "다른 PTT 회선이 쓰는 번호입니다",
+            _ => "다른 구성원이 쓰는 번호입니다",
+        },
         "self_delete" => "자기 자신은 지울 수 없습니다",
         "derived_from_phone_group" => "전화 그룹 소속 구성원의 픽업 그룹은 콘솔 전화 그룹에서 파생됩니다 — 직접 바꿀 수 없습니다",
         "service_kind_mismatch" => "회선 종류에 맞지 않는 접속서비스입니다 — VoLTE 회선은 volte, VoIP 회선은 voip, PTT 회선은 ptt 서비스만 고를 수 있습니다",
@@ -101,6 +111,8 @@ public static class ResponseText
             => "저장된 IMSI·접속서비스와 달라 H(A1) 재결박이 필요합니다 — SIP 비밀번호를 함께 입력하세요",
         _ when error.StartsWith("password required when changing the number", StringComparison.Ordinal)
             => "번호를 바꾸려면 SIP 비밀번호가 필요합니다(H(A1) 재결박)",
+        _ when error.StartsWith("service_ref required for voip", StringComparison.Ordinal)
+            => "VoIP(유선) 회선은 유선(voip) 접속서비스를 골라야 합니다 — 후보가 비어 있으면 서버 접속서비스(kind=voip) 등록이 필요합니다(운영자)",
         _ when error.StartsWith("service_ref required to derive ha1", StringComparison.Ordinal)
             => "접속서비스를 알 수 없어 H(A1) 을 만들 수 없습니다 — 접속서비스를 고르세요. 목록이 비어 있으면 서버 csc.json Provisioning.Services 설정이 필요합니다(운영자)",
         _ when error.StartsWith("imsi required", StringComparison.Ordinal) => "IMSI 가 필요합니다(비우면 번호 숫자로 채워집니다)",
@@ -131,6 +143,13 @@ public static class ResponseText
         return (m.Groups[1].Value, detail);
     }
 
+    /// <summary>오류 본문의 문자열 필드 하나(`"where":"phone_groups"` 등). 없으면 "".</summary>
+    public static string Field(string reason, string name)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(reason, "\"" + name + "\"\\s*:\\s*\"([^\"]*)\"");
+        return m.Success ? m.Groups[1].Value : "";
+    }
+
     public static string Describe(Area area, int code, string reason)
     {
         if (area == Area.Group)
@@ -141,7 +160,7 @@ public static class ResponseText
         if (area is Area.Management or Area.Recording)
         {
             var (err, detail) = GroupError(reason);
-            if (err.Length > 0 && ForManagementError(err, detail) is { } mg) return mg;
+            if (err.Length > 0 && ForManagementError(err, detail, Field(reason, "where")) is { } mg) return mg;
             if (err.Length == 0 && reason.Contains("required", StringComparison.OrdinalIgnoreCase)) return "필수 항목이 빠졌습니다: " + reason;
         }
         string? t = For(area, code);
