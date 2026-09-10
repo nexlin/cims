@@ -115,6 +115,10 @@ ems/service/console/node_modules
 /HA_design_recommand*.md
 pw.md
 
+# 개인 작업 폴더 — 테스트베드 접속정보(pw.md)·개인 운영 스크립트. **통째로 커밋 금지**
+# (저장소가 public 이다 — 사이트 IP·비밀번호가 나가면 안 된다)
+/johnyim/
+
 # Windows SDK 슈퍼빌드 (sdk/windows)
 build-win/
 
