@@ -51,7 +51,7 @@
 ```bash
 deployment/tb/tools/tb-fetch-debs.sh mariadb        # MariaDB + 의존 .deb 수집
 deployment/tb/tools/tb-fetch-debs.sh apt-repair    # 대상 장비의 깨진 apt 를 메울 집합
-deployment/tb/tools/tb-pack.sh --with-packages      # db-bootstrap + 모듈 tarball + 시험 음성 모으기
+deployment/tb/tools/tb-pack.sh --with-packages      # db-bootstrap + 모듈 tarball + 인증서 도구 + 시험 음성
 ```
 
 `deployment/tb/` 전체(=`offline/` 포함)를 USB 로 옮긴다. `--tar` 를 주면 하나로 묶는다.
@@ -178,6 +178,8 @@ tools/tb-pack.sh       반입본 조립 (빌드 장비)
 tools/tb-teardown.sh   철거 (대상 장비)
 tools/tb-renumber-csv.py     data/*.csv 의 번호·IMSI 일괄 재부여 — **18 단계보다 먼저**
 tools/tb-agent-install-cmd.sh  agent 재설치 명령을 OAM 에서 받아 실행 (20 단계 실패 복구)
+offline/tools/service-cert.sh  단말 대면(Service CA) 인증서 — SAN 수집·배치·검증 (4-8)
+                               반입본에만 담긴다(scripts/service-cert.sh 사본)
 lib/tb_oam.py          OAM REST 클라이언트 (30~70 단계가 호출, 표준 라이브러리만)
 lib/tb_seed.py         CSV → DB 직접 입력기 (18 단계가 호출)
 data/*.csv             초기 데이터 (템플릿 동봉 — 사이트 값으로 고쳐 쓴다)

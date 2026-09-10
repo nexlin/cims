@@ -31,7 +31,7 @@ done
 header "=== TB 반입본 조립 ==="
 
 # ── DB 부트스트랩 자원 ────────────────────────────────────────
-info "[1/4] DB 부트스트랩 — db_bootstrap.py + cims_schema.sql + pymysql"
+info "[1/5] DB 부트스트랩 — db_bootstrap.py + cims_schema.sql + pymysql"
 dbdir="$TB_OFFLINE_DIR/db-bootstrap"
 mkdir -p "$dbdir/vendor"
 cp -f "$TB_REPO_ROOT/deployment/db-bootstrap/db_bootstrap.py" "$dbdir/"
@@ -39,13 +39,17 @@ cp -f "$TB_REPO_ROOT/deployment/db-bootstrap/README.md"       "$dbdir/" 2>/dev/n
 cp -f "$TB_REPO_ROOT/sql/cims_schema.sql"                     "$dbdir/"
 # --cleanup 을 쓸 때만 필요하지만 24KB 라 같이 넣는다 (현장에서 없으면 곤란한 쪽).
 cp -f "$TB_REPO_ROOT/sql/migrate_drop_unused_tables.sql"      "$dbdir/" 2>/dev/null || true
+# 옛 스키마(dispatch_groups 계열)로 이미 깐 DB 를 이어 쓸 때만 필요하다. 새로 깔면 안 쓴다 —
+# 없으면 현장에서 구할 방법이 없으니 함께 담는다 (TB-INSTALL 4-1 의 [주의]).
+cp -f "$TB_REPO_ROOT/sql/migrate_phone_groups_roles.sql"      "$dbdir/" 2>/dev/null || true
 rm -rf "$dbdir/vendor/pymysql"
 cp -a "$TB_REPO_ROOT/ems/core/oam/vendor/pymysql"             "$dbdir/vendor/"
-find "$dbdir/vendor" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
+# 컴파일 캐시는 담지 않는다 — 대상 장비의 파이썬과 무관하고, 옛 바이트코드가 섞이면 혼란만 준다.
+find "$dbdir" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
 ok "$dbdir ($(du -sh "$dbdir" | awk '{print $1}'))"
 
 # ── OS 패키지 ─────────────────────────────────────────────────
-info "[2/4] OS 패키지(.deb) 확인"
+info "[2/5] OS 패키지(.deb) 확인"
 if [[ -d "$TB_OFFLINE_DIR/debs" ]] && compgen -G "$TB_OFFLINE_DIR/debs/*/*.deb" >/dev/null; then
     for d in "$TB_OFFLINE_DIR"/debs/*/; do
         ok "$(basename "$d"): $(ls -1 "$d"/*.deb 2>/dev/null | wc -l)개"
@@ -55,7 +59,7 @@ else
 fi
 
 # ── 모듈 tarball (선택) ───────────────────────────────────────
-info "[3/4] 모듈 패키지"
+info "[3/5] 모듈 패키지"
 if [[ $WITH_PKGS -eq 1 ]]; then
     src="$TB_REPO_ROOT/build/dist/packages"
     [[ -d "$src" ]] || die_hint "$src 없음" \
@@ -91,30 +95,38 @@ else
     info "건너뜀 (--with-packages 로 포함)"
 fi
 
+# ── 단말 대면 인증서 도구 ─────────────────────────────────────
+# 단말은 CIMS Service CA 한 장만 신뢰한다 — 설치 직후의 CSC·CSP 인증서는 발급자가 달라
+# 단말이 로그인 단계에서 끊긴다(TB-INSTALL 4-8). `collect` 로 그 노드가 요구하는 SAN 을
+# 뽑는 일은 **대상 노드에서** 해야 하므로 이 파일을 함께 반입한다. 발급(issue)은 CA 보관
+# 서버에서만 하고, 현장 배치는 거기서 만든 묶음(tgz)으로 한다 — 묶음에 같은 스크립트가
+# 들어 있어 이 사본은 SAN 수집·검증용이다.
+info "[4/5] 단말 대면 인증서 도구"
+if [[ -f "$TB_REPO_ROOT/scripts/service-cert.sh" ]]; then
+    mkdir -p "$TB_OFFLINE_DIR/tools"
+    cp -f "$TB_REPO_ROOT/scripts/service-cert.sh" "$TB_OFFLINE_DIR/tools/service-cert.sh"
+    chmod 755 "$TB_OFFLINE_DIR/tools/service-cert.sh"
+    ok "$TB_OFFLINE_DIR/tools/service-cert.sh (SAN 수집·검증용)"
+else
+    warn "scripts/service-cert.sh 없음 — 단말 대면 인증서 절차(4-8)를 현장에서 쓸 수 없습니다"
+fi
+
 # ── 시험 음성 (70 단계 호시험) ────────────────────────────────
-# cspsim 패키지에는 미디어가 없다. 없으면 코덱이 PCMU(0)로 떨어져 호는 서지만 녹취
-# 재생이 안 된다 — 설치 실패가 아니라 **시험 자료 결손**이라 경고만 하고 계속한다.
-info "[4/4] 시험 음성"
+# cspsim 패키지에는 미디어가 없다. cspsim 은 이 디렉토리에서 `*_audio.amrwb` 를 모아
+# **이름과 무관하게 단말 순번대로 돌려 쓴다**(CspsimMain.cpp: vecAudioFiles[i % 개수]).
+# 그래서 필요한 것은 "단말 수만큼의 파일" 이고 파일명·가입 번호는 상관없다.
+# 파일이 붙지 않은 세션은 합성음 PCMU(payload 0)로 떨어진다(SimSession.cpp).
+info "[5/5] 시험 음성"
 _msrc="$TB_REPO_ROOT/tests/media"
 # 파일만 — 그 디렉토리에 __pycache__ 같은 하위 디렉토리가 섞여 있다.
 if [[ -d "$_msrc" ]] && [[ -n "$(find "$_msrc" -maxdepth 1 -type f -print -quit)" ]]; then
     mkdir -p "$TB_OFFLINE_DIR/media"
     find "$_msrc" -maxdepth 1 -type f -exec cp -f {} "$TB_OFFLINE_DIR/media/" \;
-    ok "$TB_OFFLINE_DIR/media ($(ls -1 "$TB_OFFLINE_DIR/media" | wc -l)개, $(du -sh "$TB_OFFLINE_DIR/media" | awk '{print $1}'))"
-    # 파일명이 **가입 번호와 대응**한다(8050001000004_audio.amrwb). 짝이 없는 번호는
-    # 그 번호만 PCMU 로 떨어지므로, 현장에서 헤매지 않게 여기서 미리 알려 준다.
-    _csv="$TB_ROOT/data/subscriptions.csv"
-    if [[ -f "$_csv" ]]; then
-        _miss=""
-        while IFS=, read -r _num _login _kind _rest; do
-            [[ -z "$_num" || "$_num" == \#* || "$_num" == "number" ]] && continue
-            compgen -G "$TB_OFFLINE_DIR/media/${_num}_audio."* >/dev/null \
-                || _miss+=" $_num($_kind)"
-        done < "$_csv"
-        [[ -n "$_miss" ]] && warn "음성 없는 번호:$_miss — 그 번호는 codec(0)=PCMU (VoLTE 는 예정된 범위)"
-    fi
+    _na=$(find "$TB_OFFLINE_DIR/media" -maxdepth 1 -name '*_audio.amrwb' | wc -l)
+    ok "$TB_OFFLINE_DIR/media ($(ls -1 "$TB_OFFLINE_DIR/media" | wc -l)개, $(du -sh "$TB_OFFLINE_DIR/media" | awk '{print $1}')) — 음성 ${_na}개"
+    [[ "$_na" -eq 0 ]] && warn "*_audio.amrwb 가 없습니다 — 70 단계가 전부 PCMU(codec 0)로 떨어집니다"
 else
-    warn "$_msrc 없음 — 70 단계가 codec(0)=PCMU 로 떨어집니다 (녹취 재생 불가)"
+    warn "$_msrc 없음 — 70 단계가 codec(0)=PCMU 로 떨어집니다 (합성음)"
 fi
 
 # ── 묶기 ──────────────────────────────────────────────────────
@@ -124,6 +136,7 @@ if [[ $MAKE_TAR -eq 1 ]]; then
     # 사이트 고유값·임시 자격·로그는 반출하지 않는다.
     tar czf "$out" -C "$(dirname "$TB_ROOT")" \
         --exclude='tb/tb-site.conf' --exclude='tb/state' --exclude='tb/log' \
+        --exclude='__pycache__' --exclude='*.pyc' \
         "$(basename "$TB_ROOT")"
     ok "$out ($(du -sh "$out" | awk '{print $1}'))"
     # 무결성 값 — 반입 경로가 FTP 면 ascii 모드 사고를 이것만이 잡는다(TB-INSTALL §2-b).

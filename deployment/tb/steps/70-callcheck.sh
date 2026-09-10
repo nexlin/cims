@@ -78,7 +78,7 @@ media=""
 for c in "$(dirname "$sim")/../media" "$TB_OFFLINE_DIR/media"; do
     [[ -d "$c" ]] && { media="$(cd "$c" && pwd)"; break; }
 done
-[[ -n "$media" ]] || warn "미디어 디렉토리가 없습니다 — codec(0)=PCMU 로 떨어질 수 있습니다(녹취 재생 불가)"
+[[ -n "$media" ]] || warn "미디어 디렉토리가 없습니다 — 전 세션이 codec(0)=PCMU 합성음으로 떨어집니다(녹취 재생 불가)"
 
 # ── -db 인자용 축소 설정 ─────────────────────────────────────
 # 운영 csp.json 은 서비스 계정 소유(0600/0660)라 읽히지 않을 수 있다 — 필요한 5키만 따로 만든다.
@@ -140,14 +140,15 @@ run_case() {
             || { err "[$kind] floor 실패 — GRANT received 가 없습니다 (-local_ip / SDP 주소 확인)"; kfail=1; }
     fi
 
+    # codec(0)=PCMU 는 **그 세션에 미디어 파일이 안 붙었다**는 뜻이다
+    # (SimSession.cpp: 파일이 비면 0, 있으면 코덱표 최우선 = AMR-WB 96).
+    # cspsim 은 media_dir 의 *_audio.amrwb 를 이름과 무관하게 단말 순번대로 돌려 쓰므로
+    # (vecAudioFiles[i % 개수]), 파일이 하나라도 있으면 전 세션에 붙는다 —
+    # 즉 codec(0) 이 보이면 디렉토리를 못 찾았거나 그 안에 음성이 없는 것이다.
+    # 호 성립 판정과는 무관하지만(합성음으로도 호는 선다) 녹취 재생은 못 한다.
     if grep -q "codec(0)" "$log"; then
-        if [[ "$kind" == volte ]]; then
-            # 미디어 파일명이 가입 번호와 대응한다. 반입본 media/ 에는 PTT 번호 것만 있어
-            # VoLTE 번호는 주입할 파일이 없다 — 설치 결함이 아니라 시험 자료의 범위 문제다.
-            warn "[$kind] codec(0)=PCMU — VoLTE 번호용 미디어 파일이 없습니다(반입본은 PTT 번호만). 호 판정과 무관"
-        else
-            warn "[$kind] codec(0)=PCMU — 미디어 미주입 상태입니다 (녹취 재생 불가). -media_dir 확인"
-        fi
+        warn "[$kind] codec(0)=PCMU — 미디어가 세션에 안 붙었습니다 (합성음). 호 판정과는 무관"
+        info "  로그의 \"미디어 파일 수: audio=N\" 줄을 봅니다 — N=0 이면 -media_dir=$media 안에 *_audio.amrwb 가 없습니다"
     fi
 
     # 서버측 확인
