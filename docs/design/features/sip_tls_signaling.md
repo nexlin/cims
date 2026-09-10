@@ -389,35 +389,50 @@ psip 은 `SSL_CTX_use_certificate_chain_file()` 로 인증서를 적재한다 �
 `tls_cert_path` 는 leaf + CA 를 이어붙인 체인 PEM 을 가리키고, 키는 `tls_key_path` 로 분리한다.
 중간 CA 를 도입하거나 고객사 PKI 에서 인증서를 받아오면 그 중간 인증서를 이 파일에 추가하면 된다.
 
-### 8.3 발급 절차
+### 8.3 발급·배치 절차 — 새 노드는 `scripts/service-cert.sh` 로
+
+새 노드에 패키지를 설치하면 CSC 는 agent 가 그룹 CA(`CIMS-OAM-CA`)로 자동 발급한 인증서를,
+CSP 는 동봉 자가서명(`cert/csp.pem`)을 쓴다. 둘 다 단말이 신뢰하는 발급자가 아니라 **단말은
+로그인(HTTPS 4430)부터 TLS 거절로 막힌다** — CSC 로그에는 요청이 남지 않아 서버에서는 원인이
+보이지 않는다. 그래서 단말 대면 노드마다 Service CA 발급 leaf 를 배치하는 단계가 초도 설치에
+들어간다([initial_install.md §4.5](../../user-manual/initial_install.md#45-단말-대면-tls-인증서--없으면-단말이-로그인하지-못한다)).
+절차와 검증은 `scripts/service-cert.sh` 한 파일이 담당하고, 묶음(bundle)에 자기 자신을 복사하므로
+현장에서는 묶음과 `openssl` 만 있으면 된다. **CA 개인키는 CA 보관 서버를 떠나지 않는다** — 묶음에는
+CA 인증서와 노드 leaf/키만 들어간다.
+
+| 단계 | 실행 위치 | 명령 | 하는 일 |
+|---|---|---|---|
+| collect | 대상 노드 | `service-cert.sh collect [--prefix P]` | 필요한 SAN 목록 출력. agent `cert.sh` 가 있으면 그 함수(`_node_cert_san`)를 그대로 호출해 규칙이 어긋나지 않는다 |
+| issue | CA 보관 서버 | `service-cert.sh issue --host H --san "<목록>"` | csc·csp leaf 2장(RSA 2048·2년·EKU=serverAuth) 발급 → 체인 PEM(leaf+CA)·키·CA 인증서·README·스크립트를 담은 묶음 디렉터리 + tgz |
+| install | 대상 노드 | `service-cert.sh install [--prefix P]` | 배치 전 노드 요구 SAN 과 대조(부족하면 거절) → CSC `runtime/cert/server.{crt,key}` 백업 후 교체(30초 핫리로드 확인) → CSP `runtime/cert/` 에 체인·키 배치 → `local_nodes` 에 넣을 값 안내 |
+| verify | 어디서든 | `service-cert.sh verify --ip IP --csc-port 4430 --csp-port 15061` | 포트별 체인 2장·발급자=Service CA·IP 신원 OK·**틀린 이름 거절(음성 대조군)**·만료 잔여. FAIL 이 하나라도 있으면 종료코드 1 |
+
+CSP 는 파일을 두는 것만으로는 쓰지 않는다 — `local_nodes` TLS 행의 `tls_cert_path`(체인)/
+`tls_key_path`(키)에 절대경로를 저장해야 하고, 저장 시 SIGUSR1 로 무중단 반영된다(§8.4).
+
+**SAN 상위집합 조건.** agent 의 노드 인증서 보증(`agent/lib/cert.sh`)은 `O=CIMS` 인증서를 자기
+관리 대상으로 보고, 요구 목록(`DNS:<hostname>`·`IP:127.0.0.1`·노드 IPv4 전부·VIP·
+`Server.AgentOamUrl` host·`Server.CertSans`) 중 빠진 것이 있으면 재기동 때 그룹 CA 인증서로
+**덮어쓴다**. Service CA leaf 의 SAN 이 그 목록의 상위집합이면 손대지 않는다 — `collect` 가 그 목록을
+뽑고 `install` 이 배치 전에 검사한다. 기본 경로는 `/opt/cims-agent/modules`, 개발 레이아웃은
+`--prefix build/dist/<server>`.
+
+**CA 자체의 생성**(최초 1회, CA 보관 서버). CA 를 새로 만들면 단말 앵커(`CimsTrustStore.CA_BUNDLE`)도
+바뀌므로 §8.5 의 CA 교체 절차를 따른다.
 
 ```bash
 umask 077
-# 1) 사설 CA (10년)
 openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
   -keyout cims-service-ca.key -out cims-service-ca.crt \
   -subj "/C=KR/O=CIMS/CN=CIMS Service CA" \
   -addext "basicConstraints=critical,CA:TRUE" \
   -addext "keyUsage=critical,keyCertSign,cRLSign"
-
-# 2) 서버 키 + CSR
-openssl req -newkey rsa:2048 -sha256 -nodes -keyout csp.key -out csp.csr \
-  -subj "/C=KR/O=CIMS/CN=<CSP 접속 주소>"
-
-# 3) SAN·용도 확장 — HA 를 쓰면 VIP 주소를 반드시 포함한다
-cat > csp-ext.cnf <<'EXT'
-basicConstraints = critical, CA:FALSE
-keyUsage         = critical, digitalSignature, keyEncipherment
-extendedKeyUsage = serverAuth
-subjectAltName   = IP:<CSP 접속 주소>, IP:<관리망 주소>, DNS:csp.cims.local
-EXT
-
-# 4) CA 서명 (2년) → 5) 체인 PEM 조립
-openssl x509 -req -in csp.csr -CA cims-service-ca.crt -CAkey cims-service-ca.key \
-  -CAcreateserial -out csp.crt -days 730 -sha256 -extfile csp-ext.cnf
-cat csp.crt cims-service-ca.crt > csp-chain.pem
-chmod 600 cims-service-ca.key csp.key
 ```
+
+스크립트가 leaf 에 적용하는 확장은 `basicConstraints=critical,CA:FALSE` ·
+`keyUsage=critical,digitalSignature,keyEncipherment` · `extendedKeyUsage=serverAuth` ·
+`subjectAltName=<목록>,DNS:csc.cims.local`(csp 는 `DNS:csp.cims.local`)이다. 수동 등가 명령은
+`openssl req`(키+CSR) → `openssl x509 -req -CA … -extfile`(서명) → `cat leaf ca > chain` 이다.
 
 ### 8.4 교체 절차 — 무중단이다 (재기동 불필요)
 
@@ -470,7 +485,8 @@ openssl s_client -connect <IP>:15061 -CAfile cims-service-ca.crt \
 | 항목 | 상태 |
 |---|---|
 | 단말 CA 주입 + `verifyServer=true` | **적용됨**(`CimsTrustStore.CA_BUNDLE` → `caBuf`). 음성 대조군까지 실측 — 미신뢰 인증서는 503 `PJSIP_TLS_ECERTVERIF` 로 거절된다 |
-| CA 배포 경로 | **APK 동봉.** 프로비저닝(CSC 4430)은 자신도 자가서명 + `allowInsecureTls=true` 라 신뢰의 최초 씨앗을 그 채널로 받으면 의미가 반감된다 |
+| CA 배포 경로 | **APK 동봉.** 신뢰의 최초 씨앗을 프로비저닝 채널(CSC 4430)로 받으면 그 채널 자체가 같은 앵커로 검증되므로 의미가 없다 — 앵커는 앱과 함께 배포한다. Windows 관제조작반은 CA PEM 파일 경로(`TlsCaPemPath`) |
+| 신규 노드 발급·배치 | **`scripts/service-cert.sh`**(collect → issue → install → verify, [§8.3](#83-발급배치-절차--새-노드는-scriptsservice-certsh-로)). agent 자동 발급은 그룹 CA 라 단말 대면 노드는 이 절차가 필수다. 장기 과제 = 그룹 CA 를 Service CA 로 통일해 발급을 agent 에 맡기는 것 |
 | CSC(4421·4430) 서버 인증서 | **적용됨** — Service CA 발급, `runtime/cert` 배치. openssl(체인·IP 신원·틀린 이름 대조) + 검증을 켠 클라이언트로 로그인→토큰→프로비저닝 전 구간 실측. OAM 게이트웨이는 업스트림 TLS 를 검증하지 않으므로(`gateway.py` `_ssl_param`) 관리 경로 무영향 |
 | CSC 검증 — **앱측** | **적용됨** — `core/net/CimsTls` 가 `CimsTrustStore.CA_BUNDLE` 로 신뢰 관리자를 만들어 OkHttp 에 설치한다. `allowInsecureTls` 스위치와 중복 `insecure()` 구현 2벌은 **제거**했다(전 인증서 통과 + 호스트명 검사 무력화였다). 앵커는 SIP 평면과 동일하므로 추가 배포가 없었다. 앵커 생성 실패 시 예외 — 조용히 검증을 끄지 않는다 |
 | CA 교체(무중단) | `CA_BUNDLE` 에 신규 CA 를 추가한 APK 선배포 → 서버 인증서 교체 → 다음 배포에서 구 CA 제거 |
@@ -537,4 +553,6 @@ transport 별 도달 모델([§2](#2-transport-별-도달-모델--latch-의-의�
 | `android/core/.../sip/PjLib.kt` | UE transport 생성 + 서버 인증서 검증 설정 |
 | `android/core/.../sip/CimsTrustStore.kt` | UE 신뢰 앵커(APK 동봉 사설 CA PEM). CA 교체 시 여기에 추가 |
 | `csc/src/services/mcptt.py` | 프로비저닝 가용 transport 목록 제공(§7.1) |
-| `/home/cims/certs/` | `cims-service-ca.{crt,key}` · `csp.{crt,key}` · `csp-chain.pem` (키 권한 600) |
+| `scripts/service-cert.sh` | 단말 대면 인증서 발급·배치·검증(§8.3). 묶음에 자기 복사 — 현장 단독 실행 |
+| `agent/lib/cert.sh` | 관리평면 노드 인증서 자동 발급(그룹 CA). SAN 요구 목록의 정본 — `service-cert.sh` 가 상위집합 조건으로 검사 |
+| `/home/cims/certs/` | `cims-service-ca.{crt,key}` · `csp.{crt,key}` · `csp-chain.pem` (키 권한 600). CA 개인키의 유일한 보관 위치 |

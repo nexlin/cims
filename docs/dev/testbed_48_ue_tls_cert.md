@@ -47,55 +47,37 @@ sudo find / -xdev -type f \( -name '*.key' -o -name '*.pem' \) -size +3k 2>/dev/
 
 CA 키가 어디에도 없으면 §5-B(새 CA + APK 재빌드)로 간다.
 
-## 3. .48 용 인증서 발급 (.45 에서 — CA 키는 .45 를 떠나지 않는다)
+## 3. 발급·배치·검증 — `scripts/service-cert.sh`
 
-SAN 은 agent 자동 발급 체계가 요구하는 목록(`DNS:<hostname>`, `IP:127.0.0.1`, 노드 IPv4 전부)의 **상위집합**이어야
-한다. `ensure_node_cert` 는 `O=CIMS` 인증서를 CIMS 관리 인증서로 보고 SAN 만 검사하므로, 부족하지 않으면
-재기동마다 유지되고 부족하면 그룹 CA 인증서로 **덮어쓴다**(`agent/lib/cert.sh` `_cert_san_missing`).
-
-```bash
-umask 077; mkdir -p ~/cert48 && cd ~/cert48
-openssl req -newkey rsa:2048 -sha256 -nodes -keyout server.key -out csc48.csr \
-  -subj "/C=KR/O=CIMS/CN=121.161.164.48"
-cat > ext.cnf <<'EXT'
-basicConstraints=critical,CA:FALSE
-keyUsage=critical,digitalSignature,keyEncipherment
-extendedKeyUsage=serverAuth
-subjectAltName=IP:121.161.164.48,IP:10.0.2.48,IP:192.168.0.82,IP:127.0.0.1,DNS:media01,DNS:csc.cims.local
-EXT
-openssl x509 -req -in csc48.csr -CA /tmp/ca.crt -CAkey <CA 키 경로> \
-  -CAcreateserial -days 730 -sha256 -extfile ext.cnf -out csc48.crt
-cat csc48.crt /tmp/ca.crt > server.crt                 # 체인 PEM (leaf + CA)
-openssl verify -CAfile /tmp/ca.crt csc48.crt           # OK
-diff <(openssl x509 -in csc48.crt -noout -modulus) <(openssl rsa -in server.key -noout -modulus) && echo key-match
-scp server.crt server.key cims@121.161.164.48:/home/cims/work/cims/build/dist/mgmt-server/csc/runtime/cert/
-```
-
-CSP 15061 도 TLS 단말을 받으려면 같은 CA 로 한 장 더 발급해(`CN=121.161.164.48`, SAN 동일) 배포 #34 의
-`local_nodes` `access-tls` 의 `tls_cert_path`/`tls_key_path` 를 그 파일로 바꾸고 SIGUSR1(무중단 교체, §8.4).
-
-## 4. .48 배치·재시작·검증
+절차 정본은 [sip_tls_signaling.md §8.3](../design/features/sip_tls_signaling.md#83-발급배치-절차--새-노드는-scriptsservice-certsh-로).
+.48 은 개발 레이아웃(`build/dist/mgmt-server`)이라 `--prefix` 를 준다. CA 키는 .45 를 떠나지 않는다.
 
 ```bash
-# .48
-chmod 600 build/dist/mgmt-server/csc/runtime/cert/server.key
-# CSC 재시작 — 콘솔 관리 > 배포 > #31 CSC > 재시작, 또는
-TOK=$(curl -sk -X POST https://127.0.0.1:4419/api/v1/auth/login -H 'Content-Type: application/json' \
-      -d '{"login_id":"admin","password":"<콘솔 admin 비밀번호>"}' | python3 -c 'import json,sys;print(json.load(sys.stdin)["token"])')
-curl -sk -X POST -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' \
-     -d '{"job_type":"restart"}' https://127.0.0.1:4419/api/v1/deployments/31/job
-# job 상태: GET /api/v1/agents/13/jobs/<job_id>
+# .48 — 필요한 SAN (hostname media01 · 121.161.164.48 · 10.0.2.48 · 127.0.0.1 …)
+ssh cims@121.161.164.48 'bash -s -- collect --prefix /home/cims/work/cims/build/dist/mgmt-server' < scripts/service-cert.sh
 
-# 검증 — 체인 2장, CA 검증 + IP 신원 통과, 틀린 이름은 실패해야 정상
-openssl s_client -connect 121.161.164.48:4430 -showcerts </dev/null 2>/dev/null | grep -c 'BEGIN CERTIFICATE'
-openssl s_client -connect 121.161.164.48:4430 -CAfile /tmp/ca.crt -verify_return_error -verify_ip 121.161.164.48 -brief </dev/null
-openssl s_client -connect 121.161.164.48:4430 -CAfile /tmp/ca.crt -verify_return_error -verify_hostname wrong.example -brief </dev/null
-grep -h 'SSL Enabled' build/dist/mgmt-server/csc/current/log/csc.log | tail -1
+# .45 — 발급 (collect 가 출력한 HOST/SAN 그대로)
+scripts/service-cert.sh issue --host media01 --san "<SAN>"
+
+# .45 → .48 — 전달 + 배치(CSC 백업·교체·핫리로드 확인, CSP runtime/cert 배치) + 검증. csp-port 는
+# local_nodes 저장 전이면 0 으로 두고 저장 후 verify 를 다시 돌린다.
+scripts/service-cert.sh push --ssh cims@121.161.164.48 --bundle ./service-cert-media01 \
+    --prefix /home/cims/work/cims/build/dist/mgmt-server --csp-port 0
 ```
 
-그 뒤 단말 로그인. 도메인·IdMS issuer 는 이미 새 규약([dev_test_domain_realm.md](dev_test_domain_realm.md) §4)이라
-프로비저닝은 그대로 받아진다. 가입자별 `sip_transport=TLS` override 가 있는 4 건(volte/ptt 각 `+821310001001/2`,
-`+82510001001/2`, user_id 5020·5021)은 CSP 15061 인증서를 교체하기 전까지 UDP 로 비워 둔다(콘솔 가입자 편집).
+## 4. .48 CSP `local_nodes` 저장·최종 검증
+
+콘솔(.48 OAM) `local_nodes` 의 `access-tls` 행: `tls_cert_path` =
+`/home/cims/work/cims/build/dist/mgmt-server/csp/runtime/cert/csp-chain.pem`, `tls_key_path` =
+`…/csp/runtime/cert/csp.key`(지금은 상대경로 `cert/csp.pem` 이라 절대경로로 바꾼다). 저장 시 SIGUSR1 무중단 교체.
+
+```bash
+scripts/service-cert.sh verify --ip 121.161.164.48 --csc-port 4430 --csp-port 15061   # 전부 PASS
+```
+
+CSC 를 한 번 재시작한 뒤 verify 를 다시 돌려 발급자가 `CIMS Service CA` 로 유지되는지 본다. 그 뒤
+단말 로그인. 가입자별 `sip_transport=TLS` override 4 건(volte/ptt 각 `+821310001001/2`,
+`+82510001001/2`)은 CSP 인증서 교체가 끝나면 다시 TLS 로 둘 수 있다.
 
 ## 5. 남은 과제
 

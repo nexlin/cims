@@ -158,6 +158,8 @@ OAM 은 기동 시 SAN 이 부족하면 그룹 CA 로 인증서를 재발급하�
 SAN 에 들어간다. 외부망 IP 로 브라우저 접속해도 SAN 불일치는 나지 않는다(self-signed
 경고는 남는다). 상용 인증서는 `modules/oam/runtime/cert` 의 `server.crt`/`server.key` 를
 교체한다. 특정 주소(VIP 등)를 강제로 넣으려면 `[패키지 설정] > oam > Server.CertSans`.
+이것은 관리평면(브라우저·모듈 간) 인증서다. **단말이 붙는 CSC 4430·CSP TLS 인증서는 §4.5 에서
+따로 배치한다** — 단말은 그룹 CA 를 신뢰하지 않는다.
 
 ## 3. 콘솔 배포 — 패키지 등록 → 설치 → 설정
 
@@ -272,7 +274,7 @@ TCP/TLS 단말을 받으려면 같은 컬렉션에 `protocol=TCP`(관례 25061) 
 | `tls_key_path` | cert+key 결합 PEM 이면 **비운다** (스택이 인증서 파일에서 키를 읽는다). 분리 배치면 키 경로를 넣는다 |
 | `tls_ca_path` | 체인 검증이 필요할 때만 |
 
-동봉 `csp.pem` 은 개발·시험용 self-signed 다. 상용은 이 경로의 파일을 교체한다.
+동봉 `csp.pem` 은 개발·시험용 self-signed 다. **단말이 붙는 노드는 §4.5 의 Service CA 인증서로 바꾼다** — 단말은 이 자가서명을 거절한다.
 
 저장 시 CSP 는 SIGUSR1 로 rebind 하므로 재기동이 필요 없다(기동 전이면 이후 start 에 반영).
 리스너 개설이 실패하면 프로세스는 죽지 않고 **`A-PRC-012` 알람으로 격리 보고**된다 —
@@ -381,6 +383,47 @@ realm 이 달라져 등록이 401 로 실패한다.** 바꾼 뒤 해당 번호�
 
 `MCPTT 서비스 공개 URL`(`McpttServer.PublicUrl`)은 **올인원 단일 노드면 비워 둔다** —
 단말/CSP 가 접속해 온 주소에서 유도한다. VIP·NAT·리버스 프록시 뒤라면 반드시 지정한다.
+
+### 4.5 단말 대면 TLS 인증서 — **없으면 단말이 로그인하지 못한다**
+
+단말(Android 앱·Windows 관제조작반)은 **CIMS Service CA** 한 장만 신뢰한다. 설치 직후의
+인증서는 둘 다 그 발급자가 아니다 — CSC 4430 은 agent 가 그룹 CA(`CIMS-OAM-CA`)로 자동
+발급한 것, CSP TLS 는 패키지 동봉 자가서명(`cert/csp.pem`)이다. 이 상태로 단말이 붙으면
+**로그인 단계에서 TLS 핸드셰이크가 끊기고 CSC 로그에는 요청이 한 건도 남지 않는다.** SIP 를
+UDP 로 두어도 풀리지 않는다(막히는 채널은 HTTPS 4430 이다).
+
+절차는 `scripts/service-cert.sh` 가 담당한다(정본
+[sip_tls_signaling.md §8.3](../design/features/sip_tls_signaling.md#83-발급배치-절차--새-노드는-scriptsservice-certsh-로)).
+CA 개인키는 CA 보관 서버(`/home/cims/certs/`)를 떠나지 않는다.
+
+1. **대상 노드**에서 필요한 SAN 을 뽑는다. 설치 전이어도 된다(그때는 hostname·IP 만 잡힌다).
+   ```bash
+   bash service-cert.sh collect              # HOST= / SAN= 출력
+   ```
+2. **CA 보관 서버**에서 발급해 묶음을 만든다. 출력된 HOST/SAN 을 그대로 넘긴다.
+   ```bash
+   scripts/service-cert.sh issue --host <HOST> --san "<SAN>"
+   # → ./service-cert-<HOST>/  +  service-cert-<HOST>.tgz  (현장 반입용. 키가 들어 있어 600)
+   ```
+3. 패키지 설치와 CSC 기동이 끝난 뒤 **대상 노드**에서 서비스 계정(cims)으로 실행한다.
+   ```bash
+   tar xzf service-cert-<HOST>.tgz && bash service-cert-<HOST>/service-cert.sh install
+   ```
+   노드가 요구하는 SAN 을 대조해 부족하면 거절한다(그대로 두면 agent 가 재기동 때 그룹 CA
+   인증서로 덮어쓴다). CSC 는 기존 파일을 백업하고 교체하며 30초 안에 핫리로드된다. CSP 파일은
+   `<prefix>/csp/runtime/cert/` 에 놓이고, 다음 단계가 있어야 CSP 가 그 파일을 쓴다.
+4. `[패키지 설정] > csp > local_nodes` 의 TLS 행(§4.1)에 절대경로를 저장한다. 저장 시 SIGUSR1
+   로 무중단 반영된다.
+   - `tls_cert_path` = `/opt/cims-agent/modules/csp/runtime/cert/csp-chain.pem`
+   - `tls_key_path` = `/opt/cims-agent/modules/csp/runtime/cert/csp.key`
+5. 검증 — 전부 PASS 여야 한다. CSC 를 한 번 재시작한 뒤 다시 돌려 발급자가 유지되는지도 본다.
+   ```bash
+   bash service-cert.sh verify --ip <단말 접속 IP> --csc-port 4430 --csp-port <TLS bind_port>
+   ```
+
+단말은 로그인 화면의 서버 주소를 SAN 에 있는 IP 로 넣는다. Windows 관제조작반은 "서버 인증서
+검증"을 켜고 CA PEM 경로에 묶음의 `cims-service-ca.crt` 를 지정한다. 단말 시계가 틀리면 유효기간
+검사에서 실패한다.
 
 ## 5. 기동 및 확인
 
