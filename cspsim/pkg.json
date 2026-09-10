@@ -1,6 +1,6 @@
 {
   "name": "cspsim",
   "description": "Test Simulator",
-  "version": "0.2.88",
+  "version": "0.2.90",
   "ha_capability": "standalone"
 }
