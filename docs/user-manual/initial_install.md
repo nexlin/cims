@@ -179,7 +179,7 @@ SAN 에 들어간다. 외부망 IP 로 브라우저 접속해도 SAN 불일치�
   (csc·oam-svc)에 그룹 공통 신원으로 주입한다.
 - `CimsRuntimeDir` 은 다르다. oam-svc 는 oam 배포설정에서 유도(`_store_source`)받지만
   **csc 는 받지 못한다** — 비워 두면 컬렉션·IdMS 토큰 경로가 엉뚱하게 잡힌다.
-  §4.2 ① 에서 반드시 설정한다.
+  §4.2 에서 반드시 설정한다.
 - 설정 항목은 대부분 재기동이 필요하다. 값을 다 넣고 패널 하단 **`저장 + 재기동`** 을 쓴다
   (`저장` 만 누르면 파일에만 반영되고 프로세스는 옛 값으로 계속 돈다).
 - 템플릿에 선언되지 않은 키는 저장 시 버려지고 `미저장(템플릿에 없는 키)` 로 보고된다.
@@ -297,30 +297,24 @@ Digest realm 의 근거다.
 `Auth realm` 을 비우면 도메인을 상속한다. `Inbound 정책` `any` 면 `허용 Local Node` 는
 비워 둔다(`restricted` 일 때만 필수).
 
-#### ⚠ 알려진 결함 — `sip_service` 컬렉션 수동 seed 가 필요하다
+#### csc `CimsRuntimeDir` 설정 — CSC 가 이 정의를 읽는 전제
 
-**이 단계까지만 하면 가입자 프로비저닝이 전면 실패한다.** PTT/VoLTE 번호를 추가할 때
-`400 service_ref required to derive ha1 (unknown service)` 가 나온다.
+CSC 는 가입 번호의 SIP 자격 H(A1) = `MD5(imsi@<domain>:<realm>:<passwd>)` 을 만들 때
+domain/realm 을 **이 접속 서비스 정의에서** 찾는다. 그 컬렉션을 어디서 읽을지는 csc 의
+`CimsRuntimeDir` 이 정하므로 비워 두면 빈 목록을 보게 되고, 번호 추가가 실패한다:
 
-CSP·콘솔은 `access_services` 를 쓰지만, **CSC 는 구 컬렉션 `sip_service` 만 읽는다**
-(`csc/src/services/config_cache.py` — `_DOMAIN_BY_ENTITY["service"] = "sip_service"`).
-가입자의 SIP 자격 H(A1) 은 `imsi@<domain>:<realm>:<passwd>` 로 만들어지는데, 그 domain/realm
-을 이 컬렉션에서 찾기 때문에 비어 있으면 유도가 불가능하다. **`sip_service` 를 쓰는 주체는
-어디에도 없다** — 콘솔에도 그 컬렉션 편집 화면이 없다.
+```
+400 service_ref required to derive ha1 (unknown service)
+```
 
-해소에는 **두 단계가 다 필요하다.** 하나만 하면 증상이 그대로다.
-
-##### ① csc `CimsRuntimeDir` 설정 — 이것부터
-
-비워 두면 CSC 가 컬렉션을 **엉뚱한 경로에서** 찾는다. `file_store.runtime_root()` 의 폴백이
-`ServiceLogging.Dir` 의 형제 `../runtime` 인데, 부트스트랩 레이아웃은 `service_log` 가
-`runtime` **안에** 있어서 경로가 겹쳐 나온다.
+비워 두면 `file_store.runtime_root()` 의 폴백이 `ServiceLogging.Dir` 의 형제 `../runtime`
+인데, 부트스트랩 레이아웃은 `service_log` 가 `runtime` **안에** 있어서 경로가 겹쳐 나온다.
 
 ```
 CimsRuntimeDir 미설정
   ServiceLogging.Dir = <prefix>/modules/oam/runtime/service_log
         ../runtime   = <prefix>/modules/oam/runtime/runtime      ← 존재하지 않는 경로
-  → 컬렉션 = .../oam/runtime/runtime/collections/csp/sip_service
+  → 컬렉션 = .../oam/runtime/runtime/collections/csp/access_services
 ```
 
 값을 명시하면 `ha_lookup._collections_base()` 의 판정(`basename=runtime` ∧ `parent=oam` ∧
@@ -328,7 +322,7 @@ CimsRuntimeDir 미설정
 
 ```
 CimsRuntimeDir = <prefix>/modules/oam/runtime
-  → 컬렉션 = <prefix>/modules/csp/runtime/collections/sip_service
+  → 컬렉션 = <prefix>/modules/csp/runtime/collections/access_services
 ```
 
 **콘솔 위치** — `[패키지 설정]` → `csc` 모듈 탭 → **`서비스 로그`** 섹션 →
@@ -338,30 +332,8 @@ CimsRuntimeDir = <prefix>/modules/oam/runtime
 > **컬렉션 읽기 경로를 함께** 정한다. 같은 섹션의 `서비스 로그 루트`와 혼동하지 말 것:
 > 넣을 값은 그 한 단계 위(`/service_log` 없이)다.
 >
-> 이 값은 결함 우회와 **무관하게 반드시 설정해야 한다.** 비우면 IdMS 토큰도 없는 경로에
-> 쌓으려 하고, 버전 디렉터리로 유도되면 업그레이드마다 전 단말 재로그인이 된다.
-
-##### ② `sip_service` 컬렉션 seed
-
-`access_services` 를 미러링해 손으로 넣는다. `name`·`domain` 이 §4.2 에서 만든 접속 서비스와
-**정확히 같아야** 한다.
-
-```bash
-sudo install -o <서비스계정> -g <서비스계정> -d <prefix>/modules/csp/runtime/collections/sip_service
-```
-
-서비스마다 `<n>.json` 을 하나씩 둔다 (`file_store` 가 디렉터리의 `*.json` 을 전부 읽는다).
-
-```json
-{ "id": 1, "name": "mcptt", "kind": "ptt",
-  "domain": "ptt.cims.example.kr", "auth_realm": "",
-  "inbound_policy": "any", "priority": 100, "enabled": true, "note": "",
-  "listeners": ["access-udp"] }
-```
-
-소유자는 서비스 계정, 모드 `660`. **넣은 뒤 `csc` 를 재기동한다** — 설정 캐시는 기동 시
-`file_store` 에서 1회 로드되고, `refresh_entity()` 는 CSC 자기 write 경로에서만 호출되므로
-(`csc/src/services/mcptt.py`) 외부가 넣은 파일은 재기동으로만 반영된다.
+> 비우면 IdMS 토큰도 없는 경로에 쌓으려 하고, 버전 디렉터리로 유도되면 업그레이드마다
+> 전 단말 재로그인이 된다.
 
 ##### 확인
 
@@ -371,8 +343,9 @@ sudo install -o <서비스계정> -g <서비스계정> -d <prefix>/modules/csp/r
 mysql -u<앱계정> -p<비번> <db> -e "SELECT id, imsi, service_ref, LEFT(ha1,10) FROM ptt_subscriptions;"
 ```
 
-접속 서비스를 나중에 바꾸면 **두 곳을 함께 고쳐야 한다** — 이 미러가 어긋나면 이미 발급된
-H(A1) 과 CSP 가 계산하는 realm 이 달라져 등록이 401 로 실패한다.
+접속 서비스의 `domain`/`auth_realm` 을 나중에 바꾸면 **이미 발급된 H(A1) 과 CSP 가 계산하는
+realm 이 달라져 등록이 401 로 실패한다.** 바꾼 뒤 해당 번호를 다시 저장해 H(A1) 을 재발급한다.
+
 
 ### 4.3 그 밖의 CSP 설정
 
@@ -551,11 +524,11 @@ curl -sk https://<관리IP>:4419/api/v1/deployments -H "Authorization: Bearer <�
 | agent 설치 단계 실패 | `<prefix>/modules/oam/current/log/agent_install.log`. ⑥은 자기 OAM 에 HTTPS 로 붙는 단계라 OAM 기동 여부·포트를 먼저 본다 |
 | `db_bootstrap.py` 관리자 접속 실패 | TCP 전용이다. `unix_socket` 환경이면 §1 의 (a) 또는 (b) |
 | CSP `status=failed`, 로그에 `no primary local_node` | §4.1 — `local_nodes` 에 `is_primary=true` 행이 없음 |
-| 번호 추가 시 `400 service_ref required to derive ha1 (unknown service)` | §4.2 — ① csc `CimsRuntimeDir`(콘솔 `서비스 로그 > IdMS 토큰 store`)이 비어 있으면 컬렉션을 `<store>/runtime/runtime/…` 에서 찾는다 ② `sip_service` 컬렉션 미러가 없다. **둘 다** 해야 한다 |
-| csc 가 컬렉션·IdMS 토큰을 엉뚱한 경로에서 찾음 | `CimsRuntimeDir` 미설정 시 폴백이 `ServiceLogging.Dir` 의 형제 `../runtime` 인데, 부트스트랩 레이아웃은 `service_log` 가 `runtime` 안에 있어 `runtime/runtime` 이 된다. §4.2 ① |
+| 번호 추가 시 `400 service_ref required to derive ha1 (unknown service)` | §4.2 — csc `CimsRuntimeDir`(콘솔 `서비스 로그 > IdMS 토큰 store`)이 비어 있으면 접속 서비스 컬렉션을 `<store>/runtime/runtime/…` 에서 찾아 빈 목록이 된다. 다음으로 `service_ref` 가 §4.2 의 접속 서비스 이름과 같은지 확인한다 |
+| csc 가 컬렉션·IdMS 토큰을 엉뚱한 경로에서 찾음 | `CimsRuntimeDir` 미설정 시 폴백이 `ServiceLogging.Dir` 의 형제 `../runtime` 인데, 부트스트랩 레이아웃은 `service_log` 가 `runtime` 안에 있어 `runtime/runtime` 이 된다. §4.2 |
 | floor 만 실패 (`GRANT timeout`), 등록·호는 정상 | §6.1 — cspsim `-local_ip` 미지정으로 SDP 주소 ≠ 실제 출발지. CMP 로그에 `Floor from unknown` |
 | CSP 는 떴고 리스너도 열렸는데 UE 가 등록되지 않음 | §4.4 — csc `SIP 포트` 가 기본값 **15060** 으로 남아 CSP 리스너(5060)와 어긋난 경우가 가장 흔하다. 다음으로 `access_services` 도메인 ↔ UE 프로비저닝 도메인 불일치, `local_nodes` bind IP 가 단말이 보는 주소인지 |
-| 등록이 401 로 실패 | `sip_service` 미러의 `domain`/`auth_realm` 이 `access_services` 와 어긋나면 H(A1) 과 CSP 의 realm 계산이 달라진다. 두 곳을 맞춘 뒤 번호를 다시 저장(H(A1) 재발급) |
+| 등록이 401 로 실패 | 접속 서비스의 `domain`/`auth_realm` 을 번호 발급 뒤에 바꾸면 저장된 H(A1) 과 CSP 의 realm 계산이 달라진다. 값을 맞춘 뒤 번호를 다시 저장(H(A1) 재발급). 단말이 보내는 도메인(§4.4 자동 프로비저닝)도 같은 값이어야 한다 |
 | TCP/TLS 로 붙는 UE 만 실패 | csc `SIP TCP/TLS 포트` 가 0 이면 단말에 그 transport 를 광고하지 않거나(TLS) UDP 포트로 시도한다(TCP). §4.4 |
 | TLS 리스너가 안 열림 (`A-PRC-012`) | §4.1 — TLS 행의 `tls_cert_path` 미지정. 로그: `AddTlsListener: no certificate` |
 | 설정을 저장했는데 반영되지 않음 | 모듈 설정 파일은 기동 시점에 써진다. `저장 + 재기동` 을 쓴다 |
