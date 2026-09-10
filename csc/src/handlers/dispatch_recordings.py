@@ -67,6 +67,13 @@ def _http(config: dict) -> requests.Session:
     return _client
 
 
+def _oam_headers(accept: str) -> dict:
+    """OAM 호출 헤더 — 이력·녹취 API 는 role ≥ monitor 인증 게이트라 공유 시크릿 서비스 토큰을 붙인다
+    (services/admin_auth.service_token). 매 호출 발급(단기 exp) — 캐시 없음."""
+    from services import admin_auth as _aa
+    return {'Accept': accept, 'Authorization': 'Bearer ' + _aa.service_token('monitor')}
+
+
 def _parts(full_path: str):
     path = urlparse(full_path).path
     if not path.startswith(_BASE + '/'):
@@ -169,7 +176,7 @@ async def handle_recordings(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
     params = {k: (v[0] if isinstance(v, list) else v) for k, v in qp.items() if k in ('slot', 'retry')}
     url = _oam_base(config) + path
     try:
-        r = _http(config).get(url, params=params, headers={'Accept': '*/*'}, timeout=_TIMEOUT)
+        r = _http(config).get(url, params=params, headers=_oam_headers('*/*'), timeout=_TIMEOUT)
     except requests.RequestException as e:
         logger.log_error(f"[provisioning/recordings] OAM unreachable {url}: {e}")
         return _json(502, {'error': 'oam_unreachable', 'detail': str(e)})
@@ -220,7 +227,7 @@ def fetch_ptt_sessions(config: dict, since_dt, until_dt, group_keys: set):
         params["from"], params["to"] = f, t
     url = _oam_base(config) + "/api/v1/ptt/sessions"
     try:
-        r = _http(config).get(url, params=params, headers={'Accept': 'application/json'}, timeout=_TIMEOUT_INDEX)
+        r = _http(config).get(url, params=params, headers=_oam_headers('application/json'), timeout=_TIMEOUT_INDEX)
     except requests.RequestException as e:
         logger.log_warning(f"[provisioning/history] OAM ptt index unreachable {url}: {e} — falling back to file scan")
         return None
@@ -290,8 +297,8 @@ async def handle_ptt_session_detail(handler_args: HandlerArgs, kwargs: dict) -> 
 
     base = _oam_base(config) + f"/api/v1/ptt/history/{quote(group_key, safe='')}/{quote(ses_dir, safe='')}"
     try:
-        r1 = _http(config).get(base, headers={'Accept': 'application/json'}, timeout=_TIMEOUT_INDEX)
-        r2 = _http(config).get(base + "/floor", headers={'Accept': 'application/json'}, timeout=_TIMEOUT_INDEX)
+        r1 = _http(config).get(base, headers=_oam_headers('application/json'), timeout=_TIMEOUT_INDEX)
+        r2 = _http(config).get(base + "/floor", headers=_oam_headers('application/json'), timeout=_TIMEOUT_INDEX)
     except requests.RequestException as e:
         logger.log_error(f"[provisioning/history/ptt] OAM unreachable {base}: {e}")
         return _json(502, {'error': 'oam_unreachable', 'detail': str(e)})

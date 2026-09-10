@@ -139,6 +139,16 @@ bool CTasModule::TryPickupDial( const char *pszCallId, const char *pszFrom, cons
 //   local = entity 자신, remote = 상대 leg 의 원단, direction = 개시자면 initiator (RFC 4235 §4.1).
 //   picker 는 착신자 entity 의 dialog id(B-leg Call-ID)를 Replaces 대상으로 쓴다.
 void CTasModule::NotifyDialogState( const char *pszCallId, const char *pszState ) {
+    {
+        // PTT 세션 fan-out leg 도 CallMap 에 있다 — 그 dialog 는 세션 URI·<mcptt> 확장으로 CGroupCallService 가 낸다
+        //   (dispatch_center.md §5.6a). 확립·종료는 OnCallStarted/OnCallTerminated 가 스스로 내고, 18x 만 여기서 위임.
+        std::string strPttGroup, strPttMember;
+        if ( gclsGroupCallService.GetGroupCallSession( pszCallId, strPttGroup, strPttMember ) ) {
+            if ( pszState && strcmp( pszState, "early" ) == 0 )
+                gclsGroupCallService.NotifyPttDialog( pszCallId, "early" );
+            return;
+        }
+    }
     CallLegParty clsThis, clsPeer;
     if ( !gclsCallMap.ResolveLegParties( pszCallId, clsThis, clsPeer ) ) return;
     const CallLegParty *arr[2] = { &clsThis, &clsPeer };
@@ -1084,6 +1094,34 @@ bool CTasModule::AdvanceSequential( CTasForkSet &clsSet ) {
         }
     }
     return false;
+}
+
+// 대표번호 발신 표시 (dispatch_center.md §4.7 — TS 24.239 FA 그룹원의 pilot 신원 발신). 발신 INVITE 의
+//   P-Preferred-Identity(RFC 3325) 가 발신자가 속한 관제 그룹의 대표번호면 B-leg 의 From(= psip 가 같은 값으로 넣는
+//   P-Asserted-Identity)을 대표번호로 낸다 — 착신자는 대표번호를 보고, 회신은 대표번호 포크로 돌아온다. 등록·인가된
+//   신원이 아닌 PPI 는 TS 24.229 §5.4.3.2 대로 무시하고 기본 신원(발신자 자신)을 쓴다. CallMap·CDR·dialog 당사자는
+//   실제 발신자 그대로 — 표시 신원만 바뀐다.
+std::string CTasModule::ResolveOriginatingIdentity( const char *pszFrom, CSipMessage *pclsMessage ) {
+    std::string strFrom = pszFrom ? pszFrom : "";
+    if ( !pclsMessage || strFrom.empty() ) return strFrom;
+    CSipHeader *pclsPpi = pclsMessage->GetHeader( "P-Preferred-Identity" );
+    if ( pclsPpi == NULL || pclsPpi->m_strValue.empty() ) return strFrom;
+    CSipFrom clsPpi;
+    if ( clsPpi.Parse( pclsPpi->m_strValue.c_str(), (int)pclsPpi->m_strValue.size() ) <= 0 ) return strFrom;
+    std::string strPref = clsPpi.m_clsUri.m_strUser;
+    if ( strPref.empty() && strcasecmp( clsPpi.m_clsUri.m_strProtocol.c_str(), "tel" ) == 0 )
+        strPref = clsPpi.m_clsUri.m_strHost;  // tel: 은 번호가 host 자리에 파싱된다
+    if ( strPref.empty() || strPref == strFrom ) return strFrom;
+    CspDispatchGroup clsGroup;
+    if ( gclsDispatchGroupMap.SelectForUser( strFrom.c_str(), clsGroup ) && clsGroup.HasPilot() &&
+         clsGroup.m_strPilotId == strPref ) {
+        CLog::Print( LOG_INFO, "TAS: originating identity %s → pilot %s (P-Preferred-Identity, dispatch group %s)",
+                     strFrom.c_str(), strPref.c_str(), clsGroup.m_strId.c_str() );
+        return strPref;
+    }
+    CLog::Print( LOG_INFO, "TAS: P-Preferred-Identity %s from %s is not an authorised identity — ignored",
+                 strPref.c_str(), strFrom.c_str() );
+    return strFrom;
 }
 
 bool CTasModule::TryDispatchPilot( const char *pszCallId, const char *pszFrom, const char *pszTo, CSipCallRtp *pclsRtp,

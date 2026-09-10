@@ -7,7 +7,7 @@
 //   · 화자별 파형 레인 — floor 이벤트 없이 "누가 언제 말했나"를 보여주는 유일한 수단
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { recordingsApi, type RecordingSegment, type SegmentTrack } from '../api/recordings'
-import { waitSegmentReady } from './useInlineAudio'
+import { fetchMediaReady, setMediaSrc } from './useInlineAudio'
 
 interface Props {
   recordingId: string
@@ -77,10 +77,10 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
     setErr(''); setPrep(true)
     ;(async () => {
       try {
-        await waitSegmentReady(url, ac.signal)
-        if (ac.signal.aborted) return
+        const objUrl = await fetchMediaReady(url, ac.signal)
+        if (ac.signal.aborted) { URL.revokeObjectURL(objUrl); return }
         setPrep(false)
-        el.src = url
+        setMediaSrc(el, objUrl)
         if (wasPlaying) el.play().catch(() => {})
       } catch (e) {
         if (!ac.signal.aborted) {
@@ -93,7 +93,11 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recordingId, segment.seq, sel])
 
-  useEffect(() => () => { abortRef.current?.abort() }, [])
+  useEffect(() => () => {
+    abortRef.current?.abort()
+    const src = audioRef.current?.getAttribute('src')
+    if (src && src.startsWith('blob:')) URL.revokeObjectURL(src)
+  }, [])
 
   const toggle = () => {
     const el = audioRef.current

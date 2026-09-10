@@ -69,6 +69,19 @@ def verify_admin_jwt(token: str) -> Optional[dict]:
         return None
 
 
+def service_token(role: str = 'monitor', ttl_sec: int = 120, sub: str = 'csc') -> str:
+    """서버 간 호출용 단기 서비스 토큰 — OAM 이력·녹취 API(role ≥ monitor 게이트)를 CSC 관제 프록시
+    (handlers/dispatch_recordings)가 부를 때 붙인다. 콘솔 admin JWT 와 같은 시크릿(CimsAuth.JwtSecret)·
+    알고리즘·클레임 형태(sub/login_id/role)라 OAM 은 별도 경로 없이 require_role 로 검증한다.
+    가입자 게이트(범위·감사)는 CSC 가 이미 수행했으므로 OAM 쪽 신원은 서비스 주체 하나다."""
+    import time
+    now = int(time.time())
+    payload = {'sub': sub, 'login_id': f'{sub}-service', 'role': role, 'svc': sub,
+               'iat': now, 'exp': now + max(30, int(ttl_sec))}
+    tok = jwt.encode(payload, _SECRET, algorithm='HS256')
+    return tok.decode('utf-8') if isinstance(tok, bytes) else tok
+
+
 def extract_admin_jwt(headers: dict) -> Optional[dict]:
     """Authorization Bearer 헤더에서 JWT 추출 후 검증."""
     auth = headers.get('authorization', '') if headers else ''

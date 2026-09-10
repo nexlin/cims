@@ -144,7 +144,9 @@ REGISTER 수신
 
 **SIP 헤더 주입 (IMS 규격 준수):**
 
-REGISTER 200 OK 와 B2BUA 발신 INVITE 에 `P-Asserted-Identity`(`<sip:user@domain>`)를 주입한다.
+REGISTER 200 OK 와 B2BUA 발신 INVITE 에 `P-Asserted-Identity`(`<sip:user@domain>`)를 주입한다. 발신 INVITE 의
+`P-Preferred-Identity` 는 관제 그룹원이 자기 그룹 대표번호를 제시한 경우에만 B-leg From/PAI 로 채택하고(TAS
+`ResolveOriginatingIdentity`, [dispatch_center.md §4.7](../features/dispatch_center.md)), 그 외는 무시한다(TS 24.229 §5.4.3.2).
 
 **Static 헬퍼:**
 

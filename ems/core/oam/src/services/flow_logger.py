@@ -3155,7 +3155,23 @@ async def _handle_ptt_sessions(handler_args: HandlerArgs, kwargs: dict) -> Handl
     }, ensure_ascii=False), media_type="application/json")
 
 
-FLOW_HANDLER_LIST = [
+def _guarded(handler, min_role: str = 'monitor'):
+    """이력·flow 조회 핸들러의 인증 게이트 — 콘솔 admin JWT(공유 CimsAuth.JwtSecret) 역할 ≥ min_role.
+    게이트웨이는 Authorization 을 전달만 하므로(handlers/gateway.py) 각 핸들러가 독립 검증한다.
+    CSC 관제 프록시(dispatch_recordings)는 같은 시크릿으로 서명한 서비스 토큰(role=monitor)으로 호출한다."""
+    from services.admin_auth import require_role
+
+    async def _wrapped(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+        _, err = require_role(handler_args, min_role)
+        if err:
+            return err
+        return await handler(handler_args, kwargs)
+    _wrapped.__name__ = getattr(handler, '__name__', 'flow_handler')
+    _wrapped.__doc__ = getattr(handler, '__doc__', None)
+    return _wrapped
+
+
+FLOW_HANDLER_LIST = [(path, _guarded(h), kw) for path, h, kw in [
     ("/api/v1/flow/body", _handle_flow_body, {}),
     ("/api/v1/flow/register/list", _handle_register_list, {}),
     ("/api/v1/flow/user", _handle_user_flow, {}),
@@ -3167,7 +3183,7 @@ FLOW_HANDLER_LIST = [
     ("/api/v1/ptt/history", _handle_ptt_history, {}),
     ("/api/v1/security/abnormal-sessions", _handle_abnormal_sessions, {}),
     ("/api/v1/messages", _handle_messages, {}),
-]
+]]
 
 
 # ── API 문서 (개발자 모드) ──────────────────────────────────────────────────

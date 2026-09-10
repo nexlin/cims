@@ -468,13 +468,17 @@ CREATE TABLE recording_segments (
 GET    /api/v1/recordings                          목록 조회
 GET    /api/v1/recordings/{id}                     상세 (메타 + 세그먼트)
 GET    /api/v1/recordings/{id}/audio               음성 (on-demand 변환 후 스트리밍)
-GET    /api/v1/recordings/{id}/video?side=a|b       영상 (on-demand 변환 후 스트리밍)
 GET    /api/v1/recordings/{id}/segments            PTT 세그먼트 목록
 GET    /api/v1/recordings/{id}/segments/{seq}/audio[?slot=K]  세그먼트 음성 (믹스 / 슬롯 단독)
 GET    /api/v1/recordings/{id}/segments/{seq}/video[?slot=K]  세그먼트 영상
 GET    /api/v1/recordings/{id}/segments/{seq}/peaks[?slot=K]  파형 피크 배열
 DELETE /api/v1/recordings/{id}                     삭제 (raw + converted 모두)
 ```
+
+인증 — 조회·재생은 콘솔 admin JWT `role ≥ monitor`, 삭제는 `manager`(핸들러가 직접 검증 — 게이트웨이는 헤더를 전달만
+한다). 콘솔은 미디어 element 에 URL 을 직접 주지 않고 **토큰을 붙인 fetch → Blob URL** 로 재생한다(`fetchMediaReady`,
+202 변환 대기 폴링 포함). 관제 앱은 CSC `/provisioning/recordings/*` 프록시만 쓰며, CSC 는 공유 `CimsAuth.JwtSecret` 로
+서명한 단기 서비스 토큰(role=monitor)으로 OAM 을 부른다. 세션 레벨 `/video` 는 없다(세그먼트 `/segments/{seq}/video` 만).
 
 `slot` 미지정 = **믹스**(화자 전원 합성), `slot=K` = 슬롯 K 화자 단독본 (§3.6.3).
 

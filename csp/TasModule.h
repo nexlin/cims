@@ -108,6 +108,11 @@ public:
     bool TryDispatchPilot( const char *pszCallId, const char *pszFrom, const char *pszTo, CSipCallRtp *pclsRtp,
                            CSipMessage *pclsMessage );
 
+    /** 대표번호 발신 표시 (dispatch_center.md §4.7) — 발신 INVITE 의 P-Preferred-Identity 가 발신 그룹원의 관제 그룹
+     *  대표번호면 B-leg From/P-Asserted-Identity 에 쓸 신원 = 대표번호, 아니면 발신자 자신(TS 24.229 §5.4.3.2 —
+     *  인가되지 않은 PPI 는 무시). ModuleDispatcher 가 VoLTE B2BUA CreateCall 직전에 호출한다. */
+    std::string ResolveOriginatingIdentity( const char *pszFrom, CSipMessage *pclsMessage );
+
     /** 1초 주기 — 포크 집합 무응답(no_answer_sec) 판정 → overflow 또는 480 (§4.4). */
     void Tick();
 

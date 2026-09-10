@@ -48,10 +48,15 @@ export function onElevationChange(f: () => void): () => void {
   return () => { _elevListeners.delete(f) }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+// 현재 세션 토큰의 Authorization 헤더 — JSON 이 아닌 요청(미디어 fetch 등)이 같은 자격을 붙일 때 쓴다.
+// 서버 이력·녹취 API 는 role ≥ monitor 인증 게이트라 <audio src> 직접 지정으로는 재생되지 않는다.
+export function authHeaders(): Record<string, string> {
   const token = (elevationActive() && _elevated) ? _elevated.token : getToken()
-  if (token) headers['Authorization'] = `Bearer ${token}`
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...authHeaders() }
 
   const res = await fetch(buildApiUrl(path), {
     method,

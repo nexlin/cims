@@ -251,6 +251,23 @@ relay 는 대표번호 호 1건이다. `RELAY_ADD` 의 `callee` 는 대표번호
 
 ---
 
+### 4.7 대표번호 발신 표시 (P-Preferred-Identity = pilot)
+
+관제사가 **대표번호로 걸 때**(민원인이 관제석 개인 번호가 아닌 대표번호를 보고, 회신이 대표번호 포크로 돌아오게)
+는 TS 24.239 FA 그룹원의 pilot 신원 발신이다. 단말은 발신 INVITE 에 `P-Preferred-Identity: <sip:+821310001000@volte…>`
+(RFC 3325, `tel:` 도 수락)를 싣는다. CSP(TAS `ResolveOriginatingIdentity`, B2BUA `CreateCall` 직전)는:
+- PPI 의 신원이 **발신자가 속한 관제 그룹의 `pilot_id`** 이면 B-leg 의 `From` 을 대표번호로 낸다 — psip 는 B-leg
+  `P-Asserted-Identity` 를 From 과 같은 값으로 넣으므로 착신자(내부 단말·트렁크)는 대표번호를 본다.
+- 그 외의 PPI(다른 그룹의 대표번호·타인 번호)는 TS 24.229 §5.4.3.2 대로 **무시**하고 기본 신원(발신자 자신)으로 낸다
+  (403 이 아니다 — 등록·인가된 신원이 아닌 PPI 는 기본 신원으로 대체). 인가 = 그룹 멤버십 하나(대표번호 착신을 받는
+  사람이 대표번호로 걸 수 있다). 별도 플래그는 두지 않는다.
+- **표시 신원만 바뀐다**: CallMap 당사자·CDR(`call_log`)·세션 이력·dialog 이벤트(§4.5 `NotifyDialogState` 의
+  `CallLegParty`)는 실제 발신자다 — 그룹원 띠에는 "관제1석 통화 중" 으로, 착신자에게는 대표번호로 보인다.
+- 대표번호로 나간 호의 회신은 §4.1 의 일반 대표번호 착신(포크)이다.
+
+앱: 빠른 발신 줄의 "대표번호로 발신" 토글([dispatch_desktop_ui.md §4.3](dispatch_desktop_ui.md)) — `dispatch.pilotId` 가
+있을 때만 노출. SDK 는 INVITE 헤더 추가(`makeCall` 옵션)로 싣는다.
+
 ## 5. 업무망 합법감청 (통화 청취)
 
 ### 5.1 모델과 규격상 위치
@@ -416,14 +433,51 @@ function, `CscfModule` SUBSCRIBE 초기 구독)는 구독자를 그룹 문서(TS
 - **비멤버 관제사** = 청취 leg 와 같은 2단 인가(자격 `allow_ambient_listening` + 범위 `ptt_listen`)를 같은 요소의 해석으로
   두어 **합류 전 사전 모니터링 구독**을 허용한다(규격 흐름은 "세션 참가자"의 구독이고 청취 leg 로 합류한 관제사는
   참가자이므로 규격 그대로 — 합류 전 구독만 CIMS 확장). 프로파일 부재·DB 불가는 불허(fail-closed).
-- 즉석 세션(`adhoc-`/`priv-`)은 그룹 문서가 없고 참가자 = fan-out 대상이라 게이트 없음. in-dialog refresh 는 재검사하지
-  않는다(RFC 6665 — 자원·이벤트 불변). 구독자에게 가는 로스터는 `listen_visibility` 규칙 그대로(청취 leg 은닉/공개).
+- 즉석 세션(`adhoc-`/`priv-`)은 그룹 문서가 없다 — 참가자(fan-out 대상)는 허용, 그 외는 §5.6a 의 즉석 세션 관측
+  인가(자격 + 참가자 `monitor_scope`). in-dialog refresh 는 재검사하지 않는다(RFC 6665 — 자원·이벤트 불변). 구독자에게
+  가는 로스터는 `listen_visibility` 규칙 그대로(청취 leg 은닉/공개).
 - 검증 = `S3-SCN-PTT-LISTEN` L1b(범위 안 200)·L2b/L3b(403 + Warning 138) — cspsim `ptt_listen` 이 합류 전 M 의 conference
   SUBSCRIBE 결과를 `M_conf_sub`/`M_conf_warn` 마커로 낸다.
 
 TS 24.379 **ambient listening**(`session-type=ambient-listening`, remote-init — 특정 단말 주변음을
 원격 개시로 듣는 1:1 호)은 같은 `allow_ambient_listening` 자격을 재사용하되 단말의 무표시 자동응답이
 필요해 시그널링은 별도 과제다(§10).
+
+### 5.6a PTT 세션 가시성 — 타인 간 사설콜·애드혹 (dialog 이벤트, RFC 4235)
+
+관제 앱 ② 범위 채널의 "타인 세션"([dispatch_desktop_ui.md §4.2](dispatch_desktop_ui.md))은 **관제 범위 안 사람들이
+지금 어떤 PTT 세션에 참가 중인가**다. 사설콜(`priv-<발신>-<착신>`)·애드혹(`adhoc-…`)은 PTT 그룹이 아니라 **사람 사이의
+세션**이라 그룹 AoR 구독(§5.6)으로는 알 수 없다. 규격에 제3자 관측 절차가 없으므로 VoLTE 통화 감시와 **같은 패키지·
+같은 인가**로 푼다: 관제 앱이 범위 안 사람의 **PTT 회선 AoR 에 `Event: dialog` 를 구독**한다(대상 = `/provisioning/me`
+`dispatch.members[].pttId`, VoLTE 회선 `volteAor` 와 나란히). 인가는 §5.2 `CanWatch` 그대로 — 감시자·대상 모두
+`EffectiveGroupOf`(PTT 회선은 파생 `ptt_subscriptions.pickup_group`, §5.6)로 그룹을 얻어 `monitor_scope` 로 판정한다
+(`CscfModule` SUBSCRIBE 초기 구독, VoLTE 와 같은 코드).
+
+**dialog 본문 (PTT 회선)** — `CGroupCallService` 가 참가 leg 마다 dialog 1건을 낸다(`SendPttDialogEventNotify`,
+`CollectPttDialogs` 초기 full 스냅샷):
+- `entity`/`<local>` = 참가자 PTT 회선(`sip:+82…@<PTT 도메인>` — 도메인은 감시 대상 회선의 서비스 종류로 정한다,
+  `DialogDomainSuffixFor`), `id` = 참가자 leg Call-ID, `direction` = 개시자 `initiator` / fan-out 초대 `recipient`.
+- `<remote><identity>` = **세션 URI** `sip:<group id>@<PTT 도메인>`(`priv-…`·`adhoc-…`·`g002`) — UE 의 dialog 상대는
+  focus(PTT-AS)이므로 RFC 4235 §4.1.6 그대로다. 앱은 같은 remote 를 가진 dialog 를 한 세션으로 묶는다(참가자 = 감시
+  중인 회선 중 그 세션에 있는 사람).
+- dialog 안의 확장 요소(RFC 4235 §4.1 `xs:any ##other`)
+  `<mcptt xmlns="urn:cims:xml:ns:dialog-info:mcptt" session-type="private|adhoc|prearranged|chat|broadcast"
+  session-id="priv-…" initiator="+82…" emergency="false" imminent-peril="false"/>` — 카드의 종류 배지·개시자·긴급 표시.
+- 상태: fan-out 18x `early` → 200/개시자 accept `confirmed` → BYE·세션 해제·등록 해제·미디어 노드 다운 `terminated`
+  (`OnCallStarted`/`OnCallTerminated`/`ClearUserCall`/`TerminateGroupLocal`/pending 취소 전부). **청취 leg(recvonly)는
+  내지 않는다** — 참가가 아니고, 은닉 정책과 무관하게 일관되게 뺀다. TAS 의 `NotifyDialogState` 는 PTT 세션 leg
+  (`GetGroupCallSession`)를 만나면 여기로 위임한다(종전에는 VoLTE 도메인·remote 없는 반쪽 dialog 가 나갔다).
+- 그룹 세션(멤버 그룹)도 같은 규칙으로 나간다 — 앱은 remote 가 멤버/청취 범위 그룹이면 ①/② 카드의 참가 정보로 흡수하고,
+  `priv-`/`adhoc-` 이면 타인 세션 카드로 그린다. `members[]` 에는 `monitor_scope=all` 일 때 **PTT 전용 가입자**(VoLTE 회선
+  없음, `volteAor=""`)도 실린다 — 현장 PTT 단말 간 사설콜이 보이려면 그 회선을 구독해야 한다.
+
+**즉석 세션의 참가자 명단·청취** — 세션 URI 를 알게 된 관제사가 `Event: conference` 구독(로스터)·`a=recvonly` 합류(청취)를
+하면 CSP 는 **즉석 세션 관측 인가** `CGroupCallService::CanObserveEphemeral` 로 판정한다: 참가자(fan-out 대상)는 항상 허용,
+그 외는 자격 `allow_ambient_listening`(§5.6 과 같은 TS 24.484 자격) **+ 참가자 중 한 명의 관제 그룹이 관측자의
+`monitor_scope` 안**(`CanWatch` — VoLTE Join 의 "어느 한 당사자 범위 안" 과 같은 규칙). 즉석 세션에는 그룹 문서·
+`ptt_listen` 대상 항목이 없으므로 `ptt_listen` 축을 쓰지 않는다. 불허는 conference 403 + `Warning: 138`, 청취 INVITE
+403(사유 `ephemeral …`, 감사 `denied`). 종전 "즉석 세션은 게이트 없음" 은 폐기 — 세션 id 를 아는 것만으로 타인의
+사설콜 로스터가 열리지 않는다.
 
 ### 5.7 감사 이벤트 (G8)
 
@@ -678,10 +732,12 @@ csp.json `sections.tas` 신규 키:
 
 관제용 앱은 `/provisioning/me` 의 `dispatch` 블록으로 자기 데스크(그룹·대표번호·범위)와 **감시 대상**을 안다
 (계약 정본 [android_ue_provisioning.md §3](android_ue_provisioning.md)):
-- `members[]` = dialog 감시(§5.2) 대상 — CSC 가 `monitor_scope` 를 CSP `CanWatch` 와 같은 규칙으로 해석한 VoLTE
-  가입자(자기 그룹원 항상 + `listed` 대상 그룹원 / `all` 전 가입자). 항목 `userId·name·volteAor·pttId·extension·groupId` —
-  ③ 그룹원 상태 띠는 `groupId == dispatch.groupId` 인 항목, 나머지는 감시 전용. `extension` 은 가입 번호 끝자리
-  (`Provisioning.ExtensionDigits`, 기본 4)로 망 주소가 아닌 표시 라벨.
+- `members[]` = dialog 감시(§5.2) 대상 — CSC 가 `monitor_scope` 를 CSP `CanWatch` 와 같은 규칙으로 해석한
+  가입자(자기 그룹원 항상 + `listed` 대상 그룹원 / `all` 전 가입자 — `all` 에는 VoLTE 회선 없는 PTT 전용 가입자도
+  `volteAor=""` 로 실린다). 항목 `userId·name·volteAor·pttId·extension·groupId` — 앱은 `volteAor`(통화)와 `pttId`(PTT
+  세션 참가, §5.6a) **둘 다** 비어 있지 않으면 dialog 를 구독한다. ③ 그룹원 상태 띠는 `groupId == dispatch.groupId` 인
+  항목, 나머지는 감시 전용. `extension` 은 가입 번호 끝자리(`Provisioning.ExtensionDigits`, 기본 4)로 망 주소가 아닌
+  표시 라벨.
 - `pttTargets[]` = conference 구독·청취(§5.6) 대상 — `ptt_listen` 을 `CanListenPtt` 와 같은 규칙으로 해석한 PTT 그룹
   (`id·uri(tel:)·name`). GMS 멤버 그룹과 겹치면 앱이 id 로 병합.
 - `etag`(블록) + 응답 `ETag`/`If-None-Match` 304 — 주기 재조회로 편성 변경(그룹원·대상 추가/제거)을 따라간다.
@@ -748,8 +804,8 @@ S3-SEED 가 관제 그룹 2개(대표번호 있는 `dg-verify-a`: A 제외 B·C�
 - **3GPP LI 핸드오버(HI2/HI3·LEMF)** — 외부 사법기관 인도가 요구되면 별도 LI 게이트웨이(§5.8). 본 설계 범위 밖.
 - **관제사 겸임(N:M 멤버십)** — 채택하지 않는다(§3.2 확정). 겸임 요구는 `overflow_target`·지정 픽업으로
   흡수한다.
-- **RFC 4662 RLS** 목록 구독(§5.2 표준형), **큐/ACD**(대기열·순번 안내), 대표번호 **발신 표시**(관제사가
-  대표번호로 걸 때 `P-Preferred-Identity`=pilot).
+- **RFC 4662 RLS** 목록 구독(§5.2 표준형 — PTT 회선 dialog 구독(§5.6a)까지 더해 구독 수가 회선 ×2 로 늘어 우선순위가
+  올라간다), **큐/ACD**(대기열·순번 안내).
 - Android UE 의 Join 발신·SSRC 디먹스 UI — 서버 완성 후 단말 파트.
 
 ---

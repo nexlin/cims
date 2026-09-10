@@ -226,7 +226,8 @@
 ### 4.2 ② 범위 채널 (상단 가운데)
 
 **소스**: 프로비저닝 `dispatch.pttTargets[]`(청취 범위 그룹 — conference 구독 → 진행/참가자 수/발언자) · `GET /provisioning/directory/groups` 의 관리 범위·내 소유
-그룹(멤버·청취 범위가 아니면 세션 상태 없음) · **타인 간 사설콜·애드혹 세션**(관제 범위 안 — 서버 과제, §13). 내 멤버 그룹과 내가 건 세션은 여기 없다(①).
+그룹(멤버·청취 범위가 아니면 세션 상태 없음) · **타인 간 사설콜·애드혹 세션**(관제 범위 안 — `dispatch.members[].pttId` dialog 구독, 서버 계약
+[dispatch_center.md §5.6a](dispatch_center.md); 앱 구현은 §13). 내 멤버 그룹과 내가 건 세션은 여기 없다(①).
 
 - **머리**: `[전체|활성|긴급|청취|관리] [검색]` — 필터·검색은 **이 패널에만** 걸린다. [+ 새 채널] 은 패널 머리 오른쪽(§4.7 인라인 폼을 관제 위 드로어로 — 아래).
 - **섹션**: 청취 범위 · n → 타인 세션 · n(사설콜·애드혹) → 관리 범위 · n · 상태 없음(**기본 접힘** — 관리만 되는 그룹이 화면을 먹지 않게).
@@ -258,7 +259,8 @@
   `sendRequest(acc_volte, "MESSAGE", target, "text/plain", body)`, 결과 `onRequestResult`(✓ / ⚠ 재전송).
 - 받은 문자: `onMessage(from, "text/plain", body)` → 발신자 스레드(발신자·시각·본문, 답장은 같은 스레드 입력). **상시 패널로 감시하지 않는다** — 새 문자는 토스트 + [문자] 배지
   미읽음 수(요약 띠에도), 지난 문자는 ⑥ 최근 행(문자 요약)과 [이력 F2]. 보관은 MCData 와 같은 SQLite(스레드 종류 구분).
-- 외부망 휴대전화 SMS/LMS 는 서버 게이트웨이(IBCF→SMSC TS 24.341 / SMPP)가 없어 **미지원** — 외부 번호 [문자] 비활성 + 툴팁, 팝오버 머리에 게이트웨이 상태 배지(§13 서버 과제).
+- 외부망 휴대전화 SMS/LMS 는 서버 게이트웨이(IBCF→SMSC TS 24.341 / SMPP)가 있을 때만 — 프로비저닝 `services[kind].capabilities.smsGateway`
+  ([android_ue_provisioning.md §3](android_ue_provisioning.md))가 `false` 면 외부 번호 [문자] 비활성 + 툴팁, 팝오버 머리에 게이트웨이 상태 배지. 게이트웨이 자체는 §13 서버 과제.
 
 **관제 그룹원 상태 띠** — BLF 의 축소형(2~4명, 최대 10, 넘치면 두 줄 + "+n"):
 - 칩 = 내선 · 이름 · 상태 점(대기/링잉/통화/보류 + 경과). 자기 내선은 "나". 링잉 → [픽업](`pickup(code, ext)`), 통화 중이고 `monitorScope` 안 → [청취](감청 창 §5),
@@ -584,8 +586,13 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
 
 - **SDK 과제 — 다중 채널 동시 발언(단말 팬아웃)**: `libcimsue` 에 발언 대상 집합 API(`setTalkTargets(callIds[])` · `floorRequest/Release` 를 집합에 적용 · 승인된 세션 전부로 같은 캡처 송출 ·
   대상별 floor 상태 이벤트). 3GPP 는 UE 의 다중 그룹 동시 발언 절차가 없어 단말 쪽 팬아웃으로 구현한다(서버 변경 없음). 그 전까지 발언 바는 대상 1개만 허용한다.
-- **서버 과제 — 타인 간 사설콜·애드혹 세션 가시성**: ② 타인 세션 섹션은 관제 범위 안 사설콜/애드혹 세션 목록(개시자·참가자·경과·긴급, 청취 인가 여부)이 필요하다. 지금 프로비저닝은
-  그룹(`pttTargets[]`)만 준다 — dispatch_center.md 에 세션 단위 가시성(구독 또는 `/provisioning/me` 확장)을 설계한다.
+- **앱 과제 — 타인 간 사설콜·애드혹 세션(② 타인 세션 섹션)**: 서버 계약은 확정·구현됐다([dispatch_center.md §5.6a](dispatch_center.md)) —
+  `dispatch.members[].pttId` 에 `Event: dialog` 구독(VoLTE `volteAor` 와 같은 `dialogWatch`) → PTT 세션 참가 leg 마다 dialog(remote = 세션 URI
+  `sip:priv-…|adhoc-…|g002@<ptt 도메인>`, 확장 `<mcptt session-type initiator emergency imminent-peril/>`). 앱: 같은 remote 의 dialog 를 한 카드로
+  묶고(참가자 = 감시 회선 중 그 세션에 있는 사람), `session-type` 이 `private|adhoc` 이면 타인 세션 카드, 그 외는 ①/② 그룹 카드의 참가 정보로 흡수.
+  [청취] = 세션 URI 로 `joinGroupCall(listenOnly)`, 참가자 전부가 필요하면 세션 URI conference 구독 — 둘 다 서버의 즉석 세션 관측 인가(참가자
+  `monitor_scope`)를 받아 403 이면 `Area.PttListen` 문구. `members[]` 에 `volteAor=""` 인 PTT 전용 가입자가 올 수 있다(`monitorScope=all`).
+  SDK: `dialogWatch` 가 PTT 계정으로도 구독하고 `<mcptt>` 확장을 이벤트 필드로 노출해야 한다.
 - **발언 세트 저장**(`talksets.json`)·**잠금 발언** 설정·**관리 범위 섹션 기본 접힘** 상태 기억은 앱 로컬 설정.
 - **주소록 소스 = 서버 회사 전화번호부** `GET /provisioning/directory?service=volte|ptt`([android_ue_provisioning.md](android_ue_provisioning.md) §3-1 — 조직 트리 +
   가입자, ETag/304, Android 연락처 탭과 같은 소스·동선: 조직 범위 선택 + 조직별 섹션 + 검색 + 홈 국가 로컬 표기). 앱은 `directory-cache.json` 에 캐시한다.
@@ -599,14 +606,14 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
   앱: [PTT 그룹] 화면 인라인 폼(`GroupEditView`, 주소록 [그룹] 탭 [새 그룹]·[편집]도 여기로)·[삭제] → `CscClient.PutGroup/DeleteGroup` → `RefreshGroupsAsync`
   (GMS 목록 재조회 + 신규 그룹 affiliation·conference 구독, 삭제 그룹 해제).
 - **조직·구성원·번호 관리 = 관리 화면(§4.5)** — 관제 그룹 `directory_admin` 범위 안에서 앱이 직접 편집하고(`/provisioning/directory/*`), 관제 그룹 편성
-  (멤버·대표번호·감청/청취/관리 범위)은 여전히 콘솔 `구성 > 관제 그룹` 몫이다. 남은 것: 조직 트리 드래그 이동, 구성원 일괄 가져오기(CSV — 콘솔 import 와 같은 형식,
-  관리 화면 서브내비의 "예정" 자리), 회선 여러 개인 구성원(앱은 종류당 첫 번호만 관리).
+  (멤버·대표번호·감청/청취/관리 범위)은 여전히 콘솔 `구성 > 관제 그룹` 몫이다. 남은 것: 조직 트리 드래그 이동, 구성원 일괄 가져오기 화면(서버 `POST /provisioning/directory/members/import` —
+  CSV/JSON 행 단위 결과, [android_ue_provisioning.md §3-3](android_ue_provisioning.md) — 관리 화면 서브내비의 "예정" 자리에 파일 선택 + 결과 표), 회선 여러 개인 구성원(앱은 종류당 첫 번호만 관리).
 - **별창 화면의 위치 기억** — 화면 별창(§3.4)은 아직 위치·크기를 프리셋에 넣지 않는다(감청 창처럼 `layout.json` 에 기억할 것).
 - **청취 범위 그룹의 conference 이벤트 구독**은 서버가 인가한다([dispatch_center.md §5.6](dispatch_center.md), TS 24.379 §10.1.3.4.1) — `pttTargets[]`
   그룹 구독은 200(② 범위 채널 카드의 "진행/참가자 수" 소스), 범위 밖·자격 없음은 **403 + `Warning: 138`**(앱은 `Area.PttListen` 403 문구로 흡수, 재시도
   루프 금지), 브로드캐스트 그룹은 480 + Warning 105.
 - **녹취 재생 후속**: 파형(`/peaks`)·단독 발언자 트랙(`slot`) 선택·VoLTE 두 화자 분리 재생·영상 세그먼트(F3) — 서버는 이미 내며 앱 UI 만 남았다.
-  OAM 녹취 API 자체는 콘솔 realm 인증이 없어(handlers/recording.py) CSC 프록시가 유일한 가입자 게이트다 — OAM 쪽 인증 정비는 서버 과제.
+  OAM 녹취·이력 API 는 콘솔 admin JWT(role ≥ monitor, 삭제 manager) 게이트를 받고 CSC 프록시는 공유 시크릿 서비스 토큰으로 부른다 — 앱은 CSC 경로만 쓴다.
 - **서버 통합 이력 조회(메시지 모니터링 포함) — 앱 `Services/HistoryClient`**: 관제 범위 안에서 **끝난** 통화·PTT 세션·메시지를 수초 지연으로 ⑤⑥ 최근 행에
   합친다. 진행 중 상태는 dialog/conference 구독이 정본이라 폴링이 live 를 대체하지 않는다. 메시지 모니터링은 **실시간 사본 없이 이력 조회만**으로 결정
   ([mcdata_messaging.md §4.3](mcdata_messaging.md)).
@@ -620,12 +627,15 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
     건너뛰고, 넣는 행은 `IsOthers` 로 표시해 데스크 응대·부재 집계에서 뺀다.
   - 내가 당사자(`from`/`to` 가 내 PTT·VoLTE 번호)인 항목은 로컬 행이 이미 있어 건너뛴다. 이름은 주소록으로, 그룹은 GMS 목록 이름으로 표시.
 - **서버 과제 — 외부망 SMS/LMS 게이트웨이**: 현재 MESSAGE 는 등록 가입자 간 전달만. 외부망 휴대전화 문자는 IBCF→SMSC(TS 24.341 SMS over IMS) 또는 SMPP
-  게이트웨이가 필요하다. 앱은 게이트웨이 유무를 접속서비스 능력으로 받아 [문자] 활성/비활성을 결정한다(능력 키 신설 필요).
+  게이트웨이가 필요하다. 능력 키는 있다 — 프로비저닝 `services[kind].capabilities.smsGateway`(csc.json `Provisioning.Services.<kind>.sms_gateway`,
+  기본 `false`); 앱은 이 값으로 외부 번호 [문자] 활성/비활성을 결정한다(앱 반영 남음).
 - **U10 관측 API** — `MediaSource.level/active` 실시간 갱신 확정 후 감청 창 레벨 미터 활성.
 - **경보(alert-ind) 파싱** — `onMessage` 의 `mcptt-info` 를 코어가 `McpttInfo` 로 해석해 이벤트로.
 - **CMS user-profile 파싱 API** — `allow_adhoc_call`·`allow_emergency_private_call`·수신자 모드를 구조로.
 - **자동 수락 분리** — `AccountConfig.autoAnswerMcptt` 는 그룹콜·사설콜 공통. 관제석은 그룹콜 자동 + 사설콜 수동이 맞아 코어 플래그 분리 필요.
-- **대표번호 발신 표시**(`P-Preferred-Identity`=pilot — 서버 과제) 확정 시 ③ 빠른 발신 줄에 "대표번호로 발신" 토글.
+- **대표번호 발신 표시** — 서버 확정([dispatch_center.md §4.7](dispatch_center.md)): 발신 INVITE 에 `P-Preferred-Identity: <sip:<pilotId>@…>` 를 실으면
+  CSP 가 자기 관제 그룹 대표번호일 때 착신자에게 대표번호로 낸다(그 외는 무시 → 기본 신원). 앱: ③ 빠른 발신 줄 "대표번호로 발신" 토글(`dispatch.pilotId`
+  있을 때) + SDK `makeCall` 헤더 옵션(남음).
 - **큐/ACD**, **영상 F3**, **ambient listening**, **끼어들기**(CMP 믹서) — 서버 과제.
 
 ## 14. 실기 시험 환경 — 개발 서버(.45) 등록 계획

@@ -22,12 +22,13 @@ from httpsrv.handler import HandlerArgs  # noqa: E402
 
 DG = "dg-dispatch01"
 # users: id → (name)
-USERS = {5020: "관제1석", 5021: "관제2석", 5030: "현장A", 5031: "현장B", 5040: "타부서"}
+USERS = {5020: "관제1석", 5021: "관제2석", 5030: "현장A", 5031: "현장B", 5040: "타부서", 5050: "현장C(PTT전용)"}
 # volte_subscriptions: msisdn → user_id
 VOLTE = {"+821310001001": 5020, "+821310001002": 5021, "+821310002001": 5030, "+821310002002": 5031,
          "+821310003001": 5040}
 # ptt_subscriptions: msisdn → user_id (관제2석은 PTT 미가입, 현장A 는 PTT 2회선)
-PTT = {"+82510001001": 5020, "+82510002001": 5030, "+82510002009": 5030, "+82510002002": 5031}
+PTT = {"+82510001001": 5020, "+82510002001": 5030, "+82510002009": 5030, "+82510002002": 5031,
+       "+82510005001": 5050}   # 5050 = PTT 전용(VoLTE 회선 없음) — scope=all 감시 대상(dispatch_center.md §5.6a)
 # dispatch_group_members: volte msisdn → (group_id, alert_order)
 DGM = {"+821310001002": (DG, 2), "+821310001001": (DG, 1),
        "+821310002001": ("dg-field", 1), "+821310002002": ("dg-field", 2)}
@@ -102,6 +103,14 @@ class _FakeCursor:
                 self._rows = self._member_rows("own", args[0])
             else:
                 self._rows = self._member_rows("all", args[0])
+        elif q.startswith("SELECT u.id, u.name, MIN(p.id) FROM ptt_subscriptions p JOIN users u"):
+            volte_uids = set(VOLTE.values())
+            rows = {}
+            for pid, uid in sorted(PTT.items()):
+                if uid in volte_uids or uid in rows:
+                    continue
+                rows[uid] = (uid, USERS[uid], pid)
+            self._rows = sorted(rows.values(), key=lambda r: r[2])
         elif q.startswith("SELECT mcptt_group_id, name FROM ptt_groups"):
             self._rows = sorted(((g, n) for _pk, g, n in PTT_GROUPS))
         elif q.startswith("SELECT g.mcptt_group_id, g.name FROM dispatch_group_ptt_targets"):
@@ -177,11 +186,22 @@ class DiscoveryTests(unittest.TestCase):
 
     def test_scope_all_is_every_volte_subscriber_like_csp_canwatch(self):
         d = m.dispatch_discovery(_FakeCursor(_group("all")), 5020)
-        self.assertEqual(len(d["members"]), len(VOLTE))
+        self.assertEqual(len(d["members"]), len(VOLTE) + 1)            # + PTT 전용 가입자 1명(뒤에 붙는다)
         self.assertEqual([x["groupId"] for x in d["members"][:2]], [DG, DG])   # 자기 그룹 먼저
         by_uid = {x["userId"]: x for x in d["members"]}
         self.assertEqual(by_uid[5040]["groupId"], "")                  # 관제 그룹 없는 가입자 groupId=""
         self.assertEqual(by_uid[5030]["groupId"], "dg-field")
+        # PTT 전용 가입자 — volteAor 빈 문자열, pttId 로 dialog 감시(§5.6a 타인 세션)
+        self.assertEqual(by_uid[5050], {"userId": 5050, "name": "현장C(PTT전용)", "volteAor": "",
+                                        "pttId": "tel:+82510005001", "extension": "5001", "groupId": ""})
+        self.assertEqual(d["members"][-1]["userId"], 5050)
+
+    def test_scope_own_and_listed_do_not_add_ptt_only_users(self):
+        for scope in ("own", "listed", "none"):
+            cur = _FakeCursor(_group(scope))
+            d = m.dispatch_discovery(cur, 5020)
+            self.assertNotIn(5050, [x["userId"] for x in d["members"]], scope)
+            self.assertFalse(any(q.startswith("SELECT u.id, u.name, MIN(p.id) FROM ptt_subscriptions") for q, _ in cur.sql), scope)
 
     def test_ptt_targets_listed_and_all_use_tel_uri(self):
         d = m.dispatch_discovery(_FakeCursor(_group(ptt_listen="listed")), 5020)
@@ -295,6 +315,19 @@ class HandlerTests(unittest.TestCase):
         r = self._get()
         self.assertEqual(r.status, 200)
         self.assertNotIn("dispatch", r.body)
+
+    def test_service_capabilities_sms_gateway(self):
+        """접속서비스 능력 — smsGateway 는 csc.json Provisioning.Services.<kind>.sms_gateway(기본 false, 문자열 bool 허용)."""
+        r = self._get()
+        self.assertEqual([s["capabilities"] for s in r.body["services"]],
+                         [{"smsGateway": False}, {"smsGateway": False}])
+        m.PROVISIONING = {"Services": {"volte": {"sms_gateway": True}, "ptt": {"sms_gateway": "false"}}}
+        r = self._get()
+        caps = {s["kind"]: s["capabilities"]["smsGateway"] for s in r.body["services"]}
+        self.assertEqual(caps, {"volte": True, "ptt": False})
+        m.PROVISIONING = {"Services": {"ptt": {"sms_gateway": "true"}}}
+        r = self._get()
+        self.assertTrue({s["kind"]: s["capabilities"]["smsGateway"] for s in r.body["services"]}["ptt"])
 
 
 if __name__ == "__main__":

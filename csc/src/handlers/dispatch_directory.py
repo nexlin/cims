@@ -27,6 +27,7 @@ docs/design/features/dispatch_center.md §3.4 · android_ue_provisioning.md §3-
 
 import hashlib
 import json
+import re
 from urllib.parse import urlparse, unquote
 from pathlib import PurePath
 from typing import Optional, Tuple
@@ -543,6 +544,80 @@ async def _member_write(cur, config, scope, method, parts, body, actor, ip, my_u
 
 # ── 핸들러 ────────────────────────────────────────────────────────────────────
 
+# ── 구성원 일괄 가져오기 ─────────────────────────────────────────────────────────────────────────────
+#  POST /provisioning/directory/members/import — 행마다 POST members 와 같은 생성 경로(_member_write)를 밟는다: 같은 범위
+#  게이트·같은 감사(E-AUD-006)·같은 회선 규약(imsi 비면 번호 숫자, 회선 password 필수). 본문은 text/csv(UTF-8, 머리행) 또는
+#  JSON {"rows":[<POST members 본문>…]}. 행 단위 결과를 돌려주고 한 행의 실패가 다른 행을 막지 않는다(콘솔 users/import 와 같은 계약).
+_IMPORT_MAX_ROWS = 500
+_IMPORT_USER_COLS = {'name': 'name', 'org': 'org', 'orgcode': 'org', 'title': 'title', 'loginid': 'loginId',
+                     'login': 'loginId', 'password': 'password', 'passwd': 'password'}
+_IMPORT_SUB_COLS = {'msisdn': 'msisdn', 'number': 'msisdn', 'imsi': 'imsi', 'serviceref': 'serviceRef',
+                    'service': 'serviceRef', 'siptransport': 'sipTransport', 'transport': 'sipTransport',
+                    'password': 'password', 'passwd': 'password'}
+
+
+def _import_rows_from_csv(text: str):
+    """CSV 원문 → POST members 본문 목록. 열 이름은 대소문자·`_`·`-` 무시: name, org, title, login_id, password,
+    volte_msisdn, volte_imsi, volte_service_ref, volte_sip_transport, volte_password, ptt_msisdn, ptt_… ."""
+    import csv
+    import io
+    rd = csv.reader(io.StringIO(text.lstrip('\ufeff')))   # BOM 은 첫 열 이름에 붙는다
+    header = None
+    rows = []
+    for raw in rd:
+        if not raw or all(not (c or '').strip() for c in raw):
+            continue
+        if header is None:
+            header = [re.sub(r'[\s_\-]', '', (c or '')).strip().lower() for c in raw]
+            continue
+        body: dict = {}
+        for i, col in enumerate(header):
+            val = (raw[i] if i < len(raw) else '').strip()
+            if not col or not val:
+                continue
+            if col in _IMPORT_USER_COLS:
+                body[_IMPORT_USER_COLS[col]] = val
+                continue
+            for kind in _KINDS:
+                if col.startswith(kind) and col[len(kind):] in _IMPORT_SUB_COLS:
+                    body.setdefault(kind, {})[_IMPORT_SUB_COLS[col[len(kind):]]] = val
+                    break
+        rows.append(body)
+    return rows
+
+
+async def _members_import(cur, config, scope, body, actor, ip, my_uid) -> HandlerResult:
+    if isinstance(body, dict):
+        rows = body.get('rows')
+        if not isinstance(rows, list):
+            return _json(400, {'error': 'rows_required'})
+    elif isinstance(body, str):
+        rows = _import_rows_from_csv(body)
+        if not rows:
+            return _json(400, {'error': 'empty_csv'})
+    else:
+        return _json(400, {'error': 'csv_or_json_required'})
+    if len(rows) > _IMPORT_MAX_ROWS:
+        return _json(413, {'error': 'too_many_rows', 'max': _IMPORT_MAX_ROWS})
+    results = []
+    created = 0
+    for i, row in enumerate(rows, start=1):
+        if not isinstance(row, dict) or not (row.get('name') or '').strip():
+            results.append({'row': i, 'status': 400, 'error': 'name_required'})
+            continue
+        r = await _member_write(cur, config, scope, 'POST', (), row, actor, ip, my_uid)
+        item = {'row': i, 'status': r.status}
+        if isinstance(r.body, dict):
+            if r.status == 201:
+                item['userId'] = r.body.get('userId')
+                created += 1
+            else:
+                item.update({k: v for k, v in r.body.items() if k in ('error', 'org', 'userId', 'kind', 'detail')})
+        results.append(item)
+    logger.log_info(f"[provisioning/directory] members/import by {actor}: rows={len(rows)} created={created}")
+    return _json(200, {'created': created, 'failed': len(rows) - created, 'results': results})
+
+
 async def handle_directory_admin(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
     config = kwargs.get('config', {}) or {}
     token, err = _auth(handler_args)
@@ -551,11 +626,16 @@ async def handle_directory_admin(handler_args: HandlerArgs, kwargs: dict) -> Han
     parts = _path_parts(handler_args.full_path)
     method = handler_args.method.upper()
     body = handler_args.body
+    is_import = parts[:2] == ['members', 'import']
     if isinstance(body, (bytes, bytearray)):
-        try:
-            body = json.loads(body.decode('utf-8')) if body else None
-        except ValueError:
-            return _json(400, {'error': 'invalid_json'})
+        ctype = str((getattr(handler_args, 'headers', None) or {}).get('content-type', '')).lower()
+        if is_import and 'json' not in ctype:
+            body = body.decode('utf-8-sig', errors='replace')    # CSV 원문 — _members_import 가 파싱
+        else:
+            try:
+                body = json.loads(body.decode('utf-8')) if body else None
+            except ValueError:
+                return _json(400, {'error': 'invalid_json'})
     ip = getattr(handler_args, 'client_ip', '') or ''
     try:
         with _get_db(config) as conn:
@@ -614,6 +694,10 @@ async def handle_directory_admin(handler_args: HandlerArgs, kwargs: dict) -> Han
                         r = _json(200, {'code': code})
                     return r
 
+                if is_import:
+                    if method != 'POST':
+                        return _json(405, {'error': 'Method Not Allowed'})
+                    return await _members_import(cur, config, scope, body, msisdn, ip, my_uid)
                 if head == 'members':
                     return await _member_write(cur, config, scope, method, rest, body, msisdn, ip, my_uid)
 

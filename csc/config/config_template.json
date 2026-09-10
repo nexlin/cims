@@ -210,6 +210,14 @@
           "help": "Digest username = imsi@도메인. CSP 의 VoLTE access_service 도메인과 일치해야 등록된다."
         },
         {
+          "key": "Provisioning.Services.volte.sms_gateway",
+          "label": "VoLTE 외부망 문자 게이트웨이",
+          "type": "bool",
+          "default": false,
+          "restart": true,
+          "help": "이 접속서비스에 외부망 휴대전화 SMS/LMS 게이트웨이(IBCF→SMSC TS 24.341 SMS over IMS 또는 SMPP)가 연결돼 있는가. 단말 프로파일 capabilities.smsGateway 로 내려 관제 앱이 외부 번호 [문자] 를 활성/비활성한다(dispatch_desktop_ui.md §4.3). 현재 CIMS 는 게이트웨이를 내장하지 않으므로 기본 false — 외부 게이트웨이 연동 시 운영자가 켠다."
+        },
+        {
           "key": "Provisioning.Services.volte.media_srtp",
           "label": "VoLTE 미디어 SRTP",
           "type": "enum",
@@ -289,6 +297,14 @@
           "deploy_value": "@PTT_DOMAIN@",
           "restart": true,
           "help": "PTT access_service 도메인. MCPTT ID 와는 별개."
+        },
+        {
+          "key": "Provisioning.Services.ptt.sms_gateway",
+          "label": "PTT 외부망 문자 게이트웨이",
+          "type": "bool",
+          "default": false,
+          "restart": true,
+          "help": "이 접속서비스에 외부망 휴대전화 SMS/LMS 게이트웨이(IBCF→SMSC TS 24.341 SMS over IMS 또는 SMPP)가 연결돼 있는가. 단말 프로파일 capabilities.smsGateway 로 내려 관제 앱이 외부 번호 [문자] 를 활성/비활성한다(dispatch_desktop_ui.md §4.3). 현재 CIMS 는 게이트웨이를 내장하지 않으므로 기본 false — 외부 게이트웨이 연동 시 운영자가 켠다."
         },
         {
           "key": "Provisioning.Services.ptt.media_srtp",

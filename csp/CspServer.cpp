@@ -52,6 +52,7 @@ CCallDir gclsCallDir;
 #include "CspServerDefine.h"
 #include "CspServerVersion.h"
 #include "CspServiceMap.h"
+#include "CspUser.h"
 #include "DbManager.h"
 #include "Directory.h"
 #include "FmReporter.h"
@@ -781,7 +782,23 @@ struct DialogNotifyState {
     std::string strDir;    // initiator|recipient
     std::string strLocalTag, strRemoteTag;
     std::string strLocalAor, strRemoteAor;
+    /** remote 를 감시 대상 도메인의 가입자가 아닌 완전한 URI 로 낼 때(PTT 세션 = 세션 URI `sip:<group>@<ptt 도메인>`,
+     *  RFC 4235 §4.1.6 — UE 의 dialog 상대는 focus). 비면 strRemoteAor + 도메인. */
+    std::string strRemoteUri;
+    /** dialog 요소 안의 확장 요소(RFC 4235 §4.1 <xs:any namespace="##other">) — PTT 세션 속성 <mcptt …/>. */
+    std::string strExtXml;
 };
+
+// dialog-info entity/identity 의 도메인 — 감시 대상 AoR 의 서비스 종류(PTT 회선 = PTT 도메인, 그 외 VoLTE 도메인).
+//   관제 앱은 VoLTE 회선(통화)과 PTT 회선(사설콜·애드혹 세션, dispatch_center.md §5.6a)을 같은 패키지로 감시한다.
+static std::string DialogDomainSuffixFor( const std::string &strAor ) {
+    std::string strDom;
+    CspUser clsUser;
+    if ( !strAor.empty() && gclsCspUserMap.Select( strAor.c_str(), clsUser ) && clsUser.m_strServiceType == "ptt" )
+        strDom = gclsServiceMap.GetDomainByKind( "ptt" );
+    if ( strDom.empty() ) strDom = gclsServiceMap.GetDomainByKind( "volte" );
+    return strDom.empty() ? "" : ( "@" + strDom );
+}
 
 static void _AppendDialogEntry( std::string &s, const DialogNotifyState &dlg, const std::string &strDomSuffix ) {
     if ( dlg.strCallId.empty() ) return;
@@ -792,14 +809,16 @@ static void _AppendDialogEntry( std::string &s, const DialogNotifyState &dlg, co
     s += "    <state>" + ( dlg.strState.empty() ? std::string( "confirmed" ) : dlg.strState ) + "</state>\r\n";
     if ( !dlg.strLocalAor.empty() )
         s += "    <local><identity>sip:" + dlg.strLocalAor + strDomSuffix + "</identity></local>\r\n";
-    if ( !dlg.strRemoteAor.empty() )
+    if ( !dlg.strRemoteUri.empty() )
+        s += "    <remote><identity>" + dlg.strRemoteUri + "</identity></remote>\r\n";
+    else if ( !dlg.strRemoteAor.empty() )
         s += "    <remote><identity>sip:" + dlg.strRemoteAor + strDomSuffix + "</identity></remote>\r\n";
+    if ( !dlg.strExtXml.empty() ) s += "    " + dlg.strExtXml + "\r\n";
     s += "  </dialog>\r\n";
 }
 
 static std::string BuildDialogInfoBody( const std::string &strWatchedAor, const DialogNotifyState &dlg, int iVersion ) {
-    const std::string strDom = gclsServiceMap.GetDomainByKind( "volte" );
-    const std::string strDomSuffix = strDom.empty() ? "" : ( "@" + strDom );
+    const std::string strDomSuffix = DialogDomainSuffixFor( strWatchedAor );
     std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
     s += "<dialog-info xmlns=\"urn:ietf:params:xml:ns:dialog-info\" version=\"" + std::to_string( iVersion ) +
          "\" state=\"" + ( dlg.bFull ? "full" : "partial" ) + "\" entity=\"sip:" + strWatchedAor + strDomSuffix +
@@ -812,8 +831,7 @@ static std::string BuildDialogInfoBody( const std::string &strWatchedAor, const 
 // 초기 full 스냅샷 — 진행 중 dialog 여러 건(RFC 4235 §3.2). 빈 목록이면 빈 full(활성 호 없음).
 static std::string BuildDialogInfoBodyMulti( const std::string &strWatchedAor,
                                              const std::vector<DialogNotifyState> &vecDlg, int iVersion ) {
-    const std::string strDom = gclsServiceMap.GetDomainByKind( "volte" );
-    const std::string strDomSuffix = strDom.empty() ? "" : ( "@" + strDom );
+    const std::string strDomSuffix = DialogDomainSuffixFor( strWatchedAor );
     std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
     s += "<dialog-info xmlns=\"urn:ietf:params:xml:ns:dialog-info\" version=\"" + std::to_string( iVersion ) +
          "\" state=\"full\" entity=\"sip:" + strWatchedAor + strDomSuffix + "\">\r\n";
@@ -1074,6 +1092,9 @@ static std::vector<DialogNotifyState> CollectInitialDialogs( const std::string &
         CallLegParty clsMe, clsOther;
         CCallMap::ResolveLegParties( strCallId, clsCi, clsMe, clsOther );
         if ( clsMe.strUser != strAor ) return;
+        // PTT 세션 fan-out leg 도 CallMap 에 있다 — 그 dialog 는 3) 에서 세션 URI·<mcptt> 확장으로 낸다.
+        std::string strPttGroup, strPttMember;
+        if ( gclsGroupCallService.GetGroupCallSession( strCallId, strPttGroup, strPttMember ) ) return;
         DialogNotifyState d;
         d.bFull = true;
         d.strCallId = strCallId;
@@ -1099,6 +1120,26 @@ static std::vector<DialogNotifyState> CollectInitialDialogs( const std::string &
             d.strLocalAor = p.strPilot;
             d.strRemoteAor = p.strCaller;
             gclsUserAgent.GetDialogTags( p.strDialogId.c_str(), d.strLocalTag, d.strRemoteTag );
+            vecOut.push_back( d );
+        }
+    }
+    // 3) PTT 세션 참가 leg (dispatch_center.md §5.6a) — 감시 AoR 이 PTT 회선이면 그 회선이 참가 중인 세션(그룹·사설콜·
+    //    애드혹)마다 dialog 1건: remote = 세션 URI, <mcptt> 확장(세션 종류·개시자·조건). 청취 leg 는 참가가 아니라
+    //    제외.
+    {
+        std::vector<PttDialogSnapshot> vecPtt;
+        gclsGroupCallService.CollectPttDialogs( strAor, vecPtt );
+        for ( const auto &p : vecPtt ) {
+            if ( !setSeen.insert( p.strCallId ).second ) continue;
+            DialogNotifyState d;
+            d.bFull = true;
+            d.strCallId = p.strCallId;
+            d.strState = p.bEstablished ? "confirmed" : "early";
+            d.strDir = p.bInitiator ? "initiator" : "recipient";
+            d.strLocalAor = strAor;
+            d.strRemoteUri = p.strSessionUri;
+            d.strExtXml = p.strExtXml;
+            gclsUserAgent.GetDialogTags( p.strCallId.c_str(), d.strLocalTag, d.strRemoteTag );
             vecOut.push_back( d );
         }
     }
@@ -1204,6 +1245,35 @@ void SendDialogEventNotify( const std::string &strWatchedAor, const std::string 
     }
     CLog::Print( LOG_INFO, "SendDialogEventNotify: watched=%s state=%s callid=%s subs=%d", strWatchedAor.c_str(),
                  strState.c_str(), strDlgCallId.c_str(), (int)clsSubList.size() );
+}
+
+/**
+ * @brief PTT 세션 참가 leg 의 dialog-event 통지 (dispatch_center.md §5.6a — 관제 앱의 타인 사설콜·애드혹 가시성).
+ *   감시 대상 = 참가자 PTT 회선, remote = 세션 URI(`sip:<group>@<ptt 도메인>`), dialog 안에 <mcptt> 확장 요소.
+ *   CGroupCallService 가 leg 확립(confirmed)·종료(terminated), fan-out 18x(early) 시점에 호출한다.
+ */
+void SendPttDialogEventNotify( const std::string &strWatchedAor, const std::string &strDlgCallId,
+                               const std::string &strState, bool bInitiator, const std::string &strSessionUri,
+                               const std::string &strExtXml ) {
+    std::list<SubscriptionInfo> clsSubList;
+    gclsSubscriptionManager.GetSubscriptionsByResource( strWatchedAor, "dialog", clsSubList );
+    if ( clsSubList.empty() ) return;
+
+    DialogNotifyState dlg;
+    dlg.bFull = false;
+    dlg.strCallId = strDlgCallId;
+    dlg.strState = strState;
+    dlg.strDir = bInitiator ? "initiator" : "recipient";
+    dlg.strLocalAor = strWatchedAor;
+    dlg.strRemoteUri = strSessionUri;
+    dlg.strExtXml = strExtXml;
+    gclsUserAgent.GetDialogTags( strDlgCallId.c_str(), dlg.strLocalTag, dlg.strRemoteTag );
+    for ( std::list<SubscriptionInfo>::iterator itSub = clsSubList.begin(); itSub != clsSubList.end(); ++itSub ) {
+        SendNotifyToSubscriber( *itSub, "", "", NULL, NULL, NULL, &dlg );
+    }
+    CLog::Print( LOG_INFO, "SendPttDialogEventNotify: watched=%s state=%s callid=%s session=%s subs=%d",
+                 strWatchedAor.c_str(), strState.c_str(), strDlgCallId.c_str(), strSessionUri.c_str(),
+                 (int)clsSubList.size() );
 }
 
 /**

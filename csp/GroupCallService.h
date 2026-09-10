@@ -17,6 +17,16 @@ class CSipCallRtp;
 class CSipCallRoute;
 class CspPttGroup;
 
+/** dialog 초기 full 스냅샷용 PTT 세션 참가 leg 1건 (CspServer 가 DialogNotifyState 로 변환 — dispatch_center.md §5.6a).
+ */
+struct PttDialogSnapshot {
+    std::string strCallId;      ///< 참가자 leg Call-ID = dialog id
+    std::string strSessionUri;  ///< 세션 URI `sip:<group id>@<ptt 도메인>` (dialog remote)
+    std::string strExtXml;      ///< `<mcptt …/>` 확장 요소 (세션 종류·개시자·조건)
+    bool bEstablished = false;  ///< true=confirmed / false=early(fan-out 초대 대기)
+    bool bInitiator = false;    ///< 세션 개시자 leg
+};
+
 /**
  * @ingroup CspServer
  * @brief Service class to handle Group Calls
@@ -57,6 +67,13 @@ public:
 
     /** callId → (groupId, memberId) 조회. 활성 PTT 그룹콜 세션이면 true. (re-INVITE 식별용) */
     bool GetGroupCallSession( const std::string &strCallId, std::string &strGroupId, std::string &strMemberId );
+
+    /** PTT 세션 dialog 이벤트 (RFC 4235, dispatch_center.md §5.6a) — 관제 앱이 PTT 회선을 감시해 타인 간 사설콜·
+     *  애드혹·그룹 세션 참가를 아는 경로. 참가 leg 가 18x(early)/확립(confirmed)/종료(terminated)될 때 참가자
+     *  회선의 dialog 구독자에게 낸다. 청취 leg(recvonly)는 참가가 아니라 내지 않는다(은닉과 무관하게 일관). */
+    void NotifyPttDialog( const std::string &strCallId, const char *pszState );
+    /** 감시 대상 PTT 회선 strAor 가 참가 중인 세션 leg 전부 (초기 full 스냅샷, 청취 leg 제외). */
+    void CollectPttDialogs( const std::string &strAor, std::vector<PttDialogSnapshot> &vecOut );
 
     /** 진행 중 호의 condition(emergency/imminent) 변경 적용 (re-INVITE 업그레이드/취소, TS 24.379).
      *  iNewCond: 2=emergency/1=imminent/0=normal. 상향=멤버가 개시(누구나), 하향=개시자만(권한).
@@ -254,7 +271,32 @@ private:
         bool bListenHidden = true;   ///< 관제 그룹 listen_visibility=hidden — 로스터(RFC 4575)·통지에서 은닉
         std::string strListenGroup;  ///< 청취자의 관제 그룹 id (감사 상관 키)
         time_t tListenStart = 0;
+        bool bInitiator = false;  ///< 세션 개시자 leg (ProcessGroupCall) — dialog direction=initiator
     };
+    /** dialog 이벤트를 낼 참가 leg 스냅샷 — 맵 락 밖에서 통지하기 위해 복사해 둔다. */
+    struct PttDialogLeg {
+        std::string strCallId, strUser, strGroupId;
+        bool bInitiator = false;
+        bool bListen = false;
+    };
+    static PttDialogLeg _pttLegOf( const std::string &strCallId, const CallSessionInfo &clsInfo ) {
+        PttDialogLeg leg;
+        leg.strCallId = strCallId;
+        leg.strUser = clsInfo.strMemberId;
+        leg.strGroupId = clsInfo.strGroupId;
+        leg.bInitiator = clsInfo.bInitiator;
+        leg.bListen = clsInfo.bListenOnly;
+        return leg;
+    }
+    /** 락 밖에서 호출 — 청취 leg 는 무동작. */
+    void EmitPttDialog( const PttDialogLeg &leg, const char *pszState );
+    /** dialog `<mcptt>` 확장 요소 — 세션 종류(private|adhoc|prearranged|chat|broadcast)·session-id·개시자·긴급/임박. */
+    std::string BuildPttDialogExt( const std::string &strGroupId );
+    static std::string PttSessionUri( const std::string &strGroupId );
+    /** 즉석 세션(priv-/adhoc-) 관측 인가 — 청취 leg 합류·conference 구독 공용 (dispatch_center.md §5.6a).
+     *  참가자는 항상. 그 외는 자격 allow_ambient_listening + 참가자 중 한 명이 관제 그룹 monitor_scope(CanWatch) 안. */
+    static bool CanObserveEphemeral( const CspPttGroup &clsGroup, const std::string &strUserId,
+                                     std::string &strReason );
     // CallId -> Info
     std::map<std::string, CallSessionInfo> m_mapCallSession;
 
