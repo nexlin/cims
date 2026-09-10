@@ -476,6 +476,9 @@ except Exception:
     ovl = {}
 ovl["CimsAuth.JwtSecret"] = os.environ["SECRET"]
 ovl["ServiceLogging.Dir"] = os.environ["SVC_LOG_DIR"]
+# 개발 트리 전용 store override — 상용에서 store 위치를 정하는 값은 `CimsRuntimeMount`
+# 하나이고 나머지는 유도된다(oam_ha.md §4.1). dev 는 마운트가 없으므로 유도 폴백이
+# 모듈 트리를 가리키는데, 배포본(dist) 레이아웃에는 그 트리가 없어 여기서 못박는다.
 ovl["CimsRuntimeDir"] = os.environ["RUNTIME_DIR"]
 # stats 핸들러(_get_db)가 읽는 CimsDatabase — 미주입 시 기본 127.0.0.1 로 접속을 시도해
 # 외부 DB 구성에서 통계 API 가 MySQL 에러(500)를 반환한다.

@@ -879,15 +879,16 @@ def step_08_package_upload(ctx: VerifyContext) -> ItemResult:
 def _mgmt_overlay(name: str, ports: dict, mgmt_root: str) -> dict:
     """mgmt-server 자식 config overlay. sim 은 overlay 없음.
 
-    oam 은 포트에 더해 runtime store / 패키지 저장소 / 서비스 로그를 자기
-    모듈 트리로 격리한다 — 패키징된 oam.json 은 빌드 서버(dev) 경로를 담고
-    있어, overlay 없이 기동하면 TB 와 file_store 를 공유하는 사고가 난다."""
+    oam 은 포트와 서비스 로그만 준다. **관리 store·패키지 저장소는 지정하지 않는다** —
+    관리 store 의 입력은 마운트 지점 하나이고(oam_ha.md §4.1), 마운트를 주지 않으면
+    자기 모듈 트리(`<install_path>/modules/oam/runtime`)로 유도된다. 자식 OAM 은 별도
+    install_path 에 설치되므로 그것만으로 TB 와 격리된다(옛 overlay 는 패키지 oam.json 에
+    빌드 서버 절대경로가 박혀 있던 시절의 방어책이었다 — 지금 그 기본값은 비어 있다).
+    선언 없는 키라 어차피 `_prune_to_template` 이 저장을 막는다."""
     if name == "oam":
         oam_root = os.path.join(mgmt_root, "oam")
         return {
             "Server.Port":        ports["mgmt"],
-            "CimsRuntimeDir":     os.path.join(oam_root, "runtime"),
-            "Packages.Dir":       os.path.join(oam_root, "packages"),
             "ServiceLogging.Dir": os.path.join(oam_root, "service_log"),
         }
     return {}
@@ -898,7 +899,8 @@ def step_09_deployment_create(ctx: VerifyContext) -> ItemResult:
 
     install_path = $DIST_DIR/mgmt-server/{oam,sim}.
     process_name = OAM / CSPSIM.
-    config overlay 로 oam:Server.Port=4445 + runtime/packages/log 격리. sim 은 없음.
+    config overlay 로 oam:Server.Port=4445 + 서비스 로그 격리 (store 는 모듈 트리로
+    유도돼 자동 격리). sim 은 없음.
     성공 시 ctx.state["dep_id_oam"] / ["dep_id_sim"] 저장.
     """
     if already_ran(ctx, 9):

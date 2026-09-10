@@ -68,26 +68,28 @@ def _writable_dir(path: str) -> bool:
 
 
 def runtime_root(config: dict) -> str:
-    """runtime store 의 base 디렉토리.
+    """runtime store 의 base 디렉토리 — `services.paths.runtime_store_dir` 이 정본.
 
-    우선순위:
-      1. config['CimsRuntimeDir']
-      2. ServiceLogging.Dir 의 sibling '../runtime'
-      3. ServiceLogDir / MsgLogDir 의 sibling
-      4. 현재 CWD 의 'runtime' (개발 fallback)
+    해석 순서:
+      1. `CimsRuntimeMount` → `{마운트}/runtime` (관리 store 를 정하는 **유일한 입력**)
+      2. `CimsRuntimeDir` — 실체화가 채워 준 유도 결과(마운트 없는 구성의 노드 로컬 경로)
+         또는 전환기·dev override
+      3. 노드 로컬 `modules/oam/runtime` (설정이 아예 없는 부트스트랩 직후)
 
-    2·3 은 로그 디렉터리에서 유도하는 폴백인데, 로그를 공유 스토리지(NAS)에 두는
-    구성에서는 **관리 데이터(배포/그룹/에이전트)까지 공유 스토리지로 끌려간다**. 그러면
-    노드를 밀어도 관리 데이터가 남고, 무엇보다 **펜싱 없이** 두 OAM 이 같은 store 를
-    동시에 write 할 수 있다.
+    옛 폴백(로그 디렉터리 sibling → cwd/runtime)은 폐기했다. 로그를 공유 스토리지(NAS)에
+    두는 구성에서 **관리 데이터(배포/그룹/에이전트)까지 공유 스토리지로 끌려가고**, 노드를
+    밀어도 관리 데이터가 남으며, 무엇보다 **펜싱 없이** 두 OAM 이 같은 store 를 동시에
+    write 할 수 있었다.
 
     금지의 대상은 공유 스토리지 자체가 아니라 **펜싱 없는 다중 writer** 다(oam_ha.md §4).
     이중화 구성에서는 (a) mount guard, (b) 소유권 리스(`services.lease`) 2층으로 단일
-    writer 를 보장하고, 그때는 운영자가 `CimsRuntimeDir` 을 그 공유 경로로 **명시**한다. 따라서 명시 경로는 존중하고(리스가
-    보호), **유도된 폴백이 공유 마운트로 끌려가는 사고**만 기동 실패로 막는다.
+    writer 를 보장하고, 그때는 운영자가 마운트 지점을 **명시**한다. 따라서 명시 구성은
+    존중하고(리스가 보호), **유도된 폴백이 공유 마운트로 끌려가는 사고**만 기동 실패로 막는다.
     """
-    explicit = config.get('CimsRuntimeDir')
+    from services import paths as _p
+    explicit = config.get('CimsRuntimeDir') or config.get('CimsRuntimeMount')
     if explicit:
+        explicit = _p.runtime_store_dir(config)
         # **쓸 수 있는 경로인지 확인한다.** 패키지 기본값이나 옛 배포 overlay 에 다른 머신의
         # 절대경로가 들어 있으면(실측: 빌드 머신 경로 `/home/<user>/work/...` 가 패키지
         # oam.json 에 커밋돼 배포됨) OAM 은 그 경로에 makedirs 하다 PermissionError 로 죽고,
@@ -97,9 +99,8 @@ def runtime_root(config: dict) -> str:
         # 잠깐 없다고 로컬로 갈아타면 store 가 갈라진다. 그 판정은 mount guard 의 몫이다.
         if _writable_dir(explicit) or config.get('CimsRuntimeMount'):
             return explicit
-        from services import paths as _p
         fallback = _p.local_runtime_dir(config)
-        print(f'[store] ⚠ CimsRuntimeDir={explicit} 를 쓸 수 없습니다(권한/경로). '
+        print(f'[store] ⚠ 관리 store {explicit} 를 쓸 수 없습니다(권한/경로). '
               f'노드 로컬 {fallback} 로 폴백합니다 — 관리평면이 기동하지 못하는 것보다 안전합니다. '
               f'콘솔에서 경로를 고치세요.', flush=True)
         return fallback
@@ -108,16 +109,15 @@ def runtime_root(config: dict) -> str:
     # (modules/oam/<ver>/oam/src)라서 store 를 `.../current/ext_mnt/runtime` 같은 위치에
     # 만들었다(실서버 실측). 그 위치는 **oam 업그레이드 시 통째로 사라진다** — 관리
     # 데이터(에이전트·배포·그룹·패키지)를 잃는 경로다. 설정 누락은 흔한 일이므로
-    # (배포 overlay 에 CimsRuntimeDir 이 주입되지 않은 노드가 실제로 있었다) 폴백 자체가
+    # (배포 overlay 에 store 경로가 주입되지 않은 노드가 실제로 있었다) 폴백 자체가
     # 안전해야 한다: services.paths 가 계산하는 `modules/oam/runtime` 로 고정한다.
-    from services import paths as _paths
-    cand = _paths.local_runtime_dir(config)
+    cand = _p.local_runtime_dir(config)
     if _is_shared_mount(cand):
         raise RuntimeError(
             f"runtime store 폴백이 공유 스토리지로 유도됨: {cand}\n"
             f"  펜싱 없이 두 OAM 이 같은 store 를 write 하면 손상된다.\n"
-            f"  해결: 모듈 설정 CimsRuntimeDir 을 명시하라 — 단일 노드는 로컬 경로,"
-            f" 이중화는 공유 store 마운트 하위 경로(+ CimsRuntimeMount).")
+            f"  해결: 모듈 설정 `CimsRuntimeMount`(관리 store 마운트 지점)를 지정하라 —"
+            f" store 는 그 하위 `runtime` 으로 유도된다.")
     return cand
 
 

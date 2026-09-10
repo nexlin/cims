@@ -24,10 +24,10 @@
 #     --server-name N  OAM 호스트(이 서버) 표시 이름 (기본 hostname)
 #     --mgmt-ip IP     관리(mgmt) IP — agent↔OAM 통신 기준 (AgentOamUrl/Mgmt.Cidr; 기본 첫 global IP)
 #     --runtime-mount DIR  관리 store 를 공유 스토리지(NAS)에 둘 때의 **마운트 지점**.
-#                          지정하면 관리 데이터·패키지 파일·서비스 로그가 처음부터 이 하위에
+#                          store 는 <마운트>/runtime, 패키지는 그 하위 pkg_files, 로그는
+#                          <마운트>/service_log 로 유도된다 — 지정하면 처음부터 이 하위에
 #                          놓여 이중화 전환 시 이관이 필요 없다. 미지정 = 노드 로컬.
 #                          (대화식 설치에서는 [6/7] 에서 묻는다)
-#     --runtime-dir DIR    관리 store 경로 (기본: <마운트>/runtime). 마운트 하위여야 한다.
 #   공유 스토리지:
 #     --mount-src SRC      마운트 원본 (서버의 **export 경로**). 예 nas.example:/export/cims
 #                          이것만 주면 /mnt/cims 에 붙이고(fstab 영속, _netdev,nofail 자동)
@@ -45,7 +45,7 @@
 #     --join                  합류 모드 (peer 에서 그룹 공통 신원 수령, OAM 미기동)
 #     --peer-url URL          기존 OAM 주소 (예: https://121.161.164.140:4419)
 #     --join-token TOKEN      1회용 합류 토큰 (콘솔/API: POST /api/v1/ha/join-token)
-#     (store 위치는 위 --runtime-mount/--runtime-dir — 미지정 시 peer 값을 계승)
+#     (store 위치는 위 --runtime-mount — 미지정 시 peer 값을 계승)
 #   옵션 없이 실행하면 설치 경로/포트/관리 store/admin 비밀번호를 단계별로 묻는다.
 #   제거: sudo <prefix>/uninstall-base.sh [--yes]
 #     --user USER      서비스 사용자 (기본: sudo 호출자) — agent/OAM 프로세스 소유자
@@ -63,8 +63,11 @@ BATCH=0
 JOIN=0              # 관리평면 합류 모드 (두 번째 OAM 노드)
 PEER_URL=""         # 기존 OAM 주소 (신원 수령 + agent enroll 대상)
 JOIN_TOKEN=""       # 1회용 합류 토큰
-STORE_DIR=""        # 관리 store 경로 (공유 마운트 하위) — CimsRuntimeDir
+# 관리 store 위치를 정하는 입력은 **마운트 지점 하나**다 (oam_ha.md §4.1).
+#   store 루트(`<마운트>/runtime`)·패키지 저장소(`<store>/pkg_files`)는 유도값이라 따로
+#   받지 않는다 — 셋을 따로 받으면 하나만 어긋나도 조용히 깨진다(절체 후 패키지 404 등).
 STORE_MOUNT=""      # 공유 store 마운트 지점 — CimsRuntimeMount (mount guard 기준)
+STORE_DIR=""        # ↑ 에서 유도한 store 경로 (입력 아님 — mkdir/전제검사/기록용)
 # 마운트 생성 — **store 위치와는 별개 결정**이다. NAS 를 붙이되 관리 store 는 노드 로컬에
 # 두는 구성도 유효하다(로그만 NAS 로 보내는 단일 노드 등). 마운트 자체는 새로 구현하지 않고
 # agent 의 마운트 관리와 같은 엔진(cims-priv mount-add)을 쓴다 — 규칙(_netdev,nofail 강제·
@@ -91,7 +94,6 @@ while [[ $# -gt 0 ]]; do
         --join)         JOIN=1; BATCH=1; shift ;;      # 합류는 항상 비대화식
         --peer-url)     PEER_URL="$2"; shift 2 ;;
         --join-token)   JOIN_TOKEN="$2"; shift 2 ;;
-        --runtime-dir)  STORE_DIR="$2"; shift 2 ;;
         --runtime-mount) STORE_MOUNT="$2"; shift 2 ;;
         --mount)        MNT_TARGET="$2"; MNT_TARGET_EXPLICIT=1; shift 2 ;;
         --mount-src)    MNT_SRC="$2"; shift 2 ;;
@@ -351,7 +353,7 @@ if [[ $BATCH -eq 0 ]] && { [[ -t 0 ]] || [[ -n "${CIMS_INSTALL_FORCE_INTERACTIVE
     # [6] 공유 스토리지 — 원본 + 붙일 위치. 파일시스템·옵션·store 경로는 유도한다.
     #     지점을 원본에서 유도하지 않는 이유는 위 헬퍼 주석 참조(서버 export 경로와 무관).
     #     비우면 노드 로컬. 옵션으로 이미 지정했으면 묻지 않는다.
-    if [[ -z "$MNT_SRC" && -z "$MNT_TARGET" && -z "$STORE_MOUNT" && -z "$STORE_DIR" ]]; then
+    if [[ -z "$MNT_SRC" && -z "$MNT_TARGET" && -z "$STORE_MOUNT" ]]; then
         while :; do
             read -r -p "  [6/7] 공유 스토리지 (예: nas.example:/export/cims) [Enter=노드 로컬]: " _in
             [[ -z "$_in" ]] && break
@@ -378,9 +380,9 @@ if [[ $BATCH -eq 0 ]] && { [[ -t 0 ]] || [[ -n "${CIMS_INSTALL_FORCE_INTERACTIVE
                 esac
             done
             MNT_SRC="$_in"; MNT_FSTYPE="$_fs"; MNT_TARGET="$_mp"
-            STORE_MOUNT="$_mp"; STORE_DIR="$_mp/runtime"
+            STORE_MOUNT="$_mp"
             echo "        → $MNT_SRC 를 $MNT_TARGET 에 $MNT_FSTYPE 로 붙이고,"
-            echo "          관리 store 를 $STORE_DIR, 서비스 로그를 $MNT_TARGET/service_log 에 둡니다."
+            echo "          관리 store 를 $_mp/runtime, 서비스 로그를 $MNT_TARGET/service_log 에 둡니다."
             echo "          (시크릿·인증서는 항상 노드 로컬. 옵션은 defaults+_netdev,nofail)"
             break
         done
@@ -405,7 +407,7 @@ if [[ $BATCH -eq 0 ]] && { [[ -t 0 ]] || [[ -n "${CIMS_INSTALL_FORCE_INTERACTIVE
     else
         echo "    마운트        : 없음"
     fi
-    echo "    관리 store    : ${STORE_DIR:-(노드 로컬)}"
+    echo "    관리 store    : $([[ -n "$STORE_MOUNT" ]] && echo "${STORE_MOUNT%/}/runtime (마운트 ${STORE_MOUNT%/})" || echo "(노드 로컬)")"
     echo "    로컬 agent    : $([[ $DO_AGENT -eq 1 ]] && echo 설치 || echo 생략)"
     read -r -p "  진행할까요? [Y/n]: " _in
     [[ "$_in" == n* || "$_in" == N* ]] && { echo "중단"; exit 1; }
@@ -488,11 +490,9 @@ if [[ -n "$MNT_TARGET" ]]; then
 fi
 
 # ② 관리 store 를 마운트 하위에 두기로 했으면 전제를 검사한다.
-#   `--runtime-mount` 만 주면 store 경로가 노드 로컬로 남아 마운트 하위가 아니게 되고 guard
-#   가 기동을 거부한다 — 마운트 하위로 유도한다. 합류 모드는 store 경로를 peer 값으로
-#   계승하므로(`.join_params.runtime_dir`) 유도하지 않는다: peer 의 store 가 `<마운트>/runtime`
-#   이 아닐 수 있어 두 노드가 서로 다른 store 를 보게 된다.
-if [[ $JOIN -eq 0 && -n "$STORE_MOUNT" && -z "$STORE_DIR" ]]; then
+#   store 경로는 마운트에서 유도한다 — 입력이 하나이므로 두 노드가 다른 store 를 볼 여지가
+#   없다(합류 노드도 같은 규칙으로 같은 경로를 얻는다).
+if [[ -n "$STORE_MOUNT" ]]; then
     STORE_DIR="${STORE_MOUNT%/}/runtime"
 fi
 if [[ $JOIN -eq 0 && -n "$STORE_MOUNT" ]]; then
@@ -578,15 +578,17 @@ if [[ $JOIN -eq 1 ]]; then
         exit 1
     fi
     # 신원을 _secrets 에 전개 (JwtSecret / 그룹 CA / mTLS CA) + 설치 파라미터 반영
-    JOIN_IDENTITY="$JOIN_IDENTITY" SECRETS_DIR_PRE="$STORE_DIR" \
+    JOIN_IDENTITY="$JOIN_IDENTITY" STORE_MOUNT_PRE="$STORE_MOUNT" \
     LOCAL_RUNTIME="$RUNTIME_DIR" python3 - <<'PYJOIN' || { err "신원 전개 실패"; exit 1; }
-import json, os, sys
+import json, os
 d = json.loads(os.environ['JOIN_IDENTITY'])['identity']
-rt = (d.get('runtime') or {}).get('CimsRuntimeDir') or os.environ.get('SECRETS_DIR_PRE') or ''
-if not rt:
-    sys.stderr.write('peer 가 CimsRuntimeDir 를 주지 않았고 --runtime-dir 도 없음\n'); sys.exit(1)
+# 계승하는 것은 **마운트 지점 하나**다 — store 경로는 양쪽이 같은 규칙으로 유도하므로
+# (`<마운트>/runtime`) 따로 옮길 값이 없다. peer 가 마운트 없이(노드 로컬 store) 돌고
+# 있으면 이 노드도 노드 로컬이다 — 그 구성은 애초에 이중화 대상이 아니다(§6.3).
+mnt = (os.environ.get('STORE_MOUNT_PRE') or '').strip() \
+    or (d.get('runtime') or {}).get('CimsRuntimeMount') or ''
 # 시크릿·CA 는 **노드 로컬** runtime 에 둔다 — 관리 store(공유 마운트)에 개인키를 올리지
-# 않는다(oam_ha.md §5). 관리 store 경로(rt)는 아래 .join_params 로만 전달한다.
+# 않는다(oam_ha.md §5). 관리 store 마운트는 아래 .join_params 로만 전달한다.
 sd = os.path.join(os.environ['LOCAL_RUNTIME'], '_secrets')
 os.makedirs(sd, mode=0o700, exist_ok=True)
 os.chmod(sd, 0o700)
@@ -615,30 +617,26 @@ with open(os.path.join(sd, '.join_params'), 'w') as f:
                'agent_oam_url': (d.get('server') or {}).get('AgentOamUrl') or '',
                'cert_sans': (d.get('server') or {}).get('CertSans') or [],
                'mgmt_cidr': (d.get('mgmt') or {}).get('Cidr') or '',
-               'runtime_dir': rt,
-               'runtime_mount': (d.get('runtime') or {}).get('CimsRuntimeMount') or '',
+               'runtime_mount': mnt,
                'log_dir': (d.get('logging') or {}).get('Dir') or '',
                'accounts': (d.get('auth') or {}).get('BuiltinAccounts') or [],
                'agent': d.get('agent') or {}}, f)
 print(f"  신원 전개 완료: {sd} (jwt_secret / ca / agent_mtls)")
 PYJOIN
     ok "그룹 공통 신원 수령 완료 — 이 노드는 peer 와 같은 토큰·CA 를 사용"
-    # 합류 노드의 실효 store 위치 = 명시 옵션 > peer 계승값. peer 가 공유 store 를 쓰면
+    # 합류 노드의 실효 마운트 = 명시 옵션 > peer 계승값. peer 가 공유 store 를 쓰면
     # **이 노드에도 같은 경로가 마운트돼 있어야** 절체가 성립하므로 여기서 확인한다.
     # 합류 노드는 OAM 을 기동하지 않으므로(DO_START=0) 미충족이 즉시 사고는 아니다 —
     # 설치는 계속하고 경고만 남긴다(마운트를 붙이면 그대로 사용 가능).
     _jp="$RUNTIME_DIR/_secrets/.join_params"
-    _eff_mnt="$STORE_MOUNT"; _eff_dir="$STORE_DIR"
-    for _k in mount dir; do
-        [[ "$_k" == mount && -n "$_eff_mnt" ]] && continue
-        [[ "$_k" == dir   && -n "$_eff_dir" ]] && continue
-        _v=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('runtime_'+sys.argv[2]) or '')" \
-             "$_jp" "$_k" 2>/dev/null || true)
-        [[ "$_k" == mount ]] && _eff_mnt="$_v" || _eff_dir="$_v"
-    done
-    if [[ -n "$_eff_mnt" ]]; then
-        if store_mount_check "$_eff_mnt" "$_eff_dir" 0; then
-            ok "공유 store 확인: $_eff_dir (마운트 $_eff_mnt)"
+    if [[ -z "$STORE_MOUNT" ]]; then
+        STORE_MOUNT=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('runtime_mount') or '')" \
+                      "$_jp" 2>/dev/null || true)
+    fi
+    if [[ -n "$STORE_MOUNT" ]]; then
+        STORE_DIR="${STORE_MOUNT%/}/runtime"
+        if store_mount_check "$STORE_MOUNT" "$STORE_DIR" 0; then
+            ok "공유 store 확인: $STORE_DIR (마운트 $STORE_MOUNT)"
         else
             warn "이 노드는 아직 공유 store 를 쓸 수 없습니다 — 마운트를 붙인 뒤 모듈을 기동하세요. 그때까지 승격 자격에서 제외됩니다."
         fi
@@ -670,7 +668,7 @@ fi
 chmod 600 "$JWT_SECRET_FILE"
 PY=python3 OAM_ROOT="$OAM_ROOT" RUNTIME_DIR="$RUNTIME_DIR" PORT="$PORT" \
 JWT_SECRET="$(cat "$JWT_SECRET_FILE")" MGMT_IP="$MGMT_IP" \
-STORE_DIR="$STORE_DIR" STORE_MOUNT="$STORE_MOUNT" MNT_TARGET="$MNT_TARGET" JOIN="$JOIN" \
+STORE_MOUNT="$STORE_MOUNT" MNT_TARGET="$MNT_TARGET" JOIN="$JOIN" \
 JOIN_PARAMS_FILE="$SECRETS_DIR/.join_params" \
 ADMIN_PASS="$ADMIN_PASS" OAM_OVERLAY_FILE="$OAM_OVERLAY_FILE" python3 - <<'PYEOF'
 import hashlib, json, os
@@ -708,11 +706,11 @@ if join:
         d['Server']['CertSans'] = sans
     if jp.get('log_dir'):
         d.setdefault('ServiceLogging', {})['Dir'] = jp['log_dir']
-# 관리 store 경로 — 이중화면 공유 마운트 하위. 미지정 시 노드 로컬 runtime(단일 노드 기본).
-store = (os.environ.get('STORE_DIR') or '').strip() or (jp.get('runtime_dir') or '').strip() \
-        or os.environ['RUNTIME_DIR']
+# 관리 store — 정하는 값은 **마운트 지점 하나**이고 store 경로는 그 하위 `runtime` 으로
+#   유도한다(oam_ha.md §4.1). 미지정 시 노드 로컬 runtime(단일 노드 기본).
 mount = (os.environ.get('STORE_MOUNT') or '').strip() or (jp.get('runtime_mount') or '').strip()
-# 서비스 로그 루트 — **구체값을 반드시 기록한다** (CimsRuntimeDir 과 같은 규칙).
+store = f"{mount.rstrip('/')}/runtime" if mount else os.environ['RUNTIME_DIR']
+# 서비스 로그 루트 — **구체값을 반드시 기록한다** (관리 store 와 같은 규칙).
 #   비워두면 모듈은 코드 폴백으로 노드 로컬을 쓰는데, **콘솔은 그 폴백을 알 수 없어**
 #   템플릿 기본값(사이트 값 = 공유 경로)을 그리게 된다 — 화면과 실제가 갈린다. 설정
 #   화면은 실제 적용값이 기준이어야 하므로, 설치 시점에 정해 overlay 에 남긴다.
@@ -727,10 +725,12 @@ log_mount = (os.environ.get('MNT_TARGET') or '').strip() or mount
 if not (d.get('ServiceLogging') or {}).get('Dir'):
     d.setdefault('ServiceLogging', {})['Dir'] = os.path.join(
         log_mount or os.environ['RUNTIME_DIR'], 'service_log')
-d['CimsRuntimeDir'] = store
+# 배포 overlay(`ov`)에 남기는 store 값은 **입력인 마운트 하나**다 — store 루트·패키지
+#   저장소는 OAM 이 매 디스패치마다 유도해 채운다(§4.1). 노드 config.json 에는 그 유도
+#   결과까지 적는다(아래 `eff`) — agent 가 기록하는 실체화본과 같은 모양이어야 설치
+#   직후부터 설정 불일치(A-PRC-003)가 뜨지 않는다.
 if mount:
     d['CimsRuntimeMount'] = mount       # mount guard — 마운트 없으면 기동 거부
-d.setdefault('Packages', {})['Dir'] = os.path.join(store, 'pkg_files')
 d.setdefault('CimsAuth', {})['JwtSecret'] = os.environ['JWT_SECRET']
 if join and jp.get('accounts'):
     d['CimsAuth']['BuiltinAccounts'] = jp['accounts']   # admin 계정도 그룹 공통
@@ -749,8 +749,6 @@ print('  oam.json 무변경 (패키지 기본값) — 노드 값은 config.json 
 ov = {
     'Server.Ip': '0.0.0.0',
     'Server.Port': port,
-    'CimsRuntimeDir': d['CimsRuntimeDir'],
-    'Packages.Dir': d['Packages']['Dir'],
     'CimsAuth.JwtSecret': d['CimsAuth']['JwtSecret'],
     'CimsAuth.BuiltinAccounts': d['CimsAuth'].get('BuiltinAccounts', []),
 }
@@ -759,6 +757,7 @@ if d['Server'].get('Role'):
 if d['Server'].get('CertSans'):
     ov['Server.CertSans'] = d['Server']['CertSans']
 if d.get('CimsRuntimeMount'):
+    # store 위치의 유일한 입력 — store 루트·패키지 저장소는 OAM 이 여기서 유도한다.
     ov['CimsRuntimeMount'] = d['CimsRuntimeMount']
 # 조건은 **값 존재**로 판정한다 — `if mgmt:` 로 묶으면 합류(join) 모드에서 peer 가 준
 # agent_oam_url·mgmt_cidr 이 d 에는 들어가고 overlay 에는 빠져 유실된다(oam.json 을 더 이상
@@ -805,6 +804,11 @@ for _k, _v in ov.items():
     if _v is None or _v == '':
         continue
     eff[_k] = _v
+# store 파생 키 — OAM 의 실체화(`agents._materialize_deploy_config`)가 base oam 에 채우는
+#   값과 같은 규칙으로 여기서도 채운다. 빠뜨리면 설치 직후 config 해시가 어긋나
+#   A-PRC-003(설정 불일치)이 뜬다.
+eff['CimsRuntimeDir'] = store
+eff['Packages.Dir'] = os.path.join(store, 'pkg_files')
 json.dump(eff, open(os.path.join(os.environ['OAM_ROOT'], 'oam', 'config.json'), 'w'),
           ensure_ascii=False, indent=2)
 print(f'  config.json 기록 — 실체화본 {len(eff)}키 (템플릿 기본값 + 노드 overlay {len(ov)}키)')
@@ -1164,14 +1168,8 @@ cat <<JOINDONE
    OAM      : **미기동** (cold standby — 승격 시 agent 가 볼륨 인수 후 기동)
    신원      : peer 와 동일 (JwtSecret / admin 계정 / 그룹 CA / mTLS CA)
    agent    : $AGENT_STATE  → 대상 OAM $PEER_URL
-   store    : $(python3 -c "
-import json
-try: d=json.load(open('$SECRETS_DIR/.join_params')); print(d.get('runtime_dir') or '(미지정)')
-except Exception: print('(미지정)')" 2>/dev/null)
-   마운트    : $(python3 -c "
-import json
-try: d=json.load(open('$SECRETS_DIR/.join_params')); print(d.get('runtime_mount') or '(미설정 — mount guard 비활성)')
-except Exception: print('(미설정)')" 2>/dev/null)
+   마운트    : ${STORE_MOUNT:-(미설정 — 노드 로컬 store, mount guard 비활성)}
+   store    : $([[ -n "$STORE_MOUNT" ]] && echo "$STORE_DIR" || echo "(노드 로컬 $RUNTIME_DIR)")
 
    다음 (콘솔에서):
      1) 공유 store 마운트 확인 — 이 서버에도 상대 노드와 **같은 NAS 경로**가 붙어야 한다

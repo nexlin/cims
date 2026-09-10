@@ -214,21 +214,29 @@ def _module_holds_lease(config, pkg_file) -> bool:
 
 
 def _store_source(config) -> dict:
-    """관리 store 위치의 **정본** — base `oam` 배포설정(desired state).
+    """관리 store 위치의 **정본** — base `oam` 배포설정(desired state)의 마운트 지점.
 
     store 를 읽지만 위치를 스스로 정하지는 않는 모듈(oam-svc)에 줄 값이다. 위치를 정하는
     창구는 oam 하나여야 한다 — 양쪽에서 입력받으면 서로 다른 값이 저장될 수 있고, 그러면
     어긋남을 막는 정합 코드가 또 필요해진다(oam_ha.md §4.1 이 그룹 레코드에 대해 이미
     거부한 패턴이다).
 
+    읽는 것은 `CimsRuntimeMount` 하나이고 store 경로는 거기서 유도한다(§4.1) — 옛 배포
+    overlay 에 `CimsRuntimeDir` 이 남아 있으면 전환기 값으로만 참고한다.
+
     출처가 **배포 overlay**(desired state)이지 돌고 있는 OAM 의 현재 설정(actual state)이
     아닌 이유: 이관 job 을 디스패치하는 시점에 현재 설정은 아직 **옛 경로**다(이관이 아직
     일어나지 않았다). 그 값을 주면 oam-svc 만 옛 store 에 남는다. 그래서 이관은 oam
     overlay 를 먼저 갱신하고, 여기서 그 값을 읽는다.
 
+    마운트를 아직 정하지 않은 구성(단일 노드 = 노드 로컬 store)에서는 유도할 것이 없으므로
+    **돌고 있는 OAM 의 실효 store 루트**를 준다 — 같은 노드에 얹히는 oam-svc 가 base 와
+    같은 store 를 읽어야 하는데, 노드 로컬 폴백은 모듈 트리마다 다르기 때문이다.
+
     멤버 간 값이 갈리면(정상 구성에서는 있을 수 없다 — `scope=service` 공통 설정) 유도를
     포기하고 현재 설정으로 폴백한다. 살아있는 경로가 확실한 쪽을 택하는 편이 안전하다.
     """
+    from services import paths as _paths
     out: dict = {}
     try:
         by_dir: dict = {}
@@ -238,9 +246,10 @@ def _store_source(config) -> dict:
             if d.get("status") == "removed":
                 continue
             ov = d.get("config") if isinstance(d.get("config"), dict) else {}
+            mp = str(ov.get("CimsRuntimeMount") or "").strip()
             rd = str(ov.get("CimsRuntimeDir") or "").strip()
-            if rd:
-                by_dir.setdefault(rd, str(ov.get("CimsRuntimeMount") or "").strip())
+            if mp or rd:
+                by_dir.setdefault(_paths.runtime_store_dir(ov), mp)
         if len(by_dir) == 1:
             rd, mp = next(iter(by_dir.items()))
             out["CimsRuntimeDir"] = rd
@@ -251,16 +260,18 @@ def _store_source(config) -> dict:
             logger.log_warning(
                 f"[config] oam 배포설정의 store 경로가 멤버 간 다릅니다 {sorted(by_dir)} — "
                 f"유도 포기, 현재 설정으로 폴백. 그룹 > 패키지 설정 > oam > 관리 store 에서 "
-                f"맞추세요(멤버 간 동일해야 함).")
+                f"마운트 지점을 맞추세요(멤버 간 동일해야 함).")
     except Exception as e:
         logger.log_warning(f"[config] store 정본 유도 실패({e}) — 현재 설정으로 폴백")
 
-    rd = str(config.get("CimsRuntimeDir") or "").strip()
-    if rd:
-        out["CimsRuntimeDir"] = rd
-        mp = str(config.get("CimsRuntimeMount") or "").strip()
-        if mp:
-            out["CimsRuntimeMount"] = mp
+    try:
+        out["CimsRuntimeDir"] = file_store.runtime_root(config)
+    except Exception as e:
+        logger.log_warning(f"[config] 현재 store 루트 해석 실패({e}) — store 경로 미주입")
+        return {}
+    mp = str(config.get("CimsRuntimeMount") or "").strip()
+    if mp:
+        out["CimsRuntimeMount"] = mp
     return out
 
 
@@ -275,9 +286,10 @@ def _materialize_deploy_config(config, pkg_file, overlay):
     (base `oam` 자신 — 이중화된 두 번째 노드의 OAM 이 같은 신원으로 떠야 한다).
       - CimsAuth.JwtSecret / Mgmt.Cidr — base 가 SoT, overlay 보다 우선 (시크릿 회전 시
         base 현재값 추종).
-      - CimsRuntimeDir / CimsRuntimeMount — store 위치. base `oam` 배포설정이 정본이다.
-        oam 은 overlay 우선(이관 보호), oam-svc 는 **선언 없는 파생값**이라 `_store_source`
-        가 무조건 채운다 — 위치를 입력받는 창구는 oam 하나뿐이다.
+      - CimsRuntimeMount — 관리 store 위치의 **유일한 입력**. base `oam` 배포설정이 정본이고
+        overlay 우선(이관 보호)이다. `CimsRuntimeDir`·`Packages.Dir` 은 여기서 유도해 채우는
+        **선언 없는 파생값**이고(oam_ha.md §4.1), oam-svc 는 `_store_source` 로 같은 store 를
+        무조건 받는다 — 위치를 입력받는 창구는 oam 하나뿐이다.
       - ServiceLogging.Dir — template 소유(콘솔 편집 가능), 비어있을 때만 base 값 주입.
       - CimsAuth.BuiltinAccounts — shared_identity 모듈만. admin 계정이 노드마다 다르면
         절체 후 로그인이 깨진다(관리평면 이중화 전제, oam_ha.md §5)."""
@@ -300,56 +312,61 @@ def _materialize_deploy_config(config, pkg_file, overlay):
             secret = (config.get("CimsAuth") or {}).get("JwtSecret")
             if secret:
                 out["CimsAuth.JwtSecret"] = secret
-            # 관리 store 경로는 **리스 보유 모듈에만** 준다. 공유 store 는 소유권 리스
-            # (flock+epoch)를 쥔 하나만 write 하는 자원인데, csc 같은 서비스 모듈은 리스
-            # 획득 코드가 없다 — 경로만 받아두면 IdMS 가 토큰을 발급하는 순간 **펜싱 없는
-            # 두 번째 writer** 가 된다. 판별자는 descriptor 의 `safety.requires_leader_lease`
-            # (= "이 모듈은 단일 writer 자원을 소유한다" 선언, oam/oam-svc 만 true).
-            # 서비스 모듈은 노드 로컬 runtime 을 쓴다 — 절체 시 그 모듈의 로컬 상태
-            # (csc IdMS 의 auth_codes·refresh_tokens 등)는 유실되고 단말이 재로그인한다.
+            # 관리 store 경로는 **그 store 를 다루는 모듈에만** 준다. 공유 store 는
+            # 소유권 리스(flock+epoch)를 쥔 하나만 write 하는 자원인데, csc 같은 서비스
+            # 모듈은 리스 획득 코드가 없다 — 경로만 받아두면 IdMS 가 토큰을 발급하는 순간
+            # **펜싱 없는 두 번째 writer** 가 된다. 판별자는 descriptor 의
+            # `safety.requires_leader_lease`(= "이 모듈은 단일 writer 자원을 소유한다"
+            # 선언, oam/oam-svc 만 true). 서비스 모듈은 노드 로컬 runtime 을 쓴다 — 절체 시
+            # 그 모듈의 로컬 상태(csc IdMS 의 auth_codes·refresh_tokens 등)는 유실되고
+            # 단말이 재로그인한다.
             #
-            # 리스 보유 모듈 안에서도 **위치를 정하는 쪽과 받아 쓰는 쪽**을 가른다.
-            if _module_holds_lease(config, pkg_file):
-                if ((pkg_file or {}).get("name") or "").lower().strip() == "oam":
-                    # base oam — store 위치를 입력받는 **유일한 창구**(정본).
-                    #
-                    # store 경로는 **overlay 명시값이 우선**이다. base 를 무조건 덮어쓰면 이관
-                    # (overlay 에 새 경로를 넣는 작업)이 무력화된다 — 실측 사고: 이관이 overlay 에
-                    # `CimsRuntimeDir=/NAS/runtime` + `CimsRuntimeMount=/NAS` 를 넣었는데 여기서
-                    # base(로컬 경로)가 Dir 만 되돌려, "store 가 마운트 하위가 아님" guard 에 걸려
-                    # OAM 이 기동을 거부했다(자가복구가 되돌려 콘솔은 살아남음).
-                    # overlay 에 값이 없을 때만 base 를 주입한다(= 아직 정하지 않은 노드에 그룹 값 전파).
-                    #
-                    # 3종을 **함께** 준다 — 하나만 주면 그 노드가 반쪽 설정으로 뜬다.
-                    #   · CimsRuntimeDir   원본(store 루트)
-                    #   · CimsRuntimeMount mount guard 기준. **없으면 guard 가 꺼진다**
-                    #     (키 미설정이면 검사 자체를 건너뛴다 — oam_app._assert_runtime_mount).
-                    #     그러면 마운트 없이 떠서 마운트 지점 하부 로컬 디스크에 두 번째 store 를
-                    #     만드는 것을 막는 장치가 사라진다.
-                    #   · Packages.Dir     store 파생값(oam_ha.md §4.1). 없으면 패키지 oam.json 의
-                    #     상대경로("packages")로 폴백해 **버전 디렉터리**를 보므로, 그 노드가
-                    #     Active 가 되는 순간 패키지를 못 찾는다(`/agent-bundle.tar.gz` 404 =
-                    #     agent·모듈 설치/업그레이드 전면 불가).
-                    _tkeys = _template_key_set(tmpl)
-                    for _k, _v in (("CimsRuntimeDir",   config.get("CimsRuntimeDir")),
-                                   ("CimsRuntimeMount", config.get("CimsRuntimeMount")),
-                                   ("Packages.Dir",     (config.get("Packages") or {}).get("Dir"))):
-                        if not _v or str(out.get(_k) or "").strip():
-                            continue        # 값 없음 / overlay 명시값 있음(이관을 무력화하지 않는다)
-                        if _k != "CimsRuntimeDir" and _k not in _tkeys:
-                            continue
-                        out[_k] = _v
+            # 그 안에서 **위치를 정하는 쪽과 받아 쓰는 쪽**을 가른다.
+            if ((pkg_file or {}).get("name") or "").lower().strip() == "oam":
+                # base oam — store 위치를 입력받는 **유일한 창구**(정본). 자기 store 이므로
+                # descriptor 판정에 걸지 않는다: descriptor 를 못 읽었다고 경로를 비우면
+                # config.json 형태가 부트스트랩 기록과 갈라져 설정 불일치가 뜬다.
+                #
+                # 입력은 `CimsRuntimeMount`(관리 store 마운트 지점) **하나**다. store 루트와
+                # 패키지 저장소는 거기서 유도해 여기서 채운다(oam_ha.md §4.1) — 셋을 따로
+                # 입력받던 옛 구조는 같은 사실을 세 곳에 적는 것이라, 하나만 어긋나도 조용히
+                # 깨졌다:
+                #   · CimsRuntimeDir   어긋나면 그 노드가 다른 store 를 본다
+                #   · Packages.Dir     빠지면 패키지 oam.json 의 상대경로로 폴백해 **버전
+                #     디렉터리**를 보므로, 그 노드가 Active 가 되는 순간 패키지를 못 찾는다
+                #     (`/agent-bundle.tar.gz` 404 = agent·모듈 설치/업그레이드 전면 불가)
+                #
+                # 마운트는 **overlay 명시값이 우선**이다. base 를 무조건 덮어쓰면 이관
+                # (overlay 에 새 마운트를 넣는 작업)이 무력화된다 — overlay 에 값이 없을
+                # 때만 base 를 주입한다(= 아직 정하지 않은 노드에 그룹 값 전파).
+                # 마운트가 없는 구성(단일 노드)에서는 유도할 것이 없으므로 **돌고 있는
+                # OAM 의 실효 store 루트**를 준다 — 노드 로컬 폴백과 같은 값이고, 콘솔·agent·
+                # oam-svc 가 실제 경로를 알 수 있게 config.json 에 구체값으로 남긴다.
+                from services import paths as _paths
+                if "CimsRuntimeMount" in _template_key_set(tmpl) \
+                        and not str(out.get("CimsRuntimeMount") or "").strip():
+                    _mp = str(config.get("CimsRuntimeMount") or "").strip()
+                    if _mp:
+                        out["CimsRuntimeMount"] = _mp
+                if str(out.get("CimsRuntimeMount") or "").strip():
+                    _store = _paths.runtime_store_dir(out)
                 else:
-                    # oam-svc — store 를 **읽지만 위치를 정하지는 않는다**(알람 sweeper 가
-                    # agents·ha_groups·services 도메인을 읽는다). 위치는 언제나 oam 과 같은
-                    # 값이어야 하므로 사용자 입력이 아니라 **파생값**이다: 템플릿에 선언하지
-                    # 않아 `_prune_to_template` 이 overlay 저장을 구조적으로 막고, 여기서
-                    # oam 배포설정에서 유도해 **무조건** 채운다(overlay 우선 없음 — 옛 배포에
-                    # 남은 값이 이기면 두 프로세스가 다른 store 를 본다).
-                    # `Mgmt.Cidr` 이 이미 같은 방식이다(바로 아래).
-                    # `Packages.Dir` 은 주지 않는다 — 패키지 서빙은 base oam 만의 일이다.
-                    for _k, _v in _store_source(config).items():
-                        out[_k] = _v
+                    _store = str(out.get("CimsRuntimeDir") or "").strip() \
+                        or file_store.runtime_root(config)
+                out["CimsRuntimeDir"] = _store
+                if not str(out.get("Packages.Dir") or "").strip():
+                    out["Packages.Dir"] = os.path.join(_store, _STORE_PKG_DIR)
+            elif _module_holds_lease(config, pkg_file):
+                # oam-svc — store 를 **읽지만 위치를 정하지는 않는다**(알람 sweeper 가
+                # agents·ha_groups·services 도메인을 읽는다). 위치는 언제나 oam 과 같은
+                # 값이어야 하므로 사용자 입력이 아니라 **파생값**이다: 템플릿에 선언하지
+                # 않아 `_prune_to_template` 이 overlay 저장을 구조적으로 막고, 여기서
+                # oam 배포설정에서 유도해 **무조건** 채운다(overlay 우선 없음 — 옛 배포에
+                # 남은 값이 이기면 두 프로세스가 다른 store 를 본다).
+                # `Mgmt.Cidr` 이 이미 같은 방식이다(바로 아래).
+                # `Packages.Dir` 은 주지 않는다 — 패키지 서빙은 base oam 만의 일이다.
+                for _k, _v in _store_source(config).items():
+                    out[_k] = _v
             if (config.get("Mgmt") or {}).get("Cidr"):
                 out["Mgmt.Cidr"] = config["Mgmt"]["Cidr"]
             if not out.get("ServiceLogging.Dir"):
@@ -929,8 +946,9 @@ _SYNC_TXN_BASE    = "/api/v1/csp/sync"
 _DRIFT_BASE       = "/api/v1/csp/drift"
 _SIP_SERVICES_BASE = "/api/v1/csp/services"  # L5: csp_runtime/sip_service → deployment.collection/access_services 로 마이그레이션
 
-_DEFAULT_PKG_DIR    = "packages"
-_DEFAULT_BACKUP_DIR = "packages_trash"
+# 관리 store 하위의 패키지 저장소 이름 — 경로 자체는 store 에서 유도한다(oam_ha.md §4.1).
+_STORE_PKG_DIR      = "pkg_files"
+_STORE_BACKUP_DIR   = "pkg_files_trash"
 # CSC 루트 = 이 파일이 있는 handlers/ 의 두 단계 부모 (csc/src/handlers → csc/)
 _COMPONENT_ROOT = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
@@ -938,19 +956,26 @@ _COMPONENT_ROOT = os.path.normpath(
 
 
 def _resolve_pkg_paths(config: dict) -> tuple:
-    """csc.json 의 Packages.{Dir,BackupDir} 를 읽어 절대 경로 반환.
+    """패키지 저장소·백업 경로 (절대경로).
 
     우선순위:
-      1) csc.json → Packages.Dir / Packages.BackupDir
+      1) `Packages.Dir` / `Packages.BackupDir` (실체화가 채운 유도값 또는 명시값)
       2) 환경변수 CIMS_PKG_STORE / CIMS_PKG_BACKUP
-      3) 기본: <csc-root>/packages , <csc-root>/packages_trash
+      3) **관리 store 파생** — `{store}/pkg_files`, `{store}/pkg_files_trash`
 
-    상대 경로는 **CSC 컴포넌트 루트** (dist/csc/) 기준으로 해석 — `ConfigCacheDir`
-    등 다른 설정과 일관된 방식.
+    3 이 핵심이다: 패키지는 관리 store 의 일부이므로(oam_ha.md §4.1) 설정이 비어도
+    store 를 따라가야 한다. 옛 기본값은 컴포넌트 루트 상대경로(`packages`)라 **버전
+    디렉터리 안**을 가리켰고, 그 노드가 Active 가 되는 순간 `/agent-bundle.tar.gz` 가
+    404 였다(= agent·모듈 설치/업그레이드 전면 불가). 상대경로가 명시된 경우에만 종전대로
+    컴포넌트 루트 기준으로 해석한다.
     """
     pkg = config.get("Packages") or {}
-    active  = pkg.get("Dir")       or os.environ.get("CIMS_PKG_STORE")  or _DEFAULT_PKG_DIR
-    backup  = pkg.get("BackupDir") or os.environ.get("CIMS_PKG_BACKUP") or _DEFAULT_BACKUP_DIR
+    active  = str(pkg.get("Dir")       or os.environ.get("CIMS_PKG_STORE")  or "").strip()
+    backup  = str(pkg.get("BackupDir") or os.environ.get("CIMS_PKG_BACKUP") or "").strip()
+    if not (active and backup):
+        _store = file_store.runtime_root(config)
+        active = active or os.path.join(_store, _STORE_PKG_DIR)
+        backup = backup or os.path.join(_store, _STORE_BACKUP_DIR)
     if not os.path.isabs(active):  active = os.path.normpath(os.path.join(_COMPONENT_ROOT, active))
     if not os.path.isabs(backup):  backup = os.path.normpath(os.path.join(_COMPONENT_ROOT, backup))
     return active, backup

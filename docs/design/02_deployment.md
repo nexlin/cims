@@ -79,7 +79,7 @@ agent 와 모든 모듈은 **버전 디렉토리를 병렬로 보존**하고, �
 > ⚠️ **버전 트리 밖 영속(durability) 제약**
 > 다음은 **버전 디렉토리 밖**(prefix 직하 또는 모듈 루트 직하)에 둔다 — `current` flip / prune 에 생존해야 하기 때문:
 > - agent `state/`(enroll·cert), `run/`(supervised.json·managed_ips·pending_reports), sub-script(update/uninstall/setup-sudoers). 버전 디렉토리 안에 두면 매 업그레이드마다 re-enroll·감독 상태 유실.
-> - oam `modules/oam/runtime/`(file_store·`_secrets`·cert·JWT). 버전 안에 두면 업그레이드마다 토큰·계정·배포기록 소실. oam.json `CimsRuntimeDir` 는 절대경로라 `current` 경유 기동에도 동일 store 를 찾는다.
+> - oam `modules/oam/runtime/`(file_store·`_secrets`·cert·JWT). 버전 안에 두면 업그레이드마다 토큰·계정·배포기록 소실. 노드 `config.json` 의 `CimsRuntimeDir`(마운트에서 유도된 절대경로)라 `current` 경유 기동에도 동일 store 를 찾는다.
 >
 > **stale 인스턴스 정리**: `current` 통로 기동에선 신·구 버전 프로세스의 명령 경로가 같으므로(`current/bin/<m>`),
 > 경로 문자열이 아니라 **`/proc/<pid>/exe` 실경로**(exec 가 심볼릭을 해소 → 실제 버전 inode)로 구버전을 식별해 stop 한다.
@@ -325,14 +325,15 @@ CSC notify 라우팅 (`csc/src/services/mcptt.py::_notify_targets`):
 
 ## 설정 계층 — 패키지 기본값 vs 노드 overlay
 
-**공유 스토리지를 가리키는 키는 패키지 기본값에 박지 않는다.** `CimsRuntimeDir`(관리
-store)과 `ServiceLogging.Dir`(서비스 로그)이 그렇다. 부트스트랩 직후에는 공유 마운트가
+**공유 스토리지를 가리키는 키는 패키지 기본값에 박지 않는다.** `CimsRuntimeMount`(관리
+store 마운트 지점 — store 루트·패키지 저장소가 여기서 유도된다)와 `ServiceLogging.Dir`
+(서비스 로그)이 그렇다. 부트스트랩 직후에는 공유 마운트가
 **없는 것이 정상**이다 — 마운트를 붙이는 수단이 그 노드의 OAM 이 서빙하는 콘솔이기
 때문이다. 패키지에 공유 경로가 박혀 있으면 새 노드는 반드시 없는 경로를 붙들고 시작한다
 (실측: 서비스 로그 기록 실패가 분당 400건씩 17분, 그 로그가 진짜 원인을 덮었다).
 
 두 키 모두 **패키지 기본값은 빈 값**이고, 비었을 때 노드 로컬로 해석한다
-(`services/paths.py` — `local_runtime_dir` 하위). 공유 경로는 언제나 **배포 overlay** 가
+(`services/paths.py` — `runtime_store_dir` → `local_runtime_dir` 하위). 공유 경로는 언제나 **배포 overlay** 가
 정한다 — 패키지에는 들어가지 않는다. 로그는 로컬로라도 남긴다 — 비워서 로깅을 끄면
 부트스트랩 노드의 진단 통로가 사라진다.
 

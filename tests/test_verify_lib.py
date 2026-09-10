@@ -2231,14 +2231,13 @@ class TestStage5CscDeploySteps(unittest.TestCase):
         self.assertEqual(r.status, self._ItemStatus.PASS)
         self.assertEqual(self._native._get(ctx, "dep_id_oam"), 11)
         self.assertEqual(self._native._get(ctx, "dep_id_sim"), 33)
-        # config overlay 검증 — oam: Server.Port=4445 + runtime/packages/log 격리,
-        # sim: 없음 ({}).
+        # config overlay 검증 — oam: Server.Port=4445 + 서비스 로그 격리, sim: 없음 ({}).
+        # 관리 store 는 overlay 로 주지 않는다 — 입력은 마운트 지점 하나이고, 마운트가
+        # 없으면 자식 OAM 의 모듈 트리로 유도돼 그것만으로 TB 와 격리된다.
         mgmt_root = os.path.join(ctx.dist_dir, "mgmt-server")
         oam_payload = next(p for u, p in captured if p["process_name"] == "OAM")
         self.assertEqual(oam_payload["config"], {
             "Server.Port":        4445,
-            "CimsRuntimeDir":     os.path.join(mgmt_root, "oam", "runtime"),
-            "Packages.Dir":       os.path.join(mgmt_root, "oam", "packages"),
             "ServiceLogging.Dir": os.path.join(mgmt_root, "oam", "service_log"),
         })
         sim_payload = next(p for u, p in captured if p["process_name"] == "CSPSIM")
@@ -2453,10 +2452,11 @@ class TestStage5CscVerifySteps(unittest.TestCase):
         root = "/x/mgmt-server"
         ov = ns._mgmt_overlay("oam", verify_ports, root)
         self.assertEqual(ov["Server.Port"], 4445)
-        # runtime store / 패키지 저장소 / 서비스 로그 — oam 모듈 트리로 격리
-        self.assertEqual(ov["CimsRuntimeDir"],     "/x/mgmt-server/oam/runtime")
-        self.assertEqual(ov["Packages.Dir"],       "/x/mgmt-server/oam/packages")
+        # 서비스 로그만 격리 경로를 준다. 관리 store 는 **입력이 마운트 하나**라
+        # overlay 로 주지 않는다 — 마운트가 없으면 자식 OAM 의 모듈 트리로 유도된다.
         self.assertEqual(ov["ServiceLogging.Dir"], "/x/mgmt-server/oam/service_log")
+        self.assertNotIn("CimsRuntimeDir", ov)
+        self.assertNotIn("Packages.Dir", ov)
         self.assertEqual(ns._mgmt_overlay("oam", prod_ports, root)["Server.Port"], 4419)
         self.assertEqual(ns._mgmt_overlay("sim", verify_ports, root), {})
         self.assertEqual(ns._mgmt_overlay("unknown", verify_ports, root), {})

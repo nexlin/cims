@@ -1564,8 +1564,9 @@ Agent OAM 주소 재지정 (이중화 전환: 노드 IP → VIP):
 > 화면에 띄우고 코드로 분기한다(가드 409 는 사유를 보여준 뒤 `force` 재시도를 묻는다).
 
 > **`POST /api/v1/ha-groups/{id}/shared-store/migrate`** (admin) — 관리 store 를 공유
-> 마운트로 이관. body `{mount_point}`. 멤버 **oam** 배포설정(`CimsRuntimeDir`/`CimsRuntimeMount`
-> + 파생 `Packages.Dir`·`ServiceLogging.Dir`) 갱신 + store 보유 노드에 `migrate_oam_store` job
+> 마운트로 이관. body `{mount_point}`. 멤버 **oam** 배포설정에 `CimsRuntimeMount` 를 넣고
+> (옛 파생 키 `CimsRuntimeDir`·`Packages.Dir` 은 걷어낸다 — 실체화가 새 마운트에서 다시
+> 유도한다) 파생 `ServiceLogging.Dir` 갱신 + store 보유 노드에 `migrate_oam_store` job
 > (정지→복사→config→기동) 까지 한 번에 수행하고 **202** 를 반환한다. 진행 중 OAM 이
 > 재기동되므로 콘솔이 잠깐 끊긴다. 복사는 멱등이고, 실패 시 구 설정으로 되돌려 기동한다.
 > 시크릿·인증서는 이관 대상이 아니다(노드 로컬 유지). 대상 경로에 이전 데이터가 있으면

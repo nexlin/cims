@@ -146,9 +146,11 @@ ls /var/lib/systemd/linger/               # 서비스 계정
 ls /etc/sudoers.d/                        # cims-priv
 ```
 
-배포 overlay(`config.json`)의 `CimsRuntimeDir` 은 `<prefix>/modules/oam/runtime`,
-`Packages.Dir` 은 그 하위 `pkg_files` 여야 한다. 이 값이 **배포 레코드에 명시되어 있어야**
-이후 설치되는 csc/oam-svc 가 store 위치를 유도해 받는다.
+노드 `config.json` 의 `CimsRuntimeDir` 은 `<prefix>/modules/oam/runtime`, `Packages.Dir` 은
+그 하위 `pkg_files` 여야 한다. 공유 스토리지에 두었다면 각각 `<마운트>/runtime`,
+`<마운트>/runtime/pkg_files` 다. **둘 다 유도값이다** — 배포 레코드에는 `CimsRuntimeMount`
+(공유 스토리지를 쓸 때만) 하나만 저장되고, 나머지는 OAM 이 job 을 보낼 때마다 계산해
+`config.json` 에 적는다(oam_ha.md §4.1). 이후 설치되는 oam-svc 도 그 값을 유도해 받는다.
 
 ### 인증서
 

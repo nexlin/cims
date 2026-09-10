@@ -367,7 +367,7 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
  footer={sec.key === 'store'
                         ? <StoreMigrateFooter groupId={ha?.group_id ?? null}
  mountPoint={String(values['CimsRuntimeMount'] ?? '')}
- dirty={changed.has('CimsRuntimeMount') || changed.has('CimsRuntimeDir')}
+ dirty={changed.has('CimsRuntimeMount')}
  onDone={onDone} />
                         : undefined} />
                   ))}
@@ -613,12 +613,16 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
 }
 
 /**
- * 관리 store 섹션 하단 — 경로 변경의 정규 경로.
+ * 관리 store 섹션 하단 — 유도되는 경로를 보여주고, 경로 변경의 정규 경로(이관)를 준다.
  *
- * `CimsRuntimeMount`/`CimsRuntimeDir` 은 **저장으로 적용되는 키가 아니다.** 저장하면
- * `update_config` 만 돌아 경로만 바뀌고 데이터는 따라가지 않는다 → 새 경로에 빈 store 가
- * 생기거나(마운트 없으면) mount guard 가 기동을 거부한다. 데이터를 옮기는 것은 이관
- * (`migrate_oam_store` job: 정지 → 복사 → 기록 → 기동)뿐이므로 그 버튼을 여기 둔다.
+ * 입력은 **마운트 지점 하나**다(oam_ha.md §4.1). store 루트·패키지 저장소는 그 하위로
+ * 유도되므로 화면에 입력칸을 두지 않고 **결과만 보여준다** — 같은 사실을 세 칸에 나눠
+ * 입력받으면 하나만 어긋나도 조용히 깨진다(절체한 노드에서 패키지 404 등).
+ *
+ * `CimsRuntimeMount` 는 **저장으로 적용되는 키가 아니다.** 저장하면 `update_config` 만
+ * 돌아 경로만 바뀌고 데이터는 따라가지 않는다 → 새 경로에 빈 store 가 생기거나(마운트
+ * 없으면) mount guard 가 기동을 거부한다. 데이터를 옮기는 것은 이관(`migrate_oam_store`
+ * job: 정지 → 복사 → 기록 → 기동)뿐이므로 그 버튼을 여기 둔다.
  * 최초 지정은 부트스트랩 설치가 담당하므로(oam_ha.md §9.4) 보통 이 버튼은 쓰지 않는다.
  *
  * 이 footer 는 결과적으로 **oam 에만** 붙는다 — store 섹션을 가진 템플릿이 oam 하나이기
@@ -660,11 +664,19 @@ export function StoreMigrateFooter({ groupId, mountPoint, dirty, onDone }: {
     // (구 화면은 노란 경고 상자였다 — 매번 떠 있어 경고로 읽히지 않았다).
     // Primary 는 화면당 1개(저장바)라 여기는 outline 이다.
     <div className="mt-2.5 flex flex-col gap-2.5">
+      {/* 유도 결과 — 입력칸이 아니라 「이 마운트면 어디에 놓이는가」의 표시다. */}
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <dt>관리 store</dt>
+        <dd className="font-mono">{mp ? `${mp}/runtime` : '노드 로컬 (modules/oam/runtime)'}</dd>
+        <dt>패키지 저장소</dt>
+        <dd className="font-mono">{mp ? `${mp}/runtime/pkg_files` : '노드 로컬 store 하위 pkg_files'}</dd>
+      </dl>
       <p className="text-xs leading-[1.6] text-muted-foreground">
         <b>경로를 바꾸려면 이관을 쓰세요.</b> 저장은 경로만 바꾸고 <b>데이터를 옮기지
         않습니다</b> — 새 경로에 빈 store 가 생기거나, 마운트가 없으면 OAM 이 기동을
         거부합니다. 이관은 정지 → 복사 → 기동을 한 번에 처리합니다. 이 값은 <b>멤버 간
         동일해야</b> 하므로 공통 설정입니다 — 최초 지정은 부트스트랩 설치가 담당합니다.
+        비우면 노드 로컬에 저장합니다.
       </p>
       {groupId ? (
         <div className="flex flex-wrap items-center gap-2">

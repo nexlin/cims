@@ -274,8 +274,8 @@ config/
 - 하위호환: `common.json` 부재 시 자기 `oam-svc.json` 단독. **base `oam.json` 상속(fallback)은
   없다** — oam-svc 는 자기 설정(배포 overlay `config.json` 또는 `oam-svc.json`)만 읽는 완전
   독립 설정 모듈이다(csp/cmp/csc 와 동일 모델). base 와 공유해야 하는 값(`CimsAuth.JwtSecret`/
-  `CimsRuntimeDir`·`CimsRuntimeMount`/`Mgmt.Cidr`)은 상속이 아니라 **배포 시 base OAM 이
-  주입**한다(아래 실체화 참조). 이 값들은 oam-svc `config_template.json` 에 **선언을 두지
+  관리 store 경로 `CimsRuntimeDir`·`CimsRuntimeMount`/`Mgmt.Cidr`)은 상속이 아니라 **배포 시
+  base OAM 이 주입**한다(아래 실체화 참조). 이 값들은 oam-svc `config_template.json` 에 **선언을 두지
   않는다** — 선언은 곧 편집권이고(콘솔 필드 + overlay 저장 허용), 이 값들은 운영자가 정할
   것이 아니라 base 에서 유도되는 파생값이기 때문이다. 양쪽에서 입력받으면 서로 다른 값이
   저장될 수 있고, 그러면 어긋남을 막는 정합 코드가 또 필요해진다. 선언이 없으면 overlay
@@ -300,8 +300,9 @@ install/upgrade/update_config job 을 디스패치할 때 ① `config_template` 
 를 base 로 깔고 ② deployment 레코드의 overlay(사용자 변경분)를 병합하고 ③ 게이트웨이 서비스
 모듈(meta.gateway.routes 보유)에는 base 소유 공유값(`CimsAuth.JwtSecret`/`Mgmt.Cidr`,
 비어있으면 `ServiceLogging.Dir`)을 주입해 완전한 config 를 agent 에 전달한다. store 경로
-(`CimsRuntimeDir`/`CimsRuntimeMount`)는 리스 보유 모듈(oam/oam-svc)에만 주는데, oam-svc 쪽
-출처는 살아있는 OAM 의 현재 설정이 아니라 **`oam` 배포설정**(desired state)이다
+(`CimsRuntimeDir`)는 그 store 를 다루는 모듈(oam/oam-svc)에만 주는데, **입력은 base oam 의
+`CimsRuntimeMount` 하나**이고 store 루트·패키지 저장소는 거기서 유도된다(oam_ha.md §4.1).
+oam-svc 쪽 출처는 살아있는 OAM 의 현재 설정이 아니라 **`oam` 배포설정**(desired state)이다
 (`agents._store_source`) — 이관 job 을 디스패치하는 시점의 현재 설정은 아직 옛 경로라
 그것을 주면 oam-svc 만 옛 store 에 남는다. 상세: [oam_ha.md](oam_ha.md) §4.1·§9.4.
 deployment **레코드는 sparse overlay(사용자 변경분)로 유지** — template default 가 바뀌면
@@ -661,6 +662,8 @@ _put_group_pkg_config`, operator):
   선언은 곧 편집권이므로, 다른 모듈에서 유도되는 파생값에 선언을 주면 두 번째 입력점이
   생기고 그때부터 "두 값이 같은가" 를 검사하는 코드가 따라붙는다. 그런 값은 선언을 두지
   않아 이 마스크가 저장을 막게 하고, 실체화가 유일한 출처에서 유도해 채운다. 예:
-  oam-svc 의 `CimsRuntimeDir`/`CimsRuntimeMount`(oam 배포설정에서 유도), `Mgmt.Cidr`.
+  oam-svc 의 `CimsRuntimeDir`/`CimsRuntimeMount`(oam 배포설정에서 유도), `Mgmt.Cidr`,
+  그리고 **base oam 자신의 `CimsRuntimeDir`·`Packages.Dir`**(마운트 지점 하나에서 유도 —
+  같은 사실을 세 칸에 나눠 입력받던 구조를 걷어냈다, oam_ha.md §4.1).
   이 값들은 `_prune_to_template` 이 걸러 overlay 에 앉지 못하므로 §14.7 의 세 가지 폐해
   ((a) 안 보이는 필드 (b) 자동교정 방치 (c) 남의 필드 오독)도 발생하지 않는다.

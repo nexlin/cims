@@ -1563,8 +1563,9 @@ async def _migrate_shared_store(gid: int, body_raw, config: dict) -> HandlerResu
     무엇보다 OAM 은 **자기 store 를 자기가 옮길 수 없다**. 그래서:
 
       1. (그룹 레코드에는 쓰지 않는다 — 공유 store 는 배포 overlay 가 정본)
-      2. 그룹 멤버의 **oam** 배포 overlay 에 `CimsRuntimeDir`/`CimsRuntimeMount` 병합
+      2. 그룹 멤버의 **oam** 배포 overlay 에 `CimsRuntimeMount` 병합(+ 옛 파생값 제거)
          → **현재 store 에 기록**되므로 3단계 복사에 함께 실려 간다(신 store 와 일관).
+         store 루트·패키지 저장소는 실체화가 마운트에서 유도한다(§4.1).
          oam-svc 는 저장하지 않는다 — 실체화가 oam 에서 유도해 넣는다(정본 하나)
       3. store 를 들고 있는 노드(현재 oam 이 running 인 노드)에 `migrate_oam_store` job
          → agent 가 정지 → 복사 → config.json 기록 → 기동 을 수행
@@ -1673,30 +1674,27 @@ async def _migrate_shared_store(gid: int, body_raw, config: dict) -> HandlerResu
         cur = dep.get('config') if isinstance(dep.get('config'), dict) else {}
         overlay = dict(cur)
         _is_base = (dep.get('process_name') or '').lower().strip() == 'oam'
-        # ── store 파생 키도 함께 옮긴다 ────────────────────────────────────────
-        # 이관은 "store 를 이 위치로 옮긴다" 는 뜻이므로 store 에서 유도되는 값이 뒤에
-        # 남으면 안 된다. 여기서 갱신하지 않아 실제로 깨졌던 것들:
-        #   · Packages.Dir 이 이관 전 로컬 경로에 머물러, 절체한 노드에서 패키지 파일을
-        #     못 찾아 `/agent-bundle.tar.gz` 404 → agent·모듈 설치/업그레이드 전면 불가.
-        #   · ServiceLogging.Dir 이 로컬에 머물러, 운영자가 매 설치마다 콘솔에서 손으로
-        #     공유 경로로 되돌려야 했다.
-        # 파생 기준이 서로 다르다 (oam_ha.md §4.1):
-        #   · Packages.Dir       = store 의 일부  → **store(=target_dir)** 하위
-        #   · ServiceLogging.Dir = store 가 아님  → **마운트(=mnt)** 하위
-        #     (append-only 관측 데이터라 양 노드 동시 write 가 무해하고, store 이관·스냅샷에
-        #      대용량 로그가 딸려가면 안 된다)
-        # `Packages.Dir` 은 패키지를 서빙하는 base oam 만의 키다(oam-svc 템플릿엔 없다) —
-        # 선언 없는 키를 overlay 에 심으면 콘솔 설정화면에 유령 항목·드리프트로 보인다.
+        # ── 저장하는 것은 **마운트 지점 하나**다 ──────────────────────────────
+        # store 루트(`CimsRuntimeDir`)와 패키지 저장소(`Packages.Dir`)는 마운트에서 유도되는
+        # 파생값이라 저장하지 않는다 — 실체화(`agents._materialize_deploy_config`)가 새 마운트
+        # 에서 계산해 config.json 에 넣는다(oam_ha.md §4.1). 옛 배포에 굳어 있는 값은 여기서
+        # **걷어낸다**: 남겨두면 그 명시값이 유도값을 이겨(전환기 호환 규칙) 이관 후에도
+        # 옛 경로를 가리키고, 그러면 절체한 노드가 패키지 파일을 못 찾는다
+        # (`/agent-bundle.tar.gz` 404 = agent·모듈 설치/업그레이드 전면 불가).
+        #
+        # `ServiceLogging.Dir` 만 다르다 — 파생 기준이 store 가 아니라 **마운트**이고
+        # (append-only 관측 데이터라 양 노드 동시 write 가 무해하고, store 이관·스냅샷에
+        # 대용량 로그가 딸려가면 안 된다) 운영자가 콘솔에서 다른 위치를 고를 수 있는
+        # 선언된 키라, 파생값일 때만 따라 옮긴다.
+        overlay.pop('CimsRuntimeDir', None)
+        overlay.pop('Packages.Dir', None)
         if _is_base:
-            overlay['CimsRuntimeDir'] = target_dir
             overlay['CimsRuntimeMount'] = mnt
-            overlay['Packages.Dir'] = f'{target_dir}/pkg_files'
         else:
             # oam-svc 는 store 위치를 **저장하지 않는다** — 정본은 oam 배포설정 하나이고
-            # 실체화가 거기서 유도해 config.json 에 넣는다. 옛 배포에 남아 있는 값은 여기서
-            # 걷어낸다: 두면 템플릿 밖 유령 키로 굳고(선언을 뺐다), 이관 때마다 "oam 과
-            # 같은지" 를 검사해야 하는 두 번째 입력점이 된다.
-            overlay.pop('CimsRuntimeDir', None)
+            # 실체화가 거기서 유도해 config.json 에 넣는다. 옛 배포에 남아 있는 마운트 값도
+            # 여기서 걷어낸다: 두면 템플릿 밖 유령 키로 굳고(선언을 뺐다), 이관 때마다
+            # "oam 과 같은지" 를 검사해야 하는 두 번째 입력점이 된다.
             overlay.pop('CimsRuntimeMount', None)
         if _log_dir_follows_mount(str(cur.get('ServiceLogging.Dir') or ''), mnt):
             overlay['ServiceLogging.Dir'] = f'{mnt}/service_log'

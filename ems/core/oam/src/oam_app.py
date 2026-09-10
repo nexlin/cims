@@ -34,18 +34,10 @@ _COMPONENT_ROOT = os.path.normpath(os.path.join(_HERE, '..'))  # = oam/
 _CONFIG_PATH = os.environ.get('CIMS_OAM_CONFIG') or os.path.join(_COMPONENT_ROOT, 'config', 'oam.json')
 
 
-def _runtime_dir(config=None):
-    """버전무관 runtime 루트 — `CimsRuntimeDir` 우선, 없으면 modules/oam/runtime 추정."""
-    d = (config or {}).get('CimsRuntimeDir')
-    if d:
-        return d
-    return os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', '..', 'runtime'))
-
-
 def _secrets_dir(config=None):
     """시크릿 격리 디렉토리(0700) — **노드 로컬**(services.paths).
 
-    `CimsRuntimeDir` 에서 유도하면 안 된다: 이중화에서 그 값은 **공유 store**를 가리키고,
+    관리 store 에서 유도하면 안 된다: 이중화에서 그 경로는 **공유 마운트**를 가리키고,
     개인키(그룹 CA·mTLS CA)를 볼륨에 올리는 것은 설계 위반이다(oam_ha.md §5 — 복제가 아니라
     join 1회 복사)."""
     from services import paths as _paths
@@ -93,7 +85,8 @@ def _resolve_jwt_secret(config):
 
 
 def _assert_runtime_mount(config):
-    """mount guard — `CimsRuntimeMount` 가 설정돼 있으면 그 경로가 **실제 마운트**인지 확인.
+    """mount guard — `CimsRuntimeMount`(관리 store 의 유일한 입력)가 설정돼 있으면
+    그 경로가 **실제 마운트**인지 확인.
 
     관리평면 store 가 공유 스토리지(NAS)에 있는 구성에서, 마운트가 안 된 상태로 OAM 이 뜨면
     마운트 포인트 **하부 로컬 디스크**에 두 번째 store 를 만든다. 절체마다 서로 다른 데이터를
@@ -106,7 +99,8 @@ def _assert_runtime_mount(config):
     if not mp:
         return
     mp = str(mp).rstrip('/')
-    rt = os.path.abspath((config or {}).get('CimsRuntimeDir') or '')
+    from services import paths as _paths
+    rt = os.path.abspath(_paths.runtime_store_dir(config))    # = {마운트}/runtime
     mounted = False
     try:
         with open('/proc/mounts') as f:
@@ -125,9 +119,7 @@ def _assert_runtime_mount(config):
         # **되돌릴 통로 없이 영구 정지**한다 — 설정을 고칠 콘솔이 사라지기 때문이다(실측).
         # 그래서 위험한 경우만 거부하고, 안전한 경우는 **직전 로컬 store 로 기동**한다.
         target_has_store = os.path.isdir(os.path.join(rt, 'control')) if rt else False
-        local = ''
         try:
-            from services import paths as _paths
             local = _paths.local_runtime_dir(config)
         except Exception:
             local = ''
@@ -163,7 +155,9 @@ def _assert_runtime_mount(config):
         sys.exit(3)
 
     if rt and not (rt == mp or rt.startswith(mp + '/')):
-        print(f'OAM_MOUNT_GUARD_FAIL: CimsRuntimeDir={rt} 가 마운트 {mp} 하위가 아닙니다 '
+        # 유도값은 정의상 마운트 하위라 여기 걸릴 수 없다 — 유도 규칙이 깨졌을 때만
+        # 드러나는 불변식 검사다(조용히 마운트 밖에 store 를 만드는 것보다 낫다).
+        print(f'OAM_MOUNT_GUARD_FAIL: 관리 store {rt} 가 마운트 {mp} 하위가 아닙니다 '
               f'— 설정 불일치로 기동을 거부합니다.', flush=True)
         sys.exit(3)
     print(f'[oam-mount] runtime store 마운트 확인: {mp}', flush=True)
@@ -491,7 +485,7 @@ if __name__ == '__main__':
             logger.log_error(f"[lease] 획득 예외({_e}) — read-only 모드")
 
         # ── 잘못된 위치의 store 1회 회수 (버전 디렉터리 → 버전무관) ──────────
-        # 배포 overlay 에 CimsRuntimeDir 이 없던 노드는 옛 폴백 때문에 store 가 버전
+        # 배포 overlay 에 store 경로가 없던 노드는 옛 폴백 때문에 store 가 버전
         # 디렉터리 안(`.../current/ext_mnt/runtime`, `cwd/runtime`)에 생겼다 — oam 업그레이드
         # 시 사라지는 위치다(실서버 실측). 폴백은 고쳤지만 **이미 생긴 데이터**는 옮겨줘야
         # 잃지 않는다. 목표 위치에 control/ 이 없을 때만 복사한다(멱등, 덮어쓰기 없음).
@@ -518,11 +512,39 @@ if __name__ == '__main__':
                             _sh.copy2(_src, _dst)
                     logger.log_warning(
                         f"[store] 잘못된 위치의 관리 store 회수: {_legacy} → {_rt_now} "
-                        f"(버전 디렉터리 안이라 업그레이드 시 소실되는 위치였다. "
-                        f"배포 설정 CimsRuntimeDir 를 명시해 두는 것을 권장)")
+                        f"(버전 디렉터리 안이라 업그레이드 시 소실되는 위치였다)")
                     break
         except Exception as _e:
             logger.log_warning(f"[store] 위치 회수 skip: {_e}")
+
+        # ── 잘못된 위치의 패키지 파일 1회 회수 (컴포넌트 상대경로 → store 하위) ──
+        # `Packages.Dir` 이 비어 있던 노드는 옛 기본값(상대경로 `packages`)때문에 업로드
+        # 파일이 **버전 디렉터리 안**(`<ver>/oam/packages`)에 쌓였다 — 업그레이드하면
+        # 사라지고, 절체하면 그 노드에 없어 `/agent-bundle.tar.gz` 가 404 다(agent·모듈
+        # 설치/업그레이드 전면 불가). 지금은 store 하위(`<store>/pkg_files`)로 유도하므로,
+        # 옛 위치에 남은 파일을 한 번 옮겨 준다. 목적지에 같은 이름이 있으면 건드리지 않는다.
+        try:
+            from handlers.agents import _resolve_pkg_paths as _rpp
+            import shutil as _sh2
+            _pkg_now, _ = _rpp(config)
+            for _legacy in (os.path.join(_COMPONENT_ROOT, 'packages'),):
+                if os.path.abspath(_legacy) == os.path.abspath(_pkg_now) \
+                        or not os.path.isdir(_legacy):
+                    continue
+                _moved = 0
+                os.makedirs(_pkg_now, exist_ok=True)
+                for _fn in sorted(os.listdir(_legacy)):
+                    _src, _dst = os.path.join(_legacy, _fn), os.path.join(_pkg_now, _fn)
+                    if not os.path.isfile(_src) or os.path.exists(_dst):
+                        continue
+                    _sh2.copy2(_src, _dst)
+                    _moved += 1
+                if _moved:
+                    logger.log_warning(
+                        f"[pkg] 잘못된 위치의 패키지 파일 {_moved}건 회수: {_legacy} → {_pkg_now} "
+                        f"(버전 디렉터리 안이라 업그레이드 시 소실되는 위치였다)")
+        except Exception as _e:
+            logger.log_warning(f"[pkg] 패키지 위치 회수 skip: {_e}")
 
         # runtime store v2 — 구 평면 도메인 1회 이행 (도메인 접근 전 선행).
         #   P2: OAM 자기 데이터 → control/·console/.   P3: 컬렉션 → modules/<owner>/runtime.

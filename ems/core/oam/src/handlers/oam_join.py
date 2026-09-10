@@ -71,6 +71,14 @@ def _secrets_dir(config) -> str:
     return _paths.secrets_dir(config, create=False)
 
 
+def _store_root(config) -> str:
+    """이 노드의 실효 관리 store 경로 — 마운트에서 유도(services.paths)."""
+    try:
+        return file_store.runtime_root(config)
+    except Exception:
+        return str(config.get('CimsRuntimeDir') or '')
+
+
 def _identity_bundle(config: dict) -> dict:
     """합류 노드에 넘기는 그룹 공통 신원 — 노드 로컬 0600 자산의 사본.
 
@@ -93,8 +101,11 @@ def _identity_bundle(config: dict) -> dict:
             'CertSans': srv.get('CertSans') or [],
         },
         'mgmt': {'Cidr': (config.get('Mgmt') or {}).get('Cidr') or ''},
+        # 합류 노드가 계승하는 것은 **마운트 지점**이다 — store 경로는 양쪽이 같은 규칙으로
+        # 유도한다(oam_ha.md §4.1). `CimsRuntimeDir` 은 해석된 현재 store 를 참고용으로
+        # 함께 준다(구 installer 하위호환 + 진단).
         'runtime': {
-            'CimsRuntimeDir': config.get('CimsRuntimeDir') or '',
+            'CimsRuntimeDir': _store_root(config),
             'CimsRuntimeMount': config.get('CimsRuntimeMount') or '',
         },
         'logging': {'Dir': (config.get('ServiceLogging') or {}).get('Dir') or ''},

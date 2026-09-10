@@ -28,7 +28,9 @@
 ## 2. 디렉토리 레이아웃
 
 ```
-{CimsRuntimeDir}/                    # 기본: {ServiceLogDir}/../runtime/ 또는 config 의 CimsRuntimeDir
+{관리 store}/                        # `CimsRuntimeMount` 지정 시 `<마운트>/runtime`,
+                                     #   비우면 노드 로컬 `modules/oam/runtime`
+                                     #   (services/paths.py: runtime_store_dir)
   packages/
     <name>__<version>.json           # 한 패키지 = 1 파일. 파일명 = uk(name,version)
     .seq                             # 다음 ID (단조 증가, 파일 lock 으로 보호)
@@ -149,7 +151,7 @@ def _atomic_write(path, content):
 
 ## 9. 백업 / 보존
 
-- `CimsRuntimeDir` 전체를 tar 로 백업 (compose 기반 배포의 volume 와 동일 단순성).
+- 관리 store 전체를 tar 로 백업 (compose 기반 배포의 volume 와 동일 단순성).
 - 일별 jsonl (jobs/metrics) 는 운영 정책으로 30~90일 보존 후 자동 삭제 (cron + `find -mtime`).
 
 ## 공유 스토리지(NFS)에서의 접근 비용
