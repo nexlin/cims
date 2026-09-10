@@ -1,0 +1,5 @@
+# PTT 그룹 — mcptt_group_id 가 유일키(자유 문자열, 'adhoc-'·'priv-' 접두사는 예약).
+#   cspsim 의 -group 기본값이 1000 이라 시험 편의상 숫자 id 도 쓸 수 있다.
+#   빈 열은 DB 기본값을 쓴다. group_type: prearranged|chat|broadcast / floor_policy: single|dual|multi
+mcptt_group_id,name,org_code,group_type,floor_policy,max_talkers,require_affiliation,emergency_call,allow_sds
+testgrp01,시험그룹,HQ,prearranged,single,,0,,

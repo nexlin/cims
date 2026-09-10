@@ -1,0 +1,8 @@
+# 가입자(사람) — login_id 가 유일키. login_id/passwd 는 단말(IdMS) 로그인 자격이다.
+#   · passwd 는 평문 저장이다 (CSC 가 그대로 비교한다). 콘솔 admin 계정과는 무관.
+#   · org_code 는 organizations.csv 의 code.
+login_id,name,passwd,org_code,title,email
+test001,시험01,1234,HQ,,
+test002,시험02,1234,HQ,,
+test003,시험03,1234,HQ,,
+test004,시험04,1234,HQ,,

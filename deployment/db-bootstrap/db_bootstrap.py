@@ -154,9 +154,13 @@ def main():
 
         # (3) 앱 계정 + 권한 (멱등). 비밀번호 지정 시 갱신.
         if appusr:
-            cur.execute(f"CREATE USER IF NOT EXISTS '{appusr}'@'{ghost}' IDENTIFIED BY %s", (apppw,))
+            # ghost 에 '%' (와일드카드 호스트) 가 올 수 있는데, pymysql 의 %s 파라미터
+            # 치환이 query 문자열 전체에 printf 스타일 포매팅을 적용하므로 리터럴 %
+            # 는 %% 로 escape 해야 함 (그렇지 않으면 mogrify 단계에서 깨짐).
+            ghost_esc = ghost.replace('%', '%%')
+            cur.execute(f"CREATE USER IF NOT EXISTS '{appusr}'@'{ghost_esc}' IDENTIFIED BY %s", (apppw,))
             if apppw:
-                cur.execute(f"ALTER USER '{appusr}'@'{ghost}' IDENTIFIED BY %s", (apppw,))
+                cur.execute(f"ALTER USER '{appusr}'@'{ghost_esc}' IDENTIFIED BY %s", (apppw,))
             cur.execute(f"GRANT ALL PRIVILEGES ON `{dbname}`.* TO '{appusr}'@'{ghost}'")
             cur.execute("FLUSH PRIVILEGES")
             print(f"✓ user '{appusr}'@'{ghost}' granted on `{dbname}`")

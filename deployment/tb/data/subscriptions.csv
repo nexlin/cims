@@ -1,0 +1,16 @@
+# 가입 번호 — number 가 PK(내선/msisdn). login_id 로 사람에 붙인다.
+#   · kind        : ptt | volte
+#   · service_ref : CSP access_services 의 **서비스 이름** (다르면 CSP 가 서비스를 못 찾는다)
+#   · imsi+passwd : ha1 = MD5("<imsi>@<도메인>:<realm>:<passwd>") 로 변환 저장된다.
+#                   passwd 평문은 저장되지 않는다.
+#   · sip_transport : 비우면 미지정(단말 기본). UDP|TCP|TLS
+#   · pickup_group  : 당겨받기 그룹(선택). 같은 값끼리 당겨받기 가능
+number,login_id,kind,imsi,service_ref,passwd,sip_transport,pickup_group
+8050001000004,test001,ptt,450033000000004,mcptt,1234,,
+8050001000005,test002,ptt,450033000000005,mcptt,1234,,
+8050001000008,test003,ptt,450033000000008,mcptt,1234,,
+8050001000009,test004,ptt,450033000000009,mcptt,1234,,
+8050002000001,test001,volte,450033000000101,volte,test1234,,
+8050002000002,test002,volte,450033000000102,volte,test1234,,
+8050002000003,test003,volte,450033000000103,volte,test1234,,
+8050002000004,test004,volte,450033000000104,volte,test1234,,

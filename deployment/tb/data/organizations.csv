@@ -1,0 +1,4 @@
+# 조직 — code 가 유일키다. 상위 조직은 parent_code 로 가리킨다(위에 없어도 순서 무관).
+# code_path 는 스크립트가 '/' 로 조립한다 (루트는 code 그대로).
+code,name,parent_code,sort_order
+HQ,본부,,0

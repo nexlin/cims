@@ -1,0 +1,6 @@
+# 그룹 멤버 — number 는 **PTT 가입 번호**여야 한다(volte 번호는 안 된다). role: chair|participant
+mcptt_group_id,number,role,priority
+testgrp01,8050001000004,chair,
+testgrp01,8050001000005,participant,
+testgrp01,8050001000008,participant,
+testgrp01,8050001000009,participant,
