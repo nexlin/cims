@@ -443,6 +443,14 @@ PYEOF
         #  packages_trash/ : TB-CSC 삭제 보관소
         #  cdr/         : CDR 산출물
         #  dist/        : 번들러 산출물 이 아닌 상위 dist 와 혼동 방지 (cwrtc/dist 등 없음)
+        # 개인키는 0600 으로 담는다. git 은 실행 비트만 기록하므로 클론·umask 에 따라
+        # 0644 가 되고, 그대로 tar 에 실리면 **배포본에서 world-readable** 이 된다 —
+        # csp/cert/csp.pem 이 실제로 0644 로 나가고 있었다.
+        while IFS= read -r -d '' _pem; do
+            chmod 600 "$_pem" 2>/dev/null || true
+        done < <(find "$pkg_root/$src_sub" -type f \
+                      \( -name '*.pem' -o -name '*.key' \) -print0 2>/dev/null)
+
         ( cd "$pkg_root" && \
             tar czf "$tar_file" \
                 --exclude="$src_sub/log" \

@@ -836,7 +836,7 @@
           "key": "Recording.VerifyTls",
           "label": "OAM 인증서 검증",
           "type": "bool",
-          "default": "false",
+          "default": false,
           "restart": true,
           "advanced": true,
           "help": "OAM 게이트웨이 TLS 인증서를 검증할지 — 사내 자가서명이면 끔."
@@ -862,7 +862,7 @@
           "key": "Fm.Enable",
           "label": "FM 자기보고 사용",
           "type": "bool",
-          "default": "true",
+          "default": true,
           "restart": true,
           "help": "끄면 자기보고 알람(DB 연결 등)·이벤트가 OAM 에 보고되지 않음 (외부 관측 폴링만 동작)."
         },

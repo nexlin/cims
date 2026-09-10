@@ -397,7 +397,7 @@
           "key": "Fm.Enable",
           "label": "FM 자기보고 사용",
           "type": "bool",
-          "default": "true",
+          "default": true,
           "restart": true,
           "help": "끄면 자기보고 알람·이벤트가 OAM 에 보고되지 않음 (외부 관측 폴링만 동작)."
         },
