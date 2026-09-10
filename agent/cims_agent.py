@@ -4876,28 +4876,66 @@ def _write_jsonl_atomic(path: str, records: list) -> int:
     return len(records)
 
 
-def _signal_process(install_path: str, sig_name: str, pkg_subdir: str = "") -> tuple:
-    """install_path 의 *.pid 를 읽어 SIGUSR1(기본)/SIGHUP 전송.
+def _module_of_install_path(install_path: str) -> tuple:
+    """install_path 에서 (prefix, 모듈이름) 을 뽑는다 — `<prefix>/modules/<mod>/…` 규약.
 
-    탐색 순서: pkg_subdir/run/ → install_path/run/ → install_path/ (각각 *.pid 매칭).
+    배포본이 아니면 ("", "") — 소스/dist 트리는 pid 를 자기 run/ 에 두므로 유도할 것이 없다.
+    """
+    parts = os.path.realpath(install_path).split(os.sep)
+    if "modules" not in parts:
+        return ("", "")
+    i = len(parts) - 1 - parts[::-1].index("modules")
+    prefix = os.sep.join(parts[:i]) or os.sep
+    mod = parts[i + 1] if i + 1 < len(parts) else ""
+    return (prefix, mod)
+
+
+def _pid_files_for(install_path: str, pkg_subdir: str = "") -> list:
+    """이 install 의 pid 파일 후보 — **정본(버전 밖) 먼저**, 없으면 옛 자리.
+
+    pid 정본은 `<prefix>/run/<mod>.pid` 다 (cims-svc `_pid_dir_for`). 버전 폴더 안에 두면
+    `current` 가 넘어갈 때 옛 프로세스를 잃는다. `<prefix>/run` 은 **모듈 공용 디렉토리**라
+    이름으로 한 개만 고른다 — 거기 있는 `*.pid` 를 전부 읽으면 남의 모듈에도 신호가 간다.
+
+    옛 자리(`<install_path>[/<pkg_subdir>]/run/*.pid`)는 이행기 동안 함께 본다 — pid 를
+    옮기기 전에 기동한 프로세스가 아직 그 자리를 쓰고 있다.
+    """
+    out = []
+    prefix, mod = _module_of_install_path(install_path)
+    if prefix:
+        for nm in ([pkg_subdir] if pkg_subdir else []) + ([mod] if mod else []):
+            f = os.path.join(prefix, "run", f"{nm}.pid")
+            if os.path.isfile(f):
+                out.append(f)
+    if out:
+        return out
+    legacy = []
+    if pkg_subdir:
+        legacy.append(os.path.join(install_path, pkg_subdir, "run"))
+    legacy.extend([os.path.join(install_path, "run"), install_path])
+    d = next((x for x in legacy if os.path.isdir(x)), install_path)
+    try:
+        out = [os.path.join(d, n) for n in os.listdir(d) if n.endswith(".pid")]
+    except OSError:
+        out = []
+    return out
+
+
+def _signal_process(install_path: str, sig_name: str, pkg_subdir: str = "") -> tuple:
+    """이 install 의 pid 에 SIGUSR1(기본)/SIGHUP 전송. 탐색은 `_pid_files_for` 규약.
+
     multi-pkg agent 의 경우 pkg_subdir 가 명시되면 해당 변종의 pid 만 신호 받음.
     """
     sig = signal.SIGUSR1 if sig_name == "usr1" else signal.SIGHUP
-    candidates = []
-    if pkg_subdir:
-        candidates.append(os.path.join(install_path, pkg_subdir, "run"))
-    candidates.extend([os.path.join(install_path, "run"), install_path])
-    pid_dir = next((d for d in candidates if os.path.isdir(d)), install_path)
     found = []
-    for n in os.listdir(pid_dir):
-        if n.endswith(".pid"):
-            try:
-                with open(os.path.join(pid_dir, n)) as f:
-                    pid = int(f.read().strip())
-                os.kill(pid, sig)
-                found.append(pid)
-            except Exception:
-                pass
+    for f in _pid_files_for(install_path, pkg_subdir):
+        try:
+            with open(f) as fh:
+                pid = int(fh.read().strip())
+            os.kill(pid, sig)
+            found.append(pid)
+        except Exception:
+            pass
     return (0, found) if found else (1, [])
 
 

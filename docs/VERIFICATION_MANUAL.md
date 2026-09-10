@@ -593,6 +593,10 @@ python3 -m unittest tests.test_verify_lib    # 161 OK
 g++ -std=c++17 -Icmp -Iext/pasf/include tests/cmp_floor_codec_test.cpp cmp/PFloorCodec.cpp -o /tmp/floorcodec && /tmp/floorcodec
 g++ -std=c++17 -Iinclude tests/json_escape_test.cpp -o /tmp/jsonesc && /tmp/jsonesc
 g++ -std=c++17 -Icmp tests/cmp_floor_crypto_test.cpp cmp/PFloorCrypto.cpp -lcrypto -o /tmp/floorcrypto && /tmp/floorcrypto
+
+# agent lifecycle (라이브 무접촉 — 임시 디렉토리 + 가짜 바이너리, cc 필요)
+tests/agent_lifecycle_csp_start_test.sh    # CSP start 하드닝 7시나리오
+tests/agent_pid_version_test.sh            # pid 위치·소유권 6시나리오 (버전 전환 시 옛 프로세스 회수)
 ```
 
 ---

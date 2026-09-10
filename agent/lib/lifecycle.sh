@@ -19,9 +19,86 @@ PYBIN="${CIMS_PYTHON:-}"
 [[ -z "$PYBIN" ]] && PYBIN="$(command -v python3 2>/dev/null || command -v python 2>/dev/null || echo python3)"
 
 # ── PID 파일 헬퍼 ──────────────────────────────────────────────
+# PID_DIR 은 **버전 밖**이다 (cims-svc `_pid_dir_for` 머리말 참조). 버전 폴더 안에 두면
+# `current` 가 새 버전으로 넘어갈 때 옛 프로세스의 pid 를 잃는다.
 pidfile() { echo "$PID_DIR/$1.pid"; }
 save_pid() { echo "$2" > "$(pidfile "$1")"; }
-read_pid() { local f; f="$(pidfile "$1")"; [[ -f $f ]] && cat "$f" || echo ""; }
+
+# 이 모듈의 install 루트 — `<prefix>/modules/<name>` (버전 무관). 배포본이 아니면 빈 문자열.
+# 버전이 바뀌어도 변하지 않는 유일한 소유권 기준이라, pid 를 잃었을 때 "우리 프로세스"를
+# 판정하는 데 쓴다. 실행 파일 경로로 대조하므로 남의 모듈을 건드리지 않는다.
+_module_root() {
+    local name="$1" p
+    p="$(readlink -f "$DIST_DIR" 2>/dev/null || echo "$DIST_DIR")"
+    case "$p" in
+        */modules/"$name")   echo "$p" ;;
+        */modules/"$name"/*) echo "${p%%/modules/"$name"/*}/modules/$name" ;;
+        *)                   echo "" ;;
+    esac
+}
+
+# 옛 자리의 pid 파일들 — pid 를 버전 밖으로 옮기기 전(2026-09-10 이전) 기동한 프로세스는
+# 아직 버전 폴더 안에 pid 를 두고 있다. 이행기 동안 이 자리도 함께 본다.
+_legacy_pidfiles() {
+    local name="$1" root; root="$(_module_root "$name")"
+    local out=()
+    [[ -f "$DIST_DIR/run/$name.pid" ]] && out+=("$DIST_DIR/run/$name.pid")
+    if [[ -n "$root" ]]; then
+        local f
+        for f in "$root"/*/run/"$name".pid; do [[ -f "$f" ]] && out+=("$f"); done
+    fi
+    printf '%s\n' "${out[@]+"${out[@]}"}"
+}
+
+read_pid() {
+    local name="$1" f p
+    f="$(pidfile "$name")"
+    if [[ -f $f ]]; then cat "$f"; return 0; fi
+    # 정본 자리에 없으면 옛 자리 — **살아 있는 것만** 채택한다. 죽은 옛 pid 를 돌려주면
+    # 호출부가 "이미 중지됨" 으로 오판하고 진짜 살아 있는 프로세스를 놓친다.
+    while read -r lf; do
+        [[ -n "$lf" && -f "$lf" ]] || continue
+        p="$(cat "$lf" 2>/dev/null || true)"
+        if [[ -n "$p" ]] && kill -0 "$p" 2>/dev/null; then echo "$p"; return 0; fi
+    done < <(_legacy_pidfiles "$name")
+    echo ""
+}
+
+# 정본·옛 자리 pid 파일 일괄 삭제 — 중지 후 잔재가 남아 다음 판정을 흐리지 않게.
+_rm_pidfiles() {
+    local name="$1" lf
+    rm -f "$(pidfile "$name")"
+    while read -r lf; do [[ -n "$lf" ]] && rm -f "$lf"; done < <(_legacy_pidfiles "$name")
+    return 0
+}
+
+# install 루트(버전 무관) 아래의 실행 파일로 돌고 있는 프로세스 — pid 를 잃었을 때의 최후 수단.
+_pids_under_module_root() {
+    local name="$1" root; root="$(_module_root "$name")"
+    [[ -z "$root" ]] && return 0
+    local p exe out=""
+    for p in /proc/[0-9]*; do
+        exe="$(readlink "$p/exe" 2>/dev/null || true)"; exe="${exe% (deleted)}"
+        [[ -z "$exe" ]] && continue
+        case "$exe" in "$root"/*) out+=" ${p##*/}" ;; esac
+    done
+    echo "${out# }"
+}
+
+# SIGTERM → 최대 4s 대기 → 잔존 SIGKILL.
+_term_pids() {
+    local pids="$*" i=0 p left
+    [[ -z "$pids" ]] && return 0
+    kill $pids 2>/dev/null || true
+    while (( i < 20 )); do
+        left=""
+        for p in $pids; do kill -0 "$p" 2>/dev/null && left=1; done
+        [[ -z "$left" ]] && break
+        sleep 0.2; i=$(( i + 1 ))
+    done
+    for p in $pids; do kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null || true; done
+    return 0
+}
 
 # is_running: pid 파일 + 살아있는 process + (있다면) exe 경로가 자기 install
 # 의 binary 와 일치할 때만 true. stale pid 파일 (kill -0 성공하지만 다른
@@ -1021,17 +1098,35 @@ start_tb_console() {
 stop_one() {
     local name="$1"
     local pid; pid="$(read_pid "$name")"
-    if [[ -z $pid ]]; then warn "$name: PID 파일 없음"; return 0; fi
+    if [[ -z $pid ]]; then
+        # pid 를 잃었다고 안 도는 것은 아니다 — install 루트(버전 무관) 아래에서 실행 중인
+        # 것을 찾아 정리한다. 여기서 "없다" 로 끝내면 **살아 있는 옛 버전을 남긴 채 성공을
+        # 보고**하게 되고, 이어지는 start 가 포트 충돌로 죽는다 (2026-09-10 csp 실측).
+        local orphans; orphans="$(_pids_under_module_root "$name")"
+        if [[ -z "$orphans" ]]; then
+            warn "$name: 중지할 대상 없음 (pid 파일·실행 프로세스 모두 없음)"
+            _rm_pidfiles "$name"
+            return 0
+        fi
+        warn "$name: pid 파일을 잃었지만 실행 중인 프로세스를 찾았습니다 — pid=$orphans"
+        _term_pids $orphans
+        ok "$name 중지 완료 (pid=$orphans)"
+        _rm_pidfiles "$name"
+        return 0
+    fi
     if kill -0 "$pid" 2>/dev/null; then
-        kill "$pid" 2>/dev/null || true
-        local i=1
-        while kill -0 "$pid" 2>/dev/null && (( i <= 20 )); do sleep 0.2; i=$(( i + 1 )); done
-        kill -0 "$pid" 2>/dev/null && { kill -9 "$pid" 2>/dev/null || true; }
+        _term_pids "$pid"
         ok "$name 중지 완료 (pid=$pid)"
     else
         warn "$name: 이미 중지됨 (pid=$pid)"
     fi
-    rm -f "$(pidfile "$name")"
+    # pid 파일이 가리키던 것 말고도 남아 있으면 함께 정리 — 버전 전환 중 pid 가 갈린 경우.
+    local left; left="$(_pids_under_module_root "$name")"
+    if [[ -n "$left" ]]; then
+        warn "$name: 같은 install 의 잔존 프로세스 정리 — pid=$left"
+        _term_pids $left
+    fi
+    _rm_pidfiles "$name"
 }
 
 stop_console() {

@@ -77,6 +77,16 @@ systemd `ExecStart` 와 sudoers 는 고정 경로 `agent/current/...` 를 가리
 - **prefix 도출**: `CIMS_AGENT_PREFIX`(systemd Environment) 우선, 없으면 `__file__` 에서 `agent`
   디렉토리 컴포넌트까지 거슬러 올라가 그 부모를 prefix 로 삼는다 — flat/버전화/`current` 경유 무관.
 
+- **모듈 pid 는 `<prefix>/run/<mod>.pid`** — 버전 밖이다(`cims-svc` 의 `_pid_dir_for`).
+  버전 폴더 안에 두면 업그레이드가 `current` 를 새 버전으로 넘기는 순간 **옛 프로세스의 pid 를
+  잃는다**: `stop` 이 "대상 없음" 으로 조용히 성공하고, 아직 살아 있는 옛 프로세스가 포트를 쥔
+  채 `start` 가 bind 실패로 죽어 — 업그레이드는 성공으로 보고되는데 옛 코드가 계속 돈다.
+  `_seed_supervised_from_pidfiles` 도 이 자리를 전제한다. 소스/dist 트리(별도 인스턴스)는
+  자기 `run/` 을 쓴다 — 같은 자리를 쓰면 개발 실행이 배포본 pid 를 덮어쓴다.
+  pid 를 잃은 경우의 최후 수단은 **install 루트(버전 무관) 아래 실행 파일 대조**다
+  (`_pids_under_module_root`) — 소유권 기준이 경로라 남의 모듈을 건드리지 않는다.
+  단위시험 `tests/agent_pid_version_test.sh`.
+
 ## 4. 상태 머신
 
 | 상태 | 조건 |
@@ -128,7 +138,7 @@ TLS + `X-Agent-Token` 인증. 세부 명세는 `api/collection_api.md` 의 Agent
 
 ## 7. 프로세스 시그널 룰
 
-Agent 는 PUT /collection 의 `signal=true` 파라미터 수신 시 `install_path/run/*.pid` 파일을 찾아 해당 pid 에 SIGUSR1 전송. CSP 는 SIGUSR1 수신 시 jsonl 을 재로드합니다.
+Agent 는 PUT /collection 의 `signal=true` 파라미터 수신 시 그 모듈의 pid 를 찾아 SIGUSR1 을 보냅니다(`_pid_files_for` — 정본 `<prefix>/run/<mod>.pid` 우선, 없으면 옛 자리 `install_path/run/*.pid`). CSP 는 SIGUSR1 수신 시 jsonl 을 재로드합니다.
 
 ## 8. 보안
 

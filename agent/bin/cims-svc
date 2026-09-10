@@ -44,7 +44,29 @@ else
     fi
 fi
 
-PID_DIR="$DIST_DIR/run"
+# PID 는 **버전 밖**에 둔다 (agent.md §3 레이아웃의 `run/ ← 버전 밖`).
+#
+# 배포본 install_path 는 `<prefix>/modules/<mod>/{current|<ver>}` 인데, pid 를 그 안에
+# 두면 업그레이드가 `current` 를 새 버전으로 넘기는 순간 **옛 프로세스의 pid 를 잃는다**.
+# 그러면 stop 이 "PID 파일 없음" 으로 조용히 성공하고, start 는 아직 살아 있는 옛
+# 프로세스가 쥔 포트에 bind 하지 못해 죽는다 — "업그레이드했다고 보고되지만 옛 코드가
+# 도는" 상태가 된다 (2026-09-10 csp 에서 두 번 실측).
+#
+# agent 의 `_seed_supervised_from_pidfiles` 도 `<prefix>/run/*.pid` 를 전제한다 —
+# 원래 이 자리가 규약이었고 여기가 어긋나 있었다.
+#
+# 소스/dist 트리(별도 인스턴스)는 종전대로 자기 `run/` 을 쓴다. 노드의 배포본과 같은
+# 자리를 쓰면 개발 실행이 배포본 pid 를 덮어쓴다.
+_pid_dir_for() {
+    local d="$1" p
+    p="$(readlink -f "$d" 2>/dev/null || echo "$d")"
+    case "$p" in
+        */modules/*) echo "${p%/modules/*}/run" ;;
+        *)           echo "$d/run" ;;
+    esac
+}
+
+PID_DIR="$(_pid_dir_for "$DIST_DIR")"
 LOG_DIR="$DIST_DIR/log"
 mkdir -p "$PID_DIR" "$LOG_DIR"
 # 과거 umask 전파 사고로 0600 이 된 기존 디렉토리 자가 교정 (mkdir -p 는 기존 모드 불변)
@@ -81,6 +103,7 @@ usage() {
        (변종 pmp|imp|psp|isp 는 배포본 전용, cwrtc|phone 은 재설계 예정 — 명시 지정만)
 
 DIST_DIR=$DIST_DIR
+PID_DIR=$PID_DIR
 EOF
 }
 
