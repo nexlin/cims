@@ -665,20 +665,13 @@ export function StoreMigrateFooter({ groupId, mountPoint, dirty, onDone }: {
     // Primary 는 화면당 1개(저장바)라 여기는 outline 이다.
     // 필드 사이 간격은 본문과 같은 14 다(도안 `gap` 399:5083·399:5088), 안내문 앞은 18.
     <div className="mt-3.5 flex flex-col gap-3.5">
-      {/* 유도 경로 두 칸 — 도안(G3-1 `399:5076`)은 이 둘을 `런타임 store`·`패키지 저장소`
-          **field** 로 그렸다(라벨 12 · mono 컨트롤 · 도움말 11 · 마커 62). 이제 입력이
-          아니라 마운트에서 유도되는 값이라 같은 모양에 **비활성**으로 낸다 — 비활성은
-          불투명도가 아니라 토큰이다(contracts.md §TextInput). 도안에 없는 모양을 새로
-          만들지 않는다(§7-39). */}
-      <DerivedPathField label="런타임 store"
- value={mp ? `${mp}/runtime` : 'modules/oam/runtime'}
- help={`file_store 루트(deployments·packages·gateway_routes) · 버전 무관 영속${
-                       mp ? ' — 마운트 지점에서 유도됩니다' : ' — 마운트 지점이 비어 노드 로컬입니다'}`} />
-      <DerivedPathField label="패키지 저장소"
- value={mp ? `${mp}/runtime/pkg_files` : 'modules/oam/runtime/pkg_files'}
- help="store 파생값 · 따로 두면 절체한 노드에서 패키지를 못 찾는다 (agent·모듈 설치 불가)" />
-      {/* 14(부모 gap) + 4 = 도안의 18 */}
-      <p className="mt-1 text-xs leading-[1.6] text-muted-foreground">
+      {/* 도안(G3-1 `399:5076`)은 `런타임 store`·`패키지 저장소` 를 field 로 그리지만
+          **두지 않는다.** 그 둘은 입력이 아니라 마운트 지점에서 유도되는 값이고, 설정
+          화면에 값을 세우면(비활성이어도) "설정에 있는 값" 으로 읽혀 어디선가 따로
+          지정할 수 있다는 오해를 만든다 — 유도는 백엔드가 하고(services/paths.py
+          `runtime_store_dir`), 화면에는 입력인 마운트 지점 하나만 둔다(사용자 결정,
+          도안보다 우선). 결과 경로가 궁금하면 마운트 필드의 도움말이 규칙을 적는다. */}
+      <p className="text-xs leading-[1.6] text-muted-foreground">
         <b>경로를 바꾸려면 이관을 쓰세요.</b> 저장은 경로만 바꾸고 <b>데이터를 옮기지
         않습니다</b> — 새 경로에 빈 store 가 생기거나, 마운트가 없으면 OAM 이 기동을
         거부합니다. 이관은 정지 → 복사 → 기동을 한 번에 처리합니다. 이 값은 <b>멤버 간
@@ -704,21 +697,6 @@ export function StoreMigrateFooter({ groupId, mountPoint, dirty, onDone }: {
         </p>
       )}
     </div>
-  )
-}
-
-/**
- * 유도 경로 한 칸 — 값이 입력이 아니라 **마운트 지점에서 유도**되는 필드.
- * 모양은 도안의 `field` 그대로다(G3-1 `399:5080`·`399:5090`) — 라벨 12px Medium ·
- * mono 컨트롤 · 도움말 11px · 마커 62. 다른 점은 컨트롤이 비활성이라는 것뿐이고,
- * 그 사유는 도움말에 함께 적는다(contracts.md — 비활성은 사유 병기).
- */
-function DerivedPathField({ label, value, help }: { label: string; value: string; help: string }) {
- return (
-    <FormField label={label} help={help}
- marker={<Badge variant="neutralSoft" title="저장 후 재기동해야 반영됩니다">재기동</Badge>}>
-      <Input value={value} readOnly disabled className="font-mono" />
-    </FormField>
   )
 }
 
