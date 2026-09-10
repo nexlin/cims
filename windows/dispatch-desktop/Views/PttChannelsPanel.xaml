@@ -7,27 +7,27 @@
              d:DataContext="{d:DesignInstance vm:MainViewModel}" x:Name="Root">
     <!-- ① 내 채널(§4.1) — 머리 → 빠른 발신 줄([PTT 번호·이름·그룹][사설콜 ▾][애드혹 ▾], 팝오버 = PttOriginateView) → 발언 바(PTT 40px · 대상 칩 · 게이지) →
          안내 줄 → 채널 카드(2줄, 포커스 3줄). 카드 왼쪽 체크 = 발언 대상(다중), 카드 클릭 = 포커스(다시 클릭하면 접힘). 필터·검색 없음 — 항상 전부. -->
+    <UserControl.Resources>
+        <!-- 패널 머리 — 도킹 제목줄(MainWindow·DockTheme 의 AnchorablePaneTitle 템플릿)이 Resources[PanelHeader] 를 제목 옆에 그린다. 본문 위에 머리 줄을 따로 두지 않는다 -->
+        <DockPanel x:Key="PanelHeader" VerticalAlignment="Center">
+            <TextBlock Style="{StaticResource Muted}" VerticalAlignment="Center">
+                <Run Text="{Binding PttChannels.Cards.Count, Mode=OneWay}" /><Run Text=" · 발언 대상 " /><Run Text="{Binding TalkBar.TargetCount, Mode=OneWay}" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Text}" />
+            </TextBlock>
+        </DockPanel>
+    </UserControl.Resources>
     <Border Style="{StaticResource Pnl}">
         <DockPanel>
             <!-- 머리 -->
-            <Border DockPanel.Dock="Top" Style="{StaticResource PanelHeader}">
-                <DockPanel VerticalAlignment="Center">
-                    <TextBlock Style="{StaticResource H2}" Text="① 내 채널" Margin="6,0,10,0" />
-                    <TextBlock Style="{StaticResource Muted}" VerticalAlignment="Center">
-                        <Run Text="{Binding PttChannels.Cards.Count, Mode=OneWay}" /><Run Text=" · 발언 대상 " /><Run Text="{Binding TalkBar.TargetCount, Mode=OneWay}" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Text}" />
-                    </TextBlock>
-                </DockPanel>
-            </Border>
             <!-- 빠른 발신 줄(44) -->
             <Border DockPanel.Dock="Top" Height="44" Padding="8,0" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,0,1" Background="{DynamicResource Brush.Surface}">
                 <DockPanel VerticalAlignment="Center" x:Name="QuickLine">
                     <ToggleButton DockPanel.Dock="Right" x:Name="AdhocBtn" Style="{StaticResource DropButton}" Height="30" Margin="4,0,0,0" ToolTip="애드혹 그룹통화 — PTT 사용자 N 명(주소록 체크)"
                                   IsChecked="{Binding PttOriginateOpen, Mode=OneWay}" Command="{Binding OpenPttOriginateCommand}" CommandParameter="adhoc">
-                        <TextBlock><Run Text="애드혹" /><Run Text=" ▾" Foreground="{DynamicResource Brush.Muted}" /></TextBlock>
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="애드혹" /><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.ChevronDown}" Width="12" Height="12" Margin="4,0,0,0" /></StackPanel>
                     </ToggleButton>
                     <ToggleButton DockPanel.Dock="Right" x:Name="PrivateBtn" Style="{StaticResource DropButton}" Height="30" Margin="6,0,0,0" ToolTip="사설콜 — PTT 사용자 1명(반이중 floor / 전이중)"
                                   IsChecked="{Binding PttOriginateOpen, Mode=OneWay}" Command="{Binding OpenPttOriginateCommand}" CommandParameter="private">
-                        <TextBlock><Run Text="사설콜" /><Run Text=" ▾" Foreground="{DynamicResource Brush.Muted}" /></TextBlock>
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="사설콜" /><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.ChevronDown}" Width="12" Height="12" Margin="4,0,0,0" /></StackPanel>
                     </ToggleButton>
                     <Grid>
                         <TextBox x:Name="TargetBox" Style="{StaticResource Field}" Height="30" Text="{Binding PttOriginate.Target, UpdateSourceTrigger=PropertyChanged}" KeyDown="Target_KeyDown" LostKeyboardFocus="Target_LostFocus"
@@ -118,13 +118,14 @@
                                         <StackPanel Orientation="Horizontal">
                                             <Ellipse x:Name="Dot" Style="{StaticResource Dot}" Width="8" Height="8" Margin="0,0,5,0" />
                                             <Button Content="{Binding Name}" Command="{Binding DataContext.FocusCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}"
-                                                    Background="Transparent" BorderThickness="0" Padding="0" Cursor="Hand" Foreground="{DynamicResource Brush.Text}" FontSize="12" FontWeight="Medium" />
+                                                    Style="{StaticResource Btn.Flat}" FontSize="12" FontWeight="Medium" />
                                             <TextBlock x:Name="St" Text="{Binding StateText}" FontSize="11" Margin="5,0,0,0" VerticalAlignment="Center" Visibility="{Binding StateText, Converter={StaticResource StrToVis}}" />
-                                            <Button Content="×" Command="{Binding DataContext.RemoveCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}"
-                                                    Background="Transparent" BorderThickness="0" Padding="4,0,0,0" Cursor="Hand" Foreground="{DynamicResource Brush.Muted}" />
+                                            <Button Command="{Binding DataContext.RemoveCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}"
+                                                    Style="{StaticResource Btn.Link}" Padding="4,0,0,0"><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.X}" Width="11" Height="11" /></Button>
                                         </StackPanel>
                                     </Border>
                                     <DataTemplate.Triggers>
+                                        <Trigger SourceName="Chip" Property="IsMouseOver" Value="True"><Setter TargetName="Chip" Property="Background" Value="{DynamicResource Brush.Hover}" /></Trigger>
                                         <DataTrigger Binding="{Binding IsGranted}" Value="True"><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Talk}" /><Setter TargetName="St" Property="Foreground" Value="{DynamicResource Brush.Talk}" /><Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.Talk}" /></DataTrigger>
                                         <DataTrigger Binding="{Binding IsRequesting}" Value="True"><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Ring}" /><Setter TargetName="St" Property="Foreground" Value="{DynamicResource Brush.Ring}" /></DataTrigger>
                                         <DataTrigger Binding="{Binding IsQueued}" Value="True"><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Ring}" /><Setter TargetName="St" Property="Foreground" Value="{DynamicResource Brush.Ring}" /></DataTrigger>
@@ -139,7 +140,7 @@
             </Border>
             <!-- 안내 줄(24) -->
             <Border DockPanel.Dock="Top" Height="24" Padding="10,0">
-                <TextBlock Style="{StaticResource Hint}" VerticalAlignment="Center" Text="멤버 그룹 · 내가 건 사설콜·애드혹 — 항상 전부 · ☑ 발언 대상 · 클릭 = 포커스 · Ctrl+n 포커스+단일 대상 · Ctrl+Shift+n 체크" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                <TextBlock Style="{StaticResource Hint}" VerticalAlignment="Center" Text="멤버 그룹 · 내가 건 사설콜·애드혹 — 항상 전부 · 체크 = 발언 대상 · 클릭 = 포커스 · Ctrl+n 포커스+단일 대상 · Ctrl+Shift+n 체크" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
             </Border>
             <!-- 카드 -->
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="8,0,8,8">
@@ -150,25 +151,25 @@
                             <DataTemplate DataType="{x:Type vm:ChannelCard}">
                                 <Border x:Name="Card" Style="{StaticResource ChannelCard}" MouseLeftButtonDown="Card_MouseLeftButtonDown">
                                     <StackPanel>
-                                        <!-- 1줄: ☑ · 점 · 이름 · 배지 · ✉ n ── 핀 · 경과 -->
+                                        <!-- 1줄: 발언 체크 · 점 · 이름 · 배지 · 미읽음 n ── 핀 · 경과 -->
                                         <DockPanel>
                                             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                                                 <Border Style="{StaticResource NavKey}" Margin="0,0,8,0" ToolTip="Ctrl+n = 포커스 + 단일 발언 대상 · Ctrl+Shift+n = 체크 토글"><TextBlock><Run Text="Ctrl+" /><Run Text="{Binding Index, Mode=OneWay}" /></TextBlock></Border>
                                                 <TextBlock x:Name="Elapsed" Style="{StaticResource MonoMuted}" Text="{Binding ElapsedText}" FontSize="12.5" VerticalAlignment="Center" MinWidth="40" TextAlignment="Right" />
                                             </StackPanel>
                                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                                <CheckBox IsChecked="{Binding IsChecked, Mode=OneWay}" IsEnabled="{Binding CanCheck}" VerticalAlignment="Center" Margin="0,0,6,0" ToolTip="발언 대상(PTT 를 누르면 여기로 요청)"
+                                                <CheckBox Style="{StaticResource Check.Talk}" IsChecked="{Binding IsChecked, Mode=OneWay}" IsEnabled="{Binding CanCheck}" VerticalAlignment="Center" Margin="0,0,6,0" ToolTip="발언 대상(PTT 를 누르면 여기로 요청)"
                                                           Command="{Binding DataContext.PttChannels.ToggleTargetCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" />
                                                 <Ellipse x:Name="Dot" Style="{StaticResource StateDot}" />
                                                 <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="13.5" VerticalAlignment="Center" Margin="0,0,8,0" TextTrimming="CharacterEllipsis" MaxWidth="240" />
                                                 <Border Style="{StaticResource Badge.Member}" Visibility="{Binding IsMember, Converter={StaticResource BoolToVis}}"><TextBlock Text="{Binding MemberText}" /></Border>
                                                 <Border Style="{StaticResource Badge.Listen}" Visibility="{Binding IsPrivate, Converter={StaticResource BoolToVis}}"><TextBlock><Run Text="사설콜 " /><Run Text="{Binding Duplex, Mode=OneWay}" /></TextBlock></Border>
-                                                <Border Style="{StaticResource Badge}" Visibility="{Binding IsAdhoc, Converter={StaticResource BoolToVis}}"><TextBlock Text="임시" /></Border>
+                                                <Border Style="{StaticResource Badge.Temp}" Visibility="{Binding IsAdhoc, Converter={StaticResource BoolToVis}}"><TextBlock Text="임시" /></Border>
                                                 <Border Style="{StaticResource Badge.Emg}" Visibility="{Binding IsEmergency, Converter={StaticResource BoolToVis}}"><TextBlock Text="긴급" /></Border>
                                                 <Border Style="{StaticResource Badge.Pilot}" Visibility="{Binding IsImminentPeril, Converter={StaticResource BoolToVis}}"><TextBlock Text="임박" /></Border>
                                                 <Button Style="{StaticResource Btn.Xs}" Height="20" Padding="6,0" Visibility="{Binding HasUnread, Converter={StaticResource BoolToVis}}" ToolTip="미읽음 SDS — ④ 스레드로"
                                                         Command="{Binding DataContext.PttChannels.OpenThreadCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">
-                                                    <TextBlock Foreground="{DynamicResource Brush.Ring}"><Run Text="✉ " /><Run Text="{Binding Unread, Mode=OneWay}" FontWeight="Bold" /></TextBlock>
+                                                    <StackPanel Orientation="Horizontal" TextElement.Foreground="{DynamicResource Brush.Ring}"><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Mail}" Width="12" Height="12" Margin="0,0,4,0" /><TextBlock Text="{Binding Unread, Mode=OneWay}" FontWeight="Bold" /></StackPanel>
                                                 </Button>
                                             </StackPanel>
                                         </DockPanel>
@@ -191,12 +192,13 @@
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate DataType="{x:Type vm:RosterRow}">
                                                         <Button Command="{Binding DataContext.PttChannels.PersonMenuCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"
-                                                                Background="Transparent" BorderThickness="0" Padding="0" Cursor="Hand" ToolTip="{Binding Number}">
+                                                                Style="{StaticResource Btn.Flat}" ToolTip="{Binding Number}">
                                                             <Border x:Name="RChip" Style="{StaticResource Chip}" Padding="7,2" Margin="0,0,4,4">
                                                                 <TextBlock><Run Text="{Binding Name, Mode=OneWay}" /><Run Text=" 청취" FontSize="10" x:Name="Lst" /></TextBlock>
                                                             </Border>
                                                         </Button>
                                                         <DataTemplate.Triggers>
+                                                            <Trigger SourceName="RChip" Property="IsMouseOver" Value="True"><Setter TargetName="RChip" Property="Background" Value="{DynamicResource Brush.Hover}" /></Trigger>
                                                             <DataTrigger Binding="{Binding IsListener}" Value="False"><Setter TargetName="Lst" Property="Text" Value="" /></DataTrigger>
                                                             <DataTrigger Binding="{Binding IsSpeaking}" Value="True"><Setter TargetName="RChip" Property="Background" Value="{DynamicResource Brush.TalkSoft}" /><Setter TargetName="RChip" Property="BorderBrush" Value="{DynamicResource Brush.Talk}" /><Setter TargetName="RChip" Property="TextElement.Foreground" Value="{DynamicResource Brush.Talk}" /></DataTrigger>
                                                             <DataTrigger Binding="{Binding IsMe}" Value="True"><Setter TargetName="RChip" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /><Setter TargetName="RChip" Property="TextElement.Foreground" Value="{DynamicResource Brush.Primary}" /></DataTrigger>
@@ -211,7 +213,7 @@
                                             <DockPanel Margin="0,2,0,0">
                                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                                                     <Button Style="{StaticResource Btn.Xs}" Command="{Binding ToggleRouteCommand}" IsEnabled="{Binding CanToggleRoute}" Margin="0,0,4,0" ToolTip="출력 라우트: 헤드셋 / 데스크 스피커" Visibility="{Binding IsJoined, Converter={StaticResource BoolToVis}}">
-                                                        <TextBlock><Run Text="🎧" /><Run Text="/" /><Run Text="🔊" /></TextBlock>
+                                                        <Path Style="{StaticResource Icon}" Width="13" Height="13" Data="{Binding RouteIsSpeaker, Converter={StaticResource RouteIcon}}" />
                                                     </Button>
                                                     <Button Style="{StaticResource Btn.Xs}" Margin="0,0,4,0" Visibility="{Binding HasRosterMore, Converter={StaticResource BoolToVis}}" ToolTip="로스터 전체는 [PTT 그룹] 화면 상세" Command="{Binding DataContext.GroupsScreen.GoToChannelCommand, RelativeSource={RelativeSource AncestorType=UserControl}}">
                                                         <TextBlock><Run Text="로스터 전체 +" /><Run Text="{Binding RosterMore, Mode=OneWay}" /></TextBlock>

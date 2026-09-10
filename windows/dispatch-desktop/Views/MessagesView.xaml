@@ -24,8 +24,8 @@
                     <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate DataType="{x:Type m:MessageThread}">
-                            <Button Command="{Binding DataContext.SelectThreadCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Background="Transparent" BorderThickness="0" Padding="0" Cursor="Hand">
-                                <Border x:Name="Chip" Style="{StaticResource Chip}">
+                            <Button Style="{StaticResource Btn.Flat}" Command="{Binding DataContext.SelectThreadCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">
+                                <Border x:Name="Chip" Style="{StaticResource Pill}" Margin="0,0,5,0" Padding="9,2">
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="{Binding Title}" />
                                         <TextBlock Text="{Binding Unread}" Margin="5,0,0,0" FontWeight="Bold" Foreground="{DynamicResource Brush.Ring}" Visibility="{Binding Unread, Converter={StaticResource CountToVis}}" />
@@ -33,6 +33,7 @@
                                 </Border>
                             </Button>
                             <DataTemplate.Triggers>
+                                <Trigger SourceName="Chip" Property="IsMouseOver" Value="True"><Setter TargetName="Chip" Property="Background" Value="{DynamicResource Brush.Hover}" /></Trigger>
                                 <DataTrigger Value="True">
                                     <DataTrigger.Binding>
                                         <MultiBinding Converter="{x:Static v:MessagesView.SameRef}">
@@ -41,7 +42,6 @@
                                         </MultiBinding>
                                     </DataTrigger.Binding>
                                     <Setter TargetName="Chip" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" />
-                                    <Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" />
                                     <Setter TargetName="Chip" Property="TextElement.Foreground" Value="{DynamicResource Brush.Primary}" />
                                 </DataTrigger>
                             </DataTemplate.Triggers>
@@ -70,9 +70,9 @@
                                     <TextBlock Visibility="{Binding IsAttachment, Converter={StaticResource BoolToVis}}" Foreground="{DynamicResource Brush.Primary}"><Run Text="📎 " /><Run Text="{Binding FileName, Mode=OneWay}" /></TextBlock>
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                         <TextBlock Style="{StaticResource Muted}" FontSize="10.5" Text="{Binding Time, StringFormat=HH:mm}" />
-                                        <Button Content="{Binding StateMark}" FontSize="10.5" Margin="6,0,0,0" Background="Transparent" BorderThickness="0" Padding="0" Cursor="Hand"
+                                        <Button Style="{StaticResource Btn.Link}" Content="{Binding StateMark}" FontSize="10.5" Margin="6,0,0,0"
                                                 Command="{Binding DataContext.ResendCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"
-                                                Visibility="{Binding IsOut, Converter={StaticResource BoolToVis}}" Foreground="{DynamicResource Brush.Muted}" />
+                                                Visibility="{Binding IsOut, Converter={StaticResource BoolToVis}}" />
                                     </StackPanel>
                                 </StackPanel>
                             </Border>

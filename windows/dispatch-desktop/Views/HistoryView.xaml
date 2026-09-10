@@ -101,9 +101,9 @@
                     <RadioButton Style="{StaticResource Seg}" Content="PTT 세션" IsChecked="{Binding KindIndex, Converter={StaticResource Eq}, ConverterParameter=1}" />
                 </StackPanel>
             </Border>
-            <Button Style="{StaticResource Btn.Sm}" Content="◀" Command="{Binding ShiftDateCommand}" CommandParameter="-1" ToolTip="전날" Margin="0,0,4,0" />
+            <Button Style="{StaticResource Btn.Sm}" Command="{Binding ShiftDateCommand}" CommandParameter="-1" ToolTip="전날" Margin="0,0,4,0" Padding="7,0"><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.ChevronLeft}" /></Button>
             <DatePicker SelectedDate="{Binding Date}" Width="140" VerticalAlignment="Center" />
-            <Button Style="{StaticResource Btn.Sm}" Content="▶" Command="{Binding ShiftDateCommand}" CommandParameter="1" ToolTip="다음 날" Margin="4,0,4,0" />
+            <Button Style="{StaticResource Btn.Sm}" Command="{Binding ShiftDateCommand}" CommandParameter="1" ToolTip="다음 날" Margin="4,0,4,0" Padding="7,0"><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.ChevronRight}" /></Button>
             <Button Style="{StaticResource Btn.Sm}" Content="오늘" Command="{Binding ShiftDateCommand}" CommandParameter="0" Margin="0,0,8,0" />
             <TextBox Style="{StaticResource Field}" Width="220" Height="26" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" ToolTip="상대·그룹·참여자 검색" Margin="0,0,8,0" />
             <TextBlock Style="{StaticResource Muted}" Text="{Binding Summary}" FontSize="12" VerticalAlignment="Center" />
@@ -155,7 +155,7 @@
                             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Visibility="{Binding SelectedHasRecording, Converter={StaticResource BoolToVis}}">
                                 <Button Style="{StaticResource Btn.Xs}" Content="다시 변환" ToolTip="변환 실패 표식을 지우고 다시 변환 요청" Command="{Binding RetryTranscodeCommand}" IsEnabled="{Binding CanPlay}" Margin="0,0,4,0" />
                                 <Button Style="{StaticResource Btn.Xs}" Content="정지" Command="{Binding StopCommand}" IsEnabled="{Binding IsPlaying}" Margin="0,0,4,0" />
-                                <Button Style="{StaticResource Btn.Xs.Pri}" Content="▶ 재생" Command="{Binding PlayCommand}" IsEnabled="{Binding CanPlay}" />
+                                <Button Style="{StaticResource Btn.Xs.Pri}" Command="{Binding PlayCommand}" IsEnabled="{Binding CanPlay}"><StackPanel Orientation="Horizontal"><Path Style="{StaticResource Icon.Filled}" Data="{StaticResource Icon.Play}" Width="10" Height="10" Margin="0,0,4,0" /><TextBlock Text="재생" /></StackPanel></Button>
                             </StackPanel>
                             <TextBlock DockPanel.Dock="Left" Style="{StaticResource SectionHeader}" Text="녹취" VerticalAlignment="Center" Margin="0,0,8,0" />
                             <TextBlock DockPanel.Dock="Left" Style="{StaticResource Muted}" Text="{Binding Selected.Parties}" FontSize="12" VerticalAlignment="Center" Margin="0,0,10,0" />
@@ -227,9 +227,9 @@
                         <Border DockPanel.Dock="Top" Style="{StaticResource SubHeader}" Padding="12,8">
                             <DockPanel DataContext="{Binding Selected}">
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                                    <Button Style="{StaticResource Btn.Xs}" Content="▶ 전체" ToolTip="재생 가능한 세그먼트를 순서대로 재생"
+                                    <Button Style="{StaticResource Btn.Xs}" ToolTip="재생 가능한 세그먼트를 순서대로 재생"
                                             Command="{Binding DataContext.PlayAllCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                            IsEnabled="{Binding DataContext.HasRecording, RelativeSource={RelativeSource AncestorType=UserControl}}" Margin="0,0,4,0" />
+                                            IsEnabled="{Binding DataContext.HasRecording, RelativeSource={RelativeSource AncestorType=UserControl}}" Margin="0,0,4,0"><StackPanel Orientation="Horizontal"><Path Style="{StaticResource Icon.Filled}" Data="{StaticResource Icon.Play}" Width="10" Height="10" Margin="0,0,4,0" /><TextBlock Text="전체" /></StackPanel></Button>
                                     <Button Style="{StaticResource Btn.Xs}" Content="정지" Command="{Binding DataContext.StopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                             IsEnabled="{Binding DataContext.IsPlaying, RelativeSource={RelativeSource AncestorType=UserControl}}" />
                                 </StackPanel>
@@ -270,7 +270,7 @@
                                 <DockPanel>
                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                                         <Button Style="{StaticResource Btn.Xs}" Content="다시 변환" ToolTip="변환 실패 표식을 지우고 다시 변환 요청" Command="{Binding RetryTranscodeCommand}" IsEnabled="{Binding CanPlay}" Margin="0,0,4,0" />
-                                        <Button Style="{StaticResource Btn.Xs.Pri}" Content="▶ 세그먼트 재생" Command="{Binding PlayCommand}" IsEnabled="{Binding CanPlay}" />
+                                        <Button Style="{StaticResource Btn.Xs.Pri}" Command="{Binding PlayCommand}" IsEnabled="{Binding CanPlay}"><StackPanel Orientation="Horizontal"><Path Style="{StaticResource Icon.Filled}" Data="{StaticResource Icon.Play}" Width="10" Height="10" Margin="0,0,4,0" /><TextBlock Text="세그먼트 재생" /></StackPanel></Button>
                                     </StackPanel>
                                     <TextBlock Style="{StaticResource SectionHeader}" Text="녹취" VerticalAlignment="Center" Margin="0,0,8,0" />
                                     <TextBlock Style="{StaticResource Hint}" Text="{Binding RecordingStatus}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />

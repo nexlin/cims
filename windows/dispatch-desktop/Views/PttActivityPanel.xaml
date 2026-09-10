@@ -5,45 +5,28 @@
              xmlns:m="clr-namespace:DispatchDesktop.Models"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
              d:DataContext="{d:DesignInstance vm:PttActivityViewModel}">
-    <!-- ⑤ PTT 이벤트(§4.4) — 방금 일어난 것의 흐름(진행 중 행 없음). 머리 [● 따라가기] · [전체|발언|긴급] · 검색 · [이력에서 보기] · CSV. 활성 긴급 행은 위에 고정 -->
+    <!-- ⑤ PTT 이벤트(§4.4) — 방금 일어난 것의 흐름(진행 중 행 없음). 머리 [따라가기] 스위치 · [전체|발언|긴급] · 검색 · [이력에서 보기] · CSV. 활성 긴급 행은 위에 고정 -->
+    <UserControl.Resources>
+        <!-- 패널 머리 — 도킹 제목줄(MainWindow·DockTheme 의 AnchorablePaneTitle 템플릿)이 Resources[PanelHeader] 를 제목 옆에 그린다. 본문 위에 머리 줄을 따로 두지 않는다 -->
+        <DockPanel x:Key="PanelHeader" VerticalAlignment="Center">
+            <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="CSV" Command="{Binding ExportCommand}" Margin="6,0,0,0" />
+            <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="이력에서 보기" Command="{Binding OpenHistoryCommand}" Margin="6,0,0,0" ToolTip="끝난 PTT 세션의 날짜별 조회·녹취 — [이력] 화면(F2)" />
+            <TextBox DockPanel.Dock="Right" Style="{StaticResource Field}" Width="120" Height="26" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" ToolTip="검색" />
+            <Border DockPanel.Dock="Right" Style="{StaticResource SegGroup}" Margin="0,0,8,0">
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton Style="{StaticResource Seg}" Content="전체" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=all, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="all" />
+                    <RadioButton Style="{StaticResource Seg}" Content="발언" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=talk, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="talk" />
+                    <RadioButton Style="{StaticResource Seg}" Content="긴급" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=emergency, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="emergency" />
+                </StackPanel>
+            </Border>
+            <!-- 따라가기 토글 -->
+            <CheckBox Style="{StaticResource Switch}" HorizontalAlignment="Left" VerticalAlignment="Center" IsChecked="{Binding FollowFocus, Mode=OneWay}" Command="{Binding ToggleFollowCommand}" ToolTip="포커스 채널의 이벤트만 / 끄면 범위 전체">
+                <TextBlock Text="{Binding FollowText}" />
+            </CheckBox>
+        </DockPanel>
+    </UserControl.Resources>
     <Border Style="{StaticResource Pnl}">
         <DockPanel>
-            <Border DockPanel.Dock="Top" Style="{StaticResource PanelHeader}">
-                <DockPanel VerticalAlignment="Center">
-                    <TextBlock Style="{StaticResource H2}" Text="⑤ PTT 이벤트" Margin="6,0,10,0" />
-                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="CSV" Command="{Binding ExportCommand}" Margin="6,0,0,0" />
-                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="이력에서 보기" Command="{Binding OpenHistoryCommand}" Margin="6,0,0,0" ToolTip="끝난 PTT 세션의 날짜별 조회·녹취 — [이력] 화면(F2)" />
-                    <TextBox DockPanel.Dock="Right" Style="{StaticResource Field}" Width="120" Height="26" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" ToolTip="검색" />
-                    <Border DockPanel.Dock="Right" Style="{StaticResource SegGroup}" Margin="0,0,8,0">
-                        <StackPanel Orientation="Horizontal">
-                            <RadioButton Style="{StaticResource Seg}" Content="전체" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=all, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="all" />
-                            <RadioButton Style="{StaticResource Seg}" Content="발언" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=talk, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="talk" />
-                            <RadioButton Style="{StaticResource Seg}" Content="긴급" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=emergency, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="emergency" />
-                        </StackPanel>
-                    </Border>
-                    <!-- 따라가기 토글 -->
-                    <Button HorizontalAlignment="Left" Command="{Binding ToggleFollowCommand}" ToolTip="포커스 채널의 이벤트만 / 끄면 범위 전체">
-                        <Button.Style>
-                            <Style TargetType="Button" BasedOn="{StaticResource Btn.Xs}">
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding FollowFocus}" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /><Setter Property="Foreground" Value="{DynamicResource Brush.Primary}" /><Setter Property="Background" Value="{DynamicResource Brush.PrimarySoft}" /></DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </Button.Style>
-                        <StackPanel Orientation="Horizontal">
-                            <Ellipse Width="7" Height="7" Margin="0,0,5,0" VerticalAlignment="Center">
-                                <Ellipse.Style>
-                                    <Style TargetType="Ellipse">
-                                        <Setter Property="Fill" Value="{DynamicResource Brush.Wire}" />
-                                        <Style.Triggers><DataTrigger Binding="{Binding FollowFocus}" Value="True"><Setter Property="Fill" Value="{DynamicResource Brush.Primary}" /></DataTrigger></Style.Triggers>
-                                    </Style>
-                                </Ellipse.Style>
-                            </Ellipse>
-                            <TextBlock Text="{Binding FollowText}" />
-                        </StackPanel>
-                    </Button>
-                </DockPanel>
-            </Border>
             <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <StackPanel>
                     <!-- 활성 긴급 고정 행 -->
@@ -71,7 +54,7 @@
                                         </StackPanel>
                                         <TextBlock Style="{StaticResource MonoMuted}" Text="{Binding Time, StringFormat=HH:mm}" Width="54" />
                                         <Border Style="{StaticResource Badge}" Width="52"><TextBlock Text="{Binding KindText}" HorizontalAlignment="Center" /></Border>
-                                        <TextBlock Text="⚠" Foreground="{DynamicResource Brush.Emg}" Margin="0,0,6,0" Visibility="{Binding IsEmergency, Converter={StaticResource BoolToVis}}" />
+                                        <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Warn}" Width="13" Height="13" Margin="0,0,6,0" TextElement.Foreground="{DynamicResource Brush.Emg}" Visibility="{Binding IsEmergency, Converter={StaticResource BoolToVis}}" />
                                         <TextBlock Text="{Binding Title}" Margin="0,0,8,0" TextTrimming="CharacterEllipsis" />
                                         <TextBlock Style="{StaticResource Muted}" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" />
                                     </DockPanel>

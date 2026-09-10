@@ -64,7 +64,7 @@
     <!-- ── ComboBox ── -->
     <ControlTemplate x:Key="ComboToggle" TargetType="ToggleButton">
         <Border x:Name="Bd" Background="{DynamicResource Brush.Surface}" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1" CornerRadius="6">
-            <Path HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,9,0" Data="M0,0 L4,4 L8,0" Stroke="{DynamicResource Brush.Muted}" StrokeThickness="1.5" />
+            <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.ChevronDown}" HorizontalAlignment="Right" Margin="0,0,7,0" TextElement.Foreground="{DynamicResource Brush.Muted}" />
         </Border>
         <ControlTemplate.Triggers>
             <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" /></Trigger>
@@ -125,26 +125,64 @@
     </Style>
 
     <!-- ── CheckBox · RadioButton ── -->
+    <!-- 체크(예시 .cb/.tk) — 15px·모서리 3·1.5px 선. 켜진 색 = Background(기본 Primary, Check.Talk 는 Talk) -->
     <Style TargetType="CheckBox">
         <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.Primary}" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="CheckBox">
                     <StackPanel Orientation="Horizontal" Background="Transparent">
-                        <Border x:Name="Box" Width="16" Height="16" CornerRadius="4" Background="{DynamicResource Brush.Surface}" BorderBrush="{DynamicResource Brush.BorderStrong}" BorderThickness="1" VerticalAlignment="Center">
-                            <Path x:Name="Mark" Data="M3,8 L7,12 L13,4" Stroke="{DynamicResource Brush.OnAccent}" StrokeThickness="2" Visibility="Collapsed" />
+                        <Border x:Name="Box" Width="15" Height="15" CornerRadius="3" Background="{DynamicResource Brush.Surface}" BorderBrush="{DynamicResource Brush.BorderStrong}" BorderThickness="1.5" VerticalAlignment="Center" SnapsToDevicePixels="True">
+                            <Path x:Name="Mark" Data="M2.5,7 L5.5,10 L10.5,4" Stroke="{DynamicResource Brush.OnAccent}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Visibility="Collapsed" />
                         </Border>
-                        <ContentPresenter Margin="6,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True" />
+                        <ContentPresenter x:Name="Lbl" Margin="6,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True" />
                     </StackPanel>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Box" Property="Background" Value="{DynamicResource Brush.Primary}" />
-                            <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" />
+                            <Setter TargetName="Box" Property="Background" Value="{Binding Background, RelativeSource={RelativeSource TemplatedParent}}" />
+                            <Setter TargetName="Box" Property="BorderBrush" Value="{Binding Background, RelativeSource={RelativeSource TemplatedParent}}" />
                             <Setter TargetName="Mark" Property="Visibility" Value="Visible" />
                         </Trigger>
-                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5" /></Trigger>
+                        <Trigger Property="HasContent" Value="False"><Setter TargetName="Lbl" Property="Margin" Value="0" /></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4" /></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <!-- 발언 대상 체크(예시 .tk) — 켜지면 녹색 -->
+    <Style TargetType="CheckBox" x:Key="Check.Talk" BasedOn="{StaticResource {x:Type CheckBox}}">
+        <Setter Property="Background" Value="{DynamicResource Brush.Talk}" />
+    </Style>
+    <!-- 스위치(예시 .toggle) — 28×16 트랙 + 12 손잡이, 켜짐 = Primary 트랙 + Primary 라벨 -->
+    <Style TargetType="CheckBox" x:Key="Switch">
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Muted}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <StackPanel Orientation="Horizontal" Background="Transparent">
+                        <Border x:Name="Track" Width="28" Height="16" CornerRadius="8" Background="{DynamicResource Brush.BorderStrong}" VerticalAlignment="Center" SnapsToDevicePixels="True">
+                            <Ellipse x:Name="Knob" Width="12" Height="12" Fill="{DynamicResource Brush.Surface}" HorizontalAlignment="Left" Margin="2,0,0,0">
+                                <Ellipse.RenderTransform><TranslateTransform x:Name="KnobT" X="0" /></Ellipse.RenderTransform>
+                            </Ellipse>
+                        </Border>
+                        <ContentPresenter x:Name="Lbl" Margin="6,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True" />
+                    </StackPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Track" Property="Background" Value="{DynamicResource Brush.Primary}" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Primary}" />
+                            <Trigger.EnterActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="KnobT" Storyboard.TargetProperty="X" To="12" Duration="0:0:0.15" /></Storyboard></BeginStoryboard></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="KnobT" Storyboard.TargetProperty="X" To="0" Duration="0:0:0.15" /></Storyboard></BeginStoryboard></Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="HasContent" Value="False"><Setter TargetName="Lbl" Property="Margin" Value="0" /></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4" /></Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
@@ -158,8 +196,8 @@
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
                     <StackPanel Orientation="Horizontal" Background="Transparent">
-                        <Border x:Name="Ring" Width="16" Height="16" CornerRadius="8" Background="{DynamicResource Brush.Surface}" BorderBrush="{DynamicResource Brush.BorderStrong}" BorderThickness="1" VerticalAlignment="Center">
-                            <Ellipse x:Name="Dot" Width="8" Height="8" Fill="{DynamicResource Brush.Primary}" Visibility="Collapsed" />
+                        <Border x:Name="Ring" Width="15" Height="15" CornerRadius="7.5" Background="{DynamicResource Brush.Surface}" BorderBrush="{DynamicResource Brush.BorderStrong}" BorderThickness="1.5" VerticalAlignment="Center" SnapsToDevicePixels="True">
+                            <Ellipse x:Name="Dot" Width="7" Height="7" Fill="{DynamicResource Brush.Primary}" Visibility="Collapsed" />
                         </Border>
                         <ContentPresenter Margin="6,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True" />
                     </StackPanel>
@@ -320,14 +358,17 @@
     </Style>
     <!-- 메뉴 항목 옆 핫키 칩(F1~F4) -->
     <Style x:Key="NavKey" TargetType="Border">
-        <Setter Property="Background" Value="{DynamicResource Brush.Surface2}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" />
+        <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="4" />
-        <Setter Property="Padding" Value="5,1" />
+        <Setter Property="Padding" Value="4,0" />
         <Setter Property="Margin" Value="6,0,0,0" />
         <Setter Property="VerticalAlignment" Value="Center" />
-        <Setter Property="TextElement.FontSize" Value="10.5" />
+        <Setter Property="TextElement.FontSize" Value="10" />
         <Setter Property="TextElement.FontFamily" Value="{DynamicResource Font.Mono}" />
-        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Wire}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Muted}" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
     </Style>
 
     <!-- 상단 바 드롭다운(메뉴 대신 팝업 — 시스템 메뉴 색을 못 바꾸므로) -->
@@ -347,7 +388,12 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Hover}" /></Trigger>
-                        <Trigger Property="IsChecked" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /></Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" />
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Primary}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45" /></Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>

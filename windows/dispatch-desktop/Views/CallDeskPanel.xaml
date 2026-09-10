@@ -7,16 +7,16 @@
              d:DataContext="{d:DesignInstance vm:MainViewModel}" x:Name="Root">
     <!-- ③ 일반통화(§4.3) — 한 열: 빠른 발신 줄([내선·번호·이름][발신][픽업 **][▦ ▾][문자 n]) → 관제 그룹원 띠 → 대표번호 대기열 → 오늘 데스크 → 내 통화.
          [▦ ▾] 팝오버 = CallOriginateView(다이얼패드|주소록|최근), [문자 n] 팝오버 = SMS·LMS(받는 사람 줄 + 스레드), DTMF·전달은 내 통화 카드 옆 팝오버. -->
+    <UserControl.Resources>
+        <!-- 패널 머리 — 도킹 제목줄(MainWindow·DockTheme 의 AnchorablePaneTitle 템플릿)이 Resources[PanelHeader] 를 제목 옆에 그린다. 본문 위에 머리 줄을 따로 두지 않는다 -->
+        <DockPanel x:Key="PanelHeader" VerticalAlignment="Center">
+            <TextBlock Style="{StaticResource Muted}" VerticalAlignment="Center">
+                <Run Text="{Binding CallDesk.PilotText, Mode=OneWay}" /><Run Text=" · VoLTE·외부망" />
+            </TextBlock>
+        </DockPanel>
+    </UserControl.Resources>
     <Border Style="{StaticResource Pnl}">
         <DockPanel>
-            <Border DockPanel.Dock="Top" Style="{StaticResource PanelHeader}">
-                <DockPanel VerticalAlignment="Center">
-                    <TextBlock Style="{StaticResource H2}" Text="③ 일반통화" Margin="6,0,10,0" />
-                    <TextBlock Style="{StaticResource Muted}" VerticalAlignment="Center">
-                        <Run Text="{Binding CallDesk.PilotText, Mode=OneWay}" /><Run Text=" · VoLTE·외부망" />
-                    </TextBlock>
-                </DockPanel>
-            </Border>
             <!-- 빠른 발신 줄(44) -->
             <Border DockPanel.Dock="Top" Height="44" Padding="8,0" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,0,1" Background="{DynamicResource Brush.Surface}">
                 <DockPanel VerticalAlignment="Center" x:Name="QuickLine">
@@ -50,7 +50,7 @@
                     <!-- [▦ ▾] 다이얼패드|주소록|최근 -->
                     <Grid DockPanel.Dock="Right" Margin="4,0,0,0">
                         <ToggleButton x:Name="PadBtn" Style="{StaticResource DropButton}" Height="30" IsChecked="{Binding CallOriginateOpen, Mode=TwoWay}" ToolTip="다이얼패드 · 주소록 · 최근">
-                            <TextBlock><Run Text="▦" /><Run Text=" ▾" Foreground="{DynamicResource Brush.Muted}" /></TextBlock>
+                            <StackPanel Orientation="Horizontal"><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Grid}" Width="13" Height="13" /><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.ChevronDown}" Width="12" Height="12" Margin="4,0,0,0" /></StackPanel>
                         </ToggleButton>
                         <Popup IsOpen="{Binding CallOriginateOpen, Mode=TwoWay}" PlacementTarget="{Binding ElementName=QuickLine}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
                             <Border Style="{StaticResource PopPanel}" Width="500" Height="520">
@@ -102,10 +102,10 @@
                         <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type vm:MemberChip}">
-                                <Border x:Name="Chip" Style="{StaticResource Pill}" Margin="0,0,6,6" Cursor="Hand" MouseLeftButtonUp="Chip_Click" MouseRightButtonUp="Chip_RightClick" ToolTip="클릭 = 발신 입력란에 채움 · 우클릭 = 사람 메뉴">
-                                    <StackPanel Orientation="Horizontal">
-                                        <Ellipse x:Name="Dot" Style="{StaticResource Dot}" />
-                                        <TextBlock Text="{Binding Label}" FontWeight="Medium" />
+                                <Border x:Name="Chip" Style="{StaticResource MemberChip}" Cursor="Hand" MouseLeftButtonUp="Chip_Click" MouseRightButtonUp="Chip_RightClick" ToolTip="클릭 = 발신 입력란에 채움 · 우클릭 = 사람 메뉴">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Ellipse x:Name="Dot" Style="{StaticResource Dot}" Width="8" Height="8" />
+                                        <TextBlock Text="{Binding Label}" FontWeight="SemiBold" VerticalAlignment="Center" />
                                         <TextBlock x:Name="St" Style="{StaticResource Muted}" Margin="6,0,0,0" FontSize="12">
                                             <Run Text="{Binding StateText, Mode=OneWay}" /><Run Text=" " /><Run Text="{Binding Elapsed, Mode=OneWay, Converter={StaticResource Elapsed}}" FontFamily="{StaticResource Font.Mono}" />
                                         </TextBlock>
@@ -116,8 +116,8 @@
                                 </Border>
                                 <DataTemplate.Triggers>
                                     <DataTrigger Binding="{Binding IsIdle}" Value="True"><Setter TargetName="St" Property="Visibility" Value="Collapsed" /></DataTrigger>
-                                    <DataTrigger Binding="{Binding IsRinging}" Value="True"><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Ring}" /><Setter TargetName="Chip" Property="Background" Value="{DynamicResource Brush.RingSoft}" /></DataTrigger>
-                                    <DataTrigger Binding="{Binding IsTalking}" Value="True"><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Talk}" /><Setter TargetName="Chip" Property="Background" Value="{DynamicResource Brush.TalkSoft}" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding IsRinging}" Value="True"><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Ring}" /><Setter TargetName="Chip" Property="Background" Value="{DynamicResource Brush.RingSoft}" /><Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.Ring}" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding IsTalking}" Value="True"><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Talk}" /><Setter TargetName="Chip" Property="Background" Value="{DynamicResource Brush.TalkSoft}" /><Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.Talk}" /></DataTrigger>
                                     <DataTrigger Binding="{Binding IsMe}" Value="True"><Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /></DataTrigger>
                                 </DataTemplate.Triggers>
                             </DataTemplate>
@@ -169,12 +169,14 @@
                                     <StackPanel>
                                         <DockPanel>
                                             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                                <Button Style="{StaticResource Btn.Xs}" Content="🎧/🔊" Command="{Binding RouteCommand}" IsEnabled="{Binding CanToggleRoute}" Margin="0,0,6,0" Height="20" ToolTip="출력 라우트" />
+                                                <Button Style="{StaticResource Btn.Xs}" Command="{Binding RouteCommand}" IsEnabled="{Binding CanToggleRoute}" Margin="0,0,6,0" Height="20" Padding="6,0" ToolTip="출력 라우트">
+                                                    <Path Style="{StaticResource Icon}" Width="13" Height="13" Data="{Binding Session.RouteIsSpeaker, Converter={StaticResource RouteIcon}}" />
+                                                </Button>
                                                 <TextBlock Style="{StaticResource Mono}" Text="{Binding Session.Elapsed, Converter={StaticResource Elapsed}}" VerticalAlignment="Center" />
                                             </StackPanel>
                                             <StackPanel Orientation="Horizontal">
-                                                <TextBlock x:Name="Icon" Text="●" Margin="0,0,6,0" Foreground="{DynamicResource Brush.Talk}" VerticalAlignment="Center" />
-                                                <Button Content="{Binding Title}" Command="{Binding MenuCommand}" Background="Transparent" BorderThickness="0" Padding="0" Cursor="Hand" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Text}" Margin="0,0,8,0" ToolTip="{Binding Session.Info.RemoteUri}" />
+                                                <Path x:Name="Icon" Style="{StaticResource Icon}" Data="{StaticResource Icon.Dot}" Width="12" Height="12" Margin="0,0,6,0" Fill="{DynamicResource Brush.Talk}" TextElement.Foreground="{DynamicResource Brush.Talk}" />
+                                                <Button Style="{StaticResource Btn.Flat}" Content="{Binding Title}" Command="{Binding MenuCommand}" FontWeight="SemiBold" Margin="0,0,8,0" ToolTip="{Binding Session.Info.RemoteUri}" />
                                                 <Border Style="{StaticResource Badge.Pilot}" Visibility="{Binding PathBadge, Converter={StaticResource StrToVis}}"><TextBlock Text="{Binding PathBadge}" /></Border>
                                                 <Border Style="{StaticResource Badge}" Visibility="{Binding IsPilotIncoming, Converter={StaticResource NotToVis}}"><TextBlock Text="직접" /></Border>
                                                 <TextBlock Style="{StaticResource Muted}" Text="{Binding Session.StateText}" VerticalAlignment="Center" />
@@ -190,7 +192,7 @@
                                             <Button Content="음소거" Command="{Binding MuteCommand}" Visibility="{Binding CanHold, Converter={StaticResource BoolToVis}}" />
                                             <!-- [DTMF ▾] 팝오버 — 카드 옆 3×4 패드 -->
                                             <Grid Visibility="{Binding CanHold, Converter={StaticResource BoolToVis}}">
-                                                <ToggleButton x:Name="DtmfBtn" Style="{StaticResource DropButton}" Height="22" Padding="7,0" FontSize="11.5" Margin="0,0,4,4" IsChecked="{Binding DtmfOpen, Mode=TwoWay}" Content="DTMF ▾" />
+                                                <ToggleButton x:Name="DtmfBtn" Style="{StaticResource DropButton}" Height="22" Padding="7,0" FontSize="11.5" Margin="0,0,4,4" IsChecked="{Binding DtmfOpen, Mode=TwoWay}"><StackPanel Orientation="Horizontal"><TextBlock Text="DTMF" /><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.ChevronDown}" Width="11" Height="11" Margin="3,0,0,0" /></StackPanel></ToggleButton>
                                                 <Popup IsOpen="{Binding DtmfOpen, Mode=TwoWay}" PlacementTarget="{Binding ElementName=DtmfBtn}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
                                                     <Border Style="{StaticResource PopPanel}" Width="220" Padding="8">
                                                         <StackPanel>
@@ -210,7 +212,7 @@
                                             </Grid>
                                             <!-- [전달 ▾] 팝오버 — 대상 입력 + 그룹원 칩, [전달](blind) / [상담 전달](attended) -->
                                             <Grid Visibility="{Binding CanTransfer, Converter={StaticResource BoolToVis}}">
-                                                <ToggleButton x:Name="XferBtn" Style="{StaticResource DropButton}" Height="22" Padding="7,0" FontSize="11.5" Margin="0,0,4,4" IsChecked="{Binding TransferOpen, Mode=TwoWay}" Content="전달 ▾" />
+                                                <ToggleButton x:Name="XferBtn" Style="{StaticResource DropButton}" Height="22" Padding="7,0" FontSize="11.5" Margin="0,0,4,4" IsChecked="{Binding TransferOpen, Mode=TwoWay}"><StackPanel Orientation="Horizontal"><TextBlock Text="전달" /><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.ChevronDown}" Width="11" Height="11" Margin="3,0,0,0" /></StackPanel></ToggleButton>
                                                 <Popup IsOpen="{Binding TransferOpen, Mode=TwoWay}" PlacementTarget="{Binding ElementName=XferBtn}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
                                                     <Border Style="{StaticResource PopPanel}" Width="300" Padding="8">
                                                         <StackPanel>
@@ -239,9 +241,9 @@
                                     </StackPanel>
                                 </Border>
                                 <DataTemplate.Triggers>
-                                    <DataTrigger Binding="{Binding Session.IsHeld}" Value="True"><Setter TargetName="Icon" Property="Text" Value="⏸" /><Setter TargetName="Icon" Property="Foreground" Value="{DynamicResource Brush.Held}" /><Setter TargetName="Card" Property="Background" Value="{DynamicResource Brush.HeldSoft}" /></DataTrigger>
-                                    <DataTrigger Binding="{Binding Session.IsIncoming}" Value="True"><Setter TargetName="Icon" Property="Text" Value="🔔" /><Setter TargetName="Card" Property="Background" Value="{DynamicResource Brush.RingSoft}" /><Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource Brush.Ring}" /></DataTrigger>
-                                    <DataTrigger Binding="{Binding Session.IsOutgoing}" Value="True"><Setter TargetName="Icon" Property="Text" Value="↗" /><Setter TargetName="Icon" Property="Foreground" Value="{DynamicResource Brush.Muted}" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding Session.IsHeld}" Value="True"><Setter TargetName="Icon" Property="Data" Value="{StaticResource Icon.Pause}" /><Setter TargetName="Icon" Property="Fill" Value="Transparent" /><Setter TargetName="Icon" Property="StrokeThickness" Value="2.4" /><Setter TargetName="Icon" Property="TextElement.Foreground" Value="{DynamicResource Brush.Held}" /><Setter TargetName="Card" Property="Background" Value="{DynamicResource Brush.HeldSoft}" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding Session.IsIncoming}" Value="True"><Setter TargetName="Icon" Property="Data" Value="{StaticResource Icon.Bell}" /><Setter TargetName="Icon" Property="Fill" Value="Transparent" /><Setter TargetName="Icon" Property="TextElement.Foreground" Value="{DynamicResource Brush.Ring}" /><Setter TargetName="Card" Property="Background" Value="{DynamicResource Brush.RingSoft}" /><Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource Brush.Ring}" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding Session.IsOutgoing}" Value="True"><Setter TargetName="Icon" Property="Data" Value="{StaticResource Icon.Out}" /><Setter TargetName="Icon" Property="Fill" Value="Transparent" /><Setter TargetName="Icon" Property="TextElement.Foreground" Value="{DynamicResource Brush.Muted}" /></DataTrigger>
                                     <DataTrigger Binding="{Binding Session.IsActive}" Value="True"><Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource Brush.Talk}" /></DataTrigger>
                                 </DataTemplate.Triggers>
                             </DataTemplate>

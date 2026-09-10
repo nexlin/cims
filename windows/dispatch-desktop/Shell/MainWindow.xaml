@@ -21,7 +21,7 @@
                         <!-- 감청 중 N ▾ -->
                         <Grid Visibility="{Binding HasMonitors, Converter={StaticResource BoolToVis}}" Margin="0,0,8,0">
                             <ToggleButton x:Name="MonDrop" Style="{StaticResource DropButton}" Foreground="{DynamicResource Brush.Mon}" BorderBrush="{DynamicResource Brush.Mon}" Background="{DynamicResource Brush.MonSoft}" ToolTip="열린 감청·청취 창 — 클릭하면 복원">
-                                <TextBlock FontWeight="SemiBold"><Run Text="감청 중 " /><Run Text="{Binding MonitorCount, Mode=OneWay}" /><Run Text=" ▾" /></TextBlock>
+                                <StackPanel Orientation="Horizontal"><Ellipse Style="{StaticResource Dot}" Width="8" Height="8" Fill="{DynamicResource Brush.Mon}" /><TextBlock FontWeight="SemiBold"><Run Text="감청 중 " /><Run Text="{Binding MonitorCount, Mode=OneWay}" /></TextBlock><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.ChevronDown}" Width="12" Height="12" Margin="4,0,0,0" /></StackPanel>
                             </ToggleButton>
                             <Popup IsOpen="{Binding IsChecked, ElementName=MonDrop}" PlacementTarget="{Binding ElementName=MonDrop}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
                                 <Border Style="{StaticResource DropPanel}">
@@ -38,19 +38,22 @@
                         </Grid>
                         <!-- 배치 잠금 -->
                         <Button Style="{StaticResource Btn.Sm}" Command="{Binding ToggleLockCommand}" Margin="0,0,4,0" ToolTip="배치 잠금 — 잠긴 동안 패널 이동·별창 비활성">
-                            <TextBlock>
-                                <TextBlock.Style>
-                                    <Style TargetType="TextBlock">
-                                        <Setter Property="Text" Value="🔓 배치" />
-                                        <Style.Triggers><DataTrigger Binding="{Binding LayoutLocked}" Value="True"><Setter Property="Text" Value="🔒 배치" /></DataTrigger></Style.Triggers>
-                                    </Style>
-                                </TextBlock.Style>
-                            </TextBlock>
+                            <StackPanel Orientation="Horizontal">
+                                <Path Width="13" Height="13" Margin="0,0,5,0">
+                                    <Path.Style>
+                                        <Style TargetType="Path" BasedOn="{StaticResource Icon}">
+                                            <Setter Property="Data" Value="{StaticResource Icon.Unlock}" />
+                                            <Style.Triggers><DataTrigger Binding="{Binding LayoutLocked}" Value="True"><Setter Property="Data" Value="{StaticResource Icon.Lock}" /></DataTrigger></Style.Triggers>
+                                        </Style>
+                                    </Path.Style>
+                                </Path>
+                                <TextBlock Text="배치" />
+                            </StackPanel>
                         </Button>
                         <!-- 프리셋 ▾ -->
                         <Grid Margin="0,0,10,0">
                             <ToggleButton x:Name="PresetDrop" Style="{StaticResource DropButton}">
-                                <TextBlock><Run Text="{Binding CurrentPreset, Mode=OneWay}" /><Run Text=" ▾" /></TextBlock>
+                                <StackPanel Orientation="Horizontal"><TextBlock Text="{Binding CurrentPreset, Mode=OneWay}" /><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.ChevronDown}" Width="12" Height="12" Margin="4,0,0,0" /></StackPanel>
                             </ToggleButton>
                             <Popup IsOpen="{Binding IsChecked, ElementName=PresetDrop}" PlacementTarget="{Binding ElementName=PresetDrop}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
                                 <Border Style="{StaticResource DropPanel}">
@@ -77,7 +80,7 @@
                         <TextBlock Style="{StaticResource Mono}" Text="{Binding Clock}" FontSize="16" VerticalAlignment="Center" Margin="4,0,10,0" />
                         <!-- ⚙ ▾ -->
                         <Grid>
-                            <ToggleButton x:Name="GearDrop" Style="{StaticResource DropButton}" Content="⚙" FontSize="15" Padding="7,0" />
+                            <ToggleButton x:Name="GearDrop" Style="{StaticResource DropButton}" Padding="6,0" ToolTip="설정 · 로그아웃 · 종료"><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Settings}" Width="15" Height="15" /></ToggleButton>
                             <Popup IsOpen="{Binding IsChecked, ElementName=GearDrop}" PlacementTarget="{Binding ElementName=GearDrop}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" HorizontalOffset="-140">
                                 <Border Style="{StaticResource DropPanel}">
                                     <StackPanel>
@@ -152,7 +155,7 @@
                         </StackPanel>
                         <!-- Ctrl+K -->
                         <Button Style="{StaticResource Btn.Sm}" Margin="10,0,0,0" ToolTip="통합 검색 — 사람·그룹 → 사설콜·애드혹·통화·문자·SDS (Ctrl+K)" Command="{Binding ToggleSearchCommand}">
-                            <StackPanel Orientation="Horizontal"><TextBlock Text="🔍 검색" /><Border Style="{StaticResource NavKey}"><TextBlock Text="Ctrl+K" /></Border></StackPanel>
+                            <StackPanel Orientation="Horizontal"><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Search}" Width="13" Height="13" Margin="0,0,5,0" /><TextBlock Text="검색" /><Border Style="{StaticResource NavKey}"><TextBlock Text="Ctrl+K" /></Border></StackPanel>
                         </Button>
                     </StackPanel>
                 </DockPanel>
@@ -331,12 +334,14 @@
                     <Border x:Name="T" Style="{StaticResource Card}" BorderBrush="{DynamicResource Brush.BorderStrong}" Margin="0,6,0,0">
                         <Border.Effect><DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.18" /></Border.Effect>
                         <DockPanel>
-                            <Button DockPanel.Dock="Right" Content="×" Background="Transparent" BorderThickness="0" Cursor="Hand" VerticalAlignment="Top" Foreground="{DynamicResource Brush.Muted}"
-                                    Command="{Binding DataContext.DismissToastCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" />
+                            <Button DockPanel.Dock="Right" Style="{StaticResource IconBtn}" Width="22" Height="22" VerticalAlignment="Top" Margin="6,0,0,0"
+                                    Command="{Binding DataContext.DismissToastCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.X}" Width="12" Height="12" /></Button>
                             <StackPanel>
                                 <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontWeight="Medium" />
-                                <Button Content="▸ 상세" Background="Transparent" BorderThickness="0" Padding="0" HorizontalAlignment="Left" Cursor="Hand" FontSize="11.5" Foreground="{DynamicResource Brush.Muted}"
-                                        Command="{Binding DataContext.ToggleToastDetailCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Visibility="{Binding HasDetail, Converter={StaticResource BoolToVis}}" />
+                                <Button Style="{StaticResource Btn.Link}" HorizontalAlignment="Left" FontSize="11.5"
+                                        Command="{Binding DataContext.ToggleToastDetailCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Visibility="{Binding HasDetail, Converter={StaticResource BoolToVis}}">
+                                    <StackPanel Orientation="Horizontal"><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.ChevronRight}" Width="11" Height="11" Margin="0,0,2,0" /><TextBlock Text="상세" /></StackPanel>
+                                </Button>
                                 <TextBlock Style="{StaticResource MonoMuted}" Text="{Binding Detail}" FontSize="11.5" TextWrapping="Wrap" Visibility="{Binding ShowDetail, Converter={StaticResource BoolToVis}}" />
                             </StackPanel>
                         </DockPanel>

@@ -7,6 +7,11 @@
     <!-- ② 범위 채널(§4.2) — 머리([전체|활성|긴급|청취|관리] · 검색 · [+ 새 채널]) → 섹션: 청취 범위 · n → 타인 세션 · n(서버 과제) → 관리 범위 · n · 상태 없음(기본 접힘).
          카드 = ① 과 같은 2줄 모양, 조작 = [🔊 청취]/[🔊 청취 중] 토글 · [창으로] · [편집][삭제]. 멤버가 아니면 발언 체크·PTT 는 없다. -->
     <UserControl.Resources>
+        <!-- 패널 머리 — 도킹 제목줄(MainWindow·DockTheme 의 AnchorablePaneTitle 템플릿)이 Resources[PanelHeader] 를 제목 옆에 그린다. 본문 위에 머리 줄을 따로 두지 않는다 -->
+        <DockPanel x:Key="PanelHeader" VerticalAlignment="Center">
+            <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Sm.Pri}" Content="새 채널" Command="{Binding NewChannelCommand}" Visibility="{Binding CanCreate, Converter={StaticResource BoolToVis}}" ToolTip="PTT 그룹 만들기 — 채널 편집 드로어(GMS XCAP)" />
+            <TextBlock Style="{StaticResource Muted}" Text="{Binding HeaderCounts}" VerticalAlignment="Center" FontSize="12.5" />
+        </DockPanel>
         <DataTemplate x:Key="ScopedCardTemplate" DataType="{x:Type vm:ScopedCard}">
             <Border x:Name="Card" Style="{StaticResource ChannelCard}" MouseLeftButtonDown="Card_MouseLeftButtonDown">
                 <StackPanel>
@@ -14,14 +19,16 @@
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                             <!-- 조작 — 세션을 끝내는 것([청취 중])만 상시, 나머지는 호버 -->
                             <StackPanel x:Name="Ops" Orientation="Horizontal" Visibility="Hidden" Margin="0,0,6,0">
-                                <Button Style="{StaticResource Btn.Xs.Mon}" Content="🔊 청취" Command="{Binding ToggleListenCommand}" IsEnabled="{Binding CanListen}" ToolTip="{Binding ListenTip}" Margin="0,0,4,0"
-                                        Visibility="{Binding IsListening, Converter={StaticResource NotToVis}}" />
+                                <Button Style="{StaticResource Btn.Xs.Mon}" Command="{Binding ToggleListenCommand}" IsEnabled="{Binding CanListen}" ToolTip="{Binding ListenTip}" Margin="0,0,4,0"
+                                        Visibility="{Binding IsListening, Converter={StaticResource NotToVis}}"><StackPanel Orientation="Horizontal"><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Speaker}" Width="12" Height="12" Margin="0,0,4,0" /><TextBlock Text="청취" /></StackPanel></Button>
                                 <Button Style="{StaticResource Btn.Xs}" Content="편집" Command="{Binding EditCommand}" Margin="0,0,4,0" Visibility="{Binding CanEdit, Converter={StaticResource BoolToVis}}" ToolTip="채널 편집 드로어(GMS XCAP)" />
                                 <Button Style="{StaticResource Btn.Xs.Danger}" Content="삭제" Command="{Binding DeleteCommand}" Margin="0,0,4,0" Visibility="{Binding CanEdit, Converter={StaticResource BoolToVis}}" />
                             </StackPanel>
                             <StackPanel Orientation="Horizontal" Visibility="{Binding IsListening, Converter={StaticResource BoolToVis}}" Margin="0,0,6,0">
-                                <Button Style="{StaticResource Btn.Xs.Mon}" Content="🔊 청취 중" Command="{Binding ToggleListenCommand}" ToolTip="{Binding ListenTip}" Background="{DynamicResource Brush.MonSoft}" Margin="0,0,4,0" />
-                                <Button Style="{StaticResource Btn.Xs}" Content="🎧/🔊" Command="{Binding ToggleRouteCommand}" ToolTip="청취 출력 라우트" Margin="0,0,4,0" />
+                                <Button Style="{StaticResource Btn.Xs.Mon}" Command="{Binding ToggleListenCommand}" ToolTip="{Binding ListenTip}" Background="{DynamicResource Brush.MonSoft}" Margin="0,0,4,0"><StackPanel Orientation="Horizontal"><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Speaker}" Width="12" Height="12" Margin="0,0,4,0" /><TextBlock Text="청취 중" /></StackPanel></Button>
+                                <Button Style="{StaticResource Btn.Xs}" Command="{Binding ToggleRouteCommand}" ToolTip="청취 출력 라우트" Margin="0,0,4,0" Padding="6,0">
+                                    <Path Style="{StaticResource Icon}" Width="13" Height="13" Data="{Binding RouteIsSpeaker, Converter={StaticResource RouteIcon}}" />
+                                </Button>
                                 <Button Style="{StaticResource Btn.Xs}" Content="창으로" Command="{Binding ShowWindowCommand}" ToolTip="감청 창(§5)에 띄우기" />
                             </StackPanel>
                             <TextBlock x:Name="Elapsed" Style="{StaticResource MonoMuted}" Text="{Binding ElapsedText}" FontSize="12.5" VerticalAlignment="Center" MinWidth="40" TextAlignment="Right" />
@@ -60,13 +67,6 @@
     </UserControl.Resources>
     <Border Style="{StaticResource Pnl}">
         <DockPanel>
-            <Border DockPanel.Dock="Top" Style="{StaticResource PanelHeader}">
-                <DockPanel VerticalAlignment="Center">
-                    <TextBlock Style="{StaticResource H2}" Text="② 범위 채널" Margin="6,0,10,0" />
-                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Sm.Pri}" Content="+ 새 채널" Command="{Binding NewChannelCommand}" Visibility="{Binding CanCreate, Converter={StaticResource BoolToVis}}" ToolTip="PTT 그룹 만들기 — 채널 편집 드로어(GMS XCAP)" />
-                    <TextBlock Style="{StaticResource Muted}" Text="{Binding HeaderCounts}" VerticalAlignment="Center" FontSize="12.5" />
-                </DockPanel>
-            </Border>
             <!-- 필터 줄(34) — 이 패널에만 걸린다 -->
             <Border DockPanel.Dock="Top" Height="34" Padding="8,0" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,0,1" Background="{DynamicResource Brush.Surface}">
                 <DockPanel VerticalAlignment="Center">
@@ -97,13 +97,13 @@
                     <ItemsControl ItemsSource="{Binding Others}" ItemTemplate="{StaticResource ScopedCardTemplate}" />
                     <TextBlock Style="{StaticResource Hint}" Margin="4,0,4,8" Text="{Binding OthersHint}" Visibility="{Binding Others.Count, Converter={StaticResource ZeroToVis}}" />
                     <!-- 관리 범위(기본 접힘) -->
-                    <Button Background="Transparent" BorderThickness="0" Padding="0" HorizontalAlignment="Left" HorizontalContentAlignment="Left" Cursor="Hand" Command="{Binding ToggleManageCommand}">
+                    <Button HorizontalAlignment="Left" HorizontalContentAlignment="Left" Command="{Binding ToggleManageCommand}">
                         <TextBlock Style="{StaticResource SectionLabel}">
                             <Run Text="관리 범위 · " /><Run Text="{Binding ManageCount, Mode=OneWay}" /><Run Text=" · 상태 없음 " />
                             <Run x:Name="Arrow" Text="▸" /><Run Text=" (접힘)" x:Name="Fold" />
                         </TextBlock>
                         <Button.Style>
-                            <Style TargetType="Button">
+                            <Style TargetType="Button" BasedOn="{StaticResource Btn.Flat}">
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding ManageExpanded}" Value="True"><Setter Property="ToolTip" Value="접기" /></DataTrigger>
                                     <DataTrigger Binding="{Binding ManageExpanded}" Value="False"><Setter Property="ToolTip" Value="펼치기 — 관리만 되는 그룹(세션 상태 없음)" /></DataTrigger>

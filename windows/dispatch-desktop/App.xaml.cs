@@ -175,7 +175,7 @@ public partial class App : Application
             dict.Insert(0, new ResourceDictionary { Source = dockUri });
         }
         var uri = new Uri(dark ? "Themes/Dark.xaml" : "Themes/Light.xaml", UriKind.Relative);
-        var current = dict.FirstOrDefault(d => d.Source is not null && d.Source.OriginalString.Contains("Themes/", StringComparison.OrdinalIgnoreCase) && !d.Source.OriginalString.Contains("Styles"));
+        var current = dict.FirstOrDefault(d => d.Source is not null && (d.Source.OriginalString.EndsWith("Themes/Light.xaml", StringComparison.OrdinalIgnoreCase) || d.Source.OriginalString.EndsWith("Themes/Dark.xaml", StringComparison.OrdinalIgnoreCase)));
         if (current is not null && current.Source!.OriginalString.EndsWith(uri.OriginalString, StringComparison.OrdinalIgnoreCase)) return;
         if (current is not null) dict.Remove(current);
         dict.Insert(0, new ResourceDictionary { Source = uri });

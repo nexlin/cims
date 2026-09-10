@@ -118,7 +118,7 @@ public partial class MainWindow : Window
     /// <summary>도킹 크롬(패널 제목줄·탭·스플리터)을 앱 테마에 맞춘다 — AvalonDock VS2013 테마.</summary>
     public void ApplyDockTheme(string theme)
     {
-        Dock.Theme = theme == "dark" ? new AvalonDock.Themes.Vs2013DarkTheme() : new AvalonDock.Themes.Vs2013LightTheme();
+        Dock.Theme = new Themes.DockTheme(dark: theme == "dark");
     }
 
     private void SavePreset_Click(object sender, RoutedEventArgs e)

@@ -68,7 +68,7 @@ public sealed partial class DeskViewModel : ObservableObject
     public string AudioSummary => _s.SpeakerName.Length > 0 ? $"🎧 {Short(_s.HeadsetName)} · 🔊 {Short(_s.SpeakerName)}" : $"🎧 {Short(_s.HeadsetName)}";
     public string AudioTip => $"마이크: {_s.CaptureName}\n헤드셋(라우트 0): {_s.HeadsetName}\n데스크 스피커: {(_s.SpeakerName.Length > 0 ? _s.SpeakerName : "없음")}";
     private static string Short(string n) => n.Length > 18 ? n[..17] + "…" : n;
-    public string PttHotKey => "⌨ PTT " + HotKeyMap.DisplayOf(_s.Settings.Current.HotKeys, "ptt");
+    public string PttHotKey => "PTT " + HotKeyMap.DisplayOf(_s.Settings.Current.HotKeys, "ptt");
 
     public int MonitorCount => Monitors.Count;
     public bool HasMonitors => Monitors.Count > 0;
