@@ -84,11 +84,44 @@ tb_init_dirs
 
 # ── ③ 설치 ────────────────────────────────────────────────────
 installed=0
-if [[ -f "$deb_dir/Packages" || -f "$deb_dir/Packages.gz" ]] && [[ ${#targets[@]} -gt 0 ]] \
+# 로컬 저장소는 **debs/* 전체**를 붙인다 — 설치 대상은 이 set 이지만, apt 는 시스템 전체의
+# 의존 상태를 먼저 검사하므로 **관계없는 패키지의 의존이 비어 있으면 이 설치까지 거부**한다.
+# (실측: linux-tools 의 libnl-3-200 이 없어 MariaDB 설치가 `Unmet dependencies` 로 막혔다.)
+# 그 구멍을 메울 deb 를 `debs/apt-repair/` 같은 다른 set 으로 반입해도 apt 가 함께 보게 한다.
+# 색인(Packages)이 있는 디렉토리만 — 없는 것을 넣으면 apt update 가 그 줄에서 실패한다.
+repo_dirs=()
+for _d in "$TB_OFFLINE_DIR"/debs/*/; do
+    [[ -f "${_d}Packages" || -f "${_d}Packages.gz" ]] && repo_dirs+=("${_d%/}")
+done
+
+if [[ ${#repo_dirs[@]} -gt 0 ]] && [[ ${#targets[@]} -gt 0 ]] \
    && command -v apt-get >/dev/null; then
-    info "[1/2] 오프라인 apt 저장소로 설치 — ${targets[*]} (${#debs[@]}개 .deb 보유)"
+    info "[1/2] 오프라인 apt 저장소로 설치 — ${targets[*]} (${#debs[@]}개 .deb, 저장소 ${#repo_dirs[@]}곳)"
+
+    # apt 의 file:// 취득은 **_apt 사용자로 권한을 낮춰** 수행된다. 키트를 홈 아래에 풀면
+    # (Ubuntu 기본 홈은 0750) _apt 가 디렉토리를 통과하지 못해
+    #   Could not open file .../Packages - open (13: Permission denied)
+    # 로 색인을 못 읽고, apt 는 쓸 수 있는 소스가 없는 상태로 의존을 풀지 못한다(실측
+    # 2026-09-10, /home/<계정> 0750). 키트를 **어디에 풀었는지에 의존하지 않도록** 색인과
+    # .deb 를 _apt 가 읽을 수 있는 자리로 옮겨 붙인다. 홈 권한을 바꾸지 않는 쪽을 택했다 —
+    # 설치 스크립트가 사용자 홈의 접근 권한을 넓히는 것은 부수효과가 너무 크다.
+    stage_root="/var/tmp/tb-offline-debs.$$"
+    install -d -m 755 "$stage_root"
+    staged=()
+    for _d in "${repo_dirs[@]}"; do
+        _s="$stage_root/$(basename "$_d")"
+        install -d -m 755 "$_s"
+        cp -f "$_d"/*.deb "$_s"/ 2>/dev/null || true
+        cp -f "$_d"/Packages "$_d"/Packages.gz "$_s"/ 2>/dev/null || true
+        chmod 644 "$_s"/* 2>/dev/null || true
+        staged+=("$_s")
+    done
+
     listf="$TB_STATE_DIR/offline-$DEB_SET.list"
-    printf 'deb [trusted=yes] file://%s ./\n' "$deb_dir" > "$listf"
+    : > "$listf"
+    for _d in "${staged[@]}"; do
+        printf 'deb [trusted=yes] file://%s ./\n' "$_d" >> "$listf"
+    done
     # sourceparts=/dev/null → 시스템 저장소(네트워크) 배제. List-Cleanup=0 → 기존 색인 보존.
     apt_opts=(-o "Dir::Etc::sourcelist=$listf"
               -o Dir::Etc::sourceparts=/dev/null
@@ -104,6 +137,7 @@ if [[ -f "$deb_dir/Packages" || -f "$deb_dir/Packages.gz" ]] && [[ ${#targets[@]
         warn "apt 경로 실패 — dpkg 직접 설치로 재시도합니다 (로그: $TB_LOG_DIR/05-apt-$DEB_SET.log)"
     fi
     rm -f "$listf"
+    rm -rf "$stage_root"
 fi
 
 if [[ $installed -eq 0 ]]; then

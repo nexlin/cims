@@ -3,13 +3,21 @@
 # tb-fetch-debs.sh — 폐쇄망 반입용 .deb 수집 (인터넷 되는 빌드 장비에서 실행)
 #
 #   ./tb-fetch-debs.sh mariadb          MariaDB 서버·클라이언트 + 의존
-#   ./tb-fetch-debs.sh mariadb --all    베이스 설치에 있을 것까지 전부
+#   ./tb-fetch-debs.sh apt-repair       깨진 apt 를 되살리는 최소 집합 (아래 참조)
+#   ./tb-fetch-debs.sh mariadb --all    required/important 까지 전부
 #
 # 산출: deployment/tb/offline/debs/<set>/*.deb  → 이 디렉토리를 USB 로 옮긴다.
 #
-# 의존 고르기: apt-cache 로 재귀 의존을 뽑고, 배포판 기본 설치에 이미 있는 것
-# (Priority = required/important/standard)은 제외한다. csp/vendor 를 큐레이션한
-# 기준과 같다 — libc6·zlib1g 류를 반입해봐야 용량만 늘고 의미가 없다.
+# 의존 고르기: apt-cache 로 재귀 의존을 뽑고, **모든 시스템에 반드시 있는 것**
+# (Priority = required/important)만 제외한다 — libc6·zlib1g 류를 반입해봐야
+# 용량만 늘고 의미가 없다.
+#
+# ⚠ `standard` 는 제외하지 않는다. Debian 정책의 `standard` 는 "표준 설치에 포함"
+# 이지 "모든 설치에 포함"이 아니다 — 최소·클라우드 이미지에는 없다. 수집 장비(개발
+# 서버)에는 있고 대상 장비에는 없어서, 같은 반입본이 한 서버에서는 되고 다른 서버에서는
+# 05 단계가 `lsof/psmisc/rsync ... not installable` 로 막혔다(2026-09-10 실측).
+# 제외 기준을 장비 상태가 아니라 정책 등급으로 두는 것이 요점이다.
+#
 # 추정이 틀리면 대상 장비의 05 단계가 부족한 패키지 이름을 정확히 알려주므로,
 # 그 이름으로 다시 수집하면 된다.
 # =============================================================
@@ -28,6 +36,10 @@ done
 
 case "$SET" in
     mariadb) PKGS=(mariadb-server mariadb-client) ;;
+    # apt 가 잠긴 시스템을 되살리는 집합. 한 패키지의 의존이 비어 있으면 apt 는 **관계없는
+    # 설치까지 전부 거부**하므로(전체 의존 상태를 먼저 검사한다), 폐쇄망에서는 이걸 못 받아와
+    # 05 단계에서 영구히 막힌다. keepalived 를 지울 때 libnl 이 함께 걷혀 가는 경우가 대표적.
+    apt-repair) PKGS=(libnl-3-200 libnl-genl-3-200 libsnmp40t64) ;;
     "")      die "사용법: ./tb-fetch-debs.sh <set> [--all]   (set: mariadb | <패키지명>...)" ;;
     # 임의 패키지 수집 — 첫 인자도 패키지명으로 취급하고 산출은 debs/custom/ 에 담는다.
     *)       PKGS=("$SET" "${rest[@]}"); SET="custom" ;;
@@ -57,7 +69,7 @@ while read -r p; do
     prio="$(apt-cache show "$p" 2>/dev/null | awk -F': ' '/^Priority: /{print $2; exit}' || true)"
     # 실체 없는 가상 패키지(awk·debconf-2.0 등)는 받을 것이 없다 — 조용히 건너뛴다.
     [[ -z "$prio" ]] && { skipped+=("$p(가상)"); continue; }
-    if [[ $ALL -eq 0 && "$prio" =~ ^(required|important|standard)$ ]]; then
+    if [[ $ALL -eq 0 && "$prio" =~ ^(required|important)$ ]]; then
         skipped+=("$p($prio)")
         continue
     fi

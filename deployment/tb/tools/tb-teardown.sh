@@ -78,13 +78,13 @@ run() {
 
 # ── 무엇이 사라지는지 먼저 보여준다 ───────────────────────────
 header "=== 철거 대상 ==="
-echo "  설치 루트      $PREFIX $( [[ -d $PREFIX ]] && echo "($(du -sh "$PREFIX" 2>/dev/null | cut -f1))" || echo '(없음)')"
+echo "  설치 루트      $PREFIX $( [[ -d $PREFIX ]] && echo "($(tb_du_safe "$PREFIX"))" || echo '(없음)')"
 echo "  관리 store     $PREFIX/modules/oam/runtime — 배포 overlay·컬렉션·인증서·토큰 전부"
 echo "  실행 중 모듈   $(pgrep -f 'bin/csp |bin/cmp |bin/cmdp |oam_app\.py|oam_svc_app\.py|csc_app\.py|cims_agent\.py' 2>/dev/null | wc -l) 개"
 if [[ $KEEP_NAS -eq 1 ]]; then
     echo "  NAS 서비스로그 유지 ($NAS_LOG_DIR)"
 else
-    echo "  NAS 서비스로그 $NAS_LOG_DIR 내용 비움 ($(du -sh "$NAS_LOG_DIR" 2>/dev/null | cut -f1))"
+    echo "  NAS 서비스로그 $NAS_LOG_DIR 내용 비움 ($(tb_du_safe "$NAS_LOG_DIR"))"
 fi
 if [[ $KEEP_DB -eq 1 ]]; then
     echo "  DB             cims 스키마만 drop (MariaDB 서버 유지)"
@@ -191,10 +191,14 @@ fi
 header "=== [4/5] NAS 서비스 로그 ==="
 if [[ $KEEP_NAS -eq 1 ]]; then
     ok "유지 (--keep-nas)"
+elif [[ -d "$NAS_LOG_DIR" ]] && ! tb_path_alive "$NAS_LOG_DIR"; then
+    # 마운트가 응답하지 않는다 — find/rm 도 같은 곳에서 멈춘다. 건너뛰고 사람에게 넘긴다.
+    warn "$NAS_LOG_DIR 이 응답하지 않습니다 (죽은 마운트로 보입니다) — 건드리지 않고 넘어갑니다"
+    warn "  확인: mount | grep -i cims    복구: sudo umount -f -l $NAS_LOG_DIR"
 elif [[ -d "$NAS_LOG_DIR" ]]; then
     # 디렉토리 자체는 남긴다 — setgid·ACL(cims-svc 쓰기)이 여기 걸려 있고, 재설치가 그
     # 권한 구성을 다시 만들지 않는다. 안의 내용만 비운다.
-    info "내용 비움 $NAS_LOG_DIR/* ($(du -sh "$NAS_LOG_DIR" 2>/dev/null | cut -f1))"
+    info "내용 비움 $NAS_LOG_DIR/* ($(tb_du_safe "$NAS_LOG_DIR"))"
     if [[ $DRY -eq 1 ]]; then
         echo "    would: rm -rf $NAS_LOG_DIR/{*,.[!.]*}"
     else
@@ -293,7 +297,15 @@ if [[ $KEEP_DB -eq 0 ]]; then
     chk "datadir 없음"                              test ! -e /var/lib/mariadb
     chk_not "AppArmor mariadbd 프로파일 미로드"     grep -q '^mariadbd ' /sys/kernel/security/apparmor/profiles
 fi
-chk "libmariadb-dev 유지 (빌드 전제조건)"      dpkg -s libmariadb-dev
+# libmariadb-dev 는 **빌드 장비에서만** 있어야 하는 것이다 — csp CMake configure 의 전제라
+# 철거가 걷어가면 안 된다. 반대로 TB 전용 노드에는 애초에 없는 것이 정상이다. 그래서
+# 성공/실패가 아니라 **어느 쪽인지 알리는** 정보로 낸다 (없는 서버에서 ERROR 가 뜨고
+# 문구까지 "남아 있다" 로 반대로 나왔다 — 2026-09-10 실측).
+if dpkg -s libmariadb-dev >/dev/null 2>&1; then
+    ok "libmariadb-dev 유지 (빌드 전제조건 — 철거가 건드리지 않았다)"
+else
+    info "libmariadb-dev 없음 — 빌드 장비가 아니면 정상이다 (csp 를 빌드하는 장비에는 있어야 한다)"
+fi
 echo
 info "포트 점검"
 ss -lntup 2>/dev/null | awk 'NR==1 || /:(4419|4421|4430|5060|25061|5061|9000|9001|3306)\y/' || true
@@ -303,6 +315,11 @@ cat <<EOF
   반입본을 풀어서 설치하세요 (레포 워크트리 사본이 아니라 ${BOLD}tar${NC} 를 쓰는 게 맞습니다 —
   tar 안의 db-bootstrap 이 ghost-escape 패치가 들어간 판본입니다):
 
-      mkdir -p ~/tb && tar xzf <반입본>/cims-tb-20260907.tar.gz -C ~/tb
+      mkdir -p ~/tb && tar xzf <반입본 경로>/cims-tb-<날짜>.tar.gz -C ~/tb
       cd ~/tb/tb && sudo ./tb-install.sh --role all-in-one
+
+  반입본을 이미 옮겨 두었으면 이름을 찍지 말고 글로브로 푸는 쪽이 안전합니다
+  (날짜를 손으로 적다 틀리는 것이 흔합니다):
+
+      tar xzf ~/tmp/cims-tb-*.tar.gz -C ~/tb
 EOF

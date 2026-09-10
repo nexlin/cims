@@ -298,6 +298,30 @@ tb_db_active() { systemctl is-active --quiet mariadb; }
 # 시스템 DB(mysql 스키마) 초기화 여부. datadir 은 배포판마다 다르다 —
 # Ubuntu 26.04 부터 /var/lib/mariadb 가 기본이고 그 전에는 /var/lib/mysql 이다.
 # 초기화가 안 된 상태에서는 mariadbd 가 권한 테이블을 못 열고 매번 죽는다.
+# 응답 없는 마운트(NAS/NFS)에서 멈추지 않는 크기 재기.
+#
+# 죽은 NFS 마운트에서 `du`·`stat` 은 **무한정 블록**한다(uninterruptible I/O — Ctrl+C 도
+# 안 먹는다). 철거 스크립트의 `--dry-run` 이 "무엇을 지울지" 만 찍다가 NAS 크기를 재려고
+# 멈춘 적이 있다(2026-09-10 실측, media02). **미리보기가 멈추는 것은 어떤 이유로도 안 되므로**
+# 시간 제한을 두고, 넘으면 크기 대신 그 사실을 돌려준다.
+tb_du_safe() {
+    local path="$1" secs="${2:-5}" out
+    [[ -e "$path" ]] || { echo "없음"; return 0; }
+    out="$(timeout "$secs" du -sh "$path" 2>/dev/null | cut -f1)"
+    if [[ -z "$out" ]]; then
+        echo "응답없음(${secs}s 초과 — 마운트 확인)"
+    else
+        echo "$out"
+    fi
+    return 0
+}
+
+# 경로가 살아 있는 마운트인지 — 죽은 NFS 를 만지기 전에 먼저 묻는다.
+tb_path_alive() {
+    local path="$1" secs="${2:-5}"
+    timeout "$secs" ls -d "$path" >/dev/null 2>&1
+}
+
 tb_db_datadir() {
     local d
     for d in /var/lib/mariadb /var/lib/mysql; do
@@ -314,7 +338,10 @@ tb_db_initialized() { tb_db_datadir >/dev/null; }
 # 철거 후 재설치에서 AppArmor 프로파일이 커널에 남아 mariadb-install-db 가
 # setgid/dac_override 거부로 실패할 때 생긴다 (tb-teardown.sh 가 프로파일을 걷는다).
 tb_db_init_hint() {
-    local dd; dd="$(tb_db_datadir 2>/dev/null || echo /var/lib/mariadb)"
+    # tb_db_datadir 는 "디렉토리는 있고 초기화만 안 됨" 을 **경로를 찍고 rc=1** 로 알린다.
+    # `|| echo` 로 받으면 두 줄이 이어붙어 복구 명령의 --datadir 이 깨진다(실측) — 값이
+    # 비었을 때만 폴백한다.
+    local dd; dd="$(tb_db_datadir 2>/dev/null)"; dd="${dd:-/var/lib/mariadb}"
     cat >&2 <<EOF
         시스템 DB(mysql 스키마)가 없습니다 — datadir: $dd
         패키지 postinst 의 mariadb-install-db 가 실패하면 이 상태가 됩니다
