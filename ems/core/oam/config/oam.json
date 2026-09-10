@@ -68,7 +68,12 @@
                 "module": "csc"
             },
             {
-                "segment": "/api/v1/dispatch-groups",
+                "segment": "/api/v1/phone-groups",
+                "upstream": "https://127.0.0.1:4421",
+                "module": "csc"
+            },
+            {
+                "segment": "/api/v1/roles",
                 "upstream": "https://127.0.0.1:4421",
                 "module": "csc"
             }

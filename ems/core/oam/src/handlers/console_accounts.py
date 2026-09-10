@@ -110,7 +110,8 @@ def _body(handler_args: HandlerArgs):
 
 
 def _valid_role(role: str) -> bool:
-    # 콘솔 계정은 로그인 가능 등급(monitor 이상)만. 'user'(가입자)는 불가.
+    # 콘솔 계정은 로그인 가능 등급(내장 monitor 이상) 또는 커스텀 역할 id(role-…, CSC roles 행 — 존재 여부는 CSC 가
+    #   판정 시 확인). 'user'(가입자)는 불가.
     return _shared_auth.can_login(role)
 
 

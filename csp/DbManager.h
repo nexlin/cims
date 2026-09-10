@@ -20,8 +20,9 @@ struct CspUserProfile;
 class CspUserMap;
 class CspPttGroup;
 class CGroupMap;
-class CspDispatchGroup;
-class CCspDispatchGroupMap;
+class CspPhoneGroup;
+class CCspPhoneGroupMap;
+class CCspRoleMap;
 
 /**
  * @ingroup CspServer
@@ -103,17 +104,23 @@ public:
     bool LoadAllUsers( CspUserMap &clsMap );
 
     // ─────────────────────────────────────────────
-    //  Dispatch group operations (dispatch_center.md §3) — 테이블 부재 시 관제 기능 비활성
+    //  Phone group / role operations (dispatch_center.md §3·§8.1) — 테이블 부재 시 그 기능 비활성
     // ─────────────────────────────────────────────
 
-    /** dispatch_groups 테이블 존재(migrate_dispatch_groups.sql 적용) 여부 — Connect 시 프로브 */
-    bool HasDispatchTables() const {
-        return m_bHasDispatchTables;
+    /** phone_groups 테이블 존재(migrate_phone_groups_roles.sql 적용) 여부 — Connect 시 프로브 */
+    bool HasPhoneGroupTables() const {
+        return m_bHasPhoneGroupTables;
     }
-    /** 단일 관제 그룹(+멤버·감청 대상·PTT 청취 대상) 조회 */
-    bool SelectDispatchGroup( const std::string &strGroupId, CspDispatchGroup &clsGroup );
-    /** 전체 관제 그룹을 읽어 맵을 재구축한다 */
-    bool LoadAllDispatchGroups( CCspDispatchGroupMap &clsMap );
+    /** roles·role_assignments 테이블 존재 여부 — Connect 시 프로브 */
+    bool HasRoleTables() const {
+        return m_bHasRoleTables;
+    }
+    /** 단일 전화 그룹(+멤버) 조회 */
+    bool SelectPhoneGroup( const std::string &strGroupId, CspPhoneGroup &clsGroup );
+    /** 전체 전화 그룹을 읽어 맵을 재구축한다 */
+    bool LoadAllPhoneGroups( CCspPhoneGroupMap &clsMap );
+    /** 전체 역할 + user 배정(person → volte·ptt 전 회선으로 펼침) + 대상 목록을 읽어 맵을 재구축한다 */
+    bool LoadAllRoles( CCspRoleMap &clsMap );
 
     // ─────────────────────────────────────────────
     //  Call log operations
@@ -183,8 +190,10 @@ private:
     bool m_bHasAkaColumns = false;
     /** 픽업 그룹 컬럼(pickup_group — migrate_subscription_pickup_group.sql) 존재 여부 */
     bool m_bHasPickupColumn = false;
-    /** 관제 그룹 테이블(dispatch_groups — migrate_dispatch_groups.sql) 존재 여부 */
-    bool m_bHasDispatchTables = false;
+    /** 전화 그룹 테이블(phone_groups — migrate_phone_groups_roles.sql) 존재 여부 */
+    bool m_bHasPhoneGroupTables = false;
+    /** 역할 테이블(roles·role_assignments — migrate_phone_groups_roles.sql) 존재 여부 */
+    bool m_bHasRoleTables = false;
     /** 원격 청취 자격 컬럼(ptt_user_profile.allow_ambient_listening — migrate_ptt_ambient_listening.sql) 존재 여부 */
     bool m_bHasAmbientColumn = false;
     void ProbeSchema();

@@ -1033,6 +1033,11 @@ const cimsue_service_profile_t* CIMSUE_CALL cimsue_profile_service(const cimsue_
     return nullptr;
 }
 
+const cimsue_service_profile_t* CIMSUE_CALL cimsue_profile_phone_service(const cimsue_profile_t* profile) {
+    if (const cimsue_service_profile_t* s = cimsue_profile_service(profile, "voip")) return s;
+    return cimsue_profile_service(profile, "volte");
+}
+
 void CIMSUE_CALL cimsue_service_profile_to_account(const cimsue_service_profile_t* sp, const char* login_pw,
                                                    cimsue_account_config_t* out) {
     if (!out) return;

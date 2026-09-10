@@ -21,9 +21,10 @@
 #include "CallDir.h"
 #include "CallMap.h"
 #include "CmpClient.h"
-#include "CspDispatchGroup.h"
 #include "CspLocalNodeMap.h"
+#include "CspPhoneGroup.h"
 #include "CspPttGroup.h"
+#include "CspRole.h"
 #include "FmReporter.h"
 #include "RecordPath.h"
 #include "RtpMap.h"
@@ -239,29 +240,29 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
     std::string strListenGroup;
     bool bListenHidden = true;
     if ( bListen ) {
+        // 2단 인가 (§5.6): 자격 = TS 24.484 프로파일 allow_ambient_listening(역할 배정의 결과로 CSC 가 동기),
+        //   범위 = 청취자 회선의 역할 ptt_listen. strListenGroup 은 역할 id (감사 E-AUD-016 `role`).
         CspUserProfile clsListenProf;
         const int iProf = gclsDbManager.SelectUserProfile( pszCallerInfo, clsListenProf );
-        strListenGroup = gclsDispatchGroupMap.EffectiveGroupOf( pszCallerInfo );
+        strListenGroup = gclsRoleMap.RoleIdForLine( pszCallerInfo );
         std::string strDeny;
         if ( iProf != 1 || !clsListenProf.m_bAllowAmbientListening )
             strDeny = ( iProf < 0 ) ? "profile unavailable" : "allow_ambient_listening=0";
         else if ( clsGroup._isAdhoc ) {
-            // 즉석 세션(사설콜·애드혹)은 PTT 그룹이 아니라 사람 사이의 세션 — 범위 축은 ptt_listen 이 아닌 참가자의
-            //   monitor_scope(VoLTE 통화 Join 과 같은 규칙, §5.6a).
+            // 즉석 세션(사설콜·애드혹)은 PTT 그룹이 아니라 사람 사이의 세션 — 범위 축은 ptt_listen 이 아닌 참가자 전화
+            //   그룹에 대한 관측자 역할 monitor_call(VoLTE 통화 Join 과 같은 규칙, §5.6a).
             std::string strReason;
             if ( !CanObserveEphemeral( clsGroup, pszCallerInfo, strReason ) ) strDeny = "ephemeral " + strReason;
-        } else if ( !gclsDispatchGroupMap.CanListenPtt( strListenGroup, pszGroupId ) )
+        } else if ( !gclsRoleMap.CanListenPtt( pszCallerInfo, pszGroupId ) )
             strDeny = "ptt_listen scope";
         if ( !strDeny.empty() ) {
-            CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) listener(%s) dispatch_group(%s) denied (%s) → 403",
-                         pszGroupId, pszCallerInfo, strListenGroup.c_str(), strDeny.c_str() );
+            CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) listener(%s) role(%s) denied (%s) → 403", pszGroupId,
+                         pszCallerInfo, strListenGroup.c_str(), strDeny.c_str() );
             gclsUserAgent.StopCall( pszCallId, SIP_FORBIDDEN );
             EmitPttListenAudit( "denied", pszCallerInfo, strListenGroup, pszGroupId, "", -1 );
             return true;
         }
-        CspDispatchGroup clsListenDg;
-        if ( gclsDispatchGroupMap.Select( strListenGroup.c_str(), clsListenDg ) )
-            bListenHidden = ( clsListenDg.m_strListenVisibility != "visible" );
+        bListenHidden = gclsRoleMap.ListenHidden( pszCallerInfo );
         // 청취는 진행 중 세션에 합류하는 것이다 — 청취자가 세션을 개시(멤버 fan-out)하지 않는다. 상시 세션(chat)만
         // 예외.
         bool bHasSession;
@@ -636,7 +637,7 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         if ( !bListen || !bListenHidden ) SendConferenceNotify( pszGroupId, pszCallerInfo, "connected", "full" );
         if ( bListen ) {
             EmitPttListenAudit( "started", pszCallerInfo, strListenGroup, pszGroupId, strGroupSesId, -1 );
-            CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) listener(%s) dispatch_group(%s) joined recv_only (%s)",
+            CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) listener(%s) role(%s) joined recv_only (%s)",
                          pszGroupId, pszCallerInfo, strListenGroup.c_str(), bListenHidden ? "hidden" : "visible" );
             return true;  // 청취 합류는 fan-out 을 일으키지 않는다
         }
@@ -2065,10 +2066,10 @@ int CGroupCallService::CheckConferenceSubscribe( const std::string &strGroupId, 
     if ( bMember && clsGroup._allowConferenceState ) return 0;
     CspUserProfile clsProf;
     const int iProf = gclsDbManager.SelectUserProfile( strUserId.c_str(), clsProf );
-    const std::string strDg = gclsDispatchGroupMap.EffectiveGroupOf( strUserId.c_str() );
+    const std::string strDg = gclsRoleMap.RoleIdForLine( strUserId.c_str() );
     if ( iProf == 1 && clsProf.m_bAllowAmbientListening &&
-         gclsDispatchGroupMap.CanListenPtt( strDg, strGroupId.c_str() ) ) {
-        CLog::Print( LOG_INFO, "SUBSCRIBE conference: %s on group %s allowed by dispatch listen scope (%s)",
+         gclsRoleMap.CanListenPtt( strUserId.c_str(), strGroupId.c_str() ) ) {
+        CLog::Print( LOG_INFO, "SUBSCRIBE conference: %s on group %s allowed by role listen scope (%s)",
                      strUserId.c_str(), strGroupId.c_str(), strDg.c_str() );
         return 0;
     }
@@ -2085,8 +2086,8 @@ int CGroupCallService::CheckConferenceSubscribe( const std::string &strGroupId, 
 }
 
 // 즉석 세션 관측 인가 (dispatch_center.md §5.6a) — 사설콜·애드혹은 PTT 그룹이 아니라 사람 사이의 세션이라 범위 축은
-//   ptt_listen(그룹 목록)이 아닌 참가자의 관제 그룹 monitor_scope(VoLTE 통화 Join·dialog 감시와 같은 CanWatch)다.
-//   자격은 그룹콜 청취와 같은 allow_ambient_listening(TS 24.484). 참가자 자신은 항상 허용(자기 세션 로스터).
+//   ptt_listen(그룹 목록)이 아닌 "참가자 중 한 명의 전화 그룹이 관측자 역할 monitor_call 안"(VoLTE 통화 Join·dialog
+//   감시와 같은 CanWatch)다. 자격은 그룹콜 청취와 같은 allow_ambient_listening(TS 24.484). 참가자 자신은 항상 허용.
 bool CGroupCallService::CanObserveEphemeral( const CspPttGroup &clsGroup, const std::string &strUserId,
                                              std::string &strReason ) {
     for ( const auto &pUser : clsGroup._pusers )
@@ -2097,13 +2098,12 @@ bool CGroupCallService::CanObserveEphemeral( const CspPttGroup &clsGroup, const 
         strReason = ( iProf < 0 ) ? "profile unavailable" : ( iProf != 1 ) ? "no profile" : "allow_ambient_listening=0";
         return false;
     }
-    const std::string strDg = gclsDispatchGroupMap.EffectiveGroupOf( strUserId.c_str() );
     for ( const auto &pUser : clsGroup._pusers ) {
         if ( !pUser ) continue;
-        if ( gclsDispatchGroupMap.CanWatch( strDg, gclsDispatchGroupMap.EffectiveGroupOf( pUser->_id.c_str() ) ) )
+        if ( gclsRoleMap.CanWatch( strUserId.c_str(), gclsPhoneGroupMap.EffectiveGroupOf( pUser->_id.c_str() ) ) )
             return true;
     }
-    strReason = "monitor_scope (" + strDg + ")";
+    strReason = "monitor_call (role " + gclsRoleMap.RoleIdForLine( strUserId.c_str() ) + ")";
     return false;
 }
 
@@ -2189,15 +2189,16 @@ void CGroupCallService::CollectPttDialogs( const std::string &strAor, std::vecto
 }
 
 // dispatch_center.md §5.7 — PTT 그룹콜 청취 감사(E-AUD-016 call_monitored, tap_mode=ptt_listen). 시작/종료/거절 각 1건.
-//   target_a = PTT 그룹 id, target_b 없음(그룹 세션). 통화 감청(TAS Join)과 같은 이벤트 코드·필드 체계.
+//   target_a = PTT 그룹 id, target_b 없음(그룹 세션). 통화 감청(TAS Join)과 같은 이벤트 코드·필드 체계. role = 청취자
+//   역할.
 void CGroupCallService::EmitPttListenAudit( const char *pszPhase, const std::string &strMonitor,
-                                            const std::string &strDispatchGroup, const std::string &strPttGroup,
+                                            const std::string &strRole, const std::string &strPttGroup,
                                             const std::string &strSesId, int iDurMs ) {
     if ( !gclsFmReporter.IsEnabled() ) return;
     SimpleJson::JsonNode p;
     p.Set( "phase", pszPhase );
     p.Set( "monitor", strMonitor );
-    p.Set( "group", strDispatchGroup );
+    p.Set( "role", strRole );
     p.Set( "session", strPttGroup );
     if ( !strSesId.empty() ) p.Set( "sesid", strSesId );
     p.Set( "target_a", strPttGroup );

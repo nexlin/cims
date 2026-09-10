@@ -25,7 +25,8 @@
  * Hourly rotation: all files rotate together.
  *
  * Service classification:
- *   - SIP: domain in Request-URI/To → volte (IMS domain), ptt (PTT domain), else "system"
+ *   - SIP: domain in Request-URI/To → volte (전화 계열 — kind volte·voip 합산, CCspServiceMap::LogServiceOf),
+ *          ptt (PTT domain), else "system"
  *   - CMP: caller specifies ("volte" or "ptt")
  *   - CSC: always "system"
  *   - HEARTBEAT/OPTIONS: always "system"

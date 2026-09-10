@@ -604,6 +604,9 @@ function SvcBadge({ svc }: { svc: 'call' | 'ptt' }) {
 
 interface AddNum { id: string; imsi: string; svcCat: string; passwd: string; sip_transport: SipTransport | ''; auth_scheme: AuthScheme; k: string; opc: string; dnd: boolean; forward_id: string; pickup_group: string }
 
+// 전화 그룹 id(pg-…, 전환 전 발급 dg-… 유지 — dispatch_center.md §3.1) 에서 파생된 pickup_group 은 직접 편집 409(derived_from_phone_group)
+const isPhoneGroupId = (v: string | null | undefined) => /^(pg|dg)-/.test(v || '')
+
 // 인증 체계 (sip_access_security.md §8.2) — aka 는 K/OPc(hex32) 를 CSC AuC 가 암호화 보관, 보호 채널(TLS/IPsec) 강제.
 //   K/OPc 는 응답에 오지 않는다(aka_provisioned 로 보관 여부만) — 입력 시에만 전송, 전송하면 SQN 0 리셋.
 const HEX32 = /^[0-9a-fA-F]{32}$/
@@ -764,10 +767,10 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
                 </> : <AuthBadge sub={r.sub} />}</Td>
                 <Td className="text-center">{!isCall ? <span className="text-sm text-muted-foreground">—</span> : ed ? <Checkbox  checked={editForm.dnd || false} onCheckedChange={(c) => setEditForm({ ...editForm, dnd: (c === true) })} /> : (r.sub.dnd ? <Badge  variant="dangerSoft">ON</Badge> : <span className="text-sm text-muted-foreground">—</span>)}</Td>
                 <Td>{!isCall ? <span className="text-sm text-muted-foreground">—</span> : ed ? <Input  placeholder="대상" value={editForm.forward_id || ''} onChange={e => setEditForm({ ...editForm, forward_id: e.target.value })} /> : <span className="text-sm text-muted-foreground">{r.sub.forward_id || '—'}</span>}</Td>
-                <Td>{ed ? ((r.sub.pickup_group || '').startsWith('dg-')
-                    ? <Badge  variant="brandSoft" title="관제 그룹 멤버십에서 파생 — 관리 › 관제 그룹에서 변경">{r.sub.pickup_group}</Badge>
-                    : <Input  placeholder="예: control-room-1" title="자유 문자열 픽업 그룹 — 관제 그룹(대표번호·감청)은 관리 › 관제 그룹" value={editForm.pickup_group || ''} onChange={e => setEditForm({ ...editForm, pickup_group: e.target.value })} />)
-                  : <span className="text-sm text-muted-foreground" title={(r.sub.pickup_group || '').startsWith('dg-') ? '관제 그룹 (파생)' : undefined}>{r.sub.pickup_group || '—'}</span>}</Td>
+                <Td>{ed ? (isPhoneGroupId(r.sub.pickup_group)
+                    ? <Badge  variant="brandSoft" title="전화 그룹 멤버십에서 파생 (derived_from_phone_group) — 구성 › 전화 그룹에서 변경">{r.sub.pickup_group}</Badge>
+                    : <Input  placeholder="예: control-room-1" title="자유 문자열 픽업 그룹 — 전화 그룹(대표번호·당겨받기)은 구성 › 전화 그룹" value={editForm.pickup_group || ''} onChange={e => setEditForm({ ...editForm, pickup_group: e.target.value })} />)
+                  : <span className="text-sm text-muted-foreground" title={isPhoneGroupId(r.sub.pickup_group) ? '전화 그룹 (파생)' : undefined}>{r.sub.pickup_group || '—'}</span>}</Td>
                 <Td className="flex gap-1.5">
                   {!canWrite ? <span className="text-sm text-muted-foreground">—</span> : ed ? <>
                     <IconBtn title="저장" tone="primary" onClick={() => saveEdit(r)}><Check size={ICON} /></IconBtn>

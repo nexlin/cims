@@ -202,55 +202,94 @@ CREATE TABLE IF NOT EXISTS ptt_user_profile (
   COMMENT='사용자 MCPTT 프로파일 (SOS 대상 결정 모드·전용 긴급그룹·긴급 사설콜·개시 인가)';
 
 -- ─────────────────────────────────────────────
---  관제 그룹 (dispatch group) — 픽업 그룹+대표번호+감청 범위 (docs/design/features/dispatch_center.md)
---  volte_subscriptions.pickup_group 값 = dispatch_groups.id (CSC 가 멤버십에서 파생 갱신)
+--  전화 그룹 (phone group) — 픽업 그룹 + 대표번호: 유선 전화의 일반 기능 (docs/design/features/dispatch_center.md §3.1)
+--  *_subscriptions.pickup_group 값 = phone_groups.id (CSC 가 멤버십에서 파생 갱신)
+--  역할 (role) — 능력 + 범위: 콘솔 관리 권한과 관제 권한의 단일 모델 (docs/design/features/mcptt_authorization.md §2)
+--  기존 DB 의 dispatch_groups 계열 → sql/migrate_phone_groups_roles.sql 이 복사 후 DROP (같은 DDL·내장 4행 시드)
 -- ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS dispatch_groups (
-    id              VARCHAR(64)  NOT NULL COMMENT '불변 키 (CSC 발급 dg-xxxxxxxx) — pickup_group 값·상관 키',
+CREATE TABLE IF NOT EXISTS phone_groups (
+    id              VARCHAR(64)  NOT NULL COMMENT '불변 키 (CSC 발급 pg-xxxxxxxx; 전환 전 dg- 값 유지) — pickup_group 값·상관 키',
     name            VARCHAR(128) NOT NULL DEFAULT '' COMMENT '표시 이름',
     pilot_id        VARCHAR(64)           DEFAULT NULL COMMENT '대표번호(AoR user part). NULL=대표번호 없음',
-    service_ref     VARCHAR(64)           DEFAULT NULL COMMENT '대표번호 접속서비스 name',
+    service_ref     VARCHAR(64)           DEFAULT NULL COMMENT '대표번호 접속서비스 name (유선 VoIP)',
     alert_mode      ENUM('parallel','sequential') NOT NULL DEFAULT 'parallel' COMMENT 'TS 24.239 alerting mode',
-    no_answer_sec   INT          NOT NULL DEFAULT 30 COMMENT '전원 무응답 판정 초',
-    busy_members    ENUM('skip','alert') NOT NULL DEFAULT 'skip' COMMENT '통화 중 그룹원 호출 여부',
-    overflow_target VARCHAR(64)           DEFAULT NULL COMMENT '무응답 넘김 대상(대표번호/내선). NULL=480',
-    monitor_scope   ENUM('none','own','listed','all') NOT NULL DEFAULT 'none' COMMENT '합법감청(dialog 감시·Join) 범위',
-    ptt_listen      ENUM('none','listed','all')       NOT NULL DEFAULT 'none' COMMENT 'PTT 그룹콜 청취 범위',
-    listen_visibility ENUM('hidden','visible')        NOT NULL DEFAULT 'hidden' COMMENT 'PTT 청취 멤버 로스터 노출',
-    directory_admin ENUM('none','own','all')          NOT NULL DEFAULT 'none' COMMENT '관제 앱 조직/구성원/번호·PTT 그룹 관리 범위 (own=org_id 하위)',
-    org_id          INT                   DEFAULT NULL COMMENT '소속 조직 (콘솔 필터·RBAC 스코프 — directory_admin=own 의 루트)',
+    no_answer_sec   INT          NOT NULL DEFAULT 30,
+    busy_members    ENUM('skip','alert') NOT NULL DEFAULT 'skip',
+    overflow_target VARCHAR(64)           DEFAULT NULL COMMENT '무응답 넘김 대상(대표번호/가입 번호). NULL=480',
+    org_id          INT                   DEFAULT NULL,
     created_at      DATETIME              DEFAULT CURRENT_TIMESTAMP,
-    updated_at      DATETIME              DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY uk_dg_pilot (pilot_id),
-    KEY idx_dg_org (org_id),
-    CONSTRAINT fk_dg_org FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='관제 그룹 (픽업 그룹+대표번호+감청 범위)';
+    UNIQUE KEY uk_pilot (pilot_id),
+    CONSTRAINT fk_pg_org FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='전화 그룹';
 
-CREATE TABLE IF NOT EXISTS dispatch_group_members (
-    user_id     VARCHAR(64) NOT NULL COMMENT '가입자 id (volte_subscriptions.id) — 가입자당 그룹 하나',
-    group_id    VARCHAR(64) NOT NULL COMMENT 'dispatch_groups.id',
-    alert_order INT         NOT NULL DEFAULT 0 COMMENT 'sequential 호출 순서 (MaxForkTargets 절삭 순서)',
+CREATE TABLE IF NOT EXISTS phone_group_members (
+    user_id     VARCHAR(64) NOT NULL COMMENT '가입자(회선) id — 가입자당 그룹 하나',
+    group_id    VARCHAR(64) NOT NULL,
+    alert_order INT         NOT NULL DEFAULT 0 COMMENT 'sequential 호출 순서',
     PRIMARY KEY (user_id),
-    KEY idx_dgm_group (group_id),
-    CONSTRAINT fk_dgm_group FOREIGN KEY (group_id) REFERENCES dispatch_groups (id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='관제 그룹 멤버';
+    KEY idx_group (group_id),
+    CONSTRAINT fk_pgm_group FOREIGN KEY (group_id) REFERENCES phone_groups (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='전화 그룹 멤버';
 
-CREATE TABLE IF NOT EXISTS dispatch_group_monitor_targets (
-    group_id        VARCHAR(64) NOT NULL COMMENT '감청 주체 그룹',
-    target_group_id VARCHAR(64) NOT NULL COMMENT '감청 대상 그룹',
-    PRIMARY KEY (group_id, target_group_id),
-    CONSTRAINT fk_dgt_group  FOREIGN KEY (group_id)        REFERENCES dispatch_groups (id) ON DELETE CASCADE,
-    CONSTRAINT fk_dgt_target FOREIGN KEY (target_group_id) REFERENCES dispatch_groups (id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='monitor_scope=listed 대상';
+CREATE TABLE IF NOT EXISTS roles (
+    id                VARCHAR(64)  NOT NULL COMMENT '불변 키 — 내장 admin|manager|operator|monitor, 관제 role-xxxxxxxx',
+    name              VARCHAR(128) NOT NULL DEFAULT '',
+    builtin           TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '내장 프리셋(읽기 전용)',
+    authz_manage      TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '역할·배정·범위 관리 — 내장 admin/manager 만',
+    audit_read        TINYINT(1)   NOT NULL DEFAULT 0,
+    directory_write   ENUM('none','own','all') NOT NULL DEFAULT 'none' COMMENT '조직/구성원/번호/전화 그룹 관리 범위 (own=org_id 하위)',
+    directory_read    ENUM('none','own','all') NOT NULL DEFAULT 'none',
+    ptt_group_manage  ENUM('none','own','scope','all') NOT NULL DEFAULT 'none' COMMENT 'own=본인 소유, scope=directory_write 범위',
+    monitor_call      ENUM('none','own','listed','all') NOT NULL DEFAULT 'none' COMMENT '통화 감청·세션 관측·통화 이력/녹취 범위',
+    ptt_listen        ENUM('none','listed','all')       NOT NULL DEFAULT 'none' COMMENT 'PTT 청취·conference 구독·PTT 이력/녹취 범위',
+    listen_visibility ENUM('hidden','visible')          NOT NULL DEFAULT 'hidden' COMMENT 'PTT 청취 멤버 로스터 노출',
+    history_read      ENUM('none','scope','all')        NOT NULL DEFAULT 'none' COMMENT 'scope=monitor_call/ptt_listen 범위',
+    alarm_ack         TINYINT(1)   NOT NULL DEFAULT 0,
+    mcptt_control     TINYINT(1)   NOT NULL DEFAULT 0,
+    org_id            INT                   DEFAULT NULL COMMENT 'own 범위의 루트',
+    created_at        DATETIME              DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    CONSTRAINT fk_role_org FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='역할';
 
-CREATE TABLE IF NOT EXISTS dispatch_group_ptt_targets (
-    group_id     VARCHAR(64) NOT NULL COMMENT '청취 주체 관제 그룹',
+CREATE TABLE IF NOT EXISTS role_assignments (
+    principal_type ENUM('console','user') NOT NULL COMMENT 'console=OAM 콘솔 계정(login_id), user=가입자 person(users.id)',
+    principal_id   VARCHAR(64) NOT NULL,
+    role_id        VARCHAR(64) NOT NULL,
+    PRIMARY KEY (principal_type, principal_id),
+    KEY idx_role (role_id),
+    CONSTRAINT fk_ra_role FOREIGN KEY (role_id) REFERENCES roles (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='역할 배정 (사람당 하나)';
+
+CREATE TABLE IF NOT EXISTS role_monitor_targets (
+    role_id        VARCHAR(64) NOT NULL,
+    phone_group_id VARCHAR(64) NOT NULL,
+    PRIMARY KEY (role_id, phone_group_id),
+    CONSTRAINT fk_rmt_role FOREIGN KEY (role_id)        REFERENCES roles (id)        ON DELETE CASCADE,
+    CONSTRAINT fk_rmt_pg   FOREIGN KEY (phone_group_id) REFERENCES phone_groups (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='monitor_call=listed 대상';
+
+CREATE TABLE IF NOT EXISTS role_ptt_targets (
+    role_id      VARCHAR(64) NOT NULL,
     ptt_group_id BIGINT      NOT NULL COMMENT 'ptt_groups.id (surrogate)',
-    PRIMARY KEY (group_id, ptt_group_id),
-    CONSTRAINT fk_dgp_group FOREIGN KEY (group_id)     REFERENCES dispatch_groups (id) ON DELETE CASCADE,
-    CONSTRAINT fk_dgp_ptt   FOREIGN KEY (ptt_group_id) REFERENCES ptt_groups (id)      ON DELETE CASCADE
+    PRIMARY KEY (role_id, ptt_group_id),
+    CONSTRAINT fk_rpt_role FOREIGN KEY (role_id)      REFERENCES roles (id)      ON DELETE CASCADE,
+    CONSTRAINT fk_rpt_ptt  FOREIGN KEY (ptt_group_id) REFERENCES ptt_groups (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ptt_listen=listed 대상';
+
+-- 내장 프리셋 4행 (mcptt_authorization.md §3 매트릭스) — 항상 존재, 값은 코드가 정본
+INSERT INTO roles (id, name, builtin, authz_manage, audit_read, directory_write, directory_read, ptt_group_manage,
+                   monitor_call, ptt_listen, listen_visibility, history_read, alarm_ack, mcptt_control) VALUES
+    ('admin',    '관리자',      1, 1, 1, 'all',  'all', 'all',  'none', 'none', 'hidden', 'all', 1, 1),
+    ('manager',  '운영 관리자', 1, 1, 1, 'all',  'all', 'all',  'none', 'none', 'hidden', 'all', 1, 1),
+    ('operator', '운용자',      1, 0, 0, 'none', 'all', 'own',  'none', 'none', 'hidden', 'all', 1, 1),
+    ('monitor',  '모니터',      1, 0, 0, 'none', 'all', 'none', 'none', 'none', 'hidden', 'all', 0, 0)
+ON DUPLICATE KEY UPDATE
+    name = VALUES(name), builtin = 1, authz_manage = VALUES(authz_manage), audit_read = VALUES(audit_read),
+    directory_write = VALUES(directory_write), directory_read = VALUES(directory_read), ptt_group_manage = VALUES(ptt_group_manage),
+    monitor_call = VALUES(monitor_call), ptt_listen = VALUES(ptt_listen), listen_visibility = VALUES(listen_visibility),
+    history_read = VALUES(history_read), alarm_ack = VALUES(alarm_ack), mcptt_control = VALUES(mcptt_control);
 
 -- ─────────────────────────────────────────────
 --  MCPTT 시스템 서비스 설정 (TS 24.484 service-config — 시스템 전역 1건)

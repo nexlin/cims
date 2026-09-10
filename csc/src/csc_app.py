@@ -104,9 +104,10 @@ if __name__ == '__main__':
     from services.mcptt import load_shared_data, apply_config, CSC_HANDLER_LIST, notify_csp
     from services       import logger as csc_logger
     from services       import admin_auth
+    from services       import authz            # 단일 권한 판정 can() — roles 행 캐시 (mcptt_authorization.md §2.3)
     from handlers.admin          import CIMS_ADMIN_HANDLER_LIST
     from handlers.org            import CIMS_ORG_HANDLER_LIST
-    from handlers.dispatch       import CIMS_DISPATCH_HANDLER_LIST   # 관제 그룹 (dispatch_center.md §8.2)
+    from handlers.dispatch       import CIMS_DISPATCH_HANDLER_LIST   # 전화 그룹·역할 (dispatch_center.md §8.2, mcptt_authorization.md)
     # 관제 앱(가입자 PKCE 토큰) 주체 관리 평면 — MCPTT 서버(4430)에 붙는다: 조직/구성원/번호·PTT 그룹 관리(dispatch_center.md §3.4),
     #   녹취 조회·재생(범위 게이트 + oam-svc 프록시, §5.6a).
     from handlers.dispatch_directory  import CSC_DIRECTORY_ADMIN_HANDLER_LIST
@@ -127,6 +128,7 @@ if __name__ == '__main__':
 
         config = load_config()
         admin_auth.init(config)
+        authz.init(config)
         _auc.init(config)
 
         # ── SIGUSR1 = 배포 config reload (agent job_update_config 규약) ──
@@ -143,6 +145,7 @@ if __name__ == '__main__':
                     from services import config_reload as _cr
                     kept = _cr.apply_reload(config, newc)
                     admin_auth.init(config)
+                    authz.init(config)
                     _auc.init(config)
                     apply_config(config)
                     logger.log_info(f'[reload] SIGUSR1 — config 재적용 ({kept}건 런타임 보존) '

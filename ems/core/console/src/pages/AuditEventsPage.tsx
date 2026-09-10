@@ -26,7 +26,8 @@ const FETCH_LIMIT = 5000
 interface MonitoredParams {
   phase?: string        // started | ended | denied
   monitor?: string      // 감청자(관제사) id
-  group?: string        // 관제 그룹 id
+  role?: string         // 감청자 역할 id (dispatch_center.md §5.7)
+  group?: string        // 전환 전 이벤트의 관제 그룹 id (role 없을 때 표시)
   session?: string      // relay session_id(통화) / PTT 그룹 id(청취)
   sesid?: string
   target_a?: string
@@ -82,7 +83,7 @@ export function AuditEventsSection() {
       const p = (e.params || {}) as MonitoredParams
       if (filterType && e.type !== filterType) return false
       if (filterPhase && p.phase !== filterPhase) return false
-      if (needle && ![e.code, e.type, e.message, p.monitor, p.group, p.session, p.target_a, p.target_b,
+      if (needle && ![e.code, e.type, e.message, p.monitor, p.role, p.group, p.session, p.target_a, p.target_b,
                       e.source?.mo_instance]
         .some(v => (v || '').toString().toLowerCase().includes(needle))) return false
       return true
@@ -94,10 +95,10 @@ export function AuditEventsSection() {
 
   const exportCsv = () => {
     downloadCsv(`audit_${days}d.csv`,
-      ['시각', '코드', '유형', '단계', '행위자', '관제 그룹', '세션', '대상', '방식', '시간(ms)', '메시지'],
+      ['시각', '코드', '유형', '단계', '행위자', '역할', '세션', '대상', '방식', '시간(ms)', '메시지'],
       filtered.map(e => {
         const p = (e.params || {}) as MonitoredParams
-        return [e.ts, e.code || '', e.type, p.phase || '', p.monitor || '', p.group || '', p.session || '',
+        return [e.ts, e.code || '', e.type, p.phase || '', p.monitor || '', p.role || p.group || '', p.session || '',
                 [p.target_a, p.target_b].filter(Boolean).join('/'), p.tap_mode || '',
                 p.dur_ms != null ? String(p.dur_ms) : '', e.message]
       }))
@@ -157,7 +158,7 @@ export function AuditEventsSection() {
                   <Th className="w-[130px]">유형</Th>
                   <Th className="w-[70px]">단계</Th>
                   <Th className="w-[150px]">행위자(감청자)</Th>
-                  <Th className="w-[130px]">관제 그룹</Th>
+                  <Th className="w-[130px]">역할</Th>
                   <Th className="w-[170px]">세션</Th>
                   <Th className="w-[200px]">대상</Th>
                   <Th className="w-[120px]">방식</Th>
@@ -177,7 +178,7 @@ export function AuditEventsSection() {
                         ? <Badge variant={PHASE_BADGE[p.phase] || 'neutralSoft'} >{PHASE_LABEL[p.phase] || p.phase}</Badge>
                         : '-'}</Td>
                       <Td><code className="text-xs">{p.monitor || '-'}</code></Td>
-                      <Td><code className="text-xs">{p.group || '-'}</code></Td>
+                      <Td><code className="text-xs">{p.role || p.group || '-'}</code></Td>
                       <Td><code className="text-xs" title={p.sesid}>{p.session || '-'}</code></Td>
                       <Td><code className="text-xs">{targets || '-'}</code></Td>
                       <Td>{p.tap_mode ? (TAP_LABEL[p.tap_mode] || p.tap_mode) : '-'}</Td>

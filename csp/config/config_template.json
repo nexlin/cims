@@ -132,15 +132,6 @@
       "description": "VoLTE B2BUA 및 부가 서비스(당겨받기/착신거부/DND) 정책. 역할 토글은 Roles.TAS.",
       "fields": [
         {
-          "key": "Setup.Sip.CallPickupId",
-          "label": "Call Pickup ID (당겨받기 — 폐기 예정)",
-          "type": "string",
-          "default": "**",
-          "restart": false,
-          "reload_hint": "SIGUSR1 로 재로드. 다음 INVITE 부터 적용.",
-          "help": "당겨받기 코드의 정본은 접속서비스별 pickup_feature_code (volte_supplementary_services.md §5.2). 이 전역 키는 그 필드가 없는 레거시 서비스 레코드의 폴백으로만 쓰이며 폐기 예정."
-        },
-        {
           "key": "Setup.Sip.StaleCallTimeout",
           "label": "Stale Call Timeout (s)",
           "type": "int",
@@ -210,7 +201,10 @@
           "key": "Setup.Sip.SessionTimer.Refresher",
           "label": "갱신 주체",
           "type": "enum",
-          "values": [ "server", "ue" ],
+          "values": [
+            "server",
+            "ue"
+          ],
           "default": "server",
           "restart": true,
           "help": "server = 서버가 주기 re-INVITE(단말 지원 무관하게 감지). ue = 단말이 갱신, 서버는 만료 감시만."
@@ -301,10 +295,16 @@
             ]
           },
           "default": [
-            { "ip": "127.0.0.1", "port": 9000 }
+            {
+              "ip": "127.0.0.1",
+              "port": 9000
+            }
           ],
           "deploy_value": [
-            { "ip": "@CMP_IP@", "port": 9000 }
+            {
+              "ip": "@CMP_IP@",
+              "port": 9000
+            }
           ]
         },
         {
@@ -343,12 +343,50 @@
           "restart": true,
           "item_schema": {
             "fields": [
-              { "key": "Name", "label": "코덱명 (rtpmap encoding)", "type": "string", "required": true, "help": "예: AMR-WB, PCMA, telephone-event (DTMF 슬롯)" },
-              { "key": "Pt", "label": "Payload Type", "type": "int", "required": true, "min": 0, "max": 127, "help": "정적 코덱=RFC 3551 고정 번호(0~34), 동적 코덱=96~127" },
-              { "key": "Clock", "label": "Clock rate", "type": "int", "default": 8000, "help": "예: AMR-WB=16000" },
-              { "key": "Channels", "label": "채널 수", "type": "int", "default": 0, "help": "0=rtpmap 에 채널 미표기" },
-              { "key": "Fmtp", "label": "fmtp", "type": "string", "default": "", "help": "예: octet-align=1 (비면 미출력)" },
-              { "key": "Ptime", "label": "ptime (ms)", "type": "int", "default": 0, "help": "0=미출력" }
+              {
+                "key": "Name",
+                "label": "코덱명 (rtpmap encoding)",
+                "type": "string",
+                "required": true,
+                "help": "예: AMR-WB, PCMA, telephone-event (DTMF 슬롯)"
+              },
+              {
+                "key": "Pt",
+                "label": "Payload Type",
+                "type": "int",
+                "required": true,
+                "min": 0,
+                "max": 127,
+                "help": "정적 코덱=RFC 3551 고정 번호(0~34), 동적 코덱=96~127"
+              },
+              {
+                "key": "Clock",
+                "label": "Clock rate",
+                "type": "int",
+                "default": 8000,
+                "help": "예: AMR-WB=16000"
+              },
+              {
+                "key": "Channels",
+                "label": "채널 수",
+                "type": "int",
+                "default": 0,
+                "help": "0=rtpmap 에 채널 미표기"
+              },
+              {
+                "key": "Fmtp",
+                "label": "fmtp",
+                "type": "string",
+                "default": "",
+                "help": "예: octet-align=1 (비면 미출력)"
+              },
+              {
+                "key": "Ptime",
+                "label": "ptime (ms)",
+                "type": "int",
+                "default": 0,
+                "help": "0=미출력"
+              }
             ]
           },
           "help": "비우면 내장 기본 테이블 사용. 예: [{\"Name\":\"AMR-WB\",\"Pt\":96,\"Clock\":16000,\"Channels\":1,\"Fmtp\":\"octet-align=1\",\"Ptime\":20},{\"Name\":\"PCMA\",\"Pt\":8},{\"Name\":\"telephone-event\",\"Pt\":101,\"Fmtp\":\"0-15\"}]"
@@ -937,14 +975,24 @@
           "help": "DB 가 SOT. 이 폴더는 DB 미연결 시 fallback."
         },
         {
-          "key": "Setup.DataFolder.DispatchGroup",
-          "label": "관제 그룹 데이터 폴더",
+          "key": "Setup.DataFolder.PhoneGroup",
+          "label": "전화 그룹 데이터 폴더",
           "group": "data_folder",
           "type": "path",
-          "default": "dispatch_group",
+          "default": "phone_group",
           "hidden": true,
           "restart": true,
-          "help": "DB 가 SOT(dispatch_groups). dispatch_groups 테이블 미적용·DB 미연결 시 <id>.json fallback (dispatch_center.md §3.3)."
+          "help": "DB 가 SOT(phone_groups). 테이블 미적용·DB 미연결 시 <id>.json fallback (dispatch_center.md §3.5)."
+        },
+        {
+          "key": "Setup.DataFolder.Role",
+          "label": "역할 데이터 폴더",
+          "group": "data_folder",
+          "type": "path",
+          "default": "role",
+          "hidden": true,
+          "restart": true,
+          "help": "DB 가 SOT(roles·role_assignments). 테이블 미적용·DB 미연결 시 <id>.json fallback (dispatch_center.md §3.5)."
         },
         {
           "key": "Setup.ServiceLogging.Enable",
@@ -2054,10 +2102,12 @@
             "type": "enum",
             "options": [
               "volte",
+              "voip",
               "ptt"
             ],
             "default": "volte",
-            "required": true
+            "required": true,
+            "help": "접속환경 클래스 — volte=이동 VoLTE(스마트폰 앱, USIM/AKA 또는 Digest, 공중망 NAT) / voip=유선 VoIP(데스크폰·소프트폰·관제 앱, Digest 전용·TLS·사내망 — 피처코드·대표번호·PBX 급 보조서비스는 여기) / ptt=MCPTT. volte 와 voip 는 CSP 가 같은 전화 경로로 다룬다. docs/design/features/sip_service_model.md §2-9"
           },
           {
             "key": "domain",

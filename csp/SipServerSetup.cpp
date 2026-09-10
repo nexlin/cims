@@ -267,7 +267,6 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if ( sip.Has( "TcpRecvTimeout" ) ) m_iTcpRecvTimeout = (int)sip.GetInt( "TcpRecvTimeout" );
                 if ( sip.Has( "TlsAcceptTimeout" ) ) m_iTlsAcceptTimeout = (int)sip.GetInt( "TlsAcceptTimeout" );
                 if ( sip.Has( "MinRegisterTimeout" ) ) m_iMinRegisterTimeout = (int)sip.GetInt( "MinRegisterTimeout" );
-                if ( sip.Has( "CallPickupId" ) ) m_strCallPickupId = sip.GetString( "CallPickupId" );
                 if ( sip.Has( "StackExecutePeriod" ) ) m_iStackExecutePeriod = (int)sip.GetInt( "StackExecutePeriod" );
                 if ( sip.Has( "UserTimeout" ) ) m_iUserTimeout = (int)sip.GetInt( "UserTimeout" );
                 if ( sip.Has( "StaleCallTimeout" ) ) m_iStaleCallTimeout = (int)sip.GetInt( "StaleCallTimeout" );
@@ -508,8 +507,8 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 SimpleJson::JsonNode dataDir = setup.Get( "DataFolder" );
                 if ( dataDir.Has( "User" ) ) m_strUserDataFolder = dataDir.GetString( "User" );
                 if ( dataDir.Has( "Group" ) ) m_strGroupDataFolder = dataDir.GetString( "Group" );
-                if ( dataDir.Has( "DispatchGroup" ) )
-                    m_strDispatchGroupDataFolder = dataDir.GetString( "DispatchGroup" );
+                if ( dataDir.Has( "PhoneGroup" ) ) m_strPhoneGroupDataFolder = dataDir.GetString( "PhoneGroup" );
+                if ( dataDir.Has( "Role" ) ) m_strRoleDataFolder = dataDir.GetString( "Role" );
                 // G10 (2026-04-23): DataFolder.SipServer 제거 — SipServerMap legacy 제거와 동반.
             }
 
@@ -781,20 +780,6 @@ bool CSipServerSetup::Read( CXmlElement &clsXml ) {
     }
 
     return true;
-}
-
-/**
- * @ingroup CspServer
- * @brief 입력된 아이디가 Call PickUp 아이디인지 검사한다.
- * @param pszId 아이디
- * @returns 입력된 아이디가 Call PickUp 아이디이면 true 를 리턴하고 그렇지 않으면 false 를 리턴한다.
- */
-bool CSipServerSetup::IsCallPickupId( const char *pszId ) {
-    if ( m_strCallPickupId.empty() ) return false;
-
-    if ( !strcmp( m_strCallPickupId.c_str(), pszId ) ) return true;
-
-    return false;
 }
 
 /**

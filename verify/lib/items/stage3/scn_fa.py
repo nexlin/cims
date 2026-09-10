@@ -4,10 +4,11 @@
 A 와 연결되며(RELAY_MODIFY peer1) 나머지는 CANCEL 된다. 무응답이면 `no_answer_sec` 뒤 `overflow_target`
 으로 1단계 재시도, 없으면 480.
 
-픽스처: 같은 org VOIP 가입자 4명(A=발신, B·C=그룹원, D=overflow 내선)으로 관제 그룹 `dg-vfy-<org>`
+픽스처: 같은 org VOIP 가입자 4명(A=발신, B·C=그룹원, D=overflow 내선)으로 전화 그룹 `pg-verify-a`
 (pilot `7<org 뒷 3자리>…`, no_answer_sec=8, overflow=D) 를 **DB 에 직접 시드**하고 CSP 에
-DISPATCH_GROUP_CHANGED 를 보낸다(멤버 pickup_group 도 그룹 id 로 파생, 종료 시 자기복원).
-`dispatch_groups` 테이블 미적용 DB(migrate_dispatch_groups.sql) 면 SKIP.
+PHONE_GROUP_CHANGED 를 보낸다(멤버 pickup_group 도 그룹 id 로 파생, 종료 시 자기복원 — `_dispatch_common`).
+역할은 쓰지 않는다 — 대표번호 호출·지정 픽업·그룹원 BLF(F7) 는 전화 그룹 축(CanWatch 규칙 1)만으로 성립한다.
+전환 전 스키마(`dispatch_groups`)면 같은 의미를 관제 그룹으로 시드하고, 둘 다 없는 DB 면 SKIP.
 
 검사 (판정 정본 = 4단말 누적 수신 RTP delta + A 의 최종 응답 `hunt_status` + 그룹원별 `*_invites`):
   F1 병렬 호출·응답 — A→pilot, B(ring-hold)·C 링, C 응답 → A·C 미디어, B 무흐름, B_invites=C_invites=1,
@@ -26,17 +27,15 @@ from __future__ import annotations
 
 import os
 import re
-import time
 
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 from ...common.cspsim import run_cspsim
-from ...common import db as _db
-from ...common.csp_notify import notify_csp_event
 from ._xfer_common import (
     select_same_org, trio_cred_args, parse_marker_int,
-    VOLTE_DOMAIN, VOLTE_TABLE, FLOW_MIN, DROP_MAX, fmt_checks, emit_checks, notify_user_changed,
+    VOLTE_DOMAIN, FLOW_MIN, DROP_MAX, fmt_checks, emit_checks,
 )
+from ._dispatch_common import DispatchFixture
 
 _RID = "S3-SCN-FA"
 _RNAME = "대표번호 병렬 호출 (관제 그룹 pilot — 포크·승자·CANCEL·무응답 overflow)"
@@ -93,100 +92,6 @@ def _parse_marker_str(text: str, key: str):
     return last
 
 
-def _has_table(db_cfg: dict, table: str) -> bool:
-    conn = _db.connect(db_cfg)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SHOW TABLES LIKE %s", (table,))
-            return cur.fetchone() is not None
-    finally:
-        conn.close()
-
-
-class DispatchGroupFixture:
-    """관제 그룹 1개 시드(+멤버 pickup_group 파생) + 자기복원. 테이블 부재면 active=False."""
-
-    def __init__(self, dist_dir: str, csp_ip: str, group_id: str, pilot: str, members: list, overflow: str,
-                 no_answer_sec: int = 8, alert_mode: str = "parallel", ptt_listen: str = "none",
-                 listen_visibility: str = "hidden"):
-        self.db_cfg = _db.csp_db_config(dist_dir)
-        self.csp_ip = csp_ip
-        self.group_id = group_id
-        self.pilot = pilot
-        self.members = list(members)
-        self.overflow = overflow
-        self.no_answer_sec = no_answer_sec
-        self.alert_mode = alert_mode
-        self.ptt_listen = ptt_listen
-        self.listen_visibility = listen_visibility
-        self.active = False
-        self.reason = ""
-        self._orig_pickup: dict = {}
-        self._orig_member: dict = {}
-
-    def __enter__(self):
-        try:
-            if not _has_table(self.db_cfg, "dispatch_groups"):
-                self.reason = "dispatch_groups 테이블 부재 (migrate_dispatch_groups.sql 미적용)"
-                return self
-        except Exception as e:
-            self.reason = f"DB 확인 실패: {type(e).__name__}"
-            return self
-        conn = _db.connect(self.db_cfg)
-        try:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM dispatch_groups WHERE id=%s", (self.group_id,))
-                cur.execute(
-                    "INSERT INTO dispatch_groups (id, name, pilot_id, service_ref, alert_mode, no_answer_sec, "
-                    "busy_members, overflow_target, monitor_scope, ptt_listen, listen_visibility) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,'skip',%s,'none',%s,%s)",
-                    (self.group_id, f"verify {self.group_id}", self.pilot or None,
-                     "volte" if self.pilot else None, self.alert_mode, self.no_answer_sec, self.overflow or None,
-                     self.ptt_listen, self.listen_visibility))
-                for i, user in enumerate(self.members):
-                    cur.execute("SELECT group_id FROM dispatch_group_members WHERE user_id=%s", (user,))
-                    r = cur.fetchone()
-                    self._orig_member[user] = (r[0] if isinstance(r, tuple) else (r or {}).get("group_id")) if r else None
-                    cur.execute("INSERT INTO dispatch_group_members (user_id, group_id, alert_order) VALUES (%s,%s,%s) "
-                                "ON DUPLICATE KEY UPDATE group_id=VALUES(group_id), alert_order=VALUES(alert_order)",
-                                (user, self.group_id, i))
-                    cur.execute(f"SELECT pickup_group FROM {VOLTE_TABLE} WHERE id=%s", (user,))
-                    r = cur.fetchone()
-                    self._orig_pickup[user] = (r[0] if isinstance(r, tuple) else (r or {}).get("pickup_group")) if r else None
-                    cur.execute(f"UPDATE {VOLTE_TABLE} SET pickup_group=%s WHERE id=%s", (self.group_id, user))
-        finally:
-            conn.close()
-        notify_csp_event("DISPATCH_GROUP_CHANGED", uri=self.group_id, action="POST", ip=self.csp_ip)
-        for user in self.members:
-            notify_user_changed(self.csp_ip, user)
-        self.active = True
-        time.sleep(0.5)
-        return self
-
-    def __exit__(self, *exc):
-        if not self.active:
-            return False
-        try:
-            conn = _db.connect(self.db_cfg)
-            try:
-                with conn.cursor() as cur:
-                    cur.execute("DELETE FROM dispatch_groups WHERE id=%s", (self.group_id,))  # 멤버 행 CASCADE
-                    for user, grp in self._orig_member.items():
-                        if grp:
-                            cur.execute("INSERT IGNORE INTO dispatch_group_members (user_id, group_id) VALUES (%s,%s)",
-                                        (user, grp))
-                    for user, pg in self._orig_pickup.items():
-                        cur.execute(f"UPDATE {VOLTE_TABLE} SET pickup_group=%s WHERE id=%s", (pg, user))
-            finally:
-                conn.close()
-            notify_csp_event("DISPATCH_GROUP_CHANGED", uri=self.group_id, action="DELETE", ip=self.csp_ip)
-            for user in self.members:
-                notify_user_changed(self.csp_ip, user)
-        except Exception:
-            pass
-        return False
-
-
 @verify_item(
     id=_RID,
     stage=3, category="시나리오",
@@ -209,7 +114,7 @@ def flexible_alerting(ctx: VerifyContext) -> ItemResult:
         return done(ItemStatus.SKIP, "같은 org VOIP 4명 미확보")
     A, B, C, D = creds
     media_dir = os.path.join(ctx.repo_root, "tests", "media")
-    group_id = f"dg-vfy-{org}"
+    group_id = "pg-verify-a"
     pilot = f"7{str(org)[-3:].zfill(3)}0"  # 가입 id(E.164 +…)와 겹치지 않는 짧은 내선형 대표번호
     ctx.w(f"- 단말 org={org} A={A['user']} B={B['user']} C={C['user']} D={D['user']} pilot={pilot} group={group_id}")
 
@@ -233,10 +138,12 @@ def flexible_alerting(ctx: VerifyContext) -> ItemResult:
         return "RTP delta 미출력" if d is None else f"recv A=+{d[0]} B=+{d[1]} C=+{d[2]} D=+{d[3]}"
 
     checks = []
-    with DispatchGroupFixture(ctx.dist_dir, ctx.sim_ip, group_id, pilot, [B["user"], C["user"]], D["user"]) as fx:
+    with DispatchFixture(ctx.dist_dir, ctx.sim_ip, group_id, pilot=pilot, members=[B["user"], C["user"]],
+                         overflow=D["user"]) as fx:
         if not fx.active:
             ctx.w(f"- [SKIP] {fx.reason}")
             return done(ItemStatus.SKIP, fx.reason)
+        ctx.w(f"- 시드 스키마={fx.schema} (전화 그룹 {group_id}, 역할 없음)")
 
         # ── F1: 병렬 호출 — B ring-hold, C 응답 ──
         rc, d, st, tail = run("fa_f1", noanswer=False)
@@ -258,7 +165,8 @@ def flexible_alerting(ctx: VerifyContext) -> ItemResult:
         checks.append(("F4 통화 중 그룹원 제외(busy_members=skip)", None, "후속 — cspsim 사전 통화 구성 필요"))
 
     # ── F5: 대표번호 링잉 호 지정 픽업 — B·C·D 그룹원 전원 ring-hold, D 가 **<pilot> ──
-    with DispatchGroupFixture(ctx.dist_dir, ctx.sim_ip, group_id, pilot, [B["user"], C["user"], D["user"]], "") as fx5:
+    with DispatchFixture(ctx.dist_dir, ctx.sim_ip, group_id, pilot=pilot,
+                         members=[B["user"], C["user"], D["user"]]) as fx5:
         if fx5.active:
             rc, d, st, tail = run("fa_f5", noanswer=False, pickup=True)
             pk = parse_marker_int(tail, "pickup_status")
@@ -270,8 +178,8 @@ def flexible_alerting(ctx: VerifyContext) -> ItemResult:
 
     # ── F6: sequential alerting — B(순번 0, ring-hold) 단계 시한 뒤 C(순번 1) 링·응답 ──
     seq_step = 4
-    with DispatchGroupFixture(ctx.dist_dir, ctx.sim_ip, group_id, pilot, [B["user"], C["user"]], "",
-                              no_answer_sec=seq_step, alert_mode="sequential") as fx6:
+    with DispatchFixture(ctx.dist_dir, ctx.sim_ip, group_id, pilot=pilot, members=[B["user"], C["user"]],
+                         no_answer_sec=seq_step, alert_mode="sequential") as fx6:
         if fx6.active:
             rc, d, st, tail = run("fa_f6", noanswer=False)
             b_inv, c_inv = parse_marker_int(tail, "B_invites"), parse_marker_int(tail, "C_invites")
@@ -286,7 +194,8 @@ def flexible_alerting(ctx: VerifyContext) -> ItemResult:
 
     # ── F7: dialog 이벤트 정합 — 그룹원 B 가 pilot·A·C 감시, C 응답 뒤 A(발신자) 선종료(A-leg BYE) ──
     #   A 도 멤버로 넣어 B 가 A 를 감시할 수 있게 한다(발신자는 포크 대상에서 제외되므로 B·C 만 울린다).
-    with DispatchGroupFixture(ctx.dist_dir, ctx.sim_ip, group_id, pilot, [A["user"], B["user"], C["user"]], "") as fx7:
+    with DispatchFixture(ctx.dist_dir, ctx.sim_ip, group_id, pilot=pilot,
+                         members=[A["user"], B["user"], C["user"]]) as fx7:
         if fx7.active:
             rc, d, st, tail = run("fa_f7", noanswer=False, watch=True)
             sub_ok = parse_marker_int(tail, "dlg_sub_ok")

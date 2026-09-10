@@ -11,8 +11,9 @@
 #include <cstring>
 #include <ctime>
 
-#include "CspDispatchGroup.h"
+#include "CspPhoneGroup.h"
 #include "CspPttGroup.h"
+#include "CspRole.h"
 #include "CspUser.h"
 #include "GroupMap.h"
 #include "Log.h"
@@ -110,15 +111,23 @@ void CDbManager::ProbeSchema() {
         CLog::Print( LOG_INFO,
                      "[DB] subscriptions.pickup_group column absent — migrate_subscription_pickup_group.sql 미적용. "
                      "당겨받기 그룹은 전원 org_id 폴백" );
-    // 관제 그룹 (dispatch_groups — dispatch_center.md §8.1). 미적용이면 대표번호·감청 범위 판정 전체 비활성 (INFO —
-    // 선택 기능).
-    pRes = ExecuteSelect( "SHOW TABLES LIKE 'dispatch_groups'" );
-    m_bHasDispatchTables = pRes && mysql_num_rows( pRes ) > 0;
+    // 전화 그룹 (phone_groups — dispatch_center.md §8.1). 미적용이면 대표번호 병렬 호출·픽업 축 비활성 (INFO — 선택
+    // 기능).
+    pRes = ExecuteSelect( "SHOW TABLES LIKE 'phone_groups'" );
+    m_bHasPhoneGroupTables = pRes && mysql_num_rows( pRes ) > 0;
     if ( pRes ) mysql_free_result( pRes );
-    if ( !m_bHasDispatchTables )
+    if ( !m_bHasPhoneGroupTables )
         CLog::Print( LOG_INFO,
-                     "[DB] dispatch_groups table absent — migrate_dispatch_groups.sql 미적용. 관제 그룹(대표번호 병렬 "
-                     "호출·감청 범위) 비활성 — 당겨받기는 pickup_group 축으로 계속 동작" );
+                     "[DB] phone_groups table absent — migrate_phone_groups_roles.sql 미적용. 전화 그룹(대표번호 병렬 "
+                     "호출) 비활성 — 당겨받기는 pickup_group 축으로 계속 동작" );
+    // 역할 (roles·role_assignments — mcptt_authorization.md §2). 미적용이면 감청·청취 범위 전원 없음.
+    pRes = ExecuteSelect( "SHOW TABLES LIKE 'role_assignments'" );
+    m_bHasRoleTables = pRes && mysql_num_rows( pRes ) > 0;
+    if ( pRes ) mysql_free_result( pRes );
+    if ( !m_bHasRoleTables )
+        CLog::Print( LOG_INFO,
+                     "[DB] role_assignments table absent — migrate_phone_groups_roles.sql 미적용. 감청·PTT 청취 범위 "
+                     "비활성(같은 전화 그룹 BLF 만)" );
     // 원격 청취 자격 (ptt_user_profile.allow_ambient_listening — dispatch_center.md §5.6). 미적용이면 전원 자격 없음.
     pRes = ExecuteSelect( "SHOW COLUMNS FROM ptt_user_profile LIKE 'allow_ambient_listening'" );
     m_bHasAmbientColumn = pRes && mysql_num_rows( pRes ) > 0;
@@ -563,18 +572,18 @@ bool CDbManager::LoadAllUsers( CspUserMap &clsMap ) {
 }
 
 // ─────────────────────────────────────────────
-//  Dispatch group operations (dispatch_center.md §3·§8.1)
+//  Phone group / role operations (dispatch_center.md §3·§8.1)
 // ─────────────────────────────────────────────
 
-bool CDbManager::SelectDispatchGroup( const std::string &strGroupId, CspDispatchGroup &clsGroup ) {
+bool CDbManager::SelectPhoneGroup( const std::string &strGroupId, CspPhoneGroup &clsGroup ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
-    if ( !m_bHasDispatchTables ) return false;
+    if ( !m_bHasPhoneGroupTables ) return false;
     if ( !m_pMysql && !Reconnect() ) return false;
 
     std::string strSql =
         "SELECT id, name, COALESCE(pilot_id,''), COALESCE(service_ref,''), alert_mode, no_answer_sec, busy_members, "
-        "       COALESCE(overflow_target,''), monitor_scope, ptt_listen, listen_visibility, COALESCE(org_id,'') "
-        "FROM dispatch_groups WHERE id='" +
+        "       COALESCE(overflow_target,''), COALESCE(org_id,'') "
+        "FROM phone_groups WHERE id='" +
         Escape( strGroupId ) + "'";
     MYSQL_RES *pRes = ExecuteSelect( strSql );
     if ( !pRes ) return false;
@@ -592,51 +601,30 @@ bool CDbManager::SelectDispatchGroup( const std::string &strGroupId, CspDispatch
     clsGroup.m_iNoAnswerSec = row[5] ? atoi( row[5] ) : 30;
     if ( row[6] && row[6][0] ) clsGroup.m_strBusyMembers = row[6];
     clsGroup.m_strOverflowTarget = row[7] ? row[7] : "";
-    if ( row[8] && row[8][0] ) clsGroup.m_strMonitorScope = row[8];
-    if ( row[9] && row[9][0] ) clsGroup.m_strPttListen = row[9];
-    if ( row[10] && row[10][0] ) clsGroup.m_strListenVisibility = row[10];
-    clsGroup.m_strOrgId = row[11] ? row[11] : "";
+    clsGroup.m_strOrgId = row[8] ? row[8] : "";
     mysql_free_result( pRes );
 
-    const std::string strEsc = Escape( strGroupId );
-    pRes = ExecuteSelect( "SELECT user_id, alert_order FROM dispatch_group_members WHERE group_id='" + strEsc +
-                          "' ORDER BY alert_order, user_id" );
+    pRes = ExecuteSelect( "SELECT user_id, alert_order FROM phone_group_members WHERE group_id='" +
+                          Escape( strGroupId ) + "' ORDER BY alert_order, user_id" );
     if ( pRes ) {
         while ( ( row = mysql_fetch_row( pRes ) ) != nullptr ) {
             if ( !row[0] ) continue;
-            CspDispatchMember m;
+            CspPhoneGroupMember m;
             m.strUserId = row[0];
             m.iAlertOrder = row[1] ? atoi( row[1] ) : 0;
             clsGroup.m_vecMembers.push_back( m );
         }
         mysql_free_result( pRes );
     }
-    pRes =
-        ExecuteSelect( "SELECT target_group_id FROM dispatch_group_monitor_targets WHERE group_id='" + strEsc + "'" );
-    if ( pRes ) {
-        while ( ( row = mysql_fetch_row( pRes ) ) != nullptr )
-            if ( row[0] ) clsGroup.m_setMonitorTargets.insert( row[0] );
-        mysql_free_result( pRes );
-    }
-    // ptt_targets 는 ptt_groups.id(surrogate) 참조 — CSP 그룹 맵 키(mcptt_group_id)로 해석해 보관
-    pRes = ExecuteSelect(
-        "SELECT g.mcptt_group_id FROM dispatch_group_ptt_targets t JOIN ptt_groups g ON g.id = t.ptt_group_id "
-        "WHERE t.group_id='" +
-        strEsc + "'" );
-    if ( pRes ) {
-        while ( ( row = mysql_fetch_row( pRes ) ) != nullptr )
-            if ( row[0] ) clsGroup.m_setPttTargets.insert( row[0] );
-        mysql_free_result( pRes );
-    }
     return true;
 }
 
-bool CDbManager::LoadAllDispatchGroups( CCspDispatchGroupMap &clsMap ) {
+bool CDbManager::LoadAllPhoneGroups( CCspPhoneGroupMap &clsMap ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
-    if ( !m_bHasDispatchTables ) return false;
+    if ( !m_bHasPhoneGroupTables ) return false;
     if ( !m_pMysql && !Reconnect() ) return false;
 
-    MYSQL_RES *pRes = ExecuteSelect( "SELECT id FROM dispatch_groups" );
+    MYSQL_RES *pRes = ExecuteSelect( "SELECT id FROM phone_groups" );
     if ( !pRes ) return false;
     std::vector<std::string> vecIds;
     MYSQL_ROW row;
@@ -647,13 +635,78 @@ bool CDbManager::LoadAllDispatchGroups( CCspDispatchGroupMap &clsMap ) {
     clsMap.Clear();
     int iLoaded = 0;
     for ( const auto &strId : vecIds ) {
-        CspDispatchGroup clsGroup;
-        if ( SelectDispatchGroup( strId, clsGroup ) ) {
+        CspPhoneGroup clsGroup;
+        if ( SelectPhoneGroup( strId, clsGroup ) ) {
             clsMap.Insert( clsGroup );
             ++iLoaded;
         }
     }
-    CLog::Print( LOG_INFO, "[DB] LoadAllDispatchGroups: %d groups loaded", iLoaded );
+    CLog::Print( LOG_INFO, "[DB] LoadAllPhoneGroups: %d groups loaded", iLoaded );
+    return true;
+}
+
+// 역할 전량 적재 — CSP 는 SIP 신원이 있는 배정(principal_type='user')만 든다. person 의 volte·ptt 전 회선으로 펼쳐
+//   회선 id → 역할 인덱스를 만든다(PTT 회선의 청취 인가와 유선 회선의 감청 인가가 같은 사람의 역할을 본다 — §3.5).
+//   ptt_targets 는 ptt_groups.id(surrogate) 참조 — CSP 그룹 맵 키(mcptt_group_id)로 해석해 보관.
+bool CDbManager::LoadAllRoles( CCspRoleMap &clsMap ) {
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    if ( !m_bHasRoleTables ) return false;
+    if ( !m_pMysql && !Reconnect() ) return false;
+
+    std::map<std::string, CspRole> mapRoles;
+    MYSQL_RES *pRes = ExecuteSelect( "SELECT id, name, monitor_call, ptt_listen, listen_visibility FROM roles" );
+    if ( !pRes ) return false;
+    MYSQL_ROW row;
+    while ( ( row = mysql_fetch_row( pRes ) ) != nullptr ) {
+        if ( !row[0] ) continue;
+        CspRole r;
+        r.m_strId = row[0];
+        r.m_strName = row[1] ? row[1] : "";
+        if ( row[2] && row[2][0] ) r.m_strMonitorCall = row[2];
+        if ( row[3] && row[3][0] ) r.m_strPttListen = row[3];
+        if ( row[4] && row[4][0] ) r.m_strListenVisibility = row[4];
+        mapRoles[r.m_strId] = r;
+    }
+    mysql_free_result( pRes );
+
+    pRes = ExecuteSelect( "SELECT role_id, phone_group_id FROM role_monitor_targets" );
+    if ( pRes ) {
+        while ( ( row = mysql_fetch_row( pRes ) ) != nullptr ) {
+            auto it = ( row[0] ) ? mapRoles.find( row[0] ) : mapRoles.end();
+            if ( it != mapRoles.end() && row[1] ) it->second.m_setMonitorTargets.insert( row[1] );
+        }
+        mysql_free_result( pRes );
+    }
+    pRes = ExecuteSelect(
+        "SELECT t.role_id, g.mcptt_group_id FROM role_ptt_targets t JOIN ptt_groups g ON g.id = t.ptt_group_id" );
+    if ( pRes ) {
+        while ( ( row = mysql_fetch_row( pRes ) ) != nullptr ) {
+            auto it = ( row[0] ) ? mapRoles.find( row[0] ) : mapRoles.end();
+            if ( it != mapRoles.end() && row[1] ) it->second.m_setPttTargets.insert( row[1] );
+        }
+        mysql_free_result( pRes );
+    }
+    // 배정 → 회선 펼침 (volte + ptt). principal_id 는 users.id 의 문자열.
+    int iLines = 0;
+    pRes = ExecuteSelect(
+        "SELECT a.role_id, s.id FROM role_assignments a "
+        "JOIN (SELECT id, user_id FROM volte_subscriptions UNION ALL SELECT id, user_id FROM ptt_subscriptions) s "
+        "  ON CAST(s.user_id AS CHAR) = a.principal_id "
+        "WHERE a.principal_type='user'" );
+    if ( pRes ) {
+        while ( ( row = mysql_fetch_row( pRes ) ) != nullptr ) {
+            auto it = ( row[0] ) ? mapRoles.find( row[0] ) : mapRoles.end();
+            if ( it != mapRoles.end() && row[1] ) {
+                it->second.m_vecLines.push_back( row[1] );
+                ++iLines;
+            }
+        }
+        mysql_free_result( pRes );
+    }
+
+    clsMap.Clear();
+    for ( auto &kv : mapRoles ) clsMap.Insert( kv.second );
+    CLog::Print( LOG_INFO, "[DB] LoadAllRoles: %d roles, %d assigned lines", (int)mapRoles.size(), iLines );
     return true;
 }
 

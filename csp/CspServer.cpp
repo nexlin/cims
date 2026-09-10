@@ -40,11 +40,12 @@ CCallDir gclsCallDir;
 #include "CscInterface.h"
 #include "CspAclPolicyEngine.h"
 #include "CspConfigCache.h"
-#include "CspDispatchGroup.h"
 #include "CspListenerManager.h"
 #include "CspLocalNodeMap.h"
 #include "CspPendingRouteMap.h"
+#include "CspPhoneGroup.h"
 #include "CspRemoteNodeMap.h"
+#include "CspRole.h"
 #include "CspRouteMap.h"
 #include "CspRouteSetMap.h"
 #include "CspRoutingPolicyEngine.h"
@@ -150,7 +151,7 @@ int ServiceMain() {
         gclsCspConfigCache.LoadInitial();
         gclsLocalNodeMap.Sync();
         gclsAccessServiceMap_Sync_compat();
-        gclsSipLogger.SetDomainServiceMap( gclsServiceMap.BuildDomainToKindMap() );
+        gclsSipLogger.SetDomainServiceMap( gclsServiceMap.BuildDomainToLogServiceMap() );
     }
 
     // primary local_node → gclsSetup.m_strLocalIp/m_iUdpPort.
@@ -376,15 +377,21 @@ int ServiceMain() {
         gclsCspUserMap.Load( gclsSetup.m_strUserDataFolder.c_str() );
     }
 
-    // Load dispatch groups (관제 그룹 — dispatch_center.md §3.3): DB primary(테이블 존재 시), file fallback.
+    // Load phone groups / roles (dispatch_center.md §3.5): DB primary(테이블 존재 시), file fallback.
     //   테이블 미적용 DB 에서도 폴더가 지정돼 있으면 파일로 적재한다(개발·시험 환경).
-    if ( gclsDbManager.IsConnected() && gclsDbManager.HasDispatchTables() ) {
-        CLog::Print( LOG_SYSTEM, "Loading DispatchGroupMap from DB (primary)..." );
-        gclsDispatchGroupMap.LoadFromDb();
-    } else if ( gclsSetup.m_strDispatchGroupDataFolder.length() > 0 ) {
-        CLog::Print( LOG_SYSTEM, "Loading DispatchGroupMap from files: %s",
-                     gclsSetup.m_strDispatchGroupDataFolder.c_str() );
-        gclsDispatchGroupMap.Load( gclsSetup.m_strDispatchGroupDataFolder.c_str() );
+    if ( gclsDbManager.IsConnected() && gclsDbManager.HasPhoneGroupTables() ) {
+        CLog::Print( LOG_SYSTEM, "Loading PhoneGroupMap from DB (primary)..." );
+        gclsPhoneGroupMap.LoadFromDb();
+    } else if ( gclsSetup.m_strPhoneGroupDataFolder.length() > 0 ) {
+        CLog::Print( LOG_SYSTEM, "Loading PhoneGroupMap from files: %s", gclsSetup.m_strPhoneGroupDataFolder.c_str() );
+        gclsPhoneGroupMap.Load( gclsSetup.m_strPhoneGroupDataFolder.c_str() );
+    }
+    if ( gclsDbManager.IsConnected() && gclsDbManager.HasRoleTables() ) {
+        CLog::Print( LOG_SYSTEM, "Loading RoleMap from DB (primary)..." );
+        gclsRoleMap.LoadFromDb();
+    } else if ( gclsSetup.m_strRoleDataFolder.length() > 0 ) {
+        CLog::Print( LOG_SYSTEM, "Loading RoleMap from files: %s", gclsSetup.m_strRoleDataFolder.c_str() );
+        gclsRoleMap.Load( gclsSetup.m_strRoleDataFolder.c_str() );
     }
 
     {
@@ -493,7 +500,7 @@ int ServiceMain() {
         if ( g_reloadFlag ) {
             g_reloadFlag = 0;
             CLog::Print( LOG_SYSTEM, "SIGUSR1: reloading scalar config + jsonl (v3 9-collection)" );
-            // scalar csp.json 재파싱 → gclsSetup 의 단순 값(CallPickupId/Timeout 류) 즉시 반영.
+            // scalar csp.json 재파싱 → gclsSetup 의 단순 값(Timeout 류) 즉시 반영.
             //   bootstrap 성 필드(UdpThreadCount, DB 연결 등)는 재기동이 필요 — 여기서 반영해도 기존 객체엔 미적용.
             gclsSetup.Read();
             gclsSetup.WarnDeprecatedKeys();

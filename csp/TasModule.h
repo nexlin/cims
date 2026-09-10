@@ -12,7 +12,7 @@
 #include "SipUserAgentCallBack.h"  // CSipCallRtp (포크 집합의 B-leg 공통 offer 보관)
 
 class CspUser;
-class CspDispatchGroup;
+class CspPhoneGroup;
 
 /**
  * @brief 대표번호 병렬 호출 포크 집합 (dispatch_center.md §4.4) — A-leg 하나에 대기 B-leg N 개.
@@ -24,7 +24,7 @@ class CspDispatchGroup;
 struct CTasForkSet {
     std::string strACallId;                          ///< 발신(A) leg Call-ID
     std::string strCaller;                           ///< 발신자 id
-    std::string strGroupId;                          ///< 관제 그룹 id
+    std::string strGroupId;                          ///< 전화 그룹 id
     std::string strPilot;                            ///< 대표번호
     std::string strDomain;                           ///< 대표번호 도메인 (P-Called-Party-ID)
     std::set<std::string> setPending;                ///< 대기 B-leg Call-ID
@@ -125,9 +125,8 @@ private:
      *  (NULL/빈 값 = 그룹 픽업 — 발신자의 픽업 그룹에서 링 중인 아무 호). */
     void PickUp( const char *pszCallId, const char *pszFrom, const char *pszTarget, CSipCallRtp *pclsRtp );
 
-    /** 픽업 다이얼 판정 (§5.2) — 발신 가입자 접속서비스의 pickup_feature_code (필드 미지정 시
-     *  전역 Setup.Sip.CallPickupId 폴백, 빈 값=비활성). "<code>"=그룹 픽업(strTarget 빈 값),
-     *  "<code><내선>"=지정 픽업(strTarget=내선). */
+    /** 픽업 다이얼 판정 (§5.2) — 발신 가입자 접속서비스의 pickup_feature_code (빈 값·부재=비활성,
+     *  전역 폴백 없음). "<code>"=그룹 픽업(strTarget 빈 값), "<code><번호>"=지정 픽업(strTarget=번호). */
     bool IsPickupDial( const char *pszFrom, const char *pszTo, std::string &strTarget );
 
     /** 당겨받기 재고정 코어 — 링잉/대상 leg(strOldCallId)를 pszCallId(신규 단말)로 재키잉하고
@@ -171,7 +170,7 @@ public:
         std::string strService;
         std::string strTapId;
         std::string strMonitor;
-        std::string strGroupId;
+        std::string strRoleId;  ///< 감청자 역할 id (감사 E-AUD-016 `role`)
         std::string strTargetA, strTargetB;
         std::string strTapMode;
         time_t tStart = 0;
@@ -188,7 +187,7 @@ private:
 
     // ── 대표번호 병렬 호출 (dispatch_center.md §4) ──
     /** 그룹원 → 포크 대상 결정: 등록·(busy_members=skip) 비통화·발신자 제외, alert_order 순, MaxForkTargets 절삭. */
-    void ResolveForkTargets( const CspDispatchGroup &clsGroup, const std::string &strCaller,
+    void ResolveForkTargets( const CspPhoneGroup &clsGroup, const std::string &strCaller,
                              std::vector<std::string> &vecTargets );
     /** 대기 leg 생성 — 대상 각각에 leg 전용 SDES offer 로 INVITE(P-Called-Party-ID=대표번호). 생성 수 반환.
      *  m_mutexFork 를 잡은 상태에서 호출한다. */

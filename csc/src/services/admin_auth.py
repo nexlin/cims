@@ -21,16 +21,26 @@ from httpsrv.handler import HandlerResult
 _SECRET = 'cims_jwt_secret_change_me'  # config 로 갱신
 
 # ─────────────────────────────────────────────────────────────
-#  RBAC 역할 모델 (계층적) — docs/design/features/mcptt_authorization.md §3
-#    admin > manager > operator > monitor > user
-#    역할은 콘솔 계정(OAM console_accounts·내장 admin)의 속성 — 토큰 클레임으로만 온다.
+#  RBAC 역할 모델 — docs/design/features/mcptt_authorization.md §2·§3
+#    역할 = roles 행(능력 + 범위). 내장 4행 admin > manager > operator > monitor 는 계층으로도 읽힌다
+#    (require_role 의 최소 등급 게이트). 토큰 role 클레임 = roles.id — 콘솔 계정(OAM console_accounts·내장
+#    admin)의 속성으로 토큰에만 온다. 커스텀 역할 id(role-…)가 배정된 콘솔 계정은 계층 게이트에서 monitor
+#    등급(읽기 전용)으로 보고(OAM 로컬 게이트와 같은 규칙 — oam/src/services/admin_auth.py), 실제 능력·범위는
+#    services/authz.can() 이 roles 행으로 판정한다(§2.2). 이 파일은 roles 행을 읽지 않는다(인증 + 계층 다리만).
 #    user 는 "콘솔 계정 없음"(가입자 = telephony 전용, 로그인 불가) 의 자리값. DB users 에는 role 이 없다.
 # ─────────────────────────────────────────────────────────────
 _ROLE_RANK = {'user': 0, 'monitor': 1, 'operator': 2, 'manager': 3, 'admin': 4}
 ROLES = tuple(_ROLE_RANK.keys())
+CUSTOM_ROLE_PREFIX = 'role-'
+
+
+def is_custom_role(role: Optional[str]) -> bool:
+    return bool(role) and role.startswith(CUSTOM_ROLE_PREFIX) and len(role) > len(CUSTOM_ROLE_PREFIX)
 
 
 def role_rank(role: Optional[str]) -> int:
+    if is_custom_role(role):
+        return _ROLE_RANK['monitor']
     return _ROLE_RANK.get(role or '', 0)
 
 

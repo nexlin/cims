@@ -98,7 +98,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     public bool HasDesk => Dispatch.Present;
     public string DisplayName => Profile?.DisplayName ?? "";
     public string LoginId => Profile?.LoginId ?? "";
-    public ServiceProfile? VolteService => Profile?.Service("volte");
+    /// <summary>전화 회선 — 유선 voip 우선, 없으면 이동 volte(SDK Profile.PhoneService). 이름은 전화 계열 계정(AccountKind.Volte)을 따른다.</summary>
+    public ServiceProfile? VolteService => Profile?.PhoneService;
     public ServiceProfile? PttService => Profile?.Service("ptt");
     public string MyExtension => VolteService?.Msisdn ?? "";
     /// <summary>tel:+82… (MCPTT ID). 비면 tel:+msisdn.</summary>

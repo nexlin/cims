@@ -16,6 +16,9 @@ from .subscribers import VOLTE_DOMAIN, MCPTT_DOMAIN
 #   REFER 403 게이트(volte_supplementary_services.md §6.3)를 본다. voip 서비스와 같은 도메인·realm 이라
 #   등록/인증은 동일하고, priority 가 낮아(=값이 커) GetByKind/도메인 매핑의 1순위를 빼앗지 않는다.
 NOXFER_SERVICE_REF = "volte-noxfer"
+# 유선 VoIP 접속서비스(kind=voip) — dev 검증 스택에서는 volte 와 같은 도메인(H(A1) 결박이 도메인에 묶여 가입자
+#   service_ref 를 옮겨도 인증이 유지되게), priority 150(GetByKind("volte") 1순위를 빼앗지 않는다).
+VOIP_SERVICE_REF = "voip"
 
 
 def seed_access_services(cfg_dir: str, voip_ref: str, ptt_ref: str,
@@ -24,9 +27,11 @@ def seed_access_services(cfg_dir: str, voip_ref: str, ptt_ref: str,
                           with_noxfer: bool = False) -> int:
     """{cfg_dir}/access_services.jsonl 작성. 작성 건수 반환.
 
-    volte 레코드는 관제 보조 서비스 필드(`pickup_feature_code`="**", `transfer_allowed`=true)를 명시해
-    서비스별 피처코드 경로(전역 CallPickupId 폴백 아님)를 태운다. with_noxfer 면 `transfer_allowed=false`
-    변종(NOXFER_SERVICE_REF)을 하나 더 쓴다.
+    volte 레코드는 검증용 dev 스택에서 유선 보조 서비스 필드(`pickup_feature_code`="**", `transfer_allowed`=true)를
+    명시해 서비스별 피처코드 경로를 태운다(S3 전화 시나리오의 가입자가 service_ref=volte 라 — 상용 규약은 유선
+    `kind=voip` 서비스에만 피처코드를 두고 이동 volte 는 비운다, sip_service_model.md §2-9). `kind=voip` 레코드
+    (VOIP_SERVICE_REF, 같은 도메인·priority 150)도 함께 시드해 유선 회선 프로비저닝·H(A1) 결박·kind 검증 경로가
+    dev 에서 돈다. with_noxfer 면 `transfer_allowed=false` 변종(NOXFER_SERVICE_REF)을 하나 더 쓴다.
     """
     seeded = []
 
@@ -40,12 +45,13 @@ def seed_access_services(cfg_dir: str, voip_ref: str, ptt_ref: str,
             "priority": priority, "tags": [tag], "note": note,
             "server_identity_uri": f"sip:cspserver@{domain}",
         }
-        if kind == "volte":
+        if kind in ("volte", "voip"):
             rec.update({"pickup_feature_code": "**", "transfer_allowed": True})
         rec.update(extra)
         seeded.append(rec)
 
     add(voip_ref, "volte", VOLTE_DOMAIN)
+    add(VOIP_SERVICE_REF, "voip", VOLTE_DOMAIN, priority=150)
     add(ptt_ref,  "ptt",   MCPTT_DOMAIN)
     if with_noxfer and voip_ref:
         add(NOXFER_SERVICE_REF, "volte", VOLTE_DOMAIN, priority=200, transfer_allowed=False)

@@ -113,6 +113,7 @@ TEST(CApi, ProfileFlattenAndToAccount) {
     ASSERT_EQ(v->sec_mechanism_count, 1);
     EXPECT_STREQ(v->sec_mechanisms[0], "tls");
     EXPECT_EQ(cimsue_profile_service(&p, "video"), nullptr);
+    EXPECT_EQ(cimsue_profile_phone_service(&p), v);            // voip 없음 → volte 폴백 (Profile::phoneService)
     EXPECT_TRUE(p.dispatch.present);
     EXPECT_STREQ(p.dispatch.group_id, "dg-1");
     EXPECT_STREQ(p.dispatch.monitor_scope, "all");

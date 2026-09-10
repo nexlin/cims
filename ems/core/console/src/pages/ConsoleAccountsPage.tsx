@@ -9,6 +9,8 @@ import {
   consoleAccountsApi, CONSOLE_ROLES,
   type ConsoleAccount, type ConsoleRole,
 } from '../api/consoleAccounts'
+import { rolesApi, type RoleDef } from '../api/roles'
+import type { Role } from '../api/auth'
 import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
@@ -20,6 +22,13 @@ import { usePrompt } from '@core/components/custom/prompt'
 type Form = { login_id: string; name: string; role: ConsoleRole; email: string; password: string }
 const EMPTY: Form = { login_id: '', name: '', role: 'operator', email: '', password: '' }
 
+// 역할 후보 = GET /api/v1/roles (내장 4 + 커스텀, mcptt_authorization.md §6 콘솔). 역할 API(csc)가 없으면 내장 4 로 폴백.
+type RoleOpt = { id: string; label: string; builtin: boolean }
+const BUILTIN_OPTS: RoleOpt[] = CONSOLE_ROLES.map(r => ({ id: r, label: ROLE_LABELS[r as Role] ?? r, builtin: true }))
+function toOpt(r: RoleDef): RoleOpt {
+  return { id: r.id, label: r.builtin ? (ROLE_LABELS[r.id as Role] ?? (r.name || r.id)) : (r.name || r.id), builtin: r.builtin }
+}
+
 export default function ConsoleAccountsPage() {
   const { show } = useToast()
   const confirm = useConfirm()
@@ -30,6 +39,7 @@ export default function ConsoleAccountsPage() {
   const [editId, setEditId] = useState<string | null>(null)
   const [form, setForm] = useState<Form>(EMPTY)
   const [busy, setBusy] = useState(false)
+  const [roleOpts, setRoleOpts] = useState<RoleOpt[]>(BUILTIN_OPTS)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -38,6 +48,14 @@ export default function ConsoleAccountsPage() {
     finally { setLoading(false) }
   }, [show])
   useEffect(() => { load() }, [load])
+  useEffect(() => {
+    let alive = true
+    rolesApi.list()
+      .then(r => { if (alive && r.roles.length) setRoleOpts(r.roles.map(toOpt)) })
+      .catch(() => { /* 역할 API 없음(csc 미설치·마이그레이션 전) — 내장 4 유지 */ })
+    return () => { alive = false }
+  }, [])
+  const roleLabel = (id: string) => roleOpts.find(o => o.id === id)?.label ?? id
 
   function startAdd() { setForm({ ...EMPTY }); setEditId(null); setAdding(true) }
   function startEdit(a: ConsoleAccount) {
@@ -112,7 +130,7 @@ export default function ConsoleAccountsPage() {
             <Select value={toSel(form.role)} onValueChange={(v: string) => setForm({ ...form, role: fromSel(v) as ConsoleRole })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                {CONSOLE_ROLES.map(r => <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>)}
+                {roleOpts.map(o => <SelectItem key={o.id} value={o.id}>{o.label}{o.builtin ? '' : ` (${o.id})`}</SelectItem>)}
               </SelectContent>
             </Select>
           </Field>
@@ -153,7 +171,7 @@ export default function ConsoleAccountsPage() {
             <tr key={a.login_id}>
               <Td><strong>{a.login_id}</strong></Td>
               <Td>{a.name}</Td>
-              <Td><Badge >{ROLE_LABELS[a.role]}</Badge></Td>
+              <Td><Badge >{roleLabel(a.role)}</Badge></Td>
               <Td className="text-sm text-muted-foreground">{a.email || '—'}</Td>
               <Td className="text-sm text-muted-foreground">{a.update_time || '—'}</Td>
               <Td className="text-right whitespace-nowrap">

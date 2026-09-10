@@ -10,16 +10,18 @@ android_ue_provisioning.md §3-2 · mcdata_messaging.md §4.1.
 이 API 는 그 구독을 대체하지 않는다 — 여기서는 **관제 범위 안의 지난 이력**만 커서(`since`)로 준다.
 
 백엔드 = CSP/CSC 가 공유 NAS(`ServiceLogging.Dir`)에 남기는 파일 SoT (flow_logger.py 가 콘솔용으로
-읽는 것과 같은 파일. 이쪽은 관제사(가입자) PKCE 토큰으로 **관제 그룹 범위**만 걸러 주는 얇은 구독자
+읽는 것과 같은 파일. 이쪽은 관제사(가입자) PKCE 토큰으로 **역할 범위**만 걸러 주는 얇은 구독자
 뷰다 — 콘솔 이력 API 를 재구현하지 않는다):
   - kind=call    VoLTE 통화     `{sl}/{Y}/{M}/{D}/{H}/**/call.json`      (+ live `{sl}/state/volte/*.json`)
   - kind=ptt     PTT 그룹 세션  `{sl}/ptt/*/{Y}/{M}/{D}/{H}/**/session.json` (+ live `{sl}/state/ptt/*.json`)
   - kind=message SDS            그룹 `{sl}/message/*/{Y}/{M}/{D}/{H}/messages.jsonl`
                                 1:1  `{sl}/message_direct/{Y}/{M}/{D}/{H}/messages.jsonl`
 
-범위(scope)는 호출자(mcptt)가 dispatch 그룹에서 유도한다 — CSP `CanWatch`/`CanListenPtt` 와 같은 규칙:
-  members     감시 대상 VoLTE 가입자 user-part 집합 (monitor_scope 해석) — call·1:1 message
+범위(scope)는 호출자(mcptt `_dispatch_scope_sets`)가 관제사의 **역할**(roles 행 + role_monitor_targets/role_ptt_targets,
+mcptt_authorization.md §2)에서 유도한다 — CSP `CanWatch` 규칙 2/`CanListenPtt` 와 같은 규칙:
+  members     감시 대상 VoLTE 가입자 user-part 집합 (monitor_call 해석) — call·1:1 message
   ptt_groups  청취 대상 PTT 그룹 mcptt_group_id 집합 (ptt_listen 해석) — ptt·group message
+역할이 없거나 두 범위가 모두 none 이면 호출자가 403 no_monitor_scope 로 끝낸다(여기까지 오지 않는다).
 
 PTT **창 조회**(until 있음 — 관제 앱 [이력] 화면)는 발언 지표(턴·화자·발화·동시 발언)가 필요한데 그 값은 CMP segments.jsonl 을
 집계한 OAM 세션 인덱스(ptt_index — 콘솔 `/api/v1/ptt/sessions`)에만 있다. 그래서 창 조회는 호출자가 OAM 인덱스를 프록시해
@@ -358,7 +360,7 @@ def scan_messages(sl_dir: str, group_ids: set, members: set,
                 for rec in _read_jsonl(fp):
                     if rec.get('group') in group_ids:
                         rows.append(_msg_row(rec, "group"))
-    # 1:1 SDS — 범위 = monitor_scope(members). 감시 멤버가 발신 또는 수신인 것 (mcdata_messaging.md §4.3).
+    # 1:1 SDS — 범위 = 역할 monitor_call(members). 감시 멤버가 발신 또는 수신인 것 (mcdata_messaging.md §4.3).
     #   CSP 가 Setup.McData.StoreOneToOneSds 로 보관을 켰을 때만 파일이 존재한다.
     if members:
         for (y, m, d, h) in buckets:

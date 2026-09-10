@@ -16,9 +16,10 @@
 #include "CscAvClient.h"
 #include "CspAddressing.h"
 #include "CspConfigCache.h"  // CspUuidToIntId
-#include "CspDispatchGroup.h"
 #include "CspLocalNodeMap.h"
+#include "CspPhoneGroup.h"
 #include "CspPttGroup.h"
+#include "CspRole.h"
 #include "CspServiceMap.h"
 #include "CspUser.h"
 #include "DbManager.h"
@@ -1202,20 +1203,22 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
             return true;
         }
         if ( strReqUriUser != strFromId ) {
-            // 인가 축 = 관제 그룹(= pickup_group 값). 같은 그룹이면 허용(현행), 아니면 감시자 그룹의
-            //   monitor_scope(own/listed/all)로 판정 (dispatch_center.md §5.2). 감시 대상이 대표번호면
-            //   그 그룹을 대상 그룹으로 본다 (§4.5 — 데스크 큐 표시).
-            std::string strGSub = gclsDispatchGroupMap.EffectiveGroupOf( strFromId.c_str() );
+            // 인가 — 질문 둘 (dispatch_center.md §5.2): 규칙 1 같은 전화 그룹(= pickup_group 값, 그룹원 BLF) /
+            //   규칙 2 감시자 역할의 monitor_call(own/listed/all). 감시 대상이 대표번호면 그 전화 그룹을 대상
+            //   그룹으로 본다 (§4.5 — 데스크 큐 표시).
             std::string strGWatch;
-            CspDispatchGroup clsPilotGroup;
-            if ( gclsDispatchGroupMap.SelectByPilot( strReqUriUser.c_str(), clsPilotGroup ) )
+            CspPhoneGroup clsPilotGroup;
+            if ( gclsPhoneGroupMap.SelectByPilot( strReqUriUser.c_str(), clsPilotGroup ) )
                 strGWatch = clsPilotGroup.m_strId;
             else
-                strGWatch = gclsDispatchGroupMap.EffectiveGroupOf( strReqUriUser.c_str() );
-            if ( !gclsDispatchGroupMap.CanWatch( strGSub, strGWatch ) ) {
-                CLog::Print( LOG_INFO,
-                             "SUBSCRIBE dialog denied — %s watch %s outside pickup/monitor scope (%s vs %s) → 403",
-                             strFromId.c_str(), strReqUriUser.c_str(), strGSub.c_str(), strGWatch.c_str() );
+                strGWatch = gclsPhoneGroupMap.EffectiveGroupOf( strReqUriUser.c_str() );
+            if ( !gclsRoleMap.CanWatch( strFromId.c_str(), strGWatch ) ) {
+                CLog::Print(
+                    LOG_INFO,
+                    "SUBSCRIBE dialog denied — %s watch %s outside phone group / role scope (%s vs %s, role %s) → 403",
+                    strFromId.c_str(), strReqUriUser.c_str(),
+                    gclsPhoneGroupMap.EffectiveGroupOf( strFromId.c_str() ).c_str(), strGWatch.c_str(),
+                    gclsRoleMap.RoleIdForLine( strFromId.c_str() ).c_str() );
                 SendResponse( pclsMessage, 403 );
                 return true;
             }

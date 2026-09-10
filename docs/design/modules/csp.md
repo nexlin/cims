@@ -145,7 +145,7 @@ REGISTER 수신
 **SIP 헤더 주입 (IMS 규격 준수):**
 
 REGISTER 200 OK 와 B2BUA 발신 INVITE 에 `P-Asserted-Identity`(`<sip:user@domain>`)를 주입한다. 발신 INVITE 의
-`P-Preferred-Identity` 는 관제 그룹원이 자기 그룹 대표번호를 제시한 경우에만 B-leg From/PAI 로 채택하고(TAS
+`P-Preferred-Identity` 는 전화 그룹원이 자기 그룹 대표번호를 제시한 경우에만 B-leg From/PAI 로 채택하고(TAS
 `ResolveOriginatingIdentity`, [dispatch_center.md §4.7](../features/dispatch_center.md)), 그 외는 무시한다(TS 24.229 §5.4.3.2).
 
 **Static 헬퍼:**
@@ -184,8 +184,8 @@ B2BUA 골격(라우팅·relay 수명)은 ModuleDispatcher 가 유지하고, 보�
 | 착신전환 | `CspUser::m_strForward` 설정됨 | 302 Moved Temporarily (수신 listener 주소 Contact) |
 | 당겨받기 | 피처코드 다이얼(`TryPickupDial`) / INVITE-Replaces(`OnIncomingCall`) | 링잉 leg 재키잉 + `RELAY_MODIFY` |
 | 호 전달 | REFER blind/attended (`OnBlindTransfer`/`OnTransfer`, 게이트=`OnSipRequest`) | 원 relay 유지·교체 leg `RELAY_MODIFY` |
-| dialog 이벤트 (RFC 4235) | 호 상태 변화 (`OnCallRing/OnCallStart/OnCallEnd`) | BLF dialog-info NOTIFY — 인가 범위는 관제 그룹 `CanWatch`(같은 그룹 또는 `monitor_scope`) |
-| 대표번호 병렬 호출 (TS 24.239) | 미등록 착신이 관제 그룹 대표번호(`TryDispatchPilot`, `TryPickupDial` 앞) | 등록 그룹원 전원 포크(`CTasForkSet`, TAS 소유) → 최초 200 승자만 `(A,승자)` 쌍을 CallMap 에 넣고 정상 answer 경로(RELAY_MODIFY peer1), 패자 CANCEL, 무응답 `Tick` → overflow/480 ([dispatch_center.md](../features/dispatch_center.md) §4) |
+| dialog 이벤트 (RFC 4235) | 호 상태 변화 (`OnCallRing/OnCallStart/OnCallEnd`) | BLF dialog-info NOTIFY — 인가는 `CCspRoleMap::CanWatch`(규칙 1 같은 전화 그룹(`CCspPhoneGroupMap`) / 규칙 2 역할 `monitor_call` — dispatch_center.md §5.2) |
+| 대표번호 병렬 호출 (TS 24.239) | 미등록 착신이 전화 그룹 대표번호(`TryDispatchPilot`, `TryPickupDial` 앞) | 등록 그룹원 전원 포크(`CTasForkSet`, TAS 소유) → 최초 200 승자만 `(A,승자)` 쌍을 CallMap 에 넣고 정상 answer 경로(RELAY_MODIFY peer1), 패자 CANCEL, 무응답 `Tick` → overflow/480 ([dispatch_center.md](../features/dispatch_center.md) §4) |
 
 TAS 역할 off(`roles.TAS=false`) 시 위 보조 서비스 전체가 비활성이다(모듈 게이트).
 

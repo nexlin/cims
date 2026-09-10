@@ -6,9 +6,10 @@
 #include "CallMap.h"
 #include "CscEndpointCache.h"
 #include "CspConfigCache.h"
-#include "CspDispatchGroup.h"
 #include "CspListenerManager.h"
 #include "CspLocalNodeMap.h"
+#include "CspPhoneGroup.h"
+#include "CspRole.h"
 #include "CspRouteMap.h"
 #include "CspServiceMap.h"
 #include "CspUser.h"
@@ -282,8 +283,9 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
 
         // Resync user map from DB
         gclsCspUserMap.LoadFromDb();
-        // 관제 그룹도 재동기 (대표번호·감청 범위 — dispatch_center.md §3.3)
-        if ( gclsDbManager.HasDispatchTables() ) gclsDispatchGroupMap.LoadFromDb();
+        // 전화 그룹·역할도 재동기 (대표번호·감청 범위 — dispatch_center.md §3.5)
+        if ( gclsDbManager.HasPhoneGroupTables() ) gclsPhoneGroupMap.LoadFromDb();
+        if ( gclsDbManager.HasRoleTables() ) gclsRoleMap.LoadFromDb();
 
         // Trigger full group resync (SyncGroupsState)
         gclsGroupCallService.OnGroupConfigChanged();
@@ -300,27 +302,42 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
         //   CSP 는 이 문서를 소비하지 않으므로(서빙은 CSC XCAP) 캐시 갱신 없이 중계만 한다.
         extern void SendServiceConfigNotify( const std::string &etag );
         SendServiceConfigNotify( strEtag );
-    } else if ( strEvent == "DISPATCH_GROUP_CHANGED" ) {
-        // 관제 그룹 변경 (dispatch_center.md §3.3) — uri = 그룹 id(dg-…). DELETE 는 맵에서 제거,
-        //   그 외(POST/PUT/멤버·대상 변경)는 DB 단건 재적재. uri 가 비면 전량 재적재.
-        //   가입자 pickup_group 파생 갱신은 CSC 가 USER_CHANGED 를 따로 보낸다(기존 경로).
+    } else if ( strEvent == "PHONE_GROUP_CHANGED" || strEvent == "DISPATCH_GROUP_CHANGED" ) {
+        // 전화 그룹 변경 (dispatch_center.md §3.5) — uri = 그룹 id. DELETE 는 맵에서 제거, 그 외(POST/PUT/멤버 변경)는
+        //   DB 단건 재적재. uri 가 비면 전량 재적재. 가입자 pickup_group 파생 갱신은 CSC 가 USER_CHANGED 를 따로
+        //   보낸다. DISPATCH_GROUP_CHANGED 는 전환 전 CSC 의 이름 — 같은 처리 + 역할도 전량 재적재(한 엔티티였던 범위
+        //   열 대비).
         std::string strGroupId = strUri;
         if ( strGroupId.substr( 0, 4 ) == "tel:" ) strGroupId = strGroupId.substr( 4 );
-        if ( !gclsDbManager.HasDispatchTables() ) {
-            CLog::Print( LOG_INFO, "CscInterface: DISPATCH_GROUP_CHANGED ignored — dispatch_groups table absent" );
+        if ( strEvent == "DISPATCH_GROUP_CHANGED" ) {
+            CLog::Print( LOG_INFO,
+                         "CscInterface: DISPATCH_GROUP_CHANGED (legacy name) — reloading phone groups + roles" );
+            if ( gclsDbManager.HasRoleTables() ) gclsRoleMap.LoadFromDb();
+        }
+        if ( !gclsDbManager.HasPhoneGroupTables() ) {
+            CLog::Print( LOG_INFO, "CscInterface: %s ignored — phone_groups table absent", strEvent.c_str() );
         } else if ( strGroupId.empty() ) {
-            gclsDispatchGroupMap.LoadFromDb();
-            CLog::Print( LOG_INFO, "CscInterface: DispatchGroupMap reloaded (%d groups)",
-                         gclsDispatchGroupMap.GetCount() );
+            gclsPhoneGroupMap.LoadFromDb();
+            CLog::Print( LOG_INFO, "CscInterface: PhoneGroupMap reloaded (%d groups)", gclsPhoneGroupMap.GetCount() );
         } else if ( strAction == "DELETE" ) {
-            gclsDispatchGroupMap.Remove( strGroupId.c_str() );
-            CLog::Print( LOG_INFO, "CscInterface: Dispatch group removed [%s]", strGroupId.c_str() );
-        } else if ( gclsDispatchGroupMap.LoadOneFromDb( strGroupId.c_str() ) ) {
-            CLog::Print( LOG_INFO, "CscInterface: Dispatch group updated [%s]", strGroupId.c_str() );
+            gclsPhoneGroupMap.Remove( strGroupId.c_str() );
+            CLog::Print( LOG_INFO, "CscInterface: Phone group removed [%s]", strGroupId.c_str() );
+        } else if ( gclsPhoneGroupMap.LoadOneFromDb( strGroupId.c_str() ) ) {
+            CLog::Print( LOG_INFO, "CscInterface: Phone group updated [%s]", strGroupId.c_str() );
         } else {
             // DB 에 없으면 삭제로 간주(통지 순서 역전 방어)
-            gclsDispatchGroupMap.Remove( strGroupId.c_str() );
-            CLog::Print( LOG_INFO, "CscInterface: Dispatch group not in DB — removed [%s]", strGroupId.c_str() );
+            gclsPhoneGroupMap.Remove( strGroupId.c_str() );
+            CLog::Print( LOG_INFO, "CscInterface: Phone group not in DB — removed [%s]", strGroupId.c_str() );
+        }
+    } else if ( strEvent == "ROLE_CHANGED" ) {
+        // 역할·배정·대상 변경 (mcptt_authorization.md §2, dispatch_center.md §3.5) — 배정은 person 단위라 회선 펼침이
+        //   바뀌므로 전량 재적재한다(역할 수는 작다). uri 는 역할 id 또는 person id — 로그용.
+        if ( !gclsDbManager.HasRoleTables() ) {
+            CLog::Print( LOG_INFO, "CscInterface: ROLE_CHANGED ignored — role tables absent" );
+        } else {
+            gclsRoleMap.LoadFromDb();
+            CLog::Print( LOG_INFO, "CscInterface: RoleMap reloaded (%d roles) [%s]", gclsRoleMap.GetCount(),
+                         strUri.c_str() );
         }
     } else if ( strEvent == "USER_CHANGED" ) {
         extern void SendSipNotify( const std::string &uri, const std::string &etag, const std::string &action );
@@ -345,5 +362,9 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
                 CLog::Print( LOG_ERROR, "CscInterface: User not found in DB [%s]", strUserId.c_str() );
             }
         }
+        // 회선 개설/삭제는 person 의 회선 집합을 바꾼다 — 역할 맵의 회선 펼침을 다시 만든다(§3.5). PUT(속성 변경)도
+        //   같은 경로로 오지만 역할 수가 작아 전량 재적재 비용이 문제되지 않는다.
+        if ( gclsDbManager.HasRoleTables() && ( strAction == "POST" || strAction == "DELETE" ) )
+            gclsRoleMap.LoadFromDb();
     }
 }

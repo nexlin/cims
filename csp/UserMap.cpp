@@ -144,7 +144,7 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bInt
     }
     time( &clsInfo.m_iLoginTime );
 
-    // 픽업 그룹 — pickup_group 우선, 미지정이면 org 폴백 (volte_supplementary_services.md §5.1).
+    // 픽업 그룹 — pickup_group(= 전화 그룹 id) 만, 비어 있으면 픽업·BLF 축 없음 (volte_supplementary_services.md §5.1).
     //   등록 시점 스냅샷: 프로비저닝 변경은 다음 등록 갱신부터 반영된다.
     clsInfo.m_strGroupId = pclsXmlUser->EffectivePickupGroup();
 

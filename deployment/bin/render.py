@@ -345,14 +345,14 @@ def _build_remote_nodes(idx: Index, scn_csp: dict) -> list[dict]:
 def _build_access_services(scn_csp: dict, local_node_names: set[str]) -> list[dict]:
     """access_services.jsonl — csp 의 진짜 schema (CspServiceMap.cpp:24-67).
 
-    필수: id (uuid 또는 int>0) / name / kind (volte|ptt 만) / domain.
+    필수: id (uuid 또는 int>0) / name / kind (volte|voip|ptt) / domain.
     listeners 결정: allowed_local_node_refs[] (string name 배열).
     """
     rows: list[dict] = []
     for i, svc in enumerate(scn_csp.get("access_services") or [], start=1):
         kind = svc.get("kind", "volte")
-        if kind not in ("volte", "ptt"):
-            raise RenderError(f"access_service '{svc.get('name')}' kind='{kind}' 미지원 (volte|ptt 만)")
+        if kind not in ("volte", "voip", "ptt"):
+            raise RenderError(f"access_service '{svc.get('name')}' kind='{kind}' 미지원 (volte|voip|ptt)")
         # listener_ids 는 옛 호환 — 새 키는 allowed_local_node_refs (CspServiceMap.cpp).
         # 옛 키 사용 시 stderr 에 deprecation warn (한 번 출력 의도지만 svc 마다
         # 보내고 사용자가 빠르게 발견 가능하게 함 — 마이그레이션 후 사라짐).
@@ -638,7 +638,6 @@ def _build_csp_json(idx: Index, node_id: str, scn: dict) -> OrderedDict:
             ("MinRegisterTimeout", sip.get("min_register_timeout", 60)),
             ("UserTimeout",        sip.get("user_timeout", 3600)),
             ("SendOptionsPeriod",  sip.get("send_options_period", 0)),
-            ("CallPickupId",       sip.get("call_pickup_id", "**")),
             ("StaleCallTimeout",   sip.get("stale_call_timeout", 300)),
             ("TcpThreadCount",     sip.get("tcp_thread_count", 2)),
             ("TcpRecvTimeout",     sip.get("tcp_recv_timeout", 600)),
@@ -685,7 +684,7 @@ def _build_csp_json(idx: Index, node_id: str, scn: dict) -> OrderedDict:
             ("Password", db.get("password", "cims1234")),
             ("DbName",   db.get("dbname", "cims")),
         ])),
-        ("DataFolder", OrderedDict([("User", "user"), ("Group", "group"), ("DispatchGroup", "dispatch_group")])),
+        ("DataFolder", OrderedDict([("User", "user"), ("Group", "group"), ("PhoneGroup", "phone_group"), ("Role", "role")])),
     ])
 
     # ServiceLogging — env.service_logging 또는 setup.service_logging override

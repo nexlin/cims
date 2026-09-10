@@ -21,7 +21,7 @@ Rule               SIP 메시지 1개 필드에 대한 단일 조건
 Rule Set           Rule 들을 flat AND/OR 로 조합
 Routing Policy     Rule Set match → Route Set 또는 Access Service 로 전달
 ACL Policy         Rule Set match → allow/deny (scope: global/local_node/route/route_set)
-Access Service     UE 가 직접 붙는 서비스(volte/ptt) — domain + auth_realm + 허용 LN
+Access Service     UE 가 직접 붙는 서비스 — 접속환경 클래스 kind(volte 이동 / voip 유선 / ptt) + domain + auth_realm + 허용 LN
 ```
 
 재사용성이 원칙이다:
@@ -79,7 +79,7 @@ Access Service     UE 가 직접 붙는 서비스(volte/ptt) — domain + auth_r
 
           ┌──────────────────────────┐
           │   AccessService          │── listeners[] → LocalNode
-          │   kind: volte | ptt      │        (restricted 일 때)
+          │   kind: volte|voip|ptt   │        (restricted 일 때)
           │   domain, auth_realm     │
           │   inbound_policy         │
           └──────────────────────────┘
@@ -270,11 +270,31 @@ Rule 은 Routing 과 ACL 이 공유. RuleEvaluator 하나가 양쪽을 처리.
 
 ### 2-9. AccessService — UE 서비스
 
-UE 가 직접 REGISTER 하는 서비스 도메인.
+UE 가 직접 REGISTER 하는 서비스 도메인. **`kind` 는 접속환경 클래스**다 — 같은 SIP 스택이라도 신원·전송·번호계획·
+보조서비스·단말이 다른 환경을 따로 운영하기 위한 분류이며, 가입 테이블·CSC 프로비저닝(`Provisioning.Services.<kind>`,
+`/provisioning/me` `services[].kind`)·단말 회선 선택·통계 라벨의 키다.
+
+| kind | 접속환경 | 스택·가입 테이블 | 전형적 정책 |
+|---|---|---|---|
+| `volte` | 이동 VoLTE — 스마트폰 앱, USIM/AKA 또는 Digest, E.164, 공중망 NAT | IMS MMTel 전화 경로(B2BUA+CMP relay, TAS), `volte_subscriptions` | UDP/TCP/TLS 혼용, `media_nat_mode=auto`, 피처코드 없음 |
+| `voip` | 유선 VoIP — 데스크폰·소프트폰·관제 앱, Digest 전용(USIM 없음), 사내망 | **volte 와 같은** MMTel 전화 경로·`volte_subscriptions` | `sec_mechanisms=[tls]`, `media_nat_mode=off`, `media_srtp=required`, `pickup_feature_code`, `transfer_allowed=true` — 대표번호·당겨받기·BLF([dispatch_center.md](dispatch_center.md), [volte_supplementary_services.md](volte_supplementary_services.md)) |
+| `ptt` | MCPTT — PTT 단말 | MCPTT(GroupCallService, floor), `ptt_subscriptions` | TLS, `media_srtp` 정책 |
+
+> **구현 반영**: CSP `CCspServiceMap` kind 검증 `volte|voip|ptt`(그 외 레코드 skip+ERROR). `volte`·`voip` 는 같은 전화 경로 —
+> `GetForUser(user, "volte")` 는 가입 행 `service_ref` 를 먼저 보므로 voip 회선도 자기 서비스(도메인·피처코드·SRTP 정책)로 해석되고,
+> 로그·통계 **서비스축**은 `LogServiceOf` 로 전화 계열을 `volte` 에 합산한다(`{ServiceLogging.Dir}/volte/…`, flow `service`,
+> [sip_statistics.md §3.1](sip_statistics.md)). CSC `service_entry(kind, service_ref)` = `service_ref` ↔ `Provisioning.Services.<k>.name`
+> 매칭(종류 경계는 넘지 않음, 와이어 `services[].kind` = 고른 서비스의 kind), 템플릿 `Provisioning.Services.voip`. **CSC 의 읽기 경로는
+> `services/access_services` 하나** — 정의(name·kind·domain·auth_realm·media_srtp·sec_mechanisms·피처코드)는 관리 store 의
+> access_services 미러(CSP 정본의 읽기 전용 복제)가 정본이고, csc.json `Provisioning.Services.<kind>` 는 단말 도달 정보(host·포트·
+> transport·sms_gateway)만 보탠다(미러 미도달 시 폴백·도메인이 어긋나면 드리프트 경고). H(A1) 결박(`_service_realm`)·관제 앱 번호
+> 개설 후보·IdMS 도메인 유도도 같은 경로다. 콘솔은 템플릿 enum·
+> 상태 화면 라벨 `VoIP`, 관제 앱의 전화 회선은 voip 우선([android_ue_provisioning.md §3](android_ue_provisioning.md)). 이동 서비스로
+> 만들어진 기존 회선의 이관은 [volte_supplementary_services.md §10.3a](volte_supplementary_services.md).
 
 | 필드 | 의미 |
 |---|---|
-| `kind` | `volte` / `ptt` (IBCF 는 이 collection 에 없음). 다른 값이면 해당 레코드를 skip + ERROR 로그 |
+| `kind` | `volte` / `voip` / `ptt`. `volte`·`voip` 는 CSP 가 같은 전화 경로로 다룬다(전화 계열). 다른 값이면 해당 레코드를 skip + ERROR 로그 |
 | `domain` | IMPU/IMPI 조립용. Digest username = `imsi@<domain>`. 비면 레코드 제외 |
 | `auth_realm` | 비우면 domain 상속 |
 | `inbound_policy` | `any` / `restricted` |
@@ -283,7 +303,18 @@ UE 가 직접 REGISTER 하는 서비스 도메인.
 | `media_nat_mode` | `off`(기본) / `auto` / `force` — 단말 NAT 미디어 정책. leg 별 판정 결과를 CMP 자원할당 명령에 전달 ([ue_nat_traversal.md](ue_nat_traversal.md) §4) |
 | `latch_ip_guard` | `strict`(기본) / `off` — NAT latch 소스 IP 를 그 leg 의 SIP 실소스로 제한 (스푸핑 방어) |
 | `sec_mechanisms[]` | `["tls"]`(기본) / `["tls","ipsec-3gpp"]` — 가입자에게 제시할 RFC 3329 보안 메커니즘. `ipsec-3gpp` 는 AKA 가입자에게만, `media_nat_mode=off` 일 때만 유효(위반이면 `ipsec-3gpp` 무시 + ERROR) — [sip_access_security.md §8.3](sip_access_security.md#83-p4--ims-aka--ipsec-본문-67--구현-반영) |
+| `media_srtp` | `off`(기본) / `optional` / `required` — UE↔CMP SRTP(SDES) 정책 ([media_security.md](media_security.md) §4) |
+| `pickup_feature_code` | 당겨받기 피처코드(도메인 번호계획). 빈 값 = 이 서비스에서 픽업 비활성. `voip` 서비스에 둔다 ([volte_supplementary_services.md §5.2](volte_supplementary_services.md)) |
+| `transfer_allowed` | 호 전달(REFER) 허용 — 도메인 기본값(기본 true) ([volte_supplementary_services.md §6.3](volte_supplementary_services.md)) |
 | `priority` | 같은 domain 중복 시 먼저 매칭될 순서 |
+
+같은 kind 의 서비스가 둘 이상일 수 있다(도메인이 다르면). 가입자 → 서비스 해석은 항상 **`service_ref`(name)** 이며(§3),
+kind 대표 서비스(`GetByKind`/`GetDomainByKind` — priority 순 첫 enabled) 는 `service_ref` 가 없는 레거시 행과 서버 신원·로깅
+기본값에만 쓴다. `voip` 가입자는 `service_ref` 필수.
+
+CSC 는 단말 프로비저닝·H(A1) 파생을 위해 서비스의 도메인·realm·포트·정책을 알아야 한다 — 가입 행의 `service_ref` 로
+`Provisioning.Services` 안에서 `name` 이 일치하는 항목을 고르고, 없으면 kind 키 폴백([android_ue_provisioning.md §4](android_ue_provisioning.md)).
+접속서비스 SoT 는 CSP 소유 컬렉션이므로 두 값은 운영자가 동기한다(SoT 단일화는 후속 과제).
 
 ---
 
@@ -355,7 +386,7 @@ RemoteNode  없음
 AccessService volte-test (domain=csp, allowed LN = :5060)
 ```
 
-### 5-2. 표준 (VoLTE + PTT + 1 peering)
+### 5-2. 표준 (이동 VoLTE + 유선 VoIP + PTT + 1 peering)
 
 ```
 LocalNodes:
@@ -387,7 +418,8 @@ RoutingPolicies:
   rp-default priority=1000 match=""  target=access_service:volte-main (catch-all)
 
 AccessServices:
-  volte-main  volte  domain=ims.mnc001... allowed_ln=[lb-access-udp, lb-access-tls]
+  volte-main  volte  domain=ims.mnc001... allowed_ln=[lb-access-udp, lb-access-tls]   media_nat_mode=auto
+  voip        voip   domain=voip.cims...  sec_mechanisms=[tls] media_srtp=required media_nat_mode=off pickup_feature_code="**"
   ptt-main    ptt    domain=ptt.mnc001... allowed_ln=[lb-access-udp]
 ```
 
@@ -420,7 +452,7 @@ AccessServices:
 | Routing 결정 | `CRoutingPolicyEngine` | |
 | ACL 결정 | `CAclPolicyEngine` | |
 | RemoteNode/Route/RouteSet 캐시 | `CspRemoteNodeMap`, `CspRouteMap`, `CspRouteSetMap` | |
-| Access service 캐시 | `CCspServiceMap` (`gclsServiceMap`, volte/ptt 만) | |
+| Access service 캐시 | `CCspServiceMap` (`gclsServiceMap`, volte/voip/ptt) | |
 
 ---
 

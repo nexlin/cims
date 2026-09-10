@@ -37,7 +37,7 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
 |---|---|---|---|
 | GET  | `/org.openmobilealliance.groups/users/{xui}` | 본인 트리 | JSON 배열 — 멤버인 그룹 + **소유(`authorized_user_id`) 그룹**(비멤버라도). 항목 `{uri, display_name, etag, member_count, is_owner}` — `is_owner` = 편집·삭제 가능 |
 | GET  | `…/users/{xui}/{group_uri}` | 멤버 또는 소유자 | `application/vnd.oma.poc.groups+xml` + `ETag`; `If-None-Match` → 304 |
-| PUT  | `…/users/{xui}/{group_uri}` | **신규** = 프로파일 `allow_create_group`(OAM 부여, 프로비저닝 `ptt.allowCreateGroup`) **또는** 관제 그룹 관리 범위(`directory_admin`) · **기존** = 소유자 또는 관리 범위 안 그룹(`org_code` 범위 — 소유권은 유지, [dispatch_center.md §3.4](../design/features/dispatch_center.md)) | 201(신규)/200(갱신) + 문서 + `ETag`. 403 `group_creation_not_allowed` / `not_group_owner`(소유자 없는 콘솔 그룹 포함), 409 `uri_taken`(타인 소유 id — 다른 id 로), 400 `invalid_group_id`·`reserved_prefix`·`invalid_group_document`·`unknown_member`, 412 `etag_mismatch`(`If-Match` 사용 시) |
+| PUT  | `…/users/{xui}/{group_uri}` | **신규** = 프로파일 `allow_create_group`(OAM 부여, 프로비저닝 `ptt.allowCreateGroup`) **또는** 역할 관리 범위(`ptt_group_manage=scope|all`, mcptt_authorization.md §4.1) · **기존** = 소유자 또는 관리 범위 안 그룹(`org_code` 범위 — 소유권은 유지, [dispatch_center.md §3.4](../design/features/dispatch_center.md)) | 201(신규)/200(갱신) + 문서 + `ETag`. 403 `group_creation_not_allowed` / `not_group_owner`(소유자 없는 콘솔 그룹 포함), 409 `uri_taken`(타인 소유 id — 다른 id 로), 400 `invalid_group_id`·`reserved_prefix`·`invalid_group_document`·`unknown_member`, 412 `etag_mismatch`(`If-Match` 사용 시) |
 | DELETE | `…/users/{xui}/{group_uri}` | 소유자 또는 관리 범위 안 그룹 | 200. 403 `not_group_owner`, 404 |
 
 - **신규 그룹 식별자는 클라이언트가 정한다**(XCAP 관습): `g-` + 소문자 hex 8자리(`tel:g-0a1b2c3d`). `adhoc-`/`priv-` 는

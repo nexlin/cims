@@ -29,7 +29,7 @@ from services.mcptt import (notify_csp, refresh_group_members, refresh_login_acc
                             update_user_profile_cache, SERVICE_CONFIG_DEFAULTS,
                             get_service_config, update_service_config_cache,
                             get_service_config_xml)
-from handlers import dispatch as _dispatch  # 관제 그룹 파생(pickup_group 409 게이트)
+from handlers import dispatch as _dispatch  # 전화 그룹 파생(pickup_group 409 게이트)
 from services import admin_auth
 from services.auc import auc as _auc
 from services.mcptt import logger as _logger
@@ -525,22 +525,27 @@ def _service_realm(config: dict, service_ref, kind: str):
     sip_access_security.md §4.3). service_ref 가 없으면 None(400) — 가입자 행의 service_ref 가 CSP 의 서비스
     해석 키이기 때문이다.
 
-    ① 정본 = csp 소유 `access_services` 컬렉션(runtime store — sip_service_model.md): 같은 runtime store 를
-       보는 배포에서 name=service_ref 로 조회.
-    ② 미도달이면 csc.json `Provisioning.Services.<kind>`(volte|ptt) — `/provisioning/me` 가 단말에 내려주는
-       `domain` 과 같은 원천이라 단말 Digest username(imsi@domain)과 결박이 맞는다(csc 는 CSP 를 조회하지
-       않는다 — 두 값은 운영 규약으로 일치시킨다, mcptt.py Provisioning 주석)."""
+    ① 정본 = csp 소유 `access_services` 컬렉션(관리 store 미러 — services/access_services.find, 이름 매칭·가족 경계).
+    ② 미도달이면 csc.json `Provisioning.Services.<kind>`(volte|voip|ptt) — `/provisioning/me` 가 미러 없이 내려주는
+       `domain` 과 같은 원천이라 단말 Digest username(imsi@domain)과 결박이 맞는다(두 값은 운영 규약으로 일치시킨다 —
+       어긋나면 access_services 가 드리프트 경고)."""
     if not service_ref:
         return None
-    try:
-        from services import ha_lookup as _ha, file_store as _fs
-        for r in _fs.load_all(_ha.collection_dir(config, 'access_services')) or []:
-            domain = (r.get('domain') or '').strip()
-            if r.get('name') == service_ref and domain:
-                return domain, ((r.get('auth_realm') or '').strip() or domain)
-    except Exception as e:  # runtime store 미도달·손상은 ② 로 — 이유는 로그로만
-        _logger.log_warning(f"_service_realm: access_services lookup failed ({e}) — Provisioning.Services fallback")
-    svc = (((config or {}).get('Provisioning') or {}).get('Services') or {}).get(kind) or {}
+    from services import access_services as _access_services
+    r = _access_services.find(config, service_ref, kind)
+    if r is not None:
+        domain = (r.get('domain') or '').strip()
+        return domain, ((r.get('auth_realm') or '').strip() or domain)
+    services = ((config or {}).get('Provisioning') or {}).get('Services') or {}
+    # service_ref(= access_services.name)와 name 이 같은 항목 우선 — 유선 voip 회선이 이동 volte 도메인으로 결박되지
+    #   않게(같은 volte_subscriptions 테이블). 종류 경계(전화 계열 ↔ ptt)는 넘지 않는다. 없으면 종류 키 폴백.
+    svc = None
+    for k, v in services.items():
+        if isinstance(v, dict) and (v.get('name') or k) == service_ref and ((k == 'ptt') == (kind == 'ptt')):
+            svc = v
+            break
+    if svc is None:
+        svc = services.get(kind) or {}
     domain = (svc.get('domain') or '').strip()
     if domain:
         return domain, ((svc.get('auth_realm') or '').strip() or domain)
@@ -548,7 +553,8 @@ def _service_realm(config: dict, service_ref, kind: str):
 
 
 def _service_kind(svc: str) -> str:
-    """가입 종류(call|ptt) → Provisioning.Services 키(volte|ptt)."""
+    """가입 종류(call|ptt) → Provisioning.Services 폴백 키(volte|ptt). 실제 항목 선택은 service_ref 이름 매칭이
+    우선(_service_realm) — 전화 계열(volte·voip)은 같은 가입 테이블이라 폴백 키만 volte 다."""
     return 'volte' if svc == 'call' else 'ptt'
 
 
@@ -709,14 +715,14 @@ async def _add_subscription(person_id: str, svc: str, body, config):
                 if not _has_pickup_column(cur):
                     return HandlerResult(status=400, body=_PICKUP_SCHEMA_ERROR)
                 pickup_col, pickup_vals = ', pickup_group', [_parse_pickup_group(body)]
-            # 관제 그룹 귀속 person 의 새 회선 — pickup_group 은 멤버십에서 파생된다(dispatch_center.md §3.2). 직접
-            #   지정값이 다르면 409, 없으면 파생값을 물려받는다(관제사에게 PTT 회선을 뒤에 개설해도 청취 범위가 열린다).
+            # 전화 그룹 귀속 person 의 새 회선 — pickup_group 은 멤버십에서 파생된다(dispatch_center.md §3.2). 직접
+            #   지정값이 다르면 409, 없으면 파생값을 물려받는다(관제사에게 PTT 회선을 뒤에 개설해도 PTT 세션 가시성이 열린다).
             if _has_pickup_column(cur):
-                dg = _dispatch.dispatch_group_of_person(cur, person_id)
+                dg = _dispatch.phone_group_of_person(cur, person_id)
                 if dg is not None:
                     if pickup_vals and pickup_vals[0] != dg:
-                        return HandlerResult(status=409, body={'error': 'derived_from_dispatch_group', 'group_id': dg,
-                                                               'detail': 'pickup_group 은 관제 그룹 멤버십(/api/v1/dispatch-groups)에서 파생된다'})
+                        return HandlerResult(status=409, body={'error': 'derived_from_phone_group', 'group_id': dg,
+                                                               'detail': 'pickup_group 은 전화 그룹 멤버십(/api/v1/phone-groups)에서 파생된다'})
                     pickup_col, pickup_vals = ', pickup_group', [dg]
             if not _has_ha1_column(cur):
                 return HandlerResult(status=503, body=_HA1_SCHEMA_ERROR)
@@ -777,12 +783,12 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
             if 'pickup_group' in body:
                 if not _has_pickup_column(cur):
                     return HandlerResult(status=400, body=_PICKUP_SCHEMA_ERROR)
-                # 관제 그룹 소속 가입자의 pickup_group 은 멤버십에서 파생된다 — 직접 편집 409 (dispatch_center.md §3.2).
+                # 전화 그룹 소속 가입자의 pickup_group 은 멤버십에서 파생된다 — 직접 편집 409 (dispatch_center.md §3.2).
                 #   같은 person 의 다른 회선(관제사 PTT 회선)도 파생 대상이라 유효 그룹(effective)으로 판정한다.
-                dg = _dispatch.effective_dispatch_group(cur, msisdn)
+                dg = _dispatch.effective_phone_group(cur, msisdn)
                 if dg is not None and _parse_pickup_group(body) != dg:
-                    return HandlerResult(status=409, body={'error': 'derived_from_dispatch_group', 'group_id': dg,
-                                                           'detail': 'pickup_group 은 관제 그룹 멤버십(/api/v1/dispatch-groups)에서 파생된다'})
+                    return HandlerResult(status=409, body={'error': 'derived_from_phone_group', 'group_id': dg,
+                                                           'detail': 'pickup_group 은 전화 그룹 멤버십(/api/v1/phone-groups)에서 파생된다'})
                 fields.append("pickup_group=%s"); values.append(_parse_pickup_group(body))
 
             # H(A1) 결박 — imsi/service_ref 가 바뀌면 기존 ha1 은 무효다. 서버는 원문을 모르므로

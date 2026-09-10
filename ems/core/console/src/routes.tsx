@@ -27,6 +27,7 @@ import VerificationHistoryPage from './pages/VerificationHistoryPage'
 import DocsPage from './pages/DocsPage'
 import ExternalSystemsPage from './pages/ExternalSystemsPage'
 import ConsoleAccountsPage from './pages/ConsoleAccountsPage'
+import RolesPage from './pages/RolesPage'
 
 export type { RouteDef, RouteSection } from './nav-types'
 
@@ -98,6 +99,14 @@ const CORE_SECTIONS: RouteSection[] = [
       //   (위 4탭이 수동 설치 경로 — 선언적 일괄 경로는 관리>릴리스>자동 배포)
       { path: '/deploy/external-systems', title: '외부 시스템',   component: ExternalSystemsPage, adminOnly: true },
       { path: '/deploy/console-accounts', title: '콘솔 계정',     component: ConsoleAccountsPage, adminOnly: true },
+      // 역할 = 능력 + 범위 (mcptt_authorization.md §2·§6 콘솔) — 내장 프리셋 읽기 전용 · 관제 프리셋(감독/관리/전체)
+      //   생성 · 범위/대상 · 콘솔 계정과 가입자 배정 한 화면. 콘솔 계정의 role(위 계정 화면)이 이 목록의 id 다.
+      //   저장소가 csc DB(roles) 라 base 프로파일(서비스 무관 부트스트랩 콘솔)에는 두지 않는다.
+      ...(IS_BASE_CONSOLE ? [] : [{ path: '/deploy/roles', title: '역할', component: RolesPage, requiredRole: 'manager' as const,
+        apis: ['csc.roles.list', 'csc.roles.get', 'csc.roles.create', 'csc.roles.update', 'csc.roles.delete',
+               'csc.roles.monitor-targets.put', 'csc.roles.ptt-targets.put',
+               'csc.roles.assignments.list', 'csc.roles.assignments.put', 'csc.roles.assignments.delete',
+               'csc.phone-groups.list', 'csc.ptt-groups.list', 'csc.users.list', 'csc.orgs.list'] }]),
       { path: '/deploy/packages',         title: '패키지',        component: PackagesPage,        adminOnly: true },
     ],
   },

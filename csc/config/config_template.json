@@ -120,7 +120,7 @@
     {
       "key": "provisioning",
       "title": "자동 프로비저닝 (단말 접속 정보)",
-      "description": "단말이 로그인 후 GET /provisioning/me 로 받아가는 서비스별 시그널링 접속 정보 (android_ue_provisioning.md §3). CSC 는 CSP 의 local_nodes/access_services 를 직접 읽을 수 없으므로, 단말에 내려줄 SIP 주소/포트/도메인을 여기에 따로 선언한다 — CSP 의 수신 포트를 바꾸면 이 값도 같이 맞춰야 단말이 새 포트로 등록한다. 포트는 transport 별로 선언하고 단말에는 가용 transport 목록으로 내려간다 — 단말이 그 중 하나를 고르므로 transport 설정은 강제가 아니라 기본값(권장)이다.",
+      "description": "단말이 로그인 후 GET /provisioning/me 로 받아가는 서비스별 시그널링 접속 정보 (android_ue_provisioning.md §3). 종류(kind) = volte(이동 VoLTE)·voip(유선 VoIP — 데스크폰·소프트폰·관제 앱)·ptt. 가입 회선은 service_ref(=name)로 여기의 항목을 고르고, 없으면 종류 키로 폴백한다. CSC 는 CSP 의 local_nodes/access_services 를 직접 읽을 수 없으므로, 단말에 내려줄 SIP 주소/포트/도메인을 여기에 따로 선언한다 — CSP 의 수신 포트를 바꾸면 이 값도 같이 맞춰야 단말이 새 포트로 등록한다. 포트는 transport 별로 선언하고 단말에는 가용 transport 목록으로 내려간다 — 단말이 그 중 하나를 고르므로 transport 설정은 강제가 아니라 기본값(권장)이다.",
       "fields": [
         {
           "key": "Provisioning.CountryCode",
@@ -148,7 +148,7 @@
           "default": "volte",
           "deploy_value": "@VOLTE_SERVICE@",
           "restart": true,
-          "help": "CSP access_services.name — 이 종류의 가입 회선이 참조하는 service_ref. 관제 앱 관리 API(/provisioning/directory/admin services.volte[].name)가 번호 개설 폼의 후보로 내려준다. CSP 의 실제 접속서비스 이름과 일치해야 한다(csc 는 CSP 를 조회하지 않는다 — domain·media_srtp 와 같은 운영 규약). 패키지 기본 = csp/pkg.json 의 volte."
+          "help": "CSP access_services.name — 이 종류의 가입 회선이 참조하는 service_ref. 정본은 CSP access_services(관리 store 미러 — csc 는 미러에서 name·domain·realm·media_srtp·sec_mechanisms 를 읽는다). 이 값은 미러 미도달 시 폴백이며, 미러가 있으면 이름이 같은 항목에 host·포트·transport 를 보탠다. 관제 앱 관리 API(services.volte[].name) 후보도 미러 우선. 패키지 기본 = csp/pkg.json 의 volte."
         },
         {
           "key": "Provisioning.Services.volte.host",
@@ -207,7 +207,7 @@
           "default": "volte.cims.example.kr",
           "deploy_value": "@VOLTE_DOMAIN@",
           "restart": true,
-          "help": "Digest username = imsi@도메인. CSP 의 VoLTE access_service 도메인과 일치해야 등록된다."
+          "help": "Digest username = imsi@도메인. 정본은 CSP access_services 미러의 domain — 이 값은 미러 미도달 시 폴백이며 미러와 다르면 드리프트 경고 후 미러를 쓴다. CSP 의 VoLTE access_service 도메인과 일치시킨다."
         },
         {
           "key": "Provisioning.Services.volte.sms_gateway",
@@ -228,7 +228,94 @@
           ],
           "default": "off",
           "restart": true,
-          "help": "단말 프로파일 mediaSecurity 로 내리는 미디어 SRTP(SDES) 정책. CSP access_services.media_srtp 와 일치해야 한다(csc 는 CSP 를 조회하지 않는다). docs/design/features/media_security.md §7.2"
+          "help": "단말 프로파일 mediaSecurity 로 내리는 미디어 SRTP(SDES) 정책. 정본은 CSP access_services.media_srtp(관리 store 미러) — 이 값은 미러 미도달 시 폴백. docs/design/features/media_security.md §7.2"
+        },
+        {
+          "key": "Provisioning.Services.voip.name",
+          "label": "유선 VoIP 접속서비스 이름",
+          "type": "string",
+          "default": "voip",
+          "restart": true,
+          "help": "CSP access_services.name(kind=voip) — 유선 회선이 참조하는 service_ref. 정본은 CSP access_services 미러(csc 는 미러의 voip 레코드에 이 항목의 host·포트·transport 를 보탠다). 미러 미도달 시 폴백. 관제 앱 관리 API 의 번호 개설 후보(services.volte[] — 전화 회선 버킷)에 volte 와 함께 내려간다."
+        },
+        {
+          "key": "Provisioning.Services.voip.host",
+          "label": "유선 VoIP SIP 주소 (CSP)",
+          "type": "string",
+          "default": "",
+          "restart": true,
+          "help": "단말이 REGISTER 할 CSP 주소. 빈값이면 단말이 접속한 CSC Host 를 사용(올인원 기본). 모듈별로 서버가 나뉘면 CSP 대표/VIP 주소를 넣는다."
+        },
+        {
+          "key": "Provisioning.Services.voip.port",
+          "label": "유선 VoIP SIP 포트",
+          "type": "int",
+          "default": 15060,
+          "min": 1,
+          "max": 65535,
+          "restart": true,
+          "help": "CSP 의 유선 수신 local_node bind_port 와 일치해야 한다(평문은 보통 쓰지 않는다 — TLS 기본)."
+        },
+        {
+          "key": "Provisioning.Services.voip.tcp_port",
+          "label": "유선 VoIP SIP TCP 포트",
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 65535,
+          "restart": true,
+          "help": "0/미설정 = 평문 포트 공용(CSP 가 UDP/TCP 를 같은 포트로 청취하는 기본 구성). TCP 를 다른 포트로 분리 운용할 때만 지정한다. 단말 가용 transport 목록에 이 포트가 실린다."
+        },
+        {
+          "key": "Provisioning.Services.voip.tls_port",
+          "label": "유선 VoIP SIP TLS 포트",
+          "type": "int",
+          "default": 15061,
+          "min": 0,
+          "max": 65535,
+          "restart": true,
+          "help": "유선 VoIP 는 TLS 가 기본이다 — CSP 의 protocol=TLS local_node bind_port. 0 이면 TLS 를 광고하지 않아 유선 단말이 등록할 경로가 없다."
+        },
+        {
+          "key": "Provisioning.Services.voip.transport",
+          "label": "유선 VoIP SIP transport",
+          "type": "enum",
+          "options": [
+            "UDP",
+            "TCP",
+            "TLS"
+          ],
+          "default": "TLS",
+          "restart": true
+        },
+        {
+          "key": "Provisioning.Services.voip.domain",
+          "label": "유선 VoIP 도메인",
+          "type": "string",
+          "default": "voip.cims.example.kr",
+          "restart": true,
+          "help": "Digest username = imsi@도메인. 정본은 CSP access_services 미러의 domain(미러 미도달 시 폴백·다르면 드리프트 경고). 이동 VoLTE 와 다른 도메인 — 유선 번호계획·피처코드·SRTP 정책을 따로 건다."
+        },
+        {
+          "key": "Provisioning.Services.voip.sms_gateway",
+          "label": "유선 VoIP 외부망 문자 게이트웨이",
+          "type": "bool",
+          "default": false,
+          "restart": true,
+          "help": "이 접속서비스에 외부망 휴대전화 SMS/LMS 게이트웨이(IBCF→SMSC TS 24.341 SMS over IMS 또는 SMPP)가 연결돼 있는가. 단말 프로파일 capabilities.smsGateway 로 내려 관제 앱이 외부 번호 [문자] 를 활성/비활성한다(dispatch_desktop_ui.md §4.3). 현재 CIMS 는 게이트웨이를 내장하지 않으므로 기본 false — 외부 게이트웨이 연동 시 운영자가 켠다."
+        },
+        {
+          "key": "Provisioning.Services.voip.media_srtp",
+          "label": "유선 VoIP 미디어 SRTP",
+          "type": "enum",
+          "options": [
+            "off",
+            "optional",
+            "required"
+          ],
+          "default": "off",
+          "restart": true,
+          "help": "단말 프로파일 mediaSecurity 로 내리는 미디어 SRTP(SDES) 정책. 정본은 CSP access_services.media_srtp(관리 store 미러) — 이 값은 미러 미도달 시 폴백. 유선(사내망·TLS)은 required 를 권장한다. docs/design/features/media_security.md §7.2"
         },
         {
           "key": "Provisioning.Services.ptt.name",
@@ -237,7 +324,7 @@
           "default": "ptt",
           "deploy_value": "@PTT_SERVICE@",
           "restart": true,
-          "help": "CSP access_services.name — 이 종류의 가입 회선이 참조하는 service_ref. 관제 앱 관리 API(/provisioning/directory/admin services.ptt[].name)가 번호 개설 폼의 후보로 내려준다. CSP 의 실제 접속서비스 이름과 일치해야 한다(csc 는 CSP 를 조회하지 않는다 — domain·media_srtp 와 같은 운영 규약). 패키지 기본 = csp/pkg.json 의 ptt."
+          "help": "CSP access_services.name — 이 종류의 가입 회선이 참조하는 service_ref. 정본은 CSP access_services(관리 store 미러 — csc 는 미러에서 name·domain·realm·media_srtp·sec_mechanisms 를 읽는다). 이 값은 미러 미도달 시 폴백이며, 미러가 있으면 이름이 같은 항목에 host·포트·transport 를 보탠다. 관제 앱 관리 API(services.ptt[].name) 후보도 미러 우선. 패키지 기본 = csp/pkg.json 의 ptt."
         },
         {
           "key": "Provisioning.Services.ptt.host",
@@ -296,7 +383,7 @@
           "default": "ptt.cims.example.kr",
           "deploy_value": "@PTT_DOMAIN@",
           "restart": true,
-          "help": "PTT access_service 도메인. MCPTT ID 와는 별개."
+          "help": "PTT access_service 도메인. 정본은 CSP access_services 미러(kind=ptt 첫 레코드) — 이 값은 미러 미도달 시 폴백. MCPTT ID 와는 별개."
         },
         {
           "key": "Provisioning.Services.ptt.sms_gateway",
@@ -317,7 +404,7 @@
           ],
           "default": "off",
           "restart": true,
-          "help": "단말 프로파일 mediaSecurity 로 내리는 미디어 SRTP(SDES) 정책. CSP access_services.media_srtp 와 일치해야 한다(csc 는 CSP 를 조회하지 않는다). docs/design/features/media_security.md §7.2"
+          "help": "단말 프로파일 mediaSecurity 로 내리는 미디어 SRTP(SDES) 정책. 정본은 CSP access_services.media_srtp(관리 store 미러) — 이 값은 미러 미도달 시 폴백. docs/design/features/media_security.md §7.2"
         }
       ],
       "scope": "service"

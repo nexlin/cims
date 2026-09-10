@@ -1,12 +1,15 @@
-# VoLTE 보조 서비스 — 관제 소프트폰 (내선·당겨받기·호 전달)
+# 유선 VoIP 보조 서비스 — 데스크폰·소프트폰·관제 앱 (내선·당겨받기·호 전달)
 
-> **설계 정본.** USIM 없는 관제센터용 소프트폰이 내선번호로 서로를 부르고,
-> 당겨받기(call pickup)·호 전달(call transfer)을 쓰는 시나리오의 CSP 보완 설계와 설정 규약.
-> **P0(미디어 정합 — RELAY_MODIFY·SRTP)·P1(관제 축 — 픽업 그룹·서비스별 피처코드·전달 권한)·
+> **설계 정본.** USIM 없는 유선 단말(데스크폰·소프트폰·관제 앱)이 **유선 VoIP 접속서비스**(`kind=voip`,
+> [sip_service_model.md §2-9](sip_service_model.md))에 붙어 내선 라벨로 서로를 부르고, 당겨받기(call pickup)·호 전달
+> (call transfer)·대표번호(전화 그룹, [dispatch_center.md](dispatch_center.md))를 쓰는 시나리오의 CSP 설계와 설정 규약.
+> 당겨받기·대표번호·BLF 는 **유선 전화의 일반 기능**이며 관제 권한과 무관하다.
+> **P0(미디어 정합 — RELAY_MODIFY·SRTP)·P1(그룹 축 — 픽업 그룹·서비스별 피처코드·전달 권한)·
 > P2(표준형 — 수신 INVITE-Replaces·RFC 4235 dialog 이벤트 패키지·489)·P3(구조 — `CTasModule`
 > 소유 이관)은 구현 반영, cspsim 시나리오 5종·S3 검증(`S3-SCN-XFER`/`PICKUP`/`DIALOG` — happy-path
 > 미디어 재고정 + 그룹 경계 403/404·`transfer_allowed` 403·미지 Event 489 게이트)으로 `pickup_group`
-> 실컬럼 축에서 실측 PASS.**
+> 실컬럼 축에서 실측 PASS.** 픽업 축의 org 폴백·전역 `CallPickupId` 는 제거됨(§5.1·§5.2). 유선 VoIP 접속환경 `kind=voip` 는 구현 반영(§10.2) —
+> 이동 서비스로 만들어진 기존 회선의 `voip` 이관(H(A1) 재결박)은 §10.3a.
 >
 > 관련: [sip_access_security.md](sip_access_security.md)(인증), [sip_service_model.md](sip_service_model.md)
 > (접속서비스), [media_security.md](media_security.md)(SRTP), [volte_flows.md](volte_flows.md)(기본 호 flow),
@@ -19,8 +22,8 @@
 | 요구 | 결론 |
 |---|---|
 | USIM 없는 단말 | **이미 지원** — `auth_scheme=digest` + `sip_transport=TLS` + `ha1`. USIM 자료(k/opc) 불요. 신규 코드 없음, 규약만 고정(§3) |
-| 내선번호 | **내선번호 = 가입 id(AoR)** 로 사용(§4). 별칭(내선↔MSISDN 겸용) 계층은 범위 외 — 향후 과제(§9) |
-| 당겨받기 | 기존 `PickUp()` 경로를 보완 — 그룹 축을 `pickup_group` 으로 독립(§5), 미디어를 CMP 경유로 정합(§7) |
+| 내선번호 | **가입 id(AoR) = E.164**, 내선 = 표시 라벨(끝자리 N — `Provisioning.ExtensionDigits`)(§4). 서버 다이얼 플랜 없음 — 내선 확장은 단말이 한다. 별칭(내선을 망 주소로) 계층은 향후 과제(§9) |
+| 당겨받기 | 기존 `PickUp()` 경로를 보완 — 그룹 축을 `pickup_group`(= 전화 그룹 id)으로 독립(§5), 미디어를 CMP 경유로 정합(§7) |
 | 호 전달 | psip REFER(blind/attended) 위에 미디어 재고정을 `RELAY_MODIFY` 로 정합(§6, §7) |
 
 표준 근거: 호 전달 = 3GPP TS 24.629(ECT) / RFC 3515(REFER) / RFC 3891(Replaces) /
@@ -35,10 +38,9 @@ RFC 4235(dialog event) + INVITE-with-Replaces 다. 본 설계는 1차로 **피�
 모든 설계 갭이 해소됐다:
 - **G1(미디어 재고정)** — 전달·픽업 전 경로가 원 통화의 relay 세션을 유지한 채 교체 leg 만
   `RELAY_MODIFY` 로 재고정하고 SRTP 를 유지한다(§6·§7, P0).
-- **G2(픽업 그룹 축)** — 가입자별 `pickup_group`(미지정 시 org 폴백)으로 독립 축을 신설했다
-  (§5.1, P1). `CUserInfo::m_strGroupId` 공급원 = `CspUser::EffectivePickupGroup()`.
-- **G3(피처코드)** — 접속서비스별 `pickup_feature_code`(그룹/지정 픽업)로 이관, 전역
-  `Setup.Sip.CallPickupId` 는 폴백(폐기 예정) (§5.2, P1).
+- **G2(픽업 그룹 축)** — 가입자별 `pickup_group` 으로 독립 축을 신설했다(§5.1, P1). org 폴백은 없다. `CUserInfo::m_strGroupId` 공급원 = `CspUser::EffectivePickupGroup()`.
+- **G3(피처코드)** — 접속서비스별 `pickup_feature_code`(그룹/지정 픽업)로 이관, 전역 `Setup.Sip.CallPickupId` 는
+  제거 (§5.2, P1).
 - **G4(수신 INVITE-with-Replaces)** — `EventIncomingCall` 이 `Replaces`(RFC 3891)를 해석해 대상
   다이얼로그를 Call-ID+태그로 찾아(`CSipUserAgent::MatchReplacesDialog`) 픽업 재고정 코어
   (`PickUpLeg`)로 교체한다. 표준 attended 완결·BLF 클릭 픽업의 서버 수신부 (§6.2, P2).
@@ -59,38 +61,36 @@ INVITE 경로에 DB 질의를 넣지 않는다 — 모든 신규 판정(내선 �
 
 ---
 
-## 3. 신원 모델 — USIM 없는 관제 가입자
+## 3. 신원 모델 — USIM 없는 유선 가입자
 
-관제 소프트폰은 **Digest over TLS** 가입자다. 지원 조합 표
+유선 단말은 **Digest over TLS** 가입자다. 지원 조합 표
 ([sip_access_security.md](sip_access_security.md) §1 "SIP Digest + TLS")의 현행 경로 그대로이며
 신규 메커니즘이 없다. 규약만 고정한다:
 
-| 필드 | 관제 규약 | 근거 |
+| 필드 | 유선 규약 | 근거 |
 |---|---|---|
-| `id` (가입 id = AoR) | **내선번호** (예: `1002`) | `volte_subscriptions.id` 는 자유형 VARCHAR 이자 SIP To user 매칭 키 — 내선이 곧 주소 |
-| `imsi` | **내선번호와 동일** | 프로비저닝이 imsi 필수(auth_id 제거됨). Digest 경로에서 imsi 는 AKA 와 무관한 "IMPI user part" — Digest username = `imsi@<domain>`, ha1 도 이에 묶임 |
+| `id` (가입 id = AoR) | **E.164**(예: `+821310001001`) — 망 신원. 내선(`1001`)은 끝자리 라벨 | 이동 가입자와 같은 주소 공간이라 도메인 간 호·대표번호·연락처가 한 번호 체계로 통한다. 라벨 자릿수 = `Provisioning.ExtensionDigits` |
+| `imsi` | 번호 숫자(USIM 없음 규약 — 관제 앱 관리 API 가 비어 있으면 채운다) | Digest 경로에서 imsi 는 AKA 와 무관한 "IMPI user part" — Digest username = `imsi@<domain>`, ha1 도 이에 묶임 |
 | `auth_scheme` | `digest` (기본값) | AKA 아님 = USIM 불요 |
-| `sip_transport` | `TLS` | 채널 정책 게이트가 평문 유입을 403 차단 (A-SEC-003) |
-| `service_ref` | 관제용 접속서비스 name (§10.2) | 비면 REGISTER 거부 |
-| `pickup_group` | 픽업 그룹 키 (§5, 신설) | |
+| `sip_transport` | `TLS` | 채널 정책 게이트가 평문 유입을 403 차단 (A-SEC-003). 서비스 `sec_mechanisms=[tls]` |
+| `service_ref` | 유선 VoIP 접속서비스 name (`voip`, §10.2) | 비면 REGISTER 거부 |
+| `pickup_group` | 전화 그룹 id — 멤버십에서 파생(§5.1, [dispatch_center.md §3.2](dispatch_center.md)) | |
 
-**식별자 모델과의 관계** ([identifier_model.md](../identifier_model.md)): 내선번호는 운영자가
-바꾸는 표시 라벨이 아니라 **다이얼 가능한 주소 = id 축**이다. 표시 이름은 `users.name` 이
-담당한다. 따라서 내선 변경은 rename 이 아니라 재키잉(구독 삭제·재생성)이며, 이는 전화망의
-일반 관례와 같다.
-
----
+**식별자 모델과의 관계** ([identifier_model.md](../identifier_model.md)): 가입 id(E.164)는 **다이얼 가능한
+주소 = id 축**이고, 내선은 그 끝자리를 잘라 보여 주는 **표시 라벨**이다(어떤 키에도 쓰지 않는다). 표시 이름은
+`users.name` 이 담당한다. 번호 변경은 rename 이 아니라 재키잉(구독 삭제·재생성 + H(A1) 재결박)이며, 이는
+전화망의 일반 관례와 같다.
 
 ## 4. 내선 다이얼링
 
-내선 = 가입 id 이므로 **다이얼 플랜 계층이 필요 없다.** 소프트폰이 `1002` 를 걸면 INVITE 의
-To user 가 `1002` 이고, 기존 `EventIncomingCall` 의 `gclsCspUserMap.isAlive(pszTo)` 조회가
-그대로 맞는다. 내선의 유일성 범위 = 가입 테이블 전역(= CSP 인스턴스 전역)이며, 관제 도메인의
-내선 대역(예: 4자리)을 프로비저닝 규약으로 분리한다.
+서버에는 **다이얼 플랜 계층이 없다.** INVITE 의 To user 는 항상 E.164 이고 기존 `EventIncomingCall` 의
+`gclsCspUserMap.isAlive(pszTo)` 조회가 그대로 맞는다. 내선 다이얼(짧은 번호로 걸기)은 단말이 한다 — 관제 앱의 빠른
+발신 줄·그룹원 띠는 프로비저닝이 내려준 `extension` 라벨을 같은 전화 그룹/조직의 E.164 로 확장해 건다
+([dispatch_desktop_ui.md](dispatch_desktop_ui.md) §4.3). 데스크폰은 단축 다이얼 또는 전화번호부로 대신한다.
 
-한 가입자가 MSISDN 과 내선을 겸하는 별칭(alias) 요구가 생기면, 그때 별칭 인덱스를
-`CspUserMap` 에 두고(`isAlive` 직전 정규화, 인메모리) CSC 에 SoT 컬럼을 신설한다 — routing-policy
-의 예약 필드 `transform_rule_set_refs` 를 이 용도로 실체화하는 방안 포함. 본 설계 범위 외(§9).
+내선을 망 주소(별칭)로 받아야 하는 요구가 생기면, 그때 별칭 인덱스를 `CspUserMap` 에 두고(`isAlive` 직전 정규화,
+인메모리) CSC 에 SoT 컬럼을 신설한다 — routing-policy 의 예약 필드 `transform_rule_set_refs` 를 이 용도로 실체화하는
+방안 포함. 본 설계 범위 외(§9).
 
 ---
 
@@ -98,32 +98,36 @@ To user 가 `1002` 이고, 기존 `EventIncomingCall` 의 `gclsCspUserMap.isAliv
 
 ### 5.1 그룹 축 — `pickup_group`
 
-픽업 대상 판정 축을 조직(`org_id`)에서 **가입자별 `pickup_group`** 로 옮긴다.
+픽업 대상 판정 축은 **가입자별 `pickup_group`** 이고, 그 값은 **전화 그룹 id**([dispatch_center.md §3.1](dispatch_center.md))다.
 
-- SoT: `volte_subscriptions.pickup_group VARCHAR(64) NULL` (신설, §10.1).
-- CSP: `CspUser::m_strPickupGroup` 신설 → 등록 시 `CUserInfo::m_strGroupId` 의 공급원을
-  `pickup_group` 우선, **비어 있으면 `org_id` 폴백**(기존 현장 무변경 전환기 호환)으로 교체.
-- 그룹 키는 운영자가 정하는 식별 문자열(예: `control-room-1`)이며 조직 코드와 무관하다.
+- SoT: `volte_subscriptions.pickup_group VARCHAR(64) NULL` / `ptt_subscriptions.pickup_group`(§10.1) — 값은 전화 그룹 멤버십에서
+  CSC 가 파생한다(person 단위, 직접 편집 409).
+- CSP: `CspUser::m_strPickupGroup` → 등록 시 `CUserInfo::m_strGroupId`. **비어 있으면 그 회선은 어떤 픽업·BLF 축에도 속하지
+  않는다** — `org_id` 폴백은 두지 않는다(같은 조직이라는 사실만으로 남의 호를 당겨받거나 dialog 를 구독할 수 없다).
+  전화 그룹이 없던 현장의 org 단위 사용례는 같은 값의 전화 그룹을 만들어 승격한다([dispatch_center.md §8.1](dispatch_center.md)).
+
+구현: `CspUser::EffectivePickupGroup()` 은 `pickup_group` 만 돌려주고, `CTasModule::PickUp` 은 픽업자의 축 값이 비면 404 로
+끊는다(지정 픽업의 "같은 그룹" 비교가 빈 값끼리 참이 되지 않게). `CUserMap` 그룹 인덱스는 빈 값을 넣지 않는다.
 
 ### 5.2 피처코드 — 서비스별 + 지정 픽업
 
-전역 `Setup.Sip.CallPickupId` 를 **접속서비스별 `pickup_feature_code`**(§10.2)로 이관한다.
-판정은 발신 가입자의 접속서비스(`CspServiceMap::GetForUser`)에서 읽는다.
+피처코드는 **접속서비스 필드 `pickup_feature_code`**(§10.2) — 도메인의 번호계획이다. 판정은 발신 가입자의
+접속서비스(`CspServiceMap::GetForUser`)에서 읽는다. 유선 VoIP 서비스에만 두고 이동 VoLTE 서비스는 비워 둔다(픽업 비활성).
 
 | 다이얼 | 의미 |
 |---|---|
 | `<code>` (정확일치, 예: `**`) | **그룹 픽업** — 내 `pickup_group` 에서 링 중인 아무 호 |
-| `<code><내선>` (prefix, 예: `**1003`) | **지정 픽업** — 해당 내선에 링 중인 호만. 같은 `pickup_group` 소속일 때만 허용 |
+| `<code><번호>` (prefix, 예: `**+821310001003`, 앱은 내선 라벨을 확장해 보낸다) | **지정 픽업** — 해당 가입자에 링 중인 호만. 같은 `pickup_group` 소속일 때만 허용 |
 | 코드 빈 문자열 | 그 서비스에서 픽업 비활성 |
 
-전환기: 전역 `Setup.Sip.CallPickupId` 는 서비스에 `pickup_feature_code` 미지정 시의 폴백으로
-한시 유지 후 제거한다.
+전역 `Setup.Sip.CallPickupId` 는 **없다** — 서비스 필드가 없는 레거시 폴백이었고 이동 VoLTE 가입자까지 픽업을 여는 부작용이
+있어 제거했다(`SipServerSetup`·config_template `sections.tas`·render 에서 삭제. 기존 csp.json 의 값은 무시된다).
 
 ### 5.3 픽업 flow (미디어 경로는 현행 — 그룹 축·피처코드 축은 §8 P1)
 
 ```
 UE-A ──INVITE──► CSP ──INVITE──► UE-B (링 중, CMP relay 할당됨: peer0=A, peer1=B)
-                                  UE-C (B 와 같은 pickup_group)
+                                  UE-C (B 와 같은 전화 그룹)
 UE-C ──INVITE **──► CSP
                     │ [발신자 서비스의 pickup_feature_code 매칭]
                     │ [pickup_group=C 의 그룹에서 링 중 leg 탐색 — 그룹 인덱스, 실패 시 다음 후보]
@@ -288,12 +292,12 @@ org 폴백이라 happy-path 만 판정하고 그룹 경계 검사는 SKIP 으로
 
 ## 9. 범위 외 / 향후 과제
 
-- 내선↔MSISDN 별칭 계층 (§4) — `transform_rule_set_refs` 실체화 후보.
-- 호 보류(hold)/파킹(park) — 별도 설계. 그룹 착신(대표번호 병렬 호출)·통화 감청·관제 그룹 엔티티는
-  [dispatch_center.md](dispatch_center.md) 가 설계 정본이다(`pickup_group` 값이 관제 그룹 id 로 파생된다).
+- 내선을 망 주소로 받는 별칭 계층 (§4) — `transform_rule_set_refs` 실체화 후보.
+- 호 보류(hold)/파킹(park) — 별도 설계. 그룹 착신(대표번호 병렬 호출)·전화 그룹 엔티티·통화 감청은
+  [dispatch_center.md](dispatch_center.md) 가 설계 정본이다(`pickup_group` 값이 전화 그룹 id 로 파생된다).
 - Android UE 의 REFER 발신·픽업 UI — 서버 완성 후 단말 파트.
 - `listener_id` 전파의 TCP/TLS 확장 — 관제 전용 listener 를 `inbound_policy=restricted` 로
-  울타리 치려면 필요 ([sip_service_model.md](sip_service_model.md) §9 갭). 그 전까지 관제
+  울타리 치려면 필요 ([sip_service_model.md](sip_service_model.md) §9 갭). 그 전까지 유선
   서비스 격리는 domain·가입자 `service_ref` 로만 성립한다.
 
 ---
@@ -316,26 +320,26 @@ ALTER TABLE ptt_subscriptions   ADD COLUMN pickup_group VARCHAR(64) NULL DEFAULT
 
 ### 10.2 접속서비스 (`access_services` — 콘솔 관리>설정, `config/access_services.jsonl`)
 
-관제용 서비스는 **새 `kind` 를 만들지 않고 `kind=volte` 레코드 하나를 추가**한다
-(`kind` 는 코드 전반의 리터럴 분기라 신설이 침습적 — 서비스별 플래그로 충분).
+유선 단말은 **유선 VoIP 접속서비스 `kind=voip`** 에 붙는다([sip_service_model.md §2-9](sip_service_model.md)). CSP 는
+`volte`·`voip` 를 같은 전화 경로로 다루고, 다른 것은 이 레코드의 정책 필드다. 이동 VoLTE 서비스에는 피처코드를 두지 않는다.
 
-신설 필드 (config_template `access_services` collection 에 추가 → 콘솔 편집 UI 자동 노출):
+서비스 필드(config_template `access_services` collection — 콘솔 편집 UI 자동 노출):
 
 | 필드 | 타입/기본값 | 의미 |
 |---|---|---|
-| `pickup_feature_code` | string, `""` | 이 서비스의 당겨받기 코드. 빈 값=비활성. `<code>`=그룹 픽업, `<code><내선>`=지정 픽업 (§5.2) |
-| `transfer_allowed` | bool, `true` | REFER(호 전달) 허용 여부 (§6.3) |
+| `pickup_feature_code` | string, `""` | 이 서비스의 당겨받기 코드. 빈 값=비활성. `<code>`=그룹 픽업, `<code><번호>`=지정 픽업 (§5.2) |
+| `transfer_allowed` | bool, `true` | REFER(호 전달) 허용 — 도메인 기본값 (§6.3) |
 
-관제 서비스 권장 레코드 예:
+유선 VoIP 서비스 권장 레코드:
 
 ```json
-{ "name": "dispatch", "kind": "volte", "enabled": true,
-  "domain": "dispatch.cims",            // 내선 대역 전용 도메인 — Digest username = <내선>@dispatch.cims
+{ "name": "voip", "kind": "voip", "enabled": true,
+  "domain": "voip.cims.example.kr",     // 유선 도메인 — Digest username = <imsi>@voip.cims.example.kr
   "auth_realm": "",                     // 비움 = domain 상속
   "inbound_policy": "any",              // restricted 는 TLS 에서 무효(§9) — 사용하지 않는다
   "sec_mechanisms": ["tls"],            // ipsec-3gpp 불필요 (AKA 가입자 없음)
-  "media_srtp": "required",             // 관제망 권장 — TLS 강제와 결합 (media_security.md §4)
-  "media_nat_mode": "off",              // 관제센터 내부망 전제. NAT 구간이 있으면 auto
+  "media_srtp": "required",             // 사내망 권장 — TLS 강제와 결합 (media_security.md §4)
+  "media_nat_mode": "off",              // 사내망 전제. NAT 구간이 있으면 auto
   "latch_ip_guard": "strict",
   "pickup_feature_code": "**",
   "transfer_allowed": true,
@@ -344,36 +348,55 @@ ALTER TABLE ptt_subscriptions   ADD COLUMN pickup_group VARCHAR(64) NULL DEFAULT
 
 ### 10.3 가입자 프로비저닝 (CSC `POST /users/{pid}/call`)
 
-관제 소프트폰 1대 = 가입 1건. 규약(§3)을 그대로 payload 로:
+유선 단말 1대 = 가입 1건. 규약(§3)을 그대로 payload 로:
 
 ```json
-{ "id": "1002",                 // 내선번호 = AoR
-  "imsi": "1002",               // 규약: 내선과 동일 (Digest username = 1002@dispatch.cims)
-  "passwd": "…",                // CSC 가 ha1 로 파생 저장 (평문 미보관)
-  "service_ref": "dispatch",
+{ "id": "+821310001002",      // E.164 = AoR (내선 라벨 1002 는 끝자리)
+  "imsi": "821310001002",     // 규약: 번호 숫자 (Digest username = 821310001002@voip.cims.example.kr)
+  "passwd": "…",              // CSC 가 ha1 로 파생 저장 (평문 미보관)
+  "service_ref": "voip",
   "sip_transport": "TLS",
-  "auth_scheme": "digest",      // 기본값 — 생략 가능. k/opc 없음
-  "pickup_group": "control-room-1",   // 신설 (P1) — 같은 값끼리 당겨받기 가능
+  "auth_scheme": "digest",    // 기본값 — 생략 가능. k/opc 없음
   "dnd": false, "forward_id": "" }
 ```
 
-`pickup_group` 변경은 기존 `PUT /users/{pid}/call/{id}` + `USER_CHANGED` UDP 통지 경로로
-CSP 캐시에 반영된다(신규 통지 경로 없음). 표시 이름은 `users.name` — 콘솔·이력에서 내선과
-함께 표기한다.
+`pickup_group` 은 payload 에 두지 않는다 — 전화 그룹 멤버십(`/api/v1/phone-groups/{id}/members`)에서 파생되며 직접 지정은
+409 다([dispatch_center.md §3.2](dispatch_center.md)). 반영은 기존 `USER_CHANGED` UDP 통지 경로. 표시 이름은 `users.name`,
+내선 라벨은 프로비저닝 `extension`.
+
+### 10.3a 기존 회선의 `voip` 이관 (H(A1) 재결박)
+
+이동 서비스(`service_ref=volte`)로 만들어진 유선 회선(관제석 등)을 `voip` 서비스로 옮기는 절차. Digest 자료 H(A1) =
+MD5(`<imsi>@<domain>:<realm>:<pw>`) 는 **서비스 도메인·realm 에 묶여** 있어, 도메인이 다른 서비스로 `service_ref` 만 바꾸면
+REGISTER 가 403 이 된다 — CSC 는 평문을 보관하지 않아 재파생할 수 없다([sip_access_security.md §4.3·§4.7](sip_access_security.md)).
+
+1. 접속서비스 `voip` 레코드 생성(§10.2) → CSP 반영(콘솔 저장 = agent 반영 + reload) — OAM 이 관리 store 미러를 따라 갱신하고
+   CSC 는 그 미러에서 정의(domain·realm·SRTP·sec-agree·피처코드)를 읽는다. csc.json `Provisioning.Services.voip` 에는 단말 도달
+   정보(host·포트·transport)만 채운다(`name` 을 레코드와 같게 — [sip_service_model.md §2-9](sip_service_model.md)).
+2. 회선마다 `PUT /users/{pid}/call/{msisdn}` 로 `service_ref="voip"` **와 `passwd` 를 함께** 보낸다 — CSC 가 새 도메인·realm 으로
+   H(A1) 을 다시 파생해 저장하고 CSP 에 `USER_CHANGED` 를 보낸다. `service_ref`(또는 `imsi`)가 바뀌는데 `passwd` 가 없으면 400
+   (결박 변경 = 재입력 필수). 콘솔 가입자 회선 편집·관제 앱 [관리] 도 같은 규칙이다.
+3. 전화 그룹의 `service_ref` 를 `voip` 로 바꾼다(`PUT /api/v1/phone-groups/{id}`) — 대표번호 포크의 도메인이 이 값을 따른다.
+4. 단말은 재로그인(재프로비저닝) — `/provisioning/me` `services[]` 에 `kind=voip` 항목이 내려오고 관제 앱은 그것을 전화 회선으로
+   잡는다([android_ue_provisioning.md §3](android_ue_provisioning.md)). 구 프로파일을 캐시한 단말은 옛 도메인으로 REGISTER 해
+   403 을 받으므로 이관은 정지창에 회선 단위로 한다.
+
+dev 검증 스택은 `voip` 를 volte 와 **같은 도메인**(priority 150)으로 시드해 재결박 없이 `service_ref` 만 옮겨도 인증이 유지된다
+(`verify/lib/common/access_services.py`). 상용 규약은 도메인을 분리한다(§10.2).
 
 ### 10.4 csp.json / 템플릿 (`sections.tas`)
 
 | 키 | 처분 |
 |---|---|
-| `Setup.Sip.CallPickupId` | **폐기 예정** — 서비스별 `pickup_feature_code` 로 이관(§5.2). 전환기 동안 서비스 미지정 시 폴백, 이후 템플릿에서 제거 |
+| `Setup.Sip.CallPickupId` | **없음(제거됨)** — 피처코드는 접속서비스 `pickup_feature_code` 만(§5.2). 기존 csp.json 의 값은 무시된다 |
 | `Setup.Sip.SessionTimer.*` | 그대로 — 관제 소프트폰도 세션 타이머 대상 |
 | `Setup.Sip.StaleCallTimeout` | 그대로 |
 
-신규 전역 키 없음 — 픽업·전달의 정책은 전부 접속서비스(§10.2)와 가입자(§10.3) 레벨이다.
+신규 전역 키 없음 — 픽업·전달의 정책은 전부 접속서비스(§10.2)와 전화 그룹 멤버십 레벨이다.
 
 ### 10.5 Local Node / 단말
 
-- LocalNode 는 기존 TLS listener(5061) 재사용 — 관제 전용 listener 를 추가해도 되지만
+- LocalNode 는 기존 TLS listener(5061) 재사용 — 유선 전용 listener 를 추가해도 되지만
   `restricted` 귀속은 TLS 에서 성립하지 않으므로(§9) 격리 근거로 삼지 않는다.
 - 단말(소프트폰) 설정: SIP TLS, Digest(내선/비밀번호), SRTP(SDES) — 능력 선언
   `Security-Client: sdes-srtp` + `mediasec` ([media_security.md](media_security.md) §3).

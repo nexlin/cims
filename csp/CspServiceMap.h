@@ -18,7 +18,7 @@ struct ServiceInfo {
     int id = 0;        // UUID → hash int (v3)
     std::string uuid;  // 원본 UUID 문자열 (v3)
     std::string name;
-    std::string kind;  // voip | ptt  (v3: ibcf/system/console 제거)
+    std::string kind;  // volte(이동 VoLTE) | voip(유선 VoIP — 같은 전화 경로) | ptt  (sip_service_model.md §2-9)
     std::string domain;
     std::string auth_realm;           // 비어있으면 domain 상속
     std::string server_identity_uri;  // R6: CSP 발신 From URI. 비면 sip:cspserver@{domain} 자동.
@@ -35,10 +35,9 @@ struct ServiceInfo {
      *  media_nat_mode≠off 와는 상호배제 (로드 시 무시 + ERROR). tls 는 항상 제시된다. */
     bool sec_ipsec = false;
     /** 당겨받기 피처코드 (volte_supplementary_services.md §5.2) — "<code>"=그룹 픽업,
-     *  "<code><내선>"=지정 픽업. 빈 값=이 서비스에서 픽업 비활성. pickup_code_set=false(필드
-     *  미지정)이면 전역 Setup.Sip.CallPickupId 폴백(전환기 호환). */
+     *  "<code><번호>"=지정 픽업. 빈 값(또는 필드 부재)=이 서비스에서 픽업 비활성. 전역 폴백은 없다 —
+     *  피처코드는 도메인의 번호계획이라 접속서비스 필드만 인정한다(유선 VoIP 서비스에 둔다). */
     std::string pickup_feature_code;
-    bool pickup_code_set = false;
     /** 호 전달(REFER) 허용 (volte_supplementary_services.md §6.3) — false 면 이 서비스
      *  가입자의 REFER 는 403. 기본 true(기존 동작 보존). */
     bool transfer_allowed = true;
@@ -68,15 +67,20 @@ public:
     /** 전체 서비스 목록 스냅샷. */
     std::vector<ServiceInfo> GetAll() const;
 
-    /** kind (voip|ptt) 로 조회. priority 낮은 첫 enabled 서비스 반환. v3 신규. */
+    /** kind (volte|voip|ptt) 로 조회. priority 낮은 첫 enabled 서비스 반환. v3 신규. */
     ServiceInfo GetByKind( const std::string &kind ) const;
 
     /** kind 의 대표 domain 반환 (기존 gclsSetup.GetDomainForService 대체). v3 신규. */
     std::string GetDomainByKind( const std::string &kind ) const;
 
-    /** domain→kind 매핑 구축 (SipLogger 등에서 로깅용으로 사용).
-     *  kind 값: voip | ptt. 하나의 domain 이 중복된 kind 에 걸치면 우선순위 낮은 서비스 승리. */
-    std::map<std::string, std::string> BuildDomainToKindMap() const;
+    /** 로그·통계 서비스축 — 전화 계열 kind(volte·voip)는 `volte`, ptt 는 `ptt`.
+     *  service_log 디렉터리(`{dir}/volte|ptt/…`)·flow `service` 키·OAM 통계 svc 축의 이름이라 접속환경 클래스보다
+     *  거칠다(유선/이동은 같은 전화 경로 — sip_statistics.md §3.1). OAM `access_services.service_axis` 와 같은 규칙. */
+    static std::string LogServiceOf( const std::string &kind );
+
+    /** domain→로그 서비스축 매핑 구축 (SipLogger 분류용). 값은 LogServiceOf(kind).
+     *  하나의 domain 이 중복된 kind 에 걸치면 우선순위 낮은 서비스 승리. */
+    std::map<std::string, std::string> BuildDomainToLogServiceMap() const;
 
     /** inbound_policy=restricted 검사.
      *  @param svc             체크할 서비스

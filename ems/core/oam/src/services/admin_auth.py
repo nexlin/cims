@@ -27,9 +27,19 @@ _SECRET = 'cims_jwt_secret_change_me'  # config 로 갱신
 # ─────────────────────────────────────────────────────────────
 _ROLE_RANK = {'user': 0, 'monitor': 1, 'operator': 2, 'manager': 3, 'admin': 4}
 ROLES = tuple(_ROLE_RANK.keys())
+# 커스텀 역할 id 접두(roles.id = 'role-…', mcptt_authorization.md §2.1). 콘솔 계정에 배정될 수 있으며 OAM 로컬 게이트
+#   (인프라·배포·계정 — DB 없이 판정)에서는 monitor 등급(읽기 전용)으로 본다. 실제 능력(감청·관리 범위 등)은 CSC
+#   services/authz.can() 이 roles 행으로 판정한다 — 이 파일은 그 행을 읽지 않는다.
+CUSTOM_ROLE_PREFIX = 'role-'
+
+
+def is_custom_role(role: Optional[str]) -> bool:
+    return bool(role) and role.startswith(CUSTOM_ROLE_PREFIX) and len(role) > len(CUSTOM_ROLE_PREFIX)
 
 
 def role_rank(role: Optional[str]) -> int:
+    if is_custom_role(role):
+        return _ROLE_RANK['monitor']
     return _ROLE_RANK.get(role or '', 0)
 
 

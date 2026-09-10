@@ -7,7 +7,7 @@ import { api } from './client'
 // listServices() 만 사용 중이라 read-only view 로 축약했고, 나머지 CRUD 는
 // agents.py 의 handle_sip_services + deployments collection API 가 대체.
 
-export type ServiceKind = 'volte' | 'ptt' | 'ibcf' | 'system' | 'console'
+export type ServiceKind = 'volte' | 'voip' | 'ptt' | 'ibcf' | 'system' | 'console'
 export type InboundPolicy = 'any' | 'restricted'
 
 export interface SipService {

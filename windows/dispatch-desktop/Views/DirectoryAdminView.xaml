@@ -228,7 +228,7 @@
                                         <TextBlock Text="SIP 비밀번호 (개설·번호 변경 시 필수)" Style="{StaticResource Hint}" />
                                         <PasswordBox x:Name="PttPw" Style="{StaticResource FieldPw}" PasswordChanged="PttPw_Changed" Margin="0,2,0,6" />
                                         <CheckBox Style="{StaticResource Switch}" Content="PTT 그룹 생성 자격 (allow-create-group)" IsChecked="{Binding AllowCreateGroup}" Margin="0,2,0,6" />
-                                        <CheckBox Style="{StaticResource Switch}" Content="원격 청취 자격 (allow-ambient-listening — 관제사)" IsChecked="{Binding AllowAmbientListening}" />
+                                        <CheckBox Style="{StaticResource Switch}" Content="원격 청취 자격 (allow-ambient-listening) — 콘솔에서 역할로 부여, 여기서는 표시만" IsChecked="{Binding AllowAmbientListening}" IsEnabled="False" />
                                     </StackPanel>
                                 </Border>
                                 <TextBlock Style="{StaticResource Hint}" Text="착신 응답 등으로 관제 화면에 다녀와도 이 폼은 유지됩니다." Margin="0,0,0,6" />

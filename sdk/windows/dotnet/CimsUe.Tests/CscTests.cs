@@ -28,6 +28,19 @@ public class CscTests
     """;
 
     [Fact]
+    public void PhoneServicePrefersVoipOverVolte()
+    {
+        // 유선 voip 회선과 이동 volte 회선이 함께 오면 관제 앱의 전화 계정은 voip(android_ue_provisioning.md §3)
+        string json = ProfileJson.Replace("\"services\": [", "\"services\": [ { \"kind\": \"voip\", \"sip\": { \"host\": \"10.0.0.1\", \"port\": 5060, \"transport\": \"TLS\", \"domain\": \"voip.example.org\" }, \"account\": { \"msisdn\": \"+821310001001\", \"imsi\": \"45033821310001001\" } },");
+        var r = CscClient.ParseProfile(json);
+        Assert.True(r.Ok, r.Reason);
+        Assert.Equal(3, r.Value.Services.Count);
+        Assert.Equal("voip", r.Value.PhoneService!.Kind);
+        Assert.Equal("voip.example.org", r.Value.PhoneService!.Domain);
+        Assert.Equal("volte", r.Value.Service("volte")!.Kind);
+    }
+
+    [Fact]
     public void ParseProfileFlattensNestedArraysAndDispatch()
     {
         var r = CscClient.ParseProfile(ProfileJson);
@@ -44,6 +57,7 @@ public class CscTests
         Assert.Equal(MediaSecurity.Optional, v.MediaSecurity);
         Assert.Equal(new[] { "tls" }, v.SecMechanisms);
         Assert.Null(p.Service("video"));
+        Assert.Same(v, p.PhoneService);                       // voip 없음 → volte 폴백
         Assert.True(p.Dispatch.Present);
         Assert.Equal("dg-1", p.Dispatch.GroupId);
         Assert.Equal("all", p.Dispatch.MonitorScope);

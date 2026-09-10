@@ -518,8 +518,10 @@ sleep 2
 ```
 
 ```bash
-# 관제 — 관제 그룹 시드가 필요하다(dispatch_center.md §8.1). 감시자 M 은 monitor_scope=all 그룹, 대상 A·B 는 다른 그룹.
-#   (verify 픽스처 DispatchGroupFixture 와 같은 INSERT + CSP 4421 DISPATCH_GROUP_CHANGED/USER_CHANGED 통지)
+# 관제 — 전화 그룹·역할 시드가 필요하다(dispatch_center.md §8.1). 감시자 M 은 monitor_call=all 역할(배정은 M 의 person=users.id),
+#   대상 A·B 는 전화 그룹 멤버(같은 그룹이면 BLF 만 열리고 Join 은 역할이 있어야 한다 — §5.2).
+#   (verify 픽스처 verify/lib/items/stage3/_dispatch_common.py DispatchFixture 와 같은 INSERT + CSP 4421
+#    PHONE_GROUP_CHANGED/ROLE_CHANGED/USER_CHANGED 통지)
 # 감청: M 이 먼저 구독(초기 NOTIFY 는 빈 스냅샷, confirmed 는 통화 성립 시점에만 온다) → A→B 통화 → M Join
 ./build/bin/cimsue-cli $A --msisdn +821300000003 ... --json join +821300000002 --timeout 25 --duration 8 &
 ./build/bin/cimsue-cli $A --msisdn +821300000002 ... --json answer --duration 20 &

@@ -137,7 +137,7 @@ def my_check(ctx: VerifyContext) -> ItemResult:
 
 ## 1. Stage 별 상세
 
-### S1 — 정적 검사 (9 항목)
+### S1 — 정적 검사 (12 항목)
 
 | ID | 검사 | 도구 |
 |---|---|---|
@@ -148,8 +148,11 @@ def my_check(ctx: VerifyContext) -> ItemResult:
 | S1-CPP-FORMAT | C++ 포맷 | `clang-format --dry-run -Werror` |
 | S1-UNIT-VERIFY-LIB | verify.lib 단위 | `python3 -m unittest tests.test_verify_lib` |
 | S1-UNIT-HA-INTENT | HA 무장/해제 의도·소유 경계 | `python3 -m unittest tests.test_ha_intent` |
+| S1-UNIT-CSC | CSC 관제·프로비저닝·인가 단위 | `python3 -m unittest tests.test_csc_*` 9모듈 (rbac·realm·GMS CRUD·/provisioning/me·history·IdMS scope·user-profile·management·access_services 단일 읽기 경로) |
 | S1-UNIT-CONSOLE-LAYOUT | 콘솔 레이아웃 영속 계약 | `python3 -m unittest tests.test_console_layouts` |
 | S1-UNIT-GRID-BUDGET | 콘솔 그리드 세로 예산·잠금 | `node tests/frontend/grid_budget.test.mjs` (gridLayout.ts esbuild 번들) |
+| S1-UNIT-OAM-PTT | OAM PTT 세션 인덱스·진행중 병합 | `python3 tests/oam_ptt_index_test.py · tests/oam_ptt_sessions_live_test.py` |
+| S1-UNIT-OAM-STATS | OAM SIP 통계 서비스축(voip→volte 합산)·프로브 | `python3 tests/test_oam_stats_classify.py · tests/test_stats_probe.py` |
 
 S1 FAIL → S2~S6 자동 BLOCKED (stage gate).
 
@@ -192,12 +195,20 @@ S2 FAIL → S3~S6 BLOCKED.
   403)·당겨받기(그룹/지정 + 타 그룹 403·그룹 밖 404)·BLF(dialog NOTIFY + INVITE-Replaces + 그룹 밖 감시 403 +
   미지 Event 489)를 cspsim 3 단말 시나리오의 RTP delta·최종 응답 마커로 판정. 컬럼 부재 DB 는 경계 검사 SKIP
 - **S3-SCN-FA / MONITOR / PTT-LISTEN**: 관제 센터 회귀 ([dispatch_center.md §9](design/features/dispatch_center.md)) —
-  관제 그룹을 DB 에 직접 시드(자기복원, `dispatch_groups` 테이블 미적용 DB 는 SKIP)하고 cspsim `hunt`/`monitor`/
-  `ptt_listen` 시나리오의 RTP delta·최종 응답 마커로 판정. FA = 대표번호 병렬 호출(F1 승자·CANCEL, F3 무응답 overflow,
-  F5 링잉 대표번호 호 지정 픽업, F6 sequential alerting 단계 시한), MONITOR = 업무망 합법감청(M2 Join 200·SSRC 2개·A/B
-  무영향, M5 범위 밖 403), PTT-LISTEN = PTT 그룹콜 청취(L1 recvonly 합류·floor DENY·로스터 은닉, L2 자격 없음 403,
-  L3 범위 밖 403, L4 비멤버 sendrecv 403, L5 공개 청취 로스터 노출 — `ptt_user_profile.allow_ambient_listening` 컬럼
-  미적용 DB 는 SKIP)
+  전화 그룹(`phone_groups`/`phone_group_members` + 멤버 회선 `pickup_group` 파생)과 역할(`roles`/`role_assignments` —
+  principal 은 시험 회선의 **person**(users.id), 대상 `role_monitor_targets`/`role_ptt_targets`)을 공용 픽스처
+  `verify/lib/items/stage3/_dispatch_common.py` 로 DB 에 직접 시드하고 CSP 에 `PHONE_GROUP_CHANGED`/`ROLE_CHANGED`/
+  `USER_CHANGED` 를 보낸다(자기복원 — 시드분 삭제 + 종전 멤버십·pickup_group·person 의 종전 배정 복원). 스키마 프로브:
+  신 테이블 없이 `dispatch_groups` 만 있으면 전환 전 스키마로 같은 의미를 시드(관제 그룹 범위 열, `DISPATCH_GROUP_CHANGED`),
+  둘 다 없으면 SKIP. cspsim `hunt`/`monitor`/`ptt_listen` 시나리오의 RTP delta·최종 응답 마커로 판정.
+  FA = 전화 그룹 `pg-verify-a`(역할 없음) 대표번호 병렬 호출(F1 승자·CANCEL, F3 무응답 overflow, F5 링잉 대표번호 호
+  지정 픽업, F6 sequential alerting 단계 시한, F7 그룹원 dialog 정합), MONITOR = 업무망 합법감청(대상 그룹 `pg-verify-a`
+  A·B — M2 역할 `role-verify-mon` monitor_call=all 의 Join 200·SSRC 2개·A/B 무영향, M5a 범위 밖 역할 `role-verify-out`
+  own·타 그룹 `pg-verify-b` dialog 403, M5b 같은 그룹원·역할 없음 BLF dialog 200 + Join 403(신 스키마만), M5c 타 그룹원·
+  역할 없음 dialog 403), PTT-LISTEN = PTT 그룹콜 청취(역할 `role-vfy-lsn-<group>` ptt_listen=listed·대상=그 그룹 —
+  L1 recvonly 합류·floor DENY·로스터 은닉, L2 자격 없음 403, L3 역할 ptt_listen=none 403, L3c 전화 그룹
+  `pg-vfy-lsn-<group>` 멤버·역할 없음 403(신 스키마만), L4 비멤버 sendrecv 403, L5 공개 청취 로스터 노출 —
+  `ptt_user_profile.allow_ambient_listening` 컬럼 미적용 DB 는 SKIP)
 - **S3-SCN-CHANNEL-POLICY / REALM-MISMATCH / SEC-AGREE / AKA / IPSEC(-LIVE) / TLS-REBIND / MIXED-TRANSPORT /
   AKA-MIGRATE-IDEMPOTENT / PROVISIONING-HA1**: SIP 접속 보안 회귀(V1~V26) — 항목 정의는
   [sip_access_security.md](design/features/sip_access_security.md) 검증표. IPSEC-LIVE 는 dev 에 IPSEC

@@ -100,7 +100,7 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
     [ObservableProperty] private bool _allowAmbientListening;
     private string _origVolte = "", _origPtt = "";
     private string _origVolteImsi = "", _origPttImsi = "";           // 저장된 IMSI — 같은 번호로 PUT 할 때 그대로 실어 서버의 H(A1) 재결박 오판을 막는다
-    private bool _origCreate, _origAmbient;
+    private bool _origCreate;                                          // allowAmbientListening 은 편집 불가(역할 배정의 결과) — 원본 추적 없음
     /// <summary>서버가 접속서비스 후보를 하나도 내려주지 않았다 — 회선 개설이 400 으로 실패하므로 폼에 경고한다(서버 csc.json Provisioning.Services / access_services 미러).</summary>
     public bool NoVolteServices => VolteServices.Count == 0;
     public bool NoPttServices => PttServices.Count == 0;
@@ -114,7 +114,7 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
     public bool IsDirty => IsEditing && Fingerprint() != _formBase;
     private string _formBase = "";
     private string Fingerprint() => string.Join("\u001f", EditName, EditOrg?.Code, EditTitle, EditLoginId, EditPassword, VolteNumber, VolteService?.Name, VolteTransport, VoltePassword,
-                                                PttNumber, PttService?.Name, PttTransport, PttPassword, AllowCreateGroup, AllowAmbientListening, OrgCode, OrgName, OrgParent?.Code, OrgSort);
+                                                PttNumber, PttService?.Name, PttTransport, PttPassword, AllowCreateGroup, OrgCode, OrgName, OrgParent?.Code, OrgSort);
     private void MarkClean() { _formBase = Fingerprint(); OnPropertyChanged(nameof(IsDirty)); }
     protected override void OnPropertyChanged(PropertyChangedEventArgs e)
     {
@@ -285,9 +285,9 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
     [RelayCommand] private void NewMember()
     {
         MemberIsNew = true; EditUserId = 0; EditName = ""; EditOrg = SelectedOrg ?? Orgs.FirstOrDefault(); EditTitle = ""; EditLoginId = ""; EditPassword = "";
-        VolteNumber = ""; VolteService = VolteServices.FirstOrDefault(); VolteTransport = "TLS"; VoltePassword = "";
+        VolteNumber = ""; VolteService = VolteServices.FirstOrDefault(s => s.Kind == "voip") ?? VolteServices.FirstOrDefault(); VolteTransport = "TLS"; VoltePassword = "";   // 관제·유선 회선 기본 = voip 서비스
         PttNumber = ""; PttService = PttServices.FirstOrDefault(); PttTransport = "TLS"; PttPassword = "";
-        AllowCreateGroup = false; AllowAmbientListening = false; _origVolte = _origPtt = _origVolteImsi = _origPttImsi = ""; _origCreate = _origAmbient = false;
+        AllowCreateGroup = false; AllowAmbientListening = false; _origVolte = _origPtt = _origVolteImsi = _origPttImsi = ""; _origCreate = false;
         OnPropertyChanged(nameof(HasVolte)); OnPropertyChanged(nameof(HasPtt));
         MemberEditing = true; OrgEditing = false;
         MarkClean();
@@ -314,7 +314,7 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
         PttTransport = i.Ptt?.SipTransport is { Length: > 0 } pt ? pt : "TLS"; PttPassword = "";
         AllowCreateGroup = i.Ptt?.Profile?.GetValueOrDefault("allowCreateGroup") == true;
         AllowAmbientListening = i.Ptt?.Profile?.GetValueOrDefault("allowAmbientListening") == true;
-        _origVolte = VolteNumber; _origPtt = PttNumber; _origCreate = AllowCreateGroup; _origAmbient = AllowAmbientListening;
+        _origVolte = VolteNumber; _origPtt = PttNumber; _origCreate = AllowCreateGroup;
         _origVolteImsi = i.Volte?.Imsi ?? ""; _origPttImsi = i.Ptt?.Imsi ?? "";
         OnPropertyChanged(nameof(HasVolte)); OnPropertyChanged(nameof(HasPtt));
         MemberEditing = true; OrgEditing = false;
@@ -341,8 +341,9 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
             var r = await m.CreateMemberAsync(input);
             Busy = false;
             if (!r.Ok) { Error = "구성원 생성 실패 — " + ResponseText.Describe(ResponseText.Area.Management, r.Code, r.Reason); return; }
-            if (ptt.Length > 0 && (AllowCreateGroup || AllowAmbientListening))
-                await m.PutPttProfileAsync(r.Value, new Dictionary<string, bool> { ["allowCreateGroup"] = AllowCreateGroup, ["allowAmbientListening"] = AllowAmbientListening });
+            // 원격 청취 자격(allowAmbientListening)은 관제 앱이 바꾸지 않는다 — 콘솔에서 역할(청취 범위)로 부여(서버 400 not_editable).
+            if (ptt.Length > 0 && AllowCreateGroup)
+                await m.PutPttProfileAsync(r.Value, new Dictionary<string, bool> { ["allowCreateGroup"] = AllowCreateGroup });
             _s.Notify.Info("구성원 생성 완료");
             await LoadAsync(force: true); _ = _s.SyncDirectoryAsync();
             MemberEditing = false;
@@ -374,8 +375,8 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
                 if (!await RunAsync(m.PutNumberAsync(uid, kind, input), $"{kind} 회선 {(orig.Length == 0 ? "개설" : "변경")}")) return;
             }
         }
-        if (ptt.Length > 0 && (AllowCreateGroup != _origCreate || AllowAmbientListening != _origAmbient))
-            if (!await RunAsync(m.PutPttProfileAsync(uid, new Dictionary<string, bool> { ["allowCreateGroup"] = AllowCreateGroup, ["allowAmbientListening"] = AllowAmbientListening }), "PTT 자격 저장")) return;
+        if (ptt.Length > 0 && AllowCreateGroup != _origCreate)
+            if (!await RunAsync(m.PutPttProfileAsync(uid, new Dictionary<string, bool> { ["allowCreateGroup"] = AllowCreateGroup }), "PTT 자격 저장")) return;
         MemberEditing = false;
     }
 

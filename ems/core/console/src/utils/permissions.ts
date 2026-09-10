@@ -16,7 +16,11 @@ export const ROLE_LABELS: Record<Role, string> = {
 // 콘솔 계정으로 지정 가능한 역할 (user 는 telephony 전용 → 콘솔 로그인 불가, 보통 미지정).
 export const ASSIGNABLE_ROLES: Role[] = ['admin', 'manager', 'operator', 'monitor', 'user']
 
+/** 커스텀 역할 id(`role-…`, mcptt_authorization.md §2.1) — 메뉴 노출은 monitor 등급으로 본다. 실제 능력은 백엔드 판정. */
+export const isCustomRole = (role?: string | null) => !!role && role.startsWith('role-') && role.length > 5
+
 export function roleRank(role?: string | null): number {
+  if (isCustomRole(role)) return RANK.monitor
   return RANK[(role as Role)] ?? 0
 }
 

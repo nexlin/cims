@@ -109,6 +109,11 @@ const ServiceProfile* Profile::service(const std::string& kind) const {
     return nullptr;
 }
 
+const ServiceProfile* Profile::phoneService() const {
+    if (const ServiceProfile* s = service("voip")) return s;
+    return service("volte");
+}
+
 // ── CscClient ──
 
 struct CscClient::Impl {

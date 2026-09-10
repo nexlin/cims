@@ -479,7 +479,7 @@ static bool g_bPreempt = false;   // -preempt: floor 선점(preemption) 검증 �
 static int  g_iPreemptBy = 0;     // -preempt_by N: 선점자 세션 인덱스 (default 0; chair 검증 시 chair 인덱스)
 static bool g_bNoConfSub = false;  // -no_conf_sub: conference 구독 skip (구 APK 재현)
 static std::string g_strXcapRoot; // -xcap_root: SUBSCRIBE 후 XCAP 문서 능동 GET (Phase 3D 검증)
-static std::string g_strPickupCode = "**";  // -pickup_code: 당겨받기 코드 (pickup 시나리오, 서버 pickup_feature_code/CallPickupId 와 일치)
+static std::string g_strPickupCode = "**";  // -pickup_code: 당겨받기 코드 (pickup 시나리오, 서버 접속서비스 pickup_feature_code 와 일치)
 static std::string g_strPickupTarget;       // -pickup_target: 지정 픽업 대상 내선 — 비면 그룹 픽업(<code>), 있으면 <code><내선>
 static std::string g_strSubscribeEvent = "dialog";  // -event: subscribe_event 시나리오의 Event 토큰 (미지원 토큰 → 489 프로브)
 static std::string g_strPilot;                      // -pilot: hunt 시나리오 대표번호 (dispatch_center.md §4)

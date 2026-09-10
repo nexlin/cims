@@ -1,7 +1,7 @@
 """csc — 관제 데스크 통합 이력 조회 단위 시험 (오프라인, 임시 ServiceLogDir 트리).
 
 dispatch_center.md §5.6/§8.4 · mcdata_messaging.md §4.3: `GET /provisioning/history?kind=call|ptt|message`
-= 관제 그룹 범위(monitor_scope→members / ptt_listen→ptt_groups) 안의 지난 이력만 커서(since)로 준다.
+= 관제사 역할 범위(monitor_call→members / ptt_listen→ptt_groups) 안의 지난 이력만 커서(since)로 준다.
 `services/dispatch_history.py` 의 파일 스캔·범위 대조·커서, `mcptt.handle_provisioning_history` 의
 토큰·범위 게이트(403)·감사.
 
@@ -230,14 +230,16 @@ class HandlerTests(unittest.TestCase):
         cur.fetchone = lambda: getattr(cur, "_r", None)
         conn = types.SimpleNamespace(cursor=lambda: cur, close=lambda: None)
         sys.modules["pymysql"] = types.SimpleNamespace(connect=lambda **kw: conn)
-        # 범위 = disp01 관제 그룹 (dispatch_discovery 스텁)
+        # 범위 = disp01 의 역할(monitor_call=all·ptt_listen=all) — dispatch_discovery 스텁(두 블록 반환 형태)
         self._dispatcher = True
         def _disc(c, uid):
             if not self._dispatcher:
-                return None
-            return {"groupId": "dg-dispatch01", "monitorScope": "all", "pttListen": "all",
-                    "members": [{"volteAor": "tel:+821310002001"}, {"volteAor": "tel:+821310002002"}],
-                    "pttTargets": [{"id": "g002"}]}
+                return {"phoneGroup": None, "dispatch": None}
+            return {"phoneGroup": None,
+                    "dispatch": {"roleId": "role-dispatch01", "groupId": "pg-dispatch01",
+                                 "monitorCall": "all", "pttListen": "all", "monitorScope": "all",
+                                 "members": [{"volteAor": "tel:+821310002001"}, {"volteAor": "tel:+821310002002"}],
+                                 "pttTargets": [{"id": "g002"}]}}
         m.dispatch_discovery = _disc
         # 감사 캡처
         self.audits = []

@@ -98,19 +98,30 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
                    "authId": "", "sipHa1": null, "sipPassword": null, "mcpttId": "tel:+821300000001" }
     }
   ],
-  "dispatch": {                                          // 관제 데스크 소속일 때만 (없으면 키 자체 생략)
-    "groupId": "dg-dispatch01", "groupName": "관제 1조", "pilotId": "+821310001000",
-    "monitorScope": "own", "pttListen": "listed", "listenVisibility": "hidden",
-    "directoryAdmin": "own", "orgCode": "TEAM01",
+  "phoneGroup": {                                        // 전화 그룹 소속일 때만 (없으면 키 자체 생략)
+    "groupId": "pg-dispatch01", "groupName": "관제 1조", "pilotId": "+821310001000",
     "members": [
       { "userId": 5020, "name": "관제1석", "volteAor": "tel:+821310001001",
-        "pttId": "tel:+82510001001", "extension": "1001", "groupId": "dg-dispatch01" },
+        "pttId": "tel:+82510001001", "extension": "1001" },
       { "userId": 5021, "name": "관제2석", "volteAor": "tel:+821310001002",
-        "pttId": "", "extension": "1002", "groupId": "dg-dispatch01" }
+        "pttId": "", "extension": "1002" }
+    ],
+    "etag": "\"8a2f…\""
+  },
+  "dispatch": {                                          // 관제 역할이 있을 때만 (없으면 키 자체 생략)
+    "roleId": "role-dispatch01", "roleName": "관제 1조 감독",
+    "monitorCall": "own", "pttListen": "listed", "listenVisibility": "hidden",
+    "directoryWrite": "own", "orgCode": "TEAM01",
+    "members": [
+      { "userId": 5020, "name": "관제1석", "volteAor": "tel:+821310001001",
+        "pttId": "tel:+82510001001", "extension": "1001", "groupId": "pg-dispatch01" }
     ],
     "pttTargets": [ { "id": "g002", "uri": "tel:g002", "name": "음성그룹2" } ],
+    // 전환기 합성 필드(구 앱) — groupId/groupName/pilotId 는 phoneGroup, monitorScope=monitorCall, directoryAdmin=directoryWrite
+    "groupId": "pg-dispatch01", "groupName": "관제 1조", "pilotId": "+821310001000",
+    "monitorScope": "own", "directoryAdmin": "own",
     "etag": "\"3f1c…\""
-  }
+  }  }
 }
 ```
 
@@ -118,7 +129,10 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
 관제 앱의 주기 재조회(발견 목록 갱신 감지)는 이 경로로 전송 없이 끝난다.
 
 필드 규칙:
-- `sip.host/domain`: 단말이 접속할 **서비스별 시그널링 서버**. VoLTE=CSP, PTT=PSP (다를 수 있음).
+- `services[].kind`: `volte`(이동 VoLTE) · `voip`(유선 VoIP — 데스크폰·소프트폰·관제 앱의 전화 회선) · `ptt`. `volte` 와
+  `voip` 는 단말에서 같은 전화 회선 종류다 — 관제 앱은 `voip` 를 우선 잡고 없으면 `volte`, 이동 앱은 `volte` 만 본다
+  ([sip_service_model.md §2-9](sip_service_model.md)). 구 서버는 `voip` 를 내리지 않는다.
+- `sip.host/domain`: 단말이 접속할 **서비스별 시그널링 서버**. VoLTE/VoIP=CSP, PTT=PSP (다를 수 있음).
 - `sip.transports`/`sip.default`: **가용 transport 목록과 기본값(권장)** — 단말이 이 중에서 고른다.
   transport 마다 포트가 다르므로 목록에 포트가 함께 실린다(같은 포트로 평문과 TLS 를 겸하지 않는다).
   TLS 포트 미설정(`tls_port=0`)이면 TLS 항목이 실리지 않는다. 선택·유지·반영 규칙은
@@ -157,24 +171,30 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
 - `countryCode`: 홈 국가코드(E.164 digits, `+` 없음. 예 `"82"`) — 단말 번호 로컬 표기(§3-1)의 **SoT**.
   CSC 설정 `Provisioning.CountryCode` 우선, 미설정이면 로그인 msisdn 에서 서버가 유도. 판정 불가면
   빈 문자열(`""`) — 명시적 `null` 은 보내지 않는다(Android `org.json` 이 `"null"` 문자열로 오독).
-- `dispatch`: **관제 데스크**([dispatch_center.md §8.4](dispatch_center.md)) — 사용자가 관제 그룹
-  (`dispatch_group_members`) 소속일 때만 실린다(미소속·테이블 미적용 DB 는 키 생략, `null` 없음).
-  - `groupId/groupName/pilotId/monitorScope/pttListen/listenVisibility`: 소속 그룹의 속성 그대로
-    (`monitor_scope` `none|own|listed|all`, `ptt_listen` `none|listed|all`, `listen_visibility` `hidden|visible`).
-  - `directoryAdmin`(`none|own|all`)·`orgCode`: 관제 앱의 조직/구성원/번호·PTT 그룹 **관리 범위**(§3-3,
-    [dispatch_center.md §3.4](dispatch_center.md)) — `own` 의 루트가 `orgCode`(그룹 `org_id` 의 코드, 없으면 `""`).
-    컬럼 미적용 DB·구 서버는 `none`/`""`. 앱은 `none` 이면 관리 탭을 잠근다.
-  - `members[]`: **dialog 감시(RFC 4235) 대상** = 서버가 `monitorScope` 를 CSP `CanWatch` 와 같은 규칙으로 해석한
-    가입자 목록 — 자기 관제 그룹원은 범위와 무관하게 항상(같은 픽업 그룹), `listed` 는 대상 그룹원 추가,
-    `all` 은 전 VoLTE 가입자 **+ VoLTE 회선 없는 PTT 전용 가입자**(`volteAor=""`, 목록 끝). 항목 = `userId`(`users.id`) ·
-    `name` · `volteAor`(`tel:+E.164`, PTT 전용이면 `""`) · `pttId`(첫 PTT 가입 `tel:`, 미가입 `""`) · `extension`(가입
-    번호 끝자리 N — 설정 `Provisioning.ExtensionDigits`, 기본 4. 망 주소가 아닌 **표시 라벨**) · `groupId`(그 가입자의
-    관제 그룹, 무소속 `""`). 정렬 = 자기 그룹(`alert_order`) → 그 외. 앱은 `volteAor`(통화 상태)와 `pttId`(PTT 세션 참가 —
-    사설콜·애드혹·그룹, [dispatch_center.md §5.6a](dispatch_center.md)) **둘 다** 비어 있지 않은 것마다 dialog 를 구독한다.
-    앱의 **그룹원 상태 띠는 `groupId == dispatch.groupId`** 인 항목이다. 앱은 enum 을 해석하지 않는다.
+- `phoneGroup`: **전화 그룹**([dispatch_center.md §3.1·§8.4](dispatch_center.md)) — 사용자의 회선이 전화 그룹
+  (`phone_group_members`) 소속일 때만 실린다(미소속·테이블 미적용 DB 는 키 생략, `null` 없음). 유선 전화 기능이며 관제 권한과 무관.
+  - `groupId/groupName/pilotId`: 소속 그룹의 속성 그대로.
+  - `members[]`: **같은 전화 그룹원** = 그룹원 상태 띠·BLF(dialog 구독, `CanWatch` 규칙 1)·지정 픽업 대상. 항목 = `userId`(`users.id`) ·
+    `name` · `volteAor`(`tel:+E.164`) · `pttId`(첫 PTT 가입 `tel:`, 미가입 `""`) · `extension`(가입 번호 끝자리 N — 설정
+    `Provisioning.ExtensionDigits`, 기본 4. 망 주소가 아닌 **표시 라벨**). 정렬 = `alert_order`.
+  - `etag`: 블록 내용 파생.
+- `dispatch`: **관제 역할**([dispatch_center.md §3.3·§8.4](dispatch_center.md), 정본 [mcptt_authorization.md](mcptt_authorization.md)) —
+  사용자(person)에게 역할이 배정돼 있을 때만 실린다(미배정·테이블 미적용 DB 는 키 생략).
+  - `roleId/roleName/monitorCall/pttListen/listenVisibility`: 역할 속성 그대로(`monitor_call` `none|own|listed|all`, `ptt_listen`
+    `none|listed|all`, `listen_visibility` `hidden|visible`).
+  - `directoryWrite`(`none|own|all`)·`orgCode`: 관제 앱의 조직/구성원/번호·PTT 그룹·전화 그룹 **관리 범위**(§3-3) — `own` 의 루트가
+    `orgCode`(역할 `org_id` 의 코드, 없으면 `""`). 앱은 `none` 이면 관리 탭을 잠근다.
+  - `members[]`: **dialog 감시(RFC 4235) 대상** = 서버가 `monitorCall` 을 CSP `CanWatch` 규칙 2 와 같은 규칙으로 해석한 가입자 목록 —
+    `own` 은 자기 전화 그룹원, `listed` 는 대상 전화 그룹원, `all` 은 전 VoLTE/VoIP 가입자 **+ 회선 없는 PTT 전용 가입자**
+    (`volteAor=""`, 목록 끝). 항목 = `phoneGroup.members[]` 와 같은 열 + `groupId`(그 가입자의 전화 그룹, 무소속 `""`). 앱은
+    `volteAor`(통화 상태)와 `pttId`(PTT 세션 참가 — 사설콜·애드혹·그룹, [dispatch_center.md §5.6a](dispatch_center.md)) **둘 다**
+    비어 있지 않은 것마다 dialog 를 구독한다. 앱은 enum 을 해석하지 않는다.
   - `pttTargets[]`: **conference 구독·청취 대상** = `pttListen` 을 `CanListenPtt` 와 같은 규칙으로 해석한 PTT
     그룹(`listed` 대상, `all` 전 그룹, `none` `[]`). 항목 = `id`(`mcptt_group_id`) · `uri`(시스템 관례 `tel:` 형) ·
     `name`. GMS 멤버 그룹과 겹칠 수 있다 — 앱은 `id` 로 병합한다.
+  - **전환기 합성 필드**(구 `dispatch` 블록 모양을 아는 앱용): `groupId/groupName/pilotId`(= `phoneGroup`), `monitorScope`(= `monitorCall`),
+    `directoryAdmin`(= `directoryWrite`). 전화 그룹만 있고 역할이 없으면 `dispatch` 블록은 합성 필드와 `members[]`(그룹원)만 싣고 범위는
+    `none` 이다. 새 앱은 두 블록을 따로 읽는다.
   - `etag`: 블록 내용 파생(따옴표 포함) — 재조회 결과에서 대상 변경 여부만 볼 때 비교한다. 304 판정은 응답
     헤더 `ETag`(전체) 로만 한다.
 
@@ -278,15 +298,15 @@ RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②P
 - 응답 헤더 `ETag`. 단말이 `If-None-Match` 로 같은 값을 보내면 **304**(본문 없음, 폴링 대역 절약). 변경 없는 304 는
   감사하지 않는다 — 실제 열람(새 항목/최초)만 `E-AUD-016` 로 남긴다.
 
-**범위(scope) 게이트** — 관제 그룹 속성으로 서버가 거른다(CSP `CanWatch`/`CanListenPtt` 와 같은 규칙):
-- `call` · 1:1 `message` = `monitor_scope` 로 해석한 감시 대상 VoLTE 가입자(자기 그룹원 항상 + `listed`
+**범위(scope) 게이트** — 역할 속성으로 서버가 거른다(CSP `CanWatch` 규칙 2/`CanListenPtt` 와 같은 규칙):
+- `call` · 1:1 `message` = 역할 `monitor_call` 로 해석한 감시 대상 가입자(`own` 자기 전화 그룹원 / `listed`
   대상 그룹원 / `all` 전 가입자)가 발신 또는 수신인 것.
-- `ptt` · 그룹 `message` = `ptt_listen` 으로 해석한 청취 대상 PTT 그룹.
-- **관제 그룹 미소속 = `403 no_monitor_scope`**. 열람은 감사(`E-AUD-016 call_monitored`, `tap_mode=history`) —
+- `ptt` · 그룹 `message` = 역할 `ptt_listen` 으로 해석한 청취 대상 PTT 그룹.
+- **역할이 없거나 두 범위가 모두 `none` = `403 no_monitor_scope`**. 열람은 감사(`E-AUD-016 call_monitored`, `tap_mode=history`) —
   당사자 모르게 이력을 여는 동작이라 감사 대상(manager 열람, [dispatch_center.md §5.7](dispatch_center.md)).
 
 > 백엔드는 CSP/CSC 가 공유 NAS(`ServiceLogging.Dir`)에 남기는 파일 SoT(콘솔 `flow_logger` 가 읽는 것과 같은
-> 파일)를 관제 그룹 범위로만 걸러 주는 얇은 구독자 뷰다 — 콘솔 이력 API(oam-svc)를 재구현하지 않는다(집계가 필요한 PTT
+> 파일)를 역할 범위로만 걸러 주는 얇은 구독자 뷰다 — 콘솔 이력 API(oam-svc)를 재구현하지 않는다(집계가 필요한 PTT
 > 창 조회·세션 상세는 그 API 를 범위 게이트 뒤에서 **프록시**한다).
 > 1:1 SDS/SMS 는 CSP `Setup.McData.StoreOneToOneSds` 를 켜야 보관된다([mcdata_messaging.md §4.3](mcdata_messaging.md)).
 
@@ -313,10 +333,11 @@ OAM 미도달 502 `oam_unreachable`. 구현 `csc/src/handlers/dispatch_recording
 
 ## 3-3. Contract — `/provisioning/directory/{admin,orgs,members,groups}` (관제 앱 관리 평면)
 
-관제사(가입자)가 관제 앱에서 조직 트리·구성원·VoLTE/PTT 번호·PTT 그룹을 관리한다. 같은 PKCE provisioning 토큰.
-인가 = 관제 그룹 `directory_admin`(§3 `dispatch.directoryAdmin`, [dispatch_center.md §3.4](dispatch_center.md)) —
-없으면 전부 `403 {"error":"no_directory_admin"}`, 범위 밖 조직·구성원은 `403 {"error":"out_of_scope"}`.
-서버 구현 `csc/src/handlers/dispatch_directory.py`(콘솔 관리 API 와 같은 쓰기 코드 호출).
+관제사(가입자)가 관제 앱에서 조직 트리·구성원·VoLTE/PTT 번호·전화 그룹·PTT 그룹을 관리한다. 같은 PKCE provisioning 토큰.
+인가 = 역할 `directory_write`(§3 `dispatch.directoryWrite`, [dispatch_center.md §3.4](dispatch_center.md),
+[mcptt_authorization.md §2.3](mcptt_authorization.md) `can(principal, directory.write, org)`) — 없으면 전부
+`403 {"error":"no_directory_admin"}`, 범위 밖 조직·구성원은 `403 {"error":"out_of_scope"}`. 콘솔 관리 API 와 **같은 쓰기 코드·같은
+판정**을 지난다(서버 구현 `csc/src/handlers/dispatch_directory.py`). 역할·배정은 이 평면에 없다(콘솔 `authz.manage`).
 
 | 메서드·경로 | 본문 / 응답 |
 |---|---|
@@ -330,15 +351,16 @@ OAM 미도달 502 `oam_unreachable`. 구현 `csc/src/handlers/dispatch_recording
 | `POST /provisioning/directory/members/import` | 구성원 일괄 가져오기 — 본문 `text/csv`(UTF-8, 머리행. 열 = `name, org, title, login_id, password, volte_msisdn, volte_imsi, volte_service_ref, volte_sip_transport, volte_password, ptt_msisdn, ptt_…`; 대소문자·`_`·`-` 무시) 또는 `application/json` `{"rows":[<POST members 본문>…]}`(최대 500행) → `200 {created, failed, results:[{row, status, userId\|error…}]}`. 행마다 `POST members` 와 같은 경로(범위 게이트·감사 E-AUD-006·회선 규약)라 한 행의 실패(403/409/400)가 다른 행을 막지 않는다. 빈 CSV `400 empty_csv`, 초과 `413 too_many_rows` |
 | `PUT /provisioning/directory/members/{userId}/volte\|ptt` | `{msisdn, imsi?, serviceRef?, sipTransport?, password?}` — 같은 번호면 갱신(`200`), 다른 번호면 종전 회선 삭제 + 개설(`201`, `password` 필수). 타인 번호 `409 number_exists`, `pickup_group` 파생 충돌 `409 derived_from_dispatch_group` |
 | `DELETE /provisioning/directory/members/{userId}/volte\|ptt` | `200 {userId, kind, deleted[]}` |
-| `PUT /provisioning/directory/members/{userId}/ptt/profile` | `{allowCreateGroup?, allowAmbientListening?, allowEmergencyCall?, …}`(없는 키는 현재값 유지) → `200 {msisdn, profile}` |
-| `GET /provisioning/directory/groups` | `{ "scope": {directoryAdmin, orgCode}, "groups": [{id, uri, name, memberCount, isOwner, orgCode, sessionType, etag}] }` — 범위 안(또는 내 소유) PTT 그룹. 문서 GET/PUT/DELETE 는 GMS XCAP 그대로([mcptt_api.md §2](../../api/mcptt_api.md) — 관리 범위 안이면 소유자가 아니어도 허용) |
+| `PUT /provisioning/directory/members/{userId}/ptt/profile` | `{allowCreateGroup?, allowEmergencyCall?, allowEmergencyAlert?, allowAdhocCall?, allowEmergencyPrivateCall?}`(없는 키는 현재값 유지) → `200 {msisdn, profile}`. **`allowAmbientListening` 은 바꿀 수 없다** — 현재값과 다른 값이 실려 오면 `400 {"error":"not_editable","key":"allowAmbientListening"}`, 같은 값은 무시(구 앱 호환). 청취 자격은 역할 배정의 결과([mcptt_authorization.md §2.4](mcptt_authorization.md)) |
+| `GET /provisioning/directory/groups` | `{ "scope": {directoryWrite, orgCode}, "groups": [{id, uri, name, memberCount, isOwner, canManage, inListenScope, isMember, orgCode, sessionType, etag}] }` — 관리 범위 안 ∪ 내 소유 ∪ 청취 범위 ∪ 내 멤버 PTT 그룹. 문서 GET/PUT/DELETE 는 GMS XCAP 그대로([mcptt_api.md §2](../../api/mcptt_api.md) — 관리 범위 안이면 소유자가 아니어도 허용) |
+| `GET|POST /provisioning/directory/phone-groups` · `GET|PUT|DELETE …/phone-groups/{id}` · `POST|DELETE …/phone-groups/{id}/members[/{userId}]` | 관리 범위 안 조직의 **전화 그룹**(대표번호·호출 방식·멤버) — 콘솔 `/api/v1/phone-groups` 와 같은 본문·같은 판정([dispatch_center.md §8.2](dispatch_center.md)) |
 
 오류 본문은 `{"error": "<token>", "detail"?: …}`. 앱 문구 사전 = `ResponseText.ForManagementError`. 컬럼 미적용 DB 는
-`403 no_directory_admin`(관리 기능 비활성). 감사 = `E-AUD-006 config_change`.
+`403 no_directory_admin`(관리 기능 비활성). 감사 = `E-AUD-006 config_change`(actor `user:<users.id>`).
 
 ## 3-4. Contract — `GET /provisioning/recordings/{id}…` (관제 앱 녹취 재생)
 
-`id` = §3-2 항목의 `recordingId`. 같은 토큰. CSC 는 관제 범위(§3-2 와 같은 집합)를 판정한 뒤 oam-svc 녹취 API
+`id` = §3-2 항목의 `recordingId`. 같은 토큰. CSC 는 역할 범위(§3-2 와 같은 집합)를 판정한 뒤 oam-svc 녹취 API
 (`/api/v1/recordings/…`, [recording.md](recording.md))로 **프록시**한다 — 응답 본문·상태는 그대로.
 
 | 경로 | 응답 |
@@ -347,7 +369,7 @@ OAM 미도달 502 `oam_unreachable`. 구현 `csc/src/handlers/dispatch_recording
 | `GET /provisioning/recordings/{id}/segments/{seq}/audio?slot=<K>&retry=1` | `200 audio/mp4`(AAC 16k mono — 믹스, `slot` 은 단독 트랙) · `202 {status: transcoding\|recording}`(앱은 0.7초→1.5초 간격으로 최대 120초 재시도) · `500 {status: failed, reason}`(`retry=1` 로 표식 제거 후 재변환) · `404` |
 | `GET /provisioning/recordings/{id}/segments/{seq}/peaks?slot=` | `{seq, slot, buckets, peaks[]}` |
 
-오류: `401` · `403 no_monitor_scope`(관제 미소속) · `403 out_of_scope` · `400 invalid_recording_id`(경로 이탈) · `404 not_found` ·
+오류: `401` · `403 no_monitor_scope`(역할 없음) · `403 out_of_scope` · `400 invalid_recording_id`(경로 이탈) · `404 not_found` ·
 `502 oam_unreachable` · `503 service_log_unavailable`. 오디오 200 마다 감사 `E-AUD-016`(`tap_mode=recording`).
 서버 설정 csc.json `Recording.OamUrl`(비면 `https://{Fm.OamIp}:4419`) · `Recording.VerifyTls`(기본 false).
 
@@ -358,20 +380,26 @@ OAM 미도달 502 `oam_unreachable`. 구현 `csc/src/handlers/dispatch_recording
    - 조회: 로그인 msisdn 으로 person(`user_id`) 확인 → 그 person 의 `volte_subscriptions`+`ptt_subscriptions`
      전 서비스를 반환(로그인 1회로 보유 서비스 모두). 계정: id(msisdn)/imsi/auth_id.
    - 사용자: `users.name` → displayName.
-   - 관제 데스크: `dispatch_discovery` — 소속 관제 그룹 1행 + 범위 enum 해석 질의(members = `volte_subscriptions`
-     ⋈ `users` ⟕ `dispatch_group_members`, WHERE 만 범위별 / pttTargets = `dispatch_group_ptt_targets` ⋈ `ptt_groups`
-     또는 전 그룹). 범위 판정 규칙은 CSP `CCspDispatchGroupMap`(게이트)과 여기(목록) 둘뿐이며 같아야 한다.
+   - 전화 그룹·관제 역할: `dispatch_discovery` — `phoneGroup`(소속 전화 그룹 1행 + 그룹원) / `dispatch`(배정 역할 1행 + 범위 enum
+     해석 질의 — members = `volte_subscriptions` ⋈ `users` ⟕ `phone_group_members`, WHERE 만 범위별 / pttTargets =
+     `role_ptt_targets` ⋈ `ptt_groups` 또는 전 그룹) + 전환기 합성 필드. 범위 판정 규칙은 CSP `CCspRoleMap`(게이트)과 여기(목록)
+     둘뿐이며 같아야 한다.
    - ETag: 응답 전체 정규화 JSON 의 sha256(앞 32 hex) — `If-None-Match` 일치 시 304.
-2. **시그널링 도메인/주소** ← CSC 설정 `Provisioning.Services.<kind>`
-   `{host,port,tcp_port,tls_port,transport,domain}`. 포트 3개가 가용 transport 목록으로 조립된다
-   (`tcp_port=0`→평문 포트 공용, `tls_port=0`→TLS 미광고).
-   `host` 빈값이면 요청 Host(=UE 가 접속한 CSC IP)를 사용(올인원 기본). 다중 노드면 volte=CSP,
-   ptt=PSP 대표/VIP 주소로 채운다.
-   (표준 `access_services` 는 CSP 컬렉션이라 CSC 가 직접 못 읽으므로, 시그널링 매핑은 CSC 설정으로 둔다.
-   **따라서 CSP/PSP 의 `local_nodes` bind_port 를 바꾸면 이 값도 같이 맞춰야 한다** — 두 값은 의도적 중복이다.)
-   `name` = 그 종류의 CSP `access_services.name`(= 가입 회선 `service_ref`). 관제 앱 관리 API
-   `GET /provisioning/directory/admin` 의 `services.<kind>[].name` 후보가 여기서 나오므로 CSP 의 실제 이름과
-   같아야 한다(패키지 기본 `volte`/`ptt` — csp/pkg.json. configure `--volte-service/--ptt-service`).
+2. **서비스 정의 + 시그널링 주소** — 두 겹을 합친다(`services/access_services.entry`, [sip_service_model.md §2-9](sip_service_model.md)):
+   - **정의**(`name·kind·domain·auth_realm·media_srtp·sec_mechanisms·pickup_feature_code·transfer_allowed`) ← CSP `access_services`
+     의 관리 store 미러(정본의 읽기 전용 복제). 서비스 선택은 가입 행의 **`service_ref`** 로 `name` 이 일치하는 레코드(가족 경계 안 —
+     PTT 가입 행이 전화 서비스 name 을 가리켜도 ptt), 없으면 가입 종류의 kind(call→`volte`, ptt→`ptt`) 첫 enabled 레코드(priority
+     오름차순 — CSP `GetForUser` 와 같은 순서). 같은 경로로 H(A1) 파생(`_service_realm`)도 도메인·realm 을 얻는다(유선 회선의 H(A1) 이
+     이동 도메인으로 파생되지 않게). 와이어 `services[].kind` = 고른 레코드의 kind.
+   - **단말 도달 정보**(`host,port,tcp_port,tls_port,transport,ipsec_port_ps/pc,sms_gateway,max_payload_*`) ← CSC 설정
+     `Provisioning.Services.<kind>`(`volte` · `voip` · `ptt`) — 레코드 name 과 같은 `name` 의 항목, 없으면 레코드 kind 키. CSP 레코드에
+     없는 값이라 CSC 설정이 가진다. **CSP/PSP 의 `local_nodes` bind_port 를 바꾸면 이 값도 같이 맞춘다.** 포트 3개가 가용 transport
+     목록으로 조립된다(`tcp_port=0`→평문 포트 공용, `tls_port=0`→TLS 미광고). `host` 빈값이면 요청 Host(=UE 가 접속한 CSC IP)를
+     사용(올인원 기본). 다중 노드면 volte=CSP, ptt=PSP 대표/VIP 주소로 채운다.
+   - 미러가 없으면(미배포·store 비공유) `Provisioning.Services.<kind>` 의 `name·domain·media_srtp·sec_mechanisms` 를 **폴백**으로 쓴다 —
+     운영 규약으로 CSP 와 맞추며, 미러와 도메인이 어긋나면 CSC 가 드리프트 경고를 남기고 미러를 쓴다. 관제 앱 관리 API
+     `GET /provisioning/directory/admin` 의 `services.<kind>[].name` 후보도 미러 우선(패키지 기본 `volte`/`ptt` — csp/pkg.json.
+     configure `--volte-service/--ptt-service`).
 
    설정 소유자는 `csc/config/config_template.json` 의 `provisioning` 섹션(`scope: service`)이다:
    - 콘솔 `관리 > 시스템 > 시스템/인프라` → 서버 선택 → **[패키지 설정] > csc > [설정]** 탭의

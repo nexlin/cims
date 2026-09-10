@@ -33,7 +33,7 @@ struct TokenSet {
 
 /** 프로비저닝 프로파일의 서비스 1개 → AccountConfig 로 변환 가능(toAccount). */
 struct ServiceProfile {
-    std::string kind;                     // volte | ptt
+    std::string kind;                     // volte(이동) | voip(유선) | ptt — 접속환경 클래스(sip_service_model.md §2-9)
     std::string sipHost; int sipPort = 5060; Transport transport = Transport::UDP;
     struct Endpoint { Transport transport; int port; };
     std::vector<Endpoint> transports;
@@ -75,6 +75,9 @@ struct Profile {
     /** GMS 그룹 생성 자격(ptt_user_profile.allow_create_group — 프로비저닝 `ptt.allowCreateGroup`). */
     bool allowGroupCreation = false;
     CIMSUE_API const ServiceProfile* service(const std::string& kind) const;
+    /** 전화 회선 — 유선 `voip` 우선, 없으면 이동 `volte`(android_ue_provisioning.md §3). 관제 앱의 전화 계정 선택 규칙.
+     *  이동 앱은 service("volte") 를 그대로 쓴다. */
+    CIMSUE_API const ServiceProfile* phoneService() const;
 };
 
 /** GMS 목록 항목. isOwner = 토큰 주체가 authorized user(편집·삭제 가능). */

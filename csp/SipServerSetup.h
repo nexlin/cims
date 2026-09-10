@@ -88,7 +88,6 @@ public:
     std::string m_strCaCertFile;
 
     /** Call Pickup 을 위한 아이디 ( 전화번호 ) */
-    std::string m_strCallPickupId;
 
     // 관제 센터 (Setup.Sip.Dispatch — docs/design/features/dispatch_center.md §8.3)
     /** 세션당 감청(tap) leg 상한 — 초과 Join 은 486 (§5.5) */
@@ -112,7 +111,7 @@ public:
 
     // Realm/AuthRealm 필드는 없다.
     //   domain/auth_realm 의 SOT 는 access_services.jsonl (CCspServiceMap, CspServiceMap.{h,cpp}).
-    //   도메인→서비스 매핑은 CCspServiceMap::BuildDomainToKindMap().
+    //   도메인→서비스 매핑은 CCspServiceMap::BuildDomainToLogServiceMap() (전화 계열 volte·voip 합산).
 
     /** SIP REGISTER timeout 최소 시간 */
     int m_iMinRegisterTimeout;
@@ -129,8 +128,10 @@ public:
     /** 그룹 정보 저장 폴더 - 비어 있으면 DB 를 사용한다. */
     std::string m_strGroupDataFolder;
 
-    /** 관제 그룹 JSON fallback 폴더 (DataFolder.DispatchGroup) - 비어 있으면 DB 를 사용한다. */
-    std::string m_strDispatchGroupDataFolder;
+    /** 전화 그룹 JSON fallback 폴더 (DataFolder.PhoneGroup) - 비어 있으면 DB 를 사용한다. */
+    std::string m_strPhoneGroupDataFolder;
+    /** 역할 JSON fallback 폴더 (DataFolder.Role) - 비어 있으면 DB 를 사용한다. */
+    std::string m_strRoleDataFolder;
 
     /** SIP REGISTER 를 전송한 후, 수신한 401 응답의 Authenticate 를 저장하여서 다음 주기의 SIP REGISTER 메시지를 생성할
      * 때에 사용하는 경우 true 로 설정한다. */
@@ -398,8 +399,6 @@ public:
 
     bool Read( const char *pszFileName );
     bool Read();
-
-    bool IsCallPickupId( const char *pszId );
 
     bool IsMonitorIp( const char *pszIp );
 

@@ -269,7 +269,7 @@ private:
          *  제외(청취자는 세션을 붙들지 못한다), 참가자 DB/이력에 남기지 않고 감사(E-AUD-016)로 남긴다. */
         bool bListenOnly = false;
         bool bListenHidden = true;   ///< 관제 그룹 listen_visibility=hidden — 로스터(RFC 4575)·통지에서 은닉
-        std::string strListenGroup;  ///< 청취자의 관제 그룹 id (감사 상관 키)
+        std::string strListenGroup;  ///< 청취자의 역할 id (감사 E-AUD-016 `role` 상관 키)
         time_t tListenStart = 0;
         bool bInitiator = false;  ///< 세션 개시자 leg (ProcessGroupCall) — dialog direction=initiator
     };
@@ -302,10 +302,10 @@ private:
 
     /** 그룹의 활성(확립·비청취) leg 존재 — 세션 활성 판정 단일 기준. m_mutex 보유 상태에서 호출. */
     bool HasActiveLeg( const std::string &strGroupId ) const;
-    /** PTT 청취 감사 이벤트 (E-AUD-016 call_monitored, tap_mode=ptt_listen) — started/ended/denied. */
-    static void EmitPttListenAudit( const char *pszPhase, const std::string &strMonitor,
-                                    const std::string &strDispatchGroup, const std::string &strPttGroup,
-                                    const std::string &strSesId, int iDurMs );
+    /** PTT 청취 감사 이벤트 (E-AUD-016 call_monitored, tap_mode=ptt_listen) — started/ended/denied.
+     *  strRole = 청취자 역할 id (dispatch_center.md §5.7). */
+    static void EmitPttListenAudit( const char *pszPhase, const std::string &strMonitor, const std::string &strRole,
+                                    const std::string &strPttGroup, const std::string &strSesId, int iDurMs );
 
     // Track Active Calls ((UserId, GroupId) -> CallId)
     //   멀티그룹 동시 참여: 사용자는 그룹별 독립 다이얼로그를 가진다 (그룹당 1콜).

@@ -757,7 +757,7 @@ Content-Type: application/json
 | `id` | string | Y | 그룹 MSISDN (E.164 형식) |
 | `name` | string | Y | 그룹 표시 이름 |
 | `video_enabled` | boolean | N | 영상 지원 여부 (기본: false) |
-| `allow_conference_state` | boolean | N | `on-network-allow-conference-state`(TS 24.481) — 멤버의 conference 이벤트(RFC 4575) 구독 허용 (기본: true). false 면 CSP 가 초기 SUBSCRIBE 를 403 `Warning: 138` 로 거절. 관제사 청취 범위 인가는 별도([dispatch_center.md §5.6](../design/features/dispatch_center.md)) |
+| `allow_conference_state` | boolean | N | `on-network-allow-conference-state`(TS 24.481) — 멤버의 conference 이벤트(RFC 4575) 구독 허용 (기본: true). false 면 CSP 가 초기 SUBSCRIBE 를 403 `Warning: 138` 로 거절. 관제사 청취 범위 인가는 별도(역할 `ptt_listen` — [dispatch_center.md §5.6](../design/features/dispatch_center.md)) |
 | `floor_policy` | string | N | 동시 발언 정책 `single`(기본)/`dual`/`multi` |
 | `max_talkers` | integer | N | `multi` 의 동시 발언자 수 (2~8, CMP 슬롯 상한). `single`/`dual` 은 미해석 — 2 로 정규화 |
 | `members` | array | N | 초기 멤버 목록 |
@@ -927,48 +927,66 @@ curl -k -X DELETE "https://192.168.0.2:4421/api/v1/ptt/groups/%2B82571910001/mem
 }
 ```
 
-### 6.7 관제 그룹 (`/api/v1/dispatch-groups`)
+### 6.7 전화 그룹 (`/api/v1/phone-groups`)
 
-관제 그룹 = 픽업 그룹 + (선택) 대표번호 + (선택) 감청 범위 ([dispatch_center.md](../design/features/dispatch_center.md) §3·§8.2).
-불변 id(`dg-xxxxxxxx`) 가 곧 가입자 `pickup_group` 값이다 — **멤버십이 SoT** 라 멤버 추가/제거가 가입자의
-`pickup_group` 을 파생 갱신하고(`USER_CHANGED`), 가입자 API 에서 그 값을 직접 바꾸면 409 `derived_from_dispatch_group`.
-관제 그룹은 person 귀속이다: 멤버 행은 대표번호 포크·dialog 감시 대상인 **VoLTE 회선** 하나이고, 같은 person 의
-다른 회선(관제사 **PTT 회선**)은 멤버가 아니어도 `pickup_group` 을 물려받는다(재계산 규칙 = 자기 멤버십 → 같은 person
-의 멤버십, dispatch_center.md §3.2). 이 파생이 PTT 청취·conference 구독 범위(§5.6)의 답이므로 PTT 회선을 멤버로
-넣지 않는다(포크 대상이 돼 PTT 앱이 울린다). 파생 회선의 직접 편집도 409, 관제 그룹 귀속 person 의 새 회선(`POST
+전화 그룹 = 픽업 그룹 + (선택) 대표번호 — **유선 전화의 일반 기능**([dispatch_center.md](../design/features/dispatch_center.md) §3.1·§8.2).
+불변 id(`pg-xxxxxxxx`, 전환 전 `dg-…` 유지) 가 곧 가입자 `pickup_group` 값이다 — **멤버십이 SoT** 라 멤버 추가/제거가 가입자의
+`pickup_group` 을 파생 갱신하고(`USER_CHANGED`), 가입자 API 에서 그 값을 직접 바꾸면 409 `derived_from_phone_group`.
+전화 그룹은 person 귀속이다: 멤버 행은 대표번호 포크·BLF 대상인 **유선 회선** 하나이고, 같은 person 의 다른 회선(PTT 회선)은
+멤버가 아니어도 `pickup_group` 을 물려받는다(재계산 규칙 = 자기 멤버십 → 같은 person 의 멤버십, dispatch_center.md §3.2). PTT 회선을
+멤버로 넣지 않는다(포크 대상이 돼 PTT 앱이 울린다). 파생 회선의 직접 편집도 409, 전화 그룹 귀속 person 의 새 회선(`POST
 /users/{pid}/{call|ptt}`)은 파생값을 물려받는다(다른 값 지정 시 409).
-CSP 에는 `DISPATCH_GROUP_CHANGED`(uri=그룹 id) 로 재적재를 알린다. 가입자당 그룹 하나(다른 그룹 소속 가입자를
+CSP 에는 `PHONE_GROUP_CHANGED`(uri=그룹 id) 로 재적재를 알린다. 가입자당 그룹 하나(다른 그룹 소속 가입자를
 추가하면 이동, 응답 `moved_from`).
 
-| 메서드·경로 | 권한 | 설명 |
+| 메서드·경로 | 권한(능력) | 설명 |
 |---|---|---|
-| `GET /api/v1/dispatch-groups[?org_id=]` | monitor+ | 목록(멤버·대상 포함). 테이블 미적용 DB 는 `{groups:[], schema:"not_migrated"}` |
-| `POST /api/v1/dispatch-groups` | operator+ (`monitor_scope`/`ptt_listen`/`directory_admin`≠none 은 manager) | 생성 — `{id?, name, pilot_id?, service_ref?(pilot 시 필수), alert_mode?, no_answer_sec?, busy_members?, overflow_target?, monitor_scope?, ptt_listen?, listen_visibility?, directory_admin?(none\|own\|all — 관제 앱 조직/구성원/번호·PTT 그룹 관리 범위, own=org_id 하위; 컬럼 미적용 DB 는 400 `schema_not_migrated`), org_id?, members?[{user_id, alert_order}]}` → 201 `{id}` |
-| `GET|PUT|DELETE /api/v1/dispatch-groups/{id}` | monitor+ / operator+ / operator+ | 단건·부분 갱신·삭제(멤버와 같은 person 의 파생 회선 `pickup_group` 재계산 — 남는 멤버십 없으면 NULL) |
-| `GET|POST /api/v1/dispatch-groups/{id}/members` | monitor+ / operator+ (감청·청취 그룹은 manager) | 멤버 목록 / 추가·이동 `{user_id, alert_order?}` → 201 |
-| `DELETE /api/v1/dispatch-groups/{id}/members/{user_id}` | operator+ | 멤버 제거(같은 person 의 파생 회선 포함 `pickup_group` 재계산 → NULL) |
-| `PUT /api/v1/dispatch-groups/{id}/monitor-targets` | manager+ | `{target_group_ids:[dg-…]}` — `monitor_scope=listed` 대상 |
-| `PUT /api/v1/dispatch-groups/{id}/ptt-targets` | manager+ | `{ptt_group_ids:[mcptt_group_id…]}` — `ptt_listen=listed` 대상 |
+| `GET /api/v1/phone-groups[?org_id=]` | `directory_read` | 목록(멤버 포함). 테이블 미적용 DB 는 `{groups:[], schema:"not_migrated"}` |
+| `POST /api/v1/phone-groups` | `directory_write`(범위 안 `org_id`) | 생성 — `{id?, name, pilot_id?, service_ref?(pilot 시 필수 — 유선 VoIP 서비스), alert_mode?, no_answer_sec?, busy_members?, overflow_target?, org_id?, members?[{user_id, alert_order}]}` → 201 `{id}` |
+| `GET|PUT|DELETE /api/v1/phone-groups/{id}` | `directory_read` / `directory_write` | 단건·부분 갱신·삭제(멤버와 같은 person 의 파생 회선 `pickup_group` 재계산 — 남는 멤버십 없으면 NULL) |
+| `GET|POST /api/v1/phone-groups/{id}/members` | `directory_read` / `directory_write` | 멤버 목록 / 추가·이동 `{user_id, alert_order?}` → 201 |
+| `DELETE /api/v1/phone-groups/{id}/members/{user_id}` | `directory_write` | 멤버 제거(같은 person 의 파생 회선 포함 `pickup_group` 재계산 → NULL) |
 
-**오류:** 409 `pilot_conflict`(대표번호가 가입 id·다른 대표번호와 충돌) · 409 `group_exists` · 403 `manager_required`
-(감청/청취 범위 변경·그 그룹 편입을 operator 가 시도 — 편입되는 가입자 쪽 역할 게이트는 없다, 역할은 콘솔 계정에만) ·
-400 `schema_not_migrated`(`sql/migrate_dispatch_groups.sql` 미적용) · 404.
+**오류:** 409 `pilot_conflict`(대표번호가 가입 id·다른 대표번호와 충돌) · 409 `group_exists` · 403 `forbidden`
+(`{capability, scope}`) · 400 `schema_not_migrated` · 404.
 
 **그룹 객체:**
 ```json
-{ "id": "dg-7f3a91c2", "name": "관제 1반", "pilot_id": "7000", "service_ref": "volte",
-  "alert_mode": "parallel", "no_answer_sec": 30, "busy_members": "skip", "overflow_target": null,
-  "monitor_scope": "own", "ptt_listen": "none", "listen_visibility": "hidden", "directory_admin": "none", "org_id": 1,
-  "members": [{ "user_id": "+821300000004", "alert_order": 0 }], "monitor_targets": [], "ptt_targets": [] }
+{ "id": "pg-7f3a91c2", "name": "관제 1반", "pilot_id": "+821310001000", "service_ref": "voip",
+  "alert_mode": "parallel", "no_answer_sec": 30, "busy_members": "skip", "overflow_target": null, "org_id": 1,
+  "members": [{ "user_id": "+821310001001", "alert_order": 0 }] }
 ```
 
+관제 앱(PKCE 토큰)의 같은 자원 = `/provisioning/directory/phone-groups`([android_ue_provisioning.md §3-3](../design/features/android_ue_provisioning.md)) —
+같은 본문·같은 판정.
+
+### 6.8 역할 (`/api/v1/roles`)
+
+권한 모델 정본 = [mcptt_authorization.md](../design/features/mcptt_authorization.md). 역할 = 능력 + 범위 한 행(내장 프리셋
+`admin/manager/operator/monitor` 는 읽기 전용, 관제 프리셋 `감독/관리/전체` 는 생성 시 초깃값). **전부 `authz_manage`**(콘솔
+`manager` 이상) — 관제 앱에는 이 API 가 없다.
+
+| 메서드·경로 | 설명 |
+|---|---|
+| `GET /api/v1/roles` | 내장 4 + 커스텀 목록(대상·배정 수 포함) |
+| `POST /api/v1/roles` | `{id?, name, preset?(supervisor\|admin\|full), directory_write?, directory_read?, ptt_group_manage?, monitor_call?, ptt_listen?, listen_visibility?, history_read?, org_id?}` → 201 `{id}`. `authz_manage`/`audit_read`/`alarm_ack`/`mcptt_control` 은 커스텀에 켤 수 없다(400 `not_delegable`) |
+| `GET|PUT|DELETE /api/v1/roles/{id}` | 단건·부분 갱신·삭제(내장은 PUT/DELETE 403 `builtin`). 배정이 남은 역할 삭제 409 `assigned` |
+| `PUT /api/v1/roles/{id}/monitor-targets` | `{phone_group_ids:[pg-…]}` — `monitor_call=listed` 대상 |
+| `PUT /api/v1/roles/{id}/ptt-targets` | `{ptt_group_ids:[mcptt_group_id…]}` — `ptt_listen=listed` 대상 |
+| `GET /api/v1/roles/{id}/assignments` | 배정 목록 `[{principal_type, principal_id, name}]`(콘솔 계정은 OAM `console_accounts.role` 을 조회해 합친다) |
+| `PUT /api/v1/roles/{id}/assignments` | `{principal_type:"user", principal_id:<users.id>}` — 사람당 역할 하나(다른 역할에서 이동, 응답 `moved_from`). `ptt_listen≠none` 이면 대상 person 의 `ptt_user_profile.allow_ambient_listening=1` 동기 + `ROLE_CHANGED`. 콘솔 계정 배정은 OAM `PUT /api/v1/console-accounts/{login_id}` `role` 로 |
+| `DELETE /api/v1/roles/{id}/assignments/{principal_type}/{principal_id}` | 해제 — 청취 범위 역할이었으면 `allow_ambient_listening=0` 동기 |
+
+감사 = `E-AUD-006 config_change`(entity `role`|`role_assignment`, actor `console:<login>`).
+
 > PTT 프로파일(`PUT /api/v1/users/{pid}/ptt/{msisdn}/profile`)의 `allow_ambient_listening`(TS 24.484
-> allow-ambient-listening, 기본 false) 은 PTT 그룹콜 청취 **자격**이고, 범위는 관제 그룹 `ptt_listen` 이다
-> (dispatch_center.md §5.6). 컬럼 미적용 DB(`sql/migrate_ptt_ambient_listening.sql`) 에서는 응답이 false 고 입력 시 400.
+> allow-ambient-listening, 기본 false) 은 PTT 그룹콜 청취 **자격**이고 **역할 배정의 결과로만 바뀐다** — 이 API 에 실려 오면
+> 400 `not_editable`(mcptt_authorization.md §2.4). 범위는 역할 `ptt_listen` 이다(dispatch_center.md §5.6). 컬럼 미적용
+> DB(`sql/migrate_ptt_ambient_listening.sql`) 에서는 응답이 false.
 >
 > 같은 프로파일의 `allow_create_group`(CIMS 확장 allow-create-group, 기본 false) 은 관제사가 **GMS XCAP 으로 PTT 그룹을
-> 생성**할 자격이다(수정·삭제는 그룹 소유로 판정 — mcptt_authorization.md §4.1). 부여 주체는 OAM(이 API·콘솔 가입자
-> 편집). 컬럼 미적용 DB(`sql/migrate_ptt_allow_create_group.sql`) 에서는 응답이 false 고 입력 시 400.
+> 생성**할 자격이다(수정·삭제는 그룹 소유 또는 관리 범위로 판정 — mcptt_authorization.md §4.1). 부여 주체는 `directory_write`
+> (이 API·콘솔 가입자 편집·관제 앱 관리 화면). 컬럼 미적용 DB(`sql/migrate_ptt_allow_create_group.sql`) 에서는 응답이 false 고 입력 시 400.
 
 ---
 
@@ -1043,12 +1061,13 @@ CSP 에는 `DISPATCH_GROUP_CHANGED`(uri=그룹 id) 로 재적재를 알린다. �
 | user_id | VARCHAR(32) | N | - | PK (복합), FK → ptt_subscriptions.id ON DELETE CASCADE | PTT 구독 MSISDN |
 | priority | INT | N | 0 | CHECK (priority >= 0) | 우선순위 (0=최고) |
 
-### dispatch_groups / dispatch_group_members / dispatch_group_monitor_targets / dispatch_group_ptt_targets (관제 그룹)
+### phone_groups / phone_group_members · roles / role_assignments / role_monitor_targets / role_ptt_targets (전화 그룹 · 역할)
 
-`sql/migrate_dispatch_groups.sql` — 컬럼 정의는 [db_schema.md](../design/db_schema.md) §2 와
-[dispatch_center.md](../design/features/dispatch_center.md) §8.1. `dispatch_groups.id`(VARCHAR(64), `dg-…`) 가
-`volte_subscriptions.pickup_group` 값이며(같은 person 의 `ptt_subscriptions.pickup_group` 도 파생), `dispatch_group_members.user_id` 가 PK(가입자당 그룹 하나).
-`dispatch_group_ptt_targets.ptt_group_id` 는 `ptt_groups.id`(surrogate) 참조 — API 는 `mcptt_group_id` 로 노출한다.
+`sql/migrate_phone_groups_roles.sql`(설계 — 전환 전 `sql/migrate_dispatch_groups.sql` 의 `dispatch_groups` 계열 4 테이블) — 컬럼 정의는
+[db_schema.md](../design/db_schema.md) §2 와 [dispatch_center.md](../design/features/dispatch_center.md) §8.1(전환 표 포함).
+`phone_groups.id`(VARCHAR(64), `pg-…`/전환 전 `dg-…`) 가 `volte_subscriptions.pickup_group` 값이며(같은 person 의
+`ptt_subscriptions.pickup_group` 도 파생), `phone_group_members.user_id` 가 PK(가입자당 그룹 하나). `role_assignments(principal_type,
+principal_id)` PK(사람당 역할 하나). `role_ptt_targets.ptt_group_id` 는 `ptt_groups.id`(surrogate) 참조 — API 는 `mcptt_group_id` 로 노출한다.
 
 **ER 다이어그램:**
 ```

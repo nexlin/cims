@@ -157,6 +157,22 @@ def domain_kind_map(config: dict) -> dict:
     return out
 
 
+# 통계·로그 서비스축 — 접속환경 클래스(kind volte|voip|ptt)보다 거칠다: 유선(voip)·이동(volte)은 같은 전화
+#   경로라 한 축 `volte` 로 합산한다(sip_statistics.md §3.1). CSP 로그 디렉터리(`{dir}/volte|ptt/…`)·flow
+#   `service` 키를 만드는 CSP `CCspServiceMap::LogServiceOf` 와 같은 규칙이어야 원문 스캔과 판정이 어긋나지 않는다.
+SERVICE_AXES = ('volte', 'ptt')
+
+
+def service_axis(kind: str) -> str:
+    """kind → 서비스축(`volte`|`ptt`). 전화 계열(volte·voip)은 volte. 그 외는 그대로(호출자가 unknown 처리)."""
+    k = (kind or '').lower()
+    if k in ('volte', 'voip'):
+        return 'volte'
+    if k in ('ptt', 'mcptt'):
+        return 'ptt'
+    return k
+
+
 def name_domain_map(config: dict) -> dict:
     """{service_ref(name) → domain}. 가입자 레코드의 service_ref 해석용."""
     out = {}

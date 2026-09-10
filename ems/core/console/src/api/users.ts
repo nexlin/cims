@@ -21,7 +21,8 @@ export interface Subscription {
   aka_provisioned?: boolean
   // 당겨받기 그룹 키 — 같은 값끼리 픽업 가능 (volte_supplementary_services.md §5.1).
   //   빈 값/미지정=org_id 폴백. 반영은 다음 REGISTER 갱신부터. 마이그레이션 전 DB 는 응답에 없다.
-  //   관제 그룹(dispatch_center.md §3.2) 소속 가입자는 이 값이 그룹 id(dg-…)로 파생된다 — 직접 편집 409.
+  //   전화 그룹(dispatch_center.md §3.2) 귀속 person 의 회선은 이 값이 그룹 id(pg-…/전환 전 dg-…)로 파생된다 — 직접 편집 409
+  //   derived_from_phone_group. 빈 값 = 어떤 픽업·BLF 축에도 속하지 않음(org 폴백 없음).
   pickup_group?: string | null
   k?: string        // hex32, 입력 전용
   opc?: string      // hex32, 입력 전용
@@ -41,7 +42,7 @@ export interface McpttProfile {
   private_emergency_mode: 'LocallyDetermined' | 'UsePreConfigured'  // 긴급 사설콜 대상 결정
   emergency_private_recipient: string | null // UsePreConfigured 의 지정 수신자 (PTT 번호 — 서버가 존재검증)
   // allow-ambient-listening (TS 24.484) — PTT 그룹콜 청취·원격 청취 수행 자격 (관제사, 기본 false).
-  //   범위는 관제 그룹 ptt_listen, 부여는 manager 승인 (dispatch_center.md §5.6). 컬럼 미적용 DB 는 false.
+  //   범위는 역할 ptt_listen, 값은 역할 배정의 결과로 CSC 가 동기(mcptt_authorization.md §2.4). 컬럼 미적용 DB 는 false.
   allow_ambient_listening?: boolean
 }
 

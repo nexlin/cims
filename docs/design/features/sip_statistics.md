@@ -184,6 +184,10 @@ REGISTER 의 200(등록)이 한 칸에 합쳐져 세어도 쓸 수 없다. 트�
 `access_services` 의 `domain → kind` 로 SIP URI 를 분류한다. 순서는 CSP 와 동일하게
 Request-URI → To → From, 첫 매치. 응답은 Request-URI 가 없으므로 To/From 만 본다.
 
+판정 결과는 **서비스축** `volte | ptt` 다 — 접속환경 kind 가 `voip`(유선) 여도 전화 계열로 `volte` 에 합산한다
+(`services/access_services.service_axis`). CSP 도 같은 규칙(`CCspServiceMap::LogServiceOf`)으로 `{ServiceLogging.Dir}/volte/…`
+디렉터리와 flow `service` 키를 만들므로 원문 스캔 경로와 판정이 같은 축을 본다([sip_service_model.md §2-9](sip_service_model.md)).
+
 이 판정이 서비스축(요구 ⑤) 전체의 근거다. 접속 서비스 정의를 읽는 경로는 관리평면 소비자
 공통으로 `services/access_services` 하나다 — 원본은 대상 노드의
 `<install_path>/config/access_services.jsonl` 이고(CSP 가 직접 읽는 SoT), OAM 은 agent proxy
@@ -191,10 +195,10 @@ Request-URI → To → From, 첫 매치. 응답은 Request-URI 가 없으므로 
 남긴다. 복제는 agent 불통 구간의 폴백이자 CSC 의 유일한 경로다(CSC 에는 agent 클라이언트가
 없다). 쓰기 주체는 콘솔 → OAM → agent 하나뿐이다.
 
-CSC 는 이 복제를 **읽을 때마다 원본 지문(파일명·mtime·크기)을 확인**해 바뀌었으면 다시
-읽는다(`services/config_cache`). CSC 는 이 정의를 쓰지 않으므로 변경을 알리는 신호가 없고,
-기동 시 1회만 읽으면 접속 서비스를 새로 만든 직후 그 서비스의 가입자 자격(H(A1)) 유도가
-재기동 전까지 `unknown service` 로 실패한다.
+CSC 는 이 복제를 **읽을 때마다 디렉터리에서 다시 읽는다**(`services/access_services` — CSC 안의 단일 읽기 경로:
+프로비저닝·H(A1) 결박·관제 앱 번호 개설 후보·IdMS 도메인 유도). CSC 는 이 정의를 쓰지 않으므로 변경을 알리는 신호가
+없고, 기동 시 1회만 읽으면 접속 서비스를 새로 만든 직후 그 서비스의 가입자 자격(H(A1)) 유도가 재기동 전까지
+`unknown service` 로 실패한다. 복제가 없는 배포(store 비공유)에서는 csc.json `Provisioning.Services` 가 폴백이다.
 
 ## 4. 시간 축
 

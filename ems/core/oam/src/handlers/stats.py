@@ -927,7 +927,8 @@ _DOMAIN_IN_URI = re.compile(r'@([A-Za-z0-9._-]+)')
 def _classify_service(msg: str, dmap: dict) -> str:
     """SIP 원문에서 서비스 판정. Request-URI → To → From 순으로 첫 매치(CSP 와 같은 순서).
 
-    응답(SIP/2.0 …)은 Request-URI 가 없어 To/From 만 본다.
+    응답(SIP/2.0 …)은 Request-URI 가 없어 To/From 만 본다. 반환은 서비스축(`volte`|`ptt`) — 접속환경
+    kind 가 `voip`(유선) 이어도 전화 계열로 `volte` 에 합산한다(access_services.service_axis).
     """
     if not msg or not dmap:
         return ''
@@ -949,7 +950,7 @@ def _classify_service(msg: str, dmap: dict) -> str:
         for dom in _DOMAIN_IN_URI.findall(c):
             kind = dmap.get(dom.lower().split(':')[0])
             if kind:
-                return kind
+                return access_services.service_axis(kind)
     return ''
 
 

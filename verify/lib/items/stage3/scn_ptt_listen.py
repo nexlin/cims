@@ -1,18 +1,21 @@
 """S3 PTT 그룹콜 청취(관제사 recvonly 합류) 회귀 — dispatch_center.md §5.6·§9.
 
 멤버(A,B)가 그룹콜 중일 때 관제사 M 이 그룹 AoR 로 `a=recvonly` INVITE 하면 CSP 가 2단 인가
-(자격 `ptt_user_profile.allow_ambient_listening` + 범위 관제 그룹 `ptt_listen`) 뒤 청취 멤버로 합류시킨다
-(CMP `PTT_JOIN recv_only=1` — 상향 미중계·floor 요청 DENY, 로스터 은닉). 비멤버의 일반 INVITE 는 403.
+(자격 `ptt_user_profile.allow_ambient_listening` + 범위 = M 회선의 **역할** `ptt_listen`/`role_ptt_targets`) 뒤 청취
+멤버로 합류시킨다(CMP `PTT_JOIN recv_only=1` — 상향 미중계·floor 요청 DENY, 로스터 은닉). 비멤버의 일반 INVITE 는 403.
 
-픽스처(자기복원): M 을 멤버로 하는 관제 그룹 `dg-vfy-lsn-…`(ptt_listen/listen_visibility 를 검사별로 시드) +
-`ptt_user_profile` M 행의 allow_ambient_listening. M 은 대상 PTT 그룹의 **비멤버** PTT 가입자를 고른다
-(없으면 S3-SEED 창의 마지막 멤버). `dispatch_groups` 테이블·컬럼 미적용 DB 면 SKIP.
+픽스처(자기복원, `_dispatch_common`): M 의 person 에 배정하는 역할 `role-vfy-lsn-<group>`(ptt_listen=listed + 대상 = 그
+그룹 / none, listen_visibility 를 검사별로 시드) 또는 역할 없는 전화 그룹 `pg-vfy-lsn-<group>` 의 멤버 M(L3c) +
+`ptt_user_profile` M 행의 allow_ambient_listening(설계상 CSC 가 역할 배정에서 동기하는 값 — 검증은 DB 에 직접 둔다).
+M 은 대상 PTT 그룹의 **비멤버** PTT 가입자를 고른다(없으면 S3-SEED 창의 마지막 멤버). 전화 그룹/역할 테이블·
+allow_ambient_listening 컬럼 미적용 DB 면 SKIP. 전환 전 스키마(`dispatch_groups`)면 같은 의미를 관제 그룹으로 시드한다.
 
 검사 (cspsim `ptt_listen` 결과 마커):
-  L1 청취 합류 — allow=1·ptt_listen=all·hidden: join 200, M 수신 RTP delta>0, floor 요청 DENY(GRANT 0), 멤버 로스터에 M 없음,
+  L1 청취 합류 — allow=1·ptt_listen=listed(대상 그룹)·hidden: join 200, M 수신 RTP delta>0, floor 요청 DENY(GRANT 0), 멤버 로스터에 M 없음,
      합류 전 M 의 conference SUBSCRIBE 200 (TS 24.379 §10.1.3.4.1 — 청취 범위를 <on-network-allow-conference-state> 해석으로 인가)
   L2 자격 없음 — allow_ambient_listening=0 → 403, M 무수신, conference SUBSCRIBE 403 + Warning 138
-  L3 범위 밖 — ptt_listen=none → 403, conference SUBSCRIBE 403 + Warning 138
+  L3 범위 밖 — 역할 ptt_listen=none → 403, conference SUBSCRIBE 403 + Warning 138
+  L3c 역할 없음 — 전화 그룹원이지만 역할 없음(allow=1) → 403 + conference 403/138 (신 스키마만 — 전환 전 스키마는 L3 과 같은 뜻이라 SKIP)
   L4 비멤버 일반 INVITE(sendrecv) → 403 (TS 24.379 비멤버 거절)
   L5 공개 청취 — listen_visibility=visible: join 200, 멤버 로스터에 M 노출(roles listener)
 """
@@ -26,10 +29,9 @@ from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 from ...common.cspsim import run_cspsim
 from ...common import db as _db
-from ...common.csp_notify import notify_csp_event
 from ...common.subscribers import MCPTT_DOMAIN
 from ._xfer_common import trio_cred_args, parse_marker_int, FLOW_MIN, DROP_MAX, fmt_checks, emit_checks
-from .scn_fa import DispatchGroupFixture
+from ._dispatch_common import DispatchFixture, RoleSpec, SCHEMA_DISPATCH
 
 _RID = "S3-SCN-PTT-LISTEN"
 _RNAME = "PTT 그룹콜 청취 (관제사 recvonly 합류 — 자격·범위 인가, floor DENY, 로스터 은닉/공개)"
@@ -78,17 +80,30 @@ def _pick_listener(db_cfg: dict, ptt_group: str, fallback: dict) -> dict:
 
 
 class ListenerFixture:
-    """관제사 M 시드 — 관제 그룹(멤버 M, ptt_listen/visibility) + ptt_user_profile.allow_ambient_listening. 자기복원."""
+    """관제사 M 시드 + 자기복원 — ptt_user_profile.allow_ambient_listening 과 범위 축 하나:
+      · ptt_listen 지정 → 역할 `role-vfy-lsn-<group>`(listed 면 대상 = 그 그룹, listen_visibility) 을 M 의 person 에 배정
+      · ptt_listen=None → 역할 없이 전화 그룹 `pg-vfy-lsn-<group>` 의 멤버 M (L3c — 그룹원이어도 청취 범위는 없다.
+        M 의 person 에 기존 배정이 있으면 픽스처 동안 걷어 둔다)
+    """
 
-    def __init__(self, dist_dir: str, csp_ip: str, group_id: str, listener: str, allow: int,
-                 ptt_listen: str, visibility: str = "hidden"):
-        self.fx = DispatchGroupFixture(dist_dir, csp_ip, group_id, "", [listener], "", no_answer_sec=30,
-                                       ptt_listen=ptt_listen, listen_visibility=visibility)
+    def __init__(self, dist_dir: str, csp_ip: str, group: str, listener: str, allow: int,
+                 ptt_listen: str | None, visibility: str = "hidden"):
+        if ptt_listen is None:
+            self.fx = DispatchFixture(dist_dir, csp_ip, f"pg-vfy-lsn-{group}", members=[listener], no_answer_sec=30,
+                                      unassign=[listener])
+        else:
+            self.fx = DispatchFixture(dist_dir, csp_ip, "", no_answer_sec=30, role=RoleSpec(
+                f"role-vfy-lsn-{group}", [listener], ptt_listen=ptt_listen,
+                ptt_targets=[group] if ptt_listen == "listed" else [], listen_visibility=visibility))
         self.listener = listener
         self.allow = allow
         self.active = False
         self.reason = ""
         self._orig = None  # (existed, prev_value)
+
+    @property
+    def schema(self):
+        return self.fx.schema
 
     def __enter__(self):
         self.fx.__enter__()
@@ -110,7 +125,7 @@ class ListenerFixture:
                             (self.listener, self.allow))
         finally:
             conn.close()
-        # 프로파일은 CSP 가 INVITE 시점에 DB 로 판정 — 캐시 없음. 그룹 맵은 DispatchGroupFixture 가 통지했다.
+        # 프로파일은 CSP 가 INVITE 시점에 DB 로 판정 — 캐시 없음. 전화 그룹·역할 맵은 DispatchFixture 가 통지했다.
         self.active = True
         time.sleep(0.3)
         return self
@@ -159,7 +174,6 @@ def ptt_listen(ctx: VerifyContext) -> ItemResult:
     A, B = members[0], members[1]
     M = _pick_listener(_db.csp_db_config(ctx.dist_dir), group, members[-1])
     media_dir = os.path.join(ctx.repo_root, "tests", "media")
-    dg = f"dg-vfy-lsn-{group}"
     ctx.w(f"- 그룹={group} 멤버 A={A['user']} B={B['user']} 청취자 M={M['user']}"
           f"{' (그룹 멤버 — 비멤버 가입자 없음)' if M['user'] == members[-1]['user'] else ' (비멤버)'}")
 
@@ -181,11 +195,14 @@ def ptt_listen(ctx: VerifyContext) -> ItemResult:
             f"M_conf_sub={r['conf_sub']} M_conf_warn={r['conf_warn']}")
 
     checks = []
-    # ── L1: 인가된 청취 (allow=1, ptt_listen=all, hidden) ──
-    with ListenerFixture(ctx.dist_dir, ctx.sim_ip, dg, M["user"], 1, "all", "hidden") as fx:
+    legacy = False
+    # ── L1: 인가된 청취 (allow=1, 역할 ptt_listen=listed·대상=그룹, hidden) ──
+    with ListenerFixture(ctx.dist_dir, ctx.sim_ip, group, M["user"], 1, "listed", "hidden") as fx:
         if not fx.active:
             ctx.w(f"- [SKIP] {fx.reason}")
             return done(ItemStatus.SKIP, fx.reason)
+        legacy = fx.schema == SCHEMA_DISPATCH
+        ctx.w(f"- 시드 스키마={fx.schema} 역할 role-vfy-lsn-{group} person={fx.fx.persons.get(M['user'], '-')}")
         rc, r = run("lsn_l1")
         ok = (r is not None and r["join"] == 200 and r["members"] >= 2 and r["m_recv"] >= FLOW_MIN
               and r["grant"] == 0 and r["deny"] >= 1 and r["hidden"] == 1)
@@ -200,7 +217,7 @@ def ptt_listen(ctx: VerifyContext) -> ItemResult:
         else:
             checks.append(("L4 비멤버 일반 INVITE(sendrecv) → 403", None, "비멤버 PTT 가입자 없음 — 판정 불가"))
     # ── L2: 자격 없음 → 403 ──
-    with ListenerFixture(ctx.dist_dir, ctx.sim_ip, dg, M["user"], 0, "all", "hidden") as fx:
+    with ListenerFixture(ctx.dist_dir, ctx.sim_ip, group, M["user"], 0, "listed", "hidden") as fx:
         if fx.active:
             rc, r = run("lsn_l2")
             checks.append(("L2 자격 없음(allow_ambient_listening=0) → 403",
@@ -208,17 +225,30 @@ def ptt_listen(ctx: VerifyContext) -> ItemResult:
             checks.append(("L2b 자격 없음 conference SUBSCRIBE → 403 + Warning 138",
                            r is not None and r["conf_sub"] == 403 and r["conf_warn"] == 138,
                            f"M_conf_sub={r['conf_sub'] if r else '-'} warn={r['conf_warn'] if r else '-'}"))
-    # ── L3: 범위 밖 → 403 ──
-    with ListenerFixture(ctx.dist_dir, ctx.sim_ip, dg, M["user"], 1, "none", "hidden") as fx:
+    # ── L3: 범위 밖(역할 ptt_listen=none) → 403 ──
+    with ListenerFixture(ctx.dist_dir, ctx.sim_ip, group, M["user"], 1, "none", "hidden") as fx:
         if fx.active:
             rc, r = run("lsn_l3")
-            checks.append(("L3 범위 밖(ptt_listen=none) → 403", r is not None and r["join"] == 403,
+            checks.append(("L3 범위 밖(역할 ptt_listen=none) → 403", r is not None and r["join"] == 403,
                            f"{rstr(r)} rc={rc}"))
             checks.append(("L3b 범위 밖 conference SUBSCRIBE → 403 + Warning 138",
                            r is not None and r["conf_sub"] == 403 and r["conf_warn"] == 138,
                            f"M_conf_sub={r['conf_sub'] if r else '-'} warn={r['conf_warn'] if r else '-'}"))
+    # ── L3c: 전화 그룹원이지만 역할 없음(allow=1) → 403 — 청취 범위는 역할에서만 나온다 ──
+    name_3c = "L3c 전화 그룹원·역할 없음 → 403 + conference 403/Warning 138"
+    if legacy:
+        checks.append((name_3c, None, "전환 전 스키마(dispatch_groups) — 역할 없음 = 관제 그룹 ptt_listen=none(L3 과 동일)"))
+    else:
+        with ListenerFixture(ctx.dist_dir, ctx.sim_ip, group, M["user"], 1, None) as fx:
+            if fx.active:
+                rc, r = run("lsn_l3c")
+                checks.append((name_3c, r is not None and r["join"] == 403 and r["m_recv"] <= DROP_MAX
+                               and r["conf_sub"] == 403 and r["conf_warn"] == 138,
+                               f"{rstr(r)} (전화 그룹 pg-vfy-lsn-{group} 멤버, 역할 없음) rc={rc}"))
+            else:
+                checks.append((name_3c, False, f"전화 그룹 시드 실패 — {fx.reason}"))
     # ── L5: 공개 청취 — 로스터 노출 ──
-    with ListenerFixture(ctx.dist_dir, ctx.sim_ip, dg, M["user"], 1, "all", "visible") as fx:
+    with ListenerFixture(ctx.dist_dir, ctx.sim_ip, group, M["user"], 1, "listed", "visible") as fx:
         if fx.active:
             rc, r = run("lsn_l5")
             checks.append(("L5 공개 청취(listen_visibility=visible) — 로스터 노출",

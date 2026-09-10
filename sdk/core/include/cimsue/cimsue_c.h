@@ -633,6 +633,8 @@ CIMSUE_API int32_t CIMSUE_CALL cimsue_csc_enc(const char* s, char* out, int32_t 
 /** kind 로 서비스 찾기 — 없으면 NULL. profile 이 소유한 배열을 가리킨다(복사 없음). */
 CIMSUE_API const cimsue_service_profile_t* CIMSUE_CALL cimsue_profile_service(const cimsue_profile_t* profile,
                                                                               const char* kind);
+/** 전화 회선 — 유선 "voip" 우선, 없으면 이동 "volte"(Profile::phoneService). 없으면 NULL. */
+CIMSUE_API const cimsue_service_profile_t* CIMSUE_CALL cimsue_profile_phone_service(const cimsue_profile_t* profile);
 /** 이 서비스로 등록할 계정 설정. login_pw 는 sip_ha1 이 없을 때의 평문 폴백(NULL 가능).
  *  out 의 문자열은 스레드별 스냅샷 — 같은 스레드의 다음 to_account 호출 전까지 유효하다. */
 CIMSUE_API void CIMSUE_CALL cimsue_service_profile_to_account(const cimsue_service_profile_t* sp, const char* login_pw,

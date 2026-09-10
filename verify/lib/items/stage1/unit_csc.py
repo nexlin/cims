@@ -1,5 +1,5 @@
 """S1-UNIT-CSC — CSC 관리 API·GMS·프로비저닝 단위시험 4종 (DB 없음).
-  · tests/test_csc_dispatch_rbac.py       관제 그룹 편입 RBAC — 감청/청취 그룹 편입 = 콘솔 manager 승인 하나,
+  · tests/test_csc_dispatch_rbac.py       전화 그룹 멤버십·pickup_group 파생 + 역할(/api/v1/roles) 배정·청취 자격 동기,
                                           가입자(DB users = person 전용) 쪽 역할 SQL 이 나가지 않는다(dispatch_center.md §5.3)
   · tests/test_csc_subscription_realm.py  가입 번호 H(A1) 결박 realm 해석 — access_services → csc.json
                                           Provisioning.Services 순(sip_access_security.md §4.1)
@@ -14,7 +14,9 @@
                                           issuer 유도(mcx_identity_scope.md)
   · tests/test_csc_user_profile.py        MCPTT user-profile 문서(TS 24.484 §8.3.2) — OnNetwork MCPTTGroupInfo(소속 그룹·소유 표시)·
                                           ImplicitAffiliations·PrivateCallList(동료)·긴급 요소 부재/폴백·common-policy ruleset·ETag
-  · tests/test_csc_dispatch_management.py 관제 앱 관리 평면 — directory_admin 범위(admin_scope/in_scope)·
+  · tests/test_csc_access_services.py   접속 서비스 단일 읽기 경로 — 미러(CSP 정본) 이름 매칭·가족 경계·kind 폴백·csc.json 도달 정보
+                                        합성·드리프트 경고·미러 부재 폴백(services/access_services)
+  · tests/test_csc_dispatch_management.py 관제 앱 관리 평면 — 역할 directory_write 범위(admin_scope/in_scope)·
                                           /provisioning/directory 게이트·이력 until/recordingId·녹취 프록시 게이트·
                                           GMS 관리 범위 확장(dispatch_center.md §3.4·§5.7b)"""
 from __future__ import annotations
@@ -26,13 +28,13 @@ from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 
 _ID = "S1-UNIT-CSC"
-_NAME = ("CSC unit test — 관제 그룹 RBAC·가입 realm·GMS 그룹 CRUD·프로비저닝 발견·IdMS scope·user-profile "
+_NAME = ("CSC unit test — 전화 그룹·역할 RBAC·가입 realm·GMS 그룹 CRUD·프로비저닝 발견·이력·관리 평면·IdMS scope·user-profile "
          "(python3 -m unittest tests.test_csc_dispatch_rbac tests.test_csc_subscription_realm "
          "tests.test_csc_gms_group_crud tests.test_csc_provisioning_dispatch)")
 _MODULES = ["tests.test_csc_dispatch_rbac", "tests.test_csc_subscription_realm",
             "tests.test_csc_gms_group_crud", "tests.test_csc_provisioning_dispatch",
             "tests.test_csc_provisioning_history", "tests.test_csc_idms_scope", "tests.test_csc_user_profile",
-            "tests.test_csc_dispatch_management"]
+            "tests.test_csc_dispatch_management", "tests.test_csc_access_services"]
 
 
 @verify_item(

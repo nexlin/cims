@@ -57,6 +57,8 @@ public sealed record Profile(string DisplayName, string LoginId, string CountryC
 {
     /// <summary>kind 로 서비스 찾기 — 없으면 null.</summary>
     public ServiceProfile? Service(string kind) => Services.FirstOrDefault(s => s.Kind == kind);
+    /// <summary>전화 회선 — 유선 "voip" 우선, 없으면 이동 "volte"(android_ue_provisioning.md §3). 관제 앱의 전화 계정 선택 규칙.</summary>
+    public ServiceProfile? PhoneService => Service("voip") ?? Service("volte");
 }
 
 /// <summary>GMS 목록 항목. IsOwner = 토큰 주체가 authorized user(편집·삭제 가능).</summary>

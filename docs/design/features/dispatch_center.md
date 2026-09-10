@@ -1,19 +1,30 @@
-# 관제 센터 — 관제 그룹·대표번호 병렬 호출·업무망 합법감청
+# 관제 센터 — 전화 그룹(대표번호·당겨받기)·역할(감청·관리)·업무망 합법감청
 
 > 관제 센터(소프트폰·관제용 앱) 요구 세 가지를 수용하는 CSP/CMP/CSC 설계와 설정 규약. 요구 = ① 업무망
 > 통화를 선택해 합법감청(운영자 인가 기반 감독 청취), ② 관제센터로 걸려오는 전화를 N 명의 관제사가 선택적으로
-> 수신(그룹핑), ③ 관제센터 그룹을 N 개 생성.
+> 수신(그룹핑), ③ 그룹을 N 개 생성.
 >
-> **구현 상태**: ③ 관제 그룹 모델(CSC API·DB·콘솔·CSP 인메모리 맵), ② 대표번호 호출(parallel/sequential
-> alerting·포크 집합·승자 확정·CANCEL·무응답·overflow·링잉 대표번호 호의 당겨받기), ① 업무망 합법감청(RFC 3911
-> Join → CMP 청취 leg tap, dialog 인가 범위 §5.2, SSRC 2개 분리 인도·은닉), PTT 그룹콜 청취(§5.6 — recvonly
-> 합류·2단 인가·floor 거절·로스터 은닉/공개), 감사 E-AUD-016 + 콘솔 감사 이력 화면(§5.7)까지 서버·콘솔·검증
-> (`S3-SCN-FA`/`S3-SCN-MONITOR`/`S3-SCN-PTT-LISTEN`) 구현·실측 완료. 남은 것: 단말(관제용 앱)의 Join 발신·
-> SSRC 디먹스 UI(U10 공용)·PTT 청취 채널 UI(U6), §10 향후 과제.
+> 모델은 **세 축**이다.
+> - **접속환경** — 관제석·데스크폰·소프트폰은 이동 VoLTE 와 다른 **유선 VoIP 접속서비스**(`kind=voip`,
+>   [sip_service_model.md §2-9](sip_service_model.md))에 붙는다. TLS·SRTP·NAT·피처코드·호 전달 기본값은 이 서비스의 필드다.
+> - **전화 그룹**(§3.1) — 대표번호(TS 24.239 Flexible Alerting)·당겨받기 축·그룹원 BLF. **유선 전화의 일반 기능**이며
+>   관제와 무관하게 어느 조직이든 쓴다. `pickup_group` 값 = 전화 그룹 id.
+> - **역할**(§3.3, 정본 [mcptt_authorization.md](mcptt_authorization.md)) — 감청·PTT 청취·이력/녹취 열람·조직/구성원/
+>   번호/PTT 그룹 관리 **권한**. 콘솔 관리 권한과 같은 역할 모델이고, **관제사 = 역할을 배정받은 가입자**다.
 >
-> 관련: [volte_supplementary_services.md](volte_supplementary_services.md)(내선·당겨받기·호 전달 —
-> 본 설계가 그 위에 얹힌다), [registration_binding_set.md](registration_binding_set.md)(도달 경로 선택),
-> [media_security.md](media_security.md)(SRTP), [recording.md](recording.md)(녹취 탭),
+> **구현 상태**: 대표번호 호출(§4)·업무망 합법감청(§5 — Join → CMP tap, 분리 인도·은닉)·PTT 그룹콜 청취(§5.6)·
+> 감사 E-AUD-016(§5.7)·CMP tap(§6)·검증(`S3-SCN-FA`/`S3-SCN-MONITOR`/`S3-SCN-PTT-LISTEN`)은 구현·실측 완료.
+> **전화 그룹/역할 분해(§3·§8.1)는 구현 반영** — CSP `CCspPhoneGroupMap`+`CCspRoleMap`, CSC `/api/v1/phone-groups`·`/api/v1/roles`·
+> `authz.can()`·두 블록 discovery, 콘솔 `구성 > 전화 그룹`·`시스템 > 역할`, 검증 시드, 전환 마이그레이션. **유선 VoIP 접속환경
+> `kind=voip` 도 구현 반영**(§8.3 — CSP kind 검증·같은 전화 경로·로그/통계 축 합산, CSC `service_ref`↔서비스 name 매칭 프로비저닝,
+> 관제 앱 전화 회선 voip 우선). 라이브 반영은 정지창(마이그레이션 + csp·csc·oam-svc 동시 + 기존 관제 회선의 `voip` 이관 —
+> [volte_supplementary_services.md §10.3a](volte_supplementary_services.md)). 남은 것:
+> 단말(관제용 앱)의 SSRC 디먹스 UI(U10 공용)·PTT 청취 채널 UI(U6), §10 향후 과제.
+>
+> 관련: [volte_supplementary_services.md](volte_supplementary_services.md)(유선 VoIP 규약·내선·당겨받기·호 전달 —
+> 본 설계가 그 위에 얹힌다), [mcptt_authorization.md](mcptt_authorization.md)(역할·능력·범위 — 권한 모델 정본),
+> [sip_service_model.md](sip_service_model.md)(접속서비스 `kind`), [registration_binding_set.md](registration_binding_set.md)
+> (도달 경로 선택), [media_security.md](media_security.md)(SRTP), [recording.md](recording.md)(녹취 탭),
 > [mcptt_standard_conformance.md](mcptt_standard_conformance.md) §R1(ambient listening),
 > [mcptt_ue_multitalker_media.md](mcptt_ue_multitalker_media.md)(단말 SSRC 디먹스),
 > [../identifier_model.md](../identifier_model.md), [../../api/cmp_media_api.md](../../api/cmp_media_api.md).
@@ -25,112 +36,131 @@
 
 ## 1. 범위와 결론
 
-세 요구는 **관제 그룹(dispatch group) 엔티티 하나**를 두고 그 위에 규격 기반 서비스 둘을 얹으면
-한 축으로 수용된다.
+세 요구는 **전화 그룹**(유선 전화 기능)과 **역할**(권한) 두 엔티티 위에 규격 기반 서비스를 얹으면 수용된다.
+관제는 접속환경도 그룹도 아닌 **권한**이다 — 대표번호를 받고 당겨받는 것은 어느 유선 사용자든 하는 일이고,
+감청·청취·관리는 역할이 있는 사람만 한다.
 
 | 요구 | 결론 | 표준 근거 |
 |---|---|---|
-| ③ 관제 그룹 N 개 | **관제 그룹 엔티티** 신설(§3). 기존 `pickup_group` 축을 이 엔티티의 id 로 채워 당겨받기·BLF 인가·병렬 호출·감청 범위가 **한 그룹 축**을 공유한다 | [identifier_model.md](../identifier_model.md) — 동작은 불변 id, 표시는 name |
-| ② 대표번호 착신을 관제사 전원이 선택 수신 | 그룹의 **대표번호(pilot) 병렬 호출**(§4) — 대표번호 INVITE 를 등록 그룹원 전원에게 포크, 최초 200 OK 가 이기고 나머지는 CANCEL | 3GPP TS 24.239 Flexible Alerting(parallel alerting), RFC 3261 §16.7(포크 응답 처리), RFC 3455 `P-Called-Party-ID` |
-| ① 업무망 통화 선택 합법감청 | **선택** = RFC 4235 dialog 이벤트(기존 구현)의 인가 범위를 그룹 `monitor_scope` 로 확장, **합류** = RFC 3911 `Join` INVITE(`a=recvonly`) → CMP **청취 leg(tap)** — 양 화자를 **분리 스트림(SSRC 2개)** 으로 인도(귀속 보존), **믹싱은 단말**(§5·§6). PTT 그룹콜은 `recv_only` 멤버로 JOIN | 3GPP TS 33.107/33.108·ETSI TS 101 671(LI — 분리 인도), RFC 4235, RFC 3911, RFC 3264, RFC 5576(소스 라벨링), TS 24.379(§5.6·§10) |
+| ③ 그룹 N 개 | **전화 그룹 엔티티**(§3.1). 기존 `pickup_group` 축을 이 엔티티의 id 로 채워 당겨받기·그룹원 BLF·병렬 호출이 **한 그룹 축**을 공유한다. 감청·관리 범위는 여기 두지 않는다 | [identifier_model.md](../identifier_model.md) — 동작은 불변 id, 표시는 name |
+| ② 대표번호 착신을 그룹원 전원이 선택 수신 | 전화 그룹의 **대표번호(pilot) 병렬 호출**(§4) — 대표번호 INVITE 를 등록 그룹원 전원에게 포크, 최초 200 OK 가 이기고 나머지는 CANCEL | 3GPP TS 24.239 Flexible Alerting(parallel alerting), RFC 3261 §16.7(포크 응답 처리), RFC 3455 `P-Called-Party-ID` |
+| ① 업무망 통화 선택 합법감청 | **선택** = RFC 4235 dialog 이벤트(기존 구현)의 인가 범위를 **역할 `monitor_call`** 로 확장, **합류** = RFC 3911 `Join` INVITE(`a=recvonly`) → CMP **청취 leg(tap)** — 양 화자를 **분리 스트림(SSRC 2개)** 으로 인도(귀속 보존), **믹싱은 단말**(§5·§6). PTT 그룹콜은 `recv_only` 멤버로 JOIN(역할 `ptt_listen`) | 3GPP TS 33.107/33.108·ETSI TS 101 671(LI — 분리 인도), RFC 4235, RFC 3911, RFC 3264, RFC 5576(소스 라벨링), TS 24.379(§5.6·§10) |
 
 설계 원칙(CLAUDE.md 우선순위)대로 규격형을 채택하고, 기존 구현(픽업·전달·dialog 이벤트·CMP
-ambient 플래그·녹취 탭)의 연장으로 구성한다. **INVITE 경로에 DB 질의를 넣지 않는다** — 관제 그룹
+ambient 플래그·녹취 탭)의 연장으로 구성한다. **INVITE 경로에 DB 질의를 넣지 않는다** — 전화 그룹·역할
 판정은 전부 인메모리 맵에서 답한다.
 
 ---
 
 ## 2. 현재 구현과의 갭 (구현 단계의 입력)
 
+대표번호·감청·청취·감사의 절차는 구현돼 있다. 남은 갭은 **엔티티와 인가의 자리**다.
+
 | 갭 | 현재 | 필요 |
 |---|---|---|
-| **G1 그룹 엔티티 부재** | `pickup_group` 은 가입자 컬럼의 자유 문자열. 그룹 자체는 실체가 없다(대표번호·범위·정책을 둘 곳이 없음) | `dispatch_groups` + 멤버 테이블(§3). `pickup_group` 은 멤버십에서 **파생**(CSC 단일 쓰기 주체) |
-| **G2 1:N 포크 구조 부재** | `CCallMap` 은 leg 쌍(`m_strPeerCallId` 1:1). 바인딩 집합도 "사람당 leg 하나"(멀티 디바이스 금지) | A-leg 하나에 **대기 B-leg N 개**를 묶는 포크 집합(§4.4). 바인딩 집합의 원칙은 **한 사람** 범위이므로 그룹 포크와 충돌하지 않는다 — 문서에 경계 명시 |
-| **G3 대표번호 해석 부재** | 미등록 착신은 `TryPickupDial`(피처코드) 아니면 404 | 미등록 착신 판정 앞에 **pilot 해석**(§4.2) |
-| **G4 감청 합류 시그널링 부재** | 수신 INVITE-`Replaces`(교체)만 구현 | INVITE-`Join`(합류) 처리기(§5.3) — Replaces 처리기와 같은 자리 |
-| **G5 CMP 3자 leg 부재** | `PRtpRelay` 는 peer 2개 고정(peer i 수신 → peer 1-i 송신). MIX 는 예약만 | 세션에 붙는 **청취 leg(tap)** — 양 peer ingress 복사, 상향 미중계, leg 별 SRTP(§6) |
-| **G6 dialog 이벤트 인가 범위** | 같은 `pickup_group` 만 200, 아니면 403 | 같은 그룹 **또는** 관제 그룹 `monitor_scope` 가 대상을 포함하면 200(§5.2) |
-| **G7 PTT 청취 시그널링·인가** | CMP `recv_only`/`floor_suppress` 는 구현, CSP 발행 미구현. `ptt_user_profile` 에 청취 자격 필드 없음 | 관제사의 그룹콜 합류를 청취 멤버로 PTT_JOIN + `allow_ambient_listening` 자격 게이트(§5.6) |
-| **G8 감사** | 감청 사실을 남길 이벤트 없음 | `E-AUD-016 call_monitored`(§5.7) |
+| **G1 전화 기능과 권한이 한 엔티티** | `dispatch_groups` 가 픽업 그룹·대표번호와 함께 `monitor_scope`·`ptt_listen`·`listen_visibility`·`directory_admin` 을 든다 — 편입이 곧 범위 취득이고, 대표번호만 필요한 조직도 "관제 그룹" 을 만들어야 한다 | `phone_groups`(전화) + `roles`/`role_assignments`(권한)로 분해(§3, §8.1). 절차(포크·tap·감사)는 그대로, **인가의 질문만 둘**로 — "같은 전화 그룹인가"(BLF·픽업) / "역할 범위 안인가"(감청·청취·관리) |
+| **G2 자격 부여 경로** | 관제 앱 관리 API(`PUT …/ptt/profile`)는 `allow_ambient_listening` 변경을 400 `not_editable` 로 거절한다(현재값과 같은 값은 무시 — 구 앱 호환, 표시는 유지). 부여는 콘솔 프로파일 편집(manager) | 청취 자격은 **역할 배정의 결과**로 CSC 가 동기하고, 배정은 `authz.manage`(콘솔 manager)에만 있다([mcptt_authorization.md §2.4](mcptt_authorization.md)) — 그때 콘솔 직접 편집도 잠근다 |
+| **G3 org 폴백·전역 피처코드** | 해소 — 픽업 축 = `pickup_group` 만(없으면 픽업·BLF 불가, `PickUp` 404), 피처코드 = 서비스 필드만(전역 `CallPickupId` 제거) ([volte_supplementary_services.md §5](volte_supplementary_services.md)) | — |
+| **G4 프로비저닝 블록** | `/provisioning/me` `dispatch` 블록이 전화 그룹 정보(대표번호·그룹원)와 권한(범위·관리)을 한 블록에 싣는다 | `phoneGroup` + `dispatch` 두 블록(§8.4). 전환기에는 현 블록 모양을 합성해 유지 |
+| **G5 접속환경** | 관제 회선·전화 그룹이 이동 VoLTE 서비스(`volte`)에 있다 | 유선 VoIP 서비스 `kind=voip`(§8.3, [sip_service_model.md](sip_service_model.md)) — 관제 회선 `service_ref` 와 `phone_groups.service_ref` 를 `voip` 로 |
 
 ---
 
-## 3. 관제 그룹 모델
+## 3. 전화 그룹과 역할
 
-### 3.1 정의
+### 3.1 전화 그룹 (phone group)
 
-관제 그룹 = **픽업 그룹 + (선택) 대표번호 + (선택) 감청 범위**. 대표번호가 없는 그룹은 순수
-당겨받기 그룹(현행 `pickup_group` 사용례)이고, 감청 범위가 `none` 인 그룹은 감청을 못 한다.
-즉 기존 픽업 그룹은 이 모델의 부분집합이며 별도 축을 남기지 않는다.
+전화 그룹 = **픽업 그룹 + (선택) 대표번호**. 유선 VoIP 서비스의 그룹 기능이며 관제 권한과 무관하다 — 관제석
+전화도, 총무팀 대표번호도 같은 엔티티다. 대표번호가 없는 그룹은 순수 당겨받기 그룹이다.
 
 | 필드 | 의미 |
 |---|---|
-| `id` | **불변 키**(CSC 발급, 예 `dg-7f3a91c2`). `volte_subscriptions.pickup_group` 에 그대로 들어가는 값이자 알람·이력의 상관 키 |
+| `id` | **불변 키**(CSC 발급, 예 `pg-7f3a91c2`. 전환 전 발급된 `dg-…` 값도 그대로 유효 — 재키잉하지 않는다). `*_subscriptions.pickup_group` 에 그대로 들어가는 값이자 알람·이력의 상관 키 |
 | `name` | 표시 이름(운영자 변경 가능, 어떤 키에도 쓰지 않는다) |
 | `pilot_id` | 대표번호(다이얼 가능한 주소). 가입 id 주소 공간과 **겹치지 않아야** 한다(CSC 검증). NULL = 대표번호 없음 |
-| `service_ref` | 대표번호가 속한 접속서비스 — 도메인·SRTP 정책·피처코드를 이 서비스에서 읽는다 |
-| `alert_mode` | `parallel`(기본) / `sequential`(§10) — TS 24.239 의 두 모드 |
+| `service_ref` | 대표번호가 속한 접속서비스 — 유선 VoIP 서비스(`voip`). 도메인·SRTP 정책·피처코드를 이 서비스에서 읽는다 |
+| `alert_mode` | `parallel`(기본) / `sequential`(§4.4a) — TS 24.239 의 두 모드 |
 | `no_answer_sec` | 전원 무응답 판정 시간(기본 30) |
 | `busy_members` | `skip`(기본 — 통화 중 그룹원은 호출 안 함) / `alert`(호출 — 단말 통화대기) |
-| `overflow_target` | 무응답·전원 부재 시 넘김 대상(다른 대표번호 또는 내선). NULL = 480 |
-| `monitor_scope` | `none`(기본) / `own`(자기 그룹) / `listed`(§3.2 대상 목록) / `all` |
-| `ptt_listen` | `none`(기본) / `listed` / `all` — 청취 가능한 PTT 그룹 범위(§5.6) |
-| `directory_admin` | `none`(기본) / `own`(소속 조직 `org_id` 와 그 하위) / `all` — 관제 앱에서 조직·구성원·VoLTE/PTT 번호·PTT 그룹을 관리할 수 있는 범위(§3.4). manager 승인 사항 |
-| `org_id` | 소속 조직(콘솔 필터·RBAC 스코프, `directory_admin=own` 의 루트) |
+| `overflow_target` | 무응답·전원 부재 시 넘김 대상(다른 대표번호 또는 가입 번호). NULL = 480 |
+| `org_id` | 소속 조직(콘솔 필터) |
 
 ### 3.2 멤버십과 파생
 
-- `dispatch_group_members(user_id PK, group_id, alert_order)` — **가입자당 그룹 하나**. `pickup_group`
+- `phone_group_members(user_id PK, group_id, alert_order)` — **가입자당 그룹 하나**. `pickup_group`
   이 단일 값이므로 이 제약이 축 통합의 전제다(겸임은 §10). 멤버 행의 `user_id` 는 **대표번호 포크·dialog
-  감시 대상인 회선**(관제사의 VoLTE 회선)이다 — CSP `ResolveForkTargets` 는 서비스 구분 없이 등록된 멤버
+  감시 대상인 회선**(유선 회선)이다 — CSP `ResolveForkTargets` 는 서비스 구분 없이 등록된 멤버
   전원에게 포크하므로 PTT 회선을 멤버로 넣지 않는다(PTT 앱까지 울린다).
-- **관제 그룹은 person 귀속이다.** CSC 가 멤버 추가/제거/그룹 삭제 시 그 회선이 속한 person 의 **volte·ptt 전
-  회선** `pickup_group` 을 유효 그룹(`effective_dispatch_group` = 자기 멤버십 → 없으면 같은 person 의 멤버십, 여럿이면
+- **전화 그룹은 person 귀속이다.** CSC 가 멤버 추가/제거/그룹 삭제 시 그 회선이 속한 person 의 **volte·ptt 전
+  회선** `pickup_group` 을 유효 그룹(`effective_phone_group` = 자기 멤버십 → 없으면 같은 person 의 멤버십, 여럿이면
   `alert_order`·회선 id 순 첫째)으로 **재계산**하고, 값이 바뀐 회선마다 `USER_CHANGED` 를 보낸다(CSP 는 회선별
-  사용자 캐시로 `pickup_group` 을 든다). 관제사의 PTT 회선은 멤버가 아니어도 이렇게 그룹을 물려받아야 CSP 가 PTT
-  청취·conference 구독 인가(§5.6)에서 SIP 신원(PTT id)으로 범위를 찾는다 — 없으면 `EffectiveGroupOf` 가 org 로
-  폴백해 범위 밖 403 이 된다. 기존 데이터는 `sql/migrate_dispatch_groups.sql` 끝의 백필(같은 규칙, 재실행 안전)로
-  맞춘다.
-- 파생 회선(자기 멤버십 여부와 무관)의 `pickup_group` 직접 편집은 409(`derived_from_dispatch_group`), 관제 그룹
+  사용자 캐시로 `pickup_group` 을 든다). 관제사의 PTT 회선이 그룹을 물려받아야 PTT 세션 가시성(§5.6a)의 "자기 그룹원"
+  판정과 PTT 회선 dialog 인가 규칙 1 이 성립한다. 기존 데이터는 마이그레이션 끝의 백필(같은 규칙, 재실행 안전)로 맞춘다.
+- 파생 회선(자기 멤버십 여부와 무관)의 `pickup_group` 직접 편집은 409(`derived_from_phone_group`), 전화 그룹
   귀속 person 에 새 회선을 개설하면 파생값을 물려받는다(지정값이 다르면 409) — SoT 는 멤버십이다.
-- `dispatch_group_monitor_targets(group_id, target_group_id)` — `monitor_scope=listed` 의 대상.
-- `dispatch_group_ptt_targets(group_id, ptt_group_id)` — `ptt_listen=listed` 의 대상.
+- **org 폴백은 없다.** `pickup_group` 이 비어 있으면 그 회선은 어떤 픽업·BLF 축에도 속하지 않는다
+  ([volte_supplementary_services.md §5.1](volte_supplementary_services.md)).
+
+### 3.3 역할 — 관제 권한
+
+권한 모델의 정본은 [mcptt_authorization.md](mcptt_authorization.md) 다. 여기서는 본 문서의 절차가 읽는 필드만 적는다.
+
+- **역할 = 능력 + 범위** 하나의 엔티티(`roles`). 콘솔 프리셋(`admin/manager/operator/monitor`, 전역 범위)과 관제
+  프리셋(`감독 / 관리 / 전체`, 한정 범위)이 같은 엔티티다. 사람은 역할 **하나**에 배정된다(`role_assignments`).
+- **CSP 가 읽는 것**(SIP 경로 인가): `monitor_call`(none/own/listed/all) + `role_monitor_targets`(전화 그룹 id) —
+  통화 감청·타인 세션 관측(§5.2·§5.3·§5.6a) / `ptt_listen`(none/listed/all) + `role_ptt_targets` — PTT 청취·conference
+  구독(§5.6) / `listen_visibility`(hidden/visible) — 청취 로스터 노출(§5.6).
+- **CSC 가 읽는 것**: `directory_write`(none/own/all) + `org_id` — 관제 앱 관리 평면(§3.4) / `monitor_call`·`ptt_listen` —
+  이력·녹취 열람 범위(§5.7a·§5.7b)·`/provisioning/me` 감시 대상 목록(§8.4).
+- **자격 동기**: `ptt_listen≠none` 인 역할에 배정되면 CSC 가 그 person 의 PTT 프로파일 `allow_ambient_listening`
+  (TS 24.484)을 켜고, 해제·역할 변경으로 범위가 없어지면 끈다. CSP 는 규격 자리(프로파일)에서 자격을 읽는다(§5.6).
+- **부여**: 역할 생성·범위 변경·배정은 `authz.manage` 능력(콘솔 `manager` 이상)에만 있고 한정 범위 역할에는
+  부여할 수 없다 — 관제 앱에서는 어떤 경로로도 감청·청취 권한을 만들 수 없다. 배정·해제는 감사된다(§5.7).
 
 ### 3.4 관리 범위 — 조직/구성원/번호·PTT 그룹 관리 (관제 앱)
 
-관제사(가입자, PKCE 토큰)가 관제 앱에서 조직 트리·구성원(person)·VoLTE/PTT 번호(가입)·PTT 그룹을 관리하는 권한은 관제 그룹
-속성 **`directory_admin`** 하나로 정한다 — `monitor_scope`·`ptt_listen` 과 같은 결의 범위 enum 이며 서버가 해석하고
-앱은 결과만 받는다. 가입자 프로비저닝은 3GPP 규격 밖(MC 서비스 제공자 정책)이라 CIMS 확장이다.
+관제사(가입자, PKCE 토큰)가 관제 앱에서 조직 트리·구성원(person)·VoLTE/PTT 번호(가입)·전화 그룹·PTT 그룹을 관리하는 권한은
+역할의 **`directory_write`** 하나로 정한다 — `monitor_call`·`ptt_listen` 과 같은 결의 범위 enum 이며 서버가 해석하고 앱은
+결과만 받는다. 가입자 프로비저닝은 3GPP 규격 밖(MC 서비스 제공자 정책)이라 CIMS 확장이다.
 
-- **범위 해석**: `own` = `org_id` 조직과 그 하위(코드 집합), `all` = 전 조직. `own` 인데 `org_id` 가 없으면 범위가
-  비어 관리 불가. 컬럼 미적용 DB(`sql/migrate_dispatch_directory_admin.sql`)는 전 그룹 `none`.
-- **부여** = 콘솔 `구성 > 관제 그룹 > 관리 범위`(manager 이상 — 가입자에게 조직·번호 쓰기 권한을 여는 승인 사항이라
-  감청 범위와 같은 게이트, §5.8). 앱은 `/provisioning/me` `dispatch.directoryAdmin`/`orgCode` 로 안다.
+- **범위 해석**: `own` = 역할 `org_id` 조직과 그 하위(코드 집합), `all` = 전 조직. `own` 인데 `org_id` 가 없으면 범위가
+  비어 관리 불가.
+- **부여** = 콘솔 `관리 > 역할`(manager 이상 — 가입자에게 조직·번호 쓰기 권한을 여는 승인 사항). 앱은 `/provisioning/me`
+  `dispatch.directoryWrite`/`orgCode` 로 안다.
 - **API** = `/provisioning/directory/{admin,orgs,members,groups}`(CSC 4430, 계약
   [android_ue_provisioning.md §3-3](android_ue_provisioning.md)) — 콘솔 관리 API(`/api/v1/organizations`·`/api/v1/users`,
-  콘솔 토큰)와 **같은 쓰기 코드**(`handlers/admin.py`·`org.py`)를 호출해 정책(H(A1) 결박·`pickup_group` 파생 409·AKA)이
-  두 평면에서 갈라지지 않게 한다. 토큰 realm 은 섞지 않는다(`csc/src/handlers/dispatch_directory.py`).
+  콘솔 토큰)와 **같은 쓰기 코드**(`handlers/admin.py`·`org.py`)와 **같은 판정**(`can(principal, directory.write, org)`)을
+  지난다. 토큰 realm 은 섞지 않는다 — 섞이는 것은 정책이다.
 - **범위 게이트**: 대상 조직(생성 부모·이동 부모·구성원 소속)이 범위 안이어야 한다(`403 out_of_scope`). `own` 은
   범위 루트를 옮기거나 지우거나 루트를 새로 만들 수 없다. 조직 삭제는 하위 조직·구성원이 없을 때만(`409 not_empty`).
   자기 자신 삭제 불가(`409 self_delete`). 번호 변경(다른 msisdn) = 종전 회선 삭제 + 신규 개설이라 SIP 비밀번호 필수.
+- **PTT 프로파일**: 관리 범위 안 구성원의 `allow_create_group`·긴급 계열 자격은 편집할 수 있다. **`allow_ambient_listening`
+  은 편집 대상이 아니다**(역할 배정의 결과 — `authz.manage`). 현재값과 다른 값이 실려 오면 400 `not_editable`, 같은 값은 무시(구 앱은
+  두 플래그를 함께 보낸다). 구현 = `dispatch_directory.py` `_LOCKED_PROFILE_KEYS`.
 - **PTT 그룹**: 관리 범위 안 그룹(`org_code` 가 범위 안 또는 내 소유)은 소유자가 아니어도 GMS XCAP GET/PUT/DELETE 를
-  허용하고(소유권은 바뀌지 않는다 — `authorized_user_id` 유지), 신규 생성은 `allow_create_group` 없이도 된다.
-  관리용 열거는 `GET /provisioning/directory/groups`(멤버 그룹 목록과 별개) — 관리 범위 안 ∪ 내 소유 ∪ 관제 그룹 청취 범위(`ptt_listen`
-  all|listed) ∪ 내 멤버 그룹을 주고, 행마다 `canManage`(관리 범위 안 또는 소유 = GMS 게이트 판정)·`inListenScope`·`isMember` 를 싣는다.
-  관리 권한이 없는 청취·멤버 그룹은 보기 전용으로 보인다.
-- **감사**: 모든 쓰기는 `E-AUD-006 config_change`(actor = 관제사 msisdn, entity = organization|user|subscription|ptt_profile,
-  reason = `dispatch_directory`).
+  허용하고(소유권은 바뀌지 않는다 — `authorized_user_id` 유지), 신규 생성은 `allow_create_group` 없이도 된다
+  (`ptt_group.manage` 능력 — [mcptt_authorization.md §3](mcptt_authorization.md)). 관리용 열거는
+  `GET /provisioning/directory/groups`(멤버 그룹 목록과 별개) — 관리 범위 안 ∪ 내 소유 ∪ 청취 범위(`ptt_listen`
+  all|listed) ∪ 내 멤버 그룹을 주고, 행마다 `canManage`·`inListenScope`·`isMember` 를 싣는다.
+- **전화 그룹**: 관리 범위 안 조직의 전화 그룹(대표번호·호출 방식·멤버)도 같은 능력으로 관리한다. 역할·배정은 관리 대상이 아니다.
+- **감사**: 모든 쓰기는 `E-AUD-006 config_change`(actor = `user:<users.id>`, entity = organization|user|subscription|
+  ptt_profile|phone_group, reason = `dispatch_directory`).
 
-### 3.3 CSP 인메모리 맵
+### 3.5 CSP 인메모리 맵
 
-`CCspDispatchGroupMap`(`csp/CspDispatchGroup.h/.cpp`) — 그룹 id 인덱스 + pilot 인덱스 + 멤버 인덱스(가입자 →
-그룹) + 감청/청취 범위 판정(`CanWatch`/`CanListenPtt`). 부팅 시 `DbManager` 가 적재하고(`dispatch_groups`
-테이블 부재는 프로브로 감지 — INFO 로그 후 관제 기능 비활성) `DISPATCH_GROUP_CHANGED` UDP 통지(uri=그룹 id,
-DELETE=제거·그 외 단건 재적재, 빈 uri=전량)와 `CSC_RESTART` 로 재적재한다. JSON fallback 은
-`DataFolder.DispatchGroup`(기본 `dispatch_group/`)의 `<id>.json`(User/Group 관례 — 멤버·대상 배열 포함, 개발·시험
-환경에서 DB 마이그레이션 없이 쓴다). 포크 대상은 **멤버 테이블(`alert_order` 순)** 이 SoT 이고 등록·생존 여부만
-`UserMap` 으로 판정한다 — 등록 바인딩의 그룹 스냅샷 지연에 좌우되지 않는다. 당겨받기·BLF·감청 인가의 그룹 축
-값은 `EffectiveGroupOf`(멤버 인덱스 → `CspUser.EffectivePickupGroup()` = `pickup_group` → org 폴백) 하나로 답한다.
+두 맵이다(현 코드 `CCspDispatchGroupMap` 을 분리한다).
+
+- **`CCspPhoneGroupMap`** — 그룹 id 인덱스 + pilot 인덱스 + 멤버 인덱스(가입자 → 그룹). 부팅 시 `DbManager` 가
+  적재하고(`phone_groups` 테이블 부재는 프로브로 감지 — INFO 로그 후 전화 그룹 기능 비활성) `PHONE_GROUP_CHANGED` UDP
+  통지(uri=그룹 id, DELETE=제거·그 외 단건 재적재, 빈 uri=전량)와 `CSC_RESTART` 로 재적재한다. JSON fallback 은
+  `DataFolder.PhoneGroup`(기본 `phone_group/`)의 `<id>.json`. 포크 대상은 **멤버 테이블(`alert_order` 순)** 이 SoT 이고
+  등록·생존 여부만 `UserMap` 으로 판정한다. 당겨받기·BLF 규칙 1 의 그룹 축 값은 `EffectiveGroupOf`(멤버 인덱스 →
+  `CspUser.m_strPickupGroup`) 하나로 답한다 — org 폴백은 없다.
+- **`CCspRoleMap`** — 회선 id → 역할(`monitor_call`·감시 대상 집합·`ptt_listen`·청취 대상 집합·`listen_visibility`).
+  적재 시 `role_assignments(principal_type='user')` 를 그 person 의 **전 회선**(volte·ptt) id 로 펼친다 — PTT 회선의
+  청취 인가와 유선 회선의 감청 인가가 같은 사람의 역할을 본다. `ROLE_CHANGED`(uri=역할 id 또는 배정 person id — 전량)·
+  `USER_CHANGED`(POST/DELETE = 회선 개설/삭제 — 전량)·`CSC_RESTART` 로 재적재. JSON fallback `DataFolder.Role`. 콘솔 principal 의 배정은 SIP
+  신원이 없으므로 적재하지 않는다. 판정 = `CanWatch`(§5.2)·`CanListenPtt`(§5.6)·`ListenVisibility`.
 
 ---
 
@@ -140,7 +170,7 @@ DELETE=제거·그 외 단건 재적재, 빈 uri=전량)와 `CSC_RESTART` 로 �
 
 ```
 UE-A ──INVITE sip:7000@dispatch.cims──► CSP(TAS)
-                                          │ [pilot 해석: 7000 → dg-7f3a91c2, alert_mode=parallel]
+                                          │ [pilot 해석: 7000 → pg-7f3a91c2, alert_mode=parallel]
                                           │ [그룹원 중 등록·생존 바인딩·(busy_members=skip) 비통화 → B, C]
                                           │ ── RELAY_ADD (peer0=A 주소, peer1=0.0.0.0:0 미확정) ──► CMP
                                           │ ── INVITE ──► UE-B   SDP: local_port_b, 서버 키 offer(B 전용)
@@ -221,7 +251,7 @@ TAS 인에이블 CSP 로 보내야 한다. 트렁크 leg 는 SRTP·코덱 협상
 
 ### 4.5 대표번호의 dialog 이벤트
 
-그룹원은 대표번호 AoR 에 `Event: dialog` 를 구독할 수 있다(인가 = 그 그룹의 멤버). 대표번호에
+그룹원은 대표번호 AoR 에 `Event: dialog` 를 구독할 수 있다(인가 = 그 전화 그룹의 멤버 — 역할 불요). 대표번호에
 걸려온 호의 early/confirmed/terminated 와 응답자(`remote` 신원)가 NOTIFY 된다 — 데스크 큐 표시·
 "누가 받았나" 표시의 표준 경로다.
 
@@ -246,7 +276,7 @@ A-leg BYE 때 두 당사자가 바뀐다. 검증 F7. `version` 은 구독별 NOT
 ### 4.6 녹취·이력
 
 relay 는 대표번호 호 1건이다. `RELAY_ADD` 의 `callee` 는 대표번호, 승자 확정 시 `RELAY_MODIFY` 의
-`callee` 로 응답자를 갱신한다. `call.json` 에 `dispatch_group`, `pilot`, `alerted[]`, `answered_by`
+`callee` 로 응답자를 갱신한다. `call.json` 에 `phone_group`, `pilot`, `alerted[]`, `answered_by`
 를 기록한다(CSP 작성 메타 — [recording.md](recording.md) §3.6).
 
 ---
@@ -256,7 +286,7 @@ relay 는 대표번호 호 1건이다. `RELAY_ADD` 의 `callee` 는 대표번호
 관제사가 **대표번호로 걸 때**(민원인이 관제석 개인 번호가 아닌 대표번호를 보고, 회신이 대표번호 포크로 돌아오게)
 는 TS 24.239 FA 그룹원의 pilot 신원 발신이다. 단말은 발신 INVITE 에 `P-Preferred-Identity: <sip:+821310001000@volte…>`
 (RFC 3325, `tel:` 도 수락)를 싣는다. CSP(TAS `ResolveOriginatingIdentity`, B2BUA `CreateCall` 직전)는:
-- PPI 의 신원이 **발신자가 속한 관제 그룹의 `pilot_id`** 이면 B-leg 의 `From` 을 대표번호로 낸다 — psip 는 B-leg
+- PPI 의 신원이 **발신자가 속한 전화 그룹의 `pilot_id`** 이면 B-leg 의 `From` 을 대표번호로 낸다 — psip 는 B-leg
   `P-Asserted-Identity` 를 From 과 같은 값으로 넣으므로 착신자(내부 단말·트렁크)는 대표번호를 본다.
 - 그 외의 PPI(다른 그룹의 대표번호·타인 번호)는 TS 24.229 §5.4.3.2 대로 **무시**하고 기본 신원(발신자 자신)으로 낸다
   (403 이 아니다 — 등록·인가된 신원이 아닌 PPI 는 기본 신원으로 대체). 인가 = 그룹 멤버십 하나(대표번호 착신을 받는
@@ -301,23 +331,25 @@ RFC 3911 `Join` 은 **대상 dialog 지목·인가의 시그널링 수단으로�
 픽업·전달로 A/B leg 가 재고정돼도(`RELAY_MODIFY`) tap 은 그대로 남고, 세션 종료(`RELAY_REMOVE`)와
 함께 사라진다.
 
-### 5.2 선택 — dialog 이벤트 인가 범위 (G6)
+### 5.2 선택 — dialog 이벤트 인가 범위
 
-`CanWatchDialog(watcher, target)`:
-1. 같은 `pickup_group`(= 같은 관제 그룹) → 허용(현행).
-2. watcher 의 관제 그룹 `monitor_scope` 가 `all`, 또는 `own` 이고 target 이 자기 그룹, 또는 `listed`
-   이고 target 의 그룹이 대상 목록에 있음 → 허용.
+`CanWatch(watcher, target)` — 질문이 둘이다.
+1. **전화 그룹**: 같은 `pickup_group`(= 같은 전화 그룹) → 허용. 그룹원 BLF·지정 픽업의 근거이며 역할이 필요 없다.
+2. **역할**: watcher 의 역할 `monitor_call` 이 `all`, 또는 `own` 이고 target 이 watcher 의 전화 그룹, 또는 `listed`
+   이고 target 의 전화 그룹이 `role_monitor_targets` 에 있음 → 허용. `own` 은 규칙 1 과 대상이 같지만 **이력·녹취·
+   Join 청취**(§5.3·§5.7a)까지 여는 값이다 — 규칙 1 은 BLF 만 연다.
 3. 그 외 403.
 
 "모든 통화" 목록의 구독 형태:
-- **초기형**: 대상 내선별 dialog 구독. 대상 목록은 `/provisioning/me` `dispatch.members[]`(§8.4) — CSC 가
-  `monitor_scope` 를 위 `CanWatchDialog` 와 **같은 규칙**으로 해석해 내려준 VoLTE 가입자 집합이라 앱은 enum 을
-  해석하지 않고 그대로 구독한다. 클릭 시 소프트폰이 §5.3 의 Join INVITE 를 낸다.
+- **초기형**: 대상 회선별 dialog 구독. 대상 목록은 `/provisioning/me` `dispatch.members[]`(§8.4) — CSC 가
+  역할 `monitor_call` 을 위 `CanWatch` 와 **같은 규칙**으로 해석해 내려준 가입자 집합이라 앱은 enum 을
+  해석하지 않고 그대로 구독한다. 자기 전화 그룹원은 `phoneGroup.members[]` 로 따로 온다(규칙 1). 클릭 시 소프트폰이
+  §5.3 의 Join INVITE 를 낸다.
   - **구독 수락 직후 full 스냅샷**(RFC 4235 §3.2): CSP 가 감시 대상이 당사자인 **진행 중 호**(멤버 BLF = CallMap
     caller-facing leg)와 **대표번호 착신**(TAS 포크 집합=울림 / 확립 집합)을 모아 `state=full` NOTIFY 로 준다
     (`CspServer.cpp CollectInitialDialogs`·`BuildDialogInfoBodyMulti`, `CallMap::Iterate`·`CTasModule::CollectPilotDialogs`).
     재로그인·재구독 즉시 이미 울리는 대표번호 호·통화 중 그룹원이 보인다(활성 호 없으면 빈 full, 이후 partial 갱신).
-- **표준형(후속)**: RFC 4662 RLS — `Supported: eventlist` 로 그룹의 감시 목록 URI 하나를 구독하고
+- **표준형(후속)**: RFC 4662 RLS — `Supported: eventlist` 로 감시 목록 URI 하나를 구독하고
   RLMI+multipart NOTIFY 로 전 대상의 dialog-info 를 받는다. 구독 N 개를 1개로 줄인다.
 
 ### 5.3 합류 — INVITE-with-Join (G4)
@@ -328,7 +360,7 @@ UE-M ──INVITE sip:A@dispatch.cims ──► CSP
       Join: <A-leg Call-ID>;to-tag=…;from-tag=…        (dialog NOTIFY 에서 얻은 식별자)
       SDP: m=audio … a=recvonly, crypto(M 수신 키)
                                       │ [CallMap 에서 Call-ID 조회 → 세션 S 확정(MatchDialog: Call-ID+태그)]
-                                      │ [인가: M 의 관제 그룹 monitor_scope ∋ A 또는 B 의 그룹]
+                                      │ [인가: M 의 역할 monitor_call ∋ A 또는 B 의 전화 그룹]
                                       │ ── RELAY_TAP_ADD (session_id=S, tap_id, M 주소, tap_mode=both, media_crypto) ──► CMP
                                       │ ◄── local_port_t ─────────────────────────────────────────────────── CMP
 UE-M ◄── 200 OK  SDP: c=relay ip, m=audio local_port_t … a=sendonly ── │
@@ -340,13 +372,10 @@ UE-M ◄════ RTP (A ingress 복사 SSRC_A + B ingress 복사 SSRC_B, tap
   `m_strRelaySessionId`). 태그 대조는 `MatchReplacesDialog` 를 일반화한 `MatchDialog` 로 한다.
 - **응답 코드**: dialog 없음/조기 dialog → 481, 인가 실패 → 403, `recvonly` 아님·코덱 불일치·
   서비스 `media_srtp=required` 인데 crypto 없음 → 488, 세션당 tap 상한 초과 → 486.
-- **인가 두 겹**: SIP 경로는 인메모리 판정(그룹 멤버십 + `monitor_scope`)만 한다. "누가 감청 가능
-  그룹의 멤버가 될 수 있나" 는 CSC/콘솔의 RBAC 가 프로비저닝 시점에 막는다 — `monitor_scope≠none`/
-  `ptt_listen≠none` 그룹의 생성·범위 변경·멤버 편입은 **콘솔 계정 `manager` 이상**만
-  ([mcptt_authorization.md](mcptt_authorization.md)). 편입되는 가입자 쪽에는 역할 게이트가 없다 —
-  가입자(DB `users` = person 전용, role 컬럼 없음)와 콘솔 계정(OAM `console_accounts`)은 다른
-  저장소·다른 모듈이라 가입자에게 역할이 없기 때문이다([csc_standalone_module.md](csc_standalone_module.md)
-  도메인 경계).
+- **인가 두 겹**: SIP 경로는 인메모리 판정(역할 `monitor_call` + 대상의 전화 그룹, §5.2 규칙 2)만 한다. "누가
+  감청 권한을 갖는가" 는 역할 배정이 정하고, 배정은 `authz.manage`(콘솔 계정 `manager` 이상)에만 있다
+  ([mcptt_authorization.md §2.4](mcptt_authorization.md)). 관제 앱의 관리 범위(`directory_write`)로는 배정할 수 없다.
+  콘솔 계정과 가입자는 다른 저장소·다른 principal 이지만 **같은 역할 모델**을 본다.
 - **재-INVITE**: M 의 주소 변경(NAT 재바인딩 등)은 `RELAY_TAP_MODIFY`. hold 는 의미 없음(488).
 - **종료**: M 의 BYE → `RELAY_TAP_REMOVE`. 원 통화 종료 → CSP 가 세션의 tap 전부에 BYE 를 보내고
   `RELAY_REMOVE`(tap 은 세션과 함께 회수, 별도 명령 불요).
@@ -387,7 +416,7 @@ UE-M ◄════ RTP (A ingress 복사 SSRC_A + B ingress 복사 SSRC_B, tap
 
 ### 5.6 PTT 그룹콜 청취 (G7)
 
-관제사가 `ptt_listen` 범위 안의 그룹 AoR 로 **SDP `a=recvonly` 초기 INVITE**(RFC 3264 — 수신 전용 offer 가
+관제사가 역할 `ptt_listen` 범위 안의 그룹 AoR 로 **SDP `a=recvonly` 초기 INVITE**(RFC 3264 — 수신 전용 offer 가
 청취 합류의 시그널링 신호다; 통화 감청 Join 과 같은 표현)를 보내면 CSP(`CGroupCallService::ProcessGroupCall`)는
 그룹 멤버 여부와 무관하게 **청취 멤버**로 합류시킨다:
 - 인가 통과 후 answer 는 `a=sendonly`(RFC 3264 §6.1) + 멤버 전용 CMP 포트 + floor `m=application`. CMP 에는
@@ -400,21 +429,21 @@ UE-M ◄════ RTP (A ingress 복사 SSRC_A + B ingress 복사 SSRC_B, tap
   등)에 남기지 않고 감사(§5.7)로만 남긴다. affiliation 은 만들지 않는다(청취는 제휴가 아니다).
 - 비멤버의 일반(sendrecv) INVITE 는 403 (TS 24.379 §10.1.1 — 그룹 멤버가 아닌 사용자의 개시/합류 거절).
 
-**인가 — TS 24.484 프로파일 자격 + 관제 그룹 범위(규격형, 2단)**:
+**인가 — TS 24.484 프로파일 자격 + 역할 범위(규격형, 2단)**:
 - **자격 = `ptt_user_profile.allow_ambient_listening`**(TS 24.484 ruleset·TS 24.379 ambient listening 인가):
-  이 사용자가 원격 청취를 수행할 자격. 관제사에게만 부여(기본 0). CSP 가 청취 개시 INVITE 에서 프로파일 행
-  하나를 읽어 판정한다(`SelectUserProfile` — 인덱스 단건, 다른 프로파일 게이트와 같은 경로. 값 0·행 부재·DB
-  불가는 모두 403 — 당사자 모르게 미디어를 인도하는 동작이라 fail-closed). 규격이 정한 인가 자리를 그대로 쓴다.
-- **범위 = 관제 그룹 `ptt_listen`**(`none`/`listed`/`all`): 자격자가 어느 PTT 그룹을 들을 수 있는가. 청취자의 관제
-  그룹은 청취 INVITE·conference SUBSCRIBE 의 **SIP 신원 = PTT 회선 id** 로 `EffectiveGroupOf` 에 묻는다 — PTT 회선은
-  멤버 행이 아니므로(§3.2) 같은 person 의 VoLTE 멤버십에서 파생된 `ptt_subscriptions.pickup_group` 이 답이다.
-  두 자격·범위는 별개 설정이라 둘 다 있어야 한다: 프로파일 자격만 켜고 파생이 비면 `ptt_listen scope` 403,
-  파생만 있고 자격이 없으면 `allow_ambient_listening=0` 403(CSP 로그 `ProcessGroupCall … denied (사유)`).
-- **편입 게이트 = 콘솔 `manager` 승인**: 청취 범위가 있는 관제 그룹으로의 편입과 `allow_ambient_listening`
-  부여를 콘솔에서 승인·감사한다(§5.7). 편입되는 가입자 쪽 역할 게이트는 없다(§5.3).
+  이 사용자가 원격 청취를 수행할 자격. CSP 가 청취 개시 INVITE 에서 프로파일 행 하나를 읽어 판정한다
+  (`SelectUserProfile` — 인덱스 단건, 다른 프로파일 게이트와 같은 경로. 값 0·행 부재·DB 불가는 모두 403 — 당사자
+  모르게 미디어를 인도하는 동작이라 fail-closed). 값은 사람이 직접 켜지 않는다 — **`ptt_listen≠none` 역할에 배정되면
+  CSC 가 켜고, 해제되면 끈다**(§3.3). 규격이 정한 인가 자리를 그대로 쓴다.
+- **범위 = 역할 `ptt_listen`**(`none`/`listed`/`all`) + `role_ptt_targets`: 자격자가 어느 PTT 그룹을 들을 수 있는가.
+  청취 INVITE·conference SUBSCRIBE 의 **SIP 신원 = PTT 회선 id** 로 `CCspRoleMap` 에 묻는다(회선 → person → 역할, §3.5).
+  자격과 범위는 같은 배정에서 나오지만 판정은 둘 다 한다: 프로파일이 0 이면 `allow_ambient_listening=0` 403, 역할이 없거나
+  범위 밖이면 `ptt_listen scope` 403(CSP 로그 `ProcessGroupCall … denied (사유)`).
+- **부여 게이트 = `authz.manage`(콘솔 `manager`)**: 청취 범위가 있는 역할의 생성·범위 변경·배정을 콘솔에서 승인·감사한다
+  (§5.7). 편입되는 가입자 쪽에 별도 역할 게이트는 없다.
 
 **로스터 노출 — `listen_visibility`(은닉·투명 둘 다 정식 지원)**: 규격이 청취 멤버 표시를 정의하지
-않으므로 CIMS 정책축이며, **관제사의 관제 그룹 속성**으로 두 모드를 모두 지원한다.
+않으므로 CIMS 정책축이며, **관제사 역할의 속성**으로 두 모드를 모두 지원한다.
 - `hidden`(기본): 청취 멤버를 로스터(RFC 4575 conference-info)에서 제외하고 합류/이탈 시 참가자 통지도 내지
   않는다(청취 leg 자신은 NOTIFY 를 받는다). `FLOOR_TALKERS`·녹취 화자 트랙에는 `recv_only` 라 원래 오르지 않는다 —
   합법감청 은닉(§5.1). 사용은 §5.8 의 고지·동의 운영 규약을 전제한다.
@@ -430,11 +459,11 @@ function, `CscfModule` SUBSCRIBE 초기 구독)는 구독자를 그룹 문서(TS
 **480 + Warning 105** 로 거절한다(`CGroupCallService::CheckConferenceSubscribe`). CIMS 해석:
 - **멤버** = 그룹 속성 `ptt_groups.allow_conference_state`(기본 1 — GMS 문서 `<cp:actions>` 요소로 노출, 관리 API·GMS PUT·콘솔
   편집). 0 이면 멤버도 403.
-- **비멤버 관제사** = 청취 leg 와 같은 2단 인가(자격 `allow_ambient_listening` + 범위 `ptt_listen`)를 같은 요소의 해석으로
+- **비멤버 관제사** = 청취 leg 와 같은 2단 인가(자격 `allow_ambient_listening` + 역할 범위 `ptt_listen`)를 같은 요소의 해석으로
   두어 **합류 전 사전 모니터링 구독**을 허용한다(규격 흐름은 "세션 참가자"의 구독이고 청취 leg 로 합류한 관제사는
   참가자이므로 규격 그대로 — 합류 전 구독만 CIMS 확장). 프로파일 부재·DB 불가는 불허(fail-closed).
 - 즉석 세션(`adhoc-`/`priv-`)은 그룹 문서가 없다 — 참가자(fan-out 대상)는 허용, 그 외는 §5.6a 의 즉석 세션 관측
-  인가(자격 + 참가자 `monitor_scope`). in-dialog refresh 는 재검사하지 않는다(RFC 6665 — 자원·이벤트 불변). 구독자에게
+  인가(자격 + 참가자 전화 그룹이 관측자 역할 `monitor_call` 안). in-dialog refresh 는 재검사하지 않는다(RFC 6665 — 자원·이벤트 불변). 구독자에게
   가는 로스터는 `listen_visibility` 규칙 그대로(청취 leg 은닉/공개).
 - 검증 = `S3-SCN-PTT-LISTEN` L1b(범위 안 200)·L2b/L3b(403 + Warning 138) — cspsim `ptt_listen` 이 합류 전 M 의 conference
   SUBSCRIBE 결과를 `M_conf_sub`/`M_conf_warn` 마커로 낸다.
@@ -449,8 +478,8 @@ TS 24.379 **ambient listening**(`session-type=ambient-listening`, remote-init �
 지금 어떤 PTT 세션에 참가 중인가**다. 사설콜(`priv-<발신>-<착신>`)·애드혹(`adhoc-…`)은 PTT 그룹이 아니라 **사람 사이의
 세션**이라 그룹 AoR 구독(§5.6)으로는 알 수 없다. 규격에 제3자 관측 절차가 없으므로 VoLTE 통화 감시와 **같은 패키지·
 같은 인가**로 푼다: 관제 앱이 범위 안 사람의 **PTT 회선 AoR 에 `Event: dialog` 를 구독**한다(대상 = `/provisioning/me`
-`dispatch.members[].pttId`, VoLTE 회선 `volteAor` 와 나란히). 인가는 §5.2 `CanWatch` 그대로 — 감시자·대상 모두
-`EffectiveGroupOf`(PTT 회선은 파생 `ptt_subscriptions.pickup_group`, §5.6)로 그룹을 얻어 `monitor_scope` 로 판정한다
+`dispatch.members[].pttId`, VoLTE 회선 `volteAor` 와 나란히). 인가는 §5.2 `CanWatch` 그대로 — 대상의 전화 그룹은
+`EffectiveGroupOf`(PTT 회선은 파생 `ptt_subscriptions.pickup_group`, §3.2)로, 감시자의 범위는 역할(`CCspRoleMap`)로 판정한다
 (`CscfModule` SUBSCRIBE 초기 구독, VoLTE 와 같은 코드).
 
 **dialog 본문 (PTT 회선)** — `CGroupCallService` 가 참가 leg 마다 dialog 1건을 낸다(`SendPttDialogEventNotify`,
@@ -468,13 +497,13 @@ TS 24.379 **ambient listening**(`session-type=ambient-listening`, remote-init �
   내지 않는다** — 참가가 아니고, 은닉 정책과 무관하게 일관되게 뺀다. TAS 의 `NotifyDialogState` 는 PTT 세션 leg
   (`GetGroupCallSession`)를 만나면 여기로 위임한다(종전에는 VoLTE 도메인·remote 없는 반쪽 dialog 가 나갔다).
 - 그룹 세션(멤버 그룹)도 같은 규칙으로 나간다 — 앱은 remote 가 멤버/청취 범위 그룹이면 ①/② 카드의 참가 정보로 흡수하고,
-  `priv-`/`adhoc-` 이면 타인 세션 카드로 그린다. `members[]` 에는 `monitor_scope=all` 일 때 **PTT 전용 가입자**(VoLTE 회선
+  `priv-`/`adhoc-` 이면 타인 세션 카드로 그린다. `members[]` 에는 역할 `monitor_call=all` 일 때 **PTT 전용 가입자**(VoLTE 회선
   없음, `volteAor=""`)도 실린다 — 현장 PTT 단말 간 사설콜이 보이려면 그 회선을 구독해야 한다.
 
 **즉석 세션의 참가자 명단·청취** — 세션 URI 를 알게 된 관제사가 `Event: conference` 구독(로스터)·`a=recvonly` 합류(청취)를
 하면 CSP 는 **즉석 세션 관측 인가** `CGroupCallService::CanObserveEphemeral` 로 판정한다: 참가자(fan-out 대상)는 항상 허용,
-그 외는 자격 `allow_ambient_listening`(§5.6 과 같은 TS 24.484 자격) **+ 참가자 중 한 명의 관제 그룹이 관측자의
-`monitor_scope` 안**(`CanWatch` — VoLTE Join 의 "어느 한 당사자 범위 안" 과 같은 규칙). 즉석 세션에는 그룹 문서·
+그 외는 자격 `allow_ambient_listening`(§5.6 과 같은 TS 24.484 자격) **+ 참가자 중 한 명의 전화 그룹이 관측자 역할의
+`monitor_call` 안**(`CanWatch` — VoLTE Join 의 "어느 한 당사자 범위 안" 과 같은 규칙). 즉석 세션에는 그룹 문서·
 `ptt_listen` 대상 항목이 없으므로 `ptt_listen` 축을 쓰지 않는다. 불허는 conference 403 + `Warning: 138`, 청취 INVITE
 403(사유 `ephemeral …`, 감사 `denied`). 종전 "즉석 세션은 게이트 없음" 은 폐기 — 세션 id 를 아는 것만으로 타인의
 사설콜 로스터가 열리지 않는다.
@@ -482,21 +511,21 @@ TS 24.379 **ambient listening**(`session-type=ambient-listening`, remote-init �
 ### 5.7 감사 이벤트 (G8)
 
 감청은 당사자가 모르는 동작이므로 **감사 이벤트를 필수**로 남긴다 — 카탈로그 `E-AUD-016`
-`event=call_monitored`(kind=audit, source=CSP): `monitor`(관제사 id), `group`(관제 그룹 id), `session`
+`event=call_monitored`(kind=audit, source=CSP): `monitor`(관제사 회선 id), `role`(관제사 역할 id), `session`
 (relay `session_id`/sesid), `targets`(A/B id), `started_at`/`ended_at`/`dur_ms`, `tap_mode`. 시작·종료
 각 1건. PTT 그룹콜 청취(§5.6)도 같은 코드로 남긴다 — `session`/`target_a`=PTT 그룹 id, `target_b` 없음,
-`tap_mode=ptt_listen`, `group`=관제사의 관제 그룹(`CGroupCallService::EmitPttListenAudit`). FM push 경로는
+`tap_mode=ptt_listen`, `role`=관제사의 역할(`CGroupCallService::EmitPttListenAudit`). FM push 경로는
 [../alarm_self_reporting.md](../alarm_self_reporting.md), 카탈로그 행은 [../alarm_catalog.csv](../alarm_catalog.csv).
 `call.json` 에도 `monitors[]` 로 남긴다(당사자 표시 UI 에서는 숨기고 감사 화면에서만 노출). 감청 대상 범위
-(`monitor_scope`)는 관제 업무 근거가 있는 통화로 한정하는 운영 규약을 전제한다.
+(역할 `monitor_call`)는 관제 업무 근거가 있는 통화로 한정하는 운영 규약을 전제한다.
 
 **열람** — 콘솔 `장애 > 감사 이력`(`/alerts/audit`, `requiredRole=manager`): `kind=audit` 이벤트를 단계(시작/종료/
-거절)·감청자·관제 그룹·세션·대상·방식·시간 열로 펼친다(`core.audit-history` 위젯, CSV). 서버 게이트는 OAM
+거절)·감청자·역할·세션·대상·방식·시간 열로 펼친다(`core.audit-history` 위젯, CSV). 서버 게이트는 OAM
 `GET /api/v1/events` — manager 미만 계정에는 `kind=audit` 이벤트를 결과에서 제외하고 `kind=audit` 명시 조회는 403
 (`code=` 필터 추가). 일반 이벤트 이력 화면의 "감사" 분류도 같은 게이트를 받는다.
 
-감사 로그 자체의 무결성이 통제의 핵심이다: "누가 무엇을 감청했나" 의 **열람은 `manager` 이상으로
-제한**하고(감청 수행 권한과 분리), 보존 기간은 조직 정책을 따르되 감청 감사는 일반 이벤트보다 길게
+감사 로그 자체의 무결성이 통제의 핵심이다: "누가 무엇을 감청했나" 의 **열람은 `audit.read`(콘솔 `manager` 이상)로
+제한**하고(감청 수행 권한 `monitor_call` 과 분리), 보존 기간은 조직 정책을 따르되 감청 감사는 일반 이벤트보다 길게
 둔다. 감청 leg 개설 실패(403/481/488)도 시도로 남긴다(무단 시도 추적).
 
 ### 5.7a 통합 이력 조회 · 메시지 모니터링 (관제 데스크 ②④ 패널)
@@ -507,15 +536,16 @@ TS 24.379 **ambient listening**(`session-type=ambient-listening`, remote-init �
 상태(링잉·floor·참가자 수)는 표준 구독(RFC 4235 dialog · RFC 4575 conference)이 그대로 담당하고
 (폴링으로 대체하지 않는다 — 수초 미만 상태 유실·부하), 지난 이력만 이 API 가 커서(`since`→`nextSince`)로 준다.
 
-- **범위 게이트**(서버 해석, 앱은 enum 미해석): `call`·1:1 `message` = `monitor_scope`(감시 대상 VoLTE 가입자,
-  §5.2 `CanWatch` 와 같은 규칙) / `ptt`·그룹 `message` = `ptt_listen`(청취 대상 PTT 그룹, §5.6 `CanListenPtt`).
-  관제 그룹 미소속 = `403`. 백엔드 = 공유 NAS 파일 SoT(통화 `call.json`·PTT `session.json`·그룹 SDS
-  `message/…/messages.jsonl`·1:1 SDS `message_direct/…`)를 관제 그룹 범위로만 걸러 주는 얇은 구독자 뷰
-  (`csc/src/services/dispatch_history.py`) — 콘솔 이력 API(oam-svc `flow_logger`)를 재구현하지 않는다.
+- **범위 게이트**(서버 해석, 앱은 enum 미해석): `call`·1:1 `message` = 역할 `monitor_call`(감시 대상 가입자,
+  §5.2 `CanWatch` 규칙 2 와 같은 규칙) / `ptt`·그룹 `message` = 역할 `ptt_listen`(청취 대상 PTT 그룹, §5.6 `CanListenPtt`).
+  역할이 없거나 두 범위가 모두 `none` = `403 no_monitor_scope`. 백엔드 = 공유 NAS 파일 SoT(통화 `call.json`·PTT `session.json`·그룹 SDS
+  `message/…/messages.jsonl`·1:1 SDS `message_direct/…`)를 역할 범위로만 걸러 주는 얇은 구독자 뷰
+  (`csc/src/services/dispatch_history.py`) — 콘솔 이력 API(oam-svc `flow_logger`)를 재구현하지 않는다. 콘솔의 같은
+  열람은 같은 능력(`history.read`, 전역 범위)이다.
 - **메시지 모니터링 = 실시간(수 초 이내) 이력 조회만.** SIP MESSAGE 사본 전달은 채택하지 않는다(원 발·수신자
   은닉·중복 트랜잭션 회피). 그룹 SDS 는 이미 보관되고([mcdata_messaging.md §4.1](mcdata_messaging.md)), **1:1
-  SDS/SMS 는 `Setup.McData.StoreOneToOneSds` 를 켜야** 보관된다(전량 보관, 열람은 조회 시점에 `monitor_scope`
-  로 게이트 — 범위 한정 보관은 멤버십 변동 시 이력 결손이라 채택 안 함, [mcdata_messaging.md §4.3](mcdata_messaging.md)).
+  SDS/SMS 는 `Setup.McData.StoreOneToOneSds` 를 켜야** 보관된다(전량 보관, 열람은 조회 시점에 역할 `monitor_call`
+  로 게이트 — 범위 한정 보관은 배정 변동 시 이력 결손이라 채택 안 함, [mcdata_messaging.md §4.3](mcdata_messaging.md)).
 - **감사**: 열람 자체가 당사자 모르게 이력을 여는 동작이라 `E-AUD-016 call_monitored`(`tap_mode=history`,
   `hist_kind`·`count` 포함)로 남기고 열람은 §5.7 과 같은 manager 게이트를 받는다.
 - **창 조회**: 같은 API 에 `until` 을 주면 [since, until] 창(관제 앱 [이력] 화면 — 하루 단위 페이지)이고,
@@ -537,14 +567,14 @@ TS 24.379 **ambient listening**(`session-type=ambient-listening`, remote-init �
 마커) CSC 가 재구현하지 않는다(`csc/src/handlers/dispatch_recordings.py`, OAM 주소 = csc.json `Recording.OamUrl`,
 비면 `https://{Fm.OamIp}:4419`).
 - **범위** = §5.7a 와 같은 집합: `ptt/{groupKey}/…` 는 그룹 키(`ptt_groups.id` 또는 mcptt id)·`session.json` 의
-  그룹이 `ptt_listen` 대상, `volte/…/{cid}.d` 는 `call.json` 의 발·수신자 중 하나가 `monitor_scope` 대상. 범위 밖
-  403, 경로 이탈(`..`) 400, 관제 미소속 403.
+  그룹이 역할 `ptt_listen` 대상, `volte/…/{cid}.d` 는 `call.json` 의 발·수신자 중 하나가 역할 `monitor_call` 대상. 범위 밖
+  403, 경로 이탈(`..`) 400, 역할 없음 403.
 - **감사**: 오디오 200 마다 `E-AUD-016 call_monitored`(`tap_mode=recording`, `recording`·`segment`·`slot`).
 
 ### 5.8 법적 근거·인가
 
-- **감청은 운영자 인가에 근거한다.** 편입(누가 감청 가능 그룹의 멤버가 되나)은 콘솔 계정 `manager`
-  이상이 콘솔에서 명시 승인하고 그 자체가 감사된다(§5.7). SIP 경로는 인메모리 인가만 집행한다(§5.3).
+- **감청은 운영자 인가에 근거한다.** 배정(누가 감청 범위가 있는 역할을 받나)은 `authz.manage`(콘솔 계정 `manager`
+  이상)가 콘솔에서 명시 승인하고 그 자체가 감사된다(§5.7). 관제 앱의 관리 권한으로는 만들 수 없다. SIP 경로는 인메모리 인가만 집행한다(§5.3).
 - **동의·고지는 배포 정책**이다. 관할지 법제(업무 통화 감청 고지 의무·동의 요건)에 따라 가입자 온보딩
   시 고지하는 것을 전제하며, 시스템은 그 근거를 강제하지 않고 감사로 뒷받침한다.
 - **본 기능은 3GPP LI 핸드오버(HI2/HI3·LEMF)가 아니다** — 업무망 내부 감독 청취다. 외부 사법기관
@@ -608,25 +638,26 @@ MODIFY 는 ADD 와 같은 payload 로 주소·crypto 만 갱신(같은 포트). 
 
 | 컴포넌트 | 변경 | 상태 |
 |---|---|---|
-| **CSC** `handlers/dispatch.py` | `dispatch_groups`·멤버·대상 테이블(§8.1), `/api/v1/dispatch-groups` CRUD + `/members` + `/monitor-targets` + `/ptt-targets`(§8.2), `pickup_group` 파생 갱신(멤버 추가/제거/그룹 삭제 → 같은 person 의 volte·ptt 전 회선 재계산 `effective_dispatch_group` → 바뀐 회선마다 USER_CHANGED) + 가입자 API 직접 편집 409 `derived_from_dispatch_group`(파생 회선 포함)·새 회선 개설 시 파생값 상속, `DISPATCH_GROUP_CHANGED` 통지(uri=그룹 id), pilot↔가입 id·타 대표번호 충돌 409, RBAC(감청/청취 범위 변경·그 그룹 편입은 콘솔 manager — 편입 가입자 쪽 역할 게이트 없음), `ptt_user_profile.allow_ambient_listening` 편집·XCAP user-profile `<allow-ambient-listening>`, `/provisioning/me` `dispatch{groupId,groupName,pilotId,monitorScope,pttListen,listenVisibility, members[],pttTargets[],etag}`(발견 — `services/mcptt.py` `dispatch_discovery`, §8.4) + 응답 `ETag`/`If-None-Match` 304. **관제사의 PTT 그룹 생성·편집·삭제는 GMS XCAP 경로**(PKCE 토큰, 생성 자격 `ptt_user_profile.allow_create_group` = OAM 부여, 편집·삭제 = 본인 소유 — [mcptt_authorization.md §4.1](mcptt_authorization.md)). 테이블 미적용 DB 는 목록 `schema=not_migrated`·변경 400. **통합 이력** `GET /provisioning/history?kind=call\|ptt\|message`(`services/dispatch_history.py` — 공유 NAS 파일을 관제 그룹 범위로 필터, 커서 `since`/`nextSince`, 관제 미소속 403, 감사 E-AUD-016 `tap_mode=history`) | 구현 |
-| **CSP `CCspDispatchGroupMap`** (`CspDispatchGroup.h/.cpp`) | 그룹 id·pilot·멤버 인덱스, `CanWatch`(§5.2)·`CanListenPtt`(§5.6) 범위 판정, `EffectiveGroupOf`(멤버 인덱스 → `pickup_group` → org 폴백), DbManager 적재(`SelectDispatchGroup`/`LoadAllDispatchGroups`, 부팅 프로브 `HasDispatchTables`)·`DISPATCH_GROUP_CHANGED`/`CSC_RESTART` 재적재·JSON fallback `DataFolder.DispatchGroup`(§3.3) | 구현 |
+| **CSC** `handlers/dispatch.py` · `services/authz.py` | `/api/v1/phone-groups` CRUD + `/members`(`directory.read`/`directory.write` — 콘솔 manager 전역, 관제 앱은 같은 코드 `dispatch_phone_group` 을 범위 안에서), `pickup_group` 파생 갱신(멤버 추가/제거/그룹 삭제 → 같은 person 의 volte·ptt 전 회선 재계산 → 바뀐 회선마다 USER_CHANGED) + 가입자 API 직접 편집 409 `derived_from_phone_group`·새 회선 개설 시 파생값 상속, `PHONE_GROUP_CHANGED` 통지, pilot 충돌 409 · `/api/v1/roles`(전부 `authz.manage`: 내장 4행 읽기 전용 403 `builtin`, 커스텀에 위임 불가 능력 400 `not_delegable`, 배정 남은 삭제 409 `assigned`, 배정 PUT 사람당 하나 `moved_from`, 배정/해제 시 `allow_ambient_listening` 동기, `ROLE_CHANGED`) · 단일 판정 `can(principal, capability, target)`(§2.3 — roles 테이블 미적용이면 내장 4행) · `/provisioning/me` `phoneGroup`+`dispatch`(`dispatch_discovery`, 전환기 합성 필드) + `ETag` 304 · 이력·녹취 게이트 = 역할(`_dispatch_scope_sets`) · 감사 actor `console:<login>`/`user:<id>` | 구현 |
+| **CSP `CCspPhoneGroupMap`** (`CspPhoneGroup.h/.cpp`) + **`CCspRoleMap`** (`CspRole.h/.cpp`) | 전화 그룹 맵 = 그룹 id·pilot·멤버 인덱스, `EffectiveGroupOf`(멤버 인덱스 → `pickup_group`, org 폴백 없음), `DbManager::LoadAllPhoneGroups/SelectPhoneGroup`·`PHONE_GROUP_CHANGED`(uri=그룹 id, DELETE/단건/전량)·JSON fallback `DataFolder.PhoneGroup`. 역할 맵 = 회선 → 역할 인덱스(`LoadAllRoles` 가 `role_assignments(user)` 를 person 의 volte·ptt 전 회선으로 펼침), `CanWatch(watcherLine, targetGroup)`(규칙 1 전화 그룹 / 규칙 2 `monitor_call`)·`CanListenPtt(line, pttGroup)`·`ListenHidden(line)`·`RoleIdForLine`, `ROLE_CHANGED`·`USER_CHANGED`(POST/DELETE)·`CSC_RESTART` 전량 재적재·JSON fallback `DataFolder.Role`(`assignments[]`=회선). `DISPATCH_GROUP_CHANGED` 는 전환 전 이름 — 두 맵 재적재 | 구현 |
 | **CSP `CTasModule` 포크 집합** | `CTasForkSet`(TAS 소유 — 대기 leg 는 승자 확정 전까지 `CCallMap` 밖) · `TryDispatchPilot`(§4.2, 미등록 착신 분기의 `TryPickupDial` 앞) · `ResolveForkTargets`(등록·`busy_members=skip` 비통화·발신자 제외·`alert_order` 순·`MaxForkTargets` 절삭) · `StartAlert`(`alert_mode` 분기 — parallel 전원 / sequential 큐+첫 순번) · `AdvanceSequential`(§4.4a 다음 순번·단계 시한 재설정) · `ForkAlert`(leg 전용 SDES 서버 키·`P-Called-Party-ID`=대표번호) · `OnForkRing`(첫 180 만 A 에, SDP 없이) · `OnForkStart`(승자 → (A,승자) 쌍 CallMap 삽입 후 디스패처 정상 answer 경로가 RELAY_MODIFY·A 200, 패자 CANCEL, 늦은 200 은 BYE) · `OnForkEnd`(패자 최종 응답 흡수, sequential 다음 순번, 전원 실패 486/480, A 취소 → 전원 CANCEL+relay 회수) · `Tick`(1초 — `no_answer_sec` 만료 → sequential 다음 순번 / `OverflowFork`(대표번호면 그 그룹원 재포크·내선이면 단일 leg, 1단계) 또는 480) · `FindForkForPickup`/`PickUpFork`(§4.4 링잉 대표번호 호 당겨받기 — `PickUp` 의 CallMap 후보 폴백) · 대표번호 AoR dialog 이벤트(§4.5 — early/confirmed/terminated) | 구현 |
-| **CSP `CscfModule`** | dialog SUBSCRIBE 인가 → `CanWatch(EffectiveGroupOf(구독자), 대상 그룹)`; 대상이 대표번호면 그 그룹(§4.5) · conference SUBSCRIBE 인가(§5.6, TS 24.379 §10.1.3.4.1) → `CGroupCallService::CheckConferenceSubscribe`(멤버 = `allow_conference_state` / 비멤버 = 자격+`CanListenPtt`), 403 `Warning: 138`·480 `Warning: 105`(`SendResponseWithWarning`) | 구현 |
+| **CSP `CscfModule`** | dialog SUBSCRIBE 인가 → `gclsRoleMap.CanWatch(구독자 회선, 대상 전화 그룹)`(§5.2 — 규칙 1 전화 그룹 / 규칙 2 역할); 대상이 대표번호면 그 전화 그룹(§4.5) · conference SUBSCRIBE 인가(§5.6, TS 24.379 §10.1.3.4.1) → `CGroupCallService::CheckConferenceSubscribe`(멤버 = `allow_conference_state` / 비멤버 = 자격+`CanListenPtt`), 403 `Warning: 138`·480 `Warning: 105`(`SendResponseWithWarning`) | 구현 |
 | **CSP `ModuleDispatcher`** | `OnCallRing`/`OnCallEnd` 훅을 소비형으로(포크 leg 흡수) — CallMap leg 의 dialog 통지는 종전대로 통과 | 구현 |
-| **CSP 설정** | `Setup.Sip.Dispatch.{MaxForkTargets,ForkRingTimeoutSec,MaxTapsPerSession}`, `Setup.DataFolder.DispatchGroup`(config_template·render 기본 `dispatch_group`) | 구현 |
+| **CSP 설정** | `Setup.Sip.Dispatch.{MaxForkTargets,ForkRingTimeoutSec,MaxTapsPerSession}`, `Setup.DataFolder.{PhoneGroup,Role}`(render 기본 `phone_group`/`role`). `Setup.Sip.CallPickupId` 는 없다(피처코드 = 접속서비스 필드만, [volte_supplementary_services.md §5.2](volte_supplementary_services.md)) | 구현 |
 | **CSP `CCallMap`** | 감청 leg 는 CallMap 밖(TAS `m_mapMonitorLeg`)에 두어 dialog 이벤트·픽업 후보에서 자연 제외(별도 표식 불요). Join 대상 대조는 `MatchReplacesDialog` 재사용 | 구현 |
-| **CSP `CTasModule` 감청** | `HandleIncomingJoin`(§5.3 — Join 파싱·`CanWatch` 인가·recvonly·세션당 tap 상한·offer SDES→tap egress 서버 키·200 answer sendonly+`a=ssrc` 라벨) · `HandleMonitorLegEnd`/`ReleaseSessionMonitors`(M BYE·원 통화 종료 시 tap 회수) · `E-AUD-016` 발신(started/ended/denied) | 구현 |
-| **CSP `CGroupCallService` PTT 청취** | `ProcessGroupCall` 의 청취 leg 분기(§5.6 — `a=recvonly` 판정·비멤버 403·`SelectUserProfile` 자격 + `CanListenPtt` 범위·활성 세션 없으면 480·answer sendonly·`PTT_JOIN recv_only=1`) · `CallSessionInfo.bListenOnly/bListenHidden`(세션 활성 판정 `HasActiveLeg`·로스터·조건 전파·참가자 DB/이력 제외) · `EmitPttListenAudit`(E-AUD-016 started/ended/denied) | 구현 |
+| **CSP `CTasModule` 감청** | `HandleIncomingJoin`(§5.3 — Join 파싱·역할 필수 + `CanWatch` 인가(같은 전화 그룹만으로는 BLF 까지, Join 은 역할이 있어야 한다)·recvonly·세션당 tap 상한·offer SDES→tap egress 서버 키·200 answer sendonly+`a=ssrc` 라벨) · `HandleMonitorLegEnd`/`ReleaseSessionMonitors`(M BYE·원 통화 종료 시 tap 회수) · `E-AUD-016` 발신(started/ended/denied, `role`=감청자 역할 id) | 구현 |
+| **CSP `CGroupCallService` PTT 청취** | `ProcessGroupCall` 의 청취 leg 분기(§5.6 — `a=recvonly` 판정·비멤버 403·`SelectUserProfile` 자격 + `gclsRoleMap.CanListenPtt` 범위·`ListenHidden`(역할 `listen_visibility`)·활성 세션 없으면 480·answer sendonly·`PTT_JOIN recv_only=1`) · `CallSessionInfo.bListenOnly/bListenHidden`(세션 활성 판정 `HasActiveLeg`·로스터·조건 전파·참가자 DB/이력 제외) · `CanObserveEphemeral`(참가자 전화 그룹에 대한 관측자 역할 `CanWatch`) · `EmitPttListenAudit`(E-AUD-016 started/ended/denied, `role`) | 구현 |
 | **CSP `CmpClient`** | `AddTap`(ssrc_a/ssrc_b 응답)/`ModifyTap`/`RemoveTap`, HEARTBEAT `resource.tap` 학습(`SupportsTap` — 미광고 CMP 는 Join 488) | 구현 |
 | **CMP** | `PRtpTap`(청취 leg — SSRC 재매핑·SRTP egress·상향 폐기·RTCP SR 재매핑), `PRtpRelay::_taps` fan-out(복호 평문 ingress 복사), `RELAY_TAP_ADD/MODIFY/REMOVE` 핸들러, `resource.tap` 광고·STATS `taps[]`·풀(TapPoolSize/MaxTapsPerSession)·세션 회수 시 일괄 free(§6) | 구현 |
-| **콘솔** | 관리>가입자 옆 **관제 그룹** 페이지(`DispatchGroupsPage` — 그룹 CRUD·멤버 transfer(VoLTE 가입자)·`alert_order`·감청/청취 범위(manager)·listed 대상 선택), 가입자 편집의 `pickup_group` 은 `dg-` 파생값이면 잠금 표시, `McpttProfile.allow_ambient_listening` 타입 · **장애>감사 이력**(`/alerts/audit`, manager — `AuditEventsSection`/`core.audit-history` 위젯, §5.7) | 구현 |
+| **콘솔** | `구성 > 전화 그룹`(`/subscribers/phone-groups`, `PhoneGroupsPage` — 그룹 CRUD·멤버 transfer·`alert_order`·대표번호, 권한 열 없음) · `시스템 > 역할`(`/deploy/roles`, `RolesPage`, manager — 내장 프리셋 읽기 전용·관제 프리셋 생성·범위/대상·가입자·콘솔 계정 배정) · 계정 화면 역할 선택 = `GET /api/v1/roles` · 가입자 편집의 `pickup_group` 파생값 잠금(`derived_from_phone_group`) · **장애>감사 이력**(`/alerts/audit`, manager — `role` 열, 전환 전 이벤트의 `group` 폴백) | 구현 |
 | **OAM** | `GET /api/v1/events` — `kind=audit` 열람 manager 게이트(미만은 결과 제외·명시 조회 403)·`code=` 필터 | 구현 |
-| **OAM 게이트웨이** | csc `pkg.json` `gateway.routes` + `oam.json Gateway.Routes` 시드에 `/api/v1/dispatch-groups` | 구현 |
+| **OAM 게이트웨이** | csc `pkg.json` `gateway.routes` + `oam.json Gateway.Routes` 시드에 `/api/v1/phone-groups`·`/api/v1/roles`(기존 배포는 OAM 설정 PUT 으로 라우트 추가) · OAM `console_accounts.role` 은 커스텀 역할 id(`role-…`)도 수락(로컬 게이트에서는 monitor 등급) | 구현 |
 | **단말 SDK `libcimsue`** ([ue_sdk.md](ue_sdk.md)) | `calledParty`(P-Called-Party-ID), `dialogWatch`(RFC 4235)·`join`(RFC 3911 recvonly, 200 OK a=ssrc 라벨 → `sources`), `pickup`, `transfer`, `joinGroupCall(listenOnly)` — `cimsue-cli` 로 dev 실측(Join 200·감청 RTP·caller/callee 라벨·픽업·REFER) | 구현 |
 | **단말 앱(관제용 UI)** | dialog 목록·클릭→Join, SSRC 별 활성/레벨 표시(U10 관측 API 후속), PTT 청취 채널 UI(U6) — 화면 설계 정본 [dispatch_desktop_ui.md](dispatch_desktop_ui.md)(Windows WPF, 네 도킹 패널+감청 창·배너·핫키·응답 코드 문구) | Windows WPF 구현 완료 — 실기 시험은 서버 연결 후 일괄 |
 | **cspsim** | `hunt`(`-pilot`, `-hunt_noanswer`, `-hunt_pickup` — D 의 `<code><pilot>` 지정 픽업, 마커 `pickup_status`/`t_answer_ms`) · `monitor`(dialog 구독→INVITE-Join 청취, 마커 `join_status`/`M_ssrc`/A·B·M RTP delta — SSRC 2개·은닉 판정) · `ptt_listen`(멤버 그룹콜 중 M 의 recvonly INVITE, `-listen_sendrecv` 비멤버 대조 — 마커 `join_status`/`M_recv`/`M_grant`/`M_deny`/`hidden`) · 수신 SSRC 집합·floor DENY/TAKEN 카운터·conference 로스터 누적 | 구현 |
 
-②의 포크 집합이 유일한 구조 변경이고 나머지는 기존 훅·계약의 연장이다.
+②의 포크 집합이 절차상 유일한 구조 변경이고 나머지는 기존 훅·계약의 연장이다. 엔티티 분해(§3)는 인가 판정의
+입력만 바꾸며 SIP 절차·CMP 계약은 그대로다.
 
 **포크 집합의 위치(구현 결정)**: 대기 B-leg 는 `CCallMap`(leg 쌍 1:1 모델) 밖의 TAS 소유 맵에 두고, 승자 확정
 시점에 (A, 승자) 쌍을 `CCallMap` 에 넣어 이후를 기존 1:1 경로(answer RELAY_MODIFY·re-INVITE·BYE·sweeper)에
@@ -640,108 +671,149 @@ MODIFY 는 ADD 와 같은 payload 로 주소·crypto 만 갱신(같은 포트). 
 
 ### 8.1 DB 스키마
 
+목표 스키마(`sql/migrate_phone_groups_roles.sql`, 재실행 안전). 전환 전 스키마(`dispatch_groups` 계열 4 테이블,
+`sql/migrate_dispatch_groups.sql`)와의 대응은 아래 전환 표.
+
 ```sql
--- sql/migrate_dispatch_groups.sql (재실행 안전)
-CREATE TABLE IF NOT EXISTS dispatch_groups (
-    id              VARCHAR(64)  NOT NULL COMMENT '불변 키 (CSC 발급 dg-xxxxxxxx) — pickup_group 값·상관 키',
+-- 전화 그룹 (유선 전화 기능 — 관제 아님)
+CREATE TABLE IF NOT EXISTS phone_groups (
+    id              VARCHAR(64)  NOT NULL COMMENT '불변 키 (CSC 발급 pg-xxxxxxxx; 전환 전 dg- 값 유지) — pickup_group 값·상관 키',
     name            VARCHAR(128) NOT NULL DEFAULT '' COMMENT '표시 이름',
     pilot_id        VARCHAR(64)           DEFAULT NULL COMMENT '대표번호(AoR user part). NULL=대표번호 없음',
-    service_ref     VARCHAR(64)           DEFAULT NULL COMMENT '대표번호 접속서비스 name',
+    service_ref     VARCHAR(64)           DEFAULT NULL COMMENT '대표번호 접속서비스 name (유선 VoIP)',
     alert_mode      ENUM('parallel','sequential') NOT NULL DEFAULT 'parallel' COMMENT 'TS 24.239 alerting mode',
     no_answer_sec   INT          NOT NULL DEFAULT 30,
     busy_members    ENUM('skip','alert') NOT NULL DEFAULT 'skip',
-    overflow_target VARCHAR(64)           DEFAULT NULL COMMENT '무응답 넘김 대상(대표번호/내선). NULL=480',
-    monitor_scope   ENUM('none','own','listed','all') NOT NULL DEFAULT 'none',
-    ptt_listen      ENUM('none','listed','all')       NOT NULL DEFAULT 'none',
-    listen_visibility ENUM('hidden','visible')        NOT NULL DEFAULT 'hidden' COMMENT 'PTT 청취 멤버 로스터 노출',
-    directory_admin ENUM('none','own','all')          NOT NULL DEFAULT 'none' COMMENT '관제 앱 조직/구성원/번호·PTT 그룹 관리 범위 (own=org_id 하위) — sql/migrate_dispatch_directory_admin.sql',
+    overflow_target VARCHAR(64)           DEFAULT NULL COMMENT '무응답 넘김 대상(대표번호/가입 번호). NULL=480',
     org_id          INT                   DEFAULT NULL,
     created_at      DATETIME              DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uk_pilot (pilot_id),
-    CONSTRAINT fk_dg_org FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='관제 그룹';
+    CONSTRAINT fk_pg_org FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='전화 그룹';
 
-CREATE TABLE IF NOT EXISTS dispatch_group_members (
-    user_id     VARCHAR(64) NOT NULL COMMENT '가입자 id — 가입자당 그룹 하나',
+CREATE TABLE IF NOT EXISTS phone_group_members (
+    user_id     VARCHAR(64) NOT NULL COMMENT '가입자(회선) id — 가입자당 그룹 하나',
     group_id    VARCHAR(64) NOT NULL,
     alert_order INT         NOT NULL DEFAULT 0 COMMENT 'sequential 호출 순서',
     PRIMARY KEY (user_id),
     KEY idx_group (group_id),
-    CONSTRAINT fk_dgm_group FOREIGN KEY (group_id) REFERENCES dispatch_groups (id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='관제 그룹 멤버';
+    CONSTRAINT fk_pgm_group FOREIGN KEY (group_id) REFERENCES phone_groups (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='전화 그룹 멤버';
 
-CREATE TABLE IF NOT EXISTS dispatch_group_monitor_targets (
-    group_id        VARCHAR(64) NOT NULL,
-    target_group_id VARCHAR(64) NOT NULL,
-    PRIMARY KEY (group_id, target_group_id),
-    CONSTRAINT fk_dgt_group  FOREIGN KEY (group_id)        REFERENCES dispatch_groups (id) ON DELETE CASCADE,
-    CONSTRAINT fk_dgt_target FOREIGN KEY (target_group_id) REFERENCES dispatch_groups (id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='monitor_scope=listed 대상';
+-- 역할 (권한 = 능력 + 범위) — 정의·내장 프리셋은 mcptt_authorization.md §2·§3
+CREATE TABLE IF NOT EXISTS roles (
+    id                VARCHAR(64)  NOT NULL COMMENT '불변 키 — 내장 admin|manager|operator|monitor, 관제 role-xxxxxxxx',
+    name              VARCHAR(128) NOT NULL DEFAULT '',
+    builtin           TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '내장 프리셋(읽기 전용)',
+    authz_manage      TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '역할·배정·범위 관리 — 내장 admin/manager 만',
+    audit_read        TINYINT(1)   NOT NULL DEFAULT 0,
+    directory_write   ENUM('none','own','all') NOT NULL DEFAULT 'none' COMMENT '조직/구성원/번호/전화 그룹 관리 범위 (own=org_id 하위)',
+    directory_read    ENUM('none','own','all') NOT NULL DEFAULT 'none',
+    ptt_group_manage  ENUM('none','own','scope','all') NOT NULL DEFAULT 'none' COMMENT 'own=본인 소유, scope=directory_write 범위',
+    monitor_call      ENUM('none','own','listed','all') NOT NULL DEFAULT 'none' COMMENT '통화 감청·세션 관측·통화 이력/녹취 범위',
+    ptt_listen        ENUM('none','listed','all')       NOT NULL DEFAULT 'none' COMMENT 'PTT 청취·conference 구독·PTT 이력/녹취 범위',
+    listen_visibility ENUM('hidden','visible')          NOT NULL DEFAULT 'hidden' COMMENT 'PTT 청취 멤버 로스터 노출',
+    history_read      ENUM('none','scope','all')        NOT NULL DEFAULT 'none' COMMENT 'scope=monitor_call/ptt_listen 범위',
+    alarm_ack         TINYINT(1)   NOT NULL DEFAULT 0,
+    mcptt_control     TINYINT(1)   NOT NULL DEFAULT 0,
+    org_id            INT                   DEFAULT NULL COMMENT 'own 범위의 루트',
+    created_at        DATETIME              DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    CONSTRAINT fk_role_org FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='역할';
 
-CREATE TABLE IF NOT EXISTS dispatch_group_ptt_targets (
-    group_id     VARCHAR(64) NOT NULL,
+CREATE TABLE IF NOT EXISTS role_assignments (
+    principal_type ENUM('console','user') NOT NULL COMMENT 'console=OAM 콘솔 계정(login_id), user=가입자 person(users.id)',
+    principal_id   VARCHAR(64) NOT NULL,
+    role_id        VARCHAR(64) NOT NULL,
+    PRIMARY KEY (principal_type, principal_id),          -- 사람당 역할 하나
+    KEY idx_role (role_id),
+    CONSTRAINT fk_ra_role FOREIGN KEY (role_id) REFERENCES roles (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='역할 배정';
+
+CREATE TABLE IF NOT EXISTS role_monitor_targets (
+    role_id        VARCHAR(64) NOT NULL,
+    phone_group_id VARCHAR(64) NOT NULL,
+    PRIMARY KEY (role_id, phone_group_id),
+    CONSTRAINT fk_rmt_role FOREIGN KEY (role_id)        REFERENCES roles (id)        ON DELETE CASCADE,
+    CONSTRAINT fk_rmt_pg   FOREIGN KEY (phone_group_id) REFERENCES phone_groups (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='monitor_call=listed 대상';
+
+CREATE TABLE IF NOT EXISTS role_ptt_targets (
+    role_id      VARCHAR(64) NOT NULL,
     ptt_group_id BIGINT      NOT NULL COMMENT 'ptt_groups.id (surrogate)',
-    PRIMARY KEY (group_id, ptt_group_id),
-    CONSTRAINT fk_dgp_group FOREIGN KEY (group_id)     REFERENCES dispatch_groups (id) ON DELETE CASCADE,
-    CONSTRAINT fk_dgp_ptt   FOREIGN KEY (ptt_group_id) REFERENCES ptt_groups (id)      ON DELETE CASCADE
+    PRIMARY KEY (role_id, ptt_group_id),
+    CONSTRAINT fk_rpt_role FOREIGN KEY (role_id)      REFERENCES roles (id)      ON DELETE CASCADE,
+    CONSTRAINT fk_rpt_ptt  FOREIGN KEY (ptt_group_id) REFERENCES ptt_groups (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ptt_listen=listed 대상';
 ```
 
-PTT 그룹콜 청취 자격은 `ptt_user_profile` 에 컬럼을 신설한다(TS 24.484, §5.6):
+콘솔 계정의 배정은 DB 가 아니라 OAM file_store `console_accounts[].role`(값 = `roles.id`)이다 — OAM 은 DB 없이
+동작해야 하므로(내장 admin·부트스트랩) 콘솔 principal 의 배정은 JWT `role` 클레임으로 CSC 에 전달되고 CSC 가
+`roles` 행으로 해석한다(내장 4행은 마이그레이션이 항상 시드한다).
 
-```sql
--- sql/migrate_ptt_ambient_listening.sql (재실행 안전 — 컬럼 존재 시 no-op)
-ALTER TABLE ptt_user_profile
-  ADD COLUMN allow_ambient_listening TINYINT(1) NOT NULL DEFAULT 0
-    COMMENT 'allow-ambient-listening (TS 24.484 ruleset) — 원격 청취 수행 자격 (관제사)';
-```
+**전환 표** (`migrate_phone_groups_roles.sql` — 재실행 안전, 데이터 보존):
 
-`volte_subscriptions.pickup_group` 컬럼은 그대로 쓴다(값 = `dispatch_groups.id`). 기존 자유 문자열
-값은 마이그레이션 시 같은 값의 관제 그룹(대표번호 없음)으로 승격해 축을 맞춘다. 컬럼 미적용 DB
-에서는 CSP 가 부팅 프로브로 감지해 관제 기능 전체를 비활성(INFO 로그)한다 — 기존
-`pickup_group` 프로브와 같은 방식.
+| 전환 전 | 전환 후 |
+|---|---|
+| `dispatch_groups`(전화 열: id·name·pilot_id·service_ref·alert_mode·no_answer_sec·busy_members·overflow_target·org_id) | `phone_groups` 같은 열, **id 유지**(`dg-…` 그대로) |
+| `dispatch_groups`(범위 열: monitor_scope·ptt_listen·listen_visibility·directory_admin·org_id) — 하나라도 `none` 이 아닌 그룹 | 그룹마다 역할 `role-<그룹 id>`(name = 그룹 name, `monitor_call`=monitor_scope, `ptt_listen`, `listen_visibility`, `directory_write`=directory_admin, `history_read=scope`, `org_id`) + 그 그룹 **전 멤버**의 `role_assignments('user', users.id, role)` |
+| `dispatch_group_members` | `phone_group_members` |
+| `dispatch_group_monitor_targets` / `dispatch_group_ptt_targets` | `role_monitor_targets` / `role_ptt_targets`(역할 `role-<그룹 id>`) |
+| `ptt_user_profile.allow_ambient_listening` | 값 유지 + `ptt_listen≠none` 역할 배정자는 1 로 정합(백필) |
+| `volte_subscriptions.pickup_group` / `ptt_subscriptions.pickup_group` | 값 유지(= `phone_groups.id`). 컬럼 미적용 DB 에서는 CSP 가 부팅 프로브로 감지해 픽업·BLF 축을 비활성(INFO 로그) |
 
 ### 8.2 CSC 관리 API
 
-`/api/v1/dispatch-groups` — `GET`(목록) / `POST` / `GET|PUT|DELETE /{id}` /
-`POST /{id}/members` / `DELETE /{id}/members/{user_id}` / `PUT /{id}/monitor-targets` /
-`PUT /{id}/ptt-targets`. PTT 그룹 API([../../api/admin_api.md](../../api/admin_api.md) §6)와 동형.
-검증: `pilot_id` 가 `volte_subscriptions.id`/`ptt_subscriptions.id`/다른 pilot 과 충돌 → 409;
-`monitor_scope≠none`/`ptt_listen≠none`/`directory_admin≠none` 그룹의 생성·범위 변경·멤버 편입을 manager 미만 콘솔 계정이 시도
-→ 403 `manager_required`(편입되는 가입자 쪽 역할 게이트는 없다 — §5.3). `directory_admin` 컬럼 미적용 DB 에서 `none` 외 값 → 400 `schema_not_migrated`.
-
-**관제 앱(가입자 토큰) 관리 API** — `/provisioning/directory/{admin,orgs,members,groups}`(§3.4) ·
-`/provisioning/recordings/{id}…`(§5.7b): MCPTT 서버(4430) 에 붙고 콘솔 관리 API 와 realm 이 다르다.
+- `/api/v1/phone-groups` — `GET`(목록) / `POST` / `GET|PUT|DELETE /{id}` / `POST /{id}/members` /
+  `DELETE /{id}/members/{user_id}`. 검증: `pilot_id` 가 `volte_subscriptions.id`/`ptt_subscriptions.id`/다른 pilot 과
+  충돌 → 409. 권한 = `directory.write`(콘솔 manager 전역 / 관제 `own|all` 범위 안 조직의 그룹).
+- `/api/v1/roles` — `GET`(내장 4 + 커스텀) / `POST` / `GET|PUT|DELETE /{id}`(내장은 읽기 전용) / `PUT /{id}/monitor-targets`
+  `{phone_group_ids:[…]}` / `PUT /{id}/ptt-targets` `{ptt_group_ids:[mcptt_group_id…]}` / `GET|PUT|DELETE /{id}/assignments`
+  `{principal_type, principal_id}`. **전부 `authz.manage`**(콘솔 `manager` 이상). `authz_manage=1` 은 내장 행에만 허용(커스텀은
+  400 `not_delegable`). `ptt_listen≠none` 배정/해제는 대상 person 의 `allow_ambient_listening` 을 동기하고 `ROLE_CHANGED` 를 낸다.
+  콘솔 계정의 배정은 OAM `PUT /api/v1/console-accounts/{login_id}` `role`(값 = `roles.id`) 그대로.
+- **관제 앱(가입자 토큰) 관리 API** — `/provisioning/directory/{admin,orgs,members,groups,phone-groups}`(§3.4) ·
+  `/provisioning/recordings/{id}…`(§5.7b): MCPTT 서버(4430) 에 붙고 콘솔 관리 API 와 realm 이 다르지만 **판정은 같은
+  `can()`** 을 지난다. 역할·배정 API 는 여기에 없다.
+- 계약 상세 = [../../api/admin_api.md §6.7](../../api/admin_api.md).
 
 ### 8.3 접속서비스·csp.json
 
-신규 서비스 필드 없음 — 대표번호는 `dispatch_groups.service_ref` 로 서비스를 가리킨다.
-csp.json `sections.tas` 신규 키:
+- **대표번호·관제 회선은 유선 VoIP 서비스(`kind=voip`)에 둔다** — `phone_groups.service_ref` 와 관제 회선 `service_ref`
+  = 그 서비스 name. 피처코드(`pickup_feature_code`)·`transfer_allowed`·`media_srtp=required`·`sec_mechanisms=[tls]`·
+  `media_nat_mode=off` 가 이 서비스의 필드다([sip_service_model.md §2-9](sip_service_model.md),
+  [volte_supplementary_services.md §10.2](volte_supplementary_services.md)). 이동 VoLTE 서비스에는 피처코드를 두지 않는다.
+- 신규 서비스 필드 없음. csp.json `sections.tas` 키:
 
 | 키 | 기본 | 의미 |
 |---|---|---|
 | `Setup.Sip.Dispatch.MaxTapsPerSession` | 2 | 세션당 감청 leg 상한(§5.5) |
 | `Setup.Sip.Dispatch.MaxForkTargets` | 32 | 대표번호 1건이 동시 포크하는 멤버 상한(제어평면 부하 방어 — 초과분은 `alert_order` 순 절삭). [../csp_control_plane_load_hardening.md](../csp_control_plane_load_hardening.md) |
 | `Setup.Sip.Dispatch.ForkRingTimeoutSec` | 60 | `no_answer_sec` 상한(그룹 값이 이를 넘으면 clamp) |
+| `Setup.DataFolder.PhoneGroup` / `Setup.DataFolder.Role` | `phone_group` / `role` | JSON fallback 디렉터리(§3.5) |
+
+`Setup.Sip.CallPickupId`(전역 피처코드)는 없다 — 피처코드는 접속서비스 필드만 인정한다(기존 csp.json 의 값은 무시).
 
 ### 8.4 단말
 
 > 관제용 앱의 구현 토대는 [ue_sdk.md](ue_sdk.md)(C++ 코어 `libcimsue` + Android/Windows SDK) 이며, 아래 요건과
 > 코어 API 의 대응표는 그 문서 §7 이다.
 
-관제용 앱은 `/provisioning/me` 의 `dispatch` 블록으로 자기 데스크(그룹·대표번호·범위)와 **감시 대상**을 안다
-(계약 정본 [android_ue_provisioning.md §3](android_ue_provisioning.md)):
-- `members[]` = dialog 감시(§5.2) 대상 — CSC 가 `monitor_scope` 를 CSP `CanWatch` 와 같은 규칙으로 해석한
-  가입자(자기 그룹원 항상 + `listed` 대상 그룹원 / `all` 전 가입자 — `all` 에는 VoLTE 회선 없는 PTT 전용 가입자도
-  `volteAor=""` 로 실린다). 항목 `userId·name·volteAor·pttId·extension·groupId` — 앱은 `volteAor`(통화)와 `pttId`(PTT
-  세션 참가, §5.6a) **둘 다** 비어 있지 않으면 dialog 를 구독한다. ③ 그룹원 상태 띠는 `groupId == dispatch.groupId` 인
-  항목, 나머지는 감시 전용. `extension` 은 가입 번호 끝자리(`Provisioning.ExtensionDigits`, 기본 4)로 망 주소가 아닌
-  표시 라벨.
-- `pttTargets[]` = conference 구독·청취(§5.6) 대상 — `ptt_listen` 을 `CanListenPtt` 와 같은 규칙으로 해석한 PTT 그룹
-  (`id·uri(tel:)·name`). GMS 멤버 그룹과 겹치면 앱이 id 로 병합.
-- `etag`(블록) + 응답 `ETag`/`If-None-Match` 304 — 주기 재조회로 편성 변경(그룹원·대상 추가/제거)을 따라간다.
-  범위 enum 의 해석은 서버에만 있다(CSC 가 목록, CSP 가 게이트 — 두 규칙은 같다).
+관제용 앱은 `/provisioning/me` 의 두 블록으로 자기 데스크를 안다(계약 정본 [android_ue_provisioning.md §3](android_ue_provisioning.md)):
+- **`phoneGroup`** — 전화 그룹 소속일 때. `groupId·groupName·pilotId·members[]`(같은 그룹원 = 그룹원 상태 띠·BLF 대상
+  `userId·name·volteAor·pttId·extension`)·`etag`. 대표번호 대기열·픽업·"대표번호로 발신" 토글은 이 블록으로 켜진다.
+- **`dispatch`** — 역할이 있을 때. `roleId·roleName·monitorCall·pttListen·listenVisibility·directoryWrite·orgCode·members[]·
+  pttTargets[]·etag`. `members[]` = dialog 감시(§5.2 규칙 2) 대상 — CSC 가 `monitorCall` 을 CSP `CanWatch` 와 같은 규칙으로
+  해석한 가입자(`listed` 대상 그룹원 / `all` 전 가입자 — `all` 에는 VoLTE 회선 없는 PTT 전용 가입자도 `volteAor=""` 로
+  실린다). `pttTargets[]` = conference 구독·청취(§5.6) 대상. 감청 창·범위 채널·이력·관리 탭은 이 블록으로 켜진다.
+- **전환기**: 현 `dispatch` 블록의 필드(`groupId/groupName/pilotId/monitorScope/pttListen/listenVisibility/directoryAdmin/
+  orgCode/members[]/pttTargets[]`)를 두 블록에서 합성해 함께 내린다 — `monitorScope`=`monitorCall`, `directoryAdmin`=
+  `directoryWrite`, `members[]` = 그룹원 ∪ 감시 대상. 구 앱은 그대로 동작한다.
+- `extension` 은 가입 번호 끝자리(`Provisioning.ExtensionDigits`, 기본 4)로 망 주소가 아닌 표시 라벨. `etag`(블록) +
+  응답 `ETag`/`If-None-Match` 304 — 주기 재조회로 편성 변경을 따라간다. 범위 enum 의 해석은 서버에만 있다(CSC 가 목록,
+  CSP 가 게이트 — 두 규칙은 같다).
 
 Join INVITE 는 `Supported: join` 을 싣고, SDP 는 `a=recvonly` + 통화 표준 코덱(AMR-WB) +
 SDES crypto(서비스 `media_srtp` 에 따름). 미디어 수신부는 한 m-line 의 **SSRC 2개를 디먹스해 각각
@@ -769,12 +841,12 @@ cspsim 시나리오(3~4 단말)와 S3 항목. 판정 정본은 기존 방식 그
 | | M2 청취 | M Join INVITE → 200, M 수신 RTP delta>0 (SSRC 2개), A·B delta 변화 없음 |
 | | M3 은닉 | A·B 에 re-INVITE/NOTIFY 0건, 같은 그룹 D 의 dialog NOTIFY 에 M leg 없음 |
 | | M4 상향 차단 | M 송신 RTP → A·B 수신 delta 무변화 |
-| | M5 인가 | 범위 밖 그룹의 M' → 구독 403 / Join 403; 미지 Call-ID → 481 |
+| | M5 인가 | M5a 범위 밖 역할(`own`, 다른 그룹)의 M' → 구독 403·Join 없음 / M5c 역할 없는 다른 그룹 M' → 구독 403 / **M5b 같은 전화 그룹원이지만 역할 없음** → 그룹원 BLF 구독 200·Join 403(미디어 무흐름); 미지 Call-ID → 481 |
 | | M6 종료 | A BYE → M 에 BYE 수신 마커, CMP tap 회수(STATS `taps` 0) |
 | | M7 감사 | `E-AUD-016` 시작·종료 2건 |
-| `S3-SCN-PTT-LISTEN` | L1 청취 합류 | 멤버 A·B 그룹콜 중 M(비멤버, `allow_ambient_listening=1`, 관제 그룹 `ptt_listen=all`) recvonly INVITE → 200, M 수신 RTP delta>0, M floor 요청 → DENY(GRANT 0), A 의 conference 로스터에 M 없음(hidden) |
+| `S3-SCN-PTT-LISTEN` | L1 청취 합류 | 멤버 A·B 그룹콜 중 M(비멤버, `allow_ambient_listening=1`, 역할 `ptt_listen=all`) recvonly INVITE → 200, M 수신 RTP delta>0, M floor 요청 → DENY(GRANT 0), A 의 conference 로스터에 M 없음(hidden) |
 | | L2 자격 없음 | `allow_ambient_listening=0` → 403 |
-| | L3 범위 밖 | `ptt_listen=none` → 403 |
+| | L3 범위 밖 | 역할 `ptt_listen=none` → 403 / L3c 전화 그룹원이지만 역할 없음 → Join 403 + conference 구독 403 `Warning: 138` |
 | | L4 비멤버 일반 INVITE | sendrecv → 403 |
 | | L5 공개 청취 | `listen_visibility=visible` → 200 + 로스터에 M(`roles` listener) |
 | `S1` | CMP tap 단위(복사·PT 스탬프·상향 폐기·세션 종료 회수), CSP `Join` 파서·`MatchDialog` 단위 | gtest |
@@ -786,10 +858,16 @@ cspsim 시나리오(3~4 단말)와 S3 항목. 판정 정본은 기존 방식 그
 ```
 
 `S3-SCN-PTT-LISTEN` 은 S3-SEED 의 PTT 자격 창(멤버 A·B)과 대상 그룹의 **비멤버** PTT 가입자(M)를 쓰고, M 의 관제
-그룹(`dg-vfy-lsn-<group>`)과 `ptt_user_profile.allow_ambient_listening` 을 검사별로 시드·복원한다.
+역할(`role-vfy-lsn-<group>`, `ptt_listen` 대상 = 그 그룹)과 `ptt_user_profile.allow_ambient_listening` 을 검사별로 시드·복원한다.
 
-S3-SEED 가 관제 그룹 2개(대표번호 있는 `dg-verify-a`: A 제외 B·C·D 멤버 / `dg-verify-b`: M' 멤버,
-범위 없음)와 감시 그룹(`monitor_scope=all` 의 M)을 시드하고 종료 시 복원한다(자기복원).
+세 항목은 각자 공용 픽스처(`verify/lib/items/stage3/_dispatch_common.py` `DispatchFixture`)로 전화 그룹·역할을 DB 에
+직접 시드하고 종료 시 복원한다(자기복원 — S3-SEED 는 관여하지 않는다): `S3-SCN-FA` = `pg-verify-a`(대표번호, 역할 없음 —
+포크·픽업·그룹원 BLF 는 규칙 1) / `S3-SCN-MONITOR` = `pg-verify-a`(A·B) + `role-verify-mon`(`monitor_call=all`, M 의 person
+배정) + M5 대조군(`pg-verify-b` 의 M' — `role-verify-out` own / 역할 없음 / 같은 그룹원이지만 역할 없음) /
+`S3-SCN-PTT-LISTEN` = `role-vfy-lsn-<group>`(`ptt_listen=listed`+대상) 또는 역할 없는 `pg-vfy-lsn-<group>`. 배정은 회선의
+person(`users.id`)에 하고, 통지는 `PHONE_GROUP_CHANGED`/`ROLE_CHANGED`/`USER_CHANGED`. 스키마 프로브: `phone_groups`+
+`role_assignments` 둘 다 있으면 새 경로, 둘 다 없고 `dispatch_groups` 만 있으면 전환 전 경로(같은 의미를 관제 그룹으로
+시드, M5b·L3c 는 SKIP), 어느 것도 없으면 SKIP.
 
 ---
 
@@ -802,8 +880,12 @@ S3-SEED 가 관제 그룹 2개(대표번호 있는 `dg-verify-a`: A 제외 B·C�
   추가로 필요하다. 단말 파트 선행.
 - **History-Info(RFC 7044)** — 대표번호 재타게팅 이력의 표준 표현(§4.3, 현재 `P-Called-Party-ID` 로 대체).
 - **3GPP LI 핸드오버(HI2/HI3·LEMF)** — 외부 사법기관 인도가 요구되면 별도 LI 게이트웨이(§5.8). 본 설계 범위 밖.
-- **관제사 겸임(N:M 멤버십)** — 채택하지 않는다(§3.2 확정). 겸임 요구는 `overflow_target`·지정 픽업으로
+- **전화 그룹 겸임(N:M 멤버십)** — 채택하지 않는다(§3.2 확정). 겸임 요구는 `overflow_target`·지정 픽업으로
   흡수한다.
+- **자리(관제석)와 사람의 분리 — 보류.** 지금은 관제석 = 가입자(회선 묶음 + 로그인)라 교대 근무에서 계정을 나눠 쓴다.
+  재개 시 출발점: 자리 = 회선 묶음(전화 그룹 멤버십·PTT 회선·PC), 사람 = IdMS 계정 + 역할 + 감사 actor, "앉기" = 점유
+  (배타·리스·인수 — TS 23.280 §10.13 functional alias 의 활성/인수, TS 24.484 `allow-activate/take-over-functional-alias`),
+  CSC 가 점유자의 역할을 자리 회선에 투영(USER_CHANGED). 전제 = 콘솔 계정의 IdMS 신원 통합([mcptt_authorization.md §9](mcptt_authorization.md)).
 - **RFC 4662 RLS** 목록 구독(§5.2 표준형 — PTT 회선 dialog 구독(§5.6a)까지 더해 구독 수가 회선 ×2 로 늘어 우선순위가
   올라간다), **큐/ACD**(대기열·순번 안내).
 - Android UE 의 Join 발신·SSRC 디먹스 UI — 서버 완성 후 단말 파트.
@@ -812,14 +894,15 @@ S3-SEED 가 관제 그룹 2개(대표번호 있는 `dg-verify-a`: A 제외 B·C�
 
 ## 11. 문서 갱신 대상 (구현과 같은 변경에서)
 
-- [volte_supplementary_services.md](volte_supplementary_services.md) §9 — "그룹 착신(hunt group) 별도 설계" 를 본 문서 참조로.
-- [registration_binding_set.md](registration_binding_set.md) §2.2 — "병렬 포크 금지" 는 **한 사람의 멀티 디바이스** 범위임을 명시(그룹 포크는 §4).
+- [volte_supplementary_services.md](volte_supplementary_services.md) §5 — 픽업 축 = `pickup_group` 만(org 폴백 없음), 전역 `CallPickupId` 제거.
+- [mcptt_authorization.md](mcptt_authorization.md) — 역할·능력·범위 모델(정본), 내장 프리셋, `authz.manage` 불변 규칙.
+- [sip_service_model.md](sip_service_model.md) §2-9 — `kind=voip`.
+- [registration_binding_set.md](registration_binding_set.md) §2.2 — "병렬 포크 금지" 는 **한 사람의 멀티 디바이스** 범위임을 명시(전화 그룹 포크는 §4).
 - [../../api/cmp_media_api.md](../../api/cmp_media_api.md) — §6.5 `RELAY_TAP_*`(분리 인도·`a=ssrc` 라벨링·RTCP SR), §5.1 `resource.tap`, §5.2 STATS `taps`, §9 `LIMIT`.
-- [../db_schema.md](../db_schema.md) — `dispatch_groups` 계열 4 테이블, `pickup_group` 값 의미, `ptt_user_profile.allow_ambient_listening`, `ptt_groups.allow_conference_state`.
-- [../../api/admin_api.md](../../api/admin_api.md) — `/api/v1/dispatch-groups`.
-- [../alarm_catalog.csv](../alarm_catalog.csv) — `E-AUD-016 call_monitored` 정의·감지 행.
-- [recording.md](recording.md) — `call.json` `dispatch_group/pilot/alerted/answered_by/monitors[]`.
-- [android_ue_provisioning.md](android_ue_provisioning.md) — `/provisioning/me` `dispatch` 블록.
-- [mcptt_authorization.md](mcptt_authorization.md) — 감청 편입 RBAC(`manager` 승인·감사 열람 분리, §5.7/§5.8).
+- [../db_schema.md](../db_schema.md) — `phone_groups`·`roles` 계열, `pickup_group` 값 의미, `ptt_user_profile.allow_ambient_listening`(역할 동기), `ptt_groups.allow_conference_state`.
+- [../../api/admin_api.md](../../api/admin_api.md) — `/api/v1/phone-groups`·`/api/v1/roles`.
+- [../alarm_catalog.csv](../alarm_catalog.csv) — `E-AUD-016 call_monitored` 정의·감지 행(`role` 필드).
+- [recording.md](recording.md) — `call.json` `phone_group/pilot/alerted/answered_by/monitors[]`.
+- [android_ue_provisioning.md](android_ue_provisioning.md) — `/provisioning/me` `phoneGroup`·`dispatch` 블록, §3-3 게이트.
 - [../csp_control_plane_load_hardening.md](../csp_control_plane_load_hardening.md) — 포크 팬아웃 상한 `MaxForkTargets`(§8.3).
 - [mcptt_standard_conformance.md](mcptt_standard_conformance.md) §R1 — ambient listening 행에 본 문서 §5.6/§10 참조.

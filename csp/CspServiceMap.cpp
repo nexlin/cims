@@ -14,7 +14,8 @@ bool CCspServiceMap::Sync() {
     // v3 (2026-04-22): access_services.jsonl 로드.
     //   - UUID string → hash int (레거시 int id 호환).
     //   - allowed_local_node_refs[] (name) → listeners[] (LocalNode hash int) 파생.
-    //   - kind 는 volte/ptt 만 허용 (ibcf 는 RouteSet 으로 이관).
+    //   - kind 는 접속환경 클래스 volte(이동)/voip(유선)/ptt 만 허용 (ibcf 는 RouteSet 으로 이관). volte·voip 는 같은
+    //     전화 경로 — sip_service_model.md §2-9.
     SimpleJson::JsonNode items = gclsCspConfigCache.GetItems( CACHE_ACCESS_SERVICE );
     std::vector<ServiceInfo> newList;
     if ( items.type == SimpleJson::JSON_ARRAY ) {
@@ -55,12 +56,8 @@ bool CCspServiceMap::Sync() {
             std::string en = row.GetString( "enabled" );
             s.enabled = ( en != "false" && en != "0" );
 
-            // 당겨받기 피처코드 — 필드 미지정(부재)과 빈 값을 구분한다: 부재=전역 폴백, 빈 값=비활성
-            //   (volte_supplementary_services.md §5.2)
-            if ( row.Has( "pickup_feature_code" ) ) {
-                s.pickup_code_set = true;
-                s.pickup_feature_code = row.GetString( "pickup_feature_code" );
-            }
+            // 당겨받기 피처코드 — 부재·빈 값 모두 비활성 (volte_supplementary_services.md §5.2). 전역 폴백 없음.
+            if ( row.Has( "pickup_feature_code" ) ) s.pickup_feature_code = row.GetString( "pickup_feature_code" );
             // 호 전달(REFER) 허용 — 기본 true (§6.3)
             std::string tr = row.GetString( "transfer_allowed" );
             s.transfer_allowed = ( tr != "false" && tr != "0" );
@@ -97,12 +94,12 @@ bool CCspServiceMap::Sync() {
                 }
             }
 
-            // kind 검증 — v3 는 volte/ptt 만
-            if ( s.kind != "volte" && s.kind != "ptt" ) {
+            // kind 검증 — volte(이동 VoLTE) / voip(유선 VoIP) / ptt
+            if ( s.kind != "volte" && s.kind != "voip" && s.kind != "ptt" ) {
                 if ( !s.kind.empty() ) {
                     CLog::Print(
                         LOG_ERROR,
-                        "AccessServiceMap: service '%s' has unsupported kind '%s' (expected volte|ptt) — skipped",
+                        "AccessServiceMap: service '%s' has unsupported kind '%s' (expected volte|voip|ptt) — skipped",
                         s.name.c_str(), s.kind.c_str() );
                 }
                 continue;
@@ -184,7 +181,12 @@ bool CCspServiceMap::IsInboundAllowed( const ServiceInfo &svc, int listenerIntId
     return false;
 }
 
-std::map<std::string, std::string> CCspServiceMap::BuildDomainToKindMap() const {
+std::string CCspServiceMap::LogServiceOf( const std::string &kind ) {
+    if ( kind == "volte" || kind == "voip" ) return "volte";
+    return kind;
+}
+
+std::map<std::string, std::string> CCspServiceMap::BuildDomainToLogServiceMap() const {
     std::map<std::string, std::string> out;
     std::lock_guard<std::mutex> lk( m_mutex );
     // m_services 는 priority 낮은(=우선도 높은) 순 정렬되어 있음.
@@ -193,7 +195,7 @@ std::map<std::string, std::string> CCspServiceMap::BuildDomainToKindMap() const 
         if ( !s.enabled ) continue;
         if ( s.domain.empty() ) continue;
         if ( out.find( s.domain ) != out.end() ) continue;
-        out[s.domain] = s.kind;
+        out[s.domain] = LogServiceOf( s.kind );
     }
     return out;
 }

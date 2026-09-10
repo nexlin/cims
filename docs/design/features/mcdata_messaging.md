@@ -120,8 +120,8 @@ MCDATA-AS 게이트 (모두 controlling function 검사, TS 24.282 §9.2.2):
   `{ServiceLogDir}/message_direct/{YYYY}/{MM}/{DD}/{HH}/messages.jsonl` 에 1줄 append(`CCallDir::McData1to1Log`).
   레코드: `ts·from·to·msg_type(sds|text|fd)·conv_id·msg_id·text·size·disposition_req`. disposition 통지
   (`SDS NOTIFICATION`)는 이력이 아니라 제외한다.
-- **전량 보관, 조회 시 게이트**: 범위 한정 보관은 관제 그룹 멤버십 변동 시 이력 결손·정책 불투명을 낳으므로
-  전량 보관하고, **열람 권한은 조회 시점에 관제 그룹 `monitor_scope` 로 게이트**한다(감시 멤버가 발신 또는 수신인
+- **전량 보관, 조회 시 게이트**: 범위 한정 보관은 역할 배정 변동 시 이력 결손·정책 불투명을 낳으므로
+  전량 보관하고, **열람 권한은 조회 시점에 역할 `monitor_call` 로 게이트**한다(감시 멤버가 발신 또는 수신인
   1:1 메시지만, [dispatch_center.md §5.7a](dispatch_center.md)). 조회 = `GET /provisioning/history?kind=message`
   (그룹 SDS + 1:1 병합, [android_ue_provisioning.md §3-2](android_ue_provisioning.md)), 감사 `E-AUD-016 tap_mode=history`.
 - 개인정보 영향이 크므로 기본 off — 합법감청 운용(고지·동의 전제, [dispatch_center.md §5.8](dispatch_center.md))에서만 켠다.

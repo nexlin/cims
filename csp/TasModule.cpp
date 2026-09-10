@@ -13,7 +13,8 @@
 #include "CallMap.h"
 #include "CmpClient.h"
 #include "CspAddressing.h"
-#include "CspDispatchGroup.h"
+#include "CspPhoneGroup.h"
+#include "CspRole.h"
 #include "CspServiceMap.h"
 #include "CspUser.h"
 #include "FmReporter.h"
@@ -574,14 +575,11 @@ bool CTasModule::IsPickupDial( const char *pszFrom, const char *pszTo, std::stri
     strTarget.clear();
     if ( pszTo == NULL || pszTo[0] == '\0' ) return false;
 
-    // 코드 결정 — 발신 가입자의 접속서비스 pickup_feature_code. 필드 미지정(레거시 레코드)이면
-    //   전역 Setup.Sip.CallPickupId 폴백(전환기 호환), 빈 값이면 그 서비스에서 픽업 비활성 (§5.2).
+    // 코드 결정 — 발신 가입자의 접속서비스 pickup_feature_code 만 (§5.2). 비어 있으면 그 서비스에서 픽업 비활성.
+    //   전역 폴백은 없다 — 이동 VoLTE 서비스는 피처코드를 비워 두고 유선 VoIP 서비스에만 둔다.
     ServiceInfo clsSvc = gclsServiceMap.GetForUser( pszFrom ? pszFrom : "", "volte" );
-    std::string strCode;
-    if ( clsSvc.id > 0 && clsSvc.pickup_code_set )
-        strCode = clsSvc.pickup_feature_code;
-    else
-        strCode = gclsSetup.m_strCallPickupId;
+    if ( clsSvc.id <= 0 ) return false;
+    const std::string strCode = clsSvc.pickup_feature_code;
     if ( strCode.empty() ) return false;
 
     const size_t iLen = strCode.size();
@@ -597,16 +595,21 @@ void CTasModule::PickUp( const char *pszCallId, const char *pszFrom, const char 
     bool bCallPickup = false;
     bool bCommitted = false;  // 재키잉(원 착신 leg 해체) 이후에는 다음 후보로 넘어갈 수 없다
 
-    // 후보 결정 — 축은 픽업 그룹(pickup_group, 미지정 시 org 폴백 — §5.1).
+    // 후보 결정 — 축은 픽업 그룹(pickup_group = 전화 그룹 id, §5.1). 비어 있으면 픽업 불가(org 폴백 없음).
     //   그룹 픽업: 그룹 인덱스의 등록 그룹원 전체. 지정 픽업: 대상 내선 하나 — 같은 그룹일 때만(403).
-    // 픽업자의 유효 그룹 축 값 — 멤버 인덱스 → pickup_group → org 폴백 (dispatch_center.md §3.3)
-    const std::string strPickerGroup = gclsDispatchGroupMap.EffectiveGroupOf( pszFrom );
+    // 픽업자의 유효 그룹 축 값 — 멤버 인덱스 → pickup_group (dispatch_center.md §3.5). 비어 있으면 픽업 축이 없다:
+    //   지정 픽업의 "같은 그룹" 비교가 빈 값끼리 참이 되지 않게 여기서 끊는다(404 — 그룹에 링 중 호 없음과 같은 결과).
+    const std::string strPickerGroup = gclsPhoneGroupMap.EffectiveGroupOf( pszFrom );
+    if ( strPickerGroup.empty() ) {
+        CLog::Print( LOG_INFO, "PickUp: picker(%s) has no pickup group → 404", pszFrom ? pszFrom : "" );
+        return gclsDispatcher.StopCall( pszCallId, SIP_NOT_FOUND );
+    }
     if ( gclsCspUserMap.Select( pszFrom, xmlFrom ) ) {
         if ( pszTarget != NULL && pszTarget[0] != '\0' ) {
             // 대표번호 지정 픽업 (§4.4 F5) — "<code><대표번호>": 포크 중인 대표번호 호를 가져간다. 인가 = 그 그룹의
             // 멤버.
-            CspDispatchGroup clsPilotGroup;
-            if ( gclsDispatchGroupMap.SelectByPilot( pszTarget, clsPilotGroup ) ) {
+            CspPhoneGroup clsPilotGroup;
+            if ( gclsPhoneGroupMap.SelectByPilot( pszTarget, clsPilotGroup ) ) {
                 if ( clsPilotGroup.m_strId != strPickerGroup ) {
                     CLog::Print( LOG_INFO, "PickUp: pilot(%s) group(%s) ≠ picker(%s) group(%s) → 403", pszTarget,
                                  clsPilotGroup.m_strId.c_str(), pszFrom, strPickerGroup.c_str() );
@@ -976,7 +979,7 @@ bool CTasModule::IsUserBusy( const std::string &strUserId ) {
     return false;
 }
 
-void CTasModule::ResolveForkTargets( const CspDispatchGroup &clsGroup, const std::string &strCaller,
+void CTasModule::ResolveForkTargets( const CspPhoneGroup &clsGroup, const std::string &strCaller,
                                      std::vector<std::string> &vecTargets ) {
     vecTargets.clear();
     const bool bSkipBusy = ( clsGroup.m_strBusyMembers != "alert" );
@@ -1112,10 +1115,10 @@ std::string CTasModule::ResolveOriginatingIdentity( const char *pszFrom, CSipMes
     if ( strPref.empty() && strcasecmp( clsPpi.m_clsUri.m_strProtocol.c_str(), "tel" ) == 0 )
         strPref = clsPpi.m_clsUri.m_strHost;  // tel: 은 번호가 host 자리에 파싱된다
     if ( strPref.empty() || strPref == strFrom ) return strFrom;
-    CspDispatchGroup clsGroup;
-    if ( gclsDispatchGroupMap.SelectForUser( strFrom.c_str(), clsGroup ) && clsGroup.HasPilot() &&
+    CspPhoneGroup clsGroup;
+    if ( gclsPhoneGroupMap.SelectForUser( strFrom.c_str(), clsGroup ) && clsGroup.HasPilot() &&
          clsGroup.m_strPilotId == strPref ) {
-        CLog::Print( LOG_INFO, "TAS: originating identity %s → pilot %s (P-Preferred-Identity, dispatch group %s)",
+        CLog::Print( LOG_INFO, "TAS: originating identity %s → pilot %s (P-Preferred-Identity, phone group %s)",
                      strFrom.c_str(), strPref.c_str(), clsGroup.m_strId.c_str() );
         return strPref;
     }
@@ -1126,8 +1129,8 @@ std::string CTasModule::ResolveOriginatingIdentity( const char *pszFrom, CSipMes
 
 bool CTasModule::TryDispatchPilot( const char *pszCallId, const char *pszFrom, const char *pszTo, CSipCallRtp *pclsRtp,
                                    CSipMessage *pclsMessage ) {
-    CspDispatchGroup clsGroup;
-    if ( pszTo == NULL || gclsDispatchGroupMap.SelectByPilot( pszTo, clsGroup ) == false ) return false;
+    CspPhoneGroup clsGroup;
+    if ( pszTo == NULL || gclsPhoneGroupMap.SelectByPilot( pszTo, clsGroup ) == false ) return false;
     gclsDispatcher.SetCallOwner( pszCallId, this );
     const std::string strCaller = pszFrom ? pszFrom : "";
 
@@ -1402,8 +1405,8 @@ void CTasModule::OverflowFork( const std::string &strACallId ) {
     clsSet.setPending.clear();
 
     std::vector<std::string> vecTargets;
-    CspDispatchGroup clsNext;
-    if ( gclsDispatchGroupMap.SelectByPilot( strTarget.c_str(), clsNext ) ) {
+    CspPhoneGroup clsNext;
+    if ( gclsPhoneGroupMap.SelectByPilot( strTarget.c_str(), clsNext ) ) {
         // 다른 대표번호 — 그 그룹원에게 재포크 (순환 금지: depth 1 에서 더 넘기지 않는다)
         ResolveForkTargets( clsNext, clsSet.strCaller, vecTargets );
         clsSet.bSequential = ( clsNext.m_strAlertMode == "sequential" );
@@ -1462,7 +1465,7 @@ static void _emitCallMonitored( const CTasModule::MonitorLeg &m, const char *psz
     SimpleJson::JsonNode p;
     p.Set( "phase", pszPhase );
     p.Set( "monitor", m.strMonitor );
-    p.Set( "group", m.strGroupId );
+    p.Set( "role", m.strRoleId );
     p.Set( "session", m.strSessionId );
     if ( !m.strSesId.empty() ) p.Set( "sesid", m.strSesId );
     p.Set( "target_a", m.strTargetA );
@@ -1521,7 +1524,8 @@ bool CTasModule::HandleIncomingJoin( const char *pszCallId, const char *pszFrom,
         return true;
     }
 
-    // 인가 — 감청자의 관제 그룹 monitor_scope 가 대상 호의 어느 당사자 그룹이라도 포함하면 허용 (§5.2).
+    // 인가 — 감청자 회선의 역할 monitor_call 이 대상 호의 어느 당사자 전화 그룹이라도 포함하면 허용 (§5.2 규칙 2;
+    //   같은 전화 그룹이면 규칙 1). 전화 그룹원이지만 역할이 없으면 Join 은 403 — BLF 와 달리 미디어를 인도한다.
     //   당사자는 leg 원단 기준(CallLegParty) — 대표번호 호의 A-leg 를 지목해도 다이얼된 번호가 아니라 승자가 잡힌다.
     std::string strCaller, strCallee;
     {
@@ -1531,16 +1535,17 @@ bool CTasModule::HandleIncomingJoin( const char *pszCallId, const char *pszFrom,
         strCallee = clsTgtParty.bInitiator ? clsOtherParty.strUser : clsTgtParty.strUser;
     }
     {
-        const std::string strGW = gclsDispatchGroupMap.EffectiveGroupOf( strMonitor.c_str() );
-        const std::string strGA = gclsDispatchGroupMap.EffectiveGroupOf( strCaller.c_str() );
-        const std::string strGB = gclsDispatchGroupMap.EffectiveGroupOf( strCallee.c_str() );
+        const std::string strGA = gclsPhoneGroupMap.EffectiveGroupOf( strCaller.c_str() );
+        const std::string strGB = gclsPhoneGroupMap.EffectiveGroupOf( strCallee.c_str() );
+        const std::string strRole = gclsRoleMap.RoleIdForLine( strMonitor.c_str() );
         const bool bSelf = ( strMonitor == strCaller || strMonitor == strCallee );
-        if ( !bSelf && !gclsDispatchGroupMap.CanWatch( strGW, strGA ) &&
-             !gclsDispatchGroupMap.CanWatch( strGW, strGB ) ) {
-            CLog::Print( LOG_INFO, "Join denied — %s cannot monitor %s/%s (scope) → 403", strMonitor.c_str(),
-                         strCaller.c_str(), strCallee.c_str() );
+        // Join 은 청취 미디어를 인도하므로 역할이 있어야 한다 — 같은 전화 그룹(규칙 1)만으로는 BLF 까지다.
+        if ( !bSelf && ( strRole.empty() || ( !gclsRoleMap.CanWatch( strMonitor.c_str(), strGA ) &&
+                                              !gclsRoleMap.CanWatch( strMonitor.c_str(), strGB ) ) ) ) {
+            CLog::Print( LOG_INFO, "Join denied — %s cannot monitor %s/%s (role %s scope) → 403", strMonitor.c_str(),
+                         strCaller.c_str(), strCallee.c_str(), strRole.c_str() );
             gclsDispatcher.StopCall( pszCallId, SIP_FORBIDDEN );
-            _emitCallMonitored( { clsTarget.m_strRelaySessionId, clsTarget.m_strRelaySesId, "", "", strMonitor, "",
+            _emitCallMonitored( { clsTarget.m_strRelaySessionId, clsTarget.m_strRelaySesId, "", "", strMonitor, strRole,
                                   strCaller, strCallee, "", time( NULL ) },
                                 "denied", -1 );
             return true;
@@ -1657,7 +1662,7 @@ bool CTasModule::HandleIncomingJoin( const char *pszCallId, const char *pszFrom,
     leg.strService = "volte";
     leg.strTapId = strTapId;
     leg.strMonitor = strMonitor;
-    leg.strGroupId = gclsDispatchGroupMap.EffectiveGroupOf( strMonitor.c_str() );
+    leg.strRoleId = gclsRoleMap.RoleIdForLine( strMonitor.c_str() );
     leg.strTargetA = strCaller;
     leg.strTargetB = strCallee;
     leg.strTapMode = strTapMode;

@@ -286,7 +286,7 @@ export function AnomalyCard() {
       </div>
       {anomalies.map((a, i) => (
         <div className="flex items-center gap-2 text-md mb-[3px]" key={i}>
-          <Badge variant="dangerSoft" >{a.kind === 'volte' ? 'VoLTE' : 'PTT'}</Badge>
+          <Badge variant="dangerSoft" >{kindLabel(a.kind)}</Badge>
           <span>{a.detail}</span>
           <span className="text-muted-foreground">{a.label}</span>
         </div>
@@ -425,6 +425,10 @@ export function PttGroupsCard() {
 }
 
 // ── 위젯: 라이브 이벤트 ───────────────────────────────────
+// 접속환경 kind 라벨 — volte(이동)·voip(유선)은 같은 전화 계열이라 배지 색은 같다(sip_service_model.md §2-9)
+const KIND_LABEL: Record<string, string> = { volte: 'VoLTE', voip: 'VoIP', ptt: 'PTT' }
+const kindLabel = (k: string) => KIND_LABEL[k] ?? k
+
 const EV_ICON: Record<string, React.ReactNode> = {
  call_start:    <Phone size={12} className="inline align-[-2px]" />,
  call_end:      <PhoneOff size={12} className="inline align-[-2px]" />,
@@ -453,7 +457,7 @@ export function EventFeedCard() {
           {events.map((e, i) => (
             <tr key={i}>
               <Td className="text-sm text-muted-foreground">{new Date(e.ts).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</Td>
-              <Td><Badge variant={e.kind === 'volte' ? 'brandSoft' : 'successSoft'} >{e.kind === 'volte' ? 'VoLTE' : 'PTT'}</Badge></Td>
+              <Td><Badge variant={e.kind === 'ptt' ? 'successSoft' : 'brandSoft'} >{kindLabel(e.kind)}</Badge></Td>
               <Td>{EV_ICON[e.type] ?? <Dot size={12} className="inline align-[-2px]" />} {e.detail}</Td>
             </tr>
           ))}

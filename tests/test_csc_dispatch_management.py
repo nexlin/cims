@@ -1,12 +1,11 @@
 """csc — 관제 앱 관리 평면 단위 시험 (오프라인, 가짜 DB·임시 ServiceLogDir).
 
-dispatch_center.md §3.4·§5.6a · android_ue_provisioning.md §3-2/§3-3:
-  - `dispatch_groups.directory_admin`(none|own|all) → 관리 범위(admin_scope)·범위 판정(in_scope)·조직 하위 집합
-  - `/provisioning/directory/{admin,orgs,members,groups}` 게이트(401/403 no_directory_admin/out_of_scope)·라우팅
+dispatch_center.md §3.4·§5.7a/b · mcptt_authorization.md §2 · android_ue_provisioning.md §3-2/§3-3:
+  - 역할 `directory_write`(none|own|all) + `org_id` → 관리 범위(admin_scope)·범위 판정(in_scope)·조직 하위 집합
+  - `/provisioning/directory/{admin,orgs,members,groups,phone-groups}` 게이트(401/403 no_directory_admin/out_of_scope)·라우팅
   - `/provisioning/history` 의 `until` 창 조회 + 항목 `recordingId`/`hasRecording`
   - `/provisioning/recordings/{id}` 의 id 검증·범위 판정(ptt 그룹 키·volte 당사자)·OAM 프록시 응답 변환
-  - `/provisioning/me` dispatch 블록의 `directoryAdmin`/`orgCode`
-  - GMS PUT/DELETE 의 관리 범위 확장(_admin_manages_group)
+  - GMS PUT/DELETE 의 관리 범위 확장(_admin_manages_group = authz.can(ptt_group.manage))
 
   python3 -m unittest tests.test_csc_dispatch_management
 """
@@ -26,6 +25,7 @@ sys.path.insert(0, os.path.join(_REPO_ROOT, "csc", "src"))
 
 import services.dispatch_history as dh  # noqa: E402
 import services.mcptt as m  # noqa: E402
+import services.authz as az  # noqa: E402
 import handlers.dispatch as hd  # noqa: E402
 import handlers.dispatch_directory as dd  # noqa: E402
 import handlers.dispatch_recordings as dr  # noqa: E402
@@ -55,25 +55,36 @@ class ScopeTests(unittest.TestCase):
         self.assertTrue(dd.in_scope({"orgCodes": None}, ""))       # all — 무소속 구성원도 범위 안
 
 
-class _DictCur:
-    """dispatch_directory.admin_scope 가 내는 SQL 만 흉내 내는 DictCursor."""
+def _role(dw="none", org_id=None, **kw):
+    r = {'id': 'role-1', 'name': '관리', 'builtin': 0, 'authz_manage': 0, 'audit_read': 0, 'directory_write': dw,
+         'directory_read': 'none', 'ptt_group_manage': 'none', 'monitor_call': 'none', 'ptt_listen': 'none',
+         'listen_visibility': 'hidden', 'history_read': 'none', 'alarm_ack': 0, 'mcptt_control': 0, 'org_id': org_id}
+    r.update(kw)
+    return r
 
-    def __init__(self, group_row, has_col=True, has_tables=True):
-        self.group_row = group_row
-        self.has_col = has_col
+
+class _DictCur:
+    """dispatch_directory.admin_scope(services/authz 역할 해석 + 전화 그룹 멤버십)가 내는 SQL 만 흉내 내는 DictCursor."""
+
+    def __init__(self, role, assigned=True, has_tables=True, group="pg-1"):
+        self.role = role
+        self.assigned = assigned
         self.has_tables = has_tables
+        self.group = group
         self._rows = []
 
     def execute(self, q, args=None):
         self._rows = []
-        if q.startswith("SHOW TABLES LIKE") or "information_schema" in q and "dispatch_groups" in q:
+        if q.startswith("SHOW TABLES LIKE"):
             self._rows = [{"x": 1}] if self.has_tables else []
-        elif q.startswith("SHOW COLUMNS FROM dispatch_groups LIKE 'directory_admin'"):
-            self._rows = [{"Field": "directory_admin"}] if self.has_col else []
-        elif q.startswith("SELECT g.id, g.directory_admin, g.org_id"):
-            self._rows = [self.group_row] if self.group_row else []
+        elif q.startswith("SELECT role_id FROM role_assignments WHERE principal_type='user'"):
+            self._rows = [{"role_id": "role-1"}] if (self.role and self.assigned) else []
+        elif q.startswith("SELECT " + ", ".join(az.ROLE_COLS) + " FROM roles WHERE id="):
+            self._rows = [dict(self.role)] if self.role else []
         elif q.startswith("SELECT id, code, name, parent_id, sort_order FROM organizations"):
             self._rows = [{"id": i, "code": c, "name": n, "parent_id": p, "sort_order": s} for i, c, n, p, s in ORGS]
+        elif q.startswith("SELECT m.group_id FROM phone_group_members m WHERE m.user_id IN ("):
+            self._rows = [{"group_id": self.group}] if self.group else []
         else:
             raise AssertionError("unexpected SQL: " + q)
 
@@ -86,40 +97,42 @@ class _DictCur:
 
 class AdminScopeTests(unittest.TestCase):
     def setUp(self):
-        hd._HAS_TABLES = True
-        hd._HAS_DIR_ADMIN = None
+        hd._HAS_TABLES = None
+        az.reset_probe()
 
     def tearDown(self):
         hd._HAS_TABLES = None
-        hd._HAS_DIR_ADMIN = None
+        az.reset_probe()
 
     def test_none_is_no_scope(self):
-        cur = _DictCur({"id": "dg-1", "directory_admin": "none", "org_id": 2})
-        self.assertIsNone(dd.admin_scope(cur, 5020))
+        self.assertIsNone(dd.admin_scope(_DictCur(_role("none", 2)), 5020))
 
     def test_own_is_org_subtree(self):
-        cur = _DictCur({"id": "dg-1", "directory_admin": "own", "org_id": 2})
-        sc = dd.admin_scope(cur, 5020)
-        self.assertEqual((sc["groupId"], sc["directoryAdmin"], sc["orgCode"]), ("dg-1", "own", "DIV1"))
+        sc = dd.admin_scope(_DictCur(_role("own", 2)), 5020)
+        self.assertEqual((sc["roleId"], sc["groupId"], sc["directoryWrite"], sc["directoryAdmin"], sc["orgCode"]),
+                         ("role-1", "pg-1", "own", "own", "DIV1"))
         self.assertEqual(sc["orgCodes"], {"DIV1", "TEAM01", "TEAM02"})
+        self.assertEqual(sc["role"]["id"], "role-1")
 
     def test_own_without_org_is_no_scope(self):
-        cur = _DictCur({"id": "dg-1", "directory_admin": "own", "org_id": None})
-        self.assertIsNone(dd.admin_scope(cur, 5020))
+        self.assertIsNone(dd.admin_scope(_DictCur(_role("own", None)), 5020))
 
     def test_all_is_unbounded(self):
-        cur = _DictCur({"id": "dg-1", "directory_admin": "all", "org_id": None})
-        sc = dd.admin_scope(cur, 5020)
-        self.assertEqual(sc["directoryAdmin"], "all")
+        sc = dd.admin_scope(_DictCur(_role("all"), group=None), 5020)
+        self.assertEqual((sc["directoryAdmin"], sc["groupId"]), ("all", ""))
         self.assertIsNone(sc["orgCodes"])
 
-    def test_column_missing_is_no_scope(self):
-        cur = _DictCur({"id": "dg-1", "directory_admin": "all", "org_id": 1}, has_col=False)
-        self.assertIsNone(dd.admin_scope(cur, 5020))
+    def test_tables_missing_is_no_scope(self):
+        self.assertIsNone(dd.admin_scope(_DictCur(_role("all", 1), has_tables=False), 5020))
 
-    def test_non_member_is_no_scope(self):
+    def test_unassigned_is_no_scope(self):
+        self.assertIsNone(dd.admin_scope(_DictCur(_role("all", 1), assigned=False), 5020))
         self.assertIsNone(dd.admin_scope(_DictCur(None), 5020))
-        self.assertIsNone(dd.admin_scope(_DictCur({"id": "dg-1", "directory_admin": "all", "org_id": 1}), None))
+        self.assertIsNone(dd.admin_scope(_DictCur(_role("all", 1)), None))
+
+    def test_in_scope_follows_authz(self):
+        self.assertTrue(dd.in_scope({"orgCodes": None}, "ANY"))
+        self.assertFalse(dd.in_scope({"orgCodes": {"A"}}, "B"))
 
 
 class RoutingTests(unittest.TestCase):
@@ -130,7 +143,8 @@ class RoutingTests(unittest.TestCase):
         self.token = {"sub": "disp01", "mcptt_id": "tel:+821310001001", "scope": [m.SCOPE_PROVISIONING]}
         m.extract_token = lambda hdr: self.token if hdr else None
         dd.caller_identity = lambda cur, tok: ("+821310001001", 5020)
-        self.scope = {"groupId": "dg-1", "directoryAdmin": "own", "orgCode": "DIV1", "orgCodes": {"DIV1", "TEAM01"}}
+        self.scope = {"roleId": "role-1", "groupId": "pg-1", "directoryWrite": "own", "directoryAdmin": "own",
+                      "orgCode": "DIV1", "orgCodes": {"DIV1", "TEAM01"}, "role": _role("own", 2)}
         dd.admin_scope = lambda cur, uid: self.scope
         cur = types.SimpleNamespace(execute=lambda q, a=None: None, fetchone=lambda: None, fetchall=lambda: [])
         dd._get_db = lambda cfg: _Conn(cur)
@@ -172,9 +186,44 @@ class RoutingTests(unittest.TestCase):
     def test_routes_registered_on_mcptt_server(self):
         paths = {p for p, _h, _k in dd.CSC_DIRECTORY_ADMIN_HANDLER_LIST}
         self.assertEqual(paths, {"/provisioning/directory/admin", "/provisioning/directory/orgs",
-                                 "/provisioning/directory/members", "/provisioning/directory/groups"})
+                                 "/provisioning/directory/members", "/provisioning/directory/groups",
+                                 "/provisioning/directory/phone-groups"})
         self.assertEqual([p for p, _h, _k in dr.CSC_RECORDINGS_HANDLER_LIST],
                          ["/provisioning/recordings", "/provisioning/history/ptt"])
+
+    def test_phone_groups_share_console_write_code_and_audit(self):
+        """/provisioning/directory/phone-groups → handlers.dispatch.dispatch_phone_group(같은 코드) + 범위 orgCodes + 감사 actor user:<id>."""
+        calls, audits = [], []
+        saved = (dd._dispatch.dispatch_phone_group, dd._audit)
+        dd._dispatch.dispatch_phone_group = lambda cur, method, parts, body, codes, org_filter=None: (
+            calls.append((method, parts, body, codes)) or dd.HandlerResult(status=201 if method == "POST" else 200,
+                                                                            body={"id": "pg-9", "groups": []}))
+        dd._audit = lambda cfg, actor, ip, entity, eid, action, after=None, **k: audits.append((actor, entity, eid, action))
+        try:
+            r = self._call("GET", "/provisioning/directory/phone-groups")
+            self.assertEqual((r.status, calls[-1][0], calls[-1][1], calls[-1][3]), (200, "GET", (), {"DIV1", "TEAM01"}))
+            self.assertEqual(audits, [])
+            r = self._call("POST", "/provisioning/directory/phone-groups", {"name": "x", "org_id": 3})
+            self.assertEqual((r.status, r.body["id"]), (201, "pg-9"))
+            self.assertEqual(audits[-1], ("user:5020", "phone_group", "pg-9", "create"))
+            self._call("POST", "/provisioning/directory/phone-groups/pg-9/members", {"user_id": "+8213"})
+            self.assertEqual((calls[-1][1], audits[-1][3]), (("pg-9", "members"), "member_add"))
+            self._call("DELETE", "/provisioning/directory/phone-groups/pg-9/members/%2B8213")
+            self.assertEqual((calls[-1][1], audits[-1][3]), (("pg-9", "members", "+8213"), "member_remove"))
+        finally:
+            dd._dispatch.dispatch_phone_group, dd._audit = saved
+
+    def test_members_import_route(self):
+        saved = dd._members_import
+
+        async def fake(cur, config, scope, body, actor, ip, my_uid):
+            return dd._json(200, {"actor": actor})
+        dd._members_import = fake
+        try:
+            r = self._call("POST", "/provisioning/directory/members/import", {"rows": []})
+            self.assertEqual((r.status, r.body["actor"]), (200, "user:5020"))
+        finally:
+            dd._members_import = saved
 
 
 class _Ctx:
@@ -237,8 +286,8 @@ class OrgWriteTests(unittest.TestCase):
 
     def setUp(self):
         self.cur = self._Cur()
-        self.own = {"groupId": "dg-1", "directoryAdmin": "own", "orgCode": "DIV1", "orgCodes": {"DIV1", "TEAM01", "TEAM02"}}
-        self.all = {"groupId": "dg-1", "directoryAdmin": "all", "orgCode": "", "orgCodes": None}
+        self.own = {"groupId": "pg-1", "directoryAdmin": "own", "orgCode": "DIV1", "orgCodes": {"DIV1", "TEAM01", "TEAM02"}}
+        self.all = {"groupId": "pg-1", "directoryAdmin": "all", "orgCode": "", "orgCodes": None}
 
     def test_create_needs_parent_in_scope(self):
         r = dd._org_write(self.cur, {}, self.own, "POST", "", {"code": "X", "name": "x", "parent": "DIV2"}, "a", "")
@@ -292,7 +341,7 @@ class HistoryWindowTests(unittest.TestCase):
 
     def _scope(self, members=(), ptt=()):
         return {"members": {dh.userpart(x) for x in members}, "ptt_groups": set(ptt),
-                "groupId": "dg1", "monitorScope": "all", "pttListen": "all"}
+                "roleId": "role-1", "monitorCall": "all", "pttListen": "all"}
 
     def test_until_window(self):
         self.t.group_msg("g002", "+82510002001", "old", minutes_ago=40, msg_id="o")
@@ -417,8 +466,8 @@ class RecordingsTests(unittest.TestCase):
         t.ptt("g002", "ses-1", "+82510002001")
         t.call("call-A", "+821310002001", "+821310009999")
         scope = {"members": {"+821310002001"}, "ptt_groups": {"g002"}}
-        rec_ptt = dh.query(t.sl, "ptt", dict(scope, groupId="dg1"), None, 10)[0][0]["recordingId"]
-        rec_call = dh.query(t.sl, "call", dict(scope, groupId="dg1"), None, 10)[0][0]["recordingId"]
+        rec_ptt = dh.query(t.sl, "ptt", dict(scope, roleId="role-1"), None, 10)[0][0]["recordingId"]
+        rec_call = dh.query(t.sl, "call", dict(scope, roleId="role-1"), None, 10)[0][0]["recordingId"]
         self.assertTrue(dr.in_scope(t.sl, rec_ptt, scope, {"1": "g002"}))       # surrogate → mcptt id
         self.assertTrue(dr.in_scope(t.sl, rec_ptt, scope, {}))                   # session.json 대조 폴백
         self.assertFalse(dr.in_scope(t.sl, rec_ptt, {"members": set(), "ptt_groups": {"g009"}}, {"1": "g002"}))
@@ -429,7 +478,7 @@ class RecordingsTests(unittest.TestCase):
     def test_handler_gate_and_proxy(self):
         t = _Tree()
         t.ptt("g002", "ses-1", "+82510002001")
-        rec = dh.query(t.sl, "ptt", {"members": set(), "ptt_groups": {"g002"}, "groupId": "dg1"}, None, 10)[0][0]["recordingId"]
+        rec = dh.query(t.sl, "ptt", {"members": set(), "ptt_groups": {"g002"}, "roleId": "role-1"}, None, 10)[0][0]["recordingId"]
         import services as _svc_pkg
         saved = (m.extract_token, m._SERVICE_LOG_DIR, dr._scope_sets, dr._http,
                  sys.modules.get("services.fm_reporter"), getattr(_svc_pkg, "fm_reporter", None))
@@ -442,7 +491,7 @@ class RecordingsTests(unittest.TestCase):
             token = {"sub": "disp01", "mcptt_id": "tel:+821310001001", "scope": [m.SCOPE_PROVISIONING]}
             m.extract_token = lambda hdr: token if hdr else None
             m._SERVICE_LOG_DIR = t.sl
-            dr._scope_sets = lambda cfg, tok: ("+821310001001", {"groupId": "dg1", "members": set(), "ptt_groups": {"g002"}}, {"1": "g002"})
+            dr._scope_sets = lambda cfg, tok: ("+821310001001", {"roleId": "role-1", "groupId": "pg1", "members": set(), "ptt_groups": {"g002"}}, {"1": "g002"})
             calls = []
 
             class _Resp:
@@ -473,7 +522,7 @@ class RecordingsTests(unittest.TestCase):
             self.assertEqual(r.body[:4], b"\x00\x00\x00\x18")
             self.assertTrue(calls[-1][0].endswith("/segments/3/audio")); self.assertEqual(calls[-1][1], {"slot": "1"})
             # 범위 밖
-            dr._scope_sets = lambda cfg, tok: ("+821310001001", {"groupId": "dg1", "members": set(), "ptt_groups": {"g009"}}, {})
+            dr._scope_sets = lambda cfg, tok: ("+821310001001", {"roleId": "role-1", "groupId": "pg1", "members": set(), "ptt_groups": {"g009"}}, {})
             self.assertEqual(call("/provisioning/recordings/" + rec).body["error"], "out_of_scope")
             dr._scope_sets = lambda cfg, tok: ("+821310001001", None, {})
             self.assertEqual(call("/provisioning/recordings/" + rec).body["error"], "no_monitor_scope")
@@ -506,23 +555,33 @@ class RecordingsTests(unittest.TestCase):
 
 
 class GmsAdminGateTests(unittest.TestCase):
-    """_admin_manages_group — 소유자가 아니어도 관리 범위 안 그룹은 관리, 범위 밖·범위 없음은 거부."""
+    """_admin_manages_group = authz.can(user, ptt_group.manage, group) — scope(관리 범위 안 org_code)·all·own(소유), 범위 밖·역할 없음은 거부."""
 
     def setUp(self):
-        self._saved = (m._db_connect, dd.caller_identity, dd.admin_scope)
+        self._saved = (m._db_connect, dd.caller_identity, az.role_of, az.org_scope)
         m._db_connect = lambda: _Conn(types.SimpleNamespace())
         dd.caller_identity = lambda c, tok: ("+821310001001", 5020)
+        az.org_scope = lambda cur, role, field='directory_write': ('own', 'TEAM01', {"TEAM01"})
+        self.role = _role("own", 3, ptt_group_manage="scope")
+        az.role_of = lambda cur, principal: self.role
 
     def tearDown(self):
-        m._db_connect, dd.caller_identity, dd.admin_scope = self._saved
+        m._db_connect, dd.caller_identity, az.role_of, az.org_scope = self._saved
 
     def test_scope_decides(self):
-        dd.admin_scope = lambda c, uid: {"orgCodes": {"TEAM01"}}
         self.assertTrue(m._admin_manages_group({}, {"org_code": "TEAM01"}))
         self.assertFalse(m._admin_manages_group({}, {"org_code": "TEAM02"}))
         self.assertFalse(m._admin_manages_group({}, {"org_code": ""}))
-        self.assertTrue(m._admin_manages_group({}, None))                     # 신규 생성
-        dd.admin_scope = lambda c, uid: None
+        self.assertTrue(m._admin_manages_group({}, None))                     # 신규 생성 = scope|all
+        self.assertTrue(m._admin_manages_group({}, {"org_code": "TEAM02", "authorized_user_id": 5020}))   # 내 소유
+        self.role = _role("own", 3)                                            # ptt_group_manage none 이어도 관리 범위가 scope 를 유도(§3.4)
+        self.assertTrue(m._admin_manages_group({}, {"org_code": "TEAM01"}))
+        self.role = _role("none", None, ptt_group_manage="own")
+        self.assertFalse(m._admin_manages_group({}, None))                    # own 은 생성 인가가 아니다
+        self.assertTrue(m._admin_manages_group({}, {"org_code": "X", "authorized_user_id": 5020}))
+        self.role = _role("none", None, ptt_group_manage="all")
+        self.assertTrue(m._admin_manages_group({}, {"org_code": "TEAM02"}))
+        self.role = None
         self.assertFalse(m._admin_manages_group({}, {"org_code": "TEAM01"}))
         self.assertFalse(m._admin_manages_group({}, None))
 
@@ -545,12 +604,36 @@ class ServiceCatalogTests(unittest.TestCase):
             "volte": {"name": "volte", "domain": "ims.example"},
             "ptt": {"name": "mcptt", "domain": "ptt.example"}}}}
         out = dd._services(cfg)
-        self.assertEqual(out["volte"], [{"name": "volte", "domain": "ims.example"}])
-        self.assertEqual(out["ptt"], [{"name": "mcptt", "domain": "ptt.example"}])
+        self.assertEqual(out["volte"], [{"name": "volte", "domain": "ims.example", "kind": "volte"}])
+        self.assertEqual(out["ptt"], [{"name": "mcptt", "domain": "ptt.example", "kind": "ptt"}])
 
     def test_fallback_without_name_uses_kind(self):
         cfg = {"Provisioning": {"Services": {"ptt": {"domain": "ptt.example"}}}}
-        self.assertEqual(dd._services(cfg)["ptt"], [{"name": "ptt", "domain": "ptt.example"}])
+        self.assertEqual(dd._services(cfg)["ptt"], [{"name": "ptt", "domain": "ptt.example", "kind": "ptt"}])
+
+    def test_voip_rides_volte_bucket_with_kind(self):
+        """유선 voip 접속환경은 전화 회선 버킷(volte_subscriptions)에 실리고 항목 kind 로 구분된다(sip_service_model.md §2-9)."""
+        cfg = {"Provisioning": {"Services": {
+            "volte": {"name": "volte", "domain": "volte.example"},
+            "voip": {"name": "voip", "domain": "voip.example"},
+            "ptt": {"name": "mcptt", "domain": "ptt.example"}}}}
+        out = dd._services(cfg)
+        self.assertEqual(out["volte"], [{"name": "volte", "domain": "volte.example", "kind": "volte"},
+                                        {"name": "voip", "domain": "voip.example", "kind": "voip"}])
+        self.assertEqual([x["kind"] for x in out["ptt"]], ["ptt"])
+
+    def test_runtime_store_rows_carry_kind(self):
+        """runtime store access_services 가 있으면 그것이 우선 — mcptt 종류는 ptt 버킷·kind ptt, voip 는 volte 버킷·kind voip."""
+        import services.file_store as fs
+        fs.load_all = lambda d: [
+            {"name": "voip", "kind": "voip", "domain": "voip.example", "priority": 150},
+            {"name": "volte", "kind": "volte", "domain": "volte.example", "priority": 100},
+            {"name": "mcptt", "kind": "mcptt", "domain": "ptt.example", "priority": 100},
+            {"kind": "volte", "domain": "no-name.example", "priority": 1},   # name 없음 = 후보 아님
+        ]   # 후보 순서 = priority 오름차순(같으면 name) — services/access_services.records
+        out = dd._services({"Provisioning": {"Services": {}}})
+        self.assertEqual([(x["name"], x["kind"]) for x in out["volte"]], [("volte", "volte"), ("voip", "voip")])
+        self.assertEqual(out["ptt"], [{"name": "mcptt", "domain": "ptt.example", "kind": "ptt"}])
 
 
 class _GroupsCur:
@@ -573,9 +656,11 @@ class _GroupsCur:
             self._rows = list(self.GROUPS)
         elif q.startswith("SELECT group_id, COUNT(*)"):
             self._rows = [{"group_id": 1, "n": 3}, {"group_id": 2, "n": 4}]
-        elif q.startswith("SELECT ptt_listen FROM dispatch_groups"):
-            self._rows = [{"ptt_listen": self.ptt_listen}]
-        elif q.startswith("SELECT ptt_group_id FROM dispatch_group_ptt_targets"):
+        elif q.startswith("SHOW TABLES LIKE 'roles'"):
+            self._rows = [{"x": 1}]
+        elif q.startswith("SELECT phone_group_id FROM role_monitor_targets"):
+            self._rows = []
+        elif q.startswith("SELECT ptt_group_id FROM role_ptt_targets"):
             self._rows = [{"ptt_group_id": i} for i in self.targets]
         elif q.startswith("SELECT gm.group_id FROM ptt_group_members"):
             self._rows = [{"group_id": i} for i in self.member_groups]
@@ -590,15 +675,21 @@ class _GroupsCur:
 
 
 class GroupsInScopeTests(unittest.TestCase):
-    """PTT 그룹 관리 열거 = 관리 범위 ∪ 내 소유 ∪ 청취 범위 ∪ 멤버 그룹, canManage 는 관리 범위·소유만(GMS 게이트와 동일)."""
+    """PTT 그룹 관리 열거 = 관리 범위 ∪ 내 소유 ∪ 청취 범위 ∪ 멤버 그룹, canManage 는 역할 ptt_group_manage(scope=관리 범위)·소유만(GMS 게이트와 동일)."""
 
-    OWN = {"groupId": "dg-1", "directoryAdmin": "own", "orgCode": "TEAM01", "orgCodes": {"TEAM01"}}
+    def setUp(self):
+        az.reset_probe()
+
+    @staticmethod
+    def _own(ptt_listen):
+        return {"roleId": "role-1", "groupId": "pg-1", "directoryWrite": "own", "directoryAdmin": "own", "orgCode": "TEAM01",
+                "orgCodes": {"TEAM01"}, "role": _role("own", 3, ptt_listen=ptt_listen, ptt_group_manage="scope")}
 
     def _ids(self, rows, key=None):
         return [r["id"] for r in rows if key is None or r[key]]
 
     def test_own_scope_shows_listen_and_member_groups_read_only(self):
-        rows = dd._groups_in_scope(_GroupsCur("listed", targets={2, 3}, member_groups={3}), self.OWN, 5020)
+        rows = dd._groups_in_scope(_GroupsCur("listed", targets={2, 3}, member_groups={3}), self._own("listed"), 5020)
         self.assertEqual(self._ids(rows), ["g001", "g002", "g003", "g005"])          # g004(TEAM02) 만 밖
         self.assertEqual(self._ids(rows, "canManage"), ["g001", "g005"])            # 범위 안 조직 · 내 소유
         self.assertEqual(self._ids(rows, "inListenScope"), ["g002", "g003"])
@@ -606,17 +697,25 @@ class GroupsInScopeTests(unittest.TestCase):
         self.assertEqual(rows[0]["memberCount"], 3)
 
     def test_listen_all_shows_everything(self):
-        rows = dd._groups_in_scope(_GroupsCur("all", targets=set(), member_groups=set()), self.OWN, 5020)
+        rows = dd._groups_in_scope(_GroupsCur("all", targets=set(), member_groups=set()), self._own("all"), 5020)
         self.assertEqual(len(rows), 5)
         self.assertTrue(all(r["inListenScope"] for r in rows))
         self.assertEqual(self._ids(rows, "canManage"), ["g001", "g005"])
 
     def test_no_listen_no_member_is_manage_only(self):
-        rows = dd._groups_in_scope(_GroupsCur("none", targets=set(), member_groups=set()), self.OWN, None)
+        rows = dd._groups_in_scope(_GroupsCur("none", targets=set(), member_groups=set()), self._own("none"), None)
         self.assertEqual(self._ids(rows), ["g001"])
 
     def test_all_scope_manages_everything(self):
-        sc = {"groupId": "dg-1", "directoryAdmin": "all", "orgCode": "", "orgCodes": None}
+        sc = {"roleId": "role-1", "groupId": "", "directoryWrite": "all", "directoryAdmin": "all", "orgCode": "", "orgCodes": None,
+              "role": _role("all", None, ptt_group_manage="scope")}
+        rows = dd._groups_in_scope(_GroupsCur("none", targets=set(), member_groups=set()), sc, 5020)
+        self.assertEqual(len(rows), 5)
+        self.assertTrue(all(r["canManage"] for r in rows))
+
+    def test_ptt_group_manage_all_without_directory_scope(self):
+        sc = {"roleId": "role-1", "groupId": "", "directoryWrite": "none", "directoryAdmin": "none", "orgCode": "", "orgCodes": set(),
+              "role": _role("none", None, ptt_group_manage="all", ptt_listen="none")}
         rows = dd._groups_in_scope(_GroupsCur("none", targets=set(), member_groups=set()), sc, 5020)
         self.assertEqual(len(rows), 5)
         self.assertTrue(all(r["canManage"] for r in rows))
@@ -663,7 +762,7 @@ class MemberWriteTests(unittest.TestCase):
         dd._audit = lambda *a, **k: self.calls.append(("audit", a[3], a[5], k.get("after")))
         m.get_user_profile = lambda ms: {"allow_emergency_call": True, "allow_emergency_alert": True, "allow_adhoc_call": True,
                                         "allow_emergency_private_call": True, "allow_ambient_listening": False, "allow_create_group": False}
-        self.scope = {"groupId": "dg-1", "directoryAdmin": "own", "orgCode": "TEAM01", "orgCodes": {"TEAM01"}}
+        self.scope = {"groupId": "pg-1", "directoryAdmin": "own", "orgCode": "TEAM01", "orgCodes": {"TEAM01"}}
 
     def tearDown(self):
         dd._admin._add_subscription, dd._admin._delete_subscription, dd._admin._put_ptt_profile, dd._audit, m.get_user_profile = self._saved
@@ -755,7 +854,7 @@ class PttSessionDetailTests(unittest.TestCase):
             token = {"sub": "disp01", "mcptt_id": "tel:+821310001001", "scope": [m.SCOPE_PROVISIONING]}
             m.extract_token = lambda hdr: token if hdr else None
             m._SERVICE_LOG_DIR = t.sl
-            dr._scope_sets = lambda cfg, tok: ("+821310001001", {"groupId": "dg1", "members": set(), "ptt_groups": {"g002"}}, {"1": "g002"})
+            dr._scope_sets = lambda cfg, tok: ("+821310001001", {"roleId": "role-1", "groupId": "pg1", "members": set(), "ptt_groups": {"g002"}}, {"1": "g002"})
             calls = []
 
             class _Resp:
@@ -793,7 +892,7 @@ class PttSessionDetailTests(unittest.TestCase):
             self.assertEqual([a["params"]["tap_mode"] for a in audits], ["history"])
             self.assertEqual(audits[0]["params"]["hist_kind"], "ptt_session")
             # 범위 밖 / 관제 미소속
-            dr._scope_sets = lambda cfg, tok: ("+821310001001", {"groupId": "dg1", "members": set(), "ptt_groups": {"g009"}}, {})
+            dr._scope_sets = lambda cfg, tok: ("+821310001001", {"roleId": "role-1", "groupId": "pg1", "members": set(), "ptt_groups": {"g009"}}, {})
             self.assertEqual(call("/provisioning/history/ptt/" + rec).body["error"], "out_of_scope")
             dr._scope_sets = lambda cfg, tok: ("+821310001001", None, {})
             self.assertEqual(call("/provisioning/history/ptt/" + rec).body["error"], "no_monitor_scope")

@@ -2,11 +2,12 @@
 관제 앱(가입자=관제사, PKCE provisioning 토큰) 주체의 조직/구성원/번호·PTT 그룹 관리 —
 docs/design/features/dispatch_center.md §3.4 · android_ue_provisioning.md §3-3.
 
-인가 축 = 관제 그룹 속성 `dispatch_groups.directory_admin`(none|own|all, own = 그룹 org_id 조직과 그 하위).
-감청 범위(monitor_scope)와 같은 결 — 서버가 enum 을 해석해 **범위 안의 조직 코드 집합**으로 게이트하고 앱은 결과만
-받는다. 부여는 콘솔 manager(이 파일은 판정만). 3GPP 규격 밖(가입자 프로비저닝은 MC 서비스 제공자 정책)이라 CIMS
-확장이며, 콘솔 관리 API(`/api/v1/organizations`·`/api/v1/users`, 콘솔 토큰)와 **같은 쓰기 코드**(handlers.admin/org)를
-호출한다 — 정책·검증(H(A1) 결박, pickup_group 파생 409, AKA)이 두 평면에서 갈라지지 않게. 토큰 realm 은 섞지 않는다.
+인가 축 = 관제사(person)에게 배정된 **역할**의 `directory_write`(none|own|all, own = 역할 org_id 조직과 그 하위 —
+mcptt_authorization.md §2.3 `can(principal, directory.write, org)`, services/authz). 감청 범위(monitor_call)와 같은 결 — 서버가
+enum 을 해석해 **범위 안의 조직 코드 집합**으로 게이트하고 앱은 결과만 받는다. 부여는 콘솔 `authz.manage`(이 파일은 판정만).
+3GPP 규격 밖(가입자 프로비저닝은 MC 서비스 제공자 정책)이라 CIMS 확장이며, 콘솔 관리 API(`/api/v1/organizations`·
+`/api/v1/users`·`/api/v1/phone-groups`, 콘솔 토큰)와 **같은 쓰기 코드**(handlers.admin/org/dispatch)를 호출한다 — 정책·검증
+(H(A1) 결박, pickup_group 파생 409, AKA)이 두 평면에서 갈라지지 않게. 토큰 realm 은 섞지 않는다. 역할·배정은 이 평면에 없다.
 
   GET    /provisioning/directory/admin                      관리 화면 한 벌: scope·services·orgs(범위 안)·members(범위 안)
   POST   /provisioning/directory/orgs                       {code,name,parent,sort}         (parent 는 범위 안 조직 코드)
@@ -17,12 +18,17 @@ docs/design/features/dispatch_center.md §3.4 · android_ue_provisioning.md §3-
   DELETE /provisioning/directory/members/{userId}
   PUT    /provisioning/directory/members/{userId}/volte|ptt {msisdn,imsi?,serviceRef?,sipTransport?,password?} 개설/변경
   DELETE /provisioning/directory/members/{userId}/volte|ptt
-  PUT    /provisioning/directory/members/{userId}/ptt/profile {allowCreateGroup?,allowAmbientListening?,...}
+  PUT    /provisioning/directory/members/{userId}/ptt/profile {allowCreateGroup?,allowEmergencyCall?,...}
+         — allowAmbientListening 은 편집 불가(역할 배정의 결과, mcptt_authorization.md §2.4): 현재값과 다른 값이 실려 오면
+           400 not_editable, 같은 값은 무시(구 앱 호환). GET 응답에는 표시용으로 실린다.
   GET    /provisioning/directory/groups                     범위 안 PTT 그룹 목록(관리용 — GMS 멤버 목록과 별개)
+  GET/POST /provisioning/directory/phone-groups             범위 안 조직의 전화 그룹 — 콘솔 /api/v1/phone-groups 와 같은 본문·
+  GET/PUT/DELETE …/phone-groups/{id}                        같은 쓰기 코드(handlers.dispatch)·같은 판정(그룹 org 가 범위 안)
+  POST/DELETE …/phone-groups/{id}/members[/{userId}]
 
-오류: 401 invalid_token · 403 insufficient_scope / no_directory_admin(관리 범위 없음) / out_of_scope(범위 밖 조직·구성원) ·
-      400 schema_not_migrated(directory_admin 컬럼 미적용) · 그 외는 admin/org 핸들러의 코드 그대로.
-감사: 모든 쓰기는 E-AUD-006 config_change(actor=관제사 msisdn, entity=organization|user|subscription|ptt_profile).
+오류: 401 invalid_token · 403 insufficient_scope / no_directory_admin(관리 범위 없음 — 역할 없음·directory_write=none·
+      테이블 미적용) / out_of_scope(범위 밖 조직·구성원·전화 그룹) · 그 외는 admin/org/dispatch 핸들러의 코드 그대로.
+감사: 모든 쓰기는 E-AUD-006 config_change(actor=`user:<users.id>`, entity=organization|user|subscription|ptt_profile|phone_group).
 """
 
 import hashlib
@@ -39,6 +45,7 @@ from httpsrv.handler import HandlerArgs, HandlerResult
 from handlers import admin as _admin
 from handlers import org as _org
 from handlers import dispatch as _dispatch
+from services import authz
 from services import mcptt as _m
 from services.mcptt import logger
 
@@ -50,6 +57,10 @@ _PROFILE_KEYS = {                               # 와이어 camelCase → ptt_us
     'allowAdhocCall': 'allow_adhoc_call', 'allowEmergencyPrivateCall': 'allow_emergency_private_call',
     'allowAmbientListening': 'allow_ambient_listening', 'allowCreateGroup': 'allow_create_group',
 }
+# 관제 앱(관리 범위)이 바꿀 수 없는 자격 — 감청·청취 권한은 콘솔 manager 의 승인 사항(dispatch_center.md §5.6,
+#   mcptt_authorization.md §2.4 "청취 자격은 배정의 결과"). 관리 범위가 있는 관제사가 자기(또는 범위 안 구성원)에게 청취
+#   자격을 부여하는 권한 상승 경로를 여기서 끊는다. 표시(GET)는 그대로.
+_LOCKED_PROFILE_KEYS = {'allowAmbientListening'}
 
 
 def _json(status: int, body, headers=None) -> HandlerResult:
@@ -99,62 +110,39 @@ def caller_identity(cur, token: dict) -> Tuple[str, Optional[int]]:
 # ── 범위 ──────────────────────────────────────────────────────────────────────
 
 def _org_rows(cur) -> list:
-    cur.execute("SELECT id, code, name, parent_id, sort_order FROM organizations")
-    rows = cur.fetchall()
-    out = []
-    for r in rows:
-        if isinstance(r, dict):
-            out.append((r['id'], r['code'] or '', r['name'] or '', r['parent_id'], r['sort_order'] or 0))
-        else:
-            out.append((r[0], r[1] or '', r[2] or '', r[3], r[4] or 0))
-    return out
+    return authz.org_rows(cur)
 
 
 def org_subtree_codes(org_rows: list, root_id) -> set:
-    """root_id 조직과 그 하위 전체의 code 집합(사이클 방어)."""
-    children = {}
-    code_of = {}
-    for oid, code, _name, pid, _so in org_rows:
-        code_of[oid] = code
-        children.setdefault(pid, []).append(oid)
-    out, stack, seen = set(), [root_id], set()
-    while stack:
-        oid = stack.pop()
-        if oid in seen or oid not in code_of:
-            continue
-        seen.add(oid)
-        out.add(code_of[oid])
-        stack.extend(children.get(oid, []))
-    return out
+    """root_id 조직과 그 하위 전체의 code 집합(사이클 방어) — services/authz 와 같은 규칙."""
+    return authz.org_subtree_codes(org_rows, root_id)
 
 
 def admin_scope(cur, user_id) -> Optional[dict]:
-    """관제사의 관리 범위 — {groupId, directoryAdmin, orgCode, orgCodes(set|None=전체)}. 없으면 None.
-    dispatch_discovery(P2)와 같은 소속 판정(volte 회선 멤버십)에 directory_admin 을 얹는다. 컬럼 미적용 DB = None."""
-    if user_id is None or not _dispatch.has_dispatch_tables(cur) or not _dispatch.has_directory_admin_column(cur):
+    """관제사의 관리 범위 — person 의 배정 역할 `directory_write`(none|own|all) + `org_id` 로 해석(dispatch_center.md §3.4).
+    {roleId, groupId(자기 전화 그룹, 없으면 ''), directoryWrite, directoryAdmin(=directoryWrite — 구 앱 키), orgCode(own 의 루트),
+    orgCodes(set|None=전체), role(roles 행)}. 역할 없음·none·own 인데 조직이 없어 범위가 빔·테이블 미적용 = None(관리 불가).
+    services/authz.can(principal, directory.write, org) 과 같은 규칙 — 콘솔 manager 의 같은 쓰기와 판정이 갈리지 않는다."""
+    if user_id is None:
         return None
-    cur.execute("SELECT g.id, g.directory_admin, g.org_id FROM dispatch_group_members m "
-                "JOIN dispatch_groups g ON g.id=m.group_id "
-                "JOIN volte_subscriptions s ON s.id=m.user_id WHERE s.user_id=%s LIMIT 1", (user_id,))
-    r = cur.fetchone()
-    if not r:
+    role = authz.role_of(cur, authz.user_principal(user_id))
+    if not role:
         return None
-    gid, da, org_id = (r['id'], r['directory_admin'], r['org_id']) if isinstance(r, dict) else (r[0], r[1], r[2])
-    da = da or 'none'
-    if da == 'none':
+    mode, org_code, codes = authz.org_scope(cur, role, 'directory_write')
+    if mode == 'none' or (mode == 'own' and not codes):
         return None
-    rows = _org_rows(cur)
-    org_code = next((c for oid, c, _n, _p, _s in rows if oid == org_id), '') if org_id is not None else ''
-    if da == 'all':
-        return {"groupId": gid, "directoryAdmin": 'all', "orgCode": org_code, "orgCodes": None}
-    if org_id is None or not org_code:
-        return None                                   # own 인데 조직이 없으면 범위가 비어 관리 불가
-    return {"groupId": gid, "directoryAdmin": 'own', "orgCode": org_code, "orgCodes": org_subtree_codes(rows, org_id)}
+    gid = _dispatch.phone_group_of_person(cur, user_id) or ''
+    return {"roleId": role['id'], "groupId": gid, "directoryWrite": mode, "directoryAdmin": mode,
+            "orgCode": org_code, "orgCodes": codes, "role": role}
 
 
 def in_scope(scope: dict, org_code: str) -> bool:
-    codes = scope.get("orgCodes")
-    return True if codes is None else (org_code or '') in codes
+    return authz.in_codes(scope.get("orgCodes"), org_code)
+
+
+def _scope_wire(scope: dict) -> dict:
+    return {"roleId": scope.get("roleId", ""), "groupId": scope.get("groupId", ""),
+            "directoryWrite": scope["directoryWrite"], "directoryAdmin": scope["directoryAdmin"], "orgCode": scope["orgCode"]}
 
 
 def _org_by_code(cur, code: str):
@@ -175,23 +163,24 @@ def _audit(config, actor: str, ip: str, entity: str, entity_id, action: str, aft
 # ── 조회(관리 화면 한 벌) ─────────────────────────────────────────────────────
 
 def _services(config) -> dict:
-    """접속서비스 후보 — {volte:[{name,domain}], ptt:[...]}: runtime store access_services 우선, 없으면 Provisioning.Services."""
+    """접속서비스 후보 — {volte:[{name,domain,kind}], ptt:[...]}: 버킷 키는 회선 종류(전화 회선 = volte_subscriptions,
+    PTT 회선)라 전화 계열 kind volte(이동)·voip(유선)가 함께 volte 버킷에 실린다(항목 kind 로 구분 — 관제석은 voip).
+    정본 = CSP access_services 미러(services/access_services.records), 없으면 csc.json Provisioning.Services(volte·voip·ptt 전부)."""
     out = {"volte": [], "ptt": []}
-    try:
-        from services import ha_lookup as _ha, file_store as _fs
-        for r in _fs.load_all(_ha.collection_dir(config, 'access_services')) or []:
-            kind = (r.get('kind') or r.get('service_kind') or '').lower()
-            kind = 'ptt' if kind in ('ptt', 'mcptt') else 'volte'
-            if r.get('name'):
-                out[kind].append({"name": r['name'], "domain": (r.get('domain') or '').strip()})
-    except Exception as e:
-        logger.log_warning(f"[provisioning/directory] access_services lookup failed ({e}) — Provisioning.Services fallback")
+
+    def bucket(kind: str) -> str:
+        return 'ptt' if kind in ('ptt', 'mcptt') else 'volte'
+
+    from services import access_services as _access_services
+    for r in _access_services.records(config):        # 미러(CSP 정본) — 미도달·빈 목록이면 아래 csc.json 폴백
+        kind = (r.get('kind') or '').lower()
+        out[bucket(kind)].append({"name": r['name'], "domain": (r.get('domain') or '').strip(),
+                                  "kind": 'ptt' if bucket(kind) == 'ptt' else (kind or 'volte')})
     if not out["volte"] and not out["ptt"]:
         svcs = ((config or {}).get('Provisioning') or {}).get('Services') or {}
-        for kind in ('volte', 'ptt'):
-            s = svcs.get(kind) or {}
-            if s.get('domain'):
-                out[kind].append({"name": s.get('name') or kind, "domain": s['domain']})
+        for kind, s in svcs.items():
+            if isinstance(s, dict) and s.get('domain') and (s.get('name') or kind):
+                out[bucket(kind)].append({"name": s.get('name') or kind, "domain": s['domain'], "kind": kind})
     return out
 
 
@@ -248,7 +237,7 @@ def _orgs_in_scope(cur, scope: dict) -> list:
 
 def _admin_view(cur, config, scope: dict) -> dict:
     return {
-        "scope": {"groupId": scope["groupId"], "directoryAdmin": scope["directoryAdmin"], "orgCode": scope["orgCode"]},
+        "scope": _scope_wire(scope),
         "services": _services(config),
         "orgs": _orgs_in_scope(cur, scope),
         "members": _members_in_scope(cur, scope),
@@ -256,17 +245,15 @@ def _admin_view(cur, config, scope: dict) -> dict:
 
 
 def _visible_group_sets(cur, scope: dict, my_uid) -> Tuple[set, set]:
-    """(청취 범위 ptt_groups.id 집합 | None=전체, 내 멤버 그룹 ptt_groups.id 집합) — 관제 그룹 ptt_listen(all|listed) 은
-    provisioning/me dispatch.pttTargets 와 같은 원천(dispatch_group_ptt_targets), 멤버십은 ptt_group_members(내 PTT 회선)."""
+    """(청취 범위 ptt_groups.id 집합 | None=전체, 내 멤버 그룹 ptt_groups.id 집합) — 역할 ptt_listen(all|listed) 은
+    provisioning/me dispatch.pttTargets 와 같은 원천(role_ptt_targets), 멤버십은 ptt_group_members(내 PTT 회선)."""
     listen: Optional[set] = set()
-    cur.execute("SELECT ptt_listen FROM dispatch_groups WHERE id=%s", (scope["groupId"],))
-    r = cur.fetchone()
-    mode = (r['ptt_listen'] if isinstance(r, dict) else (r[0] if r else None)) or 'none'
+    role = scope.get("role") or {}
+    mode = role.get('ptt_listen') or 'none'
     if mode == 'all':
         listen = None
     elif mode == 'listed':
-        cur.execute("SELECT ptt_group_id FROM dispatch_group_ptt_targets WHERE group_id=%s", (scope["groupId"],))
-        listen = {(x['ptt_group_id'] if isinstance(x, dict) else x[0]) for x in cur.fetchall()}
+        _mon, listen = authz.role_targets(cur, role.get('id'))
     member: set = set()
     if my_uid is not None:
         cur.execute("SELECT gm.group_id FROM ptt_group_members gm JOIN ptt_subscriptions ps ON ps.id=gm.user_id WHERE ps.user_id=%s", (my_uid,))
@@ -275,10 +262,11 @@ def _visible_group_sets(cur, scope: dict, my_uid) -> Tuple[set, set]:
 
 
 def _groups_in_scope(cur, scope: dict, my_uid) -> list:
-    """관제사에게 보이는 PTT 그룹 = 관리 범위(org_code 가 범위 안) ∪ 내 소유 ∪ 관제 그룹 청취 범위 ∪ 내 멤버 그룹.
-    행마다 canManage(관리 범위 안 또는 내 소유 — GMS PUT/DELETE 게이트 mcptt._admin_manages_group 와 같은 판정)를 실어
-    앱이 편집/삭제를 그 행에만 연다. 청취·멤버 그룹은 관제사가 매일 다루는 그룹이라 관리 권한이 없어도 목록에는 보여야 한다
-    (조직 미지정 그룹이 own 범위에서 통째로 사라지지 않게). GMS 목록(멤버 그룹)과 별개의 관리용 열거."""
+    """관제사에게 보이는 PTT 그룹 = 관리 범위(org_code 가 범위 안) ∪ 내 소유 ∪ 역할 청취 범위 ∪ 내 멤버 그룹.
+    행마다 canManage(역할 `ptt_group_manage` — all / scope=관리 범위 안 org_code / 내 소유 — GMS PUT/DELETE 게이트
+    mcptt._admin_manages_group = authz.can(ptt_group.manage) 와 같은 판정)를 실어 앱이 편집/삭제를 그 행에만 연다.
+    청취·멤버 그룹은 관제사가 매일 다루는 그룹이라 관리 권한이 없어도 목록에는 보여야 한다(조직 미지정 그룹이 own 범위에서
+    통째로 사라지지 않게). GMS 목록(멤버 그룹)과 별개의 관리용 열거."""
     cur.execute("SELECT id, mcptt_group_id, name, org_code, authorized_user_id, group_type FROM ptt_groups ORDER BY name, mcptt_group_id")
     rows = cur.fetchall()
     ids = [r['id'] for r in rows]
@@ -288,11 +276,12 @@ def _groups_in_scope(cur, scope: dict, my_uid) -> list:
                     % ",".join(["%s"] * len(ids)), ids)
         counts = {r['group_id']: int(r['n']) for r in cur.fetchall()}
     listen, member = _visible_group_sets(cur, scope, my_uid)
+    pgm = authz.effective_ptt_group_manage(scope.get("role") or {}) if scope.get("role") else 'scope'
     out = []
     for r in rows:
         owner = r.get('authorized_user_id')
         is_owner = my_uid is not None and owner == my_uid
-        can_manage = in_scope(scope, r.get('org_code') or '') or is_owner
+        can_manage = is_owner or pgm == 'all' or (pgm == 'scope' and in_scope(scope, r.get('org_code') or ''))
         in_listen = listen is None or r['id'] in listen
         is_member = r['id'] in member
         if not (can_manage or in_listen or is_member):
@@ -474,11 +463,17 @@ async def _member_write(cur, config, scope, method, parts, body, actor, ip, my_u
             return _json(404, {'error': 'Subscription not found'})
         msisdn = existing[0]
         cur_prof = dict(_m.get_user_profile(msisdn) or {})
+        # 잠긴 자격(allowAmbientListening)은 변경 시도만 거절 — 현재값과 같은 값은 무시한다(구 앱은 두 플래그를 항상 함께
+        #   보낸다). 거절은 어떤 회선·어떤 범위든 동일: 청취 자격은 콘솔에서 부여한다.
+        for k in _LOCKED_PROFILE_KEYS:
+            if k in body and bool(body[k]) != bool(cur_prof.get(_PROFILE_KEYS[k], False)):
+                return _json(400, {'error': 'not_editable', 'key': k,
+                                   'detail': 'ambient listening qualification is granted from the console (role), not from the dispatch app'})
         # 요청에 없는 자격은 현재값 유지 — 선택 컬럼(allow_ambient_listening/allow_create_group)은 값이 있을 때만 싣는다
         #   (컬럼 미적용 DB 에서 admin PUT 이 400 을 내지 않게).
         pb = {}
         for k, col in _PROFILE_KEYS.items():
-            if k in body:
+            if k in body and k not in _LOCKED_PROFILE_KEYS:
                 pb[col] = bool(body[k])
             elif col in _admin._OPT_PROFILE_COLS:
                 if cur_prof.get(col):
@@ -626,7 +621,7 @@ async def handle_directory_admin(handler_args: HandlerArgs, kwargs: dict) -> Han
     parts = _path_parts(handler_args.full_path)
     method = handler_args.method.upper()
     body = handler_args.body
-    is_import = parts[:2] == ['members', 'import']
+    is_import = tuple(parts[:2]) == ('members', 'import')
     if isinstance(body, (bytes, bytearray)):
         ctype = str((getattr(handler_args, 'headers', None) or {}).get('content-type', '')).lower()
         if is_import and 'json' not in ctype:
@@ -644,6 +639,7 @@ async def handle_directory_admin(handler_args: HandlerArgs, kwargs: dict) -> Han
                 scope = admin_scope(cur, my_uid)
                 if not scope:
                     return _json(403, {'error': 'no_directory_admin'})
+                actor = authz.actor(authz.user_principal(my_uid))        # 감사 actor = user:<users.id> (§2.5)
                 head = parts[0] if parts else ''
                 rest = parts[1:]
 
@@ -662,21 +658,33 @@ async def handle_directory_admin(handler_args: HandlerArgs, kwargs: dict) -> Han
                 if head == 'groups' and not rest:
                     if method != 'GET':
                         return _json(405, {'error': 'Method Not Allowed'})
-                    return _json(200, {"scope": {"directoryAdmin": scope["directoryAdmin"], "orgCode": scope["orgCode"]},
+                    return _json(200, {"scope": {"directoryWrite": scope["directoryWrite"], "directoryAdmin": scope["directoryAdmin"],
+                                                 "orgCode": scope["orgCode"]},
                                        "groups": _groups_in_scope(cur, scope, my_uid)})
+
+                if head == 'phone-groups':
+                    # 전화 그룹 — 콘솔 /api/v1/phone-groups 와 같은 쓰기 코드·같은 본문. 범위 = 그룹(과 멤버 person)의 조직.
+                    r = _dispatch.dispatch_phone_group(cur, method, rest, body, scope["orgCodes"])
+                    if method != 'GET' and r.status in (200, 201):
+                        gid = rest[0] if rest else (r.body or {}).get('id')
+                        action = {'POST': 'create', 'PUT': 'update', 'DELETE': 'delete'}.get(method, method.lower())
+                        if len(rest) > 1:
+                            action = f"member_{'add' if method == 'POST' else 'remove'}"
+                        _audit(config, actor, ip, 'phone_group', gid, action, after=body if isinstance(body, dict) else None)
+                    return r
 
                 if head == 'orgs':
                     code = rest[0] if rest else ''
                     if len(rest) > 1 or (method == 'POST') != (not rest):
                         return _json(405, {'error': 'Method Not Allowed'})
-                    res = _org_write(cur, config, scope, method, code, body, msisdn, ip)
+                    res = _org_write(cur, config, scope, method, code, body, actor, ip)
                     if isinstance(res, HandlerResult):
                         return res
                     _none, payload = res
                     if method == 'POST':
                         r = await _org._create_org(payload, config)
                         if r.status == 201:
-                            _audit(config, msisdn, ip, 'organization', payload['code'], 'create', after=payload)
+                            _audit(config, actor, ip, 'organization', payload['code'], 'create', after=payload)
                             r = _json(201, {'code': payload['code'], 'id': r.body.get('id')})
                         return r
                     if method == 'PUT':
@@ -685,21 +693,21 @@ async def handle_directory_admin(handler_args: HandlerArgs, kwargs: dict) -> Han
                             return _json(400, {'error': 'no updatable fields'})
                         r = await _org._update_org(oid, upd, config)
                         if r.status == 200:
-                            _audit(config, msisdn, ip, 'organization', code, 'update', after=upd)
+                            _audit(config, actor, ip, 'organization', code, 'update', after=upd)
                             r = _json(200, {'code': code})
                         return r
                     r = await _org._delete_org(payload, config)
                     if r.status == 200:
-                        _audit(config, msisdn, ip, 'organization', code, 'delete')
+                        _audit(config, actor, ip, 'organization', code, 'delete')
                         r = _json(200, {'code': code})
                     return r
 
                 if is_import:
                     if method != 'POST':
                         return _json(405, {'error': 'Method Not Allowed'})
-                    return await _members_import(cur, config, scope, body, msisdn, ip, my_uid)
+                    return await _members_import(cur, config, scope, body, actor, ip, my_uid)
                 if head == 'members':
-                    return await _member_write(cur, config, scope, method, rest, body, msisdn, ip, my_uid)
+                    return await _member_write(cur, config, scope, method, rest, body, actor, ip, my_uid)
 
                 return _json(404, {'error': 'Not Found'})
     except pymysql.Error as e:
@@ -712,4 +720,5 @@ CSC_DIRECTORY_ADMIN_HANDLER_LIST = [
     ('/provisioning/directory/orgs', handle_directory_admin, {}),
     ('/provisioning/directory/members', handle_directory_admin, {}),
     ('/provisioning/directory/groups', handle_directory_admin, {}),
+    ('/provisioning/directory/phone-groups', handle_directory_admin, {}),
 ]

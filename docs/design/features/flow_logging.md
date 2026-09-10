@@ -132,7 +132,8 @@ csp 는 `CSipMessageLogger` 가 포맷/seq 를 맡고 writer 를 위임, csc 는
 ```
 
 ### 규칙
-- **`service`** 는 예약 키워드: `volte` | `mcptt` | `system` | `console` (향후 `mcvideo`, `mcdata`)
+- **`service`** 는 예약 키워드: `volte` | `mcptt` | `system` | `console` (향후 `mcvideo`, `mcdata`) — `volte` 는 전화 계열
+  서비스축(접속환경 kind `volte`·`voip` 합산, CSP `CCspServiceMap::LogServiceOf` / OAM `access_services.service_axis`)
 - **한 service 에 다중 domains**: 배열
 - **도메인 중복 불허**: 서로 다른 service 에 같은 도메인이 나오면 config 로드 시 ERROR
 - **상용 분리 배포**: CSP/CMP 인스턴스는 보통 하나의 service entry만 가짐

@@ -71,6 +71,26 @@ TEST(Csc, ParseProfile) {
     EXPECT_FALSE(CscClient::parseProfile("not json", none));
 }
 
+// 전화 회선 선택 — 유선 voip 우선, 없으면 이동 volte(android_ue_provisioning.md §3). 관제 앱의 전화 계정 규칙.
+TEST(Csc, PhoneServicePrefersVoipOverVolte) {
+    Profile p;
+    ASSERT_TRUE(CscClient::parseProfile(kProfile, p));
+    ASSERT_NE(p.phoneService(), nullptr);
+    EXPECT_EQ(p.phoneService(), p.service("volte"));            // voip 없음 → volte 폴백
+    Profile both;
+    ASSERT_TRUE(CscClient::parseProfile(R"({"services":[
+        {"kind":"volte","sip":{"host":"10.0.0.1","port":5060,"domain":"volte.example"},"account":{"msisdn":"+8213000"}},
+        {"kind":"voip","sip":{"host":"10.0.0.1","port":5060,"transport":"TLS","domain":"voip.example"},"account":{"msisdn":"+8213001"}},
+        {"kind":"ptt","sip":{"host":"10.0.0.1","port":5061,"domain":"ptt.example"},"account":{"msisdn":"+8250000"}}]})", both));
+    ASSERT_NE(both.phoneService(), nullptr);
+    EXPECT_EQ(both.phoneService()->kind, "voip");
+    EXPECT_EQ(both.phoneService()->domain, "voip.example");
+    EXPECT_EQ(both.service("volte")->domain, "volte.example");   // 이동 앱은 volte 를 그대로 본다
+    Profile pttOnly;
+    ASSERT_TRUE(CscClient::parseProfile(R"({"services":[{"kind":"ptt"}]})", pttOnly));
+    EXPECT_EQ(pttOnly.phoneService(), nullptr);
+}
+
 // dispatch 발견 확장(members[]/pttTargets[])·그룹 생성 자격 — 서버 요청서 §1.2·§2 계약. 없으면 빈 배열/false.
 TEST(Csc, ParseProfileDispatchDiscovery) {
     static const char* kJson = R"({

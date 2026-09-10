@@ -88,5 +88,51 @@ class TestTransportEnforced(unittest.TestCase):
         self.assertNotIn("ipsec-3gpp", sip["security"])
 
 
+class TestServiceEntry(unittest.TestCase):
+    """service_entry — 가입 행 service_ref(= access_services.name)로 Provisioning.Services 항목을 고른다
+    (sip_service_model.md §2-9: 유선 voip·이동 volte 회선이 같은 volte_subscriptions 에 있어 종류 키만으로는 도메인이 어긋난다)."""
+    SERVICES = {"Services": {
+        "volte": {"name": "volte", "domain": "volte.example"},
+        "voip": {"name": "voip", "domain": "voip.example", "tls_port": 15061, "transport": "TLS"},
+        "ptt": {"name": "mcptt", "domain": "ptt.example"},
+    }}
+
+    def setUp(self):
+        self._saved = mcptt.PROVISIONING
+        mcptt.PROVISIONING = self.SERVICES
+
+    def tearDown(self):
+        mcptt.PROVISIONING = self._saved
+
+    def test_ref_selects_named_entry_and_wire_kind_is_entry_key(self):
+        kind, svc = mcptt.service_entry("volte", "voip")
+        self.assertEqual((kind, svc["domain"]), ("voip", "voip.example"))
+        kind, svc = mcptt.service_entry("ptt", "mcptt")            # 라이브 name(mcptt) ≠ 키(ptt) — 이름 매칭
+        self.assertEqual((kind, svc["domain"]), ("ptt", "ptt.example"))
+
+    def test_empty_or_unknown_ref_falls_back_to_kind(self):
+        for ref in ("", None, "  ", "no-such"):
+            kind, svc = mcptt.service_entry("volte", ref)
+            self.assertEqual((kind, svc["domain"]), ("volte", "volte.example"), f"ref={ref!r}")
+
+    def test_ref_never_crosses_kind_boundary(self):
+        # PTT 가입 행이 전화 서비스를 가리켜도 ptt 항목 유지(가입 테이블이 다르다) — 반대도 같다
+        self.assertEqual(mcptt.service_entry("ptt", "voip")[0], "ptt")
+        self.assertEqual(mcptt.service_entry("volte", "mcptt")[0], "volte")
+
+    def test_provisioned_voip_line_carries_voip_policy(self):
+        out = mcptt._provision_service("volte", "+821310001001", "45033821310001001", "", "10.0.0.5",
+                                       sip_transport="TLS", sip_ha1="0" * 32, service_ref="voip")
+        self.assertEqual(out["kind"], "voip")
+        self.assertEqual(out["sip"]["domain"], "voip.example")
+        self.assertEqual(out["sip"]["transport"], "TLS")
+        self.assertTrue(out["sip"]["enforced"])
+        self.assertNotIn("mcpttId", out["account"])
+
+    def test_services_missing_entirely(self):
+        mcptt.PROVISIONING = {}
+        self.assertEqual(mcptt.service_entry("volte", "voip"), ("volte", {}))
+
+
 if __name__ == '__main__':
     unittest.main()

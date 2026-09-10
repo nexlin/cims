@@ -80,6 +80,7 @@ public static class ResponseText
         "no_directory_admin" => "관리 권한이 없습니다 — 관제 그룹의 관리 범위(directory_admin)를 콘솔에서 부여해야 합니다",
         "out_of_scope" => "관리 범위 밖의 조직·구성원입니다",
         "insufficient_scope" => "토큰 권한이 부족합니다 — 다시 로그인하세요",
+        "not_editable" => "원격 청취 자격은 관제 앱에서 바꿀 수 없습니다 — 콘솔에서 역할(청취 범위)로 부여합니다",
         "schema_not_migrated" => "서버 DB 마이그레이션이 필요합니다 (관리자 문의)",
         "code_exists" => "같은 코드의 조직이 이미 있습니다",
         "unknown_parent" => "상위 조직이 없습니다",

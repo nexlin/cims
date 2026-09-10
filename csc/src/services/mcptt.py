@@ -124,7 +124,7 @@ PSP_NOTIFY_PORT = 4421
 # 자동 프로비저닝(/provisioning/me, android_ue_provisioning.md §3) —
 #   서비스 kind 별 시그널링 서버/도메인. host 빈값이면 요청 Host(=UE 가 접속한 IP) 사용(올인원 기본).
 #   다중 노드면 host 를 CSP/PSP 대표(VIP) 주소로 지정.
-PROVISIONING = {}            # config Provisioning: {"Services":{"volte":{host,port,tcp_port,tls_port,transport,domain}, "ptt":{...}}}
+PROVISIONING = {}            # config Provisioning: {"Services":{"volte":{name,host,port,tcp_port,tls_port,transport,domain,…}, "voip":{…}, "ptt":{...}}}
 _SERVICE_LOG_DIR = ''        # ServiceLogging.Dir (NAS 공유) — 통합 이력 조회(/provisioning/history) 백엔드
 _DB_CONFIG = None            # CimsDatabase (가입자 라이브 조회용)
 _OAM_CONFIG: dict = {}       # Recording.OamUrl / Fm.OamIp — 통합 이력 PTT 창 조회의 OAM 세션 인덱스 프록시용
@@ -327,7 +327,10 @@ def apply_config(config):
 
     # IdMS 신원 값 유도 — 비면 PTT 도메인에서 파생(단일 정본). 템플릿 기본값이 비어 있어 배포 overlay 에
     #   실리지 않으므로, 운영자가 콘솔에 명시할 때만 그 값을 쓴다.
-    _ptt_domain = str(((PROVISIONING.get('Services') or {}).get('ptt') or {}).get('domain') or '').strip()
+    #   PTT 도메인의 정본은 CSP access_services(관리 store 미러) — csc.json 항목은 미러 미도달 시 폴백(services/access_services).
+    from services import access_services as _access_services
+    _access_services.configure(config)
+    _ptt_domain = _access_services.ptt_domain(PROVISIONING)
     IDMS_ISSUER, IDMS_DOMAIN, KMS_URI = resolve_idms_identity(idms_config, _ptt_domain, _MCPTT_PUBLIC_URL)
     logger.log_info(f"IdMS identity: issuer={IDMS_ISSUER} domain={IDMS_DOMAIN} kms={KMS_URI} "
                     f"scope_enforcement={SCOPE_ENFORCEMENT}")
@@ -829,7 +832,7 @@ def notify_csp(event_type, uri, action, etag="", sesid="", caller="", service=""
             if event_type in ("CSC_RESTART", "HEARTBEAT", "STATS_REQUEST", "STATS_RESPONSE"):
                 service = "system"
             elif event_type in (
-                "USER_CHANGED", "GROUP_CHANGED", "DISPATCH_GROUP_CHANGED",
+                "USER_CHANGED", "GROUP_CHANGED", "PHONE_GROUP_CHANGED", "ROLE_CHANGED",
                 # CSP 런타임 설정 변경 알림 (admin 트리거)
                 "LISTENER_CHANGED", "TRUNK_CHANGED",
                 "ROUTE_RULE_CHANGED", "ACCESS_LIST_CHANGED",
@@ -1586,8 +1589,8 @@ def _build_ue_init_config_xml(base_url: str) -> str:
     import re as _re
     esc = lambda s: _html.escape(str(s if s is not None else ''), quote=True)
 
-    ptt = (PROVISIONING.get('Services') or {}).get('ptt', {}) if isinstance(PROVISIONING, dict) else {}
-    domain = (ptt.get('domain') or IDMS_DOMAIN).strip()
+    from services import access_services as _access_services
+    domain = (_access_services.ptt_domain(PROVISIONING) or IDMS_DOMAIN).strip()
 
     # PLMN = MCC+MNC — 설정값 우선, 없으면 도메인 표기 ptt.mncXXX.mccYYY.… 에서 유도 (실패 시 명목값)
     plmn = str(_ue_init_cfg('Hplmn', 'Plmn')).strip()
@@ -2145,22 +2148,28 @@ _NS = {
 
 
 def _admin_manages_group(payload: dict, group: Optional[dict]) -> bool:
-    """관리 범위(dispatch_groups.directory_admin)로 그룹을 관리할 수 있는가 — 소유자가 아니어도 그룹 org_code 가 범위 안이면
-    GET/PUT/DELETE 허용(신규 생성은 allow_create_group 없이도). handlers/dispatch_directory.admin_scope 와 같은 판정."""
+    """역할의 PTT 그룹 관리 능력(`can(user, ptt_group.manage, group)` — mcptt_authorization.md §4.1)으로 그룹을 관리할 수
+    있는가 — 소유자가 아니어도 `scope`(그룹 org_code 가 directory_write 범위 안)·`all` 이면 GET/PUT/DELETE 허용.
+    group=None(신규 생성)은 scope|all 만(own 은 소유 판정이라 생성 인가가 아니다). 관제 앱 관리 API 와 같은 판정."""
     conn = _db_connect()
     if conn is None:
         return False
     try:
         from handlers import dispatch_directory as _dd
+        from services import authz as _az
         with conn:
             with conn.cursor() as cur:
                 _msisdn, uid = _dd.caller_identity(cur, payload)
-                scope = _dd.admin_scope(cur, uid)
-                if not scope:
+                if uid is None:
                     return False
+                principal = _az.user_principal(uid)
                 if group is None:
-                    return True
-                return _dd.in_scope(scope, (group.get('org_code') or ''))
+                    role = _az.role_of(cur, principal)
+                    return bool(role) and _az.effective_ptt_group_manage(role) in ('scope', 'all')
+                target = {'kind': 'ptt_group', 'id': group.get('id'), 'org_code': group.get('org_code') or '',
+                          'authorized_user_id': group.get('authorized_user_id')}
+                ok, _reason = _az.can(principal, 'ptt_group.manage', target, cur=cur)
+                return ok
     except Exception as e:
         logger.log_warning(f"[GMS] admin scope check failed: {e}")
         return False
@@ -2193,7 +2202,8 @@ def _gms_gid_from_uri(group_uri: str) -> Tuple[str, str]:
 def _ptt_domains() -> set:
     ds = {IDMS_DOMAIN.lower()}
     try:
-        d = ((PROVISIONING.get('Services') or {}).get('ptt') or {}).get('domain')
+        from services import access_services as _access_services
+        d = _access_services.ptt_domain(PROVISIONING)
         if d:
             ds.add(str(d).lower())
     except Exception:
@@ -2496,7 +2506,7 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
                     return _json_result(403, {'error': 'group_creation_not_allowed', 'detail': 'token subject has no users.id'})
             else:
                 owner = existing.get('authorized_user_id')
-                # 소유자 또는 관리 범위(directory_admin) 안의 그룹 — 관리자는 소유권을 뺏지 않는다(authorized_user 유지).
+                # 소유자 또는 역할 관리 범위(ptt_group_manage scope|all) 안의 그룹 — 관리자는 소유권을 뺏지 않는다(authorized_user 유지).
                 if (my_uid is None or owner != my_uid) and not _admin_manages_group(token_payload, existing):
                     logger.log_error(f"[GMS] PUT {gid} denied: '{requester}' is not the owner (owner={owner})")
                     # 타인 소유 = 409(클라이언트 명명 id 충돌 — 다른 id 로 다시), 소유자 없음(콘솔 생성) = 403.
@@ -2778,9 +2788,24 @@ def _country_code_of(msisdn: str) -> str:
         return d[0]
     return d[:2] if d[:2] in _E164_CC2 else d[:3]
 
+_PHONE_KINDS = ('volte', 'voip')      # 전화 계열 접속환경 — 같은 가입 테이블(volte_subscriptions)·같은 CSP 전화 경로
+
+
+def service_entry(kind: str, service_ref: str = "") -> tuple:
+    """(와이어 kind, 서비스 항목) — 가입 행의 service_ref(= CSP access_services.name)로 접속 서비스를 고른다
+    (같은 종류의 서비스가 여럿일 때 — 유선 voip 회선과 이동 volte 회선이 같은 volte_subscriptions 에 있다).
+    정의(name·kind·domain·realm·media_srtp·sec_mechanisms…)는 CSP access_services 미러가 정본이고 csc.json
+    `Provisioning.Services.<kind>` 는 단말 도달 정보(host·포트·transport…)를 보탠다 — 미러가 없으면 csc.json 만으로
+    (services/access_services.entry, sip_service_model.md §2-9, android_ue_provisioning.md §4). 와이어 kind 는 고른 서비스의
+    kind(volte|voip|ptt)라 단말이 회선 종류를 안다."""
+    from services import access_services as _access_services
+    return _access_services.entry(kind, service_ref, PROVISIONING)
+
+
 def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: str,
-                       sip_transport: str = "", sip_ha1: str = "", aka: dict = None) -> dict:
-    svc = (PROVISIONING.get('Services') or {}).get(kind, {}) if isinstance(PROVISIONING, dict) else {}
+                       sip_transport: str = "", sip_ha1: str = "", aka: dict = None,
+                       service_ref: str = "") -> dict:
+    kind, svc = service_entry(kind, service_ref)
     account = {
         "msisdn": sid,
         "imsi": imsi or "",
@@ -2882,7 +2907,7 @@ def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: st
         profile["allowCreateGroup"] = bool(get_user_profile(sid).get('allow_create_group'))
     return profile
 
-# ─── 관제 데스크 발견(discovery) — /provisioning/me `dispatch` 블록 (dispatch_center.md §8.4) ───
+# ─── 관제 데스크 발견(discovery) — /provisioning/me `phoneGroup`·`dispatch` 두 블록 (dispatch_center.md §8.4) ───
 
 def _extension_of(msisdn: str) -> str:
     """내선 라벨 = E.164 끝자리 N 자리(설정 Provisioning.ExtensionDigits, 기본 4, 0=전체).
@@ -2911,91 +2936,124 @@ def _content_etag_json(obj) -> str:
     return '"' + hashlib.sha256(canon.encode('utf-8')).hexdigest()[:32] + '"'
 
 
-_HAS_DIR_ADMIN_COL = None
+_MEMBER_SQL = ("SELECT u.id, u.name, s.id, COALESCE(m.group_id,''), "
+               "(SELECT MIN(p.id) FROM ptt_subscriptions p WHERE p.user_id=u.id) "
+               "FROM volte_subscriptions s JOIN users u ON u.id=s.user_id "
+               "LEFT JOIN phone_group_members m ON m.user_id=s.id")
+_MEMBER_ORDER = " ORDER BY CASE WHEN m.group_id=%s THEN 0 ELSE 1 END, m.group_id, m.alert_order, s.id"
 
 
-def _has_directory_admin_column(cur) -> bool:
-    """dispatch_groups.directory_admin(sql/migrate_dispatch_directory_admin.sql) — 미적용 DB 는 'none'."""
-    global _HAS_DIR_ADMIN_COL
-    if _HAS_DIR_ADMIN_COL is None:
-        try:
-            cur.execute("SHOW COLUMNS FROM dispatch_groups LIKE 'directory_admin'")
-            _HAS_DIR_ADMIN_COL = cur.fetchone() is not None
-        except Exception:
-            _HAS_DIR_ADMIN_COL = False
-    return _HAS_DIR_ADMIN_COL
+def _member_rows(cur, group_ids, own_gid: str, all_subscribers: bool = False) -> list:
+    """유선(volte) 회선 ⋈ users ⟕ phone_group_members → 항목 {userId, name, volteAor, pttId, extension, groupId}.
+    group_ids = 그 전화 그룹들의 멤버만, all_subscribers = 전 가입자(WHERE 없음). 투영·정렬은 하나 — 자기 그룹(alert_order) → 그 외."""
+    params = []
+    sql = _MEMBER_SQL
+    if not all_subscribers:
+        ids = sorted(g for g in (group_ids or set()) if g)
+        if not ids:
+            return []
+        sql += " WHERE m.group_id IN (" + ",".join(["%s"] * len(ids)) + ")"
+        params += ids
+    params.append(own_gid or '')
+    cur.execute(sql + _MEMBER_ORDER, params)
+    return [{"userId": uid, "name": name or "", "volteAor": _tel_uri(vid),
+             "pttId": _tel_uri(pid) if pid else "", "extension": _extension_of(vid), "groupId": mg or ""}
+            for uid, name, vid, mg, pid in cur.fetchall()]
 
 
-def dispatch_discovery(cur, user_id) -> Optional[dict]:
-    """관제 데스크 블록 = 소속 관제 그룹 속성 + **서버가 범위 enum 을 해석한 대상 목록**.
+def _ptt_only_rows(cur) -> list:
+    """PTT 전용 가입자(VoLTE 회선 없음 — 현장 PTT 단말) — monitor_call=all 에서만 감시 대상: 관제 앱이 그 PTT 회선에
+    dialog 를 구독해 타인 간 사설콜·애드혹 세션을 본다(dispatch_center.md §5.6a). volteAor 는 빈 문자열, 목록 끝."""
+    cur.execute("SELECT u.id, u.name, MIN(p.id) FROM ptt_subscriptions p JOIN users u ON u.id=p.user_id "
+                "WHERE NOT EXISTS (SELECT 1 FROM volte_subscriptions v WHERE v.user_id=u.id) "
+                "GROUP BY u.id, u.name ORDER BY MIN(p.id)")
+    return [{"userId": uid, "name": name or "", "volteAor": "", "pttId": _tel_uri(pid),
+             "extension": _extension_of(pid), "groupId": ""} for uid, name, pid in cur.fetchall()]
 
-    - members[]    dialog 감시(RFC 4235) 대상 = CSP `CanWatch` 가 허용하는 VoLTE 가입자 집합(dispatch_center.md §5.2):
-                   자기 관제 그룹원은 범위와 무관하게 항상(같은 픽업 그룹) + `monitor_scope=listed` 의 대상 그룹원,
-                   `all` 은 전 VoLTE 가입자. 항목 `groupId` = 그 가입자의 관제 그룹 — 앱은 ③ 그룹원 띠를
-                   `groupId == dispatch.groupId` 로 고른다. 정렬 = 자기 그룹(alert_order) → 그 외(그룹·번호).
-    - pttTargets[] conference 구독·청취 대상 = `CanListenPtt` 가 허용하는 PTT 그룹(§5.6): `listed` 대상, `all` 은 전 그룹.
-                   uri 는 시스템 관례 tel: 형(`_group_uri`). 멤버 그룹과 겹칠 수 있다(앱이 id 로 병합).
-    - etag         블록 내용 파생 — 앱은 재조회 결과의 대상 변경을 값 비교로 안다.
-    앱은 enum 을 해석하지 않는다. 범위 판정 규칙은 CSP(게이트)와 여기(목록) 두 곳에만 있고 같아야 한다.
-    관제 그룹 미소속이면 None. 테이블 미적용 DB 는 예외 — 호출자가 블록을 생략한다."""
-    da_col = ", g.directory_admin" if _has_directory_admin_column(cur) else ", 'none'"
-    cur.execute("SELECT g.id, g.name, COALESCE(g.pilot_id,''), g.monitor_scope, g.ptt_listen, "
-                f"g.listen_visibility{da_col}, COALESCE(o.code,'') FROM dispatch_group_members m "
-                "JOIN dispatch_groups g ON g.id=m.group_id "
-                "LEFT JOIN organizations o ON o.id=g.org_id "
-                "JOIN volte_subscriptions s ON s.id=m.user_id WHERE s.user_id=%s LIMIT 1", (user_id,))
-    dg = cur.fetchone()
-    if not dg:
+
+def _phone_group_block(cur, user_id) -> Optional[dict]:
+    """`phoneGroup` — person 의 회선이 전화 그룹 소속일 때. members[] = 같은 그룹원(그룹원 상태 띠·BLF·지정 픽업 대상,
+    CanWatch 규칙 1). 유선 전화 기능이며 관제 권한과 무관하다. 미소속·테이블 미적용이면 None."""
+    from handlers import dispatch as _pg
+    gid = _pg.phone_group_of_person(cur, user_id)
+    if not gid:
         return None
-    gid = dg[0]
-    scope = dg[3] or "none"
-    ptt_listen = dg[4] or "none"
-    directory_admin = dg[6] or "none"
-    org_code = dg[7] or ""
-    # members — 범위별로 WHERE 만 다르고 투영·정렬은 하나.
-    member_sql = ("SELECT u.id, u.name, s.id, COALESCE(m.group_id,''), "
-                  "(SELECT MIN(p.id) FROM ptt_subscriptions p WHERE p.user_id=u.id) "
-                  "FROM volte_subscriptions s JOIN users u ON u.id=s.user_id "
-                  "LEFT JOIN dispatch_group_members m ON m.user_id=s.id")
-    order = " ORDER BY CASE WHEN m.group_id=%s THEN 0 ELSE 1 END, m.group_id, m.alert_order, s.id"
-    if scope == 'all':
-        cur.execute(member_sql + order, (gid,))
-    elif scope == 'listed':
-        cur.execute(member_sql + " WHERE m.group_id=%s OR m.group_id IN "
-                    "(SELECT target_group_id FROM dispatch_group_monitor_targets WHERE group_id=%s)" + order,
-                    (gid, gid, gid))
+    cur.execute("SELECT g.id, g.name, COALESCE(g.pilot_id,'') FROM phone_groups g WHERE g.id=%s", (gid,))
+    r = cur.fetchone()
+    if not r:
+        return None
+    members = [{k: v for k, v in m.items() if k != 'groupId'} for m in _member_rows(cur, {gid}, gid)]
+    block = {"groupId": gid, "groupName": r[1] or "", "pilotId": r[2] or "", "members": members}
+    block["etag"] = _content_etag_json(block)
+    return block
+
+
+def _role_org_code(cur, role: dict) -> str:
+    org_id = role.get('org_id')
+    if org_id is None:
+        return ''
+    cur.execute("SELECT code FROM organizations WHERE id=%s", (org_id,))
+    r = cur.fetchone()
+    return ((r['code'] if isinstance(r, dict) else r[0]) if r else '') or ''
+
+
+def _dispatch_block(cur, user_id, pg: Optional[dict]) -> Optional[dict]:
+    """`dispatch` — person 에게 역할이 배정돼 있을 때(mcptt_authorization.md §2). **서버가 범위 enum 을 해석한 대상 목록**:
+    - members[]    dialog 감시(RFC 4235) 대상 = CSP `CanWatch` 와 같은 규칙(dispatch_center.md §5.2): 자기 전화 그룹원은
+                   규칙 1(같은 픽업 그룹)로 항상 + 역할 `monitor_call` — own=자기 그룹, listed=대상 그룹원, all=전 가입자
+                   (+ PTT 전용 가입자, volteAor=""). 항목 `groupId` = 그 가입자의 전화 그룹.
+    - pttTargets[] conference 구독·청취 대상 = `CanListenPtt` 와 같은 규칙(§5.6): listed 대상, all 전 그룹.
+    - 전환기 합성 필드(구 앱): groupId/groupName/pilotId(=phoneGroup), monitorScope(=monitorCall), directoryAdmin(=directoryWrite).
+      전화 그룹만 있고 역할이 없으면 합성 필드 + members[](그룹원) 만, 범위는 none.
+    앱은 enum 을 해석하지 않는다. 범위 판정 규칙은 CSP(게이트)와 여기(목록) 두 곳에만 있고 같아야 한다."""
+    from services import authz as _az
+    role = _az.role_of(cur, _az.user_principal(user_id))
+    own_gid = pg['groupId'] if pg else ''
+    synth = {"groupId": own_gid, "groupName": pg['groupName'] if pg else "", "pilotId": pg['pilotId'] if pg else ""}
+    if role is None:
+        if not pg:
+            return None
+        block = dict(synth, monitorScope="none", pttListen="none", listenVisibility="hidden",
+                     directoryAdmin="none", orgCode="",
+                     members=[dict(m, groupId=own_gid) for m in pg['members']], pttTargets=[])
+        block["etag"] = _content_etag_json(block)
+        return block
+    mon_mode = role.get('monitor_call') or 'none'
+    ptt_mode = role.get('ptt_listen') or 'none'
+    mon_targets, _ptt_targets = _az.role_targets(cur, role['id'])
+    if mon_mode == 'all':
+        members = _member_rows(cur, None, own_gid, all_subscribers=True) + _ptt_only_rows(cur)
+    elif mon_mode == 'listed':
+        members = _member_rows(cur, ({own_gid} if own_gid else set()) | set(mon_targets), own_gid)
     else:   # none / own — 같은 픽업 그룹은 CanWatch 규칙 1 로 항상 허용
-        cur.execute(member_sql + " WHERE m.group_id=%s" + order, (gid, gid))
-    members = [{"userId": uid, "name": name or "", "volteAor": _tel_uri(vid),
-                "pttId": _tel_uri(pid) if pid else "", "extension": _extension_of(vid), "groupId": mg or ""}
-               for uid, name, vid, mg, pid in cur.fetchall()]
-    if scope == 'all':
-        # PTT 전용 가입자(VoLTE 회선 없음 — 현장 PTT 단말)도 전 범위에서는 감시 대상이다: 관제 앱이 그 PTT 회선에
-        #   dialog 를 구독해 타인 간 사설콜·애드혹 세션을 본다(dispatch_center.md §5.6a). volteAor 는 빈 문자열.
-        cur.execute("SELECT u.id, u.name, MIN(p.id) FROM ptt_subscriptions p JOIN users u ON u.id=p.user_id "
-                    "WHERE NOT EXISTS (SELECT 1 FROM volte_subscriptions v WHERE v.user_id=u.id) "
-                    "GROUP BY u.id, u.name ORDER BY MIN(p.id)")
-        members += [{"userId": uid, "name": name or "", "volteAor": "", "pttId": _tel_uri(pid),
-                     "extension": _extension_of(pid), "groupId": ""} for uid, name, pid in cur.fetchall()]
-    # pttTargets
-    if ptt_listen == 'all':
+        members = _member_rows(cur, {own_gid}, own_gid) if own_gid else []
+    if ptt_mode == 'all':
         cur.execute("SELECT mcptt_group_id, name FROM ptt_groups ORDER BY mcptt_group_id")
         rows = cur.fetchall()
-    elif ptt_listen == 'listed':
-        cur.execute("SELECT g.mcptt_group_id, g.name FROM dispatch_group_ptt_targets t "
-                    "JOIN ptt_groups g ON g.id=t.ptt_group_id WHERE t.group_id=%s ORDER BY g.mcptt_group_id", (gid,))
+    elif ptt_mode == 'listed':
+        cur.execute("SELECT g.mcptt_group_id, g.name FROM role_ptt_targets t "
+                    "JOIN ptt_groups g ON g.id=t.ptt_group_id WHERE t.role_id=%s ORDER BY g.mcptt_group_id", (role['id'],))
         rows = cur.fetchall()
     else:
         rows = []
     targets = [{"id": mid, "uri": _group_uri(mid), "name": name or ""} for mid, name in rows]
-    # directoryAdmin — 관제 앱의 조직/구성원/번호·PTT 그룹 관리 범위(none|own|all, own = orgCode 하위). 쓰기 API 는
-    #   handlers/dispatch_directory.py 가 같은 규칙으로 게이트한다(dispatch_center.md §3.4).
-    block = {"groupId": gid, "groupName": dg[1] or "", "pilotId": dg[2] or "",
-             "monitorScope": scope, "pttListen": ptt_listen, "listenVisibility": dg[5] or "hidden",
-             "directoryAdmin": directory_admin, "orgCode": org_code,
+    dw = role.get('directory_write') or 'none'
+    block = {"roleId": role['id'], "roleName": role.get('name') or "",
+             "monitorCall": mon_mode, "pttListen": ptt_mode, "listenVisibility": role.get('listen_visibility') or "hidden",
+             "directoryWrite": dw, "orgCode": _role_org_code(cur, role),
              "members": members, "pttTargets": targets}
+    block.update(synth)
+    block["monitorScope"] = mon_mode
+    block["directoryAdmin"] = dw
     block["etag"] = _content_etag_json(block)
     return block
+
+
+def dispatch_discovery(cur, user_id) -> dict:
+    """/provisioning/me 의 두 블록 — {"phoneGroup": …|None, "dispatch": …|None}. 호출자는 None 인 키를 생략한다
+    (테이블 미적용 DB 는 예외 → 호출자가 두 블록 다 생략)."""
+    pg = _phone_group_block(cur, user_id)
+    return {"phoneGroup": pg, "dispatch": _dispatch_block(cur, user_id, pg)}
 
 
 async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResult:
@@ -3020,7 +3078,7 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
 
     services: list = []
     display_name = None
-    dispatch = None
+    blocks = {}
     try:
         import pymysql
         conn = pymysql.connect(host=_DB_CONFIG.get('Host', '127.0.0.1'),
@@ -3043,25 +3101,27 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
                     # sip_transport 는 가입자 단위 override (migrate_subscription_transport.sql).
                     #   구 스키마(컬럼 부재) DB 에서도 동작하도록 실패 시 기존 질의로 폴백한다.
                     #   AKA 열(auth_scheme/k_enc/opc_enc/amf)은 migrate_subscription_aka.sql 이후에만 — 같은 폴백 사슬.
+                    #   service_ref(접속서비스 name)로 Provisioning.Services 항목을 고른다 — 유선(voip)/이동(volte) 회선이
+                    #   같은 테이블에 있으므로 종류 키만으로는 도메인이 어긋난다(sip_service_model.md §2-9).
                     try:
-                        cur.execute(f"SELECT id, imsi, auth_id, sip_transport, ha1, auth_scheme, k_enc, opc_enc, amf "
-                                    f"FROM {t} WHERE user_id=%s ORDER BY id", (user_id,))
+                        cur.execute(f"SELECT id, imsi, auth_id, sip_transport, ha1, auth_scheme, k_enc, opc_enc, amf, "
+                                    f"COALESCE(service_ref,'') FROM {t} WHERE user_id=%s ORDER BY id", (user_id,))
                         rows = cur.fetchall()
                     except Exception:
                         try:
-                            cur.execute(f"SELECT id, imsi, auth_id, sip_transport, ha1 FROM {t} "
+                            cur.execute(f"SELECT id, imsi, auth_id, sip_transport, ha1, COALESCE(service_ref,'') FROM {t} "
                                         "WHERE user_id=%s ORDER BY id", (user_id,))
-                            rows = [(r[0], r[1], r[2], r[3], r[4], 'digest', '', '', '') for r in cur.fetchall()]
+                            rows = [(r[0], r[1], r[2], r[3], r[4], 'digest', '', '', '', r[5]) for r in cur.fetchall()]
                         except Exception:
                             try:
-                                cur.execute(f"SELECT id, imsi, auth_id, sip_transport FROM {t} "
+                                cur.execute(f"SELECT id, imsi, auth_id, sip_transport, COALESCE(service_ref,'') FROM {t} "
                                             "WHERE user_id=%s ORDER BY id", (user_id,))
-                                rows = [(r[0], r[1], r[2], r[3], '', 'digest', '', '', '') for r in cur.fetchall()]
+                                rows = [(r[0], r[1], r[2], r[3], '', 'digest', '', '', '', r[4]) for r in cur.fetchall()]
                             except Exception:
                                 cur.execute(f"SELECT id, imsi, auth_id FROM {t} WHERE user_id=%s ORDER BY id",
                                             (user_id,))
-                                rows = [(r[0], r[1], r[2], None, '', 'digest', '', '', '') for r in cur.fetchall()]
-                    for sid, imsi, auth_id, transport, ha1, scheme, k_enc, opc_enc, amf in rows:
+                                rows = [(r[0], r[1], r[2], None, '', 'digest', '', '', '', '') for r in cur.fetchall()]
+                    for sid, imsi, auth_id, transport, ha1, scheme, k_enc, opc_enc, amf, sref in rows:
                         aka = None
                         if scheme == 'aka' and k_enc and opc_enc:
                             try:
@@ -3072,18 +3132,18 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
                                 logger.log_error(f"[provisioning/me] aka key material unavailable for {sid}: {e}")
                                 aka = {"k": "", "opc": "", "amf": amf or "8000"}
                         services.append(_provision_service(kind, sid, imsi or '', auth_id or '', host_ip,
-                                                          transport or '', ha1 or '', aka))
+                                                          transport or '', ha1 or '', aka, service_ref=sref or ''))
                 cur.execute("SELECT name FROM users WHERE id=%s", (user_id,))
                 rr = cur.fetchone()
                 display_name = rr[0] if rr else None
-                # 관제 데스크 (dispatch_center.md §8.4) — 소속 관제 그룹·대표번호·범위 + 서버가 해석한 감시 대상
-                #   목록(members[]/pttTargets[]/etag, `dispatch_discovery`). 테이블 미적용 DB 에서는 블록을
-                #   생략한다(null 금지 — Android org.json 문자열화).
+                # 전화 그룹·관제 역할 (dispatch_center.md §8.4) — `phoneGroup`(소속 전화 그룹·대표번호·그룹원) +
+                #   `dispatch`(배정 역할·범위 + 서버가 해석한 감시 대상 members[]/pttTargets[]/etag, `dispatch_discovery`).
+                #   테이블 미적용 DB 에서는 블록을 생략한다(null 금지 — Android org.json 문자열화).
                 try:
-                    dispatch = dispatch_discovery(cur, user_id)
+                    blocks = dispatch_discovery(cur, user_id) or {}
                 except Exception as e:
-                    logger.log_info(f"[provisioning/me] dispatch block skipped: {e}")
-                    dispatch = None
+                    logger.log_info(f"[provisioning/me] phoneGroup/dispatch blocks skipped: {e}")
+                    blocks = {}
         finally:
             conn.close()
     except Exception as e:
@@ -3103,16 +3163,19 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
         "countryCode": country,     # 판정 불가 시 "" (null 금지 — Android org.json 이 "null" 문자열화)
         "services": services,
     }
-    if dispatch:
-        body["dispatch"] = dispatch
+    for key in ("phoneGroup", "dispatch"):
+        if blocks.get(key):
+            body[key] = blocks[key]
+    dispatch = body.get("dispatch")
     # 버전(ETag) — 응답 전체의 내용 해시(RFC 7232). 단말 If-None-Match 일치 시 304 — 관제 앱의 주기 재조회
-    #   (발견 목록 갱신 감지)가 전송 없이 끝난다. dispatch.etag 는 블록 단위 값(대상 변경만 볼 때).
+    #   (발견 목록 갱신 감지)가 전송 없이 끝난다. 블록의 etag 는 블록 단위 값(대상 변경만 볼 때).
     etag = _content_etag_json(body)
     inm = args.headers.get('if-none-match') or args.headers.get('If-None-Match')
     if inm and inm == etag:
         logger.log_info(f"[provisioning/me] msisdn={msisdn} not-modified etag={etag}")
         return HandlerResult(status=304, headers={"ETag": etag})
-    disp_log = (f" dispatch={dispatch['groupId']}/{dispatch['monitorScope']}:{len(dispatch['members'])}"
+    disp_log = (f" dispatch={dispatch.get('roleId') or '-'}/{dispatch.get('groupId') or '-'}"
+                f"/{dispatch['monitorScope']}:{len(dispatch['members'])}"
                 f"/{dispatch['pttListen']}:{len(dispatch['pttTargets'])}") if dispatch else ""
     logger.log_info(f"[provisioning/me] msisdn={msisdn} services={[s['kind'] for s in services]} cc={country}"
                     f"{disp_log} etag={etag}")
@@ -3125,18 +3188,26 @@ _HISTORY_KINDS = ("call", "ptt", "message")
 
 
 def _dispatch_scope_sets(cur, user_id) -> Optional[dict]:
-    """관제 데스크 범위를 이력 대조용 집합으로 — dispatch_discovery(P2, /provisioning/me 와 같은 SoT)를
-    재사용해 members(감시 VoLTE user-part)·ptt_groups(청취 PTT mcptt_group_id)를 뽑는다.
-    관제 그룹 미소속이면 None(→ 403). 범위 규칙(CanWatch/CanListenPtt)은 dispatch_discovery 한 곳."""
+    """관제사의 **역할** 범위를 이력·녹취 대조용 집합으로(dispatch_center.md §5.7a·§5.7b) — dispatch_discovery 의
+    `dispatch` 블록(/provisioning/me 와 같은 SoT)을 재사용해 members(monitor_call 감시 대상 VoLTE user-part)·
+    ptt_groups(ptt_listen 청취 대상 mcptt_group_id)를 뽑는다. 역할이 없거나 두 범위가 모두 none 이면 None(→ 403
+    no_monitor_scope). 범위 규칙(CanWatch 규칙 2/CanListenPtt)은 dispatch_discovery 한 곳."""
     from services import dispatch_history as _dh
-    d = dispatch_discovery(cur, user_id)
-    if not d:
+    blocks = dispatch_discovery(cur, user_id) or {}
+    d = blocks.get("dispatch") if isinstance(blocks, dict) else None
+    if not d or not d.get("roleId"):
+        return None
+    mon = d.get("monitorCall") or d.get("monitorScope") or "none"
+    ptt = d.get("pttListen") or "none"
+    if mon == "none" and ptt == "none":
         return None
     return {
-        "groupId": d["groupId"],
-        "monitorScope": d.get("monitorScope", "none"),
-        "pttListen": d.get("pttListen", "none"),
-        "members": {_dh.userpart(m.get("volteAor")) for m in d.get("members", []) if m.get("volteAor")},
+        "roleId": d["roleId"],
+        "groupId": d.get("groupId") or "",
+        "monitorCall": mon,
+        "pttListen": ptt,
+        "members": ({_dh.userpart(m.get("volteAor")) for m in d.get("members", []) if m.get("volteAor")}
+                    if mon != "none" else set()),
         "ptt_groups": {t.get("id") for t in d.get("pttTargets", []) if t.get("id")},
     }
 
@@ -3207,7 +3278,7 @@ async def handle_provisioning_history(args: HandlerArgs, kwargs: dict) -> Handle
         logger.log_error(f"[provisioning/history] DB error: {e}")
         return HandlerResult(status=503, body={"error": "db_error", "detail": str(e)}, media_type="application/json")
 
-    # 관제 그룹 미소속 = 감시 범위 없음 → 403 (범위 밖 열람 거부, dispatch_center.md §5.6).
+    # 역할 없음·두 범위 모두 none = 감시 범위 없음 → 403 (범위 밖 열람 거부, dispatch_center.md §5.7a).
     if not scope:
         return HandlerResult(status=403, body={"error": "no_monitor_scope"}, media_type="application/json")
 
@@ -3243,14 +3314,14 @@ async def handle_provisioning_history(args: HandlerArgs, kwargs: dict) -> Handle
         r = _fm.get()
         if r is not None:
             r.send_event('call_monitored', kind='audit', mo=f"{r.node}/csc",
-                         params={"monitor": msisdn, "group": scope["groupId"], "tap_mode": "history",
-                                 "hist_kind": kind, "count": len(wire),
-                                 "monitor_scope": scope["monitorScope"], "ptt_listen": scope["pttListen"]},
-                         message=f"{msisdn} read {kind} history ({len(wire)}) scope {scope['groupId']}")
+                         params={"monitor": msisdn, "role": scope["roleId"], "group": scope["groupId"],
+                                 "tap_mode": "history", "hist_kind": kind, "count": len(wire),
+                                 "monitor_call": scope["monitorCall"], "ptt_listen": scope["pttListen"]},
+                         message=f"{msisdn} read {kind} history ({len(wire)}) role {scope['roleId']}")
     except Exception as e:
         logger.log_warning(f"[provisioning/history] audit emit failed: {e}")
 
-    logger.log_info(f"[provisioning/history] msisdn={msisdn} kind={kind} scope={scope['groupId']} "
+    logger.log_info(f"[provisioning/history] msisdn={msisdn} kind={kind} role={scope['roleId']} "
                     f"m={len(scope['members'])} g={len(scope['ptt_groups'])} → {len(wire)} items etag={etag}")
     return HandlerResult(status=200, body=body, headers={"ETag": etag}, media_type="application/json")
 

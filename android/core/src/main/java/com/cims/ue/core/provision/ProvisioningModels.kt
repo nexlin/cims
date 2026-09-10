@@ -32,13 +32,14 @@ data class ProvisioningProfile(
     val countryCode: String?,         // 홈 국가코드(digits, 예 "82") — 번호 로컬 표기 SoT. 구서버는 null
     val services: List<ServiceProfile>,
 ) {
-    /** 주어진 kind("volte"/"ptt")의 서비스 프로파일(없으면 null). */
+    /** 주어진 kind("volte"/"voip"/"ptt")의 서비스 프로파일(없으면 null). 이동 앱은 "volte" 만 본다 — 유선 "voip" 회선은
+     *  관제 앱(Windows·태블릿) 몫이다(android_ue_provisioning.md §3, sip_service_model.md §2-9). */
     fun service(kind: String): ServiceProfile? = services.firstOrNull { it.kind.equals(kind, ignoreCase = true) }
 }
 
 /** 한 서비스(VoLTE=CSP / PTT=PSP) 의 접속·계정 — 서버마다 다를 수 있음. */
 data class ServiceProfile(
-    val kind: String,                 // "volte" | "ptt"
+    val kind: String,                 // "volte"(이동) | "voip"(유선) | "ptt"
     val sipHost: String,
     val sipPort: Int,
     val transport: String,            // UDP/TCP/TLS — 서버 권장 기본값(`sip.default`)

@@ -24,7 +24,7 @@ import { ABNORMAL_WIDGETS } from './widgets/abnormalWidgets'
 import ProvisioningWorkbenchPage from './pages/ProvisioningWorkbenchPage'
 import OrganizationsPage from './pages/OrganizationsPage'
 import PttGroupsWorkbenchPage from './pages/PttGroupsWorkbenchPage'
-import DispatchGroupsPage from './pages/DispatchGroupsPage'
+import PhoneGroupsPage from './pages/PhoneGroupsPage'
 import McpttPolicyPage from './pages/McpttPolicyPage'
 import RegisterFlowPage from './pages/RegisterFlowPage'
 import { SERVICE_DEFS_LAYOUT } from '@core/widgets/layouts'  // 코어 레이아웃 — '구성' 그룹에 배치
@@ -114,12 +114,12 @@ export const cimsManifest: ServiceManifest = {
                  'csc.ptt-groups.update', 'csc.ptt-groups.delete',
                  'csc.ptt-groups.members.list', 'csc.ptt-groups.members.add',
                  'csc.ptt-groups.members.remove', 'csc.users.list', 'csc.orgs.list'] },
-        { path: '/subscribers/dispatch-groups', title: '관제 그룹',    component: DispatchGroupsPage, requiredRole: 'monitor',
-          apis: ['csc.dispatch-groups.list', 'csc.dispatch-groups.get', 'csc.dispatch-groups.create',
-                 'csc.dispatch-groups.update', 'csc.dispatch-groups.delete',
-                 'csc.dispatch-groups.members.list', 'csc.dispatch-groups.members.add',
-                 'csc.dispatch-groups.members.remove', 'csc.dispatch-groups.monitor-targets.put',
-                 'csc.dispatch-groups.ptt-targets.put', 'csc.users.list', 'csc.orgs.list', 'csc.ptt-groups.list'] },
+        // 전화 그룹 = 픽업 그룹 + 대표번호 (dispatch_center.md §3.1) — 유선 전화 기능. 감청·관리 범위(역할)는 관리 › 역할.
+        { path: '/subscribers/phone-groups',  title: '전화 그룹',      component: PhoneGroupsPage, requiredRole: 'monitor',
+          apis: ['csc.phone-groups.list', 'csc.phone-groups.get', 'csc.phone-groups.create',
+                 'csc.phone-groups.update', 'csc.phone-groups.delete',
+                 'csc.phone-groups.members.list', 'csc.phone-groups.members.add',
+                 'csc.phone-groups.members.remove', 'csc.users.list', 'csc.orgs.list'] },
         { path: '/subscribers/mcptt-policy',  title: 'MCPTT 정책',     component: McpttPolicyPage, requiredRole: 'monitor',
           apis: ['csc.mcptt.service-config.get', 'csc.mcptt.service-config.update'] },
         { path: '/deploy/service-defs',       title: '서비스 정의',

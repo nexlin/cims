@@ -13,10 +13,12 @@ android_ue_provisioning.md §3-2.
 `id` = 세션 디렉터리의 ServiceLogDir 상대 경로(`/provisioning/history` 항목의 `recordingId`, OAM 녹취 API 와 같은 키).
 CSC 는 **범위 게이트 + 프록시**만 한다 — 원시 RTP → MP4 변환·캐시·다중 버킷 결합은 oam-svc `handlers/recording.py` 하나가
 소유하고(변환 상태·워커 풀·failed 마커) CSC 가 재구현하지 않는다(통합 이력의 "얇은 구독자 뷰" 원칙). 범위 판정은
-`/provisioning/history` 와 같은 집합(monitor_scope → members, ptt_listen → ptt_groups):
+`/provisioning/history` 와 같은 집합 — 관제사의 **역할**(mcptt_authorization.md §2: monitor_call + role_monitor_targets →
+members, ptt_listen + role_ptt_targets → ptt_groups, `mcptt._dispatch_scope_sets`):
   ptt/{groupKey}/…  → groupKey(ptt_groups.id 또는 mcptt id) 가 청취 대상 그룹     (session.json 의 mcptt_group_id 로 대조)
   volte/…/{cid}.d   → call.json 의 initiator/callee 중 하나가 감시 대상 가입자
-범위 밖·관제 미소속 = 403, 경로 이탈(`..`) = 400. 열람은 감사 E-AUD-016(tap_mode=recording).
+범위 밖 = 403 out_of_scope, 역할 없음·두 범위 모두 none = 403 no_monitor_scope, 경로 이탈(`..`) = 400.
+열람은 감사 E-AUD-016(tap_mode=recording, role).
 설정: `Recording.OamUrl`(비면 `https://{Fm.OamIp}:4419` — OAM 게이트웨이) · `Recording.VerifyTls`(기본 false, 자가서명).
 """
 
@@ -92,7 +94,7 @@ def _safe_id(rec_id: str) -> bool:
 
 
 def _scope_sets(config: dict, token: dict):
-    """(msisdn, scope) — /provisioning/history 와 같은 해석. DB 오류는 예외."""
+    """(msisdn, scope, group_key_of) — /provisioning/history 와 같은 해석(역할 범위). DB 오류는 예외."""
     db = (config or {}).get('CimsDatabase') or {}
     msisdn = _m._msisdn_from_id(token.get('mcptt_id') or token.get('sub') or '')
     conn = pymysql.connect(host=db.get('Host', '127.0.0.1'), port=int(db.get('Port', 3306)),
@@ -118,7 +120,7 @@ def _scope_sets(config: dict, token: dict):
 
 
 def in_scope(sl_dir: str, rec_id: str, scope: dict, group_key_of: dict) -> bool:
-    """녹취 id 가 관제 범위 안인가. 파일 SoT(session.json/call.json)로 당사자를 대조한다."""
+    """녹취 id 가 역할 범위 안인가. 파일 SoT(session.json/call.json)로 당사자를 대조한다."""
     top = rec_id.split('/', 1)[0]
     if top == 'ptt':
         segs = rec_id.split('/')
@@ -188,8 +190,9 @@ async def handle_recordings(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
             fr = _fm.get()
             if fr is not None:
                 fr.send_event('call_monitored', kind='audit', mo=f"{fr.node}/csc",
-                              params={"monitor": msisdn, "group": scope["groupId"], "tap_mode": "recording",
-                                      "recording": rec_id, "segment": seq, "slot": params.get('slot', '')},
+                              params={"monitor": msisdn, "role": scope.get("roleId", ""), "group": scope.get("groupId", ""),
+                                      "tap_mode": "recording", "recording": rec_id, "segment": seq,
+                                      "slot": params.get('slot', '')},
                               message=f"{msisdn} played recording {rec_id} seg {seq}")
         except Exception as e:
             logger.log_warning(f"[provisioning/recordings] audit emit failed: {e}")
@@ -331,8 +334,8 @@ async def handle_ptt_session_detail(handler_args: HandlerArgs, kwargs: dict) -> 
         fr = _fm.get()
         if fr is not None:
             fr.send_event('call_monitored', kind='audit', mo=f"{fr.node}/csc",
-                          params={"monitor": msisdn, "group": scope["groupId"], "tap_mode": "history",
-                                  "hist_kind": "ptt_session", "recording": rec_id, "count": 1},
+                          params={"monitor": msisdn, "role": scope.get("roleId", ""), "group": scope.get("groupId", ""),
+                                  "tap_mode": "history", "hist_kind": "ptt_session", "recording": rec_id, "count": 1},
                           message=f"{msisdn} read ptt session {rec_id}")
     except Exception as e:
         logger.log_warning(f"[provisioning/history/ptt] audit emit failed: {e}")

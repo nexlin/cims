@@ -10,4 +10,5 @@
 - S1-UNIT-CONSOLE-LAYOUT : python3 -m unittest tests.test_console_layouts
 - S1-UNIT-GRID-BUDGET    : node tests/frontend/grid_budget.test.mjs (그리드 세로 예산 + 잠금)
 - S1-UNIT-OAM-PTT        : python3 tests/oam_ptt_index_test.py · tests/oam_ptt_sessions_live_test.py (PTT 세션 인덱스 · 진행중 병합 규약)
+- S1-UNIT-OAM-STATS      : python3 tests/test_oam_stats_classify.py · tests/test_stats_probe.py (SIP 통계 서비스축 — voip 전화 계열 합산 · 미디어 프로브)
 """
