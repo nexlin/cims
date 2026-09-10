@@ -13,7 +13,7 @@ docs/
 │   ├── 01_overview.md               전체 시스템 아키텍처
 │   ├── 02_deployment.md             분산 배포 아키텍처 (Agent/Package/Deployment)
 │   ├── console_platform.md          콘솔 플랫폼화 (위젯 합성 · shape 위젯 · 데이터 소스 descriptor 등록)
-│   ├── console_design_system.md     콘솔 디자인 시스템 (Tailwind + shadcn/ui 이행 · 토큰 · 컴포넌트 계약 — 시각 계약 정본)
+│   ├── console_design_system.md     콘솔 디자인 시스템 (Tailwind + shadcn/ui + Radix · 토큰 · 컴포넌트 계약 · 충돌 판정 — 시각 계약 정본)
 │   ├── alarm_standardization.md      알람 표준화 설계 (X.733 / 3GPP TS 32.111 — code·severity6·eventType·probableCause·source)
 │   ├── alarm_pipeline.md            알람/이벤트 파이프라인 (발생→전달→수집/보관→가시화 절차·연동 계약)
 │   ├── modules/                     각 모듈별 상세 설계

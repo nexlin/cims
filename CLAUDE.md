@@ -129,7 +129,7 @@ docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)
 - [ha_design.md](docs/design/ha_design.md) — HA 설계
 - [db_schema.md](docs/design/db_schema.md) — DB 스키마 (file_store SoT 포함)
 - [console_platform.md](docs/design/console_platform.md) — 콘솔 플랫폼
-- [console_design_system.md](docs/design/console_design_system.md) — 콘솔 디자인 시스템 — 시각 계약 정본 (Tailwind + shadcn/ui + Radix 전면 이행, Mantine 폐기). 적용은 **세 층** — ①방식(하드코딩 CSS·인라인 style 을 걷고 shadcn 컴포넌트 임포트)·②규칙(절대 규칙·컴포넌트 계약·토큰)은 **전 31 라우트 + 공통 셸**, ③화면별 구체 값은 도안이 있는 `/deploy/servers`·공통 셸만. **기능(메뉴 소속·라우팅·동작)은 건드리지 않는다.** 시안에 없으면 지우지도 고치지도 않는다(양방향). 원본 자료 = `cims-design-handoff/`(읽기 전용) + Figma MCP 직접 읽기 §6.1, 충돌 판정 §7·이행 T0a~T4 §8·미결 §9)
+- [console_design_system.md](docs/design/console_design_system.md) — 콘솔 디자인 시스템 — **시각 계약 정본** (Tailwind + shadcn/ui + Radix. Mantine 안 씀). 적용은 **세 층** — ①방식(하드코딩 CSS·인라인 style 대신 shadcn 컴포넌트)·②규칙(절대 규칙·컴포넌트 계약·토큰)은 **전 31 라우트 + 공통 셸**, ③화면별 구체 값은 도안이 있는 `/deploy/servers`·공통 셸만. **기능(메뉴 소속·라우팅·동작)은 건드리지 않는다.** 시안에 없으면 지우지도 고치지도 않는다(양방향) — **단 도면이 전부 있는 `시스템/인프라` 는 예외로 도안에 없는 것을 지운다(§7-39)**. 원본 자료 = `cims-design-handoff/`(읽기 전용) + Figma MCP 직접 읽기 §6.1, 토큰 §5 · 컴포넌트 계약 §4 · 충돌 판정 §7 · 지켜야 할 검사 §8 · 남은 항목 §9)
 - [oam_csc_split.md](docs/design/oam_csc_split.md) — OAM/CSC 분리 경계·인증·토폴로지
 - [csc_config_server.md](docs/design/csc_config_server.md) — CSC config server
 - [csp_control_plane_load_hardening.md](docs/design/csp_control_plane_load_hardening.md) — CSP 제어평면 부하 대책

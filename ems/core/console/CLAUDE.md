@@ -17,8 +17,14 @@ SA1·SA3 · G1~G4 · A1~A4 + 모달 M1~M3 + `더보기` 오버레이까지 다 �
 것은 **누락이 아니라 제외**이므로 **지운다**(정본 문서 §7-39, 사용자 확정). 도면이 없는 나머지
 라우트에서는 위 규칙이 그대로다.
 
-- **스택은 Tailwind + shadcn/ui + Radix 로 이행 중**이다. Mantine 금지, 두 체계 혼용 금지.
-  `src/index.css` 는 폐기 대상이지만 아직 전 라우트가 여기에 의존한다 — 통째로 걷어내지 않는다.
+- **스택은 Tailwind + shadcn/ui + Radix** 다. Mantine 금지, 두 체계 혼용 금지. 화면은
+  **계약 컴포넌트 + 토큰 유틸리티**로만 그린다 — 새 CSS 규칙을 쓰지 않는다.
+- `src/index.css` 는 **526줄**로 ①preflight 를 끈 대가로 직접 넣는 reset ②`:root`/다크 토큰
+  ③위젯 편집·2D 격자 CSS 세 갈래만 남았다. 화면을 그리는 CSS 는 없다 — `.panel`·`.toolbar`·
+  `.scroll-fill` 은 격자가 훅으로 잡는 **선언 없는 이름**이다. **여기에 규칙을 추가하지 않는다.**
+- **덮임 검사 두 겹을 돌린다** — `@tailwind` 가 맨 앞이라 뒤에 오는 CSS 가 이긴다.
+  `~/.cims-scratch/tw-override-check.py`(소스) + `~/.cims-scratch/css-vs-tw.mjs`(실제 DOM).
+  전 라우트 시각 회귀는 `~/.cims-scratch/verify.mjs` (정본 문서 §8.1·§8.3).
 - **손대지 말 것**: `src/index.css` 의 위젯 편집·2D 그리드 CSS(`.grid-canvas` `.card-canvas` 계열)와
   `src/widgets/EditableLayout.tsx` · `GridEditor.tsx` · `CardLayout.tsx`. 시안에 없는 것은
   **디자이너 누락으로 확인됐다** — 페이지 편집·카드 안 편집·AppBar 의 `✎` 슬롯 모두 현행 유지
