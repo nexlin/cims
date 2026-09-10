@@ -11,12 +11,34 @@ public sealed record ServiceRef(string Kind, string Name, string Domain)
     public string Label => Domain.Length > 0 ? $"{Name} ({Domain})" : Name;
 }
 
-/// <summary>가입(번호) — VoLTE 또는 PTT 회선 하나. Profile 은 PTT 회선의 자격 플래그(없으면 null).</summary>
-public sealed record NumberInfo(string Msisdn, string Imsi, string ServiceRef, string SipTransport, string AuthScheme,
-                                IReadOnlyDictionary<string, bool>? Profile);
+/// <summary>회선 종류(와이어 kind = `members[].{kind}` · `services.{kind}[]` · `PUT …/members/{id}/{kind}`) — 전화 계열 둘(volte 이동·voip 유선)과 ptt.
+/// 서버는 종류별로 첫 회선만 내리므로 한 사람이 이동·유선 회선을 둘 다 가져도 종류를 갈라 두면 둘 다 보인다.</summary>
+public static class LineKind
+{
+    public const string Volte = "volte", Voip = "voip", Ptt = "ptt";
+    public static readonly IReadOnlyList<string> All = new[] { Volte, Voip, Ptt };
+    public static string Label(string kind) => kind switch { Volte => "VoLTE", Voip => "VoIP", Ptt => "PTT", _ => kind.ToUpperInvariant() };
+}
 
-/// <summary>구성원(person) + 회선 둘.</summary>
-public sealed record MemberInfo(long UserId, string Name, string LoginId, string Org, string Title, NumberInfo? Volte, NumberInfo? Ptt);
+/// <summary>SIP transport 와이어 값 — 콘솔 라벨과 같은 넷. ANY = 가입자 override 없음(서버 NULL, 접속서비스 기본을 따른다) 의 **명시값**(양방향).</summary>
+public static class SipTransports
+{
+    public const string Any = "ANY";
+    public static readonly IReadOnlyList<string> All = new[] { "TLS", "TCP", "UDP", Any };
+    /// <summary>서버 값 → 콤보 값. 비었거나 모르는 값은 ANY(override 없음)로 본다.</summary>
+    public static string Normalize(string wire) => wire.Trim().ToUpperInvariant() is { Length: > 0 } t && All.Contains(t) ? t : Any;
+}
+
+/// <summary>가입(번호) — 회선 하나(volte·voip·ptt). Profile 은 PTT 회선의 자격 플래그(없으면 null).
+/// Extension(내선 라벨)·PickupGroup(픽업 그룹 = 전화 그룹 id 파생)은 유선 회선의 읽기전용 표시 — 서버가 실어 주면 보인다.</summary>
+public sealed record NumberInfo(string Msisdn, string Imsi, string ServiceRef, string SipTransport, string AuthScheme,
+                                IReadOnlyDictionary<string, bool>? Profile, string Extension = "", string PickupGroup = "");
+
+/// <summary>구성원(person) + 회선 셋(종류당 하나).</summary>
+public sealed record MemberInfo(long UserId, string Name, string LoginId, string Org, string Title, NumberInfo? Volte, NumberInfo? Voip, NumberInfo? Ptt)
+{
+    public NumberInfo? Line(string kind) => kind switch { LineKind.Volte => Volte, LineKind.Voip => Voip, LineKind.Ptt => Ptt, _ => null };
+}
 
 /// <summary>관리 화면 한 벌 — GET /provisioning/directory/admin.</summary>
 public sealed record AdminView(AdminScope Scope, IReadOnlyList<ServiceRef> Services, IReadOnlyList<OrgNode> Orgs,
@@ -31,6 +53,7 @@ public sealed class MemberInput
     public string? LoginId { get; set; }
     public string? Password { get; set; }
     public NumberInput? Volte { get; set; }
+    public NumberInput? Voip { get; set; }
     public NumberInput? Ptt { get; set; }
 }
 

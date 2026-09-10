@@ -175,7 +175,7 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
   (`phone_group_members`) 소속일 때만 실린다(미소속·테이블 미적용 DB 는 키 생략, `null` 없음). 유선 전화 기능이며 관제 권한과 무관.
   - `groupId/groupName/pilotId`: 소속 그룹의 속성 그대로.
   - `members[]`: **같은 전화 그룹원** = 그룹원 상태 띠·BLF(dialog 구독, `CanWatch` 규칙 1)·지정 픽업 대상. 항목 = `userId`(`users.id`) ·
-    `name` · `volteAor`(`tel:+E.164`) · `pttId`(첫 PTT 가입 `tel:`, 미가입 `""`) · `extension`(가입 번호 끝자리 N — 설정
+    `name` · `volteAor`(`tel:+E.164` — 이름은 **전화 가족 축**: 유선 `voip` 회선도 이 필드로 온다. SDK C++·C API·.NET·Android 넷에 걸친 이름이라 바꾸지 않는다) · `pttId`(첫 PTT 가입 `tel:`, 미가입 `""`) · `extension`(가입 번호 끝자리 N — 설정
     `Provisioning.ExtensionDigits`, 기본 4. 망 주소가 아닌 **표시 라벨**). 정렬 = `alert_order`.
   - `etag`: 블록 내용 파생.
 - `dispatch`: **관제 역할**([dispatch_center.md §3.3·§8.4](dispatch_center.md), 정본 [mcptt_authorization.md](mcptt_authorization.md)) —

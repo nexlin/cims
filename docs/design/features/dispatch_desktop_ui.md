@@ -52,7 +52,7 @@
 | 장치·핫키·배치 | 설정 | 상단 바 → 설정 창 / 🔒 프리셋 | `audioDevices`·`setAudioDevices`·`addPlaybackRoute`·`setCallRoute` |
 | 세션 이력 조회·녹취 재생 | 상단 바 [이력] F2 · ⑤⑥ 머리 [이력에서 보기] | §4.6 이력 화면 | `CscClient.request`(앱 `ManagementClient` — `/provisioning/history?until=`·`/provisioning/recordings/*`) |
 | PTT 그룹 관리(범위 안 전부) | 상단 바 [PTT 그룹] F3 · ② 카드 [편집]/[+ 새 채널] → 채널 편집 드로어 | §4.7 PTT 그룹 화면 | `/provisioning/directory/groups` + GMS XCAP(`CscClient.putGroup/deleteGroup`) |
-| 조직/구성원/VoLTE·PTT 번호 관리 | 상단 바 [관리] F4 (관리 범위 있을 때) | §4.5 관리 화면 | `ManagementClient` — `/provisioning/directory/*` |
+| 조직/구성원/VoLTE·VoIP·PTT 번호 관리 | 상단 바 [관리] F4 (관리 범위 있을 때) | §4.5 관리 화면 | `ManagementClient` — `/provisioning/directory/*` |
 
 ## 3. 화면 구성
 
@@ -135,7 +135,7 @@
 | **관제** | F1 | §3.1 도킹 캔버스(패널 6개) | 항상 |
 | **이력** | F2 | §4.6 — 끝난 통화·PTT 세션의 날짜 창 조회 + 녹취 재생 | 관제 역할이 있을 때(범위는 서버 역할 `monitorCall`/`pttListen`) |
 | **PTT 그룹** | F3 | §4.7 — 관리 범위 안 그룹 목록·생성/편집/삭제 | 항상(관리 범위가 없으면 GMS 목록의 내 소유 그룹만) |
-| **관리** | F4 | §4.5 — 조직·구성원·VoLTE/PTT 번호·전화 그룹 | `dispatch.directoryWrite`(전환기 `directoryAdmin`) = `own`\|`all`. 없으면 비활성 + 툴팁 |
+| **관리** | F4 | §4.5 — 조직·구성원·VoLTE/VoIP/PTT 번호·전화 그룹 | `dispatch.directoryWrite`(전환기 `directoryAdmin`) = `own`\|`all`. 없으면 비활성 + 툴팁 |
 
 - **같은 창의 레이어 전환.** 도킹 호스트(관제 캔버스)는 항상 마운트돼 있고(배치·float 창·스플리터가 살아 있다) 관제 외 화면은 그 위에 겹치는 레이어다 —
   가시성만 바뀐다. 배너 레이어·토스트·감청 칩은 상단 바 아래 공통이라 어느 화면에서나 보인다. 감청 창(§5)은 별창이라 영향이 없다.
@@ -221,7 +221,7 @@
 
 **사람 메뉴**(로스터 칩·⑤ 행 발신자·③ 그룹원 칩·주소록 행 우클릭/클릭): 머리 = 이름 · PTT 번호 · 내선, 항목 = [사설콜][애드혹에 추가][SDS 메시지] / [통화 <내선>][문자].
 회선이 없는 항목은 비활성. **통합 검색** `Ctrl+K` = 같은 행동을 이름 하나로(사람 행 = 소속·PTT 상태·내선 상태 + 행동 버튼, 그룹 행 = [채널로][멤버 추가]; ↑↓ 이동 · Enter 첫 행동 · Tab 행동 이동).
-주소록 소스는 서버 전화번호부(VoLTE·PTT 번호 동시, §13) — PTT 와 일반통화가 같은 사람을 두 번 찾지 않게.
+주소록 소스는 서버 전화번호부(`service=volte` = 전화 가족 축(이동 volte+유선 voip 서버 합산)·`ptt`, §13) — PTT 와 일반통화가 같은 사람을 두 번 찾지 않게.
 
 ### 4.2 ② 범위 채널 (상단 가운데)
 
@@ -318,12 +318,15 @@
 
 ### 4.5 관리 화면 ([관리] F4)
 
-조직·구성원·VoLTE/PTT 번호·전화 그룹. 활성 조건 = `dispatch.directoryWrite`(전환기 `directoryAdmin`) = `own`\|`all`(관제 역할 **관리 범위** — 콘솔 `관리 > 역할`, manager 부여).
+조직·구성원·VoLTE/VoIP/PTT 번호·전화 그룹. 활성 조건 = `dispatch.directoryWrite`(전환기 `directoryAdmin`) = `own`\|`all`(관제 역할 **관리 범위** — 콘솔 `관리 > 역할`, manager 부여).
 왼쪽 **서브내비**(200px — "조직 · 구성원 · 번호" 한 항목 + 후속 항목 자리 "CSV 가져오기(예정)", 아래에 범위 안내) | 본문 = 세 카드. 왼쪽 **조직 트리**(범위 안, 선택 = 하위 포함 필터,
-머리 [+ 새 조직] · 바닥 [편집][삭제]) · 가운데 **구성원 표**(머리 "구성원 N명 · {조직} 하위 포함" + 검색 + [+ 새 구성원], 열 = 이름·직함·소속 | VoLTE | PTT | 자격("그룹 생성"/"원격 청취" 배지),
+머리 [+ 새 조직] · 바닥 [편집][삭제]) · 가운데 **구성원 표**(머리 "구성원 N명 · {조직} 하위 포함" + 검색 + [+ 새 구성원], 열 = 이름·직함·소속 | VoLTE | VoIP | PTT | 자격("그룹 생성"/"원격 청취" 배지),
 **행 한 번 클릭 = 오른쪽 폼에 바로 편집**) · 오른쪽 **편집 폼**("편집 — 이름", 머리 오른쪽 [삭제]) — 구성원 속성(이름·직함·소속·로그인 아이디/비밀번호) +
-**VoLTE 번호 / PTT 번호** 카드(번호·접속서비스·SIP transport·SIP 비밀번호 — 비우면 회선 삭제, 새 회선·번호 변경·접속서비스 변경은 비밀번호 필수(서버가 H(A1) 로만 보관)) + PTT 자격 토글(그룹 생성·원격 청취).
-접속서비스 후보 = 서버 `services.<kind>[]`. 기존 회선은 **저장된 서비스를 그대로 선택**(후보에 없으면 그 이름을 후보에 넣어 보인다, 저장값이 비면 비움 = 서버가 현재값 유지) — 첫 후보로 바꿔 넣으면
+**회선 카드 셋 = VoLTE 번호(이동) / VoIP 번호(유선) / PTT 번호**(번호·접속서비스·SIP transport·SIP 비밀번호 — 비우면 회선 삭제, 새 회선·번호 변경·접속서비스 변경은 비밀번호 필수(서버가 H(A1) 로만 보관)) + PTT 자격 토글(그룹 생성·원격 청취 — 청취는 표시만, 역할 배정의 결과).
+회선 종류(와이어 kind `volte`·`voip`·`ptt`)는 `members[].{kind}`·`services.{kind}[]`·`PUT …/members/{id}/{kind}`·목록 열까지 한 축으로 갈라진다 — 서버가 종류당 첫 회선만 내리므로 이동·유선 회선을 둘 다 가진 관제사도 둘 다 관리된다.
+카드별 차이는 콘솔 매트릭스와 같다: VoIP 카드 = `voip` 후보만 · 기본 TLS 에 UDP/TCP/TLS/**ANY** 선택 · IMSI 는 서버가 번호 숫자로 · 인증 digest 만 · **내선 라벨·픽업 그룹은 읽기전용 표시**(서버 파생, 픽업 그룹 편성은 콘솔 전화 그룹); VoLTE 카드는 AKA 를 다루지 않는다(digest).
+SIP transport 콤보는 **ANY** 를 포함한 넷(콘솔 라벨과 같다) — ANY 는 "가입자 override 없음(서버 NULL, 접속서비스 기본을 따른다)" 의 **양방향 명시값**이라 다른 값에서 되돌릴 수 있다. transport 만 바뀐 회선도 PUT 한다(H(A1) 무관, 비밀번호 불필요).
+접속서비스 후보 = 서버 `services.<kind>[]`(항목이 `kind` 를 실으면 그것을 따른다 — 전환기 서버는 voip 항목을 volte 버킷에 함께 실었다). 기존 회선은 **저장된 서비스를 그대로 선택**(후보에 없으면 그 이름을 후보에 넣어 보인다, 저장값이 비면 비움 = 서버가 현재값 유지) — 첫 후보로 바꿔 넣으면
 저장마다 "서비스 변경 → 재결박 비밀번호 필요(400)" 가 나기 때문. 같은 번호 PUT 은 저장된 IMSI 를 그대로 싣고(서버는 IMSI 가 없으면 번호 숫자로 채워 "IMSI 변경" 으로 오판), 번호가 바뀌면 새 회선이라 비운다.
 바뀐 것이 없는 회선은 보내지 않는다. 후보가 0건이면 카드에 경고(서버 csc.json `Provisioning.Services` / access_services 미러 — server_todo T9)하고 회선 개설 저장을 앱에서 막는다. 서버의 문장형 오류
 (`passwd required when imsi or service_ref changes` 등)는 `ResponseText.ForManagementError` 접두 매칭으로 번역한다.
@@ -551,7 +554,8 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
     LoginViewModel · SettingsViewModel(잠금 발언 설정 포함)
   Models/  SessionKind: isMcptt&&listenOnly→PTT 청취(② 카드 토글/창) · isMcptt&&privateCall→사설콜(①) · groupId adhoc-→애드혹(①) · isMcptt→멤버 채널(①) ·
            listenOnly&&joinedDialog→VoLTE 감청(창) · 그 외 VoLTE 통화(③). SessionItem·GroupInfo·DialogRow·Message/MessageThread·ActivityRow·Contact
-  Services/ DispatchSession(코어 투영 + 관제 동작 진입점 — Engine·CscClient 소유, Sessions/Groups/Dialogs, 등록 백오프, 오디오 적용) ·
+  Services/ DispatchSession(코어 투영 + 관제 동작 진입점 — Engine·CscClient 소유, Sessions/Groups/Dialogs, 등록 백오프, 오디오 적용.
+                            계정 = PTT 서비스 전부 + **전화 계열은 SDK 가 고른 `Profile.PhoneService` 하나**(유선 voip 우선·이동 volte 폴백) — volte·voip 를 둘 다 등록하면 이동 번호까지 관제석에 포크되고 전화 계정 참조를 마지막 계정이 덮어쓴다) ·
             Notifications(토스트·배너) · SettingsStore(json — FollowChannelThread/FollowChannelEvents/LockTalk/ScopedManageExpanded 등) · LayoutStore(프리셋, 패널 집합 버전) ·
             MessageStore(SQLite: mcdata/sms) · ActivityLog(링 버퍼·CSV) · HotKeyMap · AudioPolicy(라우트 기본값) · AdhocIdFactory(adhoc-<나>-<epoch>) ·
             DirectoryService(그룹원·PTT 사용자·연락처 CSV) · ResponseText(§9 사전 + Area.Management/Recording 오류 본문 `error` 사전) · AppLog(%APPDATA% logs, 7일) ·

@@ -198,7 +198,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         return Result.Success;
     }
 
-    /// <summary>회사 전화번호부 동기화 — `/provisioning/directory?service=volte|ptt`, ETag 로 304 면 다운로드 생략(android_ue_provisioning.md §3-1).</summary>
+    /// <summary>회사 전화번호부 동기화 — `/provisioning/directory?service=volte|ptt`, ETag 로 304 면 다운로드 생략(android_ue_provisioning.md §3-1).
+    /// `service=volte` 는 **전화 가족 축**(이동 volte + 유선 voip 를 서버가 합산) — 앱은 회선 종류를 나눠 요청하지 않는다(그룹원 `volteAor` 와 같은 어휘).</summary>
     public async Task SyncDirectoryAsync(CancellationToken ct = default)
     {
         if (_csc is null || _tokens is null) return;
@@ -230,7 +231,12 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         }
         ApplyAudioSettings();
 
-        foreach (var sp in Profile.Services)
+        // 계정으로 올리는 서비스 = PTT 전부 + 전화 계열은 SDK 가 고른 하나(Profile.PhoneService — 유선 voip 우선, 없으면 이동 volte).
+        //   관제사가 volte·voip 를 둘 다 가졌을 때 둘 다 등록하면 이동 번호까지 관제석에 바인딩되어 착신이 이 앱으로 포크되고,
+        //   전화 계정 참조(Volte)·등록 상태(VolteReg)를 마지막 계정이 덮어쓴다 — 전화 계열은 한 계정만 올린다.
+        var toRegister = Profile.Services.Where(s => s.Kind == "ptt").ToList();
+        if (Profile.PhoneService is { } phone) toRegister.Insert(0, phone);
+        foreach (var sp in toRegister)
         {
             var cfg = sp.ToAccountConfig(_loginPw.Length > 0 ? _loginPw : null);
             cfg.DisplayName = Profile.DisplayName;

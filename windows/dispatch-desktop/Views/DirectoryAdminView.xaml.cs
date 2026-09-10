@@ -25,7 +25,7 @@ public partial class DirectoryAdminView : UserControl
 
     private void OnVmChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(DirectoryAdminViewModel.MemberEditing) && Vm?.MemberEditing == true) { LoginPw.Password = ""; VoltePw.Password = ""; PttPw.Password = ""; }
+        if (e.PropertyName == nameof(DirectoryAdminViewModel.MemberEditing) && Vm?.MemberEditing == true) { LoginPw.Password = ""; VoltePw.Password = ""; VoipPw.Password = ""; PttPw.Password = ""; }
     }
 
     private bool Confirm(string title, string text) =>
@@ -33,6 +33,7 @@ public partial class DirectoryAdminView : UserControl
 
     private void LoginPw_Changed(object sender, RoutedEventArgs e) { if (Vm is not null) Vm.EditPassword = LoginPw.Password; }
     private void VoltePw_Changed(object sender, RoutedEventArgs e) { if (Vm is not null) Vm.VoltePassword = VoltePw.Password; }
+    private void VoipPw_Changed(object sender, RoutedEventArgs e) { if (Vm is not null) Vm.VoipPassword = VoipPw.Password; }
     private void PttPw_Changed(object sender, RoutedEventArgs e) { if (Vm is not null) Vm.PttPassword = PttPw.Password; }
     private void Members_DoubleClick(object sender, MouseButtonEventArgs e) { if (Vm?.SelectedMember is not null) Vm.EditMemberCommand.Execute(null); }
 }

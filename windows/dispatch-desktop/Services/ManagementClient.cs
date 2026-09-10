@@ -1,12 +1,14 @@
 // 관리 평면 클라이언트(§4.5) — 조직/구성원/번호·PTT 그룹 목록·이력 창 조회·녹취 재생을 코어 CscClient 의 범용 요청(Bearer) 위에 얇게 둔다.
 //
 //  서버 계약(android_ue_provisioning.md §3-2/§3-3, CSC 4430, PKCE provisioning 토큰):
-//    GET    /provisioning/directory/admin                 → {scope, services{volte[],ptt[]}, orgs[], members[]} + ETag/304
+//    GET    /provisioning/directory/admin                 → {scope, services{volte[],voip[],ptt[]}, orgs[], members[]} + ETag/304
+//                                                           members[].{volte|voip|ptt} = 종류당 첫 회선(전화 계열은 이동 volte·유선 voip 로 갈라 온다)
 //    POST   /provisioning/directory/orgs                  {code,name,parent,sort}
 //    PUT    /provisioning/directory/orgs/{code}           {name?,parent?,sort?}      DELETE …/orgs/{code}
-//    POST   /provisioning/directory/members               {name,org,title,loginId,password,volte{..},ptt{..}} → {userId}
+//    POST   /provisioning/directory/members               {name,org,title,loginId,password,volte{..},voip{..},ptt{..}} → {userId}
 //    PUT    /provisioning/directory/members/{id}          {name?,org?,title?,loginId?,password?}   DELETE …/members/{id}
-//    PUT    /provisioning/directory/members/{id}/volte|ptt {msisdn,imsi,serviceRef,sipTransport,password}  DELETE 〃
+//    PUT    /provisioning/directory/members/{id}/volte|voip|ptt {msisdn,imsi,serviceRef,sipTransport,password}  DELETE 〃
+//                                                           sipTransport = TLS|TCP|UDP|ANY 명시값(ANY = override 없음, 콘솔 라벨과 같다)
 //    PUT    /provisioning/directory/members/{id}/ptt/profile {allowCreateGroup,…}
 //    GET    /provisioning/directory/groups                → {groups[]}
 //    GET    /provisioning/history?kind=&since=&until=&limit=  (창 조회 — 하루 단위, 항목 recordingId/hasRecording + 종류별 확장 필드, 최상위 hours)
@@ -80,11 +82,17 @@ public sealed class ManagementClient
     {
         var sc = root.TryGetProperty("scope", out var s) ? s : default;
         var scope = new AdminScope(Str(sc, "groupId"), Str(sc, "directoryAdmin"), Str(sc, "orgCode"));
+        // 접속서비스 후보 — 버킷 = 회선 종류(volte·voip·ptt). 항목이 자기 kind 를 실으면 그것을 따른다(전환기 서버는 voip 항목을 volte 버킷에 함께 실었다).
         var services = new List<ServiceRef>();
         if (root.TryGetProperty("services", out var sv) && sv.ValueKind == JsonValueKind.Object)
-            foreach (var kind in new[] { "volte", "ptt" })
-                if (sv.TryGetProperty(kind, out var arr) && arr.ValueKind == JsonValueKind.Array)
-                    foreach (var x in arr.EnumerateArray()) services.Add(new ServiceRef(kind, Str(x, "name"), Str(x, "domain")));
+            foreach (var bucket in LineKind.All)
+                if (sv.TryGetProperty(bucket, out var arr) && arr.ValueKind == JsonValueKind.Array)
+                    foreach (var x in arr.EnumerateArray())
+                    {
+                        string kind = Str(x, "kind").ToLowerInvariant();
+                        kind = kind switch { "" => bucket, "mcptt" => LineKind.Ptt, _ when LineKind.All.Contains(kind) => kind, _ => bucket };
+                        services.Add(new ServiceRef(kind, Str(x, "name"), Str(x, "domain")));
+                    }
         var orgs = new List<OrgNode>();
         if (root.TryGetProperty("orgs", out var oa) && oa.ValueKind == JsonValueKind.Array)
             foreach (var o in oa.EnumerateArray()) orgs.Add(new OrgNode(Str(o, "code"), Str(o, "name"), Str(o, "parent"), Int(o, "sort")));
@@ -93,7 +101,8 @@ public sealed class ManagementClient
             foreach (var m in ma.EnumerateArray())
             {
                 long uid = m.TryGetProperty("userId", out var u) && u.ValueKind == JsonValueKind.Number && u.TryGetInt64(out long l) ? l : 0;
-                members.Add(new MemberInfo(uid, Str(m, "name"), Str(m, "loginId"), Str(m, "org"), Str(m, "title"), ParseNumber(m, "volte"), ParseNumber(m, "ptt")));
+                members.Add(new MemberInfo(uid, Str(m, "name"), Str(m, "loginId"), Str(m, "org"), Str(m, "title"),
+                                           ParseNumber(m, LineKind.Volte), ParseNumber(m, LineKind.Voip), ParseNumber(m, LineKind.Ptt)));
             }
         return new AdminView(scope, services, orgs, members, etag);
     }
@@ -107,7 +116,10 @@ public sealed class ManagementClient
             prof = new Dictionary<string, bool>(StringComparer.Ordinal);
             foreach (var kv in p.EnumerateObject()) prof[kv.Name] = kv.Value.ValueKind == JsonValueKind.True;
         }
-        return new NumberInfo(Str(n, "msisdn"), Str(n, "imsi"), Str(n, "serviceRef"), Str(n, "sipTransport"), Str(n, "authScheme"), prof);
+        // 내선 라벨·픽업 그룹은 읽기전용 표시 — 서버가 실어 줄 때만(유선 회선)
+        string pickup = Str(n, "pickupGroup"); if (pickup.Length == 0) pickup = Str(n, "pickup_group");
+        return new NumberInfo(Str(n, "msisdn"), Str(n, "imsi"), Str(n, "serviceRef"), Str(n, "sipTransport"), Str(n, "authScheme"), prof,
+                              Str(n, "extension"), pickup);
     }
 
     public Task<Result<HttpResponse>> CreateOrgAsync(string code, string name, string parent, int sort, CancellationToken ct = default) =>
@@ -141,8 +153,9 @@ public sealed class ManagementClient
         if (m.Title is not null) d["title"] = m.Title;
         if (m.LoginId is not null) d["loginId"] = m.LoginId;
         if (!string.IsNullOrEmpty(m.Password)) d["password"] = m.Password;
-        if (m.Volte is not null && m.Volte.Msisdn.Trim().Length > 0) d["volte"] = NumberBody(m.Volte);
-        if (m.Ptt is not null && m.Ptt.Msisdn.Trim().Length > 0) d["ptt"] = NumberBody(m.Ptt);
+        if (m.Volte is not null && m.Volte.Msisdn.Trim().Length > 0) d[LineKind.Volte] = NumberBody(m.Volte);
+        if (m.Voip is not null && m.Voip.Msisdn.Trim().Length > 0) d[LineKind.Voip] = NumberBody(m.Voip);
+        if (m.Ptt is not null && m.Ptt.Msisdn.Trim().Length > 0) d[LineKind.Ptt] = NumberBody(m.Ptt);
         return d;
     }
 

@@ -82,14 +82,16 @@
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="140" />
-                                    <ColumnDefinition Width="140" />
-                                    <ColumnDefinition Width="160" />
+                                    <ColumnDefinition Width="130" />
+                                    <ColumnDefinition Width="130" />
+                                    <ColumnDefinition Width="130" />
+                                    <ColumnDefinition Width="150" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" Style="{StaticResource Hint}" Text="이름 · 직함 · 소속" />
                                 <TextBlock Grid.Column="1" Style="{StaticResource Hint}" Text="VoLTE" />
-                                <TextBlock Grid.Column="2" Style="{StaticResource Hint}" Text="PTT" />
-                                <TextBlock Grid.Column="3" Style="{StaticResource Hint}" Text="자격" />
+                                <TextBlock Grid.Column="2" Style="{StaticResource Hint}" Text="VoIP" />
+                                <TextBlock Grid.Column="3" Style="{StaticResource Hint}" Text="PTT" />
+                                <TextBlock Grid.Column="4" Style="{StaticResource Hint}" Text="자격" />
                             </Grid>
                         </Border>
                         <ListBox Style="{StaticResource SelectList}" ItemsSource="{Binding Members}" SelectedItem="{Binding SelectedMember}" MouseDoubleClick="Members_DoubleClick">
@@ -99,9 +101,10 @@
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="140" />
-                                                <ColumnDefinition Width="140" />
-                                                <ColumnDefinition Width="160" />
+                                                <ColumnDefinition Width="130" />
+                                                <ColumnDefinition Width="130" />
+                                                <ColumnDefinition Width="130" />
+                                                <ColumnDefinition Width="150" />
                                             </Grid.ColumnDefinitions>
                                             <StackPanel Grid.Column="0" VerticalAlignment="Center">
                                                 <StackPanel Orientation="Horizontal">
@@ -111,8 +114,9 @@
                                                 <TextBlock Style="{StaticResource Muted}" Text="{Binding OrgPath}" FontSize="11" TextTrimming="CharacterEllipsis" />
                                             </StackPanel>
                                             <TextBlock Grid.Column="1" Style="{StaticResource Mono}" Text="{Binding VolteCell}" FontSize="12.5" VerticalAlignment="Center" />
-                                            <TextBlock Grid.Column="2" Style="{StaticResource Mono}" Text="{Binding PttCell}" FontSize="12.5" VerticalAlignment="Center" />
-                                            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock Grid.Column="2" Style="{StaticResource Mono}" Text="{Binding VoipCell}" FontSize="12.5" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="3" Style="{StaticResource Mono}" Text="{Binding PttCell}" FontSize="12.5" VerticalAlignment="Center" />
+                                            <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
                                                 <Border Style="{StaticResource Badge.Member}" Visibility="{Binding CanCreateGroup, Converter={StaticResource BoolToVis}}"><TextBlock Text="그룹 생성" /></Border>
                                                 <Border Style="{StaticResource Badge.Listen}" Margin="4,0,0,0" Visibility="{Binding CanAmbientListen, Converter={StaticResource BoolToVis}}"><TextBlock Text="원격 청취" /></Border>
                                             </StackPanel>
@@ -127,7 +131,7 @@
                 <Border Grid.Column="2" Style="{StaticResource Card}" Padding="12">
                     <Grid>
                         <TextBlock TextWrapping="Wrap" VerticalAlignment="Center" TextAlignment="Center"
-                                   Text="구성원을 클릭하면 여기서 바로 편집합니다. 조직은 트리에서 골라 [편집], 새로 만들려면 [+ 새 조직]/[+ 새 구성원].&#10;&#10;번호(VoLTE·PTT 회선)는 구성원 폼에서 개설·변경·삭제합니다. 새 회선과 번호 변경에는 SIP 비밀번호가 필요합니다(서버가 H(A1) 로만 보관).">
+                                   Text="구성원을 클릭하면 여기서 바로 편집합니다. 조직은 트리에서 골라 [편집], 새로 만들려면 [+ 새 조직]/[+ 새 구성원].&#10;&#10;번호(VoLTE·VoIP·PTT 회선)는 구성원 폼에서 개설·변경·삭제합니다. 새 회선과 번호 변경에는 SIP 비밀번호가 필요합니다(서버가 H(A1) 로만 보관).">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock" BasedOn="{StaticResource Hint}">
                                     <Setter Property="Visibility" Value="Visible" />
@@ -158,7 +162,7 @@
                         <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding MemberEditing, Converter={StaticResource BoolToVis}}">
                             <StackPanel Margin="0,0,6,0">
                                 <DockPanel Margin="0,0,0,8">
-                                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs.Danger}" Content="삭제" Command="{Binding DeleteMemberCommand}" Visibility="{Binding MemberIsNew, Converter={StaticResource NotToVis}}" ToolTip="구성원과 VoLTE/PTT 회선을 삭제" />
+                                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs.Danger}" Content="삭제" Command="{Binding DeleteMemberCommand}" Visibility="{Binding MemberIsNew, Converter={StaticResource NotToVis}}" ToolTip="구성원과 VoLTE/VoIP/PTT 회선을 삭제" />
                                     <TextBlock Style="{StaticResource SectionHeader}" Text="{Binding MemberFormTitle}" VerticalAlignment="Center" />
                                 </DockPanel>
                                 <UniformGrid Columns="2">
@@ -183,10 +187,10 @@
                                         <PasswordBox x:Name="LoginPw" Style="{StaticResource FieldPw}" PasswordChanged="LoginPw_Changed" Margin="0,2,0,8" />
                                     </StackPanel>
                                 </UniformGrid>
-                                <!-- VoLTE 회선 -->
+                                <!-- VoLTE 회선(이동) — 콘솔 매트릭스와 같게 AKA 는 이 앱이 다루지 않는다(digest 만) -->
                                 <Border Style="{StaticResource Sub}" Margin="0,4,0,6" Padding="8">
                                     <StackPanel>
-                                        <TextBlock Style="{StaticResource SectionHeader}" Text="VoLTE 번호" Margin="0,0,0,4" />
+                                        <TextBlock Style="{StaticResource SectionHeader}" Text="VoLTE 번호 (이동)" Margin="0,0,0,4" />
                                         <TextBlock Text="번호 (E.164, 비우면 회선 삭제)" Style="{StaticResource Hint}" />
                                         <TextBox Style="{StaticResource Field}" Text="{Binding VolteNumber, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource Font.Mono}" Margin="0,2,0,6" />
                                         <UniformGrid Columns="2">
@@ -204,6 +208,40 @@
                                                    Visibility="{Binding NoVolteServices, Converter={StaticResource BoolToVis}}" />
                                         <TextBlock Text="SIP 비밀번호 (개설·번호 변경 시 필수)" Style="{StaticResource Hint}" />
                                         <PasswordBox x:Name="VoltePw" Style="{StaticResource FieldPw}" PasswordChanged="VoltePw_Changed" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                </Border>
+                                <!-- VoIP 회선(유선 — 데스크폰·소프트폰·관제석) — voip 접속서비스 후보만, 기본 TLS(UDP/TCP/TLS/ANY), IMSI 는 서버가 번호 숫자로, 인증 digest.
+                                     내선 라벨·픽업 그룹은 서버 파생값이라 읽기전용 표시(픽업 그룹 편성은 콘솔 전화 그룹) -->
+                                <Border Style="{StaticResource Sub}" Margin="0,0,0,6" Padding="8">
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource SectionHeader}" Text="VoIP 번호 (유선)" Margin="0,0,0,4" />
+                                        <TextBlock Text="번호 (E.164, 비우면 회선 삭제)" Style="{StaticResource Hint}" />
+                                        <TextBox Style="{StaticResource Field}" Text="{Binding VoipNumber, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource Font.Mono}" Margin="0,2,0,6" />
+                                        <UniformGrid Columns="2">
+                                            <StackPanel Margin="0,0,6,0">
+                                                <TextBlock Text="접속서비스 (유선 voip)" Style="{StaticResource Hint}" />
+                                                <ComboBox Style="{StaticResource FieldCombo}" ItemsSource="{Binding VoipServices}" SelectedItem="{Binding VoipService}" DisplayMemberPath="Label" Margin="0,2,0,6" />
+                                            </StackPanel>
+                                            <StackPanel>
+                                                <TextBlock Text="SIP transport (ANY = 서비스 기본)" Style="{StaticResource Hint}" />
+                                                <ComboBox Style="{StaticResource FieldCombo}" ItemsSource="{Binding Transports}" SelectedItem="{Binding VoipTransport}" Margin="0,2,0,6" />
+                                            </StackPanel>
+                                        </UniformGrid>
+                                        <TextBlock Style="{StaticResource Hint}" Foreground="{DynamicResource Brush.Emg}" TextWrapping="Wrap" Margin="0,0,0,6"
+                                                   Text="유선(voip) 접속서비스 후보가 없습니다 — 서버(CSC)가 후보를 내려주지 않아 회선 개설이 실패합니다. 운영자에게 접속서비스(kind=voip) 등록을 요청하세요."
+                                                   Visibility="{Binding NoVoipServices, Converter={StaticResource BoolToVis}}" />
+                                        <UniformGrid Columns="2" Visibility="{Binding HasVoipDerived, Converter={StaticResource BoolToVis}}" Margin="0,0,0,6">
+                                            <StackPanel Margin="0,0,6,0">
+                                                <TextBlock Text="내선 라벨 (서버 파생, 읽기전용)" Style="{StaticResource Hint}" />
+                                                <TextBox Style="{StaticResource Field}" Text="{Binding VoipExtension, Mode=OneWay}" IsReadOnly="True" IsTabStop="False" FontFamily="{StaticResource Font.Mono}" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                            <StackPanel>
+                                                <TextBlock Text="픽업 그룹 (콘솔 전화 그룹에서 편성, 읽기전용)" Style="{StaticResource Hint}" />
+                                                <TextBox Style="{StaticResource Field}" Text="{Binding VoipPickupGroup, Mode=OneWay}" IsReadOnly="True" IsTabStop="False" FontFamily="{StaticResource Font.Mono}" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                        </UniformGrid>
+                                        <TextBlock Text="SIP 비밀번호 (개설·번호 변경 시 필수)" Style="{StaticResource Hint}" />
+                                        <PasswordBox x:Name="VoipPw" Style="{StaticResource FieldPw}" PasswordChanged="VoipPw_Changed" Margin="0,2,0,0" />
                                     </StackPanel>
                                 </Border>
                                 <!-- PTT 회선 -->

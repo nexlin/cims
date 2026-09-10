@@ -89,7 +89,8 @@ public static class ResponseText
         "not_empty" => detail.Contains("members") ? "구성원이 남아 있는 조직은 지울 수 없습니다" : "하위 조직이 남아 있는 조직은 지울 수 없습니다",
         "number_exists" => "다른 구성원이 쓰는 번호입니다",
         "self_delete" => "자기 자신은 지울 수 없습니다",
-        "derived_from_dispatch_group" => "관제 그룹 소속 구성원의 픽업 그룹은 콘솔 관제 그룹에서 파생됩니다",
+        "derived_from_phone_group" => "전화 그룹 소속 구성원의 픽업 그룹은 콘솔 전화 그룹에서 파생됩니다 — 직접 바꿀 수 없습니다",
+        "service_kind_mismatch" => "회선 종류에 맞지 않는 접속서비스입니다 — VoLTE 회선은 volte, VoIP 회선은 voip, PTT 회선은 ptt 서비스만 고를 수 있습니다",
         "no_monitor_scope" => "관제 그룹 미소속 — 이력·녹취를 볼 수 없습니다",
         "oam_unreachable" => "녹취 서버(OAM)에 닿지 않습니다",
         "invalid_recording_id" => "녹취 식별자가 잘못됐습니다",
@@ -103,7 +104,7 @@ public static class ResponseText
         _ when error.StartsWith("service_ref required to derive ha1", StringComparison.Ordinal)
             => "접속서비스를 알 수 없어 H(A1) 을 만들 수 없습니다 — 접속서비스를 고르세요. 목록이 비어 있으면 서버 csc.json Provisioning.Services 설정이 필요합니다(운영자)",
         _ when error.StartsWith("imsi required", StringComparison.Ordinal) => "IMSI 가 필요합니다(비우면 번호 숫자로 채워집니다)",
-        _ when error.StartsWith("sip_transport must be", StringComparison.Ordinal) => "SIP transport 는 UDP/TCP/TLS 중 하나여야 합니다",
+        _ when error.StartsWith("sip_transport must be", StringComparison.Ordinal) => "SIP transport 는 UDP/TCP/TLS/ANY 중 하나여야 합니다(ANY = 접속서비스 기본)",
         _ => null,
     };
 
