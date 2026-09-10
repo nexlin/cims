@@ -68,6 +68,10 @@
       "controllable": true,
       "health": {
         "config_key": "Server.Port"
+      },
+      "safety": {
+        "class": "read_only",
+        "reads_shared_store": true
       }
     },
     {

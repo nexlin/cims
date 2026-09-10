@@ -179,9 +179,10 @@ SAN 에 들어간다. 외부망 IP 로 브라우저 접속해도 SAN 불일치�
 - 게이트웨이 라우트는 서비스 모듈이 설치 시 **self-register** 한다 — 수동 시드 불필요.
 - `CimsAuth.JwtSecret` 은 **입력하지 않는다** — 설정 실체화가 게이트웨이 서비스 모듈
   (csc·oam-svc)에 그룹 공통 신원으로 주입한다.
-- `CimsRuntimeDir` 은 다르다. oam-svc 는 oam 배포설정에서 유도(`_store_source`)받지만
-  **csc 는 받지 못한다** — 비워 두면 컬렉션·IdMS 토큰 경로가 엉뚱하게 잡힌다.
-  §4.2 ① 에서 반드시 설정한다.
+- **관리 store 경로는 입력하지 않는다.** oam-svc(리스 보유)와 csc(store 를 읽음) 둘 다
+  base `oam` 배포설정의 **마운트 지점 하나**에서 유도받는다(`_store_source`). 위치를 정하는
+  창구는 oam 하나여야 한다 — 두 곳에서 받으면 값이 갈리고, csc 가 어긋나면 빈 컬렉션을 보고
+  번호 추가가 `400 service_ref required to derive ha1` 로 실패한다.
 - 설정 항목은 대부분 재기동이 필요하다. 값을 다 넣고 패널 하단 **`저장 + 재기동`** 을 쓴다
   (`저장` 만 누르면 파일에만 반영되고 프로세스는 옛 값으로 계속 돈다).
 - 템플릿에 선언되지 않은 키는 저장 시 버려지고 `미저장(템플릿에 없는 키)` 로 보고된다.
@@ -562,7 +563,7 @@ curl -sk https://<관리IP>:4419/api/v1/deployments -H "Authorization: Bearer <�
 | TLS 리스너가 안 열림 (`A-PRC-012`) | §4.1 — TLS 행의 `tls_cert_path` 미지정. 로그: `AddTlsListener: no certificate` |
 | 설정을 저장했는데 반영되지 않음 | 모듈 설정 파일은 기동 시점에 써진다. `저장 + 재기동` 을 쓴다 |
 | 저장 후 `미저장(템플릿에 없는 키)` | 그 키는 `config_template.json` 에 선언이 없어 overlay 에 저장되지 않는다. 템플릿 선언이 필요한 항목 |
-| csc/oam-svc 가 관리 store 를 못 찾음 | base `oam` 배포설정에 `CimsRuntimeDir` 이 명시돼 있는지 (유도의 근거다) |
+| csc/oam-svc 가 관리 store 를 못 찾음 | base `oam` 배포설정의 `CimsRuntimeMount` (유도의 근거다). 노드 `config.json` 의 `CimsRuntimeDir` 이 oam 것과 같은지도 대조 — 다르면 descriptor 의 `safety.reads_shared_store`/`requires_leader_lease` 선언이 그 모듈에 없는 것이다 |
 | 로그·시크릿을 읽을 수 없음 | 서비스 계정 소유(`0600`/`0660`)다. `sudo` 로 읽거나 실행 계정을 서비스 계정 그룹에 넣는다(재로그인 필요) |
 | 철거 후에도 포트가 잡혀 있음 | §7 — C++ 모듈 잔존. `pgrep` 로 확인 후 종료 |
 

@@ -1073,12 +1073,14 @@ class TestDerivedSharedStore(_R4Case):
         ]}]}
 
     def _seed_lease_descriptor(self):
-        """oam/oam-svc = 리스 보유 모듈 — 주입/전제 판정의 근거."""
+        """oam/oam-svc = 리스 보유 모듈, csc = store 를 읽기만 하는 모듈 —
+        주입/전제 판정의 근거."""
         from services import file_store
         file_store.save(file_store.domain_dir(self.config, "services"), 1, {
             "id": "cims", "modules": [
                 {"name": "oam",     "safety": {"requires_leader_lease": True}},
                 {"name": "oam-svc", "safety": {"requires_leader_lease": True}},
+                {"name": "csc",     "safety": {"reads_shared_store": True}},
             ]})
 
     def _seed_store_dep(self, did, aid, proc, mount, pid=None, tpl=None):
@@ -1235,6 +1237,30 @@ class TestDerivedSharedStore(_R4Case):
         self.assertNotIn("CimsRuntimeMount", eff)
         self.assertEqual(eff.get("CimsRuntimeDir"), root)
         self.assertEqual(eff.get("Packages.Dir"), os.path.join(root, "pkg_files"))
+
+    def test_store_path_injected_into_csc(self):
+        """csc 는 리스를 잡지 않지만 **같은 store 를 읽는다** — 경로를 주입한다.
+
+        가입 번호의 H(A1) 을 만들 때 domain/realm 을 `access_services` 컬렉션에서 찾고
+        IdMS 토큰도 같은 store 에 둔다. 예전에는 운영자가 csc 설정에 완성 경로를 손으로
+        적었는데, oam 의 마운트와 한 글자라도 어긋나면 빈 컬렉션을 보고 번호 추가가
+        `400 service_ref required to derive ha1` 로 실패했다. 창구는 oam 하나여야 한다."""
+        self._seed_lease_descriptor()
+        self._seed_store_dep(5, 10, "oam", "/mnt/cims")
+        self._seed_store_dep(7, 12, "csc", "", pid=23, tpl=self.TPL_SVC)
+        eff = self._materialize(23, {})
+        self.assertEqual(eff.get("CimsRuntimeDir"), "/mnt/cims/runtime")
+        self.assertEqual(eff.get("CimsRuntimeMount"), "/mnt/cims")
+        # 패키지 서빙은 base oam 만의 일 — csc 에는 주지 않는다
+        self.assertNotIn("Packages.Dir", eff)
+
+    def test_store_path_not_injected_into_plain_module(self):
+        """선언이 없는 모듈(csp)에는 주지 않는다 — 보수적 기본값."""
+        self._seed_lease_descriptor()
+        self._seed_store_dep(5, 10, "oam", "/mnt/cims")
+        self._seed_store_dep(8, 13, "csp", "", pid=24, tpl=self.TPL_SVC)
+        eff = self._materialize(24, {})
+        self.assertNotIn("CimsRuntimeDir", eff)
 
     def test_legacy_store_dir_under_mount_is_kept(self):
         """전환기 — 마운트 하위의 **다른** 경로를 store 로 쓰던 사이트는 그 값을 지킨다.

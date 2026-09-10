@@ -294,19 +294,31 @@ def merge_seed_updates(config: dict = None) -> int:
         by_name = {m.get('name'): m for m in (cur.get('modules') or []) if isinstance(m, dict)}
         new_mods = [m for m in (doc.get('modules') or [])
                     if isinstance(m, dict) and m.get('name') and m['name'] not in by_name]
-        # 기존 모듈의 health 블록 보강 — 없는 키만 (안전 필드 소급 적용)
+        # 기존 모듈의 health·safety 블록 보강 — 없는 키만 (안전 필드 소급 적용).
+        # safety 를 함께 다루는 이유: `reads_shared_store` 처럼 **뒤에 추가된 선언**은
+        # 이미 운용 중인 노드에 영원히 닿지 않는다. 그러면 그 선언을 근거로 삼는 동작
+        # (관리 store 경로 주입 — handlers/agents.py `_module_reads_store`)이 새 설치에서만
+        # 돌아 두 노드가 다르게 움직인다. 값이 이미 있으면 운영자 판단으로 보고 덮지 않는다.
         filled = 0
         for sm in (doc.get('modules') or []):
             if not isinstance(sm, dict):
                 continue
             tgt = by_name.get(sm.get('name'))
-            sh = sm.get('health')
-            if not tgt or not isinstance(sh, dict) or not isinstance(tgt.get('health'), dict):
+            if not tgt:
                 continue
-            for k, v in sh.items():
-                if k not in tgt['health']:
-                    tgt['health'][k] = v
-                    filled += 1
+            for blk in ('health', 'safety'):
+                sb = sm.get(blk)
+                if not isinstance(sb, dict):
+                    continue
+                if not isinstance(tgt.get(blk), dict):
+                    # 블록 자체가 없던 모듈(csc 의 safety) — 통째로 넣는다
+                    tgt[blk] = dict(sb)
+                    filled += len(sb)
+                    continue
+                for k, v in sb.items():
+                    if k not in tgt[blk]:
+                        tgt[blk][k] = v
+                        filled += 1
         # 데이터 소스 — seed 가 가진 소스는 **seed 를 그대로 정본으로 삼는다**(shapes·map·endpoint).
         # 이 값들은 운영자 정책이 아니라 렌더러와의 계약이다(어느 필드를 어떤 축으로 읽는가).
         # "없는 것만 채우기"로 두면 두 방향 모두 막힌다 — 매핑을 고쳐도 옛 노드에 안 닿고,

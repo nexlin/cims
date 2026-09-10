@@ -196,21 +196,43 @@ def _prune_to_template(values, pkg_file, *, where: str) -> tuple:
     return {k: v for k, v in values.items() if k in keys}, dropped
 
 
-def _module_holds_lease(config, pkg_file) -> bool:
-    """이 패키지의 모듈이 **관리 store 의 리스 보유자**인가 (descriptor `safety.
-    requires_leader_lease`). 공유 store 경로를 줄 대상을 가르는 기준이다 — 서비스 모듈
-    (csc 등)은 리스 획득 코드가 없어 경로만 받으면 펜싱 없는 두 번째 writer 가 된다.
-    descriptor 를 못 읽으면 **주지 않는다**(보수적: 잘못 주는 쪽이 손상이다)."""
+def _module_safety(config, pkg_file) -> dict:
+    """이 패키지의 모듈 descriptor 의 `safety` 블록. 못 읽으면 빈 dict —
+    호출부가 전부 「없으면 주지 않는다」로 해석한다(보수적: 잘못 주는 쪽이 손상이다)."""
     name = ((pkg_file or {}).get("name") or "").lower().strip() if isinstance(pkg_file, dict) else ""
     if not name:
-        return False
+        return {}
     try:
         from services import service_registry
         spec = (service_registry.all_modules(config) or {}).get(name) or {}
-        return bool((spec.get("safety") or {}).get("requires_leader_lease"))
+        return (spec.get("safety") or {}) if isinstance(spec.get("safety"), dict) else {}
     except Exception as e:
-        logger.log_warning(f"[config] {name}: 리스 보유 판정 실패({e}) — store 경로 미주입")
-        return False
+        logger.log_warning(f"[config] {name}: 안전 명세 판정 실패({e}) — store 경로 미주입")
+        return {}
+
+
+def _module_holds_lease(config, pkg_file) -> bool:
+    """이 패키지의 모듈이 **관리 store 의 리스 보유자**인가 (descriptor
+    `safety.requires_leader_lease`). 리스 보유자는 store 에 **쓴다**."""
+    return bool(_module_safety(config, pkg_file).get("requires_leader_lease"))
+
+
+def _module_reads_store(config, pkg_file) -> bool:
+    """이 패키지의 모듈이 **관리 store 를 읽는가** (descriptor `safety.reads_shared_store`).
+
+    리스는 못 잡지만 store 안의 컬렉션을 봐야 하는 모듈이다 — `csc` 가 그렇다. 가입 번호의
+    H(A1) 을 만들 때 domain/realm 을 `access_services` 컬렉션에서 찾고, IdMS refresh 토큰·
+    auth code 도 같은 store 에 둔다. 위치가 oam 과 **한 글자라도 다르면** 빈 컬렉션을 보고
+    번호 추가가 `400 service_ref required to derive ha1` 로 실패한다.
+
+    그래서 리스 보유자와 **같이** 주입 대상이다 — 위치를 정하는 창구는 oam 하나여야 한다
+    (oam_ha.md §4.1). 예전에는 운영자가 csc 설정에 완성 경로를 손으로 적었는데, 그러면
+    ①oam 의 마운트를 바꿀 때마다 두 곳을 맞춰야 하고 ②어긋나면 조용히 위 오류로 나타났다.
+
+    **리스 판정과 가르는 이유** — `requires_leader_lease` 는 "단일 writer 자원을 소유한다"는
+    선언이라 절체·래치 해제 정책까지 따라붙는다(§4.4·§6.2). 읽기만 하는 모듈에 그걸 붙이면
+    HA 판정이 함께 달라진다. 두 성질은 따로 선언한다."""
+    return bool(_module_safety(config, pkg_file).get("reads_shared_store"))
 
 
 def _store_source(config) -> dict:
@@ -312,14 +334,13 @@ def _materialize_deploy_config(config, pkg_file, overlay):
             secret = (config.get("CimsAuth") or {}).get("JwtSecret")
             if secret:
                 out["CimsAuth.JwtSecret"] = secret
-            # 관리 store 경로는 **그 store 를 다루는 모듈에만** 준다. 공유 store 는
-            # 소유권 리스(flock+epoch)를 쥔 하나만 write 하는 자원인데, csc 같은 서비스
-            # 모듈은 리스 획득 코드가 없다 — 경로만 받아두면 IdMS 가 토큰을 발급하는 순간
-            # **펜싱 없는 두 번째 writer** 가 된다. 판별자는 descriptor 의
-            # `safety.requires_leader_lease`(= "이 모듈은 단일 writer 자원을 소유한다"
-            # 선언, oam/oam-svc 만 true). 서비스 모듈은 노드 로컬 runtime 을 쓴다 — 절체 시
-            # 그 모듈의 로컬 상태(csc IdMS 의 auth_codes·refresh_tokens 등)는 유실되고
-            # 단말이 재로그인한다.
+            # 관리 store 경로는 **그 store 를 쓰는 모듈에만** 준다. 판별자는 descriptor
+            # 선언 둘이다 — `safety.requires_leader_lease`("단일 writer 자원을 소유한다",
+            # oam·oam-svc)와 `safety.reads_shared_store`("그 store 를 읽어야 한다", csc).
+            # 선언이 없는 모듈(csp·cmp 등)은 노드 로컬 runtime 을 쓴다.
+            # 위치를 정하는 창구는 base oam 하나여야 한다(oam_ha.md §4.1) — 두 곳에서
+            # 입력받으면 값이 갈리고, csc 가 어긋나면 빈 컬렉션을 보고 번호 추가가
+            # `400 service_ref required to derive ha1` 로 실패한다.
             #
             # 그 안에서 **위치를 정하는 쪽과 받아 쓰는 쪽**을 가른다.
             if ((pkg_file or {}).get("name") or "").lower().strip() == "oam":
@@ -356,8 +377,8 @@ def _materialize_deploy_config(config, pkg_file, overlay):
                 out["CimsRuntimeDir"] = _store
                 if not str(out.get("Packages.Dir") or "").strip():
                     out["Packages.Dir"] = os.path.join(_store, _STORE_PKG_DIR)
-            elif _module_holds_lease(config, pkg_file):
-                # oam-svc — store 를 **읽지만 위치를 정하지는 않는다**(알람 sweeper 가
+            elif _module_holds_lease(config, pkg_file) or _module_reads_store(config, pkg_file):
+                # oam-svc·csc — store 를 **읽지만 위치를 정하지는 않는다**(알람 sweeper 가
                 # agents·ha_groups·services 도메인을 읽는다). 위치는 언제나 oam 과 같은
                 # 값이어야 하므로 사용자 입력이 아니라 **파생값**이다: 템플릿에 선언하지
                 # 않아 `_prune_to_template` 이 overlay 저장을 구조적으로 막고, 여기서
@@ -365,6 +386,8 @@ def _materialize_deploy_config(config, pkg_file, overlay):
                 # 남은 값이 이기면 두 프로세스가 다른 store 를 본다).
                 # `Mgmt.Cidr` 이 이미 같은 방식이다(바로 아래).
                 # `Packages.Dir` 은 주지 않는다 — 패키지 서빙은 base oam 만의 일이다.
+                # csc 는 리스를 잡지 않지만 같은 store 의 컬렉션을 읽어야 한다
+                # (`safety.reads_shared_store` — `_module_reads_store` 주석).
                 for _k, _v in _store_source(config).items():
                     out[_k] = _v
             if (config.get("Mgmt") or {}).get("Cidr"):

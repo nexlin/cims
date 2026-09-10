@@ -506,17 +506,34 @@ config.json 에 실체화한다. 대상은 두 부류다:
 |---|---|---|
 | `meta.gateway.routes` | csc, oam-svc | JwtSecret · Mgmt.Cidr · (빈 경우) ServiceLogging.Dir |
 | `safety.requires_leader_lease` | oam, oam-svc | 위 + **관리 store 경로**(`CimsRuntimeDir` — oam 은 마운트에서 유도, oam-svc 는 oam 에서 유도) |
+| `safety.reads_shared_store` | csc | 위 + **관리 store 경로**(`CimsRuntimeDir`·`CimsRuntimeMount`. `Packages.Dir` 은 주지 않는다 — 패키지 서빙은 base oam 만의 일) |
 | `meta.shared_identity` | **base `oam`** | 위 + `CimsAuth.BuiltinAccounts` |
 
-**관리 store 경로는 그 store 를 다루는 모듈(oam·oam-svc)에만 준다.** 공유 store 는 소유권
-리스(flock+epoch)를 쥔 하나만 write 하는 자원인데, `csc` 같은 서비스 모듈은 리스 획득
-코드가 없다 — 경로만 받아두면 IdMS 가 토큰을 발급하는 순간(`auth_codes`·`refresh_tokens`)
-**펜싱 없는 두 번째 writer** 가 된다. 판별자는 descriptor 의
-`safety.requires_leader_lease`(= "이 모듈은 단일 writer 자원을 소유한다" 선언)이고,
+**관리 store 경로를 정하는 창구는 base `oam` 하나다.** 그 store 를 쓰는 모듈은 전부 거기서
+유도받는다 — 두 곳에서 입력받으면 값이 갈리고, 어긋남을 막는 정합 코드가 또 따라붙는다
+(§4.1 이 그룹 레코드에 대해 이미 거부한 패턴이다). 판별자는 descriptor 선언 **둘**이고,
 descriptor 를 못 읽으면 주지 않는다(잘못 주는 쪽이 손상이므로 보수적으로).
 
-서비스 모듈은 **노드 로컬 runtime** 을 쓴다. 그 대가로 절체 시 그 모듈의 로컬 상태는
-유실된다 — csc IdMS 의 `auth_codes`·`refresh_tokens` 가 사라져 **단말이 재로그인**한다.
+- `safety.requires_leader_lease` — "이 모듈은 단일 writer 자원을 **소유한다**". 소유권
+  리스(flock+epoch)를 쥔 하나만 write 하고, 절체·래치 해제 정책이 여기에 딸린다(§4.4·§6.2).
+- `safety.reads_shared_store` — "이 모듈은 그 store 를 **읽어야 한다**". `csc` 가 그렇다:
+  가입 번호의 H(A1) 을 만들 때 domain/realm 을 `access_services` 컬렉션에서 찾는다. 경로가
+  oam 과 한 글자라도 다르면 빈 컬렉션을 보고 번호 추가가
+  `400 service_ref required to derive ha1` 로 실패한다.
+
+두 선언을 가른 이유 — 읽기만 하는 모듈에 `requires_leader_lease` 를 붙이면 HA 절체 판정까지
+함께 달라진다. 성질이 다르므로 따로 선언한다.
+
+> **csc 는 그 store 에 쓰기도 한다** — IdMS 의 `auth_codes`·`refresh_tokens` 가 같은 루트에
+> 놓인다(`runtime_root` 하나가 읽기 경로와 토큰 저장소를 겸한다). 즉 csc 는 리스 없는
+> writer 다. 쓰는 도메인이 OAM 것과 겹치지 않아 실제 충돌은 없지만, 구조로 보장되는 것은
+> 아니다. **읽기 경로와 토큰 저장소를 가르는 것**(토큰은 csc 자기 네임스페이스로)이 남은
+> 과제다. 예전에는 이 경로를 운영자가 csc 설정에 손으로 적게 해서 자동 주입만 막고 있었는데,
+> 손으로 적어도 결과는 같아 보호가 되지 않았다.
+
+토큰이 공유 store 에 놓이므로 **절체해도 단말 재로그인이 일어나지 않는다.** 노드 로컬
+runtime 을 쓰던 때의 대가(절체 시 `auth_codes`·`refresh_tokens` 유실 → 전 단말 재로그인)는
+사라졌다.
 관리평면 이중화의 목적은 관리 데이터(agent 등록·배포 기록)를 절체 너머로 잇는 것이지
 서비스 모듈의 세션 상태까지 잇는 것이 아니다.
 
