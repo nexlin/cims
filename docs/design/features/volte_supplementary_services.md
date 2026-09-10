@@ -381,8 +381,11 @@ REGISTER 가 403 이 된다 — CSC 는 평문을 보관하지 않아 재파생�
    잡는다([android_ue_provisioning.md §3](android_ue_provisioning.md)). 구 프로파일을 캐시한 단말은 옛 도메인으로 REGISTER 해
    403 을 받으므로 이관은 정지창에 회선 단위로 한다.
 
-dev 검증 스택은 `voip` 를 volte 와 **같은 도메인**(priority 150)으로 시드해 재결박 없이 `service_ref` 만 옮겨도 인증이 유지된다
-(`verify/lib/common/access_services.py`). 상용 규약은 도메인을 분리한다(§10.2).
+**같은 도메인 배치(전환기)**: `voip` 레코드를 volte 와 **같은 도메인**(priority 150 — `GetByDomain` 의 1순위를 빼앗지 않는다)으로
+두면 H(A1) 이 그대로라 재결박·단말 재로그인 없이 `service_ref` 만 옮길 수 있다. 정책 필드(피처코드·전달·SRTP)는 `service_ref` 로
+붙으므로 도메인이 같아도 유선 정책은 voip 레코드를 따르고, 프로비저닝 `services[].kind` 도 voip 다. dev 검증 스택이 이 배치로
+시드하며(`verify/lib/common/access_services.py`), 라이브도 이 배치로 먼저 옮긴 뒤 도메인 분리(§10.2)는 도메인 간 대표번호
+포크(`S3-SCN-FA`)·관제 앱 SRTP 실기 확인 후 정지창에서 위 1~4 로 마무리한다. 관제석이 NAT 뒤면 `media_nat_mode=auto` 를 유지한다.
 
 ### 10.4 csp.json / 템플릿 (`sections.tas`)
 
