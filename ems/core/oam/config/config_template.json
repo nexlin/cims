@@ -85,11 +85,11 @@
       "fields": [
         {
           "key": "CimsRuntimeMount",
-          "label": "관리 store 마운트 지점",
+          "label": "런타임 마운트 지점",
           "type": "path",
           "default": "",
           "restart": true,
-          "help": "관리 store 를 둘 공유 스토리지(NAS)의 마운트 지점. store 는 `<마운트>/runtime`, 패키지 저장소는 `<마운트>/runtime/pkg_files` 로 자동 유도된다. 설정 시 OAM 은 기동 전 이 경로가 실제 마운트인지 확인하고, 아니면 기동을 거부한다(마운트 없이 떠서 로컬 디스크에 두 번째 store 를 만드는 것 방지). **비우면 노드 로컬**(`modules/oam/runtime`)에 저장한다 — 단일 노드·부트스트랩 직후의 정상 상태다."
+          "help": "관리 store 를 둘 공유 스토리지(NAS)의 마운트 지점. store 는 `<마운트>/runtime`, 패키지 저장소는 `<마운트>/runtime/pkg_files` 로 자동 유도된다. 설정 시 OAM 은 기동 전 이 경로가 실제 마운트인지 확인하고, 아니면 기동을 거부한다(마운트 없이 떠서 로컬 디스크에 두 번째 store 를 만드는 것 방지). 비우면 노드 로컬(`modules/oam/runtime`)에 저장한다 — 단일 노드·부트스트랩 직후의 정상 상태다."
         }
       ]
     },
