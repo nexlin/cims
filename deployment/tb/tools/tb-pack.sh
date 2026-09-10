@@ -31,7 +31,7 @@ done
 header "=== TB 반입본 조립 ==="
 
 # ── DB 부트스트랩 자원 ────────────────────────────────────────
-info "[1/3] DB 부트스트랩 — db_bootstrap.py + cims_schema.sql + pymysql"
+info "[1/4] DB 부트스트랩 — db_bootstrap.py + cims_schema.sql + pymysql"
 dbdir="$TB_OFFLINE_DIR/db-bootstrap"
 mkdir -p "$dbdir/vendor"
 cp -f "$TB_REPO_ROOT/deployment/db-bootstrap/db_bootstrap.py" "$dbdir/"
@@ -45,7 +45,7 @@ find "$dbdir/vendor" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || 
 ok "$dbdir ($(du -sh "$dbdir" | awk '{print $1}'))"
 
 # ── OS 패키지 ─────────────────────────────────────────────────
-info "[2/3] OS 패키지(.deb) 확인"
+info "[2/4] OS 패키지(.deb) 확인"
 if [[ -d "$TB_OFFLINE_DIR/debs" ]] && compgen -G "$TB_OFFLINE_DIR/debs/*/*.deb" >/dev/null; then
     for d in "$TB_OFFLINE_DIR"/debs/*/; do
         ok "$(basename "$d"): $(ls -1 "$d"/*.deb 2>/dev/null | wc -l)개"
@@ -55,7 +55,7 @@ else
 fi
 
 # ── 모듈 tarball (선택) ───────────────────────────────────────
-info "[3/3] 모듈 패키지"
+info "[3/4] 모듈 패키지"
 if [[ $WITH_PKGS -eq 1 ]]; then
     src="$TB_REPO_ROOT/build/dist/packages"
     [[ -d "$src" ]] || die_hint "$src 없음" \
@@ -89,6 +89,32 @@ if [[ $WITH_PKGS -eq 1 ]]; then
     ok "$TB_OFFLINE_DIR/packages (${#picked[@]}개, $(du -sh "$TB_OFFLINE_DIR/packages" | awk '{print $1}'))"
 else
     info "건너뜀 (--with-packages 로 포함)"
+fi
+
+# ── 시험 음성 (70 단계 호시험) ────────────────────────────────
+# cspsim 패키지에는 미디어가 없다. 없으면 코덱이 PCMU(0)로 떨어져 호는 서지만 녹취
+# 재생이 안 된다 — 설치 실패가 아니라 **시험 자료 결손**이라 경고만 하고 계속한다.
+info "[4/4] 시험 음성"
+_msrc="$TB_REPO_ROOT/tests/media"
+# 파일만 — 그 디렉토리에 __pycache__ 같은 하위 디렉토리가 섞여 있다.
+if [[ -d "$_msrc" ]] && [[ -n "$(find "$_msrc" -maxdepth 1 -type f -print -quit)" ]]; then
+    mkdir -p "$TB_OFFLINE_DIR/media"
+    find "$_msrc" -maxdepth 1 -type f -exec cp -f {} "$TB_OFFLINE_DIR/media/" \;
+    ok "$TB_OFFLINE_DIR/media ($(ls -1 "$TB_OFFLINE_DIR/media" | wc -l)개, $(du -sh "$TB_OFFLINE_DIR/media" | awk '{print $1}'))"
+    # 파일명이 **가입 번호와 대응**한다(8050001000004_audio.amrwb). 짝이 없는 번호는
+    # 그 번호만 PCMU 로 떨어지므로, 현장에서 헤매지 않게 여기서 미리 알려 준다.
+    _csv="$TB_ROOT/data/subscriptions.csv"
+    if [[ -f "$_csv" ]]; then
+        _miss=""
+        while IFS=, read -r _num _login _kind _rest; do
+            [[ -z "$_num" || "$_num" == \#* || "$_num" == "number" ]] && continue
+            compgen -G "$TB_OFFLINE_DIR/media/${_num}_audio."* >/dev/null \
+                || _miss+=" $_num($_kind)"
+        done < "$_csv"
+        [[ -n "$_miss" ]] && warn "음성 없는 번호:$_miss — 그 번호는 codec(0)=PCMU (VoLTE 는 예정된 범위)"
+    fi
+else
+    warn "$_msrc 없음 — 70 단계가 codec(0)=PCMU 로 떨어집니다 (녹취 재생 불가)"
 fi
 
 # ── 묶기 ──────────────────────────────────────────────────────

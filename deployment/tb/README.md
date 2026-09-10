@@ -50,7 +50,7 @@
 
 ```bash
 deployment/tb/tools/tb-fetch-debs.sh mariadb        # MariaDB + 의존 .deb 수집
-deployment/tb/tools/tb-pack.sh --with-packages      # db-bootstrap + 모듈 tarball 모으기
+deployment/tb/tools/tb-pack.sh --with-packages      # db-bootstrap + 모듈 tarball + 시험 음성 모으기
 ```
 
 `deployment/tb/` 전체(=`offline/` 포함)를 USB 로 옮긴다. `--tar` 를 주면 하나로 묶는다.
