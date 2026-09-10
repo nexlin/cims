@@ -81,7 +81,12 @@ public sealed class McDataMessagesViewModel : MessagesViewModelBase
     }
 
     /// <summary>채널 카드 선택 → 그 그룹 스레드(설정 FollowChannelThread).</summary>
-    public void FollowGroup(GroupInfo g) { if (FollowChannel) SelectKey(g.Uri, g.Name, true); }
+    public void FollowGroup(GroupInfo g) { FocusGroup = g; if (FollowChannel) SelectKey(g.Uri, g.Name, true); }
+    /// <summary>포커스 카드의 그룹 — 머리 "[● <채널> 따라가기]" 문구.</summary>
+    private GroupInfo? _focusGroup;
+    public GroupInfo? FocusGroup { get => _focusGroup; set { _focusGroup = value; OnPropertyChanged(nameof(FollowText)); } }
+    public string FollowText => FocusGroup is null ? "따라가기" : $"{FocusGroup.Name} 따라가기";
+    public void ClearFocus() => FocusGroup = null;
     public void OpenGroup(GroupInfo g) => SelectKey(g.Uri, g.Name, true);
     public void OpenUser(string number) => SelectKey(UserPartConverter.UserPart(number), S.NameOfPtt(number), false);
 }

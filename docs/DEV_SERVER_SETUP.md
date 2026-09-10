@@ -217,7 +217,7 @@ Enter(수락) 또는 직접 입력으로 진행합니다:
 ./configure.sh \
   --local-ip 192.168.1.10 \
   --db-host 127.0.0.1 --db-user cims --db-password '<DB_PASSWORD>' \
-  --volte-domain ims.mnc033.mcc450.3gppnetwork.org
+  --volte-domain volte.cims.example.kr
 ```
 - 생성 대상: `build/dist/{cmp,cmdp,csp,csc}/config/*.json` + `build/dist/config/local_nodes.jsonl`
   + `ems/core/console/.env.local`/`.env.tb.local`(`VITE_ADMIN_TARGET`) + `build/dist/sql/grant_db_access.sql`
@@ -231,7 +231,9 @@ Enter(수락) 또는 직접 입력으로 진행합니다:
 - 편의 래퍼: `./cims.sh configure [동일 옵션]`
 
 > 도메인 주의: cspsim/단말의 Digest username 은 `imsi@domain` 이라 도메인이 정확해야 인증됩니다.
-> VoLTE=`ims.mnc033.mcc450.3gppnetwork.org`, PTT=`ptt.mnc033...`.
+> 개발·시험 환경의 도메인/realm 정본과 서버·단말·검증 도구별 적용 지점은
+> [dev/dev_test_domain_realm.md](dev/dev_test_domain_realm.md) 를 본다
+> (VoLTE=`volte.cims.example.kr`, PTT=`ptt.cims.example.kr`).
 
 ---
 
@@ -286,7 +288,7 @@ curl -s  -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3000/api/v1/agents   
 # 콘솔 접속: 브라우저로 http://<host>:3000
 
 # 1콜 스모크 (VoLTE / PTT) — cspsim 은 가급적 별도 머신에서
-./build/bin/cspsim -server_ip 127.0.0.1 -count 2 -user 1001 -domain ims.mnc033.mcc450.3gppnetwork.org \
+./build/bin/cspsim -server_ip 127.0.0.1 -count 2 -user 1001 -domain volte.cims.example.kr \
   -password 1234 -mode volte -scenario call -call_duration 5
 ```
 
@@ -314,7 +316,7 @@ sudo mysql -u root < sql/cims_schema.sql
 
 # 4) 설정
 ./configure.sh --local-ip <IP> --db-host 127.0.0.1 --db-user cims --db-password '<PW>' \
-               --volte-domain ims.mnc033.mcc450.3gppnetwork.org
+               --volte-domain volte.cims.example.kr
 sudo mysql -u root < build/dist/sql/grant_db_access.sql
 
 # 5) 실행 (CMP → CSP → cwrtc → OAM → CSC → Console)

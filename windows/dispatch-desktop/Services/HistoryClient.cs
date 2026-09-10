@@ -6,7 +6,8 @@
 //
 // 응답 기대치(앱이 읽는 것 — 서버 확정 대기):
 //   { "items": [ { "id": "...", "time": "2026-09-06T10:00:00+09:00", "kind": "call|ptt|message", "event": "call.answered|call.missed|...",
-//                  "from": "tel:+82...", "to": "tel:+82...", "group": "tel:g003", "duration": 42, "emergency": false, "text": "..." } ],
+//                  "from": "tel:+82...", "to": "tel:+82...", "group": "tel:g003", "duration": 42, "emergency": false, "text": "...",
+//                  "recordingId": "ptt/24/2026/09/07/10/S…_1", "hasRecording": true } ],
 //     "next": "<since 커서 — 다음 폴링에 그대로>", "etag": "..." }
 using System.Text.Json;
 using CimsUe;
@@ -17,6 +18,9 @@ namespace DispatchDesktop.Services;
 public sealed class HistoryClient : IDisposable
 {
     public const int DefaultIntervalMs = 2500;
+    /// <summary>CSC 연결 실패 시 폴링 백오프 상한.</summary>
+    public const int MaxBackoffMs = 30_000;
+    private int _unreachable;
     public const int PageLimit = 200;
 
     private readonly CscClient _csc;
@@ -70,7 +74,9 @@ public sealed class HistoryClient : IDisposable
                     catch (OperationCanceledException) { return; }
                     catch (Exception ex) { _log.Error($"history {k}: poll failed", ex); }
                 }
-                try { await Task.Delay(intervalMs, ct); } catch (OperationCanceledException) { return; }
+                // CSC 에 닿지 않으면(재배포·망 단절) 지수 백오프 — 최대 MaxBackoffMs. 닿으면 원래 주기로.
+                int delay = _unreachable > 0 ? Math.Min(intervalMs << Math.Min(_unreachable, 6), MaxBackoffMs) : intervalMs;
+                try { await Task.Delay(delay, ct); } catch (OperationCanceledException) { return; }
             }
         }, ct);
     }
@@ -91,11 +97,13 @@ public sealed class HistoryClient : IDisposable
         if (!r.Ok)
         {
             if (r.Code is 404 or 501 or 403) { _log.Warn($"history {kind}: {r.Code} — polling off"); Available = false; Stop(); }
+            else if (r.Code < 0) { if (_unreachable++ == 0) _log.Warn($"history: CSC unreachable ({r.Reason}) — backing off"); }
             else _log.Warn($"history {kind}: {r}");
             return;
         }
+        if (_unreachable > 0) { _log.Info($"history: CSC reachable again after {_unreachable} failed polls"); _unreachable = 0; }
         if (r.Value.NotModified) return;
-        var (items, next) = Parse(kind, r.Value.Body);
+        var (items, next, _hours) = Parse(kind, r.Value.Body);
         _cursor[kind] = (next.Length > 0 ? next : since, r.Value.ETag);
         foreach (var e in items)
         {
@@ -108,30 +116,57 @@ public sealed class HistoryClient : IDisposable
 
     internal static string KindName(HistoryKind k) => k switch { HistoryKind.Call => "call", HistoryKind.Ptt => "ptt", _ => "message" };
 
-    /// <summary>응답 본문 → 항목(오래된 것부터)·다음 커서. 모르는 필드는 무시, 필수(id·time)가 없는 항목은 건너뛴다.</summary>
-    internal static (List<HistoryEntry> Items, string Next) Parse(HistoryKind kind, string json)
+    /// <summary>응답 본문 → 항목(오래된 것부터)·다음 커서·시간대 분포. 모르는 필드는 무시, 필수(id·time)가 없는 항목은 건너뛴다.
+    /// 종류별 확장 필드(§3-2 — 이력 화면용)는 있으면 읽고 없으면 기본값(""/0)이다.</summary>
+    internal static (List<HistoryEntry> Items, string Next, Dictionary<string, int> Hours) Parse(HistoryKind kind, string json)
     {
         var items = new List<HistoryEntry>();
+        var hours = new Dictionary<string, int>(StringComparer.Ordinal);
         string next = "";
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
         if (root.TryGetProperty("next", out var n) && n.ValueKind == JsonValueKind.String) next = n.GetString() ?? "";
-        if (!root.TryGetProperty("items", out var arr) || arr.ValueKind != JsonValueKind.Array) return (items, next);
+        if (root.TryGetProperty("hours", out var ho) && ho.ValueKind == JsonValueKind.Object)
+            foreach (var p in ho.EnumerateObject()) if (p.Value.TryGetInt32(out int c)) hours[p.Name] = c;
+        if (!root.TryGetProperty("items", out var arr) || arr.ValueKind != JsonValueKind.Array) return (items, next, hours);
         foreach (var it in arr.EnumerateArray())
         {
             string id = Str(it, "id");
             if (id.Length == 0 || !DateTime.TryParse(Str(it, "time"), null, System.Globalization.DateTimeStyles.RoundtripKind, out var t)) continue;
             var k = Str(it, "kind") switch { "call" => HistoryKind.Call, "ptt" => HistoryKind.Ptt, "message" => HistoryKind.Message, _ => kind };
+            var people = new List<string>();
+            if (it.TryGetProperty("people", out var pa) && pa.ValueKind == JsonValueKind.Array)
+                foreach (var x in pa.EnumerateArray()) if (x.ValueKind == JsonValueKind.String && x.GetString() is { Length: > 0 } s) people.Add(s);
             items.Add(new HistoryEntry(id, t.ToLocalTime(), k, Str(it, "event"), Str(it, "from"), Str(it, "to"), Str(it, "group"),
-                                       it.TryGetProperty("duration", out var d) && d.TryGetInt32(out int ds) ? ds : 0,
-                                       it.TryGetProperty("emergency", out var em) && em.ValueKind == JsonValueKind.True, Str(it, "text")));
+                                       Int(it, "duration"), Bool(it, "emergency"), Str(it, "text"),
+                                       Str(it, "recordingId"), Bool(it, "hasRecording"))
+            {
+                State = Str(it, "state"), CallType = Str(it, "callType"),
+                InviteTime = Time(it, "inviteTime"), AnswerTime = Time(it, "answerTime"), EndTime = Time(it, "endTime"),
+                EndReason = Str(it, "endReason"), SipStatus = Int(it, "sipStatus"),
+                SessionKind = Str(it, "sessionKind"), StartTime = Time(it, "startTime"), GroupName = Str(it, "groupName"),
+                MemberCount = Int(it, "memberCount"), TurnCount = Int(it, "turnCount"), SpeakerCount = Int(it, "speakerCount"),
+                TotalSpeechMs = Int(it, "totalSpeechMs"), TalkMs = Int(it, "talkMs"), MaxConcurrent = Int(it, "maxConcurrent"),
+                FloorControl = Str(it, "floorControl"), FloorPolicy = Str(it, "floorPolicy"), MaxTalkers = Int(it, "maxTalkers"),
+                People = people,
+            });
         }
         items.Sort((a, b) => a.Time.CompareTo(b.Time));
-        return (items, next);
+        return (items, next, hours);
     }
 
     private static string Str(JsonElement e, string name) =>
         e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+    private static int Int(JsonElement e, string name) =>
+        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out int n) ? n : 0;
+    private static bool Bool(JsonElement e, string name) => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
+    /// <summary>ISO8601(+offset 또는 naive-local) → 로컬 DateTime. 빈 값은 null.</summary>
+    internal static DateTime? Time(JsonElement e, string name)
+    {
+        string s = Str(e, name);
+        if (s.Length == 0 || !DateTime.TryParse(s, null, System.Globalization.DateTimeStyles.RoundtripKind, out var t)) return null;
+        return t.Kind == DateTimeKind.Unspecified ? t : t.ToLocalTime();
+    }
 
     public void Dispose() => Stop();
 }

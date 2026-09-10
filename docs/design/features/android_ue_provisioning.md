@@ -82,7 +82,7 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
                                    { "transport": "TCP", "port": 15060 },
                                    { "transport": "TLS", "port": 15061 } ],
                    "default": "UDP",
-                   "domain": "ims.mnc033.mcc450.3gppnetwork.org" },
+                   "domain": "volte.cims.example.kr" },
       "account": { "msisdn": "+821300000001", "imsi": "450330000000001",
                    "authId": "", "sipHa1": "5f4dcc3b5aa765d61d8327deb882cf99", "sipPassword": null }
     },
@@ -91,7 +91,7 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
       "sip":     { "host": "<PSP host>", "port": 15061, "transport": "TLS",
                    "transports": [ { "transport": "TLS", "port": 15061 } ],
                    "default": "TLS", "enforced": true, "mediaSecurity": "optional",
-                   "domain": "ptt.mnc033.mcc450.3gppnetwork.org" },
+                   "domain": "ptt.cims.example.kr" },
       "account": { "msisdn": "+821300000001", "imsi": "450330000000002",
                    "authId": "", "sipHa1": null, "sipPassword": null, "mcpttId": "tel:+821300000001" }
     }
@@ -99,6 +99,7 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
   "dispatch": {                                          // 관제 데스크 소속일 때만 (없으면 키 자체 생략)
     "groupId": "dg-dispatch01", "groupName": "관제 1조", "pilotId": "+821310001000",
     "monitorScope": "own", "pttListen": "listed", "listenVisibility": "hidden",
+    "directoryAdmin": "own", "orgCode": "TEAM01",
     "members": [
       { "userId": 5020, "name": "관제1석", "volteAor": "tel:+821310001001",
         "pttId": "tel:+82510001001", "extension": "1001", "groupId": "dg-dispatch01" },
@@ -141,8 +142,10 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
   값을 pjsip AKA 자격(`PJSIP_CRED_DATA_EXT_AKA`)에 넣어 `AKAv1-MD5` 챌린지에 답하고, 그 가입은 TLS 로만 등록한다
   (Android 연결은 후속). 서버가 키를 못 풀면(`AuC.Kek` 불일치) `k`/`opc` 가 빈 문자열로 온다.
 - `account.sipPassword`: 항상 `null`(서버가 평문을 배포하지 않는다 — 키는 단말 호환으로 유지).
-  단말은 `sipHa1`(DIGEST cred) → 평문 cred(`sipPassword` → 로그인 비번) 순으로 쓴다 — 평문 cred 는
-  pjsip 이 challenge realm 로 그때 ha1 을 계산하므로 realm 결박이 없다.
+  단말은 `sipHa1`(DIGEST cred) → 평문 cred(`sipPassword`, 구 서버 호환) 순으로 쓰고, 둘 다 없으면 SIP 계정을
+  구성하지 않는다(`SipAccountConfig.isComplete()` 미완성 → 등록 시도 없음, 앱 상태 "로그인 필요"). **로그인
+  비밀번호는 IdMS 자격이라 SIP Digest 에 쓰지 않는다** — 두 비밀번호는 별개다(sip_access_security.md §4.7).
+  평문 cred 는 pjsip 이 challenge realm 로 그때 ha1 을 계산하므로 realm 결박이 없다.
 - `account.mcpttId`: PTT 프로파일에만. GMS/CMS/affiliation/floor 에서 사용.
 - `countryCode`: 홈 국가코드(E.164 digits, `+` 없음. 예 `"82"`) — 단말 번호 로컬 표기(§3-1)의 **SoT**.
   CSC 설정 `Provisioning.CountryCode` 우선, 미설정이면 로그인 msisdn 에서 서버가 유도. 판정 불가면
@@ -151,6 +154,9 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
   (`dispatch_group_members`) 소속일 때만 실린다(미소속·테이블 미적용 DB 는 키 생략, `null` 없음).
   - `groupId/groupName/pilotId/monitorScope/pttListen/listenVisibility`: 소속 그룹의 속성 그대로
     (`monitor_scope` `none|own|listed|all`, `ptt_listen` `none|listed|all`, `listen_visibility` `hidden|visible`).
+  - `directoryAdmin`(`none|own|all`)·`orgCode`: 관제 앱의 조직/구성원/번호·PTT 그룹 **관리 범위**(§3-3,
+    [dispatch_center.md §3.4](dispatch_center.md)) — `own` 의 루트가 `orgCode`(그룹 `org_id` 의 코드, 없으면 `""`).
+    컬럼 미적용 DB·구 서버는 `none`/`""`. 앱은 `none` 이면 관리 탭을 잠근다.
   - `members[]`: **dialog 감시(RFC 4235) 대상** = 서버가 `monitorScope` 를 CSP `CanWatch` 와 같은 규칙으로 해석한
     VoLTE 가입자 목록 — 자기 관제 그룹원은 범위와 무관하게 항상(같은 픽업 그룹), `listed` 는 대상 그룹원 추가,
     `all` 은 전 VoLTE 가입자. 항목 = `userId`(`users.id`) · `name` · `volteAor`(`tel:+E.164`) · `pttId`(첫 PTT 가입
@@ -212,12 +218,14 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
 RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②PTT 내역·④통화 내역 패널과 메시지
 모니터링이 같은 계약 하나로 최근 이력을 커서로 받는다([dispatch_center.md §5.6](dispatch_center.md)).
 
-요청: `GET /provisioning/history?kind=call|ptt|message&since=<ISO8601|epoch>&limit=<n>` +
+요청: `GET /provisioning/history?kind=call|ptt|message&since=<ISO8601|epoch>&until=<ISO8601|epoch>&limit=<n>` +
 `Authorization: Bearer <provisioning access token>`(PKCE, `/provisioning/me` 와 같은 토큰).
 
 - `kind`(필수): `call`(VoLTE) · `ptt`(PTT 그룹 세션) · `message`(SDS — 그룹 + 1:1). 미지 값 400.
 - `since`(선택): 이 시각 **이후**(strict)만. 생략 시 최근 1시간. 이전 응답의 `nextSince` 를 그대로 넣어
   폴링한다(관제 앱 2~3초 주기). 스캔은 최대 48 시간 버킷으로 유계.
+- `until`(선택): 이 시각 **이하**만 — 있으면 [since, until] **창 조회**(관제 앱 [이력] 화면 — 하루 단위로 나눠
+  묻는다), 없으면 지금까지(폴링). 버킷 상한은 그대로.
 - `limit`(선택, 기본 200, 최대 1000): 가장 최근 N 개.
 
 응답 `200`(단말 `HistoryClient` 계약 — 필드 추가는 무시, 필수 `id`·`time` 없으면 스킵):
@@ -226,7 +234,8 @@ RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②P
   "items": [
     { "id": "<call_id>", "time": "2026-09-06T19:05:12+09:00", "kind": "call",
       "event": "call.answered", "from": "+82…", "to": "+82…", "group": "",
-      "duration": 30, "emergency": false, "text": "" }
+      "duration": 30, "emergency": false, "text": "",
+      "recordingId": "volte/2026/09/06/19/010/01000000001/<call_id>.d", "hasRecording": true }
   ],
   "next": "2026-09-06T19:05:12"
 }
@@ -237,6 +246,26 @@ RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②P
 - `event` 이름표(앱 switch 와 1:1): call = `call.answered`(응답됨)/`call.missed`(무응답) · ptt = `ptt.session.start`(진행 중)/
   `ptt.session.end`(종료) · message = `message.sds`(그룹 SDS → ② 패널)/`message.sms`(1:1 → ④ 패널). `group`·`duration`·`text`
   는 종류에 따라 채워진다(call `group=""`·`duration`=통화초, ptt `group=tel:<gid>`·`duration`=세션초, message `text`=본문).
+- `recordingId`(종료분 call·ptt): 녹취 식별자 = 세션 디렉터리의 `ServiceLogging.Dir` 상대 경로(OAM `/api/v1/recordings/{id}`
+  와 같은 키, `/` 구분 — 세그먼트별 percent-encoding). live 항목·message 는 `""`. `hasRecording` = `segments.jsonl` 존재.
+  재생은 §3-4.
+- **종류별 확장 필드**(관제 앱 [이력] 화면이 콘솔 VoLTE/PTT 이력과 같은 열·카드를 그리는 데 쓴다. 폴링 병합은 읽지 않는다.
+  값이 없으면 `""`/`0`/`[]`):
+  - call: `callType`(volte|volte_video) · `state`(ended|active|ringing) · `inviteTime` · `answerTime` · `endTime`(ISO8601+offset) ·
+    `endReason`(normal|no_answer|busy|rejected|error|timeout|incomplete — 문구는 앱 사전) · `sipStatus`.
+  - ptt: `sessionKind`(group|private|adhoc) · `state`(ended|active) · `startTime` · `endTime` · `groupName` · `memberCount` · `people[]`(참여자) ·
+    `turnCount`(발언 턴) · `speakerCount` · `totalSpeechMs`(발화 구간 합, 겹침 1회) · `talkMs`(화자별 누적) · `maxConcurrent` ·
+    `floorControl`(on|off|"") · `floorPolicy`(single|dual|multi) · `maxTalkers`.
+- 최상위 `hours`: 시간대(HH) → 건수 — 통화는 INVITE, PTT 는 세션 시작 시각 기준(콘솔 `/call/logs`·`/ptt/sessions` 의 `hours` 와 같은 축),
+  `limit` 절삭 **전** 창 안 전체 행으로 센다(앱 시간대 밴드 = 그날의 분포이자 필터).
+- **PTT 창 조회의 백엔드**(`kind=ptt` + `until`): 발언 지표는 CMP `segments.jsonl` 을 집계한 OAM 세션 인덱스(ptt_index — 콘솔 PTT 이력의
+  읽기 모델)에만 있으므로, CSC 가 OAM `GET /api/v1/ptt/sessions?date|from,to&group_key=<청취 그룹의 ptt_groups.id 목록>` 을 프록시해
+  같은 항목 형태로 바꾼다(`services/dispatch_history.ptt_row_from_oam`, `recordingId` 는 콘솔 `recIdOf` 와 같은 규칙, `id` 는 스캔 경로와
+  같은 우선순위 sesid→call_id→dir). OAM 에 닿지 않으면 파일 스캔으로 폴백한다(지표 0). 폴링(until 없음)은 파일 스캔이다.
+  파일 스캔의 **진행 중 판정**은 `state/ptt/*.json`(CSP 가 참가자마다 쓰고 떠나면 지운다)에 세션이 있는지로 한다 — 시간 버킷의
+  `session.json` 은 세션 시작 스냅샷이라 `state`/`end_time` 이 비어 있어도 진행 중이 아니다(콘솔 ptt_index 와 같은 기준). 종료 시각은
+  `events.jsonl` 의 `session_end`(없으면 마지막 이벤트) 또는 `segments.jsonl` 의 마지막 `end_time`.
+  OAM 주소 = csc.json `Recording.OamUrl`(비면 `https://{Fm.OamIp}:4419`) — 녹취 프록시(§3-4)와 같은 설정.
 - 응답 헤더 `ETag`. 단말이 `If-None-Match` 로 같은 값을 보내면 **304**(본문 없음, 폴링 대역 절약). 변경 없는 304 는
   감사하지 않는다 — 실제 열람(새 항목/최초)만 `E-AUD-016` 로 남긴다.
 
@@ -248,8 +277,69 @@ RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②P
   당사자 모르게 이력을 여는 동작이라 감사 대상(manager 열람, [dispatch_center.md §5.7](dispatch_center.md)).
 
 > 백엔드는 CSP/CSC 가 공유 NAS(`ServiceLogging.Dir`)에 남기는 파일 SoT(콘솔 `flow_logger` 가 읽는 것과 같은
-> 파일)를 관제 그룹 범위로만 걸러 주는 얇은 구독자 뷰다 — 콘솔 이력 API(oam-svc)를 재구현하지 않는다.
+> 파일)를 관제 그룹 범위로만 걸러 주는 얇은 구독자 뷰다 — 콘솔 이력 API(oam-svc)를 재구현하지 않는다(집계가 필요한 PTT
+> 창 조회·세션 상세는 그 API 를 범위 게이트 뒤에서 **프록시**한다).
 > 1:1 SDS/SMS 는 CSP `Setup.McData.StoreOneToOneSds` 를 켜야 보관된다([mcdata_messaging.md §4.3](mcdata_messaging.md)).
+
+### 3-2a. `GET /provisioning/history/ptt/{recordingId}` — PTT 세션 상세
+
+관제 앱 [이력] 화면이 PTT 세션을 고르면 부르는 상세(참여자·입퇴장 이벤트·floor 타임라인). `recordingId` 는 §3-2 항목의 것
+(`ptt/{저장키}/{Y}/{M}/{D}/{H}[/{세션키}]`, 세그먼트별 percent-encoding). 범위 게이트는 §3-4 녹취와 같다(저장키 → 청취 그룹,
+`session.json` 대조 폴백 · 범위 밖 403 · 경로 이탈 400 · 관제 미소속 403 · 세션 디렉터리 없음 404). 본문은 OAM
+`GET /api/v1/ptt/history/{group_key}/{session}` + `…/floor` 를 합친 것(구 녹취형은 session = 시간창 `YYYYMMDDHH`):
+
+```json
+{ "recordingId": "ptt/1/2026/09/08/09/S20260908091000000000_1",
+  "session": { "...session.json 스냅샷 + session_id, windows[]" },
+  "participants": [ { "msisdn": "+82…", "role": "initiator|member", "join_time": "…", "leave_time": null } ],
+  "events":       [ { "ts": "…", "type": "session_start|session_end|member_join|member_leave|member_invite|config_change", "member": "+82…", "role": "initiator" } ],
+  "floor":        [ { "ts": "…", "op": "GRANT|RELEASE|IDLE|REVOKE|REVOKE_END|QUEUE|QUEUE_CANCEL|DENY", "user": "+82…", "slot": 0, "talkers": 1,
+                      "policy": "dual", "preempt": false, "reason": "recv_only", "owner": "+82…", "pos": 1, "qsize": 1, "grace_sec": 3, "idle_ms": 300 } ],
+  "hasRecording": true }
+```
+시각은 파일의 naive-local ISO 그대로(앱은 로컬로 해석). 발언 턴은 이 응답이 아니라 §3-4 녹취 세그먼트의 `tracks[].speakers[]`
+(콘솔 `segTurns` 와 같은 해석)에서 만든다. 열람은 감사 `E-AUD-016 call_monitored`(`tap_mode=history`, `hist_kind=ptt_session`, `recording`).
+OAM 미도달 502 `oam_unreachable`. 구현 `csc/src/handlers/dispatch_recordings.py` `handle_ptt_session_detail`(경로 등록은 가장 긴 접두 우선 —
+`/provisioning/history` 목록보다 먼저 잡힌다).
+
+## 3-3. Contract — `/provisioning/directory/{admin,orgs,members,groups}` (관제 앱 관리 평면)
+
+관제사(가입자)가 관제 앱에서 조직 트리·구성원·VoLTE/PTT 번호·PTT 그룹을 관리한다. 같은 PKCE provisioning 토큰.
+인가 = 관제 그룹 `directory_admin`(§3 `dispatch.directoryAdmin`, [dispatch_center.md §3.4](dispatch_center.md)) —
+없으면 전부 `403 {"error":"no_directory_admin"}`, 범위 밖 조직·구성원은 `403 {"error":"out_of_scope"}`.
+서버 구현 `csc/src/handlers/dispatch_directory.py`(콘솔 관리 API 와 같은 쓰기 코드 호출).
+
+| 메서드·경로 | 본문 / 응답 |
+|---|---|
+| `GET /provisioning/directory/admin` | 관리 화면 한 벌 `{ "scope": {groupId, directoryAdmin, orgCode}, "services": {"volte":[{name,domain}], "ptt":[…]}, "orgs": [{code,name,parent,sort}](범위 안), "members": [{userId, name, loginId, org, title, "volte": {msisdn,imsi,serviceRef,sipTransport,authScheme}\|null, "ptt": {…, "profile": {allowCreateGroup, allowAmbientListening, allowEmergencyCall, allowEmergencyAlert, allowAdhocCall, allowEmergencyPrivateCall}}\|null}] }` + `ETag`/`If-None-Match` 304 |
+| `POST /provisioning/directory/orgs` | `{code, name, parent, sort}` → `201 {code, id}`. `parent` 는 범위 안 코드(`own` 은 필수 — 루트 신설 불가). `409 code_exists`·`400 unknown_parent` |
+| `PUT /provisioning/directory/orgs/{code}` | `{name?, parent?, sort?}` → `200 {code}`. 범위 루트 이동 불가(403)·`400 cyclic_parent` |
+| `DELETE /provisioning/directory/orgs/{code}` | `200 {code}`. 하위 조직·구성원이 남아 있으면 `409 not_empty`, 범위 루트 삭제 불가(403) |
+| `POST /provisioning/directory/members` | `{name, org, title?, loginId?, password?, volte?: {msisdn, imsi?, serviceRef?, sipTransport?, password}, ptt?: {…}}` → `201 {userId}`. `imsi` 비면 번호 숫자(USIM 없는 관제 소프트폰 규약), 회선은 `password` 필수(H(A1)). 회선 개설 실패는 그 코드 + `{userId, kind}` |
+| `PUT /provisioning/directory/members/{userId}` | `{name?, org?, title?, loginId?, password?}` → `200 {id}` |
+| `DELETE /provisioning/directory/members/{userId}` | `200 {id}` — 회선 함께 삭제(USER_CHANGED). 자기 자신 `409 self_delete` |
+| `PUT /provisioning/directory/members/{userId}/volte\|ptt` | `{msisdn, imsi?, serviceRef?, sipTransport?, password?}` — 같은 번호면 갱신(`200`), 다른 번호면 종전 회선 삭제 + 개설(`201`, `password` 필수). 타인 번호 `409 number_exists`, `pickup_group` 파생 충돌 `409 derived_from_dispatch_group` |
+| `DELETE /provisioning/directory/members/{userId}/volte\|ptt` | `200 {userId, kind, deleted[]}` |
+| `PUT /provisioning/directory/members/{userId}/ptt/profile` | `{allowCreateGroup?, allowAmbientListening?, allowEmergencyCall?, …}`(없는 키는 현재값 유지) → `200 {msisdn, profile}` |
+| `GET /provisioning/directory/groups` | `{ "scope": {directoryAdmin, orgCode}, "groups": [{id, uri, name, memberCount, isOwner, orgCode, sessionType, etag}] }` — 범위 안(또는 내 소유) PTT 그룹. 문서 GET/PUT/DELETE 는 GMS XCAP 그대로([mcptt_api.md §2](../../api/mcptt_api.md) — 관리 범위 안이면 소유자가 아니어도 허용) |
+
+오류 본문은 `{"error": "<token>", "detail"?: …}`. 앱 문구 사전 = `ResponseText.ForManagementError`. 컬럼 미적용 DB 는
+`403 no_directory_admin`(관리 기능 비활성). 감사 = `E-AUD-006 config_change`.
+
+## 3-4. Contract — `GET /provisioning/recordings/{id}…` (관제 앱 녹취 재생)
+
+`id` = §3-2 항목의 `recordingId`. 같은 토큰. CSC 는 관제 범위(§3-2 와 같은 집합)를 판정한 뒤 oam-svc 녹취 API
+(`/api/v1/recordings/…`, [recording.md](recording.md))로 **프록시**한다 — 응답 본문·상태는 그대로.
+
+| 경로 | 응답 |
+|---|---|
+| `GET /provisioning/recordings/{id}` | 세션 메타 + `segments[]`(`seq, type, speaker_id, speaker_ids[], start_time, end_time, duration_ms, has_video, status, talker_count, tracks[]`) |
+| `GET /provisioning/recordings/{id}/segments/{seq}/audio?slot=<K>&retry=1` | `200 audio/mp4`(AAC 16k mono — 믹스, `slot` 은 단독 트랙) · `202 {status: transcoding\|recording}`(앱은 0.7초→1.5초 간격으로 최대 120초 재시도) · `500 {status: failed, reason}`(`retry=1` 로 표식 제거 후 재변환) · `404` |
+| `GET /provisioning/recordings/{id}/segments/{seq}/peaks?slot=` | `{seq, slot, buckets, peaks[]}` |
+
+오류: `401` · `403 no_monitor_scope`(관제 미소속) · `403 out_of_scope` · `400 invalid_recording_id`(경로 이탈) · `404 not_found` ·
+`502 oam_unreachable` · `503 service_log_unavailable`. 오디오 200 마다 감사 `E-AUD-016`(`tap_mode=recording`).
+서버 설정 csc.json `Recording.OamUrl`(비면 `https://{Fm.OamIp}:4419`) · `Recording.VerifyTls`(기본 false).
 
 ## 4. 서버측 구현 (CSC)
 
@@ -269,14 +359,20 @@ RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②P
    ptt=PSP 대표/VIP 주소로 채운다.
    (표준 `access_services` 는 CSP 컬렉션이라 CSC 가 직접 못 읽으므로, 시그널링 매핑은 CSC 설정으로 둔다.
    **따라서 CSP/PSP 의 `local_nodes` bind_port 를 바꾸면 이 값도 같이 맞춰야 한다** — 두 값은 의도적 중복이다.)
+   `name` = 그 종류의 CSP `access_services.name`(= 가입 회선 `service_ref`). 관제 앱 관리 API
+   `GET /provisioning/directory/admin` 의 `services.<kind>[].name` 후보가 여기서 나오므로 CSP 의 실제 이름과
+   같아야 한다(패키지 기본 `volte`/`ptt` — csp/pkg.json. configure `--volte-service/--ptt-service`).
 
    설정 소유자는 `csc/config/config_template.json` 의 `provisioning` 섹션(`scope: service`)이다:
    - 콘솔 `관리 > 시스템 > 시스템/인프라` → 서버 선택 → **[패키지 설정] > csc > [설정]** 탭의
      `자동 프로비저닝 (단말 접속 정보)` 에서 편집. 전 필드 `restart: true` → 저장 후 csc 재기동.
    - configure.sh 경로(올인원 시험환경)는 `deploy_value` 로 `@VOLTE_DOMAIN@`/`@PTT_DOMAIN@`/
-     `@COUNTRY_CODE@` 를 치환해 csc.json 에 기록한다. 포트/host 는 템플릿 default(5060 / 빈값).
-3. 비번: 응답 `sipPassword=null` → 단말이 로그인 비번을 SIP Digest 비번으로 재사용(망에 SIP 비번 미전송).
-   서비스별 SIP 비번이 다르면 응답에 명시.
+     `@COUNTRY_CODE@` 를 치환해 csc.json 에 기록하고, **SIP 포트(`port`/`tcp_port`/`tls_port`)는
+     `local_nodes.jsonl` 의 access 리스너(UDP primary/TCP/TLS)에서 유도해 기록한다**(리스너 SoT 와
+     단일화 — 템플릿 default 15060 은 운영 표준 배치용이라 dev 시드 5060/25061/5061 과 다르다).
+     host 가 비어 있거나 CSP_IP 인 서비스만 정합하고, 다른 서버를 가리키면 운영자 값을 보존한다.
+3. SIP 자격: 응답 `account.sipHa1`(H(A1)) 로 인증한다 — 평문 SIP 비밀번호는 망에 실리지 않고 단말도 갖지
+   않는다. `sipHa1` 이 없는 가입(H(A1) 미생성)은 단말이 등록을 시도하지 않는다.
 4. **홈 국가코드** ← CSC 설정 `Provisioning.CountryCode`(템플릿 default 82, configure.sh `--country-code`).
    미설정 시 로그인 msisdn 에서 유도(`_country_code_of`, 단말 fallback 과 동일한 ITU 자릿수 규칙).
    응답 `countryCode` 로 내려주며 단말은 이 값을 번호 로컬 표기의 SoT 로 저장(`SipAccountConfig.countryCode`).
@@ -288,9 +384,9 @@ RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②P
 
 ## 5. 클라이언트 구현 (core + 각 앱)
 
-- **core `provision/`** (공유): `Pkce`(PKCE S256), `ProvisioningClient`(IdMS 로그인 + `/provisioning/me` 조회, OkHttp), `ProvisioningModels`(ProvisioningProfile/ServiceProfile/SipServer/AccountInfo/TokenSet), `ServiceProfile.toSipAccountConfig(loginPassword)`.
+- **core `provision/`** (공유): `Pkce`(PKCE S256), `ProvisioningClient`(IdMS 로그인 + `/provisioning/me` 조회, OkHttp), `ProvisioningModels`(ProvisioningProfile/ServiceProfile/SipServer/AccountInfo/TokenSet), `ServiceProfile.toSipAccountConfig(loginId, displayName, countryCode)`.
 - **volte-client / ptt-client**: 첫 진입 = `LoginScreen` → `ProvisioningClient` → 자기 kind 프로파일을 `ConfigStore` 에 저장 → 홈. 수동 설정은 §5-1 수동 설정 모드.
-- 토큰: access_token 보관, 만료 시 재로그인(또는 refresh). SIP 비번 미수신 시 로그인 비번 재사용.
+- 토큰: access_token 보관, 만료 시 재로그인(또는 refresh). SIP 자격(`sipHa1`) 미수신 시 등록하지 않는다.
 - 서버 엔드포인트 준비 전: 로그인/프로비저닝 실패 시 **수동설정으로 graceful fallback**.
 
 ### 5-1. 설정 화면·수동 설정 모드 (volte-client)

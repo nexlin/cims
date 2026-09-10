@@ -42,12 +42,17 @@ public sealed partial class CallActivityViewModel : ObservableObject
     private readonly DispatchSession _s;
     public ObservableCollection<CallSessionRow> Ongoing { get; } = new();
     public ObservableCollection<ActivityRow> Recent { get; } = new();
-    /// <summary>all | pilot | missed</summary>
+    /// <summary>all | pilot | missed | outgoing | transfer | monitor(오늘 데스크 칩)</summary>
     [ObservableProperty] private string _filter = "all";
     [ObservableProperty] private string _search = "";
 
     public event EventHandler<SessionItem>? WindowRequested;
     public event EventHandler<string>? SmsRequested;
+    public event EventHandler<string>? MenuRequested;
+    [RelayCommand] private void Menu(string numberOrUri) => MenuRequested?.Invoke(this, numberOrUri);
+    /// <summary>머리 [이력에서 보기] — 끝난 통화의 날짜 창 조회는 [이력] 화면(§4.6).</summary>
+    public event EventHandler? HistoryRequested;
+    [RelayCommand] private void OpenHistory() => HistoryRequested?.Invoke(this, EventArgs.Empty);
 
     public CallActivityViewModel(DispatchSession s)
     {
@@ -98,6 +103,9 @@ public sealed partial class CallActivityViewModel : ObservableObject
         {
             if (Filter == "pilot" && !r.IsPilot) continue;
             if (Filter == "missed" && !r.IsMissed) continue;
+            if (Filter == "outgoing" && r.Kind != ActivityKind.Outgoing) continue;
+            if (Filter == "transfer" && r.Kind != ActivityKind.Transfer) continue;
+            if (Filter == "monitor" && r.Kind is not (ActivityKind.ListenStart or ActivityKind.ListenEnd)) continue;
             if (q.Length > 0 && !r.Title.Contains(q, StringComparison.OrdinalIgnoreCase) && !r.Detail.Contains(q, StringComparison.OrdinalIgnoreCase)) continue;
             Recent.Add(r);
         }

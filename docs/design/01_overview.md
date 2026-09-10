@@ -753,8 +753,8 @@ merge 되어 우선한다 (csp/cmp 와 동일 계약). 개발 환경은 `configu
 | `Setup.DocRoot` | string | "html" | 내장 HTTP 서버 문서 루트 |
 | `Setup.Sip.ServerIp` | string | "127.0.0.1" | CSP SIP 서버 IP |
 | `Setup.Sip.ServerPort` | int | 5060 | CSP SIP 포트 |
-| `Setup.Sip.Domain` | string | ims.mnc033.… | VoLTE 도메인 (CSP 와 일치 필요) |
-| `Setup.Sip.PttDomain` | string | ptt.mnc033.… | PTT 도메인 (CSP 와 일치 필요) |
+| `Setup.Sip.Domain` | string | volte.cims.example.kr | VoLTE 도메인 (CSP 와 일치 필요) |
+| `Setup.Sip.PttDomain` | string | ptt.cims.example.kr | PTT 도메인 (CSP 와 일치 필요) |
 | `Setup.Sip.LocalPort` | int | 5062 | cwrtc SIP bind UDP 포트 |
 | `Setup.Rtp.PortBase` | int | 50100 | RTP 포트 풀 시작 |
 | `Setup.Rtp.PortCount` | int | 50 | RTP 포트 수 (동시 세션 한계) |
@@ -769,8 +769,8 @@ merge 되어 우선한다 (csp/cmp 와 동일 계약). 개발 환경은 `configu
     "Wss": 1,
     "CertFile": "cert/csp.pem",
     "Sip": { "ServerIp": "192.168.0.135", "ServerPort": 5060,
-             "Domain": "ims.mnc033.mcc450.3gppnetwork.org",
-             "PttDomain": "ptt.mnc033.mcc450.3gppnetwork.org", "LocalPort": 5062 },
+             "Domain": "volte.cims.example.kr",
+             "PttDomain": "ptt.cims.example.kr", "LocalPort": 5062 },
     "Rtp": { "PortBase": 50100, "PortCount": 50 }
   }
 }
@@ -860,7 +860,7 @@ a=sendrecv
   "user": "+82571900001",
   "password": "123456",
   "domain": "csp",
-  "auth_id": "4503382571900001@ptt.mnc033.mcc450.3gppnetwork.org"
+  "auth_id": "4503382571900001@ptt.cims.example.kr"
 }
 ```
 > `auth_id`는 SIP IMPI (3GPP 형식). 미입력 시 user와 동일하게 사용.

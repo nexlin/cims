@@ -74,9 +74,9 @@ cmd_smoke() {
   echo "[smoke] cspsim — 1콜 외부 user 호출 시도 (외부 peer 응답 안 옴 → tx 만 발생)"
   # 등록된 user 가 외부 user 호 → routing_policies 매칭 → outbound INVITE
   timeout 12 "$CSPSIM" -server_ip "$CSP_HOST" -server_port "$CSP_PORT" \
-    -count 1 -user 1001 -domain ims.mnc033.mcc450.3gppnetwork.org -password 1234 \
+    -count 1 -user 1001 -domain volte.cims.example.kr -password 1234 \
     -mode volte -scenario call -call_duration 3 \
-    -callee_override sip:99001@ims.mnc033.mcc450.3gppnetwork.org \
+    -callee_override sip:99001@volte.cims.example.kr \
     -interval 100 < /dev/null 2>&1 | tail -10 || echo "[smoke] cspsim exit (expected — peer never answers)"
 }
 

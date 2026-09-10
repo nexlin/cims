@@ -1,5 +1,7 @@
 #include "SubscriptionManager.h"
 
+#include <ctime>
+
 #include "Log.h"
 
 CSubscriptionManager gclsSubscriptionManager;
@@ -8,6 +10,14 @@ CSubscriptionManager::CSubscriptionManager() {
 }
 
 CSubscriptionManager::~CSubscriptionManager() {
+}
+
+int CSubscriptionManager::RebootSafeNotifySeq() {
+    static const time_t tBase = 1767225600;  // 2026-01-01T00:00:00Z
+    const time_t tNow = time( NULL );
+    if ( tNow <= tBase ) return 1;
+    const long long llSeed = (long long)( tNow - tBase ) * 8;
+    return llSeed >= 0x7FFFFF00LL ? 0x7FFFFF00 : (int)llSeed;
 }
 
 void CSubscriptionManager::AddSubscription( const std::string &strResourceUri, const SubscriptionInfo &info ) {

@@ -142,6 +142,15 @@
           "help": "관제 데스크 dispatch.members[].extension = 가입 번호(E.164) 끝자리 N 자리. 망 주소가 아닌 관제 앱 표시 라벨(dispatch_center.md §8.4). 0 = 전체 digits."
         },
         {
+          "key": "Provisioning.Services.volte.name",
+          "label": "VoLTE 접속서비스 이름",
+          "type": "string",
+          "default": "volte",
+          "deploy_value": "@VOLTE_SERVICE@",
+          "restart": true,
+          "help": "CSP access_services.name — 이 종류의 가입 회선이 참조하는 service_ref. 관제 앱 관리 API(/provisioning/directory/admin services.volte[].name)가 번호 개설 폼의 후보로 내려준다. CSP 의 실제 접속서비스 이름과 일치해야 한다(csc 는 CSP 를 조회하지 않는다 — domain·media_srtp 와 같은 운영 규약). 패키지 기본 = csp/pkg.json 의 volte."
+        },
+        {
           "key": "Provisioning.Services.volte.host",
           "label": "VoLTE SIP 주소 (CSP)",
           "type": "string",
@@ -195,7 +204,7 @@
           "key": "Provisioning.Services.volte.domain",
           "label": "VoLTE 도메인",
           "type": "string",
-          "default": "ims.mnc033.mcc450.3gppnetwork.org",
+          "default": "volte.cims.example.kr",
           "deploy_value": "@VOLTE_DOMAIN@",
           "restart": true,
           "help": "Digest username = imsi@도메인. CSP 의 VoLTE access_service 도메인과 일치해야 등록된다."
@@ -212,6 +221,15 @@
           "default": "off",
           "restart": true,
           "help": "단말 프로파일 mediaSecurity 로 내리는 미디어 SRTP(SDES) 정책. CSP access_services.media_srtp 와 일치해야 한다(csc 는 CSP 를 조회하지 않는다). docs/design/features/media_security.md §7.2"
+        },
+        {
+          "key": "Provisioning.Services.ptt.name",
+          "label": "PTT 접속서비스 이름",
+          "type": "string",
+          "default": "ptt",
+          "deploy_value": "@PTT_SERVICE@",
+          "restart": true,
+          "help": "CSP access_services.name — 이 종류의 가입 회선이 참조하는 service_ref. 관제 앱 관리 API(/provisioning/directory/admin services.ptt[].name)가 번호 개설 폼의 후보로 내려준다. CSP 의 실제 접속서비스 이름과 일치해야 한다(csc 는 CSP 를 조회하지 않는다 — domain·media_srtp 와 같은 운영 규약). 패키지 기본 = csp/pkg.json 의 ptt."
         },
         {
           "key": "Provisioning.Services.ptt.host",
@@ -267,7 +285,7 @@
           "key": "Provisioning.Services.ptt.domain",
           "label": "PTT 도메인",
           "type": "string",
-          "default": "ptt.mnc033.mcc450.3gppnetwork.org",
+          "default": "ptt.cims.example.kr",
           "deploy_value": "@PTT_DOMAIN@",
           "restart": true,
           "help": "PTT access_service 도메인. MCPTT ID 와는 별개."
@@ -419,26 +437,39 @@
           "key": "IdMs.Issuer",
           "label": "Issuer",
           "type": "string",
-          "default": "idms.ptt.mnc001.mcc001.3gppnetwork.org",
-          "deploy_value": "idms.@PTT_DOMAIN@",
+          "default": "",
           "restart": true,
-          "help": "JWT iss 클레임. 보통 idms.<PTT_DOMAIN>."
+          "help": "JWT iss 클레임(TS 33.180 B.2.1.2). 비우면 McpttServer.PublicUrl(URL 형) → 없으면 idms.<PTT 도메인> (Provisioning.Services.ptt.domain) 으로 유도. discovery(/.well-known/openid-configuration) issuer 와 같은 값."
         },
         {
           "key": "IdMs.Domain",
           "label": "PTT 도메인",
           "type": "string",
-          "default": "ptt.mnc001.mcc001.3gppnetwork.org",
-          "deploy_value": "@PTT_DOMAIN@",
-          "restart": true
+          "default": "",
+          "restart": true,
+          "help": "IdMS/KMS 신원 도메인(KMS UserUri 의 @도메인). 비우면 Provisioning.Services.ptt.domain 으로 유도."
         },
         {
           "key": "IdMs.KmsUri",
           "label": "KMS URI",
           "type": "string",
-          "default": "kms.ptt.mnc001.mcc001.3gppnetwork.org",
-          "deploy_value": "kms.@PTT_DOMAIN@",
-          "restart": true
+          "default": "",
+          "restart": true,
+          "help": "KMS URI. 비우면 kms.<IdMs.Domain> 으로 유도."
+        },
+        {
+          "key": "IdMs.ScopeEnforcement",
+          "label": "리소스 서버 scope 검사",
+          "type": "enum",
+          "options": [
+            "off",
+            "log",
+            "enforce"
+          ],
+          "default": "enforce",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "GMS/CMS/KMS/MCData FD 가 토큰의 3gpp:mc:* scope 를 검사하는 방식(TS 33.180 B.10). enforce=부족 시 403 insufficient_scope(최종 상태) / log=판정만 '[IdMS][scope] would-deny' 로그로 남기고 통과(이행 관찰 창) / off=검사 없음(비상). 구 scope 3gpp:mcptt:ptt_server 는 별칭으로 전체 확장되므로 구 단말도 enforce 를 통과한다."
         },
         {
           "key": "IdMs.KmsClientReqUrl",
@@ -573,9 +604,10 @@
           "label": "HPLMN PLMN (MCC+MNC)",
           "type": "string",
           "default": "",
+          "deploy_value": "@PLMN@",
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드.",
-          "help": "비우면 PTT 도메인(ptt.mncXXX.mccYYY…)에서 유도(예 45033). 도메인 표기가 규격형이 아닐 때만 직접 지정."
+          "help": "비우면 PTT 도메인이 3GPP 표기(ptt.mncXXX.mccYYY…)일 때만 유도되고, 아니면 명목값 00101. 개발·시험 도메인(ptt.cims.example.kr)은 유도 불가 — IMSI 접두와 같은 45033 을 지정(configure --plmn)."
         },
         {
           "key": "UeInitConfig.Hplmn.McpttConRef",
@@ -687,6 +719,53 @@
       "scope": "service"
     },
     {
+      "key": "user_profile",
+      "title": "MCPTT 사용자 프로파일 문서 (user-profile) 규격 파라미터값",
+      "description": "TS 24.484 §8.3.2 사용자 프로파일 문서의 상수 요소. 그룹 목록·연락처·긴급 대상·인가는 DB(그룹 멤버십·ptt_user_profile·mcptt_service_config)에서 유도되므로 여기 없다. 값이 바뀌면 문서 ETag 도 바뀌어 단말이 새 문서를 받는다.",
+      "fields": [
+        {
+          "key": "UserProfile.MaxSimultaneousCallsN6",
+          "label": "동시 그룹콜 상한 (MaxSimultaneousCallsN6)",
+          "type": "int",
+          "default": 1,
+          "min": 1,
+          "max": 255,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag."
+        },
+        {
+          "key": "UserProfile.MaxSimultaneousTransmissionsN7",
+          "label": "동시 송신 상한 (MaxSimultaneousTransmissionsN7)",
+          "type": "int",
+          "default": 1,
+          "min": 0,
+          "max": 255,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드."
+        },
+        {
+          "key": "UserProfile.Priority",
+          "label": "사용자 우선순위 (Priority)",
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 65535,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드."
+        },
+        {
+          "key": "UserProfile.MissionCriticalOrganization",
+          "label": "MC 조직명 (MissionCriticalOrganization)",
+          "type": "string",
+          "default": "",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "비우면 UeInitConfig.Name 을 쓴다."
+        }
+      ],
+      "scope": "service"
+    },
+    {
       "key": "service_log",
       "title": "서비스 로그",
       "description": "녹취·msg·flow 로그의 공통 저장 루트. CSP·CMP·CSC 가 같은 경로를 쓰고 OAM 이 조회하므로 그룹 공통(service)으로 관리한다.",
@@ -735,6 +814,32 @@
           "hidden": true,
           "restart": true,
           "help": "refresh 토큰·auth code 의 file_store 루트 — **버전 무관 영속**이어야 한다(버전/개발 트리 경로면 업그레이드마다 소실 → 전 단말 재로그인). 비우면 설치 트리에서 modules/csc/runtime 을 유도한다."
+        }
+      ],
+      "scope": "service"
+    },
+    {
+      "key": "recording",
+      "title": "녹취 재생 프록시 (관제 앱)",
+      "description": "관제 앱의 녹취 조회·재생(/provisioning/recordings)은 CSC 가 관제 범위를 판정한 뒤 oam-svc 녹취 API(/api/v1/recordings)로 프록시한다 — dispatch_center.md §5.6a.",
+      "fields": [
+        {
+          "key": "Recording.OamUrl",
+          "label": "OAM 게이트웨이 URL",
+          "type": "string",
+          "default": "",
+          "deploy_value": "https://@OAM_IP@:4419",
+          "restart": true,
+          "help": "oam-svc 녹취 API 를 프록시하는 base OAM 게이트웨이 주소. 비우면 https://{Fm.OamIp}:4419. 관리평면 이중화 환경에서는 VIP."
+        },
+        {
+          "key": "Recording.VerifyTls",
+          "label": "OAM 인증서 검증",
+          "type": "bool",
+          "default": "false",
+          "restart": true,
+          "advanced": true,
+          "help": "OAM 게이트웨이 TLS 인증서를 검증할지 — 사내 자가서명이면 끔."
         }
       ],
       "scope": "service"

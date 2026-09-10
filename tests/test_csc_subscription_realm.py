@@ -94,12 +94,12 @@ class ServiceRealmTest(unittest.TestCase):
         self.assertIsNone(self.a._service_realm(cfg, "", "ptt"))
 
     def test_fallback_to_provisioning_services(self):
-        cfg = self._config(services={"volte": {"domain": "ims.mnc033.mcc450.3gppnetwork.org"},
-                                     "ptt": {"domain": "ptt.mnc033.mcc450.3gppnetwork.org"}})
+        cfg = self._config(services={"volte": {"domain": "volte.cims.example.kr"},
+                                     "ptt": {"domain": "ptt.cims.example.kr"}})
         self.assertEqual(self.a._service_realm(cfg, "mcptt", "ptt"),
-                         ("ptt.mnc033.mcc450.3gppnetwork.org", "ptt.mnc033.mcc450.3gppnetwork.org"))
+                         ("ptt.cims.example.kr", "ptt.cims.example.kr"))
         self.assertEqual(self.a._service_realm(cfg, "volte", "volte"),
-                         ("ims.mnc033.mcc450.3gppnetwork.org", "ims.mnc033.mcc450.3gppnetwork.org"))
+                         ("volte.cims.example.kr", "volte.cims.example.kr"))
 
     def test_fallback_auth_realm_override(self):
         cfg = self._config(services={"ptt": {"domain": "ptt.example", "auth_realm": "auth.example"}})

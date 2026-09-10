@@ -28,14 +28,39 @@ SECRET_KEY = _secrets.token_urlsafe(32)
 #   ⚠ 본 파생은 가입자별 **구조적 프로비저닝**(UserDecryptKey/SSK/PVT 가 사용자마다 다름)을 제공하나,
 #   참값 ECCSI/SAKKE(RFC 6507/6508)는 pairing 암호 라이브러리가 필요한 후속 과제다(E2E 암호화 도입 시).
 KMS_MASTER_SECRET = _secrets.token_bytes(32)
-# IdMS scope 분리 — 평면별 토큰 용도 구분(TS 33.180 / 본 프로젝트 프로비저닝).
-#   CIMS 앱 로그인은 두 scope 를 함께 grant 받고, AccountManager 가 refresh 로 용도별 토큰을 좁혀 발급.
-SCOPE_PROVISIONING = "cims:provisioning"      # 디바이스 부트스트랩(/provisioning/me)
-SCOPE_MCPTT        = "3gpp:mcptt:ptt_server"  # MCPTT 서비스 평면(XCAP/KMS/affiliation)
+# ── IdMS scope 카탈로그 (TS 33.180 Annex B.4.2.2 — MC 서비스별 authorization scope) ──
+#   토큰 scope = 요청 ∩ 카탈로그 (RFC 6749 §3.3: 모르는 값은 제외하고 토큰 응답 `scope` 로 허가분을 알림).
+#   리소스 서버는 자기 scope 를 검사한다(B.10 — `require_scope`, IdMs.ScopeEnforcement).
+#   MCVideo 는 미지원이라 카탈로그 밖(요청되면 제외). CIMS 앱은 로그인 시 전부 grant 받고 AccountManager 가
+#   refresh 로 용도별(provisioning / MC 서비스) 토큰을 좁혀 발급받는다.
+SCOPE_OPENID       = "openid"
+SCOPE_PROVISIONING = "cims:provisioning"      # 자체 — 디바이스 부트스트랩(/provisioning/*)
+SCOPE_PTT_SERVICE  = "3gpp:mc:ptt_service"
+SCOPE_DATA_SERVICE = "3gpp:mc:data_service"
+SCOPE_PTT_GMS      = "3gpp:mc:ptt_group_management_service"
+SCOPE_PTT_CMS      = "3gpp:mc:ptt_config_management_service"
+SCOPE_PTT_KMS      = "3gpp:mc:ptt_key_management_service"
+SCOPE_DATA_GMS     = "3gpp:mc:data_group_management_service"
+SCOPE_DATA_CMS     = "3gpp:mc:data_config_management_service"
+SCOPE_DATA_KMS     = "3gpp:mc:data_key_management_service"
+SCOPE_MC_SERVICES  = (SCOPE_PTT_SERVICE, SCOPE_PTT_GMS, SCOPE_PTT_CMS, SCOPE_PTT_KMS,
+                      SCOPE_DATA_SERVICE, SCOPE_DATA_GMS, SCOPE_DATA_CMS, SCOPE_DATA_KMS)
+SCOPE_CATALOG      = frozenset((SCOPE_OPENID, SCOPE_PROVISIONING) + SCOPE_MC_SERVICES)
+# 전환기 별칭 — 구 단일 scope(TS 33.179 표기)는 MC 서비스 scope 8개 전체로 확장한다(종전에 그 하나가 열어 주던
+#   범위와 동일). 토큰에는 확장분과 함께 구 문자열도 실린다(요청 scope 를 문자열 대조하는 단말 호환).
+#   별칭 제거 = 우리 앱·협력업체가 신 이름으로 옮긴 뒤 별도 결정 (mcx_identity_scope.md §5).
+SCOPE_LEGACY_MCPTT = "3gpp:mcptt:ptt_server"
+SCOPE_ALIASES      = {SCOPE_LEGACY_MCPTT: SCOPE_MC_SERVICES}
+# 리소스 서버 scope 검사 모드 (IdMs.ScopeEnforcement): off=검사 없음 / log=would-deny 로그만 / enforce=403.
+SCOPE_ENFORCEMENT  = "enforce"
 
-IDMS_ISSUER = "idms.mcptt.com"
-KMS_URI = "kms.mcptt.com"
-IDMS_DOMAIN = "mcptt.com"
+# IdMS 신원 값 — 설정이 비면 apply_config 가 PTT 도메인(Provisioning.Services.ptt.domain)에서 유도한다.
+#   Issuer = IdMs.Issuer > McpttServer.PublicUrl(URL 형, TS 33.180 B.2.1.2) > idms.<Domain>
+#   Domain = IdMs.Domain > PTT 도메인 > 코드 기본값 / KmsUri = IdMs.KmsUri > kms.<Domain>
+_IDMS_DOMAIN_DEFAULT = "mcptt.com"
+IDMS_ISSUER = "idms." + _IDMS_DOMAIN_DEFAULT
+KMS_URI = "kms." + _IDMS_DOMAIN_DEFAULT
+IDMS_DOMAIN = _IDMS_DOMAIN_DEFAULT
 KMS_CLIENT_REQ_URL = "http://localhost:4421/keymanagement/identity/v1/init"
 USERS = {}            # tel:+msisdn → {password,...} (XCAP/profile 키 = MCPTT ID)
 # 사용자 MCPTT 프로파일 (ptt_user_profile) — ptt_subscriptions.id(MSISDN) → {allow_*, emergency_group_*}.
@@ -102,6 +127,7 @@ PSP_NOTIFY_PORT = 4421
 PROVISIONING = {}            # config Provisioning: {"Services":{"volte":{host,port,tcp_port,tls_port,transport,domain}, "ptt":{...}}}
 _SERVICE_LOG_DIR = ''        # ServiceLogging.Dir (NAS 공유) — 통합 이력 조회(/provisioning/history) 백엔드
 _DB_CONFIG = None            # CimsDatabase (가입자 라이브 조회용)
+_OAM_CONFIG: dict = {}       # Recording.OamUrl / Fm.OamIp — 통합 이력 PTT 창 조회의 OAM 세션 인덱스 프록시용
 _MCPTT_PORT = 4430           # csc McpttServer.Port (응답 csc.port)
 # 단말이 도달하는 MCPTT 서비스(IdMS/GMS/CMS/KMS) 공개 base URL — **단일 정본**.
 #   McpttServer.PublicUrl 설정값(정규화: 스킴 필수·후행 / 제거). 비면 요청 Host 유도(올인원).
@@ -198,6 +224,17 @@ def _users_has_title(cur) -> bool:
     return cur.fetchone()['cnt'] > 0
 
 
+def resolve_idms_identity(idms_config: dict, ptt_domain: str, public_url: str):
+    """IdMS 신원 3종 (issuer, domain, kms_uri) 유도 — 설정 명시값 > 유도값.
+    Issuer: IdMs.Issuer > McpttServer.PublicUrl(URL 형, TS 33.180 B.2.1.2 "IdM 서버의 URL") > idms.<domain>
+    Domain: IdMs.Domain > Provisioning.Services.ptt.domain > 코드 기본값 / KmsUri: IdMs.KmsUri > kms.<domain>"""
+    idms_config = idms_config or {}
+    domain = str(idms_config.get('Domain') or ptt_domain or _IDMS_DOMAIN_DEFAULT).strip()
+    issuer = str(idms_config.get('Issuer') or public_url or f"idms.{domain}").strip()
+    kms_uri = str(idms_config.get('KmsUri') or f"kms.{domain}").strip()
+    return issuer, domain, kms_uri
+
+
 def apply_config(config):
     """설정 스칼라 값만 모듈 전역에 재적용 — 가입자/그룹 데이터 로드는 하지 않는다.
 
@@ -218,12 +255,6 @@ def apply_config(config):
     else:
         logger.log_error("[IdMS] IdMs.JwtSecret 미설정 — 임의 시크릿 사용(재기동 시 토큰 무효화). "
                          "운영은 IdMs.JwtSecret 설정 권장.")
-    if idms_config.get('Issuer'):
-        IDMS_ISSUER = idms_config['Issuer']
-    if idms_config.get('KmsUri'):
-        KMS_URI = idms_config['KmsUri']
-    if idms_config.get('Domain'):
-        IDMS_DOMAIN = idms_config['Domain']
     if idms_config.get('KmsClientReqUrl'):
         KMS_CLIENT_REQ_URL = idms_config['KmsClientReqUrl']
     if idms_config.get('AuthCodeTtl'):
@@ -232,6 +263,12 @@ def apply_config(config):
         ACCESS_TOKEN_TTL = int(idms_config['AccessTokenTtl'])
     if idms_config.get('RefreshTokenTtl'):
         REFRESH_TOKEN_TTL = int(idms_config['RefreshTokenTtl'])
+    global SCOPE_ENFORCEMENT
+    _enf = str(idms_config.get('ScopeEnforcement') or 'enforce').strip().lower()
+    if _enf not in ('off', 'log', 'enforce'):
+        logger.log_error(f"[IdMS] IdMs.ScopeEnforcement='{_enf}' 미지 값 — enforce 로 동작")
+        _enf = 'enforce'
+    SCOPE_ENFORCEMENT = _enf
 
     # 규격 로그인 폼 입력칸 이름 · redirect_uri 허용 목록 (둘 다 리로드 가능 — 다음 요청부터)
     global IDMS_FORM_LOGIN_FIELD, IDMS_FORM_PASSWORD_FIELD, IDMS_REDIRECT_URI_ALLOW
@@ -248,6 +285,12 @@ def apply_config(config):
     if not isinstance(UE_INIT_CONFIG, dict):
         logger.log_error("[CMS] UeInitConfig 가 객체가 아님 — 기본값 사용")
         UE_INIT_CONFIG = {}
+    # user-profile 규격 파라미터값 — 같은 규칙(ETag 내용 파생, SIGUSR1 리로드)
+    global USER_PROFILE_CONFIG
+    USER_PROFILE_CONFIG = config.get('UserProfile') or {}
+    if not isinstance(USER_PROFILE_CONFIG, dict):
+        logger.log_error("[CMS] UserProfile 이 객체가 아님 — 기본값 사용")
+        USER_PROFILE_CONFIG = {}
 
     global CSP_NOTIFY_IP, CSP_NOTIFY_PORT, PSP_NOTIFY_IP, PSP_NOTIFY_PORT
     notify_cfg = config.get('CspNotify', {})
@@ -266,8 +309,10 @@ def apply_config(config):
                     f"PSP={PSP_NOTIFY_IP or '(unset)'}:{PSP_NOTIFY_PORT}")
 
     # 자동 프로비저닝(/provisioning/me) — DB 핸들 + 서비스별 시그널링/도메인 매핑 보관.
-    global _DB_CONFIG, PROVISIONING, _MCPTT_PORT, _MCPTT_PUBLIC_URL, _SERVICE_LOG_DIR
+    global _DB_CONFIG, PROVISIONING, _MCPTT_PORT, _MCPTT_PUBLIC_URL, _SERVICE_LOG_DIR, _OAM_CONFIG
     _DB_CONFIG = db_config
+    # 통합 이력 PTT 창 조회가 OAM 세션 인덱스를 프록시할 때의 접속 설정(dispatch_recordings._oam_base/_http 와 같은 키).
+    _OAM_CONFIG = {k: config.get(k) for k in ('Recording', 'Fm') if config.get(k) is not None}
     PROVISIONING = config.get('Provisioning', {}) or {}
     _sl = config.get('ServiceLogging', {}) or {}
     _SERVICE_LOG_DIR = str(_sl.get('Dir', '') or config.get('ServiceLogDir', config.get('MsgLogDir', '')) or '').strip()
@@ -279,6 +324,13 @@ def apply_config(config):
         _pub = 'https://' + _pub
     _MCPTT_PUBLIC_URL = _pub
     logger.log_info(f"MCPTT public base URL: {_MCPTT_PUBLIC_URL or '(요청 Host 유도)'}")
+
+    # IdMS 신원 값 유도 — 비면 PTT 도메인에서 파생(단일 정본). 템플릿 기본값이 비어 있어 배포 overlay 에
+    #   실리지 않으므로, 운영자가 콘솔에 명시할 때만 그 값을 쓴다.
+    _ptt_domain = str(((PROVISIONING.get('Services') or {}).get('ptt') or {}).get('domain') or '').strip()
+    IDMS_ISSUER, IDMS_DOMAIN, KMS_URI = resolve_idms_identity(idms_config, _ptt_domain, _MCPTT_PUBLIC_URL)
+    logger.log_info(f"IdMS identity: issuer={IDMS_ISSUER} domain={IDMS_DOMAIN} kms={KMS_URI} "
+                    f"scope_enforcement={SCOPE_ENFORCEMENT}")
 
     global GROUP_DIR
     if group_path:
@@ -988,14 +1040,21 @@ def verify_pkce(code_verifier: str, code_challenge: str, method: str = "S256") -
 # refresh_scope= 회전된 refresh_token 에 보존할 scope. None 이면 scope 와 동일.
 #   scope 분리 refresh 시 access 만 좁히고 refresh 는 원 grant(broad) 유지 → 다음 다른-용도 refresh 가능.
 def create_tokens(subject, scope, client_id="mcptt_client", nonce=None, refresh_scope=None, mcptt_id=None):
+    """토큰 3종 발급. `scope` 는 이미 허가 계산(grant_scope / refresh 축소)을 거친 공백 구분 문자열.
+
+    claim 은 TS 33.180 Annex B: ID token = iss/sub/aud/exp/iat + mcptt_id/mcdata_id(+nonce),
+    access token = exp/scope(공백 구분 문자열)/client_id + mcptt_id/mcdata_id (iss/sub/aud/iat 는 RFC 7519 추가분).
+    단일 MC service ID 구성(TS 23.280 §10.1.4.1)이라 mcdata_id = mcptt_id 값."""
     now = int(time.time())
     # sub = CIMS 로그인 ID(인증 신원). mcptt_id = 규격 MCPTT 서비스 신원(분리). 미지정 시 subject 로 폴백.
     sub = subject
     mcptt = mcptt_id or subject
+    scope = " ".join(scope.split()) if isinstance(scope, str) else " ".join(scope or [])
 
     # ID Token (OIDC) — nonce 가 있으면 반영(S2b: CSRF/replay 방지, OIDC Core §3.1.2.1)
     id_token_payload = {
         "mcptt_id": mcptt,
+        "mcdata_id": mcptt,
         "iss": IDMS_ISSUER,
         "sub": sub,
         "aud": client_id or "mcptt_client",
@@ -1006,15 +1065,17 @@ def create_tokens(subject, scope, client_id="mcptt_client", nonce=None, refresh_
         id_token_payload["nonce"] = nonce
     id_token = jwt.encode(id_token_payload, SECRET_KEY, algorithm="HS256")
 
-    # Access Token — S2a: OIDC 표준 클레임(sub/iss/iat) 보강. sub=login_id, mcptt_id=MCPTT 신원.
+    # Access Token — sub=login_id, mcptt_id/mcdata_id=MC 서비스 신원, client_id=요청 클라이언트(B.2.2.2).
     access_token_payload = {
         "mcptt_id": mcptt,
+        "mcdata_id": mcptt,
         "iss": IDMS_ISSUER,
         "sub": sub,
         "aud": "mcptt_client",
+        "client_id": client_id or "mcptt_client",
         "iat": now,
         "exp": now + ACCESS_TOKEN_TTL,
-        "scope": scope.split() if scope else []
+        "scope": scope
     }
     access_token = jwt.encode(access_token_payload, SECRET_KEY, algorithm="HS256")
 
@@ -1041,6 +1102,81 @@ def validate_access_token(token):
     except Exception as e:
         logger.log_error(f"Token validation error: {e}")
         return None
+
+
+# ── scope 계산 ──
+def expand_scopes(scope) -> list:
+    """scope(공백 구분 문자열 또는 목록) → 별칭 확장·중복 제거 목록(입력 순서 유지, 별칭 원문도 남김).
+    카탈로그 여과는 하지 않는다 — 발급은 grant_scope, 검사는 token_scopes 가 쓴다."""
+    items = scope.split() if isinstance(scope, str) else list(scope or [])
+    out: list = []
+    for s in items:
+        for v in (s,) + tuple(SCOPE_ALIASES.get(s, ())):
+            if v not in out:
+                out.append(v)
+    return out
+
+
+def grant_scope(requested):
+    """허가 scope 계산 — 요청 ∩ (카탈로그 ∪ 별칭). 반환 (허가 공백 구분 문자열, 제외된 요청 항목 목록).
+    별칭은 확장 집합과 원문을 함께 허가한다. 모르는 값(MCVideo 등)은 제외 — 토큰 응답 `scope` 로 알린다."""
+    items = requested.split() if isinstance(requested, str) else list(requested or [])
+    granted: list = []
+    dropped: list = []
+    for s in items:
+        if s in SCOPE_CATALOG or s in SCOPE_ALIASES:
+            for v in expand_scopes([s]):
+                if v not in granted:
+                    granted.append(v)
+        else:
+            dropped.append(s)
+    return " ".join(granted), dropped
+
+
+def token_scopes(payload: dict) -> set:
+    """토큰의 유효 scope 집합 — 문자열/배열 양식 모두 수용(이행 전 발급 토큰은 배열), 별칭은 검사 시점에도 확장."""
+    return set(expand_scopes((payload or {}).get('scope') or []))
+
+
+def _bearer_challenge(error: str = '', scope: str = '') -> dict:
+    """RFC 6750 §3 `WWW-Authenticate: Bearer` 헤더."""
+    v = f'Bearer realm="{IDMS_DOMAIN}"'
+    if error:
+        v += f', error="{error}"'
+    if scope:
+        v += f', scope="{scope}"'
+    return {"WWW-Authenticate": v}
+
+
+def unauthorized(args) -> HandlerResult:
+    """401 — 토큰 부재는 Bearer 챌린지만, 토큰이 있었으면 error=invalid_token (RFC 6750 §3.1)."""
+    had = bool(args.headers.get('authorization') or args.headers.get('Authorization'))
+    return HandlerResult(status=401, body={"error": "invalid_token" if had else "unauthorized"},
+                         media_type="application/json",
+                         headers=_bearer_challenge('invalid_token' if had else ''))
+
+
+def require_scope(args, payload: dict, endpoint: str, *accepted: str) -> Optional[HandlerResult]:
+    """리소스 서버 scope 검사(TS 33.180 B.10) — `accepted` 중 하나가 토큰에 있어야 통과(None).
+
+    IdMs.ScopeEnforcement: off=검사 없음 / log=판정만 계산해 `would-deny` 한 줄 로그 후 통과(라이브 관찰 창) /
+    enforce=403 insufficient_scope + WWW-Authenticate 에 필요한 scope 명시(RFC 6750 §3.1). 로그 한 줄에
+    엔드포인트·신원·client_id·보유·요구를 모두 담아 grep 한 번으로 구 클라이언트를 찾을 수 있게 한다."""
+    if SCOPE_ENFORCEMENT == 'off':
+        return None
+    have = token_scopes(payload)
+    if any(s in have for s in accepted):
+        return None
+    line = (f"[IdMS][scope] would-deny endpoint={endpoint} method={args.method} "
+            f"mcptt_id={(payload or {}).get('mcptt_id')} client_id={(payload or {}).get('client_id')} "
+            f"granted={' '.join(sorted(have)) or '(none)'} required={'|'.join(accepted)}")
+    if SCOPE_ENFORCEMENT != 'enforce':
+        logger.log_warning(line)
+        return None
+    logger.log_error(line.replace('would-deny', 'deny', 1))
+    return HandlerResult(status=403, body={"error": "insufficient_scope", "required": list(accepted)},
+                         media_type="application/json",
+                         headers=_bearer_challenge('insufficient_scope', ' '.join(accepted)))
 
 # --- XML Generators ---
 def _content_etag(content: str) -> str:
@@ -1215,73 +1351,171 @@ def update_service_config_cache(cfg):
     SERVICE_CONFIG.update(cfg)
 
 
-def get_user_profile_xml(user_uri):
-    """MCPTT user profile 문서 (TS 24.484) — SOS 대상 결정(MCPTTGroupInitiation entry-info)과
-    사용자 단위 개시 인가(ruleset)를 DB(ptt_user_profile)에서 산출. ad hoc 인가는 규격에 요소가
-    없어 cims 확장 네임스페이스로 노출."""
+# ── MCPTT user profile 규격 파라미터값 (config UserProfile.*) — 문서 상수 요소. 빈/미지정 = 코드 기본값.
+USER_PROFILE_CONFIG = {}
+_USER_PROFILE_DEFAULTS = {
+    "MaxSimultaneousCallsN6": 1,          # 동시 그룹콜 상한 (MCPTT-group-call)
+    "MaxSimultaneousTransmissionsN7": 1,  # 동시 송신 상한 (OnNetwork)
+    "Priority": 0,                        # 사용자 우선순위 (unsignedShort)
+    "MissionCriticalOrganization": "",    # 빈값 = UeInitConfig.Name
+}
+
+
+def _user_profile_cfg(key):
+    v = USER_PROFILE_CONFIG.get(key) if isinstance(USER_PROFILE_CONFIG, dict) else None
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return _USER_PROFILE_DEFAULTS[key]
+    return v
+
+
+def get_user_profile_xml(user_uri, owner_uid=None):
+    """MCPTT user profile 문서 (TS 24.484 §8.3.2, ns urn:3gpp:mcptt:user-profile:1.0).
+
+    규격 단말은 로그인 뒤 이 문서에서 **그룹 목록·연락처·긴급 대상·개시 인가**를 읽는다. 소스는 전부 기존 정본:
+      - 그룹 = GROUPS 멤버십(GMS 문서 URI 와 같은 키) → <OnNetwork><MCPTTGroupInfo>(제휴 가능 그룹) ·
+        <ImplicitAffiliations>(= 소속 전체 — 우리 단말의 전 그룹 자동 제휴 동작과 일치). 소유(authorized_user_id ==
+        owner_uid)한 소속 그룹은 entry anyExt 에 cims:authorized-user 표시(단말 편집·삭제 노출 근거). 소유만 하고
+        멤버가 아닌 그룹은 서비스 목록이 아니라 싣지 않는다(관리 목록 = GMS JSON/관리 API 몫).
+      - 연락처 = 내 그룹의 동료 멤버 → <Common><PrivateCall><PrivateCallList>(그룹 문서로 이미 보이는 범위라 추가 노출 없음).
+      - 긴급 = ptt_user_profile(emergency_group_mode/id·private_emergency_mode/recipient) → MCPTT-group-call 의
+        EmergencyCall/ImminentPerilCall/EmergencyAlert, PrivateCall 의 EmergencyCall(MCPTTPrivateRecipient), OnNetwork 의
+        PrivateEmergencyAlert. §8.3.2.1 8d)ii·8e)ii~iv·10f) 가 "shall" 로 요구하는 요소라 **항상 싣는다** — 대상이
+        미지정이면 entry-info 로 표현한다: 그룹은 `UseCurrentlySelectedGroup`(uri-entry = 폴백 그룹: 지정 그룹 > 첫 소속
+        그룹, §8.3.2.7), 사설은 `LocallyDetermined`(uri-entry = 폴백 수신자: 지정 수신자 > 첫 연락처). 개시 **인가**는
+        요소 유무가 아니라 <cp:ruleset> 의 allow-* 가 말한다 — DedicatedGroup 모드에 긴급그룹 미지정이면 그룹 긴급
+        개시·경보를, UsePreConfigured 모드에 수신자 미지정이면 긴급 사설콜을 false 로 내린다(CSP 의 403 판정과 일치,
+        mcptt_emergency_modes.md). MCPTTPrivateRecipient 는 XSD sequence 상 ProSeUserID-entry(User-Info-ID 6옥텟 hex)가
+        필수 자식이라 off-network 미지원인 우리는 영값(000000000000)을 싣는다.
+      - 상한 = mcptt_service_config.max_affiliations_n2(MaxAffiliationsN2) + UserProfile.*(N6·N7·Priority·조직명).
+      - 인가 = <cp:ruleset>(RFC 4745 common-policy) — actions 자식은 규격 요소 + cims 확장(ad hoc·그룹 생성).
+    루트 <Status>true</Status>(§8.3.2.1 3, 프로파일 활성)·alias-entry index 속성(선택이나 필수로 읽는 단말이 있어 병기).
+    텍스트는 전부 escape. ETag 는 내용 파생."""
     user = USERS.get(user_uri)
     if not user:
         return None, None
+    import html as _html
+    esc = lambda v: _html.escape(str(v if v is not None else ''), quote=True)
 
-    display_name = user.get('name', user_uri)
+    display_name = user.get('name') or user_uri
     prof = get_user_profile(user.get('msisdn', ''))
     mode = prof.get('emergency_group_mode') or 'DedicatedGroup'
     egid = prof.get('emergency_group_id')
-    uri_entry = f"\n            <uri-entry>{_group_uri(egid)}</uri-entry>\n          " if egid else ""
-    # 긴급 사설콜 (TS 24.484 PrivateCall > EmergencyCall > MCPTTPrivateRecipient)
     pmode = prof.get('private_emergency_mode') or 'LocallyDetermined'
     precip = prof.get('emergency_private_recipient')
-    priv_uri_entry = f"\n              <uri-entry>tel:{precip}</uri-entry>\n            " if precip else ""
 
-    def _b(k):
-        return "true" if prof.get(k, True) else "false"
+    def et(tag, uri, name=None, info=None, ext=''):
+        """EntryType — sequence(uri-entry, display-name?, anyExt?) + entry-info 속성."""
+        a = f' entry-info="{esc(info)}"' if info else ''
+        dn = f'<display-name>{esc(name)}</display-name>' if name else ''
+        return f'<{tag}{a}><uri-entry>{esc(uri)}</uri-entry>{dn}{ext}</{tag}>'
+
+    # 소속 그룹(멤버) — 소유(authorized_user)만으로는 목록에 넣지 않는다(_is_group_member 와 다른 기준).
+    my_groups = sorted(((g_uri, g) for g_uri, g in GROUPS.items()
+                        if any(_uri_eq(m.get('uri'), user_uri) for m in g.get('members', []))),
+                       key=lambda x: x[0])
+    owner_ext = '<anyExt><cims:authorized-user>true</cims:authorized-user></anyExt>'
+    group_entries = ''.join(
+        et('entry', g_uri, g.get('display_name'),
+           ext=owner_ext if (owner_uid is not None and g.get('authorized_user_id') == owner_uid) else '')
+        for g_uri, g in my_groups)
+    implicit_entries = ''.join(et('entry', g_uri, g.get('display_name')) for g_uri, g in my_groups)
+
+    # 연락처 = 동료 멤버(본인 제외, 정규화 키로 중복 제거, URI 순 — ETag 안정)
+    contacts = {}
+    for _, g in my_groups:
+        for mbr in g.get('members', []):
+            u = mbr.get('uri') or ''
+            if not u or _uri_eq(u, user_uri):
+                continue
+            contacts.setdefault(_norm_mcptt_uri(u), (u, mbr.get('name') or u))
+    contact_entries = ''.join(et('PrivateCallURI', u, n) for _, (u, n) in sorted(contacts.items()))
+
+    # 긴급 그룹 대상 entry — 항상 존재(§8.3.2.1 8e). 전용 그룹이 지정돼 있으면 DedicatedGroup, 아니면(모드가
+    #   UseCurrentlySelectedGroup 이거나 DedicatedGroup 인데 미지정) UseCurrentlySelectedGroup + 폴백 uri-entry
+    #   (지정 그룹 > 첫 소속 그룹 > 본인 URI — 소속 그룹이 없는 퇴화 케이스, 그룹콜 자체가 불가하므로 무해).
+    dedicated = bool(mode == 'DedicatedGroup' and egid)
+    eg_uri = _group_uri(egid) if egid else (my_groups[0][0] if my_groups else user_uri)
+    eg_entry = et('entry', eg_uri, GROUPS.get(eg_uri, {}).get('display_name'),
+                  'DedicatedGroup' if dedicated else 'UseCurrentlySelectedGroup')
+    # 긴급 사설콜 수신자 entry — 항상 존재(§8.3.2.1 8d·10f). 사전 지정이면 UsePreConfigured, 아니면 LocallyDetermined
+    #   + 폴백 uri-entry(§8.3.2.7: 선택 상대가 없을 때 쓰는 값 — 지정 수신자 > 첫 연락처 > 본인 URI(퇴화)).
+    preconfigured = bool(pmode == 'UsePreConfigured' and precip)
+    first_contact = sorted(contacts.items())[0][1][0] if contacts else None
+    pr_uri = f"tel:{precip}" if precip else (first_contact or user_uri)
+    pr_entry = et('entry', pr_uri, None, 'UsePreConfigured' if preconfigured else 'LocallyDetermined')
+    # ProSe(off-network) 미지원 — MCPTTPrivateRecipientEntryType 의 필수 자식 ProSeUserID-entry 는 User-Info-ID 영값
+    #   (6옥텟 hex, §8.3.2.7 "shall be 6 octets")로 채운다.
+    prose_entry = '<ProSeUserID-entry><User-Info-ID>000000000000</User-Info-ID></ProSeUserID-entry>'
+
+    def _b(k, default=True):
+        return "true" if prof.get(k, default) else "false"
+
+    # 인가 = 운영자 allow_* AND 대상 결정 가능 여부 — DedicatedGroup 모드에 긴급그룹 미지정이면 그룹 긴급 개시·경보,
+    #   UsePreConfigured 모드에 수신자 미지정이면 긴급 사설콜을 미인가로 내린다(CSP 의 403 판정과 같은 규칙,
+    #   mcptt_emergency_modes.md §5). 요소 생략이 아니라 ruleset 이 인가를 말하는 것이 규격의 방식이다.
+    group_target_ok = not (mode == 'DedicatedGroup' and not egid)
+    private_target_ok = not (pmode == 'UsePreConfigured' and not precip)
+
+    def _ba(k, ok, default=True):
+        return "true" if (prof.get(k, default) and ok) else "false"
+
+    org = str(_user_profile_cfg('MissionCriticalOrganization') or _ue_init_cfg('Name') or _UE_INIT_DEFAULTS['Name'])
+    n6 = int(_user_profile_cfg('MaxSimultaneousCallsN6'))
+    n7 = int(_user_profile_cfg('MaxSimultaneousTransmissionsN7'))
+    prio = int(_user_profile_cfg('Priority'))
+    n2 = int(SERVICE_CONFIG.get('max_affiliations_n2') or 0)
+
+    # <Common>
+    # alias-entry 의 index 는 XSD 상 선택(IndexType, use 없음)이지만 필수로 읽는 단말이 있어 병기한다(규격 위반 아님).
+    common = f'<UserAlias><alias-entry index="1">{esc(display_name)}</alias-entry></UserAlias>'
+    common += et('MCPTTUserID', user_uri)
+    # PrivateCall 은 항상(8d "shall include one"). PrivateCallList 는 "one or more" 라 연락처가 없으면 폴백 수신자
+    #   (지정 수신자 > 본인 URI — 퇴화) 하나를 싣는다. MCPTTPrivateCallType 은 sequence: PrivateCallList → EmergencyCall.
+    pc_list = contact_entries or et('PrivateCallURI', pr_uri)
+    pc_emerg = f'<EmergencyCall><MCPTTPrivateRecipient>{pr_entry}{prose_entry}</MCPTTPrivateRecipient></EmergencyCall>'
+    common += f'<PrivateCall><PrivateCallList>{pc_list}</PrivateCallList>{pc_emerg}</PrivateCall>'
+    gc = f'<MaxSimultaneousCallsN6>{n6}</MaxSimultaneousCallsN6>'
+    # EmergencyCall 을 ImminentPerilCall 앞에 — 첫 MCPTTGroupInitiation 을 SOS 대상으로 읽는 단말 호환
+    gc += f'<EmergencyCall><MCPTTGroupInitiation>{eg_entry}</MCPTTGroupInitiation></EmergencyCall>'
+    gc += f'<ImminentPerilCall><MCPTTGroupInitiation>{eg_entry}</MCPTTGroupInitiation></ImminentPerilCall>'
+    gc += f'<EmergencyAlert>{eg_entry}</EmergencyAlert>'
+    gc += f'<Priority>{prio}</Priority>'
+    common += f'<MCPTT-group-call>{gc}</MCPTT-group-call>'
+    common += f'<MissionCriticalOrganization>{esc(org)}</MissionCriticalOrganization>'
+
+    # <OnNetwork>
+    on = ''
+    if group_entries:
+        on += f'<MCPTTGroupInfo>{group_entries}</MCPTTGroupInfo>'
+    on += f'<MaxAffiliationsN2>{n2}</MaxAffiliationsN2>'
+    if implicit_entries:
+        on += f'<ImplicitAffiliations>{implicit_entries}</ImplicitAffiliations>'
+    on += f'<MaxSimultaneousTransmissionsN7>{n7}</MaxSimultaneousTransmissionsN7>'
+    on += f'<PrivateEmergencyAlert>{pr_entry}</PrivateEmergencyAlert>'   # 10f) "shall include one"
 
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <mcptt-user-profile xmlns="urn:3gpp:mcptt:user-profile:1.0"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:cp="urn:ietf:params:xml:ns:common-policy"
   xmlns:cims="urn:cims:mcptt:ext:1.0"
-  user-profile-index="1">
-  <Name>
-    <display-name xml:lang="en">{display_name}</display-name>
-  </Name>
-  <Common>
-    <MCPTTUserID>{user_uri}</MCPTTUserID>
-    <MCPTT-group-call>
-      <EmergencyCall>
-        <MCPTTGroupInitiation>
-          <entry entry-info="{mode}">{uri_entry}</entry>
-        </MCPTTGroupInitiation>
-      </EmergencyCall>
-      <EmergencyAlert>
-        <entry entry-info="{mode}">{uri_entry}</entry>
-      </EmergencyAlert>
-    </MCPTT-group-call>
-    <PrivateCall>
-      <MaxSimultaneousCallsN6>1</MaxSimultaneousCallsN6>
-      <MaxCallsN7>1</MaxCallsN7>
-      <EmergencyCall>
-        <MCPTTPrivateRecipient>
-          <entry entry-info="{pmode}">{priv_uri_entry}</entry>
-        </MCPTTPrivateRecipient>
-      </EmergencyCall>
-    </PrivateCall>
-  </Common>
-  <ruleset>
-    <rule id="mcptt-user-authorisation">
-      <actions>
-        <allow-emergency-group-call>{_b('allow_emergency_call')}</allow-emergency-group-call>
-        <allow-activate-emergency-alert>{_b('allow_emergency_alert')}</allow-activate-emergency-alert>
-        <allow-cancel-emergency-alert>{_b('allow_emergency_alert')}</allow-cancel-emergency-alert>
-        <allow-emergency-private-call>{_b('allow_emergency_private_call')}</allow-emergency-private-call>
-        <allow-ambient-listening>{"true" if prof.get('allow_ambient_listening') else "false"}</allow-ambient-listening>
+  XUI-URI="{esc(user_uri)}" user-profile-index="1">
+  <Name xml:lang="en">{esc(display_name)}</Name>
+  <Status>true</Status>
+  <Common index="1">{common}</Common>
+  <cp:ruleset>
+    <cp:rule id="mcptt-user-authorisation">
+      <cp:actions>
+        <allow-emergency-group-call>{_ba('allow_emergency_call', group_target_ok)}</allow-emergency-group-call>
+        <allow-activate-emergency-alert>{_ba('allow_emergency_alert', group_target_ok)}</allow-activate-emergency-alert>
+        <allow-cancel-emergency-alert>{_ba('allow_emergency_alert', group_target_ok)}</allow-cancel-emergency-alert>
+        <allow-emergency-private-call>{_ba('allow_emergency_private_call', private_target_ok)}</allow-emergency-private-call>
+        <allow-ambient-listening>{_b('allow_ambient_listening', False)}</allow-ambient-listening>
         <cims:allow-adhoc-group-call>{_b('allow_adhoc_call')}</cims:allow-adhoc-group-call>
-        <cims:allow-create-group>{"true" if prof.get('allow_create_group') else "false"}</cims:allow-create-group>
-      </actions>
-    </rule>
-  </ruleset>
-  <OnNetwork>
-    <MCPTTUserID>{user_uri}</MCPTTUserID>
-  </OnNetwork>
+        <cims:allow-create-group>{_b('allow_create_group', False)}</cims:allow-create-group>
+      </cp:actions>
+    </cp:rule>
+  </cp:ruleset>
+  <OnNetwork index="1">{on}</OnNetwork>
 </mcptt-user-profile>"""
     return xml, _content_etag(xml)
 
@@ -1803,8 +2037,11 @@ async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
         # 7. 성공 - 토큰 발급 (sub=login_id, mcptt_id=서비스 신원 분리. nonce 반영)
         login_id = auth_data.get("login_id") or auth_data.get("user_id")
         mcptt_id = auth_data.get("mcptt_id", login_id)
-        scope = auth_data.get("scope", "")
         nonce = auth_data.get("nonce", "")
+        # 허가 scope = 요청 ∩ 카탈로그(별칭 확장). 제외분은 로그 + 응답 `scope` 로 실제 허가분을 알린다(RFC 6749 §5.1).
+        scope, dropped = grant_scope(auth_data.get("scope", ""))
+        if dropped:
+            logger.log_info(f"[IdMS] scope not granted (unknown): {' '.join(dropped)} login_id={login_id}")
 
         id_token, access_token, refresh_token = create_tokens(
             login_id, scope, client_id, nonce=nonce, mcptt_id=mcptt_id)
@@ -1812,13 +2049,14 @@ async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
         # auth-code 삭제 (1회성)
         storage.delete_auth_code(code)
         
-        logger.log_info(f"Token issued for login_id={login_id} mcptt_id={mcptt_id}")
+        logger.log_info(f"Token issued for login_id={login_id} mcptt_id={mcptt_id} scope={scope}")
         return HandlerResult(status=200, body={
             "access_token": access_token,
             "refresh_token": refresh_token,
             "id_token": id_token,
             "token_type": "Bearer",
-            "expires_in": 3600
+            "expires_in": ACCESS_TOKEN_TTL,
+            "scope": scope,
         }, media_type="application/json")
     
     # ==================== refresh_token ====================
@@ -1857,14 +2095,16 @@ async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
         granted_scope = token_data.get("scope", "") or ""
 
         # scope 분리: refresh 요청이 scope 를 명시하면 원 grant 의 subset 으로 좁혀 발급한다.
-        #   (AccountManager 가 authTokenType 별로 provisioning / mcptt 토큰을 따로 받기 위함.)
+        #   (AccountManager 가 authTokenType 별로 provisioning / MC 서비스 토큰을 따로 받기 위함.)
+        #   양쪽을 별칭 확장한 뒤 교집합 — 이행 전 발급된 refresh(구 scope 문자열 저장)도 재로그인 없이 이어진다.
+        granted_full = expand_scopes(granted_scope)
         requested_scope = (data.get('scope') or "").strip()
         if requested_scope:
-            granted_set = set(granted_scope.split())
-            req = [s for s in requested_scope.split() if s in granted_set]
-            scope = " ".join(req) if req else granted_scope   # 교집합 없으면 원 scope 유지
+            _gs = set(granted_full)
+            req = [s for s in expand_scopes(requested_scope) if s in _gs]
+            scope = " ".join(req) if req else " ".join(granted_full)   # 교집합 없으면 원 scope 유지
         else:
-            scope = granted_scope
+            scope = " ".join(granted_full)
 
         # 새 토큰 발급 — access 는 좁힌 scope, refresh 는 원 grant(broad) 보존(다음 다른-용도 refresh 가능).
         id_token, access_token, new_refresh_token = create_tokens(
@@ -1873,13 +2113,14 @@ async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
         # 기존 토큰 회수
         storage.revoke_refresh_token(refresh_token, rotated_to=new_refresh_token)
         
-        logger.log_info(f"Refresh token rotated for user: {login_id}")
+        logger.log_info(f"Refresh token rotated for user: {login_id} scope={scope}")
         return HandlerResult(status=200, body={
             "access_token": access_token,
             "refresh_token": new_refresh_token,
             "id_token": id_token,
             "token_type": "Bearer",
-            "expires_in": 3600
+            "expires_in": ACCESS_TOKEN_TTL,
+            "scope": scope,
         }, media_type="application/json")
     
     return HandlerResult(status=400, body={"error": "unsupported_grant_type"}, media_type="application/json")
@@ -1901,6 +2142,28 @@ _NS = {
     'gi': 'urn:3gpp:ns:mcpttGroupInfo:1.0',
     'cims': 'urn:cims:groupinfo:1.0',
 }
+
+
+def _admin_manages_group(payload: dict, group: Optional[dict]) -> bool:
+    """관리 범위(dispatch_groups.directory_admin)로 그룹을 관리할 수 있는가 — 소유자가 아니어도 그룹 org_code 가 범위 안이면
+    GET/PUT/DELETE 허용(신규 생성은 allow_create_group 없이도). handlers/dispatch_directory.admin_scope 와 같은 판정."""
+    conn = _db_connect()
+    if conn is None:
+        return False
+    try:
+        from handlers import dispatch_directory as _dd
+        with conn:
+            with conn.cursor() as cur:
+                _msisdn, uid = _dd.caller_identity(cur, payload)
+                scope = _dd.admin_scope(cur, uid)
+                if not scope:
+                    return False
+                if group is None:
+                    return True
+                return _dd.in_scope(scope, (group.get('org_code') or ''))
+    except Exception as e:
+        logger.log_warning(f"[GMS] admin scope check failed: {e}")
+        return False
 
 
 def _token_user_id(payload: dict) -> Optional[int]:
@@ -2121,9 +2384,10 @@ def _json_result(status: int, body: dict, headers=None) -> HandlerResult:
 # GMS: List groups for a user
 # GET /org.openmobilealliance.groups/users/{user_uri}
 async def handle_user_groups(args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    # scope 검사는 진입점 handle_group_management 가 수행(여기는 그 위임 대상 — 중복 로그 방지).
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
-        return HandlerResult(status=401, body="Missing or Invalid Token")
+        return unauthorized(args)
 
     from urllib.parse import unquote
     path = args.full_path
@@ -2158,7 +2422,11 @@ async def handle_user_groups(args: HandlerArgs, kwargs: dict) -> HandlerResult:
 async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
-        return HandlerResult(status=401, body="Missing or Invalid Token")
+        return unauthorized(args)
+    # GMS scope — 그룹 문서가 MCPTT/MCData 공용이라 둘 중 하나면 통과 (TS 33.180 B.4.2.2).
+    deny = require_scope(args, token_payload, 'GMS', SCOPE_PTT_GMS, SCOPE_DATA_GMS)
+    if deny:
+        return deny
 
     path = args.full_path
     parts = [p for p in path.split('/') if p]
@@ -2196,7 +2464,7 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
         if args.method == 'GET':
             # 인가 (item 2): 멤버(또는 authorized_user)만 그룹 문서 열람 (TS 24.481).
             grp = GROUPS.get(group_uri)
-            if grp and not _is_group_member(grp, requester):
+            if grp and not _is_group_member(grp, requester) and not _admin_manages_group(token_payload, grp):
                 logger.log_error(f"[GMS] Forbidden: '{requester}' not a member of group '{group_uri}'")
                 return HandlerResult(status=403, body="Forbidden: not a member of this group")
             xml, etag = get_group_xml(group_uri)
@@ -2220,14 +2488,16 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
                 err = validate_new_gms_group_id(gid, dom)
                 if err:
                     return _json_result(400, {'error': 'invalid_group_id', 'detail': err})
-                if not get_user_profile(_requester_ptt_id(token_payload)).get('allow_create_group'):
+                if not get_user_profile(_requester_ptt_id(token_payload)).get('allow_create_group') \
+                        and not _admin_manages_group(token_payload, None):
                     logger.log_error(f"[GMS] PUT {gid} denied: '{requester}' lacks allow_create_group")
                     return _json_result(403, {'error': 'group_creation_not_allowed'})
                 if my_uid is None:
                     return _json_result(403, {'error': 'group_creation_not_allowed', 'detail': 'token subject has no users.id'})
             else:
                 owner = existing.get('authorized_user_id')
-                if my_uid is None or owner != my_uid:
+                # 소유자 또는 관리 범위(directory_admin) 안의 그룹 — 관리자는 소유권을 뺏지 않는다(authorized_user 유지).
+                if (my_uid is None or owner != my_uid) and not _admin_manages_group(token_payload, existing):
                     logger.log_error(f"[GMS] PUT {gid} denied: '{requester}' is not the owner (owner={owner})")
                     # 타인 소유 = 409(클라이언트 명명 id 충돌 — 다른 id 로 다시), 소유자 없음(콘솔 생성) = 403.
                     if owner is not None and my_uid is not None:
@@ -2270,7 +2540,8 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
             if existing is None:
                 return _json_result(404, {'error': 'not_found'})
             my_uid = _token_user_id(token_payload)
-            if my_uid is None or existing.get('authorized_user_id') != my_uid:
+            if (my_uid is None or existing.get('authorized_user_id') != my_uid) \
+                    and not _admin_manages_group(token_payload, existing):
                 logger.log_error(f"[GMS] DELETE {gid} denied: '{requester}' is not the owner")
                 return _json_result(403, {'error': 'not_group_owner'})
             if not _DB_CONFIG:
@@ -2317,7 +2588,10 @@ async def handle_user_profile(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     # (로깅은 pi_http post_hook 에서 자동 처리)
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
-        return HandlerResult(status=401, body="Missing or Invalid Token")
+        return unauthorized(args)
+    deny = require_scope(args, token_payload, 'CMS', SCOPE_PTT_CMS)
+    if deny:
+        return deny
         
     path = args.full_path
     try:
@@ -2337,7 +2611,7 @@ async def handle_user_profile(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     # 문서 생성은 **토큰의 정본 신원**으로 — 경로 XUI 는 표기 변형(sip:user@domain 완전형 등)일
     #   수 있고 USERS 키는 tel: 정본이라, 원문 조회는 본인인데도 404 가 난다(시뮬레이터 실측).
     #   본인 확인(_uri_eq)을 통과했으므로 두 표기는 동일 인물이다.
-    xml, etag = get_user_profile_xml(token_payload.get('mcptt_id'))
+    xml, etag = get_user_profile_xml(token_payload.get('mcptt_id'), owner_uid=_token_user_id(token_payload))
 
     if xml:
         if_none_match = args.headers.get('if-none-match', '')
@@ -2353,7 +2627,10 @@ async def handle_service_config(args: HandlerArgs, kwargs: dict) -> HandlerResul
     # (로깅은 pi_http post_hook 에서 자동 처리)
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
-        return HandlerResult(status=401, body="Missing or Invalid Token")
+        return unauthorized(args)
+    deny = require_scope(args, token_payload, 'CMS', SCOPE_PTT_CMS)
+    if deny:
+        return deny
         
     path = args.full_path
     try:
@@ -2384,7 +2661,10 @@ async def handle_service_config(args: HandlerArgs, kwargs: dict) -> HandlerResul
 async def handle_kms_init(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
-        return HandlerResult(status=401, body="Missing or Invalid Token")
+        return unauthorized(args)
+    deny = require_scope(args, token_payload, 'KMS', SCOPE_PTT_KMS, SCOPE_DATA_KMS)
+    if deny:
+        return deny
         
     user_uri = token_payload.get('mcptt_id')
     logger.log_info(f"[KMS] Init: {user_uri}")
@@ -2395,7 +2675,10 @@ async def handle_kms_init(args: HandlerArgs, kwargs: dict) -> HandlerResult:
 async def handle_kms_keyprov(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
-        return HandlerResult(status=401, body="Missing or Invalid Token")
+        return unauthorized(args)
+    deny = require_scope(args, token_payload, 'KMS', SCOPE_PTT_KMS, SCOPE_DATA_KMS)
+    if deny:
+        return deny
         
     user_uri = token_payload.get('mcptt_id')
     logger.log_info(f"[KMS] Key Provision: {user_uri}")
@@ -2424,14 +2707,18 @@ async def handle_token_introspect(args: HandlerArgs, kwargs: dict) -> HandlerRes
 
     payload = validate_access_token(token)
     if payload:
-        scope = payload.get("scope", [])
+        # scope 는 RFC 7662 대로 공백 구분 문자열. 이행 전 발급(배열) 토큰도 같은 형으로 돌려준다.
         return HandlerResult(status=200, body={
             "active": True,
+            "sub": payload.get("sub"),
+            "iss": payload.get("iss"),
+            "client_id": payload.get("client_id"),
             "mcptt_id": payload.get("mcptt_id"),
+            "mcdata_id": payload.get("mcdata_id") or payload.get("mcptt_id"),
             "aud": payload.get("aud"),
             "exp": payload.get("exp"),
             "iat": payload.get("iat"),
-            "scope": " ".join(scope) if isinstance(scope, list) else scope
+            "scope": " ".join(expand_scopes(payload.get("scope") or [])),
         }, media_type="application/json")
     else:
         return HandlerResult(status=200, body={"active": False}, media_type="application/json")
@@ -2450,10 +2737,12 @@ async def handle_openid_config(args: HandlerArgs, kwargs: dict) -> HandlerResult
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "response_types_supported": ["code"],
         "code_challenge_methods_supported": ["S256"],
-        "scopes_supported": ["openid", "3gpp:mcptt:ptt_server"],
+        # 신 이름(TS 33.180 B.4.2.2) + 전환기 별칭(구 단말). MCVideo 미지원.
+        "scopes_supported": [SCOPE_OPENID, SCOPE_PROVISIONING, *SCOPE_MC_SERVICES, SCOPE_LEGACY_MCPTT],
         "subject_types_supported": ["public"],
         "id_token_signing_alg_values_supported": ["HS256"],
-        "claims_supported": ["sub", "iss", "iat", "exp", "aud", "mcptt_id", "nonce", "scope"],
+        "claims_supported": ["sub", "iss", "iat", "exp", "aud", "nonce", "scope", "client_id",
+                             "mcptt_id", "mcdata_id"],
     }
     return HandlerResult(status=200, body=doc, media_type="application/json")
 
@@ -2499,7 +2788,7 @@ def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: st
         # SIP Digest 자료 (sip_access_security.md §4.7). sipHa1 = H(A1)=MD5(imsi@domain:realm:pw) —
         #   단말은 이것만으로 response 를 계산한다(pjsip PJSIP_CRED_DATA_DIGEST). CIMS 로그인(IdMS)
         #   비번과 별개. sipPassword 는 항상 null(§4.7 ⑤ — 평문 미배포, 키는 단말 호환으로 유지).
-        #   sipHa1 도 없으면 단말이 로그인 비번으로 ha1 을 계산한다.
+        #   sipHa1 도 없으면 단말은 SIP 계정을 구성하지 않는다(로그인 비번은 IdMS 자격 — SIP 에 쓰지 않음).
         "sipHa1": sip_ha1 or None,
         "sipPassword": None,
         # 인증 체계 (sip_access_security.md §8.2). aka 면 소프트-K 프로비저닝 — 단말이 USIM 역할이므로
@@ -2616,6 +2905,21 @@ def _content_etag_json(obj) -> str:
     return '"' + hashlib.sha256(canon.encode('utf-8')).hexdigest()[:32] + '"'
 
 
+_HAS_DIR_ADMIN_COL = None
+
+
+def _has_directory_admin_column(cur) -> bool:
+    """dispatch_groups.directory_admin(sql/migrate_dispatch_directory_admin.sql) — 미적용 DB 는 'none'."""
+    global _HAS_DIR_ADMIN_COL
+    if _HAS_DIR_ADMIN_COL is None:
+        try:
+            cur.execute("SHOW COLUMNS FROM dispatch_groups LIKE 'directory_admin'")
+            _HAS_DIR_ADMIN_COL = cur.fetchone() is not None
+        except Exception:
+            _HAS_DIR_ADMIN_COL = False
+    return _HAS_DIR_ADMIN_COL
+
+
 def dispatch_discovery(cur, user_id) -> Optional[dict]:
     """관제 데스크 블록 = 소속 관제 그룹 속성 + **서버가 범위 enum 을 해석한 대상 목록**.
 
@@ -2628,9 +2932,11 @@ def dispatch_discovery(cur, user_id) -> Optional[dict]:
     - etag         블록 내용 파생 — 앱은 재조회 결과의 대상 변경을 값 비교로 안다.
     앱은 enum 을 해석하지 않는다. 범위 판정 규칙은 CSP(게이트)와 여기(목록) 두 곳에만 있고 같아야 한다.
     관제 그룹 미소속이면 None. 테이블 미적용 DB 는 예외 — 호출자가 블록을 생략한다."""
+    da_col = ", g.directory_admin" if _has_directory_admin_column(cur) else ", 'none'"
     cur.execute("SELECT g.id, g.name, COALESCE(g.pilot_id,''), g.monitor_scope, g.ptt_listen, "
-                "g.listen_visibility FROM dispatch_group_members m "
+                f"g.listen_visibility{da_col}, COALESCE(o.code,'') FROM dispatch_group_members m "
                 "JOIN dispatch_groups g ON g.id=m.group_id "
+                "LEFT JOIN organizations o ON o.id=g.org_id "
                 "JOIN volte_subscriptions s ON s.id=m.user_id WHERE s.user_id=%s LIMIT 1", (user_id,))
     dg = cur.fetchone()
     if not dg:
@@ -2638,6 +2944,8 @@ def dispatch_discovery(cur, user_id) -> Optional[dict]:
     gid = dg[0]
     scope = dg[3] or "none"
     ptt_listen = dg[4] or "none"
+    directory_admin = dg[6] or "none"
+    org_code = dg[7] or ""
     # members — 범위별로 WHERE 만 다르고 투영·정렬은 하나.
     member_sql = ("SELECT u.id, u.name, s.id, COALESCE(m.group_id,''), "
                   "(SELECT MIN(p.id) FROM ptt_subscriptions p WHERE p.user_id=u.id) "
@@ -2666,8 +2974,11 @@ def dispatch_discovery(cur, user_id) -> Optional[dict]:
     else:
         rows = []
     targets = [{"id": mid, "uri": _group_uri(mid), "name": name or ""} for mid, name in rows]
+    # directoryAdmin — 관제 앱의 조직/구성원/번호·PTT 그룹 관리 범위(none|own|all, own = orgCode 하위). 쓰기 API 는
+    #   handlers/dispatch_directory.py 가 같은 규칙으로 게이트한다(dispatch_center.md §3.4).
     block = {"groupId": gid, "groupName": dg[1] or "", "pilotId": dg[2] or "",
              "monitorScope": scope, "pttListen": ptt_listen, "listenVisibility": dg[5] or "hidden",
+             "directoryAdmin": directory_admin, "orgCode": org_code,
              "members": members, "pttTargets": targets}
     block["etag"] = _content_etag_json(block)
     return block
@@ -2676,7 +2987,7 @@ def dispatch_discovery(cur, user_id) -> Optional[dict]:
 async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     token = extract_token(args.headers.get('authorization') or args.headers.get('Authorization'))
     if not token:
-        return HandlerResult(status=401, body={"error": "invalid_token"}, media_type="application/json")
+        return unauthorized(args)
     # scope 분리: provisioning 토큰만 허용(빈 scope=레거시 허용). mcptt 전용 토큰은 거부 → 평면 혼용 방지.
     _sc = token.get('scope') or []
     if isinstance(_sc, str):
@@ -2684,7 +2995,8 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
     if _sc and SCOPE_PROVISIONING not in _sc:
         return HandlerResult(status=403,
                              body={"error": "insufficient_scope", "required": SCOPE_PROVISIONING},
-                             media_type="application/json")
+                             media_type="application/json",
+                             headers=_bearer_challenge('insufficient_scope', SCOPE_PROVISIONING))
     msisdn = _msisdn_from_id(token.get('mcptt_id') or token.get('sub') or '')
     # 시그널링(CSP/PSP) host 폴백 = 요청 Host (올인원 전제). CSC 자기 주소는 공개 URL 정본에서.
     host_ip = (args.headers.get('host') or args.headers.get('Host') or '').split(':')[0]
@@ -2822,13 +3134,14 @@ async def handle_provisioning_history(args: HandlerArgs, kwargs: dict) -> Handle
     **범위 안의 지난 이력**만 커서로 준다. 범위 밖·관제 미소속은 403. 열람은 감사(E-AUD-016 tap_mode=history)."""
     token = extract_token(args.headers.get('authorization') or args.headers.get('Authorization'))
     if not token:
-        return HandlerResult(status=401, body={"error": "invalid_token"}, media_type="application/json")
+        return unauthorized(args)
     _sc = token.get('scope') or []
     if isinstance(_sc, str):
         _sc = _sc.split()
     if _sc and SCOPE_PROVISIONING not in _sc:
         return HandlerResult(status=403, body={"error": "insufficient_scope", "required": SCOPE_PROVISIONING},
-                             media_type="application/json")
+                             media_type="application/json",
+                             headers=_bearer_challenge('insufficient_scope', SCOPE_PROVISIONING))
     qp = getattr(args, 'query_params', None) or {}
 
     def _q(name, default=None):
@@ -2843,6 +3156,7 @@ async def handle_provisioning_history(args: HandlerArgs, kwargs: dict) -> Handle
                              media_type="application/json")
     from services import dispatch_history as _dh
     since_dt = _dh.parse_ts(_q('since'))
+    until_dt = _dh.parse_ts(_q('until'))                 # 창 조회(이력 화면) — 없으면 폴링 커서(now 까지)
     try:
         limit = int(_q('limit', 200))
     except (TypeError, ValueError):
@@ -2866,8 +3180,13 @@ async def handle_provisioning_history(args: HandlerArgs, kwargs: dict) -> Handle
                 if r:
                     user_id = r[0]
                     break
+            group_key_of = {}
             if user_id is not None:
                 scope = _dispatch_scope_sets(cur, user_id)
+                # 청취 그룹 → 녹취 저장 키(ptt_groups.id) — PTT 창 조회가 OAM 세션 인덱스를 그 키로 좁힌다.
+                if kind == "ptt" and until_dt is not None and scope and scope.get("ptt_groups"):
+                    cur.execute("SELECT id, mcptt_group_id FROM ptt_groups")
+                    group_key_of = {str(r[0]): r[1] for r in (cur.fetchall() or [])}
         finally:
             conn.close()
     except Exception as e:
@@ -2878,11 +3197,25 @@ async def handle_provisioning_history(args: HandlerArgs, kwargs: dict) -> Handle
     if not scope:
         return HandlerResult(status=403, body={"error": "no_monitor_scope"}, media_type="application/json")
 
-    items, next_since = _dh.query(_SERVICE_LOG_DIR, kind, scope, since_dt, limit)
+    # PTT 창 조회(이력 화면) = 콘솔 PTT 이력의 읽기 모델(OAM ptt_index — 발언 턴·화자·발화·동시 발언·참여자)을 프록시.
+    #   범위 = 청취 그룹의 저장 키. OAM 에 닿지 않으면 파일 스캔으로 폴백(지표 없음). 폴링(until 없음)은 파일 스캔.
+    items = None
+    if kind == "ptt" and until_dt is not None:
+        from handlers import dispatch_recordings as _dr
+        w_since, w_until = _dh.window(since_dt, until_dt)
+        keys = {k for k, g in group_key_of.items() if g in scope["ptt_groups"]}
+        oam_items = _dr.fetch_ptt_sessions(_OAM_CONFIG, w_since, w_until, keys)
+        if oam_items is not None:
+            rows = [r for r in (_dh.ptt_row_from_oam(it, _SERVICE_LOG_DIR) for it in oam_items)
+                    if r and r["groupId"] in scope["ptt_groups"]]
+            items, next_since, hours = _dh.finish_rows(rows, w_since, w_until, limit)
+    if items is None:
+        items, next_since, hours = _dh.query_ex(_SERVICE_LOG_DIR, kind, scope, since_dt, limit, until_dt)
     # 앱(HistoryClient) 와이어 계약 — dispatch_desktop_ui.md §13 / android_ue_provisioning.md §3-2.
-    #   items[]{id,time,kind,event,from,to,group,duration,emergency,text} + 최상위 next + 응답 ETag/304.
+    #   items[]{id,time,kind,event,from,to,group,duration,emergency,text,recordingId,hasRecording + 종류별 확장 필드}
+    #   + 최상위 next·hours(시간대 분포) + 응답 ETag/304.
     wire = [_dh.format_item(r) for r in items]
-    body = {"items": wire, "next": next_since}
+    body = {"items": wire, "next": next_since, "hours": hours}
     etag = _content_etag_json(body)
     inm = args.headers.get('if-none-match') or args.headers.get('If-None-Match')
     if inm and inm == etag:
@@ -2919,14 +3252,15 @@ async def handle_provisioning_directory(args: HandlerArgs, kwargs: dict) -> Hand
     """
     token = extract_token(args.headers.get('authorization') or args.headers.get('Authorization'))
     if not token:
-        return HandlerResult(status=401, body={"error": "invalid_token"}, media_type="application/json")
+        return unauthorized(args)
     _sc = token.get('scope') or []
     if isinstance(_sc, str):
         _sc = _sc.split()
     if _sc and SCOPE_PROVISIONING not in _sc:
         return HandlerResult(status=403,
                              body={"error": "insufficient_scope", "required": SCOPE_PROVISIONING},
-                             media_type="application/json")
+                             media_type="application/json",
+                             headers=_bearer_challenge('insufficient_scope', SCOPE_PROVISIONING))
     if not _DB_CONFIG:
         return HandlerResult(status=503, body={"error": "db_unavailable"}, media_type="application/json")
 

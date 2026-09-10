@@ -312,6 +312,7 @@ std::string dispatchJson(const DispatchProfile& d) {
         tgt += std::string(tgt.empty() ? "" : ",") + "{\"id\":\"" + jsonEsc(t.id) + "\",\"uri\":\"" + jsonEsc(t.uri) + "\",\"name\":\"" + jsonEsc(t.name) + "\"}";
     return "{\"group_id\":\"" + jsonEsc(d.groupId) + "\",\"group_name\":\"" + jsonEsc(d.groupName) + "\",\"pilot_id\":\"" + jsonEsc(d.pilotId) +
            "\",\"monitor_scope\":\"" + d.monitorScope + "\",\"ptt_listen\":\"" + d.pttListen + "\",\"listen_visibility\":\"" + d.listenVisibility +
+           "\",\"directory_admin\":\"" + d.directoryAdmin + "\",\"org_code\":\"" + jsonEsc(d.orgCode) +
            "\",\"members\":[" + mem + "],\"ptt_targets\":[" + tgt + "]}";
 }
 

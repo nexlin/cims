@@ -32,7 +32,7 @@ source "$SCRIPT_DIR/scripts/lib/common.sh" || {
 # 본 스크립트 대화형 모드의 저장분 — 재실행/verify 자동 호출 간 멱등성 보장.
 _INIT_CFG="${SRC_DIR:-$SCRIPT_DIR}/.cims/server.local.json"
 _CFG_SAVED_KEYS="csp_ip psp_ip isp_ip cmp_ip pmp_ip imp_ip cmdp_ip cwrtc_ip csc_host \
-db_host db_user volte_domain ptt_domain country_code \
+db_host db_user volte_domain ptt_domain volte_service ptt_service country_code plmn \
 msg_log_dir service_log_dir record_dir"
 eval "$(cims_local_cfg_eval "$_INIT_CFG" $_CFG_SAVED_KEYS)"
 
@@ -53,7 +53,10 @@ DB_USER="${_init_db_user:-cims}"
 DB_PASSWORD="${CIMS_DB_PASSWORD:-${_init_db_password:-cims1234}}"
 VOLTE_DOMAIN="${_init_volte_domain:-}"
 PTT_DOMAIN="${_init_ptt_domain:-}"
+VOLTE_SERVICE="${_init_volte_service:-}"   # CSP access_services.name (= 가입 service_ref) — csc Provisioning.Services.volte.name
+PTT_SERVICE="${_init_ptt_service:-}"       # 〃 PTT
 COUNTRY_CODE="${_init_country_code:-}"
+PLMN="${_init_plmn:-}"                      # HPLMN MCC+MNC — csc UeInitConfig.Hplmn.Plmn (ue-init-config)
 IDMS_JWT_SECRET=""
 CIMS_JWT_SECRET=""
 MSG_LOG_DIR="${_init_msg_log_dir:-}"
@@ -95,9 +98,12 @@ ${BOLD}데이터베이스:${NC}
   --db-password PWD  DB 비밀번호 (기본: cims1234)
 
 ${BOLD}도메인:${NC}
-  --volte-domain DOM  VoLTE SIP 도메인 / 인증 Realm (기본: ims.mnc001.mcc001.3gppnetwork.org)
-  --ptt-domain   DOM  PTT 그룹 통화 SIP 도메인 (기본: volte-domain의 ims→ptt 치환)
+  --volte-domain DOM  VoLTE SIP 도메인 / 인증 Realm (기본: volte.cims.example.kr)
+  --ptt-domain   DOM  PTT 그룹 통화 SIP 도메인 (기본: volte-domain의 volte→ptt 치환)
+  --volte-service N   VoLTE 접속서비스 이름 = CSP access_services.name = 가입 service_ref (기본: volte)
+  --ptt-service   N   PTT 접속서비스 이름 (기본: ptt) — csc.json Provisioning.Services.<kind>.name 으로 기록
   --country-code CC   홈 국가코드(E.164 digits, 단말 번호 로컬 표기용. 기본: 82)
+  --plmn         PLMN HPLMN MCC+MNC — csc.json UeInitConfig.Hplmn.Plmn (ue-init-config, 기본: 45033)
 
 ${BOLD}로그/녹취:${NC}
   --msg-log-dir      DIR  메시지 통계 로그 디렉터리 (기본: DIST_DIR/ext_mnt/msg_log)
@@ -111,7 +117,7 @@ ${BOLD}보안:${NC}
 ${BOLD}예시:${NC}
   # 단일 서버 배포
   $(basename "$0") --local-ip 192.168.1.10 --db-password mypass \\
-                   --volte-domain ims.mnc033.mcc450.3gppnetwork.org
+                   --volte-domain volte.cims.example.kr
 
   # 다중 서버 배포
   $(basename "$0") --csp-ip 192.168.1.10 --cmp-ip 192.168.1.11 \\
@@ -139,7 +145,10 @@ while [[ $# -gt 0 ]]; do
         --db-password)  DB_PASSWORD="$2";   shift 2 ;;
         --volte-domain) VOLTE_DOMAIN="$2";  shift 2 ;;
         --ptt-domain)   PTT_DOMAIN="$2";    shift 2 ;;
+        --volte-service) VOLTE_SERVICE="$2"; shift 2 ;;
+        --ptt-service)   PTT_SERVICE="$2";   shift 2 ;;
         --country-code) COUNTRY_CODE="$2";  shift 2 ;;
+        --plmn)         PLMN="$2";          shift 2 ;;
         --msg-log-dir)      MSG_LOG_DIR="$2";       shift 2 ;;
         --service-log-dir)  SERVICE_LOG_DIR="$2";   shift 2 ;;
         --record-dir)       RECORD_DIR="$2";        shift 2 ;;
@@ -204,11 +213,14 @@ if [[ $INTERACTIVE == "yes" ]]; then
     ask DB_PASSWORD "DB_PASSWORD" "$_pw_label"
 
     ask VOLTE_DOMAIN "VOLTE_DOMAIN (SIP 도메인/인증 Realm)" \
-        "${VOLTE_DOMAIN:-ims.mnc033.mcc450.3gppnetwork.org}"
-    _volte_eff="${VOLTE_DOMAIN:-ims.mnc033.mcc450.3gppnetwork.org}"
-    ask PTT_DOMAIN "PTT_DOMAIN (기본=ims→ptt 치환)" \
-        "${PTT_DOMAIN:-$(echo "$_volte_eff" | sed 's/^ims\./ptt./')}"
+        "${VOLTE_DOMAIN:-volte.cims.example.kr}"
+    _volte_eff="${VOLTE_DOMAIN:-volte.cims.example.kr}"
+    ask PTT_DOMAIN "PTT_DOMAIN (기본=volte→ptt 치환)" \
+        "${PTT_DOMAIN:-$(echo "$_volte_eff" | sed 's/^volte\./ptt./')}"
+    ask VOLTE_SERVICE "VOLTE_SERVICE (CSP 접속서비스 name = 가입 service_ref)" "${VOLTE_SERVICE:-volte}"
+    ask PTT_SERVICE   "PTT_SERVICE   (CSP 접속서비스 name = 가입 service_ref)" "${PTT_SERVICE:-ptt}"
     ask COUNTRY_CODE "COUNTRY_CODE (홈 국가코드, E.164 digits)" "${COUNTRY_CODE:-82}"
+    ask PLMN "PLMN (HPLMN MCC+MNC, ue-init-config)" "${PLMN:-45033}"
 
     read -rp "  로그/녹취 디렉터리 변경? [y/N]: " _yn
     if [[ $_yn =~ ^[yY] ]]; then
@@ -244,7 +256,8 @@ _raw_cmdp_ip="$CMDP_IP"
 _raw_cwrtc_ip="$CWRTC_IP"; _raw_csc_host="$CSC_HOST"
 _raw_db_host="$DB_HOST"; _raw_db_user="$DB_USER"
 _raw_volte_domain="$VOLTE_DOMAIN"; _raw_ptt_domain="$PTT_DOMAIN"
-_raw_country_code="$COUNTRY_CODE"
+_raw_volte_service="$VOLTE_SERVICE"; _raw_ptt_service="$PTT_SERVICE"
+_raw_country_code="$COUNTRY_CODE"; _raw_plmn="$PLMN"
 _raw_msg_log_dir="$MSG_LOG_DIR"; _raw_service_log_dir="$SERVICE_LOG_DIR"
 _raw_record_dir="$RECORD_DIR"
 
@@ -261,9 +274,16 @@ CSC_HOST="${CSC_HOST:-$LOCAL_IP}"
 CSC_IP="$CSC_HOST"            # 템플릿 @CSC_IP@ 별칭 (csp Setup.Csc.Host)
 OAM_IP="${OAM_IP:-$LOCAL_IP}" # 템플릿 @OAM_IP@ — 모듈 FM 자기보고 목적지 (이중화 시 관리평면 VIP)
 DB_HOST="${DB_HOST:-127.0.0.1}"
-VOLTE_DOMAIN="${VOLTE_DOMAIN:-ims.mnc033.mcc450.3gppnetwork.org}"
-PTT_DOMAIN="${PTT_DOMAIN:-$(echo "$VOLTE_DOMAIN" | sed 's/^ims\./ptt./')}"
+VOLTE_DOMAIN="${VOLTE_DOMAIN:-volte.cims.example.kr}"
+PTT_DOMAIN="${PTT_DOMAIN:-$(echo "$VOLTE_DOMAIN" | sed 's/^volte\./ptt./')}"
+# 접속서비스 이름 — CSP 패키지 기본 접속서비스(csp/pkg.json access_services: volte/ptt)와 같은 이름.
+#   가입자 service_ref 가 이 이름을 참조하므로 CSP 의 실제 access_services.name 과 일치해야 한다
+#   (csc 는 CSP 컬렉션을 읽지 않는다 — Provisioning.Services.<kind> 의 다른 키들과 같은 운영 규약).
+VOLTE_SERVICE="${VOLTE_SERVICE:-volte}"
+PTT_SERVICE="${PTT_SERVICE:-ptt}"
 COUNTRY_CODE="${COUNTRY_CODE:-82}"
+# HPLMN PLMN — 도메인이 3GPP 표기(ptt.mncXXX.mccYYY…)가 아니라 유도할 수 없으므로 명시 (IMSI 접두 45033 규약과 일치)
+PLMN="${PLMN:-45033}"
 
 # 로그/녹취 디렉터리 기본값
 SERVICE_LOG_DIR="${SERVICE_LOG_DIR:-$DIST_DIR/ext_mnt/service_log}"
@@ -302,7 +322,10 @@ echo "  CSC_HOST     = $CSC_HOST"
 echo "  DB_HOST      = $DB_HOST / $DB_USER"
 echo "  VOLTE_DOMAIN = $VOLTE_DOMAIN"
 echo "  PTT_DOMAIN   = $PTT_DOMAIN"
+echo "  VOLTE_SERVICE = $VOLTE_SERVICE"
+echo "  PTT_SERVICE   = $PTT_SERVICE"
 echo "  COUNTRY_CODE = +$COUNTRY_CODE"
+echo "  PLMN         = $PLMN"
 echo "  MSG_LOG_DIR     = $MSG_LOG_DIR"
 echo "  SERVICE_LOG_DIR = $SERVICE_LOG_DIR"
 echo "  RECORD_DIR      = $RECORD_DIR"
@@ -328,7 +351,8 @@ if [[ $INTERACTIVE == "yes" ]]; then
     RAW_cwrtc_ip="$_raw_cwrtc_ip" RAW_csc_host="$_raw_csc_host" \
     RAW_db_host="$_raw_db_host" RAW_db_user="$_raw_db_user" \
     RAW_volte_domain="$_raw_volte_domain" RAW_ptt_domain="$_raw_ptt_domain" \
-    RAW_country_code="$_raw_country_code" \
+    RAW_volte_service="$_raw_volte_service" RAW_ptt_service="$_raw_ptt_service" \
+    RAW_country_code="$_raw_country_code" RAW_plmn="$_raw_plmn" \
     RAW_msg_log_dir="$_raw_msg_log_dir" RAW_service_log_dir="$_raw_service_log_dir" \
     RAW_record_dir="$_raw_record_dir" \
     KEYS="$_CFG_SAVED_KEYS" python3 - <<'PY'
@@ -369,6 +393,9 @@ apply_template() {
         -e "s|@DB_PASSWORD@|${DB_PASSWORD}|g" \
         -e "s|@VOLTE_DOMAIN@|${VOLTE_DOMAIN}|g" \
         -e "s|@PTT_DOMAIN@|${PTT_DOMAIN}|g" \
+        -e "s|@PLMN@|${PLMN}|g" \
+        -e "s|@VOLTE_SERVICE@|${VOLTE_SERVICE}|g" \
+        -e "s|@PTT_SERVICE@|${PTT_SERVICE}|g" \
         -e "s|@IDMS_JWT_SECRET@|${IDMS_JWT_SECRET}|g" \
         -e "s|@CIMS_JWT_SECRET@|${CIMS_JWT_SECRET}|g" \
         -e "s|@INTERNAL_TOKEN@|${INTERNAL_TOKEN}|g" \
@@ -394,7 +421,8 @@ apply_config_template() {
     CMDP_IP="$CMDP_IP" SYSTEM_ID="${SYSTEM_ID:-cmdp_01}" \
     CWRTC_IP="$CWRTC_IP" CSC_HOST="$CSC_HOST" CSC_IP="$CSC_IP" OAM_IP="$OAM_IP" \
     DB_HOST="$DB_HOST" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" \
-    VOLTE_DOMAIN="$VOLTE_DOMAIN" PTT_DOMAIN="$PTT_DOMAIN" COUNTRY_CODE="$COUNTRY_CODE" \
+    VOLTE_DOMAIN="$VOLTE_DOMAIN" PTT_DOMAIN="$PTT_DOMAIN" COUNTRY_CODE="$COUNTRY_CODE" PLMN="$PLMN" \
+    VOLTE_SERVICE="$VOLTE_SERVICE" PTT_SERVICE="$PTT_SERVICE" \
     IDMS_JWT_SECRET="$IDMS_JWT_SECRET" CIMS_JWT_SECRET="$CIMS_JWT_SECRET" \
     INTERNAL_TOKEN="$INTERNAL_TOKEN" AUC_KEK="$AUC_KEK" \
     MSG_LOG_DIR="$MSG_LOG_DIR" SERVICE_LOG_DIR="$SERVICE_LOG_DIR" \
@@ -580,6 +608,64 @@ PY
     ok "생성: $file (UDP 5060 primary / TCP 25061${tls_note} @ $CSP_IP)"
 }
 seed_local_nodes
+
+# ── 단말 프로비저닝 SIP 포트 ← local_nodes 정합 ─────────────────
+# csc.json Provisioning.Services.<kind>.{port,tcp_port,tls_port} 는 단말이 REGISTER 할
+# CSP 리스너 포트인데, 템플릿 default(운영 표준 배치)와 dev 시드(UDP 5060/TCP 25061/
+# TLS 5061)가 다르면 단말이 존재하지 않는 포트로 접속한다. SIP 리스너의 SoT 는
+# local_nodes.jsonl 이므로 dev configure 는 그 access 리스너에서 포트를 유도해 기록한다
+# (host 가 비어 있거나 CSP_IP 인 서비스만 — 다른 서버를 가리키면 운영자 값 보존).
+# 분산 배포는 콘솔 [패키지 설정] > csc 값이 정본(configure 미경유).
+align_csc_provisioning_ports() {
+    local nodes="$DIST_DIR/config/local_nodes.jsonl"
+    [[ -f $nodes ]] || return 0
+    local cfg
+    for cfg in "$DIST_DIR/csc/config/csc.json" "$DIST_DIR/csc/config/csc-tb.json"; do
+        [[ -f $cfg ]] || continue
+        NODES="$nodes" CFG="$cfg" CSP_IP="$CSP_IP" python3 - <<'PY'
+import json, os
+ports = {"UDP": 0, "TCP": 0, "TLS": 0}
+primary_udp = 0
+with open(os.environ["NODES"], encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        r = json.loads(line)
+        if not r.get("enabled", True) or r.get("edge", "access") != "access":
+            continue
+        proto = str(r.get("protocol", "")).upper()
+        port = int(r.get("bind_port") or 0)
+        if proto in ports and port and not ports[proto]:
+            ports[proto] = port
+        if proto == "UDP" and r.get("is_primary"):
+            primary_udp = port
+if primary_udp:
+    ports["UDP"] = primary_udp
+cfg_path = os.environ["CFG"]
+with open(cfg_path, encoding="utf-8") as f:
+    c = json.load(f)
+svcs = ((c.get("Provisioning") or {}).get("Services") or {})
+changed = []
+for kind, svc in svcs.items():
+    if not isinstance(svc, dict):
+        continue
+    host = (svc.get("host") or "").strip()
+    if host and host != os.environ["CSP_IP"]:
+        continue
+    want = {"port": ports["UDP"] or int(svc.get("port") or 0),
+            "tcp_port": ports["TCP"], "tls_port": ports["TLS"]}
+    if want["port"] and any(svc.get(k) != v for k, v in want.items()):
+        svc.update(want)
+        changed.append(f"{kind}={want['port']}/tcp{want['tcp_port']}/tls{want['tls_port']}")
+if changed:
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        json.dump(c, f, indent=4, ensure_ascii=False)
+    print("  " + os.path.basename(cfg_path) + " Provisioning 포트 ← local_nodes: " + ", ".join(changed))
+PY
+    done
+}
+align_csc_provisioning_ports
 
 # ── 시험 환경 설정 파일 생성 (소스 트리 tests/ 에만) ────────────
 # 테스트가 실제 배포 IP/도메인/DB 를 자동으로 사용하도록 한다.

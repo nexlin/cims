@@ -119,10 +119,19 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bInt
     if ( strUserId.empty() ) return false;
 
     if ( pclsMessage->GetTopViaIpPort( clsInfo.m_strIp, clsInfo.m_iPort ) == false ) return false;
-    clsInfo.m_iLoginTimeout = pclsMessage->GetExpires();
-
-    if ( clsInfo.m_iLoginTimeout == 0 && pclsMessage->IsMethod( SIP_METHOD_REGISTER ) ) {
-        return false;
+    // 요청 수명: Contact ;expires > Expires 헤더 > 서버 기본값 (RFC 3261 §10.2.1.1, §10.2.4).
+    //   REGISTER: 0 은 등록 해제라(핸들러가 먼저 처리) Insert 대상이 아니고, 형식 오류는 핸들러가 400 을 낸 뒤라
+    //   방어적으로 거절한다. 비REGISTER(인증된 flow 갱신, 미등록 SUBSCRIBE/PUBLISH 의 Digest 수락)는 종전대로
+    //   요청의 Expires 를 잠정 수명으로 쓴다(없음·무효 = 0) — 수명 확정은 아래 REGISTER 분기에서만 한다.
+    uint32_t uiReqExpires = 0;
+    const ESipExpiresResult eExpires = pclsMessage->GetRegisterExpires( uiReqExpires );
+    const bool bExpiresValid = ( eExpires == E_SIP_EXPIRES_VALID );
+    if ( pclsMessage->IsMethod( SIP_METHOD_REGISTER ) ) {
+        if ( eExpires == E_SIP_EXPIRES_INVALID ) return false;
+        if ( bExpiresValid && uiReqExpires == 0 ) return false;
+        clsInfo.m_iLoginTimeout = bExpiresValid ? ExpiresToInt( uiReqExpires ) : REGISTER_DEFAULT_EXPIRES_SEC;
+    } else {
+        clsInfo.m_iLoginTimeout = bExpiresValid ? ExpiresToInt( uiReqExpires ) : 0;
     }
 
     clsInfo.m_eTransport = pclsMessage->m_eTransport;

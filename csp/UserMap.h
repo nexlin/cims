@@ -28,6 +28,13 @@
 #include "SipMutex.h"
 #include "SipUserAgent.h"
 
+// REGISTER 요청에 Expires 헤더도 Contact ;expires 도 없을 때 등록자가 정하는 기본 수명 (RFC 3261 §10.2.4).
+//   요청값이 있으면 그대로 수락(F-12)하되 내부 표현(int 초)의 범위로만 자른다 — 운영 상한은 별도 정책.
+static const int REGISTER_DEFAULT_EXPIRES_SEC = 3600;
+static inline int ExpiresToInt( uint32_t uiExpires ) {
+    return uiExpires > 0x7FFFFFFFu ? 0x7FFFFFFF : (int)uiExpires;
+}
+
 typedef std::list<std::string> USER_ID_LIST;
 
 class CUserInfo;

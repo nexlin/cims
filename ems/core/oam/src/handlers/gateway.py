@@ -135,6 +135,16 @@ def _normalize_upstream(up: str) -> str:
     return up
 
 
+def _module_id(module) -> str:
+    """라우트의 module 키 정규화 — 패키지 id(소문자 `csc`·`oam-svc`)만 쓴다.
+
+    identifier_model: 이름은 키가 아니다. 배포 레코드의 표시용 process_name("CSC")이
+    module 키로 들어오면 role=all 하이브리드 필터(modules={'csc'})·deregister 가 같은
+    모듈을 다른 것으로 보아 프록시가 빠진다. 쓰기(upsert)·비교(mount 필터·deregister)
+    양쪽에서 이 함수를 거쳐 과거 대문자 레코드도 그대로 정합된다."""
+    return str(module or '').strip().lower()
+
+
 def load_routes(config: dict) -> list:
     """라우트 테이블 전체. enabled 무관 모든 레코드."""
     return file_store.load_all(_dir(config))
@@ -160,7 +170,7 @@ def upsert_route(config: dict, route: dict) -> dict:
     rec.update({
         'segment': seg,
         'upstream': up,
-        'module': str(route.get('module', '') or rec.get('module', '')),
+        'module': _module_id(route.get('module') or rec.get('module')),
         'enabled': bool(route.get('enabled', rec.get('enabled', True))),
         'deprecated': bool(route.get('deprecated', rec.get('deprecated', False))),
         'sunset': route.get('sunset', rec.get('sunset')),
@@ -337,7 +347,7 @@ def register_gateway(admin_server, config: dict, modules=None) -> int:
     global _ADMIN_SERVER, _GW_CONFIG, _GW_ONLY_MODULES
     _ADMIN_SERVER = admin_server          # 런타임 self-register hot-mount 용
     _GW_CONFIG = config
-    _GW_ONLY_MODULES = set(modules) if modules else None
+    _GW_ONLY_MODULES = {_module_id(m) for m in modules} if modules else None
     seeded = seed_routes(config)
     if seeded:
         _logger.log_info(f'[gateway] seeded {seeded} route(s) (table was empty)')
@@ -346,7 +356,7 @@ def register_gateway(admin_server, config: dict, modules=None) -> int:
         seg = _normalize_segment(r.get('segment'))
         if not seg:
             continue
-        if _GW_ONLY_MODULES and r.get('module') not in _GW_ONLY_MODULES:
+        if _GW_ONLY_MODULES and _module_id(r.get('module')) not in _GW_ONLY_MODULES:
             continue
         admin_server.add_dynamic_rules([(seg, proxy, {'config': config, '_route': r})])
         _logger.log_info(f"[gateway] mount {seg} → {r.get('upstream')} (module={r.get('module')})")
@@ -364,7 +374,7 @@ def mount_route(route: dict) -> bool:
     모듈 필터(_GW_ONLY_MODULES) 활성 시 필터 밖 모듈도 no-op(persist 만)."""
     if _ADMIN_SERVER is None or _GW_CONFIG is None:
         return False
-    if _GW_ONLY_MODULES and route.get('module') not in _GW_ONLY_MODULES:
+    if _GW_ONLY_MODULES and _module_id(route.get('module')) not in _GW_ONLY_MODULES:
         return False
     seg = _normalize_segment(route.get('segment'))
     if not seg or not route.get('enabled', True):
@@ -452,7 +462,7 @@ def deregister_module_routes(config: dict, module: str) -> int:
     d = _dir(config)
     n = 0
     for r in load_routes(config):
-        if str(r.get('module', '')) == str(module):
+        if _module_id(r.get('module')) == _module_id(module):
             unmount_route(r.get('segment'))
             file_store.delete(d, r.get('id'))
             n += 1

@@ -150,6 +150,7 @@ public sealed partial class CallOriginateViewModel : ObservableObject
         Number += key;
     }
     [RelayCommand] private void Backspace() { if (Number.Length > 0) Number = Number[..^1]; }
+    public void ClearSuggestions() { Suggestions.Clear(); OnPropertyChanged(nameof(HasSuggestions)); }
     [RelayCommand] private void Clear() => Number = "";
     [RelayCommand] private void Call(BookRow r) => _s.Dial(r.Number);
     /// <summary>제안 행 클릭 — 필드에 채움(발신은 Resolve 가 원본 번호로).</summary>

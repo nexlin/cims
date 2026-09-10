@@ -5,7 +5,7 @@ namespace DispatchDesktop.Services;
 
 public static class ResponseText
 {
-    public enum Area { Pickup, Transfer, Join, PttListen, PttJoin, PttPrivate, PttAdhoc, Emergency, Sds, Sms, Register, Call, Group }
+    public enum Area { Pickup, Transfer, Join, PttListen, PttJoin, PttPrivate, PttAdhoc, Emergency, Sds, Sms, Register, Call, Group, Management, Recording }
 
     public static Area AreaOf(Operation op) => op switch
     {
@@ -62,6 +62,38 @@ public static class ResponseText
         (Area.Group, 409) => "같은 id 의 그룹을 다른 사용자가 소유하고 있습니다",
         (Area.Group, 412) => "다른 곳에서 먼저 바뀐 그룹입니다 — 다시 열어 편집하세요",
         (Area.Group, 400) => "그룹 문서 형식 오류",
+        // 관리 창(§4.5) — /provisioning/directory/* · /provisioning/recordings/* (본문 `error` 로 세분 ForManagementError)
+        (Area.Management or Area.Recording, 401) => "로그인이 만료됐습니다 — 다시 로그인하세요",
+        (Area.Management, 403) => "관리 권한이 없습니다 (관제 그룹 관리 범위)",
+        (Area.Management, 404) => "대상이 없습니다 — 목록을 새로 고칩니다",
+        (Area.Management, 409) => "충돌 — 이미 있거나 비어 있지 않습니다",
+        (Area.Recording, 403) => "청취 범위 밖의 녹취입니다",
+        (Area.Recording, 404) => "녹취가 없습니다",
+        (Area.Recording, 502) => "녹취 서버(OAM)에 닿지 않습니다",
+        (Area.Recording, 500) => "녹취 변환에 실패했습니다 — [다시 변환]",
+        _ => null,
+    };
+
+    /// <summary>관리 API 오류 본문의 `error` 값 → 문구(dispatch_directory.py · dispatch_recordings.py). 없으면 null.</summary>
+    public static string? ForManagementError(string error, string detail) => error switch
+    {
+        "no_directory_admin" => "관리 권한이 없습니다 — 관제 그룹의 관리 범위(directory_admin)를 콘솔에서 부여해야 합니다",
+        "out_of_scope" => "관리 범위 밖의 조직·구성원입니다",
+        "insufficient_scope" => "토큰 권한이 부족합니다 — 다시 로그인하세요",
+        "schema_not_migrated" => "서버 DB 마이그레이션이 필요합니다 (관리자 문의)",
+        "code_exists" => "같은 코드의 조직이 이미 있습니다",
+        "unknown_parent" => "상위 조직이 없습니다",
+        "unknown_org" => "소속 조직이 없습니다",
+        "cyclic_parent" => "자기 하위 조직으로 옮길 수 없습니다",
+        "not_empty" => detail.Contains("members") ? "구성원이 남아 있는 조직은 지울 수 없습니다" : "하위 조직이 남아 있는 조직은 지울 수 없습니다",
+        "number_exists" => "다른 구성원이 쓰는 번호입니다",
+        "self_delete" => "자기 자신은 지울 수 없습니다",
+        "derived_from_dispatch_group" => "관제 그룹 소속 구성원의 픽업 그룹은 콘솔 관제 그룹에서 파생됩니다",
+        "no_monitor_scope" => "관제 그룹 미소속 — 이력·녹취를 볼 수 없습니다",
+        "oam_unreachable" => "녹취 서버(OAM)에 닿지 않습니다",
+        "invalid_recording_id" => "녹취 식별자가 잘못됐습니다",
+        "service_log_unavailable" => "서버 녹취 저장소에 닿지 않습니다",
+        "db_unavailable" or "db_error" => "서버 DB 오류 — 잠시 후 다시 시도",
         _ => null,
     };
 
@@ -94,6 +126,12 @@ public static class ResponseText
         {
             var (err, detail) = GroupError(reason);
             if (err.Length > 0 && ForGroupError(err, detail) is { } g) return g;
+        }
+        if (area is Area.Management or Area.Recording)
+        {
+            var (err, detail) = GroupError(reason);
+            if (err.Length > 0 && ForManagementError(err, detail) is { } mg) return mg;
+            if (err.Length == 0 && reason.Contains("required", StringComparison.OrdinalIgnoreCase)) return "필수 항목이 빠졌습니다: " + reason;
         }
         string? t = For(area, code);
         if (t is not null) return t;

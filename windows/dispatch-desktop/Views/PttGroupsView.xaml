@@ -1,0 +1,171 @@
+<UserControl x:Class="DispatchDesktop.Views.PttGroupsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:DispatchDesktop.ViewModels"
+             xmlns:v="clr-namespace:DispatchDesktop.Views"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance vm:GroupAdminViewModel}">
+    <!-- [PTT 그룹] 화면 본문(§4.7) — 왼쪽 좁은 그룹 목록(이력 화면 PTT 세션 카드와 같은 1 : 3) | 오른쪽 선택 그룹 카드.
+         카드 = 상세(소유자·소속·정책·청취 노출·멤버와 참여 상태 · [삭제][채널로] · 머리 [편집]) 또는 같은 자리의 편집 폼(GroupEditView — 별창 없음).
+         행 한 번 클릭 = 상세, 더블클릭 = 편집. 편집 중엔 목록·[+ 새 그룹]이 잠긴다(저장·취소로 나온다). -->
+    <Grid Margin="10">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" MinWidth="260" MaxWidth="460" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="3*" MinWidth="560" />
+        </Grid.ColumnDefinitions>
+        <!-- 목록 -->
+        <Border Grid.Column="0" Style="{StaticResource Card}" Padding="0">
+            <DockPanel>
+                <Border DockPanel.Dock="Top" Style="{StaticResource LogHeader}" Padding="12,8">
+                    <StackPanel>
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button Style="{StaticResource Btn.Sm}" Content="↻" ToolTip="목록 새로고침" Command="{Binding RefreshCommand}" IsEnabled="{Binding ListEnabled}" Margin="0,0,6,0" />
+                                <Button Style="{StaticResource Btn.Sm.Pri}" Content="+ 새 그룹" Command="{Binding NewGroupCommand}" IsEnabled="{Binding IsEditing, Converter={StaticResource Not}}"
+                                        Visibility="{Binding CanCreate, Converter={StaticResource BoolToVis}}" />
+                            </StackPanel>
+                            <TextBlock VerticalAlignment="Center" FontSize="13">
+                                <Run Text="그룹" FontWeight="SemiBold" /><Run Text=" " /><Run Text="{Binding TotalCount, Mode=OneWay}" FontWeight="SemiBold" /><Run Text="개" />
+                            </TextBlock>
+                        </DockPanel>
+                        <DockPanel Margin="0,8,0,0">
+                            <Border DockPanel.Dock="Left" Style="{StaticResource SegGroup}" Margin="0,0,8,0" VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal">
+                                    <RadioButton Style="{StaticResource Seg}" Content="전체" IsChecked="{Binding ListFilter, Converter={StaticResource Eq}, ConverterParameter=all, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="all" />
+                                    <RadioButton Style="{StaticResource Seg}" Content="멤버" IsChecked="{Binding ListFilter, Converter={StaticResource Eq}, ConverterParameter=member, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="member" />
+                                    <RadioButton Style="{StaticResource Seg}" Content="내 소유" IsChecked="{Binding ListFilter, Converter={StaticResource Eq}, ConverterParameter=mine, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="mine" />
+                                </StackPanel>
+                            </Border>
+                            <TextBox Style="{StaticResource Field}" Height="26" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" ToolTip="그룹명·id 검색" />
+                        </DockPanel>
+                        <TextBlock Style="{StaticResource Hint}" Foreground="{DynamicResource Brush.Emg}" Text="{Binding Error}" Margin="0,6,0,0" TextWrapping="Wrap"
+                                   Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}" />
+                        <TextBlock Style="{StaticResource Hint}" Text="편집 중 — 저장하거나 취소하면 다른 그룹을 고를 수 있습니다" Margin="0,6,0,0" TextWrapping="Wrap"
+                                   Visibility="{Binding IsEditing, Converter={StaticResource BoolToVis}}" />
+                    </StackPanel>
+                </Border>
+                <ListBox Style="{StaticResource SelectList}" ItemsSource="{Binding Groups}" SelectedItem="{Binding Selected}" MouseDoubleClick="Groups_DoubleClick" IsEnabled="{Binding ListEnabled}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate DataType="{x:Type vm:GroupAdminRow}">
+                            <Border Style="{StaticResource LogRow}" Padding="10,7">
+                                <StackPanel>
+                                    <DockPanel>
+                                        <Border DockPanel.Dock="Left" Padding="6,1" Margin="0,0,6,0" VerticalAlignment="Center">
+                                            <Border.Style>
+                                                <Style TargetType="Border" BasedOn="{StaticResource Badge}">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsMemberRelation}" Value="True"><Setter Property="Background" Value="{DynamicResource Brush.PrimarySoft}" /></DataTrigger>
+                                                        <DataTrigger Binding="{Binding Relation}" Value="청취 범위"><Setter Property="Background" Value="{DynamicResource Brush.ListenSoft}" /></DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                            <TextBlock Text="{Binding Relation}" FontSize="10" />
+                                        </Border>
+                                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource Muted}" FontSize="11" VerticalAlignment="Center" Margin="6,0,0,0">
+                                            <Run Text="{Binding MemberCount, Mode=OneWay}" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Text}" /><Run Text="명" />
+                                        </TextBlock>
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                    </DockPanel>
+                                    <TextBlock Style="{StaticResource MonoMuted}" FontSize="11.5" Margin="0,3,0,0" TextTrimming="CharacterEllipsis">
+                                        <Run Text="{Binding Id, Mode=OneWay}" /><Run Text="  " /><Run Text="{Binding OrgPath, Mode=OneWay}" FontFamily="{StaticResource Font.Ui}" />
+                                    </TextBlock>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+        </Border>
+        <GridSplitter Grid.Column="1" Width="10" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+        <!-- 선택 그룹 카드 — 상세 또는 편집 폼 -->
+        <Border Grid.Column="2" Style="{StaticResource Card}" Padding="0">
+            <Grid>
+                <TextBlock Style="{StaticResource Hint}" Text="그룹을 고르면 여기에 상세가 보입니다." HorizontalAlignment="Center" VerticalAlignment="Center"
+                           Visibility="{Binding ShowPlaceholder, Converter={StaticResource BoolToVis}}" />
+
+                <!-- 상세(보기) -->
+                <DockPanel Visibility="{Binding ShowDetail, Converter={StaticResource BoolToVis}}">
+                    <!-- 머리: 이름 · id · 배지 · [편집] -->
+                    <Border DockPanel.Dock="Top" Style="{StaticResource LogHeader}" Padding="12,8">
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Border Style="{StaticResource Badge.Member}" Visibility="{Binding Selected.IsMemberRelation, Converter={StaticResource BoolToVis}}"><TextBlock Text="멤버" /></Border>
+                                <Border Style="{StaticResource Badge.Talk}" Margin="4,0,0,0" Visibility="{Binding DetailHasSession, Converter={StaticResource BoolToVis}}"><TextBlock Text="세션 진행 중" /></Border>
+                                <Button Style="{StaticResource Btn.Sm.Pri}" Content="편집" Command="{Binding EditGroupCommand}" ToolTip="이 자리에서 그룹 문서를 편집(GMS XCAP)" Margin="10,0,0,0"
+                                        Visibility="{Binding Selected.CanManage, Converter={StaticResource BoolToVis}}" />
+                            </StackPanel>
+                            <TextBlock VerticalAlignment="Center">
+                                <Run Text="{Binding Selected.Name, Mode=OneWay}" FontWeight="SemiBold" FontSize="14" /><Run Text="  " />
+                                <Run Text="{Binding Selected.Id, Mode=OneWay}" FontFamily="{StaticResource Font.Mono}" FontSize="12" Foreground="{DynamicResource Brush.Muted}" />
+                            </TextBlock>
+                        </DockPanel>
+                    </Border>
+                    <!-- 바닥: 안내 + [삭제][채널로] -->
+                    <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0" Padding="12,8">
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <Button Style="{StaticResource Btn.Danger}" Content="삭제" Command="{Binding DeleteGroupCommand}" Margin="0,0,6,0"
+                                        Visibility="{Binding Selected.CanManage, Converter={StaticResource BoolToVis}}" />
+                                <Button Style="{StaticResource Btn}" Content="채널로" Command="{Binding GoToChannelCommand}" ToolTip="관제 캔버스의 채널 카드로 — 멤버 그룹이면 합류" />
+                            </StackPanel>
+                            <TextBlock Style="{StaticResource Hint}" Text="{Binding Hint}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        </DockPanel>
+                    </Border>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="12,10">
+                            <TextBlock Style="{StaticResource Hint}" Foreground="{DynamicResource Brush.Emg}" Text="{Binding DetailError}" Margin="0,0,0,6" Visibility="{Binding DetailError, Converter={StaticResource StrToVis}}" />
+                            <TextBlock Style="{StaticResource Hint}" Text="문서 조회 중…" Margin="0,0,0,6" Visibility="{Binding DetailLoading, Converter={StaticResource BoolToVis}}" />
+                            <UniformGrid Columns="2" Margin="0,0,0,4">
+                                <TextBlock FontSize="12.5" Margin="0,0,0,6"><Run Text="소유자 " Foreground="{DynamicResource Brush.Muted}" /><Run Text="{Binding DetailOwner, Mode=OneWay}" FontWeight="Medium" /></TextBlock>
+                                <TextBlock FontSize="12.5" Margin="0,0,0,6"><Run Text="소속 " Foreground="{DynamicResource Brush.Muted}" /><Run Text="{Binding DetailOrg, Mode=OneWay}" FontWeight="Medium" /></TextBlock>
+                                <TextBlock FontSize="12.5" Margin="0,0,0,6" TextWrapping="Wrap"><Run Text="{Binding DetailPolicy, Mode=OneWay}" /></TextBlock>
+                                <TextBlock FontSize="12.5" Margin="0,0,0,6"><Run Text="청취 노출 " Foreground="{DynamicResource Brush.Muted}" /><Run Text="{Binding DetailListenVisibility, Mode=OneWay}" FontWeight="Medium" /></TextBlock>
+                            </UniformGrid>
+                            <TextBlock Style="{StaticResource Hint}" Text="{Binding DetailCapability}" Margin="0,0,0,8" Visibility="{Binding DetailCapability, Converter={StaticResource StrToVis}}" />
+                            <DockPanel Margin="0,4,0,4">
+                                <TextBlock DockPanel.Dock="Right" Style="{StaticResource Muted}" Text="{Binding DetailAffiliationText}" FontSize="12" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding DetailMemberCount}" FontWeight="SemiBold" FontSize="13" />
+                            </DockPanel>
+                            <ItemsControl ItemsSource="{Binding DetailMembers}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type vm:GroupDetailMember}">
+                                        <Border BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,0,1" Padding="4,7">
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="12">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock" BasedOn="{StaticResource Muted}">
+                                                            <Setter Property="Text" Value="{Binding Status}" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsSpeaking}" Value="True"><Setter Property="Foreground" Value="{DynamicResource Brush.Talk}" /><Setter Property="FontWeight" Value="SemiBold" /></DataTrigger>
+                                                                <DataTrigger Binding="{Binding Status}" Value="참여"><Setter Property="Text" Value="" /></DataTrigger>
+                                                                <DataTrigger Binding="{Binding IsMe}" Value="True"><Setter Property="Text" Value="나" /><Setter Property="Foreground" Value="{DynamicResource Brush.Text}" /></DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                                <TextBlock VerticalAlignment="Center">
+                                                    <Run Text="{Binding Label, Mode=OneWay}" FontWeight="Medium" /><Run Text=" " />
+                                                    <Run Text="{Binding Number, Mode=OneWay}" FontFamily="{StaticResource Font.Mono}" FontSize="11.5" Foreground="{DynamicResource Brush.Muted}" />
+                                                    <Run Text="{Binding ChairText, Mode=OneWay}" FontSize="11" Foreground="{DynamicResource Brush.Muted}" />
+                                                </TextBlock>
+                                            </DockPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </ScrollViewer>
+                </DockPanel>
+
+                <!-- 편집 폼 — 같은 자리 -->
+                <DockPanel Visibility="{Binding IsEditing, Converter={StaticResource BoolToVis}}">
+                    <Border DockPanel.Dock="Top" Style="{StaticResource LogHeader}" Padding="12,8">
+                        <TextBlock Text="{Binding EditorTitle}" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    </Border>
+                    <v:GroupEditView DataContext="{Binding Editor}" />
+                </DockPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

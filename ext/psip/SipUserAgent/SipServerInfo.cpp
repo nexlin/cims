@@ -108,7 +108,7 @@ CSipMessage * CSipServerInfo::CreateRegister( CSipStack * pclsSipStack, CSipMess
 	pclsRequest->m_clsFrom.InsertTag();
 
 	// Expires: 300
-	pclsRequest->m_iExpires = m_iLoginTimeout;
+	if( m_iLoginTimeout >= 0 ) pclsRequest->SetExpires( (uint32_t)m_iLoginTimeout );
 	
 	// CSeq: 1 REGISTER
 	++m_iSeqNo;

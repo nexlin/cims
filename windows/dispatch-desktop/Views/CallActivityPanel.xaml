@@ -5,14 +5,14 @@
              xmlns:m="clr-namespace:DispatchDesktop.Models"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
              d:DataContext="{d:DesignInstance vm:CallActivityViewModel}">
-    <!-- ④ 일반통화 내역 — 실시간 (§4.4): 진행 중 세션 행 + 최근 기록 -->
+    <!-- ⑥ 일반통화 내역(§4.4) — 진행 중 세션 행(dialog 쌍 결합) + 최근 기록. 머리 [전체|대표번호|부재] · 검색 · [이력에서 보기] · CSV -->
     <Border Style="{StaticResource Pnl}">
         <DockPanel>
             <Border DockPanel.Dock="Top" Style="{StaticResource PanelHeader}">
                 <DockPanel VerticalAlignment="Center">
-                    <TextBlock Style="{StaticResource H2}" Text="④ 일반통화 내역" Margin="6,0,10,0" />
-                    <TextBlock Style="{StaticResource Muted}" Text="실시간" VerticalAlignment="Center" />
+                    <TextBlock Style="{StaticResource H2}" Text="⑥ 일반통화 내역" Margin="6,0,10,0" />
                     <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="CSV" Command="{Binding ExportCommand}" Margin="6,0,0,0" />
+                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="이력에서 보기" Command="{Binding OpenHistoryCommand}" Margin="6,0,0,0" ToolTip="끝난 통화의 날짜별 조회·녹취 — [이력] 화면(F2)" />
                     <TextBox DockPanel.Dock="Right" Style="{StaticResource Field}" Width="140" Height="26" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" ToolTip="검색" />
                     <Border Style="{StaticResource SegGroup}" HorizontalAlignment="Right" Margin="0,0,8,0">
                         <StackPanel Orientation="Horizontal">

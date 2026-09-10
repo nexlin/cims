@@ -111,8 +111,13 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     public bool CanListenPtt => HasDesk && Dispatch.PttListen != "none";
     public bool ListenHidden => Dispatch.ListenVisibility != "visible";
     public bool CanSms => Volte is not null;      // 외부망 게이트웨이 능력 키는 §13 — 지금은 등록 가입자 간만
-    /// <summary>GMS 그룹 생성 자격(`ptt.allowCreateGroup`) — [새 그룹] 노출. 편집·삭제는 그룹별 IsOwner.</summary>
-    public bool CanCreateGroups => Profile?.AllowGroupCreation == true && Ptt is not null;
+    /// <summary>GMS 그룹 생성 자격(`ptt.allowCreateGroup`) — [새 그룹] 노출. 편집·삭제는 그룹별 IsOwner. 관리 범위(CanManageDirectory)가 있으면 그것으로도 생성.</summary>
+    public bool CanCreateGroups => (Profile?.AllowGroupCreation == true || CanManageDirectory) && Ptt is not null;
+    /// <summary>관리 범위(`dispatch.directoryAdmin` own|all) — 관리 창(§4.5)의 조직/구성원/번호·PTT 그룹 탭 활성.</summary>
+    public bool CanManageDirectory => Profile?.Dispatch.CanAdminDirectory == true;
+    private ManagementClient? _management;
+    /// <summary>관리 평면 클라이언트(조직/구성원/번호·그룹 목록·이력 창 조회·녹취) — 로그인 전 null.</summary>
+    public ManagementClient? Management => _csc is null || _tokens is null ? null : (_management ??= new ManagementClient(_csc, () => _tokens?.AccessToken, Log));
     public string PttDomain => PttService?.Domain ?? "";
 
     partial void OnProfileChanged(Profile? value)
@@ -121,6 +126,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         OnPropertyChanged(nameof(MyExtension)); OnPropertyChanged(nameof(MyPttId)); OnPropertyChanged(nameof(MyPttNumber));
         OnPropertyChanged(nameof(PilotId)); OnPropertyChanged(nameof(GroupName)); OnPropertyChanged(nameof(CanMonitorCalls));
         OnPropertyChanged(nameof(CanListenPtt)); OnPropertyChanged(nameof(ListenHidden)); OnPropertyChanged(nameof(CanCreateGroups));
+        OnPropertyChanged(nameof(CanManageDirectory));
         OnPropertyChanged(nameof(PttDomain));
     }
     partial void OnPttChanged(Account? value) => OnPropertyChanged(nameof(CanCreateGroups));
@@ -535,7 +541,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         _history?.Dispose(); _history = null;
         Engine.Stop();
         Credentials.Delete(RefreshTokenKey);
-        _tokens = null; _loginPw = "";
+        _tokens = null; _loginPw = ""; _management = null;
         Volte = null; Ptt = null; Profile = null;
         _accountKinds.Clear(); _watched.Clear(); _pendingOps.Clear(); _pendingConsult.Clear(); _adhocMembers.Clear(); _regRetryAt.Clear(); _regBackoff.Clear();
         Sessions.Clear(); Groups.Clear(); Dialogs.Clear();

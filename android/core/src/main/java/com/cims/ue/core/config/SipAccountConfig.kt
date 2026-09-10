@@ -27,7 +27,7 @@ data class SipAccountConfig(
      *  서버는 세 transport 를 동시에 청취하며 강제하지 않는다(sip_tls_signaling.md §7.1).
      *  빈 목록 = 목록을 모르는 구 서버 응답/미프로비저닝 상태(선택 UI 를 띄우지 않는다). */
     val transports: List<TransportEndpoint> = emptyList(),
-    val domain: String = "",            // 홈/서비스 도메인 (예: ims.mnc033.mcc450.3gppnetwork.org)
+    val domain: String = "",            // 홈/서비스 도메인 (예: volte.cims.example.kr)
     val msisdn: String = "",            // 전화번호(공개 ID / AOR user part)
     val imsi: String = "",              // IMSI — Digest username(IMPI) 합성용 (IMSI@domain)
     val displayName: String = "",       // 이름

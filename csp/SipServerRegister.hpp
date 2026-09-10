@@ -137,8 +137,10 @@ ECheckAuthResult CheckAuthorization( CSipCredential *pclsCredential, const char 
  */
 bool CSipServer::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage ) {
     // Min-Expires 체크 (등록 요청에만 적용)
-    if ( pclsMessage->m_iExpires > 0 && gclsSetup.m_iMinRegisterTimeout != 0 ) {
-        if ( pclsMessage->m_iExpires < gclsSetup.m_iMinRegisterTimeout ) {
+    uint32_t uiReqExpires = 0;
+    const bool bReqExpiresGiven = ( pclsMessage->GetRegisterExpires( uiReqExpires ) == E_SIP_EXPIRES_VALID );
+    if ( bReqExpiresGiven && uiReqExpires > 0 && gclsSetup.m_iMinRegisterTimeout != 0 ) {
+        if ( uiReqExpires < (uint32_t)gclsSetup.m_iMinRegisterTimeout ) {
             CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_INTERVAL_TOO_BRIEF );
             if ( pclsResponse == NULL ) return false;
 
@@ -171,7 +173,7 @@ bool CSipServer::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage ) 
     }
 
     // [UNREGISTER] 인증 통과 후 등록 해제
-    if ( pclsMessage->GetExpires() == 0 ) {
+    if ( bReqExpiresGiven && uiReqExpires == 0 ) {
         std::string strUserId = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
         gclsUserMap.Delete( strUserId.c_str() );
         // 등록 해제 시: 진행 중 그룹콜 레그 정리(BYE 포함) + 암묵적 de-affiliation (TS 24.379)

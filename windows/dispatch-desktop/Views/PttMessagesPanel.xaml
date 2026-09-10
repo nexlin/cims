@@ -1,0 +1,44 @@
+<UserControl x:Class="DispatchDesktop.Views.PttMessagesPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:DispatchDesktop.ViewModels"
+             xmlns:v="clr-namespace:DispatchDesktop.Views"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance vm:McDataMessagesViewModel}">
+    <!-- ④ PTT 메시지(§4.4) — 머리 [● <포커스 채널> 따라가기] 토글 · 미읽음 배지, 본문 = MessagesView(스레드 칩 → 말풍선 → 입력, MCData SDS) -->
+    <Border Style="{StaticResource Pnl}">
+        <DockPanel>
+            <Border DockPanel.Dock="Top" Style="{StaticResource PanelHeader}">
+                <DockPanel VerticalAlignment="Center">
+                    <TextBlock Style="{StaticResource H2}" Text="④ PTT 메시지" Margin="6,0,10,0" />
+                    <TextBlock Style="{StaticResource Muted}" Text="SDS" VerticalAlignment="Center" Margin="0,0,10,0" />
+                    <Border DockPanel.Dock="Right" Style="{StaticResource Badge.Pilot}" Margin="6,0,0,0" Visibility="{Binding UnreadTotal, Converter={StaticResource CountToVis}}" ToolTip="미읽음">
+                        <TextBlock Text="{Binding UnreadTotal}" />
+                    </Border>
+                    <!-- 따라가기 토글 — 켜면 ① 포커스 카드의 그룹 스레드로 이동 -->
+                    <Button HorizontalAlignment="Left" Command="{Binding ToggleFollowCommand}" ToolTip="포커스 채널의 스레드를 따라간다 / 끄면 스레드 선택이 고정된다">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource Btn.Xs}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding FollowChannel}" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /><Setter Property="Foreground" Value="{DynamicResource Brush.Primary}" /><Setter Property="Background" Value="{DynamicResource Brush.PrimarySoft}" /></DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="7" Height="7" Margin="0,0,5,0" VerticalAlignment="Center">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Fill" Value="{DynamicResource Brush.Wire}" />
+                                        <Style.Triggers><DataTrigger Binding="{Binding FollowChannel}" Value="True"><Setter Property="Fill" Value="{DynamicResource Brush.Primary}" /></DataTrigger></Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+                            <TextBlock Text="{Binding FollowText}" />
+                        </StackPanel>
+                    </Button>
+                </DockPanel>
+            </Border>
+            <v:MessagesView HeaderVisible="False" InputTip="메시지… (Enter 전송 · Shift+Enter 줄바꿈)" Margin="6" />
+        </DockPanel>
+    </Border>
+</UserControl>

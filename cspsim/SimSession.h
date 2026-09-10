@@ -7,6 +7,9 @@
 #include "SipStack.h"
 #include "SipMessage.h"
 #include <atomic>
+
+#include "SipChallenge.h"
+#include "SipCredential.h"
 #include <map>
 #include <string>
 #include <vector>
@@ -211,6 +214,11 @@ public:
      *  m_iEventSubStatus 에 기록한다 (RFC 6665 §8.2.1: 미지원 패키지 → 489 Bad Event 판정용). */
     void SubscribeEvent(const std::string& strEvent, const std::string& strResourceAor);
     std::atomic<int>  m_iEventSubStatus{0};
+    std::string       m_strEventSubRealm;   // 401 챌린지 realm — 서버가 요청자 서비스 realm 을 줬는지(volte 폴백 아님) 판정용
+    /** 401 에 대한 Digest 재전송(RFC 3261 §22) — 실 UE 처럼 챌린지 realm 을 그대로 echo 한다. HA1 은 -creds 의 ha1
+     *  (realm 결박) 우선, 없으면 MD5(authId:realm:pwd). 1회만 재시도. */
+    bool _BuildDigestCredential(const char* pszMethod, const std::string& strResourceAor, const CSipChallenge& clsCh,
+                                CSipCredential& clsCred);
     /** conference 구독(SubscribeConference)의 최종 응답 상태 — 0=대기. TS 24.379 §10.1.3.4.1 인가 판정값
      *  (범위 안 200 / 밖 403 Warning 138). m_strConfSubWarning = 거절 응답의 Warning 헤더 값. */
     std::atomic<int>  m_iConfSubStatus{0};
@@ -328,7 +336,9 @@ public:
     std::map<std::string, std::string> m_mapDlgSubs;
     std::vector<DlgNotifyRec> m_vecDlgRecs;   // m_mtxConf 보호
 
-    // 이벤트 패키지 프로브 다이얼로그 (SubscribeEvent)
+    // 이벤트 패키지 프로브 다이얼로그 (SubscribeEvent) — 401 재전송을 위해 요청 인자를 보관
+    std::string  m_strEventSubEvent, m_strEventSubAccept, m_strEventSubResource;
+    bool         m_bEventSubAuthRetried{false};
     std::string  m_strEventSubCallId;
     int          m_iEventSubSeq{0};
     std::string  m_strEventSubFromTag;
@@ -350,7 +360,8 @@ private:
     //   dialog(RFC 4235)·이벤트 프로브 공용. strAccept 가 비면 Accept 를 싣지 않는다.
     void SendEventSubscribe(const std::string& strEvent, const std::string& strAccept,
                             const std::string& strResourceAor,
-                            std::string& strCallIdOut, int& iSeqOut, std::string& strFromTagOut);
+                            std::string& strCallIdOut, int& iSeqOut, std::string& strFromTagOut,
+                            const CSipCredential* pclsCred = nullptr, bool bReuseIds = false);
     // SUBSCRIBE 메시지 생성 후 전송
     void SendSubscribe(const std::string& strPsi,
                        std::string& strCallIdOut,

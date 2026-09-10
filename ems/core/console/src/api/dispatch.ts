@@ -9,6 +9,7 @@ export type BusyMembers = 'skip' | 'alert'
 export type MonitorScope = 'none' | 'own' | 'listed' | 'all'
 export type PttListen = 'none' | 'listed' | 'all'
 export type ListenVisibility = 'hidden' | 'visible'
+export type DirectoryAdmin = 'none' | 'own' | 'all'   // 관제 앱 조직/구성원/번호·PTT 그룹 관리 범위 (own = org_id 하위)
 
 export interface DispatchMember {
   user_id: string       // 가입자 id (MSISDN) — 가입자당 그룹 하나
@@ -27,7 +28,8 @@ export interface DispatchGroup {
   monitor_scope: MonitorScope      // 합법감청(dialog 감시·Join) 범위 — manager 만 변경
   ptt_listen: PttListen            // PTT 그룹콜 청취 범위 — manager 만 변경
   listen_visibility: ListenVisibility  // PTT 청취 멤버 로스터 노출
-  org_id: number | null
+  directory_admin: DirectoryAdmin      // 관제 앱 관리 범위 — manager 만 변경. 컬럼 미적용 DB 는 'none'
+  org_id: number | null                // 소속 조직 — directory_admin=own 의 루트
   members: DispatchMember[]
   monitor_targets: string[]        // monitor_scope=listed 의 대상 그룹 id
   ptt_targets: string[]            // ptt_listen=listed 의 대상 PTT 그룹 (mcptt_group_id)

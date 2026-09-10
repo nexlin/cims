@@ -15,17 +15,7 @@
 #include "SipMessageLogger.h"
 #include "SipServer.h"
 
-// time_t → ISO string helper
-static std::string TimeToIso( time_t t ) {
-    if ( t == 0 ) return "";
-    char buf[32];
-    struct tm tm;
-    localtime_r( &t, &tm );
-    snprintf( buf, sizeof( buf ), "%04d-%02d-%02dT%02d:%02d:%02d", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-              tm.tm_hour, tm.tm_min, tm.tm_sec );
-    return buf;
-}
-#include <ctime>
+// 문자열 조립 유틸
 #include <sstream>
 
 #include "CallDir.h"
@@ -1390,16 +1380,22 @@ void CGroupCallService::SyncGroupsState() {
                 } else {
                     // MODIFY 실패 (NOT_FOUND: CMP 그룹 소실 등) — AddGroup 멱등 재수립.
                     //   재생성이면 floor/멤버 포트가 새로 할당되므로 캐시를 응답값으로 갱신한다.
-                    std::string strIp, strRecordDir;
+                    std::string strIp, strRecordDir, strSessionDir;
                     int iFloorPort = 0;
                     std::map<std::string, std::pair<int, int>> mapMemberPorts;
-                    if ( gclsCallDir.IsEnabled() )
-                        strRecordDir = gclsCallDir.GetPttSessionDir( group._id, TimeToIso( group._sessionStart ),
-                                                                     std::to_string( group._dbId ) );
+                    // 재수립도 같은 세션의 산출물 자리를 가리켜야 한다 — sesid 를 근거로 record_dir 과
+                    //   session_dir 을 함께 넘긴다. session_dir 없이 재수립하면 CMP 가 시간버킷 직행으로
+                    //   녹취를 열고, 뒤에 세션 ADD 가 와도 그 자리에 머물러 세그먼트가 이력에서 사라진다.
+                    std::string strGroupSesId = GetOrIssueGroupSesId( group._id );
+                    if ( gclsCallDir.IsEnabled() ) {
+                        strRecordDir =
+                            gclsCallDir.GetPttSessionDir( group._id, strGroupSesId, std::to_string( group._dbId ) );
+                        strSessionDir = gclsCallDir.GetPttSessionName( group._id );
+                    }
                     if ( gclsCmpClient.AddGroup( group._id, group._pusers, strIp, iFloorPort, mapMemberPorts,
-                                                 strRecordDir, group._videoEnabled, group._sessionSeq,
-                                                 GetOrIssueGroupSesId( group._id ), group._groupType, "",
-                                                 group._floorPolicy, group._maxTalkers, group._floorControl ) ) {
+                                                 strRecordDir, group._videoEnabled, group._sessionSeq, strGroupSesId,
+                                                 group._groupType, "", group._floorPolicy, group._maxTalkers,
+                                                 group._floorControl, strSessionDir ) ) {
                         std::unique_lock<std::recursive_mutex> lock2( m_mutex );
                         auto it2 = m_mapGroupRtp.find( group._id );
                         if ( it2 != m_mapGroupRtp.end() ) {
@@ -1543,14 +1539,15 @@ void CGroupCallService::CheckGroupIntegrity() {
             std::string ip;
             int floorPort = 0;
             std::map<std::string, std::pair<int, int>> mapMemberPorts;
-            std::string strRecordDir;
-            if ( gclsCallDir.IsEnabled() )
-                strRecordDir = gclsCallDir.GetPttSessionDir( group._id, TimeToIso( group._sessionStart ),
-                                                             std::to_string( group._dbId ) );
+            std::string strRecordDir, strSessionDir;
             std::string strGroupSesId = GetOrIssueGroupSesId( group._id );
+            if ( gclsCallDir.IsEnabled() ) {
+                strRecordDir = gclsCallDir.GetPttSessionDir( group._id, strGroupSesId, std::to_string( group._dbId ) );
+                strSessionDir = gclsCallDir.GetPttSessionName( group._id );
+            }
             if ( !gclsCmpClient.AddGroup( group._id, group._pusers, ip, floorPort, mapMemberPorts, strRecordDir,
                                           group._videoEnabled, group._sessionSeq, strGroupSesId, group._groupType, "",
-                                          group._floorPolicy, group._maxTalkers, group._floorControl ) )
+                                          group._floorPolicy, group._maxTalkers, group._floorControl, strSessionDir ) )
                 return;
             std::unique_lock<std::recursive_mutex> lock( m_mutex );
             m_mapGroupRtp[group._id] = {
@@ -1720,16 +1717,19 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
         // JoinGroup 실패의 주요 원인은 CMP 그룹 소실(NOT_FOUND) — CMP 재시작/orphan 정리 후 CSP 세션만
         //   남은 상태. JoinGroup 경로엔 self-heal 이 없어 영구 무음이 되므로, SyncGroupsState 의 MODIFY
         //   실패 self-heal 과 대칭으로 AddGroup(멱등) 재수립 후 1회 재시도한다.
-        std::string strReAddIp, strReAddRecDir;
+        std::string strReAddIp, strReAddRecDir, strReAddSesDir;
         int iReAddFloor = 0;
         std::map<std::string, std::pair<int, int>> mapReAddPorts;
-        if ( gclsCallDir.IsEnabled() )
-            strReAddRecDir = gclsCallDir.GetPttSessionDir( strGroupId, TimeToIso( clsGroup._sessionStart ),
-                                                           std::to_string( clsGroup._dbId ) );
+        std::string strReAddSesId = GetOrIssueGroupSesId( strGroupId );
+        if ( gclsCallDir.IsEnabled() ) {
+            strReAddRecDir =
+                gclsCallDir.GetPttSessionDir( strGroupId, strReAddSesId, std::to_string( clsGroup._dbId ) );
+            strReAddSesDir = gclsCallDir.GetPttSessionName( strGroupId );
+        }
         if ( gclsCmpClient.AddGroup( strGroupId, clsGroup._pusers, strReAddIp, iReAddFloor, mapReAddPorts,
-                                     strReAddRecDir, clsGroup._videoEnabled, clsGroup._sessionSeq,
-                                     GetOrIssueGroupSesId( strGroupId ), clsGroup._groupType, strMemberId.c_str(),
-                                     clsGroup._floorPolicy, clsGroup._maxTalkers, clsGroup._floorControl ) ) {
+                                     strReAddRecDir, clsGroup._videoEnabled, clsGroup._sessionSeq, strReAddSesId,
+                                     clsGroup._groupType, strMemberId.c_str(), clsGroup._floorPolicy,
+                                     clsGroup._maxTalkers, clsGroup._floorControl, strReAddSesDir ) ) {
             {
                 std::unique_lock<std::recursive_mutex> lock( m_mutex );
                 auto itRe = m_mapGroupRtp.find( strGroupId );

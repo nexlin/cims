@@ -1,0 +1,119 @@
+<UserControl x:Class="DispatchDesktop.Views.ScopedChannelsPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:DispatchDesktop.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance vm:ScopedChannelsViewModel}">
+    <!-- ② 범위 채널(§4.2) — 머리([전체|활성|긴급|청취|관리] · 검색 · [+ 새 채널]) → 섹션: 청취 범위 · n → 타인 세션 · n(서버 과제) → 관리 범위 · n · 상태 없음(기본 접힘).
+         카드 = ① 과 같은 2줄 모양, 조작 = [🔊 청취]/[🔊 청취 중] 토글 · [창으로] · [편집][삭제]. 멤버가 아니면 발언 체크·PTT 는 없다. -->
+    <UserControl.Resources>
+        <DataTemplate x:Key="ScopedCardTemplate" DataType="{x:Type vm:ScopedCard}">
+            <Border x:Name="Card" Style="{StaticResource ChannelCard}" MouseLeftButtonDown="Card_MouseLeftButtonDown">
+                <StackPanel>
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                            <!-- 조작 — 세션을 끝내는 것([청취 중])만 상시, 나머지는 호버 -->
+                            <StackPanel x:Name="Ops" Orientation="Horizontal" Visibility="Hidden" Margin="0,0,6,0">
+                                <Button Style="{StaticResource Btn.Xs.Mon}" Content="🔊 청취" Command="{Binding ToggleListenCommand}" IsEnabled="{Binding CanListen}" ToolTip="{Binding ListenTip}" Margin="0,0,4,0"
+                                        Visibility="{Binding IsListening, Converter={StaticResource NotToVis}}" />
+                                <Button Style="{StaticResource Btn.Xs}" Content="편집" Command="{Binding EditCommand}" Margin="0,0,4,0" Visibility="{Binding CanEdit, Converter={StaticResource BoolToVis}}" ToolTip="채널 편집 드로어(GMS XCAP)" />
+                                <Button Style="{StaticResource Btn.Xs.Danger}" Content="삭제" Command="{Binding DeleteCommand}" Margin="0,0,4,0" Visibility="{Binding CanEdit, Converter={StaticResource BoolToVis}}" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Visibility="{Binding IsListening, Converter={StaticResource BoolToVis}}" Margin="0,0,6,0">
+                                <Button Style="{StaticResource Btn.Xs.Mon}" Content="🔊 청취 중" Command="{Binding ToggleListenCommand}" ToolTip="{Binding ListenTip}" Background="{DynamicResource Brush.MonSoft}" Margin="0,0,4,0" />
+                                <Button Style="{StaticResource Btn.Xs}" Content="🎧/🔊" Command="{Binding ToggleRouteCommand}" ToolTip="청취 출력 라우트" Margin="0,0,4,0" />
+                                <Button Style="{StaticResource Btn.Xs}" Content="창으로" Command="{Binding ShowWindowCommand}" ToolTip="감청 창(§5)에 띄우기" />
+                            </StackPanel>
+                            <TextBlock x:Name="Elapsed" Style="{StaticResource MonoMuted}" Text="{Binding ElapsedText}" FontSize="12.5" VerticalAlignment="Center" MinWidth="40" TextAlignment="Right" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Ellipse x:Name="Dot" Style="{StaticResource StateDot}" />
+                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="13.5" VerticalAlignment="Center" Margin="0,0,8,0" TextTrimming="CharacterEllipsis" MaxWidth="220" />
+                            <Border Style="{StaticResource Badge.Listen}" Visibility="{Binding IsListenScope, Converter={StaticResource BoolToVis}}"><TextBlock Text="청취 범위" /></Border>
+                            <Border Style="{StaticResource Badge}" Visibility="{Binding IsManageScope, Converter={StaticResource BoolToVis}}"><TextBlock Text="관리 범위" /></Border>
+                            <Border Style="{StaticResource Badge.Member}" Visibility="{Binding IsOwner, Converter={StaticResource BoolToVis}}"><TextBlock Text="내 소유" /></Border>
+                            <Border Style="{StaticResource Badge.Emg}" Visibility="{Binding IsEmergency, Converter={StaticResource BoolToVis}}"><TextBlock Text="긴급" /></Border>
+                            <Border Style="{StaticResource Badge.Pilot}" Visibility="{Binding IsImminentPeril, Converter={StaticResource BoolToVis}}"><TextBlock Text="임박" /></Border>
+                        </StackPanel>
+                    </DockPanel>
+                    <StackPanel Orientation="Horizontal" Margin="16,3,0,0">
+                        <StackPanel Orientation="Horizontal" Visibility="{Binding HasSpeaker, Converter={StaticResource BoolToVis}}">
+                            <Ellipse Style="{StaticResource Dot}" Width="7" Height="7" Fill="{DynamicResource Brush.Talk}" />
+                            <TextBlock FontSize="12.5" VerticalAlignment="Center"><Run Text="발언 " Foreground="{DynamicResource Brush.Muted}" /><Run Text="{Binding Speaker, Mode=OneWay}" FontWeight="SemiBold" /></TextBlock>
+                            <TextBlock Style="{StaticResource MonoMuted}" Text="{Binding SpeakerElapsed, Converter={StaticResource Elapsed}}" FontSize="12" VerticalAlignment="Center" Margin="6,0,0,0" />
+                            <TextBlock Style="{StaticResource Muted}" Text=" · " FontSize="12.5" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <TextBlock Style="{StaticResource Muted}" Text="{Binding Line2}" FontSize="12.5" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+            <DataTemplate.Triggers>
+                <Trigger SourceName="Card" Property="IsMouseOver" Value="True"><Setter TargetName="Ops" Property="Visibility" Value="Visible" /></Trigger>
+                <DataTrigger Binding="{Binding IsSelected}" Value="True"><Setter TargetName="Ops" Property="Visibility" Value="Visible" /><Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /><Setter TargetName="Card" Property="BorderThickness" Value="2" /><Setter TargetName="Card" Property="Padding" Value="7,5" /></DataTrigger>
+                <DataTrigger Binding="{Binding HasSession}" Value="True"><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Talk}" /><Setter TargetName="Dot" Property="Stroke" Value="{DynamicResource Brush.Talk}" /><Setter TargetName="Elapsed" Property="Foreground" Value="{DynamicResource Brush.Text}" /></DataTrigger>
+                <DataTrigger Binding="{Binding IsListening}" Value="True"><Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource Brush.Mon}" /></DataTrigger>
+                <DataTrigger Binding="{Binding IsManageOnly}" Value="True"><Setter TargetName="Dot" Property="Stroke" Value="{DynamicResource Brush.Border}" /></DataTrigger>
+                <DataTrigger Binding="{Binding IsImminentPeril}" Value="True"><Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource Brush.Ring}" /><Setter TargetName="Card" Property="BorderThickness" Value="2" /><Setter TargetName="Card" Property="Padding" Value="7,5" /></DataTrigger>
+                <DataTrigger Binding="{Binding IsEmergency}" Value="True"><Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource Brush.Emg}" /><Setter TargetName="Card" Property="BorderThickness" Value="2" /><Setter TargetName="Card" Property="Padding" Value="7,5" /><Setter TargetName="Card" Property="Background" Value="{DynamicResource Brush.EmgSoft}" /><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Emg}" /><Setter TargetName="Dot" Property="Stroke" Value="{DynamicResource Brush.Emg}" /></DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+    </UserControl.Resources>
+    <Border Style="{StaticResource Pnl}">
+        <DockPanel>
+            <Border DockPanel.Dock="Top" Style="{StaticResource PanelHeader}">
+                <DockPanel VerticalAlignment="Center">
+                    <TextBlock Style="{StaticResource H2}" Text="② 범위 채널" Margin="6,0,10,0" />
+                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Sm.Pri}" Content="+ 새 채널" Command="{Binding NewChannelCommand}" Visibility="{Binding CanCreate, Converter={StaticResource BoolToVis}}" ToolTip="PTT 그룹 만들기 — 채널 편집 드로어(GMS XCAP)" />
+                    <TextBlock Style="{StaticResource Muted}" Text="{Binding HeaderCounts}" VerticalAlignment="Center" FontSize="12.5" />
+                </DockPanel>
+            </Border>
+            <!-- 필터 줄(34) — 이 패널에만 걸린다 -->
+            <Border DockPanel.Dock="Top" Height="34" Padding="8,0" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,0,1" Background="{DynamicResource Brush.Surface}">
+                <DockPanel VerticalAlignment="Center">
+                    <TextBox DockPanel.Dock="Right" Style="{StaticResource Field}" Width="150" Height="26" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" ToolTip="그룹명·id 검색(이 패널만)" />
+                    <Border Style="{StaticResource SegGroup}" HorizontalAlignment="Left">
+                        <StackPanel Orientation="Horizontal">
+                            <RadioButton Style="{StaticResource Seg}" Content="전체" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=all, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="all" />
+                            <RadioButton Style="{StaticResource Seg}" Content="활성" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=active, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="active" />
+                            <RadioButton Style="{StaticResource Seg}" Content="긴급" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=emergency, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="emergency" />
+                            <RadioButton Style="{StaticResource Seg}" Content="청취" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=listen, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="listen" />
+                            <RadioButton Style="{StaticResource Seg}" Content="관리" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=manage, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="manage" />
+                        </StackPanel>
+                    </Border>
+                </DockPanel>
+            </Border>
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="8,0,8,8">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Hint}" Margin="4,10" Text="청취·관리 범위가 없습니다 — 콘솔 구성 › 관제 그룹에서 PTT 청취 범위·관리 범위를 주면 여기 카드가 생깁니다" Visibility="{Binding HasNoScope, Converter={StaticResource BoolToVis}}" />
+                    <!-- 청취 범위 -->
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource SectionLabel}" Text="{Binding ListeningText}" ToolTip="동시 청취 상한(설정)" />
+                        <TextBlock Style="{StaticResource SectionLabel}"><Run Text="청취 범위 · " /><Run Text="{Binding ListenCount, Mode=OneWay}" /></TextBlock>
+                    </DockPanel>
+                    <ItemsControl ItemsSource="{Binding Listen}" ItemTemplate="{StaticResource ScopedCardTemplate}" />
+                    <TextBlock Style="{StaticResource Hint}" Margin="4,0,4,8" Text="청취 범위 그룹 없음" Visibility="{Binding Listen.Count, Converter={StaticResource ZeroToVis}}" />
+                    <!-- 타인 세션(서버 과제) -->
+                    <TextBlock Style="{StaticResource SectionLabel}"><Run Text="타인 세션 · " /><Run Text="{Binding OthersCount, Mode=OneWay}" /><Run Text=" · 사설콜·애드혹" /></TextBlock>
+                    <ItemsControl ItemsSource="{Binding Others}" ItemTemplate="{StaticResource ScopedCardTemplate}" />
+                    <TextBlock Style="{StaticResource Hint}" Margin="4,0,4,8" Text="{Binding OthersHint}" Visibility="{Binding Others.Count, Converter={StaticResource ZeroToVis}}" />
+                    <!-- 관리 범위(기본 접힘) -->
+                    <Button Background="Transparent" BorderThickness="0" Padding="0" HorizontalAlignment="Left" HorizontalContentAlignment="Left" Cursor="Hand" Command="{Binding ToggleManageCommand}">
+                        <TextBlock Style="{StaticResource SectionLabel}">
+                            <Run Text="관리 범위 · " /><Run Text="{Binding ManageCount, Mode=OneWay}" /><Run Text=" · 상태 없음 " />
+                            <Run x:Name="Arrow" Text="▸" /><Run Text=" (접힘)" x:Name="Fold" />
+                        </TextBlock>
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding ManageExpanded}" Value="True"><Setter Property="ToolTip" Value="접기" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding ManageExpanded}" Value="False"><Setter Property="ToolTip" Value="펼치기 — 관리만 되는 그룹(세션 상태 없음)" /></DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                    <ItemsControl ItemsSource="{Binding Manage}" ItemTemplate="{StaticResource ScopedCardTemplate}" Visibility="{Binding ManageExpanded, Converter={StaticResource BoolToVis}}" />
+                </StackPanel>
+            </ScrollViewer>
+        </DockPanel>
+    </Border>
+</UserControl>

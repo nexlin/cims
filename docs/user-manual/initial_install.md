@@ -356,7 +356,7 @@ sudo install -o <서비스계정> -g <서비스계정> -d <prefix>/modules/csp/r
 
 ```json
 { "id": 1, "name": "mcptt", "kind": "ptt",
-  "domain": "ptt.mnc033.mcc450.3gppnetwork.org", "auth_realm": "",
+  "domain": "ptt.cims.example.kr", "auth_realm": "",
   "inbound_policy": "any", "priority": 100, "enabled": true, "note": "",
   "listeners": ["access-udp"] }
 ```

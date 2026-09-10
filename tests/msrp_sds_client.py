@@ -462,7 +462,7 @@ def main():
     ap.add_argument("--port", type=int, default=15060)
     ap.add_argument("--user", default="1001")
     ap.add_argument("--group", default="9001")
-    ap.add_argument("--domain", default="ptt.mnc033.mcc450.3gppnetwork.org")
+    ap.add_argument("--domain", default="ptt.cims.example.kr")
     ap.add_argument("--password", default="1234")
     ap.add_argument("--auth-user", default="", help="digest username (기본: user; CIMS v3 는 imsi@svc-domain)")
     ap.add_argument("--text", default="MSRP 대용량 SDS 시험 " + "x" * 2500)

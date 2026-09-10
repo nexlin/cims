@@ -5,7 +5,8 @@
              xmlns:m="clr-namespace:DispatchDesktop.Models"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
              d:DataContext="{d:DesignInstance vm:PttOriginateViewModel}">
-    <!-- ① 오른쪽 위 — PTT 발신 [사설콜|애드혹] + PTT 주소록 [사용자|그룹] (§4.1). 사용자 = 서버 전화번호부(service=ptt) 조직별 섹션 -->
+    <!-- ① [사설콜 ▾]/[애드혹 ▾] 팝오버 본문(§4.1) — 모드 세그먼트 [사설콜|애드혹] + 대상 줄 + 옵션 + PTT 주소록 [사용자|그룹|다이얼패드].
+         사용자 = 서버 전화번호부(service=ptt) 조직별 섹션 · 그룹 행 = [채널로][메시지](내 소유는 [편집][삭제]). 애드혹 구성 중엔 바깥 클릭에 닫히지 않고 [취소]로만 -->
     <UserControl.Resources>
         <CollectionViewSource x:Key="UsersView" Source="{Binding Users}">
             <CollectionViewSource.GroupDescriptions>
@@ -13,10 +14,11 @@
             </CollectionViewSource.GroupDescriptions>
         </CollectionViewSource>
     </UserControl.Resources>
-    <Border Style="{StaticResource Sub}">
+    <Border Background="Transparent">
         <DockPanel>
             <Border DockPanel.Dock="Top" Style="{StaticResource SubHeader}">
                 <DockPanel>
+                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="취소" Command="{Binding CloseCommand}" Margin="8,0,0,0" ToolTip="팝오버 닫기(애드혹 선택은 비운다)" />
                     <TextBlock Style="{StaticResource SectionHeader}" Text="PTT 발신" />
                     <Border Style="{StaticResource SegGroup}" HorizontalAlignment="Right">
                         <StackPanel Orientation="Horizontal">
@@ -106,7 +108,7 @@
                     <Button Style="{StaticResource Btn.Sm}" Content="↻" ToolTip="그룹 목록 새로고침" Command="{Binding RefreshGroupsCommand}" IsEnabled="{Binding RefreshingGroups, Converter={StaticResource Not}}" Margin="0,0,4,0" />
                     <Button Style="{StaticResource Btn.Sm.Pri}" Content="새 그룹" ToolTip="PTT 그룹 만들기(GMS)" Command="{Binding NewGroupCommand}" Visibility="{Binding CanCreateGroups, Converter={StaticResource BoolToVis}}" />
                 </StackPanel>
-                <TextBlock Style="{StaticResource Hint}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Text="멤버 그룹 · 내 그룹은 편집·삭제 가능" ToolTip="GMS 그룹 목록. 내가 만든(소유한) 그룹만 편집·삭제할 수 있습니다." />
+                <TextBlock Style="{StaticResource Hint}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="GMS 그룹 목록. 내가 만든(소유한) 그룹만 편집·삭제할 수 있습니다(채널 편집 드로어)."><Run Text="멤버 그룹 " /><Run Text="{Binding GroupCount, Mode=OneWay}" /><Run Text=" · 내 그룹은 편집·삭제 가능" /></TextBlock>
             </DockPanel>
             <Grid>
                 <ListBox Style="{StaticResource PlainList}" ItemsSource="{Binding Source={StaticResource UsersView}}" Visibility="{Binding IsUsers, Converter={StaticResource BoolToVis}}">
@@ -183,7 +185,7 @@
                             <Border Style="{StaticResource LogRow}">
                                 <DockPanel>
                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                        <Button Style="{StaticResource Btn.Xs}" Content="채널에 추가" Command="{Binding DataContext.AddChannelCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Margin="0,0,4,0" />
+                                        <Button Style="{StaticResource Btn.Xs}" Content="채널로" Command="{Binding DataContext.ChannelCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Margin="0,0,4,0" ToolTip="① 카드 포커스(미참여면 합류)" />
                                         <Button Style="{StaticResource Btn.Xs}" Content="메시지" Command="{Binding DataContext.MessageGroupCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" />
                                         <Button Style="{StaticResource Btn.Xs}" Content="편집" Command="{Binding DataContext.EditGroupCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Margin="4,0,0,0"
                                                 Visibility="{Binding IsOwner, Converter={StaticResource BoolToVis}}" />

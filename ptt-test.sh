@@ -48,8 +48,8 @@ MYSQL="mysql -h$DB_HOST -P$DB_PORT -u$DB_USER -p$DB_PASS $DB_NAME"
 # 테스트 사용자 (PTT MSISDN — E.164, 실제 단말 형식)
 USERS=(+821000000001 +821000000002 +821000000003 +821000000004)
 USER_PWD="123456"
-SIP_DOMAIN="ptt.mnc033.mcc450.3gppnetwork.org"
-AUTH_REALM="ims.mnc033.mcc450.3gppnetwork.org"   # 실제 망: realm 은 PTT 도메인과 무관하게 IMS core realm
+SIP_DOMAIN="ptt.cims.example.kr"
+AUTH_REALM="ptt.cims.example.kr"   # 개발·시험: realm = 도메인 (dev_test_domain_realm.md)
 IMSI_BASE="45033821000000001"   # USERS[0]의 IMSI (실단말 규칙: 45033+번호); 이후 세션은 +1씩 자동 증가
 
 # 테스트 그룹

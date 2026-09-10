@@ -19,7 +19,7 @@ Authorization 재발행(CSeq+1)을 받아 200 + 상대(UDP 등록)에 전달하�
 import argparse, base64, hashlib, re, socket, struct, sys, time, uuid
 
 SERVER = "121.161.164.45"; PORT = 15060
-DOMAIN = "ptt.mnc033.mcc450.3gppnetwork.org"
+DOMAIN = "ptt.cims.example.kr"
 LOCAL_IP = "121.161.164.45"   # Via/Contact 광고 주소 (--ip 로 서버·로컬 동시 지정)
 
 def md5(s): return hashlib.md5(s.encode()).hexdigest()

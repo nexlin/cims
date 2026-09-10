@@ -15,6 +15,9 @@ public partial class MessagesView : UserControl
     public static readonly DependencyProperty SubtitleProperty = DependencyProperty.Register(nameof(Subtitle), typeof(string), typeof(MessagesView), new PropertyMetadata(""));
     public static readonly DependencyProperty CountTextProperty = DependencyProperty.Register(nameof(CountText), typeof(string), typeof(MessagesView), new PropertyMetadata(""));
     public static readonly DependencyProperty InputTipProperty = DependencyProperty.Register(nameof(InputTip), typeof(string), typeof(MessagesView), new PropertyMetadata("메시지…"));
+    public static readonly DependencyProperty HeaderVisibleProperty = DependencyProperty.Register(nameof(HeaderVisible), typeof(bool), typeof(MessagesView), new PropertyMetadata(true));
+    /// <summary>자체 머리(제목·부제·미읽음) 표시 — 패널/팝오버가 머리를 따로 그리면 끈다.</summary>
+    public bool HeaderVisible { get => (bool)GetValue(HeaderVisibleProperty); set => SetValue(HeaderVisibleProperty, value); }
 
     public string Title { get => (string)GetValue(TitleProperty); set => SetValue(TitleProperty, value); }
     public string Subtitle { get => (string)GetValue(SubtitleProperty); set => SetValue(SubtitleProperty, value); }
@@ -61,7 +64,8 @@ public partial class MessagesView : UserControl
 
     private void ScrollToEnd()
     {
-        if (List.Items.Count > 0) Dispatcher.BeginInvoke(() => List.ScrollIntoView(List.Items[List.Items.Count - 1]));
+        // 항목 수는 지연 실행 시점에 다시 본다 — 채널 따라가기로 빈 스레드로 바뀐 뒤 실행되면 Items[-1] 이 된다.
+        Dispatcher.BeginInvoke(() => { int n = List.Items.Count; if (n > 0) List.ScrollIntoView(List.Items[n - 1]); });
     }
 
     private void Input_KeyDown(object sender, KeyEventArgs e)

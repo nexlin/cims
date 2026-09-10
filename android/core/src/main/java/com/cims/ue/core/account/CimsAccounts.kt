@@ -10,7 +10,9 @@ import com.cims.ue.core.provision.CscEndpoint
  * CIMS 단일 로그인(SSO) 공유 계정 — AccountManager 기반. 모든 앱(CIMS/CIMS-Phone/CIMS-McPtt)이
  * 같은 계정타입을 참조하고, **authTokenType 으로 용도(평면)를 분리**한다:
  *  - [TOKEN_PROVISIONING] : CIMS 앱 부트스트랩(/provisioning/me) — scope `cims:provisioning`
- *  - [TOKEN_MCPTT]        : MCPTT 서비스 평면(XCAP/KMS/affiliation, TS 33.180) — scope `3gpp:mcptt:ptt_server`
+ *  - [TOKEN_MCPTT]        : MC 서비스 평면(GMS/CMS/KMS/MCData FD, TS 33.180 Annex B) — scope [SCOPE_MC_SERVICES]
+ *                           (`3gpp:mc:ptt_service`·`data_service`·ptt/data 의 group/config/key management 8종.
+ *                           서버는 구 표기 `3gpp:mcptt:ptt_server` 도 전환기 별칭으로 수용한다)
  *
  * 계정(로그인)은 1개, refresh_token 은 owner(CIMS) 앱이 보관(setPassword). 다른 앱은
  * [AccountManager.getAuthToken] 으로 용도별 토큰을 받는다(동일 서명키 → signature 수준 접근).
@@ -20,7 +22,11 @@ object CimsAccounts {
     const val ACCOUNT_TYPE = "com.cims.ue"
 
     const val TOKEN_PROVISIONING = "cims.provisioning"
-    const val TOKEN_MCPTT = "3gpp:mcptt:ptt_server"
+    const val TOKEN_MCPTT = "cims.mcptt"
+
+    /** MC 서비스 scope 8종(TS 33.180 B.4.2.2) — 서버 SCOPE_MC_SERVICES 와 정합. 로그인·refresh 요청 문자열. */
+    const val SCOPE_MC_SERVICES = "3gpp:mc:ptt_service 3gpp:mc:data_service 3gpp:mc:ptt_group_management_service 3gpp:mc:ptt_config_management_service 3gpp:mc:ptt_key_management_service 3gpp:mc:data_group_management_service 3gpp:mc:data_config_management_service 3gpp:mc:data_key_management_service"
+    const val SCOPE_PROVISIONING = "cims:provisioning"
 
     /** owner(CIMS) 앱의 로그인 Activity 를 띄우는 액션. */
     const val ACTION_LOGIN = "com.cims.ue.account.LOGIN"
@@ -29,18 +35,14 @@ object CimsAccounts {
     const val KEY_CSC_HOST = "csc_host"
     const val KEY_CSC_PORT = "csc_port"
     const val KEY_PROFILE_JSON = "profile_json"   // /provisioning/me 캐시(선택)
-    // 로그인 비번 — VoLTE/PTT 의 SIP Digest 비번 재사용용(서버가 sipPassword=null 로 내릴 때).
-    //   IMS Digest 는 토큰 인증이 없으므로 비번이 필요. AccountManager(동일서명 프로세스 보호)에 보관.
-    //   ⚠️ 현재 평문(개발) — ConfigStore 와 동일 posture. 운영 시 Keystore/EncryptedSharedPreferences.
-    const val KEY_LOGIN_PW = "login_pw"
+    // 로그인 비밀번호는 보관하지 않는다 — IdMS 자격이라 SIP Digest 에 쓰지 않고(SIP 자료는 프로비저닝 sipHa1),
+    //   토큰 갱신은 refresh_token(password 슬롯)으로 한다.
 
-    fun loginPassword(am: AccountManager, account: Account): String =
-        am.getUserData(account, KEY_LOGIN_PW).orEmpty()
-
-    /** authTokenType → IdMS scope (서버 SCOPE_PROVISIONING / SCOPE_MCPTT 와 정합). */
+    /** authTokenType → IdMS scope (서버 SCOPE_PROVISIONING / SCOPE_MC_SERVICES 와 정합).
+     *  구 빌드의 ptt-client 가 옛 타입 문자열("3gpp:mcptt:ptt_server")로 요청해도 MC 서비스 scope 를 준다(앱 혼재 호환). */
     fun scopeFor(tokenType: String): String = when (tokenType) {
-        TOKEN_MCPTT -> "3gpp:mcptt:ptt_server"
-        else -> "cims:provisioning"
+        TOKEN_MCPTT, "3gpp:mcptt:ptt_server" -> SCOPE_MC_SERVICES
+        else -> SCOPE_PROVISIONING
     }
 
     fun get(am: AccountManager): Account? = am.getAccountsByType(ACCOUNT_TYPE).firstOrNull()

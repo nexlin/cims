@@ -122,7 +122,6 @@ class LoginActivity : ComponentActivity() {
                 }
                 am.setUserData(account, CimsAccounts.KEY_CSC_HOST, host.trim())
                 am.setUserData(account, CimsAccounts.KEY_CSC_PORT, port.toString())
-                am.setUserData(account, CimsAccounts.KEY_LOGIN_PW, password)  // SIP Digest 재사용용(동일서명 보호)
                 am.setAuthToken(account, CimsAccounts.TOKEN_PROVISIONING, ts.accessToken)
 
                 response?.onResult(Bundle().apply {

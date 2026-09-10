@@ -10,6 +10,9 @@ Replaces 수신)이 한 흐름으로 엮인다. 그룹 축은 scn_pickup 과 같
   D2 Replaces 재고정   — INVITE-Replaces 후 A·C 로 미디어가 흐르고(원 relay 승계) B(응답 보류)는 무흐름
   D3 그룹 밖 감시 403  — D(다른 pickup_group)의 B dialog 구독 → 403, NOTIFY 0건 (컬럼 축 한정)
   D4 미지 Event 489    — 미지원 이벤트 패키지 SUBSCRIBE → 489 Bad Event (RFC 6665 §8.2.1), 대조 dialog 자기감시 → 200
+  D5 미등록 SUBSCRIBE  — REGISTER 없이(-no_register) PTT 가입자가 자기 AoR dialog SUBSCRIBE → 서버는 등록 여부가 아닌
+                         신원으로 인증(RFC 6665 §4.2.1): 401 의 realm 이 **요청자 서비스 realm(ptt)** 이고(volte 폴백 아님),
+                         Digest 응답 뒤 200. 재기동으로 등록표가 빈 뒤 재REGISTER 까지 구독이 전멸하던 결함의 회귀.
 """
 from __future__ import annotations
 
@@ -18,13 +21,43 @@ import os
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 from ...common.cspsim import run_cspsim
+from ...common import db as _db
+from ...common.subscribers import MCPTT_DOMAIN
 from ._xfer_common import (
     select_same_org, trio_cred_args, parse_recv_delta, parse_marker_int, PickupGroupFixture,
     VOLTE_DOMAIN, FLOW_MIN, DROP_MAX, fmt_checks, emit_checks,
 )
 
 _RID = "S3-SCN-DIALOG"
-_RNAME = "dialog-event/BLF 당겨받기 (RFC 4235 NOTIFY + RFC 3891 INVITE-Replaces) + SUBSCRIBE 분류(403/489)"
+_RNAME = "dialog-event/BLF 당겨받기 (RFC 4235 NOTIFY + RFC 3891 INVITE-Replaces) + SUBSCRIBE 분류(403/489) + 미등록 Digest 수락"
+
+
+def _pick_ptt_digest_subscriber(dist_dir: str):
+    """D5 용 PTT digest 가입자 1명(ha1·service_ref 보유, UDP). 없으면 None."""
+    try:
+        conn = _db.connect(_db.csp_db_config(dist_dir))
+    except Exception:
+        return None
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT s.id, s.imsi, COALESCE(s.ha1,'') FROM ptt_subscriptions s "
+                "WHERE s.id LIKE '+%%' AND COALESCE(s.ha1,'')<>'' AND s.service_ref<>'' "
+                "  AND COALESCE(s.sip_transport,'') IN ('','UDP') AND COALESCE(s.auth_scheme,'digest')='digest' "
+                "ORDER BY s.id LIMIT 1")
+            r = cur.fetchone()
+            if not r:
+                return None
+            sid, imsi, ha1 = (r[0], r[1], r[2]) if isinstance(r, tuple) else (r["id"], r["imsi"], r["ha1"])
+            return {"user": sid, "authId": f"{imsi}@{MCPTT_DOMAIN}" if imsi else "", "ha1": ha1}
+    finally:
+        conn.close()
+
+
+def _parse_marker_str(text: str, key: str):
+    import re
+    m = re.search(rf"\b{re.escape(key)}=(\S+)", text)
+    return m.group(1) if m else None
 
 _BOGUS_EVENT = "cims-verify-bogus"
 
@@ -105,6 +138,24 @@ def dialog(ctx: VerifyContext) -> ItemResult:
     checks.append(("D4 미지 Event 489", st_bogus == 489 and st_ctrl == 200,
                    f"Event:{_BOGUS_EVENT} → {st_bogus} (기대 489) / 대조 Event:dialog 자기감시 → {st_ctrl} (기대 200) "
                    f"rc={rc_b}/{rc_c}"))
+
+    # ── D5: 미등록 PTT 가입자의 SUBSCRIBE — 신원(Digest)으로 수락, 챌린지 realm = 요청자 서비스 realm ──
+    P = _pick_ptt_digest_subscriber(ctx.dist_dir)
+    if P is None:
+        checks.append(("D5 미등록 SUBSCRIBE Digest 수락 (realm=요청자 서비스)", None, "PTT digest 가입자(ha1) 미확보"))
+    else:
+        args = [
+            "-mode", "ptt", "-scenario", "subscribe_event", "-count", "1",
+            "-ip", ctx.sim_ip, "-domain", MCPTT_DOMAIN,
+            *trio_cred_args([P], "dialog_d5"), "-event", "dialog", "-no_register",
+        ]
+        rc_p, tail_p = run_cspsim(ctx.repo_root, args, timeout=90)
+        st_p = parse_marker_int(tail_p, "status")
+        realm_p = _parse_marker_str(tail_p, "realm") or "-"
+        ok = st_p == 200 and realm_p == MCPTT_DOMAIN
+        checks.append(("D5 미등록 SUBSCRIBE Digest 수락 (realm=요청자 서비스)", ok,
+                       f"user={P['user']} -no_register Event:dialog → 401 realm={realm_p} (기대 {MCPTT_DOMAIN}, volte 폴백 아님) "
+                       f"→ Digest → status={st_p} (기대 200) rc={rc_p}"))
 
     all_ok = emit_checks(ctx, checks)
     return done(ItemStatus.PASS if all_ok else ItemStatus.FAIL, f"axis={fx.axis}\n" + fmt_checks(checks))

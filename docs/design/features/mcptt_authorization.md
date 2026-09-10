@@ -110,6 +110,10 @@ GMC→GMS **XCAP Ut PUT/DELETE** 다. 관제사는 콘솔 계정이 아니라 PT
 | 생성 (PUT 신규 uri) | 프로파일 `ptt_user_profile.allow_create_group=1` | CIMS 확장 요소 `<cims:allow-create-group>` — TS 24.484 에는 일반 그룹 생성 요소가 없다(`allow-regroup` 은 임시 regroup, `allow-create-{group,user}-broadcast-group` 은 브로드캐스트 한정). 규격상 이 인가는 GMS 측 정책이라 프로파일 확장 자리(`anyExt` 계열, 기존 `cims:allow-adhoc-group-call` 과 같은 관례)에 둔다 |
 | 수정·삭제 (PUT 기존 / DELETE) | `ptt_groups.authorized_user_id == 토큰 가입자 users.id` | §4 소유 규칙 그대로. 콘솔 admin/manager 가 만든 소유자 없는 그룹은 관제사가 편집 불가(의도) |
 
+- **관제 그룹 관리 범위**(`dispatch_groups.directory_admin` own|all, [dispatch_center.md §3.4](dispatch_center.md))가 있는 관제사는 위 두 조건
+  없이도 범위 안 그룹(`org_code` 가 범위 안)을 생성·수정·삭제할 수 있다 — 소유권(`authorized_user_id`)은 바꾸지 않는다. 같은 범위로
+  조직·구성원·VoLTE/PTT 번호·PTT 프로파일 자격(`allow_create_group`·`allow_ambient_listening`)도 관제 앱에서 관리한다
+  (`/provisioning/directory/*`, 콘솔 manager 가 부여).
 - 부여는 **OAM** 이 한다(TS 23.280 authorized user = 조직 프로비저닝): 콘솔 가입자 편집의 PTT 프로파일 토글,
   admin API `PUT /api/v1/users/{id}/ptt/{msisdn}/profile` 의 `allow_create_group`, 관제 그룹 멤버 화면의 일괄 부여 —
   셋 다 같은 플래그(인가 축은 하나). `allow_ambient_listening` 과 같은 결.

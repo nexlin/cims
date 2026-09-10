@@ -1473,10 +1473,22 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
             sharedFloorPort = pttSession->getLocalFloorPort();
             sharedIp = _rtpIp;
         }
-        // 기존 그룹이더라도 record_dir이 새로 전달되면 갱신
+        // 기존 그룹이더라도 record_dir 이 새로 전달되면 녹취를 개시하고, **다른** session_dir 이 오면
+        //   기록 자리를 그 세션으로 옮긴다 — CSP 가 REMOVE 없이 재기동해 남은 그룹 컨텍스트를 새 세션이
+        //   이어 쓰는 경우(또는 session_dir 없는 재수립 뒤 세션 ADD)에 앞 자리에 머물면 이 세션의
+        //   세그먼트가 이력에서 보이지 않는다. 같은 세션의 멤버 추가 ADD 는 같은 이름이라 무동작.
+        //   재지정 = 진행 중 세그먼트 마감(stopRecording) 후 새 레코더 — seq 는 새 자리에서 이어받는다.
         std::string recordDir = payload.GetString("record_dir");
-        if (!recordDir.empty() && !group->isRecordEnabled()) {
-            group->setRecording(true, recordDir, payload.GetString("session_dir"));
+        std::string sesDir = payload.GetString("session_dir");
+        if (!recordDir.empty()) {
+            if (!group->isRecordEnabled()) {
+                group->setRecording(true, recordDir, sesDir);
+            } else if (!sesDir.empty() && sesDir != group->recordSesDir()) {
+                LOG_INFO("PCmpServer", "ADD_GROUP group=%s recording re-targeted session_dir '%s' -> '%s'",
+                         groupId.c_str(), group->recordSesDir().c_str(), sesDir.c_str());
+                group->stopRecording();
+                group->setRecording(true, recordDir, sesDir);
+            }
         }
         LOG_DEBUG("PCmpServer", "ADD_GROUP group=%s floor=%d (existing)", groupId.c_str(), sharedFloorPort);
     }

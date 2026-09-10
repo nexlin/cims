@@ -36,8 +36,8 @@ public sealed class LayoutFile
 public sealed class LayoutStore
 {
     public const string DefaultName = "기본 배치";
-    /// <summary>2 = 패널 8개(발신·채널/운영·메시지·내역 × PTT/일반통화).</summary>
-    public const int CurrentVersion = 2;
+    /// <summary>3 = 패널 6개 3×2(① 내 채널 · ② 범위 채널 · ③ 일반통화 / ④ PTT 메시지 · ⑤ PTT 이벤트 · ⑥ 일반통화 내역, §3.1).</summary>
+    public const int CurrentVersion = 3;
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.Never,
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 

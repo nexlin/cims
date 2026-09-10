@@ -51,10 +51,12 @@ bool CSipUserAgent::RecvRegisterResponse( int iThreadId, CSipMessage * pclsMessa
 					time( &itSL->m_iLoginTime );
 					itSL->m_iResponseTime = itSL->m_iLoginTime;
 
-					int iExpires = pclsMessage->GetExpires();
-					if( iExpires > 0 && iExpires != itSL->m_iLoginTimeout )
+					// 부여 수명 (RFC 3261 §10.3 (8) — Contact ;expires 우선, 없으면 Expires 헤더). int 범위 밖은 무시.
+					uint32_t uiExpires = 0;
+					if( pclsMessage->GetRegisterExpires( uiExpires ) == E_SIP_EXPIRES_VALID && uiExpires > 0 &&
+							uiExpires <= 0x7FFFFFFFu && (int)uiExpires != itSL->m_iLoginTimeout )
 					{
-						itSL->m_iLoginTimeout = iExpires;
+						itSL->m_iLoginTimeout = (int)uiExpires;
 					}
 				}
 

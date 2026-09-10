@@ -218,6 +218,7 @@ bool CscClient::parseProfile(const std::string& json, Profile& out, std::string*
         out.dispatch.groupId = Json::str(d, "groupId"); out.dispatch.groupName = Json::str(d, "groupName");
         out.dispatch.pilotId = Json::str(d, "pilotId"); out.dispatch.monitorScope = Json::str(d, "monitorScope", "none");
         out.dispatch.pttListen = Json::str(d, "pttListen", "none"); out.dispatch.listenVisibility = Json::str(d, "listenVisibility", "hidden");
+        out.dispatch.directoryAdmin = Json::str(d, "directoryAdmin", "none"); out.dispatch.orgCode = Json::str(d, "orgCode");
         // 발견(discovery) 확장 — 서버가 아직 주지 않으면 빈 배열(앱은 로컬 폴백).
         Json::each(Json::child(d, "members"), [&](const JVal* m) {
             DispatchMember dm;
@@ -298,6 +299,24 @@ Result CscClient::deleteGroup(const std::string& accessToken, const std::string&
                                           {{"Authorization", "Bearer " + accessToken}}, "");
     if (r.status / 100 != 2) return httpFail(r, "deleteGroup");
     return Result::success();
+}
+
+Result CscClient::request(const std::string& accessToken, const std::string& method, const std::string& path,
+                          const std::string& contentType, const std::string& body, const std::string& accept,
+                          const std::string& ifMatch, const std::string& ifNoneMatch, HttpResult& out) {
+    std::map<std::string, std::string> h{{"Authorization", "Bearer " + accessToken}};
+    h["Accept"] = accept.empty() ? "*/*" : accept;
+    if (!body.empty()) h["Content-Type"] = contentType.empty() ? "application/json" : contentType;
+    if (!ifMatch.empty()) h["If-Match"] = ifMatch;
+    if (!ifNoneMatch.empty()) h["If-None-Match"] = ifNoneMatch;
+    http::Response r = impl_->tp->request(method.empty() ? "GET" : method, impl_->ep.baseUrl() + path, h, body);
+    out.status = r.status;
+    out.contentType = http::header(r, "content-type");
+    out.etag = http::header(r, "etag");
+    out.body = r.body;
+    if (r.status == 0) return Result::fail(-1, "request: " + r.error);
+    if (r.status / 100 == 2 || r.status == 304) return Result::success();
+    return httpFail(r, "request");
 }
 
 Result CscClient::xcapGet(const std::string& accessToken, const std::string& path, const std::string& accept,

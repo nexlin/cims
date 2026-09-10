@@ -507,6 +507,8 @@ typedef struct {
     const char*                     monitor_scope;          /* none|own|listed|all */
     const char*                     ptt_listen;
     const char*                     listen_visibility;
+    const char*                     directory_admin;        /* none|own|all — 관제 앱 관리 범위 */
+    const char*                     org_code;               /* 관제 그룹 소속 조직 코드("" = 없음) */
     const cimsue_dispatch_member_t* members;
     int32_t                         member_count;
     const cimsue_dispatch_target_t* ptt_targets;
@@ -538,6 +540,15 @@ typedef struct {
     const char* etag;
     int32_t     not_modified;
 } cimsue_xcap_doc_t;
+
+/** 범용 HTTP 요청 산출(csc.h HttpResult). body 는 바이트(이진 가능) + 길이 — NUL 종료를 가정하지 않는다. */
+typedef struct {
+    int32_t        status;          /* HTTP 상태(0 = 전송 실패) */
+    const char*    content_type;
+    const char*    etag;
+    const uint8_t* body;
+    int32_t        body_len;
+} cimsue_http_result_t;
 
 /** 그룹 문서 멤버 — role = chair | participant. */
 typedef struct {
@@ -587,6 +598,13 @@ CIMSUE_API int32_t CIMSUE_CALL cimsue_csc_list_groups(cimsue_csc_t* c, const cha
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_xcap_get(cimsue_csc_t* c, const char* access_token, const char* path,
                                                            const char* accept, const char* if_none_match,
                                                            cimsue_xcap_doc_t* out);
+/** 범용 요청(Bearer) — 코어가 모델링하지 않은 CSC 엔드포인트(관제 관리 API·녹취·이력 창 조회). body/body_len 은 본문(NULL/0 = 없음),
+ *  content_type·accept·if_match·if_none_match 는 NULL 가능. 2xx·304 = 0(out->status 로 구분), 그 밖의 HTTP 상태 = 그 값(out 은
+ *  채워진다 — 오류 JSON 본문), 전송 실패 = -1. 산출은 핸들 스냅샷(다음 호출 전까지 유효). */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_request(cimsue_csc_t* c, const char* access_token, const char* method,
+                                                          const char* path, const char* content_type, const uint8_t* body,
+                                                          int32_t body_len, const char* accept, const char* if_match,
+                                                          const char* if_none_match, cimsue_http_result_t* out);
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_get_user_profile(cimsue_csc_t* c, const char* access_token,
                                                                    const char* user_uri, const char* etag,
                                                                    cimsue_xcap_doc_t* out);
@@ -632,6 +650,7 @@ typedef enum {
     CIMSUE_STRUCT_CSC_ENDPOINT, CIMSUE_STRUCT_TOKEN_SET, CIMSUE_STRUCT_SERVICE_ENDPOINT, CIMSUE_STRUCT_SERVICE_PROFILE,
     CIMSUE_STRUCT_DISPATCH_PROFILE, CIMSUE_STRUCT_PROFILE, CIMSUE_STRUCT_GROUP_SUMMARY, CIMSUE_STRUCT_XCAP_DOC,
     CIMSUE_STRUCT_DISPATCH_MEMBER, CIMSUE_STRUCT_DISPATCH_TARGET, CIMSUE_STRUCT_GROUP_MEMBER, CIMSUE_STRUCT_GROUP_DOC,
+    CIMSUE_STRUCT_HTTP_RESULT,
     CIMSUE_STRUCT_COUNT_
 } cimsue_struct_id_t;
 /** 구조체의 sizeof(이 DLL 의 컴파일 결과). 모르는 id 는 -1. */

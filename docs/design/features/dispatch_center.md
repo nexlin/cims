@@ -75,7 +75,8 @@ ambient 플래그·녹취 탭)의 연장으로 구성한다. **INVITE 경로에 
 | `overflow_target` | 무응답·전원 부재 시 넘김 대상(다른 대표번호 또는 내선). NULL = 480 |
 | `monitor_scope` | `none`(기본) / `own`(자기 그룹) / `listed`(§3.2 대상 목록) / `all` |
 | `ptt_listen` | `none`(기본) / `listed` / `all` — 청취 가능한 PTT 그룹 범위(§5.6) |
-| `org_id` | 소속 조직(콘솔 필터·RBAC 스코프) |
+| `directory_admin` | `none`(기본) / `own`(소속 조직 `org_id` 와 그 하위) / `all` — 관제 앱에서 조직·구성원·VoLTE/PTT 번호·PTT 그룹을 관리할 수 있는 범위(§3.4). manager 승인 사항 |
+| `org_id` | 소속 조직(콘솔 필터·RBAC 스코프, `directory_admin=own` 의 루트) |
 
 ### 3.2 멤버십과 파생
 
@@ -94,6 +95,31 @@ ambient 플래그·녹취 탭)의 연장으로 구성한다. **INVITE 경로에 
   귀속 person 에 새 회선을 개설하면 파생값을 물려받는다(지정값이 다르면 409) — SoT 는 멤버십이다.
 - `dispatch_group_monitor_targets(group_id, target_group_id)` — `monitor_scope=listed` 의 대상.
 - `dispatch_group_ptt_targets(group_id, ptt_group_id)` — `ptt_listen=listed` 의 대상.
+
+### 3.4 관리 범위 — 조직/구성원/번호·PTT 그룹 관리 (관제 앱)
+
+관제사(가입자, PKCE 토큰)가 관제 앱에서 조직 트리·구성원(person)·VoLTE/PTT 번호(가입)·PTT 그룹을 관리하는 권한은 관제 그룹
+속성 **`directory_admin`** 하나로 정한다 — `monitor_scope`·`ptt_listen` 과 같은 결의 범위 enum 이며 서버가 해석하고
+앱은 결과만 받는다. 가입자 프로비저닝은 3GPP 규격 밖(MC 서비스 제공자 정책)이라 CIMS 확장이다.
+
+- **범위 해석**: `own` = `org_id` 조직과 그 하위(코드 집합), `all` = 전 조직. `own` 인데 `org_id` 가 없으면 범위가
+  비어 관리 불가. 컬럼 미적용 DB(`sql/migrate_dispatch_directory_admin.sql`)는 전 그룹 `none`.
+- **부여** = 콘솔 `구성 > 관제 그룹 > 관리 범위`(manager 이상 — 가입자에게 조직·번호 쓰기 권한을 여는 승인 사항이라
+  감청 범위와 같은 게이트, §5.8). 앱은 `/provisioning/me` `dispatch.directoryAdmin`/`orgCode` 로 안다.
+- **API** = `/provisioning/directory/{admin,orgs,members,groups}`(CSC 4430, 계약
+  [android_ue_provisioning.md §3-3](android_ue_provisioning.md)) — 콘솔 관리 API(`/api/v1/organizations`·`/api/v1/users`,
+  콘솔 토큰)와 **같은 쓰기 코드**(`handlers/admin.py`·`org.py`)를 호출해 정책(H(A1) 결박·`pickup_group` 파생 409·AKA)이
+  두 평면에서 갈라지지 않게 한다. 토큰 realm 은 섞지 않는다(`csc/src/handlers/dispatch_directory.py`).
+- **범위 게이트**: 대상 조직(생성 부모·이동 부모·구성원 소속)이 범위 안이어야 한다(`403 out_of_scope`). `own` 은
+  범위 루트를 옮기거나 지우거나 루트를 새로 만들 수 없다. 조직 삭제는 하위 조직·구성원이 없을 때만(`409 not_empty`).
+  자기 자신 삭제 불가(`409 self_delete`). 번호 변경(다른 msisdn) = 종전 회선 삭제 + 신규 개설이라 SIP 비밀번호 필수.
+- **PTT 그룹**: 관리 범위 안 그룹(`org_code` 가 범위 안 또는 내 소유)은 소유자가 아니어도 GMS XCAP GET/PUT/DELETE 를
+  허용하고(소유권은 바뀌지 않는다 — `authorized_user_id` 유지), 신규 생성은 `allow_create_group` 없이도 된다.
+  관리용 열거는 `GET /provisioning/directory/groups`(멤버 그룹 목록과 별개) — 관리 범위 안 ∪ 내 소유 ∪ 관제 그룹 청취 범위(`ptt_listen`
+  all|listed) ∪ 내 멤버 그룹을 주고, 행마다 `canManage`(관리 범위 안 또는 소유 = GMS 게이트 판정)·`inListenScope`·`isMember` 를 싣는다.
+  관리 권한이 없는 청취·멤버 그룹은 보기 전용으로 보인다.
+- **감사**: 모든 쓰기는 `E-AUD-006 config_change`(actor = 관제사 msisdn, entity = organization|user|subscription|ptt_profile,
+  reason = `dispatch_directory`).
 
 ### 3.3 CSP 인메모리 맵
 
@@ -381,7 +407,7 @@ UE-M ◄════ RTP (A ingress 복사 SSRC_A + B ingress 복사 SSRC_B, tap
   성립하려면 불가피한 관측 가능 변화다.
 
 **conference 이벤트 구독 인가 — TS 24.379 §10.1.3.4.1(규격형)**: 관제 앱의 PTT 세션 목록("진행 중·참가자 수",
-[dispatch_desktop_ui.md](dispatch_desktop_ui.md) §4.3)은 그룹 AoR 의 RFC 4575 conference 구독으로 안다. CSP(controlling
+[dispatch_desktop_ui.md](dispatch_desktop_ui.md) §4.2 ② 범위 채널)은 그룹 AoR 의 RFC 4575 conference 구독으로 안다. CSP(controlling
 function, `CscfModule` SUBSCRIBE 초기 구독)는 구독자를 그룹 문서(TS 24.481)의 **`<on-network-allow-conference-state>`**
 로 판정하고, 불허 시 **403 + `Warning: 138 CIMS "subscription of conference events not allowed"`**, 브로드캐스트 그룹은
 **480 + Warning 105** 로 거절한다(`CGroupCallService::CheckConferenceSubscribe`). CIMS 해석:
@@ -438,6 +464,28 @@ TS 24.379 **ambient listening**(`session-type=ambient-listening`, remote-init �
   로 게이트 — 범위 한정 보관은 멤버십 변동 시 이력 결손이라 채택 안 함, [mcdata_messaging.md §4.3](mcdata_messaging.md)).
 - **감사**: 열람 자체가 당사자 모르게 이력을 여는 동작이라 `E-AUD-016 call_monitored`(`tap_mode=history`,
   `hist_kind`·`count` 포함)로 남기고 열람은 §5.7 과 같은 manager 게이트를 받는다.
+- **창 조회**: 같은 API 에 `until` 을 주면 [since, until] 창(관제 앱 [이력] 화면 — 하루 단위 페이지)이고,
+  없으면 폴링 커서다. 종료분 항목에는 녹취 식별자 `recordingId`(세션 디렉터리의 `ServiceLogging.Dir` 상대 경로 — OAM
+  `/api/v1/recordings/{id}` 와 같은 키)와 `hasRecording` 이 실린다. 항목에는 콘솔 VoLTE/PTT 이력과 같은 열을 그릴 종류별 확장
+  필드(통화 = 상태·시작/응답/종료·종료사유, PTT = 종류·발언 턴/화자/발화/동시 발언·참여자·floor 축)와 최상위 시간대 분포 `hours` 가
+  함께 실린다. **PTT 창 조회는 OAM 세션 인덱스(`/api/v1/ptt/sessions`, 콘솔 PTT 이력의 읽기 모델)를 청취 그룹의 저장 키로 좁혀
+  프록시**하고(집계값은 CMP `segments.jsonl` 에서 나오므로 CSC 가 재구현하지 않는다) OAM 미도달 시 파일 스캔으로 폴백한다.
+  **PTT 세션 상세**(참여자·입퇴장·floor 타임라인)는 `GET /provisioning/history/ptt/{recordingId}` — §5.7b 와 같은 범위 게이트 +
+  OAM `/api/v1/ptt/history/{group_key}/{session}`·`/floor` 프록시(계약 [android_ue_provisioning.md §3-2a](android_ue_provisioning.md),
+  감사 `tap_mode=history`·`hist_kind=ptt_session`).
+
+### 5.7b 녹취 열람·재생 (관제 앱)
+
+관제 앱은 이력 항목의 `recordingId` 로 `GET /provisioning/recordings/{id}`(세션·세그먼트 메타)와
+`GET /provisioning/recordings/{id}/segments/{seq}/audio?slot=`(MP4/AAC — 202 변환 중이면 재시도) 를 부른다
+(계약 [android_ue_provisioning.md §3-4](android_ue_provisioning.md)). CSC 는 **범위 게이트 + 프록시**만 한다 —
+원시 RTP → MP4 변환·캐시·다중 버킷 결합은 oam-svc `handlers/recording.py` 하나가 소유하고(변환 상태·워커 풀·failed
+마커) CSC 가 재구현하지 않는다(`csc/src/handlers/dispatch_recordings.py`, OAM 주소 = csc.json `Recording.OamUrl`,
+비면 `https://{Fm.OamIp}:4419`).
+- **범위** = §5.7a 와 같은 집합: `ptt/{groupKey}/…` 는 그룹 키(`ptt_groups.id` 또는 mcptt id)·`session.json` 의
+  그룹이 `ptt_listen` 대상, `volte/…/{cid}.d` 는 `call.json` 의 발·수신자 중 하나가 `monitor_scope` 대상. 범위 밖
+  403, 경로 이탈(`..`) 400, 관제 미소속 403.
+- **감사**: 오디오 200 마다 `E-AUD-016 call_monitored`(`tap_mode=recording`, `recording`·`segment`·`slot`).
 
 ### 5.8 법적 근거·인가
 
@@ -552,6 +600,7 @@ CREATE TABLE IF NOT EXISTS dispatch_groups (
     monitor_scope   ENUM('none','own','listed','all') NOT NULL DEFAULT 'none',
     ptt_listen      ENUM('none','listed','all')       NOT NULL DEFAULT 'none',
     listen_visibility ENUM('hidden','visible')        NOT NULL DEFAULT 'hidden' COMMENT 'PTT 청취 멤버 로스터 노출',
+    directory_admin ENUM('none','own','all')          NOT NULL DEFAULT 'none' COMMENT '관제 앱 조직/구성원/번호·PTT 그룹 관리 범위 (own=org_id 하위) — sql/migrate_dispatch_directory_admin.sql',
     org_id          INT                   DEFAULT NULL,
     created_at      DATETIME              DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
@@ -605,8 +654,11 @@ ALTER TABLE ptt_user_profile
 `POST /{id}/members` / `DELETE /{id}/members/{user_id}` / `PUT /{id}/monitor-targets` /
 `PUT /{id}/ptt-targets`. PTT 그룹 API([../../api/admin_api.md](../../api/admin_api.md) §6)와 동형.
 검증: `pilot_id` 가 `volte_subscriptions.id`/`ptt_subscriptions.id`/다른 pilot 과 충돌 → 409;
-`monitor_scope≠none`/`ptt_listen≠none` 그룹의 생성·범위 변경·멤버 편입을 manager 미만 콘솔 계정이 시도
-→ 403 `manager_required`(편입되는 가입자 쪽 역할 게이트는 없다 — §5.3).
+`monitor_scope≠none`/`ptt_listen≠none`/`directory_admin≠none` 그룹의 생성·범위 변경·멤버 편입을 manager 미만 콘솔 계정이 시도
+→ 403 `manager_required`(편입되는 가입자 쪽 역할 게이트는 없다 — §5.3). `directory_admin` 컬럼 미적용 DB 에서 `none` 외 값 → 400 `schema_not_migrated`.
+
+**관제 앱(가입자 토큰) 관리 API** — `/provisioning/directory/{admin,orgs,members,groups}`(§3.4) ·
+`/provisioning/recordings/{id}…`(§5.7b): MCPTT 서버(4430) 에 붙고 콘솔 관리 API 와 realm 이 다르다.
 
 ### 8.3 접속서비스·csp.json
 

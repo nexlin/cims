@@ -420,7 +420,8 @@ static void PrintUsage(const char* pszBin) {
     printf("                             transfer_attended - [volte] A→B + A→C 상담 후 attended REFER: B–C (-count 3)\n");
     printf("                             pickup       - [volte] A→B 링잉 중 C 가 당겨받기 코드(-pickup_code) 다이얼: A–C (-count 3)\n");
     printf("                             dialog_pickup- [volte] C 가 B 를 dialog 구독(BLF) → A→B 링잉 NOTIFY → C INVITE-Replaces: A–C (-count 3)\n");
-    printf("                             subscribe_event - 등록 후 -event 토큰으로 자기 AoR SUBSCRIBE 1건, 최종 응답 출력 (489 프로브)\n");
+    printf("                             subscribe_event - -event 토큰으로 자기 AoR SUBSCRIBE 1건, 최종 응답·챌린지 realm 출력 (489 프로브,\n");
+    printf("                                            -no_register 와 함께면 미등록 가입자 Digest 수락 프로브 — 401 은 Digest 로 1회 재전송)\n");
     printf("                             hunt         - [volte] A→대표번호(-pilot): 그룹원 B·C 병렬 링, C 응답(B ring-hold) → A–C (-count 3~4)\n");
     printf("                                            -hunt_noanswer: 전원 ring-hold — 무응답 → A 480 또는 overflow(D 응답)\n");
     printf("                             monitor      - [volte] A↔B 통화 중 M(감청자)이 B dialog 구독→INVITE-Join 청취(SSRC 2개), A/B 무영향 (-count 3, §5)\n");
@@ -543,19 +544,23 @@ static void RunScenario(std::vector<SimSession*>& sessions,
     //   출력한다. 서버 분류 검증용(RFC 6665 §8.2.1: 미지원 패키지 → 489 Bad Event, dialog 자기감시 → 200).
     //   마커 "[Scenario] SUBSCRIBE-EVENT result: event=<tok> status=<n>" 는 verify(S3-SCN-DIALOG)가 읽는다.
     if (eScenario == E_SCENARIO_SUBSCRIBE_EVENT) {
+        // -no_register 세션도 프로브한다 — 미등록 가입자의 SUBSCRIBE 를 서버가 신원(Digest)으로 수락하는지·챌린지 realm 이
+        //   요청자 서비스 realm 인지(volte 폴백 아님) 판정(S3-SCN-DIALOG D5). 401 은 SimSession 이 Digest 로 1회 재전송.
+        auto eligible = [](SimSession* s) { return s->m_bRegistered || s->m_bNoRegister; };
         for (auto* s : sessions) {
-            if (!s->m_bRegistered) continue;
+            if (!eligible(s)) continue;
             s->SubscribeEvent(g_strSubscribeEvent, s->m_strUser);
         }
-        for (int t = 0; t < 50 && !g_bQuit; ++t) {  // 최종 응답 대기 (최대 5s)
+        for (int t = 0; t < 100 && !g_bQuit; ++t) {  // 최종 응답 대기 (최대 10s — 401→재전송 왕복 포함)
             bool bAll = true;
-            for (auto* s : sessions) if (s->m_bRegistered && s->m_iEventSubStatus == 0) bAll = false;
+            for (auto* s : sessions) if (eligible(s) && s->m_iEventSubStatus == 0) bAll = false;
             if (bAll) break;
             usleep(100000);
         }
         for (auto* s : sessions) {
-            printf("[Scenario] SUBSCRIBE-EVENT result: user=%s event=%s status=%d\n", s->m_strUser.c_str(),
-                   g_strSubscribeEvent.c_str(), s->m_iEventSubStatus.load());
+            printf("[Scenario] SUBSCRIBE-EVENT result: user=%s event=%s status=%d realm=%s\n", s->m_strUser.c_str(),
+                   g_strSubscribeEvent.c_str(), s->m_iEventSubStatus.load(),
+                   s->m_strEventSubRealm.empty() ? "-" : s->m_strEventSubRealm.c_str());
         }
         return;
     }

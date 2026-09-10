@@ -62,12 +62,17 @@ def _meta_path(fid: str):
 
 
 async def handle_mcdata_fd(args: HandlerArgs, kwargs: dict) -> HandlerResult:
-    # 인증 — MCPTT access token (IdMS 발급, mcptt.validate_access_token)
-    from services.mcptt import extract_token, GROUPS, _group_uri, _is_group_member
+    # 인증 — IdMS access token(mcptt.validate_access_token) + MCData scope(3gpp:mc:data_service, TS 33.180 B.10).
+    #   MCData 신원 = 토큰 mcdata_id (단일 MC service ID 구성이라 mcptt_id 와 같은 값 — 이행 전 토큰은 mcptt_id 폴백).
+    from services.mcptt import (extract_token, unauthorized, require_scope, SCOPE_DATA_SERVICE,
+                                GROUPS, _group_uri, _is_group_member)
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
-        return HandlerResult(status=401, body="Missing or Invalid Token")
-    mcptt_id = token_payload.get('mcptt_id', '')
+        return unauthorized(args)
+    deny = require_scope(args, token_payload, 'MCDATA-FD', SCOPE_DATA_SERVICE)
+    if deny:
+        return deny
+    mcptt_id = token_payload.get('mcdata_id') or token_payload.get('mcptt_id', '')
 
     if not _FD_DIR:
         return _err(503, 'FD store not configured')

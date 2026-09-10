@@ -22,11 +22,41 @@
 #include "SipParserDefine.h"
 #include "SipStatusCode.h"
 #include "SipUtility.h"
+#include <ctype.h>
+#include <limits.h>
 #include <stdlib.h>
+
+/**
+ * @brief Expires / Contact ;expires 의 delta-seconds 파싱 (RFC 3261 §20.19 — 32bit 무부호 정수).
+ *        숫자만 허용하고(앞뒤 공백 무시) 2^32-1 을 넘으면 실패. 값의 해석(0=해지, 없음=서버 기본,
+ *        상한 적용)은 호출부 몫이다 — 파서는 규격 타입을 그대로 보존한다.
+ * @returns 성공 시 true (uiOut 설정), 형식 오류면 false
+ */
+static bool ParseDeltaSeconds(const char *pszValue, int iValueLen,
+                              uint32_t &uiOut) {
+  int iPos = 0;
+  while (iPos < iValueLen && (pszValue[iPos] == ' ' || pszValue[iPos] == '\t'))
+    ++iPos;
+  int iEnd = iValueLen;
+  while (iEnd > iPos &&
+         (pszValue[iEnd - 1] == ' ' || pszValue[iEnd - 1] == '\t' ||
+          pszValue[iEnd - 1] == '\r' || pszValue[iEnd - 1] == '\n'))
+    --iEnd;
+  if (iPos >= iEnd) return false;
+  uint64_t ullValue = 0;
+  for (; iPos < iEnd; ++iPos) {
+    const char c = pszValue[iPos];
+    if (c < '0' || c > '9') return false;
+    ullValue = ullValue * 10 + (uint64_t)(c - '0');
+    if (ullValue > 0xFFFFFFFFULL) return false;
+  }
+  uiOut = (uint32_t)ullValue;
+  return true;
+}
 
 
 CSipMessage::CSipMessage()
-    : m_iStatusCode(-1), m_iContentLength(0), m_iExpires(-1),
+    : m_iStatusCode(-1), m_iContentLength(0), m_bExpiresPresent(false), m_bExpiresValid(false), m_uiExpires(0),
       m_iMaxForwards(-1), m_eTransport(E_SIP_UDP), m_iClientPort(0),
       m_iListenerId(-1), m_iSendDestPort(0), m_bUseCompact(false),
       m_iUseCount(0) {}
@@ -151,7 +181,8 @@ int CSipMessage::Parse(const char *pszText, int iTextLen) {
         if (ParseSipFrom(m_clsContactList, pszValue, iValueLen) == -1)
           return -1;
       } else if (!strcasecmp(pszName, "Expires")) {
-        m_iExpires = atoi(pszValue);
+        m_bExpiresPresent = true;
+        m_bExpiresValid = ParseDeltaSeconds(pszValue, iValueLen, m_uiExpires);
       } else {
         bNotFound = true;
       }
@@ -299,7 +330,8 @@ int CSipMessage::Parse(const char *pszText, int iTextLen) {
     }
 #endif
     else if (!strcasecmp(pszName, "Expires")) {
-      m_iExpires = atoi(pszValue);
+      m_bExpiresPresent = true;
+      m_bExpiresValid = ParseDeltaSeconds(pszValue, iValueLen, m_uiExpires);
     } else if (!strcasecmp(pszName, "User-Agent")) {
       m_strUserAgent = clsHeader.m_strValue;
     } else {
@@ -543,9 +575,9 @@ int CSipMessage::ToString(char *pszText, int iTextSize) {
   }
 #endif
 
-  if (m_iExpires >= 0) {
-    iLen += snprintf(pszText + iLen, iTextSize - iLen, "Expires: %d\r\n",
-                     m_iExpires);
+  if (m_bExpiresPresent && m_bExpiresValid) {
+    iLen += snprintf(pszText + iLen, iTextSize - iLen, "Expires: %u\r\n",
+                     m_uiExpires);
   }
 
   if (m_strUserAgent.empty() == false) {
@@ -624,7 +656,9 @@ void CSipMessage::Clear() {
   m_clsContentType.Clear();
   m_iContentLength = 0;
 
-  m_iExpires = -1;
+  m_bExpiresPresent = false;
+  m_bExpiresValid = false;
+  m_uiExpires = 0;
   m_iMaxForwards = -1;
 
   m_strUserAgent.clear();
@@ -1140,28 +1174,41 @@ bool CSipMessage::SetTopContactIpPort(const char *pszIp, int iPort,
 }
 
 /**
- * @ingroup SipParser
- * @brief Expires 헤더가 존재하면 Expires 헤더 값을 리턴하고 Contact 헤더에
- * expires 가 존재하면 Contact 헤더의 expires 를 리턴한다.
- * @returns Expires 헤더가 존재하면 Expires 헤더 값을 리턴하고 Contact 헤더에
- * expires 가 존재하면 Contact 헤더의 expires 를 리턴한다. 둘 다 없으면 0 을
- * 리턴한다.
+ * @brief Expires 헤더의 delta-seconds (RFC 3261 §20.19). SUBSCRIBE(RFC 6665)·PUBLISH(RFC 3903) 처럼
+ *        Expires 헤더만 의미를 갖는 요청용. REGISTER 는 GetRegisterExpires() 를 쓴다.
+ * @returns E_SIP_EXPIRES_ABSENT(헤더 없음) / VALID(uiExpires 설정) / INVALID(형식 오류)
  */
-int CSipMessage::GetExpires() {
-  if (m_iExpires != -1)
-    return m_iExpires;
+ESipExpiresResult CSipMessage::GetExpires(uint32_t &uiExpires) {
+  if (m_bExpiresPresent == false) return E_SIP_EXPIRES_ABSENT;
+  if (m_bExpiresValid == false) return E_SIP_EXPIRES_INVALID;
+  uiExpires = m_uiExpires;
+  return E_SIP_EXPIRES_VALID;
+}
 
+/**
+ * @brief REGISTER 의 바인딩 요청 수명 (RFC 3261 §10.2.1.1): 첫 Contact 의 ;expires 파라미터가 Expires
+ *        헤더보다 우선하고, 둘 다 없으면 ABSENT(등록자가 기본값을 정한다 — §10.2.4). 200 OK 의 부여
+ *        수명도 같은 규칙으로 읽는다(§10.3 (8)).
+ */
+ESipExpiresResult CSipMessage::GetRegisterExpires(uint32_t &uiExpires) {
   SIP_FROM_LIST::iterator itContact = m_clsContactList.begin();
-  if (itContact == m_clsContactList.end())
-    return 0;
-
-  std::string strExpires;
-
-  if (itContact->SelectParam("EXPIRES", strExpires)) {
-    return atoi(strExpires.c_str());
+  if (itContact != m_clsContactList.end()) {
+    std::string strExpires;
+    if (itContact->SelectParam("EXPIRES", strExpires)) {
+      return ParseDeltaSeconds(strExpires.c_str(), (int)strExpires.length(),
+                               uiExpires)
+                 ? E_SIP_EXPIRES_VALID
+                 : E_SIP_EXPIRES_INVALID;
+    }
   }
+  return GetExpires(uiExpires);
+}
 
-  return 0;
+/** @brief 송신 메시지(REGISTER/SUBSCRIBE 요청, 2xx 응답)의 Expires 헤더 설정 */
+void CSipMessage::SetExpires(uint32_t uiExpires) {
+  m_bExpiresPresent = true;
+  m_bExpiresValid = true;
+  m_uiExpires = uiExpires;
 }
 
 /**

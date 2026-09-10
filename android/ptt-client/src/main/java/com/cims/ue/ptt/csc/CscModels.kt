@@ -109,7 +109,7 @@ data class CscConfig(
     val port: Int = 4430,
     val clientId: String = "MCPTT_UE",
     val redirectUri: String = "https://localhost/callback",
-    val scope: String = "openid 3gpp:mcptt:ptt_server",
+    val scope: String = "openid 3gpp:mc:ptt_service 3gpp:mc:data_service 3gpp:mc:ptt_group_management_service 3gpp:mc:ptt_config_management_service 3gpp:mc:ptt_key_management_service 3gpp:mc:data_group_management_service 3gpp:mc:data_config_management_service 3gpp:mc:data_key_management_service",
 ) {
     val baseUrl: String get() = "https://$host:$port"
 }

@@ -16,11 +16,13 @@ MCPTT 단말 로그인 + 토큰 발급 (OAuth 2.0 Authorization Code + PKCE S256
 | GET  | `/.well-known/openid-configuration` | OIDC 디스커버리 (authorization/token/introspection endpoint 광고) |
 | GET  | `/idms/authreq` | **두 말투 병행** — ① `user_name`+`user_password` 쿼리 동반: 자체 단말 간이형 → `200 JSON {code,state,Location}` ② 자격 없음(규격 OIDC Authentication Request): `client_id`·`redirect_uri`(필수)·`code_challenge`(필수)·`code_challenge_method=S256`·`scope`·`state`·`nonce`·`response_type=code` → `200 text/html` 로그인 폼 |
 | POST | `/idms/authreq` | 규격 로그인 폼 제출 (`application/x-www-form-urlencoded`: 입력칸 `username`/`password` — 이름은 `IdMs.FormLoginField`/`FormPasswordField` 설정 + hidden 문맥) → 성공 **`302 Location: redirect_uri?code=…&state=…`** / 실패 `200` 폼 재표시+오류 |
-| POST | `/idms/tokenreq` | `grant_type=authorization_code`(`code`·`code_verifier`·`client_id`·`redirect_uri`) 또는 `refresh_token` → JSON(access/id/refresh token). JSON·form-urlencoded 모두 수용 |
-| GET  | `/idms/introspect` | 토큰 introspection |
+| POST | `/idms/tokenreq` | `grant_type=authorization_code`(`code`·`code_verifier`·`client_id`·`redirect_uri`) 또는 `refresh_token`(+선택 `scope` 축소) → JSON(access/id/refresh token·`expires_in`·**`scope`=실제 허가분**). JSON·form-urlencoded 모두 수용. scope = 요청 ∩ 카탈로그(`openid`·`cims:provisioning`·TS 33.180 `3gpp:mc:*` 8종, 구 `3gpp:mcptt:ptt_server` 별칭) — [mcx_identity_scope.md](../design/features/mcx_identity_scope.md) |
+| POST | `/idms/introspect` | 토큰 introspection (RFC 7662: `active sub iss client_id mcptt_id mcdata_id aud exp iat scope`) |
 
 검증 공통: PKCE 누락/plain → 400, `redirect_uri` 허용목록 `IdMs.RedirectUriAllow`(비면 전부 허용,
-정확 일치) 위반 → 400, 인증 실패(간이형) → 401 `access_denied`. 흐름 상세는 3GPP TS 24.482 §6.3.1 과
+정확 일치) 위반 → 400, 인증 실패(간이형) → 401 `access_denied`. 리소스 서버(GMS/CMS/KMS/`/mcdata/fd`)는
+토큰 부재/무효 → 401 `WWW-Authenticate: Bearer`, scope 부족 → 403 `insufficient_scope` + `WWW-Authenticate: Bearer
+error="insufficient_scope", scope="…"`(`IdMs.ScopeEnforcement=enforce`; `log` 는 로그만). 흐름 상세는 3GPP TS 24.482 §6.3.1 과
 [mcptt_standard_conformance.md §3 IdMS](../design/features/mcptt_standard_conformance.md).
 
 ---
@@ -35,8 +37,8 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
 |---|---|---|---|
 | GET  | `/org.openmobilealliance.groups/users/{xui}` | 본인 트리 | JSON 배열 — 멤버인 그룹 + **소유(`authorized_user_id`) 그룹**(비멤버라도). 항목 `{uri, display_name, etag, member_count, is_owner}` — `is_owner` = 편집·삭제 가능 |
 | GET  | `…/users/{xui}/{group_uri}` | 멤버 또는 소유자 | `application/vnd.oma.poc.groups+xml` + `ETag`; `If-None-Match` → 304 |
-| PUT  | `…/users/{xui}/{group_uri}` | **신규** = 프로파일 `allow_create_group`(OAM 부여, 프로비저닝 `ptt.allowCreateGroup`) · **기존** = 소유자 | 201(신규)/200(갱신) + 문서 + `ETag`. 403 `group_creation_not_allowed` / `not_group_owner`(소유자 없는 콘솔 그룹 포함), 409 `uri_taken`(타인 소유 id — 다른 id 로), 400 `invalid_group_id`·`reserved_prefix`·`invalid_group_document`·`unknown_member`, 412 `etag_mismatch`(`If-Match` 사용 시) |
-| DELETE | `…/users/{xui}/{group_uri}` | 소유자 | 200. 403 `not_group_owner`, 404 |
+| PUT  | `…/users/{xui}/{group_uri}` | **신규** = 프로파일 `allow_create_group`(OAM 부여, 프로비저닝 `ptt.allowCreateGroup`) **또는** 관제 그룹 관리 범위(`directory_admin`) · **기존** = 소유자 또는 관리 범위 안 그룹(`org_code` 범위 — 소유권은 유지, [dispatch_center.md §3.4](../design/features/dispatch_center.md)) | 201(신규)/200(갱신) + 문서 + `ETag`. 403 `group_creation_not_allowed` / `not_group_owner`(소유자 없는 콘솔 그룹 포함), 409 `uri_taken`(타인 소유 id — 다른 id 로), 400 `invalid_group_id`·`reserved_prefix`·`invalid_group_document`·`unknown_member`, 412 `etag_mismatch`(`If-Match` 사용 시) |
+| DELETE | `…/users/{xui}/{group_uri}` | 소유자 또는 관리 범위 안 그룹 | 200. 403 `not_group_owner`, 404 |
 
 - **신규 그룹 식별자는 클라이언트가 정한다**(XCAP 관습): `g-` + 소문자 hex 8자리(`tel:g-0a1b2c3d`). `adhoc-`/`priv-` 는
   즉석 세션 예약 접두사라 거부. 콘솔이 만든 `g001` 류는 형식이 달라도 소유자면 PUT/DELETE 가능.
@@ -103,7 +105,7 @@ MCPTT 설정 문서 (TS 24.484). ue-init-config 만 **익명 GET**(로그인 전
 | Method | Path | 인증 |
 |---|---|---|
 | GET  | `/org.3gpp.mcptt.ue-init-config/users/{instance}/{doc}` | 없음 (익명) |
-| GET  | `/org.3gpp.mcptt.user-profile/users/{user}/user-profile` | Bearer + 본인 |
+| GET  | `/org.3gpp.mcptt.user-profile/users/{user}/user-profile` | Bearer + 본인 + scope `ptt_config_management_service`. TS 24.484 §8.3.2 문서 — `<OnNetwork><MCPTTGroupInfo>` = 소속 그룹 목록(규격 단말의 그룹 소스), `<PrivateCallList>` = 동료 연락처, 긴급 대상·`cp:ruleset` 인가. ETag 내용 파생 |
 | GET  | `/org.3gpp.mcptt.service-config/users/{user}/service-config` | Bearer + 본인 |
 
 ue-init-config 의 주소류(IdMS/CMS/GMS/KMS/XCAP 루트)의 base 는 CSC 설정 `McpttServer.PublicUrl`

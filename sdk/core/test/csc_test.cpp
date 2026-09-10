@@ -22,7 +22,8 @@ static const char* kProfile = R"({
       "account": { "msisdn": "+82500000001", "imsi": "4503382500000001", "sipHa1": null, "mcpttId": "tel:+82500000001",
                    "authScheme": "aka", "aka": { "k": "00112233", "opc": "44556677", "amf": "8000" } } }
   ],
-  "dispatch": { "groupId": "dg-1", "groupName": "관제1", "pilotId": "+8215001000", "monitorScope": "all", "pttListen": "listed", "listenVisibility": "hidden" }
+  "dispatch": { "groupId": "dg-1", "groupName": "관제1", "pilotId": "+8215001000", "monitorScope": "all", "pttListen": "listed", "listenVisibility": "hidden",
+                "directoryAdmin": "own", "orgCode": "DIV1" }
 })";
 
 TEST(Csc, ParseProfile) {
@@ -59,9 +60,12 @@ TEST(Csc, ParseProfile) {
     EXPECT_EQ(p.dispatch.groupId, "dg-1");
     EXPECT_EQ(p.dispatch.pilotId, "+8215001000");
     EXPECT_EQ(p.dispatch.monitorScope, "all");
+    EXPECT_EQ(p.dispatch.directoryAdmin, "own");
+    EXPECT_EQ(p.dispatch.orgCode, "DIV1");
     Profile none;
     ASSERT_TRUE(CscClient::parseProfile(R"({"services":[]})", none));
     EXPECT_FALSE(none.dispatch.present);
+    EXPECT_EQ(none.dispatch.directoryAdmin, "none");
     EXPECT_FALSE(none.allowGroupCreation);
     EXPECT_TRUE(none.dispatch.members.empty());
     EXPECT_FALSE(CscClient::parseProfile("not json", none));
@@ -204,4 +208,63 @@ TEST(SsrcLabels, ParseFromSdp) {
     EXPECT_EQ(s[0].ssrc, 1111u); EXPECT_EQ(s[0].label, "caller"); EXPECT_TRUE(s[0].active);
     EXPECT_EQ(s[1].ssrc, 2222u); EXPECT_EQ(s[1].label, "callee");
     EXPECT_TRUE(mcptt::sdpSsrcLabels("v=0\r\nm=audio 1 RTP/AVP 0\r\n").empty());
+}
+
+// ── 범용 요청(request) — 헤더 조립·이진 본문 왕복·상태 매핑(2xx/304 = ok, 4xx = fail + 산출 유지, 전송 실패 = -1) ──
+#include "../src/http/https_client.h"
+
+namespace {
+struct FakeTransport : http::ITransport {
+    http::Response next;
+    std::string lastMethod, lastUrl, lastBody;
+    std::map<std::string, std::string> lastHeaders;
+    http::Response request(const std::string& method, const std::string& url,
+                           const std::map<std::string, std::string>& headers, const std::string& body) override {
+        lastMethod = method; lastUrl = url; lastHeaders = headers; lastBody = body;
+        return next;
+    }
+};
+}  // namespace
+
+TEST(Csc, GenericRequestHeadersBinaryAndStatusMapping) {
+    auto tp = std::make_shared<FakeTransport>();
+    CscEndpoint ep; ep.host = "csc.example"; ep.port = 4430;
+    CscClient c(ep, tp);
+    HttpResult out;
+
+    // PUT JSON + If-Match → 200 이진 응답(NUL 포함)이 길이 그대로 온다
+    tp->next.status = 200;
+    tp->next.headers = {{"content-type", "audio/mp4"}, {"etag", "\"e1\""}};
+    tp->next.body = std::string("\x00\x00\x00\x18" "ftyp", 8);
+    Result r = c.request("tok", "PUT", "/provisioning/directory/orgs/T1", "application/json", "{\"name\":\"x\"}", "", "\"e0\"", "", out);
+    EXPECT_TRUE(r.ok) << r.reason;
+    EXPECT_EQ(tp->lastMethod, "PUT");
+    EXPECT_EQ(tp->lastUrl, ep.baseUrl() + "/provisioning/directory/orgs/T1");
+    EXPECT_EQ(tp->lastHeaders.at("Authorization"), "Bearer tok");
+    EXPECT_EQ(tp->lastHeaders.at("Content-Type"), "application/json");
+    EXPECT_EQ(tp->lastHeaders.at("If-Match"), "\"e0\"");
+    EXPECT_EQ(tp->lastHeaders.at("Accept"), "*/*");
+    EXPECT_EQ(tp->lastHeaders.count("If-None-Match"), 0u);
+    EXPECT_EQ(out.status, 200); EXPECT_EQ(out.contentType, "audio/mp4"); EXPECT_EQ(out.etag, "\"e1\"");
+    EXPECT_EQ(out.body.size(), 8u); EXPECT_EQ(out.body[3], '\x18');
+
+    // GET 본문 없음 → Content-Type 헤더 없음, 304 = ok(NotModified 는 status 로)
+    tp->next = http::Response(); tp->next.status = 304;
+    r = c.request("tok", "GET", "/provisioning/directory/admin", "", "", "application/json", "", "\"e1\"", out);
+    EXPECT_TRUE(r.ok); EXPECT_EQ(out.status, 304);
+    EXPECT_EQ(tp->lastHeaders.count("Content-Type"), 0u);
+    EXPECT_EQ(tp->lastHeaders.at("If-None-Match"), "\"e1\"");
+    EXPECT_EQ(tp->lastHeaders.at("Accept"), "application/json");
+
+    // 403 = fail(code=403) 이되 오류 본문은 산출에 남는다
+    tp->next = http::Response(); tp->next.status = 403; tp->next.body = "{\"error\":\"out_of_scope\"}";
+    tp->next.headers = {{"content-type", "application/json"}};
+    r = c.request("tok", "DELETE", "/provisioning/directory/orgs/T2", "", "", "", "", "", out);
+    EXPECT_FALSE(r.ok); EXPECT_EQ(r.code, 403);
+    EXPECT_EQ(out.status, 403); EXPECT_EQ(out.body, "{\"error\":\"out_of_scope\"}");
+
+    // 전송 실패 = -1
+    tp->next = http::Response(); tp->next.status = 0; tp->next.error = "connect refused";
+    r = c.request("tok", "GET", "/x", "", "", "", "", "", out);
+    EXPECT_FALSE(r.ok); EXPECT_EQ(r.code, -1); EXPECT_EQ(out.status, 0);
 }

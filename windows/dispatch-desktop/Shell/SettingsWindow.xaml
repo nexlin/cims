@@ -5,7 +5,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
         d:DataContext="{d:DesignInstance vm:SettingsViewModel}"
         Style="{StaticResource Window.Base}" Title="설정" Width="640" Height="640" WindowStartupLocation="CenterOwner">
-    <!-- 설정 — 오디오(§7)·핫키(§8)·관제·표시·채널 -->
+    <!-- 설정 — 오디오(§7)·핫키(§8)·관제·표시·주소록 -->
     <DockPanel Margin="16">
         <DockPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
@@ -67,7 +67,7 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <TextBlock Style="{StaticResource Hint}" Margin="0,8,0,0" Text="채널 선택 Ctrl+1..9 는 고정." />
+                    <TextBlock Style="{StaticResource Hint}" Margin="0,8,0,0" Text="Ctrl+1..9 = 채널 포커스 + 단일 발언 대상, Ctrl+Shift+1..9 = 발언 대상 토글, Ctrl+K 통합 검색, Ctrl+M 문자, F1~F4 화면 전환 — 고정." />
                 </StackPanel>
             </TabItem>
             <TabItem Header="관제">
@@ -81,6 +81,7 @@
                         <TextBox Style="{StaticResource Field}" Text="{Binding MaxMonitorWindows, UpdateSourceTrigger=PropertyChanged}" Width="60" />
                     </StackPanel>
                     <CheckBox Content="채널 카드를 선택하면 MCData 스레드가 따라감" IsChecked="{Binding FollowChannelThread}" Margin="0,0,0,6" />
+                    <CheckBox Content="잠금 발언 — PTT 클릭으로 누름 유지(다시 클릭·TalkLimit 로 해제)" IsChecked="{Binding LockTalk}" Margin="0,0,0,6" />
                     <CheckBox Content="창 닫기는 트레이(작업 표시줄) 최소화" IsChecked="{Binding MinimizeToTray}" Margin="0,0,0,6" />
                     <CheckBox Content="Windows 시작 시 자동 실행" IsChecked="{Binding AutoStart}" Margin="0,0,0,6" />
                     <StackPanel Orientation="Horizontal">
@@ -89,19 +90,9 @@
                     </StackPanel>
                 </StackPanel>
             </TabItem>
-            <TabItem Header="채널·주소록">
+            <TabItem Header="주소록">
                 <StackPanel Margin="12">
-                    <TextBlock Text="카드로 보일 멤버 그룹 (전부 선택 = 멤버 그룹 전부)" Style="{StaticResource Hint}" Margin="0,0,0,6" />
-                    <ItemsControl ItemsSource="{Binding Channels}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="{x:Type vm:ChannelChoice}">
-                                <CheckBox IsChecked="{Binding Selected}" Margin="0,2">
-                                    <TextBlock><Run Text="{Binding Group.Name, Mode=OneWay}" /><Run Text=" (멤버 " Foreground="{DynamicResource Brush.Muted}" /><Run Text="{Binding Group.MemberCount, Mode=OneWay}" Foreground="{DynamicResource Brush.Muted}" /><Run Text=")" Foreground="{DynamicResource Brush.Muted}" /></TextBlock>
-                                </CheckBox>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                    <TextBlock Text="주소록 CSV (kind,number,name,tags — ext|external|ptt, tags 의 member = 관제 그룹원)" Style="{StaticResource Hint}" Margin="0,14,0,2" />
+                    <TextBlock Text="주소록 CSV (kind,number,name,tags — ext|external|ptt, tags 의 member = 관제 그룹원)" Style="{StaticResource Hint}" Margin="0,0,0,2" />
                     <DockPanel>
                         <Button DockPanel.Dock="Right" Style="{StaticResource Btn}" Content="찾기…" Command="{Binding BrowseDirectoryCommand}" Margin="6,0,0,0" />
                         <TextBox Style="{StaticResource Field}" Text="{Binding DirectoryCsv, UpdateSourceTrigger=PropertyChanged}" />

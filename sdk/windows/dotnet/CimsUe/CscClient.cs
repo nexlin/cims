@@ -40,13 +40,16 @@ public sealed record DispatchMember(string UserId, string Name, string VolteAor,
 /// <summary>청취 대상 PTT 그룹(dispatch pttTargets[] — 서버가 ptt_listen 범위를 해석한 결과).</summary>
 public sealed record DispatchTarget(string Id, string Uri, string Name);
 
-/// <summary>관제 데스크(dispatch_center.md §8.4) — 없으면 Present=false. MonitorScope·PttListen = none|own|listed|all, ListenVisibility = hidden|visible.
-/// Members/PttTargets 는 서버가 주지 않으면 빈 목록.</summary>
+/// <summary>관제 데스크(dispatch_center.md §8.4) — 없으면 Present=false. MonitorScope·PttListen = none|own|listed|all, ListenVisibility = hidden|visible,
+/// DirectoryAdmin = none|own|all(관제 앱 조직/구성원/번호·PTT 그룹 관리 범위 — own 의 루트 = OrgCode). Members/PttTargets 는 서버가 주지 않으면 빈 목록.</summary>
 public sealed record DispatchProfile(bool Present, string GroupId, string GroupName, string PilotId,
                                      string MonitorScope, string PttListen, string ListenVisibility,
+                                     string DirectoryAdmin, string OrgCode,
                                      IReadOnlyList<DispatchMember> Members, IReadOnlyList<DispatchTarget> PttTargets)
 {
-    public static DispatchProfile None { get; } = new(false, "", "", "", "none", "none", "hidden", Array.Empty<DispatchMember>(), Array.Empty<DispatchTarget>());
+    public static DispatchProfile None { get; } = new(false, "", "", "", "none", "none", "hidden", "none", "", Array.Empty<DispatchMember>(), Array.Empty<DispatchTarget>());
+    /// <summary>관리 범위가 있는가 — 관제 앱 [관리] 창 노출.</summary>
+    public bool CanAdminDirectory => DirectoryAdmin is "own" or "all";
 }
 
 public sealed record Profile(string DisplayName, string LoginId, string CountryCode, string CscHost, int CscPort,
@@ -59,6 +62,13 @@ public sealed record Profile(string DisplayName, string LoginId, string CountryC
 /// <summary>GMS 목록 항목. IsOwner = 토큰 주체가 authorized user(편집·삭제 가능).</summary>
 public sealed record GroupSummary(string Uri, string DisplayName, string ETag, int MemberCount, bool IsOwner);
 public sealed record XcapDoc(string Body, string ETag, bool NotModified);
+/// <summary>범용 요청 산출(csc.h HttpResult) — Status = HTTP 상태(0 전송 실패), Body 는 바이트 그대로(이진 가능). NotModified = 304.</summary>
+public sealed record HttpResponse(int Status, string ContentType, string ETag, byte[] Body)
+{
+    public bool NotModified => Status == 304;
+    /// <summary>본문을 UTF-8 문자열로(JSON·텍스트 응답).</summary>
+    public string Text => System.Text.Encoding.UTF8.GetString(Body);
+}
 
 /// <summary>그룹 문서 멤버 — Role = chair | participant.</summary>
 public sealed class GroupMember
@@ -233,6 +243,35 @@ public sealed unsafe class CscClient : IDisposable
         return st == 0 ? Result<GroupDoc>.Success(ToManaged(&d)) : Result<GroupDoc>.Fail(st, Engine.LastError());
     }
 
+    /// <summary>범용 요청(Bearer) — 코어가 모델링하지 않은 CSC 엔드포인트(관제 관리 API·녹취·이력 창 조회). 2xx·304 = Ok(Value.Status 로 구분),
+    /// 그 밖의 HTTP 상태 = Fail(Code=상태)이되 Value 는 채워진다(오류 JSON 본문을 읽을 수 있게), 전송 실패 = -1.</summary>
+    public Result<HttpResponse> Request(string accessToken, string method, string path, string? contentType = null, byte[]? body = null,
+                                        string? accept = null, string? ifMatch = null, string? ifNoneMatch = null)
+    {
+        lock (_gate)
+        {
+            cimsue_http_result_t r;
+            int st;
+            fixed (byte* b = body)
+                st = cimsue_csc_request(Handle, accessToken, method, path, contentType, b, body?.Length ?? 0, accept, ifMatch, ifNoneMatch, &r);
+            var v = new HttpResponse(r.status, Utf8.Str(r.content_type), Utf8.Str(r.etag),
+                                     r.body != null && r.body_len > 0 ? new ReadOnlySpan<byte>(r.body, r.body_len).ToArray() : Array.Empty<byte>());
+            return st == 0 ? Result<HttpResponse>.Success(v) : new Result<HttpResponse>(st, Engine.LastError(), v);
+        }
+    }
+
+    /// <summary>JSON 본문 편의 — body 문자열은 UTF-8 로, Accept/Content-Type = application/json.</summary>
+    public Result<HttpResponse> RequestJson(string accessToken, string method, string path, string? json = null, string? ifMatch = null, string? ifNoneMatch = null) =>
+        Request(accessToken, method, path, "application/json", json is null ? null : System.Text.Encoding.UTF8.GetBytes(json),
+                "application/json", ifMatch, ifNoneMatch);
+
+    public Task<Result<HttpResponse>> RequestAsync(string accessToken, string method, string path, string? contentType = null, byte[]? body = null,
+                                                   string? accept = null, string? ifMatch = null, string? ifNoneMatch = null, CancellationToken ct = default) =>
+        Task.Run(() => Request(accessToken, method, path, contentType, body, accept, ifMatch, ifNoneMatch), ct);
+    public Task<Result<HttpResponse>> RequestJsonAsync(string accessToken, string method, string path, string? json = null, string? ifMatch = null,
+                                                       string? ifNoneMatch = null, CancellationToken ct = default) =>
+        Task.Run(() => RequestJson(accessToken, method, path, json, ifMatch, ifNoneMatch), ct);
+
     /// <summary>XCAP GET — ifNoneMatch 로 304 캐시(NotModified).</summary>
     public Result<XcapDoc> XcapGet(string accessToken, string path, string accept, string? ifNoneMatch = null)
     {
@@ -329,7 +368,8 @@ public sealed unsafe class CscClient : IDisposable
         for (int i = 0; i < targets.Length; ++i)
             targets[i] = new DispatchTarget(Utf8.Str(d.ptt_targets[i].id), Utf8.Str(d.ptt_targets[i].uri), Utf8.Str(d.ptt_targets[i].name));
         var dispatch = new DispatchProfile(d.present != 0, Utf8.Str(d.group_id), Utf8.Str(d.group_name), Utf8.Str(d.pilot_id),
-                                           Utf8.Str(d.monitor_scope), Utf8.Str(d.ptt_listen), Utf8.Str(d.listen_visibility), members, targets);
+                                           Utf8.Str(d.monitor_scope), Utf8.Str(d.ptt_listen), Utf8.Str(d.listen_visibility),
+                                           Utf8.Str(d.directory_admin) is { Length: > 0 } da ? da : "none", Utf8.Str(d.org_code), members, targets);
         return new Profile(Utf8.Str(p->display_name), Utf8.Str(p->login_id), Utf8.Str(p->country_code), Utf8.Str(p->csc_host),
                            p->csc_port, svc, dispatch, p->allow_group_creation != 0);
     }

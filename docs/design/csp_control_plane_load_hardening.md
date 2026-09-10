@@ -227,7 +227,7 @@ UDP 버퍼 → SIP 소켓 버퍼 → 라우팅 LoadAllGroups). 매번 "고쳤는
 
 ### 검증 자산(재사용)
 - per-process CPU 샘플러: `/tmp/volte_mon/sampler.py`(외부의존 無, /proc 기반).
-- 부하: `build/bin/cspsim -server_ip <VIP> -mode volte -scenario call -domain ims.mnc033… -cps N -ht H -calls C -count 200 -no_video -media_dir tests/media -db <csp.json>` (착신 등록 위해 `-count` 充, 음성만 `-no_video`).
+- 부하: `build/bin/cspsim -server_ip <VIP> -mode volte -scenario call -domain volte.cims.example.kr -cps N -ht H -calls C -count 200 -no_video -media_dir tests/media -db <csp.json>` (착신 등록 위해 `-count` 充, 음성만 `-no_video`).
 - HA failover 로 부하생성기 분리: ctrl01 `sudo systemctl stop keepalived`(VIP→ctrl02), 원복 `start`.
 
 ## 관련 파일 (fix 위치)

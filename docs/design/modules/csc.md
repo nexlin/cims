@@ -2,7 +2,7 @@
 
 > CSC 는 자족 독립 모듈이다([features/csc_standalone_module.md](../features/csc_standalone_module.md)). OAM(`ems/core/oam/src`)을 마운트하지 않으며, 결합은 계약(게이트웨이 HTTP + 공유 JwtSecret JWT verify + DB)만이다.
 > - 통화 이력/Flow API(`services/flow_logger.py`)는 **oam-svc 소유**다(콘솔 토큰·조직 전체·날짜 탐색). HA fan-out 인프라(sync_dispatch·sync_txn·drift_sweeper·service_registry·collection_schema·alert_log)도 oam 이 보유한다.
-> - 관제 데스크 **통합 이력** `GET /provisioning/history`(`services/dispatch_history.py`)는 CSC 소유지만 별개 realm 이다 — 관제사(가입자) PKCE 토큰 + 관제 그룹 범위 게이트 + 커서. flow_logger 를 재구현하지 않고 같은 공유 NAS 파일(`ServiceLogging.Dir`)을 범위로만 걸러 읽는 얇은 구독자 뷰다. 현행 `csc/src/services/` = **mcptt · dispatch_history · idms_storage · config_cache · file_store · ha_lookup · logger · admin_auth · fm_reporter · mcdata_fd · auc** 등.
+> - 관제 데스크 **통합 이력** `GET /provisioning/history`(`services/dispatch_history.py`)는 CSC 소유지만 별개 realm 이다 — 관제사(가입자) PKCE 토큰 + 관제 그룹 범위 게이트 + 커서(`until` 로 창 조회, 항목 `recordingId`). flow_logger 를 재구현하지 않고 같은 공유 NAS 파일(`ServiceLogging.Dir`)을 범위로만 걸러 읽는 얇은 구독자 뷰다. 같은 realm 의 **관제 앱 관리 평면** = `handlers/dispatch_directory.py`(`/provisioning/directory/{admin,orgs,members,groups}` — 관제 그룹 `directory_admin` 범위 게이트 + admin/org 핸들러의 같은 쓰기 코드 호출)·`handlers/dispatch_recordings.py`(`/provisioning/recordings/{id}…` — 범위 게이트 + oam-svc 녹취 API 프록시, csc.json `Recording.OamUrl`), [dispatch_center.md §3.4·§5.7b](../features/dispatch_center.md). 현행 `csc/src/services/` = **mcptt · dispatch_history · idms_storage · config_cache · file_store · ha_lookup · logger · admin_auth · fm_reporter · mcdata_fd · auc** 등.
 > - 현행 `csc/src/services/` = **mcptt · idms_storage · config_cache · file_store · ha_lookup · logger · admin_auth** (7개) + `__init__.py`.
 
 ## 1. 개요
@@ -448,18 +448,26 @@ UE                    IdMS (CSC:4430)      UE                              IdMS 
 `redirect_uri` 허용목록은 `IdMs.RedirectUriAllow`(비면 전부 허용 — 상용 전 등록·활성). 규격 대비는
 [mcptt_standard_conformance.md §3](../features/mcptt_standard_conformance.md).
 
-**토큰 구조 (JWT):**
+**토큰 구조 (JWT, HS256)** — claim·scope 카탈로그·리소스 서버 검사 규칙의 정본은
+[mcx_identity_scope.md](../features/mcx_identity_scope.md). access token 예:
 
 ```json
 {
-  "sub": "+82571900001",
-  "iss": "cims-idms",
-  "aud": "mcptt-client",
-  "exp": 1713024000,
-  "mcptt_id": "sip:+82571900001@ptt.csp",
-  "org_id": "org_001"
+  "sub": "test003",
+  "iss": "idms.ptt.cims.example.kr",
+  "aud": "mcptt_client",
+  "client_id": "MCPTT_UE",
+  "mcptt_id": "tel:+82500000003",
+  "mcdata_id": "tel:+82500000003",
+  "iat": 1788494195,
+  "exp": 1788497795,
+  "scope": "openid cims:provisioning 3gpp:mc:ptt_service 3gpp:mc:data_service 3gpp:mc:ptt_group_management_service …"
 }
 ```
+
+`scope` = 요청 ∩ 카탈로그(TS 33.180 B.4.2.2 `3gpp:mc:*` 8종 + `openid` + 자체 `cims:provisioning`), 공백 구분 문자열.
+구 `3gpp:mcptt:ptt_server` 는 전환기 별칭(8종 전체 확장·병기). GMS/CMS/KMS/MCData FD 는 `IdMs.ScopeEnforcement`
+(`enforce|log|off`)에 따라 자기 scope 를 검사한다. `iss`/`IdMs.Domain`/`KmsUri` 는 비우면 PTT 도메인에서 유도.
 
 **토큰 저장 (영속성 규칙):**
 

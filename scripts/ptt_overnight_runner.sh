@@ -19,7 +19,7 @@ while [ "$(date +%s)" -lt "$DEADLINE" ] && [ ! -f "$STOP" ]; do
   "$CIMS/build/bin/cspsim" -server_ip 121.161.164.47 \
     -db /opt/cims-agent/csp/config/csp.json -mode ptt -group "$GROUP" \
     -scenario group-call -count "$COUNT" -floor_hold "$FLOOR" -floor_loop \
-    -domain ptt.mnc033.mcc450.3gppnetwork.org -media_dir "$CIMS/tests/media" -no_video \
+    -domain ptt.cims.example.kr -media_dir "$CIMS/tests/media" -no_video \
     >> "$LOG" 2>&1
   rc=$?
   echo "----- [cycle $cycle] $(date) cspsim EXITED rc=$rc — restart in 5s -----" >> "$LOG"

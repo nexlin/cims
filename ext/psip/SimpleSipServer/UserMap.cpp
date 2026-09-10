@@ -60,11 +60,12 @@ bool CUserMap::Insert( CSipMessage * pclsMessage, CSipFrom * pclsContact  )
 		pclsContact->m_clsUri.m_strHost = clsInfo.m_strIp;
 		pclsContact->m_clsUri.m_iPort = clsInfo.m_iPort;
 
-		if( pclsMessage->m_iExpires > 0 )
+		uint32_t uiExpires = 0;
+		if( pclsMessage->GetRegisterExpires( uiExpires ) == E_SIP_EXPIRES_VALID && uiExpires > 0 )
 		{
 			char	szTemp[21];
 
-			snprintf( szTemp, sizeof(szTemp), "%d", pclsMessage->m_iExpires );
+			snprintf( szTemp, sizeof(szTemp), "%u", uiExpires );
 			pclsContact->InsertParam( "expires", szTemp );
 		}
 	}

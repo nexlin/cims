@@ -485,7 +485,7 @@ cspsim(시뮬레이터)과 달리 **실제 단말 스택**(pjsua2 코덱·지터
 
 ```bash
 # 인자 공통: 접속점·도메인·가입자 (도메인은 access_services.jsonl 의 kind=volte domain)
-A="--server 121.161.164.48 --domain ims.mnc033.mcc450.3gppnetwork.org"
+A="--server 121.161.164.48 --domain volte.cims.example.kr"
 
 # 등록만 (200 OK 후 de-REGISTER) — 종료코드 0
 ./build/bin/cimsue-cli $A --msisdn +821300000001 --imsi 45033821300000001 --ha1 <HA1> register
@@ -505,7 +505,7 @@ sleep 3
 
 ```bash
 # MCPTT 그룹콜 — B 가 먼저 참여(청취), A 가 3초 뒤 3초간 PTT. 자격은 ptt_subscriptions, 도메인은 kind=ptt.
-P="--server 121.161.164.48 --domain ptt.mnc033.mcc450.3gppnetwork.org --affiliate g001 --json"
+P="--server 121.161.164.48 --domain ptt.cims.example.kr --affiliate g001 --json"
 ./build/bin/cimsue-cli $P --msisdn +82500000002 --imsi <IMSI> --ha1 <HA1> group-call g001 --duration 14 &
 sleep 2
 ./build/bin/cimsue-cli $P --msisdn +82500000001 --imsi <IMSI> --ha1 <HA1> group-call g001 --duration 10 --ptt-at 3 --ptt-len 3

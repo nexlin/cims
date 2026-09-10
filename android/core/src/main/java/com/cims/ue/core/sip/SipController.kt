@@ -285,6 +285,19 @@ class SipController(private val config: SipAccountConfig) {
 
     fun hangup(callId: Int) = onCtl { calls[callId]?.hangup(CallOpParam()) }
 
+    /** [groupUser](그룹 URI user part, 예 "g001") 로 살아 있는 그룹콜 leg 을 전부 BYE 한다.
+     *  앱 세션맵이 추적하지 못한 **orphan leg**(재설치·재기동 후 서버가 세션 타이머로 살려 둔 옛
+     *  다이얼로그를 pjsip 이 자동 응답으로 유지 중인 경우) 정리용 — 세션 callId 에 의존하지 않고
+     *  실제 다이얼로그의 remoteUri 로 찾는다. 제휴(PUBLISH)는 건드리지 않는다. */
+    fun hangupGroupLegs(groupUser: String) = onCtl {
+        for (c in calls.values.toList()) {
+            val user = runCatching { c.info.remoteUri }.getOrNull()
+                ?.substringAfter("sip:", "")?.substringBefore("@")?.substringBefore(";")?.substringBefore(">")
+                ?: continue
+            if (user == groupUser) runCatching { c.hangup(CallOpParam()) }
+        }
+    }
+
     // ── PTT(M2): affiliation PUBLISH / 그룹콜(multipart+floor SDP) / 반이중 mic ──
 
     /** 마이크 송신 토글 (PTT floor GRANT→true, RELEASE/REVOKE→false). */

@@ -903,6 +903,12 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
             pMsg->m_clsViaList.front().m_strHost = CspAddressing::GetLocalSipAddress( clsUserInfo.m_iSendListenerId );
             pMsg->m_clsViaList.front().m_iPort = CspAddressing::GetLocalSipPort( clsUserInfo.m_iSendListenerId, 0 );
         }
+    } else if ( !sub.strSrcIp.empty() ) {
+        // 등록 바인딩 없음(재기동 뒤 재REGISTER 전에 Digest 로 수락된 구독) — 구독 요청의 수신 주소로 보낸다
+        //   (RFC 6665 dialog remote target; NAT 뒤 단말은 Contact 가 사설주소일 수 있어 received/rport 가 정본).
+        pMsg->m_strSendDestIp = sub.strSrcIp;
+        pMsg->m_iSendDestPort = sub.iSrcPort;
+        pMsg->m_eTransport = sub.eSrcTransport;
     }
 
     // Contact = 서버 자기 주소 (user 없음 — 실망 형태, 예: <sip:scscf11.ims...>).
@@ -1023,6 +1029,12 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
             pMsg->m_clsViaList.front().m_strHost = CspAddressing::GetLocalSipAddress( clsUserInfo.m_iSendListenerId );
             pMsg->m_clsViaList.front().m_iPort = CspAddressing::GetLocalSipPort( clsUserInfo.m_iSendListenerId, 0 );
         }
+    } else if ( !sub.strSrcIp.empty() ) {
+        // 등록 바인딩 없음(재기동 뒤 재REGISTER 전에 Digest 로 수락된 구독) — 구독 요청의 수신 주소로 보낸다
+        //   (RFC 6665 dialog remote target; NAT 뒤 단말은 Contact 가 사설주소일 수 있어 received/rport 가 정본).
+        pMsg->m_strSendDestIp = sub.strSrcIp;
+        pMsg->m_iSendDestPort = sub.iSrcPort;
+        pMsg->m_eTransport = sub.eSrcTransport;
     }
 
     // Contact = 서버 자기 주소 — 송신 transport 확정 후 구성 (SendNotifyToSubscriber 와 동일 규칙)

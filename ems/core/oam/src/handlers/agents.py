@@ -500,6 +500,9 @@ def self_register_deployment_routes(config, dep: dict) -> int:
     if not gw_routes:
         return 0
     process_name = dep.get("process_name") or (pkg or {}).get("name")
+    # 라우트 module 키 = 패키지 id(소문자). process_name 은 표시용 이름이라 키로 쓰지
+    # 않는다(identifier_model) — "CSC" 로 들어가면 role=all 하이브리드 필터(csc)에서 빠진다.
+    module_id = (pkg or {}).get("name") or process_name
     overlay = dep.get("config") if isinstance(dep.get("config"), dict) else {}
     port = effective_server_port(config, pkg, overlay)
     if not port:
@@ -512,7 +515,7 @@ def self_register_deployment_routes(config, dep: dict) -> int:
     # 게이트웨이 upstream host = Server.GatewayHost(분리 배치 명시) → 127.0.0.1(동거 기본).
     host = effective_gateway_host(config, pkg, overlay) or "127.0.0.1"
     import handlers.gateway as _gw
-    return _gw.register_module_routes(config, process_name, host,
+    return _gw.register_module_routes(config, module_id, host,
                                       int(port), gw_routes)
 
 
@@ -2769,10 +2772,11 @@ async def _put_deployment_config(handler_args, did: int, config):
             if new_port and (new_port != old_port or new_host != old_host):
                 _meta = (_pkg or {}).get("meta") if isinstance(_pkg, dict) else None
                 gw_routes = ((_meta or {}).get("gateway") or {}).get("routes") or []
-                if gw_routes and updated.get("process_name"):
+                _mod = (_pkg or {}).get("name") or updated.get("process_name")
+                if gw_routes and _mod:
                     import handlers.gateway as _gw
                     await asyncio.to_thread(_gw.register_module_routes, config,
-                                            updated["process_name"], new_host,
+                                            _mod, new_host,
                                             int(new_port), gw_routes)
                 n = 0
                 if new_port != old_port:
@@ -3725,11 +3729,12 @@ async def _after_package_switch(config, did: int, dep: dict,
         if new_port and new_port != old_port:
             _meta = (newp or {}).get("meta") if isinstance(newp, dict) else None
             gw_routes = ((_meta or {}).get("gateway") or {}).get("routes") or []
-            if gw_routes and dep.get("process_name"):
+            _mod = (newp or {}).get("name") or dep.get("process_name")
+            if gw_routes and _mod:
                 import handlers.gateway as _gw
                 _host = effective_gateway_host(config, newp, dep.get("config")) or "127.0.0.1"
                 await asyncio.to_thread(_gw.register_module_routes, config,
-                                        dep["process_name"], _host,
+                                        _mod, _host,
                                         int(new_port), gw_routes)
             from handlers.ha_groups import enqueue_update_ha_for_agent
             n = await asyncio.to_thread(enqueue_update_ha_for_agent, dep.get("agent_id"), config)
@@ -3783,7 +3788,8 @@ async def _delete_deployment(did: int, config):
                         if (d.get("process_name") or d.get("package_name")) == _proc]
             if not siblings:
                 import handlers.gateway as _gw
-                await asyncio.to_thread(_gw.deregister_module_routes, config, _proc)
+                # 라우트 module 키는 패키지 id — process_name(표시용) 이 아니라 pkg 로 해제
+                await asyncio.to_thread(_gw.deregister_module_routes, config, pkg or _proc)
             else:
                 logger.log_info(f"[deploy] dep={did} 제거 — '{_proc}' 배포 {len(siblings)}개 잔존, 라우트 유지")
         except Exception as e:
@@ -4682,6 +4688,27 @@ async def _get_deployment_collection(did: int, name: str, config):
             "hash":          h,
             "error":         None if ok else resp,
         })
+
+    # ── 요청 대상 자신의 읽기 실패는 **오류로 올린다** — 200 + 빈 records 로 돌려주면
+    #   콘솔이 "컬렉션이 비어 있다"로 그려 원인(agent 미도달·미설치)이 숨고, 그 빈 표를
+    #   저장하면 실제 파일을 비울 위험까지 있다. peer 실패는 drift 판정에서만 제외한다.
+    if not peers_resp[0]["ok"]:
+        st, err = results[0]
+        code = 502 if st in (0, 502) else (503 if st in (503, 504) else 502)
+        return HandlerResult(status=code, body={
+            "error":         "collection_unreachable",
+            "detail":        (f"deployment#{dep['id']} 의 agent"
+                              f"(#{dep.get('agent_id')} {dep.get('agent_name') or ''}, "
+                              f"status={dep.get('agent_status') or '?'}) 에서 "
+                              f"'{name}' 을 읽지 못했습니다 — "
+                              + str((err or {}).get("detail") or (err or {}).get("error") or f"HTTP {st}")),
+            "hint":          "agent 가 켜져 있고 heartbeat 를 보고하는지, 설치 경로가 남아 있는지 확인",
+            "deployment_id": dep["id"],
+            "agent_id":      dep.get("agent_id"),
+            "agent_status":  dep.get("agent_status"),
+            "upstream_status": st,
+            "upstream":      err,
+        }, media_type="application/json")
 
     # ── drift 결정: 양 멤버 모두 ok 인 경우만 hash 비교 (proxy 실패는 drift 아님)
     drift = False

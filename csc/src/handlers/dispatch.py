@@ -36,11 +36,15 @@ _BUSY_MODES = ('skip', 'alert')
 _MONITOR_SCOPES = ('none', 'own', 'listed', 'all')
 _PTT_LISTEN = ('none', 'listed', 'all')
 _LISTEN_VIS = ('hidden', 'visible')
+_DIRECTORY_ADMIN = ('none', 'own', 'all')     # 관제 앱 조직/구성원/번호·PTT 그룹 관리 범위 (own = org_id 하위)
 
 _SCHEMA_ERROR = {'error': 'schema_not_migrated',
                  'detail': 'dispatch_groups table absent — sql/migrate_dispatch_groups.sql not applied'}
 
 _HAS_TABLES = None  # 테이블 프로브 캐시 (프로세스 수명). None=미확인
+_HAS_DIR_ADMIN = None  # dispatch_groups.directory_admin 컬럼 프로브 캐시 (sql/migrate_dispatch_directory_admin.sql)
+_DIR_ADMIN_SCHEMA_ERROR = {'error': 'schema_not_migrated',
+                           'detail': 'dispatch_groups.directory_admin absent — sql/migrate_dispatch_directory_admin.sql not applied'}
 
 
 def _get_db(config: dict):
@@ -64,6 +68,19 @@ def _path_parts(full_path: str, base: str):
         return tuple(unquote(p) for p in rel.parts)
     except ValueError:
         return ()
+
+
+def has_directory_admin_column(cur) -> bool:
+    """dispatch_groups.directory_admin 존재 여부 — 미적용 DB 는 전 그룹 'none'(관리 기능 비활성) 으로 읽는다."""
+    global _HAS_DIR_ADMIN
+    if _HAS_DIR_ADMIN is None:
+        cur.execute("SHOW COLUMNS FROM dispatch_groups LIKE 'directory_admin'")
+        _HAS_DIR_ADMIN = cur.fetchone() is not None
+    return _HAS_DIR_ADMIN
+
+
+def _group_cols(cur) -> str:
+    return _GROUP_COLS_DA if has_directory_admin_column(cur) else _GROUP_COLS
 
 
 def has_dispatch_tables(cur) -> bool:
@@ -212,10 +229,12 @@ async def handle_dispatch_groups(handler_args: HandlerArgs, kwargs: dict) -> Han
 
 _GROUP_COLS = ("id, name, pilot_id, service_ref, alert_mode, no_answer_sec, busy_members, overflow_target, "
                "monitor_scope, ptt_listen, listen_visibility, org_id, created_at, updated_at")
+_GROUP_COLS_DA = _GROUP_COLS.replace("listen_visibility,", "listen_visibility, directory_admin,")
 
 
 def _shape(g: dict, members=None, monitor_targets=None, ptt_targets=None):
     g['no_answer_sec'] = int(g.get('no_answer_sec') or 30)
+    g['directory_admin'] = g.get('directory_admin') or 'none'      # 컬럼 미적용 DB = none
     g['created_at'] = _dt(g.get('created_at'))
     g['updated_at'] = _dt(g.get('updated_at'))
     if members is not None:
@@ -320,7 +339,7 @@ def _list_groups(cur, handler_args):
         q = {k: v[0] for k, v in parse_qs(urlparse(handler_args.full_path).query).items()}
     except Exception:
         pass
-    sql = f"SELECT {_GROUP_COLS} FROM dispatch_groups"
+    sql = f"SELECT {_group_cols(cur)} FROM dispatch_groups"
     params = []
     if q.get('org_id'):
         sql += " WHERE org_id=%s"
@@ -346,7 +365,7 @@ def _list_groups(cur, handler_args):
 
 
 def _fetch_group(cur, group_id: str):
-    cur.execute(f"SELECT {_GROUP_COLS} FROM dispatch_groups WHERE id=%s", (group_id,))
+    cur.execute(f"SELECT {_group_cols(cur)} FROM dispatch_groups WHERE id=%s", (group_id,))
     g = cur.fetchone()
     if not g:
         return None
@@ -377,6 +396,7 @@ def _create_group(cur, body, is_manager: bool):
         scope = _enum(body, 'monitor_scope', _MONITOR_SCOPES, 'none')
         ptt_listen = _enum(body, 'ptt_listen', _PTT_LISTEN, 'none')
         vis = _enum(body, 'listen_visibility', _LISTEN_VIS, 'hidden')
+        dir_admin = _enum(body, 'directory_admin', _DIRECTORY_ADMIN, 'none')
         no_answer = int(body.get('no_answer_sec') or 30)
     except (ValueError, TypeError) as e:
         return HandlerResult(status=400, body={'error': str(e)})
@@ -385,6 +405,12 @@ def _create_group(cur, body, is_manager: bool):
     if (scope != 'none' or ptt_listen != 'none') and not is_manager:
         return HandlerResult(status=403, body={'error': 'manager_required',
                                                'detail': '감청/청취 범위가 있는 그룹 생성은 manager 이상'})
+    # 관리 범위(directory_admin) — 가입자(관제사)에게 조직·번호 쓰기 권한을 여는 승인 사항이라 감청 범위와 같은 manager 게이트.
+    if dir_admin != 'none' and not is_manager:
+        return HandlerResult(status=403, body={'error': 'manager_required',
+                                               'detail': '관리 범위(directory_admin)가 있는 그룹 생성은 manager 이상'})
+    if dir_admin != 'none' and not has_directory_admin_column(cur):
+        return HandlerResult(status=400, body=_DIR_ADMIN_SCHEMA_ERROR)
     group_id = _opt_str(body, 'id') or _new_group_id()
     if not group_id.startswith('dg-') or len(group_id) > 64:
         return HandlerResult(status=400, body={'error': "id must start with 'dg-' (max 64)"})
@@ -404,11 +430,12 @@ def _create_group(cur, body, is_manager: bool):
     if pilot and not service_ref:
         return HandlerResult(status=400, body={'error': 'service_ref is required when pilot_id is set'})
 
+    da_col, da_ph, da_val = ('', '', ()) if not has_directory_admin_column(cur) else (', directory_admin', ',%s', (dir_admin,))
     cur.execute(
         "INSERT INTO dispatch_groups (id, name, pilot_id, service_ref, alert_mode, no_answer_sec, busy_members, "
-        "overflow_target, monitor_scope, ptt_listen, listen_visibility, org_id) "
-        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-        (group_id, name, pilot, service_ref, alert_mode, no_answer, busy, overflow, scope, ptt_listen, vis, org_id))
+        f"overflow_target, monitor_scope, ptt_listen, listen_visibility, org_id{da_col}) "
+        f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s{da_ph})",
+        (group_id, name, pilot, service_ref, alert_mode, no_answer, busy, overflow, scope, ptt_listen, vis, org_id, *da_val))
     changed_users = []
     for i, m in enumerate(body.get('members') or []):
         uid = m.get('user_id') if isinstance(m, dict) else m
@@ -429,7 +456,7 @@ def _create_group(cur, body, is_manager: bool):
 def _update_group(cur, group_id: str, body, is_manager: bool):
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
-    cur.execute(f"SELECT {_GROUP_COLS} FROM dispatch_groups WHERE id=%s", (group_id,))
+    cur.execute(f"SELECT {_group_cols(cur)} FROM dispatch_groups WHERE id=%s", (group_id,))
     cur_row = cur.fetchone()
     if not cur_row:
         return HandlerResult(status=404, body={'error': 'Group not found'})
@@ -470,6 +497,16 @@ def _update_group(cur, group_id: str, body, is_manager: bool):
             fields.append("ptt_listen=%s"); values.append(pl)
         if 'listen_visibility' in body:
             fields.append("listen_visibility=%s"); values.append(_enum(body, 'listen_visibility', _LISTEN_VIS, 'hidden'))
+        if 'directory_admin' in body:
+            da = _enum(body, 'directory_admin', _DIRECTORY_ADMIN, 'none')
+            if da != (cur_row.get('directory_admin') or 'none') and not is_manager:
+                return HandlerResult(status=403, body={'error': 'manager_required',
+                                                       'detail': '관리 범위(directory_admin) 변경은 manager 이상'})
+            if not has_directory_admin_column(cur):
+                if da != 'none':
+                    return HandlerResult(status=400, body=_DIR_ADMIN_SCHEMA_ERROR)
+            else:
+                fields.append("directory_admin=%s"); values.append(da)
         if 'org_id' in body:
             org_id = body.get('org_id')
             fields.append("org_id=%s"); values.append(int(org_id) if org_id not in (None, '', 0, '0') else None)
@@ -628,6 +665,7 @@ _DG_FIELDS = [
     {'name': 'monitor_scope', 'type': 'string', 'desc': 'none(기본)|own|listed|all — 합법감청(dialog 감시·Join) 범위'},
     {'name': 'ptt_listen', 'type': 'string', 'desc': 'none(기본)|listed|all — PTT 그룹콜 청취 범위'},
     {'name': 'listen_visibility', 'type': 'string', 'desc': 'hidden(기본)|visible — PTT 청취 멤버 로스터 노출'},
+    {'name': 'directory_admin', 'type': 'string', 'desc': 'none(기본)|own|all — 관제 앱 조직/구성원/번호·PTT 그룹 관리 범위(own=org_id 하위). manager 만 변경'},
     {'name': 'org_id', 'type': 'integer|null', 'desc': '소속 조직'},
     {'name': 'members[]', 'type': 'object', 'desc': '{user_id, alert_order} — 가입자당 그룹 하나'},
     {'name': 'monitor_targets[]', 'type': 'string', 'desc': 'monitor_scope=listed 의 대상 그룹 id'},
@@ -659,7 +697,7 @@ CIMS_DISPATCH_API_DOCS = [
      'summary': '관제 그룹 생성 (id 미지정 시 dg-<hex8> 발급)',
      'params': [{'name': 'body', 'in': 'body', 'type': 'object', 'required': True,
                  'desc': '{id?, name, pilot_id?, service_ref?(pilot 시 필수), alert_mode?, no_answer_sec?, busy_members?, '
-                         'overflow_target?, monitor_scope?, ptt_listen?, listen_visibility?, org_id?, members?[{user_id, alert_order}]}'}],
+                         'overflow_target?, monitor_scope?, ptt_listen?, listen_visibility?, directory_admin?, org_id?, members?[{user_id, alert_order}]}'}],
      'response': '{id}', 'response_fields': [{'name': 'id', 'type': 'string', 'desc': '생성된 그룹 id'}],
      'example': {'id': 'dg-7f3a91c2'},
      'errors': _ERR_COMMON + [

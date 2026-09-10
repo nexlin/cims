@@ -27,6 +27,13 @@
 #include "IpsecSaSet.h"
 #include "Log.h"
 #include "McpttInfo.h"  // ParseAffiliationCommand (TS 24.379 §9 affiliation-command)
+
+// 구독(SUBSCRIBE)·제휴 PUBLISH 에 부여하는 Expires 상한 (RFC 6665 §4.2.1.1 — notifier 는 요청보다 짧게 부여할 수 있고
+//   2xx 의 Expires 가 부여값이다). 단말이 2^32-1 같은 "무한" 을 요청해도 여기서 자른다. REGISTER 의 3600 과 같은 값.
+static const int SUBSCRIBE_MAX_EXPIRES_SEC = 3600;
+// 요청에 Expires 가 없을 때 부여하는 기본값 — SUBSCRIBE 는 notifier 정책(RFC 6665 §4.2.1.1), PUBLISH 는 ESC 기본값
+//   (RFC 3903 §4.1). 상한과 같은 값을 쓴다. 형식 오류(비숫자·2^32 초과)는 400 (RFC 3261 §21.4.1).
+static const int SUBSCRIBE_DEFAULT_EXPIRES_SEC = SUBSCRIBE_MAX_EXPIRES_SEC;
 #include "NonceMap.h"
 #include "SecAgree.h"
 #include "SipMd5.h"
@@ -664,8 +671,14 @@ static SecAgreeIpsecOffer EvaluateIpsecOffer( CSipMessage *pclsMessage, const st
 }
 
 bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage ) {
-    if ( pclsMessage->m_iExpires > 0 && gclsSetup.m_iMinRegisterTimeout != 0 ) {
-        if ( pclsMessage->m_iExpires < gclsSetup.m_iMinRegisterTimeout ) {
+    // 요청 수명 (RFC 3261 §10.2.1.1: Contact ;expires > Expires 헤더). 형식 오류 → 400 (§21.4.1).
+    uint32_t uiReqExpires = 0;
+    const ESipExpiresResult eReqExpires = pclsMessage->GetRegisterExpires( uiReqExpires );
+    if ( eReqExpires == E_SIP_EXPIRES_INVALID ) return SendResponse( pclsMessage, SIP_BAD_REQUEST );
+    const bool bReqExpiresGiven = ( eReqExpires == E_SIP_EXPIRES_VALID );
+    // Min-Expires (§10.3 (7)) — 0(해제)은 제외
+    if ( bReqExpiresGiven && uiReqExpires > 0 && gclsSetup.m_iMinRegisterTimeout != 0 ) {
+        if ( uiReqExpires < (uint32_t)gclsSetup.m_iMinRegisterTimeout ) {
             CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_INTERVAL_TOO_BRIEF );
             if ( pclsResponse == NULL ) return false;
             pclsResponse->AddHeader( "Min-Expires", gclsSetup.m_iMinRegisterTimeout );
@@ -827,8 +840,8 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
         bIntegrityProtected = true;
     }
 
-    // UNREGISTER
-    if ( pclsMessage->GetExpires() == 0 ) {
+    // UNREGISTER — 명시적 Expires 0 (없음은 해제가 아니라 기본 수명 등록, RFC 3261 §10.2.4)
+    if ( bReqExpiresGiven && uiReqExpires == 0 ) {
         std::string strUserId = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
         // 삭제 직전 바인딩 보관 — reg-event 구독자 통지(partial, event=unregistered)용
         CUserInfo clsRegInfo;
@@ -861,8 +874,11 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
     CUserInfo clsIpsecBind;
     const CUserInfo *pclsIpsecBind = NULL;
     if ( bIpsecRegister ) {
-        const int iReqExpires = pclsMessage->GetExpires();
-        const int iLifetime = ( iReqExpires > 0 ? iReqExpires : 3600 ) + IPSEC_SA_LIFETIME_GRACE_SEC;
+        int iReqLifetime =
+            ( bReqExpiresGiven && uiReqExpires > 0 ) ? ExpiresToInt( uiReqExpires ) : REGISTER_DEFAULT_EXPIRES_SEC;
+        if ( iReqLifetime > 0x7FFFFFFF - IPSEC_SA_LIFETIME_GRACE_SEC )
+            iReqLifetime = 0x7FFFFFFF - IPSEC_SA_LIFETIME_GRACE_SEC;
+        const int iLifetime = iReqLifetime + IPSEC_SA_LIFETIME_GRACE_SEC;
         const bool bOk = clsIpsecSet.bEstablished
                              ? gclsIpsecSaSetMap.Extend( clsIpsecSet.iReqId, iLifetime )
                              : gclsIpsecSaSetMap.Establish( strFromUser, clsIpsecSet.iReqId, iLifetime );
@@ -887,9 +903,10 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
         CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_OK );
         if ( pclsResponse == NULL ) return false;
 
-        // F-12: 요청 Expires 를 그대로 수락 (요청에 없으면 3600 기본값)
-        int iReqExpires = pclsMessage->GetExpires();
-        int iGrantedExpires = ( iReqExpires > 0 ) ? iReqExpires : 3600;
+        // F-12: 요청 Expires 를 그대로 수락 — 없으면 서버 기본값 (RFC 3261 §10.2.4). 상한은 두지 않되 int 범위로만
+        //   자른다(운영 상한은 별도 정책).
+        int iGrantedExpires =
+            ( bReqExpiresGiven && uiReqExpires > 0 ) ? ExpiresToInt( uiReqExpires ) : REGISTER_DEFAULT_EXPIRES_SEC;
         char szExpires[16];
         snprintf( szExpires, sizeof( szExpires ), "%d", iGrantedExpires );
 
@@ -981,9 +998,15 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
 
     std::string strFromId = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
     if ( !gclsUserMap.Select( strFromId.c_str() ) ) {
-        CLog::Print( LOG_ERROR, "SUBSCRIBE Rejected: User %s not registered", strFromId.c_str() );
-        SendUnAuthorizedResponse( pclsMessage );
-        return true;
+        // 등록표(메모리)에 없는 요청자 — 재기동으로 등록이 소실됐거나 아직 REGISTER 전. 등록 여부가 아니라 **신원**을
+        //   검증한다(RFC 6665 §4.2.1: notifier 가 구독자를 인증하며 REGISTER 는 전제가 아니다). SUBSCRIBE 는 psip 의
+        //   EventIncomingRequestAuth(INVITE/BYE/…) 대상이 아니라 여기서 직접 Digest 를 거친다 — 자격 없음 → 요청자
+        //   서비스 realm 으로 401, 유효 → 수락, 불량/미가입 → 403, AKA 는 보호 흐름 밖이라 403(TS 33.203).
+        //   종전의 "미등록 = realm 없는 401" 은 자격을 검증하지 않는 챌린지여서 단말이 옳게 답해도 영원히 성공하지
+        //   못했고, 폴백 realm(volte)이 PTT 요청과 어긋나 재기동마다 재REGISTER 까지 SUBSCRIBE 가 전멸했다(09-07 실측).
+        if ( CheckAuthrization( pclsMessage ) == false ) return true;
+        CLog::Print( LOG_INFO, "SUBSCRIBE from unregistered %s accepted by Digest identity (%s:%d)", strFromId.c_str(),
+                     pclsMessage->m_strClientIp.c_str(), pclsMessage->m_iClientPort );
     }
 
     std::string strSubCallId;
@@ -1095,7 +1118,14 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
                      strReqUriUser.c_str(), strFromId.c_str(), strEventType.c_str() );
     }
 
-    int iExpires = pclsMessage->GetExpires();
+    // 부여값 = min(요청, 상한); 요청에 없으면 기본값. 형식 오류 → 400 (RFC 3261 §21.4.1).
+    uint32_t uiReqExpires = 0;
+    const ESipExpiresResult eReqExpires = pclsMessage->GetExpires( uiReqExpires );
+    if ( eReqExpires == E_SIP_EXPIRES_INVALID ) return SendResponse( pclsMessage, SIP_BAD_REQUEST );
+    int iExpires =
+        ( eReqExpires == E_SIP_EXPIRES_VALID )
+            ? ( uiReqExpires > (uint32_t)SUBSCRIBE_MAX_EXPIRES_SEC ? SUBSCRIBE_MAX_EXPIRES_SEC : (int)uiReqExpires )
+            : SUBSCRIBE_DEFAULT_EXPIRES_SEC;
 
     if ( iExpires == 0 ) {
         // RFC 3265 §3.1.4: 200 OK 먼저, 그 다음 final NOTIFY (Subscription-State: terminated)
@@ -1220,9 +1250,20 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
     info.strResourceId = strReqUriUser;  // 자원 기준 조회용 (conference = 그룹 ID)
     info.iExpires = ( iExpires > 0 ) ? iExpires : 3600;
     info.tStartTime = time( NULL );
-    info.iNotifySeq = 1;
+    // 상태 없는 in-dialog 갱신(재기동 후 옛 dialog 승계 — 위 To tag 승계 분기)은 RFC 3261 §12.2.2 의 수용 조건대로
+    //   NOTIFY CSeq 도 재부팅을 넘어 단조 증가해야 한다. 1부터 세면 구독자 dialog 가 이전 인스턴스의 CSeq 보다
+    //   작다고 보고 후속 NOTIFY 를 전부 500 으로 거절한다(09-07 실측 — 재기동 뒤 단말 4대 로스터 통지 전부 유실).
+    const bool bStatelessRefresh = !bRefresh && !strReqToTag.empty();
+    info.iNotifySeq = bStatelessRefresh ? CSubscriptionManager::RebootSafeNotifySeq() : 1;
+    if ( bStatelessRefresh )
+        CLog::Print( LOG_INFO, "SUBSCRIBE stateless refresh accepted — NOTIFY CSeq seeded %d (user=%s event=%s)",
+                     info.iNotifySeq, strFromId.c_str(), strEventType.c_str() );
     // NOTIFY 송신 시 SUBSCRIBE 수신 listener 의 IP/Port 를 Via/Contact 자기 주소로 사용
     info.iInboundListenerId = GetCurrentInboundListenerId();
+    // 수신 주소 — 등록 바인딩이 없을 때의 NOTIFY 목적지 폴백 (SubscriptionInfo 주석)
+    info.strSrcIp = pclsMessage->m_strClientIp;
+    info.iSrcPort = pclsMessage->m_iClientPort;
+    info.eSrcTransport = pclsMessage->m_eTransport;
 
     gclsSubscriptionManager.AddSubscription( strReqUri, info );
 
@@ -1267,9 +1308,10 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
     pclsMessage->m_clsFrom.m_clsUri.ToString( szFromBuf, sizeof( szFromBuf ) );
     std::string strFromId = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
     if ( !gclsUserMap.Select( strFromId.c_str() ) ) {
-        CLog::Print( LOG_ERROR, "PUBLISH Rejected: User %s not registered", strFromId.c_str() );
-        SendResponse( pclsMessage, 403 );
-        return true;
+        // 미등록 요청자 — SUBSCRIBE 와 같은 규칙으로 신원(Digest)을 검증한다(RFC 3903 §6.3: ESC 가 PUBLISH 를 인증).
+        //   종전의 무조건 403 은 재기동 뒤 재REGISTER 까지 제휴 PUBLISH 를 전부 버렸다.
+        if ( CheckAuthrization( pclsMessage ) == false ) return true;
+        CLog::Print( LOG_INFO, "PUBLISH from unregistered %s accepted by Digest identity", strFromId.c_str() );
     }
 
     // F-05: Event 헤더 검증 — TS 24.379 §9는 "mcptt" 요구, 불일치 시 489 Bad Event
@@ -1310,7 +1352,14 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
         return true;
     }
 
-    int iExpires = pclsMessage->GetExpires();
+    // 부여값 = min(요청, 상한); 요청에 없으면 기본값. 형식 오류 → 400 (RFC 3261 §21.4.1).
+    uint32_t uiReqExpires = 0;
+    const ESipExpiresResult eReqExpires = pclsMessage->GetExpires( uiReqExpires );
+    if ( eReqExpires == E_SIP_EXPIRES_INVALID ) return SendResponse( pclsMessage, SIP_BAD_REQUEST );
+    int iExpires =
+        ( eReqExpires == E_SIP_EXPIRES_VALID )
+            ? ( uiReqExpires > (uint32_t)SUBSCRIBE_MAX_EXPIRES_SEC ? SUBSCRIBE_MAX_EXPIRES_SEC : (int)uiReqExpires )
+            : SUBSCRIBE_DEFAULT_EXPIRES_SEC;
     // affiliate vs de-affiliate 판정 — affiliation-command 액션 요소 기반 파싱(요소 앵커, substring 아님).
     //   액션이 de-affiliate 이거나 Expires:0 이면 해제, else 등록. group 속성은 Req-URI 와 교차검증.
     CMcpttAffiliation clsCmd = ParseAffiliationCommand( strBody );

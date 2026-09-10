@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import IconBtn from '@core/components/IconBtn'
 import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, Headphones, Pencil, Plus, Radio, Trash2, X } from 'lucide-react'
 import { dispatchApi, type DispatchGroup, type DispatchGroupInput, type DispatchMember,
-  type MonitorScope, type PttListen } from '@core/api/dispatch'
+  type MonitorScope, type PttListen, type DirectoryAdmin } from '@core/api/dispatch'
 import { usersApi, type UserSummary } from '@core/api/users'
 import { groupsApi, type Group } from '@core/api/groups'
 import { orgApi, type Organization } from '@core/api/organizations'
@@ -36,6 +36,7 @@ const SCOPE_HINT: Record<MonitorScope, string> = {
   all: '모든 가입자의 통화를 dialog 감시·Join 청취 (업무망 합법감청 — 운영 규약·감사 전제)',
 }
 const PTT_LABEL: Record<PttListen, string> = { none: '없음', listed: '지정 그룹', all: '전체' }
+const ADMIN_LABEL: Record<DirectoryAdmin, string> = { none: '없음', own: '소속 조직 하위', all: '전체 조직' }
 
 function Caret({ open }: { open: boolean }) {
   return <span className="text-muted-foreground inline-flex">
@@ -212,9 +213,10 @@ function GroupDrawer(p: DrawerProps) {
   const [form, setForm] = useState<DispatchGroupInput>(() => existing
     ? { name: existing.name, pilot_id: existing.pilot_id || '', service_ref: existing.service_ref || 'volte', alert_mode: existing.alert_mode,
         no_answer_sec: existing.no_answer_sec, busy_members: existing.busy_members, overflow_target: existing.overflow_target || '',
-        monitor_scope: existing.monitor_scope, ptt_listen: existing.ptt_listen, listen_visibility: existing.listen_visibility, org_id: existing.org_id }
+        monitor_scope: existing.monitor_scope, ptt_listen: existing.ptt_listen, listen_visibility: existing.listen_visibility,
+        directory_admin: existing.directory_admin || 'none', org_id: existing.org_id }
     : { name: '', pilot_id: '', service_ref: 'volte', alert_mode: 'parallel', no_answer_sec: 30, busy_members: 'skip', overflow_target: '',
-        monitor_scope: 'none', ptt_listen: 'none', listen_visibility: 'hidden', org_id: null })
+        monitor_scope: 'none', ptt_listen: 'none', listen_visibility: 'hidden', directory_admin: 'none', org_id: null })
   const [members, setMembers] = useState<DispatchMember[]>(existing?.members || [])
   const existingId = existing?.id
   const reloadMembers = useCallback(() => {
@@ -230,7 +232,8 @@ function GroupDrawer(p: DrawerProps) {
     if (form.pilot_id && !form.service_ref) { show('대표번호에는 접속서비스가 필요합니다', 'err'); return }
     const body: DispatchGroupInput = { ...form, pilot_id: form.pilot_id || null, overflow_target: form.overflow_target || null,
       service_ref: form.service_ref || null }
-    if (scopeLocked && existing) { delete body.monitor_scope; delete body.ptt_listen }
+    if (scopeLocked && existing) { delete body.monitor_scope; delete body.ptt_listen; delete body.directory_admin }
+    if (body.directory_admin === 'own' && !body.org_id) { show('관리 범위 "소속 조직 하위"에는 조직이 필요합니다', 'err'); return }
     try {
       if (existing) { await dispatchApi.update(existing.id, body); show('저장', 'ok'); setEditing(false); p.reload() }
       else { await dispatchApi.create(body); show('생성', 'ok'); p.onSaved() }
@@ -330,6 +333,14 @@ function GroupDrawer(p: DrawerProps) {
               </SelectContent>
             </Select>
           </Field>
+          <Field label={`관리 범위${scopeLocked ? ' (manager)' : ''}`} w={130}>
+            <Select value={toSel(form.directory_admin || 'none')} onValueChange={(v: string) => setForm({ ...form, directory_admin: fromSel(v) as DirectoryAdmin })} disabled={scopeLocked}>
+              <SelectTrigger title="관제 앱에서 조직·구성원·VoLTE/PTT 번호·PTT 그룹을 관리할 수 있는 범위 (own = 소속 조직과 그 하위). manager 만 변경"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(Object.keys(ADMIN_LABEL) as DirectoryAdmin[]).map(k => <SelectItem key={k} value={k}>{ADMIN_LABEL[k]}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </Field>
           <div className="flex gap-1.5 items-center">
             <Button variant="default" onClick={save}>저장</Button>
             <Button variant="ghost" onClick={() => isNew ? p.onClose() : setEditing(false)}>취소</Button>
@@ -343,6 +354,7 @@ function GroupDrawer(p: DrawerProps) {
           <span className="text-sm text-muted-foreground">넘김 {existing.overflow_target || '—'}</span>
           <span className="text-sm text-muted-foreground">감청 {SCOPE_LABEL[existing.monitor_scope]}</span>
           <span className="text-sm text-muted-foreground">PTT 청취 {PTT_LABEL[existing.ptt_listen]}{existing.ptt_listen !== 'none' ? ` (${existing.listen_visibility === 'hidden' ? '은닉' : '투명'})` : ''}</span>
+          <span className="text-sm text-muted-foreground">관리 범위 {ADMIN_LABEL[existing.directory_admin || 'none']}</span>
           {p.canWrite && <Button className="ml-auto" onClick={() => setEditing(true)}>속성 편집</Button>}
         </div>
       )}

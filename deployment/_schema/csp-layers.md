@@ -93,8 +93,8 @@ TCP / TLS 도 동일 (`GetPrimaryByProtocol("TCP"/"TLS")`).
 {
   "name":             "volte-basic",
   "kind":             "volte",          // volte | ptt
-  "domain":           "ims.mnc033.mcc450.3gppnetwork.org",
-  "auth_realm":       "ims.mnc033.mcc450.3gppnetwork.org",
+  "domain":           "volte.cims.example.kr",
+  "auth_realm":       "volte.cims.example.kr",
   "inbound_policy":   "default",        // routing_policies.id 참조
   "outbound_policy":  null,
   "priority":         100,
@@ -111,7 +111,7 @@ TCP / TLS 도 동일 (`GetPrimaryByProtocol("TCP"/"TLS")`).
 {
   "id":         "default-ims",
   "match":      {
-    "domain":   "ims.mnc033.mcc450.3gppnetwork.org",
+    "domain":   "volte.cims.example.kr",
     "user_pattern": "+82*"
   },
   "transform":  {

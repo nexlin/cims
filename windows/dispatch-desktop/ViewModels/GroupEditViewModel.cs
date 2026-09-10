@@ -1,5 +1,6 @@
-// PTT 그룹 생성·편집 창 — GMS 그룹 문서(GroupDoc)를 폼으로(§4.1 [그룹] 탭 [새 그룹]/[편집]). 저장 = XCAP PUT(TS 24.481, 본인 소유).
-// 멤버 후보 = PTT 주소록(서버 전화번호부 service=ptt). 편집은 열 때의 ETag 를 If-Match 로 보내 충돌(412)을 잡는다.
+// PTT 그룹 생성·편집 폼 — GMS 그룹 문서(GroupDoc)를 폼으로. [PTT 그룹] 화면(§4.7) 상세 카드 자리에 인라인으로 뜬다(GroupAdminViewModel.Editor,
+// 뷰 = Views/GroupEditView). 저장 = XCAP PUT(TS 24.481, 본인 소유 또는 관리 범위). 멤버 후보 = PTT 주소록(서버 전화번호부 service=ptt).
+// 편집은 열 때의 ETag 를 If-Match 로 보내 충돌(412)을 잡는다.
 using System.Collections.ObjectModel;
 using CimsUe;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -68,6 +69,8 @@ public sealed partial class GroupEditViewModel : ObservableObject
     public ObservableCollection<GroupCandidateRow> Candidates { get; } = new();
 
     public event EventHandler? Saved;
+    /// <summary>[취소] — 호스트(GroupAdminViewModel)가 폼을 닫는다.</summary>
+    public event EventHandler? Cancelled;
 
     public GroupEditViewModel(DispatchSession s, GroupInfo? existing)
     {
@@ -75,6 +78,8 @@ public sealed partial class GroupEditViewModel : ObservableObject
         if (existing is null)
         {
             GroupId = UserPartConverter.UserPart(s.NewGroupUri());
+            // 관리 범위가 있으면 새 그룹을 데스크 소속 조직(dispatch.orgCode)에 귀속 — 같은 범위의 다른 관제사 관리 창에도 보인다(§4.5).
+            if (s.CanManageDirectory) _orgCode = s.Dispatch.OrgCode;
             AddMember(s.ToTelUri(s.MyPttNumber), s.DisplayName, chair: true);
             Loaded = true;
         }
@@ -147,6 +152,7 @@ public sealed partial class GroupEditViewModel : ObservableObject
     [RelayCommand] private void AddAllShown() { foreach (var c in Candidates.ToList()) AddMember(_s.ToTelUri(c.Contact.Number), c.Contact.Name, chair: false); Filter(); }
     [RelayCommand] private void Remove(GroupMemberRow m) { Members.Remove(m); OnPropertyChanged(nameof(MemberCountText)); OnPropertyChanged(nameof(CanSave)); Filter(); }
     [RelayCommand] private void ToggleChair(GroupMemberRow m) => m.IsChair = !m.IsChair;
+    [RelayCommand] private void Cancel() => Cancelled?.Invoke(this, EventArgs.Empty);
 
     [RelayCommand]
     private async Task Save()

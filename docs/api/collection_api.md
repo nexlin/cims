@@ -43,7 +43,7 @@ Admin Browser ── HTTPS + JWT ──> CSC ── HTTPS + X-Agent-Token ──
 - 404 `deployment_not_found`
 - 409 `not_installed` — deployment.install_path 가 없음 (install 먼저 필요)
 - 404 `collection_not_in_template` — 해당 패키지 템플릿에 collection 정의 없음
-- 502 `agent_proxy_failed` — Agent 에 연결 실패 / sync_port 미보고 상태
+- 502 `collection_unreachable` — 요청 대상 deployment 의 agent 에서 읽기 실패(연결 거부·sync_port 미보고·설치 경로 소실 등). `detail`(agent id/name/status 포함)·`hint`·`upstream_status`·`upstream` 동봉. **200 + 빈 records 로 대체하지 않는다** — 빈 표로 오인되고 그대로 저장하면 실제 파일을 비울 수 있다. HA 그룹 peer 의 읽기 실패는 오류가 아니라 `peers[].ok=false` 로만 표시(drift 판정 제외).
 
 ---
 

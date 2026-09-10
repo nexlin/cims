@@ -20,6 +20,7 @@
 #define _SIP_MESSAGE_H_
 
 #include "SipParserDefine.h"
+#include <stdint.h>
 #include "SipFrom.h"
 #include "SipVia.h"
 #include "SipAcceptData.h"
@@ -31,6 +32,14 @@
 #include "SipContentType.h"
 
 // SIP 메시지 정보를 저장하는 클래스
+/** Expires(delta-seconds) 조회 결과 — 값의 해석(0=해지, 없음=서버 기본값, 상한)은 호출부 몫이다 */
+enum ESipExpiresResult
+{
+	E_SIP_EXPIRES_ABSENT = 0,	// 헤더(REGISTER 는 Contact ;expires 포함) 없음 — 서버 기본값 적용 대상 (RFC 3261 §10.2.4)
+	E_SIP_EXPIRES_VALID,		// 유효한 32bit 무부호 값
+	E_SIP_EXPIRES_INVALID		// 형식 오류(비숫자·2^32 초과) — 400 Bad Request 대상 (RFC 3261 §21.4.1)
+};
+
 class CSipMessage
 {
 public:
@@ -108,8 +117,12 @@ public:
 	// SIP Content-Length 헤더의 값
 	int							m_iContentLength;
 
-	// SIP Expires 헤더의 값
-	int							m_iExpires;
+	// SIP Expires 헤더 (RFC 3261 §20.19 delta-seconds = 32bit 무부호 정수)
+	//   m_bExpiresPresent: 헤더 존재 여부. 존재하면 m_bExpiresValid 가 숫자 파싱 성공 여부, m_uiExpires 가 값.
+	//   (종전 int + "-1=미지정" 표지 구조는 2^31 이상 값이 -1 로 넘쳐 미지정과 겹치고 0(해지) 으로 접히는 결함이 있었다.)
+	bool						m_bExpiresPresent;
+	bool						m_bExpiresValid;
+	uint32_t					m_uiExpires;
 
 	// SIP Max-Forwards 헤더의 값
 	int							m_iMaxForwards;
@@ -178,7 +191,12 @@ public:
 
 	bool SetTopContactIpPort( const char * pszIp, int iPort, ESipTransport eTransport );
 
-	int GetExpires();
+	/** Expires 헤더의 delta-seconds — SUBSCRIBE/PUBLISH 등 Expires 헤더만 의미를 갖는 요청용 */
+	ESipExpiresResult GetExpires( uint32_t & uiExpires );
+	/** REGISTER 의 바인딩 수명 — 첫 Contact 의 ;expires 가 Expires 헤더보다 우선 (RFC 3261 §10.2.1.1) */
+	ESipExpiresResult GetRegisterExpires( uint32_t & uiExpires );
+	/** 송신 메시지의 Expires 헤더 설정 */
+	void SetExpires( uint32_t uiExpires );
 
 	CSipHeader * GetHeader( const char * pszName );
 

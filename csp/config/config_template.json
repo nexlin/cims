@@ -2078,7 +2078,7 @@
             "label": "Server Identity URI",
             "type": "string",
             "default": "",
-            "help": "CSP 가 발신하는 SIP 메시지의 From URI 로 사용 (예: sip:cspserver@ims.mnc033.mcc450.3gppnetwork.org). 비우면 sip:cspserver@<domain> 자동 조립. R6."
+            "help": "CSP 가 발신하는 SIP 메시지의 From URI 로 사용 (예: sip:cspserver@volte.cims.example.kr). 비우면 sip:cspserver@<domain> 자동 조립. R6."
           },
           {
             "key": "inbound_policy",

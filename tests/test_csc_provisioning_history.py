@@ -332,3 +332,211 @@ class HandlerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExtendedWireTests(unittest.TestCase):
+    """이력 화면(§4.6) 확장 필드 — 콘솔 VoLTE/PTT 이력과 같은 열을 앱이 그릴 수 있게 종류별로 실린다. 공통 필드는 그대로."""
+
+    def test_call_item_extended_fields(self):
+        w = dh.format_item({"kind": "call", "ts": "2026-09-06T19:05:00", "id": "c1", "initiator": "a", "callee": "b",
+                            "callType": "volte_video", "state": "ended", "inviteTime": "2026-09-06T19:04:00",
+                            "answerTime": "2026-09-06T19:04:05", "endTime": "2026-09-06T19:05:00",
+                            "duration": 55, "sipStatus": 200, "endReason": "normal"})
+        self.assertEqual((w["callType"], w["state"], w["endReason"], w["sipStatus"]), ("volte_video", "ended", "normal", 200))
+        self.assertRegex(w["inviteTime"], r'^2026-09-06T19:04:00[+-]\d{2}:\d{2}$')
+        self.assertRegex(w["answerTime"], r'^2026-09-06T19:04:05[+-]\d{2}:\d{2}$')
+        self.assertRegex(w["endTime"], r'^2026-09-06T19:05:00[+-]\d{2}:\d{2}$')
+        # 값이 없으면 빈 문자열/0 — 앱은 필드 유무가 아니라 값으로 판단한다
+        w2 = dh.format_item({"kind": "call", "ts": "t", "id": "c2", "initiator": "a", "callee": "b"})
+        self.assertEqual((w2["callType"], w2["answerTime"], w2["sipStatus"], w2["endReason"]), ("volte", "", 0, ""))
+
+    def test_ptt_item_extended_fields(self):
+        w = dh.format_item({"kind": "ptt", "ts": "2026-09-06T19:00:30", "id": "s1", "groupId": "g002", "groupName": "1팀",
+                            "sessionKind": "group", "state": "ended", "startTime": "2026-09-06T19:00:00",
+                            "endTime": "2026-09-06T19:00:30", "memberCount": 5, "people": ["+8250001", "+8250002"],
+                            "turnCount": 7, "speakerCount": 2, "totalSpeechMs": 12345, "talkMs": 13000, "maxConcurrent": 2,
+                            "floorControl": "on", "floorPolicy": "dual", "maxTalkers": 2})
+        self.assertEqual((w["sessionKind"], w["state"], w["groupName"], w["memberCount"]), ("group", "ended", "1팀", 5))
+        self.assertEqual((w["turnCount"], w["speakerCount"], w["totalSpeechMs"], w["talkMs"], w["maxConcurrent"]), (7, 2, 12345, 13000, 2))
+        self.assertEqual((w["floorControl"], w["floorPolicy"], w["maxTalkers"]), ("on", "dual", 2))
+        self.assertEqual(w["people"], ["+8250001", "+8250002"])
+        self.assertRegex(w["startTime"], r'^2026-09-06T19:00:00[+-]\d{2}:\d{2}$')
+        # 파일 스캔 행(지표 없음) 도 같은 키를 0 으로 낸다
+        w2 = dh.format_item({"kind": "ptt", "ts": "t", "id": "s2", "groupId": "g002", "state": "active"})
+        self.assertEqual((w2["sessionKind"], w2["turnCount"], w2["people"], w2["floorControl"]), ("group", 0, [], ""))
+
+    def test_hour_histogram_axis(self):
+        rows = [{"kind": "call", "ts": "2026-09-06T19:05:00", "inviteTime": "2026-09-06T18:59:50"},     # INVITE 시각 기준
+                {"kind": "ptt", "ts": "2026-09-06T19:30:00", "startTime": "2026-09-06T19:00:00"},        # 세션 시작 기준
+                {"kind": "message", "ts": "2026-09-06T19:45:00"},                                        # 항목 시각
+                {"kind": "call", "ts": None}]
+        self.assertEqual(dh.hour_histogram(rows), {"18": 1, "19": 2})
+
+    def test_query_ex_returns_hours_before_limit(self):
+        t = _Tree()
+        t.call("c1", "+821310002001", "+821310009999", minutes_ago=3)
+        t.call("c2", "+821310002001", "+821310009998", minutes_ago=2)
+        scope = {"members": {"+821310002001"}, "ptt_groups": set()}
+        items, nxt, hours = dh.query_ex(t.sl, "call", scope, None, 1)
+        self.assertEqual(len(items), 1)                          # limit 절삭
+        self.assertEqual(sum(hours.values()), 2)                 # 분포는 절삭 전 전체
+        self.assertEqual(dh.query(t.sl, "call", scope, None, 1)[0], items)
+
+
+class OamIndexRowTests(unittest.TestCase):
+    """OAM `/api/v1/ptt/sessions` 항목 → 내부 row (창 조회). 녹취 id 는 콘솔 recIdOf 와 같은 규칙."""
+
+    def test_recording_id_rules(self):
+        self.assertEqual(dh.ptt_recording_id("3", "S20260906190102000000_1", ["2026090619"]),
+                         "ptt/3/2026/09/06/19/S20260906190102000000_1")
+        self.assertEqual(dh.ptt_recording_id("3", "S20260906190102000000_1", None),          # windows 없어도 세션키에서 시각
+                         "ptt/3/2026/09/06/19/S20260906190102000000_1")
+        self.assertEqual(dh.ptt_recording_id("3", "2026090619", ["2026090619"]), "ptt/3/2026/09/06/19")   # 구 녹취 = 시간창
+        self.assertEqual(dh.ptt_recording_id("", "S20260906190102000000_1", None), "")
+        self.assertEqual(dh.ptt_recording_id("3", "x", None), "")
+
+    def test_row_mapping(self):
+        it = {"dir": "S20260906190102000000_1", "windows": ["2026090619"], "group_key": "3", "kind": "group",
+              "mcptt_group_id": "g002", "group_name": "1팀", "group_type": "prearranged", "member_count": 4,
+              "sesid": "ses-9", "call_id": "cid-9", "initiator": "+8250001", "people": ["+8250001", "+8250002"],
+              "start_time": "2026-09-06T19:01:02", "end_time": "2026-09-06T19:03:00", "state": "ended",
+              "turn_count": 5, "speaker_count": 2, "total_speech_ms": 40000, "talk_ms": 41000, "max_concurrent": 1,
+              "segment_count": 3, "floor_control": "on", "floor_policy": "single", "max_talkers": 1}
+        r = dh.ptt_row_from_oam(it, "")
+        self.assertEqual((r["kind"], r["id"], r["groupId"], r["groupName"], r["sessionKind"]), ("ptt", "ses-9", "g002", "1팀", "group"))
+        self.assertEqual(r["recordingId"], "ptt/3/2026/09/06/19/S20260906190102000000_1")
+        self.assertTrue(r["hasRecording"])                        # sl_dir 없으면 segment_count 로
+        self.assertEqual((r["ts"], r["startTime"], r["endTime"]), ("2026-09-06T19:03:00", "2026-09-06T19:01:02", "2026-09-06T19:03:00"))
+        self.assertEqual((r["turnCount"], r["speakerCount"], r["totalSpeechMs"], r["maxConcurrent"]), (5, 2, 40000, 1))
+        self.assertEqual(r["people"], ["+8250001", "+8250002"])
+        w = dh.format_item(r)
+        self.assertEqual((w["event"], w["group"], w["from"], w["duration"], w["turnCount"]), ("ptt.session.end", "tel:g002", "+8250001", 118, 5))
+        # 진행중 → session.start, id 폴백(sesid 없으면 call_id → dir)
+        live = dh.ptt_row_from_oam({"dir": "S1_1", "group_key": "3", "mcptt_group_id": "g002", "state": "active",
+                                    "start_time": "2026-09-06T19:01:02", "end_time": None}, "")
+        self.assertEqual((live["id"], dh.format_item(live)["event"]), ("S1_1", "ptt.session.start"))
+        self.assertIsNone(dh.ptt_row_from_oam({"dir": "", "mcptt_group_id": "g002"}, ""))
+        self.assertIsNone(dh.ptt_row_from_oam("junk", ""))
+
+    def test_has_recording_prefers_file(self):
+        t = _Tree()
+        t.ptt("g002", "ses-1", "+82510002001")
+        row = dh.query(t.sl, "ptt", {"members": set(), "ptt_groups": {"g002"}, "groupId": "dg1"}, None, 10)[0][0]
+        parts = row["recordingId"].split("/")
+        # 구 녹취형(세션키 아님) — 시간창 디렉터리가 곧 녹취 id. 세션키형은 test_recording_id_rules.
+        it = {"dir": "".join(parts[2:6]), "windows": ["".join(parts[2:6])], "group_key": "1", "mcptt_group_id": "g002",
+              "start_time": t.ts(6), "segment_count": 0}
+        r = dh.ptt_row_from_oam(it, t.sl)
+        self.assertEqual(r["recordingId"], "/".join(parts[:6]))
+        self.assertFalse(r["hasRecording"])
+        with open(os.path.join(t.sl, r["recordingId"], "segments.jsonl"), "w") as f:
+            f.write("{}\n")
+        self.assertTrue(dh.ptt_row_from_oam(it, t.sl)["hasRecording"])
+
+
+class PttWindowHandlerTests(HandlerTests):
+    """kind=ptt & until → OAM 세션 인덱스 프록시(범위 저장 키), 실패 시 파일 스캔 폴백. 응답에 hours."""
+
+    def setUp(self):
+        super().setUp()
+        import handlers.dispatch_recordings as dr
+        self._dr = dr
+        self._saved_fetch = dr.fetch_ptt_sessions
+        cur = sys.modules["pymysql"].connect().cursor()
+        cur.fetchall = lambda: [(1, "g002"), (2, "g009")]
+
+    def tearDown(self):
+        self._dr.fetch_ptt_sessions = self._saved_fetch
+        super().tearDown()
+
+    def _window(self, kind="ptt"):
+        since = (self.t.now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S")
+        until = self.t.now.strftime("%Y-%m-%dT%H:%M:%S")
+        a = HandlerArgs("GET", "/provisioning/history", "127.0.0.1", 0, headers={"authorization": "Bearer x"},
+                        query_params={"kind": kind, "since": since, "until": until, "limit": "100"})
+        return asyncio.run(m.handle_provisioning_history(a, {}))
+
+    def test_window_proxies_oam_index_with_scope_keys(self):
+        seen = []
+        start = (self.t.now - timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S")
+        end = (self.t.now - timedelta(minutes=8)).strftime("%Y-%m-%dT%H:%M:%S")
+
+        def fake_fetch(cfg, since_dt, until_dt, keys):
+            seen.append((cfg, since_dt, until_dt, set(keys)))
+            return [{"dir": "S20260906190102000000_1", "windows": ["2026090619"], "group_key": "1", "kind": "group",
+                     "mcptt_group_id": "g002", "group_name": "1팀", "sesid": "ses-9", "initiator": "+8250001",
+                     "people": ["+8250001"], "start_time": start, "end_time": end, "state": "ended",
+                     "turn_count": 4, "speaker_count": 1, "total_speech_ms": 9000, "segment_count": 1},
+                    {"dir": "S20260906190102000000_2", "group_key": "7", "mcptt_group_id": "g777",       # 범위 밖 그룹 → 제외
+                     "start_time": start, "end_time": end, "state": "ended"}]
+        self._dr.fetch_ptt_sessions = fake_fetch
+        r = self._window()
+        self.assertEqual(r.status, 200)
+        self.assertEqual(seen[0][3], {"1"})                       # 청취 그룹(g002) 의 저장 키만
+        self.assertEqual([x["id"] for x in r.body["items"]], ["ses-9"])
+        it = r.body["items"][0]
+        self.assertEqual((it["turnCount"], it["groupName"], it["hasRecording"]), (4, "1팀", True))
+        self.assertEqual(it["recordingId"], "ptt/1/2026/09/06/19/S20260906190102000000_1")
+        self.assertEqual(sum(r.body["hours"].values()), 1)
+        self.assertEqual(len(self.audits), 1)
+
+    def test_window_falls_back_to_scan_when_oam_unavailable(self):
+        self._dr.fetch_ptt_sessions = lambda cfg, s, u, keys: None
+        self.t.ptt("g002", "ses-1", "+82510002001")
+        r = self._window()
+        self.assertEqual(r.status, 200)
+        self.assertEqual([x["id"] for x in r.body["items"]], ["ses-1"])
+        self.assertEqual(r.body["items"][0]["turnCount"], 0)      # 스캔 경로 = 지표 없음
+        self.assertIn("hours", r.body)
+
+    def test_polling_does_not_touch_oam(self):
+        self._dr.fetch_ptt_sessions = lambda *a: self.fail("polling must scan files")
+        self.t.ptt("g002", "ses-1", "+82510002001")
+        r = self._get(kind="ptt")
+        self.assertEqual([x["id"] for x in r.body["items"]], ["ses-1"])
+        self.assertIn("hours", r.body)
+
+
+class PttLivenessTests(unittest.TestCase):
+    """세션 시작 스냅샷(session.json 에 state/end_time 없음)은 라이브 상태 파일이 없으면 **종료**다 — 종료 시각은 events/segments 에서."""
+
+    def _session(self, t, gid, sesid, minutes_ago, with_state=False, end_event=True):
+        y, mo, d, h = _now_parts(t.now - timedelta(minutes=minutes_ago))
+        t._ptt_seq += 1
+        dd = _bucket(t.sl, "ptt", str(t._ptt_seq), y, mo, d, h, "S" + str(t._ptt_seq))
+        with open(os.path.join(dd, "session.json"), "w") as f:
+            json.dump({"mcptt_group_id": gid, "name": gid, "sesid": sesid, "initiator": "+8250001", "call_id": "cid_" + sesid,
+                       "start_time": t.ts(minutes_ago)}, f)                       # state/end_time 없음 = 시작 스냅샷
+        with open(os.path.join(dd, "events.jsonl"), "w") as f:
+            f.write(json.dumps({"ts": t.ts(minutes_ago), "type": "session_start"}) + "\n")
+            f.write(json.dumps({"ts": t.ts(minutes_ago - 1), "type": "member_join", "member": "+8250002"}) + "\n")
+            if end_event:
+                f.write(json.dumps({"ts": t.ts(minutes_ago - 3), "type": "session_end"}) + "\n")
+        if with_state:
+            sd = _bucket(t.sl, "state", "ptt")
+            with open(os.path.join(sd, "+8250001.json"), "w") as f:
+                json.dump({"kind": "ptt", "subscriber_id": "+8250001", "session_id": sesid, "call_id": "cid_" + sesid,
+                           "group_id": gid, "role": "initiator", "state": "active", "started_at": t.ts(minutes_ago)}, f)
+
+    def test_snapshot_without_end_is_ended_with_end_from_events(self):
+        t = _Tree()
+        self._session(t, "g002", "ses-old", 20)
+        items, _ = dh.query(t.sl, "ptt", {"members": set(), "ptt_groups": {"g002"}}, None, 10)
+        r = items[0]
+        self.assertEqual((r["id"], r["state"]), ("ses-old", "ended"))
+        self.assertEqual(r["endTime"], t.ts(17))                                  # session_end 시각
+        self.assertEqual(dh.format_item(r)["event"], "ptt.session.end")
+        self.assertEqual(dh.format_item(r)["duration"], 180)
+
+    def test_snapshot_with_live_state_file_is_active(self):
+        t = _Tree()
+        self._session(t, "g002", "ses-live", 5, with_state=True, end_event=False)
+        items, _ = dh.query(t.sl, "ptt", {"members": set(), "ptt_groups": {"g002"}}, None, 10)
+        self.assertEqual([(x["id"], x["state"]) for x in items], [("ses-live", "active")])   # 라이브 스냅샷과 버킷 행이 한 건으로
+        self.assertEqual(dh.format_item(items[0])["event"], "ptt.session.start")
+
+    def test_no_end_event_falls_back_to_last_event(self):
+        t = _Tree()
+        self._session(t, "g002", "ses-x", 30, end_event=False)
+        r = dh.query(t.sl, "ptt", {"members": set(), "ptt_groups": {"g002"}}, None, 10)[0][0]
+        self.assertEqual((r["state"], r["endTime"]), ("ended", t.ts(29)))

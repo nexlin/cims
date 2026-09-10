@@ -25,7 +25,9 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        _instance = new SingleInstance(AppPaths.InstanceName);
+        // --ui-preview(개발 스위치)는 실제 앱과 다른 인스턴스 이름 — 실행 중인 관제 앱 옆에서 화면 점검용으로 띄울 수 있게.
+        bool preview = e.Args.Contains("--ui-preview", StringComparer.OrdinalIgnoreCase);
+        _instance = new SingleInstance(preview ? AppPaths.InstanceName + ".preview" : AppPaths.InstanceName);
         if (!_instance.IsFirst) { Shutdown(0); return; }
         _instance.ActivationRequested += (_, _) => _main?.ActivateFromSecondInstance();
 
@@ -72,7 +74,49 @@ public partial class App : Application
         _log.Info($"start {CimsUe.Engine.Version}");
         _started = true;
         // --ui-preview: 로그인·엔진 없이 메인 화면만(화면 배치·바인딩 점검용 개발 스위치). 프로파일이 없으므로 소프트폰 모드 표시.
-        if (e.Args.Contains("--ui-preview", StringComparer.OrdinalIgnoreCase)) { ShowMain(); return; }
+        if (e.Args.Contains("--ui-preview", StringComparer.OrdinalIgnoreCase))
+        {
+            ShowMain();
+            // --ui-preview-screen=history|groups|admin: 관제 외 화면(§3.4)으로 열어 서버 없이 XAML 자원·바인딩 점검(목록은 "로그인 전" 오류로 비어 있다).
+            // 관리 화면은 관리 범위 검사를 건너뛴다(프로파일이 없다). 구 스위치 --ui-preview-management = admin.
+            string? screenArg = e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-screen=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1]
+                                ?? (e.Args.Contains("--ui-preview-management", StringComparer.OrdinalIgnoreCase) ? "admin" : null);
+            if (screenArg is not null && _mainVm is not null)
+                _mainVm.Screen = screenArg.ToLowerInvariant() switch { "history" => Models.AppScreen.History, "groups" => Models.AppScreen.PttGroups, _ => Models.AppScreen.Admin };
+            // --ui-preview-canvas: 관제 캔버스(§3.1)에 표본 채널·세션을 심어 카드 2/3줄·발언 바·② 섹션·③ 카드를 그려 본다.
+            if (e.Args.Contains("--ui-preview-canvas", StringComparer.OrdinalIgnoreCase) && _mainVm is not null) _mainVm.SeedCanvasPreview();
+            // --ui-preview-history=call|ptt: 이력 화면(§4.6)에 표본 하루를 심어(시간대 밴드·표/카드·선택 세션 패널) 서버 없이 그려 본다.
+            if (e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-history=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] is { Length: > 0 } histKind && _mainVm is not null)
+                _mainVm.HistoryScreen.SeedPreview(histKind.Equals("ptt", StringComparison.OrdinalIgnoreCase) ? Models.HistoryKind.Ptt : Models.HistoryKind.Call);
+            // --ui-preview-zoom=<배율>: 발언 타임라인 확대 상태로 그려 본다(눈금·트랙 폭·가로 스크롤).
+            if (e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-zoom=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] is { Length: > 0 } zoomArg && _mainVm is not null
+                && double.TryParse(zoomArg, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double z))
+                _mainVm.HistoryScreen.TalkZoom = Math.Clamp(z, 1, ViewModels.SessionHistoryViewModel.TalkZoomMax);
+            // --ui-preview-shot=<png>: 주 창을 그려 PNG 로 저장하고 종료 — 화면 잠금·원격 세션에서도 XAML 점검이 되게(화면 캡처가 아니라 WPF 렌더).
+            if (e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-shot=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] is { Length: > 0 } shot && _main is not null)
+            {
+                var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+                t.Tick += (_, _) =>
+                {
+                    t.Stop();
+                    try
+                    {
+                        var w = _main; int pw = (int)Math.Ceiling(w.ActualWidth), ph = (int)Math.Ceiling(w.ActualHeight);
+                        var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(pw, ph, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+                        rtb.Render(w);
+                        var enc = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                        enc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(rtb));
+                        using var fs = System.IO.File.Create(shot);
+                        enc.Save(fs);
+                        _log?.Info($"preview shot {pw}x{ph} → {shot}");
+                    }
+                    catch (Exception ex) { _log?.Error("preview shot", ex); }
+                    Shutdown(0);
+                };
+                t.Start();
+            }
+            return;
+        }
         _ = RunLoginAsync();
     }
 
@@ -120,7 +164,17 @@ public partial class App : Application
     public void ApplyTheme(string theme)
     {
         var dict = Resources.MergedDictionaries;
-        var uri = new Uri(theme == "dark" ? "Themes/Dark.xaml" : "Themes/Light.xaml", UriKind.Relative);
+        bool dark = theme == "dark";
+        // AvalonDock VS2013 테마 사전은 **앱 전역**에도 병합한다 — DockingManager.Theme 만 놓으면 도킹 크롬이 상태를 바꿀 때(탭 전환·캡션 버튼 글리프)
+        //   ComponentResourceKey(ToolWindowTab*·PanelBorderBrush …) 조회가 매니저 밖(별창·팝업·어도너)에서 실패해 "Resource not found" 경고가 계속 난다.
+        var dockUri = new Uri($"pack://application:,,,/AvalonDock.Themes.VS2013;component/{(dark ? "DarkTheme" : "LightTheme")}.xaml");
+        var dock = dict.FirstOrDefault(d => d.Source is not null && d.Source.OriginalString.Contains("AvalonDock.Themes.VS2013", StringComparison.OrdinalIgnoreCase));
+        if (dock is null || !dock.Source!.OriginalString.EndsWith(dockUri.OriginalString[dockUri.OriginalString.LastIndexOf('/')..], StringComparison.OrdinalIgnoreCase))
+        {
+            if (dock is not null) dict.Remove(dock);
+            dict.Insert(0, new ResourceDictionary { Source = dockUri });
+        }
+        var uri = new Uri(dark ? "Themes/Dark.xaml" : "Themes/Light.xaml", UriKind.Relative);
         var current = dict.FirstOrDefault(d => d.Source is not null && d.Source.OriginalString.Contains("Themes/", StringComparison.OrdinalIgnoreCase) && !d.Source.OriginalString.Contains("Styles"));
         if (current is not null && current.Source!.OriginalString.EndsWith(uri.OriginalString, StringComparison.OrdinalIgnoreCase)) return;
         if (current is not null) dict.Remove(current);

@@ -690,47 +690,64 @@ void SimSession::SubscribeReg()
 void SimSession::SubscribeDialog(const std::string& strWatchedAor)
 {
     // 첫 구독만 단일 필드(m_iDlgSubStatus 판정값)에, 추가 구독은 별도 다이얼로그로 — 전부 m_mapDlgSubs 에 등록.
-    std::string strCallId, strFromTag;
-    int iSeq = 0;
+    //   Call-ID/태그를 여기서 먼저 만들고 **송신 전에** 맵에 넣는다 — 로컬 서버의 200 OK 가 송신 직후 스택 스레드로
+    //   도착하므로, 송신 뒤에 넣으면 응답 처리가 맵을 못 찾아 SUBSCRIBED OK 를 세지 못한다(F7 dlg_sub_ok 2/3 실측).
+    static std::atomic<int> s_iDlgSubSerial{0};
+    char szCallId[160], szTag[64];
+    snprintf(szCallId, sizeof(szCallId), "evsub_dialog_%s_%d_%d_%d", m_strUser.c_str(), m_iId, (int)time(NULL),
+             ++s_iDlgSubSerial);
+    SipMakeTag(szTag, sizeof(szTag));
+    std::string strCallId = szCallId, strFromTag = szTag;
+    int iSeq = 0;   // bReuseIds 경로가 ++ 해 1 로 송신
     const bool bFirst = m_strDlgSubCallId.empty();
     if (bFirst) {
         m_strDlgWatchedAor = strWatchedAor;
         m_iDlgSubStatus = 0;
-    }
-    printf("[%d] SUBSCRIBE dialog watched=%s\n", m_iId, strWatchedAor.c_str());
-    SendEventSubscribe("dialog", "application/dialog-info+xml", strWatchedAor, strCallId, iSeq, strFromTag);
-    if (bFirst) {
         m_strDlgSubCallId = strCallId;
-        m_iDlgSubSeq = iSeq;
         m_strDlgSubFromTag = strFromTag;
     }
     m_mapDlgSubs[strCallId] = strWatchedAor;
+    printf("[%d] SUBSCRIBE dialog watched=%s\n", m_iId, strWatchedAor.c_str());
+    SendEventSubscribe("dialog", "application/dialog-info+xml", strWatchedAor, strCallId, iSeq, strFromTag, nullptr,
+                       true);
+    if (bFirst) m_iDlgSubSeq = iSeq;
 }
 
 // 이벤트 패키지 프로브 — Event 토큰 임의 지정. 자원은 보통 자기 AoR (인가 축 무관하게 분류만 본다).
 void SimSession::SubscribeEvent(const std::string& strEvent, const std::string& strResourceAor)
 {
     m_iEventSubStatus = 0;
+    m_strEventSubRealm.clear();
+    m_bEventSubAuthRetried = false;
+    m_strEventSubEvent = strEvent;
+    m_strEventSubAccept = "";
+    m_strEventSubResource = strResourceAor;
     printf("[%d] SUBSCRIBE Event=%s resource=%s\n", m_iId, strEvent.c_str(), strResourceAor.c_str());
     SendEventSubscribe(strEvent, "", strResourceAor, m_strEventSubCallId, m_iEventSubSeq, m_strEventSubFromTag);
 }
 
 void SimSession::SendEventSubscribe(const std::string& strEvent, const std::string& strAccept,
                                     const std::string& strResourceAor,
-                                    std::string& strCallIdOut, int& iSeqOut, std::string& strFromTagOut)
+                                    std::string& strCallIdOut, int& iSeqOut, std::string& strFromTagOut,
+                                    const CSipCredential* pclsCred, bool bReuseIds)
 {
     const std::string& strLocalIp = m_clsSetup.m_strLocalIp;
 
-    static std::atomic<int> s_iEvSubSerial{0};   // 같은 초에 여러 대상을 구독해도 Call-ID 가 겹치지 않게
-    char szCallId[160];
-    snprintf(szCallId, sizeof(szCallId), "evsub_%s_%s_%d_%d_%d", strEvent.c_str(), m_strUser.c_str(), m_iId,
-             (int)time(NULL), ++s_iEvSubSerial);
-    strCallIdOut = szCallId;
-    iSeqOut = 1;
-
-    char szTag[64];
-    SipMakeTag(szTag, sizeof(szTag));
-    strFromTagOut = szTag;
+    if (!bReuseIds) {
+        static std::atomic<int> s_iEvSubSerial{0};   // 같은 초에 여러 대상을 구독해도 Call-ID 가 겹치지 않게
+        char szCallId[160];
+        snprintf(szCallId, sizeof(szCallId), "evsub_%s_%s_%d_%d_%d", strEvent.c_str(), m_strUser.c_str(), m_iId,
+                 (int)time(NULL), ++s_iEvSubSerial);
+        strCallIdOut = szCallId;
+        iSeqOut = 1;
+        char szTag[64];
+        SipMakeTag(szTag, sizeof(szTag));
+        strFromTagOut = szTag;
+    } else {
+        ++iSeqOut;   // 같은 dialog(Call-ID/From-tag) 안의 재전송 — 401 Digest 응답 등
+    }
+    const std::string szCallId = strCallIdOut;
+    const std::string szTag = strFromTagOut;
 
     CSipMessage* pMsg = new CSipMessage();
     pMsg->m_strSipMethod = "SUBSCRIBE";
@@ -741,15 +758,16 @@ void SimSession::SendEventSubscribe(const std::string& strEvent, const std::stri
     pMsg->AddVia(strLocalIp.c_str(), m_iLocalPort, szBranch);
 
     pMsg->m_clsFrom.m_clsUri.Set("sip", m_strUser.c_str(), m_strDomain.c_str(), 0);
-    pMsg->m_clsFrom.InsertParam(SIP_TAG, szTag);
+    pMsg->m_clsFrom.InsertParam(SIP_TAG, szTag.c_str());
     pMsg->m_clsTo.m_clsUri.Set("sip", strResourceAor.c_str(), m_strDomain.c_str(), 0);
 
-    pMsg->m_clsCallId.Parse(szCallId, (int)strlen(szCallId));
+    pMsg->m_clsCallId.Parse(szCallId.c_str(), (int)szCallId.size());
     pMsg->m_clsCSeq.Set(iSeqOut, "SUBSCRIBE");
     pMsg->m_iMaxForwards = 70;
     pMsg->AddHeader("Expires", "3600");
     pMsg->AddHeader("Event", strEvent.c_str());
     if (!strAccept.empty()) pMsg->AddHeader("Accept", strAccept.c_str());
+    if (pclsCred) pMsg->m_clsAuthorizationList.push_back(*pclsCred);
 
     char szContact[128];
     snprintf(szContact, sizeof(szContact), "<sip:%s@%s:%d>", m_strUser.c_str(), strLocalIp.c_str(), m_iLocalPort);
@@ -758,6 +776,51 @@ void SimSession::SendEventSubscribe(const std::string& strEvent, const std::stri
     pMsg->AddRoute(m_strServerIp.c_str(), RoutePort(), m_eTransport);
 
     m_clsUserAgent.m_clsSipStack.SendSipMessage(pMsg);
+}
+
+bool SimSession::_BuildDigestCredential(const char* pszMethod, const std::string& strResourceAor,
+                                        const CSipChallenge& clsCh, CSipCredential& clsCred)
+{
+    if (!clsCh.m_strType.empty() && strcasecmp(clsCh.m_strType.c_str(), "Digest") != 0) return false;
+    if (strncasecmp(clsCh.m_strAlgorithm.c_str(), "AKA", 3) == 0) return false;   // AKA 는 REGISTER 경로(psip)만
+    const std::string strUser = m_strAuthId.empty() ? m_strUser : m_strAuthId;
+    char szUri[256];
+    snprintf(szUri, sizeof(szUri), "sip:%s@%s:%d", strResourceAor.c_str(), m_strDomain.c_str(), m_iServerPort);
+
+    char szHa1[33];
+    if (!m_strHa1.empty()) {
+        snprintf(szHa1, sizeof(szHa1), "%s", m_strHa1.c_str());   // -creds 의 H(A1) — 서버 realm 에 결박
+    } else {
+        const std::string strA1 = strUser + ":" + clsCh.m_strRealm + ":" + m_strPwd;
+        SipMd5String(strA1.c_str(), szHa1);
+    }
+    char szHa2[33];
+    const std::string strA2 = std::string(pszMethod) + ":" + szUri;
+    SipMd5String(strA2.c_str(), szHa2);
+
+    clsCred.Clear();
+    clsCred.m_strType = "Digest";
+    clsCred.m_strUserName = strUser;
+    clsCred.m_strRealm = clsCh.m_strRealm;
+    clsCred.m_strNonce = clsCh.m_strNonce;
+    clsCred.m_strUri = szUri;
+    clsCred.m_strAlgorithm = clsCh.m_strAlgorithm.empty() ? "MD5" : clsCh.m_strAlgorithm;
+    clsCred.m_strOpaque = clsCh.m_strOpaque;
+    char szResp[33];
+    if (!clsCh.m_strQop.empty()) {
+        char szCnonce[33];
+        snprintf(szCnonce, sizeof(szCnonce), "%08x%08x", (unsigned)time(NULL), (unsigned)rand());
+        clsCred.m_strQop = "auth";
+        clsCred.m_strNonceCount = "00000001";
+        clsCred.m_strCnonce = szCnonce;
+        const std::string strR = std::string(szHa1) + ":" + clsCh.m_strNonce + ":00000001:" + szCnonce + ":auth:" + szHa2;
+        SipMd5String(strR.c_str(), szResp);
+    } else {
+        const std::string strR = std::string(szHa1) + ":" + clsCh.m_strNonce + ":" + szHa2;
+        SipMd5String(strR.c_str(), szResp);
+    }
+    clsCred.m_strResponse = szResp;
+    return true;
 }
 
 // INVITE-with-Replaces(RFC 3891) — 대상 다이얼로그(strReplacesCallId+태그)를 교체한다.
@@ -1436,6 +1499,20 @@ bool SimSession::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
         CSipHeader* pWarn = pclsMessage->GetHeader("Warning");
         if (strCallId == m_strDlgSubCallId) m_iDlgSubStatus = iStatus;
         else if (m_mapDlgSubs.count(strCallId)) { /* 추가 감시 대상 거절 — OK 수에 미포함 */ }
+        else if (strCallId == m_strEventSubCallId && iStatus == 401 && !pclsMessage->m_clsWwwAuthenticateList.empty()) {
+            // 서버 Digest 챌린지 — realm 을 기록(검증 마커)하고 실 UE 처럼 1회 재전송한다.
+            const CSipChallenge& clsCh = pclsMessage->m_clsWwwAuthenticateList.front();
+            if (m_strEventSubRealm.empty()) m_strEventSubRealm = clsCh.m_strRealm;
+            CSipCredential clsCred;
+            if (!m_bEventSubAuthRetried && _BuildDigestCredential("SUBSCRIBE", m_strEventSubResource, clsCh, clsCred)) {
+                m_bEventSubAuthRetried = true;
+                printf("[%d] EVENT-PROBE 401 realm=%s → Digest retry\n", m_iId, clsCh.m_strRealm.c_str());
+                SendEventSubscribe(m_strEventSubEvent, m_strEventSubAccept, m_strEventSubResource, m_strEventSubCallId,
+                                   m_iEventSubSeq, m_strEventSubFromTag, &clsCred, true);
+                return true;
+            }
+            m_iEventSubStatus = iStatus;   // 재시도 뒤에도 401 — 자격 거절(realm/HA1 불일치)로 판정
+        }
         else if (strCallId == m_strEventSubCallId) m_iEventSubStatus = iStatus;
         else if (strCallId == m_strConfSubCallId) {
             m_iConfSubStatus = iStatus;

@@ -7,6 +7,8 @@
 #include <mutex>
 #include <string>
 
+#include "SipTransport.h"
+
 /**
  * @ingroup CspServer
  * @brief Subscription Info Structure
@@ -24,6 +26,12 @@ struct SubscriptionInfo {
     time_t tStartTime;             // Subscription Start Time
     int iNotifySeq;                // CSeq counter for NOTIFY messages
     int iInboundListenerId = 0;    // SUBSCRIBE 수신 listener (NOTIFY Via/Contact 자기 주소 결정)
+    // 구독 요청의 수신 주소(received/rport·transport) — 등록 바인딩이 없는 구독자(재기동 뒤 재REGISTER 전, Digest 로
+    //   수락)에게 NOTIFY 를 보낼 폴백 목적지. RFC 6665 의 dialog remote target 을 NAT 뒤에서 등록 latch 와 같은
+    //   원리로 고정한다 — Contact 가 사설주소여도 도달한다.
+    std::string strSrcIp;
+    int iSrcPort = 0;
+    ESipTransport eSrcTransport = E_SIP_UDP;
 };
 
 /**
@@ -34,6 +42,15 @@ class CSubscriptionManager {
 public:
     CSubscriptionManager();
     ~CSubscriptionManager();
+
+    /**
+     * @brief 재기동을 넘어 단조 증가하는 NOTIFY CSeq 시드 (RFC 3261 §12.2.2).
+     *   상태 없는 in-dialog 갱신(재기동 후 옛 dialog 의 SUBSCRIBE)을 수용할 때 쓴다 — 구독자 dialog 는 이전
+     *   인스턴스가 보낸 NOTIFY CSeq 를 기억하므로 1부터 다시 세면 후속 NOTIFY 가 전부 500(Invalid CSeq, 하위
+     *   CSeq)으로 거절돼 로스터·xcap-diff 통지가 영구 stale 된다. 2026-01-01 UTC 경과 초 ×8 — 구독 하나에
+     *   초당 8건 미만이면 어떤 이전 CSeq 보다 크고, int 범위에서 약 8.5년 유효.
+     */
+    static int RebootSafeNotifySeq();
 
     /**
      * @brief Add or Update a subscription
