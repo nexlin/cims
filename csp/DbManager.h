@@ -119,7 +119,7 @@ public:
     bool SelectPhoneGroup( const std::string &strGroupId, CspPhoneGroup &clsGroup );
     /** 전체 전화 그룹을 읽어 맵을 재구축한다 */
     bool LoadAllPhoneGroups( CCspPhoneGroupMap &clsMap );
-    /** 전체 역할 + user 배정(person → volte·ptt 전 회선으로 펼침) + 대상 목록을 읽어 맵을 재구축한다 */
+    /** 전체 역할 + user 배정(person → voip·volte·ptt 전 회선으로 펼침) + 대상 목록을 읽어 맵을 재구축한다 */
     bool LoadAllRoles( CCspRoleMap &clsMap );
 
     // ─────────────────────────────────────────────
@@ -194,6 +194,19 @@ private:
     bool m_bHasPhoneGroupTables = false;
     /** 역할 테이블(roles·role_assignments — migrate_phone_groups_roles.sql) 존재 여부 */
     bool m_bHasRoleTables = false;
+    /** 유선 VoIP 가입 테이블(voip_subscriptions — migrate_voip_subscriptions.sql, sip_service_model.md §2-9) 존재 여부.
+     *  가입 테이블 = 접속환경 kind. 미적용이면 유선 회선은 volte_subscriptions 행으로만 적재된다(전환기). */
+    bool m_bHasVoipTable = false;
+    /** 가입 테이블 하나 = {테이블명, service type(voip|volte|ptt)} */
+    struct SubTable {
+        const char *pszTable;
+        const char *pszType;
+    };
+    /** 존재하는 가입 테이블 목록 — voip(있을 때)·volte·ptt 순. 전량 적재·단건 조회·등록/로그아웃 시각 갱신·역할 회선
+     *  펼침이 전부 이 목록을 쓴다(테이블을 하나 더 두는 곳이 여기 하나가 되게). */
+    std::vector<SubTable> SubTables() const;
+    /** "(SELECT id, user_id FROM t1 UNION ALL SELECT id, user_id FROM t2 …)" — 전 가입 테이블 회선 펼침 서브쿼리 */
+    std::string SubTablesUnion() const;
     /** 원격 청취 자격 컬럼(ptt_user_profile.allow_ambient_listening — migrate_ptt_ambient_listening.sql) 존재 여부 */
     bool m_bHasAmbientColumn = false;
     void ProbeSchema();

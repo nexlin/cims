@@ -40,7 +40,7 @@ function build(users: UserSummary[]): DirMap {
       userId: u.id, name: u.name,
       title: u.title || undefined, org: u.org_id || undefined,
     }
-    for (const s of [...(u.ptt_subscriptions || []), ...(u.call_subscriptions || [])]) {
+    for (const s of [...(u.ptt_subscriptions || []), ...(u.call_subscriptions || []), ...(u.voip_subscriptions || [])]) {
       if (s.id && !m.has(s.id)) m.set(s.id, p)
     }
   }

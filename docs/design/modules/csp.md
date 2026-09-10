@@ -897,8 +897,9 @@ relay bookkeeping 의 키는 **session_id**(`csp_{yyyymmddHHMMSSmmm}_{n}`, 재�
 | 테이블 | 용도 |
 |--------|------|
 | users | 가입자 기본 정보 |
-| volte_subscriptions | VoLTE 회선 (ID, AuthId, Password, DND, Forward) |
-| ptt_subscriptions | PTT 회선 (ID, AuthId, Password) |
+| volte_subscriptions | 이동 VoLTE 회선 (ID, imsi, ha1, service_ref, sip_transport, DND, Forward, pickup_group) — service type `volte` |
+| voip_subscriptions | 유선 VoIP 회선 — 같은 열, service type `voip`(전화 경로는 volte 와 같음). 테이블 부재 DB 는 부팅 프로브로 건너뜀(INFO) |
+| ptt_subscriptions | PTT 회선 (ID, imsi, ha1, service_ref, sip_transport, pickup_group) — service type `ptt` |
 | ptt_groups | PTT 그룹 설정 |
 | ptt_group_members | 그룹 멤버십 |
 | recordings / recording_segments | 녹취 메타데이터 |

@@ -23,9 +23,10 @@ export interface UserProfile extends AuthUser {
   update_time?: string | null
 }
 
-// /users/me/subscriptions 응답
+// /users/me/subscriptions 응답 — 회선 종류(가입 테이블)별 배열. voip 는 유선 VoIP(구 서버 응답에는 없다 → `|| []`)
 export interface MySubscriptions {
   call_subscriptions: Subscription[]
+  voip_subscriptions?: Subscription[]
   ptt_subscriptions:  Subscription[]
 }
 

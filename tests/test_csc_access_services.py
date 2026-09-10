@@ -76,13 +76,23 @@ class FindResolveTests(_Base):
         super().setUp()
         self.write_mirror()
 
-    def test_find_by_name_within_family(self):
-        self.assertEqual(acc.find(self.cfg, "voip", "volte")["domain"], "voip.sot")      # 전화 가족 안: volte 회선이 voip 서비스
+    def test_find_by_name_exact_kind(self):
+        """테이블 = kind 불변식: 이름 매칭은 그 kind 안에서만(ptt≡mcptt). 다른 kind 의 같은 이름은 해당 없음."""
+        self.assertEqual(acc.find(self.cfg, "voip", "voip")["domain"], "voip.sot")       # voip 회선이 voip 서비스
+        self.assertIsNone(acc.find(self.cfg, "voip", "volte"))                           # volte 회선은 voip 서비스를 못 가리킨다
         self.assertEqual(acc.find(self.cfg, "mcptt", "ptt")["domain"], "ptt.sot")
-        self.assertIsNone(acc.find(self.cfg, "voip", "ptt"))                             # 가족 경계는 넘지 않는다
+        self.assertEqual(acc.find(self.cfg, "mcptt", "mcptt")["domain"], "ptt.sot")     # 별칭
+        self.assertIsNone(acc.find(self.cfg, "voip", "ptt"))
         self.assertIsNone(acc.find(self.cfg, "mcptt", "volte"))
         self.assertIsNone(acc.find(self.cfg, "", "volte"))
         self.assertIsNone(acc.find(self.cfg, "volte-old", "volte"))                      # disabled
+
+    def test_find_by_name_any_kind(self):
+        """쓰기 게이트용 — 이름만으로 레코드(kind)를 묻는다."""
+        self.assertEqual(acc.find_by_name(self.cfg, "voip")["kind"], "voip")
+        self.assertEqual(acc.find_by_name(self.cfg, "mcptt")["kind"], "ptt")
+        self.assertIsNone(acc.find_by_name(self.cfg, "nope"))
+        self.assertIsNone(acc.find_by_name(self.cfg, ""))
 
     def test_pick_by_kind_priority_and_alias(self):
         self.assertEqual(acc.pick_by_kind(self.cfg, "volte")["name"], "volte")
@@ -92,7 +102,8 @@ class FindResolveTests(_Base):
         self.assertIsNone(acc.pick_by_kind(self.cfg, "ibcf"))
 
     def test_resolve_name_then_kind(self):
-        self.assertEqual(acc.resolve(self.cfg, "voip", "volte")["name"], "voip")
+        self.assertEqual(acc.resolve(self.cfg, "voip", "voip")["name"], "voip")
+        self.assertEqual(acc.resolve(self.cfg, "voip", "volte")["name"], "volte")        # 다른 kind 이름 → kind 폴백
         self.assertEqual(acc.resolve(self.cfg, "", "volte")["name"], "volte")            # service_ref 없음 → kind
         self.assertEqual(acc.resolve(self.cfg, "no-such", "ptt")["name"], "mcptt")      # 미지 이름 → kind
 
@@ -100,7 +111,7 @@ class FindResolveTests(_Base):
 class EntryTests(_Base):
     def test_entry_merges_identity_over_reachability(self):
         self.write_mirror()
-        kind, svc = acc.entry("volte", "voip", PROV)
+        kind, svc = acc.entry("voip", "voip", PROV)
         self.assertEqual(kind, "voip")
         self.assertEqual((svc["domain"], svc["auth_realm"], svc["media_srtp"], svc["pickup_feature_code"]),
                          ("voip.sot", "voip.realm", "required", "**"))                  # 정의 = 미러
@@ -128,19 +139,23 @@ class EntryTests(_Base):
         self.assertIn("volte.cfg", warned[0])
 
     def test_entry_without_mirror_falls_back_to_config(self):
-        kind, svc = acc.entry("volte", "voip", PROV)                  # 이름 매칭(가족 안)
+        kind, svc = acc.entry("voip", "voip", PROV)                   # 이름 매칭(같은 kind 키)
         self.assertEqual((kind, svc["domain"]), ("voip", "voip.sot"))
         kind, svc = acc.entry("volte", "", PROV)                      # 종류 키
         self.assertEqual((kind, svc["domain"]), ("volte", "volte.cfg"))
-        kind, svc = acc.entry("ptt", "voip", PROV)                    # 가족 경계
+        kind, svc = acc.entry("volte", "voip", PROV)                  # 다른 kind 의 이름 → 자기 kind 키
+        self.assertEqual((kind, svc["domain"]), ("volte", "volte.cfg"))
+        kind, svc = acc.entry("ptt", "voip", PROV)
         self.assertEqual((kind, svc["domain"]), ("ptt", "ptt.cfg"))
         self.assertEqual(acc.entry("ptt", "x", {}), ("ptt", {}))
 
     def test_entry_mirror_without_config_entry(self):
         self.write_mirror()
-        kind, svc = acc.entry("volte", "voip", {"Services": {"volte": {"host": "h", "port": 1}}})
-        self.assertEqual((kind, svc["domain"], svc["host"]), ("voip", "voip.sot", "h"))     # 가족 키(volte) 항목 폴백
-        kind, svc = acc.entry("volte", "voip", {})
+        kind, svc = acc.entry("voip", "voip", {"Services": {"voip": {"host": "h", "port": 1}}})
+        self.assertEqual((kind, svc["domain"], svc["host"]), ("voip", "voip.sot", "h"))     # 같은 kind 키 항목
+        kind, svc = acc.entry("voip", "voip", {"Services": {"volte": {"host": "h", "port": 1}}})
+        self.assertEqual((kind, svc["domain"], svc.get("host")), ("voip", "voip.sot", None))  # 다른 kind 키는 도달 정보로 안 쓴다
+        kind, svc = acc.entry("voip", "voip", {})
         self.assertEqual((kind, svc["domain"], svc.get("host")), ("voip", "voip.sot", None))
 
 

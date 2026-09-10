@@ -7,10 +7,10 @@ CIMS 최초 구축 시 **DB / 앱 계정 / 스키마**를 한 번에 생성하�
 
 - 데이터베이스 `cims` (utf8mb4)
 - 앱(서비스) 계정 + 해당 DB 전권 GRANT
-- 통합 스키마 `cims_schema.sql` — **8개 테이블**:
-  `organizations`, `users`(가입자 person 전용), `volte_subscriptions`,
-  `ptt_subscriptions`, `user_rejects`, `ptt_groups`, `ptt_group_members`,
-  `ptt_affiliations`
+- 통합 스키마 `cims_schema.sql` — **9개 테이블**:
+  `organizations`, `users`(가입자 person 전용), `volte_subscriptions`(이동 VoLTE),
+  `voip_subscriptions`(유선 VoIP), `ptt_subscriptions`, `user_rejects`, `ptt_groups`,
+  `ptt_group_members`, `ptt_affiliations` — 가입 테이블 = 접속환경 kind(volte/voip/ptt)
 - (선택 `--cleanup`) 기존 DB 의 미사용 테이블 16종 정리
 
 > **DB 에 두지 않는 것** — 콘솔 로그인 계정(OAM users)은 OAM file_store 도메인

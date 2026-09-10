@@ -47,7 +47,7 @@ TS 33.203 이 정의하는 접속 보안 조합만 지원한다. 자유 조합(�
 
 | 구간 | 위치 | 형태 |
 |---|---|---|
-| DB SoT | `volte_subscriptions.ha1` / `ptt_subscriptions.ha1` (`sql/cims_schema.sql`, CHAR(32)) | **H(A1)** |
+| DB SoT | `volte_subscriptions.ha1` / `voip_subscriptions.ha1` / `ptt_subscriptions.ha1` (`sql/cims_schema.sql`, CHAR(32)) | **H(A1)** |
 | 과도기 | 같은 테이블 `passwd` — CSC 는 더 쓰지 않고(구 스키마 fallback 제외), CSP 는 ha1 이 비었을 때만 읽는다 | 평문 (값 소거 → 후속 릴리스 DROP) |
 | CSP 메모리 | `CspUser::m_strHa1` (`csp/CspUser.h`) — 전 가입자 캐시 | H(A1) |
 | 검증 지점 | `CCscfModule::CheckAuthorizationResponse` (`csp/CscfModule.cpp`) — 저장 H(A1) 로 response 합성 | H(A1) 소비 |
@@ -190,6 +190,7 @@ ALTER TABLE volte_subscriptions
   ADD COLUMN ha1 CHAR(32) NOT NULL DEFAULT '' COMMENT 'MD5(imsi@domain:realm:password) — SIP Digest H(A1)';
 ALTER TABLE ptt_subscriptions
   ADD COLUMN ha1 CHAR(32) NOT NULL DEFAULT '' COMMENT '동일';
+-- voip_subscriptions 는 생성 시점(sql/migrate_voip_subscriptions.sql)부터 같은 ha1 열을 가진다.
 ```
 
 - CSP(`CDbManager::ProbeSchema`)와 CSC(`_has_ha1_column`)는 연결 시 `ha1` 컬럼 존재를 1회 프로브한다 —

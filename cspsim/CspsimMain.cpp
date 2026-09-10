@@ -28,7 +28,7 @@ struct DbSubscriber {
     std::string authId;       // Digest auth_id
     std::string password;     // 평문 — CLI/-creds 전용 (DB 에는 없다: passwd 컬럼 DROP, sip_access_security.md §4.7 ⑥)
     std::string ha1;          // SIP Digest H(A1) (sip_access_security.md §4) — DB 모드의 유일한 Digest 자격
-    std::string serviceType;  // "volte" or "ptt"
+    std::string serviceType;  // "volte" | "voip" | "ptt" — 가입 테이블(접속환경 kind)
     std::string sipTransport; // 채널 정책 (sip_access_security.md §3) — ''(무정책)|UDP|TCP|TLS
     std::string authScheme;   // digest|aka — aka 는 TLS 위 AKAv1-MD5 만 성립 (Annex X)
 };
@@ -79,14 +79,21 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
     //   DB 쿼리는 id / imsi / ha1. authId 는 SimSession 생성 시 imsi+@+strDomain 으로 조립.
     //   인증 자료는 ha1 (원문 없이 response 계산) — passwd 컬럼은 없다(§4.7 ⑥). ha1 이 비면 등록 불가.
     //   (sub.authId 는 imsi 만 담아 뒀다가 상위에서 완성)
-    // VoIP 가입자
-    if (strFilterMode.empty() || strFilterMode == "volte") {
-        const char* sql =
-            "SELECT cu.id, COALESCE(cu.imsi,''), COALESCE(cu.ha1,''), "
-            "COALESCE(cu.sip_transport,''), COALESCE(cu.auth_scheme,'digest') "
-            "FROM volte_subscriptions cu "
-            "ORDER BY cu.id";
-        if (mysql_query(pMysql, sql) == 0) {
+    // 전화(volte·voip) 가입자 — 가입 테이블 = 접속환경 kind (sip_service_model.md §2-9). -mode volte 는 이동 volte 와
+    //   유선 voip 두 테이블을 함께 적재하고(서버 전화 경로가 같다), -mode voip 는 voip 테이블만 적재한다.
+    //   voip_subscriptions 가 없는 DB(migrate_voip_subscriptions.sql 미적용)면 그 질의만 조용히 건너뛴다.
+    struct PhoneTable { const char* table; const char* type; };
+    const PhoneTable aPhone[] = { { "volte_subscriptions", "volte" }, { "voip_subscriptions", "voip" } };
+    for (const PhoneTable& pt : aPhone) {
+        bool bWant = strFilterMode.empty()
+                  || (strFilterMode == "volte")                                   // 전화 계열 전부
+                  || (strFilterMode == "voip" && std::string(pt.type) == "voip"); // 유선만
+        if (!bWant) continue;
+        std::string sql =
+            std::string("SELECT cu.id, COALESCE(cu.imsi,''), COALESCE(cu.ha1,''), "
+                        "COALESCE(cu.sip_transport,''), COALESCE(cu.auth_scheme,'digest') "
+                        "FROM ") + pt.table + " cu ORDER BY cu.id";
+        if (mysql_query(pMysql, sql.c_str()) == 0) {
             MYSQL_RES* res = mysql_store_result(pMysql);
             if (res) {
                 MYSQL_ROW row;
@@ -98,7 +105,7 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
                     sub.ha1          = row[2] ? row[2] : "";
                     sub.sipTransport = row[3] ? row[3] : "";
                     sub.authScheme   = row[4] ? row[4] : "digest";
-                    sub.serviceType  = "volte";
+                    sub.serviceType  = pt.type;
                     vecOut.push_back(sub);
                 }
                 mysql_free_result(res);
@@ -406,7 +413,7 @@ static void PrintUsage(const char* pszBin) {
            "ipsec-3gpp 제안, 401 뒤 커널 SA 설치 (CAP_NET_ADMIN, -aka_k 필수)\n");
     printf("  -ipsec_alg   <alg>       hmac-sha-1-96(기본)|hmac-md5-96\n");
     printf("  -ipsec_ealg  <ealg>      aes-cbc(기본)|null\n");
-    printf("  -mode        <volte|ptt> 단말 유형 (default: volte)\n");
+    printf("  -mode        <volte|voip|ptt> 단말 유형 (default: volte) — volte 는 이동·유선 전화 가입자 전부, voip 는 유선만\n");
     printf("  -transport   <udp|tcp|tls> 시그널링 transport (default: udp)\n");
     printf("                             tls 는 서버 인증서를 검증하지 않는다(랩 자가서명 수용)\n");
     printf("  -group       <group_id>  PTT 그룹 ID (default: 1000)\n");

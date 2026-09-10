@@ -3,7 +3,7 @@ CIMS Users API (v3, 2026-04-22) — 로그인한 본인 리소스 조회
 
 Routes:
   GET /api/v1/users/me              - 본인 프로파일 (role, org_id 등; Console admin 용)
-  GET /api/v1/users/me/subscriptions - 본인 VoIP/PTT 가입자 배열 (Phone UE 가 SIP REGISTER 전에 호출)
+  GET /api/v1/users/me/subscriptions - 본인 VoLTE/VoIP/PTT 가입자 배열 (Phone UE 가 SIP REGISTER 전에 호출)
 
 분리 원칙 (v3):
   - /auth/login 은 인증 전용 (토큰 + 최소 user 만 반환)
@@ -32,6 +32,25 @@ def _access_service_domain_map(config):
 
 def _dt(val):
     return val.isoformat() if val else None
+
+
+# 가입 테이블 = 접속환경 kind (sip_service_model.md §2-9) — 응답 키는 CSC 관리 API 와 같다.
+#   voip_subscriptions 는 migrate_voip_subscriptions.sql 로 뒤에 생긴 테이블이라 부재를 프로브해 건너뛴다(프로세스 수명 캐시).
+_SUB_TABLES = (('volte_subscriptions', 'call_subscriptions'),
+               ('voip_subscriptions', 'voip_subscriptions'),
+               ('ptt_subscriptions', 'ptt_subscriptions'))
+_HAS_VOIP_TABLE = None
+
+
+def _has_voip_table(cur) -> bool:
+    global _HAS_VOIP_TABLE
+    if _HAS_VOIP_TABLE is None:
+        cur.execute("SELECT COUNT(*) AS cnt FROM information_schema.TABLES "
+                    "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='voip_subscriptions'")
+        row = cur.fetchone()
+        cnt = row['cnt'] if isinstance(row, dict) else (row[0] if row else 0)
+        _HAS_VOIP_TABLE = bool(cnt)
+    return _HAS_VOIP_TABLE
 
 
 def _parts(full_path: str):
@@ -87,15 +106,16 @@ async def _get_me(handler_args, config):
 
 
 async def _get_me_subscriptions(handler_args, config):
-    """본인 VoIP/PTT 가입자 배열 — Phone UE 가 SIP REGISTER 전에 호출.
+    """본인 가입자 배열 — 전화 계열(VoLTE `call_subscriptions`·유선 VoIP `voip_subscriptions`) + PTT `ptt_subscriptions`.
 
     응답 각 subscription 에는 다음이 포함됨:
       id           — MSISDN (E.164)
       service_ref  — access_services.name
       imsi         — IMSI (user part)
-      passwd       — SIP Digest password
       domain       — service_ref 가 가리키는 access_services.domain
       auth_id      — imsi@domain (Digest username) — Phone 은 이 값을 그대로 사용
+    SIP 비밀번호는 내리지 않는다 — 평문 passwd 컬럼은 없다(sip_access_security.md §4.7 ⑥). 단말 SIP 자격은
+    CSC `/provisioning/me` 의 sipHa1 경로다.
     """
     payload, err = _auth.require_auth(handler_args)
     if err:
@@ -103,7 +123,7 @@ async def _get_me_subscriptions(handler_args, config):
 
     # 콘솔 계정(내장/console_accounts)은 가입자(전화) 정보가 없음 — DB 없이 빈 배열
     if payload.get('builtin') or payload.get('file_acct'):
-        return HandlerResult(status=200, body={'call_subscriptions': [], 'ptt_subscriptions': []})
+        return HandlerResult(status=200, body={key: [] for _t, key in _SUB_TABLES})
     uid = int(payload['sub'])
 
     domain_map = _access_service_domain_map(config)
@@ -117,31 +137,25 @@ async def _get_me_subscriptions(handler_args, config):
         s['auth_id'] = f"{s.get('imsi','')}@{domain}" if (s.get('imsi') and domain) else ''
         return s
 
+    body = {}
     try:
         with _auth._get_db(config) as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT id, service_ref, imsi, passwd, dnd, forward_id, "
-                    "       register_time, logout_time "
-                    "FROM volte_subscriptions WHERE user_id=%s ORDER BY id",
-                    (uid,)
-                )
-                call_subs = [_fill(s) for s in cur.fetchall()]
-
-                cur.execute(
-                    "SELECT id, service_ref, imsi, passwd, dnd, forward_id, "
-                    "       register_time, logout_time "
-                    "FROM ptt_subscriptions WHERE user_id=%s ORDER BY id",
-                    (uid,)
-                )
-                ptt_subs = [_fill(s) for s in cur.fetchall()]
+                for table, key in _SUB_TABLES:
+                    if table == 'voip_subscriptions' and not _has_voip_table(cur):
+                        body[key] = []
+                        continue
+                    cur.execute(
+                        "SELECT id, service_ref, imsi, sip_transport, dnd, forward_id, "
+                        "       register_time, logout_time "
+                        f"FROM {table} WHERE user_id=%s ORDER BY id",
+                        (uid,)
+                    )
+                    body[key] = [_fill(s) for s in cur.fetchall()]
     except pymysql.Error as e:
         return HandlerResult(status=500, body={'error': str(e)})
 
-    return HandlerResult(status=200, body={
-        'call_subscriptions': call_subs,
-        'ptt_subscriptions':  ptt_subs,
-    })
+    return HandlerResult(status=200, body=body)
 
 
 # ── 핸들러 목록 ────────────────────────────────────────────────

@@ -17,6 +17,7 @@ from httpsrv.handler import HandlerArgs, HandlerResult, BodyData
 from util.log_util import Logger
 from services.idms_storage import IdmsStorage
 from services import logger as _logger
+from services import subscriptions as _subs      # 가입 테이블 레지스트리(volte/voip/ptt — sip_service_model.md §2-9)
 
 # --- Configuration & Data ---
 # JWT 서명 시크릿. 구 하드코딩 default("mcptt_jwt_secret_change_me") 제거 — 알려진 기본값은
@@ -373,7 +374,7 @@ def load_shared_data(config):
             )
             with conn:
                 with conn.cursor() as cur:
-                    for table in ('volte_subscriptions', 'ptt_subscriptions'):
+                    for _kind, table in _subs.tables(cur):
                         # SIP Digest passwd 는 로그인 자격이 아니다(소거됨, sip_access_security.md §4.7 ⑤).
                         #   IdMS 로그인 = users.login_id/passwd(LOGIN_ACCOUNTS) — 여기서는 신원 목록만 싣는다.
                         cur.execute(f"SELECT id FROM {table}")
@@ -536,14 +537,17 @@ def load_shared_data(config):
 
 def _load_login_accounts(cur) -> None:
     """users.login_id/passwd → LOGIN_ACCOUNTS 전량 교체. 기동 적재와 admin API 변경 후 갱신이 같은 코드를 쓴다."""
+    # MCPTT ID 파생 회선 = ptt → volte → voip 순의 첫 가입(voip 테이블은 있을 때만 — services.subscriptions 프로브)
+    voip_col = ("(SELECT id FROM voip_subscriptions WHERE user_id=u.id LIMIT 1) voip "
+                if _subs.has_table(cur, 'voip') else "NULL voip ")
     cur.execute(
         "SELECT u.id uid, u.login_id, u.passwd, u.name, "
         "(SELECT id FROM ptt_subscriptions WHERE user_id=u.id LIMIT 1) ptt, "
-        "(SELECT id FROM volte_subscriptions WHERE user_id=u.id LIMIT 1) volte "
+        "(SELECT id FROM volte_subscriptions WHERE user_id=u.id LIMIT 1) volte, " + voip_col +
         "FROM users u WHERE u.login_id IS NOT NULL AND u.login_id<>''")
     fresh = {}
     for r in cur.fetchall():
-        msisdn = r.get('ptt') or r.get('volte')
+        msisdn = r.get('ptt') or r.get('volte') or r.get('voip')
         if msisdn:
             mcptt_id = msisdn if str(msisdn).startswith('tel:') else (
                 f"tel:{msisdn}" if str(msisdn).startswith('+') else f"tel:+{msisdn}")
@@ -2788,12 +2792,12 @@ def _country_code_of(msisdn: str) -> str:
         return d[0]
     return d[:2] if d[:2] in _E164_CC2 else d[:3]
 
-_PHONE_KINDS = ('volte', 'voip')      # 전화 계열 접속환경 — 같은 가입 테이블(volte_subscriptions)·같은 CSP 전화 경로
+_PHONE_KINDS = _subs.PHONE_KINDS      # 전화 가족(volte·voip) — 같은 CSP 전화 경로. 가입 테이블은 kind 마다 따로(services.subscriptions)
 
 
 def service_entry(kind: str, service_ref: str = "") -> tuple:
     """(와이어 kind, 서비스 항목) — 가입 행의 service_ref(= CSP access_services.name)로 접속 서비스를 고른다
-    (같은 종류의 서비스가 여럿일 때 — 유선 voip 회선과 이동 volte 회선이 같은 volte_subscriptions 에 있다).
+    (같은 kind 의 서비스가 여럿일 때 — 이름 매칭은 그 회선의 테이블 kind 안에서만, sip_service_model.md §2-9).
     정의(name·kind·domain·realm·media_srtp·sec_mechanisms…)는 CSP access_services 미러가 정본이고 csc.json
     `Provisioning.Services.<kind>` 는 단말 도달 정보(host·포트·transport…)를 보탠다 — 미러가 없으면 csc.json 만으로
     (services/access_services.entry, sip_service_model.md §2-9, android_ue_provisioning.md §4). 와이어 kind 는 고른 서비스의
@@ -2936,18 +2940,23 @@ def _content_etag_json(obj) -> str:
     return '"' + hashlib.sha256(canon.encode('utf-8')).hexdigest()[:32] + '"'
 
 
-_MEMBER_SQL = ("SELECT u.id, u.name, s.id, COALESCE(m.group_id,''), "
-               "(SELECT MIN(p.id) FROM ptt_subscriptions p WHERE p.user_id=u.id) "
-               "FROM volte_subscriptions s JOIN users u ON u.id=s.user_id "
-               "LEFT JOIN phone_group_members m ON m.user_id=s.id")
+_MEMBER_SELECT = ("SELECT u.id, u.name, s.id, COALESCE(m.group_id,''), "
+                  "(SELECT MIN(p.id) FROM ptt_subscriptions p WHERE p.user_id=u.id) ")
 _MEMBER_ORDER = " ORDER BY CASE WHEN m.group_id=%s THEN 0 ELSE 1 END, m.group_id, m.alert_order, s.id"
 
 
+def _member_sql(cur) -> str:
+    """전화 가족 회선(volte∪voip — 테이블 존재에 따라 UNION, services.subscriptions) ⋈ users ⟕ phone_group_members."""
+    return (_MEMBER_SELECT + "FROM " + _subs.phone_union_sql(cur) + " s JOIN users u ON u.id=s.user_id "
+            "LEFT JOIN phone_group_members m ON m.user_id=s.id")
+
+
 def _member_rows(cur, group_ids, own_gid: str, all_subscribers: bool = False) -> list:
-    """유선(volte) 회선 ⋈ users ⟕ phone_group_members → 항목 {userId, name, volteAor, pttId, extension, groupId}.
-    group_ids = 그 전화 그룹들의 멤버만, all_subscribers = 전 가입자(WHERE 없음). 투영·정렬은 하나 — 자기 그룹(alert_order) → 그 외."""
+    """전화 회선(volte·voip) ⋈ users ⟕ phone_group_members → 항목 {userId, name, volteAor, pttId, extension, groupId}.
+    volteAor 는 전화 가족 회선의 AoR(키 이름은 전화 가족 축 'volte'). group_ids = 그 전화 그룹들의 멤버만, all_subscribers =
+    전 가입자(WHERE 없음). 투영·정렬은 하나 — 자기 그룹(alert_order) → 그 외."""
     params = []
-    sql = _MEMBER_SQL
+    sql = _member_sql(cur)
     if not all_subscribers:
         ids = sorted(g for g in (group_ids or set()) if g)
         if not ids:
@@ -2962,10 +2971,10 @@ def _member_rows(cur, group_ids, own_gid: str, all_subscribers: bool = False) ->
 
 
 def _ptt_only_rows(cur) -> list:
-    """PTT 전용 가입자(VoLTE 회선 없음 — 현장 PTT 단말) — monitor_call=all 에서만 감시 대상: 관제 앱이 그 PTT 회선에
+    """PTT 전용 가입자(전화 회선 volte·voip 없음 — 현장 PTT 단말) — monitor_call=all 에서만 감시 대상: 관제 앱이 그 PTT 회선에
     dialog 를 구독해 타인 간 사설콜·애드혹 세션을 본다(dispatch_center.md §5.6a). volteAor 는 빈 문자열, 목록 끝."""
     cur.execute("SELECT u.id, u.name, MIN(p.id) FROM ptt_subscriptions p JOIN users u ON u.id=p.user_id "
-                "WHERE NOT EXISTS (SELECT 1 FROM volte_subscriptions v WHERE v.user_id=u.id) "
+                "WHERE NOT EXISTS (SELECT 1 FROM " + _subs.phone_union_sql(cur) + " v WHERE v.user_id=u.id) "
                 "GROUP BY u.id, u.name ORDER BY MIN(p.id)")
     return [{"userId": uid, "name": name or "", "volteAor": "", "pttId": _tel_uri(pid),
              "extension": _extension_of(pid), "groupId": ""} for uid, name, pid in cur.fetchall()]
@@ -3088,21 +3097,21 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
                                database=_DB_CONFIG.get('Db', 'cims'), connect_timeout=5)
         try:
             cur = conn.cursor()
-            # 로그인 msisdn 으로 person(user_id) 확인 → 그 person 의 volte+ptt 전 서비스 반환.
+            # 로그인 msisdn 으로 person(user_id) 확인 → 그 person 의 volte·voip·ptt 전 서비스 반환(테이블 = kind, 레지스트리 순서).
             user_id = None
-            for t in ('volte_subscriptions', 'ptt_subscriptions'):
+            for _k, t in _subs.tables(cur):
                 cur.execute(f"SELECT user_id FROM {t} WHERE id=%s", (msisdn,))
                 r = cur.fetchone()
                 if r:
                     user_id = r[0]
                     break
             if user_id is not None:
-                for t, kind in (('volte_subscriptions', 'volte'), ('ptt_subscriptions', 'ptt')):
+                for kind, t in _subs.tables(cur):
                     # sip_transport 는 가입자 단위 override (migrate_subscription_transport.sql).
                     #   구 스키마(컬럼 부재) DB 에서도 동작하도록 실패 시 기존 질의로 폴백한다.
                     #   AKA 열(auth_scheme/k_enc/opc_enc/amf)은 migrate_subscription_aka.sql 이후에만 — 같은 폴백 사슬.
-                    #   service_ref(접속서비스 name)로 Provisioning.Services 항목을 고른다 — 유선(voip)/이동(volte) 회선이
-                    #   같은 테이블에 있으므로 종류 키만으로는 도메인이 어긋난다(sip_service_model.md §2-9).
+                    #   service_ref(접속서비스 name)로 그 kind 안의 서비스 항목을 고른다(같은 kind 의 서비스가 여럿일 때 —
+                    #   sip_service_model.md §2-9). kind 는 테이블에서 온다.
                     try:
                         cur.execute(f"SELECT id, imsi, auth_id, sip_transport, ha1, auth_scheme, k_enc, opc_enc, amf, "
                                     f"COALESCE(service_ref,'') FROM {t} WHERE user_id=%s ORDER BY id", (user_id,))
@@ -3259,7 +3268,7 @@ async def handle_provisioning_history(args: HandlerArgs, kwargs: dict) -> Handle
         try:
             cur = conn.cursor()
             user_id = None
-            for t in ('volte_subscriptions', 'ptt_subscriptions'):
+            for _k, t in _subs.tables(cur):
                 cur.execute(f"SELECT user_id FROM {t} WHERE id=%s", (msisdn,))
                 r = cur.fetchone()
                 if r:
@@ -3330,8 +3339,9 @@ async def handle_provisioning_directory(args: HandlerArgs, kwargs: dict) -> Hand
     """회사 전화번호부 — 조직 트리 + 가입자. 단말 '회사 연락처'(읽기전용) 소스.
 
     provisioning scope 토큰 필요. 조직(organizations) 계층(parent_id)과 가입자를 반환한다.
-    `?service=volte|ptt` 로 가입 테이블을 고른다(기본 volte — 기존 VoLTE 단말 호환).
-    PTT 단말은 `service=ptt` 로 1:1 private call 대상(ptt_subscriptions)을 받는다.
+    `?service=volte|voip|ptt` 로 가입 테이블을 고른다(기본 volte). `volte` 는 전화 가족(volte∪voip) 합산 — 관제·전화 단말의
+    회사 연락처에 유선 번호가 빠지지 않게(sip_service_model.md §2-9). `voip` 는 유선 회선만, PTT 단말은 `service=ptt` 로
+    1:1 private call 대상(ptt_subscriptions)을 받는다.
     `orgs[]` = 조직 트리(code/name/parent code/sort), `entries[]` = 가입자(org=조직 code).
     users.org_id 는 조직 코드(organizations.code)를 담는다. ETag 는 내용 해시라 서비스별로 다르다.
     """
@@ -3370,10 +3380,15 @@ async def handle_provisioning_directory(args: HandlerArgs, kwargs: dict) -> Hand
                              "sort": so or 0})
             # 가입자 — org = users.org_id(조직 code). service 인자로 가입 테이블 선택.
             service = (getattr(args, 'query_params', None) or {}).get('service') or 'volte'
-            table = 'ptt_subscriptions' if service == 'ptt' else 'volte_subscriptions'
+            if service == 'ptt':
+                rel = _subs.table('ptt')
+            elif service == 'voip':
+                rel = _subs.table('voip') if _subs.has_table(cur, 'voip') else "(SELECT id, user_id FROM volte_subscriptions WHERE 0)"
+            else:
+                rel = _subs.phone_union_sql(cur)          # 전화 가족 합산(volte∪voip)
             cur.execute(
                 f"SELECT u.org_id AS org, u.name AS name, v.id AS msisdn "
-                f"FROM {table} v JOIN users u ON u.id = v.user_id "
+                f"FROM {rel} v JOIN users u ON u.id = v.user_id "
                 "ORDER BY u.name")
             for org, name, msisdn in cur.fetchall():
                 entries.append({"org": org or "", "name": name or "", "msisdn": msisdn or ""})

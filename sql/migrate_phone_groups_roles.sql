@@ -103,6 +103,12 @@ SET @have_da := (SELECT COUNT(*) FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'dispatch_groups' AND COLUMN_NAME = 'directory_admin');
 SET @have_amb := (SELECT COUNT(*) FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ptt_user_profile' AND COLUMN_NAME = 'allow_ambient_listening');
+SET @have_voip := (SELECT COUNT(*) FROM information_schema.TABLES
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'voip_subscriptions');
+-- 회선 → person 펼침 서브쿼리 — 가입 테이블 전부(voip_subscriptions 는 migrate_voip_subscriptions.sql 적용 뒤에만 있다)
+SET @lines := CONCAT('(SELECT id, user_id FROM volte_subscriptions',
+                     IF(@have_voip > 0, ' UNION ALL SELECT id, user_id FROM voip_subscriptions', ''),
+                     ' UNION ALL SELECT id, user_id FROM ptt_subscriptions)');
 
 -- 4a. 전화 그룹 (전화 열만, id 유지)
 SET @sql := IF(@have_dg > 0,
@@ -127,13 +133,14 @@ SET @sql := IF(@have_dg > 0, CONCAT(
     'SELECT 1');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- 4c. 배정 — 그 그룹 멤버(회선)의 person 에게. 멤버 행은 유선(VoLTE) 회선이지만 PTT 회선이 섞였을 때도 person 으로 해석한다.
-SET @sql := IF(@have_dg > 0,
+-- 4c. 배정 — 그 그룹 멤버(회선)의 person 에게. 멤버 행은 유선 회선(voip — 전환 전엔 volte 행)이지만 어느 가입 테이블의
+--     회선이 섞였어도 person 으로 해석한다.
+SET @sql := IF(@have_dg > 0, CONCAT(
     'INSERT IGNORE INTO role_assignments (principal_type, principal_id, role_id)
      SELECT ''user'', CAST(p.user_id AS CHAR), r.id
        FROM dispatch_group_members m
        JOIN roles r ON r.id = CONCAT(''role-'', m.group_id)
-       JOIN (SELECT id, user_id FROM volte_subscriptions UNION ALL SELECT id, user_id FROM ptt_subscriptions) p ON p.id = m.user_id',
+       JOIN ', @lines, ' p ON p.id = m.user_id'),
     'SELECT 1');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 

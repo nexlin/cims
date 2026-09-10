@@ -85,6 +85,14 @@ class FakeCursor:
         self._next = None
         self._rows = []
         self.rowcount = 0
+        # 선택 테이블(voip_subscriptions) 존재 = 회선 중 voip 테이블 행이 하나라도 있을 때(services.subscriptions 프로브)
+        self.has_voip = any(v["table"] == "voip_subscriptions" for v in self.lines.values())
+
+    @staticmethod
+    def _sub_table(s: str):
+        """SQL 안의 가입 테이블 이름(volte|voip|ptt _subscriptions)."""
+        m = re.search(r"\b(volte|voip|ptt)_subscriptions\b", s)
+        return m.group(0) if m else None
 
     def _line_ids(self, table, person):
         return sorted(k for k, v in self.lines.items() if v["table"] == table and v["person"] == person)
@@ -99,13 +107,15 @@ class FakeCursor:
         low = s.lower()
         if s.startswith("SHOW TABLES LIKE 'phone_groups'") or s.startswith("SHOW TABLES LIKE 'roles'"):
             self._next = {"Tables_in_cims": "x"}
+        elif s.startswith("SHOW TABLES LIKE %s"):                      # services.subscriptions 선택 테이블 프로브
+            self._next = {"Tables_in_cims": p[0]} if p and (p[0] != "voip_subscriptions" or self.has_voip) else None
         elif s.startswith("SHOW COLUMNS FROM"):
             self._next = {"Field": "x"}
-        elif s.startswith("SELECT 1 FROM volte_subscriptions WHERE id=") or s.startswith("SELECT 1 FROM ptt_subscriptions WHERE id="):
-            t = "volte_subscriptions" if "volte" in s else "ptt_subscriptions"
+        elif re.match(r"SELECT 1 FROM (volte|voip|ptt)_subscriptions WHERE id=", s):
+            t = self._sub_table(s)
             self._next = {"1": 1} if p and p[0] in self.lines and self.lines[p[0]]["table"] == t else None
-        elif s.startswith("SELECT user_id FROM volte_subscriptions WHERE id=") or s.startswith("SELECT user_id FROM ptt_subscriptions WHERE id="):
-            t = "volte_subscriptions" if "volte" in s else "ptt_subscriptions"
+        elif re.match(r"SELECT user_id FROM (volte|voip|ptt)_subscriptions WHERE id=", s):
+            t = self._sub_table(s)
             ln = self.lines.get(p[0]) if p else None
             self._next = {"user_id": ln["person"]} if ln and ln["table"] == t else None
         elif s.startswith("SELECT group_id FROM phone_group_members WHERE user_id="):
@@ -116,8 +126,8 @@ class FakeCursor:
             cands = sorted(((g, o, uid) for uid, (g, o) in self.members.items()
                             if self.lines.get(uid, {}).get("person") == person), key=lambda x: (x[1], x[2]))
             self._next = {"group_id": cands[0][0]} if cands else None
-        elif s.startswith("SELECT id, pickup_group FROM volte_subscriptions WHERE") or s.startswith("SELECT id, pickup_group FROM ptt_subscriptions WHERE"):
-            t = "volte_subscriptions" if "volte" in s else "ptt_subscriptions"
+        elif re.match(r"SELECT id, pickup_group FROM (volte|voip|ptt)_subscriptions WHERE", s):
+            t = self._sub_table(s)
             ids = [p[0]] if "WHERE id=" in s else self._line_ids(t, p[0])
             self._rows = [{"id": i, "pickup_group": self.pickup.get(i)} for i in ids if i in self.lines and self.lines[i]["table"] == t]
         elif s.startswith("SELECT user_id FROM phone_group_members WHERE group_id="):
@@ -160,7 +170,7 @@ class FakeCursor:
             for uid in [u for u, (g, _) in self.members.items() if g == p[0]]:   # FK CASCADE
                 del self.members[uid]
             self.rowcount = 1 if self.groups.pop(p[0], None) is not None or p[0] in self.groups else 1
-        elif s.startswith("UPDATE volte_subscriptions SET pickup_group=") or s.startswith("UPDATE ptt_subscriptions SET pickup_group="):
+        elif re.match(r"UPDATE (volte|voip|ptt)_subscriptions SET pickup_group=", s):
             self.pickup[p[1]] = p[0]
             self.rowcount = 1
         elif s.startswith("UPDATE phone_groups SET"):
@@ -257,11 +267,13 @@ class _Base(unittest.TestCase):
     def setUp(self):
         self.d._HAS_TABLES = True
         self.az.reset_probe()
+        self.d._subs.reset_probe()        # voip_subscriptions 존재 여부는 커서(시험)마다 다르다 — 프로세스 캐시 무효
         self.notified.clear()
 
     def tearDown(self):
         self.d._HAS_TABLES = None
         self.az.reset_probe()
+        self.d._subs.reset_probe()
 
     def _no_role_sql(self, cur: FakeCursor):
         """가입자 쪽 역할 컬럼(users.role) 을 읽는 SQL 은 어떤 경로에서도 나가면 안 된다 — 역할은 roles/role_assignments 다."""
@@ -292,6 +304,22 @@ class PhoneGroupMembershipTest(_Base):
         self.assertTrue(any(s.startswith("UPDATE volte_subscriptions SET pickup_group=") for s, _ in cur.executed))
         self.assertEqual(self._notify("PHONE_GROUP_CHANGED"), [("pg-t", "PUT")])
         self.assertFalse(any(s.startswith("SELECT") and "roles" in s for s, _ in cur.executed))   # 편입에 역할 조회 없음
+
+    def test_voip_line_member_derives_person_lines(self):
+        """유선 voip 회선(voip_subscriptions)을 멤버로 넣으면 같은 person 의 volte·ptt 회선도 pickup_group 을 물려받는다 —
+        전화 그룹은 person 귀속(dispatch_center.md §3.2), 테이블 = kind 라 세 테이블을 다 돈다."""
+        lines = {"+82210001001": ("voip_subscriptions", 1), "+821310001001": ("volte_subscriptions", 1),
+                 "+82510001001": ("ptt_subscriptions", 1), "+82210001002": ("voip_subscriptions", 2)}
+        cur = FakeCursor(lines)
+        r = self.d.pg_add_member(cur, "pg-t", {"user_id": "+82210001001", "alert_order": 0})
+        self.assertEqual(r.status, 201, r.body)
+        self.assertEqual(cur.pickup["+82210001001"], "pg-t")
+        self.assertEqual(cur.pickup["+821310001001"], "pg-t")                          # 같은 person 의 volte 회선 파생
+        self.assertEqual(cur.pickup["+82510001001"], "pg-t")                           # 같은 person 의 PTT 회선 파생
+        self.assertIsNone(cur.pickup["+82210001002"])                                  # 다른 person
+        self.assertTrue(any(s.startswith("UPDATE voip_subscriptions SET pickup_group=") for s, _ in cur.executed))
+        self.assertEqual(sorted(self._notify("USER_CHANGED")),
+                         sorted([("tel:+82210001001", "PUT"), ("tel:+821310001001", "PUT"), ("tel:+82510001001", "PUT")]))
 
     def test_add_member_unknown_subscriber_404(self):
         cur = FakeCursor(set())

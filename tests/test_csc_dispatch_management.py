@@ -605,25 +605,27 @@ class ServiceCatalogTests(unittest.TestCase):
             "ptt": {"name": "mcptt", "domain": "ptt.example"}}}}
         out = dd._services(cfg)
         self.assertEqual(out["volte"], [{"name": "volte", "domain": "ims.example", "kind": "volte"}])
+        self.assertEqual(out["voip"], [])
         self.assertEqual(out["ptt"], [{"name": "mcptt", "domain": "ptt.example", "kind": "ptt"}])
 
     def test_fallback_without_name_uses_kind(self):
         cfg = {"Provisioning": {"Services": {"ptt": {"domain": "ptt.example"}}}}
         self.assertEqual(dd._services(cfg)["ptt"], [{"name": "ptt", "domain": "ptt.example", "kind": "ptt"}])
 
-    def test_voip_rides_volte_bucket_with_kind(self):
-        """유선 voip 접속환경은 전화 회선 버킷(volte_subscriptions)에 실리고 항목 kind 로 구분된다(sip_service_model.md §2-9)."""
+    def test_voip_has_own_bucket(self):
+        """유선 voip 접속환경은 자기 버킷(voip_subscriptions = kind) — 관제석 유선 회선은 voip 서비스만 고른다(sip_service_model.md §2-9)."""
         cfg = {"Provisioning": {"Services": {
             "volte": {"name": "volte", "domain": "volte.example"},
             "voip": {"name": "voip", "domain": "voip.example"},
             "ptt": {"name": "mcptt", "domain": "ptt.example"}}}}
         out = dd._services(cfg)
-        self.assertEqual(out["volte"], [{"name": "volte", "domain": "volte.example", "kind": "volte"},
-                                        {"name": "voip", "domain": "voip.example", "kind": "voip"}])
+        self.assertEqual(sorted(out), ["ptt", "voip", "volte"])
+        self.assertEqual(out["volte"], [{"name": "volte", "domain": "volte.example", "kind": "volte"}])
+        self.assertEqual(out["voip"], [{"name": "voip", "domain": "voip.example", "kind": "voip"}])
         self.assertEqual([x["kind"] for x in out["ptt"]], ["ptt"])
 
     def test_runtime_store_rows_carry_kind(self):
-        """runtime store access_services 가 있으면 그것이 우선 — mcptt 종류는 ptt 버킷·kind ptt, voip 는 volte 버킷·kind voip."""
+        """runtime store access_services 가 있으면 그것이 우선 — mcptt 종류는 ptt 버킷·kind ptt, voip 는 voip 버킷."""
         import services.file_store as fs
         fs.load_all = lambda d: [
             {"name": "voip", "kind": "voip", "domain": "voip.example", "priority": 150},
@@ -632,7 +634,8 @@ class ServiceCatalogTests(unittest.TestCase):
             {"kind": "volte", "domain": "no-name.example", "priority": 1},   # name 없음 = 후보 아님
         ]   # 후보 순서 = priority 오름차순(같으면 name) — services/access_services.records
         out = dd._services({"Provisioning": {"Services": {}}})
-        self.assertEqual([(x["name"], x["kind"]) for x in out["volte"]], [("volte", "volte"), ("voip", "voip")])
+        self.assertEqual([(x["name"], x["kind"]) for x in out["volte"]], [("volte", "volte")])
+        self.assertEqual([(x["name"], x["kind"]) for x in out["voip"]], [("voip", "voip")])
         self.assertEqual(out["ptt"], [{"name": "mcptt", "domain": "ptt.example", "kind": "ptt"}])
 
 

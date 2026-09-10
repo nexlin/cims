@@ -179,7 +179,7 @@ def seed_users(cur, rows, st):
                 st.add('users', '유지')
 
 
-_KIND_TABLE = {'ptt': 'ptt_subscriptions', 'volte': 'volte_subscriptions'}
+_KIND_TABLE = {'ptt': 'ptt_subscriptions', 'volte': 'volte_subscriptions', 'voip': 'voip_subscriptions'}   # 가입 테이블 = 접속환경 kind
 
 
 def seed_subs(cur, rows, st, svc):
@@ -354,12 +354,12 @@ def main():
                                  password=passwd, database=args.db, charset='utf8mb4')
         bad = 0
         with cn.cursor() as cur:
-            for t in ('organizations', 'users', 'ptt_subscriptions', 'volte_subscriptions',
+            for t in ('organizations', 'users', 'ptt_subscriptions', 'volte_subscriptions', 'voip_subscriptions',
                       'ptt_groups', 'ptt_group_members'):
                 cur.execute(f"SELECT COUNT(*) FROM {t}")
                 print(f"   {t:22} {cur.fetchone()[0]}행")
             # ha1 이 비면 그 번호는 등록이 401 로 실패한다 — 조용히 넘어가지 않게 여기서 잡는다.
-            for t in ('ptt_subscriptions', 'volte_subscriptions'):
+            for t in ('ptt_subscriptions', 'volte_subscriptions', 'voip_subscriptions'):
                 cur.execute(f"SELECT COUNT(*) FROM {t} WHERE ha1='' OR ha1 IS NULL")
                 n = cur.fetchone()[0]
                 if n:

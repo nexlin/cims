@@ -89,9 +89,9 @@ ambient 플래그·녹취 탭)의 연장으로 구성한다. **INVITE 경로에 
 
 - `phone_group_members(user_id PK, group_id, alert_order)` — **가입자당 그룹 하나**. `pickup_group`
   이 단일 값이므로 이 제약이 축 통합의 전제다(겸임은 §10). 멤버 행의 `user_id` 는 **대표번호 포크·dialog
-  감시 대상인 회선**(유선 회선)이다 — CSP `ResolveForkTargets` 는 서비스 구분 없이 등록된 멤버
-  전원에게 포크하므로 PTT 회선을 멤버로 넣지 않는다(PTT 앱까지 울린다).
-- **전화 그룹은 person 귀속이다.** CSC 가 멤버 추가/제거/그룹 삭제 시 그 회선이 속한 person 의 **volte·ptt 전
+  감시 대상인 회선**(유선 회선 — `voip_subscriptions`, [sip_service_model.md §2-9](sip_service_model.md))이다 — CSP
+  `ResolveForkTargets` 는 서비스 구분 없이 등록된 멤버 전원에게 포크하므로 PTT 회선을 멤버로 넣지 않는다(PTT 앱까지 울린다).
+- **전화 그룹은 person 귀속이다.** CSC 가 멤버 추가/제거/그룹 삭제 시 그 회선이 속한 person 의 **volte·voip·ptt 전
   회선** `pickup_group` 을 유효 그룹(`effective_phone_group` = 자기 멤버십 → 없으면 같은 person 의 멤버십, 여럿이면
   `alert_order`·회선 id 순 첫째)으로 **재계산**하고, 값이 바뀐 회선마다 `USER_CHANGED` 를 보낸다(CSP 는 회선별
   사용자 캐시로 `pickup_group` 을 든다). 관제사의 PTT 회선이 그룹을 물려받아야 PTT 세션 가시성(§5.6a)의 "자기 그룹원"
@@ -119,7 +119,7 @@ ambient 플래그·녹취 탭)의 연장으로 구성한다. **INVITE 경로에 
 
 ### 3.4 관리 범위 — 조직/구성원/번호·PTT 그룹 관리 (관제 앱)
 
-관제사(가입자, PKCE 토큰)가 관제 앱에서 조직 트리·구성원(person)·VoLTE/PTT 번호(가입)·전화 그룹·PTT 그룹을 관리하는 권한은
+관제사(가입자, PKCE 토큰)가 관제 앱에서 조직 트리·구성원(person)·VoLTE/VoIP/PTT 번호(가입)·전화 그룹·PTT 그룹을 관리하는 권한은
 역할의 **`directory_write`** 하나로 정한다 — `monitor_call`·`ptt_listen` 과 같은 결의 범위 enum 이며 서버가 해석하고 앱은
 결과만 받는다. 가입자 프로비저닝은 3GPP 규격 밖(MC 서비스 제공자 정책)이라 CIMS 확장이다.
 
@@ -157,7 +157,7 @@ ambient 플래그·녹취 탭)의 연장으로 구성한다. **INVITE 경로에 
   등록·생존 여부만 `UserMap` 으로 판정한다. 당겨받기·BLF 규칙 1 의 그룹 축 값은 `EffectiveGroupOf`(멤버 인덱스 →
   `CspUser.m_strPickupGroup`) 하나로 답한다 — org 폴백은 없다.
 - **`CCspRoleMap`** — 회선 id → 역할(`monitor_call`·감시 대상 집합·`ptt_listen`·청취 대상 집합·`listen_visibility`).
-  적재 시 `role_assignments(principal_type='user')` 를 그 person 의 **전 회선**(volte·ptt) id 로 펼친다 — PTT 회선의
+  적재 시 `role_assignments(principal_type='user')` 를 그 person 의 **전 회선**(volte·voip·ptt) id 로 펼친다 — PTT 회선의
   청취 인가와 유선 회선의 감청 인가가 같은 사람의 역할을 본다. `ROLE_CHANGED`(uri=역할 id 또는 배정 person id — 전량)·
   `USER_CHANGED`(POST/DELETE = 회선 개설/삭제 — 전량)·`CSC_RESTART` 로 재적재. JSON fallback `DataFolder.Role`. 콘솔 principal 의 배정은 SIP
   신원이 없으므로 적재하지 않는다. 판정 = `CanWatch`(§5.2)·`CanListenPtt`(§5.6)·`ListenVisibility`.
@@ -638,8 +638,8 @@ MODIFY 는 ADD 와 같은 payload 로 주소·crypto 만 갱신(같은 포트). 
 
 | 컴포넌트 | 변경 | 상태 |
 |---|---|---|
-| **CSC** `handlers/dispatch.py` · `services/authz.py` | `/api/v1/phone-groups` CRUD + `/members`(`directory.read`/`directory.write` — 콘솔 manager 전역, 관제 앱은 같은 코드 `dispatch_phone_group` 을 범위 안에서), `pickup_group` 파생 갱신(멤버 추가/제거/그룹 삭제 → 같은 person 의 volte·ptt 전 회선 재계산 → 바뀐 회선마다 USER_CHANGED) + 가입자 API 직접 편집 409 `derived_from_phone_group`·새 회선 개설 시 파생값 상속, `PHONE_GROUP_CHANGED` 통지, pilot 충돌 409 · `/api/v1/roles`(전부 `authz.manage`: 내장 4행 읽기 전용 403 `builtin`, 커스텀에 위임 불가 능력 400 `not_delegable`, 배정 남은 삭제 409 `assigned`, 배정 PUT 사람당 하나 `moved_from`, 배정/해제 시 `allow_ambient_listening` 동기, `ROLE_CHANGED`) · 단일 판정 `can(principal, capability, target)`(§2.3 — roles 테이블 미적용이면 내장 4행) · `/provisioning/me` `phoneGroup`+`dispatch`(`dispatch_discovery`, 전환기 합성 필드) + `ETag` 304 · 이력·녹취 게이트 = 역할(`_dispatch_scope_sets`) · 감사 actor `console:<login>`/`user:<id>` | 구현 |
-| **CSP `CCspPhoneGroupMap`** (`CspPhoneGroup.h/.cpp`) + **`CCspRoleMap`** (`CspRole.h/.cpp`) | 전화 그룹 맵 = 그룹 id·pilot·멤버 인덱스, `EffectiveGroupOf`(멤버 인덱스 → `pickup_group`, org 폴백 없음), `DbManager::LoadAllPhoneGroups/SelectPhoneGroup`·`PHONE_GROUP_CHANGED`(uri=그룹 id, DELETE/단건/전량)·JSON fallback `DataFolder.PhoneGroup`. 역할 맵 = 회선 → 역할 인덱스(`LoadAllRoles` 가 `role_assignments(user)` 를 person 의 volte·ptt 전 회선으로 펼침), `CanWatch(watcherLine, targetGroup)`(규칙 1 전화 그룹 / 규칙 2 `monitor_call`)·`CanListenPtt(line, pttGroup)`·`ListenHidden(line)`·`RoleIdForLine`, `ROLE_CHANGED`·`USER_CHANGED`(POST/DELETE)·`CSC_RESTART` 전량 재적재·JSON fallback `DataFolder.Role`(`assignments[]`=회선). `DISPATCH_GROUP_CHANGED` 는 전환 전 이름 — 두 맵 재적재 | 구현 |
+| **CSC** `handlers/dispatch.py` · `services/authz.py` | `/api/v1/phone-groups` CRUD + `/members`(`directory.read`/`directory.write` — 콘솔 manager 전역, 관제 앱은 같은 코드 `dispatch_phone_group` 을 범위 안에서), `pickup_group` 파생 갱신(멤버 추가/제거/그룹 삭제 → 같은 person 의 volte·voip·ptt 전 회선 재계산 → 바뀐 회선마다 USER_CHANGED) + 가입자 API 직접 편집 409 `derived_from_phone_group`·새 회선 개설 시 파생값 상속, `PHONE_GROUP_CHANGED` 통지, pilot 충돌 409 · `/api/v1/roles`(전부 `authz.manage`: 내장 4행 읽기 전용 403 `builtin`, 커스텀에 위임 불가 능력 400 `not_delegable`, 배정 남은 삭제 409 `assigned`, 배정 PUT 사람당 하나 `moved_from`, 배정/해제 시 `allow_ambient_listening` 동기, `ROLE_CHANGED`) · 단일 판정 `can(principal, capability, target)`(§2.3 — roles 테이블 미적용이면 내장 4행) · `/provisioning/me` `phoneGroup`+`dispatch`(`dispatch_discovery`, 전환기 합성 필드) + `ETag` 304 · 이력·녹취 게이트 = 역할(`_dispatch_scope_sets`) · 감사 actor `console:<login>`/`user:<id>` | 구현 |
+| **CSP `CCspPhoneGroupMap`** (`CspPhoneGroup.h/.cpp`) + **`CCspRoleMap`** (`CspRole.h/.cpp`) | 전화 그룹 맵 = 그룹 id·pilot·멤버 인덱스, `EffectiveGroupOf`(멤버 인덱스 → `pickup_group`, org 폴백 없음), `DbManager::LoadAllPhoneGroups/SelectPhoneGroup`·`PHONE_GROUP_CHANGED`(uri=그룹 id, DELETE/단건/전량)·JSON fallback `DataFolder.PhoneGroup`. 역할 맵 = 회선 → 역할 인덱스(`LoadAllRoles` 가 `role_assignments(user)` 를 person 의 volte·voip·ptt 전 회선으로 펼침), `CanWatch(watcherLine, targetGroup)`(규칙 1 전화 그룹 / 규칙 2 `monitor_call`)·`CanListenPtt(line, pttGroup)`·`ListenHidden(line)`·`RoleIdForLine`, `ROLE_CHANGED`·`USER_CHANGED`(POST/DELETE)·`CSC_RESTART` 전량 재적재·JSON fallback `DataFolder.Role`(`assignments[]`=회선). `DISPATCH_GROUP_CHANGED` 는 전환 전 이름 — 두 맵 재적재 | 구현 |
 | **CSP `CTasModule` 포크 집합** | `CTasForkSet`(TAS 소유 — 대기 leg 는 승자 확정 전까지 `CCallMap` 밖) · `TryDispatchPilot`(§4.2, 미등록 착신 분기의 `TryPickupDial` 앞) · `ResolveForkTargets`(등록·`busy_members=skip` 비통화·발신자 제외·`alert_order` 순·`MaxForkTargets` 절삭) · `StartAlert`(`alert_mode` 분기 — parallel 전원 / sequential 큐+첫 순번) · `AdvanceSequential`(§4.4a 다음 순번·단계 시한 재설정) · `ForkAlert`(leg 전용 SDES 서버 키·`P-Called-Party-ID`=대표번호) · `OnForkRing`(첫 180 만 A 에, SDP 없이) · `OnForkStart`(승자 → (A,승자) 쌍 CallMap 삽입 후 디스패처 정상 answer 경로가 RELAY_MODIFY·A 200, 패자 CANCEL, 늦은 200 은 BYE) · `OnForkEnd`(패자 최종 응답 흡수, sequential 다음 순번, 전원 실패 486/480, A 취소 → 전원 CANCEL+relay 회수) · `Tick`(1초 — `no_answer_sec` 만료 → sequential 다음 순번 / `OverflowFork`(대표번호면 그 그룹원 재포크·내선이면 단일 leg, 1단계) 또는 480) · `FindForkForPickup`/`PickUpFork`(§4.4 링잉 대표번호 호 당겨받기 — `PickUp` 의 CallMap 후보 폴백) · 대표번호 AoR dialog 이벤트(§4.5 — early/confirmed/terminated) | 구현 |
 | **CSP `CscfModule`** | dialog SUBSCRIBE 인가 → `gclsRoleMap.CanWatch(구독자 회선, 대상 전화 그룹)`(§5.2 — 규칙 1 전화 그룹 / 규칙 2 역할); 대상이 대표번호면 그 전화 그룹(§4.5) · conference SUBSCRIBE 인가(§5.6, TS 24.379 §10.1.3.4.1) → `CGroupCallService::CheckConferenceSubscribe`(멤버 = `allow_conference_state` / 비멤버 = 자격+`CanListenPtt`), 403 `Warning: 138`·480 `Warning: 105`(`SendResponseWithWarning`) | 구현 |
 | **CSP `ModuleDispatcher`** | `OnCallRing`/`OnCallEnd` 훅을 소비형으로(포크 leg 흡수) — CallMap leg 의 dialog 통지는 종전대로 통과 | 구현 |
@@ -762,13 +762,13 @@ CREATE TABLE IF NOT EXISTS role_ptt_targets (
 | `dispatch_group_members` | `phone_group_members` |
 | `dispatch_group_monitor_targets` / `dispatch_group_ptt_targets` | `role_monitor_targets` / `role_ptt_targets`(역할 `role-<그룹 id>`) |
 | `ptt_user_profile.allow_ambient_listening` | 값 유지 + `ptt_listen≠none` 역할 배정자는 1 로 정합(백필) |
-| `volte_subscriptions.pickup_group` / `ptt_subscriptions.pickup_group` | 값 유지(= `phone_groups.id`). 컬럼 미적용 DB 에서는 CSP 가 부팅 프로브로 감지해 픽업·BLF 축을 비활성(INFO 로그) |
+| `volte_subscriptions.pickup_group` / `voip_subscriptions.pickup_group` / `ptt_subscriptions.pickup_group` | 값 유지(= `phone_groups.id`). 유선 회선의 테이블 이동(`migrate_voip_subscriptions.sql`)도 값과 `phone_group_members` 행을 바꾸지 않는다. 컬럼 미적용 DB 에서는 CSP 가 부팅 프로브로 감지해 픽업·BLF 축을 비활성(INFO 로그) |
 
 ### 8.2 CSC 관리 API
 
 - `/api/v1/phone-groups` — `GET`(목록) / `POST` / `GET|PUT|DELETE /{id}` / `POST /{id}/members` /
-  `DELETE /{id}/members/{user_id}`. 검증: `pilot_id` 가 `volte_subscriptions.id`/`ptt_subscriptions.id`/다른 pilot 과
-  충돌 → 409. 권한 = `directory.write`(콘솔 manager 전역 / 관제 `own|all` 범위 안 조직의 그룹).
+  `DELETE /{id}/members/{user_id}`. 검증: `pilot_id` 가 가입 번호(`volte_subscriptions`·`voip_subscriptions`·`ptt_subscriptions` 의
+  `id`)/다른 pilot 과 충돌 → 409 `pilot_conflict`(역방향 — 가입 번호 개설이 대표번호와 겹치면 409 `number_exists`). 권한 = `directory.write`(콘솔 manager 전역 / 관제 `own|all` 범위 안 조직의 그룹).
 - `/api/v1/roles` — `GET`(내장 4 + 커스텀) / `POST` / `GET|PUT|DELETE /{id}`(내장은 읽기 전용) / `PUT /{id}/monitor-targets`
   `{phone_group_ids:[…]}` / `PUT /{id}/ptt-targets` `{ptt_group_ids:[mcptt_group_id…]}` / `GET|PUT|DELETE /{id}/assignments`
   `{principal_type, principal_id}`. **전부 `authz.manage`**(콘솔 `manager` 이상). `authz_manage=1` 은 내장 행에만 허용(커스텀은

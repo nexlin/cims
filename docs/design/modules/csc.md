@@ -183,7 +183,7 @@ POST /api/v1/users
   "name": "홍길동",
   "email": "hong@example.com",
   "org_id": 1,
-  "volte_subscriptions": [
+  "call_subscriptions": [
     {
       "id": "+821001",
       "auth_id": "1001",
@@ -192,6 +192,7 @@ POST /api/v1/users
       "reject_ids": ["1005"]
     }
   ],
+  "voip_subscriptions": [],
   "ptt_subscriptions": [
     {
       "id": "+82571900001",
@@ -686,15 +687,16 @@ DB 는 가입자(person/VoLTE/PTT) 도메인과 조직 트리 등 **관계형이
 | 테이블 | 키 | 용도 |
 |--------|----|------|
 | `users` | `id INT AI PK` | 가입자(person) 개인정보(name/email/org_id/title/details) + **단말 IdMS 로그인 자격**(`login_id`/`passwd` — 콘솔 계정이 아니다, 콘솔 계정은 OAM `console_accounts`; role 컬럼 없음). IdMS 는 기동 시 `LOGIN_ACCOUNTS` 로 적재하고 admin API 의 가입자·가입 번호 변경 후 `refresh_login_accounts()` 로 재조회한다(재기동 없이 반영) |
-| `volte_subscriptions` | `id VARCHAR PK`(MSISDN) | VoLTE 회선: SIP 인증, dnd/forward. `user_id` → users(CASCADE) |
-| `user_rejects` | `id INT AI PK` | VoLTE 착신거부 목록. `subscription_id` → volte_subscriptions(CASCADE) |
-| `ptt_subscriptions` | `id VARCHAR PK`(MCPTT ID) | MCPTT 회선: IMPI 인증. `user_id` → users(CASCADE) |
+| `volte_subscriptions` | `id VARCHAR PK`(MSISDN) | 이동 VoLTE 회선: SIP 인증(ha1), dnd/forward, pickup_group. `user_id` → users(CASCADE). `service_ref` 는 kind=volte 서비스만 |
+| `voip_subscriptions` | `id VARCHAR PK`(MSISDN) | 유선 VoIP 회선 — 컬럼은 volte 와 동일, `service_ref` 는 kind=voip 서비스 필수(**가입 테이블 = 접속환경 kind**, 레지스트리 `services/subscriptions.py`). `sql/migrate_voip_subscriptions.sql` 로 생성 — 없는 DB 에서는 CSC 가 프로브해 그 테이블만 건너뛴다(`/users/{pid}/voip` 503) |
+| `user_rejects` | (`user_id`, `reject_id`) PK | person 착신거부 목록. `user_id` → users(CASCADE) |
+| `ptt_subscriptions` | `id VARCHAR PK`(MCPTT ID) | MCPTT 회선: IMPI 인증. `user_id` → users(CASCADE). `service_ref` 는 kind=ptt 서비스만 |
 | `ptt_groups` | **`id BIGINT AI PK`**(surrogate) | PTT 그룹. `mcptt_group_id` 는 UNIQUE 식별자(키 아님). group_type(prearranged/chat/broadcast)/priority/emergency/video_enabled/require_affiliation 등 |
 | `ptt_group_members` | `id INT AI PK` | 멤버. `group_id` → **ptt_groups.id(surrogate BIGINT FK)**, role(chair/participant), mcptt_id |
 | `ptt_affiliations` | (group_id, user_id, client_id) | MCPTT affiliation(TS 24.379 §9). `group_id` → ptt_groups.id(CASCADE) |
 | `organizations` | `id INT AI PK` | code/name/parent_id 트리. users.org_id FK 대상 |
 
-> 주의: 구 `voip_subscriptions` 는 `volte_subscriptions` 로 rename 되었고, `ptt_groups` 의 PK 는 옛 `VARCHAR id` 가 아니라 **surrogate `BIGINT AUTO_INCREMENT`** 이며 MCPTT 그룹 식별자는 별도 `mcptt_group_id` 컬럼이다. `voip_call_logs`/`volte_call_logs`/`ptt_call_logs` 등 통화 이력 계열과 `recordings`/`recording_segments` 는 DROP 되어 파일 기반으로 대체되었다. 정확한 현행명·마이그레이션 매핑은 [db_schema.md](../db_schema.md) 를 따른다.
+> 주의: `voip_subscriptions` 는 유선 VoIP 회선 전용 테이블이다(이동 VoLTE 는 `volte_subscriptions`). `ptt_groups` 의 PK 는 **surrogate `BIGINT AUTO_INCREMENT`** 이며 MCPTT 그룹 식별자는 별도 `mcptt_group_id` 컬럼이다. `voip_call_logs`/`volte_call_logs`/`ptt_call_logs` 등 통화 이력 계열과 `recordings`/`recording_segments` 는 DROP 되어 파일 기반으로 대체되었다. 정확한 현행명·마이그레이션 매핑은 [db_schema.md](../db_schema.md) 를 따른다.
 
 ---
 

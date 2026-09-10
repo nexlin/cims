@@ -19,18 +19,19 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 
 ## 2. 테이블 인벤토리 (도메인별)
 
-> **규칙:** 신규 데이터는 DB 테이블을 새로 만들지 않고 file-store(collection/jsonl)로 시작한다. DB 는 가입자(person/VoLTE/PTT) 도메인 등 관계형이 본질적으로 필요한 데이터에 한정한다 → [runtime_store_design.md](runtime_store_design.md).
+> **규칙:** 신규 데이터는 DB 테이블을 새로 만들지 않고 file-store(collection/jsonl)로 시작한다. DB 는 가입자(person/VoLTE/VoIP/PTT) 도메인 등 관계형이 본질적으로 필요한 데이터에 한정한다 → [runtime_store_design.md](runtime_store_design.md).
 >
 > 취소선(~~table~~) 항목은 DB 테이블 없이 파일 기반(file_store)으로 운영되는 도메인.
 
 | 도메인 | 테이블 | 정의 파일 | 비고 |
 |---|---|---|---|
 | **가입자** | `users` | cims_schema.sql + migrate_add_email.sql + migrate_users_title.sql | 개인 (name/email/org_id/title/details) — `title`=직함, GMS 그룹문서 `cims:user-title` 로 UE 전달 |
-| | `volte_subscriptions` | cims_schema.sql + migrate_voip_to_volte.sql + migrate_subscription_transport.sql + migrate_subscription_ha1.sql + migrate_subscription_aka.sql | VoLTE MSISDN, SIP 인증(`ha1` SoT, `auth_scheme`/AKA 자료(`k_enc`/`opc_enc`/`sqn`/`amf`), `sip_transport` 채널 정책), dnd/forward |
-| | `user_rejects` | cims_schema.sql | VoLTE 착신거부 목록 |
+| | `volte_subscriptions` | cims_schema.sql + migrate_voip_to_volte.sql + migrate_subscription_transport.sql + migrate_subscription_ha1.sql + migrate_subscription_aka.sql | 이동 VoLTE MSISDN(kind=volte 접속서비스만 참조), SIP 인증(`ha1` SoT, `auth_scheme`/AKA 자료(`k_enc`/`opc_enc`/`sqn`/`amf`), `sip_transport` 채널 정책 — NULL=ANY 단말 선택), dnd/forward. FK 이름 `fk_voip_sub_user` |
+| | `voip_subscriptions` | cims_schema.sql + migrate_voip_subscriptions.sql | 유선 VoIP MSISDN — `volte_subscriptions` 와 컬럼 동일(pickup_group 포함), `service_ref` 는 kind=voip 접속서비스만(**테이블 = 접속환경 kind**, [sip_service_model.md §2-9](features/sip_service_model.md)). 마이그레이션이 `service_ref ∈ @voip_refs`(기본 `voip`) 인 volte 행을 옮긴다. FK `fk_voipsub_user` → users CASCADE. 번호는 세 가입 테이블·대표번호에 걸쳐 유일(CSC 게이트) |
+| | `user_rejects` | cims_schema.sql | 가입자(person) 착신거부 목록 — (`user_id`, `reject_id`) PK, `user_id` → users |
 | | `ptt_subscriptions` | cims_schema.sql + migrate_auth.sql + migrate_auth_id_dropped.sql + migrate_subscription_transport.sql + migrate_subscription_ha1.sql + migrate_subscription_aka.sql | MCPTT ID, IMPI 인증(`ha1` SoT, `auth_scheme`/AKA 자료, `sip_transport` 채널 정책) |
 | | `ptt_user_profile` | cims_schema.sql + migrate_ptt_user_profile_v2.sql + migrate_ptt_user_profile_v3.sql + migrate_ptt_ambient_listening.sql | 사용자 MCPTT 프로파일(TS 24.484) — SOS 대상 결정 모드/전용 긴급그룹·개시 인가 3종 ([mcptt_emergency_modes.md](features/mcptt_emergency_modes.md) §2), 긴급 사설콜, `allow_ambient_listening`(원격 청취 자격 — [dispatch_center.md](features/dispatch_center.md) §5.6, 기본 0. 역할 `ptt_listen≠none` 배정 시 CSC 가 동기 — 직접 편집 없음, mcptt_authorization.md §2.4) |
-| | `volte_subscriptions.pickup_group` / `ptt_subscriptions.pickup_group` | migrate_subscription_pickup_group.sql | 당겨받기 그룹 축 = **전화 그룹 id**(NULL = 어떤 픽업·BLF 축에도 속하지 않음 — org 폴백 없음). 전화 그룹 소속 가입자는 값이 그룹 id(`pg-…`, 전환 전 `dg-…`)로 **파생**된다(CSC 단일 쓰기 주체, 직접 편집 409). 파생은 **person 단위** — 멤버 행(유선 회선)과 같은 person 의 PTT 회선도 같은 값을 받는다(dispatch_center.md §3.2). 기존 데이터 백필 = 마이그레이션 끝 |
+| | `volte_subscriptions.pickup_group` / `voip_subscriptions.pickup_group` / `ptt_subscriptions.pickup_group` | migrate_subscription_pickup_group.sql (voip 는 생성 시점부터 보유) | 당겨받기 그룹 축 = **전화 그룹 id**(NULL = 어떤 픽업·BLF 축에도 속하지 않음 — org 폴백 없음). 전화 그룹 소속 가입자는 값이 그룹 id(`pg-…`, 전환 전 `dg-…`)로 **파생**된다(CSC 단일 쓰기 주체, 직접 편집 409). 파생은 **person 단위** — 멤버 행(유선 회선)과 같은 person 의 PTT 회선도 같은 값을 받는다(dispatch_center.md §3.2). 기존 데이터 백필 = 마이그레이션 끝 |
 | **전화 그룹** | `phone_groups` | cims_schema.sql + migrate_phone_groups_roles.sql(전환 — `dispatch_groups` 계열에서 복사 후 DROP) | 유선 전화 그룹(픽업 그룹 + 대표번호, [dispatch_center.md](features/dispatch_center.md) §3.1·§8.1) — `id`(VARCHAR(64) 불변 키 `pg-…`, 전환 전 `dg-…` 유지), name, `pilot_id`(UNIQUE, 대표번호), `service_ref`(유선 VoIP 서비스), `alert_mode`(parallel/sequential), `no_answer_sec`, `busy_members`(skip/alert), `overflow_target`, `org_id`(FK organizations SET NULL). 관제 권한 열은 없다 |
 | | `phone_group_members` | cims_schema.sql + migrate_phone_groups_roles.sql | `user_id` **PK**(가입자당 그룹 하나), `group_id`(FK CASCADE), `alert_order`(sequential 호출·포크 상한 절삭 순) |
 | **역할** | `roles` | cims_schema.sql + migrate_phone_groups_roles.sql | 권한 = 능력 + 범위([mcptt_authorization.md](features/mcptt_authorization.md) §2) — `id`(내장 `admin/manager/operator/monitor` + `role-…`), name, `builtin`, `authz_manage`, `audit_read`, `directory_write`/`directory_read`(none/own/all), `ptt_group_manage`(none/own/scope/all), `monitor_call`(none/own/listed/all), `ptt_listen`(none/listed/all), `listen_visibility`, `history_read`(none/scope/all), `alarm_ack`, `mcptt_control`, `org_id`(own 루트). 내장 4행은 마이그레이션이 시드 |
@@ -55,7 +56,7 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 | | ~~`routing_access_list`~~ | — | **파일 기반** |
 | | ~~`csp_config_audit`~~ | — | **파일 기반** — JSONL 시계열 (`csp_config_audit/audit/YYYY/MM/DD.jsonl`) |
 | | ~~`sip_service (+sip_service_listener)`~~ | — | **파일 기반** — listeners 배열 임베드 |
-| **구독↔서비스** | `voip_subscriptions.service_id` / `ptt_subscriptions.service_id` | migrate_subscriptions_service_ref.sql | FK → sip_service |
+| **구독↔서비스** | `volte_subscriptions.service_ref` / `voip_subscriptions.service_ref` / `ptt_subscriptions.service_ref` | migrate_subscriptions_service_ref.sql | VARCHAR(64) = `access_services.name`(file-store, FK 없음). 테이블 kind 와 같은 kind 의 레코드만(CSC 400 `service_kind_mismatch`) |
 | **HA** | ~~`ha_groups`~~ | — | **파일 기반** — `{CimsRuntimeDir}/ha_groups/<id>.json` (members 배열 임베드) |
 | | ~~`ha_group_members`~~ | — | (그룹 JSON 안에 임베드) |
 | **에이전트/배포** | ~~`cims_agent`~~ | — | **파일 기반** — `{CimsRuntimeDir}/agents/<id>.json` |
@@ -66,12 +67,12 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 
 ### 주요 FK / 참조
 
-- `users(id)` ← `voip_subscriptions.user_id`, `ptt_subscriptions.user_id` (ON DELETE CASCADE)
-- `voip_subscriptions(id)` ← `user_rejects.subscription_id` (CASCADE)
+- `users(id)` ← `volte_subscriptions.user_id`(`fk_voip_sub_user`), `voip_subscriptions.user_id`(`fk_voipsub_user`), `ptt_subscriptions.user_id`(`fk_ptt_sub_user`), `user_rejects.user_id`(`fk_reject_user`) (ON DELETE CASCADE)
+- `ptt_subscriptions(id)` ← `ptt_user_profile.ptt_id`(`fk_pup_ptt_sub`), `ptt_user_profile.emergency_private_recipient`(`fk_pup_emg_priv`)
 - `ptt_groups(id)` ← `ptt_group_members.group_id` (CASCADE) — **id=surrogate BIGINT**; `mcptt_group_id` 는 UNIQUE 식별자(키 아님)
 - `ptt_groups(id)` ← `ptt_affiliations.group_id` (CASCADE)
-- `phone_groups(id)` ← `phone_group_members.group_id`, `role_monitor_targets.phone_group_id` (CASCADE); `roles(id)` ← `role_assignments.role_id`, `role_monitor_targets.role_id`, `role_ptt_targets.role_id` (CASCADE); `ptt_groups(id)` ← `role_ptt_targets.ptt_group_id` (CASCADE); `organizations(id)` ← `phone_groups.org_id`, `roles.org_id` (SET NULL). `volte_subscriptions.pickup_group`·`ptt_subscriptions.pickup_group` 은 FK 없이 값으로 `phone_groups.id` 를 담는다(person 단위 파생 — 멤버 제거·그룹 삭제 시 CSC 가 재계산해 NULL 로 되돌린다). 전환 전 이름 = `dispatch_groups` 계열(매핑은 dispatch_center.md §8.1 전환 표)
-- `sip_service(id)` ← `voip_subscriptions.service_id`, `ptt_subscriptions.service_id` (NULLABLE)
+- `phone_groups(id)` ← `phone_group_members.group_id`, `role_monitor_targets.phone_group_id` (CASCADE); `roles(id)` ← `role_assignments.role_id`, `role_monitor_targets.role_id`, `role_ptt_targets.role_id` (CASCADE); `ptt_groups(id)` ← `role_ptt_targets.ptt_group_id` (CASCADE); `organizations(id)` ← `phone_groups.org_id`, `roles.org_id` (SET NULL). `volte_subscriptions.pickup_group`·`voip_subscriptions.pickup_group`·`ptt_subscriptions.pickup_group` 은 FK 없이 값으로 `phone_groups.id` 를 담는다(person 단위 파생 — 멤버 제거·그룹 삭제 시 CSC 가 재계산해 NULL 로 되돌린다). 전환 전 이름 = `dispatch_groups` 계열(매핑은 dispatch_center.md §8.1 전환 표)
+- 가입 테이블 `service_ref` 는 file-store `access_services.name` 을 값으로 가리킨다(FK 없음)
 - `ha_groups(id)` ← `ha_group_members.group_id` (CASCADE)
 
 ## 3. 옛 테이블 / DROP 됨

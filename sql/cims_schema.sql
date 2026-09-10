@@ -10,9 +10,12 @@
 --      → users 테이블은 가입자(person) 전용. login_id/password/role 없음.
 --    - 운영 런타임 데이터(agents/ha_groups/packages/deployments/call_logs/
 --      recordings/csp_runtime/idms tokens 등)는 전부 file_store 로 이관됨 → DB 없음.
---  최종 테이블: 8개 (organizations, users, volte_subscriptions,
---    ptt_subscriptions, user_rejects, ptt_groups, ptt_group_members,
---    ptt_affiliations).
+--    - 가입 테이블 = 접속환경 kind (sip_service_model.md §2-9): volte_subscriptions(이동 VoLTE) /
+--      voip_subscriptions(유선 VoIP — 데스크폰·소프트폰·관제 앱) / ptt_subscriptions(MCPTT). 세 테이블은 컬럼이
+--      같고 행의 service_ref 는 자기 kind 의 access_services 레코드만 가리킨다(CSC 쓰기 게이트).
+--  최종 테이블: 9개 (organizations, users, volte_subscriptions,
+--    voip_subscriptions, ptt_subscriptions, user_rejects, ptt_groups,
+--    ptt_group_members, ptt_affiliations).
 -- ============================================================
 
 CREATE DATABASE IF NOT EXISTS cims
@@ -76,15 +79,43 @@ CREATE TABLE IF NOT EXISTS volte_subscriptions (
     opc_enc       VARCHAR(160) NOT NULL DEFAULT '' COMMENT 'AKA OPc (AuC.Kek 암호화 보관)',
     sqn           BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'AKA SQN_HE (48-bit, CSC 단일 발급자)',
     amf           CHAR(4)      NOT NULL DEFAULT '8000' COMMENT 'AKA AMF hex4',
-    sip_transport ENUM('UDP','TCP','TLS')  DEFAULT NULL COMMENT '채널 정책: TLS=서버 집행(비-TLS 요청 403) / UDP·TCP=프로비저닝 힌트 / NULL=단말 선택',
+    sip_transport ENUM('UDP','TCP','TLS')  DEFAULT NULL COMMENT '채널 정책: TLS=서버 집행(비-TLS 요청 403) / UDP·TCP=프로비저닝 힌트 / NULL=ANY(단말 선택)',
     dnd           TINYINT(1)   NOT NULL DEFAULT 0  COMMENT '착신거부',
     forward_id    VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '착신전환 대상',
+    pickup_group  VARCHAR(64)           DEFAULT NULL COMMENT '당겨받기 그룹 = phone_groups.id (전화 그룹 멤버십에서 CSC 가 파생, NULL=어떤 픽업·BLF 축에도 속하지 않음)',
     register_time DATETIME              DEFAULT NULL,
     logout_time   DATETIME              DEFAULT NULL,
     PRIMARY KEY (id),
     KEY idx_user_id (user_id),
     CONSTRAINT fk_voip_sub_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='VoLTE 가입자 인증 정보';
+
+-- ─────────────────────────────────────────────
+--  유선 VoIP 가입자 인증 정보 (VoIP Subscriptions) — 데스크폰·소프트폰·관제 앱 (kind=voip, USIM 없음 → Digest,
+--  imsi = 번호 숫자 규약). 컬럼은 volte_subscriptions 와 같다. service_ref 는 kind=voip 접속서비스 필수.
+-- ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS voip_subscriptions (
+    id            VARCHAR(64)  NOT NULL COMMENT 'VoIP MSISDN (E.164)',
+    user_id       INT          NOT NULL COMMENT 'users.id 참조 (개인 ID)',
+    auth_id       VARCHAR(128) NOT NULL DEFAULT '' COMMENT 'SIP Digest 인증 ID (IMPI)',
+    imsi          VARCHAR(64)           DEFAULT NULL COMMENT '유선 규약: 번호 숫자 (USIM 없음)',
+    service_ref   VARCHAR(64)           DEFAULT NULL COMMENT 'access_services.name (kind=voip 필수)',
+    ha1           CHAR(32)     NOT NULL DEFAULT '' COMMENT 'SIP Digest H(A1)=MD5(imsi@domain:realm:password) — 인증 자료 SoT',
+    auth_scheme   ENUM('digest','aka') NOT NULL DEFAULT 'digest' COMMENT '인증 체계: digest=SIP Digest(ha1) / aka=IMS AKA(k/opc/sqn) — 유선은 digest',
+    k_enc         VARCHAR(160) NOT NULL DEFAULT '' COMMENT 'AKA K (AuC.Kek 암호화 보관)',
+    opc_enc       VARCHAR(160) NOT NULL DEFAULT '' COMMENT 'AKA OPc (AuC.Kek 암호화 보관)',
+    sqn           BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'AKA SQN_HE (48-bit, CSC 단일 발급자)',
+    amf           CHAR(4)      NOT NULL DEFAULT '8000' COMMENT 'AKA AMF hex4',
+    sip_transport ENUM('UDP','TCP','TLS')  DEFAULT NULL COMMENT '채널 정책: TLS=서버 집행(비-TLS 요청 403) / UDP·TCP=프로비저닝 힌트 / NULL=ANY(단말 선택). 유선 권장 기본 TLS',
+    dnd           TINYINT(1)   NOT NULL DEFAULT 0  COMMENT '착신거부',
+    forward_id    VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '착신전환 대상',
+    pickup_group  VARCHAR(64)           DEFAULT NULL COMMENT '당겨받기 그룹 = phone_groups.id (전화 그룹 멤버십에서 CSC 가 파생, NULL=어떤 픽업·BLF 축에도 속하지 않음)',
+    register_time DATETIME              DEFAULT NULL,
+    logout_time   DATETIME              DEFAULT NULL,
+    PRIMARY KEY (id),
+    KEY idx_user_id (user_id),
+    CONSTRAINT fk_voipsub_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='유선 VoIP 가입자 인증 정보';
 
 -- ─────────────────────────────────────────────
 --  PTT 가입자 인증 정보 (PTT Subscriptions)
@@ -101,9 +132,10 @@ CREATE TABLE IF NOT EXISTS ptt_subscriptions (
     opc_enc       VARCHAR(160) NOT NULL DEFAULT '' COMMENT 'AKA OPc (AuC.Kek 암호화 보관)',
     sqn           BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'AKA SQN_HE (48-bit, CSC 단일 발급자)',
     amf           CHAR(4)      NOT NULL DEFAULT '8000' COMMENT 'AKA AMF hex4',
-    sip_transport ENUM('UDP','TCP','TLS')  DEFAULT NULL COMMENT '채널 정책: TLS=서버 집행(비-TLS 요청 403) / UDP·TCP=프로비저닝 힌트 / NULL=단말 선택',
+    sip_transport ENUM('UDP','TCP','TLS')  DEFAULT NULL COMMENT '채널 정책: TLS=서버 집행(비-TLS 요청 403) / UDP·TCP=프로비저닝 힌트 / NULL=ANY(단말 선택)',
     dnd           TINYINT(1)   NOT NULL DEFAULT 0  COMMENT '착신거부',
     forward_id    VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '착신전환 대상',
+    pickup_group  VARCHAR(64)           DEFAULT NULL COMMENT '당겨받기 그룹 = phone_groups.id (전화 그룹 멤버십에서 CSC 가 파생, NULL=어떤 픽업·BLF 축에도 속하지 않음)',
     register_time DATETIME              DEFAULT NULL,
     logout_time   DATETIME              DEFAULT NULL,
     PRIMARY KEY (id),

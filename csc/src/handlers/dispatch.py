@@ -37,6 +37,7 @@ from httpsrv.handler import HandlerArgs, HandlerResult
 from services import admin_auth
 from services import authz
 from services.mcptt import notify_csp
+from services import subscriptions as _subs      # 가입 테이블 레지스트리(volte/voip/ptt)
 
 _PG_BASE = '/api/v1/phone-groups'
 _ROLE_BASE = '/api/v1/roles'
@@ -48,7 +49,6 @@ _SCHEMA_ERROR = {'error': 'schema_not_migrated',
                  'detail': 'phone_groups/roles tables absent — sql/migrate_phone_groups_roles.sql not applied'}
 
 _HAS_TABLES = None  # phone_groups 테이블 프로브 캐시 (프로세스 수명). None=미확인
-_SUB_TABLES = ('volte_subscriptions', 'ptt_subscriptions')
 
 
 def _get_db(config: dict):
@@ -109,8 +109,8 @@ def phone_group_of_user(cur, user_id: str):
 
 
 def _person_of(cur, user_id: str):
-    """가입 id → person(users.id). 어느 가입 테이블에도 없으면 None."""
-    for t in _SUB_TABLES:
+    """가입 id → person(users.id). 어느 가입 테이블(volte·voip·ptt)에도 없으면 None."""
+    for _k, t in _subs.tables(cur):
         cur.execute(f"SELECT user_id FROM {t} WHERE id=%s", (user_id,))
         row = cur.fetchone()
         if row:
@@ -123,10 +123,10 @@ def phone_group_of_person(cur, person_id):
     여럿이면 alert_order·회선 id 순 첫째로 결정적). 없으면 None. 테이블 미적용이면 None."""
     if person_id is None or not has_phone_group_tables(cur):
         return None
-    cur.execute("SELECT m.group_id FROM phone_group_members m WHERE m.user_id IN ("
-                "SELECT id FROM volte_subscriptions WHERE user_id=%s UNION "
-                "SELECT id FROM ptt_subscriptions WHERE user_id=%s) "
-                "ORDER BY m.alert_order, m.user_id LIMIT 1", (person_id, person_id))
+    tabs = _subs.tables(cur)
+    inner = " UNION ".join(f"SELECT id FROM {t} WHERE user_id=%s" for _k, t in tabs)
+    cur.execute("SELECT m.group_id FROM phone_group_members m WHERE m.user_id IN (" + inner + ") "
+                "ORDER BY m.alert_order, m.user_id LIMIT 1", tuple(person_id for _ in tabs))
     return _cell(cur.fetchone(), 'group_id')
 
 
@@ -142,7 +142,7 @@ def effective_phone_group(cur, user_id: str):
 
 
 def _sync_pickup_group(cur, user_id: str) -> list:
-    """멤버십 변경 뒤 파생값 재계산 — user_id 가 속한 person 의 volte/ptt **전 회선** pickup_group 을
+    """멤버십 변경 뒤 파생값 재계산 — user_id 가 속한 person 의 volte·voip·ptt **전 회선** pickup_group 을
     effective_phone_group 으로 맞춘다(컬럼 존재 테이블만). 값이 바뀐 회선 id 목록을 돌려준다(USER_CHANGED 대상 —
     CSP 는 회선별 사용자 캐시로 pickup_group 을 든다). 멤버 행 뒤에 호출한다(INSERT/DELETE 반영 상태를 읽는다).
 
@@ -151,7 +151,7 @@ def _sync_pickup_group(cur, user_id: str) -> list:
     PTT 회선 dialog 인가 규칙 1 은 SIP 신원(PTT id)으로 EffectiveGroupOf 를 묻는다."""
     person = _person_of(cur, user_id)
     changed = []
-    for t in _SUB_TABLES:
+    for _k, t in _subs.tables(cur):
         cur.execute("SHOW COLUMNS FROM %s LIKE 'pickup_group'" % t)
         if cur.fetchone() is None:
             continue
@@ -178,7 +178,7 @@ def _changed_users(*ids_lists) -> list:
 
 
 def _subscriber_exists(cur, user_id: str) -> bool:
-    for t in _SUB_TABLES:
+    for _k, t in _subs.tables(cur):
         cur.execute(f"SELECT 1 FROM {t} WHERE id=%s", (user_id,))
         if cur.fetchone():
             return True
@@ -266,7 +266,7 @@ def _pilot_conflict(cur, pilot: str, self_id: str = None):
     """대표번호는 가입 id 주소 공간·다른 대표번호와 겹치면 안 된다 (§8.2) → 409 body 또는 None."""
     if not pilot:
         return None
-    for t in _SUB_TABLES:
+    for _k, t in _subs.tables(cur):
         cur.execute(f"SELECT 1 FROM {t} WHERE id=%s", (pilot,))
         if cur.fetchone():
             return {'error': 'pilot_conflict', 'detail': f'pilot_id {pilot} is a subscriber id ({t})'}

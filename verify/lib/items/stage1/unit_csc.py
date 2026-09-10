@@ -28,13 +28,14 @@ from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 
 _ID = "S1-UNIT-CSC"
-_NAME = ("CSC unit test — 전화 그룹·역할 RBAC·가입 realm·GMS 그룹 CRUD·프로비저닝 발견·이력·관리 평면·IdMS scope·user-profile "
+_NAME = ("CSC unit test — 전화 그룹·역할 RBAC·가입 realm·GMS 그룹 CRUD·프로비저닝 발견·이력·관리 평면·IdMS scope·user-profile·가입 테이블 레지스트리(kind 게이트) "
          "(python3 -m unittest tests.test_csc_dispatch_rbac tests.test_csc_subscription_realm "
          "tests.test_csc_gms_group_crud tests.test_csc_provisioning_dispatch)")
 _MODULES = ["tests.test_csc_dispatch_rbac", "tests.test_csc_subscription_realm",
             "tests.test_csc_gms_group_crud", "tests.test_csc_provisioning_dispatch",
             "tests.test_csc_provisioning_history", "tests.test_csc_idms_scope", "tests.test_csc_user_profile",
-            "tests.test_csc_dispatch_management", "tests.test_csc_access_services"]
+            "tests.test_csc_dispatch_management", "tests.test_csc_access_services",
+            "tests.test_csc_subscriptions"]
 
 
 @verify_item(

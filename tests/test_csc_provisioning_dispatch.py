@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.join(_REPO_ROOT, "csc", "src"))
 
 import services.mcptt as m  # noqa: E402
 import services.authz as az  # noqa: E402
+import services.subscriptions as subs  # noqa: E402
 import handlers.dispatch as hd  # noqa: E402
 from httpsrv.handler import HandlerArgs  # noqa: E402
 
@@ -29,6 +30,8 @@ USERS = {5020: "관제1석", 5021: "관제2석", 5030: "현장A", 5031: "현장B
 # volte_subscriptions: msisdn → user_id
 VOLTE = {"+821310001001": 5020, "+821310001002": 5021, "+821310002001": 5030, "+821310002002": 5031,
          "+821310003001": 5040}
+# voip_subscriptions(유선 관제석 회선, 테이블 = kind voip): msisdn → user_id — _FakeCursor(voip=True) 에서만 존재
+VOIP = {"+82210001001": 5020, "+82210001002": 5021}
 # subscriptions.service_ref(접속서비스 name) — 기본 빈값(종류 키 폴백). voip 시험이 한 회선만 바꾼다.
 SREF: dict[str, str] = {}
 # ptt_subscriptions: msisdn → user_id (관제2석은 PTT 미가입, 현장A 는 PTT 2회선)
@@ -55,22 +58,30 @@ def _role(scope="own", ptt_listen="none", vis="hidden", dw="none", org_id=None, 
 class _FakeCursor:
     """dispatch_discovery / services.authz / handle_provisioning_me 가 내는 SQL 만 흉내 내는 tuple 커서."""
 
-    def __init__(self, role: dict | None, assigned=(5020, 5021), tables: bool = True):
+    def __init__(self, role: dict | None, assigned=(5020, 5021), tables: bool = True, voip: bool = False):
         self.role = role                  # roles 행 (None = 역할 없음)
         self.assigned = set(assigned)     # 배정된 person
         self.tables = tables
+        self.voip = voip                  # voip_subscriptions 테이블 존재(마이그레이션 적용) 여부
         self.sql: list[tuple[str, tuple]] = []
         self._rows: list = []
 
     # ── 도우미 ──
+    def _phone_lines(self) -> dict:
+        """전화 가족 회선(volte ∪ voip — voip 테이블이 있을 때만): msisdn → user_id."""
+        d = dict(VOLTE)
+        if self.voip:
+            d.update(VOIP)
+        return d
+
     @staticmethod
     def _group_of_person(uid):
-        cands = sorted((o, vid, gid) for vid, (gid, o) in PGM.items() if VOLTE.get(vid) == uid)
+        cands = sorted((o, vid, gid) for vid, (gid, o) in PGM.items() if VOLTE.get(vid) == uid or VOIP.get(vid) == uid)
         return cands[0][2] if cands else None
 
     def _member_rows(self, group_ids, own):
         rows = []
-        for vid, uid in VOLTE.items():
+        for vid, uid in self._phone_lines().items():
             mg, order = PGM.get(vid, ("", 0))
             if group_ids is not None and mg not in group_ids:
                 continue
@@ -88,10 +99,15 @@ class _FakeCursor:
             if q.startswith("SHOW TABLES"):
                 return
             raise RuntimeError("(1146, \"Table 'cims.phone_group_members' doesn't exist\")")
-        if q.startswith("SHOW TABLES LIKE"):
+        if q.startswith("SHOW TABLES LIKE %s"):                 # services.subscriptions 선택 테이블 프로브
+            self._rows = [("x",)] if (args[0] != "voip_subscriptions" or self.voip) else []
+        elif q.startswith("SHOW TABLES LIKE"):
             self._rows = [("x",)]
         elif q.startswith("SELECT user_id FROM volte_subscriptions WHERE id="):
             uid = VOLTE.get(args[0])
+            self._rows = [(uid,)] if uid is not None else []
+        elif q.startswith("SELECT user_id FROM voip_subscriptions WHERE id="):
+            uid = VOIP.get(args[0])
             self._rows = [(uid,)] if uid is not None else []
         elif q.startswith("SELECT user_id FROM ptt_subscriptions WHERE id="):
             uid = PTT.get(args[0])
@@ -100,6 +116,10 @@ class _FakeCursor:
             # 10열 — 마지막 COALESCE(service_ref,'') 는 접속서비스 name(sip_service_model.md §2-9). 빈값 = 종류 키 폴백.
             self._rows = [(vid, "45033" + vid[-10:], "", "TLS", "0" * 32, "digest", "", "", "", SREF.get(vid, ""))
                           for vid, uid in sorted(VOLTE.items()) if uid == args[0]]
+        elif q.startswith("SELECT id, imsi, auth_id, sip_transport, ha1, auth_scheme") and "voip_subscriptions" in q:
+            # 유선 회선 — imsi = 번호 숫자(USIM 없음 규약), service_ref 기본 voip
+            self._rows = [(vid, vid.lstrip("+"), "", "TLS", "0" * 32, "digest", "", "", "", SREF.get(vid, "voip"))
+                          for vid, uid in sorted(VOIP.items()) if uid == args[0]]
         elif q.startswith("SELECT id, imsi, auth_id, sip_transport, ha1, auth_scheme") and "ptt_subscriptions" in q:
             self._rows = [(pid, "45033" + pid[-10:], "", "TLS", "0" * 32, "digest", "", "", "", SREF.get(pid, ""))
                           for pid, uid in sorted(PTT.items()) if uid == args[0]]
@@ -121,14 +141,14 @@ class _FakeCursor:
             self._rows = [(g,) for g in sorted(PTT_TARGETS.get(args[0], set()))]
         elif q.startswith("SELECT code FROM organizations WHERE id="):
             self._rows = [(ORGS[args[0]],)] if args[0] in ORGS else []
-        elif q.startswith(m._MEMBER_SQL):
+        elif q.startswith(m._MEMBER_SELECT):
             own = args[-1]
             if " WHERE m.group_id IN (" in q:
                 self._rows = self._member_rows(set(args[:-1]), own)
             else:
                 self._rows = self._member_rows(None, own)
         elif q.startswith("SELECT u.id, u.name, MIN(p.id) FROM ptt_subscriptions p JOIN users u"):
-            volte_uids = set(VOLTE.values())
+            volte_uids = set(self._phone_lines().values())
             rows = {}
             for pid, uid in sorted(PTT.items()):
                 if uid in volte_uids or uid in rows:
@@ -167,14 +187,17 @@ class _Base(unittest.TestCase):
         m.PROVISIONING = {}
         hd._HAS_TABLES = None
         az.reset_probe()
+        subs.reset_probe()
 
     def tearDown(self):
         m.PROVISIONING = self._prov
         hd._HAS_TABLES = None
         az.reset_probe()
+        subs.reset_probe()
 
     def _disc(self, cur, uid):
         az.reset_probe()                  # 시험마다 역할 행이 다르다 — 캐시 무효
+        subs.reset_probe()                # voip 테이블 존재 여부도 커서마다 다르다
         return m.dispatch_discovery(cur, uid)
 
 
@@ -300,7 +323,7 @@ class DiscoveryTests(_Base):
         """CSP 와 같은 규칙임을 SQL 로 고정 — listed 는 자기 그룹 ∪ role_monitor_targets, all 은 WHERE 없음, PTT 는 role_ptt_targets."""
         cur = _FakeCursor(_role("listed", "listed"))
         self._disc(cur, 5020)
-        member_qs = [(q, a) for q, a in cur.sql if q.startswith(m._MEMBER_SQL)]
+        member_qs = [(q, a) for q, a in cur.sql if q.startswith(m._MEMBER_SELECT)]
         q, a = member_qs[-1]
         self.assertIn(" WHERE m.group_id IN (%s,%s)", q)
         self.assertEqual(set(a[:-1]), {PG, "pg-field"})
@@ -309,7 +332,7 @@ class DiscoveryTests(_Base):
         self.assertTrue(any(q.startswith("SELECT g.mcptt_group_id, g.name FROM role_ptt_targets") for q, _ in cur.sql))
         cur = _FakeCursor(_role("all", "all"))
         self._disc(cur, 5020)
-        q, a = [(q, a) for q, a in cur.sql if q.startswith(m._MEMBER_SQL)][-1]
+        q, a = [(q, a) for q, a in cur.sql if q.startswith(m._MEMBER_SELECT)][-1]
         self.assertNotIn(" WHERE m.group_id", q)
         self.assertTrue(any(q == "SELECT mcptt_group_id, name FROM ptt_groups ORDER BY mcptt_group_id" for q, _ in cur.sql))
 
@@ -334,8 +357,10 @@ class HandlerTests(_Base):
             sys.modules["pymysql"] = pm
         super().tearDown()
 
-    def _get(self, headers=None):
+    def _get(self, headers=None, voip: bool = False):
         az.reset_probe()
+        subs.reset_probe()
+        self.cur.voip = voip              # voip_subscriptions 테이블 존재 여부(프로브가 커서에 묻는다)
         h = {"authorization": "Bearer x", "host": "csc.test:4430"}
         h.update(headers or {})
         return asyncio.run(m.handle_provisioning_me(HandlerArgs("GET", "/provisioning/me", "127.0.0.1", 0, headers=h), {}))
@@ -410,27 +435,36 @@ class HandlerTests(_Base):
         r = self._get()
         self.assertTrue({s["kind"]: s["capabilities"]["smsGateway"] for s in r.body["services"]}["ptt"])
 
-    def test_service_ref_voip_selects_voip_entry(self):
-        """service_ref=voip 회선은 Provisioning.Services.voip 항목으로 프로비저닝된다(와이어 kind=voip·voip 도메인).
-        같은 volte_subscriptions 테이블의 이동 회선(service_ref 빈값)은 volte 그대로(sip_service_model.md §2-9)."""
+    def test_voip_table_line_provisions_voip_entry(self):
+        """voip_subscriptions 회선은 Provisioning.Services.voip 항목으로 프로비저닝된다(와이어 kind=voip·voip 도메인) —
+        테이블 = kind. 같은 person 의 volte 회선은 volte 그대로. volte 테이블 행이 'voip' 이름을 가리켜도(레거시) 자기 kind 폴백
+        (sip_service_model.md §2-9 exact-kind)."""
         m.PROVISIONING = {"Services": {
             "volte": {"name": "volte", "domain": "volte.cims.example.kr", "port": 5060, "tls_port": 5061},
             "voip": {"name": "voip", "domain": "voip.cims.example.kr", "port": 5060, "tls_port": 15061,
                      "transport": "TLS"},
             "ptt": {"name": "mcptt", "domain": "ptt.cims.example.kr", "port": 5060, "tls_port": 5061},
         }}
+        r = self._get(voip=True)
+        self.assertEqual(r.status, 200)
+        by_kind = {s["kind"]: s for s in r.body["services"]}
+        self.assertEqual(sorted(by_kind), ["ptt", "voip", "volte"])
+        self.assertEqual(by_kind["voip"]["account"]["msisdn"], "+82210001001")
+        self.assertEqual(by_kind["voip"]["sip"]["domain"], "voip.cims.example.kr")
+        self.assertEqual(by_kind["voip"]["sip"]["transport"], "TLS")
+        self.assertEqual(by_kind["voip"]["sip"]["port"], 15061)
+        self.assertEqual(by_kind["volte"]["sip"]["domain"], "volte.cims.example.kr")
+        # 전화 그룹 멤버 목록도 전화 가족 합산 — 유선 회선이 그룹원으로 보인다
+        aors = [x["volteAor"] for x in r.body["phoneGroup"]["members"]]
+        self.assertIn("tel:+821310001001", aors)
+        # volte 테이블 행이 voip 이름을 가리키면(쓰기 게이트가 막는 레거시 상태) 자기 kind 로 폴백
         SREF["+821310001001"] = "voip"
         try:
             r = self._get()
         finally:
             SREF.clear()
-        self.assertEqual(r.status, 200)
-        by_kind = {s["kind"]: s for s in r.body["services"]}
-        self.assertEqual(sorted(by_kind), ["ptt", "voip"])
-        self.assertEqual(by_kind["voip"]["sip"]["domain"], "voip.cims.example.kr")
-        self.assertEqual(by_kind["voip"]["sip"]["transport"], "TLS")
-        self.assertEqual(by_kind["voip"]["sip"]["port"], 15061)
-        # ptt 회선의 service_ref 는 종류 경계를 넘지 못한다 — 'voip' 를 가리켜도 ptt 항목 유지
+        self.assertEqual(sorted(s["kind"] for s in r.body["services"]), ["ptt", "volte"])
+        # ptt 회선의 service_ref 는 kind 경계를 넘지 못한다 — 'voip' 를 가리켜도 ptt 항목 유지
         SREF["+82510001001"] = "voip"
         try:
             r = self._get()

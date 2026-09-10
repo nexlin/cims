@@ -7,6 +7,8 @@ Routes (prefix-matched):
   /api/v1/users/{pid}                         GET / PUT / DELETE
   /api/v1/users/{pid}/call                    GET list / POST add call subscription
   /api/v1/users/{pid}/call/{msisdn}           PUT update / DELETE remove call subscription
+  /api/v1/users/{pid}/voip                    GET list / POST add VoIP(유선) subscription
+  /api/v1/users/{pid}/voip/{msisdn}           PUT update / DELETE remove VoIP subscription
   /api/v1/users/{pid}/ptt                     GET list / POST add PTT subscription
   /api/v1/users/{pid}/ptt/{msisdn}            PUT update / DELETE remove PTT subscription
   /api/v1/ptt/groups                          GET list / POST create
@@ -32,6 +34,7 @@ from services.mcptt import (notify_csp, refresh_group_members, refresh_login_acc
 from handlers import dispatch as _dispatch  # 전화 그룹 파생(pickup_group 409 게이트)
 from services import admin_auth
 from services.auc import auc as _auc
+from services import subscriptions as _subs   # 가입 테이블 레지스트리 — kind ↔ 테이블·API 세그먼트·응답 키
 from services.mcptt import logger as _logger
 
 # ──────────────────────────────────────────────────────────────
@@ -91,9 +94,9 @@ _USERS_BASE = '/api/v1/users'
 async def handle_users(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
     config = kwargs.get('config', {})
     parts = _path_parts(handler_args.full_path, _USERS_BASE)
-    # parts: () | (pid,) | (pid, 'call'|'ptt') | (pid, 'call'|'ptt', msisdn)
+    # parts: () | (pid,) | (pid, <seg>) | (pid, <seg>, msisdn) — seg ∈ services.subscriptions.API_SEGMENTS(call|voip|ptt)
     person_id = parts[0] if len(parts) > 0 else None
-    sub       = parts[1] if len(parts) > 1 else None   # 'call' | 'ptt'
+    sub       = parts[1] if len(parts) > 1 else None   # 'call' | 'voip' | 'ptt'
     sub_id    = parts[2] if len(parts) > 2 else None   # MSISDN of the subscription
     method    = handler_args.method.upper()
 
@@ -136,7 +139,7 @@ async def handle_users(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
                 return await _put_ptt_profile(person_id, sub_id, handler_args.body, config)
             return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
 
-        if sub in ('call', 'ptt'):
+        if sub in _subs.API_SEGMENTS:
             if sub_id is None:
                 if method == 'GET':
                     return await _list_subscriptions(person_id, sub, config)
@@ -169,6 +172,14 @@ def _has_email_column(cur) -> bool:
     return _has_user_column(cur, 'email')
 
 
+def _fill_sub_row(s: dict) -> dict:
+    """가입 행 응답 정규화 — dnd bool·시각 ISO8601."""
+    s['dnd'] = bool(s['dnd'])
+    s['register_time'] = _dt(s['register_time'])
+    s['logout_time'] = _dt(s['logout_time'])
+    return s
+
+
 async def _list_users(config):
     """Phase 4d2 N+1 fix — 옛 패턴: 5020 users × 3 sub query = 15,061 SQL calls.
     cross-host DB (ctrl02 → ctrl01) 에서 ~16s 응답. 4 bulk query 로 단축.
@@ -195,35 +206,21 @@ async def _list_users(config):
             for r in cur.fetchall():
                 rejects_by_user.setdefault(r['user_id'], []).append(r['reject_id'])
 
-            # 1 query for all volte_subscriptions
+            # 가입 테이블마다 1 query (volte·voip·ptt — services.subscriptions 레지스트리, 부재 테이블은 건너뛴다)
             aka_cols = _aka_select_extra(cur)
             pickup_cols = _pickup_select_extra(cur)
-            cur.execute(
-                "SELECT id, user_id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
-                f"{aka_cols}{pickup_cols} FROM volte_subscriptions ORDER BY user_id, id"
-            )
-            call_subs_by_user: dict = {}
-            for s in cur.fetchall():
-                s['dnd'] = bool(s['dnd'])
-                s['register_time'] = _dt(s['register_time'])
-                s['logout_time']   = _dt(s['logout_time'])
-                uid = s.pop('user_id')
-                call_subs_by_user.setdefault(uid, []).append(s)
+            subs_by_kind: dict = {}          # kind → {user_id: [행]}
+            for kind, table in _subs.tables(cur):
+                cur.execute(
+                    "SELECT id, user_id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
+                    f"{aka_cols}{pickup_cols} FROM {table} ORDER BY user_id, id"
+                )
+                by_user = subs_by_kind.setdefault(kind, {})
+                for s in cur.fetchall():
+                    _fill_sub_row(s)
+                    by_user.setdefault(s.pop('user_id'), []).append(s)
 
-            # 1 query for all ptt_subscriptions
-            cur.execute(
-                "SELECT id, user_id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
-                f"{aka_cols}{pickup_cols} FROM ptt_subscriptions ORDER BY user_id, id"
-            )
-            ptt_subs_by_user: dict = {}
-            for s in cur.fetchall():
-                s['dnd'] = bool(s['dnd'])
-                s['register_time'] = _dt(s['register_time'])
-                s['logout_time']   = _dt(s['logout_time'])
-                uid = s.pop('user_id')
-                ptt_subs_by_user.setdefault(uid, []).append(s)
-
-            # group-by 적용
+            # group-by 적용 — 응답 키는 kind 마다 항상 있다(테이블 부재면 빈 배열)
             for row in rows:
                 if not has_email:
                     row['email'] = ''
@@ -231,9 +228,9 @@ async def _list_users(config):
                     row['title'] = ''
                 row['create_time'] = _dt(row['create_time'])
                 row['update_time'] = _dt(row['update_time'])
-                row['reject_id']          = rejects_by_user.get(row['id'], [])
-                row['call_subscriptions'] = call_subs_by_user.get(row['id'], [])
-                row['ptt_subscriptions']  = ptt_subs_by_user.get(row['id'], [])
+                row['reject_id'] = rejects_by_user.get(row['id'], [])
+                for kind in _subs.KINDS:
+                    row[_subs.RESPONSE_KEYS[kind]] = subs_by_kind.get(kind, {}).get(row['id'], [])
     return HandlerResult(status=200, body={'users': rows})
 
 
@@ -266,32 +263,21 @@ async def _get_user(person_id: str, config):
             )
             row['reject_id'] = [r['reject_id'] for r in cur.fetchall()]
 
-            # call subscriptions
+            # 가입 행 — kind 마다(volte·voip 전화 회선 + ptt). 부재 테이블(voip 미마이그레이션)은 빈 배열.
             aka_cols = _aka_select_extra(cur)
             pickup_cols = _pickup_select_extra(cur)
-            cur.execute(
-                "SELECT id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
-                f"{aka_cols}{pickup_cols} FROM volte_subscriptions WHERE user_id=%s ORDER BY id",
-                (person_id,)
-            )
-            call_subs = cur.fetchall()
-            for s in call_subs:
-                s['dnd'] = bool(s['dnd'])
-                s['register_time'] = _dt(s['register_time'])
-                s['logout_time']   = _dt(s['logout_time'])
-            row['call_subscriptions'] = call_subs
 
-            # ptt subscriptions
-            cur.execute(
-                "SELECT id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
-                f"{aka_cols}{pickup_cols} FROM ptt_subscriptions WHERE user_id=%s ORDER BY id",
-                (person_id,)
-            )
-            ptt_subs = cur.fetchall()
-            for s in ptt_subs:
-                s['dnd'] = bool(s['dnd'])
-                s['register_time'] = _dt(s['register_time'])
-                s['logout_time']   = _dt(s['logout_time'])
+            def _load_subs(table):
+                cur.execute(
+                    "SELECT id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
+                    f"{aka_cols}{pickup_cols} FROM {table} WHERE user_id=%s ORDER BY id",
+                    (person_id,)
+                )
+                return [_fill_sub_row(s) for s in cur.fetchall()]
+
+            for kind in _subs.PHONE_KINDS:
+                row[_subs.RESPONSE_KEYS[kind]] = _load_subs(_subs.table(kind)) if _subs.has_table(cur, kind) else []
+            ptt_subs = _load_subs(_subs.table('ptt'))
 
             # 사용자 MCPTT 프로파일 동봉 (부재/마이그레이션 전 = None → 콘솔이 기본값 표시)
             profiles = {}
@@ -424,11 +410,11 @@ async def _delete_user(person_id: str, config):
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             # 삭제 전 연관 subscription ID 수집
-            for table in ('volte_subscriptions', 'ptt_subscriptions'):
+            for _kind, table in _subs.tables(cur):
                 cur.execute(f"SELECT id FROM {table} WHERE user_id=%s", (person_id,))
                 sub_ids.extend(r['id'] for r in cur.fetchall())
-            cur.execute("DELETE FROM volte_subscriptions WHERE user_id=%s", (person_id,))
-            cur.execute("DELETE FROM ptt_subscriptions WHERE user_id=%s", (person_id,))
+            for _kind, table in _subs.tables(cur):
+                cur.execute(f"DELETE FROM {table} WHERE user_id=%s", (person_id,))
             cur.execute("DELETE FROM user_rejects WHERE user_id=%s", (person_id,))
             cur.execute("DELETE FROM users WHERE id=%s", (person_id,))
             if cur.rowcount == 0:
@@ -468,7 +454,15 @@ async def _batch_delete_users(body, config):
 # ──────────────────────────────────────────────────────────────
 
 def _sub_table(svc: str) -> str:
-    return 'volte_subscriptions' if svc == 'call' else 'ptt_subscriptions'
+    """관리 API 세그먼트(call|voip|ptt) → 가입 테이블 (services.subscriptions 레지스트리)."""
+    return _subs.table(_subs.API_SEGMENTS[svc])
+
+
+def _table_missing(cur, svc: str):
+    """선택 테이블(voip) 미마이그레이션 DB → 503 응답, 있으면 None."""
+    if _subs.has_table(cur, _subs.API_SEGMENTS[svc]):
+        return None
+    return HandlerResult(status=503, body=_subs.SCHEMA_ERROR_VOIP)
 
 
 
@@ -477,6 +471,9 @@ async def _list_subscriptions(person_id: str, svc: str, config):
     table = _sub_table(svc)
     with _get_db(config) as conn:
         with conn.cursor() as cur:
+            missing = _table_missing(cur, svc)
+            if missing is not None:
+                return missing
             cur.execute("SELECT id FROM users WHERE id=%s", (person_id,))
             if cur.fetchone() is None:
                 return HandlerResult(status=404, body={'error': 'User not found'})
@@ -537,11 +534,12 @@ def _service_realm(config: dict, service_ref, kind: str):
         domain = (r.get('domain') or '').strip()
         return domain, ((r.get('auth_realm') or '').strip() or domain)
     services = ((config or {}).get('Provisioning') or {}).get('Services') or {}
-    # service_ref(= access_services.name)와 name 이 같은 항목 우선 — 유선 voip 회선이 이동 volte 도메인으로 결박되지
-    #   않게(같은 volte_subscriptions 테이블). 종류 경계(전화 계열 ↔ ptt)는 넘지 않는다. 없으면 종류 키 폴백.
+    # service_ref(= access_services.name)와 name 이 같은 항목 우선 — kind 키가 같은 것만(테이블 = kind 불변식,
+    #   가족 경계도 넘지 않는다). 없으면 kind 키 폴백.
     svc = None
     for k, v in services.items():
-        if isinstance(v, dict) and (v.get('name') or k) == service_ref and ((k == 'ptt') == (kind == 'ptt')):
+        if isinstance(v, dict) and (v.get('name') or k) == service_ref \
+                and _subs.normalize_kind(k) == _subs.normalize_kind(kind):
             svc = v
             break
     if svc is None:
@@ -553,9 +551,31 @@ def _service_realm(config: dict, service_ref, kind: str):
 
 
 def _service_kind(svc: str) -> str:
-    """가입 종류(call|ptt) → Provisioning.Services 폴백 키(volte|ptt). 실제 항목 선택은 service_ref 이름 매칭이
-    우선(_service_realm) — 전화 계열(volte·voip)은 같은 가입 테이블이라 폴백 키만 volte 다."""
-    return 'volte' if svc == 'call' else 'ptt'
+    """관리 API 세그먼트(call|voip|ptt) → 접속환경 kind(volte|voip|ptt) = 가입 테이블 = Provisioning.Services 키."""
+    return _subs.API_SEGMENTS[svc]
+
+
+def _service_kind_gate(config: dict, service_ref, kind: str):
+    """테이블 = kind 불변식의 쓰기 게이트 — service_ref 가 가리키는 접속서비스의 kind 가 가입 테이블의 kind 와 다르면
+    400 `service_kind_mismatch`(sip_service_model.md §2-9). 레코드 = 관리 store 미러(이름으로 kind 무관 조회), 미도달이면
+    csc.json `Provisioning.Services` 의 name/키 매칭. 어디에도 없는 이름은 여기서 막지 않는다(H(A1) 파생이 400 을 낸다)."""
+    if not service_ref:
+        return None
+    from services import access_services as _access_services
+    rec_kind = None
+    rec = _access_services.find_by_name(config, service_ref)
+    if rec is not None:
+        rec_kind = rec.get('kind') or ''
+    else:
+        services = ((config or {}).get('Provisioning') or {}).get('Services') or {}
+        hits = [k for k, v in services.items() if isinstance(v, dict) and (v.get('name') or k) == service_ref]
+        if hits:
+            rec_kind = next((k for k in hits if _subs.normalize_kind(k) == _subs.normalize_kind(kind)), hits[0])
+    if rec_kind is None or _subs.kind_matches(kind, rec_kind):
+        return None
+    return HandlerResult(status=400, body={'error': 'service_kind_mismatch', 'kind': kind,
+                                           'service_kind': _subs.normalize_kind(rec_kind), 'service_ref': service_ref,
+                                           'detail': f'{kind} 회선의 service_ref 는 kind={kind} 접속서비스여야 한다'})
 
 
 def _digest_ha1(imsi: str, domain: str, realm: str, passwd: str) -> str:
@@ -578,7 +598,7 @@ def _aka_select_extra(cur) -> str:
 
 
 # ── 당겨받기 그룹 (volte_supplementary_services.md §5.1) ─────────────────────────
-#   pickup_group: 같은 값끼리 당겨받기 가능. NULL/빈 값 = 미지정(CSP 는 org_id 폴백).
+#   pickup_group: 전화 그룹 멤버십에서 파생되는 값(= phone_groups.id). NULL/빈 값 = 어떤 픽업·BLF 축에도 속하지 않음.
 #   CSP 반영은 다음 REGISTER 갱신부터(등록 바인딩 스냅샷).
 
 _HAS_PICKUP_COL = None  # 컬럼 프로브 캐시 (프로세스 수명). None=미확인
@@ -602,7 +622,7 @@ def _pickup_select_extra(cur) -> str:
 
 
 def _parse_pickup_group(body):
-    """body.pickup_group → str|None. 빈 값/공백 = None(그룹 해제 — CSP 는 org 폴백)."""
+    """body.pickup_group → str|None. 빈 값/공백 = None(축 없음 — org 폴백은 없다)."""
     v = body.get('pickup_group')
     if v is None:
         return None
@@ -653,14 +673,8 @@ def _aka_fields(cur, body, scheme, stored_has_keys: bool):
 
 
 def _parse_sip_transport(body):
-    """body.sip_transport → 'UDP'|'TCP'|'TLS'|None. 잘못된 값은 ValueError."""
-    v = body.get('sip_transport')
-    if v in (None, ''):
-        return None
-    v = str(v).strip().upper()
-    if v not in _SIP_TRANSPORTS:
-        raise ValueError(v)
-    return v
+    """body.sip_transport → 'UDP'|'TCP'|'TLS'|None. None/''/'ANY' = NULL(단말 선택). 잘못된 값은 ValueError."""
+    return _subs.parse_sip_transport(body.get('sip_transport'))
 
 
 async def _add_subscription(person_id: str, svc: str, body, config):
@@ -684,14 +698,22 @@ async def _add_subscription(person_id: str, svc: str, body, config):
     try:
         sip_transport = _parse_sip_transport(body)
     except ValueError:
-        return HandlerResult(status=400, body={'error': 'sip_transport must be one of UDP/TCP/TLS'})
+        return HandlerResult(status=400, body={'error': 'sip_transport must be one of UDP/TCP/TLS/ANY'})
     dnd        = _coerce_dnd(body.get('dnd', False))
     forward_id = body.get('forward_id', '')
     table      = _sub_table(svc)
+    kind       = _service_kind(svc)
     try:
         auth_scheme = _parse_auth_scheme(body)
     except ValueError:
         return HandlerResult(status=400, body={'error': 'auth_scheme must be one of digest/aka'})
+    # 테이블 = kind 불변식 — 유선 voip 회선은 kind=voip 접속서비스가 필수(sip_service_model.md §2-9)
+    if kind == 'voip' and not service_ref:
+        return HandlerResult(status=400, body={'error': 'service_ref required for voip',
+                                               'detail': '유선 voip 회선은 kind=voip 접속서비스를 가리켜야 한다'})
+    gate = _service_kind_gate(config, service_ref, kind)
+    if gate is not None:
+        return gate
 
     ha1 = ''
     if passwd:
@@ -702,9 +724,16 @@ async def _add_subscription(person_id: str, svc: str, body, config):
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
+            missing = _table_missing(cur, svc)
+            if missing is not None:
+                return missing
             cur.execute("SELECT id FROM users WHERE id=%s", (person_id,))
             if cur.fetchone() is None:
                 return HandlerResult(status=404, body={'error': 'User not found'})
+            # 번호 유일성 — 가입 테이블 전부 + 대표번호(phone_groups.pilot_id) 주소 공간(dispatch_center.md §8.2)
+            where = _subs.number_taken(cur, msisdn)
+            if where is not None:
+                return HandlerResult(status=409, body={'error': 'number_exists', 'msisdn': msisdn, 'where': where})
             aka = _aka_fields(cur, body, auth_scheme, stored_has_keys=False)
             if isinstance(aka, HandlerResult):
                 return aka
@@ -745,10 +774,11 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
     dnd        = _coerce_dnd(body.get('dnd', False))
     forward_id = body.get('forward_id', '')
     table      = _sub_table(svc)
+    kind       = _service_kind(svc)
     try:
         sip_transport = _parse_sip_transport(body)
     except ValueError:
-        return HandlerResult(status=400, body={'error': 'sip_transport must be one of UDP/TCP/TLS'})
+        return HandlerResult(status=400, body={'error': 'sip_transport must be one of UDP/TCP/TLS/ANY'})
     try:
         auth_scheme = _parse_auth_scheme(body)
     except ValueError:
@@ -756,6 +786,9 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
+            missing = _table_missing(cur, svc)
+            if missing is not None:
+                return missing
             ha1_col = ", ha1" if _has_ha1_column(cur) else ""
             cur.execute(f"SELECT imsi, service_ref{ha1_col} {_aka_select_extra(cur)} FROM {table} WHERE id=%s AND user_id=%s",
                         (msisdn, person_id))
@@ -774,6 +807,11 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
             if 'service_ref' in body:
                 sid = body.get('service_ref')
                 new_ref = None if sid in (None, '', 0, '0') else str(sid).strip()
+                if kind == 'voip' and not new_ref:
+                    return HandlerResult(status=400, body={'error': 'service_ref required for voip'})
+                gate = _service_kind_gate(config, new_ref, kind)
+                if gate is not None:
+                    return gate
                 fields.append("service_ref=%s"); values.append(new_ref)
             if 'imsi' in body:
                 new_imsi = (body.get('imsi') or '').strip() or None
@@ -804,7 +842,7 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
             if passwd:
                 if not new_imsi:
                     return HandlerResult(status=400, body={'error': 'imsi required to derive ha1'})
-                realm = _service_realm(config, new_ref, _service_kind(svc))
+                realm = _service_realm(config, new_ref, kind)
                 if realm is None:
                     return HandlerResult(status=400, body={'error': 'service_ref required to derive ha1 (unknown service)'})
                 if not _has_ha1_column(cur):
@@ -826,6 +864,9 @@ async def _delete_subscription(person_id: str, svc: str, msisdn: str, config):
     table = _sub_table(svc)
     with _get_db(config) as conn:
         with conn.cursor() as cur:
+            missing = _table_missing(cur, svc)
+            if missing is not None:
+                return missing
             cur.execute(
                 f"DELETE FROM {table} WHERE id=%s AND user_id=%s",
                 (msisdn, person_id)
@@ -1604,12 +1645,13 @@ _USER_FIELDS = [
     {'name': 'email', 'type': 'string', 'desc': '이메일 (스키마에 컬럼이 없으면 생략됨)'},
     {'name': 'details', 'type': 'string', 'desc': '비고'},
     {'name': 'reject_id[]', 'type': 'string', 'desc': '착신 거부 번호 목록'},
-    {'name': 'call_subscriptions[]', 'type': 'object', 'desc': 'VoLTE 번호 목록 (아래 가입 필드)'},
+    {'name': 'call_subscriptions[]', 'type': 'object', 'desc': '이동 VoLTE 번호 목록 (아래 가입 필드)'},
+    {'name': 'voip_subscriptions[]', 'type': 'object', 'desc': '유선 VoIP 번호 목록 (아래 가입 필드 — voip 테이블 미마이그레이션 DB 는 빈 배열)'},
     {'name': 'ptt_subscriptions[]', 'type': 'object', 'desc': 'PTT 번호 목록 (아래 가입 필드)'},
     {'name': '*_subscriptions[].id', 'type': 'string', 'desc': '번호(MSISDN)'},
     {'name': '*_subscriptions[].imsi', 'type': 'string', 'desc': 'SIM IMSI — 인증 username 의 user 파트'},
     {'name': '*_subscriptions[].sip_transport', 'type': 'string',
-     'desc': '채널 정책 — TLS=서버 집행 / UDP·TCP=프로비저닝 힌트 / null=단말 선택'},
+     'desc': '채널 정책 — TLS=서버 집행 / UDP·TCP=프로비저닝 힌트 / null(입력은 "ANY" 도 허용)=단말 선택'},
     {'name': '*_subscriptions[].auth_scheme', 'type': 'string',
      'desc': '인증 체계 — digest(SIP Digest, ha1) / aka(IMS AKA over TLS — TLS 채널 집행). 마이그레이션 전 DB 는 생략'},
     {'name': '*_subscriptions[].aka_provisioned', 'type': 'boolean',
@@ -1618,7 +1660,7 @@ _USER_FIELDS = [
     {'name': '*_subscriptions[].dnd', 'type': 'boolean', 'desc': '방해금지'},
     {'name': '*_subscriptions[].forward_id', 'type': 'string', 'desc': '착신전환 대상'},
     {'name': '*_subscriptions[].pickup_group', 'type': 'string',
-     'desc': '당겨받기 그룹 키 — 같은 값끼리 픽업 가능. 빈 값=미지정(CSP 는 org_id 폴백). 마이그레이션 전 DB 는 생략'},
+     'desc': '당겨받기 그룹 = 전화 그룹 id(멤버십에서 파생, 직접 편집 409). 빈 값=어떤 픽업·BLF 축에도 속하지 않음. 마이그레이션 전 DB 는 생략'},
     {'name': '*_subscriptions[].register_time', 'type': 'string', 'desc': 'ISO8601 최근 등록 시각'},
     {'name': '*_subscriptions[].logout_time', 'type': 'string', 'desc': 'ISO8601 최근 로그아웃 시각'},
     {'name': 'create_time', 'type': 'string', 'desc': 'ISO8601 생성'},
@@ -1631,6 +1673,9 @@ _USER_EXAMPLE = {
     'call_subscriptions': [{'id': '01000000001', 'imsi': '450050000000001',
                             'service_ref': 'volte', 'sip_transport': None, 'dnd': False, 'forward_id': '',
                             'register_time': '2026-07-30T08:40:11', 'logout_time': None}],
+    'voip_subscriptions': [{'id': '+82210001001', 'imsi': '82210001001',
+                            'service_ref': 'voip', 'sip_transport': 'TLS', 'dnd': False, 'forward_id': '',
+                            'pickup_group': 'pg-7f3a91c2', 'register_time': '2026-07-30T08:40:11', 'logout_time': None}],
     'ptt_subscriptions': [{'id': '01000000001', 'imsi': '450050000000001',
                            'service_ref': 'mcptt', 'sip_transport': 'TLS', 'dnd': False, 'forward_id': '',
                            'register_time': '2026-07-30T08:40:12', 'logout_time': None}],
@@ -1786,7 +1831,7 @@ CIMS_ADMIN_API_DOCS = [
      'params': [
          {'name': 'person_id', 'in': 'path', 'type': 'integer', 'required': True, 'desc': '가입자 id'},
          {'name': 'kind', 'in': 'path', 'type': 'string', 'required': True,
-          'enum': ['call', 'ptt'], 'desc': '가입 종류 — call = VoLTE'},
+          'enum': ['call', 'voip', 'ptt'], 'desc': '가입 종류 — call = 이동 VoLTE, voip = 유선 VoIP, ptt = MCPTT'},
      ],
      'response': '{subscriptions[]}',
      'response_fields': [
@@ -1814,7 +1859,7 @@ CIMS_ADMIN_API_DOCS = [
      'params': [
          {'name': 'person_id', 'in': 'path', 'type': 'integer', 'required': True, 'desc': '가입자 id'},
          {'name': 'kind', 'in': 'path', 'type': 'string', 'required': True,
-          'enum': ['call', 'ptt'], 'desc': '가입 종류'},
+          'enum': ['call', 'voip', 'ptt'], 'desc': '가입 종류 — call = 이동 VoLTE, voip = 유선 VoIP, ptt = MCPTT'},
          {'name': 'body', 'in': 'body', 'type': 'object', 'required': True,
           'desc': '{id(MSISDN, 필수), imsi(필수), service_ref?, passwd?, sip_transport?(UDP|TCP|TLS), '
                   'auth_scheme?(digest|aka), k?(hex32), opc?(hex32)|op?(hex32), amf?(hex4), dnd?, forward_id?, '
@@ -1829,7 +1874,7 @@ CIMS_ADMIN_API_DOCS = [
          {'status': 400, 'when': 'imsi 누락', 'body': {'error': 'imsi required'}},
          {'status': 400, 'when': 'passwd 가 있는데 service_ref 가 비었거나 미정의 서비스',
           'body': {'error': 'service_ref required to derive ha1 (unknown service)'}},
-         {'status': 400, 'when': 'sip_transport 값 오류', 'body': {'error': 'sip_transport must be one of UDP/TCP/TLS'}},
+         {'status': 400, 'when': 'sip_transport 값 오류', 'body': {'error': 'sip_transport must be one of UDP/TCP/TLS/ANY'}},
          {'status': 400, 'when': 'auth_scheme=aka 인데 k/opc(op) 없음', 'body': {'error': 'k and opc (or op) required for auth_scheme=aka'}},
          {'status': 503, 'when': 'subscriptions.ha1 컬럼 없음 (migrate_subscription_ha1.sql 미적용 — 자격 저장처 부재)',
           'body': {'error': 'schema_not_migrated'}},
@@ -1854,7 +1899,7 @@ CIMS_ADMIN_API_DOCS = [
      'params': [
          {'name': 'person_id', 'in': 'path', 'type': 'integer', 'required': True, 'desc': '가입자 id'},
          {'name': 'kind', 'in': 'path', 'type': 'string', 'required': True,
-          'enum': ['call', 'ptt'], 'desc': '가입 종류'},
+          'enum': ['call', 'voip', 'ptt'], 'desc': '가입 종류 — call = 이동 VoLTE, voip = 유선 VoIP, ptt = MCPTT'},
          {'name': 'msisdn', 'in': 'path', 'type': 'string', 'required': True,
           'desc': '번호 (+ 로 시작하면 URL-encode)'},
          {'name': 'body', 'in': 'body', 'type': 'object', 'required': True, 'desc': '변경할 필드만'},
@@ -1866,7 +1911,7 @@ CIMS_ADMIN_API_DOCS = [
          {'status': 400, 'when': 'JSON 본문 없음', 'body': {'error': 'JSON body required'}},
          {'status': 400, 'when': 'imsi 또는 service_ref 가 바뀌는데 passwd 미전송',
           'body': {'error': 'passwd required when imsi or service_ref changes (ha1 rebinding)'}},
-         {'status': 400, 'when': 'sip_transport 값 오류', 'body': {'error': 'sip_transport must be one of UDP/TCP/TLS'}},
+         {'status': 400, 'when': 'sip_transport 값 오류', 'body': {'error': 'sip_transport must be one of UDP/TCP/TLS/ANY'}},
          {'status': 404, 'when': '없는 가입자/번호'},
      ],
      'notes': ['dnd 는 "Y"/"1"/"true"/"on" 같은 문자열도 참으로 해석된다 ("false"/"0" 은 거짓).',
@@ -1884,7 +1929,7 @@ CIMS_ADMIN_API_DOCS = [
      'params': [
          {'name': 'person_id', 'in': 'path', 'type': 'integer', 'required': True, 'desc': '가입자 id'},
          {'name': 'kind', 'in': 'path', 'type': 'string', 'required': True,
-          'enum': ['call', 'ptt'], 'desc': '가입 종류'},
+          'enum': ['call', 'voip', 'ptt'], 'desc': '가입 종류 — call = 이동 VoLTE, voip = 유선 VoIP, ptt = MCPTT'},
          {'name': 'msisdn', 'in': 'path', 'type': 'string', 'required': True, 'desc': '번호'},
      ],
      'response': '{id}',

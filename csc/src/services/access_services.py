@@ -29,8 +29,9 @@ logger = Logger()
 
 COLLECTION = 'access_services'
 
-# 접속환경 클래스(kind)의 가족 — 같은 가입 테이블·같은 CSP 경로. service_ref 매칭은 이 경계를 넘지 않는다
-#   (PTT 가입 행이 전화 서비스 name 을 가리켜도 ptt 항목 — 가입 테이블이 다르다).
+# 접속환경 클래스(kind) = 가입 테이블 하나(services.subscriptions — volte/voip/ptt). service_ref 매칭은 **exact kind**
+#   (ptt≡mcptt) 안에서만 한다: voip 회선이 volte 서비스 name 을 가리키면 해당 없음(쓰기 게이트 400 service_kind_mismatch).
+#   전화 가족(volte∪voip)은 `family()` — 로그/통계 축·전화번호부 합산 같은 축 용도이며 서비스 해석에는 쓰지 않는다.
 PHONE_KINDS = ('volte', 'voip')
 PTT_KINDS = ('ptt', 'mcptt')
 
@@ -83,20 +84,36 @@ def records(config: Optional[dict] = None) -> list:
     return out
 
 
+def _norm_kind(kind: str) -> str:
+    k = (kind or '').strip().lower()
+    return 'ptt' if k in PTT_KINDS else k
+
+
 def find(config: Optional[dict], service_ref: str, kind: str) -> Optional[dict]:
-    """service_ref(= access_services.name) 로 찾는다 — kind 가족 경계 안에서만. 없으면 None(종류 폴백은 하지 않는다 —
-    H(A1) 결박처럼 '그 서비스' 가 필요한 호출자용)."""
+    """service_ref(= access_services.name) 로 찾는다 — kind exact(ptt≡mcptt) 안에서만. 없으면 None(종류 폴백은 하지 않는다 —
+    H(A1) 결박처럼 '그 서비스' 가 필요한 호출자용). kind 없는 레코드는 이름으로 인정한다."""
     ref = (service_ref or '').strip()
     if not ref:
         return None
-    fam = family(kind)
+    k = _norm_kind(kind)
     for r in records(config):
         if r.get('name') != ref:
             continue
-        rfam = family(r.get('kind'))
-        if fam and rfam and rfam != fam:            # 경계는 양쪽 kind 를 알 때만 — kind 없는 레코드는 이름으로 인정
+        rk = _norm_kind(r.get('kind'))
+        if k and rk and rk != k:                    # 테이블 = kind 불변식 — 다른 kind 의 같은 이름은 해당 없음
             continue
         return r
+    return None
+
+
+def find_by_name(config: Optional[dict], service_ref: str) -> Optional[dict]:
+    """이름만으로 찾는다(kind 무관) — 쓰기 게이트가 '이 이름의 서비스는 어느 kind 인가' 를 묻는 용도."""
+    ref = (service_ref or '').strip()
+    if not ref:
+        return None
+    for r in records(config):
+        if r.get('name') == ref:
+            return r
     return None
 
 
@@ -116,10 +133,10 @@ def resolve(config: Optional[dict], service_ref: str, kind: str) -> Optional[dic
 
 
 def _overlay(services: dict, name: str, kinds: tuple) -> tuple:
-    """csc.json Provisioning.Services 에서 (키, 항목) — name 일치 항목 우선, 없으면 kind 키 순서대로."""
+    """csc.json Provisioning.Services 에서 (키, 항목) — 같은 kind 키의 name 일치 항목 우선, 없으면 kind 키 순서대로."""
     if name:
         for k, v in services.items():
-            if isinstance(v, dict) and (v.get('name') or k) == name and (family(k) == family(kinds[0]) or not family(k)):
+            if isinstance(v, dict) and (v.get('name') or k) == name and _norm_kind(k) == _norm_kind(kinds[0]):
                 return k, v
     for k in kinds:
         v = services.get(k)
@@ -132,7 +149,7 @@ def entry(kind: str, service_ref: str, provisioning: dict, config: Optional[dict
     """(와이어 kind, 서비스 항목) — `/provisioning/me` 가 내리는 한 서비스의 설정.
 
     미러 레코드(정의) 위에 csc.json 항목(단말 도달 정보)을 합친다. 와이어 kind 는 레코드의 kind(volte|voip|ptt) — 단말이 회선
-    종류를 안다. 레코드가 없으면 csc.json 만으로: service_ref 와 name 이 같은 항목(가족 경계 안) → 종류 키.
+    종류를 안다. 레코드가 없으면 csc.json 만으로: service_ref 와 name 이 같은 항목(같은 kind 키) → kind 키.
     """
     services = (provisioning.get('Services') or {}) if isinstance(provisioning, dict) else {}
     kind = (kind or '').lower()
@@ -141,7 +158,7 @@ def entry(kind: str, service_ref: str, provisioning: dict, config: Optional[dict
         ref = (service_ref or '').strip()
         if ref:
             for k, v in services.items():
-                if isinstance(v, dict) and (v.get('name') or k) == ref and family(k) == family(kind):
+                if isinstance(v, dict) and (v.get('name') or k) == ref and _norm_kind(k) == _norm_kind(kind):
                     return k, v
         return kind, (services.get(kind) or {})
     rec_kind = (rec.get('kind') or kind).lower()

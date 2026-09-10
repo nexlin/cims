@@ -2,7 +2,7 @@ import { useConfirm } from '@core/components/custom/confirm'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import IconBtn from '@core/components/IconBtn'
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Pencil, Plus, Trash2, X } from 'lucide-react'
-import { usersApi, type UserSummary, type Subscription, type UserInput, type McpttProfile, type SipTransport, type AuthScheme, type ImportResult } from '@core/api/users'
+import { usersApi, type UserSummary, type Subscription, type UserInput, type McpttProfile, type SipTransport, type AuthScheme, type ImportResult, type LineSvc } from '@core/api/users'
 import { groupsApi, type Group } from '@core/api/groups'
 import { orgApi, type Organization } from '@core/api/organizations'
 import OrgTreePanel from '@core/components/OrgTreePanel'
@@ -21,14 +21,44 @@ import Modal from '@core/components/Modal'
 import { Checkbox } from '@core/components/ui/checkbox'
 
 // ── 사용자 프로비저닝 워크벤치 (사용자 = 가입, 번호 등록이 가입 행위) ──────────
-//  좌: 조직트리(공유 스코프) | 상단 탭: 사용자/VoLTE 번호/PTT 번호.
+//  좌: 조직트리(공유 스코프) | 상단 탭: 사용자/VoLTE 번호/VoIP 번호/PTT 번호 (번호 탭 = 가입 테이블 = 접속환경 kind).
 //  편집은 '행 펼침 상세' 단일 패러다임으로 통일 — 행 클릭 → 상세(기본정보 편집 + 번호 서브테이블).
 //  번호는 사용자 종속(child) — 별도 메뉴 없이 사용자 하위로 관리. PTT 그룹은 별도 메뉴.
 
-type Tab = 'users' | 'volte' | 'ptt'
+type Tab = 'users' | 'volte' | 'voip' | 'ptt'
+const TAB_SVC: Record<Exclude<Tab, 'users'>, LineSvc> = { volte: 'call', voip: 'voip', ptt: 'ptt' }
 
 // 번호 탭의 평탄화 행
-interface NumberRow { msisdn: string; svc: 'call' | 'ptt'; user: UserSummary; sub: Subscription }
+interface NumberRow { msisdn: string; svc: LineSvc; user: UserSummary; sub: Subscription }
+
+// ── 회선 종류(접속환경 kind)별 폼 스펙 — 종류마다 다른 것만 여기 선언하고 폼·표는 이 스펙 하나로 그린다
+//    (sip_service_model.md §2-9, volte_supplementary_services.md §3 유선 규약). 같은 것은 스펙에 두지 않는다.
+interface LineSpec {
+  label: string                     // 배지 라벨
+  short: string                     // 버튼·제목 라벨
+  badge: 'brandSoft' | 'infoSoft' | 'successSoft'
+  subsOf: (u: UserSummary) => Subscription[]
+  defaultRef: string                // 접속서비스 카탈로그가 비었을 때 기본 name
+  msisdnPlaceholder: string
+  imsiAuto: boolean                 // IMSI 를 비우면 MSISDN 숫자로 채운다(USIM 없는 유선 규약 — Digest username 의 user 파트)
+  authSchemes: AuthScheme[]         // 고를 수 있는 인증 체계 — 하나뿐이면 선택 UI 를 숨기고 그 값으로 보낸다
+  defaultTransport: SipTransport | ''   // 새 회선 기본 채널 정책 ('' = ANY 단말 선택)
+  showDnd: boolean                  // DND·착신전환은 전화 회선만
+  showExtension: boolean            // 내선 라벨(끝 자리, 표시 전용 — 망 주소는 E.164)
+}
+const LINE: Record<LineSvc, LineSpec> = {
+  call: { label: 'VoLTE', short: 'VoLTE', badge: 'brandSoft', subsOf: u => u.call_subscriptions || [], defaultRef: 'volte',
+          msisdnPlaceholder: '+8213…', imsiAuto: false, authSchemes: ['digest', 'aka'], defaultTransport: '', showDnd: true, showExtension: false },
+  voip: { label: 'VoIP', short: 'VoIP', badge: 'infoSoft', subsOf: u => u.voip_subscriptions || [], defaultRef: 'voip',
+          msisdnPlaceholder: '+8221…', imsiAuto: true, authSchemes: ['digest'], defaultTransport: 'TLS', showDnd: true, showExtension: true },
+  ptt:  { label: 'McPTT', short: 'PTT', badge: 'successSoft', subsOf: u => u.ptt_subscriptions || [], defaultRef: 'mcptt',
+          msisdnPlaceholder: '+825…', imsiAuto: false, authSchemes: ['digest', 'aka'], defaultTransport: 'TLS', showDnd: false, showExtension: false },
+}
+const LINE_SVCS: LineSvc[] = ['call', 'voip', 'ptt']
+// 내선 라벨 자릿수 — 서버 Provisioning.ExtensionDigits 기본값과 같다(표시 전용)
+const EXT_DIGITS = 4
+const digitsOf = (msisdn: string) => msisdn.replace(/\D/g, '')
+const extensionOf = (msisdn: string) => digitsOf(msisdn).slice(-EXT_DIGITS)
 
 // 펼침 상태 — 어느 행이 펼쳐졌는지(key) + 그 사용자(userId) + 초기 편집모드 + 강조할 번호
 type Expand = { key: string | number; userId: number; edit: boolean; hi?: string } | null
@@ -103,7 +133,7 @@ export default function ProvisioningWorkbenchPage() {
   const [exp, setExp] = useState<Expand>(null)
   // 추가 폼 (테이블 위 블록)
   const [addUserOpen, setAddUserOpen] = useState(false)
-  const [addNumSvc, setAddNumSvc] = useState<'call' | 'ptt' | null>(null)
+  const [addNumSvc, setAddNumSvc] = useState<LineSvc | null>(null)
 
   const orgOpts = useMemo(() => orgIndentedOptions(orgs), [orgs])
   const userIndex = useMemo(() => buildPickIndex(users, 'user'), [users])
@@ -136,8 +166,7 @@ export default function ProvisioningWorkbenchPage() {
   }, [])
 
   const userHasNumber = useCallback((u: UserSummary, q: string) =>
-    u.call_subscriptions.some(s => s.id.toLowerCase().includes(q)) ||
-    u.ptt_subscriptions.some(s => s.id.toLowerCase().includes(q)), [])
+    LINE_SVCS.some(svc => LINE[svc].subsOf(u).some(s => s.id.toLowerCase().includes(q))), [])
 
   // ── 탭 데이터 ──
   const userRows = useMemo(() => {
@@ -146,18 +175,19 @@ export default function ProvisioningWorkbenchPage() {
       (!q || u.name.toLowerCase().includes(q) || (u.title || '').toLowerCase().includes(q) || userHasNumber(u, q)))
   }, [users, inScope, search, userHasNumber])
 
-  const buildNumberRows = useCallback((svc: 'call' | 'ptt'): NumberRow[] => {
+  const buildNumberRows = useCallback((svc: LineSvc): NumberRow[] => {
     const q = search.trim().toLowerCase()
     const out: NumberRow[] = []
     for (const u of users) {
       if (!inScope(u.org_id || '')) continue
-      const subs = svc === 'call' ? u.call_subscriptions : u.ptt_subscriptions
-      for (const sub of subs) out.push({ msisdn: sub.id, svc, user: u, sub })
+      for (const sub of LINE[svc].subsOf(u)) out.push({ msisdn: sub.id, svc, user: u, sub })
     }
     return out.filter(r => !q || r.msisdn.toLowerCase().includes(q) || r.user.name.toLowerCase().includes(q))
   }, [users, inScope, search])
   const volteRows = useMemo(() => buildNumberRows('call'), [buildNumberRows])
+  const voipRows = useMemo(() => buildNumberRows('voip'), [buildNumberRows])
   const pttRows = useMemo(() => buildNumberRows('ptt'), [buildNumberRows])
+  const rowsOf: Record<Exclude<Tab, 'users'>, NumberRow[]> = { volte: volteRows, voip: voipRows, ptt: pttRows }
 
   // ── 삭제 ──
   async function batchDeleteUsers() {
@@ -190,13 +220,10 @@ export default function ProvisioningWorkbenchPage() {
     { key: 'org', header: '조직', width: 220, sortValue: u => buildOrgPath(orgs, u.org_id), render: u => <span className="text-sm text-muted-foreground" title={buildOrgPath(orgs, u.org_id)}>{buildOrgPath(orgs, u.org_id)}</span> },
     { key: 'details', header: '설명', render: u => <span className="text-sm text-muted-foreground">{u.details || '—'}</span> },
     { key: 'nums', header: '번호', width: 220, render: u => {
-      const all = [
-        ...u.call_subscriptions.map(s => ({ svc: 'call' as const, id: s.id })),
-        ...u.ptt_subscriptions.map(s => ({ svc: 'ptt' as const, id: s.id })),
-      ]
+      const all = LINE_SVCS.flatMap(svc => LINE[svc].subsOf(u).map(s => ({ svc, id: s.id })))
       if (all.length === 0) return <span className="text-sm text-muted-foreground">—</span>
       return <span className="flex flex-wrap gap-[3px]">
-        {all.map(n => <Badge  variant={n.svc === 'call' ? 'brandSoft' : 'successSoft'} key={`${n.svc}:${n.id}`} title={n.svc === 'call' ? 'VoLTE' : 'McPTT'}>{n.id}</Badge>)}
+        {all.map(n => <Badge  variant={LINE[n.svc].badge} key={`${n.svc}:${n.id}`} title={LINE[n.svc].label}>{n.id}</Badge>)}
       </span>
     } },
     { key: 'act', header: '', width: 84, align: 'right', render: u => canWrite ? (
@@ -220,17 +247,20 @@ export default function ProvisioningWorkbenchPage() {
     { key: 'user', header: '가입자', sortable: true, sortValue: r => r.user.name, render: r => r.user.name },
     { key: 'org', header: '조직', width: 130, render: r => <span className="text-sm text-muted-foreground">{orgs.find(o => o.code === r.user.org_id)?.name || r.user.org_id || '—'}</span> },
   ]
-  const volteCols: Column<NumberRow>[] = [
+  // 전화 회선(VoLTE·VoIP) 표 = 기본 열 + DND/착신전환, PTT 표 = 기본 열
+  const phoneCols: Column<NumberRow>[] = [
     ...numberBaseCols,
     { key: 'dnd', header: 'DND', width: 70, align: 'center', render: r => <Badge  variant={r.sub.dnd ? 'dangerSoft' : 'neutralSoft'}>{r.sub.dnd ? 'ON' : 'OFF'}</Badge> },
     { key: 'fwd', header: '착신전환', width: 120, render: r => <span className="text-sm text-muted-foreground">{r.sub.forward_id || '—'}</span> },
     numberActCol,
   ]
   const pttCols: Column<NumberRow>[] = [...numberBaseCols, numberActCol]
+  const colsOf: Record<Exclude<Tab, 'users'>, Column<NumberRow>[]> = { volte: phoneCols, voip: phoneCols, ptt: pttCols }
 
   const TABS: Array<{ k: Tab; label: string; count: number }> = [
     { k: 'users', label: '사용자', count: userRows.length },
     { k: 'volte', label: 'VoLTE 번호', count: volteRows.length },
+    { k: 'voip', label: 'VoIP 번호', count: voipRows.length },
     { k: 'ptt', label: 'PTT 번호', count: pttRows.length },
   ]
 
@@ -278,9 +308,9 @@ export default function ProvisioningWorkbenchPage() {
               {selected.size > 0 && <Button variant="destructive" onClick={batchDeleteUsers}>선택 삭제 ({selected.size})</Button>}
               <Button variant="default" onClick={() => { setAddUserOpen(v => !v); setExp(null) }}><Plus size={13} /> 사용자</Button>
             </>}
-            {(tab === 'volte' || tab === 'ptt') && canWrite && (
-              <Button variant="default" onClick={() => { setAddNumSvc(tab === 'volte' ? 'call' : 'ptt'); setExp(null) }}>
-                <Plus size={13} /> {tab === 'volte' ? 'VoLTE' : 'PTT'} 번호
+            {tab !== 'users' && canWrite && (
+              <Button variant="default" onClick={() => { setAddNumSvc(TAB_SVC[tab]); setExp(null) }}>
+                <Plus size={13} /> {LINE[TAB_SVC[tab]].short} 번호
               </Button>
             )}
           </span>
@@ -296,9 +326,9 @@ export default function ProvisioningWorkbenchPage() {
               onCancel={() => setAddUserOpen(false)} />
           </div>
         )}
-        {(tab === 'volte' || tab === 'ptt') && addNumSvc && (
+        {tab !== 'users' && addNumSvc && (
           <div className="border-b border-border bg-muted py-2.5 px-4">
-            <div className="font-semibold text-sm text-primary mb-2">새 {addNumSvc === 'call' ? 'VoLTE' : 'PTT'} 번호</div>
+            <div className="font-semibold text-sm text-primary mb-2">새 {LINE[addNumSvc].short} 번호</div>
             <NumberAddForm svc={addNumSvc} catalog={catalog} userIndex={userIndex} orgScope={orgScope} orgPathOf={orgPathOf}
               onAdded={() => { setAddNumSvc(null); load() }} onCancel={() => setAddNumSvc(null)} />
           </div>
@@ -313,19 +343,12 @@ export default function ProvisioningWorkbenchPage() {
             renderExpanded={exp && expUser ? renderDetail : undefined}
             pageSize={50} emptyText="사용자 없음" />
         )}
-        {tab === 'volte' && (
-          <DataTable<NumberRow> columns={volteCols} rows={volteRows} rowKey={r => r.msisdn} loading={loading}
+        {tab !== 'users' && (
+          <DataTable<NumberRow> key={tab} columns={colsOf[tab]} rows={rowsOf[tab]} rowKey={r => r.msisdn} loading={loading}
             onRowClick={r => toggleExpand(r.msisdn, r.user.id, r.msisdn)}
             expandedKey={exp?.key ?? null}
             renderExpanded={exp && expUser ? renderDetail : undefined}
-            pageSize={50} emptyText="VoLTE 번호 없음" />
-        )}
-        {tab === 'ptt' && (
-          <DataTable<NumberRow> columns={pttCols} rows={pttRows} rowKey={r => r.msisdn} loading={loading}
-            onRowClick={r => toggleExpand(r.msisdn, r.user.id, r.msisdn)}
-            expandedKey={exp?.key ?? null}
-            renderExpanded={exp && expUser ? renderDetail : undefined}
-            pageSize={50} emptyText="PTT 번호 없음" />
+            pageSize={50} emptyText={`${LINE[TAB_SVC[tab]].short} 번호 없음`} />
         )}
       </div>
 
@@ -582,27 +605,40 @@ function PttProfileRow({ pid, msisdn, canWrite }: { pid: number; msisdn: string;
   )
 }
 
-// 서비스 카탈로그 항목 — ref(access_services 이름) + 그 서비스의 svc(call=VoLTE / ptt=PTT)
-interface ServiceCat { svc: 'call' | 'ptt'; ref: string }
+// 서비스 카탈로그 항목 — ref(access_services 이름) + 그 서비스의 회선 종류(svc). 같은 종류의 회선이 쓰는 이름을 모으고,
+//   종류마다 하나도 없으면 패키지 기본 이름(volte/voip/mcptt)을 둔다. 회선의 service_ref 는 자기 종류(kind)의 서비스만 가리킬 수 있다.
+interface ServiceCat { svc: LineSvc; ref: string }
 function buildServiceCatalog(users: UserSummary[]): ServiceCat[] {
   const seen = new Set<string>()
   const cat: ServiceCat[] = []
-  const add = (svc: 'call' | 'ptt', ref: string) => { const k = `${svc}:${ref}`; if (ref && !seen.has(k)) { seen.add(k); cat.push({ svc, ref }) } }
-  for (const u of users) {
-    for (const s of u.call_subscriptions) if (s.service_ref) add('call', s.service_ref)
-    for (const s of u.ptt_subscriptions) if (s.service_ref) add('ptt', s.service_ref)
-  }
-  if (!cat.some(c => c.svc === 'call')) add('call', 'volte')
-  if (!cat.some(c => c.svc === 'ptt')) add('ptt', 'mcptt')
+  const add = (svc: LineSvc, ref: string) => { const k = `${svc}:${ref}`; if (ref && !seen.has(k)) { seen.add(k); cat.push({ svc, ref }) } }
+  for (const u of users) for (const svc of LINE_SVCS) for (const s of LINE[svc].subsOf(u)) if (s.service_ref) add(svc, s.service_ref)
+  for (const svc of LINE_SVCS) if (!cat.some(c => c.svc === svc)) add(svc, LINE[svc].defaultRef)
   return cat
 }
 
-// VoLTE/PTT 유형 배지
-function SvcBadge({ svc }: { svc: 'call' | 'ptt' }) {
-  return <Badge  variant={svc === 'call' ? 'brandSoft' : 'successSoft'}>{svc === 'call' ? 'VoLTE' : 'McPTT'}</Badge>
+// 회선 종류 배지 (VoLTE / VoIP / McPTT)
+function SvcBadge({ svc }: { svc: LineSvc }) {
+  return <Badge  variant={LINE[svc].badge}>{LINE[svc].label}</Badge>
 }
 
-interface AddNum { id: string; imsi: string; svcCat: string; passwd: string; sip_transport: SipTransport | ''; auth_scheme: AuthScheme; k: string; opc: string; dnd: boolean; forward_id: string; pickup_group: string }
+// 인증 체계 칸 — 종류가 허용하는 체계가 하나면(유선 voip = digest) 선택 UI 없이 고정 표시
+function AuthCell({ spec, value, onChange }: { spec: LineSpec; value: AuthScheme | undefined; onChange: (v: AuthScheme) => void }) {
+  if (spec.authSchemes.length === 1) return <span className="text-sm text-muted-foreground" title="USIM 없는 유선 회선 — SIP Digest 만">Digest</span>
+  return <AuthSelect value={value} onChange={onChange} />
+}
+
+// 픽업그룹 칸 — 값은 전화 그룹 멤버십에서 파생된다(SoT = 멤버십, 직접 편집 409). 읽기 전용.
+const PICKUP_TITLE = '전화 그룹 멤버십에서 파생 — 구성 › 전화 그룹. 빈 값 = 어떤 픽업·BLF 축에도 속하지 않음. 반영은 다음 등록 갱신부터'
+function PickupCell({ value }: { value?: string | null }) {
+  if (isPhoneGroupId(value)) return <Badge  variant="brandSoft" title={PICKUP_TITLE}>{value}</Badge>
+  return <span className="text-sm text-muted-foreground" title={PICKUP_TITLE}>{value || '—'}</span>
+}
+
+// 새 회선 입력 상태 — IMSI 는 종류 규약(imsiAuto)이면 비워도 된다(전송 시 MSISDN 숫자로 채움)
+interface AddNum { id: string; imsi: string; svcCat: string; passwd: string; sip_transport: SipTransport | ''; auth_scheme: AuthScheme; k: string; opc: string; dnd: boolean; forward_id: string }
+// 종류 규약에 맞춘 IMSI 값 — 비면 imsiAuto 종류만 MSISDN 숫자로 채운다
+const effectiveImsi = (spec: LineSpec, imsi: string, msisdn: string) => imsi.trim() || (spec.imsiAuto ? digitsOf(msisdn) : '')
 
 // 전화 그룹 id(pg-…, 전환 전 발급 dg-… 유지 — dispatch_center.md §3.1) 에서 파생된 pickup_group 은 직접 편집 409(derived_from_phone_group)
 const isPhoneGroupId = (v: string | null | undefined) => /^(pg|dg)-/.test(v || '')
@@ -639,13 +675,14 @@ function akaBody(scheme: AuthScheme, k: string, opc: string, stored: boolean): {
   return { fields: { ...fields, k, opc } }
 }
 
-// 채널 정책 선택 — 값의 의미는 Subscription.sip_transport 주석 참조
+// 채널 정책 선택 — 값의 의미는 Subscription.sip_transport 주석 참조. ANY(null) = 서버 정책 없음, 단말이 고른다.
+const TRANSPORT_TITLE = 'ANY=단말 선택(서버 정책 없음) / UDP·TCP=단말 힌트 / TLS=서버 집행(비-TLS 요청 403)'
 const TRANSPORT_OPTS: Array<{ v: SipTransport | ''; label: string }> = [
-  { v: '', label: '자유' }, { v: 'UDP', label: 'UDP' }, { v: 'TCP', label: 'TCP' }, { v: 'TLS', label: 'TLS (강제)' },
+  { v: '', label: 'ANY' }, { v: 'UDP', label: 'UDP' }, { v: 'TCP', label: 'TCP' }, { v: 'TLS', label: 'TLS (강제)' },
 ]
 function TransportSelect({ value, onChange }: { value: SipTransport | '' | null | undefined; onChange: (v: SipTransport | '') => void }) {
   return <Select value={toSel(value || '')} onValueChange={(v: string) => onChange(fromSel(v) as SipTransport | '')}>
-   <SelectTrigger title="TLS=서버 집행(비-TLS 요청 403) / UDP·TCP=단말 힌트 / 자유=단말 선택"><SelectValue /></SelectTrigger>
+   <SelectTrigger title={TRANSPORT_TITLE}><SelectValue /></SelectTrigger>
    <SelectContent>
       {TRANSPORT_OPTS.map(o => <SelectItem key={o.v} value={o.v}>{o.label}</SelectItem>)}
    </SelectContent>
@@ -653,7 +690,7 @@ function TransportSelect({ value, onChange }: { value: SipTransport | '' | null 
 }
 function TransportBadge({ v, aka }: { v?: SipTransport | null; aka?: boolean }) {
   if (aka) return <TransportFixedAka />
-  if (!v) return <span className="text-sm text-muted-foreground">자유</span>
+  if (!v) return <span className="text-sm text-muted-foreground" title="단말 선택 — 서버 정책 없음">ANY</span>
   return <Badge  variant={v === 'TLS' ? 'dangerSoft' : 'brandSoft'} title={v === 'TLS' ? '서버 집행 — 비-TLS 채널 요청 403' : '프로비저닝 힌트'}>{v}</Badge>
 }
 // AKA 가입자는 채널 정책(sip_transport) 값과 무관하게 보호 채널이 강제된다(requiresTls = TLS ∨ aka,
@@ -663,65 +700,76 @@ function TransportFixedAka() {
     title="AKA — 보호 채널(TLS) 강제. sip_transport 값과 무관하게 비-TLS 요청은 403이며, 단말 프로비저닝 목록도 TLS 하나로 좁혀진다. 접속서비스에 TLS 접속점(tls_port)이 없으면 등록 불가">TLS (AKA 강제)</Badge>
 }
 
-// ── 단일 번호 테이블 (사용자 상세 내부, VoLTE+PTT 통합) ──
+// ── 단일 번호 테이블 (사용자 상세 내부, VoLTE+VoIP+PTT 통합) — 종류별 차이는 LINE 스펙 하나로 그린다 ──
+type LineRow = { svc: LineSvc; sub: Subscription }
 function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: UserSummary; catalog: ServiceCat[]; canWrite: boolean; highlight?: string; onReload: () => void }) {
   const { show } = useToast()
   const confirm = useConfirm()
-  const rows: Array<{ svc: 'call' | 'ptt'; sub: Subscription }> = [
-    ...user.call_subscriptions.map(s => ({ svc: 'call' as const, sub: s })),
-    ...user.ptt_subscriptions.map(s => ({ svc: 'ptt' as const, sub: s })),
-  ]
+  const rows: LineRow[] = LINE_SVCS.flatMap(svc => LINE[svc].subsOf(user).map(sub => ({ svc, sub })))
   const svcVal = (c: ServiceCat) => `${c.svc}:${c.ref}`
-  const rk = (svc: 'call' | 'ptt', msisdn: string) => `${svc}:${msisdn}`
-  const newAdd = (): AddNum => ({ id: '', imsi: '', svcCat: catalog[0] ? svcVal(catalog[0]) : 'call:volte', passwd: '', sip_transport: '', auth_scheme: 'digest', k: '', opc: '', dnd: false, forward_id: '', pickup_group: '' })
+  const rk = (svc: LineSvc, msisdn: string) => `${svc}:${msisdn}`
+  const catOf = (svcCat: string) => svcCat.split(':')[0] as LineSvc
+  // 새 회선 초기값 — 채널 기본값은 종류 스펙(유선·PTT = TLS, 이동 = ANY)
+  const newAdd = (svcCat?: string): AddNum => {
+    const cat = svcCat || (catalog[0] ? svcVal(catalog[0]) : 'call:volte')
+    return { id: '', imsi: '', svcCat: cat, passwd: '', sip_transport: LINE[catOf(cat)].defaultTransport, auth_scheme: 'digest', k: '', opc: '', dnd: false, forward_id: '' }
+  }
 
   const [editKey, setEditKey] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<Partial<Subscription>>({})
   const [adding, setAdding] = useState(false)
   const [addForm, setAddForm] = useState<AddNum>(newAdd())
 
-  function startEdit(r: { svc: 'call' | 'ptt'; sub: Subscription }) {
+  function startEdit(r: LineRow) {
     setAdding(false); setEditKey(rk(r.svc, r.sub.id))
-    setEditForm({ imsi: r.sub.imsi || '', service_ref: r.sub.service_ref || '', passwd: '', sip_transport: r.sub.sip_transport || null, auth_scheme: r.sub.auth_scheme || 'digest', k: '', opc: '', dnd: r.sub.dnd, forward_id: r.sub.forward_id, pickup_group: r.sub.pickup_group || '' })
+    setEditForm({ imsi: r.sub.imsi || '', service_ref: r.sub.service_ref || '', passwd: '', sip_transport: r.sub.sip_transport || null, auth_scheme: r.sub.auth_scheme || 'digest', k: '', opc: '', dnd: r.sub.dnd, forward_id: r.sub.forward_id })
   }
-  async function saveEdit(r: { svc: 'call' | 'ptt'; sub: Subscription }) {
+  async function saveEdit(r: LineRow) {
+    const spec = LINE[r.svc]
     // passwd 는 변경 시에만 전송. imsi/service_ref 가 바뀌면 서버가 passwd 를 요구한다(H(A1) 결박).
     const d: Partial<Subscription> = { ...editForm }; if (!d.passwd) delete d.passwd
-    // pickup_group 은 변경 시에만 전송 (마이그레이션 전 DB 는 키 포함 시 400)
-    if ((d.pickup_group || '') === (r.sub.pickup_group || '')) delete d.pickup_group
+    // IMSI 를 비웠으면 종류 규약으로 채운다 — 유선 회선은 번호 숫자(USIM 없음)
+    if (spec.imsiAuto && !(d.imsi || '').trim()) d.imsi = digitsOf(r.sub.id)
     if (!d.passwd && ((d.imsi || '') !== (r.sub.imsi || '') || (d.service_ref || '') !== (r.sub.service_ref || ''))) { show('IMSI/서비스 변경 시 비밀번호를 함께 입력해야 합니다 (H(A1) 재결박)', 'err'); return }
-    // AKA: 체계 변경/키 갱신만 전송 (키는 입력했을 때만 — 비우면 보관 키 유지)
-    const aka = akaBody(d.auth_scheme || 'digest', d.k || '', d.opc || '', !!r.sub.aka_provisioned)
+    // 인증 체계 — 종류가 하나만 허용하면 그 값(유선 = digest). AKA: 체계 변경/키 갱신만 전송 (키는 입력했을 때만 — 비우면 보관 키 유지)
+    const scheme: AuthScheme = spec.authSchemes.length === 1 ? spec.authSchemes[0] : (d.auth_scheme || 'digest')
+    const aka = akaBody(scheme, d.k || '', d.opc || '', !!r.sub.aka_provisioned)
     if (aka.err) { show(aka.err, 'err'); return }
     // aka→digest 전환은 Digest 자격(H(A1)) 생성이 필요하다 — 서버는 저장 ha1 이 없을 때 400 (§8.2)
     if ((r.sub.auth_scheme || 'digest') === 'aka' && (aka.fields.auth_scheme || 'digest') === 'digest' && !d.passwd) { show('AKA→Digest 전환 시 비밀번호를 함께 입력해야 합니다 (H(A1) 생성)', 'err'); return }
     delete d.k; delete d.opc; delete d.auth_scheme
     if ((aka.fields.auth_scheme || 'digest') !== (r.sub.auth_scheme || 'digest') || aka.fields.k) Object.assign(d, aka.fields)
+    if (!spec.showDnd) { delete d.dnd; delete d.forward_id }
     try { await usersApi.updateSub(user.id, r.svc, r.sub.id, d); show('수정', 'ok'); setEditKey(null); onReload() }
     catch (e: unknown) { show(String(e), 'err') }
   }
-  async function del(r: { svc: 'call' | 'ptt'; sub: Subscription }) {
+  async function del(r: LineRow) {
     if (!await confirm({ title: '가입 삭제', tone: 'danger', confirmLabel: '삭제',
       body: `${r.sub.id} 삭제?` })) return
     try { await usersApi.deleteSub(user.id, r.svc, r.sub.id); show('삭제', 'ok'); onReload() }
     catch (e: unknown) { show(String(e), 'err') }
   }
   async function add() {
+    const svc = catOf(addForm.svcCat)
+    const spec = LINE[svc]
+    const ref = addForm.svcCat.split(':')[1] || spec.defaultRef
     if (!addForm.id) { show('MSISDN 필수', 'err'); return }
-    if (!addForm.imsi) { show('IMSI 필수', 'err'); return }
-    if (!addForm.passwd && addForm.auth_scheme !== 'aka') { show('비밀번호 필수', 'err'); return }
-    const aka = akaBody(addForm.auth_scheme, addForm.k, addForm.opc, false)
+    const imsi = effectiveImsi(spec, addForm.imsi, addForm.id)
+    if (!imsi) { show('IMSI 필수', 'err'); return }
+    const scheme: AuthScheme = spec.authSchemes.length === 1 ? spec.authSchemes[0] : addForm.auth_scheme
+    if (!addForm.passwd && scheme !== 'aka') { show('비밀번호 필수', 'err'); return }
+    const aka = akaBody(scheme, addForm.k, addForm.opc, false)
     if (aka.err) { show(aka.err, 'err'); return }
-    const [svc, ref] = addForm.svcCat.split(':') as ['call' | 'ptt', string]
-    const body: Partial<Subscription> = { id: addForm.id, imsi: addForm.imsi, service_ref: ref, sip_transport: addForm.sip_transport || null, dnd: addForm.dnd, forward_id: addForm.forward_id, ...aka.fields }
+    const body: Partial<Subscription> = { id: addForm.id, imsi, service_ref: ref, sip_transport: addForm.sip_transport || null,
+      dnd: spec.showDnd ? addForm.dnd : false, forward_id: spec.showDnd ? addForm.forward_id : '', ...aka.fields }
     if (addForm.passwd) body.passwd = addForm.passwd
-    if (addForm.pickup_group) body.pickup_group = addForm.pickup_group
     try { await usersApi.addSub(user.id, svc, body); show('추가', 'ok'); setAdding(false); setAddForm(newAdd()); onReload() }
     catch (e: unknown) { show(String(e), 'err') }
   }
 
-  const addSvc = addForm.svcCat.split(':')[0] as 'call' | 'ptt'
-  const addIsCall = addSvc === 'call'
+  const addSpec = LINE[catOf(addForm.svcCat)]
+  // 종류를 바꾸면 채널 기본값·인증 체계도 그 종류의 것으로 되돌린다(새 행이라 잃는 입력 없음)
+  const changeAddCat = (v: string) => setAddForm({ ...addForm, svcCat: v, sip_transport: LINE[catOf(v)].defaultTransport, auth_scheme: 'digest', k: '', opc: '' })
 
   return (
     <div>
@@ -733,11 +781,11 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
             <Th className="w-[140px]">MSISDN</Th>
             <Th className="w-[100px]">비밀번호</Th>
             <Th>IMSI</Th>
-            <Th className="w-[96px]" title="TLS=서버 집행(비-TLS 채널 요청 403) / UDP·TCP=단말 힌트 / 자유=단말 선택">채널</Th>
-            <Th className="w-[150px]" title="Digest=SIP Digest(H(A1)) / AKA=IMS AKA(K/OPc — CSC AuC 암호화 보관, 보호 채널 강제)">인증</Th>
+            <Th className="w-[96px]" title={TRANSPORT_TITLE}>채널</Th>
+            <Th className="w-[150px]" title="Digest=SIP Digest(H(A1)) / AKA=IMS AKA(K/OPc — CSC AuC 암호화 보관, 보호 채널 강제). 유선 VoIP 는 Digest 만">인증</Th>
             <Th className="w-[56px] text-center">DND</Th>
             <Th className="w-[110px]">착신전환</Th>
-            <Th className="w-[100px]" title="당겨받기 그룹 — 같은 값끼리 픽업 가능. 빈 값=조직(org) 폴백. 반영은 다음 등록 갱신부터">픽업그룹</Th>
+            <Th className="w-[100px]" title={PICKUP_TITLE}>픽업그룹</Th>
             <Th className="w-[110px]"></Th>
           </tr>
         </thead>
@@ -745,7 +793,7 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
           {rows.length === 0 && !adding && <tr><Td colSpan={10} className="py-8 text-center text-muted-foreground p-3">번호 없음 — 아래 [번호 추가]</Td></tr>}
           {rows.map(r => {
             const ed = editKey === rk(r.svc, r.sub.id)
-            const isCall = r.svc === 'call'
+            const spec = LINE[r.svc]
             const hi = highlight && r.sub.id === highlight
             return (
               <tr key={rk(r.svc, r.sub.id)} style={{ background: hi && !ed ? 'var(--cims-brand-soft)' : undefined }}>
@@ -757,20 +805,17 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
    </SelectContent>
  </Select>
                   : <SvcBadge svc={r.svc} />}</Td>
-                <Td><strong>{r.sub.id}</strong></Td>
+                <Td><strong>{r.sub.id}</strong>{spec.showExtension && <span className="ml-1.5 text-xs text-muted-foreground" title="내선 라벨(끝자리, 표시 전용) — 망 주소는 E.164">내선 {extensionOf(r.sub.id)}</span>}</Td>
                 <Td>{ed ? <Input  type="password" placeholder="변경 시 입력" value={editForm.passwd || ''} onChange={e => setEditForm({ ...editForm, passwd: e.target.value })} /> : <span className="text-sm text-muted-foreground">••••</span>}</Td>
-                <Td>{ed ? <Input  placeholder="SIM IMSI" value={editForm.imsi || ''} onChange={e => setEditForm({ ...editForm, imsi: e.target.value })} /> : <span className="text-sm text-muted-foreground">{r.sub.imsi || '—'}</span>}</Td>
+                <Td>{ed ? <Input  placeholder={spec.imsiAuto ? '비우면 번호 숫자' : 'SIM IMSI'} value={editForm.imsi || ''} onChange={e => setEditForm({ ...editForm, imsi: e.target.value })} /> : <span className="text-sm text-muted-foreground">{r.sub.imsi || '—'}</span>}</Td>
                 <Td>{ed ? (editForm.auth_scheme === 'aka' ? <TransportFixedAka /> : <TransportSelect value={editForm.sip_transport} onChange={v => setEditForm({ ...editForm, sip_transport: v || null })} />) : <TransportBadge v={r.sub.sip_transport} aka={r.sub.auth_scheme === 'aka'} />}</Td>
                 <Td>{ed ? <>
-                  <AuthSelect value={editForm.auth_scheme} onChange={v => setEditForm({ ...editForm, auth_scheme: v })} />
-                  {editForm.auth_scheme === 'aka' && <AkaKeyInputs k={editForm.k || ''} opc={editForm.opc || ''} keep={!!r.sub.aka_provisioned} onChange={(k, opc) => setEditForm({ ...editForm, k, opc })} />}
+                  <AuthCell spec={spec} value={editForm.auth_scheme} onChange={v => setEditForm({ ...editForm, auth_scheme: v })} />
+                  {editForm.auth_scheme === 'aka' && spec.authSchemes.includes('aka') && <AkaKeyInputs k={editForm.k || ''} opc={editForm.opc || ''} keep={!!r.sub.aka_provisioned} onChange={(k, opc) => setEditForm({ ...editForm, k, opc })} />}
                 </> : <AuthBadge sub={r.sub} />}</Td>
-                <Td className="text-center">{!isCall ? <span className="text-sm text-muted-foreground">—</span> : ed ? <Checkbox  checked={editForm.dnd || false} onCheckedChange={(c) => setEditForm({ ...editForm, dnd: (c === true) })} /> : (r.sub.dnd ? <Badge  variant="dangerSoft">ON</Badge> : <span className="text-sm text-muted-foreground">—</span>)}</Td>
-                <Td>{!isCall ? <span className="text-sm text-muted-foreground">—</span> : ed ? <Input  placeholder="대상" value={editForm.forward_id || ''} onChange={e => setEditForm({ ...editForm, forward_id: e.target.value })} /> : <span className="text-sm text-muted-foreground">{r.sub.forward_id || '—'}</span>}</Td>
-                <Td>{ed ? (isPhoneGroupId(r.sub.pickup_group)
-                    ? <Badge  variant="brandSoft" title="전화 그룹 멤버십에서 파생 (derived_from_phone_group) — 구성 › 전화 그룹에서 변경">{r.sub.pickup_group}</Badge>
-                    : <Input  placeholder="예: control-room-1" title="자유 문자열 픽업 그룹 — 전화 그룹(대표번호·당겨받기)은 구성 › 전화 그룹" value={editForm.pickup_group || ''} onChange={e => setEditForm({ ...editForm, pickup_group: e.target.value })} />)
-                  : <span className="text-sm text-muted-foreground" title={isPhoneGroupId(r.sub.pickup_group) ? '전화 그룹 (파생)' : undefined}>{r.sub.pickup_group || '—'}</span>}</Td>
+                <Td className="text-center">{!spec.showDnd ? <span className="text-sm text-muted-foreground">—</span> : ed ? <Checkbox  checked={editForm.dnd || false} onCheckedChange={(c) => setEditForm({ ...editForm, dnd: (c === true) })} /> : (r.sub.dnd ? <Badge  variant="dangerSoft">ON</Badge> : <span className="text-sm text-muted-foreground">—</span>)}</Td>
+                <Td>{!spec.showDnd ? <span className="text-sm text-muted-foreground">—</span> : ed ? <Input  placeholder="대상" value={editForm.forward_id || ''} onChange={e => setEditForm({ ...editForm, forward_id: e.target.value })} /> : <span className="text-sm text-muted-foreground">{r.sub.forward_id || '—'}</span>}</Td>
+                <Td><PickupCell value={r.sub.pickup_group} /></Td>
                 <Td className="flex gap-1.5">
                   {!canWrite ? <span className="text-sm text-muted-foreground">—</span> : ed ? <>
                     <IconBtn title="저장" tone="primary" onClick={() => saveEdit(r)}><Check size={ICON} /></IconBtn>
@@ -785,23 +830,24 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
           })}
           {adding && (
             <tr className="bg-brandsoft">
-              <Td><Select value={toSel(addForm.svcCat)} onValueChange={(v: string) => setAddForm({ ...addForm, svcCat: fromSel(v) })}>
+              <Td><Select value={toSel(addForm.svcCat)} onValueChange={(v: string) => changeAddCat(fromSel(v))}>
   <SelectTrigger><SelectValue /></SelectTrigger>
   <SelectContent>
-                  {catalog.map(c => <SelectItem key={svcVal(c)} value={svcVal(c)}>{c.ref} ({c.svc === 'call' ? 'VoLTE' : 'McPTT'})</SelectItem>)}
+                  {catalog.map(c => <SelectItem key={svcVal(c)} value={svcVal(c)}>{c.ref} ({LINE[c.svc].label})</SelectItem>)}
   </SelectContent>
 </Select></Td>
-              <Td><Input  placeholder={addIsCall ? '+8213…' : '+825…'} autoFocus value={addForm.id} onChange={e => setAddForm({ ...addForm, id: e.target.value })} /></Td>
-              <Td><Input  type="password" placeholder={addForm.auth_scheme === 'aka' ? '암호(선택)' : '암호 *'} value={addForm.passwd} onChange={e => setAddForm({ ...addForm, passwd: e.target.value })} /></Td>
-              <Td><Input  placeholder="SIM IMSI *" value={addForm.imsi} onChange={e => setAddForm({ ...addForm, imsi: e.target.value })} /></Td>
-              <Td>{addForm.auth_scheme === 'aka' ? <TransportFixedAka /> : <TransportSelect value={addForm.sip_transport} onChange={v => setAddForm({ ...addForm, sip_transport: v })} />}</Td>
+              <Td><Input  placeholder={addSpec.msisdnPlaceholder} autoFocus value={addForm.id} onChange={e => setAddForm({ ...addForm, id: e.target.value })} />
+                {addSpec.showExtension && addForm.id && <span className="ml-1.5 text-xs text-muted-foreground">내선 {extensionOf(addForm.id)}</span>}</Td>
+              <Td><Input  type="password" placeholder={addForm.auth_scheme === 'aka' && addSpec.authSchemes.includes('aka') ? '암호(선택)' : '암호 *'} value={addForm.passwd} onChange={e => setAddForm({ ...addForm, passwd: e.target.value })} /></Td>
+              <Td><Input  placeholder={addSpec.imsiAuto ? '비우면 번호 숫자' : 'SIM IMSI *'} value={addForm.imsi} onChange={e => setAddForm({ ...addForm, imsi: e.target.value })} /></Td>
+              <Td>{addForm.auth_scheme === 'aka' && addSpec.authSchemes.includes('aka') ? <TransportFixedAka /> : <TransportSelect value={addForm.sip_transport} onChange={v => setAddForm({ ...addForm, sip_transport: v })} />}</Td>
               <Td>
-                <AuthSelect value={addForm.auth_scheme} onChange={v => setAddForm({ ...addForm, auth_scheme: v })} />
-                {addForm.auth_scheme === 'aka' && <AkaKeyInputs k={addForm.k} opc={addForm.opc} onChange={(k, opc) => setAddForm({ ...addForm, k, opc })} />}
+                <AuthCell spec={addSpec} value={addForm.auth_scheme} onChange={v => setAddForm({ ...addForm, auth_scheme: v })} />
+                {addForm.auth_scheme === 'aka' && addSpec.authSchemes.includes('aka') && <AkaKeyInputs k={addForm.k} opc={addForm.opc} onChange={(k, opc) => setAddForm({ ...addForm, k, opc })} />}
               </Td>
-              <Td className="text-center">{addIsCall ? <Checkbox  checked={addForm.dnd} onCheckedChange={(c) => setAddForm({ ...addForm, dnd: (c === true) })} /> : <span className="text-sm text-muted-foreground">—</span>}</Td>
-              <Td>{addIsCall ? <Input  placeholder="대상" value={addForm.forward_id} onChange={e => setAddForm({ ...addForm, forward_id: e.target.value })} /> : <span className="text-sm text-muted-foreground">—</span>}</Td>
-              <Td><Input  placeholder="픽업그룹" value={addForm.pickup_group} onChange={e => setAddForm({ ...addForm, pickup_group: e.target.value })} /></Td>
+              <Td className="text-center">{addSpec.showDnd ? <Checkbox  checked={addForm.dnd} onCheckedChange={(c) => setAddForm({ ...addForm, dnd: (c === true) })} /> : <span className="text-sm text-muted-foreground">—</span>}</Td>
+              <Td>{addSpec.showDnd ? <Input  placeholder="대상" value={addForm.forward_id} onChange={e => setAddForm({ ...addForm, forward_id: e.target.value })} /> : <span className="text-sm text-muted-foreground">—</span>}</Td>
+              <Td><PickupCell value={null} /></Td>
               <Td className="flex gap-1.5">
                 <Button variant="default" onClick={add}>추가</Button>
                 <Button variant="ghost" onClick={() => { setAdding(false); setAddForm(newAdd()) }}>취소</Button>
@@ -818,9 +864,9 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
   )
 }
 
-// ── 번호 탭 직접 추가 폼 (가입자 피커 + 번호 입력) ──
+// ── 번호 탭 직접 추가 폼 (가입자 피커 + 번호 입력) — 필드 가감은 LINE 스펙이 정한다 ──
 function NumberAddForm({ svc, catalog, userIndex, orgScope, orgPathOf, onAdded, onCancel }: {
-  svc: 'call' | 'ptt'
+  svc: LineSvc
   catalog: ServiceCat[]
   userIndex: PickItem[]
   orgScope: string | null
@@ -829,32 +875,34 @@ function NumberAddForm({ svc, catalog, userIndex, orgScope, orgPathOf, onAdded, 
   onCancel: () => void
 }) {
   const { show } = useToast()
+  const spec = LINE[svc]
   const svcCatalog = catalog.filter(c => c.svc === svc)
   const [pick, setPick] = useState<PickItem | null>(null)
-  const [serviceRef, setServiceRef] = useState(svcCatalog[0]?.ref || (svc === 'call' ? 'volte' : 'mcptt'))
+  const [serviceRef, setServiceRef] = useState(svcCatalog[0]?.ref || spec.defaultRef)
   const [msisdn, setMsisdn] = useState('')
   const [imsi, setImsi] = useState('')
   const [passwd, setPasswd] = useState('')
-  const [sipTransport, setSipTransport] = useState<SipTransport | ''>('')
+  const [sipTransport, setSipTransport] = useState<SipTransport | ''>(spec.defaultTransport)
   const [authScheme, setAuthScheme] = useState<AuthScheme>('digest')
   const [akaK, setAkaK] = useState('')
   const [akaOpc, setAkaOpc] = useState('')
   const [dnd, setDnd] = useState(false)
   const [forwardId, setForwardId] = useState('')
-  const [pickupGroup, setPickupGroup] = useState('')
   const [busy, setBusy] = useState(false)
-  const isCall = svc === 'call'
+  const scheme: AuthScheme = spec.authSchemes.length === 1 ? spec.authSchemes[0] : authScheme
+  const isAka = scheme === 'aka'
 
   async function add() {
     if (!pick) { show('가입자 선택 필수', 'err'); return }
     if (!msisdn) { show('MSISDN 필수', 'err'); return }
-    if (!imsi) { show('IMSI 필수', 'err'); return }
-    if (!passwd && authScheme !== 'aka') { show('비밀번호 필수', 'err'); return }
-    const aka = akaBody(authScheme, akaK, akaOpc, false)
+    const imsiVal = effectiveImsi(spec, imsi, msisdn)
+    if (!imsiVal) { show('IMSI 필수', 'err'); return }
+    if (!passwd && !isAka) { show('비밀번호 필수', 'err'); return }
+    const aka = akaBody(scheme, akaK, akaOpc, false)
     if (aka.err) { show(aka.err, 'err'); return }
-    const body: Partial<Subscription> = { id: msisdn, imsi, service_ref: serviceRef, sip_transport: sipTransport || null, dnd, forward_id: forwardId, ...aka.fields }
+    const body: Partial<Subscription> = { id: msisdn, imsi: imsiVal, service_ref: serviceRef, sip_transport: sipTransport || null,
+      dnd: spec.showDnd ? dnd : false, forward_id: spec.showDnd ? forwardId : '', ...aka.fields }
     if (passwd) body.passwd = passwd
-    if (pickupGroup) body.pickup_group = pickupGroup
     setBusy(true)
     try { await usersApi.addSub(Number(pick.value), svc, body); show('번호 추가', 'ok'); onAdded() }
     catch (e: unknown) { show(String(e), 'err') } finally { setBusy(false) }
@@ -884,15 +932,16 @@ function NumberAddForm({ svc, catalog, userIndex, orgScope, orgPathOf, onAdded, 
             </SelectContent>
           </Select>
         </Field>
-        <Field label="MSISDN *" w={150}><Input  placeholder={isCall ? '+8213…' : '+825…'} value={msisdn} onChange={e => setMsisdn(e.target.value)} /></Field>
-        <Field label="IMSI *" w={170}><Input  placeholder="SIM IMSI" value={imsi} onChange={e => setImsi(e.target.value)} /></Field>
-        <Field label={authScheme === 'aka' ? '암호' : '암호 *'} w={120}><Input  type="password" value={passwd} onChange={e => setPasswd(e.target.value)} /></Field>
-        <Field label="채널" w={110}>{authScheme === 'aka' ? <TransportFixedAka /> : <TransportSelect value={sipTransport} onChange={setSipTransport} />}</Field>
-        <Field label="인증" w={100}><AuthSelect value={authScheme} onChange={setAuthScheme} /></Field>
-        {authScheme === 'aka' && <Field label="K / OPc *" w={300}><AkaKeyInputs k={akaK} opc={akaOpc} onChange={(k, opc) => { setAkaK(k); setAkaOpc(opc) }} /></Field>}
-        {isCall && <Field label="DND" w={56}><Checkbox className="mt-1.5" checked={dnd} onCheckedChange={(c) => setDnd((c === true))} /></Field>}
-        {isCall && <Field label="착신전환" w={130}><Input  placeholder="대상" value={forwardId} onChange={e => setForwardId(e.target.value)} /></Field>}
-        <Field label="픽업그룹" w={130}><Input  placeholder="빈 값=조직 폴백" title="당겨받기 그룹 — 같은 값끼리 픽업 가능. 반영은 다음 등록 갱신부터" value={pickupGroup} onChange={e => setPickupGroup(e.target.value)} /></Field>
+        <Field label="MSISDN *" w={150}><Input  placeholder={spec.msisdnPlaceholder} value={msisdn} onChange={e => setMsisdn(e.target.value)} /></Field>
+        {spec.showExtension && <Field label="내선" w={70}><span className="text-sm text-muted-foreground py-1.5" title="내선 라벨(끝자리, 표시 전용) — 망 주소는 E.164">{msisdn ? extensionOf(msisdn) : '—'}</span></Field>}
+        <Field label={spec.imsiAuto ? 'IMSI' : 'IMSI *'} w={170}><Input  placeholder={spec.imsiAuto ? '비우면 번호 숫자' : 'SIM IMSI'} value={imsi} onChange={e => setImsi(e.target.value)} /></Field>
+        <Field label={isAka ? '암호' : '암호 *'} w={120}><Input  type="password" value={passwd} onChange={e => setPasswd(e.target.value)} /></Field>
+        <Field label="채널" w={110}>{isAka ? <TransportFixedAka /> : <TransportSelect value={sipTransport} onChange={setSipTransport} />}</Field>
+        <Field label="인증" w={100}><AuthCell spec={spec} value={authScheme} onChange={setAuthScheme} /></Field>
+        {isAka && <Field label="K / OPc *" w={300}><AkaKeyInputs k={akaK} opc={akaOpc} onChange={(k, opc) => { setAkaK(k); setAkaOpc(opc) }} /></Field>}
+        {spec.showDnd && <Field label="DND" w={56}><Checkbox className="mt-1.5" checked={dnd} onCheckedChange={(c) => setDnd((c === true))} /></Field>}
+        {spec.showDnd && <Field label="착신전환" w={130}><Input  placeholder="대상" value={forwardId} onChange={e => setForwardId(e.target.value)} /></Field>}
+        <Field label="픽업그룹" w={110}><PickupCell value={null} /></Field>
         <div className="flex gap-1.5 items-center">
           <Button variant="default" disabled={busy} onClick={add}>추가</Button>
           <Button variant="ghost" onClick={onCancel}>취소</Button>
@@ -902,7 +951,7 @@ function NumberAddForm({ svc, catalog, userIndex, orgScope, orgPathOf, onAdded, 
   )
 }
 
-// ── 통합 Excel import 모달 (사용자+VoLTE+PTT) ──
+// ── 통합 Excel import 모달 (사용자+VoLTE+VoIP+PTT) ──
 function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const { show } = useToast()
   const [result, setResult] = useState<ImportResult | null>(null)
@@ -915,14 +964,14 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
       const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)))
       const r = await usersApi.importExcel(b64)
       setResult(r)
-      if (r.created_users + r.created_voip + r.created_ptt > 0) onDone()
+      if (r.created_users + (r.created_volte || 0) + r.created_voip + r.created_ptt > 0) onDone()
     } catch (err: unknown) { show(String(err), 'err') }
     finally { setBusy(false); e.target.value = '' }
   }
   return (
     <Modal title="사용자·번호 Excel 가져오기" onClose={onClose}>
         <div>
-          <p className="mb-3">사용자 + VoLTE/PTT 번호를 한 Excel(.xlsx)로 일괄 등록합니다.</p>
+          <p className="mb-3">사용자 + VoLTE/VoIP/PTT 번호를 한 Excel(.xlsx)로 일괄 등록합니다 (시트 = 회선 종류).</p>
           <div className="flex gap-3 items-center mb-4">
             <Button asChild variant="default" size="default">
               <label className="cursor-pointer">파일 선택<input className="hidden" type="file" accept=".xlsx" onChange={onFile}/></label>
@@ -933,7 +982,7 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
           {result && (
             <div className="bg-card rounded-md p-4 text-md">
               <div className="font-semibold mb-2">결과</div>
-              <div>사용자 <strong>{result.created_users}</strong> · VoLTE <strong>{result.created_voip}</strong> · PTT <strong>{result.created_ptt}</strong></div>
+              <div>사용자 <strong>{result.created_users}</strong> · VoLTE <strong>{result.created_volte || 0}</strong> · VoIP <strong>{result.created_voip}</strong> · PTT <strong>{result.created_ptt}</strong></div>
               {result.errors.length > 0 && (
                 <div className="mt-2 text-destructive text-sm">
                   {result.errors.map((er, i) => <div key={i}>[{er.sheet}] 행 {er.row}: {er.error}</div>)}

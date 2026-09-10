@@ -58,6 +58,30 @@ def _dt(val):
     return val.isoformat() if val else None
 
 
+# 가입 테이블 = 접속환경 kind(volte·voip·ptt — sip_service_model.md §2-9). 유선 voip 테이블은
+#   migrate_voip_subscriptions.sql 로 뒤에 생기므로 부재를 프로브해 SQL 에서 빼고, 프로세스 수명 동안 캐시한다.
+#   통계·상태 축에서 volte·voip 는 같은 전화 가족이다(access_services.service_axis) — CSP state 파일도 volte 축에 실린다.
+_HAS_VOIP_TABLE = None
+
+
+def _has_voip_table(cur) -> bool:
+    global _HAS_VOIP_TABLE
+    if _HAS_VOIP_TABLE is None:
+        cur.execute("SELECT COUNT(*) AS cnt FROM information_schema.TABLES "
+                    "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='voip_subscriptions'")
+        row = cur.fetchone()
+        cnt = row['cnt'] if isinstance(row, dict) else (row[0] if row else 0)
+        _HAS_VOIP_TABLE = bool(cnt)
+    return _HAS_VOIP_TABLE
+
+
+def _phone_lines_sql(has_voip: bool) -> str:
+    """전화 가족(volte∪voip) 회선 (id, user_id) 파생 테이블 — JOIN/IN 절에 서브쿼리로 쓴다."""
+    if not has_voip:
+        return "(SELECT id, user_id FROM volte_subscriptions)"
+    return "(SELECT id, user_id FROM volte_subscriptions UNION ALL SELECT id, user_id FROM voip_subscriptions)"
+
+
 def _path_parts(full_path: str, base: str):
     path = urlparse(full_path).path
     try:
@@ -646,13 +670,22 @@ def _get_dashboard_counts(config: dict) -> dict:
         try:
             with _get_db(config) as conn:
                 with conn.cursor() as cur:
-                    cur.execute("""
+                    has_voip = _has_voip_table(cur)
+                    # voip_numbers/voip_registered = 유선 VoIP 회선(voip_subscriptions) — 테이블 부재 DB 면 0.
+                    voip_sql = ("""
+                          (SELECT COUNT(*) FROM voip_subscriptions)                       AS voip_numbers,
+                          (SELECT COUNT(*) FROM voip_subscriptions
+                             WHERE register_time IS NOT NULL
+                               AND (logout_time IS NULL OR register_time > logout_time))  AS voip_registered,"""
+                                if has_voip else """
+                          0 AS voip_numbers, 0 AS voip_registered,""")
+                    cur.execute(f"""
                         SELECT
                           (SELECT COUNT(*) FROM users)                                   AS subscribers_total,
                           (SELECT COUNT(*) FROM volte_subscriptions)                      AS volte_numbers,
                           (SELECT COUNT(*) FROM volte_subscriptions
                              WHERE register_time IS NOT NULL
-                               AND (logout_time IS NULL OR register_time > logout_time))  AS volte_registered,
+                               AND (logout_time IS NULL OR register_time > logout_time))  AS volte_registered,{voip_sql}
                           (SELECT COUNT(*) FROM ptt_subscriptions)                        AS ptt_numbers,
                           (SELECT COUNT(*) FROM ptt_subscriptions
                              WHERE register_time IS NOT NULL
@@ -663,7 +696,7 @@ def _get_dashboard_counts(config: dict) -> dict:
                     if not row:
                         return {}
                     # DictCursor / tuple 양쪽 대응
-                    keys = ['subscribers_total', 'volte_numbers', 'volte_registered',
+                    keys = ['subscribers_total', 'volte_numbers', 'volte_registered', 'voip_numbers', 'voip_registered',
                             'ptt_numbers', 'ptt_registered', 'ptt_groups_total']
                     if isinstance(row, dict):
                         return {k: int(row.get(k) or 0) for k in keys}
@@ -1653,14 +1686,10 @@ def _subscribers_status(config: dict, status: str = 'active',
     except Exception:
         pass
 
-    # online 판정 SQL 조각 (register_time 유효 && 미로그아웃)
-    _VOLTE_ON = ("(vs.id IS NOT NULL AND vs.register_time IS NOT NULL AND "
-                 "(vs.logout_time IS NULL OR vs.register_time > vs.logout_time))")
-    _PTT_ON = ("(ps.id IS NOT NULL AND ps.register_time IS NOT NULL AND "
-               "(ps.logout_time IS NULL OR ps.register_time > ps.logout_time))")
-    _BASE = ("FROM users u "
-             "LEFT JOIN volte_subscriptions vs ON vs.user_id = u.id "
-             "LEFT JOIN ptt_subscriptions ps ON ps.user_id = u.id ")
+    # 회선 테이블 별칭 — vs=volte(이동) · ws=voip(유선, 테이블 있을 때만) · ps=ptt. online 판정 = register_time 유효 && 미로그아웃.
+    def _on(a: str) -> str:
+        return (f"({a}.id IS NOT NULL AND {a}.register_time IS NOT NULL AND "
+                f"({a}.logout_time IS NULL OR {a}.register_time > {a}.logout_time))")
 
     subscribers = []
     counts = {'all': 0, 'online': 0, 'active': 0}
@@ -1668,39 +1697,50 @@ def _subscribers_status(config: dict, status: str = 'active',
     try:
         with _get_db(config) as conn:
             with conn.cursor() as cur:
+                has_voip = _has_voip_table(cur)
+                aliases = ['vs'] + (['ws'] if has_voip else []) + ['ps']
+                _BASE = ("FROM users u "
+                         "LEFT JOIN volte_subscriptions vs ON vs.user_id = u.id "
+                         + ("LEFT JOIN voip_subscriptions ws ON ws.user_id = u.id " if has_voip else "")
+                         + "LEFT JOIN ptt_subscriptions ps ON ps.user_id = u.id ")
+                _ANY_ON = "(" + " OR ".join(_on(a) for a in aliases) + ")"
+                _VOIP_COLS = ("ws.id AS voip_id, ws.imsi AS voip_imsi, "
+                              "ws.register_time AS voip_reg_time, ws.logout_time AS voip_logout_time, "
+                              if has_voip else "")
+
+                def _in_active(ph: str) -> str:
+                    return "(" + " OR ".join(f"{a}.id IN ({ph}) OR {a}.imsi IN ({ph})" for a in aliases) + ")"
+
                 # ── 상단 요약 카운트 (필터와 무관, 토글 뱃지용) ──
                 cur.execute("SELECT COUNT(*) AS c FROM users")
                 counts['all'] = cur.fetchone()['c']
-                cur.execute(f"SELECT COUNT(*) AS c {_BASE} WHERE ({_VOLTE_ON} OR {_PTT_ON})")
+                cur.execute(f"SELECT COUNT(*) AS c {_BASE} WHERE {_ANY_ON}")
                 counts['online'] = cur.fetchone()['c']
                 if active_ids:
                     ids = list(active_ids)
                     ph = ','.join(['%s'] * len(ids))
                     cur.execute(
-                        f"SELECT COUNT(DISTINCT u.id) AS c {_BASE} "
-                        f"WHERE vs.id IN ({ph}) OR ps.id IN ({ph}) "
-                        f"OR vs.imsi IN ({ph}) OR ps.imsi IN ({ph})",
-                        ids * 4,
+                        f"SELECT COUNT(DISTINCT u.id) AS c {_BASE} WHERE {_in_active(ph)}",
+                        ids * (2 * len(aliases)),
                     )
                     counts['active'] = cur.fetchone()['c']
 
                 # ── 현재 필터의 WHERE 절 구성 ──
                 where, params = [], []
                 if status == 'online':
-                    where.append(f"({_VOLTE_ON} OR {_PTT_ON})")
+                    where.append(_ANY_ON)
                 elif status == 'active':
                     if not active_ids:
                         where.append("1=0")  # 활성 없음 → 빈 페이지
                     else:
                         ids = list(active_ids)
                         ph = ','.join(['%s'] * len(ids))
-                        where.append(f"(vs.id IN ({ph}) OR ps.id IN ({ph}) "
-                                     f"OR vs.imsi IN ({ph}) OR ps.imsi IN ({ph}))")
-                        params += ids * 4
+                        where.append(_in_active(ph))
+                        params += ids * (2 * len(aliases))
                 if q:
-                    where.append("(u.name LIKE %s OR vs.id LIKE %s OR ps.id LIKE %s)")
+                    where.append("(u.name LIKE %s OR " + " OR ".join(f"{a}.id LIKE %s" for a in aliases) + ")")
                     like = f"%{q}%"
-                    params += [like, like, like]
+                    params += [like] * (1 + len(aliases))
                 if org:
                     codes = _org_descendants(config, org)   # 부서(회사/본부/팀) → 하위 전체
                     ph = ','.join(['%s'] * len(codes))
@@ -1716,6 +1756,7 @@ def _subscribers_status(config: dict, status: str = 'active',
                     "SELECT u.id AS person_id, u.name, u.org_id AS org_id, "
                     "vs.id AS volte_id, vs.imsi AS volte_imsi, "
                     "vs.register_time AS volte_reg_time, vs.logout_time AS volte_logout_time, "
+                    f"{_VOIP_COLS}"
                     "ps.id AS ptt_id, ps.imsi AS ptt_imsi, "
                     "ps.register_time AS ptt_reg_time, ps.logout_time AS ptt_logout_time "
                     f"{_BASE} {where_sql} ORDER BY u.name LIMIT %s OFFSET %s",
@@ -1763,10 +1804,13 @@ def _subscribers_status(config: dict, status: str = 'active',
 
                 for row in rows:
                     volte_id = row.get('volte_id')
+                    voip_id = row.get('voip_id')
                     ptt_id = row.get('ptt_id')
 
                     volte_online = bool(volte_id and row.get('volte_reg_time') and (
                         not row.get('volte_logout_time') or row['volte_reg_time'] > row['volte_logout_time']))
+                    voip_online = bool(voip_id and row.get('voip_reg_time') and (
+                        not row.get('voip_logout_time') or row['voip_reg_time'] > row['voip_logout_time']))
                     ptt_online = bool(ptt_id and row.get('ptt_reg_time') and (
                         not row.get('ptt_logout_time') or row['ptt_reg_time'] > row['ptt_logout_time']))
 
@@ -1777,6 +1821,7 @@ def _subscribers_status(config: dict, status: str = 'active',
                         'org': org_code,
                         'org_path': org_paths.get(org_code, org_code),
                         'volte': None,
+                        'voip': None,
                         'ptt': None,
                     }
 
@@ -1787,6 +1832,17 @@ def _subscribers_status(config: dict, status: str = 'active',
                             'msisdn': volte_id,
                             'online': volte_online,
                             'register_time': _dt(row.get('volte_reg_time')),
+                            'calls': calls,
+                        }
+
+                    # 유선 VoIP 회선 — 활성 호 state 는 전화 가족 축(volte)에 실리므로 같은 인덱스에서 찾는다.
+                    if voip_id:
+                        calls = (volte_active_by_sub.get(voip_id)
+                                 or volte_active_by_sub.get(row.get('voip_imsi')) or [])
+                        sub['voip'] = {
+                            'msisdn': voip_id,
+                            'online': voip_online,
+                            'register_time': _dt(row.get('voip_reg_time')),
                             'calls': calls,
                         }
 
@@ -2032,7 +2088,7 @@ def _service_live(config: dict) -> HandlerResult:
                         ids = list(active_msisdns)
                         ph = ','.join(['%s'] * len(ids))
                         cur.execute(
-                            f"SELECT vs.id AS m, COALESCE(NULLIF(u.org_id,''),'') AS o FROM volte_subscriptions vs JOIN users u ON u.id=vs.user_id WHERE vs.id IN ({ph}) "
+                            f"SELECT vs.id AS m, COALESCE(NULLIF(u.org_id,''),'') AS o FROM {_phone_lines_sql(_has_voip_table(cur))} vs JOIN users u ON u.id=vs.user_id WHERE vs.id IN ({ph}) "
                             f"UNION SELECT ps.id, COALESCE(NULLIF(u.org_id,''),'') FROM ptt_subscriptions ps JOIN users u ON u.id=ps.user_id WHERE ps.id IN ({ph})",
                             tuple(ids + ids),
                         )
@@ -2580,11 +2636,16 @@ def _service_org(config: dict) -> HandlerResult:
     try:
         with _get_db(config) as conn:
             with conn.cursor() as cur:
+                # volte_reg = 전화 가족(volte + 유선 voip) 등록 회선 수 — 통계 축은 kind 보다 거칠다(access_services.service_axis).
+                has_voip = _has_voip_table(cur)
+                phone_lines = ("(SELECT id, user_id, register_time, logout_time FROM volte_subscriptions"
+                               + (" UNION ALL SELECT id, user_id, register_time, logout_time FROM voip_subscriptions" if has_voip else "")
+                               + ")")
                 cur.execute(
                     "SELECT COALESCE(NULLIF(u.org_id,''),%s) AS code, COUNT(DISTINCT u.id) AS members, "
                     "COUNT(DISTINCT CASE WHEN vs.register_time IS NOT NULL AND (vs.logout_time IS NULL OR vs.register_time>vs.logout_time) THEN vs.id END) AS volte_reg, "
                     "COUNT(DISTINCT CASE WHEN ps.register_time IS NOT NULL AND (ps.logout_time IS NULL OR ps.register_time>ps.logout_time) THEN ps.id END) AS ptt_reg "
-                    "FROM users u LEFT JOIN volte_subscriptions vs ON vs.user_id=u.id "
+                    f"FROM users u LEFT JOIN {phone_lines} vs ON vs.user_id=u.id "
                     "LEFT JOIN ptt_subscriptions ps ON ps.user_id=u.id GROUP BY code", (UNSET,))
                 for r in cur.fetchall():
                     d = L(r['code'])
@@ -2595,7 +2656,7 @@ def _service_org(config: dict) -> HandlerResult:
                 if allact:
                     ph = ','.join(['%s'] * len(allact))
                     cur.execute(
-                        f"SELECT vs.id AS m, COALESCE(NULLIF(u.org_id,''),%s) AS o FROM volte_subscriptions vs JOIN users u ON u.id=vs.user_id WHERE vs.id IN ({ph}) "
+                        f"SELECT vs.id AS m, COALESCE(NULLIF(u.org_id,''),%s) AS o FROM {_phone_lines_sql(has_voip)} vs JOIN users u ON u.id=vs.user_id WHERE vs.id IN ({ph}) "
                         f"UNION SELECT ps.id, COALESCE(NULLIF(u.org_id,''),%s) FROM ptt_subscriptions ps JOIN users u ON u.id=ps.user_id WHERE ps.id IN ({ph})",
                         tuple([UNSET] + allact + [UNSET] + allact))
                     for r in cur.fetchall():

@@ -6,8 +6,8 @@
 멤버 회선의 종전 그룹·pickup_group·person 의 종전 역할 배정을 되돌린다(공유 DB 안전).
 
 역할 배정의 principal 은 **person(users.id)** 이다 — 회선이 아니다. 픽스처는 회선 id 로 받은 배정 대상을
-`volte_subscriptions`/`ptt_subscriptions.user_id` 로 person 에 풀어 배정하고, CSP 는 그 person 의 전 회선으로
-펼친다(§3.5). person 이 없는 회선(user_id NULL)은 배정할 수 없어 픽스처가 비활성(reason)으로 끝난다.
+가입 테이블(`voip_subscriptions`/`volte_subscriptions`/`ptt_subscriptions`).user_id 로 person 에 풀어 배정하고,
+CSP 는 그 person 의 전 회선으로 펼친다(§3.5). person 이 없는 회선(user_id NULL)은 배정할 수 없어 픽스처가 비활성(reason)으로 끝난다.
 
 스키마 프로브(전환기 공존):
   · `phone_groups` + `role_assignments` 있음 → 신 스키마(SCHEMA_ROLES)
@@ -29,12 +29,19 @@ SCHEMA_DISPATCH = "dispatch"  # dispatch_groups (전환 전 — migrate_dispatch
 
 NO_TABLE_REASON = "phone_groups/roles 테이블 부재 (migrate_phone_groups_roles.sql 미적용)"
 
-_SUB_TABLES = ("volte_subscriptions", "ptt_subscriptions")
+# 가입 테이블 = 접속환경 kind (sip_service_model.md §2-9). voip_subscriptions 는 migrate_voip_subscriptions.sql 적용
+#   뒤에만 있으므로 실제 순회 목록은 _sub_tables(cur) 로 프로브해 얻는다.
+_SUB_TABLES = ("voip_subscriptions", "volte_subscriptions", "ptt_subscriptions")
 
 
 def _has_table(cur, table: str) -> bool:
     cur.execute("SHOW TABLES LIKE %s", (table,))
     return cur.fetchone() is not None
+
+
+def _sub_tables(cur) -> tuple:
+    """존재하는 가입 테이블 — voip_subscriptions 는 테이블이 있을 때만 포함."""
+    return tuple(t for t in _SUB_TABLES if t != "voip_subscriptions" or _has_table(cur, "voip_subscriptions"))
 
 
 def _one(row, key: str):
@@ -78,7 +85,7 @@ def person_of(db_cfg: dict, line: str):
 
 
 def _person_of(cur, line: str):
-    for table in _SUB_TABLES:
+    for table in _sub_tables(cur):
         cur.execute(f"SELECT user_id FROM {table} WHERE id=%s", (line,))
         r = cur.fetchone()
         if r is not None:
@@ -88,8 +95,8 @@ def _person_of(cur, line: str):
 
 
 def _line_table(cur, line: str):
-    """회선 id 가 든 가입 테이블 이름(volte/ptt). 없으면 None."""
-    for table in _SUB_TABLES:
+    """회선 id 가 든 가입 테이블 이름(voip/volte/ptt). 없으면 None."""
+    for table in _sub_tables(cur):
         cur.execute(f"SELECT 1 FROM {table} WHERE id=%s", (line,))
         if cur.fetchone() is not None:
             return table

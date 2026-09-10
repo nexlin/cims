@@ -58,6 +58,7 @@ curl -k -X POST https://192.168.0.2:4421/api/v1/auth/login \
     "details": null,
     "reject_id": [],
     "call_subscriptions": [],
+    "voip_subscriptions": [],
     "ptt_subscriptions": [
       {
         "id": "+821030432632",
@@ -130,6 +131,7 @@ curl -k -X POST https://192.168.0.2:4421/api/v1/auth/register \
     "details": null,
     "reject_id": [],
     "call_subscriptions": [],
+    "voip_subscriptions": [],
     "ptt_subscriptions": [],
     "create_time": "2026-03-31T20:00:00",
     "update_time": "2026-03-31T20:00:00"
@@ -186,6 +188,7 @@ curl -k -X GET https://192.168.0.2:4421/api/v1/auth/me \
       "logout_time": null
     }
   ],
+  "voip_subscriptions": [],
   "ptt_subscriptions": [
     {
       "id": "+821030432632",
@@ -273,6 +276,7 @@ curl -k -X GET https://192.168.0.2:4421/api/v1/users \
         "logout_time": null
       }
     ],
+    "voip_subscriptions": [],
     "ptt_subscriptions": [
       {
         "id": "+82571900001",
@@ -296,6 +300,7 @@ curl -k -X GET https://192.168.0.2:4421/api/v1/users \
     "details": null,
     "reject_id": [],
     "call_subscriptions": [],
+    "voip_subscriptions": [],
     "ptt_subscriptions": [],
     "create_time": "2026-03-26T09:00:00",
     "update_time": "2026-03-26T09:00:00"
@@ -356,6 +361,7 @@ curl -k -X POST https://192.168.0.2:4421/api/v1/users \
   "details": "비고 내용",
   "reject_id": ["+821099990001", "+821099990002"],
   "call_subscriptions": [],
+  "voip_subscriptions": [],
   "ptt_subscriptions": [],
   "create_time": "2026-03-31T20:30:00",
   "update_time": "2026-03-31T20:30:00"
@@ -398,6 +404,7 @@ curl -k -X PUT https://192.168.0.2:4421/api/v1/users/35 \
   "details": "비고 내용",
   "reject_id": ["+821099990003"],
   "call_subscriptions": [],
+  "voip_subscriptions": [],
   "ptt_subscriptions": [],
   "create_time": "2026-03-31T20:30:00",
   "update_time": "2026-03-31T21:00:00"
@@ -437,7 +444,17 @@ curl -k -X DELETE https://192.168.0.2:4421/api/v1/users/35 \
 
 ## 4. Call 구독 관리 (`/api/v1/users/{pid}/call`)
 
-Call 구독은 VoIP 전화번호를 사용자에게 할당하는 기능입니다.
+Call 구독은 **이동 VoLTE** 전화번호를 사용자에게 할당하는 기능입니다(가입 테이블 `volte_subscriptions`). 유선 VoIP 번호는
+§4a(`/voip`, `voip_subscriptions`), MCPTT 번호는 §5(`/ptt`, `ptt_subscriptions`) — **가입 테이블 = 접속환경 kind** 이며 세 API 는
+본문·응답이 같고 다음 규칙만 공통으로 적용된다([sip_service_model.md §2-9](../design/features/sip_service_model.md)).
+
+- `service_ref` 는 그 테이블 kind 의 접속서비스만 가리킬 수 있다 — 다른 kind 의 이름이면
+  `400 {"error":"service_kind_mismatch","kind":"volte","service_kind":"voip","service_ref":"voip"}`.
+- 번호(`id`)는 세 가입 테이블과 대표번호(`phone_groups.pilot_id`)에 걸쳐 유일하다 — 추가 시 이미 쓰이면
+  `409 {"error":"number_exists","msisdn":"+82…","where":"voip_subscriptions"|"phone_groups"}`.
+- `sip_transport` 는 `UDP`/`TCP`/`TLS`/`null`. `null`(입력은 `""`·`"ANY"` 도 허용) = **ANY — 단말 선택**, 서버 정책 없음.
+  값 오류는 `400 sip_transport must be one of UDP/TCP/TLS/ANY`.
+- `pickup_group` 은 전화 그룹 멤버십에서 파생되는 값이라 직접 지정은 `409 derived_from_phone_group`([dispatch_center.md §3.2](../design/features/dispatch_center.md)).
 
 ### 4.1 Call 번호 추가
 
@@ -462,8 +479,10 @@ Content-Type: application/json
 |------|------|------|--------|------|
 | `id` | string | Y | - | MSISDN (E.164 형식, `+` 국가코드 포함) |
 | `auth_id` | string | N | id와 동일 | SIP Digest 인증 ID |
+| `imsi` | string | Y | - | Digest username 의 user 파트(`imsi@<domain>`). 유선(§4a)은 번호 숫자 규약 |
+| `service_ref` | string | N(call) / **Y(voip)** | kind 대표 서비스 | 접속서비스 name(`access_services`) — 이 테이블 kind(`volte`)의 서비스만(다른 kind → 400 `service_kind_mismatch`) |
 | `passwd` | string | Y | - | SIP Digest 비밀번호 — **저장되지 않는다.** `ha1=MD5(imsi@domain:realm:passwd)` 로 변환해 저장(realm = 서비스 `auth_realm ?? domain` — `access_services` 컬렉션, 미도달 시 csc.json `Provisioning.Services.<kind>`). 따라서 `service_ref` 가 해석되어야 한다(400) |
-| `sip_transport` | string | N | null | 채널 정책 `UDP`/`TCP`/`TLS`. **`TLS` 는 서버가 집행** — 이 번호의 비-TLS 채널 요청은 REGISTER 포함 403. `UDP`/`TCP` 는 단말 프로비저닝 힌트, null 은 단말 선택 |
+| `sip_transport` | string | N | null | 채널 정책 `UDP`/`TCP`/`TLS`/`ANY`(=null). **`TLS` 는 서버가 집행** — 이 번호의 비-TLS 채널 요청은 REGISTER 포함 403. `UDP`/`TCP` 는 단말 프로비저닝 힌트, null(ANY)은 단말 선택 |
 | `auth_scheme` | string | N | `digest` | 인증 체계 `digest`(SIP Digest, `ha1`) / `aka`(IMS AKA over TLS — `sip_transport` 와 무관하게 TLS 채널만 허용). 마이그레이션(`migrate_subscription_aka.sql`) 전 DB 에서는 400 |
 | `k` / `opc` / `op` / `amf` | string | aka 면 Y | - / `8000` | IMS AKA 자료(hex32 / hex32 / hex32 → OPc 유도 / hex4). **저장 형식은 CSC `AuC.Kek` 암호화**이며 어떤 응답에도 원문이 나가지 않는다(조회는 `auth_scheme`·`aka_provisioned`). 키를 넣으면 SQN 이 0 으로 리셋. `AuC.Kek` 미설정이면 503 |
 | `dnd` | boolean | N | false | 방해금지 모드 |
@@ -510,10 +529,22 @@ curl -k -X POST https://192.168.0.2:4421/api/v1/users/1/call \
 }
 ```
 
-**실패 응답 (409 - 번호 중복):**
+**실패 응답 (409 - 번호 중복 — 세 가입 테이블·대표번호 주소 공간):**
 ```json
 {
-  "error": "이미 등록된 번호입니다"
+  "error": "number_exists",
+  "msisdn": "+821012345678",
+  "where": "volte_subscriptions"
+}
+```
+
+**실패 응답 (400 - 서비스 kind 불일치):**
+```json
+{
+  "error": "service_kind_mismatch",
+  "kind": "volte",
+  "service_kind": "voip",
+  "service_ref": "voip"
 }
 ```
 
@@ -576,6 +607,63 @@ curl -k -X DELETE "https://192.168.0.2:4421/api/v1/users/1/call/%2B821012345678"
   "ok": true
 }
 ```
+
+---
+
+## 4a. VoIP 구독 관리 (`/api/v1/users/{pid}/voip`)
+
+VoIP 구독은 **유선 VoIP**(데스크폰·소프트폰·관제 앱) 전화번호를 사용자에게 할당한다(가입 테이블 `voip_subscriptions` —
+[volte_supplementary_services.md §3·§10.3](../design/features/volte_supplementary_services.md)). 경로 세그먼트만 `voip` 이고 본문·응답·
+오류는 §4 와 같다. 다른 점:
+
+| 항목 | VoIP 구독 |
+|---|---|
+| `service_ref` | **필수** — `kind=voip` 접속서비스 name(비면 `400 service_ref required for voip`, 다른 kind → `400 service_kind_mismatch`) |
+| `imsi` | USIM 이 없는 규약이라 **번호 숫자**(`+82210001001` → `82210001001`). Digest username = `82210001001@voip.cims.example.kr` |
+| `auth_scheme` | `digest`(기본) — AKA 자료는 쓰지 않는다 |
+| `sip_transport` | `TLS` 권장 기본값(서비스 `sec_mechanisms=[tls]`·`media_srtp=required` 와 결합). `UDP`/`TCP`/`ANY` 도 선택 가능 — 서비스가 `media_srtp=required` 인데 비-TLS 를 고르면 SDES 키가 평문 시그널링에 실리므로 콘솔이 경고한다 |
+| `pickup_group` | 전화 그룹 멤버십에서 파생(직접 지정 409). 응답에 그룹 id(`pg-…`)로 실린다 |
+| 스키마 | `voip_subscriptions` 테이블이 없는 DB(`sql/migrate_voip_subscriptions.sql` 미적용)는 전 메서드 `503 {"error":"schema_not_migrated"}`. 사용자 응답의 `voip_subscriptions[]` 는 빈 배열 |
+
+### 4a.1 VoIP 번호 추가
+
+```
+POST /api/v1/users/{pid}/voip
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+```
+
+**요청:**
+```json
+{
+  "id": "+82210001001",
+  "imsi": "82210001001",
+  "service_ref": "voip",
+  "passwd": "…",
+  "sip_transport": "TLS",
+  "dnd": false,
+  "forward_id": ""
+}
+```
+
+**성공 응답 (201):** `{"id": "+82210001001"}`
+
+### 4a.2 VoIP 번호 수정
+
+```
+PUT /api/v1/users/{pid}/voip/{msisdn}
+```
+
+§4.2 와 같다 — `imsi`/`service_ref` 가 바뀌면 `passwd` 동반(H(A1) 재결박), `service_ref` 는 kind=voip 서비스만.
+
+### 4a.3 VoIP 번호 삭제
+
+```
+DELETE /api/v1/users/{pid}/voip/{msisdn}
+```
+
+§4.3 과 같다. 전화 그룹 멤버 행(`phone_group_members.user_id`)은 FK 가 없어 남으므로 회선을 지울 때 전화 그룹 멤버도 함께
+정리한다(콘솔 구성 › 전화 그룹).
 
 ---
 
@@ -1007,41 +1095,52 @@ CSP 에는 `PHONE_GROUP_CHANGED`(uri=그룹 id) 로 재적재를 알린다. 가�
 | create_time | DATETIME | N | CURRENT_TIMESTAMP | - | 생성일 |
 | update_time | DATETIME | N | CURRENT_TIMESTAMP ON UPDATE | - | 수정일 |
 
-### voip_subscriptions (Call 번호)
+### volte_subscriptions (VoLTE 번호)
 
 | 컬럼 | 타입 | Nullable | 기본값 | 제약조건 | 설명 |
 |------|------|----------|--------|----------|------|
-| id | VARCHAR(32) | N | - | PK | MSISDN (E.164 형식) |
-| user_id | INT | N | - | FK → users.id ON DELETE CASCADE | 소유자 |
-| auth_id | VARCHAR(128) | Y | id와 동일 | - | SIP 인증 ID (IMPI) |
+| id | VARCHAR(64) | N | - | PK | MSISDN (E.164 형식) — 세 가입 테이블·대표번호에 걸쳐 유일(CSC 게이트) |
+| user_id | INT | N | - | FK → users.id ON DELETE CASCADE (`fk_voip_sub_user`) | 소유자 |
+| auth_id | VARCHAR(128) | N | '' | - | SIP 인증 ID (IMPI) |
+| imsi | VARCHAR(64) | Y | NULL | - | Digest username 의 user 파트 |
+| service_ref | VARCHAR(64) | Y | NULL | - | 접속서비스 name — kind=volte 서비스만 |
 | ha1 | CHAR(32) | N | '' | - | SIP Digest H(A1)=MD5(imsi@domain:realm:password) — 인증 자료 SoT |
-| passwd | VARCHAR(128) | N | '' | - | 평문 (과도기 — ha1 이행 후 소거·DROP 예정) |
-| sip_transport | ENUM('UDP','TCP','TLS') | Y | NULL | - | 채널 정책 (TLS=서버 집행 / UDP·TCP=힌트 / NULL=단말 선택) |
+| sip_transport | ENUM('UDP','TCP','TLS') | Y | NULL | - | 채널 정책 (TLS=서버 집행 / UDP·TCP=힌트 / NULL=ANY 단말 선택) |
 | auth_scheme | ENUM('digest','aka') | N | 'digest' | - | 인증 체계 — CSP 챌린지 체계 선택(aka=IMS AKA over TLS, TLS 채널 강제) — migrate_subscription_aka.sql |
 | k_enc / opc_enc | VARCHAR(160) | N | '' | - | AKA K/OPc — CSC `AuC.Kek` 암호화 보관(`v1:<iv><ct><hmac>`), CSC 만 읽는다 |
 | sqn | BIGINT UNSIGNED | N | 0 | - | AKA SQN_HE(48-bit) — CSC 단일 발급자만 갱신(AV 발급 +1, AUTS 재동기) |
 | amf | CHAR(4) | N | '8000' | - | AKA AMF hex4 |
 | dnd | TINYINT(1) | N | 0 | - | 방해금지 (0=off, 1=on) |
-| forward_id | VARCHAR(32) | Y | '' | - | 착신전환 번호 (E.164) |
+| forward_id | VARCHAR(64) | N | '' | - | 착신전환 번호 (E.164) |
+| pickup_group | VARCHAR(64) | Y | NULL | - | 당겨받기·BLF 축 = 전화 그룹 id(멤버십에서 파생, 직접 편집 409). NULL=축 없음 |
 | register_time | DATETIME | Y | NULL | - | 최근 SIP REGISTER 시각 |
 | logout_time | DATETIME | Y | NULL | - | 최근 등록해제 시각 |
+
+### voip_subscriptions (VoIP 번호)
+
+유선 VoIP 회선 — 컬럼은 `volte_subscriptions` 와 **동일**(정본 DDL `sql/cims_schema.sql`, 생성 `sql/migrate_voip_subscriptions.sql`).
+다른 점: FK 이름 `fk_voipsub_user`, `service_ref` 는 **kind=voip 접속서비스 필수**, `imsi` 는 번호 숫자 규약, `pickup_group` 은
+전화 그룹 멤버 행(`phone_group_members.user_id` = 이 테이블의 id)에서 파생된다. 테이블 = 접속환경 kind 이므로 이동/유선 회선은
+서로 다른 테이블에 있고 CSP 는 두 테이블을 같은 전화 경로로 다룬다([sip_service_model.md §2-9](../design/features/sip_service_model.md)).
 
 ### ptt_subscriptions (PTT 번호)
 
 | 컬럼 | 타입 | Nullable | 기본값 | 제약조건 | 설명 |
 |------|------|----------|--------|----------|------|
-| id | VARCHAR(32) | N | - | PK | MSISDN (E.164 형식) |
-| user_id | INT | N | - | FK → users.id ON DELETE CASCADE | 소유자 |
-| auth_id | VARCHAR(128) | Y | - | - | IMPI (3GPP 형식) |
+| id | VARCHAR(64) | N | - | PK | MSISDN (E.164 형식) |
+| user_id | INT | N | - | FK → users.id ON DELETE CASCADE (`fk_ptt_sub_user`) | 소유자 |
+| auth_id | VARCHAR(128) | N | '' | - | IMPI (3GPP 형식) |
+| imsi | VARCHAR(64) | Y | NULL | - | Digest username 의 user 파트 |
+| service_ref | VARCHAR(64) | Y | NULL | - | 접속서비스 name — kind=ptt(`mcptt`) 서비스만 |
 | ha1 | CHAR(32) | N | '' | - | SIP Digest H(A1) — 인증 자료 SoT |
-| passwd | VARCHAR(128) | N | '' | - | 평문 (과도기 — 소거·DROP 예정) |
 | sip_transport | ENUM('UDP','TCP','TLS') | Y | NULL | - | 채널 정책 (TLS=서버 집행) |
 | auth_scheme | ENUM('digest','aka') | N | 'digest' | - | 인증 체계 — CSP 챌린지 체계 선택(aka=IMS AKA over TLS, TLS 채널 강제) — migrate_subscription_aka.sql |
 | k_enc / opc_enc | VARCHAR(160) | N | '' | - | AKA K/OPc — CSC `AuC.Kek` 암호화 보관(`v1:<iv><ct><hmac>`), CSC 만 읽는다 |
 | sqn | BIGINT UNSIGNED | N | 0 | - | AKA SQN_HE(48-bit) — CSC 단일 발급자만 갱신(AV 발급 +1, AUTS 재동기) |
 | amf | CHAR(4) | N | '8000' | - | AKA AMF hex4 |
 | dnd | TINYINT(1) | N | 0 | - | 방해금지 (0=off, 1=on) |
-| forward_id | VARCHAR(32) | Y | '' | - | 착신전환 번호 |
+| forward_id | VARCHAR(64) | N | '' | - | 착신전환 번호 |
+| pickup_group | VARCHAR(64) | Y | NULL | - | 같은 person 의 전화 그룹 값을 파생(PTT 세션 가시성·dialog 인가 축) |
 | register_time | DATETIME | Y | NULL | - | 최근 SIP REGISTER 시각 |
 | logout_time | DATETIME | Y | NULL | - | 최근 등록해제 시각 |
 
@@ -1065,15 +1164,15 @@ CSP 에는 `PHONE_GROUP_CHANGED`(uri=그룹 id) 로 재적재를 알린다. 가�
 
 `sql/migrate_phone_groups_roles.sql`(설계 — 전환 전 `sql/migrate_dispatch_groups.sql` 의 `dispatch_groups` 계열 4 테이블) — 컬럼 정의는
 [db_schema.md](../design/db_schema.md) §2 와 [dispatch_center.md](../design/features/dispatch_center.md) §8.1(전환 표 포함).
-`phone_groups.id`(VARCHAR(64), `pg-…`/전환 전 `dg-…`) 가 `volte_subscriptions.pickup_group` 값이며(같은 person 의
-`ptt_subscriptions.pickup_group` 도 파생), `phone_group_members.user_id` 가 PK(가입자당 그룹 하나). `role_assignments(principal_type,
+`phone_groups.id`(VARCHAR(64), `pg-…`/전환 전 `dg-…`) 가 멤버 회선(`voip_subscriptions`·`volte_subscriptions`)의 `pickup_group`
+값이며(같은 person 의 다른 가입 테이블 회선도 파생), `phone_group_members.user_id` 가 PK(가입자당 그룹 하나). `role_assignments(principal_type,
 principal_id)` PK(사람당 역할 하나). `role_ptt_targets.ptt_group_id` 는 `ptt_groups.id`(surrogate) 참조 — API 는 `mcptt_group_id` 로 노출한다.
 
 **ER 다이어그램:**
 ```
-users (1) ──────── (N) voip_subscriptions
-  │
-  └──── (1) ──────── (N) ptt_subscriptions
+users (1) ──┬───── (N) volte_subscriptions   (이동 VoLTE — kind=volte)
+            ├───── (N) voip_subscriptions    (유선 VoIP  — kind=voip)  ──── phone_group_members ──── phone_groups
+            └───── (N) ptt_subscriptions     (MCPTT      — kind=ptt)
                               │
                               └──── (N) ──── ptt_group_members ──── (N) ──── ptt_groups
 ```
@@ -1087,11 +1186,16 @@ users (1) ──────── (N) voip_subscriptions
 - 회원가입 가능 (role=user 고정)
 - 비밀번호 변경 기능
 
-### 가입자 관리 (관리자 전용)
-- **검색**: 이름/아이디/조직/번호로 필터링
-- **가입자 추가/편집**: 이름, 아이디, 조직, 세부사항, 착신거부 목록
-- **Call 번호 관리**: 인라인 칩으로 표시, 클릭하여 편집, + 버튼으로 추가
-- **PTT 번호 관리**: Call과 동일 구조
+### 가입자 관리 (관리자 전용 — `/subscribers/workbench`)
+- 상단 탭 **사용자 / VoLTE 번호 / VoIP 번호 / PTT 번호** — 번호 탭은 가입 테이블(kind) 하나씩. 좌측 조직 트리가 공유 스코프
+- **검색**: 이름/로그인 ID/조직/번호(세 종류 전부)로 필터링
+- **가입자 추가/편집**: 행 펼침 상세 — 이름·직함·로그인 ID·조직·비고·착신거부 + 번호 서브테이블(세 종류 통합)
+- **번호 폼은 kind 별로 다르다**(필드 스펙 선언 하나로 렌더): VoLTE = IMSI 입력·인증 digest/aka(K·OPc)·채널 기본 ANY·DND/착신전환 /
+  VoIP = kind=voip 접속서비스만 선택·IMSI 는 번호 숫자 기본값(편집 가능)·인증 digest 고정·채널 기본 TLS(UDP/TCP/TLS/ANY 선택 —
+  서비스 `media_srtp=required` 인데 비-TLS 면 경고)·DND/착신전환·내선 라벨(끝 4자리) 표시 / PTT = 인증 digest/aka·채널 기본 TLS·
+  DND/착신전환 없음·MCPTT 프로파일 편집. 픽업 그룹은 전 kind 읽기전용(전화 그룹 멤버십 파생값 — 구성 › 전화 그룹에서 바꾼다)
+- 채널 표시: `ANY`(단말 선택) / `UDP` / `TCP` / `TLS (강제)`
+- Excel 일괄 등록: 시트 `users` · `volte_subscriptions` · `voip_subscriptions` · `ptt_subscriptions`, 결과 `created_users`/`created_volte`/`created_voip`/`created_ptt`
 - 번호 표시: +82 제거 후 `XXX-XXXX-XXXX` 형태
 
 ### PTT 그룹 관리 (관리자 전용)

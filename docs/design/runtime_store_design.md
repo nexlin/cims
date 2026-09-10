@@ -21,7 +21,7 @@
 | **IdMS 토큰** | `auth_codes`, `refresh_tokens` |
 
 **DB 유지 (영구)**: 가입자 도메인 + 조직
-- `users`, `volte_subscriptions`, `ptt_subscriptions`, `user_rejects`, `ptt_groups`, `ptt_group_members`, `ptt_session_seq`, `organizations`
+- `users`, `volte_subscriptions`, `voip_subscriptions`, `ptt_subscriptions`, `user_rejects`, `ptt_groups`, `ptt_group_members`, `ptt_session_seq`, `organizations`
 
 `organizations` 는 `users.org_id` FK 대상이라 가입자와 함께 외부 이중화 DB 에 인계한다.
 

@@ -101,9 +101,10 @@ bool CspUserMap::_loadUserFromFile( std::string strUserId, CspUser &clsUser ) {
     if ( jsonUser.Has( "service_type" ) ) clsUser.m_strServiceType = jsonUser.GetString( "service_type" );
     if ( jsonUser.Has( "pickup_group" ) ) clsUser.m_strPickupGroup = jsonUser.GetString( "pickup_group" );
 
-    // v3 (2026-04-22): service_ref / imsi — DB 의 volte_subscriptions / ptt_subscriptions 에 적재되는
-    // 가입자 매핑. file fallback 모드 (DB 미연결) 에서도 user JSON 에서 직접 읽어 service_binding 채움.
-    // 두 필드가 비면 CCscfModule::CheckAuthorization 에서 REGISTER 거부.
+    // v3 (2026-04-22): service_ref / imsi — DB 의 가입 테이블(voip·volte·ptt _subscriptions, 가입 테이블 = 접속환경
+    // kind) 에 적재되는 가입자 매핑. file fallback 모드 (DB 미연결) 에서도 user JSON 에서 직접 읽어 service_binding
+    // 채움 (service_type 도 "voip"|"volte"|"ptt" 그대로). 두 필드가 비면 CCscfModule::CheckAuthorization 에서 REGISTER
+    // 거부.
     if ( jsonUser.Has( "service_ref" ) ) clsUser.m_strServiceRef = jsonUser.GetString( "service_ref" );
     if ( jsonUser.Has( "imsi" ) ) clsUser.m_strImsi = jsonUser.GetString( "imsi" );
 

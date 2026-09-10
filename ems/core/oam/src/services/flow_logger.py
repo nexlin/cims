@@ -81,8 +81,24 @@ def _db_conn():
         return None
 
 
+_HAS_VOIP_TABLE = None
+
+
+def _has_voip_table(cur) -> bool:
+    """유선 voip 가입 테이블(voip_subscriptions — migrate_voip_subscriptions.sql) 존재 여부. 프로세스 수명 캐시."""
+    global _HAS_VOIP_TABLE
+    if _HAS_VOIP_TABLE is None:
+        cur.execute("SELECT COUNT(*) AS cnt FROM information_schema.TABLES "
+                    "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='voip_subscriptions'")
+        row = cur.fetchone()
+        cnt = row['cnt'] if isinstance(row, dict) else (row[0] if row else 0)
+        _HAS_VOIP_TABLE = bool(cnt)
+    return _HAS_VOIP_TABLE
+
+
 def _resolve_volte_msisdns(org: str = None, q: str = None):
-    """부서(org, 하위 전체 포함) 또는 검색어(q=이름/번호)에 매칭되는 VoLTE 가입자 msisdn 집합.
+    """부서(org, 하위 전체 포함) 또는 검색어(q=이름/번호)에 매칭되는 전화 가족(VoLTE·유선 VoIP) 가입자 msisdn 집합.
+    통화 이력의 서비스축 volte 는 이동 volte 와 유선 voip 를 합산한 전화 가족이라 두 가입 테이블을 함께 본다.
        org/q 둘 다 없으면 None(필터 없음). DB 미연결 시 None."""
     org = (org or '').strip()
     q = (q or '').strip()
@@ -114,8 +130,10 @@ def _resolve_volte_msisdns(org: str = None, q: str = None):
                 if q:
                     where.append("(u.name LIKE %s OR vs.id LIKE %s)")
                     params.extend([f"%{q}%", f"%{q}%"])
-                sql = ("SELECT vs.id AS msisdn FROM users u "
-                       "JOIN volte_subscriptions vs ON vs.user_id=u.id")
+                phone_lines = ("(SELECT id, user_id FROM volte_subscriptions"
+                               + (" UNION ALL SELECT id, user_id FROM voip_subscriptions" if _has_voip_table(cur) else "")
+                               + ")")
+                sql = (f"SELECT vs.id AS msisdn FROM users u JOIN {phone_lines} vs ON vs.user_id=u.id")
                 if where:
                     sql += " WHERE " + " AND ".join(where)
                 cur.execute(sql, params)

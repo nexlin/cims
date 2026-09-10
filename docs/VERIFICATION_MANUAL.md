@@ -481,7 +481,7 @@ private(개시자 초기 발언권, 큐 없는 DENY) · `floor_control=off`
 cspsim(시뮬레이터)과 달리 **실제 단말 스택**(pjsua2 코덱·지터버퍼·SRTP·TLS)으로 등록·1:1 호를 돌리므로, 단말 정합
 회귀의 두 번째 축이다. 빌드 산출물은 `build/bin/cimsue-cli` (루트 `make` — `CIMS_UE_SDK=ON` 기본).
 
-가입자 자격은 DB 의 `volte_subscriptions.id/imsi/ha1` 이다(단말은 DB 를 보지 않으므로 인자로 넘긴다).
+가입자 자격은 DB 의 `volte_subscriptions.id/imsi/ha1` 이다(유선 회선이면 `voip_subscriptions` — 단말은 DB 를 보지 않으므로 인자로 넘긴다).
 
 ```bash
 # 인자 공통: 접속점·도메인·가입자 (도메인은 access_services.jsonl 의 kind=volte domain)

@@ -6,7 +6,7 @@ Bearer 토큰을 그대로 전달해 **csc JSON API**(POST /api/v1/users, /users
 /organizations …)를 호출한다. csc DB 직접 접근 없음 — 계약(HTTP) 경유.
 
 라우트 (게이트웨이가 csc 의 /users·/organizations 보다 더 구체적인 세그먼트로 oam-svc 에 우선 매핑):
-  GET  /api/v1/users/import/template          빈 가입자 Excel 템플릿 (users/volte/ptt 시트)
+  GET  /api/v1/users/import/template          빈 가입자 Excel 템플릿 (users/volte/voip/ptt 시트 — 가입 테이블 = 접속환경 kind)
   POST /api/v1/users/import                   가입자/구독 일괄 등록 (file_base64)
   GET  /api/v1/organizations/import/template  빈 조직 Excel 템플릿
   POST /api/v1/organizations/import           조직 일괄 등록 (file_base64)
@@ -136,13 +136,18 @@ def _users_template() -> HandlerResult:
     ws1.title = 'users'
     ws1.append(['name', 'org_code', 'details', 'reject_ids'])
     ws1.append(['홍길동', 'DEV_01', '개발1팀', '+8210001,+8210002'])
-    ws2 = wb.create_sheet('volte_subscriptions')
+    # 시트 = 가입 테이블 = 접속환경 kind (sip_service_model.md §2-9): volte(이동)·voip(유선)·ptt.
     # password 를 비우면 행별 난수 비밀번호를 생성해 결과(credentials)로만 돌려준다 — 고정 기본값은 없다.
-    ws2.append(['name', 'msisdn', 'service_ref', 'imsi', 'password', 'dnd', 'forward_id'])
-    ws2.append(['홍길동', '+821357007100', 'volte', '450033100000100', '', 'N', ''])
-    ws3 = wb.create_sheet('ptt_subscriptions')
-    ws3.append(['name', 'msisdn', 'service_ref', 'imsi', 'password', 'dnd'])
-    ws3.append(['홍길동', '+82571900100', 'mcptt', '450033100000100', '', 'N'])
+    # sip_transport(선택) = UDP/TCP/TLS, 비우면 ANY(단말 선택). 유선 voip 는 imsi = 번호 숫자 규약·TLS 권장.
+    ws2 = wb.create_sheet('volte_subscriptions')
+    ws2.append(['name', 'msisdn', 'service_ref', 'imsi', 'password', 'sip_transport', 'dnd', 'forward_id'])
+    ws2.append(['홍길동', '+821357007100', 'volte', '450033100000100', '', '', 'N', ''])
+    ws3 = wb.create_sheet('voip_subscriptions')
+    ws3.append(['name', 'msisdn', 'service_ref', 'imsi', 'password', 'sip_transport', 'dnd', 'forward_id'])
+    ws3.append(['홍길동', '+82210001001', 'voip', '82210001001', '', 'TLS', 'N', ''])
+    ws4 = wb.create_sheet('ptt_subscriptions')
+    ws4.append(['name', 'msisdn', 'service_ref', 'imsi', 'password', 'sip_transport', 'dnd'])
+    ws4.append(['홍길동', '+82571900100', 'mcptt', '450033100000100', '', '', 'N'])
     return _xlsx_result(wb, 'cims_import_template.xlsx')
 
 
@@ -173,7 +178,8 @@ def _do_users_import(file_bytes: bytes, token: str, base: str):
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes))
     # credentials = 비밀번호를 비워 난수로 생성한 행. 이 응답이 원문을 보는 유일한 기회다 —
     #   CSC 는 H(A1) 만 저장하므로 이후에는 복구할 수 없다.
-    result = {'created_users': 0, 'created_voip': 0, 'created_ptt': 0, 'errors': [], 'credentials': []}
+    # created_volte/voip/ptt = 시트(가입 테이블)별 생성 회선 수.
+    result = {'created_users': 0, 'created_volte': 0, 'created_voip': 0, 'created_ptt': 0, 'errors': [], 'credentials': []}
 
     r = _get(base, '/api/v1/users', token)
     if r.status_code != 200:
@@ -215,7 +221,9 @@ def _do_users_import(file_bytes: bytes, token: str, base: str):
             else:
                 result['errors'].append({'row': i, 'sheet': 'users', 'error': f'HTTP {rr.status_code} {rr.text[:80]}'})
 
-    for sheet, svc, key in (('volte_subscriptions', 'call', 'created_voip'),
+    # (시트, csc 관리 API 경로 세그먼트 /users/{id}/<svc>, 결과 키) — 세그먼트는 CSC subscriptions 레지스트리와 같다.
+    for sheet, svc, key in (('volte_subscriptions', 'call', 'created_volte'),
+                            ('voip_subscriptions', 'voip', 'created_voip'),
                             ('ptt_subscriptions', 'ptt', 'created_ptt')):
         if sheet not in wb.sheetnames:
             continue
@@ -244,7 +252,10 @@ def _do_users_import(file_bytes: bytes, token: str, base: str):
             sref = _cell_str(rd.get('service_ref'))
             if sref:
                 sub['service_ref'] = sref
-            if svc == 'call':
+            tr = _cell_str(rd.get('sip_transport')).upper()
+            if tr and tr != 'ANY':
+                sub['sip_transport'] = tr
+            if svc in ('call', 'voip'):
                 sub['forward_id'] = _cell_str(rd.get('forward_id'))
             rr = _post(base, f'/api/v1/users/{pid}/{svc}', token, sub)
             if rr.status_code in (200, 201):
@@ -254,7 +265,7 @@ def _do_users_import(file_bytes: bytes, token: str, base: str):
             else:
                 result['errors'].append({'row': i, 'sheet': sheet, 'error': f'HTTP {rr.status_code} {rr.text[:80]}'})
 
-    result['total'] = result['created_users'] + result['created_voip'] + result['created_ptt']
+    result['total'] = result['created_users'] + result['created_volte'] + result['created_voip'] + result['created_ptt']
     return result, 200
 
 

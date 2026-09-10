@@ -27,7 +27,7 @@ csc:
 ```
 
 ### `database`
-가입자 도메인 (users / volte_subscriptions / ptt_subscriptions / organizations) 의 외부 DB. dev 환경처럼 DB 미연결이면 `null`.
+가입자 도메인 (users / volte_subscriptions / voip_subscriptions / ptt_subscriptions / organizations) 의 외부 DB. dev 환경처럼 DB 미연결이면 `null`.
 
 ```yaml
 database:

@@ -50,7 +50,7 @@ operator / monitor`, `builtin=1`, 읽기 전용)은 마이그레이션이 항상
 |---|---|---|
 | `authz_manage` | bool | 역할 생성·범위 변경·배정·해제, 청취 자격 동기. **내장 admin/manager 만** — 커스텀 역할에 켜면 400 `not_delegable` |
 | `audit_read` | bool | `kind=audit` 이벤트(E-AUD) 열람 — 감청 감사([dispatch_center.md §5.7](dispatch_center.md)) |
-| `directory_write` | none / own / all | 조직·구성원(person)·VoLTE/PTT 번호·프로파일 비감청 자격·전화 그룹 쓰기. `own` = `org_id` 조직과 그 하위 |
+| `directory_write` | none / own / all | 조직·구성원(person)·VoLTE/VoIP/PTT 번호·프로파일 비감청 자격·전화 그룹 쓰기. `own` = `org_id` 조직과 그 하위 |
 | `directory_read` | none / own / all | 같은 자원 조회(콘솔). 관제 앱의 전화번호부(`/provisioning/directory`)는 provisioning scope 의 일반 읽기라 별개 |
 | `ptt_group_manage` | none / own / scope / all | PTT 그룹 CRUD — `own` = `authorized_user_id` == principal(가입자일 때만 성립, §9), `scope` = `directory_write` 범위 안 `org_code`, `all` |
 | `monitor_call` | none / own / listed / all | 통화 감청(Join tap)·타인 세션 관측(dialog)·통화 이력/녹취 범위. `own` = 배정자의 전화 그룹, `listed` = `role_monitor_targets`(전화 그룹 id) |
@@ -178,7 +178,7 @@ GMC→GMS **XCAP Ut PUT/DELETE** 다. 관제사는 콘솔 계정이 아니라 PT
 | 생성 (PUT 신규 uri) | 프로파일 `ptt_user_profile.allow_create_group=1` **또는** 역할 `ptt_group_manage=scope\|all` | CIMS 확장 요소 `<cims:allow-create-group>` — TS 24.484 에는 일반 그룹 생성 요소가 없다(`allow-regroup` 은 임시 regroup, `allow-create-{group,user}-broadcast-group` 은 브로드캐스트 한정). 규격상 이 인가는 GMS 측 정책이라 프로파일 확장 자리(`anyExt` 계열, 기존 `cims:allow-adhoc-group-call` 과 같은 관례)에 둔다 |
 | 수정·삭제 (PUT 기존 / DELETE) | `ptt_groups.authorized_user_id == 토큰 가입자 users.id` **또는** 역할 `ptt_group_manage=scope`(그룹 `org_code` 가 범위 안)\|`all` | §4 소유 규칙 + 관리 범위. 소유권(`authorized_user_id`)은 바뀌지 않는다 |
 
-- 관리 범위 편집은 같은 범위로 조직·구성원·VoLTE/PTT 번호·전화 그룹·PTT 프로파일의 비감청 자격(`allow_create_group`·긴급 계열)도
+- 관리 범위 편집은 같은 범위로 조직·구성원·VoLTE/VoIP/PTT 번호·전화 그룹·PTT 프로파일의 비감청 자격(`allow_create_group`·긴급 계열)도
   관제 앱에서 다룬다(`/provisioning/directory/*`, [dispatch_center.md §3.4](dispatch_center.md)). `allow_ambient_listening` 은 §2.4.
 - `allow_create_group` 의 부여는 **OAM/관리 범위**가 한다(TS 23.280 authorized user = 조직 프로비저닝): 콘솔 가입자 편집의 PTT
   프로파일 토글, admin API `PUT /api/v1/users/{id}/ptt/{msisdn}/profile`, 관제 앱 관리 화면 — 셋 다 같은 플래그(인가 축은 하나).

@@ -344,7 +344,7 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
         SendSipNotify( strUri, strEtag, strAction );
 
         // 가입자 캐시 즉시 갱신.
-        // volte_subscriptions.id / ptt_subscriptions.id 는 E.164 `+` prefix 포함.
+        // 가입 테이블(voip·volte·ptt _subscriptions).id 는 E.164 `+` prefix 포함.
         // tel:+821001 → +821001 (scheme 만 제거, MSISDN 의 `+` 는 유지).
         std::string strUserId = strUri;
         if ( strUserId.substr( 0, 4 ) == "tel:" ) {

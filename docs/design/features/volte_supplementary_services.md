@@ -72,8 +72,9 @@ INVITE 경로에 DB 질의를 넣지 않는다 — 모든 신규 판정(내선 �
 | `id` (가입 id = AoR) | **E.164**(예: `+821310001001`) — 망 신원. 내선(`1001`)은 끝자리 라벨 | 이동 가입자와 같은 주소 공간이라 도메인 간 호·대표번호·연락처가 한 번호 체계로 통한다. 라벨 자릿수 = `Provisioning.ExtensionDigits` |
 | `imsi` | 번호 숫자(USIM 없음 규약 — 관제 앱 관리 API 가 비어 있으면 채운다) | Digest 경로에서 imsi 는 AKA 와 무관한 "IMPI user part" — Digest username = `imsi@<domain>`, ha1 도 이에 묶임 |
 | `auth_scheme` | `digest` (기본값) | AKA 아님 = USIM 불요 |
-| `sip_transport` | `TLS` | 채널 정책 게이트가 평문 유입을 403 차단 (A-SEC-003). 서비스 `sec_mechanisms=[tls]` |
-| `service_ref` | 유선 VoIP 접속서비스 name (`voip`, §10.2) | 비면 REGISTER 거부 |
+| `sip_transport` | `TLS` 권장 기본값 — 회선 필드 자체는 kind 무관(`UDP`/`TCP`/`TLS`/ANY=NULL 단말 선택) | `TLS` 만 서버가 집행(비-TLS 유입 403, A-SEC-003). 서비스 `sec_mechanisms=[tls]`·`media_srtp=required` 는 채널이 TLS 일 때만 SDES 키가 보호되므로 비-TLS 선택은 콘솔이 경고한다([media_security.md](media_security.md) TLS 결합) |
+| `service_ref` | 유선 VoIP 접속서비스 name (`voip`, §10.2) — 필수 | kind=voip 서비스만(다른 kind → 400 `service_kind_mismatch`). 비면 400 |
+| 가입 테이블 | `voip_subscriptions`(§10.1) — `volte_subscriptions` 와 컬럼 동일 | 테이블 = 접속환경 kind([sip_service_model.md §2-9](sip_service_model.md)). 번호는 volte·voip·ptt 테이블과 대표번호에 걸쳐 유일(409 `number_exists`) |
 | `pickup_group` | 전화 그룹 id — 멤버십에서 파생(§5.1, [dispatch_center.md §3.2](dispatch_center.md)) | |
 
 **식별자 모델과의 관계** ([identifier_model.md](../identifier_model.md)): 가입 id(E.164)는 **다이얼 가능한
@@ -100,7 +101,7 @@ INVITE 경로에 DB 질의를 넣지 않는다 — 모든 신규 판정(내선 �
 
 픽업 대상 판정 축은 **가입자별 `pickup_group`** 이고, 그 값은 **전화 그룹 id**([dispatch_center.md §3.1](dispatch_center.md))다.
 
-- SoT: `volte_subscriptions.pickup_group VARCHAR(64) NULL` / `ptt_subscriptions.pickup_group`(§10.1) — 값은 전화 그룹 멤버십에서
+- SoT: `voip_subscriptions.pickup_group VARCHAR(64) NULL` / `volte_subscriptions.pickup_group` / `ptt_subscriptions.pickup_group`(§10.1) — 값은 전화 그룹 멤버십에서
   CSC 가 파생한다(person 단위, 직접 편집 409).
 - CSP: `CspUser::m_strPickupGroup` → 등록 시 `CUserInfo::m_strGroupId`. **비어 있으면 그 회선은 어떤 픽업·BLF 축에도 속하지
   않는다** — `org_id` 폴백은 두지 않는다(같은 조직이라는 사실만으로 남의 호를 당겨받거나 dialog 를 구독할 수 없다).
@@ -304,19 +305,31 @@ org 폴백이라 happy-path 만 판정하고 그룹 경계 검사는 SKIP 으로
 
 ## 10. 설정 정리 (운영 규약)
 
-### 10.1 DB 스키마 (신설 1컬럼)
+### 10.1 DB 스키마 (유선 가입 테이블 + pickup_group)
+
+유선 회선은 `voip_subscriptions` 에 둔다 — `volte_subscriptions` 와 컬럼이 같고(id/user_id/imsi/service_ref/ha1/auth_scheme/AKA 열/
+sip_transport/dnd/forward_id/pickup_group/register_time/logout_time), `service_ref` 는 kind=voip 접속서비스만 가리킨다(정본 DDL =
+`sql/cims_schema.sql`, [db_schema.md](../db_schema.md)). 테이블이 곧 접속환경 kind 다([sip_service_model.md §2-9](sip_service_model.md)).
 
 ```sql
--- sql/migrate_subscription_pickup_group.sql (재실행 안전 — 컬럼 존재 시 no-op)
+-- sql/migrate_voip_subscriptions.sql (재실행 안전)
+--   ① CREATE TABLE IF NOT EXISTS voip_subscriptions (… volte_subscriptions 와 동일 …, FK fk_voipsub_user → users CASCADE)
+--   ② SET @voip_refs := COALESCE(@voip_refs, 'voip');   -- kind=voip 접속서비스 name 목록(쉼표) — 적용 전 SET 으로 지정 가능
+--   ③ volte_subscriptions 가 최종 형상(ha1·auth_scheme·pickup_group·sip_transport)이 아니면 SIGNAL 로 중단
+--   ④ INSERT IGNORE INTO voip_subscriptions (…) SELECT … FROM volte_subscriptions WHERE FIND_IN_SET(service_ref, @voip_refs)
+--   ⑤ DELETE FROM volte_subscriptions WHERE FIND_IN_SET(service_ref, @voip_refs) AND id IN (SELECT id FROM voip_subscriptions)
+
+-- sql/migrate_subscription_pickup_group.sql (재실행 안전 — 컬럼 존재 시 no-op; voip_subscriptions 는 생성 시점부터 이 컬럼을 가진다)
 ALTER TABLE volte_subscriptions ADD COLUMN pickup_group VARCHAR(64) NULL DEFAULT NULL;
 ALTER TABLE ptt_subscriptions   ADD COLUMN pickup_group VARCHAR(64) NULL DEFAULT NULL;
 ```
 
-`NULL`/빈 값 = 기존 동작(조직 축 폴백). JSON fallback(`csp/User/<id>.json`)에는 `pickup_group`
-키로 대응한다. **컬럼 미적용 DB 에서도 안전**하다 — CSP `DbManager` 가 부팅 시 컬럼을 프로브해
-없으면 SELECT 에서 생략(전원 org 폴백, INFO 로그), CSC 도 `pickup_group` 을 응답에서 빼고 그
-키를 담은 프로비저닝 요청은 400(`schema_not_migrated`)으로 거절한다. CSP 반영은 다음 REGISTER
-갱신부터(등록 바인딩 스냅샷).
+테이블 이동은 `phone_group_members.user_id`(회선 id, FK 없음)와 `pickup_group` 값을 바꾸지 않는다. `pickup_group` NULL/빈 값 =
+어떤 픽업·BLF 축에도 속하지 않음(§5.1 — org 폴백 없음). JSON fallback(`csp/User/<id>.json`)에는 `pickup_group` 키로 대응한다.
+**스키마 미적용 DB 에서도 안전**하다 — CSP `DbManager` 가 부팅 시 컬럼·테이블을 프로브해 `pickup_group` 이 없으면 SELECT 에서
+생략(픽업·BLF 축 비활성, INFO 로그)하고 `voip_subscriptions` 가 없으면 그 테이블만 건너뛴다(INFO). CSC 도 같은 프로브로
+`pickup_group` 을 응답에서 빼고 그 키를 담은 프로비저닝 요청은 400(`schema_not_migrated`), `/users/{pid}/voip` 는 503
+(`schema_not_migrated`)으로 거절한다. CSP 반영은 다음 REGISTER 갱신부터(등록 바인딩 스냅샷).
 
 ### 10.2 접속서비스 (`access_services` — 콘솔 관리>설정, `config/access_services.jsonl`)
 
@@ -346,7 +359,7 @@ ALTER TABLE ptt_subscriptions   ADD COLUMN pickup_group VARCHAR(64) NULL DEFAULT
   "priority": 100 }
 ```
 
-### 10.3 가입자 프로비저닝 (CSC `POST /users/{pid}/call`)
+### 10.3 가입자 프로비저닝 (CSC `POST /users/{pid}/voip`)
 
 유선 단말 1대 = 가입 1건. 규약(§3)을 그대로 payload 로:
 
@@ -355,37 +368,45 @@ ALTER TABLE ptt_subscriptions   ADD COLUMN pickup_group VARCHAR(64) NULL DEFAULT
   "imsi": "821310001002",     // 규약: 번호 숫자 (Digest username = 821310001002@voip.cims.example.kr)
   "passwd": "…",              // CSC 가 ha1 로 파생 저장 (평문 미보관)
   "service_ref": "voip",
-  "sip_transport": "TLS",
+  "sip_transport": "TLS",     // 권장 기본값 — UDP/TCP/TLS/ANY(null) 중 선택 가능
   "auth_scheme": "digest",    // 기본값 — 생략 가능. k/opc 없음
   "dnd": false, "forward_id": "" }
 ```
 
-`pickup_group` 은 payload 에 두지 않는다 — 전화 그룹 멤버십(`/api/v1/phone-groups/{id}/members`)에서 파생되며 직접 지정은
-409 다([dispatch_center.md §3.2](dispatch_center.md)). 반영은 기존 `USER_CHANGED` UDP 통지 경로. 표시 이름은 `users.name`,
-내선 라벨은 프로비저닝 `extension`.
+`service_ref` 는 kind=voip 접속서비스여야 한다(다른 kind → 400 `service_kind_mismatch`, 비면 400). 번호는 volte·voip·ptt 테이블과
+대표번호에 걸쳐 유일하다(409 `number_exists`). `pickup_group` 은 payload 에 두지 않는다 — 전화 그룹 멤버십
+(`/api/v1/phone-groups/{id}/members`)에서 파생되며 직접 지정은 409 다([dispatch_center.md §3.2](dispatch_center.md)). 반영은 기존
+`USER_CHANGED` UDP 통지 경로. 표시 이름은 `users.name`, 내선 라벨은 프로비저닝 `extension`. 콘솔 가입자 화면의 VoIP 번호 탭·
+관제 앱 [관리] 의 VoIP 회선 폼이 이 API 를 쓴다([admin_api.md §4a](../../api/admin_api.md)).
 
-### 10.3a 기존 회선의 `voip` 이관 (H(A1) 재결박)
+### 10.3a 기존 회선의 `voip` 이관
 
-이동 서비스(`service_ref=volte`)로 만들어진 유선 회선(관제석 등)을 `voip` 서비스로 옮기는 절차. Digest 자료 H(A1) =
-MD5(`<imsi>@<domain>:<realm>:<pw>`) 는 **서비스 도메인·realm 에 묶여** 있어, 도메인이 다른 서비스로 `service_ref` 만 바꾸면
-REGISTER 가 403 이 된다 — CSC 는 평문을 보관하지 않아 재파생할 수 없다([sip_access_security.md §4.3·§4.7](sip_access_security.md)).
+이동 서비스(`service_ref=volte`, `volte_subscriptions`)로 만들어진 유선 회선(관제석 등)을 유선 VoIP 서비스·테이블로 옮기는 절차.
+Digest 자료 H(A1) = MD5(`<imsi>@<domain>:<realm>:<pw>`) 는 **서비스 도메인·realm 에 묶여** 있고 CSC 는 평문을 보관하지 않아
+재파생할 수 없다([sip_access_security.md §4.3·§4.7](sip_access_security.md)). 가입 테이블은 kind 라 volte 행의 `service_ref` 를
+voip 서비스로 바꾸는 PUT 은 400(`service_kind_mismatch`)이다 — 이관은 **회선 재키잉**([identifier_model.md](../identifier_model.md))이다.
 
 1. 접속서비스 `voip` 레코드 생성(§10.2) → CSP 반영(콘솔 저장 = agent 반영 + reload) — OAM 이 관리 store 미러를 따라 갱신하고
    CSC 는 그 미러에서 정의(domain·realm·SRTP·sec-agree·피처코드)를 읽는다. csc.json `Provisioning.Services.voip` 에는 단말 도달
    정보(host·포트·transport)만 채운다(`name` 을 레코드와 같게 — [sip_service_model.md §2-9](sip_service_model.md)).
-2. 회선마다 `PUT /users/{pid}/call/{msisdn}` 로 `service_ref="voip"` **와 `passwd` 를 함께** 보낸다 — CSC 가 새 도메인·realm 으로
-   H(A1) 을 다시 파생해 저장하고 CSP 에 `USER_CHANGED` 를 보낸다. `service_ref`(또는 `imsi`)가 바뀌는데 `passwd` 가 없으면 400
-   (결박 변경 = 재입력 필수). 콘솔 가입자 회선 편집·관제 앱 [관리] 도 같은 규칙이다.
+2. 회선마다 `DELETE /users/{pid}/call/{msisdn}` → `POST /users/{pid}/voip`(같은 번호, `service_ref="voip"`, `passwd` 필수) — CSC 가
+   voip 도메인·realm 으로 H(A1) 을 파생해 저장하고 CSP 에 `USER_CHANGED` 를 보낸다. 번호가 같으므로 `phone_group_members` 행은
+   그대로이고 새 회선은 그 person 의 전화 그룹 값을 `pickup_group` 으로 물려받는다. 콘솔 가입자 화면(VoLTE 번호 삭제 → VoIP 번호
+   개설)·관제 앱 [관리] 도 같은 두 단계다.
 3. 전화 그룹의 `service_ref` 를 `voip` 로 바꾼다(`PUT /api/v1/phone-groups/{id}`) — 대표번호 포크의 도메인이 이 값을 따른다.
 4. 단말은 재로그인(재프로비저닝) — `/provisioning/me` `services[]` 에 `kind=voip` 항목이 내려오고 관제 앱은 그것을 전화 회선으로
    잡는다([android_ue_provisioning.md §3](android_ue_provisioning.md)). 구 프로파일을 캐시한 단말은 옛 도메인으로 REGISTER 해
    403 을 받으므로 이관은 정지창에 회선 단위로 한다.
 
+**이미 `voip` 서비스를 가리키는 volte 행**(같은 도메인 배치로 개설한 회선)은 `sql/migrate_voip_subscriptions.sql` 이 정지창에
+`service_ref ∈ @voip_refs` 조건으로 `voip_subscriptions` 로 옮긴다(§10.1) — H(A1)·번호·`pickup_group` 이 불변이라 단말 재로그인이
+필요 없다(프로파일 `kind` 는 이미 voip).
+
 **같은 도메인 배치(전환기)**: `voip` 레코드를 volte 와 **같은 도메인**(priority 150 — `GetByDomain` 의 1순위를 빼앗지 않는다)으로
-두면 H(A1) 이 그대로라 재결박·단말 재로그인 없이 `service_ref` 만 옮길 수 있다. 정책 필드(피처코드·전달·SRTP)는 `service_ref` 로
-붙으므로 도메인이 같아도 유선 정책은 voip 레코드를 따르고, 프로비저닝 `services[].kind` 도 voip 다. dev 검증 스택이 이 배치로
-시드한다(`verify/lib/common/access_services.py`). 상용 규약은 도메인 분리(§10.2)이며, 유선 번호대(예 `+8221…`)의 회선을 **새로
-개설**하면 재결박 없이 처음부터 voip 도메인의 H(A1) 이 만들어지므로 위 2 단계의 passwd 재입력은 기존 회선을 옮길 때만 필요하다.
+두면 H(A1) 값이 그대로라 재키잉 시 입력한 `passwd` 로 파생한 자료가 종전과 같고 단말 자격이 바뀌지 않는다. 정책 필드(피처코드·전달·
+SRTP)는 `service_ref` 로 붙으므로 도메인이 같아도 유선 정책은 voip 레코드를 따르고, 프로비저닝 `services[].kind` 도 voip 다. dev
+검증 스택이 이 배치로 시드한다(`verify/lib/common/access_services.py`). 상용 규약은 도메인 분리(§10.2)이며, 유선 번호대(예 `+8221…`)
+의 회선을 **새로 개설**하면 처음부터 voip 테이블·voip 도메인의 H(A1) 이 만들어지므로 위 2 단계는 기존 회선을 옮길 때만 필요하다.
 관제석이 NAT 뒤면 `media_nat_mode=auto` 를 유지한다.
 
 ### 10.4 csp.json / 템플릿 (`sections.tas`)

@@ -91,4 +91,4 @@ scenario yaml 의 모든 csp_config layer 는 csp 의 `.cpp` 헤더 schema 와 1
 - [_schema/scenario.schema.md](_schema/scenario.schema.md) — scenario.yaml 필드 명세 (진짜 csp schema)
 - [_schema/csp-layers.md](_schema/csp-layers.md) — CSP 10 entity layer 모델
 - `docs/design/runtime_store_design.md` — file_store SoT (deployment/agent/ha_groups/packages JSON)
-- `docs/design/db_schema.md` — 외부 DB 위임 도메인 (users / volte_subscriptions / ptt_subscriptions / organizations)
+- `docs/design/db_schema.md` — 외부 DB 위임 도메인 (users / volte_subscriptions / voip_subscriptions / ptt_subscriptions / organizations)

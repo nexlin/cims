@@ -31,7 +31,7 @@ MCPTT 관련 동작은 csc 가 규격에 따라 제공하는 **MCPTT API(HTTP)**
 | 개념 | 소유 모듈 | 저장소 | 설명 |
 |---|---|---|---|
 | **사용자(user)** | base/oam | **file_store** (`console_accounts`) | 콘솔/관리 로그인 계정. `/users/me` = 로그인 본인 프로파일 |
-| **가입자(subscriber)** | **csc** | **MariaDB** (`volte_subscriptions`·`ptt_subscriptions`) | VoLTE/PTT 단말 가입자. CRUD = csc 도메인 |
+| **가입자(subscriber)** | **csc** | **MariaDB** (`volte_subscriptions`·`voip_subscriptions`·`ptt_subscriptions` — 테이블 = 접속환경 kind) | VoLTE/VoIP/PTT 단말 가입자. CRUD = csc 도메인 |
 | MCPTT(규격) | csc | DB + 자기 file 영역 | mcptt(XCAP·USERS·GROUPS·notify_csp) + idms_storage(IdMS 토큰) |
 | 조직/그룹 | csc | DB | org·ptt_groups |
 | 통계/녹취/flow/검증 | oam-svc | 파일 | flow_logger 포함 |

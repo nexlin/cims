@@ -1,6 +1,9 @@
 import { api } from './client'
 
 export type SipTransport = 'UDP' | 'TCP' | 'TLS'
+// 회선 종류 = 가입 테이블 = 접속환경 kind (sip_service_model.md §2-9) — 관리 API 경로 세그먼트 /users/{pid}/<svc>.
+//   call = VoLTE(이동, volte_subscriptions) / voip = 유선 VoIP(voip_subscriptions) / ptt(ptt_subscriptions)
+export type LineSvc = 'call' | 'voip' | 'ptt'
 // 인증 체계 (sip_access_security.md §8.2) — digest=SIP Digest(H(A1)) / aka=IMS AKA(K/OPc, 보호 채널 강제)
 export type AuthScheme = 'digest' | 'aka'
 
@@ -13,7 +16,8 @@ export interface Subscription {
   service_ref?: string | null   // 소속 서비스(access_services.name, 예: volte/mcptt) — 도메인 결정
   service_id?: number | null    // (구) 숫자 service_id 호환
   imsi?: string | null          // SIM IMSI — 인증 username 의 user 파트. 번호 add 시 필수.
-  // 채널 정책 — TLS=서버 집행(비-TLS 채널의 이 번호 요청은 REGISTER 포함 403) / UDP·TCP=프로비저닝 힌트 / null=단말 선택
+  // 채널 정책 — TLS=서버 집행(비-TLS 채널의 이 번호 요청은 REGISTER 포함 403) / UDP·TCP=프로비저닝 힌트 /
+  //   null = ANY(단말 선택 — 서버 정책 없음, 광고된 transport 중 단말이 고른다). 서버는 입력 "ANY" 도 null 로 받는다.
   sip_transport?: SipTransport | null
   // 인증 체계 — 응답은 auth_scheme + aka_provisioned(K/OPc 보관 여부)만. K/OPc 는 입력 전용(응답에 절대 미포함),
   //   보내면 SQN 이 0 으로 리셋된다. AKA 컬럼 미적용 DB 에서는 두 키가 응답에 없다.
@@ -57,7 +61,8 @@ export interface UserSummary {
   email?: string
   details?: string | null
   reject_id: string[]
-  call_subscriptions: Subscription[]
+  call_subscriptions: Subscription[]   // VoLTE(이동) 회선 — volte_subscriptions
+  voip_subscriptions: Subscription[]   // 유선 VoIP 회선 — voip_subscriptions (구 서버 응답에는 없다 → 소비자는 `|| []`)
   ptt_subscriptions: Subscription[]
   create_time?: string | null
   update_time?: string | null
@@ -74,7 +79,8 @@ export type UserInput = {
 // Excel 가져오기 결과. credentials = password 칸을 비워 난수로 생성된 행 — 서버는 H(A1) 만 저장하므로
 //   이 응답이 원문 비밀번호를 보는 유일한 기회다.
 export interface ImportResult {
-  total: number; created_users: number; created_voip: number; created_ptt: number
+  // created_volte = VoLTE 시트, created_voip = 유선 VoIP 시트, created_ptt = PTT 시트 생성 회선 수
+  total: number; created_users: number; created_volte: number; created_voip: number; created_ptt: number
   errors: Array<{ row: number; sheet: string; error: string }>
   credentials?: Array<{ sheet: string; row: number; msisdn: string; password: string }>
 }
@@ -92,9 +98,9 @@ export const usersApi = {
   importExcel: (base64: string)                              => api.post<ImportResult>('/users/import', {file_base64: base64}),
   templateUrl: '/api/v1/users/import/template',
 
-  addSub:     (pid: number, svc: 'call'|'ptt', sub: Partial<Subscription>)              => api.post<{id:string}>(`/users/${pid}/${svc}`, sub),
-  updateSub:  (pid: number, svc: 'call'|'ptt', msisdn: string, data: Partial<Subscription>) => api.put<{id:string}>(`/users/${pid}/${svc}/${enc(msisdn)}`, data),
-  deleteSub:  (pid: number, svc: 'call'|'ptt', msisdn: string)                          => api.delete<{id:string}>(`/users/${pid}/${svc}/${enc(msisdn)}`),
+  addSub:     (pid: number, svc: LineSvc, sub: Partial<Subscription>)              => api.post<{id:string}>(`/users/${pid}/${svc}`, sub),
+  updateSub:  (pid: number, svc: LineSvc, msisdn: string, data: Partial<Subscription>) => api.put<{id:string}>(`/users/${pid}/${svc}/${enc(msisdn)}`, data),
+  deleteSub:  (pid: number, svc: LineSvc, msisdn: string)                          => api.delete<{id:string}>(`/users/${pid}/${svc}/${enc(msisdn)}`),
 
   getPttProfile:    (pid: number, msisdn: string)                        => api.get<McpttProfile & {id:string, exists:boolean}>(`/users/${pid}/ptt/${enc(msisdn)}/profile`),
   updatePttProfile: (pid: number, msisdn: string, data: McpttProfile)    => api.put<McpttProfile & {id:string}>(`/users/${pid}/ptt/${enc(msisdn)}/profile`, data),

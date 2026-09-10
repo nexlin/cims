@@ -40,7 +40,8 @@ export function buildPickIndex(users: UserSummary[], kind: 'ptt' | 'call' | 'use
       out.push({ value: String(u.id), label: u.name, sub: u.org_id || '', orgCode: u.org_id || '', userId: u.id, userName: u.name })
       continue
     }
-    const subs = kind === 'ptt' ? u.ptt_subscriptions : u.call_subscriptions
+    // 'call' 피커 = 전화 가족(이동 VoLTE + 유선 VoIP) — 구 서버 응답에는 voip_subscriptions 가 없다
+    const subs = kind === 'ptt' ? u.ptt_subscriptions : [...(u.call_subscriptions || []), ...(u.voip_subscriptions || [])]
     for (const s of subs) {
       out.push({ value: s.id, label: u.name, sub: s.id, orgCode: u.org_id || '', userId: u.id, userName: u.name })
     }

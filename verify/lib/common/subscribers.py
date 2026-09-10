@@ -109,6 +109,10 @@ def select_subscribers(db_cfg: dict, voip_count: int = 1, ptt_count: int = 1) ->
 
     voip_count/ptt_count 는 그 가입자로 돌릴 시나리오의 cspsim `-count` 다 —
     그 수만큼 연속·전원 ha1 보유인 구간의 첫 가입자를 고른다.
+
+    키 이름 주의: `voip_*` 는 **이동 VoLTE 스모크 가입자**(volte_subscriptions 행)다 — 전화 가족을 voip 로 부르던
+    옛 어휘의 잔재이며 유선 VoIP 가입 테이블(voip_subscriptions, kind=voip)과 무관하다. 사용처(stage3/6 seed·
+    access_services)가 이 키로 묶여 있어 이름은 유지한다.
     """
     out = {
         "voip_user": "", "voip_imsi": "", "voip_ref": "", "voip_ha1": "",
@@ -192,7 +196,7 @@ def select_subscribers(db_cfg: dict, voip_count: int = 1, ptt_count: int = 1) ->
 # 채널 정책 프로브용 — sip_transport 정책 읽기/쓰기 (S3 게이트 검증)
 # ─────────────────────────────────────────────────────────────
 def get_transport_policy(db_cfg: dict, table: str, user: str):
-    """`table`(volte_subscriptions|ptt_subscriptions) 의 user 행 sip_transport 반환.
+    """`table`(voip_subscriptions|volte_subscriptions|ptt_subscriptions) 의 user 행 sip_transport 반환.
 
     행이 없으면 None, 값이 NULL 이면 '' 반환 (구분 필요 — 복원 시 NULL 로 되돌린다).
     """

@@ -129,6 +129,7 @@ CSP/CMP STATS probe 는 UDP 단발 요청이라 재전송이 없다. 다음 규�
 |------|------|------|
 | 가입자 수 | `COUNT(*) users` | 사람 단위 |
 | VoLTE 번호 (전체/등록) | `COUNT(*) volte_subscriptions` / 등록조건 | "등록 단말" |
+| VoIP 번호 (전체/등록) | `COUNT(*) voip_subscriptions` / 등록조건 | 유선 회선 — 테이블 부재 DB 는 0 |
 | PTT 번호 (전체/등록) | `COUNT(*) ptt_subscriptions` / 등록조건 | |
 | PTT 그룹 수 | `COUNT(*) ptt_groups` | |
 

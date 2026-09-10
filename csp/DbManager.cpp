@@ -128,6 +128,15 @@ void CDbManager::ProbeSchema() {
         CLog::Print( LOG_INFO,
                      "[DB] role_assignments table absent — migrate_phone_groups_roles.sql 미적용. 감청·PTT 청취 범위 "
                      "비활성(같은 전화 그룹 BLF 만)" );
+    // 유선 VoIP 가입 테이블 (voip_subscriptions — sip_service_model.md §2-9, 가입 테이블 = 접속환경 kind). 미적용이면
+    // 유선 회선은 volte_subscriptions 행으로만 적재된다 (INFO — 전환기).
+    pRes = ExecuteSelect( "SHOW TABLES LIKE 'voip_subscriptions'" );
+    m_bHasVoipTable = pRes && mysql_num_rows( pRes ) > 0;
+    if ( pRes ) mysql_free_result( pRes );
+    if ( !m_bHasVoipTable )
+        CLog::Print( LOG_INFO,
+                     "[DB] voip_subscriptions table absent — migrate_voip_subscriptions.sql 미적용. 유선 voip 회선은 "
+                     "volte_subscriptions 행으로만 적재" );
     // 원격 청취 자격 (ptt_user_profile.allow_ambient_listening — dispatch_center.md §5.6). 미적용이면 전원 자격 없음.
     pRes = ExecuteSelect( "SHOW COLUMNS FROM ptt_user_profile LIKE 'allow_ambient_listening'" );
     m_bHasAmbientColumn = pRes && mysql_num_rows( pRes ) > 0;
@@ -151,6 +160,25 @@ std::string CDbManager::AuthSchemeCol( const char *pszAlias ) const {
 std::string CDbManager::PickupGroupCol( const char *pszAlias ) const {
     if ( !m_bHasPickupColumn ) return "''";
     return std::string( "COALESCE(" ) + pszAlias + ".pickup_group,'')";
+}
+
+std::vector<CDbManager::SubTable> CDbManager::SubTables() const {
+    std::vector<SubTable> vec;
+    if ( m_bHasVoipTable ) vec.push_back( { "voip_subscriptions", "voip" } );
+    vec.push_back( { "volte_subscriptions", "volte" } );
+    vec.push_back( { "ptt_subscriptions", "ptt" } );
+    return vec;
+}
+
+std::string CDbManager::SubTablesUnion() const {
+    std::string str = "(";
+    bool bFirst = true;
+    for ( const SubTable &t : SubTables() ) {
+        if ( !bFirst ) str += " UNION ALL ";
+        str += std::string( "SELECT id, user_id FROM " ) + t.pszTable;
+        bFirst = false;
+    }
+    return str + ")";
 }
 
 void CDbManager::Disconnect() {
@@ -298,44 +326,33 @@ bool CDbManager::SelectUser( const std::string &strUserId, CspUser &clsUser ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_pMysql && !Reconnect() ) return false;
 
-    // Try call users first (query by subscription MSISDN = id)
+    // 가입 테이블(voip·volte·ptt)을 차례로 본다 — 번호(id)는 세 테이블에 걸쳐 유일(CSC 쓰기 게이트).
     //  v3 (2026-04-22): service_id INT → service_ref VARCHAR (access_services.name 참조)
-    std::string strSql =
-        "SELECT cu.id, u.name, u.org_id, cu.dnd, cu.forward_id, u.id AS person_id, "
-        "       COALESCE(cu.service_ref,''), COALESCE(cu.imsi,''), " +
-        Ha1Col( "cu" ) + ", COALESCE(cu.sip_transport,''), " + AuthSchemeCol( "cu" ) + ", " + PickupGroupCol( "cu" ) +
-        " FROM volte_subscriptions cu JOIN users u ON cu.user_id = u.id "
-        "WHERE cu.id='" +
-        Escape( strUserId ) + "'";
-
-    MYSQL_RES *pRes = ExecuteSelect( strSql );
-    if ( !pRes ) return false;
-
-    std::string strServiceType = "volte";
-    MYSQL_ROW row = mysql_fetch_row( pRes );
-    if ( !row ) {
-        mysql_free_result( pRes );
-
-        // Try PTT users
-        strSql =
-            "SELECT pu.id, u.name, u.org_id, pu.dnd, pu.forward_id, u.id AS person_id, "
-            "       COALESCE(pu.service_ref,''), COALESCE(pu.imsi,''), " +
-            Ha1Col( "pu" ) + ", COALESCE(pu.sip_transport,''), " + AuthSchemeCol( "pu" ) + ", " +
-            PickupGroupCol( "pu" ) +
-            " FROM ptt_subscriptions pu JOIN users u ON pu.user_id = u.id "
-            "WHERE pu.id='" +
-            Escape( strUserId ) + "'";
+    MYSQL_RES *pRes = nullptr;
+    MYSQL_ROW row = nullptr;
+    std::string strServiceType;
+    for ( const SubTable &t : SubTables() ) {
+        std::string strSql = std::string(
+                                 "SELECT s.id, u.name, u.org_id, s.dnd, s.forward_id, u.id AS person_id, "
+                                 "       COALESCE(s.service_ref,''), COALESCE(s.imsi,''), " ) +
+                             Ha1Col( "s" ) + ", COALESCE(s.sip_transport,''), " + AuthSchemeCol( "s" ) + ", " +
+                             PickupGroupCol( "s" ) + " FROM " + t.pszTable +
+                             " s JOIN users u ON s.user_id = u.id "
+                             "WHERE s.id='" +
+                             Escape( strUserId ) + "'";
 
         pRes = ExecuteSelect( strSql );
         if ( !pRes ) return false;
 
         row = mysql_fetch_row( pRes );
-        if ( !row ) {
-            mysql_free_result( pRes );
-            return false;
+        if ( row ) {
+            strServiceType = t.pszType;
+            break;
         }
-        strServiceType = "ptt";
+        mysql_free_result( pRes );
+        pRes = nullptr;
     }
+    if ( !row ) return false;
 
     clsUser.m_strId = row[0] ? row[0] : "";
     clsUser.m_strServiceType = strServiceType;
@@ -357,7 +374,7 @@ bool CDbManager::SelectUser( const std::string &strUserId, CspUser &clsUser ) {
 
     // 착신 거부 목록 로드 (person_id는 INT이므로 따옴표 없이 사용)
     clsUser.m_vecReject.clear();
-    strSql = "SELECT reject_id FROM user_rejects WHERE user_id=" + strPersonId;
+    std::string strSql = "SELECT reject_id FROM user_rejects WHERE user_id=" + strPersonId;
     pRes = ExecuteSelect( strSql );
     if ( pRes ) {
         while ( ( row = mysql_fetch_row( pRes ) ) != nullptr ) {
@@ -407,8 +424,9 @@ bool CDbManager::UpdateRegisterTime( const std::string &strUserId ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_pMysql && !Reconnect() ) return false;
 
-    ExecuteQuery( "UPDATE volte_subscriptions SET register_time=NOW() WHERE id='" + Escape( strUserId ) + "'" );
-    ExecuteQuery( "UPDATE ptt_subscriptions  SET register_time=NOW() WHERE id='" + Escape( strUserId ) + "'" );
+    for ( const SubTable &t : SubTables() )
+        ExecuteQuery( std::string( "UPDATE " ) + t.pszTable + " SET register_time=NOW() WHERE id='" +
+                      Escape( strUserId ) + "'" );
     return true;
 }
 
@@ -416,8 +434,9 @@ bool CDbManager::UpdateLogoutTime( const std::string &strUserId ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_pMysql && !Reconnect() ) return false;
 
-    ExecuteQuery( "UPDATE volte_subscriptions SET logout_time=NOW() WHERE id='" + Escape( strUserId ) + "'" );
-    ExecuteQuery( "UPDATE ptt_subscriptions  SET logout_time=NOW() WHERE id='" + Escape( strUserId ) + "'" );
+    for ( const SubTable &t : SubTables() )
+        ExecuteQuery( std::string( "UPDATE " ) + t.pszTable + " SET logout_time=NOW() WHERE id='" +
+                      Escape( strUserId ) + "'" );
     // de-register 시 affiliation 해제 (TS 24.379 §9 — 제휴는 등록에 묶인다).
     //   가입자의 **전 그룹 제휴를 한 번에 지우는 유일한 경로**이므로 반드시 흔적을 남긴다.
     //   종전엔 무로그였고, 그래서 "제휴 테이블이 비었다" 를 조사할 때 지운 주체를 특정할 수
@@ -526,17 +545,15 @@ bool CDbManager::LoadAllUsers( CspUserMap &clsMap ) {
     if ( !m_pMysql && !Reconnect() ) return false;
 
     int count = 0;
-    const char *aTables[] = { "volte_subscriptions", "ptt_subscriptions" };
-    const char *aTypes[] = { "volte", "ptt" };
-
-    for ( int i = 0; i < 2; ++i ) {
+    // 가입 테이블 = 접속환경 kind (voip·volte·ptt) — 목록은 SubTables() 하나(voip 는 테이블이 있을 때만).
+    for ( const SubTable &t : SubTables() ) {
         // v3 (2026-04-22): service_id INT → service_ref VARCHAR (access_services.name 참조)
         std::string strSql = std::string(
                                  "SELECT s.id, u.name, u.org_id, s.dnd, s.forward_id, u.id, "
                                  "       COALESCE(s.service_ref, ''), COALESCE(s.imsi, ''), "
                                  "       " ) +
                              Ha1Col( "s" ) + ", COALESCE(s.sip_transport, ''), " + AuthSchemeCol( "s" ) + ", " +
-                             PickupGroupCol( "s" ) + " FROM " + aTables[i] + " s JOIN users u ON s.user_id = u.id";
+                             PickupGroupCol( "s" ) + " FROM " + t.pszTable + " s JOIN users u ON s.user_id = u.id";
 
         MYSQL_RES *pRes = ExecuteSelect( strSql );
         if ( !pRes ) continue;
@@ -545,7 +562,7 @@ bool CDbManager::LoadAllUsers( CspUserMap &clsMap ) {
         while ( ( row = mysql_fetch_row( pRes ) ) != nullptr ) {
             CspUser clsUser;
             clsUser.m_strId = row[0] ? row[0] : "";
-            clsUser.m_strServiceType = aTypes[i];
+            clsUser.m_strServiceType = t.pszType;
             clsUser.m_strName = row[1] ? row[1] : "";
             clsUser.m_strOrganizationId = row[2] ? row[2] : "";
             clsUser.m_bDnd = row[3] ? ( atoi( row[3] ) != 0 ) : false;
@@ -645,7 +662,7 @@ bool CDbManager::LoadAllPhoneGroups( CCspPhoneGroupMap &clsMap ) {
     return true;
 }
 
-// 역할 전량 적재 — CSP 는 SIP 신원이 있는 배정(principal_type='user')만 든다. person 의 volte·ptt 전 회선으로 펼쳐
+// 역할 전량 적재 — CSP 는 SIP 신원이 있는 배정(principal_type='user')만 든다. person 의 voip·volte·ptt 전 회선으로 펼쳐
 //   회선 id → 역할 인덱스를 만든다(PTT 회선의 청취 인가와 유선 회선의 감청 인가가 같은 사람의 역할을 본다 — §3.5).
 //   ptt_targets 는 ptt_groups.id(surrogate) 참조 — CSP 그룹 맵 키(mcptt_group_id)로 해석해 보관.
 bool CDbManager::LoadAllRoles( CCspRoleMap &clsMap ) {
@@ -686,11 +703,13 @@ bool CDbManager::LoadAllRoles( CCspRoleMap &clsMap ) {
         }
         mysql_free_result( pRes );
     }
-    // 배정 → 회선 펼침 (volte + ptt). principal_id 는 users.id 의 문자열.
+    // 배정 → 회선 펼침 (voip + volte + ptt — SubTablesUnion). principal_id 는 users.id 의 문자열.
     int iLines = 0;
     pRes = ExecuteSelect(
         "SELECT a.role_id, s.id FROM role_assignments a "
-        "JOIN (SELECT id, user_id FROM volte_subscriptions UNION ALL SELECT id, user_id FROM ptt_subscriptions) s "
+        "JOIN " +
+        SubTablesUnion() +
+        " s "
         "  ON CAST(s.user_id AS CHAR) = a.principal_id "
         "WHERE a.principal_type='user'" );
     if ( pRes ) {

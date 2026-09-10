@@ -277,20 +277,24 @@ UE 가 직접 REGISTER 하는 서비스 도메인. **`kind` 는 접속환경 클
 | kind | 접속환경 | 스택·가입 테이블 | 전형적 정책 |
 |---|---|---|---|
 | `volte` | 이동 VoLTE — 스마트폰 앱, USIM/AKA 또는 Digest, E.164, 공중망 NAT | IMS MMTel 전화 경로(B2BUA+CMP relay, TAS), `volte_subscriptions` | UDP/TCP/TLS 혼용, `media_nat_mode=auto`, 피처코드 없음 |
-| `voip` | 유선 VoIP — 데스크폰·소프트폰·관제 앱, Digest 전용(USIM 없음), 사내망 | **volte 와 같은** MMTel 전화 경로·`volte_subscriptions` | `sec_mechanisms=[tls]`, `media_nat_mode=off`, `media_srtp=required`, `pickup_feature_code`, `transfer_allowed=true` — 대표번호·당겨받기·BLF([dispatch_center.md](dispatch_center.md), [volte_supplementary_services.md](volte_supplementary_services.md)) |
+| `voip` | 유선 VoIP — 데스크폰·소프트폰·관제 앱, Digest 전용(USIM 없음), 사내망 | volte 와 같은 MMTel 전화 경로(전화 가족), `voip_subscriptions` | `sec_mechanisms=[tls]`, `media_nat_mode=off`, `media_srtp=required`, `pickup_feature_code`, `transfer_allowed=true` — 대표번호·당겨받기·BLF([dispatch_center.md](dispatch_center.md), [volte_supplementary_services.md](volte_supplementary_services.md)) |
 | `ptt` | MCPTT — PTT 단말 | MCPTT(GroupCallService, floor), `ptt_subscriptions` | TLS, `media_srtp` 정책 |
 
-> **구현 반영**: CSP `CCspServiceMap` kind 검증 `volte|voip|ptt`(그 외 레코드 skip+ERROR). `volte`·`voip` 는 같은 전화 경로 —
-> `GetForUser(user, "volte")` 는 가입 행 `service_ref` 를 먼저 보므로 voip 회선도 자기 서비스(도메인·피처코드·SRTP 정책)로 해석되고,
-> 로그·통계 **서비스축**은 `LogServiceOf` 로 전화 계열을 `volte` 에 합산한다(`{ServiceLogging.Dir}/volte/…`, flow `service`,
-> [sip_statistics.md §3.1](sip_statistics.md)). CSC `service_entry(kind, service_ref)` = `service_ref` ↔ `Provisioning.Services.<k>.name`
-> 매칭(종류 경계는 넘지 않음, 와이어 `services[].kind` = 고른 서비스의 kind), 템플릿 `Provisioning.Services.voip`. **CSC 의 읽기 경로는
-> `services/access_services` 하나** — 정의(name·kind·domain·auth_realm·media_srtp·sec_mechanisms·피처코드)는 관리 store 의
-> access_services 미러(CSP 정본의 읽기 전용 복제)가 정본이고, csc.json `Provisioning.Services.<kind>` 는 단말 도달 정보(host·포트·
-> transport·sms_gateway)만 보탠다(미러 미도달 시 폴백·도메인이 어긋나면 드리프트 경고). H(A1) 결박(`_service_realm`)·관제 앱 번호
-> 개설 후보·IdMS 도메인 유도도 같은 경로다. 콘솔은 템플릿 enum·
-> 상태 화면 라벨 `VoIP`, 관제 앱의 전화 회선은 voip 우선([android_ue_provisioning.md §3](android_ue_provisioning.md)). 이동 서비스로
-> 만들어진 기존 회선의 이관은 [volte_supplementary_services.md §10.3a](volte_supplementary_services.md).
+> **구현 반영**: CSP `CCspServiceMap` kind 검증 `volte|voip|ptt`(그 외 레코드 skip+ERROR). **가입 테이블 = kind** — `volte_subscriptions`·
+> `voip_subscriptions`·`ptt_subscriptions` 행의 `service_ref` 는 그 테이블 kind 의 접속서비스만 가리킨다(CSC 쓰기 게이트 400
+> `service_kind_mismatch`, `voip` 회선은 `service_ref` 필수, 번호는 세 테이블과 대표번호에 걸쳐 유일 — 409 `number_exists`). CSC 의 서비스
+> 해석(`services/access_services.find`)·H(A1) 결박(`_service_realm`)·csc.json 폴백 키도 exact kind 다(`ptt`≡`mcptt`). 가족(`volte`∪`voip`
+> = 전화)은 CSP 전화 경로·로그/통계 **서비스축**(`LogServiceOf` 가 전화 계열을 `volte` 에 합산 — `{ServiceLogging.Dir}/volte/…`, flow
+> `service`, [sip_statistics.md §3.1](sip_statistics.md))·전화번호부 합산(`/provisioning/directory?service=volte` = 전화 가족)에만 남는다.
+> `GetForUser(user, kind)` 는 가입 행 `service_ref` 를 먼저 보고, 없으면 그 테이블 kind 의 대표 서비스로 폴백한다. CSC
+> `service_entry(kind, service_ref)` = `service_ref` ↔ 미러 레코드 `name` 매칭(와이어 `services[].kind` = 고른 서비스의 kind), 템플릿
+> `Provisioning.Services.voip`. **CSC 의 읽기 경로는 `services/access_services` 하나** — 정의(name·kind·domain·auth_realm·media_srtp·
+> sec_mechanisms·피처코드)는 관리 store 의 access_services 미러(CSP 정본의 읽기 전용 복제)가 정본이고, csc.json
+> `Provisioning.Services.<kind>` 는 단말 도달 정보(host·포트·transport·sms_gateway)만 보탠다(미러 미도달 시 폴백·도메인이 어긋나면
+> 드리프트 경고). 관제 앱 번호 개설 후보·IdMS 도메인 유도도 같은 경로다. 회선 `sip_transport` 는 kind 무관한 채널 정책 필드
+> (`TLS`=서버 집행, `UDP`/`TCP`=단말 힌트, NULL=ANY 단말 선택)이며 유선은 `TLS` 가 권장 기본값이다. 콘솔은 템플릿 enum·상태 화면
+> 라벨 `VoIP`·가입자 화면의 VoIP 번호 탭, 관제 앱의 전화 회선은 voip 우선([android_ue_provisioning.md §3](android_ue_provisioning.md)).
+> 이동 서비스로 만들어진 기존 회선의 이관은 [volte_supplementary_services.md §10.3a](volte_supplementary_services.md).
 
 | 필드 | 의미 |
 |---|---|

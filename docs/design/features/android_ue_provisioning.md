@@ -203,7 +203,9 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
 ## 3-1. Contract — `GET /provisioning/directory`
 
 회사 전화번호부(단말 '회사 연락처' 탭의 읽기전용 소스). provisioning scope 토큰 필요.
-조직 트리(`organizations` 의 `parent_id` 계층)와 전 VoLTE 가입자를 반환한다.
+조직 트리(`organizations` 의 `parent_id` 계층)와 가입자를 반환한다. `?service=volte|voip|ptt` 로 가입 테이블을 고른다(기본
+`volte`) — **`volte` 는 전화 가족(volte∪voip) 합산**이라 관제·전화 단말의 연락처에 유선 번호가 빠지지 않고, `voip` 는 유선 회선만,
+`ptt` 는 PTT 회선(1:1 사설콜 대상)이다([sip_service_model.md §2-9](sip_service_model.md)). ETag 는 서비스별 내용 해시.
 
 ```json
 {
@@ -333,7 +335,9 @@ OAM 미도달 502 `oam_unreachable`. 구현 `csc/src/handlers/dispatch_recording
 
 ## 3-3. Contract — `/provisioning/directory/{admin,orgs,members,groups}` (관제 앱 관리 평면)
 
-관제사(가입자)가 관제 앱에서 조직 트리·구성원·VoLTE/PTT 번호·전화 그룹·PTT 그룹을 관리한다. 같은 PKCE provisioning 토큰.
+관제사(가입자)가 관제 앱에서 조직 트리·구성원·VoLTE/VoIP/PTT 번호·전화 그룹·PTT 그룹을 관리한다. 같은 PKCE provisioning 토큰.
+회선 kind(`volte`·`voip`·`ptt`)는 가입 테이블과 1:1 이며 `serviceRef` 는 그 kind 의 접속서비스만 허용된다(`400 service_kind_mismatch`,
+`voip` 는 `serviceRef` 필수). `sipTransport` 는 **양방향 `UDP`|`TCP`|`TLS`|`ANY`**(ANY = 서버 정책 없음·단말 선택 — DB NULL).
 인가 = 역할 `directory_write`(§3 `dispatch.directoryWrite`, [dispatch_center.md §3.4](dispatch_center.md),
 [mcptt_authorization.md §2.3](mcptt_authorization.md) `can(principal, directory.write, org)`) — 없으면 전부
 `403 {"error":"no_directory_admin"}`, 범위 밖 조직·구성원은 `403 {"error":"out_of_scope"}`. 콘솔 관리 API 와 **같은 쓰기 코드·같은
@@ -341,16 +345,16 @@ OAM 미도달 502 `oam_unreachable`. 구현 `csc/src/handlers/dispatch_recording
 
 | 메서드·경로 | 본문 / 응답 |
 |---|---|
-| `GET /provisioning/directory/admin` | 관리 화면 한 벌 `{ "scope": {groupId, directoryAdmin, orgCode}, "services": {"volte":[{name,domain}], "ptt":[…]}, "orgs": [{code,name,parent,sort}](범위 안), "members": [{userId, name, loginId, org, title, "volte": {msisdn,imsi,serviceRef,sipTransport,authScheme}\|null, "ptt": {…, "profile": {allowCreateGroup, allowAmbientListening, allowEmergencyCall, allowEmergencyAlert, allowAdhocCall, allowEmergencyPrivateCall}}\|null}] }` + `ETag`/`If-None-Match` 304 |
+| `GET /provisioning/directory/admin` | 관리 화면 한 벌 `{ "scope": {groupId, directoryAdmin, orgCode}, "services": {"volte":[{name,domain,kind}], "voip":[…], "ptt":[…]}(버킷 = 회선 kind, exact), "orgs": [{code,name,parent,sort}](범위 안), "members": [{userId, name, loginId, org, title, "volte": {msisdn,imsi,serviceRef,sipTransport,authScheme}\|null, "voip": {…}\|null, "ptt": {…, "profile": {allowCreateGroup, allowAmbientListening, allowEmergencyCall, allowEmergencyAlert, allowAdhocCall, allowEmergencyPrivateCall}}\|null}] }`(kind 당 첫 회선) + `ETag`/`If-None-Match` 304. `voip_subscriptions` 테이블이 없는 DB 는 `voip` 버킷·필드가 비어 있다 |
 | `POST /provisioning/directory/orgs` | `{code, name, parent, sort}` → `201 {code, id}`. `parent` 는 범위 안 코드(`own` 은 필수 — 루트 신설 불가). `409 code_exists`·`400 unknown_parent` |
 | `PUT /provisioning/directory/orgs/{code}` | `{name?, parent?, sort?}` → `200 {code}`. 범위 루트 이동 불가(403)·`400 cyclic_parent` |
 | `DELETE /provisioning/directory/orgs/{code}` | `200 {code}`. 하위 조직·구성원이 남아 있으면 `409 not_empty`, 범위 루트 삭제 불가(403) |
-| `POST /provisioning/directory/members` | `{name, org, title?, loginId?, password?, volte?: {msisdn, imsi?, serviceRef?, sipTransport?, password}, ptt?: {…}}` → `201 {userId}`. `imsi` 비면 번호 숫자(USIM 없는 관제 소프트폰 규약), 회선은 `password` 필수(H(A1)). 회선 개설 실패는 그 코드 + `{userId, kind}` |
+| `POST /provisioning/directory/members` | `{name, org, title?, loginId?, password?, volte?: {msisdn, imsi?, serviceRef?, sipTransport?, password}, voip?: {…, serviceRef 필수}, ptt?: {…}}` → `201 {userId}`. `imsi` 비면 번호 숫자(USIM 없는 관제 소프트폰 규약), 회선은 `password` 필수(H(A1)). 회선 개설 실패는 그 코드 + `{userId, kind}` |
 | `PUT /provisioning/directory/members/{userId}` | `{name?, org?, title?, loginId?, password?}` → `200 {id}` |
 | `DELETE /provisioning/directory/members/{userId}` | `200 {id}` — 회선 함께 삭제(USER_CHANGED). 자기 자신 `409 self_delete` |
-| `POST /provisioning/directory/members/import` | 구성원 일괄 가져오기 — 본문 `text/csv`(UTF-8, 머리행. 열 = `name, org, title, login_id, password, volte_msisdn, volte_imsi, volte_service_ref, volte_sip_transport, volte_password, ptt_msisdn, ptt_…`; 대소문자·`_`·`-` 무시) 또는 `application/json` `{"rows":[<POST members 본문>…]}`(최대 500행) → `200 {created, failed, results:[{row, status, userId\|error…}]}`. 행마다 `POST members` 와 같은 경로(범위 게이트·감사 E-AUD-006·회선 규약)라 한 행의 실패(403/409/400)가 다른 행을 막지 않는다. 빈 CSV `400 empty_csv`, 초과 `413 too_many_rows` |
-| `PUT /provisioning/directory/members/{userId}/volte\|ptt` | `{msisdn, imsi?, serviceRef?, sipTransport?, password?}` — 같은 번호면 갱신(`200`), 다른 번호면 종전 회선 삭제 + 개설(`201`, `password` 필수). 타인 번호 `409 number_exists`, `pickup_group` 파생 충돌 `409 derived_from_dispatch_group` |
-| `DELETE /provisioning/directory/members/{userId}/volte\|ptt` | `200 {userId, kind, deleted[]}` |
+| `POST /provisioning/directory/members/import` | 구성원 일괄 가져오기 — 본문 `text/csv`(UTF-8, 머리행. 열 = `name, org, title, login_id, password, volte_msisdn, volte_imsi, volte_service_ref, volte_sip_transport, volte_password, voip_msisdn, voip_…, ptt_msisdn, ptt_…`; 대소문자·`_`·`-` 무시) 또는 `application/json` `{"rows":[<POST members 본문>…]}`(최대 500행) → `200 {created, failed, results:[{row, status, userId\|error…}]}`. 행마다 `POST members` 와 같은 경로(범위 게이트·감사 E-AUD-006·회선 규약)라 한 행의 실패(403/409/400)가 다른 행을 막지 않는다. 빈 CSV `400 empty_csv`, 초과 `413 too_many_rows` |
+| `PUT /provisioning/directory/members/{userId}/volte\|voip\|ptt` | `{msisdn, imsi?, serviceRef?, sipTransport?, password?}` — 같은 번호면 갱신(`200`), 다른 번호면 종전 회선 삭제 + 개설(`201`, `password` 필수). 타인 번호(세 테이블·대표번호) `409 number_exists`, 다른 kind 의 서비스 `400 service_kind_mismatch`, `pickup_group` 파생 충돌 `409 derived_from_phone_group`, voip 테이블 부재 `503 schema_not_migrated` |
+| `DELETE /provisioning/directory/members/{userId}/volte\|voip\|ptt` | `200 {userId, kind, deleted[]}` |
 | `PUT /provisioning/directory/members/{userId}/ptt/profile` | `{allowCreateGroup?, allowEmergencyCall?, allowEmergencyAlert?, allowAdhocCall?, allowEmergencyPrivateCall?}`(없는 키는 현재값 유지) → `200 {msisdn, profile}`. **`allowAmbientListening` 은 바꿀 수 없다** — 현재값과 다른 값이 실려 오면 `400 {"error":"not_editable","key":"allowAmbientListening"}`, 같은 값은 무시(구 앱 호환). 청취 자격은 역할 배정의 결과([mcptt_authorization.md §2.4](mcptt_authorization.md)) |
 | `GET /provisioning/directory/groups` | `{ "scope": {directoryWrite, orgCode}, "groups": [{id, uri, name, memberCount, isOwner, canManage, inListenScope, isMember, orgCode, sessionType, etag}] }` — 관리 범위 안 ∪ 내 소유 ∪ 청취 범위 ∪ 내 멤버 PTT 그룹. 문서 GET/PUT/DELETE 는 GMS XCAP 그대로([mcptt_api.md §2](../../api/mcptt_api.md) — 관리 범위 안이면 소유자가 아니어도 허용) |
 | `GET|POST /provisioning/directory/phone-groups` · `GET|PUT|DELETE …/phone-groups/{id}` · `POST|DELETE …/phone-groups/{id}/members[/{userId}]` | 관리 범위 안 조직의 **전화 그룹**(대표번호·호출 방식·멤버) — 콘솔 `/api/v1/phone-groups` 와 같은 본문·같은 판정([dispatch_center.md §8.2](dispatch_center.md)) |
@@ -377,19 +381,20 @@ OAM 미도달 502 `oam_unreachable`. 구현 `csc/src/handlers/dispatch_recording
 
 1. **엔드포인트 `GET /provisioning/me`** (`csc/src/services/mcptt.py` `handle_provisioning_me`, CSC mcptt 서버 4430):
    - 인증: Bearer access_token → `mcptt_id`(또는 sub) → msisdn 추출.
-   - 조회: 로그인 msisdn 으로 person(`user_id`) 확인 → 그 person 의 `volte_subscriptions`+`ptt_subscriptions`
-     전 서비스를 반환(로그인 1회로 보유 서비스 모두). 계정: id(msisdn)/imsi/auth_id.
+   - 조회: 로그인 msisdn 으로 person(`user_id`) 확인 → 그 person 의 `volte_subscriptions`·`voip_subscriptions`·`ptt_subscriptions`
+     전 서비스를 반환(로그인 1회로 보유 서비스 모두 — 테이블 = kind, `services/subscriptions` 레지스트리 순회, voip 테이블은 있을 때만).
+     계정: id(msisdn)/imsi/auth_id.
    - 사용자: `users.name` → displayName.
    - 전화 그룹·관제 역할: `dispatch_discovery` — `phoneGroup`(소속 전화 그룹 1행 + 그룹원) / `dispatch`(배정 역할 1행 + 범위 enum
-     해석 질의 — members = `volte_subscriptions` ⋈ `users` ⟕ `phone_group_members`, WHERE 만 범위별 / pttTargets =
+     해석 질의 — members = 전화 가족 회선(`volte_subscriptions` ∪ `voip_subscriptions`) ⋈ `users` ⟕ `phone_group_members`, WHERE 만 범위별 / pttTargets =
      `role_ptt_targets` ⋈ `ptt_groups` 또는 전 그룹) + 전환기 합성 필드. 범위 판정 규칙은 CSP `CCspRoleMap`(게이트)과 여기(목록)
      둘뿐이며 같아야 한다.
    - ETag: 응답 전체 정규화 JSON 의 sha256(앞 32 hex) — `If-None-Match` 일치 시 304.
 2. **서비스 정의 + 시그널링 주소** — 두 겹을 합친다(`services/access_services.entry`, [sip_service_model.md §2-9](sip_service_model.md)):
    - **정의**(`name·kind·domain·auth_realm·media_srtp·sec_mechanisms·pickup_feature_code·transfer_allowed`) ← CSP `access_services`
-     의 관리 store 미러(정본의 읽기 전용 복제). 서비스 선택은 가입 행의 **`service_ref`** 로 `name` 이 일치하는 레코드(가족 경계 안 —
-     PTT 가입 행이 전화 서비스 name 을 가리켜도 ptt), 없으면 가입 종류의 kind(call→`volte`, ptt→`ptt`) 첫 enabled 레코드(priority
-     오름차순 — CSP `GetForUser` 와 같은 순서). 같은 경로로 H(A1) 파생(`_service_realm`)도 도메인·realm 을 얻는다(유선 회선의 H(A1) 이
+     의 관리 store 미러(정본의 읽기 전용 복제). 서비스 선택은 가입 행의 **`service_ref`** 로 `name` 이 일치하는 레코드(**exact kind** —
+     그 회선의 가입 테이블 kind 와 같은 kind 의 레코드만, `ptt`≡`mcptt`; 다른 kind 는 쓰기 시 400 `service_kind_mismatch`), 없으면
+     그 테이블 kind(`volte`|`voip`|`ptt`)의 첫 enabled 레코드(priority 오름차순 — CSP `GetForUser` 와 같은 순서). 같은 경로로 H(A1) 파생(`_service_realm`)도 도메인·realm 을 얻는다(유선 회선의 H(A1) 이
      이동 도메인으로 파생되지 않게). 와이어 `services[].kind` = 고른 레코드의 kind.
    - **단말 도달 정보**(`host,port,tcp_port,tls_port,transport,ipsec_port_ps/pc,sms_gateway,max_payload_*`) ← CSC 설정
      `Provisioning.Services.<kind>`(`volte` · `voip` · `ptt`) — 레코드 name 과 같은 `name` 의 항목, 없으면 레코드 kind 키. CSP 레코드에

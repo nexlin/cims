@@ -9,14 +9,14 @@ enum 을 해석해 **범위 안의 조직 코드 집합**으로 게이트하고 
 `/api/v1/users`·`/api/v1/phone-groups`, 콘솔 토큰)와 **같은 쓰기 코드**(handlers.admin/org/dispatch)를 호출한다 — 정책·검증
 (H(A1) 결박, pickup_group 파생 409, AKA)이 두 평면에서 갈라지지 않게. 토큰 realm 은 섞지 않는다. 역할·배정은 이 평면에 없다.
 
-  GET    /provisioning/directory/admin                      관리 화면 한 벌: scope·services·orgs(범위 안)·members(범위 안)
+  GET    /provisioning/directory/admin                      관리 화면 한 벌: scope·services{volte,voip,ptt}·orgs(범위 안)·members(범위 안, 회선 volte|voip|ptt)
   POST   /provisioning/directory/orgs                       {code,name,parent,sort}         (parent 는 범위 안 조직 코드)
   PUT    /provisioning/directory/orgs/{code}                {name?,parent?,sort?}
   DELETE /provisioning/directory/orgs/{code}                하위 조직·구성원이 남아 있으면 409 not_empty
   POST   /provisioning/directory/members                    {name,org,title?,loginId?,password?,volte?{..},ptt?{..}}
   PUT    /provisioning/directory/members/{userId}           {name?,org?,title?,loginId?,password?}
   DELETE /provisioning/directory/members/{userId}
-  PUT    /provisioning/directory/members/{userId}/volte|ptt {msisdn,imsi?,serviceRef?,sipTransport?,password?} 개설/변경
+  PUT    /provisioning/directory/members/{userId}/volte|voip|ptt {msisdn,imsi?,serviceRef?,sipTransport?,password?} 개설/변경 (sipTransport ANY=단말 선택)
   DELETE /provisioning/directory/members/{userId}/volte|ptt
   PUT    /provisioning/directory/members/{userId}/ptt/profile {allowCreateGroup?,allowEmergencyCall?,...}
          — allowAmbientListening 은 편집 불가(역할 배정의 결과, mcptt_authorization.md §2.4): 현재값과 다른 값이 실려 오면
@@ -47,10 +47,11 @@ from handlers import org as _org
 from handlers import dispatch as _dispatch
 from services import authz
 from services import mcptt as _m
+from services import subscriptions as _subs      # 가입 테이블 레지스트리(volte/voip/ptt)
 from services.mcptt import logger
 
 _BASE = '/provisioning/directory'
-_KINDS = {'volte': 'call', 'ptt': 'ptt'}        # 와이어 kind → admin.py svc 키
+_KINDS = {k: seg for seg, k in _subs.API_SEGMENTS.items()}   # 와이어 kind(volte|voip|ptt) → admin.py 세그먼트(call|voip|ptt)
 _TRANSPORTS = ('UDP', 'TCP', 'TLS')
 _PROFILE_KEYS = {                               # 와이어 camelCase → ptt_user_profile 컬럼
     'allowEmergencyCall': 'allow_emergency_call', 'allowEmergencyAlert': 'allow_emergency_alert',
@@ -98,7 +99,7 @@ def _auth(args: HandlerArgs) -> Tuple[Optional[dict], Optional[HandlerResult]]:
 def caller_identity(cur, token: dict) -> Tuple[str, Optional[int]]:
     """토큰 → (msisdn, users.id). /provisioning/history 와 같은 해석(가입 id → user_id), 없으면 LOGIN_ACCOUNTS."""
     msisdn = _m._msisdn_from_id(token.get('mcptt_id') or token.get('sub') or '')
-    for t in ('volte_subscriptions', 'ptt_subscriptions'):
+    for _k, t in _subs.tables(cur):
         cur.execute(f"SELECT user_id FROM {t} WHERE id=%s", (msisdn,))
         r = cur.fetchone()
         if r:
@@ -163,34 +164,36 @@ def _audit(config, actor: str, ip: str, entity: str, entity_id, action: str, aft
 # ── 조회(관리 화면 한 벌) ─────────────────────────────────────────────────────
 
 def _services(config) -> dict:
-    """접속서비스 후보 — {volte:[{name,domain,kind}], ptt:[...]}: 버킷 키는 회선 종류(전화 회선 = volte_subscriptions,
-    PTT 회선)라 전화 계열 kind volte(이동)·voip(유선)가 함께 volte 버킷에 실린다(항목 kind 로 구분 — 관제석은 voip).
-    정본 = CSP access_services 미러(services/access_services.records), 없으면 csc.json Provisioning.Services(volte·voip·ptt 전부)."""
-    out = {"volte": [], "ptt": []}
+    """접속서비스 후보 — {volte:[{name,domain,kind}], voip:[…], ptt:[…]}: 버킷 = 회선 kind = 가입 테이블(exact — 관제석 유선 회선은
+    voip 버킷의 서비스만 고를 수 있다, sip_service_model.md §2-9). 정본 = CSP access_services 미러(services/access_services.records),
+    없으면 csc.json Provisioning.Services(volte·voip·ptt)."""
+    out = {k: [] for k in _subs.KINDS}
 
     def bucket(kind: str) -> str:
-        return 'ptt' if kind in ('ptt', 'mcptt') else 'volte'
+        k = _subs.normalize_kind(kind)
+        return k if k in out else 'volte'
 
     from services import access_services as _access_services
     for r in _access_services.records(config):        # 미러(CSP 정본) — 미도달·빈 목록이면 아래 csc.json 폴백
-        kind = (r.get('kind') or '').lower()
-        out[bucket(kind)].append({"name": r['name'], "domain": (r.get('domain') or '').strip(),
-                                  "kind": 'ptt' if bucket(kind) == 'ptt' else (kind or 'volte')})
-    if not out["volte"] and not out["ptt"]:
+        b = bucket(r.get('kind'))
+        out[b].append({"name": r['name'], "domain": (r.get('domain') or '').strip(), "kind": b})
+    if not any(out.values()):
         svcs = ((config or {}).get('Provisioning') or {}).get('Services') or {}
         for kind, s in svcs.items():
             if isinstance(s, dict) and s.get('domain') and (s.get('name') or kind):
-                out[bucket(kind)].append({"name": s.get('name') or kind, "domain": s['domain'], "kind": kind})
+                b = bucket(kind)
+                out[b].append({"name": s.get('name') or kind, "domain": s['domain'], "kind": b})
     return out
 
 
 def _sub_wire(row: dict) -> dict:
     return {"msisdn": row.get('id') or '', "imsi": row.get('imsi') or '', "serviceRef": row.get('service_ref') or '',
-            "sipTransport": row.get('sip_transport') or 'UDP', "authScheme": row.get('auth_scheme') or 'digest'}
+            "sipTransport": _subs.wire_sip_transport(row.get('sip_transport')),      # NULL = ANY(단말 선택)
+            "authScheme": row.get('auth_scheme') or 'digest'}
 
 
 def _members_in_scope(cur, scope: dict) -> list:
-    """범위 안 구성원(person) + volte/ptt 가입 + PTT 프로파일 자격. users.org_id 는 조직 code."""
+    """범위 안 구성원(person) + volte/voip/ptt 가입(kind 당 첫 회선) + PTT 프로파일 자격. users.org_id 는 조직 code."""
     has_title = _admin._has_user_column(cur, 'title')
     title_col = ", u.title" if has_title else ""
     cur.execute(f"SELECT u.id, u.name, u.login_id, u.org_id{title_col} FROM users u ORDER BY u.name, u.id")
@@ -200,14 +203,14 @@ def _members_in_scope(cur, scope: dict) -> list:
         if not in_scope(scope, org):
             continue
         people.append({"userId": r['id'], "name": r.get('name') or '', "loginId": r.get('login_id') or '',
-                       "org": org, "title": (r.get('title') if has_title else '') or '', "volte": None, "ptt": None})
+                       "org": org, "title": (r.get('title') if has_title else '') or '', **{k: None for k in _subs.KINDS}})
     if not people:
         return people
     by_id = {p["userId"]: p for p in people}
     ids = list(by_id)
     ph = ",".join(["%s"] * len(ids))
     aka_extra = _admin._aka_select_extra(cur)
-    for kind, table in (('volte', 'volte_subscriptions'), ('ptt', 'ptt_subscriptions')):
+    for kind, table in _subs.tables(cur):
         cur.execute(f"SELECT id, user_id, service_ref, imsi, sip_transport {aka_extra} FROM {table} "
                     f"WHERE user_id IN ({ph}) ORDER BY id", ids)
         for r in cur.fetchall():
@@ -369,14 +372,15 @@ def _sub_body(kind: str, b: dict) -> dict:
     if b.get('serviceRef') is not None:
         out['service_ref'] = b.get('serviceRef')
     if b.get('sipTransport'):
-        out['sip_transport'] = str(b['sipTransport']).upper()
+        tr = str(b['sipTransport']).strip().upper()
+        out['sip_transport'] = None if tr == 'ANY' else tr      # "ANY" = NULL(단말 선택) — admin.py 가 키 존재 시 반영
     if b.get('password'):
         out['passwd'] = b['password']
     return out
 
 
 async def _member_write(cur, config, scope, method, parts, body, actor, ip, my_uid) -> HandlerResult:
-    """parts = (userId?, 'volte'|'ptt'?, 'profile'?)."""
+    """parts = (userId?, 'volte'|'voip'|'ptt'?, 'profile'?)."""
     if method == 'POST' and not parts:
         if not isinstance(body, dict):
             return _json(400, {'error': 'JSON body required'})
@@ -449,7 +453,9 @@ async def _member_write(cur, config, scope, method, parts, body, actor, ip, my_u
     if kind not in _KINDS:
         return _json(404, {'error': 'Not Found'})
     svc = _KINDS[kind]
-    table = 'volte_subscriptions' if kind == 'volte' else 'ptt_subscriptions'
+    if not _subs.has_table(cur, kind):
+        return _json(503, _subs.SCHEMA_ERROR_VOIP)
+    table = _subs.table(kind)
     cur.execute(f"SELECT id, service_ref, sip_transport FROM {table} WHERE user_id=%s ORDER BY id", (user_id,))
     existing_rows = cur.fetchall()
     existing = [r['id'] for r in existing_rows]
@@ -553,7 +559,7 @@ _IMPORT_SUB_COLS = {'msisdn': 'msisdn', 'number': 'msisdn', 'imsi': 'imsi', 'ser
 
 def _import_rows_from_csv(text: str):
     """CSV 원문 → POST members 본문 목록. 열 이름은 대소문자·`_`·`-` 무시: name, org, title, login_id, password,
-    volte_msisdn, volte_imsi, volte_service_ref, volte_sip_transport, volte_password, ptt_msisdn, ptt_… ."""
+    volte_msisdn, volte_imsi, volte_service_ref, volte_sip_transport, volte_password, voip_msisdn, voip_…, ptt_msisdn, ptt_… ."""
     import csv
     import io
     rd = csv.reader(io.StringIO(text.lstrip('\ufeff')))   # BOM 은 첫 열 이름에 붙는다

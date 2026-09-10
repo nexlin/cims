@@ -19,7 +19,7 @@ _TOKEN: str = ""
 _HAS_AKA_COLS: Optional[bool] = None
 
 SQN_MAX = (1 << 48) - 1
-_TABLES = {"volte": "volte_subscriptions", "ptt": "ptt_subscriptions"}
+_TABLES = {"volte": "volte_subscriptions", "voip": "voip_subscriptions", "ptt": "ptt_subscriptions"}   # 가입 테이블 = kind (services.subscriptions 와 동일)
 
 
 class AucError(Exception):
@@ -111,10 +111,16 @@ def decrypt_keys(k_enc: str, opc_enc: str) -> tuple:
 # ── AV 발급 (내부 API) ───────────────────────────────────────────────────────
 
 def _locate(cur, msisdn: str, service: str):
-    """(table, row). service 가 비면 volte → ptt 순으로 찾는다 (CSP SelectUser 와 같은 순서)."""
+    """(table, row). service 가 비면 volte → voip → ptt 순으로 찾는다 (CSP SelectUser 와 같은 순서). voip 테이블 부재 DB 는
+    그 테이블만 건너뛴다(1146)."""
     tables = [_TABLES[service]] if service in _TABLES else list(_TABLES.values())
     for t in tables:
-        cur.execute(f"SELECT auth_scheme, k_enc, opc_enc, sqn, amf, imsi FROM {t} WHERE id=%s FOR UPDATE", (msisdn,))
+        try:
+            cur.execute(f"SELECT auth_scheme, k_enc, opc_enc, sqn, amf, imsi FROM {t} WHERE id=%s FOR UPDATE", (msisdn,))
+        except Exception as e:                       # 선택 테이블(voip) 미마이그레이션 — 1146 만 건너뛴다
+            if t == _TABLES["voip"] and "1146" in str(e):
+                continue
+            raise
         row = cur.fetchone()
         if row:
             return t, row
@@ -179,7 +185,7 @@ def issue(conn, msisdn: str, service: str = "", rand_hex: str = "", auts_hex: st
         raise
     return {
         "scheme": "aka", "msisdn": msisdn,
-        "service": "volte" if table == _TABLES["volte"] else "ptt",
+        "service": next(k for k, t in _TABLES.items() if t == table),
         "resynced": resynced,
         "av": {k_: v.hex() for k_, v in av.items()},
     }

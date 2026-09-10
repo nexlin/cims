@@ -15,13 +15,14 @@ PTT 번호를 들고 있다. 여기서 함께 처리한다.
 **18 단계보다 먼저** 돌린다. 18 은 번호를 열쇠로 넣으므로, 이미 넣은 뒤에 바꾸면 옛 행이
 남고 새 행이 추가된다 — 그때는 가입자·그룹멤버 표를 비우고 18 을 다시 돌려야 한다:
   sudo mariadb -e "DELETE FROM cims.ptt_group_members; \
-                   DELETE FROM cims.ptt_subscriptions; DELETE FROM cims.volte_subscriptions;"
+                   DELETE FROM cims.ptt_subscriptions; DELETE FROM cims.volte_subscriptions; \
+                   DELETE FROM cims.voip_subscriptions;"
   sudo ./tb-install.sh --role db-data
 """
 import re, sys, shutil, os
 
 PLMN   = '45033'
-PREFIX = {'volte': '+8213', 'ptt': '+825'}     # 뒤에 8자리 순번이 붙는다
+PREFIX = {'volte': '+8213', 'voip': '+8221', 'ptt': '+825'}     # 뒤에 8자리 순번이 붙는다 (kind = 가입 테이블)
 # tools/ 안에 있으므로 데이터는 한 단계 위의 data/ 다. 키트 밖에서 돌릴 때는
 # TB_DATA_DIR 로 지정한다.
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -71,7 +72,7 @@ def main():
         login = r[idx['login_id']].strip()
         kind  = r[idx['kind']].strip().lower()
         if kind not in PREFIX:
-            sys.exit(f"ERROR: kind 는 ptt|volte 여야 합니다 (number={old}, kind={kind})")
+            sys.exit(f"ERROR: kind 는 ptt|volte|voip 여야 합니다 (number={old}, kind={kind})")
         new  = f"{PREFIX[kind]}{serial(login):08d}"
         imsi = PLMN + new.lstrip('+')
         if new in mapping.values():

@@ -32,6 +32,7 @@ import requests
 from httpsrv.handler import HandlerArgs, HandlerResult
 from services import mcptt as _m
 from services import dispatch_history as _dh
+from services import subscriptions as _subs
 from services.mcptt import logger
 
 _BASE = '/provisioning/recordings'
@@ -103,7 +104,7 @@ def _scope_sets(config: dict, token: dict):
     try:
         cur = conn.cursor()
         user_id = None
-        for t in ('volte_subscriptions', 'ptt_subscriptions'):
+        for _k, t in _subs.tables(cur):
             cur.execute(f"SELECT user_id FROM {t} WHERE id=%s", (msisdn,))
             r = cur.fetchone()
             if r:
