@@ -332,6 +332,12 @@ cmd_pkg() {
             local dist_meta="$DIST_DIR/$t/pkg.json"
             [[ -f $dist_meta && "$dist_meta" != "$comp_meta" ]] && _pkg_write_version "$dist_meta" "$comp_ver"
         fi
+        # tar 의 루트가 staging 이면 **그 안의 pkg.json 도** 고친다. staging 은 버전을
+        # 쓰기 전에 복사되므로, dist 사본만 고치면 tarball 안쪽만 옛 버전으로 남는다 —
+        # 등록은 meta.json 을 쓰니 동작엔 영향이 없지만, 배포된 트리에서 버전을 읽으면 속는다.
+        if [[ -n $comp_ver && "$pkg_root" != "$DIST_DIR" && -f "$pkg_root/$t/pkg.json" ]]; then
+            _pkg_write_version "$pkg_root/$t/pkg.json" "$comp_ver"
+        fi
 
         # meta.json 생성 (pkg_root 안에 임시로 작성 → tar 루트에 추가 후 삭제;
         # 변종은 staging, 그 외는 DIST_DIR).
@@ -491,6 +497,13 @@ PYEOF
     done
     [[ $_cleaned -gt 0 ]] && ok "stale tarball $_cleaned 개 정리"
 
+    # 부트스트랩 인스톨러 자동 조립 — oam-base(console 동봉) + agent tarball 이 준비된
+    # 경우에만 (개별 모듈 pkg 호출 시에는 보통 미충족 → skip). **manifest 보다 먼저** 한다 —
+    # 인스톨러가 tarball 을 다시 만드므로, 뒤에 두면 manifest 의 sha256 이 옛 내용으로 남는다.
+    if ls "$out_dir"/oam-[0-9]*.tar.gz "$out_dir"/agent-*.tar.gz >/dev/null 2>&1; then
+        cmd_installer || warn "부트스트랩 인스톨러 조립 실패 (개별 패키지는 정상)"
+    fi
+
     # manifest.json 생성/갱신 — 현재 packages/*.tar.gz 의 SHA256 + size + mtime 기록.
     # Console UI 의 다운로드 라벨 (버전 표시) 과 검증 S6 의 immutability gate 가 이 파일 사용.
     # 검증 S4-PKG-MANIFEST 가 같은 로직으로 만들지만, cmd_pkg 직후에도 항상 fresh 하도록.
@@ -535,11 +548,6 @@ PYEOF
     echo ""
     info "Console 에서 업로드: 배포 관리 → 패키지 → ＋ 업로드 (파일만 선택하면 meta 자동 인식)"
 
-    # 상용 부트스트랩 인스톨러 자동 조립 — oam-base(console 동봉) + agent tarball 이
-    # 준비된 경우에만 (개별 모듈 pkg 호출 시에는 보통 미충족 → skip).
-    if ls "$out_dir"/oam-[0-9]*.tar.gz "$out_dir"/agent-*.tar.gz >/dev/null 2>&1; then
-        cmd_installer || warn "부트스트랩 인스톨러 조립 실패 (개별 패키지는 정상)"
-    fi
 }
 
 
