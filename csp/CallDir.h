@@ -17,6 +17,7 @@
 #include <string>
 
 #include "FmReporter.h"
+#include "SimpleJson.h"
 #include "Log.h"
 #include "StoreOpWriter.h"
 
@@ -881,36 +882,10 @@ private:
         }
         return (int)r.size() > mx ? r.substr( 0, mx ) : r;
     }
+    // 이스케이프 규칙은 SimpleJson::JsonNode::Escape 가 정본이다 — 세 벌로 갈라져
+    // 있던 것을 모았다. 유효하지 않은 UTF-8 바이트를 걸러 주는 것이 핵심이다.
     static std::string Esc( const std::string &s ) {
-        std::string r;
-        r.reserve( s.size() + 16 );
-        for ( unsigned char c : s ) {
-            switch ( c ) {
-                case '"':
-                    r += "\\\"";
-                    break;
-                case '\\':
-                    r += "\\\\";
-                    break;
-                case '\n':
-                    r += "\\n";
-                    break;
-                case '\r':
-                    r += "\\r";
-                    break;
-                case '\t':
-                    r += "\\t";
-                    break;
-                default:
-                    if ( c < 0x20 ) {
-                        char h[8];
-                        snprintf( h, 8, "\\u%04x", c );
-                        r += h;
-                    } else
-                        r += (char)c;
-            }
-        }
-        return r;
+        return SimpleJson::JsonNode::Escape( s );
     }
     static bool MkdirP( const std::string &p ) {
         struct stat st;

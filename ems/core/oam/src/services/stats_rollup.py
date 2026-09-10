@@ -158,7 +158,7 @@ def read_period_at(root: str, year: str, unit: str) -> list:
         return []
     out = []
     try:
-        with open(p, 'r', encoding='utf-8') as f:
+        with open(p, 'r', encoding='utf-8', errors='replace') as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -179,7 +179,7 @@ def read_period(year: str, unit: str) -> list:
         return []
     out = []
     try:
-        with open(p, 'r', encoding='utf-8') as f:
+        with open(p, 'r', encoding='utf-8', errors='replace') as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -307,7 +307,7 @@ def _scan_volte_hour(root: str, hour: str) -> list:
     out = []
     for path in _glob.glob(os.path.join(base, '**', '*.d', 'call.json'), recursive=True):
         try:
-            with open(path, 'r', encoding='utf-8') as f:
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
                 rec = json.load(f)
         except (OSError, ValueError):
             continue
@@ -336,7 +336,14 @@ def _scan_ptt_day(day: str) -> list:
 
 
 def _scan_msg_hour(root: str, hour: str, dmap: dict) -> dict:
-    """그 시간의 SIP 원문 → {minute: {svc: {'in'|'out': {키: 건수}}}}."""
+    """그 시간의 SIP 원문 → {minute: {svc: {'in'|'out': {키: 건수}}}}.
+
+    **원문은 `errors='replace'` 로 읽는다** (이 모듈의 다른 읽기도 같다). SIP 포트로
+    비-SIP 패킷이 들어오면 그 바이트가 원문 JSONL 에 실릴 수 있는데, strict 로 읽으면
+    UnicodeDecodeError 가 `for line in f` 에서 나서 줄 단위 방어(json 파싱 except)를
+    지나쳐 버리고, run_once 가 통째로 실패해 **watermark 가 그 지점에서 영구히 멈춘다**
+    — 시스템 전체 통계가 정지한다(2026-09-10 실측: 0xfe 한 바이트에 6시간 정지).
+    한 파일의 손상은 그 줄만 버리고 넘어가는 것이 맞다."""
     import glob as _glob
     from handlers.stats import _classify_service, _parse_msg_method, _ts_full
 
@@ -349,7 +356,7 @@ def _scan_msg_hour(root: str, hour: str, dmap: dict) -> dict:
     for pattern in patterns:
         for fpath in _glob.glob(pattern):
             try:
-                with open(fpath, 'r', encoding='utf-8') as f:
+                with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
                     for line in f:
                         line = line.strip()
                         if not line:
@@ -530,7 +537,7 @@ def read_day_at(root: str, day: str, unit: str = '1m') -> list:
         return []
     rows = []
     try:
-        with open(p, 'r', encoding='utf-8') as f:
+        with open(p, 'r', encoding='utf-8', errors='replace') as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -721,7 +728,7 @@ def load_state() -> dict:
     p = _state_path()
     if p and os.path.isfile(p):
         try:
-            with open(p, 'r', encoding='utf-8') as f:
+            with open(p, 'r', encoding='utf-8', errors='replace') as f:
                 st = json.load(f)
             if isinstance(st, dict):
                 st.setdefault('watermark', '')
@@ -813,7 +820,7 @@ def _is_closed(key: str, kind: str) -> bool:
         if not os.path.isfile(key):
             return True
         try:
-            with open(key, 'r', encoding='utf-8') as f:
+            with open(key, 'r', encoding='utf-8', errors='replace') as f:
                 rec = json.load(f)
         except (OSError, ValueError):
             return True

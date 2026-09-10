@@ -62,8 +62,10 @@ def enabled() -> bool:
 # ── 파일 유틸 (모듈 자립 — flow_logger 와 순환 import 를 만들지 않는다) ──
 
 def _read_json(path: str) -> dict:
+    # errors='replace' — 원문 유래 문자열에 비-UTF-8 바이트가 섞여도 그 파일 전체를
+    # 잃지 않는다 (stats_rollup._scan_msg_hour 주석의 같은 사유).
     try:
-        with open(path, 'r') as f:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
             o = json.load(f)
         return o if isinstance(o, dict) else {}
     except Exception:
@@ -73,7 +75,7 @@ def _read_json(path: str) -> dict:
 def _read_jsonl(path: str) -> list:
     out = []
     try:
-        with open(path, 'r') as f:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
             for line in f:
                 line = line.strip()
                 if not line:

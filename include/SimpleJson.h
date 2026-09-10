@@ -8,6 +8,7 @@
 #include <iostream>
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 
 // Very Minimal JSON Parser/Builder
 // Limitations: No arrays (except via string parsing manually if needed), supports Object, String, Int/Double (as string/int).
@@ -267,17 +268,56 @@ private:
         return res;
     }
     
+public:
+    // JSON 문자열 값 이스케이프 — **모듈 공용 정본**. CSP 의 서비스 로그 기록기
+    // (CCallDir::Esc · CSipMessageLogger::JsonEsc)도 이리로 위임한다.
+    //
+    // 두 가지를 반드시 건다.
+    //  (1) 제어문자(<0x20) → \uXXXX. 날것으로 두면 JSON 파싱 자체가 깨진다.
+    //  (2) 0x80 이상은 **유효한 UTF-8 시퀀스일 때만** 통과. JSON 은 UTF-8 만 허용한다
+    //      (RFC 8259 §8.1). 정상 경로(한글 표시이름 등)는 그대로 지나가고 임의 바이트만
+    //      걸린다 — SIP 포트로 들어온 비-SIP 패킷(스캐너의 DTLS ClientHello 등)이 원문
+    //      로그에 실리면 그 JSONL 이 UTF-8 이 아니게 되고, 파일을 읽는 통계 집계·이력이
+    //      통째로 멈춘다(2026-09-10 실측: 0xfe 한 바이트에 전 서비스 통계가 6시간 정지).
     static std::string Escape(const std::string& s) {
         std::string res;
-        for (char c : s) {
-            if (c == '"') res += "\\\"";
-            else if (c == '\\') res += "\\\\";
-            else if (c == '\b') res += "\\b";
-            else if (c == '\f') res += "\\f";
-            else if (c == '\n') res += "\\n";
-            else if (c == '\r') res += "\\r";
-            else if (c == '\t') res += "\\t";
-            else res += c;
+        res.reserve(s.size() + 16);
+        const size_t n = s.size();
+        for (size_t i = 0; i < n; i++) {
+            unsigned char c = (unsigned char)s[i];
+            switch (c) {
+                case '"':  res += "\\\""; continue;
+                case '\\': res += "\\\\"; continue;
+                case '\b': res += "\\b";  continue;
+                case '\f': res += "\\f";  continue;
+                case '\n': res += "\\n";  continue;
+                case '\r': res += "\\r";  continue;
+                case '\t': res += "\\t";  continue;
+                default: break;
+            }
+            if (c < 0x20) {
+                char h[8];
+                snprintf(h, sizeof(h), "\\u%04x", c);
+                res += h;
+            } else if (c < 0x80) {
+                res += (char)c;
+            } else {
+                // 선두 바이트별 후속 바이트 수. 0x80~0xC1 은 선두가 될 수 없고(0xC0·0xC1 은
+                // overlong), 0xF5 이상은 Unicode 범위 밖이다.
+                int need = (c >= 0xC2 && c <= 0xDF) ? 1
+                         : (c >= 0xE0 && c <= 0xEF) ? 2
+                         : (c >= 0xF0 && c <= 0xF4) ? 3 : -1;
+                bool ok = (need > 0) && (i + (size_t)need < n);
+                for (int k = 1; ok && k <= need; k++) {
+                    if (((unsigned char)s[i + k] & 0xC0) != 0x80) ok = false;
+                }
+                if (ok) {
+                    res.append(s, i, (size_t)need + 1);
+                    i += (size_t)need;
+                } else {
+                    res += "\\ufffd";   // 텍스트가 아니었음만 남긴다 (원 바이트는 복원하지 않는다)
+                }
+            }
         }
         return res;
     }

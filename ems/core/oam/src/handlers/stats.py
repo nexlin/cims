@@ -1276,7 +1276,7 @@ def _iter_call_jsons(config: dict, call_type: str, from_dt: str, to_dt: str):
         if os.path.isdir(date_base):
             for cj_path in glob.glob(os.path.join(date_base, '**', '*.d', 'call.json'), recursive=True):
                 try:
-                    with open(cj_path, 'r', encoding='utf-8') as f:
+                    with open(cj_path, 'r', encoding='utf-8', errors='replace') as f:
                         yield json.load(f)
                 except Exception:
                     continue
@@ -1284,7 +1284,7 @@ def _iter_call_jsons(config: dict, call_type: str, from_dt: str, to_dt: str):
             for cjl_path in glob.glob(os.path.join(date_base, '**', '*.d', 'call.jsonl'), recursive=True):
                 try:
                     last = None
-                    with open(cjl_path, 'r', encoding='utf-8') as f:
+                    with open(cjl_path, 'r', encoding='utf-8', errors='replace') as f:
                         for line in f:
                             line = line.strip()
                             if not line:

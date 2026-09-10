@@ -591,6 +591,7 @@ python3 -m unittest tests.test_verify_lib    # 161 OK
 
 # CMP floor 코덱/암호 단위테스트 (외부 의존 없음 — 빌드 트리 불필요)
 g++ -std=c++17 -Icmp -Iext/pasf/include tests/cmp_floor_codec_test.cpp cmp/PFloorCodec.cpp -o /tmp/floorcodec && /tmp/floorcodec
+g++ -std=c++17 -Iinclude tests/json_escape_test.cpp -o /tmp/jsonesc && /tmp/jsonesc
 g++ -std=c++17 -Icmp tests/cmp_floor_crypto_test.cpp cmp/PFloorCrypto.cpp -lcrypto -o /tmp/floorcrypto && /tmp/floorcrypto
 ```
 

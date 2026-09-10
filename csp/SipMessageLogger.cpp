@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "FmReporter.h"
+#include "SimpleJson.h"
 
 CSipMessageLogger gclsSipLogger;
 
@@ -682,38 +683,12 @@ std::string CSipMessageLogger::GetTimestamp() {
 
 std::string CSipMessageLogger::JsonEsc( const char *s, int maxLen ) {
     if ( !s ) return "";
-    std::string r;
-    int len = ( maxLen > 0 ) ? maxLen : (int)strlen( s );
-    r.reserve( len + 32 );
-    for ( int i = 0; i < len && s[i]; i++ ) {
-        unsigned char c = (unsigned char)s[i];
-        switch ( c ) {
-            case '"':
-                r += "\\\"";
-                break;
-            case '\\':
-                r += "\\\\";
-                break;
-            case '\n':
-                r += "\\n";
-                break;
-            case '\r':
-                r += "\\r";
-                break;
-            case '\t':
-                r += "\\t";
-                break;
-            default:
-                if ( c < 0x20 ) {
-                    char h[8];
-                    snprintf( h, sizeof( h ), "\\u%04x", c );
-                    r += h;
-                } else {
-                    r += (char)c;
-                }
-        }
-    }
-    return r;
+    // 길이·NUL 처리는 종전 그대로 — maxLen 초과분과 NUL 이후는 버린다.
+    size_t nCap = ( maxLen > 0 ) ? (size_t)maxLen : strlen( s );
+    size_t nLen = strnlen( s, nCap );
+    // 이스케이프 규칙 자체는 SimpleJson::JsonNode::Escape 가 정본이다 — 여기 사본을
+    // 두면 UTF-8 검사 같은 수정이 한쪽에만 들어간다(실제로 세 벌로 갈라져 있었다).
+    return SimpleJson::JsonNode::Escape( std::string( s, nLen ) );
 }
 
 std::string CSipMessageLogger::ExtractHeader( const char *pszMsg, const char *pszHeader, const char *pszShort ) {
