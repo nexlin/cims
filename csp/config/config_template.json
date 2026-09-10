@@ -255,7 +255,7 @@
           "key": "Setup.Roles.MCDATA",
           "label": "MCDATA-AS (MCData 메시징)",
           "type": "bool",
-          "default": "true",
+          "default": true,
           "restart": true,
           "help": "MCData 그룹 SDS/FD 메시징 (TS 24.282). 끄면 그룹 MESSAGE/MSRP INVITE 를 처리하지 않는다."
         }
@@ -365,7 +365,7 @@
           "key": "Setup.McDataMedia.Enable",
           "label": "CMDP 사용",
           "type": "bool",
-          "default": "false",
+          "default": false,
           "restart": true,
           "help": "MSRP media plane 활성화. cmdp 모듈 배치 필요. 꺼져 있으면 기존 C-plane 경로만 동작."
         },
@@ -435,7 +435,7 @@
           "key": "Setup.Fm.Enable",
           "label": "FM 자기보고 사용",
           "type": "bool",
-          "default": "true",
+          "default": true,
           "restart": true,
           "help": "끄면 자기보고 알람(DB 연결 등)·이벤트가 OAM 에 보고되지 않음 (외부 관측 폴링만 동작)."
         },

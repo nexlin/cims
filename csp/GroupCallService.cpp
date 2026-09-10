@@ -33,6 +33,11 @@
 #include "SipUserAgent.h"
 #include "UserMap.h"
 
+// CspServer.cpp — PTT 세션 참가 leg 의 dialog-event NOTIFY (dispatch_center.md §5.6a)
+extern void SendPttDialogEventNotify( const std::string &strWatchedAor, const std::string &strDlgCallId,
+                                      const std::string &strState, bool bInitiator, const std::string &strSessionUri,
+                                      const std::string &strExtXml );
+
 // Notify subscribers about group changes
 extern void SendSipNotify( const std::string &uri, const std::string &etag, const std::string &action );
 /** conference 구독자에게 참가자 NOTIFY 푸시 (CspServer.cpp) — 0 이면 구독자 없음(in-dialog 폴백). */
@@ -237,14 +242,19 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         CspUserProfile clsListenProf;
         const int iProf = gclsDbManager.SelectUserProfile( pszCallerInfo, clsListenProf );
         strListenGroup = gclsDispatchGroupMap.EffectiveGroupOf( pszCallerInfo );
-        const char *pszDeny = NULL;
+        std::string strDeny;
         if ( iProf != 1 || !clsListenProf.m_bAllowAmbientListening )
-            pszDeny = ( iProf < 0 ) ? "profile unavailable" : "allow_ambient_listening=0";
-        else if ( !gclsDispatchGroupMap.CanListenPtt( strListenGroup, pszGroupId ) )
-            pszDeny = "ptt_listen scope";
-        if ( pszDeny ) {
+            strDeny = ( iProf < 0 ) ? "profile unavailable" : "allow_ambient_listening=0";
+        else if ( clsGroup._isAdhoc ) {
+            // 즉석 세션(사설콜·애드혹)은 PTT 그룹이 아니라 사람 사이의 세션 — 범위 축은 ptt_listen 이 아닌 참가자의
+            //   monitor_scope(VoLTE 통화 Join 과 같은 규칙, §5.6a).
+            std::string strReason;
+            if ( !CanObserveEphemeral( clsGroup, pszCallerInfo, strReason ) ) strDeny = "ephemeral " + strReason;
+        } else if ( !gclsDispatchGroupMap.CanListenPtt( strListenGroup, pszGroupId ) )
+            strDeny = "ptt_listen scope";
+        if ( !strDeny.empty() ) {
             CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) listener(%s) dispatch_group(%s) denied (%s) → 403",
-                         pszGroupId, pszCallerInfo, strListenGroup.c_str(), pszDeny );
+                         pszGroupId, pszCallerInfo, strListenGroup.c_str(), strDeny.c_str() );
             gclsUserAgent.StopCall( pszCallId, SIP_FORBIDDEN );
             EmitPttListenAudit( "denied", pszCallerInfo, strListenGroup, pszGroupId, "", -1 );
             return true;
@@ -503,7 +513,18 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
             clsSess.bListenHidden = bListenHidden;
             clsSess.strListenGroup = strListenGroup;
             clsSess.tListenStart = time( NULL );
+            clsSess.bInitiator = true;
             m_mapCallSession[pszCallId] = clsSess;
+        }
+        // dialog-event(§5.6a): 개시자 leg 확립 — 개시자 회선 감시자에게 confirmed (remote = 세션 URI)
+        {
+            PttDialogLeg leg;
+            leg.strCallId = pszCallId;
+            leg.strUser = pszCallerInfo;
+            leg.strGroupId = pszGroupId;
+            leg.bInitiator = true;
+            leg.bListen = bListen;
+            EmitPttDialog( leg, "confirmed" );
         }
         if ( !strPrevCallId.empty() ) {
             CLog::Print( LOG_INFO, "ProcessGroupCall: Caller(%s) rejoined Group(%s) — clearing stale leg(%s)",
@@ -788,6 +809,7 @@ void CGroupCallService::ClearUserCall( const std::string &strUserId ) {
         std::string strGroupId;
         std::string strSessionId;
         bool bStillActive = false;
+        PttDialogLeg clsDlg;  ///< dialog-event terminated 통지용(§5.6a)
     };
     std::vector<ClearItem> vecItems;
     {
@@ -806,6 +828,7 @@ void CGroupCallService::ClearUserCall( const std::string &strUserId ) {
             if ( itSess != m_mapCallSession.end() ) {
                 clsItem.strGroupId = itSess->second.strGroupId;
                 clsItem.strSessionId = itSess->second.strSessionId;
+                clsItem.clsDlg = _pttLegOf( clsItem.strCallId, itSess->second );
                 m_mapCallSession.erase( itSess );
             }
             it = m_mapUserCall.erase( it );
@@ -831,6 +854,7 @@ void CGroupCallService::ClearUserCall( const std::string &strUserId ) {
         }
     }
     for ( const auto &clsItem : vecItems ) {
+        EmitPttDialog( clsItem.clsDlg, "terminated" );  // dialog-event(§5.6a) — 맵에서 이미 뺐으므로 여기서 낸다
         // 기존 SIP 다이얼로그 정상 종료(BYE) — 고아 다이얼로그 누수 방지 (1E)
         if ( !clsItem.strCallId.empty() ) {
             gclsUserAgent.StopCall( clsItem.strCallId.c_str() );
@@ -1605,6 +1629,7 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
                                        int iRemoteFloorPort, int iRemoteVideoPort, CSipCallRtp *pclsRtp ) {
     std::string strGroupId, strSessionId, strMemberId;
     int iCmpFloorPort = 0;
+    PttDialogLeg clsDlgLeg;
 
     // 1. lock 보유 중 맵 조회만 수행
     {
@@ -1616,6 +1641,7 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
         strGroupId = it->second.strGroupId;
         strSessionId = it->second.strSessionId;
         strMemberId = it->second.strMemberId;
+        clsDlgLeg = _pttLegOf( strCallId, it->second );
 
         // CMP에서 할당한 floor_port 조회 (멤버 SDP에서 파싱 불필요)
         auto itRtp = m_mapGroupRtp.find( strGroupId );
@@ -1623,6 +1649,8 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
             iCmpFloorPort = itRtp->second.iFloorPort;
         }
     }
+    // dialog-event(§5.6a): 멤버 leg 확립 — 멤버 회선 감시자에게 confirmed
+    EmitPttDialog( clsDlgLeg, "confirmed" );
     // 2. lock 해제 후 외부 호출 (CMP, DB)
     int iFloorPort = iRemoteFloorPort > 0 ? iRemoteFloorPort : ( iRemotePort + 1 );
     // video 는 협상된 경우만 전달 — 비협상 멤버에 audio+2 유령 포트를 광고하면 CMP 가
@@ -1773,12 +1801,14 @@ int CGroupCallService::TerminateGroupLocal( const std::string &strGroupId ) {
     if ( strGroupId.empty() ) return 0;
 
     std::vector<std::string> vecCallIds;
+    std::vector<PttDialogLeg> vecDlg;
     // 1) lock 안 — 이 그룹의 활성 멤버 호를 수집하고 로컬 맵에서 제거 (CMP/네트워크 호출 금지)
     {
         std::unique_lock<std::recursive_mutex> lock( m_mutex );
         for ( auto it = m_mapCallSession.begin(); it != m_mapCallSession.end(); ) {
             if ( it->second.strGroupId == strGroupId ) {
                 vecCallIds.push_back( it->first );
+                vecDlg.push_back( _pttLegOf( it->first, it->second ) );
                 for ( auto uIt = m_mapUserCall.begin(); uIt != m_mapUserCall.end(); ++uIt ) {
                     if ( uIt->second == it->first ) {
                         m_mapUserCall.erase( uIt );
@@ -1801,6 +1831,7 @@ int CGroupCallService::TerminateGroupLocal( const std::string &strGroupId ) {
     // 2) lock 해제 후 BYE + B2BUA 레코드 정리. dead node → LeaveGroup/RemoveGroup(blocking) 생략.
     CLog::Print( LOG_INFO, "TerminateGroupLocal: Group(%s) media node down — %zu member call(s) BYE (local only)",
                  strGroupId.c_str(), vecCallIds.size() );
+    for ( const auto &clsDlg : vecDlg ) EmitPttDialog( clsDlg, "terminated" );  // dialog-event(§5.6a)
     for ( const auto &strCallId : vecCallIds ) {
         gclsUserAgent.StopCall( strCallId.c_str() );
         gclsCallMap.Delete( strCallId.c_str(), false );  // 그룹호: RemoveSession 미사용(dead node)
@@ -1819,6 +1850,8 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
     bool bFound = false;
     bool bListen = false, bListenHidden = true;
     time_t tListenStart = 0;
+    PttDialogLeg clsDlgLeg;
+    std::vector<PttDialogLeg> vecPendingDlg;  // 세션 해제로 함께 걷는 미확립 초대 leg 의 terminated
 
     // 1. lock 보유 중 맵 조회/수정만 수행 (외부 호출 금지)
     {
@@ -1835,6 +1868,7 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
         bListenHidden = it->second.bListenHidden;
         strListenGroup = it->second.strListenGroup;
         tListenStart = it->second.tListenStart;
+        clsDlgLeg = _pttLegOf( strCallId, it->second );
 
         m_mapCallSession.erase( it );
 
@@ -1858,6 +1892,7 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
     }
     // 2. lock 해제 후 외부 호출 (CMP, DB)
     CLog::Print( LOG_INFO, "OnCallTerminated: Group Call Terminated. CallId=%s", strCallId.c_str() );
+    EmitPttDialog( clsDlgLeg, "terminated" );  // dialog-event(§5.6a) — 그룹 컨텍스트가 아직 살아 있을 때
     gclsCmpClient.LeaveGroup( strGroupId, strSessionId, GetOrIssueGroupSesId( strGroupId ) );
     InvalidateMemberPort( strGroupId, strSessionId );
     if ( bListen ) {
@@ -1937,6 +1972,7 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
                 for ( auto itP = m_mapCallSession.begin(); itP != m_mapCallSession.end(); ) {
                     if ( itP->second.strGroupId == strGroupId ) {
                         vecPending.push_back( itP->first );
+                        vecPendingDlg.push_back( _pttLegOf( itP->first, itP->second ) );
                         itP = m_mapCallSession.erase( itP );
                     } else {
                         ++itP;
@@ -1950,6 +1986,7 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
                     }
                 }
             }
+            for ( const auto &clsPendingDlg : vecPendingDlg ) EmitPttDialog( clsPendingDlg, "terminated" );
             for ( const auto &strPending : vecPending ) {
                 CLog::Print( LOG_INFO, "OnCallTerminated: cancel pending invite Call(%s) — Group(%s) session end",
                              strPending.c_str(), strGroupId.c_str() );
@@ -2002,7 +2039,17 @@ bool CGroupCallService::HasActiveLeg( const std::string &strGroupId ) const {
 int CGroupCallService::CheckConferenceSubscribe( const std::string &strGroupId, const std::string &strUserId,
                                                  std::string &strWarning, std::string &strReason ) {
     CspPttGroup clsGroup;
-    if ( !gclsGroupMap.Select( strGroupId.c_str(), clsGroup ) || clsGroup._isAdhoc ) return 0;
+    if ( !gclsGroupMap.Select( strGroupId.c_str(), clsGroup ) ) return 0;
+    if ( clsGroup._isAdhoc ) {
+        // 즉석 세션(priv-/adhoc-) — 그룹 문서가 없다. 참가자(fan-out 대상)는 허용, 그 외(관제사)는 청취 leg 와 같은
+        //   즉석 세션 관측 인가(자격 + 참가자 monitor_scope). 세션 id 를 아는 것만으로 로스터가 열리지 않게
+        //   한다(§5.6a).
+        std::string strWhy;
+        if ( CanObserveEphemeral( clsGroup, strUserId, strWhy ) ) return 0;
+        strWarning = "138 CIMS \"subscription of conference events not allowed\"";
+        strReason = "ephemeral session, " + strWhy;
+        return SIP_FORBIDDEN;
+    }
     if ( clsGroup._groupType == "broadcast" ) {
         strWarning = "105 CIMS \"subscription not allowed in a broadcast group call\"";
         strReason = "broadcast group";
@@ -2035,6 +2082,110 @@ int CGroupCallService::CheckConferenceSubscribe( const std::string &strGroupId, 
     else
         strReason = "non-member, ptt_listen scope (" + strDg + ")";
     return SIP_FORBIDDEN;
+}
+
+// 즉석 세션 관측 인가 (dispatch_center.md §5.6a) — 사설콜·애드혹은 PTT 그룹이 아니라 사람 사이의 세션이라 범위 축은
+//   ptt_listen(그룹 목록)이 아닌 참가자의 관제 그룹 monitor_scope(VoLTE 통화 Join·dialog 감시와 같은 CanWatch)다.
+//   자격은 그룹콜 청취와 같은 allow_ambient_listening(TS 24.484). 참가자 자신은 항상 허용(자기 세션 로스터).
+bool CGroupCallService::CanObserveEphemeral( const CspPttGroup &clsGroup, const std::string &strUserId,
+                                             std::string &strReason ) {
+    for ( const auto &pUser : clsGroup._pusers )
+        if ( pUser && ( pUser->_id == strUserId || pUser->_mcpttId == strUserId ) ) return true;
+    CspUserProfile clsProf;
+    const int iProf = gclsDbManager.SelectUserProfile( strUserId.c_str(), clsProf );
+    if ( iProf != 1 || !clsProf.m_bAllowAmbientListening ) {
+        strReason = ( iProf < 0 ) ? "profile unavailable" : ( iProf != 1 ) ? "no profile" : "allow_ambient_listening=0";
+        return false;
+    }
+    const std::string strDg = gclsDispatchGroupMap.EffectiveGroupOf( strUserId.c_str() );
+    for ( const auto &pUser : clsGroup._pusers ) {
+        if ( !pUser ) continue;
+        if ( gclsDispatchGroupMap.CanWatch( strDg, gclsDispatchGroupMap.EffectiveGroupOf( pUser->_id.c_str() ) ) )
+            return true;
+    }
+    strReason = "monitor_scope (" + strDg + ")";
+    return false;
+}
+
+// ── PTT 세션 dialog 이벤트 (RFC 4235 dialog-info, dispatch_center.md §5.6a) ─────────────────────────────
+//   관제 앱은 범위 안 사람의 PTT 회선에 Event: dialog 를 구독한다(VoLTE 회선과 같은 패키지·같은 인가 CanWatch).
+//   참가 leg 마다 dialog 1건: local = 참가자, remote = 세션 URI(UE 의 대화 상대는 focus), 확장 <mcptt> 로 세션
+//   종류(사설콜·애드혹·그룹)·개시자·긴급/임박을 싣는다. 앱은 같은 remote 를 가진 dialog 를 한 세션으로 묶고,
+//   참가자 명단이 더 필요하면 그 세션 URI 에 conference 를 구독한다(CheckConferenceSubscribe 즉석 게이트).
+std::string CGroupCallService::PttSessionUri( const std::string &strGroupId ) {
+    const std::string strDom = gclsServiceMap.GetDomainByKind( "ptt" );
+    return "sip:" + strGroupId + ( strDom.empty() ? std::string() : "@" + strDom );
+}
+
+std::string CGroupCallService::BuildPttDialogExt( const std::string &strGroupId ) {
+    std::string strType;
+    CspPttGroup clsGroup;
+    if ( gclsGroupMap.Select( strGroupId.c_str(), clsGroup ) ) {
+        if ( clsGroup._groupType == "private" )
+            strType = "private";
+        else if ( clsGroup._isAdhoc )
+            strType = "adhoc";
+        else
+            strType = clsGroup._groupType.empty() ? "prearranged" : clsGroup._groupType;
+    } else if ( strGroupId.rfind( "priv-", 0 ) == 0 ) {
+        strType = "private";
+    } else if ( strGroupId.rfind( "adhoc-", 0 ) == 0 ) {
+        strType = "adhoc";
+    } else {
+        strType = "prearranged";
+    }
+    int iCond = 0;
+    std::string strInitiator;
+    {
+        std::unique_lock<std::recursive_mutex> lock( m_mutex );
+        auto itC = m_mapGroupCondition.find( strGroupId );
+        if ( itC != m_mapGroupCondition.end() ) iCond = itC->second;
+        auto itR = m_mapGroupRtp.find( strGroupId );
+        if ( itR != m_mapGroupRtp.end() ) strInitiator = itR->second.strCallerId;
+    }
+    std::string s = "<mcptt xmlns=\"urn:cims:xml:ns:dialog-info:mcptt\" session-type=\"" + strType +
+                    "\" session-id=\"" + strGroupId + "\"";
+    if ( !strInitiator.empty() ) s += " initiator=\"" + strInitiator + "\"";
+    s += std::string( " emergency=\"" ) + ( iCond == 2 ? "true" : "false" ) + "\" imminent-peril=\"" +
+         ( iCond == 1 ? "true" : "false" ) + "\"/>";
+    return s;
+}
+
+void CGroupCallService::EmitPttDialog( const PttDialogLeg &leg, const char *pszState ) {
+    if ( leg.bListen || leg.strUser.empty() || leg.strCallId.empty() || leg.strGroupId.empty() ) return;
+    SendPttDialogEventNotify( leg.strUser, leg.strCallId, pszState ? pszState : "confirmed", leg.bInitiator,
+                              PttSessionUri( leg.strGroupId ), BuildPttDialogExt( leg.strGroupId ) );
+}
+
+void CGroupCallService::NotifyPttDialog( const std::string &strCallId, const char *pszState ) {
+    PttDialogLeg leg;
+    {
+        std::unique_lock<std::recursive_mutex> lock( m_mutex );
+        auto it = m_mapCallSession.find( strCallId );
+        if ( it == m_mapCallSession.end() ) return;
+        leg = _pttLegOf( strCallId, it->second );
+    }
+    EmitPttDialog( leg, pszState );
+}
+
+void CGroupCallService::CollectPttDialogs( const std::string &strAor, std::vector<PttDialogSnapshot> &vecOut ) {
+    std::vector<std::pair<PttDialogLeg, bool>> vecLegs;
+    {
+        std::unique_lock<std::recursive_mutex> lock( m_mutex );
+        for ( const auto &kv : m_mapCallSession ) {
+            if ( kv.second.strMemberId != strAor || kv.second.bListenOnly ) continue;
+            vecLegs.emplace_back( _pttLegOf( kv.first, kv.second ), kv.second.bEstablished );
+        }
+    }
+    for ( const auto &pr : vecLegs ) {
+        PttDialogSnapshot p;
+        p.strCallId = pr.first.strCallId;
+        p.strSessionUri = PttSessionUri( pr.first.strGroupId );
+        p.strExtXml = BuildPttDialogExt( pr.first.strGroupId );
+        p.bEstablished = pr.second;
+        p.bInitiator = pr.first.bInitiator;
+        vecOut.push_back( p );
+    }
 }
 
 // dispatch_center.md §5.7 — PTT 그룹콜 청취 감사(E-AUD-016 call_monitored, tap_mode=ptt_listen). 시작/종료/거절 각 1건.

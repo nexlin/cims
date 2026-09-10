@@ -77,6 +77,7 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
   "services": [
     {
       "kind": "volte",
+      "capabilities": { "smsGateway": false },
       "sip":     { "host": "<CSP host>", "port": 15060, "transport": "UDP",
                    "transports": [ { "transport": "UDP", "port": 15060 },
                                    { "transport": "TCP", "port": 15060 },
@@ -88,6 +89,7 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
     },
     {
       "kind": "ptt",
+      "capabilities": { "smsGateway": false },
       "sip":     { "host": "<PSP host>", "port": 15061, "transport": "TLS",
                    "transports": [ { "transport": "TLS", "port": 15061 } ],
                    "default": "TLS", "enforced": true, "mediaSecurity": "optional",
@@ -147,6 +149,11 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
   비밀번호는 IdMS 자격이라 SIP Digest 에 쓰지 않는다** — 두 비밀번호는 별개다(sip_access_security.md §4.7).
   평문 cred 는 pjsip 이 challenge realm 로 그때 ha1 을 계산하므로 realm 결박이 없다.
 - `account.mcpttId`: PTT 프로파일에만. GMS/CMS/affiliation/floor 에서 사용.
+- `capabilities`: **접속서비스 능력** — 단말이 기능 노출을 결정하는 서버측 사실. `smsGateway`(bool) = 이 서비스에 외부망
+  휴대전화 SMS/LMS 게이트웨이(IBCF→SMSC TS 24.341 / SMPP)가 연결돼 있는가 — 관제 앱은 `false` 면 외부 번호의 [문자] 를
+  비활성 + 툴팁으로 두고 팝오버 머리에 게이트웨이 상태 배지를 그린다([dispatch_desktop_ui.md §4.3](dispatch_desktop_ui.md)).
+  등록 가입자 간 `MESSAGE` 전달은 이 값과 무관. SoT = csc.json `Provisioning.Services.<kind>.sms_gateway`(기본 `false` —
+  CIMS 는 게이트웨이를 내장하지 않으므로 외부 게이트웨이 연동 시 운영자가 켠다). 구 서버 응답에 없으면 전부 `false`.
 - `countryCode`: 홈 국가코드(E.164 digits, `+` 없음. 예 `"82"`) — 단말 번호 로컬 표기(§3-1)의 **SoT**.
   CSC 설정 `Provisioning.CountryCode` 우선, 미설정이면 로그인 msisdn 에서 서버가 유도. 판정 불가면
   빈 문자열(`""`) — 명시적 `null` 은 보내지 않는다(Android `org.json` 이 `"null"` 문자열로 오독).
@@ -158,10 +165,12 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
     [dispatch_center.md §3.4](dispatch_center.md)) — `own` 의 루트가 `orgCode`(그룹 `org_id` 의 코드, 없으면 `""`).
     컬럼 미적용 DB·구 서버는 `none`/`""`. 앱은 `none` 이면 관리 탭을 잠근다.
   - `members[]`: **dialog 감시(RFC 4235) 대상** = 서버가 `monitorScope` 를 CSP `CanWatch` 와 같은 규칙으로 해석한
-    VoLTE 가입자 목록 — 자기 관제 그룹원은 범위와 무관하게 항상(같은 픽업 그룹), `listed` 는 대상 그룹원 추가,
-    `all` 은 전 VoLTE 가입자. 항목 = `userId`(`users.id`) · `name` · `volteAor`(`tel:+E.164`) · `pttId`(첫 PTT 가입
-    `tel:`, 미가입 `""`) · `extension`(가입 번호 끝자리 N — 설정 `Provisioning.ExtensionDigits`, 기본 4. 망 주소가
-    아닌 **표시 라벨**) · `groupId`(그 가입자의 관제 그룹, 무소속 `""`). 정렬 = 자기 그룹(`alert_order`) → 그 외.
+    가입자 목록 — 자기 관제 그룹원은 범위와 무관하게 항상(같은 픽업 그룹), `listed` 는 대상 그룹원 추가,
+    `all` 은 전 VoLTE 가입자 **+ VoLTE 회선 없는 PTT 전용 가입자**(`volteAor=""`, 목록 끝). 항목 = `userId`(`users.id`) ·
+    `name` · `volteAor`(`tel:+E.164`, PTT 전용이면 `""`) · `pttId`(첫 PTT 가입 `tel:`, 미가입 `""`) · `extension`(가입
+    번호 끝자리 N — 설정 `Provisioning.ExtensionDigits`, 기본 4. 망 주소가 아닌 **표시 라벨**) · `groupId`(그 가입자의
+    관제 그룹, 무소속 `""`). 정렬 = 자기 그룹(`alert_order`) → 그 외. 앱은 `volteAor`(통화 상태)와 `pttId`(PTT 세션 참가 —
+    사설콜·애드혹·그룹, [dispatch_center.md §5.6a](dispatch_center.md)) **둘 다** 비어 있지 않은 것마다 dialog 를 구독한다.
     앱의 **그룹원 상태 띠는 `groupId == dispatch.groupId`** 인 항목이다. 앱은 enum 을 해석하지 않는다.
   - `pttTargets[]`: **conference 구독·청취 대상** = `pttListen` 을 `CanListenPtt` 와 같은 규칙으로 해석한 PTT
     그룹(`listed` 대상, `all` 전 그룹, `none` `[]`). 항목 = `id`(`mcptt_group_id`) · `uri`(시스템 관례 `tel:` 형) ·
@@ -318,6 +327,7 @@ OAM 미도달 502 `oam_unreachable`. 구현 `csc/src/handlers/dispatch_recording
 | `POST /provisioning/directory/members` | `{name, org, title?, loginId?, password?, volte?: {msisdn, imsi?, serviceRef?, sipTransport?, password}, ptt?: {…}}` → `201 {userId}`. `imsi` 비면 번호 숫자(USIM 없는 관제 소프트폰 규약), 회선은 `password` 필수(H(A1)). 회선 개설 실패는 그 코드 + `{userId, kind}` |
 | `PUT /provisioning/directory/members/{userId}` | `{name?, org?, title?, loginId?, password?}` → `200 {id}` |
 | `DELETE /provisioning/directory/members/{userId}` | `200 {id}` — 회선 함께 삭제(USER_CHANGED). 자기 자신 `409 self_delete` |
+| `POST /provisioning/directory/members/import` | 구성원 일괄 가져오기 — 본문 `text/csv`(UTF-8, 머리행. 열 = `name, org, title, login_id, password, volte_msisdn, volte_imsi, volte_service_ref, volte_sip_transport, volte_password, ptt_msisdn, ptt_…`; 대소문자·`_`·`-` 무시) 또는 `application/json` `{"rows":[<POST members 본문>…]}`(최대 500행) → `200 {created, failed, results:[{row, status, userId\|error…}]}`. 행마다 `POST members` 와 같은 경로(범위 게이트·감사 E-AUD-006·회선 규약)라 한 행의 실패(403/409/400)가 다른 행을 막지 않는다. 빈 CSV `400 empty_csv`, 초과 `413 too_many_rows` |
 | `PUT /provisioning/directory/members/{userId}/volte\|ptt` | `{msisdn, imsi?, serviceRef?, sipTransport?, password?}` — 같은 번호면 갱신(`200`), 다른 번호면 종전 회선 삭제 + 개설(`201`, `password` 필수). 타인 번호 `409 number_exists`, `pickup_group` 파생 충돌 `409 derived_from_dispatch_group` |
 | `DELETE /provisioning/directory/members/{userId}/volte\|ptt` | `200 {userId, kind, deleted[]}` |
 | `PUT /provisioning/directory/members/{userId}/ptt/profile` | `{allowCreateGroup?, allowAmbientListening?, allowEmergencyCall?, …}`(없는 키는 현재값 유지) → `200 {msisdn, profile}` |

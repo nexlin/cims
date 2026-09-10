@@ -52,8 +52,15 @@ const ifaceLayout: WidgetPlacement[] = [
     config: { source: IFACE_SOURCE, title: '시간대별 메시지 수' } },
   { widgetId: 'shape.distribution', x: 30, y: 14, w: 18, h: 20,
     config: { source: IFACE_SOURCE, title: '메서드 비중' } },
-  { widgetId: 'shape.table', x: 0, y: 34, w: 48, h: 14,
-    config: { source: IFACE_SOURCE, title: '메서드별 카운트' } },
+  // 표는 **교차표(시간 × 메서드)**다. 총계 2열표(소스의 `map.table` = `method_counts`)로는
+  // 위 차트가 이미 시간축을, 옆 분포가 서비스 비중을 보여주므로 더 얹는 정보가 없었다 —
+  // "어느 시간대에 어떤 메시지가 몰렸나" 는 두 축이 함께 있어야 읽힌다.
+  // 교차표의 **열 합계가 그 총계표와 같은 값**이라 총계를 잃지 않고 시간축이 붙는다.
+  // 열은 전 구간 합계 내림차순 14개 + `기타(n)` 로 접힌다(소스의 `map.matrix.limit`).
+  // 네 인터페이스(sip/cmp/csc/https) 모두 `matrix` 를 선언하고 버킷에 `in`/`out` 을 내므로
+  // source-picker 로 대상을 바꿔도 표가 비지 않는다.
+  { widgetId: 'shape.matrix', x: 0, y: 34, w: 48, h: 14,
+    config: { source: IFACE_SOURCE, title: '메서드별 카운트 (시간대별)' } },
 ]
 
 // 화면별 카드 안 기본 배치 — 세로 합 = GRID_ROWS = **화면 한 장**.

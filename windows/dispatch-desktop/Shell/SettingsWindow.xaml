@@ -29,7 +29,7 @@
                     <CheckBox Content="데스크 스피커 라우트 사용 (PTT 그룹·애드혹·PTT 청취 기본)" IsChecked="{Binding SpeakerRouteEnabled}" Margin="0,0,0,4" />
                     <ComboBox Style="{StaticResource FieldCombo}" ItemsSource="{Binding RenderDevices}" SelectedItem="{Binding SpeakerDevice}" IsEditable="True" Text="{Binding SpeakerDevice}" IsEnabled="{Binding SpeakerRouteEnabled}" Margin="0,2,0,10" />
                     <CheckBox Content="장치가 다시 붙으면 자동 복귀" IsChecked="{Binding AutoReturnToPreferredDevice}" />
-                    <TextBlock Style="{StaticResource Hint}" Margin="0,10,0,0" Text="카드·감청 창의 🎧/🔊 토글은 세션별 라우트를 바꿉니다. 스피커 라우트가 없으면 비활성." />
+                    <TextBlock Style="{StaticResource Hint}" Margin="0,10,0,0" Text="카드·감청 창의 헤드셋/스피커 토글은 세션별 라우트를 바꿉니다. 스피커 라우트가 없으면 비활성." />
                 </StackPanel>
             </TabItem>
             <TabItem Header="핫키">

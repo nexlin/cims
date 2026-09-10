@@ -981,8 +981,15 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     if ( !strOutboundLocalIp.empty() ) clsRoute.m_strOutboundLocalIp = strOutboundLocalIp;
     if ( iOutboundLocalPort > 0 ) clsRoute.m_iOutboundLocalPort = iOutboundLocalPort;
 
+    // 발신 신원 표시 — 관제 그룹원이 P-Preferred-Identity 로 자기 그룹 대표번호를 제시하면 B-leg From(= psip 가 같은
+    //   값으로 넣는 P-Asserted-Identity)을 대표번호로 낸다(dispatch_center.md §4.7). CallMap·CDR·dialog 당사자는
+    //   실제 발신자(pszFrom) 그대로 — 아래 모든 기록은 pszFrom 을 쓴다.
+    const std::string strPresentFrom = m_clsTas.IsEnabled()
+                                           ? m_clsTas.ResolveOriginatingIdentity( pszFrom, pclsMessage )
+                                           : std::string( pszFrom ? pszFrom : "" );
     CSipMessage *pclsInvite;
-    if ( gclsUserAgent.CreateCall( pszFrom, pszTo, pclsRtp, &clsRoute, strCallId, &pclsInvite ) == false ) {
+    if ( gclsUserAgent.CreateCall( strPresentFrom.c_str(), pszTo, pclsRtp, &clsRoute, strCallId, &pclsInvite ) ==
+         false ) {
         // [LEAK-FIX] B-leg INVITE 생성 실패 — 직전 AddSession 으로 만든 CMP relay 가 CallMap 등록
         //   전이라 추적 불가(고아) 상태로 누수된다. 여기서 즉시 RemoveSession 으로 회수한다.
         //   (호 실패 시 주요 RTP 누수 경로 — session_id 로 직접 회수.)

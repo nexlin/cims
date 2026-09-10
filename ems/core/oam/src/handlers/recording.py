@@ -1359,6 +1359,14 @@ async def handle_recordings(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
     parts = _path_parts(handler_args.full_path, _REC_BASE)
     method = handler_args.method.upper()
 
+    # 인증 — 조회·재생 monitor, 삭제(디렉터리 제거) manager. 게이트웨이는 Authorization 을 전달만 하므로
+    #   여기서 독립 검증한다. 콘솔 미디어 element 는 토큰을 헤더로 붙인 fetch → Blob URL 로 재생하고,
+    #   CSC 관제 프록시는 공유 CimsAuth.JwtSecret 로 서명한 서비스 토큰(role=monitor)을 붙인다.
+    from services.admin_auth import require_role
+    _, err = require_role(handler_args, 'manager' if method == 'DELETE' else 'monitor')
+    if err:
+        return err
+
     try:
         # GET /recordings — 목록
         if len(parts) == 0 and method == 'GET':

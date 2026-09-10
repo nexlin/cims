@@ -42,8 +42,8 @@
                                 <Border Style="{StaticResource Chip}">
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="{Binding Name}" />
-                                        <Button Content="×" Command="{Binding DataContext.RemoveAdhocCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"
-                                                Background="Transparent" BorderThickness="0" Padding="4,0" Cursor="Hand" Foreground="{DynamicResource Brush.Muted}" />
+                                        <Button Command="{Binding DataContext.RemoveAdhocCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"
+                                                Style="{StaticResource Btn.Link}" Padding="4,0,0,0"><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.X}" Width="11" Height="11" /></Button>
                                     </StackPanel>
                                 </Border>
                             </DataTemplate>

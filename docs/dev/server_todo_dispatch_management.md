@@ -1,5 +1,7 @@
 > 서버 쪽 보완 목록 — 관제조작반 관리 기능(조직/구성원/번호 · PTT 그룹 · 세션 이력/녹취 재생) 추가에 따른 서버·운영 작업.
 > 앱·SDK·CSC 코드는 같은 변경(csc 0.2.108)에 들어 있다. 아래 §2 는 코드가 아니라 **배포·운영 절차**, §3 은 **아직 남은 서버 과제**다.
+> 반영이 끝난 과제(OAM 녹취·이력 API 인증 게이트 + CSC 서비스 토큰, 세션 레벨 video URL 정리, 구성원 CSV/JSON 일괄 가져오기, CSC 의 `access_services` 읽기 =
+> `CimsRuntimeDir` 전제([initial_install.md §4.2](../user-manual/initial_install.md)), `directory_admin` 은 CSC 전용)는 표에서 뺐다.
 > 정본: [dispatch_center.md §3.4·§5.7a·§5.7b](../design/features/dispatch_center.md) · [android_ue_provisioning.md §3-2~§3-4](../design/features/android_ue_provisioning.md) ·
 > [dispatch_desktop_ui.md §4.5](../design/features/dispatch_desktop_ui.md). 전부 반영되면 이 문서는 삭제한다.
 
@@ -46,12 +48,7 @@ S1-UNIT-CSC(`verify/lib/items/stage1/unit_csc.py`)에 `tests/test_csc_dispatch_m
 
 | # | 과제 | 배경 | 제안 |
 |---|---|---|---|
-| T1 | **OAM 녹취·이력 API 인증 부재** — `handlers/recording.py`, `flow_logger.py` 의 `/api/v1/recordings·/call/logs·/ptt/sessions·/ptt/history·/messages` 는 `require_role` 이 없고 게이트웨이도 검증하지 않는다(api_docs 는 monitor 로 선언). `DELETE /api/v1/recordings/{id}` 는 무인증 rmtree | 지금은 CSC 프록시가 가입자 게이트를 대신하지만 4419 에 닿는 누구나 원 API 를 부를 수 있다 | 콘솔은 `<audio src>` 라 헤더를 못 붙이므로 **단기 서명 URL(쿼리 토큰)** 또는 쿠키 인증 + 나머지 경로 `require_role(monitor)`, DELETE 는 manager. CSC 프록시는 서버 간 토큰(`InternalApi.Token` 결)으로 호출 |
-| T2 | 세션 레벨 `GET /api/v1/recordings/{id}/video?side=` 미구현(문서만) | 콘솔 `recordings.ts:115` 가 URL 을 만든다 | 구현하거나 문서·클라이언트에서 제거 |
-| T3 | 이력 스캔 48 시간 버킷 상한 — 관리 창은 하루 단위로 나눠 묻지만 월 단위 조회·검색은 느리다 | `dispatch_history.py` 가 파일 glob | oam-svc `ptt_index`(일별 jsonl 읽기 모델)를 CSC 도 읽거나, CSC 가 자기 일별 인덱스를 두는 안. 통화(volte) 쪽은 인덱스가 없다 |
-| T4 | 구성원 일괄 가져오기(CSV) 를 관제 앱 관리 API 에도 — 콘솔 `POST /api/v1/users/import` 와 같은 형식 | 앱은 건별 입력만 | `POST /provisioning/directory/members/import`(같은 파서 재사용, 범위 게이트) |
+| T3 | 이력 스캔 48 시간 버킷 상한 — 관리 창은 하루 단위로 나눠 묻지만 월 단위 조회·검색은 느리다 | PTT 창 조회·세션 상세는 OAM 세션 인덱스(`/api/v1/ptt/sessions`·`/ptt/history`)를 프록시한다(csc 0.2.112). **통화(volte) 쪽은 여전히 `dispatch_history.py` 파일 glob** | volte 도 oam-svc 의 `/api/v1/call/logs` 를 범위 게이트 뒤에서 프록시하거나, CSC 가 자기 일별 인덱스를 두는 안 |
 | T5 | 회선 여러 개인 구성원 — 관리 API 는 종류당 첫 회선만 노출/편집 | `_members_in_scope` 첫 행 | 필요하면 `volte[]`/`ptt[]` 배열로 계약 확장(앱 폼도) |
 | T6 | 관제 그룹 편성 자체(멤버·대표번호·감청/청취/관리 범위)는 여전히 콘솔 전용 | 설계상 승인 사항(manager) | 유지. 앱에서 필요해지면 별도 인가 축으로 검토 |
-| T7 | `directory_admin` 을 CSP 도 알아야 하는가 | CSP 는 관제 그룹 속성을 인메모리 맵으로 든다(§3.3) — 관리 범위는 CSC 만 판정하므로 **불필요**. `DISPATCH_GROUP_CHANGED` 재적재 시 모르는 컬럼은 무시됨 | 없음(확인만) |
-| T9 | **CSC 가 `access_services` 미러를 못 본다** — OAM helper(`services/access_services.py`)는 미러 `modules/csp/runtime/collections/access_services/` 를 "CSC 의 유일한 경로" 로 적지만, CSC 의 `ha_lookup.collection_dir` 은 자기 runtime(`modules/csc/runtime/collections/csp/…`)을 보므로 표준 배포에서도 항상 빈 목록 → csc.json 폴백 | `_service_realm`(admin.py)·`_services`(dispatch_directory.py) 둘 다 폴백으로만 동작 중. 이름은 `Provisioning.Services.<kind>.name` 으로 메웠다(§2-6) | 미러를 CSC 가 실제로 읽게 하거나(경로 계약 정정), 아니면 helper 주석·runtime_store_v2 문서를 "CSC 는 csc.json 규약" 으로 정정. 둘 중 하나로 문서·코드를 일치시킨다 |
 | T8 | Android 관제 태블릿·SDK Kotlin 파사드에 `CscClient.request`·`DispatchProfile.directoryAdmin/orgCode` 반영 | SWIG `cimsue.i` 는 `csc.h` 를 포함하지 않는다 | Android 관리 화면 착수 시 |

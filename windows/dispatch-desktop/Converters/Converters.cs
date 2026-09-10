@@ -160,3 +160,11 @@ public sealed class ScaleToLengthConverter : IMultiValueConverter
     }
     public object[] ConvertBack(object v, Type[] t, object? p, CultureInfo c) => throw new NotSupportedException();
 }
+
+/// <summary>출력 라우트(bool RouteIsSpeaker) → 아이콘 지오메트리(Icon.Speaker / Icon.Headphones). 🎧/🔊 글리프 대신 Path 로 그린다.</summary>
+public sealed class RouteIconConverter : IValueConverter
+{
+    public object Convert(object? value, Type t, object? p, CultureInfo c)
+        => Application.Current?.TryFindResource(value is true ? "Icon.Speaker" : "Icon.Headphones") ?? System.Windows.Media.Geometry.Empty;
+    public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotSupportedException();
+}

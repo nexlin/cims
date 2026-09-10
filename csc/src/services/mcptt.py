@@ -2846,8 +2846,14 @@ def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: st
     media_security = str(svc.get('media_srtp') or 'off').lower()
     if media_security not in ('off', 'optional', 'required'):
         media_security = 'off'
+    # 접속서비스 능력 — 단말이 기능 노출을 결정하는 서버측 사실. smsGateway = 외부망 휴대전화 SMS/LMS 게이트웨이
+    #   (IBCF→SMSC TS 24.341 / SMPP) 연결 여부(dispatch_desktop_ui.md §4.3 — 외부 번호 [문자] 활성 조건). CIMS 는 게이트웨이를
+    #   내장하지 않으므로 기본 false; 등록 가입자 간 MESSAGE 전달은 이 값과 무관하다.
+    sms_gw = svc.get('sms_gateway', False)
+    capabilities = {"smsGateway": sms_gw is True or str(sms_gw).lower() == 'true'}
     profile = {
         "kind": kind,
+        "capabilities": capabilities,
         "sip": {
             "host": svc.get('host') or host_ip,     # 빈값 → 요청 Host(올인원). 다중노드면 CSP/PSP VIP.
             # port/transport = 기본값의 유효 쌍. 목록을 모르는 구 단말이 이 두 필드만 읽으므로 유지한다.
@@ -2963,6 +2969,14 @@ def dispatch_discovery(cur, user_id) -> Optional[dict]:
     members = [{"userId": uid, "name": name or "", "volteAor": _tel_uri(vid),
                 "pttId": _tel_uri(pid) if pid else "", "extension": _extension_of(vid), "groupId": mg or ""}
                for uid, name, vid, mg, pid in cur.fetchall()]
+    if scope == 'all':
+        # PTT 전용 가입자(VoLTE 회선 없음 — 현장 PTT 단말)도 전 범위에서는 감시 대상이다: 관제 앱이 그 PTT 회선에
+        #   dialog 를 구독해 타인 간 사설콜·애드혹 세션을 본다(dispatch_center.md §5.6a). volteAor 는 빈 문자열.
+        cur.execute("SELECT u.id, u.name, MIN(p.id) FROM ptt_subscriptions p JOIN users u ON u.id=p.user_id "
+                    "WHERE NOT EXISTS (SELECT 1 FROM volte_subscriptions v WHERE v.user_id=u.id) "
+                    "GROUP BY u.id, u.name ORDER BY MIN(p.id)")
+        members += [{"userId": uid, "name": name or "", "volteAor": "", "pttId": _tel_uri(pid),
+                     "extension": _extension_of(pid), "groupId": ""} for uid, name, pid in cur.fetchall()]
     # pttTargets
     if ptt_listen == 'all':
         cur.execute("SELECT mcptt_group_id, name FROM ptt_groups ORDER BY mcptt_group_id")

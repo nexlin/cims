@@ -1,6 +1,7 @@
 import { AlertTriangle, Maximize2, Play } from 'lucide-react'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { recordingsApi, type RecordingSegment } from '../api/recordings'
+import { fetchMediaReady } from './useInlineAudio'
 import { Button } from '@core/components/ui/button'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { Badge } from '@core/components/ui/badge'
@@ -44,40 +45,6 @@ function fmtMs(ms: number): string {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
-/**
- * 세그먼트 변환 완료까지 대기.
- * 서버는 재생 요청(GET audio|video) 시 raw → mp4 변환을 비동기 시작하고
- * 변환 중에는 202(transcoding), 완료되면 200 을 반환한다. 같은 URL 을 폴링하여
- * 200 이 될 때까지 기다린 뒤 호출자가 미디어 element 에 src 를 지정한다.
- * (본문은 받지 않고 상태코드만 확인 — element 가 다시 요청해 재생.)
- */
-async function waitSegmentReady(url: string, signal: AbortSignal): Promise<void> {
-  const deadline = Date.now() + 120_000
-  let first = true
-  while (Date.now() < deadline) {
-    if (signal.aborted) return
-    const res = await fetch(url, { method: 'GET', signal, credentials: 'same-origin' })
-    if (res.status === 200) {
-      try { await res.body?.cancel() } catch { /* noop */ }
-      return
-    }
-    if (res.status === 202) {
-      try { await res.body?.cancel() } catch { /* noop */ }
-      await new Promise(r => setTimeout(r, first ? 700 : 1500))
-      first = false
-      continue
-    }
-    // failed 등 — 서버가 사유(message/reason)를 주면 그대로 표기
-    let detail = ''
-    try {
-      const body = await res.json()
-      detail = body?.message || body?.reason || body?.error || ''
-    } catch { /* noop */ }
-    throw new Error(detail || `재생 준비 실패 (HTTP ${res.status})`)
-  }
-  throw new Error('변환 시간 초과')
-}
-
 export default function SegmentPlayer({ segments, recordingId, callType, caller, callee, onClose, compact, onMaximize }: SegmentPlayerProps) {
   // 재생 가능한 세그먼트만 (recording 상태 제외)
   const playable = segments.filter(s => s.status !== 'recording')
@@ -96,6 +63,8 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
   const audioRef = useRef<HTMLAudioElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const readySeqs = useRef<Set<number>>(new Set(playable.filter(s => s.status === 'ready').map(s => s.seq)))
+  // 받아 둔 세그먼트 Blob URL (url → blob:) — 인증 fetch 결과라 element 가 다시 요청하지 않는다. 언마운트 시 해제.
+  const blobUrls = useRef<Map<string, string>>(new Map())
   const prepAbort = useRef<AbortController | null>(null)
   const activeRowRef = useRef<HTMLTableRowElement | null>(null)
 
@@ -114,33 +83,26 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
     const el = seg.has_video ? videoRef.current : audioRef.current
     if (!el) return
     const url = getMediaUrl(seg)
-    if (readySeqs.current.has(seg.seq) || seg.status === 'ready') {
+    const cached = blobUrls.current.get(url)
+    if (cached) {
       setPreparingSeq(null); setPrepError('')
-      if (el.getAttribute('src') !== url) el.src = url
+      if (el.getAttribute('src') !== cached) el.src = cached
       if (autoplay) el.play().catch(() => {})
       return
     }
     prepAbort.current?.abort()
     const ac = new AbortController()
     prepAbort.current = ac
-    setPrepError(''); setPreparingSeq(seg.seq)
+    setPrepError('')
+    if (!(readySeqs.current.has(seg.seq) || seg.status === 'ready')) setPreparingSeq(seg.seq)
     try {
-      if (seg.status === 'failed') {
-        // 재시도 priming 1회 — 실패 마커 해제+재변환 큐잉. 이후엔 일반 폴링(반복 재큐잉 방지).
-        const res = await fetch(`${url}${url.includes('?') ? '&' : '?'}retry=1`,
-          { method: 'GET', signal: ac.signal, credentials: 'same-origin' })
-        if (res.status !== 200 && res.status !== 202) {
-          let detail = ''
-          try { const b = await res.json(); detail = b?.message || b?.reason || '' } catch { /* noop */ }
-          throw new Error(detail || `재생 준비 실패 (HTTP ${res.status})`)
-        }
-        try { await res.body?.cancel() } catch { /* noop */ }
-      }
-      await waitSegmentReady(url, ac.signal)
-      if (ac.signal.aborted) return
+      // failed 세그먼트는 첫 요청에 retry=1 — 실패 마커 해제+재변환 큐잉. 이후엔 일반 폴링(반복 재큐잉 방지).
+      const objUrl = await fetchMediaReady(url, ac.signal, { retry: seg.status === 'failed' })
+      if (ac.signal.aborted) { URL.revokeObjectURL(objUrl); return }
       readySeqs.current.add(seg.seq)
+      blobUrls.current.set(url, objUrl)
       setPreparingSeq(null)
-      el.src = url
+      el.src = objUrl
       if (autoplay) el.play().catch(() => {})
     } catch (e) {
       if (!ac.signal.aborted) {
@@ -158,8 +120,12 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIdx, playToken, current?.seq])
 
-  // 언마운트 시 진행 중 폴링 취소
-  useEffect(() => () => { prepAbort.current?.abort() }, [])
+  // 언마운트 시 진행 중 폴링 취소 + Blob URL 해제
+  useEffect(() => () => {
+    prepAbort.current?.abort()
+    blobUrls.current.forEach(u => URL.revokeObjectURL(u))
+    blobUrls.current.clear()
+  }, [])
 
   // 재생 세그먼트 변경 시 목록에서 현재 행이 보이도록 자동 스크롤
   useEffect(() => {

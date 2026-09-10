@@ -112,9 +112,6 @@ export const recordingsApi = {
   audioUrl: (id: string) =>
     `/api/v1/recordings/${encPath(id)}/audio`,
 
-  videoUrl: (id: string, side: 'a' | 'b' = 'a') =>
-    `/api/v1/recordings/${encPath(id)}/video?side=${side}`,
-
   // slot 미지정 = 믹스(동시 발언 화자 전원 합성 — 실제로 들린 소리).
   // slot=K = 슬롯 K 화자 단독본 (화자 식별·증거용).
   segmentAudioUrl: (id: string, seq: number, slot?: number) =>

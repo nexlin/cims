@@ -14,7 +14,7 @@
         <TextBlock Text="비밀번호" Style="{StaticResource Hint}" />
         <PasswordBox x:Name="Pw" Style="{StaticResource FieldPw}" Margin="0,2,0,10" PasswordChanged="Pw_Changed" KeyDown="Pw_KeyDown" />
         <CheckBox Content="자동 로그인 (refresh token 만 이 PC 에 보관)" IsChecked="{Binding AutoLogin}" Margin="0,0,0,10" />
-        <Button Content="고급 ▾" Command="{Binding ToggleAdvancedCommand}" HorizontalAlignment="Left" Background="Transparent" BorderThickness="0" Padding="0" Cursor="Hand" Foreground="{DynamicResource Brush.Muted}" />
+        <Button Style="{StaticResource Btn.Link}" Command="{Binding ToggleAdvancedCommand}" HorizontalAlignment="Left"><StackPanel Orientation="Horizontal"><TextBlock Text="고급" /><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.ChevronDown}" Width="11" Height="11" Margin="3,0,0,0" /></StackPanel></Button>
         <StackPanel Visibility="{Binding Advanced, Converter={StaticResource BoolToVis}}" Margin="0,6,0,0">
             <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="8" /><ColumnDefinition Width="90" /></Grid.ColumnDefinitions>

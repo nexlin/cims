@@ -8,7 +8,7 @@
 import { Pause, Play } from 'lucide-react'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { recordingsApi, type RecordingSegment, type SegmentTrack } from '../api/recordings'
-import { waitSegmentReady } from './useInlineAudio'
+import { fetchMediaReady, setMediaSrc } from './useInlineAudio'
 import { Button } from '@core/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { fromSel, toSel } from '@core/components/custom/select-value'
@@ -81,10 +81,10 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
     setErr(''); setPrep(true)
     ;(async () => {
       try {
-        await waitSegmentReady(url, ac.signal)
-        if (ac.signal.aborted) return
+        const objUrl = await fetchMediaReady(url, ac.signal)
+        if (ac.signal.aborted) { URL.revokeObjectURL(objUrl); return }
         setPrep(false)
-        el.src = url
+        setMediaSrc(el, objUrl)
         if (wasPlaying) el.play().catch(() => {})
       } catch (e) {
         if (!ac.signal.aborted) {
@@ -97,7 +97,11 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recordingId, segment.seq, sel])
 
-  useEffect(() => () => { abortRef.current?.abort() }, [])
+  useEffect(() => () => {
+    abortRef.current?.abort()
+    const src = audioRef.current?.getAttribute('src')
+    if (src && src.startsWith('blob:')) URL.revokeObjectURL(src)
+  }, [])
 
   const toggle = () => {
     const el = audioRef.current

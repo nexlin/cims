@@ -17,19 +17,21 @@
     <c:NullToVisibilityConverter x:Key="NullToVis" />
     <c:NotNullToVisibilityConverter x:Key="NotNullToVis" />
     <c:RegStateToBrushConverter x:Key="RegBrush" />
+    <c:RouteIconConverter x:Key="RouteIcon" />
     <c:RatioToLengthConverter x:Key="RatioLen" />
     <c:ScaleToLengthConverter x:Key="ScaleLen" />
     <BooleanToVisibilityConverter x:Key="B2V" />
 
-    <FontFamily x:Key="Font.Ui">Pretendard, Malgun Gothic, Segoe UI, sans-serif</FontFamily>
-    <FontFamily x:Key="Font.Mono">Cascadia Mono, Consolas, D2Coding, monospace</FontFamily>
+    <FontFamily x:Key="Font.Ui">Noto Sans KR, Pretendard, Malgun Gothic, Segoe UI, sans-serif</FontFamily>
+    <FontFamily x:Key="Font.Mono">JetBrains Mono, Cascadia Mono, Consolas, D2Coding, monospace</FontFamily>
 
     <Style TargetType="Window" x:Key="Window.Base">
         <Setter Property="FontFamily" Value="{StaticResource Font.Ui}" />
-        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontSize" Value="13" />
         <Setter Property="Background" Value="{DynamicResource Brush.Bg}" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
-        <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
+        <Setter Property="TextOptions.TextFormattingMode" Value="Ideal" />
+        <Setter Property="TextOptions.TextRenderingMode" Value="ClearType" />
         <Setter Property="UseLayoutRounding" Value="True" />
     </Style>
 
@@ -60,18 +62,11 @@
 
     <!-- 패널 (도킹 단위) -->
     <Style TargetType="Border" x:Key="Pnl">
-        <Setter Property="Background" Value="{DynamicResource Brush.Bg}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="8" />
-        <Setter Property="SnapsToDevicePixels" Value="True" />
-    </Style>
-    <Style TargetType="Border" x:Key="PanelHeader">
         <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
         <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
-        <Setter Property="BorderThickness" Value="0,0,0,1" />
-        <Setter Property="Height" Value="40" />
-        <Setter Property="Padding" Value="6,0,10,0" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
     </Style>
     <!-- 소구획 -->
     <Style TargetType="Border" x:Key="Sub">
@@ -174,7 +169,45 @@
         <Setter Property="Padding" Value="7,0" />
         <Setter Property="FontSize" Value="11.5" />
     </Style>
-    <!-- 세그먼트 토글 -->
+    <!-- 평면 버튼(.link/.chip 래퍼) — 크롬 없음. 기본 WPF 템플릿은 Background=Transparent 여도 호버에 사각 음영을 그려 칩 모양과 어긋난다 -->
+    <Style TargetType="Button" x:Key="Btn.Flat">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" RecognizesAccessKey="True" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45" /></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <!-- 글자 링크형 평면 버튼 — 호버에 글자색만 진해진다 -->
+    <Style TargetType="Button" x:Key="Btn.Link" BasedOn="{StaticResource Btn.Flat}">
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Muted}" />
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{DynamicResource Brush.Text}" /></Trigger>
+        </Style.Triggers>
+    </Style>
+    <Style TargetType="Button" x:Key="Btn.Ghost" BasedOn="{StaticResource Btn}">
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Muted}" />
+    </Style>
+    <Style TargetType="Button" x:Key="Btn.Xs.Ghost" BasedOn="{StaticResource Btn.Ghost}">
+        <Setter Property="Height" Value="22" />
+        <Setter Property="Padding" Value="7,0" />
+        <Setter Property="FontSize" Value="11.5" />
+    </Style>
+    <!-- 세그먼트 토글(예시 .seg) — 바깥 진한 테두리 한 겹, 선택 = Primary 연한 배경 + Primary 글자 -->
     <Style TargetType="RadioButton" x:Key="Seg">
         <Setter Property="Foreground" Value="{DynamicResource Brush.Muted}" />
         <Setter Property="FontSize" Value="12" />
@@ -182,13 +215,16 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
-                    <Border x:Name="Bd" Background="Transparent" Padding="9,3" CornerRadius="6">
+                    <Border x:Name="Bd" Background="Transparent" Padding="10,0" Height="24">
                         <ContentPresenter VerticalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Hover}" />
+                        </Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Surface}" />
-                            <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Primary}" />
                             <Setter Property="FontWeight" Value="SemiBold" />
                         </Trigger>
                     </ControlTemplate.Triggers>
@@ -197,23 +233,47 @@
         </Setter>
     </Style>
     <Style TargetType="Border" x:Key="SegGroup">
-        <Setter Property="Background" Value="{DynamicResource Brush.Surface2}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="8" />
-        <Setter Property="Padding" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="ClipToBounds" Value="True" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
     </Style>
 
     <!-- 배지 -->
+    <!-- 배지(예시 .badge) — 18px 각진 라벨(모서리 4), 연한 배경 + 진한 글자. 알약형 아님 -->
     <Style TargetType="Border" x:Key="Badge">
-        <Setter Property="CornerRadius" Value="999" />
-        <Setter Property="Padding" Value="8,2" />
-        <Setter Property="Margin" Value="0,0,6,0" />
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Padding" Value="6,1" />
+        <Setter Property="Margin" Value="0,0,4,0" />
         <Setter Property="VerticalAlignment" Value="Center" />
         <Setter Property="Background" Value="{DynamicResource Brush.Surface2}" />
         <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Muted}" />
         <Setter Property="TextElement.FontSize" Value="11" />
         <Setter Property="TextElement.FontWeight" Value="SemiBold" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+    </Style>
+    <!-- .badge.own — 중립, 본문색 글자 -->
+    <Style TargetType="Border" x:Key="Badge.Own" BasedOn="{StaticResource Badge}">
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Text}" />
+    </Style>
+    <!-- .badge.temp — 임시(애드혹) -->
+    <Style TargetType="Border" x:Key="Badge.Temp" BasedOn="{StaticResource Badge}">
+        <Setter Property="Background" Value="{DynamicResource Brush.HeldSoft}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Held}" />
+    </Style>
+    <!-- .badge.pin — 외곽선 + 모노(핀 번호·핫키) -->
+    <Style TargetType="Border" x:Key="Badge.Pin" BasedOn="{StaticResource Badge}">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="5,0" />
+        <Setter Property="TextElement.FontFamily" Value="{StaticResource Font.Mono}" />
+        <Setter Property="TextElement.FontWeight" Value="Medium" />
+        <Setter Property="TextElement.FontSize" Value="10.5" />
     </Style>
     <Style TargetType="Border" x:Key="Badge.Pilot" BasedOn="{StaticResource Badge}">
         <Setter Property="Background" Value="{DynamicResource Brush.RingSoft}" />
@@ -240,30 +300,61 @@
         <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Primary}" />
     </Style>
     <Style TargetType="Border" x:Key="Badge.Emg" BasedOn="{StaticResource Badge}">
+        <Setter Property="Background" Value="{DynamicResource Brush.EmgSoft}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Emg}" />
+    </Style>
+    <!-- 채움형 긴급(배너·고정 행처럼 강하게 알릴 곳) -->
+    <Style TargetType="Border" x:Key="Badge.Emg.Solid" BasedOn="{StaticResource Badge}">
         <Setter Property="Background" Value="{DynamicResource Brush.Emg}" />
         <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.OnAccent}" />
     </Style>
 
     <!-- 칩 · 알약 -->
+    <!-- .chip — 24px, 연한 배경, 테두리 없음(상단 바 상태 칩·스레드 칩) -->
     <Style TargetType="Border" x:Key="Pill">
-        <Setter Property="CornerRadius" Value="999" />
-        <Setter Property="Padding" Value="10,3" />
+        <Setter Property="CornerRadius" Value="12" />
+        <Setter Property="Padding" Value="9,3" />
         <Setter Property="Background" Value="{DynamicResource Brush.Surface2}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
-        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="BorderThickness" Value="0" />
         <Setter Property="VerticalAlignment" Value="Center" />
         <Setter Property="Margin" Value="0,0,8,0" />
-        <Setter Property="TextElement.FontSize" Value="13" />
+        <Setter Property="TextElement.FontSize" Value="12" />
+        <Setter Property="TextElement.FontWeight" Value="Medium" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
     </Style>
+    <!-- .chip.ghost — 외곽선만 -->
+    <Style TargetType="Border" x:Key="Pill.Ghost" BasedOn="{StaticResource Pill}">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Muted}" />
+    </Style>
+    <!-- .mchip — 관제 그룹원 띠: 라운드 사각(모서리 7), 연한 바탕 + 테두리, 상태 = 테두리색·연한 배경 -->
+    <Style TargetType="Border" x:Key="MemberChip">
+        <Setter Property="CornerRadius" Value="7" />
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="Padding" Value="10,0" />
+        <Setter Property="Background" Value="{DynamicResource Brush.BgSoft}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Margin" Value="0,0,6,6" />
+        <Setter Property="TextElement.FontSize" Value="12" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource Brush.Hover}" /></Trigger>
+        </Style.Triggers>
+    </Style>
+    <!-- .m / .tchip — 22px 로스터·대상 칩: 연한 바탕 + 테두리, 상태색은 쓰는 곳의 트리거가 덮는다 -->
     <Style TargetType="Border" x:Key="Chip">
-        <Setter Property="CornerRadius" Value="999" />
-        <Setter Property="Padding" Value="9,3" />
-        <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
+        <Setter Property="CornerRadius" Value="11" />
+        <Setter Property="Padding" Value="8,2" />
+        <Setter Property="Background" Value="{DynamicResource Brush.BgSoft}" />
         <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Margin" Value="0,0,5,5" />
         <Setter Property="TextElement.FontSize" Value="12" />
-        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Muted}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Text}" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
     </Style>
 
     <!-- 점 -->
@@ -301,9 +392,9 @@
         <Setter Property="Height" Value="30" />
         <Setter Property="Padding" Value="8,0" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
-        <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.BgSoft}" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="FontSize" Value="13" />
         <Setter Property="CaretBrush" Value="{DynamicResource Brush.Text}" />

@@ -323,6 +323,78 @@ class HistoryWindowTests(unittest.TestCase):
         self.assertEqual(dh.format_item({"kind": "call", "ts": "t", "id": "x"})["recordingId"], "")
 
 
+class MembersImportTests(unittest.TestCase):
+    """POST members/import — CSV/JSON 행 → _member_write POST 와 같은 경로. 행 단위 결과, 한 행 실패가 다른 행을 막지 않는다."""
+
+    def test_csv_header_normalisation_and_kinds(self):
+        rows = dd._import_rows_from_csv(
+            "\ufeffName,Org,Login_Id,Password,VoLTE_MSISDN,volte-password,ptt_msisdn,PTT_Service_Ref,ptt_sip_transport\n"
+            "관제3석,TEAM01,disp03,pw3,+821310001003,sip3,+82510001003,mcptt,TLS\n"
+            "\n"
+            "현장D,TEAM02,,,,,+82510002004,,\n")
+        self.assertEqual(rows, [
+            {"name": "관제3석", "org": "TEAM01", "loginId": "disp03", "password": "pw3",
+             "volte": {"msisdn": "+821310001003", "password": "sip3"},
+             "ptt": {"msisdn": "+82510001003", "serviceRef": "mcptt", "sipTransport": "TLS"}},
+            {"name": "현장D", "org": "TEAM02", "ptt": {"msisdn": "+82510002004"}},
+        ])
+
+    def test_import_calls_member_write_per_row_and_reports(self):
+        calls = []
+
+        async def fake_write(cur, config, scope, method, parts, body, actor, ip, my_uid):
+            calls.append((method, parts, body))
+            if body["name"] == "bad":
+                return dd._json(403, {"error": "out_of_scope", "org": body.get("org")})
+            return dd._json(201, {"userId": 100 + len(calls)})
+        saved = dd._member_write
+        dd._member_write = fake_write
+        try:
+            r = asyncio.run(dd._members_import(None, {}, {"all": True}, "name,org\nA,T1\nbad,T9\nB,T1\n", "+82131", "ip", 1))
+            self.assertEqual(r.status, 200)
+            self.assertEqual((r.body["created"], r.body["failed"]), (2, 1))
+            self.assertEqual([x["status"] for x in r.body["results"]], [201, 403, 201])
+            self.assertEqual(r.body["results"][1], {"row": 2, "status": 403, "error": "out_of_scope", "org": "T9"})
+            self.assertEqual([m for m, _p, _b in calls], ["POST"] * 3)
+            self.assertEqual(calls[0][1], ())
+            # JSON rows — 같은 경로, name 없는 행은 호출 없이 400
+            r = asyncio.run(dd._members_import(None, {}, {}, {"rows": [{"name": "C", "org": "T1"}, {"org": "T1"}]}, "a", "ip", 1))
+            self.assertEqual([x["status"] for x in r.body["results"]], [201, 400])
+            self.assertEqual(r.body["results"][1]["error"], "name_required")
+            self.assertEqual(len(calls), 4)
+            # 빈 CSV / 잘못된 본문 / 행 수 상한
+            self.assertEqual(asyncio.run(dd._members_import(None, {}, {}, "name,org\n", "a", "ip", 1)).status, 400)
+            self.assertEqual(asyncio.run(dd._members_import(None, {}, {}, 42, "a", "ip", 1)).status, 400)
+            self.assertEqual(asyncio.run(dd._members_import(None, {}, {}, {"rows": [{"name": "x"}] * 501}, "a", "ip", 1)).status, 413)
+        finally:
+            dd._member_write = saved
+
+
+class OamServiceTokenTests(unittest.TestCase):
+    """CSC → OAM 프록시 자격 — 공유 CimsAuth.JwtSecret 로 서명한 단기 서비스 토큰(role=monitor). OAM 이력·녹취 API 의
+    require_role 게이트를 그대로 통과해야 하므로 클레임 형태(sub/login_id/role)는 콘솔 admin JWT 와 같다."""
+
+    def test_service_token_claims_and_headers(self):
+        import jwt
+        from services import admin_auth as aa
+        saved = aa._SECRET
+        try:
+            aa.init({"CimsAuth": {"JwtSecret": "unit-secret"}})
+            h = dr._oam_headers("application/json")
+            self.assertEqual(h["Accept"], "application/json")
+            self.assertTrue(h["Authorization"].startswith("Bearer "))
+            claims = jwt.decode(h["Authorization"][7:], "unit-secret", algorithms=["HS256"])
+            self.assertEqual((claims["sub"], claims["role"], claims["svc"]), ("csc", "monitor", "csc"))
+            self.assertGreater(claims["exp"], claims["iat"])
+            self.assertLessEqual(claims["exp"] - claims["iat"], 120)
+            # OAM 쪽 검증 함수와 같은 규칙 — 다른 시크릿이면 무효
+            with self.assertRaises(Exception):
+                jwt.decode(h["Authorization"][7:], "other", algorithms=["HS256"])
+            self.assertEqual(aa.role_rank(claims["role"]), aa.role_rank("monitor"))
+        finally:
+            aa._SECRET = saved
+
+
 class RecordingsTests(unittest.TestCase):
     def test_parts(self):
         self.assertEqual(dr._parts("/provisioning/recordings/ptt/24/2026/09/07/10/S1_1"),
