@@ -474,10 +474,22 @@ if [[ "$MODE" == "fresh" ]]; then
     echo "==> sudoers + linger 등록"
     bash "$SETUP_SUDOERS"
 
-    # linger 직후 사용자 런타임 디렉터리(/run/user/UID)가 뜰 때까지 잠깐 대기
+    # linger 직후에는 user@<uid>.service 가 아직 `systemctl --user` 에 응답하지 않는다.
+    # **디렉터리 존재는 준비 완료가 아니다** — /run/user/<uid> 가 생긴 뒤에도 매니저·D-Bus
+    # 소켓이 올라오기 전이면 실패한다(2026-09-10 media02 실측: 디렉터리는 linger 를 켠 그
+    # 순간 생겼는데 설치는 바로 "systemd --user 사용 불가" 로 죽었다 — Linger=yes 인데도).
+    # 그래서 디렉터리가 아니라 **실제로 응답하는지**를 기다린다. 확실하게 하려고 user
+    # 매니저를 명시적으로 깨운 뒤 기다린다.
     XRD="/run/user/$SVC_UID"
-    for _i in $(seq 1 20); do [[ -d "$XRD" ]] && break; sleep 0.3; done
     _user_sc() { runuser -u "$SVC_USER" -- env XDG_RUNTIME_DIR="$XRD" systemctl --user "$@"; }
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl start "user@$SVC_UID.service" >/dev/null 2>&1 || true
+        for _i in $(seq 1 40); do                     # 0.5s × 40 = 최대 20초
+            _user_sc show-environment >/dev/null 2>&1 && break
+            [[ $_i -eq 1 ]] && echo "  systemd --user 기동 대기 (linger 직후 — 최대 20초)"
+            sleep 0.5
+        done
+    fi
 
     # (2) enrollment — 서비스 계정으로 state.json 생성
     if [[ -f "$STATE_DIR/state.json" ]]; then
@@ -506,6 +518,8 @@ if [[ "$MODE" == "fresh" ]]; then
         echo "✗ systemd --user 사용 불가 (XDG_RUNTIME_DIR=$XRD) — linger/세션 확인 필요." >&2
         echo "  CIMS agent 정책: die 시 자동 재기동 + host 재기동 시 자동 기동 — systemd --user + linger 필수." >&2
         echo "  (systemd 없는 환경이면 --no-systemd 로 enroll 까지만 수행하고 nohup 으로 기동하세요.)" >&2
+        echo "  linger 를 방금 켠 경우라면 잠시 뒤 이 스크립트를 다시 실행하면 됩니다 —" >&2
+        echo "  enroll 은 이미 끝나 있어 건너뛰고 unit 작성부터 이어집니다." >&2
         exit 1
     fi
     USER_UNIT_DIR="$SVC_HOME/.config/systemd/user"

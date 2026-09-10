@@ -82,6 +82,24 @@ fi
 tb_require_root
 tb_init_dirs
 
+# ── dpkg 가 깨끗한지 먼저 ─────────────────────────────────────
+# dpkg 가 반쯤 멈춘 상태(--configure 미완, "in a mess" 패키지)에서는 apt 가 **무엇을 해도
+# 거부**한다. 그런데 그 사실이 여기서 드러나지 않고 한참 뒤 의존 오류 목록으로만 보여서
+# "반입 deb 가 부족한가" 로 오해하게 된다(2026-09-10 실측: libwrap0 가 mess 상태였는데
+# `mariadb-server Depends libwrap0` 연쇄로만 나타났다). 먼저 짚고 멈춘다.
+_audit="$(dpkg --audit 2>/dev/null || true)"
+if [[ -n "$_audit" ]]; then
+    err "dpkg 가 깨끗하지 않습니다 — apt 는 이 상태에서 아무것도 설치하지 못합니다"
+    echo "$_audit" | sed 's/^/        /' >&2
+    die_hint "먼저 dpkg 상태를 정리하세요" \
+        "  sudo dpkg --configure -a" \
+        "그래도 'in a mess' 가 남으면 그 패키지를 다시 설치해야 합니다:" \
+        "  sudo apt-get install --reinstall <패키지>            (인터넷 되는 장비)" \
+        "  폐쇄망이면 반입한 .deb 로: sudo dpkg -i offline/debs/*/<패키지>_*.deb" \
+        "정리 뒤 이어서: sudo ./tb-install.sh --role $ROLE --from 05"
+fi
+ok "dpkg 상태 깨끗함"
+
 # ── ③ 설치 ────────────────────────────────────────────────────
 installed=0
 # 로컬 저장소는 **debs/* 전체**를 붙인다 — 설치 대상은 이 set 이지만, apt 는 시스템 전체의
@@ -141,6 +159,31 @@ if [[ ${#repo_dirs[@]} -gt 0 ]] && [[ ${#targets[@]} -gt 0 ]] \
 fi
 
 if [[ $installed -eq 0 ]]; then
+    # dpkg 직접 설치는 **기본으로 하지 않는다.**
+    #
+    # dpkg 는 의존을 해소하지 못하고 순서대로 풀다 중간에서 멈춘다. 그러면 시스템이
+    # **반쯤 설치된 상태**로 남는다 — 실측(2026-09-10, media02): perl 계열이 버전이 섞여
+    # (libperl5.40 0.3 / perl-modules 0.1 / perl 없음) `dpkg was interrupted` 로 잠기고,
+    # 이후 apt 조작이 전부 거부됐다. **깔끔한 실패를 망가진 시스템으로 바꾸는 것**이라
+    # 이득보다 손해가 크다. MariaDB 의존 폐쇄집합에는 opensysusers 처럼 systemd 와 충돌하는
+    # 것도 들어와서 성공 확률 자체가 낮다.
+    #
+    # 정공법은 apt 가 왜 실패했는지 고치는 것이다 — 부족한 .deb 를 반입에 추가하거나,
+    # 대상 장비의 깨진 의존을 `debs/apt-repair/` 로 메운다.
+    if [[ "${TB_ALLOW_DPKG_FALLBACK:-0}" != "1" ]]; then
+        die_hint "apt 경로가 실패했습니다 — dpkg 직접 설치는 기본으로 시도하지 않습니다" \
+            "로그에서 **맨 앞의 Err: 줄**과 unmet dependencies 를 함께 보세요:" \
+            "  $TB_LOG_DIR/05-apt-$DEB_SET.log" \
+            "  · 'not installable'          = 어디에도 없다 → 반입에 추가해야 한다" \
+            "  · 'not going to be installed' = 있는데 다른 원인의 연쇄다" \
+            "부족한 패키지는 빌드 장비에서 추가 수집:" \
+            "  deployment/tb/tools/tb-fetch-debs.sh <패키지명>" \
+            "대상 장비의 의존이 이미 깨져 있으면 apt-repair 세트를 반입하세요:" \
+            "  deployment/tb/tools/tb-fetch-debs.sh apt-repair" \
+            "그래도 dpkg 로 밀어붙이려면(반쯤 설치될 수 있습니다):" \
+            "  sudo TB_ALLOW_DPKG_FALLBACK=1 ./tb-install.sh --role db --from 05"
+    fi
+    warn "TB_ALLOW_DPKG_FALLBACK=1 — dpkg 직접 설치를 시도합니다 (반쯤 설치될 수 있습니다)"
     info "[1/2] dpkg 직접 설치 — ${#debs[@]}개 ($DEB_SET)"
     # 한 번에 넘겨 서로의 의존을 dpkg 가 해소하게 한다. 개별 설치는 순서 문제로 실패한다.
     if ! DEBIAN_FRONTEND=noninteractive tb_run "05-dpkg-$DEB_SET" \
@@ -148,6 +191,8 @@ if [[ $installed -eq 0 ]]; then
         die_hint "설치 실패 — 의존 부족 또는 대체 제공자 충돌" \
             "로그의 'dependency problems' / 'conflicting' 줄을 보고 판단하세요:" \
             "  $TB_LOG_DIR/05-dpkg-$DEB_SET.log" \
+            "반쯤 설치됐을 수 있습니다 — 먼저 이것부터:" \
+            "  sudo dpkg --configure -a" \
             "부족한 패키지는 빌드 장비에서 추가 수집:" \
             "  deployment/tb/tools/tb-fetch-debs.sh <패키지명>"
     fi

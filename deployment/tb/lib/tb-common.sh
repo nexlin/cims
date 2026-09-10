@@ -54,9 +54,22 @@ tb_find_offline() {
     return 1
 }
 
+# sudo 로 돌리면 log/·state/ 에 생기는 파일이 **root 소유**가 된다. 그러면 정작 키트를
+# 소유한 계정이 자기 디렉토리를 지우지 못해, 재설치할 때마다 `sudo rm -rf` 가 필요해진다
+# (안내에도 없어서 `Permission denied` 로만 드러났다 — 2026-09-10 실측). 호출한 사용자에게
+# 되돌려 준다. state 는 0700 을 유지하므로 비밀값이 넓어지지는 않는다.
+tb_own_back() {
+    [[ -n "${SUDO_USER:-}" ]] || return 0
+    id -u "$SUDO_USER" >/dev/null 2>&1 || return 0
+    local g; g="$(id -gn "$SUDO_USER" 2>/dev/null || echo "$SUDO_USER")"
+    chown -R "$SUDO_USER:$g" "$@" 2>/dev/null || true
+    return 0
+}
+
 tb_init_dirs() {
     mkdir -p "$TB_STATE_DIR" "$TB_LOG_DIR"
     chmod 700 "$TB_STATE_DIR" 2>/dev/null || true
+    tb_own_back "$TB_STATE_DIR" "$TB_LOG_DIR"
 }
 
 # ── 사이트 설정 (tb-site.conf) ─────────────────────────────────
@@ -64,8 +77,29 @@ tb_init_dirs() {
 # 파일은 셸 할당문 목록이라 편집기로 직접 고쳐도 된다.
 tb_load_site() {
     if [[ -f "$TB_SITE_CONF" ]]; then
+        # 우선순위는 **환경 > 파일 > 질의** 다. 예전에는 그냥 source 해서 파일이 환경을
+        # 덮었다 — `TB_MODULES="cspsim" ./tb-install.sh` 가 조용히 무시되고 저장된 값으로
+        # 돌았다(실패도 경고도 없어서 왜 안 되는지 알 수 없다, 2026-09-10 실측).
+        # tb_ask 는 `${!key}` 를 먼저 보므로, 여기서 파일 값이 **이미 설정된 변수를 덮지
+        # 않게** 막으면 그 순서가 실제로 성립한다.
+        # 방식: 파일에 나오는 키 중 이미 값이 있는 것을 미리 적어 두고, source 뒤에 되돌린다.
+        # (직접 파싱하지 않는 이유 — 값에 공백·따옴표·$ 가 올 수 있어 셸에 맡기는 것이 맞다.)
+        local -a _pk=() _pv=()
+        local _k
+        while read -r _k; do
+            [[ "$_k" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+            [[ -n "${!_k:-}" ]] || continue
+            _pk+=("$_k"); _pv+=("${!_k}")
+        done < <(sed -nE 's/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=.*/\1/p' "$TB_SITE_CONF" | sort -u)
+
         # shellcheck disable=SC1090
         source "$TB_SITE_CONF"
+
+        local _i
+        for _i in ${_pk[@]+"${!_pk[@]}"}; do
+            printf -v "${_pk[$_i]}" '%s' "${_pv[$_i]}"
+        done
+        [[ ${#_pk[@]} -gt 0 ]] && info "환경으로 지정된 값 우선: ${_pk[*]}"
         _TB_SITE_LOADED=1
     fi
 }
@@ -373,6 +407,7 @@ tb_tee() {
     local shown
     shown="$(printf '%s' "$*" | sed -E 's/([A-Za-z_]*(PASS|PASSWORD|SECRET|TOKEN)[A-Za-z_]*)=[^ ]*/\1=********/g')"
     printf '\n=== %s — %s ===\n' "$(date '+%F %T')" "$shown" >> "$lf"
+    tb_own_back "$lf"          # tb_run 과 같은 사유 — 만든 자리에서 소유권 되돌리기
     "$@" 2>&1 | tee -a "$lf"
     return "${PIPESTATUS[0]}"
 }
@@ -382,6 +417,9 @@ tb_run() {
     local name="$1"; shift
     mkdir -p "$TB_LOG_DIR"
     local lf="$TB_LOG_DIR/${name}.log"
+    # 로그는 만든 자리에서 소유권을 되돌린다 — 단계가 끝난 뒤에 몰아서 하면 마지막 단계의
+    # 파일이 root 로 남아 그것만으로 디렉토리 삭제가 막힌다.
+    : >>"$lf"; tb_own_back "$lf"
     # rc 는 명령 **바로 뒤**에서 받는다. `if "$@"; then return 0; fi` 뒤의 `$?` 는
     # 그 if 문 자체의 상태(=0)라 실패 코드가 사라진다 — 그러면 호출부의
     # `tb_run … || die` 가 발동하지 않아 실패한 단계가 그대로 다음으로 넘어간다.

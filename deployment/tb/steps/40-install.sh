@@ -25,7 +25,10 @@ header "=== [40] 모듈 설치 ==="
 
 tb_ask TB_OAM_URL    "OAM 주소" "https://127.0.0.1:4419"
 tb_ask TB_ADMIN_PASS "콘솔 admin 비밀번호" "" secret
-tb_ask TB_MODULES    "설치할 모듈 (공백 구분)" "oam-svc cmp csc csp"
+# cspsim 은 **70 단계 호시험의 전제**다 — 기본에서 빠지면 all-in-one 으로 끝까지 돌려도
+# 호시험이 `cspsim 을 찾을 수 없습니다` 로 반드시 막힌다(2026-09-10 실측). 30 단계는 이미
+# 등록 대상에 넣고 있었는데 설치 목록에만 없었다. cmdp 는 기본 구성이 아니라 그대로 둔다.
+tb_ask TB_MODULES    "설치할 모듈 (공백 구분)" "oam-svc cmp csc csp cspsim"
 
 # OAM 호출은 화면에 그대로 내보내면서 log/40-install.log 에도 남긴다 — 현장에서
 # "무엇을 넣었고 무엇이 거부됐는지" 를 되짚을 기록이 이 단계에는 없었다.

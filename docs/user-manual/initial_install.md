@@ -513,6 +513,11 @@ curl -sk https://<관리IP>:4419/api/v1/deployments -H "Authorization: Bearer <�
 | `install.sh` 즉시 종료 | root 직접 로그인이거나 `sudo` 미경유. 일반 계정에서 `sudo ./install.sh`. 서비스 계정이 root 면 `--user` 로 일반 계정 지정 |
 | `install.sh` 가 서비스 계정으로 전환 후 실패 | 서비스 계정에 로그인 셸/home 이 없거나, 참조 파일이 그 계정이 못 읽는 경로(다른 사용자 home 등)에 있음 |
 | agent 설치 단계 실패 | `<prefix>/modules/oam/current/log/agent_install.log`. ⑥은 자기 OAM 에 HTTPS 로 붙는 단계라 OAM 기동 여부·포트를 먼저 본다 |
+| agent 설치가 `systemd --user 사용 불가 (XDG_RUNTIME_DIR=/run/user/<uid>)` 로 실패 | **linger 를 막 켠 직후의 경합**이다. linger 를 켜면 `user@<uid>.service` 가 뜨는데, `/run/user/<uid>` 디렉토리가 생긴 뒤에도 매니저가 `systemctl --user` 에 응답하기까지 시간이 더 걸린다 — `install-agent.sh` 는 **응답할 때까지** 기다린다(디렉토리 존재만으로 판단하지 않는다). 이미 실패했으면 잠시 뒤 다시 실행하면 된다: `enroll` 은 `state.json` 이 있어 건너뛰고 unit 작성부터 이어진다. 명령은 콘솔 `시스템 > 시스템/인프라 > install-command` 가 준다(enrollment 토큰이 필요한데 OAM 만 갖고 있다) |
+| 콘솔 모듈 목록에 `oam` 이 없다 | `install.sh` 의 self-deploy 는 **agent 가 등록된 뒤에** `oam` 배포 레코드를 만든다 — agent 설치가 실패하면 조용히 건너뛴다. OAM 프로세스는 돌고 있어 서비스에는 지장이 없지만, 콘솔에서 oam 을 업그레이드·재기동할 수 없고 HA 는 관리 store 위치의 정본을 잃는다(관리평면 판정이 `oam` 배포를 본다). agent 를 먼저 살린 뒤 콘솔 `패키지 설치 > [+ 모듈 추가] > oam` 으로 채운다 |
+| 콘솔에 서비스 메뉴(가입자·성능/통계·이력·장애)가 없다 | 콘솔이 아직 base 판이다. 서비스 메뉴는 **`oam-svc` 에 동봉된 번들**로 오고 OAM 은 정적 디렉토리를 **기동 시 1회만** 해석하므로, `oam-svc` 설치만으로는 바뀌지 않는다 — `oam` 을 재기동해야 승격된다. 모듈이 모두 running 이어도 마찬가지다. 재기동 뒤에는 브라우저 강제 새로고침(옛 번들 캐시) |
+| 오프라인 `.deb` 저장소에서 `Could not open file …/Packages - open (13: Permission denied)` | apt 는 `file://` 취득을 **`_apt` 사용자로 권한을 낮춰** 수행한다. 저장소가 홈 아래(기본 0750)에 있으면 `_apt` 가 디렉토리를 통과하지 못한다. 색인·deb 를 `_apt` 가 읽을 수 있는 자리로 옮겨 붙이거나(권장) 상위 디렉토리에 탐색 권한을 준다 |
+| 관계없는 패키지 때문에 apt 가 전부 거부 (`… but it is not installable`) | apt 는 설치 요청 전에 **시스템 전체 의존 상태**를 검사한다. 그래서 `linux-tools` 의 `libnl-3-200` 같은 무관한 구멍 하나가 MariaDB 설치까지 막는다. 인터넷이 되면 `apt-get -f install`, 폐쇄망이면 그 패키지들을 반입해 로컬 저장소에 함께 붙인다. 그리고 `dpkg --audit` 이 더러우면(`in a mess`) apt 는 무엇도 하지 못한다 — `dpkg --configure -a` 를 먼저 |
 | `db_bootstrap.py` 관리자 접속 실패 | TCP 전용이다. `unix_socket` 환경이면 §1 의 (a) 또는 (b) |
 | CSP `status=failed`, 로그에 `no primary local_node` | §4.1 — `local_nodes` 에 `is_primary=true` 행이 없음 |
 | 번호 추가 시 `400 service_ref required to derive ha1 (unknown service)` | csc 가 빈 컬렉션을 보고 있다. csc 설정이 아니라 **주입**을 본다 — §4.2 (`CimsRuntimeDir` 이 oam 것과 같은지 · descriptor 의 `reads_shared_store` 선언) |

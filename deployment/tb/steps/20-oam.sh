@@ -112,6 +112,36 @@ TB_ADMIN_PASS="$TB_ADMIN_PASS" TB_STATE_DIR="$TB_STATE_DIR" \
     python3 "$_HERE/../lib/tb_oam.py" --url "https://127.0.0.1:${TB_OAM_PORT}" status \
     || die "OAM API 조회 실패 — agent enroll 을 확인하세요"
 
+# ── oam 자기배포(self-deploy) 확인 ────────────────────────────
+# install.sh 는 **agent 가 등록된 뒤에** `oam` 배포 레코드를 스스로 만든다(self-deploy).
+# agent 설치가 실패하면 그 단계가 `agent id 미확인 — skip` 으로 조용히 넘어가고, 결과는
+# 한참 뒤 콘솔 모듈 목록에 `oam` 이 없는 것으로만 드러난다(2026-09-10 media02 실측).
+# 레코드가 없으면 콘솔에서 oam 을 업그레이드·재기동할 수 없고, HA 는 관리 store 위치의
+# 정본을 잃는다(관리평면 판정이 `oam` 배포를 본다). 서비스는 이미 돌고 있으므로 중단이
+# 아니라 경고로 짚는다.
+_chk_oam="$TB_STATE_DIR/.chk-oam-deploy.py"
+cat > "$_chk_oam" <<'CHKEOF'
+import os, sys
+sys.path.insert(0, os.environ['TB_LIB'])
+import tb_oam
+o = tb_oam.Oam(os.environ['TB_OAM_URL'], os.environ['TB_ADMIN_PASS'])
+print('Y' if o.deployment('oam') else '')
+CHKEOF
+_have_oam="$(TB_ADMIN_PASS="$TB_ADMIN_PASS" TB_STATE_DIR="$TB_STATE_DIR" \
+    TB_OAM_URL="https://127.0.0.1:${TB_OAM_PORT}" TB_LIB="$_HERE/../lib" \
+    python3 "$_chk_oam" 2>/dev/null || true)"
+rm -f "$_chk_oam"
+if [[ "$_have_oam" != "Y" ]]; then
+    warn "oam 배포 레코드가 없습니다 — install.sh 의 self-deploy 가 건너뛰어졌습니다"
+    warn "  OAM 프로세스는 돌고 있습니다. 레코드가 없으면 콘솔에서 oam 업그레이드·재기동을"
+    warn "  할 수 없고, HA 구성 시 관리 store 위치의 정본이 없습니다."
+    warn "  agent 설치가 실패했었다면 먼저 그것부터:"
+    warn "    sudo ./tools/tb-agent-install-cmd.sh --regen --run"
+    warn "  그 뒤 콘솔에서 채웁니다: 패키지 설치 → [+ 모듈 추가] → oam (설치 경로 $TB_INSTALL_PREFIX)"
+else
+    ok "oam 배포 레코드 확인"
+fi
+
 header "[20] 완료"
 cat <<EOF
   콘솔: $TB_OAM_URL  (admin / tb-site.conf 의 TB_ADMIN_PASS)

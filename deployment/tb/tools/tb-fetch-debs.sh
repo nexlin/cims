@@ -62,6 +62,24 @@ closure="$(apt-cache depends --recurse --no-recommends --no-suggests \
               "${PKGS[@]}" 2>/dev/null \
            | grep -v '^ ' | grep -v '^<' | sed 's/:.*//' | sort -u || true)"
 
+# 정확버전(`=`)으로 묶인 짝은 **우선순위와 무관하게 함께** 담는다.
+#
+# `perl` 은 `perl-base (= <같은 버전>)` 과 `libperl5.40 (= …)` 을 요구한다. perl-base 는
+# Priority=required 라 위 규칙이 제외하는데, 대상 장비의 perl-base 가 조금이라도 다른
+# 버전이면(실측: 담은 것 0.3 / 대상 0.2) apt 가 절대 풀 수 없다:
+#   perl Depends perl-base (= 0.3) but none of the choices are installable
+# 이런 lock-step 짝은 "기본 설치에 있으니 됐다" 는 가정이 성립하지 않는다.
+_locked=()
+while read -r p; do
+    [[ -z "$p" ]] && continue
+    while read -r dep; do
+        [[ -n "$dep" ]] && _locked+=("$dep")
+    done < <(apt-cache show "$p" 2>/dev/null \
+             | awk -F': ' '/^Depends: /{print $2; exit}' \
+             | tr ',' '\n' | grep '(= ' | awk '{print $1}' || true)
+done <<< "$closure"
+_locked_uniq="$(printf '%s\n' "${_locked[@]+"${_locked[@]}"}" | sort -u)"
+
 want=()
 skipped=()
 while read -r p; do
@@ -69,7 +87,8 @@ while read -r p; do
     prio="$(apt-cache show "$p" 2>/dev/null | awk -F': ' '/^Priority: /{print $2; exit}' || true)"
     # 실체 없는 가상 패키지(awk·debconf-2.0 등)는 받을 것이 없다 — 조용히 건너뛴다.
     [[ -z "$prio" ]] && { skipped+=("$p(가상)"); continue; }
-    if [[ $ALL -eq 0 && "$prio" =~ ^(required|important)$ ]]; then
+    if [[ $ALL -eq 0 && "$prio" =~ ^(required|important)$ ]] \
+       && ! grep -qx -- "$p" <<< "$_locked_uniq"; then
         skipped+=("$p($prio)")
         continue
     fi
