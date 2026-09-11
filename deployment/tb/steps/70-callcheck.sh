@@ -55,9 +55,33 @@ tb_ask TB_DB_NAME     "DB 이름" "cims"
 tb_ask TB_DB_APP_USER "DB 계정" "cims"
 tb_ask TB_DB_APP_PASS "DB 비밀번호" "" secret
 
+# ── SIP UDP 포트 — 정본은 OAM local_nodes ────────────────────
+# cspsim 의 기본값은 5060 이다. 사이트가 다른 포트를 쓰면(15060 등) 등록이 전부
+# 실패하는데, 증상이 "Registered 0/4" 뿐이라 도메인/H(A1) 불일치와 구분되지 않는다.
+# 그래서 방화벽(tools/tb-firewall.sh)과 **같은 출처**에서 실제 리스너 포트를 읽는다.
+sip_port=""
+if [[ -n "${TB_ADMIN_PASS:-}" ]]; then
+    sip_port="$(TB_LIB="$TB_ROOT/lib" TB_OAM_URL="$TB_OAM_URL" \
+                TB_ADMIN_PASS="$TB_ADMIN_PASS" TB_STATE_DIR="$TB_STATE_DIR" \
+                python3 "$TB_ROOT/lib/tb_listen_ports.py" 2>/dev/null \
+                | awk -F'[/|]' '/SIP UDP/ {print $1; exit}')" || sip_port=""
+fi
+if [[ -n "$sip_port" ]]; then
+    sip_port_src="OAM local_nodes"
+else
+    # OAM 을 못 읽으면 설정 파일 값. 그래도 없으면 규격 기본값.
+    sip_port="$(awk -F= '$1 ~ /^[ \t]*SIP_UDP[ \t]*$/ {gsub(/[ \t]/,"",$2); print $2; exit}' \
+                "$TB_ROOT/pkg_setting.cfg" 2>/dev/null)"
+    if [[ -n "$sip_port" ]]; then
+        sip_port_src="pkg_setting.cfg (OAM 조회 실패 — 실제 리스너와 다를 수 있음)"
+    else
+        sip_port=5060; sip_port_src="기본값"
+    fi
+fi
+
 # 묻지 않은 값도 무엇이 쓰이는지는 보여준다 — 도메인 불일치는 401 로만 드러나서 찾기 어렵다.
 info "사용할 사이트 값 (바꾸려면 --reconfigure)"
-echo "        SIP 주소   $TB_SIP_IP"
+echo "        SIP 주소   $TB_SIP_IP:$sip_port  ($sip_port_src)"
 [[ "$TB_CALL_KIND" != volte ]] && echo "        PTT 도메인   ${TB_PTT_DOMAIN:-}"
 [[ "$TB_CALL_KIND" != ptt   ]] && echo "        VoLTE 도메인 ${TB_VOLTE_DOMAIN:-}"
 echo "        DB         $TB_DB_APP_USER@$TB_DB_HOST:$TB_DB_PORT/$TB_DB_NAME"
@@ -104,7 +128,7 @@ run_case() {
     local since; since="$(date '+%Y-%m-%dT%H:%M:%S')"
     local kfail=0
 
-    local args=(-server_ip "$TB_SIP_IP" -local_ip "$TB_SIP_IP"
+    local args=(-server_ip "$TB_SIP_IP" -server_port "$sip_port" -local_ip "$TB_SIP_IP"
                 -count "$TB_CALL_COUNT" -call_duration "$TB_CALL_DURATION"
                 -db "$dbjson")
     if [[ "$kind" == ptt ]]; then
