@@ -15,6 +15,10 @@ import type { WidgetDef, WidgetPlacement } from '@core/widgets/types'
 
 // 서비스 통계(VoLTE/PTT) — 조회 조건 / 지표 카드 낱개 / 추이 · 분포.
 //
+// 세로 예산은 4(조회조건) + 7(지표) + 23(추이·분포) + 14(구간별 상세 표) = GRID_ROWS(48).
+// 표를 넣으려고 차트를 37 에서 23 으로 줄였다 — 한 장에 고정한다는 규칙을 지키면서 표를
+// 넣는 방법이 그것뿐이다(스크롤을 허용하거나 탭으로 가르는 쪽은 규칙을 바꾸는 일이다).
+//
 // 지표는 소스가 선언한 kpi 항목의 **인덱스 배열**로 받는다. 개수를 세는 방식이었을 때 소스가
 // 8개를 선언해도 4를 세면 뒤 항목(평균 통화시간·평균 접속지연)이 조용히 잘렸다 — 선언은 8,
 // 화면은 4, 양쪽 다 자기 기준으로는 정상이라 어긋나도 아무 데서도 경고가 나지 않는다.
@@ -29,8 +33,20 @@ const svcLayout = (source: string, items: number[], trend: string, dist: string)
       w: i === items.length - 1 ? GRID_COLS - w * i : w, h: 7,
       config: { source, item },
     })),
-    { widgetId: 'shape.time-bar', x: 0, y: 11, w: 26, h: 37, config: { source, title: trend } },
-    { widgetId: 'shape.distribution', x: 26, y: 11, w: 22, h: 37, config: { source, title: dist } },
+    { widgetId: 'shape.time-bar', x: 0, y: 11, w: 26, h: 23, config: { source, title: trend } },
+    { widgetId: 'shape.distribution', x: 26, y: 11, w: 22, h: 23, config: { source, title: dist } },
+    // 구간별 상세 표 — 소스의 `map.matrix`(행=버킷, 열=지표, 합계 행은 `totalPath`).
+    //
+    // 지표 타일은 **구간 전체의 한 값**이라 "언제 나빠졌나" 를 답하지 못한다. 추이 막대는
+    // 한 지표만 보여주고, 분포는 시간축이 없다. 성공률이 떨어진 구간에서 시도·성립·소통·
+    // 정상종료가 **함께** 어떻게 움직였는지는 이 표에서만 읽힌다 — 비율이 떨어진 것이
+    // 분모가 늘어서인지 분자가 줄어서인지가 갈린다.
+    //
+    // 자리는 차트에서 덜어 왔다(37 → 23). 세로 합은 여전히 GRID_ROWS 48 이라 화면 한 장이
+    // 유지된다 — 4(조회조건) + 7(지표) + 23(차트) + 14(표) = 48. 표의 y·h 는 인터페이스
+    // 통계의 교차표와 같은 값으로 맞췄다(같은 자리에 같은 성격의 블록이 오게).
+    { widgetId: 'shape.matrix', x: 0, y: 34, w: GRID_COLS, h: 14,
+      config: { source, title: '구간별 상세' } },
   ]
 }
 
