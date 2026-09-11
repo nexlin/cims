@@ -296,22 +296,37 @@
    꺼짐이라 이 관문 자체가 없었다. 증상이 고약하다 — 서버에서는 `curl` 이 200 인데
    **브라우저만 안 붙는다.** 바깥에서 보면 `No route to host` 가 돌아온다(거부 응답).
 
-   20 단계가 OAM/콘솔 포트를 자동으로 연다. 나머지(단말이 붙는 포트)는 직접 연다:
+   20 단계가 OAM/콘솔 포트를 자동으로 연다. **단말이 붙는 포트는 tools/tb-firewall.sh
+   가 연다** — 모듈 설치(40 단계) 뒤에 돌린다.
 
-   $ sudo firewall-cmd --list-all
-       [확인] `ports:` 줄에 무엇이 열려 있는지 본다.
+   $ sudo ./tools/tb-firewall.sh --dry-run
+       무엇을 왜 열지 계획만 보여준다. 포트 숫자를 이 스크립트가 들고 있지 않다 —
+       SIP 는 tb-site.conf/pkg_setting.cfg 에서, 미디어 대역은 **배포된 cmp.json 의
+       시작포트 + 풀 크기로 계산**한다. 그래서 설정을 바꾸면 다시 돌리기만 하면 된다.
 
-   $ sudo firewall-cmd --permanent --add-port=<포트>/<tcp|udp> ; sudo firewall-cmd --reload
-       SIP  — UDP 5060 · TCP 25061 · TLS 5061 (45 단계에서 정한 값)
-       CSC  — TCP 4430 (단말 대면 HTTPS. 4-8 인증서 절차와 짝이다)
-       RTP  — CMP 미디어 포트 범위 (UDP, 45 단계 설정값 확인 후)
-       [주의] 게이트웨이 뒤 내부 API(csc·oam-svc)는 loopback 이라 열지 않는다.
+   $ sudo ./tools/tb-firewall.sh
+       계획을 보여주고 물어본 뒤 연다 (--yes 로 묻지 않게).
+
+       [확인] 템플릿 기본값 그대로면 이렇게 나온다:
+         4419/tcp         콘솔·API
+         4430/tcp         CSC 단말 대면 HTTPS (4-8 인증서와 짝)
+         5060/udp · 25061/tcp · 5061/tcp    SIP
+         50000-50159/udp  VoLTE/VoIP 미디어 (RtpStartPort + RtpPoolSize × 8)
+         52000-52079/udp  PTT 멤버 오디오   (PttRtpStartPort + PttMemberPoolSize × 2)
+         56000-56079/udp  PTT 멤버 영상
+         54000-54019/udp  PTT floor 제어    (PttFloorStartPort + PttRtpPoolSize × 2)
+         58000-58063/udp  감청 tap          (TapStartPort + TapPoolSize × 4)
+
+       [주의] 내부 채널은 열지 않는다 — csc 내부 API(4421) · csp 제어(9000) ·
+              cmp 제어(9001) · DB(3306). 목록에 없는데 외부 주소로 듣고 있는 포트가
+              있으면 **알려만 준다**(자동으로 열지 않는다) — 여는 목록이 곧 노출면이다.
 
    $ sudo firewall-cmd --list-ports
        [확인] 연 포트가 보인다. 바깥 장비에서 확인하는 게 확실하다:
               curl -sk -o /dev/null -w '%{http_code}\n' https://<서버IP>:4419/
 
    [참고] 자동 개방이 싫으면 TB_SKIP_FIREWALL=1 로 끄면 안내만 나온다.
+   [참고] 포트를 열어도 단말은 아직 못 붙는다 — 4-8 의 인증서가 남아 있다.
 
  R-5. SELinux — 막은 것이 없다 (전 구간 실측)
  --------------------------------------------------------------------------------
