@@ -489,6 +489,7 @@
    4-6  콘솔 승격    tb-install.sh --role console
    4-7  기동         tb-install.sh --role start
    4-8  단말 인증서  offline/tools/service-cert.sh    ← 실제 단말을 붙일 때만
+   4-9  현장 반입     (용인 192.168.50.100 으로 옮길 때)
    5    호시험       tb-install.sh --role callcheck
 
    4-5b 와 4-8 만 tb-install.sh 바깥이다. 둘 다 **앞 단계의 결과를 읽어야** 할 일이
@@ -800,6 +801,19 @@
 
       CA 개인키는 CA 보관 서버를 떠나지 않는다. 그래서 두 장소로 나뉜다.
 
+  (0) 시작 전에 확인할 다섯 (CA 담당자에게 넘길 값이 여기서 나온다)
+
+  $ ss -lnt | grep 4430
+      [확인] 한 줄이라도 나와야 한다 — CSC 가 떠 있어야 배치 뒤 핫리로드를 확인한다.
+             안 나오면 4-7(기동)부터 끝내고 온다.
+  $ hostname; hostname -I
+      [확인] 이 둘이 곧 SAN 이다. **재설치로 하나라도 바뀌었으면 인증서를 다시
+             받아야 한다** — (3) install 이 거절한다(exit 2).
+      · CSP TLS 포트   — 4-5 의 access-tls bind_port (이 사이트는 15061)
+      · 콘솔 admin 비밀번호 — (4)(a) 자동 경로 등록에서 묻는다. 없으면 (4)(b) 수동
+      · 단말 로그인 계정 — 그 계정이 **이 노드의 CSC** 에 있어야 한다. DB 가 별개면
+        §3 의 CSV 로 새로 넣는다 (다른 서버 계정은 여기서 쓰지 못한다)
+
   (1) TB 서버에서 — 이 노드가 요구하는 SAN 을 뽑는다 (설치 전에도 된다)
 
   $ bash offline/tools/service-cert.sh collect
@@ -837,12 +851,24 @@
              "CSC 가 새 인증서를 서빙한다" → 핫리로드 완료. 재시작 불필요.
              기존 파일은 server.crt.bak.<시각> 로 백업된다.
 
-  (4) 콘솔에서 — CSP 가 그 인증서를 쓰게 한다
+  (4) TB 서버에서 — CSP 가 그 인증서를 쓰게 한다 (둘 중 하나)
 
-      [패키지 설정] > csp > local_nodes > TLS 행 (4-5 에서 만든 access-tls)
+      (a) 자동 — 권장. 같은 노드에서 돌리고 콘솔 admin 비밀번호를 프롬프트에 넣는다.
+
+  $ bash service-cert-<HOST>/service-cert.sh csp-node --dry-run
+      바뀔 행·경로를 미리 보여준다 (저장하지 않는다).
+
+  $ bash service-cert-<HOST>/service-cert.sh csp-node
+      콘솔 [저장] 과 같은 OAM API 를 부른다 — SIGUSR1 무중단 반영 + CSP TLS 검증까지
+      한 번에 한다. "TLS 행이 없다" 면 `--port <TLS 포트>` 를 붙여 행을 만든다.
+      OAM 이 다른 주소면 `--oam https://<IP>:4419`.
+
+      (b) 수동 — 콘솔 [패키지 설정] > csp > local_nodes > TLS 행 (4-5 의 access-tls)
+
         tls_cert_path = /opt/cims-agent/modules/csp/runtime/cert/csp-chain.pem
         tls_key_path  = /opt/cims-agent/modules/csp/runtime/cert/csp.key
       저장하면 SIGUSR1 로 무중단 반영된다. 재기동하지 않아도 된다.
+      [주의] **절대경로**로 넣는다. 상대경로는 CSP 작업 디렉토리 기준이라 어긋난다.
 
   (5) 검증 — 단말을 붙이기 전에 서버측만으로 확정한다
 
@@ -853,12 +879,116 @@
       CSC 를 한 번 재시작한 뒤 다시 돌려 발급자가 유지되는지도 본다 — 유지되지
              않으면 SAN 이 부족해 agent 가 덮은 것이다.
 
-      단말 쪽: 로그인 서버 주소는 **SAN 에 있는 IP** 로 넣는다. Windows 관제조작반은
-      "서버 인증서 검증"을 켜고 CA PEM 경로에 묶음의 cims-service-ca.crt 를 준다.
-      단말 시계가 틀리면 유효기간 검사에서 실패한다.
+  (6) 단말에서 — 그리고 안 될 때 어디를 볼지
+
+      · 앱에서 **로그아웃 → 로그인 화면의 서버 주소 변경 → 다시 로그인**. 재기동만
+        해서는 새 서버를 받지 않는다 (주소는 로그인 시점에 굳는다).
+      · 주소는 **SAN 에 있는 IP** 로 넣는다. SAN 에 없는 주소로 붙으면 신원 검증에서
+        실패한다 — 인증서는 멀쩡한데 단말만 막힌다.
+      · APK 는 서버 검증이 켜진 빌드(2026-08-19 이후)여야 한다. 단말 시계는 자동 동기로
+        둔다 — 틀리면 유효기간 검사에서 실패한다.
+      · 그룹통화·PTT 는 **같은 서버에 등록된 단말끼리만** 된다. 시험 단말은 전부 함께
+        옮긴다.
+      · Windows 관제조작반: "서버 인증서 검증" 켜고, CA PEM 경로에 묶음 안의
+        cims-service-ca.crt 를 준다.
+
+      증상 판독 — 비슷해 보이는 넷을 가른다:
+
+        로그인 즉시 실패 + CSC 로그에 /idms/authreq 없음
+            → 인증서. (5) verify 를 다시 본다 (TLS 가 끊겨 요청이 도달하지 못한 것)
+        401 / 403
+            → 계정·비밀번호. 인증서 문제가 아니다 (TLS 는 이미 통과했다)
+        로그인·프로비저닝 OK, REGISTER 만 실패
+            → 포트 불일치. CSC 프로비저닝 포트 ↔ CSP local_nodes 를 맞춘다 (4-5)
+        TLS 로 바꾸면 등록 503 PJSIP_TLS_ECERTVERIF
+            → CSP 인증서 미교체. (4) 를 안 했거나 경로가 상대경로다
+
+  (7) 마무리·원복
+
+      · 시험이 끝나면 단말 서버 주소를 원래 서버로 되돌린다 (로그아웃 → 변경 → 로그인).
+      · CSC 원복: `<prefix>/csc/runtime/cert/server.{crt,key}.bak.<시각>` 을 되돌리면
+        30초 안에 반영된다.
+      · CSP 원복: local_nodes 의 경로를 원래 값으로 (csp-node --dry-run 출력의 왼쪽 값).
+
+      [주의] server.key · csp.key 는 **600 을 유지**한다. 채팅·문서에 붙이지 않는다.
+      [주의] 인증서만 바꾸는 교체는 CSC·CSP 모두 무중단이다. **bind 주소·포트가 바뀌면
+             CSP 재기동이 필요하다.**
+      [주의] 만료 30일 전 `A-PRC-009` warning, 7일 전 critical 이 뜬다. 갱신은 같은
+             절차다 — issue → install → csp-node.
 
       절차 정본: docs/user-manual/initial_install.md §4.5 ·
                  docs/design/features/sip_tls_signaling.md §8.3
+
+
+ --------------------------------------------------------------------------------
+ 4-9. 현장 반입 — 주소가 192.168.50.100 으로 바뀐다 (용인)
+ --------------------------------------------------------------------------------
+
+      사무실에서 설치·시험한 장비를 현장으로 옮기면 **IP 가 바뀐다**
+      (121.161.164.127 → 192.168.50.100). 그 주소에 묶여 있는 것이 셋이라 셋 다
+      손봐야 한다. 하나만 빠뜨려도 증상은 똑같이 "단말이 안 붙는다" 로 나온다.
+
+        ① 모듈 설정   — csp/cmp/csc 가 들고 있는 주소 (4-5 가 넣은 값)
+        ② 인증서 SAN  — 새 IP 가 SAN 에 없으면 단말이 신원 검증에서 거절한다
+        ③ 단말 주소   — 앱 로그인 화면의 서버 주소
+
+      바뀌지 않는 것도 알아두면 헛수고를 안 한다:
+        · 포트 — 방화벽 규칙은 IP 가 아니라 포트라 그대로다 (확인만 한다)
+        · 가입자 H(A1) — **도메인**으로 결박돼 있어 IP 와 무관하다. 도메인을 그대로
+          두면 §3·18 단계를 다시 돌릴 필요가 없다
+
+  (1) 가기 전에 — 인증서를 **미리** 받아 간다  ★ 현장엔 CA 서버가 없다
+
+      SAN 에는 여분을 넣어도 된다(상위집합이면 된다). **두 IP 를 다 넣어** 받아 두면
+      사무실에서도 현장에서도 같은 묶음을 쓴다.
+
+  $ bash offline/tools/service-cert.sh collect
+      지금 나오는 SAN 뒤에 새 IP 를 더해서 CA 담당자에게 넘긴다. 예:
+        HOST=cims-app01
+        SAN=DNS:cims-app01,IP:127.0.0.1,IP:121.161.164.127,IP:192.168.50.100
+
+      CA 보관 서버에서:
+  $ scripts/service-cert.sh issue --host cims-app01 \
+        --san "DNS:cims-app01,IP:127.0.0.1,IP:121.161.164.127,IP:192.168.50.100"
+
+      [주의] **호스트명을 바꾸면 다시 받아야 한다.** SAN 에 hostname 이 들어가므로
+             현장에서 이름을 바꿀 계획이면 그 이름으로 미리 받는다.
+
+      함께 챙길 것: 묶음 tgz · 단말 APK(서버 검증 켜진 빌드) ·
+                    Windows 관제조작반이면 묶음 안의 cims-service-ca.crt
+
+  (2) 현장에서 — IP 를 바꾼 뒤 설정을 다시 넣는다
+
+  $ vi ~/cims-tb/tb/pkg_setting.cfg
+      [vars] 의 세 줄을 새 IP 로 바꾼다:
+        SIP_IP  = 192.168.50.100
+        RTP_IP  = 192.168.50.100
+        MGMT_IP = 192.168.50.100
+
+  $ sudo ./tb-install.sh --role config
+      [확인] csp/cmp/csc/oam-svc 의 주소 값이 전부 192.168.50.100 으로 찍힌다.
+
+  $ sudo ./tb-install.sh --role start
+      **bind 주소가 바뀌면 재기동해야 한다** — 설정만 바꾸면 옛 주소에 붙은 채로
+      돌아간다 (포트만 바뀔 때와 다르다).
+
+  $ sudo ./tools/tb-firewall.sh --dry-run
+      포트는 그대로여야 한다. 다르면 4-5 가 덜 반영된 것이다.
+
+  (3) 현장에서 — 인증서 배치·검증 (4-8 의 (3)~(5) 와 같다)
+
+  $ tar xzf cert-init-cims-app01.tgz
+  $ bash cert-init-cims-app01/service-cert.sh install
+  $ bash cert-init-cims-app01/service-cert.sh csp-node
+  $ bash cert-init-cims-app01/service-cert.sh verify --ip 192.168.50.100 \
+        --csc-port 4430 --csp-port 15061
+      [확인] 전부 PASS. `install` 이 SAN 부족으로 거절하면 (1) 에서 새 IP 를
+             빠뜨린 것이다 — 그 자리에서는 다시 받을 수 없으니 미리 확인한다.
+
+  (4) 단말
+
+      APK 설치 → 로그아웃 → 서버 주소 **192.168.50.100** → 로그인.
+      안 되면 4-8 (6) 의 증상 판독표를 따라간다.
 
 
 ================================================================================
@@ -881,6 +1011,16 @@
       ── 묻지 않는 값 (사이트 값) ──
         SIP 주소 · PTT/VoLTE 도메인 · DB 값 · OAM 주소 · admin 비번
       화면에 무엇이 쓰이는지는 찍어준다. 바꿔야 하면 --reconfigure 로 실행한다.
+
+      [확인] SIP 포트는 묻지 않고 **OAM 의 local_nodes 에서 읽는다** — 방화벽
+             (4-5b)과 같은 출처다. 첫 줄에 출처까지 찍히니 그것부터 본다:
+               SIP 주소   192.168.50.100:15060  (OAM local_nodes)
+             여기가 `(pkg_setting.cfg …)` 로 찍히면 OAM 조회가 실패한 것이고, 그
+             값이 실제 리스너와 다르면 등록이 전부 실패한다(아래 주의).
+      [주의] 등록이 **0/4 로 전멸**하면 포트부터 본다. 단말이 붙을 곳이 없으면
+             증상이 도메인·H(A1) 불일치와 똑같다 — 실측(2026-09-11): 사이트 SIP 가
+             15060 인데 cspsim 기본값 5060 으로 등록해 4건 모두 실패했다.
+
       [주의] 도메인을 여기서 바꾸면 안 된다 — 18 단계가 도메인으로 H(A1) 을
              결박했으므로 어긋나면 등록이 401 로 실패한다. 바꿀 거면 18 단계
              (--role db-data --reconfigure)부터 다시 돌려 ha1 을 재발급한다.
