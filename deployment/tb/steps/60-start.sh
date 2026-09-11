@@ -43,7 +43,9 @@ info "상태 확인"
 if ! oam status --require-up $TB_START_ORDER; then
     die_hint "일부 모듈이 running/up 이 아닙니다" \
         "CSP 가 죽어 있으면 local_nodes primary 누락이 가장 흔합니다 (45 단계)." \
-        "로그: <설치경로>/modules/<모듈>/current/log/"
+        "로그는 두 곳이다 — 모듈이 제 로그를 한 단계 더 깊은 자리에 쓴다:" \
+        "  <설치경로>/modules/<모듈>/current/log/           agent 가 받은 stdout (비어 있을 수 있다)" \
+        "  <설치경로>/modules/<모듈>/current/<모듈>/log/     모듈 자기 로그 (<모듈>_<날짜>_N.log) ← 이쪽을 본다"
 fi
 
 ok "[60] 완료 — 모든 모듈 running/up"

@@ -396,7 +396,9 @@ _csp_sync_pidfile() {
         local cexe; cexe=$(_proc_exe "$cur"); cexe="${cexe% (deleted)}"
         [[ "$cexe" == "$bin_real" ]] && return 0
     fi
-    local adopt; adopt=$(_pids_by_exe "$bin" | head -1)
+    # head 는 파이프를 일찍 닫아 왼쪽을 SIGPIPE(141)로 죽인다 — pipefail 아래서 그 값이
+    # 대입문으로 올라오면 set -e 가 조용히 끝낸다. awk 로 끝까지 읽고, 빈 값도 허용한다.
+    local adopt; adopt=$(_pids_by_exe "$bin" | awk 'NR==1 {x=$0} END {print x}') || adopt=""
     [[ -n "$adopt" ]] && save_pid "$name" "$adopt"
     return 0
 }
@@ -665,7 +667,7 @@ _start_csp_variant() {
     else
         err "$upper 시작 실패 — 리스너 ${proto}:$port 미개설/worker 소멸 (timeout ${CIMS_CSP_START_TIMEOUT:-20}s)"
         tail -3 "$LOG_DIR/$name.log" | sed 's/^/  /'
-        local _vlog; _vlog=$(ls -t "$DIST_DIR/$name/log/${name}_"*.log 2>/dev/null | head -1)
+        local _vlog; _vlog=$(ls -t "$DIST_DIR/$name/log/${name}_"*.log 2>/dev/null | awk 'NR==1 {x=$0} END {print x}') || _vlog=""
         [[ -n "$_vlog" ]] && tail -3 "$_vlog" | sed 's/^/  /'
         return 1
     fi
@@ -1197,7 +1199,7 @@ _pid_by_port() {
         line=$(ss -Htlnp 2>/dev/null | awk -v pt="$port" 'match($4,/:([0-9]+)$/,m) && m[1]==pt {print; exit}')
     fi
     [[ -z $line ]] && return
-    pid=$(echo "$line" | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)
+    pid=$(echo "$line" | grep -oE 'pid=[0-9]+' | awk -F= 'NR==1 {x=$2} END {print x}') || pid=""
     # 소켓은 보이는데 소유 pid 미표기 = capability 바이너리 프로세스(ss -p 귀속 거부)
     # — root 위임으로 귀속 복원
     if [[ -z $pid ]]; then
@@ -1259,7 +1261,7 @@ cmd_status() {
 cmd_log() {
     local name="${1:-csp}"
     local clog
-    clog=$(ls -t "$LOG_DIR/${name}_"*.log 2>/dev/null | head -1)
+    clog=$(ls -t "$LOG_DIR/${name}_"*.log 2>/dev/null | awk 'NR==1 {x=$0} END {print x}') || clog=""
     if [[ -n $clog ]]; then
         tail -f "$clog"
     else

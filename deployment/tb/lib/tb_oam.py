@@ -76,7 +76,7 @@ class Oam:
         return tok
 
     # ── HTTP ────────────────────────────────────────────────────
-    def _raw(self, method, path, data, ctype, auth=True):
+    def _raw(self, method, path, data, ctype, auth=True, soft_conn=False):
         req = urllib.request.Request(self.base + path, data=data, method=method)
         if ctype:
             req.add_header('Content-Type', ctype)
@@ -95,6 +95,11 @@ class Oam:
                 detail = raw.decode('utf-8', 'replace')[:300]
             die(f"{method} {path} → HTTP {e.code}", f"응답: {detail}")
         except urllib.error.URLError as e:
+            # 자기 재기동을 시킨 뒤 그 OAM 에게 진행을 묻는 경우처럼, 끊기는 것이 **예상된**
+            # 자리가 있다. 거기서 ERROR 를 찍으면 정상 동작이 사고처럼 보인다 — 호출부가
+            # soft_conn 으로 "여기선 끊겨도 된다" 를 밝히면 예외로 올려 판단을 넘긴다.
+            if soft_conn:
+                raise _ConnLost(str(e.reason))
             die(f"{method} {path} → 접속 실패 ({e.reason})",
                 f"OAM 이 떠 있는지 확인: curl -sk -o /dev/null -w '%{{http_code}}' {self.base}/")
         if not raw:
@@ -104,7 +109,7 @@ class Oam:
         except Exception:
             return {'_raw': raw.decode('utf-8', 'replace')[:2000]}
 
-    def req(self, method, path, body=None, *, raw_bytes=None, ctype=None):
+    def req(self, method, path, body=None, *, raw_bytes=None, ctype=None, soft_conn=False):
         data = raw_bytes if raw_bytes is not None else (
             json.dumps(body).encode() if body is not None else None)
         ct = ctype or ('application/json' if data is not None and raw_bytes is None else None)
@@ -112,7 +117,7 @@ class Oam:
             if not self.token:
                 self.login()
             try:
-                return self._raw(method, path, data, ct)
+                return self._raw(method, path, data, ct, soft_conn=soft_conn)
             except _Unauthorized:
                 if attempt == 2:
                     die("인증이 계속 거부됩니다 (401)")
@@ -174,7 +179,7 @@ class Oam:
         return sorted(cands, key=key)[-1]
 
     # ── job ─────────────────────────────────────────────────────
-    def run_job(self, did, agent_id, job_type, timeout=600, poll=3):
+    def run_job(self, did, agent_id, job_type, timeout=600, poll=3, expect_restart=False):
         r = self.req('POST', f'/api/v1/deployments/{did}/job', {'job_type': job_type})
         jid = (r or {}).get('job_id')
         if not jid:
@@ -182,7 +187,14 @@ class Oam:
         deadline = time.time() + timeout
         last = None
         while time.time() < deadline:
-            j = self.req('GET', f'/api/v1/agents/{agent_id}/jobs/{jid}')
+            try:
+                j = self.req('GET', f'/api/v1/agents/{agent_id}/jobs/{jid}',
+                             soft_conn=expect_restart)
+            except _ConnLost as e:
+                # oam 자신을 재기동시킨 경우 — job 은 이미 큐잉됐고 끊기는 것이 정상이다.
+                # 완료 판정은 호출부(복귀 대기)가 한다.
+                print(f"  {job_type} job#{jid} 큐잉됨 — OAM 재기동으로 응답이 끊겼습니다 ({e})")
+                return {'status': 'restarting', 'job_id': jid}
             if isinstance(j, dict):
                 last = j.get('status')
                 if last in ('succeeded', 'failed', 'cancelled'):
@@ -196,6 +208,11 @@ class Oam:
 
 
 class _Unauthorized(Exception):
+    pass
+
+
+class _ConnLost(Exception):
+    """OAM 과의 연결이 끊겼다. 예상된 자리(자기 재기동)에서만 올라온다."""
     pass
 
 
@@ -388,7 +405,10 @@ def cmd_ensure_running(o, args):
 def cmd_job(o, args):
     a = o.agent(os.environ.get('TB_AGENT_NAME') or None)
     dep = o.need_deployment(args.package)
-    o.run_job(dep['id'], a['id'], args.job_type, timeout=args.timeout)
+    r = o.run_job(dep['id'], a['id'], args.job_type, timeout=args.timeout,
+                  expect_restart=getattr(args, 'expect_restart', False))
+    if (r or {}).get('status') == 'restarting':
+        return 0
     print(f"  {args.package}: {args.job_type} 완료")
     return 0
 
@@ -422,6 +442,8 @@ def main():
     p.add_argument('--timeout', type=int, default=600); p.add_argument('--settle', type=int, default=30)
     p = sub.add_parser('job'); p.add_argument('package'); p.add_argument('job_type')
     p.add_argument('--timeout', type=int, default=600)
+    # oam 자신을 재기동시키는 job — 진행을 물어볼 상대가 사라지는 것이 정상이다.
+    p.add_argument('--expect-restart', action='store_true')
     sub.add_parser('console-bundle')
 
     args = ap.parse_args()

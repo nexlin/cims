@@ -69,7 +69,13 @@ def _locate(name, override):
 
 def _split_sql(text):
     """주석/빈 줄 제거 후 ';' 단위로 statement 분리.
-    (스키마에 ';' 는 statement 종결자로만 쓰임 — ENUM 의 ',' 는 영향 없음.)"""
+
+    **따옴표 안의 ';' 는 종결자가 아니다.** 전에는 `body.split(';')` 였는데, 스키마의
+    COMMENT 문자열에 ';' 가 들어오자(`phone_groups.id` 의 "pg-xxxxxxxx; 전환 전 dg- …")
+    문장이 한가운데서 잘려 MariaDB 가 1064 syntax error 를 냈다(2026-09-11 실측).
+    "스키마에 ';' 는 종결자로만 쓰인다" 는 전제는 스키마를 쓰는 사람이 언제든 깰 수 있으므로
+    전제를 두지 않고 인용 상태를 따라간다 — '…'(''·\\' 이스케이프) · "…" · `…`.
+    """
     lines = []
     for ln in text.splitlines():
         s = ln.strip()
@@ -77,7 +83,36 @@ def _split_sql(text):
             continue
         lines.append(ln)
     body = '\n'.join(lines)
-    return [st.strip() for st in body.split(';') if st.strip()]
+
+    out, buf = [], []
+    quote = None                      # None | "'" | '"' | '`' — 현재 열려 있는 인용
+    i, n = 0, len(body)
+    while i < n:
+        ch = body[i]
+        if quote is not None:
+            buf.append(ch)
+            # 백슬래시 이스케이프 (MySQL 기본 — 식별자 인용 `…` 에는 없다)
+            if ch == '\\' and quote in ("'", '"') and i + 1 < n:
+                buf.append(body[i + 1]); i += 2; continue
+            if ch == quote:
+                # 같은 인용부호가 연달아 오면 리터럴 한 글자 ('' → ')
+                if i + 1 < n and body[i + 1] == quote:
+                    buf.append(body[i + 1]); i += 2; continue
+                quote = None
+            i += 1
+            continue
+        if ch in ("'", '"', '`'):
+            quote = ch; buf.append(ch); i += 1; continue
+        if ch == ';':
+            st = ''.join(buf).strip()
+            if st:
+                out.append(st)
+            buf = []; i += 1; continue
+        buf.append(ch); i += 1
+    st = ''.join(buf).strip()
+    if st:
+        out.append(st)
+    return out
 
 
 def _prompt(label, default='', secret=False, noninteractive=False):

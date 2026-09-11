@@ -56,8 +56,11 @@ if [[ "$served" == "$want" ]]; then
 fi
 
 info "[2/3] oam 재기동 (콘솔이 잠깐 끊깁니다)"
-# 자기 자신을 재기동하므로 job 완료 응답을 못 받을 수 있다 — 큐잉만 하고 복귀를 기다린다.
-oam job oam restart --timeout 60 || warn "job 응답이 끊겼습니다 (자기 재기동이라 정상) — 복귀를 기다립니다"
+# 자기 자신을 재기동하므로 job 완료 응답을 못 받는다 — 큐잉만 하고 복귀를 기다린다.
+# --expect-restart 를 주면 그 끊김을 ERROR 가 아니라 정상 경로로 다룬다(정상 동작이
+# 사고처럼 보이지 않게). 진짜 실패는 아래 [3/3] 복귀 대기가 잡는다.
+oam job oam restart --timeout 60 --expect-restart \
+    || warn "job 응답이 끊겼습니다 (자기 재기동이라 정상) — 복귀를 기다립니다"
 
 info "[3/3] 복귀 대기"
 for i in $(seq 1 40); do
