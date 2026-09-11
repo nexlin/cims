@@ -1002,7 +1002,7 @@ if __name__ == '__main__':
         # 코어(emit/transition/서비스 규칙 평가)는 services.alarm_sweeper 공용.
         # 서비스 계열(process_unresponsive/db_down/rtp_pct_gte)은 oam-svc 소유
         # (oam_base_service_split §4) — base 는 role=all(단일 프로세스)에서만 대행 평가하고,
-        # role=base 는 agent 계열(disk_high/module_down/config_drift/ha_flap)만 평가한다
+        # role=base 는 agent 계열(disk_high/module_down/config_drift/ha_flap/store_unavailable)만 평가한다
         # (CSP/CMP probe·DB 미접속).
         from services import alarm_sweeper
         ALERT_SWEEP_INTERVAL = int(config.get('AlertSweepSec', 30))
@@ -1105,6 +1105,18 @@ if __name__ == '__main__':
                 kw = dict(mo=mo, host=host_name, pct=disk, threshold=thr)
                 tinfo = {'observed': disk, 'threshold': thr, 'unit': rule.get('unit') or '%'}
                 res.append((mo, is_open, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw), tinfo, sev))
+            elif chk == 'store_unavailable':
+                # agent 가 보고한 직전 판정 그대로 쓴다 — OAM 이 다시 probe 하지 않는다.
+                # (OAM 이 재확인하면 그 write 가 같은 멈춘 마운트에서 블록돼 스위퍼가
+                #  통째로 선다. 감지기는 고장난 자원을 만지면 안 된다.)
+                st = metric.get('store') or {}
+                if not st.get('path'):
+                    return res         # 공유 store 미구성 — 판정 대상 아님
+                mo = f"{host}/store"
+                kw = dict(mo=mo, host=host_name, path=st.get('path'),
+                          reason=st.get('reason') or 'unknown')
+                res.append((mo, not st.get('ok'), _fmt(rule.get('msg_open'), **kw),
+                            _fmt(rule.get('msg_close'), **kw), None, None))
             elif chk == 'module_down':
                 running = {(m.get('name') or '').lower()
                            for m in (metric.get('modules') or []) if m.get('name')}

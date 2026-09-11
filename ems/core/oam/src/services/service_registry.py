@@ -90,6 +90,20 @@ _CORE_ALERT_RULES = [
      'msg_close': '{mo} 인증서 잔여 수명 정상 ({days_left}일)',
      'effect': '만료 시 접속·상호인증 전면 실패 — agent 관측/콘솔 접속 단절',
      'recommended_action': '인증서 재발급·회전 경로 점검 (agent 는 cert_rotate, 파일 인증서는 재생성 후 모듈 재시작)'},
+    # 공유 store(NAS) 접근 불가 — 마운트 소실·쓰기 불가·무응답(멈춘 hard 마운트).
+    #   관측 주체가 **agent** 인 이유: store 가 멈추면 그것을 쓰는 모듈(oam/oam-svc)이 먼저
+    #   물려(uninterruptible D — 죽지도 않는다) 자기 상태를 보고할 수 없다. agent 는 store 를
+    #   쓰지 않으므로 살아남아 보고한다. 실측 사고에서 이 구간이 **전부 무알람**이었다 —
+    #   모듈만 조용히 멈추고 콘솔은 게이트웨이 504 만 뱉었다.
+    #   승격 자격(preflight)과 같은 판정을 쓴다(`_shared_store_ready`) — 알람과 HA 판정이
+    #   갈리면 "알람은 없는데 승격 부적격" 같은 상태가 생긴다.
+    {'type': 'dependency_unavailable', 'code': 'A-PRC-028', 'perceived_severity': 'major',
+     'event_type': 'processingError', 'probable_cause': 'underlyingResourceUnavailable',
+     'mo_class': 'host', 'check': 'store_unavailable', 'scope': 'agent', 'metric': '공유 store 접근',
+     'msg_open': '{mo} 공유 store 접근 실패 — {reason} ({path})',
+     'msg_close': '{mo} 공유 store 접근 정상 ({path})',
+     'effect': '관리평면 정본 저장 불능 — HA 승격 부적격·배포/알람 보관 정지',
+     'recommended_action': '마운트/NAS/권한 확인 (재마운트 후 그 store 를 쓰는 모듈 재기동 — 멈춘 마운트에 물린 프로세스는 SIGKILL 로도 죽지 않는다)'},
 ]
 
 # 알람 클래스 기본값 — check → 표준 분류 필드. 규칙에 명시값 있으면 우선(setdefault).
@@ -116,6 +130,9 @@ _ALERT_CLASS_DEFAULTS = {
                      'probable_cause': 'thresholdCrossed', 'mo_class': 'service', 'perceived_severity': 'warning'},
     'cert_expiring': {'type': 'cert_expiring', 'code': 'A-PRC-009', 'event_type': 'processingError',
                      'probable_cause': 'keyExpired', 'mo_class': 'software', 'perceived_severity': 'warning'},
+    'store_unavailable': {'type': 'dependency_unavailable', 'code': 'A-PRC-028',
+                     'event_type': 'processingError', 'probable_cause': 'underlyingResourceUnavailable',
+                     'mo_class': 'host', 'perceived_severity': 'major'},
 }
 
 # 옛 per-process/리소스·개명 전 type → (조건클래스, code). 구 이벤트/규칙 read 시 alias.

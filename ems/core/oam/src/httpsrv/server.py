@@ -26,6 +26,7 @@ class HttpServer:
         self._ssl_certfile = ssl_certfile
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._io_executor: Optional[ThreadPoolExecutor] = None
+        self._lag_task = None                 # 이벤트 루프 지연 감시
         self._ready_event = threading.Event()
         self._shutdown_event = threading.Event()
         self._thread = threading.Thread(target=self._start_event_loop, daemon=True)
@@ -71,11 +72,56 @@ class HttpServer:
             self._logger.log_warning(f"TLS 인증서 감시 미기동({e}) — 회전 시 재기동 필요")
         self._server = uvicorn.Server(config)
         self._server_task = asyncio.create_task(self._server.serve())
+        self._lag_task = asyncio.create_task(self._watch_loop_lag())
         self._ready_event.set()
         try:
             await self._server_task
         finally:
             await self._cleanup_async()
+
+    # ── 이벤트 루프 지연 감시 ───────────────────────────────────────────
+    #
+    # `/health` 는 `return {"status":"ok"}` 한 줄이라 **느려질 수 있는 이유가 하나뿐**이다:
+    # 이벤트 루프가 막혀 코루틴이 제때 못 깨는 것. 그런데 그 사실이 지금까지 아무 데도
+    # 남지 않았다 — agent 는 2초 안에 응답이 없으면 그 모듈을 죽은 것으로 판정하고
+    # **한 번 만에 절체·영구 래치**까지 가는데(ha_service_model.md §8), 서버 쪽 기록은
+    # "늦게라도 200 을 줬다"뿐이라 사후에 원인을 댈 수 없었다(실측 2026-09-10).
+    #
+    # 그래서 루프 지연을 직접 잰다. 판정 임계(2초)를 넘긴 구간은 **경고 + 그 순간의 전체
+    # 스레드 스택**을 남긴다 — 무엇이 루프를 잡고 있었는지가 로그에 그대로 찍힌다
+    # (py-spy 를 들고 현장에 있을 필요가 없다). 덤프는 쿨다운을 둬 폭주시키지 않는다.
+    _LAG_WARN_SEC = 2.0            # agent readiness 판정 타임아웃과 같은 눈금
+    _LAG_DEBUG_SEC = 0.2           # 이 이상은 debug 로만 (평시 소음 방지)
+    _LAG_DUMP_COOLDOWN_SEC = 60
+
+    async def _watch_loop_lag(self):
+        """1초 주기 코루틴의 실제 깨어난 시각으로 루프 지연을 잰다."""
+        import faulthandler
+        import sys as _sys
+        import time as _time
+        last_dump = 0.0
+        while True:
+            t0 = _time.monotonic()
+            try:
+                await asyncio.sleep(1.0)
+            except asyncio.CancelledError:
+                return
+            lag = _time.monotonic() - t0 - 1.0
+            if lag >= self._LAG_WARN_SEC:
+                self._logger.log_warning(
+                    f"[loop] 이벤트 루프 지연 {lag:.1f}s — 이 시간만큼 모든 응답이 밀린다"
+                    f" (health 판정 임계 {self._LAG_WARN_SEC:.0f}s)")
+                now = _time.monotonic()
+                if now - last_dump >= self._LAG_DUMP_COOLDOWN_SEC:
+                    last_dump = now
+                    try:
+                        print(f"--- loop lag {lag:.1f}s: thread dump ---", file=_sys.stderr, flush=True)
+                        faulthandler.dump_traceback(file=_sys.stderr)
+                        _sys.stderr.flush()
+                    except Exception:
+                        pass
+            elif lag >= self._LAG_DEBUG_SEC:
+                self._logger.log_verbose(f"[loop] 지연 {lag * 1000:.0f}ms")
 
     # ── TLS 인증서 핫리로드 ──────────────────────────────────────────────
     # 인증서는 lifecycle 엔진이 **모듈 기동 전**에 발급·재발급한다(oam_ha.md §5.2).
@@ -122,6 +168,8 @@ class HttpServer:
         threading.Thread(target=_loop, daemon=True, name='cert-watch').start()
 
     async def _cleanup_async(self):
+        if self._lag_task is not None:
+            self._lag_task.cancel()
         try:
             await self._server.shutdown()
         except Exception:

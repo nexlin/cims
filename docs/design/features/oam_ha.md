@@ -323,9 +323,26 @@ HA 판정이 노드 로컬이어야 한다는 원칙(ha_service_model.md §5·§
 
 | 역할 | 요구 조건 | 실패 시 |
 |---|---|---|
-| BACKUP/UNKNOWN/FAULT (승격 자격) | store 가 **마운트돼 있고 write 가능** (실제 write·fsync 1회) | `vrrp_eligible=false` — 관리 데이터에 접근 못 하는 노드로 승격하면 **빈/읽기전용 콘솔을 이어받는다** |
+| BACKUP/UNKNOWN/FAULT (승격 자격) | store 가 **마운트돼 있고 write 가능** (실제 write·fsync 1회, 데드라인 5초) | `vrrp_eligible=false` — 관리 데이터에 접근 못 하는 노드로 승격하면 **빈/읽기전용 콘솔을 이어받는다** |
 | MASTER + 승격 grace | 위와 동일 | 승격 중단 |
 | MASTER 정상 운전 | **마운트되어 있을 것** (write 가능까지는 요구하지 않음) | 절체 사유 — 마운트가 빠졌으면 모듈이 엉뚱한 위치(마운트 포인트 하부 로컬 디스크)에 쓰는 중 |
+
+**probe 는 워커 스레드에서 돌리고 호출자는 데드라인(5초)만 본다.** 멈춘 NFS(`hard`)의
+write 는 uninterruptible 이라 인라인으로 부르면 **판정하는 쪽이 같이 물린다** — 실측 사고
+(2026-09-10)에서 store 를 쓰던 oam-svc 가 워커 16개 전부 그렇게 멈췄고(D 상태, SIGKILL
+불가) 그 구간 내내 **알람이 하나도 열리지 않았다**. 데드라인을 넘기면 `unresponsive` 로
+**판정한다** — "모른다" 가 아니라 "못 쓴다" 이므로 승격 부적격 사유이자 A-PRC-028 발화
+조건이다. 물린 워커는 죽일 수 없으므로 마운트당 하나만 유지한다(tick 마다 띄우면 죽지 않는
+스레드가 쌓인다).
+
+**그 판정을 알람으로도 낸다 — `A-PRC-028 dependency_unavailable`(major, mo=`<host>/store`).**
+agent 가 `metric.store{path, ok, reason}` 로 보고하고 OAM base 가 평가한다
+(`check=store_unavailable`). 관측 주체가 agent 인 이유는 store 가 멈추면 **그것을 쓰는
+모듈이 먼저 물려 자기 상태를 보고할 수 없기** 때문이다 — agent 는 store 를 쓰지 않으므로
+살아남는다. OAM 은 보고값을 그대로 쓰고 **다시 probe 하지 않는다**(스위퍼가 같은 마운트에서
+블록되면 안 된다). 승격 자격과 **같은 함수**(`_shared_store_ready`)를 쓰는 것이 중요하다 —
+갈리면 "알람은 없는데 승격 부적격" 상태가 생긴다. 공유 store 미구성 노드는 판정 대상이
+아니다. (OAM 자신의 런타임 주기 probe 는 카탈로그의 별도 감지행 — 미구현)
 
 > 승격 자격에 **실제 write** 를 요구하는 이유: NFS 는 서버 장애 시 마운트는 남아 있는데
 > I/O 만 막히는 상태(stale handle)가 되므로 마운트 존재 확인만으로는 부족하다.

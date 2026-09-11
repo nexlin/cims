@@ -806,6 +806,30 @@ def _serving_cert_info() -> dict:
 _PREV_RUNNING_MODULES: set = set()   # 직전 metric 의 실행 모듈 집합 — 소멸 전이(process_died) 감지
 
 
+def collect_store_state() -> dict:
+    """공유 store(NAS) 접근 상태 — {path, ok, reason} (공유 store 미구성이면 빈 dict).
+
+    HA 서비스 선언(`ha.json` services.<svc>.shared_store)이 정본이라 그 마운트만 본다 —
+    노드에 붙은 다른 마운트는 이 알람의 대상이 아니다(용량은 A-QOS-001 소관).
+
+    **관측 주체가 agent 인 이유**: store 가 멈추면 그것을 쓰는 모듈(oam/oam-svc)이 먼저
+    물려 자기 상태를 보고할 수 없다(실측 — 모듈은 D 상태로 죽지도 않았다). agent 는 store
+    를 쓰지 않으므로 살아남아 보고할 수 있다."""
+    out: dict = {}
+    try:
+        cfg = _read_ha_json()
+        for svc in (cfg.get("services") or {}).values():
+            mp = _shared_store_for(svc)
+            if not mp:
+                continue
+            ok, reason = _shared_store_ready(mp)
+            out = {"path": mp, "ok": bool(ok), "reason": reason}
+            break               # 그룹당 공유 store 는 하나 (oam_ha.md §4.1)
+    except Exception as e:
+        return {"path": "", "ok": False, "reason": f"probe_error:{type(e).__name__}"}
+    return out
+
+
 def collect_metrics() -> dict:
     """CPU/mem/disk percent + load + per-iface RX/TX + CIMS module pid/cpu/mem."""
     m = {}
@@ -835,6 +859,13 @@ def collect_metrics() -> dict:
     m["per_iface"] = collect_per_iface()
     # mount별 disk 사용률 (실제 블록 디바이스만)
     m["mounts"] = collect_per_mount()
+    # 공유 store(NAS) 접근 상태 — A-PRC-028 판정 근거 (OAM base 평가, check=store_unavailable).
+    #   verdict 의 reason_codes 로도 간접 도달하지만 [:6] 절단이라 근거로 쓸 수 없다.
+    #   여기 실리는 것은 **직전 판정**이고 probe 는 워커가 돈다 — 이 수집 경로는 절대
+    #   블록되면 안 된다(멈춘 마운트에서 metric 이 끊기면 그 호스트 전 규칙이 미평가된다).
+    st = collect_store_state()
+    if st:
+        m["store"] = st
     # modules — 실행 중 모듈 (pid/cpu/mem) + 기존 processes 유지 (호환).
     m["processes"] = []
     m["modules"]   = []
@@ -3158,6 +3189,20 @@ def _run_health_check(mod: str, check: str, t: dict) -> dict:
     return r
 
 
+# 관측 강화 — 판정 근거 보존 (동작은 바꾸지 않는다).
+#   실측 사고(2026-09-10 16:48)에서 `zombie:oam` 으로 절체됐는데, **왜 그 한 번이 실패했는지**
+#   를 사후에 알 수 없었다: 판정 상세(detail)는 이 캐시 파일에만 있고 3초마다 덮어써진다.
+#   그래서 결과를 덮어쓰되 **최근 이력은 남긴다**. 파일은 어차피 매 tick 다시 쓰므로 비용 없음.
+_HEALTH_RECENT_MAX = 40           # 검사별 보존 개수 (readiness 3초 주기 ≈ 최근 2분)
+_AGENT_DEBUG = os.environ.get("CIMS_AGENT_DEBUG", "").strip().lower() in ("1", "true", "yes")
+
+
+def _dbg(msg: str) -> None:
+    """디버그 로그 — `CIMS_AGENT_DEBUG=1` 일 때만. 기본은 무음(운영 로그 오염 방지)."""
+    if _AGENT_DEBUG:
+        print(f"[agent][debug] {msg}", flush=True)
+
+
 def _health_merge_write(mod: str, updated: dict) -> None:
     path = os.path.join(_HEALTH_DIR, f"{mod}.json")
     data = {}
@@ -3167,8 +3212,25 @@ def _health_merge_write(mod: str, updated: dict) -> None:
     except Exception:
         data = {}
     checks = data.get("checks") if isinstance(data.get("checks"), dict) else {}
+    recent = data.get("recent") if isinstance(data.get("recent"), dict) else {}
+    for _chk, _res in updated.items():
+        prev = checks.get(_chk) or {}
+        # 상태가 바뀐 순간과 **실패·지연**은 반드시 남긴다. 성공 연속은 1개만 갱신해
+        # 이력이 성공으로 가득 차 실패 흔적이 밀려나지 않게 한다.
+        slow = int(_res.get("duration_ms") or 0) >= 1000
+        changed = prev.get("status") != _res.get("status")
+        if _res.get("status") != "SUCCESS" or slow or changed:
+            row = {"at": _res.get("checked_at"), "status": _res.get("status"),
+                   "detail": str(_res.get("detail") or "")[:160],
+                   "ms": _res.get("duration_ms")}
+            lst = recent.get(_chk) if isinstance(recent.get(_chk), list) else []
+            lst.append(row)
+            recent[_chk] = lst[-_HEALTH_RECENT_MAX:]
+            _dbg(f"health {mod}/{_chk} {_res.get('status')} "
+                 f"{_res.get('detail')} ({_res.get('duration_ms')}ms)")
     checks.update(updated)
-    data = {"module": mod, "checks": checks, "updated_at": int(time.time())}
+    data = {"module": mod, "checks": checks, "recent": recent,
+            "updated_at": int(time.time())}
     try:
         os.makedirs(_HEALTH_DIR, exist_ok=True)
         tmp = path + ".tmp"
@@ -3248,6 +3310,27 @@ def _latch_is_set(svc: str) -> bool:
     return bool(_EVAL_LATCH.get(svc))      # 파일 기록 실패(권한 등) 시의 폴백
 
 
+def _health_snapshot() -> dict:
+    """지금 이 순간 전 모듈의 health 캐시(최근 이력 포함) 사본.
+
+    래치가 서는 순간을 박제하는 용도다. 캐시 파일은 3초마다 덮어써지므로, 절체 사유를
+    나중에 확인하려면 **결정 시점에** 떠 두는 수밖에 없다 — 실측 사고에서 `zombie:oam`
+    의 근거(어느 검사가 왜 실패했는지)를 사후에 복원할 수 없었던 것이 이 코드의 이유다."""
+    out: dict = {}
+    try:
+        for fn in sorted(os.listdir(_HEALTH_DIR)):
+            if not fn.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(_HEALTH_DIR, fn)) as f:
+                    out[fn[:-5]] = json.load(f)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
+
+
 def _latch_set(svc: str, reasons: list | None = None) -> None:
     """래치 설정 (멱등 — 이미 서 있으면 파일을 다시 쓰지 않아 set_at 이 보존된다)."""
     _EVAL_LATCH[svc] = True
@@ -3259,7 +3342,9 @@ def _latch_set(svc: str, reasons: list | None = None) -> None:
         tmp = p + ".tmp"
         with open(tmp, "w") as f:
             json.dump({"service": svc, "set_at": int(time.time()),
-                       "boot_id": _boot_id(), "reasons": (reasons or [])[:12]}, f)
+                       "boot_id": _boot_id(), "reasons": (reasons or [])[:12],
+                       # 판정 근거 박제 — 이 파일은 운영자가 래치를 풀 때까지 남는다.
+                       "health_at_decision": _health_snapshot()}, f)
         os.replace(tmp, p)
         print(f"[agent][ha] 절체 래치 설정(영속): {svc} reasons={(reasons or [])[:4]}", flush=True)
     except Exception as e:
@@ -3709,6 +3794,12 @@ def _ha_managed_modules() -> set:
 _STORE_LOG_TS: dict = {}          # svc -> 마지막 공유 store 경고 로그 시각 (스팸 억제)
 _STORE_PROBE_TTL = 5
 _STORE_PROBE_CACHE: dict = {}     # mount_point -> (ts, (ok, reason))
+# 진행 중인 write probe — **멈춘 NFS 에서는 probe 자체가 영원히 안 끝난다**(hard 마운트의
+# write/fsync 는 uninterruptible, SIGKILL 도 안 듣는다 — 실측). 그래서 probe 를 워커에
+# 맡기고 호출자는 데드라인만 본다. 워커가 물려 있는 동안 새 probe 를 또 띄우면 죽지 않는
+# 스레드가 tick 마다 쌓이므로, 마운트당 하나만 돌린다.
+_STORE_PROBE_DEADLINE = 5.0       # 이 시간 넘게 안 끝나면 'unresponsive' 로 판정
+_STORE_PROBE_INFLIGHT: dict = {}  # mount_point -> (시작시각, threading.Event, [결과])
 
 
 def _shared_store_for(s: dict) -> "str | None":
@@ -3736,6 +3827,20 @@ def _shared_store_mounted(mp: str) -> bool:
     return False
 
 
+def _store_write_probe(mp: str) -> tuple:
+    """실제 write 1회 — (ok, reason). **블록될 수 있다**(호출자는 워커에서 돌린다)."""
+    probe = os.path.join(mp, ".cims-store-probe")
+    try:
+        with open(probe, "w") as f:
+            f.write(str(os.getpid()))
+            f.flush()
+            os.fsync(f.fileno())
+        os.unlink(probe)
+        return (True, "ok")
+    except Exception as e:
+        return (False, f"not_writable:{type(e).__name__}")
+
+
 def _shared_store_ready(mp: str, force: bool = False) -> tuple:
     """승격 자격(preflight) — (ok, reason). 5초 캐시.
 
@@ -3743,24 +3848,50 @@ def _shared_store_ready(mp: str, force: bool = False) -> tuple:
     남아 있는데 I/O 만 막히는 상태(stale handle)가 되므로 존재 확인만으로는 부족하다 —
     실제 write 를 1회 해본다. 양 노드가 모두 부적격이면 VIP 공백이 되는데, 이는
     **관리 데이터에 접근 못 하는 노드가 관리평면을 인수하는 것보다 안전**하다.
+
+    **write 는 워커에서 하고 여기서는 데드라인만 본다.** 멈춘 NFS(hard)에서 write 는
+    영원히 안 끝나므로, 인라인으로 부르면 판정하는 쪽(HA tick·metric 수집)이 같이 물려
+    감지 자체가 사라진다 — 실측 사고에서 oam-svc 가 정확히 그렇게 죽었다. 데드라인을
+    넘기면 `unresponsive` 로 **판정**한다(모른다가 아니라 못 쓴다 — 승격 부적격 사유이자
+    A-PRC-028 발화 조건). 물린 워커는 죽일 수 없으므로 마운트당 하나만 유지한다.
     """
     now = time.time()
     if not force:
         ent = _STORE_PROBE_CACHE.get(mp)
         if ent and now - ent[0] < _STORE_PROBE_TTL:
             return ent[1]
-    res = (False, "not_mounted")
-    if _shared_store_mounted(mp):
-        probe = os.path.join(mp, ".cims-store-probe")
-        try:
-            with open(probe, "w") as f:
-                f.write(str(os.getpid()))
-                f.flush()
-                os.fsync(f.fileno())
-            os.unlink(probe)
-            res = (True, "ok")
-        except Exception as e:
-            res = (False, f"not_writable:{type(e).__name__}")
+    if not _shared_store_mounted(mp):
+        res = (False, "not_mounted")
+        _STORE_PROBE_CACHE[mp] = (now, res)
+        _STORE_PROBE_INFLIGHT.pop(mp, None)
+        return res
+
+    ent = _STORE_PROBE_INFLIGHT.get(mp)
+    if ent is None:
+        done, box = threading.Event(), []
+
+        def _run():
+            try:
+                box.append(_store_write_probe(mp))
+            except Exception as e:                       # noqa: BLE001 — 워커 밖으로 못 나감
+                box.append((False, f"not_writable:{type(e).__name__}"))
+            finally:
+                done.set()
+
+        threading.Thread(target=_run, daemon=True,
+                         name=f"store-probe:{os.path.basename(mp) or 'root'}").start()
+        ent = (now, done, box)
+        _STORE_PROBE_INFLIGHT[mp] = ent
+
+    started, done, box = ent
+    done.wait(max(0.0, _STORE_PROBE_DEADLINE - (now - started)))
+    if done.is_set():
+        res = box[0] if box else (False, "not_writable:Unknown")
+        _STORE_PROBE_INFLIGHT.pop(mp, None)
+    else:
+        # 워커가 아직 물려 있다 — 이 판정 주기는 'unresponsive'. 워커는 그대로 두고
+        # (죽일 수 없다) 다음 호출에서 같은 워커의 완료 여부를 다시 본다.
+        res = (False, "unresponsive")
     _STORE_PROBE_CACHE[mp] = (now, res)
     return res
 
