@@ -140,6 +140,23 @@ for c in python3 tar openssl; do
     command -v "$c" >/dev/null || { err "$c 필요 — 설치 후 재시도"; exit 1; }
 done
 
+# ── OAM 실행 인터프리터 결정 ──────────────────────────────────────────────
+# OAM 의 동봉 확장은 `*.cpython-314-*.so` 라 CPython 3.14 를 요구한다. 배포판마다 자리가
+# 다르므로(우분투 26.04 = `python3`, 로키 10 = `python3.14`) **이름이 아니라 버전을 물어서**
+# 고른다 — 이름으로 고르면 배포판이 하나 늘 때마다 분기가 는다.
+#
+# 여기서 고른 값은 ① 부트스트랩 OAM 기동 ② cims-svc 인계(CIMS_PYTHON) ③ agent 설치
+# (`install-agent.sh --python`) 셋 모두에 같은 값으로 흘러간다. agent 의 sys.executable 이
+# 이후 모든 파이썬 모듈(oam/csc/oam-svc)의 런타임이 되므로, 갈래를 하나로 두는 것이 요점이다.
+#
+# 같은 판정이 `agent/install-agent.sh` 에도 있다 — 두 설치기 모두 단독 배포(curl | bash)라
+# 공유 파일을 source 할 수 없다. **고칠 때는 두 곳을 같이 고친다.**
+_py_is_314() {
+    [[ -n "${1:-}" && -x "$1" ]] || return 1
+    "$1" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 14) else 1)' 2>/dev/null
+}
+# (실제 선택은 설치 경로(PREFIX)가 확정된 뒤 — 아래 "인터프리터 선택" 절)
+
 # ── 관리 store 위치 — 마운트 후보 제시 + 전제 검사 ────────────────────────────
 #   `CimsRuntimeMount` 이 설정되면 OAM 은 기동 **전에** 그 경로가 실제 마운트인지 확인하고
 #   아니면 기동을 거부한다(oam_app._assert_runtime_mount → exit 3, oam_ha.md §4.3). 그 거부가
@@ -430,6 +447,25 @@ if (( PORT < 1024 )); then
     warn "bind 포트 $PORT 는 특권 포트 — 비root OAM 은 직접 bind 불가 → 4419 로 보정."
     PORT=4419
 fi
+
+# ── 인터프리터 선택 ──────────────────────────────────────────────────────────
+#   설치 경로(PREFIX)가 확정된 뒤에 고른다 — 후보 ①이 그 아래에 있기 때문이다.
+#   ① 반입본 동봉 인터프리터  ② 배포판의 python3.14 (로키 10)  ③ 기본 python3 (우분투 26.04)
+CIMS_PY=""
+for _c in "$PREFIX/runtime/python/bin/python3" \
+          "$(command -v python3.14 2>/dev/null || true)" \
+          "$(command -v python3 2>/dev/null || true)"; do
+    if _py_is_314 "$_c"; then CIMS_PY="$_c"; break; fi
+done
+if [[ -z "$CIMS_PY" ]]; then
+    err "CPython 3.14 를 찾지 못했습니다 — OAM 의 동봉 확장(*.cpython-314-*.so)이 3.14 전용입니다"
+    err "  현재 python3 : $(python3 -V 2>&1)"
+    err "  우분투 26.04 : 기본 python3 이 3.14 입니다 (설치 누락 확인)"
+    err "  로키/RHEL 10 : sudo dnf install -y python3.14"
+    err "  그 외 배포판 : 반입본의 동봉 인터프리터를 $PREFIX/runtime/python 에 푸세요"
+    exit 1
+fi
+ok "python: $CIMS_PY ($("$CIMS_PY" -V 2>&1))"
 
 # 권한 체크는 스크립트 상단 가드(반드시 sudo)에서 이미 강제됨 — 여기서는 생략.
 
@@ -919,7 +955,7 @@ cat > "$PREFIX/start-oam.sh" <<SH
 # OAM 부트스트랩 기동 — 정식 감독은 agent watchdog + cims-svc (start oam).
 # current 통로로 기동 — 이후 oam 업그레이드 시 이 스크립트가 자동으로 활성 버전을 가리킨다.
 cd "$OAM_CURRENT/oam/src"
-setsid nohup /usr/bin/env python3 -u "$OAM_CURRENT/oam/src/oam_app.py" > "$OAM_ROOT/log/oam_stdout.log" 2>&1 < /dev/null &
+setsid nohup $CIMS_PY -u "$OAM_CURRENT/oam/src/oam_app.py" > "$OAM_ROOT/log/oam_stdout.log" 2>&1 < /dev/null &
 SH
 chmod +x "$PREFIX/start-oam.sh"
 if [[ $DO_START -eq 1 ]]; then
@@ -969,7 +1005,8 @@ except Exception: print('')" 2>/dev/null)
             chmod 0644 "$_IA" 2>/dev/null || true
             _ia_args=(--oam-url "$PEER_URL" --enrollment-token "$_JOIN_ENROLL"
                       --name "${SERVER_NAME:-$(hostname -s 2>/dev/null || hostname)}"
-                      --install-dir "$PREFIX" --svc-user "$SVC_USER")
+                      --install-dir "$PREFIX" --svc-user "$SVC_USER"
+                      --python "$CIMS_PY")
             if [[ $USE_SYSTEMD -eq 1 && -d /run/systemd/system ]]; then
                 # 합류 노드도 OAM 은 role=base — 배포 설정(Server.Role)이 정본이지만
                 # drop-in 도 함께 둬서 어느 경로로 기동돼도 같은 역할이 되게 한다.
@@ -1109,7 +1146,8 @@ except Exception: print('')" 2>/dev/null)
             #   install-agent.sh 가 추출 + sudoers + linger + enroll + systemd --user enable 까지 수행
             #   (구 setup-sudoers.sh + init.sh 단계 흡수). systemd 미사용 환경은 --no-systemd → 아래 nohup.
             _ia_args=(--oam-url "https://127.0.0.1:$PORT" --enrollment-token "$ENROLL_TOKEN"
-                      --name "$HOSTNM" --install-dir "$PREFIX" --svc-user "$SVC_USER")
+                      --name "$HOSTNM" --install-dir "$PREFIX" --svc-user "$SVC_USER"
+                      --python "$CIMS_PY")
             _use_sd=0
             if [[ $USE_SYSTEMD -eq 1 && -d /run/systemd/system ]]; then _use_sd=1; else _ia_args+=(--no-systemd); fi
             # OAM_ROLE=base — base 노드는 게이트웨이. agent 가 OAM 을 --role base 로 기동해야
@@ -1127,7 +1165,7 @@ except Exception: print('')" 2>/dev/null)
                 #   start_oam 의 kill_stray 가 부트스트랩 OAM(같은 포트/경로)을 정리하고
                 #   pidfile($OAM_ROOT/run/oam.pid)을 남긴다 → 중복기동·고아 방지.
                 info "OAM 을 agent 관리(cims-svc)로 인계... (role=base, 게이트웨이)"
-                if _run_as "OAM_ROLE=base CIMS_DIST_DIR='$OAM_CURRENT' CIMS_PYTHON=python3 '$PREFIX/agent/current/bin/cims-svc' start oam" \
+                if _run_as "OAM_ROLE=base CIMS_DIST_DIR='$OAM_CURRENT' CIMS_PYTHON='$CIMS_PY' '$PREFIX/agent/current/bin/cims-svc' start oam" \
                         >> "$OAM_ROOT/log/oam_handover.log" 2>&1; then
                     ok "OAM cims-svc 감독 전환 완료 (pidfile + watchdog)"
                 else
@@ -1144,7 +1182,7 @@ except Exception: print('')" 2>/dev/null)
                     AGENT_STATE="실행 중 (systemd --user cims-agent.service)"
                 else
                     # systemd 미사용 — install-agent.sh 가 enroll 까지만 했으므로 nohup 기동
-                    _run_as "cd '$PREFIX' && CIMS_AGENT_PREFIX='$PREFIX' setsid nohup python3 ./agent/current/cims_agent.py --oam-url 'https://127.0.0.1:$PORT' --state-dir ./state --name '$HOSTNM' > ./agent-stdout.log 2>&1 < /dev/null &"
+                    _run_as "cd '$PREFIX' && CIMS_AGENT_PREFIX='$PREFIX' setsid nohup '$CIMS_PY' ./agent/current/cims_agent.py --oam-url 'https://127.0.0.1:$PORT' --state-dir ./state --name '$HOSTNM' > ./agent-stdout.log 2>&1 < /dev/null &"
                     sleep 3
                     AGENT_STATE="실행 중 (nohup — systemd 미사용 환경)"
                 fi

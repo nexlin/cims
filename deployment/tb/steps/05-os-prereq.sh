@@ -3,9 +3,11 @@
 # 05-os-prereq.sh — OS 전제조건 확인 + 반입 .deb 설치 (폐쇄망)
 #
 # 하는 일
-#   ① OS/아키텍처가 기준(Ubuntu 26.04 / x86_64)인지 확인 — 아니면 이유를 말하고 중단
+#   ① 전제 확인 — 아키텍처·glibc·패키지 계열 (배포판 이름이 아니라 능력으로, tb-common)
 #   ② 필수 명령 존재 확인 (python3 / tar / openssl, curl·ssh 는 경고)
-#   ③ 반입한 .deb 설치 — 기본은 MariaDB 서버 (offline/debs/mariadb/)
+#   ③ 반입 패키지 설치 — 기본은 MariaDB 서버
+#        debian 계열: offline/debs/mariadb/ (apt 로컬 저장소)
+#        rhel   계열: offline/rpms/mariadb/ (dnf 로컬 파일)
 #
 # 왜 이 단계가 있나: 폐쇄망엔 apt repo 가 없다. 프로젝트는 이미 같은 문제를
 # .deb 동봉 + 오프라인 설치로 풀고 있다 (csp/vendor, agent/vendor) — 그 관례를 따른다.
@@ -41,21 +43,128 @@ for c in curl ssh; do
     command -v "$c" >/dev/null || warn "$c 없음 — 이후 단계에서 필요합니다 (반입 목록에 추가)"
 done
 
+# ── 계열 분기 ─────────────────────────────────────────────────
+# OS 의존 설치가 갈라지는 유일한 축이다 — debian = apt/dpkg, rhel = dnf/rpm.
+# 나머지 단계(10~70)는 계열을 묻지 않는다.
+PKG_FAMILY="$(tb_pkg_family)"
+installed=0
+
+tb_require_root
+tb_init_dirs
+
+# ── CPython 3.14 확보 ─────────────────────────────────────────
+# OAM·CSC 의 동봉 확장이 `*.cpython-314-*.so` 라 3.14 를 요구한다(20 단계가 검사).
+# 배포판이 3.14 를 주는지는 배포판·마이너마다 다르다:
+#   우분투 26.04       기본 python3 이 3.14           → 할 일 없음
+#   로키 10.2          AppStream 의 python3.14 패키지  → 반입 rpm 으로 설치 가능
+#   로키 10.0 / 10.1   **없다** (10.2 부터 생겼다)      → 동봉 인터프리터가 유일한 길
+#
+# **OS 전제조건이므로 여기서 채운다.** 20 단계까지 가서 막히면 현장에서 한 번 더 왕복한다 —
+# 05 는 "이 장비가 이 배포본을 받을 수 있는 상태인가" 를 끝내는 단계다.
+# MariaDB 가 이미 깔려 있어 아래 조기 종료로 빠지는 경우에도 이 검사는 지나간다.
+#
+# 순서에 뜻이 있다 — **동봉본이 배포판 패키지보다 앞**이다:
+#   ① 이미 쓸 수 있는 3.14 가 있으면 그것을 쓴다 (재설치하지 않는다)
+#   ② 동봉 인터프리터 — 배포판을 가리지 않고, OS 패키지를 하나도 건드리지 않는다
+#   ③ 배포판 패키지 (rhel) — 반입 rpm 이 기반 패키지까지 올릴 수 있어 뒤에 둔다
+_extract_bundled_python() {
+    shopt -s nullglob
+    local cands=("$TB_OFFLINE_DIR/runtime"/python-*.tar.gz)
+    shopt -u nullglob
+    [[ ${#cands[@]} -gt 0 ]] || return 1
+    local tgz="${cands[-1]}"
+
+    # 설치 경로는 20 단계와 같은 키다 — 여기서 물으면 20 이 그 값을 그대로 쓴다.
+    tb_ask TB_INSTALL_PREFIX "설치 경로" "/opt/cims-agent"
+    local root="$TB_INSTALL_PREFIX/runtime"
+
+    info "동봉 인터프리터 설치 — $(basename "$tgz") → $root/python"
+    mkdir -p "$root"
+    rm -rf "$root/.python.new"
+    mkdir -p "$root/.python.new"
+    # install_only 아카이브는 최상위가 python/ 이다.
+    tar xzf "$tgz" -C "$root/.python.new" \
+        || { rm -rf "$root/.python.new"; die "동봉 인터프리터 풀기 실패: $tgz"; }
+    if [[ ! -x "$root/.python.new/python/bin/python3" ]]; then
+        rm -rf "$root/.python.new"
+        die "아카이브 구조가 예상과 다릅니다 — python/bin/python3 가 없습니다 ($tgz)"
+    fi
+    # 교체는 마지막에 한 번에 — 도중에 죽어도 반쯤 덮인 인터프리터가 남지 않는다.
+    rm -rf "$root/.python.old"
+    [[ -d "$root/python" ]] && mv "$root/python" "$root/.python.old"
+    mv "$root/.python.new/python" "$root/python"
+    rm -rf "$root/.python.new" "$root/.python.old"
+    # agent 는 비root(서비스 계정)로 돈다 — 읽기·실행이 열려 있어야 한다.
+    chmod -R a+rX "$root/python"
+    return 0
+}
+
+_install_python314_rhel() {
+    local pydir="$TB_OFFLINE_DIR/rpms/python"
+    shopt -s nullglob
+    local pyrpms=("$pydir"/*.rpm)
+    shopt -u nullglob
+
+    if [[ ${#pyrpms[@]} -gt 0 ]]; then
+        info "CPython 3.14 설치 — 반입 rpm ${#pyrpms[@]}개"
+        tb_run "05-dnf-python" dnf install -y --disablerepo='*' "${pyrpms[@]}" \
+            || die_hint "python3.14 설치 실패" "로그: $TB_LOG_DIR/05-dnf-python.log"
+        return 0
+    fi
+    if [[ "${TB_ALLOW_ONLINE:-0}" == "1" ]]; then
+        warn "TB_ALLOW_ONLINE=1 — 네트워크 저장소에서 python3.14 를 설치합니다"
+        tb_run "05-dnf-python" dnf install -y python3.14 \
+            || die_hint "python3.14 설치 실패" "로그: $TB_LOG_DIR/05-dnf-python.log"
+        return 0
+    fi
+    return 1
+}
+
+_ensure_python314() {
+    tb_find_python314 >/dev/null 2>&1 && { ok "python 3.14: $(tb_find_python314)"; return 0; }
+
+    if _extract_bundled_python; then
+        :
+    elif [[ "$PKG_FAMILY" == "rhel" ]] && _install_python314_rhel; then
+        :
+    else
+        die_hint "CPython 3.14 가 없습니다 — OAM·CSC 의 동봉 확장이 3.14 전용입니다" \
+            "현재 python3: $(python3 -V 2>&1)" \
+            "길은 둘입니다." \
+            "  ① 인터프리터 동봉 (배포판을 가리지 않음 — 로키 10.0/10.1 은 이 길뿐):" \
+            "       빌드 장비에서  ./tools/tb-fetch-python.sh   → 반입본에 다시 담는다" \
+            "  ② 배포판 패키지 (로키 10.2 이상):" \
+            "       같은 배포판 장비에서  ./tools/tb-fetch-rpms.sh python" \
+            "       이 장비에 저장소가 살아 있다면:" \
+            "         sudo TB_ALLOW_ONLINE=1 ./tb-install.sh --role $ROLE --from 05"
+    fi
+
+    local p
+    if p="$(tb_find_python314)"; then
+        ok "python 3.14: $p"
+    else
+        die "3.14 를 설치했으나 찾지 못했습니다 — 설치 결과를 확인하세요"
+    fi
+}
+_ensure_python314
+
 # ── 이미 설치돼 있으면 끝 ─────────────────────────────────────
 # 명령 존재만 보고 넘기면 안 된다 — **패키지는 설치됐고 시스템 DB 만 없는 반쪽 상태**가
 # 실제로 생긴다(철거 후 재설치에서 AppArmor 가 mariadb-install-db 를 막을 때). 그때
 # 여기서 통과시키면 10 단계가 뜨지 않는 DB 를 붙잡고 헤맨다.
-if [[ "$DEB_SET" == "mariadb" ]] && command -v mariadbd >/dev/null && command -v mariadb >/dev/null; then
+if [[ "$DEB_SET" == "mariadb" ]] && tb_db_server_installed && command -v mariadb >/dev/null; then
     if ! tb_db_initialized; then
         err "MariaDB 는 설치돼 있으나 초기화되지 않았습니다"
         tb_db_init_hint
         die "위 복구를 먼저 하세요 (또는 tools/tb-teardown.sh 로 걷어내고 다시 설치)"
     fi
-    ok "MariaDB 서버·클라이언트 이미 설치됨 ($(mariadbd --version | sed 's/.*Ver \([^ ]*\).*/\1/'))"
+    ok "MariaDB 서버·클라이언트 이미 설치됨 ($("$(tb_db_serverbin)" --version | sed 's/.*Ver \([^ ]*\).*/\1/'))"
     ok "시스템 DB 확인 — datadir: $(tb_db_datadir)"
     exit 0
 fi
 
+# ── debian 계열 (apt/dpkg) ────────────────────────────────────
+_install_debian() {
 deb_dir="$TB_OFFLINE_DIR/debs/$DEB_SET"
 [[ -d "$deb_dir" ]] || die_hint "반입 .deb 디렉토리 없음: $deb_dir" \
     "빌드 장비(개발 서버)에서 아래로 수집해 USB 로 옮기세요:" \
@@ -79,8 +188,6 @@ if [[ ${#targets[@]} -eq 0 ]]; then
     esac
 fi
 
-tb_require_root
-tb_init_dirs
 
 # ── dpkg 가 깨끗한지 먼저 ─────────────────────────────────────
 # dpkg 가 반쯤 멈춘 상태(--configure 미완, "in a mess" 패키지)에서는 apt 가 **무엇을 해도
@@ -101,7 +208,6 @@ fi
 ok "dpkg 상태 깨끗함"
 
 # ── ③ 설치 ────────────────────────────────────────────────────
-installed=0
 # 로컬 저장소는 **debs/* 전체**를 붙인다 — 설치 대상은 이 set 이지만, apt 는 시스템 전체의
 # 의존 상태를 먼저 검사하므로 **관계없는 패키지의 의존이 비어 있으면 이 설치까지 거부**한다.
 # (실측: linux-tools 의 libnl-3-200 이 없어 MariaDB 설치가 `Unmet dependencies` 로 막혔다.)
@@ -198,20 +304,98 @@ if [[ $installed -eq 0 ]]; then
     fi
 fi
 
+}
+
+# ── rhel 계열 (dnf/rpm) ───────────────────────────────────────
+# 폐쇄망 원칙은 debian 쪽과 같다 — **반입한 패키지로 설치**한다. dnf 는 디렉토리를
+# 통째로 넘기면(`dnf install ./*.rpm`) 그 안에서 의존을 스스로 푼다. apt 처럼 색인
+# (Packages)을 만들 필요가 없어서 debian 경로보다 단순하다.
+#
+# 네트워크 저장소는 **명시적으로 허용할 때만** 쓴다(TB_ALLOW_ONLINE=1). 폐쇄망 반입본이
+# 조용히 인터넷에서 받아 오면, 현장에서 "왜 여기선 되는데 거기선 안 되나" 가 된다.
+_install_rhel() {
+    local rpm_dir="$TB_OFFLINE_DIR/rpms/$DEB_SET"
+    local targets=()
+    if [[ -f "$rpm_dir/tb-targets.txt" ]]; then
+        while read -r t; do [[ -n "$t" ]] && targets+=("$t"); done < "$rpm_dir/tb-targets.txt"
+    fi
+    if [[ ${#targets[@]} -eq 0 ]]; then
+        case "$DEB_SET" in
+            # mariadb-connector-c 를 함께 깐다 — csp(C++)가 libmariadb.so.3 를 링크한다.
+            # debian 쪽은 이것을 csp 패키지가 .deb 로 동봉하지만(agent 가 설치), rpm 동봉물은
+            # 아직 없어서 OS 패키지로 받는다.
+            mariadb) targets=(mariadb-server mariadb mariadb-connector-c) ;;
+            *)       targets=() ;;
+        esac
+    fi
+    [[ ${#targets[@]} -gt 0 ]] || die "설치 대상을 알 수 없습니다 (set=$DEB_SET)"
+
+    shopt -s nullglob
+    local rpms=("$rpm_dir"/*.rpm)
+    shopt -u nullglob
+
+    if [[ ${#rpms[@]} -gt 0 ]]; then
+        info "[1/2] 반입 rpm 으로 설치 — ${targets[*]} (${#rpms[@]}개, $rpm_dir)"
+        # --disablerepo='*' : 네트워크 저장소 배제 (폐쇄망 동작을 여기서 보장한다)
+        if tb_run "05-dnf-$DEB_SET" dnf install -y --disablerepo='*' "${rpms[@]}"; then
+            installed=1; ok "dnf 설치 완료 (반입 rpm)"
+        else
+            die_hint "반입 rpm 설치 실패 — 의존이 모자랍니다" \
+                "로그의 'nothing provides' 줄이 부족한 패키지 이름입니다:" \
+                "  $TB_LOG_DIR/05-dnf-$DEB_SET.log" \
+                "같은 배포판·같은 버전 장비에서 추가 수집하세요:" \
+                "  deployment/tb/tools/tb-fetch-rpms.sh $DEB_SET"
+        fi
+        return 0
+    fi
+
+    # 반입 rpm 이 없다 — 네트워크 저장소를 쓸지 묻는다.
+    if [[ "${TB_ALLOW_ONLINE:-0}" != "1" ]]; then
+        die_hint "반입 rpm 디렉토리가 비어 있습니다: $rpm_dir" \
+            "같은 배포판 장비(인터넷 가용)에서 수집해 옮기세요:" \
+            "  deployment/tb/tools/tb-fetch-rpms.sh $DEB_SET" \
+            "이 장비에 저장소가 살아 있고 네트워크 설치를 허용하려면:" \
+            "  sudo TB_ALLOW_ONLINE=1 ./tb-install.sh --role $ROLE --from 05"
+    fi
+    warn "TB_ALLOW_ONLINE=1 — 네트워크 저장소에서 설치합니다 (폐쇄망 동작이 아닙니다)"
+    info "[1/2] dnf 설치 — ${targets[*]}"
+    if tb_run "05-dnf-$DEB_SET" dnf install -y "${targets[@]}"; then
+        installed=1; ok "dnf 설치 완료 (네트워크 저장소)"
+    else
+        die_hint "dnf 설치 실패" "로그: $TB_LOG_DIR/05-dnf-$DEB_SET.log"
+    fi
+}
+
+case "$PKG_FAMILY" in
+    debian) _install_debian ;;
+    rhel)   _install_rhel ;;
+    *)      die_hint "패키지 관리자를 찾지 못했습니다 (apt-get·dnf 없음)" \
+                "MariaDB 서버·클라이언트를 직접 설치한 뒤 이어서 돌리세요:" \
+                "  sudo ./tb-install.sh --role $ROLE --from 10" ;;
+esac
+
 # ── 설치 확인 ─────────────────────────────────────────────────
 info "[2/2] 설치 확인"
 case "$DEB_SET" in
     mariadb)
-        command -v mariadbd >/dev/null || die "mariadbd 가 없습니다 — 설치가 완료되지 않았습니다"
+        _dbd="$(tb_db_serverbin)" || die "mariadbd 가 없습니다 — 설치가 완료되지 않았습니다"
         command -v mariadb  >/dev/null || die "mariadb 클라이언트가 없습니다 (10 단계가 이 명령을 씁니다)"
-        ok "MariaDB: $(mariadbd --version | sed 's/.*Ver \([^ ]*\).*/\1/')"
-        # apt 는 postinst 가 조용히 실패해도 성공으로 끝난다 — 산출물을 직접 본다.
-        if ! tb_db_initialized; then
+        ok "MariaDB: $("$_dbd" --version | sed 's/.*Ver \([^ ]*\).*/\1/')  ($_dbd)"
+        # 시스템 DB(mysql 스키마)를 **언제 만드는가가 계열마다 다르다.**
+        #   debian — 패키지 postinst 가 설치 시점에 mariadb-install-db 를 돌린다.
+        #            그래서 여기서 없으면 사고다(postinst 가 조용히 실패한 것 — apt 는
+        #            그래도 성공으로 끝내므로 산출물을 직접 본다).
+        #   rhel   — 설치 때 만들지 않는다. mariadb.service 의 ExecStartPre
+        #            (mariadb-prepare-db-dir)가 **첫 기동 때** 만든다. 여기서 없는 것이 정상.
+        if tb_db_initialized; then
+            ok "시스템 DB 확인 — datadir: $(tb_db_datadir)"
+        elif [[ "$PKG_FAMILY" == "rhel" ]]; then
+            info "시스템 DB 는 아직 없습니다 — 첫 기동 때 systemd 가 만듭니다 (10 단계)"
+        else
             err "설치는 됐으나 시스템 DB 가 만들어지지 않았습니다"
             tb_db_init_hint
             die "이 상태로는 10 단계가 DB 를 띄울 수 없습니다"
         fi
-        ok "시스템 DB 확인 — datadir: $(tb_db_datadir)"
         ;;
     *)  ok "$DEB_SET 설치 완료" ;;
 esac

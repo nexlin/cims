@@ -79,6 +79,10 @@ inst="$stage/cims-bootstrap/install.sh"
 # --batch: 문답 생략(자동화용). --admin-pass 는 argv 로만 받는 인자다 — 이 프로세스가
 # 잠깐 ps 에 노출되지만 같은 값이 tb-site.conf(0600)에 이미 있고, 대안(대화식 입력)은
 # 자동화를 깬다. 로그에는 남기지 않는다.
+# 콘솔·API 는 브라우저와 다른 노드의 agent 가 붙는 포트다 — rhel 계열이면 여기서 연다.
+# (우분투는 ufw 가 꺼져 있어 아무 일도 하지 않는다.)
+tb_firewall_allow "${TB_OAM_PORT}/tcp"
+
 info "[2/3] install.sh 실행 — mgmt=$TB_MGMT_IP port=$TB_OAM_PORT user=$TB_SERVICE_USER"
 if ! "$inst" --batch \
         --prefix "$TB_INSTALL_PREFIX" \

@@ -39,9 +39,13 @@ cp -f "$TB_REPO_ROOT/deployment/db-bootstrap/README.md"       "$dbdir/" 2>/dev/n
 cp -f "$TB_REPO_ROOT/sql/cims_schema.sql"                     "$dbdir/"
 # --cleanup 을 쓸 때만 필요하지만 24KB 라 같이 넣는다 (현장에서 없으면 곤란한 쪽).
 cp -f "$TB_REPO_ROOT/sql/migrate_drop_unused_tables.sql"      "$dbdir/" 2>/dev/null || true
-# 옛 스키마(dispatch_groups 계열)로 이미 깐 DB 를 이어 쓸 때만 필요하다. 새로 깔면 안 쓴다 —
+# 이미 깐 DB 를 이어 쓸 때만 필요한 마이그레이션 — 새로 깔면 안 쓴다(스키마에 이미 들어 있다).
 # 없으면 현장에서 구할 방법이 없으니 함께 담는다 (TB-INSTALL 4-1 의 [주의]).
-cp -f "$TB_REPO_ROOT/sql/migrate_phone_groups_roles.sql"      "$dbdir/" 2>/dev/null || true
+#   phone_groups_roles   dispatch_groups 계열 → 전화 그룹 + 역할 분해
+#   voip_subscriptions   유선 VoIP 가입 테이블 분리 (가입 테이블 = 접속환경 kind)
+for _mig in migrate_phone_groups_roles migrate_voip_subscriptions; do
+    cp -f "$TB_REPO_ROOT/sql/$_mig.sql" "$dbdir/" 2>/dev/null || true
+done
 rm -rf "$dbdir/vendor/pymysql"
 cp -a "$TB_REPO_ROOT/ems/core/oam/vendor/pymysql"             "$dbdir/vendor/"
 # 컴파일 캐시는 담지 않는다 — 대상 장비의 파이썬과 무관하고, 옛 바이트코드가 섞이면 혼란만 준다.
@@ -49,13 +53,38 @@ find "$dbdir" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
 ok "$dbdir ($(du -sh "$dbdir" | awk '{print $1}'))"
 
 # ── OS 패키지 ─────────────────────────────────────────────────
-info "[2/5] OS 패키지(.deb) 확인"
+info "[2/5] OS 패키지 확인 (계열별)"
+# debian 계열(.deb)과 rhel 계열(.rpm)을 함께 담을 수 있다 — 대상 장비의 05 단계가 자기
+# 계열 디렉토리만 본다. 빌드 장비가 우분투라 .rpm 은 대상 배포판 장비에서 수집해 넣는다
+# (tools/tb-fetch-rpms.sh). 둘 다 없으면 05 단계에서 막힌다.
+_os_pkg_found=0
 if [[ -d "$TB_OFFLINE_DIR/debs" ]] && compgen -G "$TB_OFFLINE_DIR/debs/*/*.deb" >/dev/null; then
     for d in "$TB_OFFLINE_DIR"/debs/*/; do
-        ok "$(basename "$d"): $(ls -1 "$d"/*.deb 2>/dev/null | wc -l)개"
+        ok "deb $(basename "$d"): $(ls -1 "$d"/*.deb 2>/dev/null | wc -l)개"
+    done
+    _os_pkg_found=1
+fi
+if [[ -d "$TB_OFFLINE_DIR/rpms" ]] && compgen -G "$TB_OFFLINE_DIR/rpms/*/*.rpm" >/dev/null; then
+    for d in "$TB_OFFLINE_DIR"/rpms/*/; do
+        ok "rpm $(basename "$d"): $(ls -1 "$d"/*.rpm 2>/dev/null | wc -l)개"
+    done
+    _os_pkg_found=1
+fi
+# 동봉 인터프리터 — 배포판이 CPython 3.14 를 주지 않는 노드(로키 10.0/10.1 등)에서는
+# 이것이 유일한 길이다. 없으면 그 노드의 05 단계가 막힌다.
+if compgen -G "$TB_OFFLINE_DIR/runtime/python-*.tar.gz" >/dev/null; then
+    for f in "$TB_OFFLINE_DIR"/runtime/python-*.tar.gz; do
+        ok "runtime $(basename "$f") ($(du -h "$f" | awk '{print $1}'))"
     done
 else
-    warn "반입 .deb 가 없습니다 — 먼저 수집하세요: ./tb-fetch-debs.sh mariadb"
+    warn "동봉 인터프리터가 없습니다 — 배포판이 CPython 3.14 를 주지 않는 노드에서 막힙니다"
+    warn "  받기: ./tb-fetch-python.sh   (인터넷 되는 장비에서)"
+fi
+
+if [[ $_os_pkg_found -eq 0 ]]; then
+    warn "반입 OS 패키지가 없습니다 — 수집하세요:"
+    warn "  debian 대상: ./tb-fetch-debs.sh mariadb   (이 빌드 장비에서)"
+    warn "  rhel   대상: ./tb-fetch-rpms.sh mariadb   (같은 배포판 장비에서)"
 fi
 
 # ── 모듈 tarball (선택) ───────────────────────────────────────

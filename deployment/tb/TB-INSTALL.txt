@@ -6,7 +6,9 @@
    · 서버 1대에 전부 (DB + OAM/콘솔 + csp + cmp + csc + oam-svc)
    · HA(이중화) 미사용
    · 서비스 계정 = cims
-   · OS = Ubuntu 26.04 LTS / x86_64  ← 이건 선택이 아니다 (아래 §1 참고)
+   · OS = Ubuntu 26.04 LTS 또는 Rocky Linux 10.2 / x86_64  (아래 §1 참고)
+        배포판 이름이 조건이 아니라 **능력 셋**이 조건이다 — x86_64 · glibc 2.38 이상 ·
+        CPython 3.14. 설치 스크립트가 이름이 아니라 이 셋을 검사한다.
 
  읽는 법
    $ 로 시작하는 줄이 실제로 칠 명령이고, 그 아래 들여쓴 줄이 그 명령의 설명이다.
@@ -28,7 +30,9 @@
 
    설치 스크립트          deployment/tb/ 전체 (이 파일 포함)
    DB 부트스트랩          db_bootstrap.py + cims_schema.sql + pymysql
-   MariaDB 서버 .deb      25개 (약 26MB)
+   OS 패키지              debian 계열 = MariaDB .deb / rhel 계열 = MariaDB .rpm
+                          (반입본에는 수집해 둔 계열만 들어 있다 — 0-3 참고)
+   동봉 인터프리터        CPython 3.14 재배치 빌드 (배포판이 3.14 를 안 줄 때 쓴다 — 0-3b)
    모듈 패키지            cims-bootstrap-*.tar.gz + csp/cmp/csc/oam-svc(+cspsim)
    초기 데이터 CSV        조직·사용자·가입번호·PTT그룹
    시험용 미디어          tests/media (호시험 코덱용)
@@ -94,10 +98,66 @@
       keepalived 를 지울 때 libnl 이 함께 걷혀 가는 경우가 대표적이다.
       05 단계는 debs/ 아래 **모든 세트**를 저장소로 붙이므로 함께 해석된다.
 
+  ── rhel 계열(로키·RHEL) 대상이면 ────────────────────────────────────────────
+  대상 장비가 로키/RHEL 이면 .deb 가 아니라 .rpm 이 필요하다. **rpm 은 빌드 장비(우분투)
+  에서 받을 수 없다** — 같은 배포판·같은 메이저 버전 장비에서 받아야 한다.
+
+  **sudo 로 돌린다.** 받기만 하고 아무것도 설치하지 않지만, 마지막에 "이 묶음만으로 설치가
+  풀리는가" 를 dnf 에게 실제로 풀어 보게 하는 검사가 있고 그 해결에 root 가 필요하다.
+  (비root 로 돌리면 그 검사만 건너뛴다 — 빠진 의존이 폐쇄망 현장에서야 드러난다.)
+
+  $ ./tools/tb-fetch-rpms.sh mariadb        (로키 장비에서, 반입본을 푼 자리에서)
+      MariaDB 서버·클라이언트 + mariadb-connector-c 와 의존을 받아
+      offline/rpms/mariadb/ 에 담는다.
+      connector 를 함께 받는 이유: csp(C++)가 libmariadb.so.3 를 링크한다. debian 쪽은
+      csp 패키지가 이것을 .deb 로 동봉하지만 rpm 동봉물은 아직 없다.
+      [확인] Rocky 10.2 실측 — 191개 74M. 목록에 mariadb-server · mariadb ·
+             mariadb-connector-c 가 보여야 한다.
+
+  [참고] **CPython 3.14 는 rpm 으로 받지 않는다** — 반입본이 인터프리터를 동봉한다
+         (0-3b 참조). 배포판 패키지로 깔아야 하는 사정이 있을 때만 아래를 쓴다:
+           ./tools/tb-fetch-rpms.sh python      (offline/rpms/python/, 54개 32M)
+         05 단계는 **동봉본을 먼저** 보므로, 둘 다 있으면 rpm 은 쓰이지 않는다.
+
+      [확인] 마지막에 "dnf 가 이 묶음만으로 설치를 풀 수 있습니다" 가 나와야 한다.
+             안 나오면 빠진 패키지 이름이 함께 찍히니, 그 이름으로 같은 디렉토리에 더 받는다:
+               dnf download --resolve --alldeps --destdir offline/rpms/<set> <패키지명>
+             `dnf download --resolve` 가 **조건부(rich) 의존을 따라가지 않기 때문에** 생기는
+             일이다 — mariadb-server 의 `(mysql-selinux >= 1.0.10 if selinux-policy-targeted)`
+             가 실제로 그렇게 빠졌다. 그래서 이 검사를 둔다.
+
+      [주의] 받은 rpm 은 **그 배포판 전용**이다. Rocky 10 용을 RHEL 9 에 깔 수 없다.
+
+      [주의] 의존을 `--alldeps` 로 받기 때문에 **기반 패키지까지 함께 담긴다**
+             (glibc·bash·coreutils·systemd·filesystem 등). 일부러 그렇게 한다 —
+             "수집 장비엔 있고 대상 장비엔 없어서" 폐쇄망에서 영구히 막히는 사고를
+             막기 위해서다(deb 쪽 lsof/psmisc/rsync 사례).
+             설치 때 dnf 가 이미 같은 버전인 것은 건너뛴다. 다만 **대상 장비가 더 낮은
+             버전이면 그것들을 올린다** — 수집 장비와 대상 장비를 같은 이미지에서
+             만든 것으로 맞추면 아무 일도 일어나지 않는다.
+
   [참고] 수집에서 제외하는 것은 Priority=required/important 뿐이다. `standard` 는
          "표준 설치에 포함" 이지 "모든 설치에 포함" 이 아니라서(최소·클라우드 이미지에는
          없다) 제외하지 않는다. 정확버전(=)으로 묶인 짝(perl ↔ perl-base 등)은 우선순위와
          무관하게 함께 담는다 — 한쪽만 담으면 대상 장비에서 절대 풀리지 않는다.
+
+ --------------------------------------------------------------------------------
+ 0-3b. 동봉 인터프리터 (CPython 3.14)
+ --------------------------------------------------------------------------------
+
+  OAM·CSC 안의 부품 13개가 CPython 3.14 전용으로 컴파일돼 있다. 그런데 배포판이 3.14 를
+  주지 않는 경우가 있다 — Rocky 10.0·10.1 저장소에는 python3.14 패키지가 아예 없다
+  (10.2 부터 생겼다). 그래서 인터프리터를 **반입본에 동봉한다.**
+
+  $ deployment/tb/tools/tb-fetch-python.sh      (인터넷 되는 빌드 장비에서)
+      재배치 가능 빌드(python-build-standalone)를 받아 offline/runtime/ 에 담는다.
+      버전·sha256 이 스크립트에 고정돼 있고, 이미 받아 뒀으면 건너뛴다.
+      [확인] "python-3.14.7.tar.gz (35M)" · "sha256 일치"
+
+      [참고] 이 빌드는 **glibc 외에 아무것도 요구하지 않는다** (OpenSSL·SQLite 내장).
+             그래서 배포판·마이너가 바뀌어도 그대로 동작한다 — 버전에 묶이는 쪽은
+             오히려 배포판 rpm 이다. 대상 장비의 05 단계가 이것을
+             <설치경로>/runtime/python 에 풀고, agent·OAM·CSC 가 그 인터프리터로 뜬다.
 
  --------------------------------------------------------------------------------
  0-4. 호시험용 미디어 — tb-pack.sh 가 자동으로 담는다
@@ -151,16 +211,27 @@
  일반 계정으로 로그인한다 (root 직접 로그인은 스크립트가 거부한다).
 
   $ cat /etc/os-release | head -3
-      [확인] Ubuntu 26.04 LTS 여야 한다.
-      [주의] 다른 버전이면 여기서 멈춰야 한다. OAM·CSC 안에 든 부품 13개가
-             CPython 3.14 전용으로 컴파일돼 있어서, 파이썬 버전이 다르면
-             OAM 이 기동 자체를 못 한다. 반입한 .deb 도 26.04 용이다.
-
-  $ python3 -V
-      [확인] Python 3.14.x
+      배포판 이름 자체는 조건이 아니다. 조건은 아래 셋이고, 05 단계가 이것을 검사한다.
+      실측 통과: Ubuntu 26.04 LTS · Rocky Linux 10.2.
 
   $ uname -m
-      [확인] x86_64
+      [확인] x86_64   — 동봉 바이너리(csp·cmp·cspsim) 아키텍처다.
+
+  $ ldd --version | head -1
+      [확인] 끝의 숫자가 2.38 이상이어야 한다 (우분투 26.04 = 2.43, 로키 10.2 = 2.39).
+      [주의] 낮으면 csp 가 실행 즉시 죽는다 — 설정으로 풀 수 없고 재빌드가 필요하다.
+             csp 가 링크한 최고 심볼이 GLIBC_2.38 이다.
+
+  $ python3 -V; python3.14 -V 2>/dev/null
+      [확인] 둘 중 하나가 Python 3.14.x 여야 한다.
+             우분투 26.04 — 기본 python3 이 3.14 다.
+             로키 10.2   — 기본은 3.12 이고, 3.14 는 별도 패키지다:
+                             sudo dnf install -y python3.14
+                           (반입본에 담아 왔다면 05 단계가 알아서 깐다)
+      [주의] 3.14 가 없으면 20 단계에서 OAM 이 기동 자체를 못 한다. OAM·CSC 안에 든
+             부품 13개가 `*.cpython-314-*.so` — CPython 3.14 전용 바이너리라서다.
+             설치 스크립트는 이름이 아니라 **버전을 물어서** 인터프리터를 고르므로,
+             자리가 /usr/bin/python3 든 /usr/bin/python3.14 든 상관없다.
 
   $ ip -4 -o addr show scope global | awk '{print $2, $4}'
       이 서버의 IP 를 확인해 적어둔다. 아래에서 계속 쓴다.
@@ -178,8 +249,94 @@
 
   $ df -h /opt /var
       디스크 여유 확인. 모듈·로그(/opt)와 DB(/var)가 들어간다.
-      [주의] Ubuntu 26.04 의 MariaDB datadir 은 /var/lib/mariadb 다
-             (/var/lib/mysql 아님 — 26.04 에서 기본값이 바뀌었다).
+      [주의] MariaDB datadir 은 배포판마다 다르다 — 우분투 26.04 는 /var/lib/mariadb
+             (26.04 에서 기본값이 바뀌었다), 로키 10 은 /var/lib/mysql 이다.
+             스크립트는 둘 다 본다.
+
+
+================================================================================
+ 1-R. 로키(rhel 계열)에서 추가로 해야 하는 것  ★ 우분투면 이 절을 건너뛴다
+================================================================================
+
+ 우분투와 다른 점만 모았다. **설치 흐름(§2~§5)은 같고**, 아래 넷이 더 붙는다.
+ 대부분 스크립트가 알아서 하지만, 무엇이 왜 다른지 알고 있어야 막혔을 때 빨리 푼다.
+
+ R-1. CPython 3.14 — 배포판이 안 줄 수 있다
+ --------------------------------------------------------------------------------
+   OAM·CSC 안의 부품 13개가 3.14 전용으로 컴파일돼 있다. 로키의 기본 python3 은 3.12 다.
+     · Rocky 10.2  — AppStream 에 python3.14 가 있다
+     · Rocky 10.0 / 10.1 — **없다** (python3.<버전> 패키지 자체가 10.2 부터 생겼다)
+   그래서 반입본이 인터프리터를 동봉한다(§0-3b). 05 단계가 그것을
+   <설치경로>/runtime/python 에 풀고, agent·OAM·CSC 가 그 인터프리터로 뜬다.
+   [확인] 05 에서 "python 3.14: ..." 줄이 나온다.
+
+ R-2. OS 패키지는 .rpm 이고, 같은 배포판 장비에서 받아야 한다
+ --------------------------------------------------------------------------------
+   빌드 장비(우분투)에서는 rpm 을 받을 수 없다. 대상과 **같은 배포판·같은 마이너**
+   장비에서 §0-3 의 tb-fetch-rpms.sh 로 받아 offline/rpms/ 에 담는다.
+   [주의] `dnf download --resolve` 는 **조건부(rich) 의존을 따라가지 않는다.**
+          mariadb-server 의 `(mysql-selinux >= 1.0.10 if selinux-policy-targeted)` 가
+          그래서 빠진 적이 있다. 수집기가 마지막에 "dnf 가 이 묶음만으로 설치를 풀 수
+          있습니다" 를 확인하므로, 그 줄을 반드시 보고 넘어간다.
+   [주의] 받은 rpm 에는 glibc·systemd 같은 기반 패키지도 함께 담긴다(일부러 그렇다).
+          대상 장비의 마이너가 더 낮으면 설치하면서 그것들이 올라간다 — 수집 장비와
+          대상 장비를 같은 이미지로 맞추면 아무 일도 없다.
+
+ R-3. 시스템 DB 는 설치가 아니라 첫 기동 때 만들어진다
+ --------------------------------------------------------------------------------
+   우분투는 패키지 설치 시점(postinst)에 mariadb-install-db 를 돌리지만, rhel 은
+   mariadb.service 의 ExecStartPre(mariadb-prepare-db-dir)가 **첫 기동 때** 만든다.
+   그래서 05 직후에 /var/lib/mysql/mysql 이 없는 것이 **정상**이다 — 05 는 그 사실을
+   알리고 넘어가고, 10 단계가 기동하면서 만든다.
+   [참고] datadir 도 다르다 — 우분투 /var/lib/mariadb · 로키 /var/lib/mysql.
+
+ R-4. firewalld — 포트를 열어야 한다  ★ 가장 자주 걸리는 것
+ --------------------------------------------------------------------------------
+   로키는 firewalld 가 **기본 켜짐**이고 ssh 말고는 전부 거부한다. 우분투는 ufw 가 기본
+   꺼짐이라 이 관문 자체가 없었다. 증상이 고약하다 — 서버에서는 `curl` 이 200 인데
+   **브라우저만 안 붙는다.** 바깥에서 보면 `No route to host` 가 돌아온다(거부 응답).
+
+   20 단계가 OAM/콘솔 포트를 자동으로 연다. 나머지(단말이 붙는 포트)는 직접 연다:
+
+   $ sudo firewall-cmd --list-all
+       [확인] `ports:` 줄에 무엇이 열려 있는지 본다.
+
+   $ sudo firewall-cmd --permanent --add-port=<포트>/<tcp|udp> ; sudo firewall-cmd --reload
+       SIP  — UDP 5060 · TCP 25061 · TLS 5061 (45 단계에서 정한 값)
+       CSC  — TCP 4430 (단말 대면 HTTPS. 4-8 인증서 절차와 짝이다)
+       RTP  — CMP 미디어 포트 범위 (UDP, 45 단계 설정값 확인 후)
+       [주의] 게이트웨이 뒤 내부 API(csc·oam-svc)는 loopback 이라 열지 않는다.
+
+   $ sudo firewall-cmd --list-ports
+       [확인] 연 포트가 보인다. 바깥 장비에서 확인하는 게 확실하다:
+              curl -sk -o /dev/null -w '%{http_code}\n' https://<서버IP>:4419/
+
+   [참고] 자동 개방이 싫으면 TB_SKIP_FIREWALL=1 로 끄면 안내만 나온다.
+
+ R-5. SELinux — 막은 것이 없다 (전 구간 실측)
+ --------------------------------------------------------------------------------
+   enforcing 상태 그대로 **05~70 전 구간(설치·설정·기동·호시험)이 통과했고 AVC 거부
+   기록이 0건**이다 (Rocky 10.2, 2026-09-11). 끄거나 완화할 이유가 없다.
+
+   $ sudo ausearch -m AVC -ts today
+       [확인] 아무것도 안 나오면 정상이다.
+
+   모듈이 표준 자리가 아닌 경로(/opt/cims-agent)에서 돌고 파일 capability(CAP_NET_ADMIN)
+   도 쓰므로, 앞으로 막히는 일이 생기면 여기를 먼저 본다. 끄는 것은 마지막 수단이다 —
+   무엇이 막혔는지부터 본다.
+
+ R-6. 모듈 로그는 한 단계 더 깊은 자리에 있다
+ --------------------------------------------------------------------------------
+   `<설치경로>/modules/<모듈>/current/log/<모듈>.log` 는 **agent 가 받은 stdout** 이라
+   비어 있을 수 있다(CSP 는 0바이트다). 모듈이 제 로그를 쓰는 자리는 한 단계 더 깊다:
+
+     /opt/cims-agent/modules/csp/current/csp/log/csp_<날짜>_N.log     ← 실제 SIP 로그
+     /opt/cims-agent/modules/oam/current/oam/log/app_<날짜>.log
+     /opt/cims-agent/modules/csc/current/csc/log/app_<날짜>.log
+
+   $ sudo find /opt/cims-agent/modules -name '*.log' -size +0 -printf '%10s  %p\n' | sort -rn | head
+       어느 로그에 내용이 있는지 한 번에 본다. (rhel 전용 항목은 아니지만 로키에서
+       처음 걸렸다 — 빈 파일을 보고 "로그가 안 남는다" 로 오해하기 쉽다.)
 
 
 ================================================================================
@@ -335,7 +492,13 @@
   $ sudo ./tb-install.sh --role db
       05·10·15·18 네 단계를 연속 실행한다.
 
-      [05] OS·아키텍처·필수 명령 확인 → 반입 .deb 로 MariaDB 설치
+      [05] 전제 확인(아키텍처·glibc·필수 명령) → 반입 패키지로 MariaDB 설치
+             debian 계열 — offline/debs/ 를 로컬 apt 저장소로 붙여 설치
+             rhel   계열 — offline/rpms/mariadb/ 를 dnf 로 설치 (+ connector)
+                           CPython 3.14 가 없으면 offline/rpms/python/ 으로 함께 설치
+             [주의] 반입 패키지가 없으면 여기서 멈춘다. 이 장비에 저장소가 살아 있고
+                    네트워크 설치를 허용하려면(= 폐쇄망 동작이 아니다):
+                      sudo TB_ALLOW_ONLINE=1 ./tb-install.sh --role db
       [10] MariaDB 기동·자동기동 + 접속주소 설정 + 임시 관리계정 발급
       [15] DB·앱계정·스키마 생성 → 앱계정 접속 검증 → 임시계정 회수
       [18] data/*.csv → DB 직접 입력
@@ -364,16 +527,20 @@
 
   $ sudo mariadb -N -e "SELECT COUNT(*) FROM information_schema.tables \
         WHERE table_schema='cims';"
-      [확인] 16 이 나온다. 15 단계 마지막 줄이 찍는 "OK 테이블 N개" 와 같아야 한다
+      [확인] 17 이 나온다. 15 단계 마지막 줄이 찍는 "OK 테이블 N개" 와 같아야 한다
              (그 줄이 정본 — 스키마가 바뀌면 수도 바뀐다).
 
       [주의] 옛 스키마로 이미 깔린 DB 를 이어 쓰는 경우
-             2026-09-10 부터 관제 그룹(dispatch_groups 계열 4개)이 전화 그룹
-             (phone_groups)과 역할(roles 계열)로 나뉘었다. --role db-schema 를 다시
-             돌리면 새 테이블은 만들어지지만 **옛 테이블과 그 데이터는 그대로 남는다.**
-             데이터를 옮기고 옛 테이블을 지우려면 모듈을 세운 상태에서 한 번 돌린다:
+             --role db-schema 를 다시 돌리면 새 테이블은 만들어지지만 **옛 테이블과 그
+             데이터는 그대로 남는다.** 데이터를 옮기고 옛 구조를 정리하려면 모듈을 세운
+             상태에서 해당하는 것을 순서대로 한 번씩 돌린다:
                $ sudo mariadb cims < offline/db-bootstrap/migrate_phone_groups_roles.sql
-             새로 깔 때는 필요 없다 (스키마가 이미 새 구조다).
+                   관제 그룹(dispatch_groups 계열 4개) → 전화 그룹(phone_groups)
+                   + 역할(roles 계열) 분해
+               $ sudo mariadb cims < offline/db-bootstrap/migrate_voip_subscriptions.sql
+                   유선 VoIP 가입을 volte_subscriptions 에서 voip_subscriptions 로 분리
+                   (가입 테이블 = 접속환경 kind)
+             새로 깔 때는 둘 다 필요 없다 (스키마가 이미 새 구조다).
 
  --------------------------------------------------------------------------------
  4-2. 관리 서버  (OAM + 콘솔 + agent)

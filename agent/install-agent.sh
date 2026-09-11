@@ -8,6 +8,7 @@
 #   sudo bash install-agent.sh --oam-url https://<OAM>:4419 \
 #        --enrollment-token <token> --name <agent-name> \
 #        [--install-dir /opt/cims-agent]   # 미지정 시 /opt/cims-agent
+#        [--python /usr/bin/python3.14]    # 미지정 시 자동 탐색 (아래 resolve_python)
 #   → sudoers + linger + enroll + systemd --user + enable --now 까지 한 번에 (init.sh 불필요).
 #   (agent 자체는 서비스 계정의 systemd --user 로 동작 — sudo 호출자(SUDO_USER) 또는 --svc-user)
 #
@@ -26,6 +27,7 @@ AGENT_NAME="$(hostname)"
 MODE="fresh"
 INSTALL_DIR_ARG=""
 SVC_USER_ARG=""
+PYTHON_ARG=""  # 모듈 실행 인터프리터 명시 지정 (미지정 시 아래 resolve_python 이 고른다)
 NO_SYSTEMD=0   # fresh 에서 systemd --user 단계 생략(호출자가 기동) — base install.sh --no-systemd 용
 
 while [[ $# -gt 0 ]]; do
@@ -36,6 +38,7 @@ while [[ $# -gt 0 ]]; do
         --name)              AGENT_NAME="$2"; shift 2 ;;
         --install-dir)       INSTALL_DIR_ARG="$2"; shift 2 ;;
         --svc-user)          SVC_USER_ARG="$2"; shift 2 ;;   # fresh 서비스 계정 명시(미지정 시 SUDO_USER)
+        --python)            PYTHON_ARG="$2"; shift 2 ;;      # 모듈 실행 인터프리터 절대경로 (CPython 3.14)
         --no-systemd)        NO_SYSTEMD=1; shift ;;          # fresh: systemd --user 생략(호출자 nohup 기동)
         --update-only)       MODE="update"; shift ;;
         *) echo "Unknown option: $1"; exit 1 ;;
@@ -138,6 +141,51 @@ STATE_DIR="$INSTALL_DIR/state"
 BIN_FILE="$INSTALL_DIR/agent/current/cims_agent.py"   # current 통로 — 버전 무관 고정 경로
 SUDOERS_FILE="/etc/sudoers.d/cims-priv"
 
+# ── 모듈 실행 인터프리터 결정 ────────────────────────────────────────────
+# agent 의 `sys.executable` 이 그대로 `CIMS_PYTHON` 으로 cims-svc 에 전달되고,
+# lifecycle.sh 가 그것(`PYBIN`)으로 oam/csc/oam-svc 를 띄운다. 즉 **agent 를 어떤
+# 파이썬으로 띄우느냐가 파이썬 모듈 전부의 런타임을 결정한다** — 그래서 그 선택을
+# 여기 한 곳에서만 한다.
+#
+# OAM·CSC 의 동봉 확장은 `*.cpython-314-*.so` 라 CPython 3.14 를 요구한다. 배포판마다
+# 자리가 다르므로(우분투 26.04 = `python3`, 로키 10 = `python3.14`) **이름이 아니라
+# 버전을 물어서** 고른다. 이름으로 고르면 배포판이 하나 늘 때마다 분기가 는다.
+#
+# 3.14 가 없어도 설치는 계속한다 — csp/cmp 만 올리는 노드에는 파이썬 모듈이 없어
+# 3.14 가 필요 없다. 대신 경고를 남겨 "이 노드에서는 OAM·CSC 가 못 뜬다"를 알린다.
+_py_is_314() {
+    [[ -n "${1:-}" && -x "$1" ]] || return 1
+    "$1" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 14) else 1)' 2>/dev/null
+}
+
+resolve_python() {
+    local c
+    # ① 명시 지정이 최우선 — 버전이 달라도 존중한다(운영자가 알고 넣은 값).
+    if [[ -n "$PYTHON_ARG" ]]; then
+        if ! _py_is_314 "$PYTHON_ARG"; then
+            echo "  ⚠ --python $PYTHON_ARG 는 CPython 3.14 가 아닙니다 — 그대로 사용합니다" >&2
+        fi
+        echo "$PYTHON_ARG"; return 0
+    fi
+    # ② 동봉 인터프리터 — 반입본이 들고 온 경우(배포판 무관 경로)
+    c="$INSTALL_DIR/runtime/python/bin/python3"
+    if _py_is_314 "$c"; then echo "$c"; return 0; fi
+    # ③ 배포판이 3.14 를 별도 이름으로 제공 (로키 10 AppStream: python3.14)
+    c="$(command -v python3.14 2>/dev/null || true)"
+    if _py_is_314 "$c"; then echo "$c"; return 0; fi
+    # ④ 기본 python3 이 3.14 (우분투 26.04)
+    c="$(command -v python3 2>/dev/null || true)"
+    if _py_is_314 "$c"; then echo "$c"; return 0; fi
+    # ⑤ 없음 — 설치는 계속하되 파이썬 모듈은 못 띄운다.
+    echo "${c:-/usr/bin/python3}"; return 1
+}
+
+if CIMS_PY="$(resolve_python)"; then
+    PY_NOTE=""
+else
+    PY_NOTE=" (3.14 아님 — OAM·CSC 는 이 노드에서 기동하지 못합니다)"
+fi
+
 if [[ "$MODE" == "fresh" ]]; then
     echo "==> Installing CIMS Agent (fresh)"
 else
@@ -146,6 +194,7 @@ fi
 echo "    dir    : $INSTALL_DIR"
 echo "    user   : $SVC_USER"
 echo "    name   : $AGENT_NAME"
+echo "    python : $CIMS_PY$PY_NOTE"
 
 mkdir -p "$STATE_DIR"
 chmod 700 "$STATE_DIR"
@@ -422,7 +471,7 @@ _user_systemctl daemon-reload
 
 # 2-b. agent process 종료 — systemd 정리 직후라 보통 이미 죽어있음.
 if pgrep -f "cims_agent.py.*--name $AGENT_NAME" >/dev/null 2>&1; then
-    PID=\$(pgrep -f "cims_agent.py.*--name $AGENT_NAME" | head -1)
+    PID=\$(pgrep -f "cims_agent.py.*--name $AGENT_NAME" | awk 'NR==1 {x=\$0} END {print x}')
     echo "→ agent 잔존 process 종료 (pid=\$PID)"
     kill "\$PID" 2>/dev/null || true
     sleep 1
@@ -497,7 +546,7 @@ if [[ "$MODE" == "fresh" ]]; then
     else
         echo "==> first-time enroll (user=$SVC_USER)"
         runuser -u "$SVC_USER" -- env CIMS_ENROLLMENT_TOKEN="$ENROLL_TOKEN" \
-            /usr/bin/python3 "$BIN_FILE" --oam-url "$OAM_URL" \
+            "$CIMS_PY" "$BIN_FILE" --oam-url "$OAM_URL" \
             --state-dir "$STATE_DIR" --name "$AGENT_NAME" --enroll-only || true
         if [[ ! -f "$STATE_DIR/state.json" ]]; then
             echo "✗ enroll 실패 — token 만료 또는 OAM 도달성 확인" >&2
@@ -543,7 +592,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=$INSTALL_DIR
 Environment=CIMS_AGENT_PREFIX=$INSTALL_DIR
-ExecStart=/usr/bin/python3 $BIN_FILE --oam-url $OAM_URL --state-dir $STATE_DIR --name $AGENT_NAME
+ExecStart=$CIMS_PY $BIN_FILE --oam-url $OAM_URL --state-dir $STATE_DIR --name $AGENT_NAME
 Restart=always
 RestartSec=10
 # agent 가 기동한 모듈(csc/csp 등, cims-svc & 백그라운드)은 이 유닛 cgroup 에 귀속된다.

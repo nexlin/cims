@@ -54,8 +54,11 @@ ${BOLD}CIMS TB 설치${NC}
     --show          현재 사이트 설정 보기
     -h, --help      이 도움말
 
-  기준 환경: Ubuntu ${TB_REF_OS_VERSION} / CPython ${TB_REF_PYTHON} / x86_64
-    다른 배포판(Rocky 등)은 모듈 재빌드가 필요하다 — 별도 과제.
+  실행 조건 (배포판 이름이 아니라 능력이 조건 — docs/design/features/os_portability.md)
+    x86_64 · glibc ${TB_MIN_GLIBC} 이상 · CPython ${TB_REF_PYTHON}
+    실측 통과: Ubuntu ${TB_REF_OS_VERSION} · Rocky Linux 10.2
+    OS 패키지는 계열별로 갈린다 — debian=offline/debs · rhel=offline/rpms
+    (rhel 용 rpm 은 같은 배포판 장비에서 tools/tb-fetch-rpms.sh 로 받는다)
 EOF
 }
 
@@ -130,6 +133,11 @@ if [[ -n "$FROM" ]]; then
     [[ ${#filtered[@]} -gt 0 ]] || die "--from $FROM 에 해당하는 단계가 역할 '$ROLE' 에 없습니다"
     STEPS=("${filtered[@]}")
 fi
+
+# 단계 스크립트는 `bash <script>` 로 **별도 프로세스**에서 돈다 — export 하지 않으면
+# 그쪽의 `set -u` 가 "바인딩 해제한 변수" 로 죽는다. 단계가 실패 안내에
+# "sudo ./tb-install.sh --role $ROLE --from NN" 을 찍으려면 이 값이 필요하다.
+export ROLE
 
 header "=== TB 설치 — 역할: $ROLE (단계: ${STEPS[*]}) ==="
 info "사이트 설정: $TB_SITE_CONF"

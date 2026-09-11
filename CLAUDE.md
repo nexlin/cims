@@ -173,6 +173,7 @@ docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)
 - [api_docs.md](docs/design/features/api_docs.md) — 위젯별 사용 API 노출 (모듈이 코드 옆에 자기 API 선언 + 위젯이 쓰는 id 선언 → 개발자 모드 `[API]` 배지)
 - [csc_standalone_module.md](docs/design/features/csc_standalone_module.md) — CSC 독립 모듈화
 - [build_and_packaging.md](docs/design/features/build_and_packaging.md) / [package_and_template.md](docs/design/features/package_and_template.md) — 빌드·패키징·템플릿
+- [os_portability.md](docs/design/features/os_portability.md) — OS 이식성 — 실행 조건은 배포판 이름이 아니라 **능력 셋**(x86_64 · glibc 2.38+ · CPython 3.14). 원칙 = 분기가 아니라 축(모듈 소스에 OS 분기 없음, 갈라지는 곳은 설치·기동 경계). 인터프리터 선택 단일 규칙(`--python` > 동봉 > `python3.14` > `python3`, **버전을 물어서** 판정 — agent 의 sys.executable → `CIMS_PYTHON` → `PYBIN` 으로 전 파이썬 모듈에 전파, 구현 3곳 복제 명시) · 패키지 계열 축 debian/rhel(TB 05 단계·철거·모듈 vendor·agent HA) · 반입 rpm 수집 `tb-fetch-rpms.sh`(대상과 같은 배포판 장비에서) · OS 의존 지점 목록(상류 대조용) · 확인 조합 Ubuntu 26.04 / Rocky Linux 10.2. 남은 것 = 철거 rhel 갈래 · HA/NFS rpm · SELinux · 인터프리터 동봉
 - [android_ue_client.md](docs/design/features/android_ue_client.md) / [android_ue_m1_pjsip_integration.md](docs/design/features/android_ue_m1_pjsip_integration.md) — Android UE 클라이언트
 - [mcptt_ue_multitalker_media.md](docs/design/features/mcptt_ue_multitalker_media.md) — 단말 동시 발언 미디어 평면(U10) 선택지·구현 설계 + floor 코덱 공유/정의 단일화 검토 (pjproject·안드로이드 빌드 환경 필요)
 - [android_ue_provisioning.md](docs/design/features/android_ue_provisioning.md) — UE 로그인·자동 프로비저닝(서비스별 프로파일, CSC `/provisioning/me`)

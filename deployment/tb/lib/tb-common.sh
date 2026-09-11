@@ -203,35 +203,80 @@ tb_ask_always() {
 }
 
 # ── 전제조건 검사 ──────────────────────────────────────────────
+# **배포판 이름이 아니라 능력으로 검사한다.** 이름으로 막으면 배포판이 하나 늘 때마다
+# 분기가 늘고, 정작 진짜 전제는 검사하지 않게 된다. 동봉 산출물이 요구하는 것은 셋뿐이다:
+#
+#   ① x86_64        — 동봉 바이너리(csp·cmp·cspsim) 아키텍처
+#   ② glibc ≥ 2.38  — csp 가 링크한 최고 심볼 (`objdump -T bin/csp | grep GLIBC_` 로 확인)
+#                      libstdc++ 는 GLIBCXX_3.4.32 (gcc 13) 이상
+#   ③ CPython 3.14  — OAM·CSC 동봉 확장이 `*.cpython-314-*.so` (ABI 전용)
+#
+# 셋을 만족하면 배포판은 묻지 않는다. 실측 통과: Ubuntu 26.04, Rocky Linux 10.2.
+# 참조 배포판(빌드 기준)은 Ubuntu 26.04 지만 그것이 조건은 아니다.
 TB_REF_OS_ID="ubuntu"
 TB_REF_OS_VERSION="26.04"
 TB_REF_PYTHON="3.14"
+TB_MIN_GLIBC="2.38"
 
 tb_os_id()      { . /etc/os-release 2>/dev/null; echo "${ID:-unknown}"; }
 tb_os_version() { . /etc/os-release 2>/dev/null; echo "${VERSION_ID:-unknown}"; }
 tb_os_pretty()  { . /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-unknown}"; }
 
-# 이 배포본은 Ubuntu 26.04 / CPython 3.14 를 겨냥해 빌드돼 있다:
-#   - OAM·CSC 의 vendor 확장이 cpython-314 ABI 전용 (netifaces 는 무조건 import)
-#   - csp/cmp 는 glibc·libstdc++·libssl.so.3·libmariadb.so.3 에 링크
-#   - OS 의존 라이브러리 동봉물이 .deb (agent 가 dpkg 로 설치)
-# 그래서 다른 배포판에서는 "설정을 맞추는" 문제가 아니라 재빌드 문제가 된다.
+# 패키지 계열 — OS 의존 설치(05 단계·철거)가 갈라지는 유일한 축.
+#   debian = apt/dpkg (Ubuntu·Debian) · rhel = dnf/rpm (Rocky·RHEL·AlmaLinux)
+# 이름이 아니라 **명령의 존재**로 판정한다 — 파생 배포판 이름을 나열하지 않기 위해서다.
+tb_pkg_family() {
+    if command -v apt-get >/dev/null 2>&1; then echo debian; return 0; fi
+    if command -v dnf >/dev/null 2>&1 || command -v rpm >/dev/null 2>&1; then echo rhel; return 0; fi
+    echo unknown
+}
+
+# glibc 런타임 버전 — `ldd --version` 첫 줄 끝의 숫자. 배포판마다 앞부분 문구가 다르다
+# ("ldd (Ubuntu GLIBC 2.43-2ubuntu2.4) 2.43" / "ldd (GNU libc) 2.39").
+#
+# ⚠ **`| head -1` 을 쓰지 않는다.** head 는 첫 줄만 읽고 즉시 끝나므로, 아직 쓰고 있던
+#   왼쪽 명령이 SIGPIPE 로 죽는다(종료코드 141). `set -o pipefail` 이면 파이프라인이 141 이
+#   되고, 그 값을 받는 대입문에서 `set -e` 가 **아무 메시지 없이** 스크립트를 죽인다.
+#   로키의 /usr/bin/ldd 는 셸 스크립트라 이 경합에 걸린다(2026-09-11 실측 — 우분투에서는
+#   타이밍이 맞아 드러나지 않았다). awk 로 **끝까지 읽고** 마지막에 출력해 파이프를 안 끊는다.
+tb_glibc_version() {
+    local v=""
+    v="$(ldd --version 2>/dev/null | awk 'NR==1 {x=$NF} END {print x}')" || v=""
+    echo "$v"
+}
+
+# a >= b (점 구분 버전). sort -V 로 비교 — 셸 산술로 쪼개면 2.9 vs 2.38 에서 틀린다.
+# 위와 같은 이유로 `| head -1` 대신 awk 로 끝까지 읽는다.
+tb_ver_ge() {
+    local lo
+    lo="$(printf '%s\n%s\n' "$2" "$1" | sort -V | awk 'NR==1 {x=$0} END {print x}')" || return 1
+    [[ "$lo" == "$2" ]]
+}
+
 tb_require_os() {
-    local id ver
-    id="$(tb_os_id)"; ver="$(tb_os_version)"
-    if [[ "$id" == "$TB_REF_OS_ID" && "$ver" == "$TB_REF_OS_VERSION" ]]; then
-        ok "OS: $(tb_os_pretty) ($(uname -m))"
-        return 0
+    local fam glibc
+    fam="$(tb_pkg_family)"
+    glibc="$(tb_glibc_version)"
+
+    # ② glibc — 못 넘으면 csp 가 실행 즉시 죽는다. 설정으로 풀 수 없으니 여기서 멈춘다.
+    if [[ -n "$glibc" ]] && ! tb_ver_ge "$glibc" "$TB_MIN_GLIBC"; then
+        if [[ "${TB_FORCE_OS:-0}" == "1" ]]; then
+            warn "glibc $glibc < $TB_MIN_GLIBC — csp/cmp 가 기동하지 못합니다 (--force-os 로 계속)"
+        else
+            die_hint "glibc $glibc — 동봉 바이너리는 $TB_MIN_GLIBC 이상이 필요합니다 (현재: $(tb_os_pretty))" \
+                "csp 가 링크한 최고 심볼이 GLIBC_$TB_MIN_GLIBC 입니다." \
+                "이 배포판에서 쓰려면 재빌드가 필요합니다 — 별도 과제." \
+                "그래도 진행하려면: --force-os"
+        fi
     fi
-    if [[ "${TB_FORCE_OS:-0}" == "1" ]]; then
-        warn "OS 불일치: $(tb_os_pretty) — 기준은 ${TB_REF_OS_ID} ${TB_REF_OS_VERSION} (--force-os 로 계속)"
-        return 0
+
+    # 패키지 계열 — 05 단계(DB 설치)와 철거가 이 축으로 갈린다.
+    if [[ "$fam" == "unknown" ]]; then
+        warn "패키지 관리자를 찾지 못했습니다 (apt-get·dnf 없음) — 05 단계는 수동 설치가 필요합니다"
     fi
-    die_hint "OS 불일치 — 이 배포본은 ${TB_REF_OS_ID} ${TB_REF_OS_VERSION} 전용입니다 (현재: $(tb_os_pretty))" \
-        "OAM·CSC 의 동봉 확장이 CPython ${TB_REF_PYTHON} 전용 바이너리이고," \
-        "csp/cmp 는 이 배포판의 glibc·libssl 에 링크돼 있습니다." \
-        "다른 배포판(Rocky 등)에서는 재빌드가 필요합니다 — 별도 과제." \
-        "그래도 진행하려면: --force-os"
+
+    ok "OS: $(tb_os_pretty) ($(uname -m), glibc ${glibc:-?}, $fam 계열)"
+    return 0
 }
 
 tb_require_arch() {
@@ -245,18 +290,44 @@ tb_require_python() {
         "Ubuntu 26.04 최소 설치에는 python3 가 있습니다. 확인: dpkg -l python3-minimal"
 }
 
+# CPython 3.14 를 찾는다 — **이름이 아니라 버전을 물어서** 고른다. 배포판마다 자리가 다르다:
+#   우분투 26.04 = /usr/bin/python3 · 로키 10 = /usr/bin/python3.14 · 동봉본 = <prefix>/runtime/python
+# 찾으면 경로를 stdout 에 내고 0, 없으면 1. 같은 판정이 install.sh·install-agent.sh 에도 있다
+# (둘은 단독 배포라 이 파일을 source 할 수 없다) — **고칠 때는 세 곳을 같이 고친다.**
+tb_find_python314() {
+    local c
+    for c in "${TB_PYTHON:-}" \
+             "${TB_INSTALL_PREFIX:-${TB_PREFIX:-/opt/cims-agent}}/runtime/python/bin/python3" \
+             "$(command -v python3.14 2>/dev/null || true)" \
+             "$(command -v python3 2>/dev/null || true)"; do
+        [[ -n "$c" && -x "$c" ]] || continue
+        if "$c" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 14) else 1)' 2>/dev/null; then
+            echo "$c"; return 0
+        fi
+    done
+    return 1
+}
+
 # OAM·CSC 가 올라갈 노드에서만 요구한다 (agent 는 순수 파이썬이라 무관).
+# 찾은 경로는 TB_PYTHON314 로 남긴다 — 이후 단계가 그 인터프리터를 설치기에 넘긴다.
 tb_require_python314() {
     tb_require_python
-    local v; v="$(python3 -c 'import sys;print("%d.%d"%sys.version_info[:2])')"
-    [[ "$v" == "$TB_REF_PYTHON" ]] && { ok "python3 $v"; return 0; }
-    if [[ "${TB_FORCE_OS:-0}" == "1" ]]; then
-        warn "python3 $v — OAM·CSC 동봉 확장은 ${TB_REF_PYTHON} 전용입니다 (--force-os 로 계속)"
+    if TB_PYTHON314="$(tb_find_python314)"; then
+        ok "python ${TB_REF_PYTHON}: $TB_PYTHON314"
+        export TB_PYTHON314
         return 0
     fi
-    die_hint "python3 $v — OAM·CSC 는 CPython ${TB_REF_PYTHON} 가 필요합니다" \
-        "동봉 확장(netifaces·pydantic_core 등)이 cpython-314 ABI 전용이라," \
-        "버전이 다르면 OAM 이 기동 자체를 못 합니다."
+    TB_PYTHON314=""
+    if [[ "${TB_FORCE_OS:-0}" == "1" ]]; then
+        warn "CPython ${TB_REF_PYTHON} 없음 — OAM·CSC 는 기동하지 못합니다 (--force-os 로 계속)"
+        return 0
+    fi
+    die_hint "CPython ${TB_REF_PYTHON} 를 찾지 못했습니다 (현재 python3: $(python3 -V 2>&1))" \
+        "OAM·CSC 의 동봉 확장(netifaces·pydantic_core 등)이 cpython-314 ABI 전용이라," \
+        "버전이 다르면 OAM 이 기동 자체를 못 합니다." \
+        "  로키/RHEL 10 : sudo dnf install -y python3.14" \
+        "  우분투 26.04 : 기본 python3 이 3.14 입니다 (설치 누락 확인)" \
+        "  그 외        : TB_PYTHON=<경로> 로 직접 지정"
 }
 
 tb_require_cmds() {
@@ -324,7 +395,62 @@ tb_ensure_site_cert() {
     ok "  CN=csp  SAN=${san}  유효 3650일  0600 ${owner:-$(id -un)}"
 }
 
+# ── 방화벽 ─────────────────────────────────────────────────────
+# rhel 계열은 firewalld 가 **기본 켜짐**이고 ssh 말고는 전부 거부한다(icmp-host-prohibited).
+# 우분투는 ufw 가 기본 꺼짐이라 이 관문이 없었고, 그래서 키트에도 이 단계가 없었다 —
+# 로키에서 OAM 이 정상 기동했는데 브라우저만 안 붙는 형태로 드러났다(2026-09-11 실측).
+#
+# **여는 것은 우리가 설치한 서비스의 포트뿐이다.** zone 정책이나 다른 규칙은 건드리지 않는다.
+# 자동으로 여는 것이 싫으면 TB_SKIP_FIREWALL=1 로 끄고 안내만 받는다.
+#
+# 인자: "<포트>/<프로토콜>" 여러 개 (예: 4419/tcp 5060/udp 16000-16999/udp)
+tb_firewall_allow() {
+    [[ $# -gt 0 ]] || return 0
+
+    # firewalld 가 없거나 꺼져 있으면 할 일이 없다 (우분투 경로가 여기로 온다).
+    command -v firewall-cmd >/dev/null 2>&1 || return 0
+    firewall-cmd --state >/dev/null 2>&1 || return 0
+
+    if [[ "${TB_SKIP_FIREWALL:-0}" == "1" ]]; then
+        warn "TB_SKIP_FIREWALL=1 — 방화벽을 건드리지 않습니다. 직접 여세요:"
+        warn "  sudo firewall-cmd --permanent $(printf -- '--add-port=%s ' "$@")&& sudo firewall-cmd --reload"
+        return 0
+    fi
+
+    local opened=() already=() spec
+    for spec in "$@"; do
+        if firewall-cmd --quiet --query-port="$spec" 2>/dev/null; then
+            already+=("$spec")
+        elif firewall-cmd --quiet --permanent --add-port="$spec" 2>/dev/null; then
+            opened+=("$spec")
+        else
+            warn "방화벽 열기 실패: $spec (수동: sudo firewall-cmd --permanent --add-port=$spec)"
+        fi
+    done
+
+    if [[ ${#opened[@]} -gt 0 ]]; then
+        # --permanent 는 재적재해야 실제로 먹는다. 한 번만 돈다.
+        firewall-cmd --reload >/dev/null 2>&1 || warn "firewall-cmd --reload 실패 — 수동으로 한 번 돌리세요"
+        ok "방화벽 개방: ${opened[*]}"
+    fi
+    [[ ${#already[@]} -gt 0 ]] && info "방화벽 이미 열림: ${already[*]}"
+    return 0
+}
+
 # ── MariaDB 상태 판정 ─────────────────────────────────────────
+# 서버 실행 파일 자리가 배포판마다 다르다 — 우분투는 /usr/sbin/mariadbd(PATH 안),
+# 로키는 /usr/libexec/mariadbd(PATH 밖)다. `command -v mariadbd` 만 보면 로키에서
+# "설치 안 됨" 으로 오판한다. 있으면 경로를 내고 0.
+tb_db_serverbin() {
+    local c
+    for c in "$(command -v mariadbd 2>/dev/null || true)" \
+             /usr/libexec/mariadbd /usr/sbin/mariadbd /usr/libexec/mysqld; do
+        [[ -n "$c" && -x "$c" ]] && { echo "$c"; return 0; }
+    done
+    return 1
+}
+tb_db_server_installed() { tb_db_serverbin >/dev/null; }
+
 # `mariadbd --version` 은 **바이너리가 있으면** 답한다 — 서버가 죽어 있어도 통과하므로
 # 기동 확인에 쓰면 안 된다. 실제 판정은 systemd 의 active 상태로 한다.
 tb_db_active() { systemctl is-active --quiet mariadb; }
@@ -369,8 +495,12 @@ tb_db_datadir() {
 tb_db_initialized() { tb_db_datadir >/dev/null; }
 
 # 반쪽 초기화(패키지는 설치됐고 시스템 DB 만 없는 상태)의 복구 안내.
-# 철거 후 재설치에서 AppArmor 프로파일이 커널에 남아 mariadb-install-db 가
-# setgid/dac_override 거부로 실패할 때 생긴다 (tb-teardown.sh 가 프로파일을 걷는다).
+#
+# **debian 계열 전용 증상이다.** 거기서는 패키지 postinst 가 설치 시점에
+# mariadb-install-db 를 돌리는데, 철거 후 재설치에서 AppArmor 프로파일이 커널에 남아
+# setgid/dac_override 거부로 실패하면 이 상태가 된다 (tb-teardown.sh 가 프로파일을 걷는다).
+# rhel 계열은 애초에 설치 때 만들지 않고 mariadb.service 의 ExecStartPre 가 첫 기동 때
+# 만들므로, 거기서 이 상태가 보이면 원인은 그 ExecStartPre 실패다 (journalctl -u mariadb).
 tb_db_init_hint() {
     # tb_db_datadir 는 "디렉토리는 있고 초기화만 안 됨" 을 **경로를 찍고 rc=1** 로 알린다.
     # `|| echo` 로 받으면 두 줄이 이어붙어 복구 명령의 --datadir 이 깨진다(실측) — 값이
@@ -380,6 +510,8 @@ tb_db_init_hint() {
         시스템 DB(mysql 스키마)가 없습니다 — datadir: $dd
         패키지 postinst 의 mariadb-install-db 가 실패하면 이 상태가 됩니다
         (postinst 가 set +e 로 감싸 성공으로 끝나기 때문에 조용히 지나갑니다).
+        (아래는 debian 계열 복구다. rhel 계열이면 `systemctl start mariadb` 가
+         ExecStartPre 로 만들어 주므로, 실패 원인을 journalctl -u mariadb 에서 본다.)
         AppArmor 프로파일이 커널에 남아 있으면 그것이 원인입니다. 복구:
           sudo apparmor_parser -C -r /etc/apparmor.d/mariadbd
           sudo mariadb-install-db --datadir=$dd --user=mysql --rpm --cross-bootstrap --skip-test-db --disable-log-bin

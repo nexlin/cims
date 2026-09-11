@@ -34,7 +34,8 @@ docs/
 │       ├── sip_service_model.md     SIP 서비스 모델 (Service/Trunk/Listener)
 │       ├── ha_service_model.md      HA 서비스 운영 모델 (책임 분리·선언적 verdict·절체 판정 — 설계 정본, 단계적 이행)
 │       ├── package_and_template.md  패키지 포맷 + config_template.json 스키마
-│       └── build_and_packaging.md   빌드/패키징 워크플로우 (콘솔 /release/package) · manifest.json SSOT
+│       ├── build_and_packaging.md   빌드/패키징 워크플로우 (콘솔 /release/package) · manifest.json SSOT
+│       └── os_portability.md        OS 이식성 — 능력 셋(glibc·CPython) · debian/rhel 축 · OS 의존 지점 목록
 ├── api/                  REST API 명세
 │   ├── admin_api.md                 관리자 API (가입자/그룹/검증/빌드/패키지/서버/배포)
 │   ├── agent_api.md                 Agent ↔ CSC (enroll/heartbeat/report)
@@ -61,6 +62,7 @@ docs/
 | 콘솔 UI 수정 | `design/console_design_system.md` (시각) + `design/console_platform.md` (기능·위젯) |
 | UE 연동 개발 | `user-manual/<volte|ptt>_ue.md` |
 | 빌드/패키징 워크플로우 | `design/features/build_and_packaging.md` |
+| OS 이식성(지원 배포판·OS 의존 지점) | `design/features/os_portability.md` |
 | 검증 절차 (S1~S6) | `VERIFICATION_PROCESS.md` (SSOT) → `VERIFICATION_MANUAL.md` |
 
 ## 관련 자료

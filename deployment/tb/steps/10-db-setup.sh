@@ -54,12 +54,19 @@ fi
 
 # ── ① 서비스 ──────────────────────────────────────────────────
 info "[1/4] 서비스 기동"
-# 기동 전에 초기화 여부를 본다 — 시스템 DB 가 없으면 systemd start 는 반드시 실패하고,
-# 원인이 로그 깊숙이 있어서 여기서 짚어주는 편이 훨씬 빠르다.
+# 기동 전 초기화 여부 — **계열마다 만드는 시점이 다르다.**
+#   debian — 패키지 postinst 가 설치 때 만든다. 그래서 여기서 없으면 systemd start 가
+#            반드시 실패하고, 원인이 로그 깊숙이 있어 여기서 짚어주는 편이 훨씬 빠르다.
+#   rhel   — 설치 때 만들지 않는다. mariadb.service 의 ExecStartPre(mariadb-prepare-db-dir)가
+#            **첫 기동 때** 만든다. 없는 것이 정상이므로 막지 않고 기동으로 넘긴다.
 if ! tb_db_initialized; then
-    err "시스템 DB 가 없어 MariaDB 를 띄울 수 없습니다"
-    tb_db_init_hint
-    die "위 복구를 먼저 하세요"
+    if [[ "$(tb_pkg_family)" == "rhel" ]]; then
+        info "시스템 DB 가 아직 없습니다 — 첫 기동 때 systemd 가 만듭니다"
+    else
+        err "시스템 DB 가 없어 MariaDB 를 띄울 수 없습니다"
+        tb_db_init_hint
+        die "위 복구를 먼저 하세요"
+    fi
 fi
 systemctl enable mariadb >/dev/null 2>&1 || true
 if ! tb_db_active; then
@@ -69,7 +76,12 @@ fi
 # `mariadbd --version` 은 바이너리만 보므로 서버가 죽어도 통과한다 — 실제 상태로 판정한다.
 tb_db_active || die_hint "MariaDB 가 active 가 아닙니다 (start 는 오류를 내지 않았습니다)" \
     "확인: systemctl status mariadb / journalctl -u mariadb -n 50"
-ok "mariadb active ($(mariadbd --version | sed 's/.*Ver \([^ ]*\).*/\1/'))"
+# 기동했으면 시스템 DB 는 반드시 있어야 한다 — rhel 의 첫 기동 초기화가 실패하면
+# 서비스는 떠 있는데 권한 테이블이 없는 상태가 되고, 그 증상이 뒤 단계에서야 드러난다.
+tb_db_initialized || die_hint "기동은 됐는데 시스템 DB(mysql 스키마)가 없습니다" \
+    "확인: journalctl -u mariadb -n 50   ·   ls $(tb_db_datadir 2>/dev/null || echo /var/lib/mysql)" \
+    "rhel 계열이면 ExecStartPre 의 mariadb-prepare-db-dir 가 실패한 것입니다 (SELinux·권한 확인)"
+ok "mariadb active ($("$(tb_db_serverbin)" --version | sed 's/.*Ver \([^ ]*\).*/\1/'))"
 
 # ── ② bind-address ────────────────────────────────────────────
 info "[2/4] 접속 주소 설정 — bind-address=$TB_DB_BIND_ADDRESS, port=$TB_DB_PORT"
