@@ -1393,6 +1393,10 @@ async def handle_ha_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerRe
         if sub == 'maintenance' and method == 'POST':
             return await _maintenance_group(gid, handler_args.body, config)
 
+        # 절체 래치 해제 (AS 전용) — admin. 콘솔 배너의 [래치 해제] 버튼이 부른다.
+        if sub == 'clear-latch' and method == 'POST':
+            return await _clear_latch(gid, handler_args.body, config)
+
         if sub == 'collections':
             if not member:
                 return HandlerResult(status=400, body={'error': 'collection name required'})
@@ -2162,6 +2166,61 @@ async def _maintenance_group(gid: int, body, config):
                     f"agent#{aid} svc={svc} (EXCLUDE_NODE)")
     return HandlerResult(status=202, body={'group_id': gid, 'agent_id': aid,
                                            'service': svc, 'maintenance': on})
+
+
+async def _clear_latch(gid: int, body, config):
+    """절체 래치 해제 — body = {"agent_id": int} (생략 시 그룹의 래치 걸린 멤버 전부).
+
+    래치는 "이 노드는 절체당했다 = 원인을 확인하고 운영자가 명시적으로 재합류시켜라" 는
+    상태이고, 그래서 자동 해제가 없다(ha_service_model.md §13). 문제는 **해제 수단이
+    콘솔에 없었다**는 것이다 — 배너는 "start/restart 하거나 홀드 해제로 풀어야 합니다" 라고
+    안내하면서 정작 그 버튼이 없어, 운영자가 모듈을 재기동해 **부작용(실제 기동)까지 감수**
+    하거나 노드에 직접 들어가야 했다. 판정을 되돌리는 것과 프로세스를 켜는 것은 다른 일이라
+    수단도 따로 있어야 한다.
+
+    해제는 `ha_clear_holds` job 으로 노드에 내린다(래치 파일 + desired 정지 마커 제거).
+    기동하지 않는다 — 해제 뒤 승격 자격이 서면 그때 reconcile 이 정상 경로로 켠다.
+    """
+    g = _ha_load(config, gid)
+    if not g:
+        return HandlerResult(status=404, body={'error': 'Group not found'})
+    if g.get('mode') != 'active_standby':
+        return HandlerResult(status=409, body={'error': 'not_active_standby',
+            'hint': '절체 래치는 Active/Standby 그룹에만 있습니다'})
+    body = body if isinstance(body, dict) else {}
+    members = [m.get('agent_id') for m in (g.get('members') or []) if m.get('agent_id')]
+    if body.get('agent_id') is not None:
+        try:
+            aid = int(body['agent_id'])
+        except (TypeError, ValueError):
+            return HandlerResult(status=400, body={'error': 'agent_id (int) required'})
+        if aid not in members:
+            return HandlerResult(status=404, body={'error': 'agent not a group member'})
+        targets = [aid]
+    else:
+        # 대상 미지정 = 래치가 실제로 걸린 멤버만. 안 걸린 노드에 job 을 보내는 것은
+        # 무해하지만, "무엇을 했는지" 가 응답에 정확히 남아야 운영자가 확인할 수 있다.
+        from handlers.agents import _agent_load
+        targets = []
+        for aid in members:
+            try:
+                ag = _agent_load(config, aid=aid) or {}
+            except Exception:
+                continue
+            if any((v or {}).get('latched') for v in (ag.get('ha_state') or {}).values()):
+                targets.append(aid)
+        if not targets:
+            return HandlerResult(status=409, body={
+                'error': 'no_latched_member',
+                'detail': '이 그룹에 절체 래치가 걸린 멤버가 없습니다.'})
+    from handlers.agents import _job_create
+    svc = ha_service_key(g)
+    jobs = []
+    for aid in targets:
+        jid = _job_create(config, aid, 'ha_clear_holds', {'service': svc})
+        jobs.append({'agent_id': aid, 'job_id': jid})
+        logger.log_info(f"[ha-group] group#{gid} 절체 래치 해제 — agent#{aid} svc={svc} job#{jid}")
+    return HandlerResult(status=202, body={'group_id': gid, 'service': svc, 'jobs': jobs})
 
 
 # ── 계획 절체(스위치오버) v2 — OAM operation 상태머신 (ha_service_model.md §12) ──

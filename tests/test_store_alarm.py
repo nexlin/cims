@@ -292,3 +292,80 @@ class TestLoopLagWatch(unittest.TestCase):
         asyncio.run(main())
         self.assertEqual(hits, [])
         self.assertEqual(verbose, [])
+
+
+class TestClearLatchEndpoint(unittest.TestCase):
+    """절체 래치 해제 — 운영자가 **판정만** 되돌릴 수단이 있는가.
+
+    종전에는 해제 수단이 모듈 start/restart 뿐이라, 판정을 지우려면 실제 기동이라는
+    부작용을 감수하거나 노드에 직접 들어가야 했다(콘솔 배너의 `[홀드 해제]` 는 버튼 없이
+    문구뿐이었다). 판정을 되돌리는 것과 프로세스를 켜는 것은 다른 일이다.
+    """
+
+    def setUp(self):
+        import tempfile as _tf
+        from services import file_store, lease
+        self._td = _tf.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.config = {"CimsRuntimeDir": self._td.name}
+        self.fs = file_store
+        lease.acquire(file_store.runtime_root(self.config))   # 관리 store 는 단일 writer
+        self.addCleanup(lease.release)
+        g = {"id": 1, "name": "g1", "mode": "active_standby",
+             "members": [{"agent_id": 10, "priority": 100}, {"agent_id": 11, "priority": 90}]}
+        file_store.save(file_store.domain_dir(self.config, "ha_groups"), 1, g)
+        for aid, latched in ((10, True), (11, False)):
+            file_store.save(file_store.domain_dir(self.config, "agents"), aid, {
+                "id": aid, "name": f"n{aid}",
+                "ha_state": {"g1": {"role": "FAULT", "latched": latched,
+                                    "reasons": ["zombie:oam"] if latched else []}}})
+
+    def _call(self, body):
+        import asyncio
+        from handlers.ha_groups import _clear_latch
+        return asyncio.run(_clear_latch(1, body, self.config))
+
+    def _jobs(self):
+        return [j for j in self.fs.load_all(self.fs.domain_dir(self.config, "jobs"))
+                if j.get("job_type") == "ha_clear_holds"]
+
+    def test_clears_only_latched_members_by_default(self):
+        """대상을 안 주면 **실제로 래치가 걸린 멤버만** — 응답이 무엇을 했는지 말해야 한다."""
+        r = self._call({})
+        self.assertEqual(r.status, 202)
+        self.assertEqual([j["agent_id"] for j in r.body["jobs"]], [10])
+        self.assertEqual([j.get("agent_id") for j in self._jobs()], [10])
+
+    def test_explicit_member(self):
+        r = self._call({"agent_id": 11})
+        self.assertEqual(r.status, 202)
+        self.assertEqual([j["agent_id"] for j in r.body["jobs"]], [11])
+
+    def test_rejects_non_member(self):
+        self.assertEqual(self._call({"agent_id": 99}).status, 404)
+
+    def test_no_latched_member_is_409_not_silent_success(self):
+        """풀 것이 없으면 조용한 성공이 아니라 사유를 준다 — 운영자가 오해하면 안 된다."""
+        from services import file_store
+        a = file_store.load(file_store.domain_dir(self.config, "agents"), 10)
+        a["ha_state"]["g1"]["latched"] = False
+        file_store.save(file_store.domain_dir(self.config, "agents"), 10, a)
+        r = self._call({})
+        self.assertEqual(r.status, 409)
+        self.assertEqual(r.body["error"], "no_latched_member")
+
+    def test_rejects_non_as_group(self):
+        from services import file_store
+        g = file_store.load(file_store.domain_dir(self.config, "ha_groups"), 1)
+        g["mode"] = "all_active"
+        file_store.save(file_store.domain_dir(self.config, "ha_groups"), 1, g)
+        r = self._call({})
+        self.assertEqual(r.status, 409)
+        self.assertEqual(r.body["error"], "not_active_standby")
+
+    def test_does_not_start_modules(self):
+        """해제는 판정만 되돌린다 — start/restart job 을 만들면 안 된다."""
+        self._call({})
+        kinds = {j.get("job_type") for j in
+                 self.fs.load_all(self.fs.domain_dir(self.config, "jobs"))}
+        self.assertEqual(kinds, {"ha_clear_holds"}, f"기동 job 이 섞였다: {kinds}")

@@ -262,6 +262,13 @@ export const haGroupsApi = {
     api.post<{ group_id: number; agent_id: number; service: string; maintenance: boolean }>(
       `/ha-groups/${id}/maintenance`, { agent_id: agentId, on }),
 
+  // 절체 래치 해제 — AS 전용. agentId 를 주면 그 멤버만, 생략하면 래치가 걸린 멤버 전부.
+  //   래치는 "이 노드는 절체당했다" 는 판정이라 자동 해제가 없다(ha_service_model.md §13).
+  //   **모듈을 켜지 않는다** — 판정만 되돌리고, 승격 자격이 서면 그때 정상 경로로 기동된다.
+  clearLatch: (id: number, agentId?: number) =>
+    api.post<{ group_id: number; service: string; jobs: { agent_id: number; job_id: number }[] }>(
+      `/ha-groups/${id}/clear-latch`, agentId == null ? {} : { agent_id: agentId }),
+
   // ── 그룹×패키지 공통 설정 (R4) ──
   // 정합 상태 조회 — 드리프트 판정은 **서버 소유**다. 멤버별 설정을 받아 화면에서 직접
   // 비교하지 말 것: 자동 교정 데몬과 판정이 갈라져 실제로 교정되지 않을 것을 "교정 대기"로

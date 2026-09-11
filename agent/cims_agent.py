@@ -3194,6 +3194,7 @@ def _run_health_check(mod: str, check: str, t: dict) -> dict:
 #   를 사후에 알 수 없었다: 판정 상세(detail)는 이 캐시 파일에만 있고 3초마다 덮어써진다.
 #   그래서 결과를 덮어쓰되 **최근 이력은 남긴다**. 파일은 어차피 매 tick 다시 쓰므로 비용 없음.
 _HEALTH_RECENT_MAX = 40           # 검사별 보존 개수 (readiness 3초 주기 ≈ 최근 2분)
+_HEALTH_SLOW_LOG_TS: dict = {}    # (모듈, 검사) -> 마지막 '느림' 로그 시각 (쿨다운 60s)
 _AGENT_DEBUG = os.environ.get("CIMS_AGENT_DEBUG", "").strip().lower() in ("1", "true", "yes")
 
 
@@ -3226,8 +3227,19 @@ def _health_merge_write(mod: str, updated: dict) -> None:
             lst = recent.get(_chk) if isinstance(recent.get(_chk), list) else []
             lst.append(row)
             recent[_chk] = lst[-_HEALTH_RECENT_MAX:]
-            _dbg(f"health {mod}/{_chk} {_res.get('status')} "
-                 f"{_res.get('detail')} ({_res.get('duration_ms')}ms)")
+            # **실패·상태변화는 스위치 없이 남긴다.** 이 판정 하나가 절체·영구 래치로
+            # 이어지므로(ha_service_model.md §8) 사후에 근거가 없으면 원인을 댈 수 없다
+            # — 실측 사고가 그랬다. 드문 사건이라 상시 기록해도 로그가 지저분해지지 않는다.
+            # 느린 성공(판정 임계의 절반 이상)은 전조라 남기되 모듈당 쿨다운을 둔다.
+            line = (f"[agent][health] {mod}/{_chk} {_res.get('status')} "
+                    f"— {_res.get('detail')} ({_res.get('duration_ms')}ms)")
+            if _res.get("status") != "SUCCESS" or changed:
+                print(line, flush=True)
+            elif slow and time.time() - _HEALTH_SLOW_LOG_TS.get((mod, _chk), 0) >= 60:
+                _HEALTH_SLOW_LOG_TS[(mod, _chk)] = time.time()
+                print(line + " — 판정 임계(2s) 접근", flush=True)
+            else:
+                _dbg(line)
     checks.update(updated)
     data = {"module": mod, "checks": checks, "recent": recent,
             "updated_at": int(time.time())}

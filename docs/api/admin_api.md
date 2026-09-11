@@ -1771,6 +1771,7 @@ Collection API 상세는 `api/collection_api.md`. Agent 프로토콜은 `api/age
 | DELETE | `/ha-groups/{id}/members/{agent_id}` | 멤버 제거 |
 | POST | `/ha-groups/{id}/apply` | 데이터 변경 없이 멤버에 `update_ha` job 강제 큐잉 (VIP Bindings `[↻ 재적용]`) |
 | POST | `/ha-groups/{id}/apply-mounts` | 그룹 공통 마운트 — 선언(`group.mounts`) 갱신 + 멤버 fan-out. body `{mounts:[{op:'add'\|'del', target, source?, fstype?, options?}]}` → `{group_id, mounts, applied, results[{agent_id, name, ok, rc?, error?}]}`. 오프라인·실패 멤버가 있어도 선언은 갱신(콘솔이 '미적용' 표시 → 재적용으로 따라잡음) |
+| POST | `/ha-groups/{id}/clear-latch` | **절체 래치 해제** (admin, AS 전용) — body `{agent_id?}` (생략 시 래치가 걸린 멤버 전부) → `202 {group_id, service, jobs[{agent_id, job_id}]}`. 노드에 `ha_clear_holds` job 을 내려 래치·정지 마커만 지운다. **모듈을 기동하지 않는다** — 승격 자격이 서면 reconcile 이 정상 경로로 켠다. 409 `not_active_standby` / 409 `no_latched_member`. 상세: [ha_service_model.md](../design/features/ha_service_model.md) §13 |
 | GET | `/ha-groups/{id}/packages/{pkg}/sync` | 그룹×패키지 공통 설정 **정합 판정 + 표시용 실효값**(읽기 전용, operator) — `{status, reason, auto_sync, active_agent_id, compared_to, drift[], deferred[], members[{…, values:{key:{v, src}}}]}`. 판정·표시 모두 서버 소유(자동 교정과 동일 규칙). `src` = `overlay`/`injected`/`default` |
 | PUT | `/ha-groups/{id}/packages/{pkg}/config` | 그룹 공통(scope=service) 설정 저장 (operator) — body `{values, target_deployment_id?, queue_update?}`. 스위치 ON=전 멤버 / OFF=target 필수 |
 | PUT | `/ha-groups/{id}/packages/{pkg}/auto-sync` | 자동 동기화 스위치 (operator) — body `{enabled}`. ON 전환 시 즉시 정합 1회 |

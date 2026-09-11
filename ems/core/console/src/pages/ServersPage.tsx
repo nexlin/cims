@@ -2644,6 +2644,7 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
 }) {
  const { show } = useToast()
  const confirm = useConfirm()
+ const canEdit = useAdminCapable()          // 래치 해제·유지보수는 admin 조작
  const [busy, setBusy] = useState<string | null>(null)
  const isAS = group.mode === 'active_standby'
  const activeName = group.active_agent_id != null
@@ -2737,6 +2738,38 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
  await onReload()
     } catch (e) {
  show(`주소 전환 실패: ${(e as Error).message}`, 'err')
+    } finally {
+ setBusy(null)
+    }
+  }
+
+  // 절체 래치 해제 — 판정만 되돌린다(모듈을 켜지 않는다).
+  //   종전에는 배너가 "start/restart 하거나 홀드 해제로 푸세요" 라고만 적고 **버튼이 없었다**.
+  //   그래서 운영자는 판정을 지우려고 모듈을 재기동해 실제 기동이라는 부작용까지 감수하거나
+  //   노드에 직접 들어가야 했다. 판정을 되돌리는 것과 프로세스를 켜는 것은 다른 일이다.
+ async function doClearLatch(agentId?: number) {
+ const nm = agentId == null
+      ? '래치가 걸린 멤버 전부'
+      : agentDisplayName(agents.find(a => a.id === agentId)?.name || `#${agentId}`)
+ if (!await confirm({
+ title: '절체 래치 해제',
+ confirmLabel: '해제',
+ body: <>
+        [{nm}] 의 절체 래치를 해제합니다.
+        <div className="mt-1">
+          이 노드가 다시 <b>승격 대상</b>이 됩니다. 원인을 확인한 뒤에 푸세요 — 같은 문제가
+          남아 있으면 절체 후 그 노드에서 다시 실패합니다.
+        </div>
+        <div className="mt-1">모듈을 기동하지는 않습니다(판정만 해제). 계속할까요?</div>
+      </> }))
+ return
+ setBusy('clear-latch')
+ try {
+ const r = await haGroupsApi.clearLatch(group.id, agentId)
+ show(`절체 래치 해제 요청 — ${r.jobs.length}개 노드`, 'ok')
+ await onReload()
+    } catch (e) {
+ show(`래치 해제 실패: ${e instanceof Error ? e.message : e}`, 'err')
     } finally {
  setBusy(null)
     }
@@ -2855,13 +2888,23 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
             <b>절체 래치 — 승격 불가: {latched.map(a => agentDisplayName(a.name)).join(', ')}</b>
             <div className="mt-1">
               이 노드는 이전 장애 판정이 걸려 있어 <b>절체 대상이 되지 않습니다.</b> 원인을
-              확인한 뒤 해당 모듈을 start/restart 하거나 <b>[홀드 해제]</b> 로 풀어야 합니다.
+              확인한 뒤 아래 [래치 해제] 로 푸세요 (모듈 start/restart 로도 풀립니다).
               {latched.map(a => {
  const rs = Object.values(a.ha_state || {})
                   .flatMap(v => v?.reasons || []).slice(0, 4)
  return rs.length ? ` (${agentDisplayName(a.name)}: ${rs.join(', ')})` : ''
               }).join('')}
             </div>
+            {canEdit && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {latched.map(a => (
+                  <Button key={a.id} variant="outline" size="sm" disabled={busy === 'clear-latch'}
+ onClick={() => void doClearLatch(a.id)}>
+                    {agentDisplayName(a.name)} 래치 해제
+                  </Button>
+                ))}
+              </div>
+            )}
           </div>
         )
       })()}

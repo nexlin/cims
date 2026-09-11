@@ -173,7 +173,7 @@ agent 설치 루트(`_PREFIX`) 아래에 둔다 — agent 는 **user systemd 유
 | `run/ha/desired.json` | **서버별 정지 의도** — `{module: 'stopped'}` (HOLD_VIP) | Agent `job_process_control` | Supervisor |
 | `state/ha/maintenance/<svc>` | **유지보수 마커** (영속) — `EXCLUDE_NODE` | OAM `ha_maintenance` job | Supervisor |
 | `state/ha/planned_release/<svc>` | 계획 절체 반납 마커 (영속) | OAM job | Supervisor |
-| `state/ha/latch/<svc>.json` | **절체 확정 래치** (영속) — 운영자 start/restart 로 해제 | Supervisor/운영자 | Supervisor |
+| `state/ha/latch/<svc>.json` | **절체 확정 래치** (영속) — 콘솔 [래치 해제] 또는 모듈 start/restart 로 해제 | Supervisor/운영자 | Supervisor |
 
 **영속 vs 휘발**: 유지보수(`maintenance`)·계획절체(`planned_release`) 마커는 재부팅 후에도
 남아야 안전(점검/절체 의도가 재부팅으로 사라지면 안 됨) → `state/ha/`. verdict·카운터·역할은
@@ -680,14 +680,25 @@ relevant 모듈이 (a) 재기동 한도 초과(exhausted) 또는 (b) 좀비(프�
 모듈을 전부 정지(kill)한다**(§7.1) — 절체당한 노드는 재기동 경쟁 없이 완전히 내려간다.
 track_script 실패 → keepalived FAULT → VIP 는 peer 로.
 
-해제(재합류): 운영자가 콘솔에서 해당 모듈을 **start/restart** 하면 래치가 풀린다
-(`_latch_clear`) — 원인을 고친 뒤 올리라는 명시적 re-arm. 해제되면 role 기반
-reconcile 이 hot 을 기동 → readiness 회복 → track_script PASS → keepalived FAULT→BACKUP
-로 standby 재합류한다(`nopreempt` 라 곧바로 MASTER 는 아님). **agent 재기동·노드 재부팅은
-래치를 풀지 않는다**(영속) — 원인을 고친 뒤 운영자가 명시적으로 올려야 재합류한다.
+해제(재합류)는 두 가지다 — **판정을 되돌리는 것**과 **프로세스를 켜는 것**은 다른 일이라
+수단도 나뉘어 있다.
+
+| 수단 | 하는 일 | 쓰는 때 |
+|---|---|---|
+| **[래치 해제]** (콘솔 그룹 배너, `POST /ha-groups/{id}/clear-latch` → `ha_clear_holds` job) | 래치·정지 마커만 지운다. **모듈을 기동하지 않는다** — 승격 자격이 서면 그때 reconcile 이 정상 경로로 켠다 | 원인을 확인했고 이 노드를 다시 승격 후보로 돌리려는 때 (대부분) |
+| 모듈 **start/restart** | 래치를 풀고(`_latch_clear`) 그 자리에서 기동까지 한다 | 그 노드에서 모듈을 바로 올려야 하는 때 |
+
+해제되면 role 기반 reconcile 이 hot 을 기동 → readiness 회복 → track_script PASS →
+keepalived FAULT→BACKUP 로 standby 재합류한다(`nopreempt` 라 곧바로 MASTER 는 아님).
+**agent 재기동·노드 재부팅은 래치를 풀지 않는다**(영속) — 원인을 고친 뒤 운영자가 명시적으로
+풀어야 재합류한다.
+
+> 해제 수단이 `start/restart` 하나뿐이던 때는 "판정만 되돌리고 싶은데 기동까지 된다" 는
+> 부작용을 감수하거나 노드에 직접 들어가야 했다. 콘솔 배너가 안내하던 `[홀드 해제]` 도
+> 실제 버튼 없이 문구뿐이었다.
 
 > 안전등급별 자동 해제(stateless/read_only 는 연속 성공 창 기반 자동, shared_writer/
-> unknown 은 수동)는 §19 후속 과제다. 현재는 등급 무관 **운영자 start/restart 단일 해제**다.
+> unknown 은 수동)는 §19 후속 과제다. 현재는 등급 무관 **운영자 수동 해제**다.
 
 ### 부트스트랩
 
