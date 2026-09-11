@@ -301,16 +301,25 @@
 
    $ sudo ./tools/tb-firewall.sh --dry-run
        무엇을 왜 열지 계획만 보여준다. 포트 숫자를 이 스크립트가 들고 있지 않다 —
-       SIP 는 tb-site.conf/pkg_setting.cfg 에서, 미디어 대역은 **배포된 cmp.json 의
-       시작포트 + 풀 크기로 계산**한다. 그래서 설정을 바꾸면 다시 돌리기만 하면 된다.
+       **SIP 는 OAM 의 `local_nodes`(실제 리스너), CSC 단말 포트는 csc 의
+       `McpttServer.Port`, 미디어 대역은 배포된 cmp.json 의 시작포트 + 풀 크기**로
+       그때그때 읽는다. 그래서 콘솔에서 포트를 바꿔도 다시 돌리기만 하면 맞는다.
+       계획 표에 출처가 함께 찍힌다 — `SIP UDP (access-udp)` 처럼 어느 노드의 값인지.
+
+       [주의] **모듈 설치(40 단계) 뒤에 돌린다.** 그 전에는 OAM 에 local_nodes 가 없어
+              설정 파일(pkg_setting.cfg) 값으로 물러나고, 그 사실을 경고로 알린다.
+              설정 파일 값은 45 단계의 *입력*일 뿐이라 나중에 콘솔에서 포트를 바꾸면
+              갈라진다 — 실측(2026-09-11)에서 사이트는 15060/15061 인데 설정 파일
+              기본값 5060·25061·5061 을 열어 **쓰지도 않는 포트를 연** 적이 있다.
 
    $ sudo ./tools/tb-firewall.sh
        계획을 보여주고 물어본 뒤 연다 (--yes 로 묻지 않게).
 
        [확인] 템플릿 기본값 그대로면 이렇게 나온다:
          4419/tcp         콘솔·API
-         4430/tcp         CSC 단말 대면 HTTPS (4-8 인증서와 짝)
-         5060/udp · 25061/tcp · 5061/tcp    SIP
+         4430/tcp         CSC 단말 대면 HTTPS (4-8 인증서와 짝) — csc McpttServer.Port
+         SIP              local_nodes 의 enabled 행 전부 (UDP/TCP/TLS, IPSEC 이면
+                          bind_port UDP+TCP 와 client_port UDP 까지)
          50000-50159/udp  VoLTE/VoIP 미디어 (RtpStartPort + RtpPoolSize × 8)
          52000-52079/udp  PTT 멤버 오디오   (PttRtpStartPort + PttMemberPoolSize × 2)
          56000-56079/udp  PTT 멤버 영상

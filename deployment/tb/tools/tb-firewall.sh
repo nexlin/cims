@@ -73,10 +73,37 @@ _pick() {      # $1=사이트변수명 $2=cfg키 $3=최후기본값
 }
 
 OAM_PORT="$(_pick TB_OAM_PORT OAM_PORT 4419)"
-SIP_UDP="$(_pick TB_SIP_UDP_PORT SIP_UDP 5060)"
-SIP_TCP="$(_pick TB_SIP_TCP_PORT SIP_TCP 25061)"
-SIP_TLS="$(_pick TB_SIP_TLS_PORT SIP_TLS 5061)"
-CSC_UE_PORT="${TB_CSC_UE_PORT:-4430}"     # 단말 대면 HTTPS (4-8 인증서와 짝)
+
+# ── 단말 접속 포트는 **OAM 이 정본**이다 ──────────────────────
+# SIP 포트는 `local_nodes`, CSC 단말 포트는 csc 의 `McpttServer.Port` 가 실제 값이다.
+# tb-site.conf/pkg_setting.cfg 의 SIP_* 는 45 단계가 local_nodes 를 처음 쓸 때의 입력일
+# 뿐이라, 그 뒤 콘솔에서 바꾸면 갈라진다 — 그때 설정 파일만 보면 **쓰지도 않는 포트를
+# 열고 정작 쓰는 포트는 막힌 채로 둔다**(2026-09-11 실측).
+sip_specs=()
+if [[ -n "${TB_ADMIN_PASS:-}" ]]; then
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && sip_specs+=("$line")
+    done < <(TB_LIB="$TB_ROOT/lib" TB_OAM_URL="${TB_OAM_URL:-https://127.0.0.1:$OAM_PORT}" \
+             TB_ADMIN_PASS="$TB_ADMIN_PASS" TB_STATE_DIR="$TB_STATE_DIR" \
+             python3 "$TB_ROOT/lib/tb_listen_ports.py" 2>/dev/null || true)
+fi
+
+if [[ ${#sip_specs[@]} -eq 0 ]]; then
+    # OAM 이 아직 없거나(20 단계 전) 조회가 실패했다. 설정 파일 값으로 물러나되,
+    # **그 값이 실제 리스너와 다를 수 있다는 것**을 반드시 알린다.
+    warn "OAM 에서 리스너를 읽지 못했습니다 — 설정 파일 값으로 진행합니다"
+    warn "  실제 리스너(local_nodes)와 다르면 엉뚱한 포트를 엽니다."
+    warn "  모듈 설치(40 단계) 뒤에 다시 돌리면 정확한 값으로 엽니다."
+    SIP_UDP="$(_pick TB_SIP_UDP_PORT SIP_UDP 5060)"
+    SIP_TCP="$(_pick TB_SIP_TCP_PORT SIP_TCP 25061)"
+    SIP_TLS="$(_pick TB_SIP_TLS_PORT SIP_TLS 5061)"
+    [[ "$SIP_UDP" != "0" ]] && sip_specs+=("$SIP_UDP/udp|SIP UDP (설정 파일 값)")
+    [[ "$SIP_TCP" != "0" ]] && sip_specs+=("$SIP_TCP/tcp|SIP TCP (설정 파일 값)")
+    [[ "$SIP_TLS" != "0" ]] && sip_specs+=("$SIP_TLS/tcp|SIP TLS (설정 파일 값)")
+    sip_specs+=("${TB_CSC_UE_PORT:-4430}/tcp|CSC 단말 대면 HTTPS (설정 파일 값)")
+else
+    info "단말 접속 포트 근거: OAM local_nodes + csc McpttServer.Port"
+fi
 
 # ── cmp.json 에서 미디어 대역 계산 ────────────────────────────
 prefix="${TB_INSTALL_PREFIX:-/opt/cims-agent}"
@@ -134,10 +161,9 @@ plan_note=()
 _add() { plan+=("$2"); plan_note+=("$1"); }
 
 _add "콘솔·API (이미 20 단계가 열었을 수 있다)" "$OAM_PORT/tcp"
-_add "CSC 단말 대면 HTTPS (4-8 인증서와 짝 — 막히면 로그인부터 실패)" "$CSC_UE_PORT/tcp"
-[[ "$SIP_UDP" != "0" ]] && _add "SIP UDP"  "$SIP_UDP/udp"
-[[ "$SIP_TCP" != "0" ]] && _add "SIP TCP"  "$SIP_TCP/tcp"
-[[ "$SIP_TLS" != "0" ]] && _add "SIP TLS"  "$SIP_TLS/tcp"
+for _s in "${sip_specs[@]}"; do
+    _add "${_s#*|}" "${_s%%|*}"
+done
 for m in "${media[@]+"${media[@]}"}"; do
     _add "${m%%|*}" "${m#*|}"
 done
