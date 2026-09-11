@@ -236,12 +236,19 @@ export interface CallCell {
   open: number
   late_dropped: number
   reasons: Record<string, number>
-  success_rate: number
-  talk_rate: number
+  /**
+   * 비율 지표는 **null 일 수 있다** — 분모가 결손된 축(`totals.all` 에 PTT 가 섞인 경우)
+   * 에서는 계산하지 않고 비운다. 왜 비었는지는 `rate_gap` 이 알려준다.
+   * 거짓값(150% 같은) 대신 빈칸을 내는 규칙이다 — 서버 `stats_rollup.with_rates` 참조.
+   */
+  success_rate: number | null
+  talk_rate: number | null
   /** 세션을 분모로 한 소통률 — PTT 용(attempts 가 0 이라 talk_rate 를 쓸 수 없다) */
   talk_rate_sessions: number
-  completion_rate: number
+  completion_rate: number | null
   join_rate: number
+  /** 비율을 비운 이유 — 시도를 원천에 남기지 않는 서비스 이름들 (예: ["ptt"], §8 Y6) */
+  rate_gap?: string[]
   avg_pdd_ms: number
   avg_duration_sec: number
 }

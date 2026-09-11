@@ -62,12 +62,16 @@ function BarChart({ data, labelKey, valueKey, maxH = 160 }: {
 // sub — 비율 카드의 분자/분모. 비율만 보여주면 "3건 중 2건" 인지 "3만건 중 2만건" 인지
 // 구분되지 않아 같은 66.7% 를 같은 무게로 읽게 된다.
 function KpiCard({ label, value, unit, sub }: {
- label: string; value: string | number; unit?: string; sub?: string
+ label: string; value: string | number | null | undefined; unit?: string; sub?: string
 }) {
+ // 값이 없는 것과 0 은 다르다 — 서버가 비율을 비워 보내면(분모 결손, rate_gap) 0% 가 아니라
+ // 빈칸으로 그린다. 0% 로 그리면 "아무것도 성공하지 못했다"로 읽힌다.
+ const empty = value === null || value === undefined
  return (
     <div className="flex-[1_1_140px] min-w-[140px] bg-card border border-border rounded-md py-3.5 px-4 text-center">
       <div className="text-sm text-muted-foreground mb-1">{label}</div>
-      <div className="text-3xl font-bold">{value}<span className="text-sm text-muted-foreground ml-0.5">{unit}</span></div>
+      <div className="text-3xl font-bold">{empty ? <span className="text-muted-foreground">—</span> : value}
+        {!empty && <span className="text-sm text-muted-foreground ml-0.5">{unit}</span>}</div>
       {sub && <div className="text-xs text-muted-foreground mt-1">{sub}</div>}
     </div>
   )

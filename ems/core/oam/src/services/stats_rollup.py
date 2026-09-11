@@ -1201,9 +1201,32 @@ def _rate(num: int, den: int) -> float:
 _NER_USER_REASONS = ('busy', 'no_answer', 'rejected', 'canceled')
 
 
-def with_rates(c: dict) -> dict:
+# 시도(attempts)를 원천에 남기지 않는 서비스. 이 축이 다른 서비스와 합쳐지면 **비율의
+# 분모가 결손**된다 — 분자(sessions)에는 들어가는데 분모(attempts)에는 없으므로 100% 를
+# 넘는 값이 나온다(실측 2026-09-11: VoLTE 2세션 + PTT 1세션 → success_rate 150%).
+#
+# 지금은 PTT 뿐이다 — 그룹통화 개시 실패 경로가 `PttSessionStart()` 이전에 반환해서
+# 시도가 아무 데도 남지 않는다(§8 Y6 / 결함 F-43). **Y6 이 해소되면 이 집합을 비운다**;
+# 그러면 아래 규칙이 저절로 꺼지고 값이 채워진다.
+_NO_ATTEMPT_SVCS = frozenset({'ptt'})
+
+# 결손 서비스가 섞였을 때 내지 않는 비율 — **분자와 분모가 서로 다른 모집단**이 되는 것들.
+#   success_rate·talk_rate·ner : 분자에 PTT 가 있고 분모(attempts)에는 없다 → 100% 초과
+#   completion_rate·drop_rate  : 분모(sessions)에 PTT 가 있고 분자(completed)에는 없다
+#                                → 없는 끊김이 생긴다
+# join_rate·talk_rate_sessions 는 분자·분모 모두 전 서비스에서 오므로 영향이 없다.
+_RATES_NEED_ATTEMPTS = ('success_rate', 'talk_rate', 'ner', 'completion_rate', 'drop_rate')
+
+
+def with_rates(c: dict, no_attempt_svcs=()) -> dict:
     """분자·분모에 비율을 덧붙인다. **분모를 지운 채로 내지 않는다** — 비율만 받은 화면은
-    구간을 다시 합칠 수 없고, 3건 중 2건과 3만건 중 2만건을 같은 무게로 보여준다."""
+    구간을 다시 합칠 수 없고, 3건 중 2건과 3만건 중 2만건을 같은 무게로 보여준다.
+
+    `no_attempt_svcs` 가 비어 있지 않으면 그 서비스가 이 합계에 섞였다는 뜻이다. 그때는
+    분모가 결손된 비율을 **계산해서 내지 않고 `None` 으로 비운다** — 거짓값 대신 빈칸이다.
+    고쳐서 낼 수도 없다: 올바른 분모(PTT 시도)가 원천에 아예 없기 때문이다. 왜 비었는지는
+    `rate_gap` 으로 함께 낸다(화면이 '자료 없음'과 '집계 불가'를 구분할 수 있게).
+    """
     out = dict(c)
     out['reasons'] = dict(c.get('reasons') or {})
     # 코드별(내림차순)과 계열별(4xx/5xx/6xx)을 함께 낸다 — 코드는 원인 특정에, 계열은 추세에
@@ -1250,6 +1273,15 @@ def with_rates(c: dict) -> dict:
     out['avg_pdd_ms'] = round(c.get('pdd_sum_ms', 0) / n) if n else 0
     t = c.get('talked', 0)
     out['avg_duration_sec'] = round(c.get('duration_sum_sec', 0) / t, 1) if t else 0
+
+    # 분모가 결손된 축이면 비율을 비운다. **개수는 그대로 둔다** — 세션·소통 건수는 사실이고,
+    # 비율만 낼 수 없는 것이다. 위에서 이미 계산했더라도 여기서 덮어쓴다(계산 순서에
+    # 의존하지 않게 — 지표가 하나 늘어도 목록에만 추가하면 된다).
+    gap = sorted(set(no_attempt_svcs or ()))
+    if gap:
+        for k in _RATES_NEED_ATTEMPTS:
+            out[k] = None
+        out['rate_gap'] = gap
     return out
 
 
@@ -1269,7 +1301,10 @@ def aggregate(rows: list, gran: str, svc: str = 'all', include_msg: bool = False
     totals: dict = {}
 
     def _cell(store, key):
-        return store.setdefault(key, {'call': _zero_call(), 'msg': {'in': {}, 'out': {}}})
+        # `gap` = 이 칸에 섞인 "시도를 안 남기는 서비스" 이름들. 'all' 축에만 모인다
+        # (서비스 칸은 자기 자신뿐이라 섞일 일이 없다 — 아래 keys 구성 참조).
+        return store.setdefault(key, {'call': _zero_call(), 'msg': {'in': {}, 'out': {}},
+                                      'gap': set()})
 
     for r in rows:
         sv = r.get('svc') or 'unknown'
@@ -1282,11 +1317,16 @@ def aggregate(rows: list, gran: str, svc: str = 'all', include_msg: bool = False
             for target in (_cell(slot, key), _cell(totals, key)):
                 _add_call(target['call'], r.get('call') or {},
                           open_n=r.get('open', 0), late_n=r.get('late_dropped', 0))
+                # 여러 서비스가 합쳐지는 칸('all')에서만 의미가 있다 — 자기 서비스 칸은
+                # 분자·분모가 같은 원천이라 비율이 깨지지 않는다(PTT 칸의 success_rate 는
+                # 분모 0 이라 0% 로 나오고, 그건 §8 이 정한 "자리를 비운다"의 몫이다).
+                if sv in _NO_ATTEMPT_SVCS and key == 'all':
+                    target['gap'].add(sv)
                 if include_msg:
                     _add_msg(target['msg'], r.get('msg') or {})
 
     def _out(cell):
-        o = with_rates(cell['call'])
+        o = with_rates(cell['call'], no_attempt_svcs=cell.get('gap') or ())
         if include_msg:
             o['msg'] = cell['msg']
         return o
