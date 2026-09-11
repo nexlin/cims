@@ -29,6 +29,15 @@ _HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/tb-common.sh
 source "$_HERE/../lib/tb-common.sh"
 
+# 이 도구는 lib/tb-common.sh 의 tb_firewall_allow 에 기댄다. 키트가 이 도구보다 옛 판이면
+# **계획을 다 보여준 뒤 마지막 줄에서** "명령어를 찾을 수 없음" 으로 죽는다 — 그러면 원인이
+# 안 보인다(2026-09-11 실측). 시작할 때 짚는다.
+if ! declare -F tb_firewall_allow >/dev/null 2>&1; then
+    die_hint "lib/tb-common.sh 에 tb_firewall_allow 가 없습니다 — 키트가 이 도구보다 옛 판입니다" \
+        "둘은 같은 판이어야 합니다. 새 반입본을 풀거나 lib/tb-common.sh 만 같은 판으로 바꾸세요." \
+        "확인: grep -c tb_firewall_allow $TB_ROOT/lib/tb-common.sh   (0 이면 옛 판)"
+fi
+
 YES=0; DRY=0
 for a in "$@"; do
     case "$a" in
