@@ -53,26 +53,24 @@ CA 키가 어디에도 없으면 §5-B(새 CA + APK 재빌드)로 간다.
 .48 은 개발 레이아웃(`build/dist/mgmt-server`)이라 `--prefix` 를 준다. CA 키는 .45 를 떠나지 않는다.
 
 ```bash
-# .48 — 필요한 SAN (hostname media01 · 121.161.164.48 · 10.0.2.48 · 127.0.0.1 …)
-ssh cims@121.161.164.48 'bash -s -- collect --prefix /home/cims/work/cims/build/dist/mgmt-server' < scripts/service-cert.sh
-
-# .45 — 발급 (collect 가 출력한 HOST/SAN 그대로)
-scripts/service-cert.sh issue --host media01 --san "<SAN>"
+# .45 — 발급 (ssh 로 .48 의 hostname·SAN 자동 수집 → ./cert-init-media01/ + cert-init-media01.tgz)
+scripts/service-cert.sh issue --ip 121.161.164.48
 
 # .45 → .48 — 전달 + 배치(CSC 백업·교체·핫리로드 확인, CSP runtime/cert 배치) + 검증. csp-port 는
 # local_nodes 저장 전이면 0 으로 두고 저장 후 verify 를 다시 돌린다.
-scripts/service-cert.sh push --ssh cims@121.161.164.48 --bundle ./service-cert-media01 \
+scripts/service-cert.sh push --ssh cims@121.161.164.48 --bundle ./cert-init-media01 \
     --prefix /home/cims/work/cims/build/dist/mgmt-server --csp-port 0
 ```
 
 ## 4. .48 CSP `local_nodes` 저장·최종 검증
 
-콘솔(.48 OAM) `local_nodes` 의 `access-tls` 행: `tls_cert_path` =
-`/home/cims/work/cims/build/dist/mgmt-server/csp/runtime/cert/csp-chain.pem`, `tls_key_path` =
-`…/csp/runtime/cert/csp.key`(지금은 상대경로 `cert/csp.pem` 이라 절대경로로 바꾼다). 저장 시 SIGUSR1 무중단 교체.
+`.48` 에서 `bash cert-init-media01/service-cert.sh csp-node --prefix /home/cims/work/cims/build/dist/mgmt-server`
+(콘솔 admin 비밀번호 입력, `--dry-run` 으로 미리보기) — `access-tls` 행의 `tls_cert_path`/`tls_key_path` 를 배치 경로로
+갱신하고 SIGUSR1 무중단 교체. 콘솔(.48 OAM)에서 손으로 하면 같은 행에 `…/csp/runtime/cert/csp-chain.pem` ·
+`…/csp/runtime/cert/csp.key` 절대경로 저장(지금은 상대경로 `cert/csp.pem`).
 
 ```bash
-scripts/service-cert.sh verify --ip 121.161.164.48 --csc-port 4430 --csp-port 15061   # 전부 PASS
+bash ./cert-init-media01/service-cert.sh verify --csp-port 15061   # --ip 는 묶음에서 읽는다. 전부 PASS
 ```
 
 CSC 를 한 번 재시작한 뒤 verify 를 다시 돌려 발급자가 `CIMS Service CA` 로 유지되는지 본다. 그 뒤

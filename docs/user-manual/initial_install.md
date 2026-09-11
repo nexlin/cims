@@ -396,29 +396,33 @@ UDP 로 두어도 풀리지 않는다(막히는 채널은 HTTPS 4430 이다).
 [sip_tls_signaling.md §8.3](../design/features/sip_tls_signaling.md#83-발급배치-절차--새-노드는-scriptsservice-certsh-로)).
 CA 개인키는 CA 보관 서버(`/home/cims/certs/`)를 떠나지 않는다.
 
-1. **대상 노드**에서 필요한 SAN 을 뽑는다. 설치 전이어도 된다(그때는 hostname·IP 만 잡힌다).
+1. **CA 보관 서버**에서 대상 노드 IP 하나로 발급한다. ssh 로 노드의 hostname·IP 를 수집해 SAN 을
+   채운다(설치 전이어도 된다).
    ```bash
-   bash service-cert.sh collect              # HOST= / SAN= 출력
+   scripts/service-cert.sh issue --ip <노드 IP>            # HA 면 --vip <VIP> 추가
+   # → /home/cims/certs/cert-init-<HOST>/  +  cert-init-<HOST>.tgz  (현장 반입용. 키가 들어 있어 600)
    ```
-2. **CA 보관 서버**에서 발급해 묶음을 만든다. 출력된 HOST/SAN 을 그대로 넘긴다.
+   ssh 가 안 되면 대상 노드에서 `bash service-cert.sh collect` 를 돌려 나온 HOST/SAN 을
+   `issue --host <HOST> --san "<SAN>"` 으로 넘긴다.
+2. 패키지 설치와 CSC 기동이 끝난 뒤 **대상 노드**에서 서비스 계정(cims)으로 실행한다.
    ```bash
-   scripts/service-cert.sh issue --host <HOST> --san "<SAN>"
-   # → ./service-cert-<HOST>/  +  service-cert-<HOST>.tgz  (현장 반입용. 키가 들어 있어 600)
-   ```
-3. 패키지 설치와 CSC 기동이 끝난 뒤 **대상 노드**에서 서비스 계정(cims)으로 실행한다.
-   ```bash
-   tar xzf service-cert-<HOST>.tgz && bash service-cert-<HOST>/service-cert.sh install
+   tar xzf cert-init-<HOST>.tgz && bash cert-init-<HOST>/service-cert.sh install
    ```
    노드가 요구하는 SAN 을 대조해 부족하면 거절한다(그대로 두면 agent 가 재기동 때 그룹 CA
    인증서로 덮어쓴다). CSC 는 기존 파일을 백업하고 교체하며 30초 안에 핫리로드된다. CSP 파일은
    `<prefix>/csp/runtime/cert/` 에 놓이고, 다음 단계가 있어야 CSP 가 그 파일을 쓴다.
-4. `[패키지 설정] > csp > local_nodes` 의 TLS 행(§4.1)에 절대경로를 저장한다. 저장 시 SIGUSR1
-   로 무중단 반영된다.
+3. CSP 에 경로를 알린다. 같은 노드에서 콘솔 admin 비밀번호로 실행하면 콘솔 저장과 같은 API
+   (`PUT …/collection/local_nodes`)를 호출해 TLS 행을 갱신하고 SIGUSR1 로 무중단 반영한다.
+   ```bash
+   bash cert-init-<HOST>/service-cert.sh csp-node        # --dry-run 으로 미리보기, TLS 행이 없으면 --port <포트>
+   ```
+   콘솔로 하려면 `[패키지 설정] > csp > local_nodes` 의 TLS 행(§4.1)에 절대경로를 저장한다.
    - `tls_cert_path` = `/opt/cims-agent/modules/csp/runtime/cert/csp-chain.pem`
    - `tls_key_path` = `/opt/cims-agent/modules/csp/runtime/cert/csp.key`
-5. 검증 — 전부 PASS 여야 한다. CSC 를 한 번 재시작한 뒤 다시 돌려 발급자가 유지되는지도 본다.
+4. 검증 — 전부 PASS 여야 한다. 접속 IP 는 묶음에서 읽는다. CSC 를 한 번 재시작한 뒤 다시 돌려
+   발급자가 유지되는지도 본다.
    ```bash
-   bash service-cert.sh verify --ip <단말 접속 IP> --csc-port 4430 --csp-port <TLS bind_port>
+   bash cert-init-<HOST>/service-cert.sh verify --csp-port <TLS bind_port>
    ```
 
 단말은 로그인 화면의 서버 주소를 SAN 에 있는 IP 로 넣는다. Windows 관제조작반은 "서버 인증서

@@ -402,13 +402,16 @@ CA 인증서와 노드 leaf/키만 들어간다.
 
 | 단계 | 실행 위치 | 명령 | 하는 일 |
 |---|---|---|---|
-| collect | 대상 노드 | `service-cert.sh collect [--prefix P]` | 필요한 SAN 목록 출력. agent `cert.sh` 가 있으면 그 함수(`_node_cert_san`)를 그대로 호출해 규칙이 어긋나지 않는다 |
-| issue | CA 보관 서버 | `service-cert.sh issue --host H --san "<목록>"` | csc·csp leaf 2장(RSA 2048·2년·EKU=serverAuth) 발급 → 체인 PEM(leaf+CA)·키·CA 인증서·README·스크립트를 담은 묶음 디렉터리 + tgz |
-| install | 대상 노드 | `service-cert.sh install [--prefix P]` | 배치 전 노드 요구 SAN 과 대조(부족하면 거절) → CSC `runtime/cert/server.{crt,key}` 백업 후 교체(30초 핫리로드 확인) → CSP `runtime/cert/` 에 체인·키 배치 → `local_nodes` 에 넣을 값 안내 |
-| verify | 어디서든 | `service-cert.sh verify --ip IP --csc-port 4430 --csp-port 15061` | 포트별 체인 2장·발급자=Service CA·IP 신원 OK·**틀린 이름 거절(음성 대조군)**·만료 잔여. FAIL 이 하나라도 있으면 종료코드 1 |
+| issue | CA 보관 서버 | `service-cert.sh issue --ip <노드 IP> [--vip <VIP>]` | ssh 로 대상 노드에서 `collect` 를 돌려 hostname·SAN 을 자동 수집한 뒤 csc·csp leaf 2장(RSA 2048·2년·EKU=serverAuth) 발급 → 체인 PEM(leaf+CA)·키·CA 인증서·README·스크립트를 담은 묶음 `<CA 디렉터리>/cert-init-<host>/` + `.tgz`(있으면 덮어씀). `--vip` 는 HA 대표 주소를 SAN 에 추가, `--runbook FILE` 은 노드 전용 절차 문서를 동봉. 묶음의 `README.txt` 가 설치 완료 시점부터의 현장 절차(0~6 단계·출력/증상 판독·원복)를 전부 담아 **현장에는 tgz 와 openssl 만 있으면 된다**. ssh 가 없으면 대상 노드에서 `collect` 를 직접 돌려 `--host/--san` 으로 넘긴다 |
+| collect | 대상 노드 | `service-cert.sh collect [--prefix P]` | 필요한 SAN 목록 출력(issue 가 ssh 로 대신 호출한다). agent `cert.sh` 가 있으면 그 함수(`_node_cert_san`)를 그대로 호출해 규칙이 어긋나지 않는다 |
+| install | 대상 노드 | `bash cert-init-<host>/service-cert.sh install [--prefix P]` | 배치 전 노드 요구 SAN 과 대조(부족하면 거절) → CSC `runtime/cert/server.{crt,key}` 백업 후 교체(30초 핫리로드 확인) → CSP `runtime/cert/` 에 체인·키 배치 → `local_nodes` 에 넣을 값 안내 |
+| csp-node | 대상 노드 | `bash cert-init-<host>/service-cert.sh csp-node [--port N] [--dry-run]` | OAM 에 로그인해 csp 배포의 `local_nodes` 를 읽고 TLS 행의 `tls_cert_path`/`tls_key_path` 를 배치 경로로 바꿔 `PUT …/collection/local_nodes` 로 저장(콘솔 저장과 같은 경로 — 스키마 검증·agent jsonl 원자 쓰기·SIGUSR1). 행이 없으면 `--port` 로 `access-tls` 생성. 끝나면 그 포트로 verify |
+| verify | 어디서든 | `bash cert-init-<host>/service-cert.sh verify --csp-port <TLS 포트>` | 묶음에서 접속 IP 를 읽어(`--ip` 로 대체 가능) 포트별 체인 2장·발급자=Service CA·IP 신원 OK·**틀린 이름 거절(음성 대조군)**·만료 잔여를 판정. FAIL 이 하나라도 있으면 종료코드 1 |
 
 CSP 는 파일을 두는 것만으로는 쓰지 않는다 — `local_nodes` TLS 행의 `tls_cert_path`(체인)/
-`tls_key_path`(키)에 절대경로를 저장해야 하고, 저장 시 SIGUSR1 로 무중단 반영된다(§8.4).
+`tls_key_path`(키)가 그 파일을 가리켜야 한다. `csp-node` 가 OAM 컬렉션 API 로 그 행을 갱신하며(파일 직접
+편집은 다음 설정 push 에 되돌아가므로 하지 않는다), 콘솔에서 손으로 저장해도 같다. 저장 시 SIGUSR1 로
+무중단 반영된다(§8.4).
 
 **SAN 상위집합 조건.** agent 의 노드 인증서 보증(`agent/lib/cert.sh`)은 `O=CIMS` 인증서를 자기
 관리 대상으로 보고, 요구 목록(`DNS:<hostname>`·`IP:127.0.0.1`·노드 IPv4 전부·VIP·
