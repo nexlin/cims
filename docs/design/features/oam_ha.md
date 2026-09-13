@@ -626,6 +626,10 @@ SAN 이 충분하면 아무것도 하지 않으므로 재기동이 인증서를 
 없거나 발급이 실패하면 경고만 남기고 통과한다 (모듈 자체 폴백이 뒤를 받쳐 기동을 막지
 않는다).
 
+단말 대면 모듈(csc·csp)에 대한 확장 — 그룹 CA 키에 개발사 루트가 발급한 교차 인증서(`_secrets/ca/ca-cross.crt`)를
+체인에 붙이는 것, 잔여 60일 자동 재발급과 일일 스윕, CSP 편입, 자동 갱신 실패 알람 — 은
+[sip_tls_signaling.md §8.6](sip_tls_signaling.md#86-만료-방어--leaf-자동-갱신과-만료-안내) 이 정본이다. join 은 `ca-cross.crt` 도 피어에 복사한다.
+
 모듈 쪽에는 발급 코드가 없다. SAN 점검·그룹 CA 생성·재발급은 **lifecycle 엔진**
 (`agent/lib/cert.sh`)이 모듈 **기동 전**에 수행한다 — 기동 중에 재발급하면 이미 뜬 모듈과
 인증서가 갈린다. `oam_app` 에 남은 것은 `_resolve_oam_cert` 의 self-signed 생성뿐이고,

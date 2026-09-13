@@ -49,7 +49,7 @@ CA 키가 어디에도 없으면 §5-B(새 CA + APK 재빌드)로 간다.
 
 ## 3. 발급·배치·검증 — `scripts/service-cert.sh`
 
-절차 정본은 [sip_tls_signaling.md §8.3](../design/features/sip_tls_signaling.md#83-발급배치-절차--새-노드는-scriptsservice-certsh-로).
+절차 정본은 [sip_tls_signaling.md §8.3](../design/features/sip_tls_signaling.md#83-발급배치-절차--사이트-ca-는-개발사에서-1회-서버-leaf-는-현장에서).
 .48 은 개발 레이아웃(`build/dist/mgmt-server`)이라 `--prefix` 를 준다. CA 키는 .45 를 떠나지 않는다.
 
 ```bash

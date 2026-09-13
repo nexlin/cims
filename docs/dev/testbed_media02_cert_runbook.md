@@ -2,7 +2,7 @@
 
 > 개발·시험 환경 운영 메모. 패키지 설치는 팀원이, **인증서와 서비스 동작 확인은 인증서 담당자**가 한다.
 > 이 문서는 인증서 담당자가 현장에서 보는 절차다. 절차 정본은
-> [sip_tls_signaling.md §8.3](../design/features/sip_tls_signaling.md#83-발급배치-절차--새-노드는-scriptsservice-certsh-로),
+> [sip_tls_signaling.md §8.3](../design/features/sip_tls_signaling.md#83-발급배치-절차--사이트-ca-는-개발사에서-1회-서버-leaf-는-현장에서),
 > 설치 문맥은 [initial_install.md §4.5](../user-manual/initial_install.md#45-단말-대면-tls-인증서--없으면-단말이-로그인하지-못한다).
 
 ## 왜 필요한가

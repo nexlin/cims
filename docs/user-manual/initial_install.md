@@ -274,7 +274,7 @@ TCP/TLS 단말을 받으려면 같은 컬렉션에 `protocol=TCP`(관례 25061) 
 | `tls_key_path` | cert+key 결합 PEM 이면 **비운다** (스택이 인증서 파일에서 키를 읽는다). 분리 배치면 키 경로를 넣는다 |
 | `tls_ca_path` | 체인 검증이 필요할 때만 |
 
-동봉 `csp.pem` 은 개발·시험용 self-signed 다. **단말이 붙는 노드는 §4.5 의 Service CA 인증서로 바꾼다** — 단말은 이 자가서명을 거절한다.
+동봉 `csp.pem` 은 개발·시험용 self-signed 다. **단말이 붙는 노드는 §4.5 의 사이트 CA 발급 인증서로 바꾼다** — 단말은 이 자가서명을 거절한다.
 
 저장 시 CSP 는 SIGUSR1 로 rebind 하므로 재기동이 필요 없다(기동 전이면 이후 start 에 반영).
 리스너 개설이 실패하면 프로세스는 죽지 않고 **`A-PRC-012` 알람으로 격리 보고**된다 —
@@ -386,24 +386,38 @@ realm 이 달라져 등록이 401 로 실패한다.** 바꾼 뒤 해당 번호�
 
 ### 4.5 단말 대면 TLS 인증서 — **없으면 단말이 로그인하지 못한다**
 
-단말(Android 앱·Windows 관제조작반)은 **CIMS Service CA** 한 장만 신뢰한다. 설치 직후의
-인증서는 둘 다 그 발급자가 아니다 — CSC 4430 은 agent 가 그룹 CA(`CIMS-OAM-CA`)로 자동
-발급한 것, CSP TLS 는 패키지 동봉 자가서명(`cert/csp.pem`)이다. 이 상태로 단말이 붙으면
-**로그인 단계에서 TLS 핸드셰이크가 끊기고 CSC 로그에는 요청이 한 건도 남지 않는다.** SIP 를
-UDP 로 두어도 풀리지 않는다(막히는 채널은 HTTPS 4430 이다).
+단말(Android 앱·Windows 관제조작반)은 **CIMS 루트 CA** 한 장만 신뢰하고, 서버 인증서는 그 아래
+**사이트 CA → 서버 leaf** 두 층으로 발급된다(2단 PKI — 정본
+[sip_tls_signaling.md §8](../design/features/sip_tls_signaling.md#8-인증서-운영)). 설치 직후의
+인증서는 둘 다 이 계층 밖이다 — CSC 4430 은 agent 가 그룹 CA(`CIMS-OAM-CA`)로 자동 발급한 것,
+CSP TLS 는 패키지 동봉 자가서명(`cert/csp.pem`)이다. 이 상태로 단말이 붙으면 **로그인 단계에서
+TLS 핸드셰이크가 끊기고 CSC 로그에는 요청이 한 건도 남지 않는다.** SIP 를 UDP 로 두어도 풀리지
+않는다(막히는 채널은 HTTPS 4430 이다).
 
-절차는 `scripts/service-cert.sh` 가 담당한다(정본
-[sip_tls_signaling.md §8.3](../design/features/sip_tls_signaling.md#83-발급배치-절차--새-노드는-scriptsservice-certsh-로)).
-CA 개인키는 CA 보관 서버(`/home/cims/certs/`)를 떠나지 않는다.
+절차는 `scripts/service-cert.sh` 가 담당한다. 루트 CA 개인키는 개발사 오프라인 매체를, 사이트 CA
+개인키는 현장 CA 보관 서버(`/home/cims/certs/<site_id>/`)를 떠나지 않는다. 현장과 개발사 사이에
+네트워크는 필요 없다 — 개발사 손이 닿는 것은 0 단계 한 번뿐이고, 이후 노드 추가·IP 변경·갱신은
+전부 현장 안에서 끝난다.
 
-1. **CA 보관 서버**에서 대상 노드 IP 하나로 발급한다. ssh 로 노드의 hostname·IP 를 수집해 SAN 을
+0. **사이트 CA 준비 — 사이트 개설 시 1회, 개발사에서.** 개발사가 오프라인 루트로 이 사이트의 CA 를
+   발급해 설치 키트에 담아 보낸다(현장이 키를 직접 만들어 CSR 만 보내는 방식과 고객 PKI 교차 서명
+   방식은 정본 §8.3 (0)). 현장 CA 보관 서버에 `cims-site-ca.{crt,key}`(키 600)와 루트 인증서
+   `cims-service-ca.crt`(현 세대 루트 파일명)를 둔다. 루트가 직접 서명한 leaf 가 이미 배치된 노드는 그대로 유효하며 다음
+   갱신부터 사이트 CA 를 쓴다.
+   기본 방식은 **그룹 CA 교차 서명**이다 — OAM 노드의 `<oam>/runtime/_secrets/ca/ca.crt` 를 개발사에 보내
+   교차 인증서 `ca-cross.crt` 를 받아 같은 디렉터리에 두면, lifecycle 엔진이 이후 leaf 발급·갱신을
+   자동으로 한다(정본 §8.6 — 엔진 반영 뒤. 그 전이거나 별도 사이트 CA 현장이면 아래 1~4 수동).
+   > 도구의 `site-ca` 서브커맨드가 들어오기 전(정본 §9 #2)에는 §8.3 의 수동 등가 명령으로 발급한다.
+1. **현장 CA 보관 서버**에서 대상 노드 IP 하나로 발급한다. ssh 로 노드의 hostname·IP 를 수집해 SAN 을
    채운다(설치 전이어도 된다).
    ```bash
-   scripts/service-cert.sh issue --ip <노드 IP>            # HA 면 --vip <VIP> 추가
-   # → /home/cims/certs/cert-init-<HOST>/  +  cert-init-<HOST>.tgz  (현장 반입용. 키가 들어 있어 600)
+   scripts/service-cert.sh issue --ip <노드 IP> \
+       --ca-dir /home/cims/certs/<site_id> --ca-name cims-site-ca     # HA 면 --vip <VIP> 추가
+   # → /home/cims/certs/<site_id>/cert-init-<HOST>/  +  cert-init-<HOST>.tgz  (현장 반입용. 키가 들어 있어 600)
    ```
    ssh 가 안 되면 대상 노드에서 `bash service-cert.sh collect` 를 돌려 나온 HOST/SAN 을
-   `issue --host <HOST> --san "<SAN>"` 으로 넘긴다.
+   `issue --host <HOST> --san "<SAN>"` 으로 넘긴다. 체인 PEM 은 leaf + 사이트 CA 두 장이고 루트는
+   들어가지 않는다(단말이 이미 가진 앵커).
 2. 패키지 설치와 CSC 기동이 끝난 뒤 **대상 노드**에서 서비스 계정(cims)으로 실행한다.
    ```bash
    tar xzf cert-init-<HOST>.tgz && bash cert-init-<HOST>/service-cert.sh install
@@ -419,15 +433,19 @@ CA 개인키는 CA 보관 서버(`/home/cims/certs/`)를 떠나지 않는다.
    콘솔로 하려면 `[패키지 설정] > csp > local_nodes` 의 TLS 행(§4.1)에 절대경로를 저장한다.
    - `tls_cert_path` = `/opt/cims-agent/modules/csp/runtime/cert/csp-chain.pem`
    - `tls_key_path` = `/opt/cims-agent/modules/csp/runtime/cert/csp.key`
-4. 검증 — 전부 PASS 여야 한다. 접속 IP 는 묶음에서 읽는다. CSC 를 한 번 재시작한 뒤 다시 돌려
-   발급자가 유지되는지도 본다.
+4. 검증 — 전부 PASS 여야 한다. 앵커는 **루트 인증서**다(사이트 CA 를 앵커로 주면 경로가 루트까지
+   이어지지 않아 실패한다). 접속 IP 는 묶음에서 읽는다. CSC 를 한 번 재시작한 뒤 다시 돌려 발급자가
+   유지되는지도 본다.
    ```bash
-   bash cert-init-<HOST>/service-cert.sh verify --csp-port <TLS bind_port>
+   bash cert-init-<HOST>/service-cert.sh verify --csp-port <TLS bind_port> --ca cims-service-ca.crt
    ```
+   > `verify` 의 발급자 판정이 루트 기준으로 바뀌기 전(정본 §9 #3)에는 §8.4 의 `openssl s_client`
+   > 명령 세 줄(체인 2장·`-verify_ip` 통과·틀린 이름 거절)로 대신 확인한다.
 
 단말은 로그인 화면의 서버 주소를 SAN 에 있는 IP 로 넣는다. Windows 관제조작반은 "서버 인증서
-검증"을 켜고 CA PEM 경로에 묶음의 `cims-service-ca.crt` 를 지정한다. 단말 시계가 틀리면 유효기간
-검사에서 실패한다.
+검증"을 켜고 CA PEM 경로에 **루트 인증서** `cims-service-ca.crt` 를 지정한다(사이트 CA 가 아니다). 단말
+시계가 틀리면 유효기간 검사에서 실패한다. 서버 IP 가 바뀌면 1~4 를 현장에서 다시 하면 되고 단말
+앱은 손대지 않는다.
 
 ## 5. 기동 및 확인
 
