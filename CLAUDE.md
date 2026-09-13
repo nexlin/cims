@@ -87,29 +87,6 @@ CMP 를 CSP 보다 먼저 기동:
 [docs/VERIFICATION_MANUAL.md](docs/VERIFICATION_MANUAL.md) 를 본다. 진입점은 `cims-verify`
 또는 콘솔 `/testbed/verify-v2`.
 
-### 디렉토리 구조
-
-```
-csp/        CSP — SIP 서버 (소스 + csp.json)
-cmp/        CMP — 미디어 서버 (소스 + cmp.json, config_template.json)
-cmdp/       CMDP — MCData 미디어평면 (MSRP 종단, cmdp.json)
-cspsim/     단말 시뮬레이터
-csc/        CSC — 가입자/MCPTT 서버 (Python), csc.json
-ems/        OAM + 콘솔
-  core/     { oam/ (base 게이트웨이=`oam` 패키지), console/ (공통 셸·base 메뉴) }
-  service/  { oam/ (서비스 모듈=`oam-svc` 패키지), console/ (서비스 팩) }
-agent/      노드 에이전트
-sdk/        단말 SDK — engine/(pjproject config_site 정본) core/(libcimsue C++ 코어·cimsue-cli·단위시험·SWIG .i) android/(NDK 빌드 스크립트)
-android/    Android UE 앱(volte/ptt/cims SSO) + core(pjsua2 SWIG·Kotlin — sdk/core 로 이식 중)
-deployment/ 부트스트랩·DB 부트스트랩 모듈
-verify/     S1~S6 검증 인프라 (verify/lib/)
-tests/      테스트
-scripts/    개발 파이프라인 단위 스크립트 (sync.sh, package.sh, lib/common.sh) + 운영/시험 스크립트
-sql/        DB 스키마/마이그레이션
-ext/, pkg/  외부 의존성 소스 / 설치 산출물
-docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)
-```
-
 > **설정 파일 위치**: `csp/csp.json`, `cmp/cmp.json`, `csc/bin/csc_pihttp/config/csc.json`.
 > 가입자/그룹 데이터는 DB(MariaDB) primary, `csp/User/`·`csp/Group/` JSON fallback.
 > 각 설정 키의 의미는 해당 모듈 설계 문서를 참조한다.
@@ -205,15 +182,8 @@ docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)
 - 기능 작업 전 **관련 design/features 문서를 먼저 읽는다.** 문서와 코드가 어긋나면 코드를 정본으로
   보되, 그 차이를 문서 갱신으로 해소한다.
 
-**콘솔 UI (프론트)**
-- `ems/core/console/**` · `ems/service/console/**` 를 수정하기 전에
-  **[docs/design/console_design_system.md](docs/design/console_design_system.md) 를 먼저 읽는다.**
-  토큰 체계가 이행 중이라 임의로 색·간격을 넣으면 전 라우트가 어긋난다.
-- 읽지 않아도 걸리는 것 넷: **hex 직접 사용 금지**(토큰만) · **이모지/텍스트 글리프 아이콘 금지**(Lucide 만) ·
-  **화면 스펙 없는 페이지의 구조·문구를 지어내지 않는다**(방식·규칙만 적용) ·
-  **시안에 없는 것은 지우지도 고치지도 않는다**(일관성·정돈을 이유로도) —
-  **도면이 전부 있는 `시스템/인프라` 만 예외로, 거기서는 도안에 없는 것을 지운다**(§7-39).
-- 디자이너 원본 `cims-design-handoff/` 는 **읽기 전용**이다. 우리 결정은 위 정본 문서에만 쓴다.
+**콘솔 UI (프론트)** — 규칙은 콘솔 폴더 작업 시 자동 로드되는 [ems/core/console/CLAUDE.md](ems/core/console/CLAUDE.md) 가
+정본이다(시각 계약 [docs/design/console_design_system.md](docs/design/console_design_system.md) 를 먼저 읽는다).
 
 **기능 보완 = 코드 + 문서 동시 갱신**
 - 동작·인터페이스·설정 키를 바꾸면 해당 docs 문서를 같은 변경에서 갱신한다.
