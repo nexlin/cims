@@ -57,6 +57,10 @@ void SSLServerCtxFree( SSL_CTX * ctx );
  *  무중단 교체(SSLServerCtxReload)와 경합해도 dangling 을 잡지 않도록 하는 유일한 안전 경로다. */
 SSL_CTX * SSLServerCtxAcquire( );
 
+/** 임의 SSL_CTX 의 참조 카운트를 1 올린다 — per-listener ctx 를 accept 스레드에서 worker 로 넘길 때
+ *  (CSipStackTlsListener::AcquireSslCtx). 해제는 SSLServerCtxFree. */
+void SSLCtxRef( SSL_CTX * ctx );
+
 /** 전역 서버 ctx 를 새 인증서로 **무중단 교체**한다.
  *  이미 맺어진 TLS 연결은 각자 SSL 객체가 옛 ctx 를 참조해 그대로 유지되고, **새 핸드셰이크만**
  *  새 인증서를 쓴다. 소켓을 닫지 않으므로 등록·통화가 끊기지 않는다.

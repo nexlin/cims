@@ -19,6 +19,12 @@
 
 #include <cctype>
 #include <cstring>
+#include <ctime>
+#ifdef _WIN32
+#  define cimsue_timegm _mkgmtime
+#else
+#  define cimsue_timegm timegm
+#endif
 
 namespace cimsue {
 namespace http {
@@ -154,6 +160,19 @@ Response OpenSslTransport::request(const std::string& method, const std::string&
             long vr = SSL_get_verify_result(c.ssl);
             if (vr != X509_V_OK) r.error += std::string(" (") + X509_verify_cert_error_string(vr) + ")";
             return r;
+        }
+        // 서버 인증서 만료 관측 — 관제조작반 "서버 인증서 N일 후 만료" 경고의 입력(sip_tls_signaling.md §8.6.2).
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+        if (X509* px = SSL_get1_peer_certificate(c.ssl)) {
+#else
+        if (X509* px = SSL_get_peer_certificate(c.ssl)) {
+#endif
+            const ASN1_TIME* na = X509_get0_notAfter(px);
+            struct tm tmv{};
+            if (na && ASN1_TIME_to_tm(na, &tmv) == 1) r.peerNotAfterEpoch = (int64_t)cimsue_timegm(&tmv);
+            char sbuf[256] = {0};
+            if (X509_NAME_oneline(X509_get_subject_name(px), sbuf, sizeof sbuf)) r.peerSubject = sbuf;
+            X509_free(px);
         }
     }
     std::string req = method + " " + u.path + " HTTP/1.1\r\nHost: " + u.host + ":" + std::to_string(u.port) + "\r\n"

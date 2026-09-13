@@ -192,6 +192,14 @@ public sealed record SdsMessage(int AccountId, string FromUri, string GroupUri, 
 
 public sealed record StreamStats(uint RxPackets, uint RxBytes, uint RxLoss, uint RxDiscard, uint TxPackets, uint TxBytes, bool Valid);
 
+/// <summary>서버 인증서 만료 관측 — 마지막 성공 TLS 핸드셰이크의 peer 인증서(SIP TLS = Engine, HTTPS = CscClient).
+/// 관측 전엔 Valid=false. DaysLeft 는 코어가 계산한 잔여 일수(음수 = 만료). 임계는 서버와 같다: ≤30일 경고(자동 갱신 실패 신호), ≤7일 위험
+/// (sip_tls_signaling.md §8.6.2).</summary>
+public sealed record TlsPeerExpiry(bool Valid, DateTimeOffset NotAfter, DateTimeOffset ObservedAt, int DaysLeft, string Subject, string Remote)
+{
+    public static readonly TlsPeerExpiry None = new(false, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0, "", "");
+}
+
 public sealed record AudioDeviceInfo(int Id, string Name, string Driver, uint InputCount, uint OutputCount);
 
 /// <summary>MCData 가 아닌 MESSAGE/NOTIFY 본문(text/plain 문자, xcap-diff 등) — 앱이 해석.</summary>

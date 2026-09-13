@@ -46,28 +46,48 @@ SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]:-$0}")"
 SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
 
 DEFAULT_PREFIX=/opt/cims-agent/modules          # 배포본. 개발 레이아웃은 build/dist/<server>
-DEFAULT_CA_DIR=/home/cims/certs
-DEFAULT_CA_NAME=cims-service-ca
+DEFAULT_CA_DIR=/home/cims/certs                 # CA 보관 서버 — 사이트 CA 는 <CA 디렉터리>/<site_id>/
+DEFAULT_ROOT_DIR=/home/cims/certs               # 루트 인증서·(오프라인 매체의) 루트 키 자리
+DEFAULT_ROOT_NAME=cims-service-ca               # 현 세대 루트 파일 이름 = 단말 앵커(APK). 재발급 세대는 cims-root-ca-g1
+DEFAULT_SITE_CA_NAME=cims-site-ca               # 별도 사이트 CA(방식 A/B) 파일 이름
+DEFAULT_CA_NAME="$DEFAULT_ROOT_NAME"            # issue 의 서명 CA 기본값(--site 가 없을 때 = 루트 직서명, 임시)
 DEFAULT_DAYS=730
+# 임계(일) — 단일 정의 sip_tls_signaling.md §8.6.2 (agent/lib/cert.sh CERT_RENEW/WARN_DAYS 와 같은 값)
+RENEW_DAYS=60
+WARN_DAYS=30
 DEFAULT_CSC_PORT=4430
 DEFAULT_CSP_PORT=15061
 
 usage() {
     cat <<'USAGE'
-사용법: service-cert.sh <collect|issue|install|verify|push> [옵션]
+사용법: service-cert.sh <site-ca|collect|issue|install|csp-node|verify|push> [옵션]
+
+  site-ca <issue|csr|sign> …     — 사이트 CA (정본 §8.3 (0)). issue/sign 은 **개발사 오프라인 루트 매체**에서.
+      site-ca sign --cross <CA.crt> [--out FILE]
+          기본 방식. 현장 OAM 노드의 그룹 CA 인증서(<oam>/runtime/_secrets/ca/ca.crt)를 루트가 교차 서명해
+          ca-cross.crt 를 만든다(같은 공개키·subject, CA:TRUE pathlen:0, 만료=루트). 현장에서 같은 디렉터리에
+          두면 lifecycle 엔진이 leaf 를 자동으로 사이트 CA 체인으로 발급·갱신한다. 고객 PKI(방식 C)도 같다.
+      site-ca issue --site <site_id> [--ca-dir D]
+          방식 A(턴키). 사이트 CA 키+인증서 → <CA 디렉터리>/<site_id>/cims-site-ca.{key,crt} + 루트 인증서 복사.
+      site-ca csr --site <site_id> [--ca-dir D]          현장에서. 키+CSR 만 만든다(루트 불필요) → CSR 만 매체로.
+      site-ca sign <CSR> [--out FILE]                    방식 B 서명. 결과 인증서를 현장 CA 보관 서버에 둔다.
+      공통: --root-dir D --root-name N (루트 위치, 기본 /home/cims/certs/cims-service-ca) · --days N(기본 = 루트 잔여−1)
 
   collect [--prefix P]
       대상 노드에서 실행. 필요한 SAN 목록(agent 자동 발급 규칙과 동일)을 출력한다.
       출력의 HOST/SAN 을 issue 에 그대로 넘긴다.
 
-  issue --ip IP [--vip IP] [--days N]
-      CA 보관 서버에서 실행. 보통은 이것으로 끝이다 — ssh 로 대상 노드의 hostname·주소를 읽어 발급하고,
-      /home/cims/certs/cert-init-<host>/ 와 cert-init-<host>.tgz 를 만든다(있으면 덮어쓴다).
+  issue --ip IP --site <site_id> [--vip IP] [--days N]
+      현장 CA 보관 서버에서 실행(별도 사이트 CA 현장·엔진 없는 노드의 수동 경로 — 교차 인증서를 배치한 노드는
+      lifecycle 엔진이 자동 발급하므로 필요 없다). ssh 로 대상 노드의 hostname·주소를 읽어 **사이트 CA**
+      (<CA 디렉터리>/<site_id>/cims-site-ca) 로 csc·csp leaf 를 발급하고 <CA 디렉터리>/<site_id>/cert-init-<host>/ 와
+      .tgz 를 만든다(있으면 덮어쓴다). 체인 = leaf + 사이트 CA 2장, 묶음에 **루트 인증서**(단말 앵커·verify 기준) 동봉.
         --vip IP        HA 대표 주소를 쓰면 함께 넣는다 (여러 개면 쉼표)
-        --days N        유효기간(기본 730)
+        --days N        유효기간(기본 730 = 2년)
         --runbook FILE  노드 전용 절차 문서를 묶음에 RUNBOOK-<host>.md 로 동봉
-      드물게 쓰는 것: --host H --san LIST (ssh 불가 시 collect 출력을 수동 전달) · --extra-san LIST(IP:/DNS: 접두)
-      · --cn IP · --ca-dir D · --ca-name N · --ssh-user U · --out DIR · --keep(덮어쓰기 금지)
+      --site 를 생략하면 루트가 직접 서명한다(체인 1장, 임시 — 경고). 드물게 쓰는 것: --host H --san LIST (ssh 불가 시
+      collect 출력을 수동 전달) · --extra-san LIST(IP:/DNS: 접두) · --cn IP · --ca-dir D --ca-name N(서명 CA 직접 지정)
+      · --root FILE(동봉할 루트 인증서) · --ssh-user U · --out DIR · --keep(덮어쓰기 금지)
 
   install [--prefix P] [--bundle D] [--csc-only|--csp-only] [--skip-san-check]
           [--ip IP] [--wait N|--no-wait]
@@ -82,9 +102,11 @@ usage() {
       것과 같은 API 라 SIGUSR1 로 무중단 반영된다. TLS 행이 없으면 --port 로 새 행(access-tls)을 만든다.
       --dry-run 은 바뀔 내용만 보여 주고 저장하지 않는다. 끝나면 그 포트로 verify 를 돌린다.
 
-  verify [--ip IP] [--csc-port N(4430)] [--csp-port N(15061, 0=생략)] [--ca FILE] [--wait N]
-      어느 장비에서든 실행. 묶음 디렉터리 안의 스크립트로 돌리면 --ip 는 묶음에서 읽는다.
-      포트마다 체인 2장 전송·발급자=Service CA·IP 신원 OK·틀린 이름 거절을 판정한다. FAIL 이 하나라도 있으면 종료코드 1.
+  verify [--ip IP] [--csc-port N(4430)] [--csp-port N(15061, 0=생략)] [--root FILE] [--wait N]
+      어느 장비에서든 실행. 묶음 디렉터리 안의 스크립트로 돌리면 --ip 와 루트는 묶음에서 읽는다.
+      **앵커는 루트**다(단말과 같은 규칙 — 사이트 CA 를 주면 경로가 루트까지 이어지지 않아 실패한다). 포트마다
+      체인 장수(사이트 CA 체인 2장 / 루트 직서명 1장)·발급자·사이트 CA→루트·IP 신원·틀린 이름 거절(음성 대조군)·
+      만료 잔여(leaf·사이트 CA 중 이른 것, 갱신 임계 60/경고 30)를 판정한다. FAIL 이 하나라도 있으면 종료코드 1.
 
   push --ssh user@host [--prefix P] [--bundle D|tgz] [--remote-dir D] [--csp-port N]
       CA 서버에서 대상 노드로 묶음을 scp 하고 원격 install 을 실행한 뒤 verify 한다.
@@ -233,12 +255,123 @@ cmd_collect() {
     echo "#   scripts/service-cert.sh issue --host $host --san \"$san\""
 }
 
+# ── site-ca ──────────────────────────────────────────────────────────────────
+# 사이트 CA (정본 §8.3 (0)) — issue/sign 은 **개발사 오프라인 루트 매체**에서 실행한다. 루트 키는 여기서만 쓰인다.
+#   sign --cross <CA.crt>  기본 방식. 현장 그룹 CA 인증서(또는 고객 CA)의 공개키·subject 를 그대로 두고 루트가 서명한
+#                          교차 인증서를 만든다 — 키는 현장을 떠나지 않고, 현장에서는 lifecycle 엔진이 leaf 를 이 체인으로
+#                          자동 발급·갱신한다(agent/lib/cert.sh). CSR 이 없어도 된다(입력 CA 인증서가 자가서명이라 키 보유가 증명됨).
+#   issue --site <id>      방식 A(턴키): 사이트 CA 키+인증서를 개발사가 만들어 설치 키트에 담는다.
+#   csr   --site <id>      방식 B(현장 키): 현장에서 키+CSR → CSR 만 매체로 → sign <CSR>.
+# 프로파일: CA:TRUE pathlen:0 · keyCertSign,cRLSign · SKI/AKI · 유효기간 = 루트 잔여일 − 1 (하위는 상위보다 오래 살 수 없다).
+_site_id_ok() {   # site_id = 짧은 불변 슬러그 (identifier_model.md — 표시명은 키가 아니다)
+    [[ "$1" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]] || die "site_id 는 소문자·숫자·'-' 1~32자다: '$1'"
+}
+_site_ca_ext() { printf 'basicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,keyCertSign,cRLSign\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid\n'; }
+_need_root() {    # root_crt root_key
+    [[ -f "$1" ]] || die "루트 인증서 없음: $1 (--root-dir/--root-name)"
+    [[ -r "$2" ]] || die "루트 개인키 없음/읽기 불가: $2 — 사이트 CA 발급·서명은 오프라인 루트 매체에서 한다"
+    [[ "$(openssl x509 -in "$1" -noout -subject)" == "$(openssl x509 -in "$1" -noout -issuer | sed 's/^issuer=/subject=/')" ]] \
+        || die "루트가 자가서명이 아니다: $1"
+}
+_root_days_minus1() {
+    local d; d=$(_days_left "$1") || die "루트 만료 읽기 실패: $1"
+    (( d > 1 )) || die "루트 잔여가 ${d}일 — 사이트 CA 를 발급할 수 없다(루트 교체 §8.5 가 먼저다)"
+    echo $(( d - 1 ))
+}
+
+cmd_site_ca() {
+    _need openssl
+    local sub="${1:-}"; [[ -n "$sub" ]] && shift
+    local site="" ca_dir="$DEFAULT_CA_DIR" root_dir="$DEFAULT_ROOT_DIR" root_name="$DEFAULT_ROOT_NAME" out="" cross="" csr="" days="" force=0
+    while (($#)); do case "$1" in
+        --site) site="$2"; shift 2 ;;
+        --ca-dir) ca_dir="$2"; shift 2 ;;
+        --root-dir) root_dir="$2"; shift 2 ;;
+        --root-name) root_name="$2"; shift 2 ;;
+        --out) out="$2"; shift 2 ;;
+        --cross) cross="$2"; shift 2 ;;
+        --days) days="$2"; shift 2 ;;
+        --force) force=1; shift ;;
+        -h|--help) usage; exit 0 ;;
+        -*) die "site-ca: 알 수 없는 옵션 $1" ;;
+        *) [[ "$sub" == sign && -z "$csr" ]] && { csr="$1"; shift; } || die "site-ca: 알 수 없는 인자 $1" ;;
+    esac; done
+    local root_crt="$root_dir/$root_name.crt" root_key="$root_dir/$root_name.key" name="$DEFAULT_SITE_CA_NAME" d
+    case "$sub" in
+      issue)
+        [[ -n "$site" ]] || die "site-ca issue: --site <site_id> 필수"
+        _site_id_ok "$site"; _need_root "$root_crt" "$root_key"
+        d="$ca_dir/$site"
+        if [[ -e "$d/$name.crt" ]] && (( ! force )); then die "이미 있다: $d/$name.crt — 사이트 CA 는 사이트당 1개다. 침해 교체면 --force(기존 leaf 체인이 끊긴다)"; fi
+        [[ -n "$days" ]] || days=$(_root_days_minus1 "$root_crt")
+        umask 077; mkdir -p "$d" || die "생성 실패: $d"; chmod 700 "$d"
+        header "=== 사이트 CA 발급(방식 A): $site (${days}일 = 루트 만료일) ==="
+        openssl req -newkey rsa:4096 -sha256 -nodes -keyout "$d/$name.key" -out "$d/$name.csr" \
+                -subj "/C=KR/O=CIMS/CN=CIMS Site CA $site" >/dev/null 2>&1 || die "키/CSR 생성 실패"
+        openssl x509 -req -in "$d/$name.csr" -CA "$root_crt" -CAkey "$root_key" -CAcreateserial -days "$days" -sha256 \
+                -extfile <(_site_ca_ext) -out "$d/$name.crt" >/dev/null 2>&1 || die "루트 서명 실패"
+        rm -f "$d/$name.csr"; chmod 600 "$d/$name.key"; chmod 644 "$d/$name.crt"
+        cp "$root_crt" "$d/$root_name.crt"; chmod 644 "$d/$root_name.crt"
+        openssl verify -CAfile "$root_crt" "$d/$name.crt" >/dev/null 2>&1 || die "발급 직후 경로 검증 실패"
+        ok "사이트 CA: $d/$name.crt (키 600) · 루트 인증서 동봉 $d/$root_name.crt"
+        info "$(openssl x509 -in "$d/$name.crt" -noout -subject -enddate | paste -sd' ' -)"
+        echo "  다음: <site_id> 디렉터리를 설치 키트에 담아 현장 CA 보관 서버로. 서버 leaf 는 현장에서  service-cert.sh issue --ip <노드 IP> --site $site"
+        ;;
+      csr)
+        [[ -n "$site" ]] || die "site-ca csr: --site <site_id> 필수"
+        _site_id_ok "$site"
+        d="$ca_dir/$site"
+        [[ -e "$d/$name.key" ]] && (( ! force )) && die "이미 있다: $d/$name.key (--force 로 새로 만든다)"
+        umask 077; mkdir -p "$d" || die "생성 실패: $d"; chmod 700 "$d"
+        header "=== 사이트 CA 키+CSR(방식 B): $site ==="
+        openssl req -newkey rsa:4096 -sha256 -nodes -keyout "$d/$name.key" -out "$d/$name.csr" \
+                -subj "/C=KR/O=CIMS/CN=CIMS Site CA $site" >/dev/null 2>&1 || die "키/CSR 생성 실패"
+        chmod 600 "$d/$name.key"
+        ok "키: $d/$name.key (현장을 떠나지 않는다) · CSR: $d/$name.csr"
+        echo "  다음: CSR 만 매체로 개발사에 → 루트 매체에서  service-cert.sh site-ca sign $name.csr  → 인증서를 $d/$name.crt 로 회수"
+        ;;
+      sign)
+        _need_root "$root_crt" "$root_key"
+        [[ -n "$days" ]] || days=$(_root_days_minus1 "$root_crt")
+        if [[ -n "$cross" ]]; then
+            [[ -f "$cross" ]] || die "CA 인증서 없음: $cross"
+            openssl x509 -in "$cross" -noout -ext basicConstraints 2>/dev/null | grep -q 'CA:TRUE' \
+                || die "교차 서명 대상이 CA 인증서가 아니다(basicConstraints CA:TRUE 없음): $cross"
+            [[ -n "$out" ]] || out="$(dirname "$cross")/ca-cross.crt"
+            header "=== 교차 서명(기본 방식): $(openssl x509 -in "$cross" -noout -subject | sed 's/^subject=//') (${days}일 = 루트 만료일) ==="
+            # 입력 인증서의 subject·공개키를 그대로 두고 발급자·유효기간·확장만 새로 쓴다(-clrext 로 입력 확장 제거).
+            openssl x509 -in "$cross" -CA "$root_crt" -CAkey "$root_key" -CAcreateserial -days "$days" -sha256 -clrext \
+                    -extfile <(_site_ca_ext) -out "$out" >/dev/null 2>&1 || die "교차 서명 실패"
+            [[ "$(openssl x509 -in "$out" -noout -pubkey)" == "$(openssl x509 -in "$cross" -noout -pubkey)" ]] || die "교차 인증서 공개키 불일치"
+            openssl verify -CAfile "$root_crt" "$out" >/dev/null 2>&1 || die "교차 인증서 경로 검증 실패"
+            chmod 644 "$out"
+            ok "교차 인증서: $out"
+            info "$(openssl x509 -in "$out" -noout -subject -issuer -enddate | paste -sd' ' -)"
+            echo "  다음: 매체로 현장에 → OAM 노드  <oam>/runtime/_secrets/ca/ca-cross.crt  (644, ca.crt 옆). HA 피어는 join 이 복사한다."
+            echo "        다음 일일 스윕(또는  cims-svc cert <module>)에서 lifecycle 엔진이 CSC·CSP leaf 를 이 체인으로 재발급한다 — 단말 무변경."
+        else
+            [[ -n "$csr" && -f "$csr" ]] || die "site-ca sign: <CSR 파일> 또는 --cross <CA 인증서> 가 필요하다"
+            [[ -n "$out" ]] || out="${csr%.csr}.crt"
+            header "=== 사이트 CA 서명(방식 B): $(openssl req -in "$csr" -noout -subject | sed 's/^subject=//') (${days}일) ==="
+            openssl x509 -req -in "$csr" -CA "$root_crt" -CAkey "$root_key" -CAcreateserial -days "$days" -sha256 \
+                    -extfile <(_site_ca_ext) -out "$out" >/dev/null 2>&1 || die "루트 서명 실패"
+            openssl verify -CAfile "$root_crt" "$out" >/dev/null 2>&1 || die "발급 직후 경로 검증 실패"
+            chmod 644 "$out"
+            ok "사이트 CA 인증서: $out — 현장 CA 보관 서버의 키 옆($DEFAULT_SITE_CA_NAME.crt)에 둔다. 루트 인증서($root_crt)도 함께 보낸다"
+        fi
+        ;;
+      *) die "site-ca: <issue|csr|sign> 중 하나 (예: site-ca sign --cross ca.crt)" ;;
+    esac
+}
+
 # ── issue ────────────────────────────────────────────────────────────────────
 cmd_issue() {
     _need openssl
     local host="" san="" cn="" ca_dir="$DEFAULT_CA_DIR" ca_name="$DEFAULT_CA_NAME" days="$DEFAULT_DAYS"
-    local extra="" out="" force=1 ip="" ssh_user="${USER:-cims}" vip="" runbook=""
+    local extra="" out="" force=1 ip="" ssh_user="${USER:-cims}" vip="" runbook="" site="" root=""
     while (($#)); do case "$1" in
+        --site) site="$2"; shift 2 ;;
+        --root) root="$2"; shift 2 ;;
         --ip) ip="$2"; shift 2 ;;
         --vip) vip="$2"; shift 2 ;;
         --runbook) runbook="$2"; shift 2 ;;
@@ -277,6 +410,11 @@ cmd_issue() {
         [[ -n "$cn" ]] || cn="$ip"
     fi
     [[ -n "$host" && -n "$san" ]] || die "issue: --ip IP (ssh 자동 수집) 또는 --host/--san (수동) 이 필요하다"
+    # 서명 CA — --site 면 그 사이트 CA(<CA 디렉터리>/<site_id>/cims-site-ca). 없으면 루트 직서명(임시, 체인 1장).
+    if [[ -n "$site" ]]; then
+        _site_id_ok "$site"
+        ca_dir="$ca_dir/$site"; ca_name="$DEFAULT_SITE_CA_NAME"
+    fi
     if [[ -n "$vip" ]]; then                      # --vip 1.2.3.4[,5.6.7.8] → IP: 접두어를 붙여 SAN 에 합류
         local v; IFS=',' read -ra _v <<< "$vip"
         for v in "${_v[@]}"; do v="${v// /}"; [[ -z "$v" ]] && continue; extra="${extra:+$extra,}IP:$v"; done
@@ -302,13 +440,29 @@ cmd_issue() {
     umask 077
     mkdir -p "$out/csc" "$out/csp" || die "출력 디렉터리 생성 실패: $out"
 
-    local ca_subject ca_days
+    local ca_subject ca_issuer ca_days ca_is_root=0
     ca_subject=$(openssl x509 -in "$ca_crt" -noout -subject | sed 's/^subject=//')
+    ca_issuer=$(openssl x509 -in "$ca_crt" -noout -issuer | sed 's/^issuer=//')
+    [[ "$ca_subject" == "$ca_issuer" ]] && ca_is_root=1
     ca_days=$(_days_left "$ca_crt")
     (( ca_days > days )) || warn "CA 만료($ca_days 일)가 leaf 유효기간($days 일)보다 이르다 — 체인 PEM 의 만료 알람은 CA 기준으로 먼저 울린다"
+    # 동봉할 루트(단말 앵커) — 사이트 CA 로 서명하면 그 발급자 체인의 꼭대기, 루트 직서명이면 CA 자신.
+    if (( ca_is_root )); then
+        root="$ca_crt"
+    else
+        [[ -n "$root" ]] || for root in "$DEFAULT_ROOT_DIR/$DEFAULT_ROOT_NAME.crt" "$ca_dir/$DEFAULT_ROOT_NAME.crt" "$(dirname "$ca_dir")/$DEFAULT_ROOT_NAME.crt"; do [[ -f "$root" ]] && break; done
+        [[ -f "$root" ]] || die "루트 인증서를 찾을 수 없다 (--root FILE) — 묶음에 동봉해 verify·Windows CA PEM 기준으로 쓴다"
+        openssl verify -CAfile "$root" "$ca_crt" >/dev/null 2>&1 || die "사이트 CA($ca_crt)가 루트($root) 아래에 있지 않다 — 단말이 거절한다"
+    fi
+    local root_name; root_name=$(basename "$root" .crt)
 
-    header "=== Service CA 발급: $host (CN=$cn, ${days}일) ==="
-    info "CA: $ca_subject (남은 ${ca_days}일)"
+    header "=== 서버 leaf 발급: $host (CN=$cn, ${days}일) ==="
+    if (( ca_is_root )); then
+        warn "서명 CA 가 루트 자신이다 — 루트 직서명(체인 1장, 임시). 사이트 CA 를 쓰려면 --site <site_id> (정본 §8.3 (0))"
+        info "루트: $ca_subject (남은 ${ca_days}일)"
+    else
+        info "사이트 CA: $ca_subject (남은 ${ca_days}일) · 루트: $(openssl x509 -in "$root" -noout -subject | sed 's/^subject=//')"
+    fi
     info "SAN: $san${extra:+,$extra}"
 
     local m san_m tmp chain key leaf
@@ -324,27 +478,33 @@ cmd_issue() {
         openssl x509 -req -in "$tmp/$m.csr" -CA "$ca_crt" -CAkey "$ca_key" -CAcreateserial \
                 -out "$leaf" -days "$days" -sha256 -extfile "$tmp/$m.cnf" >/dev/null 2>&1 \
             || { rm -rf "$tmp"; die "$m: CA 서명 실패"; }
-        openssl verify -CAfile "$ca_crt" "$leaf" >/dev/null 2>&1 \
-            || { rm -rf "$tmp"; die "$m: 발급 직후 체인 검증 실패"; }
+        # 발급 직후 경로 검증 — 앵커는 루트(단말과 같은 규칙). 사이트 CA 는 중간 인증서로 준다.
+        if (( ca_is_root )); then openssl verify -CAfile "$ca_crt" "$leaf" >/dev/null 2>&1
+        else openssl verify -CAfile "$root" -untrusted "$ca_crt" "$leaf" >/dev/null 2>&1; fi \
+            || { rm -rf "$tmp"; die "$m: 발급 직후 경로 검증 실패(루트 앵커)"; }
         [[ "$(openssl x509 -in "$leaf" -noout -modulus)" == "$(openssl rsa -in "$key" -noout -modulus 2>/dev/null)" ]] \
             || { rm -rf "$tmp"; die "$m: 키↔인증서 불일치"; }
         case "$m" in
             csc) chain="$out/csc/server.crt";   cp "$key" "$out/csc/server.key" ;;
             csp) chain="$out/csp/csp-chain.pem"; cp "$key" "$out/csp/csp.key" ;;
         esac
-        cat "$leaf" "$ca_crt" > "$chain"
+        # 체인 = leaf + 사이트 CA. 루트는 싣지 않는다(단말이 이미 가진 앵커, §8.2) — 루트 직서명이면 1장.
+        if (( ca_is_root )); then cat "$leaf" > "$chain"; else cat "$leaf" "$ca_crt" > "$chain"; fi
         chmod 644 "$chain"
-        ok "$m: leaf 발급 → $(basename "$chain") (체인 2장) / SAN=$san_m"
+        ok "$m: leaf 발급 → $(basename "$chain") (체인 $(grep -c 'BEGIN CERTIFICATE' "$chain")장) / SAN=$san_m"
     done
     local not_after; not_after=$(openssl x509 -in "$out/csc/server.crt" -noout -enddate | cut -d= -f2)
     rm -rf "$tmp"
 
-    cp "$ca_crt" "$out/$ca_name.crt"; chmod 644 "$out/$ca_name.crt"
+    # 묶음 = 루트 인증서(앵커 — verify·Windows CA PEM) + 사이트 CA 인증서(참고) + 스크립트. 사이트 CA 키는 들어가지 않는다.
+    cp "$root" "$out/$root_name.crt"; chmod 644 "$out/$root_name.crt"
+    if (( ! ca_is_root )); then cp "$ca_crt" "$out/$ca_name.crt"; chmod 644 "$out/$ca_name.crt"; fi
     cp "$SCRIPT_PATH" "$out/service-cert.sh"; chmod 755 "$out/service-cert.sh"
     # 값에 공백이 든다(CA subject·만료일) — source 가능하도록 %q 로 인용해 기록
     printf '%s=%q\n' HOST "$host" CN "$cn" SAN "$san" DAYS "$days" ISSUED_AT "$(date -Is)" \
-           CA_NAME "$ca_name" CA_SUBJECT "$ca_subject" NOT_AFTER "$not_after" > "$out/bundle.env"
-    _write_readme "$out" "$host" "$san" "$ca_subject" "$not_after" "$ca_name" "$cn"
+           CA_NAME "$ca_name" CA_SUBJECT "$ca_subject" CA_IS_ROOT "$ca_is_root" ROOT_NAME "$root_name" \
+           NOT_AFTER "$not_after" > "$out/bundle.env"
+    _write_readme "$out" "$host" "$san" "$ca_subject" "$not_after" "$ca_name" "$cn" "$root_name" "$ca_is_root"
     if [[ -n "$runbook" ]]; then                  # 노드 전용 runbook(설치 담당 확인 항목 등)을 함께 싣는다
         [[ -f "$runbook" ]] || die "runbook 파일 없음: $runbook"
         cp "$runbook" "$out/RUNBOOK-$host.md" && chmod 600 "$out/RUNBOOK-$host.md"
@@ -366,25 +526,33 @@ cmd_issue() {
 }
 
 _write_readme() {
-    local out="$1" host="$2" san="$3" ca_subject="$4" not_after="$5" ca_name="$6" cn="$7"
-    local b="cert-init-$host"
+    local out="$1" host="$2" san="$3" ca_subject="$4" not_after="$5" ca_name="$6" cn="$7" root_name="$8" ca_is_root="${9:-0}"
+    local b="cert-init-$host" chain_desc site_line
+    if (( ca_is_root )); then
+        chain_desc="leaf 1장(루트 직서명 — 임시. 다음 갱신부터 사이트 CA 체인)"
+        site_line="  (사이트 CA 없음 — 루트가 직접 서명했다)"
+    else
+        chain_desc="leaf + 사이트 CA 2장"
+        site_line="  $ca_name.crt   사이트 CA 인증서(참고 — 단말 앵커가 아니다. 서버가 체인으로 보낸다)"
+    fi
     cat > "$out/README.txt" <<README
 CIMS 단말 대면 TLS 인증서 묶음 — $host
 발급 $(date +%F) / 발급자 $ca_subject / leaf 만료 $not_after
 SAN: $san (+ DNS:csc.cims.local / DNS:csp.cims.local)
 단말 접속 주소(검증 기본값): $cn
 
-이 묶음은 노드 $host 용 서버 인증서(CSC·CSP)와 CA 인증서를 담고 있다. CA 개인키는 없다.
-단말(Android APK·Windows 관제조작반)은 이 CA 만 신뢰한다. 패키지 설치 후 이 인증서를
-배치하지 않으면 단말이 로그인 단계(HTTPS 4430)에서 TLS 거절로 막힌다 — CSC 로그에는
-아무 흔적도 남지 않으므로 서버에서는 원인을 볼 수 없다.
+이 묶음은 노드 $host 용 서버 인증서(CSC·CSP, 체인 = $chain_desc)와 루트 인증서를 담고 있다.
+CA 개인키는 없다. 단말(Android APK·Windows 관제조작반)은 **루트 CA 한 장**만 신뢰하고 사이트 CA·leaf 는
+서버가 핸드셰이크로 보낸다. 패키지 설치 후 이 인증서를 배치하지 않으면 단말이 로그인 단계(HTTPS 4430)에서
+TLS 거절로 막힌다 — CSC 로그에는 아무 흔적도 남지 않으므로 서버에서는 원인을 볼 수 없다.
 
 파일
-  csc/server.crt        CSC 인증서 체인(leaf + CA)      → <prefix>/csc/runtime/cert/server.crt
+  csc/server.crt        CSC 인증서 체인                 → <prefix>/csc/runtime/cert/server.crt
   csc/server.key        CSC 개인키 (600)                → <prefix>/csc/runtime/cert/server.key
-  csp/csp-chain.pem     CSP 인증서 체인(leaf + CA)      → <prefix>/csp/runtime/cert/csp-chain.pem
+  csp/csp-chain.pem     CSP 인증서 체인                 → <prefix>/csp/runtime/cert/csp-chain.pem
   csp/csp.key           CSP 개인키 (600)                → <prefix>/csp/runtime/cert/csp.key
-  $ca_name.crt   CA 인증서 — verify 와 Windows 관제조작반 CA PEM 경로용
+  $root_name.crt   **루트 인증서(앵커)** — verify 기준·Windows 관제조작반 CA PEM 경로용
+$site_line
   service-cert.sh       이 절차를 수행하는 스크립트 (install / csp-node / verify)
   <prefix> = 배포본 /opt/cims-agent/modules (개발 레이아웃은 build/dist/<server>, --prefix 로 지정)
 
@@ -427,13 +595,13 @@ SAN: $san (+ DNS:csc.cims.local / DNS:csp.cims.local)
      bash $b/service-cert.sh verify --csp-port <TLS 포트>     # --ip 는 묶음에서 읽는다($cn)
    "틀린 이름 거절" 은 서버가 신원 검사를 집행하는지 보는 음성 대조군 — 통과해 버리면 FAIL 이다.
    그 다음 콘솔에서 CSC 를 한 번 재시작하고 같은 명령을 다시 돌린다. 발급자가 그대로
-   "CIMS Service CA" 면 agent 가 덮어쓰지 않는다는 뜻 — 여기까지가 인증서 작업의 완료 지점.
+   "$ca_subject" 면 agent 가 덮어쓰지 않는다는 뜻 — 여기까지가 인증서 작업의 완료 지점.
 
 5. 단말
    - 앱에서 로그아웃 → 로그인 화면 서버 주소 = $cn → 로그인. 재기동만으로는 새 서버를 받지 않는다.
    - APK 는 서버 검증이 켜진 빌드(2026-08-19 이후). 단말 시계 자동 동기(틀리면 유효기간 검사 실패).
    - 그룹 통화·PTT 는 같은 서버에 등록된 단말끼리만 된다 — 시험 단말은 전부 함께 옮긴다.
-   - Windows 관제조작반: "서버 인증서 검증" 켬 + CA PEM 경로 = 이 묶음의 $ca_name.crt
+   - Windows 관제조작반: "서버 인증서 검증" 켬 + CA PEM 경로 = 이 묶음의 **$root_name.crt**(루트 — 사이트 CA 가 아니다)
    증상 판독
      로그인 즉시 실패 + CSC 로그에 /idms/authreq 없음   → 인증서. 4 단계 verify 재확인
      401 / 403                                        → 계정·비밀번호 (인증서 아님)
@@ -448,7 +616,9 @@ SAN: $san (+ DNS:csc.cims.local / DNS:csp.cims.local)
 주의
   - server.key / csp.key 는 600 유지. 채팅·문서에 붙이지 않는다.
   - 인증서만 바뀌는 교체는 CSC·CSP 모두 무중단. bind 주소·포트가 바뀌면 CSP 재기동이 필요하다.
-  - 만료 30일 전 A-PRC-009 warning, 7일 전 critical. 갱신은 같은 절차(issue → install → csp-node)다.
+  - 만료 30일 전 A-PRC-009 warning, 7일 전 critical. 사이트 CA 교차 인증서(<oam>/runtime/_secrets/ca/ca-cross.crt)가
+    배치된 노드는 lifecycle 엔진이 잔여 60일에 자동 갱신한다(경고가 뜨면 = 자동 갱신 실패). 그 밖의 노드는
+    같은 절차(issue → install → csp-node)로 갱신한다.
 정본: docs/design/features/sip_tls_signaling.md §8 · docs/user-manual/initial_install.md §4.5
 README
 }
@@ -716,8 +886,7 @@ PYEOF
 
     header "=== CSP TLS 검증 ($bind_ip:$tls_port) ==="
     sleep 2
-    "$SCRIPT_PATH" verify --ip "$bind_ip" --csc-port 0 --csp-port "$tls_port" --wait 20 \
-        --ca "$( [[ -f "$bundle/$CA_NAME.crt" ]] && echo "$bundle/$CA_NAME.crt" || echo "$DEFAULT_CA_DIR/$DEFAULT_CA_NAME.crt" )"
+    "$SCRIPT_PATH" verify --ip "$bind_ip" --csc-port 0 --csp-port "$tls_port" --wait 20 --root "$(_bundle_root "$bundle")"
 }
 
 # ── verify ───────────────────────────────────────────────────────────────────
@@ -730,26 +899,60 @@ _res() {   # PASS|FAIL|WARN  label  detail
     esac
 }
 
-_verify_port() {   # ip port label ca
-    local ip="$1" port="$2" label="$3" ca="$4" raw n leaf issuer ca_subj out days
+_pem_block() {   # 텍스트 n → n 번째 인증서 블록 (없으면 빈 출력)
+    awk -v want="$2" '/-----BEGIN CERTIFICATE-----/{n++} n==want{print} /-----END CERTIFICATE-----/{if(n==want) exit}' <<< "$1"
+}
+_pem_days() {    # PEM 텍스트 → 만료까지 남은 일수
+    local na; na=$(openssl x509 -noout -enddate <<< "$1" 2>/dev/null | cut -d= -f2) || return 1
+    [[ -n "$na" ]] || return 1
+    echo $(( ( $(date -d "$na" +%s) - $(date +%s) ) / 86400 ))
+}
+
+# 앵커는 **루트**다 — 단말과 같은 규칙(§8.4). 서버가 보낸 체인으로 leaf → (사이트 CA) → 루트 경로를 판정한다.
+#   루트 직서명 leaf(1단, 임시)는 체인 1장이 정상이고, 사이트 CA 체인은 2장이며 두 번째 장이 leaf 의 발급자·루트 아래여야 한다.
+_verify_port() {   # ip port label root
+    local ip="$1" port="$2" label="$3" root="$4" raw n leaf second issuer root_subj second_subj out days days_leaf days_ca which
     header "[$label] $ip:$port"
     raw=$(timeout 8 openssl s_client -connect "$ip:$port" -showcerts </dev/null 2>/dev/null)
     n=$(grep -c "BEGIN CERTIFICATE" <<< "$raw")
     if (( n == 0 )); then
         _res FAIL "접속/TLS" "연결 실패 또는 TLS 아님"; return
     fi
-    if (( n >= 2 )); then _res PASS "체인 전송" "${n}장"; else _res FAIL "체인 전송" "1장 — CA 가 이어붙지 않았다(체인 PEM 이 아니다)"; fi
-    leaf=$(awk '/BEGIN CERTIFICATE/{f=1} f{print} /END CERTIFICATE/{exit}' <<< "$raw")
+    leaf=$(_pem_block "$raw" 1); second=$(_pem_block "$raw" 2)
     issuer=$(openssl x509 -noout -issuer <<< "$leaf" 2>/dev/null | sed 's/^issuer=//')
-    ca_subj=$(openssl x509 -in "$ca" -noout -subject | sed 's/^subject=//')
-    if [[ "$issuer" == "$ca_subj" ]]; then _res PASS "발급자" "$issuer"; else _res FAIL "발급자" "$issuer (기대: $ca_subj) — 단말이 거절한다"; fi
-    out=$(timeout 8 openssl s_client -connect "$ip:$port" -CAfile "$ca" -verify_return_error -verify_ip "$ip" -brief </dev/null 2>&1)
-    if grep -q "Verification: OK" <<< "$out"; then _res PASS "체인+IP 신원($ip)"; else _res FAIL "체인+IP 신원($ip)" "$(grep -m1 -E 'verify error|Verification|error' <<< "$out")"; fi
-    out=$(timeout 8 openssl s_client -connect "$ip:$port" -CAfile "$ca" -verify_return_error -verify_hostname wrong.example -brief </dev/null 2>&1)
+    root_subj=$(openssl x509 -in "$root" -noout -subject | sed 's/^subject=//')
+    if [[ "$issuer" == "$root_subj" ]]; then
+        _res PASS "발급자" "$issuer — 루트 직서명(1단, 임시. 다음 갱신부터 사이트 CA 체인)"
+        if (( n == 1 )); then _res PASS "체인 전송" "1장(루트 직서명)"; else _res WARN "체인 전송" "${n}장 — 루트 직서명인데 부가 장이 있다(무해)"; fi
+    else
+        if (( n >= 2 )); then _res PASS "체인 전송" "${n}장(leaf + 사이트 CA)"; else _res FAIL "체인 전송" "1장 — 사이트 CA 장이 빠졌다(체인 PEM 이 아니다). 단말이 경로를 완성하지 못한다"; fi
+        second_subj=$(openssl x509 -noout -subject <<< "$second" 2>/dev/null | sed 's/^subject=//')
+        if [[ -n "$second_subj" && "$issuer" == "$second_subj" ]]; then _res PASS "발급자" "$issuer (사이트 CA)"; else _res FAIL "발급자" "$issuer — 체인 2번째 장(${second_subj:-없음})과 다르다"; fi
+        if [[ -n "$second" ]]; then
+            if openssl verify -CAfile "$root" <(printf '%s\n' "$second") >/dev/null 2>&1; then _res PASS "사이트 CA → 루트" "$second_subj"; else _res FAIL "사이트 CA → 루트" "$second_subj 가 루트($root_subj) 아래에 있지 않다 — 단말이 거절한다"; fi
+        fi
+    fi
+    out=$(timeout 8 openssl s_client -connect "$ip:$port" -CAfile "$root" -verify_return_error -verify_ip "$ip" -brief </dev/null 2>&1)
+    if grep -q "Verification: OK" <<< "$out"; then _res PASS "경로(루트 앵커)+IP 신원($ip)"; else _res FAIL "경로(루트 앵커)+IP 신원($ip)" "$(grep -m1 -E 'verify error|Verification|error' <<< "$out")"; fi
+    out=$(timeout 8 openssl s_client -connect "$ip:$port" -CAfile "$root" -verify_return_error -verify_hostname wrong.example -brief </dev/null 2>&1)
     if grep -q "Verification: OK" <<< "$out"; then _res FAIL "틀린 이름 거절(음성 대조군)" "통과해 버림 — 신원 검사 미집행"; else _res PASS "틀린 이름 거절(음성 대조군)"; fi
-    days=$(openssl x509 -noout -enddate <<< "$leaf" 2>/dev/null | cut -d= -f2)
-    days=$(( ( $(date -d "$days" +%s) - $(date +%s) ) / 86400 ))
-    if (( days > 30 )); then _res PASS "leaf 만료" "${days}일 남음"; elif (( days > 0 )); then _res WARN "leaf 만료" "${days}일 남음 — A-PRC-009 임계"; else _res FAIL "leaf 만료" "만료됨"; fi
+    # 만료 잔여 — leaf·사이트 CA 중 이른 것. 임계는 엔진(cert.sh)과 같다: 갱신 60 / 경고 30.
+    days_leaf=$(_pem_days "$leaf") || days_leaf=0; days="$days_leaf"; which="leaf"
+    if [[ -n "$second" ]] && days_ca=$(_pem_days "$second"); then (( days_ca < days )) && { days="$days_ca"; which="사이트 CA"; }; fi
+    if (( days > RENEW_DAYS )); then _res PASS "만료 잔여" "${days}일 (${which})"
+    elif (( days > WARN_DAYS )); then _res WARN "만료 잔여" "${days}일 (${which}) — 갱신 임계(${RENEW_DAYS}일) 안: 엔진 자동 갱신 대상. 다음 스윕에도 그대로면 갱신 실패"
+    elif (( days > 0 )); then _res FAIL "만료 잔여" "${days}일 (${which}) — A-PRC-009 경고 구간 = 자동 갱신 실패. 지금 갱신하라"
+    else _res FAIL "만료" "만료됨 (${which})"; fi
+}
+
+# 묶음(또는 기본 자리)에서 루트 인증서를 찾는다 — bundle.env ROOT_NAME > 기본 이름.
+_bundle_root() {
+    local b="$1" c rn=""
+    [[ -f "$b/bundle.env" ]] && rn=$( source "$b/bundle.env" 2>/dev/null; echo "${ROOT_NAME:-}" )
+    for c in "${rn:+$b/$rn.crt}" "$b/$DEFAULT_ROOT_NAME.crt" "$DEFAULT_ROOT_DIR/$DEFAULT_ROOT_NAME.crt"; do
+        [[ -n "$c" && -f "$c" ]] && { echo "$c"; return 0; }
+    done
+    return 1
 }
 
 cmd_verify() {
@@ -759,7 +962,7 @@ cmd_verify() {
         --ip) ip="$2"; shift 2 ;;
         --csc-port) csc_port="$2"; shift 2 ;;
         --csp-port) csp_port="$2"; shift 2 ;;
-        --ca) ca="$2"; shift 2 ;;
+        --root|--ca) ca="$2"; shift 2 ;;      # --ca 는 옛 이름 — 값은 루트여야 한다
         --wait) wait_s="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) die "verify: 알 수 없는 옵션 $1" ;;
@@ -770,14 +973,15 @@ cmd_verify() {
         [[ -n "$ip" ]] && info "--ip 생략 — 묶음의 접속 주소 $ip 를 쓴다"
     fi
     [[ -n "$ip" ]] || die "verify: --ip 필수 (단말이 접속하는 주소. 묶음 디렉터리에서 실행하면 자동)"
-    if [[ -z "$ca" ]]; then
-        for c in "$SCRIPT_DIR/$DEFAULT_CA_NAME.crt" "$DEFAULT_CA_DIR/$DEFAULT_CA_NAME.crt"; do [[ -f "$c" ]] && { ca="$c"; break; }; done
+    [[ -n "$ca" ]] || ca=$(_bundle_root "$SCRIPT_DIR") || true
+    [[ -n "$ca" && -f "$ca" ]] || die "루트 인증서를 찾을 수 없다 (--root FILE — 단말 앵커와 같은 파일)"
+    if [[ "$(openssl x509 -in "$ca" -noout -subject)" != "$(openssl x509 -in "$ca" -noout -issuer | sed 's/^issuer=/subject=/')" ]]; then
+        die "앵커로 준 인증서가 자가서명 루트가 아니다: $ca — 사이트 CA 를 앵커로 주면 경로가 루트까지 이어지지 않아 실패한다(§8.4). 루트 인증서를 --root 로 주라"
     fi
-    [[ -f "$ca" ]] || die "CA 인증서를 찾을 수 없다 (--ca FILE)"
     local t=0
     while :; do
         _VF_FAIL=0
-        header "=== 단말 대면 TLS 검증: $ip (CA: $(openssl x509 -in "$ca" -noout -subject | sed 's/^subject=//')) ==="
+        header "=== 단말 대면 TLS 검증: $ip (앵커=루트: $(openssl x509 -in "$ca" -noout -subject | sed 's/^subject=//')) ==="
         (( csc_port > 0 )) && _verify_port "$ip" "$csc_port" "CSC HTTPS" "$ca"
         (( csp_port > 0 )) && _verify_port "$ip" "$csp_port" "CSP SIP/TLS" "$ca"
         (( _VF_FAIL == 0 )) && break
@@ -786,7 +990,7 @@ cmd_verify() {
     done
     echo
     if (( _VF_FAIL )); then err "검증 실패 항목이 있다 — 단말이 붙지 않는다"; return 1; fi
-    ok "전 항목 PASS — 단말(Service CA 앵커)이 이 주소로 접속할 수 있다"
+    ok "전 항목 PASS — 단말(루트 앵커)이 이 주소로 접속할 수 있다"
 }
 
 # ── push ─────────────────────────────────────────────────────────────────────
@@ -820,12 +1024,12 @@ cmd_push() {
     ssh "$target" "cd '$remote_dir' && rm -rf '$name' && tar xzf '$name.tgz' && chmod 600 '$name.tgz' && bash '$name/service-cert.sh' install --prefix '$prefix' ${extra[*]}" \
         || die "원격 install 실패"
     header "=== 원격 검증 ($host) ==="
-    "$SCRIPT_PATH" verify --ip "$host" --csc-port "$DEFAULT_CSC_PORT" --csp-port "$csp_port" \
-        --ca "$( [[ -f "$bundle/$DEFAULT_CA_NAME.crt" ]] && echo "$bundle/$DEFAULT_CA_NAME.crt" || echo "$DEFAULT_CA_DIR/$DEFAULT_CA_NAME.crt" )"
+    "$SCRIPT_PATH" verify --ip "$host" --csc-port "$DEFAULT_CSC_PORT" --csp-port "$csp_port" --root "$(_bundle_root "$bundle")"
 }
 
 # ── 진입 ─────────────────────────────────────────────────────────────────────
 case "${1:-}" in
+    site-ca) shift; cmd_site_ca "$@" ;;
     collect) shift; cmd_collect "$@" ;;
     issue)   shift; cmd_issue "$@" ;;
     install) shift; cmd_install "$@" ;;

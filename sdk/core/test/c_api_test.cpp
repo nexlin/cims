@@ -53,6 +53,7 @@ TEST(CApi, StructSizesForBindings) {
     EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_FLOOR_EVENT), (int32_t)sizeof(cimsue_floor_event_t));
     EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_LISTENER), (int32_t)sizeof(cimsue_listener_t));
     EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_PROFILE), (int32_t)sizeof(cimsue_profile_t));
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_TLS_PEER_EXPIRY), (int32_t)sizeof(cimsue_tls_peer_expiry_t));
     for (int i = 0; i < (int)CIMSUE_STRUCT_COUNT_; ++i) EXPECT_GT(cimsue_struct_size((cimsue_struct_id_t)i), 0) << "id " << i;
     EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_COUNT_), -1);
 }
@@ -284,4 +285,22 @@ TEST(CApi, GroupDocRoundTripAndAbi) {
     EXPECT_EQ(p.allow_group_creation, 1);
     ASSERT_EQ(p.dispatch.member_count, 1); EXPECT_STREQ(p.dispatch.members[0].extension, "1001");
     ASSERT_EQ(p.dispatch.ptt_target_count, 1); EXPECT_STREQ(p.dispatch.ptt_targets[0].name, "G1");
+}
+
+// ── 서버 인증서 만료 관측 — 관측 전에는 valid=0·days_left=0, NULL 핸들도 안전. C++ daysLeft 규약과 같다 ──
+TEST(CApi, TlsPeerExpiryDefaults) {
+    cimsue_tls_peer_expiry_t t;
+    cimsue_engine_tls_peer_expiry(nullptr, &t);
+    EXPECT_EQ(t.valid, 0);
+    EXPECT_EQ(t.days_left, 0);
+    EXPECT_EQ(t.not_after_epoch, 0);
+    EXPECT_STREQ(t.subject, "");
+    cimsue_csc_tls_peer_expiry(nullptr, &t);
+    EXPECT_EQ(t.valid, 0);
+    TlsPeerExpiry e;
+    EXPECT_EQ(e.daysLeft(1000), 0);                          // valid 아니면 0
+    e.valid = true; e.notAfterEpoch = 1000 + 86400 * 45;
+    EXPECT_EQ(e.daysLeft(1000), 45);
+    e.notAfterEpoch = 1000 - 86400 * 2;
+    EXPECT_EQ(e.daysLeft(1000), -2);                          // 만료 = 음수
 }

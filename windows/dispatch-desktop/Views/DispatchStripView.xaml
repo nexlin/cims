@@ -4,12 +4,18 @@
              xmlns:vm="clr-namespace:DispatchDesktop.ViewModels"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
              d:DataContext="{d:DesignInstance vm:MainViewModel}">
-    <!-- 관제 요약 띠(§3.5) — 관제 밖 화면 상단 32px 상시: 발언 대상(① 체크 집합) + 발언 상태 + PTT · 대표번호 대기열 · 문자 미읽음 · 내 통화 · 감청 창 · [관제로 F1] -->
+    <!-- 관제 요약 띠(§3.5) — 관제 밖 화면 상단 32px 상시: 발언 대상(① 체크 집합) + 발언 상태 + PTT · 대표번호 대기열 · 문자 미읽음 · 내 통화 · 감청 창 · 서버 인증서 만료 경고 · [관제로 F1] -->
     <Border Height="32" Background="{DynamicResource Brush.BgSoft}" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,0,1" Padding="14,0">
         <DockPanel VerticalAlignment="Center" DataContext="{Binding Summary}">
             <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Sm}" Height="24" Command="{Binding DataContext.ReturnToDispatchCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" ToolTip="관제 캔버스로 (F1)">
                 <TextBlock><Run Text="관제로" /><Run Text="  F1" Foreground="{DynamicResource Brush.Muted}" FontFamily="{StaticResource Font.Mono}" FontSize="11" /></TextBlock>
             </Button>
+            <!-- 서버 인증서 만료 경고(§8.6.2) — 잔여 ≤30일이면 상시. 닫기 없음: 서버 인증서가 갱신되면 사라진다 -->
+            <Border DockPanel.Dock="Right" Style="{StaticResource Badge.Emg}" Margin="0,0,12,0" VerticalAlignment="Center"
+                    Visibility="{Binding HasCertWarning, Converter={StaticResource BoolToVis}}"
+                    ToolTip="단말 대면 서버 인증서(CSC HTTPS·CSP TLS)가 갱신되지 않고 만료로 가고 있다 — 자동 갱신 실패 신호. 운영자에게 콘솔 알람 A-PRC-009(cert/…/renew) 확인을 요청하세요">
+                <TextBlock Text="{Binding CertWarningText}" />
+            </Border>
             <StackPanel Orientation="Horizontal">
                 <!-- 발언 대상 -->
                 <TextBlock Style="{StaticResource Muted}" Text="발언 대상" FontSize="12.5" VerticalAlignment="Center" Margin="0,0,8,0" />

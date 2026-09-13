@@ -112,7 +112,9 @@ def _identity_bundle(config: dict) -> dict:
         'ca': {},
         'agent_mtls': {},
     }
-    for k, fn in (('crt', 'ca.crt'), ('key', 'ca.key')):
+    # 그룹 CA + 사이트 CA 교차 인증서(ca-cross.crt, 있을 때만) — 단말 대면 체인은 양 노드가 같은 교차
+    #   인증서를 붙여야 절체 뒤에도 단말 검증이 이어진다(sip_tls_signaling.md §8.6.1 HA).
+    for k, fn in (('crt', 'ca.crt'), ('key', 'ca.key'), ('cross_crt', 'ca-cross.crt')):
         pem = _read_pem(os.path.join(ca_dir, fn))
         if pem:
             out['ca'][k] = pem

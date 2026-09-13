@@ -274,6 +274,16 @@ typedef struct {
     uint32_t    output_count;
 } cimsue_audio_device_info_t;
 
+/** 서버 인증서 만료 관측(types.h TlsPeerExpiry) — 마지막 성공 TLS 핸드셰이크의 peer 인증서. valid=0 이면 관측 없음. */
+typedef struct {
+    int32_t     valid;
+    int64_t     not_after_epoch;        /* UTC epoch 초 */
+    int64_t     observed_epoch;         /* 관측 시각 */
+    int32_t     days_left;              /* 지금 기준 잔여 일수(음수 = 만료). valid=0 이면 0 */
+    const char* subject;                /* peer 인증서 subject(한 줄) */
+    const char* remote;                 /* 관측한 상대 host:port */
+} cimsue_tls_peer_expiry_t;
+
 /* ── 리스너 (listener.h 1:1) ── */
 
 typedef struct {
@@ -339,6 +349,8 @@ CIMSUE_API void CIMSUE_CALL cimsue_engine_call_info(const cimsue_engine_t* e, in
 CIMSUE_API int32_t CIMSUE_CALL cimsue_engine_calls(const cimsue_engine_t* e, const int32_t** out);
 CIMSUE_API void CIMSUE_CALL cimsue_engine_stream_stats(const cimsue_engine_t* e, int32_t call_id,
                                                        cimsue_stream_stats_t* out);
+/* SIP TLS 서버 인증서 만료 관측(Engine::tlsPeerExpiry) — 관제조작반 경고 입력(sip_tls_signaling.md §8.6.2) */
+CIMSUE_API void CIMSUE_CALL cimsue_engine_tls_peer_expiry(const cimsue_engine_t* e, cimsue_tls_peer_expiry_t* out);
 
 /* MCPTT 그룹콜·사설콜 (TS 24.379) — opts=NULL 이면 기본값 */
 CIMSUE_API void CIMSUE_CALL cimsue_group_call_options_default(cimsue_group_call_options_t* opts);
@@ -605,6 +617,8 @@ CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_request(cimsue_csc_t* c, const
                                                           const char* path, const char* content_type, const uint8_t* body,
                                                           int32_t body_len, const char* accept, const char* if_match,
                                                           const char* if_none_match, cimsue_http_result_t* out);
+/* HTTPS 서버 인증서 만료 관측(CscClient::tlsPeerExpiry) — 문자열은 그 핸들의 다음 호출까지 유효 */
+CIMSUE_API void CIMSUE_CALL cimsue_csc_tls_peer_expiry(cimsue_csc_t* c, cimsue_tls_peer_expiry_t* out);
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_get_user_profile(cimsue_csc_t* c, const char* access_token,
                                                                    const char* user_uri, const char* etag,
                                                                    cimsue_xcap_doc_t* out);
@@ -652,7 +666,7 @@ typedef enum {
     CIMSUE_STRUCT_CSC_ENDPOINT, CIMSUE_STRUCT_TOKEN_SET, CIMSUE_STRUCT_SERVICE_ENDPOINT, CIMSUE_STRUCT_SERVICE_PROFILE,
     CIMSUE_STRUCT_DISPATCH_PROFILE, CIMSUE_STRUCT_PROFILE, CIMSUE_STRUCT_GROUP_SUMMARY, CIMSUE_STRUCT_XCAP_DOC,
     CIMSUE_STRUCT_DISPATCH_MEMBER, CIMSUE_STRUCT_DISPATCH_TARGET, CIMSUE_STRUCT_GROUP_MEMBER, CIMSUE_STRUCT_GROUP_DOC,
-    CIMSUE_STRUCT_HTTP_RESULT,
+    CIMSUE_STRUCT_HTTP_RESULT, CIMSUE_STRUCT_TLS_PEER_EXPIRY,
     CIMSUE_STRUCT_COUNT_
 } cimsue_struct_id_t;
 /** 구조체의 sizeof(이 DLL 의 컴파일 결과). 모르는 id 는 -1. */

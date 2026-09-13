@@ -633,7 +633,7 @@ if sec:
     p = os.path.join(sd, 'jwt_secret')
     fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, 'w') as f: f.write(sec + '\n')
-for sub, keys in (('ca', {'crt': 'ca.crt', 'key': 'ca.key'}),
+for sub, keys in (('ca', {'crt': 'ca.crt', 'key': 'ca.key', 'cross_crt': 'ca-cross.crt'}),
                   ('agent_mtls', {'ca_crt': 'ca.crt', 'ca_key': 'ca.key',
                                   'client_crt': 'csc_client.crt', 'client_key': 'csc_client.key'})):
     src = d.get(sub) or {}

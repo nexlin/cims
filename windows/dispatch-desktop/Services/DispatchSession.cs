@@ -93,6 +93,25 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         Endpoints.Changed += (_, _) => OnEndpointsChanged();
     }
 
+    // ── 서버 인증서 만료 경고 (sip_tls_signaling.md §8.6.2 — 관제사는 매일 앉아 있는 사람이라 폐쇄망에서 가장 확실한 채널) ──
+    /// <summary>경고 임계(일) — 서버 A-PRC-009 경고 임계와 같은 30. 자동 갱신 대상 인증서가 여기 닿았다 = 자동 갱신 실패.</summary>
+    public const int ServerCertWarnDays = 30;
+    /// <summary>SIP TLS(Engine)·HTTPS(CSC) 서버 인증서 중 잔여가 짧은 것. 관측 전(평문·미접속)엔 null.</summary>
+    public TlsPeerExpiry? ServerCertExpiry
+    {
+        get
+        {
+            TlsPeerExpiry? best = null;
+            foreach (var e in new[] { Engine.TlsPeerExpiry, _csc?.TlsPeerExpiry ?? TlsPeerExpiry.None })
+                if (e.Valid && (best is null || e.DaysLeft < best.DaysLeft)) best = e;
+            return best;
+        }
+    }
+    public bool ServerCertWarning => ServerCertExpiry is { } e && e.DaysLeft <= ServerCertWarnDays;
+    public string ServerCertWarningText => ServerCertExpiry is { } e && e.DaysLeft <= ServerCertWarnDays
+        ? (e.DaysLeft < 0 ? "서버 인증서 만료됨 — 운영자에게 알리세요" : $"서버 인증서 {e.DaysLeft}일 후 만료 — 운영자에게 알리세요")
+        : "";
+
     // ── 신원 (§3.2 상단 바) ──
     public DispatchProfile Dispatch => Profile?.Dispatch ?? DispatchProfile.None;
     public bool HasDesk => Dispatch.Present;

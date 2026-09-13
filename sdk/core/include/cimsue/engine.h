@@ -121,6 +121,10 @@ public:
     /** 호의 수신 음성을 재생할 라우트 선택(0=기본). 활성 호면 즉시 재결선. */
     Result setCallRoute(int callId, int routeId);
 
+    /** SIP TLS 서버 인증서 만료 관측 — 마지막 성공 TLS 핸드셰이크의 peer 인증서(pjsip onTransportState).
+     *  TLS 계정이 없거나 아직 연결이 없으면 valid=false. 관제조작반 요약 띠 경고의 입력(§8.6.2). */
+    TlsPeerExpiry tlsPeerExpiry() const;
+
     static std::string version();
 
     /** 내부 구현(pImpl). 앱·플랫폼 SDK 는 사용하지 않는다. */

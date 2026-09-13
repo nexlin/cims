@@ -404,15 +404,15 @@ TLS 핸드셰이크가 끊기고 CSC 로그에는 요청이 한 건도 남지 �
    방식은 정본 §8.3 (0)). 현장 CA 보관 서버에 `cims-site-ca.{crt,key}`(키 600)와 루트 인증서
    `cims-service-ca.crt`(현 세대 루트 파일명)를 둔다. 루트가 직접 서명한 leaf 가 이미 배치된 노드는 그대로 유효하며 다음
    갱신부터 사이트 CA 를 쓴다.
-   기본 방식은 **그룹 CA 교차 서명**이다 — OAM 노드의 `<oam>/runtime/_secrets/ca/ca.crt` 를 개발사에 보내
-   교차 인증서 `ca-cross.crt` 를 받아 같은 디렉터리에 두면, lifecycle 엔진이 이후 leaf 발급·갱신을
-   자동으로 한다(정본 §8.6 — 엔진 반영 뒤. 그 전이거나 별도 사이트 CA 현장이면 아래 1~4 수동).
-   > 도구의 `site-ca` 서브커맨드가 들어오기 전(정본 §9 #2)에는 §8.3 의 수동 등가 명령으로 발급한다.
+   기본 방식은 **그룹 CA 교차 서명**이다 — OAM 노드의 `<oam>/runtime/_secrets/ca/ca.crt` 를 매체로 개발사에
+   보내 루트 매체에서 `scripts/service-cert.sh site-ca sign --cross ca.crt` 로 교차 인증서 `ca-cross.crt` 를
+   받아 같은 디렉터리에 두면(644, HA 피어는 join 이 복사), lifecycle 엔진이 이후 leaf 발급·갱신을 자동으로
+   한다(정본 §8.6 — 즉시 반영은 노드에서 `cims-svc cert csc` / `cims-svc cert csp`). 별도 사이트 CA 현장은
+   `site-ca issue --site <site_id>`(방식 A) 또는 `site-ca csr` → `site-ca sign <csr>`(방식 B)로 만들고 아래 1~4 수동.
 1. **현장 CA 보관 서버**에서 대상 노드 IP 하나로 발급한다. ssh 로 노드의 hostname·IP 를 수집해 SAN 을
    채운다(설치 전이어도 된다).
    ```bash
-   scripts/service-cert.sh issue --ip <노드 IP> \
-       --ca-dir /home/cims/certs/<site_id> --ca-name cims-site-ca     # HA 면 --vip <VIP> 추가
+   scripts/service-cert.sh issue --ip <노드 IP> --site <site_id>       # HA 면 --vip <VIP> 추가
    # → /home/cims/certs/<site_id>/cert-init-<HOST>/  +  cert-init-<HOST>.tgz  (현장 반입용. 키가 들어 있어 600)
    ```
    ssh 가 안 되면 대상 노드에서 `bash service-cert.sh collect` 를 돌려 나온 HOST/SAN 을
@@ -437,10 +437,10 @@ TLS 핸드셰이크가 끊기고 CSC 로그에는 요청이 한 건도 남지 �
    이어지지 않아 실패한다). 접속 IP 는 묶음에서 읽는다. CSC 를 한 번 재시작한 뒤 다시 돌려 발급자가
    유지되는지도 본다.
    ```bash
-   bash cert-init-<HOST>/service-cert.sh verify --csp-port <TLS bind_port> --ca cims-service-ca.crt
+   bash cert-init-<HOST>/service-cert.sh verify --csp-port <TLS bind_port>      # 루트는 묶음에서 읽는다(--root 로 대체 가능)
    ```
-   > `verify` 의 발급자 판정이 루트 기준으로 바뀌기 전(정본 §9 #3)에는 §8.4 의 `openssl s_client`
-   > 명령 세 줄(체인 2장·`-verify_ip` 통과·틀린 이름 거절)로 대신 확인한다.
+   판정 = 체인 장수(사이트 CA 체인 2장 / 루트 직서명 1장)·발급자·사이트 CA → 루트·루트 앵커 경로 + IP 신원·
+   틀린 이름 거절(음성 대조군)·만료 잔여(leaf·사이트 CA 중 이른 것, 갱신 임계 60일 안이면 WARN, 30일 안이면 FAIL).
 
 단말은 로그인 화면의 서버 주소를 SAN 에 있는 IP 로 넣는다. Windows 관제조작반은 "서버 인증서
 검증"을 켜고 CA PEM 경로에 **루트 인증서** `cims-service-ca.crt` 를 지정한다(사이트 CA 가 아니다). 단말

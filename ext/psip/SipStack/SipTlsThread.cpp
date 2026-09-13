@@ -93,7 +93,11 @@ THREAD_API SipTlsThread( LPVOID lpParameter )
 					bool	bRes = false;
 
 					// R5.c: listener 별 SSL_CTX 가 있으면 그걸 사용, 없으면 global.
-					if( SSLAcceptWithCtx( clsTcpComm.m_hSocket, clsTcpComm.m_pSslCtx, &psttSsl, false, 0, pclsSipStack->m_clsSetup.m_iTlsAcceptTimeout * 1000 ) )
+					//   m_pSslCtx 는 accept 스레드가 참조를 획득해 넘긴 것 — SSL_new 가 자기 참조를 들면
+					//   여기 참조는 성공·실패 무관하게 놓는다(무중단 교체의 마지막 사용자 규약).
+					bool bAccepted = SSLAcceptWithCtx( clsTcpComm.m_hSocket, clsTcpComm.m_pSslCtx, &psttSsl, false, 0, pclsSipStack->m_clsSetup.m_iTlsAcceptTimeout * 1000 );
+					if( clsTcpComm.m_pSslCtx ) { SSLServerCtxFree( clsTcpComm.m_pSslCtx ); clsTcpComm.m_pSslCtx = NULL; }
+					if( bAccepted )
 					{
 						if( clsSessionList.Insert( clsTcpComm, psttSsl ) )
 						{
@@ -252,8 +256,10 @@ THREAD_API SipTlsListenerThread( LPVOID lpParameter )
 
 			clsTcpComm.m_hSocket = hConnFd;
 			clsTcpComm.m_iListenerId = pListener->m_iId;
-			// R5.c: listener 의 per-listener SSL_CTX 를 worker 로 전달 (NULL 이면 stack-global)
-			clsTcpComm.m_pSslCtx = pListener->m_pSslCtx;
+			// R5.c: listener 의 per-listener SSL_CTX 를 worker 로 전달 (NULL 이면 stack-global).
+			//   **참조를 획득해서** 넘긴다 — 무중단 교체(ReloadTlsListenerCert)가 옛 ctx 를 놓는 사이에
+			//   worker 가 dangling 으로 SSL_new 하지 않게. worker 가 accept 뒤 SSLServerCtxFree 로 놓는다.
+			clsTcpComm.m_pSslCtx = pListener->AcquireSslCtx();
 
 			if( pclsSipStack->m_clsTlsThreadList.SendCommand(
 			        (char *)&clsTcpComm, sizeof(clsTcpComm) ) == false )
@@ -263,6 +269,8 @@ THREAD_API SipTlsListenerThread( LPVOID lpParameter )
 				CLog::Print( LOG_ERROR, "%s: SendCommand failed (TLS worker pool) — close %s:%d",
 				             __FUNCTION__, clsTcpComm.m_szIp, clsTcpComm.m_iPort );
 				closesocket( hConnFd );
+				if( clsTcpComm.m_pSslCtx ) SSLServerCtxFree( clsTcpComm.m_pSslCtx );
+				clsTcpComm.m_pSslCtx = NULL;
 			}
 		}
 	}

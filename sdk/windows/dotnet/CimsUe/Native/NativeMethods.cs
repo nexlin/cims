@@ -48,6 +48,7 @@ internal static unsafe class NativeMethods
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern void cimsue_engine_call_info(IntPtr e, int call_id, cimsue_call_info_t* @out);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_calls(IntPtr e, int** @out);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern void cimsue_engine_stream_stats(IntPtr e, int call_id, cimsue_stream_stats_t* @out);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern void cimsue_engine_tls_peer_expiry(IntPtr e, cimsue_tls_peer_expiry_t* @out);
 
     // MCPTT 그룹콜·사설콜
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern void cimsue_group_call_options_default(cimsue_group_call_options_t* opts);
@@ -109,6 +110,7 @@ internal static unsafe class NativeMethods
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_csc_list_groups(IntPtr c, [MarshalAs(U8)] string access_token, [MarshalAs(U8)] string user_uri, cimsue_group_summary_t** @out);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_csc_xcap_get(IntPtr c, [MarshalAs(U8)] string access_token, [MarshalAs(U8)] string path, [MarshalAs(U8)] string accept, [MarshalAs(U8)] string? if_none_match, cimsue_xcap_doc_t* @out);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_csc_request(IntPtr c, [MarshalAs(U8)] string access_token, [MarshalAs(U8)] string method, [MarshalAs(U8)] string path, [MarshalAs(U8)] string? content_type, byte* body, int body_len, [MarshalAs(U8)] string? accept, [MarshalAs(U8)] string? if_match, [MarshalAs(U8)] string? if_none_match, cimsue_http_result_t* @out);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern void cimsue_csc_tls_peer_expiry(IntPtr c, cimsue_tls_peer_expiry_t* @out);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_csc_get_user_profile(IntPtr c, [MarshalAs(U8)] string access_token, [MarshalAs(U8)] string user_uri, [MarshalAs(U8)] string? etag, cimsue_xcap_doc_t* @out);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_csc_get_service_config(IntPtr c, [MarshalAs(U8)] string access_token, [MarshalAs(U8)] string user_uri, [MarshalAs(U8)] string? etag, cimsue_xcap_doc_t* @out);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_csc_get_group(IntPtr c, [MarshalAs(U8)] string access_token, [MarshalAs(U8)] string user_uri, [MarshalAs(U8)] string group_uri, cimsue_group_doc_t* @out);

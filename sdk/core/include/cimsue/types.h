@@ -258,6 +258,19 @@ struct StreamStats {
     bool valid = false;
 };
 
+/** 서버(peer) 인증서 만료 관측 — 마지막 성공 TLS 핸드셰이크에서 본 상대 인증서의 notAfter
+ *  (sip_tls_signaling.md §8.6.2 관제조작반 경고). SIP TLS(Engine)·HTTPS(CscClient) 각각 관측한다.
+ *  임계는 서버와 같다: 잔여 ≤ 30일 = 경고(자동 갱신 실패 신호), ≤ 7일 = 위험. */
+struct TlsPeerExpiry {
+    bool valid = false;               // 관측 있음
+    int64_t notAfterEpoch = 0;        // UTC epoch 초
+    int64_t observedEpoch = 0;        // 관측 시각(UTC epoch 초)
+    std::string subject;              // peer 인증서 subject(한 줄)
+    std::string remote;               // 관측한 상대(host:port)
+    /** 잔여 일수(now 기준, 음수 = 만료). valid 아니면 0 — 호출자가 valid 를 본다. */
+    int daysLeft(int64_t now) const { return valid ? (int)((notAfterEpoch - now) / 86400) : 0; }
+};
+
 struct AudioDeviceInfo {
     int id = -1;
     std::string name;

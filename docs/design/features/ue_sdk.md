@@ -344,6 +344,10 @@ sdk/windows/
 Android 의 SWIG Java 바인딩 ↔ Kotlin 파사드 에 대응하는 Windows 의 두 층. C++ 공개 헤더(§4.2)가 바인딩 정본이라는 규칙은 같다 —
 C API 는 그 헤더를 **손으로 1:1 평탄화**한 것이며(SWIG 는 C# 대상도 지원하지만 콜백·문자열·수명 규칙을 P/Invoke 관용구로
 직접 고정하는 편이 관제 앱 한 곳에는 더 얇다), 새 C++ API 는 C API·파사드에 같은 변경에서 반영한다.
+서버 인증서 만료 관측은 이 규약의 예다 — `Engine::tlsPeerExpiry()`(pjsua2 `onTransportState` 의 remote 인증서)·
+`CscClient::tlsPeerExpiry()`(OpenSSL 전송의 peer 인증서) → `cimsue_engine_tls_peer_expiry`/`cimsue_csc_tls_peer_expiry`
+(`cimsue_tls_peer_expiry_t{valid, not_after_epoch, observed_epoch, days_left, subject, remote}`) → .NET `TlsPeerExpiry`.
+관제조작반은 잔여 ≤ 30일이면 요약 띠 경고([sip_tls_signaling.md §8.6.2](sip_tls_signaling.md)).
 
 | 층 | 위치 | 규칙 |
 |---|---|---|

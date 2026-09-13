@@ -112,6 +112,13 @@ public:
 	 *  이미 맺어진 연결은 유지되고 새 핸드셰이크부터 새 인증서가 쓰인다.
 	 *  실패 시 기존 인증서를 유지하고 false. 성공 시 m_clsSetup 의 경로도 새 값으로 갱신한다. */
 	bool ReloadTlsServerCert( const char* pszCertFile, const char* pszKeyFile, const char* pszCaCertFile );
+
+	/** 리스너별(per-listener) TLS 인증서를 **무중단 교체**한다 — 같은 경로의 파일 내용이 바뀐 경우
+	 *  (lifecycle 엔진의 leaf 자동 갱신, sip_tls_signaling.md §8.6.1). 새 ctx 를 먼저 완성하고 리스너의
+	 *  ctx 포인터만 교체하므로 소켓·기존 연결은 유지되고 새 핸드셰이크부터 새 인증서가 쓰인다.
+	 *  per-listener 인증서가 없는(stack-global) 리스너면 ReloadTlsServerCert 로 위임한다.
+	 *  실패 시 기존 인증서 유지 + false. */
+	bool ReloadTlsListenerCert( int iExtId, const char* pszCertFile, const char* pszKeyFile, const char* pszCaCertFile );
 #endif
 
 	bool Execute( struct timeval * psttTime );

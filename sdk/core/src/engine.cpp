@@ -178,6 +178,7 @@ struct Engine::Impl {
 
     // 스냅샷 — 콜백(pjsip 스레드)이 쓰고 조회(임의 스레드)가 읽는다
     std::mutex snapM;
+    TlsPeerExpiry tlsPeer;                                 // 마지막 성공 TLS 핸드셰이크의 서버 인증서 만료(onTransportState)
     std::map<int, RegInfo> regInfos;
     std::map<int, CallInfo> callInfos;                     // 종료된 호도 잠시 보존(조회·최종 통계) — pruneFinished
     std::map<int, StreamStats> finalStats;                 // onStreamDestroyed 시점의 최종 RTP 통계
@@ -243,6 +244,27 @@ struct McpttSession {
     std::string pendingAppSdp;           // 송신 SDP 에 주입할 m=application 섹션
     std::unique_ptr<floor::Participant> floor;
     bool remoteLearned = false;
+};
+
+/** Endpoint — transport 상태 콜백으로 TLS 서버 인증서 만료를 관측한다(sip_tls_signaling.md §8.6.2). */
+class PjEndpoint : public pj::Endpoint {
+public:
+    explicit PjEndpoint(Engine::Impl* o) : o_(o) {}
+    void onTransportState(const pj::OnTransportStateParam& prm) override {
+        if (prm.state != PJSIP_TP_STATE_CONNECTED || prm.tlsInfo.isEmpty()) return;
+        const pj::SslCertInfo& rc = prm.tlsInfo.remoteCertInfo;
+        if (rc.isEmpty() || rc.validityEnd.sec <= 0) return;
+        TlsPeerExpiry e;
+        e.valid = true;
+        e.notAfterEpoch = (int64_t)rc.validityEnd.sec;
+        e.observedEpoch = (int64_t)std::time(nullptr);
+        e.subject = rc.subjectInfo.empty() ? rc.subjectCn : rc.subjectInfo;
+        e.remote = prm.tlsInfo.remoteAddr;
+        std::lock_guard<std::mutex> lk(o_->snapM);
+        o_->tlsPeer = e;
+    }
+private:
+    Engine::Impl* o_;
 };
 
 class PjLog : public pj::LogWriter {
@@ -724,6 +746,11 @@ int64_t Engine::Impl::doSendRequest(int accountId, const std::string& method, co
 Engine::Engine() : impl_(new Impl) {}
 Engine::~Engine() { stop(); }
 
+TlsPeerExpiry Engine::tlsPeerExpiry() const {
+    std::lock_guard<std::mutex> lk(impl_->snapM);
+    return impl_->tlsPeer;
+}
+
 std::string Engine::version() { return std::string(CIMSUE_VERSION) + " (pjproject " + pj_get_version() + ")"; }
 
 bool Engine::running() const { return impl_->running; }
@@ -738,7 +765,7 @@ Result Engine::start(const EngineConfig& cfg, Listener* listener) {
         Impl* o = impl_.get();
         try {
             pj_log_set_level(o->cfg.logLevel);               // libInit 전(writer 미설정) pjlib 기본 sink 는 stdout
-            o->ep.reset(new pj::Endpoint);
+            o->ep.reset(new PjEndpoint(o));
             o->ep->libCreate();
             pj::EpConfig epc;
             epc.uaConfig.userAgent = o->cfg.userAgent;

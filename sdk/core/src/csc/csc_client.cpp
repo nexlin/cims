@@ -1,3 +1,5 @@
+#include <ctime>
+#include <mutex>
 #include "cimsue/csc.h"
 
 #include <openssl/rand.h>
@@ -119,7 +121,27 @@ const ServiceProfile* Profile::phoneService() const {
 struct CscClient::Impl {
     CscEndpoint ep;
     std::shared_ptr<http::ITransport> tp;
+    mutable std::mutex peerM;
+    TlsPeerExpiry peer;                  // 마지막 성공 TLS 요청의 서버 인증서 만료
+    /** 모든 전송이 지나는 한 곳 — 응답의 peer 인증서 관측을 갱신한다. */
+    http::Response request(const std::string& method, const std::string& url,
+                           const std::map<std::string, std::string>& headers, const std::string& body) {
+        http::Response r = tp->request(method, url, headers, body);
+        if (r.peerNotAfterEpoch > 0) {
+            TlsPeerExpiry e;
+            e.valid = true; e.notAfterEpoch = r.peerNotAfterEpoch; e.observedEpoch = (int64_t)std::time(nullptr);
+            e.subject = r.peerSubject; e.remote = ep.host + ":" + std::to_string(ep.port);
+            std::lock_guard<std::mutex> lk(peerM);
+            peer = e;
+        }
+        return r;
+    }
 };
+
+TlsPeerExpiry CscClient::tlsPeerExpiry() const {
+    std::lock_guard<std::mutex> lk(impl_->peerM);
+    return impl_->peer;
+}
 
 CscClient::CscClient(const CscEndpoint& ep, std::shared_ptr<http::ITransport> transport) : impl_(new Impl) {
     impl_->ep = ep;
@@ -155,14 +177,14 @@ Result CscClient::login(const std::string& userName, const std::string& password
                       "&client_id=" + enc(impl_->ep.clientId) + "&redirect_uri=" + enc(impl_->ep.redirectUri) +
                       "&code_challenge=" + challenge + "&code_challenge_method=S256&scope=" + enc(impl_->ep.scope) +
                       "&state=" + state;
-    http::Response r = impl_->tp->request("GET", url, {}, "");
+    http::Response r = impl_->request("GET", url, {}, "");
     if (r.status / 100 != 2) return httpFail(r, "authreq");
     std::string code;
     { Json j(r.body); if (!j.root) return Result::fail(-2, "authreq: bad json"); code = Json::str(j.root, "code"); }
     if (code.empty()) return Result::fail(-2, "authreq: no code");
     std::string form = "grant_type=authorization_code&code=" + enc(code) + "&client_id=" + enc(impl_->ep.clientId) +
                        "&redirect_uri=" + enc(impl_->ep.redirectUri) + "&code_verifier=" + verifier;
-    r = impl_->tp->request("POST", impl_->ep.baseUrl() + "/idms/tokenreq",
+    r = impl_->request("POST", impl_->ep.baseUrl() + "/idms/tokenreq",
                            {{"Content-Type", "application/x-www-form-urlencoded"}}, form);
     if (r.status / 100 != 2) return httpFail(r, "tokenreq");
     if (!parseToken(r.body, out)) return Result::fail(-2, "tokenreq: bad json");
@@ -171,7 +193,7 @@ Result CscClient::login(const std::string& userName, const std::string& password
 
 Result CscClient::refresh(const std::string& refreshToken, TokenSet& out) {
     std::string form = "grant_type=refresh_token&refresh_token=" + enc(refreshToken) + "&client_id=" + enc(impl_->ep.clientId);
-    http::Response r = impl_->tp->request("POST", impl_->ep.baseUrl() + "/idms/tokenreq",
+    http::Response r = impl_->request("POST", impl_->ep.baseUrl() + "/idms/tokenreq",
                                           {{"Content-Type", "application/x-www-form-urlencoded"}}, form);
     if (r.status / 100 != 2) return httpFail(r, "refresh");
     if (!parseToken(r.body, out)) return Result::fail(-2, "refresh: bad json");
@@ -251,7 +273,7 @@ bool CscClient::parseProfile(const std::string& json, Profile& out, std::string*
 }
 
 Result CscClient::fetchProfile(const std::string& accessToken, Profile& out) {
-    http::Response r = impl_->tp->request("GET", impl_->ep.baseUrl() + "/provisioning/me",
+    http::Response r = impl_->request("GET", impl_->ep.baseUrl() + "/provisioning/me",
                                           {{"Authorization", "Bearer " + accessToken}}, "");
     if (r.status / 100 != 2) return httpFail(r, "provisioning/me");
     std::string err;
@@ -260,7 +282,7 @@ Result CscClient::fetchProfile(const std::string& accessToken, Profile& out) {
 }
 
 Result CscClient::listGroups(const std::string& accessToken, const std::string& userUri, std::vector<GroupSummary>& out) {
-    http::Response r = impl_->tp->request("GET", impl_->ep.baseUrl() + "/org.openmobilealliance.groups/users/" + enc(userUri),
+    http::Response r = impl_->request("GET", impl_->ep.baseUrl() + "/org.openmobilealliance.groups/users/" + enc(userUri),
                                           {{"Authorization", "Bearer " + accessToken}}, "");
     if (r.status / 100 != 2) return httpFail(r, "listGroups");
     Json j(r.body);
@@ -290,7 +312,7 @@ Result CscClient::putGroup(const std::string& accessToken, const std::string& us
     if (doc.uri.empty()) return Result::fail(-2, "group uri required");
     std::map<std::string, std::string> h{{"Authorization", "Bearer " + accessToken}, {"Content-Type", kCtGroupDoc}, {"Accept", kCtGroupDoc}};
     if (!ifMatch.empty()) h["If-Match"] = ifMatch;
-    http::Response r = impl_->tp->request("PUT", impl_->ep.baseUrl() + groupPath(userUri, doc.uri), h, doc.toXml());
+    http::Response r = impl_->request("PUT", impl_->ep.baseUrl() + groupPath(userUri, doc.uri), h, doc.toXml());
     if (r.status / 100 != 2) return httpFail(r, "putGroup");
     GroupDoc d; d.etag = http::header(r, "etag");
     std::string err;
@@ -300,7 +322,7 @@ Result CscClient::putGroup(const std::string& accessToken, const std::string& us
 }
 
 Result CscClient::deleteGroup(const std::string& accessToken, const std::string& userUri, const std::string& groupUri) {
-    http::Response r = impl_->tp->request("DELETE", impl_->ep.baseUrl() + groupPath(userUri, groupUri),
+    http::Response r = impl_->request("DELETE", impl_->ep.baseUrl() + groupPath(userUri, groupUri),
                                           {{"Authorization", "Bearer " + accessToken}}, "");
     if (r.status / 100 != 2) return httpFail(r, "deleteGroup");
     return Result::success();
@@ -314,7 +336,7 @@ Result CscClient::request(const std::string& accessToken, const std::string& met
     if (!body.empty()) h["Content-Type"] = contentType.empty() ? "application/json" : contentType;
     if (!ifMatch.empty()) h["If-Match"] = ifMatch;
     if (!ifNoneMatch.empty()) h["If-None-Match"] = ifNoneMatch;
-    http::Response r = impl_->tp->request(method.empty() ? "GET" : method, impl_->ep.baseUrl() + path, h, body);
+    http::Response r = impl_->request(method.empty() ? "GET" : method, impl_->ep.baseUrl() + path, h, body);
     out.status = r.status;
     out.contentType = http::header(r, "content-type");
     out.etag = http::header(r, "etag");
@@ -328,7 +350,7 @@ Result CscClient::xcapGet(const std::string& accessToken, const std::string& pat
                           const std::string& ifNoneMatch, XcapDoc& out) {
     std::map<std::string, std::string> h{{"Authorization", "Bearer " + accessToken}, {"Accept", accept}};
     if (!ifNoneMatch.empty()) h["If-None-Match"] = ifNoneMatch;
-    http::Response r = impl_->tp->request("GET", impl_->ep.baseUrl() + path, h, "");
+    http::Response r = impl_->request("GET", impl_->ep.baseUrl() + path, h, "");
     if (r.status == 304) { out.notModified = true; out.etag = ifNoneMatch; return Result::success(); }
     if (r.status / 100 != 2) return httpFail(r, "xcap");
     out.body = r.body; out.etag = http::header(r, "etag"); out.notModified = false;

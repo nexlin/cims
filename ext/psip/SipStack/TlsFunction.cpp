@@ -434,6 +434,11 @@ void SSLServerCtxFree( SSL_CTX * ctx )
 	if( ctx ) SSL_CTX_free( ctx );
 }
 
+void SSLCtxRef( SSL_CTX * ctx )
+{
+	if( ctx ) _SslCtxUpRef( ctx );
+}
+
 SSL_CTX * SSLServerCtxAcquire( )
 {
 	SSL_CTX * psttCtx = NULL;

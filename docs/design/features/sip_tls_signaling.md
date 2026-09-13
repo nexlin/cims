@@ -355,14 +355,14 @@ TLS 로 등록·통화한다. 구성 요소는 다음과 같다.
 
 ## 8. 인증서 운영
 
-> **구현 상태**: 단말(앵커 1장으로 X.509 경로 검증)·서버(체인 파일 전송·무중단 교체)·감시(A-PRC-009)는
-> 2단 구조를 추가 코드 없이 소화한다 — 앵커인 루트 인증서는 지금 APK 에 든 것이고, 루트가 직접 서명한
-> 기존 leaf 도 유효한 경로라 배치된 노드는 무변경으로 이 구조 안에 있다. **현 세대 루트(10년, 2036 만료)는
-> 임시 사이트 배포 단계 동안 그대로 쓰고, 루트 CA 재발급은 버전 1.0 안정화 이후**다(§8.1, §9 #6).
-> 남은 것은 발급 도구·운영 절차([§9](#9-남은-과제) #2~#4: `service-cert.sh` 의 사이트 CA 서브커맨드, 묶음의
-> 루트 동봉과 `verify` 의 루트 기준 경로 검증, 루트 키의 오프라인 이관)와 **만료 방어**([§8.6](#86-만료-방어--leaf-자동-갱신과-만료-안내), §9 #5·#7:
-> lifecycle 엔진의 leaf 자동 갱신·CSP 편입·자동 갱신 실패 알람·콘솔 배너·관제 앱 경고)다. 그 전까지 사이트 CA
-> 발급은 §8.3 의 수동 등가 명령으로 한다.
+> **구현 상태**: 단말(앵커 1장으로 X.509 경로 검증)·서버(체인 파일 전송·무중단 교체)·감시(A-PRC-009)·
+> 발급 도구(`service-cert.sh site-ca`/`issue`/루트 기준 `verify`)·**만료 방어**([§8.6](#86-만료-방어--leaf-자동-갱신과-만료-안내)
+> — lifecycle 엔진의 leaf 자동 갱신·CSP 편입·같은 경로 내용 교체의 무중단 재적재·자동 갱신 실패 알람·관제조작반
+> 경고·verify 게이트)는 구현이다. 앵커인 루트 인증서는 지금 APK 에 든 것이고, 루트가 직접 서명한 기존 leaf 도
+> 유효한 경로라 배치된 노드는 무변경으로 이 구조 안에 있다(교차 인증서를 배치하면 다음 스윕에 체인으로 전환된다).
+> **현 세대 루트(10년, 2036 만료)는 임시 사이트 배포 단계 동안 그대로 쓰고, 루트 CA 재발급은 버전 1.0 안정화
+> 이후**다(§8.1, §9). 남은 것은 [§9](#9-남은-과제) — 루트 키 오프라인 이관과 사내 사이트 교차 인증서 배치(운영),
+> 콘솔 상단 배너(도안)·Android 앱 표시, 루트 재발급.
 
 ### 8.1 PKI 구조 — 개발사 오프라인 루트 → 사이트 CA → 서버 leaf (2단)
 
@@ -454,8 +454,8 @@ CSP 는 동봉 자가서명(`cert/csp.pem`)을 쓴다. 둘 다 루트 아래에 
 TLS 거절로 막힌다** — CSC 로그에는 요청이 남지 않아 서버에서는 원인이 보이지 않는다. 그래서 단말 대면
 노드마다 사이트 CA 발급 leaf 를 배치하는 단계가 초도 설치에 들어간다([initial_install.md §4.5](../../user-manual/initial_install.md#45-단말-대면-tls-인증서--없으면-단말이-로그인하지-못한다)).
 절차와 검증은 `scripts/service-cert.sh` 한 파일이 담당하고, 묶음(bundle)에 자기 자신을 복사하므로
-현장에서는 묶음과 `openssl` 만 있으면 된다. **§8.6 도입 뒤에는 (0) 의 교차 인증서만 배치하면 (1)~(3) 을
-lifecycle 엔진이 자동으로 하고**, 아래 수동 단계는 엔진이 없는 경우의 폴백이다.
+현장에서는 묶음과 `openssl` 만 있으면 된다. **(0) 의 교차 인증서만 배치하면 (1)~(3) 을 lifecycle 엔진이
+자동으로 하고**(§8.6.1), 아래 (1)~(4) 수동 단계는 별도 사이트 CA 현장(방식 A/B)·엔진 없는 노드의 폴백이다.
 
 **(0) 사이트 CA — 사이트 개설 시 1회, 개발사 오프라인 루트로.** 네 방식 중 하나 — 기본은 그룹 CA 교차
 서명이다. 루트 키는 이 단계에서만 쓰이고 오프라인 매체를 떠나지 않는다.
@@ -577,8 +577,8 @@ openssl s_client -connect <IP>:15061 -CAfile cims-root-ca.crt \
 |---|---|
 | 단말 앵커 주입 + `verifyServer=true` | **적용됨** — `CimsTrustStore.CA_BUNDLE`(루트 1장) → pjsip `caBuf`, `core/net/CimsTls` → OkHttp 신뢰 관리자. 미신뢰 인증서는 등록 503 `PJSIP_TLS_ECERTVERIF`·로그인 `CertPathValidatorException` 으로 거절된다(음성 대조군 실측). `allowInsecureTls` 류 우회 스위치는 없다 — 앵커 생성 실패 시 예외이지 검증을 끄지 않는다 |
 | 앵커 배포 경로 | **APK 동봉(루트만).** 신뢰의 최초 씨앗을 프로비저닝 채널(CSC 4430)로 받으면 그 채널 자체가 같은 앵커로 검증되므로 의미가 없다 — 앵커는 앱과 함께 배포하고, 그 아래 층(사이트 CA·leaf)은 서버가 체인으로 보낸다. Windows 관제조작반은 CA PEM 파일 경로(`TlsCaPemPath`)에 **루트 인증서**, cimsue-cli 는 `--ca` 에 루트 |
-| 사이트 CA 발급 | 개발사 오프라인 루트, 사이트당 1회. 기본 = 현장 그룹 CA 의 교차 서명(`ca-cross.crt` 를 매체로 회수해 `_secrets/ca/` 에), 예외 = 별도 사이트 CA A/B·고객 PKI C(§8.3 (0)). 도구 `site-ca` 서브커맨드 반영 전까지 수동 등가 명령 |
-| 신규 노드 발급·배치 | 교차 인증서가 배치된 노드는 **lifecycle 엔진이 자동**(§8.6.1 — 설치 후 첫 기동에 체인 발급). 엔진 반영 전이거나 별도 사이트 CA 현장은 **`scripts/service-cert.sh`**(collect → issue → install → csp-node → verify, §8.3) 를 현장 CA 보관 서버에서 |
+| 사이트 CA 발급 | 개발사 오프라인 루트, 사이트당 1회 — `service-cert.sh site-ca sign --cross <ca.crt>`(기본 = 현장 그룹 CA 의 교차 서명, `ca-cross.crt` 를 매체로 회수해 `_secrets/ca/` 에) · `site-ca issue --site`(방식 A) · `site-ca csr` + `site-ca sign <csr>`(방식 B) · `sign --cross <고객 CA.crt>`(방식 C). §8.3 (0) |
+| 신규 노드 발급·배치 | 교차 인증서가 배치된 노드는 **lifecycle 엔진이 자동**(§8.6.1 — 설치 후 첫 기동에 체인 발급, `cims-svc cert` 로 즉시 실행 가능). 별도 사이트 CA 현장(방식 A/B)·엔진 없는 노드는 **`scripts/service-cert.sh`**(collect → `issue --site` → install → csp-node → verify, §8.3) 를 현장 CA 보관 서버에서 |
 | CSC(4421·4430) 서버 인증서 | **적용됨** — 같은 체인 파일을 `runtime/cert` 에 배치. OAM 게이트웨이는 업스트림 TLS 를 검증하지 않으므로(`gateway.py` `_ssl_param`) 관리 경로 무영향 |
 | **leaf 갱신 (2년)** | **lifecycle 엔진이 잔여 60일에 자동 재발급**(§8.6.1 — 일일 스윕, 사이트 CA 서명, 핫리로드/SIGUSR1). 사람·개발사·APK 무관. 엔진이 없는 노드만 현장에서 `issue` → `install` → SIGUSR1(§8.4) |
 | **사이트 CA 교체 (침해 시에만)** | 정기 갱신은 없다 — 루트와 같은 날 만료한다. 침해 시 APK 무관: 개발사가 새 사이트 CA 를 서명 → 현장에서 leaf 전부 재발급 → §8.4. 다만 구 사이트 CA 는 만료 전까지 단말이 계속 신뢰하므로(폐기 경로 없음) 실질 회수는 루트 교체다 |
@@ -627,23 +627,24 @@ CA 키를 신뢰하는 만큼 그룹 CA 침해 = 그 사이트 서버 위조 가
 사이트 격리). 교차 인증서가 없는 노드는 종전과 같다(그룹 CA 단독 서명 — 관리평면만 유효, 단말 불신). 즉
 **동작 차이는 체인 파일에 교차 인증서를 붙이느냐뿐**이라 도입 전 노드에 영향이 없다.
 
-**엔진의 변경** (`cert.sh`):
+**엔진의 동작** (`cert.sh` — `ensure_node_cert <module>`, 기동 전 보증과 `cims-svc cert [module|all]` 이 같은 함수):
 
 | # | 항목 | 내용 |
 |---|---|---|
-| E1 | 체인 조립 | `ca-cross.crt` 가 있으면 `server.crt` = leaf + 교차 인증서(2장). 없으면 leaf 1장(종전) |
-| E2 | 갱신 계기 추가 | 종전 3갈래(없음/SAN 부족/운영자 인증서)에 **④ CIMS 발행 + 잔여 ≤ 60일 → 재발급**, **⑤ 교차 인증서가 있는데 leaf 체인이 그것을 거치지 않음 → 재발급**(루트 직서명 leaf·자가서명 `csp.pem` 을 사이트 CA 체인으로 자동 전환) |
-| E3 | 주기 실행 | 기동 전 보증만으로는 2년 무재기동 노드의 만료를 못 막는다. agent 가 **매일 1회** 모듈별 `ensure_node_cert` 를 돈다(설치·기동 시각 무관, 시각은 노드마다 분산) |
-| E4 | CSP 편입 | `ensure_node_cert csp` — `<csp>/runtime/cert/{csp-chain.pem,csp.key}` 에 발급(§8.3 `install` 과 같은 경로·이름). 계약: `local_nodes` TLS 행의 `tls_cert_path`/`tls_key_path` 가 이 경로를 가리킨다(설치 시 `csp-node` 1회 또는 콘솔 저장, 이후 경로 불변). 재발급 뒤 엔진이 CSP 에 SIGUSR1 을 보낸다 |
-| E5 | 실패 시 강등 금지 | 유효한 기존 인증서가 있으면 재발급 실패 시 **기존 유지**(종전 규칙) + 알람(§8.6.2). 자가서명 폴백은 인증서가 아예 없을 때만 — 단말 대면 모듈에서 자가서명은 "유효한 옛 인증서"보다 나쁘다(단말 로그인 불가) |
-| E6 | 키 길이 | 그룹 CA 신규 생성 시 RSA 3072 이상(기존 2048 CA 는 그대로 교차 서명 — 교체는 루트 세대 전환과 함께) |
+| E1 | 체인 조립 | `ca-cross.crt` 가 있고 그룹 CA 와 같은 공개키면 `server.crt`/`csp-chain.pem` = leaf + 교차 인증서(2장). 없으면 leaf 1장. 공개키가 다르면(그룹 CA 재생성 뒤 옛 교차 인증서 잔존) 없는 것으로 보고 경고 |
+| E2 | 갱신 계기 | 갈래 = ① 없음 → 발급 · ② CIMS 발행 + 계기 → 재발급 · ③ 운영자 인증서 → 불변(SAN 부족은 경고만). ②의 계기 = SAN 부족(요구 목록 = hostname·loopback·노드 IPv4·VIP·`AgentOamUrl`·`CertSans`) / **④ 잔여 ≤ 60일** / **⑤ 교차 인증서가 있는데 체인 2번째 장이 그것이 아님**(루트 직서명 leaf·그룹 CA 단독 leaf 를 사이트 CA 체인으로 자동 전환). 발급 SAN 에는 `DNS:csc.cims.local`/`DNS:csp.cims.local` 을 더 넣되 요구 목록에는 넣지 않는다(그것만으로 재발급하지 않게) |
+| E3 | 주기 실행 | agent 가 **매일 1회** 설치된 모듈마다 `cims-svc cert <module>` 을 돈다(`cims_agent.py` 스윕 스레드 — 첫 실행은 기동 5분 뒤 + hostname 해시(0~59분) 분산, 이후 24h). 기동 전 보증만으로는 2년 무재기동 노드의 만료를 못 막는다 |
+| E4 | CSP 편입 | `ensure_node_cert csp` — `<csp>/runtime/cert/{csp-chain.pem,csp.key}`(§8.3 `install` 과 같은 경로·이름). 계약: `local_nodes` TLS 행의 `tls_cert_path`/`tls_key_path` 가 이 경로를 가리킨다(설치 시 `csp-node` 1회 또는 콘솔 저장, 이후 경로 불변). 발급·재발급 뒤 엔진이 CSP 에 SIGUSR1 을 보낸다(안 떠 있으면 다음 기동이 읽는다) |
+| E5 | 강등 금지 | 유효한 기존 인증서가 있으면 재발급 실패 시 **기존 유지** + 갱신 실패 기록. 교차 인증서가 없는데 leaf 가 그룹 CA 밖에서 발급된 것(루트 직서명)이면 재발급 자체를 하지 않는다 — 그룹 CA 단독 leaf 로 바꾸면 단말이 끊긴다(`site_ca_missing`). 자가서명 폴백은 인증서가 아예 없을 때만 |
+| E6 | 키 길이 | 그룹 CA 신규 생성 시 RSA 3072(기존 2048 CA 는 그대로 교차 서명 — 교체는 루트 세대 전환과 함께). leaf 는 RSA 2048·2년(730일)·`keyUsage` critical |
+| E7 | 갱신 상태 | 판정마다 `<prefix>/run/cert/<module>.json` = `{module, ok, reason(issued|renewed|ok|site_ca_missing|renew_failed|issue_failed), days_left, cert, ts}` — agent heartbeat 가 `cert_renew` 로 싣고 OAM 이 A-PRC-009 를 파생한다(§8.6.2) |
 
-**소비자의 변경**:
+**소비자의 동작**:
 
-| 모듈 | 핫리로드 | 필요한 변경 |
-|---|---|---|
-| csc·oam·oam-svc | `httpsrv` 가 30초마다 파일(mtime·size) 변경을 감지해 검증 후 `load_cert_chain` — 체인 2장도 그대로 전송 | 없음 |
-| CSP | `local_nodes` 의 **경로가 바뀔 때만** 재적재(`CspListenerManager` — 적용값과 경로 비교) | **같은 경로의 내용 교체를 감지**: 접속점별로 인증서 파일 지문(mtime+size 또는 sha256)을 기억하고 SIGUSR1/Sync 때 지문이 바뀌면 `ReloadTlsServerCert`(§8.4 무중단 경로 재사용) + A-PRC-009 재평가 |
+| 모듈 | 핫리로드 |
+|---|---|
+| csc·oam·oam-svc | `httpsrv` 가 30초마다 파일(mtime·size) 변경을 감지해 검증 후 `load_cert_chain` — 체인 2장도 그대로 전송 |
+| CSP | `CspListenerManager` 가 접속점별 인증서 파일 지문(cert·key·ca 의 mtime+size)을 기억하고 SIGUSR1/Sync 때 달라졌으면 무중단 재적재 — ListenerManager 소유 접속점은 psip `ReloadTlsListenerCert`(리스너별 ctx 교체, accept 경로는 참조 획득으로 dangling 방지), bootstrap 접속점은 `ReloadTlsServerCert`(§8.4). 경로 변경과 같은 경로의 내용 교체를 모두 잡고, 실패 시 지문을 갱신하지 않아 다음 Sync 가 재시도한다. A-PRC-009 는 호출부가 Sync 뒤 재평가 |
 
 **HA**: 사이트 CA(그룹 CA 키·교차 인증서)는 join 으로 양 노드에 있으므로 각 노드가 독립적으로 자기 leaf 를
 갱신한다. 절체와 무관하다.
@@ -663,10 +664,10 @@ CA 키를 OAM 노드 밖에 두어야 하는 현장(§8.3 방식 A/B), agent 이
 | CSP 접속점 | 구현 | `_certEarliestDaysLeft` — 체인 파일 전 인증서 중 가장 이른 만료(교차 인증서 = 루트 만료도 포함). mo `<서버명>/csp/cert/<proto:port>` |
 | CSC HTTPS | 구현 | `fm_reporter.CertExpiryProbe` 1시간 주기, mo `<서버명>/csc/cert/https` |
 | OAM·OAM-SVC·그룹 CA | 구현 | 자기 HTTPS·그룹 CA 만료. 그룹 CA 행에 `ca-cross.crt` 만료를 함께 본다 |
-| **엔진 자동 갱신 실패** | 신설 | E2 갈래 ④/⑤ 의 재발급 실패(사이트 CA 부재·서명 실패·쓰기 실패·CSP 재적재 실패) 즉시 agent FM 자기보고 — mo `<서버명>/agent/cert/<module>/renew`, 첫 실패 warning, 잔여 ≤ 30일이면 critical, 다음 성공에 close. 카탈로그 감지 행(AGENT, `cert/<module>/renew`) |
-| **콘솔 상단 배너** | 신설 | 활성 `cert_expiring` 알람이 하나라도 있으면 모든 라우트 상단에 "인증서 N일 후 만료 — 자동 갱신 실패, <mo>" 를 상시 표시. 닫기 없음, 알람 close 로만 소멸. 운영자가 알람 화면을 열지 않아도 마주친다(도안 = console_design_system 공통 셸 항목으로 추가) |
-| **관제조작반 경고** | 신설 | 관제사는 매일 앉아 있는 사람이라 폐쇄망에서 가장 확실한 채널이다. 핸드셰이크 peer 인증서의 `notAfter` 를 SDK 가 노출(`CscClient` HTTPS·pjsip TLS 콜백 → C API `cimsue_tls_peer_expiry`)하고, 잔여 ≤ 30일이면 관제 요약 띠([dispatch_desktop_ui.md §3.5](dispatch_desktop_ui.md))에 "서버 인증서 N일 후 만료 — 운영자에게 알리세요" 를 표시. Android 앱은 설정 화면 표시와 로그만 |
-| 검증 게이트 | 보강 | `cims-verify` S3-HEALTH 에 "단말 대면 인증서(CSC 4430·CSP TLS) 잔여 > 갱신 임계 60일" 검사를 추가해 FAIL 로 잡는다(`service-cert.sh verify` 의 잔여 판정과 같은 규칙) |
+| **엔진 자동 갱신 실패** | 구현 | 엔진의 갱신 상태 파일(E7)을 agent 가 heartbeat 원시 metric `cert_renew{module: {ok, reason, days_left, ts}}` 로 보고하고 OAM 규칙 `check=cert_renew_failed`(`service_registry`·`oam_app`)가 A-PRC-009 를 파생한다 — agent 계열은 FM push 를 쓰지 않는다([alarm_self_reporting.md](../alarm_self_reporting.md) §2). mo `<서버명>/agent/cert/<module>/renew`, `ok=false` 면 open(첫 실패 warning, 잔여 ≤ 30일 critical), 성공 보고에 close, 모듈이 보고에서 사라지면 미평가 close. 카탈로그 감지 행(AGENT, `cert/<module>/renew`) |
+| **콘솔 상단 배너** | 미구현(도안 대기) | 활성 `cert_expiring` 알람이 하나라도 있으면 모든 라우트 상단에 "인증서 N일 후 만료 — 자동 갱신 실패, <mo>" 를 상시 표시. 닫기 없음, 알람 close 로만 소멸. 운영자가 알람 화면을 열지 않아도 마주친다(도안 = console_design_system 공통 셸 항목으로 추가해야 착수) |
+| **관제조작반 경고** | 구현(Windows) | 관제사는 매일 앉아 있는 사람이라 폐쇄망에서 가장 확실한 채널이다. SDK 가 마지막 성공 핸드셰이크의 peer 인증서 `notAfter` 를 관측한다 — SIP TLS 는 pjsua2 `onTransportState`(`Engine::tlsPeerExpiry()`), HTTPS 는 OpenSSL 전송의 peer 인증서(`CscClient::tlsPeerExpiry()`) → C API `cimsue_engine_tls_peer_expiry`/`cimsue_csc_tls_peer_expiry`(`cimsue_tls_peer_expiry_t`) → .NET `Engine.TlsPeerExpiry`/`CscClient.TlsPeerExpiry`. 관제조작반은 둘 중 짧은 잔여가 ≤ 30일이면 관제 요약 띠([dispatch_desktop_ui.md §3.5](dispatch_desktop_ui.md))에 "서버 인증서 N일 후 만료 — 운영자에게 알리세요" 배지를 상시 표시(닫기 없음). Android 앱의 설정 화면 표시는 미구현(SDK 관측은 같은 코어) |
+| 검증 게이트 | 구현 | `cims-verify` S3-HEALTH 가 단말 대면 접속점(CSC 4430·`local_nodes` enabled TLS 행)의 서빙 체인 중 가장 이른 만료 잔여가 갱신 임계 60일을 넘지 않으면 FAIL(접속 불가 접속점은 SKIP). `S3-SCN-TLS-CERT-RENEW` 가 엔진 갈래 ⑤·④·강등 금지와 CSP 지문 재적재를 시험 루트로 끝까지 돈다(§10) |
 
 임계는 셋뿐이고 한 곳에서 정의한다: 갱신 60 / 경고 30 / 위험 7 (일). 엔진(`cert.sh`)·CSP(`CERT_EXPIRY_*`)·
 CSC 프로브·verify 가 같은 값을 쓴다 — 갱신 임계가 경고 임계보다 크다는 순서가 "경고 = 실패" 의 뜻을 만든다.
@@ -678,12 +679,16 @@ CSC 프로브·verify 가 같은 값을 쓴다 — 갱신 임계가 경고 임�
 - **기간 연장으로 대체** — leaf 를 5년·10년으로 늘리면 위험 창만 커지고 잊힐 확률은 그대로다(§8.1 기간 정책).
 - **모듈 자체 발급** — 부트스트랩 순환(oam_ha §5.2). 발급은 언제나 엔진이다.
 
-#### 8.6.4 도입 순서
+#### 8.6.4 기존 노드의 사이트 CA 체인 전환 절차
 
-① 엔진 E1~E5 + CSP 지문 재적재 (코드) → ② 카탈로그 감지 행·agent FM 자기보고 → ③ 사내 사이트: 루트가
-그룹 CA 를 교차 서명해 `ca-cross.crt` 배치 → 다음 일일 스윕에서 .45/.49 의 루트 직서명 leaf 가 갈래 ⑤로
-사이트 CA 체인으로 전환되는지 실측(단말 무변경으로 로그인·등록 200) → ④ 콘솔 배너·관제 앱 경고·verify
-게이트 → ⑤ 현장 사이트 개설 절차(§8.3 (0))의 기본 방식을 교차 서명으로.
+루트 직서명 leaf 가 배치된 노드(이미 단말이 붙어 있는 노드)를 사이트 CA 체인으로 옮기는 데 단말·정지창은
+필요 없다: ① 노드의 그룹 CA 인증서 `<oam>/runtime/_secrets/ca/ca.crt` 를 매체로 루트 매체에 → `service-cert.sh
+site-ca sign --cross ca.crt` → ② `ca-cross.crt` 를 같은 디렉터리에 배치(644, HA 피어는 join 이 복사) → ③ 다음
+일일 스윕(또는 `cims-svc cert csc`/`cims-svc cert csp` 즉시)에서 갈래 ⑤가 CSC·CSP leaf 를 체인 2장으로
+재발급하고 SIGUSR1/httpsrv 핫리로드로 무중단 반영 → ④ `service-cert.sh verify --csp-port <TLS 포트>` 전부
+PASS(체인 2장·발급자=그룹 CA·사이트 CA → 루트) + 단말 무변경으로 로그인·등록 200. CSP 의 `local_nodes` TLS
+행은 엔진이 쓰는 경로(`<csp>/runtime/cert/csp-chain.pem`·`csp.key`)를 가리켜야 한다 — 다른 자리를 가리키는
+노드는 `csp-node` 로 한 번 옮긴다.
 
 ## 9. 남은 과제
 
@@ -695,12 +700,9 @@ transport 별 도달 모델([§2](#2-transport-별-도달-모델--latch-의-의�
 | # | 과제 | 성격 | 검증 |
 |---|---|---|---|
 | 1 | **FQDN 전환**(선택) — 프로비저닝 `host`·인증서 SAN·DNS 등록 3개 동시 정합 | 구성 | FQDN 으로 등록 성립 |
-| 2 | `service-cert.sh site-ca {issue,csr,sign [--cross]}` — 사이트 CA 발급·CSR 서명·고객 CA 교차 서명(§8.3 (0)). `issue` 는 `--ca-dir <CA 디렉터리>/<site_id>` 를 기본으로 삼고 묶음에 루트 인증서를 동봉 | 도구 | 방식 A/B/C 로 만든 사이트 CA 의 leaf 로 단말 로그인·등록 200 |
-| 3 | `verify` 의 루트 기준 판정 — `-CAfile 루트`, 체인 2장, 발급자=사이트 CA, 만료 잔여는 leaf·사이트 CA 중 이른 것. README·Windows 안내의 CA PEM = 루트 | 도구 | 사이트 CA 발급 노드 전부 PASS · 사이트 CA 만 앵커로 주면 FAIL(대조군) |
-| 4 | 루트 키 오프라인 이관 — `/home/cims/certs/cims-service-ca.key` 를 매체 두 벌로 옮기고 온라인 사본 삭제. 사내 사이트 `hq-lab` 사이트 CA 를 현 루트로 먼저 발급(2036 까지)해 개발 노드(.45/.49)의 다음 갱신이 그것을 쓰게 한다 | 운영 | 온라인 노드에 루트 키 부재 · .45 갱신 leaf 체인 2장 |
-| 5 | **leaf 자동 갱신**(§8.6.1) — 엔진 E1~E6(체인 조립·갱신 계기 ④⑤·일일 스윕·CSP 편입·강등 금지·키 길이) + CSP 같은 경로 내용 교체 지문 재적재 + `site-ca sign --cross` + join 의 `ca-cross.crt` 복사 | 코드 | 잔여 60일 leaf 가 사람 개입 없이 갱신되고 단말 무변경으로 로그인·등록 200 · 루트 직서명 leaf 가 갈래 ⑤로 사이트 CA 체인 전환 · `S3-SCN-TLS-CERT-RENEW` |
-| 6 | **(1.0 안정화 이후) 루트 CA 재발급** — 유효기간은 그때 결정. 오프라인 매체에서 `CIMS Root CA G1` 생성 → APK `CA_BUNDLE` 병기(구 루트와 두 장)·Windows CA PEM 교체 → 각 사이트 CA 를 같은 키로 새 루트 아래 재서명(만료 = 새 루트) → 노드 체인 파일 두 번째 장 교체(무중단) → 다음 APK 에서 구 루트 제거 → 구 루트 키 파기 | 운영 | 새 루트만 든 APK 로 로그인·등록 200 · 사이트 CA 만료가 새 루트에 맞춰 연장 · leaf 무변경 |
-| 7 | **만료 안내 표면**(§8.6.2) — agent 자동 갱신 실패 A-PRC-009 감지 행(FM 자기보고) · 콘솔 상단 배너(공통 셸 도안 추가) · SDK peer 인증서 만료 노출 `cimsue_tls_peer_expiry` + 관제조작반 요약 띠 경고 · `cims-verify` S3-HEALTH 잔여 검사 · 임계 3값(60/30/7) 단일 정의 | 코드·도안 | 갱신 실패 주입 시 알람→배너→관제 앱 경고 3단 표시 · 잔여 59일 인증서로 S3-HEALTH FAIL |
+| 2 | **사내 사이트 체인 전환 + 루트 키 오프라인 이관** — §8.6.4 절차로 .45 그룹 CA 를 현 루트로 교차 서명해 `ca-cross.crt` 배치 → 스윕에서 .45/.49 의 루트 직서명 leaf 가 사이트 CA 체인으로 전환되는지 실측(단말 무변경 로그인·등록 200) → `/home/cims/certs/cims-service-ca.key` 를 매체 두 벌로 옮기고 온라인 사본 삭제. 선행 = 이 절의 코드가 든 agent·csp·oam·oam-svc·csc 라이브 배포(정지창 풀 S3 — `S3-SCN-TLS-CERT-RENEW` 포함) | 운영·배포 | 온라인 노드에 루트 키 부재 · .45 leaf 체인 2장 · A-PRC-009 `cert/<module>/renew` 미발화 |
+| 3 | **(1.0 안정화 이후) 루트 CA 재발급** — 유효기간은 그때 결정. 오프라인 매체에서 `CIMS Root CA G1` 생성 → APK `CA_BUNDLE` 병기(구 루트와 두 장)·Windows CA PEM 교체 → 각 사이트 CA 를 같은 키로 새 루트 아래 재서명(만료 = 새 루트) → 노드 체인 파일 두 번째 장 교체(무중단) → 다음 APK 에서 구 루트 제거 → 구 루트 키 파기 | 운영 | 새 루트만 든 APK 로 로그인·등록 200 · 사이트 CA 만료가 새 루트에 맞춰 연장 · leaf 무변경 |
+| 4 | **만료 안내 잔여 표면**(§8.6.2) — 콘솔 상단 배너(공통 셸 도안이 있어야 착수) · Android 앱 설정 화면의 서버 인증서 만료 표시(SDK 관측 `tlsPeerExpiry` 는 있음) | 코드·도안 | 갱신 실패 주입 시 알람→배너→관제 앱 경고 3단 표시 |
 
 시험 클라이언트는 `cspsim -transport {udp,tcp,tls}` 다 — 단말 빌드 없이 서버측 전 구간을 실측할
 수 있고, 한 계정을 여러 경로로 등록시켜 바인딩 집합도 만들 수 있다.
@@ -720,6 +722,7 @@ transport 별 도달 모델([§2](#2-transport-별-도달-모델--latch-의-의�
 | 9 | TLS 리스너 hot-add / 잘못된 인증서로 부트 | handshake 성립 / 서버는 뜨고 TLS 만 비활성 + A-PRC-012 open |
 | 10 | **서버 인증서 검증(정상)** | 단말 로그 `CA certificates loaded from buffer (cnt=N)` + 등록 200 |
 | 11 | **서버 인증서 검증(음성 대조군)** — 리스너를 CA 서명이 아닌 인증서로 교체 | 등록 **503 `PJSIP_TLS_ECERTVERIF`** + TLS 연결 미성립. 통과해 버리면 검증이 집행되지 않는다는 뜻 |
+| 12 | **leaf 자동 갱신** `S3-SCN-TLS-CERT-RENEW` — 시험 루트가 dev 그룹 CA 를 교차 서명 → `cims-svc cert csp` | 갈래 ⑤ 체인 2장 전환 + 시험 루트 경로 검증 · 임시 TLS 접속점이 체인 2장 서빙 · 같은 경로에 잔여 10일 leaf 교체 + SIGUSR1 → 서빙 지문 변경(지문 재적재) · 스윕 → 2년 leaf 재발급 + 엔진 SIGUSR1 로 재변경 · 쓰기 불가 주입 → 기존 유지 + 상태 `renew_failed`. 종료 시 자기복원 |
 
 진단 시 목적지 판정은 `Target=` 표기가 아니라 직후의 `UdpSend`/`TcpSend`/`TlsSend` NETWORK 로그를
 정본으로 본다. latch 갱신 로그의 transport 값은 **수신값**이므로 저장 상태 판정에 쓸 수 없다
@@ -732,9 +735,9 @@ transport 별 도달 모델([§2](#2-transport-별-도달-모델--latch-의-의�
 | `csp/UserMap.{h,cpp}` | latch 저장·갱신(`Insert`/`SetIpPort`), 만료 sweep, OPTIONS keepalive |
 | `csp/ModuleDispatcher.cpp` | 주소 변경 감지 갱신(`EventIncomingRequestAuth`), in-dialog 목적지 제공(`EventGetLegDest`) |
 | `csp/GroupCallService.cpp`, `csp/CspServer.cpp` | latch 소비 (fan-out INVITE, NOTIFY 2종) |
-| `csp/CspListenerManager.{h,cpp}` | `local_nodes.jsonl` → 리스너 add/remove (UDP/TCP/TLS) |
+| `csp/CspListenerManager.{h,cpp}` | `local_nodes.jsonl` → 리스너 add/remove (UDP/TCP/TLS). TLS 인증서 파일 지문(mtime+size) 기억 → 같은 경로 내용 교체의 무중단 재적재(§8.6.1) · A-PRC-009 만료 점검 |
 | `csp/CspLocalNodeMap.cpp` | primary 리스너 해석 |
-| `ext/psip/SipStack/SipStack.cpp` | 리스너 생성·pool 초기화 (T1·T2) |
+| `ext/psip/SipStack/SipStack.cpp` | 리스너 생성·pool 초기화 (T1·T2) · `ReloadTlsListenerCert`(리스너별 ctx 무중단 교체 — `CSipStackTlsListener::AcquireSslCtx/SwapSslCtx` 참조 규약) · `ReloadTlsServerCert`(stack-global) |
 | `ext/psip/SipStack/SipTlsThread.cpp` | TLS accept·worker (T1·T4) |
 | `ext/psip/SipStack/SipTlsClientThread.cpp` | 아웃바운드 TLS 클라이언트 |
 | `ext/psip/SipStack/TlsFunction.cpp` | SSL ctx 생성·accept·connect. 인증서는 체인 파일로 적재(§8.2), 무중단 교체(`SSLServerCtxReload`)와 참조 획득(`SSLServerCtxAcquire`), 클라이언트 인증서 요구는 CA 설정 시에만 |
@@ -746,5 +749,9 @@ transport 별 도달 모델([§2](#2-transport-별-도달-모델--latch-의-의�
 | `csc/src/services/mcptt.py` | 프로비저닝 가용 transport 목록 제공(§7.1) |
 | `scripts/service-cert.sh` | 단말 대면 인증서 발급·배치·검증(§8.3) — 사이트 CA(`site-ca`, 개발사 오프라인 루트)·서버 leaf(`issue`, 현장 사이트 CA)·`verify`(루트 앵커). 묶음에 자기 복사 — 현장 단독 실행 |
 | `<oam>/runtime/_secrets/ca/` | 사이트 CA(기본) — 그룹 CA `ca.{crt,key}`(관리평면 앵커) + 루트 교차 인증서 `ca-cross.crt`(단말 대면 체인). join 이 피어에 복사, 디렉터리 700·키 600 |
-| `agent/lib/cert.sh` | lifecycle 엔진의 노드 인증서 발급·갱신(그룹 CA = 사이트 CA 교차 인증서 체인, 잔여 60일 자동 재발급, 일일 스윕, CSP 편입 — §8.6.1). SAN 요구 목록의 정본 — `service-cert.sh` 가 상위집합 조건으로 검사 |
+| `agent/lib/cert.sh` | lifecycle 엔진의 노드 인증서 발급·갱신(그룹 CA = 사이트 CA 교차 인증서 체인, 잔여 60일 자동 재발급, CSP 편입, 강등 금지, 갱신 상태 `run/cert/<module>.json` — §8.6.1). 임계 3값(60/30/7)의 정의 자리. SAN 요구 목록의 정본 — `service-cert.sh` 가 상위집합 조건으로 검사. 진입 = `cims-svc cert [module|all]`(`cims.sh cert` 위임) |
+| `agent/cims_agent.py` | 일일 스윕 스레드(모듈별 `cims-svc cert`, hostname 해시 분산) · heartbeat metric `cert_renew` |
+| `ems/core/oam/src/services/service_registry.py` · `oam_app.py` | agent 규칙 `check=cert_renew_failed` → A-PRC-009 `<서버명>/agent/cert/<module>/renew` 파생 · `handlers/agent_api.py` metric 화이트리스트 `cert_renew` · `handlers/oam_join.py` join 번들에 `ca-cross.crt`(`deployment/bootstrap/install.sh` 가 전개) |
+| `verify/lib/items/stage3/health.py` · `scn_tls_cert_renew.py` | S3-HEALTH 단말 대면 인증서 잔여 > 60일 게이트 · `S3-SCN-TLS-CERT-RENEW`(§10 #12) |
+| `sdk/core/…` `Engine::tlsPeerExpiry` · `CscClient::tlsPeerExpiry` · `cimsue_c.h` `cimsue_*_tls_peer_expiry` · `sdk/windows/dotnet` `TlsPeerExpiry` · `windows/dispatch-desktop` 요약 띠 | 서버 인증서 만료 관측·관제조작반 경고(§8.6.2) |
 | `/home/cims/certs/` | 사내 CA 보관 서버 — 루트 `cims-service-ca.{crt,key}`(키는 오프라인 매체로 이관 대상, §9 #4) · 사이트 CA `<site_id>/cims-site-ca.{crt,key}` · 노드 묶음 `cert-init-<host>/` (키 권한 600) |

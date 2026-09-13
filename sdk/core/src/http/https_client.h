@@ -14,6 +14,9 @@ struct Response {
     std::map<std::string, std::string> headers;   // 소문자 키
     std::string body;
     std::string error;
+    /** TLS 였으면 핸드셰이크에서 본 서버 인증서의 notAfter(UTC epoch 초)·subject. 평문/실패면 0·빈 문자열. */
+    int64_t peerNotAfterEpoch = 0;
+    std::string peerSubject;
 };
 
 class ITransport {

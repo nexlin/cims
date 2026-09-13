@@ -90,6 +90,20 @@ _CORE_ALERT_RULES = [
      'msg_close': '{mo} 인증서 잔여 수명 정상 ({days_left}일)',
      'effect': '만료 시 접속·상호인증 전면 실패 — agent 관측/콘솔 접속 단절',
      'recommended_action': '인증서 재발급·회전 경로 점검 (agent 는 cert_rotate, 파일 인증서는 재생성 후 모듈 재시작)'},
+    # 단말 대면 leaf 자동 갱신 실패 — lifecycle 엔진(agent/lib/cert.sh)의 일일 스윕 결과를 agent 가 원시
+    #   metric(cert_renew{module: {ok, reason, days_left}})으로 보고하고 여기서 파생한다(alarm_self_reporting
+    #   §2 — agent 는 FM push 를 쓰지 않는다). 실패 = 기존 인증서를 유지한 채 만료가 조용히 진행 중이라는
+    #   뜻(sip_tls_signaling §8.6.2 — 자동 갱신 대상에 30일 경고가 뜨는 것 자체가 갱신 실패 신호).
+    #   첫 실패 warning, 잔여 ≤ 30일 critical, 다음 성공 보고에 close. 같은 code(A-PRC-009), mo 는
+    #   `<서버명>/agent/cert/<module>/renew` 로 분리.
+    {'type': 'cert_expiring', 'code': 'A-PRC-009', 'perceived_severity': 'warning',
+     'event_type': 'processingError', 'probable_cause': 'keyExpired', 'mo_class': 'software',
+     'check': 'cert_renew_failed', 'scope': 'agent', 'unit': '일', 'metric': '단말 대면 인증서 자동 갱신',
+     'thresholds': {'critical': 30},
+     'msg_open': '{mo} 인증서 자동 갱신 실패 ({reason}) — {days_left}일 남음, 기존 인증서 유지 중',
+     'msg_close': '{mo} 인증서 자동 갱신 정상 ({days_left}일 남음)',
+     'effect': '갱신 없이 만료로 진행 — 만료 시 단말 전체 로그인·등록 불가(사이트 CA 체인 인증서)',
+     'recommended_action': '사이트 CA 교차 인증서(<oam>/runtime/_secrets/ca/ca-cross.crt) 배치·그룹 CA 키·runtime/cert 권한·CSP local_nodes 경로 점검 후 cims-svc cert <module> 재실행'},
     # 공유 store(NAS) 접근 불가 — 마운트 소실·쓰기 불가·무응답(멈춘 hard 마운트).
     #   관측 주체가 **agent** 인 이유: store 가 멈추면 그것을 쓰는 모듈(oam/oam-svc)이 먼저
     #   물려(uninterruptible D — 죽지도 않는다) 자기 상태를 보고할 수 없다. agent 는 store 를

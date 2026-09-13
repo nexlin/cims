@@ -174,6 +174,21 @@ public sealed unsafe class Engine : IDisposable
         return new StreamStats(s.rx_packets, s.rx_bytes, s.rx_loss, s.rx_discard, s.tx_packets, s.tx_bytes, s.valid != 0);
     }
 
+    /// <summary>SIP TLS 서버 인증서 만료 관측 — 마지막 성공 핸드셰이크의 peer 인증서(관제 요약 띠 경고의 입력, §8.6.2). 관측 전엔 Valid=false.</summary>
+    public TlsPeerExpiry TlsPeerExpiry
+    {
+        get
+        {
+            cimsue_tls_peer_expiry_t t;
+            cimsue_engine_tls_peer_expiry(Handle, &t);
+            return ToManaged(&t);
+        }
+    }
+
+    internal static TlsPeerExpiry ToManaged(cimsue_tls_peer_expiry_t* t) => t->valid == 0 ? TlsPeerExpiry.None
+        : new TlsPeerExpiry(true, DateTimeOffset.FromUnixTimeSeconds(t->not_after_epoch), DateTimeOffset.FromUnixTimeSeconds(t->observed_epoch),
+                            t->days_left, Utf8.Str(t->subject), Utf8.Str(t->remote));
+
     // ── 장치 ──
 
     public IReadOnlyList<AudioDeviceInfo> AudioDevices

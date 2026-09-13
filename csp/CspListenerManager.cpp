@@ -4,6 +4,7 @@
 #include <openssl/bio.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
+#include <sys/stat.h>
 
 #include "CspConfigCache.h"
 #include "CspLocalNodeMap.h"
@@ -233,6 +234,8 @@ bool CCspListenerManager::Sync() {
         const ManagedInfo *d = findDesired( m.id );
         if ( d && sameBind( *d, m ) ) {
             stillManaged.push_back( m );  // 변화 없음 — 유지 (재바인딩하지 않음)
+            // 경로는 같아도 lifecycle 엔진이 파일 내용을 갈아끼웠을 수 있다(leaf 자동 갱신) — 지문 비교.
+            _reloadManagedTlsCertIfContentChanged( m );
             continue;
         }
         if ( _removeListenerFromStack( m ) ) {
@@ -266,6 +269,7 @@ bool CCspListenerManager::Sync() {
         int iOutId = 0;
         if ( _addListenerToStack( d, iOutId ) ) {
             stillManaged.push_back( d );
+            if ( d.protocol == "TLS" && !d.tlsCertPath.empty() ) m_mapTlsCertFp[d.id] = _tlsCertFingerprint( d );
             _listenerAlarm( d.protocol, d.bindIp, d.port, false );
             if ( d.protocol == "UDP" ) {
                 CLog::Print( LOG_SYSTEM, "ListenerManager: added id=%d %s %s:%d threads=%d", d.id, d.protocol.c_str(),
@@ -282,6 +286,14 @@ bool CCspListenerManager::Sync() {
     }
 
     m_vecManaged.swap( stillManaged );
+
+    // desired 에서 사라진 접속점의 지문은 지운다 — 같은 id 가 다시 오면 새로 기록.
+    for ( auto it = m_mapTlsCertFp.begin(); it != m_mapTlsCertFp.end(); ) {
+        if ( findDesired( it->first ) == nullptr )
+            it = m_mapTlsCertFp.erase( it );
+        else
+            ++it;
+    }
     return true;
 }
 
@@ -291,26 +303,79 @@ void CCspListenerManager::GetManagedIds( std::vector<int> &out ) {
     for ( const auto &m : m_vecManaged ) out.push_back( m.id );
 }
 
+std::string CCspListenerManager::_tlsCertFingerprint( const ManagedInfo &m ) {
+    // mtime(ns)+size — 엔진은 새 파일을 만든 뒤 rename 으로 갈아끼우므로(cert.sh) mtime 이 반드시 바뀐다.
+    //   sha256 까지 갈 이유가 없다: Sync 는 SIGUSR1 때만 돌고, 내용이 같은데 mtime 만 바뀐 경우의 비용은
+    //   ctx 한 번 더 만드는 것뿐이다(무해).
+    auto one = []( const std::string &path ) -> std::string {
+        if ( path.empty() ) return "-";
+        struct stat st;
+        if ( stat( path.c_str(), &st ) != 0 ) return "-";
+        char buf[64];
+        snprintf( buf, sizeof( buf ), "%lld.%09ld:%lld", (long long)st.st_mtim.tv_sec, (long)st.st_mtim.tv_nsec,
+                  (long long)st.st_size );
+        return buf;
+    };
+    return one( m.tlsCertPath ) + "|" + one( m.tlsKeyPath ) + "|" + one( m.tlsCaPath );
+}
+
+void CCspListenerManager::_reloadManagedTlsCertIfContentChanged( const ManagedInfo &m ) {
+    if ( m.protocol != "TLS" || m.tlsCertPath.empty() ) return;
+
+    const std::string fp = _tlsCertFingerprint( m );
+    auto it = m_mapTlsCertFp.find( m.id );
+    if ( it == m_mapTlsCertFp.end() ) {
+        // 기록이 없는 기존 접속점(도입 전 기동) — 지금 상태를 기준점으로 삼는다.
+        m_mapTlsCertFp[m.id] = fp;
+        return;
+    }
+    if ( it->second == fp ) return;
+
+    CLog::Print( LOG_SYSTEM,
+                 "ListenerManager: id=%d TLS 인증서 파일 내용 변경 감지 %s:%d — 무중단 재적재 시도 (cert=%s)", m.id,
+                 m.bindIp.c_str(), m.port, m.tlsCertPath.c_str() );
+    if ( gclsUserAgent.m_clsSipStack.ReloadTlsListenerCert( m.id, m.tlsCertPath.c_str(), m.tlsKeyPath.c_str(),
+                                                            m.tlsCaPath.c_str() ) == false ) {
+        // 실패해도 접속점은 옛 인증서로 계속 서비스한다. 지문을 갱신하지 않으므로 다음 Sync 가 재시도.
+        CLog::Print( LOG_ERROR, "ListenerManager: id=%d TLS 인증서 재적재 실패 — 기존 인증서 유지 (cert=%s)", m.id,
+                     m.tlsCertPath.c_str() );
+        return;
+    }
+    it->second = fp;
+}
+
 void CCspListenerManager::_reloadBootstrapTlsCertIfChanged( const ManagedInfo &d ) {
     if ( d.protocol != "TLS" || d.tlsCertPath.empty() ) return;
 
     // 현재 적용된 값은 psip 설정이 정본이다 — ReloadTlsServerCert 가 성공하면 그 값이 갱신되므로
-    //   같은 경로로 두 번 교체하지 않는다.
+    //   같은 경로로 두 번 교체하지 않는다. 경로가 같으면 **파일 내용 지문**을 본다 — lifecycle 엔진의
+    //   leaf 자동 갱신은 같은 경로의 내용을 바꾼다.
     CSipStackSetup &clsSetup = gclsUserAgent.m_clsSipStack.m_clsSetup;
-    if ( clsSetup.m_strCertFile == d.tlsCertPath && clsSetup.m_strKeyFile == d.tlsKeyPath &&
-         clsSetup.m_strCaCertFile == d.tlsCaPath )
-        return;
-
-    CLog::Print( LOG_SYSTEM, "ListenerManager: TLS 인증서 무중단 교체 시도 %s:%d — '%s' → '%s'", d.bindIp.c_str(),
-                 d.port, clsSetup.m_strCertFile.c_str(), d.tlsCertPath.c_str() );
+    const bool bSamePath = ( clsSetup.m_strCertFile == d.tlsCertPath && clsSetup.m_strKeyFile == d.tlsKeyPath &&
+                             clsSetup.m_strCaCertFile == d.tlsCaPath );
+    const std::string fp = _tlsCertFingerprint( d );
+    auto it = m_mapTlsCertFp.find( d.id );
+    if ( bSamePath ) {
+        if ( it == m_mapTlsCertFp.end() ) {
+            m_mapTlsCertFp[d.id] = fp;  // 기준점
+            return;
+        }
+        if ( it->second == fp ) return;
+        CLog::Print( LOG_SYSTEM, "ListenerManager: TLS 인증서 파일 내용 변경 감지 %s:%d — 무중단 재적재 시도 (cert=%s)",
+                     d.bindIp.c_str(), d.port, d.tlsCertPath.c_str() );
+    } else {
+        CLog::Print( LOG_SYSTEM, "ListenerManager: TLS 인증서 무중단 교체 시도 %s:%d — '%s' → '%s'", d.bindIp.c_str(),
+                     d.port, clsSetup.m_strCertFile.c_str(), d.tlsCertPath.c_str() );
+    }
 
     if ( gclsUserAgent.m_clsSipStack.ReloadTlsServerCert( d.tlsCertPath.c_str(), d.tlsKeyPath.c_str(),
                                                           d.tlsCaPath.c_str() ) == false ) {
-        // 실패해도 접속점은 옛 인증서로 계속 서비스한다. 설정값을 갱신하지 않으므로 다음 Sync 가 재시도.
+        // 실패해도 접속점은 옛 인증서로 계속 서비스한다. 설정값·지문을 갱신하지 않으므로 다음 Sync 가 재시도.
         CLog::Print( LOG_ERROR, "ListenerManager: TLS 인증서 교체 실패 — 기존 인증서 유지 (cert=%s)",
                      d.tlsCertPath.c_str() );
         return;
     }
+    m_mapTlsCertFp[d.id] = fp;
     // ⚠ 여기서 CheckCertExpiry() 를 부르면 안 된다 — 이 함수는 Sync() 가 m_mutex 를 **잡은 상태**로
     //   호출되고 CheckCertExpiry 도 같은 m_mutex 를 잡는다(std::mutex 는 재귀 아님) → 메인 스레드
     //   자기 교착. 실측으로 확인: 교착 후 SIGUSR1·세션 타이머·등록 만료 sweep 이 전부 정지했다.
@@ -320,7 +385,9 @@ void CCspListenerManager::_reloadBootstrapTlsCertIfChanged( const ManagedInfo &d
 // ──────────────────────────────────────────────────────────────
 //  TLS 인증서 만료 점검 (A-PRC-009 cert_expiring)
 // ──────────────────────────────────────────────────────────────
-//  임계는 agent mTLS 회전 임계(30일)와 맞춘다 — 운영자가 두 평면을 같은 감각으로 다루게.
+//  임계 3값(갱신 60 / 경고 30 / 위험 7)은 단일 정의다 — agent/lib/cert.sh CERT_RENEW/WARN/CRIT_DAYS ·
+//  CSC CertExpiryProbe · service-cert.sh verify · cims-verify S3-HEALTH 와 같은 값(sip_tls_signaling.md §8.6.2).
+//  갱신 임계(60, 엔진)가 경고 임계(30, 여기)보다 크다는 순서가 "경고가 뜨는 것 자체가 자동 갱신 실패" 의 뜻을 만든다.
 static const int CERT_EXPIRY_WARN_DAYS = 30;
 static const int CERT_EXPIRY_CRIT_DAYS = 7;
 

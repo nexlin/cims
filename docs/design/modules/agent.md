@@ -11,9 +11,13 @@
    - `start` / `stop` / `restart`: `install_path/cims.sh` 호출
    - `update_config`: `config.json` 재기록
    - **관리평면 설정 자가 복구**: `start_oam` 은 `/health` 게이트를 통과한 설정만 `config.json.last-good` 으로 승격하고, 기동 실패 시 그 값으로 되돌려 1회 재기동한다(실패 설정은 `config.json.failed-<시각>` 보관, 되돌림은 `config.json.rolled-back` 마커 → 콘솔 배너). 관리평면은 자기가 복구 통로라 잘못된 설정 하나로 영구 정지될 수 있다 ([oam_ha.md](../features/oam_ha.md) §9.5)
-   - **노드 TLS 인증서 보증**: 관리평면 모듈(oam/oam-svc/csc)을 띄우기 **전에** 버전무관
+   - **노드 TLS 인증서 보증·갱신**: 관리평면 모듈(oam/oam-svc/csc)을 띄우기 **전에** 버전무관
      `runtime/cert/{server.key,server.crt}`(key 0600, SAN=hostname·loopback·노드 IP·HA VIP)를
-     보증한다(`agent/lib/cert.sh`, 멱등 — 있으면 그대로 두므로 운영자 인증서 보존).
+     보증한다(`agent/lib/cert.sh`, 멱등 — 운영자 인증서는 손대지 않는다). 같은 엔진을 **매일 1회**
+     설치 모듈마다 `cims-svc cert <module>` 로 돌려(스윕 스레드, hostname 해시로 시각 분산) 잔여 60일·
+     SAN 부족·사이트 CA 체인 불일치를 재발급한다 — CSP 도 `runtime/cert/{csp-chain.pem,csp.key}` 로
+     편입되며 재발급 뒤 SIGUSR1 로 무중단 재적재된다. 결과는 `run/cert/<module>.json` → heartbeat
+     `cert_renew` → OAM A-PRC-009 `cert/<module>/renew`([sip_tls_signaling.md §8.6](../features/sip_tls_signaling.md)).
      모듈이 스스로 발급하면 부트스트랩 순환이 생긴다: oam 은 자기 기동 끝자락에 만들어서,
      그 사이 뜬 oam-svc 가 평문으로 bind 하고 다시 확인하지 않는다 → 게이트웨이(https 고정)
      프록시가 전면 실패 ([oam_ha.md](../features/oam_ha.md) §5.2)
@@ -160,10 +164,11 @@ ssh-free 운영을 위한 두 축 — **raw metric 시계열**(통계/알람)과
 ### 10.1 Heartbeat / Metric (raw 시계열)
 
 - agent 는 기본 **2초** 주기로 heartbeat + metric 전송 (`DEFAULT_HEARTBEAT_SEC` / `DEFAULT_METRIC_SEC`).
-- metric payload: `cpu_pct(/proc/stat) / mem_pct / disk_pct(root) / mounts[] (마운트별 사용률, /proc/mounts+statvfs) / load_avg / per_iface[] (rx/tx + rate + errors) / modules[] / cfg_hashes{} / ha_transitions{} / cert{}`.
+- metric payload: `cpu_pct(/proc/stat) / mem_pct / disk_pct(root) / mounts[] (마운트별 사용률, /proc/mounts+statvfs) / load_avg / per_iface[] (rx/tx + rate + errors) / modules[] / cfg_hashes{} / ha_transitions{} / cert{} / cert_renew{}`.
   - `cfg_hashes` = {모듈: 배포 config.json canonical hash 12hex} — 설치 모듈 전체(중지 포함, `modules/<mod>/current/<mod>/config.json`, mtime 캐시). OAM `config_drift` 평가(`CIMS-PRC-003`) 입력.
   - `ha_transitions` = {svc: 최근 10분 keepalived 전이 수} — `/var/log/cims-ha/notify_<svc>.log` tail 집계. OAM `ha_flap` 평가(`CIMS-QOS-001`) 입력. 미가독/부재 시 생략.
   - `cert` = {not_after, kind} — HTTPS 리스너가 실제로 집어든 인증서(`_SERVING_CERT`)의 가장 이른 만료. mTLS 배치면 `agent_mtls.crt`, 아니면 self-signed `agent.crt`. mtime 캐시. OAM `cert_expiring` 평가(`A-PRC-009`, mo=`<서버명>/agent/cert`) 입력 — 만료 시 OAM→agent 명령 채널(배포·재시작·HA 제어)이 함께 막힌다. 읽기 실패는 필드 생략(만료로 단정하지 않음).
+  - `cert_renew` = {모듈: {ok, reason, days_left, ts, age_sec}} — lifecycle 엔진(`cert.sh`)이 `run/cert/<module>.json` 에 남긴 마지막 인증서 보증·갱신 판정. OAM `cert_renew_failed` 평가(`A-PRC-009`, mo=`<서버명>/agent/cert/<module>/renew`) 입력 — `ok=false` 면 자동 갱신 실패(사이트 CA 교차 인증서 부재·서명/쓰기 실패)라 기존 인증서를 유지한 채 만료로 가고 있다는 뜻. 파일이 없으면 필드 생략(판정 대상 아님).
   - ⚠ OAM `agent_api.py _metric()` 가 record 를 필드 화이트리스트로 저장 — **신규 metric 필드는 화이트리스트 추가 필수**(미추가 시 버려짐). 조회는 `jsonl_tail_recent`(tail-read, 2초 시계열 풀파싱 금지).
 - OAM 가 `POST /metric` 수신 → `{CimsRuntimeDir}/metrics/<agent_id>/YYYY/MM/DD.jsonl` append.
 - retention: `_sweep_metric_purge` 가 `MetricRetentionDays`(기본 3일) 초과 일별 파일 삭제.

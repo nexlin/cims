@@ -143,6 +143,20 @@ public sealed unsafe class CscClient : IDisposable
         if (h != IntPtr.Zero) cimsue_csc_destroy(h);
     }
 
+    /// <summary>HTTPS 서버 인증서 만료 관측 — 마지막 성공 TLS 요청에서 본 CSC 인증서(§8.6.2). 요청 전엔 Valid=false.</summary>
+    public TlsPeerExpiry TlsPeerExpiry
+    {
+        get
+        {
+            lock (_gate)
+            {
+                cimsue_tls_peer_expiry_t t;
+                cimsue_csc_tls_peer_expiry(Handle, &t);
+                return Engine.ToManaged(&t);
+            }
+        }
+    }
+
     /// <summary>IdMS PKCE(S256) 로그인 → 토큰.</summary>
     public Result<TokenSet> Login(string userName, string password)
     {

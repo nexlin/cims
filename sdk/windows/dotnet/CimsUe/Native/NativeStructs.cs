@@ -235,6 +235,17 @@ internal struct cimsue_stream_stats_t
 }
 
 [StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_tls_peer_expiry_t
+{
+    public int valid;
+    public long not_after_epoch;
+    public long observed_epoch;
+    public int days_left;
+    public byte* subject;
+    public byte* remote;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 internal unsafe struct cimsue_audio_device_info_t
 {
     public int id;

@@ -1171,4 +1171,89 @@ bool CSipStack::ReloadTlsServerCert( const char * pszCertFile, const char * pszK
 	m_clsSetup.m_strCaCertFile = pszCaCertFile ? pszCaCertFile : "";
 	return true;
 }
+
+SSL_CTX * CSipStackTlsListener::AcquireSslCtx()
+{
+	SSL_CTX * pCtx = NULL;
+	m_clsSslCtxMutex.acquire();
+	pCtx = m_pSslCtx;
+	if( pCtx ) SSLCtxRef( pCtx );
+	m_clsSslCtxMutex.release();
+	return pCtx;
+}
+
+SSL_CTX * CSipStackTlsListener::SwapSslCtx( SSL_CTX * pNew )
+{
+	SSL_CTX * pOld = NULL;
+	m_clsSslCtxMutex.acquire();
+	pOld = m_pSslCtx;
+	m_pSslCtx = pNew;
+	m_clsSslCtxMutex.release();
+	return pOld;
+}
+
+bool CSipStack::ReloadTlsListenerCert( int iExtId, const char * pszCertFile, const char * pszKeyFile, const char * pszCaCertFile )
+{
+	if( pszCertFile == NULL || pszCertFile[0] == '\0' )
+	{
+		CLog::Print( LOG_ERROR, "ReloadTlsListenerCert: cert 경로가 비어 있다 (id=%d)", iExtId );
+		return false;
+	}
+
+	CSipStackTlsListener * pListener = NULL;
+	bool bPerListener = false;
+	m_clsTlsListenerMutex.acquire();
+	for( auto * p : m_vecTlsListeners )
+	{
+		if( p->m_iId == iExtId ) { pListener = p; break; }
+	}
+	if( pListener ) bPerListener = ( pListener->m_pSslCtx != NULL );
+	m_clsTlsListenerMutex.release();
+
+	if( pListener == NULL )
+	{
+		CLog::Print( LOG_ERROR, "ReloadTlsListenerCert: id=%d not found", iExtId );
+		return false;
+	}
+	// per-listener ctx 가 없으면 그 리스너는 stack-global 을 쓴다 — 전역 교체가 곧 그 리스너의 교체다.
+	if( bPerListener == false ) return ReloadTlsServerCert( pszCertFile, pszKeyFile, pszCaCertFile );
+
+	// 새 ctx 를 먼저 완성한다 — 실패하면 기존 인증서 그대로(교체 실패가 접속점 중단으로 번지지 않게).
+	SSL_CTX * pNew = SSLServerCtxCreate( pszCertFile, pszKeyFile, pszCaCertFile );
+	if( pNew == NULL )
+	{
+		CLog::Print( LOG_ERROR, "ReloadTlsListenerCert: 새 ctx 생성 실패 — 기존 인증서 유지 (id=%d cert=%s)", iExtId, pszCertFile );
+		return false;
+	}
+
+	// 리스너 목록 뮤텍스 아래에서 포인터가 살아 있음을 보장하며 교체한다(Remove 와 경합 방지).
+	SSL_CTX * pOld = NULL;
+	bool bFound = false;
+	m_clsTlsListenerMutex.acquire();
+	for( auto * p : m_vecTlsListeners )
+	{
+		if( p->m_iId == iExtId )
+		{
+			pOld = p->SwapSslCtx( pNew );
+			p->m_strCertFile   = pszCertFile;
+			p->m_strKeyFile    = ( pszKeyFile && pszKeyFile[0] ) ? pszKeyFile : "";
+			p->m_strCaCertFile = ( pszCaCertFile && pszCaCertFile[0] ) ? pszCaCertFile : "";
+			bFound = true;
+			break;
+		}
+	}
+	m_clsTlsListenerMutex.release();
+
+	if( bFound == false )
+	{
+		SSLServerCtxFree( pNew );
+		CLog::Print( LOG_ERROR, "ReloadTlsListenerCert: id=%d removed during reload", iExtId );
+		return false;
+	}
+	// 우리 참조만 놓는다 — 핸드셰이크 중인 AcquireSslCtx 보유분·기존 연결의 SSL 이 각자 참조를 들고 있다 → 무중단.
+	if( pOld ) SSLServerCtxFree( pOld );
+	CLog::Print( LOG_SYSTEM, "ReloadTlsListenerCert: id=%d TLS 인증서 교체 완료 — 기존 연결 유지, 새 핸드셰이크부터 적용 (cert=%s key=%s)",
+	             iExtId, pszCertFile, ( pszKeyFile && pszKeyFile[0] ) ? pszKeyFile : "<same as cert>" );
+	return true;
+}
 #endif // USE_TLS

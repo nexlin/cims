@@ -1210,6 +1210,32 @@ if __name__ == '__main__':
                 tinfo = {'observed': days_left, 'threshold': thr_w, 'unit': rule.get('unit') or '일'}
                 res.append((mo, is_open, _fmt(rule.get('msg_open'), **kw),
                             _fmt(rule.get('msg_close'), **kw), tinfo, sev))
+            elif chk == 'cert_renew_failed':
+                # lifecycle 엔진(cert.sh) 일일 스윕 결과 — agent 원시 보고 metric.cert_renew{module:
+                #   {ok, reason, days_left, ts}}. 실패 = 기존 인증서를 유지한 채 만료가 조용히 진행 중
+                #   (sip_tls_signaling §8.6.2 — 자동 갱신 대상에 30일 경고가 뜨는 것 자체가 갱신 실패 신호).
+                #   모듈별 mo `<host>/agent/cert/<module>/renew`. 성공 보고가 오면 close, 모듈이 보고에서
+                #   사라지면(제거) 미평가 close. 스윕 전·구 agent(필드 없음)는 판정 대상 아님.
+                renew = metric.get('cert_renew') or {}
+                if not isinstance(renew, dict) or not renew:
+                    return res
+                thr_c = int((rule.get('thresholds') or {}).get('critical', 30))
+                for mod, st in renew.items():
+                    if not isinstance(st, dict) or not mod:
+                        continue
+                    mo = f"{host}/agent/cert/{mod}/renew"
+                    days = st.get('days_left')
+                    days = days if isinstance(days, int) else None
+                    is_open = not st.get('ok')
+                    sev = None
+                    if is_open:
+                        sev = 'critical' if (days is not None and days <= thr_c) else 'warning'
+                    kw = dict(mo=mo, host=host_name, module=mod, reason=st.get('reason') or 'unknown',
+                              days_left=days if days is not None else '-')
+                    tinfo = ({'observed': days, 'threshold': thr_c, 'unit': rule.get('unit') or '일'}
+                             if days is not None else None)
+                    res.append((mo, is_open, _fmt(rule.get('msg_open'), **kw),
+                                _fmt(rule.get('msg_close'), **kw), tinfo, sev))
             elif chk == 'ha_flap':
                 # 최근 10분 keepalived 전이 수 (agent 가 notify 로그 tail 로 집계).
                 # flap 정지 → 윈도 밖으로 밀려 미보고 → 미평가 close 경로로 자동 해제.

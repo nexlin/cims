@@ -134,6 +134,8 @@ public:
     Result request(const std::string& accessToken, const std::string& method, const std::string& path,
                    const std::string& contentType, const std::string& body, const std::string& accept,
                    const std::string& ifMatch, const std::string& ifNoneMatch, HttpResult& out);
+    /** HTTPS 서버 인증서 만료 관측 — 마지막 성공 TLS 요청에서 본 CSC 인증서(§8.6.2). 아직 요청이 없으면 valid=false. */
+    TlsPeerExpiry tlsPeerExpiry() const;
     Result getUserProfile(const std::string& accessToken, const std::string& userUri, const std::string& etag, XcapDoc& out) {
         return xcapGet(accessToken, "/org.3gpp.mcptt.user-profile/users/" + enc(userUri) + "/user-profile",
                        "application/vnd.3gpp.mcptt-user-profile+xml", etag, out);

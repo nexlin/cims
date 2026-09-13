@@ -128,6 +128,17 @@ public:
     std::string   m_strKeyFile;
     std::string   m_strCaCertFile;
     SSL_CTX*      m_pSslCtx;   // NULL → stack-global gpsttServerCtx 사용
+
+    /** accept 경로용 — per-listener ctx 의 **참조를 획득**한다(NULL 이면 stack-global 을 쓰라는 뜻).
+     *  무중단 교체(CSipStack::ReloadTlsListenerCert)와 경합해도 dangling 을 잡지 않는 유일한 안전 경로 —
+     *  stack-global 의 SSLServerCtxAcquire 와 같은 규약. 받은 ctx 는 SSLServerCtxFree 로 해제한다. */
+    SSL_CTX* AcquireSslCtx();
+    /** ctx 교체 — 옛 ctx 를 돌려준다(호출자가 SSLServerCtxFree). 이미 맺어진 연결의 SSL 객체와
+     *  핸드셰이크 중인 AcquireSslCtx 보유분이 각자 참조를 들고 있어 실제 소멸은 마지막 사용자 뒤다. */
+    SSL_CTX* SwapSslCtx( SSL_CTX* pNew );
+
+private:
+    CSipMutex     m_clsSslCtxMutex;   // m_pSslCtx 교체·참조 획득 직렬화
 };
 #endif
 

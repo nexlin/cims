@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <ctime>
 #include <map>
 #include <memory>
 #include <new>
@@ -191,6 +192,15 @@ void fill(cimsue_call_info_t& o, const CallInfo& c, std::vector<cimsue_media_sou
     o.half_duplex = B(c.halfDuplex);
     o.listen_only = B(c.listenOnly);
     o.joined_dialog = C(c.joinedDialog);
+}
+
+void fill(cimsue_tls_peer_expiry_t& o, const TlsPeerExpiry& t) {
+    o.valid = B(t.valid);
+    o.not_after_epoch = t.notAfterEpoch;
+    o.observed_epoch = t.observedEpoch;
+    o.days_left = t.daysLeft((int64_t)std::time(nullptr));
+    o.subject = C(t.subject);
+    o.remote = C(t.remote);
 }
 
 void fillTalkers(std::vector<cimsue_talker_t>& buf, const std::vector<Talker>& t) {
@@ -413,6 +423,8 @@ struct Scratch {
     std::vector<const char*>                accSec;
     ProfileHolder                           profile;
     GroupDocHolder                          groupDoc;
+    TlsPeerExpiry                           tlsPeer;
+    cimsue_tls_peer_expiry_t                tlsPeerC{};
 };
 thread_local Scratch g_s;
 
@@ -498,6 +510,8 @@ struct cimsue_csc {
     GroupDocHolder             group;
     HttpResult                 http;
     cimsue_http_result_t       httpC{};
+    TlsPeerExpiry              tlsPeer;
+    cimsue_tls_peer_expiry_t   tlsPeerC{};
 };
 
 namespace {
@@ -671,6 +685,13 @@ int32_t CIMSUE_CALL cimsue_engine_calls(const cimsue_engine_t* e, const int32_t*
 void CIMSUE_CALL cimsue_engine_stream_stats(const cimsue_engine_t* e, int32_t call_id, cimsue_stream_stats_t* out) {
     if (!out) return;
     fill(*out, e ? e->eng.streamStats(call_id) : StreamStats());
+}
+
+void CIMSUE_CALL cimsue_engine_tls_peer_expiry(const cimsue_engine_t* e, cimsue_tls_peer_expiry_t* out) {
+    if (!out) return;
+    g_s.tlsPeer = e ? e->eng.tlsPeerExpiry() : TlsPeerExpiry();
+    fill(g_s.tlsPeerC, g_s.tlsPeer);
+    *out = g_s.tlsPeerC;
 }
 
 // MCPTT
@@ -1011,6 +1032,14 @@ cimsue_status_t CIMSUE_CALL cimsue_csc_get_service_config(cimsue_csc_t* c, const
     return st;
 }
 
+void CIMSUE_CALL cimsue_csc_tls_peer_expiry(cimsue_csc_t* c, cimsue_tls_peer_expiry_t* out) {
+    if (!out) return;
+    if (!c) { *out = cimsue_tls_peer_expiry_t{}; return; }
+    c->tlsPeer = c->cli->tlsPeerExpiry();
+    fill(c->tlsPeerC, c->tlsPeer);
+    *out = c->tlsPeerC;
+}
+
 cimsue_status_t CIMSUE_CALL cimsue_csc_parse_profile(const char* json, cimsue_profile_t* out) {
     g_s.profile.cxx = Profile();
     std::string err;
@@ -1079,6 +1108,7 @@ int32_t CIMSUE_CALL cimsue_struct_size(cimsue_struct_id_t id) {
     case CIMSUE_STRUCT_GROUP_SUMMARY:     return (int32_t)sizeof(cimsue_group_summary_t);
     case CIMSUE_STRUCT_XCAP_DOC:          return (int32_t)sizeof(cimsue_xcap_doc_t);
     case CIMSUE_STRUCT_HTTP_RESULT:       return (int32_t)sizeof(cimsue_http_result_t);
+    case CIMSUE_STRUCT_TLS_PEER_EXPIRY:   return (int32_t)sizeof(cimsue_tls_peer_expiry_t);
     case CIMSUE_STRUCT_DISPATCH_MEMBER:   return (int32_t)sizeof(cimsue_dispatch_member_t);
     case CIMSUE_STRUCT_DISPATCH_TARGET:   return (int32_t)sizeof(cimsue_dispatch_target_t);
     case CIMSUE_STRUCT_GROUP_MEMBER:      return (int32_t)sizeof(cimsue_group_member_t);

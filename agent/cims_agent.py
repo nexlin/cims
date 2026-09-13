@@ -921,6 +921,15 @@ def collect_metrics() -> dict:
             m["cert"] = cert
     except Exception:
         pass
+    # lifecycle 엔진(cert.sh) 의 노드 인증서 갱신 결과 — OAM cert_renew_failed(A-PRC-009
+    #   <서버명>/agent/cert/<module>/renew) 입력. 엔진이 run/cert/<module>.json 에 남긴 마지막 판정을
+    #   그대로 싣는다(agent 는 FM push 를 쓰지 않는다 — alarm_self_reporting §2).
+    try:
+        cr = _cert_renew_state()
+        if cr:
+            m["cert_renew"] = cr
+    except Exception:
+        pass
     # keepalived 전이 카운트 (최근 10분) — OAM ha_flap 알람 입력.
     try:
         ht = _ha_transitions_10m()
@@ -2730,6 +2739,85 @@ def _start_base_deps_ensurer() -> None:
 
     threading.Thread(target=_loop, daemon=True, name="agent-deps").start()
     print("[agent][deps] base deps 보증기 기동 (백그라운드 — 기동을 막지 않음)", flush=True)
+
+
+# ──────────────────────────────────────────────────────────────
+#  노드 TLS 인증서 일일 스윕 (sip_tls_signaling.md §8.6.1 E3)
+#
+#  기동 전 보증(cims-svc start → cert.sh ensure_node_cert)만으로는 2년 무재기동 노드의 leaf 만료를
+#  못 막는다. agent 가 **매일 1회** 설치된 모듈마다 `cims-svc cert <module>` 을 돌린다 — 같은 엔진
+#  (cert.sh)이 잔여 ≤60일·SAN 부족·사이트 CA 체인 불일치를 보고 재발급하고, CSP 에는 SIGUSR1 로
+#  무중단 재적재를 알린다. 시각은 노드마다 분산(hostname 해시)해 HA 양 노드가 같은 순간에 갱신하지
+#  않게 한다. 결과는 엔진이 run/cert/<module>.json 에 남기고 metric(cert_renew)으로 OAM 에 간다.
+# ──────────────────────────────────────────────────────────────
+_CERT_SWEEP_INTERVAL = 86400
+_CERT_SWEEP_MODULES = ("oam", "oam-svc", "csc", "csp", "psp", "isp")
+_CERT_STATE_DIR = os.path.join(_PREFIX, "run", "cert")
+_CERT_SWEEP_STARTED = False
+
+
+def _cert_renew_state() -> dict:
+    """run/cert/<module>.json (cert.sh _cert_state_write) → {module: {ok, reason, days_left, ts, age_sec}}.
+    파일이 없으면 {} — 스윕이 아직 안 돌았거나 구 엔진. OAM 은 빈 값을 판정 대상 아님으로 본다."""
+    out = {}
+    try:
+        names = os.listdir(_CERT_STATE_DIR)
+    except Exception:
+        return out
+    now = int(time.time())
+    for fn in names:
+        if not fn.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(_CERT_STATE_DIR, fn), encoding="utf-8") as f:
+                d = json.load(f)
+        except Exception:
+            continue
+        if not isinstance(d, dict):
+            continue
+        mod = str(d.get("module") or fn[:-5])
+        rec = {"ok": bool(d.get("ok")), "reason": str(d.get("reason") or "")}
+        if isinstance(d.get("days_left"), int):
+            rec["days_left"] = d["days_left"]
+        if isinstance(d.get("ts"), int):
+            rec["ts"] = d["ts"]
+            rec["age_sec"] = max(0, now - d["ts"])
+        out[mod] = rec
+    return out
+
+
+def _cert_sweep_once() -> None:
+    """설치된 모듈마다 cims-svc cert <module> — 모듈 DIST_DIR(current) 기준이라 인증서 자리
+    (<module_root>/runtime/cert)와 그룹 CA(<oam>/runtime/_secrets/ca) 유도가 기동 전 보증과 같다."""
+    for mod in _CERT_SWEEP_MODULES:
+        path = _module_dist_dir(mod)
+        if not path or not os.path.isdir(os.path.join(path, mod)):
+            continue
+        rc, out, err = _run_cims_svc(path, "cert", mod, timeout=300)
+        tail = (out or err or "").strip().splitlines()
+        print(f"[agent][cert] {mod}: rc={rc} {tail[-1] if tail else ''}", flush=True)
+
+
+def _start_cert_sweeper() -> None:
+    global _CERT_SWEEP_STARTED
+    if _CERT_SWEEP_STARTED:
+        return
+    _CERT_SWEEP_STARTED = True
+    # 첫 실행은 기동 5분 뒤 + hostname 해시(0~59분) — 양 노드 분산. 이후 24시간 주기.
+    import zlib
+    first = 300 + (zlib.crc32(socket.gethostname().encode("utf-8", "replace")) % 3600)
+
+    def _loop():
+        time.sleep(first)
+        while True:
+            try:
+                _cert_sweep_once()
+            except Exception as e:
+                print(f"[agent][cert] sweep error: {e}", flush=True)
+            time.sleep(_CERT_SWEEP_INTERVAL)
+
+    threading.Thread(target=_loop, daemon=True, name="agent-cert").start()
+    print(f"[agent][cert] 인증서 일일 스윕 기동 (첫 실행 {first}s 뒤, 이후 24h 주기)", flush=True)
 
 
 def reapply_net_tuning() -> None:
@@ -5610,6 +5698,7 @@ def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
     _ensure_nonlocal_bind()            # VIP 선행 bind 보장 — csp(LocalIp=VIP) 가 VIP 적용 전에도 기동 가능 (1회)
     _cleanup_stale_ha_guards()         # 설치 중단으로 남은 mask/policy-rc.d 잔재 회수 (1회)
     _start_base_deps_ensurer()         # vendor deb 균일 설치 — **백그라운드**. 기동을 막지 않는다
+    _start_cert_sweeper()              # 노드 TLS 인증서 일일 스윕 — leaf 자동 갱신 (cert.sh, §8.6.1 E3)
     reapply_managed_ips()              # 재부팅으로 소실된 cims-managed service IP 자력 복원 (1회, OAM 무관)
     reapply_net_tuning()               # 재부팅으로 소실된 RPS(rps_cpus) 자력 복원 (1회, sysctl 은 sysctl.d 가 처리)
 

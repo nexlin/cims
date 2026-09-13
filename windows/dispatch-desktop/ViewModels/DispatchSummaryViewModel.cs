@@ -1,5 +1,5 @@
 // 관제 요약 띠(§3.5) — 관제 밖 화면([이력]·[PTT 그룹]·[관리]) 상단에 상시. 발언 대상(① 체크 집합) + 발언 상태 + PTT 버튼, 대표번호 대기열·문자 미읽음,
-// 내 통화, 감청 창 수, [관제로]. 관제 밖에서 눌린 PTT 핫키의 결과(발언권)가 여기 보인다. 값은 전부 다른 VM 의 투영이라 상태를 갖지 않는다.
+// 내 통화, 감청 창 수, 서버 인증서 만료 경고(§8.6.2), [관제로]. 관제 밖에서 눌린 PTT 핫키의 결과(발언권)가 여기 보인다. 값은 전부 다른 VM 의 투영이라 상태를 갖지 않는다.
 using CommunityToolkit.Mvvm.ComponentModel;
 using DispatchDesktop.Services;
 
@@ -63,6 +63,9 @@ public sealed partial class DispatchSummaryViewModel : ObservableObject
     }
     public int MonitorCount => _top.MonitorCount;
     public bool HasMonitors => _top.HasMonitors;
+    /// <summary>서버 인증서 만료 경고(≤30일 — 자동 갱신 실패 신호, §8.6.2). 세션이 SIP TLS·HTTPS 핸드셰이크에서 관측한 값의 투영.</summary>
+    public bool HasCertWarning => _s.ServerCertWarning;
+    public string CertWarningText => _s.ServerCertWarningText;
 
     public void PttDown() => _talk.PttDown();
     public void PttUp() => _talk.PttUp();
@@ -72,7 +75,8 @@ public sealed partial class DispatchSummaryViewModel : ObservableObject
     {
         foreach (var p in new[] { nameof(HasTargets), nameof(TargetNames), nameof(TargetCount), nameof(IsEmergency), nameof(IsSpeaking), nameof(IsRequesting), nameof(HasSpeaker),
                                   nameof(Speaker), nameof(TalkGauge), nameof(SpeakerElapsed), nameof(FloorText), nameof(PttText), nameof(CanPtt),
-                                  nameof(QueueCount), nameof(QueueBusy), nameof(SmsUnread), nameof(HasSmsUnread), nameof(CallsText), nameof(MonitorCount), nameof(HasMonitors) })
+                                  nameof(QueueCount), nameof(QueueBusy), nameof(SmsUnread), nameof(HasSmsUnread), nameof(CallsText), nameof(MonitorCount), nameof(HasMonitors),
+                                  nameof(HasCertWarning), nameof(CertWarningText) })
             OnPropertyChanged(p);
     }
 }

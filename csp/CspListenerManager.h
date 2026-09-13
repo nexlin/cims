@@ -1,6 +1,7 @@
 #ifndef __CSP_LISTENER_MANAGER_H__
 #define __CSP_LISTENER_MANAGER_H__
 
+#include <map>
 #include <mutex>
 #include <set>
 #include <string>
@@ -55,6 +56,10 @@ private:
     /** Sync 에서 관측한 TLS 인증서 (경로, "proto:port") — 만료 점검 대상.
      *  bootstrap 이 이미 열어 ListenerManager 소유가 아닌 접속점도 포함한다(그 인증서도 만료된다). */
     std::vector<std::pair<std::string, std::string>> m_vecTlsCert;
+    /** 접속점(listener id)별로 마지막에 적용한 인증서 파일 지문(cert·key·ca 의 mtime+size).
+     *  lifecycle 엔진의 leaf 자동 갱신은 **같은 경로의 내용**을 바꾸므로(sip_tls_signaling.md §8.6.1) 경로
+     *  비교만으로는 잡히지 않는다 — SIGUSR1/Sync 때 지문이 달라졌으면 무중단 재적재한다. */
+    std::map<int, std::string> m_mapTlsCertFp;
 
     /** protocol 을 대문자로 정규화. 미지원 프로토콜(WS/WSS 등) 이면 빈 문자열. */
     std::string _normalizeProtocol( const std::string &protocol ) const;
@@ -65,9 +70,13 @@ private:
     bool _addListenerToStack( const ManagedInfo &m, int &outId );
     /** protocol 에 맞는 psip RemoveXxxListener 호출. */
     bool _removeListenerFromStack( const ManagedInfo &m );
-    /** bootstrap 이 연 TLS 접속점의 인증서가 바뀌었으면 **무중단 교체**한다(재기동 불필요).
-     *  ListenerManager 소유가 아니어서 remove+add 가 불가한 접속점을 위한 경로. */
+    /** bootstrap 이 연 TLS 접속점의 인증서가 바뀌었으면(경로 또는 같은 경로의 내용) **무중단 교체**한다
+     *  (재기동 불필요). ListenerManager 소유가 아니어서 remove+add 가 불가한 접속점을 위한 경로. */
     void _reloadBootstrapTlsCertIfChanged( const ManagedInfo &d );
+    /** ListenerManager 소유 TLS 접속점 — 경로는 같은데 파일 내용(지문)이 바뀌었으면 리스너 ctx 를 무중단 교체. */
+    void _reloadManagedTlsCertIfContentChanged( const ManagedInfo &m );
+    /** cert·key·ca 파일의 mtime+size 지문. 파일이 없으면 그 항목은 "-". */
+    static std::string _tlsCertFingerprint( const ManagedInfo &m );
 };
 
 extern CCspListenerManager gclsListenerManager;

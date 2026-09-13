@@ -882,6 +882,7 @@ ${BOLD}[2/3] 시험환경 설정:${NC}
                        -y/--defaults: 대화형 없이 저장값/기본값으로 즉시 진행.
 
 ${BOLD}기동/상태/로그 (→ agent/bin/cims-svc 위임):${NC}
+  cert [svc|all]                   노드 TLS 인증서 보증·갱신 (잔여 60일·SAN·사이트 CA 체인 — agent 일일 스윕과 같은 엔진)
   start|stop|restart [svc]
                        svc: all(기본) | cmp|cmdp|csp|oam|csc|console
                        (변종 pmp|imp|psp|isp 는 배포본 전용, cwrtc|phone 은 재설계 예정 — 제외)
@@ -1195,7 +1196,7 @@ case "${1:-}" in
     # 개발 서버 UX 를 위해 여기서 passthrough 위임 (TB 는 'cims.sh tb' 별도).
     # status 만 통합 뷰 (모듈 + TB [+ --full: preflight]).
     status)    shift; cmd_status_front "$@" ;;
-    start|stop|restart|log)
+    start|stop|restart|log|cert)
         exec "$SCRIPT_DIR/agent/bin/cims-svc" "$@" ;;
     ha)
         err "ha 명령은 agent/bin/cims-ha 로 이전됨"

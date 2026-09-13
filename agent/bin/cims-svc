@@ -7,6 +7,7 @@
 #   cims-svc restart <svc>    # 재시작
 #   cims-svc status           # 전체 상태
 #   cims-svc log    <svc>     # 로그 tail -f
+#   cims-svc cert   [svc|all] # 노드 TLS 인증서 보증·갱신 (cert.sh — agent 일일 스윕)
 #
 #   <svc> = all | cmp | cmdp | csp | oam | csc | console
 #         | pmp | imp | psp | isp                  (변종 — 배포본 전용)
@@ -96,6 +97,8 @@ usage() {
   restart  [svc|all]      재시작
   status                  전체 상태
   log      <svc>          로그 tail -f
+  cert     [svc|all]      노드 TLS 인증서 보증·갱신 (기동 전 보증과 같은 엔진 — agent 일일 스윕이 부른다.
+                          잔여 60일 이하·SAN 부족·사이트 CA 체인 불일치면 재발급, CSP 는 SIGUSR1 로 무중단 재적재)
 
   svc: cmp|pmp|imp|cmdp|csp|psp|isp|oam|csc|console|tb-csc|tb-console
        all = cmp cmdp csp oam csc console
@@ -113,6 +116,7 @@ case "${1:-help}" in
     restart)  shift; header "=== CIMS 재시작 ==="; cmd_restart "$@"; echo ""; cmd_status ;;
     status)   cmd_status ;;
     log)      shift; cmd_log "${1:-csp}" ;;
+    cert)     shift; header "=== 노드 TLS 인증서 보증 ==="; cert_ensure_modules "$@" ;;
     help|--help|-h) usage ;;
     *)        err "알 수 없는 subcommand: $1"; usage; exit 1 ;;
 esac
