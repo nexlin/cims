@@ -688,7 +688,8 @@ site-ca sign --cross ca.crt` → ② `ca-cross.crt` 를 같은 디렉터리에 �
 재발급하고 SIGUSR1/httpsrv 핫리로드로 무중단 반영 → ④ `service-cert.sh verify --csp-port <TLS 포트>` 전부
 PASS(체인 2장·발급자=그룹 CA·사이트 CA → 루트) + 단말 무변경으로 로그인·등록 200. CSP 의 `local_nodes` TLS
 행은 엔진이 쓰는 경로(`<csp>/runtime/cert/csp-chain.pem`·`csp.key`)를 가리켜야 한다 — 다른 자리를 가리키는
-노드는 `csp-node` 로 한 번 옮긴다.
+노드는 `service-cert.sh csp-node --bind-ip <단말 접속 IP>` 로 한 번 옮긴다(설치 묶음 불필요 — 엔진이 만든 파일로
+TLS 행을 돌리고 루트 앵커로 verify 까지 한다).
 
 ## 9. 남은 과제
 

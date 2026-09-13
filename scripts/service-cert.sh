@@ -96,11 +96,13 @@ usage() {
       --prefix 기본 /opt/cims-agent/modules (개발 레이아웃은 build/dist/<server>).
 
   csp-node [--oam URL(https://127.0.0.1:4419)] [--user U(admin)] [--port N] [--bind-ip IP] [--prefix P]
-           [--deployment ID] [--dry-run]
+           [--deployment ID] [--root FILE] [--dry-run]
       대상 노드에서 install 뒤에 실행. OAM 에 로그인해(비밀번호는 프롬프트 또는 CIMS_OAM_PASSWORD) csp 배포의
       local_nodes 를 읽고, TLS 행의 tls_cert_path/tls_key_path 를 배치 경로로 바꿔 저장한다 — 콘솔에서 저장하는
       것과 같은 API 라 SIGUSR1 로 무중단 반영된다. TLS 행이 없으면 --port 로 새 행(access-tls)을 만든다.
       --dry-run 은 바뀔 내용만 보여 주고 저장하지 않는다. 끝나면 그 포트로 verify 를 돌린다.
+      묶음 없이도 돈다 — lifecycle 엔진이 발급한 <prefix>/csp/runtime/cert/csp-chain.pem 으로 옮길 때(§8.6.4
+      기존 노드 전환). 그때는 --bind-ip(단말 접속 IP) 필수, verify 앵커는 --root 또는 기본 루트 파일.
 
   verify [--ip IP] [--csc-port N(4430)] [--csp-port N(15061, 0=생략)] [--root FILE] [--wait N]
       어느 장비에서든 실행. 묶음 디렉터리 안의 스크립트로 돌리면 --ip 와 루트는 묶음에서 읽는다.
@@ -758,7 +760,7 @@ cmd_install() {
 # 파일을 직접 고치지 않는 이유: 다음 설정 push 때 OAM 값으로 되돌아간다.
 cmd_csp_node() {
     _need curl; _need python3
-    local oam="https://127.0.0.1:4419" user="admin" port="" bind_ip="" prefix="$DEFAULT_PREFIX" dep="" dry=0 bundle="$SCRIPT_DIR"
+    local oam="https://127.0.0.1:4419" user="admin" port="" bind_ip="" prefix="$DEFAULT_PREFIX" dep="" dry=0 bundle="$SCRIPT_DIR" root=""
     while (($#)); do case "$1" in
         --oam) oam="${2%/}"; shift 2 ;;
         --user) user="$2"; shift 2 ;;
@@ -768,16 +770,23 @@ cmd_csp_node() {
         --deployment) dep="$2"; shift 2 ;;
         --dry-run) dry=1; shift ;;
         --bundle) bundle="$2"; shift 2 ;;
+        --root) root="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) die "csp-node: 알 수 없는 옵션 $1" ;;
     esac; done
-    _load_bundle "$bundle" || die "묶음이 아닙니다(bundle.env 필요): $bundle"
+    # 묶음(install 경로) 없이도 돈다 — lifecycle 엔진(`cims-svc cert csp`)이 발급한 인증서로 TLS 행을 옮기는
+    # §8.6.4 경로. 그때는 --bind-ip 가 단말 접속 주소(TLS 행 선택 키·verify 대상)다.
+    if _load_bundle "$bundle"; then
+        [[ -n "$bind_ip" ]] || bind_ip="$CN"
+    else
+        [[ -n "$bind_ip" ]] || die "묶음(bundle.env)이 없다 — 엔진 발급 인증서로 옮길 때는 --bind-ip <단말 접속 IP> 를 준다"
+    fi
+    [[ -n "$root" ]] || root=$(_bundle_root "$bundle") || root=""
     prefix=$(readlink -f "$prefix" 2>/dev/null || echo "$prefix")
     local cert="$prefix/csp/runtime/cert/csp-chain.pem" key="$prefix/csp/runtime/cert/csp.key"
     if (( ! dry )); then
-        [[ -f "$cert" && -f "$key" ]] || die "배치된 CSP 인증서가 없다: $cert — 먼저 install 을 돌린다"
+        [[ -f "$cert" && -f "$key" ]] || die "CSP 인증서가 없다: $cert — 먼저 install(묶음) 또는 cims-svc cert csp(엔진)를 돌린다"
     fi
-    [[ -n "$bind_ip" ]] || bind_ip="$CN"
 
     header "=== CSP local_nodes 갱신: $oam ==="
     local pw="${CIMS_OAM_PASSWORD:-}"
@@ -886,7 +895,7 @@ PYEOF
 
     header "=== CSP TLS 검증 ($bind_ip:$tls_port) ==="
     sleep 2
-    "$SCRIPT_PATH" verify --ip "$bind_ip" --csc-port 0 --csp-port "$tls_port" --wait 20 --root "$(_bundle_root "$bundle")"
+    "$SCRIPT_PATH" verify --ip "$bind_ip" --csc-port 0 --csp-port "$tls_port" --wait 20 ${root:+--root "$root"}
 }
 
 # ── verify ───────────────────────────────────────────────────────────────────
