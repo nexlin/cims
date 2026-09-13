@@ -71,6 +71,9 @@ public class EngineHeadlessTests
         Assert.Empty(e.Calls);
         Assert.Equal(FloorState.Idle, e.GetCall(7).FloorInfo.State);
         Assert.False(e.GetCall(7).StreamStats.Valid);
+        // 서버 인증서 만료 관측(§8.6.2) — TLS 핸드셰이크가 없었으면 관측 없음(Valid=false·None)
+        Assert.Same(TlsPeerExpiry.None, e.TlsPeerExpiry);
+        Assert.Equal(0, e.TlsPeerExpiry.DaysLeft);
         var route = e.GetCall(0).SetRoute(99);
         Assert.False(route.Ok);
         Assert.Equal("no such route", route.Reason);

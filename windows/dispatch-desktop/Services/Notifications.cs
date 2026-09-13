@@ -21,9 +21,10 @@ public sealed partial class Toast : ObservableObject
     public bool IsWarn => Level == ToastLevel.Warn;
 }
 
-public enum BannerKind { PilotIncoming, DirectIncoming, PttPrivateIncoming, Emergency, ImminentPeril, Alert }
+public enum BannerKind { PilotIncoming, DirectIncoming, PttPrivateIncoming, Emergency, ImminentPeril, Alert, ServerCert }
 
-/// <summary>착신 배너(세션 1개) 또는 긴급 배너(그룹 1개) — 스택(최신 위).</summary>
+/// <summary>착신 배너(세션 1개) · 긴급 배너(그룹 1개) · 서버 인증서 만료 배너(세션당 1개, sip_tls_signaling.md §8.6.2) — 스택(최신 위).
+/// 배너 레이어는 상단 바 아래 공통이라 관제 캔버스를 포함한 어느 화면에서나 보인다(§3.4).</summary>
 public sealed partial class Banner : ObservableObject
 {
     public BannerKind Kind { get; init; }
@@ -31,16 +32,21 @@ public sealed partial class Banner : ObservableObject
     public string Subtitle { get; init; } = "";
     public SessionItem? Session { get; init; }
     public string GroupId { get; init; } = "";
+    /// <summary>위험 단계(서버 인증서 잔여 ≤ 7일) — 연한 배경 대신 진한 배경.</summary>
+    public bool Critical { get; init; }
     public DateTime Time { get; } = DateTime.Now;
     [ObservableProperty] private TimeSpan _elapsed;
     public bool IsIncoming => Kind is BannerKind.PilotIncoming or BannerKind.DirectIncoming or BannerKind.PttPrivateIncoming;
-    public bool IsEmergency => !IsIncoming;
+    public bool IsEmergency => Kind is BannerKind.Emergency or BannerKind.ImminentPeril or BannerKind.Alert;
     public bool IsPilot => Kind == BannerKind.PilotIncoming;
     public bool IsDirect => Kind == BannerKind.DirectIncoming;
     public bool IsPtt => Kind == BannerKind.PttPrivateIncoming;
     public bool IsEmg => Kind == BannerKind.Emergency;
     public bool IsPeril => Kind == BannerKind.ImminentPeril;
     public bool IsAlert => Kind == BannerKind.Alert;
+    public bool IsServerCert => Kind == BannerKind.ServerCert;
+    /// <summary>경과 시간 표시 — 착신·긴급은 "언제부터" 가 뜻이 있고, 인증서 만료는 잔여 일수가 제목이라 경과를 보이지 않는다.</summary>
+    public bool ShowElapsed => !IsServerCert;
     public void Tick(DateTime now) => Elapsed = now - Time;
 }
 
@@ -67,6 +73,7 @@ public sealed class Notifications
     public void RemoveBanner(Banner b) => Banners.Remove(b);
     public Banner? BannerOf(SessionItem s) => Banners.FirstOrDefault(b => b.Session == s);
     public Banner? BannerOfGroup(string groupId) => Banners.FirstOrDefault(b => b.IsEmergency && b.GroupId == groupId);
+    public Banner? BannerOfKind(BannerKind kind) => Banners.FirstOrDefault(b => b.Kind == kind);
     /// <summary>응답 핫키 대상 = 최상단 착신.</summary>
     public Banner? TopIncoming => Banners.FirstOrDefault(b => b.IsIncoming);
 

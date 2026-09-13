@@ -46,6 +46,7 @@ public sealed class SingleInstance : IDisposable
     public void Dispose()
     {
         _stop.Set();
+        _waiter?.Join(TimeSpan.FromSeconds(2));   // 대기 스레드가 핸들을 보는 중에 Dispose 하면 ObjectDisposedException 으로 프로세스가 죽는다
         if (IsFirst) { try { _mutex.ReleaseMutex(); } catch (ApplicationException) { } }
         _mutex.Dispose();
         _activate.Dispose();

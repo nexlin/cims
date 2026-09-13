@@ -94,8 +94,14 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     }
 
     // ── 서버 인증서 만료 경고 (sip_tls_signaling.md §8.6.2 — 관제사는 매일 앉아 있는 사람이라 폐쇄망에서 가장 확실한 채널) ──
+    //   표면 둘: 배너 레이어(어느 화면에서나 — 관제 캔버스 포함, 닫기 없음) + 관제 요약 띠 배지(관제 밖 화면·별창). 둘 다 ServerCertExpiry 의 투영.
     /// <summary>경고 임계(일) — 서버 A-PRC-009 경고 임계와 같은 30. 자동 갱신 대상 인증서가 여기 닿았다 = 자동 갱신 실패.</summary>
     public const int ServerCertWarnDays = 30;
+    /// <summary>위험 임계(일) — 서버 A-PRC-009 critical 과 같은 7. 배너가 진한 빨강으로 바뀐다.</summary>
+    public const int ServerCertCriticalDays = 7;
+    /// <summary>배너 재평가 주기(초) — 관측은 핸드셰이크 때 갱신되고 잔여 일수는 하루에 한 번 바뀌므로 자주 볼 이유가 없다. 등록 성공·로그인 직후엔 즉시.</summary>
+    private const int ServerCertCheckSec = 60;
+    private DateTime _nextServerCertCheck = DateTime.MinValue;
     /// <summary>SIP TLS(Engine)·HTTPS(CSC) 서버 인증서 중 잔여가 짧은 것. 관측 전(평문·미접속)엔 null.</summary>
     public TlsPeerExpiry? ServerCertExpiry
     {
@@ -108,9 +114,36 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         }
     }
     public bool ServerCertWarning => ServerCertExpiry is { } e && e.DaysLeft <= ServerCertWarnDays;
-    public string ServerCertWarningText => ServerCertExpiry is { } e && e.DaysLeft <= ServerCertWarnDays
-        ? (e.DaysLeft < 0 ? "서버 인증서 만료됨 — 운영자에게 알리세요" : $"서버 인증서 {e.DaysLeft}일 후 만료 — 운영자에게 알리세요")
-        : "";
+    public bool ServerCertCritical => ServerCertExpiry is { } e && e.DaysLeft <= ServerCertCriticalDays;
+    public string ServerCertWarningText => ServerCertExpiry is { } e && e.DaysLeft <= ServerCertWarnDays ? ServerCertTitle(e) + " — 운영자에게 알리세요" : "";
+    public static string ServerCertTitle(TlsPeerExpiry e) => e.DaysLeft < 0 ? "서버 인증서 만료됨" : e.DaysLeft == 0 ? "서버 인증서 오늘 만료" : $"서버 인증서 {e.DaysLeft}일 후 만료";
+    /// <summary>배너 본문 — 운영자에게 그대로 전달할 수 있는 사실(어느 서버·어느 인증서·만료일)과 뜻(자동 갱신 실패 신호·확인할 알람).</summary>
+    public static string ServerCertSubtitle(TlsPeerExpiry e)
+        => $"{e.Remote} · {e.Subject} · 만료 {e.NotAfter.ToLocalTime():yyyy-MM-dd} · 자동 갱신 실패 신호 — 운영자에게 알리세요 (콘솔 알람 A-PRC-009 cert/…/renew)";
+
+    /// <summary>관측값을 배너에 반영 — 경고 구간이면 배너 하나를 유지(제목·본문·단계가 바뀌면 교체), 벗어나면(서버가 갱신되면) 내린다. 닫기 버튼은 없다.</summary>
+    private void UpdateServerCertBanner()
+    {
+        var e = ServerCertExpiry;
+        var cur = Notify.BannerOfKind(BannerKind.ServerCert);
+        if (e is null || e.DaysLeft > ServerCertWarnDays)
+        {
+            if (cur is not null) { Notify.RemoveBanner(cur); Log.Info("server cert banner cleared" + (e is null ? "" : $" — {e.Remote} days_left={e.DaysLeft}")); }
+            return;
+        }
+        ShowServerCertBanner(e);
+    }
+
+    /// <summary>경고 배너 표시(교체). --ui-preview-canvas 표본도 이 경로로 그린다.</summary>
+    public void ShowServerCertBanner(TlsPeerExpiry e)
+    {
+        string title = ServerCertTitle(e), sub = ServerCertSubtitle(e); bool crit = e.DaysLeft <= ServerCertCriticalDays;
+        var cur = Notify.BannerOfKind(BannerKind.ServerCert);
+        if (cur is not null && cur.Title == title && cur.Subtitle == sub && cur.Critical == crit) return;
+        if (cur is not null) Notify.RemoveBanner(cur);
+        Notify.ShowBanner(new Banner { Kind = BannerKind.ServerCert, Title = title, Subtitle = sub, Critical = crit });
+        Log.Warn($"server cert {(crit ? "CRITICAL" : "warning")}: {e.Remote} subject=\"{e.Subject}\" not_after={e.NotAfter:yyyy-MM-dd} days_left={e.DaysLeft}");
+    }
 
     // ── 신원 (§3.2 상단 바) ──
     public DispatchProfile Dispatch => Profile?.Dispatch ?? DispatchProfile.None;
@@ -286,6 +319,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             }
         }
         IsReady = true;
+        _nextServerCertCheck = DateTime.Now.AddSeconds(ServerCertCheckSec);
+        UpdateServerCertBanner();                                // 로그인(HTTPS)·등록(TLS) 핸드셰이크 직후 — 배너는 관제 캔버스에서도 보인다
         ProfileApplied?.Invoke(this, EventArgs.Empty);
         _ = StartHistoryAsync();                                 // 서버 통합 이력(P3b) — 없으면 탐침에서 조용히 꺼진다
         return Result.Success;
@@ -573,6 +608,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         Sessions.Clear(); Groups.Clear(); Dialogs.Clear();
         VolteReg = RegInfo.Empty; PttReg = RegInfo.Empty;
         _nextDispatchPoll = DateTime.MaxValue; _profileEtag = "";
+        if (Notify.BannerOfKind(BannerKind.ServerCert) is { } cb) Notify.RemoveBanner(cb);   // 다음 로그인의 핸드셰이크가 다시 판정한다
+        _nextServerCertCheck = DateTime.MinValue;
         IsReady = false;
     }
 
@@ -628,7 +665,12 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         if (kind == AccountKind.Ptt) PttReg = r; else VolteReg = r;
         string name = kind == AccountKind.Ptt ? "PTT" : "VoLTE";
         Log.Info($"reg {name} {r.State} {r.Code} {r.Reason}");
-        if (r.State == RegState.Registered) { _regRetryAt.Remove(r.AccountId); _regBackoff.Remove(r.AccountId); return; }
+        if (r.State == RegState.Registered)
+        {
+            _regRetryAt.Remove(r.AccountId); _regBackoff.Remove(r.AccountId);
+            if (IsReady) UpdateServerCertBanner();                 // TLS 등록 = 새 핸드셰이크 = 관측 갱신 시점
+            return;
+        }
         if (r.State == RegState.Failed)
         {
             string msg = ResponseText.Describe(ResponseText.Area.Register, r.Code, r.Reason);
@@ -1139,6 +1181,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             if (now >= at) { _regRetryAt.Remove(acc); Engine.GetAccount(acc).Register(); }
         if (now.Date != _lastPrune) { _lastPrune = now.Date; Activity.Prune(now); }   // 날짜가 바뀐 첫 틱 — 정각 틱을 놓쳐도 하루 밀리지 않게
         if (IsReady && HasDesk && now >= _nextDispatchPoll) { _nextDispatchPoll = now.AddSeconds(DispatchPollSec); _ = RefreshDispatchAsync(); }
+        if (IsReady && now >= _nextServerCertCheck) { _nextServerCertCheck = now.AddSeconds(ServerCertCheckSec); UpdateServerCertBanner(); }
     }
     private DateTime _lastPrune = DateTime.Today;
 

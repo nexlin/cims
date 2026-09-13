@@ -166,5 +166,7 @@ public class CscTests
         using var c = new CscClient(new CscEndpoint { Host = "127.0.0.1" });
         Assert.Equal(4430, c.Endpoint.Port);
         Assert.Equal("tel%3A%2B82%201", CscClient.Encode("tel:+82 1"));
+        // 서버 인증서 만료 관측(§8.6.2) — 요청 전엔 관측 없음
+        Assert.Same(TlsPeerExpiry.None, c.TlsPeerExpiry);
     }
 }

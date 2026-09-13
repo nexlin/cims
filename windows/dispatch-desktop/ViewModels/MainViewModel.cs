@@ -323,6 +323,8 @@ public sealed partial class MainViewModel : ObservableObject
         s.Activity.Add(ActivityPanel.Ptt, ActivityKind.Emergency, "야간 긴급 개시", "박경장", emergency: true);
         s.Activity.Add(ActivityPanel.Call, ActivityKind.Incoming, "착신 7000 ← 010-2222-3333", "응답 1004 · 03:12", number: "+821022223333", pilot: true);
         s.Activity.Add(ActivityPanel.Call, ActivityKind.Missed, "부재 7000 ← 010-7777-8888", "→ 넘김 7100", missed: true, number: "+821077778888", pilot: true);
+        // 서버 인증서 만료 경고 배너(§8.6.2) 표본 — 경고 구간(≤30일) 연한 빨강. 위험(≤7일)은 DaysLeft 를 7 이하로 바꿔 본다
+        s.ShowServerCertBanner(new CimsUe.TlsPeerExpiry(true, DateTimeOffset.Now.AddDays(12), DateTimeOffset.Now, 12, "CN=csc.site1.cims.example.kr, O=CIMS Site1", "10.20.1.5:4430"));
         RestoreFromSnapshot();
         PttChannels.Select(PttChannels.Cards.FirstOrDefault(), collapseSame: false);
         if (PttChannels.Cards.FirstOrDefault() is { } first) PttChannels.SetSingleTarget(first);

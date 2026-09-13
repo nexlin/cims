@@ -40,6 +40,7 @@ public unsafe class AbiLayoutTests
         new object[] { cimsue_struct_id_t.DISPATCH_TARGET, sizeof(cimsue_dispatch_target_t) },
         new object[] { cimsue_struct_id_t.GROUP_MEMBER, sizeof(cimsue_group_member_t) },
         new object[] { cimsue_struct_id_t.GROUP_DOC, sizeof(cimsue_group_doc_t) },
+        new object[] { cimsue_struct_id_t.TLS_PEER_EXPIRY, sizeof(cimsue_tls_peer_expiry_t) },
     };
 
     [Theory]
