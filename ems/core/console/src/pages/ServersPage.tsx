@@ -3323,51 +3323,56 @@ function AddMemberModal({ group, serverName, mountSuggestion, onClose, onSubmit 
 
  return (
     <Modal title={`${group.name} — 멤버 추가`} onClose={onClose} width={620}>
-      <div className="grid grid-cols-[120px_1fr] items-center gap-x-4 gap-y-2.5 [&_label]:text-md [&_label]:font-medium [&_label]:text-muted-foreground">
-        <label>서버 이름 *</label>
-        <Input value={name} disabled={busy}
+      {/* 옆 [시스템 추가](M3 `460:7421`)와 같은 껍데기다 — 라벨 컬럼 격자가 아니라
+          `FormField`(라벨 위 · 컨트롤 · 도움말) 세로 쌓기, 체크박스는 라벨을 오른쪽에
+          붙여 한 줄(§4 Checkbox 계약). 필드·문구·동작은 그대로 둔다. */}
+      <div className="flex flex-col gap-3.5">
+        <FormField label="서버 이름" required>
+          <Input value={name} disabled={busy}
  onChange={e => setName(e.target.value)} />
-        <label className="col-span-full mt-1 border-t border-border pt-2.5">
-          <Checkbox  checked={mountOn} disabled={busy} onCheckedChange={(c) => setMountOn((c === true))} />
-          {' '}공유 스토리지 마운트를 함께 적용
-          <span className="text-xs text-muted-foreground">
-            {' '}— 서버 등록 직후 자동으로 붙습니다 (fstab 영속)
+        </FormField>
+        <label className="mt-1 flex cursor-pointer select-none items-start gap-2 border-t border-border pt-3.5">
+          <Checkbox checked={mountOn} disabled={busy}
+ onCheckedChange={(c) => setMountOn((c === true))} className="mt-0.5" />
+          <span className="text-md">
+            공유 스토리지 마운트를 함께 적용
+            <span className="text-xs text-muted-foreground">
+              {' '}— 서버 등록 직후 자동으로 붙습니다 (fstab 영속)
+            </span>
           </span>
         </label>
         {mountOn ? (
           <>
-            <label>원본 *</label>
-            <Input value={mnt.source} disabled={busy}
+            <FormField label="원본" required>
+              <Input className="font-mono" value={mnt.source} disabled={busy}
  placeholder="예: nas.example:/export/cims"
  onChange={e => setMnt(m => ({ ...m, source: e.target.value }))} />
-            <label>붙일 위치 *</label>
-            <Input value={mnt.target} disabled={busy}
+            </FormField>
+            <FormField label="붙일 위치" required>
+              <Input className="font-mono" value={mnt.target} disabled={busy}
  placeholder="/mnt/cims"
  onChange={e => setMnt(m => ({ ...m, target: e.target.value }))} />
-            <label>파일시스템 *</label>
-            <Select value={toSel(mnt.fstype)} onValueChange={(v: string) => setMnt(m => ({ ...m, fstype: fromSel(v) }))} disabled={busy}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {['nfs4', 'nfs', 'cifs', 'ext4', 'ext3', 'xfs', 'btrfs'].map(f => (
-                  <SelectItem key={f} value={f}>{f}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <label style={{ gridColumn: '1 / -1', fontSize: 11,
- color: mntValid ? 'var(--muted-foreground)' : 'var(--destructive)' }}>
-              {mntValid
-                ? <>{fromGroup && <>기본값은 <b>이 그룹의 마운트 선언</b>입니다. </>}
-                   등록 직후 <code>{mnt.source}</code> → <code>{mnt.target}</code> ({mnt.fstype},
- defaults+_netdev,nofail) 로 마운트되고 [마운트 관리]에 표시됩니다.
-                   실패해도 서버 등록은 유지됩니다.</>
-                : <>원본과 붙일 위치(절대경로)를 입력하세요.</>}
-            </label>
+            </FormField>
+            <FormField label="파일시스템" required
+ help={mntValid
+                         ? `${fromGroup ? '기본값은 이 그룹의 마운트 선언입니다. ' : ''}등록 직후 ${mnt.source} → ${mnt.target} (${mnt.fstype}, defaults+_netdev,nofail) 로 마운트되고 [마운트 관리]에 표시됩니다. 실패해도 서버 등록은 유지됩니다.`
+                         : undefined}
+ error={mntValid ? undefined : '원본과 붙일 위치(절대경로)를 입력하세요.'}>
+              <Select value={toSel(mnt.fstype)} onValueChange={(v: string) => setMnt(m => ({ ...m, fstype: fromSel(v) }))} disabled={busy}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {['nfs4', 'nfs', 'cifs', 'ext4', 'ext3', 'xfs', 'btrfs'].map(f => (
+                    <SelectItem key={f} value={f}>{f}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FormField>
           </>
         ) : (
-          <label className="col-span-full text-xs text-warning">
+          <p className="text-xs text-warning">
             이 서버는 <b>마운트 없이</b> 등록됩니다 — 공유 store·서비스 로그를 쓰는 모듈이라면
             나중에 [마운트 관리]에서 직접 추가해야 합니다.
-          </label>
+          </p>
         )}
       </div>
       <div className="flex justify-end gap-2.5 pt-5 mt-4">
