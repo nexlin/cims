@@ -247,9 +247,13 @@ def _find_all_d_dirs(date_str: str, hour: str = None, call_type: str = None) -> 
             pat = os.path.join(base, "*", "*", "*.d") if hour else os.path.join(base, "*", "*", "*", "*.d")
             result.extend(_glob.glob(pat))
         else:
-            # ptt: 레이아웃 가변 → 재귀 glob 유지 (호환).
-            pat = os.path.join(base, "**", "*.d") if hour else os.path.join(base, "*", "**", "*.d")
-            result.extend(_glob.glob(pat, recursive=True))
+            # ptt 는 현행 저장이 ptt/{group}/... (날짜 트리 아님, _ptt_group_base) 이라 여기서
+            # 걸리는 것이 없다 — 날짜 트리로 쌓인 **구 데이터 호환** 경로다. 그래도 무한 깊이
+            # `**` 는 두지 않는다: 트리가 커지면 볼 것이 없는데도 전체를 걷는다(volte 를 고정
+            # 깊이로 바꾼 것과 같은 사유). 구 레이아웃 깊이만 열거한다.
+            depths = ("*.d", "*/*.d", "*/*/*.d") if hour else ("*/*.d", "*/*/*.d", "*/*/*/*.d")
+            for dpat in depths:
+                result.extend(_glob.glob(os.path.join(base, dpat)))
     return sorted(set(d for d in result if os.path.isdir(d)))
 
 

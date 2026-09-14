@@ -27,16 +27,16 @@
 
 import json
 import os
-import tempfile
 import threading
+import time
 from datetime import datetime, timedelta
 
+from services import stats_store
 from util.log_util import Logger
 
 logger = Logger()
 
 _MIN_FMT = '%Y-%m-%d %H:%M'
-_STATE_NAME = '.rollup_state.json'
 
 # ── 저장 계층 (§5.2) ──────────────────────────────────────────────────────
 #  1m 만 원본에서 만들고, 1h·1d 는 그 **합산**이다. 5m·10m·1w·1M·1y 는 저장하지 않는다 —
@@ -44,7 +44,7 @@ _STATE_NAME = '.rollup_state.json'
 #
 #  계층을 나누는 이유는 보존기간이다. 1분을 길게 보관하면(90일 = 12만 버킷) 월 단위 조회에
 #  쓰지도 않는 정밀도를 위해 용량을 낸다. 같은 90일이 1d 계층에서는 90 레코드다.
-UNITS = ('1m', '1h', '1d', '1M')
+UNITS = stats_store.UNITS
 
 # 월은 **연도별 파일**이다 (`stats/1M/YYYY.jsonl` = 그 해 12줄 × 서비스 수).
 # 날짜별 파일로 둘 수 없다 — 월 버킷은 여러 날에 걸쳐 있어 어느 날짜 파일에도 속하지 않는다.
@@ -57,7 +57,7 @@ UNITS = ('1m', '1h', '1d', '1M')
 # 만들어지지 않은 상태에서 쓰인 행이 그대로 정답 행세를 했다(실측: 년 2,705 / 실제 5,216).
 # 저장된 거친 행은 완전한지 알 방법이 없어 빈 곳을 신고할 수도 없다. 월 단위로 읽으면 없는
 # 달이 날짜 경로로 내려가 `missing_days` 에 잡힌다 — 조용히 작은 값이 나오지 않는다.
-_PERIOD_UNITS = ('1M',)
+_PERIOD_UNITS = stats_store.PERIOD_UNITS
 
 # 요청 단위 → 읽을 계층. 그 단위를 만들 수 있는 **가장 거친** 계층을 고른다.
 _GRAN_UNIT = {'1m': '1m', '5m': '1m', '10m': '1m',
@@ -73,13 +73,12 @@ def unit_for(gran: str) -> str:
     return _GRAN_UNIT.get(gran, '1m')
 
 
-def _subdir(unit: str) -> str:
-    return os.path.join('stats', unit if unit in UNITS else '1m')
-
 _lock = threading.Lock()
 _service_log_dir = ''
 _config: dict = {}
 _enabled = False
+# 집계 저장소 — init 이 만든다. 파일이든 DB든 이 뒤로 숨는다(services/stats_store).
+_store = None
 
 
 def init(service_log_dir: str, config: dict = None, enabled: bool = True) -> None:
@@ -88,10 +87,11 @@ def init(service_log_dir: str, config: dict = None, enabled: bool = True) -> Non
     config 는 접속 서비스 조회(services/access_services)에 그대로 넘긴다 — 서비스 판정에
     agent proxy 와 런타임 경로가 필요하다.
     """
-    global _service_log_dir, _config, _enabled
+    global _service_log_dir, _config, _enabled, _store
     _service_log_dir = service_log_dir or ''
     _config = config or {}
     _enabled = bool(enabled and _service_log_dir)
+    _store = stats_store.for_root(_service_log_dir) if _service_log_dir else None
 
 
 def enabled() -> bool:
@@ -99,7 +99,7 @@ def enabled() -> bool:
 
 
 def stats_root() -> str:
-    return os.path.join(_service_log_dir, 'stats') if _service_log_dir else ''
+    return _store.stats_root() if _store else ''
 
 
 # ──────────────────────────────────────────────────────────────
@@ -129,97 +129,6 @@ def _month_of(bucket: str) -> str:
     return bucket[:7]
 
 
-def _day_path(day: str, unit: str = '1m') -> str:
-    """day='YYYY-MM-DD' → {stats}/{unit}/YYYY/MM/DD.jsonl"""
-    if not stats_root() or len(day) < 10:
-        return ''
-    return os.path.join(_service_log_dir, _subdir(unit), day[0:4], day[5:7], day[8:10] + '.jsonl')
-
-
-# ── 월·년 계층 — 연도별 파일 ───────────────────────────────────
-
-def _period_path(unit: str, year: str) -> str:
-    """unit='1M'|'1y', year='YYYY' → {stats}/{unit}/YYYY.jsonl"""
-    if not stats_root() or unit not in _PERIOD_UNITS or len(year) < 4:
-        return ''
-    return os.path.join(_service_log_dir, _subdir(unit), year[0:4] + '.jsonl')
-
-
-def period_path_at(root: str, unit: str, year: str) -> str:
-    """root 를 명시한 연도 파일 경로 — 조회 경로가 모듈 전역에 의존하지 않게(day_path_at 와 대칭)."""
-    if not root or unit not in _PERIOD_UNITS or len(year) < 4:
-        return ''
-    return os.path.join(root, _subdir(unit), year[0:4] + '.jsonl')
-
-
-def read_period_at(root: str, year: str, unit: str) -> list:
-    p = period_path_at(root, unit, year)
-    if not p or not os.path.isfile(p):
-        return []
-    out = []
-    try:
-        with open(p, 'r', encoding='utf-8', errors='replace') as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    out.append(json.loads(line))
-                except ValueError:
-                    continue
-    except OSError:
-        return []
-    return out
-
-
-def read_period(year: str, unit: str) -> list:
-    """그 해의 월(또는 년) 레코드. 파일이 없으면 빈 목록."""
-    p = _period_path(unit, year)
-    if not p or not os.path.isfile(p):
-        return []
-    out = []
-    try:
-        with open(p, 'r', encoding='utf-8', errors='replace') as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    out.append(json.loads(line))
-                except ValueError:
-                    continue
-    except OSError:
-        return []
-    return out
-
-
-def _write_period(year: str, rows: list, unit: str) -> bool:
-    """연도 파일 원자적 교체. 빈 결과면 파일을 지운다(근거 없는 계층을 남기지 않는다)."""
-    p = _period_path(unit, year)
-    if not p:
-        return False
-    if not rows:
-        if os.path.isfile(p):
-            try:
-                os.remove(p)
-            except OSError:
-                pass
-        return True
-    try:
-        os.makedirs(os.path.dirname(p), exist_ok=True)
-        fd, tmp = tempfile.mkstemp(prefix='.tmp.', dir=os.path.dirname(p))
-        with os.fdopen(fd, 'w', encoding='utf-8') as f:
-            for r in sorted(rows, key=lambda x: (x.get('bucket', ''), x.get('svc', ''))):
-                f.write(json.dumps(r, ensure_ascii=False) + '\n')
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, p)
-        return True
-    except OSError as e:
-        logger.log_error(f"[stats-rollup] {year} {unit} 기록 실패: {e}")
-        return False
-
-
 def _days_of_month(month: str) -> list:
     """month='YYYY-MM' → 그 달의 'YYYY-MM-DD' 목록."""
     y, m = int(month[0:4]), int(month[5:7])
@@ -241,15 +150,18 @@ def rebuild_periods(day: str) -> dict:
     **그 달의 1일 계층이 하나도 없으면 기존 월 행을 그대로 둔다.** 일 계층은 보존기간이 있어
     언젠가 지워지는데, 그때 다시 접으면 근거가 없다는 이유로 영구여야 할 월 행이 사라진다.
     """
+    if _store is None:
+        return {'1M': 0}
     month, year = day[:7], day[:4]
     base = []
     for d in _days_of_month(month):
-        base.extend(read_day(d, '1d'))
+        base.extend(_store.read_day('1d', d))
     if not base:
         return {'1M': 0}
-    months = [r for r in read_period(year, '1M') if _month_of(r.get('bucket', '')) != month]
+    months = [r for r in _store.read_year('1M', year)
+              if _month_of(r.get('bucket', '')) != month]
     months.extend(fold_records(base, '1M'))
-    _write_period(year, months, '1M')
+    _store.replace_year('1M', year, months)
     return {'1M': len(months)}
 
 
@@ -474,11 +386,16 @@ def _parse(ts: str):
         return None
 
 
-def build_minutes(root: str, minutes: set, config: dict = None) -> dict:
+def build_minutes(root: str, minutes: set, config: dict = None,
+                  deadline: float = None) -> dict:
     """대상 분들의 집계 레코드를 원본에서 만든다 → {(bucket, svc): record}.
 
     시간 디렉터리 단위로 원본을 읽고 분으로 쪼갠다 — 대상이 흩어져 있어도 같은 시간이면
     한 번만 읽는다.
+
+    `deadline`(time.monotonic 기준)을 주면 그 시각에 **만든 만큼만 돌려준다**. 조회 경로는
+    게이트웨이 프록시 한도가 있어, 넘긴 뒤의 작업은 아무도 받지 못하는 결과를 만드는 것이다.
+    집계 주체(run_once)는 한도가 없으므로 주지 않는다.
     """
     from services import access_services
 
@@ -500,6 +417,8 @@ def build_minutes(root: str, minutes: set, config: dict = None) -> dict:
         dmap = {}
 
     for hour in hours:
+        if deadline is not None and time.monotonic() >= deadline:
+            break
         for mi, rec, _path in _scan_volte_hour(root, hour):
             if mi in minutes:
                 _fold_volte(rec, _agg(mi, 'volte'))
@@ -513,6 +432,8 @@ def build_minutes(root: str, minutes: set, config: dict = None) -> dict:
                         _bump(m[io], k, n)
 
     for day in days:
+        if deadline is not None and time.monotonic() >= deadline:
+            break
         for mi, row in _scan_ptt_day(day):
             if mi in minutes:
                 _fold_ptt(row, _agg(mi, 'ptt'))
@@ -524,35 +445,13 @@ def build_minutes(root: str, minutes: set, config: dict = None) -> dict:
 #  일별 파일 병합 (원자적 교체)
 # ──────────────────────────────────────────────────────────────
 
-def day_path_at(root: str, day: str, unit: str = '1m') -> str:
-    """읽기용 경로 — 집계 주체(oam-svc)가 아닌 프로세스도 조회하므로 root 를 인자로 받는다."""
-    if not root or len(day) < 10:
-        return ''
-    return os.path.join(root, _subdir(unit), day[0:4], day[5:7], day[8:10] + '.jsonl')
-
-
 def read_day_at(root: str, day: str, unit: str = '1m') -> list:
-    p = day_path_at(root, day, unit)
-    if not p or not os.path.isfile(p):
-        return []
-    rows = []
-    try:
-        with open(p, 'r', encoding='utf-8', errors='replace') as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rows.append(json.loads(line))
-                except ValueError:
-                    continue
-    except OSError:
-        return []
-    return rows
+    """읽기용 — 집계 주체(oam-svc)가 아닌 프로세스도 조회하므로 root 를 인자로 받는다."""
+    return stats_store.for_root(root).read_day(unit, day)
 
 
 def read_day(day: str, unit: str = '1m') -> list:
-    return read_day_at(_service_log_dir, day, unit)
+    return _store.read_day(unit, day) if _store else []
 
 
 def read_range(root: str, from_dt: str, to_dt: str) -> list:
@@ -579,38 +478,23 @@ def read_range(root: str, from_dt: str, to_dt: str) -> list:
     return out
 
 
-def _write_day(day: str, rows: list, unit: str = '1m') -> bool:
-    """일별 파일 원자적 교체 — 읽는 쪽이 반쪽 파일을 보지 않게(ptt_index 와 같은 방식)."""
-    p = _day_path(day, unit)
-    if not p:
-        return False
-    try:
-        os.makedirs(os.path.dirname(p), exist_ok=True)
-        fd, tmp = tempfile.mkstemp(prefix='.tmp.', dir=os.path.dirname(p))
-        with os.fdopen(fd, 'w', encoding='utf-8') as f:
-            for r in sorted(rows, key=lambda x: (x.get('bucket', ''), x.get('svc', ''))):
-                f.write(json.dumps(r, ensure_ascii=False) + '\n')
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, p)
-        return True
-    except OSError as e:
-        logger.log_error(f"[stats-rollup] {day} 기록 실패: {e}")
-        return False
-
-
 def merge_days(records: dict, buckets: set, fresh_days: set = None) -> tuple:
-    """계산된 레코드를 일별 파일에 반영. `buckets` 는 이번에 다시 계산한 버킷 전체다.
+    """계산된 레코드를 집계 저장소에 반영. `buckets` 는 이번에 다시 계산한 버킷 전체다.
 
     대상 버킷의 기존 행은 **결과가 비어도 지운다** — 되짚기로 값이 줄어든 경우(예: 오분류된
     호가 다른 서비스로 옮겨간 경우) 옛 행이 남으면 이중 계산된다.
 
-    `fresh_days` = 정상 진행(watermark 전진)으로 새로 집계하는 날. 여기 없는 날에 파일이
+    교체는 저장소가 `(unit, bucket, svc)` 키 단위로 수행한다 — 파일이면 그 날을 다시 쓰고,
+    SQL 이면 DELETE+INSERT 한 번이다. 여기서는 "무엇을 무엇으로 바꿀지" 만 정한다.
+
+    `fresh_days` = 정상 진행(watermark 전진)으로 새로 집계하는 날. 여기 없는 날에 집계가
     **없다면** 보존기간이 지나 이미 지워진 날이다 — 되짚기가 그 날을 되살리면 purge 가
     무의미해지므로 쓰지 않고 `late_dropped` 로 센다(§6.1).
 
     반환 (기록한 일수, late_dropped 버킷 수).
     """
+    if _store is None:
+        return 0, 0
     fresh_days = fresh_days or set()
     by_day: dict = {}
     for (bucket, svc), rec in records.items():
@@ -622,19 +506,14 @@ def merge_days(records: dict, buckets: set, fresh_days: set = None) -> tuple:
     late = 0
     for day, new_rows in by_day.items():
         day_buckets = {b for b in buckets if _day_of(b) == day}
-        existing = read_day(day)
-        exists = bool(_day_path(day)) and os.path.isfile(_day_path(day))
-        if not exists and day not in fresh_days:
+        rows = [r for r in new_rows.values() if not _is_empty(r)]
+        r = _store.upsert_day('1m', day, rows, day_buckets,
+                              allow_create=day in fresh_days)
+        if r == 'written':
+            written += 1
+        elif r == 'late':
             # 보존기간이 지나 사라진 날 — 되살리지 않는다.
             late += len({b for (b, _svc) in new_rows}) or len(day_buckets)
-            continue
-        kept = [r for r in existing if r.get('bucket') not in day_buckets]
-        merged = kept + [r for r in new_rows.values() if not _is_empty(r)]
-        if not merged and not exists:
-            # 빈 날에 0바이트 파일을 만들지 않는다 — 있는 파일이 곧 "집계된 날" 이다.
-            continue
-        if _write_day(day, merged):
-            written += 1
     return written, late
 
 
@@ -698,19 +577,14 @@ def rebuild_derived(day: str) -> dict:
 
     1m 이 없으면 파생도 두지 않는다 — 근거 없는 상위 계층이 남으면 조회가 그것을 믿는다.
     """
-    base = read_day(day, '1m')
+    if _store is None:
+        return {}
+    base = _store.read_day('1m', day)
     made = {}
     for unit in ('1h', '1d'):
         recs = fold_records(base, unit) if base else []
-        if recs:
-            _write_day(day, recs, unit)
-        else:
-            p = _day_path(day, unit)
-            if p and os.path.isfile(p):
-                try:
-                    os.remove(p)
-                except OSError:
-                    pass
+        # 빈 결과면 저장소가 그 날을 지운다 — 근거 없는 파생 계층을 남기지 않는다.
+        _store.replace_day(unit, day, recs)
         made[unit] = len(recs)
     return made
 
@@ -719,41 +593,16 @@ def rebuild_derived(day: str) -> dict:
 #  상태 (watermark + 미결 호)
 # ──────────────────────────────────────────────────────────────
 
-def _state_path() -> str:
-    root = stats_root()
-    return os.path.join(root, _STATE_NAME) if root else ''
-
-
 def load_state() -> dict:
-    p = _state_path()
-    if p and os.path.isfile(p):
-        try:
-            with open(p, 'r', encoding='utf-8', errors='replace') as f:
-                st = json.load(f)
-            if isinstance(st, dict):
-                st.setdefault('watermark', '')
-                st.setdefault('open', {})
-                st.setdefault('late_dropped_total', 0)
-                return st
-        except (OSError, ValueError):
-            pass
-    return {'watermark': '', 'open': {}, 'late_dropped_total': 0}
+    """watermark + 미결 호. 저장소가 없으면 빈 상태 — 호출자가 분기하지 않게."""
+    if _store is None:
+        return {'watermark': '', 'open': {}, 'late_dropped_total': 0}
+    return _store.load_state()
 
 
 def save_state(st: dict) -> None:
-    p = _state_path()
-    if not p:
-        return
-    try:
-        os.makedirs(os.path.dirname(p), exist_ok=True)
-        fd, tmp = tempfile.mkstemp(prefix='.tmp.', dir=os.path.dirname(p))
-        with os.fdopen(fd, 'w', encoding='utf-8') as f:
-            json.dump(st, f, ensure_ascii=False)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, p)
-    except OSError as e:
-        logger.log_error(f"[stats-rollup] 상태 기록 실패: {e}")
+    if _store is not None:
+        _store.save_state(st)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -850,10 +699,42 @@ def _observe_open(root: str, minutes: set) -> dict:
     return out
 
 
+# 같은 사유를 60초마다 다시 적으면 로그가 못 쓰게 된다 — 바뀔 때만 남긴다.
+_WRITER_NOTED: dict = {'reason': None}
+
+
+def _claim_writer() -> tuple:
+    """집계 writer 권한 확보 → (가능한가, 사유). 사유가 바뀔 때만 로그를 남긴다.
+
+    **집계는 권한을 쥔 하나만 한다.** 같은 대상을 둘이 쓰면 결과가 서로를 덮고, 공유
+    파일시스템에서는 그 경합이 노드를 통째로 멈춰 세운다 — 두 배포본이 `ServiceLogging.Dir`
+    만 공유하는 구성에서 실제로 그렇게 됐다(2026-09-11). **조회는 권한과 무관하다** —
+    집계를 안 쓰는 쪽도 상대가 만든 값을 그대로 읽는다.
+    """
+    ok, why = _store.acquire_writer()
+    if _WRITER_NOTED['reason'] != why:
+        if not ok:
+            logger.log_info(f"[stats-rollup] 집계 건너뜀 — 다른 writer 가 쥐고 있다({why}). "
+                            f"조회는 그대로 동작한다.")
+        elif why == 'locking_not_enforced':
+            logger.log_warning(
+                "[stats-rollup] 이 파일시스템은 flock 을 강제하지 않는다 — 집계 writer 가 "
+                "하나임을 보장할 수 없다. 여러 배포본이 같은 ServiceLogging.Dir 을 쓰면 "
+                "집계가 서로를 덮는다.")
+        elif _WRITER_NOTED['reason'] is not None:
+            # 막혔다가 풀린 경우만 남긴다 — 어느 노드가 집계 중인지 로그로 알 수 있어야 한다.
+            logger.log_info("[stats-rollup] 집계 writer 권한 확보 — 이 노드가 집계한다.")
+        _WRITER_NOTED['reason'] = why
+    return ok, why
+
+
 def run_once() -> dict:
     """1회 집계. 반환 = 요약(로그/진단용)."""
-    if not _enabled:
+    if not _enabled or _store is None:
         return {'skipped': 'disabled'}
+    ok, why = _claim_writer()
+    if not ok:
+        return {'skipped': f'not_writer:{why}'}
     with _lock:
         st = load_state()
         pending = _pending_minutes(st.get('watermark', ''))
@@ -896,7 +777,10 @@ def rebuild_range(from_day: str, to_day: str) -> int:
 
     watermark 를 건드리지 않는다 — 과거 재생성이 이후의 정상 집계를 되돌리면 안 된다.
     """
-    if not _enabled:
+    if not _enabled or _store is None:
+        return 0
+    ok, _why = _claim_writer()
+    if not ok:
         return 0
     a, b = _parse(from_day + ' 00:00:00'), _parse(to_day + ' 00:00:00')
     if a is None or b is None:
@@ -931,9 +815,8 @@ def purge_old(retain: dict) -> dict:
     `retain` = {'1m': 14, '1h': 400, '1d': 0}. 0 이하는 무제한(no-op) — daily_jsonl 규약.
     계층을 나눈 이유가 보존기간이므로 여기서 계층별로 다르게 적용해야 의미가 있다.
     """
-    if not _enabled:
+    if not _enabled or _store is None:
         return {}
-    from services import daily_jsonl
     out = {}
     for unit in UNITS:
         # 월·년은 영구다 — 지우면 그 구간을 되살릴 재료(일 계층)가 이미 없을 수 있고,
@@ -947,7 +830,7 @@ def purge_old(retain: dict) -> dict:
             days = lo
         if days <= 0:
             continue
-        n = daily_jsonl.purge_old(_service_log_dir, _subdir(unit), days)
+        n = _store.purge(unit, days)
         if n:
             out[unit] = n
     return out
@@ -959,50 +842,100 @@ def purge_old(retain: dict) -> dict:
 # 보존기간 밖 구간을 실제 감소로 읽는다.
 _SCAN_DAY_BUDGET = 14
 
+# 즉석 집계 **시간 상한**. 날 수 예산(위)은 "얼마나 많은 날"만 막고 하루가 얼마나 무거운지는
+# 못 막는다 — 원본이 쌓인 날은 하루로도 게이트웨이 프록시 타임아웃(5초)을 넘긴다. 그러면
+# 호출자는 504 를 받고 떠나는데 **서버는 끝까지 긁는다**(실측: 아무도 안 기다리는 응답을
+# 125초 넘게 생성). 한도 안에서 만들 수 있는 만큼만 만들고 나머지는 빠진 구간으로 알린다.
+_SCAN_DEADLINE_SEC = 3.5
+
+
+# 하루 안의 위치는 **00:00 기준 분 오프셋**(0~1439)으로 다룬다. 버킷이 요청 구간에 온전히
+# 들어가는지를 집합 포함으로 판정하려면 라벨 문자열보다 정수 쪽이 단순하고 빠르다.
+_UNIT_SPAN_MIN = {'1m': 1, '1h': 60, '1d': 1440}
+
+
+def _bucket_offsets(label: str, unit: str, day: str):
+    """버킷 라벨 → 그 날 기준 분 오프셋 [s, e] (끝 포함). 다른 날 버킷이면 None."""
+    dt = parse_bucket(label)
+    if dt is None or dt.strftime('%Y-%m-%d') != day:
+        return None
+    s = dt.hour * 60 + dt.minute
+    return s, min(s + _UNIT_SPAN_MIN.get(unit, 1) - 1, 1439)
+
+
+def _need_offsets(day: str, lo: str, hi: str) -> set:
+    """그 날에서 요청 구간 [lo, hi] 가 덮는 분 오프셋 집합. 라벨은 'YYYY-MM-DD HH:MM'."""
+    s_lab = max(lo, f'{day} 00:00')
+    e_lab = min(hi, f'{day} 23:59')
+    if s_lab > e_lab:
+        return set()
+    s = int(s_lab[11:13]) * 60 + int(s_lab[14:16])
+    e = int(e_lab[11:13]) * 60 + int(e_lab[14:16])
+    return set(range(s, e + 1))
+
 
 def _read_days(root: str, days: list, lo: str, hi: str, chain: tuple,
-               config: dict, budget: int) -> tuple:
-    """날짜별로 계층을 골라 읽는다 → (rows, by_unit, scanned_days, omitted_days).
+               config: dict, budget: int, deadline: float = None) -> tuple:
+    """날짜별로 계층을 골라 읽는다 → (rows, by_unit, scanned_days, omitted_days, deadline_hit).
 
-    요청 단위가 감당되는 가장 거친 계층부터 보고, 그 날에 없으면 더 잔 계층으로 내려간다
-    (잔 것은 항상 접을 수 있다). 어느 계층에도 없으면 원본에서 즉석 집계한다.
+    요청 단위가 감당되는 가장 거친 계층부터 보고, **그 계층이 덮지 못한 구간만** 더 잔
+    계층으로 내려간다. 어느 계층에도 없는 구간만 원본에서 즉석 집계한다.
+
+    판정 단위는 날이 아니라 **버킷**이다. 날 단위로 "온전히 덮였는가"를 물으면 진행 중인
+    날(`to=현재시각`)은 마지막 1분이 빠졌다는 이유로 **그 하루 전체**가 거친 계층에서
+    밀려나, 이미 만들어 둔 1시간 집계를 버리고 원본을 통째로 훑는다. 성능 화면이 늘 보내는
+    "오늘 00:00~지금" 이 항상 그 경로였다 — 같은 하루가 `date=` 로는 0.03초, `from`·`to` 로는
+    125초 무응답이었다(2026-09-11 실측, 게이트웨이 504).
     """
-    rows, by_unit, missing = [], {}, []
+    store = stats_store.for_root(root)
+    rows, by_unit, pending = [], {}, []
     for d in days:
-        # 구간이 이 날을 **온전히** 덮는가. 덮지 않는 날(구간의 양 끝)에 거친 계층을 쓰면
-        # 버킷을 쪼갤 수 없어 총계가 부풀어진다 — 그런 날만 1분 계층으로 내려가 정확히 자른다.
-        whole = lo <= f'{d} 00:00' and f'{d} 23:59' <= hi
-        use = chain if whole else ('1m',) + tuple(u for u in chain if u != '1m')
-        for unit in use:
-            if not os.path.isfile(day_path_at(root, d, unit) or ''):
+        need = _need_offsets(d, lo, hi)
+        if not need:
+            continue
+        for unit in chain:
+            if not need:
+                break
+            if not store.has_day(unit, d):
                 continue
-            for r in read_day_at(root, d, unit):
-                bt = parse_bucket(r.get('bucket', ''))
-                if bt is None:
+            # 버킷은 쪼갤 수 없다 — **버킷 전체가 아직 필요한 구간 안**일 때만 쓴다. 경계에
+            # 걸친 버킷은 남겨 두고 다음(더 잔) 계층이 그 부분만 채운다. 판정 기준이 되는
+            # need 는 이 계층을 다 훑은 뒤에 한 번만 줄인다 — 같은 버킷의 서비스별 행들이
+            # 서로의 판정을 바꾸지 않게.
+            picked, covered = [], set()
+            for r in store.read_day(unit, d):
+                off = _bucket_offsets(r.get('bucket', ''), unit, d)
+                if off is None:
                     continue
-                # 잔 계층은 버킷 시작이 구간 안이어야 한다. 온전히 덮인 날의 거친 계층은
-                # 버킷 전체가 그 날 안이므로 추가 판정이 필요 없다.
-                if not whole and not (lo <= bt.strftime(_MIN_FMT) <= hi):
-                    continue
-                rows.append(r)
-            by_unit[unit] = by_unit.get(unit, 0) + 1
-            break
-        else:
-            missing.append(d)
+                cells = set(range(off[0], off[1] + 1))
+                if cells <= need:
+                    picked.append(r)
+                    covered |= cells
+            if picked:
+                rows.extend(picked)
+                by_unit[unit] = by_unit.get(unit, 0) + 1
+                need -= covered
+        if need:
+            pending.append((d, need))
 
     # 예산을 넘으면 **최근 날부터** 채운다 — 오래된 쪽이 빠지는 것이 덜 놀랍다.
-    fill = missing[-budget:] if budget > 0 else []
-    omitted = [d for d in missing if d not in set(fill)]
-    for d in fill:
+    fill_set = set([d for d, _ in pending][-budget:] if budget > 0 else [])
+    scanned, omitted, deadline_hit = [], [d for d, _ in pending if d not in fill_set], False
+    for d, need in pending:
+        if d not in fill_set:
+            continue
+        if deadline is not None and time.monotonic() >= deadline:
+            omitted.append(d)          # 시간 상한 — 남은 날은 빠진 구간으로 알린다
+            deadline_hit = True
+            continue
         day0 = _parse(d + ' 00:00:00')
-        minutes = set()
-        for i in range(1440):
-            mi = (day0 + timedelta(minutes=i)).strftime(_MIN_FMT)
-            if lo <= mi <= hi:
-                minutes.add(mi)
+        minutes = {(day0 + timedelta(minutes=i)).strftime(_MIN_FMT) for i in need}
         if minutes:
-            rows.extend(build_minutes(root, minutes, config).values())
-    return rows, by_unit, fill, omitted
+            rows.extend(build_minutes(root, minutes, config, deadline).values())
+            scanned.append(d)
+            if deadline is not None and time.monotonic() >= deadline:
+                deadline_hit = True    # 이 날이 도중에 잘렸을 수 있다
+    return rows, by_unit, scanned, sorted(omitted), deadline_hit
 
 
 def _month_bounds(month: str) -> tuple:
@@ -1034,7 +967,7 @@ def _read_stored_periods(root: str, unit: str, lo: str, hi: str, days: list) -> 
             continue
         year = k[:4]
         if year not in cache:
-            cache[year] = read_period_at(root, year, unit)
+            cache[year] = stats_store.for_root(root).read_year(unit, year)
         hit = [r for r in cache[year] if r.get('bucket') == k]
         if not hit:
             rest.extend(by_key[k])
@@ -1045,7 +978,8 @@ def _read_stored_periods(root: str, unit: str, lo: str, hi: str, days: list) -> 
 
 
 def read_range_filled(root: str, from_dt: str, to_dt: str, config: dict = None,
-                      budget: int = None, gran: str = '1m') -> tuple:
+                      budget: int = None, gran: str = '1m',
+                      deadline_sec: float = None) -> tuple:
     """구간 레코드 + 커버리지 → (rows, coverage).
 
     **계층을 골라 읽는다.** 월·년은 저장 버킷을 먼저 보고, 나머지(와 반쪽 기간)는 날마다
@@ -1058,14 +992,20 @@ def read_range_filled(root: str, from_dt: str, to_dt: str, config: dict = None,
 
     즉석 집계 결과는 **적지 않는다** — 보존기간이 지나 지운 날을 되살리면 purge 가
     무의미해진다(merge_days 도 같은 이유로 그 날을 거부한다).
+
+    즉석 집계에는 **시간 상한**(`deadline_sec`, 기본 `_SCAN_DEADLINE_SEC`)이 있다. 넘으면
+    만든 만큼만 돌려주고 나머지는 `missing_days` 로 알린다 — 호출자가 이미 떠난 뒤까지
+    긁지 않기 위해서다. 0/음수를 주면 상한 없음(재집계·검증 경로).
     """
     unit = unit_for(gran)
-    empty_cov = {'days': 0, 'unit': unit, 'by_unit': {},
-                 'rollup': 0, 'scanned': 0, 'missing': 0, 'missing_days': []}
+    empty_cov = {'days': 0, 'unit': unit, 'by_unit': {}, 'rollup': 0, 'scanned': 0,
+                 'missing': 0, 'missing_days': [], 'deadline_hit': False}
     a, b = _parse(from_dt), _parse(to_dt)
     if a is None or b is None:
         return [], empty_cov
     budget = _SCAN_DAY_BUDGET if budget is None else budget
+    deadline_sec = _SCAN_DEADLINE_SEC if deadline_sec is None else deadline_sec
+    deadline = time.monotonic() + deadline_sec if deadline_sec and deadline_sec > 0 else None
     lo, hi = _minute(from_dt), _minute(to_dt)
 
     days, cur = [], a.date()
@@ -1079,7 +1019,8 @@ def read_range_filled(root: str, from_dt: str, to_dt: str, config: dict = None,
         rows, by_unit, rest = _read_stored_periods(root, unit, lo, hi, days)
 
     chain = _FALLBACK.get('1d' if unit in _PERIOD_UNITS else unit, ('1m',))
-    d_rows, d_by_unit, fill, omitted = _read_days(root, rest, lo, hi, chain, config, budget)
+    d_rows, d_by_unit, fill, omitted, deadline_hit = _read_days(
+        root, rest, lo, hi, chain, config, budget, deadline)
     rows.extend(d_rows)
     for u, n in d_by_unit.items():
         by_unit[u] = by_unit.get(u, 0) + n
@@ -1088,6 +1029,7 @@ def read_range_filled(root: str, from_dt: str, to_dt: str, config: dict = None,
         'days': len(days), 'unit': unit, 'by_unit': by_unit,
         'rollup': sum(by_unit.values()), 'scanned': len(fill),
         'missing': len(omitted), 'missing_days': omitted[:40],
+        'deadline_hit': deadline_hit,
     }
 
 

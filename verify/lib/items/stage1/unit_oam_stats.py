@@ -3,6 +3,10 @@
   · tests/test_oam_stats_classify.py  access_services domain→kind → 서비스축(volte|ptt) — 유선 voip 는 전화 계열 volte 합산,
                                       Request-URI→To→From 판정 순서(sip_statistics.md §3.1)
   · tests/test_stats_probe.py         CMP/노드 프로브 병렬·타임아웃·last-good 캐시(실서버 없이 죽은 UDP 소켓으로)
+  · tests/test_stats_rollup_range.py  구간 조회의 계층 선택이 **버킷 단위**인지 — 진행 중인 날(to=현재시각)이
+                                      롤업에서 통째로 밀려나 원본을 전량 훑던 회귀 + 즉석 집계 시간 상한
+  · tests/test_stats_store.py         집계 저장소 계약 — **단일 writer**(둘이 쓰면 결과가 서로를 덮고 공유
+                                      파일시스템에서는 노드가 멈춘다) + 키 단위 upsert 규칙
 """
 from __future__ import annotations
 
@@ -13,8 +17,9 @@ from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 
 _ID = "S1-UNIT-OAM-STATS"
-_NAME = "OAM SIP 통계 서비스축·프로브 unit test (tests/test_oam_stats_classify.py · test_stats_probe.py)"
-_TESTS = ["tests/test_oam_stats_classify.py", "tests/test_stats_probe.py"]
+_NAME = "OAM SIP 통계 서비스축·프로브·구간 조회·저장소 unit test (tests/test_oam_stats_*.py · test_stats_*.py)"
+_TESTS = ["tests/test_oam_stats_classify.py", "tests/test_stats_probe.py",
+          "tests/test_stats_rollup_range.py", "tests/test_stats_store.py"]
 
 
 @verify_item(
@@ -29,7 +34,7 @@ def unit_oam_stats(ctx: VerifyContext) -> ItemResult:
     present = [t for t in _TESTS if os.path.isfile(os.path.join(ctx.repo_root, t))]
     if not present:
         return ItemResult(id=_ID, name=_NAME, status=ItemStatus.SKIP,
-                          detail="tests/test_oam_stats_classify.py · test_stats_probe.py 없음", stage=1)
+                          detail=" · ".join(_TESTS) + " 없음", stage=1)
     env = dict(os.environ)
     env["PYTHONWARNINGS"] = "ignore::ResourceWarning"
     ok = True
@@ -49,7 +54,7 @@ def unit_oam_stats(ctx: VerifyContext) -> ItemResult:
         tails.append(f"[{t}] rc={rc}\n" + "\n".join(full.splitlines()[-12:]))
         ok = ok and (rc == 0)
     tail = "\n".join(tails)
-    ctx.w(f"## {_ID} — OAM SIP 통계 서비스축·프로브 unit test")
+    ctx.w(f"## {_ID} — OAM SIP 통계 서비스축·프로브·구간 조회 unit test")
     ctx.w("```")
     for line in tail.splitlines():
         ctx.w(line)

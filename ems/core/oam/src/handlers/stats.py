@@ -608,11 +608,18 @@ def _calls_stats(config: dict, from_dt: str, to_dt: str, gran: str, svc: str) ->
         'totals': totals, 'buckets': buckets,
     }
     if cov.get('missing'):
-        # 보존기간 밖이라 빠진 구간을 **응답에 적는다** — 조용히 작은 값을 내면 운영자가
-        # 그 감소를 실제 트래픽 변화로 읽는다.
-        body['warning'] = (f"{cov['missing']}일이 집계 보존기간을 넘어 제외됐습니다 "
-                           f"(ServiceLogging.StatsRetainDays.1m). 필요하면 보존기간을 늘리고 "
-                           f"POST /api/v1/stats/calls/rebuild 로 다시 만드세요.")
+        # 빠진 구간을 **응답에 적는다** — 조용히 작은 값을 내면 운영자가 그 감소를 실제
+        # 트래픽 변화로 읽는다. 빠진 이유가 둘이라 문구를 나눈다: 보존기간 밖(되살리려면
+        # 보존기간부터) 과 즉석 집계 시간 상한(집계를 만들어 두면 즉시 해소).
+        if cov.get('deadline_hit'):
+            body['warning'] = (f"집계가 없는 구간을 원본에서 계산하다 시간 상한에 걸려 "
+                               f"{cov['missing']}일이 빠졌습니다. "
+                               f"POST /api/v1/stats/calls/rebuild 로 그 구간 집계를 만들면 "
+                               f"바로 조회됩니다.")
+        else:
+            body['warning'] = (f"{cov['missing']}일이 집계 보존기간을 넘어 제외됐습니다 "
+                               f"(ServiceLogging.StatsRetainDays.1m). 필요하면 보존기간을 늘리고 "
+                               f"POST /api/v1/stats/calls/rebuild 로 다시 만드세요.")
     return HandlerResult(status=200, body=body)
 
 
