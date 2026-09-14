@@ -347,6 +347,8 @@ C API 는 그 헤더를 **손으로 1:1 평탄화**한 것이며(SWIG 는 C# 대
 서버 인증서 만료 관측은 이 규약의 예다 — `Engine::tlsPeerExpiry()`(pjsua2 `onTransportState` 의 remote 인증서)·
 `CscClient::tlsPeerExpiry()`(OpenSSL 전송의 peer 인증서) → `cimsue_engine_tls_peer_expiry`/`cimsue_csc_tls_peer_expiry`
 (`cimsue_tls_peer_expiry_t{valid, not_after_epoch, observed_epoch, days_left, subject, remote}`) → .NET `TlsPeerExpiry`.
+Android 앱은 아직 이 코어 위로 이행하지 않아(pjsua2 직접) 같은 규칙을 Kotlin 으로 둔다 — `core` 의 `CimsEndpoint.onTransportState`
+·`CimsTls` OkHttp 인터셉터 → `TlsPeerObserver`/`TlsPeerExpiry`(임계 30/7·`worst`). 이행 시 이 자리가 `Engine::tlsPeerExpiry()` 바인딩으로 바뀐다.
 관제조작반은 잔여 ≤ 30일이면 요약 띠 경고([sip_tls_signaling.md §8.6.2](sip_tls_signaling.md)).
 
 | 층 | 위치 | 규칙 |

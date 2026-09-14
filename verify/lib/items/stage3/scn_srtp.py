@@ -12,7 +12,9 @@ cspsim `-srtp` 군/대조군을 돌린다 (자기복원 — 종료 시 S3-SEED �
   R3 optional 관대 수용 — `-srtp optional`(AVP+a=crypto best-effort) 도 SRTP 로 성립
   R4 off 대조군 — 정책·단말 모두 off 로 원복 후 평문 그룹콜 그린 (기존 동작 유지)
   R5 VoLTE relay leg 종단 — volte 서비스 required 플립 + `-mode volte -scenario call
-     -srtp required`(영상 동반 — cims.sh sim 기본 미디어): 양 단말 오디오·비디오 SRTP 성립 +
+     -srtp required -media_dir tests/media`(영상 동반 — `*_video.h264` 가 있어야 m=video 를 offer
+     한다. dist 에는 기본 미디어 디렉터리가 없으므로 다른 항목처럼 tests/media 를 명시): 양 단말
+     오디오·비디오 SRTP 성립 +
      CMP relay leg crypto audio("SRTP audio peer[")·video("SRTP video peer[") 각 2건
      (leg·m-line 별 독립 키 — crypto 투과가 아니라 CSP 재작성·종단, media_security.md §5.2)
 
@@ -194,8 +196,11 @@ def srtp(ctx: VerifyContext) -> ItemResult:
                 "-domain", s.get("VOIP_DOM", VOLTE_DOMAIN),
                 *cred_args(s, "VOIP", 2),
                 "-srtp", "required",
-                # 영상 동반(cims.sh sim 기본 미디어) — 오디오·비디오 m-line 각각 SAVP+a=crypto 로 offer 하고
+                # 영상 동반 — cspsim 은 -media_dir 의 `*_video.h264` 가 있을 때만 m=video 를 offer 한다
+                #   (RtpThread 비디오 소켓 = 파일 지정 시). dist 에 기본 미디어 디렉터리는 없으므로 다른
+                #   항목과 같이 tests/media 를 명시한다. 오디오·비디오 m-line 각각 SAVP+a=crypto 로 offer 하고
                 #   CSP 가 leg 별로 재작성, CMP 가 m-line 별 독립 키로 종단하는 경로까지 실측한다.
+                "-media_dir", media_dir,
             ]
             seen5, on_line5 = srtp_watch()
             rc5, tail5 = run_cspsim(ctx.repo_root, args5, timeout=120, on_line=on_line5)

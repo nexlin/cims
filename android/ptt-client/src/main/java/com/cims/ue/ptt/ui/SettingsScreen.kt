@@ -27,6 +27,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.cims.ue.core.net.TlsPeerExpiry
+import com.cims.ue.core.net.TlsPeerObserver
 import com.cims.ue.core.sip.RegState
 import com.cims.ue.ptt.HwPtt
 import com.cims.ue.ptt.ListenPolicy
@@ -129,6 +131,8 @@ fun SettingsScreen(
             NavRow("서버 설정 다시 받기", "CSC 에서 접속 정보(포트·전송 프로토콜 목록) 재취득") {
                 svc?.refreshProvisioning()
             }
+            Divider()
+            ServerCertRow()
             Divider()
             val context = androidx.compose.ui.platform.LocalContext.current
             val ver = androidx.compose.runtime.remember {
@@ -259,5 +263,44 @@ private fun TransportRow(svc: PttService?) {
                 }
             }
         }
+    }
+}
+
+/**
+ * 설정 행 — 서버 인증서 만료 (sip_tls_signaling.md §8.6.2 만료 안내 3단 중 단말 표면).
+ * SIP TLS·CSC HTTPS 두 접속에서 관측한 서버 인증서 중 **먼저 만료되는 것**을 보인다(Windows 관제 앱과
+ * 같은 규칙). 임계는 서버와 같다 — 잔여 ≤30일 주의(호박), ≤7일 위험(빨강). 단말이 고칠 수 있는 게
+ * 아니라 서버 자동 갱신 실패를 운영자에게 알리라는 안내다. TLS 를 안 쓰면 관측이 없어 `—`.
+ */
+@Composable
+private fun ServerCertRow() {
+    val sip = TlsPeerObserver.sip.collectAsState().value
+    val csc = TlsPeerObserver.csc.collectAsState().value
+    val e = TlsPeerExpiry.worst(sip, csc)
+    val days = e?.daysLeft()
+    val level = e?.level()
+    val (value, color) = when {
+        e == null || days == null -> "—" to Ct.TextDim
+        days < 0 -> "만료됨" to Ct.Red
+        days == 0 -> "오늘 만료" to Ct.Red
+        level == TlsPeerExpiry.Level.CRITICAL -> "${days}일 후 만료" to Ct.Red
+        level == TlsPeerExpiry.Level.WARNING -> "${days}일 후 만료" to Ct.Amber
+        else -> "${days}일 남음" to Ct.TextDim
+    }
+    val subtitle = when {
+        e == null -> "TLS 접속에서 관측한 서버 인증서 — 아직 관측 없음(평문 접속이면 표시되지 않습니다)"
+        level == TlsPeerExpiry.Level.OK -> "${e.remote} · 만료 ${e.notAfterDate()}"
+        else -> "${e.remote} · 만료 ${e.notAfterDate()} · 자동 갱신 실패 신호 — 운영자에게 알리세요(콘솔 알람 A-PRC-009)"
+    }
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("서버 인증서", color = Ct.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = if (level == null || level == TlsPeerExpiry.Level.OK) Ct.TextFaint else color,
+                fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+        }
+        Text(value, color = color, fontSize = 13.sp, fontWeight = FontWeight.Bold)
     }
 }

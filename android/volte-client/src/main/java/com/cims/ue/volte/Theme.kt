@@ -46,6 +46,8 @@ object Ct {
     val TextFaint = Color(0xFF5E6E6A)   // 비활성·힌트
     val Red = Color(0xFFEF5350)         // 부재중·오류·종료
     val RedDim = Color(0xFF3A1B1B)
+    val Amber = Color(0xFFF5C24B)       // 주의(서버 인증서 만료 임박 등) — PTT 앱 Ct 와 동일 값
+    val AmberDim = Color(0xFF39301A)
     val Gray = Color(0xFF8A9995)
     val GrayDim = Color(0xFF232B29)
 }

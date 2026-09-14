@@ -125,6 +125,8 @@ import com.cims.ue.core.calllog.CallType
 import com.cims.ue.core.account.SsoProvisioner
 import com.cims.ue.core.config.ConfigStore
 import com.cims.ue.core.config.SipAccountConfig
+import com.cims.ue.core.net.TlsPeerExpiry
+import com.cims.ue.core.net.TlsPeerObserver
 import com.cims.ue.core.contacts.CompanyContact
 import com.cims.ue.core.contacts.CompanyDirectory
 import com.cims.ue.core.contacts.CompanyDirectoryStore
@@ -2232,6 +2234,7 @@ private fun SettingsScreen(
             // 도메인/IMSI/IMPI/비번 수동 편집은 프로비저닝 H(A1)(IMPI:realm:pw 결박)을 무효화하므로
             // 함께 소거한다 — 남겨두면 ha1 이 우선해 편집한 값이 인증에 반영되지 않는다.
             PrefTextRow("서비스 도메인", config.domain, manual) { onApply(config.copy(domain = it, sipHa1 = "")) }
+            ServerCertPrefRow()
 
             PrefCategory("계정")
             PrefTextRow("이름", config.displayName, manual) { onApply(config.copy(displayName = it)) }
@@ -2273,6 +2276,37 @@ private fun SettingsScreen(
             }
         }
     }
+}
+
+/**
+ * 서버 인증서 만료 행 (sip_tls_signaling.md §8.6.2 만료 안내 3단 중 단말 표면). SIP TLS·CSC HTTPS 두
+ * 접속에서 관측한 서버 인증서 중 먼저 만료되는 것을 보인다(PTT 앱·Windows 관제 앱과 같은 규칙).
+ * 임계는 서버와 같다 — 잔여 ≤30일 주의(호박), ≤7일 위험(빨강). 읽기 전용 — 단말이 고칠 수 있는 게 아니라
+ * 서버 자동 갱신 실패를 운영자에게 알리라는 안내다. TLS 를 안 쓰면 관측이 없어 `—`.
+ */
+@Composable
+private fun ServerCertPrefRow() {
+    val sip = TlsPeerObserver.sip.collectAsState().value
+    val csc = TlsPeerObserver.csc.collectAsState().value
+    val e = TlsPeerExpiry.worst(sip, csc)
+    val days = e?.daysLeft()
+    val level = e?.level()
+    val (value, color) = when {
+        e == null || days == null -> "—" to MaterialTheme.colorScheme.onSurfaceVariant
+        days < 0 -> "만료됨" to Ct.Red
+        days == 0 -> "오늘 만료" to Ct.Red
+        level == TlsPeerExpiry.Level.CRITICAL -> "${days}일 후 만료" to Ct.Red
+        level == TlsPeerExpiry.Level.WARNING -> "${days}일 후 만료" to Ct.Amber
+        else -> "${days}일 남음" to MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val summary = when {
+        e == null -> "TLS 접속에서 관측한 서버 인증서 — 아직 관측 없음(평문 접속이면 표시되지 않습니다)"
+        level == TlsPeerExpiry.Level.OK -> "${e.remote} · 만료 ${e.notAfterDate()}"
+        else -> "${e.remote} · 만료 ${e.notAfterDate()} · 자동 갱신 실패 신호 — 운영자에게 알리세요(콘솔 알람 A-PRC-009)"
+    }
+    PrefRow(title = "서버 인증서", summary = summary, trailing = {
+        Text(value, style = MaterialTheme.typography.bodyMedium, color = color, fontWeight = FontWeight.Bold)
+    })
 }
 
 /** 카테고리 라벨 — 안드로이드 설정의 굵은 primary 소제목. */

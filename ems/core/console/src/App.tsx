@@ -9,6 +9,7 @@ import { PromptProvider } from './components/custom/prompt'
 import Sidebar from './components/Sidebar'
 import Header from './components/Header'
 import ReadOnlyBanner from './components/ReadOnlyBanner'
+import CertExpiryBanner from './components/CertExpiryBanner'
 import PageHeaderRow from './components/PageHeaderRow'
 import LoginPage from './pages/LoginPage'
 import { FLAT_ROUTES, HOME_PATH } from './routes'
@@ -193,6 +194,8 @@ function Shell() {
         <main className="app-content">
           {/* 관리 store 소유권 미보유(read-only) 경고 — 정상 상태에서는 렌더 안 함 */}
           <ReadOnlyBanner />
+          {/* 서버 인증서 만료 경고(활성 cert_expiring 알람) — 없으면 렌더 안 함 (sip_tls_signaling §8.6.2) */}
+          <CertExpiryBanner />
           {/* breadcrumb 한 줄 (시안 PageHeaderRow) — 전 화면 공통, 본문 위 */}
           <PageHeaderRow />
           <div className="app-content-body flex min-h-0 flex-1 flex-col px-5 pb-5 pt-3.5">

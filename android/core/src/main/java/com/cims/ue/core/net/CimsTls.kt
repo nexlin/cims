@@ -28,11 +28,16 @@ object CimsTls {
     /** CIMS CA 앵커로 만든 신뢰 관리자. 앵커를 못 만들면 **예외** — 조용히 검증을 끄지 않는다. */
     private val trustManager: X509TrustManager by lazy { buildTrustManager() }
 
-    /** OkHttp 빌더에 CIMS CA 기반 TLS 검증을 설치한다. */
+    /**
+     * OkHttp 빌더에 CIMS CA 기반 TLS 검증을 설치한다. 같은 자리에서 서버 인증서 만료 관측
+     * ([TlsPeerObserver.httpInterceptor])도 붙인다 — CSC HTTPS 를 쓰는 클라이언트는 전부 이 함수를
+     * 거치므로 만료 표시(설정 화면)가 한 곳에서 채워진다.
+     */
     fun apply(builder: OkHttpClient.Builder): OkHttpClient.Builder {
         val tm = trustManager
         val ctx = SSLContext.getInstance("TLS").apply { init(null, arrayOf(tm), null) }
         return builder.sslSocketFactory(ctx.socketFactory, tm)
+            .addInterceptor(TlsPeerObserver.httpInterceptor)
     }
 
     private fun buildTrustManager(): X509TrustManager {

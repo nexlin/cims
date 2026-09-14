@@ -70,7 +70,8 @@ object PjLib {
             Log.i(TAG, "CameraManager injected for video capture enumeration")
         } ?: Log.w(TAG, "CameraManager not set — 카메라 캡처 디바이스 열거 불가(발신 영상/셀프뷰 안 됨)")
 
-        val endpoint = Endpoint()
+        // 서버 인증서 만료 관측(onTransportState) 을 위해 Endpoint 하위 클래스 — CimsEndpoint.
+        val endpoint = CimsEndpoint()
         endpoint.libCreate()
 
         val epc = EpConfig().apply {
@@ -159,5 +160,7 @@ object PjLib {
         if (!booted) return
         runCatching { ep.libDestroy() }.onFailure { Log.w(TAG, "libDestroy: ${it.message}") }
         booted = false
+        // 로그아웃/재기동 — 이전 접속의 서버 인증서 관측은 지운다(다음 로그인에서 다시 관측).
+        com.cims.ue.core.net.TlsPeerObserver.clearSip()
     }
 }

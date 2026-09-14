@@ -168,6 +168,7 @@ shadcn 대응표는 거기가 정본이다. 어긋나면 Figma 가 맞다.
 | EmptyState | 단일 | `20:30` |
 | ContextBar | Scope Server·Group | `21:68` |
 | **셸 6종** | AppBar · Sidebar · TreePanel · Tabs · PageHeaderRow · StickySaveBar | `457:5431` · `457:5485` · `458:9157` · `458:9160` · `458:9163` · `459:7508` |
+| 셸 상태 띠 | `main.app-content` 맨 위(PageHeaderRow 위) 전폭 띠 — 운영 상태가 정상이 아닐 때만 렌더(정상 = null, 레이아웃 무영향). `role="alert"` · `py-2 px-4 text-md leading-[1.5] flex gap-3 items-baseline` · 왼쪽 `<strong>` 제목 + 본문 · **닫기 없음**(원인이 해소되면 사라진다). 톤 둘 — 경고 `bg-warning-on text-card`, 위험 `bg-destructive text-destructive-foreground`. 현재 셋: 설정 되돌림·읽기 전용(`ReadOnlyBanner`) · 서버 인증서 만료(`CertExpiryBanner`, sip_tls_signaling §8.6.2). 도안에는 없는 운영 안내라 새 띠는 이 규약 그대로만 추가하고 화면 안 SectionMessage 와 섞지 않는다 | — (코드 정본 `components/ReadOnlyBanner.tsx`) |
 | SyncStatusRow | `hasDrift` 로 드리프트 경고 on/off — 0건에 경고색 금지 | `459:7511` |
 | Form · 시스템 추가 | Modal content 로 들어가는 조건부 폼 | `460:302` |
 | Icon (Lucide) | 실제 번들 31개 (`34:21`) | `34:21` |
