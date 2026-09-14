@@ -224,7 +224,7 @@ function FlowDiagram({ actors, messages, selIdx, onSelect }: FlowDiagramProps) {
   return (
     <div className="flex-[1_1_50%] overflow-auto min-w-0 border-r border-border" ref={containerRef}>
       {/* 노드 헤더 (sticky) */}
-      <div className="sticky t-0 z-[10] bg-card border-b border-border">
+      <div className="sticky top-0 z-[10] bg-card border-b border-border">
         <svg className="font-mono text-sm block" width={svgWidth} height={HEAD_H}>
           {actors.map(a => {
             const x = actorX(a, actors, colW)
@@ -400,7 +400,7 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
     <div className="overflow-y-auto h-full border border-border rounded-sm bg-card">
       <table className="w-full border-collapse font-mono text-sm">
         <thead>
-          <tr className="sticky t-0 bg-muted z-[1]">
+          <tr className="sticky top-0 bg-muted z-[1]">
             <th className="whitespace-nowrap border-b border-border px-2 py-1.5 text-left font-semibold text-muted-foreground">#</th>
             <th className="whitespace-nowrap border-b border-border px-2 py-1.5 text-left font-semibold text-muted-foreground">시간</th>
             <th className="whitespace-nowrap border-b border-border px-2 py-1.5 text-left font-semibold text-muted-foreground">From→To</th>

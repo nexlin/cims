@@ -3214,12 +3214,11 @@ function InstallSection({ agent: a, autoRegenSignal }: {
       {data && (
         <>
           <div className="relative">
-            <pre style={{
- background: 'var(--muted)', color: 'var(--foreground)', padding: 12, paddingRight: 88,
- borderRadius: 4, fontSize: 12, whiteSpace: 'pre-wrap', margin: 0,
- opacity: expired ? 0.5 : 1,
-            }}>{data.install_command}</pre>
-            <Button className="absolute t-[8px] r-[8px]"
+            {/* 아래 PendingMemberModal 의 같은 블록과 모양을 맞춘다. 만료 표시는
+                불투명도가 아니라 토큰이다(contracts.md — 비활성은 `text/disabled`). */}
+            <pre className={`m-0 whitespace-pre-wrap rounded-sm bg-muted p-3 pr-[88px] text-sm ${
+                             expired ? 'text-text-disabled' : 'text-foreground'}`}>{data.install_command}</pre>
+            <Button className="absolute right-2 top-2"
  onClick={copy} disabled={expired}>{copied ? <Check size={12} /> : <Copy size={12} />} 복사</Button>
           </div>
           <div className="flex items-center gap-3 mt-2">
@@ -3422,7 +3421,7 @@ function PendingMemberModal({ info, onClose }: {
       )}
       <div className="relative">
         <pre className="bg-muted text-foreground p-3 pr-[88px] rounded-sm text-sm whitespace-pre-wrap m-0">{info.install_command}</pre>
-        <Button className="absolute t-[8px] r-[8px]"
+        <Button className="absolute right-2 top-2"
  onClick={copy}>{copied ? <Check size={12} /> : <Copy size={12} />} 복사</Button>
       </div>
       <div className="text-xs text-muted-foreground mt-1.5">
@@ -3751,7 +3750,7 @@ function DeploymentUpgradeModal({ dep: d, packages, onClose, onDone }: {
         <>
           <label className="block text-sm mb-1">올릴 버전</label>
           <Select value={String(pkgId)} onValueChange={(v: string) => setPkgId(Number(v))}>
-            <SelectTrigger className="input w-full"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
               {cands.map((p, i) => (
                 <SelectItem key={p.id} value={String(p.id)}>
