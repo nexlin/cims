@@ -142,6 +142,15 @@ kill_deleted_inode_orphans() {
     done
 }
 
+# 포트가 점유돼 있는가 — **pid 유무와 무관**하다. 죽은 프로세스가 커널에 남긴 소켓은
+# 어떤 pid 의 fd 도 아니라 `ss -p` 가 소유자를 못 붙이는데, 그래도 포트는 물고 있다.
+# pid 로만 판정하면 그런 점유를 "비어 있음" 으로 읽고 bind 실패로 걸어 들어간다.
+_port_busy() {
+    local port="$1" proto="${2:-udp}" flag
+    [[ $proto == "tcp" ]] && flag="-Htln" || flag="-Huln"
+    [[ -n $(ss $flag 2>/dev/null | awk -v pt="$port" 'match($4,/:([0-9]+)$/,m) && m[1]==pt {print 1; exit}') ]]
+}
+
 kill_stray() {
     local pattern="$1"
     local port="${2:-}"
@@ -164,28 +173,34 @@ kill_stray() {
     #    ss(iproute2) 부재 시 선택적 정리이므로 건너뜀 — private/최소 호스트에서
     #    set -e 하에 start 가 hard-fail 하지 않도록 (도구는 패키지/베이스 이미지 책임).
     if [[ -n $port ]] && command -v ss >/dev/null 2>&1; then
+        # 소유자 조회는 _pid_by_port 로 통일한다 — capability 바이너리처럼 ss -p 가 귀속을
+        # 거부하는 경우 root 위임(cims-priv port-owner)까지 거치는 유일한 경로다.
         local port_pids
-        if [[ $proto == "tcp" ]]; then
-            port_pids=$(ss -tlnp 2>/dev/null | awk -v pt="$port" 'match($4,/:([0-9]+)$/,m) && m[1]==pt {match($0,/pid=([0-9]+)/,p); if(p[1]) print p[1]}' || true)
-        else
-            port_pids=$(ss -ulnp 2>/dev/null | awk -v pt="$port" 'match($4,/:([0-9]+)$/,m) && m[1]==pt {match($0,/pid=([0-9]+)/,p); if(p[1]) print p[1]}' || true)
-        fi
+        port_pids=$(_pid_by_port "${port}:${proto}" || true)
         if [[ -n $port_pids ]]; then
             warn "포트 $port ($proto) 점유 프로세스 종료: pid=$port_pids"
             kill $port_pids 2>/dev/null || true
             local i=1
-            if [[ $proto == "tcp" ]]; then
-                while [[ -n $(ss -tlnp 2>/dev/null | awk -v pt="$port" 'match($4,/:([0-9]+)$/,m) && m[1]==pt {print 1}') ]] && (( i <= 20 )); do
-                    sleep 0.2; i=$(( i + 1 ))
-                done
-                port_pids=$(ss -tlnp 2>/dev/null | awk -v pt="$port" 'match($4,/:([0-9]+)$/,m) && m[1]==pt {match($0,/pid=([0-9]+)/,p); if(p[1]) print p[1]}' || true)
-            else
-                while [[ -n $(ss -ulnp 2>/dev/null | awk -v pt="$port" 'match($4,/:([0-9]+)$/,m) && m[1]==pt {print 1}') ]] && (( i <= 20 )); do
-                    sleep 0.2; i=$(( i + 1 ))
-                done
-                port_pids=$(ss -ulnp 2>/dev/null | awk -v pt="$port" 'match($4,/:([0-9]+)$/,m) && m[1]==pt {match($0,/pid=([0-9]+)/,p); if(p[1]) print p[1]}' || true)
-            fi
+            while _port_busy "$port" "$proto" && (( i <= 20 )); do
+                sleep 0.2; i=$(( i + 1 ))
+            done
+            port_pids=$(_pid_by_port "${port}:${proto}" || true)
             [[ -n $port_pids ]] && kill -9 $port_pids 2>/dev/null || true
+        fi
+
+        # 정리하고도 점유가 남으면 뒤이은 start 는 bind 에서 죽는다. **여기서 말하지 않으면
+        # 그 이유가 아무 데도 안 남는다** — pid 를 못 얻었다는 이유로 이 블록을 통째로
+        # 건너뛰었고, 로그 한 줄 없이 EADDRINUSE 만 났다(2026-09-11 oam-svc, 노드 영구 래치).
+        # 소유 프로세스가 없는 점유 = 죽은 인스턴스가 남긴 고아 소켓이라 kill 로 회수할 수
+        # 없다. 재부팅이 유일한 정리라는 것을 운영자에게 그대로 알린다.
+        if _port_busy "$port" "$proto"; then
+            local owner; owner=$(_pid_by_port "${port}:${proto}" || true)
+            if [[ -z $owner ]]; then
+                err "포트 $port/$proto 점유가 남았는데 소유 프로세스가 없다 — 고아 소켓이다."
+                err "  kill 로 회수할 수 없다(재부팅 필요). 이대로 기동하면 bind 가 EADDRINUSE 로 실패한다."
+            else
+                warn "포트 $port/$proto 점유가 남았다 (pid=$owner) — 기동이 실패할 수 있다"
+            fi
         fi
     fi
 }

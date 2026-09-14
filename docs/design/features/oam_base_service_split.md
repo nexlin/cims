@@ -379,6 +379,16 @@ start_svc_mgmt()  { kill_stray "svc_mgmt_app.py" "$port" tcp
   승격 직후 서비스 API 가 전면 장애난다([oam_ha.md](oam_ha.md) §6.6).
 - 기동 순서: **base 먼저(게이트웨이·인증) → 서비스 모듈.** 서비스 지연/실패 시 base 정상, 해당
   라우트만 503(I3).
+- **bind 에 성공해야 기동 성공이다**(`httpsrv/server.py`). uvicorn 은 `EADDRINUSE` 를 잡아
+  로그만 남기고 `serve()` 를 *정상 종료*하므로, 준비 완료를 `serve()` 생성 직후에 알리면
+  **HTTP 없이 살아 있는 프로세스**가 된다 — agent liveness 는 "process up" 으로 통과하고
+  readiness 만 계속 실패해, **스스로 죽지도 남이 재기동하지도 못하는 상태로 굳는다**
+  (2026-09-11 oam-svc 실측: 죽은 인스턴스의 고아 소켓이 `:4480` 을 쥔 채 새 프로세스가
+  bind 에 실패했는데 "server started" 를 찍었고, 노드가 영구 `FAILOVER_LATCHED` 로 남았다).
+  그래서 `uvicorn.Server.started` 를 확인한 뒤에 준비 완료를 알리고, 실패는 `start()` 가
+  **예외로 올려** 프로세스를 종료시킨다. 죽으면 watchdog 이 재기동하고, 그때 포트도 함께
+  풀려 정상 기동한다. 기동 실패 뒤 불리는 `stop()` 은 아직 만들어지지 않은 것에 손대지
+  않는다 — 그 `AttributeError` 가 진짜 실패 사유를 덮는다.
 
 ---
 
@@ -387,6 +397,7 @@ start_svc_mgmt()  { kill_stray "svc_mgmt_app.py" "$port" tcp
 | 시나리오 | 기대 동작 |
 |---|---|
 | 서비스 모듈 crash/OOM | base 생존: 로그인·시스템관리·heartbeat 정상. 해당 위젯만 "불가". watchdog 재기동 → 자동 복구 |
+| 재기동 시 포트가 아직 점유 | `start()` 가 예외 → 프로세스 종료 → watchdog 재시도. **떠 있는 척하지 않는다**(liveness 통과 + readiness 영구 실패 = 자가치유 불가) |
 | 서비스 모듈 지연/무한루프 | 프록시 타임아웃 → 503, base 경로 무영향 |
 | 서비스 미설치(부트스트랩 1~2단계) | 라우트 미등록 → 503, base 단독 정상. 위젯 "미설치" 표기 |
 | 서비스 모듈 업그레이드 | base 무중단; 프록시 503 창 → 신버전 기동 후 자동 정상 |

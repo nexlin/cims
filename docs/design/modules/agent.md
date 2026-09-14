@@ -91,6 +91,15 @@ systemd `ExecStart` 와 sudoers 는 고정 경로 `agent/current/...` 를 가리
   (`_pids_under_module_root`) — 소유권 기준이 경로라 남의 모듈을 건드리지 않는다.
   단위시험 `tests/agent_pid_version_test.sh`.
 
+- **포트 점유 판정은 pid 유무와 분리한다**(`lifecycle.sh` `_port_busy`). 비정상 종료한
+  프로세스가 커널에 남긴 listening 소켓은 **어떤 pid 의 fd 도 아니라** `ss -p` 가 소유자를
+  못 붙이는데, 그래도 포트는 물고 연결을 backlog 에 쌓는다. 소유자 조회(`_pid_by_port`,
+  root 위임 `cims-priv port-owner` 포함)로 pid 를 못 얻었다고 정리 블록을 통째로 건너뛰면
+  그 점유가 보이지 않는 채 `start` 가 EADDRINUSE 로 죽는다 — 로그 한 줄 없이. 정리 후에도
+  점유가 남으면 **소유자 유무를 구분해 기록한다**: 소유자가 없으면 고아 소켓이라 kill 로
+  회수할 수 없고 재부팅이 유일한 정리라는 것까지 알린다(2026-09-11 oam-svc 실측 — 이
+  침묵 때문에 노드가 영구 `FAILOVER_LATCHED` 로 남았다).
+
 ## 4. 상태 머신
 
 | 상태 | 조건 |

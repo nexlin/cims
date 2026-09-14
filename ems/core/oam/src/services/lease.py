@@ -116,6 +116,12 @@ def _locking_enforced(path: str) -> bool:
         probe.close()
 
 
+def locking_enforced(path: str) -> bool:
+    """`_locking_enforced` 의 공개 이름 — 같은 판정이 필요한 다른 모듈(stats_store)이 쓴다.
+    판정 규칙을 두 벌로 두면 한쪽만 고쳐져 서로 다른 결론을 낸다."""
+    return _locking_enforced(path)
+
+
 def acquire(root: str) -> dict:
     """store 루트의 소유권 획득 시도. 결과 상태 dict 반환 (예외 없음).
 

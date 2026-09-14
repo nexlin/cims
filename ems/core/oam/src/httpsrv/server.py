@@ -25,9 +25,12 @@ class HttpServer:
         self._ssl_keyfile = ssl_keyfile
         self._ssl_certfile = ssl_certfile
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._server = None                   # uvicorn.Server — _bootstrap 에서 만든다
+        self._server_task = None
         self._io_executor: Optional[ThreadPoolExecutor] = None
         self._lag_task = None                 # 이벤트 루프 지연 감시
         self._ready_event = threading.Event()
+        self._start_error = None      # 기동 실패 사유 — start() 가 호출자에게 올린다
         self._shutdown_event = threading.Event()
         self._thread = threading.Thread(target=self._start_event_loop, daemon=True)
         self._app = self._create_app()
@@ -52,8 +55,36 @@ class HttpServer:
         self._logger.log_info(f"start http server on {self._host}:{self._port}")
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
-        self._loop.run_until_complete(self._bootstrap())
-        self._shutdown_event.set()
+        try:
+            self._loop.run_until_complete(self._bootstrap())
+        except BaseException as e:                      # noqa: BLE001 — 사유를 start() 로 넘긴다
+            # uvicorn 은 bind 실패에 sys.exit(STARTUP_FAILURE) 를 쓴다 — SystemExit 는
+            # asyncio 가 태스크에 담지 않고 run_until_complete 밖으로 올리므로 여기서 받는다.
+            self._start_error = e
+            self._abort_tasks()
+        finally:
+            # 기다리는 start() 를 **반드시** 깨운다. 기동에 실패하면 _ready_event 가 서지 않아
+            # start() 가 영원히 블록됐다.
+            self._ready_event.set()
+            self._shutdown_event.set()
+
+    def _abort_tasks(self):
+        """기동 실패 경로의 잔여 태스크 정리. 남겨 두면 파이썬이 'Task was destroyed but it
+        is pending' / 'exception was never retrieved' 를 찍어 **진짜 사유를 로그에서 밀어낸다**."""
+        tasks = [t for t in (self._server_task, self._lag_task) if t is not None]
+        for t in tasks:
+            if t.done():
+                if not t.cancelled():
+                    t.exception()          # 회수 — 경고 억제
+            else:
+                t.cancel()
+        pending = [t for t in tasks if not t.done()]
+        if pending and self._loop is not None and not self._loop.is_closed():
+            try:
+                self._loop.run_until_complete(
+                    asyncio.gather(*pending, return_exceptions=True))
+            except BaseException:          # noqa: BLE001 — 정리 실패가 원인을 가리지 않게
+                pass
 
     async def _bootstrap(self):
         self._io_executor = ThreadPoolExecutor(
@@ -73,6 +104,16 @@ class HttpServer:
         self._server = uvicorn.Server(config)
         self._server_task = asyncio.create_task(self._server.serve())
         self._lag_task = asyncio.create_task(self._watch_loop_lag())
+        # uvicorn 이 **실제로 포트를 잡을 때까지** 기다린 뒤에 준비됨을 알린다.
+        # bind 실패(EADDRINUSE)를 uvicorn 은 로그만 남기고 serve() 를 정상 종료하므로,
+        # 여기서 확인하지 않으면 HTTP 없이 살아 있는 프로세스가 된다 — agent liveness 는
+        # "process up" 으로 통과하고 readiness 만 계속 실패해서, 스스로 죽지도 남이
+        # 재기동하지도 못하는 상태로 굳는다(2026-09-11 실측: 죽은 인스턴스의 고아 소켓이
+        # 포트를 쥔 채 남아 그 노드가 영구 FAILOVER_LATCHED).
+        while not self._server.started and not self._server_task.done():
+            await asyncio.sleep(0.02)
+        if not self._server.started:
+            raise RuntimeError(f"bind 실패 — {self._host}:{self._port} 를 잡지 못했다")
         self._ready_event.set()
         try:
             await self._server_task
@@ -180,19 +221,40 @@ class HttpServer:
             pass
 
     def start(self):
+        """서버 스레드 기동. **기동에 실패하면 예외를 올린다** — 조용히 돌아오면 호출자가
+        떠 있는 줄 알고 계속 진행해, 포트가 없는 채로 사는 프로세스가 된다."""
         self._thread.start()
         self._ready_event.wait()
+        err = self._start_error
+        if err is not None:
+            if isinstance(err, SystemExit):
+                # uvicorn 의 기동 실패 종료 — 거의 언제나 포트 점유다. str(SystemExit(1)) 은
+                # "1" 이라 그대로 실으면 사유가 사라진다.
+                why = (f"서버가 기동 중 종료했다 (uvicorn exit={err.code}) — "
+                       f"대개 포트 점유(EADDRINUSE)다. 이미 떠 있는 인스턴스나 "
+                       f"죽은 프로세스가 남긴 고아 소켓을 확인하라")
+            else:
+                why = f"{type(err).__name__}: {err}"
+            raise RuntimeError(
+                f"http server 기동 실패 ({self._host}:{self._port}) — {why}") from err
 
     def stop(self, timeout: float = 5.0):
-        # stop uvicorn-server
-        self._server.should_exit = True
+        # 기동에 실패한 뒤에도 호출자의 정리 경로에서 불린다 — 아직 만들어지지 않은 것에
+        # 손대면 그 AttributeError 가 진짜 실패 사유를 덮는다.
+        if self._server is not None:
+            self._server.should_exit = True
 
         # stop event loop
         self._shutdown_event.wait(timeout)
-        self._loop.call_soon_threadsafe(self._loop.stop)
+        if self._loop is not None and not self._loop.is_closed():
+            try:
+                self._loop.call_soon_threadsafe(self._loop.stop)
+            except RuntimeError:
+                pass
 
         # stop thread
-        self._thread.join(timeout)
+        if self._thread.is_alive():
+            self._thread.join(timeout)
 
         self._logger.log_info(f"stop http server on {self._host}:{self._port}")
 
