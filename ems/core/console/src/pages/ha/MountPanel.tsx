@@ -22,7 +22,8 @@ export function MountPanel({ title, mounts, applying, onApply }: {
   mounts: AgentMount[]
   applying?: boolean
   onApply: (
-    ops: Array<{ op: 'add'|'del'; fstype?: string; source?: string; target: string; options?: string }>,
+    ops: Array<{ op: 'add'|'del'; fstype?: string; source?: string; target: string; options?: string
+                force?: boolean }>,
     label: string,
   ) => void
 }) {
@@ -38,11 +39,33 @@ export function MountPanel({ title, mounts, applying, onApply }: {
     setSource(''); setTarget(''); setOptions(MOUNT_DEFAULTS.options)
   }
   // 빈칸은 placeholder 로 보여준 기본값으로 채운다 (그룹 공통 패널과 동일 규칙).
-  const commitAdd = () => {
+  // 저장은 fstab 갱신에서 끝나지 않고 **그 자리에서 마운트까지** 한다 — 파일시스템이 실제로
+  //   바뀌고 그 경로를 쓰는 모듈(녹취·로그)이 영향을 받는다. 그래서 삭제와 같은 무게로 묻는다.
+  //   이미 다른 source 가 그 지점을 점유하고 있으면 agent 가 재마운트를 보류하므로(SOURCE_MISMATCH),
+  //   승인받은 경우에만 force 를 실어 보낸다. "현재" 값은 선언이 아니라 agent 실측(actual_source)이다.
+  const commitAdd = async () => {
     const t = target.trim()  || MOUNT_DEFAULTS.target
     const s = source.trim()  || MOUNT_DEFAULTS.source
     const o = options.trim() || MOUNT_DEFAULTS.options
-    onApply([{ op: 'add', fstype: fstype || MOUNT_DEFAULTS.fstype, source: s, target: t, options: o }],
+    const cur = mounts.find(m => m.target === t)
+    const attached = cur?.actual_source || null
+    const changing = attached !== null && attached !== s
+    if (!await confirm({
+      title: changing ? '마운트 변경 — 재연결' : '마운트 저장',
+      tone: changing ? 'danger' : undefined,
+      confirmLabel: changing ? '재연결' : '저장',
+      body: <>
+        {changing ? <>
+          <div>지금 붙어 있는 것: <b className="font-mono">{attached}</b></div>
+          <div>바꾸려는 것: <b className="font-mono">{s}</b></div>
+          <div className="mt-2">떼었다 다시 연결합니다 — 이 경로를 쓰는 모듈이 잠시 영향을 받습니다.</div>
+        </> : <>
+          <div className="font-mono">{s} → {t}</div>
+          <div className="mt-2">저장하면 /etc/fstab 에 기록하고 그 자리에서 마운트합니다.</div>
+        </>}
+      </> })) return
+    onApply([{ op: 'add', fstype: fstype || MOUNT_DEFAULTS.fstype, source: s, target: t, options: o,
+               ...(changing ? { force: true } : {}) }],
             `mount += ${s} → ${t}`)
     setAddOpen(false)
   }

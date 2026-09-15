@@ -1767,7 +1767,9 @@ async def _apply_mounts(handler_args: HandlerArgs, aid: int, config):
     """MountPanel 의 [추가]/[삭제] 진입점 — agent sync REST /apply-mounts 즉시 호출.
     agent 가 fstab 에 기록(영속 → 재부팅 시 OS 자동 마운트) + 즉시 mount.
 
-    Request body: { "mounts": [{op:'add'|'del', fstype, source, target, options?}, ...] }
+    Request body: { "mounts": [{op:'add'|'del', fstype, source, target, options?, force?}, ...] }
+                  force=true 는 이미 다른 source 가 붙어 있어도 재마운트하라는 뜻이다 —
+                  콘솔이 운영자 확인을 받은 뒤에만 보낸다(없으면 agent 가 보류·exit 4).
     성공 시 file_store 의 agent.mounts(desired) 를 op 반영해 갱신.
     """
     row = await asyncio.to_thread(_agent_load, config, aid)

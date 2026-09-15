@@ -37,6 +37,9 @@ export type MountOp = {
   fstype?: string
   source?: string
   options?: string
+  /** 이미 다른 source 가 그 지점을 점유하고 있어도 재마운트한다. 콘솔이 **운영자 확인을
+   *  받은 뒤에만** 실어 보낸다 — force 없이 불일치면 agent 가 재마운트를 보류한다. */
+  force?: boolean
 }
 
 // AS 절체 조건 (그룹/시스템 스코프) — keepalived vrrp_instance / vrrp_script 가 사용.

@@ -180,6 +180,11 @@ export interface AgentMount {
   fstype: string                 // nfs | nfs4 | cifs | ext4 | ...
   options?: string               // 예: defaults,_netdev,nofail
   mounted?: boolean              // 현재 마운트 여부 (heartbeat 보고)
+  /** 그 지점에 **실제로** 붙어 있는 source (agent heartbeat 실측). 선언(source)과 다르면
+   *  운영 데이터가 엉뚱한 스토리지에 쌓이는 상태다 — 저장 확인창이 "현재" 값으로 쓴다. */
+  actual_source?: string | null
+  /** 선언과 실측의 일치 여부. 미마운트면 null(비교 대상 없음). */
+  source_match?: boolean | null
 }
 
 export interface AgentCreateResult extends Agent {
@@ -540,7 +545,9 @@ export const deploymentApi = {
                ok: boolean; rc: number;
                stdout: string; stderr: string }>(`/agents/${id}/apply-ip-config`, ops ?? {}),
   applyMounts:   (id: number,
-                  mounts: Array<{ op: 'add'|'del'; fstype?: string; source?: string; target: string; options?: string }>) =>
+                  // force: 이미 다른 source 가 붙어 있어도 재마운트한다. **운영자 확인을
+                  //   받은 뒤에만** 보낸다 — 그 경로를 쓰는 모듈이 영향을 받는다.
+                  mounts: Array<{ op: 'add'|'del'; fstype?: string; source?: string; target: string; options?: string; force?: boolean }>) =>
     api.post<{ agent_id: number; mounts: number; ok: boolean; rc: number;
                stdout: string; stderr: string }>(`/agents/${id}/apply-mounts`, { mounts }),
   applyNetTuning: (id: number, tuning: { sysctl: Record<string, number>; rps: Array<{ iface: string; cpus: string }> }) =>
