@@ -470,6 +470,14 @@
       "description": "모듈 내부 알람/이벤트를 OAM FM ingest 로 push — alarm_self_reporting.md. 카탈로그는 config/fm_catalog.json (기동 시 FM_REGISTER 로 등록).",
       "fields": [
         {
+          "key": "Setup.SystemId",
+          "label": "시스템 ID",
+          "type": "string",
+          "default": "csp_01",
+          "restart": true,
+          "help": "로그·알람 신원이자 Flow/Msg 로그 파일명 접두어(csp_01.flow.jsonl 등). CMP/CMDP 제어 메시지의 node 헤더로도 나간다. 노드가 둘 이상이면 노드마다 달라야 한다 — 같으면 공유 스토리지에서 같은 파일명으로 충돌하고 알람 출처를 가릴 수 없다. 코드 폴백도 csp_01."
+        },
+        {
           "key": "Setup.Fm.Enable",
           "label": "FM 자기보고 사용",
           "type": "bool",
