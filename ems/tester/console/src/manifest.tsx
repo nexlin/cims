@@ -12,8 +12,7 @@ import TesterResultsPage from './pages/TesterResultsPage'
 import TesterComparePage from './pages/TesterComparePage'
 import TesterScenariosPage from './pages/TesterScenariosPage'
 import TesterTopologiesPage from './pages/TesterTopologiesPage'
-import TesterTopologyCanvasPage from './pages/TesterTopologyCanvasPage'
-import TesterScenarioCanvasPage from './pages/TesterScenarioCanvasPage'
+import TesterMockupsPage from './pages/TesterMockupsPage'
 
 export const testerManifest: ServiceManifest = {
   id: 'tester',
@@ -39,9 +38,14 @@ export const testerManifest: ServiceManifest = {
           apis: ['tester.scenarios', 'tester.scenario', 'tester.scenario.put', 'tester.scenario.delete', 'tester.profiles', 'tester.profile', 'tester.validate'] },
         { path: '/test/topologies', title: '토폴로지',   component: TesterTopologiesPage, requiredRole: 'monitor',
           apis: ['tester.topologies', 'tester.topology.save', 'tester.topology.check', 'tester.workers', 'tester.validate'] },
-        // 확정 UX 목업(§4·§7) — 정식 편집기(토폴로지 v2 스키마)로 대체될 때까지 검토용으로 노출. API 호출 없음
-        { path: '/test/topology-canvas', title: '토폴로지 캔버스', component: TesterTopologyCanvasPage, requiredRole: 'monitor', apis: [] },
-        { path: '/test/scenario-canvas', title: '시나리오 캔버스', component: TesterScenarioCanvasPage, requiredRole: 'monitor', apis: [] },
+        // 확정 UX 목업(§4·§7) — 정식 화면(캔버스 편집기 · 실행/결과/비교 재구성)으로 대체될 때까지 검토용. API 호출 없음.
+        // 사이드바에는 'UX 목업' 하나만 보이고, 목업마다의 경로는 허브 안 탭(hidden — 직접 URL·문서 링크는 산다)
+        { path: '/test/mockups',         title: 'UX 목업',        component: TesterMockupsPage, requiredRole: 'monitor', apis: [] },
+        { path: '/test/topology-canvas', title: '토폴로지 캔버스', component: TesterMockupsPage, requiredRole: 'monitor', apis: [], hidden: true },
+        { path: '/test/scenario-canvas', title: '시나리오 캔버스', component: TesterMockupsPage, requiredRole: 'monitor', apis: [], hidden: true },
+        { path: '/test/run-live',        title: '실행 라이브',     component: TesterMockupsPage, requiredRole: 'monitor', apis: [], hidden: true },
+        { path: '/test/run-report',      title: '결과 보고서',     component: TesterMockupsPage, requiredRole: 'monitor', apis: [], hidden: true },
+        { path: '/test/run-compare',     title: '회귀 비교',       component: TesterMockupsPage, requiredRole: 'monitor', apis: [], hidden: true },
       ],
     },
   ],
