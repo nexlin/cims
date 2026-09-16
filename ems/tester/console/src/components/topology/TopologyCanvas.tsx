@@ -173,7 +173,8 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
         mutate(x => {
           const LL = M.ensureLayout(x); const obj = d.kind === 'worker' ? M.worker(x, d.id) : x.target.nodes[d.id]; if (!obj) return
           if (rid) { const r = LL.regions[rid]; LL.items[d.id] = { x: Math.max(4, d.x - r.x), y: Math.max(4, d.y - r.y - 30) }; if (obj.host !== rid) { obj.host = rid; show(`${d.id} → ${x.hosts[rid]?.name ?? rid}`, 'ok') } }
-          else { LL.items[d.id] = { x: d.x, y: d.y }; if (obj.host) { obj.host = ''; show(`${d.id} 호스트 없음 — 영역 안으로 끌어 놓으십시오`, 'err') } }
+          else if (!obj.host) LL.items[d.id] = { x: d.x, y: d.y }
+          else show(`${d.id}: 호스트 영역 안에 놓으십시오 — 제자리로 되돌렸습니다`, 'err')
         })
       }
     }
@@ -367,7 +368,8 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
                 <div className="flex flex-col gap-1">{orphanP.map(([pn, p]) => <PoolCard key={pn} pn={pn} p={p} />)}</div>
               </div>
             )}
-            {dragCard && (dragCard.kind === 'node' ? <NodeCard id={dragCard.id} n={doc.target.nodes[dragCard.id]} abs={{ x: dragCard.x, y: dragCard.y }} /> : <WorkerCard name={dragCard.id} abs={{ x: dragCard.x, y: dragCard.y }} />)}
+            {/* 이동 중인 카드 — 포인터 이벤트를 꺼서 놓는 자리(elementFromPoint)가 카드 자신이 아니라 아래 호스트 영역으로 잡히게 */}
+            {dragCard && <div className="pointer-events-none">{dragCard.kind === 'node' ? <NodeCard id={dragCard.id} n={doc.target.nodes[dragCard.id]} abs={{ x: dragCard.x, y: dragCard.y }} /> : <WorkerCard name={dragCard.id} abs={{ x: dragCard.x, y: dragCard.y }} />}</div>}
           </div>
           {drag && (drag.type === 'new' || drag.type === 'pool') && (
             <div className="pointer-events-none fixed z-[200] rounded-sm border border-primary bg-card px-2 py-1 text-xs shadow-md" style={{ left: drag.x + 8, top: drag.y + 8 }}>
