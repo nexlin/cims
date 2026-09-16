@@ -673,7 +673,11 @@ def _pgrep_module(name: str):
        안 잡힘. 패키지명(예: oam-svc)은 하이픈을 포함할 수 있으나 python 엔트리포인트 파일명은
        언더스코어(oam_svc_app.py)이므로 stem 은 하이픈→언더스코어로 정규화한다."""
     script_stem = name.replace("-", "_")
-    for argv in (["pgrep", "-ax", name], ["pgrep", "-af", f"{script_stem}_app.py"]):
+    # comm(-x 매칭 대상)은 커널에서 **15자로 잘린다**(TASK_COMM_LEN=16, NUL 포함) — 이름이 15자를
+    # 넘는 C++ 모듈(예: cims-tester-worker=18자 → comm 'cims-tester-wor')은 전체 이름으로 -x 하면
+    # "0 matches" 경고와 함께 못 잡는다(false module_down). -x 는 잘린 comm 에 맞춰 15자로 자른다
+    # (여전히 정확 매칭이라 'isp' 류 부분일치 오탐 없음). 15자 이하는 그대로.
+    for argv in (["pgrep", "-ax", name[:15]], ["pgrep", "-af", f"{script_stem}_app.py"]):
         try:
             r = subprocess.run(argv, capture_output=True, text=True, timeout=2)
         except Exception:
