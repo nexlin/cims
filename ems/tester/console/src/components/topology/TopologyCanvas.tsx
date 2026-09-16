@@ -32,6 +32,7 @@ const PALETTE: { group: string; items: { kind: PaletteKind; label: string; hint:
 type Drag =
   | { type: 'new'; kind: PaletteKind; x: number; y: number }
   | { type: 'pool'; id: string; x: number; y: number; sx: number; sy: number; moved: boolean }
+  | { type: 'link'; id: string; ax: number; ay: number; x: number; y: number }      // 풀 앵커에서 수신점 행으로 선 잇기
   | { type: 'card'; kind: 'worker' | 'node'; id: string; x: number; y: number; ox: number; oy: number; moved: boolean }
   | { type: 'region'; id: string; ox: number; oy: number }
   | { type: 'resize'; id: string; ox: number; oy: number }
@@ -55,7 +56,8 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
   const [tab, setTab] = useState<'json' | 'issues' | 'check'>('issues')
   const [drawerOpen, setDrawerOpen] = useState(true)
   const [drag, setDrag] = useState<Drag | null>(null)
-  const [hot, setHot] = useState<Focus | null>(null)
+  type Hot = Focus | { kind: 'port'; id: string }
+  const [hot, setHot] = useState<Hot | null>(null)
   const [edges, setEdges] = useState<Edge[]>([])
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem('tester-topo-palette') || '{}') } catch { return {} } })
   const stageRef = useRef<HTMLDivElement>(null)
@@ -119,15 +121,32 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
   const under = (e: { clientX: number; clientY: number }) => document.elementFromPoint(e.clientX, e.clientY)
   const ctxOf = (el: Element | null) => {
     const h = el?.closest('[data-region]') as HTMLElement | null, w = el?.closest('[data-worker]') as HTMLElement | null, n = el?.closest('[data-node]') as HTMLElement | null
-    return { host: h?.dataset.region ?? null, worker: w?.dataset.worker ?? null, node: n?.dataset.node ?? null, inCanvas: !!el && !!wrapRef.current?.contains(el) }
+    const pt = el?.closest('[data-port]') as HTMLElement | null
+    return { host: h?.dataset.region ?? null, worker: w?.dataset.worker ?? null, node: n?.dataset.node ?? null, port: pt?.dataset.port ?? null, inCanvas: !!el && !!wrapRef.current?.contains(el) }
   }
   const wantNew = (kind: PaletteKind, ctx: ReturnType<typeof ctxOf>): Focus | null => {
     if (M.POOL_KINDS.includes(kind) && ctx.worker) return { kind: 'worker', id: ctx.worker }
     if ((kind === 'worker' || kind === 'obs_ssh' || kind.startsWith('n_')) && ctx.host) return { kind: 'host', id: ctx.host }
     return null
   }
-  const wantPool = (id: string, ctx: ReturnType<typeof ctxOf>): Focus | null => {
+  /** 풀을 수신점 행 위에 놓았을 때 — UE 풀은 SIP udp/tcp/tls 행(접속점+transport)·db/api 행(신원 원천), 피어 풀은 peering 행(다음 홉) */
+  const wantPort = (id: string, port: string | null): Hot | null => {
+    const p = doc.pools[id]; if (!p || !port) return null
+    const [nid, k] = port.split(':'); const n = doc.target.nodes[nid]; if (!n) return null
+    if (M.isPeer(p)) return k === 'peering' && n.sip?.peering ? { kind: 'port', id: port } : null
+    if ((k === 'udp' || k === 'tcp' || k === 'tls') && n.sip?.access?.[k]) return { kind: 'port', id: port }
+    if (M.isUe(p) && (k === 'db' || k === 'api') && M.dbNodes(doc).includes(nid)) return { kind: 'port', id: port }
+    return null
+  }
+  const applyPort = (x: TopologyDoc, id: string, port: string) => {
+    const p = x.pools[id]; const [nid, k] = port.split(':')
+    if (M.isPeer(p)) { p.peering = nid; show(`${id} 다음 홉 → ${nid}:peering`, 'ok'); return }
+    if (k === 'db' || k === 'api') { if (M.isUe(p)) { const src = 'db' in p.source ? p.source : { table: 'volte_subscriptions' as const, offset: 0, count: 100 }; p.source = { ...src, db: nid }; show(`${id} 신원 원천 → ${nid}`, 'ok') } return }
+    p.access = nid; p.transport = k as Transport; show(`${id} → ${nid} SIP ${k.toUpperCase()}`, 'ok')
+  }
+  const wantPool = (id: string, ctx: ReturnType<typeof ctxOf>): Hot | null => {
     const p = doc.pools[id]; if (!p) return null
+    const port = wantPort(id, ctx.port); if (port) return port
     if (ctx.worker && ctx.worker !== p.worker) return { kind: 'worker', id: ctx.worker }
     if (ctx.node) { const ok = M.isPeer(p) ? M.peeringNodes(doc).includes(ctx.node) : M.accessNodes(doc).includes(ctx.node); if (ok) return { kind: 'node', id: ctx.node } }
     return null
@@ -141,6 +160,9 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
         const ctx = ctxOf(under(e))
         setHot(d.type === 'new' ? wantNew(d.kind, ctx) : wantPool(d.id, ctx))
         setDrag({ ...d, x: e.clientX, y: e.clientY, ...(d.type === 'pool' ? { moved: d.moved || Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 4 } : {}) } as Drag)
+      } else if (d.type === 'link') {
+        const p = stagePt(e); setDrag({ ...d, x: p.x, y: p.y })
+        setHot(wantPort(d.id, ctxOf(under(e)).port))
       } else if (d.type === 'card') {
         const p = stagePt(e)
         setDrag({ ...d, x: snap(p.x - d.ox), y: snap(p.y - d.oy), moved: true })
@@ -158,10 +180,15 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
         const el = under(e); const ctx = ctxOf(el); if (!ctx.inCanvas) return
         const pos = stagePt(e)
         mutate(x => { const r = M.createFromPalette(x, d.kind, pos, { host: ctx.host, worker: ctx.worker }); if (r.made.length) show(`${r.made.join(' · ')} 를 만들어 그 위에 놓았습니다 — 주소·포트를 확인하십시오`, 'ok'); if (r.sel) setSel(r.sel) })
+      } else if (d.type === 'link') {
+        const t = wantPort(d.id, ctxOf(under(e)).port)
+        if (t) mutate(x => applyPort(x, d.id, t.id))
+        else { const ctx = ctxOf(under(e)); if (ctx.node) show(`${ctx.node} 에는 ${M.isPeer(doc.pools[d.id]) ? '피어링' : '접속'} 수신점 행이 없습니다 — 노드 속성에서 켜십시오`, 'err') }
       } else if (d.type === 'pool') {
         const ctx = ctxOf(under(e)); const t = wantPool(d.id, ctx)
         if (d.moved && t) mutate(x => {
           const p = x.pools[d.id]
+          if (t.kind === 'port') { applyPort(x, d.id, t.id); return }
           if (t.kind === 'worker') { p.worker = t.id; show(`${d.id} → ${t.id}`, 'ok') }
           else if (M.isPeer(p)) { p.peering = t.id; show(`${d.id} 다음 홉 → ${t.id}`, 'ok') }
           else { p.access = t.id; const a = x.target.nodes[t.id]?.sip?.access; if (a && !a[p.transport ?? 'udp']) p.transport = (['udp', 'tcp', 'tls'] as Transport[]).find(k => a[k]) ?? p.transport; show(`${d.id} 접속점 → ${t.id}`, 'ok') }
@@ -185,6 +212,12 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
 
   const startNew = (kind: PaletteKind) => (e: React.PointerEvent) => { if (!canWrite) return; e.preventDefault(); setDrag({ type: 'new', kind, x: e.clientX, y: e.clientY }) }
   const startPool = (id: string) => (e: React.PointerEvent) => { e.stopPropagation(); e.preventDefault(); setSel({ kind: 'pool', id }); if (canWrite) setDrag({ type: 'pool', id, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, moved: false }) }
+  const startLink = (id: string) => (e: React.PointerEvent) => {
+    e.stopPropagation(); e.preventDefault(); setSel({ kind: 'pool', id }); if (!canWrite) return
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); const sr = stageRef.current!.getBoundingClientRect()
+    const ax = r.left - sr.left + r.width / 2, ay = r.top - sr.top + r.height / 2
+    setDrag({ type: 'link', id, ax, ay, x: ax, y: ay })
+  }
   const startCard = (kind: 'worker' | 'node', id: string) => (e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest('input,select,button')) return
     e.stopPropagation(); e.preventDefault(); setSel({ kind, id }); if (!canWrite) return
@@ -218,7 +251,7 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
 
   // ── 카드 ────────────────────────────────────────────────────────────────
   const PortRow = ({ id, cls, name, val }: { id: string; cls: Edge['cls'] | 'rtp' | 'db'; name: string; val: string }) => (
-    <div data-port={id} className="flex items-center gap-1.5 border-t border-border px-2 py-0.5 text-[11px]">
+    <div data-port={id} className={`flex items-center gap-1.5 border-t border-border px-2 py-0.5 text-[11px] ${hot?.kind === 'port' && hot.id === id ? 'bg-success-soft ring-1 ring-success' : ''}`}>
       <span data-pa className="inline-block h-2 w-2 rounded-full" style={{ background: EDGE_COLOR[cls] }} />
       <span className="w-14 shrink-0 text-muted-foreground">{name}</span><span className="truncate font-mono" title={val}>{val}</span><span className="ml-auto">{resBadge(id)}</span>
     </div>
@@ -265,7 +298,8 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
       <div data-pool={pn} onPointerDown={startPool(pn)} title={pn}
            className={`relative flex cursor-grab select-none items-center gap-1.5 rounded-sm border bg-muted px-2 py-1 text-xs ${isSel('pool', pn) ? 'border-primary ring-1 ring-primary' : 'border-border'} ${dragging ? 'opacity-40' : ''}`}>
         {body}{errBadge({ kind: 'pool', id: pn })}
-        <span data-pool-anchor={pn} className="absolute -right-1 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full" style={{ background: anchorColor }} />
+        <span data-pool-anchor={pn} onPointerDown={startLink(pn)} title="끌어서 수신점 행에 연결 — 접속점·transport(피어는 다음 홉, DB/API 행은 신원 원천)"
+              className="absolute -right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-card hover:scale-125" style={{ background: anchorColor }} />
       </div>
     )
   }
@@ -316,7 +350,7 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
             </div>
           ))}
           <div className="mt-2 rounded-sm border border-border p-2 text-[11px] leading-relaxed text-muted-foreground">
-            <b>놓는 자리가 소속을 정합니다.</b> 호스트 영역 안에 워커·대상 노드, 워커 카드 안에 풀. 빈 곳에 놓으면 담을 상자를 만듭니다. 선은 그리지 않습니다 — 풀 카드를 SIP 노드 위에 놓으면 접속점/다음 홉이 바뀝니다. <kbd>Del</kbd> 삭제 · <kbd>Esc</kbd> 해제
+            <b>놓는 자리가 소속을 정합니다.</b> 호스트 영역 안에 워커·대상 노드, 워커 카드 안에 풀. 빈 곳에 놓으면 담을 상자를 만듭니다. 선은 모델에서 나옵니다 — 풀 카드의 오른쪽 <b>앵커 점을 끌어 수신점 행</b>(SIP UDP/TCP/TLS · 피어링 · DB/API)에 놓으면 접속점·transport(다음 홉·신원 원천)가 그 행으로 정해집니다. 풀 카드를 SIP 노드 위에 놓아도 됩니다. <kbd>Del</kbd> 삭제 · <kbd>Esc</kbd> 해제
           </div>
           <div className="mt-2 flex flex-col gap-1">
             <span className="text-[11px] font-semibold text-muted-foreground">프리셋</span>
@@ -334,6 +368,7 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
           <div ref={stageRef} data-stage className="relative" style={{ width: stageW, height: stageH, backgroundImage: 'radial-gradient(var(--border) 1px, transparent 1px)', backgroundSize: '20px 20px' }}>
             <svg className="pointer-events-none absolute inset-0" width={stageW} height={stageH}>
               {edges.map((e, i) => <path key={i} d={e.d} fill="none" stroke={e.fail ? 'var(--destructive)' : EDGE_COLOR[e.cls]} strokeWidth={e.hi ? 2.4 : 1.4} strokeDasharray={e.cls === 'reg' || e.cls === 'rtp' || e.cls === 'db' ? '4 3' : undefined} opacity={e.dim ? 0.25 : 0.9} />)}
+              {drag?.type === 'link' && (() => { const dx = Math.max(60, Math.abs(drag.x - drag.ax) * 0.5); return <path d={`M${drag.ax},${drag.ay} C${drag.ax + dx},${drag.ay} ${drag.x - dx},${drag.y} ${drag.x},${drag.y}`} fill="none" stroke={hot?.kind === 'port' ? 'var(--success)' : 'var(--primary)'} strokeWidth={2} strokeDasharray="5 4" /> })()}
             </svg>
             {edges.filter(e => e.label).map((e, i) => (
               <span key={`l${i}`} className={`pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-sm border bg-card px-1 text-[10px] ${e.fail ? 'border-destructive text-destructive' : 'border-border text-muted-foreground'}`} style={{ left: e.lx, top: e.ly, opacity: e.dim ? 0.35 : 1 }}>{e.label}</span>
