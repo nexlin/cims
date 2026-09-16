@@ -168,21 +168,21 @@ run 전에 대상 OAM 의 컬렉션 API(`PUT /api/v1/deployments/{id}/collection
   워커 Endpoint 하나 = 신원 하나(스택 없음, `callId` 로 엔진 호를 가리킴). 착신 INVITE 의 To user 가 범위 밖이면 404, 같은 신원의
   두 번째 호는 486. `ibcf` 프로파일은 착신에 `P-Asserted-Identity` 가 없으면 `pai_missing` 로 센다.
 - **발신.** From = 자기 신원, Request-URI/To = `user@상대 도메인`(psip 기본 `user@접속IP` 를 `CreateCall` 뒤 고쳐 보낸다), 다음 홉 =
-  `target.csp.peering`(없으면 access UDP 접속점). `ibcf` 는 `P-Charging-Vector`(icid-value·orig-ioi, TS 24.229 §7.2A.5)를 싣는다.
+  `peering` 노드의 `sip.peering` 수신점(없으면 access UDP 접속점). `ibcf` 는 `P-Charging-Vector`(icid-value·orig-ioi, TS 24.229 §7.2A.5)를 싣는다.
   UE 가 피어 신원을 부를 땐 `user@피어도메인` 을 다이얼한다 — `SimSession::StartCall` 도 `user@domain` 목적지를 정공법으로 낸다
   (Request-URI host = 도메인 → CSP `req_uri_host` 규칙).
 - **코덱.** 프로파일 기본(ibcf/mgcf = AMR-WB,AMR,PCMU,PCMA · pbx = PCMA,PCMU) 또는 `codecs`. 착신 answer 는 오퍼와의 첫 공통 코덱
   (오퍼 PT echo, RFC 3264), 없거나 SAVP 오퍼면 488 — IP-PBX G.711 ↔ AMR-WB 불일치(cmp.md §11)가 여기서 드러난다.
-- **워커 고정.** 피어 풀은 수신점이 하나이므로 `bind.ip` 호스트의 워커 **하나**에 고정되고, 피어를 쓰는 시나리오는 그 워커에서만 돈다
-  (인스턴스의 역할들이 한 워커에 있어야 하므로). 워커 `GET /health` 의 `local_ip` 로 호스트를 맞춘다.
+- **워커 고정.** 피어 풀은 수신점이 하나이므로 워커 **하나**(`worker`)에 놓이고 수신점은 그 워커 호스트 주소 : `bind.port` 다. 피어를 쓰는 시나리오는
+  그 워커에서만 돈다(인스턴스의 역할들이 한 워커에 있어야 하므로 — §4 워커 교집합 규칙).
 - **시드 파생 규칙**(`tester_target.derive_records`, 태그 `cims-tester` 로 재실행 시 잔재 제거): 시나리오 **역할이 선언한** 피어 풀만
   (`seed.enabled`) — 같은 `route_set` 의 형제라도 선언하지 않으면 시드하지 않는다(워커가 열지 않은 피어를 CSP 가 고르면 호가 죽는다).
   풀 P 마다 `tester-rn-P`(remote_node)·`tester-r-P`(route, `local_node_ref` = 피어링 접속점)·`tester-rule-P-domain`(`req_uri_host eq`),
   `seed.route_set`(기본 = 풀 이름)마다 `tester-rs-<set>`(members = priority/weight, `health_check_mode: none`)·`tester-rs-<set>-match`(OR)·
-  `tester-rp-<set>`(priority 50 → route_set, fail_action reject). `seed.acl: allow|deny` 면 `src_ip eq bind.ip` 규칙 + ACL 정책
-  **scope=local_node(피어링 접속점)** — global 이면 같은 호스트의 UE 트래픽까지 걸린다. 접속점 = `target.csp.peering.local_node` 가 대상에
+  `tester-rp-<set>`(priority 50 → route_set, fail_action reject). `seed.acl: allow|deny` 면 `src_ip eq <피어 워커 호스트 ip>` 규칙 + ACL 정책
+  **scope=local_node(피어링 접속점)** — global 이면 같은 호스트의 UE 트래픽까지 걸린다. 접속점 = `peering` 노드 `sip.peering.local_node` 가 대상에
   있으면 그 레코드, 없으면 그 이름으로 `edge=peering` LocalNode 를 시드한다(CSP 가 SIGUSR1 로 포트를 연다, 복원 시 닫힌다).
-- **대상 OAM.** `target.oam.url` + `token_env`(환경변수의 로그인 토큰) + `csp_deployment_id`(비면 배포 목록에서 패키지 `csp`). 시드/복원
+- **대상 OAM.** `oam` 노드(url = `https://<host.ip>:<port>`) + `token_env`(환경변수의 로그인 토큰) + `csp_deployment_id`(비면 배포 목록에서 패키지 `csp`). 시드/복원
   결과는 run 노트(`csp seed(dep …): remote_nodes+1 …` / `csp seed restored`).
 - **CSP 정합 보완**(같은 변경): 피어링 접속점(`edge=peering`)으로 들어온 요청은 Digest 챌린지 없이 통과한다 — 신뢰는 ACL(TS 24.229 §5.10
   IBCF, TS 29.165 II-NNI). psip UAC 는 등록 정보 없는 401/407 을 재전송하지 않고 최종 실패로 넘긴다(전엔 INVITE↔401 무한 루프).
@@ -231,30 +231,69 @@ run 전에 대상 OAM 의 컬렉션 API(`PUT /api/v1/deployments/{id}/collection
 기능 시험 = 시나리오 + 단발 실행, 성능 시험 = 같은 시나리오 + 부하 프로파일. 시나리오를 두 번 쓰지 않는다.
 토폴로지는 콘솔에서 편집·저장(`modules/oam-cims-tester/runtime/topologies`), 시나리오·프로파일은 패키지 동봉 YAML + 운영자 추가분.
 
+**토폴로지 모델 — 호스트 › 워커·대상 노드 › 풀.** 배치는 세 단이고 **주소는 호스트에만** 둔다 — 워커 URL·노드 수신점·피어 수신점 ip 는
+전부 호스트에서 파생된다. 시험 대상은 역할별 **노드 집합**이라 한 서버에 모인 CIMS 도, 노드마다 서버가 다른 타 IMS 도, IP-PBX 도 같은 레코드
+구조다. 콘솔은 이 레코드를 드래그앤드롭 캔버스로 편집한다(§7).
+
 ```yaml
 # topology.yaml — 대상과 자원
+name: media01
+hosts:                                   # 서버 — 주소·SSH 자격의 유일한 자리. 계측기/대상/동거 구분은 필드가 아니라 그 위에 무엇이 있느냐
+  h45: { name: media01, ip: 10.0.0.45, ssh: { user: cims, key_env: TESTER_SSH_KEY } }
+  h61: { name: tester-a, ip: 10.0.0.61 }
+  h62: { name: tester-b, ip: 10.0.0.62 }
+workers:                                 # 호스트 위의 cims-tester-worker 프로세스 — url = http://<host.ip>:<port> 파생. agent 인벤토리 자동 발견분에 보탠다
+  - { name: w1, host: h61, port: 7100, cpus: 8 }
+  - { name: w2, host: h62, port: 7100, cpus: 8 }
 target:
   name: media01
-  csp: { ip: 10.0.0.45, udp: 5060, tcp: 25061, tls: 5061, domain_volte: volte.cims.example.kr, domain_ptt: ptt.cims.example.kr,
-         peering: { port: 5070, protocol: udp, local_node: cims-tester-peering } }   # 피어 풀의 다음 홉·시드 route 의 접속점
-  csc: { host: 10.0.0.45, port: 4430, tls: true }
-  oam: { url: https://10.0.0.45:4419, token_env: TESTER_OAM_TOKEN, csp_deployment_id: 34 }   # 대상 관측·컬렉션 시드 (동거 형태여도 API 경유)
-  observe: [oam_stats, oam_alarms, agent_heartbeat, ssh_proc]         # 대상 측 KPI 원천
-workers:                                                              # 배포된 cims-tester-worker — 자기 agent 인벤토리에서 자동 발견, 수동 추가 가능
-  - { name: w1, url: http://10.0.0.61:7100, cpus: 8 }
-  - { name: w2, url: http://10.0.0.62:7100, cpus: 8 }
-pools:
-  volte_ue:  { kind: ue, source: { db: target, table: volte_subscriptions, offset: 0, count: 2000 }, transport: tls, srtp: optional }
-  ptt_ue:    { kind: ue, source: { creds: creds/ptt.jsonl }, transport: udp }
-  peer_kt:   { kind: peer, profile: ibcf, bind: { ip: 10.0.0.62, port: 5080, protocol: udp }, domain: ims.kt.test,
-               identities: { e164_range: ["+82212340000", "+82212349999"], count: 200 }, seed: { route_set: rs-kt, priority: 100 } }
-  peer_kt_dead: { kind: peer, profile: ibcf, bind: { ip: 10.0.0.62, port: 5081, protocol: udp }, domain: ims.kt.test, answer: silent,
-               identities: { e164_range: ["+82212340000", "+82212340009"] }, seed: { route_set: rs-kt, priority: 50 } }   # failover 상대
-  peer_blocked: { kind: peer, profile: ibcf, bind: { ip: 10.0.0.62, port: 5082, protocol: udp }, domain: ims.blocked.test,
-               identities: { e164_range: ["+82299990000", "+82299990009"] }, seed: { acl: deny } }                         # ACL 403 시험
-  pbx_hq:    { kind: peer, profile: pbx, bind: { ip: 10.0.0.62, port: 5090, protocol: udp }, register: { user: pbx-hq, ha1_env: PBX_HA1 },
-               identities: { did_range: ["0212345000", "0212345099"], ext_len: 4 } }
+  kind: cims                             # cims | ims | pbx — 라벨·기본값·컬렉션 시드 가능 여부(cims 만)
+  nodes:                                 # 역할(role)별 노드 — 설정 블록이 역할마다 다르다. procs = 호스트 SSH 관측이 볼 프로세스 이름
+    csp: { role: sip, fn: CSP, host: h45, procs: [csp],
+           sip: { access: { udp: 5060, tcp: 25061, tls: 5061, domains: [volte.cims.example.kr, ptt.cims.example.kr] },
+                  peering: { port: 5070, protocol: udp, local_node: cims-tester-peering } } }   # peering = 피어 풀의 다음 홉·시드 route 의 접속점
+    cmp: { role: media, fn: CMP, host: h45, procs: [cmp], media: { rtp_range: [20000, 29999], control: 9001 } }
+    csc: { role: subscriber, fn: CSC, host: h45, procs: [csc], api: { port: 4430, tls: true } }
+    oam: { role: oam, host: h45, oam: { port: 4419, token_env: TESTER_OAM_TOKEN, csp_deployment_id: 34, observe: [oam_stats, oam_alarms, agent_heartbeat] } }
+    db:  { role: db, fn: MariaDB, host: h45, db: { port: 3306, name: cims, user_env: TESTER_DB_USER, password_env: TESTER_DB_PASS } }
+pools:                                   # 풀 하나 = 워커 하나. 어디에 닿는지는 노드 id 참조. 워커 여럿에 나누려면 워커마다 풀 + 같은 group
+  volte_ue_a: { kind: ue, worker: w1, group: volte_ue, access: csp, source: { db: db, table: volte_subscriptions, offset: 0, count: 1000 }, transport: tls, srtp: optional }
+  volte_ue_b: { kind: ue, worker: w2, group: volte_ue, access: csp, source: { db: db, table: volte_subscriptions, offset: 1000, count: 1000 }, transport: tls, srtp: optional }
+  ptt_ue:   { kind: ue, worker: w1, access: csp, source: { creds: creds/ptt.jsonl }, transport: udp }
+  peer_kt:  { kind: peer, worker: w2, peering: csp, profile: ibcf, bind: { port: 5080, protocol: udp }, domain: ims.kt.test,
+              identities: { e164_range: ["+82212340000", "+82212349999"], count: 200 }, seed: { route_set: rs-kt, priority: 100 } }
+  peer_kt_dead: { kind: peer, worker: w2, peering: csp, profile: ibcf, bind: { port: 5081, protocol: udp }, domain: ims.kt.test, answer: silent,
+              identities: { e164_range: ["+82212340000", "+82212340009"] }, seed: { route_set: rs-kt, priority: 50 } }   # failover 상대
+  peer_blocked: { kind: peer, worker: w2, peering: csp, profile: ibcf, bind: { port: 5082, protocol: udp }, domain: ims.blocked.test,
+              identities: { e164_range: ["+82299990000", "+82299990009"] }, seed: { acl: deny } }                         # ACL 403 시험
+  pbx_hq:   { kind: peer, worker: w1, peering: csp, profile: pbx, bind: { port: 5090, protocol: udp }, domain: pbx.hq.test, register: { user: pbx-hq, ha1_env: PBX_HA1 },
+              identities: { did_range: ["0212345000", "0212345099"], ext_len: 4 } }
+layout:                                  # UI 배치 상태 — 캔버스 영역(호스트) 좌표·크기, 카드(워커·노드) 좌표. 컴파일러는 읽지 않는다
+  regions: { h45: { x: 420, y: 40, w: 990, h: 470 }, h61: { x: 30, y: 40, w: 360, h: 330 }, h62: { x: 30, y: 400, w: 360, h: 380 } }
+  items: { csp: { x: 14, y: 12 }, cmp: { x: 290, y: 12 }, w1: { x: 14, y: 12 }, w2: { x: 14, y: 12 } }
 ```
+
+- **노드 역할과 설정 블록.** `sip`(CSP · P/I/S-CSCF · SBC · IBCF · PBX) 는 두 수신점을 켜고 끈다 — `sip.access` = UE 가 등록·발신하는 곳(udp/tcp/tls
+  포트 + `domains`: 첫 항목이 기본 홈 도메인, `ptt` 가 든 항목이 PTT 풀 도메인), `sip.peering` = 피어 풀의 다음 홉(`local_node` 는 cims 만). 둘 다 끄면
+  관측 전용 노드(S-CSCF 처럼). `tas`(코어 내부, 참고 포트) · `media`(CMP · MRF · TrGW — `rtp_range` 가 있어야 미디어 leg 지표를 그 노드에 귀속) ·
+  `subscriber`(CSC · HSS — `api` 가 있으면 DB 원천·연결 검사 대상, HSS 처럼 없으면 관측만) · `oam`(CIMS 전용 — 통계·알람 관측 + 컬렉션 시드,
+  url = `https://<host.ip>:<port>`) · `db`(MariaDB — H(A1) 보유 가입자 원천, `creds-from-db` 와 같은 원천). 어느 노드든 `procs` 를 적으면 호스트의 `ssh`
+  로 그 프로세스 CPU/메모리를 본다(`stop_on.target_cpu_pct` 원천). `fn`·`label` 은 표시용.
+- **풀 → 노드 참조.** `ue/real-ue.access` = `sip.access` 가 있는 노드(그 노드에 없는 transport 는 거절) · `peer.peering` = `sip.peering` 이 있는 노드 ·
+  `source.db` = `db` 노드 또는 `api` 있는 `subscriber` 노드. 워커에 내려가는 `PoolCreate.target_csp`(§6.1) 는 컨트롤러가 이 참조에서 **파생**한다 —
+  워커 계약은 그대로다.
+- **풀 → 워커 배치.** 풀 하나 = 워커 하나(`worker`). 피어 풀의 수신점은 그 워커 호스트 주소 : `bind.port`. 부하를 워커 여럿에 나누려면 **워커마다 풀을
+  두고 같은 `group`(논리 풀 이름)을 준다** — 신원은 풀 정의가 나눈다(DB `offset/count` 또는 creds 파일). 시나리오의 `roles.X.pool` 은 풀 **이름 또는
+  `group`** 과 맞으면 되고, 컴파일러는 워커마다 역할을 그 워커의 로컬 풀 하나로 해석한다(이름 또는 group 일치 — 워커당 같은 group 은 하나, group 은
+  다른 풀 이름과 겹치지 않는다). **모든 역할이 해석되는 워커만 run 에 참여**하고, 그런 워커가 없으면 컴파일 오류. 워커 한 대만 쓰면 group 없이 이름만으로
+  끝난다. 신원 범위를 워커에 나눠 보내는 컨트롤러 배분(§6.1)은 이 규칙으로 대체된다 — 워커에 내려가는 신원 = 그 워커 풀의 신원 전부.
+- **호스트 성격은 파생.** 워커만 = 계측기, 대상 노드만 = 대상, 둘 다 = 동거(허용 — CPU 지표는 워커 몫을 뺀 값으로 본다), 없음 = 빈 호스트. 필드로
+  두지 않는다.
+- **`kind`.** `cims` 는 `oam` 노드가 있을 때 컬렉션 시드(§3.2)·`target_build` 를 쓴다. `ims`/`pbx` 는 시드 없음 — 피어 수신점으로의 라우팅은 대상 쪽에서
+  미리 잡아 두고, 피어 풀 `seed.*` 는 경고.
+- **컨트롤러 이행 상태.** 컨트롤러 계약(`tester_models.Topology`)은 아직 이전 꼴(`target.csp/csc/oam` · `workers[].url` · `pools.*.bind.ip`)로 동작한다.
+  이 모델로의 이행은 §10 E 의 남은 것 — 스토어 읽기 시 기계적 변환(csp/csc/oam → 호스트 하나 + 노드 셋, url → host, bind.ip → worker)으로 기존
+  레코드를 승계하고, 콘솔 캔버스는 목업(`/test/topology-canvas`)에서 정식 편집기로 바뀐다.
 
 ```yaml
 # scenarios/volte/call_basic.yaml — 시나리오 (기능·성능 공용)
@@ -294,6 +333,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
   body 안의 `register/deregister` 는 거절한다. `invite` 는 비동기(다음 단계로 바로 진행), `answer/reject` 는 착신 도착을 기다렸다가 `after_ms` 뒤
   응답하고 발신자 확립(또는 최종 응답)까지 기다린다, `media_hold` 는 확립을 기다린 뒤 `seconds` 유지하고 끝에 RTP 품질 표본을 뜬다,
   `bye` 는 BYE 최종 응답(SDD)까지 기다린다. 어느 대기든 시한(`Timers.InviteTimeoutMs`·`ByeTimeoutMs`)을 넘기면 인스턴스 실패 + event.
+- **역할의 풀** — `roles.X.pool` 은 토폴로지 풀 **이름 또는 `group`**(논리 풀 이름, §4). 워커마다 그 워커의 로컬 풀 하나로 해석된다.
 - **역할의 신원 창** — `count` 생략 = 풀 전체. 단, 같은 풀에서 서로 `disjoint_from` 인 역할들이 `count` 없이 있으면 풀을 **균등 분할**한다
   (caller/callee 가 한 풀을 나눠 쓰는 흔한 꼴). 명시 `count` 는 먼저 빼고 나머지를 나눈다. 창이 비면 컴파일 오류.
 - **단발(기능) 실행** = 프로파일 없이 `POST /runs {instances: N}` — 워커가 N 개(워커 간 배분)를 발생시키고 다 끝나면 스스로 run 을 닫는다
@@ -339,7 +379,8 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
   `kind=peer` 풀은 `PoolCreate.peer`(토폴로지 PeerPool 그대로)로 엔진을 만들고 생성 즉시 bind 한다(실패 400 `peer_bind_failed`);
   `target_csp.peering` 이 발신 다음 홉이다.
   신원 `Identity.auth_id` 는 IMPI 사용자부 — `@` 가 없으면 워커가 `domain` 을 붙인다(cspsim `-creds` authId 규약; CSP 는 `authId@domain` 을 기대한다).
-  컨트롤러는 각 워커에 **자기 몫의 신원만** 보낸다(`role_slices` 는 워커 로컬 인덱스) — 역할 창을 워커 `cpus` 가중으로 연속 분할한다.
+  컨트롤러는 각 워커에 **그 워커 풀의 신원**을 보낸다(`role_slices` 는 워커 로컬 인덱스 — `disjoint_from` 창은 풀 안에서 나눈다). 워커 사이의 신원 분할은
+  컨트롤러가 하지 않고 풀 정의(워커마다 풀 + 같은 `group`, §4)가 한다.
 - **관측(워커 → 컨트롤러)** 지속 TCP JSONL(컨트롤러 `Tester.WorkerStreamPort` 7110) 한 줄 = 한 레코드: `hello` → `agg`(1초 집계 — `counters`(attempt/session/leg·응답 코드·RTP 카운터) · `gauges`(동시 세션·등록 수·CPU) · `timers`(`rrd_ms`·`srd_ms`·`sdd_ms`·`jitter_ms`·`floor_grant_ms` 히스토그램)) · `event`(실패 개별 건 — Call-ID·역할·단계·코드) · `log`. UDP 는 부하 중 유실되어 지표를 왜곡하므로 쓰지 않는다.
 - 워커 용량 선언: 기동 시 측정한 `max_endpoints`·`max_saps`(cspsim 실측 기준 코어당 UA 약 200, RTP 포함). 컨트롤러는 풀을 워커에
   나눠 배분하고 부족하면 시작 전에 거절한다.
@@ -352,7 +393,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 - 관리 store 리스: 컨트롤러는 기동 시 자기 서브트리 `modules/oam-cims-tester/runtime` 에 소유권 리스(flock)를 잡는다 — base `oam` 이 잡는 루트와
   별개(I5 단일 소유, oam_ha §4.4 단일 writer). 못 잡으면 read-only 로 떠서 토폴로지 저장·run 색인이 `not_lease_owner` 로 거절된다.
 - 워커 발견: 컨트롤러는 자기 base 의 배포 목록(`GET /api/v1/deployments`, 패키지 `cims-tester-worker`)에서 워커 주소를 자동 수집한다.
-  토폴로지의 `workers` 수동 항목은 이를 덮어쓰거나 보탠다(agent 없는 호스트).
+  토폴로지의 `workers` 항목(호스트 참조 + 포트)은 이를 덮어쓰거나 보탠다(agent 없는 호스트).
 
 ### 6.2 컨트롤러 ↔ base OAM (서비스 모듈 규약)
 
@@ -375,7 +416,8 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 
 | 화면(라우트) | 내용 |
 |---|---|
-| 토폴로지 `/test/topologies` | 레코드 목록 + JSON 문서 편집기(컨트롤러 `topology` 스키마로 타이핑 중 검증, 생성/저장/삭제) · 선택 토폴로지의 **워커 상태·용량**(`GET /workers?topology=` — 버전·단말 n/최대·최대 SApS·CPU·진행 run·시계 오차 > 50 ms 경고) · **연결 검사**(`POST /topologies/{id}/check` — CSP OPTIONS(UDP)/TCP/TLS·피어링 접속점(평상시 닫힘 = 참고)·CSC·대상 OAM 토큰·워커 health, 항목별 OK/실패/참고·ms). 비밀은 환경변수 이름만. 워커 자동 발견(agent 배포 목록)은 남음 |
+| 토폴로지 `/test/topologies` | 레코드 목록 + JSON 문서 편집기(컨트롤러 `topology` 스키마로 타이핑 중 검증, 생성/저장/삭제 — 캔버스 편집기가 이 화면에 들어오면 JSON 은 하단 드로어의 읽기/쓰기 뷰가 된다) · 선택 토폴로지의 **워커 상태·용량**(`GET /workers?topology=` — 버전·단말 n/최대·최대 SApS·CPU·진행 run·시계 오차 > 50 ms 경고) · **연결 검사**(`POST /topologies/{id}/check` — CSP OPTIONS(UDP)/TCP/TLS·피어링 접속점(평상시 닫힘 = 참고)·CSC·대상 OAM 토큰·워커 health, 항목별 OK/실패/참고·ms). 비밀은 환경변수 이름만. 워커 자동 발견(agent 배포 목록)은 남음 |
+| 토폴로지 캔버스 `/test/topology-canvas` | **확정 UX 의 목업**(검토용, API 호출·저장 없음 — 컨트롤러 v2 이행 뒤 정식 편집기로 대체). 정식 편집기 사양 = ① **팔레트**(왼쪽, 카테고리 접기: 서버(호스트·SSH 관측) · 계측기 워커 · 풀(UE·실단말·IBCF·PBX·MGCF) · 시험 대상 노드 6 역할) ② **캔버스** — 호스트 = 옅은 색 영역(6색 낮은 채도, 이름 앞 색점, 성격 배지 계측기/대상/동거 파생), 자유 배치·모서리 크기 조절·**내용물에 맞춰 자동 확장**; 워커·대상 노드 = 영역 안 자유 배치 카드(영역 사이로 끌면 호스트 변경, 밖에 두면 빨간 점선 고아); 풀 = 워커 카드 안(풀 하나 = 워커 하나, 워커 사이로 끌면 이동, `group` 이 있으면 `≡ <group>` 칩); **빈 곳에 놓으면 상자 자동 생성**(풀 → 호스트+워커, 워커·노드 → 호스트, 호스트 위 워커 없는 곳의 풀 → 워커) ③ **선은 그리지 않고 모델에서 파생** — UE 풀 → 접속점(transport 색 udp/tcp/tls, srtp 라벨) · 피어 풀 → 피어링 수신점(route_set·priority 또는 ACL 라벨, 타 IMS 는 `→ 노드`) · 트렁크 REGISTER 점선 · RTP 점선 → 미디어 노드 · DB 원천 점선; 풀 카드를 SIP 노드 위에 놓으면 접속점/다음 홉이 바뀐다 ④ **속성 패널**(오른쪽, 역할별 폼 — 호스트 주소·SSH / 워커 포트·cpus·health / 노드 수신점·RTP·API·OAM·DB·감시 프로세스 / 풀 워커·group·접속점·transport·원천·신원·시드·REGISTER) ⑤ **하단 드로어** = 레코드 JSON · 검증(오류·경고·참고, 항목 클릭 → 카드 이동, 오류 있으면 저장 잠금) · 연결 검사(항목 = `노드:수신점`·`호스트:ssh`·`worker_<이름>`, 결과가 카드의 같은 행에 OK/실패/참고·ms 로 붙고 실패 선은 붉게) ⑥ 프리셋 3종(CIMS 한 호스트 5 노드 · 일반 IMS 분리 배치 · IP-PBX), 자동 배치, 되돌리기, 테마 대응. 카드 위치·영역 크기는 레코드 `layout` 에 저장(§4) |
 | 시나리오 `/test/scenarios` | 탭 둘 — **시나리오**(태그 필터 volte/ptt/trunk/…, 목록은 검증 오류 파일도 오류 수 배지로 노출) / **부하 프로파일**. 오른쪽 YAML 편집기 = textarea + 검증 옆칸(`POST /validate`, 600 ms 디바운스) · 저장(`PUT` — 운영자본, 동봉본을 저장하면 같은 id 의 override) · 되돌리기 · 삭제(운영자본만) · **단발 실행**(RunStartDialog, 시나리오 고정). 새 문서는 템플릿에서 시작. 단계 팔레트(드래그 편집)는 두지 않는다 — YAML 한 줄 = 단계 하나라 편집기가 곧 팔레트 |
 | 실행 `/test/runs` | 진행 중 run 의 **라이브 패널**(`RunLivePanel` — `/runs/{id}/stream` SSE agg 프레임을 초 단위로 합쳐 SApS·동시 세션·SER·SRD p95·RTP 손실·워커 CPU 를 한 시간축 SVG 차트에, step 프로파일의 단계 진행 띠, KPI 타일(2 초마다 `live()` 누계 p95), 실패 이벤트 표, **즉시 중단·율 조정**) + run 색인(행 클릭 → 결과, 체크 → 비교). 열 때 `/runs/{id}/series` 로 지나간 시계열을 먼저 채운다. `run 시작` = RunStartDialog(시나리오·토폴로지·프로파일 또는 단발 인스턴스·율·`${ht}`·라벨) |
 | 결과 `/test/results?id=` | `RunReport` — 메타(run·토폴로지/프로파일·시작→종료·워커·대상 빌드·역할→풀·중단 사유·바인딩) · 시간축 차트(`/series`) · RFC 6076 표 · 지연 분포(n/p50/p95/p99/max) · 응답 코드 분해 · **절차·예상 결과·확인 결과 표**(시나리오 flow × `expect_results` — `ptt-test-scenario` CSV 형식) · 단계 로그(DOC/IHS) · 참고. 아래 실패 이벤트 표(Call-ID 포함 — SIP 덤프는 계측기 호스트 `runs/<id>/sip/`). 진행 중 run 이면 라이브 패널로. 삭제(manager) · Markdown 복사(컨트롤러 `report_markdown`) |
@@ -454,7 +496,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 | **B. UE 축 + 컨트롤러 최소** | `libcsim` 추출(SimSession/RtpThread → 라이브러리, cspsim 은 그 위 CLI), `cims-tester-worker` ue 풀·단계 실행기·1초 집계 스트림, `oam-cims-tester` run/저장/CLI + pkg·config_template·self-register, 프로파일 constant·step(+ramp·soak·burst) | **구현 반영** — 개발서버 CSP(UDP 15060) 상대로 `cims-tester run VOLTE-CALL-BASIC --topology … --instances 3` 완주(SER 100 %, RRD p95 5 ms, SRD ≈ after_ms+20 ms, RTP 손실 0, 보고서·기대치 판정), 워커 단독 4쌍 1 SApS 지속. 남은 것 = 부하 강화 문서 시험(4 cps/HT20, 10 cps/HT5) 재현 실측·워커 2대 분산 실측·`db` 신원 원천(대상 CSC 위임)·워커 자동 발견(base 배포 목록)·대상 관측(`stop_on.target_cpu_pct`) | L |
 | **C. 피어 축 — ibcf** | peer 엔진(고정 수신점·신원 범위·응답 정책·무응답) + `ibcf` 프로파일, 대상 CSP 컬렉션 시드/복원, 트렁크 in/out·route_set failover·ACL 시나리오 | **구현 반영** — `CsimPeer` 엔진·워커 peer 풀·컨트롤러 시드/복원(§3.2). 개발서버 CSP 상대 실측: `TRUNK-IBCF-OUTBOUND`(가입자→피어, SRD p95 820 ms, RTP 손실 0)·`TRUNK-IBCF-ACL-DENY`(피어링 접속점 ACL → 403) **pass**, `TRUNK-IBCF-INBOUND`(피어→피어링 접속점→가입자, SRD p95 1185 ms, RTP 손실 0) **pass**(CSP 피어링 접속점 인증 생략 반영본), `TRUNK-IBCF-FAILOVER` 는 CSP 헬스체크 부재로 우선(무응답) 피어에서 Timer B — §12 확인. 남은 것 = 오류 주입(응답 지연·특정 코드·재전송 유실)·TLS 상호인증·THIG 흔적 | M |
 | **D. 피어 축 — pbx · mgcf** | 트렁크 REGISTER, DID/내선, 183 early media·PRACK, hold/resume, REFER 발신, RFC 4733 DTMF, Q.850 Reason, G.711 | **구현 반영**(§3.2 pbx·mgcf) — 시나리오 `trunk/pbx_{outbound,inbound,dtmf,hold_resume,transfer,register}.yaml`·`trunk/mgcf_{outbound,inbound,reject_q850}.yaml`. 개발서버 실측 7 pass / 3 fail — fail 은 전부 CIMS 측(§12: Reason 미투과·503→603·트렁크 계정). 남은 것 = UE 측 183(실 단말 착신 모사 아님)·in-band DTMF·G.722·TLS 상호인증 | M |
-| **E. 콘솔 팩** | §7 화면 전부, SSE 라이브, 비교·보고서. cims-verify S3/S6 시나리오 항목의 `cims-tester` 호출 이전 | **구현 반영**(§7 표) — 컨트롤러 = 시나리오/프로파일 `PUT/DELETE`(운영자본)·`/validate`·토폴로지 `check`·run `series/compare/DELETE`·`target_build`·모듈 `api-docs` + 콘솔 팩 5 라우트(토폴로지·시나리오·실행·결과·비교). 개발서버 실측: 연결 검사 CSP OPTIONS 200 OK / TLS 1.3 / 워커 health, `VOLTE-CALL-BASIC` 단발 3 인스턴스 완주(pass, SER 100 %, SRD p95 1522 ms, 시계열 9 점, 자기 비교 회귀 0), 단위시험 64 건(S1-UNIT-TESTER PASS), 콘솔 tsc·vite build 통과. 남은 것 = §7 '남은 것'(히스토그램 버킷·알람 타임라인·SIP 덤프 열기·S3/S6 항목 이전)·콘솔 화면 실기 확인(개발서버 게이트웨이에 `/api/v1/tester` 라우트 미등록 — 배포 후) | L |
+| **E. 콘솔 팩** | §7 화면 전부, SSE 라이브, 비교·보고서. cims-verify S3/S6 시나리오 항목의 `cims-tester` 호출 이전 | **구현 반영**(§7 표) — 컨트롤러 = 시나리오/프로파일 `PUT/DELETE`(운영자본)·`/validate`·토폴로지 `check`·run `series/compare/DELETE`·`target_build`·모듈 `api-docs` + 콘솔 팩 5 라우트(토폴로지·시나리오·실행·결과·비교). 개발서버 실측: 연결 검사 CSP OPTIONS 200 OK / TLS 1.3 / 워커 health, `VOLTE-CALL-BASIC` 단발 3 인스턴스 완주(pass, SER 100 %, SRD p95 1522 ms, 시계열 9 점, 자기 비교 회귀 0), 단위시험 64 건(S1-UNIT-TESTER PASS), 콘솔 tsc·vite build 통과. **토폴로지 모델 확정**(§4 호스트›워커·대상 노드›풀) + 캔버스 UX 목업 라우트 `/test/topology-canvas`(§7). 남은 것 = **토폴로지 v2 이행**(컨트롤러 모델·스키마·`PoolCreate.target_csp` 파생·컴파일러 역할 해석(풀 이름 또는 `group`, 워커별)·풀 고정(`worker`)·연결 검사 항목 `노드:수신점`·스토어 v1 변환·단위시험) + **캔버스 정식 편집기**(React, 목업 대체, `layout` 저장) + §7 '남은 것'(히스토그램 버킷·알람 타임라인·SIP 덤프 열기·S3/S6 항목 이전)·콘솔 화면 실기 확인 | L |
 | **F. 확장** | MCData SDS/MSRP ue 단계, `real-ue` 편입, NAT(netns) 풀, MOS 추정, soak 프로파일 + 누수 판정, 대상 알람 타임라인 겹침 | 야간 소크 스크립트 대체 | M |
 
 B 가 끝나면 성능 시험이, C·D 가 끝나면 피어 연동 기능 시험이 가능하다. E 는 B 와 병행 착수할 수 있다(API 계약이 A 에서 고정되므로).
@@ -469,6 +511,7 @@ B 가 끝나면 성능 시험이, C·D 가 끝나면 피어 연동 기능 시험
 | 운영 형태 | **확정** | 독립(계측기 자기 `oam`) / 동거(대상 `oam` 뒤) 두 가지, 블루프린트 차이만. 콘솔 인증 = base 콘솔 계정(로컬 계정 없음) |
 | 포트 | **확정** | 컨트롤러 loopback 4490(oam-svc 4480·csc 4421 과 겹치지 않음), 워커 제어 7100 |
 | 콘솔 번들 | **확정** | 번들 하나(`oam` 동봉) + nav 섹션·라우트 서비스 게이팅(§7). 서비스 모듈 패키지는 콘솔 미동봉 |
+| 토폴로지 모델 | **확정** | 호스트 › 워커·대상 노드 › 풀 3단(§4) — 주소는 호스트에만, 대상 = 역할별 노드 집합(sip/tas/media/subscriber/oam/db, CIMS·타 IMS·IP-PBX 공통), 호스트 성격(계측기/대상/동거)은 파생·동거 허용, 풀 하나 = 워커 하나(워커 여럿은 워커마다 풀 + 같은 `group`, 시나리오는 이름 또는 group 으로 참조), 콘솔은 DnD 캔버스로 편집(§7 — 빈 곳 드롭 = 상자 자동 생성, 선은 모델 파생). 컨트롤러 이행은 E 남은 것 |
 | 목표 규모 | 제안 | 등록 UE 5,000 · VoLTE 100 SApS × HT 20 s(동시 2,000) · PTT 그룹 200 × 20명 · 피어 트렁크 50 SApS. 워커 호스트 수는 B 단계 실측 후 확정 |
 | 워커 호스트 | 제안 | 시험 대상과 분리된 최소 2대(8 코어) — 발생기 동거로 v1~v6 오진한 이력. 워커 용량 선언 기본 = 코어당 200 단말·10 SApS(`Limits.*`) |
 | MGCF 범위 | **확정** | 평문 SIP(TS 29.163 Mg, TS 24.229) + Q.850 Reason + early media. **SIP-I 불필요** — CSCF↔MGCF(Mg)·IMS↔IMS NNI(GSMA IR.95)는 SIP/SDP 이고, SIP-I 는 CS 망 상호접속 트렁크(ITU-T Q.1912.5) 프로파일이다. 그런 트렁크를 받으려면 CIMS 자신이 MGCF(ISUP 해석) 역할을 해야 하는데 그것은 계측기가 아니라 CIMS 로드맵 문제다 |

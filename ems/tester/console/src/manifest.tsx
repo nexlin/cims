@@ -12,6 +12,7 @@ import TesterResultsPage from './pages/TesterResultsPage'
 import TesterComparePage from './pages/TesterComparePage'
 import TesterScenariosPage from './pages/TesterScenariosPage'
 import TesterTopologiesPage from './pages/TesterTopologiesPage'
+import TesterTopologyCanvasPage from './pages/TesterTopologyCanvasPage'
 
 export const testerManifest: ServiceManifest = {
   id: 'tester',
@@ -37,6 +38,8 @@ export const testerManifest: ServiceManifest = {
           apis: ['tester.scenarios', 'tester.scenario', 'tester.scenario.put', 'tester.scenario.delete', 'tester.profiles', 'tester.profile', 'tester.validate'] },
         { path: '/test/topologies', title: '토폴로지',   component: TesterTopologiesPage, requiredRole: 'monitor',
           apis: ['tester.topologies', 'tester.topology.save', 'tester.topology.check', 'tester.workers', 'tester.validate'] },
+        // 확정 UX 목업(§4·§7) — 정식 편집기(토폴로지 v2 스키마)로 대체될 때까지 검토용으로 노출. API 호출 없음
+        { path: '/test/topology-canvas', title: '토폴로지 캔버스', component: TesterTopologyCanvasPage, requiredRole: 'monitor', apis: [] },
       ],
     },
   ],
