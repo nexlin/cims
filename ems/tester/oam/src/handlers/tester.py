@@ -3,7 +3,7 @@
   GET  /health                      모듈 상태(버전·데이터 디렉터리·색인 수·스트림 구독자)
   GET  /schema                      계약 스키마 이름 목록
   GET  /schema/<name>               JSON 스키마(tester_models 에서 생성 — 워커 C++ 와 같은 계약)
-  POST /validate                    {kind, doc|yaml} → {ok, errors[]}
+  POST /validate                    {kind, doc|yaml} → {ok, errors[], doc}(파싱된 문서 — 편집기의 YAML→캔버스)
   GET  /scenarios/vocab             단계 어휘·지표·kind 게이트·워커 지원 셋·Q.850 목록 — 시나리오 편집기 팔레트/폼의 정본
   POST /scenarios/compile-check     {scenario_id|doc|yaml, topology_id|topology, profile?, bindings?, instances?, rate_saps?} → compile_run 드라이런(tester_plan)
   GET  /scenarios[/<id>]            패키지 동봉 + 운영자 추가 시나리오 (검증 오류 포함 목록). 상세는 doc+yaml 원문
@@ -187,7 +187,8 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
         if not isinstance(doc, dict):
             return _json(400, {'error': 'doc 또는 yaml 이 필요하다'})
         model, errs = validate(str(kind), doc)
-        return _json(200, {'ok': model is not None, 'errors': errs})
+        # doc 을 되돌려 준다 — 콘솔 편집기는 YAML 파서를 따로 두지 않고(단일 파서 = 서버) 여기서 받은 문서로 캔버스를 그린다
+        return _json(200, {'ok': model is not None, 'errors': errs, 'doc': doc})
 
     if head == 'scenarios' and len(parts) == 2 and parts[1] == 'vocab' and method == 'GET':
         return _json(200, scenario_vocab())
@@ -696,7 +697,7 @@ TESTER_API_DOCS = [
      'params': [{'name': 'kind', 'in': 'body', 'type': 'string', 'required': True, 'enum': ['scenario', 'profile', 'topology', 'run_request']},
                 {'name': 'yaml', 'in': 'body', 'type': 'string', 'desc': 'doc 대신 YAML 원문'},
                 {'name': 'doc', 'in': 'body', 'type': 'object'}],
-     'response': '{ok, errors[]}', 'auth': _AUTH_OP},
+     'response': '{ok, errors[], doc}', 'auth': _AUTH_OP},
     {'id': 'tester.topologies', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/topologies',
      'summary': '토폴로지(호스트›워커·대상 노드›풀) 레코드 목록 — 런타임 store. 이전 꼴(target.csp/workers[].url) 레코드는 읽을 때 v2 로 승계', 'response': '{topologies[]: {id, name, created_at, updated_at, doc, migrated_from?}}', 'auth': _AUTH_MON},
     {'id': 'tester.topology.save', 'module': _MOD, 'method': 'PUT', 'path': f'{_P}/topologies/{{id}}',

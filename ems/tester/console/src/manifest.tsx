@@ -12,7 +12,6 @@ import TesterResultsPage from './pages/TesterResultsPage'
 import TesterComparePage from './pages/TesterComparePage'
 import TesterScenariosPage from './pages/TesterScenariosPage'
 import TesterTopologiesPage from './pages/TesterTopologiesPage'
-import TesterMockupsPage from './pages/TesterMockupsPage'
 
 export const testerManifest: ServiceManifest = {
   id: 'tester',
@@ -29,23 +28,15 @@ export const testerManifest: ServiceManifest = {
       requiresService: 'oam-cims-tester',
       routes: [
         { path: '/test/runs',       title: '실행',       component: TesterRunsPage,       requiredRole: 'monitor',
-          apis: ['tester.health', 'tester.runs', 'tester.run.start', 'tester.run.stop', 'tester.run.rate', 'tester.run.stream', 'tester.run.series', 'tester.run.events', 'tester.events'] },
+          apis: ['tester.health', 'tester.runs', 'tester.run.start', 'tester.runs.plan', 'tester.run.stop', 'tester.run.rate', 'tester.run.hold', 'tester.run.stream', 'tester.run.series', 'tester.run.events', 'tester.run.sip', 'tester.events', 'tester.workers', 'tester.topologies', 'tester.scenario'] },
         { path: '/test/results',    title: '결과',       component: TesterResultsPage,    requiredRole: 'monitor',
-          apis: ['tester.runs', 'tester.run.report', 'tester.run.events', 'tester.run.series', 'tester.run.delete', 'tester.scenario'] },
+          apis: ['tester.runs', 'tester.run.report', 'tester.run.events', 'tester.run.series', 'tester.run.hist', 'tester.run.sip', 'tester.run.target_alerts', 'tester.run.delete', 'tester.scenario', 'tester.runs.plan'] },
         { path: '/test/compare',    title: '비교',       component: TesterComparePage,    requiredRole: 'monitor',
-          apis: ['tester.runs', 'tester.runs.compare'] },
+          apis: ['tester.runs', 'tester.runs.compare', 'tester.run.series', 'tester.scenario'] },
         { path: '/test/scenarios',  title: '시나리오',   component: TesterScenariosPage,  requiredRole: 'monitor',
-          apis: ['tester.scenarios', 'tester.scenario', 'tester.scenario.put', 'tester.scenario.delete', 'tester.profiles', 'tester.profile', 'tester.validate'] },
+          apis: ['tester.scenarios', 'tester.scenario', 'tester.scenario.put', 'tester.scenario.delete', 'tester.scenarios.vocab', 'tester.scenarios.compile_check', 'tester.profiles', 'tester.profile', 'tester.validate', 'tester.topologies', 'tester.run.start'] },
         { path: '/test/topologies', title: '토폴로지',   component: TesterTopologiesPage, requiredRole: 'monitor',
           apis: ['tester.topologies', 'tester.topology.save', 'tester.topology.check', 'tester.workers', 'tester.validate'] },
-        // 확정 UX 목업(§4·§7) — 정식 화면(캔버스 편집기 · 실행/결과/비교 재구성)으로 대체될 때까지 검토용. API 호출 없음.
-        // 사이드바에는 'UX 목업' 하나만 보이고, 목업마다의 경로는 허브 안 탭(hidden — 직접 URL·문서 링크는 산다)
-        { path: '/test/mockups',         title: 'UX 목업',        component: TesterMockupsPage, requiredRole: 'monitor', apis: [] },
-        { path: '/test/topology-canvas', title: '토폴로지 캔버스', component: TesterMockupsPage, requiredRole: 'monitor', apis: [], hidden: true },
-        { path: '/test/scenario-canvas', title: '시나리오 캔버스', component: TesterMockupsPage, requiredRole: 'monitor', apis: [], hidden: true },
-        { path: '/test/run-live',        title: '실행 라이브',     component: TesterMockupsPage, requiredRole: 'monitor', apis: [], hidden: true },
-        { path: '/test/run-report',      title: '결과 보고서',     component: TesterMockupsPage, requiredRole: 'monitor', apis: [], hidden: true },
-        { path: '/test/run-compare',     title: '회귀 비교',       component: TesterMockupsPage, requiredRole: 'monitor', apis: [], hidden: true },
       ],
     },
   ],

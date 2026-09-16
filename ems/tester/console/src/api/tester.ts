@@ -358,7 +358,7 @@ const enc = encodeURIComponent
 export const testerApi = {
   health: () => api.get<TesterHealth>('/tester/health'),
   validate: (kind: 'scenario' | 'profile' | 'topology' | 'run_request', body: { yaml?: string; doc?: unknown }) =>
-    api.post<{ ok: boolean; errors: string[] }>('/tester/validate', { kind, ...body }),
+    api.post<{ ok: boolean; errors: string[]; doc?: unknown }>('/tester/validate', { kind, ...body }),
 
   scenarios: () => api.get<{ scenarios: ScenarioRow[] }>('/tester/scenarios'),
   scenario: (id: string) => api.get<ScenarioDetail>(`/tester/scenarios/${enc(id)}`),
