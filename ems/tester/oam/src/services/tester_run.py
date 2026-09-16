@@ -89,6 +89,43 @@ class Hist:
                 'p50': self.percentile(0.5), 'p95': self.percentile(0.95), 'p99': self.percentile(0.99)}
 
 
+def run_series(run_id: str, limit: int = 7200) -> dict:
+    """<DataDir>/runs/<id>/metrics.sqlite 의 1초 버킷을 초 단위로 합쳐 열(column) 형태로 돌려준다.
+    카운터 = 워커 합, 게이지 = 합(cpu_pct 는 최대), 타이머 = 버킷 병합 뒤 p95 — 콘솔 결과 화면의 시간축 차트와
+    비교 화면이 쓴다. 파일이 없으면(진행 전·삭제됨) 빈 시계열."""
+    path = os.path.join(store.run_dir(run_id), 'metrics.sqlite')
+    out = {'t': [], 'counters': {}, 'gauges': {}, 'timers': {}}
+    if not os.path.isfile(path):
+        return out
+    db = sqlite3.connect(path)
+    try:
+        rows = db.execute('SELECT t, worker, counters, gauges, timers FROM agg ORDER BY t').fetchall()
+    finally:
+        db.close()
+    by_t: Dict[int, dict] = {}
+    for t, _w, c, g, tm in rows:
+        b = by_t.setdefault(int(t), {'c': {}, 'g': {}, 'tm': {}})
+        try:
+            for k, v in (json.loads(c) or {}).items():
+                b['c'][k] = b['c'].get(k, 0) + int(v)
+            for k, v in (json.loads(g) or {}).items():
+                b['g'][k] = max(b['g'].get(k, 0), float(v)) if k == 'cpu_pct' else b['g'].get(k, 0) + float(v)
+            for k, h in (json.loads(tm) or {}).items():
+                b['tm'].setdefault(k, Hist()).merge(h)
+        except Exception:
+            continue
+    ts = sorted(by_t)[-max(1, limit):]
+    ckeys = sorted({k for t in ts for k in by_t[t]['c']})
+    gkeys = sorted({k for t in ts for k in by_t[t]['g']})
+    tkeys = sorted({k for t in ts for k in by_t[t]['tm']})
+    out['t'] = ts
+    out['counters'] = {k: [by_t[t]['c'].get(k, 0) for t in ts] for k in ckeys}
+    out['gauges'] = {k: [by_t[t]['g'].get(k) for t in ts] for k in gkeys}
+    out['timers'] = {k: {'p95': [(by_t[t]['tm'][k].percentile(0.95) if k in by_t[t]['tm'] else None) for t in ts],
+                         'count': [(by_t[t]['tm'][k].count if k in by_t[t]['tm'] else 0) for t in ts]} for k in tkeys}
+    return out
+
+
 # ──────────────────────────────────────────────────────────────────────────
 #  Recorder — run 하나의 저장·누계·SSE
 # ──────────────────────────────────────────────────────────────────────────
@@ -283,6 +320,7 @@ class RunDriver(threading.Thread):
         self.expect_results: List[dict] = []
         self.step_log: List[dict] = []
         self.seeder: Optional[tester_target.CspSeeder] = None
+        self.target_build: Optional[str] = None
 
     # ── 외부 제어
     def request_stop(self, reason: str = 'operator') -> None:
@@ -367,6 +405,7 @@ class RunDriver(threading.Thread):
                 raise tester_compile.CompileError(f'{w.name}: 필요 단말 {need} > 용량 {cap}')
         self.rate = float(self.plan['rate_total'])
         self.state = 'provisioning'
+        self.target_build = tester_target.csp_build(self.topology)   # 없으면 None — 비교 축은 있는 것끼리
         self._publish_state()
         # 피어 풀 — 대상 CSP 컬렉션 시드(remote_nodes·routes·route_sets·rules·routing_policies·acl) → run 끝에 복원
         if self.plan.get('peer_pools'):
@@ -532,7 +571,8 @@ class RunDriver(threading.Thread):
         self.state = 'stopped'
         record = RunRecord(id=self.run_id, scenario_id=self.scenario.id, topology=self.topology_name,
                            profile=self.profile_name, started_at=self.started_at, ended_at=self.ended_at,
-                           verdict=self.verdict, workers=[w.name for w in self.workers], summary=summary)
+                           verdict=self.verdict, workers=[w.name for w in self.workers], summary=summary,
+                           target_build=self.target_build)
         store.save_run_index(record)
         detail = {
             **record.model_dump(exclude_none=True),

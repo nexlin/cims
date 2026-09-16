@@ -6,6 +6,8 @@ Covers:
   - /topologies CRUD — 검증 실패 400·errors, 저장은 검증 통과분만
   - /runs POST 검증(400/404/403) · stop/rate/report 미존재 404 · /runs 빈 색인 · 색인 저장 후 조회 · 보존 스윕
   - /events = text/event-stream StreamingResponse
+  - E 단계: 시나리오/프로파일 PUT·DELETE(운영자본만, id 일치), /topologies/<id>/check, /runs/<id> DELETE·/series,
+    /runs/compare(기준 대비 delta·회귀), 모듈 /api/v1/api-docs 자기기술
 
 각 테스트는 tmpdir 로 CimsRuntimeDir·Tester.DataDir 격리. 토큰은 admin_auth 로 직접 발급.
 """
@@ -203,6 +205,135 @@ class Runs(unittest.TestCase):
         self.assertEqual(S.purge_runs(30), 1)           # 오래된 pass 만, running 은 보존
         self.assertEqual(_call('GET', '/api/v1/tester/runs/r-2020').status, 404)
         self.assertEqual(_call('GET', '/api/v1/tester/runs/r-now').status, 200)
+
+
+class ScenarioProfileWrite(unittest.TestCase):
+    _SC = ('id: UT-EDIT-ONE\ntitle: 편집 시험\ntags: [volte]\nroles: {a: {pool: p}}\n'
+           'flow: [{step: register, who: [a]}]\n')
+
+    def test_scenario_put_get_delete(self):
+        r = _call('PUT', '/api/v1/tester/scenarios/UT-EDIT-ONE', role='operator', body={'yaml': self._SC})
+        self.assertEqual(r.status, 200, r.body)
+        self.assertEqual(r.body['source'], 'user')
+        self.assertEqual(r.body['steps'], 1)
+        r = _call('GET', '/api/v1/tester/scenarios/UT-EDIT-ONE')
+        self.assertEqual(r.status, 200)
+        self.assertIn('title: 편집 시험', r.body['yaml'])
+        self.assertEqual(r.body['source'], 'user')
+        self.assertTrue(r.body['valid'])
+        # id 불일치·검증 실패는 저장하지 않는다
+        r = _call('PUT', '/api/v1/tester/scenarios/UT-EDIT-TWO', role='operator', body={'yaml': self._SC})
+        self.assertEqual(r.status, 400)
+        self.assertTrue(any('id 불일치' in e for e in r.body['errors']))
+        r = _call('PUT', '/api/v1/tester/scenarios/UT-EDIT-ONE', role='operator', body={'yaml': 'id: UT-EDIT-ONE\nflow: []\n'})
+        self.assertEqual(r.status, 400)
+        self.assertEqual(_call('PUT', '/api/v1/tester/scenarios/UT-EDIT-ONE', role='operator', body={'yaml': ': ['}).status, 400)
+        self.assertEqual(_call('PUT', '/api/v1/tester/scenarios/UT-EDIT-ONE', role='monitor', body={'yaml': self._SC}).status, 403)
+        # 삭제 — operator 403, manager 200, 동봉본 409
+        self.assertEqual(_call('DELETE', '/api/v1/tester/scenarios/UT-EDIT-ONE', role='operator').status, 403)
+        self.assertEqual(_call('DELETE', '/api/v1/tester/scenarios/UT-EDIT-ONE', role='manager').status, 200)
+        self.assertEqual(_call('GET', '/api/v1/tester/scenarios/UT-EDIT-ONE').status, 404)
+        r = _call('DELETE', '/api/v1/tester/scenarios/VOLTE-CALL-BASIC', role='manager')
+        self.assertEqual(r.status, 409)
+        self.assertEqual(r.body['error'], 'bundled_read_only')
+        self.assertEqual(_call('DELETE', '/api/v1/tester/scenarios/NOPE-X', role='manager').status, 404)
+
+    def test_bundled_override_and_profile(self):
+        # 동봉 id 로 저장하면 운영자본이 이긴다(override) — 지우면 동봉본으로 돌아간다
+        r = _call('GET', '/api/v1/tester/scenarios/VOLTE-REGISTER')
+        self.assertEqual(r.status, 200)
+        self.assertEqual(r.body['source'], 'bundled')
+        text = r.body['yaml'].replace('title: ', 'title: override ')
+        r = _call('PUT', '/api/v1/tester/scenarios/VOLTE-REGISTER', role='operator', body={'yaml': text})
+        self.assertEqual(r.status, 200, r.body)
+        self.assertEqual(r.body['source'], 'user')
+        self.assertEqual(_call('DELETE', '/api/v1/tester/scenarios/VOLTE-REGISTER', role='manager').status, 200)
+        self.assertEqual(_call('GET', '/api/v1/tester/scenarios/VOLTE-REGISTER').body['source'], 'bundled')
+        # 프로파일 — name 은 경로와 일치(문서 name 생략 가능)
+        r = _call('PUT', '/api/v1/tester/profiles/ut_const', role='operator', body={'yaml': 'model: constant\nrate: 2\nduration_s: 10\n'})
+        self.assertEqual(r.status, 200, r.body)
+        self.assertEqual(r.body['model'], 'constant')
+        r = _call('PUT', '/api/v1/tester/profiles/ut_const', role='operator', body={'yaml': 'name: other\nmodel: constant\nrate: 2\n'})
+        self.assertEqual(r.status, 400)
+        r = _call('GET', '/api/v1/tester/profiles/ut_const')
+        self.assertIn('rate: 2', r.body['yaml'])
+        self.assertEqual(_call('DELETE', '/api/v1/tester/profiles/ut_const', role='manager').status, 200)
+        self.assertEqual(_call('DELETE', '/api/v1/tester/profiles/step_5_to_100', role='manager').status, 409)
+
+
+class TopologyCheck(unittest.TestCase):
+    def test_check_unreachable_target(self):
+        # 127.0.0.1 의 닫힌 포트 — 항목마다 ok=False 와 이유가 남고 200 으로 돌아온다(검사 실패 ≠ API 실패)
+        doc = {'name': 'chk', 'target': {'name': 'sut', 'csp': {'ip': '127.0.0.1', 'udp': 1, 'tcp': 1, 'tls': 1}},
+               'workers': [{'name': 'w1', 'url': 'http://127.0.0.1:1'}],
+               'pools': {'ue': {'kind': 'ue', 'source': {'creds': 'creds/x.jsonl'}}}}
+        r = _call('POST', '/api/v1/tester/topologies', role='operator', body=doc)
+        tid = r.body['id']
+        try:
+            r = _call('POST', f'/api/v1/tester/topologies/{tid}/check', role='operator')
+            self.assertEqual(r.status, 200, r.body)
+            self.assertFalse(r.body['ok'])
+            names = {i['name']: i for i in r.body['items']}
+            for n in ('csp.udp', 'csp.tcp', 'csp.tls', 'oam', 'worker.w1'):
+                self.assertIn(n, names)
+            self.assertFalse(names['csp.tcp']['ok'])
+            self.assertFalse(names['worker.w1']['ok'])
+            self.assertTrue(names['oam']['ok'])           # 대상 OAM 미설정 = 참고 통과
+            self.assertEqual(_call('POST', f'/api/v1/tester/topologies/{tid}/check', role='monitor').status, 403)
+            self.assertEqual(_call('POST', '/api/v1/tester/topologies/9999/check', role='operator').status, 404)
+        finally:
+            _call('DELETE', f'/api/v1/tester/topologies/{tid}', role='manager')
+
+
+class RunResults(unittest.TestCase):
+    def test_delete_series_compare(self):
+        self.assertEqual(_call('DELETE', '/api/v1/tester/runs/nope', role='manager').status, 404)
+        self.assertEqual(_call('DELETE', '/api/v1/tester/runs/nope', role='operator').status, 403)
+        self.assertEqual(_call('GET', '/api/v1/tester/runs/nope/series').status, 404)
+        self.assertEqual(_call('GET', '/api/v1/tester/runs/compare', query={'ids': 'a'}).status, 400)
+        S.save_run_index(RunRecord(id='c-base', scenario_id='X-Y', topology='t', started_at='2020-01-01T00:00:00',
+                                   ended_at='2020-01-01T00:10:00', verdict='pass', target_build='csp 1 (dep 1)',
+                                   summary={'ser_pct': 100.0, 'srd_ms_p95': 100.0, 'rtp_loss_pct': 0.0, 'attempts': 10}))
+        S.save_run_index(RunRecord(id='c-new', scenario_id='X-Y', topology='t', started_at='2020-01-02T00:00:00',
+                                   ended_at='2020-01-02T00:10:00', verdict='pass', target_build='csp 2 (dep 1)',
+                                   summary={'ser_pct': 99.0, 'srd_ms_p95': 120.0, 'rtp_loss_pct': 0.1, 'attempts': 10}))
+        try:
+            r = _call('GET', '/api/v1/tester/runs/c-base/series')
+            self.assertEqual(r.status, 200)
+            self.assertEqual(r.body['t'], [])          # metrics.sqlite 없음 = 빈 시계열
+            r = _call('GET', '/api/v1/tester/runs/compare', query={'ids': 'c-base,c-new,missing'})
+            self.assertEqual(r.status, 200, r.body)
+            self.assertEqual(r.body['baseline'], 'c-base')
+            self.assertTrue(r.body['runs'][2]['missing'])
+            m = {x['metric']: x for x in r.body['metrics']}
+            self.assertTrue(m['ser_pct']['regression'][1])       # 100 → 99 (0.5 pt 초과) 회귀
+            self.assertTrue(m['srd_ms_p95']['regression'][1])    # 100 → 120 (5 % 초과) 회귀
+            self.assertFalse(m['rtp_loss_pct']['regression'][1]) # 0 → 0.1 (0.5 pt 이내)
+            self.assertIsNone(m['ser_pct']['regression'][2])     # 없는 run
+            self.assertEqual(r.body['regressions'], 2)
+            self.assertTrue(r.body['same_scenario'])
+            self.assertEqual(_call('DELETE', '/api/v1/tester/runs/c-new', role='manager').status, 200)
+            self.assertEqual(_call('GET', '/api/v1/tester/runs/c-new').status, 404)
+        finally:
+            _call('DELETE', '/api/v1/tester/runs/c-base', role='manager')
+            _call('DELETE', '/api/v1/tester/runs/c-new', role='manager')
+
+
+class ApiDocs(unittest.TestCase):
+    def test_module_self_description(self):
+        args = HandlerArgs(method='GET', full_path='/api/v1/api-docs', client_ip='127.0.0.1', client_port=1,
+                           query_params={}, headers={'authorization': f'Bearer {_token("monitor")}'})
+        r = asyncio.run(H.handle_api_docs(args, {'config': _CFG}))
+        self.assertEqual(r.status, 200)
+        self.assertEqual(r.body['modules'], ['oam-cims-tester'])
+        ids = {a['id'] for a in r.body['apis']}
+        for need in ('tester.health', 'tester.runs', 'tester.events', 'tester.scenarios', 'tester.profiles',
+                     'tester.topologies', 'tester.workers', 'tester.run.report', 'tester.run.series', 'tester.runs.compare'):
+            self.assertIn(need, ids)
+        self.assertTrue(all(a['module'] == 'oam-cims-tester' and a['path'].startswith('/api/v1/tester') for a in r.body['apis']))
+        self.assertEqual(len(ids), len(r.body['apis']))   # id 중복 없음
+        args = HandlerArgs(method='GET', full_path='/api/v1/api-docs', client_ip='127.0.0.1', client_port=1, query_params={}, headers={})
+        self.assertEqual(asyncio.run(H.handle_api_docs(args, {'config': _CFG})).status, 401)
 
 
 class Events(unittest.TestCase):

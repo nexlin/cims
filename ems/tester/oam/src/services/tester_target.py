@@ -103,6 +103,26 @@ def token_from_env(oam) -> str:
 #  시드 파생 — 토폴로지 → CSP 컬렉션 레코드
 # ──────────────────────────────────────────────────────────────────────────
 
+def csp_build(topology: Topology) -> Optional[str]:
+    """대상 CSP 배포의 패키지 버전 문자열(예: 'csp 0.2.126 (dep 34)') — run 색인 `target_build`(비교 화면의 회귀 축).
+    대상 OAM 이 없거나 토큰이 없으면 None. 실패는 run 을 막지 않는다."""
+    oam = topology.target.oam
+    if oam is None:
+        return None
+    try:
+        client = OamClient(oam.url, token_from_env(oam))
+        rows = client.deployments()
+        dep_id = client.find_csp_deployment(oam.csp_deployment_id)
+        row = next((r for r in rows if int(r.get('id') or 0) == dep_id), None)
+        if row is None:
+            return None
+        pkg = row.get('package') if isinstance(row.get('package'), dict) else {}
+        ver = row.get('package_version') or row.get('version') or pkg.get('version')
+        return f"csp {ver or '?'} (dep {dep_id})"
+    except Exception:
+        return None
+
+
 def _tagged(rec: dict) -> bool:
     return SEED_TAG in (rec.get('tags') or [])
 

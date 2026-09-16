@@ -277,10 +277,20 @@ class Driver(unittest.TestCase):
             doc = json.load(f)
         self.assertTrue(all(r['ok'] for r in doc['expect_results']), doc['expect_results'])
         self.assertEqual(doc['timers']['srd_ms']['p95'], 1500)   # 상한 2000 버킷이지만 max 1500 로 잘린다
-        from handlers.tester import report_markdown
+        from handlers.tester import report_markdown, compare_runs
         md = report_markdown(doc)
         self.assertIn('RFC 6076', md)
         self.assertIn('PASS', md)
+        # E 단계 — metrics.sqlite → 초 단위 시계열(콘솔 결과 차트) · 자기 자신과의 비교는 회귀 0
+        series = R.run_series(d.run_id)
+        self.assertEqual(len(series['t']), 3)
+        self.assertEqual(sum(series['counters']['attempts']), 3)
+        self.assertEqual(series['gauges']['concurrent_sessions'], [1, 1, 1])
+        self.assertEqual([x for x in series['timers']['srd_ms']['p95'] if x is not None], [1500, 1500, 1500])
+        cmp_ = compare_runs([d.run_id, d.run_id])
+        self.assertEqual(cmp_['regressions'], 0)
+        self.assertTrue(any(m['metric'] == 'ser_pct' and m['values'] == [100.0, 100.0] for m in cmp_['metrics']))
+        self.assertTrue(cmp_['same_scenario'])
 
     def test_failure_makes_fail_and_events(self):
         w = FakeWorker('w1', {'fail_one': True})

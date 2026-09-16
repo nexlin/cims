@@ -360,12 +360,12 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 
 | 항목 | 내용 |
 |---|---|
-| 게이트웨이 세그먼트 | `/api/v1/tester` **하나**(D2 — 서비스 = 최상위 세그먼트 하나). `pkg.json` `gateway.routes=["/api/v1/tester"]`, `gateway.default_port=4490`. 하위: `/health`·`/schema/{name}`·`/validate`·`/scenarios`·`/profiles`·`/topologies`·`/runs`(GET 색인+라이브 / POST `run_request` → 202 id, 동시에 하나)·`/runs/{id}`·`/runs/{id}/stop`·`/runs/{id}/rate`·`/runs/{id}/stream`(SSE — 그 run 의 agg/events/runs 프레임)·`/runs/{id}/report`(run.json + Markdown)·`/runs/{id}/events`·`/workers[?topology=]`(토폴로지 워커 + health)·`/events`(SSE — run/워커 상태 변화) |
+| 게이트웨이 세그먼트 | `/api/v1/tester` **하나**(D2 — 서비스 = 최상위 세그먼트 하나). `pkg.json` `gateway.routes=["/api/v1/tester"]`, `gateway.default_port=4490`. 하위: `/health`·`/schema/{name}`·`/validate`·`/scenarios`·`/profiles`·`/topologies`·`/runs`(GET 색인+라이브 / POST `run_request` → 202 id, 동시에 하나)·`/runs/{id}`·`/runs/{id}/stop`·`/runs/{id}/rate`·`/runs/{id}/stream`(SSE — 그 run 의 agg/events/runs 프레임)·`/runs/{id}/report`(run.json + Markdown)·`/runs/{id}/events`·`/runs/{id}/series`(metrics.sqlite → 초 단위 열 형태 시계열 — 결과 차트)·`DELETE /runs/{id}`(진행 중 409)·`/runs/compare?ids=a,b[,c]`(첫 id 기준 지표별 delta·회귀 — 비율 지표 0.5 pt / 그 외 5 % 허용, `target_build` 병기)·`/workers[?topology=]`(토폴로지 워커 + health)·`/events`(SSE — run/워커 상태 변화). 시나리오·프로파일은 `GET /{id}`(doc + YAML 원문) · `PUT /{id} {yaml}`(운영자본 저장 — `Tester.DataDir/scenarios/`, 검증 통과분만, 문서 id = 경로 id) · `DELETE /{id}`(운영자본만, 동봉본 409 `bundled_read_only`) · `POST /validate {kind, yaml|doc}`(저장 없는 검증 — 편집기가 타이핑 중 호출). 토폴로지 `POST /topologies/{id}/check` = 연결 검사(CSP OPTIONS(UDP)·TCP·TLS·피어링 접속점(참고)·CSC·대상 OAM 토큰·워커 health — `services/tester_check.py`). 모듈은 `/api/v1/api-docs` 로 자기 API 를 기술(`TESTER_API_DOCS`)하고 base 가 업스트림에서 수집한다([api_docs.md](api_docs.md)) — 콘솔 라우트 `apis` 가 그 id 를 참조 |
 | 인증·RBAC | base 가 배포 시 `CimsAuth.JwtSecret` 주입(`meta.gateway.routes` 보유 모듈 자동), 모듈이 토큰 독립 검증. 권한 = 조회 `monitor`, run 실행·중단·토폴로지 편집 `operator`, 시나리오/프로파일 삭제 `manager` |
 | 설정 | `config_template.json` 선언 키만(§14.7 write 마스크). `Server.Ip/Port`(loopback 4490)·`Tester.DataDir`·`Tester.RunRetainDays`·`Tester.WorkerControlPort`(7100)·`Tester.WorkerStreamIp/Port`(7110 — 워커 관측 수신, 관리망 bind)·`Tester.WorkerStreamAdvertiseIp`(선택). 대상(SUT)·워커·풀은 설정이 아니라 **토폴로지 레코드**(런타임 store, 콘솔 편집)다. `CimsAuth.JwtSecret`·`Mgmt.Cidr`·`CimsRuntimeDir` 은 **선언하지 않는다**(base 주입 파생값) |
 | 프로파일 구동 | 오케스트레이터 스레드가 프로파일을 시간축으로 만든다 — `constant/soak` = rate 로 duration · `step` = start 부터 hold_s 마다 창 IHS(실패+건너뜀 / 시도)를 보고 임계 이내면 +step(max 까지), 초과면 중단하고 직전 단계가 **DOC** · `ramp` = 5 초마다 선형 증가 뒤 hold · `burst` = burst_interval 마다 1 초 burst_size. `stop_on.csp_5xx_pct`·`ser_pct_min` 은 최근 60 초 창(시도 ≥ 10)으로 판정해 fail 중단, `target_cpu_pct` 는 대상 관측(C 단계) 전까지 미적용(노트). 중단은 워커 `stop {drain_s = 5 + ht}` |
 | CLI | `cims-tester run <scenario> --topology <name\|id> [--load <profile>] [--ht N] [--bind k=v] [--instances N] [--rate R] [--no-wait] [--json]` — 완주까지 기다려 RFC 6076 표를 찍고 verdict 로 종료 코드(pass=0). `report <id>`·`stop <id>`·`rate <id> <saps>`·`workers`. `creds-from-db --csp-json <csp.json> --domain <sip domain> --out <jsonl>` = DB 의 ha1 보유 가입자로 creds JSONL 생성(토폴로지 `source.creds`) |
-| 스토어 | `modules/oam-cims-tester/runtime/{topologies,runs}` 단일 소유(I5). run 본체는 `Tester.DataDir` |
+| 스토어 | `modules/oam-cims-tester/runtime/{topologies,runs}` 단일 소유(I5). run 본체는 `Tester.DataDir`. run 색인 `target_build` = 대상 OAM 이 있으면 CSP 배포 패키지 버전(`csp <ver> (dep N)`, `tester_target.csp_build`) — 비교 화면의 회귀 축 |
 | 버전 계약 | `pkg.json` `gateway.requires_base_oam` — SSE 통과(아래)를 가진 base 최소 버전. base 는 self-register 시 라우트 레코드에 기록하고 자기 버전이 낮으면 경고 로그(등록은 한다 — 거부하면 콘솔에서 원인이 보이지 않는다) |
 | **base 확장 ① — SSE 통과** | 게이트웨이 프록시(`handlers/gateway.py`)는 요청 `Accept: text/event-stream` 이면 총 타임아웃 없이(연결 5 s) 업스트림을 부르고, 응답 `Content-Type: text/event-stream` 이면 **청크 passthrough**(전체 버퍼링 없음, 클라이언트 절단·업스트림 종료 어느 쪽이든 응답 해제)한다. 판정은 라우트 속성이 아니라 응답 타입 — 어느 서비스 모듈이든 SSE 를 낼 수 있다. 그 외 응답은 종전대로 5 s(다운로드 120 s) 버퍼링 |
 
@@ -373,15 +373,17 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 
 ## 7. 콘솔 팩 (`ems/tester/console`) — 화면
 
-| 화면 | 내용 |
+| 화면(라우트) | 내용 |
 |---|---|
-| 토폴로지 | 대상(CSP/CSC/OAM 주소·도메인), 워커 상태·용량(agent 배포 목록 + `GET /health`), 풀 정의(가입자 원천·피어 프로파일). 연결 검사(OPTIONS·CSC health·대상 OAM 토큰) |
-| 시나리오 | YAML 편집(스키마 검증·단계 팔레트), 시나리오 목록·태그(volte/ptt/mcdata/trunk/pbx/mgcf), 단발 실행 |
-| 부하 프로파일 | constant/step/ramp/soak/burst 편집, 정지 조건 |
-| 실행(라이브) | SApS·동시 세션·SER·SRD p95·RTP 손실·대상 CPU 를 한 시간축에(SSE 1초), 단계 진행 띠, 실패 이벤트 표, 즉시 중단·율 조정 |
-| 결과 | run 상세 — RFC 6076 표, 히스토그램, 단계별 DOC/IHS, 실패 코드 분해, 대상 알람 타임라인 겹침, 실패 호 SIP 덤프 열기 |
-| 비교 | run 두 개 이상 겹쳐 회귀 판정(빌드 sha·패키지 manifest 해시 기준) |
-| 보고서 | Markdown/PDF — 검증 콘솔 `VerificationPrintReport` 와 같은 인쇄 규약, `ptt-test-scenario` CSV 형식의 절차·예상·결과 표 포함 |
+| 토폴로지 `/test/topologies` | 레코드 목록 + JSON 문서 편집기(컨트롤러 `topology` 스키마로 타이핑 중 검증, 생성/저장/삭제) · 선택 토폴로지의 **워커 상태·용량**(`GET /workers?topology=` — 버전·단말 n/최대·최대 SApS·CPU·진행 run·시계 오차 > 50 ms 경고) · **연결 검사**(`POST /topologies/{id}/check` — CSP OPTIONS(UDP)/TCP/TLS·피어링 접속점(평상시 닫힘 = 참고)·CSC·대상 OAM 토큰·워커 health, 항목별 OK/실패/참고·ms). 비밀은 환경변수 이름만. 워커 자동 발견(agent 배포 목록)은 남음 |
+| 시나리오 `/test/scenarios` | 탭 둘 — **시나리오**(태그 필터 volte/ptt/trunk/…, 목록은 검증 오류 파일도 오류 수 배지로 노출) / **부하 프로파일**. 오른쪽 YAML 편집기 = textarea + 검증 옆칸(`POST /validate`, 600 ms 디바운스) · 저장(`PUT` — 운영자본, 동봉본을 저장하면 같은 id 의 override) · 되돌리기 · 삭제(운영자본만) · **단발 실행**(RunStartDialog, 시나리오 고정). 새 문서는 템플릿에서 시작. 단계 팔레트(드래그 편집)는 두지 않는다 — YAML 한 줄 = 단계 하나라 편집기가 곧 팔레트 |
+| 실행 `/test/runs` | 진행 중 run 의 **라이브 패널**(`RunLivePanel` — `/runs/{id}/stream` SSE agg 프레임을 초 단위로 합쳐 SApS·동시 세션·SER·SRD p95·RTP 손실·워커 CPU 를 한 시간축 SVG 차트에, step 프로파일의 단계 진행 띠, KPI 타일(2 초마다 `live()` 누계 p95), 실패 이벤트 표, **즉시 중단·율 조정**) + run 색인(행 클릭 → 결과, 체크 → 비교). 열 때 `/runs/{id}/series` 로 지나간 시계열을 먼저 채운다. `run 시작` = RunStartDialog(시나리오·토폴로지·프로파일 또는 단발 인스턴스·율·`${ht}`·라벨) |
+| 결과 `/test/results?id=` | `RunReport` — 메타(run·토폴로지/프로파일·시작→종료·워커·대상 빌드·역할→풀·중단 사유·바인딩) · 시간축 차트(`/series`) · RFC 6076 표 · 지연 분포(n/p50/p95/p99/max) · 응답 코드 분해 · **절차·예상 결과·확인 결과 표**(시나리오 flow × `expect_results` — `ptt-test-scenario` CSV 형식) · 단계 로그(DOC/IHS) · 참고. 아래 실패 이벤트 표(Call-ID 포함 — SIP 덤프는 계측기 호스트 `runs/<id>/sip/`). 진행 중 run 이면 라이브 패널로. 삭제(manager) · Markdown 복사(컨트롤러 `report_markdown`) |
+| 비교 `/test/compare?ids=` | `GET /runs/compare` — 첫 run 기준, 지표별 값·Δ·회귀(붉게), 대상 run 표(라벨·`target_build`·판정, 기준 바꾸기/제거/추가), 기대치 판정 요약(PASS/FAIL 수·실패 항목·중단 사유). 시나리오가 다르면 경고 배지 |
+| 보고서 | 결과 화면의 [인쇄] = `window.print()` — 검증 콘솔과 같은 인쇄 규약(셸·툴바·이벤트 표 숨김, `.tester-report` 만 A4 로), 표지에 발행 일시. Markdown 은 CLI `report` 와 같은 본문 |
+
+컴포넌트는 팩 안 `components/`(LineChart · YamlEditor · RunLivePanel · RunReport · RunStartDialog), 표시 헬퍼 `lib/fmt.ts`(RFC 6076 라벨·판정 톤·수치 형식 — 화면마다 다른 자릿수를 막는다). 차트는 라이브러리 없이 SVG(`--chart-N` 토큰), 시리즈별 자기 스케일(단위가 다른 지표를 한 시간축에 겹치는 것이 목적).
+**남은 것** = 결과 화면의 히스토그램(버킷 분포 — 컨트롤러가 p50/p95/p99 만 내려 준다)·대상 알람 타임라인 겹침(F 단계 대상 관측)·실패 호 SIP 덤프 열기(계측기 호스트 파일 — API 미노출)·cims-verify S3/S6 시나리오 항목의 `cims-tester` 호출 이전.
 
 **메뉴 자리** — 관리 영역(`admin`)에 그룹 `test`(**시험**)를 새로 둔다. ITU-T M.3400 Maintenance 기능군의 *Testing* 에
 해당하며, 릴리스 그룹(SW Mgmt — 검증/패키징)과 다르다: 검증은 배포 게이트, 시험은 부하·피어 시험 도구다.
@@ -452,7 +454,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 | **B. UE 축 + 컨트롤러 최소** | `libcsim` 추출(SimSession/RtpThread → 라이브러리, cspsim 은 그 위 CLI), `cims-tester-worker` ue 풀·단계 실행기·1초 집계 스트림, `oam-cims-tester` run/저장/CLI + pkg·config_template·self-register, 프로파일 constant·step(+ramp·soak·burst) | **구현 반영** — 개발서버 CSP(UDP 15060) 상대로 `cims-tester run VOLTE-CALL-BASIC --topology … --instances 3` 완주(SER 100 %, RRD p95 5 ms, SRD ≈ after_ms+20 ms, RTP 손실 0, 보고서·기대치 판정), 워커 단독 4쌍 1 SApS 지속. 남은 것 = 부하 강화 문서 시험(4 cps/HT20, 10 cps/HT5) 재현 실측·워커 2대 분산 실측·`db` 신원 원천(대상 CSC 위임)·워커 자동 발견(base 배포 목록)·대상 관측(`stop_on.target_cpu_pct`) | L |
 | **C. 피어 축 — ibcf** | peer 엔진(고정 수신점·신원 범위·응답 정책·무응답) + `ibcf` 프로파일, 대상 CSP 컬렉션 시드/복원, 트렁크 in/out·route_set failover·ACL 시나리오 | **구현 반영** — `CsimPeer` 엔진·워커 peer 풀·컨트롤러 시드/복원(§3.2). 개발서버 CSP 상대 실측: `TRUNK-IBCF-OUTBOUND`(가입자→피어, SRD p95 820 ms, RTP 손실 0)·`TRUNK-IBCF-ACL-DENY`(피어링 접속점 ACL → 403) **pass**, `TRUNK-IBCF-INBOUND`(피어→피어링 접속점→가입자, SRD p95 1185 ms, RTP 손실 0) **pass**(CSP 피어링 접속점 인증 생략 반영본), `TRUNK-IBCF-FAILOVER` 는 CSP 헬스체크 부재로 우선(무응답) 피어에서 Timer B — §12 확인. 남은 것 = 오류 주입(응답 지연·특정 코드·재전송 유실)·TLS 상호인증·THIG 흔적 | M |
 | **D. 피어 축 — pbx · mgcf** | 트렁크 REGISTER, DID/내선, 183 early media·PRACK, hold/resume, REFER 발신, RFC 4733 DTMF, Q.850 Reason, G.711 | **구현 반영**(§3.2 pbx·mgcf) — 시나리오 `trunk/pbx_{outbound,inbound,dtmf,hold_resume,transfer,register}.yaml`·`trunk/mgcf_{outbound,inbound,reject_q850}.yaml`. 개발서버 실측 7 pass / 3 fail — fail 은 전부 CIMS 측(§12: Reason 미투과·503→603·트렁크 계정). 남은 것 = UE 측 183(실 단말 착신 모사 아님)·in-band DTMF·G.722·TLS 상호인증 | M |
-| **E. 콘솔 팩** | §7 화면 전부, SSE 라이브, 비교·보고서. cims-verify S3/S6 시나리오 항목의 `cims-tester` 호출 이전 | 콘솔에서 시나리오 편집→실행→보고서까지 완주. S3/S6 관련 항목 이전 후 게이트 PASS 유지 | L |
+| **E. 콘솔 팩** | §7 화면 전부, SSE 라이브, 비교·보고서. cims-verify S3/S6 시나리오 항목의 `cims-tester` 호출 이전 | **구현 반영**(§7 표) — 컨트롤러 = 시나리오/프로파일 `PUT/DELETE`(운영자본)·`/validate`·토폴로지 `check`·run `series/compare/DELETE`·`target_build`·모듈 `api-docs` + 콘솔 팩 5 라우트(토폴로지·시나리오·실행·결과·비교). 개발서버 실측: 연결 검사 CSP OPTIONS 200 OK / TLS 1.3 / 워커 health, `VOLTE-CALL-BASIC` 단발 3 인스턴스 완주(pass, SER 100 %, SRD p95 1522 ms, 시계열 9 점, 자기 비교 회귀 0), 단위시험 64 건(S1-UNIT-TESTER PASS), 콘솔 tsc·vite build 통과. 남은 것 = §7 '남은 것'(히스토그램 버킷·알람 타임라인·SIP 덤프 열기·S3/S6 항목 이전)·콘솔 화면 실기 확인(개발서버 게이트웨이에 `/api/v1/tester` 라우트 미등록 — 배포 후) | L |
 | **F. 확장** | MCData SDS/MSRP ue 단계, `real-ue` 편입, NAT(netns) 풀, MOS 추정, soak 프로파일 + 누수 판정, 대상 알람 타임라인 겹침 | 야간 소크 스크립트 대체 | M |
 
 B 가 끝나면 성능 시험이, C·D 가 끝나면 피어 연동 기능 시험이 가능하다. E 는 B 와 병행 착수할 수 있다(API 계약이 A 에서 고정되므로).

@@ -4,17 +4,24 @@
   GET  /schema                      계약 스키마 이름 목록
   GET  /schema/<name>               JSON 스키마(tester_models 에서 생성 — 워커 C++ 와 같은 계약)
   POST /validate                    {kind, doc|yaml} → {ok, errors[]}
-  GET  /scenarios[/<id>]            패키지 동봉 + 운영자 추가 시나리오 (검증 오류 포함 목록)
-  GET  /profiles[/<name>]           부하 프로파일
+  GET  /scenarios[/<id>]            패키지 동봉 + 운영자 추가 시나리오 (검증 오류 포함 목록). 상세는 doc+yaml 원문
+  PUT  /scenarios/<id>              {yaml} → 운영자본 저장(Tester.DataDir/scenarios/, 검증 통과분만, id 는 경로와 일치)
+  DELETE /scenarios/<id>            운영자본만(동봉본 409 bundled)
+  GET  /profiles[/<name>]           부하 프로파일 — PUT/DELETE 규약은 시나리오와 같다(profiles/ 아래)
   GET|POST /topologies              토폴로지 목록·생성(검증 통과분만 저장)
   GET|PUT|DELETE /topologies/<id>
+  POST /topologies/<id>/check       연결 검사 — CSP OPTIONS/TCP/TLS·CSC·대상 OAM 토큰·워커 health (tester_check)
   GET  /runs[/<id>]                 run 색인 (본체는 Tester.DataDir/runs/<id>/) — 진행 중이면 라이브 누계 포함
   POST /runs                        run 시작 (RunRequest) → 202 {id}. 동시에 하나만
   POST /runs/<id>/stop              중단(drain 뒤 verdict=aborted)
   POST /runs/<id>/rate              {rate_saps} 율 변경(진행 중)
   GET  /runs/<id>/report            run.json 전체(RFC 6076 표·expect 판정·단계 로그) + markdown
   GET  /runs/<id>/events            실패 개별 건(events.jsonl 꼬리, ?limit=)
+  GET  /runs/<id>/series            1초 시계열(metrics.sqlite → 열 형태: t[], counters{}, gauges{}, timers{p95[],count[]})
   GET  /runs/<id>/stream            SSE — 이 run 의 agg/events/runs 프레임만
+  DELETE /runs/<id>                 색인 + 본체 제거(진행 중 409)
+  GET  /runs/compare?ids=a,b[,c]    run 나열 비교 — 첫 id 가 기준, 지표별 delta·회귀 판정(target_build 병기)
+  GET  /api/v1/api-docs             이 모듈의 API 자기기술(base /api/v1/api-docs 가 모듈별로 수집 — api_docs.py)
   GET  /workers[?topology=<id>]     토폴로지 워커 + GET /health 결과
   GET  /events                      SSE(text/event-stream) — run/워커 상태 변화 라이브
 
@@ -26,6 +33,7 @@ import asyncio
 import json
 import os
 from datetime import datetime
+from typing import List, Optional
 from pathlib import PurePath
 from urllib.parse import unquote, urlparse
 
@@ -38,6 +46,8 @@ from services.tester_bus import TESTER_BUS
 from services.tester_models import SCHEMAS, schema_json, validate, RunRequest
 from services.tester_run import RUNS
 from services import tester_workers
+from services import tester_check
+from services.tester_run import run_series
 
 _BASE = '/api/v1/tester'
 _VERSION = '0.1.0'
@@ -138,7 +148,7 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             'stream_subscribers': TESTER_BUS.subscriber_count(),
             'worker_stream': ({'ip': RUNS.stream.ip, 'port': RUNS.stream.port, 'connections': RUNS.stream.connections}
                               if RUNS.stream else None),
-            'phase': 'C',   # 이행 단계 — ue 풀 + peer 풀(ibcf·pbx·mgcf 엔진, CSP 컬렉션 시드) run 실행 가능
+            'phase': 'E',   # 이행 단계 — ue·peer 풀 run + 콘솔 팩(편집·라이브·결과·비교·보고서)
         })
 
     if head == 'events' and method == 'GET':
@@ -166,21 +176,39 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
         model, errs = validate(str(kind), doc)
         return _json(200, {'ok': model is not None, 'errors': errs})
 
-    if head == 'scenarios' and method == 'GET':
-        if len(parts) == 1:
-            return _json(200, {'scenarios': store.list_scenarios()})
-        model, doc, errs = store.get_scenario(parts[1])
-        if doc is None:
-            return _json(404, {'error': 'scenario_not_found', 'id': parts[1]})
-        return _json(200, {'id': parts[1], 'doc': doc, 'errors': errs, 'valid': model is not None})
-
-    if head == 'profiles' and method == 'GET':
-        if len(parts) == 1:
-            return _json(200, {'profiles': store.list_profiles()})
-        model, doc, errs = store.get_profile(parts[1])
-        if doc is None:
-            return _json(404, {'error': 'profile_not_found', 'name': parts[1]})
-        return _json(200, {'name': parts[1], 'doc': doc, 'errors': errs, 'valid': model is not None})
+    if head in ('scenarios', 'profiles'):
+        is_sc = head == 'scenarios'
+        key = 'id' if is_sc else 'name'
+        if len(parts) == 1 and method == 'GET':
+            return _json(200, {'scenarios': store.list_scenarios()} if is_sc else {'profiles': store.list_profiles()})
+        if len(parts) == 2:
+            name = parts[1]
+            if method == 'GET':
+                model, doc, errs = (store.get_scenario(name) if is_sc else store.get_profile(name))
+                if doc is None:
+                    return _json(404, {'error': f'{head[:-1]}_not_found', key: name})
+                rows = store.list_scenarios() if is_sc else store.list_profiles()
+                row = next((r for r in rows if r[key] == name), None)
+                text = store.read_yaml_text(row['path']) if row else None
+                return _json(200, {key: name, 'doc': doc, 'yaml': text, 'source': (row or {}).get('source'),
+                                   'errors': errs, 'valid': model is not None})
+            if method == 'PUT':
+                body = _body(handler_args) or {}
+                text = body.get('yaml')
+                if not isinstance(text, str) or not text.strip():
+                    return _json(400, {'error': 'yaml(문자열) 이 필요하다'})
+                row, errs = (store.save_scenario_yaml(name, text) if is_sc else store.save_profile_yaml(name, text))
+                if errs:
+                    return _json(400, {'error': f'invalid_{head[:-1]}', 'errors': errs})
+                return _json(200, row)
+            if method == 'DELETE':
+                ok, why = (store.delete_scenario(name) if is_sc else store.delete_profile(name))
+                if ok:
+                    return _json(200, {'deleted': True, key: name})
+                if why == 'bundled':
+                    return _json(409, {'error': 'bundled_read_only', key: name,
+                                       'detail': '패키지 동봉본은 지울 수 없다 — 운영자본(override)만 삭제 대상'})
+                return _json(404, {'error': f'{head[:-1]}_not_found', key: name})
 
     if head == 'topologies':
         if len(parts) == 1 and method == 'GET':
@@ -213,6 +241,19 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             if method == 'DELETE':
                 ok = store.delete_topology(tid)
                 return _json(200 if ok else 404, {'deleted': ok, 'id': tid})
+        if len(parts) == 3 and parts[2] == 'check' and method == 'POST':
+            try:
+                tid = int(parts[1])
+            except ValueError:
+                return _json(400, {'error': 'id 는 정수'})
+            rec = store.get_topology(tid)
+            if rec is None:
+                return _json(404, {'error': 'topology_not_found', 'id': tid})
+            model = store.topology_model(rec)
+            if model is None:
+                return _json(400, {'error': 'invalid_topology', 'id': tid})
+            items = await asyncio.get_running_loop().run_in_executor(None, tester_check.check_topology, model, rec.get('doc') or {})
+            return _json(200, {'id': tid, 'ok': all(i['ok'] or i.get('info') for i in items), 'items': items})
 
     if head == 'runs':
         if len(parts) == 1 and method == 'GET':
@@ -241,9 +282,27 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
                 return _json(404 if 'not_found' in str(e) else 400, {'error': str(e)})
             return _json(202, {'id': d.run_id, 'state': d.state, 'scenario_id': d.scenario.id,
                                'topology': d.topology_name, 'profile': d.profile_name})
+        if len(parts) == 2 and parts[1] == 'compare' and method == 'GET':
+            ids = [x for x in str((handler_args.query_params or {}).get('ids', '')).split(',') if x.strip()]
+            if len(ids) < 2:
+                return _json(400, {'error': 'ids 는 run id 둘 이상(콤마 구분)'})
+            return _json(200, compare_runs(ids))
         if len(parts) >= 2:
             rid = parts[1]
             d = RUNS.get(rid)
+            if len(parts) == 2 and method == 'DELETE':
+                if d is not None and d.state != 'stopped':
+                    return _json(409, {'error': 'run_active', 'id': rid})
+                ok = store.delete_run(rid)
+                return _json(200 if ok else 404, {'deleted': ok, 'id': rid})
+            if len(parts) == 3 and parts[2] == 'series' and method == 'GET':
+                if store.get_run(rid) is None and d is None:
+                    return _json(404, {'error': 'run_not_found', 'id': rid})
+                try:
+                    limit = int((handler_args.query_params or {}).get('limit', 7200))
+                except ValueError:
+                    limit = 7200
+                return _json(200, {'id': rid, **run_series(rid, limit)})
             if len(parts) == 2 and method == 'GET':
                 rec = store.get_run(rid)
                 if rec is None:
@@ -357,6 +416,154 @@ def report_markdown(doc: dict) -> str:
     return '\n'.join(lines) + '\n'
 
 
+# 비교 축 — (지표, 방향) : 'up' = 클수록 좋다, 'down' = 작을수록 좋다. 허용 오차 = 비율 지표 0.5 포인트, 나머지 5 %.
+COMPARE_METRICS = (('ser_pct', 'up'), ('scr_pct', 'up'), ('doc_saps', 'up'),
+                   ('rrd_ms_p95', 'down'), ('srd_ms_p95', 'down'), ('sdd_ms_p95', 'down'),
+                   ('jitter_ms_p95', 'down'), ('rtp_loss_pct', 'down'),
+                   ('early_media_pct', 'up'), ('prack_pct', 'up'), ('hold_resume_pct', 'up'), ('refer_pct', 'up'))
+
+
+def _load_run_doc(rid: str) -> Optional[dict]:
+    p = os.path.join(store.run_dir(rid), 'run.json')
+    if os.path.isfile(p):
+        with open(p, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    rec = store.get_run(rid)
+    return dict(rec) if rec else None
+
+
+def compare_runs(ids: List[str]) -> dict:
+    """첫 id 가 기준(baseline). 지표별 {metric, direction, base, values[], delta[], regression[]} 와 run 요약을 돌려준다.
+    회귀 = 방향 기준으로 나빠진 폭이 허용 오차를 넘음. 없는 지표는 비교에서 빠진다(None)."""
+    docs = []
+    for rid in ids:
+        d = _load_run_doc(rid)
+        docs.append(d if d is not None else {'id': rid, 'missing': True})
+    runs = [{'id': d.get('id'), 'missing': d.get('missing', False), 'scenario_id': d.get('scenario_id'),
+             'topology': d.get('topology'), 'profile': d.get('profile'), 'started_at': d.get('started_at'),
+             'ended_at': d.get('ended_at'), 'verdict': d.get('verdict'), 'target_build': d.get('target_build'),
+             'label': d.get('label'), 'summary': d.get('summary') or {}, 'timers': d.get('timers') or {},
+             'expect_results': d.get('expect_results') or [], 'stop_reason': d.get('stop_reason')} for d in docs]
+    metrics = []
+    base = runs[0]['summary']
+    for name, direction in COMPARE_METRICS:
+        vals = [r['summary'].get(name) for r in runs]
+        if all(v is None for v in vals):
+            continue
+        b = base.get(name)
+        deltas, regs = [], []
+        for v in vals:
+            if b is None or v is None or not isinstance(v, (int, float)) or not isinstance(b, (int, float)):
+                deltas.append(None); regs.append(None); continue
+            delta = float(v) - float(b)
+            deltas.append(delta)
+            worse = delta < 0 if direction == 'up' else delta > 0
+            tol = 0.5 if name.endswith('_pct') else abs(float(b)) * 0.05
+            regs.append(bool(worse and abs(delta) > tol))
+        metrics.append({'metric': name, 'direction': direction, 'base': b, 'values': vals, 'delta': deltas, 'regression': regs})
+    same_scenario = len({r['scenario_id'] for r in runs if not r['missing']}) <= 1
+    return {'baseline': ids[0], 'runs': runs, 'metrics': metrics, 'same_scenario': same_scenario,
+            'regressions': sum(1 for m in metrics for x in m['regression'][1:] if x)}
+
+
+# ── API 자기기술 (api_docs.md) — base /api/v1/api-docs 가 게이트웨이 라우트의 업스트림에서 수집한다 ─────────
+_AUTH_MON = {'scheme': 'Bearer JWT', 'role': 'monitor', 'token_from': 'base OAM 로그인 — 공유 CimsAuth.JwtSecret 로 모듈이 독립 검증'}
+_AUTH_OP = {**_AUTH_MON, 'role': 'operator'}
+_AUTH_MGR = {**_AUTH_MON, 'role': 'manager'}
+_MOD = 'oam-cims-tester'
+_P = _BASE
+
+TESTER_API_DOCS = [
+    {'id': 'tester.health', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/health',
+     'summary': '계측기 컨트롤러 상태 — 버전·데이터 디렉터리·색인 수·진행 중 run·스트림 구독자·이행 단계',
+     'response': '{module, version, data_dir, scenarios, profiles, topologies, runs, active_runs[], stream_subscribers, worker_stream, phase}',
+     'auth': _AUTH_MON},
+    {'id': 'tester.events', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/events',
+     'summary': 'SSE(text/event-stream) — run 상태(runs)·1초 집계(agg)·실패 이벤트(events) 라이브. 게이트웨이가 청크 통과',
+     'response': 'data: {stream: hello|runs|agg|events, record}',
+     'notes': ['EventSource 는 Authorization 헤더를 못 붙이므로 콘솔은 fetch+ReadableStream 으로 읽는다', '20 초 무소식이면 `: ping`'],
+     'auth': _AUTH_MON},
+    {'id': 'tester.scenarios', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/scenarios',
+     'summary': '시나리오 목록 — 패키지 동봉 + 운영자본(같은 id 면 운영자본이 이김). 검증 오류가 있는 파일도 errors 와 함께',
+     'response': '{scenarios[]: {id, title, tags[], steps, source(bundled|user), path, errors[]}}', 'auth': _AUTH_MON},
+    {'id': 'tester.scenario', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/scenarios/{{id}}',
+     'summary': '시나리오 상세 — 파싱된 doc + YAML 원문(편집기)', 'response': '{id, doc, yaml, source, errors[], valid}', 'auth': _AUTH_MON},
+    {'id': 'tester.scenario.put', 'module': _MOD, 'method': 'PUT', 'path': f'{_P}/scenarios/{{id}}',
+     'summary': '운영자본 저장 — 검증 통과분만, 문서 id 는 경로 id 와 일치',
+     'params': [{'name': 'yaml', 'in': 'body', 'type': 'string', 'required': True, 'desc': 'YAML 원문'}],
+     'response': '목록 행 {id, title, tags[], steps, source:user, path, errors:[]}',
+     'errors': [{'status': 400, 'when': '검증 실패', 'body': {'error': 'invalid_scenario', 'errors': ['flow.0.step: …']}}], 'auth': _AUTH_OP},
+    {'id': 'tester.scenario.delete', 'module': _MOD, 'method': 'DELETE', 'path': f'{_P}/scenarios/{{id}}',
+     'summary': '운영자본 삭제 — 동봉본은 409 bundled_read_only', 'auth': _AUTH_MGR},
+    {'id': 'tester.profiles', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/profiles',
+     'summary': '부하 프로파일 목록(ETSI TS 186 008 constant/step/ramp/soak/burst)', 'response': '{profiles[]: {name, model, source, path, errors[]}}', 'auth': _AUTH_MON},
+    {'id': 'tester.profile', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/profiles/{{name}}',
+     'summary': '프로파일 상세(doc + YAML 원문). PUT/DELETE 규약은 시나리오와 같다', 'response': '{name, doc, yaml, source, errors[], valid}', 'auth': _AUTH_MON},
+    {'id': 'tester.validate', 'module': _MOD, 'method': 'POST', 'path': f'{_P}/validate',
+     'summary': '문서 검증만(저장 없음) — 편집기가 타이핑 중 호출',
+     'params': [{'name': 'kind', 'in': 'body', 'type': 'string', 'required': True, 'enum': ['scenario', 'profile', 'topology', 'run_request']},
+                {'name': 'yaml', 'in': 'body', 'type': 'string', 'desc': 'doc 대신 YAML 원문'},
+                {'name': 'doc', 'in': 'body', 'type': 'object'}],
+     'response': '{ok, errors[]}', 'auth': _AUTH_OP},
+    {'id': 'tester.topologies', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/topologies',
+     'summary': '토폴로지(대상·워커·풀) 레코드 목록 — 런타임 store', 'response': '{topologies[]: {id, name, created_at, updated_at, doc}}', 'auth': _AUTH_MON},
+    {'id': 'tester.topology.save', 'module': _MOD, 'method': 'PUT', 'path': f'{_P}/topologies/{{id}}',
+     'summary': '토폴로지 저장(POST /topologies 는 생성) — 검증 통과분만',
+     'errors': [{'status': 400, 'when': '검증 실패', 'body': {'error': 'invalid_topology', 'errors': ['…']}}], 'auth': _AUTH_OP},
+    {'id': 'tester.topology.check', 'module': _MOD, 'method': 'POST', 'path': f'{_P}/topologies/{{id}}/check',
+     'summary': '연결 검사 — CSP OPTIONS(UDP)/TCP/TLS·피어링 접속점·CSC·대상 OAM 토큰·워커 health',
+     'response': '{id, ok, items[]: {name, ok, detail, ms, info?}}',
+     'notes': ['피어링 접속점은 run 중에만 열리므로 평상시 미도달은 info(참고) 로 표시'], 'auth': _AUTH_OP},
+    {'id': 'tester.workers', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/workers',
+     'summary': '토폴로지의 워커 + GET /health 결과(용량·cpu·진행 run·시계 오차)',
+     'params': [{'name': 'topology', 'in': 'query', 'type': 'integer', 'desc': '토폴로지 id 로 한정'}],
+     'response': '{workers[]: {name, url, cpus, up, health{max_endpoints,max_saps,cpu_pct,active_endpoints,active_run,clock_skew_ms,pools[]}, error, topology_id}}', 'auth': _AUTH_MON},
+    {'id': 'tester.runs', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs',
+     'summary': 'run 색인(최신순) — 진행 중이면 live 누계 포함',
+     'params': [{'name': 'limit', 'in': 'query', 'type': 'integer', 'desc': '기본 100'}],
+     'response': '{runs[]: RunRecord{id, scenario_id, topology, profile, started_at, ended_at, verdict, workers[], summary{}, target_build, live?}}', 'auth': _AUTH_MON},
+    {'id': 'tester.run.start', 'module': _MOD, 'method': 'POST', 'path': f'{_P}/runs',
+     'summary': 'run 시작(RunRequest) → 202. 동시에 하나만(409)',
+     'params': [{'name': 'scenario_id', 'in': 'body', 'type': 'string', 'required': True},
+                {'name': 'topology_id', 'in': 'body', 'type': 'integer', 'desc': 'topology(name) 와 둘 중 하나'},
+                {'name': 'profile', 'in': 'body', 'type': 'string', 'desc': '없으면 단발(기능) 실행'},
+                {'name': 'instances', 'in': 'body', 'type': 'integer'}, {'name': 'rate_saps', 'in': 'body', 'type': 'number'},
+                {'name': 'bindings', 'in': 'body', 'type': 'object', 'desc': '${ht} 등'}, {'name': 'label', 'in': 'body', 'type': 'string'}],
+     'response': '{id, state, scenario_id, topology, profile}', 'auth': _AUTH_OP},
+    {'id': 'tester.run', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs/{{id}}',
+     'summary': 'run 색인 1건(+ 진행 중 live)', 'auth': _AUTH_MON},
+    {'id': 'tester.run.stop', 'module': _MOD, 'method': 'POST', 'path': f'{_P}/runs/{{id}}/stop',
+     'summary': '중단 — 워커 drain 뒤 verdict=aborted', 'auth': _AUTH_OP},
+    {'id': 'tester.run.rate', 'module': _MOD, 'method': 'POST', 'path': f'{_P}/runs/{{id}}/rate',
+     'summary': '진행 중 시도율 변경', 'params': [{'name': 'rate_saps', 'in': 'body', 'type': 'number', 'required': True}], 'auth': _AUTH_OP},
+    {'id': 'tester.run.report', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs/{{id}}/report',
+     'summary': 'run.json 전체(RFC 6076 요약·타이머 분포·기대치 판정·단계 로그·plan) + Markdown', 'response': '{run, markdown, final}', 'auth': _AUTH_MON},
+    {'id': 'tester.run.events', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs/{{id}}/events',
+     'summary': '실패 개별 건(events.jsonl 꼬리)', 'params': [{'name': 'limit', 'in': 'query', 'type': 'integer', 'desc': '기본 200'}], 'auth': _AUTH_MON},
+    {'id': 'tester.run.series', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs/{{id}}/series',
+     'summary': '1초 시계열(열 형태) — 결과 화면의 시간축 차트', 'response': '{id, t[], counters{k:[]}, gauges{k:[]}, timers{k:{p95[],count[]}}}', 'auth': _AUTH_MON},
+    {'id': 'tester.run.stream', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs/{{id}}/stream',
+     'summary': 'SSE — 이 run 의 프레임만', 'auth': _AUTH_MON},
+    {'id': 'tester.run.delete', 'module': _MOD, 'method': 'DELETE', 'path': f'{_P}/runs/{{id}}',
+     'summary': 'run 색인·본체 삭제(진행 중 409)', 'auth': _AUTH_MGR},
+    {'id': 'tester.runs.compare', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs/compare',
+     'summary': 'run 비교 — 첫 id 기준 지표별 delta·회귀 판정(비율 지표 0.5 pt / 그 외 5 % 허용), target_build 병기',
+     'params': [{'name': 'ids', 'in': 'query', 'type': 'string', 'required': True, 'desc': 'run id 콤마 구분(2개 이상)'}],
+     'response': '{baseline, runs[], metrics[]: {metric, direction, base, values[], delta[], regression[]}, same_scenario, regressions}', 'auth': _AUTH_MON},
+]
+
+
+async def handle_api_docs(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    """모듈 자기기술 — base 의 api_docs._fetch_remote 가 `<upstream>/api/v1/api-docs` 로 가져간다(oam-svc 와 같은 규약)."""
+    if (handler_args.method or 'GET').upper() != 'GET':
+        return _json(405, {'error': 'method_not_allowed'})
+    _, err = require_role(handler_args, 'monitor')
+    if err:
+        return err
+    return _json(200, {'modules': [_MOD], 'count': len(TESTER_API_DOCS), 'apis': TESTER_API_DOCS})
+
+
 TESTER_HANDLER_LIST = [
     (_BASE, handle_tester, {}),
+    ('/api/v1/api-docs', handle_api_docs, {}),
 ]

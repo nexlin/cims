@@ -127,6 +127,104 @@ def get_profile(name: str) -> Tuple[Optional[LoadProfile], Optional[dict], List[
     return None, None, [f'프로파일 없음: {name}']
 
 
+# ── 운영자 YAML 쓰기 (시나리오·프로파일) ─────────────────────────────────────
+#  콘솔 편집기가 저장하는 곳 = Tester.DataDir/scenarios/ (프로파일은 그 아래 profiles/). 패키지 동봉본은
+#  읽기 전용 — 같은 id 로 저장하면 운영자본이 덮어쓰기(override)가 되고, 삭제는 운영자본만 가능하다
+#  (동봉본을 지우면 패키지 업그레이드 때 되살아나 혼란만 남는다).
+
+def read_yaml_text(path: str) -> str:
+    with open(path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+
+def _safe_name(key: str) -> str:
+    return file_store._safe_key(key)
+
+
+def _user_scenario_path(sid: str) -> str:
+    return os.path.join(user_scenarios_dir(), _safe_name(sid) + '.yaml')
+
+
+def _user_profile_path(name: str) -> str:
+    return os.path.join(user_scenarios_dir(), 'profiles', _safe_name(name) + '.yaml')
+
+
+def _parse_yaml_text(text: str) -> Tuple[Optional[dict], List[str]]:
+    try:
+        doc = yaml.safe_load(text)
+    except Exception as e:
+        return None, [f'YAML 파싱 실패: {e}']
+    if not isinstance(doc, dict):
+        return None, ['YAML 최상위는 매핑이어야 한다']
+    return doc, []
+
+
+def save_scenario_yaml(sid: str, text: str) -> Tuple[Optional[dict], List[str]]:
+    """검증 통과분만 저장. 문서의 id 는 경로의 id 와 같아야 한다(id 바꾸기 = 새 파일). 반환 (목록 행, errors)."""
+    doc, errs = _parse_yaml_text(text)
+    if errs:
+        return None, errs
+    model, errs = validate('scenario', doc)
+    if errs:
+        return None, errs
+    if model.id != sid:
+        return None, [f'id 불일치: 경로 {sid} ≠ 문서 {model.id} — id 를 바꾸려면 새 시나리오로 저장한다']
+    path = _user_scenario_path(sid)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(text if text.endswith('\n') else text + '\n')
+    for row in list_scenarios():
+        if row['id'] == sid:
+            return row, []
+    return None, ['저장 후 목록에서 찾지 못함']
+
+
+def delete_scenario(sid: str) -> Tuple[bool, Optional[str]]:
+    """운영자본만 지운다. 반환 (지움, 거절 사유)."""
+    for row in list_scenarios():
+        if row['id'] == sid:
+            if row['source'] != 'user':
+                return False, 'bundled'
+            try:
+                os.remove(row['path'])
+            except FileNotFoundError:
+                pass
+            return True, None
+    return False, 'not_found'
+
+
+def save_profile_yaml(name: str, text: str) -> Tuple[Optional[dict], List[str]]:
+    doc, errs = _parse_yaml_text(text)
+    if errs:
+        return None, errs
+    model, errs = validate('profile', doc)
+    if errs:
+        return None, errs
+    if model.name and model.name != name:
+        return None, [f'name 불일치: 경로 {name} ≠ 문서 {model.name}']
+    path = _user_profile_path(name)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(text if text.endswith('\n') else text + '\n')
+    for row in list_profiles():
+        if row['name'] == name:
+            return row, []
+    return None, ['저장 후 목록에서 찾지 못함']
+
+
+def delete_profile(name: str) -> Tuple[bool, Optional[str]]:
+    for row in list_profiles():
+        if row['name'] == name:
+            if row['source'] != 'user':
+                return False, 'bundled'
+            try:
+                os.remove(row['path'])
+            except FileNotFoundError:
+                pass
+            return True, None
+    return False, 'not_found'
+
+
 # ── 토폴로지 (관리 store 레코드) ────────────────────────────────────────────
 
 def _topo_dir() -> str:
@@ -190,6 +288,13 @@ def save_run_index(rec: RunRecord) -> dict:
     row = rec.model_dump(exclude_none=True)
     file_store.save(_runs_index_dir(), rec.id, row)
     return row
+
+
+def delete_run(run_id: str) -> bool:
+    """run 색인 + 본체 디렉터리 제거(진행 중은 호출자가 막는다). 반환=색인이 있었는가."""
+    ok = file_store.delete(_runs_index_dir(), run_id)
+    shutil.rmtree(run_dir(run_id), ignore_errors=True)
+    return ok
 
 
 def purge_runs(retain_days: int) -> int:
