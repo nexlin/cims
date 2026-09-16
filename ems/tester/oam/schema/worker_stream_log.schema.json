@@ -1,0 +1,41 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "log",
+      "title": "Kind",
+      "type": "string"
+    },
+    "level": {
+      "enum": [
+        "debug",
+        "info",
+        "warn",
+        "error"
+      ],
+      "title": "Level",
+      "type": "string"
+    },
+    "msg": {
+      "title": "Msg",
+      "type": "string"
+    },
+    "t": {
+      "title": "T",
+      "type": "number"
+    },
+    "worker": {
+      "title": "Worker",
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "t",
+    "worker",
+    "level",
+    "msg"
+  ],
+  "title": "StreamLog",
+  "type": "object"
+}

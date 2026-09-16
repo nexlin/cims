@@ -1,0 +1,16 @@
+{
+  "additionalProperties": false,
+  "description": "POST /runs/{id}/rate",
+  "properties": {
+    "rate_saps": {
+      "minimum": 0,
+      "title": "Rate Saps",
+      "type": "number"
+    }
+  },
+  "required": [
+    "rate_saps"
+  ],
+  "title": "RunRate",
+  "type": "object"
+}

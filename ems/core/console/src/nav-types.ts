@@ -55,6 +55,11 @@ export type RouteSection = {
   serviceId?: string
   // VITE_CONSOLE_TARGET=prod 빌드에서 숨김 (배포 콘솔 = 운영자용).
   prodHidden?: boolean
+  // 이 섹션의 API 를 서빙하는 서비스 모듈 **패키지 id**(`oam-svc`·`oam-cims-tester`). 지정 시 셸이
+  // `/console/catalog` 의 installed_services(게이트웨이 라우트 ∩ enabled — 서버 권위)로 표시를
+  // 게이팅한다 — 미설치 서비스의 메뉴는 없고, 설치되면 재로그인 없이 다음 조회에서 나타난다.
+  // 위젯 카탈로그 `requires_service` 와 같은 규칙을 nav 까지 넓힌 것 (oam_base_service_split D1·D7).
+  requiresService?: string
 }
 
 // 서비스 pack 이 콘솔에 기여하는 내용 — nav 섹션 + 위젯(대시보드/페이지 합성용).

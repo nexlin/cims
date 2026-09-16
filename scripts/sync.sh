@@ -32,12 +32,13 @@ cmd_sync() {
     local targets=("$@")
     [[ ${#targets[@]} -eq 0 ]] && targets=(all)
 
-    local did_csc=0 did_agent=0 did_scripts=0 did_pkg=0 did_console=0 did_oamsvc=0
+    local did_csc=0 did_agent=0 did_scripts=0 did_pkg=0 did_console=0 did_oamsvc=0 did_tester=0
     for t in "${targets[@]}"; do
         case "$t" in
-            all) did_csc=1 did_agent=1 did_scripts=1 did_pkg=1 did_oamsvc=1 ;;
+            all) did_csc=1 did_agent=1 did_scripts=1 did_pkg=1 did_oamsvc=1 did_tester=1 ;;
             csc)       did_csc=1 ;;
             oam-svc)  did_oamsvc=1 ;;
+            oam-cims-tester) did_tester=1 ;;
             agent)     did_agent=1 ;;
             scripts)   did_scripts=1 ;;
             pkg-meta)  did_pkg=1 ;;
@@ -157,6 +158,28 @@ cmd_sync() {
         [[ -f "$SCRIPT_DIR/ems/service/oam/pkg.json" ]] && \
             cp -f "$SCRIPT_DIR/ems/service/oam/pkg.json" "$DIST_DIR/oam-svc/pkg.json"
         ok "oam-svc/src (+ config, pkg.json) ← $SCRIPT_DIR"
+        n_changed=$((n_changed+1))
+    fi
+
+    # ── oam-cims-tester (계측기 컨트롤러 — test_instrument.md) : src + config + pkg.json + scenarios + schema + bin ──
+    if [[ $did_tester -eq 1 ]]; then
+        local _tsrc="$SCRIPT_DIR/ems/tester/oam" _tdst="$DIST_DIR/oam-cims-tester"
+        mkdir -p "$_tdst/src" "$_tdst/config"
+        local _sub
+        for _sub in src scenarios schema bin; do
+            [[ -d "$_tsrc/$_sub" ]] || continue
+            mkdir -p "$_tdst/$_sub"
+            if command -v rsync >/dev/null 2>&1; then
+                rsync -a --delete-excluded --exclude='__pycache__' --exclude='*.pyc' \
+                    "$_tsrc/$_sub/" "$_tdst/$_sub/"
+            else
+                rm -rf "$_tdst/$_sub"; cp -r "$_tsrc/$_sub" "$_tdst/$_sub"
+            fi
+        done
+        find "$_tdst/src" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+        cp -f "$_tsrc/config/"*.json "$_tsrc/config/"*.sample "$_tdst/config/" 2>/dev/null
+        [[ -f "$_tsrc/pkg.json" ]] && cp -f "$_tsrc/pkg.json" "$_tdst/pkg.json"
+        ok "oam-cims-tester/{src,scenarios,schema,bin} (+ config, pkg.json) ← $SCRIPT_DIR"
         n_changed=$((n_changed+1))
     fi
 

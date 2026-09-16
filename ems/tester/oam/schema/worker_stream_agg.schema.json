@@ -1,0 +1,116 @@
+{
+  "$defs": {
+    "Histogram": {
+      "additionalProperties": false,
+      "description": "지연 지표 1초 요약 — 버킷은 로그 스케일 상한(ms) 문자열 키.",
+      "properties": {
+        "buckets": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Buckets",
+          "type": "object"
+        },
+        "count": {
+          "minimum": 0,
+          "title": "Count",
+          "type": "integer"
+        },
+        "max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min"
+        },
+        "sum": {
+          "minimum": 0,
+          "title": "Sum",
+          "type": "number"
+        }
+      },
+      "required": [
+        "count",
+        "sum"
+      ],
+      "title": "Histogram",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "bucket_s": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Bucket S",
+      "type": "integer"
+    },
+    "counters": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "description": "attempts·sessions·legs·codes.<n>·rtp_rx·rtp_lost … (sip_statistics 3계층 어휘)",
+      "title": "Counters",
+      "type": "object"
+    },
+    "gauges": {
+      "additionalProperties": {
+        "type": "number"
+      },
+      "description": "concurrent_sessions·registered·cpu_pct …",
+      "title": "Gauges",
+      "type": "object"
+    },
+    "kind": {
+      "const": "agg",
+      "title": "Kind",
+      "type": "string"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "t": {
+      "description": "버킷 시작 unix 초",
+      "title": "T",
+      "type": "number"
+    },
+    "timers": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Histogram"
+      },
+      "description": "rrd_ms·srd_ms·sdd_ms·jitter_ms·floor_grant_ms …",
+      "title": "Timers",
+      "type": "object"
+    },
+    "worker": {
+      "title": "Worker",
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "t",
+    "run_id",
+    "worker"
+  ],
+  "title": "StreamAgg",
+  "type": "object"
+}

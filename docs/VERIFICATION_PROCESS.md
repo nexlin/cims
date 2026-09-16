@@ -150,6 +150,7 @@ def my_check(ctx: VerifyContext) -> ItemResult:
 | S1-UNIT-HA-INTENT | HA 무장/해제 의도·소유 경계 | `python3 -m unittest tests.test_ha_intent` |
 | S1-UNIT-CSC | CSC 관제·프로비저닝·인가 단위 | `python3 -m unittest tests.test_csc_*` 9모듈 (rbac·realm·GMS CRUD·/provisioning/me·history·IdMS scope·user-profile·management·access_services 단일 읽기 경로) |
 | S1-UNIT-CONSOLE-LAYOUT | 콘솔 레이아웃 영속 계약 | `python3 -m unittest tests.test_console_layouts` |
+| S1-UNIT-TESTER | 계측기 계약 모델·핸들러·게이트웨이 SSE 통과 | `python3 -m unittest tests.test_tester_models tests.test_tester_handler tests.test_gateway_stream` (schema/*.json 동기화 포함) |
 | S1-UNIT-GRID-BUDGET | 콘솔 그리드 세로 예산·잠금 | `node tests/frontend/grid_budget.test.mjs` (gridLayout.ts esbuild 번들) |
 | S1-UNIT-OAM-PTT | OAM PTT 세션 인덱스·진행중 병합 | `python3 tests/oam_ptt_index_test.py · tests/oam_ptt_sessions_live_test.py` |
 | S1-UNIT-OAM-STATS | OAM SIP 통계 서비스축(voip→volte 합산)·프로브 | `python3 tests/test_oam_stats_classify.py · tests/test_stats_probe.py` |

@@ -1,0 +1,105 @@
+{
+  "$defs": {
+    "WorkerPoolState": {
+      "additionalProperties": false,
+      "properties": {
+        "endpoints": {
+          "title": "Endpoints",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "ue",
+            "peer",
+            "real-ue"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "pool": {
+          "title": "Pool",
+          "type": "string"
+        },
+        "registered": {
+          "default": 0,
+          "title": "Registered",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "pool",
+        "kind",
+        "endpoints"
+      ],
+      "title": "WorkerPoolState",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "GET /health 응답 — 용량 선언 + 시계 확인(§6.1).",
+  "properties": {
+    "active_endpoints": {
+      "minimum": 0,
+      "title": "Active Endpoints",
+      "type": "integer"
+    },
+    "active_run": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Active Run"
+    },
+    "clock_unix_ms": {
+      "description": "워커 시각 — 컨트롤러가 오차를 계산, > 50 ms 면 경고",
+      "title": "Clock Unix Ms",
+      "type": "integer"
+    },
+    "cpu_pct": {
+      "minimum": 0,
+      "title": "Cpu Pct",
+      "type": "number"
+    },
+    "max_endpoints": {
+      "minimum": 0,
+      "title": "Max Endpoints",
+      "type": "integer"
+    },
+    "max_saps": {
+      "minimum": 0,
+      "title": "Max Saps",
+      "type": "number"
+    },
+    "pools": {
+      "items": {
+        "$ref": "#/$defs/WorkerPoolState"
+      },
+      "title": "Pools",
+      "type": "array"
+    },
+    "version": {
+      "title": "Version",
+      "type": "string"
+    },
+    "worker": {
+      "title": "Worker",
+      "type": "string"
+    }
+  },
+  "required": [
+    "worker",
+    "version",
+    "max_endpoints",
+    "max_saps",
+    "cpu_pct",
+    "active_endpoints",
+    "clock_unix_ms"
+  ],
+  "title": "WorkerHealth",
+  "type": "object"
+}

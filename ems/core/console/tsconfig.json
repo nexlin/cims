@@ -11,7 +11,8 @@
     "baseUrl": ".",
     "paths": {
       "@core/*": ["src/*"],
-      "@svc/*": ["../../service/console/src/*"]
+      "@svc/*": ["../../service/console/src/*"],
+      "@tester/*": ["../../tester/console/src/*"]
     }
   }
 }

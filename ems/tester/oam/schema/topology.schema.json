@@ -1,0 +1,568 @@
+{
+  "$defs": {
+    "CredsSource": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Count"
+        },
+        "creds": {
+          "description": "creds JSONL 경로(cspsim -creds 승계) — scenarios/ 상대 또는 절대",
+          "title": "Creds",
+          "type": "string"
+        }
+      },
+      "required": [
+        "creds"
+      ],
+      "title": "CredsSource",
+      "type": "object"
+    },
+    "DbSource": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "minimum": 1,
+          "title": "Count",
+          "type": "integer"
+        },
+        "db": {
+          "const": "target",
+          "description": "대상 DB — 토폴로지 target 의 CSC 가 알려주는 접속(계측기가 자격을 직접 갖지 않음)",
+          "title": "Db",
+          "type": "string"
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "table": {
+          "enum": [
+            "volte_subscriptions",
+            "voip_subscriptions",
+            "ptt_subscriptions"
+          ],
+          "title": "Table",
+          "type": "string"
+        }
+      },
+      "required": [
+        "db",
+        "table",
+        "count"
+      ],
+      "title": "DbSource",
+      "type": "object"
+    },
+    "PeerBind": {
+      "additionalProperties": false,
+      "properties": {
+        "ip": {
+          "title": "Ip",
+          "type": "string"
+        },
+        "port": {
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Port",
+          "type": "integer"
+        },
+        "protocol": {
+          "default": "udp",
+          "enum": [
+            "udp",
+            "tcp",
+            "tls"
+          ],
+          "title": "Protocol",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ip",
+        "port"
+      ],
+      "title": "PeerBind",
+      "type": "object"
+    },
+    "PeerIdentities": {
+      "additionalProperties": false,
+      "properties": {
+        "did_range": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Did Range"
+        },
+        "e164_range": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "E164 Range"
+        },
+        "ext_len": {
+          "anyOf": [
+            {
+              "maximum": 8,
+              "minimum": 2,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ext Len"
+        }
+      },
+      "title": "PeerIdentities",
+      "type": "object"
+    },
+    "PeerPool": {
+      "additionalProperties": false,
+      "properties": {
+        "bind": {
+          "$ref": "#/$defs/PeerBind"
+        },
+        "codecs": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "오퍼 코덱(우선순위 순). 생략=프로파일 기본 — ibcf/mgcf: AMR-WB,AMR,PCMU,PCMA · pbx: PCMA,PCMU (§3.2)",
+          "title": "Codecs"
+        },
+        "domain": {
+          "title": "Domain",
+          "type": "string"
+        },
+        "identities": {
+          "$ref": "#/$defs/PeerIdentities"
+        },
+        "kind": {
+          "const": "peer",
+          "title": "Kind",
+          "type": "string"
+        },
+        "profile": {
+          "enum": [
+            "ibcf",
+            "pbx",
+            "mgcf"
+          ],
+          "title": "Profile",
+          "type": "string"
+        },
+        "register": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PeerRegister"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "pbx 트렁크 REGISTER — YAML 키는 register"
+        }
+      },
+      "required": [
+        "kind",
+        "profile",
+        "bind",
+        "domain",
+        "identities"
+      ],
+      "title": "PeerPool",
+      "type": "object"
+    },
+    "PeerRegister": {
+      "additionalProperties": false,
+      "properties": {
+        "ha1_env": {
+          "description": "H(A1) 을 담은 환경변수 — 비밀은 YAML 에 두지 않는다",
+          "title": "Ha1 Env",
+          "type": "string"
+        },
+        "user": {
+          "title": "User",
+          "type": "string"
+        }
+      },
+      "required": [
+        "user",
+        "ha1_env"
+      ],
+      "title": "PeerRegister",
+      "type": "object"
+    },
+    "RealUePool": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "real-ue",
+          "title": "Kind",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/CredsSource"
+        },
+        "srtp": {
+          "default": "optional",
+          "enum": [
+            "off",
+            "optional",
+            "required"
+          ],
+          "title": "Srtp",
+          "type": "string"
+        },
+        "transport": {
+          "default": "tls",
+          "enum": [
+            "udp",
+            "tcp",
+            "tls"
+          ],
+          "title": "Transport",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "source"
+      ],
+      "title": "RealUePool",
+      "type": "object"
+    },
+    "Target": {
+      "additionalProperties": false,
+      "properties": {
+        "csc": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TargetCsc"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "csp": {
+          "$ref": "#/$defs/TargetCsp"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "oam": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TargetOam"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "observe": {
+          "items": {
+            "enum": [
+              "oam_stats",
+              "oam_alarms",
+              "agent_heartbeat",
+              "ssh_proc"
+            ],
+            "type": "string"
+          },
+          "title": "Observe",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "csp"
+      ],
+      "title": "Target",
+      "type": "object"
+    },
+    "TargetCsc": {
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "title": "Host",
+          "type": "string"
+        },
+        "port": {
+          "default": 4430,
+          "title": "Port",
+          "type": "integer"
+        },
+        "tls": {
+          "default": true,
+          "title": "Tls",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "host"
+      ],
+      "title": "TargetCsc",
+      "type": "object"
+    },
+    "TargetCsp": {
+      "additionalProperties": false,
+      "properties": {
+        "domain_ptt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Domain Ptt"
+        },
+        "domain_volte": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Domain Volte"
+        },
+        "ip": {
+          "title": "Ip",
+          "type": "string"
+        },
+        "tcp": {
+          "default": 25061,
+          "title": "Tcp",
+          "type": "integer"
+        },
+        "tls": {
+          "default": 5061,
+          "title": "Tls",
+          "type": "integer"
+        },
+        "udp": {
+          "default": 5060,
+          "title": "Udp",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ip"
+      ],
+      "title": "TargetCsp",
+      "type": "object"
+    },
+    "TargetOam": {
+      "additionalProperties": false,
+      "description": "대상 관측 전용 — 동거 형태여도 스토어를 직접 읽지 않고 이 API 로 본다(I5).",
+      "properties": {
+        "token_env": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "토큰을 담은 환경변수 이름",
+          "title": "Token Env"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "title": "TargetOam",
+      "type": "object"
+    },
+    "UePool": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "ue",
+          "title": "Kind",
+          "type": "string"
+        },
+        "register_expires": {
+          "default": 3600,
+          "minimum": 60,
+          "title": "Register Expires",
+          "type": "integer"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DbSource"
+            },
+            {
+              "$ref": "#/$defs/CredsSource"
+            }
+          ],
+          "title": "Source"
+        },
+        "srtp": {
+          "default": "off",
+          "enum": [
+            "off",
+            "optional",
+            "required"
+          ],
+          "title": "Srtp",
+          "type": "string"
+        },
+        "transport": {
+          "default": "udp",
+          "enum": [
+            "udp",
+            "tcp",
+            "tls"
+          ],
+          "title": "Transport",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "source"
+      ],
+      "title": "UePool",
+      "type": "object"
+    },
+    "Worker": {
+      "additionalProperties": false,
+      "properties": {
+        "cpus": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cpus"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "url": {
+          "description": "cims-tester-worker 제어 URL (http://ip:7100)",
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "url"
+      ],
+      "title": "Worker",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "pools": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/UePool"
+          },
+          {
+            "$ref": "#/$defs/PeerPool"
+          },
+          {
+            "$ref": "#/$defs/RealUePool"
+          }
+        ]
+      },
+      "minProperties": 1,
+      "title": "Pools",
+      "type": "object"
+    },
+    "target": {
+      "$ref": "#/$defs/Target"
+    },
+    "workers": {
+      "description": "수동 항목 — 배포 목록에서 자동 발견한 워커에 보태거나 덮어쓴다(§6.1)",
+      "items": {
+        "$ref": "#/$defs/Worker"
+      },
+      "title": "Workers",
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "target",
+    "pools"
+  ],
+  "title": "Topology",
+  "type": "object"
+}

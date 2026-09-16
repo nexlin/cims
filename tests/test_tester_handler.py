@@ -1,0 +1,211 @@
+"""계측기 API 핸들러 단위시험 (handlers.tester 직접 호출 — 서버 미기동).
+
+Covers:
+  - RBAC: 토큰 없음 401, 조회 monitor / 토폴로지 쓰기 operator / 삭제 manager
+  - /health · /schema · /validate(doc, yaml) · /scenarios · /profiles
+  - /topologies CRUD — 검증 실패 400·errors, 저장은 검증 통과분만
+  - /runs POST = 501(B 단계 전) · /runs 빈 색인 · 색인 저장 후 조회 · 보존 스윕
+  - /events = text/event-stream StreamingResponse
+
+각 테스트는 tmpdir 로 CimsRuntimeDir·Tester.DataDir 격리. 토큰은 admin_auth 로 직접 발급.
+"""
+import asyncio
+import os
+import shutil
+import sys
+import tempfile
+import unittest
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_REPO = os.path.dirname(_HERE)
+_TESTER = os.path.join(_REPO, 'ems', 'tester', 'oam')
+for _m in [m for m in list(sys.modules) if m.split('.')[0] in ('services', 'handlers', 'httpsrv', 'util')]:
+    del sys.modules[_m]
+sys.path.insert(0, os.path.join(_TESTER, 'src'))
+sys.path.insert(1, os.path.join(_REPO, 'ems', 'core', 'oam', 'src'))
+sys.path.insert(2, os.path.join(_REPO, 'ems', 'core', 'oam', 'vendor'))
+
+from httpsrv.handler import HandlerArgs  # noqa: E402
+
+# 핸들러·스토어는 setUpModule 에서 import 한다 — 같은 프로세스에서 뒤에 import 되는 다른 시험 파일이
+# services/handlers 모듈 캐시를 비우면(위 관용) 여기서 미리 잡아 둔 참조가 옛 모듈 객체(리스 미획득
+# file_store)를 가리켜 `assert_writable` 에서 깨진다. 전 시험 모듈 import 가 끝난 뒤 잡으면 한 인스턴스다.
+admin_auth = H = S = RunRecord = None
+
+_SECRET = 'unit-test-secret'
+
+
+def _token(role):
+    import jwt, time  # vendor
+    return jwt.encode({'sub': 'u', 'login_id': 'u', 'role': role, 'exp': int(time.time()) + 600},
+                      _SECRET, algorithm='HS256')
+
+
+def _call(method, path, role='monitor', body=None, query=None):
+    # controller 는 헤더 키를 소문자로 넘긴다(admin_auth.extract_admin_jwt 규약).
+    headers = {'authorization': f'Bearer {_token(role)}'} if role else {}
+    args = HandlerArgs(method=method, full_path=path, client_ip='127.0.0.1', client_port=1,
+                       query_params=query or {}, headers=headers, body=body)
+    return asyncio.run(H.handle_tester(args, {'config': _CFG}))
+
+
+_TMP = None
+_CFG = None
+
+
+def setUpModule():
+    global _TMP, _CFG, admin_auth, H, S, RunRecord
+    from services import admin_auth as _aa
+    from handlers import tester as _H
+    from services import tester_store as _S
+    from services.tester_models import RunRecord as _RR
+    admin_auth, H, S, RunRecord = _aa, _H, _S, _RR
+    _TMP = tempfile.mkdtemp(prefix='tester-ut-')
+    _CFG = {'CimsRuntimeDir': os.path.join(_TMP, 'runtime'),
+            'CimsAuth': {'JwtSecret': _SECRET},
+            'Tester': {'DataDir': os.path.join(_TMP, 'data'), 'RunRetainDays': 30}}
+    admin_auth.init(_CFG)
+    from services import file_store, lease
+    lease.acquire(file_store.runtime_root(_CFG))   # 관리 store 는 단일 writer(리스 펜싱)
+    H.init(_TESTER, _CFG)
+
+
+def tearDownModule():
+    shutil.rmtree(_TMP, ignore_errors=True)
+
+
+class Rbac(unittest.TestCase):
+    def test_no_token_401(self):
+        self.assertEqual(_call('GET', '/api/v1/tester/health', role=None).status, 401)
+
+    def test_monitor_can_read(self):
+        self.assertEqual(_call('GET', '/api/v1/tester/health', role='monitor').status, 200)
+
+    def test_monitor_cannot_write(self):
+        r = _call('POST', '/api/v1/tester/topologies', role='monitor', body={'name': 'x'})
+        self.assertEqual(r.status, 403)
+
+    def test_operator_cannot_delete(self):
+        r = _call('DELETE', '/api/v1/tester/topologies/1', role='operator')
+        self.assertEqual(r.status, 403)
+
+
+class ReadApis(unittest.TestCase):
+    def test_health(self):
+        r = _call('GET', '/api/v1/tester/health')
+        self.assertEqual(r.body['module'], 'oam-cims-tester')
+        self.assertGreaterEqual(r.body['scenarios'], 3)
+        self.assertGreaterEqual(r.body['profiles'], 3)
+
+    def test_schema(self):
+        r = _call('GET', '/api/v1/tester/schema')
+        self.assertIn('scenario', r.body['schemas'])
+        r = _call('GET', '/api/v1/tester/schema/scenario')
+        self.assertIn('properties', r.body)
+        self.assertEqual(_call('GET', '/api/v1/tester/schema/nope').status, 404)
+
+    def test_validate_doc_and_yaml(self):
+        r = _call('POST', '/api/v1/tester/validate', role='operator',
+                  body={'kind': 'profile', 'doc': {'model': 'constant', 'rate': 1, 'duration_s': 10}})
+        self.assertTrue(r.body['ok'])
+        r = _call('POST', '/api/v1/tester/validate', role='operator',
+                  body={'kind': 'profile', 'yaml': 'model: step\nstart: 5\n'})
+        self.assertFalse(r.body['ok'])
+        self.assertTrue(r.body['errors'])
+        r = _call('POST', '/api/v1/tester/validate', role='operator', body={'kind': 'profile', 'yaml': ':::'})
+        self.assertFalse(r.body['ok'])
+
+    def test_scenarios_and_profiles(self):
+        r = _call('GET', '/api/v1/tester/scenarios')
+        ids = {s['id'] for s in r.body['scenarios']}
+        self.assertIn('VOLTE-CALL-BASIC', ids)
+        self.assertTrue(all(s['errors'] == [] for s in r.body['scenarios']))
+        r = _call('GET', '/api/v1/tester/scenarios/VOLTE-CALL-BASIC')
+        self.assertTrue(r.body['valid'])
+        self.assertEqual(_call('GET', '/api/v1/tester/scenarios/NOPE').status, 404)
+        r = _call('GET', '/api/v1/tester/profiles')
+        self.assertIn('step_5_to_100', {p['name'] for p in r.body['profiles']})
+
+    def test_user_scenario_overrides_bundled_and_broken_is_listed(self):
+        ud = S.user_scenarios_dir()
+        os.makedirs(os.path.join(ud, 'volte'), exist_ok=True)
+        broken = os.path.join(ud, 'volte', 'broken.yaml')
+        with open(broken, 'w') as f:
+            f.write('id: BROKEN-ONE\nroles: {a: {pool: p}}\nflow: [{step: answer}]\n')
+        try:
+            r = _call('GET', '/api/v1/tester/scenarios')
+            row = next(s for s in r.body['scenarios'] if s['id'] == 'BROKEN-ONE')
+            self.assertEqual(row['source'], 'user')
+            self.assertTrue(row['errors'])
+        finally:
+            os.remove(broken)
+
+
+class Topologies(unittest.TestCase):
+    def _doc(self, name='t1'):
+        return {'name': name, 'target': {'name': 'sut', 'csp': {'ip': '10.0.0.1'}},
+                'pools': {'ue': {'kind': 'ue', 'source': {'creds': 'creds/x.jsonl'}}}}
+
+    def test_crud(self):
+        r = _call('POST', '/api/v1/tester/topologies', role='operator', body=self._doc())
+        self.assertEqual(r.status, 201, r.body)
+        tid = r.body['id']
+        r = _call('GET', f'/api/v1/tester/topologies/{tid}')
+        self.assertEqual(r.body['name'], 't1')
+        r = _call('PUT', f'/api/v1/tester/topologies/{tid}', role='operator', body=self._doc('t2'))
+        self.assertEqual(r.status, 200)
+        self.assertEqual(r.body['name'], 't2')
+        r = _call('GET', '/api/v1/tester/topologies')
+        self.assertTrue(any(t['id'] == tid for t in r.body['topologies']))
+        r = _call('DELETE', f'/api/v1/tester/topologies/{tid}', role='manager')
+        self.assertEqual(r.status, 200)
+        self.assertEqual(_call('GET', f'/api/v1/tester/topologies/{tid}').status, 404)
+
+    def test_invalid_rejected_with_errors(self):
+        bad = self._doc(); bad['pools']['ue']['transport'] = 'sctp'
+        r = _call('POST', '/api/v1/tester/topologies', role='operator', body=bad)
+        self.assertEqual(r.status, 400)
+        self.assertTrue(any('transport' in e for e in r.body['errors']))
+        self.assertEqual(_call('PUT', '/api/v1/tester/topologies/9999', role='operator', body=self._doc()).status, 404)
+
+
+class Runs(unittest.TestCase):
+    def test_post_is_501_before_phase_b(self):
+        r = _call('POST', '/api/v1/tester/runs', role='operator', body={'scenario_id': 'VOLTE-CALL-BASIC'})
+        self.assertEqual(r.status, 501)
+
+    def test_index_roundtrip_and_purge(self):
+        self.assertEqual(_call('GET', '/api/v1/tester/runs').body['runs'], [])
+        S.save_run_index(RunRecord(id='r-2020', scenario_id='X-Y', topology='t',
+                                   started_at='2020-01-01T00:00:00', ended_at='2020-01-01T00:10:00', verdict='pass'))
+        S.save_run_index(RunRecord(id='r-now', scenario_id='X-Y', topology='t',
+                                   started_at='2999-01-01T00:00:00', verdict='running'))
+        r = _call('GET', '/api/v1/tester/runs')
+        self.assertEqual([x['id'] for x in r.body['runs']], ['r-now', 'r-2020'])
+        self.assertEqual(_call('GET', '/api/v1/tester/runs/r-2020').body['verdict'], 'pass')
+        self.assertEqual(S.purge_runs(0), 0)            # 무제한
+        self.assertEqual(S.purge_runs(30), 1)           # 오래된 pass 만, running 은 보존
+        self.assertEqual(_call('GET', '/api/v1/tester/runs/r-2020').status, 404)
+        self.assertEqual(_call('GET', '/api/v1/tester/runs/r-now').status, 200)
+
+
+class Events(unittest.TestCase):
+    def test_sse_response(self):
+        async def go():
+            args = HandlerArgs(method='GET', full_path='/api/v1/tester/events', client_ip='127.0.0.1', client_port=1,
+                               headers={'authorization': f'Bearer {_token("monitor")}'})
+            r = await H.handle_tester(args, {'config': _CFG})
+            self.assertIsNotNone(r.response)
+            self.assertEqual(r.response.media_type, 'text/event-stream')
+            it = r.response.body_iterator
+            first = await it.__anext__()
+            second = await it.__anext__()
+            await it.aclose()
+            return first, second
+        first, second = asyncio.run(go())
+        self.assertEqual(first, b': connected\n\n')
+        self.assertIn(b'"stream": "hello"', second)
+
+
+if __name__ == '__main__':
+    unittest.main()

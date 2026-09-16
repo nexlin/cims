@@ -1,0 +1,383 @@
+{
+  "$defs": {
+    "Identity": {
+      "additionalProperties": false,
+      "properties": {
+        "aka_k": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aka K"
+        },
+        "aka_opc": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aka Opc"
+        },
+        "auth_scheme": {
+          "default": "digest",
+          "enum": [
+            "digest",
+            "aka"
+          ],
+          "title": "Auth Scheme",
+          "type": "string"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Display"
+        },
+        "domain": {
+          "title": "Domain",
+          "type": "string"
+        },
+        "ha1": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ha1"
+        },
+        "password": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Password"
+        },
+        "user": {
+          "title": "User",
+          "type": "string"
+        }
+      },
+      "required": [
+        "user",
+        "domain"
+      ],
+      "title": "Identity",
+      "type": "object"
+    },
+    "PeerBind": {
+      "additionalProperties": false,
+      "properties": {
+        "ip": {
+          "title": "Ip",
+          "type": "string"
+        },
+        "port": {
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Port",
+          "type": "integer"
+        },
+        "protocol": {
+          "default": "udp",
+          "enum": [
+            "udp",
+            "tcp",
+            "tls"
+          ],
+          "title": "Protocol",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ip",
+        "port"
+      ],
+      "title": "PeerBind",
+      "type": "object"
+    },
+    "PeerIdentities": {
+      "additionalProperties": false,
+      "properties": {
+        "did_range": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Did Range"
+        },
+        "e164_range": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "E164 Range"
+        },
+        "ext_len": {
+          "anyOf": [
+            {
+              "maximum": 8,
+              "minimum": 2,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ext Len"
+        }
+      },
+      "title": "PeerIdentities",
+      "type": "object"
+    },
+    "PeerPool": {
+      "additionalProperties": false,
+      "properties": {
+        "bind": {
+          "$ref": "#/$defs/PeerBind"
+        },
+        "codecs": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "오퍼 코덱(우선순위 순). 생략=프로파일 기본 — ibcf/mgcf: AMR-WB,AMR,PCMU,PCMA · pbx: PCMA,PCMU (§3.2)",
+          "title": "Codecs"
+        },
+        "domain": {
+          "title": "Domain",
+          "type": "string"
+        },
+        "identities": {
+          "$ref": "#/$defs/PeerIdentities"
+        },
+        "kind": {
+          "const": "peer",
+          "title": "Kind",
+          "type": "string"
+        },
+        "profile": {
+          "enum": [
+            "ibcf",
+            "pbx",
+            "mgcf"
+          ],
+          "title": "Profile",
+          "type": "string"
+        },
+        "register": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PeerRegister"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "pbx 트렁크 REGISTER — YAML 키는 register"
+        }
+      },
+      "required": [
+        "kind",
+        "profile",
+        "bind",
+        "domain",
+        "identities"
+      ],
+      "title": "PeerPool",
+      "type": "object"
+    },
+    "PeerRegister": {
+      "additionalProperties": false,
+      "properties": {
+        "ha1_env": {
+          "description": "H(A1) 을 담은 환경변수 — 비밀은 YAML 에 두지 않는다",
+          "title": "Ha1 Env",
+          "type": "string"
+        },
+        "user": {
+          "title": "User",
+          "type": "string"
+        }
+      },
+      "required": [
+        "user",
+        "ha1_env"
+      ],
+      "title": "PeerRegister",
+      "type": "object"
+    },
+    "TargetCsp": {
+      "additionalProperties": false,
+      "properties": {
+        "domain_ptt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Domain Ptt"
+        },
+        "domain_volte": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Domain Volte"
+        },
+        "ip": {
+          "title": "Ip",
+          "type": "string"
+        },
+        "tcp": {
+          "default": 25061,
+          "title": "Tcp",
+          "type": "integer"
+        },
+        "tls": {
+          "default": 5061,
+          "title": "Tls",
+          "type": "integer"
+        },
+        "udp": {
+          "default": 5060,
+          "title": "Udp",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ip"
+      ],
+      "title": "TargetCsp",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "POST /pools — 풀 생성·신원 적재. 멱등(pool 이름 기준).",
+  "properties": {
+    "identities": {
+      "items": {
+        "$ref": "#/$defs/Identity"
+      },
+      "title": "Identities",
+      "type": "array"
+    },
+    "kind": {
+      "enum": [
+        "ue",
+        "peer",
+        "real-ue"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "peer": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PeerPool"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "kind=peer 일 때 프로파일·bind·신원 범위"
+    },
+    "pool": {
+      "title": "Pool",
+      "type": "string"
+    },
+    "srtp": {
+      "default": "off",
+      "enum": [
+        "off",
+        "optional",
+        "required"
+      ],
+      "title": "Srtp",
+      "type": "string"
+    },
+    "target_csp": {
+      "$ref": "#/$defs/TargetCsp"
+    },
+    "transport": {
+      "default": "udp",
+      "enum": [
+        "udp",
+        "tcp",
+        "tls"
+      ],
+      "title": "Transport",
+      "type": "string"
+    }
+  },
+  "required": [
+    "pool",
+    "kind",
+    "target_csp"
+  ],
+  "title": "PoolCreate",
+  "type": "object"
+}

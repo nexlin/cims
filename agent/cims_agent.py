@@ -2775,7 +2775,7 @@ def _start_base_deps_ensurer() -> None:
 #  않게 한다. 결과는 엔진이 run/cert/<module>.json 에 남기고 metric(cert_renew)으로 OAM 에 간다.
 # ──────────────────────────────────────────────────────────────
 _CERT_SWEEP_INTERVAL = 86400
-_CERT_SWEEP_MODULES = ("oam", "oam-svc", "csc", "csp", "psp", "isp")
+_CERT_SWEEP_MODULES = ("oam", "oam-svc", "oam-cims-tester", "csc", "csp", "psp", "isp")
 _CERT_STATE_DIR = os.path.join(_PREFIX, "run", "cert")
 _CERT_SWEEP_STARTED = False
 

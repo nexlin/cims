@@ -1,0 +1,36 @@
+# 토폴로지 — 대상(SUT)·워커·풀. 콘솔 [시험 > 토폴로지] 가 편집·저장하는 레코드의 YAML 표현.
+# 비밀(토큰·H(A1))은 YAML 에 두지 않고 환경변수 이름만 적는다.
+name: media01
+target:
+  name: media01
+  csp: { ip: 10.0.0.45, udp: 5060, tcp: 25061, tls: 5061, domain_volte: volte.cims.example.kr, domain_ptt: ptt.cims.example.kr }
+  csc: { host: 10.0.0.45, port: 4430, tls: true }
+  oam: { url: https://10.0.0.45:4419, token_env: TESTER_OAM_TOKEN }
+  observe: [oam_stats, oam_alarms, agent_heartbeat]
+workers:
+  - { name: w1, url: http://10.0.0.61:7100, cpus: 8 }
+  - { name: w2, url: http://10.0.0.62:7100, cpus: 8 }
+pools:
+  volte_ue:
+    kind: ue
+    source: { db: target, table: volte_subscriptions, offset: 0, count: 2000 }
+    transport: tls
+    srtp: optional
+  ptt_ue:
+    kind: ue
+    source: { creds: creds/ptt.jsonl }
+    transport: udp
+  peer_kt:
+    kind: peer
+    profile: ibcf
+    bind: { ip: 10.0.0.62, port: 5080, protocol: tls }
+    domain: ims.kt.test
+    identities: { e164_range: ["+82212340000", "+82212349999"] }
+  pbx_hq:
+    kind: peer
+    profile: pbx
+    bind: { ip: 10.0.0.62, port: 5090, protocol: udp }
+    domain: pbx.hq.test
+    register: { user: pbx-hq, ha1_env: PBX_HA1 }
+    identities: { did_range: ["0212345000", "0212345099"], ext_len: 4 }
+    codecs: [PCMA, PCMU]

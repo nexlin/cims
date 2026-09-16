@@ -1,0 +1,11 @@
+# ETSI TS 186 008 step 방식 — 단계마다 hold_s 유지, IHS 임계 초과 직전 단계가 DOC.
+name: step_5_to_100
+model: step
+unit: saps
+start: 5
+step: 5
+hold_s: 300
+max: 100
+ht: 20
+ihs_threshold_pct: 0.1
+stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }

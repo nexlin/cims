@@ -187,6 +187,7 @@ if role == 'base':
   /api/v1/calls        → oam-svc  (127.0.0.1:4480)
   /api/v1/stats        → oam-svc  (health/subscribers/messages/leak + service KPI 전체)
   /api/v1/verification → oam-svc
+  /api/v1/tester       → oam-cims-tester (127.0.0.1:4490 — 계측기 컨트롤러, test_instrument.md)
   (그 외 /api/v1/*      → base 직접 처리)
 ```
 
@@ -209,7 +210,8 @@ passthrough:
 - method/body/query 전달 + 헤더 화이트리스트(`Authorization`,`Content-Type`,`If-None-Match`…)
 - 응답 status/headers/body passthrough — ETag/304, `Content-Disposition`(녹취 다운로드) 보존
 - **대용량 응답(녹취 mp4/세그먼트)은 청크 스트리밍** — 전체 버퍼링 금지(메모리·지연)
-- 타임아웃 기본 5s, 스트리밍 경로는 별도 장타임아웃
+- **SSE 통과** — 요청 `Accept: text/event-stream` 이면 총 타임아웃 없이(연결 5s) 업스트림을 부르고, 응답 `Content-Type: text/event-stream` 이면 청크 passthrough(클라이언트 절단·업스트림 종료 어느 쪽이든 응답 해제). 판정은 응답 타입이라 어느 서비스 모듈이든 SSE 를 낼 수 있다(계측기 `/api/v1/tester/events`)
+- 타임아웃 기본 5s, 다운로드는 120s
 - 구현은 `csc/src/httpsrv/client.py` 재사용
 
 ### 인증 공유
@@ -408,8 +410,8 @@ start_svc_mgmt()  { kill_stray "svc_mgmt_app.py" "$port" tcp
 
 ## 10. 버전 계약
 
-- 교차 의존 = **service → base 최소 버전**. 서비스 매니페스트에 `requires.base_oam >= X.Y.Z` 선언,
-  base 가 self-register 시 대조 → 불일치 경고/거부.
+- 교차 의존 = **service → base 최소 버전**. 서비스 `pkg.json` `gateway.requires_base_oam` 선언 → base 가
+  self-register 시 라우트 레코드에 기록하고 자기 버전(`oam/pkg.json`)과 대조 — 낮으면 경고 로그(등록은 한다).
 - 위젯과 그 API 는 같은 서비스 모듈이라 모듈 내부에서 이미 정합(스큐 없음).
 - 호환 매트릭스를 릴리스 노트에 명시.
 

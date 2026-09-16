@@ -256,6 +256,46 @@ def _request_body(handler_args: HandlerArgs):
     return None, None
 
 
+
+def _hdr(headers, name: str) -> str:
+    """대소문자 무관 헤더 조회 — controller 가 넘기는 dict 의 키 표기가 고정돼 있지 않다."""
+    name = name.lower()
+    for k, v in (headers or {}).items():
+        if str(k).lower() == name:
+            return str(v or '')
+    return ''
+
+
+def _wants_event_stream(headers) -> bool:
+    return 'text/event-stream' in _hdr(headers, 'accept').lower()
+
+
+def _is_event_stream(content_type: str) -> bool:
+    return 'text/event-stream' in (content_type or '').lower()
+
+
+def _stream_passthrough(resp, status: int, resp_headers: dict) -> HandlerResult:
+    """업스트림 SSE 응답을 청크 단위로 그대로 흘린다. 클라이언트 절단(generator 취소)이나
+    업스트림 종료 시 aiohttp 응답을 놓는다 — 어느 쪽이 먼저 끊어도 연결이 남지 않는다."""
+    from starlette.responses import StreamingResponse
+
+    async def gen():
+        try:
+            async for chunk in resp.content.iter_any():
+                if chunk:
+                    yield chunk
+        finally:
+            try:
+                resp.release()
+            except Exception:
+                pass
+            resp.close()
+
+    headers = dict(resp_headers or {})
+    headers.update({'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+    return HandlerResult(response=StreamingResponse(gen(), status_code=status,
+                                                    media_type='text/event-stream', headers=headers))
+
 async def proxy(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
     route = kwargs.get('_route') or {}
     upstream = route.get('upstream')
@@ -273,8 +313,17 @@ async def proxy(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
     req_headers = _filter_req_headers(handler_args.headers)
     content, json_obj = _request_body(handler_args)
     is_download = 'recordings' in path or path.rstrip('/').endswith('download')
-    timeout = aiohttp.ClientTimeout(total=_STREAM_TIMEOUT if is_download else _DEFAULT_TIMEOUT)
+    # SSE(text/event-stream) 라이브 스트림 — 클라이언트가 Accept 로 청하면 총 타임아웃을 두지
+    # 않는다(연결이 곧 구독이다). 실제 통과 판정은 업스트림 응답 Content-Type 으로 한다 —
+    # 라우트 속성이 아니라 응답 타입이라 어느 서비스 모듈이든 SSE 를 낼 수 있다
+    # (test_instrument.md §6.2 base 확장 ①). 연결 자체는 5 s 안에 맺혀야 한다.
+    wants_stream = _wants_event_stream(handler_args.headers)
+    if wants_stream:
+        timeout = aiohttp.ClientTimeout(total=None, sock_connect=_DEFAULT_TIMEOUT)
+    else:
+        timeout = aiohttp.ClientTimeout(total=_STREAM_TIMEOUT if is_download else _DEFAULT_TIMEOUT)
 
+    resp = None
     try:
         kw = dict(params=handler_args.query_params or None,
                   headers=req_headers or None, timeout=timeout, allow_redirects=False,
@@ -283,15 +332,25 @@ async def proxy(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
             kw['json'] = json_obj
         elif content is not None:
             kw['data'] = content
-        async with session.request(method, url, **kw) as resp:
-            status = resp.status
-            ct = resp.headers.get('Content-Type', '')
-            resp_headers = _filter_resp_headers(resp.headers)
+        resp = await session.request(method, url, **kw)
+        status = resp.status
+        ct = resp.headers.get('Content-Type', '')
+        resp_headers = _filter_resp_headers(resp.headers)
+        if _is_event_stream(ct):
+            # 청크 passthrough — 전체 버퍼링 금지. 응답 객체 수명은 generator 가 쥔다.
+            return _stream_passthrough(resp, status, resp_headers)
+        try:
             body = await resp.read()
+        finally:
+            resp.release()
     except asyncio.TimeoutError:
+        if resp is not None:
+            resp.close()
         _logger.log_error(f'[gateway] proxy {method} {url} timeout')
         return HandlerResult(status=504, body={'error': 'gateway timeout', 'upstream': upstream})
     except Exception as exc:
+        if resp is not None:
+            resp.close()
         _logger.log_error(f'[gateway] proxy {method} {url} failed: {exc}')
         return HandlerResult(status=502, body={'error': 'bad gateway',
                                                'detail': str(exc), 'upstream': upstream})
@@ -399,17 +458,49 @@ def unmount_route(segment: str) -> bool:
         return False
 
 
-def register_module_routes(config: dict, module: str, ip: str, port, segments) -> int:
+def _base_oam_version() -> str:
+    """base 자기 버전(oam/pkg.json) — 서비스 모듈의 requires_base_oam 대조용."""
+    try:
+        import os as _os
+        p = _os.path.normpath(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', '..', 'pkg.json'))
+        with open(p, 'r', encoding='utf-8') as f:
+            return str(json.load(f).get('version') or '')
+    except Exception:
+        return ''
+
+
+def _ver_tuple(v: str):
+    out = []
+    for p in str(v or '').split('.'):
+        try:
+            out.append(int(p))
+        except ValueError:
+            out.append(0)
+    return tuple(out)
+
+
+def register_module_routes(config: dict, module: str, ip: str, port, segments,
+                           requires_base_oam: str = None) -> int:
     """서비스 모듈 배포 시 self-register: 모듈이 선언한 세그먼트들을 그 모듈의 실제
     (ip=배포 config 의 Server.GatewayHost, 미지정 시 loopback / port=Server.Port=SoT)
     https upstream 으로 등록+hot-mount. 멱등(segment upsert). base 가 서비스 모듈을
-    미리 알 필요 없음(시드 하드코딩 대체)."""
+    미리 알 필요 없음(시드 하드코딩 대체).
+
+    requires_base_oam(pkg meta.gateway.requires_base_oam) — 서비스 → base 최소 버전 계약(§10).
+    라우트 레코드에 기록하고, base 자기 버전이 그보다 낮으면 경고 로그(등록은 한다 — 거부는
+    콘솔에서 무엇이 잘못됐는지 보이지 않게 만든다)."""
     ip = ip or '127.0.0.1'
     base = f"https://{ip}:{port}"
+    if requires_base_oam:
+        mine = _base_oam_version()
+        if mine and _ver_tuple(mine) < _ver_tuple(requires_base_oam):
+            _logger.log_warning(f"[gateway] {module} requires base oam >= {requires_base_oam} "
+                                f"but this base is {mine} — 서비스 API 일부가 동작하지 않을 수 있다")
     n = 0
     for seg in (segments or []):
         try:
-            rec = upsert_route(config, {'segment': seg, 'upstream': base, 'module': module})
+            rec = upsert_route(config, {'segment': seg, 'upstream': base, 'module': module,
+                                        'requires_base_oam': requires_base_oam})
             mount_route(rec)
             n += 1
         except ValueError as e:

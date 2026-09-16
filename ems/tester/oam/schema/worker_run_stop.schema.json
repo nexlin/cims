@@ -1,0 +1,15 @@
+{
+  "additionalProperties": false,
+  "description": "POST /runs/{id}/stop",
+  "properties": {
+    "drain_s": {
+      "default": 5,
+      "description": "진행 중 세션을 기다리는 시간 — 0 은 즉시 BYE",
+      "minimum": 0,
+      "title": "Drain S",
+      "type": "integer"
+    }
+  },
+  "title": "RunStop",
+  "type": "object"
+}

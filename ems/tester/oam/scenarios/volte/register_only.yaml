@@ -1,0 +1,10 @@
+# 등록 폭주 — RRD 분포와 등록 성공률만 본다 (부하 강화 문서의 등록 시험 재현).
+id: VOLTE-REGISTER
+title: VoLTE 등록/해제
+tags: [volte, register]
+roles:
+  ue: { pool: volte_ue }
+flow:
+  - { step: register,   who: [ue], expect: { code: 200, rrd_ms: { p95: 500, p99: 1500 } } }
+  - { step: wait,       seconds: 5 }
+  - { step: deregister, who: [ue], expect: { code: 200 } }

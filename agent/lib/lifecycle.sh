@@ -1014,6 +1014,45 @@ stop_oam_svc() {
     stop_one oam-svc
 }
 
+# test_instrument.md — oam-cims-tester 계측기 컨트롤러(서비스 모듈, oam-svc 와 같은 골격).
+#   base OAM(게이트웨이) 뒤 loopback(기본 4490) 업스트림. 명시 기동만(all 미포함) — 배포는
+#   콘솔(agent job)이 정본. kill_stray 패턴은 고유 절대경로(oam_cims_tester_app.py).
+start_oam_cims_tester() {
+    if is_running oam-cims-tester; then warn "oam-cims-tester 이미 실행 중 (pid=$(read_pid oam-cims-tester))"; return 0; fi
+    [[ ! -f "$DIST_DIR/oam-cims-tester/src/oam_cims_tester_app.py" ]] && err "oam-cims-tester 소스 없음 (make dist 실행 필요)" && return 1
+    ensure_node_cert oam-cims-tester      # 기동 전 TLS 인증서 보증 (cert.sh)
+    local svc_port
+    svc_port=$("$PYBIN" -c "
+import json, os
+base='$DIST_DIR/oam-cims-tester/config/oam-cims-tester.json'
+candidates=['$DIST_DIR/oam-cims-tester/config.json', '$DIST_DIR/config.json']
+p=None
+for ov in candidates:
+    if not os.path.isfile(ov): continue
+    try:
+        f=json.load(open(ov))
+        if isinstance(f,dict):
+            p=f.get('Server.Port') or (f.get('Server',{}) or {}).get('Port')
+            if p: break
+    except: pass
+if not p:
+    try: p=json.load(open(base))['Server']['Port']
+    except: p=4490
+print(p)" 2>/dev/null || echo 4490)
+    kill_stray "$DIST_DIR/oam-cims-tester/src/oam_cims_tester_app.py" "$svc_port" tcp
+    info "oam-cims-tester (계측기 컨트롤러) 시작... (port=$svc_port)"
+    cd "$DIST_DIR/oam-cims-tester/src"
+    "$PYBIN" -u "$DIST_DIR/oam-cims-tester/src/oam_cims_tester_app.py" >> "$LOG_DIR/oam-cims-tester.log" 2>&1 &
+    save_pid oam-cims-tester $!
+    sleep 1.5
+    is_running oam-cims-tester && ok "oam-cims-tester 시작 완료 (pid=$(read_pid oam-cims-tester), port=$svc_port)" \
+        || { err "oam-cims-tester 시작 실패"; tail -3 "$LOG_DIR/oam-cims-tester.log" | sed 's/^/  /'; return 1; }
+}
+
+stop_oam_cims_tester() {
+    stop_one oam-cims-tester
+}
+
 start_console() {
     if is_running console; then warn "console 이미 실행 중 (pid=$(read_pid console))"; return 0; fi
     # Console 2형 (엔진은 dist 정적 서빙만 — vite dev 콘솔은 개발 프론트 './cims.sh tb start console'):
@@ -1306,6 +1345,7 @@ _start_one() {
         oam)        start_oam ;;     # OAM 분리 Phase 3b
         csc)        start_csc ;;
         oam-svc)   start_oam_svc ;;  # oam_base_service_split P3 — 명시 기동만(all 미포함)
+        oam-cims-tester) start_oam_cims_tester ;;  # test_instrument.md — 명시 기동만
         console)    start_console ;;
         phone)      start_phone ;;
         tb-csc)     start_tb_csc ;;
@@ -1330,6 +1370,8 @@ _stop_one() {
                     csc)     stop_csc ;;
                     oam)     stop_oam ;;     # OAM 분리 Phase 3b
                     oam-svc) stop_oam_svc ;;
+        oam-cims-tester) stop_oam_cims_tester ;;
+                    oam-cims-tester) stop_oam_cims_tester ;;
                     console) stop_console ;;
                     phone)   stop_phone ;;
                     *)       stop_one "$c" ;;

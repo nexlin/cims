@@ -50,7 +50,7 @@ _BASE = '/api/v1/console'
 _DOMAIN = 'console_user_layouts'
 
 # 알려진 서비스 모듈(분리 배포 시 게이트웨이 업스트림). base(None) 위젯은 항상 가용.
-_KNOWN_SERVICES = ('csc', 'oam-svc')
+_KNOWN_SERVICES = ('csc', 'oam-svc', 'oam-cims-tester')
 
 # ── 위젯 카탈로그(정책 SoT) ─────────────────────────────────────────────────
 #  콘솔 프런트(widgets registry)가 컴포넌트를 소유하고, 서버는 RBAC/가용성 정책을 소유.

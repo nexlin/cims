@@ -539,7 +539,8 @@ def self_register_deployment_routes(config, dep: dict) -> int:
     host = effective_gateway_host(config, pkg, overlay) or "127.0.0.1"
     import handlers.gateway as _gw
     return _gw.register_module_routes(config, module_id, host,
-                                      int(port), gw_routes)
+                                      int(port), gw_routes,
+                                      requires_base_oam=gw_meta.get("requires_base_oam"))
 
 
 def _pkg_load_all(config) -> list:

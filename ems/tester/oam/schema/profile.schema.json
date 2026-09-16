@@ -1,0 +1,234 @@
+{
+  "$defs": {
+    "StopOn": {
+      "additionalProperties": false,
+      "properties": {
+        "csp_5xx_pct": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Csp 5Xx Pct"
+        },
+        "ser_pct_min": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ser Pct Min"
+        },
+        "target_cpu_pct": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Cpu Pct"
+        }
+      },
+      "title": "StopOn",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "burst_interval_s": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Burst Interval S"
+    },
+    "burst_size": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Burst Size"
+    },
+    "duration_s": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Duration S"
+    },
+    "hold_s": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Hold S"
+    },
+    "ht": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "${ht} 바인딩 — 세션 유지(초)",
+      "title": "Ht"
+    },
+    "ihs_threshold_pct": {
+      "default": 0.1,
+      "description": "부적절 처리 시나리오 비율 임계 — 초과 시 DOC 확정·정지",
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Ihs Threshold Pct",
+      "type": "number"
+    },
+    "max": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max"
+    },
+    "model": {
+      "enum": [
+        "constant",
+        "step",
+        "ramp",
+        "soak",
+        "burst"
+      ],
+      "title": "Model",
+      "type": "string"
+    },
+    "name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Name"
+    },
+    "ramp_s": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ramp S"
+    },
+    "rate": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "constant/soak 의 고정 시도율",
+      "title": "Rate"
+    },
+    "start": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Start"
+    },
+    "step": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Step"
+    },
+    "stop_on": {
+      "$ref": "#/$defs/StopOn"
+    },
+    "unit": {
+      "const": "saps",
+      "default": "saps",
+      "description": "시나리오 시도/초 — cps 를 시나리오 단위로 일반화",
+      "title": "Unit",
+      "type": "string"
+    }
+  },
+  "required": [
+    "model"
+  ],
+  "title": "LoadProfile",
+  "type": "object"
+}

@@ -1,0 +1,105 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "ended_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ended At"
+    },
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "profile": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Profile"
+    },
+    "scenario_id": {
+      "title": "Scenario Id",
+      "type": "string"
+    },
+    "started_at": {
+      "title": "Started At",
+      "type": "string"
+    },
+    "summary": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "title": "Summary",
+      "type": "object"
+    },
+    "target_build": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "대상 git sha / 패키지 manifest 해시 — 회귀 비교 축",
+      "title": "Target Build"
+    },
+    "topology": {
+      "title": "Topology",
+      "type": "string"
+    },
+    "verdict": {
+      "default": "running",
+      "enum": [
+        "running",
+        "pass",
+        "fail",
+        "aborted",
+        "error"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    },
+    "workers": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Workers",
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "scenario_id",
+    "topology",
+    "started_at"
+  ],
+  "title": "RunRecord",
+  "type": "object"
+}

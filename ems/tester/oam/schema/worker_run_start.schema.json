@@ -1,0 +1,308 @@
+{
+  "$defs": {
+    "CompiledStep": {
+      "additionalProperties": false,
+      "description": "시나리오 단계 + 바인딩 해석 결과 — 워커가 실행하는 단위.",
+      "properties": {
+        "after_ms": {
+          "default": 0,
+          "title": "After Ms",
+          "type": "integer"
+        },
+        "expect": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "$ref": "#/$defs/Percentiles"
+              }
+            ]
+          },
+          "title": "Expect",
+          "type": "object"
+        },
+        "from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From"
+        },
+        "group": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Group"
+        },
+        "idx": {
+          "minimum": 0,
+          "title": "Idx",
+          "type": "integer"
+        },
+        "media": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Media"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "payload": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Payload"
+        },
+        "seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seconds"
+        },
+        "step": {
+          "enum": [
+            "register",
+            "deregister",
+            "invite",
+            "answer",
+            "reject",
+            "bye",
+            "refer",
+            "replaces",
+            "join",
+            "pickup",
+            "subscribe",
+            "publish",
+            "group_call",
+            "floor_request",
+            "floor_release",
+            "sds_send",
+            "sds_recv",
+            "media_hold",
+            "wait",
+            "expect"
+          ],
+          "title": "Step",
+          "type": "string"
+        },
+        "to": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "To"
+        },
+        "who": {
+          "description": "역할 이름 — 워커는 roles 매핑으로 풀을 찾는다",
+          "items": {
+            "type": "string"
+          },
+          "title": "Who",
+          "type": "array"
+        }
+      },
+      "required": [
+        "idx",
+        "step"
+      ],
+      "title": "CompiledStep",
+      "type": "object"
+    },
+    "Media": {
+      "additionalProperties": false,
+      "properties": {
+        "audio": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "amr-wb",
+          "description": "amr-wb | amr | pcmu | pcma | g722",
+          "title": "Audio"
+        },
+        "video": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "h264 | none",
+          "title": "Video"
+        }
+      },
+      "title": "Media",
+      "type": "object"
+    },
+    "Percentiles": {
+      "additionalProperties": false,
+      "properties": {
+        "max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min"
+        },
+        "p50": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "P50"
+        },
+        "p95": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "P95"
+        },
+        "p99": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "P99"
+        }
+      },
+      "title": "Percentiles",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "POST /runs — 컴파일된 시나리오 + 이 워커의 배분.",
+  "properties": {
+    "rate_saps": {
+      "description": "이 워커 몫의 시도율 (컨트롤러가 워커 수로 나눔)",
+      "minimum": 0,
+      "title": "Rate Saps",
+      "type": "number"
+    },
+    "role_slices": {
+      "additionalProperties": {
+        "items": {
+          "type": "integer"
+        },
+        "type": "array"
+      },
+      "description": "역할 → 이 워커가 맡는 신원 인덱스 [begin, end) — 워커 분산",
+      "title": "Role Slices",
+      "type": "object"
+    },
+    "roles": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "역할 → 풀 이름",
+      "title": "Roles",
+      "type": "object"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "scenario_id": {
+      "title": "Scenario Id",
+      "type": "string"
+    },
+    "steps": {
+      "items": {
+        "$ref": "#/$defs/CompiledStep"
+      },
+      "minItems": 1,
+      "title": "Steps",
+      "type": "array"
+    },
+    "stream": {
+      "description": "관측 스트림 목적지 host:port (TCP JSONL)",
+      "title": "Stream",
+      "type": "string"
+    }
+  },
+  "required": [
+    "run_id",
+    "scenario_id",
+    "roles",
+    "steps",
+    "rate_saps",
+    "stream"
+  ],
+  "title": "RunStart",
+  "type": "object"
+}

@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""cims-tester — 계측기 컨트롤러의 얇은 CLI (cims-verify 항목이 호출하는 진입점).
+
+  cims-tester health
+  cims-tester scenarios | profiles | topologies | runs
+  cims-tester validate <kind> <file.yaml>        kind = topology|scenario|profile
+  cims-tester run <scenario-id> [--load <profile>] [--topology <id>] [--json]   (B 단계 전 = 501)
+
+접속: --url (기본 $CIMS_TESTER_URL 또는 https://127.0.0.1:4419 — base 게이트웨이) + 토큰
+($CIMS_TESTER_TOKEN 또는 --token). 모듈에 직접 붙을 땐 --url https://127.0.0.1:4490.
+표준 라이브러리만 쓴다(설치 의존 없음).
+"""
+import argparse
+import json
+import os
+import ssl
+import sys
+import urllib.error
+import urllib.request
+
+
+def _req(url, token, method='GET', body=None, accept='application/json'):
+    data = json.dumps(body).encode('utf-8') if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method)
+    req.add_header('Accept', accept)
+    if body is not None:
+        req.add_header('Content-Type', 'application/json')
+    if token:
+        req.add_header('Authorization', f'Bearer {token}')
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE   # 관리평면은 self-signed 전제(oam_base_service_split §5)
+    try:
+        with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
+            raw = r.read().decode('utf-8', 'replace')
+            return r.status, (json.loads(raw) if raw else None)
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode('utf-8', 'replace')
+        try:
+            return e.code, json.loads(raw)
+        except Exception:
+            return e.code, {'error': raw}
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog='cims-tester')
+    ap.add_argument('--url', default=os.environ.get('CIMS_TESTER_URL', 'https://127.0.0.1:4419'))
+    ap.add_argument('--token', default=os.environ.get('CIMS_TESTER_TOKEN', ''))
+    ap.add_argument('--json', action='store_true', help='원본 JSON 출력')
+    sub = ap.add_subparsers(dest='cmd', required=True)
+    for c in ('health', 'scenarios', 'profiles', 'topologies', 'runs', 'workers'):
+        sub.add_parser(c)
+    v = sub.add_parser('validate'); v.add_argument('kind'); v.add_argument('file')
+    r = sub.add_parser('run'); r.add_argument('scenario'); r.add_argument('--load'); r.add_argument('--topology')
+    a = ap.parse_args(argv)
+    base = a.url.rstrip('/') + '/api/v1/tester'
+
+    if a.cmd == 'validate':
+        try:
+            import yaml   # oam vendor 에 있음 — 없으면 서버에 yaml 문자열로 위임
+            with open(a.file, 'r', encoding='utf-8') as f:
+                doc = yaml.safe_load(f)
+            st, out = _req(base + '/validate', a.token, 'POST', {'kind': a.kind, 'doc': doc})
+        except ImportError:
+            with open(a.file, 'r', encoding='utf-8') as f:
+                st, out = _req(base + '/validate', a.token, 'POST', {'kind': a.kind, 'yaml': f.read()})
+    elif a.cmd == 'run':
+        body = {'scenario_id': a.scenario}
+        if a.load: body['profile'] = a.load
+        if a.topology: body['topology_id'] = a.topology
+        st, out = _req(base + '/runs', a.token, 'POST', body)
+    else:
+        st, out = _req(f'{base}/{a.cmd}', a.token)
+
+    if a.json or a.cmd in ('validate', 'run'):
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+    else:
+        rows = out.get(a.cmd) if isinstance(out, dict) else None
+        if isinstance(rows, list):
+            for row in rows:
+                print(json.dumps(row, ensure_ascii=False))
+        else:
+            print(json.dumps(out, ensure_ascii=False, indent=2))
+    if a.cmd == 'validate':
+        return 0 if (out or {}).get('ok') else 1
+    return 0 if 200 <= st < 300 else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())
