@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { FormField } from '@core/components/custom/form-field'
 import { useToast } from '@core/components/Toast'
 import { testerApi, type ScenarioRow, type ProfileRow, type TopologyRow, type RunRequest } from '@tester/api/tester'
+import { topoTargetLabel } from '@tester/pages/TesterTopologiesPage'
 
 const NONE = '__none__'
 
@@ -73,7 +74,7 @@ export default function RunStartDialog({ onClose, onStarted, scenarioId, lastTop
         <FormField label="토폴로지" required help="대상(SUT)·워커·풀. [시험 > 토폴로지] 에서 편집">
           <Select value={topology} onValueChange={setTopology}>
             <SelectTrigger><SelectValue placeholder="토폴로지 선택" /></SelectTrigger>
-            <SelectContent>{topologies.map(t => <SelectItem key={t.id} value={String(t.id)}>{t.name} <span className="text-muted-foreground">· {t.doc.target?.csp?.ip} · 워커 {t.doc.workers?.length ?? 0}</span></SelectItem>)}</SelectContent>
+            <SelectContent>{topologies.map(t => <SelectItem key={t.id} value={String(t.id)}>{t.name} <span className="text-muted-foreground">· {topoTargetLabel(t.doc)} · 워커 {t.doc.workers?.length ?? 0}</span></SelectItem>)}</SelectContent>
           </Select>
         </FormField>
         <FormField label="부하 프로파일" help="없음 = 단발(기능) 실행 — 아래 인스턴스·율을 쓴다">

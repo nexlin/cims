@@ -291,9 +291,14 @@ layout:                                  # UI 배치 상태 — 캔버스 영역
   두지 않는다.
 - **`kind`.** `cims` 는 `oam` 노드가 있을 때 컬렉션 시드(§3.2)·`target_build` 를 쓴다. `ims`/`pbx` 는 시드 없음 — 피어 수신점으로의 라우팅은 대상 쪽에서
   미리 잡아 두고, 피어 풀 `seed.*` 는 경고.
-- **컨트롤러 이행 상태.** 컨트롤러 계약(`tester_models.Topology`)은 아직 이전 꼴(`target.csp/csc/oam` · `workers[].url` · `pools.*.bind.ip`)로 동작한다.
-  이 모델로의 이행은 §10 E 의 남은 것 — 스토어 읽기 시 기계적 변환(csp/csc/oam → 호스트 하나 + 노드 셋, url → host, bind.ip → worker)으로 기존
-  레코드를 승계하고, 콘솔 캔버스는 목업(`/test/topology-canvas`)에서 정식 편집기로 바뀐다.
+- **컨트롤러 계약 = 이 모델.** `tester_models.Topology`(pydantic, `schema/topology.schema.json`) 가 참조 무결성을 검증한다 — 워커·노드의
+  `host` ∈ hosts, 풀의 `worker` ∈ workers, `ue.access` 는 `sip.access` 있는 노드(+그 transport 포트), `peer.peering` 은 `sip.peering` 있는 노드,
+  `source.db` 는 db 노드 또는 api 있는 subscriber 노드, `group` 은 다른 풀 이름과 겹치지 않고 워커당 하나, 피어 수신점(워커 호스트:port) 유일,
+  역할과 다른 설정 블록 거절. 파생 조회는 모델 메서드(`worker_url`·`pool_bind_ip`·`target_csp_for(pool)`·`oam_ref`·`host_kind`) — 워커 계약
+  `PoolCreate.target_csp`(ip·access 포트·도메인·peering)와 `peer.bind.ip` 는 여기서 나온다. **이전 꼴 레코드**(`target.csp/csc/oam` · `workers[].url` ·
+  `pools.*.bind.ip`)는 스토어가 읽을 때 기계적으로 승계한다(`tester_store.topology_v1_to_v2` — csp/csc/oam → 호스트+노드, url → 호스트+포트, bind.ip →
+  그 주소의 워커, UE 풀은 첫 워커; 레코드에 `migrated_from: v1` 표시, 쓰기 가능하면 그 자리에서 저장). 콘솔 캔버스는 목업(`/test/topology-canvas`)에서
+  정식 편집기로 바뀐다(§7).
 
 ```yaml
 # scenarios/volte/call_basic.yaml — 시나리오 (기능·성능 공용)
@@ -333,7 +338,13 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
   body 안의 `register/deregister` 는 거절한다. `invite` 는 비동기(다음 단계로 바로 진행), `answer/reject` 는 착신 도착을 기다렸다가 `after_ms` 뒤
   응답하고 발신자 확립(또는 최종 응답)까지 기다린다, `media_hold` 는 확립을 기다린 뒤 `seconds` 유지하고 끝에 RTP 품질 표본을 뜬다,
   `bye` 는 BYE 최종 응답(SDD)까지 기다린다. 어느 대기든 시한(`Timers.InviteTimeoutMs`·`ByeTimeoutMs`)을 넘기면 인스턴스 실패 + event.
-- **역할의 풀** — `roles.X.pool` 은 토폴로지 풀 **이름 또는 `group`**(논리 풀 이름, §4). 워커마다 그 워커의 로컬 풀 하나로 해석된다.
+- **역할의 풀** — `roles.X.pool` 은 토폴로지 풀 **이름 또는 `group`**(논리 풀 이름, §4). 워커마다 그 워커의 로컬 풀 하나로 해석된다
+  (`tester_compile.resolve_roles`). 워커가 지원하지 않는 단계(`WORKER_STEPS` 밖)와 행위자 kind 게이트 위반(`STEP_VOCAB.kind` — progress/refer 는
+  피어, PTT 단계는 UE)은 컴파일 오류다.
+- **`media_hold.during`** — 유지 구간 안 시각 지정 동작 `[{at_s, step: dtmf|hold|resume|refer, from|who, to, payload, expect}]`. 컴파일러가
+  `media_hold at_s → 동작 → media_hold 나머지` 로 풀어 워커에 보낸다(워커 계약 무변경). 기대치는 마지막 조각에 붙고, 풀린 조각은 `src` 로 원
+  단계 인덱스를 가리킨다(계획 미리보기·절차표는 원 단계 기준). `invite.media.rtp`·`media_send/stop`·샘플 라이브러리(§7 ⓔⓕⓖ)는 워커 이행과
+  함께 후속.
 - **역할의 신원 창** — `count` 생략 = 풀 전체. 단, 같은 풀에서 서로 `disjoint_from` 인 역할들이 `count` 없이 있으면 풀을 **균등 분할**한다
   (caller/callee 가 한 풀을 나눠 쓰는 흔한 꼴). 명시 `count` 는 먼저 빼고 나머지를 나눈다. 창이 비면 컴파일 오류.
 - **단발(기능) 실행** = 프로파일 없이 `POST /runs {instances: N}` — 워커가 N 개(워커 간 배분)를 발생시키고 다 끝나면 스스로 run 을 닫는다
@@ -401,11 +412,11 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 
 | 항목 | 내용 |
 |---|---|
-| 게이트웨이 세그먼트 | `/api/v1/tester` **하나**(D2 — 서비스 = 최상위 세그먼트 하나). `pkg.json` `gateway.routes=["/api/v1/tester"]`, `gateway.default_port=4490`. 하위: `/health`·`/schema/{name}`·`/validate`·`/scenarios`·`/profiles`·`/topologies`·`/runs`(GET 색인+라이브 / POST `run_request` → 202 id, 동시에 하나)·`/runs/{id}`·`/runs/{id}/stop`·`/runs/{id}/rate`·`/runs/{id}/stream`(SSE — 그 run 의 agg/events/runs 프레임)·`/runs/{id}/report`(run.json + Markdown)·`/runs/{id}/events`·`/runs/{id}/series`(metrics.sqlite → 초 단위 열 형태 시계열 — 결과 차트)·`DELETE /runs/{id}`(진행 중 409)·`/runs/compare?ids=a,b[,c]`(첫 id 기준 지표별 delta·회귀 — 비율 지표 0.5 pt / 그 외 5 % 허용, `target_build` 병기)·`/workers[?topology=]`(토폴로지 워커 + health)·`/events`(SSE — run/워커 상태 변화). 시나리오·프로파일은 `GET /{id}`(doc + YAML 원문) · `PUT /{id} {yaml}`(운영자본 저장 — `Tester.DataDir/scenarios/`, 검증 통과분만, 문서 id = 경로 id) · `DELETE /{id}`(운영자본만, 동봉본 409 `bundled_read_only`) · `POST /validate {kind, yaml|doc}`(저장 없는 검증 — 편집기가 타이핑 중 호출). 토폴로지 `POST /topologies/{id}/check` = 연결 검사(CSP OPTIONS(UDP)·TCP·TLS·피어링 접속점(참고)·CSC·대상 OAM 토큰·워커 health — `services/tester_check.py`). 모듈은 `/api/v1/api-docs` 로 자기 API 를 기술(`TESTER_API_DOCS`)하고 base 가 업스트림에서 수집한다([api_docs.md](api_docs.md)) — 콘솔 라우트 `apis` 가 그 id 를 참조 |
+| 게이트웨이 세그먼트 | `/api/v1/tester` **하나**(D2 — 서비스 = 최상위 세그먼트 하나). `pkg.json` `gateway.routes=["/api/v1/tester"]`, `gateway.default_port=4490`. 하위: `/health`·`/schema/{name}`·`/validate`·`/scenarios`·`/profiles`·`/topologies`·`/runs`(GET 색인+라이브 — 필터 `?scenario=&build=&verdict=a,b&since=ISO\|7d&profile=&label=&topology=&load=1` / POST `run_request` → 202 id, 동시에 하나)·`/runs/{id}`·`/runs/{id}/stop`·`/runs/{id}/rate`·`/runs/{id}/hold {hold}`(단계 고정 — 프로파일 시계 정지, 율 유지)·`/runs/{id}/stream`(SSE — 그 run 의 agg/events/runs 프레임)·`/runs/{id}/report`(run.json + Markdown)·`/runs/{id}/events`·`/runs/{id}/series`(metrics.sqlite → 초 단위 열 형태 시계열 — 결과 차트)·`/runs/{id}/hist?timer=`(전 구간 버킷 분포 + p50/p95/p99 — 행 펼침 히스토그램)·`/runs/{id}/sip/{call_id}`(그 Call-ID 의 실패 이벤트 + 덤프 `runs/<id>/sip/<call_id>.log` 가 있을 때 — 워커 SIP 덤프 이전은 후속)·`/runs/{id}/target-alerts`(대상 OAM `/alerts` 를 run 창으로 잘라 — oam 노드 필요)·`DELETE /runs/{id}`(진행 중 409)·`/runs/compare?ids=a,b[,c][&format=md\|csv]`(첫 id 기준 지표별 delta·회귀 — 비율 지표 0.5 pt / 그 외 5 % 허용, `target_build` 병기; format 은 텍스트)·`/workers[?topology=]`(토폴로지 워커 + health, 병렬 probe)·`/events`(SSE — run/워커 상태 변화). **계획 미리보기** = `POST /runs/plan` 과 `POST /scenarios/compile-check`(같은 함수 `services/tester_plan.build_plan` — compile_run 드라이런; 입력 `{scenario_id\|doc\|yaml, topology_id\|topology, profile?, bindings?, instances?, rate_saps?, probe?}`, 출력 `{ok, errors, warnings, notes, roles(역할→요청 풀·kind·워커별 창·total), workers(배분·율·인스턴스·용량·health), steps(컴파일·src), phases, procedure(절차표), seed(예정 컬렉션), env(필요 환경변수), little(SDT·율별 필요 신원·부족 시작 율·권고 max), estimate(예상 소요·피크·동시)}` + 알려진 CSP 과제 §12 경고). `GET /scenarios/vocab` = 단계 어휘 표(`STEP_VOCAB` — group·actor·kind 게이트·제안 지표·워커 지원)·지표 라벨·비율 정의·Q.850·코덱·enum 들 — 편집기 팔레트/폼의 정본. 시나리오·프로파일은 `GET /{id}`(doc + YAML 원문) · `PUT /{id} {yaml}`(운영자본 저장 — `Tester.DataDir/scenarios/`, 검증 통과분만, 문서 id = 경로 id) · `DELETE /{id}`(운영자본만, 동봉본 409 `bundled_read_only`) · `POST /validate {kind, yaml|doc}`(저장 없는 검증 — 편집기가 타이핑 중 호출). 토폴로지 `POST /topologies/{id}/check` = 연결 검사(항목 `<노드>:udp\|tcp\|tls\|peering\|api\|db\|oam` · `<호스트>:ssh` · `worker_<이름>`, 각 항목에 `target{kind,id}` — 캔버스가 카드에 붙인다; `services/tester_check.py`). 모듈은 `/api/v1/api-docs` 로 자기 API 를 기술(`TESTER_API_DOCS`)하고 base 가 업스트림에서 수집한다([api_docs.md](api_docs.md)) — 콘솔 라우트 `apis` 가 그 id 를 참조 |
 | 인증·RBAC | base 가 배포 시 `CimsAuth.JwtSecret` 주입(`meta.gateway.routes` 보유 모듈 자동), 모듈이 토큰 독립 검증. 권한 = 조회 `monitor`, run 실행·중단·토폴로지 편집 `operator`, 시나리오/프로파일 삭제 `manager` |
 | 설정 | `config_template.json` 선언 키만(§14.7 write 마스크). `Server.Ip/Port`(loopback 4490)·`Tester.DataDir`·`Tester.RunRetainDays`·`Tester.WorkerControlPort`(7100)·`Tester.WorkerStreamIp/Port`(7110 — 워커 관측 수신, 관리망 bind)·`Tester.WorkerStreamAdvertiseIp`(선택). 대상(SUT)·워커·풀은 설정이 아니라 **토폴로지 레코드**(런타임 store, 콘솔 편집)다. `CimsAuth.JwtSecret`·`Mgmt.Cidr`·`CimsRuntimeDir` 은 **선언하지 않는다**(base 주입 파생값) |
 | 프로파일 구동 | 오케스트레이터 스레드가 프로파일을 시간축으로 만든다 — `constant/soak` = rate 로 duration · `step` = start 부터 hold_s 마다 창 IHS(실패+건너뜀 / 시도)를 보고 임계 이내면 +step(max 까지), 초과면 중단하고 직전 단계가 **DOC** · `ramp` = 5 초마다 선형 증가 뒤 hold · `burst` = burst_interval 마다 1 초 burst_size. `stop_on.csp_5xx_pct`·`ser_pct_min` 은 최근 60 초 창(시도 ≥ 10)으로 판정해 fail 중단, `target_cpu_pct` 는 대상 관측(C 단계) 전까지 미적용(노트). 중단은 워커 `stop {drain_s = 5 + ht}` |
-| CLI | `cims-tester run <scenario> --topology <name\|id> [--load <profile>] [--ht N] [--bind k=v] [--instances N] [--rate R] [--no-wait] [--json]` — 완주까지 기다려 RFC 6076 표를 찍고 verdict 로 종료 코드(pass=0). `report <id>`·`stop <id>`·`rate <id> <saps>`·`workers`. `creds-from-db --csp-json <csp.json> --domain <sip domain> --out <jsonl>` = DB 의 ha1 보유 가입자로 creds JSONL 생성(토폴로지 `source.creds`) |
+| CLI | `cims-tester run <scenario> --topology <name\|id> [--load <profile>] [--ht N] [--bind k=v] [--instances N] [--rate R] [--no-wait] [--json]` — 완주까지 기다려 RFC 6076 표를 찍고 verdict 로 종료 코드(pass=0). `plan <scenario> --topology …`(같은 인자 — 계획 미리보기, ok 면 0)·`report <id>`·`hist <id> --timer`·`stop <id>`·`rate <id> <saps>`·`workers`. `creds-from-db --csp-json <csp.json> --domain <sip domain> --out <jsonl>` = DB 의 ha1 보유 가입자로 creds JSONL 생성(토폴로지 `source.creds`) |
 | 스토어 | `modules/oam-cims-tester/runtime/{topologies,runs}` 단일 소유(I5). run 본체는 `Tester.DataDir`. run 색인 `target_build` = 대상 OAM 이 있으면 CSP 배포 패키지 버전(`csp <ver> (dep N)`, `tester_target.csp_build`) — 비교 화면의 회귀 축 |
 | 버전 계약 | `pkg.json` `gateway.requires_base_oam` — SSE 통과(아래)를 가진 base 최소 버전. base 는 self-register 시 라우트 레코드에 기록하고 자기 버전이 낮으면 경고 로그(등록은 한다 — 거부하면 콘솔에서 원인이 보이지 않는다) |
 | **base 확장 ① — SSE 통과** | 게이트웨이 프록시(`handlers/gateway.py`)는 요청 `Accept: text/event-stream` 이면 총 타임아웃 없이(연결 5 s) 업스트림을 부르고, 응답 `Content-Type: text/event-stream` 이면 **청크 passthrough**(전체 버퍼링 없음, 클라이언트 절단·업스트림 종료 어느 쪽이든 응답 해제)한다. 판정은 라우트 속성이 아니라 응답 타입 — 어느 서비스 모듈이든 SSE 를 낼 수 있다. 그 외 응답은 종전대로 5 s(다운로드 120 s) 버퍼링 |

@@ -125,30 +125,36 @@ def tearDownModule():
 
 
 def _topology(workers, oam_url=None, peering=True, dead=True):
-    csp = {'ip': '10.0.0.1', 'udp': 5060, 'domain_volte': 'volte.test'}
+    """v2 — 대상 호스트 h1(10.0.0.1)에 csp 노드(access udp + peering), 워커 호스트 hw(127.0.0.1).
+    UE 풀은 워커마다 `ue_<워커>` + group volte_ue, 피어 풀은 전부 첫 워커에(수신점 ip = hw). peering=False 면 피어 풀 없음."""
+    nodes = {'csp': {'role': 'sip', 'host': 'h1', 'sip': {'access': {'udp': 5060, 'domains': ['volte.test']}}}}
     if peering:
-        csp['peering'] = {'port': 5070, 'protocol': 'udp', 'local_node': 'cims-tester-peering'}
-    target = {'name': 'sut', 'csp': csp}
+        nodes['csp']['sip']['peering'] = {'port': 5070, 'protocol': 'udp', 'local_node': 'cims-tester-peering'}
     if oam_url:
-        target['oam'] = {'url': oam_url, 'token_env': 'UT_OAM_TOKEN'}
-    pools = {
-        'volte_ue': {'kind': 'ue', 'source': {'creds': 'creds/ue.jsonl'}},
-        'peer_kt': {'kind': 'peer', 'profile': 'ibcf', 'bind': {'ip': '127.0.0.1', 'port': 5080, 'protocol': 'udp'},
-                    'domain': 'ims.kt.test', 'identities': {'e164_range': ['+82212340000', '+82212340019'], 'count': 5},
-                    'seed': {'route_set': 'rs-kt', 'priority': 100}},
-        'peer_blocked': {'kind': 'peer', 'profile': 'ibcf', 'bind': {'ip': '127.0.0.1', 'port': 5082, 'protocol': 'udp'},
-                         'domain': 'ims.blocked.test', 'identities': {'e164_range': ['+82299990000', '+82299990009']},
-                         'seed': {'acl': 'deny'}},
-        'peer_off': {'kind': 'peer', 'profile': 'pbx', 'bind': {'ip': '127.0.0.1', 'port': 5090, 'protocol': 'udp'},
-                     'domain': 'pbx.test', 'identities': {'did_range': ['0212345000', '0212345009']},
-                     'seed': {'enabled': False}},
-    }
-    if dead:
-        pools['peer_kt_dead'] = {'kind': 'peer', 'profile': 'ibcf', 'bind': {'ip': '127.0.0.1', 'port': 5081, 'protocol': 'udp'},
-                                 'domain': 'ims.kt.test', 'identities': {'e164_range': ['+82212340000', '+82212340009']},
-                                 'answer': 'silent', 'seed': {'route_set': 'rs-kt', 'priority': 50}}
-    return {'name': 'ut-peer', 'target': target,
-            'workers': [{'name': w.name, 'url': w.url, 'cpus': 1} for w in workers], 'pools': pools}
+        port = int(oam_url.rsplit(':', 1)[-1])
+        nodes['oam'] = {'role': 'oam', 'host': 'hw', 'oam': {'port': port, 'tls': False, 'token_env': 'UT_OAM_TOKEN'}}
+    wrows = [{'name': w.name, 'host': 'hw', 'port': w.port, 'cpus': 1} for w in workers] or [{'name': 'w1', 'host': 'hw', 'port': 7100}]
+    first = wrows[0]['name']
+    pools = {f"ue_{w['name']}": {'kind': 'ue', 'worker': w['name'], 'group': 'volte_ue', 'access': 'csp',
+                                 'source': {'creds': 'creds/ue.jsonl'}} for w in wrows}
+    if peering:
+        pools.update({
+            'peer_kt': {'kind': 'peer', 'worker': first, 'peering': 'csp', 'profile': 'ibcf', 'bind': {'port': 5080, 'protocol': 'udp'},
+                        'domain': 'ims.kt.test', 'identities': {'e164_range': ['+82212340000', '+82212340019'], 'count': 5},
+                        'seed': {'route_set': 'rs-kt', 'priority': 100}},
+            'peer_blocked': {'kind': 'peer', 'worker': first, 'peering': 'csp', 'profile': 'ibcf', 'bind': {'port': 5082, 'protocol': 'udp'},
+                             'domain': 'ims.blocked.test', 'identities': {'e164_range': ['+82299990000', '+82299990009']},
+                             'seed': {'acl': 'deny'}},
+            'peer_off': {'kind': 'peer', 'worker': first, 'peering': 'csp', 'profile': 'pbx', 'bind': {'port': 5090, 'protocol': 'udp'},
+                         'domain': 'pbx.test', 'identities': {'did_range': ['0212345000', '0212345009']},
+                         'seed': {'enabled': False}},
+        })
+        if dead:
+            pools['peer_kt_dead'] = {'kind': 'peer', 'worker': first, 'peering': 'csp', 'profile': 'ibcf', 'bind': {'port': 5081, 'protocol': 'udp'},
+                                     'domain': 'ims.kt.test', 'identities': {'e164_range': ['+82212340000', '+82212340009']},
+                                     'answer': 'silent', 'seed': {'route_set': 'rs-kt', 'priority': 50}}
+    return {'name': 'ut-peer', 'hosts': {'h1': {'ip': '10.0.0.1'}, 'hw': {'ip': '127.0.0.1'}}, 'workers': wrows,
+            'target': {'name': 'sut', 'kind': 'cims', 'nodes': nodes}, 'pools': pools}
 
 
 class CompilePeer(unittest.TestCase):
@@ -160,7 +166,7 @@ class CompilePeer(unittest.TestCase):
             C.expand_range('20', '10')
 
     def test_peer_pinned_to_bind_host_worker(self):
-        w_far, w_near = FakeWorker('far'), FakeWorker('near')   # 둘 다 127.0.0.1 — host 로는 구분 불가 → 첫 매칭(far)
+        w_far, w_near = FakeWorker('far'), FakeWorker('near')   # 피어 풀은 첫 워커(far)에 — 그 워커에 고정
         topo_doc = _topology([w_far, w_near])
         topo = M.Topology.model_validate(topo_doc)
         from services import tester_workers as TW
@@ -179,19 +185,29 @@ class CompilePeer(unittest.TestCase):
         self.assertEqual(peer_pc['peer']['domain'], 'ims.kt.test')
         self.assertEqual(peer_pc['target_csp']['peering']['port'], 5070)
         self.assertEqual(peer_pc['identities'][0], {'user': '+82212340000', 'domain': 'ims.kt.test', 'auth_scheme': 'digest'})
-        self.assertEqual(pw['run']['roles'], {'caller': 'volte_ue', 'peer': 'peer_kt'})
+        self.assertEqual(pw['run']['roles'], {'caller': 'ue_far', 'peer': 'peer_kt'})
         self.assertEqual(pw['run']['max_instances'], 2)
+        self.assertEqual(peer_pc['peer']['bind']['ip'], '127.0.0.1')          # 수신점 ip = 워커 호스트(파생)
+        self.assertNotIn('worker', peer_pc['peer'])                           # 워커 계약에는 토폴로지 참조 없음
 
     def test_peer_without_host_worker_rejected(self):
-        w = FakeWorker('w1')
-        topo_doc = _topology([w])
-        topo_doc['pools']['peer_kt']['bind']['ip'] = '10.9.9.9'
+        # 피어 풀이 놓인 워커(w2)에 UE 역할의 로컬 풀이 없으면 후보 워커가 없다 → CompileError
+        w1, w2 = FakeWorker('w1'), FakeWorker('w2')
+        topo_doc = _topology([w1, w2])
+        del topo_doc['pools']['ue_w2']
+        for pn in ('peer_kt', 'peer_kt_dead', 'peer_blocked', 'peer_off'):
+            topo_doc['pools'][pn]['worker'] = 'w2'
         topo = M.Topology.model_validate(topo_doc)
         from services import tester_workers as TW
         ws = TW.discover(topo_doc)
         sc, _, _ = S.get_scenario('TRUNK-IBCF-OUTBOUND')
         with self.assertRaises(C.CompileError):
             C.compile_run('r1', sc, topo, topo_doc, None, {}, ws, lambda w: '127.0.0.1:1', 1, None)
+        # 같은 수신점(호스트:포트)이 겹치면 토폴로지 검증 단계에서 거절
+        bad = json.loads(json.dumps(topo_doc))
+        bad['pools']['peer_blocked']['bind']['port'] = 5080
+        _, errs = M.validate('topology', bad)
+        self.assertTrue(any('겹친다' in e for e in errs), errs)
 
     def test_ue_only_scenario_not_pinned(self):
         w1, w2 = FakeWorker('w1'), FakeWorker('w2')
@@ -219,16 +235,16 @@ class SeedDerivation(unittest.TestCase):
 
     def test_pick_local_node(self):
         t = self._topo()
-        ref, new = T.pick_local_node(t, [{'name': 'access-udp', 'bind_port': 5060, 'protocol': 'UDP', 'is_primary': True}])
+        ref, new = T.pick_local_node(t, [{'name': 'access-udp', 'bind_port': 5060, 'protocol': 'UDP', 'is_primary': True}], 'csp')
         self.assertEqual(ref, 'cims-tester-peering')
         self.assertEqual((new['edge'], new['bind_ip'], new['bind_port'], new['protocol']), ('peering', '10.0.0.1', 5070, 'UDP'))
-        ref2, new2 = T.pick_local_node(t, [{'name': 'cims-tester-peering', 'bind_port': 5070, 'protocol': 'UDP'}])
+        ref2, new2 = T.pick_local_node(t, [{'name': 'cims-tester-peering', 'bind_port': 5070, 'protocol': 'UDP'}], 'csp')
         self.assertEqual((ref2, new2), ('cims-tester-peering', None))
         t2 = self._topo(peering=False)
-        ref3, new3 = T.pick_local_node(t2, [{'name': 'access-udp', 'bind_port': 5060, 'protocol': 'UDP', 'is_primary': True}])
+        ref3, new3 = T.pick_local_node(t2, [{'name': 'access-udp', 'bind_port': 5060, 'protocol': 'UDP', 'is_primary': True}], 'csp')
         self.assertEqual((ref3, new3), ('access-udp', None))
         with self.assertRaises(T.TargetError):
-            T.pick_local_node(t2, [])
+            T.pick_local_node(t2, [], 'csp')
 
     def test_derive_records(self):
         t = self._topo()
@@ -298,10 +314,11 @@ class PbxMgcf(unittest.TestCase):
     def _topo(self):
         w = FakeWorker('w1')
         doc = _topology([w])
-        doc['pools']['pbx_hq'] = {'kind': 'peer', 'profile': 'pbx', 'bind': {'ip': '127.0.0.1', 'port': 5090, 'protocol': 'udp'},
+        del doc['pools']['peer_off']   # 5090 수신점을 pbx_hq 가 쓴다
+        doc['pools']['pbx_hq'] = {'kind': 'peer', 'worker': 'w1', 'peering': 'csp', 'profile': 'pbx', 'bind': {'port': 5090, 'protocol': 'udp'},
                                   'domain': 'pbx.hq.test', 'register': {'user': 'pbx-hq', 'ha1_env': 'UT_PBX_HA1'},
                                   'identities': {'did_range': ['0212345000', '0212345099']}, 'codecs': ['PCMA', 'PCMU']}
-        doc['pools']['mgcf_pstn'] = {'kind': 'peer', 'profile': 'mgcf', 'bind': {'ip': '127.0.0.1', 'port': 5095, 'protocol': 'udp'},
+        doc['pools']['mgcf_pstn'] = {'kind': 'peer', 'worker': 'w1', 'peering': 'csp', 'profile': 'mgcf', 'bind': {'port': 5095, 'protocol': 'udp'},
                                      'domain': 'mgcf.pstn.test', 'identities': {'e164_range': ['+82312340000', '+82312340099']}}
         return w, doc, M.Topology.model_validate(doc)
 
@@ -323,26 +340,31 @@ class PbxMgcf(unittest.TestCase):
         _, _, topo = self._topo()
         os.environ.pop('UT_PBX_HA1', None)
         with self.assertRaises(C.CompileError):
-            C.trunk_register_for('pbx_hq', topo.pools['pbx_hq'])
+            C.trunk_register_for('pbx_hq', topo.pools['pbx_hq'], 'volte.test')
         os.environ['UT_PBX_HA1'] = 'cd' * 16
-        tr = C.trunk_register_for('pbx_hq', topo.pools['pbx_hq'])
-        self.assertEqual((tr.user, tr.ha1, tr.expires), ('pbx-hq', 'cd' * 16, 3600))
-        self.assertIsNone(C.trunk_register_for('mgcf_pstn', topo.pools['mgcf_pstn']))
+        tr = C.trunk_register_for('pbx_hq', topo.pools['pbx_hq'], 'volte.test')
+        self.assertEqual((tr.user, tr.ha1, tr.expires, tr.realm), ('pbx-hq', 'cd' * 16, 3600, 'volte.test'))
+        self.assertIsNone(C.trunk_register_for('mgcf_pstn', topo.pools['mgcf_pstn'], None))
 
     def test_register_role_on_peer_requires_trunk(self):
         _, _, topo = self._topo()
         sc = M.Scenario.model_validate({'id': 'UT-REG', 'roles': {'m': {'pool': 'mgcf_pstn'}, 'u': {'pool': 'volte_ue'}},
                                         'flow': [{'step': 'register', 'who': ['m', 'u']}, {'step': 'invite', 'from': 'm', 'to': 'u'}]})
         with self.assertRaises(C.CompileError):
-            C.check_register_roles(sc, topo)
+            C.check_register_roles(sc, topo, {'m': 'mgcf_pstn', 'u': 'ue_w1'})
         sc2 = M.Scenario.model_validate({'id': 'UT-REG2', 'roles': {'p': {'pool': 'pbx_hq'}, 'u': {'pool': 'volte_ue'}},
                                          'flow': [{'step': 'register', 'who': ['p', 'u']}, {'step': 'invite', 'from': 'p', 'to': 'u'}]})
-        C.check_register_roles(sc2, topo)   # 트렁크 계정 있음 — 통과
+        C.check_register_roles(sc2, topo, {'p': 'pbx_hq', 'u': 'ue_w1'})   # 트렁크 계정 있음 — 통과
+        # kind 게이트 — progress 는 피어만
+        sc3 = M.Scenario.model_validate({'id': 'UT-GATE', 'roles': {'u': {'pool': 'volte_ue'}, 'p': {'pool': 'pbx_hq'}},
+                                         'flow': [{'step': 'invite', 'from': 'p', 'to': 'u'}, {'step': 'progress', 'who': ['u']}]})
+        with self.assertRaises(C.CompileError):
+            C.check_kind_gates(sc3, topo, {'u': 'ue_w1', 'p': 'pbx_hq'})
 
     def test_compile_pool_create_carries_options(self):
         w, doc, topo = self._topo()
         os.environ['UT_PBX_HA1'] = 'cd' * 16
-        doc['pools']['volte_ue']['prack'] = True
+        doc['pools']['ue_w1']['prack'] = True
         topo = M.Topology.model_validate(doc)
         sc, _, _ = S.get_scenario('TRUNK-PBX-REGISTER')
         from services import tester_workers as TW
@@ -352,7 +374,8 @@ class PbxMgcf(unittest.TestCase):
         plan = C.compile_run('r-pbx', sc, topo, doc, None, {}, ws, lambda w: '127.0.0.1:1', 1, None)
         pools = {p['pool']: p for p in plan['workers']['w1']['pools']}
         self.assertEqual(pools['pbx_hq']['trunk_register']['ha1'], 'cd' * 16)
-        self.assertTrue(pools['volte_ue']['prack'])
+        self.assertTrue(pools['ue_w1']['prack'])
+        self.assertEqual(pools['pbx_hq']['trunk_register']['realm'], 'volte.test')   # 비면 접속점 기본 도메인
         steps = {s['step']: s for s in plan['steps']}
         self.assertIn('register', steps)
         sc2, _, _ = S.get_scenario('TRUNK-MGCF-OUTBOUND')
@@ -407,7 +430,7 @@ class DriverPeer(unittest.TestCase):
     def test_missing_oam_is_error(self):
         d, _ = self._run('TRUNK-IBCF-OUTBOUND', None)
         self.assertEqual(d.verdict, 'error')
-        self.assertTrue(any('target.oam' in n for n in d.notes), d.notes)
+        self.assertTrue(any('oam' in n for n in d.notes), d.notes)
 
 
 if __name__ == '__main__':

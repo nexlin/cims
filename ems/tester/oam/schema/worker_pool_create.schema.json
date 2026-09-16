@@ -101,37 +101,6 @@
       "title": "Identity",
       "type": "object"
     },
-    "PeerBind": {
-      "additionalProperties": false,
-      "properties": {
-        "ip": {
-          "title": "Ip",
-          "type": "string"
-        },
-        "port": {
-          "maximum": 65535,
-          "minimum": 1,
-          "title": "Port",
-          "type": "integer"
-        },
-        "protocol": {
-          "default": "udp",
-          "enum": [
-            "udp",
-            "tcp",
-            "tls"
-          ],
-          "title": "Protocol",
-          "type": "string"
-        }
-      },
-      "required": [
-        "ip",
-        "port"
-      ],
-      "title": "PeerBind",
-      "type": "object"
-    },
     "PeerIdentities": {
       "additionalProperties": false,
       "properties": {
@@ -201,232 +170,9 @@
       "title": "PeerIdentities",
       "type": "object"
     },
-    "PeerPool": {
-      "additionalProperties": false,
-      "properties": {
-        "answer": {
-          "default": "normal",
-          "description": "silent = 착신 INVITE 무응답(죽은 피어 — failover 시험)",
-          "enum": [
-            "normal",
-            "silent"
-          ],
-          "title": "Answer",
-          "type": "string"
-        },
-        "bind": {
-          "$ref": "#/$defs/PeerBind"
-        },
-        "codecs": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "오퍼 코덱(우선순위 순). 생략=프로파일 기본 — ibcf/mgcf: AMR-WB,AMR,PCMU,PCMA · pbx: PCMA,PCMU (§3.2)",
-          "title": "Codecs"
-        },
-        "domain": {
-          "title": "Domain",
-          "type": "string"
-        },
-        "dtmf": {
-          "default": true,
-          "description": "RFC 4733 telephone-event 오퍼/echo",
-          "title": "Dtmf",
-          "type": "boolean"
-        },
-        "identities": {
-          "$ref": "#/$defs/PeerIdentities"
-        },
-        "kind": {
-          "const": "peer",
-          "title": "Kind",
-          "type": "string"
-        },
-        "prack": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "RFC 3262 100rel/PRACK — 생략=프로파일 기본(ibcf/mgcf 켬, pbx 끔)",
-          "title": "Prack"
-        },
-        "profile": {
-          "enum": [
-            "ibcf",
-            "pbx",
-            "mgcf"
-          ],
-          "title": "Profile",
-          "type": "string"
-        },
-        "register": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/PeerRegister"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "pbx 트렁크 REGISTER — YAML 키는 register"
-        },
-        "seed": {
-          "$ref": "#/$defs/PeerSeed"
-        }
-      },
-      "required": [
-        "kind",
-        "profile",
-        "bind",
-        "domain",
-        "identities"
-      ],
-      "title": "PeerPool",
-      "type": "object"
-    },
-    "PeerRegister": {
-      "additionalProperties": false,
-      "description": "pbx 트렁크 REGISTER(SIPconnect 2.0 §8 등록 모드) — 계정 하나가 DID 범위를 대표. 대상의 access 접속점으로 Digest 등록.",
-      "properties": {
-        "expires": {
-          "default": 3600,
-          "minimum": 60,
-          "title": "Expires",
-          "type": "integer"
-        },
-        "ha1_env": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "H(A1) 을 담은 환경변수 — 비밀은 YAML 에 두지 않는다",
-          "title": "Ha1 Env"
-        },
-        "password_env": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "평문 비밀번호 환경변수 — ha1_env 가 없을 때",
-          "title": "Password Env"
-        },
-        "realm": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Digest realm·To/From host — 비면 target.csp.domain_volte",
-          "title": "Realm"
-        },
-        "user": {
-          "title": "User",
-          "type": "string"
-        }
-      },
-      "required": [
-        "user"
-      ],
-      "title": "PeerRegister",
-      "type": "object"
-    },
-    "PeerSeed": {
-      "additionalProperties": false,
-      "description": "대상 CSP 컬렉션 시드 — 이 피어를 CSP 가 알게 하는 remote_node/route/rule/routing_policy 를 run 전에 넣고 끝에 복원한다\n(§3.2). 같은 `route_set` 을 가진 피어 풀은 한 RouteSet 의 멤버(priority/weight) — failover·round_robin 시험.",
-      "properties": {
-        "acl": {
-          "anyOf": [
-            {
-              "enum": [
-                "allow",
-                "deny"
-              ],
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "이 피어 소스 IP 에 대한 ACL(global) — deny 면 403 기대",
-          "title": "Acl"
-        },
-        "distribution": {
-          "default": "failover",
-          "enum": [
-            "failover",
-            "round_robin",
-            "weighted",
-            "hash_by_caller"
-          ],
-          "title": "Distribution",
-          "type": "string"
-        },
-        "enabled": {
-          "default": true,
-          "title": "Enabled",
-          "type": "boolean"
-        },
-        "priority": {
-          "default": 100,
-          "minimum": 0,
-          "title": "Priority",
-          "type": "integer"
-        },
-        "route_set": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "RouteSet 이름 — 생략=풀 이름",
-          "title": "Route Set"
-        },
-        "weight": {
-          "default": 1,
-          "minimum": 1,
-          "title": "Weight",
-          "type": "integer"
-        }
-      },
-      "title": "PeerSeed",
-      "type": "object"
-    },
     "TargetCsp": {
       "additionalProperties": false,
+      "description": "풀이 닿는 SIP 서버(워커 관점) — access 포트 + 도메인 + (피어 풀) 피어링 다음 홉.",
       "properties": {
         "domain_ptt": {
           "anyOf": [
@@ -465,8 +211,7 @@
               "type": "null"
             }
           ],
-          "default": null,
-          "description": "피어 풀이 쓰는 CSP 피어링 접속점 — 없으면 access UDP 접속점"
+          "default": null
         },
         "tcp": {
           "default": 25061,
@@ -492,7 +237,6 @@
     },
     "TargetPeering": {
       "additionalProperties": false,
-      "description": "대상 CSP 의 피어링 접속점(edge=peering LocalNode) — 피어 풀 발신의 다음 홉이자 시드 route 의 local_node_ref.\n`local_node` 가 대상에 이미 있으면 그 레코드를 쓰고, 없으면 그 이름으로 LocalNode 를 시드한다(run 끝에 복원).",
       "properties": {
         "ip": {
           "anyOf": [
@@ -504,12 +248,10 @@
             }
           ],
           "default": null,
-          "description": "비면 csp.ip",
           "title": "Ip"
         },
         "local_node": {
           "default": "cims-tester-peering",
-          "description": "대상 local_nodes 의 name",
           "title": "Local Node",
           "type": "string"
         },
@@ -591,6 +333,111 @@
       ],
       "title": "TrunkRegister",
       "type": "object"
+    },
+    "WorkerPeer": {
+      "additionalProperties": false,
+      "description": "워커에 내려가는 피어 엔진 사양 — 토폴로지 PeerPool 에서 워커·노드 참조를 떼고 bind.ip(워커 호스트 주소)를 채운 것.",
+      "properties": {
+        "answer": {
+          "default": "normal",
+          "enum": [
+            "normal",
+            "silent"
+          ],
+          "title": "Answer",
+          "type": "string"
+        },
+        "bind": {
+          "$ref": "#/$defs/WorkerPeerBind"
+        },
+        "codecs": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Codecs"
+        },
+        "domain": {
+          "title": "Domain",
+          "type": "string"
+        },
+        "dtmf": {
+          "default": true,
+          "title": "Dtmf",
+          "type": "boolean"
+        },
+        "identities": {
+          "$ref": "#/$defs/PeerIdentities"
+        },
+        "prack": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prack"
+        },
+        "profile": {
+          "enum": [
+            "ibcf",
+            "pbx",
+            "mgcf"
+          ],
+          "title": "Profile",
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile",
+        "bind",
+        "domain",
+        "identities"
+      ],
+      "title": "WorkerPeer",
+      "type": "object"
+    },
+    "WorkerPeerBind": {
+      "additionalProperties": false,
+      "properties": {
+        "ip": {
+          "title": "Ip",
+          "type": "string"
+        },
+        "port": {
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Port",
+          "type": "integer"
+        },
+        "protocol": {
+          "default": "udp",
+          "enum": [
+            "udp",
+            "tcp",
+            "tls"
+          ],
+          "title": "Protocol",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ip",
+        "port"
+      ],
+      "title": "WorkerPeerBind",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -621,7 +468,7 @@
     "peer": {
       "anyOf": [
         {
-          "$ref": "#/$defs/PeerPool"
+          "$ref": "#/$defs/WorkerPeer"
         },
         {
           "type": "null"
@@ -651,7 +498,8 @@
       "type": "string"
     },
     "target_csp": {
-      "$ref": "#/$defs/TargetCsp"
+      "$ref": "#/$defs/TargetCsp",
+      "description": "풀이 닿는 SIP 서버 — 컨트롤러가 토폴로지 노드 참조에서 파생"
     },
     "transport": {
       "default": "udp",

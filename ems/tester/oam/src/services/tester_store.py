@@ -231,17 +231,150 @@ def _topo_dir() -> str:
     return file_store.domain_dir(_config, DOMAIN_TOPOLOGIES)
 
 
+def is_topology_v1(doc: dict) -> bool:
+    """이전 꼴(`target.csp/csc/oam` · `workers[].url` · `pools.*.bind.ip`) 인가 — hosts 가 없고 target.csp 가 있으면 v1."""
+    return isinstance(doc, dict) and 'hosts' not in doc and isinstance(doc.get('target'), dict) and 'csp' in doc['target']
+
+
+def _host_of_url(url: str) -> Tuple[str, int]:
+    u = str(url).split('://', 1)[-1].split('/', 1)[0]
+    host, _, port = u.rpartition(':')
+    if not host:
+        return u, 7100
+    try:
+        return host, int(port)
+    except ValueError:
+        return u, 7100
+
+
+def topology_v1_to_v2(doc: dict) -> dict:
+    """v1 레코드 → 호스트›워커·대상 노드›풀 3단(§4) 기계적 변환 — 기존 레코드 승계.
+    csp/csc/oam → 호스트 하나(+주소가 다른 것은 호스트 추가) + 노드 셋, workers[].url → 호스트+포트, pools.*.bind.ip → 그 주소의 워커.
+    UE 풀은 첫 워커에 놓는다(v1 은 컨트롤러가 워커 사이를 나눴지만 v2 는 풀 정의가 나눈다)."""
+    t = doc.get('target') or {}
+    csp = t.get('csp') or {}
+    hosts: Dict[str, dict] = {}
+    by_ip: Dict[str, str] = {}
+
+    def host_for(ip: str, name: Optional[str] = None) -> str:
+        ip = str(ip or '')
+        if ip in by_ip:
+            return by_ip[ip]
+        hid = 'h' + ''.join(ch for ch in ip.replace('.', '_') if ch.isalnum() or ch == '_')
+        if not hid or hid == 'h':
+            hid = f'h{len(hosts) + 1}'
+        hid = hid.lower()
+        base, n = hid, 1
+        while hid in hosts:
+            n += 1
+            hid = f'{base}_{n}'
+        hosts[hid] = {'ip': ip, **({'name': name} if name else {})}
+        by_ip[ip] = hid
+        return hid
+
+    target_host = host_for(csp.get('ip'), t.get('name'))
+    domains = [d for d in (csp.get('domain_volte'), csp.get('domain_ptt')) if d]
+    nodes: Dict[str, dict] = {'csp': {
+        'role': 'sip', 'fn': 'CSP', 'host': target_host, 'procs': ['csp'],
+        'sip': {'access': {'udp': csp.get('udp', 5060), 'tcp': csp.get('tcp', 25061), 'tls': csp.get('tls', 5061), 'domains': domains}},
+    }}
+    if csp.get('peering'):
+        pr = csp['peering']
+        nodes['csp']['sip']['peering'] = {'port': pr.get('port'), 'protocol': pr.get('protocol', 'udp'),
+                                          'local_node': pr.get('local_node', 'cims-tester-peering')}
+    if t.get('csc'):
+        c = t['csc']
+        nodes['csc'] = {'role': 'subscriber', 'fn': 'CSC', 'host': host_for(c.get('host')), 'procs': ['csc'],
+                        'api': {'port': c.get('port', 4430), 'tls': bool(c.get('tls', True))}}
+    if t.get('oam'):
+        o = t['oam']
+        oh, op = _host_of_url(o.get('url', ''))
+        tls = str(o.get('url', '')).startswith('https')
+        blk = {'port': op, 'tls': tls, 'observe': list(t.get('observe') or [])}
+        if o.get('token_env'):
+            blk['token_env'] = o['token_env']
+        if o.get('csp_deployment_id'):
+            blk['csp_deployment_id'] = o['csp_deployment_id']
+        nodes['oam'] = {'role': 'oam', 'fn': 'OAM', 'host': host_for(oh), 'procs': ['oam'], 'oam': blk}
+    workers = []
+    worker_by_ip: Dict[str, str] = {}
+    for i, w in enumerate(doc.get('workers') or []):
+        if not isinstance(w, dict) or not w.get('url'):
+            continue
+        ip, port = _host_of_url(w['url'])
+        name = str(w.get('name') or f'w{i + 1}')
+        name = ''.join(ch if ch.isalnum() or ch == '_' else '_' for ch in name).lower()
+        if not name or not name[0].isalpha():
+            name = f'w{i + 1}'
+        row = {'name': name, 'host': host_for(ip), 'port': port}
+        if w.get('cpus'):
+            row['cpus'] = w['cpus']
+        workers.append(row)
+        worker_by_ip.setdefault(ip, name)
+    if not workers:
+        workers.append({'name': 'w1', 'host': host_for('127.0.0.1', 'localhost'), 'port': 7100})
+    pools = {}
+    for pname, p in (doc.get('pools') or {}).items():
+        q = dict(p)
+        if q.get('kind') == 'peer':
+            bind = dict(q.get('bind') or {})
+            bip = str(bind.pop('ip', '') or '')
+            q['bind'] = bind
+            q['worker'] = worker_by_ip.get(bip) or workers[0]['name']
+            q['peering'] = 'csp'
+        else:
+            q['worker'] = workers[0]['name']
+            q['access'] = 'csp'
+            src = dict(q.get('source') or {})
+            if src.get('db') == 'target':
+                src['db'] = 'csc' if 'csc' in nodes else 'csp'
+                q['source'] = src
+        pools[pname] = q
+    return {'name': doc.get('name'), 'hosts': hosts, 'workers': workers,
+            'target': {'name': t.get('name') or doc.get('name'), 'kind': 'cims', 'nodes': nodes}, 'pools': pools}
+
+
+def _normalize_rec(rec: Optional[dict]) -> Optional[dict]:
+    """읽기 경로 — v1 레코드는 v2 로 바꿔 돌려주고, 쓸 수 있으면 그 자리에서 승계 저장한다."""
+    if rec is None:
+        return None
+    doc = rec.get('doc') or {}
+    if is_topology_v1(doc):
+        rec = dict(rec)
+        rec['doc'] = topology_v1_to_v2(doc)
+        rec['migrated_from'] = 'v1'
+        try:
+            file_store.save(_topo_dir(), rec['id'], rec)
+        except Exception:
+            pass
+    return rec
+
+
 def list_topologies() -> List[dict]:
-    rows = file_store.load_all(_topo_dir())
+    rows = [_normalize_rec(r) for r in file_store.load_all(_topo_dir())]
     return sorted(rows, key=lambda r: r.get('id', 0))
 
 
 def get_topology(tid: int) -> Optional[dict]:
-    return file_store.by_id(_topo_dir(), int(tid))
+    return _normalize_rec(file_store.by_id(_topo_dir(), int(tid)))
+
+
+def find_topology(ref) -> Optional[dict]:
+    """id(정수 또는 숫자 문자열) 또는 name 으로."""
+    if ref is None:
+        return None
+    if isinstance(ref, int) or (isinstance(ref, str) and ref.isdigit()):
+        return get_topology(int(ref))
+    for r in list_topologies():
+        if (r.get('doc') or {}).get('name') == ref or r.get('name') == ref:
+            return r
+    return None
 
 
 def save_topology(doc: dict, tid: Optional[int] = None) -> Tuple[Optional[dict], List[str]]:
     """검증 통과분만 저장. 반환 (레코드, errors)."""
+    if is_topology_v1(doc):
+        doc = topology_v1_to_v2(doc)
     model, errs = validate('topology', doc)
     if errs:
         return None, errs
@@ -274,8 +407,37 @@ def _runs_index_dir() -> str:
     return file_store.domain_dir(_config, DOMAIN_RUNS)
 
 
-def list_runs(limit: int = 100) -> List[dict]:
+def list_runs(limit: int = 100, filters: Optional[dict] = None) -> List[dict]:
+    """run 색인(최신순). filters = {scenario, build, verdict(콤마 구분), since(ISO 또는 일수 '7d'), profile, label(부분 일치), topology, load(bool)}."""
     rows = file_store.load_all(_runs_index_dir())
+    f = filters or {}
+    if f.get('scenario'):
+        rows = [r for r in rows if r.get('scenario_id') == f['scenario']]
+    if f.get('build'):
+        rows = [r for r in rows if str(r.get('target_build') or '') == str(f['build'])]
+    if f.get('verdict'):
+        want = {v.strip() for v in str(f['verdict']).split(',') if v.strip()}
+        rows = [r for r in rows if r.get('verdict') in want]
+    if f.get('profile'):
+        rows = [r for r in rows if (r.get('profile') or '') == f['profile']]
+    if f.get('topology'):
+        rows = [r for r in rows if (r.get('topology') or '') == f['topology']]
+    if f.get('load') in (True, '1', 'true'):
+        rows = [r for r in rows if r.get('profile')]
+    if f.get('label'):
+        q = str(f['label']).lower()
+        rows = [r for r in rows if q in str(r.get('label') or '').lower() or q in str(r.get('id') or '').lower()
+                or q in str(r.get('scenario_id') or '').lower()]
+    if f.get('since'):
+        since = str(f['since']).strip()
+        try:
+            if since.endswith('d') and since[:-1].isdigit():
+                cut = datetime.fromtimestamp(time.time() - int(since[:-1]) * 86400).isoformat(timespec='seconds')
+            else:
+                cut = datetime.fromisoformat(since).isoformat(timespec='seconds')
+            rows = [r for r in rows if (r.get('started_at') or '') >= cut]
+        except ValueError:
+            pass
     rows.sort(key=lambda r: r.get('started_at') or '', reverse=True)
     return rows[:max(1, limit)]
 

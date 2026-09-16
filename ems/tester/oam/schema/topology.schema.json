@@ -37,8 +37,7 @@
           "type": "integer"
         },
         "db": {
-          "const": "target",
-          "description": "대상 DB — 토폴로지 target 의 CSC 가 알려주는 접속(계측기가 자격을 직접 갖지 않음)",
+          "description": "신원 원천 노드 id — role=db 또는 api 있는 subscriber 노드",
           "title": "Db",
           "type": "string"
         },
@@ -66,13 +65,356 @@
       "title": "DbSource",
       "type": "object"
     },
-    "PeerBind": {
+    "Host": {
       "additionalProperties": false,
+      "description": "서버 — 주소·SSH 자격의 유일한 자리. 계측기/대상/동거 구분은 필드가 아니라 그 위에 무엇이 있느냐(파생).",
       "properties": {
         "ip": {
+          "minLength": 1,
           "title": "Ip",
           "type": "string"
         },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "ssh": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HostSsh"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "있으면 노드 procs 의 CPU/메모리를 SSH 로 관측(stop_on.target_cpu_pct 원천)"
+        }
+      },
+      "required": [
+        "ip"
+      ],
+      "title": "Host",
+      "type": "object"
+    },
+    "HostSsh": {
+      "additionalProperties": false,
+      "properties": {
+        "key_env": {
+          "description": "SSH 개인키 경로를 담은 환경변수 이름 — 비밀은 레코드에 두지 않는다",
+          "title": "Key Env",
+          "type": "string"
+        },
+        "port": {
+          "default": 22,
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Port",
+          "type": "integer"
+        },
+        "user": {
+          "title": "User",
+          "type": "string"
+        }
+      },
+      "required": [
+        "user",
+        "key_env"
+      ],
+      "title": "HostSsh",
+      "type": "object"
+    },
+    "Layout": {
+      "additionalProperties": false,
+      "description": "UI 배치 상태 — 캔버스 영역(호스트) 좌표·크기, 카드(워커·노드) 좌표. 컴파일러는 읽지 않는다.",
+      "properties": {
+        "items": {
+          "additionalProperties": {
+            "$ref": "#/$defs/LayoutItem"
+          },
+          "title": "Items",
+          "type": "object"
+        },
+        "regions": {
+          "additionalProperties": {
+            "$ref": "#/$defs/LayoutRegion"
+          },
+          "title": "Regions",
+          "type": "object"
+        }
+      },
+      "title": "Layout",
+      "type": "object"
+    },
+    "LayoutItem": {
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "default": 14,
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "default": 12,
+          "title": "Y",
+          "type": "number"
+        }
+      },
+      "title": "LayoutItem",
+      "type": "object"
+    },
+    "LayoutRegion": {
+      "additionalProperties": false,
+      "properties": {
+        "h": {
+          "default": 240,
+          "title": "H",
+          "type": "number"
+        },
+        "w": {
+          "default": 360,
+          "title": "W",
+          "type": "number"
+        },
+        "x": {
+          "default": 0,
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "default": 0,
+          "title": "Y",
+          "type": "number"
+        }
+      },
+      "title": "LayoutRegion",
+      "type": "object"
+    },
+    "NodeApi": {
+      "additionalProperties": false,
+      "properties": {
+        "port": {
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Port",
+          "type": "integer"
+        },
+        "tls": {
+          "default": true,
+          "title": "Tls",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "port"
+      ],
+      "title": "NodeApi",
+      "type": "object"
+    },
+    "NodeDb": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "default": "cims",
+          "title": "Name",
+          "type": "string"
+        },
+        "password_env": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Password Env"
+        },
+        "port": {
+          "default": 3306,
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Port",
+          "type": "integer"
+        },
+        "user_env": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "User Env"
+        }
+      },
+      "title": "NodeDb",
+      "type": "object"
+    },
+    "NodeMedia": {
+      "additionalProperties": false,
+      "properties": {
+        "control": {
+          "anyOf": [
+            {
+              "maximum": 65535,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Control"
+        },
+        "rtp_range": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "있어야 미디어 leg 지표를 이 노드에 귀속",
+          "title": "Rtp Range"
+        }
+      },
+      "title": "NodeMedia",
+      "type": "object"
+    },
+    "NodeOam": {
+      "additionalProperties": false,
+      "description": "CIMS 전용 — 통계·알람 관측 + 컬렉션 시드. url = https://<host.ip>:<port>.",
+      "properties": {
+        "csp_deployment_id": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "대상 CSP 의 배포 id — 비면 배포 목록에서 패키지 csp 를 찾는다",
+          "title": "Csp Deployment Id"
+        },
+        "observe": {
+          "items": {
+            "enum": [
+              "oam_stats",
+              "oam_alarms",
+              "agent_heartbeat",
+              "ssh_proc"
+            ],
+            "type": "string"
+          },
+          "title": "Observe",
+          "type": "array"
+        },
+        "port": {
+          "default": 4419,
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Port",
+          "type": "integer"
+        },
+        "tls": {
+          "default": true,
+          "title": "Tls",
+          "type": "boolean"
+        },
+        "token_env": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "토큰을 담은 환경변수 이름(기본 TESTER_OAM_TOKEN)",
+          "title": "Token Env"
+        }
+      },
+      "title": "NodeOam",
+      "type": "object"
+    },
+    "NodeSip": {
+      "additionalProperties": false,
+      "properties": {
+        "access": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SipAccess"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "peering": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SipPeering"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "NodeSip",
+      "type": "object"
+    },
+    "NodeTas": {
+      "additionalProperties": false,
+      "properties": {
+        "port": {
+          "anyOf": [
+            {
+              "maximum": 65535,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Port"
+        }
+      },
+      "title": "NodeTas",
+      "type": "object"
+    },
+    "PeerBind": {
+      "additionalProperties": false,
+      "description": "피어 수신점 — ip 는 워커 호스트 주소에서 파생된다.",
+      "properties": {
         "port": {
           "maximum": 65535,
           "minimum": 1,
@@ -91,7 +433,6 @@
         }
       },
       "required": [
-        "ip",
         "port"
       ],
       "title": "PeerBind",
@@ -208,12 +549,31 @@
           "title": "Dtmf",
           "type": "boolean"
         },
+        "group": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "논리 풀 이름 — 워커 여럿에 나눌 때 워커마다 풀 + 같은 group. 시나리오 roles.X.pool 이 참조",
+          "title": "Group"
+        },
         "identities": {
           "$ref": "#/$defs/PeerIdentities"
         },
         "kind": {
           "const": "peer",
           "title": "Kind",
+          "type": "string"
+        },
+        "peering": {
+          "description": "다음 홉 노드 id — sip.peering 이 있는 SIP 노드",
+          "title": "Peering",
           "type": "string"
         },
         "prack": {
@@ -252,10 +612,17 @@
         },
         "seed": {
           "$ref": "#/$defs/PeerSeed"
+        },
+        "worker": {
+          "description": "이 풀이 놓인 워커(풀 하나 = 워커 하나)",
+          "title": "Worker",
+          "type": "string"
         }
       },
       "required": [
+        "worker",
         "kind",
+        "peering",
         "profile",
         "bind",
         "domain",
@@ -310,7 +677,7 @@
             }
           ],
           "default": null,
-          "description": "Digest realm·To/From host — 비면 target.csp.domain_volte",
+          "description": "Digest realm·To/From host — 비면 접속점 기본 도메인",
           "title": "Realm"
         },
         "user": {
@@ -342,7 +709,7 @@
             }
           ],
           "default": null,
-          "description": "이 피어 소스 IP 에 대한 ACL(global) — deny 면 403 기대",
+          "description": "이 피어 소스 IP 에 대한 ACL — deny 면 403 기대",
           "title": "Acl"
         },
         "distribution": {
@@ -393,6 +760,24 @@
     "RealUePool": {
       "additionalProperties": false,
       "properties": {
+        "access": {
+          "title": "Access",
+          "type": "string"
+        },
+        "group": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "논리 풀 이름 — 워커 여럿에 나눌 때 워커마다 풀 + 같은 group. 시나리오 roles.X.pool 이 참조",
+          "title": "Group"
+        },
         "kind": {
           "const": "real-ue",
           "title": "Kind",
@@ -420,164 +805,38 @@
           ],
           "title": "Transport",
           "type": "string"
+        },
+        "worker": {
+          "description": "이 풀이 놓인 워커(풀 하나 = 워커 하나)",
+          "title": "Worker",
+          "type": "string"
         }
       },
       "required": [
+        "worker",
         "kind",
+        "access",
         "source"
       ],
       "title": "RealUePool",
       "type": "object"
     },
-    "Target": {
+    "SipAccess": {
       "additionalProperties": false,
+      "description": "UE 가 등록·발신하는 접속점 — transport 별 포트(없는 transport 는 그 노드에서 거절).",
       "properties": {
-        "csc": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TargetCsc"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "csp": {
-          "$ref": "#/$defs/TargetCsp"
-        },
-        "name": {
-          "title": "Name",
-          "type": "string"
-        },
-        "oam": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TargetOam"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "observe": {
+        "domains": {
+          "description": "첫 항목 = 기본 홈 도메인, \"ptt\" 가 든 항목 = PTT 풀 도메인",
           "items": {
-            "enum": [
-              "oam_stats",
-              "oam_alarms",
-              "agent_heartbeat",
-              "ssh_proc"
-            ],
             "type": "string"
           },
-          "title": "Observe",
+          "title": "Domains",
           "type": "array"
-        }
-      },
-      "required": [
-        "name",
-        "csp"
-      ],
-      "title": "Target",
-      "type": "object"
-    },
-    "TargetCsc": {
-      "additionalProperties": false,
-      "properties": {
-        "host": {
-          "title": "Host",
-          "type": "string"
-        },
-        "port": {
-          "default": 4430,
-          "title": "Port",
-          "type": "integer"
-        },
-        "tls": {
-          "default": true,
-          "title": "Tls",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "host"
-      ],
-      "title": "TargetCsc",
-      "type": "object"
-    },
-    "TargetCsp": {
-      "additionalProperties": false,
-      "properties": {
-        "domain_ptt": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Domain Ptt"
-        },
-        "domain_volte": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Domain Volte"
-        },
-        "ip": {
-          "title": "Ip",
-          "type": "string"
-        },
-        "peering": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TargetPeering"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "피어 풀이 쓰는 CSP 피어링 접속점 — 없으면 access UDP 접속점"
         },
         "tcp": {
-          "default": 25061,
-          "title": "Tcp",
-          "type": "integer"
-        },
-        "tls": {
-          "default": 5061,
-          "title": "Tls",
-          "type": "integer"
-        },
-        "udp": {
-          "default": 5060,
-          "title": "Udp",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "ip"
-      ],
-      "title": "TargetCsp",
-      "type": "object"
-    },
-    "TargetOam": {
-      "additionalProperties": false,
-      "description": "대상 관측·컬렉션 시드 전용 — 동거 형태여도 스토어를 직접 읽지 않고 이 API 로 본다(I5).",
-      "properties": {
-        "csp_deployment_id": {
           "anyOf": [
             {
+              "maximum": 65535,
               "minimum": 1,
               "type": "integer"
             },
@@ -586,38 +845,45 @@
             }
           ],
           "default": null,
-          "description": "대상 CSP 의 배포 id — 비면 배포 목록에서 패키지 csp 를 찾는다",
-          "title": "Csp Deployment Id"
+          "title": "Tcp"
         },
-        "token_env": {
+        "tls": {
           "anyOf": [
             {
-              "type": "string"
+              "maximum": 65535,
+              "minimum": 1,
+              "type": "integer"
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "description": "토큰을 담은 환경변수 이름",
-          "title": "Token Env"
+          "title": "Tls"
         },
-        "url": {
-          "title": "Url",
-          "type": "string"
+        "udp": {
+          "anyOf": [
+            {
+              "maximum": 65535,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Udp"
         }
       },
-      "required": [
-        "url"
-      ],
-      "title": "TargetOam",
+      "title": "SipAccess",
       "type": "object"
     },
-    "TargetPeering": {
+    "SipPeering": {
       "additionalProperties": false,
-      "description": "대상 CSP 의 피어링 접속점(edge=peering LocalNode) — 피어 풀 발신의 다음 홉이자 시드 route 의 local_node_ref.\n`local_node` 가 대상에 이미 있으면 그 레코드를 쓰고, 없으면 그 이름으로 LocalNode 를 시드한다(run 끝에 복원).",
+      "description": "피어 풀의 다음 홉(edge=peering 접속점). `local_node` 는 cims 대상에서만 — 대상 local_nodes 의 name(없으면 시드).",
       "properties": {
-        "ip": {
+        "local_node": {
           "anyOf": [
             {
               "type": "string"
@@ -627,14 +893,8 @@
             }
           ],
           "default": null,
-          "description": "비면 csp.ip",
-          "title": "Ip"
-        },
-        "local_node": {
-          "default": "cims-tester-peering",
-          "description": "대상 local_nodes 의 name",
-          "title": "Local Node",
-          "type": "string"
+          "description": "cims: 대상 local_nodes 이름 — 비면 cims-tester-peering",
+          "title": "Local Node"
         },
         "port": {
           "maximum": 65535,
@@ -656,17 +916,212 @@
       "required": [
         "port"
       ],
-      "title": "TargetPeering",
+      "title": "SipPeering",
+      "type": "object"
+    },
+    "Target": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "default": "cims",
+          "description": "cims = oam 노드로 컬렉션 시드·target_build · ims/pbx = 시드 없음",
+          "enum": [
+            "cims",
+            "ims",
+            "pbx"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "nodes": {
+          "additionalProperties": {
+            "$ref": "#/$defs/TargetNode"
+          },
+          "title": "Nodes",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Target",
+      "type": "object"
+    },
+    "TargetNode": {
+      "additionalProperties": false,
+      "description": "역할(role)별 노드 — 설정 블록이 역할마다 다르다. procs = 호스트 SSH 관측이 볼 프로세스 이름.",
+      "properties": {
+        "api": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeApi"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "db": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeDb"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fn": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "표시용 — CSP · P-CSCF · IBCF · MRF …",
+          "title": "Fn"
+        },
+        "host": {
+          "title": "Host",
+          "type": "string"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "media": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeMedia"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "oam": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeOam"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "procs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Procs",
+          "type": "array"
+        },
+        "role": {
+          "enum": [
+            "sip",
+            "tas",
+            "media",
+            "subscriber",
+            "oam",
+            "db"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "sip": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeSip"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tas": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeTas"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "role",
+        "host"
+      ],
+      "title": "TargetNode",
+      "type": "object"
+    },
+    "TopologyMedia": {
+      "additionalProperties": false,
+      "properties": {
+        "samples": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "description": "id → {코덱: 파일|synthetic}",
+          "title": "Samples",
+          "type": "object"
+        }
+      },
+      "title": "TopologyMedia",
       "type": "object"
     },
     "UePool": {
       "additionalProperties": false,
       "properties": {
+        "access": {
+          "description": "접속점 노드 id — sip.access 가 있는 SIP 노드",
+          "title": "Access",
+          "type": "string"
+        },
         "dtmf": {
           "default": true,
           "description": "RFC 4733 telephone-event 를 오퍼/echo — dtmf 단계의 전제",
           "title": "Dtmf",
           "type": "boolean"
+        },
+        "group": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "논리 풀 이름 — 워커 여럿에 나눌 때 워커마다 풀 + 같은 group. 시나리오 roles.X.pool 이 참조",
+          "title": "Group"
         },
         "kind": {
           "const": "ue",
@@ -715,10 +1170,17 @@
           ],
           "title": "Transport",
           "type": "string"
+        },
+        "worker": {
+          "description": "이 풀이 놓인 워커(풀 하나 = 워커 하나)",
+          "title": "Worker",
+          "type": "string"
         }
       },
       "required": [
+        "worker",
         "kind",
+        "access",
         "source"
       ],
       "title": "UePool",
@@ -726,6 +1188,7 @@
     },
     "Worker": {
       "additionalProperties": false,
+      "description": "호스트 위의 cims-tester-worker 프로세스 — url = http://<host.ip>:<port> 파생.",
       "properties": {
         "cpus": {
           "anyOf": [
@@ -740,26 +1203,102 @@
           "default": null,
           "title": "Cpus"
         },
+        "host": {
+          "title": "Host",
+          "type": "string"
+        },
+        "media": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkerMedia"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "name": {
+          "pattern": "^[a-z][a-z0-9_]*$",
           "title": "Name",
           "type": "string"
         },
-        "url": {
-          "description": "cims-tester-worker 제어 URL (http://ip:7100)",
-          "title": "Url",
-          "type": "string"
+        "port": {
+          "default": 7100,
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Port",
+          "type": "integer"
         }
       },
       "required": [
         "name",
-        "url"
+        "host"
       ],
       "title": "Worker",
+      "type": "object"
+    },
+    "WorkerMedia": {
+      "additionalProperties": false,
+      "properties": {
+        "max_rtp_streams": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Rtp Streams"
+        },
+        "samples": {
+          "description": "워커가 보유한 미디어 샘플 id(§7 ⓖ) — health 보고와 대조",
+          "items": {
+            "type": "string"
+          },
+          "title": "Samples",
+          "type": "array"
+        }
+      },
+      "title": "WorkerMedia",
       "type": "object"
     }
   },
   "additionalProperties": false,
   "properties": {
+    "hosts": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Host"
+      },
+      "minProperties": 1,
+      "title": "Hosts",
+      "type": "object"
+    },
+    "layout": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Layout"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "media": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TopologyMedia"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "name": {
       "title": "Name",
       "type": "string"
@@ -786,7 +1325,6 @@
       "$ref": "#/$defs/Target"
     },
     "workers": {
-      "description": "수동 항목 — 배포 목록에서 자동 발견한 워커에 보태거나 덮어쓴다(§6.1)",
       "items": {
         "$ref": "#/$defs/Worker"
       },
@@ -796,6 +1334,7 @@
   },
   "required": [
     "name",
+    "hosts",
     "target",
     "pools"
   ],

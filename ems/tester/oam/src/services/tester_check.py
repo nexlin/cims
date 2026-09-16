@@ -1,12 +1,10 @@
 """토폴로지 연결 검사 — 콘솔 [시험 > 토폴로지] 의 [연결 검사] (test_instrument.md §7).
 
-run 을 걸기 전에 대상·워커에 닿는지 본다. 검사 항목 하나 = {name, ok, detail, ms}.
-  - csp.udp   : SIP OPTIONS(UDP) → 응답(어떤 코드든) 이면 도달. 무응답 = 미도달.
-  - csp.tcp / csp.tls : TCP connect(+TLS handshake, 인증서 검증 없음 — 도달 확인이 목적).
-  - csp.peering : 피어링 접속점(있을 때) — 평상시엔 닫혀 있는 것이 정상(run 중 시드로 열림)이라 참고 항목.
-  - csc       : TCP(+TLS) connect.
-  - oam       : GET /api/v1/deployments 토큰 검증(200) — 시드·target_build 가 이 토큰을 쓴다.
-  - worker.<name> : GET /health.
+run 을 걸기 전에 대상·워커에 닿는지 본다. 검사 항목 하나 = {name, ok, detail, ms, info?, target{kind,id}}. 항목 이름 규약:
+  - `<노드>:udp|tcp|tls` : SIP 노드 access 수신점 — UDP 는 OPTIONS(응답 어떤 코드든 도달), TCP/TLS 는 connect(+handshake, 인증서 검증 없음)
+  - `<노드>:peering`     : 피어링 수신점 — 평상시엔 닫혀 있는 것이 정상(run 중 시드로 열림)이라 참고(info) 항목
+  - `<노드>:api`         : subscriber 노드 API(TCP/TLS connect) · `<노드>:db` : DB 포트 connect · `<노드>:oam` : 대상 OAM 토큰(배포 목록 200)
+  - `<호스트>:ssh`       : SSH 포트 도달(관측 자체는 후속) · `worker_<이름>` : GET /health
 CSP 에 보내는 OPTIONS 는 등록 없이 처리되는 요청(RFC 3261 §11) — 가입자 상태를 건드리지 않는다.
 """
 from __future__ import annotations
@@ -22,11 +20,11 @@ from services import tester_target
 from services.tester_models import Topology
 
 
-def _item(name: str, ok: bool, detail: str, t0: float) -> dict:
-    return {'name': name, 'ok': ok, 'detail': detail, 'ms': int((time.time() - t0) * 1000)}
+def _item(name: str, ok: bool, detail: str, t0: float, kind: str = '', tid: str = '') -> dict:
+    return {'name': name, 'ok': ok, 'detail': detail, 'ms': int((time.time() - t0) * 1000), 'target': {'kind': kind, 'id': tid}}
 
 
-def _sip_options_udp(ip: str, port: int, domain: str, timeout: float = 2.0) -> dict:
+def _sip_options_udp(name: str, ip: str, port: int, domain: str, timeout: float = 2.0) -> dict:
     t0 = time.time()
     branch = 'z9hG4bK' + uuid.uuid4().hex[:16]
     call_id = uuid.uuid4().hex
@@ -51,11 +49,11 @@ def _sip_options_udp(ip: str, port: int, domain: str, timeout: float = 2.0) -> d
         data = s.recv(4096)
         s.close()
         first = data.split(b'\r\n', 1)[0].decode('utf-8', 'replace')
-        return _item('csp.udp', True, first, t0)
+        return _item(name, True, f'{ip}:{port} {first}', t0)
     except socket.timeout:
-        return _item('csp.udp', False, f'{ip}:{port} OPTIONS 무응답 ({timeout:.0f}s)', t0)
+        return _item(name, False, f'{ip}:{port} OPTIONS 무응답 ({timeout:.0f}s)', t0)
     except Exception as e:
-        return _item('csp.udp', False, f'{ip}:{port} {e}', t0)
+        return _item(name, False, f'{ip}:{port} {e}', t0)
 
 
 def _tcp_connect(name: str, ip: str, port: int, tls: bool, timeout: float = 2.0) -> dict:
@@ -80,49 +78,78 @@ def _tcp_connect(name: str, ip: str, port: int, tls: bool, timeout: float = 2.0)
         return _item(name, False, f'{ip}:{port} {e}', t0)
 
 
-def _oam_token(topology: Topology) -> dict:
+def _oam_token(topology: Topology, nid: str) -> dict:
     t0 = time.time()
-    oam = topology.target.oam
-    if oam is None:
-        return _item('oam', True, '대상 OAM 미설정(시드·target_build 없이 실행)', t0)
+    oam = topology.oam_ref()
     try:
         client = tester_target.OamClient(oam.url, tester_target.token_from_env(oam))
         rows = client.deployments()
         try:
             dep = client.find_csp_deployment(oam.csp_deployment_id)
-            return _item('oam', True, f'{oam.url} 배포 {len(rows)}건 · CSP 배포 {dep}', t0)
+            return _item(f'{nid}:oam', True, f'{oam.url} 배포 {len(rows)}건 · CSP 배포 {dep}', t0)
         except tester_target.TargetError as e:
-            return _item('oam', False, f'{oam.url} 토큰 유효 · {e}', t0)
+            return _item(f'{nid}:oam', False, f'{oam.url} 토큰 유효 · {e}', t0)
     except tester_target.TargetError as e:
-        return _item('oam', False, str(e), t0)
+        return _item(f'{nid}:oam', False, str(e), t0)
 
 
 def check_topology(topology: Topology, topology_doc: dict) -> List[dict]:
-    csp = topology.target.csp
-    items: List[dict] = [_sip_options_udp(csp.ip, csp.udp, csp.domain_volte or '')]
-    items.append(_tcp_connect('csp.tcp', csp.ip, csp.tcp, tls=False))
-    items.append(_tcp_connect('csp.tls', csp.ip, csp.tls, tls=True))
-    if csp.peering is not None:
-        p = csp.peering
-        pi = _tcp_connect('csp.peering', p.ip or csp.ip, p.port, tls=(p.protocol == 'tls')) if p.protocol != 'udp' \
-            else _sip_options_udp(p.ip or csp.ip, p.port, csp.domain_volte or '')
-        pi['name'] = 'csp.peering'
-        if not pi['ok']:
-            pi['detail'] += ' — 피어링 접속점은 run 시드가 열고 복원이 닫는다(평상시 닫힘 정상)'
-            pi['info'] = True
-        items.append(pi)
-    if topology.target.csc is not None:
-        c = topology.target.csc
-        items.append(_tcp_connect('csc', c.host, c.port, tls=c.tls))
-    items.append(_oam_token(topology))
-    for w in tester_workers.discover(topology_doc):
+    items: List[dict] = []
+    for nid, n in topology.target.nodes.items():
+        ip = topology.node_ip(nid)
+        if n.role == 'sip' and n.sip is not None:
+            acc = n.sip.access
+            if acc is not None:
+                dom = acc.domains[0] if acc.domains else ''
+                if acc.udp:
+                    items.append(_sip_options_udp(f'{nid}:udp', ip, acc.udp, dom))
+                if acc.tcp:
+                    items.append(_tcp_connect(f'{nid}:tcp', ip, acc.tcp, tls=False))
+                if acc.tls:
+                    items.append(_tcp_connect(f'{nid}:tls', ip, acc.tls, tls=True))
+            pr = n.sip.peering
+            if pr is not None:
+                dom = acc.domains[0] if acc is not None and acc.domains else ''
+                pi = (_tcp_connect(f'{nid}:peering', ip, pr.port, tls=(pr.protocol == 'tls')) if pr.protocol != 'udp'
+                      else _sip_options_udp(f'{nid}:peering', ip, pr.port, dom))
+                if not pi['ok']:
+                    pi['detail'] += ' — 피어링 접속점은 run 시드가 열고 복원이 닫는다(평상시 닫힘 정상)'
+                    pi['info'] = True
+                items.append(pi)
+        elif n.role == 'subscriber' and n.api is not None:
+            items.append(_tcp_connect(f'{nid}:api', ip, n.api.port, tls=n.api.tls))
+        elif n.role == 'db' and n.db is not None:
+            items.append(_tcp_connect(f'{nid}:db', ip, n.db.port, tls=False))
+        elif n.role == 'oam':
+            items.append(_oam_token(topology, nid))
+        elif n.role == 'media' and n.media is not None and n.media.control:
+            it = _tcp_connect(f'{nid}:control', ip, n.media.control, tls=False)
+            it['info'] = True   # CMP 제어는 UDP JSON — TCP 도달은 참고
+            items.append(it)
+        for it in items:
+            if it['name'].startswith(nid + ':') and not it['target']['id']:
+                it['target'] = {'kind': 'node', 'id': nid}
+    for hid, h in topology.hosts.items():
+        if h.ssh is not None:
+            it = _tcp_connect(f'{hid}:ssh', h.ip, h.ssh.port, tls=False)
+            it['target'] = {'kind': 'host', 'id': hid}
+            it['detail'] += ' (SSH 관측은 도달 확인만 — 프로세스 CPU 관측은 후속)'
+            items.append(it)
+    if not topology.target.nodes:
         t0 = time.time()
-        h = w.probe()
+        items.append(_item('target', True, '대상 노드 없음 — 워커만 검사', t0))
+    ws = tester_workers.discover(topology_doc)
+    tester_workers.probe_all(ws)
+    for w in ws:
+        t0 = time.time()
+        h = w.health
         if h is None:
-            items.append(_item(f'worker.{w.name}', False, f'{w.url} {w.health_error}', t0))
+            items.append(_item(f'worker_{w.name}', False, f'{w.url} {w.health_error}', t0, 'worker', w.name))
         else:
-            items.append(_item(f'worker.{w.name}', True,
+            med = h.get('media') or {}
+            items.append(_item(f'worker_{w.name}', True,
                                f"{w.url} v{h.get('version')} 단말 {h.get('active_endpoints')}/{h.get('max_endpoints')} "
                                f"cpu {h.get('cpu_pct')}% skew {h.get('clock_skew_ms')} ms"
-                               + (f" · run {h.get('active_run')} 진행 중" if h.get('active_run') else ''), t0))
+                               + (f" rtp {med.get('rtp_streams')}/{med.get('max_rtp_streams')}" if med else '')
+                               + (f" · run {h.get('active_run')} 진행 중" if h.get('active_run') else ''), t0, 'worker', w.name))
     return items

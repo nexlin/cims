@@ -126,6 +126,49 @@ def run_series(run_id: str, limit: int = 7200) -> dict:
     return out
 
 
+def run_hist(run_id: str, timer: str) -> Optional[dict]:
+    """metrics.sqlite 전 구간의 지연 지표 버킷 분포(로그 상한 1·2·5·…) — 결과 화면 행 펼침 히스토그램. 없으면 None."""
+    path = os.path.join(store.run_dir(run_id), 'metrics.sqlite')
+    if not os.path.isfile(path):
+        return None
+    db = sqlite3.connect(path)
+    try:
+        rows = db.execute('SELECT timers FROM agg').fetchall()
+    finally:
+        db.close()
+    h = Hist()
+    for (tm,) in rows:
+        try:
+            d = (json.loads(tm) or {}).get(timer)
+        except Exception:
+            continue
+        if d:
+            h.merge(d)
+    if h.count == 0:
+        return None
+    buckets = [{'ub': (None if k == 'inf' else _bucket_key(k)), 'count': v} for k, v in sorted(h.buckets.items(), key=lambda kv: _bucket_key(kv[0]))]
+    return {'timer': timer, **h.to_dict(), 'buckets': buckets}
+
+
+def run_call_events(run_id: str, call_id: str, limit: int = 200) -> List[dict]:
+    """events.jsonl 에서 Call-ID 로 고른 실패 건 — SIP 사다리 드로어의 원천(워커 SIP 덤프 이전은 후속)."""
+    p = os.path.join(store.run_dir(run_id), 'events.jsonl')
+    out: List[dict] = []
+    if not os.path.isfile(p):
+        return out
+    with open(p, 'r', encoding='utf-8') as f:
+        for ln in f:
+            try:
+                rec = json.loads(ln)
+            except Exception:
+                continue
+            if str(rec.get('call_id') or '') == call_id:
+                out.append(rec)
+                if len(out) >= limit:
+                    break
+    return out
+
+
 # ──────────────────────────────────────────────────────────────────────────
 #  Recorder — run 하나의 저장·누계·SSE
 # ──────────────────────────────────────────────────────────────────────────
@@ -314,6 +357,8 @@ class RunDriver(threading.Thread):
         self.doc_rate: Optional[float] = None
         self.stop_reason: Optional[str] = None
         self._stop_req = threading.Event()
+        self._hold = threading.Event()        # 단계 고정 — 프로파일 시계 정지(율 유지)
+        self.held_s = 0.0
         self.started_at = _now_iso()
         self.ended_at: Optional[str] = None
         self.notes: List[str] = []
@@ -326,6 +371,15 @@ class RunDriver(threading.Thread):
     def request_stop(self, reason: str = 'operator') -> None:
         self.stop_reason = reason
         self._stop_req.set()
+
+    def set_hold(self, on: bool) -> None:
+        """단계 고정(hold) — step/ramp/constant 의 남은 시간 계산을 멈춘다. 율은 그대로라 운영자가 현 단계를 오래 볼 수 있다."""
+        if on:
+            self._hold.set()
+        else:
+            self._hold.clear()
+        self.step_log.append({'t': time.time(), 'rate': self.rate, 'event': 'hold' if on else 'resume'})
+        self._publish_state({'hold': on})
 
     def set_rate(self, rate: float) -> None:
         self.rate = rate
@@ -395,8 +449,10 @@ class RunDriver(threading.Thread):
         self.plan = tester_compile.compile_run(
             self.run_id, self.scenario, self.topology, self.topology_doc, self.profile,
             self.req.bindings, self.workers, stream_for, self.req.instances, self.req.rate_saps)
-        # 피어 풀을 쓰는 run 은 워커 하나에 고정된다(compile) — 나머지 워커는 건드리지 않는다
+        # 역할이 전부 해석되는 워커만 참여(피어 풀은 그 워커 하나에 고정) — 나머지 워커는 건드리지 않는다
         self.workers = [w for w in self.workers if w.name in self.plan['workers']]
+        for n in self.plan.get('resolve_notes') or []:
+            self.notes.append(f'제외 워커: {n}')
         # 용량 검사
         for w in self.workers:
             need = sum(len(p['identities']) for p in self.plan['workers'][w.name]['pools'])
@@ -405,11 +461,11 @@ class RunDriver(threading.Thread):
                 raise tester_compile.CompileError(f'{w.name}: 필요 단말 {need} > 용량 {cap}')
         self.rate = float(self.plan['rate_total'])
         self.state = 'provisioning'
-        self.target_build = tester_target.csp_build(self.topology)   # 없으면 None — 비교 축은 있는 것끼리
+        self.target_build = tester_target.csp_build(self.topology) if self.topology.target.kind == 'cims' else None
         self._publish_state()
         # 피어 풀 — 대상 CSP 컬렉션 시드(remote_nodes·routes·route_sets·rules·routing_policies·acl) → run 끝에 복원
         if self.plan.get('peer_pools'):
-            used = {r.pool for r in self.scenario.roles.values()}
+            used = set(self.plan['peer_pools'])
             self.seeder = tester_target.CspSeeder.for_run(self.topology, used)
             if self.seeder is not None:
                 applied = self.seeder.apply()
@@ -438,7 +494,7 @@ class RunDriver(threading.Thread):
         return True
 
     def _wait(self, seconds: float, poll: float = 1.0) -> bool:
-        """seconds 동안 대기 — 중단 요청·stop_on 발동·(단발) 워커 종료면 False."""
+        """seconds 동안 대기 — 중단 요청·stop_on 발동·(단발) 워커 종료면 False. hold 중에는 시계가 멈춘다."""
         end = time.time() + seconds
         while time.time() < end:
             if self._stop_req.is_set():
@@ -447,6 +503,13 @@ class RunDriver(threading.Thread):
                 return False
             if self.plan.get('max_instances') and self._workers_all_stopped():
                 return False
+            if self._hold.is_set():
+                t0 = time.time()
+                time.sleep(min(poll, 0.5))
+                dt = time.time() - t0
+                end += dt
+                self.held_s += dt
+                continue
             time.sleep(min(poll, max(0.05, end - time.time())))
         return not self._stop_req.is_set()
 
@@ -572,14 +635,17 @@ class RunDriver(threading.Thread):
         record = RunRecord(id=self.run_id, scenario_id=self.scenario.id, topology=self.topology_name,
                            profile=self.profile_name, started_at=self.started_at, ended_at=self.ended_at,
                            verdict=self.verdict, workers=[w.name for w in self.workers], summary=summary,
-                           target_build=self.target_build)
+                           target_build=self.target_build, label=self.req.label, stop_reason=self.stop_reason)
         store.save_run_index(record)
         detail = {
             **record.model_dump(exclude_none=True),
             'label': self.req.label,
             'bindings': self.plan['bindings'] if self.plan else {},
-            'plan': ({'roles': self.plan['roles'], 'identities': self.plan['identities'],
-                      'max_instances': self.plan['max_instances'], 'rate_total': self.plan['rate_total']} if self.plan else None),
+            'plan': ({'roles': self.plan['roles'], 'identities': self.plan['identities'], 'phases': self.plan.get('phases'),
+                      'max_instances': self.plan['max_instances'], 'rate_total': self.plan['rate_total'],
+                      'peer_pools': self.plan.get('peer_pools'), 'pinned': self.plan.get('pinned'),
+                      'steps': self.plan.get('steps')} if self.plan else None),
+            'held_s': round(self.held_s, 1),
             'profile_doc': (self.profile.model_dump(exclude_none=True) if self.profile else None),
             'counters': snap['counters'], 'timers': snap['timers'], 'events': snap['events'],
             'expect_results': self.expect_results, 'step_log': self.step_log,
@@ -704,7 +770,12 @@ class RunDriver(threading.Thread):
                 'scenario_id': self.scenario.id, 'topology': self.topology_name, 'profile': self.profile_name,
                 'started_at': self.started_at, 'workers': [w.name for w in self.workers],
                 'counters': snap['counters'], 'timers': snap['timers'], 'gauges': self.rec.gauges_sum(),
-                'events': snap['events'], 'doc_rate': self.doc_rate, 'notes': self.notes, 'step_log': self.step_log}
+                'events': snap['events'], 'doc_rate': self.doc_rate, 'notes': self.notes, 'step_log': self.step_log,
+                'hold': self._hold.is_set(), 'held_s': round(self.held_s, 1), 'label': self.req.label,
+                'target_build': self.target_build, 'stop_reason': self.stop_reason,
+                'plan': ({'roles': self.plan['roles'], 'phases': self.plan.get('phases'), 'max_instances': self.plan['max_instances'],
+                          'rate_total': self.plan['rate_total'], 'steps': self.plan.get('steps')} if self.plan else None),
+                'profile_doc': (self.profile.model_dump(exclude_none=True) if self.profile else None)}
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -751,14 +822,7 @@ class RunManager:
             raise ValueError(f'scenario_not_found: {req.scenario_id}')
         if scenario is None:
             raise ValueError(f'invalid_scenario: {errs}')
-        topo_rec = None
-        if req.topology_id is not None:
-            topo_rec = store.get_topology(int(req.topology_id))
-        else:
-            for r in store.list_topologies():
-                if (r.get('doc') or {}).get('name') == req.topology or r.get('name') == req.topology:
-                    topo_rec = r
-                    break
+        topo_rec = store.find_topology(int(req.topology_id) if req.topology_id is not None else req.topology)
         if topo_rec is None:
             raise ValueError('topology_not_found')
         topology = store.topology_model(topo_rec)
@@ -779,7 +843,7 @@ class RunManager:
                           str((topo_rec.get('doc') or {}).get('name') or topo_rec.get('id')))
             self._active[run_id] = d
         store.save_run_index(RunRecord(id=run_id, scenario_id=scenario.id, topology=d.topology_name,
-                                       profile=req.profile, started_at=d.started_at, verdict='running'))
+                                       profile=req.profile, started_at=d.started_at, verdict='running', label=req.label))
         d.start()
         return d
 
@@ -804,6 +868,13 @@ class RunManager:
         if d is None or d.state == 'stopped':
             return False
         d.request_stop('operator')
+        return True
+
+    def hold(self, run_id: str, on: bool) -> bool:
+        d = self.get(run_id)
+        if d is None or d.state != 'running':
+            return False
+        d.set_hold(on)
         return True
 
     def rate(self, run_id: str, rate: float) -> bool:

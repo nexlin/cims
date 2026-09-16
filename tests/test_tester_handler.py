@@ -12,6 +12,7 @@ Covers:
 각 테스트는 tmpdir 로 CimsRuntimeDir·Tester.DataDir 격리. 토큰은 admin_auth 로 직접 발급.
 """
 import asyncio
+import json
 import os
 import shutil
 import sys
@@ -145,8 +146,34 @@ class ReadApis(unittest.TestCase):
 
 class Topologies(unittest.TestCase):
     def _doc(self, name='t1'):
-        return {'name': name, 'target': {'name': 'sut', 'csp': {'ip': '10.0.0.1'}},
-                'pools': {'ue': {'kind': 'ue', 'source': {'creds': 'creds/x.jsonl'}}}}
+        return {'name': name, 'hosts': {'h1': {'ip': '10.0.0.1'}}, 'workers': [{'name': 'w1', 'host': 'h1'}],
+                'target': {'name': 'sut', 'nodes': {'csp': {'role': 'sip', 'host': 'h1', 'sip': {'access': {'udp': 5060}}}}},
+                'pools': {'ue': {'kind': 'ue', 'worker': 'w1', 'access': 'csp', 'source': {'creds': 'creds/x.jsonl'}}}}
+
+    def test_v1_record_migrates_to_v2(self):
+        # 이전 꼴(target.csp/csc/oam · workers[].url · bind.ip) 은 저장·읽기 때 호스트›워커·노드›풀 로 승계된다
+        v1 = {'name': 'old', 'target': {'name': 'sut', 'csp': {'ip': '10.0.0.5', 'udp': 15060, 'tls': 15061, 'domain_volte': 'volte.test',
+                                                              'peering': {'port': 15070}},
+                                        'csc': {'host': '10.0.0.5', 'port': 4430}, 'oam': {'url': 'https://10.0.0.5:4419', 'token_env': 'T'}},
+              'workers': [{'name': 'w1', 'url': 'http://10.0.0.61:7100', 'cpus': 4}, {'name': 'w2', 'url': 'http://10.0.0.62:7100'}],
+              'pools': {'ue': {'kind': 'ue', 'source': {'creds': 'creds/x.jsonl'}, 'transport': 'tls'},
+                        'kt': {'kind': 'peer', 'profile': 'ibcf', 'bind': {'ip': '10.0.0.62', 'port': 5080}, 'domain': 'kt.test',
+                               'identities': {'e164_range': ['+821', '+829']}}}}
+        r = _call('POST', '/api/v1/tester/topologies', role='operator', body=v1)
+        self.assertEqual(r.status, 201, r.body)
+        doc = r.body['doc']
+        try:
+            self.assertEqual(sorted(doc['hosts']), ['h10_0_0_5', 'h10_0_0_61', 'h10_0_0_62'])
+            self.assertEqual(doc['target']['nodes']['csp']['sip']['access']['tls'], 15061)
+            self.assertEqual(doc['target']['nodes']['csp']['sip']['peering']['port'], 15070)
+            self.assertEqual(doc['target']['nodes']['oam']['oam']['port'], 4419)
+            self.assertEqual(doc['target']['nodes']['csc']['api']['port'], 4430)
+            self.assertEqual([(w['name'], w['host'], w['port']) for w in doc['workers']], [('w1', 'h10_0_0_61', 7100), ('w2', 'h10_0_0_62', 7100)])
+            self.assertEqual((doc['pools']['ue']['worker'], doc['pools']['ue']['access']), ('w1', 'csp'))
+            self.assertEqual((doc['pools']['kt']['worker'], doc['pools']['kt']['peering']), ('w2', 'csp'))   # bind.ip → 그 주소의 워커
+            self.assertNotIn('ip', doc['pools']['kt']['bind'])
+        finally:
+            _call('DELETE', f"/api/v1/tester/topologies/{r.body['id']}", role='manager')
 
     def test_crud(self):
         r = _call('POST', '/api/v1/tester/topologies', role='operator', body=self._doc())
@@ -264,9 +291,9 @@ class ScenarioProfileWrite(unittest.TestCase):
 class TopologyCheck(unittest.TestCase):
     def test_check_unreachable_target(self):
         # 127.0.0.1 의 닫힌 포트 — 항목마다 ok=False 와 이유가 남고 200 으로 돌아온다(검사 실패 ≠ API 실패)
-        doc = {'name': 'chk', 'target': {'name': 'sut', 'csp': {'ip': '127.0.0.1', 'udp': 1, 'tcp': 1, 'tls': 1}},
-               'workers': [{'name': 'w1', 'url': 'http://127.0.0.1:1'}],
-               'pools': {'ue': {'kind': 'ue', 'source': {'creds': 'creds/x.jsonl'}}}}
+        doc = {'name': 'chk', 'hosts': {'h1': {'ip': '127.0.0.1'}}, 'workers': [{'name': 'w1', 'host': 'h1', 'port': 1}],
+               'target': {'name': 'sut', 'nodes': {'csp': {'role': 'sip', 'host': 'h1', 'sip': {'access': {'udp': 1, 'tcp': 1, 'tls': 1}}}}},
+               'pools': {'ue': {'kind': 'ue', 'worker': 'w1', 'access': 'csp', 'source': {'creds': 'creds/x.jsonl'}}}}
         r = _call('POST', '/api/v1/tester/topologies', role='operator', body=doc)
         tid = r.body['id']
         try:
@@ -274,18 +301,94 @@ class TopologyCheck(unittest.TestCase):
             self.assertEqual(r.status, 200, r.body)
             self.assertFalse(r.body['ok'])
             names = {i['name']: i for i in r.body['items']}
-            for n in ('csp.udp', 'csp.tcp', 'csp.tls', 'oam', 'worker.w1'):
+            for n in ('csp:udp', 'csp:tcp', 'csp:tls', 'worker_w1'):
                 self.assertIn(n, names)
-            self.assertFalse(names['csp.tcp']['ok'])
-            self.assertFalse(names['worker.w1']['ok'])
-            self.assertTrue(names['oam']['ok'])           # 대상 OAM 미설정 = 참고 통과
+            self.assertFalse(names['csp:tcp']['ok'])
+            self.assertFalse(names['worker_w1']['ok'])
+            self.assertEqual(names['csp:tcp']['target'], {'kind': 'node', 'id': 'csp'})
+            self.assertEqual(names['worker_w1']['target'], {'kind': 'worker', 'id': 'w1'})
             self.assertEqual(_call('POST', f'/api/v1/tester/topologies/{tid}/check', role='monitor').status, 403)
             self.assertEqual(_call('POST', '/api/v1/tester/topologies/9999/check', role='operator').status, 404)
         finally:
             _call('DELETE', f'/api/v1/tester/topologies/{tid}', role='manager')
 
 
+class PlanAndVocab(unittest.TestCase):
+    def test_vocab(self):
+        r = _call('GET', '/api/v1/tester/scenarios/vocab')
+        self.assertEqual(r.status, 200)
+        self.assertTrue(r.body['steps']['register']['supported'])
+        self.assertFalse(r.body['steps']['group_call']['supported'])
+        self.assertEqual(r.body['steps']['progress']['kind'], 'peer')
+        self.assertIn('srd_ms', r.body['metrics'])
+        self.assertEqual(r.body['q850']['16'], '정상 종료')
+
+    def test_compile_check_and_plan(self):
+        os.makedirs(os.path.join(S.user_scenarios_dir(), 'creds'), exist_ok=True)
+        with open(os.path.join(S.user_scenarios_dir(), 'creds', 'plan.jsonl'), 'w') as f:
+            for i in range(6):
+                f.write(json.dumps({'user': f'+8210000000{i:02d}', 'ha1': 'ab' * 16}) + '\n')
+        doc = {'name': 'plan-t', 'hosts': {'h1': {'ip': '10.0.0.1'}, 'hw': {'ip': '127.0.0.1'}},
+               'workers': [{'name': 'w1', 'host': 'hw', 'port': 1, 'cpus': 2}],
+               'target': {'name': 'sut', 'nodes': {'csp': {'role': 'sip', 'host': 'h1', 'sip': {'access': {'udp': 5060, 'domains': ['volte.test']}}}}},
+               'pools': {'volte_ue': {'kind': 'ue', 'worker': 'w1', 'access': 'csp', 'source': {'creds': 'creds/plan.jsonl'}}}}
+        tid = _call('POST', '/api/v1/tester/topologies', role='operator', body=doc).body['id']
+        try:
+            body = {'scenario_id': 'VOLTE-CALL-BASIC', 'topology_id': tid, 'profile': 'step_5_to_100', 'probe': False}
+            r = _call('POST', '/api/v1/tester/scenarios/compile-check', role='operator', body=body)
+            self.assertEqual(r.status, 200, r.body)
+            self.assertTrue(r.body['ok'], r.body['errors'])
+            self.assertEqual(r.body['roles']['caller']['workers'], {'w1': ['volte_ue', 0, 3]})
+            self.assertEqual(r.body['roles']['callee']['workers'], {'w1': ['volte_ue', 3, 6]})
+            self.assertEqual(r.body['phases'], {'prelude': [0], 'body': [1, 2, 3, 4], 'epilogue': []})
+            self.assertEqual([p['step'] for p in r.body['procedure']], ['register', 'invite', 'answer', 'media_hold', 'bye'])
+            self.assertEqual(r.body['bindings'], {'ht': 20})
+            self.assertEqual(r.body['little']['sdt_s'], 22.5)             # 1 + 1.5 + 20
+            self.assertEqual(r.body['little']['first_short_rate'], 5)     # 5 × 22.5 = 113 > 3 신원
+            self.assertTrue(any('Little' in w for w in r.body['warnings']))
+            self.assertEqual(r.body['estimate']['duration_s'], 20 * 300 + 22 + 5)
+            self.assertTrue(r.body['workers'][0]['in_run'])
+            self.assertEqual(r.body['workers'][0]['rate_saps'], 5.0)
+            # 같은 함수 — runs/plan (단발) · 미저장 편집본(yaml) · 오류는 errors 로
+            r2 = _call('POST', '/api/v1/tester/runs/plan', role='operator', body={'scenario_id': 'VOLTE-CALL-BASIC', 'topology': 'plan-t', 'instances': 2, 'bindings': {'ht': 3}, 'probe': False})
+            self.assertTrue(r2.body['ok'], r2.body)
+            self.assertEqual(r2.body['max_instances'], 2)
+            self.assertEqual(r2.body['estimate']['model'], 'single')
+            y = 'id: UT-PLAN\nroles: { a: { pool: volte_ue }, b: { pool: volte_ue } }\nflow:\n  - { step: invite, from: a, to: b }\n  - { step: progress, who: [b] }\n'
+            r3 = _call('POST', '/api/v1/tester/scenarios/compile-check', role='operator', body={'yaml': y, 'topology_id': tid, 'probe': False})
+            self.assertEqual(r3.status, 200)
+            self.assertFalse(r3.body['ok'])
+            self.assertTrue(any('피어 풀' in e for e in r3.body['errors']), r3.body['errors'])
+            self.assertEqual(_call('POST', '/api/v1/tester/runs/plan', role='monitor', body=body).status, 403)
+            self.assertEqual(_call('POST', '/api/v1/tester/runs/plan', role='operator', body={'scenario_id': 'NOPE', 'topology_id': tid}).status, 404)
+        finally:
+            _call('DELETE', f'/api/v1/tester/topologies/{tid}', role='manager')
+
+    def test_hold_hist_sip_not_found(self):
+        self.assertEqual(_call('POST', '/api/v1/tester/runs/nope/hold', role='operator', body={'hold': True}).status, 404)
+        self.assertEqual(_call('GET', '/api/v1/tester/runs/nope/hist', query={'timer': 'srd_ms'}).status, 404)
+        self.assertEqual(_call('GET', '/api/v1/tester/runs/nope/sip/abc').status, 404)
+
+
 class RunResults(unittest.TestCase):
+    def test_index_filters(self):
+        S.save_run_index(RunRecord(id='f-1', scenario_id='X-A', topology='t', profile='p1', started_at='2020-01-01T00:00:00', verdict='pass',
+                                   target_build='csp 1 (dep 1)', label='night'))
+        S.save_run_index(RunRecord(id='f-2', scenario_id='X-B', topology='t', started_at='2020-02-01T00:00:00', verdict='fail',
+                                   target_build='csp 2 (dep 1)'))
+        try:
+            ids = lambda q: [r['id'] for r in _call('GET', '/api/v1/tester/runs', query=q).body['runs']]
+            self.assertEqual(ids({'scenario': 'X-A'}), ['f-1'])
+            self.assertEqual(ids({'verdict': 'fail,error'}), ['f-2'])
+            self.assertEqual(ids({'build': 'csp 2 (dep 1)'}), ['f-2'])
+            self.assertEqual(ids({'since': '2020-01-15'}), ['f-2'])
+            self.assertEqual(ids({'label': 'NIGHT'}), ['f-1'])
+            self.assertEqual(ids({'load': '1'}), ['f-1'])
+            self.assertEqual(set(ids({})) >= {'f-1', 'f-2'}, True)
+        finally:
+            _call('DELETE', '/api/v1/tester/runs/f-1', role='manager')
+            _call('DELETE', '/api/v1/tester/runs/f-2', role='manager')
+
     def test_delete_series_compare(self):
         self.assertEqual(_call('DELETE', '/api/v1/tester/runs/nope', role='manager').status, 404)
         self.assertEqual(_call('DELETE', '/api/v1/tester/runs/nope', role='operator').status, 403)
@@ -312,6 +415,11 @@ class RunResults(unittest.TestCase):
             self.assertIsNone(m['ser_pct']['regression'][2])     # 없는 run
             self.assertEqual(r.body['regressions'], 2)
             self.assertTrue(r.body['same_scenario'])
+            r = _call('GET', '/api/v1/tester/runs/compare', query={'ids': 'c-base,c-new', 'format': 'md'})
+            self.assertIsNotNone(r.response)
+            self.assertIn(b'| ser_pct |', r.response.body)
+            r = _call('GET', '/api/v1/tester/runs/compare', query={'ids': 'c-base,c-new', 'format': 'csv'})
+            self.assertTrue(r.response.body.startswith(b'metric,direction,c-base,c-new,delta_c-new'))
             self.assertEqual(_call('DELETE', '/api/v1/tester/runs/c-new', role='manager').status, 200)
             self.assertEqual(_call('GET', '/api/v1/tester/runs/c-new').status, 404)
         finally:
@@ -328,7 +436,9 @@ class ApiDocs(unittest.TestCase):
         self.assertEqual(r.body['modules'], ['oam-cims-tester'])
         ids = {a['id'] for a in r.body['apis']}
         for need in ('tester.health', 'tester.runs', 'tester.events', 'tester.scenarios', 'tester.profiles',
-                     'tester.topologies', 'tester.workers', 'tester.run.report', 'tester.run.series', 'tester.runs.compare'):
+                     'tester.topologies', 'tester.workers', 'tester.run.report', 'tester.run.series', 'tester.runs.compare',
+                     'tester.scenarios.vocab', 'tester.scenarios.compile_check', 'tester.runs.plan', 'tester.run.hold',
+                     'tester.run.hist', 'tester.run.sip', 'tester.run.target_alerts'):
             self.assertIn(need, ids)
         self.assertTrue(all(a['module'] == 'oam-cims-tester' and a['path'].startswith('/api/v1/tester') for a in r.body['apis']))
         self.assertEqual(len(ids), len(r.body['apis']))   # id 중복 없음

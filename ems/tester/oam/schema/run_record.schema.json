@@ -17,6 +17,19 @@
       "title": "Id",
       "type": "string"
     },
+    "label": {
+      "anyOf": [
+        {
+          "maxLength": 120,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Label"
+    },
     "profile": {
       "anyOf": [
         {
@@ -36,6 +49,18 @@
     "started_at": {
       "title": "Started At",
       "type": "string"
+    },
+    "stop_reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Stop Reason"
     },
     "summary": {
       "additionalProperties": {

@@ -3,6 +3,7 @@
 
   cims-tester health | scenarios | profiles | topologies | runs | workers [--topology <id>]
   cims-tester validate <kind> <file.yaml>                     kind = topology|scenario|profile|run_request
+  cims-tester plan <scenario-id> --topology <name|id> [--load <profile>] [--ht N] [--bind k=v] [--instances N]   계획 미리보기(드라이런)
   cims-tester run <scenario-id> (--topology <name|id>) [--load <profile>] [--ht N] [--bind k=v]...
                   [--instances N] [--rate R] [--label ...] [--no-wait] [--json]
                   → 완주까지 기다려 RFC 6076 표를 찍고 verdict 로 종료 코드(pass=0, 그 외 1)
@@ -123,10 +124,12 @@ def main(argv=None):
         sub.add_parser(c)
     w = sub.add_parser('workers'); w.add_argument('--topology')
     v = sub.add_parser('validate'); v.add_argument('kind'); v.add_argument('file')
-    r = sub.add_parser('run'); r.add_argument('scenario'); r.add_argument('--load'); r.add_argument('--topology', required=True)
-    r.add_argument('--ht', type=int); r.add_argument('--bind', action='append', default=[])
-    r.add_argument('--instances', type=int); r.add_argument('--rate', type=float); r.add_argument('--label')
-    r.add_argument('--no-wait', action='store_true'); r.add_argument('--timeout', type=int, default=0, help='대기 상한(초, 0=무제한)')
+    for name in ('run', 'plan'):
+        r = sub.add_parser(name); r.add_argument('scenario'); r.add_argument('--load'); r.add_argument('--topology', required=True)
+        r.add_argument('--ht', type=int); r.add_argument('--bind', action='append', default=[])
+        r.add_argument('--instances', type=int); r.add_argument('--rate', type=float); r.add_argument('--label')
+        r.add_argument('--no-wait', action='store_true'); r.add_argument('--timeout', type=int, default=0, help='대기 상한(초, 0=무제한)')
+    hs = sub.add_parser('hist'); hs.add_argument('run_id'); hs.add_argument('--timer', default='srd_ms')
     rp = sub.add_parser('report'); rp.add_argument('run_id')
     st = sub.add_parser('stop'); st.add_argument('run_id')
     rt = sub.add_parser('rate'); rt.add_argument('run_id'); rt.add_argument('saps', type=float)
@@ -151,7 +154,12 @@ def main(argv=None):
         print(json.dumps(out, ensure_ascii=False, indent=2))
         return 0 if (out or {}).get('ok') else 1
 
-    if a.cmd == 'run':
+    if a.cmd == 'hist':
+        st, out = _req(f'{base}/runs/{a.run_id}/hist?timer={a.timer}', a.token)
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        return 0 if st == 200 else 1
+
+    if a.cmd in ('run', 'plan'):
         body = {'scenario_id': a.scenario}
         if a.topology.isdigit():
             body['topology_id'] = int(a.topology)
@@ -173,6 +181,33 @@ def main(argv=None):
             body['rate_saps'] = a.rate
         if a.label:
             body['label'] = a.label
+        if a.cmd == 'plan':
+            st, out = _req(base + '/runs/plan', a.token, 'POST', body)
+            if a.json or st != 200:
+                print(json.dumps(out, ensure_ascii=False, indent=2))
+                return 0 if st == 200 and out.get('ok') else 1
+            print(f"plan {out.get('scenario_id')} @ {out.get('topology')} profile={out.get('profile') or '(단발)'}  ok={out.get('ok')}")
+            for e in out.get('errors') or []:
+                print(f'  ERROR   {e}')
+            for w in out.get('warnings') or []:
+                print(f'  WARN    {w}')
+            for n in out.get('notes') or []:
+                print(f'  note    {n}')
+            for role, x in (out.get('roles') or {}).items():
+                print(f"  role {role:<10} pool={x.get('pool')} kind={x.get('kind')} total={x.get('total')} " +
+                      ' '.join(f"{w}:{p}[{b},{e})" for w, (p, b, e) in (x.get('workers') or {}).items()))
+            for w in out.get('workers') or []:
+                if w.get('in_run'):
+                    print(f"  worker {w['name']:<8} share={w.get('share')} rate={w.get('rate_saps')} instances={w.get('max_instances')} "
+                          f"endpoints={w.get('endpoints_needed')}/{(w.get('capacity') or {}).get('max_endpoints')}")
+            est, lit = out.get('estimate') or {}, out.get('little') or {}
+            print(f"  estimate duration={est.get('duration_s')}s sdt={est.get('sdt_s')}s peak={est.get('peak_rate')} SApS concurrent≈{est.get('concurrent')}"
+                  + (f"  little: 부족 시작 {lit.get('first_short_rate')} SApS (권고 max {lit.get('recommend_max')})" if lit.get('first_short_rate') is not None else '  little: OK'))
+            for sd in out.get('seed') or []:
+                print(f"  seed {sd['collection']} +{sd['count']} {', '.join(sd.get('names') or [])}")
+            for ev in out.get('env') or []:
+                print(f"  env  {ev['env']}  — {ev['for']}")
+            return 0 if out.get('ok') else 1
         st, out = _req(base + '/runs', a.token, 'POST', body)
         if st != 202:
             print(json.dumps(out, ensure_ascii=False, indent=2))

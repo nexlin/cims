@@ -17,21 +17,38 @@ import { fmtNum, fmtTime } from '@tester/lib/fmt'
 
 const NEW_DOC: TopologyDoc = {
   name: 'new-target',
-  target: {
-    name: 'sut',
-    csp: { ip: '10.0.0.45', udp: 5060, tcp: 25061, tls: 5061, domain_volte: 'volte.cims.example.kr', domain_ptt: 'ptt.cims.example.kr',
-           peering: { port: 5070, protocol: 'udp', local_node: 'cims-tester-peering' } },
-    csc: { host: '10.0.0.45', port: 4430, tls: true },
-    oam: { url: 'https://10.0.0.45:4419', token_env: 'TESTER_OAM_TOKEN' },
+  hosts: {
+    h45: { name: 'media01', ip: '10.0.0.45' },
+    h61: { name: 'tester-a', ip: '10.0.0.61' },
   },
-  workers: [{ name: 'w1', url: 'http://10.0.0.61:7100', cpus: 8 }],
+  workers: [{ name: 'w1', host: 'h61', port: 7100, cpus: 8 }],
+  target: {
+    name: 'sut', kind: 'cims',
+    nodes: {
+      csp: { role: 'sip', fn: 'CSP', host: 'h45', procs: ['csp'],
+             sip: { access: { udp: 5060, tcp: 25061, tls: 5061, domains: ['volte.cims.example.kr', 'ptt.cims.example.kr'] },
+                    peering: { port: 5070, protocol: 'udp', local_node: 'cims-tester-peering' } } },
+      cmp: { role: 'media', fn: 'CMP', host: 'h45', procs: ['cmp'], media: { rtp_range: [20000, 29999], control: 9001 } },
+      csc: { role: 'subscriber', fn: 'CSC', host: 'h45', procs: ['csc'], api: { port: 4430, tls: true } },
+      oam: { role: 'oam', fn: 'OAM', host: 'h45', procs: ['oam'], oam: { port: 4419, tls: true, token_env: 'TESTER_OAM_TOKEN' } },
+    },
+  },
   pools: {
-    volte_ue: { kind: 'ue', source: { creds: 'creds/volte.jsonl' }, transport: 'udp' },
+    volte_ue: { kind: 'ue', worker: 'w1', access: 'csp', source: { creds: 'creds/volte.jsonl' }, transport: 'udp' },
   },
 }
 
+/** 표시용 — SIP 접속점 노드 첫 항목의 호스트 주소·기본 도메인 */
+export function topoTargetLabel(doc: TopologyDoc): string {
+  const sip = Object.values(doc.target?.nodes ?? {}).find(n => n.role === 'sip' && n.sip?.access)
+  if (!sip) return doc.target?.name ?? '—'
+  const ip = doc.hosts?.[sip.host]?.ip ?? sip.host
+  const dom = sip.sip?.access?.domains?.[0]
+  return dom ? `${ip} · ${dom}` : ip
+}
+
 function poolSummary(doc: TopologyDoc): string {
-  return Object.entries(doc.pools ?? {}).map(([n, p]) => `${n}(${p.kind}${p.profile ? `/${p.profile}` : ''})`).join(', ')
+  return Object.entries(doc.pools ?? {}).map(([n, p]) => `${n}(${p.kind}${p.kind === 'peer' ? `/${p.profile}` : ''}@${p.worker})`).join(', ')
 }
 
 export default function TesterTopologiesPage() {
@@ -101,7 +118,7 @@ export default function TesterTopologiesPage() {
     <div className="flex h-full flex-col">
       <div className="toolbar flex flex-wrap items-center gap-2.5 border-b border-border bg-muted px-4 py-3">
         <span className="whitespace-nowrap text-md font-semibold text-foreground">토폴로지</span>
-        <span className="text-sm text-muted-foreground">대상(SUT) · 워커 · 풀 — run 이 참조하는 레코드. 비밀은 환경변수 이름만</span>
+        <span className="text-sm text-muted-foreground">호스트 › 워커·대상 노드 › 풀 — run 이 참조하는 레코드. 주소는 hosts 에만, 비밀은 환경변수 이름만</span>
         {error && <span className="text-sm text-destructive">{error}</span>}
         <div className="ml-auto flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={load} disabled={loading}><RefreshCw size={13} /> 새로고침</Button>
@@ -116,13 +133,13 @@ export default function TesterTopologiesPage() {
               <EmptyState title="토폴로지가 없습니다" description="[새 토폴로지] 로 대상 CSP 주소·워커 URL·풀을 정의합니다. 예시 = 패키지 scenarios/topology.sample.yaml" />
             ) : (
               <DataTable>
-                <thead><tr><Th>이름</Th><Th>대상 CSP</Th><Th>워커</Th><Th>풀</Th><Th>수정</Th></tr></thead>
+                <thead><tr><Th>이름</Th><Th>대상 접속점</Th><Th>워커</Th><Th>풀</Th><Th>수정</Th></tr></thead>
                 <tbody>
                   {rows.map(r => (
                     <TrLink key={r.id} selected={sel === r.id} onClick={() => setSel(r.id)}>
                       <Td><span className="font-medium">{r.name}</span> <span className="font-mono text-xs text-muted-foreground">#{r.id}</span></Td>
-                      <Td mono>{r.doc.target?.csp?.ip}{r.doc.target?.csp?.domain_volte ? ` · ${r.doc.target.csp.domain_volte}` : ''}</Td>
-                      <Td>{(r.doc.workers ?? []).map(w => w.name).join(', ') || '—'}</Td>
+                      <Td mono>{topoTargetLabel(r.doc)}</Td>
+                      <Td>{(r.doc.workers ?? []).map(w => `${w.name}@${r.doc.hosts?.[w.host]?.ip ?? w.host}`).join(', ') || '—'}</Td>
                       <Td className="text-xs">{poolSummary(r.doc)}</Td>
                       <Td mono>{fmtTime(r.updated_at, true)}</Td>
                     </TrLink>
@@ -180,7 +197,7 @@ export default function TesterTopologiesPage() {
 
           <section className="flex min-h-0 flex-col gap-2">
             {sel === undefined ? (
-              <EmptyState title="토폴로지를 고르십시오" description="왼쪽에서 행을 누르면 JSON 문서를 편집합니다. 피어 풀(kind: peer)은 워커 호스트의 bind ip:port 에 수신점을 열고, 시나리오가 그 풀을 쓰면 run 이 대상 CSP 컬렉션을 시드·복원합니다." />
+              <EmptyState title="토폴로지를 고르십시오" description="왼쪽에서 행을 누르면 JSON 문서를 편집합니다. 풀 하나 = 워커 하나(worker) — 워커 여럿에 나누려면 워커마다 풀 + 같은 group. 피어 풀(kind: peer)은 워커 호스트 주소:bind.port 에 수신점을 열고, 시나리오가 그 풀을 쓰면 run 이 대상 CSP 컬렉션을 시드·복원합니다." />
             ) : (
               <>
                 <div className="flex flex-wrap items-center gap-2">

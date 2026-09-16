@@ -10,6 +10,7 @@ PASS 로 보인다. 지표 이름은 RFC 6076 어휘(`rrd_ms`·`srd_ms`·`sdd_ms
 """
 from __future__ import annotations
 
+import re
 from typing import Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -20,70 +21,151 @@ class _Strict(BaseModel):
 
 
 # ──────────────────────────────────────────────────────────────────────────
-#  1. 토폴로지 — 대상(SUT)·워커·풀
+#  1. 토폴로지 — 호스트 › 워커·대상 노드 › 풀 (§4)
+#     주소는 hosts{} 에만 둔다. 워커 URL·노드 수신점·피어 수신점 ip 는 전부 호스트에서 파생된다.
+#     대상은 역할별 노드 집합(sip/tas/media/subscriber/oam/db) — CIMS·타 IMS·IP-PBX 가 같은 레코드 구조다.
+#     풀 하나 = 워커 하나(`worker`). 워커 여럿은 워커마다 풀 + 같은 `group`(논리 풀 이름).
 # ──────────────────────────────────────────────────────────────────────────
 
 Transport = Literal['udp', 'tcp', 'tls']
 SrtpMode = Literal['off', 'optional', 'required']
 PeerProfile = Literal['ibcf', 'pbx', 'mgcf']
 ObserveSource = Literal['oam_stats', 'oam_alarms', 'agent_heartbeat', 'ssh_proc']
+NodeRole = Literal['sip', 'tas', 'media', 'subscriber', 'oam', 'db']
+TargetKind = Literal['cims', 'ims', 'pbx']
+
+_ID_RE = r'^[a-z][a-z0-9_]*$'
 
 
-class TargetPeering(_Strict):
-    """대상 CSP 의 피어링 접속점(edge=peering LocalNode) — 피어 풀 발신의 다음 홉이자 시드 route 의 local_node_ref.
-    `local_node` 가 대상에 이미 있으면 그 레코드를 쓰고, 없으면 그 이름으로 LocalNode 를 시드한다(run 끝에 복원)."""
-    ip: Optional[str] = Field(default=None, description='비면 csp.ip')
+class HostSsh(_Strict):
+    user: str
+    key_env: str = Field(description='SSH 개인키 경로를 담은 환경변수 이름 — 비밀은 레코드에 두지 않는다')
+    port: int = Field(default=22, ge=1, le=65535)
+
+
+class Host(_Strict):
+    """서버 — 주소·SSH 자격의 유일한 자리. 계측기/대상/동거 구분은 필드가 아니라 그 위에 무엇이 있느냐(파생)."""
+    name: Optional[str] = None
+    ip: str = Field(min_length=1)
+    ssh: Optional[HostSsh] = Field(default=None, description='있으면 노드 procs 의 CPU/메모리를 SSH 로 관측(stop_on.target_cpu_pct 원천)')
+
+
+class WorkerMedia(_Strict):
+    samples: List[str] = Field(default_factory=list, description='워커가 보유한 미디어 샘플 id(§7 ⓖ) — health 보고와 대조')
+    max_rtp_streams: Optional[int] = Field(default=None, ge=0)
+
+
+class Worker(_Strict):
+    """호스트 위의 cims-tester-worker 프로세스 — url = http://<host.ip>:<port> 파생."""
+    name: str = Field(pattern=_ID_RE)
+    host: str
+    port: int = Field(default=7100, ge=1, le=65535)
+    cpus: Optional[int] = Field(default=None, ge=1)
+    media: Optional[WorkerMedia] = None
+
+
+class SipAccess(_Strict):
+    """UE 가 등록·발신하는 접속점 — transport 별 포트(없는 transport 는 그 노드에서 거절)."""
+    udp: Optional[int] = Field(default=None, ge=1, le=65535)
+    tcp: Optional[int] = Field(default=None, ge=1, le=65535)
+    tls: Optional[int] = Field(default=None, ge=1, le=65535)
+    domains: List[str] = Field(default_factory=list, description='첫 항목 = 기본 홈 도메인, "ptt" 가 든 항목 = PTT 풀 도메인')
+
+    @model_validator(mode='after')
+    def _any_port(self):
+        if self.udp is None and self.tcp is None and self.tls is None:
+            raise ValueError('access 에 udp/tcp/tls 포트 하나는 필요하다')
+        return self
+
+    def port_for(self, transport: str) -> Optional[int]:
+        return getattr(self, transport, None)
+
+
+class SipPeering(_Strict):
+    """피어 풀의 다음 홉(edge=peering 접속점). `local_node` 는 cims 대상에서만 — 대상 local_nodes 의 name(없으면 시드)."""
     port: int = Field(ge=1, le=65535)
     protocol: Transport = 'udp'
-    local_node: str = Field(default='cims-tester-peering', description='대상 local_nodes 의 name')
+    local_node: Optional[str] = Field(default=None, description='cims: 대상 local_nodes 이름 — 비면 cims-tester-peering')
 
 
-class TargetCsp(_Strict):
-    ip: str
-    udp: int = 5060
-    tcp: int = 25061
-    tls: int = 5061
-    domain_volte: Optional[str] = None
-    domain_ptt: Optional[str] = None
-    peering: Optional[TargetPeering] = Field(default=None, description='피어 풀이 쓰는 CSP 피어링 접속점 — 없으면 access UDP 접속점')
+class NodeSip(_Strict):
+    access: Optional[SipAccess] = None
+    peering: Optional[SipPeering] = None
 
 
-class TargetCsc(_Strict):
-    host: str
-    port: int = 4430
+class NodeTas(_Strict):
+    port: Optional[int] = Field(default=None, ge=1, le=65535)
+
+
+class NodeMedia(_Strict):
+    rtp_range: Optional[List[int]] = Field(default=None, min_length=2, max_length=2, description='있어야 미디어 leg 지표를 이 노드에 귀속')
+    control: Optional[int] = Field(default=None, ge=1, le=65535)
+
+
+class NodeApi(_Strict):
+    port: int = Field(ge=1, le=65535)
     tls: bool = True
 
 
-class TargetOam(_Strict):
-    """대상 관측·컬렉션 시드 전용 — 동거 형태여도 스토어를 직접 읽지 않고 이 API 로 본다(I5)."""
-    url: str
-    token_env: Optional[str] = Field(default=None, description='토큰을 담은 환경변수 이름')
-    csp_deployment_id: Optional[int] = Field(default=None, ge=1,
-                                             description='대상 CSP 의 배포 id — 비면 배포 목록에서 패키지 csp 를 찾는다')
+class NodeOam(_Strict):
+    """CIMS 전용 — 통계·알람 관측 + 컬렉션 시드. url = https://<host.ip>:<port>."""
+    port: int = Field(default=4419, ge=1, le=65535)
+    tls: bool = True
+    token_env: Optional[str] = Field(default=None, description='토큰을 담은 환경변수 이름(기본 TESTER_OAM_TOKEN)')
+    csp_deployment_id: Optional[int] = Field(default=None, ge=1, description='대상 CSP 의 배포 id — 비면 배포 목록에서 패키지 csp 를 찾는다')
+    observe: List[ObserveSource] = Field(default_factory=list)
+
+
+class NodeDb(_Strict):
+    port: int = Field(default=3306, ge=1, le=65535)
+    name: str = 'cims'
+    user_env: Optional[str] = None
+    password_env: Optional[str] = None
+
+
+class TargetNode(_Strict):
+    """역할(role)별 노드 — 설정 블록이 역할마다 다르다. procs = 호스트 SSH 관측이 볼 프로세스 이름."""
+    role: NodeRole
+    host: str
+    fn: Optional[str] = Field(default=None, description='표시용 — CSP · P-CSCF · IBCF · MRF …')
+    label: Optional[str] = None
+    procs: List[str] = Field(default_factory=list)
+    sip: Optional[NodeSip] = None
+    tas: Optional[NodeTas] = None
+    media: Optional[NodeMedia] = None
+    api: Optional[NodeApi] = None
+    oam: Optional[NodeOam] = None
+    db: Optional[NodeDb] = None
+
+    @model_validator(mode='after')
+    def _block_by_role(self):
+        blocks = {'sip': 'sip', 'tas': 'tas', 'media': 'media', 'subscriber': 'api', 'oam': 'oam', 'db': 'db'}
+        for role, fld in blocks.items():
+            if role != self.role and getattr(self, fld) is not None:
+                raise ValueError(f'role={self.role} 노드에 {fld} 블록은 두지 않는다')
+        if self.role == 'oam' and self.oam is None:
+            self.oam = NodeOam()
+        if self.role == 'db' and self.db is None:
+            self.db = NodeDb()
+        return self
 
 
 class Target(_Strict):
     name: str
-    csp: TargetCsp
-    csc: Optional[TargetCsc] = None
-    oam: Optional[TargetOam] = None
-    observe: List[ObserveSource] = Field(default_factory=list)
+    kind: TargetKind = Field(default='cims', description='cims = oam 노드로 컬렉션 시드·target_build · ims/pbx = 시드 없음')
+    nodes: Dict[str, TargetNode] = Field(default_factory=dict)
 
-    @model_validator(mode='after')
-    def _observe_needs_source(self):
-        if any(o.startswith('oam_') for o in self.observe) and self.oam is None:
-            raise ValueError('observe 에 oam_* 가 있으면 target.oam 이 필요하다')
-        return self
-
-
-class Worker(_Strict):
-    name: str
-    url: str = Field(description='cims-tester-worker 제어 URL (http://ip:7100)')
-    cpus: Optional[int] = Field(default=None, ge=1)
+    @field_validator('nodes')
+    @classmethod
+    def _node_ids(cls, v):
+        for k in v:
+            if not re.match(_ID_RE, k):
+                raise ValueError(f'노드 id 는 소문자·숫자·_ 만: {k!r}')
+        return v
 
 
 class DbSource(_Strict):
-    db: Literal['target'] = Field(description="대상 DB — 토폴로지 target 의 CSC 가 알려주는 접속(계측기가 자격을 직접 갖지 않음)")
+    db: str = Field(description='신원 원천 노드 id — role=db 또는 api 있는 subscriber 노드')
     table: Literal['volte_subscriptions', 'voip_subscriptions', 'ptt_subscriptions']
     offset: int = Field(default=0, ge=0)
     count: int = Field(ge=1)
@@ -94,8 +176,15 @@ class CredsSource(_Strict):
     count: Optional[int] = Field(default=None, ge=1)
 
 
-class UePool(_Strict):
+class _PoolBase(_Strict):
+    worker: str = Field(description='이 풀이 놓인 워커(풀 하나 = 워커 하나)')
+    group: Optional[str] = Field(default=None, pattern=_ID_RE,
+                                 description='논리 풀 이름 — 워커 여럿에 나눌 때 워커마다 풀 + 같은 group. 시나리오 roles.X.pool 이 참조')
+
+
+class UePool(_PoolBase):
     kind: Literal['ue']
+    access: str = Field(description='접속점 노드 id — sip.access 가 있는 SIP 노드')
     source: Union[DbSource, CredsSource]
     transport: Transport = 'udp'
     srtp: SrtpMode = 'off'
@@ -105,7 +194,7 @@ class UePool(_Strict):
 
 
 class PeerBind(_Strict):
-    ip: str
+    """피어 수신점 — ip 는 워커 호스트 주소에서 파생된다."""
     port: int = Field(ge=1, le=65535)
     protocol: Transport = 'udp'
 
@@ -128,7 +217,7 @@ class PeerRegister(_Strict):
     user: str
     ha1_env: Optional[str] = Field(default=None, description='H(A1) 을 담은 환경변수 — 비밀은 YAML 에 두지 않는다')
     password_env: Optional[str] = Field(default=None, description='평문 비밀번호 환경변수 — ha1_env 가 없을 때')
-    realm: Optional[str] = Field(default=None, description='Digest realm·To/From host — 비면 target.csp.domain_volte')
+    realm: Optional[str] = Field(default=None, description='Digest realm·To/From host — 비면 접속점 기본 도메인')
     expires: int = Field(default=3600, ge=60)
 
     @model_validator(mode='after')
@@ -147,11 +236,12 @@ class PeerSeed(_Strict):
     priority: int = Field(default=100, ge=0)
     weight: int = Field(default=1, ge=1)
     acl: Optional[Literal['allow', 'deny']] = Field(default=None,
-                                                    description='이 피어 소스 IP 에 대한 ACL(global) — deny 면 403 기대')
+                                                    description='이 피어 소스 IP 에 대한 ACL — deny 면 403 기대')
 
 
-class PeerPool(_Strict):
+class PeerPool(_PoolBase):
     kind: Literal['peer']
+    peering: str = Field(description='다음 홉 노드 id — sip.peering 이 있는 SIP 노드')
     profile: PeerProfile
     bind: PeerBind
     domain: str
@@ -172,8 +262,9 @@ class PeerPool(_Strict):
         return 'domain' if self.profile == 'ibcf' else 'number'
 
 
-class RealUePool(_Strict):
+class RealUePool(_PoolBase):
     kind: Literal['real-ue']
+    access: str
     source: CredsSource
     transport: Transport = 'tls'
     srtp: SrtpMode = 'optional'
@@ -182,20 +273,213 @@ class RealUePool(_Strict):
 Pool = Union[UePool, PeerPool, RealUePool]
 
 
+class LayoutRegion(_Strict):
+    x: float = 0
+    y: float = 0
+    w: float = 360
+    h: float = 240
+
+
+class LayoutItem(_Strict):
+    x: float = 14
+    y: float = 12
+
+
+class Layout(_Strict):
+    """UI 배치 상태 — 캔버스 영역(호스트) 좌표·크기, 카드(워커·노드) 좌표. 컴파일러는 읽지 않는다."""
+    regions: Dict[str, LayoutRegion] = Field(default_factory=dict)
+    items: Dict[str, LayoutItem] = Field(default_factory=dict)
+
+
+class MediaSample(_Strict):
+    """샘플 라이브러리 항목(§7 ⓖ) — 코덱 → 파일 경로 또는 synthetic."""
+    model_config = ConfigDict(extra='allow')
+
+
+class TopologyMedia(_Strict):
+    samples: Dict[str, Dict[str, str]] = Field(default_factory=dict, description='id → {코덱: 파일|synthetic}')
+
+
+# ── 워커 계약(PoolCreate.target_csp) — 컨트롤러가 토폴로지 노드 참조에서 파생한다. 워커 계약은 그대로다 ──
+
+class TargetPeering(_Strict):
+    ip: Optional[str] = None
+    port: int = Field(ge=1, le=65535)
+    protocol: Transport = 'udp'
+    local_node: str = 'cims-tester-peering'
+
+
+class TargetCsp(_Strict):
+    """풀이 닿는 SIP 서버(워커 관점) — access 포트 + 도메인 + (피어 풀) 피어링 다음 홉."""
+    ip: str
+    udp: int = 5060
+    tcp: int = 25061
+    tls: int = 5061
+    domain_volte: Optional[str] = None
+    domain_ptt: Optional[str] = None
+    peering: Optional[TargetPeering] = None
+
+
+class OamRef:
+    """oam 노드에서 파생한 대상 OAM 접속 정보(tester_target 이 쓴다)."""
+    __slots__ = ('node', 'url', 'token_env', 'csp_deployment_id', 'observe')
+
+    def __init__(self, node: str, url: str, token_env: Optional[str], csp_deployment_id: Optional[int], observe: List[str]):
+        self.node, self.url, self.token_env, self.csp_deployment_id, self.observe = node, url, token_env, csp_deployment_id, observe
+
+
 class Topology(_Strict):
     name: str
+    hosts: Dict[str, Host] = Field(min_length=1)
+    workers: List[Worker] = Field(default_factory=list)
     target: Target
-    workers: List[Worker] = Field(default_factory=list,
-                                  description='수동 항목 — 배포 목록에서 자동 발견한 워커에 보태거나 덮어쓴다(§6.1)')
     pools: Dict[str, Pool] = Field(min_length=1)
+    media: Optional[TopologyMedia] = None
+    layout: Optional[Layout] = None
+
+    @field_validator('hosts')
+    @classmethod
+    def _host_ids(cls, v):
+        for k in v:
+            if not re.match(_ID_RE, k):
+                raise ValueError(f'호스트 id 는 소문자·숫자·_ 만: {k!r}')
+        return v
 
     @field_validator('pools')
     @classmethod
     def _pool_names(cls, v):
         for k in v:
-            if not k.replace('_', '').isalnum():
-                raise ValueError(f'pool 이름은 영숫자·_ 만: {k!r}')
+            if not re.match(_ID_RE, k):
+                raise ValueError(f'pool 이름은 소문자·숫자·_ 만 (시나리오 roles.pool 이 참조): {k!r}')
         return v
+
+    @model_validator(mode='after')
+    def _refs(self):
+        names = [w.name for w in self.workers]
+        if len(set(names)) != len(names):
+            raise ValueError('workers 이름이 중복된다')
+        for w in self.workers:
+            if w.host not in self.hosts:
+                raise ValueError(f'workers.{w.name}.host={w.host!r} 는 hosts 에 없다')
+        for nid, n in self.target.nodes.items():
+            if n.host not in self.hosts:
+                raise ValueError(f'target.nodes.{nid}.host={n.host!r} 는 hosts 에 없다')
+        seen_group_worker = set()
+        seen_bind = {}
+        for pname, p in self.pools.items():
+            if p.worker not in names:
+                raise ValueError(f'pools.{pname}.worker={p.worker!r} 는 workers 에 없다')
+            if p.group:
+                if p.group in self.pools:
+                    raise ValueError(f'pools.{pname}.group={p.group!r} 이 다른 풀 이름과 같다 — 역할 해석이 모호해진다')
+                key = (p.group, p.worker)
+                if key in seen_group_worker:
+                    raise ValueError(f'워커 {p.worker} 에 group {p.group!r} 풀이 둘 — 워커마다 논리 풀 하나만')
+                seen_group_worker.add(key)
+            if p.kind in ('ue', 'real-ue'):
+                node = self.target.nodes.get(p.access)
+                if node is None or node.sip is None or node.sip.access is None:
+                    raise ValueError(f'pools.{pname}.access={p.access!r} 는 sip.access 가 있는 노드가 아니다')
+                if node.sip.access.port_for(p.transport) is None:
+                    raise ValueError(f'pools.{pname}: transport {p.transport} 인데 {p.access} 에 {p.transport} 수신점이 없다')
+                if p.kind == 'ue' and isinstance(p.source, DbSource):
+                    src = self.target.nodes.get(p.source.db)
+                    if src is None or not (src.role == 'db' or (src.role == 'subscriber' and src.api is not None)):
+                        raise ValueError(f'pools.{pname}.source.db={p.source.db!r} 는 db 노드 또는 api 있는 subscriber 노드가 아니다')
+            else:
+                node = self.target.nodes.get(p.peering)
+                if node is None or node.sip is None or node.sip.peering is None:
+                    raise ValueError(f'pools.{pname}.peering={p.peering!r} 는 sip.peering 이 있는 노드가 아니다')
+                if p.trunk_register is not None and node.sip.access is None:
+                    raise ValueError(f'pools.{pname}: 트렁크 REGISTER 는 {p.peering} 의 sip.access 로 가는데 access 가 없다')
+                key = (self.worker_host(p.worker), p.bind.port)
+                if key in seen_bind:
+                    raise ValueError(f'pools.{pname}: 수신점 {key[0]}:{key[1]} 이 {seen_bind[key]} 과 겹친다')
+                seen_bind[key] = pname
+        return self
+
+    # ── 파생 조회 (주소는 호스트에만 있다) ───────────────────────────────
+
+    def worker_by_name(self, name: str) -> Optional[Worker]:
+        return next((w for w in self.workers if w.name == name), None)
+
+    def host_ip(self, hid: str) -> str:
+        return self.hosts[hid].ip
+
+    def worker_host(self, wname: str) -> str:
+        w = self.worker_by_name(wname)
+        return self.host_ip(w.host) if w else ''
+
+    def worker_url(self, w: Worker) -> str:
+        return f'http://{self.host_ip(w.host)}:{w.port}'
+
+    def node_ip(self, nid: str) -> str:
+        return self.host_ip(self.target.nodes[nid].host)
+
+    def nodes_by_role(self, role: str) -> Dict[str, TargetNode]:
+        return {k: n for k, n in self.target.nodes.items() if n.role == role}
+
+    def domains_of(self, nid: str) -> List[str]:
+        n = self.target.nodes.get(nid)
+        return list(n.sip.access.domains) if n and n.sip and n.sip.access else []
+
+    def default_domain(self, nid: str, ptt: bool = False) -> str:
+        doms = self.domains_of(nid)
+        if ptt:
+            for d in doms:
+                if 'ptt' in d:
+                    return d
+        return doms[0] if doms else ''
+
+    def pool_bind_ip(self, pname: str) -> str:
+        """피어 풀 수신점 ip = 그 워커 호스트 주소."""
+        return self.worker_host(self.pools[pname].worker)
+
+    def pool_node(self, pname: str) -> str:
+        p = self.pools[pname]
+        return p.peering if p.kind == 'peer' else p.access
+
+    def target_csp_for(self, pname: str) -> TargetCsp:
+        """워커 계약 PoolCreate.target_csp — 풀이 참조한 노드(ue: access · peer: peering)에서 파생한다."""
+        p = self.pools[pname]
+        nid = self.pool_node(pname)
+        node = self.target.nodes[nid]
+        acc = node.sip.access if node.sip else None
+        kw = {'ip': self.node_ip(nid)}
+        if acc is not None:
+            for tr in ('udp', 'tcp', 'tls'):
+                v = acc.port_for(tr)
+                if v is not None:
+                    kw[tr] = v
+            kw['domain_volte'] = self.default_domain(nid) or None
+            kw['domain_ptt'] = self.default_domain(nid, ptt=True) or None
+            if kw['domain_ptt'] == kw['domain_volte']:
+                kw['domain_ptt'] = None
+        if p.kind == 'peer':
+            pr = node.sip.peering
+            kw['peering'] = TargetPeering(ip=self.node_ip(nid), port=pr.port, protocol=pr.protocol,
+                                          local_node=pr.local_node or 'cims-tester-peering')
+        return TargetCsp(**kw)
+
+    def peering_node_of(self, pools: List[str]) -> Optional[str]:
+        nids = {self.pools[p].peering for p in pools if self.pools[p].kind == 'peer'}
+        if len(nids) > 1:
+            raise ValueError(f'피어 풀들의 다음 홉 노드가 서로 다르다: {sorted(nids)}')
+        return next(iter(nids), None)
+
+    def oam_ref(self) -> Optional[OamRef]:
+        for nid, n in self.target.nodes.items():
+            if n.role == 'oam':
+                o = n.oam or NodeOam()
+                scheme = 'https' if o.tls else 'http'
+                return OamRef(nid, f'{scheme}://{self.node_ip(nid)}:{o.port}', o.token_env, o.csp_deployment_id, list(o.observe))
+        return None
+
+    def host_kind(self, hid: str) -> str:
+        """호스트 성격(파생) — tester(워커만)·target(대상 노드만)·shared(동거)·empty."""
+        has_w = any(w.host == hid for w in self.workers)
+        has_n = any(n.host == hid for n in self.target.nodes.values())
+        return 'shared' if has_w and has_n else 'tester' if has_w else 'target' if has_n else 'empty'
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -209,6 +493,69 @@ StepKind = Literal[
     'group_call', 'floor_request', 'floor_release', 'sds_send', 'sds_recv',
     'media_hold', 'wait', 'expect',
 ]
+
+# 워커가 실행할 수 있는 단계(§4) — 나머지는 모델에는 있지만 컴파일 시 거절한다(콘솔 팔레트는 회색).
+WORKER_STEPS = frozenset((
+    'register', 'deregister', 'invite', 'progress', 'answer', 'reject', 'bye',
+    'hold', 'resume', 'dtmf', 'refer', 'media_hold', 'wait', 'expect',
+))
+
+# media_hold.during 에 둘 수 있는 통화 중 동작(§7 ⓓ) — 컴파일러가 평평한 단계열로 푼다
+DURING_STEPS = ('dtmf', 'hold', 'resume', 'refer')
+
+# 단계 어휘 표 — 콘솔 편집기 팔레트·속성 폼·kind 게이트의 정본(GET /scenarios/vocab).
+#   group   : 팔레트 묶음 · actor: 행위자 인자 꼴(who|from|fromto|seconds|none)
+#   kind    : 행위자 역할의 풀 kind 게이트 — 'peer' = 피어 풀만, 'ue' = UE 풀만, 'ue|trunk' = UE 또는 트렁크 계정 피어, None = 무관
+#   metrics : 이 단계에 우선 제안하는 expect 지표
+STEP_VOCAB = {
+    'register':      {'group': 'reg',   'actor': 'who',     'kind': 'ue|trunk', 'metrics': ['code', 'rrd_ms'], 'desc': '역할 단말 전부 등록 (prelude)'},
+    'deregister':    {'group': 'reg',   'actor': 'who',     'kind': 'ue|trunk', 'metrics': ['code'], 'desc': 'run 종료 시 등록 해제 (epilogue)'},
+    'wait':          {'group': 'reg',   'actor': 'seconds', 'kind': None,       'metrics': [], 'desc': '대기 (seconds)'},
+    'invite':        {'group': 'call',  'actor': 'fromto',  'kind': None,       'metrics': ['code', 'srd_ms', 'ser_pct', 'seer_pct'], 'desc': 'INVITE from → to (비동기)'},
+    'progress':      {'group': 'peer',  'actor': 'who',     'kind': 'peer',     'metrics': ['early_media_pct', 'prack_pct'], 'desc': '183 early media · PRACK (피어)'},
+    'answer':        {'group': 'call',  'actor': 'who',     'kind': None,       'metrics': ['code', 'srd_ms', 'ser_pct'], 'desc': '착신 대기 → after_ms 뒤 200'},
+    'reject':        {'group': 'call',  'actor': 'who',     'kind': None,       'metrics': ['code', 'q850_rx_pct'], 'desc': '착신 대기 → payload 코드로 거절'},
+    'bye':           {'group': 'call',  'actor': 'from',    'kind': None,       'metrics': ['sdd_ms', 'code', 'scr_pct', 'q850_rx_pct', 'dtmf_rx_pct'], 'desc': 'BYE → 최종 응답 (SDD)'},
+    'media_hold':    {'group': 'media', 'actor': 'seconds', 'kind': None,       'metrics': ['rtp_loss_pct', 'jitter_ms', 'mos'], 'desc': '확립 뒤 seconds 유지, 끝에 RTP 표본 (during 로 통화 중 동작)'},
+    'hold':          {'group': 'media', 'actor': 'from',    'kind': None,       'metrics': ['code'], 'desc': 're-INVITE sendonly'},
+    'resume':        {'group': 'media', 'actor': 'from',    'kind': None,       'metrics': ['code'], 'desc': 're-INVITE sendrecv'},
+    'dtmf':          {'group': 'media', 'actor': 'from',    'kind': None,       'metrics': ['dtmf_rx_pct'], 'desc': 'RFC 4733 숫자열 송신 (payload)'},
+    'refer':         {'group': 'xfer',  'actor': 'fromto',  'kind': 'peer',     'metrics': ['code'], 'desc': 'blind REFER from(전달자) → to'},
+    'replaces':      {'group': 'xfer',  'actor': 'fromto',  'kind': None,       'metrics': ['code'], 'desc': 'INVITE-Replaces (RFC 3891)'},
+    'join':          {'group': 'xfer',  'actor': 'fromto',  'kind': None,       'metrics': ['code'], 'desc': 'Join 합류 (RFC 3911)'},
+    'pickup':        {'group': 'xfer',  'actor': 'from',    'kind': None,       'metrics': ['code'], 'desc': '당겨받기 (피처코드)'},
+    'subscribe':     {'group': 'ctl',   'actor': 'who',     'kind': None,       'metrics': ['code'], 'desc': 'SUBSCRIBE (dialog/reg)'},
+    'publish':       {'group': 'ctl',   'actor': 'who',     'kind': None,       'metrics': ['code'], 'desc': 'PUBLISH'},
+    'group_call':    {'group': 'ptt',   'actor': 'from',    'kind': 'ue',       'metrics': ['code', 'srd_ms'], 'desc': 'PTT 그룹콜 (group)'},
+    'floor_request': {'group': 'ptt',   'actor': 'who',     'kind': 'ue',       'metrics': ['floor_grant_ms', 'floor_queue_ms'], 'desc': 'Floor Request'},
+    'floor_release': {'group': 'ptt',   'actor': 'who',     'kind': 'ue',       'metrics': ['floor_taken_ms'], 'desc': 'Floor Release'},
+    'sds_send':      {'group': 'ptt',   'actor': 'from',    'kind': 'ue',       'metrics': ['sds_delay_ms'], 'desc': 'MCData SDS 송신'},
+    'sds_recv':      {'group': 'ptt',   'actor': 'who',     'kind': 'ue',       'metrics': ['sds_delay_ms', 'sds_disposition_pct'], 'desc': 'MCData SDS 수신 대기'},
+    'expect':        {'group': 'ctl',   'actor': 'none',    'kind': None,       'metrics': ['ser_pct', 'scr_pct', 'isa_pct'], 'desc': '누계 지표 게이트'},
+}
+STEP_GROUPS = [
+    {'id': 'reg', 'label': '등록'}, {'id': 'call', 'label': '호'}, {'id': 'media', 'label': '미디어'},
+    {'id': 'peer', 'label': '피어 축'}, {'id': 'xfer', 'label': '전달·합류'}, {'id': 'ptt', 'label': 'PTT · MCData'},
+    {'id': 'ctl', 'label': '이벤트·게이트'},
+]
+
+METRIC_LABELS = {
+    'code': 'code — 응답 코드', 'rrd_ms': 'RRD — 등록 지연', 'srd_ms': 'SRD — 세션 요청 지연', 'sdd_ms': 'SDD — 세션 해제 지연',
+    'sdt_s': 'SDT — 세션 지속', 'ser_pct': 'SER — 세션 확립률', 'seer_pct': 'SEER — 유효 확립률', 'scr_pct': 'SCR — 세션 완료율',
+    'isa_pct': 'ISA — 시도 실패율', 'rtp_loss_pct': 'RTP 손실률', 'jitter_ms': 'RTP 지터', 'mos': 'MOS',
+    'floor_grant_ms': 'Floor grant 지연', 'floor_taken_ms': 'Floor taken 지연', 'floor_queue_ms': 'Floor 대기',
+    'sds_delay_ms': 'SDS 지연', 'sds_disposition_pct': 'SDS disposition 률', 'dtmf_rx_pct': 'DTMF 수신률',
+    'q850_rx_pct': 'Q.850 Reason 수신률', 'early_media_pct': '183 early media 률', 'prack_pct': 'PRACK 률',
+}
+
+# Reason: Q.850 cause (ITU-T Q.850) — 편집기 목록
+Q850_CAUSES = {
+    16: '정상 종료', 17: '통화 중', 18: '무응답', 19: '응답 없음', 21: '거절', 27: '목적지 고장', 28: '번호 형식',
+    31: '정상·미지정', 34: '회선 없음', 38: '망 고장', 41: '일시 고장', 42: '폭주', 47: '자원 없음', 63: '서비스 불가',
+    102: '타이머 만료', 127: '불특정',
+}
+AUDIO_CODECS = ('amr-wb', 'amr', 'pcmu', 'pcma', 'g722')
+VIDEO_CODECS = ('h264', 'none')
 
 # expect 키 = RFC 6076 / RFC 3550 / TS 24.380 지표 이름(§5). 여기 없는 이름은 거절.
 METRIC_NAMES = (
@@ -255,6 +602,27 @@ class Media(_Strict):
     video: Optional[str] = Field(default=None, description='h264 | none')
 
 
+class During(_Strict):
+    """media_hold 유지 구간 안 시각 지정 동작(§7 ⓓ) — at_s = 확립 뒤 경과 초. 컴파일러가 `hold at_s → 동작 → hold 나머지` 로 푼다."""
+    at_s: float = Field(ge=0)
+    step: Literal['dtmf', 'hold', 'resume', 'refer']
+    who: Optional[List[str]] = None
+    from_: Optional[str] = Field(default=None, alias='from')
+    to: Optional[str] = None
+    payload: Optional[str] = None
+    expect: Dict[str, Expectation] = Field(default_factory=dict)
+
+    @model_validator(mode='after')
+    def _actor(self):
+        if not (self.from_ or self.who):
+            raise ValueError(f'during {self.step} 은 from 또는 who 가 필요하다')
+        if self.step == 'dtmf' and (not self.payload or any(c not in '0123456789*#ABCDabcd' for c in self.payload)):
+            raise ValueError('during dtmf 는 payload 에 숫자열(0-9 * # A-D)이 필요하다')
+        if self.step == 'refer' and not (self.from_ and self.to):
+            raise ValueError('during refer 는 from 과 to 가 필요하다')
+        return self
+
+
 class Step(_Strict):
     step: StepKind
     who: Optional[List[str]] = None
@@ -267,6 +635,7 @@ class Step(_Strict):
     payload: Optional[str] = Field(default=None, description='dtmf: 숫자열(0-9*#A-D) · reject: 응답 코드')
     cause: Optional[int] = Field(default=None, ge=1, le=127,
                                  description='bye/reject 의 Reason: Q.850;cause= (RFC 3326 — MGCF 종료 사유, 16=정상 34=회선 없음)')
+    during: Optional[List[During]] = Field(default=None, description='media_hold 만 — 유지 구간 안 통화 중 동작(at_s 순)')
     expect: Dict[str, Expectation] = Field(default_factory=dict)
 
     @field_validator('expect')
@@ -293,6 +662,13 @@ class Step(_Strict):
             raise ValueError('refer 단계는 from(전달자)과 to(전달 대상 역할)가 필요하다')
         if self.cause is not None and self.step not in ('bye', 'reject'):
             raise ValueError('cause 는 bye/reject 단계에만 둔다')
+        if self.during:
+            if self.step != 'media_hold':
+                raise ValueError('during 은 media_hold 단계에만 둔다')
+            if isinstance(self.seconds, int):
+                for d in self.during:
+                    if d.at_s > self.seconds:
+                        raise ValueError(f'during at_s={d.at_s} 가 seconds={self.seconds} 를 넘는다')
         return self
 
 
@@ -330,6 +706,10 @@ class Scenario(_Strict):
             for ref in [*(s.who or []), s.from_, s.to]:
                 if ref and ref not in names:
                     raise ValueError(f'flow[{i}] ({s.step}) 가 정의되지 않은 역할 {ref!r} 을 참조한다')
+            for d in (s.during or []):
+                for ref in [*(d.who or []), d.from_, d.to]:
+                    if ref and ref not in names:
+                        raise ValueError(f'flow[{i}].during ({d.step}) 가 정의되지 않은 역할 {ref!r} 을 참조한다')
         return self
 
 
@@ -404,6 +784,24 @@ class TrunkRegister(_Strict):
     expires: int = 3600
 
 
+class WorkerPeerBind(_Strict):
+    ip: str
+    port: int = Field(ge=1, le=65535)
+    protocol: Transport = 'udp'
+
+
+class WorkerPeer(_Strict):
+    """워커에 내려가는 피어 엔진 사양 — 토폴로지 PeerPool 에서 워커·노드 참조를 떼고 bind.ip(워커 호스트 주소)를 채운 것."""
+    profile: PeerProfile
+    bind: WorkerPeerBind
+    domain: str
+    identities: PeerIdentities
+    codecs: Optional[List[str]] = None
+    answer: Literal['normal', 'silent'] = 'normal'
+    prack: Optional[bool] = None
+    dtmf: bool = True
+
+
 class PoolCreate(_Strict):
     """POST /pools — 풀 생성·신원 적재. 멱등(pool 이름 기준)."""
     pool: str
@@ -413,8 +811,8 @@ class PoolCreate(_Strict):
     srtp: SrtpMode = 'off'
     prack: bool = Field(default=False, description='kind=ue — 100rel/PRACK')
     dtmf: bool = Field(default=True, description='kind=ue — telephone-event 오퍼/echo')
-    target_csp: TargetCsp
-    peer: Optional[PeerPool] = Field(default=None, description='kind=peer 일 때 프로파일·bind·신원 범위')
+    target_csp: TargetCsp = Field(description='풀이 닿는 SIP 서버 — 컨트롤러가 토폴로지 노드 참조에서 파생')
+    peer: Optional[WorkerPeer] = Field(default=None, description='kind=peer 일 때 프로파일·bind·신원 범위')
     trunk_register: Optional[TrunkRegister] = Field(default=None, description='kind=peer(pbx) 트렁크 REGISTER 계정 — 비밀 해석 완료본')
 
 
@@ -554,6 +952,8 @@ class RunRecord(_Strict):
     workers: List[str] = Field(default_factory=list)
     summary: Dict[str, Union[int, float, str, None]] = Field(default_factory=dict)
     target_build: Optional[str] = Field(default=None, description='대상 git sha / 패키지 manifest 해시 — 회귀 비교 축')
+    label: Optional[str] = Field(default=None, max_length=120)
+    stop_reason: Optional[str] = None
 
 
 # ──────────────────────────────────────────────────────────────────────────

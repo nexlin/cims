@@ -1,5 +1,100 @@
 {
   "$defs": {
+    "During": {
+      "additionalProperties": false,
+      "description": "media_hold 유지 구간 안 시각 지정 동작(§7 ⓓ) — at_s = 확립 뒤 경과 초. 컴파일러가 `hold at_s → 동작 → hold 나머지` 로 푼다.",
+      "properties": {
+        "at_s": {
+          "minimum": 0,
+          "title": "At S",
+          "type": "number"
+        },
+        "expect": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "$ref": "#/$defs/Percentiles"
+              }
+            ]
+          },
+          "title": "Expect",
+          "type": "object"
+        },
+        "from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From"
+        },
+        "payload": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Payload"
+        },
+        "step": {
+          "enum": [
+            "dtmf",
+            "hold",
+            "resume",
+            "refer"
+          ],
+          "title": "Step",
+          "type": "string"
+        },
+        "to": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "To"
+        },
+        "who": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Who"
+        }
+      },
+      "required": [
+        "at_s",
+        "step"
+      ],
+      "title": "During",
+      "type": "object"
+    },
     "Evidence": {
       "additionalProperties": false,
       "properties": {
@@ -229,6 +324,22 @@
           "default": null,
           "description": "bye/reject 의 Reason: Q.850;cause= (RFC 3326 — MGCF 종료 사유, 16=정상 34=회선 없음)",
           "title": "Cause"
+        },
+        "during": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/During"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "media_hold 만 — 유지 구간 안 통화 중 동작(at_s 순)",
+          "title": "During"
         },
         "expect": {
           "additionalProperties": {

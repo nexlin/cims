@@ -1,6 +1,6 @@
 // 계측기 API — base 게이트웨이 경유 /api/v1/tester/* (oam-cims-tester 가 서빙).
 // 계약은 handlers/tester.py 의 TESTER_API_DOCS(개발자 모드 [API] 배지)와 같다.
-import { api } from '@core/api/client'
+import { api, authHeaders } from '@core/api/client'
 
 export interface TesterHealth {
   module: string
@@ -83,32 +83,65 @@ export interface TopologyRow {
   doc: TopologyDoc
 }
 
+// 토폴로지 v2 — 호스트 › 워커·대상 노드 › 풀 (test_instrument.md §4). 주소는 hosts 에만, 나머지는 파생.
+export type NodeRole = 'sip' | 'tas' | 'media' | 'subscriber' | 'oam' | 'db'
+export type Transport = 'udp' | 'tcp' | 'tls'
+
+export interface TopoHost { name?: string; ip: string; ssh?: { user: string; key_env: string; port?: number } }
+export interface TopoWorker { name: string; host: string; port?: number; cpus?: number; media?: { samples?: string[]; max_rtp_streams?: number } }
+export interface TopoNode {
+  role: NodeRole; host: string; fn?: string; label?: string; procs?: string[]
+  sip?: { access?: { udp?: number; tcp?: number; tls?: number; domains?: string[] }; peering?: { port: number; protocol?: Transport; local_node?: string } }
+  tas?: { port?: number }
+  media?: { rtp_range?: [number, number]; control?: number }
+  api?: { port: number; tls?: boolean }
+  oam?: { port?: number; tls?: boolean; token_env?: string; csp_deployment_id?: number; observe?: string[] }
+  db?: { port?: number; name?: string; user_env?: string; password_env?: string }
+}
+export interface TopoPoolBase { worker: string; group?: string }
+export interface UePoolDoc extends TopoPoolBase {
+  kind: 'ue'; access: string
+  source: { creds: string; count?: number } | { db: string; table: string; offset?: number; count: number }
+  transport?: Transport; srtp?: 'off' | 'optional' | 'required'; register_expires?: number; prack?: boolean; dtmf?: boolean
+}
+export interface PeerPoolDoc extends TopoPoolBase {
+  kind: 'peer'; peering: string; profile: 'ibcf' | 'pbx' | 'mgcf'; bind: { port: number; protocol?: Transport }; domain: string
+  identities: { e164_range?: [string, string]; did_range?: [string, string]; ext_len?: number; count?: number }
+  register?: { user: string; ha1_env?: string; password_env?: string; realm?: string; expires?: number }
+  codecs?: string[]; answer?: 'normal' | 'silent'; prack?: boolean; dtmf?: boolean
+  seed?: { enabled?: boolean; route_set?: string; distribution?: string; priority?: number; weight?: number; acl?: 'allow' | 'deny' }
+}
+export interface RealUePoolDoc extends TopoPoolBase {
+  kind: 'real-ue'; access: string; source: { creds: string; count?: number }; transport?: Transport; srtp?: 'off' | 'optional' | 'required'
+}
+export type PoolDoc = UePoolDoc | PeerPoolDoc | RealUePoolDoc
+export interface TopoLayout { regions: Record<string, { x: number; y: number; w: number; h: number }>; items: Record<string, { x: number; y: number }> }
+
 export interface TopologyDoc {
   name: string
-  target: {
-    name: string
-    csp: { ip: string; udp?: number; tcp?: number; tls?: number; domain_volte?: string; domain_ptt?: string;
-           peering?: { ip?: string; port: number; protocol?: string; local_node?: string } }
-    csc?: { host: string; port?: number; tls?: boolean }
-    oam?: { url: string; token_env?: string; csp_deployment_id?: number }
-    observe?: string[]
-  }
-  workers?: { name: string; url: string; cpus?: number }[]
-  pools: Record<string, { kind: 'ue' | 'peer' | 'real-ue'; profile?: string; [k: string]: unknown }>
+  hosts: Record<string, TopoHost>
+  workers: TopoWorker[]
+  target: { name: string; kind?: 'cims' | 'ims' | 'pbx'; nodes: Record<string, TopoNode> }
+  pools: Record<string, PoolDoc>
+  media?: { samples?: Record<string, Record<string, string>> }
+  layout?: TopoLayout
 }
 
-export interface CheckItem { name: string; ok: boolean; detail: string; ms: number; info?: boolean }
+export interface CheckItem { name: string; ok: boolean; detail: string; ms: number; info?: boolean; target?: { kind: string; id: string } }
 
 export interface WorkerRow {
   name: string
   url: string
+  host?: string
   cpus: number | null
+  media?: { samples?: string[]; max_rtp_streams?: number } | null
   up: boolean
   error: string | null
   topology_id: number
   health: {
     version?: string; max_endpoints?: number; max_saps?: number; cpu_pct?: number; active_endpoints?: number
     active_run?: string | null; clock_skew_ms?: number
+    media?: { rtp_streams?: number; max_rtp_streams?: number; samples?: string[] }
     pools?: { pool: string; kind: string; endpoints: number; registered?: number }[]
   } | null
 }
@@ -128,6 +161,19 @@ export interface HistSummary {
   p99: number | null
 }
 
+export interface PlanRoleRow {
+  pool: string; kind: string; profile?: string | null; disjoint_from?: string | null; count?: number | null
+  workers: Record<string, [string, number, number]>; total: number
+}
+export interface CompiledStep {
+  idx: number; step: string; src?: number; who?: string[]; from?: string; to?: string; after_ms?: number; seconds?: number
+  media?: { audio?: string; video?: string }; payload?: string; cause?: number; expect?: Record<string, unknown>
+}
+export interface RunPlan {
+  roles: Record<string, PlanRoleRow>; identities?: Record<string, number>; phases?: { prelude: number[]; body: number[]; epilogue: number[] }
+  max_instances: number | null; rate_total: number; peer_pools?: string[]; pinned?: string | null; steps?: CompiledStep[]
+}
+
 export interface RunLive {
   id: string
   state: RunState
@@ -145,6 +191,13 @@ export interface RunLive {
   doc_rate: number | null
   notes: string[]
   step_log: StepLogRow[]
+  hold?: boolean
+  held_s?: number
+  label?: string | null
+  target_build?: string | null
+  stop_reason?: string | null
+  plan?: RunPlan | null
+  profile_doc?: Record<string, unknown> | null
 }
 
 export interface StepLogRow { t: number; rate: number; event?: string; attempts?: number; ihs_pct?: number }
@@ -169,6 +222,8 @@ export interface RunRow {
   workers?: string[]
   summary?: Summary
   target_build?: string | null
+  label?: string | null
+  stop_reason?: string | null
   live?: RunLive
 }
 
@@ -176,8 +231,9 @@ export interface RunRow {
 export interface RunDoc extends RunRow {
   label?: string | null
   bindings?: Record<string, unknown>
-  plan?: { roles: Record<string, string>; identities: number; max_instances: number | null; rate_total: number } | null
+  plan?: RunPlan | null
   profile_doc?: Record<string, unknown> | null
+  held_s?: number
   counters?: Record<string, number>
   timers?: Record<string, HistSummary>
   events?: number
@@ -228,6 +284,64 @@ export interface CompareResult {
   regressions: number
 }
 
+export interface PlanRequest {
+  scenario_id?: string
+  doc?: unknown
+  yaml?: string
+  topology_id?: number
+  topology?: string
+  profile?: string
+  bindings?: Record<string, number | string>
+  instances?: number
+  rate_saps?: number
+  probe?: boolean
+}
+
+export interface PlanWorkerRow {
+  name: string; host?: string; ip?: string; url?: string | null; cpus?: number | null; up: boolean; error?: string | null; in_run: boolean
+  capacity?: { max_endpoints?: number | null; max_saps?: number | null; active_endpoints?: number | null; active_run?: string | null; clock_skew_ms?: number | null; rtp?: number | null }
+  share?: number; rate_saps?: number; max_instances?: number | null
+  pools?: { pool: string; kind: string; identities: number; transport?: string; target: string }[]
+  endpoints_needed?: number; roles?: Record<string, [string, number, number]>
+}
+export interface ProcedureRow { idx: number; phase: 'prelude' | 'body' | 'epilogue'; step: string; actors: string[]; summary: string; expect: Record<string, unknown>; desc?: string | null }
+export interface PlanResult {
+  ok: boolean; errors: string[]; warnings: string[]; notes: string[]
+  scenario_id?: string; topology?: string; topology_id?: number; profile?: string | null; target?: { name: string; kind: string }
+  roles?: Record<string, PlanRoleRow>; workers?: PlanWorkerRow[]; steps?: CompiledStep[]
+  phases?: { prelude: number[]; body: number[]; epilogue: number[] }; procedure?: ProcedureRow[]
+  bindings?: Record<string, unknown>; rate_total?: number; max_instances?: number | null; identities?: Record<string, number>
+  peer_pools?: string[]; pinned?: string | null
+  seed?: { collection: string; count: number; names: string[]; note?: string }[]
+  env?: { env: string; for: string }[]
+  little?: { sdt_s: number; peak_rate: number; concurrent: number; rows: { rate: number; need: number; ok: boolean; short: string[] }[]; first_short_rate: number | null; recommend_max: number | null }
+  estimate?: { duration_s: number; sdt_s: number; peak_rate: number; concurrent: number; model: string }
+  active_runs?: string[]
+}
+
+export interface StepVocab { group: string; actor: 'who' | 'from' | 'fromto' | 'seconds' | 'none'; kind: string | null; metrics: string[]; desc: string; supported: boolean }
+export interface ScenarioVocab {
+  steps: Record<string, StepVocab>
+  groups: { id: string; label: string }[]
+  worker_steps: string[]
+  during_steps: string[]
+  metrics: Record<string, string>
+  pct_metrics: string[]
+  ratio_metrics: Record<string, [string, string]>
+  thresholds: string[]
+  q850: Record<string, string>
+  audio: string[]; video: string[]
+  evidence_kinds: string[]; profile_models: string[]
+  pool_kinds: string[]; peer_profiles: string[]; transports: string[]; srtp: string[]; node_roles: string[]; target_kinds: string[]
+  phases: Record<string, string>
+}
+
+export interface HistResult { id: string; timer: string; count: number; mean?: number | null; min?: number | null; max?: number | null; p50?: number | null; p95?: number | null; p99?: number | null; buckets: { ub: number | null; count: number }[] }
+export interface CallDump { id: string; call_id: string; events: RunEvent[]; dump: string | null; note?: string | null }
+export interface TargetAlerts { id: string; alerts: Record<string, unknown>[]; window?: [string, string]; oam?: string; note?: string }
+
+export interface RunFilters { scenario?: string; build?: string; verdict?: string; since?: string; profile?: string; label?: string; topology?: string; load?: boolean; limit?: number }
+
 export interface RunRequest {
   scenario_id: string
   topology_id?: number
@@ -264,7 +378,25 @@ export const testerApi = {
   checkTopology: (id: number) => api.post<{ id: number; ok: boolean; items: CheckItem[] }>(`/tester/topologies/${id}/check`, {}),
   workers: (topologyId?: number) => api.get<{ workers: WorkerRow[] }>(`/tester/workers${topologyId ? `?topology=${topologyId}` : ''}`),
 
-  runs: (limit = 200) => api.get<{ runs: RunRow[] }>(`/tester/runs?limit=${limit}`),
+  runs: (limit = 200, f: RunFilters = {}) => {
+    const q = new URLSearchParams({ limit: String(f.limit ?? limit) })
+    for (const k of ['scenario', 'build', 'verdict', 'since', 'profile', 'label', 'topology'] as const) if (f[k]) q.set(k, String(f[k]))
+    if (f.load) q.set('load', '1')
+    return api.get<{ runs: RunRow[] }>(`/tester/runs?${q.toString()}`)
+  },
+  vocab: () => api.get<ScenarioVocab>('/tester/scenarios/vocab'),
+  compileCheck: (body: PlanRequest) => api.post<PlanResult>('/tester/scenarios/compile-check', body),
+  plan: (body: PlanRequest) => api.post<PlanResult>('/tester/runs/plan', body),
+  holdRun: (id: string, hold: boolean) => api.post<{ id: string; hold: boolean }>(`/tester/runs/${enc(id)}/hold`, { hold }),
+  hist: (id: string, timer: string) => api.get<HistResult>(`/tester/runs/${enc(id)}/hist?timer=${enc(timer)}`),
+  callDump: (id: string, callId: string) => api.get<CallDump>(`/tester/runs/${enc(id)}/sip/${enc(callId)}`),
+  targetAlerts: (id: string) => api.get<TargetAlerts>(`/tester/runs/${enc(id)}/target-alerts`),
+  compareText: async (ids: string[], format: 'md' | 'csv') => {
+    // 텍스트 응답 — JSON 클라이언트를 거치지 않고 같은 자격으로 직접 받는다
+    const res = await fetch(`/api/v1/tester/runs/compare?ids=${ids.map(enc).join(',')}&format=${format}`, { headers: authHeaders() })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    return res.text()
+  },
   run: (id: string) => api.get<RunRow>(`/tester/runs/${enc(id)}`),
   startRun: (body: RunRequest) => api.post<{ id: string; state: string }>('/tester/runs', body),
   stopRun: (id: string) => api.post<{ id: string; state: string }>(`/tester/runs/${enc(id)}/stop`, {}),
@@ -297,6 +429,9 @@ export interface AggFrame {
 
 export interface RunStateFrame {
   run_id: string
+  hold?: boolean
+  step_rate?: number
+  plan?: RunPlan
   state?: RunState
   verdict?: Verdict
   rate_saps?: number

@@ -6,8 +6,8 @@ rules/rule_sets/routing_policies(Request-URI 도메인 → RouteSet)·acl_polici
 넣고(SIGUSR1 reload), run 이 끝나면 저장해 둔 원본으로 되돌린다. 레코드 스키마는 CSP 의 것 그대로(sip_service_model.md §2) —
 계측기 쪽 번역 계층을 두지 않는다. 시드 레코드는 tags 에 `cims-tester` 를 달아 재실행 시 남은 것을 걷어낸다.
 
-접속점(LocalNode) = `target.csp.peering` — 이름이 대상에 있으면 그 레코드, 없으면 그 이름으로 edge=peering 접속점을 시드한다
-(복원 시 함께 사라진다). peering 이 없으면 access UDP 접속점(csp.udp 포트의 UDP LocalNode)을 route 의 local_node_ref 로 쓴다.
+접속점(LocalNode) = 피어 풀이 참조한 노드의 `sip.peering` — 이름(local_node)이 대상에 있으면 그 레코드, 없으면 그 이름으로
+edge=peering 접속점을 시드한다(복원 시 함께 사라진다). 주소는 그 노드의 호스트에서, 피어 수신점 ip 는 풀의 워커 호스트에서 파생한다(§4).
 
 표준 라이브러리만 쓴다(관리망 안 HTTPS, 요청은 작고 드물다).
 """
@@ -106,7 +106,7 @@ def token_from_env(oam) -> str:
 def csp_build(topology: Topology) -> Optional[str]:
     """대상 CSP 배포의 패키지 버전 문자열(예: 'csp 0.2.126 (dep 34)') — run 색인 `target_build`(비교 화면의 회귀 축).
     대상 OAM 이 없거나 토큰이 없으면 None. 실패는 run 을 막지 않는다."""
-    oam = topology.target.oam
+    oam = topology.oam_ref()
     if oam is None:
         return None
     try:
@@ -139,26 +139,30 @@ def seed_pools(topology: Topology, used_pools: Set[str]) -> Dict[str, PeerPool]:
     return {n: peers[n] for n in used_pools if n in peers and peers[n].seed.enabled}
 
 
-def pick_local_node(topology: Topology, current_local_nodes: List[dict]) -> Tuple[str, Optional[dict]]:
-    """(local_node_ref, 새로 시드할 LocalNode 레코드 또는 None)."""
-    csp = topology.target.csp
-    pr = csp.peering
+def pick_local_node(topology: Topology, current_local_nodes: List[dict], node_id: str) -> Tuple[str, Optional[dict]]:
+    """(local_node_ref, 새로 시드할 LocalNode 레코드 또는 None) — node_id = 피어 풀이 참조한 SIP 노드(sip.peering)."""
+    node = topology.target.nodes[node_id]
+    pr = node.sip.peering if node.sip else None
+    ip = topology.node_ip(node_id)
     if pr is not None:
+        name = pr.local_node or 'cims-tester-peering'
         for r in current_local_nodes:
-            if r.get('name') == pr.local_node:
-                return pr.local_node, None
-        return pr.local_node, {
-            'name': pr.local_node, 'enabled': True, 'is_primary': False, 'edge': 'peering',
-            'bind_ip': pr.ip or csp.ip, 'bind_port': int(pr.port), 'protocol': pr.protocol.upper(),
+            if r.get('name') == name:
+                return name, None
+        return name, {
+            'name': name, 'enabled': True, 'is_primary': False, 'edge': 'peering',
+            'bind_ip': ip, 'bind_port': int(pr.port), 'protocol': pr.protocol.upper(),
             'tags': [SEED_TAG], 'note': 'cims-tester peering listener',
         }
-    for r in current_local_nodes:
-        if str(r.get('protocol') or '').upper() == 'UDP' and int(r.get('bind_port') or 0) == int(csp.udp) and r.get('enabled', True):
-            return str(r['name']), None
+    acc = node.sip.access if node.sip else None
+    if acc is not None and acc.udp:
+        for r in current_local_nodes:
+            if str(r.get('protocol') or '').upper() == 'UDP' and int(r.get('bind_port') or 0) == int(acc.udp) and r.get('enabled', True):
+                return str(r['name']), None
     for r in current_local_nodes:
         if r.get('is_primary'):
             return str(r['name']), None
-    raise TargetError('대상 local_nodes 에서 route 의 접속점을 고를 수 없다 — target.csp.peering 을 준다')
+    raise TargetError(f'대상 local_nodes 에서 route 의 접속점을 고를 수 없다 — 노드 {node_id} 에 sip.peering 을 준다')
 
 
 def number_prefix(p: PeerPool) -> Optional[str]:
@@ -184,8 +188,9 @@ def derive_records(topology: Topology, pools: Dict[str, PeerPool], local_node_re
     for name, p in pools.items():
         rn = f'tester-rn-{name}'
         rt = f'tester-r-{name}'
+        bind_ip = topology.pool_bind_ip(name)
         out['remote_nodes'].append({
-            'name': rn, 'enabled': True, 'ip': p.bind.ip, 'port': int(p.bind.port), 'protocol': p.bind.protocol.upper(),
+            'name': rn, 'enabled': True, 'ip': bind_ip, 'port': int(p.bind.port), 'protocol': p.bind.protocol.upper(),
             'remote_domain': p.domain, 'srv_lookup': False, 'dns_fallback': False, 'tls_verify': False,
             'tags': [SEED_TAG, p.profile], 'note': f'cims-tester peer pool {name}',
         })
@@ -208,7 +213,7 @@ def derive_records(topology: Topology, pools: Dict[str, PeerPool], local_node_re
         match_rules[name] = rules
         if p.seed.acl:
             out['rules'].append({
-                'name': f'tester-rule-{name}-src', 'enabled': True, 'field': 'src_ip', 'op': 'eq', 'value': p.bind.ip,
+                'name': f'tester-rule-{name}-src', 'enabled': True, 'field': 'src_ip', 'op': 'eq', 'value': bind_ip,
                 'tags': [SEED_TAG, 'acl'],
             })
             out['rule_sets'].append({
@@ -255,9 +260,11 @@ class CspSeeder:
         pools = seed_pools(topology, used_pools)
         if not pools:
             return None
-        oam = topology.target.oam
+        if topology.target.kind != 'cims':
+            return None   # ims/pbx 대상은 시드 없음 — 라우팅은 대상 쪽에서 미리(§4)
+        oam = topology.oam_ref()
         if oam is None:
-            raise TargetError('피어 풀 시드에는 target.oam 이 필요하다 (또는 풀의 seed.enabled=false 로 수동 구성)')
+            raise TargetError('피어 풀 시드에는 대상 oam 노드가 필요하다 (또는 풀의 seed.enabled=false 로 수동 구성)')
         client = OamClient(oam.url, token_from_env(oam))
         dep = client.find_csp_deployment(oam.csp_deployment_id)
         return cls(client, dep, topology, pools)
@@ -265,7 +272,11 @@ class CspSeeder:
     def apply(self) -> Dict[str, int]:
         for c in COLLECTIONS:
             self.snapshot[c] = self.client.get_collection(self.dep_id, c)
-        ln_ref, ln_new = pick_local_node(self.topology, self.snapshot['local_nodes'])
+        try:
+            node_id = self.topology.peering_node_of(list(self.pools))
+        except ValueError as e:
+            raise TargetError(str(e))
+        ln_ref, ln_new = pick_local_node(self.topology, self.snapshot['local_nodes'], node_id)
         self.local_node_ref = ln_ref
         new = derive_records(self.topology, self.pools, ln_ref)
         if ln_new is not None:

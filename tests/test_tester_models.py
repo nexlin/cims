@@ -127,7 +127,16 @@ class Strictness(unittest.TestCase):
     def test_pool_options(self):
         m, errs = validate('topology', _load(os.path.join(_TESTER, 'scenarios', 'topology.sample.yaml')))
         self.assertEqual(errs, [])
-        self.assertTrue(m.pools['volte_ue'].prack)
+        self.assertTrue(m.pools['volte_ue_a'].prack)
+        self.assertEqual(m.pools['volte_ue_b'].group, 'volte_ue')
+        # 파생 — 주소는 호스트에만: 워커 url·피어 수신점 ip·PoolCreate.target_csp·oam url
+        self.assertEqual(m.worker_url(m.workers[1]), 'http://10.0.0.62:7100')
+        self.assertEqual(m.pool_bind_ip('peer_kt'), '10.0.0.62')
+        tc = m.target_csp_for('peer_kt')
+        self.assertEqual((tc.ip, tc.udp, tc.tls, tc.domain_volte, tc.domain_ptt, tc.peering.port), ('10.0.0.45', 5060, 5061, 'volte.cims.example.kr', 'ptt.cims.example.kr', 5070))
+        self.assertIsNone(m.target_csp_for('volte_ue_a').peering)
+        self.assertEqual(m.oam_ref().url, 'https://10.0.0.45:4419')
+        self.assertEqual((m.host_kind('h45'), m.host_kind('h61')), ('target', 'tester'))
         self.assertEqual(m.pools['mgcf_pstn'].profile, 'mgcf')
         self.assertEqual(m.pools['mgcf_pstn'].dial, 'number')
         self.assertEqual(m.pools['peer_kt'].dial, 'domain')
@@ -137,6 +146,55 @@ class Strictness(unittest.TestCase):
         doc['pools']['pbx_hq']['register'] = {'user': 'x'}
         _, errs = validate('topology', doc)
         self.assertTrue(any('ha1_env' in e for e in errs), errs)
+
+
+class TopologyV2(unittest.TestCase):
+    def _doc(self):
+        return _load(os.path.join(_TESTER, 'scenarios', 'topology.sample.yaml'))
+
+    def test_reference_checks(self):
+        d = self._doc(); d['pools']['ptt_ue']['worker'] = 'w9'
+        self.assertTrue(any('w9' in e for e in validate('topology', d)[1]))
+        d = self._doc(); d['pools']['ptt_ue']['access'] = 'cmp'
+        self.assertTrue(any('sip.access' in e for e in validate('topology', d)[1]))
+        d = self._doc(); d['pools']['ptt_ue']['transport'] = 'tls'; d['target']['nodes']['csp']['sip']['access'].pop('tls')
+        self.assertTrue(any('tls 수신점' in e for e in validate('topology', d)[1]))
+        d = self._doc(); d['pools']['peer_kt']['peering'] = 'cmp'
+        self.assertTrue(any('sip.peering' in e for e in validate('topology', d)[1]))
+        d = self._doc(); d['pools']['volte_ue_b']['worker'] = 'w1'          # 같은 워커에 group 둘
+        self.assertTrue(any('논리 풀 하나만' in e for e in validate('topology', d)[1]))
+        d = self._doc(); d['pools']['volte_ue_a']['group'] = 'ptt_ue'          # group = 다른 풀 이름
+        self.assertTrue(any('다른 풀 이름' in e for e in validate('topology', d)[1]))
+        d = self._doc(); d['target']['nodes']['cmp']['sip'] = {}             # 역할과 다른 블록
+        self.assertTrue(any('블록' in e for e in validate('topology', d)[1]))
+        d = self._doc(); d['pools']['volte_ue_a']['source'] = {'db': 'cmp', 'table': 'volte_subscriptions', 'count': 10}
+        self.assertTrue(any('source.db' in e for e in validate('topology', d)[1]))
+        d = self._doc(); d['pools']['volte_ue_a']['source'] = {'db': 'db', 'table': 'volte_subscriptions', 'count': 10}
+        self.assertEqual(validate('topology', d)[1], [])
+
+    def test_during(self):
+        doc = {'id': 'T-DUR', 'roles': {'a': {'pool': 'p'}, 'b': {'pool': 'p'}},
+               'flow': [{'step': 'invite', 'from': 'a', 'to': 'b'},
+                        {'step': 'media_hold', 'seconds': 10, 'during': [{'at_s': 3, 'step': 'dtmf', 'from': 'a', 'payload': '12#'}]}]}
+        m, errs = validate('scenario', doc)
+        self.assertEqual(errs, [])
+        self.assertEqual(m.flow[1].during[0].payload, '12#')
+        doc['flow'][1]['during'][0]['at_s'] = 11
+        self.assertTrue(any('넘는다' in e for e in validate('scenario', doc)[1]))
+        doc['flow'][1]['during'][0]['at_s'] = 1; doc['flow'][1]['during'][0]['from'] = 'zz'
+        self.assertTrue(any('zz' in e for e in validate('scenario', doc)[1]))
+        doc['flow'][0]['during'] = [{'at_s': 1, 'step': 'hold', 'from': 'a'}]
+        self.assertTrue(any('media_hold' in e for e in validate('scenario', doc)[1]))
+
+    def test_vocab_consistency(self):
+        from services.tester_models import STEP_VOCAB, WORKER_STEPS, METRIC_NAMES, StepKind
+        import typing
+        kinds = set(typing.get_args(StepKind))
+        self.assertEqual(set(STEP_VOCAB), kinds)
+        self.assertTrue(WORKER_STEPS <= kinds)
+        for k, v in STEP_VOCAB.items():
+            for m in v['metrics']:
+                self.assertIn(m, METRIC_NAMES, f'{k}: {m}')
 
 
 class SchemaFilesInSync(unittest.TestCase):

@@ -4,6 +4,8 @@
   GET  /schema                      계약 스키마 이름 목록
   GET  /schema/<name>               JSON 스키마(tester_models 에서 생성 — 워커 C++ 와 같은 계약)
   POST /validate                    {kind, doc|yaml} → {ok, errors[]}
+  GET  /scenarios/vocab             단계 어휘·지표·kind 게이트·워커 지원 셋·Q.850 목록 — 시나리오 편집기 팔레트/폼의 정본
+  POST /scenarios/compile-check     {scenario_id|doc|yaml, topology_id|topology, profile?, bindings?, instances?, rate_saps?} → compile_run 드라이런(tester_plan)
   GET  /scenarios[/<id>]            패키지 동봉 + 운영자 추가 시나리오 (검증 오류 포함 목록). 상세는 doc+yaml 원문
   PUT  /scenarios/<id>              {yaml} → 운영자본 저장(Tester.DataDir/scenarios/, 검증 통과분만, id 는 경로와 일치)
   DELETE /scenarios/<id>            운영자본만(동봉본 409 bundled)
@@ -11,16 +13,22 @@
   GET|POST /topologies              토폴로지 목록·생성(검증 통과분만 저장)
   GET|PUT|DELETE /topologies/<id>
   POST /topologies/<id>/check       연결 검사 — CSP OPTIONS/TCP/TLS·CSC·대상 OAM 토큰·워커 health (tester_check)
-  GET  /runs[/<id>]                 run 색인 (본체는 Tester.DataDir/runs/<id>/) — 진행 중이면 라이브 누계 포함
+  GET  /runs[/<id>]                 run 색인 (본체는 Tester.DataDir/runs/<id>/) — 진행 중이면 라이브 누계 포함.
+                                    색인 필터 ?scenario=&build=&verdict=a,b&since=ISO|7d&profile=&label=&topology=&load=1
   POST /runs                        run 시작 (RunRequest) → 202 {id}. 동시에 하나만
+  POST /runs/plan                   계획 미리보기 — compile-check 와 같은 함수(run 시작 창)
   POST /runs/<id>/stop              중단(drain 뒤 verdict=aborted)
   POST /runs/<id>/rate              {rate_saps} 율 변경(진행 중)
+  POST /runs/<id>/hold              {hold: bool} 단계 고정/재개 — 프로파일 시계 정지, 율 유지
+  GET  /runs/<id>/hist?timer=       지연 지표 버킷 분포(로그 상한) + p50/p95/p99 — 행 펼침 히스토그램
+  GET  /runs/<id>/sip/<call_id>     그 Call-ID 의 실패 이벤트 + SIP 덤프(runs/<id>/sip/<call_id>.log 가 있을 때)
+  GET  /runs/<id>/target-alerts     대상 OAM 알람/이벤트를 run 창(started~ended)으로 잘라 — 대상 oam 노드 필요
   GET  /runs/<id>/report            run.json 전체(RFC 6076 표·expect 판정·단계 로그) + markdown
   GET  /runs/<id>/events            실패 개별 건(events.jsonl 꼬리, ?limit=)
   GET  /runs/<id>/series            1초 시계열(metrics.sqlite → 열 형태: t[], counters{}, gauges{}, timers{p95[],count[]})
   GET  /runs/<id>/stream            SSE — 이 run 의 agg/events/runs 프레임만
   DELETE /runs/<id>                 색인 + 본체 제거(진행 중 409)
-  GET  /runs/compare?ids=a,b[,c]    run 나열 비교 — 첫 id 가 기준, 지표별 delta·회귀 판정(target_build 병기)
+  GET  /runs/compare?ids=a,b[,c]    run 나열 비교 — 첫 id 가 기준, 지표별 delta·회귀 판정(target_build 병기). &format=md|csv 는 텍스트
   GET  /api/v1/api-docs             이 모듈의 API 자기기술(base /api/v1/api-docs 가 모듈별로 수집 — api_docs.py)
   GET  /workers[?topology=<id>]     토폴로지 워커 + GET /health 결과
   GET  /events                      SSE(text/event-stream) — run/워커 상태 변화 라이브
@@ -43,11 +51,16 @@ from httpsrv.handler import HandlerArgs, HandlerResult
 from services.admin_auth import require_role
 from services import tester_store as store
 from services.tester_bus import TESTER_BUS
-from services.tester_models import SCHEMAS, schema_json, validate, RunRequest
+from services.tester_models import (SCHEMAS, schema_json, validate, RunRequest, STEP_VOCAB, STEP_GROUPS, METRIC_NAMES,
+                                    METRIC_LABELS, RATIO_METRICS, WORKER_STEPS, DURING_STEPS, Q850_CAUSES, AUDIO_CODECS,
+                                    VIDEO_CODECS)
 from services.tester_run import RUNS
 from services import tester_workers
 from services import tester_check
-from services.tester_run import run_series
+from services import tester_plan
+from services import tester_target
+from services.tester_run import run_series, run_hist, run_call_events
+from starlette.responses import PlainTextResponse
 
 _BASE = '/api/v1/tester'
 _VERSION = '0.1.0'
@@ -148,7 +161,7 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             'stream_subscribers': TESTER_BUS.subscriber_count(),
             'worker_stream': ({'ip': RUNS.stream.ip, 'port': RUNS.stream.port, 'connections': RUNS.stream.connections}
                               if RUNS.stream else None),
-            'phase': 'E',   # 이행 단계 — ue·peer 풀 run + 콘솔 팩(편집·라이브·결과·비교·보고서)
+            'phase': 'E2',  # 이행 단계 — 토폴로지 v2 + 계획 미리보기(plan/compile-check)·hold·hist·sip·색인 필터
         })
 
     if head == 'events' and method == 'GET':
@@ -175,6 +188,17 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             return _json(400, {'error': 'doc 또는 yaml 이 필요하다'})
         model, errs = validate(str(kind), doc)
         return _json(200, {'ok': model is not None, 'errors': errs})
+
+    if head == 'scenarios' and len(parts) == 2 and parts[1] == 'vocab' and method == 'GET':
+        return _json(200, scenario_vocab())
+
+    if (head == 'scenarios' and len(parts) == 2 and parts[1] == 'compile-check' and method == 'POST') or \
+            (head == 'runs' and len(parts) == 2 and parts[1] == 'plan' and method == 'POST'):
+        body = _body(handler_args)
+        if not isinstance(body, dict):
+            return _json(400, {'error': 'body 는 {scenario_id|doc|yaml, topology_id|topology, profile?, bindings?, instances?, rate_saps?}'})
+        status, out = await _plan(body, config)
+        return _json(status, out)
 
     if head in ('scenarios', 'profiles'):
         is_sc = head == 'scenarios'
@@ -257,11 +281,13 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
 
     if head == 'runs':
         if len(parts) == 1 and method == 'GET':
+            q = handler_args.query_params or {}
             try:
-                limit = int((handler_args.query_params or {}).get('limit', 100))
+                limit = int(q.get('limit', 100))
             except ValueError:
                 limit = 100
-            rows = store.list_runs(limit=limit)
+            filters = {k: q.get(k) for k in ('scenario', 'build', 'verdict', 'since', 'profile', 'label', 'topology', 'load') if q.get(k)}
+            rows = store.list_runs(limit=limit, filters=filters)
             live = {d.run_id: d for d in RUNS.active()}
             for r in rows:
                 if r.get('id') in live:
@@ -283,10 +309,16 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             return _json(202, {'id': d.run_id, 'state': d.state, 'scenario_id': d.scenario.id,
                                'topology': d.topology_name, 'profile': d.profile_name})
         if len(parts) == 2 and parts[1] == 'compare' and method == 'GET':
-            ids = [x for x in str((handler_args.query_params or {}).get('ids', '')).split(',') if x.strip()]
+            q = handler_args.query_params or {}
+            ids = [x for x in str(q.get('ids', '')).split(',') if x.strip()]
             if len(ids) < 2:
                 return _json(400, {'error': 'ids 는 run id 둘 이상(콤마 구분)'})
-            return _json(200, compare_runs(ids))
+            cmp = compare_runs(ids)
+            fmt = str(q.get('format') or '').lower()
+            if fmt in ('md', 'csv'):
+                text = compare_markdown(cmp) if fmt == 'md' else compare_csv(cmp)
+                return HandlerResult(response=PlainTextResponse(text, media_type=('text/markdown' if fmt == 'md' else 'text/csv') + '; charset=utf-8'))
+            return _json(200, cmp)
         if len(parts) >= 2:
             rid = parts[1]
             d = RUNS.get(rid)
@@ -325,6 +357,40 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
                 if not RUNS.rate(rid, rate):
                     return _json(404 if d is None else 409, {'error': 'run_not_running', 'id': rid})
                 return _json(200, {'id': rid, 'rate_saps': rate})
+            if len(parts) == 3 and parts[2] == 'hold' and method == 'POST':
+                body = _body(handler_args) or {}
+                on = bool(body.get('hold', True))
+                if not RUNS.hold(rid, on):
+                    return _json(404 if d is None else 409, {'error': 'run_not_running', 'id': rid})
+                return _json(200, {'id': rid, 'hold': on})
+            if len(parts) == 3 and parts[2] == 'hist' and method == 'GET':
+                timer = str((handler_args.query_params or {}).get('timer') or 'srd_ms')
+                if store.get_run(rid) is None and d is None:
+                    return _json(404, {'error': 'run_not_found', 'id': rid})
+                h = run_hist(rid, timer)
+                if h is None:
+                    return _json(200, {'id': rid, 'timer': timer, 'count': 0, 'buckets': []})
+                return _json(200, {'id': rid, **h})
+            if len(parts) == 4 and parts[2] == 'sip' and method == 'GET':
+                call_id = parts[3]
+                if store.get_run(rid) is None and d is None:
+                    return _json(404, {'error': 'run_not_found', 'id': rid})
+                evs = run_call_events(rid, call_id)
+                dump = None
+                p = os.path.join(store.run_dir(rid), 'sip', store._safe_name(call_id) + '.log')
+                if os.path.isfile(p):
+                    with open(p, 'r', encoding='utf-8', errors='replace') as f:
+                        dump = f.read(512 * 1024)
+                if not evs and dump is None:
+                    return _json(404, {'error': 'call_not_found', 'id': rid, 'call_id': call_id})
+                return _json(200, {'id': rid, 'call_id': call_id, 'events': evs, 'dump': dump,
+                                   'note': None if dump is not None else '워커 SIP 덤프 이전은 후속 — 실패 이벤트만'})
+            if len(parts) == 3 and parts[2] == 'target-alerts' and method == 'GET':
+                rec = _load_run_doc(rid)
+                if rec is None:
+                    return _json(404, {'error': 'run_not_found', 'id': rid})
+                out = await asyncio.get_running_loop().run_in_executor(None, target_alerts, rec)
+                return _json(200, {'id': rid, **out})
             if len(parts) == 3 and parts[2] == 'stream' and method == 'GET':
                 return _sse(rid)
             if len(parts) == 3 and parts[2] == 'report' and method == 'GET':
@@ -360,14 +426,140 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             topos = [t for t in topos if str(t.get('id')) == str(q.get('topology'))]
         out = []
         for t in topos:
-            for w in tester_workers.discover(t.get('doc') or {}):
-                w.probe()
+            ws = tester_workers.discover(t.get('doc') or {})
+            await asyncio.get_running_loop().run_in_executor(None, tester_workers.probe_all, ws)
+            for w in ws:
                 row = w.to_dict()
                 row['topology_id'] = t.get('id')
                 out.append(row)
         return _json(200, {'workers': out})
 
     return _json(404, {'error': 'not_found', 'path': handler_args.full_path})
+
+
+def scenario_vocab() -> dict:
+    """GET /scenarios/vocab — 편집기 팔레트·속성 폼·kind 게이트의 정본(tester_models 어휘 표)."""
+    return {
+        'steps': {k: {**v, 'supported': k in WORKER_STEPS} for k, v in STEP_VOCAB.items()},
+        'groups': STEP_GROUPS,
+        'worker_steps': sorted(WORKER_STEPS),
+        'during_steps': list(DURING_STEPS),
+        'metrics': {m: METRIC_LABELS.get(m, m) for m in METRIC_NAMES},
+        'pct_metrics': [m for m in METRIC_NAMES if m.endswith('_pct')],
+        'ratio_metrics': {k: list(v) for k, v in RATIO_METRICS.items()},
+        'thresholds': ['p50', 'p95', 'p99', 'max', 'min'],
+        'q850': {str(k): v for k, v in Q850_CAUSES.items()},
+        'audio': list(AUDIO_CODECS), 'video': list(VIDEO_CODECS),
+        'evidence_kinds': ['recording_created', 'log_errors', 'alarm_raised', 'event_logged'],
+        'profile_models': ['constant', 'step', 'ramp', 'soak', 'burst'],
+        'pool_kinds': ['ue', 'peer', 'real-ue'], 'peer_profiles': ['ibcf', 'pbx', 'mgcf'],
+        'transports': ['udp', 'tcp', 'tls'], 'srtp': ['off', 'optional', 'required'],
+        'node_roles': ['sip', 'tas', 'media', 'subscriber', 'oam', 'db'], 'target_kinds': ['cims', 'ims', 'pbx'],
+        'phases': {'prelude': '앞쪽 register/wait — run 시작 때 역할 단말 전부 등록', 'body': '시나리오 인스턴스 단위',
+                   'epilogue': '끝의 deregister — run 종료 시'},
+    }
+
+
+async def _plan(body: dict, config: dict):
+    """compile-check / runs/plan 공용 — 시나리오는 id 또는 문서(doc|yaml, 미저장 편집본), 토폴로지는 id 또는 name."""
+    scenario = None
+    if body.get('scenario_id'):
+        scenario, sdoc, errs = store.get_scenario(str(body['scenario_id']))
+        if sdoc is None:
+            return 404, {'error': 'scenario_not_found', 'scenario_id': body['scenario_id']}
+        if scenario is None:
+            return 400, {'error': 'invalid_scenario', 'errors': errs}
+    else:
+        doc = body.get('doc')
+        if doc is None and isinstance(body.get('yaml'), str):
+            try:
+                doc = yaml.safe_load(body['yaml'])
+            except Exception as e:
+                return 200, {'ok': False, 'errors': [f'YAML 파싱 실패: {e}'], 'warnings': [], 'notes': []}
+        if not isinstance(doc, dict):
+            return 400, {'error': 'scenario_id 또는 doc|yaml 이 필요하다'}
+        scenario, errs = validate('scenario', doc)
+        if scenario is None:
+            return 200, {'ok': False, 'errors': errs, 'warnings': [], 'notes': []}
+    topo_rec = store.find_topology(body.get('topology_id') if body.get('topology_id') is not None else body.get('topology'))
+    if topo_rec is None:
+        return 404, {'error': 'topology_not_found'}
+    topology = store.topology_model(topo_rec)
+    if topology is None:
+        return 400, {'error': 'invalid_topology', 'id': topo_rec.get('id')}
+    profile = None
+    if body.get('profile'):
+        profile, pdoc, perrs = store.get_profile(str(body['profile']))
+        if pdoc is None:
+            return 404, {'error': 'profile_not_found', 'profile': body['profile']}
+        if profile is None:
+            return 400, {'error': 'invalid_profile', 'errors': perrs}
+    bindings = body.get('bindings') if isinstance(body.get('bindings'), dict) else {}
+    try:
+        instances = int(body['instances']) if body.get('instances') is not None else None
+        rate = float(body['rate_saps']) if body.get('rate_saps') is not None else None
+    except (TypeError, ValueError):
+        return 400, {'error': 'instances 는 정수, rate_saps 는 수'}
+    probe = body.get('probe', True) not in (False, 0, '0', 'false')
+    stream_port = int(((config.get('Tester') or {}).get('WorkerStreamPort')) or 7110)
+    out = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: tester_plan.build_plan(scenario, topology, topo_rec.get('doc') or {}, profile, bindings, instances, rate, probe, stream_port))
+    out['topology_id'] = topo_rec.get('id')
+    out['active_runs'] = [d.run_id for d in RUNS.active()]
+    return 200, out
+
+
+def target_alerts(run_doc: dict) -> dict:
+    """대상 OAM `/api/v1/alerts` 를 run 창(started_at~ended_at)으로 잘라 — 시간축 알람 레인. 대상 oam 노드가 없으면 빈 목록 + note."""
+    topo_rec = store.find_topology(run_doc.get('topology'))
+    topology = store.topology_model(topo_rec) if topo_rec else None
+    oam = topology.oam_ref() if topology else None
+    if oam is None:
+        return {'alerts': [], 'note': '대상 oam 노드가 없다(또는 토폴로지 삭제됨) — 알람 타임라인 없음'}
+    try:
+        client = tester_target.OamClient(oam.url, tester_target.token_from_env(oam))
+        st, out = client._req('GET', '/api/v1/alerts?days=7&limit=2000')
+        if st != 200:
+            return {'alerts': [], 'note': f'대상 OAM alerts {st}'}
+    except tester_target.TargetError as e:
+        return {'alerts': [], 'note': str(e)}
+    a, b = str(run_doc.get('started_at') or ''), str(run_doc.get('ended_at') or '9999')
+    rows = []
+    for ev in (out.get('events') if isinstance(out, dict) else out) or []:
+        ts = str(ev.get('ts') or ev.get('time') or '')
+        if a[:19] <= ts[:19] <= b[:19]:
+            rows.append(ev)
+    return {'alerts': rows, 'window': [a, b], 'oam': oam.url}
+
+
+def compare_markdown(cmp: dict) -> str:
+    runs = cmp['runs']
+    lines = [f"# run 비교 — 기준 {cmp['baseline']}", '',
+             '| run | 판정 | 대상 빌드 | 시나리오 | 프로파일 | 시작 |', '|---|---|---|---|---|---|']
+    for r in runs:
+        lines.append(f"| {r['id']} | {r.get('verdict') or '-'} | {r.get('target_build') or '-'} | {r.get('scenario_id') or '-'} | "
+                     f"{r.get('profile') or '(단발)'} | {r.get('started_at') or '-'} |")
+    lines += ['', '| 지표 | 방향 | ' + ' | '.join(r['id'] for r in runs) + ' |', '|---|---|' + '---|' * len(runs)]
+    for m in cmp['metrics']:
+        cells = []
+        for v, d, reg in zip(m['values'], m['delta'], m['regression']):
+            if v is None:
+                cells.append('-')
+            else:
+                cells.append(f"{v:.2f}" + (f" ({d:+.2f}{' ⚠' if reg else ''})" if d is not None and d != 0 else ''))
+        lines.append(f"| {m['metric']} | {'↑' if m['direction'] == 'up' else '↓'} | " + ' | '.join(cells) + ' |')
+    lines += ['', f"회귀 {cmp['regressions']} 건" + ('' if cmp['same_scenario'] else ' · 시나리오가 다르다(비교 주의)')]
+    return '\n'.join(lines) + '\n'
+
+
+def compare_csv(cmp: dict) -> str:
+    runs = cmp['runs']
+    lines = ['metric,direction,' + ','.join(r['id'] for r in runs) + ',' + ','.join(f"delta_{r['id']}" for r in runs[1:])]
+    for m in cmp['metrics']:
+        vals = ['' if v is None else f'{v:.4f}' for v in m['values']]
+        deltas = ['' if d is None else f'{d:+.4f}' for d in m['delta'][1:]]
+        lines.append(f"{m['metric']},{m['direction']}," + ','.join(vals) + ',' + ','.join(deltas))
+    return '\n'.join(lines) + '\n'
 
 
 def report_markdown(doc: dict) -> str:
@@ -506,22 +698,27 @@ TESTER_API_DOCS = [
                 {'name': 'doc', 'in': 'body', 'type': 'object'}],
      'response': '{ok, errors[]}', 'auth': _AUTH_OP},
     {'id': 'tester.topologies', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/topologies',
-     'summary': '토폴로지(대상·워커·풀) 레코드 목록 — 런타임 store', 'response': '{topologies[]: {id, name, created_at, updated_at, doc}}', 'auth': _AUTH_MON},
+     'summary': '토폴로지(호스트›워커·대상 노드›풀) 레코드 목록 — 런타임 store. 이전 꼴(target.csp/workers[].url) 레코드는 읽을 때 v2 로 승계', 'response': '{topologies[]: {id, name, created_at, updated_at, doc, migrated_from?}}', 'auth': _AUTH_MON},
     {'id': 'tester.topology.save', 'module': _MOD, 'method': 'PUT', 'path': f'{_P}/topologies/{{id}}',
      'summary': '토폴로지 저장(POST /topologies 는 생성) — 검증 통과분만',
      'errors': [{'status': 400, 'when': '검증 실패', 'body': {'error': 'invalid_topology', 'errors': ['…']}}], 'auth': _AUTH_OP},
     {'id': 'tester.topology.check', 'module': _MOD, 'method': 'POST', 'path': f'{_P}/topologies/{{id}}/check',
-     'summary': '연결 검사 — CSP OPTIONS(UDP)/TCP/TLS·피어링 접속점·CSC·대상 OAM 토큰·워커 health',
-     'response': '{id, ok, items[]: {name, ok, detail, ms, info?}}',
+     'summary': '연결 검사 — 노드별 수신점(`<노드>:udp|tcp|tls|peering|api|db|oam`)·`<호스트>:ssh`·`worker_<이름>` health',
+     'response': '{id, ok, items[]: {name, ok, detail, ms, info?, target{kind,id}}}',
      'notes': ['피어링 접속점은 run 중에만 열리므로 평상시 미도달은 info(참고) 로 표시'], 'auth': _AUTH_OP},
     {'id': 'tester.workers', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/workers',
      'summary': '토폴로지의 워커 + GET /health 결과(용량·cpu·진행 run·시계 오차)',
      'params': [{'name': 'topology', 'in': 'query', 'type': 'integer', 'desc': '토폴로지 id 로 한정'}],
-     'response': '{workers[]: {name, url, cpus, up, health{max_endpoints,max_saps,cpu_pct,active_endpoints,active_run,clock_skew_ms,pools[]}, error, topology_id}}', 'auth': _AUTH_MON},
+     'response': '{workers[]: {name, url, host, cpus, media, up, health{max_endpoints,max_saps,cpu_pct,active_endpoints,active_run,clock_skew_ms,media{rtp_streams,max_rtp_streams}?,pools[]}, error, topology_id}}', 'auth': _AUTH_MON},
     {'id': 'tester.runs', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs',
      'summary': 'run 색인(최신순) — 진행 중이면 live 누계 포함',
-     'params': [{'name': 'limit', 'in': 'query', 'type': 'integer', 'desc': '기본 100'}],
-     'response': '{runs[]: RunRecord{id, scenario_id, topology, profile, started_at, ended_at, verdict, workers[], summary{}, target_build, live?}}', 'auth': _AUTH_MON},
+     'params': [{'name': 'limit', 'in': 'query', 'type': 'integer', 'desc': '기본 100'},
+                {'name': 'scenario', 'in': 'query', 'type': 'string'}, {'name': 'build', 'in': 'query', 'type': 'string', 'desc': 'target_build 정확 일치'},
+                {'name': 'verdict', 'in': 'query', 'type': 'string', 'desc': 'pass,fail,aborted,error,running 콤마 구분'},
+                {'name': 'since', 'in': 'query', 'type': 'string', 'desc': 'ISO 시각 또는 7d'}, {'name': 'profile', 'in': 'query', 'type': 'string'},
+                {'name': 'label', 'in': 'query', 'type': 'string', 'desc': '라벨/id/시나리오 부분 일치'}, {'name': 'topology', 'in': 'query', 'type': 'string'},
+                {'name': 'load', 'in': 'query', 'type': 'boolean', 'desc': '1 = 부하(프로파일) run 만'}],
+     'response': '{runs[]: RunRecord{id, scenario_id, topology, profile, started_at, ended_at, verdict, workers[], summary{}, target_build, label, stop_reason, live?}}', 'auth': _AUTH_MON},
     {'id': 'tester.run.start', 'module': _MOD, 'method': 'POST', 'path': f'{_P}/runs',
      'summary': 'run 시작(RunRequest) → 202. 동시에 하나만(409)',
      'params': [{'name': 'scenario_id', 'in': 'body', 'type': 'string', 'required': True},
@@ -547,9 +744,37 @@ TESTER_API_DOCS = [
     {'id': 'tester.run.delete', 'module': _MOD, 'method': 'DELETE', 'path': f'{_P}/runs/{{id}}',
      'summary': 'run 색인·본체 삭제(진행 중 409)', 'auth': _AUTH_MGR},
     {'id': 'tester.runs.compare', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs/compare',
-     'summary': 'run 비교 — 첫 id 기준 지표별 delta·회귀 판정(비율 지표 0.5 pt / 그 외 5 % 허용), target_build 병기',
-     'params': [{'name': 'ids', 'in': 'query', 'type': 'string', 'required': True, 'desc': 'run id 콤마 구분(2개 이상)'}],
+     'summary': 'run 비교 — 첫 id 기준 지표별 delta·회귀 판정(비율 지표 0.5 pt / 그 외 5 % 허용), target_build 병기. format=md|csv 는 텍스트',
+     'params': [{'name': 'ids', 'in': 'query', 'type': 'string', 'required': True, 'desc': 'run id 콤마 구분(2개 이상)'},
+                {'name': 'format', 'in': 'query', 'type': 'string', 'enum': ['md', 'csv'], 'desc': '없으면 JSON'}],
      'response': '{baseline, runs[], metrics[]: {metric, direction, base, values[], delta[], regression[]}, same_scenario, regressions}', 'auth': _AUTH_MON},
+    {'id': 'tester.scenarios.vocab', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/scenarios/vocab',
+     'summary': '단계 어휘 표(STEP_VOCAB: group·actor·kind 게이트·제안 지표·워커 지원)·지표 라벨·Q.850·코덱 — 시나리오 편집기 팔레트/폼의 정본',
+     'response': '{steps{}, groups[], worker_steps[], during_steps[], metrics{}, pct_metrics[], ratio_metrics{}, thresholds[], q850{}, audio[], video[], …}', 'auth': _AUTH_MON},
+    {'id': 'tester.scenarios.compile_check', 'module': _MOD, 'method': 'POST', 'path': f'{_P}/scenarios/compile-check',
+     'summary': '토폴로지 적합성 — compile_run 드라이런(저장 없는 편집본도). runs/plan 과 같은 함수',
+     'params': [{'name': 'scenario_id', 'in': 'body', 'type': 'string', 'desc': 'doc|yaml 과 둘 중 하나'},
+                {'name': 'doc', 'in': 'body', 'type': 'object'}, {'name': 'yaml', 'in': 'body', 'type': 'string'},
+                {'name': 'topology_id', 'in': 'body', 'type': 'integer', 'desc': 'topology(name) 와 둘 중 하나'},
+                {'name': 'profile', 'in': 'body', 'type': 'string'}, {'name': 'bindings', 'in': 'body', 'type': 'object'},
+                {'name': 'instances', 'in': 'body', 'type': 'integer'}, {'name': 'rate_saps', 'in': 'body', 'type': 'number'},
+                {'name': 'probe', 'in': 'body', 'type': 'boolean', 'desc': '워커 health 조회(기본 true)'}],
+     'response': '{ok, errors[], warnings[], notes[], roles{}, workers[], steps[], phases{}, procedure[], seed[], env[], little{}, estimate{}}', 'auth': _AUTH_OP},
+    {'id': 'tester.runs.plan', 'module': _MOD, 'method': 'POST', 'path': f'{_P}/runs/plan',
+     'summary': 'run 시작 창의 계획 미리보기 — compile-check 와 같은 입력·출력(역할→풀→워커 창, 용량, 시드, Little 검산, 예상 소요)', 'auth': _AUTH_OP},
+    {'id': 'tester.run.hold', 'module': _MOD, 'method': 'POST', 'path': f'{_P}/runs/{{id}}/hold',
+     'summary': '단계 고정/재개 — 프로파일 시계를 멈추고 율은 유지(step 의 현 단계를 오래 본다)',
+     'params': [{'name': 'hold', 'in': 'body', 'type': 'boolean', 'required': True}], 'auth': _AUTH_OP},
+    {'id': 'tester.run.hist', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs/{{id}}/hist',
+     'summary': '지연 지표 버킷 분포(로그 상한 1·2·5·…·60000 ms) + p50/p95/p99 — 지연 분포 표의 행 펼침 히스토그램',
+     'params': [{'name': 'timer', 'in': 'query', 'type': 'string', 'desc': 'rrd_ms|srd_ms|sdd_ms|jitter_ms|sdt_s (기본 srd_ms)'}],
+     'response': '{id, timer, count, mean, min, max, p50, p95, p99, buckets[]: {ub, count}}', 'auth': _AUTH_MON},
+    {'id': 'tester.run.sip', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs/{{id}}/sip/{{call_id}}',
+     'summary': 'Call-ID 하나의 실패 이벤트 + SIP 덤프(계측기 호스트 runs/<id>/sip/<call_id>.log 가 있을 때)',
+     'response': '{id, call_id, events[], dump|null, note}', 'auth': _AUTH_MON},
+    {'id': 'tester.run.target_alerts', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs/{{id}}/target-alerts',
+     'summary': '대상 OAM 알람/이벤트를 run 창(started_at~ended_at)으로 잘라 — 시간축 차트의 알람 레인',
+     'response': '{id, alerts[], window[], oam | note}', 'auth': _AUTH_MON},
 ]
 
 

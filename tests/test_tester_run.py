@@ -169,9 +169,15 @@ def tearDownModule():
 
 
 def _topology(workers):
-    return {'name': 'ut', 'target': {'name': 'sut', 'csp': {'ip': '10.0.0.1', 'domain_volte': 'volte.test'}},
-            'workers': [{'name': w.name, 'url': w.url, 'cpus': 1} for w in workers],
-            'pools': {'volte_ue': {'kind': 'ue', 'source': {'creds': 'creds/ue.jsonl'}}}}
+    """v2(호스트›워커·대상 노드›풀) — 워커마다 UE 풀 `ue_<워커>` + 같은 group volte_ue(시나리오는 pool: volte_ue 로 참조).
+    가짜 워커는 전부 127.0.0.1 이라 호스트 하나(hw)에 포트만 다르다."""
+    return {'name': 'ut',
+            'hosts': {'h1': {'ip': '10.0.0.1'}, 'hw': {'ip': '127.0.0.1'}},
+            'workers': [{'name': w.name, 'host': 'hw', 'port': w.port, 'cpus': 1} for w in workers],
+            'target': {'name': 'sut', 'kind': 'cims', 'nodes': {
+                'csp': {'role': 'sip', 'host': 'h1', 'sip': {'access': {'udp': 5060, 'domains': ['volte.test']}}}}},
+            'pools': {f'ue_{w.name}': {'kind': 'ue', 'worker': w.name, 'group': 'volte_ue', 'access': 'csp',
+                                       'source': {'creds': 'creds/ue.jsonl'}} for w in workers}}
 
 
 def _wait_done(d, timeout=20):
@@ -192,32 +198,62 @@ class Compile(unittest.TestCase):
         for w in ws:
             w.probe()
         plan = C.compile_run('r1', sc, topo, topo_doc, None, {'ht': 7}, ws, lambda w: '127.0.0.1:1', 4, None)
-        # caller/callee 가 count 없이 한 풀을 disjoint 로 나눠 쓴다 → 균등 분할 [0,4)/[4,8)
-        self.assertEqual(plan['roles']['caller'], ['volte_ue', 0, 4])
-        self.assertEqual(plan['roles']['callee'], ['volte_ue', 4, 8])
-        self.assertEqual(plan['identities'], {'volte_ue': 8})
+        # 역할 pool=volte_ue 는 워커마다 group 으로 해석(ue_w1·ue_w2) — 워커 로컬 풀 8 신원을 caller/callee 가 균등 분할 [0,4)/[4,8)
+        self.assertEqual(plan['roles']['caller']['workers'], {'w1': ['ue_w1', 0, 4], 'w2': ['ue_w2', 0, 4]})
+        self.assertEqual(plan['roles']['callee']['workers'], {'w1': ['ue_w1', 4, 8], 'w2': ['ue_w2', 4, 8]})
+        self.assertEqual(plan['roles']['caller']['total'], 8)
+        self.assertEqual(plan['identities'], {'ue_w1': 8, 'ue_w2': 8})
         self.assertEqual(plan['max_instances'], 4)
+        self.assertEqual(plan['phases'], {'prelude': [0], 'body': [1, 2, 3, 4], 'epilogue': []})
         hold = [s for s in plan['steps'] if s['step'] == 'media_hold'][0]
         self.assertEqual(hold['seconds'], 7)
         for name, pw in plan['workers'].items():
             run = pw['run']
             self.assertEqual(run['run_id'], 'r1')
-            self.assertEqual(sum(len(p['identities']) for p in pw['pools']), 4)   # 8 신원 / 2 워커
+            self.assertEqual(sum(len(p['identities']) for p in pw['pools']), 8)   # 워커 풀 신원 전부(분할은 풀 정의가)
+            self.assertEqual(run['roles'], {'caller': f'ue_{name}', 'callee': f'ue_{name}'})
             for role, (b, e) in run['role_slices'].items():
-                self.assertTrue(0 <= b <= e <= 4)
+                self.assertTrue(0 <= b <= e <= 8)
             self.assertEqual(pw['pools'][0]['identities'][0]['domain'], 'volte.test')
+            self.assertEqual(pw['pools'][0]['target_csp']['ip'], '10.0.0.1')
         self.assertEqual(sum(pw['run']['max_instances'] for pw in plan['workers'].values()), 4)
+
+    def test_during_flattened_and_group_resolution(self):
+        # media_hold.during → hold 3 → dtmf → hold 7 (마지막 조각이 기대치) · 워커가 하나면 그 워커만 후보
+        w1 = FakeWorker('w1')
+        topo_doc = _topology([w1])
+        topo = M.Topology.model_validate(topo_doc)
+        from services import tester_workers as TW
+        sc = M.Scenario.model_validate({'id': 'UT-DUR', 'roles': {'a': {'pool': 'volte_ue', 'count': 2}, 'b': {'pool': 'volte_ue', 'disjoint_from': 'a', 'count': 2}},
+                                        'flow': [{'step': 'register', 'who': ['a', 'b']}, {'step': 'invite', 'from': 'a', 'to': 'b'},
+                                                 {'step': 'answer', 'who': ['b']},
+                                                 {'step': 'media_hold', 'seconds': 10, 'expect': {'rtp_loss_pct': {'max': 1}},
+                                                  'during': [{'at_s': 3, 'step': 'dtmf', 'from': 'a', 'payload': '12#'}]},
+                                                 {'step': 'bye', 'from': 'a'}]})
+        plan = C.compile_run('r2', sc, topo, topo_doc, None, {}, TW.discover(topo_doc), lambda w: 'x:1', 1, None)
+        kinds = [(s['step'], s.get('seconds'), s['src']) for s in plan['steps']]
+        self.assertEqual(kinds, [('register', None, 0), ('invite', None, 1), ('answer', None, 2),
+                                 ('media_hold', 3, 3), ('dtmf', None, 3), ('media_hold', 7, 3), ('bye', None, 4)])
+        self.assertEqual(plan['steps'][3].get('expect', {}), {})
+        self.assertEqual(plan['steps'][5]['expect'], {'rtp_loss_pct': {'max': 1}})
+        self.assertNotIn('src', plan['workers']['w1']['run']['steps'][0])      # 워커 계약에는 src 없음
+        # 워커가 지원하지 않는 단계는 컴파일 오류
+        sc2 = M.Scenario.model_validate({'id': 'UT-NS', 'roles': {'a': {'pool': 'volte_ue'}},
+                                         'flow': [{'step': 'group_call', 'from': 'a', 'group': 'g1'}]})
+        with self.assertRaises(C.CompileError):
+            C.compile_run('r3', sc2, topo, topo_doc, None, {}, TW.discover(topo_doc), lambda w: 'x:1', 1, None)
 
     def test_disjoint_needs_room(self):
         # caller.count=8 이 풀 전체를 쓰면 disjoint 인 callee 창이 없다 → CompileError
         sc, _, _ = S.get_scenario('VOLTE-CALL-BASIC')
         sc = sc.model_copy(deep=True)
         sc.roles['caller'].count = 8
+        rp = {'caller': 'volte_ue', 'callee': 'volte_ue'}
         with self.assertRaises(C.CompileError):
-            C.role_ranges(sc, {'volte_ue': 8})
+            C.role_ranges(sc.roles, rp, {'volte_ue': 8})
         # 균등 분할 기본값
         sc2, _, _ = S.get_scenario('VOLTE-CALL-BASIC')
-        rr = C.role_ranges(sc2, {'volte_ue': 10})
+        rr = C.role_ranges(sc2.roles, rp, {'volte_ue': 10})
         self.assertEqual(rr['caller'], ('volte_ue', 0, 5))
         self.assertEqual(rr['callee'], ('volte_ue', 5, 10))
 
