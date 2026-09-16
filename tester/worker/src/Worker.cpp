@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include "SimSession.h"
+#include "SipCodecTable.h"
 
 static void logf(const char* level, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
 static void logf(const char* level, const char* fmt, ...) {
@@ -118,9 +119,25 @@ void Worker::OnCallStart(SimSession* s, const std::string& callId, long long ms)
     std::lock_guard<std::mutex> lk(m_evMtx);
     m_events.push_back({ Event::CALLSTART, s, nullptr, 200, ms, callId, "", false });
 }
-void Worker::OnCallEnd(SimSession* s, const std::string& callId, int st) {
+void Worker::OnCallEnd(SimSession* s, const std::string& callId, int st, int q850) {
     std::lock_guard<std::mutex> lk(m_evMtx);
-    m_events.push_back({ Event::CALLEND, s, nullptr, st, 0, callId, "", false });
+    m_events.push_back({ Event::CALLEND, s, nullptr, st, 0, callId, "", false, false, q850 });
+}
+void Worker::OnCallRing(SimSession* s, const std::string& callId, int st, bool hasSdp, bool prack) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::RING, s, nullptr, st, 0, callId, "", hasSdp, prack });
+}
+void Worker::OnReInvite(SimSession* s, const std::string& callId, bool hold) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::REINVITE, s, nullptr, 0, 0, callId, "", hold });
+}
+void Worker::OnReInviteResponse(SimSession* s, const std::string& callId, int st) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::REINVITE_RESP, s, nullptr, st, 0, callId, "", false });
+}
+void Worker::OnReferResponse(SimSession* s, const std::string& callId, int st) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::REFER_RESP, s, nullptr, st, 0, callId, "", false });
 }
 void Worker::OnByeResponse(SimSession* s, const std::string& callId, int st, long long ms) {
     std::lock_guard<std::mutex> lk(m_evMtx);
@@ -134,9 +151,33 @@ void Worker::OnPeerCallStart(CsimPeer* p, const std::string& callId, long long m
     std::lock_guard<std::mutex> lk(m_evMtx);
     m_events.push_back({ Event::CALLSTART, nullptr, p, 200, ms, callId, "", false });
 }
-void Worker::OnPeerCallEnd(CsimPeer* p, const std::string& callId, int st) {
+void Worker::OnPeerCallEnd(CsimPeer* p, const std::string& callId, int st, int q850) {
     std::lock_guard<std::mutex> lk(m_evMtx);
-    m_events.push_back({ Event::CALLEND, nullptr, p, st, 0, callId, "", false });
+    m_events.push_back({ Event::CALLEND, nullptr, p, st, 0, callId, "", false, false, q850 });
+}
+void Worker::OnPeerRing(CsimPeer* p, const std::string& callId, int st, bool hasSdp, bool prack) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::RING, nullptr, p, st, 0, callId, "", hasSdp, prack });
+}
+void Worker::OnPeerPrack(CsimPeer* p, const std::string& callId) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::PRACK, nullptr, p, 0, 0, callId, "", false });
+}
+void Worker::OnPeerReInvite(CsimPeer* p, const std::string& callId, bool hold) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::REINVITE, nullptr, p, 0, 0, callId, "", hold });
+}
+void Worker::OnPeerReInviteResponse(CsimPeer* p, const std::string& callId, int st) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::REINVITE_RESP, nullptr, p, st, 0, callId, "", false });
+}
+void Worker::OnPeerReferResponse(CsimPeer* p, const std::string& callId, int st) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::REFER_RESP, nullptr, p, st, 0, callId, "", false });
+}
+void Worker::OnPeerRegister(CsimPeer* p, int st, long long ms) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::REGISTER, nullptr, p, st, ms, "", "", false });
 }
 void Worker::OnPeerByeResponse(CsimPeer* p, const std::string& callId, int st, long long ms) {
     std::lock_guard<std::mutex> lk(m_evMtx);
@@ -239,6 +280,8 @@ bool Worker::buildUePool(Pool* pool, const Json& d, std::string& err) {
         ep->s->SetSrtpMode(pool->srtp == "required" ? 2 : pool->srtp == "optional" ? 1 : 0);
         if (!ep->id.akaK.empty()) ep->s->SetAka(ep->id.akaK, ep->id.akaOpc, 0);
         ep->s->SetAnswerMode(SimSession::E_ANSWER_DEFERRED);
+        ep->s->SetPrack(d["prack"].asBool(false));
+        ep->s->SetDtmf(d["dtmf"].asBool(true));
         ep->s->SetObserver(this);
         if (!m_cfg.mediaFile.empty()) ep->s->m_clsRtpThread.SetMediaFile(m_cfg.mediaFile);
         if (!m_cfg.videoFile.empty()) ep->s->m_clsRtpThread.SetVideoFile(m_cfg.videoFile);
@@ -260,6 +303,8 @@ bool Worker::buildPeerPool(Pool* pool, const Json& d, std::string& err) {
     pc.domain = pd["domain"].asString();
     pc.silent = pd["answer"].asString("normal") == "silent";
     pc.certFile = m_cfg.peerCertFile;
+    pc.prack = pd["prack"].isBool() ? pd["prack"].asBool() : CsimPeerConfig::DefaultPrack(pc.profile);
+    pc.dtmf = pd["dtmf"].asBool(true);
     for (size_t i = 0; i < pd["codecs"].size(); ++i) pc.codecs.push_back(pd["codecs"].at(i).asString());
     if (pc.codecs.empty()) pc.codecs = CsimPeer::DefaultCodecs(pc.profile);
     // 파일 미디어(AMR-WB)는 첫 코덱이 AMR-WB 일 때만 — 나머지는 합성 PCMU
@@ -273,6 +318,20 @@ bool Worker::buildPeerPool(Pool* pool, const Json& d, std::string& err) {
     pool->transport = pr.isObject() ? pr["protocol"].asString("udp") : "udp";
     pool->profile = pc.profile;
     if (pool->targetIp.empty()) { err = "target_csp.ip_required"; return false; }
+    // pbx 트렁크 REGISTER(SIPconnect 2.0 §8 등록 모드) — 대상의 access 접속점(Digest 챌린지가 있는 쪽)으로, bind 와 같은 transport
+    const Json& tr = d["trunk_register"];
+    if (tr.isObject()) {
+        pc.trunk.user = tr["user"].asString();
+        pc.trunk.realm = tr["realm"].asString(tc["domain_volte"].asString(pc.domain));
+        pc.trunk.ha1 = tr["ha1"].asString();
+        pc.trunk.password = tr["password"].asString();
+        pc.trunk.expires = (int)tr["expires"].asInt(3600);
+        pc.trunk.ip = tc["ip"].asString();
+        pc.trunk.transport = pc.transport;
+        pc.trunk.port = (int)(pc.transport == E_SIP_TLS ? tc["tls"].asInt(5061)
+                              : pc.transport == E_SIP_TCP ? tc["tcp"].asInt(25061) : tc["udp"].asInt(5060));
+        if (pc.trunk.user.empty() || (pc.trunk.ha1.empty() && pc.trunk.password.empty())) { err = "trunk_register.user and ha1|password required"; return false; }
+    }
     const Json& ids = d["identities"];
     for (size_t i = 0; i < ids.size(); ++i) {
         const Json& x = ids.at(i);
@@ -334,7 +393,7 @@ HttpResponse Worker::poolDelete(const std::string& name) {
 }
 
 static const char* kSupported[] = { "register", "deregister", "invite", "answer", "reject", "bye",
-                                    "media_hold", "wait", "expect" };
+                                    "media_hold", "wait", "expect", "progress", "hold", "resume", "dtmf", "refer" };
 
 HttpResponse Worker::runStart(const Json& d) {
     auto spec = std::make_unique<RunSpec>();
@@ -359,6 +418,7 @@ HttpResponse Worker::runStart(const Json& d) {
         cs.to = s["to"].asString();
         cs.afterMs = (int)s["after_ms"].asInt(0);
         cs.seconds = (int)s["seconds"].asInt(0);
+        cs.cause = (int)s["cause"].asInt(0);
         cs.group = s["group"].asString();
         cs.payload = s["payload"].asString();
         cs.media = s["media"];
@@ -371,7 +431,7 @@ HttpResponse Worker::runStart(const Json& d) {
     if (!unsupported.empty()) {
         std::string list;
         for (auto& u : unsupported) list += (list.empty() ? "" : ",") + u;
-        return errResp(400, "unsupported_step", list + " — 워커는 register/invite/answer/reject/bye/media_hold/wait/expect 만");
+        return errResp(400, "unsupported_step", list + " — 워커는 register/invite/answer/reject/bye/media_hold/wait/expect/progress/hold/resume/dtmf/refer 만");
     }
     if (spec->steps.empty()) return errResp(400, "steps_required");
 
@@ -403,7 +463,8 @@ HttpResponse Worker::runStart(const Json& d) {
             auto rit = spec->roles.find(role);
             if (rit == spec->roles.end()) return errResp(400, "unknown_role", role);
             Pool* pool = m_pools[rit->second].get();
-            if (pool->kind == "peer") return errResp(400, "register_on_peer", role + " — 피어 신원은 등록하지 않는다(고정 수신점)");
+            if (pool->kind == "peer" && (!pool->peer || pool->peer->Config().trunk.user.empty()))
+                return errResp(400, "register_on_peer", role + " — 피어 신원은 등록하지 않는다(고정 수신점). 트렁크 REGISTER 는 풀 register 계정으로");
             auto sl = spec->slices[role];
             for (int i = sl.first; i < sl.second && i < (int)pool->eps.size(); ++i) {
                 Endpoint* ep = pool->eps[i].get();
@@ -591,6 +652,16 @@ void Worker::onEvent(const Event& e) {
         auto pit = m_byPeer.find(e.peer);
         if (pit == m_byPeer.end()) return;
         peerPool = pit->second;
+        if (e.kind == Event::REGISTER) {
+            // 트렁크 REGISTER 결과 — 계정 하나가 풀 신원 전부를 대표한다
+            bool ok = e.status == 200;
+            peerPool->regFailed = !ok;
+            for (auto& pe : peerPool->eps) pe->registered = ok;
+            if (ok) { m_metrics.counter("registered_ok"); m_metrics.timer("rrd_ms", (double)e.ms); }
+            else { m_metrics.counter("registered_fail"); m_metrics.counter("codes." + std::to_string(e.status));
+                   emitEvent("trunk REGISTER failed", peerPool->eps.empty() ? nullptr : peerPool->eps[0].get(), "register", e.status); }
+            return;
+        }
         if (e.kind == Event::INCOMING) {
             // 착신 귀속 — To user 가 풀 신원 범위 안이어야 한다
             auto uit = peerPool->byUser.find(e.user);
@@ -656,6 +727,7 @@ void Worker::onEvent(const Event& e) {
         ep->inCall = false;
         ep->pendingInvite = false;
         if (ep->isPeer() && ep->callId == e.callId) epClearCall(ep);
+        if (e.q850 > 0) { m_metrics.counter("q850_rx"); m_metrics.counter("q850." + std::to_string(e.q850)); }
         if (!in) break;
         std::string role = roleOf(in, ep);
         if (in->phase == Instance::WAIT_EVENT && in->awaitKind == "callend:" + role) {
@@ -686,6 +758,38 @@ void Worker::onEvent(const Event& e) {
         }
         break;
     }
+    case Event::RING:
+        // 발신자의 1xx — 183 SDP 면 early media, RSeq 가 있었으면 PRACK 을 냈다(RFC 3262)
+        m_metrics.counter("ring_rx");
+        if (e.hasPai) m_metrics.counter("early_media");
+        if (e.prack) m_metrics.counter("prack_tx");
+        if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "ring:" + roleOf(in, ep)) advance(*in, now);
+        break;
+    case Event::PRACK:
+        m_metrics.counter("prack_rx");
+        break;
+    case Event::REINVITE:
+        m_metrics.counter("reinvite_rx");
+        m_metrics.counter(e.hasPai ? "remote_hold" : "remote_resume");
+        break;
+    case Event::REINVITE_RESP:
+        m_metrics.counter(e.status / 100 == 2 ? "reinvite_ok" : "reinvite_fail");
+        if (e.status / 100 != 2) m_metrics.counter("codes." + std::to_string(e.status));
+        if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "reinviteresp:" + roleOf(in, ep)) {
+            if (e.status / 100 == 2) advance(*in, now);
+            else { emitEvent("re-INVITE refused", ep, m_body[in->stepIdx].step, e.status, e.callId);
+                   finishInstance(*in, true, "reinvite " + std::to_string(e.status), now); }
+        }
+        break;
+    case Event::REFER_RESP:
+        m_metrics.counter("refer_codes." + std::to_string(e.status));
+        if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "referresp:" + roleOf(in, ep)) {
+            int want = in->expectCode > 0 ? in->expectCode : 202;
+            if (e.status == want) advance(*in, now);
+            else { emitEvent("REFER expected " + std::to_string(want) + " got " + std::to_string(e.status), ep, "refer", e.status, e.callId);
+                   finishInstance(*in, true, "refer " + std::to_string(e.status), now); }
+        }
+        break;
     case Event::BYERESP:
         ep->inCall = false;
         m_metrics.timer("sdd_ms", (double)e.ms);
@@ -712,7 +816,17 @@ bool Worker::startEndpoint(Endpoint* ep) {
     return true;
 }
 
-bool Worker::epStartCall(Endpoint* from, Endpoint* to) {
+/** 시나리오 media.audio 이름 → 코덱 테이블 PT (-1 = 지정 없음/미지) */
+static int codecPtOf(const std::string& name) {
+    if (name.empty()) return -1;
+    std::string n = name;
+    for (auto& c : n) c = (char)toupper((unsigned char)c);
+    for (const auto& e : CSipCodecTable::GetList())
+        if (strcasecmp(e.m_strName.c_str(), n.c_str()) == 0) return e.m_iPt;
+    return -1;
+}
+
+bool Worker::epStartCall(Endpoint* from, Endpoint* to, const Json& media) {
     if (from->isPeer()) {
         Pool* pool = from->poolRef;
         std::string callId = pool->peer->StartCall(from->id.user, to->id.user, to->id.domain, pool->targetIp, pool->targetPort,
@@ -723,10 +837,63 @@ bool Worker::epStartCall(Endpoint* from, Endpoint* to) {
         return true;
     }
     if (!from->started && !startEndpoint(from)) return false;
-    // UE 가 피어 신원을 부를 땐 user@피어도메인 — Request-URI host 로 CSP 라우팅 정책(req_uri_host)이 고른다
-    std::string target = to->isPeer() ? to->id.user + "@" + to->id.domain : to->id.user;
+    // 시나리오가 오퍼 코덱을 지정하면(pcma/pcmu/amr-wb …) 그 코덱으로 — 트렁크 G.711 경로 시험. 없으면 풀 기본
+    from->s->SetOfferCodec(codecPtOf(media["audio"].asString("")));
+    // UE 가 피어 신원을 부를 때 — ibcf(타 IMS) 는 user@피어도메인(Request-URI host → req_uri_host 규칙), pbx/mgcf 는 번호 그대로
+    //   (DID/E.164 — CSP 가 번호 prefix 규칙으로 트렁크를 고른다, 실 단말이 다이얼하는 꼴)
+    std::string target = to->id.user;
+    if (to->isPeer() && to->poolRef->profile == "ibcf") target += "@" + to->id.domain;
     from->s->StartCall(target);
     return !from->s->m_strInviteId.empty();
+}
+
+int Worker::epProgress(Endpoint* ep) {
+    if (!ep->isPeer()) return 481;   // UE 시뮬레이터는 183 early media 를 내지 않는다(실 단말 착신 모사 아님)
+    return ep->callId.empty() ? 481 : ep->poolRef->peer->Progress(ep->callId);
+}
+
+bool Worker::epHold(Endpoint* ep, bool hold) {
+    if (ep->isPeer()) {
+        if (ep->callId.empty()) return false;
+        return hold ? ep->poolRef->peer->Hold(ep->callId) : ep->poolRef->peer->Resume(ep->callId);
+    }
+    return hold ? ep->s->Hold() : ep->s->Resume();
+}
+
+bool Worker::epRefer(Endpoint* from, Endpoint* to) {
+    // Refer-To 사용자부 = 전달 대상 신원(psip 이 상대 Contact host 로 URI 를 만든다 — B2BUA(CSP)가 종단·재라우팅)
+    if (from->isPeer()) return !from->callId.empty() && from->poolRef->peer->Refer(from->callId, to->id.user);
+    if (from->s->m_strInviteId.empty()) return false;
+    from->s->BlindTransfer(to->id.user);
+    return true;
+}
+
+bool Worker::epDtmf(Endpoint* ep, const std::string& digits) {
+    if (ep->isPeer()) return !ep->callId.empty() && ep->poolRef->peer->SendDtmf(ep->callId, digits);
+    return ep->s->SendDtmf(digits);
+}
+
+void Worker::sampleDtmf(Endpoint* ep) {
+    int sent = 0, recv = 0, pt = -1;
+    std::string digits;
+    if (ep->isPeer()) {
+        if (ep->callId.empty() || !ep->poolRef->peer->DtmfStats(ep->callId, sent, recv, digits, pt)) return;
+    } else {
+        pt = ep->s->m_clsRtpThread.m_iDtmfPt;
+        sent = ep->s->m_clsRtpThread.m_iDtmfSent.load();
+        recv = ep->s->m_clsRtpThread.m_iDtmfRecv.load();
+        digits = ep->s->m_clsRtpThread.DtmfRecv();
+    }
+    if (sent > 0 || recv > 0 || pt >= 0)
+        logf("debug", "dtmf sample %s(%s): te_pt=%d sent=%d recv=%d digits=%s", roleOf(ep->inst, ep).c_str(), ep->id.user.c_str(), pt, sent, recv, digits.c_str());
+    if (sent > 0) m_metrics.counter("dtmf_sent", sent);   // RTP 로 실제 나간 이벤트 수(단계 카운터 dtmf_tx 와 대조)
+    if (recv > 0) m_metrics.counter("dtmf_rx", recv);
+    if (!ep->isPeer()) ep->s->m_clsRtpThread.ResetDtmf();
+}
+
+std::string Worker::callerRole(Instance& in) {
+    for (auto& a : in.actors) if (a.second->tStartCallMs > 0) return a.first;
+    return "";
 }
 
 bool Worker::epHasCall(Endpoint* ep) {
@@ -739,17 +906,17 @@ int Worker::epAnswer(Endpoint* ep) {
     return ep->s->AnswerCall() ? 0 : 481;
 }
 
-bool Worker::epReject(Endpoint* ep, int code) {
+bool Worker::epReject(Endpoint* ep, int code, int cause) {
     if (ep->isPeer()) {
         if (ep->callId.empty()) return false;
-        bool ok = ep->poolRef->peer->Reject(ep->callId, code);
-        return ok;
+        return ep->poolRef->peer->Reject(ep->callId, code, cause);
     }
+    // UE 시뮬레이터의 거절은 Reason 없이(실 단말 거절 코드만) — cause 는 피어 프로파일(MGCF Q.850) 몫
     return ep->s->RejectCall(code);
 }
 
-bool Worker::epBye(Endpoint* ep) {
-    if (ep->isPeer()) return !ep->callId.empty() && ep->poolRef->peer->Bye(ep->callId);
+bool Worker::epBye(Endpoint* ep, int cause) {
+    if (ep->isPeer()) return !ep->callId.empty() && ep->poolRef->peer->Bye(ep->callId, cause);
     ep->s->StopCall();
     return true;
 }
@@ -774,6 +941,17 @@ void Worker::tickPrelude(long long now) {
         Endpoint* ep = m_preludeList[m_preludeCursor++];
         lastStart = now;
         if (ep->started) { if (ep->registered) m_metrics.counter("registered_reused"); continue; }
+        if (ep->isPeer()) {
+            // 트렁크 REGISTER — 풀 단위로 한 번(계정 하나가 신원 범위를 대표). 결과는 OnPeerRegister → 풀 신원 전부 registered
+            Pool* pool = ep->poolRef;
+            ep->started = true;
+            if (!pool->regStarted) {
+                pool->regStarted = true;
+                pool->regFailed = false;
+                if (!pool->peer->Register()) { pool->regFailed = true; m_metrics.counter("registered_fail"); emitEvent("trunk REGISTER not sent", ep, "register", 0); }
+            }
+            continue;
+        }
         startEndpoint(ep);
         if (m_preludeCursor % 100 == 0) logf("info", "prelude: %zu/%zu started", m_preludeCursor, m_preludeList.size());
     }
@@ -785,7 +963,8 @@ void Worker::tickPrelude(long long now) {
         // 실패 응답(REGISTER 4xx) 은 registered=false 이면서 started=true — 이벤트 카운터로 판정 불가하므로
         // 등록 통계(iRegFail) 를 본다.
         size_t failed = 0;
-        for (auto* ep : m_preludeList) if (ep->started && !ep->registered && ep->s->m_stats.iRegFail > 0) failed++;
+        for (auto* ep : m_preludeList)
+            if (ep->started && !ep->registered && (ep->isPeer() ? ep->poolRef->regFailed : ep->s->m_stats.iRegFail > 0)) failed++;
         if (failed < pending) return;
     }
     for (auto& kv : m_free) {
@@ -805,6 +984,28 @@ void Worker::tickBody(long long now) {
     for (auto& inp : m_instances) {
         Instance& in = *inp;
         if (in.phase == Instance::WAIT_TIME && now >= in.waitUntilMs) {
+            if (in.pending == Instance::PROGRESS) {
+                // 183 early media(피어 UAS) — 발신자의 1xx 도달(RING 이벤트)까지 기다린다: CSP 가 183/SDP 를 전달하는지가 시험 대상
+                Endpoint* ep = in.actors[in.pendingRole];
+                int rc = epProgress(ep);
+                in.pending = Instance::NONE;
+                if (rc != 0) {
+                    m_metrics.counter("codes." + std::to_string(rc));
+                    emitEvent("183 refused", ep, "progress", rc, ep->callId);
+                    finishInstance(in, true, "progress " + std::to_string(rc), now);
+                    continue;
+                }
+                m_metrics.counter("progress_tx");
+                std::string caller = callerRole(in);
+                if (!caller.empty()) {
+                    in.phase = Instance::WAIT_EVENT;
+                    in.awaitKind = "ring:" + caller;
+                    in.deadlineMs = now + m_cfg.inviteTimeoutMs;
+                    continue;
+                }
+                advance(in, now);
+                continue;
+            }
             if (in.pending == Instance::ANSWER || in.pending == Instance::REJECT) {
                 Endpoint* ep = in.actors[in.pendingRole];
                 bool ok;
@@ -819,7 +1020,8 @@ void Worker::tickBody(long long now) {
                         continue;
                     }
                 } else {
-                    ok = epReject(ep, in.pendingCode);
+                    ok = epReject(ep, in.pendingCode, in.pendingCause);
+                    if (ok && in.pendingCause > 0) m_metrics.counter("q850_tx");
                 }
                 if (!ok) { finishInstance(in, true, "no pending invite to answer", now); continue; }
                 ep->pendingInvite = false;
@@ -908,6 +1110,14 @@ void Worker::launchInstance(long long now) {
         if (!pick) {
             for (auto& a : actors) releaseEndpoint(a.second);
             m_metrics.counter("skipped");
+            // 역할에 쓸 수 있는 단말이 하나도 없으면(등록 전부 실패 등) 발생을 계속해도 skipped 만 쌓인다 — run 을 닫는다
+            bool anyActive = false;
+            for (auto& i : m_instances) if (i->phase != Instance::DONE) { anyActive = true; break; }
+            if (v.empty() && !anyActive) {
+                emitEvent("no usable endpoint for role " + kv.first + " — run closed", nullptr, "", 0);
+                logf("warn", "run %s: role %s has no usable endpoint — closing", m_run->runId.c_str(), kv.first.c_str());
+                endRun("stopped");
+            }
             return;
         }
         actors[kv.first] = pick;
@@ -938,10 +1148,14 @@ void Worker::execStep(Instance& in, long long now) {
             if (!from || !to) { finishInstance(in, true, "invite: role missing", now); return; }
             from->tStartCallMs = now;
             in.expectCode = (int)st.expect["code"].asInt(0);
-            if (!epStartCall(from, to)) { finishInstance(in, true, "invite: StartCall refused (busy/stack?)", now); return; }
+            if (!epStartCall(from, to, st.media)) { finishInstance(in, true, "invite: StartCall refused (busy/stack?)", now); return; }
             m_metrics.counter("legs", 2);
-            if (in.expectCode >= 300) {
-                // 거절이 기대값(ACL 403·라우팅 reject) — 발신자의 최종 응답을 여기서 기다린다
+            bool calleeActs = in.stepIdx + 1 < m_body.size() &&
+                              (m_body[in.stepIdx + 1].step == "reject" || m_body[in.stepIdx + 1].step == "answer" ||
+                               m_body[in.stepIdx + 1].step == "progress");
+            if (in.expectCode >= 300 && !calleeActs) {
+                // 거절이 기대값(ACL 403·라우팅 reject 등 대상이 스스로 거절) — 발신자의 최종 응답을 여기서 기다린다.
+                //   다음 단계가 착신 측 reject(피어 MGCF 503 등)면 그 단계가 거절을 내고 최종 응답을 기다린다.
                 in.stepIdx++;
                 in.phase = Instance::WAIT_EVENT;
                 in.awaitKind = "callend:" + st.from;
@@ -951,14 +1165,16 @@ void Worker::execStep(Instance& in, long long now) {
             in.stepIdx++;   // 비동기 — 확립은 answer/media_hold 가 기다린다
             continue;
         }
-        if (st.step == "answer" || st.step == "reject") {
+        if (st.step == "answer" || st.step == "reject" || st.step == "progress") {
             std::string role = st.who.empty() ? st.to : st.who[0];
             Endpoint* ep = in.actors[role];
             if (!ep) { finishInstance(in, true, st.step + ": role missing", now); return; }
-            in.pending = st.step == "answer" ? Instance::ANSWER : Instance::REJECT;
+            in.pending = st.step == "answer" ? Instance::ANSWER : st.step == "reject" ? Instance::REJECT : Instance::PROGRESS;
             in.pendingRole = role;
             in.pendingCode = st.step == "reject" ? (int)st.expect["code"].asInt(486) : 0;
+            in.pendingCause = st.cause;
             if (st.step == "reject" && st.payload.size()) in.pendingCode = atoi(st.payload.c_str());
+            if (st.step == "progress" && ep->inCall) { in.stepIdx++; continue; }   // 이미 확립 — 183 은 의미 없음
             if (ep->pendingInvite) { in.phase = Instance::WAIT_TIME; in.waitUntilMs = now + st.afterMs; }
             else { in.phase = Instance::WAIT_EVENT; in.awaitKind = "incoming:" + role; in.deadlineMs = now + m_cfg.inviteTimeoutMs; }
             return;
@@ -984,8 +1200,77 @@ void Worker::execStep(Instance& in, long long now) {
             in.pending = Instance::NONE;
             return;
         }
+        if (st.step == "hold" || st.step == "resume") {
+            std::string role = st.who.empty() ? st.from : st.who[0];
+            Endpoint* ep = in.actors[role];
+            if (!ep) { finishInstance(in, true, st.step + ": role missing", now); return; }
+            if (!ep->inCall) {
+                // 확립 전이면 발신자 확립을 기다렸다가 다시 이 단계로
+                std::string caller = callerRole(in);
+                if (!caller.empty() && !in.actors[caller]->inCall) {
+                    in.phase = Instance::WAIT_EVENT; in.awaitKind = "callstart:" + caller; in.deadlineMs = now + m_cfg.inviteTimeoutMs;
+                    in.stepIdx--;
+                    return;
+                }
+                finishInstance(in, true, st.step + ": not in call", now); return;
+            }
+            if (!epHold(ep, st.step == "hold")) { finishInstance(in, true, st.step + ": re-INVITE not sent", now); return; }
+            m_metrics.counter(st.step == "hold" ? "hold_tx" : "resume_tx");
+            in.phase = Instance::WAIT_EVENT;
+            in.awaitKind = "reinviteresp:" + role;
+            in.deadlineMs = now + m_cfg.inviteTimeoutMs;
+            return;
+        }
+        if (st.step == "dtmf") {
+            std::string role = st.from.empty() ? (st.who.empty() ? "" : st.who[0]) : st.from;
+            Endpoint* ep = in.actors[role];
+            if (!ep) { finishInstance(in, true, "dtmf: role missing", now); return; }
+            if (!ep->inCall) {
+                std::string caller = callerRole(in);
+                if (!caller.empty() && !in.actors[caller]->inCall) {
+                    in.phase = Instance::WAIT_EVENT; in.awaitKind = "callstart:" + caller; in.deadlineMs = now + m_cfg.inviteTimeoutMs;
+                    in.stepIdx--;
+                    return;
+                }
+                finishInstance(in, true, "dtmf: not in call", now); return;
+            }
+            if (st.payload.empty()) { finishInstance(in, true, "dtmf: payload(digits) required", now); return; }
+            if (!epDtmf(ep, st.payload)) {
+                m_metrics.counter("dtmf_unsupported");
+                emitEvent("DTMF not negotiated (telephone-event)", ep, "dtmf", 0, ep->callId);
+                finishInstance(in, true, "dtmf: telephone-event not negotiated", now); return;
+            }
+            m_metrics.counter("dtmf_tx", (long long)st.payload.size());
+            // 숫자열이 다 나갈 때까지(이벤트 길이+간격) 기다린 뒤 다음 단계 — 수신 수는 bye 에서 표본
+            in.phase = Instance::WAIT_TIME;
+            in.waitUntilMs = now + (long long)st.payload.size() * (m_cfg.dtmfDigitMs + m_cfg.dtmfGapMs + 60) + 300;
+            in.pending = Instance::NONE;
+            return;
+        }
+        if (st.step == "refer") {
+            Endpoint* from = in.actors[st.from];
+            Endpoint* to = st.to.empty() ? nullptr : in.actors[st.to];
+            if (!from || !to) { finishInstance(in, true, "refer: from/to role required", now); return; }
+            if (!from->inCall) {
+                std::string caller = callerRole(in);
+                if (!caller.empty() && !in.actors[caller]->inCall) {
+                    in.phase = Instance::WAIT_EVENT; in.awaitKind = "callstart:" + caller; in.deadlineMs = now + m_cfg.inviteTimeoutMs;
+                    in.stepIdx--;
+                    return;
+                }
+                finishInstance(in, true, "refer: not in call", now); return;
+            }
+            in.expectCode = (int)st.expect["code"].asInt(202);
+            if (!epRefer(from, to)) { finishInstance(in, true, "refer: REFER not sent", now); return; }
+            m_metrics.counter("refer_tx");
+            in.phase = Instance::WAIT_EVENT;
+            in.awaitKind = "referresp:" + st.from;
+            in.deadlineMs = now + m_cfg.inviteTimeoutMs;
+            return;
+        }
         if (st.step == "bye") {
-            // media_hold 직후라면 RTP 품질 표본
+            // media_hold 직후라면 RTP 품질 표본. DTMF 수신 수는 항상 표본(단계 dtmf 가 있었을 때만 값이 있다)
+            for (auto& a : in.actors) sampleDtmf(a.second);   // RTP 표본이 카운터를 리셋하므로 먼저
             if (in.stepIdx > 0 && m_body[in.stepIdx - 1].step == "media_hold")
                 for (auto& a : in.actors) sampleRtp(a.second);
             Endpoint* from = in.actors[st.from];
@@ -995,7 +1280,8 @@ void Worker::execStep(Instance& in, long long now) {
                 in.stepIdx++;
                 continue;
             }
-            epBye(from);
+            epBye(from, st.cause);
+            if (st.cause > 0) m_metrics.counter("q850_tx");
             in.phase = Instance::WAIT_EVENT;
             in.awaitKind = "byeresp:" + st.from;
             in.deadlineMs = now + m_cfg.byeTimeoutMs;

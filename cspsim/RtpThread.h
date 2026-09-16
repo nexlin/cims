@@ -25,6 +25,7 @@
 #include <atomic>
 #include <set>
 #include <mutex>
+#include <deque>
 
 // libsrtp 불투명 핸들 전방선언 (srtp2/srtp.h 는 RtpThread.cpp 에서만 포함)
 struct srtp_ctx_t_;
@@ -44,6 +45,8 @@ public:
 
     /** 미디어 파일 경로 (AMR-WB raw 프레임 파일) 설정 — 비어있으면 합성 RTP */
     void SetMediaFile(const std::string& strPath) { m_strMediaFile = strPath; }
+    /** 이 호에서 파일 미디어를 쓸지 — 협상 코덱이 AMR-WB 가 아니면(G.711 트렁크) false 로 두고 합성 PCMU 를 낸다. 호마다 재설정. */
+    bool m_bUseMediaFile = true;
 
     /** 비디오 파일 경로 (H.264 Annex B raw NAL 파일) 설정 */
     void SetVideoFile(const std::string& strPath) { m_strVideoFile = strPath; }
@@ -51,6 +54,23 @@ public:
 	/** 협상된 오디오 wire PT (SDP 오퍼/answer 확정값) — 파일 미디어(AMR-WB) 송신 시 스탬핑.
 	 *  -1 = 미협상(레거시 99 폴백). 합성 PCMU 는 정적 PT 0 고정. */
 	int		m_iAudioPt = -1;
+
+	// ── RFC 4733 telephone-event (DTMF) — 계측기 pbx/mgcf 프로파일·UE 단계 `dtmf` (test_instrument.md §3.2) ──
+	//   협상: SDP 에 telephone-event 를 오퍼/echo 한 쪽이 m_iDtmfPt/m_iDtmfClock 을 채운다(-1 = 미협상 → 송신 거절).
+	//   송신: SendDtmf 가 큐에 넣고 송신 스레드가 오디오 자리에 이벤트 패킷을 낸다 — 같은 SSRC/시퀀스, 이벤트 동안
+	//   타임스탬프 고정·마커는 첫 패킷·duration 누적, 끝은 E 비트 패킷 3회(§2.5.1.4). 수신: E 비트 기준 이벤트 수·숫자열.
+	int		m_iDtmfPt = -1;
+	int		m_iDtmfClock = 8000;
+	bool SendDtmf( const std::string & strDigits, int iDurationMs = 160, int iGapMs = 100 );
+	std::atomic<int> m_iDtmfSent{0};
+	std::atomic<int> m_iDtmfRecv{0};
+	std::string DtmfRecv() { std::lock_guard<std::mutex> lk(m_mtxDtmf); return m_strDtmfRecv; }
+	void ResetDtmf() { std::lock_guard<std::mutex> lk(m_mtxDtmf); m_dtmfQueue.clear(); m_strDtmfRecv.clear(); m_iDtmfSent = 0; m_iDtmfRecv = 0; }
+	std::mutex m_mtxDtmf;
+	std::deque<char> m_dtmfQueue;      // 송신 대기 숫자
+	int m_iDtmfDurationMs = 160, m_iDtmfGapMs = 100;
+	std::string m_strDtmfRecv;         // 수신 숫자열(E 비트 기준)
+	unsigned int m_uDtmfRecvLastTs = 0; int m_iDtmfRecvLastEvent = -1;   // recv 스레드 전용 — 종료 패킷 중복 제거
 
 	// ── 미디어 SRTP (SDES — media_security.md §8.2). a=crypto 는 m-line 단위(RFC 4568 §5)라
 	//    오디오·비디오가 각자 독립 컨텍스트(키)를 가진다. ──

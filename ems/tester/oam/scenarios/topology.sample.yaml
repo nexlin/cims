@@ -17,6 +17,7 @@ pools:
     source: { db: target, table: volte_subscriptions, offset: 0, count: 2000 }
     transport: tls
     srtp: optional
+    prack: true                 # 100rel — MGCF 183 early media 시험(TRUNK-MGCF-OUTBOUND)의 전제
   ptt_ue:
     kind: ue
     source: { creds: creds/ptt.jsonl }
@@ -43,7 +44,7 @@ pools:
     domain: ims.blocked.test
     identities: { e164_range: ["+82299990000", "+82299990009"] }
     seed: { acl: deny }
-  pbx_hq:
+  pbx_hq:                       # IP-PBX — G.711 + telephone-event, 등록형 트렁크 계정(SIPconnect 2.0). UE 는 DID 를 그대로 다이얼(prefix 규칙)
     kind: peer
     profile: pbx
     bind: { ip: 10.0.0.62, port: 5090, protocol: udp }
@@ -51,3 +52,9 @@ pools:
     register: { user: pbx-hq, ha1_env: PBX_HA1 }
     identities: { did_range: ["0212345000", "0212345099"], ext_len: 4 }
     codecs: [PCMA, PCMU]
+  mgcf_pstn:                    # MGCF(IM-MGW 가 AMR-WB 오퍼) — E.164 만, 183 early media + 100rel, Q.850 Reason
+    kind: peer
+    profile: mgcf
+    bind: { ip: 10.0.0.62, port: 5095, protocol: udp }
+    domain: mgcf.pstn.test
+    identities: { e164_range: ["+82312340000", "+82312340099"] }

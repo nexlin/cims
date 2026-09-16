@@ -41,6 +41,8 @@ struct WorkerConfig {
     std::string mediaFile;          // AMR-WB raw 프레임 파일 — 비면 합성 PCMU
     std::string videoFile;          // H.264 Annex B — 비면 비디오 없음
     std::string peerCertFile;       // 피어 풀 TLS 수신점 인증서(PEM) — 비면 TLS 피어 거절
+    int dtmfDigitMs = 160;          // RFC 4733 이벤트 길이·간격 — dtmf 단계의 송신 완료 대기 계산
+    int dtmfGapMs = 100;
     int registerIntervalMs = 20;    // prelude 등록 간격
     int registerTimeoutS = 60;      // prelude 전원 등록 대기 상한
     int inviteTimeoutMs = 32000;    // INVITE 최종 응답 대기(Timer B 상당)
@@ -82,6 +84,8 @@ struct Pool {
     int targetPort = 5060;
     std::string profile;            // peer 프로파일
     std::unique_ptr<CsimPeer> peer; // kind=peer 엔진
+    bool regStarted = false;        // peer 트렁크 REGISTER 를 냈다(풀 단위 — 계정 하나가 신원 범위를 대표)
+    bool regFailed = false;
     std::map<std::string, Endpoint*> byUser;   // peer: 신원 user → Endpoint (착신 귀속)
     std::map<std::string, Endpoint*> byCall;   // peer: 활성 Call-ID → Endpoint
     std::vector<std::unique_ptr<Endpoint>> eps;
@@ -94,6 +98,7 @@ struct CompiledStep {
     std::string from, to;
     int afterMs = 0;
     int seconds = 0;
+    int cause = 0;                  // bye/reject 의 Reason Q.850 cause (0 = 없음)
     std::string group, payload;
     Json media, expect;
 };
@@ -114,7 +119,8 @@ struct Instance {
     enum Phase { RUNNING, WAIT_EVENT, WAIT_TIME, DONE } phase = RUNNING;
     std::string awaitKind;                     // "callstart:<role>" 등
     long long waitUntilMs = 0, deadlineMs = 0, tStartMs = 0;
-    enum Pending { NONE, ANSWER, REJECT } pending = NONE;
+    enum Pending { NONE, ANSWER, REJECT, PROGRESS } pending = NONE;
+    int pendingCause = 0;
     int pendingCode = 0;
     std::string pendingRole;
     int expectCode = 0;                        // invite 단계 expect.code — 200 이 아니면 그 최종 응답이 성공 조건(ACL 403 등)
@@ -133,24 +139,36 @@ public:
     void OnRegister(SimSession* s, int iStatus, long long rrdMs) override;
     void OnIncomingCall(SimSession* s, const std::string& callId, const std::string& from) override;
     void OnCallStart(SimSession* s, const std::string& callId, long long srdMs) override;
-    void OnCallEnd(SimSession* s, const std::string& callId, int iSipStatus) override;
+    void OnCallEnd(SimSession* s, const std::string& callId, int iSipStatus, int iQ850) override;
     void OnByeResponse(SimSession* s, const std::string& callId, int iSipStatus, long long sddMs) override;
+    void OnCallRing(SimSession* s, const std::string& callId, int iSipStatus, bool bHasSdp, bool bPrackSent) override;
+    void OnReInvite(SimSession* s, const std::string& callId, bool bRemoteHold) override;
+    void OnReInviteResponse(SimSession* s, const std::string& callId, int iSipStatus) override;
+    void OnReferResponse(SimSession* s, const std::string& callId, int iSipStatus) override;
     // ICsimPeerObserver — 스택 스레드
     void OnPeerIncoming(CsimPeer* p, const std::string& callId, const std::string& from, const std::string& to, bool hasPai) override;
     void OnPeerCallStart(CsimPeer* p, const std::string& callId, long long srdMs) override;
-    void OnPeerCallEnd(CsimPeer* p, const std::string& callId, int iSipStatus) override;
+    void OnPeerCallEnd(CsimPeer* p, const std::string& callId, int iSipStatus, int iQ850) override;
     void OnPeerByeResponse(CsimPeer* p, const std::string& callId, int iSipStatus, long long sddMs) override;
+    void OnPeerRing(CsimPeer* p, const std::string& callId, int iSipStatus, bool bHasSdp, bool bPrackSent) override;
+    void OnPeerPrack(CsimPeer* p, const std::string& callId) override;
+    void OnPeerReInvite(CsimPeer* p, const std::string& callId, bool bRemoteHold) override;
+    void OnPeerReInviteResponse(CsimPeer* p, const std::string& callId, int iSipStatus) override;
+    void OnPeerReferResponse(CsimPeer* p, const std::string& callId, int iSipStatus) override;
+    void OnPeerRegister(CsimPeer* p, int iSipStatus, long long rrdMs) override;
 
 private:
     struct Event {
-        enum Kind { REGISTER, INCOMING, CALLSTART, CALLEND, BYERESP } kind;
+        enum Kind { REGISTER, INCOMING, CALLSTART, CALLEND, BYERESP, RING, PRACK, REINVITE, REINVITE_RESP, REFER_RESP } kind;
         SimSession* s;
         CsimPeer* peer;
         int status;
         long long ms;
         std::string callId;
         std::string user;   // peer INCOMING: To user
-        bool hasPai;
+        bool hasPai;        // INCOMING: P-Asserted-Identity 존재 · RING: SDP 있음(early media) · REINVITE: 상대 hold
+        bool prack = false; // RING: PRACK 을 냈다
+        int q850 = 0;       // CALLEND: 상대 Reason Q.850 cause
     };
 
     WorkerConfig m_cfg;
@@ -218,11 +236,17 @@ private:
     Endpoint* endpointOf(SimSession* s);
     Endpoint* endpointOfPeerCall(CsimPeer* p, const std::string& callId);
     bool startEndpoint(Endpoint* ep);
-    bool epStartCall(Endpoint* from, Endpoint* to);
+    bool epStartCall(Endpoint* from, Endpoint* to, const Json& media);
     bool epHasCall(Endpoint* ep);
     int epAnswer(Endpoint* ep);                 // 0=성공, 그 외 SIP 코드(488 코덱 불일치 등)
-    bool epReject(Endpoint* ep, int code);
-    bool epBye(Endpoint* ep);
+    int epProgress(Endpoint* ep);               // 183 early media — 피어 신원만(UE 는 481)
+    bool epReject(Endpoint* ep, int code, int cause = 0);
+    bool epBye(Endpoint* ep, int cause = 0);
+    bool epHold(Endpoint* ep, bool hold);
+    bool epRefer(Endpoint* from, Endpoint* to);
+    bool epDtmf(Endpoint* ep, const std::string& digits);
+    void sampleDtmf(Endpoint* ep);
+    std::string callerRole(Instance& in);
     void epClearCall(Endpoint* ep);
     std::string roleOf(Instance* in, Endpoint* ep);
     static long long nowMs();

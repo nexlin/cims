@@ -187,6 +187,37 @@ run 전에 대상 OAM 의 컬렉션 API(`PUT /api/v1/deployments/{id}/collection
 - **CSP 정합 보완**(같은 변경): 피어링 접속점(`edge=peering`)으로 들어온 요청은 Digest 챌린지 없이 통과한다 — 신뢰는 ACL(TS 24.229 §5.10
   IBCF, TS 29.165 II-NNI). psip UAC 는 등록 정보 없는 401/407 을 재전송하지 않고 최종 실패로 넘긴다(전엔 INVITE↔401 무한 루프).
 
+**pbx·mgcf 구현 반영**(D 단계 — 같은 `CsimPeer`/워커/컨트롤러 위에 얹은 능력, UE 측은 `SimSession` 에 대응 능력):
+- **183 early media · 100rel/PRACK**(RFC 3262) — 단계 `progress`(who=피어) → `CsimPeer::Progress` = 183 + SDP answer(첫 공통 코덱, 링백 RTP
+  송신 시작). 착신 INVITE 가 100rel 을 지원(Supported/Require)하고 풀 `prack` 이면 RSeq 를 싣고, 상대 PRACK 을 `prack_rx` 로 센다. 200 은 같은 answer 를 반복.
+  UE 풀 `prack: true` 면 발신 INVITE 에 `Supported/Require: 100rel`, RSeq 있는 1xx 에 PRACK(`prack_tx`), 183 SDP 면 early media 수신 시작(`early_media`).
+  피어 UAC(mgcf/ibcf 기본 `prack` 켬, pbx 끔)도 같다. 워커는 183 뒤 발신자의 1xx 도달(RING 이벤트)까지 기다린다 — CSP 가 183/SDP 를 전달하지 않으면 시한 실패.
+- **hold/resume**(RFC 3264 §8.4) — 단계 `hold`/`resume`(who|from) → re-INVITE `a=sendonly` / `a=sendrecv`(psip `HoldCall/ResumeCall`), 최종 응답을
+  `reinvite_ok/fail` 로 센다. 수신 re-INVITE 는 psip 이 200 으로 answer 하고 방향만 관측(`reinvite_rx`·`remote_hold`). UE·피어 양쪽 지원.
+- **blind REFER**(RFC 3515) — 단계 `refer from: <전달자> to: <대상 역할>` → `Refer-To = 대상 신원`(psip `TransferCallBlind`), 최종 응답 `refer_codes.<n>`
+  (기대 기본 202). CSP(B2BUA)가 REFER 를 종단해 대상에 INVITE 를 내고 전달자 leg 를 BYE 로 접는다 — 시나리오는 이어서 `answer who: [대상]`.
+- **RFC 4733 DTMF** — `telephone-event` 를 오퍼(PT 101, 클록 = 첫 코덱 클록)하고 answer 는 오퍼 것을 echo(RFC 3264 §6.1). 협상 PT 는 `CRtpThread::m_iDtmfPt`
+  로 — 송신 스레드가 20 ms 틱에 오디오 대신 이벤트 패킷(같은 SSRC/시퀀스, 이벤트 동안 타임스탬프 고정, 마커 첫 패킷, duration 누적, 종료 E 비트 3회)을
+  내고, 수신은 E 비트 기준 이벤트 수·숫자열(지터 계산에서 제외). 단계 `dtmf from: … payload: "1234#"` → 숫자열 송신 후 다 나갈 때까지 대기,
+  수신 수는 `bye` 에서 표본(`dtmf_tx`=단계 숫자 수·`dtmf_sent`=실제 송신 이벤트·`dtmf_rx`). 루프백 단위시험 `build/bin/csim_rtp_dtmf_test`.
+- **Q.850 Reason**(RFC 3326) — `bye`/`reject` 의 `cause: <1..127>` → psip `StopCall(callId, code, "Q.850;cause=N")`(BYE·최종 응답·CANCEL 에 Reason). 수신은
+  스택 콜백(UA 보다 먼저)에서 BYE/CANCEL/실패 최종 응답의 Reason 을 읽어 `OnCallEnd(…, q850)` 로 전달 → `q850_rx`·`q850.<cause>`. 비율 `q850_rx_pct` 가
+  B2BUA 투과 여부를 말한다.
+- **pbx 트렁크 REGISTER**(SIPconnect 2.0 §8 등록 모드) — 풀 `register: { user, ha1_env | password_env, realm?, expires }`. 컨트롤러가 환경변수를 풀어
+  `PoolCreate.trunk_register` 로 내리고(없으면 컴파일 오류), 워커는 prelude 에서 **풀당 한 번** `CsimPeer::Register`(대상 access 접속점 — Digest 챌린지가 있는
+  쪽, bind 와 같은 transport, psip 등록 스레드가 401 을 처리). 결과로 풀 신원 전부를 `registered` 로 표시(계정 하나가 DID 범위 대표). 시나리오
+  `register who: [pbx]` 는 트렁크 계정이 있는 피어 풀만 허용(컴파일·워커 양쪽 검사). 등록 실패면 그 역할의 free 단말이 없어 run 이 곧 닫힌다.
+- **다이얼·시드** — UE 가 피어 신원을 부르는 꼴은 프로파일이 정한다: ibcf = `user@피어도메인`(Request-URI host → `req_uri_host eq` 규칙), **pbx/mgcf =
+  번호 그대로**(DID/E.164 — 실 단말이 다이얼하는 꼴). 시드 매칭 집합은 도메인 규칙 OR **번호 접두 규칙**(`req_uri_user prefix` = 신원 범위의 공통 접두,
+  `tester-rule-<풀>-prefix`) — CSP 가 자기 도메인 Request-URI 의 번호 접두로 트렁크 RouteSet 을 고르는 것을 실측 확인(BGCF 식 번호 라우팅).
+- **오퍼 코덱** — `invite` 의 `media.audio`(pcmu/pcma/amr-wb …)를 UE 오퍼 코덱으로 쓴다(`SimSession::SetOfferCodec`). 협상 코덱이 AMR-WB 가 아니면 파일
+  미디어 대신 합성 PCMU(G.711 PT 로 스탬프) — pbx 상대 G.711 relay 경로와 AMR-WB 단독 오퍼(488, cmp.md §11 트랜스코딩 전) 를 시나리오가 고른다.
+- **실측**(개발서버 CSP 0.2.126, 워커 동거): `TRUNK-PBX-OUTBOUND`(UE PCMU → PBX DID, 번호 prefix 라우팅) pass · `TRUNK-PBX-INBOUND` pass ·
+  `TRUNK-PBX-HOLD-RESUME`(re-INVITE 2/2 200) pass · `TRUNK-PBX-TRANSFER`(REFER 202 → 대상 착신·전달자 BYE) pass · `TRUNK-PBX-DTMF` dtmf_rx 100 %
+  (CMP 가 telephone-event PT 를 투과) · `TRUNK-MGCF-OUTBOUND` early_media 100 %·prack 100 %(CSP 가 183/SDP·PRACK 전달) · `TRUNK-MGCF-INBOUND` pass.
+  **fail 로 남은 것 = CIMS 과제(§12)**: Reason Q.850 미투과(`q850_rx` 0 — DTMF/MGCF-OUTBOUND 의 `q850_rx_pct`), `TRUNK-MGCF-REJECT-Q850` 의 503 이 발신자에
+  603 으로 도달, `TRUNK-PBX-REGISTER` 403(CSP 트렁크 계정 수신 미구현).
+
 ### 3.3 `real-ue`
 
 `cimsue-cli --json` 을 워커가 스폰해 JSON 한 줄 결과(`rx_pkts`·`granted`·exit code 표)를 지표로 받는다.
@@ -252,8 +283,10 @@ ihs_threshold_pct: 0.1               # 부적절 처리 시나리오 비율 — 
 stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 ```
 
-- 단계(step) 어휘는 cspsim 시나리오 enum 을 **데이터로 옮긴 것**이다: `register/deregister/invite/answer/reject/bye/refer/replaces/join/pickup/
-  subscribe/publish/group_call/floor_request/floor_release/sds_send/sds_recv/media_hold/wait/expect`. 새 단계 = 워커 재빌드, 새 시나리오 = YAML 만.
+- 단계(step) 어휘는 cspsim 시나리오 enum 을 **데이터로 옮긴 것**이다: `register/deregister/invite/progress/answer/reject/bye/hold/resume/dtmf/refer/
+  replaces/join/pickup/subscribe/publish/group_call/floor_request/floor_release/sds_send/sds_recv/media_hold/wait/expect`. 새 단계 = 워커 재빌드, 새 시나리오 = YAML 만.
+  피어 축 단계(§3.2 D): `progress`(who — 183 early media) · `hold`/`resume`(who|from — re-INVITE) · `dtmf`(from + `payload` 숫자열) · `refer`(from + to) ·
+  `bye`/`reject` 의 `cause`(Reason Q.850). 워커 지원 = `register/invite/progress/answer/reject/bye/hold/resume/dtmf/refer/media_hold/wait/expect/deregister`.
 - **실행 의미(워커)** — 흐름을 셋으로 나눈다. **prelude** = 앞쪽의 `register`(+`wait`) 단계: 역할 슬라이스의 단말 **전부**를 run 시작 때 한 번
   등록한다(`Timers.RegisterIntervalMs` 간격, 이미 등록된 단말은 재사용). **body** = 나머지: **시나리오 인스턴스** 하나가 실행하는 단위 — 인스턴스는
   `rate_saps` 로 발생하고(토큰 버킷), 역할마다 free 단말을 하나씩 잡아 단계를 차례로 실행한 뒤 돌려준다. free 단말이 모자라면 그 슬롯은 `skipped`
@@ -283,6 +316,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 | 세션 비율 | SER · SEER · SCR · ISA | 성립률(200/시도)·유효 성립률(사용자 거절 제외)·완료율(정상 BYE/성립)·부적절 시도 |
 | 부하 | SApS · 동시 세션 · DOC · IHS | 단계별 시도율, 순간 동시, 설계 목표 용량(IHS 임계 넘기 직전 단계), 부적절 처리 비율 |
 | 미디어 | 손실 % · 지터 ms · 단방향 무음 · MOS 추정 | RTP seq/timestamp(RFC 3550), RTCP 수신 시 상대 보고, G.107 E-model R→MOS(선택) |
+| 피어 트렁크 | `early_media_pct` · `prack_pct` · `dtmf_rx_pct` · `q850_rx_pct` · re-INVITE/REFER 코드 | 발신기 관측 비율(`RATIO_METRICS` — 분자/분모 카운터 정의 단일): 183+SDP 도달/183 송신, PRACK 수신/신뢰 183, DTMF 수신 이벤트/송신 숫자, Reason 수신/송신. B2BUA 투과 여부를 말한다 |
 | PTT | floor request→granted · taken 도달 · queue 대기 · 그룹 fan-out 완료 시간 | TS 24.380 메시지 시각 |
 | MCData | SDS 전달 지연 · disposition 회신율 | TS 24.282 |
 | 대상 측 | CSP/CMP/CSC CPU·RSS · 5xx 수 · 알람 발생 · 포트/세션 누수 · 로그 ERROR/FATAL | 대상 OAM API·heartbeat·ssh 샘플러 — 발생기 시계와 같은 1초 버킷에 정렬 |
@@ -388,7 +422,8 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
   `Sip.PortBase`(0=OS 자동, >0 = base+2i) · `Media.AudioFile/VideoFile`(비면 합성 PCMU/비디오 없음) · `Limits.EndpointsPerCore/SapsPerCore`(용량 선언) ·
   `Timers.*`. 배포 overlay `config.json`(평면 키)은 lifecycle 가 모듈 설정에 머지하고 워커도 자기 옆의 것을 읽는다. libcsim 의 printf 진단은 부하 중
   초당 수천 줄이라 워커는 stdout 을 `/dev/null` 로 돌리고(`--verbose` 로 유지) 자기 로그는 stderr 로 낸다.
-- 검증 게이트: `S1-UNIT-TESTER`(계약·핸들러·오케스트레이터(가짜 워커)·게이트웨이 SSE 단위시험) · `S1-CONFIG-PORTABILITY` 대상에 두 모듈 설정 ·
+- 검증 게이트: `S1-UNIT-TESTER`(계약·핸들러·오케스트레이터(가짜 워커)·피어 시드 파생·게이트웨이 SSE 단위시험 + 네이티브 `build/bin/csim_rtp_dtmf_test`
+  RFC 4733 루프백) · `S1-CONFIG-PORTABILITY` 대상에 두 모듈 설정 ·
   `S2-PREFLIGHT` 네이티브 바이너리 목록 · `S4-PKG-BUILD` 기대 tarball 에 `oam-cims-tester`·`cims-tester-worker`.
 - 파이썬 인터프리터 선택은 [os_portability.md](os_portability.md) 규칙(`--python` > 동봉 > `python3.14` > `python3`)을 따른다.
 - 워커 호스트 = 시험 대상과 **다른** 호스트(N 대). 독립 형태의 컨트롤러 노드는 워커 중 한 대에 동거해도 된다(소규모).
@@ -416,7 +451,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 | **A. 계약 + base 확장** | 시나리오/프로파일 YAML 스키마, 워커 제어·관측 JSONL 스키마, 지표 정의표(§5), 목표 규모(§11) 확정. base 확장 셋 — ① 게이트웨이 SSE 통과(§6.2) ② 콘솔 번들 하나 + nav 섹션 서비스 게이팅(§7) ③ nav 그룹 `test` | 본 문서 갱신 + `ems/tester/oam/schema/*.json`(스키마 단위시험). base 확장은 기존 콘솔·oam-svc 동작 무변경으로 S3 게이트 PASS | M |
 | **B. UE 축 + 컨트롤러 최소** | `libcsim` 추출(SimSession/RtpThread → 라이브러리, cspsim 은 그 위 CLI), `cims-tester-worker` ue 풀·단계 실행기·1초 집계 스트림, `oam-cims-tester` run/저장/CLI + pkg·config_template·self-register, 프로파일 constant·step(+ramp·soak·burst) | **구현 반영** — 개발서버 CSP(UDP 15060) 상대로 `cims-tester run VOLTE-CALL-BASIC --topology … --instances 3` 완주(SER 100 %, RRD p95 5 ms, SRD ≈ after_ms+20 ms, RTP 손실 0, 보고서·기대치 판정), 워커 단독 4쌍 1 SApS 지속. 남은 것 = 부하 강화 문서 시험(4 cps/HT20, 10 cps/HT5) 재현 실측·워커 2대 분산 실측·`db` 신원 원천(대상 CSC 위임)·워커 자동 발견(base 배포 목록)·대상 관측(`stop_on.target_cpu_pct`) | L |
 | **C. 피어 축 — ibcf** | peer 엔진(고정 수신점·신원 범위·응답 정책·무응답) + `ibcf` 프로파일, 대상 CSP 컬렉션 시드/복원, 트렁크 in/out·route_set failover·ACL 시나리오 | **구현 반영** — `CsimPeer` 엔진·워커 peer 풀·컨트롤러 시드/복원(§3.2). 개발서버 CSP 상대 실측: `TRUNK-IBCF-OUTBOUND`(가입자→피어, SRD p95 820 ms, RTP 손실 0)·`TRUNK-IBCF-ACL-DENY`(피어링 접속점 ACL → 403) **pass**, `TRUNK-IBCF-INBOUND`(피어→피어링 접속점→가입자, SRD p95 1185 ms, RTP 손실 0) **pass**(CSP 피어링 접속점 인증 생략 반영본), `TRUNK-IBCF-FAILOVER` 는 CSP 헬스체크 부재로 우선(무응답) 피어에서 Timer B — §12 확인. 남은 것 = 오류 주입(응답 지연·특정 코드·재전송 유실)·TLS 상호인증·THIG 흔적 | M |
-| **D. 피어 축 — pbx · mgcf** | 트렁크 REGISTER, DID/내선, 183 early media·PRACK, hold/resume, REFER 발신, RFC 4733 DTMF, Q.850 Reason, G.711 | PBX 내선 ↔ CIMS 가입자 양방향 호, MGCF 경유 E.164 발착신 시나리오. 코덱 불일치(G.711↔AMR-WB) 결과를 §12 로 | M |
+| **D. 피어 축 — pbx · mgcf** | 트렁크 REGISTER, DID/내선, 183 early media·PRACK, hold/resume, REFER 발신, RFC 4733 DTMF, Q.850 Reason, G.711 | **구현 반영**(§3.2 pbx·mgcf) — 시나리오 `trunk/pbx_{outbound,inbound,dtmf,hold_resume,transfer,register}.yaml`·`trunk/mgcf_{outbound,inbound,reject_q850}.yaml`. 개발서버 실측 7 pass / 3 fail — fail 은 전부 CIMS 측(§12: Reason 미투과·503→603·트렁크 계정). 남은 것 = UE 측 183(실 단말 착신 모사 아님)·in-band DTMF·G.722·TLS 상호인증 | M |
 | **E. 콘솔 팩** | §7 화면 전부, SSE 라이브, 비교·보고서. cims-verify S3/S6 시나리오 항목의 `cims-tester` 호출 이전 | 콘솔에서 시나리오 편집→실행→보고서까지 완주. S3/S6 관련 항목 이전 후 게이트 PASS 유지 | L |
 | **F. 확장** | MCData SDS/MSRP ue 단계, `real-ue` 편입, NAT(netns) 풀, MOS 추정, soak 프로파일 + 누수 판정, 대상 알람 타임라인 겹침 | 야간 소크 스크립트 대체 | M |
 
@@ -448,11 +483,15 @@ B 가 끝나면 성능 시험이, C·D 가 끝나면 피어 연동 기능 시험
 | 항목 | 현 상태 | 시험에서 보이는 모습 |
 |---|---|---|
 | RouteSet 헬스체크(OPTIONS 프로브) | 미구현, `alive` 항상 true | 피어 1대 정지 시 failover 안 됨 — **실측 확인**(`TRUNK-IBCF-FAILOVER`): failover 집합의 우선 피어가 무응답이면 B-leg 가 Timer B(32 s)까지 기다리고 다음 피어로 넘어가지 않는다(A-leg 도 그동안 최종 응답 없음) |
-| 트렁크 REGISTER(`register_to_remote`, 수신 측 트렁크 계정) | 미구현 | PBX 등록형 트렁크 시나리오 불가 |
+| 트렁크 REGISTER(`register_to_remote`, 수신 측 트렁크 계정) | 미구현 | **실측**(`TRUNK-PBX-REGISTER`): PBX 계정의 Digest REGISTER 가 가입자 조회에서 403 — 등록형 트렁크 시나리오는 attempts 0 으로 닫힌다. 고정 IP 피어링(ACL 신뢰)만 동작 |
 | THIG·번호 정규화·`Privacy` | 없음 | ibcf 프로파일의 신원·프라이버시 검사 실패. (`P-Asserted-Identity` 는 psip 이 발신 leg 도메인으로 실어 B-leg 에 있다 — 실측 `pai_missing` 0) |
 | 피어링 접속점 인바운드 인증 | **반영** — `edge=peering` 접속점의 요청은 Digest 챌린지 없이 통과(신뢰 = ACL). 그 전엔 피어 INVITE 에 401 | `TRUNK-IBCF-INBOUND` 가 401 로 실패 + psip UAC 가 401 에 INVITE 를 무한 재송(같은 변경에서 수정) |
-| PRACK/100rel·183 early media 트렁크 전달 | 미확인 | mgcf 프로파일 링백 시나리오 |
+| PRACK/100rel·183 early media 트렁크 전달 | **정상 확인** — `TRUNK-MGCF-OUTBOUND` 실측 early_media 100 %·prack 100 %(CSP 가 183/SDP 를 A-leg 로, A-leg PRACK 을 B-leg 로 전달, PRACK SDP 재작성 §5.2) | 회귀 시험 항목으로 유지 |
+| re-INVITE hold/resume·REFER 트렁크 전달 | **정상 확인** — `TRUNK-PBX-HOLD-RESUME`(re-INVITE 200 2/2)·`TRUNK-PBX-TRANSFER`(피어 leg REFER 202 → 대상 INVITE → 전달자 BYE) | 회귀 시험 항목 |
+| RFC 4733 telephone-event 투과(CMP) | **정상 확인** — `TRUNK-PBX-DTMF` dtmf_rx 100 %(CMP `PRtpRelay` 가 협상 PT/TE PT 만 통과) | 회귀 시험 항목 |
+| 번호 prefix 라우팅(자기 도메인 Request-URI → 트렁크 RouteSet) | **정상 확인** — `req_uri_user prefix` 규칙으로 UE 가 DID/E.164 를 그대로 다이얼 | pbx/mgcf 시드 규칙 |
 | G.711 ↔ AMR-WB 트랜스코딩 | **채택** — [../modules/cmp.md](../modules/cmp.md) §11 설계, 구현 전 | 구현 전까지 pbx 프로파일 G.711 호는 488 또는 미디어 무음. 구현 뒤 = pbx 시나리오가 회귀 시험 |
 | RFC 4028 세션 타이머 | 설계만([leg_liveness.md](leg_liveness.md)) | 피어 leg 유실 회수 시나리오 |
-| `Reason: Q.850` 종료 사유 전달 | 없음 | 통계 실패 사유 분해 불일치 |
+| `Reason: Q.850` 종료 사유 전달 | 없음 — **실측 확인**: 피어 BYE `Reason: Q.850;cause=16` 이 상대 leg BYE 에 없고(`q850_rx` 0, `TRUNK-PBX-DTMF`·`TRUNK-MGCF-OUTBOUND`), 거절 503 + `Reason` 도 발신자에 Reason 없이 도달 | 통계 실패 사유 분해 불일치. B2BUA 는 BYE/최종 응답의 Reason 을 상대 leg 에 복사해야 한다(RFC 3326 §2, TS 24.229 §5.4.3.2) |
+| 트렁크 최종 응답 코드 매핑 | B-leg 503 → A-leg **603 Decline** (`TRUNK-MGCF-REJECT-Q850` 실측 `codes.603`) | 발신자가 망 장애를 사용자 거절로 본다. RFC 3261 §16.7 은 503 을 500 으로 바꿀 수 있다고만 했다 — 4xx/5xx 는 그대로(또는 503→500) 전달해야 한다 |
 | `Setup.Roles.IBCF=false` 인데 피어 라우팅이 동작 | 가드 누락 | 역할 격리 시나리오 실패 |

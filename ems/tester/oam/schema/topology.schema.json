@@ -202,6 +202,12 @@
           "title": "Domain",
           "type": "string"
         },
+        "dtmf": {
+          "default": true,
+          "description": "RFC 4733 telephone-event 오퍼/echo",
+          "title": "Dtmf",
+          "type": "boolean"
+        },
         "identities": {
           "$ref": "#/$defs/PeerIdentities"
         },
@@ -209,6 +215,19 @@
           "const": "peer",
           "title": "Kind",
           "type": "string"
+        },
+        "prack": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "RFC 3262 100rel/PRACK — 생략=프로파일 기본(ibcf/mgcf 켬, pbx 끔)",
+          "title": "Prack"
         },
         "profile": {
           "enum": [
@@ -247,11 +266,52 @@
     },
     "PeerRegister": {
       "additionalProperties": false,
+      "description": "pbx 트렁크 REGISTER(SIPconnect 2.0 §8 등록 모드) — 계정 하나가 DID 범위를 대표. 대상의 access 접속점으로 Digest 등록.",
       "properties": {
+        "expires": {
+          "default": 3600,
+          "minimum": 60,
+          "title": "Expires",
+          "type": "integer"
+        },
         "ha1_env": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
           "description": "H(A1) 을 담은 환경변수 — 비밀은 YAML 에 두지 않는다",
-          "title": "Ha1 Env",
-          "type": "string"
+          "title": "Ha1 Env"
+        },
+        "password_env": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "평문 비밀번호 환경변수 — ha1_env 가 없을 때",
+          "title": "Password Env"
+        },
+        "realm": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Digest realm·To/From host — 비면 target.csp.domain_volte",
+          "title": "Realm"
         },
         "user": {
           "title": "User",
@@ -259,8 +319,7 @@
         }
       },
       "required": [
-        "user",
-        "ha1_env"
+        "user"
       ],
       "title": "PeerRegister",
       "type": "object"
@@ -603,10 +662,22 @@
     "UePool": {
       "additionalProperties": false,
       "properties": {
+        "dtmf": {
+          "default": true,
+          "description": "RFC 4733 telephone-event 를 오퍼/echo — dtmf 단계의 전제",
+          "title": "Dtmf",
+          "type": "boolean"
+        },
         "kind": {
           "const": "ue",
           "title": "Kind",
           "type": "string"
+        },
+        "prack": {
+          "default": false,
+          "description": "RFC 3262 100rel — 발신 INVITE 에 Supported/Require: 100rel, RSeq 1xx 에 PRACK (mgcf early media 시험)",
+          "title": "Prack",
+          "type": "boolean"
         },
         "register_expires": {
           "default": 3600,

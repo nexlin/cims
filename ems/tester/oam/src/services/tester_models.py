@@ -100,6 +100,8 @@ class UePool(_Strict):
     transport: Transport = 'udp'
     srtp: SrtpMode = 'off'
     register_expires: int = Field(default=3600, ge=60)
+    prack: bool = Field(default=False, description='RFC 3262 100rel — 발신 INVITE 에 Supported/Require: 100rel, RSeq 1xx 에 PRACK (mgcf early media 시험)')
+    dtmf: bool = Field(default=True, description='RFC 4733 telephone-event 를 오퍼/echo — dtmf 단계의 전제')
 
 
 class PeerBind(_Strict):
@@ -122,8 +124,18 @@ class PeerIdentities(_Strict):
 
 
 class PeerRegister(_Strict):
+    """pbx 트렁크 REGISTER(SIPconnect 2.0 §8 등록 모드) — 계정 하나가 DID 범위를 대표. 대상의 access 접속점으로 Digest 등록."""
     user: str
-    ha1_env: str = Field(description='H(A1) 을 담은 환경변수 — 비밀은 YAML 에 두지 않는다')
+    ha1_env: Optional[str] = Field(default=None, description='H(A1) 을 담은 환경변수 — 비밀은 YAML 에 두지 않는다')
+    password_env: Optional[str] = Field(default=None, description='평문 비밀번호 환경변수 — ha1_env 가 없을 때')
+    realm: Optional[str] = Field(default=None, description='Digest realm·To/From host — 비면 target.csp.domain_volte')
+    expires: int = Field(default=3600, ge=60)
+
+    @model_validator(mode='after')
+    def _secret(self):
+        if not (self.ha1_env or self.password_env):
+            raise ValueError('register 에 ha1_env 또는 password_env 하나는 필요하다')
+        return self
 
 
 class PeerSeed(_Strict):
@@ -150,7 +162,14 @@ class PeerPool(_Strict):
         default=None,
         description='오퍼 코덱(우선순위 순). 생략=프로파일 기본 — ibcf/mgcf: AMR-WB,AMR,PCMU,PCMA · pbx: PCMA,PCMU (§3.2)')
     answer: Literal['normal', 'silent'] = Field(default='normal', description='silent = 착신 INVITE 무응답(죽은 피어 — failover 시험)')
+    prack: Optional[bool] = Field(default=None, description='RFC 3262 100rel/PRACK — 생략=프로파일 기본(ibcf/mgcf 켬, pbx 끔)')
+    dtmf: bool = Field(default=True, description='RFC 4733 telephone-event 오퍼/echo')
     seed: PeerSeed = Field(default_factory=PeerSeed)
+
+    @property
+    def dial(self) -> str:
+        """UE 가 이 피어 신원을 부르는 꼴 — ibcf 는 user@도메인(Request-URI host 규칙), pbx/mgcf 는 번호 그대로(DID/E.164 prefix 규칙)."""
+        return 'domain' if self.profile == 'ibcf' else 'number'
 
 
 class RealUePool(_Strict):
@@ -184,7 +203,8 @@ class Topology(_Strict):
 # ──────────────────────────────────────────────────────────────────────────
 
 StepKind = Literal[
-    'register', 'deregister', 'invite', 'answer', 'reject', 'bye',
+    'register', 'deregister', 'invite', 'progress', 'answer', 'reject', 'bye',
+    'hold', 'resume', 'dtmf',
     'refer', 'replaces', 'join', 'pickup', 'subscribe', 'publish',
     'group_call', 'floor_request', 'floor_release', 'sds_send', 'sds_recv',
     'media_hold', 'wait', 'expect',
@@ -198,7 +218,19 @@ METRIC_NAMES = (
     'rtp_loss_pct', 'jitter_ms', 'mos',
     'floor_grant_ms', 'floor_taken_ms', 'floor_queue_ms',
     'sds_delay_ms', 'sds_disposition_pct',
+    # 피어 pbx/mgcf 축(D) — 비율은 발생기 관측(송신 대비 수신)
+    'dtmf_rx_pct', 'q850_rx_pct', 'early_media_pct', 'prack_pct',
 )
+
+# 비율 지표의 분자/분모 카운터 — 요약·판정이 같은 정의를 쓴다(§5)
+RATIO_METRICS = {
+    'ser_pct': ('sessions', 'attempts'),
+    'scr_pct': ('completed', 'sessions'),
+    'dtmf_rx_pct': ('dtmf_rx', 'dtmf_tx'),          # 수신 이벤트 수 / 송신 숫자 수
+    'q850_rx_pct': ('q850_rx', 'q850_tx'),          # Reason Q.850 수신 / 송신 (B2BUA 투과 여부)
+    'early_media_pct': ('early_media', 'progress_tx'),   # 발신자에 도달한 183+SDP / 피어가 낸 183
+    'prack_pct': ('prack_rx', 'progress_tx'),       # 피어 UAS 가 받은 PRACK / 낸 신뢰 183
+}
 
 
 class Percentiles(_Strict):
@@ -232,7 +264,9 @@ class Step(_Strict):
     seconds: Optional[Union[int, str]] = Field(default=None, description='정수 또는 ${ht} 같은 바인딩')
     media: Optional[Media] = None
     group: Optional[str] = None
-    payload: Optional[str] = None
+    payload: Optional[str] = Field(default=None, description='dtmf: 숫자열(0-9*#A-D) · reject: 응답 코드')
+    cause: Optional[int] = Field(default=None, ge=1, le=127,
+                                 description='bye/reject 의 Reason: Q.850;cause= (RFC 3326 — MGCF 종료 사유, 16=정상 34=회선 없음)')
     expect: Dict[str, Expectation] = Field(default_factory=dict)
 
     @field_validator('expect')
@@ -245,13 +279,20 @@ class Step(_Strict):
 
     @model_validator(mode='after')
     def _actor(self):
-        if self.step in ('invite', 'refer', 'bye', 'sds_send') and not (self.from_ or self.who):
+        if self.step in ('invite', 'refer', 'bye', 'sds_send', 'hold', 'resume', 'dtmf') and not (self.from_ or self.who):
             raise ValueError(f'{self.step} 단계는 from 또는 who 가 필요하다')
-        if self.step in ('register', 'deregister', 'answer', 'reject', 'subscribe', 'publish',
+        if self.step in ('register', 'deregister', 'answer', 'reject', 'progress', 'subscribe', 'publish',
                          'floor_request', 'floor_release', 'sds_recv') and not self.who:
             raise ValueError(f'{self.step} 단계는 who 가 필요하다')
         if self.step in ('media_hold', 'wait') and self.seconds is None:
             raise ValueError(f'{self.step} 단계는 seconds 가 필요하다')
+        if self.step == 'dtmf':
+            if not self.payload or any(c not in '0123456789*#ABCDabcd' for c in self.payload):
+                raise ValueError('dtmf 단계는 payload 에 숫자열(0-9 * # A-D)이 필요하다')
+        if self.step == 'refer' and not (self.from_ and self.to):
+            raise ValueError('refer 단계는 from(전달자)과 to(전달 대상 역할)가 필요하다')
+        if self.cause is not None and self.step not in ('bye', 'reject'):
+            raise ValueError('cause 는 bye/reject 단계에만 둔다')
         return self
 
 
@@ -354,6 +395,15 @@ class Identity(_Strict):
     aka_opc: Optional[str] = None
 
 
+class TrunkRegister(_Strict):
+    """워커에 내려가는 트렁크 REGISTER 계정 — 컨트롤러가 환경변수(ha1_env/password_env)를 풀어 값으로 채운다."""
+    user: str
+    realm: Optional[str] = None
+    ha1: Optional[str] = None
+    password: Optional[str] = None
+    expires: int = 3600
+
+
 class PoolCreate(_Strict):
     """POST /pools — 풀 생성·신원 적재. 멱등(pool 이름 기준)."""
     pool: str
@@ -361,8 +411,11 @@ class PoolCreate(_Strict):
     identities: List[Identity] = Field(default_factory=list)
     transport: Transport = 'udp'
     srtp: SrtpMode = 'off'
+    prack: bool = Field(default=False, description='kind=ue — 100rel/PRACK')
+    dtmf: bool = Field(default=True, description='kind=ue — telephone-event 오퍼/echo')
     target_csp: TargetCsp
     peer: Optional[PeerPool] = Field(default=None, description='kind=peer 일 때 프로파일·bind·신원 범위')
+    trunk_register: Optional[TrunkRegister] = Field(default=None, description='kind=peer(pbx) 트렁크 REGISTER 계정 — 비밀 해석 완료본')
 
 
 class CompiledStep(_Strict):
@@ -377,6 +430,7 @@ class CompiledStep(_Strict):
     media: Optional[Media] = None
     group: Optional[str] = None
     payload: Optional[str] = None
+    cause: Optional[int] = None
     expect: Dict[str, Expectation] = Field(default_factory=dict)
 
 

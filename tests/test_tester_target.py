@@ -292,6 +292,77 @@ class SeedDerivation(unittest.TestCase):
             os.environ['UT_OAM_TOKEN'] = 'tok'
 
 
+class PbxMgcf(unittest.TestCase):
+    """D 단계 — 번호 접두 규칙·트렁크 REGISTER 비밀 해석·피어 register 역할 검사."""
+
+    def _topo(self):
+        w = FakeWorker('w1')
+        doc = _topology([w])
+        doc['pools']['pbx_hq'] = {'kind': 'peer', 'profile': 'pbx', 'bind': {'ip': '127.0.0.1', 'port': 5090, 'protocol': 'udp'},
+                                  'domain': 'pbx.hq.test', 'register': {'user': 'pbx-hq', 'ha1_env': 'UT_PBX_HA1'},
+                                  'identities': {'did_range': ['0212345000', '0212345099']}, 'codecs': ['PCMA', 'PCMU']}
+        doc['pools']['mgcf_pstn'] = {'kind': 'peer', 'profile': 'mgcf', 'bind': {'ip': '127.0.0.1', 'port': 5095, 'protocol': 'udp'},
+                                     'domain': 'mgcf.pstn.test', 'identities': {'e164_range': ['+82312340000', '+82312340099']}}
+        return w, doc, M.Topology.model_validate(doc)
+
+    def test_number_prefix_rule(self):
+        _, _, topo = self._topo()
+        self.assertEqual(T.number_prefix(topo.pools['pbx_hq']), '02123450')
+        self.assertEqual(T.number_prefix(topo.pools['mgcf_pstn']), '+823123400')
+        recs = T.derive_records(topo, {'pbx_hq': topo.pools['pbx_hq'], 'mgcf_pstn': topo.pools['mgcf_pstn'],
+                                       'peer_kt': topo.pools['peer_kt']}, 'cims-tester-peering')
+        names = {r['name']: r for r in recs['rules']}
+        self.assertEqual(names['tester-rule-pbx_hq-prefix']['field'], 'req_uri_user')
+        self.assertEqual(names['tester-rule-pbx_hq-prefix']['op'], 'prefix')
+        self.assertEqual(names['tester-rule-mgcf_pstn-prefix']['value'], '+823123400')
+        self.assertNotIn('tester-rule-peer_kt-prefix', names)   # ibcf 는 도메인만
+        match = {r['name']: r for r in recs['rule_sets']}['tester-rs-mgcf_pstn-match']
+        self.assertEqual([m['rule_ref'] for m in match['members']], ['tester-rule-mgcf_pstn-domain', 'tester-rule-mgcf_pstn-prefix'])
+
+    def test_trunk_register_secret(self):
+        _, _, topo = self._topo()
+        os.environ.pop('UT_PBX_HA1', None)
+        with self.assertRaises(C.CompileError):
+            C.trunk_register_for('pbx_hq', topo.pools['pbx_hq'])
+        os.environ['UT_PBX_HA1'] = 'cd' * 16
+        tr = C.trunk_register_for('pbx_hq', topo.pools['pbx_hq'])
+        self.assertEqual((tr.user, tr.ha1, tr.expires), ('pbx-hq', 'cd' * 16, 3600))
+        self.assertIsNone(C.trunk_register_for('mgcf_pstn', topo.pools['mgcf_pstn']))
+
+    def test_register_role_on_peer_requires_trunk(self):
+        _, _, topo = self._topo()
+        sc = M.Scenario.model_validate({'id': 'UT-REG', 'roles': {'m': {'pool': 'mgcf_pstn'}, 'u': {'pool': 'volte_ue'}},
+                                        'flow': [{'step': 'register', 'who': ['m', 'u']}, {'step': 'invite', 'from': 'm', 'to': 'u'}]})
+        with self.assertRaises(C.CompileError):
+            C.check_register_roles(sc, topo)
+        sc2 = M.Scenario.model_validate({'id': 'UT-REG2', 'roles': {'p': {'pool': 'pbx_hq'}, 'u': {'pool': 'volte_ue'}},
+                                         'flow': [{'step': 'register', 'who': ['p', 'u']}, {'step': 'invite', 'from': 'p', 'to': 'u'}]})
+        C.check_register_roles(sc2, topo)   # 트렁크 계정 있음 — 통과
+
+    def test_compile_pool_create_carries_options(self):
+        w, doc, topo = self._topo()
+        os.environ['UT_PBX_HA1'] = 'cd' * 16
+        doc['pools']['volte_ue']['prack'] = True
+        topo = M.Topology.model_validate(doc)
+        sc, _, _ = S.get_scenario('TRUNK-PBX-REGISTER')
+        from services import tester_workers as TW
+        ws = TW.discover(doc)
+        for x in ws:
+            x.probe()
+        plan = C.compile_run('r-pbx', sc, topo, doc, None, {}, ws, lambda w: '127.0.0.1:1', 1, None)
+        pools = {p['pool']: p for p in plan['workers']['w1']['pools']}
+        self.assertEqual(pools['pbx_hq']['trunk_register']['ha1'], 'cd' * 16)
+        self.assertTrue(pools['volte_ue']['prack'])
+        steps = {s['step']: s for s in plan['steps']}
+        self.assertIn('register', steps)
+        sc2, _, _ = S.get_scenario('TRUNK-MGCF-OUTBOUND')
+        doc2 = json.loads(json.dumps(doc))
+        plan2 = C.compile_run('r-mgcf', sc2, topo, doc2, None, {}, ws, lambda w: '127.0.0.1:1', 1, None)
+        bye = [s for s in plan2['steps'] if s['step'] == 'bye'][0]
+        self.assertEqual(bye['cause'], 16)
+        self.assertEqual([s['step'] for s in plan2['steps']], ['register', 'invite', 'progress', 'answer', 'media_hold', 'bye'])
+
+
 class DriverPeer(unittest.TestCase):
     def _run(self, scenario_id, oam, flow=None, instances=2):
         w = FakeWorker('w1')

@@ -15,8 +15,17 @@ struct ICsimObserver {
     virtual void OnIncomingCall(SimSession* /*s*/, const std::string& /*callId*/, const std::string& /*from*/) {}
     /** 발신 INVITE 의 2xx(확립) — srdMs = StartCall → 200. */
     virtual void OnCallStart(SimSession* /*s*/, const std::string& /*callId*/, long long /*srdMs*/) {}
-    /** 다이얼로그 종료 — 발신 실패 최종 응답(4xx/5xx/6xx)·상대 BYE(200)·CANCEL(487)·타이머 만료. */
-    virtual void OnCallEnd(SimSession* /*s*/, const std::string& /*callId*/, int /*iSipStatus*/) {}
+    /** 다이얼로그 종료 — 발신 실패 최종 응답(4xx/5xx/6xx)·상대 BYE(200)·CANCEL(487)·타이머 만료.
+     *  iQ850 = 상대 BYE/최종 응답의 Reason `Q.850;cause=`(RFC 3326, 0 = 없음). */
+    virtual void OnCallEnd(SimSession* /*s*/, const std::string& /*callId*/, int /*iSipStatus*/, int /*iQ850*/) {}
+    /** 발신 INVITE 의 1xx — bHasSdp = early media answer(183), bPrackSent = RSeq 가 있어 PRACK 을 냈다(RFC 3262). */
+    virtual void OnCallRing(SimSession* /*s*/, const std::string& /*callId*/, int /*iSipStatus*/, bool /*bHasSdp*/, bool /*bPrackSent*/) {}
+    /** 상대 re-INVITE 수신(psip 이 200 answer) — bRemoteHold = a=sendonly/inactive. */
+    virtual void OnReInvite(SimSession* /*s*/, const std::string& /*callId*/, bool /*bRemoteHold*/) {}
+    /** 자기 re-INVITE(Hold/Resume) 최종 응답. */
+    virtual void OnReInviteResponse(SimSession* /*s*/, const std::string& /*callId*/, int /*iSipStatus*/) {}
+    /** 자기 REFER 최종 응답(202 정상). */
+    virtual void OnReferResponse(SimSession* /*s*/, const std::string& /*callId*/, int /*iSipStatus*/) {}
     /** 로컬 BYE 의 최종 응답 — sddMs = StopCall → 응답. */
     virtual void OnByeResponse(SimSession* /*s*/, const std::string& /*callId*/, int /*iSipStatus*/, long long /*sddMs*/) {}
 };

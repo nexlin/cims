@@ -96,6 +96,48 @@ class Strictness(unittest.TestCase):
         self.assertIsNone(m)
         self.assertTrue(errs)
 
+    def test_d_stage_steps(self):
+        # dtmf 는 숫자열 payload 필수, cause 는 bye/reject 만, refer 는 from+to
+        doc = self._scn()
+        doc['flow'].append({'step': 'dtmf', 'from': 'a', 'payload': '12x'})
+        _, errs = validate('scenario', doc)
+        self.assertTrue(any('dtmf' in e for e in errs), errs)
+        doc = self._scn()
+        doc['flow'].append({'step': 'invite', 'from': 'a', 'to': 'b', 'cause': 16})
+        _, errs = validate('scenario', doc)
+        self.assertTrue(any('cause' in e for e in errs), errs)
+        doc = self._scn()
+        doc['flow'].append({'step': 'refer', 'from': 'a'})
+        _, errs = validate('scenario', doc)
+        self.assertTrue(any('refer' in e for e in errs), errs)
+        doc = self._scn()
+        doc['flow'][2] = {'step': 'bye', 'from': 'a', 'cause': 16, 'expect': {'q850_rx_pct': 100, 'dtmf_rx_pct': 100}}
+        doc['flow'].insert(2, {'step': 'progress', 'who': ['b'], 'after_ms': 100, 'expect': {'code': 183, 'early_media_pct': 100}})
+        doc['flow'].insert(3, {'step': 'hold', 'who': ['b']})
+        doc['flow'].insert(4, {'step': 'dtmf', 'from': 'a', 'payload': '12#A'})
+        m, errs = validate('scenario', doc)
+        self.assertEqual(errs, [])
+        self.assertEqual(m.flow[-1].cause, 16)
+
+    def test_ratio_metrics_are_metric_names(self):
+        from services.tester_models import METRIC_NAMES, RATIO_METRICS
+        for k in RATIO_METRICS:
+            self.assertIn(k, METRIC_NAMES)
+
+    def test_pool_options(self):
+        m, errs = validate('topology', _load(os.path.join(_TESTER, 'scenarios', 'topology.sample.yaml')))
+        self.assertEqual(errs, [])
+        self.assertTrue(m.pools['volte_ue'].prack)
+        self.assertEqual(m.pools['mgcf_pstn'].profile, 'mgcf')
+        self.assertEqual(m.pools['mgcf_pstn'].dial, 'number')
+        self.assertEqual(m.pools['peer_kt'].dial, 'domain')
+        self.assertIsNone(m.pools['mgcf_pstn'].prack)   # 프로파일 기본은 워커가 정한다
+        # register 에는 ha1_env 또는 password_env
+        doc = _load(os.path.join(_TESTER, 'scenarios', 'topology.sample.yaml'))
+        doc['pools']['pbx_hq']['register'] = {'user': 'x'}
+        _, errs = validate('topology', doc)
+        self.assertTrue(any('ha1_env' in e for e in errs), errs)
+
 
 class SchemaFilesInSync(unittest.TestCase):
     def test_schema_dir_matches_models(self):

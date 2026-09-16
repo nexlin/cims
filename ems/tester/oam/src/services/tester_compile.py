@@ -18,7 +18,8 @@ import re
 from typing import Dict, List, Optional, Tuple
 
 from services import tester_store as store
-from services.tester_models import LoadProfile, Scenario, Topology, PoolCreate, RunStart, CompiledStep, Identity
+from services.tester_models import (LoadProfile, Scenario, Topology, PoolCreate, RunStart, CompiledStep, Identity,
+                                    TrunkRegister)
 
 
 class CompileError(Exception):
@@ -144,10 +145,35 @@ def compile_steps(scenario: Scenario, bindings: Dict[str, object]) -> List[dict]
             idx=i, step=s.step, who=list(s.who or []), **{'from': s.from_}, to=s.to,
             after_ms=int(s.after_ms or 0),
             seconds=(int(bind_value(s.seconds, bindings)) if s.seconds is not None else None),
-            media=s.media, group=s.group, payload=s.payload, expect=s.expect,
+            media=s.media, group=s.group, payload=s.payload, cause=s.cause, expect=s.expect,
         )
         out.append(cs.model_dump(by_alias=True, exclude_none=True))
     return out
+
+
+def trunk_register_for(pool_name: str, peer) -> Optional[TrunkRegister]:
+    """피어 풀의 register(트렁크 계정) → 워커용 값 — 비밀은 환경변수에서 푼다(없으면 컴파일 오류, 조용히 빈 값으로 보내지 않는다)."""
+    reg = getattr(peer, 'trunk_register', None)
+    if reg is None:
+        return None
+    ha1 = os.environ.get(reg.ha1_env, '').strip() if reg.ha1_env else ''
+    pw = os.environ.get(reg.password_env, '').strip() if reg.password_env else ''
+    if not ha1 and not pw:
+        env = reg.ha1_env or reg.password_env
+        raise CompileError(f'pool {pool_name}: 트렁크 REGISTER 비밀이 없다 — 환경변수 {env} 에 H(A1)/비밀번호를 둔다')
+    return TrunkRegister(user=reg.user, realm=reg.realm, ha1=ha1 or None, password=pw or None, expires=reg.expires)
+
+
+def check_register_roles(scenario: Scenario, topology: Topology) -> None:
+    """register 단계의 역할이 피어 풀이면 트렁크 계정(register)이 있어야 한다 — 피어 신원은 개별 등록이 없다(§3.2)."""
+    for i, st in enumerate(scenario.flow):
+        if st.step not in ('register', 'deregister'):
+            continue
+        for role in st.who or []:
+            pool = topology.pools.get(scenario.roles[role].pool)
+            if pool is not None and getattr(pool, 'kind', None) == 'peer' and getattr(pool, 'trunk_register', None) is None:
+                raise CompileError(f'flow[{i}] {st.step}: 역할 {role!r} 의 피어 풀에는 register(트렁크 계정)가 없다 — '
+                                   f'고정 IP 피어링 피어는 등록하지 않는다')
 
 
 def role_ranges(scenario: Scenario, pool_sizes: Dict[str, int]) -> Dict[str, Tuple[str, int, int]]:
@@ -235,6 +261,7 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
     if profile is not None and profile.ht is not None and 'ht' not in bindings:
         bindings['ht'] = profile.ht
     steps = compile_steps(scenario, bindings)
+    check_register_roles(scenario, topology)
 
     # 풀 신원
     pools_doc = topology_doc.get('pools') or {}
@@ -306,10 +333,12 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
             if pdoc.get('kind') == 'peer':
                 pc = PoolCreate(pool=pname, kind='peer', identities=[identities[pname][g] for g in glist],
                                 transport=str((pdoc.get('bind') or {}).get('protocol') or 'udp'),
-                                target_csp=topology.target.csp, peer=topology.pools[pname])
+                                target_csp=topology.target.csp, peer=topology.pools[pname],
+                                trunk_register=trunk_register_for(pname, topology.pools[pname]))
             else:
                 pc = PoolCreate(pool=pname, kind='ue', identities=[identities[pname][g] for g in glist],
                                 transport=pdoc.get('transport', 'udp'), srtp=pdoc.get('srtp', 'off'),
+                                prack=bool(pdoc.get('prack', False)), dtmf=bool(pdoc.get('dtmf', True)),
                                 target_csp=topology.target.csp)
             pools.append(pc.model_dump(by_alias=True, exclude_none=True))
         slices = {}

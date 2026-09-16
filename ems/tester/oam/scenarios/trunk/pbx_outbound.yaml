@@ -1,0 +1,14 @@
+# IP-PBX 트렁크 발신 — 가입자가 PBX DID(국번 그대로)를 호출, PBX 가 G.711 로 응답. UE 가 PCMU 를 오퍼하면 순수 relay 경로,
+# AMR-WB 만 오퍼하면 PBX 488(cmp.md §11 트랜스코딩 전) — media.audio 로 두 경로를 고른다.
+id: TRUNK-PBX-OUTBOUND
+title: 가입자 → IP-PBX DID 발신 (G.711 relay)
+tags: [trunk, pbx]
+roles:
+  caller: { pool: volte_ue }
+  pbx:    { pool: pbx_hq }
+flow:
+  - { step: register,   who: [caller], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: pbx, media: { audio: pcmu } }
+  - { step: answer,     who: [pbx], after_ms: 800, expect: { code: 200, srd_ms: { p95: 2000 } } }
+  - { step: media_hold, seconds: 5, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }

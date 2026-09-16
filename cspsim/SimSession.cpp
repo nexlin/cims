@@ -55,7 +55,8 @@ int FindOfferedPt(CSipCallRtp* pclsOffer, const CSipCodecEntry& clsEntry) {
  *  bSavp 면 protocol 을 RTP/SAVP 로 낸다 (answer 는 오퍼 protocol echo — 호출자 책임). */
 int BuildAudioMedia(CSipCallRtp& clsRtp, int iPort, int iCodecPt, CSipCallRtp* pclsOffer,
                     bool bSavp = false, const std::string& strCryptoSuite = "",
-                    const std::string& strCryptoKey = "", const std::string& strCryptoTag = "1") {
+                    const std::string& strCryptoKey = "", const std::string& strCryptoTag = "1",
+                    int iDtmfPt = -1, int iDtmfClock = 8000) {
     const CSipCodecEntry* pclsEntry = CSipCodecTable::FindByPt(iCodecPt);
     if (pclsEntry == NULL) pclsEntry = CSipCodecTable::FindByPt(0);  // 미인식 오퍼 → PCMU 관용 (레거시 동작)
     if (pclsEntry == NULL) pclsEntry = &CSipCodecTable::GetTop();
@@ -77,8 +78,41 @@ int BuildAudioMedia(CSipCallRtp& clsRtp, int iPort, int iCodecPt, CSipCallRtp* p
                  strCryptoKey.c_str());
         clsAudio.AddAttribute("crypto", szVal);
     }
+    if (iDtmfPt >= 0) {
+        // RFC 4733 telephone-event — 오퍼는 PT 101/코덱 클록, answer 는 오퍼 것을 echo(호출자가 FindOfferedTelephoneEvent 로 찾아 준다)
+        clsAudio.AddFmt(iDtmfPt);
+        snprintf(szVal, sizeof(szVal), "%d telephone-event/%d", iDtmfPt, iDtmfClock);
+        clsAudio.AddAttribute("rtpmap", szVal);
+        snprintf(szVal, sizeof(szVal), "%d 0-16", iDtmfPt);
+        clsAudio.AddAttribute("fmtp", szVal);
+    }
     clsRtp.m_clsMediaList.push_back(clsAudio);
     return iWirePt;
+}
+
+/** 상대 SDP 첫 active audio m-line 의 telephone-event PT(없으면 -1)와 클록. */
+int FindOfferedTelephoneEvent(CSipCallRtp* pclsSdp, int& iClock) {
+    iClock = 8000;
+    if (pclsSdp == NULL) return -1;
+    for (SDP_MEDIA_LIST::iterator itM = pclsSdp->m_clsMediaList.begin(); itM != pclsSdp->m_clsMediaList.end(); ++itM) {
+        if (strcasecmp(itM->m_strMedia.c_str(), "audio") || itM->m_iPort <= 0) continue;
+        for (SDP_ATTRIBUTE_LIST::iterator itA = itM->m_clsAttributeList.begin(); itA != itM->m_clsAttributeList.end(); ++itA) {
+            if (strcasecmp(itA->m_strName.c_str(), "rtpmap")) continue;
+            const char* pszSp = strchr(itA->m_strValue.c_str(), ' ');
+            if (pszSp == NULL || strncasecmp(pszSp + 1, "telephone-event", 15)) continue;
+            const char* pszSl = strchr(pszSp + 1, '/');
+            if (pszSl) iClock = atoi(pszSl + 1);
+            return atoi(itA->m_strValue.c_str());
+        }
+        return -1;
+    }
+    return -1;
+}
+
+/** 협상 코덱(테이블 PT)에 따라 파일 미디어 사용 여부를 정한다 — AMR-WB 합의일 때만 파일, 그 외 합성 PCMU. */
+void ApplyMediaFileForCodec(CRtpThread& clsRtp, int iCodecPt) {
+    const CSipCodecEntry* pclsEntry = CSipCodecTable::FindByPt(iCodecPt);
+    clsRtp.m_bUseMediaFile = pclsEntry && strcasecmp(pclsEntry->m_strName.c_str(), "AMR-WB") == 0;
 }
 
 /** 미디어 SRTP 자기 송신 키 생성 — base64(key16||salt14). 실패 시 빈 문자열. */
@@ -1042,8 +1076,17 @@ void SimSession::StartCall(const std::string& strTarget) {
 
     clsRtp.m_strIp  = m_clsSetup.m_strLocalIp;
     clsRtp.m_iPort  = m_clsRtpThread.m_iPort;
-    // 미디어 파일 지정 시 서비스 코덱(테이블 최우선 — 기본 AMR-WB 96), 아니면 합성 PCMU(0)
-    clsRtp.m_iCodec = m_clsRtpThread.m_strMediaFile.empty() ? 0 : CSipCodecTable::GetTop().m_iPt;
+    // 미디어 파일 지정 시 서비스 코덱(테이블 최우선 — 기본 AMR-WB 96), 아니면 합성 PCMU(0). 계측기는 SetOfferCodec 으로 지정
+    clsRtp.m_iCodec = m_iOfferCodec >= 0 ? m_iOfferCodec
+                                         : (m_clsRtpThread.m_strMediaFile.empty() ? 0 : CSipCodecTable::GetTop().m_iPt);
+    ApplyMediaFileForCodec(m_clsRtpThread, clsRtp.m_iCodec);
+    m_clsRtpThread.m_iDtmfPt = -1;   // answer 가 echo 하면 EventCallStart 에서 확정
+    int iOfferDtmfPt = -1, iOfferDtmfClock = 8000;
+    if (m_bDtmf) {
+        const CSipCodecEntry* pclsOfferEntry = CSipCodecTable::FindByPt(clsRtp.m_iCodec);
+        iOfferDtmfPt = m_iDtmfPt;
+        if (pclsOfferEntry && pclsOfferEntry->m_iClockRate > 0) iOfferDtmfClock = pclsOfferEntry->m_iClockRate;
+    }
     // PTT: SDP에 m=application(floor 수신 포트) 광고
     if (m_bPttMode && m_clsRtpThread.m_iFloorRecvPort > 0)
         clsRtp.m_iApplicationPort = m_clsRtpThread.m_iFloorRecvPort;
@@ -1063,7 +1106,7 @@ void SimSession::StartCall(const std::string& strTarget) {
     // Audio media line — 오퍼러이므로 테이블 PT 로 광고, RTP 송신 PT 도 동일 값으로
     m_clsRtpThread.m_iAudioPt =
         BuildAudioMedia(clsRtp, m_clsRtpThread.m_iPort, clsRtp.m_iCodec, NULL, m_iSrtpMode >= 2,
-                        bSrtpOffer ? "AES_CM_128_HMAC_SHA1_80" : "", m_strSrtpLocalKey);
+                        bSrtpOffer ? "AES_CM_128_HMAC_SHA1_80" : "", m_strSrtpLocalKey, "1", iOfferDtmfPt, iOfferDtmfClock);
     // Video media line (if video file set) — SRTP 오퍼 시 비디오도 자기 키로 a=crypto (m-line 단위)
     m_strSrtpVideoLocalKey.clear();
     if (m_clsRtpThread.m_iVideoPort > 0) {
@@ -1085,6 +1128,7 @@ void SimSession::StartCall(const std::string& strTarget) {
     clsRoute.m_strDestIp  = m_strServerIp;
     clsRoute.m_iDestPort  = RoutePort();  // IPsec 등록 뒤에는 port_ps
     clsRoute.m_eTransport = m_eTransport;  // 등록과 같은 transport 로 발신 (TCP/TLS 호 회귀)
+    clsRoute.m_b100rel = m_bPrack;         // RFC 3262 — Supported/Require: 100rel
 
     std::string strDst = strTarget.empty() ? m_strServerIp : strTarget;
     m_stats.tCallStart = NowMs();
@@ -1305,7 +1349,23 @@ static void ParseAndLogMcpttInfo(int iId, const std::string& strBody) {
 // ─────────────────────────────────────────────
 //  ISipStackCallBack - 수신 요청 처리
 // ─────────────────────────────────────────────
+/** RFC 3326 Reason 의 Q.850 cause (없으면 0). */
+static int ParseReasonQ850(CSipMessage* pclsMessage) {
+    CSipHeader* pclsHeader = pclsMessage ? pclsMessage->GetHeader("Reason") : NULL;
+    if (pclsHeader == NULL) return 0;
+    const char* p = strcasestr(pclsHeader->m_strValue.c_str(), "Q.850");
+    const char* c = p ? strcasestr(p, "cause=") : NULL;
+    int v = c ? atoi(c + 6) : 0;
+    return v > 0 ? v : 0;
+}
+
 bool SimSession::RecvRequest(int /*iThreadId*/, CSipMessage* pclsMessage) {
+    // 상대 BYE/CANCEL 의 Reason(RFC 3326 Q.850) — EventCallEnd 가 관측자에 전달한다. 처리는 UA 에 위임.
+    if (pclsMessage->IsMethod(SIP_METHOD_BYE) || pclsMessage->IsMethod(SIP_METHOD_CANCEL)) {
+        int iQ = ParseReasonQ850(pclsMessage);
+        if (iQ > 0) m_iPendingQ850 = iQ;
+        return false;
+    }
     // INVITE: mcptt-info+xml 파싱만 하고 처리는 SipUserAgent에 위임
     if (pclsMessage->IsMethod("INVITE")) {
         if (!pclsMessage->m_strBody.empty()) {
@@ -1470,6 +1530,11 @@ bool SimSession::RecvRequest(int /*iThreadId*/, CSipMessage* pclsMessage) {
 }
 
 bool SimSession::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
+    // 발신 실패 최종 응답의 Reason(MGCF 503 + Q.850;cause=34 등) — EventCallEnd 가 관측자에 전달
+    if (pclsMessage->m_clsCSeq.m_strMethod == "INVITE" && pclsMessage->m_iStatusCode >= 300) {
+        int iQ = ParseReasonQ850(pclsMessage);
+        if (iQ > 0) m_iPendingQ850 = iQ;
+    }
     // BYE 최종 응답 — RFC 6076 SDD(세션 해제 지연) 표본. psip UA 는 로컬 BYE 의 응답을 응용에 알리지 않으므로
     //   스택 콜백(UA 보다 먼저 등록)에서 관찰한다. 처리는 UA 에 위임(return false).
     if (m_pObserver && pclsMessage->m_clsCSeq.m_strMethod == "BYE" && pclsMessage->m_iStatusCode >= 200) {
@@ -2053,10 +2118,16 @@ void SessionSipClient::AnswerVoip(const char* pszCallId, CSipCallRtp* pclsRtp) {
 
 #ifdef USE_MEDIA_LIST
     // 200 OK SDP에 audio(오퍼 PT echo) + video 미디어 포함
+    // telephone-event echo (RFC 4733) — 오퍼가 냈고 이 세션이 DTMF 를 켰을 때만. 협상 코덱이 AMR-WB 가 아니면 합성 PCMU
+    int iAnsDtmfClock = 8000;
+    int iAnsDtmfPt = m_pOwner->m_bDtmf ? FindOfferedTelephoneEvent(pclsRtp, iAnsDtmfClock) : -1;
+    m_pOwner->m_clsRtpThread.m_iDtmfPt = iAnsDtmfPt;
+    if (iAnsDtmfPt >= 0) m_pOwner->m_clsRtpThread.m_iDtmfClock = iAnsDtmfClock;
+    ApplyMediaFileForCodec(m_pOwner->m_clsRtpThread, clsLocalRtp.m_iCodec);
     m_pOwner->m_clsRtpThread.m_iAudioPt =
         BuildAudioMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iPort, clsLocalRtp.m_iCodec, pclsRtp,
                         bSrtpAnswer && pclsRtp->m_bRemoteSavp, bSrtpAnswer ? strSrtpSuite : "",
-                        m_pOwner->m_strSrtpLocalKey, strSrtpTag);
+                        m_pOwner->m_strSrtpLocalKey, strSrtpTag, iAnsDtmfPt, iAnsDtmfClock);
     if (m_pOwner->m_clsRtpThread.m_iVideoPort > 0)
         BuildVideoMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iVideoPort, bVideoSrtpAnswer && bVideoSavp,
                         bVideoSrtpAnswer ? strVideoSuite : "", m_pOwner->m_strSrtpVideoLocalKey, strVideoTag);
@@ -2113,6 +2184,14 @@ void SessionSipClient::EventCallStart(const char* pszCallId, CSipCallRtp* pclsRt
             m_pOwner->m_clsRtpThread.ClearVideoSrtp();
         }
     }
+    if (pclsRtp) {
+        // answer 의 telephone-event / 코덱 — RFC 4733 송신 PT 와 파일 미디어 여부(AMR-WB 합의일 때만)를 확정
+        int iClock = 8000;
+        int iPt = m_pOwner->m_bDtmf ? FindOfferedTelephoneEvent(pclsRtp, iClock) : -1;
+        m_pOwner->m_clsRtpThread.m_iDtmfPt = iPt;
+        if (iPt >= 0) m_pOwner->m_clsRtpThread.m_iDtmfClock = iClock;
+        if (pclsRtp->m_iCodec >= 0) ApplyMediaFileForCodec(m_pOwner->m_clsRtpThread, pclsRtp->m_iCodec);
+    }
     CSipClient::EventCallStart(pszCallId, pclsRtp);
     // 발신자(UAC, PTT): 200 OK 의 m=application(SharedFloorPort) 을 floor dest 로 학습.
     //   (member 는 INVITE 에서 학습; caller 는 여기 200 OK 에서.) 미지정 시 audio+1 fallback.
@@ -2139,7 +2218,10 @@ void SessionSipClient::EventCallStart(const char* pszCallId, CSipCallRtp* pclsRt
 void SessionSipClient::EventCallEnd(const char* pszCallId, int iSipStatus) {
     CSipClient::EventCallEnd(pszCallId, iSipStatus);
     m_pOwner->m_stats.iCallEnd++;
-    if (m_pOwner->m_pObserver) m_pOwner->m_pObserver->OnCallEnd(m_pOwner, pszCallId, iSipStatus);
+    int iQ850 = m_pOwner->m_iPendingQ850;
+    m_pOwner->m_iPendingQ850 = 0;
+    m_pOwner->m_iLastQ850 = iQ850;
+    if (m_pOwner->m_pObserver) m_pOwner->m_pObserver->OnCallEnd(m_pOwner, pszCallId, iSipStatus, iQ850);
     // 다른 다이얼로그(예: 당겨받기 뒤 서버가 CANCEL 한 자기 링잉 착신 leg, 487)의 종료는 현재 호 상태를 건드리지 않는다.
     if (!m_pOwner->m_strInviteId.empty() && pszCallId && m_pOwner->m_strInviteId != pszCallId) {
         printf("[%d] CALL ENDED (other dialog) CallId=%s status=%d — current=%s kept\n", m_pOwner->m_iId, pszCallId,
@@ -2155,4 +2237,50 @@ void SessionSipClient::EventCallEnd(const char* pszCallId, int iSipStatus) {
 void SessionSipClient::EventTransferResponse(const char* pszCallId, int iSipStatus) {
     m_pOwner->m_iReferStatus = iSipStatus;
     printf("[%d] [XFER] REFER response status=%d CallId=%s\n", m_pOwner->m_iId, iSipStatus, pszCallId);
+    if (iSipStatus >= 200 && m_pOwner->m_pObserver) m_pOwner->m_pObserver->OnReferResponse(m_pOwner, pszCallId, iSipStatus);
+}
+
+void SessionSipClient::EventCallRing(const char* pszCallId, int iSipStatus, CSipCallRtp* pclsRtp) {
+    CSipClient::EventCallRing(pszCallId, iSipStatus, pclsRtp);
+    // RFC 3262 §4 — RSeq 가 실린 신뢰 1xx 는 PRACK 으로 확인(psip 은 RSeq 적재만, PRACK 은 UA 몫). 183 의 SDP 는 우리 오퍼의
+    //   answer 라 PRACK 은 SDP 없이 낸다. 183 early media 면 링백 수신을 위해 RTP 를 그 주소로 시작한다(200 에서 목적지 갱신).
+    bool bPrackSent = false;
+    if (m_pOwner->m_bPrack && m_pUserAgent->GetRSeq(pszCallId) != -1) bPrackSent = m_pUserAgent->SendPrack(pszCallId, NULL);
+    bool bHasSdp = pclsRtp && pclsRtp->m_iPort > 0;
+    if (bHasSdp && !m_pOwner->m_bPttMode && m_pOwner->m_strSrtpLocalKey.empty()) {
+        int iClock = 8000;
+        int iPt = m_pOwner->m_bDtmf ? FindOfferedTelephoneEvent(pclsRtp, iClock) : -1;
+        m_pOwner->m_clsRtpThread.m_iDtmfPt = iPt;
+        if (iPt >= 0) m_pOwner->m_clsRtpThread.m_iDtmfClock = iClock;
+        if (pclsRtp->m_iCodec >= 0) ApplyMediaFileForCodec(m_pOwner->m_clsRtpThread, pclsRtp->m_iCodec);
+        m_pOwner->m_clsRtpThread.Start(pclsRtp->m_strIp.c_str(), pclsRtp->m_iPort);
+    }
+    if (m_pOwner->m_pObserver) m_pOwner->m_pObserver->OnCallRing(m_pOwner, pszCallId, iSipStatus, bHasSdp, bPrackSent);
+}
+
+void SessionSipClient::EventReInvite(const char* pszCallId, CSipCallRtp* pclsRemoteRtp, CSipCallRtp* /*pclsLocalRtp*/) {
+    // psip 이 200 answer(로컬 SDP 유지)를 낸다 — 방향(hold = sendonly/inactive, RFC 3264 §8.4)만 관측
+    bool bHold = pclsRemoteRtp && (pclsRemoteRtp->m_eDirection == E_RTP_SEND || pclsRemoteRtp->m_eDirection == E_RTP_INACTIVE);
+    printf("[%d] re-INVITE from peer CallId=%s %s\n", m_pOwner->m_iId, pszCallId, bHold ? "(hold)" : "(sendrecv)");
+    if (m_pOwner->m_pObserver) m_pOwner->m_pObserver->OnReInvite(m_pOwner, pszCallId, bHold);
+}
+
+void SessionSipClient::EventReInviteResponse(const char* pszCallId, int iSipStatus, CSipCallRtp* /*pclsRemoteRtp*/) {
+    if (iSipStatus < 200) return;
+    if (m_pOwner->m_pObserver) m_pOwner->m_pObserver->OnReInviteResponse(m_pOwner, pszCallId, iSipStatus);
+}
+
+bool SimSession::Hold() {
+    if (m_strInviteId.empty() || !m_bInCall) return false;
+    return m_clsUserAgent.HoldCall(m_strInviteId.c_str(), E_RTP_SEND);
+}
+
+bool SimSession::Resume() {
+    if (m_strInviteId.empty() || !m_bInCall) return false;
+    return m_clsUserAgent.ResumeCall(m_strInviteId.c_str());
+}
+
+bool SimSession::SendDtmf(const std::string& strDigits) {
+    if (m_strInviteId.empty() || !m_bInCall) return false;
+    return m_clsRtpThread.SendDtmf(strDigits);
 }

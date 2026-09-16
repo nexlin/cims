@@ -9,6 +9,18 @@
           "title": "After Ms",
           "type": "integer"
         },
+        "cause": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cause"
+        },
         "expect": {
           "additionalProperties": {
             "anyOf": [
@@ -95,9 +107,13 @@
             "register",
             "deregister",
             "invite",
+            "progress",
             "answer",
             "reject",
             "bye",
+            "hold",
+            "resume",
+            "dtmf",
             "refer",
             "replaces",
             "join",

@@ -215,6 +215,21 @@
           "default": null,
           "title": "After Ms"
         },
+        "cause": {
+          "anyOf": [
+            {
+              "maximum": 127,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "bye/reject 의 Reason: Q.850;cause= (RFC 3326 — MGCF 종료 사유, 16=정상 34=회선 없음)",
+          "title": "Cause"
+        },
         "expect": {
           "additionalProperties": {
             "anyOf": [
@@ -277,6 +292,7 @@
             }
           ],
           "default": null,
+          "description": "dtmf: 숫자열(0-9*#A-D) · reject: 응답 코드",
           "title": "Payload"
         },
         "seconds": {
@@ -300,9 +316,13 @@
             "register",
             "deregister",
             "invite",
+            "progress",
             "answer",
             "reject",
             "bye",
+            "hold",
+            "resume",
+            "dtmf",
             "refer",
             "replaces",
             "join",

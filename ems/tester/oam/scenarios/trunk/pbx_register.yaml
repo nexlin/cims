@@ -1,0 +1,14 @@
+# IP-PBX 등록형 트렁크(SIPconnect 2.0 §8) — PBX 계정 하나가 대상 access 접속점에 Digest REGISTER 로 DID 범위를 대표한 뒤 발신.
+# CSP 의 트렁크 계정 수신(sip_service_model.md §9 미구현)이 없으면 REGISTER 가 403/404 로 끝나 attempts 0 — §12 항목.
+id: TRUNK-PBX-REGISTER
+title: IP-PBX 트렁크 REGISTER 뒤 발신
+tags: [trunk, pbx, register]
+roles:
+  pbx:    { pool: pbx_hq }
+  callee: { pool: volte_ue }
+flow:
+  - { step: register,   who: [pbx, callee], expect: { code: 200 } }
+  - { step: invite,     from: pbx, to: callee }
+  - { step: answer,     who: [callee], after_ms: 500, expect: { code: 200 } }
+  - { step: media_hold, seconds: 3 }
+  - { step: bye,        from: pbx, expect: { sdd_ms: { p95: 300 } } }

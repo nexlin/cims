@@ -64,6 +64,8 @@ public:
 
 	bool StartCall( const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp, CSipCallRoute * pclsRoute, std::string & strCallId );
 	bool StopCall( const char * pszCallId, int iSipCode = 0 );
+	/** 통화 종료/거절에 Reason 헤더(RFC 3326 — 예: "Q.850;cause=16")를 싣는다. pszReason 이 NULL 이면 StopCall(pszCallId, iSipCode) 과 같다. */
+	bool StopCall( const char * pszCallId, int iSipCode, const char * pszReason );
 	bool StopCall( const char * pszCallId, const char * pszForward );
 	bool RingCall( const char * pszCallId, CSipCallRtp * pclsRtp );
 	bool RingCall( const char * pszCallId, int iSipStatus, CSipCallRtp * pclsRtp );

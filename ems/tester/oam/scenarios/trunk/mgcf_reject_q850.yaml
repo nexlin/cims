@@ -1,0 +1,12 @@
+# MGCF 거절 + Q.850 — PSTN 측 회선 없음을 MGCF 가 503 + Reason: Q.850;cause=34 로 돌려준다(TS 29.163 §7.4.2 ISUP cause → SIP 매핑).
+# 발신자는 503 을 기대하고, Reason 이 발신 UE 까지 투과되는지를 q850_rx_pct 로 본다.
+id: TRUNK-MGCF-REJECT-Q850
+title: MGCF 503 + Reason Q.850 cause=34
+tags: [trunk, mgcf, q850]
+roles:
+  caller: { pool: volte_ue }
+  mgcf:   { pool: mgcf_pstn }
+flow:
+  - { step: register,   who: [caller], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: mgcf, expect: { code: 503 } }
+  - { step: reject,     who: [mgcf], after_ms: 300, cause: 34, expect: { code: 503, q850_rx_pct: 100 } }

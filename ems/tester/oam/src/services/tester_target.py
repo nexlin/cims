@@ -141,10 +141,26 @@ def pick_local_node(topology: Topology, current_local_nodes: List[dict]) -> Tupl
     raise TargetError('대상 local_nodes 에서 route 의 접속점을 고를 수 없다 — target.csp.peering 을 준다')
 
 
+def number_prefix(p: PeerPool) -> Optional[str]:
+    """신원 범위(e164_range/did_range)의 공통 접두 — pbx/mgcf 번호 라우팅 규칙(req_uri_user prefix)의 값. 접두가 비면 None."""
+    rng = p.identities.e164_range or p.identities.did_range
+    if not rng:
+        return None
+    lo, hi = str(rng[0]), str(rng[1])
+    n = 0
+    while n < min(len(lo), len(hi)) and lo[n] == hi[n]:
+        n += 1
+    return lo[:n] or None
+
+
 def derive_records(topology: Topology, pools: Dict[str, PeerPool], local_node_ref: str) -> Dict[str, List[dict]]:
-    """피어 풀 → 컬렉션별 새 레코드(태그 cims-tester). 이름 규약: tester-<종류>-<풀|route_set>."""
+    """피어 풀 → 컬렉션별 새 레코드(태그 cims-tester). 이름 규약: tester-<종류>-<풀|route_set>.
+
+    매칭 규칙 = 도메인(`req_uri_host eq` — ibcf, UE 가 user@피어도메인 을 다이얼) OR 번호 접두(`req_uri_user prefix` — pbx/mgcf,
+    UE 가 DID/E.164 를 그대로 다이얼, BGCF 식 번호 라우팅). 두 규칙을 같은 RouteSet 의 match 집합에 OR 로 넣는다."""
     out: Dict[str, List[dict]] = {c: [] for c in COLLECTIONS}
     by_set: Dict[str, List[Tuple[str, PeerPool]]] = {}
+    match_rules: Dict[str, List[str]] = {}
     for name, p in pools.items():
         rn = f'tester-rn-{name}'
         rt = f'tester-r-{name}'
@@ -161,6 +177,15 @@ def derive_records(topology: Topology, pools: Dict[str, PeerPool], local_node_re
             'name': f'tester-rule-{name}-domain', 'enabled': True, 'field': 'req_uri_host', 'op': 'eq', 'value': p.domain,
             'tags': [SEED_TAG, 'routing'],
         })
+        rules = [f'tester-rule-{name}-domain']
+        prefix = number_prefix(p) if p.dial == 'number' else None
+        if prefix:
+            out['rules'].append({
+                'name': f'tester-rule-{name}-prefix', 'enabled': True, 'field': 'req_uri_user', 'op': 'prefix', 'value': prefix,
+                'tags': [SEED_TAG, 'routing'],
+            })
+            rules.append(f'tester-rule-{name}-prefix')
+        match_rules[name] = rules
         if p.seed.acl:
             out['rules'].append({
                 'name': f'tester-rule-{name}-src', 'enabled': True, 'field': 'src_ip', 'op': 'eq', 'value': p.bind.ip,
@@ -186,7 +211,7 @@ def derive_records(topology: Topology, pools: Dict[str, PeerPool], local_node_re
         })
         out['rule_sets'].append({
             'name': f'tester-rs-{rs_name}-match', 'enabled': True, 'combinator': 'OR',
-            'members': [{'rule_ref': f'tester-rule-{n}-domain', 'negate': False} for n, _ in members], 'tags': [SEED_TAG],
+            'members': [{'rule_ref': r, 'negate': False} for n, _ in members for r in match_rules[n]], 'tags': [SEED_TAG],
         })
         out['routing_policies'].append({
             'name': f'tester-rp-{rs_name}', 'enabled': True, 'priority': 50, 'match_rule_set_ref': f'tester-rs-{rs_name}-match',

@@ -57,6 +57,12 @@ bool CSipUserAgent::StartCall( const char * pszFrom, const char * pszTo, CSipCal
 // 통화를 종료한다. 통화 요청을 보내고 연결되지 않으면 통화 취소 메시지를 전송한다. 통화 연결되었으면 통화 종료 메시지를 전송한다. 통화 수락인 경우 통화 거절 응답 메시지를 전송한다.
 bool CSipUserAgent::StopCall( const char * pszCallId, int iSipCode )
 {
+	return StopCall( pszCallId, iSipCode, NULL );
+}
+
+// 통화 종료/거절 — pszReason 이 있으면 BYE/최종 응답/CANCEL 에 Reason 헤더(RFC 3326)를 싣는다.
+bool CSipUserAgent::StopCall( const char * pszCallId, int iSipCode, const char * pszReason )
+{
 	SIP_DIALOG_MAP::iterator		itMap;
 	bool	bRes = false;
 	CSipMessage * pclsMessage = NULL;
@@ -105,6 +111,7 @@ bool CSipUserAgent::StopCall( const char * pszCallId, int iSipCode )
 
 	if( pclsMessage )
 	{
+		if( pszReason && pszReason[0] ) pclsMessage->AddHeader( "Reason", pszReason );
 		m_clsSipStack.SendSipMessage( pclsMessage );
 	}
 

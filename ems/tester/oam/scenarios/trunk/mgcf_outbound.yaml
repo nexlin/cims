@@ -1,0 +1,15 @@
+# MGCF 경유 PSTN 발신 — 가입자가 E.164 를 그대로 다이얼(번호 prefix 규칙 → MGCF 트렁크). MGCF 가 183+SDP(링백 early media)를
+# 100rel 로 내고(UE PRACK), 2 초 뒤 200, 종료는 MGCF 가 BYE + Reason: Q.850;cause=16 (TS 29.163 §7.2.3, RFC 3326).
+id: TRUNK-MGCF-OUTBOUND
+title: 가입자 → MGCF E.164 발신 (183 early media·PRACK·Q.850)
+tags: [trunk, mgcf, early-media]
+roles:
+  caller: { pool: volte_ue }
+  mgcf:   { pool: mgcf_pstn }
+flow:
+  - { step: register,   who: [caller], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: mgcf }
+  - { step: progress,   who: [mgcf], after_ms: 300, expect: { code: 183, early_media_pct: 100, prack_pct: 100 } }
+  - { step: answer,     who: [mgcf], after_ms: 2000, expect: { code: 200, srd_ms: { p95: 4000 } } }
+  - { step: media_hold, seconds: 5, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: mgcf, cause: 16, expect: { sdd_ms: { p95: 300 }, q850_rx_pct: 100 } }

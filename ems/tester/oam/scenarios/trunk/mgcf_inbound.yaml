@@ -1,0 +1,13 @@
+# MGCF 경유 PSTN 착신 — MGCF(IM-MGW 가 AMR-WB 오퍼)가 E.164 발신자로 가입자를 호출. CSP 피어링 접속점 → 가입자 착신, 가입자가 종료.
+id: TRUNK-MGCF-INBOUND
+title: MGCF → 가입자 착신 (PSTN 발신 E.164)
+tags: [trunk, mgcf]
+roles:
+  mgcf:   { pool: mgcf_pstn }
+  callee: { pool: volte_ue }
+flow:
+  - { step: register,   who: [callee], expect: { code: 200 } }
+  - { step: invite,     from: mgcf, to: callee }
+  - { step: answer,     who: [callee], after_ms: 1000, expect: { code: 200, srd_ms: { p95: 2000 } } }
+  - { step: media_hold, seconds: 5, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: callee, expect: { sdd_ms: { p95: 300 } } }

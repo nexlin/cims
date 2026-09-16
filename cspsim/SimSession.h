@@ -35,6 +35,11 @@ public:
     virtual void EventCallEnd( const char * pszCallId, int iSipStatus );
     /** REFER 최종 응답 (psip RecvReferResponse) — 전달 게이트(transfer_allowed=false → 403) 판정용. */
     virtual void EventTransferResponse( const char * pszCallId, int iSipStatus );
+    /** 발신 1xx — RSeq 가 있으면 PRACK(RFC 3262), 183 SDP 면 early media 수신 시작. */
+    virtual void EventCallRing( const char * pszCallId, int iSipStatus, CSipCallRtp * pclsRtp );
+    /** 상대 re-INVITE(hold/resume) — psip 이 200 answer, 여기서는 방향 관측만. */
+    virtual void EventReInvite( const char * pszCallId, CSipCallRtp * pclsRemoteRtp, CSipCallRtp * pclsLocalRtp );
+    virtual void EventReInviteResponse( const char * pszCallId, int iSipStatus, CSipCallRtp * pclsRemoteRtp );
 
     /** 착신 응답 경로 — EventIncomingCall 에서 분리. PTT 는 즉시 자동응답, VoIP 는 auto(180→1초→200) 또는
      *  deferred(SimSession::AnswerCall 이 호출) 두 모드가 같은 AnswerVoip 를 쓴다. */
@@ -183,6 +188,25 @@ public:
     bool         m_bPendingOffer = false;
     std::string  m_strByeCallId;          // StopCall 이 보낸 BYE 의 Call-ID — RecvResponse 가 최종 응답을 짝짓는다
     long long    m_tStopCallMs = 0;       // BYE 송신 시각 (SDD 기점)
+
+    // ── 계측기 D 단계(피어 pbx/mgcf 상대) UE 측 능력 (test_instrument.md §3.1) ──
+    /** RFC 3262 100rel — 발신 INVITE 에 Supported/Require: 100rel 을 싣고 RSeq 있는 1xx 에 PRACK 을 낸다. */
+    void SetPrack(bool b) { m_bPrack = b; }
+    bool m_bPrack = false;
+    /** RFC 4733 telephone-event — 오퍼에 싣고(PT 101, 코덱 클록) answer 는 오퍼 것을 echo. SendDtmf 의 전제. */
+    void SetDtmf(bool b) { m_bDtmf = b; }
+    bool m_bDtmf = false;
+    int  m_iDtmfPt = 101;
+    /** 다음 발신의 오퍼 코덱(테이블 PT, -1 = 기본: 미디어 파일 있으면 AMR-WB, 없으면 PCMU). 호마다 재설정하지 않으면 유지. */
+    void SetOfferCodec(int iPt) { m_iOfferCodec = iPt; }
+    int  m_iOfferCodec = -1;
+    /** hold(re-INVITE a=sendonly) / resume(sendrecv) — 통화 중이 아니면 false. 결과는 관측자 OnReInviteResponse. */
+    bool Hold();
+    bool Resume();
+    /** RFC 4733 DTMF 숫자열 송신 — telephone-event 미협상이면 false. */
+    bool SendDtmf(const std::string& strDigits);
+    int  m_iPendingQ850 = 0;             // 상대 BYE/최종 응답의 Reason Q.850 cause — EventCallEnd 가 관측자에 전달
+    int  m_iLastQ850 = 0;
 
     // 액션
     void StartCall(const std::string& strTarget = "");

@@ -26,7 +26,7 @@ from typing import Dict, List, Optional
 from services import tester_store as store
 from services import tester_workers, tester_compile, tester_target
 from services.tester_bus import publish
-from services.tester_models import RunRecord, RunRequest, LoadProfile
+from services.tester_models import RunRecord, RunRequest, LoadProfile, RATIO_METRICS
 
 _LOG = None
 
@@ -570,6 +570,22 @@ class RunDriver(threading.Thread):
             'doc_saps': self.doc_rate,
             'codes': ','.join(f'{k[6:]}:{v}' for k, v in sorted(c.items()) if k.startswith('codes.')) or None,
         }
+        # 피어 pbx/mgcf 축 관측(있을 때만) — 비율은 RATIO_METRICS 정의로
+        for k in ('progress_tx', 'early_media', 'prack_tx', 'prack_rx', 'reinvite_ok', 'reinvite_fail', 'reinvite_rx',
+                  'dtmf_tx', 'dtmf_sent', 'dtmf_rx', 'q850_tx', 'q850_rx', 'refer_tx'):
+            if c.get(k):
+                out[k] = c[k]
+        for name, (num, den) in RATIO_METRICS.items():
+            if name in ('ser_pct', 'scr_pct'):
+                continue
+            if c.get(den):
+                out[name] = 100.0 * c.get(num, 0) / c[den]
+        refer_codes = ','.join(f'{k[12:]}:{v}' for k, v in sorted(c.items()) if k.startswith('refer_codes.'))
+        if refer_codes:
+            out['refer_codes'] = refer_codes
+        q850 = ','.join(f'{k[5:]}:{v}' for k, v in sorted(c.items()) if k.startswith('q850.'))
+        if q850:
+            out['q850_causes'] = q850
         for name in ('rrd_ms', 'srd_ms', 'sdd_ms', 'jitter_ms', 'sdt_s'):
             h = t.get(name)
             if h:
@@ -594,12 +610,27 @@ class RunDriver(threading.Thread):
                         r.update({'observed': f'sessions={sessions} failed={c.get("failed", 0)}', 'ok': c.get('failed', 0) == 0 if want == 200 else True})
                     elif s.step == 'reject':
                         r.update({'observed': f'codes.{want}={c.get(f"codes.{want}", 0)}', 'ok': c.get(f'codes.{want}', 0) > 0})
+                    elif s.step == 'progress':
+                        # 피어가 183 을 냈고 실패 인스턴스가 없어야 한다(발신자 1xx 도달은 워커가 시한으로 판정)
+                        r.update({'observed': f'progress_tx={c.get("progress_tx", 0)} early_media={c.get("early_media", 0)} failed={c.get("failed", 0)}',
+                                  'ok': c.get('progress_tx', 0) > 0 and c.get('failed', 0) == 0})
+                    elif s.step in ('hold', 'resume'):
+                        r.update({'observed': f'reinvite_ok={c.get("reinvite_ok", 0)} fail={c.get("reinvite_fail", 0)}',
+                                  'ok': c.get('reinvite_ok', 0) > 0 and c.get('reinvite_fail', 0) == 0 if want == 200 else True})
+                    elif s.step == 'refer':
+                        want = want or 202
+                        r.update({'observed': f'refer_codes.{want}={c.get(f"refer_codes.{want}", 0)} failed={c.get("failed", 0)}',
+                                  'ok': c.get(f'refer_codes.{want}', 0) > 0 and c.get('failed', 0) == 0})
                     else:
                         r.update({'observed': None, 'ok': True})
-                elif metric in ('ser_pct', 'scr_pct'):
+                elif metric in RATIO_METRICS:
+                    num, den = RATIO_METRICS[metric]
                     val = out.get(metric)
                     want = float(exp) if isinstance(exp, (int, float)) else float(getattr(exp, 'min', None) or 0)
-                    r.update({'observed': val, 'ok': val is not None and val >= want})
+                    if not c.get(den):
+                        r.update({'observed': None, 'ok': False, 'why': f'분모 {den} 없음'})
+                    else:
+                        r.update({'observed': val, 'ok': val is not None and val >= want})
                 else:
                     h = t.get(metric)
                     if not h or not h.get('count'):
