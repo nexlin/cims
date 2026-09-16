@@ -247,6 +247,62 @@ def _scan_ptt_day(day: str) -> list:
     return out
 
 
+def _scan_ptt_attempts_day(root: str, day: str) -> list:
+    """그 날의 PTT **시도 장부** → [(minute, row)]. 원천은 CSP 가 쓰는
+    `{ServiceLogDir}/ptt/attempts/YYYYMMDD.jsonl` (sip_statistics.md §2.3).
+
+    세션 기록(`_scan_ptt_day`)과 세는 것이 갈라져 있다 — 여기서 **시도·성립·실패 사유**를,
+    거기서 **발언·참여·시간**을 센다(§3). 장부가 없으면(구 CSP·기능 미배포) 빈 목록이라
+    집계는 종전대로 동작한다 — 그때는 `attempts` 가 0 이라 비율이 비워진다.
+    """
+    # **모듈 전역(_service_log_dir)이 아니라 인자로 받는다.** 그 전역은 집계 주체(oam-svc)만
+    # 설정한다 — 조회를 서빙하는 oam base 는 비어 있어, 전역을 보면 즉석 집계 경로에서
+    # 장부가 통째로 빠진다(실측: attempts 0, 성공률 0%). volte·메시지 스캔이 root 를 받는
+    # 것과 같은 규약으로 맞춘다.
+    if not root:
+        return []
+    path = os.path.join(root, 'ptt', 'attempts',
+                        day[0:4] + day[5:7] + day[8:10] + '.jsonl')
+    if not os.path.isfile(path):
+        return []
+    out = []
+    try:
+        with open(path, encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    continue          # 반쪽 줄(쓰는 중) — 다음 주기에 다시 읽는다
+                mi = _minute(r.get('ts', ''))
+                if mi and _day_of(mi) == day:
+                    out.append((mi, r))
+    except Exception as e:
+        logger.log_warning(f"[stats-rollup] PTT 시도 장부 읽기 실패 {path}: {e}")
+    return out
+
+
+def _fold_ptt_attempt(row: dict, agg: dict) -> None:
+    """PTT 시도 1건을 버킷 집계에 접는다 — 분모(attempts)와 성립(sessions)의 원천.
+
+    **성립도 여기서 센다.** 세션 기록에서 세면 같은 통화를 두 번 세거나(장부+세션) 둘이
+    어긋날 때 어느 쪽이 맞는지 판정할 근거가 없다. 세션 기록은 발언·참여만 싣는다(§3).
+    """
+    c = agg['call']
+    _bump(c, 'attempts')
+    if (row.get('outcome') or '') == 'established':
+        _bump(c, 'sessions')
+        return
+    reason = row.get('reason') or 'error'
+    _bump(c['reasons'], reason)
+    st = int(row.get('status') or 0)
+    # 결말 응답코드 — 사유 한 칸으로는 못 가리는 원인 특정용(§2.3). 성립(200)은 담지 않는다.
+    if st and st != 200:
+        _bump(c['statuses'], str(st))
+
+
 def _scan_msg_hour(root: str, hour: str, dmap: dict) -> dict:
     """그 시간의 SIP 원문 → {minute: {svc: {'in'|'out': {키: 건수}}}}.
 
@@ -329,21 +385,26 @@ def _fold_volte(rec: dict, agg: dict) -> None:
 
 
 def _fold_ptt(row: dict, agg: dict) -> None:
-    """PTT 세션 1건을 버킷 집계에 접는다.
+    """PTT 세션 1건을 버킷 집계에 접는다 — **통화의 내용**(발언·참여·시간·완료).
 
-    **성공률(성립/시도)은 여기서 낼 수 없다** — 실패한 그룹통화 시도가 원천에 없다(§8 Y6).
-    기록이 있다는 것 자체가 성립을 뜻하므로 attempts 를 세면 항상 100% 가 된다. 그래서
-    attempts/sessions 는 건드리지 않고 **소통(turn_count>0)과 참여(people/member_count)만**
-    적는다. Y6 이 해소되면 attempts 가 채워지고 나머지는 그대로 성립한다.
+    시도(attempts)와 성립(sessions)은 여기서 세지 않는다. 그건 시도 장부가 센다(§3) —
+    세션 기록에는 실패한 시도가 없어서 세면 성공률이 항상 100% 가 되고, 성립까지 양쪽에서
+    세면 같은 통화를 두 번 센다.
     """
     c = agg['call']
-    _bump(c, 'sessions')
     turns = int(row.get('turns', 0) or 0)
     if turns > 0:
         _bump(c, 'talked')
     dur = _dur_sec(row.get('start', ''), row.get('end', '') or '')
     if dur > 0:
         _bump(c, 'duration_sum_sec', dur)
+    # 완료율의 분자 — 마지막 멤버 퇴장으로 끝난 세션만. 강제 회수(노드 소실·그룹 삭제)는
+    #   CSP 가 end_reason='error' 로 남긴다(§8 Y4). 옛 기록(사유 없음)은 normal 로 본다 —
+    #   그 시절에는 강제 회수 경로가 기록되지 않았으므로 그게 사실에 가깝다.
+    if row.get('state') == 'ended' and (row.get('end_reason') or 'normal') == 'normal':
+        _bump(c, 'completed')
+    if row.get('end_reason'):
+        _bump(c['reasons'], str(row.get('end_reason')))
     invited = int(row.get('member_count', 0) or 0)
     joined = len(row.get('people') or [])
     _bump(c, 'legs_invited', invited)
@@ -434,9 +495,26 @@ def build_minutes(root: str, minutes: set, config: dict = None,
     for day in days:
         if deadline is not None and time.monotonic() >= deadline:
             break
+        # 시도 장부 — 분모(attempts)·성립(sessions)·실패 사유
+        n_established = 0
+        for mi, row in _scan_ptt_attempts_day(root, day):
+            if mi in minutes:
+                _fold_ptt_attempt(row, _agg(mi, 'ptt'))
+                if (row.get('outcome') or '') == 'established':
+                    n_established += 1
+        # 세션 기록 — 발언·참여·시간·완료
+        n_sessions = 0
         for mi, row in _scan_ptt_day(day):
             if mi in minutes:
                 _fold_ptt(row, _agg(mi, 'ptt'))
+                n_sessions += 1
+        # 두 원천의 성립 수가 다르면 한쪽이 유실된 것이다(§3). 조용히 큰 쪽을 택하지 않고
+        #   알린다 — 장부만 있고 세션이 없으면 녹취/세션 디렉터리 쓰기가 막힌 것이고,
+        #   반대면 장부 쓰기가 막힌 것이라 원인이 서로 다르다.
+        if n_established != n_sessions and (n_established or n_sessions):
+            logger.log_warning(
+                f"[stats-rollup] PTT 성립 수 불일치 {day}: 장부 {n_established} vs 세션 {n_sessions} "
+                f"— 한쪽 원천이 유실됐을 수 있습니다")
 
     return out
 
@@ -1143,20 +1221,16 @@ def _rate(num: int, den: int) -> float:
 _NER_USER_REASONS = ('busy', 'no_answer', 'rejected', 'canceled')
 
 
-# 시도(attempts)를 원천에 남기지 않는 서비스. 이 축이 다른 서비스와 합쳐지면 **비율의
-# 분모가 결손**된다 — 분자(sessions)에는 들어가는데 분모(attempts)에는 없으므로 100% 를
-# 넘는 값이 나온다(실측 2026-09-11: VoLTE 2세션 + PTT 1세션 → success_rate 150%).
-#
-# 지금은 PTT 뿐이다 — 그룹통화 개시 실패 경로가 `PttSessionStart()` 이전에 반환해서
-# 시도가 아무 데도 남지 않는다(§8 Y6 / 결함 F-43). **Y6 이 해소되면 이 집합을 비운다**;
-# 그러면 아래 규칙이 저절로 꺼지고 값이 채워진다.
-_NO_ATTEMPT_SVCS = frozenset({'ptt'})
-
-# 결손 서비스가 섞였을 때 내지 않는 비율 — **분자와 분모가 서로 다른 모집단**이 되는 것들.
-#   success_rate·talk_rate·ner : 분자에 PTT 가 있고 분모(attempts)에는 없다 → 100% 초과
-#   completion_rate·drop_rate  : 분모(sessions)에 PTT 가 있고 분자(completed)에는 없다
+# 분모가 결손된 축이 섞였을 때 내지 않는 비율 — **분자와 분모가 서로 다른 모집단**이 되는 것들.
+#   success_rate·talk_rate·ner : 분자에 그 축이 있고 분모(attempts)에는 없다 → 100% 초과
+#   completion_rate·drop_rate  : 분모(sessions)에 있고 분자(completed)에는 없다
 #                                → 없는 끊김이 생긴다
 # join_rate·talk_rate_sessions 는 분자·분모 모두 전 서비스에서 오므로 영향이 없다.
+#
+# 어느 축이 결손인지는 **이름 목록이 아니라 데이터로** 판정한다(§2.1) — 성립은 있는데 시도가
+# 0 이면 그 축은 분모를 원천에 남기지 않은 것이다. 목록으로 두면 양쪽으로 틀린다: 원천이
+# 생긴 뒤에도 목록에 남으면 값이 영영 안 나오고, 시도 장부를 아직 쓰지 않는 옛 CSP 노드는
+# 목록에 없어서 `_rate(x, 0) = 0` 으로 "성공률 0%" 라는 거짓 경보가 된다.
 _RATES_NEED_ATTEMPTS = ('success_rate', 'talk_rate', 'ner', 'completion_rate', 'drop_rate')
 
 
@@ -1207,8 +1281,8 @@ def with_rates(c: dict, no_attempt_svcs=()) -> dict:
     # 없던 구간이 전부 드롭으로 보인다.
     out['drop_rate'] = round(100.0 - out['completion_rate'], 1) if c.get('sessions', 0) else 0
     out['join_rate'] = _rate(c.get('legs_joined', 0), c.get('legs_invited', 0))
-    # 세션을 분모로 한 소통률 — **PTT 용**이다. PTT 는 실패한 시도가 원천에 없어
-    # attempts 가 0 이고(§8 Y6), 그러면 talk_rate 가 분모 0 으로 항상 0% 가 된다.
+    # 세션을 분모로 한 소통률 — **PTT 용**이다. 시도 기준 소통률(talk_rate)은 "몇 건이
+    # 말까지 갔나" 를 보지만, PTT 에서 알아야 하는 것은 "선 세션 중 몇 개가 벙어리였나" 다.
     # "세션은 섰는데 아무도 발언하지 못한" floor 장애는 이 값에서만 드러난다.
     out['talk_rate_sessions'] = _rate(c.get('talked', 0), c.get('sessions', 0))
     n = c.get('pdd_n', 0)
@@ -1219,7 +1293,13 @@ def with_rates(c: dict, no_attempt_svcs=()) -> dict:
     # 분모가 결손된 축이면 비율을 비운다. **개수는 그대로 둔다** — 세션·소통 건수는 사실이고,
     # 비율만 낼 수 없는 것이다. 위에서 이미 계산했더라도 여기서 덮어쓴다(계산 순서에
     # 의존하지 않게 — 지표가 하나 늘어도 목록에만 추가하면 된다).
+    #
+    # 자기 칸의 판정은 데이터로 한다 — **성립은 있는데 시도가 0** 이면 분모가 원천에 없는
+    # 것이고, 그대로 두면 `_rate(x, 0) = 0` 이라 성공률 0% 라는 **거짓 경보**가 된다.
+    # 시도 장부가 없는 옛 CSP 노드가 여기에 걸린다(빈칸이 맞다 — 0% 가 아니라).
     gap = sorted(set(no_attempt_svcs or ()))
+    if not gap and not c.get('attempts', 0) and (c.get('sessions', 0) or c.get('talked', 0)):
+        gap = ['no_attempts']
     if gap:
         for k in _RATES_NEED_ATTEMPTS:
             out[k] = None
@@ -1259,10 +1339,13 @@ def aggregate(rows: list, gran: str, svc: str = 'all', include_msg: bool = False
             for target in (_cell(slot, key), _cell(totals, key)):
                 _add_call(target['call'], r.get('call') or {},
                           open_n=r.get('open', 0), late_n=r.get('late_dropped', 0))
-                # 여러 서비스가 합쳐지는 칸('all')에서만 의미가 있다 — 자기 서비스 칸은
-                # 분자·분모가 같은 원천이라 비율이 깨지지 않는다(PTT 칸의 success_rate 는
-                # 분모 0 이라 0% 로 나오고, 그건 §8 이 정한 "자리를 비운다"의 몫이다).
-                if sv in _NO_ATTEMPT_SVCS and key == 'all':
+                # 여러 서비스가 합쳐지는 칸('all')에서 분모가 결손된 축이 섞였는지 본다.
+                # **정적 목록이 아니라 데이터로 판정한다** — 성립은 있는데 시도가 없으면
+                # 그 축은 분모를 원천에 남기지 않은 것이다(구 CSP 배포본처럼 시도 장부가
+                # 없는 노드도 여기서 자동으로 걸린다). 자기 서비스 칸은 아래 with_rates 가
+                # 같은 조건으로 비운다.
+                cr = r.get('call') or {}
+                if key == 'all' and not cr.get('attempts') and (cr.get('sessions') or cr.get('talked')):
                     target['gap'].add(sv)
                 if include_msg:
                     _add_msg(target['msg'], r.get('msg') or {})

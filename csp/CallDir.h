@@ -450,9 +450,52 @@ public:
         }
     }
 
-    void PttSessionEnd( const std::string &strGroupId ) {
+    /** PTT 시도 장부 — 그룹통화 **개시 시도의 결말**을 한 줄 남긴다.
+     *
+     *  왜 세션 기록으로 부족한가: 세션 디렉터리는 `PttSessionStart()` 가 만드는데,
+     *  `ProcessGroupCall` 은 그 전에 여덟 갈래로 반환한다(비멤버 403·코덱 488·SRTP 488·
+     *  권한 403·시간창 이탈 …). 그래서 세션만 세면 **성공률이 항상 100%** 가 된다
+     *  (sip_statistics.md §8 Y6). 장부는 실패한 시도의 유일한 원천이다.
+     *
+     *  **개시자 1명 = 시도 1건이다.** 진행 중 세션에 합류하는 INVITE·청취(감청) leg 은
+     *  넣지 않는다 — 그 축은 참여율이 담당한다(§2.1).
+     *
+     *  장부는 결말 하나만 남기고 메시지 카운터를 흉내내지 않는다(§2.3). 성립 줄의 sesid 로
+     *  세션 기록과 대조할 수 있다 — 둘이 어긋나면 집계가 유실로 보고한다(§3).
+     *
+     *  @param strOutcome "established" | "failed"
+     *  @param strReason  실패 사유 어휘(rejected·error·timeout…). 성립이면 빈 문자열
+     *  @param iStatus    결말 SIP 응답코드(403·488·480…). 성립·무응답 경로면 0
+     */
+    void PttAttempt( const std::string &strGroupId, const std::string &strGroupKey, const std::string &strCaller,
+                     const std::string &strOutcome, const std::string &strReason = "", int iStatus = 0,
+                     const std::string &strSesId = "" ) {
+        if ( m_strCallsDir.empty() ) return;
+        char ts[32];
+        IsoNow( ts, sizeof( ts ) );
+        char day[16];
+        snprintf( day, sizeof( day ), "%c%c%c%c%c%c%c%c", ts[0], ts[1], ts[2], ts[3], ts[5], ts[6], ts[8], ts[9] );
+        std::string line = std::string( "{\"ts\":\"" ) + ts + "\",\"group\":\"" + Esc( strGroupId ) +
+                           "\",\"group_key\":\"" + Esc( strGroupKey ) + "\",\"caller\":\"" + Esc( strCaller ) +
+                           "\",\"outcome\":\"" + Esc( strOutcome ) + "\",\"reason\":\"" + Esc( strReason ) +
+                           "\",\"status\":" + std::to_string( iStatus ) + ",\"sesid\":\"" + Esc( strSesId ) +
+                           "\"}\n";
+        std::string path = m_strCallsDir + "/ptt/attempts/" + day + ".jsonl";
+        m_worker.Enqueue( [path, line]() { return _appendLineS( path, line ); } );
+    }
+
+    /** 세션 종료.
+     *
+     *  @param strReason 종료 사유 — `normal`(마지막 멤버 퇴장으로 정상 종료) ·
+     *         `error`(강제 회수: 노드 소실·그룹 삭제 등). **완료율의 분자가 이 값이다**
+     *         (sip_statistics.md §8 Y4) — 없으면 성공률은 나오는데 완료율이 0% 로 보인다.
+     *         기본값이 `normal` 인 이유: 기존 호출부의 대다수가 정상 종료 경로이고,
+     *         강제 회수 경로만 명시적으로 넘기게 해 새 경로가 생겨도 조용히 오분류되지
+     *         않게 한다(강제 회수는 언제나 의도적으로 부른다).
+     */
+    void PttSessionEnd( const std::string &strGroupId, const std::string &strReason = "normal" ) {
         std::lock_guard<std::mutex> lock( m_mtx );
-        _endSessionLocked( strGroupId );
+        _endSessionLocked( strGroupId, strReason );
         _removePttStatesByGroupId( strGroupId );
     }
 
@@ -652,18 +695,19 @@ private:
      *  events.jsonl 을 누적할 수 있게 한다. 새 세션 시작 시에는
      *  PttSessionStart 가 두 파일을 재작성하므로 잔존값 걱정이 없다.
      */
-    void _endSessionLocked( const std::string &strGroupId ) {
+    void _endSessionLocked( const std::string &strGroupId, const std::string &strReason = "normal" ) {
         auto it = m_mapPttSession.find( strGroupId );
         if ( it == m_mapPttSession.end() ) return;
         char ts[32];
         IsoNow( ts, sizeof( ts ) );
         std::string tsStr = ts;
+        std::string rsn = strReason.empty() ? std::string( "normal" ) : strReason;
         std::string groupPath = it->second + "/group.json";
-        m_worker.Enqueue( [groupPath, tsStr]() { return _finalizeDescriptorS( groupPath, tsStr ); } );
+        m_worker.Enqueue( [groupPath, tsStr, rsn]() { return _finalizeDescriptorS( groupPath, tsStr, rsn ); } );
         auto itDesc = m_mapPttSessionDesc.find( strGroupId );
         if ( itDesc != m_mapPttSessionDesc.end() ) {
             std::string sessPath = itDesc->second;
-            m_worker.Enqueue( [sessPath, tsStr]() { return _finalizeDescriptorS( sessPath, tsStr ); } );
+            m_worker.Enqueue( [sessPath, tsStr, rsn]() { return _finalizeDescriptorS( sessPath, tsStr, rsn ); } );
             m_mapPttSessionDesc.erase( itDesc );
         }
     }
@@ -733,10 +777,16 @@ private:
 
     /** 디스크립터 종료 마킹 — state=ended + end_time. end_time 은 이미 있으면 값만
      *  교체한다 (종전엔 종료마다 말미에 삽입해 중복 키가 무한 누적됐다). */
-    static bool _finalizeDescriptorS( const std::string &path, const std::string &ts ) {
+    static bool _finalizeDescriptorS( const std::string &path, const std::string &ts,
+                                      const std::string &reason = "normal" ) {
         std::string c = _readFile( path );
         if ( c.empty() ) return false;
         _replace( c, "\"state\":\"active\"", "\"state\":\"ended\"" );
+        // 종료 사유 — 완료율의 분자(§8 Y4). VoLTE 의 end_reason 과 같은 어휘를 쓴다.
+        if ( c.find( "\"end_reason\"" ) == std::string::npos ) {
+            size_t lb = c.rfind( '}' );
+            if ( lb != std::string::npos ) c.insert( lb, std::string( ",\"end_reason\":\"" ) + reason + "\"" );
+        }
         static const char kKey[] = "\"end_time\":\"";
         size_t k = c.find( kKey );
         if ( k != std::string::npos ) {
