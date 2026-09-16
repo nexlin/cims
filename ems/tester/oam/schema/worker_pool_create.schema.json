@@ -27,6 +27,19 @@
           "default": null,
           "title": "Aka Opc"
         },
+        "auth_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "IMPI 사용자부 — '@' 없으면 워커가 domain 을 붙인다(cspsim -creds authId 규약). 비면 user",
+          "title": "Auth Id"
+        },
         "auth_scheme": {
           "default": "digest",
           "enum": [

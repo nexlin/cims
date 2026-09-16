@@ -248,6 +248,20 @@
   "additionalProperties": false,
   "description": "POST /runs — 컴파일된 시나리오 + 이 워커의 배분.",
   "properties": {
+    "max_instances": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "이 워커가 발생시킬 인스턴스 상한 — 단발(기능) 실행. 다 끝나면 워커가 run 을 스스로 닫는다",
+      "title": "Max Instances"
+    },
     "rate_saps": {
       "description": "이 워커 몫의 시도율 (컨트롤러가 워커 수로 나눔)",
       "minimum": 0,

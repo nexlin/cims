@@ -103,7 +103,7 @@ cmd_pkg() {
     # cmp 바이너리도 동일 → cmp/imp/pmp.
     # oam_base_service_split — console 은 oam-base 패키지에 동봉(별도 모듈 폐기). 명시 시만 단독 패키징.
     # cwrtc/phone 은 재설계 예정 — 빌드/dist/패키징 제외 (CMakeLists.txt 동기).
-    [[ ${#targets[@]} -eq 0 ]] && targets=(cmp pmp imp cmdp csp psp isp csc oam oam-svc oam-cims-tester cspsim agent)
+    [[ ${#targets[@]} -eq 0 ]] && targets=(cmp pmp imp cmdp csp psp isp csc oam oam-svc oam-cims-tester cims-tester-worker cspsim agent)
 
     if [[ ! -d $DIST_DIR ]]; then
         err "dist 디렉토리 없음: $DIST_DIR (먼저 ./cims.sh build)"
@@ -172,6 +172,7 @@ cmd_pkg() {
             oam)         echo "$SCRIPT_DIR/ems/core/oam" ;;   # OAM 분리 Phase 2 — 같은 cims-csc 프로세스, 별도 tarball
             oam-svc)    echo "$SCRIPT_DIR/ems/service/oam" ;;  # oam_base_service_split D5 — base 게이트웨이 뒤 독립 서비스 모듈
             oam-cims-tester) echo "$SCRIPT_DIR/ems/tester/oam" ;;  # test_instrument.md — 계측기 컨트롤러 서비스 모듈
+            cims-tester-worker) echo "$SCRIPT_DIR/tester/worker" ;;  # 계측기 워커 (C++ — dist 는 make dist 가 채운다)
             console)     echo "$SCRIPT_DIR/ems/core/console" ;;
             cspsim)      echo "$SCRIPT_DIR/cspsim" ;;
             agent)       echo "$SCRIPT_DIR/agent" ;;
@@ -213,7 +214,7 @@ cmd_pkg() {
     local t src_sub tar_file build_date pkg_root base_dist stage
     for t in "${targets[@]}"; do
         case "$t" in
-            cmp|pmp|imp|cmdp|csp|psp|isp|csc|oam|oam-svc|oam-cims-tester|console|cspsim|agent)
+            cmp|pmp|imp|cmdp|csp|psp|isp|csc|oam|oam-svc|oam-cims-tester|cims-tester-worker|console|cspsim|agent)
                 src_sub=$(_src_sub_for "$t") ;;
             cwrtc|phone) err "$t: 재설계 예정 — 빌드/패키징 제외됨"; continue ;;
             *) err "알 수 없는 컴포넌트: $t"; continue ;;

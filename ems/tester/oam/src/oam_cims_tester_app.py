@@ -176,9 +176,23 @@ if __name__ == '__main__':
             print('TESTER_PREFLIGHT_OK', flush=True)
             sys.exit(0)
 
+        # 관리 store 의 자기 서브트리(modules/oam-cims-tester/runtime — I5 단일 소유)에 소유권 리스를 잡는다.
+        #   base oam 은 store 루트를, 계측기는 자기 서브트리를 각각 flock 한다(oam_ha.md §4.4 단일 writer). 못 잡으면
+        #   read-only 로 뜬다 — 토폴로지 저장·run 색인이 not_lease_owner 로 거절되고 이유가 응답에 나온다.
+        from services import file_store as _fs, lease as _lease
+        _lease_root = os.path.join(_fs.runtime_root(config), 'modules', 'oam-cims-tester', 'runtime')
+        _lst = _lease.acquire(_lease_root)
+        if _lst.get('active'):
+            logger.log_info(f"[store] lease acquired: {_lease_root} (epoch {_lst.get('epoch')})")
+        else:
+            logger.log_warning(f"[store] lease NOT acquired: {_lease_root} — {_lst.get('reason')} (read-only)")
+
         tester_init(_COMPONENT_ROOT, config)
         logger.log_info(f"[tester] data_dir={tester_store.data_dir()} "
                         f"scenarios={len(tester_store.list_scenarios())} profiles={len(tester_store.list_profiles())}")
+        # run 오케스트레이터 + 워커 관측 스트림 수신(TCP JSONL, Tester.WorkerStreamIp:Port)
+        from services.tester_run import RUNS
+        RUNS.init(config, logger)
 
         # SSL — 버전무관 runtime cert 우선(lifecycle 엔진 ensure_node_cert 가 기동 전에 보증) → 자기 cert → oam cert.
         ssl_keyfile = ssl_certfile = None
@@ -228,6 +242,11 @@ if __name__ == '__main__':
         logger.log_error(f"fatal: {e}\n{traceback.format_exc()}")
         sys.exit(1)
     finally:
+        try:
+            from services.tester_run import RUNS as _R
+            _R.shutdown()
+        except Exception:
+            pass
         try:
             if admin_server is not None:
                 admin_server.stop()

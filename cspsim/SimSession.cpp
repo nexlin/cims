@@ -469,7 +469,7 @@ bool SimSession::Start() {
     return true;
 }
 
-void SimSession::Stop() {
+void SimSession::Stop(int iFlushMs) {
     // 통화 중이면 먼저 BYE
     if (!m_strInviteId.empty()) {
         m_clsUserAgent.StopCall(m_strInviteId.c_str());
@@ -477,7 +477,7 @@ void SimSession::Stop() {
     // 표준 로그아웃: de-affiliate → SUBSCRIBE Expires=0 → REGISTER Expires=0
     Logout();
     // 메시지 전송 완료 대기 (UDP 소켓이 닫히기 전 패킷이 나가야 함)
-    usleep(300000);
+    if (iFlushMs > 0) usleep((useconds_t)iFlushMs * 1000);
     m_clsRtpThread.Stop();
     m_clsUserAgent.Stop();
 }
@@ -1147,11 +1147,32 @@ void SimSession::StartCall(const std::string& strTarget) {
                               &clsRtp, &clsRoute, m_strInviteId);
 }
 
+bool SimSession::AnswerCall() {
+    // deferred 모드에서 보관한 오퍼로 200 OK — AnswerVoip 가 auto 모드와 같은 경로(SRTP 협상·RTP 시작)를 탄다.
+    if (m_strPendingCallId.empty()) return false;
+    std::string strId = m_strPendingCallId;
+    m_strPendingCallId.clear();
+    m_pSipClient->AnswerVoip(strId.c_str(), m_bPendingOffer ? &m_clsPendingOffer : NULL);
+    m_bPendingOffer = false;
+    return true;
+}
+
+bool SimSession::RejectCall(int iSipCode) {
+    if (m_strPendingCallId.empty()) return false;
+    std::string strId = m_strPendingCallId;
+    m_strPendingCallId.clear();
+    m_bPendingOffer = false;
+    if (m_strInviteId == strId) m_strInviteId.clear();
+    return m_clsUserAgent.StopCall(strId.c_str(), iSipCode > 0 ? iSipCode : 486);
+}
+
 void SimSession::StopCall() {
     if (!m_strInviteId.empty()) {
         // [TEARDOWN-DIAG] establish(200 OK 수신=m_bInCall) 여부 기록.
         //   inCall=0 이면 psip StopCall 이 BYE 대신 CANCEL/no-op → CSP no-BYE 누수 원인 후보.
         printf("[%d] [TD] StopCall callid=%s inCall=%d\n", m_iId, m_strInviteId.c_str(), m_bInCall ? 1 : 0);
+        m_strByeCallId = m_strInviteId;
+        m_tStopCallMs = NowMs();
         m_clsUserAgent.StopCall(m_strInviteId.c_str());
         m_clsRtpThread.Stop();
         m_strInviteId.clear();
@@ -1431,6 +1452,17 @@ bool SimSession::RecvRequest(int /*iThreadId*/, CSipMessage* pclsMessage) {
 }
 
 bool SimSession::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
+    // BYE 최종 응답 — RFC 6076 SDD(세션 해제 지연) 표본. psip UA 는 로컬 BYE 의 응답을 응용에 알리지 않으므로
+    //   스택 콜백(UA 보다 먼저 등록)에서 관찰한다. 처리는 UA 에 위임(return false).
+    if (m_pObserver && pclsMessage->m_clsCSeq.m_strMethod == "BYE" && pclsMessage->m_iStatusCode >= 200) {
+        std::string strByeId;
+        pclsMessage->GetCallId(strByeId);
+        if (!m_strByeCallId.empty() && strByeId == m_strByeCallId) {
+            m_pObserver->OnByeResponse(this, strByeId, pclsMessage->m_iStatusCode, NowMs() - m_tStopCallMs);
+            m_strByeCallId.clear();
+        }
+        return false;
+    }
     // 발신자(UAC, PTT) 그룹콜 INVITE 200 OK: SDP m=application(SharedFloorPort) 학습.
     //   pclsRtp 에는 application 미파싱이라 SIP body 에서 직접 추출 → floor dest 설정.
     //   (SimSession 콜백이 UserAgent 보다 먼저 등록되어 200 OK 를 먼저 관찰 — return false 로 위임.)
@@ -1744,6 +1776,7 @@ void SessionSipClient::EventRegister(CSipServerInfo* pclsInfo, int iStatus) {
             printf("[%d] DEREGISTERED User=%s\n", m_pOwner->m_iId, pclsInfo->m_strUserId.c_str());
             return;
         }
+        bool bFirst = !m_pOwner->m_bRegistered;   // 주기 재등록(refresh) 200 은 RRD 표본이 아니다
         m_pOwner->m_bRegistered = true;
         m_pOwner->m_iRoutePort = pclsInfo->m_clsIpsec.ServerPort();  // IPsec 이면 port_ps, 아니면 0
         m_pOwner->m_stats.iRegOk++;
@@ -1751,10 +1784,13 @@ void SessionSipClient::EventRegister(CSipServerInfo* pclsInfo, int iStatus) {
         m_pOwner->m_stats.llTotalRegMs += ms;
         printf("[%d] REGISTERED User=%s (%lldms)\n",
                m_pOwner->m_iId, pclsInfo->m_strUserId.c_str(), ms);
+        if (bFirst && m_pOwner->m_pObserver) m_pOwner->m_pObserver->OnRegister(m_pOwner, 200, ms);
     } else {
         m_pOwner->m_stats.iRegFail++;
         printf("[%d] REGISTER FAILED User=%s status=%d\n",
                m_pOwner->m_iId, pclsInfo->m_strUserId.c_str(), iStatus);
+        if (m_pOwner->m_pObserver)
+            m_pOwner->m_pObserver->OnRegister(m_pOwner, iStatus, SimSession::NowMs() - m_pOwner->m_stats.tRegStart);
     }
 }
 
@@ -1784,6 +1820,30 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
         return;
     }
 
+    // 관측자(워커) — 착신 도착 시각. 응답은 아래 모드에 따라 지금(auto) 또는 나중(deferred, AnswerCall) 에 낸다.
+    if (m_pOwner->m_pObserver) m_pOwner->m_pObserver->OnIncomingCall(m_pOwner, pszCallId, pszFrom ? pszFrom : "");
+
+    if (m_pOwner->m_bPttMode) {
+        AnswerPtt(pszCallId, pclsRtp, pclsMessage);
+        return;
+    }
+    if (m_pOwner->m_eAnswerMode == SimSession::E_ANSWER_DEFERRED) {
+        // 지연 응답(계측기 워커): 180 만 내고 오퍼를 보관한다 — 워커 스케줄러가 after_ms 뒤 AnswerCall()
+        //   또는 RejectCall(code) 를 부른다. 스택 콜백 스레드를 sleep 으로 막지 않는다.
+        m_pOwner->m_strPendingCallId = pszCallId;
+        m_pOwner->m_bPendingOffer = (pclsRtp != NULL);
+        if (pclsRtp) m_pOwner->m_clsPendingOffer = *pclsRtp;
+        m_pUserAgent->RingCall(pszCallId, 180, NULL);
+        return;
+    }
+    // VoIP 모드(자동): 180 Ringing → 1초 → 200 OK
+    m_pUserAgent->RingCall(pszCallId, 180, NULL);
+    sleep(1);
+    AnswerVoip(pszCallId, pclsRtp);
+}
+
+/** PTT 착신 응답 — SRTP 협상 + 180 → 200 자동응답(실 단말 동작). EventIncomingCall 에서 분리. */
+void SessionSipClient::AnswerPtt(const char* pszCallId, CSipCallRtp* pclsRtp, CSipMessage* pclsMessage) {
     // 미디어 SRTP answer 협상 (media_security.md §8.1) — 오퍼 crypto 존재 && 모드>0 이면
     //   수락(suite/tag echo + 자기 키 선언). SAVP 오퍼인데 수락 불가면 평문 answer 가
     //   성립하지 않으므로 488. answer protocol 은 오퍼 echo (SAVP/AVP+crypto).
@@ -1845,90 +1905,149 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
         m_pOwner->m_clsRtpThread.m_iDestVideoPort = FindActiveMediaPort(pclsRtp->m_clsMediaList, "video");
     }
 
-    // PTT 모드: 180 Ringing → 200 OK 자동응답 (실 단말 동작과 동일)
-    if (m_pOwner->m_bPttMode) {
-        printf("[%d] [PTT] Group INVITE - sending 180 Ringing\n", m_pOwner->m_iId);
-        m_pUserAgent->RingCall(pszCallId, 180, NULL);
-        usleep(200000); // 200ms
+    printf("[%d] [PTT] Group INVITE - sending 180 Ringing\n", m_pOwner->m_iId);
+    m_pUserAgent->RingCall(pszCallId, 180, NULL);
+    usleep(200000); // 200ms
 
-        CSipCallRtp clsLocalRtp;
-        clsLocalRtp.m_strIp  = m_pOwner->m_clsSetup.m_strLocalIp;
-        clsLocalRtp.m_iPort  = m_pOwner->m_clsRtpThread.m_iPort;
-        clsLocalRtp.m_iCodec = pclsRtp ? pclsRtp->m_iCodec : 0;  // GetSipCallRtp 가 테이블 PT 로 정규화한 identity
+    CSipCallRtp clsLocalRtp;
+    clsLocalRtp.m_strIp  = m_pOwner->m_clsSetup.m_strLocalIp;
+    clsLocalRtp.m_iPort  = m_pOwner->m_clsRtpThread.m_iPort;
+    clsLocalRtp.m_iCodec = pclsRtp ? pclsRtp->m_iCodec : 0;  // GetSipCallRtp 가 테이블 PT 로 정규화한 identity
 
 #ifdef USE_MEDIA_LIST
-        // PTT 200 OK SDP: audio(오퍼 PT echo) + video (비디오 파일이 있는 경우)
-        m_pOwner->m_clsRtpThread.m_iAudioPt =
-            BuildAudioMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iPort, clsLocalRtp.m_iCodec, pclsRtp,
-                            bSrtpAnswer && pclsRtp->m_bRemoteSavp, bSrtpAnswer ? strSrtpSuite : "",
-                            m_pOwner->m_strSrtpLocalKey, strSrtpTag);
-        if (m_pOwner->m_clsRtpThread.m_iVideoPort > 0)
-            BuildVideoMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iVideoPort, bVideoSrtpAnswer && bVideoSavp,
-                            bVideoSrtpAnswer ? strVideoSuite : "", m_pOwner->m_strSrtpVideoLocalKey, strVideoTag);
+    // PTT 200 OK SDP: audio(오퍼 PT echo) + video (비디오 파일이 있는 경우)
+    m_pOwner->m_clsRtpThread.m_iAudioPt =
+        BuildAudioMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iPort, clsLocalRtp.m_iCodec, pclsRtp,
+                        bSrtpAnswer && pclsRtp->m_bRemoteSavp, bSrtpAnswer ? strSrtpSuite : "",
+                        m_pOwner->m_strSrtpLocalKey, strSrtpTag);
+    if (m_pOwner->m_clsRtpThread.m_iVideoPort > 0)
+        BuildVideoMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iVideoPort, bVideoSrtpAnswer && bVideoSavp,
+                        bVideoSrtpAnswer ? strVideoSuite : "", m_pOwner->m_strSrtpVideoLocalKey, strVideoTag);
 #endif
 
-        // PTT 200 OK: m=application(floor 수신 포트) 광고
-        if (m_pOwner->m_clsRtpThread.m_iFloorRecvPort > 0)
-            clsLocalRtp.m_iApplicationPort = m_pOwner->m_clsRtpThread.m_iFloorRecvPort;
+    // PTT 200 OK: m=application(floor 수신 포트) 광고
+    if (m_pOwner->m_clsRtpThread.m_iFloorRecvPort > 0)
+        clsLocalRtp.m_iApplicationPort = m_pOwner->m_clsRtpThread.m_iFloorRecvPort;
 
-        printf("[%d] [PTT] Sending 200 OK\n", m_pOwner->m_iId);
-        m_pUserAgent->AcceptCall(pszCallId, &clsLocalRtp);
-        if (pclsRtp) {
-            m_pOwner->m_clsRtpThread.Start(pclsRtp->m_strIp.c_str(), pclsRtp->m_iPort);
-            // SDP에서 m=application 포트 추출 (floor control)
-            if (pclsMessage && !pclsMessage->m_strBody.empty()) {
-                size_t pos = pclsMessage->m_strBody.find("m=application ");
-                if (pos != std::string::npos) {
-                    int floorPort = atoi(pclsMessage->m_strBody.c_str() + pos + 14);
-                    if (floorPort > 0) {
-                        m_pOwner->m_clsRtpThread.m_iDestFloorPort = floorPort;
-                        printf("[%d] [PTT] Floor port from SDP: %d\n", m_pOwner->m_iId, floorPort);
-                    }
-                }
-            }
-            // X-Video-Port 헤더에서 비디오 포트 추출 (SDP m=video 가 없을 때의 PTT 폴백)
-            if (pclsMessage && m_pOwner->m_clsRtpThread.m_iDestVideoPort <= 0) {
-                CSipHeader* pVideoHdr = pclsMessage->GetHeader("X-Video-Port");
-                if (pVideoHdr && !pVideoHdr->m_strValue.empty()) {
-                    int vp = atoi(pVideoHdr->m_strValue.c_str());
-                    if (vp > 0) {
-                        m_pOwner->m_clsRtpThread.m_iDestVideoPort = vp;
-                        printf("[%d] [PTT] Video port from header: %d\n", m_pOwner->m_iId, vp);
-                    }
+    printf("[%d] [PTT] Sending 200 OK\n", m_pOwner->m_iId);
+    m_pUserAgent->AcceptCall(pszCallId, &clsLocalRtp);
+    if (pclsRtp) {
+        m_pOwner->m_clsRtpThread.Start(pclsRtp->m_strIp.c_str(), pclsRtp->m_iPort);
+        // SDP에서 m=application 포트 추출 (floor control)
+        if (pclsMessage && !pclsMessage->m_strBody.empty()) {
+            size_t pos = pclsMessage->m_strBody.find("m=application ");
+            if (pos != std::string::npos) {
+                int floorPort = atoi(pclsMessage->m_strBody.c_str() + pos + 14);
+                if (floorPort > 0) {
+                    m_pOwner->m_clsRtpThread.m_iDestFloorPort = floorPort;
+                    printf("[%d] [PTT] Floor port from SDP: %d\n", m_pOwner->m_iId, floorPort);
                 }
             }
         }
+        // X-Video-Port 헤더에서 비디오 포트 추출 (SDP m=video 가 없을 때의 PTT 폴백)
+        if (pclsMessage && m_pOwner->m_clsRtpThread.m_iDestVideoPort <= 0) {
+            CSipHeader* pVideoHdr = pclsMessage->GetHeader("X-Video-Port");
+            if (pVideoHdr && !pVideoHdr->m_strValue.empty()) {
+                int vp = atoi(pVideoHdr->m_strValue.c_str());
+                if (vp > 0) {
+                    m_pOwner->m_clsRtpThread.m_iDestVideoPort = vp;
+                    printf("[%d] [PTT] Video port from header: %d\n", m_pOwner->m_iId, vp);
+                }
+            }
+        }
+    }
 
-        // PTT 서버 초대 방식에서는 EventCallStart가 발생하지 않을 수 있으므로
-        // AcceptCall 성공 후 직접 통화 성공 기록
-        m_pOwner->m_bInCall = true;
-        m_pOwner->m_stats.iCallOk++;
-        printf("[%d] [PTT] Call accepted (group invite)\n", m_pOwner->m_iId);
-    } else {
-        // VoIP 모드: 180 Ringing → 1초 → 200 OK
-        m_pUserAgent->RingCall(pszCallId, 180, NULL);
-        sleep(1);
-        CSipCallRtp clsLocalRtp;
-        clsLocalRtp.m_strIp  = m_pOwner->m_clsSetup.m_strLocalIp;
-        clsLocalRtp.m_iPort  = m_pOwner->m_clsRtpThread.m_iPort;
-        clsLocalRtp.m_iCodec = pclsRtp ? pclsRtp->m_iCodec : 0;  // GetSipCallRtp 가 테이블 PT 로 정규화한 identity
+    // PTT 서버 초대 방식에서는 EventCallStart가 발생하지 않을 수 있으므로
+    // AcceptCall 성공 후 직접 통화 성공 기록
+    m_pOwner->m_bInCall = true;
+    m_pOwner->m_stats.iCallOk++;
+    printf("[%d] [PTT] Call accepted (group invite)\n", m_pOwner->m_iId);
+}
+
+/** VoIP 착신 응답 — SRTP 협상 + 200 OK + RTP 송신 시작. auto 모드(EventIncomingCall)와 deferred 모드
+ *  (SimSession::AnswerCall) 가 같은 경로를 쓴다. 180 은 호출자가 이미 보냈다. */
+void SessionSipClient::AnswerVoip(const char* pszCallId, CSipCallRtp* pclsRtp) {
+    // 미디어 SRTP answer 협상 (media_security.md §8.1) — 오퍼 crypto 존재 && 모드>0 이면
+    //   수락(suite/tag echo + 자기 키 선언). SAVP 오퍼인데 수락 불가면 평문 answer 가
+    //   성립하지 않으므로 488. answer protocol 은 오퍼 echo (SAVP/AVP+crypto).
+    bool bSrtpAnswer = false;
+    std::string strSrtpSuite, strSrtpTag = "1";
+    m_pOwner->m_strSrtpLocalKey.clear();
+    if (pclsRtp && m_pOwner->m_iSrtpMode > 0 && !pclsRtp->m_strRemoteCryptoSuite.empty() &&
+        !pclsRtp->m_strRemoteCryptoKey.empty()) {
+        m_pOwner->m_strSrtpLocalKey = SrtpGenInlineKeyB64();
+        if (!m_pOwner->m_strSrtpLocalKey.empty()) {
+            bSrtpAnswer = true;
+            strSrtpSuite = pclsRtp->m_strRemoteCryptoSuite;
+            if (!pclsRtp->m_strRemoteCryptoTag.empty()) strSrtpTag = pclsRtp->m_strRemoteCryptoTag;
+        }
+    }
+    if (pclsRtp && pclsRtp->m_bRemoteSavp && !bSrtpAnswer) {
+        printf("[%d] [SRTP] SAVP offer but srtp mode=off/unusable — 488\n", m_pOwner->m_iId);
+        m_pUserAgent->StopCall(pszCallId, 488);
+        return;
+    }
+    if (bSrtpAnswer &&
+        !m_pOwner->m_clsRtpThread.SetSrtpKeys(strSrtpSuite, m_pOwner->m_strSrtpLocalKey,
+                                              pclsRtp->m_strRemoteCryptoKey)) {
+        printf("[%d] [SRTP] session setup failed — 488\n", m_pOwner->m_iId);
+        m_pUserAgent->StopCall(pszCallId, 488);
+        return;
+    }
+    if (!bSrtpAnswer) m_pOwner->m_clsRtpThread.ClearSrtp();
+
+    // 비디오 m-line SDES (RFC 4568 §5 — 미디어 단위 키). 오퍼 video 에 crypto 가 있고 모드>0 이면
+    //   수락(suite/tag echo + 자기 키), SAVP 인데 수락 불가면 488. 오퍼에 video 가 없거나 평문이면
+    //   기존대로 평문 m=video (CSP PTT 는 video 를 X-Video-Port 로만 다룬다).
+    bool bVideoSrtpAnswer = false;
+    std::string strVideoSuite, strVideoTag = "1", strVideoRemoteKey;
+    bool bVideoSavp = false;
+    m_pOwner->m_strSrtpVideoLocalKey.clear();
+    m_pOwner->m_clsRtpThread.ClearVideoSrtp();
+    if (pclsRtp) {
+        int iVc = ReadMediaCrypto(pclsRtp->m_clsMediaList, "video", strVideoTag, strVideoSuite,
+                                  strVideoRemoteKey, bVideoSavp);
+        if (iVc == 1 && m_pOwner->m_iSrtpMode > 0) {
+            m_pOwner->m_strSrtpVideoLocalKey = SrtpGenInlineKeyB64();
+            bVideoSrtpAnswer = !m_pOwner->m_strSrtpVideoLocalKey.empty();
+            if (strVideoTag.empty()) strVideoTag = "1";
+        }
+        if (bVideoSavp && !bVideoSrtpAnswer) {
+            printf("[%d] [SRTP] video SAVP offer but srtp mode=off/unusable — 488\n", m_pOwner->m_iId);
+            m_pUserAgent->StopCall(pszCallId, 488);
+            return;
+        }
+        if (bVideoSrtpAnswer && m_pOwner->m_clsRtpThread.m_iVideoPort > 0 &&
+            !m_pOwner->m_clsRtpThread.SetVideoSrtpKeys(strVideoSuite, m_pOwner->m_strSrtpVideoLocalKey,
+                                                       strVideoRemoteKey)) {
+            printf("[%d] [SRTP] video session setup failed — 488\n", m_pOwner->m_iId);
+            m_pUserAgent->StopCall(pszCallId, 488);
+            return;
+        }
+        // 비디오 송신 목적지 = 오퍼 m=video 포트 (RFC 3264) — 없으면 PTT X-Video-Port 헤더 폴백(아래)
+        m_pOwner->m_clsRtpThread.m_iDestVideoPort = FindActiveMediaPort(pclsRtp->m_clsMediaList, "video");
+    }
+
+    CSipCallRtp clsLocalRtp;
+    clsLocalRtp.m_strIp  = m_pOwner->m_clsSetup.m_strLocalIp;
+    clsLocalRtp.m_iPort  = m_pOwner->m_clsRtpThread.m_iPort;
+    clsLocalRtp.m_iCodec = pclsRtp ? pclsRtp->m_iCodec : 0;  // GetSipCallRtp 가 테이블 PT 로 정규화한 identity
 
 #ifdef USE_MEDIA_LIST
-        // 200 OK SDP에 audio(오퍼 PT echo) + video 미디어 포함
-        m_pOwner->m_clsRtpThread.m_iAudioPt =
-            BuildAudioMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iPort, clsLocalRtp.m_iCodec, pclsRtp,
-                            bSrtpAnswer && pclsRtp->m_bRemoteSavp, bSrtpAnswer ? strSrtpSuite : "",
-                            m_pOwner->m_strSrtpLocalKey, strSrtpTag);
-        if (m_pOwner->m_clsRtpThread.m_iVideoPort > 0)
-            BuildVideoMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iVideoPort, bVideoSrtpAnswer && bVideoSavp,
-                            bVideoSrtpAnswer ? strVideoSuite : "", m_pOwner->m_strSrtpVideoLocalKey, strVideoTag);
+    // 200 OK SDP에 audio(오퍼 PT echo) + video 미디어 포함
+    m_pOwner->m_clsRtpThread.m_iAudioPt =
+        BuildAudioMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iPort, clsLocalRtp.m_iCodec, pclsRtp,
+                        bSrtpAnswer && pclsRtp->m_bRemoteSavp, bSrtpAnswer ? strSrtpSuite : "",
+                        m_pOwner->m_strSrtpLocalKey, strSrtpTag);
+    if (m_pOwner->m_clsRtpThread.m_iVideoPort > 0)
+        BuildVideoMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iVideoPort, bVideoSrtpAnswer && bVideoSavp,
+                        bVideoSrtpAnswer ? strVideoSuite : "", m_pOwner->m_strSrtpVideoLocalKey, strVideoTag);
 #endif
 
-        m_pUserAgent->AcceptCall(pszCallId, &clsLocalRtp);
-        // 200 OK 후 150ms 대기 → RTP 송출 시작 (CMP 녹취 세그먼트 초반에 SPS/PPS 포함 보장)
-        usleep(150000);
-        if (pclsRtp) m_pOwner->m_clsRtpThread.Start(pclsRtp->m_strIp.c_str(), pclsRtp->m_iPort);
-    }
+    m_pUserAgent->AcceptCall(pszCallId, &clsLocalRtp);
+    // 200 OK 후 150ms 대기 → RTP 송출 시작 (CMP 녹취 세그먼트 초반에 SPS/PPS 포함 보장)
+    usleep(150000);
+    if (pclsRtp) m_pOwner->m_clsRtpThread.Start(pclsRtp->m_strIp.c_str(), pclsRtp->m_iPort);
 }
 
 void SessionSipClient::EventCallStart(const char* pszCallId, CSipCallRtp* pclsRtp) {
@@ -1996,11 +2115,13 @@ void SessionSipClient::EventCallStart(const char* pszCallId, CSipCallRtp* pclsRt
     long long ms = SimSession::NowMs() - m_pOwner->m_stats.tCallStart;
     m_pOwner->m_stats.llTotalCallMs += ms;
     printf("[%d] CALL STARTED CallId=%s (%lldms)\n", m_pOwner->m_iId, pszCallId, ms);
+    if (m_pOwner->m_pObserver) m_pOwner->m_pObserver->OnCallStart(m_pOwner, pszCallId, ms);
 }
 
 void SessionSipClient::EventCallEnd(const char* pszCallId, int iSipStatus) {
     CSipClient::EventCallEnd(pszCallId, iSipStatus);
     m_pOwner->m_stats.iCallEnd++;
+    if (m_pOwner->m_pObserver) m_pOwner->m_pObserver->OnCallEnd(m_pOwner, pszCallId, iSipStatus);
     // 다른 다이얼로그(예: 당겨받기 뒤 서버가 CANCEL 한 자기 링잉 착신 leg, 487)의 종료는 현재 호 상태를 건드리지 않는다.
     if (!m_pOwner->m_strInviteId.empty() && pszCallId && m_pOwner->m_strInviteId != pszCallId) {
         printf("[%d] CALL ENDED (other dialog) CallId=%s status=%d — current=%s kept\n", m_pOwner->m_iId, pszCallId,

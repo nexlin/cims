@@ -1,25 +1,32 @@
 #!/usr/bin/env python3
-"""cims-tester — 계측기 컨트롤러의 얇은 CLI (cims-verify 항목이 호출하는 진입점).
+"""cims-tester — 계측기 컨트롤러의 얇은 CLI (cims-verify 항목이 호출하는 진입점, test_instrument.md §2).
 
-  cims-tester health
-  cims-tester scenarios | profiles | topologies | runs
-  cims-tester validate <kind> <file.yaml>        kind = topology|scenario|profile
-  cims-tester run <scenario-id> [--load <profile>] [--topology <id>] [--json]   (B 단계 전 = 501)
+  cims-tester health | scenarios | profiles | topologies | runs | workers [--topology <id>]
+  cims-tester validate <kind> <file.yaml>                     kind = topology|scenario|profile|run_request
+  cims-tester run <scenario-id> (--topology <name|id>) [--load <profile>] [--ht N] [--bind k=v]...
+                  [--instances N] [--rate R] [--label ...] [--no-wait] [--json]
+                  → 완주까지 기다려 RFC 6076 표를 찍고 verdict 로 종료 코드(pass=0, 그 외 1)
+  cims-tester report <run-id> [--json]                        run.json + Markdown 보고서
+  cims-tester stop <run-id>  ·  rate <run-id> <saps>
+  cims-tester creds-from-db --csp-json <csp.json> [--table volte_subscriptions] [--count N] [--offset N]
+                            [--domain <sip domain>] --out <file.jsonl>
+                  → DB(ha1 보유 가입자)에서 creds JSONL 을 만든다 (토폴로지 pool.source.creds 로 지정)
 
 접속: --url (기본 $CIMS_TESTER_URL 또는 https://127.0.0.1:4419 — base 게이트웨이) + 토큰
 ($CIMS_TESTER_TOKEN 또는 --token). 모듈에 직접 붙을 땐 --url https://127.0.0.1:4490.
-표준 라이브러리만 쓴다(설치 의존 없음).
+표준 라이브러리만 쓴다(설치 의존 없음; creds-from-db 만 pymysql — csc/oam vendor 경로를 자동으로 찾는다).
 """
 import argparse
 import json
 import os
 import ssl
 import sys
+import time
 import urllib.error
 import urllib.request
 
 
-def _req(url, token, method='GET', body=None, accept='application/json'):
+def _req(url, token, method='GET', body=None, accept='application/json', timeout=30):
     data = json.dumps(body).encode('utf-8') if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header('Accept', accept)
@@ -31,7 +38,7 @@ def _req(url, token, method='GET', body=None, accept='application/json'):
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE   # 관리평면은 self-signed 전제(oam_base_service_split §5)
     try:
-        with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
             raw = r.read().decode('utf-8', 'replace')
             return r.status, (json.loads(raw) if raw else None)
     except urllib.error.HTTPError as e:
@@ -42,18 +49,95 @@ def _req(url, token, method='GET', body=None, accept='application/json'):
             return e.code, {'error': raw}
 
 
+def _fmt(v):
+    if v is None:
+        return '-'
+    if isinstance(v, float):
+        return f'{v:.2f}'
+    return str(v)
+
+
+def _print_summary(rec):
+    s = rec.get('summary') or {}
+    print(f"run {rec.get('id')}  {rec.get('scenario_id')}  verdict={rec.get('verdict')}  "
+          f"topology={rec.get('topology')} profile={rec.get('profile') or '(단발)'}")
+    rows = [('attempts', '호 시도'), ('sessions', '세션'), ('completed', '완료'), ('failed', '실패'), ('skipped', '건너뜀'),
+            ('ser_pct', 'SER %'), ('scr_pct', 'SCR %'), ('registered_ok', '등록 OK'), ('registered_fail', '등록 실패'),
+            ('rrd_ms_p50', 'RRD p50'), ('rrd_ms_p95', 'RRD p95'), ('srd_ms_p50', 'SRD p50'), ('srd_ms_p95', 'SRD p95'),
+            ('sdd_ms_p95', 'SDD p95'), ('rtp_loss_pct', 'RTP 손실 %'), ('jitter_ms_p95', '지터 p95'), ('doc_saps', 'DOC'),
+            ('codes', '코드'), ('expect_ok', '기대치 OK'), ('expect_total', '기대치 총')]
+    for k, label in rows:
+        if k in s:
+            print(f'  {label:<12} {_fmt(s[k])}')
+
+
+def _cmd_creds(a):
+    here = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.normpath(os.path.join(here, '..'))
+    for cand in (os.path.join(root, '..', '..', '..', 'csc', 'vendor'), os.path.join(root, '..', 'csc', 'vendor'),
+                 os.path.join(root, '..', 'oam', 'vendor'), os.path.join(root, '..', '..', 'core', 'oam', 'vendor')):
+        cand = os.path.normpath(cand)
+        if os.path.isdir(cand) and cand not in sys.path:
+            sys.path.append(cand)
+    try:
+        import pymysql
+    except ImportError:
+        print('pymysql 없음 — csc/oam vendor 경로를 찾지 못했다', file=sys.stderr)
+        return 2
+    with open(a.csp_json, 'r', encoding='utf-8') as f:
+        db = (json.load(f).get('Setup') or {}).get('Database') or {}
+    if not db.get('Host'):
+        print('csp.json Setup.Database 없음', file=sys.stderr)
+        return 2
+    conn = pymysql.connect(host=db['Host'], port=int(db.get('Port', 3306)), user=db['User'],
+                           password=db['Password'], database=db['DbName'])
+    cur = conn.cursor()
+    tbl = a.table
+    if tbl not in ('volte_subscriptions', 'voip_subscriptions', 'ptt_subscriptions'):
+        print('table 은 volte_subscriptions|voip_subscriptions|ptt_subscriptions', file=sys.stderr)
+        return 2
+    cur.execute(f"SELECT id, imsi, ha1, auth_scheme FROM {tbl} WHERE ha1 IS NOT NULL AND ha1<>'' "
+                f"AND (sip_transport IS NULL OR sip_transport='' OR sip_transport=%s) ORDER BY id LIMIT %s OFFSET %s",
+                ((a.transport or '').upper(), int(a.count), int(a.offset)))
+    rows = cur.fetchall()
+    conn.close()
+    n = 0
+    with open(a.out, 'w', encoding='utf-8') as f:
+        for r in rows:
+            rec = {'user': r[0], 'authId': r[1] or '', 'ha1': r[2]}
+            if a.domain:
+                rec['domain'] = a.domain
+            f.write(json.dumps(rec) + '\n')
+            n += 1
+    print(f'{n} creds → {a.out}  (table={tbl}, offset={a.offset})')
+    return 0 if n else 1
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog='cims-tester')
     ap.add_argument('--url', default=os.environ.get('CIMS_TESTER_URL', 'https://127.0.0.1:4419'))
     ap.add_argument('--token', default=os.environ.get('CIMS_TESTER_TOKEN', ''))
     ap.add_argument('--json', action='store_true', help='원본 JSON 출력')
     sub = ap.add_subparsers(dest='cmd', required=True)
-    for c in ('health', 'scenarios', 'profiles', 'topologies', 'runs', 'workers'):
+    for c in ('health', 'scenarios', 'profiles', 'topologies', 'runs'):
         sub.add_parser(c)
+    w = sub.add_parser('workers'); w.add_argument('--topology')
     v = sub.add_parser('validate'); v.add_argument('kind'); v.add_argument('file')
-    r = sub.add_parser('run'); r.add_argument('scenario'); r.add_argument('--load'); r.add_argument('--topology')
+    r = sub.add_parser('run'); r.add_argument('scenario'); r.add_argument('--load'); r.add_argument('--topology', required=True)
+    r.add_argument('--ht', type=int); r.add_argument('--bind', action='append', default=[])
+    r.add_argument('--instances', type=int); r.add_argument('--rate', type=float); r.add_argument('--label')
+    r.add_argument('--no-wait', action='store_true'); r.add_argument('--timeout', type=int, default=0, help='대기 상한(초, 0=무제한)')
+    rp = sub.add_parser('report'); rp.add_argument('run_id')
+    st = sub.add_parser('stop'); st.add_argument('run_id')
+    rt = sub.add_parser('rate'); rt.add_argument('run_id'); rt.add_argument('saps', type=float)
+    cr = sub.add_parser('creds-from-db'); cr.add_argument('--csp-json', required=True); cr.add_argument('--table', default='volte_subscriptions')
+    cr.add_argument('--count', type=int, default=100); cr.add_argument('--offset', type=int, default=0)
+    cr.add_argument('--domain'); cr.add_argument('--transport', default=''); cr.add_argument('--out', required=True)
     a = ap.parse_args(argv)
     base = a.url.rstrip('/') + '/api/v1/tester'
+
+    if a.cmd == 'creds-from-db':
+        return _cmd_creds(a)
 
     if a.cmd == 'validate':
         try:
@@ -64,15 +148,84 @@ def main(argv=None):
         except ImportError:
             with open(a.file, 'r', encoding='utf-8') as f:
                 st, out = _req(base + '/validate', a.token, 'POST', {'kind': a.kind, 'yaml': f.read()})
-    elif a.cmd == 'run':
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        return 0 if (out or {}).get('ok') else 1
+
+    if a.cmd == 'run':
         body = {'scenario_id': a.scenario}
-        if a.load: body['profile'] = a.load
-        if a.topology: body['topology_id'] = a.topology
+        if a.topology.isdigit():
+            body['topology_id'] = int(a.topology)
+        else:
+            body['topology'] = a.topology
+        if a.load:
+            body['profile'] = a.load
+        bindings = {}
+        if a.ht is not None:
+            bindings['ht'] = a.ht
+        for b in a.bind:
+            k, _, val = b.partition('=')
+            bindings[k] = int(val) if val.isdigit() else val
+        if bindings:
+            body['bindings'] = bindings
+        if a.instances:
+            body['instances'] = a.instances
+        if a.rate:
+            body['rate_saps'] = a.rate
+        if a.label:
+            body['label'] = a.label
         st, out = _req(base + '/runs', a.token, 'POST', body)
+        if st != 202:
+            print(json.dumps(out, ensure_ascii=False, indent=2))
+            return 1
+        rid = out['id']
+        if a.no_wait:
+            print(json.dumps(out, ensure_ascii=False, indent=2) if a.json else rid)
+            return 0
+        print(f'run {rid} started — waiting', file=sys.stderr)
+        t0 = time.time()
+        last_state = ''
+        while True:
+            st, rec = _req(f'{base}/runs/{rid}', a.token)
+            if st == 200 and rec:
+                live = rec.get('live') or {}
+                state = live.get('state') or rec.get('verdict')
+                if state != last_state:
+                    print(f'  [{int(time.time()-t0):>4}s] {state}', file=sys.stderr)
+                    last_state = state
+                if rec.get('verdict') != 'running' and not live:
+                    break
+            if a.timeout and time.time() - t0 > a.timeout:
+                print('timeout — run 은 계속 진행 중 (cims-tester stop 으로 중단)', file=sys.stderr)
+                return 1
+            time.sleep(2)
+        if a.json:
+            print(json.dumps(rec, ensure_ascii=False, indent=2))
+        else:
+            _print_summary(rec)
+        return 0 if rec.get('verdict') == 'pass' else 1
+
+    if a.cmd == 'report':
+        st, out = _req(f'{base}/runs/{a.run_id}/report', a.token)
+        if st != 200:
+            print(json.dumps(out, ensure_ascii=False, indent=2))
+            return 1
+        print(json.dumps(out['run'], ensure_ascii=False, indent=2) if a.json else (out.get('markdown') or json.dumps(out['run'], ensure_ascii=False, indent=2)))
+        return 0
+
+    if a.cmd == 'stop':
+        st, out = _req(f'{base}/runs/{a.run_id}/stop', a.token, 'POST', {})
+        print(json.dumps(out, ensure_ascii=False))
+        return 0 if st == 202 else 1
+    if a.cmd == 'rate':
+        st, out = _req(f'{base}/runs/{a.run_id}/rate', a.token, 'POST', {'rate_saps': a.saps})
+        print(json.dumps(out, ensure_ascii=False))
+        return 0 if st == 200 else 1
+
+    if a.cmd == 'workers':
+        st, out = _req(f'{base}/workers' + (f'?topology={a.topology}' if a.topology else ''), a.token)
     else:
         st, out = _req(f'{base}/{a.cmd}', a.token)
-
-    if a.json or a.cmd in ('validate', 'run'):
+    if a.json:
         print(json.dumps(out, ensure_ascii=False, indent=2))
     else:
         rows = out.get(a.cmd) if isinstance(out, dict) else None
@@ -81,8 +234,6 @@ def main(argv=None):
                 print(json.dumps(row, ensure_ascii=False))
         else:
             print(json.dumps(out, ensure_ascii=False, indent=2))
-    if a.cmd == 'validate':
-        return 0 if (out or {}).get('ok') else 1
     return 0 if 200 <= st < 300 else 1
 
 

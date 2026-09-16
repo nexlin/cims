@@ -92,6 +92,23 @@ public:
     // 누적 수신 RTP 패킷 수 (리셋 없음) — 전달·당겨받기 후 재고정된 leg 로 미디어가 실제로
     //   흐르는지 검증하는 표식 (S3-SCN-XFER/PICKUP). recv 스레드가 unprotect 통과분만 센다.
     std::atomic<unsigned long long> m_ullRecvTotal{0};
+    // ── 수신 품질 통계 (RFC 3550 §6.4.1 / A.8 — 계측기 rtp_loss_pct·jitter_ms 원천) ──
+    //   손실 = 시퀀스 공백 누계(첫 패킷 기준 단일 스트림; SSRC 가 바뀌면 기준을 다시 잡는다),
+    //   지터 = 도착 간격 편차의 지수 평균(A.8), 단위 µs(클록은 wire PT 로 유도: 0/8=8 kHz, 그 외 16 kHz).
+    std::atomic<unsigned long long> m_ullRecvLost{0};
+    std::atomic<long long>          m_llRecvJitterUs{0};
+    /** 새 호마다 초기화 — 시퀀스 기준·지터 누적을 버린다(SSRC 도). */
+    void ResetRecvStats() {
+        m_ullRecvLost = 0; m_llRecvJitterUs = 0; m_ullRecvTotal = 0;
+        std::lock_guard<std::mutex> lk(m_mtxSsrc); m_setRecvSsrc.clear();
+        m_bRecvSeqInit = false;
+    }
+    bool          m_bRecvSeqInit = false;   // recv 스레드 전용
+    unsigned int  m_uRecvSsrc = 0;
+    unsigned int  m_uRecvExtSeq = 0;        // 확장 시퀀스(wrap 처리)
+    unsigned int  m_uRecvLastTs = 0;
+    long long     m_llRecvLastArrivalUs = 0;
+    double        m_dRecvJitter = 0;        // A.8 J (클록 틱)
     // 수신 audio RTP 의 서로 다른 SSRC 집합 — 청취(감청) leg 가 한 m-line 에서 SSRC 2개(caller/callee)
     //   를 받는지 검증(S3-SCN-MONITOR). recv 스레드가 헤더 SSRC 를 넣는다.
     std::set<unsigned int> m_setRecvSsrc;

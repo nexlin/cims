@@ -318,6 +318,7 @@ class LoadProfile(_Strict):
 class Identity(_Strict):
     user: str
     domain: str
+    auth_id: Optional[str] = Field(default=None, description="IMPI 사용자부 — '@' 없으면 워커가 domain 을 붙인다(cspsim -creds authId 규약). 비면 user")
     ha1: Optional[str] = None
     password: Optional[str] = None
     display: Optional[str] = None
@@ -361,6 +362,8 @@ class RunStart(_Strict):
         default_factory=dict, description='역할 → 이 워커가 맡는 신원 인덱스 [begin, end) — 워커 분산')
     steps: List[CompiledStep] = Field(min_length=1)
     rate_saps: float = Field(ge=0, description='이 워커 몫의 시도율 (컨트롤러가 워커 수로 나눔)')
+    max_instances: Optional[int] = Field(default=None, ge=1,
+                                         description='이 워커가 발생시킬 인스턴스 상한 — 단발(기능) 실행. 다 끝나면 워커가 run 을 스스로 닫는다')
     stream: str = Field(description='관측 스트림 목적지 host:port (TCP JSONL)')
 
 
@@ -472,8 +475,31 @@ class RunRecord(_Strict):
     target_build: Optional[str] = Field(default=None, description='대상 git sha / 패키지 manifest 해시 — 회귀 비교 축')
 
 
+# ──────────────────────────────────────────────────────────────────────────
+#  7. run 요청 — POST /api/v1/tester/runs (콘솔·CLI → 컨트롤러)
+# ──────────────────────────────────────────────────────────────────────────
+
+class RunRequest(_Strict):
+    scenario_id: str
+    topology_id: Optional[int] = Field(default=None, description='저장된 토폴로지 id — topology(name) 와 둘 중 하나')
+    topology: Optional[str] = Field(default=None, description='토폴로지 name')
+    profile: Optional[str] = Field(default=None, description='부하 프로파일 name — 없으면 단발(기능) 실행')
+    bindings: Dict[str, Union[int, float, str]] = Field(default_factory=dict,
+                                                       description='${ht} 같은 시나리오 바인딩 — profile.ht 보다 우선')
+    instances: Optional[int] = Field(default=None, ge=1, description='단발 실행 인스턴스 수 (기본 1)')
+    rate_saps: Optional[float] = Field(default=None, gt=0, description='단발 실행의 발생율 (기본 instances 를 1 초 안에)')
+    label: Optional[str] = Field(default=None, max_length=120)
+
+    @model_validator(mode='after')
+    def _topo(self):
+        if self.topology_id is None and not self.topology:
+            raise ValueError('topology_id 또는 topology(name) 가 필요하다')
+        return self
+
+
 # 스키마 이름 → 모델 (bin/gen-schemas · GET /api/v1/tester/schema/<name>)
 SCHEMAS = {
+    'run_request': RunRequest,
     'topology': Topology,
     'scenario': Scenario,
     'profile': LoadProfile,

@@ -10,6 +10,7 @@
 
 #include "SipChallenge.h"
 #include "SipCredential.h"
+#include "CsimObserver.h"
 #include <map>
 #include <string>
 #include <vector>
@@ -34,6 +35,11 @@ public:
     virtual void EventCallEnd( const char * pszCallId, int iSipStatus );
     /** REFER 최종 응답 (psip RecvReferResponse) — 전달 게이트(transfer_allowed=false → 403) 판정용. */
     virtual void EventTransferResponse( const char * pszCallId, int iSipStatus );
+
+    /** 착신 응답 경로 — EventIncomingCall 에서 분리. PTT 는 즉시 자동응답, VoIP 는 auto(180→1초→200) 또는
+     *  deferred(SimSession::AnswerCall 이 호출) 두 모드가 같은 AnswerVoip 를 쓴다. */
+    void AnswerPtt(const char* pszCallId, CSipCallRtp* pclsRtp, CSipMessage* pclsMessage);
+    void AnswerVoip(const char* pszCallId, CSipCallRtp* pclsRtp);
 
     SimSession* m_pOwner;
 };
@@ -106,7 +112,9 @@ public:
     ~SimSession();
 
     bool Start();
-    void Stop();
+    /** 정지 — 통화 중이면 BYE, 로그아웃(구독 해지·REGISTER Expires=0), 스택 정지. iFlushMs = 소켓을 닫기 전
+     *  마지막 메시지가 나갈 시간(기본 300 ms). 워커는 수천 세션을 한꺼번에 내리므로 0 을 주고 한 번만 기다린다. */
+    void Stop(int iFlushMs = 300);
 
     /** 시그널링 transport 선택 (기본 UDP). TLS 면 스택을 TLS 클라이언트로 기동한다 —
      *  등록·발신 목적지가 모두 이 transport 로 나가고, 서버 발신(fan-out INVITE·NOTIFY·
@@ -157,6 +165,24 @@ public:
     void SetNoRegister(bool b) { m_bNoRegister = b; }
     void SetNoXcap(bool b) { m_bNoXcap = b; }
     void SetCscHost(const std::string& h, int p, bool tls) { m_strCscHost = h; m_iCscPort = p; m_bCscTls = tls; }
+
+    // ── 관측자·응답 모드 (libcsim — 계측기 워커용, test_instrument.md §3.1) ──
+    /** 이벤트 관측자 — 등록/착신/확립/종료/BYE 응답을 시각·상태와 함께 통지한다. 스택 스레드에서 불린다. */
+    void SetObserver(ICsimObserver* p) { m_pObserver = p; }
+    ICsimObserver* m_pObserver = nullptr;
+    /** 착신 응답 모드 — AUTO(기본, cspsim: 180→1초→200) / DEFERRED(180 만, AnswerCall·RejectCall 로 응답). */
+    enum EAnswerMode { E_ANSWER_AUTO = 0, E_ANSWER_DEFERRED = 1 };
+    void SetAnswerMode(EAnswerMode e) { m_eAnswerMode = e; }
+    EAnswerMode m_eAnswerMode = E_ANSWER_AUTO;
+    /** deferred 모드 — 보관한 착신 오퍼에 200 OK / 오류 응답. 대기 착신이 없으면 false. */
+    bool AnswerCall();
+    bool RejectCall(int iSipCode);
+    bool HasPendingCall() const { return !m_strPendingCallId.empty(); }
+    std::string  m_strPendingCallId;
+    CSipCallRtp  m_clsPendingOffer;
+    bool         m_bPendingOffer = false;
+    std::string  m_strByeCallId;          // StopCall 이 보낸 BYE 의 Call-ID — RecvResponse 가 최종 응답을 짝짓는다
+    long long    m_tStopCallMs = 0;       // BYE 송신 시각 (SDD 기점)
 
     // 액션
     void StartCall(const std::string& strTarget = "");

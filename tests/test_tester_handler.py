@@ -4,7 +4,7 @@ Covers:
   - RBAC: 토큰 없음 401, 조회 monitor / 토폴로지 쓰기 operator / 삭제 manager
   - /health · /schema · /validate(doc, yaml) · /scenarios · /profiles
   - /topologies CRUD — 검증 실패 400·errors, 저장은 검증 통과분만
-  - /runs POST = 501(B 단계 전) · /runs 빈 색인 · 색인 저장 후 조회 · 보존 스윕
+  - /runs POST 검증(400/404/403) · stop/rate/report 미존재 404 · /runs 빈 색인 · 색인 저장 후 조회 · 보존 스윕
   - /events = text/event-stream StreamingResponse
 
 각 테스트는 tmpdir 로 CimsRuntimeDir·Tester.DataDir 격리. 토큰은 admin_auth 로 직접 발급.
@@ -170,9 +170,25 @@ class Topologies(unittest.TestCase):
 
 
 class Runs(unittest.TestCase):
-    def test_post_is_501_before_phase_b(self):
+    def test_post_validates_request(self):
+        # RunRequest 검증 — topology 없음 400, 모르는 시나리오 404, 모르는 토폴로지 404 (워커에 닿기 전에 거절)
         r = _call('POST', '/api/v1/tester/runs', role='operator', body={'scenario_id': 'VOLTE-CALL-BASIC'})
-        self.assertEqual(r.status, 501)
+        self.assertEqual(r.status, 400)
+        self.assertEqual(r.body['error'], 'invalid_run_request')
+        r = _call('POST', '/api/v1/tester/runs', role='operator', body={'scenario_id': 'NOPE-1', 'topology': 'x'})
+        self.assertEqual(r.status, 404)
+        r = _call('POST', '/api/v1/tester/runs', role='operator', body={'scenario_id': 'VOLTE-CALL-BASIC', 'topology': 'nope'})
+        self.assertEqual(r.status, 404)
+        self.assertIn('topology_not_found', r.body['error'])
+        # monitor 는 run 을 시작할 수 없다
+        r = _call('POST', '/api/v1/tester/runs', role='monitor', body={'scenario_id': 'VOLTE-CALL-BASIC', 'topology': 'x'})
+        self.assertEqual(r.status, 403)
+
+    def test_stop_rate_report_unknown_run(self):
+        self.assertEqual(_call('POST', '/api/v1/tester/runs/nope/stop', role='operator').status, 404)
+        self.assertEqual(_call('POST', '/api/v1/tester/runs/nope/rate', role='operator', body={'rate_saps': 1}).status, 404)
+        self.assertEqual(_call('GET', '/api/v1/tester/runs/nope/report').status, 404)
+        self.assertEqual(_call('GET', '/api/v1/tester/runs/nope/events').body, {'events': []})
 
     def test_index_roundtrip_and_purge(self):
         self.assertEqual(_call('GET', '/api/v1/tester/runs').body['runs'], [])

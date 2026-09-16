@@ -1,0 +1,723 @@
+"""run 오케스트레이터 — 워커 배분·부하 프로파일 구동·관측 수집·요약/판정 (test_instrument.md §2·§5·§6).
+
+  RunManager (프로세스 단일)
+    ├ StreamServer   : Tester.WorkerStreamIp:Port TCP 수신 — 워커 JSONL(hello/agg/event/log) → 해당 run 의 Recorder
+    ├ Recorder(run)  : <DataDir>/runs/<id>/{run.json, metrics.sqlite(1초 버킷), events.jsonl} + 병합 누계(요약용)
+    │                  + SSE fan-out (tester_bus: stream=agg|events|runs)
+    └ Driver(run)    : 스레드 — 컴파일 → 풀 생성 → run 시작 → 프로파일(constant/soak/step/ramp/burst · 단발) →
+                       stop_on/IHS 판정 → 중단(drain) → 요약·verdict → 색인 저장
+
+verdict: pass = 모든 expect 만족 · fail = 기대치 미달 또는 stop_on 발동 · aborted = 운영자 중단 · error = 워커/컴파일 오류.
+백분위는 워커 히스토그램(로그 상한 버킷)에서 상한값으로 근사한다 — 기대치 판정은 보수적(상한 ≤ 목표)이다.
+"""
+from __future__ import annotations
+
+import json
+import os
+import socket
+import sqlite3
+import threading
+import time
+import traceback
+import uuid
+from datetime import datetime
+from typing import Dict, List, Optional
+
+from services import tester_store as store
+from services import tester_workers, tester_compile
+from services.tester_bus import publish
+from services.tester_models import RunRecord, RunRequest, LoadProfile
+
+_LOG = None
+
+
+def _log(level: str, msg: str) -> None:
+    if _LOG is not None:
+        getattr(_LOG, {'info': 'log_info', 'warn': 'log_warning', 'error': 'log_error'}.get(level, 'log_info'))(msg)
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat(timespec='seconds')
+
+
+# ──────────────────────────────────────────────────────────────────────────
+#  히스토그램 병합·백분위 근사
+# ──────────────────────────────────────────────────────────────────────────
+
+def _bucket_key(k: str) -> float:
+    return float('inf') if k == 'inf' else float(k)
+
+
+class Hist:
+    __slots__ = ('count', 'sum', 'min', 'max', 'buckets')
+
+    def __init__(self):
+        self.count = 0
+        self.sum = 0.0
+        self.min = None
+        self.max = None
+        self.buckets: Dict[str, int] = {}
+
+    def merge(self, h: dict) -> None:
+        c = int(h.get('count') or 0)
+        if c <= 0:
+            return
+        self.count += c
+        self.sum += float(h.get('sum') or 0)
+        if h.get('min') is not None:
+            self.min = float(h['min']) if self.min is None else min(self.min, float(h['min']))
+        if h.get('max') is not None:
+            self.max = float(h['max']) if self.max is None else max(self.max, float(h['max']))
+        for k, v in (h.get('buckets') or {}).items():
+            self.buckets[k] = self.buckets.get(k, 0) + int(v)
+
+    def percentile(self, p: float) -> Optional[float]:
+        """p ∈ (0,1] — 누적 수가 p·count 를 넘는 첫 버킷의 상한. inf 버킷이면 max."""
+        if self.count == 0:
+            return None
+        target = p * self.count
+        acc = 0
+        for k in sorted(self.buckets, key=_bucket_key):
+            acc += self.buckets[k]
+            if acc >= target:
+                return self.max if k == 'inf' else min(_bucket_key(k), self.max if self.max is not None else _bucket_key(k))
+        return self.max
+
+    def to_dict(self) -> dict:
+        return {'count': self.count, 'mean': (self.sum / self.count) if self.count else None,
+                'min': self.min, 'max': self.max,
+                'p50': self.percentile(0.5), 'p95': self.percentile(0.95), 'p99': self.percentile(0.99)}
+
+
+# ──────────────────────────────────────────────────────────────────────────
+#  Recorder — run 하나의 저장·누계·SSE
+# ──────────────────────────────────────────────────────────────────────────
+
+class Recorder:
+    def __init__(self, run_id: str):
+        self.run_id = run_id
+        self.dir = store.run_dir(run_id)
+        os.makedirs(os.path.join(self.dir, 'sip'), exist_ok=True)
+        self._lock = threading.Lock()
+        self._db = sqlite3.connect(os.path.join(self.dir, 'metrics.sqlite'), check_same_thread=False)
+        self._db.execute('CREATE TABLE IF NOT EXISTS agg (t INTEGER, worker TEXT, counters TEXT, gauges TEXT, timers TEXT)')
+        self._db.execute('CREATE INDEX IF NOT EXISTS agg_t ON agg (t)')
+        self._events = open(os.path.join(self.dir, 'events.jsonl'), 'a', encoding='utf-8')
+        self.counters: Dict[str, int] = {}
+        self.timers: Dict[str, Hist] = {}
+        self.gauges_by_worker: Dict[str, dict] = {}
+        self.events_n = 0
+        self.workers_seen: List[str] = []
+        self.window: List[dict] = []      # 최근 버킷(카운터만) — step/IHS 창 판정용
+        self.last_t = 0
+
+    def on_record(self, rec: dict) -> None:
+        kind = rec.get('kind')
+        with self._lock:
+            w = str(rec.get('worker') or '')
+            if w and w not in self.workers_seen:
+                self.workers_seen.append(w)
+            if kind == 'agg':
+                c = rec.get('counters') or {}
+                g = rec.get('gauges') or {}
+                tm = rec.get('timers') or {}
+                for k, v in c.items():
+                    self.counters[k] = self.counters.get(k, 0) + int(v)
+                for k, h in tm.items():
+                    self.timers.setdefault(k, Hist()).merge(h)
+                self.gauges_by_worker[w] = g
+                t = int(rec.get('t') or 0)
+                self.last_t = max(self.last_t, t)
+                self.window.append({'t': t, 'counters': c})
+                if len(self.window) > 3600:
+                    del self.window[:len(self.window) - 3600]
+                self._db.execute('INSERT INTO agg VALUES (?,?,?,?,?)',
+                                 (t, w, json.dumps(c), json.dumps(g), json.dumps(tm)))
+                self._db.commit()
+                publish('agg', {'run_id': self.run_id, 't': t, 'worker': w, 'counters': c, 'gauges': g,
+                                'timers': {k: {'count': h.get('count'), 'sum': h.get('sum'), 'max': h.get('max')} for k, h in tm.items()}})
+            elif kind == 'event':
+                self.events_n += 1
+                self._events.write(json.dumps(rec, ensure_ascii=False) + '\n')
+                self._events.flush()
+                publish('events', {'run_id': self.run_id, **rec})
+            elif kind in ('log', 'hello'):
+                publish('runs', {'run_id': self.run_id, 'kind': kind, 'worker': w,
+                                 'msg': rec.get('msg') or rec.get('version')})
+
+    def gauges_sum(self) -> dict:
+        with self._lock:
+            out: Dict[str, float] = {}
+            for g in self.gauges_by_worker.values():
+                for k, v in g.items():
+                    if k == 'cpu_pct':
+                        out[k] = max(out.get(k, 0), float(v))
+                    else:
+                        out[k] = out.get(k, 0) + float(v)
+            return out
+
+    def window_counters(self, since_t: int) -> dict:
+        with self._lock:
+            out: Dict[str, int] = {}
+            for b in self.window:
+                if b['t'] >= since_t:
+                    for k, v in b['counters'].items():
+                        out[k] = out.get(k, 0) + int(v)
+            return out
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return {'counters': dict(self.counters), 'timers': {k: h.to_dict() for k, h in self.timers.items()},
+                    'events': self.events_n, 'workers': list(self.workers_seen), 'last_t': self.last_t}
+
+    def close(self) -> None:
+        with self._lock:
+            try:
+                self._db.commit()
+                self._db.close()
+            except Exception:
+                pass
+            try:
+                self._events.close()
+            except Exception:
+                pass
+
+
+# ──────────────────────────────────────────────────────────────────────────
+#  StreamServer — 워커 → 컨트롤러 TCP JSONL
+# ──────────────────────────────────────────────────────────────────────────
+
+class StreamServer:
+    def __init__(self, ip: str, port: int, dispatch):
+        self.ip, self.port, self.dispatch = ip, port, dispatch
+        self._srv: Optional[socket.socket] = None
+        self._stop = False
+        self._thread: Optional[threading.Thread] = None
+        self.connections = 0
+
+    def start(self) -> None:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind((self.ip, self.port))
+        s.listen(64)
+        s.settimeout(0.5)
+        self._srv = s
+        self._thread = threading.Thread(target=self._accept, name='tester-stream', daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop = True
+        try:
+            if self._srv:
+                self._srv.close()
+        except Exception:
+            pass
+
+    def _accept(self) -> None:
+        while not self._stop:
+            try:
+                c, addr = self._srv.accept()
+            except socket.timeout:
+                continue
+            except Exception:
+                if self._stop:
+                    return
+                continue
+            self.connections += 1
+            threading.Thread(target=self._serve, args=(c, addr), daemon=True).start()
+
+    def _serve(self, c: socket.socket, addr) -> None:
+        buf = b''
+        c.settimeout(60)
+        try:
+            while not self._stop:
+                try:
+                    d = c.recv(65536)
+                except socket.timeout:
+                    continue
+                if not d:
+                    break
+                buf += d
+                while b'\n' in buf:
+                    line, buf = buf.split(b'\n', 1)
+                    if not line.strip():
+                        continue
+                    try:
+                        rec = json.loads(line.decode('utf-8', 'replace'))
+                    except Exception:
+                        continue
+                    try:
+                        self.dispatch(rec, addr)
+                    except Exception as e:
+                        _log('error', f'[stream] dispatch error: {e}')
+        finally:
+            try:
+                c.close()
+            except Exception:
+                pass
+
+
+# ──────────────────────────────────────────────────────────────────────────
+#  Driver — run 하나의 수명주기
+# ──────────────────────────────────────────────────────────────────────────
+
+class RunDriver(threading.Thread):
+    def __init__(self, mgr: 'RunManager', run_id: str, req: RunRequest, scenario, topology, topology_doc,
+                 profile: Optional[LoadProfile], profile_name: Optional[str], topology_name: str):
+        super().__init__(name=f'tester-run-{run_id}', daemon=True)
+        self.mgr, self.run_id, self.req = mgr, run_id, req
+        self.scenario, self.topology, self.topology_doc = scenario, topology, topology_doc
+        self.profile, self.profile_name, self.topology_name = profile, profile_name, topology_name
+        self.rec = Recorder(run_id)
+        self.workers: List[tester_workers.WorkerClient] = []
+        self.plan: Optional[dict] = None
+        self.state = 'starting'
+        self.verdict = 'running'
+        self.rate = 0.0
+        self.doc_rate: Optional[float] = None
+        self.stop_reason: Optional[str] = None
+        self._stop_req = threading.Event()
+        self.started_at = _now_iso()
+        self.ended_at: Optional[str] = None
+        self.notes: List[str] = []
+        self.expect_results: List[dict] = []
+        self.step_log: List[dict] = []
+
+    # ── 외부 제어
+    def request_stop(self, reason: str = 'operator') -> None:
+        self.stop_reason = reason
+        self._stop_req.set()
+
+    def set_rate(self, rate: float) -> None:
+        self.rate = rate
+        for w in self.workers:
+            try:
+                w.run_rate(self.run_id, rate * self.plan['workers'][w.name]['share'])
+            except tester_workers.WorkerError as e:
+                self.notes.append(str(e))
+        self._publish_state()
+
+    # ── 본체
+    def run(self) -> None:
+        try:
+            self._prepare()
+            self._drive()
+        except tester_compile.CompileError as e:
+            self.verdict = 'error'
+            self.notes.append(f'compile: {e}')
+            _log('error', f'[run {self.run_id}] compile error: {e}')
+        except tester_workers.WorkerError as e:
+            self.verdict = 'error'
+            self.notes.append(f'worker: {e}')
+            _log('error', f'[run {self.run_id}] worker error: {e}')
+        except Exception as e:
+            self.verdict = 'error'
+            self.notes.append(f'{e}')
+            _log('error', f'[run {self.run_id}] error: {e}\n{traceback.format_exc()}')
+        finally:
+            try:
+                self._finish()
+            except Exception as e:
+                _log('error', f'[run {self.run_id}] finish error: {e}\n{traceback.format_exc()}')
+
+    def _publish_state(self, extra: Optional[dict] = None) -> None:
+        rec = {'run_id': self.run_id, 'state': self.state, 'verdict': self.verdict, 'rate_saps': self.rate,
+               'scenario_id': self.scenario.id, 'profile': self.profile_name}
+        if extra:
+            rec.update(extra)
+        publish('runs', rec)
+
+    def _prepare(self) -> None:
+        self.workers = tester_workers.discover(self.topology_doc)
+        if not self.workers:
+            raise tester_compile.CompileError('토폴로지에 workers 가 없다')
+        down = []
+        for w in self.workers:
+            h = w.probe()
+            if h is None:
+                down.append(f'{w.name}({w.url}): {w.health_error}')
+            elif abs(int(h.get('clock_skew_ms') or 0)) > 50:
+                self.notes.append(f'{w.name}: 시계 오차 {h.get("clock_skew_ms")} ms (> 50) — 지연 지표가 흔들릴 수 있다')
+            if h is not None and h.get('active_run'):
+                raise tester_workers.WorkerError(f'{w.name}: 다른 run 이 진행 중 ({h.get("active_run")})')
+        if down:
+            raise tester_workers.WorkerError('워커 미응답: ' + '; '.join(down))
+        stream_port = int(((self.mgr.config.get('Tester') or {}).get('WorkerStreamPort')) or 7110)
+
+        def stream_for(w):
+            adv = ((self.mgr.config.get('Tester') or {}).get('WorkerStreamAdvertiseIp') or '').strip()
+            ip = adv or w.local_ip_toward()
+            return f'{ip}:{stream_port}'
+
+        self.plan = tester_compile.compile_run(
+            self.run_id, self.scenario, self.topology, self.topology_doc, self.profile,
+            self.req.bindings, self.workers, stream_for, self.req.instances, self.req.rate_saps)
+        # 용량 검사
+        for w in self.workers:
+            need = sum(len(p['identities']) for p in self.plan['workers'][w.name]['pools'])
+            cap = int((w.health or {}).get('max_endpoints') or 0)
+            if cap and need > cap:
+                raise tester_compile.CompileError(f'{w.name}: 필요 단말 {need} > 용량 {cap}')
+        self.rate = float(self.plan['rate_total'])
+        self.state = 'provisioning'
+        self._publish_state()
+        for w in self.workers:
+            for p in self.plan['workers'][w.name]['pools']:
+                w.pool_create(p)
+        for w in self.workers:
+            w.run_start(self.plan['workers'][w.name]['run'])
+        self.state = 'running'
+        self.step_log.append({'t': time.time(), 'rate': self.rate, 'event': 'start'})
+        self._publish_state({'workers': [w.name for w in self.workers], 'plan': {
+            'roles': self.plan['roles'], 'identities': self.plan['identities'], 'max_instances': self.plan['max_instances']}})
+        _log('info', f'[run {self.run_id}] started — scenario={self.scenario.id} profile={self.profile_name} '
+                     f'workers={[w.name for w in self.workers]} rate={self.rate} plan_roles={self.plan["roles"]}')
+
+    def _workers_all_stopped(self) -> bool:
+        for w in self.workers:
+            g = w.run_get(self.run_id)
+            if g is None:
+                continue
+            if g.get('state') not in ('stopped',):
+                return False
+        return True
+
+    def _wait(self, seconds: float, poll: float = 1.0) -> bool:
+        """seconds 동안 대기 — 중단 요청·stop_on 발동·(단발) 워커 종료면 False."""
+        end = time.time() + seconds
+        while time.time() < end:
+            if self._stop_req.is_set():
+                return False
+            if self._check_stop_on():
+                return False
+            if self.plan.get('max_instances') and self._workers_all_stopped():
+                return False
+            time.sleep(min(poll, max(0.05, end - time.time())))
+        return not self._stop_req.is_set()
+
+    def _check_stop_on(self) -> bool:
+        if self.profile is None:
+            return False
+        so = self.profile.stop_on
+        win = self.rec.window_counters(int(time.time()) - 60)
+        attempts = win.get('attempts', 0)
+        if attempts < 10:
+            return False
+        if so.csp_5xx_pct is not None:
+            five = sum(v for k, v in win.items() if k.startswith('codes.5'))
+            pct = 100.0 * five / attempts
+            if pct > so.csp_5xx_pct:
+                self.request_stop(f'stop_on csp_5xx_pct {pct:.2f} > {so.csp_5xx_pct}')
+                self.verdict = 'fail'
+                return True
+        if so.ser_pct_min is not None:
+            ser = 100.0 * win.get('sessions', 0) / attempts
+            if ser < so.ser_pct_min:
+                self.request_stop(f'stop_on ser_pct {ser:.2f} < {so.ser_pct_min}')
+                self.verdict = 'fail'
+                return True
+        if so.target_cpu_pct is not None and 'target_cpu' not in self.notes:
+            self.notes.append('target_cpu: 대상 관측(oam_stats) 은 C 단계 — stop_on.target_cpu_pct 미적용')
+        return False
+
+    def _drive(self) -> None:
+        p = self.profile
+        if p is None:
+            # 단발 — 워커가 max_instances 를 다 내고 스스로 닫을 때까지 (상한: 인스턴스 × (ht+40s))
+            ht = int(self.plan['bindings'].get('ht') or 0)
+            limit = 60 + int(self.plan['max_instances'] or 1) * (ht + 40) / max(1.0, self.rate)
+            self._wait(limit)
+            return
+        if p.model in ('constant', 'soak'):
+            self._wait(float(p.duration_s))
+            return
+        if p.model == 'step':
+            rate = float(p.start)
+            prev_fail = self.rec.snapshot()['counters']
+            while True:
+                self.step_log.append({'t': time.time(), 'rate': rate, 'event': 'step'})
+                self._publish_state({'step_rate': rate})
+                t0 = int(time.time())
+                if not self._wait(float(p.hold_s)):
+                    return
+                win = self.rec.window_counters(t0)
+                attempts = win.get('attempts', 0)
+                bad = win.get('failed', 0) + win.get('skipped', 0)
+                ihs = 100.0 * bad / attempts if attempts else 0.0
+                self.step_log[-1].update({'attempts': attempts, 'ihs_pct': ihs})
+                if attempts and ihs > p.ihs_threshold_pct:
+                    self.notes.append(f'step {rate} saps: IHS {ihs:.2f}% > {p.ihs_threshold_pct}% — DOC = {self.doc_rate}')
+                    self.stop_reason = 'ihs'
+                    break
+                self.doc_rate = rate
+                if rate >= float(p.max):
+                    break
+                rate = min(float(p.max), rate + float(p.step))
+                self.set_rate(rate)
+            return
+        if p.model == 'ramp':
+            start, mx, ramp_s = float(p.start), float(p.max), float(p.ramp_s)
+            t0 = time.time()
+            while time.time() - t0 < ramp_s:
+                frac = (time.time() - t0) / ramp_s
+                self.set_rate(start + (mx - start) * frac)
+                if not self._wait(5.0):
+                    return
+            self.set_rate(mx)
+            self._wait(float(p.hold_s))
+            return
+        if p.model == 'burst':
+            t0 = time.time()
+            while time.time() - t0 < float(p.duration_s):
+                self.set_rate(float(p.burst_size))
+                if not self._wait(1.0):
+                    return
+                self.set_rate(0.0)
+                if not self._wait(max(0.0, float(p.burst_interval_s) - 1.0)):
+                    return
+            return
+
+    def _finish(self) -> None:
+        self.state = 'stopping'
+        self._publish_state()
+        drain = 5 + int(self.plan['bindings'].get('ht') or 0) if self.plan else 5
+        for w in self.workers:
+            try:
+                w.run_stop(self.run_id, drain)
+            except tester_workers.WorkerError as e:
+                self.notes.append(str(e))
+        end = time.time() + drain + 15
+        while time.time() < end and self.workers:
+            try:
+                if self._workers_all_stopped():
+                    break
+            except tester_workers.WorkerError:
+                break
+            time.sleep(1)
+        time.sleep(1.5)   # 마지막 agg 도착 여유
+        self.ended_at = _now_iso()
+        snap = self.rec.snapshot()
+        summary = self._summary(snap)
+        if self.verdict == 'running':
+            if self._stop_req.is_set() and (self.stop_reason or '').startswith('operator'):
+                self.verdict = 'aborted'
+            else:
+                # pass = 기대치 전부 만족 + 실패 인스턴스 0 (단계가 끝까지 못 간 시도는 기대치 유무와 무관하게 실패다)
+                #        + 시도 ≥ 1. 단말 부족 skipped 는 실패가 아니라 요약·IHS 에만 반영된다.
+                self.verdict = 'pass' if (all(r['ok'] for r in self.expect_results) and summary.get('attempts', 0) > 0
+                                          and summary.get('failed', 0) == 0) else 'fail'
+                if summary.get('failed', 0) > 0:
+                    self.notes.append(f"실패 인스턴스 {summary['failed']} — events 참조")
+                if summary.get('attempts', 0) == 0 and self.verdict == 'fail':
+                    self.notes.append('시도가 0 — 등록 실패·워커 미도달 여부를 events 로 확인')
+        self.state = 'stopped'
+        record = RunRecord(id=self.run_id, scenario_id=self.scenario.id, topology=self.topology_name,
+                           profile=self.profile_name, started_at=self.started_at, ended_at=self.ended_at,
+                           verdict=self.verdict, workers=[w.name for w in self.workers], summary=summary)
+        store.save_run_index(record)
+        detail = {
+            **record.model_dump(exclude_none=True),
+            'label': self.req.label,
+            'bindings': self.plan['bindings'] if self.plan else {},
+            'plan': ({'roles': self.plan['roles'], 'identities': self.plan['identities'],
+                      'max_instances': self.plan['max_instances'], 'rate_total': self.plan['rate_total']} if self.plan else None),
+            'profile_doc': (self.profile.model_dump(exclude_none=True) if self.profile else None),
+            'counters': snap['counters'], 'timers': snap['timers'], 'events': snap['events'],
+            'expect_results': self.expect_results, 'step_log': self.step_log,
+            'stop_reason': self.stop_reason, 'doc_rate': self.doc_rate, 'notes': self.notes,
+        }
+        with open(os.path.join(self.rec.dir, 'run.json'), 'w', encoding='utf-8') as f:
+            json.dump(detail, f, ensure_ascii=False, indent=2)
+        self.rec.close()
+        self._publish_state({'summary': summary})
+        _log('info', f'[run {self.run_id}] {self.verdict} — {summary}')
+        self.mgr._done(self.run_id)
+
+    # ── 요약 (RFC 6076 표) + expect 판정
+    def _summary(self, snap: dict) -> dict:
+        c, t = snap['counters'], snap['timers']
+        attempts = c.get('attempts', 0)
+        sessions = c.get('sessions', 0)
+        completed = c.get('completed', 0)
+        out = {
+            'attempts': attempts, 'sessions': sessions, 'completed': completed,
+            'failed': c.get('failed', 0), 'skipped': c.get('skipped', 0),
+            'registered_ok': c.get('registered_ok', 0), 'registered_fail': c.get('registered_fail', 0),
+            'ser_pct': (100.0 * sessions / attempts) if attempts else None,
+            'scr_pct': (100.0 * completed / sessions) if sessions else None,
+            'rtp_rx': c.get('rtp_rx', 0), 'rtp_lost': c.get('rtp_lost', 0),
+            'rtp_loss_pct': (100.0 * c.get('rtp_lost', 0) / (c.get('rtp_rx', 0) + c.get('rtp_lost', 0)))
+                            if (c.get('rtp_rx', 0) + c.get('rtp_lost', 0)) else None,
+            'doc_saps': self.doc_rate,
+            'codes': ','.join(f'{k[6:]}:{v}' for k, v in sorted(c.items()) if k.startswith('codes.')) or None,
+        }
+        for name in ('rrd_ms', 'srd_ms', 'sdd_ms', 'jitter_ms', 'sdt_s'):
+            h = t.get(name)
+            if h:
+                out[f'{name}_p50'] = h.get('p50')
+                out[f'{name}_p95'] = h.get('p95')
+                out[f'{name}_max'] = h.get('max')
+        # expect 판정 — 단계별
+        self.expect_results = []
+        for i, s in enumerate(self.scenario.flow):
+            for metric, exp in (s.expect or {}).items():
+                r = {'step': i, 'kind': s.step, 'metric': metric, 'expect': exp if isinstance(exp, (int, float)) else exp.model_dump(exclude_none=True)}
+                if metric == 'code':
+                    want = int(exp) if isinstance(exp, (int, float)) else None
+                    if s.step == 'register':
+                        got_bad = c.get('registered_fail', 0)
+                        r.update({'observed': f'ok={c.get("registered_ok", 0)} fail={got_bad}', 'ok': got_bad == 0 if want == 200 else True})
+                    elif s.step in ('invite', 'answer', 'bye'):
+                        r.update({'observed': f'sessions={sessions} failed={c.get("failed", 0)}', 'ok': c.get('failed', 0) == 0 if want == 200 else True})
+                    elif s.step == 'reject':
+                        r.update({'observed': f'codes.{want}={c.get(f"codes.{want}", 0)}', 'ok': c.get(f'codes.{want}', 0) > 0})
+                    else:
+                        r.update({'observed': None, 'ok': True})
+                elif metric in ('ser_pct', 'scr_pct'):
+                    val = out.get(metric)
+                    want = float(exp) if isinstance(exp, (int, float)) else float(getattr(exp, 'min', None) or 0)
+                    r.update({'observed': val, 'ok': val is not None and val >= want})
+                else:
+                    h = t.get(metric)
+                    if not h or not h.get('count'):
+                        r.update({'observed': None, 'ok': False, 'why': '표본 없음'})
+                    elif isinstance(exp, (int, float)):
+                        r.update({'observed': h.get('max'), 'ok': h.get('max') is not None and h['max'] <= float(exp)})
+                    else:
+                        ok = True
+                        obs = {}
+                        for q in ('p50', 'p95', 'p99', 'max'):
+                            want = getattr(exp, q, None)
+                            if want is None:
+                                continue
+                            got = h.get(q)
+                            obs[q] = got
+                            if got is None or got > float(want):
+                                ok = False
+                        if exp.min is not None:
+                            obs['min'] = h.get('min')
+                            if h.get('min') is None or h['min'] < float(exp.min):
+                                ok = False
+                        r.update({'observed': obs, 'ok': ok})
+                self.expect_results.append(r)
+        out['expect_ok'] = sum(1 for r in self.expect_results if r['ok'])
+        out['expect_total'] = len(self.expect_results)
+        return out
+
+    def live(self) -> dict:
+        snap = self.rec.snapshot()
+        return {'id': self.run_id, 'state': self.state, 'verdict': self.verdict, 'rate_saps': self.rate,
+                'scenario_id': self.scenario.id, 'topology': self.topology_name, 'profile': self.profile_name,
+                'started_at': self.started_at, 'workers': [w.name for w in self.workers],
+                'counters': snap['counters'], 'timers': snap['timers'], 'gauges': self.rec.gauges_sum(),
+                'events': snap['events'], 'doc_rate': self.doc_rate, 'notes': self.notes, 'step_log': self.step_log}
+
+
+# ──────────────────────────────────────────────────────────────────────────
+#  RunManager
+# ──────────────────────────────────────────────────────────────────────────
+
+class RunManager:
+    def __init__(self):
+        self.config: dict = {}
+        self._lock = threading.Lock()
+        self._active: Dict[str, RunDriver] = {}
+        self._recent: Dict[str, RunDriver] = {}
+        self.stream: Optional[StreamServer] = None
+
+    def init(self, config: dict, logger=None) -> None:
+        global _LOG
+        _LOG = logger
+        self.config = config or {}
+        tcfg = self.config.get('Tester') or {}
+        ip = str(tcfg.get('WorkerStreamIp') or '0.0.0.0')
+        port = int(tcfg.get('WorkerStreamPort') or 7110)
+        self.stream = StreamServer(ip, port, self._dispatch)
+        self.stream.start()
+        _log('info', f'[tester] worker stream listening on {ip}:{port}')
+
+    def shutdown(self) -> None:
+        if self.stream:
+            self.stream.stop()
+        for d in list(self._active.values()):
+            d.request_stop('shutdown')
+
+    def _dispatch(self, rec: dict, addr) -> None:
+        rid = rec.get('run_id')
+        if not rid:
+            return   # hello/log 는 run_id 가 없다
+        with self._lock:
+            d = self._active.get(rid) or self._recent.get(rid)
+        if d is not None:
+            d.rec.on_record(rec)
+
+    def start(self, req: RunRequest) -> RunDriver:
+        scenario, sdoc, errs = store.get_scenario(req.scenario_id)
+        if sdoc is None:
+            raise ValueError(f'scenario_not_found: {req.scenario_id}')
+        if scenario is None:
+            raise ValueError(f'invalid_scenario: {errs}')
+        topo_rec = None
+        if req.topology_id is not None:
+            topo_rec = store.get_topology(int(req.topology_id))
+        else:
+            for r in store.list_topologies():
+                if (r.get('doc') or {}).get('name') == req.topology or r.get('name') == req.topology:
+                    topo_rec = r
+                    break
+        if topo_rec is None:
+            raise ValueError('topology_not_found')
+        topology = store.topology_model(topo_rec)
+        if topology is None:
+            raise ValueError('invalid_topology')
+        profile = None
+        if req.profile:
+            profile, pdoc, perrs = store.get_profile(req.profile)
+            if pdoc is None:
+                raise ValueError(f'profile_not_found: {req.profile}')
+            if profile is None:
+                raise ValueError(f'invalid_profile: {perrs}')
+        with self._lock:
+            if self._active:
+                raise RuntimeError('run_active: ' + ','.join(self._active))
+            run_id = datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:6]
+            d = RunDriver(self, run_id, req, scenario, topology, topo_rec.get('doc') or {}, profile, req.profile,
+                          str((topo_rec.get('doc') or {}).get('name') or topo_rec.get('id')))
+            self._active[run_id] = d
+        store.save_run_index(RunRecord(id=run_id, scenario_id=scenario.id, topology=d.topology_name,
+                                       profile=req.profile, started_at=d.started_at, verdict='running'))
+        d.start()
+        return d
+
+    def _done(self, run_id: str) -> None:
+        with self._lock:
+            d = self._active.pop(run_id, None)
+            if d is not None:
+                self._recent[run_id] = d
+                if len(self._recent) > 5:
+                    self._recent.pop(next(iter(self._recent)))
+
+    def get(self, run_id: str) -> Optional[RunDriver]:
+        with self._lock:
+            return self._active.get(run_id) or self._recent.get(run_id)
+
+    def active(self) -> List[RunDriver]:
+        with self._lock:
+            return list(self._active.values())
+
+    def stop(self, run_id: str) -> bool:
+        d = self.get(run_id)
+        if d is None or d.state == 'stopped':
+            return False
+        d.request_stop('operator')
+        return True
+
+    def rate(self, run_id: str, rate: float) -> bool:
+        d = self.get(run_id)
+        if d is None or d.state != 'running':
+            return False
+        d.set_rate(rate)
+        return True
+
+
+RUNS = RunManager()

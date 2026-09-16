@@ -132,6 +132,14 @@ CSC/IdMS·XCAP, VoLTE 보조(REFER blind/attended·INVITE-Replaces·Join·pickup
 **추가할 것**: MCData SDS(MESSAGE·MSRP, 현재 SDK 에만 있음), TLS 서버 인증서 검증(현재 미검증), RTCP 수신 통계,
 RFC 4028 세션 타이머 응답, 신원마다 개별 행동 스크립트(§4).
 
+**libcsim 이 cspsim 위에 더한 것**(워커용, `cspsim/CsimObserver.h`·`SimSession`): ① 관측자 훅 `ICsimObserver`
+(최초 REGISTER 응답+RRD · 착신 도착 · 발신 확립+SRD · 다이얼로그 종료 · 로컬 BYE 최종 응답+SDD — psip 스택 스레드에서 불리므로
+워커는 큐에만 넣는다) ② 착신 응답 모드 `SetAnswerMode(E_ANSWER_DEFERRED)` — 180 만 내고 오퍼를 보관, 워커 스케줄러가 `after_ms` 뒤
+`AnswerCall()`/`RejectCall(code)` 를 부른다(cspsim 의 auto 모드 = 180→1초 sleep→200 은 그대로) ③ RTP 수신 품질 —
+시퀀스 공백 손실 누계·RFC 3550 A.8 지터(`CRtpThread::m_ullRecvLost`·`m_llRecvJitterUs`, 호마다 `ResetRecvStats`)
+④ `Stop(iFlushMs)` — 수천 세션을 내릴 때 세션마다 300 ms 를 기다리지 않게. 워커가 지원하는 단계(B) = `register`(prelude)·
+`invite`·`answer`·`reject`·`bye`·`media_hold`·`wait`·`expect`·`deregister`(epilogue). 나머지 단계는 run 시작 시 400 `unsupported_step`.
+
 ### 3.2 `peer` 풀과 프로파일
 
 한 엔진에 프로파일 셋을 얹는다. 공통 = 고정 수신점, INVITE 수신 시 **To 신원이 범위 안이면 하위 단말이
@@ -210,6 +218,17 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 
 - 단계(step) 어휘는 cspsim 시나리오 enum 을 **데이터로 옮긴 것**이다: `register/deregister/invite/answer/reject/bye/refer/replaces/join/pickup/
   subscribe/publish/group_call/floor_request/floor_release/sds_send/sds_recv/media_hold/wait/expect`. 새 단계 = 워커 재빌드, 새 시나리오 = YAML 만.
+- **실행 의미(워커)** — 흐름을 셋으로 나눈다. **prelude** = 앞쪽의 `register`(+`wait`) 단계: 역할 슬라이스의 단말 **전부**를 run 시작 때 한 번
+  등록한다(`Timers.RegisterIntervalMs` 간격, 이미 등록된 단말은 재사용). **body** = 나머지: **시나리오 인스턴스** 하나가 실행하는 단위 — 인스턴스는
+  `rate_saps` 로 발생하고(토큰 버킷), 역할마다 free 단말을 하나씩 잡아 단계를 차례로 실행한 뒤 돌려준다. free 단말이 모자라면 그 슬롯은 `skipped`
+  로 센다(Little 의 법칙: 동시 인스턴스 ≈ SApS × SDT — 역할당 단말 수가 그보다 커야 한다). **epilogue** = 끝의 `deregister`: run 종료 시 단말 정지.
+  body 안의 `register/deregister` 는 거절한다. `invite` 는 비동기(다음 단계로 바로 진행), `answer/reject` 는 착신 도착을 기다렸다가 `after_ms` 뒤
+  응답하고 발신자 확립(또는 최종 응답)까지 기다린다, `media_hold` 는 확립을 기다린 뒤 `seconds` 유지하고 끝에 RTP 품질 표본을 뜬다,
+  `bye` 는 BYE 최종 응답(SDD)까지 기다린다. 어느 대기든 시한(`Timers.InviteTimeoutMs`·`ByeTimeoutMs`)을 넘기면 인스턴스 실패 + event.
+- **역할의 신원 창** — `count` 생략 = 풀 전체. 단, 같은 풀에서 서로 `disjoint_from` 인 역할들이 `count` 없이 있으면 풀을 **균등 분할**한다
+  (caller/callee 가 한 풀을 나눠 쓰는 흔한 꼴). 명시 `count` 는 먼저 빼고 나머지를 나눈다. 창이 비면 컴파일 오류.
+- **단발(기능) 실행** = 프로파일 없이 `POST /runs {instances: N}` — 워커가 N 개(워커 간 배분)를 발생시키고 다 끝나면 스스로 run 을 닫는다
+  (`RunStart.max_instances`). 성능 실행 = 프로파일 결합. 요청 모델은 `run_request` 스키마.
 - `expect` 는 RFC 6076 지표 이름을 그대로 쓴다(`rrd_ms`·`srd_ms`·`sdd_ms`·`code`·`ser_pct`·`scr_pct`). 판정은 **발생기 측 관측이 1차**,
   `target_evidence`(녹취·이벤트·로그 오류 0)는 2차다 — cims-verify 가 대상 산출물만 세던 것과 반대다.
 - 기존 시험 문서 형식(`ptt-test-scenario/*.csv` 의 절차·예상 결과·확인 방법)은 보고서 출력 형식으로 유지한다.
@@ -243,12 +262,23 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 ### 6.1 컨트롤러 ↔ 워커
 
 - **계약 정본** = `ems/tester/oam/src/services/tester_models.py`(pydantic) → `schema/*.json`(`bin/gen-schemas` 생성, 워커 C++ 가 읽는다). 모든 모델은 `extra='forbid'` — 오타 난 키는 거절한다.
-- **제어(컨트롤러 → 워커)** HTTP/JSON: `POST /pools`(풀 생성·신원 적재 — `worker_pool_create`), `POST /runs`(컴파일된 단계 + 역할 배분 — `worker_run_start`), `POST /runs/{id}/rate`(SApS 변경),
-  `POST /runs/{id}/stop`, `GET /health`(용량·CPU·활성 엔드포인트·시각 — `worker_health`). 워커는 시나리오 YAML 을 모르고 **컴파일된 단계 목록**만 받는다.
+- **제어(컨트롤러 → 워커)** HTTP/JSON: `POST /pools`(풀 생성·신원 적재 — `worker_pool_create`, 같은 이름은 교체), `DELETE /pools/{name}`,
+  `POST /runs`(컴파일된 단계 + 역할 배분 — `worker_run_start`; `max_instances` 있으면 단발), `POST /runs/{id}/rate`(SApS 변경),
+  `POST /runs/{id}/stop {drain_s}`, `GET /runs/{id}`(상태·누계 스냅샷), `GET /health`(용량·CPU·활성 엔드포인트·시각 — `worker_health`).
+  워커는 시나리오 YAML 을 모르고 **컴파일된 단계 목록**만 받는다. 워커당 run 은 하나(409 `run_active`).
+  신원 `Identity.auth_id` 는 IMPI 사용자부 — `@` 가 없으면 워커가 `domain` 을 붙인다(cspsim `-creds` authId 규약; CSP 는 `authId@domain` 을 기대한다).
+  컨트롤러는 각 워커에 **자기 몫의 신원만** 보낸다(`role_slices` 는 워커 로컬 인덱스) — 역할 창을 워커 `cpus` 가중으로 연속 분할한다.
 - **관측(워커 → 컨트롤러)** 지속 TCP JSONL(컨트롤러 `Tester.WorkerStreamPort` 7110) 한 줄 = 한 레코드: `hello` → `agg`(1초 집계 — `counters`(attempt/session/leg·응답 코드·RTP 카운터) · `gauges`(동시 세션·등록 수·CPU) · `timers`(`rrd_ms`·`srd_ms`·`sdd_ms`·`jitter_ms`·`floor_grant_ms` 히스토그램)) · `event`(실패 개별 건 — Call-ID·역할·단계·코드) · `log`. UDP 는 부하 중 유실되어 지표를 왜곡하므로 쓰지 않는다.
 - 워커 용량 선언: 기동 시 측정한 `max_endpoints`·`max_saps`(cspsim 실측 기준 코어당 UA 약 200, RTP 포함). 컨트롤러는 풀을 워커에
   나눠 배분하고 부족하면 시작 전에 거절한다.
-- 시계: 워커·컨트롤러 NTP 정렬을 `GET /health` 에서 확인, 오차 > 50 ms 면 경고.
+- 시계: 워커·컨트롤러 NTP 정렬을 `GET /health` 에서 확인, 오차 > 50 ms 면 경고(run 노트).
+- 스트림 목적지(`RunStart.stream`) = 컨트롤러가 **그 워커로 갈 때 쓰는 로컬 IP**:`Tester.WorkerStreamPort`(워커 관점 도달 주소).
+  NAT 등으로 다르면 `Tester.WorkerStreamAdvertiseIp` 로 고정한다. 워커는 끊기면 지수 backoff 재접속, 그동안 레코드는 큐(상한 2만)에 둔다.
+- 컨트롤러 저장: 1초 버킷은 `runs/<id>/metrics.sqlite`(`agg(t, worker, counters, gauges, timers)`), 실패 건은 `events.jsonl`, 요약·판정·기대치 결과·
+  단계 로그는 `run.json`. 백분위는 워커 히스토그램(로그 상한 버킷 1·2·5·…·60000)에서 **상한값**으로 근사한다 — 기대치 판정은 보수적이다.
+  verdict: pass = 기대치 전부 만족 ∧ 실패 인스턴스 0 ∧ 시도 ≥ 1 · fail · aborted(운영자 중단) · error(컴파일/워커 오류).
+- 관리 store 리스: 컨트롤러는 기동 시 자기 서브트리 `modules/oam-cims-tester/runtime` 에 소유권 리스(flock)를 잡는다 — base `oam` 이 잡는 루트와
+  별개(I5 단일 소유, oam_ha §4.4 단일 writer). 못 잡으면 read-only 로 떠서 토폴로지 저장·run 색인이 `not_lease_owner` 로 거절된다.
 - 워커 발견: 컨트롤러는 자기 base 의 배포 목록(`GET /api/v1/deployments`, 패키지 `cims-tester-worker`)에서 워커 주소를 자동 수집한다.
   토폴로지의 `workers` 수동 항목은 이를 덮어쓰거나 보탠다(agent 없는 호스트).
 
@@ -258,9 +288,11 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 
 | 항목 | 내용 |
 |---|---|
-| 게이트웨이 세그먼트 | `/api/v1/tester` **하나**(D2 — 서비스 = 최상위 세그먼트 하나). `pkg.json` `gateway.routes=["/api/v1/tester"]`, `gateway.default_port=4490`. 하위: `/health`·`/schema/{name}`·`/validate`·`/scenarios`·`/profiles`·`/topologies`·`/runs`·`/runs/{id}/stream`(SSE)·`/runs/{id}/report`·`/workers`·`/events`(SSE — run/워커 상태 변화) |
+| 게이트웨이 세그먼트 | `/api/v1/tester` **하나**(D2 — 서비스 = 최상위 세그먼트 하나). `pkg.json` `gateway.routes=["/api/v1/tester"]`, `gateway.default_port=4490`. 하위: `/health`·`/schema/{name}`·`/validate`·`/scenarios`·`/profiles`·`/topologies`·`/runs`(GET 색인+라이브 / POST `run_request` → 202 id, 동시에 하나)·`/runs/{id}`·`/runs/{id}/stop`·`/runs/{id}/rate`·`/runs/{id}/stream`(SSE — 그 run 의 agg/events/runs 프레임)·`/runs/{id}/report`(run.json + Markdown)·`/runs/{id}/events`·`/workers[?topology=]`(토폴로지 워커 + health)·`/events`(SSE — run/워커 상태 변화) |
 | 인증·RBAC | base 가 배포 시 `CimsAuth.JwtSecret` 주입(`meta.gateway.routes` 보유 모듈 자동), 모듈이 토큰 독립 검증. 권한 = 조회 `monitor`, run 실행·중단·토폴로지 편집 `operator`, 시나리오/프로파일 삭제 `manager` |
-| 설정 | `config_template.json` 선언 키만(§14.7 write 마스크). `Server.Ip/Port`(loopback 4490)·`Tester.DataDir`·`Tester.RunRetainDays`·`Tester.WorkerControlPort`(7100)·`Tester.WorkerStreamIp/Port`(7110 — 워커 관측 수신, 관리망 bind). 대상(SUT)·워커·풀은 설정이 아니라 **토폴로지 레코드**(런타임 store, 콘솔 편집)다. `CimsAuth.JwtSecret`·`Mgmt.Cidr`·`CimsRuntimeDir` 은 **선언하지 않는다**(base 주입 파생값) |
+| 설정 | `config_template.json` 선언 키만(§14.7 write 마스크). `Server.Ip/Port`(loopback 4490)·`Tester.DataDir`·`Tester.RunRetainDays`·`Tester.WorkerControlPort`(7100)·`Tester.WorkerStreamIp/Port`(7110 — 워커 관측 수신, 관리망 bind)·`Tester.WorkerStreamAdvertiseIp`(선택). 대상(SUT)·워커·풀은 설정이 아니라 **토폴로지 레코드**(런타임 store, 콘솔 편집)다. `CimsAuth.JwtSecret`·`Mgmt.Cidr`·`CimsRuntimeDir` 은 **선언하지 않는다**(base 주입 파생값) |
+| 프로파일 구동 | 오케스트레이터 스레드가 프로파일을 시간축으로 만든다 — `constant/soak` = rate 로 duration · `step` = start 부터 hold_s 마다 창 IHS(실패+건너뜀 / 시도)를 보고 임계 이내면 +step(max 까지), 초과면 중단하고 직전 단계가 **DOC** · `ramp` = 5 초마다 선형 증가 뒤 hold · `burst` = burst_interval 마다 1 초 burst_size. `stop_on.csp_5xx_pct`·`ser_pct_min` 은 최근 60 초 창(시도 ≥ 10)으로 판정해 fail 중단, `target_cpu_pct` 는 대상 관측(C 단계) 전까지 미적용(노트). 중단은 워커 `stop {drain_s = 5 + ht}` |
+| CLI | `cims-tester run <scenario> --topology <name\|id> [--load <profile>] [--ht N] [--bind k=v] [--instances N] [--rate R] [--no-wait] [--json]` — 완주까지 기다려 RFC 6076 표를 찍고 verdict 로 종료 코드(pass=0). `report <id>`·`stop <id>`·`rate <id> <saps>`·`workers`. `creds-from-db --csp-json <csp.json> --domain <sip domain> --out <jsonl>` = DB 의 ha1 보유 가입자로 creds JSONL 생성(토폴로지 `source.creds`) |
 | 스토어 | `modules/oam-cims-tester/runtime/{topologies,runs}` 단일 소유(I5). run 본체는 `Tester.DataDir` |
 | 버전 계약 | `pkg.json` `gateway.requires_base_oam` — SSE 통과(아래)를 가진 base 최소 버전. base 는 self-register 시 라우트 레코드에 기록하고 자기 버전이 낮으면 경고 로그(등록은 한다 — 거부하면 콘솔에서 원인이 보이지 않는다) |
 | **base 확장 ① — SSE 통과** | 게이트웨이 프록시(`handlers/gateway.py`)는 요청 `Accept: text/event-stream` 이면 총 타임아웃 없이(연결 5 s) 업스트림을 부르고, 응답 `Content-Type: text/event-stream` 이면 **청크 passthrough**(전체 버퍼링 없음, 클라이언트 절단·업스트림 종료 어느 쪽이든 응답 해제)한다. 판정은 라우트 속성이 아니라 응답 타입 — 어느 서비스 모듈이든 SSE 를 낼 수 있다. 그 외 응답은 종전대로 5 s(다운로드 120 s) 버퍼링 |
@@ -311,7 +343,15 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 - 설치·기동·감독은 다른 모듈과 같다 — 콘솔 배포(agent job)로 설치, `agent/lib/lifecycle.sh` 에 `start_oam_cims_tester`(oam-svc 와 동일 골격 — `kill_stray` 는
   절대경로 `oam_cims_tester_app.py` 매칭)·`start_cims_tester_worker`(cmp 골격) 추가, `supervised.json` 등록, `--preflight` 지원, TLS 인증서는 `ensure_node_cert`.
 - 기동 순서: base → `oam-cims-tester` → 워커(워커는 컨트롤러 없이도 떠서 `GET /health` 만 응답).
-- 빌드: 루트 CMake `option(CIMS_TESTER ON)` 으로 `cims-tester-worker`(+`libcsim`)를 `build/bin/` 에.
+- 빌드: 루트 CMake `option(CIMS_TESTER ON)` 으로 `cims-tester-worker`(+`libcsim`)를 `build/bin/` 에. `libcsim` = `cspsim/` 의 `add_library(csim STATIC …)`
+  (SimSession·RtpThread·SipClient·G711) — cspsim CLI 와 워커가 같은 정적 라이브러리를 링크한다. 링크 순서: `libsrtp2` 가 psip(동봉 opensrtp) 보다 앞
+  (심볼 충돌). `make dist` 가 `dist/cims-tester-worker/{bin,config/{config_template,cims-tester-worker}.json,pkg.json}` 을 채운다.
+- 워커 설정(`tester/worker/config/config_template.json`): `Worker.Name`(비면 hostname) · `Server.Ip/Port`(제어 7100) · `Sip.LocalIp`(비면 자동 탐지)·
+  `Sip.PortBase`(0=OS 자동, >0 = base+2i) · `Media.AudioFile/VideoFile`(비면 합성 PCMU/비디오 없음) · `Limits.EndpointsPerCore/SapsPerCore`(용량 선언) ·
+  `Timers.*`. 배포 overlay `config.json`(평면 키)은 lifecycle 가 모듈 설정에 머지하고 워커도 자기 옆의 것을 읽는다. libcsim 의 printf 진단은 부하 중
+  초당 수천 줄이라 워커는 stdout 을 `/dev/null` 로 돌리고(`--verbose` 로 유지) 자기 로그는 stderr 로 낸다.
+- 검증 게이트: `S1-UNIT-TESTER`(계약·핸들러·오케스트레이터(가짜 워커)·게이트웨이 SSE 단위시험) · `S1-CONFIG-PORTABILITY` 대상에 두 모듈 설정 ·
+  `S2-PREFLIGHT` 네이티브 바이너리 목록 · `S4-PKG-BUILD` 기대 tarball 에 `oam-cims-tester`·`cims-tester-worker`.
 - 파이썬 인터프리터 선택은 [os_portability.md](os_portability.md) 규칙(`--python` > 동봉 > `python3.14` > `python3`)을 따른다.
 - 워커 호스트 = 시험 대상과 **다른** 호스트(N 대). 독립 형태의 컨트롤러 노드는 워커 중 한 대에 동거해도 된다(소규모).
 
@@ -336,7 +376,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 | 단계 | 내용 | 산출물 · 완료 기준 | 규모 |
 |---|---|---|---|
 | **A. 계약 + base 확장** | 시나리오/프로파일 YAML 스키마, 워커 제어·관측 JSONL 스키마, 지표 정의표(§5), 목표 규모(§11) 확정. base 확장 셋 — ① 게이트웨이 SSE 통과(§6.2) ② 콘솔 번들 하나 + nav 섹션 서비스 게이팅(§7) ③ nav 그룹 `test` | 본 문서 갱신 + `ems/tester/oam/schema/*.json`(스키마 단위시험). base 확장은 기존 콘솔·oam-svc 동작 무변경으로 S3 게이트 PASS | M |
-| **B. UE 축 + 컨트롤러 최소** | `libcsim` 추출(SimSession/RtpThread → 라이브러리, cspsim 은 그 위 CLI), `cims-tester-worker` ue 풀·단계 실행기·1초 집계 스트림, `oam-cims-tester` run/저장/CLI + pkg·config_template·self-register, 프로파일 constant·step | 부하 강화 문서의 시험(4 cps/HT20, 10 cps/HT5)을 `cims-tester run` 한 줄로 재현, RFC 6076 표 출력. 콘솔 배포로 설치된 워커 2대 분산 동작 | L |
+| **B. UE 축 + 컨트롤러 최소** | `libcsim` 추출(SimSession/RtpThread → 라이브러리, cspsim 은 그 위 CLI), `cims-tester-worker` ue 풀·단계 실행기·1초 집계 스트림, `oam-cims-tester` run/저장/CLI + pkg·config_template·self-register, 프로파일 constant·step(+ramp·soak·burst) | **구현 반영** — 개발서버 CSP(UDP 15060) 상대로 `cims-tester run VOLTE-CALL-BASIC --topology … --instances 3` 완주(SER 100 %, RRD p95 5 ms, SRD ≈ after_ms+20 ms, RTP 손실 0, 보고서·기대치 판정), 워커 단독 4쌍 1 SApS 지속. 남은 것 = 부하 강화 문서 시험(4 cps/HT20, 10 cps/HT5) 재현 실측·워커 2대 분산 실측·`db` 신원 원천(대상 CSC 위임)·워커 자동 발견(base 배포 목록)·대상 관측(`stop_on.target_cpu_pct`) | L |
 | **C. 피어 축 — ibcf** | peer 엔진(고정 수신점·신원 범위·응답 정책·오류 주입) + `ibcf` 프로파일, 대상 CSP 컬렉션 시드/복원, 트렁크 in/out·route_set failover·ACL 시나리오 | `S6-SCN-IBCF-TRUNK` 동등 시나리오 PASS + 피어 다중화 failover 시험. CSP 미구현이 드러난 항목은 §12 표로 등재 | M |
 | **D. 피어 축 — pbx · mgcf** | 트렁크 REGISTER, DID/내선, 183 early media·PRACK, hold/resume, REFER 발신, RFC 4733 DTMF, Q.850 Reason, G.711 | PBX 내선 ↔ CIMS 가입자 양방향 호, MGCF 경유 E.164 발착신 시나리오. 코덱 불일치(G.711↔AMR-WB) 결과를 §12 로 | M |
 | **E. 콘솔 팩** | §7 화면 전부, SSE 라이브, 비교·보고서. cims-verify S3/S6 시나리오 항목의 `cims-tester` 호출 이전 | 콘솔에서 시나리오 편집→실행→보고서까지 완주. S3/S6 관련 항목 이전 후 게이트 PASS 유지 | L |
@@ -355,7 +395,7 @@ B 가 끝나면 성능 시험이, C·D 가 끝나면 피어 연동 기능 시험
 | 포트 | **확정** | 컨트롤러 loopback 4490(oam-svc 4480·csc 4421 과 겹치지 않음), 워커 제어 7100 |
 | 콘솔 번들 | **확정** | 번들 하나(`oam` 동봉) + nav 섹션·라우트 서비스 게이팅(§7). 서비스 모듈 패키지는 콘솔 미동봉 |
 | 목표 규모 | 제안 | 등록 UE 5,000 · VoLTE 100 SApS × HT 20 s(동시 2,000) · PTT 그룹 200 × 20명 · 피어 트렁크 50 SApS. 워커 호스트 수는 B 단계 실측 후 확정 |
-| 워커 호스트 | 제안 | 시험 대상과 분리된 최소 2대(8 코어) — 발생기 동거로 v1~v6 오진한 이력 |
+| 워커 호스트 | 제안 | 시험 대상과 분리된 최소 2대(8 코어) — 발생기 동거로 v1~v6 오진한 이력. 워커 용량 선언 기본 = 코어당 200 단말·10 SApS(`Limits.*`) |
 | MGCF 범위 | **확정** | 평문 SIP(TS 29.163 Mg, TS 24.229) + Q.850 Reason + early media. **SIP-I 불필요** — CSCF↔MGCF(Mg)·IMS↔IMS NNI(GSMA IR.95)는 SIP/SDP 이고, SIP-I 는 CS 망 상호접속 트렁크(ITU-T Q.1912.5) 프로파일이다. 그런 트렁크를 받으려면 CIMS 자신이 MGCF(ISUP 해석) 역할을 해야 하는데 그것은 계측기가 아니라 CIMS 로드맵 문제다 |
 | 트랜스코딩 | **확정** | MGCF 는 IM-MGW 가 AMR-WB 를 오퍼하므로 문제 없다. **IP-PBX 는 G.711 이 필수 코덱**(SIPconnect 2.0)이라 CIMS 쪽 트랜스코딩이 필요하다 → **CMP 과제로 채택**, 설계 정본 [../modules/cmp.md](../modules/cmp.md) §11(피어 leg 한정 G.711↔AMR-WB, TrGW 역할). 계측기 pbx 프로파일은 G.711 기본으로 그 경로를 시험한다 |
 | 대상 관측 원천 | 제안 | 대상 OAM API + agent heartbeat 기본, ssh 샘플러는 옵션. OAM 이 없는 최소 배치도 시험 가능해야 |

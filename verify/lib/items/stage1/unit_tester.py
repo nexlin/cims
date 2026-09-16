@@ -15,8 +15,8 @@ from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 
 _ID = "S1-UNIT-TESTER"
-_NAME = "계측기 계약/핸들러/게이트웨이 SSE unit test (python3 -m unittest tests.test_tester_models tests.test_tester_handler tests.test_gateway_stream)"
-_MODULES = ("tests.test_tester_models", "tests.test_tester_handler", "tests.test_gateway_stream")
+_NAME = "계측기 계약/핸들러/오케스트레이터/게이트웨이 SSE unit test (python3 -m unittest tests.test_tester_models tests.test_tester_handler tests.test_tester_run tests.test_gateway_stream)"
+_MODULES = ("tests.test_tester_models", "tests.test_tester_handler", "tests.test_tester_run", "tests.test_gateway_stream")
 
 
 @verify_item(

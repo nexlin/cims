@@ -1,0 +1,112 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "bindings": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "description": "${ht} 같은 시나리오 바인딩 — profile.ht 보다 우선",
+      "title": "Bindings",
+      "type": "object"
+    },
+    "instances": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "단발 실행 인스턴스 수 (기본 1)",
+      "title": "Instances"
+    },
+    "label": {
+      "anyOf": [
+        {
+          "maxLength": 120,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Label"
+    },
+    "profile": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "부하 프로파일 name — 없으면 단발(기능) 실행",
+      "title": "Profile"
+    },
+    "rate_saps": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "단발 실행의 발생율 (기본 instances 를 1 초 안에)",
+      "title": "Rate Saps"
+    },
+    "scenario_id": {
+      "title": "Scenario Id",
+      "type": "string"
+    },
+    "topology": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "토폴로지 name",
+      "title": "Topology"
+    },
+    "topology_id": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "저장된 토폴로지 id — topology(name) 와 둘 중 하나",
+      "title": "Topology Id"
+    }
+  },
+  "required": [
+    "scenario_id"
+  ],
+  "title": "RunRequest",
+  "type": "object"
+}

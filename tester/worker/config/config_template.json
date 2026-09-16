@@ -1,0 +1,46 @@
+{
+  "version": 2,
+  "sections": [
+    {
+      "key": "server",
+      "title": "cims-tester-worker 제어 bind",
+      "description": "컨트롤러(oam-cims-tester)가 부르는 HTTP 제어 포트. 관리망 IP 에 bind 한다(컨트롤러가 다른 호스트).",
+      "fields": [
+        { "key": "Worker.Name", "label": "워커 이름", "type": "string", "default": "", "restart": true,
+          "help": "비우면 hostname. 컨트롤러 집계·이벤트의 worker 필드.", "scope": "system" },
+        { "key": "Server.Ip", "label": "bind IP", "type": "string", "default": "0.0.0.0", "required": true, "restart": true, "scope": "system" },
+        { "key": "Server.Port", "label": "제어 포트", "type": "int", "default": 7100, "min": 1, "max": 65535, "required": true, "restart": true,
+          "help": "컨트롤러 Tester.WorkerControlPort 와 일치." }
+      ],
+      "scope": "service"
+    },
+    {
+      "key": "sip",
+      "title": "가상 단말(SIP/RTP)",
+      "fields": [
+        { "key": "Sip.LocalIp", "label": "단말 로컬 IP", "type": "string", "default": "", "restart": true,
+          "help": "SIP/RTP 송수신 IP. 비우면 자동 탐지(기본 경로 인터페이스).", "scope": "system" },
+        { "key": "Sip.PortBase", "label": "SIP 시작 포트", "type": "int", "default": 0, "min": 0, "max": 65535, "restart": true,
+          "help": "0 = OS 자동. >0 이면 단말 i 가 base+2i 를 쓴다(IPsec·고정 포트 시험)." },
+        { "key": "Media.AudioFile", "label": "AMR-WB 미디어 파일", "type": "path", "default": "", "restart": true,
+          "help": "raw 61 바이트 프레임 파일(cspsim -media_file). 비우면 합성 PCMU." },
+        { "key": "Media.VideoFile", "label": "H.264 비디오 파일", "type": "path", "default": "", "restart": true }
+      ],
+      "scope": "service"
+    },
+    {
+      "key": "limits",
+      "title": "용량 선언·타이머",
+      "fields": [
+        { "key": "Limits.EndpointsPerCore", "label": "코어당 단말 상한", "type": "int", "default": 200, "min": 1, "restart": false,
+          "help": "GET /health max_endpoints = 코어 수 × 이 값 (cspsim 실측 기준)." },
+        { "key": "Limits.SapsPerCore", "label": "코어당 SApS 상한", "type": "int", "default": 10, "min": 1, "restart": false },
+        { "key": "Timers.RegisterIntervalMs", "label": "등록 간격(ms)", "type": "int", "default": 20, "min": 0, "restart": false },
+        { "key": "Timers.RegisterTimeoutS", "label": "등록 대기 상한(s)", "type": "int", "default": 60, "min": 1, "restart": false },
+        { "key": "Timers.InviteTimeoutMs", "label": "INVITE 최종 응답 대기(ms)", "type": "int", "default": 32000, "min": 1000, "restart": false },
+        { "key": "Timers.ByeTimeoutMs", "label": "BYE 응답 대기(ms)", "type": "int", "default": 8000, "min": 1000, "restart": false }
+      ],
+      "scope": "service"
+    }
+  ]
+}

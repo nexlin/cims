@@ -8,7 +8,7 @@ roles:
 flow:
   - { step: register,   who: [caller, callee], expect: { code: 200, rrd_ms: { p95: 500 } } }
   - { step: invite,     from: caller, to: callee, media: { audio: amr-wb, video: h264 } }
-  - { step: answer,     who: [callee], after_ms: 1500, expect: { srd_ms: { p95: 1500 } } }
+  - { step: answer,     who: [callee], after_ms: 1500, expect: { srd_ms: { p95: 2000 } } }   # SRD = 착신 지연 1500 + 처리 여유
   - { step: media_hold, seconds: "${ht}", expect: { rtp_loss_pct: { max: 0.5 }, jitter_ms: { p95: 30 } } }
   - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }
 target_evidence:

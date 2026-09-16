@@ -336,6 +336,11 @@ add_subdirectory(cmp)
 add_subdirectory(cmdp)
 add_subdirectory(csp)
 add_subdirectory(cspsim)
+# 계측기 워커 — libcsim(cspsim/) 위 C++ 실행 파일 (docs/design/features/test_instrument.md §8)
+option(CIMS_TESTER "계측기 워커(cims-tester-worker) 빌드 — test_instrument.md" ON)
+if(CIMS_TESTER)
+add_subdirectory(tester/worker)
+endif()
 # cwrtc — 재설계 예정. 빌드/dist/패키징 제외 (cims-phone 웹 UI 도 함께 제외).
 #add_subdirectory(cwrtc)
 
@@ -379,6 +384,11 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cspsim/bin
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cspsim/log
 
+    # 계측기 워커 (test_instrument.md §8) — bin/cims-tester-worker + config/{config_template,cims-tester-worker}.json + pkg.json
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/bin
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/config
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/log
+
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/run
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/log
 
@@ -390,6 +400,10 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/bin/cspsim   ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/cspsim/SipClient.xml       ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/cspsim/SipClientCaller.xml ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/bin/cims-tester-worker ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/bin/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/tester/worker/config/config_template.json    ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/config/config_template.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/tester/worker/config/cims-tester-worker.json ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/config/cims-tester-worker.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/tester/worker/pkg.json ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/pkg.json
 
     # ── 3. 설정 템플릿 복사 (deploy_value: "@PLACEHOLDER@" 포함, configure.sh 로 채움) ──
     #    CSP/CMP/CSC 모두 A안 통합 — config_template.json 하나가 UI 메타+deploy_value 둘 다 담당.

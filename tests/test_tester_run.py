@@ -1,0 +1,333 @@
+"""계측기 run 오케스트레이터 단위시험 — 가짜 워커(HTTP + 관측 스트림 송신)로 컴파일→풀→run→요약→판정 완주.
+
+Covers:
+  - compile: creds 신원 적재·domain 기본값·역할 창(disjoint_from)·워커 2대 배분(로컬 인덱스)·${ht} 바인딩·단발 max_instances
+  - driver(단발): 풀 생성·run 시작 순서, 스트림 hello/agg/event 수집(metrics.sqlite·events.jsonl), 워커 stopped 로 종료,
+    RFC 6076 요약(SER/SCR/백분위 근사)·expect 판정(pass / 미달 fail)·run.json·색인 verdict
+  - 운영자 중단 → aborted, 워커 미응답 → error
+  - Hist 백분위 근사(상한 버킷)
+
+가짜 워커는 실제 계약(worker_pool_create/worker_run_start 스키마)으로 검증한 뒤 응답한다 — 워커 C++ 와 같은 문서를 본다.
+"""
+import json
+import os
+import shutil
+import socket
+import sys
+import tempfile
+import threading
+import time
+import unittest
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_REPO = os.path.dirname(_HERE)
+_TESTER = os.path.join(_REPO, 'ems', 'tester', 'oam')
+for _m in [m for m in list(sys.modules) if m.split('.')[0] in ('services', 'handlers', 'httpsrv', 'util')]:
+    del sys.modules[_m]
+sys.path.insert(0, os.path.join(_TESTER, 'src'))
+sys.path.insert(1, os.path.join(_REPO, 'ems', 'core', 'oam', 'src'))
+sys.path.insert(2, os.path.join(_REPO, 'ems', 'core', 'oam', 'vendor'))
+
+S = M = R = C = None
+_TMP = None
+_CFG = None
+
+
+def _free_port():
+    s = socket.socket()
+    s.bind(('127.0.0.1', 0))
+    p = s.getsockname()[1]
+    s.close()
+    return p
+
+
+class FakeWorker:
+    """POST /pools·/runs·/runs/{id}/stop·rate, GET /health·/runs/{id}. run 시작 시 스트림에 접속해 레코드를 보낸다."""
+
+    def __init__(self, name, behaviour=None):
+        self.name = name
+        self.port = _free_port()
+        self.pools = []
+        self.runs = []
+        self.rates = []
+        self.stops = []
+        self.state = 'idle'
+        self.behaviour = behaviour or {}
+        outer = self
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _send(self, st, body):
+                raw = json.dumps(body).encode()
+                self.send_response(st)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def _body(self):
+                n = int(self.headers.get('Content-Length') or 0)
+                return json.loads(self.rfile.read(n).decode()) if n else {}
+
+            def do_GET(self):
+                if self.path == '/health':
+                    self._send(200, {'worker': outer.name, 'version': 't', 'max_endpoints': 100, 'max_saps': 10,
+                                     'cpu_pct': 1.0, 'active_endpoints': 0, 'active_run': None,
+                                     'clock_unix_ms': int(time.time() * 1000), 'pools': []})
+                elif self.path.startswith('/runs/'):
+                    self._send(200, {'state': outer.state, 'counters': {}})
+                else:
+                    self._send(404, {'error': 'nf'})
+
+            def do_POST(self):
+                b = self._body()
+                if self.path == '/pools':
+                    m, errs = M.validate('worker_pool_create', b)
+                    if m is None:
+                        self._send(400, {'error': errs}); return
+                    outer.pools.append(b)
+                    self._send(201, {'pool': b['pool'], 'endpoints': len(b['identities'])})
+                elif self.path == '/runs':
+                    m, errs = M.validate('worker_run_start', b)
+                    if m is None:
+                        self._send(400, {'error': errs}); return
+                    outer.runs.append(b)
+                    outer.state = 'running'
+                    threading.Thread(target=outer._stream, args=(b,), daemon=True).start()
+                    self._send(202, {'run_id': b['run_id'], 'state': 'prelude'})
+                elif self.path.endswith('/rate'):
+                    outer.rates.append(b['rate_saps'])
+                    self._send(200, b)
+                elif self.path.endswith('/stop'):
+                    outer.stops.append(b)
+                    outer.state = 'stopped'
+                    self._send(202, {'state': 'draining'})
+                else:
+                    self._send(404, {'error': 'nf'})
+
+        self.srv = HTTPServer(('127.0.0.1', self.port), H)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    @property
+    def url(self):
+        return f'http://127.0.0.1:{self.port}'
+
+    def _stream(self, run):
+        host, port = run['stream'].rsplit(':', 1)
+        s = socket.create_connection((host, int(port)), timeout=5)
+        def send(rec):
+            s.sendall((json.dumps(rec) + '\n').encode())
+        send({'kind': 'hello', 'worker': self.name, 'version': 't', 't': time.time()})
+        t = int(time.time())
+        n = int(run.get('max_instances') or 2)
+        fail = self.behaviour.get('fail_one', False)
+        for i in range(n):
+            counters = {'attempts': 1, 'sessions': 1, 'completed': 1, 'legs': 2, 'rtp_rx': 100, 'rtp_lost': 1}
+            timers = {'rrd_ms': {'count': 2, 'sum': 8, 'min': 3, 'max': 5, 'buckets': {'5': 2}},
+                      'srd_ms': {'count': 1, 'sum': 1500, 'min': 1500, 'max': 1500, 'buckets': {'2000': 1}},
+                      'sdd_ms': {'count': 1, 'sum': 2, 'min': 2, 'max': 2, 'buckets': {'2': 1}},
+                      'jitter_ms': {'count': 2, 'sum': 20, 'min': 10, 'max': 10, 'buckets': {'10': 2}},
+                      'rtp_loss_pct': {'count': 2, 'sum': 0.2, 'min': 0.1, 'max': 0.1, 'buckets': {'1': 2}}}
+            if fail and i == n - 1:
+                counters = {'attempts': 1, 'failed': 1, 'codes.503': 1, 'legs': 2}
+                timers = {}
+                send({'kind': 'event', 't': time.time(), 'run_id': run['run_id'], 'worker': self.name,
+                      'code': 503, 'step': 'invite', 'detail': 'call failed'})
+            send({'kind': 'agg', 't': t + i, 'bucket_s': 1, 'run_id': run['run_id'], 'worker': self.name,
+                  'counters': counters, 'gauges': {'registered': 2, 'concurrent_sessions': 1}, 'timers': timers})
+        send({'kind': 'log', 't': time.time(), 'worker': self.name, 'level': 'info', 'msg': 'run done'})
+        time.sleep(0.3)
+        if not self.behaviour.get('never_stop'):
+            self.state = 'stopped'
+        s.close()
+
+
+def setUpModule():
+    global S, M, R, C, _TMP, _CFG
+    from services import tester_store as _S, tester_models as _M, tester_run as _R, tester_compile as _C
+    S, M, R, C = _S, _M, _R, _C
+    _TMP = tempfile.mkdtemp(prefix='tester-run-ut-')
+    _CFG = {'CimsRuntimeDir': os.path.join(_TMP, 'runtime'),
+            'Tester': {'DataDir': os.path.join(_TMP, 'data'), 'WorkerStreamIp': '127.0.0.1',
+                       'WorkerStreamPort': _free_port(), 'WorkerStreamAdvertiseIp': '127.0.0.1'}}
+    from services import file_store, lease
+    lease.acquire(file_store.runtime_root(_CFG))
+    S.init(_TESTER, _CFG)
+    R.RUNS.init(_CFG)
+    os.makedirs(os.path.join(S.user_scenarios_dir(), 'creds'), exist_ok=True)
+    with open(os.path.join(S.user_scenarios_dir(), 'creds', 'ue.jsonl'), 'w') as f:
+        for i in range(8):
+            f.write(json.dumps({'user': f'+8213000000{i:02d}', 'authId': f'450338213000000{i:02d}', 'ha1': 'ab' * 16}) + '\n')
+
+
+def tearDownModule():
+    R.RUNS.shutdown()
+    shutil.rmtree(_TMP, ignore_errors=True)
+
+
+def _topology(workers):
+    return {'name': 'ut', 'target': {'name': 'sut', 'csp': {'ip': '10.0.0.1', 'domain_volte': 'volte.test'}},
+            'workers': [{'name': w.name, 'url': w.url, 'cpus': 1} for w in workers],
+            'pools': {'volte_ue': {'kind': 'ue', 'source': {'creds': 'creds/ue.jsonl'}}}}
+
+
+def _wait_done(d, timeout=20):
+    d.join(timeout)
+    return d.state
+
+
+class Compile(unittest.TestCase):
+    def test_roles_workers_bindings(self):
+        w1, w2 = FakeWorker('w1'), FakeWorker('w2')
+        for w in (w1, w2):
+            w.probe = None
+        sc, _, _ = S.get_scenario('VOLTE-CALL-BASIC')
+        topo_doc = _topology([w1, w2])
+        topo = M.Topology.model_validate(topo_doc)
+        from services import tester_workers as TW
+        ws = TW.discover(topo_doc)
+        for w in ws:
+            w.probe()
+        plan = C.compile_run('r1', sc, topo, topo_doc, None, {'ht': 7}, ws, lambda w: '127.0.0.1:1', 4, None)
+        # caller/callee 가 count 없이 한 풀을 disjoint 로 나눠 쓴다 → 균등 분할 [0,4)/[4,8)
+        self.assertEqual(plan['roles']['caller'], ['volte_ue', 0, 4])
+        self.assertEqual(plan['roles']['callee'], ['volte_ue', 4, 8])
+        self.assertEqual(plan['identities'], {'volte_ue': 8})
+        self.assertEqual(plan['max_instances'], 4)
+        hold = [s for s in plan['steps'] if s['step'] == 'media_hold'][0]
+        self.assertEqual(hold['seconds'], 7)
+        for name, pw in plan['workers'].items():
+            run = pw['run']
+            self.assertEqual(run['run_id'], 'r1')
+            self.assertEqual(sum(len(p['identities']) for p in pw['pools']), 4)   # 8 신원 / 2 워커
+            for role, (b, e) in run['role_slices'].items():
+                self.assertTrue(0 <= b <= e <= 4)
+            self.assertEqual(pw['pools'][0]['identities'][0]['domain'], 'volte.test')
+        self.assertEqual(sum(pw['run']['max_instances'] for pw in plan['workers'].values()), 4)
+
+    def test_disjoint_needs_room(self):
+        # caller.count=8 이 풀 전체를 쓰면 disjoint 인 callee 창이 없다 → CompileError
+        sc, _, _ = S.get_scenario('VOLTE-CALL-BASIC')
+        sc = sc.model_copy(deep=True)
+        sc.roles['caller'].count = 8
+        with self.assertRaises(C.CompileError):
+            C.role_ranges(sc, {'volte_ue': 8})
+        # 균등 분할 기본값
+        sc2, _, _ = S.get_scenario('VOLTE-CALL-BASIC')
+        rr = C.role_ranges(sc2, {'volte_ue': 10})
+        self.assertEqual(rr['caller'], ('volte_ue', 0, 5))
+        self.assertEqual(rr['callee'], ('volte_ue', 5, 10))
+
+    def test_db_source_rejected(self):
+        with self.assertRaises(C.CompileError):
+            C.load_identities('p', {'kind': 'ue', 'source': {'db': 'target', 'table': 'volte_subscriptions', 'count': 2}})
+
+
+class Hist(unittest.TestCase):
+    def test_percentile_upper_bound(self):
+        h = R.Hist()
+        h.merge({'count': 10, 'sum': 100, 'min': 1, 'max': 90, 'buckets': {'5': 5, '50': 4, '100': 1}})
+        self.assertEqual(h.percentile(0.5), 5)
+        self.assertEqual(h.percentile(0.95), 90)   # 100 버킷 상한 vs max 90 → max
+        self.assertEqual(h.to_dict()['mean'], 10)
+
+
+class Driver(unittest.TestCase):
+    def _run(self, workers, req_extra=None, scenario='VOLTE-CALL-BASIC'):
+        topo_doc = _topology(workers)
+        # caller/callee 가 같은 8 신원 풀을 나눠 쓰도록 count 를 준 사본 시나리오를 운영자 디렉터리에 둔다
+        sc, doc, _ = S.get_scenario(scenario)
+        doc = json.loads(json.dumps(doc))
+        doc['id'] = 'UT-' + scenario
+        doc['roles']['caller']['count'] = 4
+        doc['roles']['callee']['count'] = 4
+        if req_extra and 'flow' in req_extra:
+            doc['flow'] = req_extra.pop('flow')
+        import yaml
+        with open(os.path.join(S.user_scenarios_dir(), 'ut.yaml'), 'w') as f:
+            yaml.safe_dump(doc, f, allow_unicode=True)
+        rec, errs = S.save_topology(topo_doc)
+        self.assertFalse(errs, errs)
+        req = M.RunRequest(scenario_id=doc['id'], topology_id=rec['id'], bindings={'ht': 3}, **(req_extra or {}))
+        d = R.RUNS.start(req)
+        return d
+
+    def test_single_shot_pass(self):
+        w = FakeWorker('w1')
+        d = self._run([w], {'instances': 3})
+        self.assertEqual(_wait_done(d), 'stopped')
+        self.assertEqual(d.verdict, 'pass', d.notes + d.expect_results)
+        self.assertEqual(len(w.pools), 1)
+        self.assertEqual(w.runs[0]['max_instances'], 3)
+        self.assertEqual(w.runs[0]['stream'], f"127.0.0.1:{_CFG['Tester']['WorkerStreamPort']}")
+        idx = S.get_run(d.run_id)
+        self.assertEqual(idx['verdict'], 'pass')
+        self.assertEqual(idx['summary']['attempts'], 3)
+        self.assertEqual(idx['summary']['ser_pct'], 100.0)
+        rd = S.run_dir(d.run_id)
+        self.assertTrue(os.path.isfile(os.path.join(rd, 'run.json')))
+        self.assertTrue(os.path.isfile(os.path.join(rd, 'metrics.sqlite')))
+        import sqlite3
+        n = sqlite3.connect(os.path.join(rd, 'metrics.sqlite')).execute('SELECT COUNT(*) FROM agg').fetchone()[0]
+        self.assertEqual(n, 3)
+        with open(os.path.join(rd, 'run.json')) as f:
+            doc = json.load(f)
+        self.assertTrue(all(r['ok'] for r in doc['expect_results']), doc['expect_results'])
+        self.assertEqual(doc['timers']['srd_ms']['p95'], 1500)   # 상한 2000 버킷이지만 max 1500 로 잘린다
+        from handlers.tester import report_markdown
+        md = report_markdown(doc)
+        self.assertIn('RFC 6076', md)
+        self.assertIn('PASS', md)
+
+    def test_failure_makes_fail_and_events(self):
+        w = FakeWorker('w1', {'fail_one': True})
+        d = self._run([w], {'instances': 3})
+        self.assertEqual(_wait_done(d), 'stopped')
+        self.assertEqual(d.verdict, 'fail')
+        idx = S.get_run(d.run_id)
+        self.assertEqual(idx['summary']['failed'], 1)
+        self.assertEqual(idx['summary']['codes'], '503:1')
+        with open(os.path.join(S.run_dir(d.run_id), 'events.jsonl')) as f:
+            self.assertEqual(len(f.readlines()), 1)
+
+    def test_two_workers_share(self):
+        w1, w2 = FakeWorker('w1'), FakeWorker('w2')
+        d = self._run([w1, w2], {'instances': 4})
+        self.assertEqual(_wait_done(d), 'stopped')
+        self.assertEqual(d.verdict, 'pass', d.notes)
+        self.assertEqual(w1.runs[0]['max_instances'] + w2.runs[0]['max_instances'], 4)
+        self.assertEqual(sorted(S.get_run(d.run_id)['workers']), ['w1', 'w2'])
+
+    def test_operator_stop_aborts(self):
+        w = FakeWorker('w1', {'never_stop': True})
+        d = self._run([w], {'instances': 2})
+        time.sleep(1.0)
+        self.assertTrue(R.RUNS.stop(d.run_id))
+        self.assertEqual(_wait_done(d, 40), 'stopped')
+        self.assertEqual(d.verdict, 'aborted')
+        self.assertTrue(w.stops)
+
+    def test_worker_down_is_error(self):
+        dead = FakeWorker('dead')
+        dead.srv.shutdown()
+        dead.srv.server_close()   # 리슨 소켓까지 닫아야 즉시 거부된다(backlog 에 매달리지 않게)
+        d = self._run([dead], {'instances': 1})
+        self.assertEqual(_wait_done(d), 'stopped')
+        self.assertEqual(d.verdict, 'error')
+        self.assertTrue(any('워커 미응답' in n for n in d.notes), d.notes)
+
+    def test_only_one_active(self):
+        w = FakeWorker('w1', {'never_stop': True})
+        d = self._run([w], {'instances': 1})
+        time.sleep(0.5)
+        with self.assertRaises(RuntimeError):
+            self._run([w], {'instances': 1})
+        R.RUNS.stop(d.run_id)
+        _wait_done(d, 40)
+
+
+if __name__ == '__main__':
+    unittest.main()

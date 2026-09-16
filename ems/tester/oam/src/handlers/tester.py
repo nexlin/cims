@@ -8,9 +8,14 @@
   GET  /profiles[/<name>]           부하 프로파일
   GET|POST /topologies              토폴로지 목록·생성(검증 통과분만 저장)
   GET|PUT|DELETE /topologies/<id>
-  GET  /runs[/<id>]                 run 색인 (본체는 Tester.DataDir/runs/<id>/)
-  POST /runs                        run 시작 — B 단계(워커·오케스트레이터) 전까지 501
-  GET  /workers                     발견된 워커 — B 단계 전까지 빈 목록
+  GET  /runs[/<id>]                 run 색인 (본체는 Tester.DataDir/runs/<id>/) — 진행 중이면 라이브 누계 포함
+  POST /runs                        run 시작 (RunRequest) → 202 {id}. 동시에 하나만
+  POST /runs/<id>/stop              중단(drain 뒤 verdict=aborted)
+  POST /runs/<id>/rate              {rate_saps} 율 변경(진행 중)
+  GET  /runs/<id>/report            run.json 전체(RFC 6076 표·expect 판정·단계 로그) + markdown
+  GET  /runs/<id>/events            실패 개별 건(events.jsonl 꼬리, ?limit=)
+  GET  /runs/<id>/stream            SSE — 이 run 의 agg/events/runs 프레임만
+  GET  /workers[?topology=<id>]     토폴로지 워커 + GET /health 결과
   GET  /events                      SSE(text/event-stream) — run/워커 상태 변화 라이브
 
 권한: 조회 monitor, 토폴로지 쓰기·run 시작/중단 operator, 삭제 manager (test_instrument.md §6.2).
@@ -20,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from datetime import datetime
 from pathlib import PurePath
 from urllib.parse import unquote, urlparse
 
@@ -29,7 +35,9 @@ from httpsrv.handler import HandlerArgs, HandlerResult
 from services.admin_auth import require_role
 from services import tester_store as store
 from services.tester_bus import TESTER_BUS
-from services.tester_models import SCHEMAS, schema_json, validate
+from services.tester_models import SCHEMAS, schema_json, validate, RunRequest
+from services.tester_run import RUNS
+from services import tester_workers
 
 _BASE = '/api/v1/tester'
 _VERSION = '0.1.0'
@@ -71,9 +79,9 @@ def _json(status: int, body) -> HandlerResult:
     return HandlerResult(status=status, body=body)
 
 
-def _sse() -> HandlerResult:
+def _sse(run_id: str = '') -> HandlerResult:
     """SSE — alerts._sse_stream 과 같은 규약(20 초 `: ping`, 절단 시 구독 해제).
-    게이트웨이는 text/event-stream 응답을 청크 그대로 통과시킨다(gateway.py)."""
+    게이트웨이는 text/event-stream 응답을 청크 그대로 통과시킨다(gateway.py). run_id 를 주면 그 run 프레임만."""
     from starlette.responses import StreamingResponse
 
     loop = asyncio.get_running_loop()
@@ -87,6 +95,8 @@ def _sse() -> HandlerResult:
             while True:
                 try:
                     rec = await asyncio.wait_for(queue.get(), timeout=20)
+                    if run_id and (rec.get('record') or {}).get('run_id') != run_id:
+                        continue
                     yield f'data: {json.dumps(rec, ensure_ascii=False)}\n\n'.encode('utf-8')
                 except asyncio.TimeoutError:
                     yield b': ping\n\n'
@@ -124,9 +134,11 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             'data_dir': store.data_dir(),
             'scenarios': len(store.list_scenarios()), 'profiles': len(store.list_profiles()),
             'topologies': len(store.list_topologies()), 'runs': len(store.list_runs(limit=100000)),
-            'workers': 0,
+            'active_runs': [d.run_id for d in RUNS.active()],
             'stream_subscribers': TESTER_BUS.subscriber_count(),
-            'phase': 'A',   # 이행 단계 — B 에서 run 실행 가능
+            'worker_stream': ({'ip': RUNS.stream.ip, 'port': RUNS.stream.port, 'connections': RUNS.stream.connections}
+                              if RUNS.stream else None),
+            'phase': 'B',   # 이행 단계 — ue 풀 run 실행 가능 (peer 축은 C)
         })
 
     if head == 'events' and method == 'GET':
@@ -208,19 +220,141 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
                 limit = int((handler_args.query_params or {}).get('limit', 100))
             except ValueError:
                 limit = 100
-            return _json(200, {'runs': store.list_runs(limit=limit)})
+            rows = store.list_runs(limit=limit)
+            live = {d.run_id: d for d in RUNS.active()}
+            for r in rows:
+                if r.get('id') in live:
+                    r['live'] = live[r['id']].live()
+            return _json(200, {'runs': rows})
         if len(parts) == 1 and method == 'POST':
-            # B 단계(워커·오케스트레이터) 전 — 계약만 확정된 상태를 정직하게 알린다.
-            return _json(501, {'error': 'not_implemented',
-                               'detail': 'run 실행은 B 단계(cims-tester-worker + 오케스트레이터)에서 열린다 — test_instrument.md §10'})
-        if len(parts) == 2 and method == 'GET':
-            rec = store.get_run(parts[1])
-            return _json(200, rec) if rec else _json(404, {'error': 'run_not_found', 'id': parts[1]})
+            body = _body(handler_args)
+            if not isinstance(body, dict):
+                return _json(400, {'error': 'body 는 RunRequest(JSON) 여야 한다'})
+            req, errs = validate('run_request', body)
+            if req is None:
+                return _json(400, {'error': 'invalid_run_request', 'errors': errs})
+            try:
+                d = RUNS.start(req)
+            except RuntimeError as e:
+                return _json(409, {'error': str(e)})
+            except ValueError as e:
+                return _json(404 if 'not_found' in str(e) else 400, {'error': str(e)})
+            return _json(202, {'id': d.run_id, 'state': d.state, 'scenario_id': d.scenario.id,
+                               'topology': d.topology_name, 'profile': d.profile_name})
+        if len(parts) >= 2:
+            rid = parts[1]
+            d = RUNS.get(rid)
+            if len(parts) == 2 and method == 'GET':
+                rec = store.get_run(rid)
+                if rec is None:
+                    return _json(404, {'error': 'run_not_found', 'id': rid})
+                if d is not None and d.state != 'stopped':
+                    rec['live'] = d.live()
+                return _json(200, rec)
+            if len(parts) == 3 and parts[2] == 'stop' and method == 'POST':
+                if not RUNS.stop(rid):
+                    return _json(404 if d is None else 409, {'error': 'run_not_running', 'id': rid})
+                return _json(202, {'id': rid, 'state': 'stopping'})
+            if len(parts) == 3 and parts[2] == 'rate' and method == 'POST':
+                body = _body(handler_args) or {}
+                try:
+                    rate = float(body.get('rate_saps'))
+                except (TypeError, ValueError):
+                    return _json(400, {'error': 'rate_saps 필요'})
+                if rate < 0:
+                    return _json(400, {'error': 'rate_saps ≥ 0'})
+                if not RUNS.rate(rid, rate):
+                    return _json(404 if d is None else 409, {'error': 'run_not_running', 'id': rid})
+                return _json(200, {'id': rid, 'rate_saps': rate})
+            if len(parts) == 3 and parts[2] == 'stream' and method == 'GET':
+                return _sse(rid)
+            if len(parts) == 3 and parts[2] == 'report' and method == 'GET':
+                p = os.path.join(store.run_dir(rid), 'run.json')
+                if not os.path.isfile(p):
+                    if d is not None:
+                        return _json(200, {'run': d.live(), 'markdown': None, 'final': False})
+                    return _json(404, {'error': 'report_not_found', 'id': rid})
+                with open(p, 'r', encoding='utf-8') as f:
+                    doc = json.load(f)
+                return _json(200, {'run': doc, 'markdown': report_markdown(doc), 'final': True})
+            if len(parts) == 3 and parts[2] == 'events' and method == 'GET':
+                try:
+                    limit = int((handler_args.query_params or {}).get('limit', 200))
+                except ValueError:
+                    limit = 200
+                p = os.path.join(store.run_dir(rid), 'events.jsonl')
+                rows = []
+                if os.path.isfile(p):
+                    with open(p, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()[-max(1, limit):]
+                    for ln in lines:
+                        try:
+                            rows.append(json.loads(ln))
+                        except Exception:
+                            pass
+                return _json(200, {'events': rows})
 
     if head == 'workers' and method == 'GET':
-        return _json(200, {'workers': []})
+        q = handler_args.query_params or {}
+        topos = store.list_topologies()
+        if q.get('topology'):
+            topos = [t for t in topos if str(t.get('id')) == str(q.get('topology'))]
+        out = []
+        for t in topos:
+            for w in tester_workers.discover(t.get('doc') or {}):
+                w.probe()
+                row = w.to_dict()
+                row['topology_id'] = t.get('id')
+                out.append(row)
+        return _json(200, {'workers': out})
 
     return _json(404, {'error': 'not_found', 'path': handler_args.full_path})
+
+
+def report_markdown(doc: dict) -> str:
+    """run.json → Markdown 보고서 (RFC 6076 표·expect 판정·단계 로그). 콘솔 인쇄·CLI 출력 공용."""
+    s = doc.get('summary') or {}
+    t = doc.get('timers') or {}
+    lines = [f"# 계측기 run {doc.get('id')} — {doc.get('scenario_id')}",
+             '',
+             f"- 판정: **{doc.get('verdict')}**  · 토폴로지 {doc.get('topology')} · 프로파일 {doc.get('profile') or '(단발)'}",
+             f"- 시작 {doc.get('started_at')} · 종료 {doc.get('ended_at')} · 워커 {', '.join(doc.get('workers') or [])}",
+             '']
+    if doc.get('stop_reason'):
+        lines.append(f"- 중단 사유: {doc['stop_reason']}")
+    if doc.get('notes'):
+        lines += [f'- 참고: {n}' for n in doc['notes']]
+    lines += ['', '## RFC 6076 지표', '', '| 지표 | 값 |', '|---|---|']
+
+    def fmt(v):
+        if v is None:
+            return '-'
+        if isinstance(v, float):
+            return f'{v:.2f}'
+        return str(v)
+    for k, label in (('attempts', '호 시도(attempt)'), ('sessions', '세션(성립)'), ('completed', '완료(정상 BYE)'),
+                     ('failed', '실패'), ('skipped', '단말 부족으로 건너뜀'), ('ser_pct', 'SER %'), ('scr_pct', 'SCR %'),
+                     ('registered_ok', '등록 성공'), ('registered_fail', '등록 실패'), ('doc_saps', 'DOC (SApS)'),
+                     ('rtp_rx', 'RTP 수신'), ('rtp_lost', 'RTP 손실'), ('rtp_loss_pct', 'RTP 손실 %'), ('codes', '응답 코드')):
+        lines.append(f'| {label} | {fmt(s.get(k))} |')
+    lines += ['', '| 지연 | n | p50 | p95 | p99 | max |', '|---|---|---|---|---|---|']
+    for name, label in (('rrd_ms', 'RRD ms'), ('srd_ms', 'SRD ms'), ('sdd_ms', 'SDD ms'), ('sdt_s', 'SDT s'), ('jitter_ms', '지터 ms'),
+                        ('rtp_loss_pct', 'RTP 손실 %(호별)')):
+        h = t.get(name)
+        if h:
+            lines.append(f"| {label} | {h.get('count')} | {fmt(h.get('p50'))} | {fmt(h.get('p95'))} | {fmt(h.get('p99'))} | {fmt(h.get('max'))} |")
+    er = doc.get('expect_results') or []
+    if er:
+        lines += ['', '## 기대치 판정', '', '| 단계 | 지표 | 기대 | 관측 | 판정 |', '|---|---|---|---|---|']
+        for r in er:
+            lines.append(f"| {r.get('step')} {r.get('kind')} | {r.get('metric')} | {json.dumps(r.get('expect'), ensure_ascii=False)} | "
+                         f"{json.dumps(r.get('observed'), ensure_ascii=False)} | {'PASS' if r.get('ok') else 'FAIL'} |")
+    sl = doc.get('step_log') or []
+    if len(sl) > 1:
+        lines += ['', '## 단계 로그', '', '| 시각 | 율(SApS) | 시도 | IHS % |', '|---|---|---|---|']
+        for r in sl:
+            lines.append(f"| {datetime.fromtimestamp(r['t']).strftime('%H:%M:%S')} | {fmt(r.get('rate'))} | {fmt(r.get('attempts'))} | {fmt(r.get('ihs_pct'))} |")
+    return '\n'.join(lines) + '\n'
 
 
 TESTER_HANDLER_LIST = [
