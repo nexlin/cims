@@ -1054,6 +1054,10 @@ def _messages_stats_rollup(config, from_dt: str, to_dt: str, gran: str,
         return HandlerResult(status=204, body=None)
 
     buckets, totals = stats_rollup.aggregate(rows, gran, svc, include_msg=True)
+    # 시간축을 구간 전체로 채운다 — 호 통계와 같은 이유다(§2.1c). 메시지가 하나도 없던 분은
+    #   레코드가 없어 축이 띄엄띄엄해지고, 그 사이가 0 이었는지 조회에서 빠진 것인지 알 수 없다.
+    #   채운 행은 아래 `per` 가 빈 dict 가 되어 건수 0 으로 나온다.
+    buckets = stats_rollup.fill_buckets(buckets, gran, from_dt, to_dt)
 
     def _flat(cell):
         m = cell.get('msg') or {}

@@ -43,32 +43,79 @@ function compactLabels(labels: (string | number)[]): string[] {
   return out
 }
 
+/**
+ * 버킷이 이보다 많으면 **막대 대신 선**으로 그린다.
+ *
+ * 막대는 칸마다 폭을 나눠 가져야 한다 — 추이 카드 폭(그리드 26칸 ≈ 864px)에 1분 단위 하루치
+ * 900버킷을 넣으면 한 칸이 1px 미만이 되어 **그래프가 안 보인다**(실측 2026-09-16).
+ * 선은 폭이 필요 없어서 버킷이 아무리 많아도 모양이 남는다 — 자료를 묶어 버리지 않고(압축)
+ * 해상도를 그대로 둔 채 조회 구간 전체가 한 화면에 들어온다.
+ *
+ * 반대로 성길 때는 막대가 낫다 — 칸 경계가 보여서 구간끼리 비교가 쉽다. 그래서 자동 전환한다.
+ */
+const LINE_MIN_BUCKETS = 120
+
 export function TimeBarChart({ data }: { data: TimeBarData }) {
   const { buckets, unit } = data
+  const [hover, setHover] = useState<number | null>(null)
+  const wrap = useRef<HTMLDivElement>(null)
   const vals = buckets.map(b => b.value)
   const max = Math.max(...vals, 1)
   if (buckets.length === 0) return <EmptyState title="데이터 없음" />
   const labels = compactLabels(buckets.map(b => b.label))
+
+  if (buckets.length > LINE_MIN_BUCKETS) {
+    // ── 선 모드 ───────────────────────────────────────────────────────────
+    // 점은 찍지 않는다: 이 밀도에서 점 간격은 1~2px 라 점끼리 붙어 **선이 두꺼워진 것처럼만**
+    // 보이고(값 위치를 짚어 주는 역할을 못 한다), SVG 노드가 버킷 수만큼 늘어난다.
+    const W = 1000, H = 100
+    const x = (i: number) => (i / Math.max(1, buckets.length - 1)) * W
+    const y = (v: number) => H - (v / max) * (H - 4) - 2
+    const line = vals.map((v, i) => `${i ? 'L' : 'M'} ${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(' ')
+    const area = `${line} L ${W} ${H} L 0 ${H} Z`
+    // 가로축 눈금은 **축에 직접** 둔다 — 칸 안에 넣으면 1px 칸에서 글자가 서로 겹친다.
+    const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => Math.round((buckets.length - 1) * f))
+    const at = (e: React.MouseEvent) => {
+      const r = wrap.current?.getBoundingClientRect()
+      if (!r || r.width === 0) return
+      const i = Math.round(((e.clientX - r.left) / r.width) * (buckets.length - 1))
+      setHover(Math.max(0, Math.min(buckets.length - 1, i)))
+    }
+    const h = hover === null ? null : buckets[hover]
+    return (
+      <div className="flex-1 min-h-0 flex flex-col">
+        <div className="flex-none h-4 text-xs text-muted-foreground text-right pr-1 tabular-nums">
+          {h ? `${labels[hover!]} · ${h.value}${unit || ''}` : `최대 ${max}${unit || ''}`}
+        </div>
+        <div ref={wrap} className="flex-1 min-h-0 relative" onMouseMove={at}
+             onMouseLeave={() => setHover(null)}>
+          <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" width="100%" height="100%"
+               role="img" aria-label={`추이 ${buckets.length}구간, 최대 ${max}${unit || ''}`}>
+            <path d={area} fill="color-mix(in srgb, var(--primary) 16%, transparent)" />
+            <path d={line} fill="none" stroke="var(--primary)" strokeWidth={1.2}
+                  vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+            {hover !== null && (
+              <line x1={x(hover)} x2={x(hover)} y1={0} y2={H} stroke="var(--muted-foreground)"
+                    strokeWidth={1} vectorEffect="non-scaling-stroke" strokeDasharray="3 3" />
+            )}
+          </svg>
+        </div>
+        <div className="flex-none flex justify-between text-xs text-muted-foreground pt-1 tabular-nums">
+          {ticks.map(i => <span key={i}>{labels[i]}</span>)}
+        </div>
+      </div>
+    )
+  }
+
+  // ── 막대 모드 (성길 때) ─────────────────────────────────────────────────
   // 라벨·값은 몇 칸 걸러 하나만 — 막대는 다 보이되 글자만 솎는다(겹쳐 뭉개지는 것보다 낫다).
   const every = Math.ceil(buckets.length / 24)
-  /**
-   * **밀집 모드** — 버킷이 많으면 막대 사이 간격을 없앤다.
-   *
-   * 간격(2px)은 버킷 수에 비례해 커진다: 1분 단위로 하루를 보면 버킷이 900개라 간격만
-   * 1,800px 로 카드 폭을 통째로 먹고 **막대 폭이 0 이 되어 그래프가 안 보인다**
-   * (실측 2026-09-16 — 1분 조회에서 차트가 빈 칸으로 나왔다). 간격을 지우면 같은 폭에
-   * 촘촘한 히스토그램으로 들어온다 — 한 장에 다 보이는 쪽이 가로 스크롤보다 추세를 읽기 좋다.
-   * 값 글자도 이때는 접는다: 1px 막대 옆의 숫자는 어느 막대의 값인지 짚을 수 없다.
-   */
-  const dense = buckets.length > 120
   return (
-    <div className="flex-1 min-h-0 flex items-end py-0 px-1"
-         style={{ gap: dense ? 0 : 2 }}>
+    <div className="flex-1 min-h-0 flex items-end py-0 px-1 gap-0.5">
       {buckets.map((b, i) => (
-        <div className="h-full flex flex-col items-center" key={i}
-             style={{ flex: '1 1 0', minWidth: 1 }}>
+        <div className="flex-1 min-w-0 h-full flex flex-col items-center" key={i}>
           <div className="flex-none text-xs text-muted-foreground mb-0.5">
-            {!dense && b.value > 0 && i % every === 0 ? b.value : ''}
+            {b.value > 0 && i % every === 0 ? b.value : ''}
           </div>
           {/* 막대 영역 — 남은 높이 전부. 막대는 그 안에서 값 비율만큼 차지한다. */}
           <div className="flex-1 min-h-0 w-full flex items-end justify-center">
@@ -76,7 +123,6 @@ export function TimeBarChart({ data }: { data: TimeBarData }) {
                  style={{ width: '100%', maxWidth: 32, height: `${(b.value / max) * 100}%`, minHeight: 2,
                           background: 'var(--primary)', borderRadius: '2px 2px 0 0' }} />
           </div>
-          {/* 라벨은 몇 칸 걸러 하나만 — 막대는 다 보이되 글자만 솎는다(겹쳐 뭉개지는 것보다 낫다). */}
           <div className="flex-none text-xs text-muted-foreground mt-0.5">
             {i % every === 0 ? labels[i] : ''}
           </div>
