@@ -366,13 +366,6 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
         {/* 캔버스 */}
         <div ref={wrapRef} className="relative min-h-0 overflow-auto bg-background" onPointerDown={e => { if (e.target === e.currentTarget || (e.target as HTMLElement).dataset.stage) setSel(null) }}>
           <div ref={stageRef} data-stage className="relative" style={{ width: stageW, height: stageH, backgroundImage: 'radial-gradient(var(--border) 1px, transparent 1px)', backgroundSize: '20px 20px' }}>
-            <svg className="pointer-events-none absolute inset-0" width={stageW} height={stageH}>
-              {edges.map((e, i) => <path key={i} d={e.d} fill="none" stroke={e.fail ? 'var(--destructive)' : EDGE_COLOR[e.cls]} strokeWidth={e.hi ? 2.4 : 1.4} strokeDasharray={e.cls === 'reg' || e.cls === 'rtp' || e.cls === 'db' ? '4 3' : undefined} opacity={e.dim ? 0.25 : 0.9} />)}
-              {drag?.type === 'link' && (() => { const dx = Math.max(60, Math.abs(drag.x - drag.ax) * 0.5); return <path d={`M${drag.ax},${drag.ay} C${drag.ax + dx},${drag.ay} ${drag.x - dx},${drag.y} ${drag.x},${drag.y}`} fill="none" stroke={hot?.kind === 'port' ? 'var(--success)' : 'var(--primary)'} strokeWidth={2} strokeDasharray="5 4" /> })()}
-            </svg>
-            {edges.filter(e => e.label).map((e, i) => (
-              <span key={`l${i}`} className={`pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-sm border bg-card px-1 text-[10px] ${e.fail ? 'border-destructive text-destructive' : 'border-border text-muted-foreground'}`} style={{ left: e.lx, top: e.ly, opacity: e.dim ? 0.35 : 1 }}>{e.label}</span>
-            ))}
             {M.hosts(doc).map(([hid, h]) => {
               const r = L.regions[hid] ?? { x: 40, y: 40, w: 300, h: 120 }; const hc = HC(M.colorOf(doc, hid)); const hk = M.hostKind(doc, hid)
               const ws = doc.workers.filter(w => w.host === hid), ns = M.nodes(doc).filter(([, n]) => n.host === hid)
@@ -403,8 +396,16 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
                 <div className="flex flex-col gap-1">{orphanP.map(([pn, p]) => <PoolCard key={pn} pn={pn} p={p} />)}</div>
               </div>
             )}
+            {/* 선 오버레이 — 영역·카드 위에 그린다(아래에 두면 영역 배경에 덮인다) */}
+            <svg className="pointer-events-none absolute inset-0 z-[10]" width={stageW} height={stageH}>
+              {edges.map((e, i) => <path key={i} d={e.d} fill="none" stroke={e.fail ? 'var(--destructive)' : EDGE_COLOR[e.cls]} strokeWidth={e.hi ? 2.4 : 1.4} strokeDasharray={e.cls === 'reg' || e.cls === 'rtp' || e.cls === 'db' ? '4 3' : undefined} opacity={e.dim ? 0.25 : 0.9} />)}
+              {drag?.type === 'link' && (() => { const dx = Math.max(60, Math.abs(drag.x - drag.ax) * 0.5); return <path d={`M${drag.ax},${drag.ay} C${drag.ax + dx},${drag.ay} ${drag.x - dx},${drag.y} ${drag.x},${drag.y}`} fill="none" stroke={hot?.kind === 'port' ? 'var(--success)' : 'var(--primary)'} strokeWidth={2} strokeDasharray="5 4" /> })()}
+            </svg>
+            {edges.filter(e => e.label).map((e, i) => (
+              <span key={`l${i}`} className={`pointer-events-none absolute z-[11] -translate-x-1/2 -translate-y-1/2 rounded-sm border bg-card px-1 text-[10px] ${e.fail ? 'border-destructive text-destructive' : 'border-border text-muted-foreground'}`} style={{ left: e.lx, top: e.ly, opacity: e.dim ? 0.35 : 1 }}>{e.label}</span>
+            ))}
             {/* 이동 중인 카드 — 포인터 이벤트를 꺼서 놓는 자리(elementFromPoint)가 카드 자신이 아니라 아래 호스트 영역으로 잡히게 */}
-            {dragCard && <div className="pointer-events-none">{dragCard.kind === 'node' ? <NodeCard id={dragCard.id} n={doc.target.nodes[dragCard.id]} abs={{ x: dragCard.x, y: dragCard.y }} /> : <WorkerCard name={dragCard.id} abs={{ x: dragCard.x, y: dragCard.y }} />}</div>}
+            {dragCard && <div className="pointer-events-none relative z-[20]">{dragCard.kind === 'node' ? <NodeCard id={dragCard.id} n={doc.target.nodes[dragCard.id]} abs={{ x: dragCard.x, y: dragCard.y }} /> : <WorkerCard name={dragCard.id} abs={{ x: dragCard.x, y: dragCard.y }} />}</div>}
           </div>
           {drag && (drag.type === 'new' || drag.type === 'pool') && (
             <div className="pointer-events-none fixed z-[200] rounded-sm border border-primary bg-card px-2 py-1 text-xs shadow-md" style={{ left: drag.x + 8, top: drag.y + 8 }}>
