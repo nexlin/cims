@@ -173,5 +173,58 @@ for (const [lbl, key] of [['오류', 'r_error'], ['거부', 'r_denied'], ['무�
       col(key).detail)
 }
 
+// ── VoLTE — 사유 열이 종료 사유를 다 덮고, 응답코드가 제 열로만 간다 ───────────────
+//
+//   VoLTE 는 원인 축(`causes`)이 없어 응답코드가 툴팁의 유일한 근거다. 코드를 열마다 나눠
+//   선언하므로(거절 403·404·603 / 통화중 486·600 / 무응답 408·480 / 오류 488·5xx),
+//   한 코드가 두 열에 걸리면 같은 호가 두 번 세어진다. 여기서 그 회귀를 막는다.
+console.log('\n[7] VoLTE — 사유 열과 응답코드 툴팁')
+const vspec = seed.data_sources.find(s => s.id === 'cims.svc.volte')
+chk('cims.svc.volte 디스크립터가 있다', !!vspec)
+const vds = buildDataSource(vspec)
+
+// 한 버킷 — 시도 20 = 성립 12 + 거절 4 + 통화중 2 + 무응답 1 + 오류 1.
+//   `statuses` 는 그 실패들의 응답코드 합이다(200 은 담기지 않는다).
+const VCALL = {
+  attempts: 20, sessions: 12, talked: 12, completed: 11,
+  reasons: { normal: 11, incomplete: 1, rejected: 4, busy: 2, no_answer: 1, error: 1 },
+  statuses: { 603: 2, 404: 1, 403: 1, 486: 2, 480: 1, 503: 1 },
+}
+const VBUCKET = {
+  totals: { volte: VCALL },
+  buckets: [{ bucket: '2026-09-16 14:00', volte: VCALL }],
+}
+const vmx = vds.toMatrix(VBUCKET)
+const vrow = vmx.rows[0]
+const vcol = k => vmx.columns.find(c => c.key === k)
+
+for (const [lbl, key, want] of [['거절', 'r_rejected', 4], ['통화중', 'r_busy', 2],
+                                ['무응답', 'r_noanswer', 1], ['오류', 'r_error', 1],
+                                ['비정상종료', 'r_incomplete', 1]]) {
+  chk(`${lbl} 열이 있고 값이 ${want}`, (vrow.cells[key] ?? null) === want,
+      String(vrow.cells[key]))
+}
+
+const vd = vrow.details ?? {}
+chk('거절 툴팁 = 603 2건 · 404 1건 · 403 1건',
+    /603 거절\(DND·착신거부\) 2건/.test(vd.r_rejected ?? '')
+    && /404 없는 번호 1건/.test(vd.r_rejected ?? '')
+    && /403 금지 1건/.test(vd.r_rejected ?? ''), vd.r_rejected)
+chk('오류 툴팁에 503 만 온다(486·480 은 다른 열)',
+    /503 서비스 불가 1건/.test(vd.r_error ?? '') && !/486|480/.test(vd.r_error ?? ''),
+    vd.r_error)
+chk('무응답 툴팁 = 480 1건', /480 일시 불가 1건/.test(vd.r_noanswer ?? ''), vd.r_noanswer)
+
+console.log('[8] VoLTE — 칸의 숫자와 상세의 합이 같다')
+for (const [lbl, key] of [['거절', 'r_rejected'], ['통화중', 'r_busy'],
+                          ['무응답', 'r_noanswer'], ['오류', 'r_error']]) {
+  const v = vrow.cells[key] ?? 0
+  const got = sumOf(vd[key])
+  chk(`${lbl} 칸 ${v}건 = 상세 합 ${got}건`, v === got, JSON.stringify(vd[key]))
+  const tv = vcol(key).total ?? 0
+  chk(`합계 ${lbl} ${tv}건 = 상세 합 ${sumOf(vcol(key).detail)}건`,
+      tv === sumOf(vcol(key).detail), vcol(key).detail)
+}
+
 console.log(`\n합계: ${pass} pass / ${fail} fail`)
 process.exit(fail ? 1 : 0)

@@ -637,18 +637,64 @@
               "unit": "%"
             },
             {
+              "key": "r_rejected",
+              "label": "거절",
+              "path": "volte.reasons.rejected",
+              "totalPath": "totals.volte.reasons.rejected",
+              "unit": "건",
+              "statusFrom": "volte.statuses",
+              "statusLabels": {
+                "603": "603 거절(DND·착신거부)",
+                "404": "404 없는 번호",
+                "403": "403 금지",
+                "487": "487 발신 취소",
+                "400": "400 잘못된 요청",
+                "604": "604 없는 사용자"
+              },
+              "detailUnknownLabel": "응답코드 미기록"
+            },
+            {
               "key": "r_busy",
               "label": "통화중",
               "path": "volte.reasons.busy",
               "totalPath": "totals.volte.reasons.busy",
-              "unit": "건"
+              "unit": "건",
+              "statusFrom": "volte.statuses",
+              "statusLabels": {
+                "486": "486 통화중",
+                "600": "600 전부 통화중"
+              },
+              "detailUnknownLabel": "응답코드 미기록"
+            },
+            {
+              "key": "r_noanswer",
+              "label": "무응답",
+              "path": "volte.reasons.no_answer",
+              "totalPath": "totals.volte.reasons.no_answer",
+              "unit": "건",
+              "statusFrom": "volte.statuses",
+              "statusLabels": {
+                "408": "408 요청 시간초과",
+                "480": "480 일시 불가"
+              },
+              "detailUnknownLabel": "응답코드 미기록"
             },
             {
               "key": "r_error",
               "label": "오류",
               "path": "volte.reasons.error",
               "totalPath": "totals.volte.reasons.error",
-              "unit": "건"
+              "unit": "건",
+              "statusFrom": "volte.statuses",
+              "statusLabels": {
+                "503": "503 서비스 불가",
+                "488": "488 코덱 불일치",
+                "500": "500 서버 내부 오류",
+                "502": "502 게이트웨이 오류",
+                "504": "504 게이트웨이 시간초과",
+                "606": "606 수락 불가"
+              },
+              "detailUnknownLabel": "응답코드 미기록"
             },
             {
               "key": "r_timeout",
@@ -672,7 +718,10 @@
             "완료율 = 정상종료 / 성립 — 성립한 호 중 정상 종료(BYE)한 비율. 분모가 시도가 아니다",
             "시도에서 빼는 것은 없다 — 재호출·포기·무응답·거절 전부 시도로 센다",
             "성공률과 NER 의 차이 = 상대 사정으로 안 붙은 비율. 둘 다 낮으면 망·시스템 문제다",
-            "드롭률 = 100% − 완료율 — 붙은 뒤 BYE 없이 끊긴 호의 비율"
+            "드롭률 = 100% − 완료율 — 붙은 뒤 BYE 없이 끊긴 호의 비율",
+            "사유 열 여섯(거절·통화중·무응답·오류·시간초과·비정상종료)이 종료 사유를 남김없이 덮는다 — 나머지 하나가 정상종료다. 열이 없는 사유가 있으면 그 실패는 표 어디에도 안 나타난다",
+            "사유 칸에 마우스를 올리면 그 칸을 이룬 SIP 응답코드별 건수가 나온다(`503 서비스 불가 9건 · 488 코덱 불일치 2건`). 코드가 기록되지 않은 호는 `응답코드 미기록` 으로 남아, 칸의 숫자와 상세의 합이 항상 같다",
+            "응답코드는 CSP 가 기록하기 시작한 시점(csp 0.2.114) 이후의 호에만 있다 — 그 전 호는 전부 `응답코드 미기록` 이다"
           ],
           "blankLabel": "호가 없는 시간"
         }
