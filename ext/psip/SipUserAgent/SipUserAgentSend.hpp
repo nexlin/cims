@@ -25,6 +25,8 @@
  * @returns 성공하면 true 를 리턴하고 실패하면 false 를 리턴한다.
  */
 bool CSipUserAgent::SendReInvite(const char *pszCallId, CSipCallRtp *pclsRtp) {
+  RefreshLegDest(pszCallId);  // 서버 발신 in-dialog 요청 — 목적지 재해석 (SipUserAgentLegDest.hpp)
+
   SIP_DIALOG_MAP::iterator itMap;
   CSipMessage *pclsRequest = NULL;
   bool bRes = false;
@@ -57,6 +59,8 @@ bool CSipUserAgent::SendReInvite(const char *pszCallId, CSipCallRtp *pclsRtp) {
  */
 bool CSipUserAgent::CreateReInvite(const char *pszCallId, CSipCallRtp *pclsRtp,
                                    CSipMessage **ppclsRequest) {
+  RefreshLegDest(pszCallId);  // 서버 발신 in-dialog 요청 — 목적지 재해석 (SipUserAgentLegDest.hpp)
+
   SIP_DIALOG_MAP::iterator itMap;
   CSipMessage *pclsRequest = NULL;
 
@@ -84,6 +88,8 @@ bool CSipUserAgent::CreateReInvite(const char *pszCallId, CSipCallRtp *pclsRtp,
  * @returns 성공하면 true 를 리턴하고 실패하면 false 를 리턴한다.
  */
 bool CSipUserAgent::SendNotify(const char *pszCallId, int iSipCode) {
+  RefreshLegDest(pszCallId);  // 서버 발신 in-dialog 요청 — 목적지 재해석 (SipUserAgentLegDest.hpp)
+
   SIP_DIALOG_MAP::iterator itMap;
   CSipMessage *pclsRequest = NULL;
   bool bRes = false;
@@ -127,6 +133,8 @@ bool CSipUserAgent::SendNotify(const char *pszCallId, int iSipCode) {
 bool CSipUserAgent::SendNotifyWithBody(const char *pszCallId, const char *pszEvent,
                                         const char *pszContentType, const char *pszContentSubType,
                                         const std::string &strBody) {
+  RefreshLegDest(pszCallId);  // 서버 발신 in-dialog 요청 — 목적지 재해석 (SipUserAgentLegDest.hpp)
+
   SIP_DIALOG_MAP::iterator itMap;
   CSipMessage *pclsRequest = NULL;
 
@@ -157,6 +165,8 @@ bool CSipUserAgent::SendNotifyWithBody(const char *pszCallId, const char *pszEve
  * @returns 성공하면 true 를 리턴하고 실패하면 false 를 리턴한다.
  */
 bool CSipUserAgent::SendDtmf(const char *pszCallId, char cDtmf) {
+  RefreshLegDest(pszCallId);  // 서버 발신 in-dialog 요청 — 목적지 재해석 (SipUserAgentLegDest.hpp)
+
   SIP_DIALOG_MAP::iterator itMap;
   CSipMessage *pclsRequest = NULL;
   bool bRes = false;

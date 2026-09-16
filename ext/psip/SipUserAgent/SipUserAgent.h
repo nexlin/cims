@@ -211,8 +211,11 @@ private:
 	void SessionTimerAddToResponse( CSipDialog & clsDialog, CSipMessage * pclsResponse );
 	void SessionTimerAddToRequest( CSipDialog & clsDialog, CSipMessage * pclsRequest, bool bInitial );
 	void SessionTimerOnResponse( CSipDialog & clsDialog, CSipMessage * pclsMessage );
-	void SessionTimerApplyDest( const std::string & strCallId, CSipDialog & clsDialog,
+
+	// SipUserAgentLegDest.hpp : 서버 발신 in-dialog 요청(BYE·re-INVITE·NOTIFY·REFER·INFO)의 목적지 재해석
+	void ApplyLegDest( const std::string & strCallId, CSipDialog & clsDialog,
 		const std::string & strIp, int iPort, ESipTransport eTransport );
+	bool RefreshLegDest( const char * pszCallId );
 
 	int GetSeqNum( );
 

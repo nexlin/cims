@@ -176,7 +176,7 @@ CSP 는 아무것도 보내지 않고 in-dialog re-INVITE(또는 향후 UPDATE) 
 
 | 규율 | 이유 |
 |---|---|
-| 갱신·만료 요청은 **등록 바인딩(latch) 주소**로 보낸다 | 다이얼로그가 기억한 주소는 요청 **수신 당시의 소스**다. 단말은 큰 INVITE(multipart mcptt-info+SDP)를 TCP 로 승격해 보내는데, 그 연결은 곧 닫히고 NAT 뒤라 서버가 다시 열 수 없다 — 그 주소로 갱신을 보내면 도달하지 못하고 단말이 규격대로 세션을 끊는다(§10, `cause=408`). psip 은 요청 생성 직전 `EventGetLegDest` 로 현재 도달 주소를 응용에 묻고, 응답이 있으면 다이얼로그의 목적지·transport 를 그 값으로 갱신한다. Record-Route 가 있는(프록시 경유) 다이얼로그는 손대지 않는다 |
+| 서버 발신 in-dialog 요청은 **등록 바인딩(latch) 주소**로 보낸다 — 갱신 re-INVITE 뿐 아니라 BYE·NOTIFY·REFER·INFO 전부 | 다이얼로그가 기억한 주소는 요청 **수신 당시의 소스**다. 단말은 큰 INVITE(multipart mcptt-info+SDP, VoLTE 도 SDP 크기에 따라)를 TCP 로 승격해 보내는데, 그 연결은 단말 스택 유휴 타이머(pjsip 33초)로 곧 닫히고 NAT 뒤라 서버가 다시 열 수 없다 — 그 주소로 보내면 갱신은 단말이 규격대로 세션을 끊고(§10, `cause=408`), **상대 종료 BYE 는 유실돼 남은 단말이 통화 중으로 남는다**(만료 148초까지). psip 은 서버 발신 in-dialog 요청을 만드는 API 진입부(`StopCall`·`SendReInvite`/`CreateReInvite`·`HoldCall`/`ResumeCall`·`SendNotify`/`SendNotifyWithBody`·`SendDtmf`·`TransferCall*`)에서 `RefreshLegDest` 로, 세션 갱신 주기(`CheckSessionTimer`)에서는 배치로 `EventGetLegDest` 에 현재 도달 주소를 묻고, 응답이 있으면 다이얼로그의 목적지·transport 를 그 값으로 갱신한다(`SipUserAgentLegDest.hpp`). 확립된 다이얼로그만 대상이고, Record-Route 가 있는(프록시 경유) 다이얼로그는 손대지 않는다 |
 | SDP offer 는 직전과 **동일한 `o=` 세션 버전**으로 만든다 | RFC 4028 §7.4 의 "변경 없음" 표시. 현재 `CSipDialog::AddSdp()` 는 호출마다 `++m_iSessionVersion` 하므로 갱신 경로에서는 증가를 억제해야 한다 |
 | 갱신 2xx 에는 `Session-Expires` 를 **항상 echo** 한다 | 빠지면 상대가 타이머 해제로 해석한다(§7.2). psip 의 re-INVITE 자동 200 OK 생성 지점(`SipUserAgentInvite.hpp` `RecvInviteRequest`)이 싣는다 |
 | 수신 갱신에 대한 **answer 도 `o=` 를 유지**한다 | §7.4 는 answer 에도 "변경 없음" 표시를 요구한다 — 상대 offer 가 무변경일 때 answer 의 세션 버전도 올리지 않는다 |
@@ -260,7 +260,8 @@ CSP 의 정상 호처리량 대비 무시할 수준이다.
 | psip | `SipUserAgentCall.hpp` `AcceptCall`·`CreateCall`, `SipUserAgent.cpp` `SendInvite` | 2xx 에 협상 결과, 송신 INVITE 에 `Supported: timer`·`Session-Expires`·`Min-SE` |
 | psip | `SipUserAgent.cpp` `SetInviteResponse` | 2xx 수신 시 타이머 확정 / 422 는 `Min-SE` 반영 1회 재시도(§7.3) / 갱신의 408·481 은 세션 사망 표시(§10) |
 | psip | `SipUserAgentSipStack.hpp` `SendTimeout` | 현행 유지 — 갱신 무응답이 곧 `EventCallEnd(SIP_GONE)` |
-| psip | `SipUserAgentCallBack.h` `EventGetLegDest` (신규 콜백) | 서버 발신 in-dialog 요청의 현재 도달 주소를 응용에 묻는다. 기본 구현은 `false`(기존 동작 유지)라 다른 psip 사용자는 영향 없다. 콜백은 **다이얼로그 락 밖**에서 호출한다(psip 규약 — CheckSessionTimer 는 선별→조회→생성 3단계) |
+| psip | `SipUserAgentCallBack.h` `EventGetLegDest` | 서버 발신 in-dialog 요청의 현재 도달 주소를 응용에 묻는다. 기본 구현은 `false`(기존 동작 유지)라 다른 psip 사용자는 영향 없다. 콜백은 **다이얼로그 락 밖**에서 호출한다(psip 규약 — 응용이 자기 자료구조 락을 잡으므로 락 순서 역전 여지 제거) |
+| psip | `SipUserAgent/SipUserAgentLegDest.hpp` `RefreshLegDest`·`ApplyLegDest` | 요청 생성 직전 3단계(선별 → 락 밖 조회 → 반영). 서버 발신 in-dialog 요청 API 전부의 진입부에서 호출, `CheckSessionTimer` 는 같은 `ApplyLegDest` 를 배치로 사용. 교정 로그 `LegDest(callid): ip:port(tp) → ip:port(tp)` |
 | CSP | `ModuleDispatcher::EventGetLegDest` | 등록 단말이면 `UserMap` 의 latch (IP·포트·transport 한 세트)를 돌려준다 — fan-out INVITE·NOTIFY 가 쓰는 것과 동일 출처. 미등록(제휴 노드 등)이면 false |
 | CSP | `SipServerSetup` | `Setup.Sip.SessionTimer` 설정 파싱([§8](#8-값과-지연)) |
 | CSP | `ModuleDispatcher::Start` | UA 기동 직후 `SetSessionTimer()` 주입 |
@@ -325,10 +326,7 @@ CSP 의 정상 호처리량 대비 무시할 수준이다.
 | **장시간 통화 무해성** | 6분간 갱신 **4회** 전부 성공. 단말 pjsip 이 매회 `received updated media offer` → `SDP negotiation done: Success` → **`stream #0 (audio) unchanged`** 로 처리 — 스트림을 재생성하지 않는다([§6.3](#63-갱신-re-invite-규율) `o=` 고정 규율의 효과). 갱신 시각의 오디오 스트림 재시작 0회, 코덱(AMR-WB sendrecv) 유지 |
 | **망 소실 (기내 모드)** | 착신 단말 기내 모드 ON → 갱신 무응답 → **35초** 만에 `SessionTimer expired` → `PTT_LEAVE` → conference NOTIFY(`disconnected/deleted`) → 남은 단말 UI 가 **접속 중 1 / 오프라인 1** 로 갱신. 기내 모드 OFF 후 **47초**에 재등록(UDP latch 정상) + 자동 재조인으로 완전 복구 |
 
-**순서 보장** — 잔여 leg 으로 나가는 teardown BYE 는 항상 **교정된 주소**로 간다. 죽은 leg 의
-판정은 `SE/2 + Timer B`(≈122초)인데 살아있는 leg 의 첫 갱신은 `SE/2`(≈90초)라, teardown 이
-발동하는 시점엔 그 leg 의 목적지가 이미 latch 로 교정돼 있다([§6.3](#63-갱신-re-invite-규율)).
-private 실측이 이를 확인했다(살아남은 leg `…:47734(TCP) → …:22622(UDP)` 교정 후 BYE 도달).
+**teardown BYE 의 목적지** — 잔여 leg 으로 나가는 teardown BYE 도, 상대 단말 종료로 서버가 보내는 BYE 도 생성 직전 `RefreshLegDest` 가 살아있는 바인딩을 다시 고르므로 **갱신이 먼저 돌았는지에 의존하지 않는다**([§6.3](#63-갱신-re-invite-규율)). 승격 TCP 가 닫힌 33초 이후 첫 갱신 90초 이전에 상대가 끊는 경우가 이 규율이 필요한 구간이다. 루프백 단위시험 `tests/psip_leg_dest_test.cpp`(S1-UNIT-PSIP)가 UDP 등록 단말의 BYE·re-INVITE UDP 바인딩 도달, 콜백 부재 시 기존 경로 보존, Record-Route 제외, 그리고 연결이 살아있는 TCP/TLS 등록 단말은 같은 연결로 나가 동작이 바뀌지 않음을 고정한다.
 
 ## 14. 후속 과제
 

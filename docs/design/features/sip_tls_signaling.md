@@ -81,6 +81,9 @@ NAT 뒤 단말은 그 포트에 리스닝 소켓이 없어 실패한다(`TcpConn
 
 > 열쇠의 의미가 조용히 뒤집힌다는 점이 이 모델의 위험이다 — 같은 저장값이 연결 생존 중에는
 > "이 연결에 써라", 사망 후에는 "이 주소로 새로 연결해라"로 해석된다.
+> 그래서 서버 발신 요청은 저장값을 그대로 쓰지 않고 **보낼 때 살아있는 바인딩을 다시 고른다** — 처음 거는 요청은
+> `CUserMap::Select`, 확립된 다이얼로그 안의 요청(BYE·re-INVITE·NOTIFY·REFER·INFO)은 생성 직전 `EventGetLegDest`
+> (psip `RefreshLegDest`, [leg_liveness.md §6.3](leg_liveness.md#63-갱신-re-invite-규율))로.
 
 ### 2.3 latch 값과 맵 키가 일치하는 이유
 
@@ -106,7 +109,7 @@ R-URI 는 등록 Contact(사설 주소)를 그대로 유지하고(target refresh
 | 송신 API | `sendto(addr)` | `write(fd)` — 주소 인자 없음 |
 | 유효 조건 | NAT 매핑 생존 (UE keepalive) | 연결 생존 (UE keepalive) |
 | 무효화되면 | 패킷이 NAT 에서 폐기 | **신규 연결 시도로 의미가 뒤집힘** → NAT 뒤 실패 |
-| 복구 | 재등록으로 latch 갱신 | 재등록으로 latch 갱신 |
+| 복구 | 재등록으로 바인딩 갱신 | 재등록으로 바인딩 갱신. 확립 다이얼로그의 서버 발신 요청은 생성 직전 살아있는 바인딩을 다시 고른다(`EventGetLegDest`) — 닫힌 승격 연결에 묶이지 않는다 |
 
 ## 3. transport 승격과 TLS 에서의 소멸
 
@@ -174,7 +177,7 @@ flow 가 UDP 하나뿐이라 대리 표현으로 정확히 일치하기 때문�
 | fan-out INVITE | `csp/GroupCallService.cpp` `InviteMember` | 착신 불가 |
 | conference NOTIFY | `csp/CspServer.cpp` `SendNotifyToSubscriber` | 로스터 stale |
 | terminated NOTIFY | `csp/CspServer.cpp` `SendTerminatedNotify` | 이탈 통지 유실 |
-| 세션 갱신 re-INVITE / 만료 BYE | `csp/ModuleDispatcher.cpp` `EventGetLegDest` | **통화가 세션 타이머 주기에 절단** (단말이 `cause=408` BYE) |
+| 서버 발신 in-dialog 요청(BYE·re-INVITE·NOTIFY·REFER·INFO) | `csp/ModuleDispatcher.cpp` `EventGetLegDest` (psip `RefreshLegDest`·`CheckSessionTimer` 가 호출) | **상대 종료 BYE 미도달 → 남은 단말이 통화 중으로 잔류**, 갱신 미도달 → 통화가 세션 타이머 주기에 절단(단말이 `cause=408` BYE) |
 
 ### 4.2 스트림 등록 단말에서 무엇이 달라지는가
 

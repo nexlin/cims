@@ -54,6 +54,8 @@ psip 은 소켓맵 조회 API(`CTcpSocketMap::Select`)를 이미 갖고 있고, 
 1. 살아있는 바인딩 중 **가장 최근에 갱신된 것** 하나
 2. 살아있는 것이 없으면 마지막 바인딩(현 동작과 동일 — 도달 실패하지만 무해)
 
+이 선택은 서버가 **처음 거는** 요청(fan-out INVITE·NOTIFY)뿐 아니라 **확립된 다이얼로그 안에서 서버가 보내는 요청**(BYE·re-INVITE·NOTIFY·REFER·INFO)에도 생성 직전에 적용된다 — psip `RefreshLegDest` → `EventGetLegDest` → `Select`([leg_liveness.md §6.3](leg_liveness.md#63-갱신-re-invite-규율)). 다이얼로그가 기억한 수신 당시 소스는 응용이 바인딩을 모를 때(미등록 peer)의 폴백이다.
+
 멀티 디바이스를 지원하지 않으므로 **한 사람에게 병렬 포크는 하지 않는다**. 사람당 leg 하나가 유지된다.
 이 원칙의 범위는 **한 사람(AoR)의 바인딩 집합**이다 — 전화 그룹 대표번호가 여러 그룹원에게 동시에 포크하는
 것([dispatch_center.md](dispatch_center.md) §4)은 사람이 다르므로 이와 충돌하지 않는다(그룹원마다 위 선택
@@ -68,7 +70,7 @@ bool Select( const char *pszUserId, CUserInfo &clsInfo );   // 26곳이 이것�
 ```
 
 **시그니처를 유지하고 내부에서 최적 바인딩을 골라 반환**하면, fan-out INVITE·NOTIFY 2종·
-세션 갱신(`EventGetLegDest`)·MSRP·라우팅 등 소비자 전부가 무변경이다. 구조 교체가
+서버 발신 in-dialog 요청(`EventGetLegDest` — BYE·re-INVITE·NOTIFY·REFER·INFO, 세션 갱신 포함)·MSRP·라우팅 등 소비자 전부가 무변경이다. 구조 교체가
 `UserMap` 안에 갇힌다.
 
 | API | 변경 |

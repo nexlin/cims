@@ -47,6 +47,7 @@
 #include "SipUserAgentPrack.hpp"
 #include "SipUserAgentOptions.hpp"
 #include "SipUserAgentSessionTimer.hpp"
+#include "SipUserAgentLegDest.hpp"
 
 // 생성자
 CSipUserAgent::CSipUserAgent() : m_bStopEvent(false), m_pclsCallBack(NULL), m_iSeq(0), m_bStart(false)

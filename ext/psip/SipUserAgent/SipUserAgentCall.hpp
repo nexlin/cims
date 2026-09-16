@@ -61,6 +61,10 @@ bool CSipUserAgent::StopCall( const char * pszCallId, int iSipCode )
 	bool	bRes = false;
 	CSipMessage * pclsMessage = NULL;
 
+	// 확립된 다이얼로그의 BYE 는 현재 도달 주소로 — 수신 당시 소스(승격 TCP)가 이미 닫혀 있을 수 있다.
+	//   미확립(CANCEL·응답)은 헬퍼가 대상에서 제외한다 (SipUserAgentLegDest.hpp).
+	RefreshLegDest( pszCallId );
+
 	m_clsDialogMutex.acquire();
 	itMap = m_clsDialogMap.find( pszCallId );
 	if( itMap != m_clsDialogMap.end() )
@@ -290,6 +294,8 @@ bool CSipUserAgent::AcceptCall( const char * pszCallId, CSipCallRtp * pclsRtp, C
 // 통화 hold 요청 메시지를 전송한다.
 bool CSipUserAgent::HoldCall( const char * pszCallId, ERtpDirection eDirection )
 {
+	RefreshLegDest( pszCallId );		// re-INVITE 목적지 재해석 (SipUserAgentLegDest.hpp)
+
 	SIP_DIALOG_MAP::iterator		itMap;
 	CSipMessage * pclsRequest = NULL;
 	bool	bRes = false;
@@ -315,6 +321,8 @@ bool CSipUserAgent::HoldCall( const char * pszCallId, ERtpDirection eDirection )
 // 통화 resume 요청 메시지를 전송한다.
 bool CSipUserAgent::ResumeCall( const char * pszCallId )
 {
+	RefreshLegDest( pszCallId );		// re-INVITE 목적지 재해석 (SipUserAgentLegDest.hpp)
+
 	SIP_DIALOG_MAP::iterator		itMap;
 	CSipMessage * pclsRequest = NULL;
 	bool	bRes = false;
@@ -482,6 +490,8 @@ bool CSipUserAgent::TransferCallBlind( const char * pszCallId, const char * pszT
 {
 	if( pszCallId == NULL || pszTo == NULL ) return false;
 
+	RefreshLegDest( pszCallId );		// REFER 목적지 재해석 (SipUserAgentLegDest.hpp)
+
 	SIP_DIALOG_MAP::iterator		itMap;
 	CSipMessage * pclsMessage = NULL;
 	char szReferTo[1024], szReferBy[512];
@@ -511,6 +521,8 @@ bool CSipUserAgent::TransferCallBlind( const char * pszCallId, const char * pszT
 bool CSipUserAgent::TransferCall( const char * pszCallId, const char * pszToCallId )
 {
 	if( pszCallId == NULL || pszToCallId == NULL ) return false;
+
+	RefreshLegDest( pszCallId );		// REFER 목적지 재해석 (SipUserAgentLegDest.hpp)
 
 	SIP_DIALOG_MAP::iterator		itMap;
 	CSipMessage * pclsMessage = NULL;

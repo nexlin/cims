@@ -264,30 +264,6 @@ void CSipUserAgent::SetSessionTimer( bool bEnable, int iSessionExpires, int iMin
 		iSessionExpires, iMinSE, iRefresher == E_SESSION_REFRESHER_LOCAL ? "server" : "ue" );
 }
 
-// 서버 발신 in-dialog 요청의 목적지를 응용이 아는 **현재 등록 주소**로 갱신한다 (호출자가
-//   m_clsDialogMutex 보유). 다이얼로그가 기억한 주소는 요청 수신 당시의 소스라, NAT 뒤
-//   단말에서는 이미 죽어 있을 수 있다 — 대형 INVITE 를 TCP 로 승격해 보낸 뒤 그 연결이
-//   닫히면, 그 주소로는 서버가 다시 연결할 수 없다(인바운드 불가) → 갱신 미도달 → 단말이
-//   규격대로 세션을 끊는다(RFC 4028 §10). docs/design/features/leg_liveness.md §6.3.
-//   Record-Route 가 있는(중간 프록시 경유) 다이얼로그는 손대지 않는다.
-void CSipUserAgent::SessionTimerApplyDest( const std::string & strCallId, CSipDialog & clsDialog,
-	const std::string & strIp, int iPort, ESipTransport eTransport )
-{
-	if( strIp.empty() || iPort <= 0 ) return;
-
-	if( strIp != clsDialog.m_strContactIp || iPort != clsDialog.m_iContactPort ||
-		eTransport != clsDialog.m_eTransport )
-	{
-		CLog::Print( LOG_DEBUG, "SessionTimer dest(%s): %s:%d(%d) → %s:%d(%d)", strCallId.c_str(),
-			clsDialog.m_strContactIp.c_str(), clsDialog.m_iContactPort, clsDialog.m_eTransport,
-			strIp.c_str(), iPort, eTransport );
-	}
-
-	clsDialog.m_strContactIp = strIp;
-	clsDialog.m_iContactPort = iPort;
-	clsDialog.m_eTransport   = eTransport;
-}
-
 /**
  * @ingroup SipUserAgent
  * @brief 직전 수신 re-INVITE 가 미디어 무변경이었는가 — 순수 세션 갱신이면 호출자가
@@ -407,7 +383,7 @@ void CSipUserAgent::CheckSessionTimer( )
 
 		CSipDialog & clsDialog = itMap->second;
 
-		if( itLeg->bHaveDest ) SessionTimerApplyDest( itLeg->strCallId, clsDialog, itLeg->strIp, itLeg->iPort,
+		if( itLeg->bHaveDest ) ApplyLegDest( itLeg->strCallId, clsDialog, itLeg->strIp, itLeg->iPort,
 			itLeg->eTransport );
 
 		if( itLeg->bRefresh == false )

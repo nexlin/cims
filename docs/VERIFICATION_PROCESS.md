@@ -137,7 +137,7 @@ def my_check(ctx: VerifyContext) -> ItemResult:
 
 ## 1. Stage 별 상세
 
-### S1 — 정적 검사 (12 항목)
+### S1 — 정적 검사 (13 항목)
 
 | ID | 검사 | 도구 |
 |---|---|---|
@@ -154,6 +154,7 @@ def my_check(ctx: VerifyContext) -> ItemResult:
 | S1-UNIT-GRID-BUDGET | 콘솔 그리드 세로 예산·잠금 | `node tests/frontend/grid_budget.test.mjs` (gridLayout.ts esbuild 번들) |
 | S1-UNIT-OAM-PTT | OAM PTT 세션 인덱스·진행중 병합 | `python3 tests/oam_ptt_index_test.py · tests/oam_ptt_sessions_live_test.py` |
 | S1-UNIT-OAM-STATS | OAM SIP 통계 서비스축(voip→volte 합산)·프로브 | `python3 tests/test_oam_stats_classify.py · tests/test_stats_probe.py` |
+| S1-UNIT-PSIP | psip 루프백 단위시험 — 서버 발신 in-dialog 요청 목적지 재해석 | `g++ tests/psip_leg_dest_test.cpp` ← `build/csp/psip_build/*.a`, 127.0.0.1 실행 (라이브러리 없으면 SKIP) |
 
 S1 FAIL → S2~S6 자동 BLOCKED (stage gate).
 
