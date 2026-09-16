@@ -389,17 +389,20 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
     // 세션 시간 확인: 현재시간이 session_start~session_end 범위 내인지
     time_t tNow = time( NULL );
     if ( clsGroup._sessionStart > 0 && tNow < clsGroup._sessionStart ) {
-        CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) session not started yet", pszGroupId );
+        CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) session not started yet → 403", pszGroupId );
+        // 응답코드를 **실제로 나가는 값**으로 적는다. 이 경로는 `false` 를 돌려주고 호출측
+        //   (ModuleDispatcher)이 403 으로 끝내는데, 장부에 0 을 적어 두면 응답코드 축에서
+        //   이 실패가 통째로 빠진다 — 코드로 원인을 좁히는 경로에서 안 보인다.
         if ( gclsCallDir.IsEnabled() && !bListen )
             gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed", "denied",
-                                    "session_not_started" );
+                                    "session_not_started", SIP_FORBIDDEN );
         return false;
     }
     if ( clsGroup._sessionEnd > 0 && tNow > clsGroup._sessionEnd ) {
-        CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) session expired", pszGroupId );
+        CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) session expired → 403", pszGroupId );
         if ( gclsCallDir.IsEnabled() && !bListen )
             gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed", "denied",
-                                    "session_expired" );
+                                    "session_expired", SIP_FORBIDDEN );
         return false;
     }
 
@@ -515,7 +518,7 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
             CLog::Print( LOG_ERROR, "ProcessGroupCall: AcceptCall failed for Caller(%s)", pszCallerInfo );
             if ( gclsCallDir.IsEnabled() && !bListen )
                 gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed", "error",
-                                        "accept_failed", 0, strGroupSesId );
+                                        "accept_failed", SIP_FORBIDDEN, strGroupSesId );
             return false;
         }
         // 시도 장부 — **성립**. 개시자 leg 이 실제로 확립된 이 지점이 성립의 정의다(§2.1).
