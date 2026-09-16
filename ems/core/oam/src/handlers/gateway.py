@@ -63,7 +63,8 @@ _logger = Logger()
 _session = None                 # lazy aiohttp.ClientSession (bind 되는 event loop = 서버 루프)
 _ADMIN_SERVER = None            # register_gateway 에서 set — 런타임 hot-mount/unmount 용 (role base)
 _GW_CONFIG = None               # 〃 — proxy 핸들러 kwargs 의 config
-_GW_ONLY_MODULES = None         # 〃 — mount 허용 모듈 필터 (role=all 하이브리드; None=전체)
+_GW_ONLY_MODULES = None         # 〃 — mount 허용(include) 필터 (None=전체); role=all 은 아래 exclude 로 유도
+_GW_EXCLUDE_MODULES = frozenset()  # 〃 — mount 제외 모듈 = in-process 로 소유 중인 서비스(set_inprocess_services 와 단일 진실원)
 
 
 def _get_session():
@@ -394,7 +395,7 @@ def _config_rollback_mark() -> "str | None":
     return None
 
 
-def register_gateway(admin_server, config: dict, modules=None) -> int:
+def register_gateway(admin_server, config: dict, modules=None, exclude_modules=None) -> int:
     """라우트 테이블의 enabled 라우트마다 프록시 동적 라우트를 등록.
     반환=마운트한 라우트 수. base 고유 경로(/api/v1/users/me 등)는 controller 최장 일치로
     base 가 우선 — 게이트웨이는 더 구체적이지 않은 세그먼트만 잡는다.
@@ -403,10 +404,11 @@ def register_gateway(admin_server, config: dict, modules=None) -> int:
     modules: 지정 시 route.module 이 그 집합에 속한 라우트만 mount (role=all 하이브리드 —
     in-process 로 소유 중인 세그먼트(stats/recordings 등 oam-svc 계열)와의 충돌 방지.
     미지정(None)=전체 mount(role=base). hot-mount(self-register)에도 동일 필터 적용."""
-    global _ADMIN_SERVER, _GW_CONFIG, _GW_ONLY_MODULES
-    _ADMIN_SERVER = admin_server          # 런타임 self-register hot-mount 용
+    global _ADMIN_SERVER, _GW_CONFIG, _GW_ONLY_MODULES, _GW_EXCLUDE_MODULES
+    _ADMIN_SERVER = admin_server          #런타임 self-register hot-mount 용
     _GW_CONFIG = config
     _GW_ONLY_MODULES = {_module_id(m) for m in modules} if modules else None
+    _GW_EXCLUDE_MODULES = frozenset(_module_id(m) for m in (exclude_modules or ()))
     seeded = seed_routes(config)
     if seeded:
         _logger.log_info(f'[gateway] seeded {seeded} route(s) (table was empty)')
@@ -415,7 +417,7 @@ def register_gateway(admin_server, config: dict, modules=None) -> int:
         seg = _normalize_segment(r.get('segment'))
         if not seg:
             continue
-        if _GW_ONLY_MODULES and _module_id(r.get('module')) not in _GW_ONLY_MODULES:
+        if not _should_mount(r.get('module')):
             continue
         admin_server.add_dynamic_rules([(seg, proxy, {'config': config, '_route': r})])
         _logger.log_info(f"[gateway] mount {seg} → {r.get('upstream')} (module={r.get('module')})")
@@ -427,13 +429,25 @@ def register_gateway(admin_server, config: dict, modules=None) -> int:
 
 
 # ── 런타임 hot-mount / unmount (self-register) ──────────────────────────────
+def _should_mount(module) -> bool:
+    """role=all 하이브리드 mount 필터 — include(_GW_ONLY_MODULES) ∩ not-exclude(_GW_EXCLUDE_MODULES).
+    기동 mount 와 hot-mount(self-register)가 같은 술어를 써야 배포 즉시 노출이 일관된다.
+    exclude = in-process 로 소유 중인 서비스(set_inprocess_services) — 리터럴 목록 없이 그 나머지를 프록시."""
+    mid = _module_id(module)
+    if _GW_ONLY_MODULES is not None and mid not in _GW_ONLY_MODULES:
+        return False
+    if _GW_EXCLUDE_MODULES and mid in _GW_EXCLUDE_MODULES:
+        return False
+    return True
+
+
 def mount_route(route: dict) -> bool:
     """라우트 1개를 라이브 프록시로 즉시 mount. register_gateway 이후에만 유효 —
     _ADMIN_SERVER 미설정(구 role=all 전체 in-process) 시 no-op(persist 만).
     모듈 필터(_GW_ONLY_MODULES) 활성 시 필터 밖 모듈도 no-op(persist 만)."""
     if _ADMIN_SERVER is None or _GW_CONFIG is None:
         return False
-    if _GW_ONLY_MODULES and _module_id(route.get('module')) not in _GW_ONLY_MODULES:
+    if not _should_mount(route.get('module')):
         return False
     seg = _normalize_segment(route.get('segment'))
     if not seg or not route.get('enabled', True):

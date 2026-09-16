@@ -127,10 +127,14 @@
 > 배포 시 self-register 로 갱신).
 > 가입자/조직 CRUD 핸들러는 **csc 가 직접 서빙하고 base 가 프록시**한다. csc/src 마운트
 > 폐지(P3b) 이후 OAM 은 이 핸들러를 in-process 로 로드하지 못하므로, `--role all` 도
-> csc 핸들러 미로드 시 **하이브리드**로 동작한다: `module='csc'` 라우트만 게이트웨이
-> 프록시로 mount 하고(`register_gateway(modules={'csc'})`), `/users/me` 는 base slim
-> 핸들러가 커버(mount 경로 `/api/v1/users/me`). stats/녹취/flow/검증은 in-process 유지
-> — 모듈 필터가 oam-svc 계열 라우트의 중복 mount(세그먼트 충돌)를 막는다.
+> csc 핸들러 미로드 시 **하이브리드**로 동작한다: 게이트웨이 프록시 대상을 리터럴 목록으로
+> 두지 않고 **`등록 라우트 − in-process 소유 서비스`로 유도**한다
+> (`register_gateway(exclude_modules=_inproc_set)`, `_inproc_set` = `set_inprocess_services`
+> 로 선언한 그 집합 — **단일 진실원**). stats/녹취/flow/검증(oam-svc)은 in-process 유지라
+> exclude 로 빠져 세그먼트 중복 mount(충돌)를 막고, csc(미동봉)·계측기 등 **별도 배포된 서비스
+> 모듈은 자동 포함**된다. `/users/me` 는 base slim 핸들러가 커버(mount 경로 `/api/v1/users/me`).
+> 필터 술어(`_should_mount` = include ∩ not-exclude)는 기동 mount 와 hot-mount(self-register)가
+> 공유하므로, 새 서비스 모듈은 배포 즉시(재기동 없이) 프록시에 노출된다.
 > 라우트의 `module` 키는 **패키지 id**(소문자 `csc`·`oam-svc` — `pkg.json name`)다.
 > 배포 레코드의 표시용 `process_name`("CSC")은 키로 쓰지 않는다(identifier_model) —
 > self-register·deregister 는 패키지 id 로 쓰고, 테이블 쓰기(upsert)와 모든 비교(mount
