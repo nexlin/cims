@@ -197,22 +197,29 @@ def build_plan(scenario: Scenario, topology: Topology, topology_doc: dict, profi
             reg = topology.pools[pn].trunk_register
             if reg is not None:
                 env.append({'env': reg.ha1_env or reg.password_env, 'for': f'{pn}: 트렁크 REGISTER {reg.user} 비밀'})
-    # Little 검산 — 역할(UE·피어 모두)마다 rate × SDT ≤ 신원
+    # Little 검산 — 역할(UE·피어 모두)마다 rate × SDT ≤ 신원. 단발은 동시 인스턴스가 instances 를 넘지 않는다
     little_rows = []
     first_short = None
+    cap = int(plan['max_instances']) if plan['max_instances'] else None
     for r in rates:
         need = int(math.ceil(r * sdt))
+        if cap is not None:
+            need = min(need, cap)
         short = [role for role, x in plan['roles'].items() if x['total'] < need]
         little_rows.append({'rate': r, 'need': need, 'ok': not short, 'short': short})
         if short and first_short is None:
             first_short = r
-    little = {'sdt_s': sdt, 'peak_rate': peak, 'concurrent': int(math.ceil(peak * sdt)), 'rows': little_rows,
+    concurrent = int(math.ceil(peak * sdt)) if cap is None else min(cap, int(math.ceil(peak * sdt)))
+    ok_rates = [x['rate'] for x in little_rows if x['ok']]
+    little = {'sdt_s': sdt, 'peak_rate': peak, 'concurrent': concurrent, 'rows': little_rows,
               'first_short_rate': first_short,
-              'recommend_max': (max([x['rate'] for x in little_rows if x['ok']] or [0]) if first_short is not None else None)}
+              'recommend_max': (max(ok_rates) if ok_rates else None) if first_short is not None else None}
     if first_short is not None:
         mins = min(x['total'] for x in plan['roles'].values())
-        out['warnings'].append(f'Little 검산: {first_short:g} SApS × SDT {sdt} s ≈ 동시 {math.ceil(first_short * sdt)} > 역할 신원 {mins} — '
-                               f'그 단계부터 slot skipped. max 를 {little["recommend_max"]:g} 이하로 두거나 신원을 늘린다')
+        need0 = next(x['need'] for x in little_rows if x['rate'] == first_short)
+        hint = (f'max 를 {little["recommend_max"]:g} 이하로 두거나 신원을 늘린다' if little['recommend_max']
+                else ('율을 낮추거나(instances 를 SDT 동안 다 못 소화) 신원을 늘린다' if cap else '율을 낮추거나 신원을 늘린다'))
+        out['warnings'].append(f'Little 검산: {first_short:g} SApS × SDT {sdt} s ≈ 동시 {need0} > 역할 신원 {mins} — 그 단계부터 slot skipped. {hint}')
     for issue in KNOWN_TARGET_ISSUES:
         try:
             if issue['when'](scenario, topology):
@@ -225,7 +232,7 @@ def build_plan(scenario: Scenario, topology: Topology, topology_doc: dict, profi
         'identities': plan['identities'], 'peer_pools': plan['peer_pools'], 'pinned': plan['pinned'],
         'seed': seed, 'env': env, 'little': little,
         'estimate': {'duration_s': estimate_duration(profile, plan['rate_total'], plan['max_instances'], sdt),
-                     'sdt_s': sdt, 'peak_rate': peak, 'concurrent': int(math.ceil(peak * sdt)),
+                     'sdt_s': sdt, 'peak_rate': peak, 'concurrent': concurrent,
                      'model': (profile.model if profile else 'single')},
     })
     out['ok'] = not out['errors']
