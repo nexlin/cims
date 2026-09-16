@@ -3,11 +3,21 @@
 // **차트 높이는 담긴 칸을 따라간다** — px 를 박아 두면 카드를 키워도 여백만 생기고 줄이면 잘린다.
 // 캔버스가 고정 예산(화면 한 장)이라 카드 크기가 배치마다 다르므로, 막대 높이는 플롯 영역 대비
 // **비율(%)** 로 그린다(플롯 영역은 flex:1 로 남은 높이를 전부 차지).
-import { useRef, useState } from 'react'
+import { Fragment, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { TimeBarData, SeriesBarData, KpiData, DistributionData, TableData, MatrixData } from './types'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { EmptyState } from '@core/components/custom/empty-state'
+import { ChevronDown, ChevronRight } from 'lucide-react'
+import { NO_VALUE } from './dataSourceSpec'
+import { blankRange, foldBlankRuns } from './matrixFold'
+
+// 집계 불가 표시 — 서버가 `null` 로 내린 값. 0 과 구별해 빈 자리로 그리고, 왜 비었는지
+// 말해 준다(분모가 원천에 없는 기간이 섞였다 — sip_statistics.md §2.1).
+const NO_VALUE_TITLE = '값을 낼 수 없습니다 — 자료가 없거나, 이 구간에 분모(시도) 원천이 없는 기간이 섞여 있습니다'
+const naCell = (
+  <span title={NO_VALUE_TITLE} className="cursor-help text-muted-foreground">{NO_VALUE}</span>
+)
 
 // ── 시간축 공용 ────────────────────────────────────────────────────────────
 
@@ -41,12 +51,24 @@ export function TimeBarChart({ data }: { data: TimeBarData }) {
   const labels = compactLabels(buckets.map(b => b.label))
   // 라벨·값은 몇 칸 걸러 하나만 — 막대는 다 보이되 글자만 솎는다(겹쳐 뭉개지는 것보다 낫다).
   const every = Math.ceil(buckets.length / 24)
+  /**
+   * **밀집 모드** — 버킷이 많으면 막대 사이 간격을 없앤다.
+   *
+   * 간격(2px)은 버킷 수에 비례해 커진다: 1분 단위로 하루를 보면 버킷이 900개라 간격만
+   * 1,800px 로 카드 폭을 통째로 먹고 **막대 폭이 0 이 되어 그래프가 안 보인다**
+   * (실측 2026-09-16 — 1분 조회에서 차트가 빈 칸으로 나왔다). 간격을 지우면 같은 폭에
+   * 촘촘한 히스토그램으로 들어온다 — 한 장에 다 보이는 쪽이 가로 스크롤보다 추세를 읽기 좋다.
+   * 값 글자도 이때는 접는다: 1px 막대 옆의 숫자는 어느 막대의 값인지 짚을 수 없다.
+   */
+  const dense = buckets.length > 120
   return (
-    <div className="flex-1 min-h-0 flex items-end gap-0.5 py-0 px-1">
+    <div className="flex-1 min-h-0 flex items-end py-0 px-1"
+         style={{ gap: dense ? 0 : 2 }}>
       {buckets.map((b, i) => (
-        <div className="flex-1 min-w-0 h-full flex flex-col items-center" key={i}>
+        <div className="h-full flex flex-col items-center" key={i}
+             style={{ flex: '1 1 0', minWidth: 1 }}>
           <div className="flex-none text-xs text-muted-foreground mb-0.5">
-            {b.value > 0 && i % every === 0 ? b.value : ''}
+            {!dense && b.value > 0 && i % every === 0 ? b.value : ''}
           </div>
           {/* 막대 영역 — 남은 높이 전부. 막대는 그 안에서 값 비율만큼 차지한다. */}
           <div className="flex-1 min-h-0 w-full flex items-end justify-center">
@@ -198,7 +220,9 @@ export function StatValue({ data }: { data: KpiData }) {
     <div className="flex-auto min-h-0 flex flex-col justify-center items-center text-center">
       <div className="text-sm text-muted-foreground mb-1">{k.label}</div>
       <div className="text-3xl font-bold leading-[1.1]">
-        {k.value}<span className="text-sm text-muted-foreground ml-0.5">{k.unit}</span>
+        {k.value === NO_VALUE
+          ? <span title={NO_VALUE_TITLE} className="cursor-help text-muted-foreground">{NO_VALUE}</span>
+          : <>{k.value}<span className="text-sm text-muted-foreground ml-0.5">{k.unit}</span></>}
       </div>
     </div>
   )
@@ -283,19 +307,49 @@ export function MatrixTable({ data }: { data: MatrixData }) {
   const colMax = new Map(data.columns.map(c => [
     c.key, Math.max(1, ...data.rows.map(r => r.cells[c.key] ?? 0)),
   ]))
-  const cellBg = (key: string, v: number) => {
+  /**
+   * 칸 색 — 값에 비례한 농도(큰 값이 진하다). **0 만 예외**로 고정 농도로 칠한다:
+   * 높을수록 좋은 비율에서 0 은 "전부 실패" 인데 비례 색칠로는 가장 흐려져 **가장 나쁜 값이
+   * 가장 안 보인다.** 색은 전부 같은 계열(`--primary`)로 통일한다 — 색으로 성격을 나누지
+   * 않고, 왜 그런지는 실패 사유 칸과 그 툴팁이 말한다.
+   * 분모가 없는 구간은 서버가 `null` 로 내려 `—` 이므로, 여기 0 은 "호는 있었고 하나도 안
+   * 됐다" 만 뜻한다(§2.1a).
+   */
+  const paintZero = new Map(data.columns.map(c => [c.key, c.paintZero === true]))
+  const cellBg = (key: string, v: number | null) => {
+    if (v === 0 && paintZero.get(key)) {
+      return 'color-mix(in srgb, var(--primary) 22%, transparent)'
+    }
     if (!v) return undefined
     const a = Math.min(0.42, 0.06 + 0.36 * (v / (colMax.get(key) || 1)))
     return `color-mix(in srgb, var(--primary) ${Math.round(a * 100)}%, transparent)`
   }
-  const numTd = (v: number, bg?: string): CSSProperties => ({
-    textAlign: 'right', fontVariantNumeric: 'tabular-nums',
-    color: v ? 'var(--foreground)' : 'var(--muted-foreground)', opacity: v ? 1 : 0.45,
-    fontWeight: v ? 600 : 400, background: bg, whiteSpace: 'nowrap',
-  })
+  const numTd = (v: number | null, bg?: string, key?: string): CSSProperties => {
+    // 칠한 0 은 흐리게 두지 않는다 — 읽혀야 하는 값이다.
+    const painted = v === 0 && !!key && paintZero.get(key)
+    return {
+      textAlign: 'right', fontVariantNumeric: 'tabular-nums',
+      color: (v || painted) ? 'var(--foreground)' : 'var(--muted-foreground)',
+      opacity: (v || painted) ? 1 : 0.45,
+      fontWeight: (v || painted) ? 600 : 400, background: bg, whiteSpace: 'nowrap',
+    }
+  }
   const stickyR: CSSProperties = {
     position: 'sticky', right: 0, background: 'var(--card)', zIndex: 1,
   }
+  // 값 없는 구간 접기 — 규칙은 `matrixFold.ts` 가 정본이다(시험으로 덮는다).
+  const chunks = useMemo(() => foldBlankRuns(data.rows, data.columns), [data.rows, data.columns])
+  const [opened, setOpened] = useState<Record<string, boolean>>({})
+  // 칸 상세 — 건수만으로는 원인을 못 답하는 열(실패 사유 등)에 소스가 붙여 준다.
+  // **점선 밑줄을 둔다**: 마우스를 올려야 보이는 것은 올릴 이유가 보여야 쓰인다. 값이 0 인
+  // 칸에는 붙이지 않는다(볼 게 없는데 밑줄이 있으면 빈 풍선을 열게 된다).
+  const withDetail = (v: number | null, detail: string | undefined) => (
+    v === null ? naCell
+      : v && detail
+        ? <span title={detail} className="cursor-help underline decoration-dotted underline-offset-2
+                                          decoration-muted-foreground">{v}</span>
+        : v
+  )
 
   if (data.rows.length === 0 || data.columns.length === 0) {
     return <EmptyState title="데이터 없음" />
@@ -316,23 +370,52 @@ export function MatrixTable({ data }: { data: MatrixData }) {
           </tr>
         </thead>
         <tbody>
-          {data.rows.map(r => (
-            <tr key={r.label}>
-              <Td className="sticky left-0 z-[1] whitespace-nowrap bg-card">{r.label}</Td>
-              {data.columns.map(c => {
-                const v = r.cells[c.key] ?? 0
-                return <Td key={c.key} style={numTd(v, cellBg(c.key, v))}>{v}</Td>
-              })}
-              {data.rowTotal &&
-                <Td className="sticky right-0 z-[1] bg-card font-bold" style={{ ...numTd(r.total) }}>{r.total}</Td>}
-            </tr>
-          ))}
+          {chunks.map((g, gi) => {
+            const dataRow = (r: MatrixData['rows'][number]) => (
+              <tr key={r.label}>
+                <Td className="sticky left-0 z-[1] whitespace-nowrap bg-card">{r.label}</Td>
+                {data.columns.map(c => {
+                  const v = r.cells[c.key] ?? null
+                  return <Td key={c.key} style={numTd(v, cellBg(c.key, v), c.key)}>
+                    {withDetail(v, r.details?.[c.key])}
+                  </Td>
+                })}
+                {data.rowTotal &&
+                  <Td className="sticky right-0 z-[1] bg-card font-bold" style={{ ...numTd(r.total) }}>{r.total}</Td>}
+              </tr>
+            )
+            if (!g.fold) return <Fragment key={gi}>{g.rows.map(dataRow)}</Fragment>
+            const id = String(g.rows[0].label)
+            const on = opened[id] === true
+            const span = data.columns.length + 1 + (data.rowTotal ? 1 : 0)
+            return (
+              <Fragment key={gi}>
+                <tr>
+                  <Td colSpan={span} className="bg-neutral-soft p-0">
+                    <button type="button" aria-expanded={on}
+                            onClick={() => setOpened(o => ({ ...o, [id]: !on }))}
+                            className="flex w-full items-center gap-1.5 px-3.5 py-1.5 text-sm
+                                       text-muted-foreground hover:text-foreground">
+                      {on ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                      <span>{data.blankLabel ?? '자료가 없는 시간'}</span>
+                      <span className="opacity-70">({blankRange(g.rows)})</span>
+                      <span className="ml-auto">{on ? '접기' : '펼치기'}</span>
+                    </button>
+                  </Td>
+                </tr>
+                {on && g.rows.map(dataRow)}
+              </Fragment>
+            )
+          })}
         </tbody>
         <tfoot>
           <tr>
             <Td className="sticky left-0 z-[1] whitespace-nowrap bg-card font-bold">{data.rowTotal ? '합계' : '전 구간'}</Td>
             {data.columns.map(c => (
-              <Td key={c.key} style={{ ...numTd(c.total), fontWeight: 700 }}>{c.total}</Td>
+              <Td key={c.key} style={{ ...numTd(c.total, cellBg(c.key, c.total), c.key),
+                                       fontWeight: 700 }}>
+                {withDetail(c.total, c.detail)}
+              </Td>
             ))}
             {data.rowTotal &&
               <Td style={{ ...stickyR, ...numTd(data.grandTotal), fontWeight: 700 }}>{data.grandTotal}</Td>}

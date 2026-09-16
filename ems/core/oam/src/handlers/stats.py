@@ -602,6 +602,11 @@ def _calls_stats(config: dict, from_dt: str, to_dt: str, gran: str, svc: str) ->
 
     rows, cov = stats_rollup.read_range_filled(root, from_dt, to_dt, config, gran=gran)
     buckets, totals = stats_rollup.aggregate(rows, gran, svc)
+    # 시간축을 **구간 전체로 채운다** — 자료가 있는 버킷만 내면 축이 띄엄띄엄해져(10:51 ·
+    #   11:46 · 11:59 …) 그 사이가 0 이었는지 조회에서 빠진 것인지 알 수 없다. 나타나는
+    #   행조차 "호가 있던 분" 이 아니라 "SIP 메시지라도 있던 분" 이라 기준이 안 보인다.
+    #   버킷 수 상한은 `_clamp_calls_range` 가 이미 단위별로 잡아 뒀다(1분=2일).
+    buckets = stats_rollup.fill_buckets(buckets, gran, from_dt, to_dt)
     body = {
         'from': from_dt, 'to': to_dt, 'granularity': gran, 'svc': svc or 'all',
         'source': _source_of(cov), 'coverage': cov,

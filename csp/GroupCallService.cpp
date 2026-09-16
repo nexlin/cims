@@ -224,7 +224,7 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         //   만들기 **전에** 반환한다. 장부에 남기지 않으면 실패한 시도가 원천에 없어
         //   성공률의 분모가 서지 않는다(§8 Y6). 청취 leg 은 시도가 아니므로 제외한다.
         if ( gclsCallDir.IsEnabled() )
-            gclsCallDir.PttAttempt( pszGroupId, "", pszCallerInfo, "failed", "denied", 404 );
+            gclsCallDir.PttAttempt( pszGroupId, "", pszCallerInfo, "failed", "denied", "group_not_found", 404 );
         return false;
     }
 
@@ -287,7 +287,7 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         gclsUserAgent.StopCall( pszCallId, SIP_FORBIDDEN );
         if ( gclsCallDir.IsEnabled() )
             gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed", "denied",
-                                    403 );
+                                    "not_member", 403 );
         return true;
     }
 
@@ -309,7 +309,7 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
             gclsUserAgent.StopCall( pszCallId, SIP_NOT_ACCEPTABLE_HERE );
             if ( gclsCallDir.IsEnabled() && !bListen )
                 gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed", "error",
-                                        488 );
+                                        "codec_mismatch", 488 );
             return true;  // 488 응답 완료 — 호출측(dispatcher) 이 실패로 보고 403 을 덧보내지 않게 한다
         }
     }
@@ -331,7 +331,7 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
             gclsUserAgent.StopCall( pszCallId, SIP_NOT_ACCEPTABLE_HERE );
             if ( gclsCallDir.IsEnabled() && !bListen )
                 gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed", "error",
-                                        488 );
+                                        "srtp_failed", 488 );
             return true;
         }
     }
@@ -347,8 +347,8 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                          pszCallerInfo, iCond, strReason.c_str() );
             gclsUserAgent.StopCall( pszCallId, SIP_FORBIDDEN );
             if ( gclsCallDir.IsEnabled() && !bListen )
-                gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed",
-                                        "denied", 403 );
+                gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed", "denied",
+                                        "policy_denied", 403 );
             return true;  // 403 응답 완료 — 호출측(dispatcher)이 중복 응답하지 않게 한다
         }
     }
@@ -392,14 +392,14 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) session not started yet", pszGroupId );
         if ( gclsCallDir.IsEnabled() && !bListen )
             gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed", "denied",
-                                    0 );
+                                    "session_not_started" );
         return false;
     }
     if ( clsGroup._sessionEnd > 0 && tNow > clsGroup._sessionEnd ) {
         CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) session expired", pszGroupId );
         if ( gclsCallDir.IsEnabled() && !bListen )
             gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed", "denied",
-                                    0 );
+                                    "session_expired" );
         return false;
     }
 
@@ -515,7 +515,7 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
             CLog::Print( LOG_ERROR, "ProcessGroupCall: AcceptCall failed for Caller(%s)", pszCallerInfo );
             if ( gclsCallDir.IsEnabled() && !bListen )
                 gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed", "error",
-                                        0, strGroupSesId );
+                                        "accept_failed", 0, strGroupSesId );
             return false;
         }
         // 시도 장부 — **성립**. 개시자 leg 이 실제로 확립된 이 지점이 성립의 정의다(§2.1).
@@ -524,8 +524,8 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         //   재조인(같은 발신자가 BYE 없이 새 INVITE)은 아래에서 옛 leg 을 정리하는 경로라
         //   여기까지 오면 새 시도 1건이 맞다.
         if ( gclsCallDir.IsEnabled() && !bListen )
-            gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "established", "", 0,
-                                    strGroupSesId );
+            gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "established", "", "",
+                                    0, strGroupSesId );
         // 발신자 호출 추적. 같은 (발신자,그룹) 의 옛 레그가 남아 있으면(재조인 — 앱이 BYE 없이
         // 새 INVITE 로 재참여) 고아가 되어 참가자 명단에 중복 표기되고 NOTIFY 가 낭비된다 →
         // 옛 레그를 정리한다. ⚠️CMP LEAVE 는 보내지 않는다 — 멤버 키가 (group, user) 라 같은

@@ -277,7 +277,8 @@
             "out"
           ],
           "limit": 14,
-          "unit": "건"
+          "unit": "건",
+          "blankLabel": "메시지가 없는 시간"
         }
       }
     },
@@ -345,7 +346,8 @@
             "out"
           ],
           "limit": 14,
-          "unit": "건"
+          "unit": "건",
+          "blankLabel": "메시지가 없는 시간"
         }
       }
     },
@@ -413,7 +415,8 @@
             "out"
           ],
           "limit": 14,
-          "unit": "건"
+          "unit": "건",
+          "blankLabel": "메시지가 없는 시간"
         }
       }
     },
@@ -481,7 +484,8 @@
             "out"
           ],
           "limit": 14,
-          "unit": "건"
+          "unit": "건",
+          "blankLabel": "메시지가 없는 시간"
         }
       }
     },
@@ -669,7 +673,8 @@
             "시도에서 빼는 것은 없다 — 재호출·포기·무응답·거절 전부 시도로 센다",
             "성공률과 NER 의 차이 = 상대 사정으로 안 붙은 비율. 둘 다 낮으면 망·시스템 문제다",
             "드롭률 = 100% − 완료율 — 붙은 뒤 BYE 없이 끊긴 호의 비율"
-          ]
+          ],
+          "blankLabel": "호가 없는 시간"
         }
       }
     },
@@ -723,7 +728,8 @@
             "정상 종료(200)는 담지 않는다 — 그건 정상종료 열이 이미 센다. 여기 있는 값은 전부 실패다",
             "열은 전 구간 합계 내림차순이고, 12개를 넘는 꼬리는 `기타` 로 접는다",
             "CSP 가 응답코드를 기록하기 시작한 시점(csp 0.2.114) 이후의 호만 채워진다 — 그 전 호는 빈칸이다"
-          ]
+          ],
+          "blankLabel": "호가 없는 시간"
         },
         "distribution": {
           "fromObject": "totals.volte.statuses",
@@ -818,6 +824,81 @@
               "unit": "건"
             },
             {
+              "key": "success",
+              "label": "성공률",
+              "path": "ptt.success_rate",
+              "totalPath": "totals.ptt.success_rate",
+              "unit": "%",
+              "paintZero": true
+            },
+            {
+              "key": "r_denied",
+              "label": "거부",
+              "path": "ptt.reasons.denied",
+              "totalPath": "totals.ptt.reasons.denied",
+              "unit": "건",
+              "detailFrom": "ptt.causes",
+              "detailLabels": {
+                "group_not_found": "그룹 없음(403)",
+                "not_member": "비멤버(403)",
+                "policy_denied": "권한·조건 거부(403)",
+                "session_not_started": "세션 시간창 전",
+                "session_expired": "세션 시간창 지남",
+                "adhoc_not_authorised": "즉석그룹 개시 미인가(403)"
+              },
+              "statusFrom": "ptt.statuses",
+              "statusLabels": {
+                "404": "404 그룹 없음",
+                "403": "403 비멤버 또는 권한·조건 거부"
+              },
+              "detailUnknownLabel": "원인 미기록(응답코드 없음)"
+            },
+            {
+              "key": "r_error",
+              "label": "오류",
+              "path": "ptt.reasons.error",
+              "totalPath": "totals.ptt.reasons.error",
+              "unit": "건",
+              "detailFrom": "ptt.causes",
+              "detailLabels": {
+                "codec_mismatch": "서비스 코덱 없음(488)",
+                "srtp_failed": "SRTP 협상 실패(488)",
+                "accept_failed": "발신자 leg 확립 실패"
+              },
+              "statusFrom": "ptt.statuses",
+              "statusLabels": {
+                "488": "488 코덱 불일치 또는 SRTP 협상 실패",
+                "503": "503 서비스 불가",
+                "500": "500 서버 오류"
+              },
+              "detailUnknownLabel": "원인 미기록(응답코드 없음)"
+            },
+            {
+              "key": "r_noanswer",
+              "label": "무응답",
+              "path": "ptt.reasons.no_answer",
+              "totalPath": "totals.ptt.reasons.no_answer",
+              "unit": "건",
+              "detailFrom": "ptt.causes",
+              "detailLabels": {
+                "private_callee_offline": "상대 단말 미등록/꺼짐(480)"
+              },
+              "statusFrom": "ptt.statuses",
+              "statusLabels": {
+                "480": "480 상대 불가",
+                "408": "408 요청 시간초과"
+              },
+              "detailUnknownLabel": "원인 미기록(응답코드 없음)"
+            },
+            {
+              "key": "talk",
+              "label": "소통률",
+              "path": "ptt.talk_rate_sessions",
+              "totalPath": "totals.ptt.talk_rate_sessions",
+              "unit": "%",
+              "paintZero": true
+            },
+            {
               "key": "sessions",
               "label": "세션",
               "path": "ptt.sessions",
@@ -832,32 +913,12 @@
               "unit": "건"
             },
             {
-              "key": "completed",
-              "label": "정상종료",
-              "path": "ptt.completed",
-              "totalPath": "totals.ptt.completed",
-              "unit": "건"
-            },
-            {
-              "key": "success",
-              "label": "성공률",
-              "path": "ptt.success_rate",
-              "totalPath": "totals.ptt.success_rate",
-              "unit": "%"
-            },
-            {
-              "key": "comp",
-              "label": "완료율",
-              "path": "ptt.completion_rate",
-              "totalPath": "totals.ptt.completion_rate",
-              "unit": "%"
-            },
-            {
-              "key": "talk",
-              "label": "소통률",
-              "path": "ptt.talk_rate_sessions",
-              "totalPath": "totals.ptt.talk_rate_sessions",
-              "unit": "%"
+              "key": "join",
+              "label": "참여율",
+              "path": "ptt.join_rate",
+              "totalPath": "totals.ptt.join_rate",
+              "unit": "%",
+              "paintZero": true
             },
             {
               "key": "invited",
@@ -874,35 +935,40 @@
               "unit": "개"
             },
             {
-              "key": "join",
-              "label": "참여율",
-              "path": "ptt.join_rate",
-              "totalPath": "totals.ptt.join_rate",
-              "unit": "%"
+              "key": "comp",
+              "label": "완료율",
+              "path": "ptt.completion_rate",
+              "totalPath": "totals.ptt.completion_rate",
+              "unit": "%",
+              "paintZero": true
             },
             {
-              "key": "r_denied",
-              "label": "거부",
-              "path": "ptt.reasons.denied",
-              "totalPath": "totals.ptt.reasons.denied",
+              "key": "completed",
+              "label": "정상종료",
+              "path": "ptt.completed",
+              "totalPath": "totals.ptt.completed",
               "unit": "건"
             },
             {
-              "key": "r_error",
-              "label": "오류",
-              "path": "ptt.reasons.error",
-              "totalPath": "totals.ptt.reasons.error",
+              "key": "reclaimed",
+              "label": "강제회수",
+              "path": "ptt.end_reasons.error",
+              "totalPath": "totals.ptt.end_reasons.error",
               "unit": "건"
             }
           ],
           "notes": [
+            "시도·성공률은 **시도가 기록된 구간만**으로 낸다. 시도 장부가 생기기 전 구간은 시도가 원천에 없어 그 행의 시도가 `—`(0 이 아니라 모름)이고, 그 구간의 성립은 성공률 분자에서도 빠진다 — 그래야 못 잰 며칠 때문에 지표가 영구히 가려지지 않는다. 그래서 **합계 행의 성립(총 성립)과 성공률의 분모가 다를 수 있다**. 통화가 정말 한 건도 없던 구간은 0 으로 나온다",
+            "비율 칸의 `—` 와 `0` 은 다르다 — `—` 는 분모가 없다(그 구간에 호가 없었거나 모른다), **0 은 호가 있었는데 하나도 안 됐다**는 뜻이라 칠해서 세운다(값에 비례한 색칠로는 0 이 가장 흐려져 가장 나쁜 값이 가장 안 보인다). 왜 0 인지는 `거부`·`오류`·`무응답` 칸과 그 툴팁이 말한다",
             "성공률 = 세션 / 시도 — **그룹통화를 개시한 발신자 1명이 시도 1건**이다. 합류 INVITE 와 청취 leg 은 시도가 아니다(그건 참여율이 본다)",
-            "완료율 = 정상종료 / 세션 — 마지막 멤버가 나가 정상으로 끝난 세션의 비율. 강제 회수(노드 소실·그룹 삭제)는 빠진다. 분모가 시도가 아니다",
+            "완료율 = 정상종료 / 세션 — 마지막 멤버가 나가 정상으로 끝난 세션의 비율. 분자·분모가 둘 다 세션 기록이라 **시도를 몰라도 낼 수 있다**. 강제 회수(노드 소실·그룹 삭제)는 빠진다",
             "소통률 = 발언있음 / 세션 — 발언(floor)이 한 번이라도 있었던 세션의 비율. 세션은 섰는데 아무도 말하지 못한 floor 장애는 이 값에서만 드러난다",
             "참여율 = 참여 leg / 초대 leg — 초대한 멤버 중 실제 들어온 비율. 성공률과 다른 정보다(세션은 섰는데 아무도 안 들어올 수 있다)",
             "실패 사유는 둘뿐이다 — 거부(정책·시간창 403)와 오류(488·자원 확보 실패). VoLTE 의 '거절'을 쓰지 않는다: PTT 403 은 상대 사정이 아니라 우리 쪽 구성 문제라, 면제하면 결함을 가린다",
-            "그래서 NER 도 내지 않는다 — 면제할 '사용자 사정' 이 PTT 에는 없다"
-          ]
+            "거부·오류 칸의 **점선 밑줄에 마우스를 올리면 원인**이 나온다 — 사유 두 칸으로는 조치가 갈리지 않는다. 원인 기록이 없는 옛 자료는 응답코드로 대신 낸다(코드는 원인보다 거칠다 — 같은 488 이 코덱 불일치와 SRTP 협상 실패 둘이다). 둘 다 없으면 '원인 미기록' 으로 남는다 — 칸의 숫자와 상세의 합은 항상 같다",
+            "검산: **시도 = 세션 + 거부 + 오류 + 무응답**, **세션 = 정상종료 + 강제회수 + 진행 중**. 개시 결말과 세션 종료를 다른 축에 담으므로 두 줄이 각각 맞는다 — 안 맞으면 어딘가 기록이 새는 것이다"
+          ],
+          "blankLabel": "호가 없는 시간"
         }
       }
     },

@@ -142,10 +142,10 @@ function ShapeWidgetBody({ shape, config }: { shape: WidgetShape; config?: Recor
         ) : (
           // 페이지 컨트롤이 없는 배치 — 자기 구간 컨트롤을 쓴다(감당 못 할 단위는 비활성).
           <>
-            <Input className="w-[176px] text-sm" type="datetime-local" value={from.replace(' ', 'T').slice(0, 16)}
+            <Input className="w-auto text-sm" type="datetime-local" value={from.replace(' ', 'T').slice(0, 16)}
  onChange={e => setOwnRange(r => ({ ...r, from: e.target.value.replace('T', ' ') }))}/>
             <span className="text-muted-foreground">~</span>
-            <Input className="w-[176px] text-sm" type="datetime-local" value={to.replace(' ', 'T').slice(0, 16)}
+            <Input className="w-auto text-sm" type="datetime-local" value={to.replace(' ', 'T').slice(0, 16)}
  onChange={e => setOwnRange(r => ({ ...r, to: e.target.value.replace('T', ' ') }))}/>
             <ToggleGroup type="single" value={gran} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
  onValueChange={(v: string) => v && setOwnGran(v)}>

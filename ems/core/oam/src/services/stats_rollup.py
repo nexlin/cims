@@ -181,6 +181,29 @@ def _empty(bucket: str, svc: str) -> dict:
             # 가른다(488 코덱 불일치 / 503 서비스 불가 …). **정상 종료(200)는 담지 않는다** —
             # 그건 `completed` 가 이미 세고, 넣으면 실패 분해를 읽을 때 200 이 전부를 가린다.
             'statuses': {},
+            # **종료 사유 축은 따로 둔다.** PTT 는 성공한 통화에 사건이 둘이다 — 개시의
+            #   결말(성립)과 세션의 종료(정상/강제 회수). 한 맵에 담으면 `오류` 칸이 "붙지도
+            #   못함(488)" 과 "붙었다가 회수됨" 을 함께 세어, 표의 검산식
+            #   `시도 = 성립 + 거부 + 오류 + 무응답` 이 깨진다(VoLTE 는 호 1건에 결말이
+            #   하나라 이 문제가 없다). 완료율의 분자도 이 축에서 온다.
+            'end_reasons': {},
+            # 실패 원인 축 — 응답코드로도 못 가리는 "왜". 같은 488 이 코덱 불일치와 SRTP
+            # 협상 실패 둘이고, 세션 시간창 이탈·leg 확립 실패는 응답코드가 아예 없다.
+            # CSP 가 반환 지점마다 슬러그를 남긴다(§2.3). 성립 줄은 담지 않는다.
+            'causes': {},
+            # **시도를 모르는 구간**의 레코드 수. 시도 장부가 없는 날은 시도가 "0건" 이
+            #   아니라 "몇 건인지 원천에 없다" 다. 0 으로 적으면 "호를 한 건도 안 걸었는데
+            #   통화가 4건 성립했다" 는 모순이 생기고, 합산에서 분자만 자라 **성공률 350%**
+            #   같은 값이 나온다(실측 2026-09-16).
+            #   모름은 카운터로 나른다 — 다른 값들과 똑같이 합산되므로(§5.1 스키마 동일성)
+            #   몇 계층을 접어도 0 보다 크면 그 구간에 모르는 시도가 섞여 있다. 조회는 그때
+            #   `attempts` 자체를 비운다(모르는 것은 모른다고 낸다).
+            'attempts_unknown': 0,
+            # 그 미측정 구간에서 온 성립·소통 — **비율의 분자에서 덜어내려면 양이 필요하다**.
+            #   잰 것끼리만 나눈다: 성공률 = (성립 − 미측정성립) / 시도. 개수 열(성립 7)은
+            #   사실이라 그대로 두고, 비율만 측정된 모집단으로 낸다(§2.1).
+            'sessions_unmeasured': 0,
+            'talked_unmeasured': 0,
             'duration_sum_sec': 0,
             'pdd_sum_ms': 0, 'pdd_n': 0,
             'legs_invited': 0, 'legs_joined': 0,
@@ -229,14 +252,19 @@ def _scan_volte_hour(root: str, hour: str) -> list:
     return out
 
 
-def _scan_ptt_day(day: str) -> list:
+def _scan_ptt_day(day: str, force_index: bool = False) -> list:
     """그 날 시작한 PTT 세션 → [(minute, row)]. 소스는 세션 읽기 모델(ptt_index).
 
     디렉터리를 직접 훑지 않는 이유는 `_calc_ptt_stats` 와 같다 — 콘솔 호 이력과 세션 판정
     기준이 두 벌이 되면 두 화면이 다른 값을 낸다.
+
+    `force_index` 는 **재집계 경로 전용**이다. 지난 날짜의 인덱스 파일은 불변으로 보고 그대로
+    읽는데, 인덱스에 축이 추가되면(예: `end_reason`) 이미 적힌 파일에는 그 축이 없어 재집계를
+    돌려도 값이 안 채워진다 — 운영자가 `rebuild` 에 기대하는 것은 원본에서 다시 만드는 것이다.
+    주기 집계는 끄고 둔다(매 주기 전 디렉터리 재스캔은 비싸다).
     """
     from services import ptt_index
-    rows = ptt_index.day(day[0:4] + day[5:7] + day[8:10]) or []
+    rows = ptt_index.day(day[0:4] + day[5:7] + day[8:10], force=force_index) or []
     out = []
     for r in rows:
         mi = _minute(r.get('start', '') or r.get('start_time', ''))
@@ -245,6 +273,16 @@ def _scan_ptt_day(day: str) -> list:
         if mi and _day_of(mi) == day:
             out.append((mi, r))
     return out
+
+
+def _ptt_attempts_file(root: str, day: str) -> str:
+    """그 날 PTT 시도 장부의 경로. **존재 여부는 호출측이 본다** — 파일이 없는 날은
+    장부 이전(구 CSP·기능 미배포)이라 세션 기록이 성립의 유일한 원천이 된다(§3).
+    """
+    if not root:
+        return ''
+    return os.path.join(root, 'ptt', 'attempts',
+                        day[0:4] + day[5:7] + day[8:10] + '.jsonl')
 
 
 def _scan_ptt_attempts_day(root: str, day: str) -> list:
@@ -259,11 +297,8 @@ def _scan_ptt_attempts_day(root: str, day: str) -> list:
     # 설정한다 — 조회를 서빙하는 oam base 는 비어 있어, 전역을 보면 즉석 집계 경로에서
     # 장부가 통째로 빠진다(실측: attempts 0, 성공률 0%). volte·메시지 스캔이 root 를 받는
     # 것과 같은 규약으로 맞춘다.
-    if not root:
-        return []
-    path = os.path.join(root, 'ptt', 'attempts',
-                        day[0:4] + day[5:7] + day[8:10] + '.jsonl')
-    if not os.path.isfile(path):
+    path = _ptt_attempts_file(root, day)
+    if not path or not os.path.isfile(path):
         return []
     out = []
     try:
@@ -297,6 +332,13 @@ def _fold_ptt_attempt(row: dict, agg: dict) -> None:
         return
     reason = row.get('reason') or 'error'
     _bump(c['reasons'], reason)
+    # 원인 — 반환 지점마다 하나. 사유(denied/error) 두 칸과 응답코드로는 가릴 수 없는 것을
+    #   여기서 가른다: 같은 488 이 codec_mismatch·srtp_failed 둘이고, session_expired·
+    #   accept_failed 는 응답코드가 아예 없다. 옛 장부 줄(cause 없음)은 담지 않는다 —
+    #   `unknown` 으로 채우면 원인 불명과 구 판본을 구분할 수 없다.
+    cause = row.get('cause') or ''
+    if cause:
+        _bump(c.setdefault('causes', {}), cause)   # setdefault = 옛 레코드에도 안전
     st = int(row.get('status') or 0)
     # 결말 응답코드 — 사유 한 칸으로는 못 가리는 원인 특정용(§2.3). 성립(200)은 담지 않는다.
     if st and st != 200:
@@ -384,14 +426,20 @@ def _fold_volte(rec: dict, agg: dict) -> None:
         _bump(agg, 'open')
 
 
-def _fold_ptt(row: dict, agg: dict) -> None:
+def _fold_ptt(row: dict, agg: dict, count_session: bool = False) -> None:
     """PTT 세션 1건을 버킷 집계에 접는다 — **통화의 내용**(발언·참여·시간·완료).
 
-    시도(attempts)와 성립(sessions)은 여기서 세지 않는다. 그건 시도 장부가 센다(§3) —
-    세션 기록에는 실패한 시도가 없어서 세면 성공률이 항상 100% 가 되고, 성립까지 양쪽에서
-    세면 같은 통화를 두 번 센다.
+    시도(attempts)는 여기서 세지 않는다. 세션 기록에는 실패한 시도가 없어서 세면
+    성공률이 항상 100% 가 된다 — 분모는 시도 장부만 낼 수 있다(§3).
+
+    성립(sessions)도 장부가 있으면 장부가 센다(같은 통화를 두 번 세지 않게). `count_session`
+    은 **그 날 장부가 아예 없을 때만** 참이다 — 그때는 세션 기록이 성립의 유일한 원천이라,
+    안 세면 이미 집계돼 있던 옛 날의 세션 수가 재집계에서 0 으로 지워진다. 시도는 그래도
+    없으므로 비율은 빈칸으로 남는다(`rate_gap`).
     """
     c = agg['call']
+    if count_session:
+        _bump(c, 'sessions')
     turns = int(row.get('turns', 0) or 0)
     if turns > 0:
         _bump(c, 'talked')
@@ -399,12 +447,16 @@ def _fold_ptt(row: dict, agg: dict) -> None:
     if dur > 0:
         _bump(c, 'duration_sum_sec', dur)
     # 완료율의 분자 — 마지막 멤버 퇴장으로 끝난 세션만. 강제 회수(노드 소실·그룹 삭제)는
-    #   CSP 가 end_reason='error' 로 남긴다(§8 Y4). 옛 기록(사유 없음)은 normal 로 본다 —
-    #   그 시절에는 강제 회수 경로가 기록되지 않았으므로 그게 사실에 가깝다.
-    if row.get('state') == 'ended' and (row.get('end_reason') or 'normal') == 'normal':
-        _bump(c, 'completed')
-    if row.get('end_reason'):
-        _bump(c['reasons'], str(row.get('end_reason')))
+    #   CSP 가 end_reason='error' 로 남긴다(§8 Y4).
+    #   **종료 사유는 개시 결말과 다른 축(`end_reasons`)에 담는다** — 한 맵에 넣으면 `오류`
+    #   칸이 "붙지도 못함" 과 "붙었다가 회수됨" 을 함께 세어 검산식이 깨진다.
+    #   사유가 없는 기록(인덱스가 그 필드를 싣지 않던 시절)은 `unknown` 으로 둔다 — normal 로
+    #   단정하면 강제 회수가 정상종료로 잡혀 완료율이 늘 100% 가 된다(실측 2026-09-16).
+    if row.get('state') == 'ended':
+        er = str(row.get('end_reason') or '') or 'unknown'
+        _bump(c['end_reasons'], er)
+        if er == 'normal':
+            _bump(c, 'completed')
     invited = int(row.get('member_count', 0) or 0)
     joined = len(row.get('people') or [])
     _bump(c, 'legs_invited', invited)
@@ -448,7 +500,7 @@ def _parse(ts: str):
 
 
 def build_minutes(root: str, minutes: set, config: dict = None,
-                  deadline: float = None) -> dict:
+                  deadline: float = None, force_index: bool = False) -> dict:
     """대상 분들의 집계 레코드를 원본에서 만든다 → {(bucket, svc): record}.
 
     시간 디렉터리 단위로 원본을 읽고 분으로 쪼갠다 — 대상이 흩어져 있어도 같은 시간이면
@@ -496,25 +548,42 @@ def build_minutes(root: str, minutes: set, config: dict = None,
         if deadline is not None and time.monotonic() >= deadline:
             break
         # 시도 장부 — 분모(attempts)·성립(sessions)·실패 사유
+        has_ledger = bool(_ptt_attempts_file(root, day)) and \
+            os.path.isfile(_ptt_attempts_file(root, day))
         n_established = 0
         for mi, row in _scan_ptt_attempts_day(root, day):
             if mi in minutes:
                 _fold_ptt_attempt(row, _agg(mi, 'ptt'))
                 if (row.get('outcome') or '') == 'established':
                     n_established += 1
-        # 세션 기록 — 발언·참여·시간·완료
+        # 세션 기록 — 발언·참여·시간·완료 (장부가 없는 날은 성립까지)
         n_sessions = 0
-        for mi, row in _scan_ptt_day(day):
+        for mi, row in _scan_ptt_day(day, force_index=force_index):
             if mi in minutes:
-                _fold_ptt(row, _agg(mi, 'ptt'))
+                _fold_ptt(row, _agg(mi, 'ptt'), count_session=not has_ledger)
                 n_sessions += 1
         # 두 원천의 성립 수가 다르면 한쪽이 유실된 것이다(§3). 조용히 큰 쪽을 택하지 않고
         #   알린다 — 장부만 있고 세션이 없으면 녹취/세션 디렉터리 쓰기가 막힌 것이고,
         #   반대면 장부 쓰기가 막힌 것이라 원인이 서로 다르다.
-        if n_established != n_sessions and (n_established or n_sessions):
+        if has_ledger and n_established != n_sessions and (n_established or n_sessions):
             logger.log_warning(
                 f"[stats-rollup] PTT 성립 수 불일치 {day}: 장부 {n_established} vs 세션 {n_sessions} "
                 f"— 한쪽 원천이 유실됐을 수 있습니다")
+
+    # 시도를 모르는 레코드에 표를 붙인다 — **여기가 판정할 수 있는 마지막 자리**다.
+    #   이 아래(저장 계층 합산·조회 합산)부터는 아는 시도가 더해져 구별이 사라진다.
+    for day in days:
+        if _ptt_attempts_file(root, day) and os.path.isfile(_ptt_attempts_file(root, day)):
+            continue                       # 장부가 있는 날 — 시도 0 은 진짜 0 이다
+        for (mi, svc), rec in out.items():
+            if svc != 'ptt' or _day_of(mi) != day:
+                continue
+            c = rec['call']
+            if not c.get('sessions'):
+                continue
+            c['attempts_unknown'] = 1
+            c['sessions_unmeasured'] = c.get('sessions', 0)
+            c['talked_unmeasured'] = c.get('talked', 0)
 
     return out
 
@@ -631,12 +700,18 @@ def fold_records(rows: list, unit: str) -> list:
         c = tgt['call']
         src = r.get('call') or {}
         for k in ('attempts', 'sessions', 'talked', 'completed',
+                  'attempts_unknown', 'sessions_unmeasured', 'talked_unmeasured',
                   'duration_sum_sec', 'pdd_sum_ms', 'pdd_n', 'legs_invited', 'legs_joined'):
             c[k] = c.get(k, 0) + int(src.get(k, 0) or 0)
         for k, v in (src.get('reasons') or {}).items():
             c['reasons'][k] = c['reasons'].get(k, 0) + int(v or 0)
         for k, v in (src.get('statuses') or {}).items():
             c['statuses'][k] = c['statuses'].get(k, 0) + int(v or 0)
+        for k, v in (src.get('end_reasons') or {}).items():
+            c['end_reasons'][k] = c['end_reasons'].get(k, 0) + int(v or 0)
+        # 실패 원인 — 이게 빠지면 툴팁이 1분 단위에서만 나온다(조회는 1h·1d 가 기본이다)
+        for k, v in (src.get('causes') or {}).items():
+            c['causes'][k] = c['causes'].get(k, 0) + int(v or 0)
         for gid, gv in (src.get('by_group') or {}).items():
             g = c['by_group'].setdefault(gid, {'sessions': 0, 'talked': 0})
             for k in ('sessions', 'talked'):
@@ -871,7 +946,9 @@ def rebuild_range(from_day: str, to_day: str) -> int:
         while cur <= b:
             day = cur.strftime('%Y-%m-%d')
             minutes = {(cur + timedelta(minutes=i)).strftime(_MIN_FMT) for i in range(1440)}
-            records = build_minutes(_service_log_dir, minutes, _config)
+            # 재집계는 **원본에서 다시 만든다** — 세션 인덱스까지 강제 재생성해야 뒤에 추가된
+            #   축(`end_reason` 등)이 지난 날짜에도 채워진다.
+            records = build_minutes(_service_log_dir, minutes, _config, force_index=True)
             merge_days(records, minutes, fresh_days={day})
             rebuild_derived(day)
             rebuild_periods(day)
@@ -1169,6 +1246,51 @@ def bucket_of(label: str, gran: str) -> str:
     return ''
 
 
+def fill_buckets(buckets: list, gran: str, from_dt: str, to_dt: str) -> list:
+    """구간의 **모든** 버킷을 낸다 — 자료가 없는 칸도 행으로 만든다(시간 오름차순).
+
+    왜 필요한가: 시간축 표·차트는 칸이 **균일**해야 읽힌다. 자료가 있는 버킷만 내면
+    `10:51 · 11:46 · 11:59 · 12:35` 처럼 띄엄띄엄한 축이 되고(실측 2026-09-16 1분 조회),
+    보는 사람은 그 사이 시간에 무슨 일이 있었는지 알 수 없다 — 0 이었는지, 조회에서 빠진
+    것인지. 게다가 나타나는 행조차 "호가 있던 분" 이 아니라 "SIP 메시지라도 있던 분" 이라
+    기준이 보이지 않는다.
+
+    채운 행에는 **서비스 칸을 넣지 않는다**(`{bucket, bucket_start}` 만). 화면은 없는 경로를
+    건수 0 · 비율 `—` 로 그리므로(§2.1a) 그게 곧 "그 구간엔 아무 일도 없었다" 다 — 0 으로
+    채운 칸을 만들면 응답만 커지고 뜻은 같다.
+    """
+    have = {b.get('bucket') for b in buckets}
+    cur = _parse(from_dt) or parse_bucket(from_dt)
+    end = _parse(to_dt) or parse_bucket(to_dt)
+    if cur is None or end is None or cur > end:
+        return buckets
+    out = list(buckets)
+    step_min = _GRAN_MINUTES.get(gran)
+    guard = 0
+    while cur <= end and guard < 200000:
+        guard += 1
+        bk = bucket_of(cur.strftime(_MIN_FMT), gran)
+        if bk and bk not in have:
+            have.add(bk)
+            out.append({'bucket': bk, 'bucket_start': bucket_start_iso(bk)})
+        if step_min:
+            cur += timedelta(minutes=step_min)
+        elif gran == '1h':
+            cur += timedelta(hours=1)
+        elif gran == '1d':
+            cur += timedelta(days=1)
+        elif gran == '1w':
+            cur += timedelta(days=7)
+        elif gran == '1M':
+            cur = (cur.replace(day=1) + timedelta(days=31)).replace(day=1)
+        elif gran == '1y':
+            cur = cur.replace(year=cur.year + 1, month=1, day=1)
+        else:
+            break
+    out.sort(key=lambda b: parse_bucket(b.get('bucket', '')) or datetime.min)
+    return out
+
+
 def bucket_start_iso(bucket: str) -> str:
     """버킷 시작을 오프셋 포함 ISO 로. 화면이 라벨 파싱 없이 시각을 알 수 있게 한다.
 
@@ -1183,17 +1305,26 @@ def _zero_call() -> dict:
     return {'attempts': 0, 'sessions': 0, 'talked': 0, 'completed': 0,
             'duration_sum_sec': 0, 'pdd_sum_ms': 0, 'pdd_n': 0,
             'legs_invited': 0, 'legs_joined': 0, 'open': 0, 'late_dropped': 0,
-            'reasons': {}, 'statuses': {}, 'by_group': {}}
+            'attempts_unknown': 0, 'sessions_unmeasured': 0, 'talked_unmeasured': 0,
+            'reasons': {}, 'end_reasons': {}, 'statuses': {}, 'causes': {}, 'by_group': {}}
 
 
 def _add_call(dst: dict, src: dict, open_n: int = 0, late_n: int = 0) -> None:
     for k in ('attempts', 'sessions', 'talked', 'completed',
+              'attempts_unknown', 'sessions_unmeasured', 'talked_unmeasured',
               'duration_sum_sec', 'pdd_sum_ms', 'pdd_n', 'legs_invited', 'legs_joined'):
         dst[k] = dst.get(k, 0) + int(src.get(k, 0) or 0)
     for k, v in (src.get('reasons') or {}).items():
         dst['reasons'][k] = dst['reasons'].get(k, 0) + int(v or 0)
     for k, v in (src.get('statuses') or {}).items():
         dst['statuses'][k] = dst['statuses'].get(k, 0) + int(v or 0)
+    erd = dst.setdefault('end_reasons', {})
+    for k, v in (src.get('end_reasons') or {}).items():
+        erd[k] = erd.get(k, 0) + int(v or 0)
+    # 실패 원인 — 사유 두 칸(denied·error)과 응답코드로는 못 가리는 "왜" (§2.3).
+    czd = dst.setdefault('causes', {})
+    for k, v in (src.get('causes') or {}).items():
+        czd[k] = czd.get(k, 0) + int(v or 0)
     for gid, gv in (src.get('by_group') or {}).items():
         tgt = dst['by_group'].setdefault(gid, {'sessions': 0, 'talked': 0})
         for k in ('sessions', 'talked'):
@@ -1209,9 +1340,14 @@ def _add_msg(dst: dict, src: dict) -> None:
             tgt[k] = tgt.get(k, 0) + int(v or 0)
 
 
-def _rate(num: int, den: int) -> float:
-    """백분율 1자리. 분모 0 은 0 — 표시용 파생값이며 저장·롤업 근거가 아니다(§5.1)."""
-    return round(num / den * 100, 1) if den > 0 else 0
+def _rate(num: int, den: int):
+    """백분율 1자리. **분모가 0 이면 `None`** — 비율이 정의되지 않는다.
+
+    0 으로 내면 "호가 없던 구간" 과 "호가 있었는데 다 실패한 구간" 이 같은 값이 되어, 화면이
+    둘을 구분해 보여줄 수 없다. 앞은 `—`, 뒤는 **0(강조)** 이어야 한다 — 뒤는 전부 실패라는
+    뜻이므로 눈에 띄어야 하는 값이다. 표시용 파생값이며 저장·롤업 근거가 아니다(§5.1).
+    """
+    return round(num / den * 100, 1) if den > 0 else None
 
 
 # NER 분자에 넣는 종료 사유 — **망이 아니라 상대 쪽 사정**으로 안 붙은 것들.
@@ -1221,17 +1357,14 @@ def _rate(num: int, den: int) -> float:
 _NER_USER_REASONS = ('busy', 'no_answer', 'rejected', 'canceled')
 
 
-# 분모가 결손된 축이 섞였을 때 내지 않는 비율 — **분자와 분모가 서로 다른 모집단**이 되는 것들.
-#   success_rate·talk_rate·ner : 분자에 그 축이 있고 분모(attempts)에는 없다 → 100% 초과
-#   completion_rate·drop_rate  : 분모(sessions)에 있고 분자(completed)에는 없다
-#                                → 없는 끊김이 생긴다
-# join_rate·talk_rate_sessions 는 분자·분모 모두 전 서비스에서 오므로 영향이 없다.
-#
-# 어느 축이 결손인지는 **이름 목록이 아니라 데이터로** 판정한다(§2.1) — 성립은 있는데 시도가
-# 0 이면 그 축은 분모를 원천에 남기지 않은 것이다. 목록으로 두면 양쪽으로 틀린다: 원천이
-# 생긴 뒤에도 목록에 남으면 값이 영영 안 나오고, 시도 장부를 아직 쓰지 않는 옛 CSP 노드는
-# 목록에 없어서 `_rate(x, 0) = 0` 으로 "성공률 0%" 라는 거짓 경보가 된다.
-_RATES_NEED_ATTEMPTS = ('success_rate', 'talk_rate', 'ner', 'completion_rate', 'drop_rate')
+# 시도(attempts)를 분모로 쓰는 지표 — **시도를 모르면 이것들도 모른다.**
+#   나머지는 시도와 무관하므로 건드리지 않는다:
+#     completion_rate·drop_rate  = 정상종료 / 성립   — 분자·분모 둘 다 세션 기록
+#     talk_rate_sessions         = 소통 / 성립       — 〃
+#     join_rate                  = 참여 leg / 초대 leg
+#   이 넷까지 함께 비웠던 적이 있는데(2026-09-16), 장부가 없던 날의 완료율 100% 가 빈칸으로
+#   보였다 — 멀쩡한 값이다. "분모 결손" 은 **어느 분모냐**에 따라 갈린다.
+_RATES_NEED_ATTEMPTS = ('success_rate', 'talk_rate', 'ner')
 
 
 def with_rates(c: dict, no_attempt_svcs=()) -> dict:
@@ -1254,12 +1387,34 @@ def with_rates(c: dict, no_attempt_svcs=()) -> dict:
         cls = f'{k[0]}xx' if k[:1].isdigit() else 'other'
         grp[cls] = grp.get(cls, 0) + v
     out['status_classes'] = dict(sorted(grp.items()))
+    cz = {k: int(v or 0) for k, v in (c.get('causes') or {}).items()}
+    out['causes'] = dict(sorted(cz.items(), key=lambda x: -x[1]))
+    er = {k: int(v or 0) for k, v in (c.get('end_reasons') or {}).items()}
+    out['end_reasons'] = dict(sorted(er.items(), key=lambda x: -x[1]))
     # 그룹 축은 건수 내림차순. 분포 위젯은 {키: 수} 한 겹을 기대하므로 세션수만 뽑은
     # `by_group_sessions` 를 함께 낸다 — 두 겹 map 을 화면이 다시 펴지 않게.
     bg = {k: dict(v) for k, v in (c.get('by_group') or {}).items()}
     out['by_group'] = dict(sorted(bg.items(), key=lambda x: -x[1].get('sessions', 0)))
     out['by_group_sessions'] = {k: v.get('sessions', 0) for k, v in out['by_group'].items()}
-    out['success_rate'] = _rate(c.get('sessions', 0), c.get('attempts', 0))
+    # **잰 것끼리 나눈다.** 시도가 기록되지 않은 구간의 성립은 분자에서 덜어낸다 — 그러지
+    #   않으면 분자만 자라 성공률이 100% 를 넘는다(실측 350%). 개수 열(성립)은 사실이므로
+    #   그대로 두고, 비율만 측정된 모집단으로 낸다. 못 잰 구간만 있는 칸은 분자·분모가 둘 다
+    #   0 이 되므로 아래에서 빈칸이 된다.
+    attempts = int(c.get('attempts', 0) or 0)
+    unknown_n = int(c.get('attempts_unknown', 0) or 0)
+    unmeasured_s = int(c.get('sessions_unmeasured', 0) or 0)
+    unmeasured_t = int(c.get('talked_unmeasured', 0) or 0)
+    # 카운터가 없는 칸(옛 레코드·직접 호출)의 안전망 — 시도 0 인데 성립이 있으면 그 칸
+    #   전체가 미측정 구간이다. `aggregate` 는 접히기 전 레코드에서 같은 환산을 하지만,
+    #   이 함수를 홀로 부르는 경로도 같은 답을 내야 한다.
+    if not unknown_n and not attempts and (c.get('sessions', 0) or c.get('talked', 0)):
+        unknown_n = 1
+        unmeasured_s = int(c.get('sessions', 0) or 0)
+        unmeasured_t = int(c.get('talked', 0) or 0)
+    m_sessions = max(0, int(c.get('sessions', 0) or 0) - unmeasured_s)
+    m_talked = max(0, int(c.get('talked', 0) or 0) - unmeasured_t)
+    out['sessions_measured'] = m_sessions
+    out['success_rate'] = _rate(m_sessions, attempts)
     # NER (ITU-T E.425) — **사용자 사정으로 안 붙은 호를 분자에 넣어 망 책임만 남긴다.**
     # 상대가 통화중이거나 안 받은 것은 망 잘못이 아닌데 성공률(ASR)은 그것도 실패로 센다.
     # 그래서 성공률이 낮을 때 망 문제인지 상대 사정인지 성공률만으로는 가를 수 없다.
@@ -1268,18 +1423,25 @@ def with_rates(c: dict, no_attempt_svcs=()) -> dict:
     # 그건 완료율이 본다. 그래서 `sessions` 를 통째로 넣고 거기에 붙지 못한 사유 중
     # 상대 쪽 것만 더한다. 응답 전 망 실패(error·timeout·incomplete)는 어느 쪽에도 없어
     # 자연히 빠진다.
-    ner_ok = (c.get('sessions', 0)
+    ner_ok = (m_sessions
               + sum(int(out['reasons'].get(k, 0) or 0) for k in _NER_USER_REASONS))
     # 분자가 시도를 넘을 수 없다 — 넘으면 원천이 어긋난 것이고(응답한 호에 붙지 못한 사유가
     # 달린 경우), 그대로 내면 103% 같은 값이 지표 행세를 한다.
-    out['ner_ok'] = min(ner_ok, c.get('attempts', 0)) if c.get('attempts', 0) else ner_ok
-    out['ner'] = _rate(out['ner_ok'], c.get('attempts', 0))
-    out['talk_rate'] = _rate(c.get('talked', 0), c.get('attempts', 0))
-    out['completion_rate'] = _rate(c.get('completed', 0), c.get('sessions', 0))
+    out['ner_ok'] = min(ner_ok, attempts) if attempts else ner_ok
+    out['ner'] = _rate(out['ner_ok'], attempts)
+    out['talk_rate'] = _rate(m_talked, attempts)
+    # 완료율 — **종료 사유를 아는 세션만** 분모로 쓴다(시도와 같은 규칙). 사유가 없는 세션을
+    #   normal 로 단정하면 강제 회수가 정상종료로 잡혀 늘 100% 가 되고(실측 2026-09-16),
+    #   실패로 단정하면 0% 가 된다 — 둘 다 거짓이다. 모르는 만큼은 분모에서 뺀다.
+    ended_unknown = int((c.get('end_reasons') or {}).get('unknown', 0) or 0)
+    m_ended = max(0, int(c.get('sessions', 0) or 0) - ended_unknown)
+    out['sessions_end_known'] = m_ended
+    out['completion_rate'] = _rate(c.get('completed', 0), m_ended)
     # 드롭률 = 완료율의 여집합 (3GPP TS 32.410 Call Drop Rate). 업계는 보통 이 방향으로 보고
     # 목표치도 이쪽으로 잡는다("< 1%"). 성립한 호가 없으면 0 이다 — 100% 로 내면 아무 일도
     # 없던 구간이 전부 드롭으로 보인다.
-    out['drop_rate'] = round(100.0 - out['completion_rate'], 1) if c.get('sessions', 0) else 0
+    out['drop_rate'] = (round(100.0 - out['completion_rate'], 1)
+                        if m_ended and out['completion_rate'] is not None else None)
     out['join_rate'] = _rate(c.get('legs_joined', 0), c.get('legs_invited', 0))
     # 세션을 분모로 한 소통률 — **PTT 용**이다. 시도 기준 소통률(talk_rate)은 "몇 건이
     # 말까지 갔나" 를 보지만, PTT 에서 알아야 하는 것은 "선 세션 중 몇 개가 벙어리였나" 다.
@@ -1297,13 +1459,27 @@ def with_rates(c: dict, no_attempt_svcs=()) -> dict:
     # 자기 칸의 판정은 데이터로 한다 — **성립은 있는데 시도가 0** 이면 분모가 원천에 없는
     # 것이고, 그대로 두면 `_rate(x, 0) = 0` 이라 성공률 0% 라는 **거짓 경보**가 된다.
     # 시도 장부가 없는 옛 CSP 노드가 여기에 걸린다(빈칸이 맞다 — 0% 가 아니라).
+    # **시도가 기록되지 않은 구간이 섞였나.** 근거 둘 — 호출측이 넘긴 표(`no_attempt_svcs`,
+    #   접히기 전 레코드에서 걷은 것)와 이 칸의 카운터(이미 접힌 저장 계층은 이것만 남는다).
+    # 종료 사유를 아는 세션이 하나도 없으면 완료율·드롭률은 빈칸이다 (0% 도 100% 도 거짓).
+    if ended_unknown and not m_ended:
+        out['completion_rate'] = None
+        out['drop_rate'] = None
+        out['rate_gap'] = sorted(set((out.get('rate_gap') or []) + ['end_reason_unknown']))
+
     gap = sorted(set(no_attempt_svcs or ()))
-    if not gap and not c.get('attempts', 0) and (c.get('sessions', 0) or c.get('talked', 0)):
-        gap = ['no_attempts']
-    if gap:
-        for k in _RATES_NEED_ATTEMPTS:
-            out[k] = None
-        out['rate_gap'] = gap
+    if gap or unknown_n:
+        out['rate_gap'] = sorted(set((gap or ['attempts_unknown'])
+                                     + (out.get('rate_gap') or [])))
+        # 잰 시도가 하나도 없으면 비율을 낼 수 없다 — 그때는 **시도도 0 이 아니라 모름**이다
+        #   ("호를 한 건도 안 걸었는데 통화가 4건 성립했다" 는 행을 만들지 않는다).
+        #   잰 시도가 있으면 시도·성공률을 그 측정분으로 낸다: 못 잰 이틀 때문에 지표가
+        #   영구히 가려지지 않게(월 계층은 보존 무제한이다).
+        if not attempts:
+            out['attempts'] = None
+            out['ner_ok'] = None
+            for k in _RATES_NEED_ATTEMPTS:
+                out[k] = None
     return out
 
 
@@ -1339,14 +1515,36 @@ def aggregate(rows: list, gran: str, svc: str = 'all', include_msg: bool = False
             for target in (_cell(slot, key), _cell(totals, key)):
                 _add_call(target['call'], r.get('call') or {},
                           open_n=r.get('open', 0), late_n=r.get('late_dropped', 0))
-                # 여러 서비스가 합쳐지는 칸('all')에서 분모가 결손된 축이 섞였는지 본다.
-                # **정적 목록이 아니라 데이터로 판정한다** — 성립은 있는데 시도가 없으면
-                # 그 축은 분모를 원천에 남기지 않은 것이다(구 CSP 배포본처럼 시도 장부가
-                # 없는 노드도 여기서 자동으로 걸린다). 자기 서비스 칸은 아래 with_rates 가
-                # 같은 조건으로 비운다.
+                # 분모가 결손된 구간이 섞였는지 **1분 레코드 단위로** 본다 — 성립은 있는데
+                # 시도가 없으면 그 레코드는 분모를 원천에 남기지 않은 시절의 것이다(시도
+                # 장부 이전에 집계된 버킷, 또는 장부를 쓰지 않는 옛 CSP 노드).
+                #
+                # **합쳐진 칸에서 다시 판정할 수 없다.** 결손 버킷(성립 4·시도 0)과 정상
+                # 버킷(성립 1·시도 2)을 더하면 성립 5·시도 2 가 되어 `attempts != 0` 이 되고,
+                # 결손의 증거가 합산으로 사라진다 — 실측(2026-09-16): 9/9·9/10 의 옛 버킷이
+                # 9/15 와 함께 조회되어 **성공률 350%**(성립 7 / 시도 2)가 나왔다. 버킷 행은
+                # 각자 빈칸이었는데 합계 행만 틀렸다. 그래서 레코드에서 표를 걷어 칸에 싣는다.
+                #
+                # 'all' 축과 자기 서비스 축 **양쪽**에 건다. 자기 축이라고 안전한 게 아니다 —
+                # 시간이 섞이는 것은 서비스와 무관하다.
                 cr = r.get('call') or {}
-                if key == 'all' and not cr.get('attempts') and (cr.get('sessions') or cr.get('talked')):
+                # 시도가 기록되지 않은 레코드가 섞였나 — 카운터가 정본이고, 그 필드가 없던
+                #   시절에 저장된 레코드는 조건으로 잡는다(아직 안 접혀 있어 attempts 0 이
+                #   그대로 보인다).
+                if cr.get('attempts_unknown') or (
+                        not cr.get('attempts') and (cr.get('sessions') or cr.get('talked'))):
                     target['gap'].add(sv)
+                    # 옛 레코드는 **양**을 안 싣고 있다. 그러면 잰 것끼리 나눌 수 없어
+                    #   분자에 미측정 성립이 남고 성공률이 100% 를 넘는다(실측 350%).
+                    #   그 레코드 전체가 미측정 구간이므로 여기서 양을 환산해 넣는다 —
+                    #   재집계한 노드와 안 한 노드가 같은 값을 내게.
+                    if not cr.get('attempts_unknown'):
+                        tc = target['call']
+                        tc['attempts_unknown'] = tc.get('attempts_unknown', 0) + 1
+                        tc['sessions_unmeasured'] = (tc.get('sessions_unmeasured', 0)
+                                                     + int(cr.get('sessions', 0) or 0))
+                        tc['talked_unmeasured'] = (tc.get('talked_unmeasured', 0)
+                                                   + int(cr.get('talked', 0) or 0))
                 if include_msg:
                     _add_msg(target['msg'], r.get('msg') or {})
 

@@ -642,6 +642,16 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         CspUser clsCallee;
         if ( !gclsCspUserMap.isAlive( pszTo, clsCallee ) ) {
             CLog::Print( LOG_INFO, "EventIncomingCall: private call target(%s) not registered → 480 [PTT-AS]", pszTo );
+            // 시도 장부 — 사설콜도 PTT 시도다(임시 그룹을 만들어 ProcessGroupCall 로 가므로).
+            //   이 경로는 그 함수 앞에서 끝나 기록이 없었다.
+            //   사유는 **VoLTE 와 같은 `no_answer`** 다(480·408 → CallDir::_ReasonOfStatus).
+            //   상대 단말이 꺼진 것은 우리 구성 문제가 아니라 상대 사정이므로 NER 이 면제한다
+            //   (_NER_USER_REASONS) — `denied`(정책 거부)나 `error`(자원 실패)에 넣으면 실패
+            //   사유 분포가 왜곡되고, 우리 결함과 상대 사정이 한 칸에 섞인다.
+            //   응답은 그대로 480 이다.
+            if ( gclsCallDir.IsEnabled() )
+                gclsCallDir.PttAttempt( pszTo, "", pszFrom, "failed", "no_answer", "private_callee_offline",
+                                        SIP_TEMPORARILY_UNAVAILABLE );
             return StopCall( pszCallId, SIP_TEMPORARILY_UNAVAILABLE );
         }
         std::string strPrivId = std::string( "priv-" ) + pszFrom + "-" + pszTo;
@@ -702,6 +712,10 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             if ( gclsDbManager.SelectUserProfile( pszFrom, clsAdhocProf ) >= 0 && !clsAdhocProf.m_bAllowAdhocCall ) {
                 CLog::Print( LOG_INFO, "EventIncomingCall: ad-hoc by(%s) not authorised (user profile) → 403 [PTT-AS]",
                              pszFrom );
+                // 시도 장부 — 이 경로도 `ProcessGroupCall` 앞에서 끝나므로 여기서 남긴다.
+                if ( gclsCallDir.IsEnabled() )
+                    gclsCallDir.PttAttempt( pszTo, "", pszFrom, "failed", "denied", "adhoc_not_authorised",
+                                            SIP_FORBIDDEN );
                 return StopCall( pszCallId, SIP_FORBIDDEN );
             }
             CspPttGroup clsAdhoc;
@@ -749,9 +763,22 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         CspUser clsFromUser;
         bool bFromKnown = gclsCspUserMap.isAlive( pszFrom, clsFromUser );
         const std::string &mode = gclsSetup.m_strServiceMode;
-        if ( mode == "ptt" ) return StopCall( pszCallId, SIP_FORBIDDEN );
-        if ( bFromKnown && !clsFromUser.m_strServiceType.empty() && clsFromUser.m_strServiceType == "ptt" )
+        // 시도 장부 — 여기까지 온 PTT 발신은 **대상이 그룹도 등록 가입자도 아니다**(위 그룹·
+        //   private·ad-hoc 분기를 전부 지나왔다). `ProcessGroupCall` 의 group_not_found 기록은
+        //   이 경로에 닿지 않는다: 그룹이 맵에 없으면 그 함수를 아예 부르지 않기 때문이다.
+        //   그래서 실패한 개시가 원천에 안 남아 성공률이 실제보다 높게 나온다(§8 Y6 잔여 —
+        //   실측 2026-09-16: 4건 중 1건 성공인데 화면은 3건 중 1건으로 33.3%).
+        //   현장에서 가장 흔한 고장이 이 경로다(단말 그룹 오설정·그룹 삭제 뒤 잔존 발신).
+        //   **응답은 그대로 403 이다** — 와이어 동작은 바꾸지 않고 기록만 더한다.
+        //   장부의 group 칸에 실제 발신 대상이 그대로 들어가므로 무엇을 눌렀는지 보인다.
+        auto RejectPtt = [&]() {
+            if ( gclsCallDir.IsEnabled() )
+                gclsCallDir.PttAttempt( pszTo, "", pszFrom, "failed", "denied", "group_not_found", SIP_FORBIDDEN );
             return StopCall( pszCallId, SIP_FORBIDDEN );
+        };
+        if ( mode == "ptt" ) return RejectPtt();
+        if ( bFromKnown && !clsFromUser.m_strServiceType.empty() && clsFromUser.m_strServiceType == "ptt" )
+            return RejectPtt();
     }
 
     // 여기서부터는 **1:1 VoLTE 경로**다(그룹·private 분기는 위에서 끝났다). 이 구간의 거절은

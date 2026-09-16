@@ -464,12 +464,17 @@ public:
      *  세션 기록과 대조할 수 있다 — 둘이 어긋나면 집계가 유실로 보고한다(§3).
      *
      *  @param strOutcome "established" | "failed"
-     *  @param strReason  실패 사유 어휘(rejected·error·timeout…). 성립이면 빈 문자열
+     *  @param strReason  실패 사유 어휘(`denied`·`error`). 성립이면 빈 문자열.
+     *         **두 칸뿐이라 "왜" 를 답하지 못한다** — 그건 strCause 가 답한다
+     *  @param strCause   실패 원인 슬러그 — 반환 지점마다 하나. 응답코드로는 가릴 수 없기
+     *         때문에 따로 남긴다: 같은 488 이 코덱 불일치와 SRTP 협상 실패 둘이고, 세션
+     *         시간창 이탈과 AcceptCall 실패는 **응답코드가 아예 없다**(0). 어휘는
+     *         sip_statistics.md §2.3 의 표가 정본이고, 콘솔 라벨이 그 슬러그를 읽는다
      *  @param iStatus    결말 SIP 응답코드(403·488·480…). 성립·무응답 경로면 0
      */
     void PttAttempt( const std::string &strGroupId, const std::string &strGroupKey, const std::string &strCaller,
-                     const std::string &strOutcome, const std::string &strReason = "", int iStatus = 0,
-                     const std::string &strSesId = "" ) {
+                     const std::string &strOutcome, const std::string &strReason = "", const std::string &strCause = "",
+                     int iStatus = 0, const std::string &strSesId = "" ) {
         if ( m_strCallsDir.empty() ) return;
         char ts[32];
         IsoNow( ts, sizeof( ts ) );
@@ -478,8 +483,8 @@ public:
         std::string line = std::string( "{\"ts\":\"" ) + ts + "\",\"group\":\"" + Esc( strGroupId ) +
                            "\",\"group_key\":\"" + Esc( strGroupKey ) + "\",\"caller\":\"" + Esc( strCaller ) +
                            "\",\"outcome\":\"" + Esc( strOutcome ) + "\",\"reason\":\"" + Esc( strReason ) +
-                           "\",\"status\":" + std::to_string( iStatus ) + ",\"sesid\":\"" + Esc( strSesId ) +
-                           "\"}\n";
+                           "\",\"cause\":\"" + Esc( strCause ) + "\",\"status\":" + std::to_string( iStatus ) +
+                           ",\"sesid\":\"" + Esc( strSesId ) + "\"}\n";
         std::string path = m_strCallsDir + "/ptt/attempts/" + day + ".jsonl";
         m_worker.Enqueue( [path, line]() { return _appendLineS( path, line ); } );
     }

@@ -42,9 +42,44 @@ interface MatrixMap {
    *   totalPath 합계 행 값의 **절대 경로**. 비율처럼 합산이 무의미한 열에 쓴다
    *             (없으면 행들의 합).
    */
-  columns?: { key: string; label: string; path: string; totalPath?: string; unit?: string }[]
+  columns?: {
+    key: string; label: string; path: string; totalPath?: string; unit?: string
+    /**
+     * 이 열의 숫자가 **왜** 나왔는지를 담은 버킷 안 {원인: 수} map 경로.
+     * detailLabels 에 있는 키만 읽는다 — 원인 축 하나(`ptt.causes`)를 여러 열이 나눠 갖기
+     * 때문이다(거부 열은 비멤버·권한·시간창, 오류 열은 코덱·SRTP·leg 확립 실패).
+     */
+    detailFrom?: string
+    /** 원인 슬러그 → 표시 이름. **이 열이 품는 원인만** 적는다(그게 곧 필터다). */
+    detailLabels?: Record<string, string>
+    /**
+     * 원인으로 못 채운 건수를 메우는 **차선 축**(보통 응답코드). 원인 기록이 시작되기 전의
+     * 옛 자료는 원인이 비어 있는데, 그 줄에도 응답코드는 있다 — 코드는 원인보다 거칠지만
+     * (같은 488 이 둘) 아무것도 안 보여 주는 것보다 낫다. 여기도 **이 열이 품는 코드만** 적는다.
+     */
+    statusFrom?: string
+    statusLabels?: Record<string, string>
+    /** 원인도 코드도 없는 잔여 건수에 붙일 이름. 없으면 잔여를 적지 않는다. */
+    detailUnknownLabel?: string
+    /**
+     * 값 **0 을 눈에 보이게 칠한다** — 높을수록 좋은 비율에서 0 은 "전부 실패" 인데, 기본
+     * 칸 색칠은 값에 비례해서 0 을 가장 흐리게 그린다(가장 나쁜 값이 가장 안 보인다).
+     * 분모가 0 인 구간은 서버가 `null` 로 내리므로(`—`) 여기 0 은 "호가 있었는데 하나도
+     * 안 됐다" 만 뜻한다.
+     *
+     * 색은 다른 칸과 같은 계열이다 — **색으로 성격을 나누지 않는다**. 왜 0 인지는 실패 사유
+     * 칸(거부·오류·무응답)과 그 툴팁이 말한다.
+     */
+    paintZero?: boolean
+  }[]
   /** 표 아래 각주 — 비율 열은 이름만으로 분자·분모를 알 수 없어 소스가 계산식을 함께 준다. */
   notes?: string[]
+  /**
+   * 값 없는 구간을 접었을 때 그 줄에 적을 말 — **무엇이 없었는지는 소스만 안다**.
+   * 호 통계는 "호가 없는 시간", 메시지 교차표는 "메시지가 없는 시간" 이다.
+   * 없으면 "자료가 없는 시간".
+   */
+  blankLabel?: string
   /** 동적 열의 표시 이름 — 열 키가 코드(488·503)일 때 뜻을 붙인다. 없는 키는 키를 그대로 쓴다. */
   cellLabels?: Record<string, string>
 }
@@ -72,7 +107,16 @@ function firstField(item: Record<string, unknown>, fields: string[]): unknown {
   return ''
 }
 
+/**
+  * 서버가 `null` 로 내려보낸 값은 **집계 불가**다 — "분모가 원천에 없어 비율을 낼 수 없다"
+  * (sip_statistics.md §2.1 `rate_gap`). `Number(null) === 0` 이고 0 은 유한하므로, 그대로
+  * 흘리면 **0% 로 보인다** — 실측(2026-09-16): 성공률·완료율이 전 단위에서 0% 로 나왔다.
+  * 거짓 0 대신 빈 자리를 낸다. 0 은 "정말 0 건" 일 때만 쓴다.
+  */
+export const NO_VALUE = '—'
+
 function applyFormat(v: unknown, format?: string): string | number {
+  if (v === null || v === undefined) return NO_VALUE
   const n = Number(v)
   if (format === 'duration') {
     const s = Number.isFinite(n) ? n : 0
@@ -147,18 +191,96 @@ export function buildDataSource(spec: DataSourceSpec): DataSource {
     if (c.columns?.length) {
       ds.toMatrix = (raw): MatrixData => {
         const specs = c.columns as NonNullable<MatrixMap['columns']>
+        // 칸의 숫자를 **끝까지 설명한다** — 원인으로 채우고, 남으면 응답코드로, 그래도
+        // 남으면 "미기록" 으로. 열의 값과 상세의 합이 어긋난 채로 두면 읽는 사람이
+        // "나머지는 뭐냐" 를 물을 수밖에 없다. 칸이 0 이면 상세도 없다.
+        const pickDetail = (sp: typeof specs[number], src: unknown,
+                            v: number | null): [string, Record<string, number>] => {
+          const total = typeof v === 'number' ? v : 0
+          if (total <= 0) return ['', {}]
+          const got: Record<string, number> = {}
+          // 선언된 키만, 남은 예산만큼 가져온다(축이 열끼리 겹쳐도 넘치지 않게).
+          const take = (path?: string, labels?: Record<string, string>, budget = Infinity) => {
+            if (!path || !labels) return 0
+            const m0 = getPath(src as never, path)
+            if (!m0 || typeof m0 !== 'object') return 0
+            let used = 0
+            for (const [k, lbl] of Object.entries(labels)) {
+              const n = Math.min(Number((m0 as Record<string, unknown>)[k]) || 0, budget - used)
+              if (n > 0) { got[lbl] = (got[lbl] ?? 0) + n; used += n }
+            }
+            return used
+          }
+          let rest = total - take(sp.detailFrom, sp.detailLabels, total)
+          if (rest > 0) rest -= take(sp.statusFrom, sp.statusLabels, rest)
+          if (rest > 0 && sp.detailUnknownLabel) got[sp.detailUnknownLabel] = rest
+          const txt = Object.entries(got).sort((a, b) => b[1] - a[1])
+            .map(([lbl, n]) => `${lbl} ${n}건`).join(' · ')
+          return [txt, got]
+        }
+        // **null · 없음 · 0 을 가른다.**
+        //   null      = 서버가 일부러 비운 값(집계 불가) → 빈 자리
+        //   undefined = 그 버킷에 그 축이 없다(그 기간에 통화가 없었다)
+        //                 · 건수 열 → **0**. 0 이 사실이다("한 건도 없었다")
+        //                 · 비율 열 → **빈 자리**. 통화가 없던 날의 "성공률 0%" 는 거짓
+        //                   경보다 — 다 실패한 게 아니라 셀 것이 없었던 것이다
+        //   그 외      = 그대로 숫자. 시도가 있는데 성립이 0 이면 성공률 0% 가 사실이다.
+        const numOrNull = (v: unknown, isRate = false): number | null =>
+          v === null ? null
+            : (v === undefined ? (isRate ? null : 0) : (Number(v) || 0))
+        // 합계 행의 상세도 **같은 규칙**으로 만든다. 행 상세를 그냥 더하면 합계 숫자와
+        //   어긋날 수 있다(합계는 `totalPath` 에서 오고 행 합은 버킷들의 합이다) — 그러면
+        //   툴팁이 칸의 숫자를 설명하지 못한다. 그래서 원인·코드 축을 **날것으로** 모아 두고,
+        //   합계 숫자를 예산 삼아 다시 접는다.
+        const rawSums: Record<string, Record<string, Record<string, number>>> = {}
+        const addRaw = (colKey: string, path: string | undefined, src: unknown) => {
+          if (!path) return
+          const m0 = getPath(src as never, path)
+          if (!m0 || typeof m0 !== 'object') return
+          const bag = (rawSums[colKey] = rawSums[colKey] ?? {})
+          const at = (bag[path] = bag[path] ?? {})
+          for (const [k, v] of Object.entries(m0 as Record<string, unknown>)) {
+            at[k] = (at[k] ?? 0) + (Number(v) || 0)
+          }
+        }
+        // 모아 둔 날것을 경로 그대로 되살려 pickDetail 에 넘긴다(같은 코드가 돌게).
+        const rawSrc = (colKey: string) => {
+          const out: Record<string, unknown> = {}
+          for (const [path, map] of Object.entries(rawSums[colKey] ?? {})) {
+            const seg = path.split('.')
+            let cur = out
+            for (let i = 0; i < seg.length - 1; i++) {
+              cur[seg[i]] = cur[seg[i]] ?? {}
+              cur = cur[seg[i]] as Record<string, unknown>
+            }
+            cur[seg[seg.length - 1]] = map
+          }
+          return out
+        }
         const rows = asArray(raw, c.from).map(it => {
-          const cells: Record<string, number> = {}
-          for (const sp of specs) cells[sp.key] = Number(getPath(it, sp.path)) || 0
-          return { label: String(firstField(it, c.label) ?? ''), cells, total: 0 }
+          const cells: Record<string, number | null> = {}
+          const details: Record<string, string> = {}
+          for (const sp of specs) {
+            cells[sp.key] = numOrNull(getPath(it, sp.path), sp.unit === '%')
+            const [txt] = pickDetail(sp, it, cells[sp.key])
+            if (txt) details[sp.key] = txt
+            addRaw(sp.key, sp.detailFrom, it)
+            addRaw(sp.key, sp.statusFrom, it)
+          }
+          return { label: String(firstField(it, c.label) ?? ''), cells, total: 0, details }
         })
-        const columns = specs.map(sp => ({
-          key: sp.key, label: sp.label, unit: sp.unit,
-          total: sp.totalPath !== undefined
-            ? (Number(getPath(raw, sp.totalPath)) || 0)
-            : rows.reduce((a, r) => a + (r.cells[sp.key] ?? 0), 0),
-        }))
-        return { unit: c.unit, columns, rows, rowTotal: false, grandTotal: 0, notes: c.notes }
+        const columns = specs.map(sp => {
+          const total = sp.totalPath !== undefined
+            ? numOrNull(getPath(raw, sp.totalPath), sp.unit === '%')
+            : rows.reduce((a, r) => a + (r.cells[sp.key] ?? 0), 0)
+          return {
+            key: sp.key, label: sp.label, unit: sp.unit, total,
+            paintZero: sp.paintZero === true,
+            detail: pickDetail(sp, rawSrc(sp.key), total)[0] || undefined,
+          }
+        })
+        return { unit: c.unit, columns, rows, rowTotal: false, grandTotal: 0, notes: c.notes,
+                 blankLabel: c.blankLabel }
       }
     } else {
     ds.toMatrix = (raw): MatrixData => {
@@ -204,6 +326,7 @@ export function buildDataSource(spec: DataSourceSpec): DataSource {
       return {
         unit: c.unit, columns, rows, rowTotal: true,
         grandTotal: rows.reduce((a, r) => a + r.total, 0), notes: c.notes,
+        blankLabel: c.blankLabel,
       }
     }
     }
