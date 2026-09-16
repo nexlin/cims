@@ -8,6 +8,7 @@
 #include <cstring>
 #include <fstream>
 #include <netinet/in.h>
+#include <strings.h>
 #include <sys/socket.h>
 #include <thread>
 #include <unistd.h>
@@ -68,6 +69,12 @@ static HttpResponse errResp(int status, const std::string& code, const std::stri
     return jsonResp(status, j);
 }
 
+static ESipTransport parseTransport(const std::string& s) {
+    if (s == "tls" || s == "TLS") return E_SIP_TLS;
+    if (s == "tcp" || s == "TCP") return E_SIP_TCP;
+    return E_SIP_UDP;
+}
+
 Worker::Worker(const WorkerConfig& cfg) : m_cfg(cfg) {
     if (m_cfg.localIp.empty()) m_cfg.localIp = detectLocalIp();
     m_runState = "idle";
@@ -91,31 +98,49 @@ void Worker::stop() {
     m_http.stop();
     m_stream.stop();
     std::lock_guard<std::mutex> lk(m_mtx);
-    for (auto& kv : m_pools)
+    for (auto& kv : m_pools) {
         for (auto& ep : kv.second->eps)
-            if (ep->started) { ep->s->Stop(5); ep->started = false; }
+            if (ep->s && ep->started) { ep->s->Stop(5); ep->started = false; }
+        if (kv.second->peer) kv.second->peer->Stop();
+    }
 }
 
-// ── ICsimObserver (스택 스레드) ─────────────────────────────────────────────
+// ── ICsimObserver / ICsimPeerObserver (스택 스레드) ───────────────────────────
 void Worker::OnRegister(SimSession* s, int st, long long ms) {
     std::lock_guard<std::mutex> lk(m_evMtx);
-    m_events.push_back({ Event::REGISTER, s, st, ms, "" });
+    m_events.push_back({ Event::REGISTER, s, nullptr, st, ms, "", "", false });
 }
 void Worker::OnIncomingCall(SimSession* s, const std::string& callId, const std::string&) {
     std::lock_guard<std::mutex> lk(m_evMtx);
-    m_events.push_back({ Event::INCOMING, s, 0, 0, callId });
+    m_events.push_back({ Event::INCOMING, s, nullptr, 0, 0, callId, "", true });
 }
 void Worker::OnCallStart(SimSession* s, const std::string& callId, long long ms) {
     std::lock_guard<std::mutex> lk(m_evMtx);
-    m_events.push_back({ Event::CALLSTART, s, 200, ms, callId });
+    m_events.push_back({ Event::CALLSTART, s, nullptr, 200, ms, callId, "", false });
 }
 void Worker::OnCallEnd(SimSession* s, const std::string& callId, int st) {
     std::lock_guard<std::mutex> lk(m_evMtx);
-    m_events.push_back({ Event::CALLEND, s, st, 0, callId });
+    m_events.push_back({ Event::CALLEND, s, nullptr, st, 0, callId, "", false });
 }
 void Worker::OnByeResponse(SimSession* s, const std::string& callId, int st, long long ms) {
     std::lock_guard<std::mutex> lk(m_evMtx);
-    m_events.push_back({ Event::BYERESP, s, st, ms, callId });
+    m_events.push_back({ Event::BYERESP, s, nullptr, st, ms, callId, "", false });
+}
+void Worker::OnPeerIncoming(CsimPeer* p, const std::string& callId, const std::string&, const std::string& to, bool hasPai) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::INCOMING, nullptr, p, 0, 0, callId, to, hasPai });
+}
+void Worker::OnPeerCallStart(CsimPeer* p, const std::string& callId, long long ms) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::CALLSTART, nullptr, p, 200, ms, callId, "", false });
+}
+void Worker::OnPeerCallEnd(CsimPeer* p, const std::string& callId, int st) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::CALLEND, nullptr, p, st, 0, callId, "", false });
+}
+void Worker::OnPeerByeResponse(CsimPeer* p, const std::string& callId, int st, long long ms) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::BYERESP, nullptr, p, st, ms, callId, "", false });
 }
 
 // ── HTTP ───────────────────────────────────────────────────────────────────
@@ -152,11 +177,13 @@ HttpResponse Worker::health() {
     j["max_endpoints"] = Json((long long)(cores * m_cfg.maxEndpointsPerCore));
     j["max_saps"] = Json(cores * m_cfg.maxSapsPerCore);
     j["cpu_pct"] = Json(m_cpuPct.load());
+    j["local_ip"] = Json(m_cfg.localIp);
     long long active = 0;
     Json pools = Json::Array();
     for (auto& kv : m_pools) {
         long long reg = 0, started = 0;
         for (auto& ep : kv.second->eps) { if (ep->started) started++; if (ep->registered) reg++; }
+        if (kv.second->peer) active += (long long)kv.second->peer->CallCount();
         active += started;
         Json pj = Json::Object();
         pj["pool"] = Json(kv.first);
@@ -172,34 +199,26 @@ HttpResponse Worker::health() {
     return jsonResp(200, j);
 }
 
-HttpResponse Worker::poolCreate(const Json& d) {
-    std::string name = d["pool"].asString();
-    std::string kind = d["kind"].asString("ue");
-    if (name.empty()) return errResp(400, "pool_required");
-    if (kind != "ue") return errResp(400, "unsupported_kind", kind + " — B 단계는 ue 풀만 (peer/real-ue 는 C·F)");
-    std::lock_guard<std::mutex> lk(m_mtx);
-    if (m_run && m_runState != "stopped" && m_runState != "idle") return errResp(409, "run_active");
-    auto it = m_pools.find(name);
-    if (it != m_pools.end()) {
-        for (auto& ep : it->second->eps) { m_bySession.erase(ep->s); if (ep->started) ep->s->Stop(5); delete ep->s; }
-        m_pools.erase(it);
+void Worker::destroyPool(Pool* pool) {
+    for (auto& ep : pool->eps) {
+        if (ep->s) { m_bySession.erase(ep->s); if (ep->started) ep->s->Stop(5); delete ep->s; ep->s = nullptr; }
     }
-    auto pool = std::make_unique<Pool>();
-    pool->name = name;
-    pool->kind = kind;
-    pool->transport = d["transport"].asString("udp");
-    pool->srtp = d["srtp"].asString("off");
+    if (pool->peer) { m_byPeer.erase(pool->peer.get()); pool->peer->Stop(); pool->peer.reset(); }
+}
+
+bool Worker::buildUePool(Pool* pool, const Json& d, std::string& err) {
     const Json& tc = d["target_csp"];
     pool->targetIp = tc["ip"].asString();
     pool->targetPort = (int)(pool->transport == "tls" ? tc["tls"].asInt(5061)
                              : pool->transport == "tcp" ? tc["tcp"].asInt(25061) : tc["udp"].asInt(5060));
-    if (pool->targetIp.empty()) return errResp(400, "target_csp.ip_required");
+    if (pool->targetIp.empty()) { err = "target_csp.ip_required"; return false; }
     const Json& ids = d["identities"];
     for (size_t i = 0; i < ids.size(); ++i) {
         const Json& x = ids.at(i);
         auto ep = std::make_unique<Endpoint>();
         ep->idx = (int)i;
-        ep->pool = name;
+        ep->pool = pool->name;
+        ep->poolRef = pool;
         ep->id.user = x["user"].asString();
         ep->id.domain = x["domain"].asString();
         ep->id.ha1 = x["ha1"].asString();
@@ -209,7 +228,7 @@ HttpResponse Worker::poolCreate(const Json& d) {
         ep->id.akaK = x["aka_k"].asString();
         ep->id.akaOpc = x["aka_opc"].asString();
         std::string authId = x["auth_id"].asString();
-        if (ep->id.user.empty() || ep->id.domain.empty()) return errResp(400, "identity_user_domain_required");
+        if (ep->id.user.empty() || ep->id.domain.empty()) { err = "identity_user_domain_required"; return false; }
         // IMPI — '@' 없으면 도메인을 붙인다 (cspsim -creds authId 규약과 같다; CSP 는 authId@domain 을 기대한다)
         if (!authId.empty() && authId.find('@') == std::string::npos) authId += "@" + ep->id.domain;
         int localPort = m_cfg.sipPortBase > 0 ? m_cfg.sipPortBase + 2 * (int)i : 0;
@@ -226,12 +245,78 @@ HttpResponse Worker::poolCreate(const Json& d) {
         m_bySession[ep->s] = ep.get();
         pool->eps.push_back(std::move(ep));
     }
-    logf("info", "pool %s created — kind=%s endpoints=%zu transport=%s srtp=%s target=%s:%d",
+    return true;
+}
+
+bool Worker::buildPeerPool(Pool* pool, const Json& d, std::string& err) {
+    const Json& pd = d["peer"];
+    if (!pd.isObject()) { err = "peer_required"; return false; }
+    CsimPeerConfig pc;
+    pc.name = pool->name;
+    pc.profile = pd["profile"].asString("ibcf");
+    pc.bindIp = pd["bind"]["ip"].asString();
+    pc.port = (int)pd["bind"]["port"].asInt(0);
+    pc.transport = parseTransport(pd["bind"]["protocol"].asString("udp"));
+    pc.domain = pd["domain"].asString();
+    pc.silent = pd["answer"].asString("normal") == "silent";
+    pc.certFile = m_cfg.peerCertFile;
+    for (size_t i = 0; i < pd["codecs"].size(); ++i) pc.codecs.push_back(pd["codecs"].at(i).asString());
+    if (pc.codecs.empty()) pc.codecs = CsimPeer::DefaultCodecs(pc.profile);
+    // 파일 미디어(AMR-WB)는 첫 코덱이 AMR-WB 일 때만 — 나머지는 합성 PCMU
+    if (!m_cfg.mediaFile.empty() && strcasecmp(pc.codecs[0].c_str(), "AMR-WB") == 0) pc.mediaFile = m_cfg.mediaFile;
+    if (pc.bindIp.empty() || pc.port <= 0 || pc.domain.empty()) { err = "peer.bind.ip/port and peer.domain required"; return false; }
+    // 발신 다음 홉 = 대상 CSP 피어링 접속점 (없으면 access UDP 접속점)
+    const Json& tc = d["target_csp"];
+    const Json& pr = tc["peering"];
+    pool->targetIp = pr["ip"].asString(tc["ip"].asString());
+    pool->targetPort = (int)(pr.isObject() ? pr["port"].asInt(tc["udp"].asInt(5060)) : tc["udp"].asInt(5060));
+    pool->transport = pr.isObject() ? pr["protocol"].asString("udp") : "udp";
+    pool->profile = pc.profile;
+    if (pool->targetIp.empty()) { err = "target_csp.ip_required"; return false; }
+    const Json& ids = d["identities"];
+    for (size_t i = 0; i < ids.size(); ++i) {
+        const Json& x = ids.at(i);
+        auto ep = std::make_unique<Endpoint>();
+        ep->idx = (int)i;
+        ep->pool = pool->name;
+        ep->poolRef = pool;
+        ep->id.user = x["user"].asString();
+        ep->id.domain = x["domain"].asString(pc.domain);
+        if (ep->id.user.empty()) { err = "identity_user_required"; return false; }
+        pool->byUser[ep->id.user] = ep.get();
+        pool->eps.push_back(std::move(ep));
+    }
+    pool->peer = std::make_unique<CsimPeer>(pc);
+    pool->peer->SetObserver(this);
+    if (!pool->peer->Start(err)) { err = "peer_bind_failed: " + err; pool->peer.reset(); return false; }
+    m_byPeer[pool->peer.get()] = pool;
+    return true;
+}
+
+HttpResponse Worker::poolCreate(const Json& d) {
+    std::string name = d["pool"].asString();
+    std::string kind = d["kind"].asString("ue");
+    if (name.empty()) return errResp(400, "pool_required");
+    if (kind != "ue" && kind != "peer") return errResp(400, "unsupported_kind", kind + " — real-ue 는 F 단계");
+    std::lock_guard<std::mutex> lk(m_mtx);
+    if (m_run && m_runState != "stopped" && m_runState != "idle") return errResp(409, "run_active");
+    auto it = m_pools.find(name);
+    if (it != m_pools.end()) { destroyPool(it->second.get()); m_pools.erase(it); }
+    auto pool = std::make_unique<Pool>();
+    pool->name = name;
+    pool->kind = kind;
+    pool->transport = d["transport"].asString("udp");
+    pool->srtp = d["srtp"].asString("off");
+    std::string err;
+    bool ok = kind == "ue" ? buildUePool(pool.get(), d, err) : buildPeerPool(pool.get(), d, err);
+    if (!ok) { destroyPool(pool.get()); return errResp(400, err); }
+    logf("info", "pool %s created — kind=%s endpoints=%zu transport=%s srtp=%s target=%s:%d%s",
          name.c_str(), kind.c_str(), pool->eps.size(), pool->transport.c_str(), pool->srtp.c_str(),
-         pool->targetIp.c_str(), pool->targetPort);
+         pool->targetIp.c_str(), pool->targetPort, pool->peer ? (" profile=" + pool->profile).c_str() : "");
     Json j = Json::Object();
     j["pool"] = Json(name);
     j["endpoints"] = Json((long long)pool->eps.size());
+    if (pool->peer) j["bind"] = Json(pool->peer->Config().bindIp + ":" + std::to_string(pool->peer->Config().port));
     m_pools[name] = std::move(pool);
     return jsonResp(201, j);
 }
@@ -241,7 +326,7 @@ HttpResponse Worker::poolDelete(const std::string& name) {
     if (m_run && m_runState != "stopped" && m_runState != "idle") return errResp(409, "run_active");
     auto it = m_pools.find(name);
     if (it == m_pools.end()) return errResp(404, "pool_not_found");
-    for (auto& ep : it->second->eps) { m_bySession.erase(ep->s); if (ep->started) ep->s->Stop(5); delete ep->s; }
+    destroyPool(it->second.get());
     m_pools.erase(it);
     Json j = Json::Object();
     j["deleted"] = Json(true);
@@ -286,7 +371,7 @@ HttpResponse Worker::runStart(const Json& d) {
     if (!unsupported.empty()) {
         std::string list;
         for (auto& u : unsupported) list += (list.empty() ? "" : ",") + u;
-        return errResp(400, "unsupported_step", list + " — B 단계 워커는 register/invite/answer/reject/bye/media_hold/wait/expect 만");
+        return errResp(400, "unsupported_step", list + " — 워커는 register/invite/answer/reject/bye/media_hold/wait/expect 만");
     }
     if (spec->steps.empty()) return errResp(400, "steps_required");
 
@@ -318,6 +403,7 @@ HttpResponse Worker::runStart(const Json& d) {
             auto rit = spec->roles.find(role);
             if (rit == spec->roles.end()) return errResp(400, "unknown_role", role);
             Pool* pool = m_pools[rit->second].get();
+            if (pool->kind == "peer") return errResp(400, "register_on_peer", role + " — 피어 신원은 등록하지 않는다(고정 수신점)");
             auto sl = spec->slices[role];
             for (int i = sl.first; i < sl.second && i < (int)pool->eps.size(); ++i) {
                 Endpoint* ep = pool->eps[i].get();
@@ -459,6 +545,18 @@ Endpoint* Worker::endpointOf(SimSession* s) {
     return it == m_bySession.end() ? nullptr : it->second;
 }
 
+Endpoint* Worker::endpointOfPeerCall(CsimPeer* p, const std::string& callId) {
+    auto pit = m_byPeer.find(p);
+    if (pit == m_byPeer.end()) return nullptr;
+    auto it = pit->second->byCall.find(callId);
+    return it == pit->second->byCall.end() ? nullptr : it->second;
+}
+
+std::string Worker::roleOf(Instance* in, Endpoint* ep) {
+    if (in) for (auto& a : in->actors) if (a.second == ep) return a.first;
+    return "";
+}
+
 void Worker::drainEvents() {
     std::deque<Event> evs;
     { std::lock_guard<std::mutex> lk(m_evMtx); evs.swap(m_events); }
@@ -475,7 +573,8 @@ void Worker::emitEvent(const std::string& detail, Endpoint* ep, const std::strin
     if (!callId.empty()) j["call_id"] = Json(callId);
     if (ep) {
         j["identity"] = Json(ep->id.user);
-        if (ep->inst) for (auto& a : ep->inst->actors) if (a.second == ep) j["role"] = Json(a.first);
+        std::string role = roleOf(ep->inst, ep);
+        if (!role.empty()) j["role"] = Json(role);
     }
     if (!step.empty()) j["step"] = Json(step);
     if (code) j["code"] = Json(code);
@@ -484,7 +583,41 @@ void Worker::emitEvent(const std::string& detail, Endpoint* ep, const std::strin
 }
 
 void Worker::onEvent(const Event& e) {
-    Endpoint* ep = endpointOf(e.s);
+    Endpoint* ep = nullptr;
+    Pool* peerPool = nullptr;
+    if (e.s) {
+        ep = endpointOf(e.s);
+    } else if (e.peer) {
+        auto pit = m_byPeer.find(e.peer);
+        if (pit == m_byPeer.end()) return;
+        peerPool = pit->second;
+        if (e.kind == Event::INCOMING) {
+            // 착신 귀속 — To user 가 풀 신원 범위 안이어야 한다
+            auto uit = peerPool->byUser.find(e.user);
+            if (uit == peerPool->byUser.end()) {
+                e.peer->Reject(e.callId, 404);
+                m_metrics.counter("peer_unknown_callee");
+                emitEvent("peer INVITE to unknown identity " + e.user, nullptr, "invite", 404, e.callId);
+                return;
+            }
+            ep = uit->second;
+            if (!ep->callId.empty() && ep->callId != e.callId) {
+                // 같은 신원에 두 번째 호 — 실 단말처럼 486
+                e.peer->Reject(e.callId, 486);
+                m_metrics.counter("peer_busy");
+                return;
+            }
+            ep->callId = e.callId;
+            peerPool->byCall[e.callId] = ep;
+            if (peerPool->profile == "ibcf" && !e.hasPai) {
+                // TS 24.229 §5.10 — II-NNI 로 넘어오는 INVITE 의 발신 신원 단언이 없다 (§12 CSP 과제)
+                m_metrics.counter("pai_missing");
+                emitEvent("inbound INVITE without P-Asserted-Identity", ep, "invite", 0, e.callId);
+            }
+        } else {
+            ep = endpointOfPeerCall(e.peer, e.callId);
+        }
+    }
     if (!ep) return;
     long long now = nowMs();
     Instance* in = ep->inst;
@@ -496,15 +629,14 @@ void Worker::onEvent(const Event& e) {
         break;
     case Event::INCOMING:
         ep->pendingInvite = true;
-        if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "incoming:" + [&] {
-                for (auto& a : in->actors) if (a.second == ep) return a.first; return std::string(); }()) {
+        if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "incoming:" + roleOf(in, ep)) {
             // answer/reject 단계가 착신을 기다리고 있었다 — after_ms 뒤 응답
             in->phase = Instance::WAIT_TIME;
             in->waitUntilMs = now + m_body[in->stepIdx].afterMs;
         }
         if (!in) {
             // 인스턴스 밖의 착신(예: 시나리오에 없는 상대) — 486 로 거절해 스택을 비운다
-            ep->s->RejectCall(486);
+            epReject(ep, 486);
             ep->pendingInvite = false;
             m_metrics.counter("unexpected_invite");
         }
@@ -523,20 +655,30 @@ void Worker::onEvent(const Event& e) {
         bool wasInCall = ep->inCall;
         ep->inCall = false;
         ep->pendingInvite = false;
+        if (ep->isPeer() && ep->callId == e.callId) epClearCall(ep);
         if (!in) break;
-        std::string role;
-        for (auto& a : in->actors) if (a.second == ep) role = a.first;
+        std::string role = roleOf(in, ep);
         if (in->phase == Instance::WAIT_EVENT && in->awaitKind == "callend:" + role) {
-            // reject 단계: 발신자가 기대한 최종 응답을 받았다
+            // reject 단계 또는 invite expect.code≥300: 발신자가 최종 응답을 받았다 — 기대 코드와 다르면 실패
             m_metrics.counter("codes." + std::to_string(e.status));
-            advance(*in, now);
+            if (in->expectCode >= 300 && e.status != in->expectCode) {
+                emitEvent("expected " + std::to_string(in->expectCode) + " got " + std::to_string(e.status), ep, "invite", e.status, e.callId);
+                finishInstance(*in, true, "unexpected final", now);
+            } else {
+                advance(*in, now);
+            }
             break;
         }
         if (e.status >= 300) {
             m_metrics.counter("codes." + std::to_string(e.status));
             if (in->phase != Instance::DONE) {
-                emitEvent("call failed", ep, in->stepIdx < m_body.size() ? m_body[in->stepIdx].step : "", e.status, e.callId);
-                finishInstance(*in, true, "final " + std::to_string(e.status), now);
+                if (in->expectCode >= 300 && e.status == in->expectCode && ep->tStartCallMs > 0) {
+                    // invite expect.code 가 거절 코드 — 이 최종 응답이 성공 조건 (ACL deny 403, 라우팅 reject 등)
+                    finishInstance(*in, false, "", now);
+                } else {
+                    emitEvent("call failed", ep, in->stepIdx < m_body.size() ? m_body[in->stepIdx].step : "", e.status, e.callId);
+                    finishInstance(*in, true, "final " + std::to_string(e.status), now);
+                }
             }
         } else if (wasInCall && in->phase == Instance::WAIT_EVENT && in->awaitKind.rfind("byeresp:", 0) == 0 &&
                    in->actors[in->awaitKind.substr(8)] != ep) {
@@ -549,6 +691,7 @@ void Worker::onEvent(const Event& e) {
         m_metrics.timer("sdd_ms", (double)e.ms);
         if (e.status / 100 == 2) m_metrics.counter("completed");
         else m_metrics.counter("bye_fail");
+        if (ep->isPeer() && ep->callId == e.callId) epClearCall(ep);
         if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind.rfind("byeresp:", 0) == 0 &&
             in->actors[in->awaitKind.substr(8)] == ep)
             advance(*in, now);
@@ -556,8 +699,9 @@ void Worker::onEvent(const Event& e) {
     }
 }
 
+// ── 단말 동작 (UE 세션 / 피어 신원) ────────────────────────────────────────
 bool Worker::startEndpoint(Endpoint* ep) {
-    if (ep->started) return true;
+    if (ep->isPeer() || ep->started) return true;
     ep->s->m_clsRtpThread.ResetRecvStats();
     if (!ep->s->Start()) {
         m_metrics.counter("registered_fail");
@@ -566,6 +710,54 @@ bool Worker::startEndpoint(Endpoint* ep) {
     }
     ep->started = true;
     return true;
+}
+
+bool Worker::epStartCall(Endpoint* from, Endpoint* to) {
+    if (from->isPeer()) {
+        Pool* pool = from->poolRef;
+        std::string callId = pool->peer->StartCall(from->id.user, to->id.user, to->id.domain, pool->targetIp, pool->targetPort,
+                                                   parseTransport(pool->transport));
+        if (callId.empty()) return false;
+        from->callId = callId;
+        pool->byCall[callId] = from;
+        return true;
+    }
+    if (!from->started && !startEndpoint(from)) return false;
+    // UE 가 피어 신원을 부를 땐 user@피어도메인 — Request-URI host 로 CSP 라우팅 정책(req_uri_host)이 고른다
+    std::string target = to->isPeer() ? to->id.user + "@" + to->id.domain : to->id.user;
+    from->s->StartCall(target);
+    return !from->s->m_strInviteId.empty();
+}
+
+bool Worker::epHasCall(Endpoint* ep) {
+    if (ep->isPeer()) return !ep->callId.empty() && ep->poolRef->peer->HasCall(ep->callId);
+    return !ep->s->m_strInviteId.empty();
+}
+
+int Worker::epAnswer(Endpoint* ep) {
+    if (ep->isPeer()) return ep->callId.empty() ? 481 : ep->poolRef->peer->Answer(ep->callId);
+    return ep->s->AnswerCall() ? 0 : 481;
+}
+
+bool Worker::epReject(Endpoint* ep, int code) {
+    if (ep->isPeer()) {
+        if (ep->callId.empty()) return false;
+        bool ok = ep->poolRef->peer->Reject(ep->callId, code);
+        return ok;
+    }
+    return ep->s->RejectCall(code);
+}
+
+bool Worker::epBye(Endpoint* ep) {
+    if (ep->isPeer()) return !ep->callId.empty() && ep->poolRef->peer->Bye(ep->callId);
+    ep->s->StopCall();
+    return true;
+}
+
+void Worker::epClearCall(Endpoint* ep) {
+    if (!ep->isPeer() || ep->callId.empty()) return;
+    ep->poolRef->byCall.erase(ep->callId);
+    ep->callId.clear();
 }
 
 void Worker::tickPrelude(long long now) {
@@ -588,9 +780,6 @@ void Worker::tickPrelude(long long now) {
     if (m_preludeCursor < m_preludeList.size()) return;
     size_t reg = 0, pending = 0;
     for (auto* ep : m_preludeList) { if (ep->registered) reg++; else if (ep->started) pending++; }
-    // 전원 응답(성공/실패) 또는 상한 → body 로. 실패한 단말은 free 목록에서 뺀다.
-    size_t answered = 0;
-    for (auto* ep : m_preludeList) if (ep->registered || !ep->started) answered++;
     bool timeout = now >= m_preludeDeadlineMs;
     if (pending > 0 && !timeout) {
         // 실패 응답(REGISTER 4xx) 은 registered=false 이면서 started=true — 이벤트 카운터로 판정 불가하므로
@@ -599,7 +788,6 @@ void Worker::tickPrelude(long long now) {
         for (auto* ep : m_preludeList) if (ep->started && !ep->registered && ep->s->m_stats.iRegFail > 0) failed++;
         if (failed < pending) return;
     }
-    (void)answered;
     for (auto& kv : m_free) {
         auto& v = kv.second;
         v.erase(std::remove_if(v.begin(), v.end(), [](Endpoint* ep) { return ep->started && !ep->registered; }), v.end());
@@ -619,7 +807,20 @@ void Worker::tickBody(long long now) {
         if (in.phase == Instance::WAIT_TIME && now >= in.waitUntilMs) {
             if (in.pending == Instance::ANSWER || in.pending == Instance::REJECT) {
                 Endpoint* ep = in.actors[in.pendingRole];
-                bool ok = in.pending == Instance::ANSWER ? ep->s->AnswerCall() : ep->s->RejectCall(in.pendingCode);
+                bool ok;
+                if (in.pending == Instance::ANSWER) {
+                    int rc = epAnswer(ep);
+                    ok = rc == 0;
+                    if (!ok && rc != 481) {
+                        // 착신 측이 응답을 못 냈다 (488 = 공통 코덱 없음 — IP-PBX G.711 ↔ AMR-WB, cmp.md §11)
+                        m_metrics.counter("codes." + std::to_string(rc));
+                        emitEvent("answer refused", ep, "answer", rc, ep->callId);
+                        finishInstance(in, true, "answer " + std::to_string(rc), now);
+                        continue;
+                    }
+                } else {
+                    ok = epReject(ep, in.pendingCode);
+                }
                 if (!ok) { finishInstance(in, true, "no pending invite to answer", now); continue; }
                 ep->pendingInvite = false;
                 if (in.pending == Instance::ANSWER) {
@@ -715,7 +916,11 @@ void Worker::launchInstance(long long now) {
     in->id = m_nextInstanceId++;
     in->actors = actors;
     in->tStartMs = now;
-    for (auto& a : actors) { a.second->inst = in.get(); a.second->tStartCallMs = 0; a.second->s->m_clsRtpThread.ResetRecvStats(); }
+    for (auto& a : actors) {
+        a.second->inst = in.get();
+        a.second->tStartCallMs = 0;
+        if (a.second->s) a.second->s->m_clsRtpThread.ResetRecvStats();
+    }
     Instance* raw = in.get();
     m_instances.push_back(std::move(in));
     m_launched++;
@@ -731,11 +936,18 @@ void Worker::execStep(Instance& in, long long now) {
             Endpoint* from = in.actors[st.from];
             Endpoint* to = st.to.empty() ? nullptr : in.actors[st.to];
             if (!from || !to) { finishInstance(in, true, "invite: role missing", now); return; }
-            if (!from->started && !startEndpoint(from)) { finishInstance(in, true, "invite: stack start failed", now); return; }
             from->tStartCallMs = now;
-            from->s->StartCall(to->id.user);
-            if (from->s->m_strInviteId.empty()) { finishInstance(in, true, "invite: StartCall refused (busy?)", now); return; }
+            in.expectCode = (int)st.expect["code"].asInt(0);
+            if (!epStartCall(from, to)) { finishInstance(in, true, "invite: StartCall refused (busy/stack?)", now); return; }
             m_metrics.counter("legs", 2);
+            if (in.expectCode >= 300) {
+                // 거절이 기대값(ACL 403·라우팅 reject) — 발신자의 최종 응답을 여기서 기다린다
+                in.stepIdx++;
+                in.phase = Instance::WAIT_EVENT;
+                in.awaitKind = "callend:" + st.from;
+                in.deadlineMs = now + m_cfg.inviteTimeoutMs;
+                return;
+            }
             in.stepIdx++;   // 비동기 — 확립은 answer/media_hold 가 기다린다
             continue;
         }
@@ -778,12 +990,12 @@ void Worker::execStep(Instance& in, long long now) {
                 for (auto& a : in.actors) sampleRtp(a.second);
             Endpoint* from = in.actors[st.from];
             if (!from) { finishInstance(in, true, "bye: role missing", now); return; }
-            if (!from->inCall || from->s->m_strInviteId.empty()) {
+            if (!from->inCall || !epHasCall(from)) {
                 // 이미 끝난 호(상대 종료·실패) — BYE 없이 통과
                 in.stepIdx++;
                 continue;
             }
-            from->s->StopCall();
+            epBye(from);
             in.phase = Instance::WAIT_EVENT;
             in.awaitKind = "byeresp:" + st.from;
             in.deadlineMs = now + m_cfg.byeTimeoutMs;
@@ -796,9 +1008,14 @@ void Worker::execStep(Instance& in, long long now) {
 }
 
 void Worker::sampleRtp(Endpoint* ep) {
-    CRtpThread& rt = ep->s->m_clsRtpThread;
-    unsigned long long rx = rt.m_ullRecvTotal.load(), lost = rt.m_ullRecvLost.load();
-    long long jitterUs = rt.m_llRecvJitterUs.load();
+    unsigned long long rx = 0, lost = 0;
+    long long jitterUs = 0;
+    if (ep->isPeer()) {
+        if (ep->callId.empty() || !ep->poolRef->peer->RtpStats(ep->callId, rx, lost, jitterUs)) return;
+    } else {
+        CRtpThread& rt = ep->s->m_clsRtpThread;
+        rx = rt.m_ullRecvTotal.load(); lost = rt.m_ullRecvLost.load(); jitterUs = rt.m_llRecvJitterUs.load();
+    }
     m_metrics.counter("rtp_rx", (long long)rx);
     m_metrics.counter("rtp_lost", (long long)lost);
     if (rx + lost > 0) {
@@ -807,14 +1024,16 @@ void Worker::sampleRtp(Endpoint* ep) {
     } else {
         m_metrics.counter("rtp_silent_legs");
     }
-    rt.ResetRecvStats();
+    if (ep->isPeer()) ep->poolRef->peer->ResetRtpStats(ep->callId);
+    else ep->s->m_clsRtpThread.ResetRecvStats();
 }
 
 void Worker::releaseEndpoint(Endpoint* ep) {
-    if (ep->inCall || !ep->s->m_strInviteId.empty()) ep->s->StopCall();
-    if (ep->pendingInvite) { ep->s->RejectCall(480); ep->pendingInvite = false; }
+    if (ep->pendingInvite) { epReject(ep, 480); ep->pendingInvite = false; }
+    else if (ep->inCall || epHasCall(ep)) epBye(ep);
     ep->inCall = false;
     ep->tStartCallMs = 0;
+    if (ep->isPeer()) epClearCall(ep);
     Instance* in = ep->inst;
     ep->inst = nullptr;
     if (in) for (auto& a : in->actors) if (a.second == ep) { m_free[a.first].insert(m_free[a.first].begin(), ep); break; }
@@ -835,7 +1054,7 @@ void Worker::finishInstance(Instance& in, bool failed, const std::string& why, l
 
 void Worker::endRun(const std::string& state) {
     logf("info", "run %s ending → %s", m_run->runId.c_str(), state.c_str());
-    // epilogue: deregister 단계가 있으면 그 역할의 단말을 내린다
+    // epilogue: deregister 단계가 있으면 그 역할의 단말을 내린다 (피어 신원은 해당 없음)
     for (auto& st : m_epilogue) {
         if (st.step != "deregister") continue;
         for (auto& role : st.who) {
@@ -845,7 +1064,7 @@ void Worker::endRun(const std::string& state) {
             auto sl = m_run->slices[role];
             for (int i = sl.first; i < sl.second && i < (int)pool->eps.size(); ++i) {
                 Endpoint* ep = pool->eps[i].get();
-                if (!ep->started) continue;
+                if (!ep->s || !ep->started) continue;
                 ep->s->Stop(5);
                 ep->started = false;
                 ep->registered = false;

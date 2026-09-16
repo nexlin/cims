@@ -501,6 +501,14 @@ bool CModuleDispatcher::EventIncomingRequestAuth( CSipMessage *pclsMessage ) {
         if ( gclsPendingRouteMap.Has( strCallId ) ) return true;
     }
 
+    // 피어링 접속점(LocalNode edge=peering) 으로 들어온 요청 — 상대는 가입자가 아니라 신뢰 피어 망이다
+    //   (TS 24.229 §5.10 IBCF · TS 29.165 II-NNI). 신뢰는 RecvRequest 의 ACL(acl_policies, 소스 IP) 이 세우고
+    //   Digest 챌린지는 하지 않는다. 접속(access) 접속점은 종전대로 가입자 인증 흐름.
+    {
+        LocalNodeInfo clsLn = gclsLocalNodeMap.GetByIntId( pclsMessage->m_iListenerId );
+        if ( clsLn.IsValid() && clsLn.edge == "peering" ) return true;
+    }
+
     // ⚠️ 테스트 환경 전용 (Setup.TestEnvOpenTermination=true) — 상용 원복 대상.
     //   착신(To)이 로컬 가입자/그룹인 INVITE 는 발신자 401 챌린지를 생략하고 통과시킨다
     //   (수신 통화 허용). 비가입자 착신 INVITE 는 RecvRequest 에서 이미 603 처리되어

@@ -1142,6 +1142,24 @@ void SimSession::StartCall(const std::string& strTarget) {
         printf("[%d] CreateCall 실패 — 일반 INVITE 폴백\n", m_iId);
     }
 
+    // 목적지가 `user@domain` 이면 Request-URI/To 의 host 를 그 도메인으로 낸다 — psip 기본은 `user@접속IP`
+    //   라 외부 도메인 착신(IBCF 트렁크 발신, 피어 신원 다이얼)이 `user@domain@ip` 로 깨진다. 다음 홉은 Route(서버)가 정한다.
+    size_t iAt = strDst.find('@');
+    if (iAt != std::string::npos && iAt > 0 && iAt + 1 < strDst.size()) {
+        std::string strToUser = strDst.substr(0, iAt), strToDomain = strDst.substr(iAt + 1);
+        CSipMessage* pInvite = NULL;
+        if (m_clsUserAgent.CreateCall(m_strUser.c_str(), strToUser.c_str(), &clsRtp, &clsRoute, m_strInviteId, &pInvite, NULL) &&
+            pInvite) {
+            pInvite->m_clsReqUri.Set(SIP_PROTOCOL, strToUser.c_str(), strToDomain.c_str(), 0);
+            pInvite->m_clsReqUri.InsertTransport(m_eTransport);
+            pInvite->m_clsTo.m_clsUri.Set(SIP_PROTOCOL, strToUser.c_str(), strToDomain.c_str(), 0);
+            printf("[%d] INVITE → %s\n", m_iId, strDst.c_str());
+            m_clsUserAgent.StartCall(m_strInviteId.c_str(), pInvite);
+            return;
+        }
+        printf("[%d] CreateCall 실패 — 일반 INVITE 폴백\n", m_iId);
+    }
+
     printf("[%d] INVITE → %s\n", m_iId, strDst.c_str());
     m_clsUserAgent.StartCall(m_strUser.c_str(), strDst.c_str(),
                               &clsRtp, &clsRoute, m_strInviteId);

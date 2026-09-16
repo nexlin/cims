@@ -323,24 +323,31 @@ bool CSipUserAgent::SetInviteResponse( std::string & strCallId, CSipMessage * pc
 			{
 				if( itMap->second.m_sttCancelTime.tv_sec == 0 )
 				{
-					itMap->second.m_strToTag.clear();
+					// 자격(등록 정보)이 있을 때만 Authorization 을 실어 재전송한다. 없으면 재전송할 근거가 없고
+					//   같은 INVITE 를 다시 보내면 401 ↔ INVITE 무한 루프가 된다(피어 UA 가 챌린지를 받을 때) —
+					//   다른 4xx 와 같이 최종 실패로 응용에 넘긴다.
+					SIP_SERVER_INFO_LIST::iterator itSL;
+					const char * pszUserId = pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str();
+					bool bAuth = false;
 
-					pclsInvite = itMap->second.CreateInvite();
-					if( pclsInvite )
+					m_clsRegisterMutex.acquire();
+					for( itSL = m_clsRegisterList.begin(); itSL != m_clsRegisterList.end(); ++itSL )
 					{
-						SIP_SERVER_INFO_LIST::iterator itSL;
-						const char * pszUserId = pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str();
-
-						m_clsRegisterMutex.acquire();
-						for( itSL = m_clsRegisterList.begin(); itSL != m_clsRegisterList.end(); ++itSL )
+						if( !strcmp( itSL->m_strUserId.c_str(), pszUserId ) )
 						{
-							if( !strcmp( itSL->m_strUserId.c_str(), pszUserId ) )
-							{
-								itSL->AddAuth( pclsInvite, pclsMessage );
-								break;
-							}
+							itMap->second.m_strToTag.clear();
+							pclsInvite = itMap->second.CreateInvite();
+							if( pclsInvite ) itSL->AddAuth( pclsInvite, pclsMessage );
+							bAuth = true;
+							break;
 						}
-						m_clsRegisterMutex.release();
+					}
+					m_clsRegisterMutex.release();
+
+					if( bAuth == false )
+					{
+						if( itMap->second.m_sttStartTime.tv_sec == 0 ) gettimeofday( &itMap->second.m_sttEndTime, NULL );
+						else bReInvite = true;
 					}
 				}
 			}

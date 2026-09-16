@@ -378,6 +378,11 @@ From URI 단독 매칭은 **fallback 으로 강등**. IMS 표준을 참고한 �
 
 1/2 가 주 경로. 3 은 IBCF incoming. 4/5 는 의심스러운 fallback (로그에 `svc_source=from_header_fallback` 표식).
 
+**피어링 접속점의 인증** — `edge=peering` LocalNode 로 들어온 요청은 가입자 인증(Digest 챌린지)을 하지 않는다
+(`CModuleDispatcher::EventIncomingRequestAuth`, TS 24.229 §5.10 IBCF · TS 29.165 II-NNI — 상대는 신뢰 피어 망이지 가입자가 아니다).
+신뢰는 `RecvRequest` 선평가 ACL(`acl_policies`, 소스 IP·scope=local_node)이 세운다. 피어링 접속점을 열면 ACL 로 상대를 좁히는 것이
+운영 절차다. 접속(access) 접속점은 종전대로 §3 흐름.
+
 ---
 
 ## 5. 배치 패턴

@@ -3,7 +3,8 @@
 name: media01
 target:
   name: media01
-  csp: { ip: 10.0.0.45, udp: 5060, tcp: 25061, tls: 5061, domain_volte: volte.cims.example.kr, domain_ptt: ptt.cims.example.kr }
+  csp: { ip: 10.0.0.45, udp: 5060, tcp: 25061, tls: 5061, domain_volte: volte.cims.example.kr, domain_ptt: ptt.cims.example.kr,
+         peering: { port: 5070, protocol: udp, local_node: cims-tester-peering } }   # 피어 풀의 다음 홉 — 없으면 시드(edge=peering)
   csc: { host: 10.0.0.45, port: 4430, tls: true }
   oam: { url: https://10.0.0.45:4419, token_env: TESTER_OAM_TOKEN }
   observe: [oam_stats, oam_alarms, agent_heartbeat]
@@ -20,12 +21,28 @@ pools:
     kind: ue
     source: { creds: creds/ptt.jsonl }
     transport: udp
-  peer_kt:
+  peer_kt:                      # 타 IMS 코어 — 워커 w2 호스트에 수신점. 시드 = remote_node/route/rule/routing_policy(자동)
     kind: peer
     profile: ibcf
-    bind: { ip: 10.0.0.62, port: 5080, protocol: tls }
+    bind: { ip: 10.0.0.62, port: 5080, protocol: udp }
     domain: ims.kt.test
-    identities: { e164_range: ["+82212340000", "+82212349999"] }
+    identities: { e164_range: ["+82212340000", "+82212349999"], count: 200 }
+    seed: { route_set: rs-kt, priority: 100 }
+  peer_kt_dead:                 # 같은 RouteSet 의 우선 피어 — 무응답(failover 시험, TRUNK-IBCF-FAILOVER)
+    kind: peer
+    profile: ibcf
+    bind: { ip: 10.0.0.62, port: 5081, protocol: udp }
+    domain: ims.kt.test
+    identities: { e164_range: ["+82212340000", "+82212340009"] }
+    answer: silent
+    seed: { route_set: rs-kt, priority: 50 }
+  peer_blocked:                 # ACL deny 대상 피어 (TRUNK-IBCF-ACL-DENY)
+    kind: peer
+    profile: ibcf
+    bind: { ip: 10.0.0.62, port: 5082, protocol: udp }
+    domain: ims.blocked.test
+    identities: { e164_range: ["+82299990000", "+82299990009"] }
+    seed: { acl: deny }
   pbx_hq:
     kind: peer
     profile: pbx

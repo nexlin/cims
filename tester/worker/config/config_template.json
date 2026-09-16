@@ -24,7 +24,8 @@
           "help": "0 = OS 자동. >0 이면 단말 i 가 base+2i 를 쓴다(IPsec·고정 포트 시험)." },
         { "key": "Media.AudioFile", "label": "AMR-WB 미디어 파일", "type": "path", "default": "", "restart": true,
           "help": "raw 61 바이트 프레임 파일(cspsim -media_file). 비우면 합성 PCMU." },
-        { "key": "Media.VideoFile", "label": "H.264 비디오 파일", "type": "path", "default": "", "restart": true }
+        { "key": "Media.VideoFile", "label": "H.264 비디오 파일", "type": "path", "default": "", "restart": true },
+        { "key": "Media.PeerCertFile", "label": "피어 풀 TLS 수신점 인증서(PEM)", "type": "path", "default": "", "restart": true }
       ],
       "scope": "service"
     },

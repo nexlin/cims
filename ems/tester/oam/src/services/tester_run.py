@@ -24,7 +24,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from services import tester_store as store
-from services import tester_workers, tester_compile
+from services import tester_workers, tester_compile, tester_target
 from services.tester_bus import publish
 from services.tester_models import RunRecord, RunRequest, LoadProfile
 
@@ -282,6 +282,7 @@ class RunDriver(threading.Thread):
         self.notes: List[str] = []
         self.expect_results: List[dict] = []
         self.step_log: List[dict] = []
+        self.seeder: Optional[tester_target.CspSeeder] = None
 
     # ── 외부 제어
     def request_stop(self, reason: str = 'operator') -> None:
@@ -310,6 +311,10 @@ class RunDriver(threading.Thread):
             self.verdict = 'error'
             self.notes.append(f'worker: {e}')
             _log('error', f'[run {self.run_id}] worker error: {e}')
+        except tester_target.TargetError as e:
+            self.verdict = 'error'
+            self.notes.append(f'target: {e}')
+            _log('error', f'[run {self.run_id}] target error: {e}')
         except Exception as e:
             self.verdict = 'error'
             self.notes.append(f'{e}')
@@ -352,6 +357,8 @@ class RunDriver(threading.Thread):
         self.plan = tester_compile.compile_run(
             self.run_id, self.scenario, self.topology, self.topology_doc, self.profile,
             self.req.bindings, self.workers, stream_for, self.req.instances, self.req.rate_saps)
+        # 피어 풀을 쓰는 run 은 워커 하나에 고정된다(compile) — 나머지 워커는 건드리지 않는다
+        self.workers = [w for w in self.workers if w.name in self.plan['workers']]
         # 용량 검사
         for w in self.workers:
             need = sum(len(p['identities']) for p in self.plan['workers'][w.name]['pools'])
@@ -361,6 +368,15 @@ class RunDriver(threading.Thread):
         self.rate = float(self.plan['rate_total'])
         self.state = 'provisioning'
         self._publish_state()
+        # 피어 풀 — 대상 CSP 컬렉션 시드(remote_nodes·routes·route_sets·rules·routing_policies·acl) → run 끝에 복원
+        if self.plan.get('peer_pools'):
+            used = {r.pool for r in self.scenario.roles.values()}
+            self.seeder = tester_target.CspSeeder.for_run(self.topology, used)
+            if self.seeder is not None:
+                applied = self.seeder.apply()
+                self.notes.append(f'csp seed(dep {self.seeder.dep_id}, ln={self.seeder.local_node_ref}): '
+                                  + ', '.join(f'{k}+{v}' for k, v in applied.items()))
+                time.sleep(1.5)   # SIGUSR1 reload — 리스너 bind·라우팅 캐시 반영 여유
         for w in self.workers:
             for p in self.plan['workers'][w.name]['pools']:
                 w.pool_create(p)
@@ -495,6 +511,9 @@ class RunDriver(threading.Thread):
                 break
             time.sleep(1)
         time.sleep(1.5)   # 마지막 agg 도착 여유
+        if self.seeder is not None and self.seeder.applied:
+            errs = self.seeder.restore()
+            self.notes.append('csp seed restored' if not errs else 'csp seed restore FAILED: ' + '; '.join(errs))
         self.ended_at = _now_iso()
         snap = self.rec.snapshot()
         summary = self._summary(snap)
@@ -567,6 +586,10 @@ class RunDriver(threading.Thread):
                     if s.step == 'register':
                         got_bad = c.get('registered_fail', 0)
                         r.update({'observed': f'ok={c.get("registered_ok", 0)} fail={got_bad}', 'ok': got_bad == 0 if want == 200 else True})
+                    elif s.step == 'invite' and want is not None and want >= 300:
+                        # 기대한 거절(ACL 403·라우팅 reject) — 그 코드가 관측되고 실패 인스턴스가 없어야 한다
+                        r.update({'observed': f'codes.{want}={c.get(f"codes.{want}", 0)} failed={c.get("failed", 0)}',
+                                  'ok': c.get(f'codes.{want}', 0) > 0 and c.get('failed', 0) == 0})
                     elif s.step in ('invite', 'answer', 'bye'):
                         r.update({'observed': f'sessions={sessions} failed={c.get("failed", 0)}', 'ok': c.get('failed', 0) == 0 if want == 200 else True})
                     elif s.step == 'reject':

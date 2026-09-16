@@ -6,7 +6,9 @@
     role_slices 는 워커 로컬 인덱스.
   · `${ht}` 같은 바인딩 해석(요청 bindings > profile.ht), seconds 정수화
   · 발생율 — 프로파일 initial rate 를 워커 몫으로 나눔. 단발(프로파일 없음)은 max_instances 배분.
-신원 원천: creds JSONL(cspsim -creds 승계). db 원천은 C 단계(대상 CSC 위임) — 지금은 명시적으로 거절한다.
+  · 피어 풀(kind=peer) — 신원은 e164_range/did_range 를 펼친 것, 풀은 bind.ip 와 같은 호스트의 워커 **하나**에 고정된다
+    (수신점이 하나이므로). 피어 풀을 쓰는 시나리오는 그 워커 한 대에서만 돈다(인스턴스의 역할들이 한 워커에 있어야 하므로).
+신원 원천: creds JSONL(cspsim -creds 승계). db 원천(대상 CSC 위임)은 후속 — 지금은 명시적으로 거절한다.
 """
 from __future__ import annotations
 
@@ -36,11 +38,42 @@ def _creds_path(rel: str) -> str:
     raise CompileError(f'creds 파일 없음: {rel} (scenarios/·DataDir 상대 또는 절대 경로)')
 
 
+def expand_range(lo: str, hi: str, count: Optional[int] = None) -> List[str]:
+    """번호 범위 펼치기 — 앞 비숫자 접두(+)·자릿수(0 채움) 보존. ["+8221234000","+8221234009"] → 10 개."""
+    pre = ''
+    i = 0
+    while i < len(lo) and not lo[i].isdigit():
+        pre += lo[i]
+        i += 1
+    a, b = lo[i:], hi[len(pre):]
+    if not a.isdigit() or not b.isdigit():
+        raise CompileError(f'번호 범위가 숫자가 아니다: {lo}~{hi}')
+    if int(b) < int(a):
+        raise CompileError(f'번호 범위 역순: {lo}~{hi}')
+    n = int(b) - int(a) + 1
+    if count:
+        n = min(n, int(count))
+    if n > 100000:
+        raise CompileError(f'번호 범위가 너무 크다({n}) — identities.count 로 줄인다')
+    return [pre + str(int(a) + k).zfill(len(a)) for k in range(n)]
+
+
+def peer_identities(pool_name: str, pool_doc: dict) -> List[dict]:
+    ids = pool_doc.get('identities') or {}
+    rng = ids.get('e164_range') or ids.get('did_range')
+    if not rng or len(rng) != 2:
+        raise CompileError(f'pool {pool_name}: identities.e164_range 또는 did_range 가 필요하다')
+    domain = str(pool_doc.get('domain') or '')
+    return [{'user': u, 'domain': domain} for u in expand_range(str(rng[0]), str(rng[1]), ids.get('count'))]
+
+
 def load_identities(pool_name: str, pool_doc: dict) -> List[dict]:
-    """풀 신원 목록 — Identity(dict). kind=ue 만(B 단계)."""
+    """풀 신원 목록 — Identity(dict). kind=ue(creds) · kind=peer(번호 범위)."""
     kind = pool_doc.get('kind')
+    if kind == 'peer':
+        return peer_identities(pool_name, pool_doc)
     if kind != 'ue':
-        raise CompileError(f'pool {pool_name}: kind={kind} 는 B 단계 워커가 지원하지 않는다 (peer/real-ue = C·F 단계)')
+        raise CompileError(f'pool {pool_name}: kind={kind} 는 워커가 지원하지 않는다 (real-ue = F 단계)')
     src = pool_doc.get('source') or {}
     if 'db' in src:
         raise CompileError(f'pool {pool_name}: db 원천은 C 단계(대상 CSC 위임). 지금은 `cims-tester creds-from-db` 로 '
@@ -81,7 +114,9 @@ def load_identities(pool_name: str, pool_doc: dict) -> List[dict]:
 
 
 def _default_domain(topology: Topology, pool_doc: dict) -> str:
-    """creds 에 domain 이 없을 때 — 풀 이름/표기로 volte·ptt 도메인을 고른다 (target.csp.domain_*)."""
+    """creds 에 domain 이 없을 때 — 풀 이름/표기로 volte·ptt 도메인을 고른다 (target.csp.domain_*). 피어 풀은 자기 domain."""
+    if pool_doc.get('kind') == 'peer':
+        return str(pool_doc.get('domain') or '')
     csp = topology.target.csp
     name = str(pool_doc.get('_name') or '')
     if 'ptt' in name and csp.domain_ptt:
@@ -219,6 +254,24 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
         identities[pname] = ids
     ranges = role_ranges(scenario, {p: len(v) for p, v in identities.items()})
 
+    # 피어 풀 — bind.ip 호스트의 워커 하나에 고정. 피어를 쓰는 시나리오는 그 워커에서만 돈다.
+    peer_pools = [p for p in used_pools if (pools_doc.get(p) or {}).get('kind') == 'peer']
+    if peer_pools:
+        pinned = None
+        for pname in peer_pools:
+            bind_ip = str(((pools_doc.get(pname) or {}).get('bind') or {}).get('ip') or '')
+            host = None
+            for w in workers:
+                if w.host == bind_ip or str((w.health or {}).get('local_ip') or '') == bind_ip:
+                    host = w
+                    break
+            if host is None:
+                raise CompileError(f'pool {pname}: bind.ip {bind_ip} 인 워커가 토폴로지 workers 에 없다 — 피어 수신점은 워커 호스트여야 한다')
+            if pinned is not None and pinned is not host:
+                raise CompileError(f'피어 풀들이 서로 다른 워커({pinned.name}, {host.name})에 있다 — 한 시나리오의 피어는 한 워커에')
+            pinned = host
+        workers = [pinned]
+
     # 워커 배분
     weights = [float(getattr(w, 'cpus', None) or ((w.health or {}).get('max_endpoints') or 1) / 200.0 or 1) for w in workers]
     per_worker: Dict[str, dict] = {w.name: {'pools': {}, 'roles': {}, 'slices': {}} for w in workers}
@@ -250,9 +303,14 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
             glist = sorted(local['global'])
             gmap[pname] = {g: i for i, g in enumerate(glist)}
             pdoc = pools_doc.get(pname) or {}
-            pc = PoolCreate(pool=pname, kind='ue', identities=[identities[pname][g] for g in glist],
-                            transport=pdoc.get('transport', 'udp'), srtp=pdoc.get('srtp', 'off'),
-                            target_csp=topology.target.csp)
+            if pdoc.get('kind') == 'peer':
+                pc = PoolCreate(pool=pname, kind='peer', identities=[identities[pname][g] for g in glist],
+                                transport=str((pdoc.get('bind') or {}).get('protocol') or 'udp'),
+                                target_csp=topology.target.csp, peer=topology.pools[pname])
+            else:
+                pc = PoolCreate(pool=pname, kind='ue', identities=[identities[pname][g] for g in glist],
+                                transport=pdoc.get('transport', 'udp'), srtp=pdoc.get('srtp', 'off'),
+                                target_csp=topology.target.csp)
             pools.append(pc.model_dump(by_alias=True, exclude_none=True))
         slices = {}
         for role, (pb, pe) in pw['slices'].items():
@@ -276,7 +334,7 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
         first['max_instances'] = max(1, first.get('max_instances', 0) + (max_instances - tot))
     return {'workers': plan_workers, 'rate_total': rate_total, 'roles': {r: list(v) for r, v in ranges.items()},
             'steps': steps, 'bindings': bindings, 'max_instances': max_instances,
-            'identities': {p: len(v) for p, v in identities.items()}}
+            'identities': {p: len(v) for p, v in identities.items()}, 'peer_pools': peer_pools}
 
 
 def initial_rate(profile: LoadProfile) -> float:

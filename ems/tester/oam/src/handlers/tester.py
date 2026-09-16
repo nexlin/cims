@@ -138,7 +138,7 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             'stream_subscribers': TESTER_BUS.subscriber_count(),
             'worker_stream': ({'ip': RUNS.stream.ip, 'port': RUNS.stream.port, 'connections': RUNS.stream.connections}
                               if RUNS.stream else None),
-            'phase': 'B',   # 이행 단계 — ue 풀 run 실행 가능 (peer 축은 C)
+            'phase': 'C',   # 이행 단계 — ue 풀 + peer 풀(ibcf·pbx·mgcf 엔진, CSP 컬렉션 시드) run 실행 가능
         })
 
     if head == 'events' and method == 'GET':

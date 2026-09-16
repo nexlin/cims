@@ -4,6 +4,7 @@ add_definitions(-DNO_ALSA -DNO_SOUND_CARD)
 #    cspsim CLI 와 cims-tester-worker(tester/worker) 가 같은 엔진을 쓴다. 공개 헤더 = 이 디렉터리.
 add_library(csim STATIC
     SimSession.cpp
+    CsimPeer.cpp
     SipClient.cpp
     SipClientSetup.cpp
     G711.cpp

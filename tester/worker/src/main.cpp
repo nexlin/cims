@@ -72,6 +72,7 @@ int main(int argc, char** argv) {
         cfg.sipPortBase = (int)c["Sip"]["PortBase"].asInt(0);
         cfg.mediaFile = c["Media"]["AudioFile"].asString("");
         cfg.videoFile = c["Media"]["VideoFile"].asString("");
+        cfg.peerCertFile = c["Media"]["PeerCertFile"].asString("");
         cfg.maxEndpointsPerCore = (int)c["Limits"]["EndpointsPerCore"].asInt(cfg.maxEndpointsPerCore);
         cfg.maxSapsPerCore = c["Limits"]["SapsPerCore"].asDouble(cfg.maxSapsPerCore);
         cfg.registerIntervalMs = (int)c["Timers"]["RegisterIntervalMs"].asInt(cfg.registerIntervalMs);

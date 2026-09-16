@@ -1,12 +1,15 @@
-// Worker — cims-tester-worker 본체: 풀(가상 단말 집합)·run 실행기·관측 스트림 (test_instrument.md §3·§6.1).
+// Worker — cims-tester-worker 본체: 풀(가상 단말·피어 신원 집합)·run 실행기·관측 스트림 (test_instrument.md §3·§6.1).
 //
-//  · 풀(POST /pools): 신원마다 libcsim SimSession 하나(스택 미기동). kind=ue 만 (peer/real-ue 는 C·F 단계).
+//  · 풀(POST /pools): kind=ue — 신원마다 libcsim SimSession 하나(스택 미기동). kind=peer — 풀당 CsimPeer 엔진 하나
+//    (고정 수신점, 생성 즉시 bind) + 신원(E.164/DID)마다 Endpoint 하나(스택 없음, 엔진의 호를 Call-ID 로 귀속).
+//    real-ue 는 F 단계.
 //  · run(POST /runs): 컴파일된 단계 목록을 셋으로 나눈다 —
-//      prelude  = 앞쪽의 register(+wait) 단계: 역할 슬라이스의 단말 전부를 한 번 등록(간격 두고 Start)
+//      prelude  = 앞쪽의 register(+wait) 단계: 역할 슬라이스의 단말 전부를 한 번 등록(간격 두고 Start). 피어 신원은 등록 없음
 //      body     = 나머지: 시나리오 인스턴스 하나가 실행하는 단위. 인스턴스는 rate_saps 로 발생(SApS),
 //                 역할마다 free 단말을 하나씩 잡고 단계를 차례로 실행한 뒤 단말을 돌려준다.
 //      epilogue = 끝의 deregister 단계: run 종료 시 단말 정지(REGISTER Expires=0)
-//    단계 실행은 스케줄러 스레드(10 ms 틱) 하나가 한다. psip 콜백(ICsimObserver)은 이벤트를 큐에만 넣는다.
+//    단계 실행은 스케줄러 스레드(10 ms 틱) 하나가 한다. psip 콜백(ICsimObserver·ICsimPeerObserver)은 이벤트를 큐에만 넣는다.
+//  · 단말 동작은 Endpoint 종류(UE 세션 / 피어 신원)에 따라 ep* 헬퍼가 갈라 처리한다 — 단계 실행기는 종류를 모른다.
 //  · 지표: Metrics 1초 버킷 → StreamClient(TCP JSONL). 실패 개별 건은 event 레코드.
 #ifndef _CIMS_TESTER_WORKER_H_
 #define _CIMS_TESTER_WORKER_H_
@@ -21,6 +24,7 @@
 #include <vector>
 
 #include "CsimObserver.h"
+#include "CsimPeer.h"
 #include "HttpServer.h"
 #include "Json.h"
 #include "Metrics.h"
@@ -36,6 +40,7 @@ struct WorkerConfig {
     int sipPortBase = 0;            // 0 = OS 자동. >0 이면 base + 2*idx (IPsec/TLS 고정 포트가 필요할 때)
     std::string mediaFile;          // AMR-WB raw 프레임 파일 — 비면 합성 PCMU
     std::string videoFile;          // H.264 Annex B — 비면 비디오 없음
+    std::string peerCertFile;       // 피어 풀 TLS 수신점 인증서(PEM) — 비면 TLS 피어 거절
     int registerIntervalMs = 20;    // prelude 등록 간격
     int registerTimeoutS = 60;      // prelude 전원 등록 대기 상한
     int inviteTimeoutMs = 32000;    // INVITE 최종 응답 대기(Timer B 상당)
@@ -50,18 +55,22 @@ struct Identity {
 };
 
 struct Instance;
+struct Pool;
 
 struct Endpoint {
     int idx = 0;
     std::string pool;
+    Pool* poolRef = nullptr;
     Identity id;
-    SimSession* s = nullptr;
+    SimSession* s = nullptr;        // kind=ue — 가상 단말 스택
+    std::string callId;             // kind=peer — 이 신원이 지금 붙어 있는 엔진 호(Call-ID)
     bool started = false;           // Start() 호출됨(등록 진행/완료)
     bool registered = false;
     Instance* inst = nullptr;       // 지금 이 단말을 쓰는 인스턴스
     bool pendingInvite = false;     // deferred 착신 대기 중
     bool inCall = false;
     long long tStartCallMs = 0;     // 발신 시각(SRD 기점 — SimSession 도 갖지만 인스턴스 판정용)
+    bool isPeer() const { return s == nullptr; }
 };
 
 struct Pool {
@@ -69,8 +78,12 @@ struct Pool {
     std::string kind;
     std::string transport = "udp";
     std::string srtp = "off";
-    std::string targetIp;
+    std::string targetIp;           // ue: CSP 접속점 · peer: CSP 피어링 접속점(발신 다음 홉)
     int targetPort = 5060;
+    std::string profile;            // peer 프로파일
+    std::unique_ptr<CsimPeer> peer; // kind=peer 엔진
+    std::map<std::string, Endpoint*> byUser;   // peer: 신원 user → Endpoint (착신 귀속)
+    std::map<std::string, Endpoint*> byCall;   // peer: 활성 Call-ID → Endpoint
     std::vector<std::unique_ptr<Endpoint>> eps;
 };
 
@@ -104,10 +117,11 @@ struct Instance {
     enum Pending { NONE, ANSWER, REJECT } pending = NONE;
     int pendingCode = 0;
     std::string pendingRole;
+    int expectCode = 0;                        // invite 단계 expect.code — 200 이 아니면 그 최종 응답이 성공 조건(ACL 403 등)
     bool failed = false;
 };
 
-class Worker : public ICsimObserver {
+class Worker : public ICsimObserver, public ICsimPeerObserver {
 public:
     explicit Worker(const WorkerConfig& cfg);
     ~Worker();
@@ -121,14 +135,22 @@ public:
     void OnCallStart(SimSession* s, const std::string& callId, long long srdMs) override;
     void OnCallEnd(SimSession* s, const std::string& callId, int iSipStatus) override;
     void OnByeResponse(SimSession* s, const std::string& callId, int iSipStatus, long long sddMs) override;
+    // ICsimPeerObserver — 스택 스레드
+    void OnPeerIncoming(CsimPeer* p, const std::string& callId, const std::string& from, const std::string& to, bool hasPai) override;
+    void OnPeerCallStart(CsimPeer* p, const std::string& callId, long long srdMs) override;
+    void OnPeerCallEnd(CsimPeer* p, const std::string& callId, int iSipStatus) override;
+    void OnPeerByeResponse(CsimPeer* p, const std::string& callId, int iSipStatus, long long sddMs) override;
 
 private:
     struct Event {
         enum Kind { REGISTER, INCOMING, CALLSTART, CALLEND, BYERESP } kind;
         SimSession* s;
+        CsimPeer* peer;
         int status;
         long long ms;
         std::string callId;
+        std::string user;   // peer INCOMING: To user
+        bool hasPai;
     };
 
     WorkerConfig m_cfg;
@@ -138,6 +160,7 @@ private:
     std::mutex m_mtx;                       // 풀·run 상태 (HTTP 스레드 ↔ 스케줄러)
     std::map<std::string, std::unique_ptr<Pool>> m_pools;
     std::map<SimSession*, Endpoint*> m_bySession;
+    std::map<CsimPeer*, Pool*> m_byPeer;
     std::unique_ptr<RunSpec> m_run;
     std::string m_runState;                 // idle|prelude|running|draining|stopped
     std::vector<CompiledStep> m_prelude, m_body, m_epilogue;
@@ -166,6 +189,9 @@ private:
     HttpResponse runRate(const std::string& id, const Json& doc);
     HttpResponse runStop(const std::string& id, const Json& doc);
     HttpResponse runGet(const std::string& id);
+    void destroyPool(Pool* pool);
+    bool buildUePool(Pool* pool, const Json& d, std::string& err);
+    bool buildPeerPool(Pool* pool, const Json& d, std::string& err);
 
     // 스케줄러
     void schedLoop();
@@ -188,8 +214,17 @@ private:
     long long m_lastFlushS = 0;
     long long m_runStartedMs = 0;
 
+    // 단말 동작 — Endpoint 종류(UE 세션 / 피어 신원)를 여기서만 가른다
     Endpoint* endpointOf(SimSession* s);
+    Endpoint* endpointOfPeerCall(CsimPeer* p, const std::string& callId);
     bool startEndpoint(Endpoint* ep);
+    bool epStartCall(Endpoint* from, Endpoint* to);
+    bool epHasCall(Endpoint* ep);
+    int epAnswer(Endpoint* ep);                 // 0=성공, 그 외 SIP 코드(488 코덱 불일치 등)
+    bool epReject(Endpoint* ep, int code);
+    bool epBye(Endpoint* ep);
+    void epClearCall(Endpoint* ep);
+    std::string roleOf(Instance* in, Endpoint* ep);
     static long long nowMs();
 };
 

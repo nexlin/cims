@@ -29,6 +29,15 @@ PeerProfile = Literal['ibcf', 'pbx', 'mgcf']
 ObserveSource = Literal['oam_stats', 'oam_alarms', 'agent_heartbeat', 'ssh_proc']
 
 
+class TargetPeering(_Strict):
+    """대상 CSP 의 피어링 접속점(edge=peering LocalNode) — 피어 풀 발신의 다음 홉이자 시드 route 의 local_node_ref.
+    `local_node` 가 대상에 이미 있으면 그 레코드를 쓰고, 없으면 그 이름으로 LocalNode 를 시드한다(run 끝에 복원)."""
+    ip: Optional[str] = Field(default=None, description='비면 csp.ip')
+    port: int = Field(ge=1, le=65535)
+    protocol: Transport = 'udp'
+    local_node: str = Field(default='cims-tester-peering', description='대상 local_nodes 의 name')
+
+
 class TargetCsp(_Strict):
     ip: str
     udp: int = 5060
@@ -36,6 +45,7 @@ class TargetCsp(_Strict):
     tls: int = 5061
     domain_volte: Optional[str] = None
     domain_ptt: Optional[str] = None
+    peering: Optional[TargetPeering] = Field(default=None, description='피어 풀이 쓰는 CSP 피어링 접속점 — 없으면 access UDP 접속점')
 
 
 class TargetCsc(_Strict):
@@ -45,9 +55,11 @@ class TargetCsc(_Strict):
 
 
 class TargetOam(_Strict):
-    """대상 관측 전용 — 동거 형태여도 스토어를 직접 읽지 않고 이 API 로 본다(I5)."""
+    """대상 관측·컬렉션 시드 전용 — 동거 형태여도 스토어를 직접 읽지 않고 이 API 로 본다(I5)."""
     url: str
     token_env: Optional[str] = Field(default=None, description='토큰을 담은 환경변수 이름')
+    csp_deployment_id: Optional[int] = Field(default=None, ge=1,
+                                             description='대상 CSP 의 배포 id — 비면 배포 목록에서 패키지 csp 를 찾는다')
 
 
 class Target(_Strict):
@@ -100,6 +112,7 @@ class PeerIdentities(_Strict):
     e164_range: Optional[List[str]] = Field(default=None, min_length=2, max_length=2)
     did_range: Optional[List[str]] = Field(default=None, min_length=2, max_length=2)
     ext_len: Optional[int] = Field(default=None, ge=2, le=8)
+    count: Optional[int] = Field(default=None, ge=1, description='범위 앞에서부터 쓸 신원 수 — 생략=범위 전부')
 
     @model_validator(mode='after')
     def _one_range(self):
@@ -113,6 +126,18 @@ class PeerRegister(_Strict):
     ha1_env: str = Field(description='H(A1) 을 담은 환경변수 — 비밀은 YAML 에 두지 않는다')
 
 
+class PeerSeed(_Strict):
+    """대상 CSP 컬렉션 시드 — 이 피어를 CSP 가 알게 하는 remote_node/route/rule/routing_policy 를 run 전에 넣고 끝에 복원한다
+    (§3.2). 같은 `route_set` 을 가진 피어 풀은 한 RouteSet 의 멤버(priority/weight) — failover·round_robin 시험."""
+    enabled: bool = True
+    route_set: Optional[str] = Field(default=None, description='RouteSet 이름 — 생략=풀 이름')
+    distribution: Literal['failover', 'round_robin', 'weighted', 'hash_by_caller'] = 'failover'
+    priority: int = Field(default=100, ge=0)
+    weight: int = Field(default=1, ge=1)
+    acl: Optional[Literal['allow', 'deny']] = Field(default=None,
+                                                    description='이 피어 소스 IP 에 대한 ACL(global) — deny 면 403 기대')
+
+
 class PeerPool(_Strict):
     kind: Literal['peer']
     profile: PeerProfile
@@ -124,6 +149,8 @@ class PeerPool(_Strict):
     codecs: Optional[List[str]] = Field(
         default=None,
         description='오퍼 코덱(우선순위 순). 생략=프로파일 기본 — ibcf/mgcf: AMR-WB,AMR,PCMU,PCMA · pbx: PCMA,PCMU (§3.2)')
+    answer: Literal['normal', 'silent'] = Field(default='normal', description='silent = 착신 INVITE 무응답(죽은 피어 — failover 시험)')
+    seed: PeerSeed = Field(default_factory=PeerSeed)
 
 
 class RealUePool(_Strict):
