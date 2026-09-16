@@ -1,36 +1,39 @@
-// 시험 > 결과 — run 상세(RFC 6076 표·지연 분포·절차/예상/결과·단계 DOC/IHS·실패 코드·시간축) + 실패 이벤트 + 보고서 인쇄(PDF).
-// ?id=<run> 으로 열린다(실행 화면의 행 클릭). 진행 중 run 이면 라이브 패널로 넘긴다.
+// 시험 > 결과 — 왼쪽 run 레일(날짜 그룹·판정 점·검색·칩·↑↓) + RunReport(판정 요약·시간축·지표·절차·실패·단계 로그·대상 증거·Markdown)
+// + 인쇄(PDF)·삭제·재실행. ?id=<run> 으로 열린다. 진행 중 run 이면 라이브 패널로 (test_instrument.md §7 결과 보고서).
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Printer, Trash2, RefreshCw, Copy, GitCompareArrows, Activity } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { Printer, Trash2, RefreshCw, Activity, ChevronUp, ChevronDown } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
 import { Badge } from '@core/components/ui/badge'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
-import { DataTable, Th, Td, orDash } from '@core/components/custom/data-table'
+import { Input } from '@core/components/ui/input'
 import { EmptyState } from '@core/components/custom/empty-state'
 import { useToast } from '@core/components/Toast'
 import { useConfirm } from '@core/components/custom/confirm'
 import { useAuth } from '@core/contexts/AuthContext'
 import { hasRole } from '@core/utils/permissions'
-import { testerApi, type RunRow, type RunDoc, type RunEvent, type RunSeries, type ScenarioDoc } from '@tester/api/tester'
+import { testerApi, type RunRow, type RunDoc, type RunEvent, type RunSeries, type ScenarioDoc, type Verdict } from '@tester/api/tester'
 import RunReport from '@tester/components/RunReport'
 import RunLivePanel from '@tester/components/RunLivePanel'
-import { fmtTime, fmtUnix, fmtNum, VERDICT_TONE, VERDICT_LABEL } from '@tester/lib/fmt'
+import RunStartDialog, { type RunStartInitial } from '@tester/components/RunStartDialog'
+import { fmtTime, fmtDuration, verdictDot, VERDICT_TONE, VERDICT_LABEL } from '@tester/lib/fmt'
+import { StatusDot } from '@core/components/custom/status-dot'
 
 const PRINT_CSS = `
 @media print {
   @page { margin: 8mm 12mm; size: A4; }
   html, body { background: #fff !important; color: #111 !important; margin: 0 !important; padding: 0 !important; }
   .app-layout, .app-layout--collapsed, .app-content, .app-content-body, .tester-results-page { display: block !important; margin: 0 !important; padding: 0 !important; max-width: none !important; width: 100% !important; height: auto !important; overflow: visible !important; }
-  .sidebar, .sidebar--collapsed, .app-header, .sub-tabs, .tester-results-page .toolbar, .tester-results-page .no-print { display: none !important; }
+  .sidebar, .sidebar--collapsed, .app-header, .sub-tabs, .tester-results-page .toolbar, .tester-results-page .no-print, .tester-results-page .run-rail { display: none !important; }
   .tester-results-page .page-scroll { overflow: visible !important; height: auto !important; padding: 0 !important; }
+  .tester-report > section { break-inside: avoid; }
   .tester-report table { page-break-inside: auto; } .tester-report tr { page-break-inside: avoid; }
   .tester-report * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 }`
 
+type Chip = '' | 'fail' | 'pass' | 'load'
+
 export default function TesterResultsPage() {
   const [params, setParams] = useSearchParams()
-  const nav = useNavigate()
   const { show } = useToast()
   const confirm = useConfirm()
   const { user } = useAuth()
@@ -45,8 +48,12 @@ export default function TesterResultsPage() {
   const [scenario, setScenario] = useState<ScenarioDoc | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [q, setQ] = useState('')
+  const [chip, setChip] = useState<Chip>('')
+  const [rerun, setRerun] = useState<RunStartInitial | null>(null)
 
-  useEffect(() => { testerApi.runs().then(r => setRuns(r.runs)).catch(() => {}) }, [])
+  const loadRuns = useCallback(() => testerApi.runs(300).then(r => setRuns(r.runs)).catch(() => {}), [])
+  useEffect(() => { loadRuns() }, [loadRuns])
 
   const load = useCallback(async () => {
     if (!id) { setDoc(null); return }
@@ -64,6 +71,18 @@ export default function TesterResultsPage() {
   useEffect(() => { load() }, [load])
 
   const liveRow = useMemo(() => runs.find(r => r.id === id && r.verdict === 'running'), [runs, id])
+  const railRuns = useMemo(() => {
+    const qq = q.trim().toLowerCase()
+    return runs.filter(r => (!qq || r.id.toLowerCase().includes(qq) || r.scenario_id.toLowerCase().includes(qq) || (r.label ?? '').toLowerCase().includes(qq))
+      && (chip === '' || (chip === 'load' ? !!r.profile : r.verdict === chip)))
+  }, [runs, q, chip])
+  const groups = useMemo(() => {
+    const m = new Map<string, RunRow[]>()
+    for (const r of railRuns) { const d = (r.started_at ?? '').slice(0, 10); const a = m.get(d) ?? []; a.push(r); m.set(d, a) }
+    return [...m.entries()]
+  }, [railRuns])
+  const idx = railRuns.findIndex(r => r.id === id)
+  const go = (i: number) => { const r = railRuns[i]; if (r) setParams({ id: r.id }) }
 
   const onDelete = async () => {
     if (!doc) return
@@ -71,76 +90,66 @@ export default function TesterResultsPage() {
     try { await testerApi.deleteRun(doc.id); show('삭제', 'ok'); setParams({}); setRuns(r => r.filter(x => x.id !== doc.id)) } catch (e) { show(String(e), 'err') }
   }
 
-  const copyMd = async () => {
-    if (!markdown) return
-    try { await navigator.clipboard.writeText(markdown); show('Markdown 복사', 'ok') } catch { show('클립보드 접근 실패', 'err') }
-  }
-
   return (
     <div className="tester-results-page flex h-full flex-col">
       <style>{PRINT_CSS}</style>
       <div className="toolbar flex flex-wrap items-center gap-2.5 border-b border-border bg-muted px-4 py-3">
         <span className="whitespace-nowrap text-md font-semibold text-foreground">결과</span>
-        <Select value={id} onValueChange={v => setParams({ id: v })}>
-          <SelectTrigger className="w-[420px]"><SelectValue placeholder="run 선택" /></SelectTrigger>
-          <SelectContent>
-            {runs.map(r => (
-              <SelectItem key={r.id} value={r.id}>
-                <span className="font-mono">{r.id}</span> · {r.scenario_id} · {fmtTime(r.started_at, true)} · {VERDICT_LABEL[r.verdict] ?? r.verdict}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {doc && <span className="font-mono text-sm text-muted-foreground">{doc.id}</span>}
         {doc && <Badge variant={VERDICT_TONE[doc.verdict] ?? 'neutralSoft'}>{VERDICT_LABEL[doc.verdict] ?? doc.verdict}</Badge>}
         {!final && doc && <Badge variant="infoSoft">진행 중 — 최종 보고서 아님</Badge>}
         {err && <span className="text-sm text-destructive">{err}</span>}
         <div className="ml-auto flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={load} disabled={!id || loading}><RefreshCw size={13} /> 새로고침</Button>
-          {doc && runs.length > 1 && (
-            <Button variant="outline" size="sm" onClick={() => nav(`/test/compare?ids=${encodeURIComponent(doc.id)}`)}><GitCompareArrows size={13} /> 비교에 담기</Button>
-          )}
-          <Button variant="outline" size="sm" onClick={copyMd} disabled={!markdown}><Copy size={13} /> Markdown</Button>
+          <Button variant="outline" size="sm" onClick={() => go(idx - 1)} disabled={idx <= 0} title="이전 run"><ChevronUp size={13} /></Button>
+          <Button variant="outline" size="sm" onClick={() => go(idx + 1)} disabled={idx < 0 || idx >= railRuns.length - 1} title="다음 run"><ChevronDown size={13} /></Button>
+          <Button variant="outline" size="sm" onClick={() => { load(); loadRuns() }} disabled={!id || loading}><RefreshCw size={13} /> 새로고침</Button>
           <Button variant="outline" size="sm" onClick={() => window.print()} disabled={!doc || !final} title="보고서를 PDF 로 인쇄"><Printer size={13} /> 인쇄</Button>
           {canManage && <Button variant="destructive" size="sm" onClick={onDelete} disabled={!doc || !final}><Trash2 size={13} /> 삭제</Button>}
         </div>
       </div>
 
-      <div className="page-scroll flex-1 min-h-0 overflow-auto p-4 flex flex-col gap-4">
-        {!id && <EmptyState title="run 을 선택하십시오" description="[실행] 의 색인에서 행을 누르거나 위에서 고릅니다." />}
-        {id && liveRow && (
-          <section className="rounded-md border border-border bg-card p-3">
-            <div className="mb-2 flex items-center gap-2 text-sm text-muted-foreground"><Activity size={13} /> 진행 중 — 라이브</div>
-            <RunLivePanel run={liveRow} onEnded={() => { load(); testerApi.runs().then(r => setRuns(r.runs)).catch(() => {}) }} />
-          </section>
-        )}
-        {id && doc && final && (
-          <>
-            <section className="rounded-md border border-border bg-card p-4">
-              <RunReport run={doc} scenario={scenario} series={series} print />
+      <div className="flex min-h-0 flex-1">
+        <aside className="run-rail flex w-[280px] shrink-0 flex-col border-r border-border bg-card">
+          <div className="flex flex-col gap-1.5 border-b border-border p-2">
+            <Input value={q} onChange={e => setQ(e.target.value)} placeholder="run·시나리오·라벨 검색" className="h-[28px] text-sm" />
+            <div className="flex gap-1">
+              {([['', '전체'], ['fail', 'FAIL'], ['pass', 'PASS'], ['load', '부하']] as [Chip, string][]).map(([c, l]) => (
+                <button key={c} onClick={() => setChip(c)} className={`h-6 rounded-sm border px-2 text-xs ${chip === c ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-muted-foreground hover:bg-accent'}`}>{l}</button>
+              ))}
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-auto">
+            {groups.length === 0 && <div className="p-3 text-xs text-muted-foreground">run 없음</div>}
+            {groups.map(([day, rows]) => (
+              <div key={day}>
+                <div className="sticky top-0 bg-muted px-3 py-1 text-[11px] font-semibold text-muted-foreground">{day} · {rows.length}</div>
+                {rows.map(r => (
+                  <button key={r.id} onClick={() => setParams({ id: r.id })}
+                          className={`flex w-full flex-col gap-0.5 border-b border-border px-3 py-1.5 text-left text-xs hover:bg-accent ${r.id === id ? 'bg-accent' : ''}`}>
+                    <div className="flex items-center gap-1.5"><StatusDot tone={verdictDot(r.verdict as Verdict)} /><span className="truncate font-mono font-medium">{r.scenario_id}</span><span className="ml-auto font-mono text-muted-foreground">{fmtTime(r.started_at)}</span></div>
+                    <div className="flex items-center gap-1.5 text-muted-foreground"><span className="truncate">{r.label ?? r.id}</span><span className="ml-auto whitespace-nowrap">{r.profile ? '부하' : '단발'} · {fmtDuration(r.started_at, r.ended_at)}</span></div>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        </aside>
+
+        <div className="page-scroll min-h-0 min-w-0 flex-1 overflow-auto p-4 flex flex-col gap-4">
+          {!id && <EmptyState title="run 을 선택하십시오" description="왼쪽 레일에서 고르거나 [실행] 색인에서 행을 누릅니다." />}
+          {id && liveRow && (
+            <section className="rounded-md border border-border bg-card p-3">
+              <div className="mb-2 flex items-center gap-2 text-sm text-muted-foreground"><Activity size={13} /> 진행 중 — 라이브</div>
+              <RunLivePanel run={liveRow} onEnded={() => { load(); loadRuns() }} />
             </section>
-            <section className="no-print flex flex-col gap-1.5">
-              <h3 className="text-sm font-semibold text-muted-foreground">실패 이벤트 ({events.length}) <span className="font-normal">— 실패 호 SIP 덤프는 계측기 호스트 <span className="font-mono">runs/{doc.id}/sip/</span></span></h3>
-              {events.length === 0 ? <EmptyState title="실패 이벤트 없음" /> : (
-                <DataTable>
-                  <thead><tr><Th width={90}>시각</Th><Th>워커</Th><Th>역할 / 신원</Th><Th>단계</Th><Th>코드</Th><Th>지표</Th><Th>Call-ID</Th><Th>상세</Th></tr></thead>
-                  <tbody>
-                    {events.map((e, i) => (
-                      <tr key={`${e.t}-${i}`}>
-                        <Td mono>{fmtUnix(e.t)}</Td><Td>{e.worker}</Td>
-                        <Td mono>{orDash(e.role)}{e.identity ? ` ${e.identity}` : ''}</Td>
-                        <Td>{orDash(e.step)}</Td><Td mono>{orDash(e.code)}</Td>
-                        <Td mono>{e.metric ? `${e.metric}=${fmtNum(e.observed)}` : orDash(null)}</Td>
-                        <Td mono className="text-xs">{orDash(e.call_id)}</Td>
-                        <Td className="break-all">{orDash(e.detail)}</Td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </DataTable>
-              )}
-            </section>
-          </>
-        )}
+          )}
+          {id && doc && final && (
+            <RunReport run={doc} scenario={scenario} series={series} events={events} markdown={markdown} print runs={runs}
+                       onRerun={r => setRerun({ scenario_id: r.scenario_id, topology: r.topology, profile: r.profile ?? null, bindings: r.bindings, label: r.label ?? null, instances: r.plan?.max_instances ?? undefined })} />
+          )}
+        </div>
       </div>
+      {rerun && <RunStartDialog initial={rerun} onClose={() => setRerun(null)} onStarted={() => { setRerun(null); loadRuns() }} />}
     </div>
   )
 }
