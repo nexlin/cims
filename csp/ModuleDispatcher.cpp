@@ -866,9 +866,10 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     if ( GetCallOwner( pszCallId ) == NULL ) SetCallOwner( pszCallId, &m_clsTas );
 
     // TAS: DND/착신거부 603, 착신전환 302
-    //   상류가 CTasModule 로 이관했다 — 이 거절은 모듈 안에서 응답하므로 여기서 시도로 남길
-    //   수 없다. F-54 적용 범위에서 빠져 있다(후속: 모듈 안에서 기록하거나 콜백을 넘긴다).
-    if ( m_clsTas.IsEnabled() && m_clsTas.ApplyTerminationServices( pszCallId, pszFrom, clsUser ) ) return;
+    //   거절은 모듈 안에서 응답하므로 시도 기록도 **모듈 안에서** 남긴다(여기서 `RejectVoice`
+    //   를 쓰면 응답을 두 번 보낸다). 착신 식별자를 넘기는 이유가 그것이다 — 장부의 callee 가
+    //   표·이력의 다른 자리와 같은 문자열이어야 한다. 착신전환 302 는 남기지 않는다(TasModule).
+    if ( m_clsTas.IsEnabled() && m_clsTas.ApplyTerminationServices( pszCallId, pszFrom, pszTo, clsUser ) ) return;
 
     // B2BUA 호 설정
     if ( bRoutePrefix == false ) {

@@ -65,12 +65,26 @@ bool CTasModule::ScreenInvite( CSipMessage *pclsMessage, const char *pszFrom, co
     if ( gclsCspUserMap.isAlive( pszTo, clsToUser ) ) {
         if ( clsToUser.isDnd() || clsToUser.isReject( pszFrom ) ) {
             CLog::Print( LOG_INFO, "TAS: Rejected (DND/Reject) From=%s To=%s", pszFrom, pszTo );
+            // 시도 장부 — 여기는 **다이얼로그 생성 전**이라 정상 경로(`VoipCallStart`)가 아직
+            //   돌지 않았다. 남기지 않으면 DND·착신거부로 튕긴 호가 성공률·NER 의 분모에서
+            //   통째로 빠지고, 그래서 **거부가 늘수록 성공률이 좋아진다** — 지표가 나빠지는
+            //   방향이 아니라 좋아지는 방향으로 틀려 스스로 드러나지 않는다 (F-54 잔여).
+            //   **응답은 그대로 603 이다** — 와이어 동작은 바꾸지 않고 기록만 더한다.
+            std::string strCallId;
+            if ( gclsCallDir.IsEnabled() && pclsMessage->GetCallId( strCallId ) )
+                gclsCallDir.VoipCallRejected( strCallId, pszFrom, pszTo, SIP_DECLINE );
             gclsDispatcher.SendResponse( pclsMessage, SIP_DECLINE );
             return true;
         }
 
         // 서비스 모드 체크
         if ( gclsSetup.m_strServiceMode == "ptt" ) {
+            // ptt 전용 모드가 막은 1:1 발신 — 디스패처의 같은 판정(`EventIncomingCall` 의
+            //   `RejectPtt`)과 한 벌이다. 착신이 등록 가입자면 호가 여기서 끝나 그쪽 기록에
+            //   닿지 않으므로, 같은 어휘로 여기서 남긴다. 서버 구성이 막은 것이라 원인은
+            //   `policy_denied` 다(사용자 사정이 아니므로 NER 면제 대상도 아니다).
+            if ( gclsCallDir.IsEnabled() )
+                gclsCallDir.PttAttempt( pszTo, "", pszFrom, "failed", "denied", "policy_denied", SIP_FORBIDDEN );
             gclsDispatcher.SendResponse( pclsMessage, SIP_FORBIDDEN );
             return true;
         }
@@ -93,12 +107,22 @@ EModuleRouteResult CTasModule::OnIncomingCall( const char *pszCallId, const char
     return E_ROUTE_PASS;
 }
 
-bool CTasModule::ApplyTerminationServices( const char *pszCallId, const char *pszFrom, const CspUser &clsUser ) {
+bool CTasModule::ApplyTerminationServices( const char *pszCallId, const char *pszFrom, const char *pszTo,
+                                           const CspUser &clsUser ) {
     if ( clsUser.isDnd() || clsUser.isReject( pszFrom ) ) {
+        // 시도 장부 — `ScreenInvite` 를 지나온 호(그때는 착신이 등록 상태가 아니었던 경우)가
+        //   여기서 603 으로 끝난다. 두 지점을 다 막지 않으면 같은 거절이 경로에 따라 세어지거나
+        //   빠진다. `VoipCallRejected` 는 정상 경로가 이미 기록한 세션을 건드리지 않으므로
+        //   두 지점이 겹쳐도 중복으로 세지 않는다.
+        if ( gclsCallDir.IsEnabled() ) gclsCallDir.VoipCallRejected( pszCallId, pszFrom, pszTo, SIP_DECLINE );
         gclsDispatcher.StopCall( pszCallId, SIP_DECLINE );
         return true;
     }
 
+    // **착신전환 302 는 시도로 남기지 않는다.** 발신 단말이 Contact 로 다시 INVITE 를 보내고
+    //   그것이 제 시도로 기록되므로, 여기서도 세면 사용자 한 번의 통화 의도가 시도 2건이 되어
+    //   성공률이 절반으로 깎인다. 3xx 는 망이 정상 응답한 것이기도 하다(ITU-T E.425 — NER 은
+    //   상대 사정을 분자에 넣는다). 전환 뒤 통화의 성패는 그 새 시도가 말한다.
     if ( clsUser.isCallForward() ) {
         CSipMessage *pclsInvite = gclsUserAgent.DeleteIncomingCall( pszCallId );
         if ( pclsInvite ) {
