@@ -7,7 +7,7 @@ CMP는 CIMS 시스템의 미디어 서버로, CSP의 제어 하에 RTP relay, PT
 **서비스 표준 코덱**: VoLTE/PTT 음성 = **AMR-WB** (`AMR-WB/16000/1`), 영상 = **H.264**
 (`H264/90000`). 음성 PT 의 정본은 CSP 코덱 테이블(`Setup.Media.Codecs`,
 [csp.md](csp.md) §6.1 — 기본 AMR-WB=96)이며, CMP 는 코덱을 해석하지 않는다(트랜스코딩
-없음). wire PT 는 기본 무재작성(PT-blind, seq/SSRC 만 재작성)이되, 제어평면이 leg 별 PT
+없음 — 피어 leg 한정 G.711↔AMR-WB 트랜스코딩은 §11 설계, 구현 전). wire PT 는 기본 무재작성(PT-blind, seq/SSRC 만 재작성)이되, 제어평면이 leg 별 PT
 (`user_pt`/`remote_pt` 계열 — [cmp_media_api.md](../../api/cmp_media_api.md) §6.1/§7.4)를
 선언하면 **egress 에서 leg 별 audio/telephone-event PT 를 재작성**해 leg 간 PT 불일치
 (비 96 offer/answer 단말)를 정합한다. 녹취는 화자 원본 PT 로 기록되며, 녹취 변환
@@ -896,6 +896,62 @@ CmpServer (PModule)
 
 ---
 
-## 11. 관련 문서
+## 11. 트랜스코딩 — 피어 leg 한정 G.711 ↔ AMR-WB (설계, 구현 전)
+
+### 11.1 왜 필요한가 · 어디에 두는가
+
+CIMS 서비스 코덱은 AMR-WB 하나다. VoLTE 단말(GSMA IR.92 — AMR-WB·AMR 필수)과 MGCF(IM-MGW 가 IMS 쪽에 AMR-WB 를
+오퍼하고 PSTN 쪽 G.711 을 자기가 트랜스코딩 — TS 29.163)는 그대로 relay 되지만, **IP-PBX 트렁크는 G.711 이 필수
+코덱이고 광대역은 선택**(SIP Forum SIPconnect 2.0)이라 PBX↔가입자 호는 어느 한쪽이 코덱을 바꿔 줘야 성립한다.
+IMS 에서 이 일은 **NNI 의 TrGW(IBCF 제어, TS 23.228 §4.14 · TS 29.162)** 또는 MRF 의 몫이다. CIMS 에서 피어 leg 의
+미디어 평면은 CMP 이므로, 트랜스코딩은 **CMP relay 의 피어 leg 에만** 둔다.
+
+- 대상: `RELAY_*` 1:1 relay 의 **peer(트렁크) leg** 오디오. UE↔UE 호, PTT 그룹, tap(청취 leg), 영상은 대상이 아니다 —
+  PTT 그룹에 G.711 단말을 넣는 것은 fan-out 이 전 leg 코덱 통일을 전제하므로 별개 과제다.
+- 코덱 쌍: `AMR-WB/16000` ↔ `PCMU/8000`·`PCMA/8000`. 그 밖의 쌍(G.722·AMR-NB)은 계약에 자리를 두되 1차 구현 밖.
+- `telephone-event` 는 트랜스코딩하지 않는다 — 8000↔16000 clock 에 맞춰 PT·timestamp 만 재작성(RFC 4733).
+
+### 11.2 협상 — CSP 가 코덱을 끼워 넣고, 결과가 다를 때만 CMP 가 변환한다
+
+표준 IMS-ALG/TrGW 의 "코덱 삽입" 모델을 따른다(TS 29.162 트랜스코딩 제어).
+
+1. **피어 → 가입자 방향 오퍼**: CSP(IBCF/TAS)가 피어 leg 에 받은 SDP 를 가입자 leg 로 넘기며 서비스 코덱(AMR-WB, 코덱
+   테이블 §6.1 첫 엔트리)을 **추가**한다. 가입자가 AMR-WB 를 고르면 피어 leg 는 G.711 로 답하고 CMP 가 변환, 가입자가
+   G.711 을 고르면 순수 relay.
+2. **가입자 → 피어 방향 오퍼**: 피어 노드 정책(`remote_nodes.transcode_codecs`, 예 `["PCMA","PCMU"]`)이 있으면 피어 leg 오퍼에
+   그 코덱을 추가한다. 피어가 그 코덱으로 답하고 가입자 오퍼에 그 코덱이 없었으면 변환.
+3. 판정은 **leg 별 최종 협상 코덱이 다른가** 하나다. 다르면 CSP 가 `RELAY_ADD/MODIFY` 에 leg 별 코덱 선언(`media_codec`,
+   [cmp_media_api.md](../../api/cmp_media_api.md) §6.6)을 실어 보내고, CMP 는 그때만 변환 유닛을 붙인다. 같으면 현행
+   PT-blind relay(`remote_pt` 재작성 포함) 그대로다.
+4. 정책 없음 = 현행 동작(코덱 삽입 없음). 변환 자원 부족(§11.4)이면 CMP 가 `E_TRANSCODE_CAPACITY` 로 거절하고 CSP 는 488
+   Not Acceptable Here 로 종결한다 — 조용히 무음 relay 를 만들지 않는다.
+
+### 11.3 CMP 안의 변환 유닛
+
+- `PRtpRelay` 방향(direction)마다 선택적 `Transcoder` 하나: `decode(A) → resample(8k↔16k) → encode(B)`. 20 ms 프레임 단위,
+  jitter 흡수는 기존 relay 경로와 동일(재정렬 없음 — 순서 뒤집힌 패킷은 decoder PLC 에 맡긴다).
+- 코덱 구현: AMR-WB 디코더 `opencore-amrwb`, 인코더 `vo-amrwbenc`(둘 다 이미 빌드 트리의 ExternalProject — cspsim 이 링크
+  중, CMP 는 아직 미링크), G.711 μ/A 는 자체 테이블. AMR-WB 는 octet-aligned/bandwidth-efficient 둘 다 수신(payload
+  format RFC 4867), 송신은 leg 의 fmtp 를 따른다. 모드 세트는 fmtp `mode-set` 존중, 기본 최고 모드.
+- 녹취는 **가입자 leg 원본**(AMR-WB)을 기록한다 — 변환 파이프라인([../features/recording.md](../features/recording.md))이
+  AMR-WB 전제라는 불변식을 지킨다. 피어 leg 는 기록하지 않는다.
+- SRTP 종단(§6.4 `media_crypto`) 뒤에서 변환한다 — 평문 전제는 믹스·녹취와 같다.
+
+### 11.4 자원·관측
+
+- 변환은 relay 보다 CPU 비용이 한 자리 크다(AMR-WB 인코딩). 리소스 풀(§4.1)에 `transcode_slots` 를 따로 두고 `HEARTBEAT`·
+  `STATS` 에 사용량을 싣는다. 슬롯 소진 = `capacity_threshold` 계열 알람(카탈로그 채번은 구현 시).
+- Flow 로그(§7)에 leg 별 코덱과 변환 여부를 남긴다 — 통계의 실패 사유 분해(488)와 맞물린다.
+- 검증: S1 단위(코덱 왕복·PLC), `S3-SCN-TRANSCODE`(cspsim G.711 ↔ AMR-WB 1:1 호, 계측기 도입 뒤 pbx 프로파일 시나리오로 이전 —
+  [../features/test_instrument.md](../features/test_instrument.md) §12).
+
+### 11.5 범위 밖
+
+SIP-I(ISUP 캡슐화) 트렁크는 미디어 문제가 아니라 CIMS 가 MGCF 역할을 하는 문제라 여기 없다. 영상 트랜스코딩·PTT 그룹의
+혼합 코덱·G.722/AMR-NB 는 계약에 자리만 둔다.
+
+---
+
+## 12. 관련 문서
 
 - [../features/flow_logging.md](./../features/flow_logging.md) — Flow/Msg 로깅 공통 규격, sesid 상속, CSP↔CMP 인터페이스 필드
