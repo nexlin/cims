@@ -89,9 +89,12 @@ export type Transport = 'udp' | 'tcp' | 'tls'
 
 export interface TopoHost { name?: string; ip: string; ssh?: { user: string; key_env: string; port?: number } }
 export interface TopoWorker { name: string; host: string; port?: number; cpus?: number; media?: { samples?: string[]; max_rtp_streams?: number } }
+export type ListenerEdge = 'access' | 'peering'
+/** SIP 수신점 하나 = 대상 LocalNode 하나. ip 비면 노드 addr → 호스트 ip. local_node = cims 대상 local_nodes 이름(비면 cims-tester-<id>) */
+export interface SipListener { edge?: ListenerEdge; ip?: string; port: number; protocol?: Transport; local_node?: string }
 export interface TopoNode {
-  role: NodeRole; host: string; fn?: string; label?: string; procs?: string[]
-  sip?: { access?: { udp?: number; tcp?: number; tls?: number; domains?: string[] }; peering?: { port: number; protocol?: Transport; local_node?: string } }
+  role: NodeRole; host: string; addr?: string; fn?: string; label?: string; procs?: string[]
+  sip?: { domains?: string[]; listeners?: Record<string, SipListener> }
   tas?: { port?: number }
   media?: { rtp_range?: [number, number]; control?: number }
   api?: { port: number; tls?: boolean }
@@ -100,19 +103,19 @@ export interface TopoNode {
 }
 export interface TopoPoolBase { worker: string; group?: string }
 export interface UePoolDoc extends TopoPoolBase {
-  kind: 'ue'; access: string
+  kind: 'ue'; access: string; listener?: string
   source: { creds: string; count?: number } | { db: string; table: string; offset?: number; count: number }
   transport?: Transport; srtp?: 'off' | 'optional' | 'required'; register_expires?: number; prack?: boolean; dtmf?: boolean
 }
 export interface PeerPoolDoc extends TopoPoolBase {
-  kind: 'peer'; peering: string; profile: 'ibcf' | 'pbx' | 'mgcf'; bind: { port: number; protocol?: Transport }; domain: string
+  kind: 'peer'; peering: string; listener?: string; profile: 'ibcf' | 'pbx' | 'mgcf'; bind: { ip?: string; port: number; protocol?: Transport }; domain: string
   identities: { e164_range?: [string, string]; did_range?: [string, string]; ext_len?: number; count?: number }
   register?: { user: string; ha1_env?: string; password_env?: string; realm?: string; expires?: number }
   codecs?: string[]; answer?: 'normal' | 'silent'; prack?: boolean; dtmf?: boolean
   seed?: { enabled?: boolean; route_set?: string; distribution?: string; priority?: number; weight?: number; acl?: 'allow' | 'deny' }
 }
 export interface RealUePoolDoc extends TopoPoolBase {
-  kind: 'real-ue'; access: string; source: { creds: string; count?: number }; transport?: Transport; srtp?: 'off' | 'optional' | 'required'
+  kind: 'real-ue'; access: string; listener?: string; source: { creds: string; count?: number }; transport?: Transport; srtp?: 'off' | 'optional' | 'required'
 }
 export type PoolDoc = UePoolDoc | PeerPoolDoc | RealUePoolDoc
 export interface TopoLayout { regions: Record<string, { x: number; y: number; w: number; h: number }>; items: Record<string, { x: number; y: number }> }

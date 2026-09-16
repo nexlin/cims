@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { useToast } from '@core/components/Toast'
 import { useConfirm } from '@core/components/custom/confirm'
-import type { TopologyDoc, TopoNode, PoolDoc, PeerPoolDoc, UePoolDoc, CheckItem, NodeRole, Transport, WorkerRow } from '@tester/api/tester'
+import type { TopologyDoc, TopoNode, PoolDoc, PeerPoolDoc, UePoolDoc, CheckItem, NodeRole, Transport, WorkerRow, SipListener } from '@tester/api/tester'
 import * as M from '@tester/lib/topology-model'
 import type { Focus, Issue, PaletteKind, Pos } from '@tester/lib/topology-model'
 
@@ -88,13 +88,19 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
     for (const [n, p] of Object.entries(doc.pools ?? {})) {
       const hi = sel?.kind === 'pool' && sel.id === n
       const a = ctr(st.querySelector(`[data-pool-anchor="${n}"]`)); if (!a) continue
+      const lid = M.poolListener(doc, p)
       if (M.isPeer(p)) {
         const seed = p.seed ?? {}
         const lbl = (doc.target.kind ?? 'cims') === 'cims' ? (seed.acl ? `ACL ${seed.acl}` : seed.route_set ? `${seed.route_set} · p${seed.priority ?? 100}${seed.distribution && seed.distribution !== 'failover' ? ` · ${seed.distribution}` : ''}` : `rs ${n}`) : `→ ${p.peering}`
-        edge(a, portA(`${p.peering}:peering`), 'peer', lbl, hi, failing(`${p.peering}:peering`))
-        if (p.register) edge({ x: a.x, y: a.y + 6 }, portA(`${p.peering}:${p.bind.protocol ?? 'udp'}`) ?? portA(`${p.peering}:peering`), 'reg', `REGISTER ${p.register.user}`, hi, false)
+        const pid = `${p.peering}:${lid}`
+        edge(a, portA(pid), 'peer', lbl, hi, failing(pid))
+        if (p.register) {
+          // 트렁크 REGISTER 는 같은 노드의 같은 transport access 수신점(피어가 가리킨 항목이 access 면 그 항목)
+          const nd = doc.target.nodes[p.peering]; const reg = M.accessListeners(nd).find(([, l]) => (l.protocol ?? 'udp') === (p.bind.protocol ?? 'udp'))?.[0] ?? M.accessListeners(nd)[0]?.[0]
+          edge({ x: a.x, y: a.y + 6 }, portA(`${p.peering}:${reg ?? lid}`), 'reg', `REGISTER ${p.register.user}`, hi, false)
+        }
       } else {
-        const tr = p.transport ?? 'udp'; const pid = `${p.access}:${tr}`
+        const tr = M.poolTransport(doc, p); const pid = `${p.access}:${lid}`
         edge(a, portA(pid), tr, `${tr}${p.srtp && p.srtp !== 'off' ? ` · srtp ${p.srtp}` : ''}`, hi, failing(pid))
         for (const m of M.mediaNodes(doc)) edge({ x: a.x, y: a.y + 6 }, portA(`${m}:rtp`), 'rtp', hi ? 'RTP' : null, hi, false)
         if (M.isUe(p) && 'db' in p.source) { const d = doc.target.nodes[p.source.db]; edge({ x: a.x, y: a.y + 10 }, portA(`${p.source.db}:${d?.role === 'db' ? 'db' : 'api'}`), 'db', `${p.source.table} ×${p.source.count}`, hi, false) }
@@ -129,20 +135,32 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
     if ((kind === 'worker' || kind === 'obs_ssh' || kind.startsWith('n_')) && ctx.host) return { kind: 'host', id: ctx.host }
     return null
   }
-  /** 풀을 수신점 행 위에 놓았을 때 — UE 풀은 SIP udp/tcp/tls 행(접속점+transport)·db/api 행(신원 원천), 피어 풀은 peering 행(다음 홉) */
+  /** 풀을 수신점 행 위에 놓았을 때 — UE 풀은 access 수신점 행(접속점+수신점+transport)·db/api 행(신원 원천), 피어 풀은 어느 수신점 행이든(다음 홉) */
   const wantPort = (id: string, port: string | null): Hot | null => {
     const p = doc.pools[id]; if (!p || !port) return null
     const [nid, k] = port.split(':'); const n = doc.target.nodes[nid]; if (!n) return null
-    if (M.isPeer(p)) return k === 'peering' && n.sip?.peering ? { kind: 'port', id: port } : null
-    if ((k === 'udp' || k === 'tcp' || k === 'tls') && n.sip?.access?.[k]) return { kind: 'port', id: port }
+    const l = n.role === 'sip' ? n.sip?.listeners?.[k] : undefined
+    if (M.isPeer(p)) return l ? { kind: 'port', id: port } : null
+    if (l && (l.edge ?? 'access') === 'access') return { kind: 'port', id: port }
     if (M.isUe(p) && (k === 'db' || k === 'api') && M.dbNodes(doc).includes(nid)) return { kind: 'port', id: port }
     return null
   }
   const applyPort = (x: TopologyDoc, id: string, port: string) => {
-    const p = x.pools[id]; const [nid, k] = port.split(':')
-    if (M.isPeer(p)) { p.peering = nid; show(`${id} 다음 홉 → ${nid}:peering`, 'ok'); return }
+    const p = x.pools[id]; const [nid, k] = port.split(':'); const l = x.target.nodes[nid]?.sip?.listeners?.[k]
+    if (M.isPeer(p)) {
+      p.peering = nid; p.listener = k
+      show(`${id} 다음 홉 → ${nid}:${k}${(l?.edge ?? 'access') === 'peering' ? '' : ' (access 수신점 — CSP 는 Route 로 이 피어를 신뢰)'}`, 'ok'); return
+    }
     if (k === 'db' || k === 'api') { if (M.isUe(p)) { const src = 'db' in p.source ? p.source : { table: 'volte_subscriptions' as const, offset: 0, count: 100 }; p.source = { ...src, db: nid }; show(`${id} 신원 원천 → ${nid}`, 'ok') } return }
-    p.access = nid; p.transport = k as Transport; show(`${id} → ${nid} SIP ${k.toUpperCase()}`, 'ok')
+    p.access = nid; p.listener = k; p.transport = (l?.protocol ?? 'udp') as Transport; show(`${id} → ${nid}:${k} SIP ${(l?.protocol ?? 'udp').toUpperCase()}`, 'ok')
+  }
+  /** 풀을 노드 카드(행 아닌 곳)에 놓았을 때 — 수신점 지정을 풀고 기본 규칙(UE: transport 와 같은 access 항목 / 피어: 첫 peering 항목)으로 */
+  const applyNode = (x: TopologyDoc, id: string, nid: string) => {
+    const p = x.pools[id]
+    if (M.isPeer(p)) { p.peering = nid; delete p.listener; show(`${id} 다음 홉 → ${nid}`, 'ok'); return }
+    p.access = nid; delete p.listener
+    const al = M.accessListeners(x.target.nodes[nid]); if (al.length && !al.some(([, l]) => (l.protocol ?? 'udp') === (p.transport ?? 'udp'))) p.transport = (al[0][1].protocol ?? 'udp') as Transport
+    show(`${id} 접속점 → ${nid}`, 'ok')
   }
   const wantPool = (id: string, ctx: ReturnType<typeof ctxOf>): Hot | null => {
     const p = doc.pools[id]; if (!p) return null
@@ -183,17 +201,16 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
       } else if (d.type === 'link') {
         const t = wantPort(d.id, ctxOf(under(e)).port)
         if (t) mutate(x => applyPort(x, d.id, t.id))
-        else { const ctx = ctxOf(under(e)); if (ctx.node) show(`${ctx.node} 에는 ${M.isPeer(doc.pools[d.id]) ? '피어링' : '접속'} 수신점 행이 없습니다 — 노드 속성에서 켜십시오`, 'err') }
+        else { const ctx = ctxOf(under(e)); if (ctx.node) show(`${ctx.node} 에는 ${M.isPeer(doc.pools[d.id]) ? '' : 'access '}수신점 행이 없습니다 — 노드 속성에서 수신점을 추가하십시오`, 'err') }
       } else if (d.type === 'pool') {
         const ctx = ctxOf(under(e)); const t = wantPool(d.id, ctx)
         if (d.moved && t) mutate(x => {
           const p = x.pools[d.id]
           if (t.kind === 'port') { applyPort(x, d.id, t.id); return }
           if (t.kind === 'worker') { p.worker = t.id; show(`${d.id} → ${t.id}`, 'ok') }
-          else if (M.isPeer(p)) { p.peering = t.id; show(`${d.id} 다음 홉 → ${t.id}`, 'ok') }
-          else { p.access = t.id; const a = x.target.nodes[t.id]?.sip?.access; if (a && !a[p.transport ?? 'udp']) p.transport = (['udp', 'tcp', 'tls'] as Transport[]).find(k => a[k]) ?? p.transport; show(`${d.id} 접속점 → ${t.id}`, 'ok') }
+          else applyNode(x, d.id, t.id)
         })
-        else if (d.moved && ctx.node) show(`${ctx.node} 에는 ${M.isPeer(doc.pools[d.id]) ? '피어링' : '접속'} 수신점이 없습니다 — 노드 속성에서 켜십시오`, 'err')
+        else if (d.moved && ctx.node) show(`${ctx.node} 에는 ${M.isPeer(doc.pools[d.id]) ? '' : 'access '}수신점이 없습니다 — 노드 속성에서 수신점을 추가하십시오`, 'err')
       } else if (d.type === 'card') {
         if (!d.moved) return
         const el = under(e); const rid = (el?.closest('[data-region]') as HTMLElement | null)?.dataset.region ?? null
@@ -262,20 +279,19 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
     const it = L.items[id] ?? { x: 14, y: 12 }
     const pos = abs ?? it
     const hc = doc.hosts[n.host] ? HC(M.colorOf(doc, n.host)) : 'var(--destructive)'
-    const a = n.sip?.access, pg = n.sip?.peering
+    const ls = M.listenersOf(n); const nip = M.ipOfNode(doc, id)
     return (
       <div data-card data-node={id} onPointerDown={startCard('node', id)}
            className={`absolute w-[250px] cursor-grab select-none rounded-md border bg-card text-xs shadow-sm ${isSel('node', id) ? 'ring-2 ring-primary' : ''} ${isHot('node', id) ? 'ring-2 ring-success' : ''} ${doc.hosts[n.host] ? 'border-border' : 'border-dashed border-destructive'}`}
            style={{ left: pos.x, top: pos.y, borderTopColor: hc, borderTopWidth: 3, zIndex: drag?.type === 'card' && drag.id === id ? 20 : undefined }}>
         <div className="flex items-center gap-1.5 px-2 py-1">
           <span className="text-muted-foreground">{ROLE_ICON[n.role]}</span><b className="truncate">{n.label ?? id}</b><span className="text-muted-foreground">{n.fn}</span>{errBadge({ kind: 'node', id })}
-          <span className="ml-auto truncate font-mono text-[10px] text-muted-foreground">{(n.procs ?? []).join(',') || '—'}</span>
+          <span className="ml-auto truncate font-mono text-[10px] text-muted-foreground" title={n.addr ? `주소 ${n.addr} (VIP — 호스트 ip 대신)` : undefined}>{n.addr ? `${n.addr} · ` : ''}{(n.procs ?? []).join(',') || '—'}</span>
         </div>
         {n.role === 'sip' && <>
-          {a && (['udp', 'tcp', 'tls'] as const).map(t => a[t] ? <PortRow key={t} id={`${id}:${t}`} cls={t} name={`SIP ${t.toUpperCase()}`} val={`:${a[t]}`} /> : null)}
-          {a && <PlainRow name="도메인" val={(a.domains ?? []).join(' · ') || '—'} />}
-          {pg && <PortRow id={`${id}:peering`} cls="peer" name="피어링" val={`:${pg.port}/${pg.protocol ?? 'udp'}${pg.local_node ? ` · ${pg.local_node}` : ''}`} />}
-          {!a && !pg && <PlainRow name="수신점" val="없음 — 관측만" />}
+          {ls.map(([lid, l]) => { const pr = (l.protocol ?? 'udp') as Transport; const lip = M.ipOfListener(doc, id, lid); const peer = l.edge === 'peering'
+            return <PortRow key={lid} id={`${id}:${lid}`} cls={peer ? 'peer' : pr} name={`${peer ? '피어링' : 'SIP'} ${pr.toUpperCase()}`} val={`${lip !== nip ? lip : ''}:${l.port} · ${lid}${peer && l.local_node ? ` · ${l.local_node}` : ''}`} /> })}
+          {ls.length ? <PlainRow name="도메인" val={(n.sip?.domains ?? []).join(' · ') || '—'} /> : <PlainRow name="수신점" val="없음 — 관측만" />}
         </>}
         {n.role === 'media' && <><PortRow id={`${id}:rtp`} cls="rtp" name="RTP" val={n.media?.rtp_range ? `${n.media.rtp_range[0]}–${n.media.rtp_range[1]}` : '범위 없음'} />{n.media?.control ? <PlainRow name="제어" val={`:${n.media.control}`} /> : null}</>}
         {n.role === 'subscriber' && (n.api ? <PortRow id={`${id}:api`} cls="db" name="API" val={`:${n.api.port}${n.api.tls ? ' tls' : ''}`} /> : <PlainRow name="API" val="없음" />)}
@@ -288,17 +304,17 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
   const PoolCard = ({ pn, p }: { pn: string; p: PoolDoc }) => {
     const dragging = drag?.type === 'pool' && drag.id === pn
     const group = p.group ? <Badge variant="neutralSoft" className="h-4 px-1 text-[10px]" title={`논리 풀 ${p.group} — 시나리오는 이 이름으로 참조`}>≡ {p.group}</Badge> : null
-    const anchorColor = M.isPeer(p) ? EDGE_COLOR.peer : EDGE_COLOR[(p.transport ?? 'udp') as 'udp' | 'tcp' | 'tls']
+    const anchorColor = M.isPeer(p) ? EDGE_COLOR.peer : EDGE_COLOR[M.poolTransport(doc, p)]
     let body: ReactNode
     if (M.isPeer(p)) { const idn = p.identities ?? {}; const rng = idn.e164_range ? `${idn.e164_range[0]}…${idn.e164_range[1].slice(-4)}` : idn.did_range ? `${idn.did_range[0]}…${idn.did_range[1].slice(-3)}` : '신원 없음'
-      body = <><Badge variant={p.answer === 'silent' ? 'dangerSoft' : 'warningSoft'} className="h-4 px-1 text-[10px]">{p.profile}{p.answer === 'silent' ? ' · silent' : ''}</Badge><b className="truncate">{pn}</b><span className="truncate font-mono text-[10px] text-muted-foreground">:{p.bind.port}/{p.bind.protocol ?? 'udp'} · {rng}</span></> }
+      body = <><Badge variant={p.answer === 'silent' ? 'dangerSoft' : 'warningSoft'} className="h-4 px-1 text-[10px]">{p.profile}{p.answer === 'silent' ? ' · silent' : ''}</Badge><b className="truncate">{pn}</b><span className="truncate font-mono text-[10px] text-muted-foreground">{p.bind.ip ? p.bind.ip : ''}:{p.bind.port}/{p.bind.protocol ?? 'udp'} → {p.peering || '?'}{p.listener ? `:${p.listener}` : ''} · {rng}</span></> }
     else { const src = 'db' in p.source ? `${p.source.table.replace('_subscriptions', '')} ${p.source.offset ?? 0}+${p.source.count}` : `creds${p.source.count ? ` ${p.source.count}` : ''}`
-      body = <><Badge variant={p.kind === 'ue' ? 'infoSoft' : 'successSoft'} className="h-4 px-1 text-[10px]">{p.kind}</Badge>{group}<b className="truncate">{pn}</b><span className="truncate font-mono text-[10px] text-muted-foreground">→ {p.access || '?'} {p.transport ?? 'udp'}{p.srtp && p.srtp !== 'off' ? '+srtp' : ''} · {src}</span></> }
+      body = <><Badge variant={p.kind === 'ue' ? 'infoSoft' : 'successSoft'} className="h-4 px-1 text-[10px]">{p.kind}</Badge>{group}<b className="truncate">{pn}</b><span className="truncate font-mono text-[10px] text-muted-foreground">→ {p.access || '?'}{p.listener ? `:${p.listener}` : ''} {M.poolTransport(doc, p)}{p.srtp && p.srtp !== 'off' ? '+srtp' : ''} · {src}</span></> }
     return (
       <div data-pool={pn} onPointerDown={startPool(pn)} title={pn}
            className={`relative flex cursor-grab select-none items-center gap-1.5 rounded-sm border bg-muted px-2 py-1 text-xs ${isSel('pool', pn) ? 'border-primary ring-1 ring-primary' : 'border-border'} ${dragging ? 'opacity-40' : ''}`}>
         {body}{errBadge({ kind: 'pool', id: pn })}
-        <span data-pool-anchor={pn} onPointerDown={startLink(pn)} title="끌어서 수신점 행에 연결 — 접속점·transport(피어는 다음 홉, DB/API 행은 신원 원천)"
+        <span data-pool-anchor={pn} onPointerDown={startLink(pn)} title="끌어서 수신점 행에 연결 — UE 는 access 수신점(접속점+transport), 피어는 어느 수신점이든(다음 홉), DB/API 행은 신원 원천"
               className="absolute -right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-card hover:scale-125" style={{ background: anchorColor }} />
       </div>
     )
@@ -350,7 +366,7 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
             </div>
           ))}
           <div className="mt-2 rounded-sm border border-border p-2 text-[11px] leading-relaxed text-muted-foreground">
-            <b>놓는 자리가 소속을 정합니다.</b> 호스트 영역 안에 워커·대상 노드, 워커 카드 안에 풀. 빈 곳에 놓으면 담을 상자를 만듭니다. 선은 모델에서 나옵니다 — 풀 카드의 오른쪽 <b>앵커 점을 끌어 수신점 행</b>(SIP UDP/TCP/TLS · 피어링 · DB/API)에 놓으면 접속점·transport(다음 홉·신원 원천)가 그 행으로 정해집니다. 풀 카드를 SIP 노드 위에 놓아도 됩니다. <kbd>Del</kbd> 삭제 · <kbd>Esc</kbd> 해제
+            <b>놓는 자리가 소속을 정합니다.</b> 호스트 영역 안에 워커·대상 노드, 워커 카드 안에 풀. 빈 곳에 놓으면 담을 상자를 만듭니다. 선은 모델에서 나옵니다 — 풀 카드의 오른쪽 <b>앵커 점을 끌어 수신점 행</b>에 놓으면 그 수신점이 접속점(UE — access 행만)·다음 홉(피어 — 어느 행이든, CSP 는 Route 로 신뢰)·신원 원천(DB/API 행)이 됩니다. 풀 카드를 SIP 노드 위에 놓으면 기본 수신점으로 갑니다. 수신점은 노드 속성에서 N 개(IP/포트/프로토콜/edge) 둡니다. <kbd>Del</kbd> 삭제 · <kbd>Esc</kbd> 해제
           </div>
           <div className="mt-2 flex flex-col gap-1">
             <span className="text-[11px] font-semibold text-muted-foreground">프리셋</span>
@@ -562,7 +578,19 @@ function Inspector({ doc, sel, setSel, mutate, issues, canWrite, onDelete, worke
   if (sel.kind === 'node') {
     const id = sel.id, n = doc.target.nodes[id]; if (!n) { setSel(null); return null }
     const N = (fn: (x: TopoNode, d: TopologyDoc) => void) => mutate(d => fn(d.target.nodes[id], d))
-    const a = n.sip?.access, pg = n.sip?.peering
+    const ls = M.listenersOf(n); const cims = (doc.target.kind ?? 'cims') === 'cims'
+    const LS = (fn: (x: Record<string, SipListener>, d: TopologyDoc) => void) => N((x, d) => { x.sip = x.sip ?? {}; x.sip.listeners = x.sip.listeners ?? {}; fn(x.sip.listeners, d) })
+    const addListener = (edge: 'access' | 'peering') => LS((x, d) => {
+      const used = new Set(Object.values(x).map(l => `${l.port}/${l.protocol ?? 'udp'}`))
+      let port = edge === 'peering' ? ((d.target.kind ?? 'cims') === 'cims' ? 5070 : 5060) : 5060; while (used.has(`${port}/udp`)) port++
+      let lid = edge === 'peering' ? 'peering' : 'udp'; let i = 2; while (x[lid]) lid = `${edge === 'peering' ? 'peering' : 'udp'}${i++}`
+      x[lid] = { edge, port, protocol: 'udp', ...(edge === 'peering' && (d.target.kind ?? 'cims') === 'cims' && lid === 'peering' ? { local_node: 'cims-tester-peering' } : {}) }
+    })
+    const renameListener = (a: string, b: string) => mutate(d => {
+      const x = d.target.nodes[id]; const l = x.sip?.listeners; if (!l || !b || a === b || l[b]) return
+      const next: Record<string, SipListener> = {}; for (const [k, v] of Object.entries(l)) next[k === a ? b : k] = v; x.sip!.listeners = next
+      Object.values(d.pools).forEach(p => { if ((M.isPeer(p) ? p.peering : p.access) === id && p.listener === a) p.listener = b })
+    })
     return <div>
       {head(n.label ?? id, <Badge variant="neutralSoft">{M.ROLE[n.role].label}</Badge>)}{issueBlock}
       <div className="grid grid-cols-2 gap-2">
@@ -571,17 +599,33 @@ function Inspector({ doc, sel, setSel, mutate, issues, canWrite, onDelete, worke
         <F label="기능 (fn)"><Sel value={n.fn} disabled={ro} options={[...new Set([...(n.fn ? [n.fn] : []), ...M.ROLE[n.role].fns])].map(v => ({ v }))} onChange={v => N(x => { x.fn = v })} /></F>
         <F label="호스트"><Sel value={n.host} disabled={ro} options={M.hosts(doc).map(([hid, hh]) => ({ v: hid, l: `${hid} (${hh.ip})` }))} onChange={v => N(x => { x.host = v })} /></F>
       </div>
-      <div className="mt-1 text-muted-foreground">주소 {M.ipOfNode(doc, id) || '?'} (호스트에서 파생)</div>
+      <F label="노드 주소 (addr)" help={`비면 호스트 ip ${M.ipOfHost(doc, n.host) || '?'}. A/S 이중화의 VIP 나 다중 IP 호스트의 서비스 주소를 적습니다 — API/OAM/DB 포트와 수신점 ip 의 기본값`}><Txt value={n.addr} mono placeholder={M.ipOfHost(doc, n.host) || '호스트 ip'} disabled={ro} onCommit={v => N(x => { if (v) x.addr = v; else delete x.addr })} /></F>
       {n.role === 'sip' && <>
-        <Sec title="접속 수신점 — UE 풀이 등록·발신하는 곳" right={<label className="inline-flex items-center gap-1"><Checkbox checked={!!a} disabled={ro} onCheckedChange={v => N(x => { x.sip = x.sip ?? {}; if (v) x.sip.access = { udp: 5060, tcp: 5060, tls: 5061, domains: [] }; else delete x.sip.access })} /> 켬</label>}>
-          {a ? <><div className="grid grid-cols-3 gap-2">{(['udp', 'tcp', 'tls'] as const).map(t => <F key={t} label={t.toUpperCase()}><Txt value={a[t]} mono type="number" placeholder="없음" disabled={ro} onCommit={v => N(x => { x.sip!.access![t] = num(v) })} /></F>)}</div>
-            <F label="도메인 (쉼표)" help="첫 항목 = 기본 홈 도메인, ptt 가 든 항목 = PTT"><Txt value={(a.domains ?? []).join(',')} mono disabled={ro} onCommit={v => N(x => { x.sip!.access!.domains = csv(v) })} /></F></>
-            : <span className="text-muted-foreground">P-CSCF · SBC · CSP 에 켭니다</span>}
-        </Sec>
-        <Sec title="피어링 수신점 — 피어 풀의 다음 홉" right={<label className="inline-flex items-center gap-1"><Checkbox checked={!!pg} disabled={ro} onCheckedChange={v => N((x, d) => { x.sip = x.sip ?? {}; if (v) x.sip.peering = { port: (d.target.kind ?? 'cims') === 'cims' ? 5070 : 5060, protocol: 'udp', ...((d.target.kind ?? 'cims') === 'cims' ? { local_node: 'cims-tester-peering' } : {}) }; else delete x.sip.peering })} /> 켬</label>}>
-          {pg ? <><div className="grid grid-cols-2 gap-2"><F label="포트"><Txt value={pg.port} mono type="number" disabled={ro} onCommit={v => N(x => { x.sip!.peering!.port = num(v) ?? 5070 })} /></F><F label="프로토콜"><Sel value={pg.protocol ?? 'udp'} disabled={ro} options={[{ v: 'udp' }, { v: 'tcp' }, { v: 'tls' }]} onChange={v => N(x => { x.sip!.peering!.protocol = v as Transport })} /></F></div>
-            {(doc.target.kind ?? 'cims') === 'cims' ? <F label="local_node (대상 local_nodes 이름 · ACL scope)"><Txt value={pg.local_node} mono disabled={ro} onCommit={v => N(x => { x.sip!.peering!.local_node = v || undefined })} /></F> : <span className="text-muted-foreground">타 IMS — 컬렉션 시드 없음, 대상 쪽 라우팅을 미리 잡아 둡니다</span>}</>
-            : <span className="text-muted-foreground">IBCF · I-CSCF · CSP 피어링 리스너에 켭니다</span>}
+        <Sec title={`수신점 (${ls.length}) — CSP local_nodes 와 1:1`} right={!ro && <span className="inline-flex gap-1"><Button variant="outline" size="sm" className="h-5 px-1.5 text-[10px]" onClick={() => addListener('access')}>+ access</Button><Button variant="outline" size="sm" className="h-5 px-1.5 text-[10px]" onClick={() => addListener('peering')}>+ peering</Button></span>}>
+          {ls.length ? <div className="flex flex-col gap-1.5">
+            {ls.map(([lid, l]) => { const peer = l.edge === 'peering'; const lip = M.ipOfListener(doc, id, lid)
+              return <div key={lid} className="rounded-sm border border-border bg-muted/40 p-1.5">
+                <div className="mb-1 flex items-center gap-1.5 text-[11px]">
+                  <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: peer ? EDGE_COLOR.peer : EDGE_COLOR[(l.protocol ?? 'udp') as Transport] }} />
+                  <b className="font-mono">{lid}</b>
+                  <Badge variant={peer ? 'warningSoft' : 'infoSoft'} className="h-4 px-1 text-[10px]">{peer ? '피어링' : 'access'}</Badge>
+                  <span className="truncate font-mono text-muted-foreground">{lip}:{l.port}/{l.protocol ?? 'udp'}</span>
+                  <button disabled={ro} title="수신점 삭제" className="ml-auto text-muted-foreground hover:text-destructive disabled:opacity-40" onClick={() => LS((x, d) => { delete x[lid]; Object.values(d.pools).forEach(p => { if ((M.isPeer(p) ? p.peering : p.access) === id && p.listener === lid) delete p.listener }) })}><Trash2 size={12} /></button>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <F label="id" help="풀이 참조하는 키"><Txt value={lid} mono disabled={ro} onCommit={v => renameListener(lid, v)} /></F>
+                  <F label="edge"><Sel value={l.edge ?? 'access'} disabled={ro} options={[{ v: 'access', l: 'access — UE 등록·발신' }, { v: 'peering', l: 'peering — 피어 다음 홉' }]} onChange={v => LS(x => { x[lid].edge = v as 'access' | 'peering' })} /></F>
+                </div>
+                <div className="mt-1 grid grid-cols-[1fr_72px_72px] gap-1.5">
+                  <F label="ip (비면 노드 주소)"><Txt value={l.ip} mono placeholder={M.ipOfNode(doc, id)} disabled={ro} onCommit={v => LS(x => { if (v) x[lid].ip = v; else delete x[lid].ip })} /></F>
+                  <F label="port"><Txt value={l.port} mono type="number" disabled={ro} onCommit={v => LS(x => { x[lid].port = num(v) ?? 5060 })} /></F>
+                  <F label="proto"><Sel value={l.protocol ?? 'udp'} disabled={ro} options={[{ v: 'udp' }, { v: 'tcp' }, { v: 'tls' }]} onChange={v => LS(x => { x[lid].protocol = v as Transport })} /></F>
+                </div>
+                {cims && peer && <div className="mt-1"><F label="local_node (대상 local_nodes 이름)" help={`비면 cims-tester-${lid} — 시드가 찾고 없으면 만듭니다`}><Txt value={l.local_node} mono placeholder={`cims-tester-${lid}`} disabled={ro} onCommit={v => LS(x => { if (v) x[lid].local_node = v; else delete x[lid].local_node })} /></F></div>}
+              </div> })}
+            <span className="text-muted-foreground">access = UE 가 등록·발신하는 곳(UE 풀은 여기만) · peering = 피어의 다음 홉(CSP 는 Route 있는 피어만 받음). 피어 풀은 어느 항목이든 가리킬 수 있습니다 — CSP 는 접속점이 아니라 Route 로 피어를 신뢰합니다</span>
+          </div> : <span className="text-muted-foreground">CSP · P-CSCF · SBC · IBCF 에 수신점을 둡니다. 없으면 관측 전용(S-CSCF 처럼)</span>}
+          <F label="도메인 (쉼표)" help="첫 항목 = 기본 홈 도메인, ptt 가 든 항목 = PTT"><Txt value={(n.sip?.domains ?? []).join(',')} mono disabled={ro} onCommit={v => N(x => { x.sip = x.sip ?? {}; x.sip.domains = csv(v) })} /></F>
         </Sec>
       </>}
       {n.role === 'media' && <Sec title="RTP — 미디어 leg 지표를 이 노드에 귀속"><div className="grid grid-cols-2 gap-2"><F label="범위 시작"><Txt value={n.media?.rtp_range?.[0]} mono type="number" disabled={ro} onCommit={v => N(x => { x.media = x.media ?? {}; x.media.rtp_range = [num(v) ?? 10000, x.media.rtp_range?.[1] ?? 19999] })} /></F><F label="끝"><Txt value={n.media?.rtp_range?.[1]} mono type="number" disabled={ro} onCommit={v => N(x => { x.media = x.media ?? {}; x.media.rtp_range = [x.media.rtp_range?.[0] ?? 10000, num(v) ?? 19999] })} /></F></div><F label="제어 포트 (선택)"><Txt value={n.media?.control} mono type="number" placeholder="CMP 9001" disabled={ro} onCommit={v => N(x => { x.media = x.media ?? {}; x.media.control = num(v) })} /></F></Sec>}
@@ -615,8 +659,14 @@ function Inspector({ doc, sel, setSel, mutate, issues, canWrite, onDelete, worke
         {wsel}{gsel}
       </div>
       <F label="도메인"><Txt value={p.domain} mono disabled={ro} onCommit={v => PP(x => { x.domain = v })} /></F>
-      <Sec title="수신점 (bind) — 워커 호스트 주소에 엽니다"><div className="grid grid-cols-2 gap-2"><F label="port"><Txt value={p.bind.port} mono type="number" disabled={ro} onCommit={v => PP(x => { x.bind.port = num(v) ?? 5080 })} /></F><F label="proto"><Sel value={p.bind.protocol ?? 'udp'} disabled={ro} options={[{ v: 'udp' }, { v: 'tcp' }, { v: 'tls' }]} onChange={v => PP(x => { x.bind.protocol = v as Transport })} /></F></div><span className="text-muted-foreground">= {M.ipOfWorker(doc, p.worker) || '?'}:{p.bind.port}/{p.bind.protocol ?? 'udp'}</span></Sec>
-      <Sec title="다음 홉 — 피어링 수신점 있는 대상 노드"><Sel value={p.peering} disabled={ro} options={M.peeringNodes(doc).map(v => ({ v }))} empty="(선택)" onChange={v => PP(x => { x.peering = v })} /></Sec>
+      <Sec title="수신점 (bind) — 워커 호스트에 엽니다"><div className="grid grid-cols-[1fr_70px_70px] gap-2"><F label="ip (비면 워커 호스트)"><Txt value={p.bind.ip} mono placeholder={M.ipOfWorker(doc, p.worker) || '워커 호스트 ip'} disabled={ro} onCommit={v => PP(x => { if (v) x.bind.ip = v; else delete x.bind.ip })} /></F><F label="port"><Txt value={p.bind.port} mono type="number" disabled={ro} onCommit={v => PP(x => { x.bind.port = num(v) ?? 5080 })} /></F><F label="proto"><Sel value={p.bind.protocol ?? 'udp'} disabled={ro} options={[{ v: 'udp' }, { v: 'tcp' }, { v: 'tls' }]} onChange={v => PP(x => { x.bind.protocol = v as Transport })} /></F></div><span className="text-muted-foreground">= {M.ipOfBind(doc, p) || '?'}:{p.bind.port}/{p.bind.protocol ?? 'udp'} — CSP remote_node 의 주소</span></Sec>
+      <Sec title="다음 홉 — 대상 SIP 노드의 수신점">
+        <div className="grid grid-cols-2 gap-2">
+          <F label="노드"><Sel value={p.peering} disabled={ro} options={M.peeringNodes(doc).map(v => ({ v }))} empty="(선택)" onChange={v => PP(x => { x.peering = v; delete x.listener })} /></F>
+          <F label="수신점" help="비면 첫 peering 항목, 없으면 bind 와 같은 protocol 의 첫 항목"><Sel value={p.listener ?? ''} disabled={ro} options={M.listenersOf(doc.target.nodes[p.peering]).map(([lid, l]) => ({ v: lid, l: `${lid} — ${l.edge === 'peering' ? '피어링' : 'access'} ${M.ipOfListener(doc, p.peering, lid)}:${l.port}/${l.protocol ?? 'udp'}` }))} empty="(기본)" onChange={v => PP(x => { if (v) x.listener = v; else delete x.listener })} /></F>
+        </div>
+        <span className="text-muted-foreground">{(() => { const lid = M.poolListener(doc, p); const l = lid ? doc.target.nodes[p.peering]?.sip?.listeners?.[lid] : undefined; return l ? `${p.peering}:${lid} → ${M.ipOfListener(doc, p.peering, lid!)}:${l.port}/${l.protocol ?? 'udp'}${(l.edge ?? 'access') === 'peering' ? '' : ' — access 수신점. CSP 는 시드된 Route 로 이 피어를 신뢰합니다'}${cims ? ` · local_node ${M.localNodeName(lid!, l)}` : ''}` : '카드를 SIP 서버의 수신점 행으로 끌어 놓으십시오' })()}</span>
+      </Sec>
       <Sec title="신원">
         {p.profile === 'pbx' ? <><div className="grid grid-cols-2 gap-2"><F label="DID 시작"><Txt value={idn.did_range?.[0]} mono disabled={ro} onCommit={v => PP(x => { x.identities = { ...x.identities, did_range: [v, x.identities?.did_range?.[1] ?? v] }; delete x.identities.e164_range })} /></F><F label="DID 끝"><Txt value={idn.did_range?.[1]} mono disabled={ro} onCommit={v => PP(x => { x.identities = { ...x.identities, did_range: [x.identities?.did_range?.[0] ?? v, v] }; delete x.identities.e164_range })} /></F></div><F label="내선 길이"><Txt value={idn.ext_len} mono type="number" disabled={ro} onCommit={v => PP(x => { x.identities = { ...x.identities, ext_len: num(v) } })} /></F></>
           : <div className="grid grid-cols-2 gap-2"><F label="E.164 시작"><Txt value={idn.e164_range?.[0]} mono disabled={ro} onCommit={v => PP(x => { x.identities = { ...x.identities, e164_range: [v, x.identities?.e164_range?.[1] ?? v] }; delete x.identities.did_range })} /></F><F label="E.164 끝"><Txt value={idn.e164_range?.[1]} mono disabled={ro} onCommit={v => PP(x => { x.identities = { ...x.identities, e164_range: [x.identities?.e164_range?.[0] ?? v, v] }; delete x.identities.did_range })} /></F></div>}
@@ -639,13 +689,14 @@ function Inspector({ doc, sel, setSel, mutate, issues, canWrite, onDelete, worke
     {head(pn, <Badge variant={p.kind === 'ue' ? 'infoSoft' : 'successSoft'}>{p.kind === 'ue' ? 'UE 풀' : '실단말 풀'}</Badge>)}{issueBlock}
     <F label="풀 이름" help="시나리오 roles.pool 이 참조 (이름 또는 group)"><Txt value={pn} mono disabled={ro} onCommit={v => mutate(d => { if (M.renamePool(d, pn, v)) setSel({ kind: 'pool', id: v }) })} /></F>
     <div className="grid grid-cols-2 gap-2">{wsel}{gsel}</div>
-    <Sec title="접속점 — 등록·발신이 닿는 SIP 서버">
+    <Sec title="접속점 — 등록·발신이 닿는 SIP 수신점">
       <div className="grid grid-cols-3 gap-2">
-        <F label="노드"><Sel value={u.access} disabled={ro} options={M.accessNodes(doc).map(v => ({ v }))} empty="(선택)" onChange={v => PU(x => { x.access = v; const a = doc.target.nodes[v]?.sip?.access; if (a && !a[x.transport ?? 'udp']) x.transport = (['udp', 'tcp', 'tls'] as Transport[]).find(t => a[t]) ?? x.transport })} /></F>
-        <F label="transport"><Sel value={u.transport ?? 'udp'} disabled={ro} options={(['udp', 'tcp', 'tls'] as Transport[]).filter(t => !acc?.sip?.access || acc.sip.access[t] || t === u.transport).map(v => ({ v }))} onChange={v => PU(x => { x.transport = v as Transport })} /></F>
-        <F label="srtp"><Sel value={u.srtp ?? 'off'} disabled={ro} options={[{ v: 'off' }, { v: 'optional' }, { v: 'required' }]} onChange={v => PU(x => { x.srtp = v as UePoolDoc['srtp'] })} /></F>
+        <F label="노드"><Sel value={u.access} disabled={ro} options={M.accessNodes(doc).map(v => ({ v }))} empty="(선택)" onChange={v => PU(x => { x.access = v; delete x.listener; const al = M.accessListeners(doc.target.nodes[v]); if (al.length && !al.some(([, l]) => (l.protocol ?? 'udp') === (x.transport ?? 'udp'))) x.transport = (al[0][1].protocol ?? 'udp') as Transport })} /></F>
+        <F label="수신점" help="비면 transport 와 같은 첫 access 항목"><Sel value={u.listener ?? ''} disabled={ro} options={M.accessListeners(acc).map(([lid, l]) => ({ v: lid, l: `${lid} — ${M.ipOfListener(doc, u.access, lid)}:${l.port}/${l.protocol ?? 'udp'}` }))} empty="(기본)" onChange={v => PU(x => { if (v) { x.listener = v; x.transport = (acc?.sip?.listeners?.[v]?.protocol ?? 'udp') as Transport } else delete x.listener })} /></F>
+        <F label="transport"><Sel value={M.poolTransport(doc, u)} disabled={ro || !!u.listener} options={(['udp', 'tcp', 'tls'] as Transport[]).filter(t => M.accessListeners(acc).some(([, l]) => (l.protocol ?? 'udp') === t) || t === u.transport).map(v => ({ v }))} onChange={v => PU(x => { x.transport = v as Transport })} /></F>
       </div>
-      <span className="text-muted-foreground">{acc?.sip?.access ? `${acc.label ?? u.access} ${M.ipOfNode(doc, u.access)} — ${(['udp', 'tcp', 'tls'] as const).filter(t => acc.sip!.access![t]).map(t => `${t} ${acc.sip!.access![t]}`).join(' · ')}` : '카드를 SIP 서버 노드 위로 끌어 놓으십시오'}</span>
+      <div className="grid grid-cols-3 gap-2"><F label="srtp"><Sel value={u.srtp ?? 'off'} disabled={ro} options={[{ v: 'off' }, { v: 'optional' }, { v: 'required' }]} onChange={v => PU(x => { x.srtp = v as UePoolDoc['srtp'] })} /></F></div>
+      <span className="text-muted-foreground">{(() => { const lid = M.poolListener(doc, u); const l = lid ? acc?.sip?.listeners?.[lid] : undefined; return l ? `${acc?.label ?? u.access}:${lid} → ${M.ipOfListener(doc, u.access, lid!)}:${l.port}/${l.protocol ?? 'udp'}` : '카드를 SIP 서버의 access 수신점 행으로 끌어 놓으십시오' })()}</span>
     </Sec>
     <Sec title="신원 원천" right={p.kind === 'ue' && <span className="inline-flex gap-1">{(['db', 'creds'] as const).map(k => <button key={k} disabled={ro} onClick={() => PU(x => { x.source = k === 'db' ? { db: M.dbNodes(doc)[0] ?? '', table: 'volte_subscriptions', offset: 0, count: 100 } : { creds: `creds/${pn}.jsonl` } })} className={`h-5 rounded-sm border px-1.5 text-[10px] ${(k === 'db') === isDb ? 'border-primary bg-primary text-primary-foreground' : 'border-border'}`}>{k === 'db' ? 'DB 노드' : 'creds'}</button>)}</span>}>
       {isDb && 'db' in u.source ? <>

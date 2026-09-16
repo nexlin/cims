@@ -11,7 +11,7 @@ PASS 로 보인다. 지표 이름은 RFC 6076 어휘(`rrd_ms`·`srd_ms`·`sdd_ms
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Literal, Optional, Union
+from typing import Dict, List, Literal, Optional, Tuple, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -22,12 +22,17 @@ class _Strict(BaseModel):
 
 # ──────────────────────────────────────────────────────────────────────────
 #  1. 토폴로지 — 호스트 › 워커·대상 노드 › 풀 (§4)
-#     주소는 hosts{} 에만 둔다. 워커 URL·노드 수신점·피어 수신점 ip 는 전부 호스트에서 파생된다.
+#     주소의 기본값은 hosts{} 에서 온다 — 워커 URL·노드 API/OAM/DB 포트·피어 수신점 ip 는 호스트에서 파생되고,
+#     대상 노드는 `addr`(VIP — A/S 이중화·다중 IP 호스트), SIP 수신점은 항목별 `ip` 로 덮어쓸 수 있다
+#     (사슬: listener.ip → node.addr → host.ip). SIP 노드의 수신점은 N 개(`sip.listeners{}` — CSP local_nodes 와 1:1,
+#     edge=access 는 UE 가 등록·발신하는 곳, edge=peering 은 피어의 다음 홉. 피어 풀은 어느 항목이든 가리킬 수 있다 —
+#     CSP 는 접속점 edge 가 아니라 Route 로 피어를 신뢰한다, sip_service_model.md §4).
 #     대상은 역할별 노드 집합(sip/tas/media/subscriber/oam/db) — CIMS·타 IMS·IP-PBX 가 같은 레코드 구조다.
 #     풀 하나 = 워커 하나(`worker`). 워커 여럿은 워커마다 풀 + 같은 `group`(논리 풀 이름).
 # ──────────────────────────────────────────────────────────────────────────
 
 Transport = Literal['udp', 'tcp', 'tls']
+ListenerEdge = Literal['access', 'peering']
 SrtpMode = Literal['off', 'optional', 'required']
 PeerProfile = Literal['ibcf', 'pbx', 'mgcf']
 ObserveSource = Literal['oam_stats', 'oam_alarms', 'agent_heartbeat', 'ssh_proc']
@@ -64,33 +69,85 @@ class Worker(_Strict):
     media: Optional[WorkerMedia] = None
 
 
-class SipAccess(_Strict):
-    """UE 가 등록·발신하는 접속점 — transport 별 포트(없는 transport 는 그 노드에서 거절)."""
-    udp: Optional[int] = Field(default=None, ge=1, le=65535)
-    tcp: Optional[int] = Field(default=None, ge=1, le=65535)
-    tls: Optional[int] = Field(default=None, ge=1, le=65535)
-    domains: List[str] = Field(default_factory=list, description='첫 항목 = 기본 홈 도메인, "ptt" 가 든 항목 = PTT 풀 도메인')
-
-    @model_validator(mode='after')
-    def _any_port(self):
-        if self.udp is None and self.tcp is None and self.tls is None:
-            raise ValueError('access 에 udp/tcp/tls 포트 하나는 필요하다')
-        return self
-
-    def port_for(self, transport: str) -> Optional[int]:
-        return getattr(self, transport, None)
-
-
-class SipPeering(_Strict):
-    """피어 풀의 다음 홉(edge=peering 접속점). `local_node` 는 cims 대상에서만 — 대상 local_nodes 의 name(없으면 시드)."""
+class SipListener(_Strict):
+    """SIP 수신점 하나 = 대상 LocalNode 하나. `edge`: access = UE 가 등록·발신하는 곳 / peering = 피어 풀의 다음 홉(CSP `edge=peering`
+    접속점은 Route 있는 피어만 받는다). `ip` 가 비면 노드 `addr` → 호스트 ip. `local_node` = cims 대상 local_nodes 의 이름 —
+    시드가 그 이름을 찾고, 없으면 그 이름으로(비면 `cims-tester-<수신점 id>`) 만든다."""
+    edge: ListenerEdge = 'access'
+    ip: Optional[str] = Field(default=None, min_length=1, description='비면 노드 addr → 호스트 ip')
     port: int = Field(ge=1, le=65535)
     protocol: Transport = 'udp'
-    local_node: Optional[str] = Field(default=None, description='cims: 대상 local_nodes 이름 — 비면 cims-tester-peering')
+    local_node: Optional[str] = Field(default=None, description='cims: 대상 local_nodes 이름 — 비면 cims-tester-<id>')
 
 
 class NodeSip(_Strict):
-    access: Optional[SipAccess] = None
-    peering: Optional[SipPeering] = None
+    """SIP 노드의 수신점 N 개 + 도메인. 입력이 이전 꼴(`access{udp,tcp,tls,domains}`·`peering{port,protocol,local_node}`)이면
+    `normalize_sip_block` 이 수신점 항목 `udp`/`tcp`/`tls`/`peering` 으로 승계한다(store 도 읽을 때 같은 함수로 바꿔 저장)."""
+    domains: List[str] = Field(default_factory=list, description='첫 항목 = 기본 홈 도메인, "ptt" 가 든 항목 = PTT 풀 도메인')
+    listeners: Dict[str, SipListener] = Field(default_factory=dict)
+
+    @model_validator(mode='before')
+    @classmethod
+    def _legacy(cls, v):
+        return normalize_sip_block(v) if isinstance(v, dict) else v
+
+    @field_validator('listeners')
+    @classmethod
+    def _ids(cls, v):
+        for k in v:
+            if not re.match(_ID_RE, k):
+                raise ValueError(f'수신점 id 는 소문자·숫자·_ 만: {k!r}')
+        return v
+
+    def by_edge(self, edge: str) -> Dict[str, SipListener]:
+        return {k: l for k, l in self.listeners.items() if l.edge == edge}
+
+
+def normalize_sip_block(sip: dict) -> dict:
+    """노드 `sip` 블록의 이전 꼴 → 수신점 목록. 이미 새 꼴이면 그대로. 사본을 돌려준다."""
+    if not isinstance(sip, dict) or ('access' not in sip and 'peering' not in sip):
+        return sip
+    out = {k: v for k, v in sip.items() if k not in ('access', 'peering')}
+    ls = dict(out.get('listeners') or {})
+    doms = list(out.get('domains') or [])
+    acc = sip.get('access')
+    if isinstance(acc, dict):
+        for t in ('udp', 'tcp', 'tls'):
+            if acc.get(t):
+                ls.setdefault(t, {'edge': 'access', 'port': acc[t], 'protocol': t})
+        if not doms:
+            doms = list(acc.get('domains') or [])
+    pr = sip.get('peering')
+    if isinstance(pr, dict) and pr.get('port'):
+        row = {'edge': 'peering', 'port': pr['port'], 'protocol': pr.get('protocol') or 'udp'}
+        if pr.get('local_node'):
+            row['local_node'] = pr['local_node']
+        ls.setdefault('peering', row)
+    out['listeners'] = ls
+    if doms:
+        out['domains'] = doms
+    return out
+
+
+def normalize_topology_doc(doc: dict) -> dict:
+    """토폴로지 문서의 노드 `sip` 블록을 전부 새 꼴로(사본). store 가 읽을 때·저장할 때 부른다."""
+    if not isinstance(doc, dict):
+        return doc
+    nodes = ((doc.get('target') or {}).get('nodes') or {})
+    changed = False
+    new_nodes = {}
+    for nid, n in nodes.items():
+        if isinstance(n, dict) and isinstance(n.get('sip'), dict) and ('access' in n['sip'] or 'peering' in n['sip']):
+            n = dict(n)
+            n['sip'] = normalize_sip_block(n['sip'])
+            changed = True
+        new_nodes[nid] = n
+    if not changed:
+        return doc
+    out = dict(doc)
+    out['target'] = dict(doc['target'])
+    out['target']['nodes'] = new_nodes
+    return out
 
 
 class NodeTas(_Strict):
@@ -127,6 +184,8 @@ class TargetNode(_Strict):
     """역할(role)별 노드 — 설정 블록이 역할마다 다르다. procs = 호스트 SSH 관측이 볼 프로세스 이름."""
     role: NodeRole
     host: str
+    addr: Optional[str] = Field(default=None, min_length=1,
+                                description='노드 주소 — 비면 호스트 ip. A/S 이중화의 VIP 나 다중 IP 호스트의 서비스 주소')
     fn: Optional[str] = Field(default=None, description='표시용 — CSP · P-CSCF · IBCF · MRF …')
     label: Optional[str] = None
     procs: List[str] = Field(default_factory=list)
@@ -184,9 +243,10 @@ class _PoolBase(_Strict):
 
 class UePool(_PoolBase):
     kind: Literal['ue']
-    access: str = Field(description='접속점 노드 id — sip.access 가 있는 SIP 노드')
+    access: str = Field(description='접속점 노드 id — edge=access 수신점이 있는 SIP 노드')
+    listener: Optional[str] = Field(default=None, description='그 노드의 수신점 id — 비면 transport 와 같은 protocol 의 첫 access 수신점')
     source: Union[DbSource, CredsSource]
-    transport: Transport = 'udp'
+    transport: Transport = Field(default='udp', description='listener 를 주면 그 protocol 로 맞춘다(둘 다 주고 다르면 오류)')
     srtp: SrtpMode = 'off'
     register_expires: int = Field(default=3600, ge=60)
     prack: bool = Field(default=False, description='RFC 3262 100rel — 발신 INVITE 에 Supported/Require: 100rel, RSeq 1xx 에 PRACK (mgcf early media 시험)')
@@ -194,7 +254,8 @@ class UePool(_PoolBase):
 
 
 class PeerBind(_Strict):
-    """피어 수신점 — ip 는 워커 호스트 주소에서 파생된다."""
+    """피어 수신점 — ip 가 비면 워커 호스트 주소(다중 IP 호스트면 여기서 고른다)."""
+    ip: Optional[str] = Field(default=None, min_length=1)
     port: int = Field(ge=1, le=65535)
     protocol: Transport = 'udp'
 
@@ -213,7 +274,8 @@ class PeerIdentities(_Strict):
 
 
 class PeerRegister(_Strict):
-    """pbx 트렁크 REGISTER(SIPconnect 2.0 §8 등록 모드) — 계정 하나가 DID 범위를 대표. 대상의 access 접속점으로 Digest 등록."""
+    """pbx 트렁크 REGISTER(SIPconnect 2.0 §8 등록 모드) — 계정 하나가 DID 범위를 대표. 피어가 가리킨 수신점(같은 주소의 같은
+    transport access 수신점)으로 Digest 등록."""
     user: str
     ha1_env: Optional[str] = Field(default=None, description='H(A1) 을 담은 환경변수 — 비밀은 YAML 에 두지 않는다')
     password_env: Optional[str] = Field(default=None, description='평문 비밀번호 환경변수 — ha1_env 가 없을 때')
@@ -241,7 +303,10 @@ class PeerSeed(_Strict):
 
 class PeerPool(_PoolBase):
     kind: Literal['peer']
-    peering: str = Field(description='다음 홉 노드 id — sip.peering 이 있는 SIP 노드')
+    peering: str = Field(description='다음 홉 노드 id — SIP 노드(수신점 하나 이상)')
+    listener: Optional[str] = Field(default=None,
+                                    description='그 노드의 수신점 id — 비면 첫 edge=peering 수신점, 없으면 bind.protocol 과 같은 첫 수신점. '
+                                                'access 수신점도 된다(CSP 는 Route 로 피어를 신뢰한다)')
     profile: PeerProfile
     bind: PeerBind
     domain: str
@@ -265,6 +330,7 @@ class PeerPool(_PoolBase):
 class RealUePool(_PoolBase):
     kind: Literal['real-ue']
     access: str
+    listener: Optional[str] = None
     source: CredsSource
     transport: Transport = 'tls'
     srtp: SrtpMode = 'optional'
@@ -361,9 +427,15 @@ class Topology(_Strict):
         for w in self.workers:
             if w.host not in self.hosts:
                 raise ValueError(f'workers.{w.name}.host={w.host!r} 는 hosts 에 없다')
+        seen_listener: Dict[tuple, str] = {}
         for nid, n in self.target.nodes.items():
             if n.host not in self.hosts:
                 raise ValueError(f'target.nodes.{nid}.host={n.host!r} 는 hosts 에 없다')
+            for lid, l in (n.sip.listeners if n.sip else {}).items():
+                key = (self.listener_ip(nid, lid), l.port, l.protocol)
+                if key in seen_listener:
+                    raise ValueError(f'target.nodes.{nid}.sip.listeners.{lid}: 수신점 {key[0]}:{key[1]}/{key[2]} 이 {seen_listener[key]} 과 겹친다')
+                seen_listener[key] = f'{nid}:{lid}'
         seen_group_worker = set()
         seen_bind = {}
         for pname, p in self.pools.items():
@@ -378,27 +450,34 @@ class Topology(_Strict):
                 seen_group_worker.add(key)
             if p.kind in ('ue', 'real-ue'):
                 node = self.target.nodes.get(p.access)
-                if node is None or node.sip is None or node.sip.access is None:
-                    raise ValueError(f'pools.{pname}.access={p.access!r} 는 sip.access 가 있는 노드가 아니다')
-                if node.sip.access.port_for(p.transport) is None:
-                    raise ValueError(f'pools.{pname}: transport {p.transport} 인데 {p.access} 에 {p.transport} 수신점이 없다')
+                if node is None or node.sip is None or not node.sip.by_edge('access'):
+                    raise ValueError(f'pools.{pname}.access={p.access!r} 는 access 수신점(sip.listeners edge=access)이 있는 노드가 아니다')
+                if p.listener is not None:
+                    l = node.sip.listeners.get(p.listener)
+                    if l is None or l.edge != 'access':
+                        raise ValueError(f'pools.{pname}.listener={p.listener!r} 는 {p.access} 의 access 수신점이 아니다')
+                    if 'transport' in p.model_fields_set and p.transport != l.protocol:
+                        raise ValueError(f'pools.{pname}: transport {p.transport} 인데 수신점 {p.listener} 은 {l.protocol} 이다')
+                    p.transport = l.protocol
+                elif not any(l.protocol == p.transport for l in node.sip.by_edge('access').values()):
+                    raise ValueError(f'pools.{pname}: transport {p.transport} 인데 {p.access} 에 {p.transport} access 수신점이 없다')
                 if p.kind == 'ue' and isinstance(p.source, DbSource):
                     src = self.target.nodes.get(p.source.db)
                     if src is None or not (src.role == 'db' or (src.role == 'subscriber' and src.api is not None)):
                         raise ValueError(f'pools.{pname}.source.db={p.source.db!r} 는 db 노드 또는 api 있는 subscriber 노드가 아니다')
             else:
                 node = self.target.nodes.get(p.peering)
-                if node is None or node.sip is None or node.sip.peering is None:
-                    raise ValueError(f'pools.{pname}.peering={p.peering!r} 는 sip.peering 이 있는 노드가 아니다')
-                if p.trunk_register is not None and node.sip.access is None:
-                    raise ValueError(f'pools.{pname}: 트렁크 REGISTER 는 {p.peering} 의 sip.access 로 가는데 access 가 없다')
-                key = (self.worker_host(p.worker), p.bind.port)
+                if node is None or node.sip is None or not node.sip.listeners:
+                    raise ValueError(f'pools.{pname}.peering={p.peering!r} 는 수신점(sip.listeners)이 있는 SIP 노드가 아니다')
+                if p.listener is not None and p.listener not in node.sip.listeners:
+                    raise ValueError(f'pools.{pname}.listener={p.listener!r} 는 {p.peering} 의 수신점이 아니다')
+                key = (self.pool_bind_ip(pname), p.bind.port, p.bind.protocol)
                 if key in seen_bind:
-                    raise ValueError(f'pools.{pname}: 수신점 {key[0]}:{key[1]} 이 {seen_bind[key]} 과 겹친다')
+                    raise ValueError(f'pools.{pname}: 수신점 {key[0]}:{key[1]}/{key[2]} 이 {seen_bind[key]} 과 겹친다')
                 seen_bind[key] = pname
         return self
 
-    # ── 파생 조회 (주소는 호스트에만 있다) ───────────────────────────────
+    # ── 파생 조회 — 주소 사슬 listener.ip → node.addr → host.ip ────────────────
 
     def worker_by_name(self, name: str) -> Optional[Worker]:
         return next((w for w in self.workers if w.name == name), None)
@@ -414,14 +493,21 @@ class Topology(_Strict):
         return f'http://{self.host_ip(w.host)}:{w.port}'
 
     def node_ip(self, nid: str) -> str:
-        return self.host_ip(self.target.nodes[nid].host)
+        """노드 주소 — addr(VIP) 이 있으면 그것, 없으면 호스트 ip. API/OAM/DB/RTP 포트와 수신점 ip 의 기본값."""
+        n = self.target.nodes[nid]
+        return n.addr or self.host_ip(n.host)
+
+    def listener_ip(self, nid: str, lid: str) -> str:
+        n = self.target.nodes[nid]
+        l = n.sip.listeners[lid] if n.sip else None
+        return (l.ip if l and l.ip else None) or self.node_ip(nid)
 
     def nodes_by_role(self, role: str) -> Dict[str, TargetNode]:
         return {k: n for k, n in self.target.nodes.items() if n.role == role}
 
     def domains_of(self, nid: str) -> List[str]:
         n = self.target.nodes.get(nid)
-        return list(n.sip.access.domains) if n and n.sip and n.sip.access else []
+        return list(n.sip.domains) if n and n.sip else []
 
     def default_domain(self, nid: str, ptt: bool = False) -> str:
         doms = self.domains_of(nid)
@@ -432,40 +518,65 @@ class Topology(_Strict):
         return doms[0] if doms else ''
 
     def pool_bind_ip(self, pname: str) -> str:
-        """피어 풀 수신점 ip = 그 워커 호스트 주소."""
-        return self.worker_host(self.pools[pname].worker)
+        """피어 풀 수신점 ip = bind.ip, 비면 그 워커 호스트 주소."""
+        p = self.pools[pname]
+        return (p.bind.ip if p.kind == 'peer' and p.bind.ip else None) or self.worker_host(p.worker)
 
     def pool_node(self, pname: str) -> str:
         p = self.pools[pname]
         return p.peering if p.kind == 'peer' else p.access
 
-    def target_csp_for(self, pname: str) -> TargetCsp:
-        """워커 계약 PoolCreate.target_csp — 풀이 참조한 노드(ue: access · peer: peering)에서 파생한다."""
+    def pool_listener(self, pname: str) -> Tuple[str, str, SipListener]:
+        """풀이 닿는 수신점 (노드 id, 수신점 id, 항목). UE = listener 또는 transport 와 같은 첫 access 수신점.
+        피어 = listener 또는 첫 edge=peering, 없으면 bind.protocol 과 같은 첫 수신점, 그것도 없으면 첫 수신점."""
         p = self.pools[pname]
         nid = self.pool_node(pname)
+        sip = self.target.nodes[nid].sip
+        if p.listener is not None:
+            return nid, p.listener, sip.listeners[p.listener]
+        if p.kind == 'peer':
+            for pool in (sip.by_edge('peering'),
+                         {k: l for k, l in sip.listeners.items() if l.protocol == p.bind.protocol}, sip.listeners):
+                if pool:
+                    lid = next(iter(pool))
+                    return nid, lid, sip.listeners[lid]
+        else:
+            for lid, l in sip.by_edge('access').items():
+                if l.protocol == p.transport:
+                    return nid, lid, l
+        raise ValueError(f'pool {pname}: 닿을 수신점이 없다')
+
+    @staticmethod
+    def local_node_name(lid: str, l: SipListener) -> str:
+        """cims 대상에서 이 수신점이 뜻하는 local_nodes 이름 — 항목의 local_node, 비면 cims-tester-<id>."""
+        return l.local_node or f'cims-tester-{lid}'
+
+    def target_csp_for(self, pname: str) -> TargetCsp:
+        """워커 계약 PoolCreate.target_csp — 풀이 닿는 수신점에서 파생한다. ip = 그 수신점 주소, udp/tcp/tls = 같은 주소의 access
+        수신점 포트(트렁크 REGISTER·다른 transport 폴백), 피어 풀은 peering = 그 수신점 자체."""
+        p = self.pools[pname]
+        nid, lid, l = self.pool_listener(pname)
         node = self.target.nodes[nid]
-        acc = node.sip.access if node.sip else None
-        kw = {'ip': self.node_ip(nid)}
-        if acc is not None:
-            for tr in ('udp', 'tcp', 'tls'):
-                v = acc.port_for(tr)
-                if v is not None:
-                    kw[tr] = v
+        ip = self.listener_ip(nid, lid)
+        kw = {'ip': ip}
+        for alid, al in node.sip.by_edge('access').items():
+            if self.listener_ip(nid, alid) == ip and al.protocol not in kw:
+                kw[al.protocol] = al.port
+        if p.kind != 'peer' and l.protocol not in kw:
+            kw[l.protocol] = l.port
+        doms = self.domains_of(nid)
+        if doms:
             kw['domain_volte'] = self.default_domain(nid) or None
             kw['domain_ptt'] = self.default_domain(nid, ptt=True) or None
             if kw['domain_ptt'] == kw['domain_volte']:
                 kw['domain_ptt'] = None
         if p.kind == 'peer':
-            pr = node.sip.peering
-            kw['peering'] = TargetPeering(ip=self.node_ip(nid), port=pr.port, protocol=pr.protocol,
-                                          local_node=pr.local_node or 'cims-tester-peering')
+            kw['peering'] = TargetPeering(ip=ip, port=l.port, protocol=l.protocol, local_node=self.local_node_name(lid, l))
         return TargetCsp(**kw)
 
-    def peering_node_of(self, pools: List[str]) -> Optional[str]:
-        nids = {self.pools[p].peering for p in pools if self.pools[p].kind == 'peer'}
-        if len(nids) > 1:
-            raise ValueError(f'피어 풀들의 다음 홉 노드가 서로 다르다: {sorted(nids)}')
-        return next(iter(nids), None)
+    def peer_listeners(self, pools: List[str]) -> Dict[str, Tuple[str, str, SipListener]]:
+        """피어 풀 이름 → (노드, 수신점 id, 항목). 시드가 풀마다 접속점(LocalNode)을 고르는 데 쓴다."""
+        return {pn: self.pool_listener(pn) for pn in pools if self.pools[pn].kind == 'peer'}
 
     def oam_ref(self) -> Optional[OamRef]:
         for nid, n in self.target.nodes.items():

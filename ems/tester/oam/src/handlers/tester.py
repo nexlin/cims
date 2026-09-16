@@ -704,7 +704,7 @@ TESTER_API_DOCS = [
      'summary': '토폴로지 저장(POST /topologies 는 생성) — 검증 통과분만',
      'errors': [{'status': 400, 'when': '검증 실패', 'body': {'error': 'invalid_topology', 'errors': ['…']}}], 'auth': _AUTH_OP},
     {'id': 'tester.topology.check', 'module': _MOD, 'method': 'POST', 'path': f'{_P}/topologies/{{id}}/check',
-     'summary': '연결 검사 — 노드별 수신점(`<노드>:udp|tcp|tls|peering|api|db|oam`)·`<호스트>:ssh`·`worker_<이름>` health',
+     'summary': '연결 검사 — 노드별 수신점(`<노드>:<수신점 id>` SIP · `<노드>:api|db|oam|control`)·`<호스트>:ssh`·`worker_<이름>` health',
      'response': '{id, ok, items[]: {name, ok, detail, ms, info?, target{kind,id}}}',
      'notes': ['피어링 접속점은 run 중에만 열리므로 평상시 미도달은 info(참고) 로 표시'], 'auth': _AUTH_OP},
     {'id': 'tester.workers', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/workers',

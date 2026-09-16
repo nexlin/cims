@@ -18,10 +18,10 @@ import { fmtTime } from '@tester/lib/fmt'
 
 /** 표시용 — SIP 접속점 노드 첫 항목의 호스트 주소·기본 도메인 */
 export function topoTargetLabel(doc: TopologyDoc): string {
-  const sip = Object.values(doc.target?.nodes ?? {}).find(n => n.role === 'sip' && n.sip?.access)
+  const sip = Object.values(doc.target?.nodes ?? {}).find(n => n.role === 'sip' && M.accessListeners(n).length)
   if (!sip) return doc.target?.name ?? '—'
-  const ip = doc.hosts?.[sip.host]?.ip ?? sip.host
-  const dom = sip.sip?.access?.domains?.[0]
+  const ip = sip.addr || (doc.hosts?.[sip.host]?.ip ?? sip.host)
+  const dom = sip.sip?.domains?.[0]
   return dom ? `${ip} · ${dom}` : ip
 }
 

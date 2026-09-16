@@ -1,5 +1,6 @@
 # 토폴로지 — 호스트 › 워커·대상 노드 › 풀 (test_instrument.md §4). 콘솔 [시험 > 토폴로지] 캔버스가 편집·저장하는 레코드의 YAML 표현.
-# 주소는 hosts 에만 둔다(워커 URL·노드 수신점·피어 수신점 ip 는 파생). 비밀(토큰·H(A1)·SSH 키)은 환경변수 이름만 적는다.
+# 주소 기본값은 hosts 에서 온다(워커 URL·노드 포트·피어 수신점 ip). 노드 addr(VIP)·수신점 ip·피어 bind.ip 로 덮어쓸 수 있다.
+# 비밀(토큰·H(A1)·SSH 키)은 환경변수 이름만 적는다.
 name: media01
 hosts:                                   # 서버 — 계측기/대상/동거 구분은 필드가 아니라 그 위에 무엇이 있느냐
   h45: { name: media01, ip: 10.0.0.45, ssh: { user: cims, key_env: TESTER_SSH_KEY } }
@@ -12,9 +13,18 @@ target:
   name: media01
   kind: cims                             # cims | ims | pbx — cims 만 oam 노드로 컬렉션 시드·target_build
   nodes:                                 # 역할(role)별 노드 — 설정 블록이 역할마다 다르다
-    csp: { role: sip, fn: CSP, host: h45, procs: [csp],
-           sip: { access: { udp: 5060, tcp: 25061, tls: 5061, domains: [volte.cims.example.kr, ptt.cims.example.kr] },
-                  peering: { port: 5070, protocol: udp, local_node: cims-tester-peering } } }   # peering = 피어 풀 다음 홉·시드 접속점
+    csp:                                 # addr: 10.0.0.50 — A/S VIP·다중 IP 호스트의 서비스 주소는 여기(비면 호스트 ip)
+      role: sip
+      fn: CSP
+      host: h45
+      procs: [csp]
+      sip:
+        domains: [volte.cims.example.kr, ptt.cims.example.kr]
+        listeners:                       # 수신점 N 개 = CSP local_nodes 와 1:1. ip 를 비우면 노드 addr → 호스트 ip
+          udp:     { edge: access, port: 5060, protocol: udp }
+          tcp:     { edge: access, port: 25061, protocol: tcp }
+          tls:     { edge: access, port: 5061, protocol: tls }
+          peering: { edge: peering, port: 5070, protocol: udp, local_node: cims-tester-peering }   # 피어 풀의 기본 다음 홉(edge=peering 첫 항목)
     cmp: { role: media, fn: CMP, host: h45, procs: [cmp], media: { rtp_range: [20000, 29999], control: 9001 } }
     csc: { role: subscriber, fn: CSC, host: h45, procs: [csc], api: { port: 4430, tls: true } }
     oam: { role: oam, fn: OAM, host: h45, procs: [oam], oam: { port: 4419, token_env: TESTER_OAM_TOKEN, observe: [oam_stats, oam_alarms, agent_heartbeat] } }

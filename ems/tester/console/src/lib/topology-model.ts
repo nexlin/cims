@@ -1,6 +1,6 @@
 // 토폴로지 캔버스 모델 — 검증(컨트롤러 Topology 모델과 같은 규칙 + 편집 힌트)·파생 조회·팔레트 생성·이름 바꾸기·프리셋·자동 배치.
 // 레코드 정본은 컨트롤러(`tester_models.Topology`); 여기서는 저장 전에 같은 오류를 미리 보이고 캔버스에 카드로 붙일 focus 를 만든다.
-import type { TopologyDoc, TopoNode, PoolDoc, UePoolDoc, PeerPoolDoc, TopoLayout, NodeRole, Transport } from '@tester/api/tester'
+import type { TopologyDoc, TopoNode, PoolDoc, UePoolDoc, PeerPoolDoc, TopoLayout, NodeRole, Transport, SipListener } from '@tester/api/tester'
 
 export type Level = 'err' | 'warn' | 'info'
 export interface Focus { kind: 'host' | 'worker' | 'node' | 'pool'; id: string }
@@ -33,14 +33,42 @@ export const nodes = (d: TopologyDoc) => Object.entries(d.target?.nodes ?? {})
 export const worker = (d: TopologyDoc, name: string) => (d.workers ?? []).find(w => w.name === name)
 export const ipOfHost = (d: TopologyDoc, hid: string) => d.hosts?.[hid]?.ip ?? ''
 export const ipOfWorker = (d: TopologyDoc, name: string) => { const w = worker(d, name); return w ? ipOfHost(d, w.host) : '' }
-export const ipOfNode = (d: TopologyDoc, nid: string) => { const n = d.target?.nodes?.[nid]; return n ? ipOfHost(d, n.host) : '' }
+/** 노드 주소 — addr(VIP) → 호스트 ip */
+export const ipOfNode = (d: TopologyDoc, nid: string) => { const n = d.target?.nodes?.[nid]; return n ? (n.addr || ipOfHost(d, n.host)) : '' }
+/** 수신점 주소 — listener.ip → 노드 addr → 호스트 ip */
+export const ipOfListener = (d: TopologyDoc, nid: string, lid: string) => { const l = d.target?.nodes?.[nid]?.sip?.listeners?.[lid]; return (l?.ip) || ipOfNode(d, nid) }
+/** 피어 풀 수신점 ip — bind.ip → 워커 호스트 ip */
+export const ipOfBind = (d: TopologyDoc, p: PeerPoolDoc) => p.bind?.ip || ipOfWorker(d, p.worker)
+export const listenersOf = (n: TopoNode | undefined): [string, SipListener][] => Object.entries(n?.sip?.listeners ?? {})
+export const accessListeners = (n: TopoNode | undefined) => listenersOf(n).filter(([, l]) => (l.edge ?? 'access') === 'access')
+export const peeringListeners = (n: TopoNode | undefined) => listenersOf(n).filter(([, l]) => l.edge === 'peering')
+/** cims 대상에서 이 수신점이 뜻하는 local_nodes 이름 */
+export const localNodeName = (lid: string, l: SipListener) => l.local_node || `cims-tester-${lid}`
+/** 풀이 닿는 수신점 id — 컨트롤러 `Topology.pool_listener` 와 같은 규칙. 없으면 null */
+export function poolListener(d: TopologyDoc, p: PoolDoc): string | null {
+  const n = d.target?.nodes?.[isPeer(p) ? p.peering : p.access]; if (!n?.sip?.listeners) return null
+  if (p.listener && n.sip.listeners[p.listener]) return p.listener
+  if (p.listener) return null
+  if (isPeer(p)) {
+    const proto = p.bind?.protocol ?? 'udp'
+    return peeringListeners(n)[0]?.[0] ?? listenersOf(n).find(([, l]) => (l.protocol ?? 'udp') === proto)?.[0] ?? listenersOf(n)[0]?.[0] ?? null
+  }
+  return accessListeners(n).find(([, l]) => (l.protocol ?? 'udp') === (p.transport ?? 'udp'))?.[0] ?? null
+}
+/** UE 풀의 실효 transport — listener 가 있으면 그 protocol */
+export function poolTransport(d: TopologyDoc, p: UePoolDoc | { kind: 'real-ue'; access: string; listener?: string; transport?: Transport }): Transport {
+  const l = p.listener ? d.target?.nodes?.[p.access]?.sip?.listeners?.[p.listener] : undefined
+  return (l?.protocol ?? p.transport ?? 'udp') as Transport
+}
 export function hostKind(d: TopologyDoc, hid: string): 'tester' | 'target' | 'mixed' | 'empty' {
   const ws = (d.workers ?? []).some(w => w.host === hid), ns = nodes(d).some(([, n]) => n.host === hid)
   return ws && ns ? 'mixed' : ws ? 'tester' : ns ? 'target' : 'empty'
 }
 export const colorOf = (d: TopologyDoc, hid: string) => (hosts(d).findIndex(([h]) => h === hid) % 6) + 1
-export const accessNodes = (d: TopologyDoc) => nodes(d).filter(([, n]) => n.role === 'sip' && n.sip?.access).map(([id]) => id)
-export const peeringNodes = (d: TopologyDoc) => nodes(d).filter(([, n]) => n.role === 'sip' && n.sip?.peering).map(([id]) => id)
+/** UE 풀이 붙을 수 있는 노드 = access 수신점이 하나라도 있는 SIP 노드 */
+export const accessNodes = (d: TopologyDoc) => nodes(d).filter(([, n]) => n.role === 'sip' && accessListeners(n).length).map(([id]) => id)
+/** 피어 풀이 붙을 수 있는 노드 = 수신점이 하나라도 있는 SIP 노드(edge 무관 — CSP 는 Route 로 피어를 신뢰). 피어링 수신점 있는 노드가 앞 */
+export const peeringNodes = (d: TopologyDoc) => nodes(d).filter(([, n]) => n.role === 'sip' && listenersOf(n).length).sort(([, a], [, b]) => Number(!!peeringListeners(b).length) - Number(!!peeringListeners(a).length)).map(([id]) => id)
 export const dbNodes = (d: TopologyDoc) => nodes(d).filter(([, n]) => n.role === 'db' || (n.role === 'subscriber' && n.api)).map(([id]) => id)
 export const mediaNodes = (d: TopologyDoc) => nodes(d).filter(([, n]) => n.role === 'media').map(([id]) => id)
 export const isPeer = (p: PoolDoc): p is PeerPoolDoc => p.kind === 'peer'
@@ -75,13 +103,21 @@ export function validate(d: TopologyDoc): Issue[] {
     if (!Object.values(d.pools ?? {}).some(p => p.worker === w.name)) add('info', `workers.${w.name}`, '풀이 없는 워커 — run 에 참여하지 않습니다', { kind: 'worker', id: w.name })
   }
   if (!nodes(d).length) add('err', 'target.nodes', '대상 노드가 없습니다 — 호스트 위에 SIP 서버부터 놓으십시오', null)
-  else if (!accessNodes(d).length) add('err', 'target.nodes', 'UE 가 접속할 SIP 접속점이 있는 노드가 없습니다', null)
+  else if (!accessNodes(d).length) add('err', 'target.nodes', 'UE 가 접속할 access 수신점이 있는 SIP 노드가 없습니다', null)
+  const listenerKeys = new Map<string, string>()
   for (const [id, n] of nodes(d)) {
     if (!ID_RE.test(id)) add('err', `nodes.${id}`, '노드 id 는 소문자·숫자·_ 만', { kind: 'node', id })
     if (!d.hosts?.[n.host]) add('err', `nodes.${id}`, '호스트가 없습니다 — 호스트 위로 옮기십시오', { kind: 'node', id })
     if (n.role === 'oam' && (T.kind ?? 'cims') !== 'cims') add('warn', `nodes.${id}`, 'OAM 노드는 CIMS 대상에서만 동작합니다', { kind: 'node', id })
-    if (n.role === 'sip' && !n.sip?.access && !n.sip?.peering && !(n.procs ?? []).length) add('info', `nodes.${id}`, '수신점도 감시 프로세스도 없는 SIP 노드 — 그림에만 있습니다', { kind: 'node', id })
-    if (n.role === 'sip' && n.sip?.access && !n.sip.access.udp && !n.sip.access.tcp && !n.sip.access.tls) add('err', `nodes.${id}`, '접속 수신점에 udp/tcp/tls 포트 하나는 필요합니다', { kind: 'node', id })
+    if (n.addr !== undefined && !n.addr) add('err', `nodes.${id}`, '노드 주소(addr)가 비었습니다 — 지우면 호스트 ip 를 씁니다', { kind: 'node', id })
+    if (n.role === 'sip' && !listenersOf(n).length && !(n.procs ?? []).length) add('info', `nodes.${id}`, '수신점도 감시 프로세스도 없는 SIP 노드 — 그림에만 있습니다', { kind: 'node', id })
+    for (const [lid, l] of listenersOf(n)) {
+      if (!ID_RE.test(lid)) add('err', `nodes.${id}`, `수신점 id ${lid} — 소문자·숫자·_ 만`, { kind: 'node', id })
+      if (!l.port) add('err', `nodes.${id}`, `수신점 ${lid} 의 포트가 비었습니다`, { kind: 'node', id })
+      if (l.ip !== undefined && !l.ip) add('err', `nodes.${id}`, `수신점 ${lid} 의 ip 가 비었습니다 — 지우면 노드 주소를 씁니다`, { kind: 'node', id })
+      const k = `${ipOfListener(d, id, lid)}:${l.port}/${l.protocol ?? 'udp'}`
+      if (listenerKeys.has(k)) add('err', `nodes.${id}`, `수신점 ${lid} (${k}) 이 ${listenerKeys.get(k)} 과 겹칩니다`, { kind: 'node', id }); else listenerKeys.set(k, `${id}:${lid}`)
+    }
     if (n.role === 'media' && !n.media?.rtp_range) add('warn', `nodes.${id}`, 'RTP 포트 범위가 없으면 미디어 지표를 이 노드에 귀속할 수 없습니다', { kind: 'node', id })
     if (n.role === 'subscriber' && !n.api) add('info', `nodes.${id}`, 'API 없는 가입자 서버 — UE 풀 원천은 creds 만 가능', { kind: 'node', id })
   }
@@ -97,22 +133,27 @@ export function validate(d: TopologyDoc): Issue[] {
     if (p.group && pools.some(([q, o]) => q !== pn && o.group === p.group && o.worker === p.worker)) add('err', `pools.${pn}`, `워커 ${p.worker} 에 group ${p.group} 풀이 둘 — 워커마다 논리 풀 하나만`, { kind: 'pool', id: pn })
     if (!isPeer(p)) {
       const a = T.nodes?.[p.access]
-      if (!a || !a.sip?.access) add('err', `pools.${pn}`, `접속점 노드 ${p.access || '(없음)'} 이 없거나 접속 수신점이 없습니다 — SIP 서버 위로 끌어 놓으십시오`, { kind: 'pool', id: pn })
-      else if (!a.sip.access[p.transport ?? 'udp']) add('err', `pools.${pn}`, `transport ${p.transport} 인데 ${p.access} 에 ${p.transport} 수신점이 없습니다`, { kind: 'pool', id: pn })
+      if (!a || !accessListeners(a).length) add('err', `pools.${pn}`, `접속점 노드 ${p.access || '(없음)'} 이 없거나 access 수신점이 없습니다 — SIP 서버의 수신점 행으로 끌어 놓으십시오`, { kind: 'pool', id: pn })
+      else if (p.listener && !a.sip?.listeners?.[p.listener]) add('err', `pools.${pn}`, `수신점 ${p.listener} 이 ${p.access} 에 없습니다`, { kind: 'pool', id: pn })
+      else if (p.listener && (a.sip!.listeners![p.listener].edge ?? 'access') !== 'access') add('err', `pools.${pn}`, `수신점 ${p.listener} 은 access 가 아닙니다 — UE 는 access 수신점으로 등록합니다`, { kind: 'pool', id: pn })
+      else if (!poolListener(d, p)) add('err', `pools.${pn}`, `transport ${p.transport ?? 'udp'} 인데 ${p.access} 에 ${p.transport ?? 'udp'} access 수신점이 없습니다`, { kind: 'pool', id: pn })
       if ('db' in p.source) { if (!dbNodes(d).includes(p.source.db)) add('err', `pools.${pn}`, `원천 노드 ${p.source.db || '(없음)'} 가 없거나 DB/API 가 아닙니다`, { kind: 'pool', id: pn }); if (!p.source.count) add('err', `pools.${pn}`, 'DB 원천은 count 가 필수입니다', { kind: 'pool', id: pn }) }
       if ('creds' in p.source && !p.source.creds) add('err', `pools.${pn}`, 'creds 경로가 비었습니다', { kind: 'pool', id: pn })
       if (p.srtp === 'required' && p.transport !== 'tls') add('warn', `pools.${pn}`, 'srtp required 는 TLS 접속에서만 협상됩니다', { kind: 'pool', id: pn })
     } else {
-      const ip = w ? ipOfWorker(d, w.name) : '?'; const k = `${ip}:${p.bind?.port}`
+      const ip = w ? ipOfBind(d, p) : '?'; const k = `${ip}:${p.bind?.port}/${p.bind?.protocol ?? 'udp'}`
+      if (p.bind?.ip !== undefined && !p.bind.ip) add('err', `pools.${pn}`, 'bind.ip 가 비었습니다 — 지우면 워커 호스트 ip 를 씁니다', { kind: 'pool', id: pn })
       if (bindKeys.has(k)) add('err', `pools.${pn}`, `수신점 ${k} 이 ${bindKeys.get(k)} 과 겹칩니다`, { kind: 'pool', id: pn }); else bindKeys.set(k, pn)
       const pg = T.nodes?.[p.peering]
-      if (!pg || !pg.sip?.peering) add('err', `pools.${pn}`, `다음 홉 노드 ${p.peering || '(없음)'} 이 없거나 피어링 수신점이 없습니다 — 피어링 있는 SIP 서버 위로 끌어 놓으십시오`, { kind: 'pool', id: pn })
+      if (!pg || !listenersOf(pg).length) add('err', `pools.${pn}`, `다음 홉 노드 ${p.peering || '(없음)'} 이 없거나 수신점이 없습니다 — SIP 서버의 수신점 행으로 끌어 놓으십시오`, { kind: 'pool', id: pn })
+      else if (p.listener && !pg.sip?.listeners?.[p.listener]) add('err', `pools.${pn}`, `수신점 ${p.listener} 이 ${p.peering} 에 없습니다`, { kind: 'pool', id: pn })
+      else { const lid = poolListener(d, p)!; const l = pg.sip!.listeners![lid]; if ((l.edge ?? 'access') !== 'peering') add('info', `pools.${pn}`, `access 수신점 ${lid} 을 다음 홉으로 씁니다 — CSP 는 시드된 Route 로 이 피어를 신뢰합니다(cims). 타 IMS 는 그쪽 설정이 필요합니다`, { kind: 'pool', id: pn }) }
       if (!p.domain) add('err', `pools.${pn}`, '피어 domain 이 비었습니다', { kind: 'pool', id: pn })
       const idn = p.identities ?? {}
       if (!idn.e164_range && !idn.did_range) add('err', `pools.${pn}`, '신원 범위(e164_range / did_range)가 필요합니다', { kind: 'pool', id: pn })
       if ((T.kind ?? 'cims') === 'cims') { if (!p.seed?.route_set && !p.seed?.acl) add('warn', `pools.${pn}`, 'route_set 도 acl 도 없습니다 — 시드는 풀 이름의 RouteSet 으로', { kind: 'pool', id: pn }) }
       else if (p.seed?.route_set || p.seed?.acl) add('warn', `pools.${pn}`, '타 IMS 대상에는 컬렉션 시드가 없습니다', { kind: 'pool', id: pn })
-      if (p.register && pg && !pg.sip?.access) add('err', `pools.${pn}`, `트렁크 REGISTER 는 ${p.peering} 의 접속 수신점으로 가는데 access 가 없습니다`, { kind: 'pool', id: pn })
+      if (p.register && pg && !accessListeners(pg).length) add('err', `pools.${pn}`, `트렁크 REGISTER 는 ${p.peering} 의 access 수신점으로 가는데 하나도 없습니다`, { kind: 'pool', id: pn })
       if (p.register && !p.register.ha1_env && !p.register.password_env) add('err', `pools.${pn}`, 'register 에 ha1_env 또는 password_env 하나는 필요합니다', { kind: 'pool', id: pn })
       if (p.profile === 'pbx' && !p.register) add('info', `pools.${pn}`, 'PBX 프로파일인데 register 가 없습니다 — 고정 IP 트렁크로 동작', { kind: 'pool', id: pn })
     }
@@ -169,7 +210,7 @@ export function createFromPalette(d: TopologyDoc, kind: PaletteKind, pos: Pos, c
   if (kind.startsWith('n_')) {
     const role = kind.slice(2) as NodeRole; const id = uniq(d, role)
     const base: TopoNode = { role, fn: ROLE[role].fns[0], label: ROLE[role].label, host: host!, procs: [] }
-    if (role === 'sip') base.sip = { access: { udp: 5060, tcp: 5060, tls: 5061, domains: ['ims.example.kr'] } }
+    if (role === 'sip') base.sip = { domains: ['ims.example.kr'], listeners: { udp: { edge: 'access', port: 5060, protocol: 'udp' }, tcp: { edge: 'access', port: 5060, protocol: 'tcp' }, tls: { edge: 'access', port: 5061, protocol: 'tls' } } }
     if (role === 'media') base.media = { rtp_range: [10000, 19999] }
     if (role === 'subscriber') base.api = { port: 4430, tls: true }
     if (role === 'oam') base.oam = { port: 4419, tls: true, token_env: 'TESTER_OAM_TOKEN', observe: ['oam_stats', 'oam_alarms'] }
@@ -181,7 +222,7 @@ export function createFromPalette(d: TopologyDoc, kind: PaletteKind, pos: Pos, c
     const name = uniq(d, kind === 'ue' ? 'ue_pool' : 'real_ue'); const acc = accessNodes(d)[0] ?? ''
     const p: PoolDoc = kind === 'ue' ? { kind: 'ue', worker: wname!, access: acc, source: { creds: `creds/${name}.jsonl` }, transport: 'udp', srtp: 'off' }
       : { kind: 'real-ue', worker: wname!, access: acc, source: { creds: `creds/${name}.jsonl` }, transport: 'tls', srtp: 'optional' }
-    const a = d.target.nodes[acc]?.sip?.access; if (a && !a[p.transport!]) p.transport = (['udp', 'tcp', 'tls'] as Transport[]).find(t => a[t]) ?? p.transport
+    const al = accessListeners(d.target.nodes[acc]); if (al.length && !al.some(([, l]) => (l.protocol ?? 'udp') === p.transport)) p.transport = (al[0][1].protocol ?? 'udp') as Transport
     d.pools[name] = p; return { sel: { kind: 'pool', id: name }, made }
   }
   const name = uniq(d, kind === 'pbx' ? `pbx_${wname}` : `${kind}_peer`)
@@ -213,7 +254,7 @@ const WORKERS = [{ name: 'w1', host: 'h61', port: 7100, cpus: 8 }, { name: 'w2',
 export const PRESETS: Record<'cims' | 'ims' | 'pbx', { name: string; hosts: TopologyDoc['hosts']; nodes: Record<string, TopoNode>; pools: Record<string, PoolDoc>; layout: TopoLayout }> = {
   cims: { name: 'media01', hosts: { h45: { name: 'media01', ip: '10.0.0.45', ssh: { user: 'cims', key_env: 'TESTER_SSH_KEY' } } },
     nodes: {
-      csp: { role: 'sip', fn: 'CSP', label: 'CSP', host: 'h45', procs: ['csp'], sip: { access: { udp: 5060, tcp: 25061, tls: 5061, domains: ['volte.cims.example.kr', 'ptt.cims.example.kr'] }, peering: { port: 5070, protocol: 'udp', local_node: 'cims-tester-peering' } } },
+      csp: { role: 'sip', fn: 'CSP', label: 'CSP', host: 'h45', procs: ['csp'], sip: { domains: ['volte.cims.example.kr', 'ptt.cims.example.kr'], listeners: { udp: { edge: 'access', port: 5060, protocol: 'udp' }, tcp: { edge: 'access', port: 25061, protocol: 'tcp' }, tls: { edge: 'access', port: 5061, protocol: 'tls' }, peering: { edge: 'peering', port: 5070, protocol: 'udp', local_node: 'cims-tester-peering' } } } },
       cmp: { role: 'media', fn: 'CMP', label: 'CMP', host: 'h45', procs: ['cmp'], media: { rtp_range: [20000, 29999], control: 9001 } },
       csc: { role: 'subscriber', fn: 'CSC', label: 'CSC', host: 'h45', procs: ['csc'], api: { port: 4430, tls: true } },
       oam: { role: 'oam', fn: 'OAM', label: 'OAM', host: 'h45', procs: ['oam'], oam: { port: 4419, tls: true, token_env: 'TESTER_OAM_TOKEN', observe: ['oam_stats', 'oam_alarms', 'agent_heartbeat'] } },
@@ -230,9 +271,9 @@ export const PRESETS: Record<'cims' | 'ims' | 'pbx', { name: string; hosts: Topo
     layout: { regions: { h45: { x: 420, y: 40, w: 990, h: 470 } }, items: { csp: { x: 14, y: 12 }, cmp: { x: 290, y: 12 }, csc: { x: 560, y: 12 }, oam: { x: 290, y: 150 }, db: { x: 560, y: 150 } } } },
   ims: { name: 'ims-lab', hosts: { hp: { name: 'pcscf-1', ip: '10.1.0.11' }, hs: { name: 'scscf-1', ip: '10.1.0.12' }, hb: { name: 'ibcf-1', ip: '10.1.0.13' }, ht: { name: 'tas-1', ip: '10.1.0.14' }, hm: { name: 'mrf-1', ip: '10.1.0.15' }, hh: { name: 'hss-1', ip: '10.1.0.16' } },
     nodes: {
-      pcscf: { role: 'sip', fn: 'P-CSCF', label: 'P-CSCF', host: 'hp', procs: ['pcscf'], sip: { access: { udp: 5060, tcp: 5060, tls: 5061, domains: ['ims.mnc001.mcc450.3gppnetwork.org'] } } },
+      pcscf: { role: 'sip', fn: 'P-CSCF', label: 'P-CSCF', host: 'hp', procs: ['pcscf'], sip: { domains: ['ims.mnc001.mcc450.3gppnetwork.org'], listeners: { udp: { edge: 'access', port: 5060, protocol: 'udp' }, tcp: { edge: 'access', port: 5060, protocol: 'tcp' }, tls: { edge: 'access', port: 5061, protocol: 'tls' } } } },
       scscf: { role: 'sip', fn: 'S-CSCF', label: 'I/S-CSCF', host: 'hs', procs: ['scscf', 'icscf'], sip: {} },
-      ibcf: { role: 'sip', fn: 'IBCF', label: 'IBCF', host: 'hb', procs: [], sip: { peering: { port: 5060, protocol: 'udp' } } },
+      ibcf: { role: 'sip', fn: 'IBCF', label: 'IBCF', host: 'hb', procs: [], sip: { listeners: { peering: { edge: 'peering', port: 5060, protocol: 'udp' } } } },
       tas: { role: 'tas', fn: 'TAS', label: 'TAS', host: 'ht', procs: ['tas'], tas: { port: 5060 } },
       mrf: { role: 'media', fn: 'MRF', label: 'MRF', host: 'hm', procs: [], media: { rtp_range: [10000, 19999] } },
       hss: { role: 'subscriber', fn: 'HSS', label: 'HSS', host: 'hh', procs: [] },
@@ -245,7 +286,7 @@ export const PRESETS: Record<'cims' | 'ims' | 'pbx', { name: string; hosts: Topo
               items: { pcscf: { x: 14, y: 12 }, scscf: { x: 14, y: 12 }, ibcf: { x: 14, y: 12 }, tas: { x: 14, y: 12 }, mrf: { x: 14, y: 12 }, hss: { x: 14, y: 12 } } } },
   pbx: { name: 'pbx-hq', hosts: { hx: { name: 'pbx-hq', ip: '10.2.0.20' } },
     nodes: {
-      pbx: { role: 'sip', fn: 'PBX', label: 'IP-PBX', host: 'hx', procs: [], sip: { access: { udp: 5060, tcp: 5060, domains: ['pbx.example.kr'] }, peering: { port: 5060, protocol: 'udp' } } },
+      pbx: { role: 'sip', fn: 'PBX', label: 'IP-PBX', host: 'hx', procs: [], sip: { domains: ['pbx.example.kr'], listeners: { udp: { edge: 'access', port: 5060, protocol: 'udp' }, tcp: { edge: 'access', port: 5060, protocol: 'tcp' } } } },
       pbxmedia: { role: 'media', fn: 'PBX 미디어', label: 'PBX RTP', host: 'hx', procs: [], media: { rtp_range: [16384, 32767] } },
     },
     pools: {

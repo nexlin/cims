@@ -176,13 +176,12 @@ def build_plan(scenario: Scenario, topology: Topology, topology_doc: dict, profi
             pools = tester_target.seed_pools(topology, used)
             if pools:
                 try:
-                    nid = topology.peering_node_of(list(pools))
-                    node = topology.target.nodes[nid]
-                    ln = (node.sip.peering.local_node if node.sip and node.sip.peering else None) or 'cims-tester-peering'
-                    recs = tester_target.derive_records(topology, pools, ln)
+                    lns = {pn: topology.local_node_name(lid, l) for pn, (_nid, lid, l) in topology.peer_listeners(list(pools)).items()}
+                    recs = tester_target.derive_records(topology, pools, lns)
                     seed = [{'collection': c, 'count': len(v), 'names': [r['name'] for r in v]} for c, v in recs.items() if v]
-                    seed.insert(0, {'collection': 'local_nodes', 'count': 1, 'names': [ln],
-                                    'note': f'{nid} 피어링 접속점 — 대상에 있으면 재사용'})
+                    names = sorted(set(lns.values()))
+                    seed.insert(0, {'collection': 'local_nodes', 'count': len(names), 'names': names,
+                                    'note': '피어가 닿는 접속점 — 대상에 같은 이름·같은 포트 레코드가 있으면 재사용, 없으면 시드'})
                 except (ValueError, tester_target.TargetError) as e:
                     out['errors'].append(str(e))
                 if oam is None:

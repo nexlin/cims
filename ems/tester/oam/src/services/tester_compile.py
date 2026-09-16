@@ -347,10 +347,6 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
         if pinned not in per_worker_roles:
             raise CompileError(f'피어 고정 워커 {pinned} 에 모든 UE 역할의 로컬 풀이 없다')
         per_worker_roles = {pinned: per_worker_roles[pinned]}
-        try:
-            topology.peering_node_of(peer_pools)
-        except ValueError as e:
-            raise CompileError(str(e))
     cand = [w for w in topology.workers if w.name in per_worker_roles]
     missing = [w.name for w in cand if w.name not in by_name]
     if missing:

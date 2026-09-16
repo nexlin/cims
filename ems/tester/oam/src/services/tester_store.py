@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Tuple
 import yaml
 
 from services import file_store
-from services.tester_models import LoadProfile, Scenario, Topology, RunRecord, validate
+from services.tester_models import LoadProfile, Scenario, Topology, RunRecord, validate, normalize_topology_doc
 
 DOMAIN_TOPOLOGIES = 'modules/oam-cims-tester/runtime/topologies'
 DOMAIN_RUNS = 'modules/oam-cims-tester/runtime/runs'
@@ -335,14 +335,23 @@ def topology_v1_to_v2(doc: dict) -> dict:
 
 
 def _normalize_rec(rec: Optional[dict]) -> Optional[dict]:
-    """읽기 경로 — v1 레코드는 v2 로 바꿔 돌려주고, 쓸 수 있으면 그 자리에서 승계 저장한다."""
+    """읽기 경로 — v1 레코드는 v2 로, 노드 `sip.access/peering` 꼴은 `sip.listeners` 로 바꿔 돌려주고, 쓸 수 있으면 그 자리에서
+    승계 저장한다."""
     if rec is None:
         return None
     doc = rec.get('doc') or {}
+    changed = False
     if is_topology_v1(doc):
         rec = dict(rec)
-        rec['doc'] = topology_v1_to_v2(doc)
+        doc = rec['doc'] = topology_v1_to_v2(doc)
         rec['migrated_from'] = 'v1'
+        changed = True
+    normalized = normalize_topology_doc(doc)
+    if normalized is not doc:
+        rec = dict(rec)
+        rec['doc'] = normalized
+        changed = True
+    if changed:
         try:
             file_store.save(_topo_dir(), rec['id'], rec)
         except Exception:
@@ -375,6 +384,7 @@ def save_topology(doc: dict, tid: Optional[int] = None) -> Tuple[Optional[dict],
     """검증 통과분만 저장. 반환 (레코드, errors)."""
     if is_topology_v1(doc):
         doc = topology_v1_to_v2(doc)
+    doc = normalize_topology_doc(doc)
     model, errs = validate('topology', doc)
     if errs:
         return None, errs

@@ -156,11 +156,13 @@ class TopologyV2(unittest.TestCase):
         d = self._doc(); d['pools']['ptt_ue']['worker'] = 'w9'
         self.assertTrue(any('w9' in e for e in validate('topology', d)[1]))
         d = self._doc(); d['pools']['ptt_ue']['access'] = 'cmp'
-        self.assertTrue(any('sip.access' in e for e in validate('topology', d)[1]))
-        d = self._doc(); d['pools']['ptt_ue']['transport'] = 'tls'; d['target']['nodes']['csp']['sip']['access'].pop('tls')
-        self.assertTrue(any('tls 수신점' in e for e in validate('topology', d)[1]))
+        self.assertTrue(any('access 수신점' in e for e in validate('topology', d)[1]))
+        d = self._doc(); d['pools']['ptt_ue']['transport'] = 'tls'; d['target']['nodes']['csp']['sip']['listeners'].pop('tls')
+        self.assertTrue(any('tls access 수신점' in e for e in validate('topology', d)[1]))
         d = self._doc(); d['pools']['peer_kt']['peering'] = 'cmp'
-        self.assertTrue(any('sip.peering' in e for e in validate('topology', d)[1]))
+        self.assertTrue(any('수신점' in e for e in validate('topology', d)[1]))
+        d = self._doc(); d['pools']['peer_kt']['listener'] = 'nope'
+        self.assertTrue(any('nope' in e for e in validate('topology', d)[1]))
         d = self._doc(); d['pools']['volte_ue_b']['worker'] = 'w1'          # 같은 워커에 group 둘
         self.assertTrue(any('논리 풀 하나만' in e for e in validate('topology', d)[1]))
         d = self._doc(); d['pools']['volte_ue_a']['group'] = 'ptt_ue'          # group = 다른 풀 이름

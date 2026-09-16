@@ -90,10 +90,9 @@ export default function WorkerFleet({ topology, targetBuild, activeRunId }: {
           </div>
           <div className="mt-1.5 flex flex-col gap-0.5 text-xs">
             {sipNodes.map(([id, n]) => {
-              const ip = doc.hosts?.[n.host]?.ip ?? n.host
-              const acc = n.sip?.access
-              const ports = acc ? (['udp', 'tcp', 'tls'] as const).filter(k => acc[k]).map(k => `${k} ${acc[k]}`).join(' · ') : ''
-              return <div key={id} className="font-mono"><span className="text-muted-foreground">{n.fn ?? id}</span> {ip} {ports}{n.sip?.peering ? ` · peering ${n.sip.peering.port}` : ''}</div>
+              const ip = n.addr || (doc.hosts?.[n.host]?.ip ?? n.host)
+              const ports = Object.entries(n.sip?.listeners ?? {}).map(([lid, l]) => `${l.edge === 'peering' ? 'peering ' : ''}${l.protocol ?? 'udp'} ${l.ip && l.ip !== ip ? `${l.ip}:` : ''}${l.port}${lid !== (l.protocol ?? 'udp') && lid !== 'peering' ? ` (${lid})` : ''}`).join(' · ')
+              return <div key={id} className="font-mono"><span className="text-muted-foreground">{n.fn ?? id}</span> {ip} {ports}</div>
             })}
             <div className="text-muted-foreground"><Cpu size={11} className="mr-1 inline" />빌드 <span className="font-mono text-foreground">{targetBuild ?? '(run 시작 시 기록)'}</span></div>
           </div>

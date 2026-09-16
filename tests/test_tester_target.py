@@ -3,7 +3,8 @@
 Covers:
   - compile: e164_range 펼치기(접두·자릿수 보존, count 상한)·피어 풀은 bind.ip 호스트의 워커 하나에 고정(다른 워커 제외)·
     PoolCreate kind=peer(peer 문서·target_csp.peering 동봉)·bind.ip 워커 없음/서로 다른 워커 → CompileError
-  - target: seed_pools(같은 route_set 형제 포함·seed.enabled=false 제외)·pick_local_node(peering 있음/없음)·
+  - target: seed_pools(같은 route_set 형제 포함·seed.enabled=false 제외)·pick_local_node(수신점 → 기존 LocalNode 재사용/시드)·
+    주소 사슬(listener.ip → node.addr → host.ip)·피어가 access 수신점을 가리키는 경우·이전 꼴 sip.access/peering 승계·
     derive_records(remote_node/route/rule/route_set/rule_set/routing_policy·ACL)·
     CspSeeder.apply/restore — 가짜 OAM(HTTP) 에 대해 GET 스냅샷 → 태그 잔재 제거+병합 PUT(마지막만 signal) → 원본 복원
   - driver: 피어 풀 시나리오 run 이 시드→풀→run→복원 순서로 완주(가짜 워커·가짜 OAM), invite expect.code=403 판정
@@ -125,11 +126,12 @@ def tearDownModule():
 
 
 def _topology(workers, oam_url=None, peering=True, dead=True):
-    """v2 — 대상 호스트 h1(10.0.0.1)에 csp 노드(access udp + peering), 워커 호스트 hw(127.0.0.1).
+    """v2 — 대상 호스트 h1(10.0.0.1)에 csp 노드(수신점 udp access + peering), 워커 호스트 hw(127.0.0.1).
     UE 풀은 워커마다 `ue_<워커>` + group volte_ue, 피어 풀은 전부 첫 워커에(수신점 ip = hw). peering=False 면 피어 풀 없음."""
-    nodes = {'csp': {'role': 'sip', 'host': 'h1', 'sip': {'access': {'udp': 5060, 'domains': ['volte.test']}}}}
+    nodes = {'csp': {'role': 'sip', 'host': 'h1', 'sip': {'domains': ['volte.test'],
+                                                          'listeners': {'udp': {'edge': 'access', 'port': 5060, 'protocol': 'udp'}}}}}
     if peering:
-        nodes['csp']['sip']['peering'] = {'port': 5070, 'protocol': 'udp', 'local_node': 'cims-tester-peering'}
+        nodes['csp']['sip']['listeners']['peering'] = {'edge': 'peering', 'port': 5070, 'protocol': 'udp', 'local_node': 'cims-tester-peering'}
     if oam_url:
         port = int(oam_url.rsplit(':', 1)[-1])
         nodes['oam'] = {'role': 'oam', 'host': 'hw', 'oam': {'port': port, 'tls': False, 'token_env': 'UT_OAM_TOKEN'}}
@@ -235,20 +237,61 @@ class SeedDerivation(unittest.TestCase):
 
     def test_pick_local_node(self):
         t = self._topo()
-        ref, new = T.pick_local_node(t, [{'name': 'access-udp', 'bind_port': 5060, 'protocol': 'UDP', 'is_primary': True}], 'csp')
+        # ① 항목 local_node 이름이 대상에 없고 같은 포트 레코드도 없음 → 항목 그대로(edge 포함) 시드
+        ref, new = T.pick_local_node(t, [{'name': 'access-udp', 'bind_port': 5060, 'protocol': 'UDP', 'is_primary': True}], 'csp', 'peering')
         self.assertEqual(ref, 'cims-tester-peering')
         self.assertEqual((new['edge'], new['bind_ip'], new['bind_port'], new['protocol']), ('peering', '10.0.0.1', 5070, 'UDP'))
-        ref2, new2 = T.pick_local_node(t, [{'name': 'cims-tester-peering', 'bind_port': 5070, 'protocol': 'UDP'}], 'csp')
+        # ② 이름이 있으면 재사용
+        ref2, new2 = T.pick_local_node(t, [{'name': 'cims-tester-peering', 'bind_port': 5070, 'protocol': 'UDP'}], 'csp', 'peering')
         self.assertEqual((ref2, new2), ('cims-tester-peering', None))
-        t2 = self._topo(peering=False)
-        ref3, new3 = T.pick_local_node(t2, [{'name': 'access-udp', 'bind_port': 5060, 'protocol': 'UDP', 'is_primary': True}], 'csp')
+        # ③ 피어가 access 수신점을 가리키면 같은 protocol·port 의 기존 레코드(bind_ip 0.0.0.0 도)를 접속점으로 — 새 LocalNode 없음
+        ref3, new3 = T.pick_local_node(t, [{'name': 'access-udp', 'bind_port': 5060, 'protocol': 'UDP', 'bind_ip': '0.0.0.0'}], 'csp', 'udp')
         self.assertEqual((ref3, new3), ('access-udp', None))
-        with self.assertRaises(T.TargetError):
-            T.pick_local_node(t2, [], 'csp')
+        # ④ 그 포트 레코드가 없으면 access edge 로 시드(local_node 비면 cims-tester-<id>)
+        ref4, new4 = T.pick_local_node(t, [], 'csp', 'udp')
+        self.assertEqual((ref4, new4['edge'], new4['bind_port']), ('cims-tester-udp', 'access', 5060))
+
+    def test_listener_address_chain_and_peer_on_access(self):
+        """주소 사슬 listener.ip → node.addr → host.ip · 피어 풀이 access 수신점을 가리켜도 된다(CSP 는 Route 로 신뢰)."""
+        doc = _topology([FakeWorker('w1')])
+        csp = doc['target']['nodes']['csp']
+        csp['addr'] = '10.0.0.99'                                                       # VIP
+        csp['sip']['listeners']['tls2'] = {'edge': 'access', 'ip': '10.0.0.98', 'port': 5061, 'protocol': 'tls'}
+        doc['pools']['peer_kt']['listener'] = 'udp'                                     # 피어 → access UDP 접속점
+        doc['pools']['peer_kt']['bind']['ip'] = '127.0.0.2'                             # 워커 호스트의 다른 IP
+        doc['pools']['ue_w1']['listener'] = 'tls2'                                      # transport 는 수신점에서
+        t = M.Topology.model_validate(doc)
+        self.assertEqual((t.node_ip('csp'), t.listener_ip('csp', 'udp'), t.listener_ip('csp', 'tls2')), ('10.0.0.99', '10.0.0.99', '10.0.0.98'))
+        self.assertEqual(t.pools['ue_w1'].transport, 'tls')
+        self.assertEqual(t.target_csp_for('ue_w1').ip, '10.0.0.98')
+        self.assertEqual(t.pool_bind_ip('peer_kt'), '127.0.0.2')
+        nid, lid, l = t.pool_listener('peer_kt')
+        self.assertEqual((nid, lid, l.edge), ('csp', 'udp', 'access'))
+        tc = t.target_csp_for('peer_kt')
+        self.assertEqual((tc.ip, tc.peering.ip, tc.peering.port, tc.peering.local_node), ('10.0.0.99', '10.0.0.99', 5060, 'cims-tester-udp'))
+        self.assertEqual(t.pool_listener('peer_blocked')[1], 'peering')               # listener 없으면 edge=peering 첫 항목
+        # 시드: 접속점은 기존 access-udp 레코드, ACL 은 그 피어의 Route 에만
+        recs = T.derive_records(t, {'peer_kt': t.pools['peer_kt']}, {'peer_kt': 'access-udp'})
+        self.assertEqual(recs['routes'][0]['local_node_ref'], 'access-udp')
+        self.assertEqual(recs['routes'][0]['inbound_auth'], 'none')
+        self.assertEqual(recs['remote_nodes'][0]['ip'], '127.0.0.2')
+        # 검증: transport 와 수신점 protocol 이 어긋나면 오류 · 수신점 튜플 중복 오류 · 이전 꼴 access/peering 은 승계
+        bad = dict(doc); bad['pools'] = dict(doc['pools']); bad['pools']['ue_w1'] = dict(doc['pools']['ue_w1'], transport='udp')
+        self.assertTrue(any('tls' in e for e in M.validate('topology', bad)[1]))
+        dup = _topology([FakeWorker('w1')]); dup['target']['nodes']['csp']['sip']['listeners']['udp2'] = {'edge': 'access', 'port': 5060, 'protocol': 'udp'}
+        self.assertTrue(any('겹친다' in e for e in M.validate('topology', dup)[1]))
+        legacy = _topology([FakeWorker('w1')])
+        legacy['target']['nodes']['csp']['sip'] = {'access': {'udp': 5060, 'tls': 5061, 'domains': ['volte.test']},
+                                                   'peering': {'port': 5070, 'protocol': 'udp', 'local_node': 'cims-tester-peering'}}
+        lt = M.Topology.model_validate(legacy)
+        self.assertEqual(sorted(lt.target.nodes['csp'].sip.listeners), ['peering', 'tls', 'udp'])
+        self.assertEqual(lt.target.nodes['csp'].sip.listeners['peering'].edge, 'peering')
+        self.assertEqual(lt.domains_of('csp'), ['volte.test'])
+        self.assertEqual(M.normalize_topology_doc(legacy)['target']['nodes']['csp']['sip']['listeners']['tls'], {'edge': 'access', 'port': 5061, 'protocol': 'tls'})
 
     def test_derive_records(self):
         t = self._topo()
-        recs = T.derive_records(t, T.seed_pools(t, {'peer_kt', 'peer_kt_dead', 'peer_blocked'}), 'ln-x')
+        recs = T.derive_records(t, T.seed_pools(t, {'peer_kt', 'peer_kt_dead', 'peer_blocked'}), {p: 'ln-x' for p in ('peer_kt', 'peer_kt_dead', 'peer_blocked')})
         names = {c: [r['name'] for r in v] for c, v in recs.items()}
         self.assertEqual(sorted(names['remote_nodes']), ['tester-rn-peer_blocked', 'tester-rn-peer_kt', 'tester-rn-peer_kt_dead'])
         self.assertTrue(all(r['local_node_ref'] == 'ln-x' for r in recs['routes']))
@@ -265,7 +308,8 @@ class SeedDerivation(unittest.TestCase):
         self.assertEqual(rules['tester-rule-peer_blocked-src']['value'], '127.0.0.1')
         acl = recs['acl_policies'][0]
         self.assertEqual((acl['action'], acl['scope'], acl['scope_ref'], acl['match_rule_set_ref']),
-                         ('deny', 'local_node', 'ln-x', 'tester-rs-peer_blocked-src'))
+                         ('deny', 'route', 'tester-r-peer_blocked', 'tester-rs-peer_blocked-src'))   # 그 피어의 Route 에만
+        self.assertTrue(all(r['inbound_auth'] == 'none' for r in recs['routes']))
         rp = {r['name']: r for r in recs['routing_policies']}
         self.assertEqual(rp['tester-rp-rs-kt']['target_ref'], 'tester-rs-rs-kt')
         self.assertTrue(all('cims-tester' in r['tags'] for v in recs.values() for r in v))
@@ -327,7 +371,7 @@ class PbxMgcf(unittest.TestCase):
         self.assertEqual(T.number_prefix(topo.pools['pbx_hq']), '02123450')
         self.assertEqual(T.number_prefix(topo.pools['mgcf_pstn']), '+823123400')
         recs = T.derive_records(topo, {'pbx_hq': topo.pools['pbx_hq'], 'mgcf_pstn': topo.pools['mgcf_pstn'],
-                                       'peer_kt': topo.pools['peer_kt']}, 'cims-tester-peering')
+                                       'peer_kt': topo.pools['peer_kt']}, {p: 'cims-tester-peering' for p in ('pbx_hq', 'mgcf_pstn', 'peer_kt')})
         names = {r['name']: r for r in recs['rules']}
         self.assertEqual(names['tester-rule-pbx_hq-prefix']['field'], 'req_uri_user')
         self.assertEqual(names['tester-rule-pbx_hq-prefix']['op'], 'prefix')

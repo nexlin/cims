@@ -6,8 +6,10 @@ rules/rule_sets/routing_policies(Request-URI 도메인 → RouteSet)·acl_polici
 넣고(SIGUSR1 reload), run 이 끝나면 저장해 둔 원본으로 되돌린다. 레코드 스키마는 CSP 의 것 그대로(sip_service_model.md §2) —
 계측기 쪽 번역 계층을 두지 않는다. 시드 레코드는 tags 에 `cims-tester` 를 달아 재실행 시 남은 것을 걷어낸다.
 
-접속점(LocalNode) = 피어 풀이 참조한 노드의 `sip.peering` — 이름(local_node)이 대상에 있으면 그 레코드, 없으면 그 이름으로
-edge=peering 접속점을 시드한다(복원 시 함께 사라진다). 주소는 그 노드의 호스트에서, 피어 수신점 ip 는 풀의 워커 호스트에서 파생한다(§4).
+접속점(LocalNode) = 피어 풀이 가리킨 수신점(`sip.listeners[<id>]` — edge 는 무엇이든) 이다. 항목의 `local_node` 이름이 대상에 있으면
+그 레코드, 없으면 같은 protocol·port 의 기존 레코드, 그것도 없으면 그 이름(비면 `cims-tester-<id>`)·그 edge 로 시드한다(복원 시 함께
+사라진다). 피어 신뢰는 시드한 Route(`inbound_auth=none`) 가 세우고 ACL 은 `scope=route` 로 그 피어에만 건다 — 같은 접속점의 UE 트래픽에는
+걸리지 않는다. 주소는 수신점 ip(→ 노드 addr → 호스트), 피어 수신점 ip 는 bind.ip(→ 워커 호스트)에서 파생한다(§4).
 
 표준 라이브러리만 쓴다(관리망 안 HTTPS, 요청은 작고 드물다).
 """
@@ -20,7 +22,7 @@ import urllib.error
 import urllib.request
 from typing import Dict, List, Optional, Set, Tuple
 
-from services.tester_models import Topology, PeerPool
+from services.tester_models import Topology, PeerPool, SipListener
 
 SEED_TAG = 'cims-tester'
 COLLECTIONS = ('local_nodes', 'remote_nodes', 'routes', 'route_sets', 'rules', 'rule_sets', 'routing_policies', 'acl_policies')
@@ -139,30 +141,27 @@ def seed_pools(topology: Topology, used_pools: Set[str]) -> Dict[str, PeerPool]:
     return {n: peers[n] for n in used_pools if n in peers and peers[n].seed.enabled}
 
 
-def pick_local_node(topology: Topology, current_local_nodes: List[dict], node_id: str) -> Tuple[str, Optional[dict]]:
-    """(local_node_ref, 새로 시드할 LocalNode 레코드 또는 None) — node_id = 피어 풀이 참조한 SIP 노드(sip.peering)."""
+def pick_local_node(topology: Topology, current_local_nodes: List[dict], node_id: str, listener_id: str) -> Tuple[str, Optional[dict]]:
+    """(local_node_ref, 새로 시드할 LocalNode 레코드 또는 None) — 피어 풀이 가리킨 수신점 하나에 대해.
+    ① 항목 local_node 이름이 대상에 있으면 그 이름 ② 같은 protocol·port(bind_ip 가 그 주소 또는 0.0.0.0)의 enabled 레코드가 있으면
+    그 이름 ③ 없으면 항목 그대로(edge 포함) 시드."""
     node = topology.target.nodes[node_id]
-    pr = node.sip.peering if node.sip else None
-    ip = topology.node_ip(node_id)
-    if pr is not None:
-        name = pr.local_node or 'cims-tester-peering'
+    l: SipListener = node.sip.listeners[listener_id]
+    ip = topology.listener_ip(node_id, listener_id)
+    name = Topology.local_node_name(listener_id, l)
+    if l.local_node:
         for r in current_local_nodes:
             if r.get('name') == name:
                 return name, None
-        return name, {
-            'name': name, 'enabled': True, 'is_primary': False, 'edge': 'peering',
-            'bind_ip': ip, 'bind_port': int(pr.port), 'protocol': pr.protocol.upper(),
-            'tags': [SEED_TAG], 'note': 'cims-tester peering listener',
-        }
-    acc = node.sip.access if node.sip else None
-    if acc is not None and acc.udp:
-        for r in current_local_nodes:
-            if str(r.get('protocol') or '').upper() == 'UDP' and int(r.get('bind_port') or 0) == int(acc.udp) and r.get('enabled', True):
-                return str(r['name']), None
     for r in current_local_nodes:
-        if r.get('is_primary'):
+        if (str(r.get('protocol') or '').upper() == l.protocol.upper() and int(r.get('bind_port') or 0) == int(l.port)
+                and r.get('enabled', True) and str(r.get('bind_ip') or '0.0.0.0') in (ip, '0.0.0.0', '')):
             return str(r['name']), None
-    raise TargetError(f'대상 local_nodes 에서 route 의 접속점을 고를 수 없다 — 노드 {node_id} 에 sip.peering 을 준다')
+    return name, {
+        'name': name, 'enabled': True, 'is_primary': False, 'edge': l.edge,
+        'bind_ip': ip, 'bind_port': int(l.port), 'protocol': l.protocol.upper(),
+        'tags': [SEED_TAG], 'note': f'cims-tester {l.edge} listener {node_id}:{listener_id}',
+    }
 
 
 def number_prefix(p: PeerPool) -> Optional[str]:
@@ -177,8 +176,9 @@ def number_prefix(p: PeerPool) -> Optional[str]:
     return lo[:n] or None
 
 
-def derive_records(topology: Topology, pools: Dict[str, PeerPool], local_node_ref: str) -> Dict[str, List[dict]]:
-    """피어 풀 → 컬렉션별 새 레코드(태그 cims-tester). 이름 규약: tester-<종류>-<풀|route_set>.
+def derive_records(topology: Topology, pools: Dict[str, PeerPool], local_node_refs: Dict[str, str]) -> Dict[str, List[dict]]:
+    """피어 풀 → 컬렉션별 새 레코드(태그 cims-tester). 이름 규약: tester-<종류>-<풀|route_set>. local_node_refs = 풀 → 접속점 이름.
+    Route 는 `inbound_auth: none`(신뢰 피어 — CSP 가 이 Route 로 식별한 요청은 Digest 없이 받는다), ACL 은 `scope=route` 로 그 피어에만.
 
     매칭 규칙 = 도메인(`req_uri_host eq` — ibcf, UE 가 user@피어도메인 을 다이얼) OR 번호 접두(`req_uri_user prefix` — pbx/mgcf,
     UE 가 DID/E.164 를 그대로 다이얼, BGCF 식 번호 라우팅). 두 규칙을 같은 RouteSet 의 match 집합에 OR 로 넣는다."""
@@ -194,9 +194,10 @@ def derive_records(topology: Topology, pools: Dict[str, PeerPool], local_node_re
             'remote_domain': p.domain, 'srv_lookup': False, 'dns_fallback': False, 'tls_verify': False,
             'tags': [SEED_TAG, p.profile], 'note': f'cims-tester peer pool {name}',
         })
+        local_node_ref = local_node_refs[name]
         out['routes'].append({
-            'name': rt, 'enabled': True, 'local_node_ref': local_node_ref, 'remote_node_ref': rn,
-            'register_to_remote': False, 'tags': [SEED_TAG], 'note': f'cims-tester {local_node_ref} → {name}',
+            'name': rt, 'enabled': True, 'local_node_ref': local_node_ref, 'remote_node_ref': rn, 'inbound_auth': 'none',
+            'register_to_remote': False, 'tags': [SEED_TAG], 'note': f'cims-tester {local_node_ref} ↔ {name}',
         })
         out['rules'].append({
             'name': f'tester-rule-{name}-domain', 'enabled': True, 'field': 'req_uri_host', 'op': 'eq', 'value': p.domain,
@@ -220,10 +221,11 @@ def derive_records(topology: Topology, pools: Dict[str, PeerPool], local_node_re
                 'name': f'tester-rs-{name}-src', 'enabled': True, 'combinator': 'AND',
                 'members': [{'rule_ref': f'tester-rule-{name}-src', 'negate': False}], 'tags': [SEED_TAG],
             })
-            # 피어 신뢰는 피어링 접속점에서 판정한다(scope=local_node) — global 이면 같은 호스트의 UE 트래픽까지 걸린다
+            # 이 피어의 Route 에만(scope=route) — CSP 가 (접속점, 소스 주소) 로 인바운드 Route 를 식별하므로 같은 접속점의 UE 나
+            #   다른 피어에는 걸리지 않는다(local_node/global 이면 같은 호스트의 다른 트래픽까지 걸린다)
             out['acl_policies'].append({
                 'name': f'tester-acl-{name}', 'enabled': True, 'priority': 10, 'match_rule_set_ref': f'tester-rs-{name}-src',
-                'scope': 'local_node', 'scope_ref': local_node_ref, 'action': p.seed.acl, 'tags': [SEED_TAG],
+                'scope': 'route', 'scope_ref': rt, 'action': p.seed.acl, 'tags': [SEED_TAG],
             })
         by_set.setdefault(p.seed.route_set or name, []).append((name, p))
     for rs_name, members in by_set.items():
@@ -253,7 +255,16 @@ class CspSeeder:
         self.client, self.dep_id, self.topology, self.pools = client, dep_id, topology, pools
         self.snapshot: Dict[str, List[dict]] = {}
         self.applied: Dict[str, int] = {}
-        self.local_node_ref: Optional[str] = None
+        self.local_node_refs: Dict[str, str] = {}   # 풀 → 접속점(LocalNode) 이름
+
+    @property
+    def local_node_ref(self) -> str:
+        """run 노트용 — 쓰인 접속점 이름들(중복 제거, 순서 유지)."""
+        seen = []
+        for v in self.local_node_refs.values():
+            if v not in seen:
+                seen.append(v)
+        return ','.join(seen)
 
     @classmethod
     def for_run(cls, topology: Topology, used_pools: Set[str]) -> Optional['CspSeeder']:
@@ -272,15 +283,17 @@ class CspSeeder:
     def apply(self) -> Dict[str, int]:
         for c in COLLECTIONS:
             self.snapshot[c] = self.client.get_collection(self.dep_id, c)
+        ln_new: Dict[str, dict] = {}
         try:
-            node_id = self.topology.peering_node_of(list(self.pools))
+            for pn, (nid, lid, _l) in self.topology.peer_listeners(list(self.pools)).items():
+                ref, rec = pick_local_node(self.topology, self.snapshot['local_nodes'], nid, lid)
+                self.local_node_refs[pn] = ref
+                if rec is not None:
+                    ln_new.setdefault(ref, rec)
         except ValueError as e:
             raise TargetError(str(e))
-        ln_ref, ln_new = pick_local_node(self.topology, self.snapshot['local_nodes'], node_id)
-        self.local_node_ref = ln_ref
-        new = derive_records(self.topology, self.pools, ln_ref)
-        if ln_new is not None:
-            new['local_nodes'].append(ln_new)
+        new = derive_records(self.topology, self.pools, self.local_node_refs)
+        new['local_nodes'].extend(ln_new.values())
         puts: List[Tuple[str, List[dict]]] = []
         for c in COLLECTIONS:
             keep = [r for r in self.snapshot[c] if not _tagged(r)]

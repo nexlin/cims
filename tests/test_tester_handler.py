@@ -164,8 +164,9 @@ class Topologies(unittest.TestCase):
         doc = r.body['doc']
         try:
             self.assertEqual(sorted(doc['hosts']), ['h10_0_0_5', 'h10_0_0_61', 'h10_0_0_62'])
-            self.assertEqual(doc['target']['nodes']['csp']['sip']['access']['tls'], 15061)
-            self.assertEqual(doc['target']['nodes']['csp']['sip']['peering']['port'], 15070)
+            self.assertEqual(doc['target']['nodes']['csp']['sip']['listeners']['tls'], {'edge': 'access', 'port': 15061, 'protocol': 'tls'})
+            self.assertEqual(doc['target']['nodes']['csp']['sip']['listeners']['peering']['port'], 15070)
+            self.assertEqual(doc['target']['nodes']['csp']['sip']['domains'], ['volte.test'])
             self.assertEqual(doc['target']['nodes']['oam']['oam']['port'], 4419)
             self.assertEqual(doc['target']['nodes']['csc']['api']['port'], 4430)
             self.assertEqual([(w['name'], w['host'], w['port']) for w in doc['workers']], [('w1', 'h10_0_0_61', 7100), ('w2', 'h10_0_0_62', 7100)])

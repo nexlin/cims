@@ -363,28 +363,22 @@
     },
     "NodeSip": {
       "additionalProperties": false,
+      "description": "SIP 노드의 수신점 N 개 + 도메인. 입력이 이전 꼴(`access{udp,tcp,tls,domains}`·`peering{port,protocol,local_node}`)이면\n`normalize_sip_block` 이 수신점 항목 `udp`/`tcp`/`tls`/`peering` 으로 승계한다(store 도 읽을 때 같은 함수로 바꿔 저장).",
       "properties": {
-        "access": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SipAccess"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
+        "domains": {
+          "description": "첫 항목 = 기본 홈 도메인, \"ptt\" 가 든 항목 = PTT 풀 도메인",
+          "items": {
+            "type": "string"
+          },
+          "title": "Domains",
+          "type": "array"
         },
-        "peering": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SipPeering"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
+        "listeners": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SipListener"
+          },
+          "title": "Listeners",
+          "type": "object"
         }
       },
       "title": "NodeSip",
@@ -413,8 +407,21 @@
     },
     "PeerBind": {
       "additionalProperties": false,
-      "description": "피어 수신점 — ip 는 워커 호스트 주소에서 파생된다.",
+      "description": "피어 수신점 — ip 가 비면 워커 호스트 주소(다중 IP 호스트면 여기서 고른다).",
       "properties": {
+        "ip": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ip"
+        },
         "port": {
           "maximum": 65535,
           "minimum": 1,
@@ -571,8 +578,21 @@
           "title": "Kind",
           "type": "string"
         },
+        "listener": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "그 노드의 수신점 id — 비면 첫 edge=peering 수신점, 없으면 bind.protocol 과 같은 첫 수신점. access 수신점도 된다(CSP 는 Route 로 피어를 신뢰한다)",
+          "title": "Listener"
+        },
         "peering": {
-          "description": "다음 홉 노드 id — sip.peering 이 있는 SIP 노드",
+          "description": "다음 홉 노드 id — SIP 노드(수신점 하나 이상)",
           "title": "Peering",
           "type": "string"
         },
@@ -633,7 +653,7 @@
     },
     "PeerRegister": {
       "additionalProperties": false,
-      "description": "pbx 트렁크 REGISTER(SIPconnect 2.0 §8 등록 모드) — 계정 하나가 DID 범위를 대표. 대상의 access 접속점으로 Digest 등록.",
+      "description": "pbx 트렁크 REGISTER(SIPconnect 2.0 §8 등록 모드) — 계정 하나가 DID 범위를 대표. 피어가 가리킨 수신점(같은 주소의 같은\ntransport access 수신점)으로 Digest 등록.",
       "properties": {
         "expires": {
           "default": 3600,
@@ -783,6 +803,18 @@
           "title": "Kind",
           "type": "string"
         },
+        "listener": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Listener"
+        },
         "source": {
           "$ref": "#/$defs/CredsSource"
         },
@@ -821,68 +853,33 @@
       "title": "RealUePool",
       "type": "object"
     },
-    "SipAccess": {
+    "SipListener": {
       "additionalProperties": false,
-      "description": "UE 가 등록·발신하는 접속점 — transport 별 포트(없는 transport 는 그 노드에서 거절).",
+      "description": "SIP 수신점 하나 = 대상 LocalNode 하나. `edge`: access = UE 가 등록·발신하는 곳 / peering = 피어 풀의 다음 홉(CSP `edge=peering`\n접속점은 Route 있는 피어만 받는다). `ip` 가 비면 노드 `addr` → 호스트 ip. `local_node` = cims 대상 local_nodes 의 이름 —\n시드가 그 이름을 찾고, 없으면 그 이름으로(비면 `cims-tester-<수신점 id>`) 만든다.",
       "properties": {
-        "domains": {
-          "description": "첫 항목 = 기본 홈 도메인, \"ptt\" 가 든 항목 = PTT 풀 도메인",
-          "items": {
-            "type": "string"
-          },
-          "title": "Domains",
-          "type": "array"
+        "edge": {
+          "default": "access",
+          "enum": [
+            "access",
+            "peering"
+          ],
+          "title": "Edge",
+          "type": "string"
         },
-        "tcp": {
+        "ip": {
           "anyOf": [
             {
-              "maximum": 65535,
-              "minimum": 1,
-              "type": "integer"
+              "minLength": 1,
+              "type": "string"
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "title": "Tcp"
+          "description": "비면 노드 addr → 호스트 ip",
+          "title": "Ip"
         },
-        "tls": {
-          "anyOf": [
-            {
-              "maximum": 65535,
-              "minimum": 1,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Tls"
-        },
-        "udp": {
-          "anyOf": [
-            {
-              "maximum": 65535,
-              "minimum": 1,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Udp"
-        }
-      },
-      "title": "SipAccess",
-      "type": "object"
-    },
-    "SipPeering": {
-      "additionalProperties": false,
-      "description": "피어 풀의 다음 홉(edge=peering 접속점). `local_node` 는 cims 대상에서만 — 대상 local_nodes 의 name(없으면 시드).",
-      "properties": {
         "local_node": {
           "anyOf": [
             {
@@ -893,7 +890,7 @@
             }
           ],
           "default": null,
-          "description": "cims: 대상 local_nodes 이름 — 비면 cims-tester-peering",
+          "description": "cims: 대상 local_nodes 이름 — 비면 cims-tester-<id>",
           "title": "Local Node"
         },
         "port": {
@@ -916,7 +913,7 @@
       "required": [
         "port"
       ],
-      "title": "SipPeering",
+      "title": "SipListener",
       "type": "object"
     },
     "Target": {
@@ -955,6 +952,20 @@
       "additionalProperties": false,
       "description": "역할(role)별 노드 — 설정 블록이 역할마다 다르다. procs = 호스트 SSH 관측이 볼 프로세스 이름.",
       "properties": {
+        "addr": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "노드 주소 — 비면 호스트 ip. A/S 이중화의 VIP 나 다중 IP 호스트의 서비스 주소",
+          "title": "Addr"
+        },
         "api": {
           "anyOf": [
             {
@@ -1099,7 +1110,7 @@
       "additionalProperties": false,
       "properties": {
         "access": {
-          "description": "접속점 노드 id — sip.access 가 있는 SIP 노드",
+          "description": "접속점 노드 id — edge=access 수신점이 있는 SIP 노드",
           "title": "Access",
           "type": "string"
         },
@@ -1127,6 +1138,19 @@
           "const": "ue",
           "title": "Kind",
           "type": "string"
+        },
+        "listener": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "그 노드의 수신점 id — 비면 transport 와 같은 protocol 의 첫 access 수신점",
+          "title": "Listener"
         },
         "prack": {
           "default": false,
@@ -1163,6 +1187,7 @@
         },
         "transport": {
           "default": "udp",
+          "description": "listener 를 주면 그 protocol 로 맞춘다(둘 다 주고 다르면 오류)",
           "enum": [
             "udp",
             "tcp",

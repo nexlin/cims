@@ -463,7 +463,7 @@ class RunDriver(threading.Thread):
         self.state = 'provisioning'
         self.target_build = tester_target.csp_build(self.topology) if self.topology.target.kind == 'cims' else None
         self._publish_state()
-        # 피어 풀 — 대상 CSP 컬렉션 시드(remote_nodes·routes·route_sets·rules·routing_policies·acl) → run 끝에 복원
+        # 피어 풀 — 대상 CSP 컬렉션 시드(접속점·remote_nodes·routes(inbound_auth)·route_sets·rules·routing_policies·acl scope=route) → run 끝에 복원
         if self.plan.get('peer_pools'):
             used = set(self.plan['peer_pools'])
             self.seeder = tester_target.CspSeeder.for_run(self.topology, used)

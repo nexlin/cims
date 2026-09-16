@@ -1,8 +1,9 @@
 """토폴로지 연결 검사 — 콘솔 [시험 > 토폴로지] 의 [연결 검사] (test_instrument.md §7).
 
 run 을 걸기 전에 대상·워커에 닿는지 본다. 검사 항목 하나 = {name, ok, detail, ms, info?, target{kind,id}}. 항목 이름 규약:
-  - `<노드>:udp|tcp|tls` : SIP 노드 access 수신점 — UDP 는 OPTIONS(응답 어떤 코드든 도달), TCP/TLS 는 connect(+handshake, 인증서 검증 없음)
-  - `<노드>:peering`     : 피어링 수신점 — 평상시엔 닫혀 있는 것이 정상(run 중 시드로 열림)이라 참고(info) 항목
+  - `<노드>:<수신점 id>` : SIP 노드 수신점(sip.listeners) — UDP 는 OPTIONS(응답 어떤 코드든 도달 — 피어링 접속점은 Route 없는 소스에 403 을
+                          주지만 그것도 도달이다), TCP/TLS 는 connect(+handshake, 인증서 검증 없음). edge=peering 항목은 run 시드가 열고
+                          복원이 닫을 수 있어 실패를 참고(info)로 둔다
   - `<노드>:api`         : subscriber 노드 API(TCP/TLS connect) · `<노드>:db` : DB 포트 connect · `<노드>:oam` : 대상 OAM 토큰(배포 목록 200)
   - `<호스트>:ssh`       : SSH 포트 도달(관측 자체는 후속) · `worker_<이름>` : GET /health
 CSP 에 보내는 OPTIONS 는 등록 없이 처리되는 요청(RFC 3261 §11) — 가입자 상태를 건드리지 않는다.
@@ -98,24 +99,15 @@ def check_topology(topology: Topology, topology_doc: dict) -> List[dict]:
     for nid, n in topology.target.nodes.items():
         ip = topology.node_ip(nid)
         if n.role == 'sip' and n.sip is not None:
-            acc = n.sip.access
-            if acc is not None:
-                dom = acc.domains[0] if acc.domains else ''
-                if acc.udp:
-                    items.append(_sip_options_udp(f'{nid}:udp', ip, acc.udp, dom))
-                if acc.tcp:
-                    items.append(_tcp_connect(f'{nid}:tcp', ip, acc.tcp, tls=False))
-                if acc.tls:
-                    items.append(_tcp_connect(f'{nid}:tls', ip, acc.tls, tls=True))
-            pr = n.sip.peering
-            if pr is not None:
-                dom = acc.domains[0] if acc is not None and acc.domains else ''
-                pi = (_tcp_connect(f'{nid}:peering', ip, pr.port, tls=(pr.protocol == 'tls')) if pr.protocol != 'udp'
-                      else _sip_options_udp(f'{nid}:peering', ip, pr.port, dom))
-                if not pi['ok']:
-                    pi['detail'] += ' — 피어링 접속점은 run 시드가 열고 복원이 닫는다(평상시 닫힘 정상)'
-                    pi['info'] = True
-                items.append(pi)
+            dom = n.sip.domains[0] if n.sip.domains else ''
+            for lid, l in n.sip.listeners.items():
+                lip = topology.listener_ip(nid, lid)
+                it = (_sip_options_udp(f'{nid}:{lid}', lip, l.port, dom) if l.protocol == 'udp'
+                      else _tcp_connect(f'{nid}:{lid}', lip, l.port, tls=(l.protocol == 'tls')))
+                if not it['ok'] and l.edge == 'peering':
+                    it['detail'] += ' — 피어링 접속점은 run 시드가 열고 복원이 닫을 수 있다(평상시 닫힘이면 정상)'
+                    it['info'] = True
+                items.append(it)
         elif n.role == 'subscriber' and n.api is not None:
             items.append(_tcp_connect(f'{nid}:api', ip, n.api.port, tls=n.api.tls))
         elif n.role == 'db' and n.db is not None:
