@@ -1,5 +1,7 @@
 #include "CspRouteMap.h"
 
+#include <strings.h>
+
 #include <ctime>
 
 #include "CspConfigCache.h"
@@ -50,6 +52,12 @@ bool CCspRouteMap::Sync() {
             c.auth_realm = row.GetString( "auth_realm" );
             c.max_concurrent_calls = (int)row.GetInt( "max_concurrent_calls", 0 );
             c.cps_limit = (int)row.GetInt( "cps_limit", 0 );
+            c.inbound_auth = row.GetString( "inbound_auth", "none" );
+            if ( c.inbound_auth != "none" && c.inbound_auth != "digest" ) {
+                CLog::Print( LOG_ERROR, "RouteMap: route '%s' inbound_auth='%s' 미지원 — none 으로 취급",
+                             c.name.c_str(), c.inbound_auth.c_str() );
+                c.inbound_auth = "none";
+            }
             c.enabled = _boolish( row.GetString( "enabled" ), true );
             c.tags = _readStringArray( row.Get( "tags" ) );
             c.note = row.GetString( "note" );
@@ -130,6 +138,24 @@ RouteConfig CCspRouteMap::GetByPair( const std::string &localName, const std::st
     auto rit = m_byName.find( it->second );
     if ( rit == m_byName.end() ) return RouteConfig();
     return rit->second.cfg;
+}
+
+RouteConfig CCspRouteMap::FindInbound( const std::string &localName, const std::string &srcIp, int srcPort,
+                                       const std::string &transport ) const {
+    if ( srcIp.empty() ) return RouteConfig();
+    std::lock_guard<std::mutex> lk( m_mutex );
+    RouteConfig byIp;
+    for ( const auto &kv : m_byName ) {
+        const RouteConfig &c = kv.second.cfg;
+        if ( !c.enabled ) continue;
+        if ( !localName.empty() && c.local_node_ref != localName ) continue;
+        RemoteNodeInfo rn = gclsRemoteNodeMap.GetByName( c.remote_node_ref );
+        if ( !rn.IsValid() || !rn.enabled || rn.ip != srcIp ) continue;
+        if ( !transport.empty() && strcasecmp( rn.protocol.c_str(), transport.c_str() ) != 0 ) continue;
+        if ( srcPort > 0 && rn.port == srcPort ) return c;  // 포트까지 맞는 것이 정답
+        if ( !byIp.IsValid() ) byIp = c;                    // IP 만 맞는 첫 후보(name 사전순)
+    }
+    return byIp;
 }
 
 std::vector<RouteConfig> CCspRouteMap::GetAll() const {

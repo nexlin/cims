@@ -20,12 +20,13 @@ Route Set          Route 여러 개 묶어 분배/failover 정책 적용 (cluste
 Rule               SIP 메시지 1개 필드에 대한 단일 조건
 Rule Set           Rule 들을 flat AND/OR 로 조합
 Routing Policy     Rule Set match → Route Set 또는 Access Service 로 전달
-ACL Policy         Rule Set match → allow/deny (scope: global/local_node/route/route_set)
+ACL Policy         Rule Set match → allow/deny (scope: global/local_node/route/route_set — route/route_set 은 인바운드 Route 식별로 양방향)
 Access Service     UE 가 직접 붙는 서비스 — 접속환경 클래스 kind(volte 이동 / voip 유선 / ptt) + domain + auth_realm + 허용 LN
 ```
 
 재사용성이 원칙이다:
 - 같은 Remote Node 가 여러 Route 에 속할 수 있다 (LN 만 다른 경우)
+- 같은 Local Node 를 Access Service(UE) 와 여러 Route(피어) 가 함께 쓸 수 있다 — 피어 신뢰는 접속점이 아니라 Route 가 세운다(§4)
 - 같은 Rule 이 Routing 과 ACL 양쪽 Rule Set 에 속할 수 있다 (`tags[]` 로 용도 힌트)
 - 같은 Route 가 여러 Route Set 에 속할 수 있고, 각 Set 마다 다른 priority/weight
 
@@ -91,11 +92,12 @@ Access Service     UE 가 직접 붙는 서비스 — 접속환경 클래스 kin
 
 ### 2-1. LocalNode
 
-CSP 가 수신하는 bind 포트. `edge` 분류를 가진다.
+CSP 가 수신하는 bind 포트. `edge` 는 **인터페이스 분류**다 — primary(UE 에 주입하는 자기 주소)·피어 발신 자기 주소·IPsec 접속점 선택의 기준이고,
+`edge=peering` 접속점은 Route 있는 피어(§4)만 받는다. 신뢰 판정(Digest 생략)의 근거는 아니다 — 그것은 Route 의 몫이다.
 
 | 필드 | 의미 |
 |---|---|
-| `edge` | `access` (UE 수신) / `peering` (IMS 피어링) / `mgmt` (관리) |
+| `edge` | `access` (UE 수신 — 낯선 소스도 인증 흐름으로) / `peering` (NNI — 설정된 피어만, Route 없는 소스 403) / `mgmt` (관리) |
 | `bind_ip`, `bind_port`, `protocol` | 기본 transport |
 | `tls_*` | TLS 전용 (protocol=TLS 일 때) |
 | `client_port` | protocol=IPSEC 일 때 — `bind_port`=port_ps(보호 서버 포트, UDP+TCP 공용), `client_port`=port_pc(보호 발신 포트). 노드당 하나 — [sip_access_security.md §8.3](sip_access_security.md#83-p4--ims-aka--ipsec-본문-67--구현-반영) |
@@ -121,7 +123,12 @@ LN 과 RN 을 묶은 실제 연결. auth 및 outbound 파라미터는 전부 여
 | `outbound_proxy_ip`, `outbound_proxy_port` | RN 앞에 proxy 가 있을 때 |
 | `register_to_remote`, `register_expires` | trunk REGISTER 가 필요한 경우. **런타임 미구현** — 값만 보관하며 REGISTER 를 보내지 않는다 (§9) |
 | `auth_user`, `auth_password`, `auth_realm` | REGISTER/challenge 대응용 |
+| `inbound_auth` | 이 Route 의 RemoteNode 에서 **들어온** 요청의 인증 — `none`(기본, 신뢰 피어: Digest 없음, IBCF·고정 IP 트렁크) / `digest`(가입자 인증 흐름 — 등록형 트렁크, 트렁크 계정은 §9) |
 | `max_concurrent_calls`, `cps_limit` | 용량 제한 |
+
+Route 는 **양방향** 연결 정보다. 발신은 RoutingPolicy → RouteSet → Route 로 고르고, 인바운드는 (수신 LocalNode, 소스 IP, transport) 로 Route 를
+역으로 식별한다(`CCspRouteMap::FindInbound` — RemoteNode.ip 가 같은 enabled Route 중 UDP 는 `RemoteNode.port == 소스 포트` 인 것을 우선하므로 같은 IP 의
+피어 여럿도 가른다, TCP/TLS 는 IP 만). RemoteNode.ip 는 IP 리터럴이어야 인바운드 식별이 된다(호스트명은 발신 전용).
 
 ### 2-4. RouteSet — Route 묶음 + 분배 정책
 
@@ -265,8 +272,8 @@ Rule 은 Routing 과 ACL 이 공유. RuleEvaluator 하나가 양쪽을 처리.
   (REGISTER 포함). deny 면 403 을 보내고 이후 처리를 하지 않는다.
 - **매칭되는 정책이 없으면 기본 ALLOW.** 화이트리스트로 쓰려면 "허용 대상이 아님 → deny" 를
   `negate` 로 표현한다.
-- 동작하는 scope 는 `global` 과 `local_node` 다. `route` / `route_set` 은 inbound 시점에 outbound
-  route 가 아직 결정되지 않아 빈 문자열로 매칭되므로 실질 미동작이다 (§9).
+- scope 네 가지가 전부 인바운드에서 동작한다. `route` / `route_set` 은 RecvRequest 가 식별한 **인바운드 Route**(§2-3, 그 Route 가 든 enabled
+  RouteSet 의 name 사전순 첫 번째)로 대조한다 — 어떤 피어 하나에만 거는 ACL 은 `scope=route`, 접속점 전체는 `scope=local_node`.
 
 ### 2-9. AccessService — UE 서비스
 
@@ -366,8 +373,8 @@ From URI 단독 매칭은 **fallback 으로 강등**. IMS 표준을 참고한 �
 2. src_addr/Call-ID → REGISTER binding 조회 (CspUserMap)
       → 인증된 UE 면 binding.service_id 확정. 끝.
 
-3. 수신 Local Node 가 edge=peering + 어떤 RoutingPolicy 가 선평가
-      → 해당 RoutingPolicy.target 기반 라우팅 (service 개념 없이 RouteSet 로 직행)
+3. (수신 Local Node, 소스 주소) 가 어떤 Route 의 RemoteNode 와 맞음 = 설정된 피어의 요청
+      → 인증은 그 Route 의 inbound_auth, 라우팅은 RoutingPolicy.target (service 개념 없이 RouteSet 로 직행)
 
 4. From URI host 가 AccessService.domain 과 일치 (best-effort fallback)
 
@@ -378,10 +385,13 @@ From URI 단독 매칭은 **fallback 으로 강등**. IMS 표준을 참고한 �
 
 1/2 가 주 경로. 3 은 IBCF incoming. 4/5 는 의심스러운 fallback (로그에 `svc_source=from_header_fallback` 표식).
 
-**피어링 접속점의 인증** — `edge=peering` LocalNode 로 들어온 요청은 가입자 인증(Digest 챌린지)을 하지 않는다
-(`CModuleDispatcher::EventIncomingRequestAuth`, TS 24.229 §5.10 IBCF · TS 29.165 II-NNI — 상대는 신뢰 피어 망이지 가입자가 아니다).
-신뢰는 `RecvRequest` 선평가 ACL(`acl_policies`, 소스 IP·scope=local_node)이 세운다. 피어링 접속점을 열면 ACL 로 상대를 좁히는 것이
-운영 절차다. 접속(access) 접속점은 종전대로 §3 흐름.
+**피어 인증 — 신뢰의 근거는 Route 다.** `RecvRequest` 가 (수신 LocalNode, 소스 IP[:UDP 소스 포트], transport) 로 **인바운드 Route** 를 식별한다
+(`CCspRouteMap::FindInbound`, §2-3). 식별되면 그 요청은 설정된 피어(RemoteNode)의 것이고, `inbound_auth=none` 이면
+`EventIncomingRequestAuth` 가 Digest 챌린지를 하지 않는다(TS 24.229 §5.10 IBCF · TS 29.165 II-NNI — 상대는 신뢰 피어 망이지 가입자가 아니다).
+`inbound_auth=digest` 면 §3 가입자 흐름이다. 접속점 `edge` 는 신뢰를 정하지 않는다 — 피어가 access 접속점으로 와도 Route 가 있으면 피어이고,
+`edge=peering` 접속점에 Route 없는 소스가 오면 RecvRequest 가 403 을 낸다(NNI 는 알려진 상대와만, TS 33.210 NDS/IP 전제). 라우팅 정책이
+트렁크를 고른 호라는 이유로 인증을 건너뛰지 않는다(미등록 발신자의 무인증 트렁크 발신 = toll fraud 구멍이었다) — 발신 UE 는 등록 바인딩으로
+인증된다. ACL 은 같은 식별 결과로 `scope=route/route_set` 을 대조한다(§2-8).
 
 ---
 
@@ -516,9 +526,10 @@ AccessServices:
 | `routes.register_to_remote` / `register_expires` | 트렁크 REGISTER 워커 미구현 — 값만 보관 |
 | Rule field `dst_ip` / `p_asserted_identity` / `via_host` | `MessageCtx` 에 채워지지 않아 항상 빈 값. 수신 인터페이스 구분은 ACL `scope=local_node` 로 대체 |
 | `routing_policies.target_type=access_service` | 매칭·로그까지만. 이후는 기존 TAS/B2BUA 경로가 처리 |
-| ACL `scope=route` / `route_set` | inbound 시점에 outbound route 미결정 → 빈 문자열로 매칭되어 실질 미동작 |
+| 트렁크 계정(`routes.inbound_auth=digest` 의 REGISTER 상대) | 등록형 트렁크(SIPconnect 등록 모드)가 REGISTER 하면 가입자 조회에서 403 — 계정 하나가 DID 범위를 대표하는 트렁크 계정 모델이 없다. `inbound_auth=digest` 는 인증 흐름만 가입자 쪽으로 보낸다 |
+| 인바운드 Route 식별의 RemoteNode 호스트명 | `FindInbound` 는 RemoteNode.ip 를 IP 리터럴로 비교한다 — 호스트명 RemoteNode 의 피어는 인바운드에서 식별되지 않는다(발신은 된다) |
 | `routing_policies.transform_rule_set_refs` (메시지 변환) | 예약 필드 |
 | RuleSet 중첩 (tree AND/OR/NOT) | 2차 |
 | 헬스체크 `invite_response` 모드 | 2차 |
 | Rule field: `record_route`, `p_charging_vector` 등 | 필요시 추가 |
-| listener_id 전파 | UDP 수신 경로만. TCP/TLS 는 `-1` → ACL `scope=local_node` 와 `restricted` 는 UDP 리스너에서만 매칭된다 |
+| listener_id 전파 | UDP·TCP·TLS 수신 경로 전부(psip `TcpSessionList.m_iListenerId`). 레거시 단일 TCP 리스너(id 0)만 LocalNode 매칭이 없다 |

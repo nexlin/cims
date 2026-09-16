@@ -24,6 +24,7 @@
 #include "CspPttGroup.h"
 #include "CspRemoteNodeMap.h"
 #include "CspRouteMap.h"
+#include "CspRouteSetMap.h"
 #include "CspRoutingPolicyEngine.h"
 #include "CspServer.h"
 #include "CspServiceMap.h"
@@ -193,17 +194,52 @@ void CModuleDispatcher::OnCallEnded( const char *pszCallId, int iSipStatus ) {
 //  순서: ModuleDispatcher (1st) → CSipUserAgent (2nd)
 // ──────────────────────────────────────────────────────────────
 
+/**
+ * @brief 수신 요청이 어느 Route 로 들어왔는가 — (수신 LocalNode, 소스 IP[:UDP 소스 포트], transport) 로 식별.
+ *
+ * Route 는 (LocalNode, RemoteNode) 연결 정보라 양방향으로 쓴다. 발신은 RoutingPolicy 가 고르고, 인바운드는 여기서
+ * 역으로 찾는다. 결과가 있으면 그 요청은 "설정된 피어" 의 것이다 — 피어 신뢰(Digest 생략)와 ACL scope=route/route_set
+ * 이 이 식별에서 나온다(sip_service_model.md §4). 접속점 edge 는 신뢰 근거가 아니다(주소 선택 분류일 뿐).
+ * TCP/TLS 는 소스 포트가 임시 포트라 IP 로만 맞춘다(FindInbound 가 처리).
+ */
+static RouteConfig InboundRouteOf( const CSipMessage *pclsMessage, const std::string &strLocalNodeName ) {
+    if ( pclsMessage == NULL || pclsMessage->m_strClientIp.empty() ) return RouteConfig();
+    int iSrcPort = ( pclsMessage->m_eTransport == E_SIP_UDP ) ? pclsMessage->m_iClientPort : 0;
+    return gclsRouteMap.FindInbound( strLocalNodeName, pclsMessage->m_strClientIp, iSrcPort,
+                                     SipGetTransport( pclsMessage->m_eTransport ) );
+}
+
 bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
     std::string strCallId;
     pclsMessage->GetCallId( strCallId );
 
     // v3 (2026-04-22): 접근제어 — AclPolicyEngine (rule_set 기반).
     //   psip v3 확장으로 수신 listener 식별 가능 → scope=local_node 동작.
-    //   scope=route/route_set 는 inbound 시점 unknown (outbound 결정 이후에 적용 가능).
+    //   인바운드 Route 식별(InboundRouteOf) 로 scope=route/route_set 도 인바운드에서 동작한다.
     std::string strLocalNodeName;
+    LocalNodeInfo clsInLn;
     if ( pclsMessage->m_iListenerId > 0 ) {
-        LocalNodeInfo ln = gclsLocalNodeMap.GetByIntId( pclsMessage->m_iListenerId );
-        if ( ln.IsValid() ) strLocalNodeName = ln.name;
+        clsInLn = gclsLocalNodeMap.GetByIntId( pclsMessage->m_iListenerId );
+        if ( clsInLn.IsValid() ) strLocalNodeName = clsInLn.name;
+    }
+    const RouteConfig clsInRoute = InboundRouteOf( pclsMessage, strLocalNodeName );
+    const std::string strInRouteSet = clsInRoute.IsValid() ? gclsRouteSetMap.SetOfRoute( clsInRoute.name ) : "";
+
+    // 피어링 접속점(edge=peering) 은 설정된 피어(Route 가 있는 RemoteNode)만 받는다 — NNI 는 알려진 상대와만 맺는다
+    //   (TS 29.165 II-NNI, TS 33.210 NDS/IP 전제). 접속(access) 접속점은 가입자용이라 낯선 소스도 인증 흐름으로 들인다.
+    if ( clsInLn.IsValid() && clsInLn.edge == "peering" && !clsInRoute.IsValid() ) {
+        CLog::Print( LOG_INFO, "InboundRoute: peering local_node=%s src=%s:%d/%s 에 맞는 Route 없음 → 403",
+                     strLocalNodeName.c_str(), pclsMessage->m_strClientIp.c_str(), pclsMessage->m_iClientPort,
+                     SipGetTransport( pclsMessage->m_eTransport ) );
+        SendResponse( pclsMessage, 403 );
+        return true;
+    }
+    if ( clsInRoute.IsValid() && pclsMessage->IsMethod( SIP_METHOD_INVITE ) &&
+         !pclsMessage->m_clsTo.SelectParam( SIP_TAG ) ) {
+        CLog::Print( LOG_INFO, "InboundRoute: route=%s remote_node=%s route_set=%s local_node=%s src=%s:%d/%s auth=%s",
+                     clsInRoute.name.c_str(), clsInRoute.remote_node_ref.c_str(), strInRouteSet.c_str(),
+                     strLocalNodeName.c_str(), pclsMessage->m_strClientIp.c_str(), pclsMessage->m_iClientPort,
+                     SipGetTransport( pclsMessage->m_eTransport ), clsInRoute.inbound_auth.c_str() );
     }
     {
         MessageCtx mctx;
@@ -216,10 +252,12 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
         mctx.src_ip = pclsMessage->m_strClientIp;
         mctx.user_agent = pclsMessage->m_strUserAgent;
         mctx.method = pclsMessage->m_strSipMethod;
-        AclDecision d = gclsAclPolicyEngine.Check( mctx, strLocalNodeName, "", "" );
+        AclDecision d = gclsAclPolicyEngine.Check( mctx, strLocalNodeName, clsInRoute.IsValid() ? clsInRoute.name : "",
+                                                   strInRouteSet );
         if ( !d.allowed ) {
-            CLog::Print( LOG_INFO, "AclPolicy: denied src=%s local_node=%s policy=%s",
-                         pclsMessage->m_strClientIp.c_str(), strLocalNodeName.c_str(), d.matched_policy.c_str() );
+            CLog::Print( LOG_INFO, "AclPolicy: denied src=%s local_node=%s route=%s policy=%s",
+                         pclsMessage->m_strClientIp.c_str(), strLocalNodeName.c_str(),
+                         clsInRoute.IsValid() ? clsInRoute.name.c_str() : "-", d.matched_policy.c_str() );
             SendResponse( pclsMessage, 403 );
             return true;
         }
@@ -491,22 +529,21 @@ bool CModuleDispatcher::EventIncomingRequestAuth( CSipMessage *pclsMessage ) {
         return false;
     }
 
-    // G10 (2026-05-11): 외부 peer inbound auth-skip.
-    //   RecvRequest 의 AclPolicy 가 inbound trust 를 이미 검증한 뒤
-    //   routing_policies 가 outbound peer 를 결정하여 PendingRouteMap 에 저장한 콜은,
-    //   From-user 가 로컬 user map 에 없는 외부 peer 발신이므로 401 challenge 우회.
+    // 설정된 피어에서 온 요청 — 인바운드 Route(InboundRouteOf: 수신 LocalNode + 소스 주소 → Route) 가 식별되고
+    //   그 Route 의 inbound_auth 가 none 이면 상대는 가입자가 아니라 신뢰 피어 망이다(TS 24.229 §5.10 IBCF ·
+    //   TS 29.165 II-NNI). Digest 챌린지를 하지 않는다 — 신뢰는 RemoteNode 설정과 RecvRequest 의 ACL(scope=route
+    //   포함)이 세운다. 접속점 edge 는 보지 않는다(피어가 access 접속점으로 와도 Route 가 있으면 피어, 피어링 접속점에
+    //   Route 없는 소스는 RecvRequest 가 이미 403). inbound_auth=digest(등록형 트렁크)는 아래 가입자 인증 흐름 그대로.
+    //   라우팅 정책이 트렁크를 고른 호(PendingRouteMap)라고 인증을 건너뛰지는 않는다 — 미등록 발신자가 트렁크
+    //   번호만 부르면 무인증으로 나가던 구멍(toll fraud)이었다. 발신 UE 는 등록 바인딩으로 인증된다.
     {
-        std::string strCallId;
-        pclsMessage->GetCallId( strCallId );
-        if ( gclsPendingRouteMap.Has( strCallId ) ) return true;
-    }
-
-    // 피어링 접속점(LocalNode edge=peering) 으로 들어온 요청 — 상대는 가입자가 아니라 신뢰 피어 망이다
-    //   (TS 24.229 §5.10 IBCF · TS 29.165 II-NNI). 신뢰는 RecvRequest 의 ACL(acl_policies, 소스 IP) 이 세우고
-    //   Digest 챌린지는 하지 않는다. 접속(access) 접속점은 종전대로 가입자 인증 흐름.
-    {
-        LocalNodeInfo clsLn = gclsLocalNodeMap.GetByIntId( pclsMessage->m_iListenerId );
-        if ( clsLn.IsValid() && clsLn.edge == "peering" ) return true;
+        std::string strLocalNodeName;
+        if ( pclsMessage->m_iListenerId > 0 ) {
+            LocalNodeInfo clsLn = gclsLocalNodeMap.GetByIntId( pclsMessage->m_iListenerId );
+            if ( clsLn.IsValid() ) strLocalNodeName = clsLn.name;
+        }
+        RouteConfig clsInRoute = InboundRouteOf( pclsMessage, strLocalNodeName );
+        if ( clsInRoute.IsValid() && clsInRoute.TrustsInbound() ) return true;
     }
 
     // ⚠️ 테스트 환경 전용 (Setup.TestEnvOpenTermination=true) — 상용 원복 대상.

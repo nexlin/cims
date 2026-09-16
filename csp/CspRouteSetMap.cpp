@@ -112,6 +112,18 @@ RouteSetConfig CCspRouteSetMap::GetByName( const std::string &name ) const {
     return it->second.cfg;
 }
 
+std::string CCspRouteSetMap::SetOfRoute( const std::string &routeName ) const {
+    if ( routeName.empty() ) return "";
+    std::lock_guard<std::mutex> lk( m_mutex );
+    for ( const auto &kv : m_byName ) {
+        const RouteSetConfig &c = kv.second.cfg;
+        if ( !c.enabled ) continue;
+        for ( const auto &m : c.members )
+            if ( m.route_ref == routeName ) return c.name;
+    }
+    return "";
+}
+
 std::vector<RouteSetConfig> CCspRouteSetMap::GetAll() const {
     std::lock_guard<std::mutex> lk( m_mutex );
     std::vector<RouteSetConfig> out;
