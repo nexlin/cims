@@ -235,40 +235,32 @@ cmd_sync() {
         n_changed=$((n_changed+1))
     fi
 
-    # ── Console 정적 빌드 (Vite) — base/svc 분리 ─────────────────
+    # ── Console 정적 빌드 (Vite) — 번들 하나 ──────────────────────
     # VITE_CONSOLE_TARGET=prod — sync 도 배포본 dist 기준 (TB-Console 은 dev 서버 별도)
-    # 콘솔 소스 = ems/core/console(공통, Vite 루트) + ems/service/console(서비스 팩, @svc).
-    # 두 벌 빌드:
-    #   svc(full): base 메뉴 + 서비스 메뉴 전부 → dist/console/dist (oam-svc 패키지 동봉)
-    #   base     : base 메뉴만 (VITE_CONSOLE_PROFILE=base, @svc manifest DCE 제거)
-    #              → dist/console/dist-base → oam-base 패키지 동봉 (부트스트랩 기본 UI)
-    # oam(base 게이트웨이)은 동봉 base 를 기본 서빙하다가, oam-svc(동봉 svc 콘솔)이
-    # 배포되면 console_static.resolve 가 그쪽(svc=full)을 우선 서빙 → 자동 승격.
+    # 콘솔 소스 = ems/core/console(공통, Vite 루트) + 서비스 팩 ems/service/console(@svc)
+    #           + 계측기 팩 ems/tester/console(@tester).
+    # 팩 전부를 담은 번들 **하나**만 빌드해 dist/console/dist → oam(base) 패키지에 동봉한다.
+    # 어느 팩의 메뉴가 보이는지는 빌드가 아니라 설치된 서비스(섹션 requiresService ↔
+    # /console/catalog installed_services)가 정한다 — oam_base_service_split D1.
     if [[ $did_console -eq 1 ]]; then
         mkdir -p "$DIST_DIR/console"
-        # svc 팩(ems/service/console)이 core 루트 밖이라 bare import(react 등) 해석을 위해
-        # core 의 node_modules 를 svc 디렉토리에 symlink (idempotent; node_modules 는 git 제외).
+        # 팩(ems/{service,tester}/console)이 core 루트 밖이라 bare import(react 등) 해석을 위해
+        # core 의 node_modules 를 팩 디렉토리에 symlink (idempotent; node_modules 는 git 제외).
+        # (npm run build 앞의 ensure-svc-modules.mjs 도 같은 일을 하지만 여기서도 보장)
         if [[ -d "$SRC_CONSOLE/node_modules" ]]; then
-            ln -sfn ../../core/console/node_modules "$SCRIPT_DIR/ems/service/console/node_modules" 2>/dev/null || true
+            for _pack in service tester; do
+                [[ -d "$SCRIPT_DIR/ems/$_pack/console" ]] || continue
+                ln -sfn ../../core/console/node_modules "$SCRIPT_DIR/ems/$_pack/console/node_modules" 2>/dev/null || true
+            done
         fi
-        # 1) svc(full) — base + 서비스 메뉴
         ( cd "$SRC_CONSOLE" && VITE_CONSOLE_TARGET=prod npm run build 2>&1 | tail -3 )
         if [[ -d "$SRC_CONSOLE/dist" ]]; then
             rm -rf "$DIST_DIR/console/dist"
             cp -r "$SRC_CONSOLE/dist" "$DIST_DIR/console/dist"
             cp -f "$SRC_CONSOLE/nginx.conf" "$DIST_DIR/console/nginx.conf" 2>/dev/null || true
-            ok "console(svc=base+서비스) ← cims-console/dist"
+            ok "console(코어+서비스 팩+계측기 팩 번들 하나) ← cims-console/dist"
         else
-            err "cims-console/dist 없음 (svc 빌드 실패?)"
-        fi
-        # 2) base — base 메뉴만 (oam-base 동봉용)
-        ( cd "$SRC_CONSOLE" && VITE_CONSOLE_TARGET=prod VITE_CONSOLE_PROFILE=base npm run build 2>&1 | tail -3 )
-        if [[ -d "$SRC_CONSOLE/dist" ]]; then
-            rm -rf "$DIST_DIR/console/dist-base"
-            cp -r "$SRC_CONSOLE/dist" "$DIST_DIR/console/dist-base"
-            ok "console-base(base 메뉴만) ← cims-console/dist"
-        else
-            err "cims-console/dist 없음 (base 빌드 실패?)"
+            err "cims-console/dist 없음 (콘솔 빌드 실패?)"
         fi
         n_changed=$((n_changed+1))
     fi

@@ -5,6 +5,9 @@
    뜬다(console_platform.md §3.3~3.4).
 ② `installed_services()` 의 가용 판정 — role=all 하이브리드(csc 만 프록시)를 base 로 오판하면
    in-process 인 oam-svc 가 통째로 미가용이 되어 API 문서·위젯이 사라진다(api_docs.md §2).
+③ 콘솔 정적 디렉토리 해석(`resolve_console_static_dir`) — 번들은 oam 동봉본 하나다. 서비스
+   모듈(oam-svc·oam-cims-tester) 설치 트리가 후보로 되살아나면 팩 조합마다 번들이 생긴다
+   (test_instrument.md §7 base 확장 ②).
 """
 from __future__ import annotations
 
@@ -15,7 +18,8 @@ from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 
 _ID = "S1-UNIT-CONSOLE-LAYOUT"
-_NAME = "콘솔 레이아웃 영속 unit test (python3 -m unittest tests.test_console_layouts)"
+_NAME = "콘솔 레이아웃 영속·정적 해석 unit test (python3 -m unittest tests.test_console_layouts tests.test_console_static)"
+_MODULES = ("tests.test_console_layouts", "tests.test_console_static")
 
 
 @verify_item(
@@ -27,17 +31,18 @@ _NAME = "콘솔 레이아웃 영속 unit test (python3 -m unittest tests.test_co
     execution_order=52,
 )
 def unit_console_layouts(ctx: VerifyContext) -> ItemResult:
-    test_module = os.path.join(ctx.repo_root, "tests", "test_console_layouts.py")
-    if not os.path.isfile(test_module):
+    missing = [m for m in _MODULES
+               if not os.path.isfile(os.path.join(ctx.repo_root, *m.split(".")) + ".py")]
+    if missing:
         return ItemResult(
             id=_ID, name=_NAME, status=ItemStatus.SKIP,
-            detail="tests/test_console_layouts.py 없음", stage=1,
+            detail=f"시험 모듈 없음: {missing}", stage=1,
         )
     env = dict(os.environ)
     env["PYTHONWARNINGS"] = "ignore::ResourceWarning"
     try:
         proc = subprocess.run(
-            ["python3", "-m", "unittest", "tests.test_console_layouts"],
+            ["python3", "-m", "unittest", *_MODULES],
             cwd=ctx.repo_root, env=env,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             timeout=120, text=True,

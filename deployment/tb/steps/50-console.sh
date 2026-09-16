@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 # =============================================================
-# 50-console.sh — 풀 콘솔 승격 (필요할 때만 oam 재기동)
+# 50-console.sh — 서비스 메뉴 확인 (콘솔은 번들 하나, 재기동 없음)
 #
-# 왜 필요한가: 가입자·서비스·통계 메뉴는 **oam-svc 에 동봉된 콘솔**로 온다. OAM 은 정적
-# 디렉토리를 기동 시 1회만 해석하므로, oam-svc 설치만으로는 그 번들이 서빙되지 않는다
-# (매뉴얼 §3.1).
+# 콘솔 번들은 oam 패키지에 동봉된 **하나**다 — 코어 + 서비스 팩(가입자·서비스·통계) + 계측기
+# 팩을 전부 담고 있다. 어느 팩의 메뉴가 보이는지는 번들이 아니라 **설치된 서비스**가 정한다:
+# 서비스 모듈이 install 시 게이트웨이에 self-register 하면 `GET /api/v1/console/catalog` 의
+# `installed_services` 에 나타나고, 콘솔 셸이 그 집합으로 nav 섹션(`requiresService`)을 켠다.
+# 재로그인·oam 재기동 없이 다음 조회에서 메뉴가 나타난다.
 #
-# 다만 패키징 방식에 따라 oam 동봉본이 이미 풀 콘솔일 수 있다. 그래서 **단정하지 않고**
-# 서빙 중인 번들과 oam-svc 가 가진 번들을 비교해 다를 때만 재기동한다.
-#
-# 재기동하면 콘솔이 잠깐 끊긴다 — agent 감독이라 자동 복귀한다. job 완료 대기가 아니라
-# HTTP 응답 복귀로 판정한다(자기 자신을 재기동하므로 API 가 잠시 끊긴다).
+# 이 단계는 그래서 **판정만** 한다 — oam-svc 가 등록돼 있지 않으면 40 단계(install) 가 끝나지
+# 않은 것이므로 여기서 멈춘다(60 단계 기동 전에 원인이 보이게).
 # =============================================================
 set -euo pipefail
 
@@ -21,61 +20,20 @@ source "$_HERE/../lib/tb-common.sh"
 tb_load_site
 tb_init_dirs
 tb_require_python
-tb_require_cmds curl
 
-header "=== [50] 풀 콘솔 승격 ==="
+header "=== [50] 서비스 메뉴 확인 ==="
 
 tb_ask TB_OAM_URL       "OAM 주소" "https://127.0.0.1:4419"
 tb_ask TB_ADMIN_PASS    "콘솔 admin 비밀번호" "" secret
-tb_ask TB_INSTALL_PREFIX "설치 경로" "/opt/cims-agent"
 
-# OAM 호출은 화면에 그대로 내보내면서 log/50-console.log 에도 남긴다 — 현장에서
-# "무엇을 넣었고 무엇이 거부됐는지" 를 되짚을 기록이 이 단계에는 없었다.
+# OAM 호출은 화면에 그대로 내보내면서 log/50-console.log 에도 남긴다.
 oam() { tb_tee 50-console env TB_ADMIN_PASS="$TB_ADMIN_PASS" TB_STATE_DIR="$TB_STATE_DIR" \
         python3 "$_HERE/../lib/tb_oam.py" --url "$TB_OAM_URL" "$@"; }
 
-info "[1/3] 서빙 중인 콘솔 번들"
-served="$(oam console-bundle | tail -1)"
-echo "        서빙: $served"
+info "[1/2] 서빙 중인 콘솔 번들 (oam 동봉본)"
+echo "        $(oam console-bundle | tail -1)"
 
-svc_dist="$TB_INSTALL_PREFIX/modules/oam-svc/current/oam-svc/console/dist/assets"
-if [[ ! -d "$svc_dist" ]]; then
-    warn "oam-svc 동봉 콘솔이 없습니다 ($svc_dist) — 승격할 것이 없습니다"
-    ok "[50] 완료 (재기동 불필요)"; exit 0
-fi
-shopt -s nullglob
-svc_js=("$svc_dist"/index-*.js)
-shopt -u nullglob
-[[ ${#svc_js[@]} -gt 0 ]] || { warn "oam-svc dist 에 index-*.js 가 없습니다"; ok "[50] 완료"; exit 0; }
-want="assets/$(basename "${svc_js[0]}")"
-echo "        oam-svc: $want"
-
-if [[ "$served" == "$want" ]]; then
-    ok "이미 oam-svc 콘솔이 서빙 중입니다 — 재기동 불필요"
-    ok "[50] 완료"; exit 0
-fi
-
-info "[2/3] oam 재기동 (콘솔이 잠깐 끊깁니다)"
-# 자기 자신을 재기동하므로 job 완료 응답을 못 받는다 — 큐잉만 하고 복귀를 기다린다.
-# --expect-restart 를 주면 그 끊김을 ERROR 가 아니라 정상 경로로 다룬다(정상 동작이
-# 사고처럼 보이지 않게). 진짜 실패는 아래 [3/3] 복귀 대기가 잡는다.
-oam job oam restart --timeout 60 --expect-restart \
-    || warn "job 응답이 끊겼습니다 (자기 재기동이라 정상) — 복귀를 기다립니다"
-
-info "[3/3] 복귀 대기"
-for i in $(seq 1 40); do
-    code=$(curl -sk -o /dev/null -w '%{http_code}' "$TB_OAM_URL/" 2>/dev/null || echo 000)
-    [[ "$code" =~ ^(200|301|302|401)$ ]] && break
-    sleep 3
-done
-[[ "$code" =~ ^(200|301|302|401)$ ]] || die_hint "OAM 이 복귀하지 않았습니다 (HTTP $code)" \
-    "agent 가 감독하므로 잠시 뒤 다시 확인하세요: $TB_OAM_URL"
-
-served2="$(oam console-bundle | tail -1)"
-if [[ "$served2" == "$want" ]]; then
-    ok "승격 확인 — $served2"
-else
-    warn "재기동 후에도 번들이 다릅니다 (서빙 $served2 / oam-svc $want)"
-    warn "Console.StaticDir 로 명시 지정이 필요한 구성일 수 있습니다 (매뉴얼 §3.1)"
-fi
+info "[2/2] 게이트웨이에 등록된 서비스 — 콘솔이 이 집합으로 서비스 메뉴를 켠다"
+oam console-services --require oam-svc
+ok "oam-svc 등록 확인 — 관리>구성 · 운용>서비스 · 운용>성능 메뉴가 콘솔에 보인다"
 ok "[50] 완료"

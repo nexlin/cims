@@ -7,12 +7,12 @@ import type { ServiceManifest } from '../nav-types'
 import { cimsManifest } from '@svc/manifest'
 import { testerManifest } from '@tester/manifest'
 
-// base 프로파일(부트스트랩 동봉 콘솔)은 서비스 pack 미포함 — 메뉴·위젯 모두 제외(DCE).
-// 서비스 메뉴/위젯은 3·4단계에서 풀 프로파일 console 패키지 업데이트로 도착한다.
-// (정확한 import.meta.env.X 구문 — vite 가 빌드 시 리터럴 치환 → 상수 조건 → DCE)
-const IS_BASE_PROFILE = import.meta.env.VITE_CONSOLE_PROFILE === 'base'
-
-export const SERVICE_MANIFESTS: ServiceManifest[] = IS_BASE_PROFILE ? [] : [
-  cimsManifest,
-  testerManifest,   // 계측기 팩(ems/tester/console) — 섹션은 requiresService='oam-cims-tester' 로 런타임 게이팅
+// 번들은 하나다 — 팩 전부를 담아 `oam`(base) 패키지에 동봉한다(oam_base_service_split D1).
+// 어느 팩의 메뉴가 보이는지는 빌드 프로파일이 아니라 **설치된 서비스**로 정한다: 섹션의
+// `requiresService`(패키지 id) 를 셸(MenuContext)이 `GET /console/catalog`.installed_services 로
+// 게이팅한다. 부트스트랩 직후(base 만)는 코어 섹션만 보이고, 서비스 모듈이 설치되면 재로그인
+// 없이 다음 조회에서 그 팩의 메뉴가 나타난다.
+export const SERVICE_MANIFESTS: ServiceManifest[] = [
+  cimsManifest,     // CIMS 서비스 팩(ems/service/console) — requiresService='oam-svc'
+  testerManifest,   // 계측기 팩(ems/tester/console)     — requiresService='oam-cims-tester'
 ]

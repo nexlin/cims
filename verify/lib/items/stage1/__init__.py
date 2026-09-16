@@ -7,7 +7,7 @@
 - S1-UNIT-VERIFY-LIB     : python3 -m unittest tests.test_verify_lib
 - S1-UNIT-HA-INTENT      : python3 -m unittest tests.test_ha_intent
 - S1-UNIT-CSC            : python3 -m unittest tests.test_csc_dispatch_rbac tests.test_csc_subscription_realm (관제 그룹 편입 RBAC · 가입 번호 realm 해석)
-- S1-UNIT-CONSOLE-LAYOUT : python3 -m unittest tests.test_console_layouts
+- S1-UNIT-CONSOLE-LAYOUT : python3 -m unittest tests.test_console_layouts tests.test_console_static (레이아웃 영속 · 가용 서비스 · 콘솔 번들 해석)
 - S1-UNIT-GRID-BUDGET    : node tests/frontend/grid_budget.test.mjs (그리드 세로 예산 + 잠금)
 - S1-UNIT-STORE-ALARM    : python3 -m unittest tests.test_store_alarm (공유 store 접근 불가 알람 A-PRC-028 — 감지기 데드라인 + 규칙 정합)
 - S1-UNIT-OAM-PTT        : python3 tests/oam_ptt_index_test.py · tests/oam_ptt_sessions_live_test.py (PTT 세션 인덱스 · 진행중 병합 규약)

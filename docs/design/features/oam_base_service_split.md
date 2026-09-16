@@ -239,7 +239,7 @@ ConsoleLayout (console account 1개당 1레코드, file_store control/console_la
   }
 ```
 - **기본 프로파일 템플릿**: `operator|admin|monitor|...` — 시작 메뉴+위젯 세트. 최초 로그인 시 선택
-  (또는 admin 이 계정에 할당). 기존 base/full 콘솔 프로파일·메뉴편집·`/custom/<slug>` 인프라 재사용.
+  (또는 admin 이 계정에 할당). 기존 메뉴편집·`/custom/<slug>` 인프라 재사용(콘솔 번들은 하나 — 서비스 팩 표시는 설치 서비스 게이팅).
 - **개인화**: 위젯 추가/삭제/배치, 커스텀 페이지, 영역 편집을 프로파일 위에 레이어. "프로파일로
   초기화" 가능.
 - **서버 저장**(file_store, base 소유 `console/` 도메인) → 기기·세션 넘어 따라감. localStorage 아님.

@@ -414,12 +414,29 @@ def cmd_job(o, args):
 
 
 def cmd_console_bundle(o, args):
-    """서빙 중인 콘솔 번들 파일명 — oam-svc 동봉본으로 승격됐는지 판정용."""
+    """서빙 중인 콘솔 번들 파일명(진단용) — 번들은 oam 동봉본 하나다."""
     import re
     r = o.req('GET', '/')
     html = r.get('_raw') if isinstance(r, dict) else ''
     m = re.findall(r'assets/index-[A-Za-z0-9_-]+\.js', html or '')
     print(m[0] if m else '(번들 표시 없음)')
+    return 0
+
+
+def cmd_console_services(o, args):
+    """콘솔이 메뉴 게이팅에 쓰는 설치 서비스 집합(`/console/catalog`.installed_services).
+
+    `--require oam-svc,...` 를 주면 빠진 것이 있을 때 실패한다 — 서비스 모듈이 게이트웨이에
+    self-register 됐는지(= 그 팩의 메뉴가 콘솔에 보이는지) 판정용.
+    """
+    r = o.req('GET', '/api/v1/console/catalog')
+    inst = sorted(str(x).lower() for x in ((r or {}).get('installed_services') or []))
+    print(' '.join(inst) if inst else '(없음)')
+    need = [x.strip().lower() for x in (args.require or '').split(',') if x.strip()]
+    missing = [x for x in need if x not in inst]
+    if missing:
+        die(f"게이트웨이에 등록되지 않은 서비스: {', '.join(missing)}",
+            "해당 모듈의 install job 이 끝났는지(self-register) 확인하세요 — 40 단계")
     return 0
 
 
@@ -445,6 +462,7 @@ def main():
     # oam 자신을 재기동시키는 job — 진행을 물어볼 상대가 사라지는 것이 정상이다.
     p.add_argument('--expect-restart', action='store_true')
     sub.add_parser('console-bundle')
+    p = sub.add_parser('console-services'); p.add_argument('--require', default='')
 
     args = ap.parse_args()
     admin_pass = os.environ.get('TB_ADMIN_PASS', '')
@@ -456,7 +474,8 @@ def main():
           'packages': cmd_packages,
           'config': cmd_config, 'collection': cmd_collection, 'job': cmd_job,
           'ensure-running': cmd_ensure_running,
-          'console-bundle': cmd_console_bundle}[args.cmd]
+          'console-bundle': cmd_console_bundle,
+          'console-services': cmd_console_services}[args.cmd]
     raise SystemExit(fn(o, args) or 0)
 
 

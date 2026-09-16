@@ -31,6 +31,9 @@ export type RouteDef = {
   // 이 고정 페이지가 호출하는 API 의 id 목록. page 위젯(`page:<path>`)의 WidgetDef.apis 로 전달돼
   // 개발자 모드 [API] 배지에 쓰인다. 합성 라우트(layout)는 각 위젯이 자기 apis 를 선언한다.
   apis?: string[]
+  // 이 라우트의 API 를 서빙하는 서비스 모듈 **패키지 id**. 섹션은 코어인데 한 화면만 서비스 평면에
+  // 기대는 경우(관리>시스템>역할 = csc roles). 셸이 섹션의 `requiresService` 와 같은 규칙으로 숨긴다.
+  requiresService?: string
 }
 
 // OAM 대영역 — EMS(Nokia NetAct 의 Monitor/Administer, TM Forum eTOM 의 Assurance/Fulfillment) 관례.

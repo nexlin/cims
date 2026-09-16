@@ -42,7 +42,7 @@ ${BOLD}CIMS TB 설치${NC}
     packages      패키지 등록                                 (30)
     install       모듈 설치                                   (40)
     config        패키지 설정 (overlay + CSP 컬렉션)          (45)
-    console       풀 콘솔 승격 (필요할 때만 oam 재기동)        (50)
+    console       서비스 메뉴 확인 (oam-svc 게이트웨이 등록)     (50)
     start         순서 기동 + 상태 확인                        (60)
     callcheck     호시험 — PTT 그룹호 / VoLTE 호 (매번 조건 질의)  (70)
 

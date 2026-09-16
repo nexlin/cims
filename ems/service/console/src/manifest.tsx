@@ -57,6 +57,7 @@ export const cimsManifest: ServiceManifest = {
     // ── 서비스 (ops) — 서비스 이용 현황(실시간) + 호·세션 이력. 대상(서비스 호/세션) 기준 묶음. ──
     {
       key: 'service',
+      requiresService: 'oam-svc',
       label: '서비스',
       icon: FileText,
       area: 'ops',
@@ -76,6 +77,7 @@ export const cimsManifest: ServiceManifest = {
     // ── 성능 (ops) — 통계(KPI/카운터). FCAPS Performance. ──
     {
       key: 'perf',
+      requiresService: 'oam-svc',
       label: '성능',
       icon: TrendingUp,
       area: 'ops',
@@ -94,6 +96,7 @@ export const cimsManifest: ServiceManifest = {
     // ── 구성 (admin) — 가입자 프로비저닝 + 서비스 정의. FCAPS Configuration. ──
     {
       key: 'config',
+      requiresService: 'oam-svc',
       label: '구성',
       icon: Users,
       area: 'admin',

@@ -283,20 +283,21 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 해당하며, 릴리스 그룹(SW Mgmt — 검증/패키징)과 다르다: 검증은 배포 게이트, 시험은 부하·피어 시험 도구다.
 `nav-types.ts` 의 `RouteSection` 에 `id:'test', area:'admin'` 하나 추가 — 코어 수정은 이 한 줄이고 화면은 전부 팩 소유.
 
-**콘솔 번들 구성 — base 확장 ②.** 현 콘솔은 두 값이다: `oam` 패키지에 서비스 팩을 DCE 로 뺀 base 번들(`dist-base`),
-`oam-svc` 패키지에 full 번들(base+cims 팩)을 동봉하고 base 의 정적 해석(`console_static.resolve_console_static_dir`)이
-"설치된 oam-svc 의 번들"을 우선 서빙한다. 팩이 셋이 되면 이 구조는 조합 폭발한다(cims 만·tester 만·둘 다). 정본 규칙으로 바꾼다:
+**콘솔 번들 구성 — base 확장 ②.** 번들은 **하나**다(D1 "full 번들 1개" 그대로) — 코어 + CIMS 팩(`@svc`) + 계측기 팩(`@tester`)을
+전부 담아 `oam`(base) 패키지에 동봉한다(`scripts/sync.sh` 한 벌 빌드 → `dist/console/dist` → `scripts/package.sh` oam 스테이지).
+서비스 모듈 패키지(`oam-svc`·`oam-cims-tester`)는 콘솔을 동봉하지 않고, base 의 정적 해석(`console_static.resolve_console_static_dir`)은
+`Console.StaticDir` → oam 동봉본 → 개발 트리 형제 `console/dist` 순서만 본다. 팩이 늘어도 번들 조합은 생기지 않는다.
 
-- **번들은 하나**(D1 "full 번들 1개" 그대로) — 팩 전부를 담아 `oam`(base) 패키지에 동봉한다. `dist-base` 프로파일 빌드·`oam-svc` 번들 동봉·해석 우선순위 (2) 는 걷어낸다.
-- **표시는 설치된 서비스로 게이팅** — 위젯 카탈로그가 이미 `requires_service` 로 하는 규칙을 **nav 섹션까지** 확장한다.
-  `RouteSection.requiresService`(팩 id 가 아니라 **패키지 id** — `oam-svc`·`oam-cims-tester`)를 두고, 셸(`MenuContext`)이 로그인 직후
-  `GET /api/v1/console/catalog` 가 내려주는 `installed_services`(게이트웨이 라우트 테이블 ∩ enabled, 서버 권위)로 섹션을 숨긴다.
+- **표시는 설치된 서비스로 게이팅** — 위젯 카탈로그가 `requires_service` 로 하는 규칙을 **nav 섹션·라우트까지** 넓혔다.
+  `RouteSection.requiresService`·`RouteDef.requiresService`(팩 id 가 아니라 **패키지 id** — `oam-svc`·`oam-cims-tester`)를 셸(`MenuContext.gateSectionsByService`)이
+  `GET /api/v1/console/catalog` 의 `installed_services`(in-process 서비스 ∪ 게이트웨이 라우트 테이블 ∩ enabled, 서버 권위)로 게이팅한다.
   카탈로그를 못 받으면 게이팅 섹션은 숨긴다(미설치를 설치로 보이는 쪽이 더 나쁘다). 미설치 서비스의 메뉴는 없고, 설치되면 재로그인 없이 다음 조회에서 나타난다.
-  계측기 섹션은 이 게이팅을 쓴다. CIMS 팩 섹션은 번들 통합(아래) 과 같은 변경에서 `oam-svc` 게이팅으로 옮긴다. 부트스트랩 직후(base 만) 화면은 지금의 base 프로파일과 같다.
+  CIMS 팩 섹션(`service`·`perf`·`config`)과 코어 섹션 안의 `/deploy/roles`(csc roles)는 `oam-svc`, 계측기 섹션은 `oam-cims-tester` 로 게이팅한다.
+  부트스트랩 직후(base 만)는 코어 섹션(대시보드·시스템·릴리스·문서)만 보인다.
 - **콘솔 버전 스큐** — 팩과 그 API 가 다른 패키지에 있으므로(번들은 oam, API 는 oam-svc/oam-cims-tester) 스큐가 생길 수 있다. D1 이 원래 감수한 것이고,
   서비스 모듈이 `requires_base_oam` 으로 최소 base(=번들) 버전을 고정하는 것으로 막는다. 반대 방향(오래된 서비스 + 새 번들)은 API 의 하위 호환(D6 Sunset 절차)이 담당한다.
 
-> 최소 보완안(해석 우선순위를 패키지 목록으로 일반화하고 `oam-cims-tester` 패키지에도 full 번들을 동봉)은 팩 조합마다 번들을 만들어야 해서 채택하지 않는다.
+> 채택하지 않은 안 — 해석 우선순위를 패키지 목록으로 일반화하고 서비스 모듈 패키지마다 full 번들을 동봉하는 방식은 팩 조합마다 번들을 만들어야 한다.
 
 스택·규칙은 서비스 팩과 같다 — [ems/service/console/CLAUDE.md](../../../ems/service/console/CLAUDE.md)·[../console_design_system.md](../console_design_system.md).
 자체 `package.json`·`node_modules` 없이 core 것을 공유하고(`ensure-svc-modules.mjs` 를 팩 목록으로 일반화), `@tester` alias 로 참조된다.
@@ -352,7 +353,7 @@ B 가 끝나면 성능 시험이, C·D 가 끝나면 피어 연동 기능 시험
 | 모듈 이름 | **확정** | 컨트롤러 `oam-cims-tester`(`oam-svc` 는 그대로), 워커 `cims-tester-worker`, CLI `cims-tester`, 게이트웨이 세그먼트 `/api/v1/tester`, 콘솔 팩 alias `@tester`, nav 그룹 `test` |
 | 운영 형태 | **확정** | 독립(계측기 자기 `oam`) / 동거(대상 `oam` 뒤) 두 가지, 블루프린트 차이만. 콘솔 인증 = base 콘솔 계정(로컬 계정 없음) |
 | 포트 | **확정** | 컨트롤러 loopback 4490(oam-svc 4480·csc 4421 과 겹치지 않음), 워커 제어 7100 |
-| 콘솔 번들 | 제안 | 번들 하나(`oam` 동봉) + nav 섹션 서비스 게이팅(§7). 현 `dist-base`·oam-svc 동봉 번들 철거 |
+| 콘솔 번들 | **확정** | 번들 하나(`oam` 동봉) + nav 섹션·라우트 서비스 게이팅(§7). 서비스 모듈 패키지는 콘솔 미동봉 |
 | 목표 규모 | 제안 | 등록 UE 5,000 · VoLTE 100 SApS × HT 20 s(동시 2,000) · PTT 그룹 200 × 20명 · 피어 트렁크 50 SApS. 워커 호스트 수는 B 단계 실측 후 확정 |
 | 워커 호스트 | 제안 | 시험 대상과 분리된 최소 2대(8 코어) — 발생기 동거로 v1~v6 오진한 이력 |
 | MGCF 범위 | **확정** | 평문 SIP(TS 29.163 Mg, TS 24.229) + Q.850 Reason + early media. **SIP-I 불필요** — CSCF↔MGCF(Mg)·IMS↔IMS NNI(GSMA IR.95)는 SIP/SDP 이고, SIP-I 는 CS 망 상호접속 트렁크(ITU-T Q.1912.5) 프로파일이다. 그런 트렁크를 받으려면 CIMS 자신이 MGCF(ISUP 해석) 역할을 해야 하는데 그것은 계측기가 아니라 CIMS 로드맵 문제다 |
