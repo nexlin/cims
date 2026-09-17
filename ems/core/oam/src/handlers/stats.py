@@ -746,10 +746,15 @@ def _calls_stats(config: dict, from_dt: str, to_dt: str, gran: str, svc: str) ->
     # **자료가 없는 날의 행을 표시한다.** 빈 버킷은 화면이 0 으로 그리는데(§2.1c), 그 규약은
     #   "읽었고 호가 없었다" 일 때만 참이다. 철거·보존기간 경과로 원본이 없는 날까지 0 으로
     #   그리면 통화가 없었던 날과 구분되지 않는다(실측 2026-09-17).
-    buckets = stats_rollup.mark_missing_buckets(buckets, gran, from_dt, to_dt,
-                                                cov.get('missing_days'))
+    #   **아직 오지 않은 날도 같이 표시한다** — 미래를 `0 건` 으로 적는 것도 같은 종류의
+    #   거짓말이다. 다만 경고(`warning`)와 0 채움(`ensure_svc`)은 `missing` 만 본다:
+    #   미래는 조치할 것이 없어 경고가 아니고, 그 때문에 읽은 날의 0 이 가려져서도 안 된다.
+    buckets = stats_rollup.mark_missing_buckets(
+        buckets, gran, from_dt, to_dt,
+        list(cov.get('missing_days') or []) + list(cov.get('future_days') or []))
     # 응답 크기 제한은 여기서 건다 — 판정(위)은 온전한 목록으로 해야 한다.
-    cov = dict(cov, missing_days=(cov.get('missing_days') or [])[:40])
+    cov = dict(cov, missing_days=(cov.get('missing_days') or [])[:40],
+               future_days=(cov.get('future_days') or [])[:40])
     body = {
         'from': from_dt, 'to': to_dt, 'granularity': gran, 'svc': svc or 'all',
         'source': _source_of(cov), 'coverage': cov,

@@ -1191,7 +1191,8 @@ def read_range_filled(root: str, from_dt: str, to_dt: str, config: dict = None,
     """
     unit = unit_for(gran)
     empty_cov = {'days': 0, 'unit': unit, 'by_unit': {}, 'rollup': 0, 'scanned': 0,
-                 'missing': 0, 'missing_days': [], 'deadline_hit': False}
+                 'missing': 0, 'missing_days': [], 'future': 0, 'future_days': [],
+                 'deadline_hit': False}
     a, b = _parse(from_dt), _parse(to_dt)
     if a is None or b is None:
         return [], empty_cov
@@ -1217,8 +1218,21 @@ def read_range_filled(root: str, from_dt: str, to_dt: str, config: dict = None,
     for u, n in d_by_unit.items():
         by_unit[u] = by_unit.get(u, 0) + n
 
+    # **아직 오지 않은 날은 "못 본 날" 이 아니다.** 자료가 없는 것은 같지만 성질이 다르다 —
+    #   못 본 날은 조치가 있고(보존기간을 늘려 재집계) 미래는 없다. 한데 세면 `이번 달`
+    #   처럼 달 끝까지 잡는 조회에서 남은 날이 전부 "자료 없음" 으로 신고되고, 재집계하라는
+    #   권고까지 붙는다(내일 것을 재집계할 수는 없다). 그래서 한 곳에서 가른다 — 어느
+    #   경로로 빠졌든(보존기간·예산·시간 상한) 미래면 미래다.
+    #   표시는 둘 다 `—` 다(§2.1c) — 화면은 두 목록을 합쳐 행을 표시하고, 경고와 0 채움은
+    #   `missing` 만 본다.
+    today = datetime.now().strftime('%Y-%m-%d')
+    future = [d for d in omitted if d > today]
+    if future:
+        omitted = [d for d in omitted if d <= today]
+
     return rows, {
         'days': len(days), 'unit': unit, 'by_unit': by_unit,
+        'future': len(future), 'future_days': future,
         'rollup': sum(by_unit.values()), 'scanned': len(fill),
         # **자르지 않는다** — 표가 "이 행은 자료가 없다" 를 이 목록으로 판정한다. 여기서
         # 40개로 자르면 41번째 날부터 다시 0 으로 그려진다(자료 없음이 0 건으로 위장).

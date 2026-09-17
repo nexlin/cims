@@ -13,6 +13,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 import unittest.mock
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -311,6 +312,57 @@ class MarkMissingBucketsTest(unittest.TestCase):
             self.assertGreater(cov['missing'], 40)
         finally:
             shutil.rmtree(root, ignore_errors=True)
+
+
+class FutureDaysTest(unittest.TestCase):
+    """**아직 오지 않은 날은 "못 본 날" 이 아니다.**
+
+    자료가 없는 것은 같지만 성질이 다르다 — 못 본 날은 조치가 있고(보존기간을 늘려 재집계)
+    미래는 없다. 한데 세면 `이번 달` 처럼 달 끝까지 잡는 조회에서 남은 날이 전부 "자료 없음"
+    으로 신고되고 재집계 권고까지 붙는다(실측 2026-09-17: 9/10~9/25 조회에 9/18~9/25 8일이
+    경고 띠에 나열됐다 — 내일 것을 재집계할 수는 없다).
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix='rollup_future_')
+        self.today = datetime.now().strftime('%Y-%m-%d')
+        self.tomorrow = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+        self.next_week = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_미래_날은_빠진_날로_세지_않는다(self):
+        _, cov = R.read_range_filled(self.root, f'{self.tomorrow} 00:00:00',
+                                     f'{self.next_week} 23:59:59', {}, gran='1d')
+        self.assertEqual(cov['missing'], 0, '경고 대상이 아니다')
+        self.assertEqual(cov['missing_days'], [])
+        self.assertGreater(cov['future'], 0, '미래 날은 따로 센다')
+        self.assertIn(self.tomorrow, cov['future_days'])
+
+    def test_과거의_결손은_그대로_신고한다(self):
+        """미래를 가른다고 진짜 구멍까지 조용해지면 안 된다."""
+        past = '2026-01-02'
+        _, cov = R.read_range_filled(self.root, f'{past} 00:00:00',
+                                     f'{past} 23:59:59', {}, gran='1d')
+        self.assertEqual(cov['missing'], 1)
+        self.assertEqual(cov['future'], 0)
+
+    def test_섞이면_각자의_칸으로_간다(self):
+        _raw_day(self.root, self.today)
+        _, cov = R.read_range_filled(self.root, '2026-01-02 00:00:00',
+                                     f'{self.tomorrow} 23:59:59', {}, gran='1d')
+        self.assertIn('2026-01-02', cov['missing_days'])
+        self.assertNotIn(self.tomorrow, cov['missing_days'])
+        self.assertIn(self.tomorrow, cov['future_days'])
+
+    def test_오늘은_미래가_아니다(self):
+        """진행 중인 날은 남은 시간이 비어 있어도 '읽은 날' 이다(원본이 있다)."""
+        _raw_day(self.root, self.today)
+        _, cov = R.read_range_filled(self.root, f'{self.today} 00:00:00',
+                                     f'{self.today} 23:59:59', {}, gran='1d')
+        self.assertEqual(cov['future'], 0)
+        self.assertEqual(cov['missing'], 0)
 
 
 class EnsureSvcCellTest(unittest.TestCase):
