@@ -30,7 +30,7 @@ export const testerManifest: ServiceManifest = {
         { path: '/test/runs',       title: '실행',       component: TesterRunsPage,       requiredRole: 'monitor',
           apis: ['tester.health', 'tester.runs', 'tester.run.start', 'tester.runs.plan', 'tester.run.stop', 'tester.run.rate', 'tester.run.hold', 'tester.run.stream', 'tester.run.series', 'tester.run.events', 'tester.run.sip', 'tester.events', 'tester.workers', 'tester.topologies', 'tester.scenario'] },
         { path: '/test/results',    title: '결과',       component: TesterResultsPage,    requiredRole: 'monitor',
-          apis: ['tester.runs', 'tester.run.report', 'tester.run.events', 'tester.run.series', 'tester.run.hist', 'tester.run.sip', 'tester.run.target_alerts', 'tester.run.delete', 'tester.scenario', 'tester.runs.plan'] },
+          apis: ['tester.runs', 'tester.run.report', 'tester.run.events', 'tester.run.series', 'tester.run.hist', 'tester.run.sips', 'tester.run.sip', 'tester.run.target_alerts', 'tester.run.delete', 'tester.scenario', 'tester.runs.plan'] },
         { path: '/test/compare',    title: '비교',       component: TesterComparePage,    requiredRole: 'monitor',
           apis: ['tester.runs', 'tester.runs.compare', 'tester.run.series', 'tester.scenario'] },
         { path: '/test/scenarios',  title: '시나리오',   component: TesterScenariosPage,  requiredRole: 'monitor',

@@ -1,0 +1,102 @@
+{
+  "$defs": {
+    "SipDumpMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "dir": {
+          "enum": [
+            "tx",
+            "rx"
+          ],
+          "title": "Dir",
+          "type": "string"
+        },
+        "peer": {
+          "description": "상대 ip:port",
+          "title": "Peer",
+          "type": "string"
+        },
+        "t": {
+          "title": "T",
+          "type": "number"
+        },
+        "text": {
+          "description": "SIP 메시지 원문 (psip 로그 버퍼 8 KB 에서 잘릴 수 있다)",
+          "title": "Text",
+          "type": "string"
+        },
+        "transport": {
+          "enum": [
+            "udp",
+            "tcp",
+            "tls"
+          ],
+          "title": "Transport",
+          "type": "string"
+        }
+      },
+      "required": [
+        "t",
+        "dir",
+        "transport",
+        "peer",
+        "text"
+      ],
+      "title": "SipDumpMessage",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "워커 SIP 덤프 — 끝난 인스턴스의 Call-ID 하나(워커 `Sip.Capture`: failed = 실패한 인스턴스만 · all = 전부).\n컨트롤러가 `runs/<id>/sip/<call_id>.log` 로 적는다(§5).",
+  "properties": {
+    "call_id": {
+      "title": "Call Id",
+      "type": "string"
+    },
+    "instance": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Instance"
+    },
+    "kind": {
+      "const": "sip",
+      "title": "Kind",
+      "type": "string"
+    },
+    "messages": {
+      "items": {
+        "$ref": "#/$defs/SipDumpMessage"
+      },
+      "title": "Messages",
+      "type": "array"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "t": {
+      "title": "T",
+      "type": "number"
+    },
+    "worker": {
+      "title": "Worker",
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "t",
+    "run_id",
+    "worker",
+    "call_id"
+  ],
+  "title": "StreamSip",
+  "type": "object"
+}

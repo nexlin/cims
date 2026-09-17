@@ -9,7 +9,7 @@ import { Button } from '@core/components/ui/button'
 import { DataTable, Th, Td, orDash } from '@core/components/custom/data-table'
 import { EmptyState } from '@core/components/custom/empty-state'
 import { useToast } from '@core/components/Toast'
-import type { RunDoc, ScenarioDoc, ExpectResult, RunSeries, RunEvent, HistResult, TargetAlerts, RunRow } from '@tester/api/tester'
+import type { RunDoc, ScenarioDoc, ExpectResult, RunSeries, RunEvent, HistResult, TargetAlerts, RunRow, SipDumpRow } from '@tester/api/tester'
 import { testerApi } from '@tester/api/tester'
 import LiveCharts from '@tester/components/LiveCharts'
 import SipDrawer from '@tester/components/SipDrawer'
@@ -104,6 +104,8 @@ export default function RunReport({ run, scenario, series, events, markdown, pri
   const [codeFilter, setCodeFilter] = useState<string | null>(null)
   const [hover, setHover] = useState<number | null>(null)
 
+  const [dumps, setDumps] = useState<SipDumpRow[]>([])
+  useEffect(() => { setDumps([]); testerApi.sipDumps(run.id).then(r => setDumps(r.dumps ?? [])).catch(() => setDumps([])) }, [run.id])
   useEffect(() => { setAlerts(null); testerApi.targetAlerts(run.id).then(setAlerts).catch(() => setAlerts(null)) }, [run.id])
   useEffect(() => { setHist({}); setOpen({}) }, [run.id])
   const toggleHist = async (k: string) => {
@@ -266,6 +268,16 @@ export default function RunReport({ run, scenario, series, events, markdown, pri
           ))}
           <span className="font-normal">— 행을 누르면 SIP 사다리</span>
         </h3>
+        {dumps.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="text-muted-foreground">SIP 덤프 ({dumps.length}) — 워커가 올린 호, 누르면 사다리</span>
+            {dumps.slice(0, 40).map(d => (
+              <button key={d.call_id} onClick={() => setSipCall(d.call_id)} title={`${d.messages} 메시지 · ${d.bytes} B`}
+                      className="h-5 max-w-[220px] truncate rounded-sm border border-border px-1.5 font-mono text-[11px] hover:bg-accent">{d.call_id}</button>
+            ))}
+            {dumps.length > 40 && <span className="text-muted-foreground">… +{dumps.length - 40}</span>}
+          </div>
+        )}
         {evShown.length === 0 ? <EmptyState title="실패 이벤트 없음" /> : (
           <DataTable>
             <thead><tr><Th width={90}>시각</Th><Th>워커</Th><Th>역할 / 신원</Th><Th>단계</Th><Th>코드</Th><Th>Call-ID</Th><Th>상세</Th></tr></thead>

@@ -28,6 +28,7 @@
 #include "HttpServer.h"
 #include "Json.h"
 #include "Metrics.h"
+#include "SipCapture.h"
 #include "StreamClient.h"
 
 class SimSession;
@@ -42,6 +43,8 @@ struct WorkerConfig {
     std::string videoFile;          // H.264 Annex B — 비면 비디오 없음
     std::string peerCertFile;       // 피어 풀 TLS 수신점 인증서(PEM) — 비면 TLS 피어 거절
     std::string sampleDir;          // 미디어 샘플 디렉터리 — media_send 의 sample 파일은 이 안의 상대 경로(§4 미디어 평면)
+    std::string sipCapture = "failed"; // SIP 덤프 — off | failed(실패한 인스턴스의 호만 올린다) | all(모든 인스턴스 — 기능 시험용)
+    int sipDumpMax = 500;           // run 하나에서 올리는 덤프(Call-ID) 상한
     int maxRtpStreams = 0;          // RTP 를 쓰는 단말 동시 상한(0 = 제한 없음) — 넘으면 인스턴스 발생을 건너뛴다(skipped)
     int dtmfDigitMs = 160;          // RFC 4733 이벤트 길이·간격 — dtmf 단계의 송신 완료 대기 계산
     int dtmfGapMs = 100;
@@ -120,6 +123,7 @@ struct RunSpec {
 struct Instance {
     long long id = 0;
     std::map<std::string, Endpoint*> actors;   // 역할 → 단말
+    std::vector<std::string> callIds;          // 이 인스턴스에 속한 Call-ID — 끝날 때 SIP 덤프를 올리거나 버린다
     size_t stepIdx = 0;                        // body 안 인덱스
     enum Phase { RUNNING, WAIT_EVENT, WAIT_TIME, DONE } phase = RUNNING;
     std::string awaitKind;                     // "callstart:<role>" 등
@@ -258,6 +262,13 @@ private:
     bool epMediaStop(Endpoint* ep);
     bool resolveSample(const std::string& file, std::string& out, std::string& err) const;
     long long rtpStreams() const;
+    // SIP 덤프 — 인스턴스가 끝나고 조금 뒤(정리 BYE/487 까지 담기게) 올린다
+    struct SipPending { long long dueMs; bool ship; long long instance; std::vector<std::string> callIds; };
+    SipCapture m_sipCapture;
+    std::deque<SipPending> m_sipPending;
+    long long m_sipShipped = 0;
+    void noteCallId(Instance* in, const std::string& callId);
+    void flushSipPending(long long nowMs, bool all);
     int m_bodyRtpMode = 0;                  // body 첫 invite 의 media.rtp — 인스턴스 시작 모드·RTP 상한 판정
     void sampleDtmf(Endpoint* ep);
     std::string callerRole(Instance& in);

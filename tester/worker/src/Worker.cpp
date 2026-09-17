@@ -88,6 +88,7 @@ Worker::~Worker() { stop(); }
 bool Worker::start(std::string& err) {
     if (!m_http.start(m_cfg.bindIp, m_cfg.port, [this](const HttpRequest& r) { return handle(r); }, err)) return false;
     m_stop = false;
+    m_sipCapture.install(SipCapture::ParseMode(m_cfg.sipCapture));
     m_sched = std::thread([this] { schedLoop(); });
     logf("info", "cims-tester-worker %s started — control %s:%d local_ip=%s cores=%ld",
          m_cfg.name.c_str(), m_cfg.bindIp.c_str(), m_cfg.port, m_cfg.localIp.c_str(), sysconf(_SC_NPROCESSORS_ONLN));
@@ -547,6 +548,8 @@ HttpResponse Worker::runStart(const Json& d) {
     m_rate = m_run->rate;
     m_credit = 0;
     m_launched = 0;
+    m_sipShipped = 0;
+    m_sipPending.clear();
     m_stopRequested = false;
     m_stopAtMs = 0;
     m_preludeCursor = 0;
@@ -618,6 +621,7 @@ void Worker::schedLoop() {
         {
             std::lock_guard<std::mutex> lk(m_mtx);
             drainEvents();
+            flushSipPending(now, false);
             if (m_run) {
                 if (m_runState == "prelude") tickPrelude(now);
                 else if (m_runState == "running" || m_runState == "draining") tickBody(now);
@@ -709,6 +713,46 @@ void Worker::emitEvent(const std::string& detail, Endpoint* ep, const std::strin
     m_stream.send(j.dump());
 }
 
+void Worker::noteCallId(Instance* in, const std::string& callId) {
+    if (!in || callId.empty()) return;
+    for (auto& c : in->callIds) if (c == callId) return;
+    in->callIds.push_back(callId);
+}
+
+/** 끝난 인스턴스의 SIP 덤프 — due 가 된 것(all 이면 전부)을 스트림의 `sip` 레코드로 올리거나 버린다 */
+void Worker::flushSipPending(long long now, bool all) {
+    while (!m_sipPending.empty() && (all || m_sipPending.front().dueMs <= now)) {
+        SipPending p = std::move(m_sipPending.front());
+        m_sipPending.pop_front();
+        for (auto& callId : p.callIds) {
+            if (!p.ship || !m_run || m_sipShipped >= m_cfg.sipDumpMax) { m_sipCapture.drop(callId); continue; }
+            std::vector<SipCapturedMessage> msgs = m_sipCapture.take(callId);
+            if (msgs.empty()) continue;
+            Json j = Json::Object();
+            j["kind"] = Json("sip");
+            j["t"] = Json(nowMs() / 1000.0);
+            j["run_id"] = Json(m_run->runId);
+            j["worker"] = Json(m_cfg.name);
+            j["call_id"] = Json(callId);
+            j["instance"] = Json(p.instance);
+            Json arr = Json::Array();
+            for (auto& m : msgs) {
+                Json mj = Json::Object();
+                mj["t"] = Json(m.t);
+                mj["dir"] = Json(m.tx ? "tx" : "rx");
+                mj["transport"] = Json(m.transport);
+                mj["peer"] = Json(m.peer);
+                mj["text"] = Json(m.text);
+                arr.push(mj);
+            }
+            j["messages"] = arr;
+            m_stream.send(j.dump());
+            m_sipShipped++;
+            m_metrics.counter("sip_dumps");
+        }
+    }
+}
+
 void Worker::onEvent(const Event& e) {
     Endpoint* ep = nullptr;
     Pool* peerPool = nullptr;
@@ -758,6 +802,7 @@ void Worker::onEvent(const Event& e) {
     if (!ep) return;
     long long now = nowMs();
     Instance* in = ep->inst;
+    noteCallId(in, e.callId);
     switch (e.kind) {
     case Event::REGISTER:
         ep->registered = (e.status == 200);
@@ -1271,6 +1316,7 @@ void Worker::execStep(Instance& in, long long now) {
             in.rtpMode = rtpModeOf(st.media);   // 이 호의 미디어 평면 — 인스턴스의 모든 단말(전달 대상 포함)에 같은 모드
             for (auto& a : in.actors) epSetMediaMode(a.second, in.rtpMode);
             if (!epStartCall(from, to, st.media)) { finishInstance(in, true, "invite: StartCall refused (busy/stack?)", now); return; }
+            noteCallId(&in, from->isPeer() ? from->callId : from->s->m_strInviteId);
             m_metrics.counter("legs", 2);
             bool calleeActs = in.stepIdx + 1 < m_body.size() &&
                               (m_body[in.stepIdx + 1].step == "reject" || m_body[in.stepIdx + 1].step == "answer" ||
@@ -1487,6 +1533,9 @@ void Worker::finishInstance(Instance& in, bool failed, const std::string& why, l
     if (failed) { m_metrics.counter("failed"); if (!why.empty()) logf("debug", "instance %lld failed: %s", in.id, why.c_str()); }
     else m_metrics.counter("instances_ok");
     m_metrics.timer("sdt_s", (double)(now - in.tStartMs) / 1000.0);
+    // SIP 덤프 — 정리 BYE/CANCEL·487 까지 담기게 조금 뒤에 올린다(성공한 인스턴스의 것은 그때 버린다)
+    if (m_sipCapture.mode() != SipCapture::OFF && !in.callIds.empty())
+        m_sipPending.push_back({ now + 1500, failed || m_sipCapture.mode() == SipCapture::ALL, in.id, in.callIds });
     // 단말 반환 (남은 호 정리 포함)
     std::vector<Endpoint*> eps;
     for (auto& a : in.actors) eps.push_back(a.second);
@@ -1512,7 +1561,8 @@ void Worker::endRun(const std::string& state) {
             }
         }
     }
-    // 마지막 집계 + 종료 로그
+    // 남은 SIP 덤프(마지막 인스턴스들) → 마지막 집계 + 종료 로그
+    flushSipPending(nowMs(), true);
     long long nowS = nowMs() / 1000;
     m_stream.send(m_metrics.flush(m_run->runId, m_cfg.name, (double)nowS).dump());
     Json l = Json::Object();

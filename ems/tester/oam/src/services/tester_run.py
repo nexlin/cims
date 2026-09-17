@@ -150,6 +150,27 @@ def run_hist(run_id: str, timer: str) -> Optional[dict]:
     return {'timer': timer, **h.to_dict(), 'buckets': buckets}
 
 
+def run_sip_dumps(run_id: str) -> List[dict]:
+    """runs/<id>/sip/ 의 덤프 목록 — {call_id(파일 이름 기준), bytes, messages}. 결과 화면의 'SIP 덤프' 목록."""
+    d = os.path.join(store.run_dir(run_id), 'sip')
+    out = []
+    if os.path.isdir(d):
+        for fn in sorted(os.listdir(d)):
+            if not fn.endswith('.log'):
+                continue
+            p = os.path.join(d, fn)
+            n = 0
+            try:
+                with open(p, 'r', encoding='utf-8', errors='replace') as f:
+                    for line in f:
+                        if line.startswith('>>> ') or line.startswith('<<< '):
+                            n += 1
+            except OSError:
+                continue
+            out.append({'call_id': fn[:-4], 'bytes': os.path.getsize(p), 'messages': n})
+    return out
+
+
 def run_call_events(run_id: str, call_id: str, limit: int = 200) -> List[dict]:
     """events.jsonl 에서 Call-ID 로 고른 실패 건 — SIP 사다리 드로어의 원천(워커 SIP 덤프 이전은 후속)."""
     p = os.path.join(store.run_dir(run_id), 'events.jsonl')
@@ -187,6 +208,7 @@ class Recorder:
         self.timers: Dict[str, Hist] = {}
         self.gauges_by_worker: Dict[str, dict] = {}
         self.events_n = 0
+        self.sip_dumps = 0
         self.workers_seen: List[str] = []
         self.window: List[dict] = []      # 최근 버킷(카운터만) — step/IHS 창 판정용
         self.last_t = 0
@@ -221,9 +243,37 @@ class Recorder:
                 self._events.write(json.dumps(rec, ensure_ascii=False) + '\n')
                 self._events.flush()
                 publish('events', {'run_id': self.run_id, **rec})
+            elif kind == 'sip':
+                self._write_sip(rec)
             elif kind in ('log', 'hello'):
                 publish('runs', {'run_id': self.run_id, 'kind': kind, 'worker': w,
                                  'msg': rec.get('msg') or rec.get('version')})
+
+    SIP_DUMP_MAX = 2000      # run 하나의 덤프 파일 수 상한(워커 Sip.DumpMax × 워커 수의 안전판)
+
+    def _write_sip(self, rec: dict) -> None:
+        """워커 SIP 덤프 → runs/<id>/sip/<call_id>.log (사람이 읽는 사다리 원문 — 방향·시각·transport·상대 + 메시지).
+        같은 Call-ID 를 두 워커가 올리면(양 끝이 다른 워커) 한 파일에 이어 적는다."""
+        call_id = str(rec.get('call_id') or '')
+        msgs = rec.get('messages') or []
+        if not call_id or not msgs:
+            return
+        p = os.path.join(self.dir, 'sip', store._safe_name(call_id) + '.log')
+        if not os.path.exists(p):
+            if self.sip_dumps >= self.SIP_DUMP_MAX:
+                return
+            self.sip_dumps += 1
+        with open(p, 'a', encoding='utf-8') as f:
+            f.write(f"# call_id {call_id} · worker {rec.get('worker')} · instance {rec.get('instance')} · {len(msgs)} messages\n")
+            for m in msgs:
+                t = float(m.get('t') or 0)
+                ts = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(t)) + f'.{int((t % 1) * 1000):03d}'
+                text = str(m.get('text') or '').replace('\r\n', '\n').rstrip('\n')
+                first = text.split('\n', 1)[0]
+                # 블록 머리 = `>>> `(송신)/`<<< `(수신) + 요청·상태 줄 — 콘솔 SIP 드로어가 이 줄로 사다리를 그린다
+                arrow = '>>>' if m.get('dir') == 'tx' else '<<<'
+                f.write(f"{arrow} {first}   · {ts} {m.get('transport')} {m.get('peer')} · {rec.get('worker')}\n")
+                f.write(text + '\n\n')
 
     def gauges_sum(self) -> dict:
         with self._lock:

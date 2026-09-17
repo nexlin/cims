@@ -21,6 +21,7 @@
   POST /runs/<id>/rate              {rate_saps} 율 변경(진행 중)
   POST /runs/<id>/hold              {hold: bool} 단계 고정/재개 — 프로파일 시계 정지, 율 유지
   GET  /runs/<id>/hist?timer=       지연 지표 버킷 분포(로그 상한) + p50/p95/p99 — 행 펼침 히스토그램
+  GET  /runs/<id>/sip               SIP 덤프 목록(call_id·bytes·messages)
   GET  /runs/<id>/sip/<call_id>     그 Call-ID 의 실패 이벤트 + SIP 덤프(runs/<id>/sip/<call_id>.log 가 있을 때)
   GET  /runs/<id>/target-alerts     대상 OAM 알람/이벤트를 run 창(started~ended)으로 잘라 — 대상 oam 노드 필요
   GET  /runs/<id>/report            run.json 전체(RFC 6076 표·expect 판정·단계 로그) + markdown
@@ -59,7 +60,7 @@ from services import tester_workers
 from services import tester_check
 from services import tester_plan
 from services import tester_target
-from services.tester_run import run_series, run_hist, run_call_events
+from services.tester_run import run_series, run_hist, run_call_events, run_sip_dumps
 from starlette.responses import PlainTextResponse
 
 _BASE = '/api/v1/tester'
@@ -372,6 +373,10 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
                 if h is None:
                     return _json(200, {'id': rid, 'timer': timer, 'count': 0, 'buckets': []})
                 return _json(200, {'id': rid, **h})
+            if len(parts) == 3 and parts[2] == 'sip' and method == 'GET':
+                if store.get_run(rid) is None and d is None:
+                    return _json(404, {'error': 'run_not_found', 'id': rid})
+                return _json(200, {'id': rid, 'dumps': run_sip_dumps(rid)})
             if len(parts) == 4 and parts[2] == 'sip' and method == 'GET':
                 call_id = parts[3]
                 if store.get_run(rid) is None and d is None:
@@ -385,7 +390,7 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
                 if not evs and dump is None:
                     return _json(404, {'error': 'call_not_found', 'id': rid, 'call_id': call_id})
                 return _json(200, {'id': rid, 'call_id': call_id, 'events': evs, 'dump': dump,
-                                   'note': None if dump is not None else '워커 SIP 덤프 이전은 후속 — 실패 이벤트만'})
+                                   'note': None if dump is not None else '이 호의 SIP 덤프가 없다 — 워커 Sip.Capture 가 failed 면 실패한 인스턴스의 호만 올린다'})
             if len(parts) == 3 and parts[2] == 'target-alerts' and method == 'GET':
                 rec = _load_run_doc(rid)
                 if rec is None:
@@ -771,6 +776,9 @@ TESTER_API_DOCS = [
      'summary': '지연 지표 버킷 분포(로그 상한 1·2·5·…·60000 ms) + p50/p95/p99 — 지연 분포 표의 행 펼침 히스토그램',
      'params': [{'name': 'timer', 'in': 'query', 'type': 'string', 'desc': 'rrd_ms|srd_ms|sdd_ms|jitter_ms|sdt_s (기본 srd_ms)'}],
      'response': '{id, timer, count, mean, min, max, p50, p95, p99, buckets[]: {ub, count}}', 'auth': _AUTH_MON},
+    {'id': 'tester.run.sips', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs/{{id}}/sip',
+     'summary': '워커가 올린 SIP 덤프 목록 — call_id·bytes·messages (워커 Sip.Capture: failed=실패한 인스턴스만 · all=전부)',
+     'response': '{id, dumps: [{call_id, bytes, messages}]}', 'auth': _AUTH_MON},
     {'id': 'tester.run.sip', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs/{{id}}/sip/{{call_id}}',
      'summary': 'Call-ID 하나의 실패 이벤트 + SIP 덤프(계측기 호스트 runs/<id>/sip/<call_id>.log 가 있을 때)',
      'response': '{id, call_id, events[], dump|null, note}', 'auth': _AUTH_MON},

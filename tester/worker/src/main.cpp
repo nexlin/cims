@@ -1,6 +1,6 @@
 // cims-tester-worker — 계측기 워커 엔트리 (test_instrument.md §2·§8).
 //   cims-tester-worker [config/cims-tester-worker.json] [--preflight] [--verbose]
-// 설정 키(config_template.json 선언): Worker.Name · Server.Ip/Port · Sip.LocalIp/PortBase · Media.AudioFile/VideoFile/SampleDir/MaxRtpStreams
+// 설정 키(config_template.json 선언): Worker.Name · Server.Ip/Port · Sip.LocalIp/PortBase/Capture/DumpMax · Media.AudioFile/VideoFile/SampleDir/MaxRtpStreams
 //   · Limits.EndpointsPerCore/SapsPerCore · Timers.RegisterIntervalMs/RegisterTimeoutS/InviteTimeoutMs/ByeTimeoutMs
 // libcsim(SimSession) 의 printf 진단은 부하 중 초당 수천 줄이라 stdout 을 /dev/null 로 돌린다(--verbose 면 유지).
 // 워커 자기 로그는 stderr — agent lifecycle 이 로그 파일로 모은다.
@@ -70,6 +70,8 @@ int main(int argc, char** argv) {
         cfg.port = (int)c["Server"]["Port"].asInt(cfg.port);
         cfg.localIp = c["Sip"]["LocalIp"].asString("");
         cfg.sipPortBase = (int)c["Sip"]["PortBase"].asInt(0);
+        cfg.sipCapture = c["Sip"]["Capture"].asString(cfg.sipCapture);
+        cfg.sipDumpMax = (int)c["Sip"]["DumpMax"].asInt(cfg.sipDumpMax);
         cfg.mediaFile = c["Media"]["AudioFile"].asString("");
         cfg.videoFile = c["Media"]["VideoFile"].asString("");
         cfg.peerCertFile = c["Media"]["PeerCertFile"].asString("");

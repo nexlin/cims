@@ -1112,6 +1112,26 @@ class StreamEvent(_Strict):
     detail: Optional[str] = None
 
 
+class SipDumpMessage(_Strict):
+    t: float
+    dir: Literal['tx', 'rx']
+    transport: Literal['udp', 'tcp', 'tls']
+    peer: str = Field(description='상대 ip:port')
+    text: str = Field(description='SIP 메시지 원문 (psip 로그 버퍼 8 KB 에서 잘릴 수 있다)')
+
+
+class StreamSip(_Strict):
+    """워커 SIP 덤프 — 끝난 인스턴스의 Call-ID 하나(워커 `Sip.Capture`: failed = 실패한 인스턴스만 · all = 전부).
+    컨트롤러가 `runs/<id>/sip/<call_id>.log` 로 적는다(§5)."""
+    kind: Literal['sip']
+    t: float
+    run_id: str
+    worker: str
+    call_id: str
+    instance: Optional[int] = None
+    messages: List[SipDumpMessage] = Field(default_factory=list)
+
+
 class StreamLog(_Strict):
     kind: Literal['log']
     t: float
@@ -1120,7 +1140,7 @@ class StreamLog(_Strict):
     msg: str
 
 
-StreamRecord = Union[StreamHello, StreamAgg, StreamEvent, StreamLog]
+StreamRecord = Union[StreamHello, StreamAgg, StreamEvent, StreamSip, StreamLog]
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -1181,6 +1201,7 @@ SCHEMAS = {
     'worker_stream_agg': StreamAgg,
     'worker_stream_event': StreamEvent,
     'worker_stream_log': StreamLog,
+    'worker_stream_sip': StreamSip,
     'worker_stream_hello': StreamHello,
     'run_record': RunRecord,
 }

@@ -1,5 +1,5 @@
 // SIP 사다리 드로어 — 실패 이벤트 행에서 연다. GET /runs/{id}/sip/{call_id} = 그 Call-ID 의 실패 이벤트 + SIP 덤프(있을 때).
-// 워커 SIP 덤프 이전은 후속이라 지금은 이벤트 열과 덤프 텍스트만 — 사다리는 덤프의 요청/응답 첫 줄을 방향 화살표로 그린다.
+// 덤프 = 워커가 올린 runs/<id>/sip/<call_id>.log — 블록 머리 `>>> `(송신)/`<<< `(수신) + 요청·상태 줄로 사다리를 그린다.
 import { useEffect, useMemo, useState } from 'react'
 import { X } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
@@ -8,7 +8,7 @@ import { testerApi, type CallDump } from '@tester/api/tester'
 import { fmtUnix, fmtNum } from '@tester/lib/fmt'
 
 function ladder(dump: string): { dir: 'out' | 'in'; line: string }[] {
-  // 덤프 규약(후속 워커): 메시지 블록 앞 줄 `>>> ` 송신 / `<<< ` 수신, 첫 줄 = 요청/상태 줄
+  // 덤프 규약: 메시지 블록 앞 줄 `>>> ` 송신 / `<<< ` 수신, 첫 줄 = 요청/상태 줄
   const out: { dir: 'out' | 'in'; line: string }[] = []
   for (const raw of dump.split('\n')) {
     const m = raw.match(/^(>>>|<<<)\s*(.*)$/)

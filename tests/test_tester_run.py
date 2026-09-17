@@ -317,6 +317,28 @@ class Compile(unittest.TestCase):
             C.load_identities('p', {'kind': 'ue', 'source': {'db': 'target', 'table': 'volte_subscriptions', 'count': 2}})
 
 
+class SipDump(unittest.TestCase):
+    def test_recorder_writes_ladder_file_and_list(self):
+        """워커 `sip` 레코드 → runs/<id>/sip/<call_id>.log (블록 머리 >>>/<<< + 요청·상태 줄) · 목록 · 스키마."""
+        rec = R.Recorder('ut-sip-1')
+        msg = {'kind': 'sip', 't': 1.0, 'run_id': 'ut-sip-1', 'worker': 'w1', 'call_id': 'abc@host', 'instance': 7, 'messages': [
+            {'t': 1700000000.123, 'dir': 'tx', 'transport': 'udp', 'peer': '10.0.0.5:5060', 'text': 'INVITE sip:b@x SIP/2.0\r\nCall-ID: abc@host\r\n\r\n'},
+            {'t': 1700000000.456, 'dir': 'rx', 'transport': 'udp', 'peer': '10.0.0.5:5060', 'text': 'SIP/2.0 403 Forbidden\r\nCall-ID: abc@host\r\n\r\n'}]}
+        self.assertEqual(M.validate('worker_stream_sip', msg)[1], [])
+        rec.on_record(msg)
+        rec.on_record({**msg, 'worker': 'w2'})          # 같은 Call-ID 를 다른 워커가 — 한 파일에 이어 적는다
+        dumps = R.run_sip_dumps('ut-sip-1')
+        self.assertEqual(len(dumps), 1)
+        self.assertEqual(dumps[0]['messages'], 4)
+        body = open(os.path.join(S.run_dir('ut-sip-1'), 'sip', dumps[0]['call_id'] + '.log'), encoding='utf-8').read()
+        self.assertIn('>>> INVITE sip:b@x SIP/2.0', body)
+        self.assertIn('<<< SIP/2.0 403 Forbidden', body)
+        self.assertIn('· w2', body)
+        self.assertNotIn('\r', body)
+        rec.on_record({**msg, 'call_id': '', 'messages': []})   # 빈 레코드는 무시
+        self.assertEqual(len(R.run_sip_dumps('ut-sip-1')), 1)
+
+
 class Hist(unittest.TestCase):
     def test_percentile_upper_bound(self):
         h = R.Hist()
