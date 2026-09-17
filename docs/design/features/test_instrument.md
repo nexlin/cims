@@ -499,7 +499,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 | 보고서 | 결과 화면의 [인쇄] = `window.print()` — 검증 콘솔과 같은 인쇄 규약(셸·툴바·레일·이벤트 표 숨김, `.tester-report` 만 A4, 구획 단위 쪽 나눔), 표지에 발행 일시. Markdown 은 CLI `report` 와 같은 본문 |
 
 컴포넌트는 팩 안 `components/`(MiniChart · LiveCharts · WorkerFleet · LiveSidebar · RunLivePanel · RunIndex · RunStartDialog · PlanPreview · SipDrawer · RunReport · YamlEditor(`onValid(ok, doc)`) · ProfileCurve · ListRail(레코드 레일 + RailRow/RailGroup) · topology/TopologyCanvas · scenario/ScenarioCanvas), 모델·표시 헬퍼 `lib/`(fmt.ts = RFC 6076 라벨·판정 톤·수치 형식 · metrics.ts = 기대치 임계·라이브 누계 판정·절차 진행·SDT/예상 소요(컨트롤러 규칙과 동일) · topology-model.ts · scenario-model.ts · use-history.ts = 문서 이력·Ctrl+Z/Y·이탈 경고 · use-drawer-height.ts = 드로어 높이). 차트는 라이브러리 없이 SVG(`--chart-N` 토큰), 지표별 소형 차트는 자기 축. 배지는 크기 오버라이드 없이 계약(12px SemiBold) 그대로(console_design_system §7-31).
-**남은 것** = 대상 관측 후속(호스트 SSH 관측 — 프로세스별 CPU·RSS·모듈 로그 `log_errors`) · cims-verify S3/S6 시나리오 항목의 `cims-tester` 호출 이전 · 미디어 평면 후속(AMR-WB 샘플 동봉·비디오 송출 제어·미디어 전담 워커 분리).
+**남은 것** = 대상 관측 후속(호스트 SSH 관측 — 프로세스별 CPU·RSS·모듈 로그 `log_errors`) · cims-verify S3/S6 나머지 시나리오 항목의 계측기 이전(다리·첫 항목은 반영 — §9) · 미디어 평면 후속(AMR-WB 샘플 동봉·비디오 송출 제어·미디어 전담 워커 분리).
 
 **메뉴 자리** — 관리 영역(`admin`)에 그룹 `test`(**시험**)를 새로 둔다. ITU-T M.3400 Maintenance 기능군의 *Testing* 에
 해당하며, 릴리스 그룹(SW Mgmt — 검증/패키징)과 다르다: 검증은 배포 게이트, 시험은 부하·피어 시험 도구다.
@@ -552,7 +552,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 
 | 구분 | 역할 | 계측기 도입 후 |
 |---|---|---|
-| `cims-verify` S1~S6 | 상용 배포 게이트(정적·빌드·스모크·패키징·배포·통합) | 유지. S3/S6 의 **시나리오 항목**이 `cims.sh sim` 대신 `cims-tester run <scenario> --json` 을 호출하도록 단계적 이전(§10 E). 게이트 판정·불변성·보고서는 그대로 |
+| `cims-verify` S1~S6 | 상용 배포 게이트(정적·빌드·스모크·패키징·배포·통합) | 유지. S3/S6 의 **시나리오 항목**이 `cims.sh sim` 대신 `cims-tester run <scenario> --json` 을 호출하도록 단계적 이전 — 다리 = `verify/lib/common/tester.py` `run_tester_scenario`(환경변수 `CIMS_TESTER_URL`·`CIMS_TESTER_TOPOLOGY`·토큰/계정; 없으면 `None` → 그 항목의 cspsim 경로, 설정했는데 못 닿으면 FAIL). 항목 판정 = 계측기 verdict, 보고서에 run id·결과 화면 경로. 이전된 항목: `S6-SCN-VOLTE-VOICE` → `VOLTE-CALL-BASIC`. 나머지는 시나리오가 확정되는 대로 같은 방식으로 옮긴다(PTT 항목은 워커 PTT 단계 구현 뒤). 게이트 판정·불변성·보고서는 그대로 |
 | `oam-svc` `verification`(`/release/verify`) | 게이트 실행·이력 콘솔 | 유지. 동거 형태에서는 같은 base 뒤에 있으므로 검증 결과에 계측기 run 링크(`/test/runs/<id>`)를 남긴다(교차 참조). 두 모듈 사이 코드 의존은 없다 |
 | `cspsim` | 경량 UE·mock peer CLI | `libcsim` 위의 얇은 CLI 로 유지(기존 플래그 호환). 이전이 끝난 항목부터 의존 제거 |
 | `cimsue-cli` | 실스택 UE | 계측기 `real-ue` 로 편입, 수동 부록에서 자동 표본 검사로 |

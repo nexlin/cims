@@ -3472,5 +3472,60 @@ class TestServiceLogRoots(unittest.TestCase):
         self.assertEqual(self.roots(self.tmp), [])
 
 
+
+class TesterBridge(unittest.TestCase):
+    """verify → 계측기 호출 헬퍼(common/tester.py) — 설정 없으면 None(cspsim 경로), 설정했는데 못 닿으면 FAIL, run 기록 요약."""
+
+    def setUp(self) -> None:
+        from verify.lib.common import tester as T
+        self.T = T
+        self._keep = {k: os.environ.pop(k, None) for k in
+                      ("CIMS_TESTER_URL", "CIMS_TESTER_TOPOLOGY", "CIMS_TESTER_TOKEN", "CIMS_TESTER_LOGIN", "CIMS_TESTER_PASSWORD")}
+
+        class Ctx:
+            repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+            def __init__(self) -> None:
+                self.lines: list = []
+
+            def w(self, s: str = "") -> None:
+                self.lines.append(s)
+        self.ctx = Ctx()
+
+    def tearDown(self) -> None:
+        for k, v in self._keep.items():
+            if v is not None:
+                os.environ[k] = v
+            else:
+                os.environ.pop(k, None)
+
+    def test_unconfigured_returns_none(self) -> None:
+        self.assertIsNone(self.T.tester_config())
+        self.assertIsNone(self.T.run_tester_scenario(self.ctx, "S6-X", "x", "VOLTE-CALL-BASIC", stage=6))
+        os.environ["CIMS_TESTER_URL"] = "https://127.0.0.1:1"       # 토폴로지가 없으면 여전히 미설정
+        self.assertIsNone(self.T.tester_config())
+
+    def test_configured_but_unreachable_is_fail_not_fallback(self) -> None:
+        os.environ.update({"CIMS_TESTER_URL": "http://127.0.0.1:1", "CIMS_TESTER_TOPOLOGY": "t", "CIMS_TESTER_TOKEN": "tok"})
+        r = self.T.run_tester_scenario(self.ctx, "S6-X", "x", "VOLTE-CALL-BASIC", stage=6, timeout=5)
+        self.assertIsNotNone(r)
+        from verify.lib.registry import ItemStatus
+        self.assertEqual(r.status, ItemStatus.FAIL)
+
+    def test_summarize(self) -> None:
+        rec = {"id": "r1", "scenario_id": "VOLTE-CALL-BASIC", "verdict": "fail", "target_build": "csp 0.2.134 (dep 34)",
+               "summary": {"attempts": 2, "sessions": 1, "completed": 1, "failed": 1, "skipped": 0, "ser_pct": 50.0},
+               "expect_results": [{"step": 2, "kind": "answer", "metric": "srd_ms", "expect": {"p95": 2000}, "observed": {"p95": 5000}, "ok": False},
+                                  {"step": 3, "kind": "media_hold", "metric": "rtp_loss_pct", "ok": True}],
+               "evidence_results": [{"kind": "recording_created", "observed": 0, "ok": False}, {"kind": "log_errors", "observed": None, "ok": None}],
+               "notes": ["실패 인스턴스 1 — events 참조"]}
+        text = "\n".join(self.T.summarize(rec))
+        self.assertIn("verdict=fail", text)
+        self.assertIn("srd_ms", text)
+        self.assertNotIn("rtp_loss_pct: ", text)                 # 통과한 기대치는 줄이지 않는다
+        self.assertIn("recording_created: 관측 0 → FAIL", text)
+        self.assertIn("log_errors: 관측 None → 판정 불가", text)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

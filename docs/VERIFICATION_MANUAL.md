@@ -229,6 +229,20 @@ cat build/dist/.deployed-manifest.json    # manifest_sha + ts
 > 를 자동 선택. ENTRY-CHECK 는 `csc_console + 4 service-server` 6 host:port
 > 매트릭스로 LISTEN 검증.
 
+**계측기로 실행(이전된 시나리오)** — 환경변수가 있으면 시나리오 항목이 `cims.sh sim` 대신 계측기(`oam-cims-tester`)를 부른다
+(`verify/lib/common/tester.py` → `cims-tester run <scenario> --json`, [test_instrument.md](design/features/test_instrument.md) §9).
+판정은 계측기 verdict 그대로다 — RFC 6076 기대치·실패 인스턴스 0(1차) + 시나리오 `target_evidence`(녹취 등, 2차). 보고서에 run id 와
+결과 화면 경로(`/test/results?id=…`)가 남는다.
+
+| 환경변수 | 뜻 |
+|---|---|
+| `CIMS_TESTER_URL` | 계측기가 뒤에 붙은 OAM 게이트웨이(예: `https://10.0.2.48:4419`) 또는 컨트롤러 주소 |
+| `CIMS_TESTER_TOPOLOGY` | 계측기 토폴로지 이름 또는 id (대상·워커·UE 풀이 정의돼 있어야 한다) |
+| `CIMS_TESTER_TOKEN` 또는 `CIMS_TESTER_LOGIN` / `CIMS_TESTER_PASSWORD` | 그 OAM 의 로그인 토큰 / 계정 |
+
+둘(`URL`·`TOPOLOGY`)이 없으면 기존 cspsim 경로로 간다. 설정했는데 계측기에 닿지 못하면 **FAIL** 이다(조용히 cspsim 으로 돌아가지 않는다 —
+어느 경로로 판정했는지 흐려지지 않게). 이전된 항목: `S6-SCN-VOLTE-VOICE` → `VOLTE-CALL-BASIC`.
+
 ```bash
 # 합격 후 녹취 갯수
 find ext_mnt/service_log -name 'seg_*.rtp' -newer verify_reports -mmin -10 | wc -l
