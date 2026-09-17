@@ -85,7 +85,7 @@ export default function MiniChart({ t, series, label, unit = '', threshold, thre
           )}
           {markers?.map((m, i) => m.t >= t0 && m.t <= t1 ? (
             <line key={`m${i}`} x1={x(m.t)} y1={padT} x2={x(m.t)} y2={H - padB} strokeWidth={1.2} vectorEffect="non-scaling-stroke"
-                  stroke={m.tone === 'warning' ? 'var(--warning)' : m.tone === 'info' ? 'var(--info)' : 'var(--destructive)'} opacity={0.7}>
+                  stroke={m.tone === 'warning' ? 'var(--cims-warning)' : m.tone === 'info' ? 'var(--cims-info)' : 'var(--destructive)'} opacity={0.7}>
               <title>{m.label}</title>
             </line>
           ) : null)}

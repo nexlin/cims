@@ -385,7 +385,7 @@ export function MatrixTable({ data }: { data: MatrixData }) {
       .map(c => c.key))
   const groupTd = (key: string): CSSProperties =>
     (groupStart.has(key)
-      ? { borderLeft: '1px solid var(--border-stronger)', paddingLeft: 22 }
+      ? { borderLeft: '1px solid var(--cims-border-strong)', paddingLeft: 22 }
       : {})
   const cellBg = (key: string, v: number | null) => {
     if (v === 0 && paintZero.get(key)) {

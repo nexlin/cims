@@ -496,7 +496,7 @@ export default function TopologyCanvas({ doc, onChange, onLayout, onCommit, chec
             {/* 선 오버레이 — 영역·카드 위에 그린다(아래에 두면 영역 배경에 덮인다) */}
             <svg className="pointer-events-none absolute inset-0 z-[10]" width={stageW} height={stageH}>
               {edges.map((e, i) => <path key={i} d={e.d} fill="none" stroke={e.fail ? 'var(--destructive)' : EDGE_COLOR[e.cls]} strokeWidth={e.hi ? 2.4 : 1.4} strokeDasharray={e.cls === 'reg' || e.cls === 'rtp' || e.cls === 'db' ? '4 3' : undefined} opacity={e.dim ? 0.25 : 0.9} />)}
-              {drag?.type === 'link' && (() => { const dx = Math.max(60, Math.abs(drag.x - drag.ax) * 0.5); return <path d={`M${drag.ax},${drag.ay} C${drag.ax + dx},${drag.ay} ${drag.x - dx},${drag.y} ${drag.x},${drag.y}`} fill="none" stroke={hot?.kind === 'port' ? 'var(--success)' : 'var(--primary)'} strokeWidth={2} strokeDasharray="5 4" /> })()}
+              {drag?.type === 'link' && (() => { const dx = Math.max(60, Math.abs(drag.x - drag.ax) * 0.5); return <path d={`M${drag.ax},${drag.ay} C${drag.ax + dx},${drag.ay} ${drag.x - dx},${drag.y} ${drag.x},${drag.y}`} fill="none" stroke={hot?.kind === 'port' ? 'var(--cims-success)' : 'var(--primary)'} strokeWidth={2} strokeDasharray="5 4" /> })()}
             </svg>
             {edges.filter(e => e.label).map((e, i) => (
               <span key={`l${i}`} className={`pointer-events-none absolute z-[11] -translate-x-1/2 -translate-y-1/2 rounded-sm border bg-card px-1 text-[10px] ${e.fail ? 'border-destructive text-destructive' : 'border-border text-muted-foreground'}`} style={{ left: e.lx, top: e.ly, opacity: e.dim ? 0.35 : 1 }}>{e.label}</span>
