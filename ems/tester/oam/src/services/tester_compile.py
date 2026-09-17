@@ -145,10 +145,10 @@ def compile_steps(scenario: Scenario, bindings: Dict[str, object]) -> List[dict]
         raise CompileError(f'워커가 지원하지 않는 단계 {unsupported} — 지원: {sorted(WORKER_STEPS)}')
 
     def emit(i, step, who=None, from_=None, to=None, after_ms=0, seconds=None, media=None, group=None,
-             payload=None, cause=None, expect=None):
+             payload=None, cause=None, expect=None, sample=None, loop=None):
         cs = CompiledStep(idx=len(out), step=step, who=list(who or []), **{'from': from_}, to=to,
                           after_ms=int(after_ms or 0), seconds=seconds, media=media, group=group,
-                          payload=payload, cause=cause, expect=expect or {})
+                          payload=payload, cause=cause, sample=sample, loop=loop, expect=expect or {})
         d = cs.model_dump(by_alias=True, exclude_none=True)
         d['src'] = i
         out.append(d)
@@ -163,12 +163,24 @@ def compile_steps(scenario: Scenario, bindings: Dict[str, object]) -> List[dict]
                 piece = int(round(d.at_s - cur))
                 if piece > 0:
                     emit(i, 'media_hold', seconds=piece)
-                emit(i, d.step, who=d.who, from_=d.from_, to=d.to, payload=d.payload, expect=d.expect)
+                emit(i, d.step, who=d.who, from_=d.from_, to=d.to, payload=d.payload, expect=d.expect,
+                     sample=d.sample, loop=d.loop)
                 cur = d.at_s
             emit(i, 'media_hold', seconds=max(1, int(round(seconds - cur))), expect=s.expect)
             continue
         emit(i, s.step, who=s.who, from_=s.from_, to=s.to, after_ms=s.after_ms, seconds=seconds, media=s.media,
-             group=s.group, payload=s.payload, cause=s.cause, expect=s.expect)
+             group=s.group, payload=s.payload, cause=s.cause, expect=s.expect, sample=s.sample, loop=s.loop)
+    return out
+
+
+def run_samples(scenario: Scenario, topology: Topology) -> Dict[str, Dict[str, str]]:
+    """시나리오가 참조하는 샘플 → 토폴로지 샘플 라이브러리 발췌(RunStart.samples). 라이브러리에 없는 id 는 컴파일 오류."""
+    lib = topology.media.samples if topology.media else {}
+    out: Dict[str, Dict[str, str]] = {}
+    for sid in scenario.sample_refs():
+        if sid not in lib:
+            raise CompileError(f'샘플 {sid!r} 가 토폴로지 media.samples 에 없다 — 정의된 샘플: {sorted(lib) or "없음"}')
+        out[sid] = dict(lib[sid])
     return out
 
 
@@ -331,6 +343,7 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
     if profile is not None and profile.ht is not None and 'ht' not in bindings:
         bindings['ht'] = profile.ht
     steps = compile_steps(scenario, bindings)
+    samples = run_samples(scenario, topology)
 
     per_worker_roles, why = resolve_roles(scenario, topology)
     if not per_worker_roles:
@@ -411,7 +424,7 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
         slices = {role: [b, e] for role, (_p, b, e) in pw['ranges'].items()}
         rs = RunStart(run_id=run_id, scenario_id=scenario.id, roles=dict(pw['role_pool']), role_slices=slices,
                       steps=[CompiledStep.model_validate({k: v for k, v in s.items() if k != 'src'}) for s in steps],
-                      rate_saps=rate_total * share,
+                      samples=samples, rate_saps=rate_total * share,
                       max_instances=(max(1, int(round(max_instances * share))) if max_instances else None),
                       stream=stream_for(by_name[w.name]))
         plan_workers[w.name] = {'pools': pools, 'run': rs.model_dump(by_alias=True, exclude_none=True), 'share': share,
@@ -431,4 +444,4 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
     return {'workers': plan_workers, 'rate_total': rate_total, 'roles': roles_out, 'steps': steps, 'phases': phases(scenario),
             'bindings': bindings, 'max_instances': max_instances,
             'identities': {p: len(v) for p, v in identities.items()}, 'peer_pools': peer_pools, 'pinned': pinned,
-            'resolve_notes': why}
+            'samples': samples, 'resolve_notes': why}

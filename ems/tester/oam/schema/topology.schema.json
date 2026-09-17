@@ -1090,6 +1090,7 @@
     },
     "TopologyMedia": {
       "additionalProperties": false,
+      "description": "미디어 샘플 라이브러리(§4 미디어 평면) — id → {코덱: 워커 샘플 디렉터리(Media.SampleDir) 안 상대 경로 | 'synthetic'}.\n합의 코덱에 해당하는 항목이 없으면 그 코덱은 합성으로 나간다.",
       "properties": {
         "samples": {
           "additionalProperties": {
@@ -1098,7 +1099,7 @@
             },
             "type": "object"
           },
-          "description": "id → {코덱: 파일|synthetic}",
+          "description": "id → {amr-wb|pcmu|pcma: 파일|synthetic}",
           "title": "Samples",
           "type": "object"
         }
@@ -1277,10 +1278,11 @@
             }
           ],
           "default": null,
+          "description": "RTP 를 쓰는 단말 동시 상한 선언(워커 Media.MaxRtpStreams 와 같은 뜻 — 계획 미리보기 용량 경고)",
           "title": "Max Rtp Streams"
         },
         "samples": {
-          "description": "워커가 보유한 미디어 샘플 id(§7 ⓖ) — health 보고와 대조",
+          "description": "이 워커가 보유한다고 선언한 샘플 id(topology.media.samples 의 키) — 비면 전부 보유로 본다. 실제 파일은 health media.files 와 대조",
           "items": {
             "type": "string"
           },

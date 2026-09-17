@@ -1,0 +1,19 @@
+# VoLTE 1:1 단방향 송출 — media.rtp: explicit 은 수신만 시작하고 송출은 media_send 가 부를 때. 발신자만 1 초 뒤부터 보내고
+# 통화 중 4 초에 멈춘다. 착신자는 끝까지 보내지 않는다 — 한쪽 방향 미디어 경로(CMP relay)와 무음 구간 처리를 본다.
+id: VOLTE-CALL-ONEWAY-MEDIA
+title: VoLTE 1:1 단방향 송출 (explicit · media_send/media_stop)
+tags: [volte, media]
+roles:
+  caller: { pool: volte_ue }
+  callee: { pool: volte_ue, disjoint_from: caller }
+flow:
+  - { step: register,   who: [caller, callee], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: callee, media: { audio: amr-wb, rtp: explicit } }
+  - { step: answer,     who: [callee], after_ms: 500 }
+  - { step: media_send, who: [caller], after_ms: 1000 }
+  - step: media_hold
+    seconds: 6
+    during:
+      - { at_s: 4, step: media_stop, who: [caller] }
+    expect: { rtp_loss_pct: { max: 0.5 } }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }

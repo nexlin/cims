@@ -1,0 +1,14 @@
+# VoLTE 1:1 시그널링 전용 — SDP 는 오퍼/answer 하되 RTP 를 송수신하지 않는다(media.rtp: none). 제어평면만 높은 율로 밀 때
+# (워커의 RTP 스레드·소켓 부하 없이 SApS 상한을 본다). RTP 기대치는 두지 않는다 — 표본이 없다.
+id: VOLTE-CALL-SIGNALING
+title: VoLTE 1:1 시그널링 전용 (RTP 없음)
+tags: [volte, signaling]
+roles:
+  caller: { pool: volte_ue }
+  callee: { pool: volte_ue, disjoint_from: caller }
+flow:
+  - { step: register,   who: [caller, callee], expect: { code: 200, rrd_ms: { p95: 500 } } }
+  - { step: invite,     from: caller, to: callee, media: { audio: amr-wb, rtp: none } }
+  - { step: answer,     who: [callee], after_ms: 500, expect: { srd_ms: { p95: 1000 } } }
+  - { step: media_hold, seconds: "${ht}" }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }

@@ -8,7 +8,11 @@ hosts:                                   # 서버 — 계측기/대상/동거 �
   h62: { name: tester-b, ip: 10.0.0.62 }
 workers:                                 # 호스트 위의 cims-tester-worker — url = http://<host.ip>:<port>
   - { name: w1, host: h61, port: 7100, cpus: 8 }
-  - { name: w2, host: h62, port: 7100, cpus: 8 }
+  - { name: w2, host: h62, port: 7100, cpus: 8, media: { max_rtp_streams: 800 } }   # media.samples: [id…] 로 보유 샘플을 좁힐 수 있다(비면 전부)
+media:                                   # 미디어 샘플 라이브러리 — media_send 의 sample. 값 = 워커 Media.SampleDir 안 파일 | synthetic
+  samples:                               #   코덱별(amr-wb = raw 61 B 프레임 · pcmu/pcma = raw 160 B/20 ms). 합의 코덱 항목이 없으면 합성
+    ringback: { pcmu: ringback_kr.pcmu, pcma: ringback_kr.pcma, amr-wb: synthetic }
+    tone_1k:  { pcmu: tone_1k.pcmu, pcma: tone_1k.pcma }
 target:
   name: media01
   kind: cims                             # cims | ims | pbx — cims 만 oam 노드로 컬렉션 시드·target_build

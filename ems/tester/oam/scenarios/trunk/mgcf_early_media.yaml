@@ -1,0 +1,19 @@
+# MGCF 링백 early media — 183+SDP 뒤 MGCF 가 링백 톤 샘플을 송출(media_send), 200 뒤에는 양쪽이 기본 원천으로 통화.
+# media.rtp: explicit 이라 발신 UE 는 183 구간에 받기만 한다(TS 24.628 early media — 단말은 early dialog 에서 송출하지 않는다).
+# early_rtp_pct = 200 전에 발신자가 링백 RTP 를 실제로 받았는가(시그널링 early_media_pct 와 별개 — 미디어 앵커가 18x SDP 를 반영해야 한다).
+# 샘플 id `ringback` 은 토폴로지 media.samples 에 있어야 한다(워커 Media.SampleDir 의 ringback_kr.pcmu/.pcma).
+id: TRUNK-MGCF-EARLY-MEDIA
+title: 가입자 → MGCF 발신 — 183 링백 샘플 송출 (explicit)
+tags: [trunk, mgcf, early-media, media]
+roles:
+  caller: { pool: volte_ue }
+  mgcf:   { pool: mgcf_pstn }
+flow:
+  - { step: register,   who: [caller], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: mgcf, media: { audio: amr-wb, rtp: explicit } }
+  - { step: progress,   who: [mgcf], after_ms: 300, expect: { code: 183, early_media_pct: 100, early_rtp_pct: 100 } }
+  - { step: media_send, who: [mgcf], sample: ringback }
+  - { step: answer,     who: [mgcf], after_ms: 3000, expect: { code: 200 } }
+  - { step: media_send, who: [caller, mgcf] }
+  - { step: media_hold, seconds: 5, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: mgcf, cause: 16 }

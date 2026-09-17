@@ -118,6 +118,88 @@ static bool DtmfTick(CRtpThread* pRtpThread, DtmfTxState& st, RtpHeader* pHdr, c
     return true;
 }
 
+/** 고정 크기 프레임 파일 공유 캐시 — 부하 시험에서 호마다 같은 파일을 다시 읽지 않는다(프로세스 수명, 경로+프레임 크기 키).
+ *  AMR-WB raw = 61 B/프레임, G.711 raw = 160 B(20 ms @ 8 kHz, 끝의 짧은 조각은 버린다). */
+typedef std::vector<std::vector<char>> RtpFrameVec;
+static std::shared_ptr<const RtpFrameVec> LoadFramesCached(const std::string& strPath, int iFrameSize) {
+    static std::mutex s_mtx;
+    static std::map<std::string, std::shared_ptr<const RtpFrameVec>> s_cache;
+    std::string strKey = strPath + "#" + std::to_string(iFrameSize);
+    std::lock_guard<std::mutex> lk(s_mtx);
+    auto it = s_cache.find(strKey);
+    if (it != s_cache.end()) return it->second;
+    std::shared_ptr<RtpFrameVec> pFrames = std::make_shared<RtpFrameVec>();
+    if (iFrameSize == 61) {
+        int iSize = 0;
+        if (!LoadAmrWbFrames(strPath, *pFrames, iSize)) return nullptr;
+    } else {
+        FILE* fp = fopen(strPath.c_str(), "rb");
+        if (!fp) return nullptr;
+        std::vector<char> vecBuf(iFrameSize);
+        while (fread(vecBuf.data(), 1, iFrameSize, fp) == (size_t)iFrameSize) pFrames->push_back(vecBuf);
+        fclose(fp);
+        if (pFrames->empty()) return nullptr;
+    }
+    printf("[RTP] Loaded %d frames(%d B) from %s\n", (int)pFrames->size(), iFrameSize, strPath.c_str());
+    s_cache[strKey] = pFrames;
+    return pFrames;
+}
+
+/** 송신 원천 — 합의 코덱과 (기본|MediaSend 지정) 파일로 정한다. 파일이 없거나 못 읽으면 그 코덱의 합성. */
+struct RtpTxSource {
+    enum Kind { SYNTH_G711, SYNTH_AMRWB, FILE_AMRWB, FILE_G711 } kind = SYNTH_G711;
+    std::shared_ptr<const RtpFrameVec> frames;
+    std::string path;
+    int pt = 0;
+    uint32_t tsStep = 160;
+    bool loop = true;
+    size_t idx = 0;
+};
+
+static void ResolveTxSource(CRtpThread* pRtpThread, RtpTxSource& src) {
+    bool bOverride; bool bLoop; std::string strAmrWb, strPcmu, strPcma;
+    {
+        std::lock_guard<std::mutex> lk(pRtpThread->m_mtxSource);
+        bOverride = pRtpThread->m_bSourceOverride;
+        strAmrWb = pRtpThread->m_strSrcAmrWb; strPcmu = pRtpThread->m_strSrcPcmu; strPcma = pRtpThread->m_strSrcPcma;
+        bLoop = pRtpThread->m_bSrcLoop;
+    }
+    int iPt = pRtpThread->m_iAudioPt;
+    bool bG711 = (iPt == 0 || iPt == 8);
+    bool bAmrWb = !bG711 && pRtpThread->m_bUseMediaFile;   // m_bUseMediaFile = AMR-WB 합의
+    RtpTxSource clsNew;
+    clsNew.loop = bLoop;
+    if (bOverride) {
+        if (bAmrWb) {
+            clsNew.path = strAmrWb; clsNew.kind = RtpTxSource::SYNTH_AMRWB; clsNew.pt = iPt >= 0 ? iPt : 99; clsNew.tsStep = 320;
+            if (!strAmrWb.empty() && (clsNew.frames = LoadFramesCached(strAmrWb, 61))) clsNew.kind = RtpTxSource::FILE_AMRWB;
+        } else {
+            const std::string& strFile = (iPt == 8) ? strPcma : strPcmu;
+            clsNew.path = strFile; clsNew.kind = RtpTxSource::SYNTH_G711; clsNew.pt = (iPt == 8) ? 8 : 0; clsNew.tsStep = 160;
+            if (bG711 && !strFile.empty() && (clsNew.frames = LoadFramesCached(strFile, 160))) clsNew.kind = RtpTxSource::FILE_G711;
+        }
+        if (!clsNew.path.empty() && !clsNew.frames)
+            printf("[RTP] Failed to load media sample: %s (falling back to synthetic)\n", clsNew.path.c_str());
+    } else if (!pRtpThread->m_strMediaFile.empty() && pRtpThread->m_bUseMediaFile) {
+        // 기본 원천 — AMR-WB 파일(PT = SDP 협상값, 미협상 시 레거시 99)
+        clsNew.path = pRtpThread->m_strMediaFile; clsNew.pt = iPt >= 0 ? iPt : 99; clsNew.tsStep = 320;
+        if ((clsNew.frames = LoadFramesCached(clsNew.path, 61))) clsNew.kind = RtpTxSource::FILE_AMRWB;
+        else {
+            printf("[RTP] Failed to load media file: %s (falling back to synthetic)\n", clsNew.path.c_str());
+            clsNew.kind = RtpTxSource::SYNTH_G711; clsNew.pt = 0; clsNew.tsStep = 160;
+        }
+    } else if (bAmrWb && iPt > 0) {
+        // 기본 합성 — AMR-WB 합의인데 파일이 없다: 협상 PT 의 NO_DATA 프레임(세션 코덱과 다른 PCMU PT 0 을 보내지 않는다)
+        clsNew.kind = RtpTxSource::SYNTH_AMRWB; clsNew.pt = iPt; clsNew.tsStep = 320;
+    } else {
+        // 기본 합성 — PCMU(PT 0). PCMA 합의면 PT 8(페이로드는 그대로 — 계측기는 흐름·손실만 본다)
+        clsNew.kind = RtpTxSource::SYNTH_G711; clsNew.pt = (iPt == 8) ? 8 : 0; clsNew.tsStep = 160;
+    }
+    // 같은 원천을 다시 고른 것이면(183 → 200 재시작 등) 재생 위치를 잇는다
+    if (clsNew.kind == src.kind && clsNew.path == src.path && clsNew.frames == src.frames) clsNew.idx = src.idx;
+    src = clsNew;
+}
+
 THREAD_API RtpThreadSend(LPVOID lpParameter) {
   CRtpThread *pRtpThread = (CRtpThread *)lpParameter;
   char szPacket[1500];
@@ -134,104 +216,86 @@ THREAD_API RtpThreadSend(LPVOID lpParameter) {
   psttRtpHeader->SetMarker(0);
   psttRtpHeader->ssrc = htonl(200);
 
-  // 미디어 파일이 설정된 경우 AMR-WB(PT=99) 전송, 아니면 합성 PCMU(PT=0)
-  std::vector<std::vector<char>> vecFrames;
-  int iFrameSize = 0;
-  bool bFileMedia = false;
-
-  if (!pRtpThread->m_strMediaFile.empty() && pRtpThread->m_bUseMediaFile) {
-      bFileMedia = LoadAmrWbFrames(pRtpThread->m_strMediaFile, vecFrames, iFrameSize);
-      if (bFileMedia) {
-          printf("[RTP] Loaded %d AMR-WB frames from %s\n",
-                 (int)vecFrames.size(), pRtpThread->m_strMediaFile.c_str());
-      } else {
-          printf("[RTP] Failed to load media file: %s (falling back to synthetic)\n",
-                 pRtpThread->m_strMediaFile.c_str());
-      }
-  }
-
   DtmfTxState sttDtmf;
-  if (bFileMedia) {
-      // ── AMR-WB 파일 기반 전송 (16kHz, 20ms/frame) — PT = SDP 협상값 (미협상 시 레거시 99) ──
-      int iAudioPt = pRtpThread->m_iAudioPt >= 0 ? pRtpThread->m_iAudioPt : 99;
-      psttRtpHeader->SetPT(iAudioPt);
-      int iFrameIdx = 0;
-      int iTotalFrames = (int)vecFrames.size();
+  RtpTxSource clsSrc;
+  int iGen = -1;
+  bool bTalkStart = true;   // 발화 시작(첫 패킷·정지 뒤 재개·원천 교체) — 마커 비트(RFC 3551 §4.1)
+  char szPcm[320];
 
-      while (pRtpThread->m_bStopEvent == false) {
-          if (DtmfTick(pRtpThread, sttDtmf, psttRtpHeader, szPacket, sSeq, iTimeStamp, iAudioPt)) {
-              iTimeStamp += 320;
-              MiliSleep(20);
-              continue;
-          }
-          // AMR-WB RTP: RFC 4867 octet-aligned
-          // payload = [CMR(4bit)+0000(4bit)] + [ToC(8bit)] + [frame data]
-          char* payload = szPacket + sizeof(RtpHeader);
-          int payloadLen = 0;
+  while (pRtpThread->m_bStopEvent == false) {
+      MiliSleep(20);
 
-          // CMR (Codec Mode Request) = 0x80 (mode 8 = 23.85kbps, 4-bit MSB + 4-bit pad)
-          payload[0] = (char)0x80;
-          payloadLen = 1;
-
-          // ToC (Table of Contents): F=0 (last frame), FT=8 (23.85kbps), Q=1 (good)
-          // FT=8 → 01000 | Q=1 → 010001 | F=0 → 0 | pad=0 → 0100 0100 = 0x44
-          payload[1] = 0x44;
-          payloadLen = 2;
-
-          // Frame data (원본 프레임의 첫 바이트는 ToC이므로 건너뜀)
-          memcpy(payload + payloadLen, vecFrames[iFrameIdx].data() + 1, vecFrames[iFrameIdx].size() - 1);
-          payloadLen += vecFrames[iFrameIdx].size() - 1;
-
-          psttRtpHeader->SetSeq(sSeq);
-          psttRtpHeader->SetTimeStamp(iTimeStamp);
-          psttRtpHeader->SetMarker(iFrameIdx == 0 ? 1 : 0);
-
-          ++sSeq;
-          iTimeStamp += 320;  // 20ms @ 16kHz
-
-          {
-              // 미디어 SRTP — 협상된 세션이면 protect 후 송신 (media_security.md §8.2)
-              int iSendLen = (int)sizeof(RtpHeader) + payloadLen;
-              if (!pRtpThread->SrtpEnabled() ||
-                  pRtpThread->SrtpProtect(szPacket, iSendLen, (int)sizeof(szPacket)))
-                  UdpSend(pRtpThread->m_hSocket, szPacket, iSendLen,
-                          pRtpThread->m_strDestIp.c_str(), pRtpThread->m_iDestPort);
-          }
-
-          ++iFrameIdx;
-          if (iFrameIdx >= iTotalFrames) iFrameIdx = 0;  // 루프 재생
-
-          MiliSleep(20);
+      // 정지 플래그를 먼저, 원천 세대를 나중에 읽는다 — MediaSend 는 세대++ 뒤에 정지를 푼다. 순서가 반대면 정지가 풀린 것만 보고
+      //   이전 원천으로 한 패킷을 흘린다.
+      bool bPaused = pRtpThread->m_bSendPaused.load() || pRtpThread->m_bHoldPaused.load();
+      int iCurGen = pRtpThread->m_iSourceGen.load();
+      if (iCurGen != iGen) {
+          iGen = iCurGen;
+          size_t iPrevIdx = clsSrc.idx;
+          ResolveTxSource(pRtpThread, clsSrc);
+          if (clsSrc.idx != iPrevIdx || clsSrc.idx == 0) bTalkStart = true;
+          psttRtpHeader->SetPT((uint8_t)clsSrc.pt);
       }
-  } else {
-      // ── 합성 RTP (기존 PCMU PT=0) ──
-      char szRead[320];
-      // PT 는 협상값이 G.711(0/8)이면 그 값(PCMA 협상 시 페이로드는 PCMU 그대로 — 계측기는 흐름·손실만 본다), 그 외 0
-      int iAudioPt = (pRtpThread->m_iAudioPt == 8) ? 8 : 0;
-      psttRtpHeader->SetPT(iAudioPt);
 
-      while (pRtpThread->m_bStopEvent == false) {
-          memset(szRead, 0x12, sizeof(szRead));
-          MiliSleep(20);
-          if (DtmfTick(pRtpThread, sttDtmf, psttRtpHeader, szPacket, sSeq, iTimeStamp, iAudioPt)) {
-              iTimeStamp += 160;
-              continue;
-          }
+      if (DtmfTick(pRtpThread, sttDtmf, psttRtpHeader, szPacket, sSeq, iTimeStamp, clsSrc.pt)) {
+          iTimeStamp += clsSrc.tsStep;
+          continue;
+      }
+      if (bPaused) {
+          // 정지 — 타임스탬프만 흐른다(시퀀스는 그대로라 수신 측 손실 계산에 공백이 없다)
+          iTimeStamp += clsSrc.tsStep;
+          bTalkStart = true;
+          continue;
+      }
 
-          psttRtpHeader->SetSeq(sSeq);
-          psttRtpHeader->SetTimeStamp(iTimeStamp);
+      char* payload = szPacket + sizeof(RtpHeader);
+      int payloadLen = 0;
+      bool bFile = (clsSrc.kind == RtpTxSource::FILE_AMRWB || clsSrc.kind == RtpTxSource::FILE_G711);
+      if (clsSrc.kind == RtpTxSource::FILE_AMRWB) {
+          // AMR-WB RTP: RFC 4867 octet-aligned — [CMR(4bit)+0000] + [ToC] + [frame data]
+          //   CMR = 0x80 (mode 8 = 23.85 kbps) · ToC = F=0, FT=8, Q=1 → 0x44. 원본 프레임의 첫 바이트는 ToC 라 건너뛴다.
+          const std::vector<char>& vecFrame = (*clsSrc.frames)[clsSrc.idx];
+          payload[0] = (char)0x80;
+          payload[1] = 0x44;
+          memcpy(payload + 2, vecFrame.data() + 1, vecFrame.size() - 1);
+          payloadLen = 2 + (int)vecFrame.size() - 1;
+      } else if (clsSrc.kind == RtpTxSource::FILE_G711) {
+          const std::vector<char>& vecFrame = (*clsSrc.frames)[clsSrc.idx];
+          memcpy(payload, vecFrame.data(), vecFrame.size());
+          payloadLen = (int)vecFrame.size();
+      } else if (clsSrc.kind == RtpTxSource::SYNTH_AMRWB) {
+          // 합성 AMR-WB — NO_DATA 프레임(FT=15, Q=1): CMR 15(요청 없음) + ToC 0x7C. 흐름·손실·지터 계측용
+          payload[0] = (char)0xF0;
+          payload[1] = 0x7C;
+          payloadLen = 2;
+      } else {
+          memset(szPcm, 0x12, sizeof(szPcm));
+          PcmToUlaw(szPcm, 320, payload, 160);
+          payloadLen = 160;
+      }
 
-          ++sSeq;
-          iTimeStamp += 160;
+      psttRtpHeader->SetSeq(sSeq);
+      psttRtpHeader->SetTimeStamp(iTimeStamp);
+      psttRtpHeader->SetMarker((bTalkStart || (bFile && clsSrc.idx == 0)) ? 1 : 0);
+      bTalkStart = false;
+      ++sSeq;
+      iTimeStamp += clsSrc.tsStep;
 
-          PcmToUlaw(szRead, 320, szPacket + sizeof(RtpHeader), 160);
+      {
+          // 미디어 SRTP — 협상된 세션이면 protect 후 송신 (media_security.md §8.2)
+          int iSendLen = (int)sizeof(RtpHeader) + payloadLen;
+          if (!pRtpThread->SrtpEnabled() ||
+              pRtpThread->SrtpProtect(szPacket, iSendLen, (int)sizeof(szPacket)))
+              UdpSend(pRtpThread->m_hSocket, szPacket, iSendLen,
+                      pRtpThread->m_strDestIp.c_str(), pRtpThread->m_iDestPort);
+          pRtpThread->m_ullSentTotal++;
+      }
 
-          {
-              int iSendLen = 160 + (int)sizeof(RtpHeader);
-              if (!pRtpThread->SrtpEnabled() ||
-                  pRtpThread->SrtpProtect(szPacket, iSendLen, (int)sizeof(szPacket)))
-                  UdpSend(pRtpThread->m_hSocket, szPacket, iSendLen,
-                          pRtpThread->m_strDestIp.c_str(), pRtpThread->m_iDestPort);
+      if (bFile && ++clsSrc.idx >= clsSrc.frames->size()) {
+          clsSrc.idx = 0;
+          if (!clsSrc.loop) {   // 한 번 재생 — 끝에서 멈춘다(MediaSend 가 다시 부를 때까지)
+              pRtpThread->m_bSendPaused = true;
+              pRtpThread->m_bSourceEnded = true;
           }
       }
   }

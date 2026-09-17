@@ -53,6 +53,10 @@ export default function PlanPreview({ plan, loading, compact }: { plan: PlanResu
           <span className="font-mono">{plan.seed && plan.seed.length ? plan.seed.map(s => `${s.collection}+${s.count}`).join(' · ') + ' (종료 시 복원)' : '없음 (UE 만)'}</span>
           <span className="text-muted-foreground">바인딩</span><span className="font-mono">{Object.entries(plan.bindings ?? {}).map(([k, v]) => `\${${k}} = ${String(v)}`).join(' · ') || '없음'}</span>
           {plan.env && plan.env.length > 0 && <><span className="text-muted-foreground">환경변수</span><span className="font-mono">{plan.env.map(e => `${e.env} — ${e.for}`).join(' · ')}</span></>}
+          {plan.media && plan.media.modes.length > 0 && (plan.media.modes.some(m => m !== 'auto') || Object.keys(plan.samples ?? {}).length > 0) && <>
+            <span className="text-muted-foreground">미디어 평면</span>
+            <span className="font-mono">rtp {[...new Set(plan.media.modes)].join(', ')}{Object.keys(plan.samples ?? {}).length ? ` · 샘플 ${Object.entries(plan.samples ?? {}).map(([id, m]) => `${id}(${Object.keys(m).join('/')})`).join(', ')}` : ''}</span>
+          </>}
           {plan.pinned && <><span className="text-muted-foreground">피어 고정</span><span className="font-mono">{plan.peer_pools?.join(', ')} → {plan.pinned}</span></>}
         </div>
       )}

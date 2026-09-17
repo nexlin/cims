@@ -1,6 +1,6 @@
 // cims-tester-worker — 계측기 워커 엔트리 (test_instrument.md §2·§8).
 //   cims-tester-worker [config/cims-tester-worker.json] [--preflight] [--verbose]
-// 설정 키(config_template.json 선언): Worker.Name · Server.Ip/Port · Sip.LocalIp/PortBase · Media.AudioFile/VideoFile
+// 설정 키(config_template.json 선언): Worker.Name · Server.Ip/Port · Sip.LocalIp/PortBase · Media.AudioFile/VideoFile/SampleDir/MaxRtpStreams
 //   · Limits.EndpointsPerCore/SapsPerCore · Timers.RegisterIntervalMs/RegisterTimeoutS/InviteTimeoutMs/ByeTimeoutMs
 // libcsim(SimSession) 의 printf 진단은 부하 중 초당 수천 줄이라 stdout 을 /dev/null 로 돌린다(--verbose 면 유지).
 // 워커 자기 로그는 stderr — agent lifecycle 이 로그 파일로 모은다.
@@ -73,6 +73,19 @@ int main(int argc, char** argv) {
         cfg.mediaFile = c["Media"]["AudioFile"].asString("");
         cfg.videoFile = c["Media"]["VideoFile"].asString("");
         cfg.peerCertFile = c["Media"]["PeerCertFile"].asString("");
+        cfg.sampleDir = c["Media"]["SampleDir"].asString("");
+        cfg.maxRtpStreams = (int)c["Media"]["MaxRtpStreams"].asInt(0);
+        // 상대 경로 SampleDir — 모듈 디렉터리(<모듈>/bin/cims-tester-worker 의 위) 기준, 거기 없으면 작업 디렉터리 기준
+        if (!cfg.sampleDir.empty() && cfg.sampleDir[0] != '/') {
+            char exe[4096] = { 0 };
+            ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+            if (n > 0) {
+                std::string dir(exe, (size_t)n);
+                dir = dir.substr(0, dir.rfind('/'));
+                dir = dir.substr(0, dir.rfind('/')) + "/" + cfg.sampleDir;
+                if (access(dir.c_str(), R_OK | X_OK) == 0) cfg.sampleDir = dir;
+            }
+        }
         cfg.maxEndpointsPerCore = (int)c["Limits"]["EndpointsPerCore"].asInt(cfg.maxEndpointsPerCore);
         cfg.maxSapsPerCore = c["Limits"]["SapsPerCore"].asDouble(cfg.maxSapsPerCore);
         cfg.registerIntervalMs = (int)c["Timers"]["RegisterIntervalMs"].asInt(cfg.registerIntervalMs);

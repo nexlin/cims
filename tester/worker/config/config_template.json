@@ -25,7 +25,11 @@
         { "key": "Media.AudioFile", "label": "AMR-WB 미디어 파일", "type": "path", "default": "", "restart": true,
           "help": "raw 61 바이트 프레임 파일(cspsim -media_file). 비우면 합성 PCMU." },
         { "key": "Media.VideoFile", "label": "H.264 비디오 파일", "type": "path", "default": "", "restart": true },
-        { "key": "Media.PeerCertFile", "label": "피어 풀 TLS 수신점 인증서(PEM)", "type": "path", "default": "", "restart": true }
+        { "key": "Media.PeerCertFile", "label": "피어 풀 TLS 수신점 인증서(PEM)", "type": "path", "default": "", "restart": true },
+        { "key": "Media.SampleDir", "label": "미디어 샘플 디렉터리", "type": "path", "default": "samples", "restart": true,
+          "help": "시나리오 media_send 의 sample 파일이 있는 곳(토폴로지 media.samples 의 값 = 이 안의 상대 경로). 상대 경로는 모듈 디렉터리 기준. raw 형식 — amr-wb 61 B 프레임 / pcmu·pcma 160 B(20 ms). 동봉: ringback_kr·tone_1k." },
+        { "key": "Media.MaxRtpStreams", "label": "RTP 동시 단말 상한", "type": "int", "default": 0, "min": 0, "max": 100000, "restart": true,
+          "help": "RTP 를 쓰는 단말(호당 송신·수신 스레드) 동시 상한. 넘는 인스턴스 슬롯은 skipped(skipped_rtp_cap). 0 = 제한 없음. media.rtp: none 호는 세지 않는다." }
       ],
       "scope": "service"
     },

@@ -2262,6 +2262,7 @@ void SessionSipClient::EventReInvite(const char* pszCallId, CSipCallRtp* pclsRem
     // psip 이 200 answer(로컬 SDP 유지)를 낸다 — 방향(hold = sendonly/inactive, RFC 3264 §8.4)만 관측
     bool bHold = pclsRemoteRtp && (pclsRemoteRtp->m_eDirection == E_RTP_SEND || pclsRemoteRtp->m_eDirection == E_RTP_INACTIVE);
     printf("[%d] re-INVITE from peer CallId=%s %s\n", m_pOwner->m_iId, pszCallId, bHold ? "(hold)" : "(sendrecv)");
+    m_pOwner->m_clsRtpThread.SetHoldPaused(bHold);   // 상대가 sendonly/inactive 면 우리는 보내지 않는다
     if (m_pOwner->m_pObserver) m_pOwner->m_pObserver->OnReInvite(m_pOwner, pszCallId, bHold);
 }
 
@@ -2278,6 +2279,20 @@ bool SimSession::Hold() {
 bool SimSession::Resume() {
     if (m_strInviteId.empty() || !m_bInCall) return false;
     return m_clsUserAgent.ResumeCall(m_strInviteId.c_str());
+}
+
+bool SimSession::MediaSend(bool bDefault, const std::string& strAmrWbFile, const std::string& strPcmuFile,
+                           const std::string& strPcmaFile, bool bLoop) {
+    if (!m_clsRtpThread.MediaRunning()) return false;
+    if (bDefault) m_clsRtpThread.MediaSendDefault();
+    else m_clsRtpThread.MediaSend(strAmrWbFile, strPcmuFile, strPcmaFile, bLoop);
+    return true;
+}
+
+bool SimSession::MediaStop() {
+    if (!m_clsRtpThread.MediaRunning()) return false;
+    m_clsRtpThread.MediaStop();
+    return true;
 }
 
 bool SimSession::SendDtmf(const std::string& strDigits) {

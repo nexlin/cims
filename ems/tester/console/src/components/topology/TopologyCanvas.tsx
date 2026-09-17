@@ -4,7 +4,7 @@
 // (끌기 중 연속 변경은 transient=true, 놓으면 onCommit — 페이지 이력이 한 걸음으로 묶는다; 영역 자동 확장은 onLayout — 이력에 안 쌓는다).
 // 줌(Ctrl+휠·버튼·화면 맞춤)은 스테이지 transform 하나 — 좌표 계산은 전부 zoom 으로 나눈다. 팔레트는 접을 수 있고 클릭 = 선택한 상자 위에 추가.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Server, Cpu, Radio, Waves, Users, Activity, Database, Smartphone, Globe, Phone, Router, Terminal, ChevronDown, ChevronRight, Trash2, Copy, PanelLeftClose, PanelLeftOpen, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
+import { Server, Cpu, Radio, Waves, Users, Activity, Database, Smartphone, Globe, Phone, Router, Terminal, ChevronDown, ChevronRight, Trash2, Copy, Plus, PanelLeftClose, PanelLeftOpen, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
 import { Badge } from '@core/components/ui/badge'
 import { Input } from '@core/components/ui/input'
@@ -594,6 +594,22 @@ function Sel({ value, options, onChange, empty, disabled }: { value: string | un
     </Select>
   )
 }
+/** 미디어 샘플 라이브러리(topology.media.samples) — id → 코덱별 파일(워커 Media.SampleDir 안 상대 경로) | synthetic. 시나리오 media_send 의 sample */
+const SAMPLE_CODECS = ['pcmu', 'pcma', 'amr-wb'] as const
+function SampleLibrary({ doc, ro, mutate }: { doc: TopologyDoc; ro: boolean; mutate: (fn: (d: TopologyDoc) => void) => void }) {
+  const samples = doc.media?.samples ?? {}
+  const edit = (fn: (m: Record<string, Record<string, string>>) => void) => mutate(d => { const m = { ...(d.media?.samples ?? {}) }; fn(m); if (Object.keys(m).length) d.media = { ...(d.media ?? {}), samples: m }; else delete d.media })
+  return <Sec title={`미디어 샘플 라이브러리 (${Object.keys(samples).length})`} right={!ro && <Button variant="outline" size="sm" onClick={() => edit(m => { let n = 'sample', k = 2; while (m[n]) n = `sample${k++}`; m[n] = { pcmu: 'synthetic' } })}><Plus size={12} /> 샘플</Button>}>
+    <div className="text-muted-foreground">시나리오 <span className="font-mono">media_send.sample</span> 이 참조합니다. 값 = 워커 샘플 디렉터리 안 파일 이름 또는 <span className="font-mono">synthetic</span>. 비운 코덱은 합성으로 나갑니다.</div>
+    {Object.entries(samples).map(([id, m]) => <div key={id} className="flex flex-col gap-1 rounded-sm border border-border p-2">
+      <div className="grid grid-cols-[1fr_auto] items-end gap-2">
+        <F label="id"><Txt value={id} mono disabled={ro} onCommit={v => { const nv = v.trim(); if (!nv || nv === id || samples[nv]) return; edit(x => { const o: Record<string, Record<string, string>> = {}; for (const [k, val] of Object.entries(x)) o[k === id ? nv : k] = val; for (const k of Object.keys(x)) delete x[k]; Object.assign(x, o) }) }} /></F>
+        <Button variant="ghost" size="sm" disabled={ro} onClick={() => edit(x => { delete x[id] })} title="샘플 삭제"><Trash2 size={12} /></Button>
+      </div>
+      <div className="grid grid-cols-3 gap-2">{SAMPLE_CODECS.map(c => <F key={c} label={c}><Txt value={m[c]} mono placeholder="합성" disabled={ro} onCommit={v => edit(x => { const e = { ...x[id] }; if (v.trim()) e[c] = v.trim(); else delete e[c]; x[id] = Object.keys(e).length ? e : { [c]: 'synthetic' } })} /></F>)}</div>
+    </div>)}
+  </Sec>
+}
 function Sec({ title, right, children }: { title: string; right?: ReactNode; children: ReactNode }) {
   return <div className="mt-3 flex flex-col gap-1.5 border-t border-border pt-2"><div className="flex items-center gap-2 text-[11px] font-semibold text-muted-foreground">{title}<span className="ml-auto">{right}</span></div>{children}</div>
 }
@@ -620,6 +636,7 @@ function Inspector({ doc, sel, setSel, mutate, issues, canWrite, onDelete, onDup
         <F label="대상 이름"><Txt value={doc.target.name} disabled={ro} onCommit={v => mutate(d => { d.target.name = v })} /></F>
         <F label="kind" help="cims 만 oam 노드로 컬렉션 시드·target_build"><Sel value={doc.target.kind ?? 'cims'} disabled={ro} options={[{ v: 'cims' }, { v: 'ims' }, { v: 'pbx' }]} onChange={v => mutate(d => { d.target.kind = v as 'cims' | 'ims' | 'pbx' })} /></F>
       </Sec>
+      <SampleLibrary doc={doc} ro={ro} mutate={mutate} />
     </div>
   )
   if (sel.kind === 'host') {
@@ -654,8 +671,9 @@ function Inspector({ doc, sel, setSel, mutate, issues, canWrite, onDelete, onDup
       </div>
       <div className="mt-1 text-muted-foreground">URL http://{ip || '?'}:{w.port ?? 7100} (파생)</div>
       <Sec title="상태 (GET /workers)">{h ? <><div className="flex justify-between"><span>버전</span><span className="font-mono">v{h.version}</span></div><div className="flex justify-between"><span>단말 / 최대</span><span className="font-mono">{h.active_endpoints} / {h.max_endpoints}</span></div><div className="flex justify-between"><span>최대 SApS</span><span className="font-mono">{h.max_saps}</span></div><div className="flex justify-between"><span>CPU</span><span className="font-mono">{h.cpu_pct} %</span></div>{h.media && <div className="flex justify-between"><span>RTP</span><span className="font-mono">{h.media.rtp_streams ?? 0} / {h.media.max_rtp_streams ?? '?'}</span></div>}</> : <span className="text-muted-foreground">저장 뒤 health 조회 — 응답 없으면 워커 프로세스·주소를 확인</span>}</Sec>
-      <Sec title="미디어 (샘플 라이브러리 §7 ⓖ)">
-        <F label="보유 샘플 (쉼표)"><Txt value={(w.media?.samples ?? []).join(',')} mono disabled={ro} onCommit={v => mutate(d => { const ww = M.worker(d, w.name)!; ww.media = { ...(ww.media ?? {}), samples: csv(v) }; if (!ww.media.samples?.length && ww.media.max_rtp_streams == null) delete ww.media })} /></F>
+      <Sec title="미디어 — 샘플·RTP 상한">
+        {h?.media && <div className="text-muted-foreground">샘플 디렉터리 <span className="font-mono">{h.media.sample_dir || '(미설정)'}</span> · 파일 {(h.media.files ?? []).length}개{(h.media.files ?? []).length ? <> — <span className="font-mono">{(h.media.files ?? []).join(', ')}</span></> : null}</div>}
+        <F label="보유 샘플 id (쉼표)" help="비면 라이브러리 전부 보유로 본다 — 실제 파일은 계획 미리보기가 위 목록과 대조"><Txt value={(w.media?.samples ?? []).join(',')} mono disabled={ro} onCommit={v => mutate(d => { const ww = M.worker(d, w.name)!; ww.media = { ...(ww.media ?? {}), samples: csv(v) }; if (!ww.media.samples?.length && ww.media.max_rtp_streams == null) delete ww.media })} /></F>
         <F label="max_rtp_streams"><Txt value={w.media?.max_rtp_streams} mono type="number" disabled={ro} onCommit={v => mutate(d => { const ww = M.worker(d, w.name)!; ww.media = { ...(ww.media ?? {}), max_rtp_streams: num(v) } })} /></F>
       </Sec>
       <Sec title={`이 워커의 풀 (${pools.length})`}>{pools.map(([pn, p]) => <div key={pn} className="flex justify-between"><span>{pn} ({M.isPeer(p) ? p.profile : p.kind})</span><span className="font-mono text-muted-foreground">{M.isPeer(p) ? `${ip}:${p.bind.port}/${p.bind.protocol ?? 'udp'}` : `${M.poolSize(p) || '전체'} ep → ${p.access}${p.group ? ` · ≡ ${p.group}` : ''}`}</span></div>)}{!pools.length && <span className="text-muted-foreground">풀을 이 카드 위에 놓으십시오</span>}</Sec>

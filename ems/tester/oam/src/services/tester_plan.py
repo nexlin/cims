@@ -20,6 +20,9 @@ KNOWN_TARGET_ISSUES = [
     {'when': lambda sc, topo: any(s.step == 'register' and any(getattr(topo.pools.get(sc.roles[r].pool, None), 'kind', '') == 'peer'
                                                               for r in (s.who or []) if r in sc.roles) for s in sc.flow),
      'text': '트렁크 REGISTER 는 CSP 가 계정을 받지 않아 403(§12) — 등록형 트렁크 시나리오는 attempts 0 으로 닫힌다'},
+    {'when': lambda sc, topo: any('early_rtp_pct' in (s.expect or {}) for s in sc.flow),
+     'text': '18x 의 SDP 는 CSP 가 CMP 에 앵커링하지 않는다(§12 — 발신자에 피어 주소 그대로, B-leg 주소는 200 에야 CMP 로) — '
+             'early media RTP 는 200 전까지 발신자에 닿지 않아 early_rtp_pct 기대치는 FAIL 이 예상된다'},
     {'when': lambda sc, topo: any(getattr(p, 'answer', '') == 'silent' for p in topo.pools.values()),
      'text': 'RouteSet 헬스체크가 없어 무응답 피어에서 Timer B(32 s)까지 기다린다(§12) — failover 는 실측 fail'},
 ]
@@ -85,7 +88,12 @@ def procedure(scenario: Scenario, phases: Dict[str, List[int]]) -> List[dict]:
         elif actors:
             parts.append(', '.join(actors))
         if s.media:
-            parts.append(f"{s.media.audio or ''}{'+' + s.media.video if s.media.video else ''}")
+            parts.append(f"{s.media.audio or ''}{'+' + s.media.video if s.media.video else ''}"
+                         + (f' · rtp {s.media.rtp}' if s.media.rtp != 'auto' else ''))
+        if s.step == 'media_send':
+            parts.append(f"sample {s.sample}" if s.sample else '기본 원천')
+            if s.loop is False:
+                parts.append('한 번 재생')
         if s.after_ms:
             parts.append(f'after {s.after_ms} ms')
         if s.seconds is not None:
@@ -95,7 +103,7 @@ def procedure(scenario: Scenario, phases: Dict[str, List[int]]) -> List[dict]:
         if s.cause:
             parts.append(f'Q.850 {s.cause}')
         if s.during:
-            parts.append('during ' + ', '.join(f'{d.at_s}s {d.step}' for d in s.during))
+            parts.append('during ' + ', '.join(f'{d.at_s}s {d.step}' + (f'({d.sample})' if d.sample else '') for d in s.during))
         rows.append({'idx': i, 'phase': ph.get(i, 'body'), 'step': s.step, 'actors': actors, 'summary': ' · '.join(parts),
                      'expect': {k: (v if isinstance(v, (int, float)) else v.model_dump(exclude_none=True)) for k, v in (s.expect or {}).items()},
                      'desc': (STEP_VOCAB.get(s.step) or {}).get('desc')})
@@ -161,6 +169,24 @@ def build_plan(scenario: Scenario, topology: Topology, topology_doc: dict, profi
                 out['warnings'].append(f'{w.name}: 시계 오차 {h.get("clock_skew_ms")} ms > 50 — 지연 지표가 흔들린다')
             if not h and probe:
                 out['errors'].append(f'{w.name}: 워커 미응답 — {c.health_error if c else "주소 없음"}')
+            # 미디어 평면 — 샘플 보유(선언·실제 파일)·RTP 동시 상한
+            hm = h.get('media') or {}
+            declared = list(w.media.samples) if (w.media and w.media.samples) else None
+            files = set(hm.get('files') or [])
+            for sid, codecs in (plan.get('samples') or {}).items():
+                if declared is not None and sid not in declared:
+                    out['errors'].append(f'{w.name}: 샘플 {sid!r} 를 보유하지 않는다(토폴로지 workers.media.samples 선언)')
+                    continue
+                if h and 'media' in h:
+                    miss = sorted(f for f in codecs.values() if f != 'synthetic' and f not in files and '/' not in f)
+                    if miss:
+                        out['errors'].append(f'{w.name}: 샘플 {sid!r} 파일 없음 {miss} — 워커 샘플 디렉터리 {hm.get("sample_dir") or "(미설정)"}')
+                elif h and any(f != 'synthetic' for f in codecs.values()):
+                    out['warnings'].append(f'{w.name}: 워커가 media 상태를 보고하지 않는다(구버전) — 샘플 {sid!r} 파일을 확인할 수 없다')
+            rtp_cap = int(hm.get('max_rtp_streams') or (w.media.max_rtp_streams if w.media and w.media.max_rtp_streams else 0) or 0)
+            row['capacity']['rtp'] = rtp_cap or None
+            row['capacity']['rtp_streams'] = hm.get('rtp_streams')
+            row['_rtp_cap'] = rtp_cap
         wrows.append(row)
     if plan.get('resolve_notes'):
         out['notes'] += [f'제외 워커: {n}' for n in plan['resolve_notes']]
@@ -219,6 +245,25 @@ def build_plan(scenario: Scenario, topology: Topology, topology_doc: dict, profi
         hint = (f'max 를 {little["recommend_max"]:g} 이하로 두거나 신원을 늘린다' if little['recommend_max']
                 else ('율을 낮추거나(instances 를 SDT 동안 다 못 소화) 신원을 늘린다' if cap else '율을 낮추거나 신원을 늘린다'))
         out['warnings'].append(f'Little 검산: {first_short:g} SApS × SDT {sdt} s ≈ 동시 {need0} > 역할 신원 {mins} — 그 단계부터 slot skipped. {hint}')
+    # 미디어 평면 — 모드 요약·RTP 상한 검산·시그널링 전용 호의 RTP 기대치
+    modes = [(s.media.rtp if s.media else 'auto') for s in scenario.flow if s.step == 'invite']
+    uses_rtp = any(m != 'none' for m in modes) if modes else False
+    n_roles = len(scenario.roles)
+    for row in wrows:
+        rtp_cap = row.pop('_rtp_cap', 0)
+        if uses_rtp and rtp_cap and row.get('in_run'):
+            need_rtp = int(math.ceil(concurrent * float(row.get('share') or 0))) * n_roles
+            if need_rtp > rtp_cap:
+                out['warnings'].append(f'{row["name"]}: 동시 RTP 단말 ≈ {need_rtp} > 상한 {rtp_cap}(Media.MaxRtpStreams) — 넘는 슬롯은 skipped')
+    if modes and not uses_rtp:
+        out['notes'].append('시그널링 전용(media.rtp: none) — RTP 를 송수신하지 않는다')
+        rtp_keys = ('rtp_loss_pct', 'jitter_ms', 'mos')
+        bad = sorted({k for s in scenario.flow for k in (s.expect or {}) if k in rtp_keys})
+        if bad:
+            out['warnings'].append(f'시그널링 전용 호에 RTP 기대치 {bad} — 표본이 없어 판정되지 않는다')
+    elif 'explicit' in modes and not scenario.sample_refs() and not any(
+            x.step == 'media_send' for s in scenario.flow for x in [s, *(s.during or [])]):
+        out['warnings'].append('media.rtp: explicit 인데 media_send 가 없다 — 아무도 송출하지 않는다(RTP 표본 0)')
     for issue in KNOWN_TARGET_ISSUES:
         try:
             if issue['when'](scenario, topology):
@@ -229,6 +274,7 @@ def build_plan(scenario: Scenario, topology: Topology, topology_doc: dict, profi
         'roles': plan['roles'], 'workers': wrows, 'steps': steps, 'phases': phases, 'procedure': procedure(scenario, phases),
         'bindings': plan['bindings'], 'rate_total': plan['rate_total'], 'max_instances': plan['max_instances'],
         'identities': plan['identities'], 'peer_pools': plan['peer_pools'], 'pinned': plan['pinned'],
+        'samples': plan.get('samples') or {}, 'media': {'modes': modes, 'uses_rtp': uses_rtp},
         'seed': seed, 'env': env, 'little': little,
         'estimate': {'duration_s': estimate_duration(profile, plan['rate_total'], plan['max_instances'], sdt),
                      'sdt_s': sdt, 'peak_rate': peak, 'concurrent': concurrent,

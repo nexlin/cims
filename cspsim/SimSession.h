@@ -205,6 +205,11 @@ public:
     bool Resume();
     /** RFC 4733 DTMF 숫자열 송신 — telephone-event 미협상이면 false. */
     bool SendDtmf(const std::string& strDigits);
+    // 미디어 평면(test_instrument.md §4) — 모드는 다음 호부터(CRtpThread::EMediaMode), 송출 제어는 SDP 교환 뒤(RTP 기동 중)에만
+    void SetMediaMode(int iMode) { m_clsRtpThread.SetMediaMode(iMode); }
+    bool MediaSend(bool bDefault, const std::string& strAmrWbFile, const std::string& strPcmuFile, const std::string& strPcmaFile,
+                   bool bLoop);
+    bool MediaStop();
     int  m_iPendingQ850 = 0;             // 상대 BYE/최종 응답의 Reason Q.850 cause — EventCallEnd 가 관측자에 전달
     int  m_iLastQ850 = 0;
 
