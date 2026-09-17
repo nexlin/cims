@@ -7,10 +7,17 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
+
+/**
+ * 토큰 기반 호출(GMS/CMS/FD)의 비-2xx 응답. [code] 401 = 토큰 거절(만료·무효) — 호출자([TokenRetry])가
+ * 토큰을 갱신해 1회 재시도한다. IdMS 자격 오류(authreq/tokenreq)는 여기 해당 없음(재로그인 사안).
+ */
+class CscHttpException(val code: Int, message: String) : RuntimeException(message)
 
 /**
  * CSC 설정 플레인 클라이언트 — IdMS(OAuth2 PKCE) + GMS/CMS(XCAP) HTTPS, **PJSIP 무관** (설계서 §7).
@@ -97,7 +104,7 @@ class CscClient(
         val url = "${cfg.baseUrl}/org.openmobilealliance.groups/users/${enc(userUri)}"
         http.newCall(bearer(token, url).get().build()).execute().use { resp ->
             val body = resp.body?.string().orEmpty()
-            check(resp.isSuccessful) { "listGroups ${resp.code}: $body" }
+            ensureOk(resp) { "listGroups ${resp.code}: $body" }
             val arr = JSONArray(body)
             return (0 until arr.length()).map { i ->
                 val o = arr.getJSONObject(i)
@@ -132,7 +139,7 @@ class CscClient(
         http.newCall(req.get().build()).execute().use { resp ->
             if (resp.code == 304) return XcapDoc(notModified = true, body = null, etag = ifNoneMatch, contentType = accept)
             val body = resp.body?.string()
-            check(resp.isSuccessful) { "xcap GET $path ${resp.code}: ${body.orEmpty()}" }
+            ensureOk(resp) { "xcap GET $path ${resp.code}: ${body.orEmpty()}" }
             return XcapDoc(
                 notModified = false,
                 body = body,
@@ -154,7 +161,7 @@ class CscClient(
         val body = data.toRequestBody("application/octet-stream".toMediaType())
         http.newCall(bearer(token, url.toString()).post(body).build()).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
-            check(resp.isSuccessful) { "fd upload ${resp.code}: $text" }
+            ensureOk(resp) { "fd upload ${resp.code}: $text" }
             val j = JSONObject(text)
             return FdUpload(
                 url = j.getString("url"),
@@ -167,13 +174,18 @@ class CscClient(
     /** FD 파일 다운로드 — FD SIGNALLING 으로 받은 절대 URL 그대로 GET. */
     fun downloadFd(token: String, url: String): ByteArray {
         http.newCall(bearer(token, url).get().build()).execute().use { resp ->
-            check(resp.isSuccessful) { "fd download ${resp.code}" }
+            ensureOk(resp) { "fd download ${resp.code}" }
             return resp.body?.bytes() ?: ByteArray(0)
         }
     }
 
     private fun bearer(token: String, url: String) =
         Request.Builder().url(url).addHeader("Authorization", "Bearer $token")
+
+    /** 토큰 호출의 비-2xx → [CscHttpException] (상태 코드 보존 — 401 재시도 판정용). */
+    private fun ensureOk(resp: Response, message: () -> String) {
+        if (!resp.isSuccessful) throw CscHttpException(resp.code, message())
+    }
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 }

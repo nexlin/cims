@@ -389,6 +389,11 @@ class PttService : Service() {
         val mcpttId = "tel:" + cfg.msisdn.removePrefix("tel:").let { if (it.startsWith("+")) it else "+$it" }
         val csc = CscConfig(host = cfg.serverHost)               // IdMS/GMS/CMS 4430 (dev: 자체서명)
         val c = PttController(cfg, mcpttId, csc).also { _controller.value = it; activeConfig = cfg }
+        // SSO 토큰 갱신 훅 — CSC 가 토큰을 거절(401)하면 컨트롤러가 이것으로 새 토큰을 받아 1회 재시도한다.
+        c.tokenRefresher = { stale ->
+            com.cims.ue.core.account.CimsAccounts.renewToken(
+                android.accounts.AccountManager.get(this), com.cims.ue.core.account.CimsAccounts.TOKEN_MCPTT, stale)
+        }
         c.feedback = com.cims.ue.ptt.audio.PttFeedback(this)
         c.volumeStore = com.cims.ue.ptt.audio.GroupVolumeStore(this)
         c.channelStore = ChannelStore(this)         // 참여 채널 영속 — 재시작 자동 재조인

@@ -7,15 +7,19 @@ import android.accounts.AccountManager
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import com.cims.ue.core.provision.ProvisioningClient
 
 /**
  * CIMS 공유 계정 인증자 — owner(CIMS) 앱의 [AuthenticatorService] 가 호스팅.
  *
  * [getAuthToken] 은 계정에 보관된 refresh_token 으로 **authTokenType 별 scope** 토큰을 발급한다
- * (provisioning ↔ mcptt 평면 분리). 캐시가 있으면 그대로, 없으면 refresh, 실패하면 재로그인 Intent 반환.
+ * (provisioning ↔ mcptt 평면 분리). 캐시가 있고 만료 전이면 그대로, 없거나 만료(임박)면 refresh, 실패하면
+ * 재로그인 Intent 반환. AccountManager 는 토큰 만료를 모르므로 만료 판정은 여기서 한다([JwtClaims]).
  */
 class CimsAuthenticator(private val context: Context) : AbstractAccountAuthenticator(context) {
+
+    private companion object { const val TAG = "CimsAuth" }
 
     override fun getAuthToken(
         response: AccountAuthenticatorResponse?, account: Account,
@@ -23,19 +27,30 @@ class CimsAuthenticator(private val context: Context) : AbstractAccountAuthentic
     ): Bundle {
         val am = AccountManager.get(context)
         var token = am.peekAuthToken(account, authTokenType)
+        if (!token.isNullOrEmpty() && JwtClaims.isExpiring(token)) {
+            // 만료(임박) 캐시 — 그대로 내주면 1시간 뒤 모든 GMS/CMS 호출이 401 로 끝난다. 버리고 refresh 로.
+            am.invalidateAuthToken(account.type, token)
+            token = null
+        }
         if (token.isNullOrEmpty()) {
             val refresh = am.getPassword(account)
-            if (!refresh.isNullOrEmpty()) {
-                try {
-                    val ep = CimsAccounts.cscEndpoint(am, account)
-                    val ts = ProvisioningClient(ep)
-                        .refresh(refresh, CimsAccounts.scopeFor(authTokenType))
-                    token = ts.accessToken
-                    if (!ts.refreshToken.isNullOrEmpty()) am.setPassword(account, ts.refreshToken) // 회전 반영
-                    am.setAuthToken(account, authTokenType, token)
-                } catch (e: Exception) {
-                    return reLogin(response, account.name, authTokenType)
-                }
+            if (refresh.isNullOrEmpty()) {
+                // refresh_token 이 없다 = 로그인한 적 없거나 로그아웃/초기화됨. 재로그인 외 방법이 없다.
+                Log.w(TAG, "$authTokenType: refresh_token 없음 — 재로그인 필요")
+                return reLogin(response, account.name, authTokenType)
+            }
+            try {
+                val ep = CimsAccounts.cscEndpoint(am, account)
+                val ts = ProvisioningClient(ep)
+                    .refresh(refresh, CimsAccounts.scopeFor(authTokenType))
+                token = ts.accessToken
+                if (!ts.refreshToken.isNullOrEmpty()) am.setPassword(account, ts.refreshToken) // 회전 반영
+                am.setAuthToken(account, authTokenType, token)
+                Log.i(TAG, "$authTokenType: 토큰 갱신 (${ep.host}:${ep.port})")
+            } catch (e: Exception) {
+                // 조용히 실패하면 호출자는 만료 토큰으로 401 을 계속 맞는다 — 원인을 남긴다.
+                Log.w(TAG, "$authTokenType: 토큰 갱신 실패 — ${e.javaClass.simpleName}: ${e.message}")
+                return reLogin(response, account.name, authTokenType)
             }
         }
         if (!token.isNullOrEmpty()) {
