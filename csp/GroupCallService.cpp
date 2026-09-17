@@ -1946,8 +1946,11 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
     //   를 올리지 않으므로, BYE 만 보내면 잔여 leg 의 마지막-멤버 teardown(그룹 해제·adhoc
     //   제거·CMP REMOVE)이 실행되지 않는다. BYE 응답 유무와도 무관해야 한다 — 미응답 단말이
     //   그룹을 붙들면 안 된다.
+    //   **청취 leg 이탈은 이 규칙을 발동시키지 않는다**(dispatch_center.md §5.6·§5.10). 청취자는 참가자가
+    //   아니라 관측자다 — 감청자가 빠졌다고 사설콜 당사자를 끊으면 «자격 회수» 가 «업무 통화 차단» 이 된다.
+    //   (ad hoc 의 «잔여 1명» 도 같다 — 참가자 수는 청취자 이탈로 변하지 않는다.)
     std::vector<std::string> vecPrivPeerLegs;
-    if ( bStillActive ) {
+    if ( bStillActive && !bListen ) {
         CspPttGroup clsPrivChk;
         if ( gclsGroupMap.Select( strGroupId.c_str(), clsPrivChk ) ) {
             std::vector<std::string> vecRemainLegs;
