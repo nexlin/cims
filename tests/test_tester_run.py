@@ -242,9 +242,57 @@ class Compile(unittest.TestCase):
         self.assertNotIn('src', plan['workers']['w1']['run']['steps'][0])      # 워커 계약에는 src 없음
         # 워커가 지원하지 않는 단계는 컴파일 오류
         sc2 = M.Scenario.model_validate({'id': 'UT-NS', 'roles': {'a': {'pool': 'volte_ue'}},
-                                         'flow': [{'step': 'group_call', 'from': 'a', 'group': 'g1'}]})
+                                         'flow': [{'step': 'pickup', 'from': 'a'}]})
         with self.assertRaises(C.CompileError):
             C.compile_run('r3', sc2, topo, topo_doc, None, {}, TW.discover(topo_doc), lambda w: 'x:1', 1, None)
+
+    def test_ptt_group_session(self):
+        """그룹 세션(group_call) — 역할은 신원 창을 나누지 않고(전부 풀 전체) multi_roles·service·ptt_group 이 워커 계약으로 간다.
+        그룹 자원 = 멤버가 되는 그룹 수(Little 검산의 분모), PTT 단계는 service=ptt 풀에서만."""
+        from services import tester_workers as TW, tester_plan as P
+        with open(os.path.join(S.user_scenarios_dir(), 'creds', 'ptt.jsonl'), 'w') as f:
+            for i in range(7):   # g1 = 4 명 · g2 = 2 명 · 그룹 없는 신원 1
+                g = 'g1' if i < 4 else 'g2' if i < 6 else None
+                rec = {'user': f'+8214000000{i:02d}', 'authId': f'450338214000000{i:02d}', 'ha1': 'cd' * 16}
+                if g:
+                    rec['group'] = g
+                f.write(json.dumps(rec) + '\n')
+        w1 = FakeWorker('w1')
+        topo_doc = _topology([w1])
+        topo_doc['target']['nodes']['csp']['sip']['access']['domains'] = ['volte.test', 'ptt.test']
+        topo_doc['pools']['ptt_ue'] = {'kind': 'ue', 'worker': 'w1', 'service': 'ptt', 'access': 'csp', 'source': {'creds': 'creds/ptt.jsonl'}}
+        topo = M.Topology.model_validate(topo_doc)
+        sc, _, _ = S.get_scenario('PTT-GROUP-CALL-BASIC')
+        plan = C.compile_run('rp', sc, topo, topo_doc, None, {'ht': 3}, TW.discover(topo_doc), lambda w: 'x:1', 1, None)
+        run = plan['workers']['w1']['run']
+        self.assertEqual(run['multi_roles'], ['listeners'])
+        self.assertEqual(run['role_slices'], {'talker': [0, 7], 'listeners': [0, 7]})
+        pool = plan['workers']['w1']['pools'][0]
+        self.assertEqual((pool['service'], pool['identities'][0]['domain'], pool['identities'][0]['ptt_group']), ('ptt', 'ptt.test', 'g1'))
+        self.assertNotIn('ptt_group', pool['identities'][6])
+        self.assertEqual([s['step'] for s in run['steps']], ['register', 'group_call', 'floor_request', 'media_hold', 'floor_release', 'bye'])
+        gs = plan['group_session']
+        self.assertEqual((gs['groups'], gs['usable'], gs['need_members'], gs['members_max']), (2, 2, 2, 4))
+        self.assertTrue(plan['roles']['listeners']['multi'])
+        # 역할 셋(단일 둘 + multi) → 멤버 3 명 이상인 그룹만 — g2(2 명)는 빠진다
+        sc3, _, _ = S.get_scenario('PTT-FLOOR-HANDOVER')
+        plan3 = C.compile_run('rp3', sc3, topo, topo_doc, None, {'ht': 3}, TW.discover(topo_doc), lambda w: 'x:1', 1, None)
+        self.assertEqual((plan3['group_session']['usable'], plan3['group_session']['need_members']), (1, 3))
+        # 계획 미리보기 — Little 검산의 자원은 그룹 수
+        pv = P.build_plan(sc3, topo, topo_doc, None, {'ht': 3}, 5, 5.0, probe=False)
+        self.assertTrue(pv['ok'], pv['errors'])
+        self.assertTrue(any('쓸 수 있는 그룹' in w for w in pv['warnings']), pv['warnings'])
+        self.assertTrue(any('그룹 세션' in n for n in pv['notes']))
+        # PTT 단계는 service=ptt 풀에서만
+        bad = M.Scenario.model_validate({'id': 'UT-PTT-BAD', 'roles': {'a': {'pool': 'volte_ue'}},
+                                         'flow': [{'step': 'group_call', 'from': 'a'}]})
+        with self.assertRaisesRegex(C.CompileError, 'service=ptt'):
+            C.compile_run('rp4', bad, topo, topo_doc, None, {}, TW.discover(topo_doc), lambda w: 'x:1', 1, None)
+        # 멤버가 되는 그룹이 없으면 컴파일 오류
+        topo_doc['pools']['ptt_ue']['source'] = {'creds': 'creds/ptt.jsonl', 'offset': 6}
+        topo2 = M.Topology.model_validate(topo_doc)
+        with self.assertRaisesRegex(C.CompileError, 'MCPTT 그룹이 없다'):
+            C.compile_run('rp5', sc, topo2, topo_doc, None, {'ht': 3}, TW.discover(topo_doc), lambda w: 'x:1', 1, None)
 
     def test_media_plane_samples_and_plan(self):
         """샘플 발췌(RunStart.samples)·sample/loop/rtp 의 워커 계약 전달 · 계획 미리보기의 샘플 파일 대조·RTP 상한·모드 경고."""

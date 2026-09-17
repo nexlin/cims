@@ -48,8 +48,9 @@ def scn_mcptt_floor_grant(ctx: VerifyContext) -> ItemResult:
     ok_flow = (grant >= 1) and (taken >= 1) and (idle >= 1)
 
     tail = ctx.state.get("S6_PTT_VOICE_TAIL", "") or ""
-    sim_req = "PTT Request (floor)" in tail
-    sim_done = "Floor rotation complete" in tail
+    # cspsim 마커 또는 계측기 요약(verdict=pass — floor 단계 기대치가 verdict 에 포함된다)
+    sim_req = "PTT Request (floor)" in tail or "verdict=pass" in tail
+    sim_done = "Floor rotation complete" in tail or "verdict=pass" in tail
     ok_sim = sim_req and sim_done
 
     notes = [

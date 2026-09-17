@@ -622,7 +622,9 @@ def report_markdown(doc: dict) -> str:
         lines.append(f'| {label} | {fmt(s.get(k))} |')
     lines += ['', '| 지연 | n | p50 | p95 | p99 | max |', '|---|---|---|---|---|---|']
     for name, label in (('rrd_ms', 'RRD ms'), ('srd_ms', 'SRD ms'), ('sdd_ms', 'SDD ms'), ('sdt_s', 'SDT s'), ('jitter_ms', '지터 ms'),
-                        ('rtp_loss_pct', 'RTP 손실 %(호별)')):
+                        ('rtp_loss_pct', 'RTP 손실 %(호별)'), ('affiliate_ms', 'Affiliation ms'), ('group_fanout_ms', '그룹 fan-out ms'),
+                        ('floor_grant_ms', 'Floor grant ms'), ('floor_taken_ms', 'Floor taken ms'), ('floor_queue_ms', 'Floor 큐 대기 ms'),
+                        ('floor_idle_ms', 'Floor idle ms')):
         h = t.get(name)
         if h:
             lines.append(f"| {label} | {h.get('count')} | {fmt(h.get('p50'))} | {fmt(h.get('p95'))} | {fmt(h.get('p99'))} | {fmt(h.get('max'))} |")
@@ -644,7 +646,8 @@ def report_markdown(doc: dict) -> str:
 COMPARE_METRICS = (('ser_pct', 'up'), ('scr_pct', 'up'), ('doc_saps', 'up'),
                    ('rrd_ms_p95', 'down'), ('srd_ms_p95', 'down'), ('sdd_ms_p95', 'down'),
                    ('jitter_ms_p95', 'down'), ('rtp_loss_pct', 'down'),
-                   ('early_media_pct', 'up'), ('prack_pct', 'up'), ('hold_resume_pct', 'up'), ('refer_pct', 'up'))
+                   ('early_media_pct', 'up'), ('prack_pct', 'up'), ('hold_resume_pct', 'up'), ('refer_pct', 'up'),
+                   ('floor_grant_pct', 'up'), ('floor_grant_ms_p95', 'down'), ('floor_taken_ms_p95', 'down'), ('group_fanout_ms_p95', 'down'))
 
 
 def _load_run_doc(rid: str) -> Optional[dict]:
@@ -799,7 +802,7 @@ TESTER_API_DOCS = [
      'params': [{'name': 'hold', 'in': 'body', 'type': 'boolean', 'required': True}], 'auth': _AUTH_OP},
     {'id': 'tester.run.hist', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs/{{id}}/hist',
      'summary': '지연 지표 버킷 분포(로그 상한 1·2·5·…·60000 ms) + p50/p95/p99 — 지연 분포 표의 행 펼침 히스토그램',
-     'params': [{'name': 'timer', 'in': 'query', 'type': 'string', 'desc': 'rrd_ms|srd_ms|sdd_ms|jitter_ms|sdt_s (기본 srd_ms)'}],
+     'params': [{'name': 'timer', 'in': 'query', 'type': 'string', 'desc': 'rrd_ms|srd_ms|sdd_ms|jitter_ms|sdt_s|floor_grant_ms|floor_taken_ms|floor_idle_ms|group_fanout_ms … (기본 srd_ms)'}],
      'response': '{id, timer, count, mean, min, max, p50, p95, p99, buckets[]: {ub, count}}', 'auth': _AUTH_MON},
     {'id': 'tester.run.sips', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs/{{id}}/sip',
      'summary': '워커가 올린 SIP 덤프 목록 — call_id·bytes·messages (워커 Sip.Capture: failed=실패한 인스턴스만 · all=전부)',

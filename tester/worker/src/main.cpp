@@ -94,6 +94,8 @@ int main(int argc, char** argv) {
         cfg.registerTimeoutS = (int)c["Timers"]["RegisterTimeoutS"].asInt(cfg.registerTimeoutS);
         cfg.inviteTimeoutMs = (int)c["Timers"]["InviteTimeoutMs"].asInt(cfg.inviteTimeoutMs);
         cfg.byeTimeoutMs = (int)c["Timers"]["ByeTimeoutMs"].asInt(cfg.byeTimeoutMs);
+        cfg.floorTimeoutMs = (int)c["Timers"]["FloorTimeoutMs"].asInt(cfg.floorTimeoutMs);
+        cfg.groupReuseGapMs = (int)c["Timers"]["GroupReuseGapMs"].asInt(cfg.groupReuseGapMs);
     }
     if (cfg.name.empty() || cfg.name == "worker") {
         char host[128] = { 0 };

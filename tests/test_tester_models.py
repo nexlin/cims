@@ -225,6 +225,40 @@ class TopologyV2(unittest.TestCase):
             with self.assertRaises(Exception):
                 TopologyMedia.model_validate({'samples': m_bad})
 
+    def test_ptt_group_session_rules(self):
+        """그룹 세션(group_call) 시나리오 규칙 — multi 역할 하나·같은 풀·group_call.from 단일/to multi·floor 는 group_call 뒤·1:1 단계 금지."""
+        def doc(flow, roles=None):
+            return {'id': 'T-PTT', 'roles': roles or {'t': {'pool': 'p'}, 'l': {'pool': 'p', 'multi': True}}, 'flow': flow}
+        ok = doc([{'step': 'register', 'who': ['t', 'l']}, {'step': 'group_call', 'from': 't', 'to': 'l', 'media': {'rtp': 'none'}},
+                  {'step': 'floor_request', 'who': ['t'], 'payload': 'granted', 'expect': {'floor_grant_ms': {'p95': 300}, 'floor_grant_pct': {'min': 100}}},
+                  {'step': 'media_hold', 'seconds': 2}, {'step': 'floor_release', 'who': ['t'], 'expect': {'floor_idle_ms': {'p95': 500}}},
+                  {'step': 'bye', 'who': ['t', 'l']}])
+        m, errs = validate('scenario', ok)
+        self.assertEqual(errs, [])
+        self.assertTrue(m.is_group_session())
+        self.assertEqual(m.multi_roles(), ['l'])
+        for bad, word in (
+            (doc([{'step': 'group_call', 'from': 'l'}]), '단일 역할'),
+            (doc([{'step': 'group_call', 'from': 't', 'to': 't'}]), 'multi 역할'),
+            (doc([{'step': 'floor_request', 'who': ['t']}, {'step': 'group_call', 'from': 't'}]), 'group_call 뒤'),
+            (doc([{'step': 'group_call', 'from': 't'}, {'step': 'floor_request', 'who': ['t'], 'payload': 'maybe'}]), 'payload'),
+            (doc([{'step': 'group_call', 'from': 't'}, {'step': 'answer', 'who': ['t']}]), '1:1'),
+            (doc([{'step': 'group_call', 'from': 't'}], {'t': {'pool': 'p'}, 'l': {'pool': 'q', 'multi': True}}), '같은 풀'),
+            (doc([{'step': 'group_call', 'from': 't'}], {'t': {'pool': 'p'}, 'l': {'pool': 'p', 'multi': True}, 'k': {'pool': 'p', 'multi': True}}), '하나만'),
+            (doc([{'step': 'invite', 'from': 't', 'to': 'l'}]), 'group_call 이 있는'),
+            (doc([{'step': 'group_call', 'to': 'l'}]), 'from'),
+            (doc([{'step': 'group_call', 'from': 't'}, {'step': 'bye', 'from': 't', 'group': 'g'}]), 'group 은'),
+        ):
+            self.assertTrue(any(word in e for e in validate('scenario', bad)[1]), (word, validate('scenario', bad)[1]))
+        # 풀 service · source.ptt_group
+        from services.tester_models import UePool
+        p = UePool.model_validate({'kind': 'ue', 'worker': 'w', 'access': 'csp', 'service': 'ptt',
+                                   'source': {'db': 'db', 'table': 'ptt_subscriptions', 'count': 5, 'ptt_group': 'g001'}})
+        self.assertEqual(p.service, 'ptt')
+        with self.assertRaises(Exception):
+            UePool.model_validate({'kind': 'ue', 'worker': 'w', 'access': 'csp',
+                                   'source': {'db': 'db', 'table': 'volte_subscriptions', 'count': 5, 'ptt_group': 'g001'}})
+
     def test_vocab_consistency(self):
         from services.tester_models import STEP_VOCAB, WORKER_STEPS, METRIC_NAMES, StepKind
         import typing

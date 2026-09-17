@@ -142,9 +142,22 @@ RTP 모드 `SetMediaMode(AUTO|NONE|EXPLICIT)`, 송출 제어 `MediaSend(코덱�
 inactive, RFC 3264 §8.4) 동안 송출 정지 `SetHoldPaused`, 송신 누계 `m_ullSentTotal`. 송신 스레드는 원천을 틱마다 다시 고르는 단일 루프 —
 원천 = AMR-WB raw(61 B 프레임)·G.711 raw(160 B/20 ms) 파일 또는 합성(G.711 = 상수 PCM, **AMR-WB = RFC 4867 NO_DATA 프레임을 협상 PT 로**
 — 세션 코덱과 다른 PT 를 내지 않는다). 파일 프레임은 프로세스 공유 캐시(호마다 다시 읽지 않는다). 정지 중에는 타임스탬프만 흐르고
-시퀀스는 멈춰 수신 측 손실 계산에 공백이 없다. 워커가 지원하는 단계(B) = `register`(prelude)·
-`invite`·`answer`·`reject`·`bye`·`media_hold`·`wait`·`expect`·`deregister`(epilogue). 나머지 단계는 run 시작 시 400 `unsupported_step`. `invite` 의 `expect.code` 가 300 이상이면 그 최종 응답이
-성공 조건이다(ACL 403·라우팅 reject) — 워커는 발신자의 최종 응답을 기다려 코드가 다르면 실패로 센다.
+시퀀스는 멈춰 수신 측 손실 계산에 공백이 없다 ⑥ **PTT 훅** — `OnAffiliate`(affiliation PUBLISH 최종 응답 + 지연) · `OnCallAnswered`(그룹
+fan-out INVITE 에 자동응답 200 = 합류 시각) · `OnFloor(subtype, tUs)`(floor 수신 스레드가 TS 24.380 메시지를 받은 시각 µs — `CRtpThread::IFloorSink`
+로 올린다; 지연 지표는 스케줄러 틱이 아니라 이 시각) · `SetGroupId`(affiliation 그룹을 Start 뒤에 정한다) · 로그아웃이 conference 구독도 내리고
+(`Event: conference` Expires 0), 로컬 `StopCall` 이 통화 상태를 내린다(다음 착신을 486 으로 거절하지 않게) · 시그널링 전용(`NONE`) 호에서도 floor
+수신 스레드는 뜬다(floor 는 RTP 와 별개의 제어 흐름). 워커가 지원하는 단계 = `register`(prelude)·`invite`·`answer`·`reject`·`bye`·`media_hold`·
+`wait`·`expect`·`deregister`(epilogue) + 피어 축·미디어 평면 + PTT `group_call`·`floor_request`·`floor_release`(§4). 나머지 단계는 run 시작 시 400
+`unsupported_step`. `invite`/`group_call` 의 `expect.code` 가 300 이상이면 그 최종 응답이 성공 조건이다(ACL 403·비멤버 403·라우팅 reject) — 워커는
+발신자의 최종 응답을 기다려 코드가 다르면 실패로 센다.
+
+**PTT 풀(`service: ptt`)의 단말** = MCPTT 단말(cspsim `-mode ptt` 승계): Contact feature tag `+g.3gpp.mcptt`·PTT 도메인, 착신은 **자동응답**
+(automatic commencement — 180 → 200 ms → 200, SDP 에 `m=application` floor 포트), floor 제어 = RTCP APP "MCPT"(TS 24.380 §8.2 subtype Request 0 ·
+Granted 1 · Taken 2 · Deny 3 · Release 4 · Idle 5 · Revoke 6 · Queue Position Info 9, FF_USER_ID TLV), XCAP 문서 GET 은 하지 않는다(xcap-diff NOTIFY 는
+받는다 — IdMS 토큰 부하는 후속). **단말 기동 절차** = `register` 단계가 REGISTER 200 뒤 GMS/CMS xcap-diff SUBSCRIBE → 그룹 affiliation PUBLISH(TS 24.379
+§9, 신원의 `ptt_group`) → conference SUBSCRIBE(RFC 4575) 를 이어 하고, prelude 는 affiliation 200 까지를 '준비됨' 으로 본다(`affiliated_ok/fail`·
+`affiliate_ms`). 가상 단말 하나 = affiliation 그룹 하나(다중 그룹 affiliation 은 후속). **미디어는 floor 를 가진 동안만** — PTT 단말의 `media.rtp: auto`
+는 수신만 시작하고 Granted 에 송출·Release/Revoke 에 정지한다(TS 24.380: 허가 없이 미디어를 내지 않는다). 발언자의 수신 0 은 무음 leg 로 세지 않는다.
 
 ### 3.2 `peer` 풀과 프로파일
 
@@ -281,7 +294,7 @@ target:
 pools:                                   # 풀 하나 = 워커 하나. 어디에 닿는지는 노드 id 참조. 워커 여럿에 나누려면 워커마다 풀 + 같은 group
   volte_ue_a: { kind: ue, worker: w1, group: volte_ue, access: csp, listener: tls, source: { db: db, table: volte_subscriptions, offset: 0, count: 1000 }, srtp: optional }   # listener 를 주면 transport 는 그 protocol
   volte_ue_b: { kind: ue, worker: w2, group: volte_ue, access: csp, source: { db: db, table: volte_subscriptions, offset: 1000, count: 1000 }, transport: tls, srtp: optional }
-  ptt_ue:   { kind: ue, worker: w1, access: csp, source: { creds: creds/ptt.jsonl }, transport: udp }
+  ptt_ue:   { kind: ue, worker: w1, service: ptt, access: csp, source: { creds: creds/ptt.jsonl }, transport: udp }   # MCPTT 단말 — creds 줄의 group = affiliation 그룹
   peer_kt:  { kind: peer, worker: w2, peering: csp, profile: ibcf, bind: { port: 5080, protocol: udp }, domain: ims.kt.test,
               identities: { e164_range: ["+82212340000", "+82212349999"], count: 200 }, seed: { route_set: rs-kt, priority: 100 } }
   peer_kt_dead: { kind: peer, worker: w2, peering: csp, profile: ibcf, bind: { port: 5081, protocol: udp }, domain: ims.kt.test, answer: silent,
@@ -314,6 +327,11 @@ layout:                                  # UI 배치 상태 — 캔버스 영역
   `group`** 과 맞으면 되고, 컴파일러는 워커마다 역할을 그 워커의 로컬 풀 하나로 해석한다(이름 또는 group 일치 — 워커당 같은 group 은 하나, group 은
   다른 풀 이름과 겹치지 않는다). **모든 역할이 해석되는 워커만 run 에 참여**하고, 그런 워커가 없으면 컴파일 오류. 워커 한 대만 쓰면 group 없이 이름만으로
   끝난다. 신원 범위를 워커에 나눠 보내는 컨트롤러 배분(§6.1)은 이 규칙으로 대체된다 — 워커에 내려가는 신원 = 그 워커 풀의 신원 전부.
+- **UE 풀 `service`** = 접속환경 클래스(sip_service_model `kind`: `volte` 이동 / `voip` 유선 / `ptt` MCPTT). 생략 = `source.table` 이
+  `ptt_subscriptions` 면 `ptt`, 그 외 `volte`. `ptt` 면 단말이 MCPTT 로 동작하고(§3.1) creds 도메인이 비면 노드 `sip.domains` 의 PTT 도메인을 쓴다.
+  **PTT 신원의 그룹** = creds JSONL 줄의 `group`(`cims-tester creds-from-db --table ptt_subscriptions` 가 가입자마다 첫 그룹을 적고, `--ptt-group <id>`
+  는 그 그룹 멤버만 priority 순으로) 또는 `source.db` 의 `ptt_group`(그 그룹 멤버만; 생략 = 가입자마다 첫 그룹 — `ptt_group_members`·`ptt_groups`).
+  워커 계약 `Identity.ptt_group`·`PoolCreate.service`.
 - **호스트 성격은 파생.** 워커만 = 계측기, 대상 노드만 = 대상, 둘 다 = 동거(허용 — CPU 지표는 워커 몫을 뺀 값으로 본다), 없음 = 빈 호스트. 필드로
   두지 않는다.
 - **`kind`.** `cims` 는 `oam` 노드가 있을 때 컬렉션 시드(§3.2)·`target_build` 를 쓴다. `ims`/`pbx` 는 시드 없음 — 피어 수신점으로의 라우팅은 대상 쪽에서
@@ -359,7 +377,9 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
   replaces/join/pickup/subscribe/publish/group_call/floor_request/floor_release/sds_send/sds_recv/media_hold/wait/expect`. 새 단계 = 워커 재빌드, 새 시나리오 = YAML 만.
   피어 축 단계(§3.2 D): `progress`(who — 183 early media) · `hold`/`resume`(who|from — re-INVITE) · `dtmf`(from + `payload` 숫자열) · `refer`(from + to) ·
   `bye`/`reject` 의 `cause`(Reason Q.850). 미디어 평면 단계: `media_send`(who + `sample`·`loop`·`after_ms`) · `media_stop`(who).
-  워커 지원 = `register/invite/progress/answer/reject/bye/hold/resume/dtmf/refer/media_hold/media_send/media_stop/wait/expect/deregister`.
+  PTT 단계: `group_call`(from = 발신 멤버, to = 합류를 기다릴 multi 역할(선택), `group` = 그룹 id 직접 지정(생략 = 인스턴스 그룹), `media`) ·
+  `floor_request`(who — `payload` = 기대 결과 `granted`(기본)|`denied`|`queued`|`any`) · `floor_release`(who).
+  워커 지원 = `register/invite/progress/answer/reject/bye/hold/resume/dtmf/refer/media_hold/media_send/media_stop/wait/expect/deregister/group_call/floor_request/floor_release`.
 - **실행 의미(워커)** — 흐름을 셋으로 나눈다. **prelude** = 앞쪽의 `register`(+`wait`) 단계: 역할 슬라이스의 단말 **전부**를 run 시작 때 한 번
   등록한다(`Timers.RegisterIntervalMs` 간격, 이미 등록된 단말은 재사용). **body** = 나머지: **시나리오 인스턴스** 하나가 실행하는 단위 — 인스턴스는
   `rate_saps` 로 발생하고(토큰 버킷), 역할마다 free 단말을 하나씩 잡아 단계를 차례로 실행한 뒤 돌려준다. free 단말이 모자라면 그 슬롯은 `skipped`
@@ -367,6 +387,18 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
   body 안의 `register/deregister` 는 거절한다. `invite` 는 비동기(다음 단계로 바로 진행), `answer/reject` 는 착신 도착을 기다렸다가 `after_ms` 뒤
   응답하고 발신자 확립(또는 최종 응답)까지 기다린다, `media_hold` 는 확립을 기다린 뒤 `seconds` 유지하고 끝에 RTP 품질 표본을 뜬다,
   `bye` 는 BYE 최종 응답(SDD)까지 기다린다. 어느 대기든 시한(`Timers.InviteTimeoutMs`·`ByeTimeoutMs`)을 넘기면 인스턴스 실패 + event.
+- **그룹 세션(PTT)** — body 에 `group_call` 이 있으면 인스턴스 하나 = **MCPTT 그룹 하나**다. 워커는 준비된(등록·affiliation 된) 멤버 전원이 free 인
+  그룹을 순환 선택해 **단일 역할에 멤버를 하나씩**(`group_call.from` 먼저, 그다음 body 등장 순), **`multi: true` 역할(하나만)에 나머지 전부**를
+  배정한다. 그래서 역할은 모두 같은 풀(`service: ptt`)이어야 하고 신원 창을 나누지 않는다(`disjoint_from`/`count` 무관, 모든 역할 = 풀 전체);
+  멤버가 `단일 역할 수 + (multi 있으면 1)` 보다 적은 그룹은 쓰지 않는다(쓸 그룹이 없으면 컴파일 오류, 계획 미리보기 `group_session` — Little 검산의
+  자원은 신원이 아니라 **쓸 수 있는 그룹 수**). 세션을 닫은 그룹은 `Timers.GroupReuseGapMs`(1 s) 뒤에 다시 잡는다(멤버 leg 정리 BYE 가 끝날 시간).
+  1:1 호 단계(invite/answer/…)는 그룹 세션 시나리오에 섞지 않는다. 단계 의미 — `group_call`: from 이 그룹 URI 로 INVITE(대상이 affiliation 멤버에게
+  fan-out, 멤버는 자동응답), 완료 = 발신자 200(SRD) + to 멤버 전원 합류(`group_fanout_ms` = INVITE → 마지막 합류; 단말 자동응답의 180→200 200 ms 포함).
+  `floor_request`: who 전원이 Floor Request 를 내고 결과(Granted/Deny/Queue Position Info)가 다 나올 때까지(`Timers.FloorTimeoutMs` 5 s) — Granted 에
+  송출 시작, 결과가 `payload` 와 다르면 인스턴스 실패(여럿이 동시에 요청하면 하나가 잡고 나머지는 큐 — 큐는 기대가 granted 가 아니거나 다른
+  요청자가 잡았을 때 결과로 본다). `floor_release`: floor 를 가진(또는 큐에 있는) who 가 Release, 완료 = 해제한 발언자가 Idle(또는 다음 발언자의
+  Taken)을 받음. `bye`: `from` 하나 또는 `who` 여럿(multi 역할 포함 — 각자 BYE, 응답 전부 대기; SCR 분자는 발신자 leg 만). 인스턴스가 끝나면 남은 멤버
+  leg 는 워커가 BYE 로 정리한다. 동봉 예 = `PTT-GROUP-CALL-BASIC`(개시·floor·유지·해제·종료) · `PTT-FLOOR-HANDOVER`(점유 중 요청 → 큐/거절 → 넘기기).
 - **역할의 풀** — `roles.X.pool` 은 토폴로지 풀 **이름 또는 `group`**(논리 풀 이름, §4). 워커마다 그 워커의 로컬 풀 하나로 해석된다
   (`tester_compile.resolve_roles`). 워커가 지원하지 않는 단계(`WORKER_STEPS` 밖)와 행위자 kind 게이트 위반(`STEP_VOCAB.kind` — progress/refer 는
   피어, PTT 단계는 UE)은 컴파일 오류다.
@@ -416,7 +448,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 | 부하 | SApS · 동시 세션 · DOC · IHS | 단계별 시도율, 순간 동시, 설계 목표 용량(IHS 임계 넘기 직전 단계), 부적절 처리 비율 |
 | 미디어 | 손실 % · 지터 ms · 단방향 무음 · MOS 추정 | RTP seq/timestamp(RFC 3550), RTCP 수신 시 상대 보고, G.107 E-model R→MOS(선택). 카운터 `rtp_tx`·`rtp_rx`·`rtp_lost`·`rtp_silent_legs`(표본 시점에 수신 0 인 단말)·`media_send`·`media_stop`·`skipped_rtp_cap`, 게이지 `rtp_streams`. 표본은 `media_hold` 를 지난 인스턴스의 `bye` 진입 때(`rtp: none` 호는 뜨지 않는다). 워커 디버그 로그에 단말별 `rtp sample <역할>: tx rx lost jitter` |
 | 피어 트렁크 | `early_media_pct` · `early_rtp_pct` · `prack_pct` · `dtmf_rx_pct` · `q850_rx_pct` · re-INVITE/REFER 코드 | 발신기 관측 비율(`RATIO_METRICS` — 분자/분모 카운터 정의 단일): 183+SDP 도달/183 송신, **200 전에 RTP(≥ 5 패킷)를 받은 발신자/183 송신**, PRACK 수신/신뢰 183, DTMF 수신 이벤트/송신 숫자, Reason 수신/송신. B2BUA 투과 여부를 말한다. `early_media_pct` 는 시그널링(183 의 SDP 가 발신자에 닿았는가), `early_rtp_pct` 는 미디어 평면(링백 RTP 가 실제로 닿았는가 — 미디어 앵커가 18x SDP 를 반영해야 100 %)이다 |
-| PTT | floor request→granted · taken 도달 · queue 대기 · 그룹 fan-out 완료 시간 | TS 24.380 메시지 시각 |
+| PTT | `affiliate_ms` · `group_fanout_ms` · `floor_grant_ms` · `floor_taken_ms` · `floor_queue_ms` · `floor_idle_ms` · `floor_grant_pct` | TS 24.380 메시지 **수신 시각**(floor 스레드, µs)으로 잰다: affiliation PUBLISH → 200 · 그룹 INVITE → 마지막 멤버 합류(자동응답) · Floor Request → Granted(큐를 거치지 않은 요청) · Request → 다른 참가자의 Taken 도달 · 큐를 거친 Request → Granted · Release → 발언자의 Idle. 비율 `floor_grant_pct` = `floor_granted`/`floor_request_tx`. 카운터 `affiliated_ok/fail`·`group_calls`·`group_joined`·`floor_request_tx`·`floor_granted`·`floor_denied`·`floor_queued`·`floor_revoked`·`floor_release_tx`·`floor_taken_rx`·`floor_idle_rx`. 그룹 세션의 leg = 발신자 1 + 합류 멤버 수 |
 | MCData | SDS 전달 지연 · disposition 회신율 | TS 24.282 |
 | 대상 측 | 호스트 CPU·메모리·load · 알람 발생 · 이벤트 · 녹취 생성 | **대상 관측**(`services/tester_observe.py`) — 원천 = 대상 OAM API(토큰은 §3 대상 OAM 규칙). ① **호스트 자원**: oam 노드 `observe` 에 `agent_heartbeat`(또는 `oam_stats`)가 있으면 run 동안 `GET /api/v1/agents/{id}/metrics`(약 3 s 간격)를 모아 `metrics.sqlite` `target(t, agent, cpu_pct, mem_pct, load)` + SSE `target` + 요약 `target_cpu_peak_pct` — 관측 대상 agent = 대상 노드 `procs` 와 패키지/프로세스 이름이 맞는 배포의 agent. `stop_on.target_cpu_pct` 는 agent 별 최근 3 표본 평균의 최댓값으로 판정한다(관측이 꺼져 있으면 미적용 + 참고). 프로세스별 CPU 는 heartbeat 에 없다 — 호스트 SSH 관측(`hosts.*.ssh`) 몫(후속). ② **증거 판정**(`target_evidence`, 2차): run 창(시작 −2 s ~ 종료 +10 s)으로 `recording_created`=`/recordings` · `alarm_raised`=`/alerts`(code, cleared 제외) · `event_logged`=`/events`(code) 건수를 세어 min/max 와 비교 — 어긋나면 run 은 fail, 원천을 못 읽은 항목(`log_errors` 는 OAM API 에 원천이 없다·대상 OAM 미도달)은 `ok=null` 로 판정에서 빼고 참고로만 남긴다(대상 OAM 이 죽었다고 시험이 뒤집히지 않는다). 운영자 중단·오류 run 은 판정하지 않는다 |
 
@@ -552,7 +584,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 
 | 구분 | 역할 | 계측기 도입 후 |
 |---|---|---|
-| `cims-verify` S1~S6 | 상용 배포 게이트(정적·빌드·스모크·패키징·배포·통합) | 유지. S3/S6 의 **시나리오 항목**이 `cims.sh sim` 대신 `cims-tester run <scenario> --json` 을 호출하도록 단계적 이전 — 다리 = `verify/lib/common/tester.py` `run_tester_scenario`(환경변수 `CIMS_TESTER_URL`·`CIMS_TESTER_TOPOLOGY`·토큰/계정; 없으면 `None` → 그 항목의 cspsim 경로, 설정했는데 못 닿으면 FAIL). 항목 판정 = 계측기 verdict, 보고서에 run id·결과 화면 경로. 이전된 항목: `S6-SCN-VOLTE-VOICE` → `VOLTE-CALL-BASIC`. 나머지는 시나리오가 확정되는 대로 같은 방식으로 옮긴다(PTT 항목은 워커 PTT 단계 구현 뒤). 게이트 판정·불변성·보고서는 그대로 |
+| `cims-verify` S1~S6 | 상용 배포 게이트(정적·빌드·스모크·패키징·배포·통합) | 유지. S3/S6 의 **시나리오 항목**이 `cims.sh sim` 대신 `cims-tester run <scenario> --json` 을 호출하도록 단계적 이전 — 다리 = `verify/lib/common/tester.py` `run_tester_scenario`(환경변수 `CIMS_TESTER_URL`·`CIMS_TESTER_TOPOLOGY`·토큰/계정; 없으면 `None` → 그 항목의 cspsim 경로, 설정했는데 못 닿으면 FAIL). 항목 판정 = 계측기 verdict, 보고서에 run id·결과 화면 경로. 이전된 항목: `S6-SCN-VOLTE-VOICE` → `VOLTE-CALL-BASIC` · `S6-SCN-PTT-VOICE` → `PTT-GROUP-CALL-BASIC`(토폴로지에 `service: ptt` 풀 필요; 다리가 cspsim 헬퍼와 같은 상태 키 `S6_PTT_VOICE_T0/_TAIL/_RC` 를 남겨 `S6-MCPTT-FLOOR-GRANT` 의 CMP flow 창이 그대로 선다). 나머지는 시나리오가 확정되는 대로 같은 방식으로 옮긴다. 게이트 판정·불변성·보고서는 그대로 |
 | `oam-svc` `verification`(`/release/verify`) | 게이트 실행·이력 콘솔 | 유지. 동거 형태에서는 같은 base 뒤에 있으므로 검증 결과에 계측기 run 링크(`/test/runs/<id>`)를 남긴다(교차 참조). 두 모듈 사이 코드 의존은 없다 |
 | `cspsim` | 경량 UE·mock peer CLI | `libcsim` 위의 얇은 CLI 로 유지(기존 플래그 호환). 이전이 끝난 항목부터 의존 제거 |
 | `cimsue-cli` | 실스택 UE | 계측기 `real-ue` 로 편입, 수동 부록에서 자동 표본 검사로 |

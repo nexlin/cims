@@ -16,6 +16,7 @@ import json
 import os
 import ssl
 import subprocess
+import time
 import urllib.request
 from typing import Dict, List, Optional
 
@@ -72,11 +73,16 @@ def summarize(rec: dict) -> List[str]:
 
 def run_tester_scenario(ctx: VerifyContext, item_id: str, title: str, scenario_id: str, stage: int,
                         instances: int = 1, ht: Optional[int] = None, binds: Optional[Dict[str, object]] = None,
-                        timeout: int = 240) -> Optional[ItemResult]:
-    """계측기로 시나리오 단발 실행 → ItemResult. 계측기 설정(환경변수)이 없으면 None — 호출자가 cspsim 경로로 간다."""
+                        timeout: int = 240, state_prefix: Optional[str] = None) -> Optional[ItemResult]:
+    """계측기로 시나리오 단발 실행 → ItemResult. 계측기 설정(환경변수)이 없으면 None — 호출자가 cspsim 경로로 간다.
+    `state_prefix` 가 있으면 cspsim 헬퍼(run_scenario)와 같은 키로 `<PREFIX>_T0`(시작 시각)·`<PREFIX>_RC` 를 남긴다 — 후속 read-only 항목
+    (S6-MCPTT-FLOOR-GRANT 의 CMP flow 창 등)이 어느 경로였든 같은 상태를 읽는다. `_TAIL` 은 계측기 요약 줄."""
     cfg = tester_config()
     if cfg is None:
         return None
+    t0 = time.time()
+    if state_prefix:
+        ctx.state[f'{state_prefix}_T0'] = t0
     ctx.w(f'### {item_id} — {title}')
     ctx.w(f"- 계측기 `{scenario_id}` @ {cfg['url']} · 토폴로지 {cfg['topology']} · 인스턴스 {instances}")
     try:
@@ -104,6 +110,9 @@ def run_tester_scenario(ctx: VerifyContext, item_id: str, title: str, scenario_i
         return ItemResult(id=item_id, name=title, status=ItemStatus.FAIL, detail=f'계측기 응답 이상(rc={proc.returncode})\n{tail}', stage=stage)
     lines = summarize(rec)
     ok = rec.get('verdict') == 'pass'
+    if state_prefix:
+        ctx.state[f'{state_prefix}_TAIL'] = '\n'.join(lines)
+        ctx.state[f'{state_prefix}_RC'] = 0 if ok else 1
     for ln in lines:
         ctx.w(f'- {ln}')
     ctx.w(f"- {'[PASS]' if ok else '[FAIL]'} 계측기 verdict={rec.get('verdict')} — 결과 화면 `/test/results?id={rec.get('id')}`")

@@ -55,7 +55,7 @@ export interface ScenarioDoc {
   id: string
   title?: string
   tags?: string[]
-  roles?: Record<string, { pool: string; disjoint_from?: string; count?: number }>
+  roles?: Record<string, { pool: string; disjoint_from?: string; count?: number; multi?: boolean }>
   flow?: ScenarioStep[]
   target_evidence?: { kind: string; min?: number; max?: number; code?: string }[]
 }
@@ -106,7 +106,9 @@ export interface TopoNode {
 export interface TopoPoolBase { worker: string; group?: string }
 export interface UePoolDoc extends TopoPoolBase {
   kind: 'ue'; access: string; listener?: string
-  source: { creds: string; offset?: number; count?: number } | { db: string; table: string; offset?: number; count: number }
+  source: { creds: string; offset?: number; count?: number } | { db: string; table: string; offset?: number; count: number; ptt_group?: string }
+  /** 접속환경 클래스 — ptt 면 MCPTT 단말(PTT 도메인·GMS/CMS 구독·그룹 affiliation·floor). 생략 = table 이 ptt_subscriptions 면 ptt, 그 외 volte */
+  service?: 'volte' | 'voip' | 'ptt'
   transport?: Transport; srtp?: 'off' | 'optional' | 'required'; register_expires?: number; prack?: boolean; dtmf?: boolean
 }
 export interface PeerPoolDoc extends TopoPoolBase {

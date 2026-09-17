@@ -396,6 +396,7 @@ SimSession::SimSession(int id,
     m_pSipClient->m_pRtpThread  = &m_clsRtpThread;
     m_pSipClient->m_pInviteId   = &m_strInviteId;
     m_pSipClient->m_pUserAgent  = &m_clsUserAgent;
+    m_clsRtpThread.SetFloorSink(this);
 
     m_clsServerInfo.m_strIp          = m_strServerIp;
     m_clsServerInfo.m_strDomain      = m_strDomain;
@@ -958,7 +959,8 @@ void SimSession::SendUnsubscribe(const std::string& strPsi,
     pMsg->m_iMaxForwards = 70;
     pMsg->AddHeader("Expires", "0");
     // reg-event 다이얼로그(자신의 AoR 구독)면 Event: reg, 그 외 xcap-diff
-    pMsg->AddHeader("Event", strCallId == m_strRegSubCallId ? "reg" : "xcap-diff");
+    // 다이얼로그별 이벤트 패키지 — reg-event(자신의 AoR) / conference(그룹 참가자 정보) / 그 외 xcap-diff
+    pMsg->AddHeader("Event", strCallId == m_strRegSubCallId ? "reg" : strCallId == m_strConfSubCallId ? "conference" : "xcap-diff");
 
     char szContact[128];
     snprintf(szContact, sizeof(szContact), "<sip:%s@%s:%d>",
@@ -998,6 +1000,11 @@ void SimSession::Logout()
     if (m_bRegSubscribed) {
         SendUnsubscribe(m_strUser, m_strRegSubCallId, m_iRegSubSeq, m_strRegSubFromTag);
         m_bRegSubscribed = false;
+    }
+    // conference 구독(RFC 4575)도 내린다 — 안 내리면 서버에 구독이 만료(3600 s)까지 쌓여 NOTIFY 가 죽은 주소로 퍼진다
+    if (m_iConfSubStatus == 200 && !m_strConfSubCallId.empty()) {
+        SendUnsubscribe(m_strConfSubGroup, m_strConfSubCallId, m_iConfSubSeq, m_strConfSubFromTag);
+        m_strConfSubCallId.clear();
     }
 
     // 3. REGISTER Expires=0 — m_clsUserAgent.Stop() 내부에서 자동 전송되므로 여기서는 생략
@@ -1060,6 +1067,7 @@ void SimSession::AffiliateGroup(bool bDeaffiliate) {
 
     printf("[%d] %s group=%s Call-ID=%s\n", m_iId, bDeaffiliate ? "DE-AFFILIATE" : "AFFILIATE",
            m_strGroupId.c_str(), szCallId);
+    if (!bDeaffiliate) { m_strAffCallId = szCallId; m_tAffStartMs = NowMs(); }
     m_clsUserAgent.m_clsSipStack.SendSipMessage(pMsg);
 }
 
@@ -1238,6 +1246,8 @@ void SimSession::StopCall() {
         m_clsUserAgent.StopCall(m_strInviteId.c_str());
         m_clsRtpThread.Stop();
         m_strInviteId.clear();
+        // 로컬 종료는 psip 이 EventCallEnd 를 올리지 않는다 — 여기서 통화 상태를 내려야 다음 착신을 486(이미 통화 중)으로 거절하지 않는다
+        m_bInCall = false;
     } else {
         printf("[%d] [TD] StopCall NOOP (no inviteId) inCall=%d\n", m_iId, m_bInCall ? 1 : 0);
     }
@@ -1305,6 +1315,9 @@ void SimSession::StartGroupCall(const std::string& strGroupId) {
 //  RTP Floor Control
 // ─────────────────────────────────────────────
 // TS 24.380 §8.2 subtype: Floor Request=0, Floor Release=4 (CMP/단말 FloorCodec 와 동일).
+void SimSession::OnFloorMessage(int iSubtype, long long tUs) {
+    if (m_pObserver) m_pObserver->OnFloor(this, iSubtype, tUs);
+}
 void SimSession::SendPttRequest()  { if (m_bPttMode) m_clsRtpThread.SendFloorControl(0); }
 void SimSession::SendPttRelease()  { if (m_bPttMode) m_clsRtpThread.SendFloorControl(4); }
 
@@ -1567,6 +1580,14 @@ bool SimSession::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
     //   affiliation E2E(멤버=200 / 비멤버=403) 를 검증 가능하게 한다.
     if (pclsMessage->m_clsCSeq.m_strMethod == "PUBLISH") {
         int st = pclsMessage->m_iStatusCode;
+        if (m_pObserver && st >= 200 && !m_strAffCallId.empty()) {
+            std::string strPubId;
+            pclsMessage->GetCallId(strPubId);
+            if (strPubId == m_strAffCallId) {
+                m_strAffCallId.clear();
+                m_pObserver->OnAffiliate(this, m_strGroupId, st, NowMs() - m_tAffStartMs);
+            }
+        }
         if (st / 100 == 2) {
             m_stats.iAffiliateOk++;
             CSipHeader* pEtag = pclsMessage->GetHeader("SIP-ETag");
@@ -2045,6 +2066,7 @@ void SessionSipClient::AnswerPtt(const char* pszCallId, CSipCallRtp* pclsRtp, CS
     m_pOwner->m_bInCall = true;
     m_pOwner->m_stats.iCallOk++;
     printf("[%d] [PTT] Call accepted (group invite)\n", m_pOwner->m_iId);
+    if (m_pOwner->m_pObserver) m_pOwner->m_pObserver->OnCallAnswered(m_pOwner, pszCallId);
 }
 
 /** VoIP 착신 응답 — SRTP 협상 + 200 OK + RTP 송신 시작. auto 모드(EventIncomingCall)와 deferred 모드

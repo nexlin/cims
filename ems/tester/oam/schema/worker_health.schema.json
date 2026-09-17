@@ -37,9 +37,35 @@
     "WorkerPoolState": {
       "additionalProperties": false,
       "properties": {
+        "affiliated": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "service=ptt — 그룹 affiliation 200 을 받은 단말 수",
+          "title": "Affiliated"
+        },
         "endpoints": {
           "title": "Endpoints",
           "type": "integer"
+        },
+        "groups": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "service=ptt — 이 풀 신원이 속한 MCPTT 그룹 수",
+          "title": "Groups"
         },
         "kind": {
           "enum": [
@@ -58,6 +84,23 @@
           "default": 0,
           "title": "Registered",
           "type": "integer"
+        },
+        "service": {
+          "anyOf": [
+            {
+              "enum": [
+                "volte",
+                "voip",
+                "ptt"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Service"
         }
       },
       "required": [

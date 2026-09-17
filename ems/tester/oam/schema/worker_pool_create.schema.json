@@ -89,6 +89,19 @@
           "default": null,
           "title": "Password"
         },
+        "ptt_group": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "service=ptt — 이 단말이 affiliation 하는 MCPTT 그룹 id(가상 단말 하나 = 그룹 하나)",
+          "title": "Ptt Group"
+        },
         "user": {
           "title": "User",
           "type": "string"
@@ -486,6 +499,17 @@
       "description": "kind=ue — 100rel/PRACK",
       "title": "Prack",
       "type": "boolean"
+    },
+    "service": {
+      "default": "volte",
+      "description": "kind=ue — ptt 면 MCPTT 단말(기동 절차·자동응답·floor)",
+      "enum": [
+        "volte",
+        "voip",
+        "ptt"
+      ],
+      "title": "Service",
+      "type": "string"
     },
     "srtp": {
       "default": "off",

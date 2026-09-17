@@ -2,6 +2,7 @@
 // 누적 시각, 검증(vocab 기반 — 컨트롤러 Scenario 모델과 같은 규칙 + kind 게이트 + in-dialog + during), YAML 직렬화(동봉 파일 꼴, 머리 주석 보존).
 // YAML → 문서는 컨트롤러 POST /validate 가 돌려준 doc 을 쓴다(파서는 서버 하나).
 import type { ScenarioDoc, ScenarioStep, TopologyDoc, PoolDoc, ScenarioVocab } from '@tester/api/tester'
+import { poolService } from './topology-model'
 
 export interface During { at_s: number; step: 'dtmf' | 'hold' | 'resume' | 'refer' | 'media_send' | 'media_stop'; who?: string[]; from?: string; to?: string; payload?: string; sample?: string; loop?: boolean; expect?: Record<string, unknown> }
 export interface Step extends ScenarioStep { during?: During[]; group?: string }
@@ -22,18 +23,22 @@ export const DURING_OK = new Set([...INDIALOG, ...MEDIA_CTL])
 export const thrOp = (q: string) => (q === 'min' ? '≥' : '≤')
 export const roles = (sc: Doc) => Object.keys(sc.roles ?? {})
 
-export interface Resolved { pools: Record<string, PoolDoc>; kind: 'ue' | 'peer' | 'real-ue'; logical: string; byName: boolean }
+export interface Resolved { pools: Record<string, PoolDoc>; kind: 'ue' | 'peer' | 'real-ue'; logical: string; byName: boolean; service: 'volte' | 'voip' | 'ptt' }
+/** 그룹 세션 시나리오 — group_call 이 있으면 인스턴스 = MCPTT 그룹 하나(단일 역할 = 멤버 하나씩, multi 역할 = 나머지 전부) */
+export const isGroupSession = (sc: Doc) => (sc.flow ?? []).some(s => s.step === 'group_call')
+export const multiRoles = (sc: Doc) => Object.entries(sc.roles ?? {}).filter(([, r]) => r.multi).map(([n]) => n)
+export const FLOOR_OUTCOMES = ['granted', 'denied', 'queued', 'any']
 export function resolvePool(sc: Doc, topo: TopologyDoc | null, role: string): Resolved | null {
   const r = sc.roles?.[role]; if (!r || !topo) return null
   const name = r.pool
-  if (topo.pools?.[name]) return { pools: { [name]: topo.pools[name] }, kind: topo.pools[name].kind, logical: name, byName: true }
+  if (topo.pools?.[name]) return { pools: { [name]: topo.pools[name] }, kind: topo.pools[name].kind, logical: name, byName: true, service: poolService(topo.pools[name]) }
   const g = Object.entries(topo.pools ?? {}).filter(([, p]) => p.group === name)
-  if (g.length) return { pools: Object.fromEntries(g), kind: g[0][1].kind, logical: name, byName: false }
+  if (g.length) return { pools: Object.fromEntries(g), kind: g[0][1].kind, logical: name, byName: false, service: poolService(g[0][1]) }
   return null
 }
 export function roleKindTag(sc: Doc, topo: TopologyDoc | null, role: string): string {
   const r = resolvePool(sc, topo, role); if (!r) return '?'
-  const p = Object.values(r.pools)[0]; return p.kind === 'peer' ? p.profile : p.kind
+  const p = Object.values(r.pools)[0]; return p.kind === 'peer' ? p.profile : r.service === 'ptt' ? 'ptt' : p.kind
 }
 
 export function phases(sc: Doc): { pre: number; epi: number } {
@@ -51,6 +56,8 @@ export function sessions(sc: Doc): Session[] {
   const out: Session[] = []; const open: Session[] = []
   ;(sc.flow ?? []).forEach((s, i) => {
     if (s.step === 'invite' && s.from && s.to) { open.push({ a: s.from, b: s.to, start: i, est: null, end: -1, prog: null }); return }
+    // 그룹 세션 — group_call 완료 = 발신자 200 + 멤버 자동응답, 그 행에서 확립된 것으로 본다(to 없으면 발신자 혼자 열린 세션)
+    if (s.step === 'group_call' && s.from) { open.push({ a: s.from, b: s.to ?? s.from, start: i, est: i, end: -1, prog: null }); return }
     if ((s.step === 'answer' || s.step === 'progress') && s.who) { const o = open.find(x => x.est == null && s.who!.includes(x.b)) ?? open.find(x => x.est == null); if (!o) return; if (s.step === 'answer') o.est = i; else if (o.prog == null) o.prog = i; return }
     if (s.step === 'refer' && s.from && s.to) { const o = open.find(x => x.est != null && (x.a === s.from || x.b === s.from)); if (o) { o.end = i; open.splice(open.indexOf(o), 1); out.push(o); open.push({ a: o.a === s.from ? o.b : o.a, b: s.to, start: i, est: null, end: -1, prog: null, via: 'refer' }) } return }
     if (s.step === 'bye' || s.step === 'reject') { const who = s.from ?? (s.who ?? [])[0]; const o = open.find(x => x.a === who || x.b === who) ?? open[0]; if (o) { o.end = i; open.splice(open.indexOf(o), 1); out.push(o) } }
@@ -108,6 +115,10 @@ export function validate(sc: Doc, topo: TopologyDoc | null, vocab: ScenarioVocab
     }
     if (s.step === 'refer' && !(s.from && s.to)) E(who, 'refer 는 from(전달자)과 to(전달 대상)가 필요하다', ref)
     if (s.step === 'invite' && !s.to) E(who, 'invite 는 to 가 필요하다', ref)
+    if (s.step === 'group_call' && !s.from) E(who, 'group_call 은 from(발신 멤버 역할)이 필요하다', ref)
+    if (s.step === 'floor_request' && s.payload != null && !FLOOR_OUTCOMES.includes(s.payload)) E(who, `floor_request 의 payload(기대 결과)는 ${FLOOR_OUTCOMES.join('|')} 중 하나`, ref)
+    if (s.group != null && s.step !== 'group_call') E(who, 'group 은 group_call 에만 둔다', ref)
+    if (s.media?.rtp && s.media.rtp !== 'auto' && s.step !== 'invite' && s.step !== 'group_call') E(who, 'media.rtp 는 invite/group_call 에만 둔다', ref)
     if (s.step === 'dtmf' && !(s.payload && /^[0-9*#A-Da-d]+$/.test(s.payload))) E(who, 'dtmf 는 payload 숫자열(0-9 * # A-D)이 필요하다', ref)
     if (s.cause != null && !['bye', 'reject'].includes(s.step)) E(who, 'cause 는 bye/reject 에만 둔다', ref)
     for (const k of Object.keys(s.expect ?? {})) if (vocab && !vocab.metrics[k]) E(who, `알 수 없는 지표 '${k}'`, ref)
@@ -119,6 +130,7 @@ export function validate(sc: Doc, topo: TopologyDoc | null, vocab: ScenarioVocab
       const rp = resolvePool(sc, topo, a); if (!rp) continue
       if (D?.kind === 'peer' && rp.kind !== 'peer') E(who, `${s.step} 의 행위자 '${a}' 는 피어 풀이어야 한다 (${rp.logical} = ${rp.kind})`, ref)
       if (D?.kind === 'ue' && rp.kind === 'peer') E(who, `${s.step} 의 행위자 '${a}' 는 UE 풀이어야 한다`, ref)
+      if (D?.kind === 'ptt' && !(rp.kind === 'ue' && rp.service === 'ptt')) E(who, `${s.step} 의 행위자 '${a}' 는 service=ptt UE 풀이어야 한다 (${rp.logical} = ${rp.kind}${rp.kind === 'ue' ? ' · ' + rp.service : ''})`, ref)
       if (D?.kind === 'ue|trunk' && rp.kind === 'peer' && !(Object.values(rp.pools)[0] as { register?: unknown }).register) E(who, `역할 '${a}' 의 피어 풀에는 register(트렁크 계정)가 없다 — 고정 IP 피어는 등록하지 않는다`, ref)
     }
     if (s.cause != null) { const a = s.from ?? (s.who ?? [])[0]; const rp = a ? resolvePool(sc, topo, a) : null; if (rp && rp.kind !== 'peer') E(who, 'cause(Reason Q.850) 는 피어 역할만 보낸다', ref) }
@@ -152,15 +164,39 @@ export function validate(sc: Doc, topo: TopologyDoc | null, vocab: ScenarioVocab
   })
   const referenced = new Set((sc.flow ?? []).flatMap(s => [...(s.who ?? []), s.from, s.to]).filter(Boolean))
   for (const n of roles(sc)) if (!referenced.has(n)) I(`roles.${n}`, '흐름에서 참조되지 않는 역할 — 풀만 열린다(failover 상대 등)', { kind: 'role', id: n })
+  // 그룹 세션(group_call) 규칙 — 컨트롤러 Scenario._check_group_session 과 같다
+  const multi = multiRoles(sc)
+  if (!isGroupSession(sc)) {
+    for (const m of multi) E(`roles.${m}`, 'multi 는 group_call 이 있는 시나리오에만 둔다', { kind: 'role', id: m })
+    ;(sc.flow ?? []).forEach((s, i) => { if (s.step === 'floor_request' || s.step === 'floor_release') E(`flow[${i}]`, `${s.step} 는 group_call 뒤에만 둔다`, { kind: 'step', idx: i }) })
+  } else {
+    if (multi.length > 1) E('roles', `multi 역할은 하나만 둔다(그룹의 나머지 멤버) — ${multi.join(', ')}`, { kind: 'role', id: multi[1] })
+    const pools = new Set(Object.values(sc.roles ?? {}).map(r => r.pool))
+    if (pools.size > 1) E('roles', `그룹 세션 시나리오의 역할은 모두 같은 풀이어야 한다 — ${[...pools].join(', ')}`, { kind: 'scenario' })
+    let inS = false
+    ;(sc.flow ?? []).forEach((s, i) => {
+      const ref: Sel = { kind: 'step', idx: i }, who = `flow[${i}]`
+      if (['invite', 'answer', 'reject', 'progress', 'refer', 'hold', 'resume', 'dtmf'].includes(s.step)) E(who, `${s.step} — 그룹 세션 시나리오에는 1:1 호 단계를 섞지 않는다`, ref)
+      if (s.step === 'group_call') {
+        if (s.from && multi.includes(s.from)) E(who, `group_call.from='${s.from}' 은 단일 역할이어야 한다`, ref)
+        if (s.to && !multi.includes(s.to)) E(who, `group_call.to='${s.to}' 는 multi 역할이어야 한다(합류를 기다릴 나머지 멤버)`, ref)
+        if (!s.to) I(who, 'to 가 없다 — 발신자 200 만 기다린다(멤버 합류·group_fanout_ms 표본 없음)', ref)
+        inS = true
+      } else if ((s.step === 'floor_request' || s.step === 'floor_release') && !inS) E(who, `${s.step} 는 group_call 뒤에만 둔다`, ref)
+      else if (s.step === 'bye') inS = false
+    })
+  }
   return out
 }
 
 // ── 편집 조작 ─────────────────────────────────────────────────────────────
 export function newStep(kind: string, sc: Doc, topo: TopologyDoc | null, vocab: ScenarioVocab | null): Step {
   const R = roles(sc); const isPeer = (n: string) => resolvePool(sc, topo, n)?.kind === 'peer'
-  const peer = R.find(isPeer), ue = R.find(n => !isPeer(n)) ?? R[0]
+  const M = multiRoles(sc); const single = R.filter(n => !M.includes(n))
+  const peer = R.find(isPeer), ue = single.find(n => !isPeer(n)) ?? R.find(n => !isPeer(n)) ?? R[0]
   const D = vocab?.steps[kind]
   const s: Step = { step: kind }
+  if (kind === 'group_call') { s.from = ue; if (M[0]) s.to = M[0]; s.media = { audio: 'amr-wb' }; return s }
   if (D?.actor === 'who') s.who = [D.kind === 'peer' ? (peer ?? R[0]) : (ue ?? R[0])].filter(Boolean)
   else if (D?.actor === 'from') s.from = D.kind === 'peer' ? (peer ?? R[0]) : (ue ?? R[0])
   else if (D?.actor === 'fromto') { s.from = D.kind === 'peer' ? (peer ?? R[0]) : (ue ?? R[0]); s.to = R.find(x => x !== s.from) ?? R[0] }

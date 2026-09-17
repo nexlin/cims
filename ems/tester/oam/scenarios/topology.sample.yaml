@@ -52,9 +52,10 @@ pools:                                   # 풀 하나 = 워커 하나. 워커 �
     transport: tls
     srtp: optional
     prack: true
-  ptt_ue:
+  ptt_ue:                                # MCPTT 단말 — service: ptt (PTT 도메인·GMS/CMS 구독·그룹 affiliation·floor). creds 줄마다 `group` = affiliation 그룹
     kind: ue
     worker: w1
+    service: ptt
     access: csp
     source: { creds: creds/ptt.jsonl }
     transport: udp

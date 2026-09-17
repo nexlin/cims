@@ -54,6 +54,19 @@
           "title": "Offset",
           "type": "integer"
         },
+        "ptt_group": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ptt_subscriptions 만 — 이 MCPTT 그룹(mcptt_group_id) 멤버만 읽는다. 생략 = 가입자마다 첫 그룹(mcptt_group_id·priority 순)",
+          "title": "Ptt Group"
+        },
         "table": {
           "enum": [
             "volte_subscriptions",
@@ -1171,6 +1184,24 @@
           "minimum": 60,
           "title": "Register Expires",
           "type": "integer"
+        },
+        "service": {
+          "anyOf": [
+            {
+              "enum": [
+                "volte",
+                "voip",
+                "ptt"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "접속환경 클래스(sip_service_model kind) — ptt 면 MCPTT 단말(feature tag·PTT 도메인·GMS/CMS 구독·그룹 affiliation·floor). 생략 = source.table 이 ptt_subscriptions 면 ptt, 그 외 volte",
+          "title": "Service"
         },
         "source": {
           "anyOf": [

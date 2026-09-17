@@ -9,7 +9,7 @@
                   → 완주까지 기다려 RFC 6076 표를 찍고 verdict 로 종료 코드(pass=0, 그 외 1)
   cims-tester report <run-id> [--json]                        run.json + Markdown 보고서
   cims-tester stop <run-id>  ·  rate <run-id> <saps>
-  cims-tester creds-from-db --csp-json <csp.json> [--table volte_subscriptions] [--count N] [--offset N]
+  cims-tester creds-from-db --csp-json <csp.json> [--table volte_subscriptions] [--count N] [--offset N] [--ptt-group <id>]
                             [--domain <sip domain>] --out <file.jsonl>
                   → DB(ha1 보유 가입자)에서 creds JSONL 을 만든다 (토폴로지 pool.source.creds 로 지정)
 
@@ -97,10 +97,30 @@ def _cmd_creds(a):
     if tbl not in ('volte_subscriptions', 'voip_subscriptions', 'ptt_subscriptions'):
         print('table 은 volte_subscriptions|voip_subscriptions|ptt_subscriptions', file=sys.stderr)
         return 2
-    cur.execute(f"SELECT id, imsi, ha1, auth_scheme FROM {tbl} WHERE ha1 IS NOT NULL AND ha1<>'' "
-                f"AND (sip_transport IS NULL OR sip_transport='' OR sip_transport=%s) ORDER BY id LIMIT %s OFFSET %s",
-                ((a.transport or '').upper(), int(a.count), int(a.offset)))
-    rows = cur.fetchall()
+    groups = {}
+    if a.ptt_group:
+        # 그 MCPTT 그룹 멤버만(priority 순) — 그룹 세션 시나리오(group_call)의 신원 원천
+        if tbl != 'ptt_subscriptions':
+            print('--ptt-group 은 --table ptt_subscriptions 에만', file=sys.stderr)
+            return 2
+        cur.execute("SELECT s.id, s.imsi, s.ha1, s.auth_scheme FROM ptt_subscriptions s JOIN ptt_group_members m ON m.user_id = s.id "
+                    "JOIN ptt_groups g ON g.id = m.group_id WHERE g.mcptt_group_id=%s AND s.ha1 IS NOT NULL AND s.ha1<>'' "
+                    "AND (s.sip_transport IS NULL OR s.sip_transport='' OR s.sip_transport=%s) ORDER BY m.priority, s.id LIMIT %s OFFSET %s",
+                    (a.ptt_group, (a.transport or '').upper(), int(a.count), int(a.offset)))
+        rows = cur.fetchall()
+        groups = {r[0]: a.ptt_group for r in rows}
+    else:
+        cur.execute(f"SELECT id, imsi, ha1, auth_scheme FROM {tbl} WHERE ha1 IS NOT NULL AND ha1<>'' "
+                    f"AND (sip_transport IS NULL OR sip_transport='' OR sip_transport=%s) ORDER BY id LIMIT %s OFFSET %s",
+                    ((a.transport or '').upper(), int(a.count), int(a.offset)))
+        rows = cur.fetchall()
+        if tbl == 'ptt_subscriptions' and rows:
+            # 가입자마다 첫 그룹(mcptt_group_id·priority 순) — 가상 단말 하나는 그룹 하나에 affiliation 한다
+            marks = ','.join(['%s'] * len(rows))
+            cur.execute("SELECT m.user_id, g.mcptt_group_id FROM ptt_group_members m JOIN ptt_groups g ON g.id = m.group_id "
+                        f"WHERE m.user_id IN ({marks}) ORDER BY g.mcptt_group_id DESC, m.priority DESC", [r[0] for r in rows])
+            for uid, gid in cur.fetchall():   # 역순으로 덮어써서 마지막에 남는 것이 첫 그룹
+                groups[uid] = gid
     conn.close()
     n = 0
     with open(a.out, 'w', encoding='utf-8') as f:
@@ -108,6 +128,8 @@ def _cmd_creds(a):
             rec = {'user': r[0], 'authId': r[1] or '', 'ha1': r[2]}
             if a.domain:
                 rec['domain'] = a.domain
+            if groups.get(r[0]):
+                rec['group'] = groups[r[0]]
             f.write(json.dumps(rec) + '\n')
             n += 1
     print(f'{n} creds → {a.out}  (table={tbl}, offset={a.offset})')
@@ -136,6 +158,7 @@ def main(argv=None):
     cr = sub.add_parser('creds-from-db'); cr.add_argument('--csp-json', required=True); cr.add_argument('--table', default='volte_subscriptions')
     cr.add_argument('--count', type=int, default=100); cr.add_argument('--offset', type=int, default=0)
     cr.add_argument('--domain'); cr.add_argument('--transport', default=''); cr.add_argument('--out', required=True)
+    cr.add_argument('--ptt-group', help='ptt_subscriptions — 이 MCPTT 그룹(mcptt_group_id) 멤버만. 생략 = 가입자마다 첫 그룹을 group 으로 적는다')
     a = ap.parse_args(argv)
     base = a.url.rstrip('/') + '/api/v1/tester'
 

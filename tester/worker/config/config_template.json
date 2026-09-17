@@ -47,7 +47,9 @@
         { "key": "Timers.RegisterIntervalMs", "label": "등록 간격(ms)", "type": "int", "default": 20, "min": 0, "restart": false },
         { "key": "Timers.RegisterTimeoutS", "label": "등록 대기 상한(s)", "type": "int", "default": 60, "min": 1, "restart": false },
         { "key": "Timers.InviteTimeoutMs", "label": "INVITE 최종 응답 대기(ms)", "type": "int", "default": 32000, "min": 1000, "restart": false },
-        { "key": "Timers.ByeTimeoutMs", "label": "BYE 응답 대기(ms)", "type": "int", "default": 8000, "min": 1000, "restart": false }
+        { "key": "Timers.ByeTimeoutMs", "label": "BYE 응답 대기(ms)", "type": "int", "default": 8000, "min": 1000, "restart": false },
+        { "key": "Timers.FloorTimeoutMs", "label": "PTT floor 결과 대기(ms)", "type": "int", "default": 5000, "min": 500, "restart": false },
+        { "key": "Timers.GroupReuseGapMs", "label": "PTT 그룹 재사용 간격(ms)", "type": "int", "default": 1000, "min": 0, "restart": false }
       ],
       "scope": "service"
     }

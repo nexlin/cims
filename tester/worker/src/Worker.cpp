@@ -38,6 +38,11 @@ long long Worker::nowMs() {
                std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
+long long Worker::nowUs() {
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
 static std::string detectLocalIp() {
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) return "127.0.0.1";
@@ -146,6 +151,18 @@ void Worker::OnByeResponse(SimSession* s, const std::string& callId, int st, lon
     std::lock_guard<std::mutex> lk(m_evMtx);
     m_events.push_back({ Event::BYERESP, s, nullptr, st, ms, callId, "", false });
 }
+void Worker::OnAffiliate(SimSession* s, const std::string&, int st, long long ms) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::AFFILIATE, s, nullptr, st, ms, "", "", false });
+}
+void Worker::OnCallAnswered(SimSession* s, const std::string& callId) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::ANSWERED, s, nullptr, 200, 0, callId, "", false });
+}
+void Worker::OnFloor(SimSession* s, int subtype, long long tUs) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::FLOOR, s, nullptr, subtype, 0, "", "", false, false, 0, tUs });
+}
 void Worker::OnPeerIncoming(CsimPeer* p, const std::string& callId, const std::string&, const std::string& to, bool hasPai) {
     std::lock_guard<std::mutex> lk(m_evMtx);
     m_events.push_back({ Event::INCOMING, nullptr, p, 0, 0, callId, to, hasPai });
@@ -225,8 +242,8 @@ HttpResponse Worker::health() {
     long long active = 0;
     Json pools = Json::Array();
     for (auto& kv : m_pools) {
-        long long reg = 0, started = 0;
-        for (auto& ep : kv.second->eps) { if (ep->started) started++; if (ep->registered) reg++; }
+        long long reg = 0, started = 0, aff = 0;
+        for (auto& ep : kv.second->eps) { if (ep->started) started++; if (ep->registered) reg++; if (ep->affiliated) aff++; }
         if (kv.second->peer) active += (long long)kv.second->peer->CallCount();
         active += started;
         Json pj = Json::Object();
@@ -234,6 +251,11 @@ HttpResponse Worker::health() {
         pj["kind"] = Json(kv.second->kind);
         pj["endpoints"] = Json((long long)kv.second->eps.size());
         pj["registered"] = Json(reg);
+        if (kv.second->service == "ptt") {
+            pj["service"] = Json(kv.second->service);
+            pj["affiliated"] = Json(aff);
+            pj["groups"] = Json((long long)kv.second->groups.size());
+        }
         pools.push(pj);
     }
     j["active_endpoints"] = Json(active);
@@ -277,6 +299,8 @@ bool Worker::buildUePool(Pool* pool, const Json& d, std::string& err) {
     pool->targetPort = (int)(pool->transport == "tls" ? tc["tls"].asInt(5061)
                              : pool->transport == "tcp" ? tc["tcp"].asInt(25061) : tc["udp"].asInt(5060));
     if (pool->targetIp.empty()) { err = "target_csp.ip_required"; return false; }
+    pool->service = d["service"].asString("volte");
+    const bool ptt = pool->service == "ptt";
     const Json& ids = d["identities"];
     for (size_t i = 0; i < ids.size(); ++i) {
         const Json& x = ids.at(i);
@@ -285,6 +309,7 @@ bool Worker::buildUePool(Pool* pool, const Json& d, std::string& err) {
         ep->pool = pool->name;
         ep->poolRef = pool;
         ep->id.user = x["user"].asString();
+        ep->id.pttGroup = x["ptt_group"].asString();
         ep->id.domain = x["domain"].asString();
         ep->id.ha1 = x["ha1"].asString();
         ep->id.password = x["password"].asString();
@@ -298,7 +323,9 @@ bool Worker::buildUePool(Pool* pool, const Json& d, std::string& err) {
         if (!authId.empty() && authId.find('@') == std::string::npos) authId += "@" + ep->id.domain;
         int localPort = m_cfg.sipPortBase > 0 ? m_cfg.sipPortBase + 2 * (int)i : 0;
         ep->s = new SimSession((int)i, ep->id.user, authId, ep->id.domain, ep->id.password, ep->id.ha1,
-                               pool->targetIp, pool->targetPort, m_cfg.localIp, localPort, false, "");
+                               pool->targetIp, pool->targetPort, m_cfg.localIp, localPort, ptt, ep->id.pttGroup);
+        // MCPTT 단말 — xcap-diff NOTIFY 는 받되 XCAP 문서 GET(IdMS 토큰 필요)은 하지 않는다. 착신은 libcsim 이 자동응답(automatic commencement)
+        if (ptt) { ep->s->SetNoXcap(true); if (!ep->id.pttGroup.empty()) pool->groups[ep->id.pttGroup].push_back(ep.get()); }
         if (pool->transport == "tls") ep->s->SetTransport(E_SIP_TLS);
         else if (pool->transport == "tcp") ep->s->SetTransport(E_SIP_TCP);
         ep->s->SetSrtpMode(pool->srtp == "required" ? 2 : pool->srtp == "optional" ? 1 : 0);
@@ -418,7 +445,7 @@ HttpResponse Worker::poolDelete(const std::string& name) {
 
 static const char* kSupported[] = { "register", "deregister", "invite", "answer", "reject", "bye",
                                     "media_hold", "wait", "expect", "progress", "hold", "resume", "dtmf", "refer",
-                                    "media_send", "media_stop" };
+                                    "media_send", "media_stop", "group_call", "floor_request", "floor_release" };
 
 static int rtpModeOf(const Json& media) {
     std::string m = media["rtp"].asString("auto");
@@ -440,7 +467,10 @@ bool Worker::resolveSample(const std::string& file, std::string& out, std::strin
 long long Worker::rtpStreams() const {
     long long n = 0;
     for (auto& in : m_instances)
-        if (in->phase != Instance::DONE && in->rtpMode != CRtpThread::E_MEDIA_NONE) n += (long long)in->actors.size();
+        if (in->phase != Instance::DONE && in->rtpMode != CRtpThread::E_MEDIA_NONE) {
+            n += (long long)in->actors.size();
+            for (auto& m : in->multi) n += (long long)m.second.size();
+        }
     return n;
 }
 
@@ -455,6 +485,7 @@ HttpResponse Worker::runStart(const Json& d) {
     for (auto& kv : d["roles"].items()) spec->roles[kv.first] = kv.second.asString();
     for (auto& kv : d["role_slices"].items())
         spec->slices[kv.first] = { (int)kv.second.at(0).asInt(), (int)kv.second.at(1).asInt() };
+    for (size_t i = 0; i < d["multi_roles"].size(); ++i) spec->multiRoles.push_back(d["multi_roles"].at(i).asString());
     const Json& steps = d["steps"];
     std::vector<std::string> unsupported;
     for (size_t i = 0; i < steps.size(); ++i) {
@@ -482,7 +513,7 @@ HttpResponse Worker::runStart(const Json& d) {
     if (!unsupported.empty()) {
         std::string list;
         for (auto& u : unsupported) list += (list.empty() ? "" : ",") + u;
-        return errResp(400, "unsupported_step", list + " — 워커는 register/invite/answer/reject/bye/media_hold/wait/expect/progress/hold/resume/dtmf/refer/media_send/media_stop 만");
+        return errResp(400, "unsupported_step", list + " — 워커는 register/invite/answer/reject/bye/media_hold/wait/expect/progress/hold/resume/dtmf/refer/media_send/media_stop/group_call/floor_request/floor_release 만");
     }
     if (spec->steps.empty()) return errResp(400, "steps_required");
     // 샘플 라이브러리(§4) — 컨트롤러가 토폴로지 media.samples 에서 이 시나리오가 참조하는 것만 보낸다. 파일은 지금 확인한다
@@ -516,7 +547,36 @@ HttpResponse Worker::runStart(const Json& d) {
         if (st.step == "register" || st.step == "deregister")
             return errResp(400, "register_in_body", "register/deregister 는 흐름의 앞(prelude)/끝(epilogue)에만 둘 수 있다");
     m_bodyRtpMode = CRtpThread::E_MEDIA_AUTO;
-    for (auto& st : m_body) if (st.step == "invite") { m_bodyRtpMode = rtpModeOf(st.media); break; }
+    for (auto& st : m_body) if (st.step == "invite" || st.step == "group_call") { m_bodyRtpMode = rtpModeOf(st.media); break; }
+    // 그룹 단위 인스턴스(body 에 group_call) — 역할은 모두 같은 PTT 풀이어야 하고, 멤버 배정 순서 = 발신자 → body 등장 순 단일 역할 → multi 역할(나머지)
+    m_groupBound = false;
+    m_groupPool.clear(); m_singleRoles.clear(); m_usedMulti.clear(); m_groupNames.clear();
+    m_groupCursor = 0;
+    for (auto& st : m_body) if (st.step == "group_call") { m_groupBound = true; break; }
+    if (m_groupBound) {
+        auto isMulti = [&](const std::string& r) { return std::find(spec->multiRoles.begin(), spec->multiRoles.end(), r) != spec->multiRoles.end(); };
+        auto note = [&](const std::string& r) {
+            if (r.empty()) return;
+            auto& v = isMulti(r) ? m_usedMulti : m_singleRoles;
+            if (std::find(v.begin(), v.end(), r) == v.end()) v.push_back(r);
+        };
+        for (auto& st : m_body) if (st.step == "group_call") { if (st.from.empty() || isMulti(st.from)) return errResp(400, "group_call_from", "group_call.from 은 단일 역할이어야 한다"); note(st.from); break; }
+        for (auto& st : m_body) { note(st.from); note(st.to); for (auto& w : st.who) note(w); }
+        if (m_usedMulti.size() > 1) return errResp(400, "multi_roles", "multi 역할은 시나리오에 하나만(그룹의 나머지 멤버)");
+        for (auto& r : m_singleRoles) { if (!spec->roles.count(r)) return errResp(400, "unknown_role", r); }
+        for (auto& r : m_usedMulti) { if (!spec->roles.count(r)) return errResp(400, "unknown_role", r); }
+        m_groupPool = spec->roles[m_singleRoles[0]];
+        for (auto& r : m_singleRoles) if (spec->roles[r] != m_groupPool) return errResp(400, "group_pool", "그룹콜 시나리오의 역할은 모두 같은 풀이어야 한다");
+        for (auto& r : m_usedMulti) if (spec->roles[r] != m_groupPool) return errResp(400, "group_pool", "그룹콜 시나리오의 역할은 모두 같은 풀이어야 한다");
+        Pool* gp = m_pools[m_groupPool].get();
+        if (gp->service != "ptt") return errResp(400, "group_pool_service", m_groupPool + " — group_call 은 service=ptt 풀에서만");
+        if (gp->groups.empty()) return errResp(400, "group_pool_groups", m_groupPool + " — 신원에 ptt_group 이 없다");
+        for (auto& g : gp->groups) m_groupNames.push_back(g.first);
+    } else {
+        for (auto& st : m_body)
+            if (st.step == "floor_request" || st.step == "floor_release")
+                return errResp(400, "floor_without_group_call", "floor 단계는 group_call 뒤에만 둔다");
+    }
 
     // prelude 대상 단말 목록 + body 역할별 free 목록
     m_preludeList.clear();
@@ -684,7 +744,10 @@ Endpoint* Worker::endpointOfPeerCall(CsimPeer* p, const std::string& callId) {
 }
 
 std::string Worker::roleOf(Instance* in, Endpoint* ep) {
-    if (in) for (auto& a : in->actors) if (a.second == ep) return a.first;
+    if (in) {
+        for (auto& a : in->actors) if (a.second == ep) return a.first;
+        for (auto& m : in->multi) for (auto* x : m.second) if (x == ep) return m.first;
+    }
     return "";
 }
 
@@ -806,10 +869,11 @@ void Worker::onEvent(const Event& e) {
     switch (e.kind) {
     case Event::REGISTER:
         ep->registered = (e.status == 200);
-        if (e.status == 200) { m_metrics.counter("registered_ok"); m_metrics.timer("rrd_ms", (double)e.ms); }
+        if (e.status == 200) { m_metrics.counter("registered_ok"); m_metrics.timer("rrd_ms", (double)e.ms); startPtt(ep); }
         else { m_metrics.counter("registered_fail"); m_metrics.counter("codes." + std::to_string(e.status)); emitEvent("REGISTER failed", ep, "register", e.status); }
         break;
     case Event::INCOMING:
+        if (ep->isPtt()) break;   // 그룹 fan-out INVITE — libcsim 이 자동응답(automatic commencement)하고 ANSWERED 로 알린다
         ep->pendingInvite = true;
         // 피어 착신 호는 엔진이 INVITE 수신 때 만든다 — Progress/Answer 전에 인스턴스의 RTP 모드를 입힌다
         if (in && ep->isPeer()) ep->poolRef->peer->SetMediaMode(e.callId, in->rtpMode);
@@ -845,10 +909,41 @@ void Worker::onEvent(const Event& e) {
         if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind.rfind("callstart:", 0) == 0) {
             std::string role = in->awaitKind.substr(10);
             if (in->actors[role] == ep) advance(*in, now);
+        } else if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "groupup") {
+            checkGroupUp(*in, now);
         }
         break;
+    case Event::ANSWERED:
+        // PTT 멤버가 그룹 fan-out INVITE 에 자동응답했다 — 세션 합류(leg 하나)
+        ep->inCall = true;
+        m_metrics.counter("legs");
+        m_metrics.counter("group_joined");
+        if (!in) {
+            // 인스턴스 밖의 그룹 세션(이 워커가 연 것이 아니다) — 자리를 비운다
+            epBye(ep);
+            ep->inCall = false;
+            m_metrics.counter("unexpected_invite");
+            break;
+        }
+        in->tLastJoinMs = now;
+        if (in->phase == Instance::WAIT_EVENT && in->awaitKind == "groupup") checkGroupUp(*in, now);
+        break;
+    case Event::AFFILIATE:
+        if (e.status / 100 == 2) {
+            ep->affiliated = true;
+            m_metrics.counter("affiliated_ok");
+            m_metrics.timer("affiliate_ms", (double)e.ms);
+        } else {
+            ep->affFailed = true;
+            m_metrics.counter("affiliated_fail");
+            m_metrics.counter("codes." + std::to_string(e.status));
+            emitEvent("affiliation PUBLISH refused (group " + ep->id.pttGroup + ")", ep, "register", e.status);
+        }
+        break;
+    case Event::FLOOR:
+        onFloor(ep, in, e.status, e.us, now);
+        break;
     case Event::CALLEND: {
-        bool wasInCall = ep->inCall;
         ep->inCall = false;
         ep->pendingInvite = false;
         if (ep->isPeer() && ep->callId == e.callId) epClearCall(ep);
@@ -877,9 +972,12 @@ void Worker::onEvent(const Event& e) {
                     finishInstance(*in, true, "final " + std::to_string(e.status), now);
                 }
             }
-        } else if (wasInCall && in->phase == Instance::WAIT_EVENT && in->awaitKind.rfind("byeresp:", 0) == 0 &&
-                   in->actors[in->awaitKind.substr(8)] != ep) {
-            // 상대(착신) 측이 BYE(200) 를 받았다 — 발신 측 BYE 응답을 계속 기다린다
+        } else if (in->phase == Instance::WAIT_EVENT && in->awaitKind == "byeresp") {
+            // bye 단계가 이 단말의 BYE 응답을 기다리는 중에 그 leg 가 끝났다(서버가 먼저 닫음 — 그룹 세션 해제) — 더 기다리지 않는다
+            auto& bw = in->byeWait;
+            size_t before = bw.size();
+            bw.erase(std::remove(bw.begin(), bw.end(), ep), bw.end());
+            if (before > 0 && bw.empty()) advance(*in, now);
         }
         break;
     }
@@ -918,12 +1016,15 @@ void Worker::onEvent(const Event& e) {
     case Event::BYERESP:
         ep->inCall = false;
         m_metrics.timer("sdd_ms", (double)e.ms);
-        if (e.status / 100 == 2) m_metrics.counter("completed");
-        else m_metrics.counter("bye_fail");
+        // 완료(SCR 분자)는 세션 단위 — 그룹 세션의 멤버 leg BYE 는 세지 않는다(발신자 leg 만)
+        if (e.status / 100 != 2) m_metrics.counter("bye_fail");
+        else if (!ep->isPtt() || ep->tStartCallMs > 0) m_metrics.counter("completed");
         if (ep->isPeer() && ep->callId == e.callId) epClearCall(ep);
-        if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind.rfind("byeresp:", 0) == 0 &&
-            in->actors[in->awaitKind.substr(8)] == ep)
-            advance(*in, now);
+        if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "byeresp") {
+            auto& bw = in->byeWait;
+            bw.erase(std::remove(bw.begin(), bw.end(), ep), bw.end());
+            if (bw.empty()) advance(*in, now);
+        }
         break;
     }
 }
@@ -995,7 +1096,125 @@ bool Worker::epRefer(Endpoint* from, Endpoint* to) {
 
 void Worker::epSetMediaMode(Endpoint* ep, int mode) {
     // UE 는 세션의 RTP 스레드에 — 다음 Start(새 호)부터 적용. 피어는 호마다(StartCall 인자 / INCOMING 이벤트)
-    if (!ep->isPeer()) ep->s->SetMediaMode(mode);
+    //   PTT 단말의 auto = floor 를 가진 동안만 송출(TS 24.380 — 허가 없이 미디어를 내지 않는다): 수신만 시작하고 Granted 에 송출, 해제·Revoke 에 정지
+    if (ep->isPeer()) return;
+    ep->s->SetMediaMode(ep->isPtt() && mode == CRtpThread::E_MEDIA_AUTO ? CRtpThread::E_MEDIA_EXPLICIT : mode);
+}
+
+void Worker::startPtt(Endpoint* ep) {
+    // MCPTT 기동 절차(실 단말 순서) — GMS/CMS xcap-diff 구독 → 그룹 affiliation → conference 구독. prelude 는 affiliation 200 까지 기다린다
+    if (!ep->isPtt() || ep->affStarted) return;
+    ep->affStarted = true;
+    ep->s->SubscribeGms();
+    ep->s->SubscribeCms();
+    if (ep->id.pttGroup.empty()) { ep->affiliated = true; return; }   // 그룹 없는 PTT 신원 — 등록만(사설콜 등)
+    ep->s->AffiliateGroup();
+    ep->s->SubscribeConference(ep->id.pttGroup);
+}
+
+std::vector<Endpoint*> Worker::endpointsOf(Instance& in) {
+    std::vector<Endpoint*> v;
+    for (auto& a : in.actors) if (a.second) v.push_back(a.second);
+    for (auto& m : in.multi) for (auto* ep : m.second) v.push_back(ep);
+    return v;
+}
+
+std::vector<Endpoint*> Worker::roleEndpoints(Instance& in, const std::string& role) {
+    auto mit = in.multi.find(role);
+    if (mit != in.multi.end()) return mit->second;
+    auto ait = in.actors.find(role);
+    if (ait != in.actors.end() && ait->second) return { ait->second };
+    return {};
+}
+
+void Worker::checkGroupUp(Instance& in, long long now) {
+    // group_call 완료 = 발신자 확립(200) + to 역할 멤버 전원 합류(자동응답 200)
+    std::string caller = callerRole(in);
+    if (caller.empty() || !in.actors[caller]->inCall) return;
+    if (!in.groupTo.empty()) {
+        for (auto* ep : roleEndpoints(in, in.groupTo)) if (!ep->inCall) return;
+        long long last = in.tLastJoinMs > 0 ? in.tLastJoinMs : now;
+        m_metrics.timer("group_fanout_ms", (double)(last - in.tGroupCallMs));
+    }
+    advance(in, now);
+}
+
+void Worker::onFloor(Endpoint* ep, Instance* in, int subtype, long long us, long long now) {
+    // TS 24.380 §8.2 subtype — 1 Granted · 2 Taken · 3 Deny · 5 Idle · 6 Revoke · 9 Queue Position Info
+    switch (subtype) {
+    case 1:
+        if (ep->floor != Endpoint::F_REQUESTED && ep->floor != Endpoint::F_QUEUED) break;
+        m_metrics.counter("floor_granted");
+        m_metrics.timer(ep->wasQueued ? "floor_queue_ms" : "floor_grant_ms", (double)(us - ep->tFloorReqUs) / 1000.0);
+        if (ep->wasQueued && in) in->tFloorReqUs = 0;   // 큐를 거친 허가의 Taken 은 요청 시각과 무관 — floor_taken_ms 표본에서 뺀다
+        ep->floor = Endpoint::F_GRANTED;
+        ep->talked = true;
+        if (in && in->rtpMode != CRtpThread::E_MEDIA_NONE) ep->s->MediaSend(true, "", "", "", true);
+        break;
+    case 3:
+        if (ep->floor != Endpoint::F_REQUESTED) break;
+        m_metrics.counter("floor_denied");
+        ep->floor = Endpoint::F_DENIED;
+        break;
+    case 9:
+        if (ep->floor != Endpoint::F_REQUESTED) break;
+        m_metrics.counter("floor_queued");
+        ep->floor = Endpoint::F_QUEUED;
+        ep->wasQueued = true;
+        break;
+    case 6:
+        if (ep->floor != Endpoint::F_GRANTED) break;
+        m_metrics.counter("floor_revoked");
+        ep->s->MediaStop();
+        ep->floor = Endpoint::F_IDLE;
+        break;
+    case 2:
+        m_metrics.counter("floor_taken_rx");
+        ep->idleSeen = true;   // 해제 뒤 Idle 없이 다음 발언자가 곧바로 잡았다(큐) — 해제 대기는 이것으로 끝난다
+        if (in && in->tFloorReqUs > 0 && !ep->takenSeen && ep->floor != Endpoint::F_GRANTED) {
+            ep->takenSeen = true;
+            m_metrics.timer("floor_taken_ms", (double)(us - in->tFloorReqUs) / 1000.0);
+        }
+        break;
+    case 5:
+        m_metrics.counter("floor_idle_rx");
+        if (in && in->tFloorRelUs > 0 && !ep->idleSeen) m_metrics.timer("floor_idle_ms", (double)(us - in->tFloorRelUs) / 1000.0);
+        ep->idleSeen = true;
+        break;
+    default:
+        break;
+    }
+    if (in && in->phase == Instance::WAIT_EVENT && (in->awaitKind == "floor" || in->awaitKind == "floorrel")) checkFloorWait(*in, now);
+}
+
+void Worker::checkFloorWait(Instance& in, long long now) {
+    if (in.awaitKind == "floorrel") {
+        for (auto* ep : in.floorWait) if (!ep->idleSeen) return;
+        in.floorWait.clear();
+        advance(in, now);
+        return;
+    }
+    // floor_request — 요청자 전원의 결과가 나왔는가. Queued 는 기대가 granted 가 아니거나 다른 요청자가 floor 를 잡았으면 결과로 본다
+    //   (동시 요청에서 하나가 잡으면 나머지는 그가 놓을 때까지 큐에 머문다).
+    bool anyGranted = false;
+    for (auto* ep : in.floorWait) if (ep->floor == Endpoint::F_GRANTED) anyGranted = true;
+    int hit = 0;
+    for (auto* ep : in.floorWait) {
+        if (ep->floor == Endpoint::F_REQUESTED) return;
+        if (ep->floor == Endpoint::F_QUEUED && in.floorWant == "granted" && !anyGranted) return;
+        if ((in.floorWant == "granted" && ep->floor == Endpoint::F_GRANTED) || (in.floorWant == "denied" && ep->floor == Endpoint::F_DENIED) ||
+            (in.floorWant == "queued" && ep->floor == Endpoint::F_QUEUED) || in.floorWant == "any") hit++;
+    }
+    if (hit == 0) {
+        Endpoint* ep = in.floorWait.empty() ? nullptr : in.floorWait[0];
+        const char* got = !ep ? "none" : ep->floor == Endpoint::F_GRANTED ? "granted" : ep->floor == Endpoint::F_DENIED ? "denied" : "queued";
+        emitEvent("floor request: expected " + in.floorWant + " got " + got, ep, "floor_request", 0);
+        in.floorWait.clear();
+        finishInstance(in, true, "floor " + std::string(got), now);
+        return;
+    }
+    in.floorWait.clear();
+    advance(in, now);
 }
 
 bool Worker::epMediaSend(Endpoint* ep, const CompiledStep& st) {
@@ -1040,7 +1259,7 @@ void Worker::sampleDtmf(Endpoint* ep) {
 }
 
 std::string Worker::callerRole(Instance& in) {
-    for (auto& a : in.actors) if (a.second->tStartCallMs > 0) return a.first;
+    for (auto& a : in.actors) if (a.second && a.second->tStartCallMs > 0) return a.first;
     return "";
 }
 
@@ -1105,21 +1324,21 @@ void Worker::tickPrelude(long long now) {
     }
     if (m_preludeCursor < m_preludeList.size()) return;
     size_t reg = 0, pending = 0;
-    for (auto* ep : m_preludeList) { if (ep->registered) reg++; else if (ep->started) pending++; }
+    for (auto* ep : m_preludeList) { if (ep->ready()) reg++; else if (ep->started) pending++; }
     bool timeout = now >= m_preludeDeadlineMs;
     if (pending > 0 && !timeout) {
         // 실패 응답(REGISTER 4xx) 은 registered=false 이면서 started=true — 이벤트 카운터로 판정 불가하므로
         // 등록 통계(iRegFail) 를 본다.
         size_t failed = 0;
         for (auto* ep : m_preludeList)
-            if (ep->started && !ep->registered && (ep->isPeer() ? ep->poolRef->regFailed : ep->s->m_stats.iRegFail > 0)) failed++;
+            if (ep->started && !ep->ready() && (ep->isPeer() ? ep->poolRef->regFailed : (ep->s->m_stats.iRegFail > 0 || ep->affFailed))) failed++;
         if (failed < pending) return;
     }
     for (auto& kv : m_free) {
         auto& v = kv.second;
-        v.erase(std::remove_if(v.begin(), v.end(), [](Endpoint* ep) { return ep->started && !ep->registered; }), v.end());
+        v.erase(std::remove_if(v.begin(), v.end(), [](Endpoint* ep) { return ep->started && !ep->ready(); }), v.end());
     }
-    logf("info", "run %s prelude done — registered=%zu/%zu%s → running", m_run->runId.c_str(), reg, m_preludeList.size(),
+    logf("info", "run %s prelude done — ready=%zu/%zu%s → running", m_run->runId.c_str(), reg, m_preludeList.size(),
          timeout ? " (timeout)" : "");
     if (m_stopRequested) { endRun("stopped"); return; }
     m_runState = "running";
@@ -1209,7 +1428,13 @@ void Worker::tickBody(long long now) {
             }
             advance(in, now);
         } else if (in.phase == Instance::WAIT_EVENT && now >= in.deadlineMs) {
-            emitEvent("timeout waiting " + in.awaitKind, nullptr, in.stepIdx < m_body.size() ? m_body[in.stepIdx].step : "", 0);
+            std::string what = in.awaitKind;
+            if (in.awaitKind == "groupup" && !in.groupTo.empty()) {
+                size_t joined = 0, total = 0;
+                for (auto* ep : roleEndpoints(in, in.groupTo)) { total++; if (ep->inCall) joined++; }
+                what += " — joined " + std::to_string(joined) + "/" + std::to_string(total);
+            }
+            emitEvent("timeout waiting " + what, nullptr, in.stepIdx < m_body.size() ? m_body[in.stepIdx].step : "", 0);
             finishInstance(in, true, "timeout " + in.awaitKind, now);
         }
     }
@@ -1245,10 +1470,57 @@ void Worker::tickBody(long long now) {
     }
 }
 
+/** 그룹 단위 인스턴스 — 준비된 멤버 전원이 free 인 그룹 하나를 순환 선택해 역할에 배정한다(단일 역할 하나씩, multi 역할 = 나머지).
+ *  준비 안 된 멤버(등록·affiliation 실패)는 fan-out 대상이 아니므로 뺀다. anyEligible = 멤버 수가 되는 그룹이 하나라도 있는가. */
+bool Worker::pickGroup(std::map<std::string, Endpoint*>& actors, std::map<std::string, std::vector<Endpoint*>>& multi, std::string& group,
+                       bool& anyEligible) {
+    anyEligible = false;
+    Pool* pool = m_pools[m_groupPool].get();
+    auto sl = m_run->slices[m_singleRoles[0]];
+    size_t need = m_singleRoles.size() + (m_usedMulti.empty() ? 0 : 1);
+    long long now = nowMs();
+    for (size_t k = 0; k < m_groupNames.size(); ++k) {
+        size_t gi = (m_groupCursor + k) % m_groupNames.size();
+        std::vector<Endpoint*> members;
+        for (auto* ep : pool->groups[m_groupNames[gi]])
+            if (ep->idx >= sl.first && ep->idx < sl.second && ep->ready()) members.push_back(ep);
+        if (members.size() < need) continue;
+        anyEligible = true;
+        bool free = true;
+        for (auto* ep : members)
+            if (ep->inst != nullptr || epHasCall(ep) || now - ep->tReleasedMs < m_cfg.groupReuseGapMs) { free = false; break; }
+        if (!free) continue;
+        size_t i = 0;
+        for (auto& r : m_singleRoles) actors[r] = members[i++];
+        if (!m_usedMulti.empty()) multi[m_usedMulti[0]].assign(members.begin() + (long)i, members.end());
+        group = m_groupNames[gi];
+        m_groupCursor = gi + 1;
+        return true;
+    }
+    return false;
+}
+
 void Worker::launchInstance(long long now) {
     // body 의 모든 역할에 free 단말이 있어야 한다
     std::map<std::string, Endpoint*> actors;
+    std::map<std::string, std::vector<Endpoint*>> multi;
+    std::string group;
+    if (m_groupBound) {
+        bool anyEligible = false;
+        if (!pickGroup(actors, multi, group, anyEligible)) {
+            m_metrics.counter("skipped");
+            bool anyActive = false;
+            for (auto& i : m_instances) if (i->phase != Instance::DONE) { anyActive = true; break; }
+            if (!anyEligible && !anyActive) {
+                emitEvent("no usable group in pool " + m_groupPool + " — run closed", nullptr, "", 0);
+                logf("warn", "run %s: pool %s has no group with enough ready members — closing", m_run->runId.c_str(), m_groupPool.c_str());
+                endRun("stopped");
+            }
+            return;
+        }
+    }
     for (auto& kv : m_run->roles) {
+        if (m_groupBound) break;
         bool used = false;
         for (auto& st : m_body) {
             if (st.from == kv.first || st.to == kv.first) used = true;
@@ -1278,9 +1550,11 @@ void Worker::launchInstance(long long now) {
         actors[kv.first] = pick;
     }
     // RTP 동시 상한(Media.MaxRtpStreams) — 넘으면 이 슬롯은 건너뛴다(단말 부족과 같은 skipped, 사유 카운터 따로)
+    size_t nEps = actors.size();
+    for (auto& m : multi) nEps += m.second.size();
     if (m_cfg.maxRtpStreams > 0 && m_bodyRtpMode != CRtpThread::E_MEDIA_NONE &&
-        rtpStreams() + (long long)actors.size() > m_cfg.maxRtpStreams) {
-        for (auto& a : actors) m_free[a.first].push_back(a.second);
+        rtpStreams() + (long long)nEps > m_cfg.maxRtpStreams) {
+        if (!m_groupBound) for (auto& a : actors) m_free[a.first].push_back(a.second);
         m_metrics.counter("skipped");
         m_metrics.counter("skipped_rtp_cap");
         return;
@@ -1288,13 +1562,17 @@ void Worker::launchInstance(long long now) {
     auto in = std::make_unique<Instance>();
     in->id = m_nextInstanceId++;
     in->actors = actors;
+    in->multi = multi;
+    in->group = group;
     in->tStartMs = now;
     in->rtpMode = m_bodyRtpMode;
-    for (auto& a : actors) {
-        a.second->inst = in.get();
-        a.second->tStartCallMs = 0;
-        epSetMediaMode(a.second, in->rtpMode);
-        if (a.second->s) a.second->s->m_clsRtpThread.ResetRecvStats();
+    for (auto* ep : endpointsOf(*in)) {
+        ep->inst = in.get();
+        ep->tStartCallMs = 0;
+        ep->floor = Endpoint::F_IDLE;
+        ep->talked = false;
+        epSetMediaMode(ep, in->rtpMode);
+        if (ep->s) ep->s->m_clsRtpThread.ResetRecvStats();
     }
     Instance* raw = in.get();
     m_instances.push_back(std::move(in));
@@ -1332,6 +1610,77 @@ void Worker::execStep(Instance& in, long long now) {
             }
             in.stepIdx++;   // 비동기 — 확립은 answer/media_hold 가 기다린다
             continue;
+        }
+        if (st.step == "group_call") {
+            // PTT 그룹콜 — 발신자가 그룹 URI 로 INVITE, 대상이 affiliation 멤버에게 fan-out 하고 멤버는 자동응답한다.
+            //   완료 = 발신자 확립 + to(multi 역할) 멤버 전원 합류. expect.code≥300 이면 그 최종 응답이 성공 조건(비멤버 403 등).
+            Endpoint* from = in.actors[st.from];
+            if (!from || !from->isPtt()) { finishInstance(in, true, "group_call: from 은 PTT 단말이어야 한다", now); return; }
+            std::string group = st.group.empty() ? in.group : st.group;
+            if (group.empty()) { finishInstance(in, true, "group_call: group 없음", now); return; }
+            from->tStartCallMs = now;
+            in.tGroupCallMs = now;
+            in.tLastJoinMs = 0;
+            in.groupTo = st.to;
+            in.expectCode = (int)st.expect["code"].asInt(0);
+            in.rtpMode = rtpModeOf(st.media);
+            for (auto* ep : endpointsOf(in)) epSetMediaMode(ep, in.rtpMode);
+            from->s->SetOfferCodec(codecPtOf(st.media["audio"].asString("")));   // 시나리오 오퍼 코덱(PTT 표준 = amr-wb). 없으면 풀 기본
+            from->s->StartGroupCall(group);
+            if (from->s->m_strInviteId.empty()) { finishInstance(in, true, "group_call: StartGroupCall refused (busy/stack?)", now); return; }
+            noteCallId(&in, from->s->m_strInviteId);
+            m_metrics.counter("legs");
+            m_metrics.counter("group_calls");
+            in.stepIdx++;
+            in.phase = Instance::WAIT_EVENT;
+            in.awaitKind = in.expectCode >= 300 ? "callend:" + st.from : "groupup";
+            in.deadlineMs = now + m_cfg.inviteTimeoutMs;
+            if (in.expectCode < 300) in.stepIdx--;   // groupup 은 advance 가 stepIdx++ 한다
+            return;
+        }
+        if (st.step == "floor_request" || st.step == "floor_release") {
+            std::vector<Endpoint*> eps;
+            for (auto& role : st.who) for (auto* ep : roleEndpoints(in, role)) eps.push_back(ep);
+            if (eps.empty()) { finishInstance(in, true, st.step + ": role missing", now); return; }
+            for (auto* ep : eps)
+                if (!ep->isPtt() || !ep->inCall) { finishInstance(in, true, st.step + ": " + ep->id.user + " 그룹 세션 밖", now); return; }
+            std::vector<Endpoint*> all = endpointsOf(in);
+            if (st.step == "floor_request") {
+                std::string want = st.payload.empty() ? "granted" : st.payload;
+                in.floorWant = want;
+                in.floorWait = eps;
+                in.tFloorReqUs = nowUs();
+                for (auto* ep : all) ep->takenSeen = false;
+                for (auto* ep : eps) {
+                    ep->floor = Endpoint::F_REQUESTED;
+                    ep->wasQueued = false;
+                    ep->tFloorReqUs = nowUs();
+                    ep->s->SendPttRequest();
+                    m_metrics.counter("floor_request_tx");
+                }
+                in.phase = Instance::WAIT_EVENT;
+                in.awaitKind = "floor";
+                in.deadlineMs = now + m_cfg.floorTimeoutMs;
+                return;
+            }
+            // floor_release — floor 를 가진(또는 큐에 있는) 단말만. 완료 = 해제한 발언자가 Idle(또는 다음 발언자의 Taken)을 받음
+            in.floorWait.clear();
+            for (auto* ep : all) ep->idleSeen = false;
+            in.tFloorRelUs = nowUs();
+            for (auto* ep : eps) {
+                if (ep->floor != Endpoint::F_GRANTED && ep->floor != Endpoint::F_QUEUED && ep->floor != Endpoint::F_REQUESTED) continue;
+                bool held = ep->floor == Endpoint::F_GRANTED;
+                if (held) ep->s->MediaStop();
+                ep->s->SendPttRelease();
+                ep->floor = Endpoint::F_IDLE;
+                m_metrics.counter("floor_release_tx");
+                if (held) in.floorWait.push_back(ep);
+            }
+            if (in.floorWait.empty()) { in.stepIdx++; continue; }
+            in.phase = Instance::WAIT_EVENT;
+            in.awaitKind = "floorrel";
+            in.deadlineMs = now + m_cfg.floorTimeoutMs;
+            return;
         }
         if (st.step == "answer" || st.step == "reject" || st.step == "progress") {
             std::string role = st.who.empty() ? st.to : st.who[0];
@@ -1376,15 +1725,17 @@ void Worker::execStep(Instance& in, long long now) {
             std::vector<std::string> roles = st.who;
             if (roles.empty() && !st.from.empty()) roles.push_back(st.from);
             for (auto& role : roles) {
-                Endpoint* ep = in.actors[role];
-                if (!ep) { finishInstance(in, true, st.step + ": role missing", now); return; }
-                bool ok = st.step == "media_send" ? epMediaSend(ep, st) : epMediaStop(ep);
-                if (!ok) {
-                    emitEvent(st.step + ": no media session (SDP 미교환)", ep, st.step, 0, ep->callId);
-                    finishInstance(in, true, st.step + ": " + role + " has no media session", now);
-                    return;
+                std::vector<Endpoint*> eps = roleEndpoints(in, role);
+                if (eps.empty()) { finishInstance(in, true, st.step + ": role missing", now); return; }
+                for (auto* ep : eps) {
+                    bool ok = st.step == "media_send" ? epMediaSend(ep, st) : epMediaStop(ep);
+                    if (!ok) {
+                        emitEvent(st.step + ": no media session (SDP 미교환)", ep, st.step, 0, ep->callId);
+                        finishInstance(in, true, st.step + ": " + role + " has no media session", now);
+                        return;
+                    }
+                    m_metrics.counter(st.step == "media_send" ? "media_send" : "media_stop");
                 }
-                m_metrics.counter(st.step == "media_send" ? "media_send" : "media_stop");
             }
             in.stepIdx++;
             continue;
@@ -1465,22 +1816,27 @@ void Worker::execStep(Instance& in, long long now) {
         }
         if (st.step == "bye") {
             // media_hold 직후라면 RTP 품질 표본. DTMF 수신 수는 항상 표본(단계 dtmf 가 있었을 때만 값이 있다)
-            for (auto& a : in.actors) sampleDtmf(a.second);   // RTP 표본이 카운터를 리셋하므로 먼저
+            for (auto* ep : endpointsOf(in)) sampleDtmf(ep);   // RTP 표본이 카운터를 리셋하므로 먼저
             if (in.mediaHeld && in.rtpMode != CRtpThread::E_MEDIA_NONE) {
-                for (auto& a : in.actors) sampleRtp(a.second);
+                for (auto* ep : endpointsOf(in)) sampleRtp(ep);
                 in.mediaHeld = false;
             }
-            Endpoint* from = in.actors[st.from];
-            if (!from) { finishInstance(in, true, "bye: role missing", now); return; }
-            if (!from->inCall || !epHasCall(from)) {
-                // 이미 끝난 호(상대 종료·실패) — BYE 없이 통과
-                in.stepIdx++;
-                continue;
+            // 행위자 = from 또는 who(역할 여럿·multi 역할 — 그룹 세션에서 멤버들이 각자 나간다). 응답을 전부 기다린다
+            std::vector<std::string> roles = st.who;
+            if (!st.from.empty()) roles.assign(1, st.from);
+            std::vector<Endpoint*> eps;
+            for (auto& role : roles) for (auto* ep : roleEndpoints(in, role)) eps.push_back(ep);
+            if (eps.empty()) { finishInstance(in, true, "bye: role missing", now); return; }
+            in.byeWait.clear();
+            for (auto* ep : eps) {
+                if (!ep->inCall || !epHasCall(ep)) continue;   // 이미 끝난 호(상대 종료·실패) — BYE 없이 통과
+                epBye(ep, st.cause);
+                if (st.cause > 0) m_metrics.counter("q850_tx");
+                in.byeWait.push_back(ep);
             }
-            epBye(from, st.cause);
-            if (st.cause > 0) m_metrics.counter("q850_tx");
+            if (in.byeWait.empty()) { in.stepIdx++; continue; }
             in.phase = Instance::WAIT_EVENT;
-            in.awaitKind = "byeresp:" + st.from;
+            in.awaitKind = "byeresp";
             in.deadlineMs = now + m_cfg.byeTimeoutMs;
             return;
         }
@@ -1507,9 +1863,10 @@ void Worker::sampleRtp(Endpoint* ep) {
     if (rx + lost > 0) {
         m_metrics.timer("rtp_loss_pct", 100.0 * (double)lost / (double)(rx + lost));
         m_metrics.timer("jitter_ms", (double)jitterUs / 1000.0);
-    } else {
-        m_metrics.counter("rtp_silent_legs");
+    } else if (!(ep->isPtt() && ep->talked)) {
+        m_metrics.counter("rtp_silent_legs");   // PTT 발언자는 자기 발언 동안 수신이 없는 것이 정상
     }
+    ep->talked = ep->floor == Endpoint::F_GRANTED;
     if (ep->isPeer()) ep->poolRef->peer->ResetRtpStats(ep->callId);
     else ep->s->m_clsRtpThread.ResetRecvStats();
 }
@@ -1519,11 +1876,14 @@ void Worker::releaseEndpoint(Endpoint* ep) {
     else if (ep->inCall || epHasCall(ep)) epBye(ep);
     ep->inCall = false;
     ep->tStartCallMs = 0;
+    ep->floor = Endpoint::F_IDLE;
+    ep->tReleasedMs = nowMs();
     if (ep->isPeer()) epClearCall(ep);
     else ep->s->SetMediaMode(CRtpThread::E_MEDIA_AUTO);
     Instance* in = ep->inst;
     ep->inst = nullptr;
-    if (in) for (auto& a : in->actors) if (a.second == ep) { m_free[a.first].insert(m_free[a.first].begin(), ep); break; }
+    // 그룹 단위 인스턴스는 free 목록을 쓰지 않는다(그룹 목록에서 고른다)
+    if (in && !m_groupBound) for (auto& a : in->actors) if (a.second == ep) { m_free[a.first].insert(m_free[a.first].begin(), ep); break; }
 }
 
 void Worker::finishInstance(Instance& in, bool failed, const std::string& why, long long now) {
@@ -1537,9 +1897,7 @@ void Worker::finishInstance(Instance& in, bool failed, const std::string& why, l
     if (m_sipCapture.mode() != SipCapture::OFF && !in.callIds.empty())
         m_sipPending.push_back({ now + 1500, failed || m_sipCapture.mode() == SipCapture::ALL, in.id, in.callIds });
     // 단말 반환 (남은 호 정리 포함)
-    std::vector<Endpoint*> eps;
-    for (auto& a : in.actors) eps.push_back(a.second);
-    for (auto* ep : eps) releaseEndpoint(ep);
+    for (auto* ep : endpointsOf(in)) releaseEndpoint(ep);
 }
 
 void Worker::endRun(const std::string& state) {
@@ -1558,6 +1916,7 @@ void Worker::endRun(const std::string& state) {
                 ep->s->Stop(5);
                 ep->started = false;
                 ep->registered = false;
+                ep->affStarted = ep->affiliated = ep->affFailed = false;
             }
         }
     }

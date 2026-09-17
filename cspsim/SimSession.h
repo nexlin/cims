@@ -100,7 +100,7 @@ enum ESimScenario {
 // ─────────────────────────────────────────────
 //  SimSession: 하나의 가상 단말기
 // ─────────────────────────────────────────────
-class SimSession : public ISipStackCallBack {
+class SimSession : public ISipStackCallBack, public IFloorSink {
 public:
     SimSession(int id,
                const std::string& strUser,
@@ -299,6 +299,12 @@ public:
      * NOTIFY. */
     void SubscribeConference(const std::string &strGroupId);
     void AffiliateGroup(bool bDeaffiliate = false);   // MCPTT 그룹 affiliation (TS 24.379 §9) — 그룹 URI 로 PUBLISH
+    /** affiliation 대상 그룹 — 계측기 워커는 풀 신원의 그룹을 Start() 뒤에 정한다(cspsim 은 생성자 인자). */
+    void SetGroupId(const std::string& strGroupId) { m_strGroupId = strGroupId; }
+    /** IFloorSink — floor 수신 스레드 → 관측자(OnFloor). */
+    virtual void OnFloorMessage(int iSubtype, long long tUs);
+    std::string  m_strAffCallId;          // 마지막 affiliate(Expires>0) PUBLISH 의 Call-ID — 응답을 관측자에 짝짓는다
+    long long    m_tAffStartMs = 0;
     void SendPttRequest();
     void SendPttRelease();
 

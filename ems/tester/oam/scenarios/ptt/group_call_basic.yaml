@@ -1,0 +1,15 @@
+# PTT 그룹콜 기본 — 인스턴스 하나 = MCPTT 그룹 하나(그룹 세션). talker 가 자기 그룹으로 INVITE 하면 대상이 affiliation 멤버에게
+# fan-out 하고 멤버(listeners)는 자동응답한다. floor 는 TS 24.380 메시지 시각으로 잰다 — PTT 단말은 floor 를 가진 동안만 RTP 를 낸다.
+id: PTT-GROUP-CALL-BASIC
+title: PTT 그룹콜 — 개시·floor 요청/해제·종료
+tags: [ptt]
+roles:
+  talker:    { pool: ptt_ue }
+  listeners: { pool: ptt_ue, multi: true }        # 그룹의 나머지 멤버 전부
+flow:
+  - { step: register,      who: [talker, listeners], expect: { code: 200, rrd_ms: { p95: 500 } } }   # PTT 풀: REGISTER → GMS/CMS 구독 → affiliation
+  - { step: group_call,    from: talker, to: listeners, media: { audio: amr-wb }, expect: { code: 200, srd_ms: { p95: 2000 }, group_fanout_ms: { p95: 3000 } } }
+  - { step: floor_request, who: [talker], expect: { floor_grant_ms: { p95: 300 }, floor_taken_ms: { p95: 500 }, floor_grant_pct: { min: 100 } } }
+  - { step: media_hold,    seconds: "${ht}", expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: floor_release, who: [talker], expect: { floor_idle_ms: { p95: 500 } } }
+  - { step: bye,           from: talker, expect: { sdd_ms: { p95: 500 } } }

@@ -225,11 +225,22 @@ class Target(_Strict):
         return v
 
 
+ServiceKind = Literal['volte', 'voip', 'ptt']
+
+
 class DbSource(_Strict):
     db: str = Field(description='신원 원천 노드 id — role=db 또는 api 있는 subscriber 노드')
     table: Literal['volte_subscriptions', 'voip_subscriptions', 'ptt_subscriptions']
     offset: int = Field(default=0, ge=0)
     count: int = Field(ge=1)
+    ptt_group: Optional[str] = Field(default=None, description='ptt_subscriptions 만 — 이 MCPTT 그룹(mcptt_group_id) 멤버만 읽는다. '
+                                                                  '생략 = 가입자마다 첫 그룹(mcptt_group_id·priority 순)')
+
+    @model_validator(mode='after')
+    def _ptt_group(self):
+        if self.ptt_group and self.table != 'ptt_subscriptions':
+            raise ValueError('source.ptt_group 은 table=ptt_subscriptions 에만 둔다')
+        return self
 
 
 class CredsSource(_Strict):
@@ -249,6 +260,9 @@ class UePool(_PoolBase):
     access: str = Field(description='접속점 노드 id — edge=access 수신점이 있는 SIP 노드')
     listener: Optional[str] = Field(default=None, description='그 노드의 수신점 id — 비면 transport 와 같은 protocol 의 첫 access 수신점')
     source: Union[DbSource, CredsSource]
+    service: Optional[ServiceKind] = Field(
+        default=None, description='접속환경 클래스(sip_service_model kind) — ptt 면 MCPTT 단말(feature tag·PTT 도메인·GMS/CMS 구독·그룹 affiliation·floor). '
+                                  '생략 = source.table 이 ptt_subscriptions 면 ptt, 그 외 volte')
     transport: Transport = Field(default='udp', description='listener 를 주면 그 protocol 로 맞춘다(둘 다 주고 다르면 오류)')
     srtp: SrtpMode = 'off'
     register_expires: int = Field(default=3600, ge=60)
@@ -536,6 +550,15 @@ class Topology(_Strict):
                     return d
         return doms[0] if doms else ''
 
+    def pool_service(self, pname: str) -> str:
+        """UE 풀의 접속환경 클래스 — service, 비면 source.table 이 ptt_subscriptions 일 때 ptt, 그 외 volte."""
+        p = self.pools[pname]
+        if p.kind != 'ue':
+            return 'volte'
+        if p.service:
+            return p.service
+        return 'ptt' if getattr(p.source, 'table', None) == 'ptt_subscriptions' else 'volte'
+
     def pool_bind_ip(self, pname: str) -> str:
         """피어 풀 수신점 ip = bind.ip, 비면 그 워커 호스트 주소."""
         p = self.pools[pname]
@@ -628,7 +651,11 @@ StepKind = Literal[
 WORKER_STEPS = frozenset((
     'register', 'deregister', 'invite', 'progress', 'answer', 'reject', 'bye',
     'hold', 'resume', 'dtmf', 'refer', 'media_hold', 'media_send', 'media_stop', 'wait', 'expect',
+    'group_call', 'floor_request', 'floor_release',
 ))
+
+# floor_request.payload — 기대 결과(TS 24.380 Granted / Deny / Queue Position Info). any = 결과가 나오기만 하면 된다
+FLOOR_OUTCOMES = ('granted', 'denied', 'queued', 'any')
 
 # media_hold.during 에 둘 수 있는 통화 중 동작(§7 ⓓ) — 컴파일러가 평평한 단계열로 푼다
 DURING_STEPS = ('dtmf', 'hold', 'resume', 'refer', 'media_send', 'media_stop')
@@ -662,9 +689,9 @@ STEP_VOCAB = {
     'pickup':        {'group': 'xfer',  'actor': 'from',    'kind': None,       'metrics': ['code'], 'desc': '당겨받기 (피처코드)'},
     'subscribe':     {'group': 'ctl',   'actor': 'who',     'kind': None,       'metrics': ['code'], 'desc': 'SUBSCRIBE (dialog/reg)'},
     'publish':       {'group': 'ctl',   'actor': 'who',     'kind': None,       'metrics': ['code'], 'desc': 'PUBLISH'},
-    'group_call':    {'group': 'ptt',   'actor': 'from',    'kind': 'ue',       'metrics': ['code', 'srd_ms'], 'desc': 'PTT 그룹콜 (group)'},
-    'floor_request': {'group': 'ptt',   'actor': 'who',     'kind': 'ue',       'metrics': ['floor_grant_ms', 'floor_queue_ms'], 'desc': 'Floor Request'},
-    'floor_release': {'group': 'ptt',   'actor': 'who',     'kind': 'ue',       'metrics': ['floor_taken_ms'], 'desc': 'Floor Release'},
+    'group_call':    {'group': 'ptt',   'actor': 'fromto',  'kind': 'ptt',      'metrics': ['code', 'srd_ms', 'group_fanout_ms'], 'desc': 'PTT 그룹콜 — from 이 자기 그룹으로 INVITE, to(multi 역할) 멤버 전원 합류까지'},
+    'floor_request': {'group': 'ptt',   'actor': 'who',     'kind': 'ptt',      'metrics': ['floor_grant_ms', 'floor_taken_ms', 'floor_queue_ms', 'floor_grant_pct'], 'desc': 'Floor Request → 결과(payload: granted|denied|queued|any)'},
+    'floor_release': {'group': 'ptt',   'actor': 'who',     'kind': 'ptt',      'metrics': ['floor_idle_ms'], 'desc': 'Floor Release → Idle 도달'},
     'sds_send':      {'group': 'ptt',   'actor': 'from',    'kind': 'ue',       'metrics': ['sds_delay_ms'], 'desc': 'MCData SDS 송신'},
     'sds_recv':      {'group': 'ptt',   'actor': 'who',     'kind': 'ue',       'metrics': ['sds_delay_ms', 'sds_disposition_pct'], 'desc': 'MCData SDS 수신 대기'},
     'expect':        {'group': 'ctl',   'actor': 'none',    'kind': None,       'metrics': ['ser_pct', 'scr_pct', 'isa_pct'], 'desc': '누계 지표 게이트'},
@@ -679,7 +706,8 @@ METRIC_LABELS = {
     'code': 'code — 응답 코드', 'rrd_ms': 'RRD — 등록 지연', 'srd_ms': 'SRD — 세션 요청 지연', 'sdd_ms': 'SDD — 세션 해제 지연',
     'sdt_s': 'SDT — 세션 지속', 'ser_pct': 'SER — 세션 확립률', 'seer_pct': 'SEER — 유효 확립률', 'scr_pct': 'SCR — 세션 완료율',
     'isa_pct': 'ISA — 시도 실패율', 'rtp_loss_pct': 'RTP 손실률', 'jitter_ms': 'RTP 지터', 'mos': 'MOS',
-    'floor_grant_ms': 'Floor grant 지연', 'floor_taken_ms': 'Floor taken 지연', 'floor_queue_ms': 'Floor 대기',
+    'floor_grant_ms': 'Floor grant 지연', 'floor_taken_ms': 'Floor taken 도달', 'floor_queue_ms': 'Floor 큐 대기',
+    'floor_idle_ms': 'Floor idle 도달', 'floor_grant_pct': 'Floor 허가율', 'group_fanout_ms': '그룹 fan-out 완료',
     'sds_delay_ms': 'SDS 지연', 'sds_disposition_pct': 'SDS disposition 률', 'dtmf_rx_pct': 'DTMF 수신률',
     'q850_rx_pct': 'Q.850 Reason 수신률', 'early_media_pct': '183 early media 률', 'prack_pct': 'PRACK 률',
     'early_rtp_pct': 'early media RTP 도달률',
@@ -700,7 +728,8 @@ METRIC_NAMES = (
     'rrd_ms', 'srd_ms', 'sdd_ms', 'sdt_s',
     'ser_pct', 'seer_pct', 'scr_pct', 'isa_pct',
     'rtp_loss_pct', 'jitter_ms', 'mos',
-    'floor_grant_ms', 'floor_taken_ms', 'floor_queue_ms',
+    # PTT(TS 24.380 메시지 시각) — 요청→Granted · 요청→다른 참가자의 Taken · 큐 경유 요청→Granted · 해제→Idle, 그룹 INVITE→마지막 멤버 합류
+    'floor_grant_ms', 'floor_taken_ms', 'floor_queue_ms', 'floor_idle_ms', 'floor_grant_pct', 'group_fanout_ms',
     'sds_delay_ms', 'sds_disposition_pct',
     # 피어 pbx/mgcf 축(D) — 비율은 발생기 관측(송신 대비 수신)
     'dtmf_rx_pct', 'q850_rx_pct', 'early_media_pct', 'prack_pct',
@@ -717,6 +746,7 @@ RATIO_METRICS = {
     'early_media_pct': ('early_media', 'progress_tx'),   # 발신자에 도달한 183+SDP / 피어가 낸 183
     'prack_pct': ('prack_rx', 'progress_tx'),       # 피어 UAS 가 받은 PRACK / 낸 신뢰 183
     'early_rtp_pct': ('early_rtp_ok', 'progress_tx'),   # 200 전에 RTP(≥ 5 패킷)를 받은 발신자 / 피어가 낸 183
+    'floor_grant_pct': ('floor_granted', 'floor_request_tx'),   # Granted 수신 / Floor Request 송신
 }
 
 
@@ -777,8 +807,8 @@ class Step(_Strict):
     after_ms: Optional[int] = Field(default=None, ge=0)
     seconds: Optional[Union[int, str]] = Field(default=None, description='정수 또는 ${ht} 같은 바인딩')
     media: Optional[Media] = None
-    group: Optional[str] = None
-    payload: Optional[str] = Field(default=None, description='dtmf: 숫자열(0-9*#A-D) · reject: 응답 코드')
+    group: Optional[str] = Field(default=None, description='group_call — MCPTT 그룹 id 를 직접 지정(생략 = 인스턴스가 잡은 그룹, 곧 발신 멤버의 affiliation 그룹)')
+    payload: Optional[str] = Field(default=None, description='dtmf: 숫자열(0-9*#A-D) · reject: 응답 코드 · floor_request: 기대 결과 granted|denied|queued|any')
     cause: Optional[int] = Field(default=None, ge=1, le=127,
                                  description='bye/reject 의 Reason: Q.850;cause= (RFC 3326 — MGCF 종료 사유, 16=정상 34=회선 없음)')
     during: Optional[List[During]] = Field(default=None, description='media_hold 만 — 유지 구간 안 통화 중 동작(at_s 순)')
@@ -808,12 +838,18 @@ class Step(_Strict):
                 raise ValueError('dtmf 단계는 payload 에 숫자열(0-9 * # A-D)이 필요하다')
         if self.step == 'refer' and not (self.from_ and self.to):
             raise ValueError('refer 단계는 from(전달자)과 to(전달 대상 역할)가 필요하다')
+        if self.step == 'group_call' and not self.from_:
+            raise ValueError('group_call 단계는 from(발신 멤버 역할)이 필요하다 — to 는 합류를 기다릴 multi 역할(선택)')
+        if self.step == 'floor_request' and self.payload is not None and self.payload not in FLOOR_OUTCOMES:
+            raise ValueError(f'floor_request 의 payload(기대 결과)는 {list(FLOOR_OUTCOMES)} 중 하나')
+        if self.group is not None and self.step != 'group_call':
+            raise ValueError('group 은 group_call 단계에만 둔다')
         if self.cause is not None and self.step not in ('bye', 'reject'):
             raise ValueError('cause 는 bye/reject 단계에만 둔다')
         if (self.sample is not None or self.loop is not None) and self.step != 'media_send':
             raise ValueError('sample/loop 은 media_send 단계에만 둔다')
-        if self.media is not None and self.media.rtp != 'auto' and self.step != 'invite':
-            raise ValueError('media.rtp 는 invite 단계에만 둔다')
+        if self.media is not None and self.media.rtp != 'auto' and self.step not in ('invite', 'group_call'):
+            raise ValueError('media.rtp 는 invite/group_call 단계에만 둔다')
         if self.during:
             if self.step != 'media_hold':
                 raise ValueError('during 은 media_hold 단계에만 둔다')
@@ -828,6 +864,7 @@ class Role(_Strict):
     pool: str
     disjoint_from: Optional[str] = None
     count: Optional[int] = Field(default=None, ge=1, description='역할이 쓰는 신원 수 — 생략=풀 전체')
+    multi: bool = Field(default=False, description='인스턴스마다 단말 여럿 — 그룹 세션(group_call)에서 단일 역할들이 멤버를 하나씩 잡고 남은 그룹 멤버 전부')
 
 
 EvidenceKind = Literal['recording_created', 'log_errors', 'alarm_raised', 'event_logged']
@@ -862,11 +899,14 @@ class Scenario(_Strict):
                 for ref in [*(d.who or []), d.from_, d.to]:
                     if ref and ref not in names:
                         raise ValueError(f'flow[{i}].during ({d.step}) 가 정의되지 않은 역할 {ref!r} 을 참조한다')
+        self._check_group_session(names)
         # 송출 제어(media_send/media_stop)는 그 호에서 SDP 가 오간 뒤(183 progress 또는 200 answer)에만, rtp: none 인 호에는 못 둔다
         rtp, sdp = None, False
         for i, s in enumerate(self.flow):
             if s.step == 'invite':
                 rtp, sdp = (s.media.rtp if s.media else 'auto'), False
+            elif s.step == 'group_call':
+                rtp, sdp = (s.media.rtp if s.media else 'auto'), True   # 완료 = 발신자 200 + 멤버 자동응답 — SDP 교환이 끝난 상태
             elif s.step in ('answer', 'progress'):
                 sdp = True
             elif s.step == 'bye':
@@ -879,6 +919,43 @@ class Scenario(_Strict):
                 if rtp == 'none':
                     raise ValueError(f'flow[{i}] {c} — 그 호의 invite.media.rtp 가 none(시그널링 전용)이다')
         return self
+
+    def is_group_session(self) -> bool:
+        return any(s.step == 'group_call' for s in self.flow)
+
+    def multi_roles(self) -> List[str]:
+        return [r for r, spec in self.roles.items() if spec.multi]
+
+    def _check_group_session(self, names) -> None:
+        """그룹 세션 시나리오(group_call) 규칙 — 인스턴스 = MCPTT 그룹 하나: 단일 역할은 멤버 하나씩, multi 역할(하나만)은 나머지 전부.
+        그래서 역할은 모두 같은 풀이어야 하고(그룹 멤버가 한 풀에 있다), multi 역할은 여럿이 함께 할 수 있는 단계에만 선다."""
+        multi = self.multi_roles()
+        if not self.is_group_session():
+            if multi:
+                raise ValueError(f'roles.{multi[0]}.multi 는 group_call 이 있는 시나리오에만 둔다')
+            for i, s in enumerate(self.flow):
+                if s.step in ('floor_request', 'floor_release'):
+                    raise ValueError(f'flow[{i}] {s.step} 는 group_call 뒤에만 둔다')
+            return
+        if len(multi) > 1:
+            raise ValueError(f'multi 역할은 하나만 둔다(그룹의 나머지 멤버) — {multi}')
+        pools = {spec.pool for spec in self.roles.values()}
+        if len(pools) > 1:
+            raise ValueError(f'그룹 세션 시나리오의 역할은 모두 같은 풀이어야 한다 — {sorted(pools)}')
+        in_session = False
+        for i, s in enumerate(self.flow):
+            if s.step in ('invite', 'answer', 'reject', 'progress', 'refer', 'hold', 'resume', 'dtmf'):
+                raise ValueError(f'flow[{i}] {s.step} — 그룹 세션 시나리오에는 1:1 호 단계를 섞지 않는다')
+            if s.step == 'group_call':
+                if s.from_ in multi:
+                    raise ValueError(f'flow[{i}] group_call.from={s.from_!r} 은 단일 역할이어야 한다')
+                if s.to and s.to not in multi:
+                    raise ValueError(f'flow[{i}] group_call.to={s.to!r} 는 multi 역할이어야 한다(합류를 기다릴 나머지 멤버)')
+                in_session = True
+            elif s.step in ('floor_request', 'floor_release') and not in_session:
+                raise ValueError(f'flow[{i}] {s.step} 는 group_call 뒤에만 둔다')
+            elif s.step == 'bye':
+                in_session = False
 
     def sample_refs(self) -> List[str]:
         """이 시나리오가 참조하는 샘플 id(순서 보존·중복 제거)."""
@@ -950,6 +1027,7 @@ class Identity(_Strict):
     auth_scheme: Literal['digest', 'aka'] = 'digest'
     aka_k: Optional[str] = None
     aka_opc: Optional[str] = None
+    ptt_group: Optional[str] = Field(default=None, description='service=ptt — 이 단말이 affiliation 하는 MCPTT 그룹 id(가상 단말 하나 = 그룹 하나)')
 
 
 class TrunkRegister(_Strict):
@@ -986,6 +1064,7 @@ class PoolCreate(_Strict):
     identities: List[Identity] = Field(default_factory=list)
     transport: Transport = 'udp'
     srtp: SrtpMode = 'off'
+    service: ServiceKind = Field(default='volte', description='kind=ue — ptt 면 MCPTT 단말(기동 절차·자동응답·floor)')
     prack: bool = Field(default=False, description='kind=ue — 100rel/PRACK')
     dtmf: bool = Field(default=True, description='kind=ue — telephone-event 오퍼/echo')
     target_csp: TargetCsp = Field(description='풀이 닿는 SIP 서버 — 컨트롤러가 토폴로지 노드 참조에서 파생')
@@ -1018,6 +1097,7 @@ class RunStart(_Strict):
     roles: Dict[str, str] = Field(description='역할 → 풀 이름')
     role_slices: Dict[str, List[int]] = Field(
         default_factory=dict, description='역할 → 이 워커가 맡는 신원 인덱스 [begin, end) — 워커 분산')
+    multi_roles: List[str] = Field(default_factory=list, description='인스턴스마다 단말 여럿인 역할 — 그룹 세션의 나머지 멤버')
     steps: List[CompiledStep] = Field(min_length=1)
     samples: Dict[str, Dict[str, str]] = Field(
         default_factory=dict, description='이 시나리오가 참조하는 샘플 — id → {코덱: 워커 샘플 디렉터리 안 파일|synthetic} (topology.media.samples 발췌)')
@@ -1042,6 +1122,9 @@ class WorkerPoolState(_Strict):
     kind: Literal['ue', 'peer', 'real-ue']
     endpoints: int
     registered: int = 0
+    service: Optional[ServiceKind] = None
+    affiliated: Optional[int] = Field(default=None, description='service=ptt — 그룹 affiliation 200 을 받은 단말 수')
+    groups: Optional[int] = Field(default=None, description='service=ptt — 이 풀 신원이 속한 MCPTT 그룹 수')
 
 
 class WorkerHealthMedia(_Strict):

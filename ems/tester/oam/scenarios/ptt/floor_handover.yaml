@@ -1,0 +1,20 @@
+# PTT floor 넘기기 — 두 멤버가 차례로 발언한다. 두 번째 발언자는 첫 발언자가 floor 를 가진 동안 요청해 거절(Deny) 또는 큐(Queue
+# Position Info)를 받고, 해제 뒤 다시 요청해 허가를 받는다. 대상의 floor 중재(TS 24.380 §6.3)를 본다.
+id: PTT-FLOOR-HANDOVER
+title: PTT floor 경합 → 넘기기
+tags: [ptt, floor]
+roles:
+  talker:    { pool: ptt_ue }
+  second:    { pool: ptt_ue }
+  listeners: { pool: ptt_ue, multi: true }
+flow:
+  - { step: register,      who: [talker, second, listeners], expect: { code: 200 } }
+  - { step: group_call,    from: talker, to: listeners, media: { audio: amr-wb }, expect: { code: 200, group_fanout_ms: { p95: 3000 } } }
+  - { step: floor_request, who: [talker], expect: { floor_grant_ms: { p95: 300 } } }
+  - { step: media_hold,    seconds: 3 }
+  - { step: floor_request, who: [second], payload: any }          # 점유 중 요청 — Deny 또는 큐
+  - { step: floor_release, who: [talker, second], expect: { floor_idle_ms: { p95: 500 } } }
+  - { step: floor_request, who: [second], expect: { floor_grant_ms: { p95: 300 } } }
+  - { step: media_hold,    seconds: "${ht}", expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: floor_release, who: [second] }
+  - { step: bye,           from: talker }

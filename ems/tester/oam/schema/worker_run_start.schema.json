@@ -315,6 +315,14 @@
       "description": "이 워커가 발생시킬 인스턴스 상한 — 단발(기능) 실행. 다 끝나면 워커가 run 을 스스로 닫는다",
       "title": "Max Instances"
     },
+    "multi_roles": {
+      "description": "인스턴스마다 단말 여럿인 역할 — 그룹 세션의 나머지 멤버",
+      "items": {
+        "type": "string"
+      },
+      "title": "Multi Roles",
+      "type": "array"
+    },
     "rate_saps": {
       "description": "이 워커 몫의 시도율 (컨트롤러가 워커 수로 나눔)",
       "minimum": 0,

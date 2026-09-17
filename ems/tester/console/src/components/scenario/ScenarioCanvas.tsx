@@ -169,6 +169,9 @@ export default function ScenarioCanvas({ doc, onChange, onCommit, topologies, to
       case 'bye': return `BYE${s.cause ? ` · Q.850 ${s.cause}` : ''}`
       case 'dtmf': return `DTMF ${s.payload ?? ''}`; case 'progress': return '183 + SDP'; case 'register': return 'REGISTER'; case 'deregister': return 'Expires: 0'
       case 'refer': return 'REFER'
+      case 'group_call': return `그룹콜${s.group ? ` ${s.group}` : ''}${s.media ? ` · ${s.media.audio ?? 'amr-wb'}` : ''}${s.media?.rtp && s.media.rtp !== 'auto' ? ` · rtp ${s.media.rtp}` : ''}`
+      case 'floor_request': return `Floor 요청${s.payload && s.payload !== 'granted' ? ` → ${s.payload}` : ''}`
+      case 'floor_release': return 'Floor 해제'
       default: return s.step
     }
   }
@@ -472,6 +475,7 @@ function Inspector({ doc, sel, setSel, mutate, topo, vocab, issues, canWrite, so
         <F label="disjoint_from" help="같은 풀의 역할과 신원 창을 겹치지 않게"><Sel value={r.disjoint_from} disabled={ro} options={[...same, ...(r.disjoint_from && !same.includes(r.disjoint_from) ? [r.disjoint_from] : [])].map(v => ({ v }))} empty="(없음)" onChange={v => mutate(d => { if (v) d.roles[n].disjoint_from = v; else delete d.roles[n].disjoint_from })} /></F>
         <F label="count" help="생략 = 전체 (disjoint 면 균등 분할)"><Txt value={r.count} mono type="number" placeholder="풀 전체" disabled={ro} onCommit={v => mutate(d => { if (v === '') delete d.roles[n].count; else d.roles[n].count = Math.max(1, Number(v)) })} /></F>
       </div>
+      <label className="mt-1 inline-flex items-center gap-1"><Checkbox checked={!!r.multi} disabled={ro} onCheckedChange={v => mutate(d => { if (v) d.roles[n].multi = true; else delete d.roles[n].multi })} /> multi — 인스턴스마다 단말 여럿 <span className="text-muted-foreground">(그룹 세션: 단일 역할이 잡고 남은 그룹 멤버 전부)</span></label>
       <Sec title="토폴로지 해석" right={topo && <Badge variant="neutralSoft">{topo.name}</Badge>}>
         {res ? <div className="flex flex-col gap-0.5">
           <div className="flex justify-between"><span className="text-muted-foreground">풀</span><span className="font-mono">{Object.entries(res.pools).map(([k, p]) => `${k}@${p.worker}`).join(', ')}{res.byName ? '' : ' (group)'}</span></div>
@@ -508,7 +512,9 @@ function Inspector({ doc, sel, setSel, mutate, topo, vocab, issues, canWrite, so
   const i = sel.idx; const s = doc.flow[i]; if (!s) { setSel({ kind: 'scenario' }); return null }
   const D = vocab?.steps[s.step]
   const ST = (fn: (x: Step) => void) => mutate(x => fn(x.flow[i]))
-  const gate = D?.kind === 'peer' ? (r: string) => kindOf(r) === 'peer' : D?.kind === 'ue' ? (r: string) => kindOf(r) !== 'peer' : undefined
+  const gate = D?.kind === 'peer' ? (r: string) => kindOf(r) === 'peer' : D?.kind === 'ue' ? (r: string) => kindOf(r) !== 'peer'
+    : D?.kind === 'ptt' ? (r: string) => { const x = S.resolvePool(doc, topo, r); return !x || (x.kind === 'ue' && x.service === 'ptt') } : undefined
+  const M = S.multiRoles(doc)
   const isBind = typeof s.seconds === 'string' && /^\$\{/.test(s.seconds)
   const suggested = D?.metrics ?? []; const allMetrics = Object.keys(vocab?.metrics ?? {})
   const thr = vocab?.thresholds ?? ['p50', 'p95', 'p99', 'max', 'min']
@@ -519,14 +525,16 @@ function Inspector({ doc, sel, setSel, mutate, topo, vocab, issues, canWrite, so
     {(D?.actor === 'who' || D?.actor === 'from' || D?.actor === 'fromto') && <>
       {D.actor === 'who' ? <F label="행위자 (who — 여럿)"><Chips roles={R} selected={s.who ?? []} multi disabled={ro} kindOf={kindOf} gate={D.kind === 'ue|trunk' ? r => { const x = S.resolvePool(doc, topo, r); return !x || x.kind !== 'peer' || !!(Object.values(x.pools)[0] as { register?: unknown }).register } : gate} onToggle={r => ST(x => { const w = new Set(x.who ?? []); if (w.has(r)) w.delete(r); else w.add(r); x.who = [...w] })} /></F>
         : <F label="행위자 (from)"><Chips roles={R} selected={[s.from ?? ''].filter(Boolean)} multi={false} disabled={ro} kindOf={kindOf} gate={gate} onToggle={r => ST(x => { if (r) x.from = r; else delete x.from })} /></F>}
-      {(D.actor === 'fromto' || s.step === 'invite') && <F label={s.step === 'refer' ? '전달 대상 (to)' : '상대 (to)'}><Chips roles={R} selected={[s.to ?? ''].filter(Boolean)} multi={false} disabled={ro} kindOf={kindOf} onToggle={r => ST(x => { if (r) x.to = r; else delete x.to })} /></F>}
+      {(D.actor === 'fromto' || s.step === 'invite') && <F label={s.step === 'refer' ? '전달 대상 (to)' : s.step === 'group_call' ? '합류 대기 (to — multi 역할, 선택)' : '상대 (to)'}><Chips roles={s.step === 'group_call' ? R.filter(r => M.includes(r)) : R} selected={[s.to ?? ''].filter(Boolean)} multi={false} disabled={ro} kindOf={kindOf} onToggle={r => ST(x => { if (r && x.to !== r) x.to = r; else delete x.to })} /></F>}
     </>}
     {(s.step === 'answer' || s.step === 'progress' || s.step === 'reject' || s.step === 'invite' || S.MEDIA_CTL.has(s.step)) && <F label="after_ms" help="직전 이벤트 뒤 지연(ms)"><Txt value={s.after_ms} mono type="number" placeholder="0" disabled={ro} onCommit={v => ST(x => { if (v === '') delete x.after_ms; else x.after_ms = Math.max(0, Number(v)) })} /></F>}
     {D?.actor === 'seconds' && <div className="grid grid-cols-[1fr_auto] items-end gap-2">
       <F label={isBind ? '바인딩 변수' : 'seconds'}><Txt value={isBind ? String(s.seconds).slice(2, -1) : s.seconds} mono type={isBind ? undefined : 'number'} disabled={ro} onCommit={v => ST(x => { x.seconds = isBind ? `\${${v.trim()}}` : Number(v) })} /></F>
       <Button variant="outline" size="sm" disabled={ro} onClick={() => ST(x => { x.seconds = isBind ? (bind.ht ?? 10) : '${ht}' })}>{isBind ? '고정값으로' : '바인딩 ${ht}'}</Button>
     </div>}
-    {s.step === 'invite' && <div className="grid grid-cols-3 gap-2">
+    {s.step === 'group_call' && <F label="group" help="MCPTT 그룹 id 직접 지정 — 생략 = 인스턴스가 잡은 그룹(발신 멤버의 affiliation 그룹)"><Txt value={s.group} mono placeholder="(인스턴스 그룹)" disabled={ro} onCommit={v => ST(x => { if (v.trim()) x.group = v.trim(); else delete x.group })} /></F>}
+    {s.step === 'floor_request' && <F label="기대 결과 (payload)" help="granted = 허가(기본) · denied = 거절 · queued = 큐 · any = 결과만 나오면 됨(동시 요청 경합)"><Sel value={s.payload ?? 'granted'} disabled={ro} options={S.FLOOR_OUTCOMES.map(v => ({ v }))} onChange={v => ST(x => { if (v === 'granted') delete x.payload; else x.payload = v })} /></F>}
+    {(s.step === 'invite' || s.step === 'group_call') && <div className="grid grid-cols-3 gap-2">
       <F label="audio"><Sel value={s.media?.audio ?? 'amr-wb'} disabled={ro} options={(vocab?.audio ?? ['amr-wb', 'amr', 'pcmu', 'pcma', 'g722']).map(v => ({ v }))} onChange={v => ST(x => { x.media = { ...(x.media ?? {}), audio: v } })} /></F>
       <F label="video"><Sel value={s.media?.video} disabled={ro} options={[{ v: 'h264' }]} empty="없음" onChange={v => ST(x => { x.media = { ...(x.media ?? {}) }; if (v) x.media.video = v; else delete x.media.video })} /></F>
       <F label="rtp" help="auto = SDP 교환 즉시 송출 · none = 시그널링 전용(RTP 없음) · explicit = media_send 가 부를 때만 송출(수신은 시작)"><Sel value={s.media?.rtp ?? 'auto'} disabled={ro} options={(vocab?.rtp_modes ?? ['auto', 'none', 'explicit']).map(v => ({ v }))} onChange={v => ST(x => { x.media = { ...(x.media ?? {}) }; if (v && v !== 'auto') x.media.rtp = v as 'none' | 'explicit'; else delete x.media.rtp })} /></F>

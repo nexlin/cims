@@ -3512,6 +3512,13 @@ class TesterBridge(unittest.TestCase):
         from verify.lib.registry import ItemStatus
         self.assertEqual(r.status, ItemStatus.FAIL)
 
+    def test_state_prefix_set_even_on_failure(self) -> None:
+        # 계측기 경로도 cspsim 헬퍼와 같은 상태 키(<PREFIX>_T0)를 남긴다 — 후속 read-only 항목(S6-MCPTT-FLOOR-GRANT)이 창을 잡는다
+        os.environ.update({"CIMS_TESTER_URL": "http://127.0.0.1:1", "CIMS_TESTER_TOPOLOGY": "t", "CIMS_TESTER_TOKEN": "tok"})
+        self.ctx.state = {}
+        self.T.run_tester_scenario(self.ctx, "S6-X", "x", "PTT-GROUP-CALL-BASIC", stage=6, timeout=5, state_prefix="S6_PTT_VOICE")
+        self.assertIn("S6_PTT_VOICE_T0", self.ctx.state)
+
     def test_summarize(self) -> None:
         rec = {"id": "r1", "scenario_id": "VOLTE-CALL-BASIC", "verdict": "fail", "target_build": "csp 0.2.134 (dep 34)",
                "summary": {"attempts": 2, "sessions": 1, "completed": 1, "failed": 1, "skipped": 0, "ser_pct": 50.0},

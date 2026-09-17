@@ -322,6 +322,12 @@
           "default": null,
           "title": "Disjoint From"
         },
+        "multi": {
+          "default": false,
+          "description": "인스턴스마다 단말 여럿 — 그룹 세션(group_call)에서 단일 역할들이 멤버를 하나씩 잡고 남은 그룹 멤버 전부",
+          "title": "Multi",
+          "type": "boolean"
+        },
         "pool": {
           "title": "Pool",
           "type": "string"
@@ -419,6 +425,7 @@
             }
           ],
           "default": null,
+          "description": "group_call — MCPTT 그룹 id 를 직접 지정(생략 = 인스턴스가 잡은 그룹, 곧 발신 멤버의 affiliation 그룹)",
           "title": "Group"
         },
         "loop": {
@@ -455,7 +462,7 @@
             }
           ],
           "default": null,
-          "description": "dtmf: 숫자열(0-9*#A-D) · reject: 응답 코드",
+          "description": "dtmf: 숫자열(0-9*#A-D) · reject: 응답 코드 · floor_request: 기대 결과 granted|denied|queued|any",
           "title": "Payload"
         },
         "sample": {

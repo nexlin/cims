@@ -96,12 +96,31 @@ def db_identities(pool_name: str, src: dict, topology: Topology, transport: str)
                                database=node.db.name, connect_timeout=6, read_timeout=15)
     except Exception as e:
         raise CompileError(f'pool {pool_name}: DB 접속 실패({topology.node_ip(nid)}:{node.db.port}/{node.db.name}) — {e}')
+    groups: Dict[str, str] = {}
     try:
         cur = conn.cursor()
-        cur.execute(f"SELECT id, imsi, ha1 FROM {table} WHERE ha1 IS NOT NULL AND ha1<>'' "
-                    f"AND (sip_transport IS NULL OR sip_transport='' OR sip_transport=%s) ORDER BY id LIMIT %s OFFSET %s",
-                    ((transport or 'udp').upper(), int(src.get('count') or 0), int(src.get('offset') or 0)))
+        want_group = str(src.get('ptt_group') or '')
+        if want_group:
+            # 그 MCPTT 그룹 멤버만(멤버 priority 순) — 그룹 세션 시나리오의 신원 원천
+            cur.execute("SELECT s.id, s.imsi, s.ha1 FROM ptt_subscriptions s JOIN ptt_group_members m ON m.user_id = s.id "
+                        "JOIN ptt_groups g ON g.id = m.group_id WHERE g.mcptt_group_id=%s AND s.ha1 IS NOT NULL AND s.ha1<>'' "
+                        "AND (s.sip_transport IS NULL OR s.sip_transport='' OR s.sip_transport=%s) ORDER BY m.priority, s.id LIMIT %s OFFSET %s",
+                        (want_group, (transport or 'udp').upper(), int(src.get('count') or 0), int(src.get('offset') or 0)))
+        else:
+            cur.execute(f"SELECT id, imsi, ha1 FROM {table} WHERE ha1 IS NOT NULL AND ha1<>'' "
+                        f"AND (sip_transport IS NULL OR sip_transport='' OR sip_transport=%s) ORDER BY id LIMIT %s OFFSET %s",
+                        ((transport or 'udp').upper(), int(src.get('count') or 0), int(src.get('offset') or 0)))
         rows = cur.fetchall()
+        if table == 'ptt_subscriptions' and rows:
+            if want_group:
+                groups = {str(r[0]): want_group for r in rows}
+            else:
+                # 가입자마다 첫 그룹(mcptt_group_id·priority 순) — 가상 단말 하나는 그룹 하나에 affiliation 한다
+                marks = ','.join(['%s'] * len(rows))
+                cur.execute("SELECT m.user_id, g.mcptt_group_id FROM ptt_group_members m JOIN ptt_groups g ON g.id = m.group_id "
+                            f"WHERE m.user_id IN ({marks}) ORDER BY g.mcptt_group_id DESC, m.priority DESC", [r[0] for r in rows])
+                for uid, gid in cur.fetchall():   # 역순으로 덮어써서 마지막에 남는 것이 첫 그룹
+                    groups[str(uid)] = str(gid)
     except Exception as e:
         raise CompileError(f'pool {pool_name}: DB 질의 실패({table}) — {e}')
     finally:
@@ -111,6 +130,8 @@ def db_identities(pool_name: str, src: dict, topology: Topology, transport: str)
         ident = {'user': str(uid), 'domain': '', 'ha1': str(ha1)}
         if imsi:
             ident['auth_id'] = str(imsi)
+        if groups.get(str(uid)):
+            ident['ptt_group'] = groups[str(uid)]
         ids.append(ident)
     if not ids:
         raise CompileError(f'pool {pool_name}: {table} 에 H(A1) 보유 가입자가 없다(offset {src.get("offset") or 0}, transport {transport})')
@@ -161,6 +182,8 @@ def load_identities(pool_name: str, pool_doc: dict, topology: Optional[Topology]
                 ident['auth_scheme'] = 'aka'
                 ident['aka_k'] = str(d['k'])
                 ident['aka_opc'] = str(d.get('opc') or '')
+            if d.get('ptt_group') or d.get('group'):
+                ident['ptt_group'] = str(d.get('ptt_group') or d.get('group'))
             ids.append(ident)
             if count and len(ids) >= int(count):
                 break
@@ -170,11 +193,11 @@ def load_identities(pool_name: str, pool_doc: dict, topology: Optional[Topology]
 
 
 def _default_domain(topology: Topology, pname: str) -> str:
-    """creds 에 domain 이 없을 때 — 접속점 노드의 도메인(풀 이름에 ptt 가 있으면 PTT 도메인). 피어 풀은 자기 domain."""
+    """creds 에 domain 이 없을 때 — 접속점 노드의 도메인(service=ptt 풀이면 PTT 도메인). 피어 풀은 자기 domain."""
     p = topology.pools[pname]
     if p.kind == 'peer':
         return p.domain
-    return topology.default_domain(p.access, ptt='ptt' in pname) or topology.default_domain(p.access)
+    return topology.default_domain(p.access, ptt=topology.pool_service(pname) == 'ptt') or topology.default_domain(p.access)
 
 
 def bind_value(v, bindings: Dict[str, object]):
@@ -310,6 +333,9 @@ def check_kind_gates(scenario: Scenario, topology: Topology, role_pool: Dict[str
                 raise CompileError(f'flow[{i}] {st.step}: 역할 {role!r} 은 피어 풀이어야 한다')
             if gate == 'ue' and pool.kind == 'peer':
                 raise CompileError(f'flow[{i}] {st.step}: 역할 {role!r} 은 UE 풀이어야 한다')
+            pname = role_pool.get(role, '')
+            if gate == 'ptt' and (pool.kind != 'ue' or topology.pool_service(pname) != 'ptt'):
+                raise CompileError(f'flow[{i}] {st.step}: 역할 {role!r} 은 service=ptt UE 풀이어야 한다(풀 {pname})')
 
 
 def role_ranges(roles: Dict[str, Role], role_pool: Dict[str, str], pool_sizes: Dict[str, int]) -> Dict[str, Tuple[str, int, int]]:
@@ -367,6 +393,32 @@ def role_ranges(roles: Dict[str, Role], role_pool: Dict[str, str], pool_sizes: D
     if pending:
         raise CompileError(f'roles: disjoint_from 순환 — {sorted(pending)}')
     return out
+
+
+def group_session_info(scenario: Scenario, pool_name: str, ids: List[dict], begin: int, end: int) -> dict:
+    """그룹 세션(group_call) 시나리오의 그룹 자원 — 인스턴스 하나 = MCPTT 그룹 하나. 필요 멤버 = 단일 역할 수 + (multi 역할이 있으면 1).
+    멤버가 모자란 그룹은 워커가 고르지 않는다(usable 에서 빠진다). 쓸 그룹이 없으면 컴파일 오류."""
+    multi = set(scenario.multi_roles())
+    used = set()
+    for st in scenario.flow:
+        if st.step in ('register', 'deregister'):
+            continue
+        used.update(r for r in [*(st.who or []), st.from_, st.to] if r)
+    need = len([r for r in used if r not in multi]) + (1 if used & multi else 0)
+    sizes: Dict[str, int] = {}
+    nogroup = 0
+    for ident in ids[begin:end]:
+        g = ident.get('ptt_group')
+        if g:
+            sizes[g] = sizes.get(g, 0) + 1
+        else:
+            nogroup += 1
+    usable = {g: n for g, n in sizes.items() if n >= need}
+    if not usable:
+        raise CompileError(f'pool {pool_name}: 멤버 {need} 명 이상인 MCPTT 그룹이 없다 — 신원의 ptt_group(creds `group` · source.ptt_group)을 확인 '
+                           f'(그룹 {len(sizes)} 개, 그룹 없는 신원 {nogroup})')
+    return {'pool': pool_name, 'groups': len(sizes), 'usable': len(usable), 'need_members': need,
+            'members_min': min(usable.values()), 'members_max': max(usable.values()), 'no_group': nogroup}
 
 
 def worker_peer(topology: Topology, pname: str) -> WorkerPeer:
@@ -438,12 +490,22 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
         return identities[pname]
 
     per_worker: Dict[str, dict] = {}
+    group_session = scenario.is_group_session()
+    groups_info: Dict[str, dict] = {}
     for w in cand:
         role_pool = per_worker_roles[w.name]
         check_register_roles(scenario, topology, role_pool)
         check_kind_gates(scenario, topology, role_pool)
         sizes = {pn: len(ids_of(pn)) for pn in set(role_pool.values())}
-        ranges = role_ranges(scenario.roles, role_pool, sizes)
+        if group_session:
+            # 그룹 세션 — 역할은 신원 창을 나누지 않는다(그룹 멤버가 풀 전체에 걸쳐 있다). 모든 역할 = 풀 전체, 배정은 워커가 그룹 단위로
+            pn = next(iter(set(role_pool.values())))
+            if len(set(role_pool.values())) > 1:
+                raise CompileError(f'{w.name}: 그룹 세션 시나리오의 역할이 서로 다른 풀로 해석된다 — {sorted(set(role_pool.values()))}')
+            ranges = {role: (pn, 0, sizes[pn]) for role in scenario.roles}
+            groups_info[w.name] = group_session_info(scenario, pn, ids_of(pn), 0, sizes[pn])
+        else:
+            ranges = role_ranges(scenario.roles, role_pool, sizes)
         per_worker[w.name] = {'role_pool': role_pool, 'ranges': ranges}
 
     # 워커 배분(율·단발 인스턴스) — cpus 가중(없으면 health max_endpoints/200, 그것도 없으면 1)
@@ -473,10 +535,11 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
                                 trunk_register=trunk_register_for(pname, p, tc.domain_volte))
             else:
                 pc = PoolCreate(pool=pname, kind='ue', identities=ids_of(pname), transport=p.transport, srtp=p.srtp,
-                                prack=bool(p.prack), dtmf=bool(p.dtmf), target_csp=tc)
+                                service=topology.pool_service(pname), prack=bool(p.prack), dtmf=bool(p.dtmf), target_csp=tc)
             pools.append(pc.model_dump(by_alias=True, exclude_none=True))
         slices = {role: [b, e] for role, (_p, b, e) in pw['ranges'].items()}
         rs = RunStart(run_id=run_id, scenario_id=scenario.id, roles=dict(pw['role_pool']), role_slices=slices,
+                      multi_roles=scenario.multi_roles(),
                       steps=[CompiledStep.model_validate({k: v for k, v in s.items() if k != 'src'}) for s in steps],
                       samples=samples, rate_saps=rate_total * share,
                       max_instances=(max(1, int(round(max_instances * share))) if max_instances else None),
@@ -502,9 +565,14 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
         pname0 = next(iter(per.values()))[0]
         p0 = topology.pools[pname0]
         roles_out[role] = {'pool': r.pool, 'kind': p0.kind, 'profile': getattr(p0, 'profile', None),
-                           'disjoint_from': r.disjoint_from, 'count': r.count,
+                           'service': topology.pool_service(pname0) if p0.kind == 'ue' else None,
+                           'disjoint_from': r.disjoint_from, 'count': r.count, 'multi': bool(r.multi),
                            'workers': per, 'total': sum(e - b for (_p, b, e) in per.values())}
     return {'workers': plan_workers, 'rate_total': rate_total, 'roles': roles_out, 'steps': steps, 'phases': phases(scenario),
             'bindings': bindings, 'max_instances': max_instances,
             'identities': {p: len(v) for p, v in identities.items()}, 'peer_pools': peer_pools, 'pinned': pinned,
-            'samples': samples, 'resolve_notes': why}
+            'samples': samples, 'resolve_notes': why,
+            'group_session': ({'workers': groups_info, 'usable': sum(g['usable'] for g in groups_info.values()),
+                               'groups': sum(g['groups'] for g in groups_info.values()),
+                               'need_members': max(g['need_members'] for g in groups_info.values()),
+                               'members_max': max(g['members_max'] for g in groups_info.values())} if groups_info else None)}

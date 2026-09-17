@@ -87,6 +87,8 @@ def procedure(scenario: Scenario, phases: Dict[str, List[int]]) -> List[dict]:
         if s.media:
             parts.append(f"{s.media.audio or ''}{'+' + s.media.video if s.media.video else ''}"
                          + (f' · rtp {s.media.rtp}' if s.media.rtp != 'auto' else ''))
+        if s.group:
+            parts.append(f'group {s.group}')
         if s.step == 'media_send':
             parts.append(f"sample {s.sample}" if s.sample else '기본 원천')
             if s.loop is False:
@@ -229,6 +231,8 @@ def build_plan(scenario: Scenario, topology: Topology, topology_doc: dict, profi
             if reg is not None:
                 env.append({'env': reg.ha1_env or reg.password_env, 'for': f'{pn}: 트렁크 REGISTER {reg.user} 비밀'})
     # Little 검산 — 역할(UE·피어 모두)마다 rate × SDT ≤ 신원. 단발은 동시 인스턴스가 instances 를 넘지 않는다
+    #   그룹 세션(group_call)은 인스턴스 하나가 MCPTT 그룹 하나를 잡는다 — 자원은 신원이 아니라 쓸 수 있는 그룹 수
+    gs = plan.get('group_session')
     little_rows = []
     first_short = None
     cap = int(plan['max_instances']) if plan['max_instances'] else None
@@ -236,7 +240,8 @@ def build_plan(scenario: Scenario, topology: Topology, topology_doc: dict, profi
         need = int(math.ceil(r * sdt))
         if cap is not None:
             need = min(need, cap)
-        short = [role for role, x in plan['roles'].items() if x['total'] < need]
+        short = ([f'그룹({gs["usable"]})'] if gs and gs['usable'] < need else
+                 [] if gs else [role for role, x in plan['roles'].items() if x['total'] < need])
         little_rows.append({'rate': r, 'need': need, 'ok': not short, 'short': short})
         if short and first_short is None:
             first_short = r
@@ -246,15 +251,18 @@ def build_plan(scenario: Scenario, topology: Topology, topology_doc: dict, profi
               'first_short_rate': first_short,
               'recommend_max': (max(ok_rates) if ok_rates else None) if first_short is not None else None}
     if first_short is not None:
-        mins = min(x['total'] for x in plan['roles'].values())
+        mins = gs['usable'] if gs else min(x['total'] for x in plan['roles'].values())
         need0 = next(x['need'] for x in little_rows if x['rate'] == first_short)
         hint = (f'max 를 {little["recommend_max"]:g} 이하로 두거나 신원을 늘린다' if little['recommend_max']
                 else ('율을 낮추거나(instances 를 SDT 동안 다 못 소화) 신원을 늘린다' if cap else '율을 낮추거나 신원을 늘린다'))
-        out['warnings'].append(f'Little 검산: {first_short:g} SApS × SDT {sdt} s ≈ 동시 {need0} > 역할 신원 {mins} — 그 단계부터 slot skipped. {hint}')
+        out['warnings'].append(f'Little 검산: {first_short:g} SApS × SDT {sdt} s ≈ 동시 {need0} > {"쓸 수 있는 그룹" if gs else "역할 신원"} {mins} — 그 단계부터 slot skipped. {hint}')
+    if gs:
+        out['notes'].append(f'그룹 세션 — 인스턴스 하나 = MCPTT 그룹 하나: 그룹 {gs["groups"]} 개 중 멤버 {gs["need_members"]} 명 이상 {gs["usable"]} 개 사용'
+                            f'(그룹당 최대 {gs["members_max"]} 명). PTT 단말은 floor 를 가진 동안만 RTP 를 낸다')
     # 미디어 평면 — 모드 요약·RTP 상한 검산·시그널링 전용 호의 RTP 기대치
-    modes = [(s.media.rtp if s.media else 'auto') for s in scenario.flow if s.step == 'invite']
+    modes = [(s.media.rtp if s.media else 'auto') for s in scenario.flow if s.step in ('invite', 'group_call')]
     uses_rtp = any(m != 'none' for m in modes) if modes else False
-    n_roles = len(scenario.roles)
+    n_roles = int(gs['members_max']) if gs else len(scenario.roles)
     for row in wrows:
         rtp_cap = row.pop('_rtp_cap', 0)
         if uses_rtp and rtp_cap and row.get('in_run'):
@@ -280,7 +288,7 @@ def build_plan(scenario: Scenario, topology: Topology, topology_doc: dict, profi
         'roles': plan['roles'], 'workers': wrows, 'steps': steps, 'phases': phases, 'procedure': procedure(scenario, phases),
         'bindings': plan['bindings'], 'rate_total': plan['rate_total'], 'max_instances': plan['max_instances'],
         'identities': plan['identities'], 'peer_pools': plan['peer_pools'], 'pinned': plan['pinned'],
-        'samples': plan.get('samples') or {}, 'media': {'modes': modes, 'uses_rtp': uses_rtp},
+        'samples': plan.get('samples') or {}, 'media': {'modes': modes, 'uses_rtp': uses_rtp}, 'group_session': gs,
         'seed': seed, 'env': env, 'little': little,
         'estimate': {'duration_s': estimate_duration(profile, plan['rate_total'], plan['max_instances'], sdt),
                      'sdt_s': sdt, 'peak_rate': peak, 'concurrent': concurrent,

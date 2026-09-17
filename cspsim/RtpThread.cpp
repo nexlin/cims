@@ -244,7 +244,15 @@ bool CRtpThread::Start(const char *pszDestIp, int iDestPort) {
   m_iDestPort = iDestPort;
 
   // 시그널링 전용 호 — SDP 는 오퍼했지만 RTP 는 송수신하지 않는다 (계측기 `invite.media.rtp: none`)
+  //   floor 제어(TS 24.380)는 RTP 와 별개의 제어 흐름이라 수신 스레드는 띄운다 — PTT 시그널링 전용 호에서도 floor 가 돈다.
   if (m_iMediaMode == E_MEDIA_NONE) {
+#ifndef WIN32
+    if (m_hFloorRecvSocket != INVALID_SOCKET && !m_bFloorRecvThreadRun) {
+      if (StartThread("RtpThreadFloorRecv", RtpThreadFloorRecv, this) == false) {
+        printf("[RTP] Warning: failed to start floor recv thread\n");
+      }
+    }
+#endif
     return true;
   }
 

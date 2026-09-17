@@ -32,6 +32,12 @@
 // libsrtp 불투명 핸들 전방선언 (srtp2/srtp.h 는 RtpThread.cpp 에서만 포함)
 struct srtp_ctx_t_;
 
+/** floor 제어 메시지 수신 통지 — floor 수신 스레드에서 불린다(SimSession 이 관측자로 넘긴다). */
+struct IFloorSink {
+    virtual ~IFloorSink() {}
+    virtual void OnFloorMessage( int iSubtype, long long tUs ) = 0;
+};
+
 class CRtpThread
 {
 public:
@@ -44,6 +50,9 @@ public:
 	bool Stop( );
 
     bool SendFloorControl(int iOpCode);
+    /** floor 수신 통지 대상 — Create() 전에 둔다(수신 스레드는 호 동안만 돈다). */
+    void SetFloorSink( IFloorSink * p ) { m_pFloorSink = p; }
+    IFloorSink * m_pFloorSink = nullptr;
 
     /** 미디어 파일 경로 (AMR-WB raw 프레임 파일) 설정 — 비어있으면 합성 RTP */
     void SetMediaFile(const std::string& strPath) { m_strMediaFile = strPath; }

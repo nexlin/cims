@@ -73,6 +73,8 @@ export const dbNodes = (d: TopologyDoc) => nodes(d).filter(([, n]) => n.role ===
 export const mediaNodes = (d: TopologyDoc) => nodes(d).filter(([, n]) => n.role === 'media').map(([id]) => id)
 export const isPeer = (p: PoolDoc): p is PeerPoolDoc => p.kind === 'peer'
 export const isUe = (p: PoolDoc): p is UePoolDoc => p.kind === 'ue'
+/** UE 풀의 접속환경 클래스 — service, 비면 source.table 이 ptt_subscriptions 일 때 ptt, 그 외 volte (컨트롤러 Topology.pool_service 와 같은 규칙) */
+export const poolService = (p: PoolDoc): 'volte' | 'voip' | 'ptt' => (p.kind !== 'ue' ? 'volte' : p.service ?? (('table' in p.source && p.source.table === 'ptt_subscriptions') ? 'ptt' : 'volte'))
 export function poolSize(p: PoolDoc): number {
   if (isPeer(p)) { const rg = p.identities?.e164_range ?? p.identities?.did_range; if (!rg) return 0; const n = parseInt(rg[1].replace(/\D/g, ''), 10) - parseInt(rg[0].replace(/\D/g, ''), 10) + 1; return p.identities.count ? Math.min(n, p.identities.count) : n }
   return ('count' in p.source ? p.source.count : undefined) ?? 0
@@ -300,7 +302,7 @@ export const PRESETS: Record<'cims' | 'ims' | 'pbx', { name: string; hosts: Topo
     pools: {
       volte_ue_a: { kind: 'ue', worker: 'w1', group: 'volte_ue', access: 'csp', source: { creds: 'creds/volte-a.jsonl' }, transport: 'tls', srtp: 'optional' },
       volte_ue_b: { kind: 'ue', worker: 'w2', group: 'volte_ue', access: 'csp', source: { creds: 'creds/volte-b.jsonl' }, transport: 'tls', srtp: 'optional' },
-      ptt_ue: { kind: 'ue', worker: 'w1', access: 'csp', source: { creds: 'creds/ptt.jsonl' }, transport: 'udp', srtp: 'off' },
+      ptt_ue: { kind: 'ue', worker: 'w1', service: 'ptt', access: 'csp', source: { creds: 'creds/ptt.jsonl' }, transport: 'udp', srtp: 'off' },
       peer_kt: { kind: 'peer', worker: 'w2', peering: 'csp', profile: 'ibcf', bind: { port: 5080, protocol: 'udp' }, domain: 'ims.kt.test', identities: { e164_range: ['+82212340000', '+82212349999'], count: 200 }, seed: { route_set: 'rs-kt', priority: 100, distribution: 'failover' } },
       peer_kt_dead: { kind: 'peer', worker: 'w2', peering: 'csp', profile: 'ibcf', bind: { port: 5081, protocol: 'udp' }, domain: 'ims.kt.test', answer: 'silent', identities: { e164_range: ['+82212340000', '+82212340009'] }, seed: { route_set: 'rs-kt', priority: 50, distribution: 'failover' } },
       pbx_hq: { kind: 'peer', worker: 'w1', peering: 'csp', profile: 'pbx', bind: { port: 5090, protocol: 'udp' }, domain: 'pbx.hq.test', register: { user: 'pbx-hq', ha1_env: 'PBX_HA1' }, identities: { did_range: ['0212345000', '0212345099'], ext_len: 4 }, seed: { route_set: 'rs-pbx', priority: 100 } },

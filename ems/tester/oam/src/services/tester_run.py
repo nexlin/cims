@@ -768,7 +768,10 @@ class RunDriver(threading.Thread):
         # 피어 pbx/mgcf 축 관측(있을 때만) — 비율은 RATIO_METRICS 정의로
         for k in ('progress_tx', 'early_media', 'prack_tx', 'prack_rx', 'reinvite_ok', 'reinvite_fail', 'reinvite_rx',
                   'dtmf_tx', 'dtmf_sent', 'dtmf_rx', 'q850_tx', 'q850_rx', 'refer_tx',
-                  'rtp_tx', 'rtp_silent_legs', 'media_send', 'media_stop', 'skipped_rtp_cap', 'early_rtp_ok', 'early_rtp_rx'):
+                  'rtp_tx', 'rtp_silent_legs', 'media_send', 'media_stop', 'skipped_rtp_cap', 'early_rtp_ok', 'early_rtp_rx',
+                  # PTT — affiliation·그룹 세션·floor(TS 24.380)
+                  'affiliated_ok', 'affiliated_fail', 'group_calls', 'group_joined', 'floor_request_tx', 'floor_granted',
+                  'floor_denied', 'floor_queued', 'floor_revoked', 'floor_release_tx'):
             if c.get(k):
                 out[k] = c[k]
         for name, (num, den) in RATIO_METRICS.items():
@@ -782,7 +785,8 @@ class RunDriver(threading.Thread):
         q850 = ','.join(f'{k[5:]}:{v}' for k, v in sorted(c.items()) if k.startswith('q850.'))
         if q850:
             out['q850_causes'] = q850
-        for name in ('rrd_ms', 'srd_ms', 'sdd_ms', 'jitter_ms', 'sdt_s'):
+        for name in ('rrd_ms', 'srd_ms', 'sdd_ms', 'jitter_ms', 'sdt_s',
+                     'group_fanout_ms', 'floor_grant_ms', 'floor_taken_ms', 'floor_queue_ms', 'floor_idle_ms', 'affiliate_ms'):
             h = t.get(name)
             if h:
                 out[f'{name}_p50'] = h.get('p50')
@@ -798,11 +802,11 @@ class RunDriver(threading.Thread):
                     if s.step == 'register':
                         got_bad = c.get('registered_fail', 0)
                         r.update({'observed': f'ok={c.get("registered_ok", 0)} fail={got_bad}', 'ok': got_bad == 0 if want == 200 else True})
-                    elif s.step == 'invite' and want is not None and want >= 300:
+                    elif s.step in ('invite', 'group_call') and want is not None and want >= 300:
                         # 기대한 거절(ACL 403·라우팅 reject) — 그 코드가 관측되고 실패 인스턴스가 없어야 한다
                         r.update({'observed': f'codes.{want}={c.get(f"codes.{want}", 0)} failed={c.get("failed", 0)}',
                                   'ok': c.get(f'codes.{want}', 0) > 0 and c.get('failed', 0) == 0})
-                    elif s.step in ('invite', 'answer', 'bye'):
+                    elif s.step in ('invite', 'answer', 'bye', 'group_call'):
                         r.update({'observed': f'sessions={sessions} failed={c.get("failed", 0)}', 'ok': c.get('failed', 0) == 0 if want == 200 else True})
                     elif s.step == 'reject':
                         r.update({'observed': f'codes.{want}={c.get(f"codes.{want}", 0)}', 'ok': c.get(f'codes.{want}', 0) > 0})

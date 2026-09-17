@@ -28,6 +28,14 @@ struct ICsimObserver {
     virtual void OnReferResponse(SimSession* /*s*/, const std::string& /*callId*/, int /*iSipStatus*/) {}
     /** 로컬 BYE 의 최종 응답 — sddMs = StopCall → 응답. */
     virtual void OnByeResponse(SimSession* /*s*/, const std::string& /*callId*/, int /*iSipStatus*/, long long /*sddMs*/) {}
+    // ── PTT(MCPTT) — 계측기 워커 단계 group_call/floor_request/floor_release (test_instrument.md §4) ──
+    /** 그룹 affiliation PUBLISH(TS 24.379 §9) 최종 응답 — affMs = PUBLISH 송신 → 응답. 해제(Expires 0)의 응답은 통지하지 않는다. */
+    virtual void OnAffiliate(SimSession* /*s*/, const std::string& /*group*/, int /*iSipStatus*/, long long /*affMs*/) {}
+    /** PTT 착신(그룹 fan-out INVITE)에 자동응답 200 을 냈다 — 이 단말이 그룹 세션에 합류한 시각. */
+    virtual void OnCallAnswered(SimSession* /*s*/, const std::string& /*callId*/) {}
+    /** floor 제어 메시지 수신(TS 24.380 §8.2 subtype: 1 Granted · 2 Taken · 3 Deny · 5 Idle · 6 Revoke · 9 Queue Position Info).
+     *  tUs = 수신 시각(µs, system_clock) — floor 수신 스레드에서 불린다. 지연 지표는 스케줄러 틱이 아니라 이 시각으로 잰다. */
+    virtual void OnFloor(SimSession* /*s*/, int /*iSubtype*/, long long /*tUs*/) {}
 };
 
 #endif
