@@ -216,6 +216,14 @@ def build_plan(scenario: Scenario, topology: Topology, topology_doc: dict, profi
                 out['notes'].append(f'{pn}: seed.enabled=false — 대상 라우팅을 수동 구성')
         else:
             out['warnings'].append(f'대상 kind={topology.target.kind} 는 컬렉션 시드가 없다 — 피어 수신점으로의 라우팅은 대상 쪽에서 미리')
+    for pn in sorted({p['pool'] for w in plan['workers'].values() for p in w['pools']}):
+        src = getattr(topology.pools[pn], 'source', None)
+        nid = getattr(src, 'db', None)
+        node = topology.target.nodes.get(nid) if nid else None
+        if node is not None and node.db is not None:
+            env.append({'env': f'{node.db.user_env or "(user_env 미지정)"} · {node.db.password_env or "(password_env 미지정)"}',
+                        'for': f'{pn}: 대상 DB({nid}) 접속 자격 — H(A1) 보유 가입자 원천'})
+    if plan['peer_pools']:
         for pn in plan['peer_pools']:
             reg = topology.pools[pn].trunk_register
             if reg is not None:

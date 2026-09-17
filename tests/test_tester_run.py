@@ -309,6 +309,52 @@ class Compile(unittest.TestCase):
             C.compile_run('r9', sc, M.Topology.model_validate(topo_doc), topo_doc, None, {'ht': 1}, TW.discover(topo_doc), lambda w: 'x:1', 2, None)
         self.assertIn('겹친다', str(cm.exception))
 
+    def test_db_identity_source(self):
+        """source.db — db 노드 접속 + 환경변수 자격으로 H(A1) 보유 가입자를 읽는다(pymysql 은 가짜로 갈아 끼운다)."""
+        import sys as _sys, types
+        from services import tester_workers as TW
+        calls = {}
+
+        class Cur:
+            def execute(self, q, args):
+                calls['q'], calls['args'] = q, args
+            def fetchall(self):
+                return [(f'+82130000{i:04d}', f'45033{i:010d}', 'cd' * 16) for i in range(8)]
+
+        class Conn:
+            def cursor(self): return Cur()
+            def close(self): calls['closed'] = True
+
+        fake = types.ModuleType('pymysql')
+        fake.connect = lambda **kw: (calls.update(conn=kw) or Conn())
+        keep = _sys.modules.get('pymysql')
+        _sys.modules['pymysql'] = fake
+        w1 = FakeWorker('w1')
+        topo_doc = _topology([w1])
+        topo_doc['target']['nodes']['db'] = {'role': 'db', 'host': 'h1', 'db': {'port': 3307, 'name': 'cimsdb', 'user_env': 'UT_DB_USER', 'password_env': 'UT_DB_PASS'}}
+        topo_doc['pools']['ue_w1']['source'] = {'db': 'db', 'table': 'volte_subscriptions', 'offset': 16, 'count': 8}
+        topo = M.Topology.model_validate(topo_doc)
+        sc, _, _ = S.get_scenario('VOLTE-CALL-BASIC')
+        try:
+            os.environ.pop('UT_DB_USER', None)
+            with self.assertRaises(C.CompileError) as cm:       # 자격 환경변수 없음 — 조용히 빈 값으로 접속하지 않는다
+                C.compile_run('r10', sc, topo, topo_doc, None, {'ht': 1}, TW.discover(topo_doc), lambda w: 'x:1', 1, None)
+            self.assertIn('DB 자격', str(cm.exception))
+            os.environ['UT_DB_USER'], os.environ['UT_DB_PASS'] = 'tester', 'pw'
+            plan = C.compile_run('r10', sc, topo, topo_doc, None, {'ht': 1}, TW.discover(topo_doc), lambda w: 'x:1', 1, None)
+            self.assertEqual((calls['conn']['host'], calls['conn']['port'], calls['conn']['database'], calls['conn']['user']), ('10.0.0.1', 3307, 'cimsdb', 'tester'))
+            self.assertEqual(calls['args'], ('UDP', 8, 16))        # 풀 transport 로 접속 가능한 가입자만 · count · offset
+            self.assertIn('volte_subscriptions', calls['q'])
+            self.assertTrue(calls.get('closed'))
+            ident = plan['workers']['w1']['pools'][0]['identities'][0]
+            self.assertEqual((ident['user'], ident['domain'], ident['ha1'], ident['auth_id']), ('+821300000000', 'volte.test', 'cd' * 16, '450330000000000'))
+        finally:
+            os.environ.pop('UT_DB_USER', None); os.environ.pop('UT_DB_PASS', None)
+            if keep is not None:
+                _sys.modules['pymysql'] = keep
+            else:
+                _sys.modules.pop('pymysql', None)
+
     def test_disjoint_needs_room(self):
         # caller.count=8 이 풀 전체를 쓰면 disjoint 인 callee 창이 없다 → CompileError
         sc, _, _ = S.get_scenario('VOLTE-CALL-BASIC')

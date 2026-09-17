@@ -9,7 +9,7 @@
   · 피어 풀(kind=peer) — 신원은 e164_range/did_range 를 펼친 것, 풀은 자기 `worker` 에 고정된다(수신점이 하나이므로).
     피어 풀을 쓰는 시나리오는 그 워커 한 대에서만 돈다(인스턴스의 역할들이 한 워커에 있어야 하므로).
   · 워커 계약(`PoolCreate.target_csp`·`peer.bind.ip`)은 토폴로지 노드·호스트 참조에서 **파생**한다 — 워커 계약은 그대로다.
-신원 원천: creds JSONL(cspsim -creds 승계). db 원천(대상 CSC 위임)은 후속 — 지금은 명시적으로 거절한다.
+신원 원천: creds JSONL(cspsim -creds 승계) 또는 대상 DB(`source.db` — db 노드 접속 + 환경변수 자격, `db_identities`).
 """
 from __future__ import annotations
 
@@ -69,8 +69,56 @@ def peer_identities(pool_name: str, pool_doc: dict) -> List[dict]:
     return [{'user': u, 'domain': domain} for u in expand_range(str(rng[0]), str(rng[1]), ids.get('count'))]
 
 
-def load_identities(pool_name: str, pool_doc: dict) -> List[dict]:
-    """풀 신원 목록 — Identity(dict). kind=ue(creds) · kind=peer(번호 범위)."""
+DB_TABLES = ('volte_subscriptions', 'voip_subscriptions', 'ptt_subscriptions')
+
+
+def db_identities(pool_name: str, src: dict, topology: Topology, transport: str) -> List[dict]:
+    """`source.db` — 대상 DB 에서 H(A1) 보유 가입자를 읽는다(`cims-tester creds-from-db` 와 같은 질의). 접속 = db 노드(주소·port·name) +
+    자격은 환경변수(`db.user_env`·`db.password_env` — 토폴로지에 비밀을 적지 않는다). 그 풀의 transport 로 접속할 수 있는 가입자만
+    (`sip_transport` 가 비었거나 같은 것). H(A1) 은 메모리에서 워커로만 가고 run 기록에 남지 않는다."""
+    nid = str(src.get('db') or '')
+    node = topology.target.nodes.get(nid)
+    if node is None or node.db is None:
+        raise CompileError(f'pool {pool_name}: source.db={nid!r} 는 db 블록이 있는 노드가 아니다')
+    table = str(src.get('table') or '')
+    if table not in DB_TABLES:
+        raise CompileError(f'pool {pool_name}: source.table 은 {list(DB_TABLES)} 중 하나')
+    user = os.environ.get(node.db.user_env or '', '').strip() if node.db.user_env else ''
+    pw = os.environ.get(node.db.password_env or '', '') if node.db.password_env else ''
+    if not user:
+        raise CompileError(f'pool {pool_name}: DB 자격이 없다 — 노드 {nid} 의 db.user_env/password_env 가 가리키는 환경변수를 컨트롤러에 준다')
+    try:
+        import pymysql
+    except ImportError:
+        raise CompileError('pymysql 을 찾지 못했다 — base oam vendor 경로 확인')
+    try:
+        conn = pymysql.connect(host=topology.node_ip(nid), port=int(node.db.port), user=user, password=pw,
+                               database=node.db.name, connect_timeout=6, read_timeout=15)
+    except Exception as e:
+        raise CompileError(f'pool {pool_name}: DB 접속 실패({topology.node_ip(nid)}:{node.db.port}/{node.db.name}) — {e}')
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT id, imsi, ha1 FROM {table} WHERE ha1 IS NOT NULL AND ha1<>'' "
+                    f"AND (sip_transport IS NULL OR sip_transport='' OR sip_transport=%s) ORDER BY id LIMIT %s OFFSET %s",
+                    ((transport or 'udp').upper(), int(src.get('count') or 0), int(src.get('offset') or 0)))
+        rows = cur.fetchall()
+    except Exception as e:
+        raise CompileError(f'pool {pool_name}: DB 질의 실패({table}) — {e}')
+    finally:
+        conn.close()
+    ids = []
+    for uid, imsi, ha1 in rows:
+        ident = {'user': str(uid), 'domain': '', 'ha1': str(ha1)}
+        if imsi:
+            ident['auth_id'] = str(imsi)
+        ids.append(ident)
+    if not ids:
+        raise CompileError(f'pool {pool_name}: {table} 에 H(A1) 보유 가입자가 없다(offset {src.get("offset") or 0}, transport {transport})')
+    return ids
+
+
+def load_identities(pool_name: str, pool_doc: dict, topology: Optional[Topology] = None) -> List[dict]:
+    """풀 신원 목록 — Identity(dict). kind=ue(creds JSONL | 대상 DB) · kind=peer(번호 범위)."""
     kind = pool_doc.get('kind')
     if kind == 'peer':
         return peer_identities(pool_name, pool_doc)
@@ -78,8 +126,9 @@ def load_identities(pool_name: str, pool_doc: dict) -> List[dict]:
         raise CompileError(f'pool {pool_name}: kind={kind} 는 워커가 지원하지 않는다 (real-ue = F 단계)')
     src = pool_doc.get('source') or {}
     if 'db' in src:
-        raise CompileError(f'pool {pool_name}: db 원천은 후속(대상 CSC 위임). 지금은 `cims-tester creds-from-db` 로 '
-                           f'creds JSONL 을 만들어 source.creds 로 지정한다')
+        if topology is None:
+            raise CompileError(f'pool {pool_name}: db 원천은 토폴로지(db 노드)가 있어야 읽는다')
+        return db_identities(pool_name, src, topology, str(pool_doc.get('transport') or 'udp'))
     path = _creds_path(str(src.get('creds') or ''))
     count = src.get('count')
     offset = int(src.get('offset') or 0)
@@ -377,7 +426,7 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
     def ids_of(pname: str) -> List[dict]:
         if pname not in identities:
             pdoc = dict(pools_doc.get(pname) or {})
-            ids = load_identities(pname, pdoc)
+            ids = load_identities(pname, pdoc, topology)
             dom = _default_domain(topology, pname)
             for ident in ids:
                 if not ident.get('domain'):
