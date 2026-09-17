@@ -362,8 +362,9 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
                 CLog::Print( LOG_ERROR, "CscInterface: User not found in DB [%s]", strUserId.c_str() );
             }
         }
-        // 회선 개설/삭제는 person 의 회선 집합을 바꾼다 — 역할 맵의 회선 펼침을 다시 만든다(§3.5). PUT(속성 변경)도
-        //   같은 경로로 오지만 역할 수가 작아 전량 재적재 비용이 문제되지 않는다.
+        // 회선 개설/삭제는 person 의 회선 집합을 바꾼다 — 역할 맵의 회선 펼침을 다시 만든다(§3.5).
+        //   PUT(회선 속성 변경)은 회선 집합을 바꾸지 않으므로 재적재하지 않는다 — 역할 배정 자체가 바뀌면
+        //   ROLE_CHANGED 가 따로 온다.
         if ( gclsDbManager.HasRoleTables() && ( strAction == "POST" || strAction == "DELETE" ) )
             gclsRoleMap.LoadFromDb();
     }

@@ -125,6 +125,9 @@ ambient 플래그·녹취 탭)의 연장으로 구성한다. **INVITE 경로에 
 
 - **범위 해석**: `own` = 역할 `org_id` 조직과 그 하위(코드 집합), `all` = 전 조직. `own` 인데 `org_id` 가 없으면 범위가
   비어 관리 불가.
+- **쓰기에만 걸리는 범위다.** 읽기(`GET /provisioning/directory` — 조직 트리 + 가입자 목록)는 provisioning scope 토큰만
+  요구하고 호출자 범위를 보지 않는다(`services/mcptt.py` `handle_provisioning_directory`). 관제사는 발신 대상을 고르려면
+  전 주소록이 보여야 하므로 의도된 동작이다 — 범위는 **누구를 고칠 수 있나**에만 적용한다.
 - **부여** = 콘솔 `관리 > 역할`(manager 이상 — 가입자에게 조직·번호 쓰기 권한을 여는 승인 사항). 앱은 `/provisioning/me`
   `dispatch.directoryWrite`/`orgCode` 로 안다.
 - **API** = `/provisioning/directory/{admin,orgs,members,groups}`(CSC 4430, 계약
@@ -882,10 +885,37 @@ person(`users.id`)에 하고, 통지는 `PHONE_GROUP_CHANGED`/`ROLE_CHANGED`/`US
 - **3GPP LI 핸드오버(HI2/HI3·LEMF)** — 외부 사법기관 인도가 요구되면 별도 LI 게이트웨이(§5.8). 본 설계 범위 밖.
 - **전화 그룹 겸임(N:M 멤버십)** — 채택하지 않는다(§3.2 확정). 겸임 요구는 `overflow_target`·지정 픽업으로
   흡수한다.
-- **자리(관제석)와 사람의 분리 — 보류.** 지금은 관제석 = 가입자(회선 묶음 + 로그인)라 교대 근무에서 계정을 나눠 쓴다.
-  재개 시 출발점: 자리 = 회선 묶음(전화 그룹 멤버십·PTT 회선·PC), 사람 = IdMS 계정 + 역할 + 감사 actor, "앉기" = 점유
-  (배타·리스·인수 — TS 23.280 §10.13 functional alias 의 활성/인수, TS 24.484 `allow-activate/take-over-functional-alias`),
-  CSC 가 점유자의 역할을 자리 회선에 투영(USER_CHANGED). 전제 = 콘솔 계정의 IdMS 신원 통합([mcptt_authorization.md §9](mcptt_authorization.md)).
+- **자리(관제석)와 사람의 분리 — 방향 확정, 미착수.** 지금은 관제석 = 가입자(회선 묶음 + 로그인)라 교대 근무에서
+  계정을 나눠 쓴다. 그래서 감청·청취·녹취 열람의 감사 actor 가 **자리의 회선 번호**로 남고(§5.7b), 개인별 자격
+  회수가 안 된다. 목표 구조는 **세 축**이다.
+  - **사람** = IdMS 신원 + 역할 배정 + 감사 actor. 회선 없는 `users` 행은 지금도 합법이고(가입은 별도 테이블),
+    로그인 신원은 `login:<login_id>` 로 파생된다.
+  - **자리** = 회선 묶음(전화 그룹 멤버십·PTT 회선). 번호는 자리 수만큼만 둔다.
+  - **사용 세션** = 사람↔자리 결박. 전환·만료·회수를 **서버가 집행**한다. 자리 전체의 통신 가능 여부와 특권
+    (감청·청취) 사용 세션은 분리한다 — 리스 만료로 감청 자격을 거두는 것과 진행 중 업무 통화를 끊는 것은 다른 정책이다.
+
+  **functional alias 는 이 구조의 기본 도구가 아니다.** TS 23.280 §10.13 은 MC service ID 를 가진 사용자의 별칭
+  활성·인수이고 같은 별칭의 복수 사용자 활성도 정책에 따라 허용되므로, 별칭이 곧 자리의 배타 점유를 뜻하지 않는다.
+  공유 단말의 사용자 교체는 TS 33.180 §5.1.3.2.1(로그아웃·재로그인 시 access token 으로 IMPU↔MC service ID 재결박)이
+  더 직접적이다. 업무상 호출 정체성("당직 관제사")이 필요해지면 별칭을 그 위에 별도로 얹는다. 규격 표기 —
+  활성 인가는 `allow-activate-*` 같은 권한 요소가 아니라 사용자 프로파일 `<FunctionalAliasList>` 의 `<entry>` 등재로
+  표현되고, 타인 인수만 TS 24.484 §8.3.2.7 표 8.3.2.7-46 `<allow-takeover-functional-alias-other-user>`
+  (TS 24.483 §5.2.48W9 대응)가 있다.
+
+  **콘솔 계정의 IdMS 신원 통합은 선행 조건이 아니다** — [mcptt_authorization.md §2.1](mcptt_authorization.md) 이 이미
+  principal 둘(`console:<login>` / `user:<users.id>`)과 토큰 realm 분리를 유효한 모델로 정의한다. 같은 정책을 쓰기 위해
+  인증 저장소까지 먼저 합칠 필요는 없고, 합치면 CSC 장애 중 복구 콘솔 진입이 같이 막힌다(§9 는 별도 과제로 둔다).
+
+  **순서는 회수 집행이 먼저, 역할 투영이 나중이다.** 착수 전 확인된 제약:
+  - `USER_CHANGED` 의 `PUT` 은 역할 맵을 재적재하지 않는다(`csp/CscInterface.cpp` — `POST`/`DELETE` 만). 점유 전환을
+    역할에 반영하려면 `ROLE_CHANGED` 경로여야 한다.
+  - **dialog 구독의 refresh 는 인가를 재검사하지 않는다**(`csp/CscfModule.cpp` — 초기 구독만 검사). 자격을 거둬도 기존
+    구독은 갱신으로 살아남으므로, 회수는 역할 변경이 아니라 **명시적 세션 종료**(RFC 6665 §4.2.2)로만 성립한다.
+    통화 감청 leg·PTT 청취 leg 도 개설 시점의 회선·역할을 세션에 저장하므로 같다.
+  - 감사 actor 표기가 경로마다 다르다 — 관리 API 는 `user:<users.id>`, 감청·청취·녹취(`E-AUD-016`)는 회선 번호.
+    `monitor` 의 뜻을 바꾸기보다 사람 actor 필드를 **병행 추가**하고 생산자·소비자(콘솔 감사 CSV 포함)를 같이 옮긴다.
+  - 회선 없는 person 은 로그인과 주소록 조회까지는 되지만(`caller_identity` 가 `sub`→`users.id` 로 폴백),
+    `/provisioning/me` 는 빈 `services` 를, `/provisioning/history` 는 `403 no_monitor_scope` 를 준다.
 - **RFC 4662 RLS** 목록 구독(§5.2 표준형 — PTT 회선 dialog 구독(§5.6a)까지 더해 구독 수가 회선 ×2 로 늘어 우선순위가
   올라간다), **큐/ACD**(대기열·순번 안내).
 - Android UE 의 Join 발신·SSRC 디먹스 UI — 서버 완성 후 단말 파트.

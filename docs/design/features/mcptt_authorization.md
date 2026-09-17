@@ -265,6 +265,8 @@ GMC→GMS **XCAP Ut PUT/DELETE** 다. 관제사는 콘솔 계정이 아니라 PT
   통합(§2) 뒤.
 - **콘솔 operator 의 그룹 소유(`ptt_group_manage=own`)**: 콘솔 계정에는 `users.id` 가 없어 소유 판정이 성립하지 않는다(현행과
   같다). 위 신원 통합에서 자연히 해소되며, 그 전에는 operator 에게 `scope` 를 쓴다.
-- **자리(관제석)와 사람의 분리 — 보류**([dispatch_center.md §10](dispatch_center.md)).
+- **자리(관제석)와 사람의 분리 — 방향 확정, 미착수**([dispatch_center.md §10](dispatch_center.md)). 사람(신원·역할·감사
+  actor) / 자리(회선 묶음) / 사용 세션(결박·회수)의 세 축. **위 신원 통합은 선행 조건이 아니다** — §2.1 의 principal 둘로
+  충분하고, 착수 순서는 세션 회수 집행이 먼저다.
 - 사람당 역할 여러 개(합성)가 필요해지면 `role_assignments` PK 를 풀고 능력은 OR·범위는 합집합으로 판정한다(현재는 하나 + "전체"
   프리셋으로 충분).
