@@ -53,6 +53,7 @@ class FakeOam:
              'tags': ['cims-tester']},
             {'id': 'keep', 'name': 'kt-sbc-1', 'enabled': True, 'ip': '2.2.2.2', 'port': 5060, 'protocol': 'UDP'}]
         self.puts = []
+        self.extra = {}      # 경로(쿼리 제외) → 응답 body — 대상 관측 시험(agents metrics·recordings·alerts·events)
         outer = self
 
         class H(BaseHTTPRequestHandler):
@@ -70,9 +71,12 @@ class FakeOam:
             def do_GET(self):
                 if self.headers.get('Authorization') != 'Bearer tok':
                     self._send(401, {'error': 'unauthorized'}); return
-                if self.path == '/api/v1/deployments':
-                    self._send(200, {'items': [{'id': 7, 'package_name': 'oam', 'status': 'running'},
-                                               {'id': 9, 'package_name': 'csp', 'status': 'running'}]})
+                if self.path.split('?')[0] in outer.extra:
+                    body = outer.extra[self.path.split('?')[0]]
+                    self._send(200, body() if callable(body) else body)
+                elif self.path == '/api/v1/deployments':
+                    self._send(200, {'items': [{'id': 7, 'package_name': 'oam', 'status': 'running', 'agent_id': 3, 'agent_name': 'mgmt'},
+                                               {'id': 9, 'package_name': 'csp', 'status': 'running', 'agent_id': 5, 'agent_name': 'sut'}]})
                 elif self.path.startswith('/api/v1/deployments/9/collection/'):
                     name = self.path.rsplit('/', 1)[-1]
                     self._send(200, {'records': outer.collections.get(name, []), 'schema': {}})
@@ -265,6 +269,58 @@ class TokenAndDataDir(unittest.TestCase):
         finally:
             TS._component_root, TS._config, TS._data_dir_cache = keep
             shutil.rmtree(root, ignore_errors=True)
+
+
+class Observe(unittest.TestCase):
+    def _topology(self, oam, observe):
+        return M.Topology.model_validate({'name': 'ut-obs', 'hosts': {'h1': {'ip': '127.0.0.1'}},
+            'workers': [{'name': 'w1', 'host': 'h1'}],
+            'target': {'name': 'sut', 'kind': 'cims', 'nodes': {
+                'csp': {'role': 'sip', 'host': 'h1', 'procs': ['csp'], 'sip': {'listeners': {'udp': {'edge': 'access', 'port': 5060}}, 'domains': ['x.test']}},
+                'oam': {'role': 'oam', 'host': 'h1', 'oam': {'port': oam.port, 'tls': False, 'token_env': 'UT_OBS_TOKEN', 'observe': observe}}}},
+            'pools': {'ue': {'kind': 'ue', 'worker': 'w1', 'access': 'csp', 'source': {'creds': 'c.jsonl'}}}})
+
+    def test_observer_collects_host_cpu_and_evidence(self):
+        from services import tester_observe as O
+        from datetime import datetime
+        oam = FakeOam()
+        now = time.time()
+        iso = lambda t: datetime.fromtimestamp(t).isoformat(timespec='seconds')
+        # agent 5(csp 가 있는 호스트)만 관측 대상 — oam(7, agent 3)은 procs 에 없다. 최신이 앞(대상 OAM 규약)
+        oam.extra['/api/v1/agents/5/metrics'] = lambda: {'items': [
+            {'ts': iso(time.time()), 'cpu_pct': 91.0, 'mem_pct': 40.0, 'load_avg': '3.1,2,1'},
+            {'ts': iso(time.time() - 3), 'cpu_pct': 89.0, 'mem_pct': 40.0, 'load_avg': '3.0,2,1'}]}
+        oam.extra['/api/v1/recordings'] = {'recordings': [{'start_time': iso(now + 1)}, {'start_time': iso(now - 3600)}]}
+        oam.extra['/api/v1/alerts'] = {'events': [{'ts': iso(now + 1), 'code': 'A-PRC-001', 'severity': 'major', 'action': 'raise'},
+                                                  {'ts': iso(now + 1), 'code': 'A-PRC-001', 'severity': 'cleared', 'action': 'close'}]}
+        oam.extra['/api/v1/events'] = {'events': [{'ts': iso(now + 2), 'code': 'E-STC-001'}]}
+        os.environ['UT_OBS_TOKEN'] = 'tok'
+        try:
+            topo = self._topology(oam, ['agent_heartbeat'])
+            self.assertTrue(O.TargetObserver.wanted(topo))
+            self.assertFalse(O.TargetObserver.wanted(self._topology(oam, [])))
+            db = os.path.join(_TMP, 'obs.sqlite')
+            ob = O.TargetObserver('ut-obs', db, topo, None)
+            ob.start()
+            for _ in range(40):
+                if ob.samples >= 1:
+                    break
+                time.sleep(0.1)
+            cpu = ob.cpu_now()
+            ob.stop(); ob.join(5)
+            self.assertEqual(list(ob.agents), [5])
+            self.assertIsNotNone(cpu)
+            self.assertGreater(cpu, 85)
+            self.assertEqual(list(O.target_series(db)['agents']), ['sut'])
+            sc = M.Scenario.model_validate({'id': 'UT-EVID', 'roles': {'a': {'pool': 'ue'}}, 'flow': [{'step': 'register', 'who': ['a']}],
+                'target_evidence': [{'kind': 'recording_created', 'min': 1}, {'kind': 'alarm_raised', 'code': 'A-PRC-001', 'max': 0},
+                                    {'kind': 'event_logged', 'code': 'E-STC-001', 'min': 1}, {'kind': 'log_errors', 'max': 0}]})
+            res = O.evaluate_evidence(sc, topo, now, now + 5, None)
+            self.assertEqual([(r['kind'], r['observed'], r['ok']) for r in res],
+                             [('recording_created', 1, True), ('alarm_raised', 1, False), ('event_logged', 1, True), ('log_errors', None, None)])
+        finally:
+            os.environ.pop('UT_OBS_TOKEN', None)
+            oam.srv.shutdown()
 
 
 class SeedDerivation(unittest.TestCase):

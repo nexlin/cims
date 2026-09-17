@@ -24,7 +24,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from services import tester_store as store
-from services import tester_workers, tester_compile, tester_target
+from services import tester_workers, tester_compile, tester_target, tester_observe
 from services.tester_bus import publish
 from services.tester_models import RunRecord, RunRequest, LoadProfile, RATIO_METRICS
 
@@ -412,7 +412,10 @@ class RunDriver(threading.Thread):
         self._hold = threading.Event()        # 단계 고정 — 프로파일 시계 정지(율 유지)
         self.held_s = 0.0
         self.started_at = _now_iso()
+        self._t_started = time.time()
         self.ended_at: Optional[str] = None
+        self.observer: Optional[tester_observe.TargetObserver] = None
+        self.evidence_results: List[dict] = []
         self.notes: List[str] = []
         self.expect_results: List[dict] = []
         self.step_log: List[dict] = []
@@ -527,6 +530,11 @@ class RunDriver(threading.Thread):
         for w in self.workers:
             for p in self.plan['workers'][w.name]['pools']:
                 w.pool_create(p)
+        # 대상 관측(§5) — oam 노드 observe 에 agent_heartbeat/oam_stats 가 있으면 호스트 자원을 run 동안 모은다
+        if tester_observe.TargetObserver.wanted(self.topology):
+            self.observer = tester_observe.TargetObserver(self.run_id, os.path.join(self.rec.dir, 'metrics.sqlite'),
+                                                          self.topology, self._requester_token)
+            self.observer.start()
         for w in self.workers:
             w.run_start(self.plan['workers'][w.name]['run'])
         self.state = 'running'
@@ -586,8 +594,14 @@ class RunDriver(threading.Thread):
                 self.request_stop(f'stop_on ser_pct {ser:.2f} < {so.ser_pct_min}')
                 self.verdict = 'fail'
                 return True
-        if so.target_cpu_pct is not None and 'target_cpu' not in self.notes:
-            self.notes.append('target_cpu: 대상 관측(oam_stats) 은 C 단계 — stop_on.target_cpu_pct 미적용')
+        if so.target_cpu_pct is not None:
+            cpu = self.observer.cpu_now() if self.observer is not None else None
+            if cpu is not None and cpu > so.target_cpu_pct:
+                self.request_stop(f'stop_on target_cpu_pct {cpu:.1f} > {so.target_cpu_pct}')
+                self.verdict = 'fail'
+                return True
+            if self.observer is None and not any(n.startswith('target_cpu:') for n in self.notes):
+                self.notes.append('target_cpu: 대상 관측이 꺼져 있다(oam 노드 observe 에 agent_heartbeat 없음) — stop_on.target_cpu_pct 미적용')
         return False
 
     def _drive(self) -> None:
@@ -669,16 +683,39 @@ class RunDriver(threading.Thread):
             errs = self.seeder.restore()
             self.notes.append('csp seed restored' if not errs else 'csp seed restore FAILED: ' + '; '.join(errs))
         self.ended_at = _now_iso()
+        t_ended = time.time()
+        if self.observer is not None:
+            self.observer.stop()
+            self.observer.join(timeout=10)
+            if self.observer.note:
+                self.notes.append(self.observer.note)
         snap = self.rec.snapshot()
         summary = self._summary(snap)
+        if self.observer is not None and self.observer.peak_cpu is not None:
+            summary['target_cpu_peak_pct'] = self.observer.peak_cpu
+        # 대상 증거(2차 판정) — 운영자 중단·오류 run 은 판정하지 않는다
+        if self.scenario.target_evidence and self.verdict == 'running' and not (
+                self._stop_req.is_set() and (self.stop_reason or '').startswith('operator')):
+            try:
+                self.evidence_results = tester_observe.evaluate_evidence(
+                    self.scenario, self.topology, self._t_started, t_ended, self._requester_token)
+            except Exception as e:
+                self.notes.append(f'target_evidence 판정 실패: {e}')
         if self.verdict == 'running':
             if self._stop_req.is_set() and (self.stop_reason or '').startswith('operator'):
                 self.verdict = 'aborted'
             else:
                 # pass = 기대치 전부 만족 + 실패 인스턴스 0 (단계가 끝까지 못 간 시도는 기대치 유무와 무관하게 실패다)
                 #        + 시도 ≥ 1. 단말 부족 skipped 는 실패가 아니라 요약·IHS 에만 반영된다.
+                #        + 대상 증거(2차)에 어긋남 없음 — 원천을 못 읽은 증거(ok=None)는 판정에서 빼고 참고로만 남긴다.
+                ev_bad = [r for r in self.evidence_results if r.get('ok') is False]
                 self.verdict = 'pass' if (all(r['ok'] for r in self.expect_results) and summary.get('attempts', 0) > 0
-                                          and summary.get('failed', 0) == 0) else 'fail'
+                                          and summary.get('failed', 0) == 0 and not ev_bad) else 'fail'
+                for r in ev_bad:
+                    self.notes.append(f"target_evidence {r['kind']}{'(' + r['code'] + ')' if r.get('code') else ''}: {r.get('why')}")
+                for r in self.evidence_results:
+                    if r.get('ok') is None:
+                        self.notes.append(f"target_evidence {r['kind']}: {r.get('why')}")
                 if summary.get('failed', 0) > 0:
                     self.notes.append(f"실패 인스턴스 {summary['failed']} — events 참조")
                 if summary.get('attempts', 0) == 0 and self.verdict == 'fail':
@@ -700,7 +737,7 @@ class RunDriver(threading.Thread):
             'held_s': round(self.held_s, 1),
             'profile_doc': (self.profile.model_dump(exclude_none=True) if self.profile else None),
             'counters': snap['counters'], 'timers': snap['timers'], 'events': snap['events'],
-            'expect_results': self.expect_results, 'step_log': self.step_log,
+            'expect_results': self.expect_results, 'evidence_results': self.evidence_results, 'step_log': self.step_log,
             'stop_reason': self.stop_reason, 'doc_rate': self.doc_rate, 'notes': self.notes,
         }
         with open(os.path.join(self.rec.dir, 'run.json'), 'w', encoding='utf-8') as f:

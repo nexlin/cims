@@ -21,6 +21,7 @@
   POST /runs/<id>/rate              {rate_saps} 율 변경(진행 중)
   POST /runs/<id>/hold              {hold: bool} 단계 고정/재개 — 프로파일 시계 정지, 율 유지
   GET  /runs/<id>/hist?timer=       지연 지표 버킷 분포(로그 상한) + p50/p95/p99 — 행 펼침 히스토그램
+  GET  /runs/<id>/target-series     대상 호스트 자원 시계열(agent 별 cpu_pct·mem_pct — 대상 관측 §5)
   GET  /runs/<id>/sip               SIP 덤프 목록(call_id·bytes·messages)
   GET  /runs/<id>/sip/<call_id>     그 Call-ID 의 실패 이벤트 + SIP 덤프(runs/<id>/sip/<call_id>.log 가 있을 때)
   GET  /runs/<id>/target-alerts     대상 OAM 알람/이벤트를 run 창(started~ended)으로 잘라 — 대상 oam 노드 필요
@@ -59,6 +60,7 @@ from services.tester_run import RUNS
 from services import tester_workers
 from services import tester_check
 from services import tester_plan
+from services import tester_observe
 from services import tester_target
 from services.tester_run import run_series, run_hist, run_call_events, run_sip_dumps
 from starlette.responses import PlainTextResponse
@@ -397,6 +399,10 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
                     return _json(404, {'error': 'call_not_found', 'id': rid, 'call_id': call_id})
                 return _json(200, {'id': rid, 'call_id': call_id, 'events': evs, 'dump': dump,
                                    'note': None if dump is not None else '이 호의 SIP 덤프가 없다 — 워커 Sip.Capture 가 failed 면 실패한 인스턴스의 호만 올린다'})
+            if len(parts) == 3 and parts[2] == 'target-series' and method == 'GET':
+                if store.get_run(rid) is None and d is None:
+                    return _json(404, {'error': 'run_not_found', 'id': rid})
+                return _json(200, {'id': rid, **tester_observe.target_series(os.path.join(store.run_dir(rid), 'metrics.sqlite'))})
             if len(parts) == 3 and parts[2] == 'target-alerts' and method == 'GET':
                 rec = _load_run_doc(rid)
                 if rec is None:
@@ -788,6 +794,9 @@ TESTER_API_DOCS = [
     {'id': 'tester.run.sip', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs/{{id}}/sip/{{call_id}}',
      'summary': 'Call-ID 하나의 실패 이벤트 + SIP 덤프(계측기 호스트 runs/<id>/sip/<call_id>.log 가 있을 때)',
      'response': '{id, call_id, events[], dump|null, note}', 'auth': _AUTH_MON},
+    {'id': 'tester.run.target_series', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs/{{id}}/target-series',
+     'summary': 'run 동안 모은 대상 호스트 자원 시계열 — 대상 OAM agent heartbeat(cpu_pct·mem_pct), stop_on.target_cpu_pct 의 원천',
+     'response': '{id, agents: {이름: {t[], cpu_pct[], mem_pct[]}}}', 'auth': _AUTH_MON},
     {'id': 'tester.run.target_alerts', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs/{{id}}/target-alerts',
      'summary': '대상 OAM 알람/이벤트를 run 창(started_at~ended_at)으로 잘라 — 시간축 차트의 알람 레인',
      'response': '{id, alerts[], window[], oam | note}', 'auth': _AUTH_MON},

@@ -243,6 +243,7 @@ export interface RunDoc extends RunRow {
   timers?: Record<string, HistSummary>
   events?: number
   expect_results?: ExpectResult[]
+  evidence_results?: EvidenceResult[]
   step_log?: StepLogRow[]
   stop_reason?: string | null
   doc_rate?: number | null
@@ -343,6 +344,8 @@ export interface ScenarioVocab {
 }
 
 export interface HistResult { id: string; timer: string; count: number; mean?: number | null; min?: number | null; max?: number | null; p50?: number | null; p95?: number | null; p99?: number | null; buckets: { ub: number | null; count: number }[] }
+export interface EvidenceResult { kind: string; code?: string | null; min?: number | null; max?: number | null; observed: number | null; ok: boolean | null; why?: string | null }
+export interface TargetSeries { id: string; agents: Record<string, { t: number[]; cpu_pct: (number | null)[]; mem_pct: (number | null)[] }> }
 export interface SipDumpRow { call_id: string; bytes: number; messages: number }
 export interface CallDump { id: string; call_id: string; events: RunEvent[]; dump: string | null; note?: string | null }
 export interface TargetAlerts { id: string; alerts: Record<string, unknown>[]; window?: [string, string]; oam?: string; note?: string }
@@ -396,6 +399,7 @@ export const testerApi = {
   plan: (body: PlanRequest) => api.post<PlanResult>('/tester/runs/plan', body),
   holdRun: (id: string, hold: boolean) => api.post<{ id: string; hold: boolean }>(`/tester/runs/${enc(id)}/hold`, { hold }),
   hist: (id: string, timer: string) => api.get<HistResult>(`/tester/runs/${enc(id)}/hist?timer=${enc(timer)}`),
+  targetSeries: (id: string) => api.get<TargetSeries>(`/tester/runs/${enc(id)}/target-series`),
   sipDumps: (id: string) => api.get<{ id: string; dumps: SipDumpRow[] }>(`/tester/runs/${enc(id)}/sip`),
   callDump: (id: string, callId: string) => api.get<CallDump>(`/tester/runs/${enc(id)}/sip/${enc(callId)}`),
   targetAlerts: (id: string) => api.get<TargetAlerts>(`/tester/runs/${enc(id)}/target-alerts`),

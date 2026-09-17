@@ -9,10 +9,11 @@ import { Button } from '@core/components/ui/button'
 import { DataTable, Th, Td, orDash } from '@core/components/custom/data-table'
 import { EmptyState } from '@core/components/custom/empty-state'
 import { useToast } from '@core/components/Toast'
-import type { RunDoc, ScenarioDoc, ExpectResult, RunSeries, RunEvent, HistResult, TargetAlerts, RunRow, SipDumpRow } from '@tester/api/tester'
+import type { RunDoc, ScenarioDoc, ExpectResult, RunSeries, RunEvent, HistResult, TargetAlerts, RunRow, SipDumpRow, TargetSeries } from '@tester/api/tester'
 import { testerApi } from '@tester/api/tester'
 import LiveCharts from '@tester/components/LiveCharts'
 import SipDrawer from '@tester/components/SipDrawer'
+import MiniChart from '@tester/components/MiniChart'
 import { fmtNum, fmtPct, fmtTime, fmtUnix, fmtDuration, SUMMARY_ROWS, TIMER_ROWS, STEP_LABEL, summaryValue, VERDICT_LABEL } from '@tester/lib/fmt'
 import { thresholdsFromScenario, expectText, type ProfileLike } from '@tester/lib/metrics'
 
@@ -105,6 +106,9 @@ export default function RunReport({ run, scenario, series, events, markdown, pri
   const [hover, setHover] = useState<number | null>(null)
 
   const [dumps, setDumps] = useState<SipDumpRow[]>([])
+  const [tgt, setTgt] = useState<TargetSeries | null>(null)
+  const [tgtHover, setTgtHover] = useState<number | null>(null)
+  useEffect(() => { setTgt(null); testerApi.targetSeries(run.id).then(setTgt).catch(() => setTgt(null)) }, [run.id])
   useEffect(() => { setDumps([]); testerApi.sipDumps(run.id).then(r => setDumps(r.dumps ?? [])).catch(() => setDumps([])) }, [run.id])
   useEffect(() => { setAlerts(null); testerApi.targetAlerts(run.id).then(setAlerts).catch(() => setAlerts(null)) }, [run.id])
   useEffect(() => { setHist({}); setOpen({}) }, [run.id])
@@ -129,6 +133,7 @@ export default function RunReport({ run, scenario, series, events, markdown, pri
   const codeCounts = useMemo(() => { const m = new Map<string, number>(); for (const e of events ?? []) { const k = String(e.code ?? e.metric ?? e.step ?? '?'); m.set(k, (m.get(k) ?? 0) + 1) } return [...m.entries()].sort((a, b) => b[1] - a[1]) }, [events])
   const vTone = run.verdict === 'pass' ? 'border-success' : run.verdict === 'fail' || run.verdict === 'error' ? 'border-destructive' : run.verdict === 'aborted' ? 'border-warning' : 'border-info'
   const evidence = scenario?.target_evidence ?? []
+  const tgtPeak = typeof s.target_cpu_peak_pct === 'number' ? s.target_cpu_peak_pct : null
   const seedRestored = (run.notes ?? []).some(n => n.includes('csp seed restored'))
   const jump = (id: string) => document.getElementById(`rr-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
@@ -319,15 +324,29 @@ export default function RunReport({ run, scenario, series, events, markdown, pri
       )}
 
       <section id="rr-evidence" className="flex flex-col gap-1.5 break-inside-avoid">
-        <h3 className="text-sm font-semibold text-muted-foreground">대상 증거 <span className="font-normal">— target_evidence(2차 판정) · 대상 관측은 F 단계</span></h3>
+        <h3 className="text-sm font-semibold text-muted-foreground">대상 증거 <span className="font-normal">— target_evidence(2차 판정 — 대상 OAM 의 녹취·알람·이벤트를 run 창으로 센다){tgtPeak != null ? ` · 대상 호스트 CPU 피크 ${fmtNum(tgtPeak, 1)} %` : ''}</span></h3>
+        {tgt && Object.keys(tgt.agents).length > 0 && (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {Object.entries(tgt.agents).map(([name, a], i) => (
+              <MiniChart key={name} t={a.t} label={`대상 호스트 ${name} — CPU / 메모리`} unit="%" max={100} hover={tgtHover} onHover={setTgtHover}
+                         threshold={p?.stop_on?.target_cpu_pct ?? null} thresholdLabel="stop_on"
+                         series={[{ key: 'cpu', values: a.cpu_pct, color: `var(--chart-${(i % 5) + 1})`, label: 'cpu' }, { key: 'mem', values: a.mem_pct, color: 'var(--chart-4)', label: 'mem', dashed: true }]} />
+            ))}
+          </div>
+        )}
         {evidence.length === 0 && !run.plan?.peer_pools?.length ? <div className="text-xs text-muted-foreground">시나리오에 target_evidence 없음</div> : (
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-            {evidence.map((e, i) => (
-              <div key={i} className="rounded-md border border-border p-2.5 text-xs">
-                <div className="flex items-center gap-1.5"><span className="font-mono font-semibold">{e.kind}</span><Badge variant="neutralSoft" className="ml-auto">대기</Badge></div>
-                <div className="mt-1 text-muted-foreground">{e.min != null ? `≥ ${e.min}` : ''}{e.max != null ? ` ≤ ${e.max}` : ''}{e.code ? ` ${e.code}` : ''} — 대상 OAM 조회는 후속</div>
-              </div>
-            ))}
+            {evidence.map((e, i) => {
+              const r = (run.evidence_results ?? [])[i]
+              return (
+                <div key={i} className="rounded-md border border-border p-2.5 text-xs">
+                  <div className="flex items-center gap-1.5"><span className="font-mono font-semibold">{e.kind}</span>
+                    <Badge variant={!r || r.ok == null ? 'neutralSoft' : r.ok ? 'successSoft' : 'dangerSoft'} className="ml-auto">{!r ? '판정 없음' : r.ok == null ? '판정 불가' : r.ok ? 'OK' : 'FAIL'}</Badge></div>
+                  <div className="mt-1 text-muted-foreground">기대 {e.min != null ? `≥ ${e.min}` : ''}{e.max != null ? ` ≤ ${e.max}` : ''}{e.code ? ` ${e.code}` : ''}{r && r.observed != null ? <> · 관측 <b className="text-foreground">{r.observed}</b></> : null}</div>
+                  {r?.why && <div className="mt-0.5 break-words text-muted-foreground">{r.why}</div>}
+                </div>
+              )
+            })}
             {(run.plan?.peer_pools?.length ?? 0) > 0 && (
               <div className="rounded-md border border-border p-2.5 text-xs">
                 <div className="flex items-center gap-1.5"><span className="font-mono font-semibold">seed_restored</span><Badge variant={seedRestored ? 'successSoft' : 'warningSoft'} className="ml-auto">{seedRestored ? 'OK' : '미확인'}</Badge></div>
