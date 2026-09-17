@@ -286,7 +286,9 @@ chk('완료율 열은 표에 없다(드롭률과 여집합)', gmap.comp === unde
 chk('실패 사유 다섯이 한 묶음',
     new Set(['r_rejected', 'r_busy', 'r_noanswer', 'r_error', 'r_unknown']
       .map(k => gmap[k])).size === 1)
-chk('사유 묶음과 성립 묶음은 다르다', gmap.r_rejected !== gmap.success)
+// 성공률과 그 하락 사유는 **한 묶음**이다 — 성공률이 낮은 이유가 바로 오른쪽에 있다.
+chk('성공률과 실패 사유가 한 묶음', gmap.r_rejected === gmap.success)
+chk('기준 수량(시도·성립)은 다른 묶음', gmap.attempts !== gmap.success)
 chk('미결·보존초과가 한 묶음이고 사유와 다르다',
     gmap.open === gmap.late && gmap.open !== gmap.r_unknown)
 // 첫 열(시도)도 자기 묶음을 갖는다 — 시각 열과의 경계에도 선이 그어진다.
