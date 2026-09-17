@@ -346,6 +346,33 @@ class DispatchFixture:
         finally:
             conn.close()
 
+    # ── 인가 회수 (dispatch_center.md §5.10) ──
+    def revoke_monitor(self) -> str:
+        """시드한 역할의 감시·청취 범위를 즉시 거두고 CSP 에 통지한다 — 시나리오 도중에 부른다.
+
+        되돌리지 않는다: 픽스처 종료가 역할 행을 통째로 지우므로(`_restore`) 별도 복원이 필요 없다.
+        전환 전 스키마는 범위가 관제 그룹 열이라 이 경로를 쓰지 않는다(빈 문자열 반환 = 미수행).
+        반환 = '' 성공 / 사유 문자열 실패.
+        """
+        if self.schema != SCHEMA_ROLES or not self._seeded_role:
+            return "역할 스키마 아님 또는 시드된 역할 없음"
+        try:
+            conn = _db.connect(self.db_cfg)
+        except Exception as e:
+            return f"DB 연결 실패: {type(e).__name__}"
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE roles SET monitor_call='none', ptt_listen='none' WHERE id=%s",
+                                (self._seeded_role,))
+                    cur.execute("DELETE FROM role_monitor_targets WHERE role_id=%s", (self._seeded_role,))
+                    cur.execute("DELETE FROM role_ptt_targets WHERE role_id=%s", (self._seeded_role,))
+                conn.commit()
+        finally:
+            conn.close()
+        notify_csp_event("ROLE_CHANGED", uri=self._seeded_role, action="PUT", ip=self.csp_ip)
+        return ""
+
     # ── CSP 통지 ──
     def _notify(self, seeded: bool) -> None:
         action = "POST" if seeded else "DELETE"

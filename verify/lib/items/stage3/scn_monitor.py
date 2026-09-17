@@ -45,6 +45,9 @@ _MONRE = re.compile(
 _SUB_OK_RE = re.compile(r"\[BLF\] dialog SUBSCRIBED OK")
 _SUB_REJ_RE = re.compile(r"MONITOR: dialog SUBSCRIBE (\d+) 거절")
 _JOIN_RE = re.compile(r"MONITOR: M INVITE-Join\(")
+_REVOKE_OPEN_RE = re.compile(r"MONITOR: revoke window open")
+_REVOKE_RE = re.compile(
+    r"MONITOR revoke: bye=(\d+) after_recv=\+(\d+) ab_alive=(\d+) A_recv=\+(\d+) B_recv=\+(\d+)")
 
 
 def _parse_mon(text: str):
@@ -57,13 +60,25 @@ def _parse_mon(text: str):
 
 
 class _Progress:
-    """cspsim 진행 줄에서 M 의 dialog 구독 응답·Join 시도 여부를 모은다 (tail 잘림과 무관 — on_line)."""
+    """cspsim 진행 줄에서 M 의 dialog 구독 응답·Join 시도 여부를 모은다 (tail 잘림과 무관 — on_line).
 
-    def __init__(self):
+    `on_revoke` 를 주면 cspsim 이 «revoke window open» 을 낸 **그 순간** 부른다 — 청취 leg 이 이미 선
+    상태에서 자격을 거둬야 회수를 관측할 수 있기 때문이다(M8, dispatch_center.md §5.10).
+    """
+
+    def __init__(self, on_revoke=None):
         self.dlg_sub = None       # 200 | 거절 코드 | None(응답 없음)
         self.join_tried = False
+        self.on_revoke = on_revoke
+        self.revoke_err = None    # None=미수행, ""=성공, 그 외=사유
+        self.tail = ""
 
     def __call__(self, line: str) -> None:
+        if self.on_revoke is not None and self.revoke_err is None and _REVOKE_OPEN_RE.search(line):
+            try:
+                self.revoke_err = self.on_revoke() or ""
+            except Exception as e:                       # noqa: BLE001 — 시나리오를 죽이지 않고 사유만 남긴다
+                self.revoke_err = f"{type(e).__name__}: {e}"
         if _SUB_OK_RE.search(line):
             self.dlg_sub = 200
         m = _SUB_REJ_RE.search(line)
@@ -101,14 +116,17 @@ def monitor(ctx: VerifyContext) -> ItemResult:
         return DispatchFixture(ctx.dist_dir, ctx.sim_ip, group_id, members=members, no_answer_sec=30, role=role,
                                unassign=unassign)
 
-    def run(trio, tag):
+    def run(trio, tag, *, revoke=None, revoke_wait=0):
         args = [
             "-mode", "volte", "-scenario", "monitor", "-count", "3",
             "-ip", ctx.sim_ip, "-domain", VOLTE_DOMAIN,
             *trio_cred_args(trio, tag), "-media_dir", media_dir, "-duration", "5", "-no_video",
         ]
-        prog = _Progress()
+        if revoke_wait > 0:
+            args += ["-revoke_wait", str(revoke_wait)]
+        prog = _Progress(on_revoke=revoke)
         rc, tail = run_cspsim(ctx.repo_root, args, timeout=180, tail_lines=400, on_line=prog)
+        prog.tail = tail
         return rc, _parse_mon(tail), parse_marker_int(tail, "join_status"), prog
 
     def mstr(d, st, prog) -> str:
@@ -134,6 +152,33 @@ def monitor(ctx: VerifyContext) -> ItemResult:
                       d[4] >= FLOW_MIN and d[5] >= FLOW_MIN)
                 checks.append(("M2 청취 (Join 200, M SSRC 2개, A·B 무영향)", ok,
                                f"{mstr(d, st, prog)} (M·A·B≥{FLOW_MIN}, SSRC=2) rc={rc}"))
+
+        # ── M8: 인가 회수 (§5.10) — 청취가 선 뒤 역할 범위를 거두면 서버가 감청 leg 에 BYE 를 보내고 tap 을
+        #    회수해야 한다. 원 통화(A↔B)는 그대로여야 한다 — 자격 회수와 업무 통화 차단은 다른 정책이다. ──
+        name_r = "M8 회수 — 역할 범위 제거 시 감청 leg BYE + 미디어 정지, A↔B 유지"
+        with fixture(role=RoleSpec(_ROLE_MON, [M["user"]], monitor_call="all")) as fr:
+            if not fr.active:
+                checks.append((name_r, False, f"역할 시드 실패 — {fr.reason}"))
+            elif legacy:
+                checks.append((name_r, None, "전환 전 스키마(dispatch_groups) — 역할 범위 열이 없어 회수 경로가 다르다"))
+            else:
+                rc, d, st, prog = run([A, B, M], "mon_m8", revoke=fr.revoke_monitor, revoke_wait=12)
+                rv = None
+                for m_ in _REVOKE_RE.finditer(prog.tail):
+                    rv = m_
+                if st != 200:
+                    checks.append((name_r, False, f"청취가 서지 않아 회수를 관측할 수 없다 — {mstr(d, st, prog)} rc={rc}"))
+                elif prog.revoke_err:
+                    checks.append((name_r, False, f"회수 조작 실패 — {prog.revoke_err}"))
+                elif rv is None:
+                    checks.append((name_r, False, f"회수 창 결과 줄 없음 (기대 'MONITOR revoke:') rc={rc}"))
+                else:
+                    bye, after, alive = int(rv.group(1)), int(rv.group(2)), int(rv.group(3))
+                    a_after, b_after = int(rv.group(4)), int(rv.group(5))
+                    ok = bye == 1 and after <= DROP_MAX and alive == 1 and a_after >= FLOW_MIN and b_after >= FLOW_MIN
+                    checks.append((name_r, ok,
+                                   f"bye={bye} after_recv=+{after} ab_alive={alive} A_recv=+{a_after} "
+                                   f"B_recv=+{b_after} (기대 bye=1, M≤{DROP_MAX}, ab_alive=1, A·B≥{FLOW_MIN}) rc={rc}"))
 
         # ── M5a: 범위 밖 역할 — M' 은 타 그룹(pg-verify-b) 멤버 + monitor_call=own → dialog 403, Join 생략 ──
         with fixture(_GRP_OTHER, [Mx["user"]], RoleSpec(_ROLE_OUT, [Mx["user"]], monitor_call="own")) as fo:

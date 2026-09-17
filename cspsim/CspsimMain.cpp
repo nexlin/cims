@@ -439,6 +439,7 @@ static void PrintUsage(const char* pszBin) {
     printf("  -hunt_watch              [hunt] B 가 대표번호·A·C 의 dialog 를 구독하고, 확립 뒤 A(발신자)가 먼저 BYE — 종료 NOTIFY 의\n");
     printf("                             entity/direction/remote 정합·version 단조 판정용 (F7). 각 NOTIFY 를 '[BLF] dlg …' 줄로 출력\n");
     printf("  -listen_sendrecv         [ptt_listen] M 이 recvonly 아닌 일반 INVITE — 비멤버 403 판정\n");
+    printf("  -revoke_wait <sec>       [monitor] 청취 확립 뒤 인가 회수를 기다린다 — 서버 BYE·미디어 정지 판정 (§5.10)\n");
     printf("  -pickup_code <code>      [pickup] 당겨받기 코드 (default: **) — 서버 pickup_feature_code 와 일치\n");
     printf("  -pickup_target <내선>    [pickup] 지정 픽업 — C 가 <code><내선> 을 다이얼 (미지정 시 그룹 픽업)\n");
     printf("  -event       <token>     [subscribe_event] Event 헤더 토큰 (default: dialog)\n");
@@ -494,6 +495,10 @@ static bool g_bHuntNoAnswer = false;                // -hunt_noanswer: 그룹원
 static bool g_bHuntPickup = false;                  // -hunt_pickup: 전원 ring-hold 중 D 가 <pickup_code><pilot> 로 지정 픽업 (F5)
 static bool g_bHuntWatch = false;                   // -hunt_watch: B 가 pilot·A·C dialog 감시, A-leg 선종료 (F7 dialog 정합)
 static bool g_bListenSendRecv = false;              // -listen_sendrecv: [ptt_listen] M 이 recvonly 아닌 일반 INVITE (비멤버 403 판정)
+// -revoke_wait N: [monitor] 청취 확립 뒤 N초 동안 **인가 회수**를 기다린다 (dispatch_center.md §5.10).
+//   검증 항목이 «revoke window open» 줄을 보고 역할을 거둔 뒤 ROLE_CHANGED 를 쏘면, 서버가 감청 leg 에 BYE 를
+//   보내야 한다. 0 이면 이 창 자체를 열지 않는다(기존 동작).
+static int g_iRevokeWait = 0;
 
 // -hold <secs>: register 시나리오가 등록을 유지하는 시간 — 등록 유지 중 외부 프로브(비보호 요청 403 등)를
 //   받기 위한 창. 0 이면 종전대로 등록 직후 해제. (RunScenario 시그니처를 늘리지 않으려 파일 정적)
@@ -854,6 +859,27 @@ static void RunScenario(std::vector<SimSession*>& sessions,
         unsigned long long dA = A->RecvPackets() - a0, dB = B->RecvPackets() - b0, dM = M->RecvPackets() - m0;
         printf("[Scenario] MONITOR result: join_status=%d ab_ok=%d M_recv=+%llu M_ssrc=%zu A_recv=+%llu B_recv=+%llu\n",
                iJoinStatus, abOk, dM, M->RecvSsrcCount(), dA, dB);
+
+        // 5) 인가 회수 창 (§5.10) — 역할을 거두면 **이미 선 청취 leg** 도 걷혀야 한다. 검증 항목이 아래 «revoke
+        //    window open» 줄을 보고 역할을 바꾼 뒤 ROLE_CHANGED 를 쏜다. 서버가 M 에게 BYE 를 보내고 tap 을
+        //    회수하면 M 의 수신이 멎는다. **원 통화(A↔B)는 그대로여야 한다** — 자격 회수와 업무 통화 차단은
+        //    다른 정책이다.
+        if (g_iRevokeWait > 0 && iJoinStatus == 200) {
+            printf("[Scenario] MONITOR: revoke window open (%ds)\n", g_iRevokeWait);
+            fflush(stdout);
+            bool bBye = false;
+            for (int t = 0; t < g_iRevokeWait * 10 && !g_bQuit; ++t) {
+                if (!M->m_bInCall) { bBye = true; break; }
+                usleep(100000);
+            }
+            // BYE 뒤 잔여 미디어 확인 — 2초 정지 창. tap 이 남아 있으면 여기서 M 의 delta 가 잡히고,
+            //   같은 창에서 A·B 가 계속 받는 것으로 «원 통화는 그대로» 를 확인한다(20ms ptime 기준 ~100 패킷).
+            unsigned long long mBye = M->RecvPackets(), aBye = A->RecvPackets(), bBye0 = B->RecvPackets();
+            for (int t = 0; t < 20 && !g_bQuit; ++t) usleep(100000);
+            printf("[Scenario] MONITOR revoke: bye=%d after_recv=+%llu ab_alive=%d A_recv=+%llu B_recv=+%llu\n",
+                   bBye ? 1 : 0, M->RecvPackets() - mBye, (A->m_bInCall && B->m_bInCall) ? 1 : 0,
+                   A->RecvPackets() - aBye, B->RecvPackets() - bBye0);
+        }
         printf("[Scenario] monitor done, stopping calls\n");
         for (auto* s : sessions) s->StopCall();
         return;
@@ -1292,6 +1318,7 @@ int main(int argc, char* argv[])
     g_bHuntPickup              = HasFlag(argc, argv, "-hunt_pickup");
     g_bHuntWatch               = HasFlag(argc, argv, "-hunt_watch");
     g_bListenSendRecv          = HasFlag(argc, argv, "-listen_sendrecv");
+    g_iRevokeWait              = atoi(GetArg(argc, argv, "-revoke_wait", "0").c_str());
     // CSC 연동: REGISTER 전 IdMS auth 수행 (올바른 순서)
     std::string strCscIp       = GetArg(argc, argv, "-csc_ip",   "");
     int iCscPort               = atoi(GetArg(argc, argv, "-csc_port", "4530").c_str());
