@@ -86,11 +86,36 @@ export function GroupMountPanel({ declared, members, applying, onApply }: {
   }
   // 빈칸은 placeholder 로 보여준 기본값으로 채운다 — 대부분의 노드가 같은 NAS 를 같은
   // 경로로 붙이므로, 표준 구성이면 [마운트 추가] → [전 멤버에 추가] 두 번이면 끝난다.
-  const commitAdd = () => {
+  // 서버 개별 패널(MountPanel)과 **같은 규율**로 묻는다 — 같은 작업인데 화면에 따라 동작이
+  //   달라지면 안 된다. 다른 점은 대상이 전 멤버라는 것뿐이라, 재연결되는 노드를 함께 보여준다.
+  //   "현재" 값은 각 멤버 agent 의 실측(actual_source)이다.
+  const commitAdd = async () => {
     const t = target.trim()  || MOUNT_DEFAULTS.target
     const s = source.trim()  || MOUNT_DEFAULTS.source
     const o = options.trim() || MOUNT_DEFAULTS.options
-    onApply([{ op: 'add', fstype: fstype || MOUNT_DEFAULTS.fstype, source: s, target: t, options: o }],
+    // 그 지점에 이미 **다른** source 가 붙어 있는 멤버 — 이들만 재연결 대상이다.
+    const conflicts = members
+      .map(m => ({ name: m.name, cur: (m.mounts || []).find(x => x.target === t)?.actual_source || null }))
+      .filter(x => x.cur !== null && x.cur !== s) as Array<{ name: string; cur: string }>
+    const changing = conflicts.length > 0
+    if (!await confirm({
+      title: changing ? '그룹 마운트 변경 — 재연결' : '그룹 마운트 저장',
+      tone: changing ? 'danger' : undefined,
+      confirmLabel: changing ? '재연결' : '저장',
+      body: <>
+        <div className="font-mono">{s} → {t}</div>
+        {changing ? <>
+          <div className="mt-2">아래 노드는 <b>지금 다른 곳에 붙어 있습니다</b> — 떼었다 다시 연결합니다:</div>
+          <ul className="mt-1 list-disc pl-5 font-mono text-xs">
+            {conflicts.map(c => <li key={c.name}>{c.name}: {c.cur}</li>)}
+          </ul>
+          <div className="mt-2">그 경로를 쓰는 모듈이 잠시 영향을 받습니다.</div>
+        </> : <>
+          <div className="mt-2">대상: {members.map(x => x.name).join(', ') || '(멤버 없음)'}</div>
+        </>}
+      </> })) return
+    onApply([{ op: 'add', fstype: fstype || MOUNT_DEFAULTS.fstype, source: s, target: t, options: o,
+               ...(changing ? { force: true } : {}) }],
             `그룹 마운트 += ${s} → ${t}`)
     setAddOpen(false)
   }

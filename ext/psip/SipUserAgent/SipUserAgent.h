@@ -64,6 +64,8 @@ public:
 
 	bool StartCall( const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp, CSipCallRoute * pclsRoute, std::string & strCallId );
 	bool StopCall( const char * pszCallId, int iSipCode = 0 );
+	/** 통화 종료/거절에 Reason 헤더(RFC 3326 — 예: "Q.850;cause=16")를 싣는다. pszReason 이 NULL 이면 StopCall(pszCallId, iSipCode) 과 같다. */
+	bool StopCall( const char * pszCallId, int iSipCode, const char * pszReason );
 	bool StopCall( const char * pszCallId, const char * pszForward );
 	bool RingCall( const char * pszCallId, CSipCallRtp * pclsRtp );
 	bool RingCall( const char * pszCallId, int iSipStatus, CSipCallRtp * pclsRtp );
@@ -211,8 +213,11 @@ private:
 	void SessionTimerAddToResponse( CSipDialog & clsDialog, CSipMessage * pclsResponse );
 	void SessionTimerAddToRequest( CSipDialog & clsDialog, CSipMessage * pclsRequest, bool bInitial );
 	void SessionTimerOnResponse( CSipDialog & clsDialog, CSipMessage * pclsMessage );
-	void SessionTimerApplyDest( const std::string & strCallId, CSipDialog & clsDialog,
+
+	// SipUserAgentLegDest.hpp : 서버 발신 in-dialog 요청(BYE·re-INVITE·NOTIFY·REFER·INFO)의 목적지 재해석
+	void ApplyLegDest( const std::string & strCallId, CSipDialog & clsDialog,
 		const std::string & strIp, int iPort, ESipTransport eTransport );
+	bool RefreshLegDest( const char * pszCallId );
 
 	int GetSeqNum( );
 

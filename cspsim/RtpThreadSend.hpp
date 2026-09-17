@@ -54,6 +54,70 @@ static bool LoadAmrWbFrames(const std::string& strPath,
 }
 
 
+/** RFC 4733 송신 상태 — 20 ms 틱마다 DtmfTick 이 본다. 이벤트 중이면 오디오 대신 이벤트 패킷을 낸다. */
+struct DtmfTxState {
+    bool active = false;
+    int event = 0;          // 0-9, 10='*', 11='#', 12-15='A'-'D'
+    int elapsedMs = 0;
+    int endSent = 0;
+    int gapLeftMs = 0;
+    uint32_t ts = 0;        // 이벤트 시작 타임스탬프(이벤트 동안 고정)
+};
+
+static int DtmfEventCode(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c == '*') return 10;
+    if (c == '#') return 11;
+    if (c >= 'A' && c <= 'D') return 12 + (c - 'A');
+    if (c >= 'a' && c <= 'd') return 12 + (c - 'a');
+    return -1;
+}
+
+/** 20 ms 틱 — 이벤트 패킷을 냈으면 true(호출자는 이 틱의 오디오를 건너뛴다). iAudioTs = 이 틱의 오디오 타임스탬프(이벤트 시작값).
+ *  RFC 4733 §2.5: 같은 SSRC/시퀀스 공간, 이벤트 동안 타임스탬프 고정, 마커는 첫 패킷, duration 누적, 종료는 E 비트 패킷 3회. */
+static bool DtmfTick(CRtpThread* pRtpThread, DtmfTxState& st, RtpHeader* pHdr, char* szPacket, uint16_t& sSeq, uint32_t iAudioTs,
+                     int iAudioPt) {
+    if (pRtpThread->m_iDtmfPt < 0) return false;
+    if (st.gapLeftMs > 0) { st.gapLeftMs -= 20; return false; }
+    if (!st.active) {
+        char c = 0;
+        {
+            std::lock_guard<std::mutex> lk(pRtpThread->m_mtxDtmf);
+            if (pRtpThread->m_dtmfQueue.empty()) return false;
+            c = pRtpThread->m_dtmfQueue.front();
+            pRtpThread->m_dtmfQueue.pop_front();
+        }
+        int ev = DtmfEventCode(c);
+        if (ev < 0) return false;
+        st.active = true; st.event = ev; st.elapsedMs = 0; st.endSent = 0; st.ts = iAudioTs;
+    }
+    bool bFirst = st.elapsedMs == 0;
+    bool bEnd = st.elapsedMs >= pRtpThread->m_iDtmfDurationMs;
+    int iDurTicks = (bEnd ? pRtpThread->m_iDtmfDurationMs : st.elapsedMs + 20) * pRtpThread->m_iDtmfClock / 1000;
+    if (iDurTicks > 0xFFFF) iDurTicks = 0xFFFF;
+    unsigned char* p = (unsigned char*)(szPacket + sizeof(RtpHeader));
+    p[0] = (unsigned char)st.event;
+    p[1] = (unsigned char)((bEnd ? 0x80 : 0x00) | 10);   // E|R|volume(10 dBm0 감쇠)
+    p[2] = (unsigned char)(iDurTicks >> 8);
+    p[3] = (unsigned char)(iDurTicks & 0xFF);
+    pHdr->SetPT((uint8_t)pRtpThread->m_iDtmfPt);
+    pHdr->SetMarker(bFirst ? 1 : 0);
+    pHdr->SetSeq(sSeq);
+    pHdr->SetTimeStamp(st.ts);
+    ++sSeq;
+    int iSendLen = (int)sizeof(RtpHeader) + 4;
+    if (!pRtpThread->SrtpEnabled() || pRtpThread->SrtpProtect(szPacket, iSendLen, 1500))
+        UdpSend(pRtpThread->m_hSocket, szPacket, iSendLen, pRtpThread->m_strDestIp.c_str(), pRtpThread->m_iDestPort);
+    pHdr->SetPT((uint8_t)iAudioPt);
+    pHdr->SetMarker(0);
+    if (bEnd) {
+        if (++st.endSent >= 3) { st.active = false; st.gapLeftMs = pRtpThread->m_iDtmfGapMs; pRtpThread->m_iDtmfSent++; }
+    } else {
+        st.elapsedMs += 20;
+    }
+    return true;
+}
+
 THREAD_API RtpThreadSend(LPVOID lpParameter) {
   CRtpThread *pRtpThread = (CRtpThread *)lpParameter;
   char szPacket[1500];
@@ -75,7 +139,7 @@ THREAD_API RtpThreadSend(LPVOID lpParameter) {
   int iFrameSize = 0;
   bool bFileMedia = false;
 
-  if (!pRtpThread->m_strMediaFile.empty()) {
+  if (!pRtpThread->m_strMediaFile.empty() && pRtpThread->m_bUseMediaFile) {
       bFileMedia = LoadAmrWbFrames(pRtpThread->m_strMediaFile, vecFrames, iFrameSize);
       if (bFileMedia) {
           printf("[RTP] Loaded %d AMR-WB frames from %s\n",
@@ -86,13 +150,20 @@ THREAD_API RtpThreadSend(LPVOID lpParameter) {
       }
   }
 
+  DtmfTxState sttDtmf;
   if (bFileMedia) {
       // ── AMR-WB 파일 기반 전송 (16kHz, 20ms/frame) — PT = SDP 협상값 (미협상 시 레거시 99) ──
-      psttRtpHeader->SetPT(pRtpThread->m_iAudioPt >= 0 ? pRtpThread->m_iAudioPt : 99);
+      int iAudioPt = pRtpThread->m_iAudioPt >= 0 ? pRtpThread->m_iAudioPt : 99;
+      psttRtpHeader->SetPT(iAudioPt);
       int iFrameIdx = 0;
       int iTotalFrames = (int)vecFrames.size();
 
       while (pRtpThread->m_bStopEvent == false) {
+          if (DtmfTick(pRtpThread, sttDtmf, psttRtpHeader, szPacket, sSeq, iTimeStamp, iAudioPt)) {
+              iTimeStamp += 320;
+              MiliSleep(20);
+              continue;
+          }
           // AMR-WB RTP: RFC 4867 octet-aligned
           // payload = [CMR(4bit)+0000(4bit)] + [ToC(8bit)] + [frame data]
           char* payload = szPacket + sizeof(RtpHeader);
@@ -135,11 +206,17 @@ THREAD_API RtpThreadSend(LPVOID lpParameter) {
   } else {
       // ── 합성 RTP (기존 PCMU PT=0) ──
       char szRead[320];
-      psttRtpHeader->SetPT(0);
+      // PT 는 협상값이 G.711(0/8)이면 그 값(PCMA 협상 시 페이로드는 PCMU 그대로 — 계측기는 흐름·손실만 본다), 그 외 0
+      int iAudioPt = (pRtpThread->m_iAudioPt == 8) ? 8 : 0;
+      psttRtpHeader->SetPT(iAudioPt);
 
       while (pRtpThread->m_bStopEvent == false) {
           memset(szRead, 0x12, sizeof(szRead));
           MiliSleep(20);
+          if (DtmfTick(pRtpThread, sttDtmf, psttRtpHeader, szPacket, sSeq, iTimeStamp, iAudioPt)) {
+              iTimeStamp += 160;
+              continue;
+          }
 
           psttRtpHeader->SetSeq(sSeq);
           psttRtpHeader->SetTimeStamp(iTimeStamp);

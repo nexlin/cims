@@ -139,6 +139,11 @@ export default function ServersPage() {
  enrollment_token: string; install_command: string;
   } | null>(null)
  const [upgradeModal, setUpgradeModal] = useState<{ dep: Deployment } | null>(null)
+  // 진행 중인 제어 job — 완료까지 그 대상의 버튼을 잠근다. 키는 대상 id, 값은 하는 일.
+  //   depBusy   = 모듈(배포) 단위 — 시작·재시작·정지
+  //   agentBusy = 서버(agent) 단위 — agent 재시작·업그레이드
+ const [depBusy, setDepBusy]     = useState<Record<number, string>>({})
+ const [agentBusy, setAgentBusy] = useState<Record<number, string>>({})
  const [deployModal, setDeployModal]       = useState<{ agent: Agent } | null>(null)
  const [metricsFor, setMetricsFor]         = useState<Agent | null>(null)
  const [healthCheckFor, setHealthCheckFor] = useState<Agent | null>(null)
@@ -388,6 +393,9 @@ export default function ServersPage() {
  const r = await deploymentApi.upgradeAgent(a.id)
  show(`업그레이드 job 큐잉 (#${r.job_id})`, 'ok')
  await load()
+ setAgentBusy(b => ({ ...b, [a.id]: '업그레이드' }))
+ try { await awaitJob(a.id, r.job_id, `${agentDisplayName(a.name)} agent 업그레이드`) }
+ finally { setAgentBusy(b => { const n = { ...b }; delete n[a.id]; return n }); await load() }
     } catch (e) { show((e as Error).message, 'err') }
   }
  async function restartAgent(a: Agent) {
@@ -399,6 +407,9 @@ export default function ServersPage() {
  const r = await deploymentApi.restartAgent(a.id)
  show(`재시작 job 큐잉 (#${r.job_id})`, 'ok')
  await load()
+ setAgentBusy(b => ({ ...b, [a.id]: '재시작' }))
+ try { await awaitJob(a.id, r.job_id, `${agentDisplayName(a.name)} agent 재시작`) }
+ finally { setAgentBusy(b => { const n = { ...b }; delete n[a.id]; return n }); await load() }
     } catch (e) { show((e as Error).message, 'err') }
   }
  async function rollbackAgent(a: Agent) {
@@ -423,6 +434,30 @@ export default function ServersPage() {
  await load()
     } catch (e) { show((e as Error).message, 'err') }
   }
+  // ── 제어 job 이 끝날 때까지 기다린다 (연타 차단) ────────────────────────────
+  // 큐에 넣고 바로 끝난 것처럼 보이면 운영자가 같은 버튼을 다시 누른다 — 상태 배지가
+  // 전후 동일(running → running)이라 눌렸는지조차 알 수 없기 때문이다. **실측: 같은
+  // agent 에 upgrade_agent job 이 연속 2건 쌓였다.** agent 업그레이드는 멱등이라 무해했지만
+  // 모듈이었다면 정지·설치가 중복된다.
+  //   · 폴링 1.5초 — job 은 agent 가 가져가 돌리므로 즉답이 아니다.
+  //   · 상한 90초 — 폴링이 막혀도 버튼이 영영 잠기지 않게(잠금만 풀고 목록 갱신에 맡긴다).
+  const JOB_POLL_MS = 1500
+  const JOB_WAIT_MS = 90_000
+  const JOB_TERMINAL = new Set(['completed', 'succeeded', 'failed', 'cancelled'])
+  async function awaitJob(agentId: number, jobId: number, what: string): Promise<void> {
+    const deadline = Date.now() + JOB_WAIT_MS
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, JOB_POLL_MS))
+      try {
+        const j = await deploymentApi.getAgentJob(agentId, jobId)
+        if (!JOB_TERMINAL.has(j.status)) continue
+        if (j.status === 'failed') show(`${what} 실패 — ${j.result_stderr || `exit ${j.result_code}`}`, 'err')
+        else show(`${what} 완료`, 'ok')
+        return
+      } catch { return }   // 조회 불가(권한·경합) — 잠금만 풀고 목록 갱신에 맡긴다
+    }
+    show(`${what} — 응답 지연, 목록에서 상태를 확인하세요`, 'err')
+  }
  async function queueJob(d: Deployment, jt: JobType) {
     // destructive / 서비스 영향 큰 job 은 confirm.
  const destructiveDesc: Partial<Record<JobType, string>> = {
@@ -441,6 +476,10 @@ export default function ServersPage() {
  const r = await deploymentApi.queueJob(d.id, jt)
  show(`${jt} 큐 등록 (#${r.job_id})`, 'ok')
  await load()
+      // 완료까지 이 모듈의 제어 버튼을 잠근다 — 재기동은 배지가 안 바뀌어 연타를 부른다.
+ setDepBusy(b => ({ ...b, [d.id]: jt }))
+ try { await awaitJob(d.agent_id, r.job_id, `${d.package_name} ${jt}`) }
+ finally { setDepBusy(b => { const n = { ...b }; delete n[d.id]; return n }); await load() }
     } catch (e) {
       // 안전 가드(409)는 막다른 골목이 아니다 — 사유를 보여주고 강행 여부를 묻는다.
  const guard = e instanceof ApiError && e.status === 409 &&
@@ -457,6 +496,9 @@ export default function ServersPage() {
  const r = await deploymentApi.queueJob(d.id, jt, undefined, true)
  show(`${jt} 큐 등록 (#${r.job_id}) — 가드 우회`, 'ok')
  await load()
+ setDepBusy(b => ({ ...b, [d.id]: jt }))
+ try { await awaitJob(d.agent_id, r.job_id, `${d.package_name} ${jt}`) }
+ finally { setDepBusy(b => { const n = { ...b }; delete n[d.id]; return n }); await load() }
         } catch (e2) { show((e2 as Error).message, 'err') }
  return
       }
@@ -623,6 +665,7 @@ export default function ServersPage() {
               <ServerContextBar a={selectedAgent}
  onApprove={approveAgent} onRevoke={revokeAgent} onRemove={removeAgent}
  onRename={renameAgent} onUpgrade={upgradeAgent} onRestart={restartAgent}
+ busy={agentBusy[selectedAgent.id]}
  onRollbackAgent={rollbackAgent} onMetrics={setMetricsFor}
  onHealthCheck={setHealthCheckFor}
  onClickReinstall={() => setReinstallSignal(v => v + 1)} />
@@ -687,6 +730,7 @@ export default function ServersPage() {
  mgmtVip={mgmtVip}
  onAddDeploy={() => setDeployModal({ agent: selectedAgent })}
  onJob={queueJob}
+ depBusy={depBusy}
  onUpgradeDep={upgradeDeployment}
  onRollback={rollbackDeployment}
  onRemoveDep={removeDeployment} />
@@ -721,6 +765,7 @@ export default function ServersPage() {
                 <GroupControlMatrix group={selectedGroup} agents={agents}
  depsByAgent={depsByAgent}
  onJob={queueJob}
+ depBusy={depBusy}
  onSelectMember={(aid) => setSelection({ kind: 'agent', id: aid })}
  onReload={load} />
               </fieldset>
@@ -770,7 +815,7 @@ export default function ServersPage() {
         <DeploymentCreateModal agent={deployModal.agent} packages={packages}
  onClose={() => setDeployModal(null)} onDone={load} />}
       {upgradeModal &&
-        <DeploymentUpgradeModal dep={upgradeModal.dep} packages={packages}
+        <DeploymentUpgradeModal dep={upgradeModal.dep} packages={packages} awaitJob={awaitJob}
  onClose={() => setUpgradeModal(null)} onDone={load} />}
       {metricsFor &&
         <MetricsModal agent={metricsFor} onClose={() => setMetricsFor(null)} />}
@@ -1873,7 +1918,7 @@ type InspectorTab = 'install' | 'info' | 'network' | 'modules'
  * outline** — destructive solid 는 그룹/전체 단위에만 쓴다(DESIGN-RULES §2).
  */
 function ServerContextBar({ a, onApprove, onRevoke, onRemove, onRename, onUpgrade, onRestart,
- onRollbackAgent, onMetrics, onHealthCheck, onClickReinstall }: {
+ onRollbackAgent, onMetrics, onHealthCheck, onClickReinstall, busy }: {
  a: Agent
  onApprove: (a: Agent) => void
  onRevoke: (a: Agent) => void
@@ -1885,6 +1930,9 @@ function ServerContextBar({ a, onApprove, onRevoke, onRemove, onRename, onUpgrad
  onMetrics: (a: Agent) => void
  onHealthCheck: (a: Agent) => void
  onClickReinstall: () => void
+  /** 이 서버에서 진행 중인 agent job 라벨(재시작·업그레이드). 있으면 셋 다 잠근다 —
+   *  큐에 넣자마자 끝난 것처럼 보여 같은 버튼을 다시 누르면 job 이 중복으로 쌓인다. */
+ busy?: string
 }) {
  return (
     <div className="flex h-[60px] shrink-0 items-center gap-2 border-b border-border px-3.5">
@@ -1919,17 +1967,17 @@ function ServerContextBar({ a, onApprove, onRevoke, onRemove, onRename, onUpgrad
                 <Button title="그 밖의 서버 액션">더보기 <ChevronDown size={13} /></Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuItem disabled={a.status !== 'online'} onSelect={() => onRestart(a)}
- title="agent 프로세스 self-restart (execv)">
-                  <RotateCw size={13} /> 재시작
+                <DropdownMenuItem disabled={a.status !== 'online' || !!busy} onSelect={() => onRestart(a)}
+ title={busy ? `${busy} 진행 중 — 완료까지 기다리세요` : "agent 프로세스 self-restart (execv)"}>
+                  {busy === '재시작' ? <><Hourglass size={13} /> 진행 중</> : <><RotateCw size={13} /> 재시작</>}
                 </DropdownMenuItem>
-                <DropdownMenuItem disabled={a.status !== 'online'} onSelect={() => onUpgrade(a)}
- title="agent 바이너리를 최신 버전으로 교체">
-                  <ArrowUp size={13} /> 업그레이드
+                <DropdownMenuItem disabled={a.status !== 'online' || !!busy} onSelect={() => onUpgrade(a)}
+ title={busy ? `${busy} 진행 중 — 완료까지 기다리세요` : "agent 바이너리를 최신 버전으로 교체"}>
+                  {busy === '업그레이드' ? <><Hourglass size={13} /> 진행 중</> : <><ArrowUp size={13} /> 업그레이드</>}
                 </DropdownMenuItem>
                 {/* 롤백은 이전 버전이 보존된 경우에만 나타난다 (screens/server-scope.md) */}
                 {(a.agent_versions || []).filter(v => v && v !== a.agent_version).length > 0 && (
-                  <DropdownMenuItem disabled={a.status !== 'online'} onSelect={() => onRollbackAgent(a)}
+                  <DropdownMenuItem disabled={a.status !== 'online' || !!busy} onSelect={() => onRollbackAgent(a)}
  title="agent 를 직전(또는 선택) 버전으로 롤백 (current flip + execv)">
                     <ArrowDown size={13} /> 롤백
                   </DropdownMenuItem>
@@ -2005,7 +2053,7 @@ function GroupContextBar({ group, memberCount, onOpenConfig, onDeleteSystem }: {
 }
 
 function ServerInspector({ agent: a, mode, deployments, packages, vipIps, mgmtVip, reinstallSignal,
- onAddDeploy, onJob, onUpgradeDep, onRollback, onRemoveDep }: {
+ onAddDeploy, onJob, onUpgradeDep, onRollback, onRemoveDep, depBusy }: {
  agent: Agent
   // infra=시스템/서버 구성 (설치안내/정보/네트워크), install=패키지 설치 (모듈 파일 배치),
   // control=패키지 제어 (프로세스 start/stop/restart)
@@ -2022,6 +2070,8 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps, mgmtVi
  onUpgradeDep: (d: Deployment) => void
  onRollback: (d: Deployment) => void
  onRemoveDep: (d: Deployment) => void
+  /** 진행 중인 제어 job — [패키지 제어] 탭이 그 모듈의 버튼을 완료까지 잠근다. */
+ depBusy?: Record<number, string>
 }) {
   // online 은 이미 enroll 완료 — token 재발급 의미 없음. InstallSection 자체 hidden.
   // 재설치 원하면 [폐기] 또는 [삭제] 후 offline / pending 전이로 진입.
@@ -2082,7 +2132,8 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps, mgmtVi
  onJob={onJob} onUpgrade={onUpgradeDep} onRollback={onRollback} onRemoveDep={onRemoveDep} />
         )}
         {mode === 'control' && (
-          <ControlTab agent={a} deployments={deployments} packages={packages} onJob={onJob} />
+          <ControlTab agent={a} deployments={deployments} packages={packages} onJob={onJob}
+ depBusy={depBusy} />
         )}
       </div>
     </>
@@ -2510,11 +2561,13 @@ function depTone(st: string): StatusTone {
 }
 
 // ── [패키지 제어] 탭 — 서버 선택: 모듈별 프로세스 start/stop/restart ──
-function ControlTab({ agent: a, deployments, packages, onJob }: {
+function ControlTab({ agent: a, deployments, packages, onJob, depBusy }: {
  agent: Agent
  deployments: Deployment[]
  packages: SipPackage[]
  onJob: (d: Deployment, jt: JobType) => void
+  /** 진행 중인 제어 job — {배포 id: 하는 일}. 그 모듈의 버튼을 완료까지 잠근다. */
+ depBusy?: Record<number, string>
 }) {
  const pkgById = new Map(packages.map(p => [p.id, p]))
  return (
@@ -2566,7 +2619,8 @@ function ControlTab({ agent: a, deployments, packages, onJob }: {
                   <Td><Badge variant={depBadge(shown)}>{shown}</Badge></Td>
                   <Td>
                     <div className="flex items-center justify-end">
-                      <ProcessControlButtons dep={d} agent={a} onJob={onJob} />
+                      <ProcessControlButtons dep={d} agent={a} onJob={onJob}
+ busy={depBusy?.[d.id]} />
                     </div>
                   </Td>
                 </tr>
@@ -2602,9 +2656,11 @@ function ControlTab({ agent: a, deployments, packages, onJob }: {
  *
  * stopped 일 때 `시작` 이 Primary 인 것도 시안 그대로다 — 그 상태에서 할 일이 하나뿐이다.
  */
-function ProcessControlButtons({ dep: d, agent, onJob }: {
+function ProcessControlButtons({ dep: d, agent, onJob, busy }: {
  dep: Deployment; agent?: Agent
  onJob: (d: Deployment, jt: JobType) => void
+  /** 이 모듈에서 진행 중인 제어 job (start|restart|stop). 있으면 셋 다 잠근다. */
+ busy?: string
 }) {
  const online = agent?.status === 'online'
  const notInstalled = d.status === 'pending'
@@ -2612,35 +2668,41 @@ function ProcessControlButtons({ dep: d, agent, onJob }: {
   // 바깥 게이트는 그대로 — 오프라인·미설치·failed 등에서는 셋 다 잠근다.
  const controllable = online && !notInstalled && (shown === 'running' || shown === 'stopped')
  const isRunning = shown === 'running'
+  // 진행 중에는 셋 다 잠근다. 재기동은 상태 배지가 전후 동일(running → running)이라
+  //   눌렸는지 알 수 없어 연타를 부르고, 그때마다 모듈이 실제로 다시 기동된다.
  const tip = (act: string) =>
- notInstalled ? '설치 필요 — [패키지 설치] 탭에서 먼저 설치'
+ busy ? `${busy} 진행 중 — 완료까지 기다리세요`
+    : notInstalled ? '설치 필요 — [패키지 설치] 탭에서 먼저 설치'
     : !online ? 'agent 오프라인'
     : !controllable ? `${shown} 상태에서는 제어할 수 없습니다`
     : act
+ const lbl = (k: JobType, text: string) =>
+ busy === k ? <><Hourglass size={12} /> 진행 중</> : text
  return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <Button variant={controllable && !isRunning ? 'default' : 'outline'}
- disabled={!controllable || isRunning}
- title={isRunning ? '이미 running 입니다' : tip('프로세스 시작')}
- onClick={() => onJob(d, 'start')}>시작</Button>
-      <Button disabled={!controllable || !isRunning}
- title={!isRunning && controllable ? 'stopped 상태에서는 [시작] 을 쓰세요' : tip('프로세스 재시작')}
- onClick={() => onJob(d, 'restart')}>재시작</Button>
-      <Button disabled={!controllable || !isRunning}
- title={!isRunning && controllable ? '이미 stopped 입니다' : tip('프로세스 정지')}
- onClick={() => onJob(d, 'stop')}>정지</Button>
+      <Button variant={controllable && !isRunning && !busy ? 'default' : 'outline'}
+ disabled={!controllable || isRunning || !!busy}
+ title={busy ? tip('') : isRunning ? '이미 running 입니다' : tip('프로세스 시작')}
+ onClick={() => onJob(d, 'start')}>{lbl('start', '시작')}</Button>
+      <Button disabled={!controllable || !isRunning || !!busy}
+ title={busy ? tip('') : !isRunning && controllable ? 'stopped 상태에서는 [시작] 을 쓰세요' : tip('프로세스 재시작')}
+ onClick={() => onJob(d, 'restart')}>{lbl('restart', '재시작')}</Button>
+      <Button disabled={!controllable || !isRunning || !!busy}
+ title={busy ? tip('') : !isRunning && controllable ? '이미 stopped 입니다' : tip('프로세스 정지')}
+ onClick={() => onJob(d, 'stop')}>{lbl('stop', '정지')}</Button>
     </div>
   )
 }
 
 // ── [패키지 제어] 탭 — 그룹 선택: 일괄 제어 바 + 멤버 × 모듈 프로세스 상태/제어 매트릭스 ──
-function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember, onReload }: {
+function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember, onReload, depBusy }: {
  group: HaGroup
  agents: Agent[]
  depsByAgent: Map<number, Deployment[]>
  onJob: (d: Deployment, jt: JobType) => void
  onSelectMember: (aid: number) => void
  onReload: () => Promise<void> | void
+ depBusy?: Record<number, string>
 }) {
  const { show } = useToast()
  const confirm = useConfirm()
@@ -2984,7 +3046,8 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
                     <Td className="align-top">
                       <div className="flex flex-col gap-2.5">
                         {deps.map(d => (
-                          <ProcessControlButtons key={d.id} dep={d} agent={ag} onJob={onJob} />
+                          <ProcessControlButtons key={d.id} dep={d} agent={ag} onJob={onJob}
+ busy={depBusy?.[d.id]} />
                         ))}
                       </div>
                     </Td>
@@ -3695,11 +3758,13 @@ function SystemCreateModal({ onClose, onDone, onCreated, saAgents, mountSuggesti
 
 // 모듈 업그레이드 모달 — 등록된 버전 중에서 **골라서** 올린다.
 // 실행 중인 모듈은 애초에 열리지 않는다(버튼이 비활성) — 서버도 409 로 거부한다.
-function DeploymentUpgradeModal({ dep: d, packages, onClose, onDone }: {
+function DeploymentUpgradeModal({ dep: d, packages, onClose, onDone, awaitJob }: {
  dep: Deployment
  packages: SipPackage[]
  onClose: () => void
  onDone: () => Promise<void> | void
+  /** job 완료까지 기다린다. 큐 등록 직후 닫으면 결과(특히 실패)를 볼 수 없다. */
+ awaitJob?: (agentId: number, jobId: number, what: string) => Promise<void>
 }) {
  const { show } = useToast()
  const confirm = useConfirm()
@@ -3714,17 +3779,27 @@ function DeploymentUpgradeModal({ dep: d, packages, onClose, onDone }: {
  return b.id - a.id
     }), [packages, d.package_name, d.package_id])
  const [pkgId, setPkgId] = useState<number>(cands[0]?.id ?? 0)
- const [busy, setBusy] = useState(false)
+  // 두 단계다 — 'queuing'(큐 등록 요청 중) → 'running'(노드가 설치 중). 종전에는 큐 등록
+  //   직후 모달을 닫아 **결과를 알 수 없었다.** 실패하면 모달을 남겨 사유를 읽고 바로
+  //   다시 시도할 수 있게 한다.
+ const [phase, setPhase] = useState<null | 'queuing' | 'running'>(null)
+ const busy = phase !== null
  const target = cands.find(p => p.id === pkgId) || null
 
  async function run(force?: boolean) {
  if (!target) return
- setBusy(true)
+ setPhase('queuing')
  try {
  const r = await deploymentApi.upgradeDeployment(d.id, target.id, force)
  show(`업그레이드 큐 등록 (#${r.job_id}) v${r.from_version} → v${r.to_version}`
            + (force ? ' — 순서 가드 우회' : ''), 'ok')
- await onDone(); onClose()
+ await onDone()
+ if (awaitJob) {
+ setPhase('running')
+ await awaitJob(d.agent_id, r.job_id, `${d.package_name} 업그레이드`)
+ await onDone()
+      }
+ onClose()
     } catch (e) {
       // 관리평면 순서(standby 먼저)는 운영자가 사정을 알고 뒤집을 수 있는 **권고**다.
       // 반면 '실행 중'(module_running)은 우회 수단을 주지 않는다 — 정지가 언제나 가능하다.
@@ -3733,13 +3808,13 @@ function DeploymentUpgradeModal({ dep: d, packages, onClose, onDone }: {
           {(e as Error).message}
           <div className="mt-2">그래도 강행할까요? (순서 가드 우회)</div>
         </> })) {
- setBusy(false); return run(true)
+ setPhase(null); return run(true)
         }
  show('취소됨 — 안전한 순서 유지', 'err')
       } else {
  show((e as Error).message, 'err')
       }
-    } finally { setBusy(false) }
+    } finally { setPhase(null) }
   }
 
  return (
@@ -3772,11 +3847,19 @@ function DeploymentUpgradeModal({ dep: d, packages, onClose, onDone }: {
           </div>
         </>
       )}
+      {phase === 'running' && (
+        <div className="text-sm text-muted-foreground mt-3">
+          노드에서 설치 중입니다 — <b>닫아도 작업은 계속됩니다</b>(결과는 목록·알림에서).
+        </div>
+      )}
       <div className="mt-4 flex gap-2 justify-end">
-        <Button onClick={onClose}>취소</Button>
+        {/* 진행 중에도 닫기는 열어 둔다 — 90초 대기에 운영자를 가두지 않는다. */}
+        <Button onClick={onClose}>{busy ? '닫기' : '취소'}</Button>
         <Button variant="default" disabled={!target || busy}
  onClick={() => run()}>
-          {busy ? '진행 중…' : target ? `v${target.version} 로 업그레이드` : '업그레이드'}
+          {phase === 'queuing' ? <><Hourglass size={12} /> 요청 중…</>
+            : phase === 'running' ? <><Hourglass size={12} /> 업그레이드 중…</>
+            : target ? `v${target.version} 로 업그레이드` : '업그레이드'}
         </Button>
       </div>
     </Modal>

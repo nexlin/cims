@@ -82,7 +82,7 @@ sudo ./tb-install.sh --show                # 저장된 사이트 값 보기 (비
 | `packages` | 30 | 패키지 등록 |
 | `install` | 40 | 모듈 설치 |
 | `config` | 45 | 패키지 설정 (overlay + CSP 컬렉션) |
-| `console` | 50 | 풀 콘솔 승격 |
+| `console` | 50 | 서비스 메뉴 확인 |
 | `start` | 60 | 순서 기동 + 상태 확인 |
 | `callcheck` | 70 | 호시험 (cspsim PTT 그룹호) |
 
@@ -113,7 +113,7 @@ sudo ./tb-install.sh --show                # 저장된 사이트 값 보기 (비
 | 30 | `steps/30-packages.sh` | `offline/packages/*.tar.gz` → `POST /api/v1/packages` (oam·agent 는 제외 — 부트스트랩이 소유) |
 | 40 | `steps/40-install.sh` | 배포 레코드 생성 + `install` job (oam-svc·cmp·csc·csp) |
 | 45 | `steps/45-config.sh` | overlay(`update_config`) + CSP 컬렉션(`local_nodes`·`access_services`) |
-| 50 | `steps/50-console.sh` | 서빙 번들 ↔ oam-svc 번들 비교 후 **다를 때만** oam 재기동 |
+| 50 | `steps/50-console.sh` | `/console/catalog`.installed_services 에 oam-svc 가 있는지 판정 — 콘솔 번들은 oam 동봉본 하나라 재기동은 없다 |
 | 60 | `steps/60-start.sh` | `oam-svc → cmp → csc → csp` 순서 기동 + `running/up` 확인 |
 | 70 | `steps/70-callcheck.sh` | cspsim PTT 그룹호 + `turn_count` 까지 판정 |
 

@@ -137,7 +137,7 @@ def my_check(ctx: VerifyContext) -> ItemResult:
 
 ## 1. Stage 별 상세
 
-### S1 — 정적 검사 (12 항목)
+### S1 — 정적 검사 (23 항목)
 
 | ID | 검사 | 도구 |
 |---|---|---|
@@ -150,9 +150,13 @@ def my_check(ctx: VerifyContext) -> ItemResult:
 | S1-UNIT-HA-INTENT | HA 무장/해제 의도·소유 경계 | `python3 -m unittest tests.test_ha_intent` |
 | S1-UNIT-CSC | CSC 관제·프로비저닝·인가 단위 | `python3 -m unittest tests.test_csc_*` 9모듈 (rbac·realm·GMS CRUD·/provisioning/me·history·IdMS scope·user-profile·management·access_services 단일 읽기 경로) |
 | S1-UNIT-CONSOLE-LAYOUT | 콘솔 레이아웃 영속 계약 | `python3 -m unittest tests.test_console_layouts` |
+| S1-UNIT-TESTER | 계측기 계약 모델·핸들러·게이트웨이 SSE 통과 | `python3 -m unittest tests.test_tester_models tests.test_tester_handler tests.test_gateway_stream` (schema/*.json 동기화 포함) |
 | S1-UNIT-GRID-BUDGET | 콘솔 그리드 세로 예산·잠금 | `node tests/frontend/grid_budget.test.mjs` (gridLayout.ts esbuild 번들) |
 | S1-UNIT-OAM-PTT | OAM PTT 세션 인덱스·진행중 병합 | `python3 tests/oam_ptt_index_test.py · tests/oam_ptt_sessions_live_test.py` |
 | S1-UNIT-OAM-STATS | OAM SIP 통계 서비스축(voip→volte 합산)·프로브 | `python3 tests/test_oam_stats_classify.py · tests/test_stats_probe.py` |
+| S1-UNIT-STORE-ALARM | 공유 store 접근 불가 알람(A-PRC-028) — 감지기 데드라인·규칙 정합 | `python3 -m unittest tests.test_store_alarm` |
+| S1-UNIT-OAM-HTTPSRV | HttpServer 기동 계약 — bind 성공이라야 기동 성공 | `python3 -m unittest tests.test_httpsrv_bind` |
+| S1-UNIT-PSIP | psip 루프백 단위시험 — 서버 발신 in-dialog 요청 목적지 재해석 | `g++ tests/psip_leg_dest_test.cpp` ← `build/csp/psip_build/*.a`, 127.0.0.1 실행 (라이브러리 없으면 SKIP) |
 | S1-UE-UNIT | 단말 SDK 코어 단위시험 | `build/bin/cimsue_test` (공개 반환형·C API ABI 포함) |
 | S1-UE-FLOOR-CODEC | floor 정의 정본 일치 | `scripts/gen_floor_defs.py --check` (정본 = `mcptt_floor_defs.yaml`) |
 | S1-UE-ANDROID-BIND | SWIG 바인딩 건전성 | 생성 Java 에 `SWIGTYPE_p_*` 부재 + `HttpResult.body=byte[]` |

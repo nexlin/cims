@@ -30,11 +30,13 @@ _TARGETS = [
     "ems/core/oam",            # pkg.json
     "csc/bin/csc_pihttp/config",
     "csp", "cmp", "cspsim", "agent",
+    "ems/tester/oam/config", "tester/worker/config",   # 계측기 컨트롤러·워커
     # 빌드 산출물 (있을 때만)
     "build/dist/oam/config",
     "build/dist/oam-svc/config",
     "build/dist/agent",
     "build/dist/csp", "build/dist/cmp",
+    "build/dist/oam-cims-tester/config", "build/dist/cims-tester-worker/config",
 ]
 
 # 개발/빌드 머신을 가리키는 패턴 — 노드에는 존재하지 않는 경로

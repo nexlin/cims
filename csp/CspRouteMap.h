@@ -12,6 +12,11 @@
  *   (local_node_ref, remote_node_ref) pair 는 unique.
  *   auth_user/pass/realm 은 Route 가 SOT (RemoteNode 에는 없음).
  *
+ *   Route 는 양방향 연결 정보다 — 발신은 RoutingPolicy → RouteSet → Route 로 고르고, **인바운드는
+ *   (수신 LocalNode, 소스 주소) 로 Route 를 식별한다**(FindInbound). 피어 신뢰는 그 식별 결과에서 나온다
+ *   (inbound_auth) — 접속점 edge 가 아니라 설정된 피어(RemoteNode)가 신뢰의 근거다
+ *   (TS 24.229 §5.10 IBCF · TS 29.165 II-NNI, sip_service_model.md §4).
+ *
  *   런타임 헬스 상태 (alive/dead, RTT, 연속 실패수) 는 RouteRuntime 에 atomic 으로 보관.
  *   헬스체크 수집은 별도 워커 (RouteSet 레벨 정책에 따라 후속 스테이지에서 통합).
  */
@@ -32,12 +37,18 @@ struct RouteConfig {
     std::string auth_realm;
     int max_concurrent_calls = 0;
     int cps_limit = 0;
+    /** 이 Route 로 들어온 요청의 인증 — "none"(기본, 신뢰 피어: Digest 없음) | "digest"(가입자 인증 흐름 — 등록형
+     * 트렁크). */
+    std::string inbound_auth = "none";
     bool enabled = true;
     std::vector<std::string> tags;
     std::string note;
 
     bool IsValid() const {
         return !name.empty() && !local_node_ref.empty() && !remote_node_ref.empty();
+    }
+    bool TrustsInbound() const {
+        return inbound_auth != "digest";
     }
 };
 
@@ -88,6 +99,14 @@ public:
 
     /** (local, remote) pair 조회. */
     RouteConfig GetByPair( const std::string &localName, const std::string &remoteName ) const;
+
+    /** 인바운드 Route 식별 — 수신 LocalNode(name, 빈 문자열이면 무관)로 들어온 srcIp[:srcPort]/transport 의 요청이
+     *  어느 Route 의 RemoteNode 에서 왔는가. enabled Route 중 RemoteNode.ip == srcIp 이고 protocol 이 맞는 것을 고르되,
+     *  RemoteNode.port == srcPort 인 것을 우선한다(UDP 는 피어가 수신 포트로 보내므로 같은 IP 에 피어 여럿도 가른다.
+     *  TCP/TLS 소스 포트는 임시 포트라 IP 만 맞으면 된다). 없으면 IsValid()==false.
+     *  RemoteNode.ip 가 호스트명이면 여기서는 매칭되지 않는다(IP 리터럴만). */
+    RouteConfig FindInbound( const std::string &localName, const std::string &srcIp, int srcPort,
+                             const std::string &transport ) const;
 
     /** 전체 스냅샷 (config 부분만). */
     std::vector<RouteConfig> GetAll() const;

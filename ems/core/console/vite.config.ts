@@ -4,10 +4,11 @@ import react from '@vitejs/plugin-react'
 import basicSsl from '@vitejs/plugin-basic-ssl'
 
 // 콘솔 base/svc 분리 — core(공통)=ems/core/console, svc(서비스 팩)=ems/service/console.
-//   @core → 이 프로젝트 src,  @svc → 형제 service/console/src.
+//   @core → 이 프로젝트 src,  @svc → 형제 service/console/src,  @tester → 형제 tester/console/src.
 //   registry.ts(@svc/manifest) 와 svc 파일들(@core/*) 이 이 alias 로 교차 참조한다.
 const CORE_SRC = path.resolve(process.cwd(), 'src')
 const SVC_SRC = path.resolve(process.cwd(), '../../service/console/src')
+const TESTER_SRC = path.resolve(process.cwd(), '../../tester/console/src')   // 계측기 팩 (test_instrument.md §7)
 const EMS_ROOT = path.resolve(process.cwd(), '../..')   // dev server fs.allow 범위
 
 // VITE_DEV_HTTPS=1 로 설정하면 HTTPS (basic-ssl). 기본은 HTTP.
@@ -26,6 +27,7 @@ export default defineConfig(({ mode }) => {
       alias: {
         '@core': CORE_SRC,
         '@svc': SVC_SRC,
+        '@tester': TESTER_SRC,
       },
     },
     server: {

@@ -380,6 +380,11 @@ def summarize(group_key: str, key: str, parts: list = None, gd: dict = None) -> 
         "start": start,
         "end": end,
         "state": "active" if active else "ended",
+        # 종료 사유 — `normal`(마지막 멤버 퇴장) · `error`(강제 회수: 노드 소실·그룹 삭제).
+        #   세션 스냅샷(session.json)에는 CSP 가 쓰는데 인덱스 행에 싣지 않아 **완료율이
+        #   집계까지 오지 못했다**(실측 2026-09-16: 없으면 normal 로 보아 완료율이 항상
+        #   100%). 진행 중 세션은 빈 값이다.
+        "end_reason": (sj.get("end_reason", "") or "") if not active else "",
         "windows": sorted(set(windows)),
         "turns": turn_count,
         "segments": seg_count,

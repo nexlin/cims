@@ -35,12 +35,8 @@ export type { RouteDef, RouteSection } from './nav-types'
 const CONSOLE_TARGET = ((import.meta as unknown as { env: Record<string, string> }).env?.VITE_CONSOLE_TARGET) || 'dev'
 export const IS_PROD_CONSOLE = CONSOLE_TARGET === 'prod'
 
-// 콘솔 프로파일 — 'full'(기본) | 'base'(부트스트랩 동봉본: 관리>시스템 + 관리>릴리스(개발자모드)만).
-// base 는 서비스 무관 코어만 담는다 — 서비스 메뉴/위젯은 3·4단계(패키지 등록/설치)에서
-// 풀 프로파일 console 패키지로 업데이트되며 도착한다 (services/registry.ts 도 동일 게이트).
-// (정확한 import.meta.env.X 구문 — vite 빌드 시 리터럴 치환 → 상수 조건 → 서비스 코드 DCE)
-export const IS_BASE_CONSOLE = import.meta.env.VITE_CONSOLE_PROFILE === 'base'
-const BASE_PROFILE_SECTION_KEYS = new Set(['system', 'release'])
+// 콘솔 번들은 하나다 — 서비스 팩 메뉴는 빌드 프로파일이 아니라 설치된 서비스로 게이팅한다
+// (섹션·라우트의 `requiresService`, services/registry.ts · contexts/MenuContext.tsx).
 
 // ── 범용 OAM 코어 섹션 (서비스 무지) ──────────────────────────────
 const CORE_SECTIONS: RouteSection[] = [
@@ -101,12 +97,12 @@ const CORE_SECTIONS: RouteSection[] = [
       { path: '/deploy/console-accounts', title: '콘솔 계정',     component: ConsoleAccountsPage, adminOnly: true },
       // 역할 = 능력 + 범위 (mcptt_authorization.md §2·§6 콘솔) — 내장 프리셋 읽기 전용 · 관제 프리셋(감독/관리/전체)
       //   생성 · 범위/대상 · 콘솔 계정과 가입자 배정 한 화면. 콘솔 계정의 role(위 계정 화면)이 이 목록의 id 다.
-      //   저장소가 csc DB(roles) 라 base 프로파일(서비스 무관 부트스트랩 콘솔)에는 두지 않는다.
-      ...(IS_BASE_CONSOLE ? [] : [{ path: '/deploy/roles', title: '역할', component: RolesPage, requiredRole: 'manager' as const,
+      //   저장소가 csc DB(roles) 라 서비스 평면(oam-svc)이 설치돼 있을 때만 메뉴에 보인다.
+      { path: '/deploy/roles', title: '역할', component: RolesPage, requiredRole: 'manager', requiresService: 'oam-svc',
         apis: ['csc.roles.list', 'csc.roles.get', 'csc.roles.create', 'csc.roles.update', 'csc.roles.delete',
                'csc.roles.monitor-targets.put', 'csc.roles.ptt-targets.put',
                'csc.roles.assignments.list', 'csc.roles.assignments.put', 'csc.roles.assignments.delete',
-               'csc.phone-groups.list', 'csc.ptt-groups.list', 'csc.users.list', 'csc.orgs.list'] }]),
+               'csc.phone-groups.list', 'csc.ptt-groups.list', 'csc.users.list', 'csc.orgs.list'] },
       { path: '/deploy/packages',         title: '패키지',        component: PackagesPage,        adminOnly: true },
     ],
   },
@@ -150,7 +146,6 @@ const SERVICE_SECTIONS: RouteSection[] = SERVICE_MANIFESTS.flatMap(
 )
 
 export const SECTIONS: RouteSection[] = [...CORE_SECTIONS, ...SERVICE_SECTIONS]
-  .filter(s => !IS_BASE_CONSOLE || BASE_PROFILE_SECTION_KEYS.has(s.key))
   .sort((a, b) => (a.order ?? 50) - (b.order ?? 50))
 
 // IS_PROD_CONSOLE 일 때 prodHidden=true 섹션 제거. dev 빌드는 모두 노출.

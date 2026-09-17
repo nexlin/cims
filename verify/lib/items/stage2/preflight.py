@@ -32,7 +32,7 @@ _TARGET_PORTS = [
     (4421, "tcp"), (3001, "tcp"), (3002, "tcp"),
     (8080, "tcp"), (8443, "tcp"),
 ]
-_CIMS_NATIVE_BINS = {"csp", "psp", "isp", "cmp", "pmp", "imp", "cspsim", "cwrtc"}
+_CIMS_NATIVE_BINS = {"csp", "psp", "isp", "cmp", "pmp", "imp", "cspsim", "cwrtc", "cims-tester-worker"}
 _CIMS_CMD_MARKERS = ("csc_app.py", "cims_agent.py", "/build/dist/", "/cims-console/")
 
 

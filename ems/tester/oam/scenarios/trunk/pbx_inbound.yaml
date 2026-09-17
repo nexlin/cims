@@ -1,0 +1,13 @@
+# IP-PBX 트렁크 착신 — PBX 내선(G.711)이 CIMS 가입자(AMR-WB)를 호출. CMP 트랜스코딩 경로(cmp.md §11).
+id: TRUNK-PBX-INBOUND
+title: IP-PBX → 가입자 착신 (G.711 ↔ AMR-WB)
+tags: [trunk, pbx, transcode]
+roles:
+  pbx:    { pool: pbx_hq }
+  callee: { pool: volte_ue }
+flow:
+  - { step: register,   who: [callee], expect: { code: 200 } }
+  - { step: invite,     from: pbx, to: callee, media: { audio: pcma } }
+  - { step: answer,     who: [callee], after_ms: 1000, expect: { code: 200, srd_ms: { p95: 2000 } } }
+  - { step: media_hold, seconds: 10, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: pbx, expect: { sdd_ms: { p95: 300 } } }

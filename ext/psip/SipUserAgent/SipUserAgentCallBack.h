@@ -105,7 +105,8 @@ public:
 	// SIP 통화 종료 이벤트 핸들러
 	virtual void EventCallEnd( const char * pszCallId, int iSipStatus ) = 0;
 
-	/** 서버가 먼저 거는 in-dialog 요청(세션 갱신·만료 BYE)의 **현재 도달 주소**를 응용에 묻는다.
+	/** 서버가 먼저 거는 in-dialog 요청(BYE·re-INVITE·NOTIFY·REFER·INFO — 세션 갱신 포함)의 **현재 도달 주소**를
+	 *  응용에 묻는다. psip 은 요청을 만들기 직전(RefreshLegDest)과 세션 갱신 주기(CheckSessionTimer)에 부른다.
 	 *  다이얼로그가 기억한 주소는 요청 수신 당시의 소스라, NAT 뒤 단말에서는 이미 죽어 있을 수
 	 *  있다 (대형 INVITE 를 TCP 로 승격해 보낸 뒤 그 연결이 닫힌 경우 등). 응용이 등록 바인딩
 	 *  (IP·포트·transport 한 세트)을 알고 있으면 채우고 true 를 리턴한다. false 면 psip 은

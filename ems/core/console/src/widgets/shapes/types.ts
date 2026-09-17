@@ -25,14 +25,31 @@ export interface TimeBarData { unit?: string; buckets: { label: string | number;
  */
 export interface MatrixData {
   unit?: string
-  /** total = 합계 행에 쓸 값. 비율 열은 합산이 무의미하므로 소스가 집계값을 따로 준다. */
-  columns: { key: string; label: string; total: number; unit?: string }[]
-  rows: { label: string; cells: Record<string, number>; total: number }[]
+  /**
+   * total = 합계 행에 쓸 값. 비율 열은 합산이 무의미하므로 소스가 집계값을 따로 준다.
+   * detail = 전 구간의 칸 상세(아래 rows.details 와 같은 문구) — 합계 행에 건다.
+   */
+  columns: { key: string; label: string; total: number | null; unit?: string; detail?: string
+             /** 0 을 **보이게 칠한다** — 다른 칸과 같은 보라 계열, 고정 농도. */
+             paintZero?: boolean }[]
+  /**
+   * details = 열 키별 **왜 이 숫자가 나왔나**. 건수 열은 숫자만으로는 원인을 못 답한다 —
+   * 실패 5건이 코덱 불일치인지 권한 거부인지가 조치를 가른다. 소스가 declare 한 원인 축
+   * (`columns[].detailFrom`)에서 만들어 붙이고, 렌더러는 있으면 칸에 달아 준다.
+   */
+  /**
+   * cells 의 **null 은 0 이 아니라 '집계 불가'** 다 — 분모가 원천에 없는 기간이 섞인 비율.
+   * 0 으로 접으면 멀쩡한 서비스가 0% 로 보이는 거짓 경보가 된다(sip_statistics.md §2.1).
+   */
+  rows: { label: string; cells: Record<string, number | null>; total: number
+          details?: Record<string, string> }[]
   /** 행 합계 열을 낼지. 열이 **같은 축**일 때만 의미가 있다(메서드별 건수 O, 시도+성립+비율 X). */
   rowTotal: boolean
   grandTotal: number
   /** 표 아래 각주 — 열 이름만으로는 알 수 없는 계산식(성공률 = …)을 소스가 함께 준다. */
   notes?: string[]
+  /** 값 없는 구간을 접은 줄에 적을 말 (예: "호가 없는 시간"). 없으면 "자료가 없는 시간". */
+  blankLabel?: string
 }
 // 계열 시계열 — series 는 **선언 순서**가 색 순서(--chart-1..5)이자 쌓는 순서(아래→위)다.
 // includes = 이 계열이 **품고 있는** 다른 계열들(예: '전체'는 volte/ptt 를 포함). 쌓기는 "부분의
@@ -43,6 +60,7 @@ export interface SeriesBarData {
   series: SeriesSpec[]
   buckets: { label: string | number; values: Record<string, number> }[]
 }
+// value 가 NO_VALUE('—') 면 **집계 불가**다(서버가 일부러 비운 값). 0 과 구별해서 낸다.
 export interface KpiData { items: { label: string; value: string | number; unit?: string }[] }
 // 분포 — parts 가 있으면 항목 하나를 계열별 조각으로 쪼개 색으로 나눠 그린다(parts 합 = value).
 export interface DistributionData {

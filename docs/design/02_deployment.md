@@ -152,13 +152,15 @@ cims-bootstrap/
   + `current` 심볼릭, runtime store 는 `modules/oam/runtime` 버전 무관) — 이후 agent 배포
   체계가 자연 인수. install.sh 는 oam 전개 후 `ln -sfn <oam버전> modules/oam/current` 를 걸고
   `CIMS_DIST_DIR=modules/oam/current` 로 기동·감독(supervised.json)한다.
-- **base 콘솔 프로파일**: 동봉 콘솔은 `VITE_CONSOLE_PROFILE=base`
-  빌드 — 메뉴가 **관리>시스템 + 관리>릴리스(개발자모드)** 만 (서비스 pack
-  메뉴/위젯은 번들에서 제외, DCE). 서비스에 필요한 기본 메뉴·위젯(대시보드/
-  구성/성능/기록 등)은 3·4단계에서 **풀 프로파일 console 패키지**(동봉본보다
-  높은 버전 필수 — 동일 버전은 시드 멱등 skip)로 업데이트 시 나타난다.
-  `cims.sh installer` 가 base 빌드(`ems/core/console/dist-base`)를 자체 수행해
-  풀 콘솔 tarball 의 dist 만 교체·동봉 (`meta.json profile=base`).
+- **콘솔 번들은 하나**: 동봉 콘솔은 코어 + 서비스 팩(`@svc`) + 계측기 팩(`@tester`)을
+  전부 담은 단일 빌드다(oam_base_service_split D1). 서비스 모듈 패키지(oam-svc·
+  oam-cims-tester)는 콘솔을 동봉하지 않는다. 어느 팩의 메뉴가 보이는지는 **설치된
+  서비스**가 정한다 — nav 섹션·라우트의 `requiresService`(패키지 id)를 셸이
+  `GET /api/v1/console/catalog`.installed_services(게이트웨이 라우트 ∩ enabled,
+  서버 권위)로 게이팅한다. 부트스트랩 직후에는 코어 섹션(대시보드·시스템·릴리스·
+  문서)만 보이고, 3·4단계에서 서비스 모듈이 self-register 하면 재로그인·재기동
+  없이 다음 조회에서 그 팩의 메뉴가 나타난다. 카탈로그를 못 받으면 게이팅 섹션은
+  숨긴다(미설치를 설치로 보이는 쪽이 더 나쁘다).
 - **메뉴 편집** (콘솔 사이드바, admin): ① 영역(운용/관리 그룹핑) 라벨 변경·
   커스텀 영역 추가/삭제 ② 섹션 순서/라벨/숨김/영역 이동 — 단 **시스템/릴리스
   섹션은 잠금**(부트스트랩 생명선) ③ 커스텀 메뉴 그룹 + 위젯 합성 페이지

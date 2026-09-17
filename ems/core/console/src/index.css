@@ -320,6 +320,28 @@ body {
 
 /* ── Forms ─────────────────────────────────────────────────── */
 
+/* 날짜·시각 입력의 캘린더 버튼 — **글자 바로 옆**에 붙이고, 잘리지 않게 한다.
+   Chrome 은 `::-webkit-datetime-edit` 을 늘려(flex:1) 남는 폭을 전부 먹으므로, 편집 영역을 자기
+   크기로 고정해 남는 폭을 버튼 **뒤로** 보낸다.
+   칸 폭은 **고정하지 않는다**(`w-auto`) — 표기 길이는 로케일이 정한다. 한국어는
+   `2026-09-16 오전 12:00:00` 처럼 영어(`2026-09-16 12:00`)보다 길어서, 고정 폭(190px)에서는
+   편집 영역이 칸을 넘고 **버튼이 오른쪽에서 잘렸다**(실측 2026-09-16). 내용 크기로 두면 칸이
+   표기에 맞춰 늘어 버튼이 항상 들어온다. 버튼 앞 간격은 날짜와 시각 사이 간격에 맞춘다. */
+/* 칸이 **글자보다 좁아지지 않게** 못 박는다 — 폭을 고정한 자리가 어딘가 남아 있어도,
+   로케일 표기가 길어져도 버튼이 잘리지 않는다. 위 `w-auto` 와 함께 두 겹으로 막는다. */
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"] { min-width: fit-content; }
+input[type="date"]::-webkit-datetime-edit,
+input[type="time"]::-webkit-datetime-edit,
+input[type="datetime-local"]::-webkit-datetime-edit { flex: 0 0 auto; }
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  margin-inline-start: 4px;
+  margin-inline-end: 0;
+}
+
 /* ── Layout (Header + Sidebar + Content) ──────── */
 .app-layout {
   --header-h: 58px;   /* Figma AppBar 실측 (457:5430). 위젯 편집 컨트롤도 이 높이에 들어간다 */

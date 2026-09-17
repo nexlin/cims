@@ -1,0 +1,6 @@
+# 부하 강화 문서의 4 cps / HT 20 s 재현.
+name: constant_4cps_ht20
+model: constant
+rate: 4
+duration_s: 600
+ht: 20

@@ -1,3 +1,4 @@
+#include <sys/time.h>
 /*
  * Copyright (C) 2012 Yee Young Han <websearch@naver.com>
  * (http://blog.naver.com/websearch)
@@ -111,9 +112,59 @@ THREAD_API RtpThreadRecv(LPVOID lpParameter) {
     pRtpThread->m_ullRecvTotal.fetch_add(1, std::memory_order_relaxed);  // 누적(전달/픽업 미디어 검증)
     // 수신 SSRC 집합 — 감청 leg 는 한 m-line 에서 caller/callee SSRC 2개를 받는다(S3-SCN-MONITOR).
     if (iPacketLen >= (int)sizeof(RtpHeader)) {
-        unsigned int uSsrc = ntohl(((const RtpHeader*)szPacket)->ssrc);
-        std::lock_guard<std::mutex> lk(pRtpThread->m_mtxSsrc);
-        if (pRtpThread->m_setRecvSsrc.size() < 16) pRtpThread->m_setRecvSsrc.insert(uSsrc);
+        const RtpHeader* pHdr = (const RtpHeader*)szPacket;
+        unsigned int uSsrc = ntohl(pHdr->ssrc);
+        {
+            std::lock_guard<std::mutex> lk(pRtpThread->m_mtxSsrc);
+            if (pRtpThread->m_setRecvSsrc.size() < 16) pRtpThread->m_setRecvSsrc.insert(uSsrc);
+        }
+        // 손실·지터 (RFC 3550 A.1 시퀀스 확장 + A.8 지터) — 단일 스트림 기준. 다른 SSRC 가 섞이면(감청 leg)
+        //   기준을 그 SSRC 로 다시 잡는다(통계는 대표 스트림 하나만 본다).
+        unsigned short usSeq = ntohs(pHdr->sSeq);
+        unsigned int uTs = ntohl(pHdr->iTimeStamp);
+        struct timeval tvNow; gettimeofday(&tvNow, NULL);
+        long long llArrivalUs = (long long)tvNow.tv_sec * 1000000LL + tvNow.tv_usec;
+        int iPt = pHdr->cMpt & 0x7F;
+        // RFC 4733 telephone-event — 이벤트 수(E 비트 패킷, 같은 (ts,event) 의 반복 종료 패킷은 한 번)·숫자열.
+        //   지터 계산에서는 제외한다(이벤트 동안 타임스탬프가 고정이라 A.8 이 흔들린다).
+        bool bTelEvent = pRtpThread->m_iDtmfPt >= 0 && iPt == pRtpThread->m_iDtmfPt;
+        if (bTelEvent && iPacketLen >= (int)sizeof(RtpHeader) + 4) {
+            const unsigned char* pEv = (const unsigned char*)(szPacket + sizeof(RtpHeader));
+            if (pEv[1] & 0x80) {
+                int iEv = pEv[0];
+                if (!(pRtpThread->m_uDtmfRecvLastTs == uTs && pRtpThread->m_iDtmfRecvLastEvent == iEv)) {
+                    pRtpThread->m_uDtmfRecvLastTs = uTs;
+                    pRtpThread->m_iDtmfRecvLastEvent = iEv;
+                    static const char* kDigits = "0123456789*#ABCD";
+                    std::lock_guard<std::mutex> lk(pRtpThread->m_mtxDtmf);
+                    pRtpThread->m_strDtmfRecv.push_back(iEv >= 0 && iEv < 16 ? kDigits[iEv] : '?');
+                    pRtpThread->m_iDtmfRecv++;
+                }
+            }
+        }
+        double dClock = (iPt == 0 || iPt == 8 || iPt == 18) ? 8000.0 : 16000.0;
+        if (!pRtpThread->m_bRecvSeqInit || pRtpThread->m_uRecvSsrc != uSsrc) {
+            pRtpThread->m_bRecvSeqInit = true;
+            pRtpThread->m_uRecvSsrc = uSsrc;
+            pRtpThread->m_uRecvExtSeq = usSeq;
+            pRtpThread->m_dRecvJitter = 0;
+        } else {
+            unsigned short usPrev = (unsigned short)(pRtpThread->m_uRecvExtSeq & 0xFFFF);
+            short sDelta = (short)(usSeq - usPrev);
+            if (sDelta > 1) pRtpThread->m_ullRecvLost.fetch_add((unsigned long long)(sDelta - 1), std::memory_order_relaxed);
+            if (sDelta > 0) pRtpThread->m_uRecvExtSeq += (unsigned int)sDelta;
+            // A.8: D = (Rj - Ri) - (Sj - Si), J += (|D| - J) / 16 (클록 틱 단위)
+            if (bTelEvent) { pRtpThread->m_uRecvLastTs = uTs; pRtpThread->m_llRecvLastArrivalUs = llArrivalUs; continue; }
+            double dArrivalTicks = (double)(llArrivalUs - pRtpThread->m_llRecvLastArrivalUs) * dClock / 1000000.0;
+            double dTsTicks = (double)(int)(uTs - pRtpThread->m_uRecvLastTs);
+            double dD = dArrivalTicks - dTsTicks;
+            if (dD < 0) dD = -dD;
+            pRtpThread->m_dRecvJitter += (dD - pRtpThread->m_dRecvJitter) / 16.0;
+            pRtpThread->m_llRecvJitterUs.store((long long)(pRtpThread->m_dRecvJitter * 1000000.0 / dClock),
+                                               std::memory_order_relaxed);
+        }
+        pRtpThread->m_uRecvLastTs = uTs;
+        pRtpThread->m_llRecvLastArrivalUs = llArrivalUs;
     }
     tCurrentTime = time(NULL);
     if( tCurrentTime - tLastTime >= 10 )

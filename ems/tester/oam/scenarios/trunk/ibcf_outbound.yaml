@@ -1,0 +1,13 @@
+# IBCF 트렁크 발신 — 가입자가 피어 도메인 번호(user@ims.kt.test)를 호출. Request-URI host → 시드된 routing_policy → RouteSet → 피어.
+id: TRUNK-IBCF-OUTBOUND
+title: IBCF 트렁크 발신 (가입자 → 타 IMS)
+tags: [trunk, ibcf]
+roles:
+  caller: { pool: volte_ue }
+  peer:   { pool: peer_kt }
+flow:
+  - { step: register,   who: [caller], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: peer, media: { audio: amr-wb } }
+  - { step: answer,     who: [peer], after_ms: 800, expect: { code: 200, srd_ms: { p95: 2000 } } }
+  - { step: media_hold, seconds: 5, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }

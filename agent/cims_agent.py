@@ -436,15 +436,23 @@ def collect_mount_targets() -> list:
 
 def collect_mounts() -> list:
     """cims-managed 마운트(fstab 의 '# cims-managed' 라인) + 현재 마운트 여부 보고.
-    Console MountPanel 이 desired(여기) + status(mounted) 표시."""
+    Console MountPanel 이 desired(여기) + status(mounted) 표시.
+
+    **mounted 를 target 점유만으로 판정하지 않는다.** 붙어 있는 source 를 함께 실어
+    보내(actual_source) 콘솔이 선언(desired)과 대조할 수 있게 한다 — target 만 보면
+    옛 마운트(수동 마운트 등)가 점유한 상태를 "정상" 으로 표시해, 운영 데이터를 엉뚱한
+    스토리지에 쓰는 상황이 감지되지 않는다(실측: fstab 은 새 export 로 갱신됐는데
+    재마운트가 생략돼 녹취가 옛 export 에 계속 쌓였다). source_match=False 면 콘솔이
+    운영자에게 재마운트 여부를 묻는다.
+    """
     result = []
     try:
-        mounted = set()
+        mounted = {}
         with open("/proc/mounts") as f:
             for ln in f:
                 p = ln.split()
                 if len(p) >= 2:
-                    mounted.add(p[1])
+                    mounted[p[1]] = p[0]      # target → 실제 source
         with open("/etc/fstab") as f:
             for ln in f:
                 if "cims-managed" not in ln or ln.lstrip().startswith("#"):
@@ -452,12 +460,16 @@ def collect_mounts() -> list:
                 s = ln.split()
                 if len(s) < 3:
                     continue
+                target, want = s[1], s[0]
+                actual = mounted.get(target)
                 result.append({
-                    "source":  s[0],
-                    "target":  s[1],
+                    "source":  want,
+                    "target":  target,
                     "fstype":  s[2],
                     "options": s[3] if len(s) > 3 else "",
-                    "mounted": s[1] in mounted,
+                    "mounted": actual is not None,
+                    "actual_source": actual,
+                    "source_match": (actual == want) if actual is not None else None,
                 })
     except Exception:
         pass
@@ -661,7 +673,11 @@ def _pgrep_module(name: str):
        안 잡힘. 패키지명(예: oam-svc)은 하이픈을 포함할 수 있으나 python 엔트리포인트 파일명은
        언더스코어(oam_svc_app.py)이므로 stem 은 하이픈→언더스코어로 정규화한다."""
     script_stem = name.replace("-", "_")
-    for argv in (["pgrep", "-ax", name], ["pgrep", "-af", f"{script_stem}_app.py"]):
+    # comm(-x 매칭 대상)은 커널에서 **15자로 잘린다**(TASK_COMM_LEN=16, NUL 포함) — 이름이 15자를
+    # 넘는 C++ 모듈(예: cims-tester-worker=18자 → comm 'cims-tester-wor')은 전체 이름으로 -x 하면
+    # "0 matches" 경고와 함께 못 잡는다(false module_down). -x 는 잘린 comm 에 맞춰 15자로 자른다
+    # (여전히 정확 매칭이라 'isp' 류 부분일치 오탐 없음). 15자 이하는 그대로.
+    for argv in (["pgrep", "-ax", name[:15]], ["pgrep", "-af", f"{script_stem}_app.py"]):
         try:
             r = subprocess.run(argv, capture_output=True, text=True, timeout=2)
         except Exception:
@@ -2499,8 +2515,12 @@ def job_apply_ip_config(params: dict) -> tuple:
 def job_apply_mounts(params: dict) -> tuple:
     """mounts[] → cims-priv mount-add/mount-del. fstab 에 기록되어 재부팅에도 유지(OS 자동 마운트).
 
-    Params: mounts: [{op:'add'|'del', fstype, source, target, options?}, ...]
+    Params: mounts: [{op:'add'|'del', fstype, source, target, options?, force?}, ...]
     네트워크 FS 는 cims-priv 가 _netdev,nofail 강제 — 마운트 실패가 부팅을 막지 않음.
+
+    `force` 는 **콘솔이 운영자 확인을 받은 뒤에만** 보낸다 — 이미 다른 source 가 붙어
+    있을 때의 재마운트는 그 경로를 쓰는 모듈(녹취·로그)에 영향을 주기 때문이다. force
+    없이 불일치면 cims-priv 가 exit 4(SOURCE_MISMATCH)로 거부하고 fstab 만 갱신한다.
     """
     mounts = params.get("mounts") or []
     if not isinstance(mounts, list) or not mounts:
@@ -2513,6 +2533,7 @@ def job_apply_mounts(params: dict) -> tuple:
     for m in mounts:
         op     = (m.get("op") or "add").lower()
         target = (m.get("target") or "").strip()
+        env    = dict(os.environ)     # del 분기도 같은 run() 을 타므로 여기서 만든다
         if not target:
             msgs.append(f"skip (no target): {m}"); continue
         if op == "add":
@@ -2522,15 +2543,22 @@ def job_apply_mounts(params: dict) -> tuple:
             if not fstype or not source:
                 msgs.append(f"[DENY] {target}: fstype/source 필요"); fail += 1; continue
             cmd = ["sudo", "-n", priv, "mount-add", fstype, source, target, options]
+            if m.get("force"):
+                env["CIMS_MOUNT_FORCE"] = "1"
         elif op == "del":
             cmd = ["sudo", "-n", priv, "mount-del", target]
         else:
             msgs.append(f"[DENY] {target}: op '{op}' 미지원"); fail += 1; continue
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=40)
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=40, env=env)
             out = ((res.stdout or "") + (res.stderr or "")).strip()
             if res.returncode == 0:
                 msgs.append(f"[OK]   {op} {target}: {out}")
+            elif res.returncode == 4:
+                # SOURCE_MISMATCH — 다른 source 가 그 지점을 점유하고 있다. fstab 은
+                # 갱신됐고 재마운트만 보류됐다. 콘솔이 확인을 받아 force 로 다시 보낸다.
+                fail += 1
+                msgs.append(f"[HOLD] {op} {target}: {out[-300:]}")
             else:
                 fail += 1
                 msgs.append(f"[FAIL] {op} {target}: rc={res.returncode} {out[-200:]}")
@@ -2751,7 +2779,7 @@ def _start_base_deps_ensurer() -> None:
 #  않게 한다. 결과는 엔진이 run/cert/<module>.json 에 남기고 metric(cert_renew)으로 OAM 에 간다.
 # ──────────────────────────────────────────────────────────────
 _CERT_SWEEP_INTERVAL = 86400
-_CERT_SWEEP_MODULES = ("oam", "oam-svc", "csc", "csp", "psp", "isp")
+_CERT_SWEEP_MODULES = ("oam", "oam-svc", "oam-cims-tester", "csc", "csp", "psp", "isp")
 _CERT_STATE_DIR = os.path.join(_PREFIX, "run", "cert")
 _CERT_SWEEP_STARTED = False
 

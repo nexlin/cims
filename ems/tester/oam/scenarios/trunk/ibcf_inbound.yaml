@@ -1,0 +1,14 @@
+# IBCF 트렁크 착신 — 타 IMS 코어(피어 ibcf 프로파일)가 II-NNI 로 가입자를 호출. 피어링 접속점 수신 → B2BUA → 가입자.
+#   대상 CSP 컬렉션은 토폴로지 peer_kt 의 seed 에서 파생해 run 전에 시드된다(remote_node·route·rule·routing_policy).
+id: TRUNK-IBCF-INBOUND
+title: IBCF 트렁크 착신 (타 IMS → 가입자)
+tags: [trunk, ibcf]
+roles:
+  peer:   { pool: peer_kt }
+  callee: { pool: volte_ue }
+flow:
+  - { step: register,   who: [callee], expect: { code: 200 } }
+  - { step: invite,     from: peer, to: callee, media: { audio: amr-wb } }
+  - { step: answer,     who: [callee], after_ms: 1000, expect: { code: 200, srd_ms: { p95: 2000 } } }
+  - { step: media_hold, seconds: 5, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: peer, expect: { sdd_ms: { p95: 300 } } }

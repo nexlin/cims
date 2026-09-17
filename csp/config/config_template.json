@@ -470,6 +470,14 @@
       "description": "모듈 내부 알람/이벤트를 OAM FM ingest 로 push — alarm_self_reporting.md. 카탈로그는 config/fm_catalog.json (기동 시 FM_REGISTER 로 등록).",
       "fields": [
         {
+          "key": "Setup.SystemId",
+          "label": "시스템 ID",
+          "type": "string",
+          "default": "csp_01",
+          "restart": true,
+          "help": "로그·알람 신원이자 Flow/Msg 로그 파일명 접두어(csp_01.flow.jsonl 등). CMP/CMDP 제어 메시지의 node 헤더로도 나간다. 노드가 둘 이상이면 노드마다 달라야 한다 — 같으면 공유 스토리지에서 같은 파일명으로 충돌하고 알람 출처를 가릴 수 없다. 코드 폴백도 csp_01."
+        },
+        {
           "key": "Setup.Fm.Enable",
           "label": "FM 자기보고 사용",
           "type": "bool",
@@ -1147,7 +1155,7 @@
             ],
             "default": "access",
             "required": true,
-            "help": "access=UE 수신, peering=IMS 피어링 수신, mgmt=관리 전용"
+            "help": "인터페이스 분류 — access=UE 수신(낯선 소스는 인증 흐름), peering=NNI 피어링 수신(Route 있는 피어만, 없으면 403), mgmt=관리 전용. 피어 신뢰(Digest 생략)는 edge 가 아니라 routes.inbound_auth 가 정한다."
           },
           {
             "key": "bind_ip",
@@ -1467,6 +1475,17 @@
             "label": "Auth realm",
             "type": "string",
             "default": ""
+          },
+          {
+            "key": "inbound_auth",
+            "label": "인바운드 인증",
+            "type": "enum",
+            "options": [
+              "none",
+              "digest"
+            ],
+            "default": "none",
+            "help": "이 Route 의 RemoteNode 에서 들어온 요청의 인증. none=신뢰 피어(Digest 없음, IBCF/고정 IP 트렁크 — TS 24.229 §5.10) · digest=가입자 인증 흐름(등록형 트렁크). 인바운드 Route 는 수신 LocalNode + 소스 IP(UDP 는 포트까지)로 식별한다."
           },
           {
             "key": "max_concurrent_calls",

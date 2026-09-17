@@ -1014,6 +1014,74 @@ stop_oam_svc() {
     stop_one oam-svc
 }
 
+# test_instrument.md — oam-cims-tester 계측기 컨트롤러(서비스 모듈, oam-svc 와 같은 골격).
+#   base OAM(게이트웨이) 뒤 loopback(기본 4490) 업스트림. 명시 기동만(all 미포함) — 배포는
+#   콘솔(agent job)이 정본. kill_stray 패턴은 고유 절대경로(oam_cims_tester_app.py).
+start_oam_cims_tester() {
+    if is_running oam-cims-tester; then warn "oam-cims-tester 이미 실행 중 (pid=$(read_pid oam-cims-tester))"; return 0; fi
+    [[ ! -f "$DIST_DIR/oam-cims-tester/src/oam_cims_tester_app.py" ]] && err "oam-cims-tester 소스 없음 (make dist 실행 필요)" && return 1
+    ensure_node_cert oam-cims-tester      # 기동 전 TLS 인증서 보증 (cert.sh)
+    local svc_port
+    svc_port=$("$PYBIN" -c "
+import json, os
+base='$DIST_DIR/oam-cims-tester/config/oam-cims-tester.json'
+candidates=['$DIST_DIR/oam-cims-tester/config.json', '$DIST_DIR/config.json']
+p=None
+for ov in candidates:
+    if not os.path.isfile(ov): continue
+    try:
+        f=json.load(open(ov))
+        if isinstance(f,dict):
+            p=f.get('Server.Port') or (f.get('Server',{}) or {}).get('Port')
+            if p: break
+    except: pass
+if not p:
+    try: p=json.load(open(base))['Server']['Port']
+    except: p=4490
+print(p)" 2>/dev/null || echo 4490)
+    kill_stray "$DIST_DIR/oam-cims-tester/src/oam_cims_tester_app.py" "$svc_port" tcp
+    info "oam-cims-tester (계측기 컨트롤러) 시작... (port=$svc_port)"
+    cd "$DIST_DIR/oam-cims-tester/src"
+    "$PYBIN" -u "$DIST_DIR/oam-cims-tester/src/oam_cims_tester_app.py" >> "$LOG_DIR/oam-cims-tester.log" 2>&1 &
+    save_pid oam-cims-tester $!
+    sleep 1.5
+    is_running oam-cims-tester && ok "oam-cims-tester 시작 완료 (pid=$(read_pid oam-cims-tester), port=$svc_port)" \
+        || { err "oam-cims-tester 시작 실패"; tail -3 "$LOG_DIR/oam-cims-tester.log" | sed 's/^/  /'; return 1; }
+}
+
+stop_oam_cims_tester() {
+    stop_one oam-cims-tester
+}
+
+# ── cims-tester-worker (계측기 워커, test_instrument.md §8) — cmp 골격: bin/cims-tester-worker config/cims-tester-worker.json.
+#    제어 포트(Server.Port, TCP 7100) 로 자기 install 의 잔존을 정리한다. 컨트롤러 없이도 떠서 GET /health 만 응답한다.
+start_cims_tester_worker() {
+    local name=cims-tester-worker
+    if is_running "$name"; then warn "$name 이미 실행 중 (pid=$(read_pid "$name"))"; return 0; fi
+    local bin="$DIST_DIR/$name/bin/$name"
+    local cfg="$DIST_DIR/$name/config/$name.json"
+    [[ ! -f "$bin" ]] && err "$name 바이너리 없음: $bin (make dist 또는 install 필요)" && return 1
+    local _overlay="$DIST_DIR/$name/config.json"
+    [[ ! -f "$_overlay" ]] && _overlay="$DIST_DIR/config.json"
+    _apply_overlay_to_module_config "$_overlay" "$cfg" || true
+    local ctrl_port
+    ctrl_port=$("$PYBIN" -c "import json; d=json.load(open('$cfg')); print((d.get('Server') or {}).get('Port', 7100))" 2>/dev/null || echo 7100)
+    kill_deleted_inode_orphans "$name" || true
+    kill_stray "$bin" || true
+    _kill_own_install_listener "$bin" "$ctrl_port" tcp || true
+    info "$name (계측기 워커) 시작... (control port=$ctrl_port)"
+    cd "$DIST_DIR/$name"
+    bin/$name config/$name.json >> "$LOG_DIR/$name.log" 2>&1 &
+    save_pid "$name" $!
+    sleep 0.8
+    is_running "$name" && ok "$name 시작 완료 (pid=$(read_pid "$name"), port=$ctrl_port)" \
+        || { err "$name 시작 실패"; tail -3 "$LOG_DIR/$name.log" | sed 's/^/  /'; return 1; }
+}
+
+stop_cims_tester_worker() {
+    stop_one cims-tester-worker
+}
+
 start_console() {
     if is_running console; then warn "console 이미 실행 중 (pid=$(read_pid console))"; return 0; fi
     # Console 2형 (엔진은 dist 정적 서빙만 — vite dev 콘솔은 개발 프론트 './cims.sh tb start console'):
@@ -1306,6 +1374,8 @@ _start_one() {
         oam)        start_oam ;;     # OAM 분리 Phase 3b
         csc)        start_csc ;;
         oam-svc)   start_oam_svc ;;  # oam_base_service_split P3 — 명시 기동만(all 미포함)
+        oam-cims-tester) start_oam_cims_tester ;;  # test_instrument.md — 명시 기동만
+        cims-tester-worker) start_cims_tester_worker ;;  # 계측기 워커 — 명시 기동만(시험 대상 밖 호스트)
         console)    start_console ;;
         phone)      start_phone ;;
         tb-csc)     start_tb_csc ;;
@@ -1330,6 +1400,10 @@ _stop_one() {
                     csc)     stop_csc ;;
                     oam)     stop_oam ;;     # OAM 분리 Phase 3b
                     oam-svc) stop_oam_svc ;;
+        oam-cims-tester) stop_oam_cims_tester ;;
+        cims-tester-worker) stop_cims_tester_worker ;;
+                    oam-cims-tester) stop_oam_cims_tester ;;
+                    cims-tester-worker) stop_cims_tester_worker ;;
                     console) stop_console ;;
                     phone)   stop_phone ;;
                     *)       stop_one "$c" ;;

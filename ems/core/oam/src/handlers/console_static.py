@@ -43,44 +43,27 @@ _MIME = {
 def resolve_console_static_dir(config: dict, component_root: str) -> str:
     """콘솔 정적 디렉토리 결정 — 없으면 ''(서빙 비활성).
 
-    우선순위 (콘솔 base/svc 분리 — 백엔드 oam-base/oam-svc 와 대칭):
+    번들은 하나다 — 코어 + 서비스 팩 전부를 담은 콘솔이 oam(base) 패키지에 동봉된다
+    (oam_base_service_split D1). 서비스 모듈 패키지는 콘솔을 동봉하지 않으므로 다른 모듈의
+    설치 트리는 후보가 아니다. 어느 팩의 메뉴가 보이는지는 번들이 아니라 설치된 서비스
+    (`/console/catalog`.installed_services ↔ nav 섹션 requiresService)가 정한다.
+
+    우선순위:
       1) config Console.StaticDir (절대 또는 component_root 상대)
-      2) oam-svc 동봉 svc 콘솔: <modules>/oam-svc/<ver>/oam-svc/console/dist
-         — 배포된 oam-svc(최신 우선). oam-svc 배포 시 풀(svc=base+서비스) 콘솔로 자동 승격.
-      3) 번들: <component_root>/console/dist — oam-base 동봉 base 콘솔(부트스트랩 기본)
-      4) flat 형제:      <root대비 ../console/dist>          (build/dist 개발 트리)
+      2) 번들:      <component_root>/console/dist      (oam 패키지 동봉)
+      3) flat 형제: <component_root>/../console/dist   (build/dist 개발 트리)
     """
-    import glob as _glob
-    import re as _re
     cfg = (config.get('Console') or {}).get('StaticDir') or ''
     if cfg:
         p = cfg if os.path.isabs(cfg) else os.path.normpath(os.path.join(component_root, cfg))
         return p if os.path.isdir(p) else ''
 
-    # 콘솔 base/svc 분리 — 배포된 oam-svc 에 동봉된 svc(=base+서비스) 콘솔이 oam-base 에
-    # 동봉된 base 콘솔보다 **우선**. oam-svc 를 배포하면(서비스 평면 활성) base OAM 이
-    # 자동으로 풀 UI 로 승격되고, 미배포(부트스트랩 직후)면 동봉 base 콘솔로 폴백.
-    def _ver_key(path):
-        # .../oam-svc/<ver>/oam-svc/console/dist → 버전 자연 정렬 (0.0.10 > 0.0.9)
-        m = _re.search(r'/oam-svc/([^/]+)/oam-svc/console/dist$', path.replace(os.sep, '/'))
-        if not m:
-            return (0,)
-        return tuple(int(x) if x.isdigit() else 0 for x in _re.split(r'[.\-]', m.group(1)))
-
-    # (2) oam-svc 동봉 svc 콘솔: <modules>/oam-svc/<ver>/oam-svc/console/dist (최신 우선)
-    svc_cons = sorted(_glob.glob(os.path.normpath(
-        os.path.join(component_root, '..', '..', '..', 'oam-svc', '*', 'oam-svc', 'console', 'dist'))),
-        key=_ver_key, reverse=True)
-    for c in svc_cons:
-        if os.path.isdir(c):
-            return c
-
-    # (3) 번들: <component_root>/console/dist — oam-base 동봉 base 콘솔(부트스트랩 기본)
+    # (2) 번들: <component_root>/console/dist — oam 패키지 동봉
     bundled = os.path.normpath(os.path.join(component_root, 'console', 'dist'))
     if os.path.isdir(bundled):
         return bundled
 
-    # (4) flat 형제: <component_root>/../console/dist — build/dist 개발 트리
+    # (3) flat 형제: <component_root>/../console/dist — build/dist 개발 트리
     flat = os.path.normpath(os.path.join(component_root, '..', 'console', 'dist'))
     if os.path.isdir(flat):
         return flat

@@ -293,6 +293,18 @@ bool CRtpThread::Stop() {
   return true;
 }
 
+bool CRtpThread::SendDtmf(const std::string &strDigits, int iDurationMs, int iGapMs) {
+  if (m_iDtmfPt < 0 || strDigits.empty()) return false;
+  std::lock_guard<std::mutex> lk(m_mtxDtmf);
+  for (char c : strDigits) {
+    if ((c >= '0' && c <= '9') || c == '*' || c == '#' || (c >= 'A' && c <= 'D') || (c >= 'a' && c <= 'd'))
+      m_dtmfQueue.push_back(c);
+  }
+  if (iDurationMs > 0) m_iDtmfDurationMs = iDurationMs;
+  if (iGapMs >= 0) m_iDtmfGapMs = iGapMs;
+  return true;
+}
+
 bool CRtpThread::SendFloorControl(int iOpCode) {
     // floor 패킷은 SDP m=application에 광고한 동일 소켓(m_hFloorRecvSocket)으로 보내야 함.
     // CMP는 멤버의 floor 포트(JOIN_PTT_GROUP의 user_floor_port)에서 오는 패킷만 해당 멤버로 인식.

@@ -2674,6 +2674,11 @@ async def _apply_group_mounts(gid: int, handler_args, config):
             entry.update({'fstype':  (m.get('fstype') or 'nfs').strip(),
                           'source':  m['source'].strip(),
                           'options': (m.get('options') or 'defaults').strip()})
+            # force = 이미 다른 source 가 그 지점을 점유해도 재마운트. 콘솔이 운영자 확인을
+            #   받은 뒤에만 실어 보낸다. 여기서 항목을 새로 만들므로 **명시적으로 이어준다**
+            #   — 빠뜨리면 agent 가 SOURCE_MISMATCH 로 보류하고 그룹 저장이 영영 안 먹는다.
+            if m.get('force'):
+                entry['force'] = True
         ops.append(entry)
 
     results = []

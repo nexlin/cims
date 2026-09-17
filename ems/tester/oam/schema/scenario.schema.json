@@ -1,0 +1,547 @@
+{
+  "$defs": {
+    "During": {
+      "additionalProperties": false,
+      "description": "media_hold 유지 구간 안 시각 지정 동작(§7 ⓓ) — at_s = 확립 뒤 경과 초. 컴파일러가 `hold at_s → 동작 → hold 나머지` 로 푼다.",
+      "properties": {
+        "at_s": {
+          "minimum": 0,
+          "title": "At S",
+          "type": "number"
+        },
+        "expect": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "$ref": "#/$defs/Percentiles"
+              }
+            ]
+          },
+          "title": "Expect",
+          "type": "object"
+        },
+        "from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From"
+        },
+        "payload": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Payload"
+        },
+        "step": {
+          "enum": [
+            "dtmf",
+            "hold",
+            "resume",
+            "refer"
+          ],
+          "title": "Step",
+          "type": "string"
+        },
+        "to": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "To"
+        },
+        "who": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Who"
+        }
+      },
+      "required": [
+        "at_s",
+        "step"
+      ],
+      "title": "During",
+      "type": "object"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "알람/이벤트 정의 코드 (alarm_catalog)",
+          "title": "Code"
+        },
+        "kind": {
+          "enum": [
+            "recording_created",
+            "log_errors",
+            "alarm_raised",
+            "event_logged"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "max": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "Media": {
+      "additionalProperties": false,
+      "properties": {
+        "audio": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "amr-wb",
+          "description": "amr-wb | amr | pcmu | pcma | g722",
+          "title": "Audio"
+        },
+        "video": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "h264 | none",
+          "title": "Video"
+        }
+      },
+      "title": "Media",
+      "type": "object"
+    },
+    "Percentiles": {
+      "additionalProperties": false,
+      "properties": {
+        "max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min"
+        },
+        "p50": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "P50"
+        },
+        "p95": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "P95"
+        },
+        "p99": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "P99"
+        }
+      },
+      "title": "Percentiles",
+      "type": "object"
+    },
+    "Role": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "역할이 쓰는 신원 수 — 생략=풀 전체",
+          "title": "Count"
+        },
+        "disjoint_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disjoint From"
+        },
+        "pool": {
+          "title": "Pool",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pool"
+      ],
+      "title": "Role",
+      "type": "object"
+    },
+    "Step": {
+      "additionalProperties": false,
+      "properties": {
+        "after_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "After Ms"
+        },
+        "cause": {
+          "anyOf": [
+            {
+              "maximum": 127,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "bye/reject 의 Reason: Q.850;cause= (RFC 3326 — MGCF 종료 사유, 16=정상 34=회선 없음)",
+          "title": "Cause"
+        },
+        "during": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/During"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "media_hold 만 — 유지 구간 안 통화 중 동작(at_s 순)",
+          "title": "During"
+        },
+        "expect": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "$ref": "#/$defs/Percentiles"
+              }
+            ]
+          },
+          "title": "Expect",
+          "type": "object"
+        },
+        "from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From"
+        },
+        "group": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Group"
+        },
+        "media": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Media"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "payload": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "dtmf: 숫자열(0-9*#A-D) · reject: 응답 코드",
+          "title": "Payload"
+        },
+        "seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "정수 또는 ${ht} 같은 바인딩",
+          "title": "Seconds"
+        },
+        "step": {
+          "enum": [
+            "register",
+            "deregister",
+            "invite",
+            "progress",
+            "answer",
+            "reject",
+            "bye",
+            "hold",
+            "resume",
+            "dtmf",
+            "refer",
+            "replaces",
+            "join",
+            "pickup",
+            "subscribe",
+            "publish",
+            "group_call",
+            "floor_request",
+            "floor_release",
+            "sds_send",
+            "sds_recv",
+            "media_hold",
+            "wait",
+            "expect"
+          ],
+          "title": "Step",
+          "type": "string"
+        },
+        "to": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "To"
+        },
+        "who": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Who"
+        }
+      },
+      "required": [
+        "step"
+      ],
+      "title": "Step",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "flow": {
+      "items": {
+        "$ref": "#/$defs/Step"
+      },
+      "minItems": 1,
+      "title": "Flow",
+      "type": "array"
+    },
+    "id": {
+      "pattern": "^[A-Z0-9][A-Z0-9-]{2,63}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "roles": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Role"
+      },
+      "minProperties": 1,
+      "title": "Roles",
+      "type": "object"
+    },
+    "tags": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+    },
+    "target_evidence": {
+      "items": {
+        "$ref": "#/$defs/Evidence"
+      },
+      "title": "Target Evidence",
+      "type": "array"
+    },
+    "title": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Title"
+    }
+  },
+  "required": [
+    "id",
+    "roles",
+    "flow"
+  ],
+  "title": "Scenario",
+  "type": "object"
+}

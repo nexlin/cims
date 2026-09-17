@@ -1,0 +1,534 @@
+{
+  "$defs": {
+    "Identity": {
+      "additionalProperties": false,
+      "properties": {
+        "aka_k": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aka K"
+        },
+        "aka_opc": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aka Opc"
+        },
+        "auth_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "IMPI 사용자부 — '@' 없으면 워커가 domain 을 붙인다(cspsim -creds authId 규약). 비면 user",
+          "title": "Auth Id"
+        },
+        "auth_scheme": {
+          "default": "digest",
+          "enum": [
+            "digest",
+            "aka"
+          ],
+          "title": "Auth Scheme",
+          "type": "string"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Display"
+        },
+        "domain": {
+          "title": "Domain",
+          "type": "string"
+        },
+        "ha1": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ha1"
+        },
+        "password": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Password"
+        },
+        "user": {
+          "title": "User",
+          "type": "string"
+        }
+      },
+      "required": [
+        "user",
+        "domain"
+      ],
+      "title": "Identity",
+      "type": "object"
+    },
+    "PeerIdentities": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "범위 앞에서부터 쓸 신원 수 — 생략=범위 전부",
+          "title": "Count"
+        },
+        "did_range": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Did Range"
+        },
+        "e164_range": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "E164 Range"
+        },
+        "ext_len": {
+          "anyOf": [
+            {
+              "maximum": 8,
+              "minimum": 2,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ext Len"
+        }
+      },
+      "title": "PeerIdentities",
+      "type": "object"
+    },
+    "TargetCsp": {
+      "additionalProperties": false,
+      "description": "풀이 닿는 SIP 서버(워커 관점) — access 포트 + 도메인 + (피어 풀) 피어링 다음 홉.",
+      "properties": {
+        "domain_ptt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Domain Ptt"
+        },
+        "domain_volte": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Domain Volte"
+        },
+        "ip": {
+          "title": "Ip",
+          "type": "string"
+        },
+        "peering": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TargetPeering"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tcp": {
+          "default": 25061,
+          "title": "Tcp",
+          "type": "integer"
+        },
+        "tls": {
+          "default": 5061,
+          "title": "Tls",
+          "type": "integer"
+        },
+        "udp": {
+          "default": 5060,
+          "title": "Udp",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ip"
+      ],
+      "title": "TargetCsp",
+      "type": "object"
+    },
+    "TargetPeering": {
+      "additionalProperties": false,
+      "properties": {
+        "ip": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ip"
+        },
+        "local_node": {
+          "default": "cims-tester-peering",
+          "title": "Local Node",
+          "type": "string"
+        },
+        "port": {
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Port",
+          "type": "integer"
+        },
+        "protocol": {
+          "default": "udp",
+          "enum": [
+            "udp",
+            "tcp",
+            "tls"
+          ],
+          "title": "Protocol",
+          "type": "string"
+        }
+      },
+      "required": [
+        "port"
+      ],
+      "title": "TargetPeering",
+      "type": "object"
+    },
+    "TrunkRegister": {
+      "additionalProperties": false,
+      "description": "워커에 내려가는 트렁크 REGISTER 계정 — 컨트롤러가 환경변수(ha1_env/password_env)를 풀어 값으로 채운다.",
+      "properties": {
+        "expires": {
+          "default": 3600,
+          "title": "Expires",
+          "type": "integer"
+        },
+        "ha1": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ha1"
+        },
+        "password": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Password"
+        },
+        "realm": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Realm"
+        },
+        "user": {
+          "title": "User",
+          "type": "string"
+        }
+      },
+      "required": [
+        "user"
+      ],
+      "title": "TrunkRegister",
+      "type": "object"
+    },
+    "WorkerPeer": {
+      "additionalProperties": false,
+      "description": "워커에 내려가는 피어 엔진 사양 — 토폴로지 PeerPool 에서 워커·노드 참조를 떼고 bind.ip(워커 호스트 주소)를 채운 것.",
+      "properties": {
+        "answer": {
+          "default": "normal",
+          "enum": [
+            "normal",
+            "silent"
+          ],
+          "title": "Answer",
+          "type": "string"
+        },
+        "bind": {
+          "$ref": "#/$defs/WorkerPeerBind"
+        },
+        "codecs": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Codecs"
+        },
+        "domain": {
+          "title": "Domain",
+          "type": "string"
+        },
+        "dtmf": {
+          "default": true,
+          "title": "Dtmf",
+          "type": "boolean"
+        },
+        "identities": {
+          "$ref": "#/$defs/PeerIdentities"
+        },
+        "prack": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prack"
+        },
+        "profile": {
+          "enum": [
+            "ibcf",
+            "pbx",
+            "mgcf"
+          ],
+          "title": "Profile",
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile",
+        "bind",
+        "domain",
+        "identities"
+      ],
+      "title": "WorkerPeer",
+      "type": "object"
+    },
+    "WorkerPeerBind": {
+      "additionalProperties": false,
+      "properties": {
+        "ip": {
+          "title": "Ip",
+          "type": "string"
+        },
+        "port": {
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Port",
+          "type": "integer"
+        },
+        "protocol": {
+          "default": "udp",
+          "enum": [
+            "udp",
+            "tcp",
+            "tls"
+          ],
+          "title": "Protocol",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ip",
+        "port"
+      ],
+      "title": "WorkerPeerBind",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "POST /pools — 풀 생성·신원 적재. 멱등(pool 이름 기준).",
+  "properties": {
+    "dtmf": {
+      "default": true,
+      "description": "kind=ue — telephone-event 오퍼/echo",
+      "title": "Dtmf",
+      "type": "boolean"
+    },
+    "identities": {
+      "items": {
+        "$ref": "#/$defs/Identity"
+      },
+      "title": "Identities",
+      "type": "array"
+    },
+    "kind": {
+      "enum": [
+        "ue",
+        "peer",
+        "real-ue"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "peer": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkerPeer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "kind=peer 일 때 프로파일·bind·신원 범위"
+    },
+    "pool": {
+      "title": "Pool",
+      "type": "string"
+    },
+    "prack": {
+      "default": false,
+      "description": "kind=ue — 100rel/PRACK",
+      "title": "Prack",
+      "type": "boolean"
+    },
+    "srtp": {
+      "default": "off",
+      "enum": [
+        "off",
+        "optional",
+        "required"
+      ],
+      "title": "Srtp",
+      "type": "string"
+    },
+    "target_csp": {
+      "$ref": "#/$defs/TargetCsp",
+      "description": "풀이 닿는 SIP 서버 — 컨트롤러가 토폴로지 노드 참조에서 파생"
+    },
+    "transport": {
+      "default": "udp",
+      "enum": [
+        "udp",
+        "tcp",
+        "tls"
+      ],
+      "title": "Transport",
+      "type": "string"
+    },
+    "trunk_register": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrunkRegister"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "kind=peer(pbx) 트렁크 REGISTER 계정 — 비밀 해석 완료본"
+    }
+  },
+  "required": [
+    "pool",
+    "kind",
+    "target_csp"
+  ],
+  "title": "PoolCreate",
+  "type": "object"
+}

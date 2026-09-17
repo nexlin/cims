@@ -24,6 +24,7 @@ const config: Config = {
     './index.html',
     './src/**/*.{ts,tsx}',
     '../../service/console/src/**/*.{ts,tsx}',
+    '../../tester/console/src/**/*.{ts,tsx}',
   ],
   corePlugins: { preflight: false },
   theme: {

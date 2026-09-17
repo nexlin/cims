@@ -421,6 +421,21 @@ RELAY_TAP_MODIFY 는 같은 payload 로 주소·crypto 만 갱신(포트·SSRC �
 오류: `NOT_FOUND`(세션 없음), `LIMIT`(세션당 상한 `MaxTapsPerSession` 초과), `NO_RESOURCE`(tap 풀 고갈),
 `BAD_REQUEST`(tap 미지원/키 형식 오류).
 
+### 6.6 media_codec — leg 별 코덱 선언 (설계, 구현 전)
+
+피어 leg 트랜스코딩([../design/modules/cmp.md](../design/modules/cmp.md) §11) 용. `RELAY_ADD`/`RELAY_MODIFY` payload 의 peer
+객체마다 선택 필드. **양 leg 의 협상 코덱이 다를 때만** CSP 가 싣고, 생략이면 현행 PT-blind relay(`remote_pt` 재작성만).
+
+| 필드 | 설명 |
+|---|---|
+| `media_codec.name` | 그 leg 의 협상 오디오 코덱 — `AMR-WB` · `PCMU` · `PCMA` (1차 구현). `G722`·`AMR` 은 예약 |
+| `media_codec.rate` | clock rate (16000 / 8000) |
+| `media_codec.pt` | wire PT (기존 `remote_pt` 와 같은 값 — 둘 다 오면 일치해야 함) |
+| `media_codec.fmtp` | AMR-WB `octet-align`·`mode-set` 등 원문 |
+
+두 peer 의 `media_codec.name` 이 다르면 CMP 가 변환 유닛을 붙이고, 자원이 없으면 `E_TRANSCODE_CAPACITY`(§9 채번은 구현 시)로
+거절한다. `telephone-event` 는 변환하지 않고 clock 에 맞춰 timestamp·PT 만 재작성한다.
+
 ## 7. PTT — 그룹통화 + floor control
 
 group 자원 키 `(service, group_id)` — 같은 service 의 AS 들이 공유한다.

@@ -59,10 +59,10 @@ function PageFilterWidget({ config }: WidgetProps) {
     <div className="panel flex flex-1 flex-col overflow-hidden rounded-md border border-border bg-card py-2.5 px-3">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="font-semibold text-md">조회 구간</span>
-        <Input className="w-[190px] text-sm" type="datetime-local" value={toInput(from)}
+        <Input className="w-auto text-sm" type="datetime-local" value={toInput(from)}
  onChange={e => applyRange(fromInput(e.target.value), to)}/>
         <span className="text-muted-foreground">~</span>
-        <Input className="w-[190px] text-sm" type="datetime-local" value={toInput(to)}
+        <Input className="w-auto text-sm" type="datetime-local" value={toInput(to)}
  onChange={e => applyRange(from, fromInput(e.target.value))}/>
         {PRESETS.map(p => (
           <Button key={p.key} onClick={() => applyPreset(p.days)}>{p.label}</Button>

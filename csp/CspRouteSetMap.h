@@ -78,6 +78,9 @@ public:
 
     RouteSetConfig GetByName( const std::string &name ) const;
     std::vector<RouteSetConfig> GetAll() const;
+    /** route 를 멤버로 가진 enabled RouteSet 의 name(여럿이면 name 사전순 첫 번째). 없으면 빈 문자열 —
+     *  인바운드 Route 식별 뒤 ACL scope=route_set 대조용. */
+    std::string SetOfRoute( const std::string &routeName ) const;
     size_t Size() const;
     bool HasName( const std::string &name ) const;
 

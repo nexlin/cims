@@ -63,7 +63,8 @@ _logger = Logger()
 _session = None                 # lazy aiohttp.ClientSession (bind 되는 event loop = 서버 루프)
 _ADMIN_SERVER = None            # register_gateway 에서 set — 런타임 hot-mount/unmount 용 (role base)
 _GW_CONFIG = None               # 〃 — proxy 핸들러 kwargs 의 config
-_GW_ONLY_MODULES = None         # 〃 — mount 허용 모듈 필터 (role=all 하이브리드; None=전체)
+_GW_ONLY_MODULES = None         # 〃 — mount 허용(include) 필터 (None=전체); role=all 은 아래 exclude 로 유도
+_GW_EXCLUDE_MODULES = frozenset()  # 〃 — mount 제외 모듈 = in-process 로 소유 중인 서비스(set_inprocess_services 와 단일 진실원)
 
 
 def _get_session():
@@ -256,6 +257,46 @@ def _request_body(handler_args: HandlerArgs):
     return None, None
 
 
+
+def _hdr(headers, name: str) -> str:
+    """대소문자 무관 헤더 조회 — controller 가 넘기는 dict 의 키 표기가 고정돼 있지 않다."""
+    name = name.lower()
+    for k, v in (headers or {}).items():
+        if str(k).lower() == name:
+            return str(v or '')
+    return ''
+
+
+def _wants_event_stream(headers) -> bool:
+    return 'text/event-stream' in _hdr(headers, 'accept').lower()
+
+
+def _is_event_stream(content_type: str) -> bool:
+    return 'text/event-stream' in (content_type or '').lower()
+
+
+def _stream_passthrough(resp, status: int, resp_headers: dict) -> HandlerResult:
+    """업스트림 SSE 응답을 청크 단위로 그대로 흘린다. 클라이언트 절단(generator 취소)이나
+    업스트림 종료 시 aiohttp 응답을 놓는다 — 어느 쪽이 먼저 끊어도 연결이 남지 않는다."""
+    from starlette.responses import StreamingResponse
+
+    async def gen():
+        try:
+            async for chunk in resp.content.iter_any():
+                if chunk:
+                    yield chunk
+        finally:
+            try:
+                resp.release()
+            except Exception:
+                pass
+            resp.close()
+
+    headers = dict(resp_headers or {})
+    headers.update({'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+    return HandlerResult(response=StreamingResponse(gen(), status_code=status,
+                                                    media_type='text/event-stream', headers=headers))
+
 async def proxy(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
     route = kwargs.get('_route') or {}
     upstream = route.get('upstream')
@@ -273,8 +314,17 @@ async def proxy(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
     req_headers = _filter_req_headers(handler_args.headers)
     content, json_obj = _request_body(handler_args)
     is_download = 'recordings' in path or path.rstrip('/').endswith('download')
-    timeout = aiohttp.ClientTimeout(total=_STREAM_TIMEOUT if is_download else _DEFAULT_TIMEOUT)
+    # SSE(text/event-stream) 라이브 스트림 — 클라이언트가 Accept 로 청하면 총 타임아웃을 두지
+    # 않는다(연결이 곧 구독이다). 실제 통과 판정은 업스트림 응답 Content-Type 으로 한다 —
+    # 라우트 속성이 아니라 응답 타입이라 어느 서비스 모듈이든 SSE 를 낼 수 있다
+    # (test_instrument.md §6.2 base 확장 ①). 연결 자체는 5 s 안에 맺혀야 한다.
+    wants_stream = _wants_event_stream(handler_args.headers)
+    if wants_stream:
+        timeout = aiohttp.ClientTimeout(total=None, sock_connect=_DEFAULT_TIMEOUT)
+    else:
+        timeout = aiohttp.ClientTimeout(total=_STREAM_TIMEOUT if is_download else _DEFAULT_TIMEOUT)
 
+    resp = None
     try:
         kw = dict(params=handler_args.query_params or None,
                   headers=req_headers or None, timeout=timeout, allow_redirects=False,
@@ -283,15 +333,25 @@ async def proxy(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
             kw['json'] = json_obj
         elif content is not None:
             kw['data'] = content
-        async with session.request(method, url, **kw) as resp:
-            status = resp.status
-            ct = resp.headers.get('Content-Type', '')
-            resp_headers = _filter_resp_headers(resp.headers)
+        resp = await session.request(method, url, **kw)
+        status = resp.status
+        ct = resp.headers.get('Content-Type', '')
+        resp_headers = _filter_resp_headers(resp.headers)
+        if _is_event_stream(ct):
+            # 청크 passthrough — 전체 버퍼링 금지. 응답 객체 수명은 generator 가 쥔다.
+            return _stream_passthrough(resp, status, resp_headers)
+        try:
             body = await resp.read()
+        finally:
+            resp.release()
     except asyncio.TimeoutError:
+        if resp is not None:
+            resp.close()
         _logger.log_error(f'[gateway] proxy {method} {url} timeout')
         return HandlerResult(status=504, body={'error': 'gateway timeout', 'upstream': upstream})
     except Exception as exc:
+        if resp is not None:
+            resp.close()
         _logger.log_error(f'[gateway] proxy {method} {url} failed: {exc}')
         return HandlerResult(status=502, body={'error': 'bad gateway',
                                                'detail': str(exc), 'upstream': upstream})
@@ -335,7 +395,7 @@ def _config_rollback_mark() -> "str | None":
     return None
 
 
-def register_gateway(admin_server, config: dict, modules=None) -> int:
+def register_gateway(admin_server, config: dict, modules=None, exclude_modules=None) -> int:
     """라우트 테이블의 enabled 라우트마다 프록시 동적 라우트를 등록.
     반환=마운트한 라우트 수. base 고유 경로(/api/v1/users/me 등)는 controller 최장 일치로
     base 가 우선 — 게이트웨이는 더 구체적이지 않은 세그먼트만 잡는다.
@@ -344,10 +404,11 @@ def register_gateway(admin_server, config: dict, modules=None) -> int:
     modules: 지정 시 route.module 이 그 집합에 속한 라우트만 mount (role=all 하이브리드 —
     in-process 로 소유 중인 세그먼트(stats/recordings 등 oam-svc 계열)와의 충돌 방지.
     미지정(None)=전체 mount(role=base). hot-mount(self-register)에도 동일 필터 적용."""
-    global _ADMIN_SERVER, _GW_CONFIG, _GW_ONLY_MODULES
-    _ADMIN_SERVER = admin_server          # 런타임 self-register hot-mount 용
+    global _ADMIN_SERVER, _GW_CONFIG, _GW_ONLY_MODULES, _GW_EXCLUDE_MODULES
+    _ADMIN_SERVER = admin_server          #런타임 self-register hot-mount 용
     _GW_CONFIG = config
     _GW_ONLY_MODULES = {_module_id(m) for m in modules} if modules else None
+    _GW_EXCLUDE_MODULES = frozenset(_module_id(m) for m in (exclude_modules or ()))
     seeded = seed_routes(config)
     if seeded:
         _logger.log_info(f'[gateway] seeded {seeded} route(s) (table was empty)')
@@ -356,7 +417,7 @@ def register_gateway(admin_server, config: dict, modules=None) -> int:
         seg = _normalize_segment(r.get('segment'))
         if not seg:
             continue
-        if _GW_ONLY_MODULES and _module_id(r.get('module')) not in _GW_ONLY_MODULES:
+        if not _should_mount(r.get('module')):
             continue
         admin_server.add_dynamic_rules([(seg, proxy, {'config': config, '_route': r})])
         _logger.log_info(f"[gateway] mount {seg} → {r.get('upstream')} (module={r.get('module')})")
@@ -368,13 +429,25 @@ def register_gateway(admin_server, config: dict, modules=None) -> int:
 
 
 # ── 런타임 hot-mount / unmount (self-register) ──────────────────────────────
+def _should_mount(module) -> bool:
+    """role=all 하이브리드 mount 필터 — include(_GW_ONLY_MODULES) ∩ not-exclude(_GW_EXCLUDE_MODULES).
+    기동 mount 와 hot-mount(self-register)가 같은 술어를 써야 배포 즉시 노출이 일관된다.
+    exclude = in-process 로 소유 중인 서비스(set_inprocess_services) — 리터럴 목록 없이 그 나머지를 프록시."""
+    mid = _module_id(module)
+    if _GW_ONLY_MODULES is not None and mid not in _GW_ONLY_MODULES:
+        return False
+    if _GW_EXCLUDE_MODULES and mid in _GW_EXCLUDE_MODULES:
+        return False
+    return True
+
+
 def mount_route(route: dict) -> bool:
     """라우트 1개를 라이브 프록시로 즉시 mount. register_gateway 이후에만 유효 —
     _ADMIN_SERVER 미설정(구 role=all 전체 in-process) 시 no-op(persist 만).
     모듈 필터(_GW_ONLY_MODULES) 활성 시 필터 밖 모듈도 no-op(persist 만)."""
     if _ADMIN_SERVER is None or _GW_CONFIG is None:
         return False
-    if _GW_ONLY_MODULES and _module_id(route.get('module')) not in _GW_ONLY_MODULES:
+    if not _should_mount(route.get('module')):
         return False
     seg = _normalize_segment(route.get('segment'))
     if not seg or not route.get('enabled', True):
@@ -399,17 +472,49 @@ def unmount_route(segment: str) -> bool:
         return False
 
 
-def register_module_routes(config: dict, module: str, ip: str, port, segments) -> int:
+def _base_oam_version() -> str:
+    """base 자기 버전(oam/pkg.json) — 서비스 모듈의 requires_base_oam 대조용."""
+    try:
+        import os as _os
+        p = _os.path.normpath(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', '..', 'pkg.json'))
+        with open(p, 'r', encoding='utf-8') as f:
+            return str(json.load(f).get('version') or '')
+    except Exception:
+        return ''
+
+
+def _ver_tuple(v: str):
+    out = []
+    for p in str(v or '').split('.'):
+        try:
+            out.append(int(p))
+        except ValueError:
+            out.append(0)
+    return tuple(out)
+
+
+def register_module_routes(config: dict, module: str, ip: str, port, segments,
+                           requires_base_oam: str = None) -> int:
     """서비스 모듈 배포 시 self-register: 모듈이 선언한 세그먼트들을 그 모듈의 실제
     (ip=배포 config 의 Server.GatewayHost, 미지정 시 loopback / port=Server.Port=SoT)
     https upstream 으로 등록+hot-mount. 멱등(segment upsert). base 가 서비스 모듈을
-    미리 알 필요 없음(시드 하드코딩 대체)."""
+    미리 알 필요 없음(시드 하드코딩 대체).
+
+    requires_base_oam(pkg meta.gateway.requires_base_oam) — 서비스 → base 최소 버전 계약(§10).
+    라우트 레코드에 기록하고, base 자기 버전이 그보다 낮으면 경고 로그(등록은 한다 — 거부는
+    콘솔에서 무엇이 잘못됐는지 보이지 않게 만든다)."""
     ip = ip or '127.0.0.1'
     base = f"https://{ip}:{port}"
+    if requires_base_oam:
+        mine = _base_oam_version()
+        if mine and _ver_tuple(mine) < _ver_tuple(requires_base_oam):
+            _logger.log_warning(f"[gateway] {module} requires base oam >= {requires_base_oam} "
+                                f"but this base is {mine} — 서비스 API 일부가 동작하지 않을 수 있다")
     n = 0
     for seg in (segments or []):
         try:
-            rec = upsert_route(config, {'segment': seg, 'upstream': base, 'module': module})
+            rec = upsert_route(config, {'segment': seg, 'upstream': base, 'module': module,
+                                        'requires_base_oam': requires_base_oam})
             mount_route(rec)
             n += 1
         except ValueError as e:

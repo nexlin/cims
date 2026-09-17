@@ -265,7 +265,30 @@ do_mount_add() {
     cp "$FSTAB" "${FSTAB}.cims.bak" 2>/dev/null || true
     cat "$tmp" > "$FSTAB"; rm -f "$tmp"
     if mountpoint -q "$target"; then
-        info "$target already mounted (fstab 갱신 완료)"
+        # **붙어 있는 source 를 대조한다.** target 점유만 보고 성공 처리하면, 운영자가 콘솔에서
+        #   바꾼 export 가 아닌 옛 마운트(수동 마운트 등)를 계속 쓰면서도 "정상" 으로 보고된다
+        #   — 운영 데이터(녹취·세션 이력)를 엉뚱한 스토리지에 쓰는 상태가 감지되지 않는다(실측).
+        #   불일치는 스스로 고치지 않고 거부한다(exit 4): 재마운트는 그 경로를 쓰는 모듈에
+        #   영향을 주므로 운영자 확인을 거쳐 CIMS_MOUNT_FORCE=1 로 와야 한다.
+        local cur; cur="$(findmnt -no SOURCE --target "$target" 2>/dev/null | head -n 1)"
+        if [[ -n "$cur" && "$cur" != "$source" ]]; then
+            if [[ "${CIMS_MOUNT_FORCE:-}" == "1" ]]; then
+                info "$target source 불일치 (현재 $cur, 요청 $source) — force 재마운트"
+                umount "$target" 2>/dev/null || umount -l "$target" 2>/dev/null \
+                    || { err "umount $target 실패 (busy) — 사용 중인 모듈을 먼저 정지하세요"; exit 3; }
+                if mount "$target" 2>/tmp/cims-priv.err; then
+                    ok "remounted $source -> $target ($fstype,$options)"
+                else
+                    err "remount $target 실패: $(cat /tmp/cims-priv.err 2>/dev/null)"
+                    exit 3
+                fi
+            else
+                err "SOURCE_MISMATCH $target: 현재 '$cur' != 요청 '$source' — fstab 은 갱신했으나 재마운트는 보류(확인 후 force 재요청)"
+                exit 4
+            fi
+        else
+            info "$target already mounted (fstab 갱신 완료)"
+        fi
     elif mount "$target" 2>/tmp/cims-priv.err; then
         ok "mounted $source -> $target ($fstype,$options)"
     else

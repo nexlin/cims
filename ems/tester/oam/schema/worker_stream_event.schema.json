@@ -1,0 +1,152 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "call_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Call Id"
+    },
+    "code": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Code"
+    },
+    "detail": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Detail"
+    },
+    "identity": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Identity"
+    },
+    "kind": {
+      "const": "event",
+      "title": "Kind",
+      "type": "string"
+    },
+    "metric": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Metric"
+    },
+    "observed": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Observed"
+    },
+    "role": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Role"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "step": {
+      "anyOf": [
+        {
+          "enum": [
+            "register",
+            "deregister",
+            "invite",
+            "progress",
+            "answer",
+            "reject",
+            "bye",
+            "hold",
+            "resume",
+            "dtmf",
+            "refer",
+            "replaces",
+            "join",
+            "pickup",
+            "subscribe",
+            "publish",
+            "group_call",
+            "floor_request",
+            "floor_release",
+            "sds_send",
+            "sds_recv",
+            "media_hold",
+            "wait",
+            "expect"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Step"
+    },
+    "t": {
+      "title": "T",
+      "type": "number"
+    },
+    "worker": {
+      "title": "Worker",
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "t",
+    "run_id",
+    "worker"
+  ],
+  "title": "StreamEvent",
+  "type": "object"
+}

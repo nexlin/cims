@@ -103,7 +103,7 @@ cmd_pkg() {
     # cmp 바이너리도 동일 → cmp/imp/pmp.
     # oam_base_service_split — console 은 oam-base 패키지에 동봉(별도 모듈 폐기). 명시 시만 단독 패키징.
     # cwrtc/phone 은 재설계 예정 — 빌드/dist/패키징 제외 (CMakeLists.txt 동기).
-    [[ ${#targets[@]} -eq 0 ]] && targets=(cmp pmp imp cmdp csp psp isp csc oam oam-svc cspsim agent)
+    [[ ${#targets[@]} -eq 0 ]] && targets=(cmp pmp imp cmdp csp psp isp csc oam oam-svc oam-cims-tester cims-tester-worker cspsim agent)
 
     if [[ ! -d $DIST_DIR ]]; then
         err "dist 디렉토리 없음: $DIST_DIR (먼저 ./cims.sh build)"
@@ -124,8 +124,9 @@ cmd_pkg() {
         for _t in "${targets[@]}"; do
             case "$_t" in
                 csc) _sync_set[csc]=1 ;;   # OAM 분리 Phase 2 — sync csc 가 oam/src 도 함께
-                oam) _sync_set[csc]=1; _sync_set[console]=1 ;;  # oam-base: csc 블록이 oam/src(자체 httpsrv/util/services)도 동기화 + console 동봉 (oam 은 자족 — csc 코드 미동봉)
-                oam-svc) _sync_set[oam-svc]=1; _sync_set[csc]=1; _sync_set[console]=1 ;;  # oam-svc = thin(자기 src) + svc(full) console 동봉; csc 블록이 oam/src 동기화 → 런타임/dev import 가능
+                oam) _sync_set[csc]=1; _sync_set[console]=1 ;;  # oam-base: csc 블록이 oam/src(자체 httpsrv/util/services)도 동기화 + console 번들(팩 전부) 동봉 (oam 은 자족 — csc 코드 미동봉)
+                oam-svc) _sync_set[oam-svc]=1; _sync_set[csc]=1 ;;  # oam-svc = thin(자기 src) — 콘솔 팩은 oam 동봉 번들에 포함(자기 번들 미동봉); csc 블록이 oam/src 동기화 → 런타임/dev import 가능
+                oam-cims-tester) _sync_set[oam-cims-tester]=1; _sync_set[csc]=1 ;;  # 계측기 컨트롤러 — 콘솔 팩은 console 번들에 포함(자기 번들 미동봉)
                 agent)   _sync_set[agent]=1 ;;
                 console) _sync_set[console]=1 ;;
             esac
@@ -170,6 +171,8 @@ cmd_pkg() {
             csc)         echo "$SCRIPT_DIR/csc" ;;
             oam)         echo "$SCRIPT_DIR/ems/core/oam" ;;   # OAM 분리 Phase 2 — 같은 cims-csc 프로세스, 별도 tarball
             oam-svc)    echo "$SCRIPT_DIR/ems/service/oam" ;;  # oam_base_service_split D5 — base 게이트웨이 뒤 독립 서비스 모듈
+            oam-cims-tester) echo "$SCRIPT_DIR/ems/tester/oam" ;;  # test_instrument.md — 계측기 컨트롤러 서비스 모듈
+            cims-tester-worker) echo "$SCRIPT_DIR/tester/worker" ;;  # 계측기 워커 (C++ — dist 는 make dist 가 채운다)
             console)     echo "$SCRIPT_DIR/ems/core/console" ;;
             cspsim)      echo "$SCRIPT_DIR/cspsim" ;;
             agent)       echo "$SCRIPT_DIR/agent" ;;
@@ -211,7 +214,7 @@ cmd_pkg() {
     local t src_sub tar_file build_date pkg_root base_dist stage
     for t in "${targets[@]}"; do
         case "$t" in
-            cmp|pmp|imp|cmdp|csp|psp|isp|csc|oam|oam-svc|console|cspsim|agent)
+            cmp|pmp|imp|cmdp|csp|psp|isp|csc|oam|oam-svc|oam-cims-tester|cims-tester-worker|console|cspsim|agent)
                 src_sub=$(_src_sub_for "$t") ;;
             cwrtc|phone) err "$t: 재설계 예정 — 빌드/패키징 제외됨"; continue ;;
             *) err "알 수 없는 컴포넌트: $t"; continue ;;
@@ -262,14 +265,11 @@ cmd_pkg() {
                 cp -f "$SCRIPT_DIR/ems/core/oam/config/oam.json"    "$stage/oam/config/oam.json"
                 cp -f "$SCRIPT_DIR/ems/core/oam/config/oam-tb.json" "$stage/oam/config/oam-tb.json" 2>/dev/null || true
             fi
-            # 콘솔 base/svc 분리 (백엔드 oam-base/oam-svc 와 대칭) —
-            #   oam-base 패키지엔 **base 메뉴 콘솔(dist-base)** 만 동봉.
-            #   oam 이 <root>/oam/console/dist 를 서빙(console_static.resolve 의 번들 후보).
-            #   svc(full=base+서비스) 콘솔은 **oam-svc 패키지에 동봉**(아래 oam-svc 블록) →
-            #   oam-svc 배포 시 base OAM resolver 가 그쪽을 우선 서빙(자동 승격).
-            #   (dist-base 미존재 시 svc full 로 폴백 → 구 동작 호환)
-            local _condist="$DIST_DIR/console/dist-base"
-            [[ -d "$_condist" ]] || _condist="$DIST_DIR/console/dist"
+            # 콘솔 번들 하나 — 코어 + 서비스 팩(@svc) + 계측기 팩(@tester) 전부를 담은 dist/console/dist 를
+            #   oam(base) 패키지에 동봉한다. oam 이 <root>/oam/console/dist 를 서빙(console_static.resolve).
+            #   서비스 모듈 패키지(oam-svc·oam-cims-tester)는 콘솔을 동봉하지 않는다 — 어느 팩의 메뉴가
+            #   보이는지는 설치된 서비스(nav 섹션 requiresService ↔ /console/catalog)가 정한다.
+            local _condist="$DIST_DIR/console/dist"
             [[ -d "$_condist" ]] || _condist="$SRC_CONSOLE/dist"
             if [[ -d "$_condist" ]]; then
                 rm -rf "$stage/oam/console"
@@ -282,27 +282,7 @@ cmd_pkg() {
             pkg_root="$stage"
         fi
 
-        # ── oam-svc: 콘솔 base/svc 분리 — svc(full=base+서비스) 콘솔을 oam-svc 패키지에 동봉.
-        #    base OAM resolver 가 배포된 oam-svc 의 console/dist 를 oam-base 동봉 base 콘솔보다
-        #    우선 서빙 → oam-svc 배포 시 콘솔이 자동으로 풀 메뉴로 승격(백엔드 분리와 대칭).
-        if [[ "$t" == "oam-svc" ]]; then
-            stage="$DIST_DIR/.pkgstage.$$.${t}"
-            rm -rf "$stage"
-            mkdir -p "$stage"
-            cp -a "$DIST_DIR/oam-svc" "$stage/oam-svc"
-            find "$stage/oam-svc/src" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
-            local _svcdist="$DIST_DIR/console/dist"
-            [[ -d "$_svcdist" ]] || _svcdist="$SRC_CONSOLE/dist"
-            if [[ -d "$_svcdist" ]]; then
-                rm -rf "$stage/oam-svc/console"
-                mkdir -p "$stage/oam-svc/console"
-                cp -a "$_svcdist" "$stage/oam-svc/console/dist"
-                find "$stage/oam-svc/console" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
-            else
-                warn "oam-svc: svc console dist 미발견($_svcdist) — 콘솔 미동봉"
-            fi
-            pkg_root="$stage"
-        fi
+        # (oam-svc 는 콘솔을 동봉하지 않는다 — 위 oam 블록의 번들 하나 규칙)
 
         # build_date = 컴포넌트 dist 디렉토리 안에서 가장 최근 파일의 mtime (base dist 기준 — staging 은 cp 로 mtime 갱신될 수 있음).
         local _bd_root="$DIST_DIR/${base_dist:-$src_sub}"

@@ -841,8 +841,10 @@ if __name__ == '__main__':
         try:
             from handlers.console_layouts import set_inprocess_services
             if role == 'all':
-                set_inprocess_services({'oam-svc'} | ({'csc'} if _csc_inproc else set()))
+                _inproc_set = {'oam-svc'} | ({'csc'} if _csc_inproc else set())
+                set_inprocess_services(_inproc_set)
             else:
+                _inproc_set = set()
                 set_inprocess_services(set())      # base — 서비스는 전부 게이트웨이 너머
         except Exception as _e:
             logger.log_error(f"[role] in-process 서비스 등록 실패: {_e}")
@@ -855,13 +857,16 @@ if __name__ == '__main__':
             else:
                 # P3b(csc/src 마운트 폐지) 이후 csc 핸들러는 OAM 에 동봉되지 않음 —
                 # 가입자/조직(csc 귀속) 세그먼트는 role=all 에서도 게이트웨이 프록시로 커버.
-                # module='csc' 라우트만 mount: stats/recordings 등 in-process 소유 세그먼트
-                # (oam-svc 계열 라우트가 테이블에 있어도) 와의 충돌 방지.
+                # 프록시 대상 = 등록 라우트 − in-process 소유(_inproc_set). 리터럴 목록을 두지
+                # 않는다(단일 진실원 = set_inprocess_services): csc(미동봉)·계측기 등 별도 배포
+                # 서비스 모듈이 자동 포함되고, oam-svc(stats/recordings 등 자기 in-process 소유)는
+                # 제외돼 세그먼트 충돌이 없다. 새 서비스 모듈은 배포 즉시 hot-mount(같은 술어)로 노출.
                 try:
-                    _gw_n = register_gateway(admin_server, config, modules={'csc'})
-                    logger.log_info(f"[gateway] role=all hybrid — csc proxy {_gw_n} route(s) mounted")
+                    _gw_n = register_gateway(admin_server, config, exclude_modules=_inproc_set)
+                    logger.log_info(f"[gateway] role=all hybrid — proxy {_gw_n} route(s) mounted "
+                                    f"(exclude in-process {sorted(_inproc_set)})")
                 except Exception as _e:
-                    logger.log_error(f"[gateway] role=all csc proxy mount failed: {_e}")
+                    logger.log_error(f"[gateway] role=all proxy mount failed: {_e}")
             # 녹취·flow(oam-svc 귀속) — 자기 init() 상태 사용(raw kwargs). FLOW→RECORDING
             # 순서로 /api/v1/recordings 충돌 시 RECORDING 우선(현행 보존).
             admin_server.add_dynamic_rules(FLOW_HANDLER_LIST)

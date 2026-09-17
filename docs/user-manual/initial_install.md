@@ -190,36 +190,35 @@ SAN 에 들어간다. 외부망 IP 로 브라우저 접속해도 SAN 불일치�
 - 템플릿에 선언되지 않은 키는 저장 시 버려지고 `미저장(템플릿에 없는 키)` 로 보고된다.
 - `Infrastructure (내부 전용)` 섹션은 기본 접혀 있다. 헤더를 클릭해 펼친다.
 
-### 3.1 oam-svc 설치 후 — **oam 재기동** (놓치기 쉬움)
+### 3.1 oam-svc 설치 후 — 서비스 메뉴가 나타난다 (재기동 없음)
 
-부트스트랩 동봉 콘솔은 **base 프로파일**이라 `관리>시스템`·`관리>릴리스` 만 있다. 가입자
-프로비저닝(`관리>구성`)·서비스 현황·통계 메뉴는 **oam-svc 패키지에 동봉된 풀 콘솔**로
-오는데, OAM 은 정적 디렉토리를 **기동 시 1회만** 해석하고 그 결과를 리로드에도 보존한다.
-oam-svc 설치는 oam-svc 만 재기동하므로 **oam 재기동 없이는 풀 콘솔이 서빙되지 않는다.**
+콘솔 번들은 부트스트랩이 동봉한 **하나**다 — 코어 화면과 서비스 팩(가입자·서비스·통계)·계측기
+팩을 전부 담고 있다. 어느 팩의 메뉴가 보이는지는 번들이 아니라 **설치된 서비스**가 정한다:
+서비스 모듈(oam-svc·oam-cims-tester)이 install 시 게이트웨이에 self-register 하면
+`GET /api/v1/console/catalog` 의 `installed_services` 에 그 패키지 id 가 나타나고, 콘솔
+셸이 그 집합으로 해당 팩의 nav 섹션을 켠다. **oam 재기동도, 재로그인도 필요 없다** —
+사이드바가 다음 조회에서 갱신된다(사이드바를 새로고침하거나 화면을 한 번 옮기면 된다).
 
-`[패키지 제어]` 탭에서 **oam** 을 재기동한다. 재기동 중 콘솔이 잠시 끊기고, agent 감독이라
-자동 복귀한다. 승격 대기 상태면 콘솔 상단에 **"콘솔 업데이트 대기"** 배너가 뜬다.
+부트스트랩 직후(oam-svc 미설치)에는 `관리>시스템`·`관리>릴리스`·대시보드·문서만 보인다.
+oam-svc 설치 뒤 나타나는 메뉴:
 
-승격됐는지는 서빙 중인 번들로 확인한다 — oam 동봉본과 다른 해시가 나와야 한다.
+```
+관리 > 구성   조직 · 사용자 · PTT 그룹 · 전화 그룹 · MCPTT 정책 · 서비스 정의
+관리 > 시스템 › 역할  (csc roles — 이 한 화면만 oam-svc 게이팅)
+운용 > 서비스  서비스 현황 · VoLTE 호 이력 · PTT 세션 이력 · 비정상 세션 이력 · 메세지 이력
+운용 > 성능    VoLTE/PTT 통계 · 인터페이스 통계 · 누수 회수
+```
+
+메뉴가 나타나지 않으면 게이트웨이 등록을 확인한다 — 여기에 `oam-svc` 가 없으면 install job
+이 끝나지 않았거나 라우트가 `enabled=false` 다(콘솔 `관리>시스템>게이트웨이` 에서도 보인다).
 
 ```bash
-curl -sk https://<관리IP>:4419/ | grep -o 'assets/index-[A-Za-z0-9_-]*\.js'
+curl -sk -H "Authorization: Bearer <token>" https://<관리IP>:4419/api/v1/console/catalog \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)["installed_services"])'
 ```
 
-```bash
-ls <prefix>/modules/oam-svc/current/oam-svc/console/dist/assets/*.js
-```
-
-재기동 후 나타나는 메뉴:
-
-```
-관리 > 구성   조직 · 사용자 · PTT 그룹 · MCPTT 정책 · 서비스 정의
-운용 > 서비스  서비스 현황 · VoLTE 호 이력 · PTT 세션 이력 · 메세지 이력
-운용 > 성능    VoLTE/PTT 통계 · 인터페이스 통계
-```
-
-> 독립 `console` 패키지를 설치해도 서빙 경로는 바뀌지 않는다 — 해석 후보에
-> `<modules>/console/...` 이 없다. 그 dist 를 쓰려면 `Console.StaticDir` 로 명시해야 한다.
+> 서비스 모듈 패키지는 콘솔을 동봉하지 않는다. 다른 콘솔 dist 를 서빙하려면
+> `Console.StaticDir` 로 명시한다(기본 = oam 동봉본 → `build/dist` 개발 트리의 형제 `console/dist`).
 
 ## 4. CSP 접속점 시드 — **없으면 CSP 가 기동하지 않는다**
 

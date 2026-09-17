@@ -1,0 +1,18 @@
+# IP-PBX hold/resume — 가입자 → PBX 통화 중 PBX 가 re-INVITE(a=sendonly) 로 보류, 다시 sendrecv 로 재개(RFC 3264 §8.4).
+# CSP 가 re-INVITE 를 B2BUA 로 전달·CMP RELAY_MODIFY 하는지(200 응답)와 재개 후 미디어 흐름을 본다.
+id: TRUNK-PBX-HOLD-RESUME
+title: IP-PBX hold/resume (re-INVITE sendonly/sendrecv)
+tags: [trunk, pbx, hold]
+roles:
+  caller: { pool: volte_ue }
+  pbx:    { pool: pbx_hq }
+flow:
+  - { step: register,   who: [caller], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: pbx, media: { audio: pcmu } }
+  - { step: answer,     who: [pbx], after_ms: 500, expect: { code: 200 } }
+  - { step: media_hold, seconds: 2 }
+  - { step: hold,       who: [pbx], expect: { code: 200 } }
+  - { step: wait,       seconds: 2 }
+  - { step: resume,     who: [pbx], expect: { code: 200 } }
+  - { step: media_hold, seconds: 3, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }

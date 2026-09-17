@@ -1,0 +1,15 @@
+# IP-PBX → 가입자 착신 + RFC 4733 DTMF + Q.850 종료 사유 — PBX 가 telephone-event 로 숫자열을 보내고(UE 수신 수로 판정),
+# BYE 에 Reason: Q.850;cause=16 을 싣는다(UE 가 받으면 CSP 가 Reason 을 투과한 것).
+id: TRUNK-PBX-DTMF
+title: IP-PBX → 가입자 DTMF(RFC 4733)·Q.850 종료
+tags: [trunk, pbx, dtmf]
+roles:
+  pbx:    { pool: pbx_hq }
+  callee: { pool: volte_ue }
+flow:
+  - { step: register,   who: [callee], expect: { code: 200 } }
+  - { step: invite,     from: pbx, to: callee }
+  - { step: answer,     who: [callee], after_ms: 500, expect: { code: 200, srd_ms: { p95: 2000 } } }
+  - { step: dtmf,       from: pbx, payload: "1234#" }
+  - { step: media_hold, seconds: 3, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: pbx, cause: 16, expect: { sdd_ms: { p95: 300 }, dtmf_rx_pct: 100, q850_rx_pct: 100 } }

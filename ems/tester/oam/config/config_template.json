@@ -1,0 +1,122 @@
+{
+  "version": 2,
+  "sections": [
+    {
+      "key": "server",
+      "title": "oam-cims-tester bind (loopback)",
+      "description": "계측기 컨트롤러의 비공개 bind. I1: 외부 노출은 base OAM 게이트웨이(4419) 경유만이므로 loopback(127.0.0.1) 고정 권장.",
+      "fields": [
+        {
+          "key": "Server.Ip",
+          "label": "bind IP",
+          "type": "string",
+          "default": "127.0.0.1",
+          "required": true,
+          "restart": true,
+          "help": "I1: loopback 비공개. 0.0.0.0 으로 열지 말 것 (게이트웨이 우회 차단).",
+          "scope": "system"
+        },
+        {
+          "key": "Server.Port",
+          "label": "bind 포트",
+          "type": "int",
+          "default": 4490,
+          "min": 1,
+          "max": 65535,
+          "required": true,
+          "restart": true,
+          "help": "base 게이트웨이 라우트 테이블의 업스트림 포트와 일치해야 함 (pkg gateway.default_port)."
+        },
+        {
+          "key": "SystemId",
+          "label": "System ID",
+          "type": "string",
+          "default": "oam_cims_tester_01",
+          "restart": true,
+          "help": "노드별 분리.",
+          "scope": "system"
+        }
+      ],
+      "scope": "service"
+    },
+    {
+      "key": "tester",
+      "title": "계측기",
+      "description": "run 결과 저장 위치와 워커 접점. 대상(SUT)·워커·풀 정의는 설정이 아니라 토폴로지(콘솔 시험 > 토폴로지, 런타임 store)다.",
+      "fields": [
+        {
+          "key": "Tester.DataDir",
+          "label": "run 데이터 디렉터리",
+          "type": "path",
+          "default": "",
+          "restart": true,
+          "help": "runs/<id>/{run.json,metrics.sqlite,events.jsonl,sip/} 가 쌓이는 곳. 비우면 모듈 로컬 data/ 를 쓴다. 1초 버킷 지표라 관리 store(jsonl 레코드)가 아니라 별도 디렉터리다."
+        },
+        {
+          "key": "Tester.RunRetainDays",
+          "label": "run 보존(일)",
+          "type": "int",
+          "default": 90,
+          "min": 0,
+          "restart": false,
+          "help": "0 은 무제한. 보존기간이 지난 run 디렉터리와 색인을 일일 스윕이 지운다."
+        },
+        {
+          "key": "Tester.WorkerControlPort",
+          "label": "워커 제어 포트 기본값",
+          "type": "int",
+          "default": 7100,
+          "min": 1,
+          "max": 65535,
+          "restart": false,
+          "help": "cims-tester-worker 의 HTTP 제어 포트. 배포 목록에서 워커를 자동 발견할 때 이 포트를 쓴다(토폴로지에서 개별 지정 가능)."
+        },
+        {
+          "key": "Tester.WorkerStreamPort",
+          "label": "워커 관측 수신 포트 (TCP JSONL)",
+          "type": "int",
+          "default": 7110,
+          "min": 1,
+          "max": 65535,
+          "restart": true,
+          "help": "워커가 1초 집계·이벤트를 올리는 컨트롤러 측 수신 포트. 워커 호스트가 다르므로 loopback 이 아니라 관리망 IP 에 bind 한다(Tester.WorkerStreamIp)."
+        },
+        {
+          "key": "Tester.WorkerStreamIp",
+          "label": "워커 관측 수신 bind IP",
+          "type": "string",
+          "default": "0.0.0.0",
+          "restart": true,
+          "scope": "system"
+        }
+      ],
+      "scope": "service"
+    },
+    {
+      "key": "_infra",
+      "title": "Infrastructure (내부 전용)",
+      "description": "UI 비노출 인프라 값. 배포 시 base 가 주입. store 경로(CimsRuntimeDir)·Mgmt.Cidr 은 선언을 두지 않는다 — base 에서 유도되는 파생값(oam_base_service_split.md §7·§14.7).",
+      "hidden": true,
+      "groups": [
+        {
+          "key": "secrets",
+          "title": "시크릿"
+        }
+      ],
+      "fields": [
+        {
+          "key": "CimsAuth.JwtSecret",
+          "label": "콘솔/게이트웨이 JWT 시크릿",
+          "group": "secrets",
+          "type": "password",
+          "default": "",
+          "deploy_value": "@CIMS_JWT_SECRET@",
+          "hidden": true,
+          "restart": true,
+          "help": "base 가 SoT — 배포 시 자동 주입. 게이트웨이 프록시 토큰 검증에 쓰인다."
+        }
+      ],
+      "scope": "system"
+    }
+  ]
+}

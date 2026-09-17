@@ -42,6 +42,7 @@ def pkg_build(ctx: VerifyContext) -> ItemResult:
         "cmdp",                    # MCData media plane (MSRP)
         "csp", "psp", "isp",       # 시그널링 (VoLTE/PTT/IBCF)
         "csc", "oam", "oam-svc", "cspsim", "agent",
+        "oam-cims-tester", "cims-tester-worker",   # 계측기 컨트롤러(Python)·워커(C++) — test_instrument.md §8
     }
     # 파일명 `<name>-<ver>.tar.gz` 에서 컴포넌트 이름 추출.
     present = {os.path.basename(t).rsplit("-", 1)[0] for t in tarballs}

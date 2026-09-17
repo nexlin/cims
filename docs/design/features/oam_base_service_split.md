@@ -127,10 +127,14 @@
 > 배포 시 self-register 로 갱신).
 > 가입자/조직 CRUD 핸들러는 **csc 가 직접 서빙하고 base 가 프록시**한다. csc/src 마운트
 > 폐지(P3b) 이후 OAM 은 이 핸들러를 in-process 로 로드하지 못하므로, `--role all` 도
-> csc 핸들러 미로드 시 **하이브리드**로 동작한다: `module='csc'` 라우트만 게이트웨이
-> 프록시로 mount 하고(`register_gateway(modules={'csc'})`), `/users/me` 는 base slim
-> 핸들러가 커버(mount 경로 `/api/v1/users/me`). stats/녹취/flow/검증은 in-process 유지
-> — 모듈 필터가 oam-svc 계열 라우트의 중복 mount(세그먼트 충돌)를 막는다.
+> csc 핸들러 미로드 시 **하이브리드**로 동작한다: 게이트웨이 프록시 대상을 리터럴 목록으로
+> 두지 않고 **`등록 라우트 − in-process 소유 서비스`로 유도**한다
+> (`register_gateway(exclude_modules=_inproc_set)`, `_inproc_set` = `set_inprocess_services`
+> 로 선언한 그 집합 — **단일 진실원**). stats/녹취/flow/검증(oam-svc)은 in-process 유지라
+> exclude 로 빠져 세그먼트 중복 mount(충돌)를 막고, csc(미동봉)·계측기 등 **별도 배포된 서비스
+> 모듈은 자동 포함**된다. `/users/me` 는 base slim 핸들러가 커버(mount 경로 `/api/v1/users/me`).
+> 필터 술어(`_should_mount` = include ∩ not-exclude)는 기동 mount 와 hot-mount(self-register)가
+> 공유하므로, 새 서비스 모듈은 배포 즉시(재기동 없이) 프록시에 노출된다.
 > 라우트의 `module` 키는 **패키지 id**(소문자 `csc`·`oam-svc` — `pkg.json name`)다.
 > 배포 레코드의 표시용 `process_name`("CSC")은 키로 쓰지 않는다(identifier_model) —
 > self-register·deregister 는 패키지 id 로 쓰고, 테이블 쓰기(upsert)와 모든 비교(mount
@@ -187,6 +191,7 @@ if role == 'base':
   /api/v1/calls        → oam-svc  (127.0.0.1:4480)
   /api/v1/stats        → oam-svc  (health/subscribers/messages/leak + service KPI 전체)
   /api/v1/verification → oam-svc
+  /api/v1/tester       → oam-cims-tester (127.0.0.1:4490 — 계측기 컨트롤러, test_instrument.md)
   (그 외 /api/v1/*      → base 직접 처리)
 ```
 
@@ -209,7 +214,8 @@ passthrough:
 - method/body/query 전달 + 헤더 화이트리스트(`Authorization`,`Content-Type`,`If-None-Match`…)
 - 응답 status/headers/body passthrough — ETag/304, `Content-Disposition`(녹취 다운로드) 보존
 - **대용량 응답(녹취 mp4/세그먼트)은 청크 스트리밍** — 전체 버퍼링 금지(메모리·지연)
-- 타임아웃 기본 5s, 스트리밍 경로는 별도 장타임아웃
+- **SSE 통과** — 요청 `Accept: text/event-stream` 이면 총 타임아웃 없이(연결 5s) 업스트림을 부르고, 응답 `Content-Type: text/event-stream` 이면 청크 passthrough(클라이언트 절단·업스트림 종료 어느 쪽이든 응답 해제). 판정은 응답 타입이라 어느 서비스 모듈이든 SSE 를 낼 수 있다(계측기 `/api/v1/tester/events`)
+- 타임아웃 기본 5s, 다운로드는 120s
 - 구현은 `csc/src/httpsrv/client.py` 재사용
 
 ### 인증 공유
@@ -237,7 +243,7 @@ ConsoleLayout (console account 1개당 1레코드, file_store control/console_la
   }
 ```
 - **기본 프로파일 템플릿**: `operator|admin|monitor|...` — 시작 메뉴+위젯 세트. 최초 로그인 시 선택
-  (또는 admin 이 계정에 할당). 기존 base/full 콘솔 프로파일·메뉴편집·`/custom/<slug>` 인프라 재사용.
+  (또는 admin 이 계정에 할당). 기존 메뉴편집·`/custom/<slug>` 인프라 재사용(콘솔 번들은 하나 — 서비스 팩 표시는 설치 서비스 게이팅).
 - **개인화**: 위젯 추가/삭제/배치, 커스텀 페이지, 영역 편집을 프로파일 위에 레이어. "프로파일로
   초기화" 가능.
 - **서버 저장**(file_store, base 소유 `console/` 도메인) → 기기·세션 넘어 따라감. localStorage 아님.
@@ -408,8 +414,8 @@ start_svc_mgmt()  { kill_stray "svc_mgmt_app.py" "$port" tcp
 
 ## 10. 버전 계약
 
-- 교차 의존 = **service → base 최소 버전**. 서비스 매니페스트에 `requires.base_oam >= X.Y.Z` 선언,
-  base 가 self-register 시 대조 → 불일치 경고/거부.
+- 교차 의존 = **service → base 최소 버전**. 서비스 `pkg.json` `gateway.requires_base_oam` 선언 → base 가
+  self-register 시 라우트 레코드에 기록하고 자기 버전(`oam/pkg.json`)과 대조 — 낮으면 경고 로그(등록은 한다).
 - 위젯과 그 API 는 같은 서비스 모듈이라 모듈 내부에서 이미 정합(스큐 없음).
 - 호환 매트릭스를 릴리스 노트에 명시.
 

@@ -1,0 +1,10 @@
+# IBCF ACL — 소스 IP deny 정책(피어 풀 seed.acl=deny)이 있는 피어의 INVITE 는 403. invite expect.code=403 = 그 최종 응답이 성공 조건.
+id: TRUNK-IBCF-ACL-DENY
+title: IBCF ACL 거부 (허용되지 않은 피어 → 403)
+tags: [trunk, ibcf, acl]
+roles:
+  peer:   { pool: peer_blocked }
+  callee: { pool: volte_ue }
+flow:
+  - { step: register,   who: [callee], expect: { code: 200 } }
+  - { step: invite,     from: peer, to: callee, expect: { code: 403 } }

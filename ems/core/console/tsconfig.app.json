@@ -13,7 +13,8 @@
     "baseUrl": ".",
     "paths": {
       "@core/*": ["src/*"],
-      "@svc/*": ["../../service/console/src/*"]
+      "@svc/*": ["../../service/console/src/*"],
+      "@tester/*": ["../../tester/console/src/*"]
     },
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
@@ -29,5 +30,5 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src", "../../service/console/src"]
+  "include": ["src", "../../service/console/src", "../../tester/console/src"]
 }

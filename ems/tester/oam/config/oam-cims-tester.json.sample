@@ -1,0 +1,14 @@
+{
+    "_comment": "oam-cims-tester 독립 모듈 전용 설정(test_instrument.md §6.2). 런타임 활성: 이 파일을 oam-cims-tester.json 으로 rename. 정규 관리 경로는 콘솔 배포설정(config_template → 배포 overlay config.json)이며, 이 파일을 직접 쓰는 dev/단독 실행에서는 base 와 동일한 CimsAuth.JwtSecret 까지 여기서 채운다.",
+    "Server": { "Ip": "127.0.0.1", "Port": 4490 },
+    "SystemId": "oam_cims_tester_01",
+    "CimsAuth": { "JwtSecret": "" },
+    "CimsRuntimeDir": "",
+    "Tester": {
+        "DataDir": "",
+        "RunRetainDays": 90,
+        "WorkerControlPort": 7100,
+        "WorkerStreamPort": 7110,
+        "WorkerStreamIp": "0.0.0.0"
+    }
+}

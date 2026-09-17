@@ -1,0 +1,105 @@
+# 토폴로지 — 호스트 › 워커·대상 노드 › 풀 (test_instrument.md §4). 콘솔 [시험 > 토폴로지] 캔버스가 편집·저장하는 레코드의 YAML 표현.
+# 주소 기본값은 hosts 에서 온다(워커 URL·노드 포트·피어 수신점 ip). 노드 addr(VIP)·수신점 ip·피어 bind.ip 로 덮어쓸 수 있다.
+# 비밀(토큰·H(A1)·SSH 키)은 환경변수 이름만 적는다.
+name: media01
+hosts:                                   # 서버 — 계측기/대상/동거 구분은 필드가 아니라 그 위에 무엇이 있느냐
+  h45: { name: media01, ip: 10.0.0.45, ssh: { user: cims, key_env: TESTER_SSH_KEY } }
+  h61: { name: tester-a, ip: 10.0.0.61 }
+  h62: { name: tester-b, ip: 10.0.0.62 }
+workers:                                 # 호스트 위의 cims-tester-worker — url = http://<host.ip>:<port>
+  - { name: w1, host: h61, port: 7100, cpus: 8 }
+  - { name: w2, host: h62, port: 7100, cpus: 8 }
+target:
+  name: media01
+  kind: cims                             # cims | ims | pbx — cims 만 oam 노드로 컬렉션 시드·target_build
+  nodes:                                 # 역할(role)별 노드 — 설정 블록이 역할마다 다르다
+    csp:                                 # addr: 10.0.0.50 — A/S VIP·다중 IP 호스트의 서비스 주소는 여기(비면 호스트 ip)
+      role: sip
+      fn: CSP
+      host: h45
+      procs: [csp]
+      sip:
+        domains: [volte.cims.example.kr, ptt.cims.example.kr]
+        listeners:                       # 수신점 N 개 = CSP local_nodes 와 1:1. ip 를 비우면 노드 addr → 호스트 ip
+          udp:     { edge: access, port: 5060, protocol: udp }
+          tcp:     { edge: access, port: 25061, protocol: tcp }
+          tls:     { edge: access, port: 5061, protocol: tls }
+          peering: { edge: peering, port: 5070, protocol: udp, local_node: cims-tester-peering }   # 피어 풀의 기본 다음 홉(edge=peering 첫 항목)
+    cmp: { role: media, fn: CMP, host: h45, procs: [cmp], media: { rtp_range: [20000, 29999], control: 9001 } }
+    csc: { role: subscriber, fn: CSC, host: h45, procs: [csc], api: { port: 4430, tls: true } }
+    oam: { role: oam, fn: OAM, host: h45, procs: [oam], oam: { port: 4419, token_env: TESTER_OAM_TOKEN, observe: [oam_stats, oam_alarms, agent_heartbeat] } }
+    db:  { role: db, fn: MariaDB, host: h45, procs: [mariadbd], db: { port: 3306, name: cims } }
+pools:                                   # 풀 하나 = 워커 하나. 워커 여럿에 나누려면 워커마다 풀 + 같은 group(논리 풀 이름)
+  volte_ue_a:                            # 논리 풀 volte_ue 의 w1 몫 — 시나리오는 pool: volte_ue 그대로
+    kind: ue
+    worker: w1
+    group: volte_ue
+    access: csp
+    source: { creds: creds/volte-a.jsonl }
+    transport: tls
+    srtp: optional
+    prack: true                          # 100rel — MGCF 183 early media 시험(TRUNK-MGCF-OUTBOUND)의 전제
+  volte_ue_b:                            # w2 몫 — 신원은 풀 정의가 나눈다(creds 파일 또는 DB offset/count)
+    kind: ue
+    worker: w2
+    group: volte_ue
+    access: csp
+    source: { creds: creds/volte-b.jsonl }
+    transport: tls
+    srtp: optional
+    prack: true
+  ptt_ue:
+    kind: ue
+    worker: w1
+    access: csp
+    source: { creds: creds/ptt.jsonl }
+    transport: udp
+  peer_kt:                               # 타 IMS 코어 — w2 호스트에 수신점(ip 파생). 시드 = remote_node/route/rule/routing_policy(자동)
+    kind: peer
+    worker: w2
+    peering: csp
+    profile: ibcf
+    bind: { port: 5080, protocol: udp }
+    domain: ims.kt.test
+    identities: { e164_range: ["+82212340000", "+82212349999"], count: 200 }
+    seed: { route_set: rs-kt, priority: 100 }
+  peer_kt_dead:                          # 같은 RouteSet 의 우선 피어 — 무응답(failover 시험, TRUNK-IBCF-FAILOVER)
+    kind: peer
+    worker: w2
+    peering: csp
+    profile: ibcf
+    bind: { port: 5081, protocol: udp }
+    domain: ims.kt.test
+    identities: { e164_range: ["+82212340000", "+82212340009"] }
+    answer: silent
+    seed: { route_set: rs-kt, priority: 50 }
+  peer_blocked:                          # ACL deny 대상 피어 (TRUNK-IBCF-ACL-DENY)
+    kind: peer
+    worker: w2
+    peering: csp
+    profile: ibcf
+    bind: { port: 5082, protocol: udp }
+    domain: ims.blocked.test
+    identities: { e164_range: ["+82299990000", "+82299990009"] }
+    seed: { acl: deny }
+  pbx_hq:                                # IP-PBX — G.711 + telephone-event, 등록형 트렁크 계정(SIPconnect 2.0). UE 는 DID 를 그대로 다이얼
+    kind: peer
+    worker: w2
+    peering: csp
+    profile: pbx
+    bind: { port: 5090, protocol: udp }
+    domain: pbx.hq.test
+    register: { user: pbx-hq, ha1_env: PBX_HA1 }
+    identities: { did_range: ["0212345000", "0212345099"], ext_len: 4 }
+    codecs: [PCMA, PCMU]
+  mgcf_pstn:                             # MGCF(IM-MGW 가 AMR-WB 오퍼) — E.164 만, 183 early media + 100rel, Q.850 Reason
+    kind: peer
+    worker: w2
+    peering: csp
+    profile: mgcf
+    bind: { port: 5095, protocol: udp }
+    domain: mgcf.pstn.test
+    identities: { e164_range: ["+82312340000", "+82312340099"] }
+layout:                                  # UI 배치 — 캔버스 영역(호스트) 좌표·크기, 카드(워커·노드) 좌표. 컴파일러는 읽지 않는다
+  regions: { h45: { x: 420, y: 40, w: 990, h: 470 }, h61: { x: 30, y: 40, w: 360, h: 330 }, h62: { x: 30, y: 400, w: 360, h: 380 } }
+  items: { csp: { x: 14, y: 12 }, cmp: { x: 290, y: 12 }, csc: { x: 560, y: 12 }, oam: { x: 290, y: 150 }, db: { x: 560, y: 150 }, w1: { x: 14, y: 12 }, w2: { x: 14, y: 12 } }

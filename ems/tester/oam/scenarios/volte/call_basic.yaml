@@ -1,0 +1,16 @@
+# VoLTE 1:1 기본 호 — 기능 시험(단발)과 성능 시험(부하 프로파일 결합) 공용.
+id: VOLTE-CALL-BASIC
+title: VoLTE 1:1 발착신 (AMR-WB + H.264)
+tags: [volte]
+roles:
+  caller: { pool: volte_ue }
+  callee: { pool: volte_ue, disjoint_from: caller }
+flow:
+  - { step: register,   who: [caller, callee], expect: { code: 200, rrd_ms: { p95: 500 } } }
+  - { step: invite,     from: caller, to: callee, media: { audio: amr-wb, video: h264 } }
+  - { step: answer,     who: [callee], after_ms: 1500, expect: { srd_ms: { p95: 2000 } } }   # SRD = 착신 지연 1500 + 처리 여유
+  - { step: media_hold, seconds: "${ht}", expect: { rtp_loss_pct: { max: 0.5 }, jitter_ms: { p95: 30 } } }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }
+target_evidence:
+  - { kind: recording_created, min: 1 }
+  - { kind: log_errors, max: 0 }
