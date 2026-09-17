@@ -3,7 +3,8 @@
 규격 단말은 이 문서에서 그룹 목록(<OnNetwork><MCPTTGroupInfo>)·연락처(<PrivateCallList>)·긴급 대상·인가를 읽는다.
 검사: XSD 요소 집합/순서(OnNetworkType 에 MCPTTUserID 없음, EntryType 은 uri-entry 필수), 그룹 목록 = 소속 그룹
 (소유만 한 그룹 제외, 소유 소속 그룹은 cims:authorized-user), ImplicitAffiliations = 소속 전체, 연락처 = 동료 멤버,
-긴급 요소는 항상 존재(§8.3.2.1 shall) — 미지정은 entry-info 폴백 + ruleset 미인가, ProSe User-Info-ID 영값, 루트 Status·alias index,
+긴급 요소는 항상 존재(§8.3.2.1 shall) — 미지정은 entry-info 폴백 + ruleset 미인가, ProSe User-Info-ID 영값, 루트 Status,
+선택이지만 필수로 읽는 단말용으로 항상 싣는 것(alias-entry index·xml:lang, ParticipantType — xml:lang 은 Name 과 같은 값),
 common-policy ruleset, escape, ETag 내용 파생, 단말 정규식 호환(첫 MCPTTGroupInitiation = EmergencyCall).
 
   python3 -m unittest tests.test_csc_user_profile
@@ -126,10 +127,24 @@ class UserProfileDocTest(unittest.TestCase):
         self.assertEqual(acts.find("up:allow-activate-emergency-alert", NS).text, "false")
         self.assertEqual(acts.find("up:allow-emergency-private-call", NS).text, "true")
 
-    def test_root_status_and_alias_index(self):
+    def test_root_status_and_always_present_optionals(self):
+        """규격상 선택이지만 필수로 읽는 단말이 있어 항상 싣는 것 — alias-entry index·xml:lang, ParticipantType."""
+        XL = "{http://www.w3.org/XML/1998/namespace}lang"
         _, root, _ = self._doc()
         self.assertEqual(root.find("up:Status", NS).text, "true", "§8.3.2.1 3) shall include one <Status>")
-        self.assertEqual(root.find("up:Common/up:UserAlias/up:alias-entry", NS).get("index"), "1")
+        al = root.find("up:Common/up:UserAlias/up:alias-entry", NS)
+        self.assertEqual(al.get("index"), "1")
+        self.assertEqual(al.get(XL), "en", "alias-entry xml:lang = UserProfile.Language 기본값")
+        self.assertEqual(root.find("up:Name", NS).get(XL), al.get(XL), "Name 과 alias-entry 의 xml:lang 은 같은 값")
+        self.assertEqual(root.find("up:Common/up:ParticipantType", NS).text, "user", "§8.3.2.1 f) 기본값")
+
+    def test_participant_type_and_language_configurable(self):
+        m.USER_PROFILE_CONFIG.update({"ParticipantType": "dispatch", "Language": "ko"})
+        XL = "{http://www.w3.org/XML/1998/namespace}lang"
+        _, root, _ = self._doc()
+        self.assertEqual(root.find("up:Common/up:ParticipantType", NS).text, "dispatch")
+        self.assertEqual(root.find("up:Common/up:UserAlias/up:alias-entry", NS).get(XL), "ko")
+        self.assertEqual(root.find("up:Name", NS).get(XL), "ko")
 
     def test_emergency_dedicated_group_configured(self):
         m.PTT_PROFILES["+82500000001"] = dict(m.DEFAULT_USER_PROFILE, emergency_group_mode="DedicatedGroup",

@@ -1365,6 +1365,9 @@ _USER_PROFILE_DEFAULTS = {
     "MaxSimultaneousTransmissionsN7": 1,  # 동시 송신 상한 (OnNetwork)
     "Priority": 0,                        # 사용자 우선순위 (unsignedShort)
     "MissionCriticalOrganization": "",    # 빈값 = UeInitConfig.Name
+    # 아래 둘은 XSD·§8.3.2.1 상 **선택**이지만 필수로 읽는 단말이 있어 항상 싣는다(규격 위반 아님).
+    "ParticipantType": "user",            # 사용자의 기능 범주 (§8.3.2.7 예: first responder·dispatch)
+    "Language": "en",                     # <Name>·<alias-entry> 의 xml:lang — 한 문서 안에서 같은 값
 }
 
 
@@ -1395,7 +1398,9 @@ def get_user_profile_xml(user_uri, owner_uid=None):
         필수 자식이라 off-network 미지원인 우리는 영값(000000000000)을 싣는다.
       - 상한 = mcptt_service_config.max_affiliations_n2(MaxAffiliationsN2) + UserProfile.*(N6·N7·Priority·조직명).
       - 인가 = <cp:ruleset>(RFC 4745 common-policy) — actions 자식은 규격 요소 + cims 확장(ad hoc·그룹 생성).
-    루트 <Status>true</Status>(§8.3.2.1 3, 프로파일 활성)·alias-entry index 속성(선택이나 필수로 읽는 단말이 있어 병기).
+    루트 <Status>true</Status>(§8.3.2.1 3, 프로파일 활성). **선택이지만 필수로 읽는 단말이 있어 항상 싣는 것** =
+    alias-entry 의 index·xml:lang 속성, <ParticipantType>(§8.3.2.1 f, 값 = UserProfile.ParticipantType 설정).
+    xml:lang 은 <Name> 과 같은 UserProfile.Language 를 써 한 문서 안에서 어긋나지 않게 한다.
     텍스트는 전부 escape. ETag 는 내용 파생."""
     user = USERS.get(user_uri)
     if not user:
@@ -1467,14 +1472,17 @@ def get_user_profile_xml(user_uri, owner_uid=None):
         return "true" if (prof.get(k, default) and ok) else "false"
 
     org = str(_user_profile_cfg('MissionCriticalOrganization') or _ue_init_cfg('Name') or _UE_INIT_DEFAULTS['Name'])
+    ptype = str(_user_profile_cfg('ParticipantType'))
+    lang = str(_user_profile_cfg('Language'))
     n6 = int(_user_profile_cfg('MaxSimultaneousCallsN6'))
     n7 = int(_user_profile_cfg('MaxSimultaneousTransmissionsN7'))
     prio = int(_user_profile_cfg('Priority'))
     n2 = int(SERVICE_CONFIG.get('max_affiliations_n2') or 0)
 
     # <Common>
-    # alias-entry 의 index 는 XSD 상 선택(IndexType, use 없음)이지만 필수로 읽는 단말이 있어 병기한다(규격 위반 아님).
-    common = f'<UserAlias><alias-entry index="1">{esc(display_name)}</alias-entry></UserAlias>'
+    # alias-entry 의 index·xml:lang 은 XSD 상 선택(IndexType use 없음, xml:lang 은 ref)이지만 필수로 읽는 단말이
+    #   있어 병기한다(규격 위반 아님 — 선택 속성을 채우는 것뿐). lang 은 <Name> 과 같은 값이라 문서가 자기모순이 없다.
+    common = f'<UserAlias><alias-entry index="1" xml:lang="{esc(lang)}">{esc(display_name)}</alias-entry></UserAlias>'
     common += et('MCPTTUserID', user_uri)
     # PrivateCall 은 항상(8d "shall include one"). PrivateCallList 는 "one or more" 라 연락처가 없으면 폴백 수신자
     #   (지정 수신자 > 본인 URI — 퇴화) 하나를 싣는다. MCPTTPrivateCallType 은 sequence: PrivateCallList → EmergencyCall.
@@ -1488,6 +1496,9 @@ def get_user_profile_xml(user_uri, owner_uid=None):
     gc += f'<EmergencyAlert>{eg_entry}</EmergencyAlert>'
     gc += f'<Priority>{prio}</Priority>'
     common += f'<MCPTT-group-call>{gc}</MCPTT-group-call>'
+    # f) may contain one <ParticipantType> — 선택이지만 필수로 읽는 단말이 있어 항상 싣는다. 값은 사이트 단위
+    #   설정(UserProfile.ParticipantType) — 역할(관제사 등) 단위 파생은 DB 조회가 필요해 두지 않았다.
+    common += f'<ParticipantType>{esc(ptype)}</ParticipantType>'
     common += f'<MissionCriticalOrganization>{esc(org)}</MissionCriticalOrganization>'
 
     # <OnNetwork>
@@ -1506,7 +1517,7 @@ def get_user_profile_xml(user_uri, owner_uid=None):
   xmlns:cp="urn:ietf:params:xml:ns:common-policy"
   xmlns:cims="urn:cims:mcptt:ext:1.0"
   XUI-URI="{esc(user_uri)}" user-profile-index="1">
-  <Name xml:lang="en">{esc(display_name)}</Name>
+  <Name xml:lang="{esc(lang)}">{esc(display_name)}</Name>
   <Status>true</Status>
   <Common index="1">{common}</Common>
   <cp:ruleset>
