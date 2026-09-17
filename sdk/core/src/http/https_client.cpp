@@ -5,11 +5,13 @@
 #include <openssl/pem.h>
 #include <openssl/ssl.h>
 #include <openssl/x509.h>
+#include <openssl/x509v3.h>
 
 #ifdef _WIN32
 #  include <winsock2.h>
 #  include <ws2tcpip.h>
 #else
+#  include <arpa/inet.h>
 #  include <netdb.h>
 #  include <netinet/in.h>
 #  include <sys/socket.h>
@@ -116,6 +118,12 @@ struct Conn {
     int read(char* b, int n) { return ssl ? SSL_read(ssl, b, n) : (int)::recv(fd, b, n, 0); }
 };
 
+/** 문자열이 IP 리터럴(v4/v6)인가 — SNI 에 넣지 않기 위한 판별(RFC 6066 §3). */
+bool isIpAddress(const std::string& h) {
+    unsigned char buf[16];
+    return inet_pton(AF_INET, h.c_str(), buf) == 1 || inet_pton(AF_INET6, h.c_str(), buf) == 1;
+}
+
 bool loadCa(SSL_CTX* ctx, const std::string& pem) {
     BIO* bio = BIO_new_mem_buf(pem.data(), (int)pem.size());
     if (!bio) return false;
@@ -151,8 +159,17 @@ Response OpenSslTransport::request(const std::string& method, const std::string&
         }
         c.ssl = SSL_new(c.ctx);
         SSL_set_fd(c.ssl, (int)c.fd);
-        SSL_set_tlsext_host_name(c.ssl, u.host.c_str());
-        if (verify_) SSL_set1_host(c.ssl, u.host.c_str());
+        // 접속 주소가 IP 리터럴이면 iPAddress SAN 을, 이름이면 DNS SAN 을 검사한다.
+        //   X509_check_host(= SSL_set1_host)는 iPAddress SAN 을 보지 않는다 — IP 로 붙으면서 이것만 걸면
+        //   인증서에 IP SAN 이 있어도 X509_V_ERR_HOSTNAME_MISMATCH(62) 로 떨어진다. CIMS 는 IP 접속이 정상이다.
+        //   SSL_set1_ip_asc 는 문자열이 IP 일 때만 1 을 돌려주므로 IP 리터럴 판별을 겸한다.
+        bool isIpLiteral = isIpAddress(u.host);
+        if (verify_ && isIpLiteral) X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(c.ssl), u.host.c_str());
+        // SNI 에는 IP 리터럴을 넣지 않는다(RFC 6066 §3) — 이름일 때만 보낸다.
+        if (!isIpLiteral) {
+            SSL_set_tlsext_host_name(c.ssl, u.host.c_str());
+            if (verify_) SSL_set1_host(c.ssl, u.host.c_str());
+        }
         if (SSL_connect(c.ssl) != 1) {
             unsigned long e = ERR_get_error();
             char buf[256]; ERR_error_string_n(e, buf, sizeof buf);
