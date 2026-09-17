@@ -517,6 +517,12 @@ void CsimPeer::EventRegister(CSipServerInfo* /*pclsInfo*/, int iStatus) {
 void CsimPeer::EventIncomingCall(const char* pszCallId, const char* pszFrom, const char* pszTo, CSipCallRtp* pclsRtp,
                                  CSipMessage* pclsMessage) {
     if (m_cfg.silent) return;   // 죽은 피어 — 트랜잭션은 psip 이 타이머로 접는다
+    if (m_cfg.rejectCode > 0) {
+        // 오류 주입 — 즉시 최종 응답(5xx failover·사용자 측 거절·Reason Q.850 투과 시험). 호 상태를 만들지 않는다
+        Reject(pszCallId, m_cfg.rejectCode, m_cfg.rejectQ850);
+        if (m_pObserver) m_pObserver->OnPeerFaultReject(this, pszCallId, pszTo ? pszTo : "", m_cfg.rejectCode);
+        return;
+    }
     bool hasPai = pclsMessage && pclsMessage->GetHeader("P-Asserted-Identity") != NULL;
     CRtpThread* rtp = newRtp();
     if (!rtp) { m_clsUserAgent.StopCall(pszCallId, 500); return; }

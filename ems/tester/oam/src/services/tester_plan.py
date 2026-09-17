@@ -286,13 +286,22 @@ def build_plan(scenario: Scenario, topology: Topology, topology_doc: dict, profi
                 out['warnings'].append('알려진 CSP 과제: ' + issue['text'])
         except Exception:
             pass
-    # 역할 → 그 창의 신원 사용자부(비밀 없음) — 검증 다리가 대상 DB 픽스처(pickup_group·전화 그룹·역할)를 계측기가 쓸 신원에 입힌다
+    # 역할 → 그 창의 신원 사용자부(비밀 없음, **워커 배정 순** — [0] 이 단발 첫 인스턴스가 쓰는 신원) — 검증 다리가 대상 DB 픽스처(pickup_group·전화 그룹·역할)를
+    #   계측기가 쓸 신원에 입힌다
+    #   그룹 밖 역할(member: false)은 워커가 첫 그룹의 비멤버를 신원 순으로 고르므로 그 후보만(첫 항목 = 단발 첫 인스턴스의 배정)
     by_role: Dict[str, List[str]] = {}
+    guests = set((gs or {}).get('guest_roles') or [])
+    first_group = (gs or {}).get('first_group')
     for pw in plan['workers'].values():
         pools = {p['pool']: p for p in pw['pools']}
         for role, (pool, b, e) in pw['roles'].items():
             ids = (pools.get(pool) or {}).get('identities') or []
-            by_role.setdefault(role, []).extend(str(x.get('user')) for x in ids[b:e] if x.get('user'))
+            window = ids[b:e]
+            if role in guests:
+                window = [x for x in window if x.get('ptt_group') != first_group]   # 워커 guest 배정 = 비멤버를 신원 순으로
+            else:
+                window = list(reversed(window))   # 워커 free 목록은 창의 끝에서부터 꺼낸다(pop_back) — 첫 항목 = 단발 첫 인스턴스의 배정
+            by_role.setdefault(role, []).extend(str(x.get('user')) for x in window if x.get('user'))
     out.update({
         'roles': plan['roles'], 'workers': wrows, 'steps': steps, 'phases': phases, 'procedure': procedure(scenario, phases),
         'bindings': plan['bindings'], 'rate_total': plan['rate_total'], 'max_instances': plan['max_instances'],

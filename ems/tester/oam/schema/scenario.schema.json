@@ -322,6 +322,12 @@
           "default": null,
           "title": "Disjoint From"
         },
+        "member": {
+          "default": true,
+          "description": "그룹 세션에서 false = 그룹 밖 신원(청취 관제사·비멤버) — 인스턴스가 잡은 그룹의 멤버가 아닌 PTT 단말을 역할 풀에서 배정한다(다른 풀도 됨). 첫 group_call 의 from·to 는 될 수 없다",
+          "title": "Member",
+          "type": "boolean"
+        },
         "multi": {
           "default": false,
           "description": "인스턴스마다 단말 여럿 — 그룹 세션(group_call)에서 단일 역할들이 멤버를 하나씩 잡고 남은 그룹 멤버 전부",

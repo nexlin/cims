@@ -208,6 +208,10 @@ void Worker::OnPeerRegister(CsimPeer* p, int st, long long ms) {
     std::lock_guard<std::mutex> lk(m_evMtx);
     m_events.push_back({ Event::REGISTER, nullptr, p, st, ms, "", "", false });
 }
+void Worker::OnPeerFaultReject(CsimPeer* p, const std::string& callId, const std::string& toUser, int iCode) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::FAULT_REJECT, nullptr, p, iCode, 0, callId, toUser, false });
+}
 void Worker::OnPeerByeResponse(CsimPeer* p, const std::string& callId, int st, long long ms) {
     std::lock_guard<std::mutex> lk(m_evMtx);
     m_events.push_back({ Event::BYERESP, nullptr, p, st, ms, callId, "", false });
@@ -361,7 +365,13 @@ bool Worker::buildPeerPool(Pool* pool, const Json& d, std::string& err) {
     pc.port = (int)pd["bind"]["port"].asInt(0);
     pc.transport = parseTransport(pd["bind"]["protocol"].asString("udp"));
     pc.domain = pd["domain"].asString();
-    pc.silent = pd["answer"].asString("normal") == "silent";
+    {
+        // 착신 정책(오류 주입) — silent: 무응답 · reject: 엔진이 fault.code(+Reason Q.850)로 즉시 거절 · delay: fault.delay_ms 보류 뒤 시나리오가 응답
+        std::string ans = pd["answer"].asString("normal");
+        pc.silent = ans == "silent";
+        if (ans == "reject") { pc.rejectCode = (int)pd["fault"]["code"].asInt(503); pc.rejectQ850 = (int)pd["fault"]["q850"].asInt(0); }
+        if (ans == "delay") pool->answerDelayMs = (int)pd["fault"]["delay_ms"].asInt(0);
+    }
     pc.certFile = m_cfg.peerCertFile;
     pc.prack = pd["prack"].isBool() ? pd["prack"].asBool() : CsimPeerConfig::DefaultPrack(pc.profile);
     pc.dtmf = pd["dtmf"].asBool(true);
@@ -377,6 +387,7 @@ bool Worker::buildPeerPool(Pool* pool, const Json& d, std::string& err) {
     pool->targetPort = (int)(pr.isObject() ? pr["port"].asInt(tc["udp"].asInt(5060)) : tc["udp"].asInt(5060));
     pool->transport = pr.isObject() ? pr["protocol"].asString("udp") : "udp";
     pool->profile = pc.profile;
+    pool->targetDomain = tc["domain_volte"].asString(pc.domain);
     if (pool->targetIp.empty()) { err = "target_csp.ip_required"; return false; }
     // pbx 트렁크 REGISTER(SIPconnect 2.0 §8 등록 모드) — 대상의 access 접속점(Digest 챌린지가 있는 쪽)으로, bind 와 같은 transport
     const Json& tr = d["trunk_register"];
@@ -496,6 +507,7 @@ HttpResponse Worker::runStart(const Json& d) {
     for (auto& kv : d["role_slices"].items())
         spec->slices[kv.first] = { (int)kv.second.at(0).asInt(), (int)kv.second.at(1).asInt() };
     for (size_t i = 0; i < d["multi_roles"].size(); ++i) spec->multiRoles.push_back(d["multi_roles"].at(i).asString());
+    for (size_t i = 0; i < d["guest_roles"].size(); ++i) spec->guestRoles.push_back(d["guest_roles"].at(i).asString());
     const Json& steps = d["steps"];
     std::vector<std::string> unsupported;
     for (size_t i = 0; i < steps.size(); ++i) {
@@ -560,28 +572,38 @@ HttpResponse Worker::runStart(const Json& d) {
     for (auto& st : m_body) if (st.step == "invite" || st.step == "group_call") { m_bodyRtpMode = rtpModeOf(st.media); break; }
     // 그룹 단위 인스턴스(body 에 group_call) — 역할은 모두 같은 PTT 풀이어야 하고, 멤버 배정 순서 = 발신자 → body 등장 순 단일 역할 → multi 역할(나머지)
     m_groupBound = false;
-    m_groupPool.clear(); m_singleRoles.clear(); m_usedMulti.clear(); m_groupNames.clear();
+    m_groupPool.clear(); m_singleRoles.clear(); m_usedMulti.clear(); m_groupNames.clear(); m_guestRoles.clear();
     m_groupCursor = 0;
     for (auto& st : m_body) if (st.step == "group_call") { m_groupBound = true; break; }
     if (m_groupBound) {
+        m_guestRoles = spec->guestRoles;
         auto isMulti = [&](const std::string& r) { return std::find(spec->multiRoles.begin(), spec->multiRoles.end(), r) != spec->multiRoles.end(); };
         auto note = [&](const std::string& r) {
-            if (r.empty()) return;
+            if (r.empty() || isGuestRole(r)) return;   // 그룹 밖 역할은 그룹 멤버 배정에서 뺀다
             auto& v = isMulti(r) ? m_usedMulti : m_singleRoles;
             if (std::find(v.begin(), v.end(), r) == v.end()) v.push_back(r);
         };
-        for (auto& st : m_body) if (st.step == "group_call") { if (st.from.empty() || isMulti(st.from)) return errResp(400, "group_call_from", "group_call.from 은 단일 역할이어야 한다"); note(st.from); break; }
+        for (auto& st : m_body) if (st.step == "group_call") {
+            if (st.from.empty() || isMulti(st.from)) return errResp(400, "group_call_from", "group_call.from 은 단일 역할이어야 한다");
+            if (isGuestRole(st.from)) return errResp(400, "group_call_from", "첫 group_call.from 은 그룹 멤버 역할이어야 한다(그룹 밖 역할은 그 뒤 listen/거절)");
+            note(st.from); break;
+        }
         for (auto& st : m_body) { note(st.from); note(st.to); for (auto& w : st.who) note(w); }
         if (m_usedMulti.size() > 1) return errResp(400, "multi_roles", "multi 역할은 시나리오에 하나만(그룹의 나머지 멤버)");
         for (auto& r : m_singleRoles) { if (!spec->roles.count(r)) return errResp(400, "unknown_role", r); }
         for (auto& r : m_usedMulti) { if (!spec->roles.count(r)) return errResp(400, "unknown_role", r); }
         m_groupPool = spec->roles[m_singleRoles[0]];
-        for (auto& r : m_singleRoles) if (spec->roles[r] != m_groupPool) return errResp(400, "group_pool", "그룹콜 시나리오의 역할은 모두 같은 풀이어야 한다");
-        for (auto& r : m_usedMulti) if (spec->roles[r] != m_groupPool) return errResp(400, "group_pool", "그룹콜 시나리오의 역할은 모두 같은 풀이어야 한다");
+        for (auto& r : m_singleRoles) if (spec->roles[r] != m_groupPool) return errResp(400, "group_pool", "그룹콜 시나리오의 멤버 역할은 모두 같은 풀이어야 한다");
+        for (auto& r : m_usedMulti) if (spec->roles[r] != m_groupPool) return errResp(400, "group_pool", "그룹콜 시나리오의 멤버 역할은 모두 같은 풀이어야 한다");
         Pool* gp = m_pools[m_groupPool].get();
         if (gp->service != "ptt") return errResp(400, "group_pool_service", m_groupPool + " — group_call 은 service=ptt 풀에서만");
         if (gp->groups.empty()) return errResp(400, "group_pool_groups", m_groupPool + " — 신원에 ptt_group 이 없다");
         for (auto& g : gp->groups) m_groupNames.push_back(g.first);
+        for (auto& r : m_guestRoles) {
+            if (!spec->roles.count(r)) return errResp(400, "unknown_role", r);
+            Pool* qp = m_pools[spec->roles[r]].get();
+            if (qp->service != "ptt") return errResp(400, "guest_pool_service", r + " — 그룹 밖 역할도 service=ptt 풀(비멤버 PTT 단말)이어야 한다");
+        }
     } else {
         for (auto& st : m_body)
             if (st.step == "floor_request" || st.step == "floor_release")
@@ -835,6 +857,14 @@ void Worker::onEvent(const Event& e) {
         auto pit = m_byPeer.find(e.peer);
         if (pit == m_byPeer.end()) return;
         peerPool = pit->second;
+        if (e.kind == Event::FAULT_REJECT) {
+            // 오류 주입(answer=reject) — 엔진이 착신을 즉시 거절했다. 인스턴스 밖의 일(대상이 이 피어를 골랐다) — 세고 event 로 남긴다
+            m_metrics.counter("peer_fault_reject");
+            m_metrics.counter("peer_fault_codes." + std::to_string(e.status));
+            auto uit = peerPool->byUser.find(e.user);
+            emitEvent("peer fault: INVITE rejected " + std::to_string(e.status) + " (answer=reject)", uit == peerPool->byUser.end() ? nullptr : uit->second, "invite", e.status, e.callId);
+            return;
+        }
         if (e.kind == Event::REGISTER) {
             // 트렁크 REGISTER 결과 — 계정 하나가 풀 신원 전부를 대표한다
             bool ok = e.status == 200;
@@ -885,12 +915,29 @@ void Worker::onEvent(const Event& e) {
     case Event::INCOMING:
         if (ep->isPtt()) break;   // 그룹 fan-out INVITE — libcsim 이 자동응답(automatic commencement)하고 ANSWERED 로 알린다
         ep->pendingInvite = true;
+        ep->holdUntilMs = 0;
+        if (ep->isPeer() && ep->poolRef->answerDelayMs > 0) {
+            // 오류 주입 answer=delay — 보류 시한. answer/progress/reject 단계의 after_ms 와 합쳐 늦은 쪽에 응답한다
+            ep->holdUntilMs = now + ep->poolRef->answerDelayMs;
+            m_metrics.counter("peer_fault_delay");
+        }
+        if (in && in->forkDial && ep->tStartCallMs == 0) {
+            // 대표번호 포크 leg(TS 24.239) — 그룹원 alert. 승자 외의 leg 는 서버가 CANCEL 한다(487 = 정상, ringing_leg_cancelled).
+            //   P-Called-Party-ID 가 다이얼한 대표번호를 실었는가(dispatch_center.md §4 — 착신 표시)
+            ep->cancelExpected = true;
+            m_metrics.counter("fork_rx");
+            if (!ep->isPeer()) {
+                const std::string& pcp = ep->s->m_strLastPCalledParty;
+                if (!pcp.empty() && pcp.find(in->dialTarget) != std::string::npos) m_metrics.counter("pcpid_ok");
+                else if (!pcp.empty()) emitEvent("P-Called-Party-ID " + pcp + " != dialed " + in->dialTarget, ep, "invite", 0, e.callId);
+            }
+        }
         // 피어 착신 호는 엔진이 INVITE 수신 때 만든다 — Progress/Answer 전에 인스턴스의 RTP 모드를 입힌다
         if (in && ep->isPeer()) ep->poolRef->peer->SetMediaMode(e.callId, in->rtpMode);
         if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "incoming:" + roleOf(in, ep)) {
-            // answer/reject 단계가 착신을 기다리고 있었다 — after_ms 뒤 응답
+            // answer/reject 단계가 착신을 기다리고 있었다 — after_ms(와 피어 보류 시한 중 늦은 쪽) 뒤 응답
             in->phase = Instance::WAIT_TIME;
-            in->waitUntilMs = now + m_body[in->stepIdx].afterMs;
+            in->waitUntilMs = std::max(now + m_body[in->stepIdx].afterMs, ep->holdUntilMs);
         }
         if (!in) {
             // 인스턴스 밖의 착신(예: 시나리오에 없는 상대) — 486 로 거절해 스택을 비운다
@@ -1146,11 +1193,12 @@ static int codecPtOf(const std::string& name) {
     return -1;
 }
 
-bool Worker::epStartCall(Endpoint* from, Endpoint* to, const Json& media) {
+bool Worker::epStartCall(Endpoint* from, Endpoint* to, const Json& media, const std::string& dial) {
     if (from->isPeer()) {
         Pool* pool = from->poolRef;
-        std::string callId = pool->peer->StartCall(from->id.user, to->id.user, to->id.domain, pool->targetIp, pool->targetPort,
-                                                   parseTransport(pool->transport), rtpModeOf(media));
+        // to 없으면 번호 리터럴(대표번호·DID) — 피어는 상대(대상) 도메인으로 부른다
+        std::string callId = pool->peer->StartCall(from->id.user, to ? to->id.user : dial, to ? to->id.domain : pool->targetDomain,
+                                                   pool->targetIp, pool->targetPort, parseTransport(pool->transport), rtpModeOf(media));
         if (callId.empty()) return false;
         from->callId = callId;
         pool->byCall[callId] = from;
@@ -1164,8 +1212,8 @@ bool Worker::epStartCall(Endpoint* from, Endpoint* to, const Json& media) {
     from->s->SetOfferCodec(codecPtOf(media["audio"].asString("")));
     // UE 가 피어 신원을 부를 때 — ibcf(타 IMS) 는 user@피어도메인(Request-URI host → req_uri_host 규칙), pbx/mgcf 는 번호 그대로
     //   (DID/E.164 — CSP 가 번호 prefix 규칙으로 트렁크를 고른다, 실 단말이 다이얼하는 꼴)
-    std::string target = to->id.user;
-    if (to->isPeer() && to->poolRef->profile == "ibcf") target += "@" + to->id.domain;
+    std::string target = to ? to->id.user : dial;   // 역할 없는 번호 리터럴(대표번호) 은 실 단말이 다이얼하는 꼴 그대로
+    if (to && to->isPeer() && to->poolRef->profile == "ibcf") target += "@" + to->id.domain;
     if (from->inCall && !from->s->m_strInviteId.empty()) {
         // 통화 중인 단말의 두 번째 INVITE = 상담 통화(consultation, 두 번째 다이얼로그) — attended transfer(RFC 3515 + Refer-To Replaces)의 전제.
         //   첫 통화는 유지된다(실 단말은 hold 하지만 계측기는 미디어 방향을 판정하지 않는다 — 전달 뒤 전달자는 빠진다)
@@ -1188,11 +1236,11 @@ bool Worker::epStartCall(Endpoint* from, Endpoint* to, const Json& media) {
 }
 
 /** 픽업·Replaces·Join 발신(UE 세션만) — kind 별 INVITE 를 낸다. 실패(스택 거절·대상 다이얼로그 미학습) 는 false. */
-static bool startSpecialCall(Endpoint* from, Endpoint* to, const std::string& kind, const std::string& payload) {
+static bool startSpecialCall(Endpoint* from, Endpoint* to, const std::string& kind, const std::string& payload, const std::string& dial = "") {
     SimSession* s = from->s;
     if (kind == "pickup") {
-        // 피처코드 다이얼(volte_supplementary_services.md §5.2) — <code> 그룹 픽업 · <code><번호> 지정 픽업
-        s->StartCall(payload + (to ? to->id.user : std::string()));
+        // 피처코드 다이얼(volte_supplementary_services.md §5.2) — <code> 그룹 픽업 · <code><번호> 지정 픽업(번호 = 역할 신원 또는 리터럴 대표번호)
+        s->StartCall(payload + (to ? to->id.user : dial));
     } else {
         // RFC 3891/3911 — dialog 이벤트(RFC 4235)로 학습한 대상 다이얼로그. 태그 방향: 우리 to-tag = 상대(remote)·from-tag = 대상(local)
         if (s->m_strWatchedDlgCallId.empty()) return false;
@@ -1679,6 +1727,27 @@ void Worker::launchInstance(long long now) {
             }
             return;
         }
+        // 그룹 밖 역할(member: false) — 잡은 그룹의 멤버가 아닌 준비된 PTT 단말을 free 목록에서(청취 관제사·비멤버 거절 시험)
+        for (auto& g : m_guestRoles) {
+            auto& v = m_free[g];
+            Endpoint* pick = nullptr;
+            for (size_t i = 0; i < v.size(); ++i) {
+                Endpoint* c = v[i];
+                if (c->inst == nullptr && c->ready() && c->id.pttGroup != group && !epHasCall(c)) { pick = c; v.erase(v.begin() + (long)i); break; }
+            }
+            if (!pick) {
+                m_metrics.counter("skipped");
+                bool anyActive = false;
+                for (auto& i : m_instances) if (i->phase != Instance::DONE) { anyActive = true; break; }
+                if (!anyActive) {
+                    emitEvent("no non-member PTT endpoint for guest role " + g + " (group " + group + ") — run closed", nullptr, "", 0);
+                    logf("warn", "run %s: guest role %s has no usable non-member endpoint — closing", m_run->runId.c_str(), g.c_str());
+                    endRun("stopped");
+                }
+                return;
+            }
+            actors[g] = pick;
+        }
     }
     for (auto& kv : m_run->roles) {
         if (m_groupBound) break;
@@ -1748,14 +1817,25 @@ void Worker::execStep(Instance& in, long long now) {
         const CompiledStep& st = m_body[in.stepIdx];
         if (st.step == "invite") {
             Endpoint* from = in.actors[st.from];
-            Endpoint* to = st.to.empty() ? nullptr : in.actors[st.to];
-            if (!from || !to) { finishInstance(in, true, "invite: role missing", now); return; }
+            // to = 역할 또는 다이얼 번호 리터럴(대표번호 — TS 24.239 Flexible Alerting). 번호면 인스턴스의 다른 UE 역할이 포크 착신을 받는다
+            bool dial = !st.to.empty() && !m_run->roles.count(st.to);
+            Endpoint* to = (st.to.empty() || dial) ? nullptr : in.actors[st.to];
+            if (!from || (!to && !dial)) { finishInstance(in, true, "invite: role missing", now); return; }
             from->tStartCallMs = now;
             in.expectCode = (int)st.expect["code"].asInt(0);
             in.rtpMode = rtpModeOf(st.media);   // 이 호의 미디어 평면 — 인스턴스의 모든 단말(전달 대상 포함)에 같은 모드
             for (auto& a : in.actors) epSetMediaMode(a.second, in.rtpMode);
             epSetVideo(in, from, st.media["video"].asString("") == "h264");
-            if (!epStartCall(from, to, st.media)) { finishInstance(in, true, "invite: StartCall refused (busy/stack/consult?)", now); return; }
+            if (dial) {
+                // 포크 관측 기준 — 발신자를 뺀 UE 역할 전부가 alert 를 받아야 한다(그룹원으로 시드된 신원). 포크 leg 의 CANCEL(487) 은 정상
+                in.forkDial = true;
+                in.dialTarget = st.to;
+                long long expected = 0;
+                for (auto& a : in.actors) if (a.second && a.second != from && !a.second->isPeer()) ++expected;
+                m_metrics.counter("fork_expected", expected);
+                m_metrics.counter("fork_dial_tx");
+            }
+            if (!epStartCall(from, to, st.media, dial ? st.to : std::string())) { finishInstance(in, true, "invite: StartCall refused (busy/stack/consult?)", now); return; }
             if (from->outKind == "consult") from->consultTo = st.to;
             noteCallId(&in, from->isPeer() ? from->callId : from->outKind == "consult" ? from->consultCallId : from->s->m_strInviteId);
             m_metrics.counter("legs", 2);
@@ -1780,25 +1860,31 @@ void Worker::execStep(Instance& in, long long now) {
             if (!from || !from->isPtt()) { finishInstance(in, true, "group_call: from 은 PTT 단말이어야 한다", now); return; }
             std::string group = st.group.empty() ? in.group : st.group;
             if (group.empty()) { finishInstance(in, true, "group_call: group 없음", now); return; }
+            // 세션이 이미 서 있으면(앞선 group_call) 이 발신은 합류 — 청취(payload listen = a=recvonly, dispatch_center.md §5.6 비멤버 관제사) 또는
+            //   비멤버 일반 INVITE(거절 403 기대). 완료 = 이 발신자 자기 200(또는 expect.code) — fan-out 을 다시 기다리지 않는다
+            bool listen = st.payload == "listen";
+            bool sessionUp = false;
+            for (auto* ep : endpointsOf(in)) if (ep != from && ep->inCall) { sessionUp = true; break; }
+            if (listen && !sessionUp) { finishInstance(in, true, "group_call listen: 진행 중인 그룹 세션이 없다", now); return; }
             from->tStartCallMs = now;
-            in.tGroupCallMs = now;
-            in.tLastJoinMs = 0;
-            in.groupTo = st.to;
+            if (!sessionUp) { in.tGroupCallMs = now; in.tLastJoinMs = 0; in.groupTo = st.to; }
             in.expectCode = (int)st.expect["code"].asInt(0);
-            in.rtpMode = rtpModeOf(st.media);
-            for (auto* ep : endpointsOf(in)) epSetMediaMode(ep, in.rtpMode);
+            if (!sessionUp) { in.rtpMode = rtpModeOf(st.media); for (auto* ep : endpointsOf(in)) epSetMediaMode(ep, in.rtpMode); }
+            else epSetMediaMode(from, in.rtpMode);
             epSetVideo(in, from, st.media["video"].asString("") == "h264");
             from->s->SetOfferCodec(codecPtOf(st.media["audio"].asString("")));   // 시나리오 오퍼 코덱(PTT 표준 = amr-wb). 없으면 풀 기본
+            from->s->SetListenOnly(listen);
             from->s->StartGroupCall(group);
             if (from->s->m_strInviteId.empty()) { finishInstance(in, true, "group_call: StartGroupCall refused (busy/stack?)", now); return; }
             noteCallId(&in, from->s->m_strInviteId);
             m_metrics.counter("legs");
-            m_metrics.counter("group_calls");
+            if (!sessionUp) m_metrics.counter("group_calls");
             m_metrics.counter("invite_tx");
+            if (listen) m_metrics.counter("listen_tx");
             from->outPending = true;
-            from->outKind = "invite";
+            from->outKind = listen ? "listen" : sessionUp ? "group_join" : "invite";   // 확립 때 <kind>_ok — 세션(SER)은 개시 INVITE 만
             in.phase = Instance::WAIT_EVENT;
-            in.awaitKind = in.expectCode >= 300 ? "callend:" + st.from : "groupup";   // 둘 다 advance 가 stepIdx++ 한다
+            in.awaitKind = in.expectCode >= 300 ? "callend:" + st.from : sessionUp ? "callstart:" + st.from : "groupup";   // 셋 다 advance 가 stepIdx++ 한다
             in.deadlineMs = now + m_cfg.inviteTimeoutMs;
             return;
         }
@@ -1856,7 +1942,7 @@ void Worker::execStep(Instance& in, long long now) {
             in.pendingCause = st.cause;
             if (st.step == "reject" && st.payload.size()) in.pendingCode = atoi(st.payload.c_str());
             if (st.step == "progress" && ep->inCall) { in.stepIdx++; continue; }   // 이미 확립 — 183 은 의미 없음
-            if (ep->pendingInvite) { in.phase = Instance::WAIT_TIME; in.waitUntilMs = now + st.afterMs; }
+            if (ep->pendingInvite) { in.phase = Instance::WAIT_TIME; in.waitUntilMs = std::max(now + st.afterMs, ep->holdUntilMs); }
             else { in.phase = Instance::WAIT_EVENT; in.awaitKind = "incoming:" + role; in.deadlineMs = now + m_cfg.inviteTimeoutMs; }
             return;
         }
@@ -2011,9 +2097,12 @@ void Worker::execStep(Instance& in, long long now) {
             // 당겨받기(피처코드, volte_supplementary_services.md §5) · INVITE-Replaces(RFC 3891, BLF 클릭 픽업 §6.2) · INVITE-Join(RFC 3911, 합법감청 청취 dispatch_center.md §5.3)
             //   from 이 새 다이얼로그를 열고 서버가 대상 호를 재고정(픽업·Replaces)하거나 청취 leg 를 붙인다(Join). 완료 = from 의 200(또는 expect.code 의 거절)
             Endpoint* from = in.actors[st.from];
-            Endpoint* to = st.to.empty() ? nullptr : in.actors[st.to];
+            // pickup 의 to 는 역할 또는 번호 리터럴(링잉 대표번호 지정 픽업 — dispatch_center.md §4.4 PickUpFork)
+            bool dialTo = st.step == "pickup" && !st.to.empty() && !m_run->roles.count(st.to);
+            Endpoint* to = (st.to.empty() || dialTo) ? nullptr : in.actors[st.to];
             if (!from || from->isPeer()) { finishInstance(in, true, st.step + ": from 은 UE 역할이어야 한다", now); return; }
             if (st.step != "pickup" && !to) { finishInstance(in, true, st.step + ": to(대상 다이얼로그의 당사자 역할) 필요", now); return; }
+            if (st.step == "pickup" && !st.to.empty() && !to && !dialTo) { finishInstance(in, true, "pickup: to role missing", now); return; }
             if (st.step == "pickup" && st.payload.empty()) { finishInstance(in, true, "pickup: payload(피처코드) 필요", now); return; }
             if (from->inCall || from->outPending) { finishInstance(in, true, st.step + ": from 이 이미 통화 중", now); return; }
             if (st.step != "pickup" && from->s->m_strWatchedDlgCallId.empty()) {
@@ -2029,7 +2118,7 @@ void Worker::execStep(Instance& in, long long now) {
             from->s->SetOfferCodec(codecPtOf(st.media["audio"].asString("")));
             from->tStartCallMs = now;
             in.expectCode = (int)st.expect["code"].asInt(0);
-            if (!startSpecialCall(from, to, st.step, st.payload)) { finishInstance(in, true, st.step + ": INVITE not sent", now); return; }
+            if (!startSpecialCall(from, to, st.step, st.payload, dialTo ? st.to : std::string())) { finishInstance(in, true, st.step + ": INVITE not sent", now); return; }
             noteCallId(&in, from->s->m_strInviteId);
             m_metrics.counter("legs");
             m_metrics.counter(st.step + "_tx");
@@ -2152,11 +2241,11 @@ void Worker::releaseEndpoint(Endpoint* ep) {
     ep->floor = Endpoint::F_IDLE;
     ep->tReleasedMs = nowMs();
     if (ep->isPeer()) epClearCall(ep);
-    else { epUnsubscribe(ep); ep->s->SetMediaMode(CRtpThread::E_MEDIA_AUTO); }
+    else { epUnsubscribe(ep); ep->s->SetMediaMode(CRtpThread::E_MEDIA_AUTO); ep->s->SetListenOnly(false); }
     Instance* in = ep->inst;
     ep->inst = nullptr;
-    // 그룹 단위 인스턴스는 free 목록을 쓰지 않는다(그룹 목록에서 고른다)
-    if (in && !m_groupBound) for (auto& a : in->actors) if (a.second == ep) { m_free[a.first].insert(m_free[a.first].begin(), ep); break; }
+    // 그룹 단위 인스턴스는 멤버를 free 목록에서 고르지 않는다(그룹 목록에서). 그룹 밖 역할(member: false)만 free 목록으로 돌아간다
+    if (in) for (auto& a : in->actors) if (a.second == ep) { if (!m_groupBound || isGuestRole(a.first)) m_free[a.first].insert(m_free[a.first].begin(), ep); break; }
 }
 
 void Worker::finishInstance(Instance& in, bool failed, const std::string& why, long long now) {

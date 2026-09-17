@@ -31,6 +31,12 @@ export interface Resolved { pools: Record<string, PoolDoc>; kind: 'ue' | 'peer' 
 export const isGroupSession = (sc: Doc) => (sc.flow ?? []).some(s => s.step === 'group_call')
 export const multiRoles = (sc: Doc) => Object.entries(sc.roles ?? {}).filter(([, r]) => r.multi).map(([n]) => n)
 export const FLOOR_OUTCOMES = ['granted', 'denied', 'queued', 'any']
+/** group_call 의 payload — listen = 그룹 밖 역할(member: false)의 a=recvonly 청취 합류 */
+export const GROUP_CALL_MODES = ['listen']
+/** invite/pickup 의 to 가 역할이 아닌 다이얼 번호(대표번호) 또는 ${var} 바인딩인가 — 컨트롤러 is_dial_literal 과 같다 */
+export const isDialLiteral = (v: string | undefined) => !!v && (/^[0-9*#+]{1,32}$/.test(v) || /^\$\{\w+\}$/.test(v))
+/** 그룹 세션의 그룹 밖 역할(member: false) */
+export const guestRoles = (sc: Doc) => Object.entries(sc.roles ?? {}).filter(([, r]) => r.member === false).map(([n]) => n)
 export function resolvePool(sc: Doc, topo: TopologyDoc | null, role: string): Resolved | null {
   const r = sc.roles?.[role]; if (!r || !topo) return null
   const name = r.pool
@@ -126,7 +132,7 @@ export function validate(sc: Doc, topo: TopologyDoc | null, vocab: ScenarioVocab
     const who = `flow[${i}] ${s.step}`; const ref: Sel = { kind: 'step', idx: i }
     const D = vocab?.steps[s.step]
     if (vocab && !D) { E(who, `알 수 없는 단계 ${s.step}`, ref); return }
-    for (const rr of [...(s.who ?? []), s.from, s.to]) if (rr && !names.has(rr)) E(who, `정의되지 않은 역할 '${rr}' 참조`, ref)
+    for (const rr of [...(s.who ?? []), s.from, s.to]) if (rr && !names.has(rr)) { if (rr === s.to && (s.step === 'invite' || s.step === 'pickup') && isDialLiteral(rr)) continue; E(who, `정의되지 않은 역할 '${rr}' 참조${rr === s.to && (s.step === 'invite' || s.step === 'pickup') ? ' (to 는 번호 리터럴(0-9*#+) 또는 ${var} 도 된다)' : ''}`, ref) }
     if (D) {
       if (D.actor === 'who' && !(s.who && s.who.length)) E(who, 'who 가 필요하다', ref)
       if ((D.actor === 'from' || D.actor === 'fromto') && !(s.from || (s.who && s.who.length))) E(who, 'from 또는 who 가 필요하다', ref)
@@ -143,13 +149,14 @@ export function validate(sc: Doc, topo: TopologyDoc | null, vocab: ScenarioVocab
     if (s.step === 'publish' && s.payload != null && !PUBLISH_COMMANDS.includes(s.payload)) E(who, `publish 의 payload(affiliation 명령)는 ${PUBLISH_COMMANDS.join('|')} 중 하나`, ref)
     if (s.step === 'invite' && s.from && sessions(sc).some(o => o.start < i && o.est != null && o.end > i && (o.a === s.from || o.b === s.from))) I(who, `'${s.from}' 이 통화 중 — 두 번째 다이얼로그(상담 통화). 뒤의 refer 가 to 를 가리키면 attended 전달`, ref)
     if (s.step === 'group_call' && !s.from) E(who, 'group_call 은 from(발신 멤버 역할)이 필요하다', ref)
+    if (s.step === 'group_call' && s.payload != null && !GROUP_CALL_MODES.includes(s.payload)) E(who, `group_call 의 payload 는 ${GROUP_CALL_MODES.join('|')}(recvonly 청취 합류) 또는 생략`, ref)
     if (s.step === 'floor_request' && s.payload != null && !FLOOR_OUTCOMES.includes(s.payload)) E(who, `floor_request 의 payload(기대 결과)는 ${FLOOR_OUTCOMES.join('|')} 중 하나`, ref)
     if (s.group != null && s.step !== 'group_call' && s.step !== 'publish') E(who, 'group 은 group_call/publish 에만 둔다', ref)
     if (s.media?.rtp && s.media.rtp !== 'auto' && s.step !== 'invite' && s.step !== 'group_call') E(who, 'media.rtp 는 invite/group_call 에만 둔다', ref)
     if (s.step === 'dtmf' && !(s.payload && /^[0-9*#A-Da-d]+$/.test(s.payload))) E(who, 'dtmf 는 payload 숫자열(0-9 * # A-D)이 필요하다', ref)
     if (s.cause != null && !['bye', 'reject'].includes(s.step)) E(who, 'cause 는 bye/reject 에만 둔다', ref)
     for (const k of Object.keys(s.expect ?? {})) if (vocab && !vocab.metrics[k]) E(who, `알 수 없는 지표 '${k}'`, ref)
-    for (const v of [s.seconds, s.payload]) { const b = bindRef(v); if (b && !bound.has(b)) W(who, `바인딩 \${${b}} 값이 없다 — profile.ht 또는 요청 bindings`, ref) }
+    for (const v of [s.seconds, s.payload, ...((s.step === 'invite' || s.step === 'pickup') && s.to && !names.has(s.to) ? [s.to] : [])]) { const b = bindRef(v); if (b && !bound.has(b)) W(who, `바인딩 \${${b}} 값이 없다 — profile.ht 또는 요청 bindings`, ref) }
     if ((s.step === 'register' || s.step === 'deregister') && i >= pre && i < epi) E(who, `${s.step} 는 body 안에 둘 수 없다 — 앞쪽(prelude) 또는 끝(epilogue)으로`, ref)
     // kind 게이트
     const actors = [...(s.who ?? []), s.from].filter((x): x is string => !!x)
@@ -192,22 +199,30 @@ export function validate(sc: Doc, topo: TopologyDoc | null, vocab: ScenarioVocab
   const referenced = new Set((sc.flow ?? []).flatMap(s => [...(s.who ?? []), s.from, s.to]).filter(Boolean))
   for (const n of roles(sc)) if (!referenced.has(n)) I(`roles.${n}`, '흐름에서 참조되지 않는 역할 — 풀만 열린다(failover 상대 등)', { kind: 'role', id: n })
   // 그룹 세션(group_call) 규칙 — 컨트롤러 Scenario._check_group_session 과 같다
-  const multi = multiRoles(sc)
+  const multi = multiRoles(sc); const guests = guestRoles(sc)
   if (!isGroupSession(sc)) {
     for (const m of multi) E(`roles.${m}`, 'multi 는 group_call 이 있는 시나리오에만 둔다', { kind: 'role', id: m })
+    for (const g of guests) E(`roles.${g}`, 'member=false 는 group_call 이 있는 시나리오에만 둔다(그룹 밖 신원)', { kind: 'role', id: g })
     ;(sc.flow ?? []).forEach((s, i) => { if (s.step === 'floor_request' || s.step === 'floor_release') E(`flow[${i}]`, `${s.step} 는 group_call 뒤에만 둔다`, { kind: 'step', idx: i }) })
   } else {
     if (multi.length > 1) E('roles', `multi 역할은 하나만 둔다(그룹의 나머지 멤버) — ${multi.join(', ')}`, { kind: 'role', id: multi[1] })
-    const pools = new Set(Object.values(sc.roles ?? {}).map(r => r.pool))
-    if (pools.size > 1) E('roles', `그룹 세션 시나리오의 역할은 모두 같은 풀이어야 한다 — ${[...pools].join(', ')}`, { kind: 'scenario' })
-    let inS = false
+    for (const g of guests) if (multi.includes(g)) E(`roles.${g}`, 'member=false 역할은 multi 가 될 수 없다(그룹 밖 신원은 인스턴스마다 하나)', { kind: 'role', id: g })
+    const pools = new Set(Object.entries(sc.roles ?? {}).filter(([n]) => !guests.includes(n)).map(([, r]) => r.pool))
+    if (pools.size > 1) E('roles', `그룹 세션 시나리오의 멤버 역할은 모두 같은 풀이어야 한다 — ${[...pools].join(', ')} (그룹 밖 역할은 member: false)`, { kind: 'scenario' })
+    let inS = false; let first = true
     ;(sc.flow ?? []).forEach((s, i) => {
       const ref: Sel = { kind: 'step', idx: i }, who = `flow[${i}]`
       if (['invite', 'answer', 'reject', 'progress', 'refer', 'hold', 'resume', 'dtmf', 'pickup', 'replaces', 'join'].includes(s.step)) E(who, `${s.step} — 그룹 세션 시나리오에는 1:1 호 단계를 섞지 않는다`, ref)
       if (s.step === 'group_call') {
         if (s.from && multi.includes(s.from)) E(who, `group_call.from='${s.from}' 은 단일 역할이어야 한다`, ref)
         if (s.to && !multi.includes(s.to)) E(who, `group_call.to='${s.to}' 는 multi 역할이어야 한다(합류를 기다릴 나머지 멤버)`, ref)
-        if (!s.to) I(who, 'to 가 없다 — 발신자 200 만 기다린다(멤버 합류·group_fanout_ms 표본 없음)', ref)
+        if (first && s.from && guests.includes(s.from)) E(who, `첫 group_call 의 from='${s.from}' 은 그룹 멤버 역할이어야 한다(인스턴스의 그룹을 정한다) — 그룹 밖 역할은 그 뒤 listen 합류 또는 거절(expect.code 403)`, ref)
+        if (s.payload === 'listen' && s.from && !guests.includes(s.from)) E(who, `group_call listen 의 from='${s.from}' 은 그룹 밖 역할(member: false)이어야 한다 — 비멤버 관제사의 recvonly 청취 합류(dispatch_center.md §5.6)`, ref)
+        if (s.payload === 'listen' && !inS) E(who, 'group_call listen 은 진행 중인 그룹 세션(앞선 group_call) 뒤에만 둔다', ref)
+        if (s.payload === 'listen' && s.to) E(who, 'group_call listen 은 to 를 두지 않는다(합류 대기는 청취자 자기 200 만)', ref)
+        if (!s.to && !inS && !first) I(who, 'to 가 없다 — 발신자 200 만 기다린다(멤버 합류·group_fanout_ms 표본 없음)', ref)
+        else if (!s.to && first) I(who, 'to 가 없다 — 발신자 200 만 기다린다(멤버 합류·group_fanout_ms 표본 없음)', ref)
+        first = false
         inS = true
       } else if ((s.step === 'floor_request' || s.step === 'floor_release') && !inS) E(who, `${s.step} 는 group_call 뒤에만 둔다`, ref)
       else if (s.step === 'bye') inS = false

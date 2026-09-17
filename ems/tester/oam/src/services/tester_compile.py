@@ -252,7 +252,9 @@ def compile_steps(scenario: Scenario, bindings: Dict[str, object]) -> List[dict]
                 cur = d.at_s
             emit(i, 'media_hold', seconds=max(1, int(round(seconds - cur))), expect=s.expect)
             continue
-        emit(i, s.step, who=s.who, from_=s.from_, to=s.to, after_ms=s.after_ms, seconds=seconds, media=s.media,
+        # to 가 역할이 아닌 다이얼 리터럴(${pilot} 대표번호)이면 바인딩을 푼다 — 역할 이름은 그대로
+        emit(i, s.step, who=s.who, from_=s.from_, to=bind_str(s.to, bindings) if s.to not in scenario.roles else s.to,
+             after_ms=s.after_ms, seconds=seconds, media=s.media,
              group=s.group, payload=bind_str(s.payload, bindings), cause=s.cause, expect=s.expect, sample=s.sample, loop=s.loop)
     return out
 
@@ -406,11 +408,12 @@ def group_session_info(scenario: Scenario, pool_name: str, ids: List[dict], begi
     """그룹 세션(group_call) 시나리오의 그룹 자원 — 인스턴스 하나 = MCPTT 그룹 하나. 필요 멤버 = 단일 역할 수 + (multi 역할이 있으면 1).
     멤버가 모자란 그룹은 워커가 고르지 않는다(usable 에서 빠진다). 쓸 그룹이 없으면 컴파일 오류."""
     multi = set(scenario.multi_roles())
+    guests = set(scenario.guest_roles())
     used = set()
     for st in scenario.flow:
         if st.step in ('register', 'deregister'):
             continue
-        used.update(r for r in [*(st.who or []), st.from_, st.to] if r)
+        used.update(r for r in [*(st.who or []), st.from_, st.to] if r and r not in guests)
     need = len([r for r in used if r not in multi]) + (1 if used & multi else 0)
     sizes: Dict[str, int] = {}
     nogroup = 0
@@ -424,14 +427,16 @@ def group_session_info(scenario: Scenario, pool_name: str, ids: List[dict], begi
     if not usable:
         raise CompileError(f'pool {pool_name}: 멤버 {need} 명 이상인 MCPTT 그룹이 없다 — 신원의 ptt_group(creds `group` · source.ptt_group)을 확인 '
                            f'(그룹 {len(sizes)} 개, 그룹 없는 신원 {nogroup})')
+    # 워커는 그룹 id 정렬 순으로 순환 선택한다(run 시작 커서 0) — 단발 첫 인스턴스의 그룹 = usable_groups[0]. 검증 다리가 픽스처(자격·역할)를 그 그룹에 입힌다
     return {'pool': pool_name, 'groups': len(sizes), 'usable': len(usable), 'need_members': need,
-            'members_min': min(usable.values()), 'members_max': max(usable.values()), 'no_group': nogroup}
+            'members_min': min(usable.values()), 'members_max': max(usable.values()), 'no_group': nogroup,
+            'usable_groups': sorted(usable), 'first_group': sorted(usable)[0]}
 
 
 def worker_peer(topology: Topology, pname: str) -> WorkerPeer:
     p = topology.pools[pname]
     return WorkerPeer(profile=p.profile, bind=WorkerPeerBind(ip=topology.pool_bind_ip(pname), port=p.bind.port, protocol=p.bind.protocol),
-                      domain=p.domain, identities=p.identities, codecs=p.codecs, answer=p.answer, prack=p.prack, dtmf=p.dtmf)
+                      domain=p.domain, identities=p.identities, codecs=p.codecs, answer=p.answer, fault=p.fault, prack=p.prack, dtmf=p.dtmf)
 
 
 def initial_rate(profile: LoadProfile) -> float:
@@ -505,11 +510,18 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
         check_kind_gates(scenario, topology, role_pool)
         sizes = {pn: len(ids_of(pn)) for pn in set(role_pool.values())}
         if group_session:
-            # 그룹 세션 — 역할은 신원 창을 나누지 않는다(그룹 멤버가 풀 전체에 걸쳐 있다). 모든 역할 = 풀 전체, 배정은 워커가 그룹 단위로
-            pn = next(iter(set(role_pool.values())))
-            if len(set(role_pool.values())) > 1:
-                raise CompileError(f'{w.name}: 그룹 세션 시나리오의 역할이 서로 다른 풀로 해석된다 — {sorted(set(role_pool.values()))}')
-            ranges = {role: (pn, 0, sizes[pn]) for role in scenario.roles}
+            # 그룹 세션 — 멤버 역할은 신원 창을 나누지 않는다(그룹 멤버가 풀 전체에 걸쳐 있다). 멤버 역할 = 그룹 풀 전체, 배정은 워커가 그룹 단위로.
+            #   그룹 밖 역할(member: false)은 자기 풀 전체 — 워커가 잡은 그룹의 멤버가 아닌 단말을 고른다
+            guests = set(scenario.guest_roles())
+            member_pools = {p for r, p in role_pool.items() if r not in guests}
+            if len(member_pools) > 1:
+                raise CompileError(f'{w.name}: 그룹 세션 시나리오의 멤버 역할이 서로 다른 풀로 해석된다 — {sorted(member_pools)}')
+            pn = next(iter(member_pools))
+            ranges = {role: ((pn, 0, sizes[pn]) if role not in guests else (role_pool[role], 0, sizes[role_pool[role]])) for role in scenario.roles}
+            for g in guests:
+                gp = role_pool[g]
+                if topology.pool_service(gp) != 'ptt':
+                    raise CompileError(f'{w.name}: 그룹 밖 역할 {g!r} 의 풀 {gp} 은 service=ptt UE 풀이어야 한다')
             groups_info[w.name] = group_session_info(scenario, pn, ids_of(pn), 0, sizes[pn])
         else:
             ranges = role_ranges(scenario.roles, role_pool, sizes)
@@ -546,7 +558,7 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
             pools.append(pc.model_dump(by_alias=True, exclude_none=True))
         slices = {role: [b, e] for role, (_p, b, e) in pw['ranges'].items()}
         rs = RunStart(run_id=run_id, scenario_id=scenario.id, roles=dict(pw['role_pool']), role_slices=slices,
-                      multi_roles=scenario.multi_roles(),
+                      multi_roles=scenario.multi_roles(), guest_roles=scenario.guest_roles(),
                       steps=[CompiledStep.model_validate({k: v for k, v in s.items() if k != 'src'}) for s in steps],
                       samples=samples, rate_saps=rate_total * share,
                       max_instances=(max(1, int(round(max_instances * share))) if max_instances else None),
@@ -573,7 +585,7 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
         p0 = topology.pools[pname0]
         roles_out[role] = {'pool': r.pool, 'kind': p0.kind, 'profile': getattr(p0, 'profile', None),
                            'service': topology.pool_service(pname0) if p0.kind == 'ue' else None,
-                           'disjoint_from': r.disjoint_from, 'count': r.count, 'multi': bool(r.multi),
+                           'disjoint_from': r.disjoint_from, 'count': r.count, 'multi': bool(r.multi), 'member': bool(r.member),
                            'workers': per, 'total': sum(e - b for (_p, b, e) in per.values())}
     return {'workers': plan_workers, 'rate_total': rate_total, 'roles': roles_out, 'steps': steps, 'phases': phases(scenario),
             'bindings': bindings, 'max_instances': max_instances,
@@ -582,4 +594,6 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
             'group_session': ({'workers': groups_info, 'usable': sum(g['usable'] for g in groups_info.values()),
                                'groups': sum(g['groups'] for g in groups_info.values()),
                                'need_members': max(g['need_members'] for g in groups_info.values()),
-                               'members_max': max(g['members_max'] for g in groups_info.values())} if groups_info else None)}
+                               'members_max': max(g['members_max'] for g in groups_info.values()),
+                               'first_group': next(iter(groups_info.values()))['first_group'],
+                               'guest_roles': scenario.guest_roles()} if groups_info else None)}

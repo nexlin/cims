@@ -1,0 +1,14 @@
+# 비멤버 일반 INVITE 거절 (TS 24.379 — 그룹 비멤버의 sendrecv INVITE 는 403) — 진행 중 그룹 세션에 그룹 밖 단말(monitor)이 청취가 아닌 일반 INVITE.
+#   검증 S3-SCN-PTT-LISTEN L4.
+id: PTT-GROUP-NONMEMBER-DENIED
+title: 비멤버 일반 INVITE → 403 (TS 24.379)
+tags: [ptt, negative]
+roles:
+  talker:    { pool: ptt_ue }
+  listeners: { pool: ptt_ue, multi: true }
+  outsider:  { pool: ptt_ue, member: false }
+flow:
+  - { step: register,   who: [talker, listeners, outsider], expect: { code: 200 } }
+  - { step: group_call, from: talker, to: listeners, media: { audio: amr-wb }, expect: { code: 200 } }
+  - { step: group_call, from: outsider, expect: { code: 403 } }
+  - { step: bye,        from: talker }

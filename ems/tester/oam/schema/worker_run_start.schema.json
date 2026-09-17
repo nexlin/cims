@@ -301,6 +301,14 @@
   "additionalProperties": false,
   "description": "POST /runs — 컴파일된 시나리오 + 이 워커의 배분.",
   "properties": {
+    "guest_roles": {
+      "description": "그룹 세션의 그룹 밖 역할(member: false) — 잡은 그룹의 멤버가 아닌 PTT 단말을 역할 풀 free 목록에서 배정",
+      "items": {
+        "type": "string"
+      },
+      "title": "Guest Roles",
+      "type": "array"
+    },
     "max_instances": {
       "anyOf": [
         {

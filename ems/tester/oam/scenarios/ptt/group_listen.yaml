@@ -1,0 +1,19 @@
+# PTT 그룹콜 청취 (dispatch_center.md §5.6) — 멤버(talker·listeners)의 그룹 세션에 그룹 밖 관제사(monitor, member: false)가 그룹 URI 로
+#   a=recvonly INVITE(payload listen). CSP 가 자격(allow_ambient_listening)·범위(역할 ptt_listen) 2단 인가 뒤 청취 멤버로 합류(CMP PTT_JOIN recv_only)
+#   — monitor 의 floor 요청은 DENY, talker 발언 동안 monitor 는 수신만. listen_pct = recvonly INVITE 확립률. 검증 S3-SCN-PTT-LISTEN L1 (자격·역할은 검증 픽스처).
+id: PTT-GROUP-LISTEN
+title: PTT 그룹콜 청취 (관제사 recvonly 합류 · floor DENY)
+tags: [ptt, dispatch, listen]
+roles:
+  talker:    { pool: ptt_ue }
+  listeners: { pool: ptt_ue, multi: true }
+  monitor:   { pool: ptt_ue, member: false }        # 잡은 그룹의 비멤버 PTT 단말(관제사)
+flow:
+  - { step: register,      who: [talker, listeners, monitor], expect: { code: 200 } }
+  - { step: group_call,    from: talker, to: listeners, media: { audio: amr-wb }, expect: { code: 200, group_fanout_ms: { p95: 3000 } } }
+  - { step: group_call,    from: monitor, payload: listen, expect: { code: 200, listen_pct: 100 } }
+  - { step: floor_request, who: [talker], expect: { floor_grant_ms: { p95: 500 } } }   # floor_grant_pct 는 run 누계라 monitor 의 DENY 가 섞인다 — 여기선 지연만
+  - { step: floor_request, who: [monitor], payload: denied }
+  - { step: media_hold,    seconds: "${ht}", expect: { rtp_loss_pct: { max: 1 } } }
+  - { step: floor_release, who: [talker] }
+  - { step: bye,           from: talker }

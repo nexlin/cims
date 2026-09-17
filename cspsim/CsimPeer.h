@@ -53,6 +53,8 @@ struct ICsimPeerObserver {
     virtual void OnPeerReferResponse(CsimPeer* /*p*/, const std::string& /*callId*/, int /*iSipStatus*/) {}
     /** 트렁크 REGISTER 최종 결과 — rrdMs = Register() → 최종 응답. */
     virtual void OnPeerRegister(CsimPeer* /*p*/, int /*iSipStatus*/, long long /*rrdMs*/) {}
+    /** 오류 주입(config.rejectCode) — 엔진이 착신 INVITE 를 즉시 거절했다(관측자 착신 통지 없음). 워커는 세기만 한다. */
+    virtual void OnPeerFaultReject(CsimPeer* /*p*/, const std::string& /*callId*/, const std::string& /*toUser*/, int /*iCode*/) {}
 };
 
 /** pbx 트렁크 REGISTER 계정 — 대상의 access 접속점(Digest 챌린지가 있는 쪽)으로 등록한다. */
@@ -77,6 +79,8 @@ struct CsimPeerConfig {
     std::vector<std::string> codecs;    // rtpmap 이름(PCMU·PCMA·AMR-WB·AMR·G722) 우선순위 순. 비면 프로파일 기본
     std::string mediaFile;              // AMR-WB raw 프레임 파일 — 비면 합성 PCMU
     bool silent = false;                // 착신 INVITE 무응답(죽은 피어)
+    int rejectCode = 0;                 // >0 이면 착신 INVITE 를 관측자에 알리지 않고 즉시 이 코드로 거절(오류 주입 — 5xx failover·Reason 투과 시험)
+    int rejectQ850 = 0;                 // 그 거절에 실을 Reason: Q.850;cause=
     std::string certFile;               // transport=TLS 서버 인증서(PEM, key 결합)
     std::string userAgent;              // User-Agent 헤더 — 비면 "cims-tester-peer/<profile>"
     bool prack = false;                 // RFC 3262 — 발신 INVITE 에 Supported/Require: 100rel, 1xx(RSeq) 에 PRACK. 착신은 INVITE 가 100rel 이면 RSeq

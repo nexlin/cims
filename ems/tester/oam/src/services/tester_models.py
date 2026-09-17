@@ -322,6 +322,16 @@ class PeerSeed(_Strict):
                                                     description='이 피어 소스 IP 에 대한 ACL — deny 면 403 기대')
 
 
+PeerAnswer = Literal['normal', 'silent', 'reject', 'delay']
+
+
+class PeerFault(_Strict):
+    """피어 오류 주입 — answer 정책의 매개변수. 재전송 유실(와이어 손실)·TLS 상호인증은 psip 수신 훅/클라이언트 인증서 검증이 없어 아직 없다(§10 C)."""
+    code: int = Field(default=503, ge=300, le=699, description='answer=reject 의 최종 응답 코드(503 = 5xx failover, 486/603 = 사용자 측 거절)')
+    q850: Optional[int] = Field(default=None, ge=1, le=127, description='거절에 실을 Reason: Q.850;cause= (RFC 3326 — 대상의 Reason 투과 시험)')
+    delay_ms: int = Field(default=0, ge=0, le=120000, description='answer=delay — 착신 INVITE 뒤 이 시간 동안 아무 응답도 내지 않는다(100 Trying 은 스택)')
+
+
 class PeerPool(_PoolBase):
     kind: Literal['peer']
     peering: str = Field(description='다음 홉 노드 id — SIP 노드(수신점 하나 이상)')
@@ -337,10 +347,21 @@ class PeerPool(_PoolBase):
     codecs: Optional[List[str]] = Field(
         default=None,
         description='오퍼 코덱(우선순위 순). 생략=프로파일 기본 — ibcf/mgcf: AMR-WB,AMR,PCMU,PCMA · pbx: PCMA,PCMU (§3.2)')
-    answer: Literal['normal', 'silent'] = Field(default='normal', description='silent = 착신 INVITE 무응답(죽은 피어 — failover 시험)')
+    answer: PeerAnswer = Field(default='normal', description='착신 정책 — normal: 시나리오 단계가 응답 · silent: 무응답(죽은 피어 — Timer B failover) · '
+                                                            'reject: 엔진이 즉시 fault.code 로 거절(5xx failover·Reason 투과) · delay: fault.delay_ms 동안 '
+                                                            '100 Trying 뒤 침묵(응답 지연 — 대상 타이머·early media 대기 시험), 그 뒤 시나리오 단계가 응답')
+    fault: Optional[PeerFault] = Field(default=None, description='answer reject/delay 의 매개변수(오류 주입)')
     prack: Optional[bool] = Field(default=None, description='RFC 3262 100rel/PRACK — 생략=프로파일 기본(ibcf/mgcf 켬, pbx 끔)')
     dtmf: bool = Field(default=True, description='RFC 4733 telephone-event 오퍼/echo')
     seed: PeerSeed = Field(default_factory=PeerSeed)
+
+    @model_validator(mode='after')
+    def _fault(self):
+        if self.answer == 'delay' and not (self.fault and self.fault.delay_ms > 0):
+            raise ValueError('answer: delay 는 fault.delay_ms(> 0) 가 필요하다')
+        if self.answer == 'reject' and self.fault is None:
+            self.fault = PeerFault()
+        return self
 
     @property
     def dial(self) -> str:
@@ -667,6 +688,15 @@ _BIND_REF = re.compile(r'^\$\{(\w+)\}$')
 
 # floor_request.payload — 기대 결과(TS 24.380 Granted / Deny / Queue Position Info). any = 결과가 나오기만 하면 된다
 FLOOR_OUTCOMES = ('granted', 'denied', 'queued', 'any')
+# group_call 의 payload — listen = a=recvonly 청취 합류(dispatch_center.md §5.6, 비멤버 관제사). 비면 일반 멤버 개시
+GROUP_CALL_MODES = ('listen',)
+# invite/pickup 의 to 가 역할이 아니라 다이얼 번호일 때(대표번호·피처코드 대상) — E.164/내선/피처코드 문자
+_DIAL_LITERAL = re.compile(r'^[0-9*#+]{1,32}$')
+
+
+def is_dial_literal(v: Optional[str]) -> bool:
+    """to 가 역할 이름이 아닌 다이얼 리터럴(번호) 또는 ${var} 바인딩인가 — 대표번호(TS 24.239 Flexible Alerting) 등 '역할 아닌 번호' 를 부를 때."""
+    return bool(v) and bool(_DIAL_LITERAL.match(v) or _BIND_REF.match(v))
 
 # media_hold.during 에 둘 수 있는 통화 중 동작(§7 ⓓ) — 컴파일러가 평평한 단계열로 푼다
 DURING_STEPS = ('dtmf', 'hold', 'resume', 'refer', 'media_send', 'media_stop')
@@ -683,7 +713,7 @@ STEP_VOCAB = {
     'register':      {'group': 'reg',   'actor': 'who',     'kind': 'ue|trunk', 'metrics': ['code', 'rrd_ms'], 'desc': '역할 단말 전부 등록 (prelude)'},
     'deregister':    {'group': 'reg',   'actor': 'who',     'kind': 'ue|trunk', 'metrics': ['code'], 'desc': 'run 종료 시 등록 해제 (epilogue)'},
     'wait':          {'group': 'reg',   'actor': 'seconds', 'kind': None,       'metrics': [], 'desc': '대기 (seconds)'},
-    'invite':        {'group': 'call',  'actor': 'fromto',  'kind': None,       'metrics': ['code', 'srd_ms', 'ser_pct', 'seer_pct', 'video_pct'], 'desc': 'INVITE from → to (비동기). from 이 통화 중이면 상담 통화(두 번째 다이얼로그 — attended 전달의 전제)'},
+    'invite':        {'group': 'call',  'actor': 'fromto',  'kind': None,       'metrics': ['code', 'srd_ms', 'ser_pct', 'seer_pct', 'video_pct', 'fork_alert_pct'], 'desc': 'INVITE from → to (비동기). to 는 역할 또는 다이얼 번호 리터럴(대표번호 — 인스턴스의 다른 UE 역할이 포크 착신, ${var} 바인딩 가능). from 이 통화 중이면 상담 통화(두 번째 다이얼로그 — attended 전달의 전제)'},
     'progress':      {'group': 'peer',  'actor': 'who',     'kind': 'peer',     'metrics': ['early_media_pct', 'early_rtp_pct', 'prack_pct'], 'desc': '183 early media · PRACK (피어)'},
     'answer':        {'group': 'call',  'actor': 'who',     'kind': None,       'metrics': ['code', 'srd_ms', 'ser_pct'], 'desc': '착신 대기 → after_ms 뒤 200'},
     'reject':        {'group': 'call',  'actor': 'who',     'kind': None,       'metrics': ['code', 'q850_rx_pct'], 'desc': '착신 대기 → payload 코드로 거절'},
@@ -697,10 +727,10 @@ STEP_VOCAB = {
     'refer':         {'group': 'xfer',  'actor': 'fromto',  'kind': None,       'metrics': ['code'], 'desc': 'REFER 전달 from(전달자) → to (RFC 3515) — 전달자가 to 와 상담 통화 중이면 attended(Refer-To 에 Replaces), 아니면 blind'},
     'replaces':      {'group': 'xfer',  'actor': 'fromto',  'kind': 'ue',       'metrics': ['code', 'srd_ms'], 'desc': 'INVITE-Replaces (RFC 3891) — from 이 dialog 구독(subscribe)으로 배운 to 의 다이얼로그를 가져온다(BLF 클릭 픽업)'},
     'join':          {'group': 'xfer',  'actor': 'fromto',  'kind': 'ue',       'metrics': ['code', 'join_tap_pct'], 'desc': 'INVITE-Join (RFC 3911) — from 이 dialog 구독으로 배운 to 의 세션에 recvonly 청취 leg 로 합류(합법감청, SSRC 2개)'},
-    'pickup':        {'group': 'xfer',  'actor': 'fromto',  'kind': 'ue',       'metrics': ['code', 'srd_ms'], 'desc': '당겨받기 — payload 피처코드를 다이얼(<code> 그룹 픽업 · to 가 있으면 <code><번호> 지정 픽업)'},
+    'pickup':        {'group': 'xfer',  'actor': 'fromto',  'kind': 'ue',       'metrics': ['code', 'srd_ms'], 'desc': '당겨받기 — payload 피처코드를 다이얼(<code> 그룹 픽업 · to 가 있으면 <code><번호> 지정 픽업 — to 는 역할 또는 번호 리터럴(링잉 대표번호))'},
     'subscribe':     {'group': 'ctl',   'actor': 'who',     'kind': 'ue',       'metrics': ['code'], 'desc': 'SUBSCRIBE (RFC 6665) — payload 이벤트 패키지(기본 dialog), to = 감시 대상 역할(생략 = 자기 AoR). 최종 응답까지'},
     'publish':       {'group': 'ctl',   'actor': 'who',     'kind': 'ptt',      'metrics': ['code', 'affiliate_ms'], 'desc': 'PUBLISH — MCPTT affiliation 명령(TS 24.379 §9): payload affiliate|deaffiliate, group 생략 = 신원의 그룹'},
-    'group_call':    {'group': 'ptt',   'actor': 'fromto',  'kind': 'ptt',      'metrics': ['code', 'srd_ms', 'group_fanout_ms', 'video_pct'], 'desc': 'PTT 그룹콜 — from 이 자기 그룹으로 INVITE, to(multi 역할) 멤버 전원 합류까지'},
+    'group_call':    {'group': 'ptt',   'actor': 'fromto',  'kind': 'ptt',      'metrics': ['code', 'srd_ms', 'group_fanout_ms', 'video_pct', 'listen_pct'], 'desc': 'PTT 그룹콜 — from 이 자기 그룹으로 INVITE, to(multi 역할) 멤버 전원 합류까지. payload listen = 그룹 밖 역할(member: false)의 a=recvonly 청취 합류(진행 중 세션에)'},
     'floor_request': {'group': 'ptt',   'actor': 'who',     'kind': 'ptt',      'metrics': ['floor_grant_ms', 'floor_taken_ms', 'floor_queue_ms', 'floor_grant_pct'], 'desc': 'Floor Request → 결과(payload: granted|denied|queued|any)'},
     'floor_release': {'group': 'ptt',   'actor': 'who',     'kind': 'ptt',      'metrics': ['floor_idle_ms'], 'desc': 'Floor Release → Idle 도달'},
     'sds_send':      {'group': 'ptt',   'actor': 'from',    'kind': 'ue',       'metrics': ['sds_delay_ms'], 'desc': 'MCData SDS 송신'},
@@ -723,6 +753,7 @@ METRIC_LABELS = {
     'sds_delay_ms': 'SDS 지연', 'sds_disposition_pct': 'SDS disposition 률', 'dtmf_rx_pct': 'DTMF 수신률',
     'q850_rx_pct': 'Q.850 Reason 수신률', 'early_media_pct': '183 early media 률', 'prack_pct': 'PRACK 률',
     'early_rtp_pct': 'early media RTP 도달률', 'join_tap_pct': 'Join 청취 leg SSRC 2개 도달률', 'video_pct': '영상 협상률(m=video 활성 answer)',
+    'fork_alert_pct': '대표번호 포크 alert 률(그룹원 착신/기대)', 'listen_pct': 'PTT 청취 합류율(recvonly 200)',
 }
 
 # Reason: Q.850 cause (ITU-T Q.850) — 편집기 목록
@@ -754,6 +785,10 @@ METRIC_NAMES = (
     'join_tap_pct',
     # 영상 — m=video 를 실은 발신 중 answer 에 활성 video m-line(포트>0)이 온 비율
     'video_pct',
+    # 대표번호(TS 24.239 Flexible Alerting) — to 가 번호 리터럴인 invite 에서 인스턴스의 다른 UE 역할(그룹원)에 포크 INVITE 가 도달한 비율
+    'fork_alert_pct',
+    # PTT 청취(dispatch_center.md §5.6) — group_call payload listen 의 recvonly INVITE 가 200 으로 확립된 비율
+    'listen_pct',
 )
 
 # 비율 지표의 분자/분모 카운터 — 요약·판정이 같은 정의를 쓴다(§5)
@@ -772,6 +807,8 @@ RATIO_METRICS = {
     'floor_grant_pct': ('floor_granted', 'floor_request_tx'),   # Granted 수신 / Floor Request 송신
     'join_tap_pct': ('join_ssrc2', 'join_ok'),      # 표본 때 SSRC 2개를 받은 청취 leg / 확립된 Join
     'video_pct': ('video_ok', 'video_offered'),     # answer 에 활성 m=video / m=video 를 실은 INVITE(워커 Media.VideoFile 필요)
+    'fork_alert_pct': ('fork_rx', 'fork_expected'),  # 번호 리터럴 다이얼 뒤 인스턴스 UE 에 도달한 포크 INVITE / 발신자를 뺀 UE 역할 수
+    'listen_pct': ('listen_ok', 'listen_tx'),       # 확립된 청취 합류(200) / recvonly 청취 INVITE
 }
 
 
@@ -879,6 +916,10 @@ class Step(_Strict):
             raise ValueError('refer 단계는 from(전달자)과 to(전달 대상 역할)가 필요하다')
         if self.step == 'group_call' and not self.from_:
             raise ValueError('group_call 단계는 from(발신 멤버 역할)이 필요하다 — to 는 합류를 기다릴 multi 역할(선택)')
+        if self.step == 'group_call' and self.payload is not None and self.payload not in GROUP_CALL_MODES:
+            raise ValueError(f'group_call 의 payload 는 {list(GROUP_CALL_MODES)} 중 하나(listen = recvonly 청취 합류) 또는 생략')
+        if self.step == 'invite' and not self.to:
+            raise ValueError('invite 단계는 to(상대 역할 또는 다이얼 번호 리터럴)가 필요하다')
         if self.step == 'floor_request' and self.payload is not None and self.payload not in FLOOR_OUTCOMES:
             raise ValueError(f'floor_request 의 payload(기대 결과)는 {list(FLOOR_OUTCOMES)} 중 하나')
         if self.group is not None and self.step not in ('group_call', 'publish'):
@@ -904,6 +945,8 @@ class Role(_Strict):
     disjoint_from: Optional[str] = None
     count: Optional[int] = Field(default=None, ge=1, description='역할이 쓰는 신원 수 — 생략=풀 전체')
     multi: bool = Field(default=False, description='인스턴스마다 단말 여럿 — 그룹 세션(group_call)에서 단일 역할들이 멤버를 하나씩 잡고 남은 그룹 멤버 전부')
+    member: bool = Field(default=True, description='그룹 세션에서 false = 그룹 밖 신원(청취 관제사·비멤버) — 인스턴스가 잡은 그룹의 멤버가 아닌 PTT 단말을 '
+                                                  '역할 풀에서 배정한다(다른 풀도 됨). 첫 group_call 의 from·to 는 될 수 없다')
 
 
 EvidenceKind = Literal['recording_created', 'log_errors', 'alarm_raised', 'event_logged']
@@ -933,7 +976,10 @@ class Scenario(_Strict):
         for i, s in enumerate(self.flow):
             for ref in [*(s.who or []), s.from_, s.to]:
                 if ref and ref not in names:
-                    raise ValueError(f'flow[{i}] ({s.step}) 가 정의되지 않은 역할 {ref!r} 을 참조한다')
+                    if ref == s.to and s.step in ('invite', 'pickup') and is_dial_literal(ref):
+                        continue   # 다이얼 번호 리터럴(대표번호·${pilot}) — 역할이 아니다
+                    raise ValueError(f'flow[{i}] ({s.step}) 가 정의되지 않은 역할 {ref!r} 을 참조한다'
+                                     + (' (invite/pickup 의 to 는 번호 리터럴(0-9*#+) 또는 ${var} 도 된다)' if ref == s.to and s.step in ('invite', 'pickup') else ''))
             for d in (s.during or []):
                 for ref in [*(d.who or []), d.from_, d.to]:
                     if ref and ref not in names:
@@ -979,23 +1025,42 @@ class Scenario(_Strict):
     def multi_roles(self) -> List[str]:
         return [r for r, spec in self.roles.items() if spec.multi]
 
+    def guest_roles(self) -> List[str]:
+        """그룹 세션의 그룹 밖 역할(member: false) — 청취 관제사·비멤버 거절 시험."""
+        return [r for r, spec in self.roles.items() if not spec.member]
+
+    def dial_targets(self) -> List[str]:
+        """역할이 아닌 다이얼 번호 리터럴 to(invite/pickup) — 대표번호 등(중복 제거)."""
+        out: List[str] = []
+        for s in self.flow:
+            if s.step in ('invite', 'pickup') and s.to and s.to not in self.roles and s.to not in out:
+                out.append(s.to)
+        return out
+
     def _check_group_session(self, names) -> None:
         """그룹 세션 시나리오(group_call) 규칙 — 인스턴스 = MCPTT 그룹 하나: 단일 역할은 멤버 하나씩, multi 역할(하나만)은 나머지 전부.
         그래서 역할은 모두 같은 풀이어야 하고(그룹 멤버가 한 풀에 있다), multi 역할은 여럿이 함께 할 수 있는 단계에만 선다."""
         multi = self.multi_roles()
+        guests = self.guest_roles()
         if not self.is_group_session():
             if multi:
                 raise ValueError(f'roles.{multi[0]}.multi 는 group_call 이 있는 시나리오에만 둔다')
+            if guests:
+                raise ValueError(f'roles.{guests[0]}.member=false 는 group_call 이 있는 시나리오에만 둔다(그룹 밖 신원)')
             for i, s in enumerate(self.flow):
                 if s.step in ('floor_request', 'floor_release'):
                     raise ValueError(f'flow[{i}] {s.step} 는 group_call 뒤에만 둔다')
             return
         if len(multi) > 1:
             raise ValueError(f'multi 역할은 하나만 둔다(그룹의 나머지 멤버) — {multi}')
-        pools = {spec.pool for spec in self.roles.values()}
+        for g in guests:
+            if g in multi:
+                raise ValueError(f'roles.{g}: member=false 역할은 multi 가 될 수 없다(그룹 밖 신원은 인스턴스마다 하나)')
+        pools = {spec.pool for r, spec in self.roles.items() if r not in guests}
         if len(pools) > 1:
-            raise ValueError(f'그룹 세션 시나리오의 역할은 모두 같은 풀이어야 한다 — {sorted(pools)}')
+            raise ValueError(f'그룹 세션 시나리오의 멤버 역할은 모두 같은 풀이어야 한다 — {sorted(pools)} (그룹 밖 역할은 member: false 로 표시)')
         in_session = False
+        first_call = True
         for i, s in enumerate(self.flow):
             if s.step in ('invite', 'answer', 'reject', 'progress', 'refer', 'hold', 'resume', 'dtmf', 'pickup', 'replaces', 'join'):
                 raise ValueError(f'flow[{i}] {s.step} — 그룹 세션 시나리오에는 1:1 호 단계를 섞지 않는다')
@@ -1004,6 +1069,17 @@ class Scenario(_Strict):
                     raise ValueError(f'flow[{i}] group_call.from={s.from_!r} 은 단일 역할이어야 한다')
                 if s.to and s.to not in multi:
                     raise ValueError(f'flow[{i}] group_call.to={s.to!r} 는 multi 역할이어야 한다(합류를 기다릴 나머지 멤버)')
+                if first_call and s.from_ in guests:
+                    raise ValueError(f'flow[{i}] 첫 group_call 의 from={s.from_!r} 은 그룹 멤버 역할이어야 한다(인스턴스의 그룹을 정한다) — '
+                                     f'그룹 밖 역할(member: false)은 그 뒤에 listen 합류 또는 거절(expect.code 403) 로')
+                if s.payload == 'listen' and s.from_ not in guests:
+                    raise ValueError(f'flow[{i}] group_call payload listen 의 from={s.from_!r} 은 그룹 밖 역할(member: false)이어야 한다 — '
+                                     f'청취 합류는 비멤버 관제사의 recvonly INVITE (TS 24.379 비멤버 · dispatch_center.md §5.6)')
+                if s.payload == 'listen' and not in_session:
+                    raise ValueError(f'flow[{i}] group_call payload listen 은 진행 중인 그룹 세션(앞선 group_call) 뒤에만 둔다')
+                if s.payload == 'listen' and s.to:
+                    raise ValueError(f'flow[{i}] group_call payload listen 은 to 를 두지 않는다(합류 대기는 청취자 자기 200 만)')
+                first_call = False
                 in_session = True
             elif s.step in ('floor_request', 'floor_release') and not in_session:
                 raise ValueError(f'flow[{i}] {s.step} 는 group_call 뒤에만 둔다')
@@ -1105,7 +1181,8 @@ class WorkerPeer(_Strict):
     domain: str
     identities: PeerIdentities
     codecs: Optional[List[str]] = None
-    answer: Literal['normal', 'silent'] = 'normal'
+    answer: PeerAnswer = 'normal'
+    fault: Optional[PeerFault] = None
     prack: Optional[bool] = None
     dtmf: bool = True
 
@@ -1151,6 +1228,7 @@ class RunStart(_Strict):
     role_slices: Dict[str, List[int]] = Field(
         default_factory=dict, description='역할 → 이 워커가 맡는 신원 인덱스 [begin, end) — 워커 분산')
     multi_roles: List[str] = Field(default_factory=list, description='인스턴스마다 단말 여럿인 역할 — 그룹 세션의 나머지 멤버')
+    guest_roles: List[str] = Field(default_factory=list, description='그룹 세션의 그룹 밖 역할(member: false) — 잡은 그룹의 멤버가 아닌 PTT 단말을 역할 풀 free 목록에서 배정')
     steps: List[CompiledStep] = Field(min_length=1)
     samples: Dict[str, Dict[str, str]] = Field(
         default_factory=dict, description='이 시나리오가 참조하는 샘플 — id → {코덱: 워커 샘플 디렉터리 안 파일|synthetic} (topology.media.samples 발췌)')

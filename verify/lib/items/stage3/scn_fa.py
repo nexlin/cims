@@ -22,6 +22,10 @@ PHONE_GROUP_CHANGED 를 보낸다(멤버 pickup_group 도 그룹 id 로 파생, 
      세 entity 각각 자기 dialog(id 불변)로 confirmed→terminated 1회, local=entity·remote=상대·direction 불변
      (대표번호 recipient/remote A · A initiator/remote C · C recipient/remote A), entity 별 version 단조 증가.
   F4 통화 중 제외(busy_members=skip)은 후속(SKIP 보고).
+
+계측기 경로(CIMS_TESTER_URL 설정 시, test_instrument.md §9): F1/F3/F5/F6 는 `VOLTE-FA-{PARALLEL,OVERFLOW,PICKUP,SEQUENTIAL}` —
+invite.to 가 역할 아닌 대표번호 리터럴(`${pilot}` 바인딩), 포크 착신은 `fork_alert_pct`, 승자 외 CANCEL 은 정상. 전화 그룹 픽스처는 계획
+드라이런의 역할 신원(memberB·memberC·overflow·picker)에 입힌다. F7(dialog 포크 정합)은 cspsim 검사로 남는다(-hunt_watch).
 """
 from __future__ import annotations
 
@@ -31,6 +35,7 @@ import re
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 from ...common.cspsim import run_cspsim
+from ...common.tester import tester_config, tester_check, tester_role_identities
 from ._xfer_common import (
     select_same_org, trio_cred_args, parse_marker_int,
     VOLTE_DOMAIN, FLOW_MIN, DROP_MAX, fmt_checks, emit_checks,
@@ -92,6 +97,119 @@ def _parse_marker_str(text: str, key: str):
     return last
 
 
+def _run_hunt(ctx: VerifyContext, creds4: list, pilot: str, tag: str, noanswer: bool, pickup: bool = False, watch: bool = False) -> tuple:
+    """cspsim hunt 시나리오(A,B,C,D) 한 번 → (rc, RTP delta 4, hunt_status, tail)."""
+    media_dir = os.path.join(ctx.repo_root, "tests", "media")
+    args = [
+        "-mode", "volte", "-scenario", "hunt", "-count", "4",
+        "-ip", ctx.sim_ip, "-domain", VOLTE_DOMAIN,
+        *trio_cred_args(creds4, tag), "-media_dir", media_dir, "-duration", "4", "-no_video",
+        "-pilot", pilot,
+    ]
+    if noanswer:
+        args += ["-hunt_noanswer"]
+    if pickup:
+        args += ["-hunt_pickup"]
+    if watch:
+        args += ["-hunt_watch"]
+    rc, tail = run_cspsim(ctx.repo_root, args, timeout=240, tail_lines=900 if watch else 400)
+    return rc, _parse_delta4(tail), parse_marker_int(tail, "hunt_status"), tail
+
+
+def _f7_cspsim(ctx: VerifyContext, creds4: list, pilot: str, group_id: str, checks: list) -> None:
+    """F7 dialog 이벤트 정합 — 그룹원 B 가 pilot·A·C 를 감시, C 응답 뒤 A(발신자) 선종료(A-leg BYE). cspsim -hunt_watch 전용 검사.
+    A 도 멤버로 넣어 B 가 A 를 감시할 수 있게 한다(발신자는 포크 대상에서 제외되므로 B·C 만 울린다)."""
+    A, B, C, _D = creds4
+    with DispatchFixture(ctx.dist_dir, ctx.sim_ip, group_id, pilot=pilot,
+                         members=[A["user"], B["user"], C["user"]]) as fx7:
+        if not fx7.active:
+            checks.append(("F7 dialog 이벤트 정합", False, f"전화 그룹 시드 실패 — {fx7.reason}"))
+            return
+        rc, d, st, tail = _run_hunt(ctx, creds4, pilot, "fa_f7", noanswer=False, watch=True)
+        sub_ok = parse_marker_int(tail, "dlg_sub_ok")
+        recs = _parse_dlg_records(tail, B["user"])
+        ok_p, s_p = _judge_dialog_entity(recs, pilot, "recipient", A["user"], ["early", "confirmed", "terminated"])
+        ok_a, s_a = _judge_dialog_entity(recs, A["user"], "initiator", C["user"], ["confirmed", "terminated"])
+        ok_c, s_c = _judge_dialog_entity(recs, C["user"], "recipient", A["user"], ["confirmed", "terminated"])
+        ok = st == 200 and sub_ok == 3 and ok_p and ok_a and ok_c
+        checks.append(("F7 dialog 이벤트 정합 (A-leg BYE — entity/direction/remote 불변·terminated 1회·version 단조)", ok,
+                       f"hunt_status={st} dlg_sub_ok={sub_ok}/3 notify={len(recs)} rc={rc}\n"
+                       f"      · {s_p}\n      · {s_a}\n      · {s_c}"))
+
+
+def _via_tester(ctx: VerifyContext, done) -> ItemResult:
+    """F1/F3/F5/F6 를 계측기로 — 계획 드라이런의 역할 신원을 전화 그룹(대표번호 pilot)에 시드한 뒤 `VOLTE-FA-*` 를 `--bind pilot=` 로.
+    포크 판정은 시나리오 기대치(fork_alert_pct 100 · 승자 200 · CANCEL 정상 · F6 srd_ms.min ≥ 단계 시한). F7 은 cspsim(-hunt_watch)."""
+    cfg = tester_config()
+    ctx.w(f"- 경로: 계측기 @ {cfg['url']} · 토폴로지 {cfg['topology']} (F5·F7 은 cspsim)")
+    checks = []
+    def dstr(d) -> str:
+        return "RTP delta 미출력" if d is None else f"recv A=+{d[0]} B=+{d[1]} C=+{d[2]} D=+{d[3]}"
+    binds0 = {"pilot": "0", "pickup_code": "**"}   # 계획 드라이런용 — 실제 pilot 은 시드 뒤 정한다
+
+    def ids(scenario: str) -> dict:
+        r = tester_role_identities(ctx, scenario, ht=4, binds=binds0) or {}
+        if not all(r.get(k) for k in r):
+            raise RuntimeError(f"{scenario}: 계획에 빈 역할 창 — {r}")
+        return {k: v[0] for k, v in r.items()}
+
+    def pilot_of(member: str) -> str:
+        # 가입 id(E.164 +…)와 겹치지 않는 짧은 내선형 대표번호 — 그룹원 번호 끝 3자리로 유일하게
+        return f"7{member[-3:]}0"
+
+    def check(name: str, scenario: str, label: str, pilot: str) -> tuple:
+        return tester_check(ctx, name, scenario, f"{_RID}/{label}", ht=4, binds={"pilot": pilot, "pickup_code": "**"})
+
+    try:
+        r1 = ids("VOLTE-FA-PARALLEL")
+    except Exception as e:
+        return done(ItemStatus.FAIL, f"계측기 계획 실패: {e}")
+    group_id = "pg-verify-tester-fa"
+    pilot = pilot_of(r1["memberB"])
+    ctx.w(f"- F1 신원 caller={r1['caller']} B={r1['memberB']} C={r1['memberC']} pilot={pilot} group={group_id}")
+    with DispatchFixture(ctx.dist_dir, ctx.sim_ip, group_id, pilot=pilot, members=[r1["memberB"], r1["memberC"]]) as fx:
+        if not fx.active:
+            ctx.w(f"- [SKIP] {fx.reason}")
+            return done(ItemStatus.SKIP, fx.reason)
+        ctx.w(f"- 시드 스키마={fx.schema} (전화 그룹 {group_id}, 역할 없음)")
+        checks.append(check("F1 병렬 호출·응답 (C 승자, B CANCEL)", "VOLTE-FA-PARALLEL", "F1", pilot))
+
+    # F3 무응답 → overflow(D) — no_answer_sec=8(기본), 그룹원 B·C 응답 없음 → D 로 재시도
+    try:
+        r3 = ids("VOLTE-FA-OVERFLOW")
+        with DispatchFixture(ctx.dist_dir, ctx.sim_ip, group_id, pilot=pilot, members=[r3["memberB"], r3["memberC"]],
+                             overflow=r3["overflow"]) as fx3:
+            if fx3.active:
+                checks.append(check("F3 무응답 → overflow 내선(D) 응답", "VOLTE-FA-OVERFLOW", "F3", pilot))
+            else:
+                checks.append(("F3 무응답 → overflow 내선(D) 응답", False, f"시드 실패 — {fx3.reason}"))
+    except Exception as e:
+        checks.append(("F3 무응답 → overflow 내선(D) 응답", False, f"계측기 계획 실패: {e}"))
+
+    checks.append(("F4 통화 중 그룹원 제외(busy_members=skip)", None, "후속 — 사전 통화 구성 필요"))
+
+    # F6 sequential alerting — first 단계 시한(4 s) 뒤 second 링·응답, srd_ms.min ≥ 4000 은 시나리오 기대치
+    try:
+        r6 = ids("VOLTE-FA-SEQUENTIAL")
+        with DispatchFixture(ctx.dist_dir, ctx.sim_ip, group_id, pilot=pilot, members=[r6["first"], r6["second"]],
+                             no_answer_sec=4, alert_mode="sequential") as fx6:
+            if fx6.active:
+                checks.append(check("F6 sequential alerting (first 단계 시한 → second 응답, TS 24.239)", "VOLTE-FA-SEQUENTIAL", "F6", pilot))
+            else:
+                checks.append(("F6 sequential alerting", False, f"시드 실패 — {fx6.reason}"))
+    except Exception as e:
+        checks.append(("F6 sequential alerting", False, f"계측기 계획 실패: {e}"))
+
+    # F5(링잉 대표번호 지정 픽업 — PickUpFork 완결)·F7(dialog 포크 정합)은 cspsim 검사 — 계측기 누계 지표로는 픽업 승계·entity 별 NOTIFY 방향을
+    #   가릴 수 없다(MONITOR 가 M2 만 계측기로 두는 것과 같은 이유). cspsim 헬퍼는 대상 CSP 의 SIP 접속점(dev 5060)이 필요하므로 계측기 모드
+    #   (대개 배포 15060)에서는 생략하고 정보로만 남긴다 — dev CSP 5060 상대로 계측기 미설정(cspsim 경로)일 때 F1~F7 전부 판정된다(D5·M8·M5 와 같은 규약).
+    checks.append(("F5 대표번호 링잉 호 지정 픽업 (PickUpFork)", None, "cspsim 경로 — dev CSP 5060 필요(계측기 미설정 시 판정). 계측기 모드에서는 생략"))
+    checks.append(("F7 dialog 이벤트 포크 정합 (RFC 4235)", None, "cspsim 경로 — dev CSP 5060 필요(계측기 미설정 시 판정). 계측기 모드에서는 생략"))
+
+    all_ok = emit_checks(ctx, checks)
+    return done(ItemStatus.PASS if all_ok else ItemStatus.FAIL, fmt_checks(checks))
+
+
 @verify_item(
     id=_RID,
     stage=3, category="시나리오",
@@ -108,31 +226,20 @@ def flexible_alerting(ctx: VerifyContext) -> ItemResult:
         ctx.w()
         return ItemResult(id=_RID, name=_RNAME, status=status, detail=detail, stage=3)
 
+    if tester_config() is not None:
+        return _via_tester(ctx, done)
+
     creds, org = select_same_org(ctx.dist_dir, 4)
     if len(creds) < 4:
         ctx.w("- [SKIP] 같은 org VOIP 가입자 4명(A,B,C,D) 미확보")
         return done(ItemStatus.SKIP, "같은 org VOIP 4명 미확보")
     A, B, C, D = creds
-    media_dir = os.path.join(ctx.repo_root, "tests", "media")
     group_id = "pg-verify-a"
     pilot = f"7{str(org)[-3:].zfill(3)}0"  # 가입 id(E.164 +…)와 겹치지 않는 짧은 내선형 대표번호
     ctx.w(f"- 단말 org={org} A={A['user']} B={B['user']} C={C['user']} D={D['user']} pilot={pilot} group={group_id}")
 
     def run(tag: str, noanswer: bool, pickup: bool = False, watch: bool = False) -> tuple:
-        args = [
-            "-mode", "volte", "-scenario", "hunt", "-count", "4",
-            "-ip", ctx.sim_ip, "-domain", VOLTE_DOMAIN,
-            *trio_cred_args([A, B, C, D], tag), "-media_dir", media_dir, "-duration", "4", "-no_video",
-            "-pilot", pilot,
-        ]
-        if noanswer:
-            args += ["-hunt_noanswer"]
-        if pickup:
-            args += ["-hunt_pickup"]
-        if watch:
-            args += ["-hunt_watch"]
-        rc, tail = run_cspsim(ctx.repo_root, args, timeout=240, tail_lines=900 if watch else 400)
-        return rc, _parse_delta4(tail), parse_marker_int(tail, "hunt_status"), tail
+        return _run_hunt(ctx, [A, B, C, D], pilot, tag, noanswer, pickup, watch)
 
     def dstr(d) -> str:
         return "RTP delta 미출력" if d is None else f"recv A=+{d[0]} B=+{d[1]} C=+{d[2]} D=+{d[3]}"
@@ -193,20 +300,7 @@ def flexible_alerting(ctx: VerifyContext) -> ItemResult:
                            f"t_answer_ms={t_ans} (≥{seq_step * 1000}) {dstr(d)} rc={rc}"))
 
     # ── F7: dialog 이벤트 정합 — 그룹원 B 가 pilot·A·C 감시, C 응답 뒤 A(발신자) 선종료(A-leg BYE) ──
-    #   A 도 멤버로 넣어 B 가 A 를 감시할 수 있게 한다(발신자는 포크 대상에서 제외되므로 B·C 만 울린다).
-    with DispatchFixture(ctx.dist_dir, ctx.sim_ip, group_id, pilot=pilot,
-                         members=[A["user"], B["user"], C["user"]]) as fx7:
-        if fx7.active:
-            rc, d, st, tail = run("fa_f7", noanswer=False, watch=True)
-            sub_ok = parse_marker_int(tail, "dlg_sub_ok")
-            recs = _parse_dlg_records(tail, B["user"])
-            ok_p, s_p = _judge_dialog_entity(recs, pilot, "recipient", A["user"], ["early", "confirmed", "terminated"])
-            ok_a, s_a = _judge_dialog_entity(recs, A["user"], "initiator", C["user"], ["confirmed", "terminated"])
-            ok_c, s_c = _judge_dialog_entity(recs, C["user"], "recipient", A["user"], ["confirmed", "terminated"])
-            ok = st == 200 and sub_ok == 3 and ok_p and ok_a and ok_c
-            checks.append(("F7 dialog 이벤트 정합 (A-leg BYE — entity/direction/remote 불변·terminated 1회·version 단조)", ok,
-                           f"hunt_status={st} dlg_sub_ok={sub_ok}/3 notify={len(recs)} rc={rc}\n"
-                           f"      · {s_p}\n      · {s_a}\n      · {s_c}"))
+    _f7_cspsim(ctx, [A, B, C, D], pilot, group_id, checks)
 
     all_ok = emit_checks(ctx, checks)
     return done(ItemStatus.PASS if all_ok else ItemStatus.FAIL, fmt_checks(checks))

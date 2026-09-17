@@ -55,7 +55,7 @@ export interface ScenarioDoc {
   id: string
   title?: string
   tags?: string[]
-  roles?: Record<string, { pool: string; disjoint_from?: string; count?: number; multi?: boolean }>
+  roles?: Record<string, { pool: string; disjoint_from?: string; count?: number; multi?: boolean; member?: boolean }>
   flow?: ScenarioStep[]
   target_evidence?: { kind: string; min?: number; max?: number; code?: string }[]
 }
@@ -115,7 +115,7 @@ export interface PeerPoolDoc extends TopoPoolBase {
   kind: 'peer'; peering: string; listener?: string; profile: 'ibcf' | 'pbx' | 'mgcf'; bind: { ip?: string; port: number; protocol?: Transport }; domain: string
   identities: { e164_range?: [string, string]; did_range?: [string, string]; ext_len?: number; count?: number }
   register?: { user: string; ha1_env?: string; password_env?: string; realm?: string; expires?: number }
-  codecs?: string[]; answer?: 'normal' | 'silent'; prack?: boolean; dtmf?: boolean
+  codecs?: string[]; answer?: 'normal' | 'silent' | 'reject' | 'delay'; fault?: { code?: number; q850?: number; delay_ms?: number }; prack?: boolean; dtmf?: boolean
   seed?: { enabled?: boolean; route_set?: string; distribution?: string; priority?: number; weight?: number; acl?: 'allow' | 'deny' }
 }
 export interface RealUePoolDoc extends TopoPoolBase {

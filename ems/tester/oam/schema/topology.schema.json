@@ -465,6 +465,45 @@
       "title": "PeerBind",
       "type": "object"
     },
+    "PeerFault": {
+      "additionalProperties": false,
+      "description": "피어 오류 주입 — answer 정책의 매개변수. 재전송 유실(와이어 손실)·TLS 상호인증은 psip 수신 훅/클라이언트 인증서 검증이 없어 아직 없다(§10 C).",
+      "properties": {
+        "code": {
+          "default": 503,
+          "description": "answer=reject 의 최종 응답 코드(503 = 5xx failover, 486/603 = 사용자 측 거절)",
+          "maximum": 699,
+          "minimum": 300,
+          "title": "Code",
+          "type": "integer"
+        },
+        "delay_ms": {
+          "default": 0,
+          "description": "answer=delay — 착신 INVITE 뒤 이 시간 동안 아무 응답도 내지 않는다(100 Trying 은 스택)",
+          "maximum": 120000,
+          "minimum": 0,
+          "title": "Delay Ms",
+          "type": "integer"
+        },
+        "q850": {
+          "anyOf": [
+            {
+              "maximum": 127,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "거절에 실을 Reason: Q.850;cause= (RFC 3326 — 대상의 Reason 투과 시험)",
+          "title": "Q850"
+        }
+      },
+      "title": "PeerFault",
+      "type": "object"
+    },
     "PeerIdentities": {
       "additionalProperties": false,
       "properties": {
@@ -539,10 +578,12 @@
       "properties": {
         "answer": {
           "default": "normal",
-          "description": "silent = 착신 INVITE 무응답(죽은 피어 — failover 시험)",
+          "description": "착신 정책 — normal: 시나리오 단계가 응답 · silent: 무응답(죽은 피어 — Timer B failover) · reject: 엔진이 즉시 fault.code 로 거절(5xx failover·Reason 투과) · delay: fault.delay_ms 동안 100 Trying 뒤 침묵(응답 지연 — 대상 타이머·early media 대기 시험), 그 뒤 시나리오 단계가 응답",
           "enum": [
             "normal",
-            "silent"
+            "silent",
+            "reject",
+            "delay"
           ],
           "title": "Answer",
           "type": "string"
@@ -575,6 +616,18 @@
           "description": "RFC 4733 telephone-event 오퍼/echo",
           "title": "Dtmf",
           "type": "boolean"
+        },
+        "fault": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PeerFault"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "answer reject/delay 의 매개변수(오류 주입)"
         },
         "group": {
           "anyOf": [

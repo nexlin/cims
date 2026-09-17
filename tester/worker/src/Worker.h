@@ -20,6 +20,7 @@
 
 #include <atomic>
 #include <deque>
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -82,6 +83,7 @@ struct Endpoint {
     bool registered = false;
     Instance* inst = nullptr;       // 지금 이 단말을 쓰는 인스턴스
     bool pendingInvite = false;     // deferred 착신 대기 중
+    long long holdUntilMs = 0;      // 피어 answer=delay — 이 시각 전엔 응답하지 않는다(오류 주입)
     bool inCall = false;
     long long tStartCallMs = 0;     // 발신 시각(SRD 기점 — SimSession 도 갖지만 인스턴스 판정용)
     bool outPending = false;        // 자기가 낸 INVITE(invite·consult·pickup·replaces·join)의 최종 응답 대기 중
@@ -118,10 +120,12 @@ struct Pool {
     std::string srtp = "off";
     std::string targetIp;           // ue: CSP 접속점 · peer: CSP 피어링 접속점(발신 다음 홉)
     int targetPort = 5060;
+    std::string targetDomain;       // 대상 홈 도메인(target_csp.domain_volte) — 피어가 역할 없는 번호 리터럴을 부를 때 Request-URI host
     std::string profile;            // peer 프로파일
     std::string service = "volte";  // ue: 접속환경 클래스 volte|voip|ptt — ptt 면 MCPTT 단말(feature tag·기동 절차·floor)
     std::map<std::string, std::vector<Endpoint*>> groups;   // ptt: MCPTT 그룹 id → 이 풀의 멤버(신원 순)
     std::unique_ptr<CsimPeer> peer; // kind=peer 엔진
+    int answerDelayMs = 0;          // peer answer=delay — 착신 INVITE 뒤 이 시간 동안 응답을 보류(시나리오 answer/progress 의 after_ms 와 합쳐 늦은 쪽)
     bool regStarted = false;        // peer 트렁크 REGISTER 를 냈다(풀 단위 — 계정 하나가 신원 범위를 대표)
     bool regFailed = false;
     std::map<std::string, Endpoint*> byUser;   // peer: 신원 user → Endpoint (착신 귀속)
@@ -150,6 +154,7 @@ struct RunSpec {
     std::map<std::string, std::string> roles;                 // 역할 → 풀
     std::map<std::string, std::pair<int, int>> slices;        // 역할 → [begin,end)
     std::vector<std::string> multiRoles;                      // 인스턴스마다 단말 여럿인 역할(그룹 세션의 나머지 멤버)
+    std::vector<std::string> guestRoles;                      // 그룹 세션의 그룹 밖 역할(member: false — 청취 관제사·비멤버). 잡은 그룹의 멤버가 아닌 PTT 단말을 free 목록에서
     std::vector<CompiledStep> steps;
     std::map<std::string, std::map<std::string, std::string>> samples;   // 샘플 id → {코덱(amr-wb|pcmu|pcma): 절대 경로 | ""(합성)}
     double rate = 0;
@@ -168,6 +173,8 @@ struct Instance {
     std::vector<Endpoint*> byeWait;            // bye 단계가 응답을 기다리는 단말
     std::vector<Endpoint*> respWait;           // subscribe/publish 단계가 최종 응답을 기다리는 단말
     std::string groupTo;                       // group_call.to — 합류를 기다리는 multi 역할(빈 값 = 발신자 확립만)
+    bool forkDial = false;                     // invite.to 가 역할 아닌 다이얼 번호(대표번호) — 인스턴스의 다른 UE 역할에 오는 착신은 포크 leg(승자 외 CANCEL 이 정상)
+    std::string dialTarget;                    // 그 번호 — P-Called-Party-ID 대조
     long long tLastJoinMs = 0;                 // 마지막 멤버 합류(자동응답 200) 시각
     std::vector<std::string> callIds;          // 이 인스턴스에 속한 Call-ID — 끝날 때 SIP 덤프를 올리거나 버린다
     size_t stepIdx = 0;                        // body 안 인덱스
@@ -219,11 +226,12 @@ public:
     void OnPeerReInviteResponse(CsimPeer* p, const std::string& callId, int iSipStatus) override;
     void OnPeerReferResponse(CsimPeer* p, const std::string& callId, int iSipStatus) override;
     void OnPeerRegister(CsimPeer* p, int iSipStatus, long long rrdMs) override;
+    void OnPeerFaultReject(CsimPeer* p, const std::string& callId, const std::string& toUser, int iCode) override;
 
 private:
     struct Event {
         enum Kind { REGISTER, INCOMING, CALLSTART, CALLEND, BYERESP, RING, PRACK, REINVITE, REINVITE_RESP, REFER_RESP,
-                    AFFILIATE, ANSWERED, FLOOR, SUBSCRIBE_RESP, DLG_NOTIFY } kind;
+                    AFFILIATE, ANSWERED, FLOOR, SUBSCRIBE_RESP, DLG_NOTIFY, FAULT_REJECT } kind;
         SimSession* s;
         CsimPeer* peer;
         int status;
@@ -296,6 +304,8 @@ private:
     std::string m_groupPool;                // 그룹 단위 인스턴스의 풀
     std::vector<std::string> m_singleRoles; // 그룹 멤버를 하나씩 받는 역할(발신자 먼저, 그다음 body 등장 순)
     std::vector<std::string> m_usedMulti;   // body 가 쓰는 multi 역할
+    std::vector<std::string> m_guestRoles;  // 그룹 밖 역할(member: false) — pickGroup 밖에서 free 목록으로 배정(잡은 그룹의 비멤버만)
+    bool isGuestRole(const std::string& r) const { return std::find(m_guestRoles.begin(), m_guestRoles.end(), r) != m_guestRoles.end(); }
     std::vector<std::string> m_groupNames;  // 그 풀의 그룹 id(순환 선택)
     size_t m_groupCursor = 0;
     static long long nowUs();
@@ -317,7 +327,7 @@ private:
     Endpoint* endpointOf(SimSession* s);
     Endpoint* endpointOfPeerCall(CsimPeer* p, const std::string& callId);
     bool startEndpoint(Endpoint* ep);
-    bool epStartCall(Endpoint* from, Endpoint* to, const Json& media);
+    bool epStartCall(Endpoint* from, Endpoint* to, const Json& media, const std::string& dial = "");   // to 없으면 dial(번호 리터럴)을 부른다
     bool epHasCall(Endpoint* ep);
     int epAnswer(Endpoint* ep);                 // 0=성공, 그 외 SIP 코드(488 코덱 불일치 등)
     int epProgress(Endpoint* ep);               // 183 early media — 피어 신원만(UE 는 481)

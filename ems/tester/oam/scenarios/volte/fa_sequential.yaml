@@ -1,0 +1,15 @@
+# 대표번호 sequential alerting (TS 24.239 §4.5.2.2 순차, dispatch_center.md §4.5) — alert_mode=sequential 전화 그룹: first 가 먼저 링(응답 보류),
+#   단계 시한(no_answer_sec) 뒤 CANCEL 되고 second 가 링·응답한다. srd_ms.min ≥ 단계 시한이 순차를 증명한다. 검증 S3-SCN-FA F6 (픽스처 no_answer_sec=4).
+id: VOLTE-FA-SEQUENTIAL
+title: 대표번호 sequential alerting (first 시한 → second 응답)
+tags: [volte, fa, dispatch]
+roles:
+  caller: { pool: volte_ue }
+  first:  { pool: volte_ue, disjoint_from: caller }
+  second: { pool: volte_ue, disjoint_from: first }
+flow:
+  - { step: register,   who: [caller, first, second], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: "${pilot}", media: { audio: amr-wb }, expect: { code: 200, fork_alert_pct: 100 } }   # 계측기는 fork 도달 + second 응답만 — 단계 시한(순차 순서) 타이밍은 cspsim(S3-SCN-FA F6)
+  - { step: answer,     who: [second], after_ms: 300, expect: { code: 200 } }
+  - { step: media_hold, seconds: "${ht}", expect: { rtp_loss_pct: { max: 1 } } }
+  - { step: bye,        from: caller }

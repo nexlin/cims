@@ -86,10 +86,10 @@ def _run_args(scenario_id: str, cfg: Dict[str, str], instances: int, timeout: in
     return out
 
 
-def tester_role_identities(ctx: VerifyContext, scenario_id: str, ht: Optional[int] = None,
-                           binds: Optional[Dict[str, object]] = None) -> Optional[Dict[str, List[str]]]:
-    """계측기 계획 드라이런(`cims-tester plan`) → 역할별 신원 사용자부. 대상 DB 픽스처(pickup_group·전화 그룹·역할)를
-    계측기가 실제로 쓸 신원에 입히기 위한 것. 계측기 미설정이면 None, 설정했는데 실패면 RuntimeError."""
+def tester_plan(ctx: VerifyContext, scenario_id: str, ht: Optional[int] = None,
+                binds: Optional[Dict[str, object]] = None) -> Optional[dict]:
+    """계측기 계획 드라이런(`cims-tester plan --json`) 전체 — identities_by_role(역할별 신원 사용자부, 그룹 밖 역할은 첫 그룹 비멤버 후보 순)·
+    group_session(first_group = 단발 첫 인스턴스가 잡을 MCPTT 그룹)·warnings. 계측기 미설정이면 None, 설정했는데 실패면 RuntimeError."""
     cfg = tester_config()
     if cfg is None:
         return None
@@ -101,6 +101,16 @@ def tester_role_identities(ctx: VerifyContext, scenario_id: str, ht: Optional[in
         raise RuntimeError(f'계획 응답 이상(rc={proc.returncode}): {(proc.stdout or proc.stderr).strip()[-300:]}')
     if not out.get('ok'):
         raise RuntimeError('계획 오류: ' + '; '.join(out.get('errors') or ['?']))
+    return out
+
+
+def tester_role_identities(ctx: VerifyContext, scenario_id: str, ht: Optional[int] = None,
+                           binds: Optional[Dict[str, object]] = None) -> Optional[Dict[str, List[str]]]:
+    """계측기 계획 드라이런 → 역할별 신원 사용자부. 대상 DB 픽스처(pickup_group·전화 그룹·역할)를
+    계측기가 실제로 쓸 신원에 입히기 위한 것. 계측기 미설정이면 None, 설정했는데 실패면 RuntimeError."""
+    out = tester_plan(ctx, scenario_id, ht, binds)
+    if out is None:
+        return None
     return {r: list(v) for r, v in (out.get('identities_by_role') or {}).items()}
 
 

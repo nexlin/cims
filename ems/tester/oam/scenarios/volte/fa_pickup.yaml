@@ -1,0 +1,17 @@
+# 링잉 대표번호 호 지정 픽업 (dispatch_center.md §4.4 PickUpFork) — 그룹원 전원(memberB·memberC·picker)이 링잉(응답 보류) 중 picker 가
+#   <pickup_code><pilot> 을 다이얼해 포크 집합을 가져간다(재키잉·RELAY_MODIFY). 나머지 링잉 leg 는 CANCEL. 검증 S3-SCN-FA F5.
+id: VOLTE-FA-PICKUP
+title: 링잉 대표번호 지정 픽업 (<code><pilot>)
+tags: [volte, fa, pickup, dispatch]
+roles:
+  caller:  { pool: volte_ue }
+  memberB: { pool: volte_ue, disjoint_from: caller }
+  memberC: { pool: volte_ue, disjoint_from: memberB }
+  picker:  { pool: volte_ue, disjoint_from: memberC }
+flow:
+  - { step: register,   who: [caller, memberB, memberC, picker], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: "${pilot}", media: { audio: amr-wb }, expect: { code: 200, fork_alert_pct: 100 } }
+  - { step: wait,       seconds: 2 }
+  - { step: pickup,     from: picker, to: "${pilot}", payload: "${pickup_code}", expect: { code: 200 } }
+  - { step: media_hold, seconds: "${ht}", expect: { rtp_loss_pct: { max: 1 } } }
+  - { step: bye,        from: caller }

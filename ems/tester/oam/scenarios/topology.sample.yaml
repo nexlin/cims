@@ -80,6 +80,17 @@ pools:                                   # 풀 하나 = 워커 하나. 워커 �
     identities: { e164_range: ["+82212340000", "+82212340009"] }
     answer: silent
     seed: { route_set: rs-kt, priority: 50 }
+  peer_kt_503:                           # 같은 RouteSet 의 우선 피어 — 즉시 503 거절(5xx failover 시험, TRUNK-IBCF-FAILOVER-5XX). 오류 주입 = answer reject + fault
+    kind: peer
+    worker: w2
+    peering: csp
+    profile: ibcf
+    bind: { port: 5083, protocol: udp }
+    domain: ims.kt.test
+    identities: { e164_range: ["+82212340000", "+82212340009"] }
+    answer: reject
+    fault: { code: 503, q850: 38 }
+    seed: { route_set: rs-kt, priority: 40 }
   peer_blocked:                          # ACL deny 대상 피어 (TRUNK-IBCF-ACL-DENY)
     kind: peer
     worker: w2

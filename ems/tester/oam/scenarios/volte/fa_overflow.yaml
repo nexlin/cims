@@ -1,0 +1,16 @@
+# 대표번호 무응답 → overflow (TS 24.239, dispatch_center.md §4.3) — 그룹원(memberB·memberC)이 응답하지 않으면 no_answer_sec 뒤 CSP 가 포크를 CANCEL 하고
+#   overflow_target(overflow 역할)로 1단계 재시도한다. overflow 가 응답 → caller–overflow 미디어. 검증 S3-SCN-FA F3 (픽스처 no_answer_sec=8).
+id: VOLTE-FA-OVERFLOW
+title: 대표번호 무응답 → overflow 내선 응답
+tags: [volte, fa, dispatch]
+roles:
+  caller:   { pool: volte_ue }
+  memberB:  { pool: volte_ue, disjoint_from: caller }
+  memberC:  { pool: volte_ue, disjoint_from: memberB }
+  overflow: { pool: volte_ue, disjoint_from: memberC }
+flow:
+  - { step: register,   who: [caller, memberB, memberC, overflow], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: "${pilot}", media: { audio: amr-wb }, expect: { code: 200, fork_alert_pct: 100 } }   # 계측기는 fork 도달 + overflow 응답만 판정한다 — overflow 가 no_answer_sec 뒤인지(순차 타이밍)는 cspsim(S3-SCN-FA F3)
+  - { step: answer,     who: [overflow], after_ms: 500, expect: { code: 200 } }
+  - { step: media_hold, seconds: "${ht}", expect: { rtp_loss_pct: { max: 1 } } }
+  - { step: bye,        from: caller }
