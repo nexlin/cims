@@ -152,6 +152,19 @@ public:
     static int CheckConferenceSubscribe( const std::string &strGroupId, const std::string &strUserId,
                                          std::string &strWarning, std::string &strReason );
 
+    /** PTT 청취 인가 판정 — **합류(§5.6)·합류 중 재확인·회수 스윕이 같은 식을 쓰게 하는 단일 지점.**
+     *  셋이 갈라지면 허용된 것을 걷거나 잃은 것을 남긴다. 반환 = "" 허용, 그 외 거절 사유(로그·감사용).
+     *  2단 = 자격 `allow_ambient_listening`(TS 24.484, 역할 배정에 맞춰 CSC 가 동기) + 범위(즉석 세션은
+     *  `CanObserveEphemeral`, 그 외는 역할 `ptt_listen`). DB(프로파일)를 읽으므로 락 밖에서 부른다. */
+    static std::string ListenDenyReason( const CspPttGroup &clsGroup, const std::string &strListener );
+
+    /** 인가를 잃은 PTT 청취 leg 회수 (dispatch_center.md §5.10) — 역할 재적재 뒤 전수 재판정한다.
+     *  판정은 합류 시(§5.6 ProcessGroupCall)와 **같은 2단**이다: 자격 `allow_ambient_listening`(CSC 가 역할
+     *  배정에 맞춰 동기) + 범위(즉석 세션은 `CanObserveEphemeral`, 그 외는 `CanListenPtt`). 회수는 청취자에게
+     *  BYE — 원 세션과 다른 참가자는 건드리지 않는다.
+     *  @return 걷어낸 leg 수. */
+    int RevokeUnauthorizedListeners( const char *pszWhy );
+
 private:
     void MonitorLoop();
     void SyncGroupsState();

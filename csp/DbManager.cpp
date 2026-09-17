@@ -686,23 +686,32 @@ bool CDbManager::LoadAllRoles( CCspRoleMap &clsMap ) {
     }
     mysql_free_result( pRes );
 
+    // **부분 적재를 게시하지 않는다.** 아래 셋은 역할의 범위·대상·회선 펼침이다 — 하나라도 실패한 채
+    //   게시하면 «역할은 있는데 대상·회선이 없는» 맵이 서고, 인가 회수(dispatch_center.md §5.10)가 그것을
+    //   확정 철회로 읽어 정상 감청·구독을 전부 끊는다. 실패하면 기존 맵을 **그대로 두고** false 를 돌린다.
     pRes = ExecuteSelect( "SELECT role_id, phone_group_id FROM role_monitor_targets" );
-    if ( pRes ) {
-        while ( ( row = mysql_fetch_row( pRes ) ) != nullptr ) {
-            auto it = ( row[0] ) ? mapRoles.find( row[0] ) : mapRoles.end();
-            if ( it != mapRoles.end() && row[1] ) it->second.m_setMonitorTargets.insert( row[1] );
-        }
-        mysql_free_result( pRes );
+    if ( !pRes ) {
+        CLog::Print( LOG_ERROR, "[DB] LoadAllRoles: role_monitor_targets 조회 실패 — 적재 취소(기존 맵 유지)" );
+        return false;
     }
+    while ( ( row = mysql_fetch_row( pRes ) ) != nullptr ) {
+        auto it = ( row[0] ) ? mapRoles.find( row[0] ) : mapRoles.end();
+        if ( it != mapRoles.end() && row[1] ) it->second.m_setMonitorTargets.insert( row[1] );
+    }
+    mysql_free_result( pRes );
+
     pRes = ExecuteSelect(
         "SELECT t.role_id, g.mcptt_group_id FROM role_ptt_targets t JOIN ptt_groups g ON g.id = t.ptt_group_id" );
-    if ( pRes ) {
-        while ( ( row = mysql_fetch_row( pRes ) ) != nullptr ) {
-            auto it = ( row[0] ) ? mapRoles.find( row[0] ) : mapRoles.end();
-            if ( it != mapRoles.end() && row[1] ) it->second.m_setPttTargets.insert( row[1] );
-        }
-        mysql_free_result( pRes );
+    if ( !pRes ) {
+        CLog::Print( LOG_ERROR, "[DB] LoadAllRoles: role_ptt_targets 조회 실패 — 적재 취소(기존 맵 유지)" );
+        return false;
     }
+    while ( ( row = mysql_fetch_row( pRes ) ) != nullptr ) {
+        auto it = ( row[0] ) ? mapRoles.find( row[0] ) : mapRoles.end();
+        if ( it != mapRoles.end() && row[1] ) it->second.m_setPttTargets.insert( row[1] );
+    }
+    mysql_free_result( pRes );
+
     // 배정 → 회선 펼침 (voip + volte + ptt — SubTablesUnion). principal_id 는 users.id 의 문자열.
     int iLines = 0;
     pRes = ExecuteSelect(
@@ -712,16 +721,18 @@ bool CDbManager::LoadAllRoles( CCspRoleMap &clsMap ) {
         " s "
         "  ON CAST(s.user_id AS CHAR) = a.principal_id "
         "WHERE a.principal_type='user'" );
-    if ( pRes ) {
-        while ( ( row = mysql_fetch_row( pRes ) ) != nullptr ) {
-            auto it = ( row[0] ) ? mapRoles.find( row[0] ) : mapRoles.end();
-            if ( it != mapRoles.end() && row[1] ) {
-                it->second.m_vecLines.push_back( row[1] );
-                ++iLines;
-            }
-        }
-        mysql_free_result( pRes );
+    if ( !pRes ) {
+        CLog::Print( LOG_ERROR, "[DB] LoadAllRoles: role_assignments 조회 실패 — 적재 취소(기존 맵 유지)" );
+        return false;
     }
+    while ( ( row = mysql_fetch_row( pRes ) ) != nullptr ) {
+        auto it = ( row[0] ) ? mapRoles.find( row[0] ) : mapRoles.end();
+        if ( it != mapRoles.end() && row[1] ) {
+            it->second.m_vecLines.push_back( row[1] );
+            ++iLines;
+        }
+    }
+    mysql_free_result( pRes );
 
     clsMap.Clear();
     for ( auto &kv : mapRoles ) clsMap.Insert( kv.second );

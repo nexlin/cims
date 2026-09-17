@@ -2,6 +2,7 @@
 
 #include <sstream>
 
+#include "AuthzRevoke.h"
 #include "CallDir.h"
 #include "CallMap.h"
 #include "CscEndpointCache.h"
@@ -284,8 +285,15 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
         // Resync user map from DB
         gclsCspUserMap.LoadFromDb();
         // 전화 그룹·역할도 재동기 (대표번호·감청 범위 — dispatch_center.md §3.5)
-        if ( gclsDbManager.HasPhoneGroupTables() ) gclsPhoneGroupMap.LoadFromDb();
-        if ( gclsDbManager.HasRoleTables() ) gclsRoleMap.LoadFromDb();
+        bool bMapsFresh = true;
+        if ( gclsDbManager.HasPhoneGroupTables() ) bMapsFresh = gclsPhoneGroupMap.LoadFromDb() && bMapsFresh;
+        if ( gclsDbManager.HasRoleTables() ) bMapsFresh = gclsRoleMap.LoadFromDb() && bMapsFresh;
+        // 재기동 중에 바뀐 배정·멤버십이 있을 수 있다 — 재적재한 값으로 성립물을 다시 판정한다(§5.10).
+        //   **적재가 실패했으면 스윕하지 않는다** — 옛 맵으로 판정하면 «바뀐 것이 없는데 전부 철회» 가 된다.
+        if ( bMapsFresh )
+            CspAuthz::RevokeUnauthorized( "CSC_RESTART" );
+        else
+            CLog::Print( LOG_ERROR, "CscInterface: CSC_RESTART — 맵 적재 실패로 인가 회수 생략(기존 성립물 유지)" );
 
         // Trigger full group resync (SyncGroupsState)
         gclsGroupCallService.OnGroupConfigChanged();
@@ -314,11 +322,13 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
                          "CscInterface: DISPATCH_GROUP_CHANGED (legacy name) — reloading phone groups + roles" );
             if ( gclsDbManager.HasRoleTables() ) gclsRoleMap.LoadFromDb();
         }
+        bool bGroupsFresh = true;
         if ( !gclsDbManager.HasPhoneGroupTables() ) {
             CLog::Print( LOG_INFO, "CscInterface: %s ignored — phone_groups table absent", strEvent.c_str() );
         } else if ( strGroupId.empty() ) {
-            gclsPhoneGroupMap.LoadFromDb();
-            CLog::Print( LOG_INFO, "CscInterface: PhoneGroupMap reloaded (%d groups)", gclsPhoneGroupMap.GetCount() );
+            bGroupsFresh = gclsPhoneGroupMap.LoadFromDb();
+            CLog::Print( LOG_INFO, "CscInterface: PhoneGroupMap reloaded (%d groups, ok=%d)",
+                         gclsPhoneGroupMap.GetCount(), (int)bGroupsFresh );
         } else if ( strAction == "DELETE" ) {
             gclsPhoneGroupMap.Remove( strGroupId.c_str() );
             CLog::Print( LOG_INFO, "CscInterface: Phone group removed [%s]", strGroupId.c_str() );
@@ -329,15 +339,26 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
             gclsPhoneGroupMap.Remove( strGroupId.c_str() );
             CLog::Print( LOG_INFO, "CscInterface: Phone group not in DB — removed [%s]", strGroupId.c_str() );
         }
+        // 전화 그룹은 감시 인가의 한 축이다 — 규칙 1(같은 그룹)과 monitor_call=own 이 그룹 멤버십으로 답한다.
+        //   그룹에서 빠지면 그 그룹원을 보던 BLF 구독도 근거를 잃으므로 같이 걷는다(§5.10).
+        if ( gclsDbManager.HasPhoneGroupTables() && bGroupsFresh )
+            CspAuthz::RevokeUnauthorized( "PHONE_GROUP_CHANGED" );
     } else if ( strEvent == "ROLE_CHANGED" ) {
         // 역할·배정·대상 변경 (mcptt_authorization.md §2, dispatch_center.md §3.5) — 배정은 person 단위라 회선 펼침이
         //   바뀌므로 전량 재적재한다(역할 수는 작다). uri 는 역할 id 또는 person id — 로그용.
         if ( !gclsDbManager.HasRoleTables() ) {
             CLog::Print( LOG_INFO, "CscInterface: ROLE_CHANGED ignored — role tables absent" );
         } else {
-            gclsRoleMap.LoadFromDb();
-            CLog::Print( LOG_INFO, "CscInterface: RoleMap reloaded (%d roles) [%s]", gclsRoleMap.GetCount(),
-                         strUri.c_str() );
+            const bool bRolesFresh = gclsRoleMap.LoadFromDb();
+            CLog::Print( LOG_INFO, "CscInterface: RoleMap reloaded (%d roles, ok=%d) [%s]", gclsRoleMap.GetCount(),
+                         (int)bRolesFresh, strUri.c_str() );
+            // 재적재만으로는 **이미 성립한 것**이 걷히지 않는다 — 구독은 갱신으로, 감청·청취 leg 은 통화가
+            //   끝날 때까지 산다. 잃은 자격을 즉시 회수한다(dispatch_center.md §5.10).
+            //   적재가 실패하면 판정 근거가 낡았으므로 회수하지 않는다 — DB 일시 장애를 서비스 정지로 바꾸지 않는다.
+            if ( bRolesFresh )
+                CspAuthz::RevokeUnauthorized( "ROLE_CHANGED" );
+            else
+                CLog::Print( LOG_ERROR, "CscInterface: ROLE_CHANGED — 역할 적재 실패로 인가 회수 생략" );
         }
     } else if ( strEvent == "USER_CHANGED" ) {
         extern void SendSipNotify( const std::string &uri, const std::string &etag, const std::string &action );
@@ -351,6 +372,16 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
             strUserId = strUserId.substr( 4 );
         }
 
+        // 갱신 **전** 파생 픽업 그룹 — 감시 인가의 한 축이다(§5.2 규칙 1·monitor_call=own). CSC 는 멤버 이동을
+        //   PHONE_GROUP_CHANGED 와 USER_CHANGED(PUT) 두 통지로 보내는데, 앞 통지의 스윕 시점에는 멤버 색인에서
+        //   빠졌어도 `EffectiveGroupOf` 가 **아직 낡은 이 캐시값으로 폴백**해 «여전히 같은 그룹» 으로 판정한다
+        //   (`CspPhoneGroup.cpp` `EffectiveGroupOf`). 그래서 캐시가 실제로 바뀐 이 시점에 한 번 더 걷는다.
+        std::string strPrevPickup;
+        {
+            CspUser clsPrev;
+            if ( gclsCspUserMap.Select( strUserId.c_str(), clsPrev ) ) strPrevPickup = clsPrev.EffectivePickupGroup();
+        }
+
         if ( strAction == "DELETE" ) {
             gclsCspUserMap.Remove( strUserId );
             CLog::Print( LOG_INFO, "CscInterface: User cache removed [%s]", strUserId.c_str() );
@@ -362,10 +393,30 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
                 CLog::Print( LOG_ERROR, "CscInterface: User not found in DB [%s]", strUserId.c_str() );
             }
         }
+
+        std::string strNowPickup;
+        if ( strAction != "DELETE" ) {
+            CspUser clsNow;
+            if ( gclsCspUserMap.Select( strUserId.c_str(), clsNow ) ) strNowPickup = clsNow.EffectivePickupGroup();
+        }
+        const bool bPickupChanged = ( strNowPickup != strPrevPickup );
+
         // 회선 개설/삭제는 person 의 회선 집합을 바꾼다 — 역할 맵의 회선 펼침을 다시 만든다(§3.5).
         //   PUT(회선 속성 변경)은 회선 집합을 바꾸지 않으므로 재적재하지 않는다 — 역할 배정 자체가 바뀌면
         //   ROLE_CHANGED 가 따로 온다.
-        if ( gclsDbManager.HasRoleTables() && ( strAction == "POST" || strAction == "DELETE" ) )
-            gclsRoleMap.LoadFromDb();
+        if ( gclsDbManager.HasRoleTables() && ( strAction == "POST" || strAction == "DELETE" ) ) {
+            // 회선이 사라지면 그 회선의 역할 펼침도 사라진다 — 그 회선으로 선 구독·leg 을 같이 걷는다(§5.10).
+            //   적재 실패 시에는 걷지 않는다(위와 같은 이유).
+            if ( gclsRoleMap.LoadFromDb() )
+                CspAuthz::RevokeUnauthorized( "USER_CHANGED" );
+            else
+                CLog::Print( LOG_ERROR, "CscInterface: USER_CHANGED — 역할 적재 실패로 인가 회수 생략" );
+        } else if ( bPickupChanged && gclsDbManager.HasPhoneGroupTables() ) {
+            // 회선 집합은 그대로다 — 역할 맵은 재적재하지 않고 그룹 축만 다시 판정한다(§5.10).
+            CLog::Print( LOG_INFO, "CscInterface: USER_CHANGED pickup_group %s → %s [%s] — 인가 재판정",
+                         strPrevPickup.empty() ? "(none)" : strPrevPickup.c_str(),
+                         strNowPickup.empty() ? "(none)" : strNowPickup.c_str(), strUserId.c_str() );
+            CspAuthz::RevokeUnauthorized( "USER_CHANGED" );
+        }
     }
 }

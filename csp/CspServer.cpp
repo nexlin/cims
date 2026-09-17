@@ -994,8 +994,12 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
 /**
  * @brief Send final NOTIFY with Subscription-State: terminated (RFC 3265 §3.1.4)
  *        Called when SUBSCRIBE Expires=0 is received.
+ * @param pszReason RFC 6665 §4.1.3 종료 사유. 기본 "timeout"(구독 만료·Expires=0).
+ *        인가 회수는 "rejected" — 규격이 "the subscription has been terminated due to change in
+ *        authorization policy" 로 정의한 값이고, 구독자에게 **재구독하지 말라**는 뜻까지 실어 보낸다
+ *        (dispatch_center.md §5.10).
  */
-void SendTerminatedNotify( const SubscriptionInfo &sub ) {
+void SendTerminatedNotify( const SubscriptionInfo &sub, const char *pszReason ) {
     const int iListenerId = sub.iInboundListenerId;
     const int iFallbackPort = gclsUserAgent.m_clsSipStack.m_clsSetup.m_iLocalUdpPort;
     const std::string strLocalIp = CspAddressing::GetLocalSipAddress( iListenerId );
@@ -1074,11 +1078,13 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
                               : sub.strEventType == "conference"  ? "conference"
                               : sub.strEventType == "dialog"      ? "dialog"
                                                                   : "xcap-diff" );
-    pMsg->AddHeader( "Subscription-State", "terminated;reason=timeout" );
+    pMsg->AddHeader(
+        "Subscription-State",
+        ( std::string( "terminated;reason=" ) + ( pszReason && *pszReason ? pszReason : "timeout" ) ).c_str() );
     pMsg->m_iContentLength = 0;
 
-    CLog::Print( LOG_INFO, "SendTerminatedNotify: User=%s Type=%s Target=%s CSeq=%d", sub.strUserId.c_str(),
-                 sub.strEventType.c_str(), strTarget.c_str(), iSeq );
+    CLog::Print( LOG_INFO, "SendTerminatedNotify: User=%s Type=%s Target=%s CSeq=%d reason=%s", sub.strUserId.c_str(),
+                 sub.strEventType.c_str(), strTarget.c_str(), iSeq, pszReason ? pszReason : "timeout" );
 
     gclsUserAgent.m_clsSipStack.SendSipMessage( pMsg );
 }

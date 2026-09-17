@@ -18,6 +18,7 @@
 // 문자열 조립 유틸
 #include <sstream>
 
+#include "AuthzRevoke.h"
 #include "CallDir.h"
 #include "CallMap.h"
 #include "CmpClient.h"
@@ -244,22 +245,15 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
     const bool bListen = ( pclsRtp != NULL && pclsRtp->m_eDirection == E_RTP_RECV );
     std::string strListenGroup;
     bool bListenHidden = true;
+    // 청취 인가 판정 시점의 정책 세대 — 아래 CMP 왕복 동안 자격을 거두면 스윕은 아직 등록되지 않은 이 leg 을
+    //   지나친다. 200 OK 직전에 세대가 달라졌으면 같은 판정을 한 번 더 한다(dispatch_center.md §5.10).
+    unsigned uListenAuthzGen = 0;
     if ( bListen ) {
         // 2단 인가 (§5.6): 자격 = TS 24.484 프로파일 allow_ambient_listening(역할 배정의 결과로 CSC 가 동기),
         //   범위 = 청취자 회선의 역할 ptt_listen. strListenGroup 은 역할 id (감사 E-AUD-016 `role`).
-        CspUserProfile clsListenProf;
-        const int iProf = gclsDbManager.SelectUserProfile( pszCallerInfo, clsListenProf );
         strListenGroup = gclsRoleMap.RoleIdForLine( pszCallerInfo );
-        std::string strDeny;
-        if ( iProf != 1 || !clsListenProf.m_bAllowAmbientListening )
-            strDeny = ( iProf < 0 ) ? "profile unavailable" : "allow_ambient_listening=0";
-        else if ( clsGroup._isAdhoc ) {
-            // 즉석 세션(사설콜·애드혹)은 PTT 그룹이 아니라 사람 사이의 세션 — 범위 축은 ptt_listen 이 아닌 참가자 전화
-            //   그룹에 대한 관측자 역할 monitor_call(VoLTE 통화 Join 과 같은 규칙, §5.6a).
-            std::string strReason;
-            if ( !CanObserveEphemeral( clsGroup, pszCallerInfo, strReason ) ) strDeny = "ephemeral " + strReason;
-        } else if ( !gclsRoleMap.CanListenPtt( pszCallerInfo, pszGroupId ) )
-            strDeny = "ptt_listen scope";
+        uListenAuthzGen = CspAuthz::PolicyGeneration();
+        const std::string strDeny = ListenDenyReason( clsGroup, pszCallerInfo );
         if ( !strDeny.empty() ) {
             CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) listener(%s) role(%s) denied (%s) → 403", pszGroupId,
                          pszCallerInfo, strListenGroup.c_str(), strDeny.c_str() );
@@ -497,6 +491,17 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         // 진행 중 조건(긴급/임박) 세션이면 200 OK 에 mcptt-info 로 현재 상태를 동봉 — 조인/재조인
         //   단말이 개시자의 다음 발언(floor TAKEN)을 기다리지 않고 즉시 세션 긴급 표시를 갖는다
         //   (TS 24.379, §9-5 멤버 전파). normal 세션은 기존 단일 SDP 200 OK 그대로.
+        // 합류 중 자격 회수 재확인 — 아직 200 OK 전이라 403 으로 끝낼 수 있다.
+        if ( bListen && CspAuthz::PolicyGeneration() != uListenAuthzGen ) {
+            const std::string strLost = ListenDenyReason( clsGroup, pszCallerInfo );
+            if ( !strLost.empty() ) {
+                CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) listener(%s) lost scope while joining (%s) → 403",
+                             pszGroupId, pszCallerInfo, strLost.c_str() );
+                gclsUserAgent.StopCall( pszCallId, SIP_FORBIDDEN );
+                EmitPttListenAudit( "denied", pszCallerInfo, strListenGroup, pszGroupId, "", -1 );
+                return true;
+            }
+        }
         bool bAccepted;
         if ( iCondEff > 0 ) {
             CSipMessage *pclsOk = NULL;
@@ -2147,6 +2152,77 @@ bool CGroupCallService::CanObserveEphemeral( const CspPttGroup &clsGroup, const 
     }
     strReason = "monitor_call (role " + gclsRoleMap.RoleIdForLine( strUserId.c_str() ) + ")";
     return false;
+}
+
+std::string CGroupCallService::ListenDenyReason( const CspPttGroup &clsGroup, const std::string &strListener ) {
+    CspUserProfile clsProf;
+    const int iProf = gclsDbManager.SelectUserProfile( strListener.c_str(), clsProf );
+    if ( iProf != 1 || !clsProf.m_bAllowAmbientListening )
+        return ( iProf < 0 ) ? "profile unavailable" : "allow_ambient_listening=0";
+    if ( clsGroup._isAdhoc ) {
+        // 즉석 세션(사설콜·애드혹)은 PTT 그룹이 아니라 사람 사이의 세션 — 범위 축은 ptt_listen 이 아닌 참가자
+        //   전화 그룹에 대한 관측자 역할 monitor_call(VoLTE 통화 Join 과 같은 규칙, §5.6a).
+        std::string strReason;
+        if ( !CanObserveEphemeral( clsGroup, strListener, strReason ) ) return "ephemeral " + strReason;
+        return "";
+    }
+    if ( !gclsRoleMap.CanListenPtt( strListener.c_str(), clsGroup._id.c_str() ) ) return "ptt_listen scope";
+    return "";
+}
+
+int CGroupCallService::RevokeUnauthorizedListeners( const char *pszWhy ) {
+    // 락 안에서는 **스냅샷만** 뜬다 — 판정이 그룹 맵과 DB(프로파일)를 읽고, 집행(BYE)이 OnCallTerminated 로
+    //   같은 락에 재진입하기 때문이다.
+    struct Snap {
+        std::string strCallId, strGroupId, strMember;
+    };
+    std::vector<Snap> vecSnap;
+    {
+        std::lock_guard<std::recursive_mutex> lock( m_mutex );
+        for ( const auto &kv : m_mapCallSession ) {
+            if ( !kv.second.bListenOnly ) continue;
+            vecSnap.push_back( { kv.first, kv.second.strGroupId, kv.second.strMemberId } );
+        }
+    }
+
+    // 판정 — 합류 시(§5.6 ProcessGroupCall)와 같은 2단: 자격 allow_ambient_listening + 범위(즉석 세션은
+    //   CanObserveEphemeral, 그 외는 CanListenPtt).
+    std::vector<Snap> vecRevoke;
+    for ( const auto &clsSnap : vecSnap ) {
+        CspPttGroup clsGroup;
+        if ( gclsGroupMap.Select( clsSnap.strGroupId.c_str(), clsGroup ) == false )
+            continue;  // 그룹이 없으면 별 경로(CheckMemberState)로 정리된다
+        const std::string strDeny = ListenDenyReason( clsGroup, clsSnap.strMember );
+        if ( strDeny.empty() ) continue;
+        CLog::Print( LOG_INFO, "AuthzRevoke(%s): ptt listen leg(%s) revoked — %s on group %s (%s, role %s)",
+                     pszWhy ? pszWhy : "authz", clsSnap.strCallId.c_str(), clsSnap.strMember.c_str(),
+                     clsSnap.strGroupId.c_str(), strDeny.c_str(),
+                     gclsRoleMap.RoleIdForLine( clsSnap.strMember.c_str() ).c_str() );
+        vecRevoke.push_back( clsSnap );
+    }
+
+    // 집행 — 판정 사이에 그 leg 이 끝나고 같은 Call-ID 로 다른 leg 이 섰을 수 있다(단말이 주는 값이다).
+    //   끊기 직전에 스냅샷과 같은 청취 leg 인지 확인한다.
+    int iRevoked = 0;
+    for ( const auto &clsSnap : vecRevoke ) {
+        {
+            std::lock_guard<std::recursive_mutex> lock( m_mutex );
+            auto it = m_mapCallSession.find( clsSnap.strCallId );
+            if ( it == m_mapCallSession.end() || !it->second.bListenOnly ) continue;  // 그새 끝났다
+            if ( it->second.strMemberId != clsSnap.strMember || it->second.strGroupId != clsSnap.strGroupId ) {
+                CLog::Print( LOG_INFO, "AuthzRevoke(%s): ptt listen leg(%s) 교체됨 — 회수 건너뜀",
+                             pszWhy ? pszWhy : "authz", clsSnap.strCallId.c_str() );
+                continue;
+            }
+        }
+        // BYE — 청취자 leg 만. **로컬 StopCall 은 EventCallEnd 를 올리지 않으므로**(psip
+        //   `SipUserAgentCall.hpp` — dialog 를 지우고 BYE 만 보낸다) 뒷정리를 직접 태운다. 이것을 빠뜨리면
+        //   세션 맵·CMP 청취 멤버(`LeaveGroup`)·감사 `ended` 가 모두 남아 **단말만 끊기고 미디어는 계속
+        //   복사된다** — 회수가 성립하지 않는다. `CheckMemberState` 의 강제 종료와 같은 순서다.
+        gclsUserAgent.StopCall( clsSnap.strCallId.c_str() );
+        if ( OnCallTerminated( clsSnap.strCallId ) ) ++iRevoked;
+    }
+    return iRevoked;
 }
 
 // ── PTT 세션 dialog 이벤트 (RFC 4235 dialog-info, dispatch_center.md §5.6a) ─────────────────────────────

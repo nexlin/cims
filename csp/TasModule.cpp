@@ -9,6 +9,7 @@
 
 #include "TasModule.h"
 
+#include "AuthzRevoke.h"
 #include "CallDir.h"
 #include "CallMap.h"
 #include "CmpClient.h"
@@ -1449,7 +1450,47 @@ void CTasModule::OverflowFork( const std::string &strACallId ) {
     if ( iLegs == 0 ) FailFork( strACallId, SIP_TEMPORARILY_UNAVAILABLE );
 }
 
+void CTasModule::RetryPendingTapRemovals() {
+    static const int MAX_TRIES = 6;     // 1+2+4+8+16+32초 ≈ 1분. 그 뒤는 원 통화 종료의 RELAY_REMOVE 에 맡긴다(§5.9)
+    static const int MAX_PER_TICK = 4;  // CMP 왕복은 블로킹(최대 3×100ms) — 1초 틱을 넘기지 않게
+    std::vector<PendingTapRemove> vecDue;
+    {
+        std::lock_guard<std::recursive_mutex> lock( m_mutexMonitor );
+        if ( m_vecPendingTapRemove.empty() ) return;
+        const time_t tNow = time( NULL );
+        for ( auto it = m_vecPendingTapRemove.begin();
+              it != m_vecPendingTapRemove.end() && (int)vecDue.size() < MAX_PER_TICK; ) {
+            if ( it->tNextTry > tNow ) {
+                ++it;
+                continue;
+            }
+            vecDue.push_back( *it );
+            it = m_vecPendingTapRemove.erase( it );
+        }
+    }
+    for ( auto &clsItem : vecDue ) {
+        if ( gclsCmpClient.RemoveTap( clsItem.strSessionId, clsItem.strTapId, clsItem.strMonitor, clsItem.strSesId,
+                                      clsItem.strService ) ) {
+            CLog::Print( LOG_INFO, "Join — tap(%s) 회수 재시도 성공 (%d회차) [TAS]", clsItem.strTapId.c_str(),
+                         clsItem.iTries + 1 );
+            continue;
+        }
+        if ( ++clsItem.iTries >= MAX_TRIES ) {
+            CLog::Print( LOG_ERROR,
+                         "Join — tap(%s) 회수 %d회 실패, 포기(session=%s monitor=%s) — 원 통화 종료 시 일괄 회수 [TAS]",
+                         clsItem.strTapId.c_str(), clsItem.iTries, clsItem.strSessionId.c_str(),
+                         clsItem.strMonitor.c_str() );
+            continue;
+        }
+        clsItem.tNextTry = time( NULL ) + ( 1 << clsItem.iTries );
+        std::lock_guard<std::recursive_mutex> lock( m_mutexMonitor );
+        m_vecPendingTapRemove.push_back( clsItem );
+    }
+}
+
 void CTasModule::Tick() {
+    RetryPendingTapRemovals();  // 포크 집합이 비어도 돌아야 한다 — 아래 조기 반환보다 앞에 둔다
+
     std::lock_guard<std::recursive_mutex> lock( m_mutexFork );
     if ( m_mapFork.empty() ) return;
     const time_t tNow = time( NULL );
@@ -1559,13 +1600,8 @@ bool CTasModule::HandleIncomingJoin( const char *pszCallId, const char *pszFrom,
         strCallee = clsTgtParty.bInitiator ? clsOtherParty.strUser : clsTgtParty.strUser;
     }
     {
-        const std::string strGA = gclsPhoneGroupMap.EffectiveGroupOf( strCaller.c_str() );
-        const std::string strGB = gclsPhoneGroupMap.EffectiveGroupOf( strCallee.c_str() );
         const std::string strRole = gclsRoleMap.RoleIdForLine( strMonitor.c_str() );
-        const bool bSelf = ( strMonitor == strCaller || strMonitor == strCallee );
-        // Join 은 청취 미디어를 인도하므로 역할이 있어야 한다 — 같은 전화 그룹(규칙 1)만으로는 BLF 까지다.
-        if ( !bSelf && ( strRole.empty() || ( !gclsRoleMap.CanWatch( strMonitor.c_str(), strGA ) &&
-                                              !gclsRoleMap.CanWatch( strMonitor.c_str(), strGB ) ) ) ) {
+        if ( !CanMonitorPair( strMonitor, strCaller, strCallee ) ) {
             CLog::Print( LOG_INFO, "Join denied — %s cannot monitor %s/%s (role %s scope) → 403", strMonitor.c_str(),
                          strCaller.c_str(), strCallee.c_str(), strRole.c_str() );
             gclsDispatcher.StopCall( pszCallId, SIP_FORBIDDEN );
@@ -1575,6 +1611,9 @@ bool CTasModule::HandleIncomingJoin( const char *pszCallId, const char *pszFrom,
             return true;
         }
     }
+    // 판정 시점의 정책 세대 — 아래 CMP 왕복 동안 자격을 거두면 스윕은 아직 없는 이 leg 을 지나친다.
+    //   등록 직전에 세대가 달라졌으면 같은 판정을 한 번 더 한다(dispatch_center.md §5.10).
+    const unsigned uAuthzGen = CspAuthz::PolicyGeneration();
 
     // 세션당 tap 상한 (§5.5) — CSP 인메모리 카운트 + CMP 기능 광고(resource.tap).
     if ( gclsCmpClient.SupportsTap() == false ) {
@@ -1673,6 +1712,15 @@ bool CTasModule::HandleIncomingJoin( const char *pszCallId, const char *pszFrom,
         clsMedia.AddAttribute( "ssrc", ( std::string( szB ) + " label:callee" ).c_str() );
         break;
     }
+    // 개설 중 자격 회수 재확인 — 아직 200 OK 를 보내기 전이라 tap 만 걷고 403 으로 끝낼 수 있다.
+    if ( CspAuthz::PolicyGeneration() != uAuthzGen && !CanMonitorPair( strMonitor, strCaller, strCallee ) ) {
+        CLog::Print( LOG_INFO, "Join denied — %s lost monitor scope while opening (%s/%s) → 403 [TAS]",
+                     strMonitor.c_str(), strCaller.c_str(), strCallee.c_str() );
+        gclsCmpClient.RemoveTap( clsTarget.m_strRelaySessionId, strTapId, strMonitor, clsTarget.m_strRelaySesId,
+                                 "volte" );
+        gclsDispatcher.StopCall( pszCallId, SIP_FORBIDDEN );
+        return true;
+    }
     if ( gclsUserAgent.AcceptCall( pszCallId, pclsRtp ) == false ) {
         gclsCmpClient.RemoveTap( clsTarget.m_strRelaySessionId, strTapId, strMonitor, clsTarget.m_strRelaySesId,
                                  "volte" );
@@ -1718,12 +1766,81 @@ bool CTasModule::HandleMonitorLegEnd( const char *pszCallId ) {
             if ( itS->second.empty() ) m_mapSessionMonitors.erase( itS );
         }
     }
-    gclsCmpClient.RemoveTap( leg.strSessionId, leg.strTapId, leg.strMonitor, leg.strSesId, leg.strService );
+    // **CMP 회수 실패를 성공으로 처리하지 않는다.** 요청이 유실되면 CMP 는 계속 RTP 를 복사하는데 CSP 는
+    //   맵에서 지운 뒤라 다음 스윕의 대상도 아니다 — 회수가 조용히 새는 자리다. 재시도 대기열로 옮긴다.
+    if ( !gclsCmpClient.RemoveTap( leg.strSessionId, leg.strTapId, leg.strMonitor, leg.strSesId, leg.strService ) ) {
+        std::lock_guard<std::recursive_mutex> lock( m_mutexMonitor );
+        m_vecPendingTapRemove.push_back(
+            { leg.strSessionId, leg.strTapId, leg.strMonitor, leg.strSesId, leg.strService, 0, time( NULL ) + 1 } );
+        CLog::Print( LOG_ERROR, "Join — tap(%s) 회수 실패(session=%s monitor=%s) — 재시도 대기 %zu 건 [TAS]",
+                     leg.strTapId.c_str(), leg.strSessionId.c_str(), leg.strMonitor.c_str(),
+                     m_vecPendingTapRemove.size() );
+    }
     gclsDispatcher.RemoveCallOwner( pszCallId );
     int iDurMs = leg.tStart > 0 ? (int)( ( time( NULL ) - leg.tStart ) * 1000 ) : -1;
     _emitCallMonitored( leg, "ended", iDurMs );
     CLog::Print( LOG_INFO, "Join — monitor leg(%s) ended, tap=%s released [TAS]", pszCallId, leg.strTapId.c_str() );
     return true;
+}
+
+bool CTasModule::CanMonitorPair( const std::string &strMonitor, const std::string &strCaller,
+                                 const std::string &strCallee ) {
+    if ( strMonitor == strCaller || strMonitor == strCallee ) return true;  // 당사자 본인
+    // Join 은 청취 미디어를 인도하므로 역할이 있어야 한다 — 같은 전화 그룹(규칙 1)만으로는 BLF 까지다(§5.2).
+    if ( gclsRoleMap.RoleIdForLine( strMonitor.c_str() ).empty() ) return false;
+    return gclsRoleMap.CanWatch( strMonitor.c_str(), gclsPhoneGroupMap.EffectiveGroupOf( strCaller.c_str() ) ) ||
+           gclsRoleMap.CanWatch( strMonitor.c_str(), gclsPhoneGroupMap.EffectiveGroupOf( strCallee.c_str() ) );
+}
+
+int CTasModule::RevokeUnauthorizedMonitors( const char *pszWhy ) {
+    // 락 안에서는 **스냅샷만** 뜬다. 판정에 쓰는 `EffectiveGroupOf` 는 멤버 색인에 없으면 사용자 캐시를
+    //   보고, 캐시 미스에서 DB·파일까지 간다(`CspUser.cpp` `CCspUserMap::Select`). 그것을 m_mutexMonitor
+    //   안에서 부르면 DB 지연 동안 감청 개설·종료가 같은 락에서 막힌다.
+    struct Snap {
+        std::string strCallId, strMonitor, strTargetA, strTargetB;
+    };
+    std::vector<Snap> vecSnap;
+    {
+        std::lock_guard<std::recursive_mutex> lock( m_mutexMonitor );
+        vecSnap.reserve( m_mapMonitorLeg.size() );
+        for ( const auto &kv : m_mapMonitorLeg )
+            vecSnap.push_back( { kv.first, kv.second.strMonitor, kv.second.strTargetA, kv.second.strTargetB } );
+    }
+
+    // 판정 — 개설 시(Join, §5.3)와 같은 식이어야 한다: 당사자 본인은 유지 / 역할 없으면 회수 / 양 peer 의
+    //   전화 그룹 중 어느 한쪽이라도 CanWatch 면 유지. 전화 그룹 소속도 그 사이 바뀔 수 있으므로 지금 값으로 구한다.
+    std::vector<Snap> vecRevoke;
+    for ( const auto &clsSnap : vecSnap ) {
+        if ( CanMonitorPair( clsSnap.strMonitor, clsSnap.strTargetA, clsSnap.strTargetB ) ) continue;
+        const std::string strRole = gclsRoleMap.RoleIdForLine( clsSnap.strMonitor.c_str() );
+        CLog::Print( LOG_INFO, "AuthzRevoke(%s): monitor leg(%s) revoked — %s on %s/%s (role %s) [TAS]",
+                     pszWhy ? pszWhy : "authz", clsSnap.strCallId.c_str(), clsSnap.strMonitor.c_str(),
+                     clsSnap.strTargetA.c_str(), clsSnap.strTargetB.c_str(),
+                     strRole.empty() ? "(none)" : strRole.c_str() );
+        vecRevoke.push_back( clsSnap );
+    }
+
+    // 집행 — 판정 사이에 그 leg 이 끝나고 **같은 Call-ID 로 다른 leg 이 섰을** 수 있다(단말이 주는 값이다).
+    //   끊기 직전에 스냅샷과 같은 감청자·대상인지 확인한다. 다르면 건너뛴다 — 다음 계기에 다시 판정된다.
+    int iRevoked = 0;
+    for ( const auto &clsSnap : vecRevoke ) {
+        {
+            std::lock_guard<std::recursive_mutex> lock( m_mutexMonitor );
+            auto it = m_mapMonitorLeg.find( clsSnap.strCallId );
+            if ( it == m_mapMonitorLeg.end() ) continue;  // 그새 끝났다
+            if ( it->second.strMonitor != clsSnap.strMonitor || it->second.strTargetA != clsSnap.strTargetA ||
+                 it->second.strTargetB != clsSnap.strTargetB ) {
+                CLog::Print( LOG_INFO, "AuthzRevoke(%s): monitor leg(%s) 교체됨 — 회수 건너뜀 [TAS]",
+                             pszWhy ? pszWhy : "authz", clsSnap.strCallId.c_str() );
+                continue;
+            }
+        }
+        // 감청자에게 BYE — 원 통화는 건드리지 않는다. tap 회수·감사 종료(E-AUD-016 ended)는 HandleMonitorLegEnd
+        //   가 한다(로컬 StopCall 은 EventCallEnd 를 올리지 않는다 — ReleaseSessionMonitors 와 같은 순서).
+        gclsUserAgent.StopCall( clsSnap.strCallId.c_str() );
+        if ( HandleMonitorLegEnd( clsSnap.strCallId.c_str() ) ) ++iRevoked;
+    }
+    return iRevoked;
 }
 
 void CTasModule::ReleaseSessionMonitors( const std::string &strRelaySessionId ) {

@@ -49,7 +49,7 @@ static const int SUBSCRIBE_DEFAULT_EXPIRES_SEC = SUBSCRIBE_MAX_EXPIRES_SEC;
 
 extern CSipUserAgent gclsUserAgent;
 extern void SendInitialNotify( const SubscriptionInfo &sub );
-extern void SendTerminatedNotify( const SubscriptionInfo &sub );
+extern void SendTerminatedNotify( const SubscriptionInfo &sub, const char *pszReason = "timeout" );
 extern void SendAffiliationNotify( const std::string &strUserId );  // C2
 extern void SendRegEventNotify( const std::string &strUserId, const char *pszEvent,
                                 const CUserInfo *pclsInfo );  // RFC 3680 partial
@@ -992,6 +992,22 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
 //  SUBSCRIBE 처리
 // ──────────────────────────────────────────────────────────────
 
+/** 인가를 잃은 **갱신** 구독을 실제로 끝낸다 (dispatch_center.md §5.10).
+ *
+ *  403 만으로는 끝나지 않는다 — RFC 6665 §4.1.2.2 는 갱신이 실패해도 "the original subscription is still
+ *  considered valid for the duration of the most recently known 'Expires' value" 라고 하며, 구독자가 종료로
+ *  해석해야 할 응답 목록(404·405·410·416·480·481·484·489·501·604)에 **403 은 없다**. 즉 거절만 하면 구독자는
+ *  구독이 살아 있다고 보고, 서버 기록도 남아 만료까지 NOTIFY 가 계속 나간다. 종료 NOTIFY 를 함께 보내고
+ *  기록을 지워야 회수가 성립한다. 초기 구독에는 끝낼 구독이 없으므로 무동작. */
+static void TerminateDeniedRefresh( bool bRefresh, const std::string &strCallId ) {
+    if ( !bRefresh ) return;
+    SubscriptionInfo clsSub;
+    if ( gclsSubscriptionManager.GetSubscriptionByCallId( strCallId, clsSub ) ) {
+        SendTerminatedNotify( clsSub, "rejected" );
+        gclsSubscriptionManager.RemoveSubscription( strCallId );
+    }
+}
+
 bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage ) {
     char szFromBuf[256];
     pclsMessage->m_clsFrom.m_clsUri.ToString( szFromBuf, sizeof( szFromBuf ) );
@@ -1192,10 +1208,13 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
         SipMakeTag( szToTag, sizeof( szToTag ) );
     }
 
-    // dialog-event 인가 (관제 BLF, volte_supplementary_services.md §6.2) — 초기 구독 시 구독자와
-    //   감시 대상(watched AoR)이 같은 픽업 그룹인지 확인한다. 그룹 밖 감시는 403(타 가입자 호 상태
-    //   노출 방지). 자기 자신 감시는 허용. refresh 는 기존 구독이 이미 인가받았으므로 재검사 생략.
-    if ( strEventType == "dialog" && !bRefresh ) {
+    // dialog-event 인가 (관제 BLF, volte_supplementary_services.md §6.2) — 구독자와 감시 대상(watched AoR)이
+    //   같은 픽업 그룹인지, 아니면 감시자 역할의 monitor_call 범위 안인지 확인한다. 그룹 밖 감시는 403(타
+    //   가입자 호 상태 노출 방지). 자기 자신 감시는 허용.
+    //   **refresh 도 같은 판정을 다시 받는다**(dispatch_center.md §5.10) — 구독은 최대 1시간(RFC 6665 §4.2.1.1,
+    //   SUBSCRIBE_MAX_EXPIRES_SEC)이라 한 번 통과한 구독이 갱신만으로 살아남으면 역할을 거둬도 감시가
+    //   그만큼 계속된다. 회수는 능동 종료(AuthzRevoke)와 이 재검사 두 겹이다.
+    if ( strEventType == "dialog" ) {
         if ( strReqUriUser.empty() ) {
             CLog::Print( LOG_INFO, "SUBSCRIBE dialog without watched AoR (R-URI user) from %s → 489",
                          strFromId.c_str() );
@@ -1220,17 +1239,18 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
                     gclsPhoneGroupMap.EffectiveGroupOf( strFromId.c_str() ).c_str(), strGWatch.c_str(),
                     gclsRoleMap.RoleIdForLine( strFromId.c_str() ).c_str() );
                 SendResponse( pclsMessage, 403 );
+                TerminateDeniedRefresh( bRefresh, strSubCallId );
                 return true;
             }
         }
     }
 
-    // conference-event 인가 (TS 24.379 §10.1.3.4.1, dispatch_center.md §5.6) — 초기 구독만(refresh 는 기존 구독이
-    //   이미 인가받음). 규격 = 그룹 문서 <on-network-allow-conference-state> 로 구독자를 판정, 불허 403 + Warning 138,
-    //   브로드캐스트 그룹 480 + Warning 105. CIMS 확장 = 비멤버 관제사의 청취 범위(allow_ambient_listening +
-    //   ptt_listen)를 같은 요소의 해석으로 두어 합류 전 사전 모니터링 구독을 허용한다. 판정 본체는
-    //   CGroupCallService::CheckConferenceSubscribe(청취 leg 게이트와 같은 축).
-    if ( strEventType == "conference" && !bRefresh && !strReqUriUser.empty() ) {
+    // conference-event 인가 (TS 24.379 §10.1.3.4.1, dispatch_center.md §5.6) — 초기 구독과 refresh 둘 다
+    //   (§5.10 — 청취 자격을 거둬도 갱신으로 살아남지 않게). 규격 = 그룹 문서 <on-network-allow-conference-state> 로
+    //   구독자를 판정, 불허 403 + Warning 138, 브로드캐스트 그룹 480 + Warning 105. CIMS 확장 = 비멤버 관제사의 청취
+    //   범위(allow_ambient_listening + ptt_listen)를 같은 요소의 해석으로 두어 합류 전 사전 모니터링 구독을 허용한다.
+    //   판정 본체는 CGroupCallService::CheckConferenceSubscribe(청취 leg 게이트와 같은 축).
+    if ( strEventType == "conference" && !strReqUriUser.empty() ) {
         std::string strWarning, strReason;
         const int iDeny =
             CGroupCallService::CheckConferenceSubscribe( strReqUriUser, strFromId, strWarning, strReason );
@@ -1238,6 +1258,7 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
             CLog::Print( LOG_INFO, "SUBSCRIBE conference denied — %s on group %s (%s) → %d", strFromId.c_str(),
                          strReqUriUser.c_str(), strReason.c_str(), iDeny );
             SendResponseWithWarning( pclsMessage, iDeny, strWarning.c_str() );
+            TerminateDeniedRefresh( bRefresh, strSubCallId );
             return true;
         }
     }

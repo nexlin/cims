@@ -160,6 +160,20 @@ private:
     void ReleaseSessionMonitors( const std::string &strRelaySessionId );
 
 public:
+    /** 감청 인가 판정 — **개설(§5.3 Join)·개설 중 재확인·회수 스윕이 같은 식을 쓰게 하는 단일 지점.**
+     *  셋이 갈라지면 허용된 것을 걷거나(서비스 장애) 잃은 것을 남긴다(보안 구멍). 규칙 = 당사자 본인은 항상 /
+     *  역할이 없으면 불가(같은 전화 그룹만으로는 BLF 까지다) / 양 peer 의 전화 그룹 중 어느 한쪽이라도
+     *  `CanWatch` 면 가능. 전화 그룹 소속은 호출 시점 값으로 구한다. */
+    static bool CanMonitorPair( const std::string &strMonitor, const std::string &strCaller,
+                                const std::string &strCallee );
+
+    /** 인가를 잃은 감청 leg 회수 (dispatch_center.md §5.10) — 역할 재적재 뒤 전수 재판정한다.
+     *  판정은 개설 시(§5.3 Join)와 **같은 식**이어야 한다 — 다르면 허용된 것을 걷거나 잃은 것을 남긴다:
+     *  당사자 본인(bSelf)은 유지 / 역할이 없으면 회수 / 양 peer 의 전화 그룹 중 어느 한쪽이라도
+     *  `CanWatch` 면 유지. 전화 그룹 소속도 그 사이 바뀔 수 있으므로 그룹은 지금 값으로 다시 구한다.
+     *  @return 걷어낸 leg 수. */
+    int RevokeUnauthorizedMonitors( const char *pszWhy );
+
     /** dialog SUBSCRIBE 초기 full 스냅샷 — 감시 대상이 대표번호일 때 진행 중(울림/확립) 호를 채운다
      *  (RFC 4235 §3.2, dispatch_center.md §4.5). 재로그인·재구독 즉시 대표번호 착신이 보이게 한다. */
     void CollectPilotDialogs( const std::string &strPilotAor, std::vector<PilotDialogSnapshot> &vecOut );
@@ -180,7 +194,22 @@ public:
 private:
     std::map<std::string, MonitorLeg> m_mapMonitorLeg;                  ///< 감청 leg Call-ID → 정보
     std::map<std::string, std::set<std::string>> m_mapSessionMonitors;  ///< relay session → 감청 leg Call-ID 집합
+
+    /** CMP tap 회수에 실패한 건 — 재시도 대기열 (dispatch_center.md §5.10).
+     *  `RELAY_TAP_REMOVE` 가 유실되면 CMP 는 계속 복사하는데 CSP 는 맵에서 지운 뒤라 다음 스윕의 대상도 아니다.
+     *  SIP leg 은 이미 끝났으므로 맵에는 되돌리지 않고(되돌리면 스윕이 죽은 호에 BYE 를 보낸다) 이 대기열로
+     *  옮겨 지수 백오프로 재시도한다. 상한을 두는 근거 = 원 통화가 끝나면 `RELAY_REMOVE` 가 세션의 tap 을
+     *  일괄 회수한다(§5.9) — 최종 안전망이 따로 있으므로 무한 재시도는 필요 없다. */
+    struct PendingTapRemove {
+        std::string strSessionId, strTapId, strMonitor, strSesId, strService;
+        int iTries = 0;
+        time_t tNextTry = 0;
+    };
+    std::vector<PendingTapRemove> m_vecPendingTapRemove;
     std::recursive_mutex m_mutexMonitor;
+
+    /** 대기열에서 만기된 건을 재시도한다 — 1초 Tick 에서 부른다. 한 틱에 처리 상한을 둔다(CMP 왕복은 블로킹). */
+    void RetryPendingTapRemovals();
 
     /** dialog-event(RFC 4235) 상태 통지 — 한 호의 두 당사자(caller/callee) 각각을 감시하는 구독자에게
      *  그 당사자의 CSP 측 leg Call-ID 로 partial NOTIFY 를 낸다(당겨받기 BLF, §6.2). */
