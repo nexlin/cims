@@ -462,6 +462,30 @@ UeForegroundService  ─ 프로세스 상주. 알림·wakelock. 여기서 CimsUe
 > 별건이다. 코어를 고치면 3개 바인딩의 모든 요청 경로가 함께 바뀌므로, CSP 가 `tel:` Request-URI 를
 > 어떻게 다루는지 확인한 뒤 결정한다(§11).
 
+### 6.2c-1 구독 수명 — 갱신은 엔진이, 종료 통지는 아직 없다
+
+앱이 거는 이벤트 구독 셋(`dialogWatch` 감시 회선 / `subscribeConference` PTT 로스터 /
+`subscribeXcapDiff` 그룹 문서)은 **엔진이 수명을 진다.** 앱은 `watchAll()`·`refreshGroups()` 를 세션 시작에
+한 번 부르면 되고, 주기 재구독을 앱이 돌릴 필요가 없다.
+
+**갱신은 자동이다.** 코어의 `Engine::dialogWatch` 등은 `pj::Account::sendRequest` 로 SUBSCRIBE 를 보내는데,
+`Event:` 가 `dialog`·`conference`·`xcap-diff` 이면 pjsua 의 CIMS 인터셉터가 가로채
+(`ext/pjproject/.../pjsua_acc.c` `pjsua_cims_conf_subscribe`) **pjsip 이벤트 구독(`pjsip_evsub`)** 으로 만든다.
+그래서 —
+
+- 같은 (자원, 이벤트)로 다시 부르면 새 구독이 아니라 **같은 dialog 의 갱신**이다(`pjsip_evsub_initiate`).
+  `Expires: 0` 이면 해지다.
+- 갱신 시점은 evsub 가 정한다 — **서버가 200 OK 로 부여한 `Expires`** 를 읽어(RFC 6665 §4.2.1.1, notifier 가
+  요청보다 짧게 줄 수 있다) 만료 조금 전에 스스로 다시 건다(`evsub.c` `TIMER_TYPE_UAC_REFRESH`,
+  `cims_conf_cb` 의 `on_client_refresh = NULL` = 기본 자동 갱신).
+
+**종료 통지는 앱까지 오지 않는다 — 미이행.** 서버가 인가 회수로 구독을 끊어도
+(`terminated;reason=rejected|deactivated` — [dispatch_center.md §5.10](dispatch_center.md)) CIMS 의 종료 콜백
+(`pjsua_pres.c` `cims_conf_on_evsub_state`)은 로그를 남기고 슬롯만 해제한다. 코어·파사드에 그 사건을 올릴
+경로가 없으므로 **앱은 화면의 낡은 행을 비우지 못하고**, `deactivated` 의 «즉시 재구독» 권고(RFC 6665 §4.1.3)도
+성립하지 않는다. 회수 자체는 서버가 집행하므로 보안 구멍은 아니다. 해소는 SDK 과제
+([ue_sdk.md §11](ue_sdk.md) — 종료 사유를 파사드 콜백으로 공개).
+
 ### 6.2d 호 목록·경과·동시 통화 — 데스크톱에서 그대로 온 규칙
 
 | 규칙 | 데스크톱 근거 | 태블릿 |

@@ -454,6 +454,16 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 
 ## 11. 미해결 / 향후 과제
 
+- **구독 종료 사유를 앱까지 올린다** — 코어의 구독 셋(`dialogWatch`·`subscribeConference`·`subscribeXcapDiff`)은
+  pjsua 의 CIMS 인터셉터(`pjsua_acc.c` `pjsua_cims_conf_subscribe`)를 거쳐 `pjsip_evsub` 로 들어가므로
+  **갱신·해지·서버 부여 `Expires` 는 이미 엔진이 처리한다**(`evsub.c` `TIMER_TYPE_UAC_REFRESH`,
+  `cims_conf_cb.on_client_refresh = NULL` = 기본 자동 갱신). 빠진 것은 **종료 전달**이다 —
+  `pjsua_pres.c` `cims_conf_on_evsub_state` 는 `PJSIP_EVSUB_STATE_TERMINATED` 에서 로그를 남기고 슬롯만
+  해제할 뿐 앱에 올리지 않는다. 그래서 서버가 인가 회수로 구독을 끊어도
+  (`terminated;reason=rejected|deactivated` — [dispatch_center.md §5.10](dispatch_center.md)) 앱은 화면의 낡은
+  행을 비우지 못하고, `deactivated` 의 «즉시 재구독» 권고(RFC 6665 §4.1.3)도 성립하지 않는다. 필요한 것 =
+  CIMS 콜백이 사유·자원을 코어로 올리고, 파사드가 `onSubscriptionEnded(event, resource, reason)` 로 공개하며,
+  앱이 사유별로 화면 비우기/재구독을 정하는 것. 실기기 회귀가 필요해 별건으로 둔다.
 - **Windows 오디오 이중 출력** — 재생 라우트(재생 전용 `ExtraAudioDevice`)의 WMME 지연·에코·장치 점유 실측. WMME 가 부족하면
   데스크톱 WASAPI 백엔드(`IMMDeviceEnumerator`+`IAudioClient` 공유 모드 — 2.16 의 UWP 전용 구현과 별개 파일)를 엔진 패치로 추가.
 - **Windows 영상 렌더 경로** — pjproject 에 "창 없는 프레임 콜백" 렌더 장치가 없다. F3 에서 pjmedia-videodev 콜백 장치를

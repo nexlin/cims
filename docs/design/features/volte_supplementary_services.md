@@ -240,7 +240,8 @@ relay leg SDES 평가/재작성 헬퍼(`EvalRelayOfferSdes`/`ApplyRelayLegOffer`
 정상 경로)와 TAS(픽업·전달 재고정)가 공용한다 ([media_security.md](media_security.md) §5.2).
 
 **P2 상세**: (a) 수신 INVITE-with-Replaces — `HandleIncomingReplaces`(§6.2). (b) dialog 이벤트
-패키지 — `CscfModule` SUBSCRIBE 에 `dialog` 분기 + 같은 픽업 그룹 인가(403), `CspServer` 에
+패키지 — `CscfModule` SUBSCRIBE 에 `dialog` 분기 + 같은 픽업 그룹 인가(403, **초기 구독과 갱신 둘 다** —
+관제 감시 범위가 같은 판정을 쓰므로 자격을 거두면 갱신에서 막힌다. [dispatch_center.md §5.10](dispatch_center.md)), `CspServer` 에
 dialog-info NOTIFY 빌더·발신(`SendDialogEventNotify`), `CTasModule` 의 `OnCallRing/Start/End`
 에서 호 상태(early/confirmed/terminated) 트리거. picker 는 NOTIFY 의 `call-id`(+태그)로
 INVITE-Replaces 를 조립한다. 본문 규칙(RFC 4235 §4.1) — 호의 두 당사자 각각에게 **그 당사자가 가진

@@ -92,6 +92,10 @@ CSP 는 SIP 경로에서 같은 역할 행을 인메모리로 든다(`CCspRoleMa
 - **수행과 감사 열람은 분리한다.** 감청을 수행하는 능력(`monitor_call`·`ptt_listen`)과 감사를 읽는 능력(`audit_read`)은 같은
   역할에 함께 두지 않는다(관제 프리셋에는 `audit_read` 가 없다).
 - **배정·범위 변경은 감사된다.** `E-AUD-006 config_change`(entity=`role` | `role_assignment`, actor=§2.5).
+- **거둔 자격은 즉시 회수된다.** 인가는 성립 시점에 한 번 판정하고 결과를 세션에 담으므로(구독·감청 leg·PTT 청취 leg),
+  역할을 바꾸는 것만으로는 이미 선 것이 무너지지 않는다. CSP 가 역할 재적재 직후 전수 재판정해 잃은 것을 끊고
+  (`terminated;reason=rejected` / BYE), 구독 갱신에서도 같은 판정을 다시 받는다 —
+  [dispatch_center.md §5.10](dispatch_center.md). 이것이 없으면 «권한을 거뒀다» 가 화면에서만 참이다.
 
 ### 2.5 감사 actor
 
@@ -233,6 +237,10 @@ GMC→GMS **XCAP Ut PUT/DELETE** 다. 관제사는 콘솔 계정이 아니라 PT
 - `csp/CallDir.h` `PttSessionStart` — 디스크립터 + `state/created_at/updated_at` 기록. initiator 는 state 파일용으로만 유지.
 - `csp/CspPttGroup.{h,cpp}` + `csp/DbManager.cpp` `SelectGroup` — `authorized_user_id` 로드.
 - `CCspRoleMap`(`csp/CspRole.{h,cpp}`, 회선 → 역할) — [dispatch_center.md §3.5](dispatch_center.md).
+- `csp/AuthzRevoke.{h,cpp}` `CspAuthz::RevokeUnauthorized()` — 인가 회수 스윕(구독·감청 leg·PTT 청취 leg). 호출은
+  `csp/CscInterface.cpp` 의 `ROLE_CHANGED`·`USER_CHANGED`·`PHONE_GROUP_CHANGED`·`CSC_RESTART` 가 맵을 재적재한 **뒤**.
+  leg 쪽 판정은 `CTasModule::RevokeUnauthorizedMonitors`·`CGroupCallService::RevokeUnauthorizedListeners` —
+  [dispatch_center.md §5.10](dispatch_center.md).
 
 ### 콘솔
 - `관리 > 계정`: role 지정 = `roles` 목록에서 선택(내장 4 + 커스텀), 기본 default-deny.

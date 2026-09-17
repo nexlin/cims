@@ -591,6 +591,110 @@ TS 24.379 **ambient listening**(`session-type=ambient-listening`, remote-init �
 소실되며(미확립 leg — sweeper 회수) 수용 가능하다. active/standby 절체 시 회수는 active 역할만
 수행한다([../ha_design.md](../ha_design.md) 역할 게이트).
 
+### 5.10 인가 회수 — 자격을 거두면 이미 선 것도 걷는다
+
+인가는 **성립 시점에 한 번** 판정하고 그 결과를 세션에 담는다 — 구독은 dialog 에, 감청 leg 는 tap 에,
+PTT 청취 leg 는 그룹 세션에. 그래서 역할을 거둬도 이미 선 것은 저절로 무너지지 않는다. 구독은 최대
+1시간(RFC 6665 §4.2.1.1, `SUBSCRIBE_MAX_EXPIRES_SEC`) 갱신으로 살고 leg 는 통화가 끝날 때까지 산다.
+감청·청취처럼 **회수가 즉시여야 하는 권한**에서 이것은 구멍이다.
+
+회수는 두 겹이다.
+
+| 겹 | 언제 | 무엇을 | 구현 |
+|---|---|---|---|
+| ① 능동 종료 | 인가 축이 바뀐 직후 | 그 순간 인가를 잃은 구독·leg 전부 | `csp/AuthzRevoke.cpp` `CspAuthz::RevokeUnauthorized()` |
+| ② 갱신 시 재검사 | 다음 SUBSCRIBE refresh | ①이 놓친 잔여 | `csp/CscfModule.cpp` — dialog·conference 인가에서 `!bRefresh` 게이트 제거 |
+
+**②는 403 만으로 끝나지 않는다.** RFC 6665 §4.1.2.2 는 갱신이 실패해도 "the original subscription is still
+considered valid for the duration of the most recently known 'Expires' value" 라고 하고, 구독자가 종료로
+해석해야 할 응답 목록(404·405·410·416·480·481·484·489·501·604)에 **403 은 없다**. 거절만 하면 구독자는 구독이
+살아 있다고 보고 서버 기록도 남아 만료까지 NOTIFY 가 계속 나간다. 그래서 갱신을 거절할 때는 **종료 NOTIFY 를
+함께 보내고 구독 기록을 지운다**(`TerminateDeniedRefresh`). 초기 구독 거절에는 끝낼 구독이 없으므로 403 만 보낸다.
+
+**인가 축이 바뀌는 계기 넷** — 넷 다 CSC 통지이고, 맵을 재적재한 **뒤에** 스윕한다(`csp/CscInterface.cpp`).
+
+- `ROLE_CHANGED` — 역할 능력·범위·대상·배정 변경
+- `USER_CHANGED`(POST/DELETE) — 회선 개설·삭제. 회선이 사라지면 그 회선의 역할 펼침도 사라진다
+- `USER_CHANGED`(PUT) — **파생 `pickup_group` 이 바뀐 경우만.** 회선 집합은 그대로이므로 역할 맵은 재적재하지
+  않고 그룹 축만 다시 판정한다. 이 계기가 필요한 이유: CSC 는 멤버 이동을 `PHONE_GROUP_CHANGED` + `USER_CHANGED(PUT)`
+  **두 통지**로 보내는데, 앞 통지의 스윕 시점에는 멤버 색인에서 빠졌어도 `EffectiveGroupOf` 가 **아직 낡은 사용자
+  캐시로 폴백**해 «여전히 같은 그룹» 으로 판정한다(`csp/CspPhoneGroup.cpp` `EffectiveGroupOf`). 그래서 캐시가 실제로
+  바뀐 뒤 한 번 더 걷어야 회수가 성립한다
+- `PHONE_GROUP_CHANGED` — 그룹 멤버십은 `CanWatch` 규칙 1(같은 전화 그룹)과 `monitor_call=own` 의 답이다
+- `CSC_RESTART` — 재기동 중에 바뀐 것을 재적재 값으로 다시 판정
+
+**걷는 대상 넷과 판정** — 판정식은 **성립 시점과 같아야 한다.** 다르면 허용된 것을 걷거나 잃은 것을 남긴다.
+
+| 대상 | 판정 | 회수 방법 |
+|---|---|---|
+| dialog 구독 | `CanWatch(구독자 회선, 감시 대상의 전화 그룹)` — 자기 자신 감시는 예외로 유지 | `NOTIFY Subscription-State: terminated;reason=rejected` + 구독 삭제 |
+| conference 구독 | `CheckConferenceSubscribe()` (§5.6 과 같은 함수) | 같음 |
+| 감청 leg(tap) | 당사자 본인은 유지 / 역할 없으면 회수 / 양 peer 전화 그룹 중 하나라도 `CanWatch` 면 유지 (§5.3 Join 과 같은 식) | 감청자에게 BYE → `HandleMonitorLegEnd` 가 tap 회수·감사 `ended` |
+| PTT 청취 leg | 자격 `allow_ambient_listening` + 범위(즉석 세션 `CanObserveEphemeral` / 그 외 `CanListenPtt`) — §5.6 과 같은 2단 | 청취자에게 BYE **+ `OnCallTerminated` 직접 호출** |
+
+**종료 사유는 계기에 따라 둘이다**(RFC 6665 §4.1.3). 안전성이 아니라 **복구 가능성**의 문제다 — 어느 쪽이든
+서버는 다음 구독을 다시 판정하므로 회수는 그대로 성립한다.
+
+| 계기 | 사유 | 왜 |
+|---|---|---|
+| `ROLE_CHANGED`·`CSC_RESTART` | `rejected` | 인가 정책 자체가 바뀌었다. 규격 정의가 그대로 이 경우다("terminated due to change in authorization policy"). 재구독해도 403 이므로 하지 말라고 알린다 |
+| `PHONE_GROUP_CHANGED`·`USER_CHANGED` | `deactivated` | CSC 는 한 사람의 그룹 이동을 **통지 둘**(옛 그룹 PUT + 새 그룹 POST)로 보낸다. 그 사이 스윕은 «아직 어느 그룹에도 없는» 순간을 볼 수 있고, 거기에 `rejected` 를 보내면 정당한 관제사가 재구독하지 않아 **영구히 눈이 먼다**. `deactivated`("SHOULD retry immediately")면 즉시 재구독하고 서버가 그때 옳게 판정한다 |
+
+만료(`timeout`)와는 셋 다 뜻이 다르므로 섞어 쓰지 않는다.
+
+**적재가 실패하면 회수하지 않는다.** 스윕의 판정 근거는 방금 재적재한 맵이다. 그 적재가 부분적으로만
+성공하면 «역할은 있는데 회선 펼침이 없는» 맵이 서고, 스윕은 그것을 확정 철회로 읽어 **정상 감청·구독을
+전부 끊는다** — DB 일시 장애가 서비스 정지가 된다. 두 겹으로 막는다.
+
+- `CDbManager::LoadAllRoles` 는 대상·배정 조회 중 **하나라도 실패하면 기존 맵을 그대로 두고 `false`** 를
+  돌린다(종전에는 빈 결과로 진행하고 `true` 를 돌렸다). 게시는 모든 조회가 성공했을 때만.
+- `csp/CscInterface.cpp` 의 네 계기는 **적재 성공일 때만** 스윕한다. 실패하면 사유를 로그에 남기고 기존
+  성립물을 유지한다 — 회수를 늦추는 쪽이 멀쩡한 감청을 끊는 쪽보다 안전하다.
+
+**비용** — 스윕은 구독 전수를 순회하지만 판정은 인메모리 맵 조회뿐이라 아무것도 걷을 것이 없는 흔한 경우는
+값싸다. DB 를 읽는 것은 conference 구독과 PTT 청취 leg 의 자격 확인(`allow_ambient_listening`)뿐이고 둘 다 수가
+적다. 스윕은 CSC 통지를 처리하는 그 스레드에서 동기로 돈다 — 같은 자리에서 이미 맵 전량 재적재를 하므로
+새로 생긴 제약은 아니다.
+
+**판정식은 한 곳에만 둔다.** 같은 규칙을 개설·개설 중 재확인·회수 스윕 세 곳에 따로 적으면 반드시
+갈라지고, 갈라지면 허용된 것을 걷거나(서비스 장애) 잃은 것을 남긴다(보안 구멍). 그래서 각 축의 판정을
+함수 하나로 모으고 셋이 그것만 부른다 — 감청은 `CTasModule::CanMonitorPair`, PTT 청취는
+`CGroupCallService::ListenDenyReason`.
+
+**개설 중인 leg 은 스윕이 못 본다.** 인가 판정과 맵 등록 사이에 CMP 왕복이 끼어 수백 ms 가 걸린다. 그
+사이에 자격을 거두면 스윕은 아직 없는 leg 을 지나치고, 등록 경로는 판정을 다시 하지 않아 **권한 없는
+leg 이 확립된다.** 그래서 **정책 세대**(`CspAuthz::PolicyGeneration`)를 둔다 — 개설 경로가 판정 직후 세대를
+적어 두고, 200 OK 직전에 세대가 달라졌으면 같은 판정을 한 번 더 한다. 세대 비교만으로 끊지 않고 **재판정**
+하는 이유는 오탐 때문이다: 맵 재적재와 세대 증가 사이에 시작한 개설은 이미 새 정책으로 판정했는데도 세대가
+달라 보인다. 재판정은 어느 경우에나 옳은 답을 낸다. 세대는 `RevokeUnauthorized` 가 **스윕보다 먼저** 올린다.
+
+**CMP 회수 실패를 성공으로 처리하지 않는다.** `RELAY_TAP_REMOVE` 가 유실되면 CMP 는 계속 RTP 를 복사하는데
+CSP 는 맵에서 지운 뒤라 다음 스윕의 대상도 아니다 — 회수가 조용히 새는 자리다. 실패한 건은 재시도
+대기열로 옮겨 1초 Tick 에서 지수 백오프(1·2·4·8·16·32초)로 6회까지 다시 보낸다. 맵에는 되돌리지 않는다 —
+SIP leg 은 이미 끝났으므로 되돌리면 스윕이 죽은 호에 BYE 를 보낸다. 상한을 두는 근거는 **원 통화가 끝나면
+`RELAY_REMOVE` 가 세션의 tap 을 일괄 회수한다**는 것이다(§5.9) — 최종 안전망이 따로 있다. 포기할 때는
+`LOG_ERROR` 로 남긴다.
+
+**leg 회수는 BYE 만으로 끝나지 않는다.** psip 의 로컬 `StopCall` 은 dialog 를 지우고 BYE 를 보낼 뿐
+`EventCallEnd` 를 올리지 않는다(`ext/psip/SipUserAgent/SipUserAgentCall.hpp`). 뒷정리를 직접 태우지 않으면
+세션 맵·CMP 멤버 해제(`LeaveGroup`)·tap 회수·감사 `ended` 가 모두 남아 **단말만 끊기고 미디어는 계속
+복사된다.** 그래서 감청 leg 는 `HandleMonitorLegEnd`, PTT 청취 leg 는 `OnCallTerminated` 를 BYE 직후 직접
+부른다(`CheckMemberState` 의 강제 종료와 같은 순서).
+
+**원 통화는 건드리지 않는다.** 걷는 것은 감청자·청취자의 leg 뿐이고 감시 대상의 통화와 다른 참가자는
+그대로다 — 자격 회수와 업무 통화 차단은 다른 정책이다(§10 «자리/사람 분리» 의 같은 원칙).
+이 원칙은 **정상 이탈에도 적용된다** — 사설콜·ad hoc 의 «한쪽이 끊으면 세션 종료» 규칙(§5.6a,
+TS 24.379 §11.1)은 참가자 이탈에만 걸고 **청취 leg 이탈에는 걸지 않는다**. 관측자가 빠졌다고 당사자 통화를
+끊으면 감청의 은닉성도 함께 깨진다.
+
+**한계** — 회수는 CSP 인메모리 성립물만 본다. 이미 인도된 미디어(단말이 받은 RTP)나 앱이 받아 둔 화면
+상태는 되돌릴 수 없다. **그리고 지금 단말은 종료 NOTIFY 를 화면까지 올리지 않는다** — 구독 수명은 pjsip
+`evsub` 가 쥐고 있는데 CIMS 종료 콜백(`pjsua_pres.c` `cims_conf_on_evsub_state`)이 슬롯만 해제하고 앱에
+알리지 않기 때문이다([ue_sdk.md §11](ue_sdk.md)). 그래서 `deactivated` 의 «즉시 재구독» 도 아직 성립하지
+않는다. 회수 자체는 서버가 집행하므로 보안 구멍은 아니지만, **관제사 화면에는 끊긴 대상의 낡은 행이 남는다.**
+
+---
+
 ---
 
 ## 6. CSP↔CMP 계약 — 청취 leg (cmp_media_api §6.5 신설)
@@ -847,6 +951,7 @@ cspsim 시나리오(3~4 단말)와 S3 항목. 판정 정본은 기존 방식 그
 | | M5 인가 | M5a 범위 밖 역할(`own`, 다른 그룹)의 M' → 구독 403·Join 없음 / M5c 역할 없는 다른 그룹 M' → 구독 403 / **M5b 같은 전화 그룹원이지만 역할 없음** → 그룹원 BLF 구독 200·Join 403(미디어 무흐름); 미지 Call-ID → 481 |
 | | M6 종료 | A BYE → M 에 BYE 수신 마커, CMP tap 회수(STATS `taps` 0) |
 | | M7 감사 | `E-AUD-016` 시작·종료 2건 |
+| | M8 회수 | 청취 확립 뒤 역할 범위 제거 + `ROLE_CHANGED` → M 에 BYE·수신 정지, **A↔B 는 통화 유지·수신 계속** (§5.10) |
 | `S3-SCN-PTT-LISTEN` | L1 청취 합류 | 멤버 A·B 그룹콜 중 M(비멤버, `allow_ambient_listening=1`, 역할 `ptt_listen=all`) recvonly INVITE → 200, M 수신 RTP delta>0, M floor 요청 → DENY(GRANT 0), A 의 conference 로스터에 M 없음(hidden) |
 | | L2 자격 없음 | `allow_ambient_listening=0` → 403 |
 | | L3 범위 밖 | 역할 `ptt_listen=none` → 403 / L3c 전화 그룹원이지만 역할 없음 → Join 403 + conference 구독 403 `Warning: 138` |
@@ -906,16 +1011,22 @@ person(`users.id`)에 하고, 통지는 `PHONE_GROUP_CHANGED`/`ROLE_CHANGED`/`US
   principal 둘(`console:<login>` / `user:<users.id>`)과 토큰 realm 분리를 유효한 모델로 정의한다. 같은 정책을 쓰기 위해
   인증 저장소까지 먼저 합칠 필요는 없고, 합치면 CSC 장애 중 복구 콘솔 진입이 같이 막힌다(§9 는 별도 과제로 둔다).
 
-  **순서는 회수 집행이 먼저, 역할 투영이 나중이다.** 착수 전 확인된 제약:
-  - `USER_CHANGED` 의 `PUT` 은 역할 맵을 재적재하지 않는다(`csp/CscInterface.cpp` — `POST`/`DELETE` 만). 점유 전환을
-    역할에 반영하려면 `ROLE_CHANGED` 경로여야 한다.
-  - **dialog 구독의 refresh 는 인가를 재검사하지 않는다**(`csp/CscfModule.cpp` — 초기 구독만 검사). 자격을 거둬도 기존
-    구독은 갱신으로 살아남으므로, 회수는 역할 변경이 아니라 **명시적 세션 종료**(RFC 6665 §4.2.2)로만 성립한다.
-    통화 감청 leg·PTT 청취 leg 도 개설 시점의 회선·역할을 세션에 저장하므로 같다.
-  - 감사 actor 표기가 경로마다 다르다 — 관리 API 는 `user:<users.id>`, 감청·청취·녹취(`E-AUD-016`)는 회선 번호.
-    `monitor` 의 뜻을 바꾸기보다 사람 actor 필드를 **병행 추가**하고 생산자·소비자(콘솔 감사 CSV 포함)를 같이 옮긴다.
-  - 회선 없는 person 은 로그인과 주소록 조회까지는 되지만(`caller_identity` 가 `sub`→`users.id` 로 폴백),
-    `/provisioning/me` 는 빈 `services` 를, `/provisioning/history` 는 `403 no_monitor_scope` 를 준다.
+  **순서는 회수 집행이 먼저, 역할 투영이 나중이다.**
+
+  - **① 회수 집행 — 구현 완료([§5.10](#510-인가-회수--자격을-거두면-이미-선-것도-걷는다)).** 자격을 거두면 이미 선
+    구독·감청 leg·PTT 청취 leg 이 실제로 걷힌다(능동 종료 + 갱신 시 재검사 두 겹). 점유 전환이 자격을 옮기는
+    구조의 전제였다 — 이것이 없으면 "앉기/일어나기" 는 화면 상태일 뿐 서버가 집행하는 것이 아니다.
+  - **② 사람 actor 병행 — 미착수.** 감사 actor 표기가 경로마다 다르다 — 관리 API 는 `user:<users.id>`,
+    감청·청취·녹취(`E-AUD-016`)는 회선 번호. `monitor` 의 뜻을 바꾸기보다 사람 actor 필드를 **병행 추가**하고
+    생산자·소비자(콘솔 감사 CSV 포함)를 같이 옮긴다.
+  - **③ 사용 세션(점유) — 미착수.** 착수 전 확인해 둔 것:
+    - `USER_CHANGED` 의 `PUT` 은 역할 맵을 재적재하지 않는다(`csp/CscInterface.cpp` — `POST`/`DELETE` 만). 점유
+      전환을 역할에 반영하려면 `ROLE_CHANGED` 경로여야 한다.
+    - 회선 없는 person 은 로그인과 주소록 조회까지는 되지만(`caller_identity` 가 `sub`→`users.id` 로 폴백),
+      `/provisioning/me` 는 빈 `services` 를, `/provisioning/history` 는 `403 no_monitor_scope` 를 준다.
+    - 토큰은 이미 사람과 회선을 나눠 싣는다 — `sub`=`users.login_id`(사람), `mcptt_id`=파생 회선
+      (`csc/src/services/mcptt.py` `_load_login_accounts` — ptt→volte→voip 첫 가입, 회선이 없으면 `login:<login_id>`).
+      점유는 이 파생을 **고정 파생이 아니라 점유 결과**로 바꾸는 일이다.
 - **RFC 4662 RLS** 목록 구독(§5.2 표준형 — PTT 회선 dialog 구독(§5.6a)까지 더해 구독 수가 회선 ×2 로 늘어 우선순위가
   올라간다), **큐/ACD**(대기열·순번 안내).
 - Android UE 의 Join 발신·SSRC 디먹스 UI — 서버 완성 후 단말 파트.
@@ -936,3 +1047,4 @@ person(`users.id`)에 하고, 통지는 `PHONE_GROUP_CHANGED`/`ROLE_CHANGED`/`US
 - [android_ue_provisioning.md](android_ue_provisioning.md) — `/provisioning/me` `phoneGroup`·`dispatch` 블록, §3-3 게이트.
 - [../csp_control_plane_load_hardening.md](../csp_control_plane_load_hardening.md) — 포크 팬아웃 상한 `MaxForkTargets`(§8.3).
 - [mcptt_standard_conformance.md](mcptt_standard_conformance.md) §R1 — ambient listening 행에 본 문서 §5.6/§10 참조.
+- [volte_supplementary_services.md](volte_supplementary_services.md) §6.2 — dialog 구독 인가가 **갱신에도** 걸린다(§5.10).
