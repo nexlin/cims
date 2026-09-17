@@ -7,6 +7,7 @@
 //   · 오늘 데스크  응대·부재·발신·전달·감청 집계
 package com.cims.ue.dispatch.ui.call
 
+import com.cims.ue.dispatch.session.userPart
 import com.cims.ue.dispatch.ui.ScreenViewModel
 import com.cims.ue.dispatch.session.CallLogKind
 import com.cims.ue.dispatch.session.CallLogRow
@@ -53,7 +54,7 @@ data class MemberChip(
     val stateText: String get() = when {
         ringing -> "링잉"; talking -> "통화"; else -> "대기"
     }
-    val peer: String get() = dialog?.info?.remoteIdentity?.let { userPartOf(it) }.orEmpty()
+    val peer: String get() = dialog?.info?.remoteIdentity?.let { userPart(it) }.orEmpty()
     /** 남의 링잉만 당겨받는다(내 것은 응답이다). */
     val canPickup: Boolean get() = ringing && !isMe
     /** 남의 통화만 청취한다. 인가는 서버가 한다(403 이면 거절). */
@@ -82,7 +83,7 @@ data class CallCard(
     val transferOpen: Boolean = false,
 ) {
     val callId: Int get() = session.callId
-    val peer: String get() = session.title.ifEmpty { userPartOf(session.info.remoteUri) }
+    val peer: String get() = session.title.ifEmpty { userPart(session.info.remoteUri) }
     val incoming: Boolean get() = session.info.state == CallState.INCOMING
     val active: Boolean get() = session.isActive
     val held: Boolean get() = session.info.state == CallState.HELD
@@ -106,6 +107,9 @@ internal const val DESK_ALL = "all"
  */
 internal fun keepInDesk(row: CallLogRow, filter: String): Boolean = when (filter) {
     DESK_ALL -> true
+    // 데스크톱 ⑥ 머리의 «대표번호» — `CallActivityViewModel.Refilter` 의 `pilot` 과 같은 값이다.
+    //   오늘 데스크 칩에는 없고 ⑥ 머리에만 있다(집계 축이 아니라 조회 축이라서).
+    "pilot" -> row.viaPilot
     "missed" -> row.kind == CallLogKind.MISSED
     "outgoing" -> row.kind == CallLogKind.OUTGOING
     "transfer" -> row.kind == CallLogKind.TRANSFER
@@ -113,8 +117,6 @@ internal fun keepInDesk(row: CallLogRow, filter: String): Boolean = when (filter
     else -> true
 }
 
-internal fun userPartOf(uri: String): String =
-    uri.substringAfter(':', uri).substringBefore('@').substringBefore(';')
 
 /**
  * ⑥ **진행 중 행** — 감시 대상의 살아 있는 통화 하나(dispatch_desktop_ui.md §4.4).
@@ -152,7 +154,7 @@ data class LiveCallRow(
     val canMonitor: Boolean get() = talking && !mine && !monitoring && inScope
     /** 픽업 대상 번호 — 울리는 착신 leg 의 감시 대상. */
     val pickupNumber: String get() =
-        (legs.firstOrNull { it.isEarly && it.isIncomingLeg } ?: primary).let { userPartOf(it.watched) }
+        (legs.firstOrNull { it.isEarly && it.isIncomingLeg } ?: primary).let { userPart(it.watched) }
 }
 
 /**
@@ -197,8 +199,8 @@ internal fun combineDialogs(rows: List<DialogRow>): List<List<DialogRow>> {
 /** 두 leg 이 같은 통화인가. */
 private fun pairs(a: DialogRow, b: DialogRow): Boolean {
     // ① 서로를 가리킨다.
-    if (userPartOf(b.watched) != userPartOf(a.info.remoteIdentity)) return false
-    if (userPartOf(a.watched) != userPartOf(b.info.remoteIdentity)) return false
+    if (userPart(b.watched) != userPart(a.info.remoteIdentity)) return false
+    if (userPart(a.watched) != userPart(b.info.remoteIdentity)) return false
     // ② 방향이 반대다 — 같은 통화의 두 leg 은 한쪽이 걸고 한쪽이 받는다(RFC 4235 direction).
     val da = a.info.direction
     val db = b.info.direction
@@ -229,11 +231,11 @@ class CallDeskViewModel(private val s: DispatchSession) : ScreenViewModel() {
                 .filter { it.volteAor.isNotEmpty() && it.groupId == d.groupId }
                 .map { m ->
                     val row = dialogs.firstOrNull {
-                        userPartOf(it.watched) == userPartOf(m.volteAor) && !it.isTerminated
+                        userPart(it.watched) == userPart(m.volteAor) && !it.isTerminated
                     }
                     MemberChip(
-                        aor = m.volteAor, number = userPartOf(m.volteAor),
-                        name = m.name, isMe = userPartOf(m.volteAor) == userPartOf(me),
+                        aor = m.volteAor, number = userPart(m.volteAor),
+                        name = m.name, isMe = userPart(m.volteAor) == userPart(me),
                         dialog = row,
                         monitoring = row != null && sessions.any {
                             it.kind == SessionKind.PHONE_MONITOR && it.info.joinedDialog == row.info.callId
@@ -250,17 +252,17 @@ class CallDeskViewModel(private val s: DispatchSession) : ScreenViewModel() {
             combine(f, f) { dialogs, _ ->
                 dialogs.filter { s.isPilot(it.watched) && !it.isTerminated }
                     .map { pilot ->
-                        val caller = userPartOf(pilot.info.remoteIdentity)
+                        val caller = userPart(pilot.info.remoteIdentity)
                         val peers = dialogs.filter {
                             it !== pilot && !s.isPilot(it.watched) &&
-                                userPartOf(it.info.remoteIdentity) == caller
+                                userPart(it.info.remoteIdentity) == caller
                         }
                         QueueItem(
                             dialog = pilot,
                             caller = caller,
-                            ringingAt = peers.filter { it.isEarly }.map { userPartOf(it.watched) },
+                            ringingAt = peers.filter { it.isEarly }.map { userPart(it.watched) },
                             answeredBy = peers.firstOrNull { it.isConfirmed }
-                                ?.let { userPartOf(it.watched) }.orEmpty())
+                                ?.let { userPart(it.watched) }.orEmpty())
                     }
             }
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
@@ -331,7 +333,7 @@ class CallDeskViewModel(private val s: DispatchSession) : ScreenViewModel() {
     val watchDiag: StateFlow<List<WatchRow>> =
         combine(s.watchedAors, s.notifiedAors, s.dialogSeenAors) { aors, notified, seen ->
             aors.map { aor ->
-                val n = userPartOf(aor)
+                val n = userPart(aor)
                 WatchRow(n, s.phoneBook.value.nameOf(n), n in notified, n in seen, s.isPilot(aor))
             }.sortedWith(compareBy({ it.established }, { it.number }))   // 안 잡힌 것이 위로
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())

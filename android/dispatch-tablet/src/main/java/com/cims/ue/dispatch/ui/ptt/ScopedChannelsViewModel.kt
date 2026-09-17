@@ -4,6 +4,7 @@
 // 진행 여부·참가자 수를 안다. **필터·검색은 이 패널에만 있다**(① 은 항상 전부 보인다).
 package com.cims.ue.dispatch.ui.ptt
 
+import kotlinx.coroutines.flow.map
 import com.cims.ue.dispatch.ui.ScreenViewModel
 import com.cims.ue.dispatch.session.DispatchSession
 import com.cims.ue.dispatch.session.GroupInfo
@@ -54,6 +55,15 @@ data class ScopedCard(
 }
 
 class ScopedChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
+
+    /** "동시 청취 2/4" — ② 머리. 상한에 닿았을 때 이유를 누르기 전에 보이는 자리다. */
+    val listenText: StateFlow<String> =
+        s.sessions.map { list ->
+            "동시 청취 ${list.count { it.isLive && it.kind.isSheet }}/${s.settingsSnapshot().maxListen}"
+        }.stateIn(scope, SharingStarted.Eagerly, "")
+
+    /** 상한에 닿았나 — 배지를 붉게. */
+    val listenFull: Boolean get() = s.listenLimitReached()
 
     private val _filter = MutableStateFlow(ScopeFilter.ALL)
     val filter: StateFlow<ScopeFilter> = _filter.asStateFlow()

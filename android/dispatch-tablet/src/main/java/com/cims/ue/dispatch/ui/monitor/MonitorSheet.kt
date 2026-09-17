@@ -10,6 +10,12 @@
 // 앱은 그 결과를 그릴 뿐 자격을 판정하지 않는다(dispatch_center.md §5.6a).
 package com.cims.ue.dispatch.ui.monitor
 
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import com.cims.ue.dispatch.session.userPart
+import com.cims.ue.dispatch.ui.Tag
+import com.cims.ue.dispatch.ui.Type
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,33 +46,45 @@ fun rememberMonitorSessions(session: DispatchSession): List<SessionItem> {
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+/**
+ * [감청] 화면 — 열려 있는 감청·청취 전부(android_dispatch_tablet.md §6.3).
+ *
+ * 전에는 어느 화면 위에나 뜨는 전면 시트였다. 시트는 «잠깐 보고 닫는» 표면인데 감청은 **일하는 동안 계속
+ * 열려 있는 것**이라 맞지 않았다 — 시트를 닫으면 청취는 계속되는데 화면에서는 사라져 «지금 몇 개를 듣고
+ * 있나» 를 놓친다. 하단 내비의 한 자리로 올려 상시 접근하게 한다.
+ */
 @Composable
-fun MonitorSheet(session: DispatchSession, onDismiss: () -> Unit) {
+fun MonitorScreen(session: DispatchSession, modifier: Modifier = Modifier) {
     val rows = rememberMonitorSessions(session)
     val scope = rememberCoroutineScope()
 
-    // 마지막 감청이 끝나면 시트도 닫는다 — 빈 시트가 화면을 덮지 않게.
-    LaunchedEffect(rows.isEmpty()) { if (rows.isEmpty()) onDismiss() }
-
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-            Text("감청·청취 ${rows.size}", fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            Text("시트를 닫아도 청취는 계속됩니다 — 끝내려면 [청취 종료]",
-                fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(8.dp))
-            rows.forEach { s ->
-                when (s.kind) {
-                    SessionKind.PTT_LISTEN -> PttListenCard(session, s) {
-                        scope.launch { session.leave(s.callId) }
-                    }
-                    else -> MonitorCard(session, s) {
-                        scope.launch { session.hangup(s.callId) }
-                    }
-                }
-                Spacer(Modifier.height(10.dp))
-            }
-            Spacer(Modifier.height(12.dp))
+    if (rows.isEmpty()) {
+        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("열린 감청·청취가 없습니다 — [무전]의 범위 채널에서 [청취], 통화 감청은 ⑥ 에서 시작합니다",
+                fontSize = Type.body, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center, modifier = Modifier.padding(32.dp))
         }
+        return
+    }
+
+    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState())
+        .padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Text("감청·청취 ${rows.size}", fontSize = Type.title, fontWeight = FontWeight.Bold)
+        Text("다른 화면으로 옮겨도 청취는 계속됩니다 — 끝내려면 [청취 종료]",
+            fontSize = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(8.dp))
+        rows.forEach { s ->
+            when (s.kind) {
+                SessionKind.PTT_LISTEN -> PttListenCard(session, s) {
+                    scope.launch { session.leave(s.callId) }
+                }
+                else -> MonitorCard(session, s) {
+                    scope.launch { session.hangup(s.callId) }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+        Spacer(Modifier.height(12.dp))
     }
 }
 
@@ -78,23 +96,23 @@ private fun MonitorCard(session: DispatchSession, s: SessionItem, onEnd: () -> U
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("감청 — ${s.title.ifBlank { userPart(s.info.remoteUri) }}",
-                    fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    fontSize = Type.title, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(8.dp))
                 Tag(if (hidden) "은닉" else "투명",
                     if (hidden) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.tertiary)
                 Spacer(Modifier.weight(1f))
-                Text(fmtElapsed(s.elapsedMs), fontSize = 12.sp)
+                Text(fmtElapsed(s.elapsedMs), fontSize = Type.body)
             }
             Spacer(Modifier.height(6.dp))
             // 소스가 둘로 갈라져 오지 않으면(구형 서버·믹스 인도) 한 줄만 보인다.
             val sources = s.info.sources
-            if (sources.isEmpty()) Text("수신 중 — 소스 라벨이 아직 없습니다", fontSize = 12.sp,
+            if (sources.isEmpty()) Text("수신 중 — 소스 라벨이 아직 없습니다", fontSize = Type.body,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             else sources.forEach { src -> SourceRow(src) }
 
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("🎧 라우트 ${s.info.playbackRoute}", fontSize = 11.sp,
+                Text("🎧 라우트 ${s.info.playbackRoute}", fontSize = Type.meta,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = onEnd) {
@@ -113,27 +131,27 @@ private fun PttListenCard(session: DispatchSession, s: SessionItem, onEnd: () ->
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("청취 — ${g?.name ?: s.info.groupId}", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text("청취 — ${g?.name ?: s.info.groupId}", fontSize = Type.title, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(8.dp))
                 Tag("청취 전용", MaterialTheme.colorScheme.primary)
                 if (s.isEmergency) Tag("긴급", MaterialTheme.colorScheme.error)
                 Spacer(Modifier.weight(1f))
-                Text(fmtElapsed(s.elapsedMs), fontSize = 12.sp)
+                Text(fmtElapsed(s.elapsedMs), fontSize = Type.body)
             }
             Spacer(Modifier.height(4.dp))
             Text(
                 if (s.speaker.isNotBlank()) "발언 ${s.speaker} · ${fmtElapsed(s.speakerElapsedMs)}"
                 else "발언 없음",
-                fontSize = 13.sp,
+                fontSize = Type.strong,
                 fontWeight = if (s.speaker.isNotBlank()) FontWeight.Bold else FontWeight.Normal)
             s.info.sources.forEach { src -> SourceRow(src) }
-            Text("참가 ${g?.connectedCount ?: 0}명", fontSize = 11.sp,
+            Text("참가 ${g?.connectedCount ?: 0}명", fontSize = Type.meta,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("발언 요청 불가 — 청취 전용 합류입니다", fontSize = 11.sp,
+            Text("발언 요청 불가 — 청취 전용 합류입니다", fontSize = Type.meta,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("🔊 라우트 ${s.info.playbackRoute}", fontSize = 11.sp,
+                Text("🔊 라우트 ${s.info.playbackRoute}", fontSize = Type.meta,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = onEnd) {
@@ -157,7 +175,7 @@ private fun SourceRow(src: MediaSource) {
             if (src.active) MaterialTheme.colorScheme.primary
             else MaterialTheme.colorScheme.surfaceVariant))
         Spacer(Modifier.width(6.dp))
-        Text(src.label.ifBlank { "ssrc ${src.ssrc}" }, Modifier.width(120.dp), fontSize = 12.sp, maxLines = 1)
+        Text(src.label.ifBlank { "ssrc ${src.ssrc}" }, Modifier.width(120.dp), fontSize = Type.body, maxLines = 1)
         Box(Modifier.weight(1f).height(6.dp).clip(RoundedCornerShape(3.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)) {
             val w = if (src.level > 0f) src.level.coerceIn(0f, 1f) else if (src.active) 0.35f else 0f
@@ -167,13 +185,4 @@ private fun SourceRow(src: MediaSource) {
     }
 }
 
-@Composable
-private fun Tag(text: String, color: Color) {
-    Surface(color = color.copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp),
-        modifier = Modifier.padding(start = 4.dp)) {
-        Text(text, Modifier.padding(horizontal = 5.dp, vertical = 1.dp), fontSize = 10.sp, color = color)
-    }
-}
 
-private fun userPart(uri: String): String =
-    uri.substringAfter(':', uri).substringBefore('@').substringBefore(';')

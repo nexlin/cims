@@ -4,6 +4,7 @@
 // 묶는 규칙이 한 칸만 어긋나도 A 의 칩에서 B 에게 사설콜이 나간다.
 package com.cims.ue.dispatch
 
+import com.cims.ue.dispatch.session.userPart
 import com.cims.ue.dispatch.session.DirectoryBook
 import com.cims.ue.dispatch.session.DirectoryEntry
 import com.cims.ue.dispatch.session.OrgNode
@@ -13,7 +14,6 @@ import com.cims.ue.dispatch.ui.channelMeta
 import com.cims.ue.dispatch.ui.mergePeople
 import com.cims.ue.dispatch.ui.searchDirectory
 import com.cims.ue.dispatch.ui.resolvePerson
-import com.cims.ue.dispatch.ui.userPart
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -165,5 +165,40 @@ class PersonMenuTest {
     @Test fun `채널 부제는 멤버 수와 범위를 적는다`() {
         assertTrue(channelMeta(grp("g1", "경비", members = 5)).contains("멤버 5"))
         assertTrue(channelMeta(grp("g1", "경비", isMember = false)).contains("청취 범위"))
+    }
+}
+
+// ④ 스레드 칩 — 1:1 을 열고 돌아갈 수 있어야 한다(§6.9a).
+class ThreadChipTest {
+    private fun msg(g: String, at: Long, read: Boolean = true, out: Boolean = false) =
+        com.cims.ue.dispatch.session.Message(
+            id = "$g-$at", groupId = g, fromUri = "sip:x@d", fromName = "x",
+            text = "t", atMs = at, outgoing = out, read = read)
+
+    @org.junit.Test fun `최근 순으로 세운다`() {
+        val chips = com.cims.ue.dispatch.ui.ptt.threadChips(
+            mapOf("a" to listOf(msg("a", 10)), "b" to listOf(msg("b", 30)), "c" to listOf(msg("c", 20)))) { "" }
+        org.junit.Assert.assertEquals(listOf("b", "c", "a"), chips.map { it.key })
+    }
+
+    @org.junit.Test fun `미읽음은 받은 것만 센다`() {
+        val chips = com.cims.ue.dispatch.ui.ptt.threadChips(
+            mapOf("a" to listOf(msg("a", 1, read = false), msg("a", 2, read = false, out = true),
+                                msg("a", 3, read = true)))) { "" }
+        org.junit.Assert.assertEquals(1, chips[0].unread)
+    }
+
+    @org.junit.Test fun `빈 스레드는 내지 않는다`() {
+        org.junit.Assert.assertTrue(
+            com.cims.ue.dispatch.ui.ptt.threadChips(mapOf("a" to emptyList())) { "" }.isEmpty())
+    }
+
+    @org.junit.Test fun `이름이 있으면 이름 없으면 키`() {
+        val chips = com.cims.ue.dispatch.ui.ptt.threadChips(mapOf("g1" to listOf(msg("g1", 1)))) {
+            if (it == "g1") "경비" else ""
+        }
+        org.junit.Assert.assertEquals("경비", chips[0].title)
+        org.junit.Assert.assertEquals("1001",
+            com.cims.ue.dispatch.ui.ptt.threadChips(mapOf("1001" to listOf(msg("1001", 1)))) { "" }[0].title)
     }
 }

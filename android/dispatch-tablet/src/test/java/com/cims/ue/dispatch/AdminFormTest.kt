@@ -10,6 +10,7 @@ import com.cims.ue.dispatch.session.NumberInfo
 import com.cims.ue.dispatch.session.OrgNode
 import com.cims.ue.dispatch.ui.admin.AdminViewModel.Companion.lineAction
 import com.cims.ue.dispatch.ui.admin.AdminViewModel.Companion.needsPassword
+import com.cims.ue.dispatch.ui.admin.orgChoices
 import com.cims.ue.dispatch.ui.admin.LineAction
 import com.cims.ue.dispatch.ui.admin.LineForm
 import com.cims.ue.dispatch.ui.admin.MemberForm
@@ -98,5 +99,50 @@ class AdminFormTest {
     @Test fun `조직 트리 평탄화 — 상위 고리가 있어도 잃지 않는다`() {
         val flat = flatten(listOf(OrgNode("A", "a", "B"), OrgNode("B", "b", "A")))
         assertEquals(setOf("A", "B"), flat.map { it.first.code }.toSet())
+    }
+
+    // ── 조직 선택 목록 (상위 조직 콤보) ──
+    //
+    // 자기 자신·자손을 상위로 고르면 고리가 된다. 서버가 막더라도 **고를 수 있게 두면 안 된다** —
+    // 고르고 저장해서 400 을 보는 UI 는 그 자체가 결함이다.
+    private val tree = listOf(
+        OrgNode("hq", "본부"),
+        OrgNode("t1", "팀01", "hq"),
+        OrgNode("t1a", "반01", "t1"),
+        OrgNode("t2", "팀02", "hq"))
+
+    @Test fun `뺄 것이 없으면 전부 준다`() {
+        assertEquals(4, orgChoices(tree).size)
+    }
+
+    @Test fun `자기와 자손을 뺀다`() {
+        val codes = orgChoices(tree, excludeSubtreeOf = "t1").map { it.first.code }
+        assertTrue(codes.contains("hq"))
+        assertTrue(codes.contains("t2"))
+        assertFalse(codes.contains("t1"))
+        assertFalse(codes.contains("t1a"))
+    }
+
+    @Test fun `루트를 빼면 전부 사라진다`() {
+        assertTrue(orgChoices(tree, excludeSubtreeOf = "hq").isEmpty())
+    }
+
+    @Test fun `빈 코드는 아무것도 빼지 않는다`() {
+        assertEquals(4, orgChoices(tree, excludeSubtreeOf = "").size)
+        assertEquals(4, orgChoices(tree, excludeSubtreeOf = null).size)
+    }
+
+    // 고리가 이미 있는 자료(서버 오류·경합)에서도 멈추지 않아야 한다.
+    @Test fun `고리가 있어도 끝난다`() {
+        val cyc = listOf(OrgNode("a", "A", "b"), OrgNode("b", "B", "a"))
+        assertEquals(2, orgChoices(cyc).size)
+        assertEquals(0, orgChoices(cyc, excludeSubtreeOf = "a").size)
+    }
+
+    @Test fun `깊이가 들여쓰기의 근거다`() {
+        val d = orgChoices(tree).associate { it.first.code to it.second }
+        assertEquals(0, d["hq"])
+        assertEquals(1, d["t1"])
+        assertEquals(2, d["t1a"])
     }
 }

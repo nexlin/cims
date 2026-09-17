@@ -93,14 +93,14 @@ private fun Banner(
                         append(if (pilot) "대표번호 ${session.dispatch.pilotId} 착신" else "착신")
                         if (call.kind == SessionKind.PTT_PRIVATE) append(" · 사설콜")
                     },
-                    fontSize = 12.sp, color = color, fontWeight = FontWeight.Bold)
+                    fontSize = Type.body, color = color, fontWeight = FontWeight.Bold)
                 Text(session.displayLabel(call.info.remoteUri),
-                    fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                    fontSize = Type.head, fontWeight = FontWeight.Bold)
             }
             @Suppress("UNUSED_EXPRESSION") tick     // 1초 틱을 이 조합에 묶는다
-            Text(fmtElapsed(call.elapsedMs), fontSize = 14.sp)
+            Text(fmtElapsed(call.elapsedMs), fontSize = Type.title)
             Button(onClick = onAnswer, modifier = Modifier.height(48.dp).widthIn(min = 104.dp)) {
-                Text("응답", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text("응답", fontSize = Type.title, fontWeight = FontWeight.Bold)
             }
             OutlinedButton(onClick = onReject, modifier = Modifier.height(48.dp)) { Text("거절") }
         }

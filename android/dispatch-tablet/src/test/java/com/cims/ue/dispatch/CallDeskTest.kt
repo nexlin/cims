@@ -4,13 +4,13 @@
 // 내 회선과 감시 회선의 구분, 픽업·청취 자격, 대표번호 포크의 묶음.
 package com.cims.ue.dispatch
 
+import com.cims.ue.dispatch.session.userPart
 import com.cims.ue.dispatch.session.CallLogKind
 import com.cims.ue.dispatch.session.CallLogRow
 import com.cims.ue.dispatch.session.DialogRow
 import com.cims.ue.dispatch.ui.call.DESK_ALL
 import com.cims.ue.dispatch.ui.call.MemberChip
 import com.cims.ue.dispatch.ui.call.keepInDesk
-import com.cims.ue.dispatch.ui.call.userPartOf
 import com.cims.ue.sdk.DialogInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -91,10 +91,10 @@ class CallDeskTest {
 
     // ── URI 번호부 추출 ──
     @Test fun `URI 에서 번호부만 뽑는다`() {
-        assertEquals("1001", userPartOf("sip:1001@cims.local"))
-        assertEquals("+821012345678", userPartOf("tel:+821012345678"))
-        assertEquals("1001", userPartOf("sip:1001@d;user=phone"))
-        assertEquals("1001", userPartOf("1001"))
+        assertEquals("1001", userPart("sip:1001@cims.local"))
+        assertEquals("+821012345678", userPart("tel:+821012345678"))
+        assertEquals("1001", userPart("sip:1001@d;user=phone"))
+        assertEquals("1001", userPart("1001"))
     }
 }
 
@@ -157,7 +157,8 @@ class CallLogRowTest {
     }
 
     // ── 오늘 데스크 칩 → ⑥ 필터 (데스크톱 CallActivityViewModel.Refilter 와 같은 규칙) ──
-    private fun row(kind: CallLogKind) = CallLogRow(atMs = 0, peer = "p", text = "t", kind = kind)
+    private fun row(kind: CallLogKind, pilot: Boolean = false) =
+        CallLogRow(atMs = 0, peer = "p", text = "t", kind = kind, viaPilot = pilot)
 
     @Test fun `전체는 모든 종류를 통과시킨다`() {
         CallLogKind.entries.forEach { assertTrue(it.name, keepInDesk(row(it), DESK_ALL)) }
@@ -175,6 +176,13 @@ class CallLogRowTest {
 
     // «응대» 칩은 필터가 아니라 **해제**다 — 데스크톱도 그 칩에 all 을 건다(CallDeskPanel.xaml 툴팁 "⑥ 전체").
     //   여기서 ANSWERED 만 남기도록 바꾸면 당겨받기(PICKUP)가 사라져 집계와 목록이 어긋난다.
+    // «대표번호» 는 ⑥ 머리에만 있는 조회 축이다 — 종류와 직교한다(대표번호로 온 부재도 있다).
+    @Test fun `대표번호 필터는 경로로 가른다`() {
+        assertTrue(keepInDesk(row(CallLogKind.MISSED, pilot = true), "pilot"))
+        assertTrue(keepInDesk(row(CallLogKind.ANSWERED, pilot = true), "pilot"))
+        assertFalse(keepInDesk(row(CallLogKind.ANSWERED, pilot = false), "pilot"))
+    }
+
     @Test fun `모르는 필터 값은 전체로 본다`() {
         assertTrue(keepInDesk(row(CallLogKind.PICKUP), "answered"))
         assertTrue(keepInDesk(row(CallLogKind.ANSWERED), ""))

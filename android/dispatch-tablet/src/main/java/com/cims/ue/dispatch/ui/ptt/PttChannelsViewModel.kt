@@ -7,6 +7,10 @@
 // 둘은 독립이다 — 순찰1을 보면서 상황실에 말할 수 있다. 섞으면 관제사가 엉뚱한 채널로 송출한다.
 package com.cims.ue.dispatch.ui.ptt
 
+import com.cims.ue.dispatch.session.userPart
+import com.cims.ue.dispatch.ui.PersonEntry
+import com.cims.ue.dispatch.ui.mergePeople
+import com.cims.ue.dispatch.ui.resolvePerson
 import com.cims.ue.dispatch.ui.ScreenViewModel
 import com.cims.ue.dispatch.session.DirectoryBook
 import com.cims.ue.dispatch.session.DispatchSession
@@ -212,6 +216,18 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
         _selectedId.value?.let { s.markRead(it) }
     }
 
+    /**
+     * 채널 화면을 열 때의 포커스 — **토글이 아니다.**
+     *
+     * [focus] 는 카드를 다시 눌러 접는 조작(데스크톱 §4.1)이라 같은 값을 넣으면 포커스가 풀린다.
+     * 화면을 여는 쪽이 그것을 쓰면 «열었는데 아무것도 안 보이는» 상태가 된다.
+     */
+    fun setFocus(id: String) {
+        if (id.isBlank()) return
+        _selectedId.value = id
+        s.markRead(id)
+    }
+
     /** Ctrl+n — n 번째 카드로 포커스 + 단일 발언 대상(데스크톱과 같다). */
     fun focusIndex(n: Int) {
         val c = cards.value.firstOrNull { it.index == n } ?: return
@@ -349,6 +365,27 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
 
     /** PTT 주소록 — 사설콜·애드혹 대상 후보. 세션이 로그인 때 받아 둔 것을 본다. */
     val pttBook: StateFlow<DirectoryBook> = s.pttBook
+
+    /** 내 PTT 번호 — 로스터 칩의 «나» 표시. */
+    val myPttNumber: String get() = userPart(s.myPttId)
+
+    /** 번호 → 이름(양 주소록). 로스터 칩 라벨. */
+    fun nameOf(number: String): String = s.displayLabel(number).takeIf { it != number }.orEmpty()
+
+    /**
+     * 사람 메뉴가 쓰는 사람 목록 — ③ VM 과 같은 순수 함수(`mergePeople`)를 쓴다.
+     *
+     * 흐름 배선만 VM 마다 두는 이유는 수명 때문이다(각 VM 이 자기 scope 에서 산다). **판정 규칙은 한 곳**
+     * (`ui/PersonMenu.kt`)이므로 두 벌이 되지 않는다.
+     */
+    val people: StateFlow<List<PersonEntry>> =
+        combine(s.phoneBook, s.pttBook) { phone, ptt ->
+            mergePeople(phone, ptt, exclude = s.myLineKeys())
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    fun personAt(numberOrUri: String): PersonEntry? =
+        resolvePerson(people.value, numberOrUri, s.phoneBook.value,
+                      fallbackName = s.displayLabel(numberOrUri))
 
     private val _originError = MutableStateFlow<String?>(null)
     /** 발신 실패 사유 — 시트가 보여 준다(§9 사전). 성공하면 시트가 닫히므로 비운다. */

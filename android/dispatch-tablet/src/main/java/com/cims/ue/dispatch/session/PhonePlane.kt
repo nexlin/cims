@@ -73,6 +73,13 @@ data class CallLogRow(
     val startedAtMs: Long = atMs,
     /** 응답 — 못 받았으면 null(부재·미응답). */
     val answeredAtMs: Long? = null,
+    /**
+     * **대표번호를 거쳐 온 호인가** — ⑥ 의 «대표번호» 필터 축(데스크톱 `ActivityRow.IsPilot`).
+     *
+     * 직접 착신과 가르는 이유는 책임이 다르기 때문이다 — 대표번호 호는 그룹 전원이 울리고 누가 받았는지가
+     * 따로 있다. 섞어 보면 «내가 놓친 것» 과 «동료가 받은 것» 이 구분되지 않는다.
+     */
+    val viaPilot: Boolean = false,
 ) {
     val endedAtMs: Long get() = atMs
 
@@ -160,6 +167,8 @@ suspend fun DispatchSession.transferAttended(callId: Int, consultCallId: Int): C
  */
 suspend fun DispatchSession.joinMonitor(row: DialogRow): CimsResult<Unit> {
     val a = phoneAccount ?: return CimsResult.fail(-1, "전화 계정 없음")
+    // 상한은 앱에서 먼저 본다 — 데스크톱도 같은 자리에서 막는다(`DispatchSession.JoinMonitor`).
+    if (listenLimitReached()) return CimsResult.fail(-1, "동시 청취 상한 ${settingsSnapshot().maxListen}")
     // dialog NOTIFY 의 `entity` 는 `tel:` 일 수 있다 — 그대로 넘기면 Join INVITE 가 라우팅되지 않는다.
     val r = a.join(routableTarget(row.watched), row.info)
     if (r.ok) noteOperation(r.value!!.id, Operation.JOIN)
@@ -248,7 +257,8 @@ internal fun DispatchSession.applyDialog(d: DialogInfo) {
             kind = if (row.wasConfirmed) CallLogKind.ANSWERED else CallLogKind.MISSED,
             others = true,
             startedAtMs = row.startedAtMs,
-            answeredAtMs = row.confirmedAtMs))
+            answeredAtMs = row.confirmedAtMs,
+            viaPilot = isPilot(row.watched)))
     }
 }
 

@@ -79,6 +79,8 @@ suspend fun DispatchSession.joinGroup(groupId: String, emergency: Boolean = fals
 /** 청취 합류 — ② 카드의 [청취]. `a=recvonly` 라 발언 버튼이 비활성된다. */
 suspend fun DispatchSession.listenGroup(groupId: String): CimsResult<Unit> {
     val ptt = pttAccount ?: return CimsResult.fail(-1, "PTT 계정 없음")
+    // 상한은 앱에서 먼저 본다 — 넘겨 보내면 서버가 486 으로 거절하고 관제사는 이유를 모른다(§6.5).
+    if (listenLimitReached()) return CimsResult.fail(-1, "동시 청취 상한 ${settingsSnapshot().maxListen}")
     val r = ptt.joinGroupCall(groupId, GroupCallOptions(listenOnly = true))
     if (r.ok) noteOperation(r.value!!.id, Operation.PTT_LISTEN)
     return if (r.ok) CimsResult.ok(Unit) else CimsResult.fail(r.code, r.reason)
@@ -243,7 +245,9 @@ private fun DispatchSession.noteMyCall(s: SessionItem, c: CallInfo) {
         others = false,
         number = userPart(c.remoteUri),
         startedAtMs = s.startedAtMs,
-        answeredAtMs = s.connectedAtMs))
+        answeredAtMs = s.connectedAtMs,
+        // 내 착신이 대표번호를 거쳐 왔나 — 카드 «대표» 배지와 같은 근거(`calledParty` 가 차면 재타게팅된 호).
+        viaPilot = c.calledParty.isNotEmpty()))
 }
 
 /** Denied/Revoked 사유를 화면 문구로 — 사전은 dispatch_desktop_ui.md §9 가 정본이다. */

@@ -4,6 +4,8 @@
 // 화면 머리에 범위 안내를 붙인다. 행 한 번 클릭이 곧 편집이다.
 package com.cims.ue.dispatch.ui.admin
 
+import com.cims.ue.dispatch.ui.Tag
+import com.cims.ue.dispatch.ui.Type
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -33,7 +35,7 @@ import com.cims.ue.dispatch.session.SIP_TRANSPORTS
 fun AdminScreen(vm: AdminViewModel, modifier: Modifier = Modifier) {
     if (!vm.available) return Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Text("관리 범위 미배정 — 콘솔 «관리 > 역할» 에서 관리 범위(directory_write)를 받아야 합니다",
-            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = Type.strong)
     }
 
     val view by vm.view.collectAsStateWithLifecycle()
@@ -48,23 +50,23 @@ fun AdminScreen(vm: AdminViewModel, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Text("조직 · 구성원 · 번호", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text("조직 · 구성원 · 번호", fontSize = Type.title, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(8.dp))
-            Text("관리 범위 ${view.scope.directoryWrite.ifBlank { "—" }}", fontSize = 11.sp,
+            Text("관리 범위 ${view.scope.directoryWrite.ifBlank { "—" }}", fontSize = Type.meta,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (vm.dirty) {
                 Spacer(Modifier.width(8.dp))
                 Surface(color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f),
                     shape = RoundedCornerShape(4.dp)) {
                     Text("저장하지 않은 변경", Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        fontSize = 11.sp, color = MaterialTheme.colorScheme.tertiary)
+                        fontSize = Type.meta, color = MaterialTheme.colorScheme.tertiary)
                 }
             }
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { vm.load(force = true) }) { Text("새로고침") }
         }
         if (error.isNotBlank()) Text(error, Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-            color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+            color = MaterialTheme.colorScheme.error, fontSize = Type.body)
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
 
         Row(Modifier.weight(1f)) {
@@ -93,7 +95,7 @@ fun AdminScreen(vm: AdminViewModel, modifier: Modifier = Modifier) {
             dismissButton = { TextButton(onClick = { discard = null }) { Text("취소") } })
     }
 
-    OrgDialog(vm)
+    OrgDialog(vm, view)
 }
 
 // ── 조직 트리 ───────────────────────────────────────────────────────────────
@@ -104,10 +106,10 @@ private fun OrgTree(vm: AdminViewModel, view: AdminView, modifier: Modifier) {
     Column(modifier.fillMaxHeight()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Text("조직", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text("조직", fontSize = Type.strong, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { vm.newOrg() },
-                contentPadding = PaddingValues(horizontal = 6.dp)) { Text("+ 새 조직", fontSize = 11.sp) }
+                contentPadding = PaddingValues(horizontal = 6.dp)) { Text("+ 새 조직", fontSize = Type.meta) }
         }
         HorizontalDivider()
         LazyColumn(Modifier.weight(1f)) {
@@ -118,8 +120,8 @@ private fun OrgTree(vm: AdminViewModel, view: AdminView, modifier: Modifier) {
                         .clickable { vm.selectOrg(o.code) }
                         .padding(start = (8 + depth * 12).dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    Text(o.name.ifBlank { o.code }, Modifier.weight(1f), fontSize = 12.sp, maxLines = 1)
-                    Text("${view.members.count { it.org == o.code }}", fontSize = 11.sp,
+                    Text(o.name.ifBlank { o.code }, Modifier.weight(1f), fontSize = Type.body, maxLines = 1)
+                    Text("${view.members.count { it.org == o.code }}", fontSize = Type.meta,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -128,10 +130,10 @@ private fun OrgTree(vm: AdminViewModel, view: AdminView, modifier: Modifier) {
         Row(Modifier.padding(4.dp)) {
             val cur = view.orgs.firstOrNull { it.code == sel }
             TextButton(onClick = { cur?.let { vm.editOrg(it) } }, enabled = cur != null,
-                contentPadding = PaddingValues(horizontal = 8.dp)) { Text("편집", fontSize = 11.sp) }
+                contentPadding = PaddingValues(horizontal = 8.dp)) { Text("편집", fontSize = Type.meta) }
             TextButton(onClick = { cur?.let { vm.deleteOrg(it.code) } }, enabled = cur != null,
                 contentPadding = PaddingValues(horizontal = 8.dp)) {
-                Text("삭제", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+                Text("삭제", fontSize = Type.meta, color = MaterialTheme.colorScheme.error)
             }
         }
     }
@@ -152,8 +154,76 @@ internal fun flatten(orgs: List<OrgNode>): List<Pair<OrgNode, Int>> {
     return out
 }
 
+/**
+ * 조직 고르기 목록 — 평탄화에서 **고를 수 없는 것을 뺀 것**(순수 함수, 시험 대상).
+ *
+ * @param excludeSubtreeOf 이 코드와 그 하위 전체를 뺀다. 조직을 편집할 때 자기 자신·자손을 상위로 고르면
+ *   고리가 생긴다 — 서버가 막더라도 **고를 수 있게 두면 안 된다**(고르고 저장 눌러서 실패하는 UI 는
+ *   그 자체가 결함이다). 구성원 «소속» 처럼 뺄 것이 없으면 null.
+ */
+internal fun orgChoices(orgs: List<OrgNode>, excludeSubtreeOf: String? = null): List<Pair<OrgNode, Int>> {
+    val all = flatten(orgs)
+    if (excludeSubtreeOf.isNullOrBlank()) return all
+    val byParent = orgs.groupBy { it.parent }
+    val banned = HashSet<String>()
+    fun mark(code: String) {
+        if (!banned.add(code)) return
+        byParent[code].orEmpty().forEach { mark(it.code) }
+    }
+    mark(excludeSubtreeOf)
+    return all.filter { it.first.code !in banned }
+}
+
+/**
+ * 조직 선택 콤보 — 데스크톱 `DirectoryAdminViewModel.OrgParent`(평탄화 목록 + 들여쓰기)의 이식.
+ *
+ * 종전에는 **코드를 손으로 쳤다.** 조직 코드는 사람이 외우는 값이 아니라 오타가 나면 조용히 다른 조직에
+ * 붙거나 저장이 400 으로 떨어진다. 트리는 이미 화면에 있으므로 그 목록을 그대로 고르게 한다.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun OrgDialog(vm: AdminViewModel) {
+private fun OrgPicker(
+    label: String,
+    value: String,
+    choices: List<Pair<OrgNode, Int>>,
+    allowNone: Boolean,
+    noneLabel: String,
+    modifier: Modifier = Modifier,
+    onPick: (String) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    val picked = choices.firstOrNull { it.first.code == value }?.first
+    // 고른 값이 목록에 없으면 코드를 그대로 보인다 — 범위 밖 조직에 붙어 있는 구성원을 «없음» 으로 보이면
+    //   저장할 때 소속이 조용히 바뀐다.
+    val shown = when {
+        value.isBlank() -> noneLabel
+        picked != null -> picked.name.ifBlank { picked.code } + " (" + picked.code + ")"
+        else -> value + " (범위 밖)"
+    }
+    ExposedDropdownMenuBox(expanded = open, onExpandedChange = { open = it }, modifier = modifier) {
+        OutlinedTextField(
+            value = shown, onValueChange = {}, readOnly = true, singleLine = true,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = open) },
+            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable))
+        ExposedDropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            if (allowNone) DropdownMenuItem(
+                text = { Text(noneLabel) },
+                onClick = { onPick(""); open = false })
+            choices.forEach { (o, depth) ->
+                DropdownMenuItem(
+                    text = {
+                        Text("   ".repeat(depth) + o.name.ifBlank { o.code } + "  (" + o.code + ")",
+                             fontSize = Type.strong)
+                    },
+                    onClick = { onPick(o.code); open = false })
+            }
+        }
+    }
+}
+
+@Composable
+private fun OrgDialog(vm: AdminViewModel, view: AdminView) {
     val o by vm.orgForm.collectAsStateWithLifecycle()
     val isNew by vm.orgFormIsNew.collectAsStateWithLifecycle()
     val node = o ?: return
@@ -170,9 +240,13 @@ private fun OrgDialog(vm: AdminViewModel) {
                     onValueChange = { v -> vm.updateOrgForm { it.copy(name = v) } },
                     label = { Text("이름") }, singleLine = true)
                 Spacer(Modifier.height(6.dp))
-                OutlinedTextField(value = node.parent,
-                    onValueChange = { v -> vm.updateOrgForm { it.copy(parent = v) } },
-                    label = { Text("상위 조직 코드(비우면 최상위)") }, singleLine = true)
+                // 편집 중인 조직 자신·자손은 고를 수 없다(고리 방지). 새 조직은 아직 자손이 없다.
+                OrgPicker(
+                    label = "상위 조직",
+                    value = node.parent,
+                    choices = orgChoices(view.orgs, excludeSubtreeOf = if (isNew) null else node.code),
+                    allowNone = true, noneLabel = "(최상위)",
+                    onPick = { v -> vm.updateOrgForm { it.copy(parent = v) } })
                 Spacer(Modifier.height(6.dp))
                 OutlinedTextField(value = node.sort.toString(),
                     onValueChange = { v -> vm.updateOrgForm { it.copy(sort = v.toIntOrNull() ?: it.sort) } },
@@ -197,13 +271,13 @@ private fun MemberTable(vm: AdminViewModel, view: AdminView, members: List<Membe
             verticalAlignment = Alignment.CenterVertically) {
             Text("구성원 ${members.size}명" +
                  (if (org.isNotBlank()) " · ${view.orgPath(org)} 하위 포함" else ""),
-                fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                fontSize = Type.body, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { vm.newMember() },
-                contentPadding = PaddingValues(horizontal = 8.dp)) { Text("+ 새 구성원", fontSize = 11.sp) }
+                contentPadding = PaddingValues(horizontal = 8.dp)) { Text("+ 새 구성원", fontSize = Type.meta) }
         }
         OutlinedTextField(value = query, onValueChange = vm::search,
-            placeholder = { Text("이름·아이디·번호", fontSize = 12.sp) }, singleLine = true,
+            placeholder = { Text("이름·아이디·번호", fontSize = Type.body) }, singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp),
             textStyle = MaterialTheme.typography.bodySmall)
         HorizontalDivider(Modifier.padding(top = 6.dp))
@@ -215,10 +289,10 @@ private fun MemberTable(vm: AdminViewModel, view: AdminView, members: List<Membe
                         .clickable { onOpen(m) }
                         .padding(horizontal = 10.dp, vertical = 6.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(m.name, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text(m.name, fontSize = Type.strong, fontWeight = FontWeight.Bold)
                         if (m.title.isNotBlank()) {
                             Spacer(Modifier.width(6.dp))
-                            Text(m.title, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(m.title, fontSize = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Spacer(Modifier.weight(1f))
                         if (m.allowCreateGroup) Tag("그룹 생성")
@@ -230,7 +304,7 @@ private fun MemberTable(vm: AdminViewModel, view: AdminView, members: List<Membe
                             m.voip?.msisdn?.takeIf { it.isNotBlank() }?.let { "유선 $it" },
                             m.ptt?.msisdn?.takeIf { it.isNotBlank() }?.let { "PTT $it" },
                         ).joinToString(" · "),
-                        fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                        fontSize = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                 }
                 HorizontalDivider()
             }
@@ -238,14 +312,6 @@ private fun MemberTable(vm: AdminViewModel, view: AdminView, members: List<Membe
     }
 }
 
-@Composable
-private fun Tag(text: String) {
-    Surface(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
-        shape = RoundedCornerShape(4.dp), modifier = Modifier.padding(start = 4.dp)) {
-        Text(text, Modifier.padding(horizontal = 5.dp, vertical = 1.dp), fontSize = 10.sp,
-            color = MaterialTheme.colorScheme.primary)
-    }
-}
 
 // ── 편집 폼 ─────────────────────────────────────────────────────────────────
 
@@ -255,14 +321,14 @@ private fun MemberForm(vm: AdminViewModel, view: AdminView, f: MemberForm) {
 
     Column(Modifier.fillMaxSize().padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(f.heading, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(f.heading, fontSize = Type.title, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
             if (!f.isNew) TextButton(onClick = { confirmDelete = true }) {
                 Text("삭제", color = MaterialTheme.colorScheme.error)
             }
         }
         if (f.error.isNotBlank()) Text(f.error, Modifier.padding(top = 4.dp),
-            color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+            color = MaterialTheme.colorScheme.error, fontSize = Type.body)
         if (f.busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
 
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
@@ -272,8 +338,13 @@ private fun MemberForm(vm: AdminViewModel, view: AdminView, f: MemberForm) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 OutlinedTextField(value = f.title, onValueChange = { v -> vm.update { it.copy(title = v) } },
                     label = { Text("직함") }, singleLine = true, modifier = Modifier.weight(1f))
-                OutlinedTextField(value = f.org, onValueChange = { v -> vm.update { it.copy(org = v) } },
-                    label = { Text("소속 코드") }, singleLine = true, modifier = Modifier.weight(1f))
+                OrgPicker(
+                    label = "소속",
+                    value = f.org,
+                    choices = orgChoices(view.orgs),
+                    allowNone = true, noneLabel = "(없음)",
+                    modifier = Modifier.weight(1f),
+                    onPick = { v -> vm.update { it.copy(org = v) } })
             }
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -288,14 +359,14 @@ private fun MemberForm(vm: AdminViewModel, view: AdminView, f: MemberForm) {
             LineKind.all.forEach { kind -> LineCard(vm, view, f, kind) }
 
             Spacer(Modifier.height(8.dp))
-            Text("PTT 자격", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text("PTT 자격", fontSize = Type.strong, fontWeight = FontWeight.Bold)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("그룹 생성", Modifier.weight(1f), fontSize = 12.sp)
+                Text("그룹 생성", Modifier.weight(1f), fontSize = Type.body)
                 Switch(checked = f.allowCreateGroup,
                     onCheckedChange = { v -> vm.update { it.copy(allowCreateGroup = v) } })
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("원격 청취 (표시만 — 콘솔 역할에서 부여)", Modifier.weight(1f), fontSize = 12.sp,
+                Text("원격 청취 (표시만 — 콘솔 역할에서 부여)", Modifier.weight(1f), fontSize = Type.body,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Switch(checked = f.orig?.allowAmbientListening == true, onCheckedChange = null, enabled = false)
             }
@@ -334,39 +405,39 @@ private fun LineCard(vm: AdminViewModel, view: AdminView, f: MemberForm, kind: S
     OutlinedCard(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Column(Modifier.padding(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(LineKind.label(kind), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text(LineKind.label(kind), fontSize = Type.strong, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.weight(1f))
                 if (orig != null && !orig.isEmpty && line.msisdn.isBlank())
-                    Text("비우면 회선 삭제", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+                    Text("비우면 회선 삭제", fontSize = Type.meta, color = MaterialTheme.colorScheme.error)
             }
             OutlinedTextField(value = line.msisdn,
                 onValueChange = { v -> vm.updateLine(kind) { it.copy(msisdn = v) } },
                 label = { Text("번호") }, singleLine = true, modifier = Modifier.fillMaxWidth())
 
             Spacer(Modifier.height(4.dp))
-            Text("접속서비스", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("접속서비스", fontSize = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (choices.isEmpty()) {
                 // 후보가 없으면 개설을 막는다 — 서버가 400 을 낼 것이 확실하다(§4.5).
                 Text("후보가 없습니다 — 서버 접속서비스(kind=$kind) 등록이 필요합니다(운영자)",
-                    fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+                    fontSize = Type.meta, color = MaterialTheme.colorScheme.error)
             } else {
                 Row(Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     choices.forEach { sv ->
                         FilterChip(selected = line.serviceRef == sv.name,
                             onClick = { vm.updateLine(kind) { it.copy(serviceRef = sv.name) } },
-                            label = { Text(sv.name, fontSize = 11.sp) })
+                            label = { Text(sv.name, fontSize = Type.meta) })
                     }
                 }
             }
 
             Spacer(Modifier.height(4.dp))
-            Text("SIP transport", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("SIP transport", fontSize = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 SIP_TRANSPORTS.forEach { t ->
                     FilterChip(selected = line.sipTransport.equals(t, ignoreCase = true),
                         onClick = { vm.updateLine(kind) { it.copy(sipTransport = t) } },
-                        label = { Text(t, fontSize = 11.sp) })
+                        label = { Text(t, fontSize = Type.meta) })
                 }
             }
 
@@ -380,7 +451,7 @@ private fun LineCard(vm: AdminViewModel, view: AdminView, f: MemberForm, kind: S
                     modifier = Modifier.fillMaxWidth())
             }
             orig?.pickupGroup?.takeIf { it.isNotBlank() }?.let {
-                Text("픽업 그룹 $it (읽기 전용 — 콘솔 전화 그룹에서 파생)", fontSize = 11.sp,
+                Text("픽업 그룹 $it (읽기 전용 — 콘솔 전화 그룹에서 파생)", fontSize = Type.meta,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }

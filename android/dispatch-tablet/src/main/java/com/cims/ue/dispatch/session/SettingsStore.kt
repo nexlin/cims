@@ -28,6 +28,15 @@ data class Settings(
     val autoHoldOnAnswer: Boolean = true,
     /** 당겨받기 피처코드 — 접속서비스의 `pickup_feature_code` 와 같아야 한다(기본 `**`). */
     val pickupFeatureCode: String = "**",
+    /**
+     * **동시 청취 상한** — 감청(통화 Join)과 PTT 청취를 합쳐 한 번에 몇 개까지 열 수 있나.
+     *
+     * 데스크톱과 같은 기본값 4(`Services/SettingsStore.cs` `MaxMonitorWindows`). 상한이 필요한 이유는
+     * 화면이 아니라 **자원**이다 — 청취 leg 하나마다 서버에 CMP tap/멤버가 생기고, 서버에도 세션당 상한이
+     * 있다(dispatch_center.md §5.5 `MaxTapsPerSession`). 앱이 무제한으로 열면 서버가 486 으로 거절하기
+     * 시작하고, 관제사는 «왜 안 되는지» 를 알 수 없다. 앱에서 먼저 막고 이유를 말한다.
+     */
+    val maxListen: Int = 4,
 )
 
 /** SharedPreferences 한 겹. DataStore 는 의존을 늘려 쓰지 않는다. */

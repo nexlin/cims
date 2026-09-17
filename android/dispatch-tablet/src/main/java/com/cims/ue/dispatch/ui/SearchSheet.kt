@@ -104,7 +104,7 @@ fun SearchSheet(
                 label = { Text("이름 · 내선 · PTT 번호 · 채널") })
 
             if (hits.isEmpty()) {
-                Text("찾는 결과가 없습니다", Modifier.padding(vertical = 16.dp), fontSize = 12.sp,
+                Text("찾는 결과가 없습니다", Modifier.padding(vertical = 16.dp), fontSize = Type.body,
                      color = MaterialTheme.colorScheme.onSurfaceVariant)
                 return@Column
             }
@@ -132,9 +132,9 @@ private fun PersonRow(p: PersonEntry, onPick: (PersonAction, String) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(p.head, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            Text(p.head, fontSize = Type.strong, fontWeight = FontWeight.Medium, maxLines = 1)
             if (p.orgPath.isNotEmpty())
-                Text(p.orgPath, fontSize = 11.sp, maxLines = 1,
+                Text(p.orgPath, fontSize = Type.meta, maxLines = 1,
                      color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         // 가진 회선에 있는 행동만 — 비활성 버튼을 늘어놓지 않는다(사람 메뉴와 같은 규칙).
@@ -152,8 +152,8 @@ private fun ChannelRow(g: GroupInfo, onChannel: (String) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(g.name, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-            Text(channelMeta(g), fontSize = 11.sp,
+            Text(g.name, fontSize = Type.strong, fontWeight = FontWeight.Medium, maxLines = 1)
+            Text(channelMeta(g), fontSize = Type.meta,
                  color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Small("채널로") { onChannel(g.id) }
@@ -163,6 +163,6 @@ private fun ChannelRow(g: GroupInfo, onChannel: (String) -> Unit) {
 @Composable
 private fun Small(text: String, onClick: () -> Unit) {
     TextButton(onClick = onClick, contentPadding = PaddingValues(horizontal = 8.dp)) {
-        Text(text, fontSize = 11.sp)
+        Text(text, fontSize = Type.meta)
     }
 }

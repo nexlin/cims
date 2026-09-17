@@ -6,6 +6,9 @@
 // DTMF·전달은 한 통화에 묶인 조작이라 **카드 안에서** 편다(§6.6).
 package com.cims.ue.dispatch.ui.call
 
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.pager.HorizontalPager
+import com.cims.ue.dispatch.ui.Type
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import com.cims.ue.dispatch.ui.PersonAction
@@ -49,47 +52,68 @@ private fun fmt(ms: Long): String {
  * @param onPerson 사람 메뉴가 고른 행동. **여기서 처리하지 않고 올린다** — 사설콜·애드혹·SDS 는 [PTT] 탭의
  *   상태를 건드리므로 두 탭을 다 아는 곳(`MainViewModel`)이 이어야 한다(데스크톱도 `MainViewModel` 이 잇는다).
  */
+private val CALL_PAGES = listOf("통화", "그룹원", "내역")
+
+/**
+ * [통화] 화면 — 좌우 스와이프 세 면 (android_dispatch_tablet.md §6.3).
+ *
+ * 데스크톱은 ③⑥ 을 2열 + 전폭으로 한 화면에 편다. 태블릿에서 그대로 하면 다섯 목록이 한 화면을 나눠 가져
+ * 각각 서너 줄이 된다 — 특히 «내 통화» 와 «통화 내역» 은 훑는 목록이라 그러면 쓸모가 없다.
+ * 그래서 **하는 일로 세 면을 나누고** 각 면이 전체 높이를 쓴다: 지금 벌어지는 통화 / 거는 상대 / 지난 기록.
+ */
 @Composable
-fun CallTab(
+fun CallsScreen(
     vm: CallDeskViewModel,
+    page: Int,
+    onPageChange: (Int) -> Unit,
     onPerson: (PersonAction, String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
+    val pager = rememberPagerState(initialPage = page.coerceIn(0, CALL_PAGES.lastIndex)) { CALL_PAGES.size }
+    LaunchedEffect(pager.currentPage) { onPageChange(pager.currentPage) }
+    LaunchedEffect(page) { if (page != pager.currentPage) pager.animateScrollToPage(page) }
+
     Column(modifier.fillMaxSize()) {
-        Row(Modifier.weight(0.6f).fillMaxWidth()) {
-            Column(Modifier.weight(1f).fillMaxHeight().padding(8.dp)) {
-                QuickDial(vm)
-                Spacer(Modifier.height(8.dp))
-                SectionTitle("관제 그룹원")
-                Members(vm, onPerson)
-                Spacer(Modifier.height(8.dp))
-                SectionTitle("대표번호 대기열")
-                Queue(vm)
-            }
-            VerticalDivider()
-            Column(Modifier.weight(1f).fillMaxHeight().padding(8.dp)) {
-                SectionTitle("오늘 데스크")
-                Tally(vm)
-                Spacer(Modifier.height(8.dp))
-                SectionTitle("내 통화")
-                MyCalls(vm)
+        TabRow(selectedTabIndex = pager.currentPage) {
+            CALL_PAGES.forEachIndexed { i, label ->
+                Tab(selected = pager.currentPage == i, onClick = { onPageChange(i) },
+                    text = { Text(label, fontSize = Type.body) })
             }
         }
-        HorizontalDivider()
-        Column(Modifier.weight(0.4f).fillMaxWidth().padding(8.dp)) {
-            SectionTitle("⑥ 통화 내역")
-            CallLog(vm, onPerson)
+        HorizontalPager(state = pager, modifier = Modifier.weight(1f)) { i ->
+            when (i) {
+                0 -> Column(Modifier.fillMaxSize().padding(8.dp)) {
+                    QuickDial(vm, onPerson)
+                    Spacer(Modifier.height(8.dp))
+                    SectionTitle("대표번호 대기열")
+                    Queue(vm)
+                    Spacer(Modifier.height(8.dp))
+                    SectionTitle("내 통화")
+                    MyCalls(vm, onPerson)          // LazyColumn — 남은 높이를 전부 쓴다
+                }
+                1 -> Column(Modifier.fillMaxSize().padding(8.dp)) {
+                    SectionTitle("관제 그룹원")
+                    Members(vm, onPerson)
+                }
+                else -> Column(Modifier.fillMaxSize().padding(8.dp)) {
+                    SectionTitle("오늘 데스크")
+                    Tally(vm)
+                    Spacer(Modifier.height(8.dp))
+                    SectionTitle("통화 내역")
+                    CallLog(vm, onPerson)          // LazyColumn — 남은 높이를 전부 쓴다
+                }
+            }
         }
     }
 }
 
 @Composable
 private fun SectionTitle(t: String) =
-    Text(t, fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.padding(bottom = 4.dp))
+    Text(t, fontWeight = FontWeight.Bold, fontSize = Type.strong, modifier = Modifier.padding(bottom = 4.dp))
 
 // ── 빠른 발신 ────────────────────────────────────────────────────────────────
 @Composable
-private fun QuickDial(vm: CallDeskViewModel) {
+private fun QuickDial(vm: CallDeskViewModel, onPerson: (PersonAction, String) -> Unit) {
     val number by vm.dialNumber.collectAsStateWithLifecycle()
     // 주소록은 **관측해서** 읽는다 — 비관측 읽기는 늦게 도착한 주소록을 화면에 못 싣는다.
     val book by vm.book.collectAsStateWithLifecycle()
@@ -99,12 +123,12 @@ private fun QuickDial(vm: CallDeskViewModel) {
         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         OutlinedTextField(
             value = number, onValueChange = vm::setDialNumber,
-            placeholder = { Text("번호·내선", fontSize = 12.sp) },
+            placeholder = { Text("번호·내선", fontSize = Type.body) },
             singleLine = true, modifier = Modifier.weight(1f),
             // 입력한 번호의 주인을 바로 보여 준다 — 잘못 건 전화를 줄인다.
             supportingText = {
                 val who = if (number.isBlank()) "" else book.nameOf(number)
-                if (who.isNotBlank()) Text(who, fontSize = 11.sp,
+                if (who.isNotBlank()) Text(who, fontSize = Type.meta,
                     color = MaterialTheme.colorScheme.primary)
             },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Go))
@@ -115,7 +139,7 @@ private fun QuickDial(vm: CallDeskViewModel) {
         OutlinedButton(onClick = { vm.pickup() }) { Text("픽업") }
     }
 
-    if (sheet) DialSheet(vm) { sheet = false }
+    if (sheet) DialSheet(vm, onPerson) { sheet = false }
 }
 
 // ── 그룹원 띠 ────────────────────────────────────────────────────────────────
@@ -128,11 +152,15 @@ private fun Members(vm: CallDeskViewModel, onPerson: (PersonAction, String) -> U
     //   재사용될 때 엉뚱한 줄에 붙는다.
     var menuFor by remember { mutableStateOf<String?>(null) }
 
-    Column(Modifier.verticalScroll(rememberScrollState()).heightIn(max = 150.dp)) {
+    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
         members.forEach { m ->
             Row(
+                // **탭 = 빠른 발신 입력란에 채움**(데스크톱 §4.3 «대기 → 클릭 → 입력란에 채움»), 롱프레스 =
+                //   사람 메뉴. 탭으로 곧바로 걸지 않는 이유는 오조작이다 — 띠는 상태를 보려고 자주 만진다.
                 Modifier.fillMaxWidth().padding(vertical = 3.dp)
-                    .combinedClickable(onClick = {}, onLongClick = { if (!m.isMe) menuFor = m.number }),
+                    .combinedClickable(
+                        onClick = { if (!m.isMe) vm.setDialNumber(m.number) },
+                        onLongClick = { if (!m.isMe) menuFor = m.number }),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
@@ -140,13 +168,13 @@ private fun Members(vm: CallDeskViewModel, onPerson: (PersonAction, String) -> U
                     person = vm.personAt(m.number), expanded = true,
                     onDismiss = { menuFor = null }, onPick = onPerson)
                 Dot(ringing = m.ringing, talking = m.talking)
-                Text(m.number + if (m.isMe) " (나)" else "", fontSize = 12.sp,
+                Text(m.number + if (m.isMe) " (나)" else "", fontSize = Type.body,
                      fontWeight = if (m.isMe) FontWeight.Bold else FontWeight.Normal)
-                Text(m.name, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                Text(m.stateText + (if (m.dialog != null) " " + fmt(m.dialog.elapsedMs) else ""), fontSize = 11.sp)
-                if (m.canPickup) TextButton(onClick = { vm.pickup(m.number) }) { Text("당겨받기", fontSize = 11.sp) }
-                if (m.canMonitor) TextButton(onClick = { vm.monitor(m) }) { Text("청취", fontSize = 11.sp) }
-                if (m.monitoring) Text("청취 중", fontSize = 11.sp)
+                Text(m.name, fontSize = Type.body, modifier = Modifier.weight(1f))
+                Text(m.stateText + (if (m.dialog != null) " " + fmt(m.dialog.elapsedMs) else ""), fontSize = Type.meta)
+                if (m.canPickup) TextButton(onClick = { vm.pickup(m.number) }) { Text("당겨받기", fontSize = Type.meta) }
+                if (m.canMonitor) TextButton(onClick = { vm.monitor(m) }) { Text("청취", fontSize = Type.meta) }
+                if (m.monitoring) Text("청취 중", fontSize = Type.meta)
             }
         }
     }
@@ -166,12 +194,12 @@ private fun Queue(vm: CallDeskViewModel) {
                                  else MaterialTheme.colorScheme.surfaceVariant)) {
                 Column(Modifier.padding(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(if (q.ringing) "🔔 " else "", fontSize = 13.sp)
+                        Text(if (q.ringing) "🔔 " else "", fontSize = Type.strong)
                         Text(book.nameOf(q.caller).ifBlank { q.caller },
-                             fontWeight = FontWeight.Bold, fontSize = 13.sp,
+                             fontWeight = FontWeight.Bold, fontSize = Type.strong,
                              modifier = Modifier.weight(1f))
-                        Text(fmt(q.elapsedMs), fontSize = 12.sp)
-                        if (q.ringing) TextButton(onClick = { vm.pickup() }) { Text("당겨받기", fontSize = 11.sp) }
+                        Text(fmt(q.elapsedMs), fontSize = Type.body)
+                        if (q.ringing) TextButton(onClick = { vm.pickup() }) { Text("당겨받기", fontSize = Type.meta) }
                     }
                     Text(
                         when {
@@ -180,7 +208,7 @@ private fun Queue(vm: CallDeskViewModel) {
                             q.ringingAt.isNotEmpty() -> "울림 " + q.ringingAt.joinToString(", ")
                             else -> "포크 중"
                         },
-                        fontSize = 11.sp)
+                        fontSize = Type.meta)
                 }
             }
         }
@@ -201,15 +229,17 @@ private fun Tally(vm: CallDeskViewModel) {
             FilterChip(
                 selected = key != DESK_ALL && f == key,
                 onClick = { vm.setDeskFilter(key) },
-                label = { Text("$label $n", fontSize = 11.sp) })
+                label = { Text("$label $n", fontSize = Type.meta) })
         }
     }
 }
 
 // ── 내 통화 ─────────────────────────────────────────────────────────────────
 @Composable
-private fun MyCalls(vm: CallDeskViewModel) {
+private fun MyCalls(vm: CallDeskViewModel, onPerson: (PersonAction, String) -> Unit) {
     val calls by vm.calls.collectAsStateWithLifecycle()
+    // 열린 메뉴는 한 번에 하나 — 호 id 를 키로(③ 그룹원·⑥ 내역과 같은 규칙).
+    var menuFor by remember { mutableStateOf<Int?>(null) }
     val xferTarget by vm.transferTarget.collectAsStateWithLifecycle()
     if (calls.isEmpty()) { Hint("진행 중인 통화 없음"); return }
 
@@ -218,31 +248,35 @@ private fun MyCalls(vm: CallDeskViewModel) {
             Card(colors = CardDefaults.cardColors(
                 containerColor = if (c.incoming) MaterialTheme.colorScheme.tertiaryContainer
                                  else MaterialTheme.colorScheme.surfaceVariant)) {
-                Column(Modifier.padding(10.dp)) {
+                Column(Modifier.padding(10.dp)
+                    .combinedClickable(onClick = {}, onLongClick = { menuFor = c.callId })) {
+                    if (menuFor == c.callId) PersonMenu(
+                        person = vm.personAt(c.session.info.remoteUri), expanded = true,
+                        onDismiss = { menuFor = null }, onPick = onPerson)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Dot(ringing = c.incoming, talking = c.active)
                         Spacer(Modifier.width(6.dp))
-                        Text(c.peer, fontWeight = FontWeight.Bold, fontSize = 14.sp,
+                        Text(c.peer, fontWeight = FontWeight.Bold, fontSize = Type.title,
                              modifier = Modifier.weight(1f))
-                        if (c.viaPilot) Text("대표 ", fontSize = 11.sp)
+                        if (c.viaPilot) Text("대표 ", fontSize = Type.meta)
                         // 음소거는 **상태 배지로도** 보여야 한다 — 버튼 글자만 바뀌면 켜졌는지 모른다.
-                        if (c.muted) Text("음소거", fontSize = 10.sp,
+                        if (c.muted) Text("음소거", fontSize = Type.micro,
                             color = MaterialTheme.colorScheme.error,
                             fontWeight = FontWeight.Bold, modifier = Modifier.padding(end = 4.dp))
-                        Text(c.stateText + " " + fmt(c.session.elapsedMs), fontSize = 12.sp)
+                        Text(c.stateText + " " + fmt(c.session.elapsedMs), fontSize = Type.body)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         if (c.incoming) {
                             Button(onClick = { vm.answer(c) }) { Text("응답") }
                         } else {
-                            TextButton(onClick = { vm.toggleHold(c) }) { Text(if (c.held) "보류 해제" else "보류", fontSize = 11.sp) }
-                            TextButton(onClick = { vm.toggleMute(c) }) { Text(if (c.muted) "음소거 해제" else "음소거", fontSize = 11.sp) }
-                            TextButton(onClick = { if (c.dtmfOpen) vm.closeDtmf() else vm.openDtmf(c) }) { Text("DTMF", fontSize = 11.sp) }
-                            TextButton(onClick = { if (c.transferOpen) vm.closeTransfer() else vm.openTransfer(c) }) { Text("전달", fontSize = 11.sp) }
+                            TextButton(onClick = { vm.toggleHold(c) }) { Text(if (c.held) "보류 해제" else "보류", fontSize = Type.meta) }
+                            TextButton(onClick = { vm.toggleMute(c) }) { Text(if (c.muted) "음소거 해제" else "음소거", fontSize = Type.meta) }
+                            TextButton(onClick = { if (c.dtmfOpen) vm.closeDtmf() else vm.openDtmf(c) }) { Text("DTMF", fontSize = Type.meta) }
+                            TextButton(onClick = { if (c.transferOpen) vm.closeTransfer() else vm.openTransfer(c) }) { Text("전달", fontSize = Type.meta) }
                         }
                         Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { vm.hangup(c) }) { Text("종료", fontSize = 11.sp) }
+                        TextButton(onClick = { vm.hangup(c) }) { Text("종료", fontSize = Type.meta) }
                     }
                     if (c.dtmfOpen) Dtmf(vm, c)
                     if (c.transferOpen) Transfer(vm, c, xferTarget)
@@ -256,7 +290,7 @@ private fun MyCalls(vm: CallDeskViewModel) {
 @Composable
 private fun Dtmf(vm: CallDeskViewModel, c: CallCard) {
     Column(Modifier.padding(top = 6.dp)) {
-        if (c.dtmfSent.isNotEmpty()) Text("보냄: ${c.dtmfSent}", fontSize = 11.sp)
+        if (c.dtmfSent.isNotEmpty()) Text("보냄: ${c.dtmfSent}", fontSize = Type.meta)
         listOf("123", "456", "789", "*0#").forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 row.forEach { d ->
@@ -278,7 +312,7 @@ private fun Transfer(vm: CallDeskViewModel, c: CallCard, target: String) {
         horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         OutlinedTextField(
             value = target, onValueChange = vm::setTransferTarget,
-            placeholder = { Text("전달 대상", fontSize = 12.sp) },
+            placeholder = { Text("전달 대상", fontSize = Type.body) },
             singleLine = true, modifier = Modifier.weight(1f),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Go))
         Button(onClick = { vm.transfer(c) }, enabled = target.isNotBlank()) { Text("전달") }
@@ -296,7 +330,7 @@ private fun CallLog(vm: CallDeskViewModel, onPerson: (PersonAction, String) -> U
 
     // ── 진행 중 행 — 감시 대상 전원의 살아 있는 통화(§4.4). 여기가 감청의 두 번째 진입점이다.
     if (live.isNotEmpty()) {
-        Text("진행 중 ${live.size}", fontSize = 11.sp, fontWeight = FontWeight.Bold,
+        Text("진행 중 ${live.size}", fontSize = Type.meta, fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary)
         live.forEach { r -> LiveRow(vm, r) }
         Spacer(Modifier.height(6.dp))
@@ -305,15 +339,27 @@ private fun CallLog(vm: CallDeskViewModel, onPerson: (PersonAction, String) -> U
         val hint by vm.liveHint.collectAsStateWithLifecycle()
         var diag by remember { mutableStateOf(false) }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(hint, Modifier.weight(1f), fontSize = 11.sp,
+            Text(hint, Modifier.weight(1f), fontSize = Type.meta,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             TextButton(onClick = { diag = !diag },
                 contentPadding = PaddingValues(horizontal = 6.dp)) {
-                Text(if (diag) "진단 닫기" else "진단", fontSize = 11.sp)
+                Text(if (diag) "진단 닫기" else "진단", fontSize = Type.meta)
             }
         }
         if (diag) WatchDiag(vm)
         Spacer(Modifier.height(4.dp))
+    }
+
+    // ⑥ 머리 필터 — 데스크톱 `[전체|대표번호|부재]`(§4.4). 오늘 데스크 칩과 **같은 상태**를 쓴다(둘로
+    //   나누면 «칩으로 건 필터» 와 «머리로 건 필터» 가 서로를 덮는다).
+    val f by vm.deskFilter.collectAsStateWithLifecycle()
+    Row(Modifier.fillMaxWidth().padding(bottom = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        listOf("전체" to DESK_ALL, "대표번호" to "pilot", "부재" to "missed").forEach { (label, key) ->
+            FilterChip(selected = if (key == DESK_ALL) f == DESK_ALL else f == key,
+                onClick = { vm.setDeskFilter(key) },
+                label = { Text(label, fontSize = Type.meta) })
+        }
     }
 
     if (log.isEmpty()) return
@@ -321,7 +367,7 @@ private fun CallLog(vm: CallDeskViewModel, onPerson: (PersonAction, String) -> U
     Row(Modifier.fillMaxWidth().padding(bottom = 2.dp)) {
         listOf("시작" to 64, "상대" to 170, "종류" to 92, "응답" to 64, "종료" to 64,
                "통화" to 60, "울림" to 56).forEach { (t, w) ->
-            Text(t, Modifier.width(w.dp), fontSize = 10.sp,
+            Text(t, Modifier.width(w.dp), fontSize = Type.micro,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
@@ -345,26 +391,26 @@ private fun CallLogRowView(r: CallLogRow, onLongPress: () -> Unit = {}) {
     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)
             .combinedClickable(onClick = {}, onLongClick = onLongPress),
         verticalAlignment = Alignment.CenterVertically) {
-        Text(hhmmss.format(Date(r.startedAtMs)), Modifier.width(64.dp), fontSize = 11.sp)
+        Text(hhmmss.format(Date(r.startedAtMs)), Modifier.width(64.dp), fontSize = Type.meta)
         // 이름과 번호를 같이 — 이름만 두면 누군지는 알아도 다시 걸 수가 없다.
         Column(Modifier.width(170.dp)) {
-            Text(r.peer, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Text(r.peer, fontSize = Type.meta, fontWeight = FontWeight.Bold, maxLines = 1)
             if (r.number.isNotBlank() && r.number != r.peer)
-                Text(r.number, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Text(r.number, fontSize = Type.micro, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1)
         }
-        Text(kindText(r.kind), Modifier.width(92.dp), fontSize = 11.sp,
+        Text(kindText(r.kind), Modifier.width(92.dp), fontSize = Type.meta,
             color = if (missed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
-        Text(r.answeredAtMs?.let { hhmmss.format(Date(it)) } ?: "—", Modifier.width(64.dp), fontSize = 11.sp)
-        Text(hhmmss.format(Date(r.endedAtMs)), Modifier.width(64.dp), fontSize = 11.sp)
+        Text(r.answeredAtMs?.let { hhmmss.format(Date(it)) } ?: "—", Modifier.width(64.dp), fontSize = Type.meta)
+        Text(hhmmss.format(Date(r.endedAtMs)), Modifier.width(64.dp), fontSize = Type.meta)
         // 통화시간은 응답~종료다. 못 받은 호는 0 이라 «울림» 쪽만 값이 있다.
-        Text(if (r.answered) durText(r.durationSec) else "—", Modifier.width(60.dp), fontSize = 11.sp,
+        Text(if (r.answered) durText(r.durationSec) else "—", Modifier.width(60.dp), fontSize = Type.meta,
             fontWeight = if (r.answered) FontWeight.Bold else FontWeight.Normal)
-        Text(durText(r.ringSec), Modifier.width(56.dp), fontSize = 11.sp,
+        Text(durText(r.ringSec), Modifier.width(56.dp), fontSize = Type.meta,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(r.text, Modifier.weight(1f), fontSize = 10.sp,
+        Text(r.text, Modifier.weight(1f), fontSize = Type.micro,
             color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-        if (r.others) Text("감시", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (r.others) Text("감시", fontSize = Type.micro, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -382,22 +428,22 @@ private fun WatchDiag(vm: CallDeskViewModel) {
     val ok = rows.count { it.established }
     Column(Modifier.fillMaxWidth().heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
         Text("구독 성립 $ok / ${rows.size} · 통화 관측 ${rows.count { it.sawDialog }}",
-            fontSize = 11.sp, fontWeight = FontWeight.Bold)
-        Text("✓ = 구독 성립(NOTIFY 수신) · ● = 그 회선의 통화를 관측함", fontSize = 10.sp,
+            fontSize = Type.meta, fontWeight = FontWeight.Bold)
+        Text("✓ = 구독 성립(NOTIFY 수신) · ● = 그 회선의 통화를 관측함", fontSize = Type.micro,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         rows.forEach { r ->
             Row(Modifier.fillMaxWidth().padding(vertical = 1.dp),
                 verticalAlignment = Alignment.CenterVertically) {
-                Text(if (r.established) "✓" else "✗", Modifier.width(18.dp), fontSize = 11.sp,
+                Text(if (r.established) "✓" else "✗", Modifier.width(18.dp), fontSize = Type.meta,
                     color = if (r.established) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.error)
-                Text(if (r.sawDialog) "●" else "·", Modifier.width(14.dp), fontSize = 11.sp,
+                Text(if (r.sawDialog) "●" else "·", Modifier.width(14.dp), fontSize = Type.meta,
                     color = if (r.sawDialog) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(r.number, Modifier.width(140.dp), fontSize = 11.sp)
-                Text(r.name, Modifier.weight(1f), fontSize = 11.sp,
+                Text(r.number, Modifier.width(140.dp), fontSize = Type.meta)
+                Text(r.name, Modifier.weight(1f), fontSize = Type.meta,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                if (r.pilot) Text("대표", fontSize = 10.sp, color = MaterialTheme.colorScheme.tertiary)
+                if (r.pilot) Text("대표", fontSize = Type.micro, color = MaterialTheme.colorScheme.tertiary)
             }
         }
     }
@@ -419,21 +465,21 @@ private fun LiveRow(vm: CallDeskViewModel, r: LiveCallRow) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Dot(ringing = r.ringing, talking = r.talking)
-            Text("${r.aLabel} ↔ ${r.bLabel}", fontSize = 12.sp, fontWeight = FontWeight.Bold,
+            Text("${r.aLabel} ↔ ${r.bLabel}", fontSize = Type.body, fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f), maxLines = 1)
-            if (r.viaPilot) Text("대표", fontSize = 10.sp, color = MaterialTheme.colorScheme.tertiary)
-            if (r.mine) Text("내 통화", fontSize = 10.sp)
-            Text("${r.stateText} ${fmt(r.elapsedMs)}", fontSize = 11.sp)
+            if (r.viaPilot) Text("대표", fontSize = Type.micro, color = MaterialTheme.colorScheme.tertiary)
+            if (r.mine) Text("내 통화", fontSize = Type.micro)
+            Text("${r.stateText} ${fmt(r.elapsedMs)}", fontSize = Type.meta)
             if (r.canPickup) TextButton(onClick = { vm.pickup(r.pickupNumber) },
-                contentPadding = PaddingValues(horizontal = 8.dp)) { Text("지정 픽업", fontSize = 11.sp) }
+                contentPadding = PaddingValues(horizontal = 8.dp)) { Text("지정 픽업", fontSize = Type.meta) }
             if (r.monitoring) {
-                Text("청취 중", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                Text("청취 중", fontSize = Type.meta, color = MaterialTheme.colorScheme.primary)
                 TextButton(onClick = { vm.stopMonitorLive(r) },
                     contentPadding = PaddingValues(horizontal = 8.dp)) {
-                    Text("청취 종료", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+                    Text("청취 종료", fontSize = Type.meta, color = MaterialTheme.colorScheme.error)
                 }
             } else if (r.canMonitor) TextButton(onClick = { vm.monitorLive(r) },
-                contentPadding = PaddingValues(horizontal = 8.dp)) { Text("청취", fontSize = 11.sp) }
+                contentPadding = PaddingValues(horizontal = 8.dp)) { Text("청취", fontSize = Type.meta) }
         }
     }
 }
@@ -465,5 +511,5 @@ private fun Dot(ringing: Boolean, talking: Boolean) {
 
 @Composable
 private fun Hint(t: String) =
-    Text(t, fontSize = 12.sp, color = MaterialTheme.colorScheme.outline,
+    Text(t, fontSize = Type.body, color = MaterialTheme.colorScheme.outline,
          modifier = Modifier.padding(vertical = 6.dp))

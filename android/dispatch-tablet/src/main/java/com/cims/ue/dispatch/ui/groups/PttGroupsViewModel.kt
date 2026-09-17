@@ -5,6 +5,7 @@
 // 생성·편집·삭제는 XCAP PUT/DELETE(TS 24.481).
 package com.cims.ue.dispatch.ui.groups
 
+import com.cims.ue.dispatch.session.userPart
 import com.cims.ue.dispatch.ui.ScreenViewModel
 import com.cims.ue.dispatch.session.DirectoryBook
 import com.cims.ue.dispatch.session.DispatchSession
@@ -20,6 +21,7 @@ import com.cims.ue.dispatch.session.saveGroup
 import com.cims.ue.dispatch.session.telUri
 import com.cims.ue.sdk.GroupDoc
 import com.cims.ue.sdk.GroupMember
+import com.cims.ue.sdk.RosterEntry
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -36,6 +38,70 @@ enum class GroupFilter(val label: String) { ALL("전체"), MEMBER("멤버"), MIN
 data class MemberRow(val uri: String, val name: String, val number: String,
                      val isChair: Boolean = false, val isMe: Boolean = false) {
     val label: String get() = name.ifBlank { number }
+}
+
+/**
+ * 상세 «멤버» 한 줄 — **구성**(GMS 문서)에 **지금 상태**(로스터·발언자)를 겹친 것.
+ * 데스크톱 `GroupDetailMember`(`GroupAdminViewModel.RefreshDetailMembers`) 대응.
+ */
+data class DetailMember(
+    val name: String,
+    val number: String,
+    val status: String,
+    val isMe: Boolean = false,
+    val isChair: Boolean = false,
+) {
+    val absent: Boolean get() = status == ABSENT
+
+    companion object {
+        const val SPEAKING = "발언 중"
+        const val JOINED = "참여"
+        const val ABSENT = "미참가"
+    }
+}
+
+/**
+ * 구성 × 지금 상태 (순수 함수, 시험 대상). 데스크톱 `RefreshDetailMembers` 와 같은 규칙이다.
+ *
+ * - **명단은 문서가, 상태는 로스터가** 준다. 로스터에만 있고 문서에 없는 사람(은닉 아닌 청취자)은
+ *   멤버가 아니므로 이 표에 나오지 않는다 — 이 표의 질문은 «편성된 사람이 지금 있나» 다.
+ * - `connected` 와 `listener` 를 **둘 다 «참여»** 로 본다(그 자리에 있다는 뜻은 같다).
+ * - **미참가는 뒤로** 보낸다. 같은 등급끼리는 문서 순서를 지킨다 — 갱신마다 줄이 뒤섞이면 읽을 수 없다.
+ * - 번호 비교는 **정규형**으로. 로스터가 `tel:+8210…`, 문서가 `sip:010…` 이라 그대로 비교하면 안 붙는다.
+ *
+ * @param speaker 발언자 **표시명**(`SessionItem.speaker`) 또는 번호. 둘 다로 맞춰 본다.
+ */
+internal fun detailMembers(
+    members: List<GroupMember>,
+    roster: List<RosterEntry>,
+    speaker: String,
+    myPttId: String,
+    nameOf: (String) -> String = { "" },
+): List<DetailMember> {
+    val present = roster
+        .filter { it.status == "connected" || it.status == "listener" }
+        .map { DirectoryBook.normalize(userPart(it.uri)) }
+        .toHashSet()
+    val speakerKey = DirectoryBook.normalize(userPart(speaker))
+    val meKey = DirectoryBook.normalize(userPart(myPttId))
+    val rows = members.map { m ->
+        val number = userPart(m.uri)
+        val key = DirectoryBook.normalize(number)
+        val name = m.name.ifBlank { nameOf(number) }.ifBlank { number }
+        val speaking = (speakerKey.isNotEmpty() && key == speakerKey) ||
+            (speaker.isNotBlank() && speaker == name)
+        DetailMember(
+            name = name,
+            number = number,
+            status = when {
+                speaking -> DetailMember.SPEAKING
+                key in present -> DetailMember.JOINED
+                else -> DetailMember.ABSENT
+            },
+            isMe = meKey.isNotEmpty() && key == meKey,
+            isChair = m.role == "chair")
+    }
+    return rows.sortedBy { if (it.absent) 1 else 0 }  // 안정 정렬 — 같은 등급은 문서 순서 유지
 }
 
 /**
@@ -100,8 +166,30 @@ class PttGroupsViewModel(private val s: DispatchSession) : ScreenViewModel() {
     private val _book = MutableStateFlow(DirectoryBook())
     val book: StateFlow<DirectoryBook> = _book.asStateFlow()
 
+    // ── 상세 «멤버»(로스터 전체) ──────────────────────────────────────────────
+    private val _detail = MutableStateFlow<List<DetailMember>>(emptyList())
+    val detail: StateFlow<List<DetailMember>> = _detail.asStateFlow()
+
+    private val _detailBusy = MutableStateFlow(false)
+    val detailBusy: StateFlow<Boolean> = _detailBusy.asStateFlow()
+
+    /** 선택된 그룹의 GMS 문서(멤버 구성). 라이브 상태가 바뀔 때마다 이것과 겹쳐 다시 그린다. */
+    private var detailDoc: GroupDoc? = null
+    private var detailFor: String = ""
+    private var detailJob: Job? = null
+
+    /** 목록이 오기 전에 들어온 선택 요청(① 3줄 [로스터 전체]). */
+    private var pendingSelect: String = ""
+
     private var loadJob: Job? = null
     private var formJob: Job? = null
+
+    init {
+        // 구성은 문서가 주지만 **상태는 로스터가** 준다 — 로스터·발언자가 바뀌면 같은 문서로 다시 겹친다.
+        //   문서를 다시 받지 않는다(구성은 XCAP 변경 통지로만 바뀐다).
+        scope.launch { s.groups.collect { projectDetail() } }
+        scope.launch { s.sessions.collect { projectDetail() } }
+    }
 
     /** 편집 중에는 목록·[↻]·[+ 새 그룹]이 잠긴다 — 편집 대상이 바뀌지 않게(§4.7). */
     val locked: Boolean get() = _form.value != null
@@ -144,11 +232,57 @@ class PttGroupsViewModel(private val s: DispatchSession) : ScreenViewModel() {
             } && (q.isEmpty() || g.name.lowercase().contains(q) || g.id.lowercase().contains(q))
         }
         _selected.value?.let { sel -> if (_rows.value.none { it.id == sel.id }) _selected.value = null }
+        if (pendingSelect.isNotBlank())
+            _groups.value.firstOrNull { it.id == pendingSelect }?.let { pendingSelect = ""; select(it) }
     }
 
     fun select(g: ManagedGroup) {
         if (locked) return                    // 편집 중에는 선택이 바뀌지 않는다
         _selected.value = g
+        loadDetail(g)
+    }
+
+    /**
+     * ① 3줄 [로스터 전체] — 화면 밖에서 그룹 id 로 연다. 목록이 아직 없으면 도착한 뒤에 적용한다.
+     *
+     * 필터·검색을 **되돌린다.** 밖에서 지목한 그룹이 지금 필터에 걸리면 `project` 의 «행에 없으면 선택 해제»
+     * 가 곧바로 선택을 지워, 눌렀는데 아무 일도 안 일어난 것처럼 보인다.
+     */
+    fun selectById(groupId: String) {
+        if (groupId.isBlank() || locked) return
+        if (_filter.value != GroupFilter.ALL || _query.value.isNotEmpty()) {
+            _filter.value = GroupFilter.ALL
+            _query.value = ""
+            project()
+        }
+        val hit = _groups.value.firstOrNull { it.id == groupId }
+        if (hit != null) { select(hit); return }
+        pendingSelect = groupId
+        load()
+    }
+
+    /** 상세 멤버 — GMS 문서를 받아 둔다. [edit] 과 달리 **폼을 열지 않는다**(보기 전용 행도 본다). */
+    private fun loadDetail(g: ManagedGroup) {
+        detailJob?.cancel()
+        if (detailFor != g.id) { detailDoc = null; _detail.value = emptyList() }
+        detailFor = g.id
+        _detailBusy.value = true
+        detailJob = scope.launch {
+            val r = s.getGroupDoc(g.uri)
+            if (detailFor != g.id) return@launch     // 그 사이 선택이 바뀌었다 — 남의 문서를 걸지 않는다
+            _detailBusy.value = false
+            detailDoc = if (r.ok) r.value else null
+            projectDetail()
+        }
+    }
+
+    private fun projectDetail() {
+        val doc = detailDoc ?: return run { _detail.value = emptyList() }
+        val live = s.groups.value.firstOrNull { it.id == detailFor }
+        val speaker = s.sessions.value.firstOrNull { it.info.groupId == detailFor }?.speaker.orEmpty()
+        _detail.value = detailMembers(
+            members = doc.members, roster = live?.roster.orEmpty(), speaker = speaker,
+            myPttId = s.myPttId, nameOf = { _book.value.nameOf(it) })
     }
 
     /** 상세 [채널로] — 관제 캔버스로 돌아가고, 멤버 그룹이면 합류한다(§4.7). */
@@ -309,15 +443,10 @@ class PttGroupsViewModel(private val s: DispatchSession) : ScreenViewModel() {
                         (qn.isNotEmpty() && DirectoryBook.normalize(it.msisdn).contains(qn))
                 }
                 .take(200).toList()
-        }
-
-        /** URI → 번호부. `tel:+8210…`·`sip:1001@dom` 둘 다. */
-        internal fun userPart(uri: String): String =
-            uri.substringAfter(':', uri).substringBefore('@').substringBefore(';')
-    }
+        }    }
 }
 
 /** 표시 이름 — 프로파일에 없으면 PTT 번호. */
 private fun DispatchSession.profileName(): String =
     profile.value?.displayName?.takeIf { it.isNotBlank() }
-        ?: PttGroupsViewModel.userPart(myPttId)
+        ?: userPart(myPttId)

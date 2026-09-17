@@ -14,6 +14,7 @@
 // 이미 집합 기준이라 상수 하나로 열린다.
 package com.cims.ue.dispatch.ui.ptt
 
+import com.cims.ue.dispatch.ui.Type
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -79,11 +80,11 @@ fun TalkBar(
                 Column {
                     Text(
                         if (anyJoined) "발언 대상 없음" else "참여한 채널 없음",
-                        fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        fontWeight = FontWeight.Bold, fontSize = Type.strong)
                     Text(
                         if (anyJoined) "채널 카드의 [발언 대상] 을 누르세요"
                         else "내 채널에서 [참여] 를 누르세요",
-                        fontSize = 12.sp)
+                        fontSize = Type.body)
                 }
             } else {
                 // 대상 칩 — 대상별 상태를 따로 본다(하나가 거부돼도 나머지는 살아 있다).
@@ -97,11 +98,11 @@ fun TalkBar(
                             onClick = { vm.focus(t.card.id) },
                             label = {
                                 Text(t.name + (if (t.stateText.isNotEmpty()) " · ${t.stateText}" else ""),
-                                     fontSize = 12.sp)
+                                     fontSize = Type.body)
                             })
                     }
                 }
-                TextButton(onClick = vm::clearTargets) { Text("모두 해제", fontSize = 12.sp) }
+                TextButton(onClick = vm::clearTargets) { Text("모두 해제", fontSize = Type.body) }
             }
         }
     }
@@ -174,12 +175,12 @@ internal fun PttButton(
         ) {
             Icon(if (enabled) Icons.Filled.Mic else Icons.Filled.MicOff, contentDescription = "발언")
             Spacer(Modifier.width(if (compact) 4.dp else 8.dp))
-            if (compact) Text(label, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            if (compact) Text(label, fontWeight = FontWeight.Bold, fontSize = Type.strong)
             else Column {
-                Text(label, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                Text(label, fontWeight = FontWeight.Bold, fontSize = Type.head)
                 Text(
                     if (!enabled) "대상 없음" else if (speaking) "말하세요" else "누르고 말하기",
-                    fontSize = 11.sp)
+                    fontSize = Type.meta)
             }
         }
     }

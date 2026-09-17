@@ -6,7 +6,7 @@ package com.cims.ue.dispatch
 
 import android.view.KeyEvent
 import com.cims.ue.dispatch.ui.AppScreen
-import com.cims.ue.dispatch.ui.DispatchTab
+import com.cims.ue.dispatch.ui.MoreItem
 import com.cims.ue.sdk.AuthScheme
 import com.cims.ue.sdk.MediaSecurity
 import com.cims.ue.sdk.Profile
@@ -21,33 +21,30 @@ import org.junit.Test
 
 class AppSkeletonTest {
 
-    // ── 화면 배열 — 데스크톱 F1~F4 와 같은 순서여야 한다(dispatch_desktop_ui.md §3.4) ──
-    @Test fun `하단 내비는 관제·이력·PTT그룹·관리 순이다`() {
-        assertEquals(listOf("관제", "이력", "PTT 그룹", "관리"), AppScreen.entries.map { it.label })
-        assertEquals(listOf("F1", "F2", "F3", "F4"), AppScreen.entries.map { it.hotkey })
+    // ── 화면 배열 — 하단 내비는 «하는 일» 다섯이다(§6.3) ──
+    @Test fun `하단 내비는 무전·통화·메시지·감청·더보기 순이다`() {
+        assertEquals(listOf("무전", "통화", "메시지", "감청", "더보기"), AppScreen.entries.map { it.label })
+        assertEquals(listOf("F1", "F2", "F3", "F4", "F5"), AppScreen.entries.map { it.hotkey })
     }
 
-    @Test fun `F1~F4 가 같은 화면에 대응한다`() {
-        assertEquals(AppScreen.DISPATCH, AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F1))
-        assertEquals(AppScreen.HISTORY, AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F2))
-        assertEquals(AppScreen.PTT_GROUPS, AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F3))
-        assertEquals(AppScreen.ADMIN, AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F4))
-        assertNull(AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F5))
+    @Test fun `첫 화면은 무전이다`() {
+        // «PTT 채널 중심» 은 UI 정본의 전제다(dispatch_desktop_ui.md §1) — 앱을 열면 채널이 먼저 보인다.
+        assertEquals(AppScreen.PTT, AppScreen.entries.first())
+    }
+
+    @Test fun `F1~F5 가 같은 화면에 대응한다`() {
+        assertEquals(AppScreen.PTT, AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F1))
+        assertEquals(AppScreen.CALLS, AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F2))
+        assertEquals(AppScreen.MESSAGES, AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F3))
+        assertEquals(AppScreen.MONITOR, AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F4))
+        assertEquals(AppScreen.MORE, AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F5))
+        assertNull(AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F6))
         assertNull(AppScreen.ofFunctionKey(KeyEvent.KEYCODE_A))
     }
 
-    @Test fun `요약 띠는 관제 밖에서만 붙는다`() {
-        // 관제 캔버스에는 발언 바가 이미 있어 띠가 중복된다(§6.2).
-        assertFalse(AppScreen.DISPATCH.showsSummaryStrip)
-        assertTrue(AppScreen.HISTORY.showsSummaryStrip)
-        assertTrue(AppScreen.PTT_GROUPS.showsSummaryStrip)
-        assertTrue(AppScreen.ADMIN.showsSummaryStrip)
-    }
-
-    @Test fun `관제 탭은 PTT 가 먼저다`() {
-        // 첫 화면이 PTT 인 것은 «PTT 채널 중심» 이라는 UI 정본의 전제다(dispatch_desktop_ui.md §1).
-        assertEquals(listOf("PTT", "일반통화"), DispatchTab.entries.map { it.label })
-        assertEquals(DispatchTab.PTT, DispatchTab.entries.first())
+    @Test fun `더보기에는 데스크톱 F2~F4 가 들어간다`() {
+        // 화면 «내용» 은 그대로고 들어가는 문만 한 겹 깊어진다(§6.3).
+        assertEquals(listOf("이력", "PTT 그룹", "관리"), MoreItem.entries.map { it.label })
     }
 
     // ── 계정 선택 규칙 — 전화 계열은 하나만 올린다 ──

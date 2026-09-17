@@ -30,18 +30,18 @@ fun SettingsSheet(session: DispatchSession, onDismiss: () -> Unit) {
         Column(Modifier.fillMaxWidth().heightIn(max = 560.dp)
             .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
 
-            Text("설정", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Text("바꾸면 바로 저장되고 적용됩니다", fontSize = 11.sp,
+            Text("설정", fontSize = Type.title, fontWeight = FontWeight.Bold)
+            Text("바꾸면 바로 저장되고 적용됩니다", fontSize = Type.meta,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 8.dp))
 
             Section("오디오")
-            Text("소리를 내보낼 곳", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("소리를 내보낼 곳", fontSize = Type.body, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Route.entries.forEach { r ->
                     FilterChip(selected = s.audioRoute == r,
                         onClick = { session.updateSettings { it.copy(audioRoute = r) } },
-                        label = { Text(routeLabel(r), fontSize = 11.sp) })
+                        label = { Text(routeLabel(r), fontSize = Type.meta) })
                 }
             }
             Hint("무전과 통화를 서로 다른 장치로 가르는 것은 아직 못 한다 — 코어에 스트림별 출력 통로가 " +
@@ -59,7 +59,22 @@ fun SettingsSheet(session: DispatchSession, onDismiss: () -> Unit) {
                 value = s.pickupFeatureCode,
                 onValueChange = { v -> session.updateSettings { it.copy(pickupFeatureCode = v.trim()) } },
                 label = { Text("피처코드") }, singleLine = true,
-                supportingText = { Text("접속서비스의 pickup_feature_code 와 같아야 한다 (기본 **)", fontSize = 11.sp) },
+                supportingText = { Text("접속서비스의 pickup_feature_code 와 같아야 한다 (기본 **)", fontSize = Type.meta) },
+                modifier = Modifier.fillMaxWidth())
+
+            Section("청취")
+            OutlinedTextField(
+                value = s.maxListen.toString(),
+                onValueChange = { v ->
+                    // 1~16 으로 죈다(데스크톱과 같은 범위, `SettingsViewModel` 의 Clamp). 빈 칸·글자는 무시한다 —
+                    //   0 이 되면 청취가 통째로 막히고 그 이유가 화면에 없다.
+                    v.toIntOrNull()?.coerceIn(1, 16)?.let { n -> session.updateSettings { it.copy(maxListen = n) } }
+                },
+                label = { Text("동시 청취 상한") }, singleLine = true,
+                supportingText = {
+                    Text("감청·PTT 청취를 합쳐 한 번에 열 수 있는 수 (1~16, 기본 4). 넘으면 서버가 거절하기 전에 앱이 막는다",
+                         fontSize = Type.meta)
+                },
                 modifier = Modifier.fillMaxWidth())
 
             Section("서버")
@@ -79,7 +94,7 @@ fun SettingsSheet(session: DispatchSession, onDismiss: () -> Unit) {
                 "다음 로그인부터 적용됩니다.")
 
             Section("진단")
-            Text("로그 수준 ${s.logLevel}", fontSize = 12.sp)
+            Text("로그 수준 ${s.logLevel}", fontSize = Type.body)
             Slider(value = s.logLevel.toFloat(), valueRange = 0f..5f, steps = 4,
                 onValueChange = { v -> session.updateSettings { it.copy(logLevel = v.toInt()) } })
             Hint("0=끔 … 5=자세히. 엔진 기동 때 읽으므로 다음 로그인부터 적용된다.")
@@ -99,28 +114,28 @@ private fun routeLabel(r: Route): String = when (r) {
 @Composable
 private fun Section(title: String) {
     Spacer(Modifier.height(12.dp))
-    Text(title, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    Text(title, fontSize = Type.strong, fontWeight = FontWeight.Bold)
     HorizontalDivider(Modifier.padding(vertical = 4.dp))
 }
 
 @Composable
 private fun Toggle(label: String, value: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, Modifier.weight(1f), fontSize = 12.sp)
+        Text(label, Modifier.weight(1f), fontSize = Type.body)
         Switch(checked = value, onCheckedChange = onChange)
     }
 }
 
 @Composable
 private fun Hint(text: String) {
-    Text(text, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+    Text(text, fontSize = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 2.dp, bottom = 4.dp))
 }
 
 @Composable
 private fun Warn(text: String) {
     Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
-        Text(text, Modifier.padding(8.dp), fontSize = 11.sp,
+        Text(text, Modifier.padding(8.dp), fontSize = Type.meta,
             color = MaterialTheme.colorScheme.onErrorContainer)
     }
 }

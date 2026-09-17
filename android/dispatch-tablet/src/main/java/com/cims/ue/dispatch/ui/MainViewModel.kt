@@ -94,11 +94,29 @@ class MainViewModel : ViewModel() {
         super.onCleared()
     }
 
-    private val _screen = MutableStateFlow(AppScreen.DISPATCH)
+    private val _screen = MutableStateFlow(AppScreen.PTT)
     val screen: StateFlow<AppScreen> = _screen.asStateFlow()
 
-    private val _tab = MutableStateFlow(DispatchTab.PTT)
-    val tab: StateFlow<DispatchTab> = _tab.asStateFlow()
+    // ── 화면 안의 이동(§6.3) ──────────────────────────────────────────────────
+    // 하단 내비가 «어느 일을 하는가» 라면 아래 둘은 «그 안에서 무엇을 보는가» 다. 뒤로가기로 되돌린다.
+
+    /** [무전]에서 연 채널(그룹 id 또는 세션 카드 id). null = 목록. */
+    private val _channel = MutableStateFlow<String?>(null)
+    val channel: StateFlow<String?> = _channel.asStateFlow()
+
+    /** [더보기]에서 연 화면. null = 목록. */
+    private val _more = MutableStateFlow<MoreItem?>(null)
+    val more: StateFlow<MoreItem?> = _more.asStateFlow()
+
+    /** 채널 화면에서 펼친 면(0 로스터 · 1 메시지 · 2 이벤트) — 화면을 오가도 보던 면이 남는다. */
+    private val _channelPage = MutableStateFlow(0)
+    val channelPage: StateFlow<Int> = _channelPage.asStateFlow()
+    fun setChannelPage(i: Int) { _channelPage.value = i }
+
+    /** [통화] 화면의 면(0 통화 · 1 그룹원 · 2 내역). */
+    private val _callsPage = MutableStateFlow(0)
+    val callsPage: StateFlow<Int> = _callsPage.asStateFlow()
+    fun setCallsPage(i: Int) { _callsPage.value = i }
 
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
@@ -136,8 +154,41 @@ class MainViewModel : ViewModel() {
     val state: StateFlow<SessionState>? get() = session?.state
     val error: StateFlow<String?>? get() = session?.error
 
-    fun show(s: AppScreen) { _screen.value = s }
-    fun showTab(t: DispatchTab) { _tab.value = t }
+    fun show(s: AppScreen) {
+        // 같은 항목을 다시 누르면 **그 축의 처음으로** 돌아간다(모바일 관례) — 열어 둔 채널·더보기를 닫는다.
+        if (_screen.value == s) { _channel.value = null; _more.value = null; return }
+        _screen.value = s
+    }
+
+    /**
+     * [무전] 목록 → 채널 화면. `groupId` 는 채널 카드의 id(그룹 id 또는 세션 id)다.
+     *
+     * 포커스도 같이 옮긴다 — ④⑤(메시지·이벤트)가 포커스를 따라간다는 불변(§6.3)은 배치가 바뀌어도
+     * 그대로다. 채널 화면의 세 면이 곧 그 포커스의 상세다.
+     */
+    fun openChannel(id: String) {
+        if (id.isBlank()) return
+        ptt?.setFocus(id)
+        _channel.value = id
+        _screen.value = AppScreen.PTT
+    }
+
+    fun closeChannel() { _channel.value = null }
+
+    fun openMore(item: MoreItem) { _more.value = item }
+
+    /**
+     * 뒤로가기 한 단계. 되돌릴 것이 있으면 true — 없으면 호출자가 기본 동작(앱 종료)을 한다.
+     *
+     * 순서는 **연 순서의 역순**이다: 채널·더보기의 안쪽을 먼저 닫고, 그다음 첫 화면([무전])으로 간다.
+     * 첫 화면에서 더 누르면 앱이 닫히는 것이 관례이므로 거기서 false 를 돌린다.
+     */
+    fun back(): Boolean {
+        if (_channel.value != null) { _channel.value = null; return true }
+        if (_more.value != null) { _more.value = null; return true }
+        if (_screen.value != AppScreen.PTT) { _screen.value = AppScreen.PTT; return true }
+        return false
+    }
 
     /**
      * 세션을 만드는 조작 뒤의 **자동 복귀**(dispatch_desktop_ui.md §3.4).
@@ -146,8 +197,8 @@ class MainViewModel : ViewModel() {
      * 받자마자 [이력] 화면에 남아 있으면 끊을 방법이 없다.
      */
     fun goToCalls() {
-        _screen.value = AppScreen.DISPATCH
-        _tab.value = DispatchTab.CALLS
+        _channel.value = null
+        _screen.value = AppScreen.CALLS
     }
 
     /**
@@ -170,29 +221,37 @@ class MainViewModel : ViewModel() {
             }
             PersonAction.PRIVATE_CALL -> {
                 viewModelScope.launch { s.startPrivateCall(number) }
-                _screen.value = AppScreen.DISPATCH
-                _tab.value = DispatchTab.PTT
+                _channel.value = null
+                _screen.value = AppScreen.PTT
             }
             PersonAction.ADHOC_ADD -> {
-                // 시트는 ① 패널이 소유하는 화면 상태라 여기서 직접 못 연다 — 씨앗만 심고 탭을 옮긴다.
+                // 시트는 [무전] 화면이 소유하는 상태라 여기서 직접 못 연다 — 씨앗만 심고 화면을 옮긴다.
                 ptt?.seedAdhoc(number)
-                _screen.value = AppScreen.DISPATCH
-                _tab.value = DispatchTab.PTT
+                _channel.value = null
+                _screen.value = AppScreen.PTT
             }
             PersonAction.SDS -> {
                 messages?.openThread(number)
-                _screen.value = AppScreen.DISPATCH
-                _tab.value = DispatchTab.PTT
+                _channel.value = null
+                _screen.value = AppScreen.MESSAGES
             }
         }
     }
 
-    /** 통합 검색의 «채널로» — 그 채널에 포커스를 두고 관제 > PTT 로 간다(데스크톱 `PttChannels.FocusGroup`). */
-    fun focusChannel(groupId: String) {
+    /** 통합 검색의 «채널로» — 그 채널 화면을 연다(데스크톱 `PttChannels.FocusGroup`). */
+    fun focusChannel(groupId: String) = openChannel(groupId)
+
+    /**
+     * «편성 전원 보기» — 그 그룹의 [PTT 그룹] 화면 상세를 연다(§6.12).
+     *
+     * 채널 화면의 [로스터] 면은 **지금 접속한 사람**이고, 이쪽은 **편성된 전원 × 지금 상태**다. 둘은 다른
+     * 질문이라 둘 다 둔다. 데스크톱도 같은 자리에서 같은 곳으로 보낸다(`PttChannelsPanel.xaml`).
+     */
+    fun showRoster(groupId: String) {
         if (groupId.isBlank()) return
-        ptt?.focus(groupId)
-        _screen.value = AppScreen.DISPATCH
-        _tab.value = DispatchTab.PTT
+        pttGroups?.selectById(groupId)
+        _more.value = MoreItem.PTT_GROUPS
+        _screen.value = AppScreen.MORE
     }
 
     /** 화면 복원 — 세션은 살아 있으므로 스냅샷만 다시 읽는다(§6.7). */

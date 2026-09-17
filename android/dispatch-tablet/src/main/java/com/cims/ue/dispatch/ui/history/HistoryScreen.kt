@@ -4,6 +4,8 @@
 // 좌(세션 카드 1) : 우(세션 패널 3) 로 나눈다. 통화는 상세가 따로 없어 표가 전체 폭이다.
 package com.cims.ue.dispatch.ui.history
 
+import com.cims.ue.dispatch.ui.Tag
+import com.cims.ue.dispatch.ui.Type
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -59,7 +61,7 @@ fun HistoryScreen(vm: HistoryViewModel, modifier: Modifier = Modifier) {
         HourBand(vm)
         if (error.isNotBlank()) {
             Text(error, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-                color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+                color = MaterialTheme.colorScheme.error, fontSize = Type.strong)
         }
         // 서버 상한에 걸려 잘렸으면 말한다 — 조용히 일부만 보여 주면 «없는 통화» 로 읽힌다.
         val truncated by vm.truncated.collectAsStateWithLifecycle()
@@ -68,7 +70,7 @@ fun HistoryScreen(vm: HistoryViewModel, modifier: Modifier = Modifier) {
             if (hour == null) "서버 상한 ${HistoryViewModel.QUERY_LIMIT}건에 걸려 **최근 것만** 보입니다 — 시간대 칸을 눌러 좁혀 보세요"
             else "이 시간대도 상한에 걸렸습니다 — 더 좁은 범위는 콘솔 이력에서 봅니다",
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-            color = MaterialTheme.colorScheme.tertiary, fontSize = 12.sp)
+            color = MaterialTheme.colorScheme.tertiary, fontSize = Type.body)
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         when (kind) {
             HistoryKind.PTT -> PttPane(vm, rows, Modifier.weight(1f))
@@ -116,13 +118,13 @@ private fun Toolbar(vm: HistoryViewModel) {
 
         OutlinedTextField(
             value = query, onValueChange = vm::search,
-            placeholder = { Text("상대·그룹·참여자", fontSize = 13.sp) },
+            placeholder = { Text("상대·그룹·참여자", fontSize = Type.strong) },
             singleLine = true,
             modifier = Modifier.width(220.dp).height(52.dp),
             textStyle = MaterialTheme.typography.bodySmall)
 
         Spacer(Modifier.weight(1f))
-        Text(summaryOf(kind, rows), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(summaryOf(kind, rows), fontSize = Type.body, color = MaterialTheme.colorScheme.onSurfaceVariant)
         TextButton(onClick = { vm.load() }) { Text("조회") }
     }
 
@@ -176,12 +178,12 @@ private fun HourBand(vm: HistoryViewModel) {
                 .clickable(enabled = n > 0) { vm.toggleHour(h) },
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center) {
-                Text("%02d".format(h), fontSize = 9.sp)
-                if (n > 0) Text("$n", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                Text("%02d".format(h), fontSize = Type.micro)
+                if (n > 0) Text("$n", fontSize = Type.micro, fontWeight = FontWeight.Bold)
             }
         }
         if (sel != null) TextButton(onClick = { vm.clearHour() },
-            contentPadding = PaddingValues(horizontal = 6.dp)) { Text("전체", fontSize = 11.sp) }
+            contentPadding = PaddingValues(horizontal = 6.dp)) { Text("전체", fontSize = Type.meta) }
     }
 }
 
@@ -206,7 +208,7 @@ private fun CallHeader() {
     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
         listOf("유형" to 60, "발신 → 착신" to 260, "상태" to 70, "시작" to 80, "응답" to 80,
                "종료" to 80, "통화시간" to 76, "종료사유" to 100).forEach { (t, w) ->
-            Text(t, Modifier.width(w.dp), fontSize = 11.sp, fontWeight = FontWeight.Bold,
+            Text(t, Modifier.width(w.dp), fontSize = Type.meta, fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
@@ -218,29 +220,22 @@ private fun CallRow(e: HistoryEntry, selected: Boolean, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().background(bg).clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Text(HistoryViewModel.callTypeText(e.callType), Modifier.width(60.dp), fontSize = 12.sp)
-        Text("${short(e.from)} → ${short(e.to)}", Modifier.width(260.dp), fontSize = 12.sp, maxLines = 1)
-        Text(HistoryViewModel.stateText(e), Modifier.width(70.dp), fontSize = 12.sp)
-        Text(hhmmss(e.inviteAtMs ?: e.atMs), Modifier.width(80.dp), fontSize = 12.sp)
-        Text(hhmmss(e.answerAtMs), Modifier.width(80.dp), fontSize = 12.sp)
-        Text(hhmmss(e.endAtMs), Modifier.width(80.dp), fontSize = 12.sp)
-        Text(durText(e.durationSec), Modifier.width(76.dp), fontSize = 12.sp)
-        Text(HistoryViewModel.endReasonText(e.endReason), Modifier.width(100.dp), fontSize = 12.sp)
-        if (e.emergency) Badge("긴급", MaterialTheme.colorScheme.error)
-        if (e.hasRecording) Badge("녹취", MaterialTheme.colorScheme.tertiary)
+        Text(HistoryViewModel.callTypeText(e.callType), Modifier.width(60.dp), fontSize = Type.body)
+        Text("${short(e.from)} → ${short(e.to)}", Modifier.width(260.dp), fontSize = Type.body, maxLines = 1)
+        Text(HistoryViewModel.stateText(e), Modifier.width(70.dp), fontSize = Type.body)
+        Text(hhmmss(e.inviteAtMs ?: e.atMs), Modifier.width(80.dp), fontSize = Type.body)
+        Text(hhmmss(e.answerAtMs), Modifier.width(80.dp), fontSize = Type.body)
+        Text(hhmmss(e.endAtMs), Modifier.width(80.dp), fontSize = Type.body)
+        Text(durText(e.durationSec), Modifier.width(76.dp), fontSize = Type.body)
+        Text(HistoryViewModel.endReasonText(e.endReason), Modifier.width(100.dp), fontSize = Type.body)
+        if (e.emergency) Tag("긴급", MaterialTheme.colorScheme.error)
+        if (e.hasRecording) Tag("녹취", MaterialTheme.colorScheme.tertiary)
     }
 }
 
 private fun short(uri: String): String =
     uri.substringAfter(':', uri).substringBefore('@').substringBefore(';').ifBlank { uri }
 
-@Composable
-private fun Badge(text: String, color: Color) {
-    Surface(color = color.copy(alpha = 0.22f), shape = RoundedCornerShape(4.dp),
-        modifier = Modifier.padding(start = 6.dp)) {
-        Text(text, Modifier.padding(horizontal = 5.dp, vertical = 1.dp), fontSize = 10.sp, color = color)
-    }
-}
 
 // ── PTT ─────────────────────────────────────────────────────────────────────
 
@@ -267,19 +262,19 @@ private fun SessionCard(e: HistoryEntry, selected: Boolean, onClick: () -> Unit)
     Column(Modifier.fillMaxWidth().background(bg).clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(HistoryViewModel.sessionKindText(e.sessionKind), fontSize = 11.sp,
+            Text(HistoryViewModel.sessionKindText(e.sessionKind), fontSize = Type.meta,
                 fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            if (e.isFullDuplex) Badge("전이중", MaterialTheme.colorScheme.primary)
-            if (e.isActive) Badge("진행중", MaterialTheme.colorScheme.tertiary)
-            if (e.emergency) Badge("긴급", MaterialTheme.colorScheme.error)
-            if (e.hasRecording) Badge("녹취", MaterialTheme.colorScheme.tertiary)
+            if (e.isFullDuplex) Tag("전이중", MaterialTheme.colorScheme.primary)
+            if (e.isActive) Tag("진행중", MaterialTheme.colorScheme.tertiary)
+            if (e.emergency) Tag("긴급", MaterialTheme.colorScheme.error)
+            if (e.hasRecording) Tag("녹취", MaterialTheme.colorScheme.tertiary)
         }
         Text(e.groupName.ifBlank { short(e.group) }.ifBlank { e.people.joinToString(" ↔ ") { short(it) } },
-            fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            fontSize = Type.title, fontWeight = FontWeight.Bold, maxLines = 1)
         Text("${hhmmss(e.startAtMs ?: e.atMs)}~${hhmmss(e.endAtMs)} · ${durText(e.durationSec)}",
-            fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            fontSize = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("턴 ${e.turnCount} · 화자 ${e.speakerCount} · 동시 ${e.maxConcurrent}",
-            fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            fontSize = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     HorizontalDivider()
 }
@@ -294,11 +289,11 @@ private fun SessionPane(vm: HistoryViewModel, e: HistoryEntry) {
     Column(Modifier.fillMaxSize().padding(12.dp)) {
         // 머리 — 종류·상태·대상·floor 정책
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(e.groupName.ifBlank { short(e.group) }, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(e.groupName.ifBlank { short(e.group) }, fontSize = Type.title, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(8.dp))
             Text("${HistoryViewModel.sessionKindText(e.sessionKind)} · ${HistoryViewModel.stateText(e)}" +
                  (if (e.floorPolicy.isNotBlank()) " · ${e.floorPolicy}" else ""),
-                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                fontSize = Type.body, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.weight(1f))
             if (e.hasRecording) {
                 TextButton(onClick = { vm.playAll() }) { Text("▶ 전체") }
@@ -308,17 +303,17 @@ private fun SessionPane(vm: HistoryViewModel, e: HistoryEntry) {
         // 지표 띠
         Text("발언 턴 ${e.turnCount} · 녹취 ${rec?.segments?.size ?: 0} · 최대 동시 ${e.maxConcurrent} · " +
              "발화 구간 ${e.totalSpeechMs / 1000}초 · 발화 누적 ${e.talkMs / 1000}초 · 화자 ${e.speakerCount}",
-            fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            fontSize = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(8.dp))
 
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Section("참여자 ${detail?.participants?.size ?: 0}")
             detail?.participants?.forEach { p ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                    Text(short(p.msisdn), Modifier.width(160.dp), fontSize = 12.sp)
-                    if (p.role == "initiator") Badge("개시자", MaterialTheme.colorScheme.primary)
+                    Text(short(p.msisdn), Modifier.width(160.dp), fontSize = Type.body)
+                    if (p.role == "initiator") Tag("개시자", MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.weight(1f))
-                    Text("${hhmmss(p.joinAtMs)}~${hhmmss(p.leaveAtMs)}", fontSize = 11.sp,
+                    Text("${hhmmss(p.joinAtMs)}~${hhmmss(p.leaveAtMs)}", fontSize = Type.meta,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -333,11 +328,11 @@ private fun SessionPane(vm: HistoryViewModel, e: HistoryEntry) {
                 Spacer(Modifier.width(8.dp))
                 FilterChip(selected = "floor" in layers,
                     onClick = { layers = layers.toggle("floor") },
-                    label = { Text("발언권 ${detail?.floor?.size ?: 0}", fontSize = 11.sp) })
+                    label = { Text("발언권 ${detail?.floor?.size ?: 0}", fontSize = Type.meta) })
                 Spacer(Modifier.width(4.dp))
                 FilterChip(selected = "member" in layers,
                     onClick = { layers = layers.toggle("member") },
-                    label = { Text("멤버 ${detail?.events?.size ?: 0}", fontSize = 11.sp) })
+                    label = { Text("멤버 ${detail?.events?.size ?: 0}", fontSize = Type.meta) })
             }
             EventList(detail?.floor.orEmpty().takeIf { "floor" in layers }.orEmpty(),
                       detail?.events.orEmpty().takeIf { "member" in layers }.orEmpty())
@@ -351,7 +346,7 @@ private fun Set<String>.toggle(k: String): Set<String> = if (k in this) this - k
 
 @Composable
 private fun Section(title: String) {
-    Text(title, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    Text(title, fontSize = Type.strong, fontWeight = FontWeight.Bold)
 }
 
 /**
@@ -371,7 +366,7 @@ internal fun barPos(widthDp: Int, valueMs: Int, totalMs: Int): Int {
 @Composable
 private fun TurnTimeline(turns: List<TurnBar>, rec: RecordingInfo?, onPlay: (TurnBar) -> Unit) {
     if (turns.isEmpty()) {
-        Text("발언 기록이 없습니다", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("발언 기록이 없습니다", fontSize = Type.body, color = MaterialTheme.colorScheme.onSurfaceVariant)
         return
     }
     val total = (turns.maxOf { it.offsetMs + it.durMs }).coerceAtLeast(1)
@@ -380,7 +375,7 @@ private fun TurnTimeline(turns: List<TurnBar>, rec: RecordingInfo?, onPlay: (Tur
     Column(Modifier.horizontalScroll(rememberScrollState())) {
         lanes.forEach { who ->
             Row(Modifier.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(short(who), Modifier.width(110.dp), fontSize = 11.sp, maxLines = 1)
+                Text(short(who), Modifier.width(110.dp), fontSize = Type.meta, maxLines = 1)
                 Box(Modifier.width(widthDp.dp).height(18.dp)
                     .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(3.dp))) {
                     turns.filter { it.speaker == who }.forEach { t ->
@@ -398,7 +393,7 @@ private fun TurnTimeline(turns: List<TurnBar>, rec: RecordingInfo?, onPlay: (Tur
             }
         }
         Text("0 ~ ${total / 1000}초" + (rec?.let { " · 세그먼트 ${it.segments.size}" } ?: ""),
-            fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            fontSize = Type.micro, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -416,15 +411,15 @@ private fun EventList(floor: List<PttFloorEvent>, events: List<com.cims.ue.dispa
     }.sortedBy { it.atMs }
 
     if (merged.isEmpty()) {
-        Text("이벤트가 없습니다", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("이벤트가 없습니다", fontSize = Type.body, color = MaterialTheme.colorScheme.onSurfaceVariant)
         return
     }
     merged.forEach { i ->
         Row(Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
-            Text(hhmmss(i.atMs.takeIf { it > 0 }), Modifier.width(80.dp), fontSize = 11.sp,
+            Text(hhmmss(i.atMs.takeIf { it > 0 }), Modifier.width(80.dp), fontSize = Type.meta,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(i.text, Modifier.weight(1f), fontSize = 11.sp)
-            if (i.extra.isNotBlank()) Text(i.extra, fontSize = 11.sp,
+            Text(i.text, Modifier.weight(1f), fontSize = Type.meta)
+            if (i.extra.isNotBlank()) Text(i.extra, fontSize = Type.meta,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
@@ -451,12 +446,12 @@ private fun RecordingStrip(vm: HistoryViewModel) {
     Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("녹취 ${r.segments.size}개", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("녹취 ${r.segments.size}개", fontSize = Type.body, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(10.dp))
                 when {
-                    pb.error.isNotBlank() -> Text(pb.error, fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
-                    pb.busy -> Text(pb.note.ifBlank { "받는 중…" }, fontSize = 11.sp)
-                    pb.label.isNotBlank() -> Text("재생 중 · ${pb.label}", fontSize = 11.sp,
+                    pb.error.isNotBlank() -> Text(pb.error, fontSize = Type.meta, color = MaterialTheme.colorScheme.error)
+                    pb.busy -> Text(pb.note.ifBlank { "받는 중…" }, fontSize = Type.meta)
+                    pb.label.isNotBlank() -> Text("재생 중 · ${pb.label}", fontSize = Type.meta,
                         color = MaterialTheme.colorScheme.primary)
                 }
                 Spacer(Modifier.weight(1f))
@@ -471,7 +466,7 @@ private fun RecordingStrip(vm: HistoryViewModel) {
                         },
                         label = {
                             Text("${seg.seq} ${short(seg.speakerId)} ${seg.durationMs / 1000}초" +
-                                 (if (!seg.playable) " · 다시 변환" else ""), fontSize = 11.sp)
+                                 (if (!seg.playable) " · 다시 변환" else ""), fontSize = Type.meta)
                         })
                 }
             }

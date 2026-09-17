@@ -8,6 +8,7 @@
 // 애드혹 구성 중에는 바깥을 눌러도 닫히지 않는다(§4.1) — 고른 대상이 말없이 사라지면 안 된다.
 package com.cims.ue.dispatch.ui.ptt
 
+import com.cims.ue.dispatch.ui.Type
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -73,7 +74,7 @@ fun OriginateSheet(vm: PttChannelsViewModel, onDismiss: () -> Unit) {
             Text(
                 if (tab == OriginTab.PRIVATE) "PTT 사용자 한 명과 1:1 세션을 엽니다"
                 else "고른 사람들로 임시 세션을 엽니다 — 서버에 편성되지 않습니다",
-                fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(vertical = 6.dp))
 
             // 고른 대상 — 애드혹은 칩으로 쌓인다.
@@ -81,27 +82,27 @@ fun OriginateSheet(vm: PttChannelsViewModel, onDismiss: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 picked.forEach { e ->
                     InputChip(selected = true, onClick = { picked = picked - e },
-                        label = { Text(e.name.ifBlank { e.msisdn }, fontSize = 11.sp) })
+                        label = { Text(e.name.ifBlank { e.msisdn }, fontSize = Type.meta) })
                 }
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 FilterChip(selected = emergency, onClick = { emergency = !emergency },
-                    label = { Text("긴급", fontSize = 11.sp) })
+                    label = { Text("긴급", fontSize = Type.meta) })
                 if (tab == OriginTab.PRIVATE) {
                     Spacer(Modifier.width(6.dp))
                     // 전이중은 마이크가 늘 열려 있어 발언 대상이 되지 못한다 — 카드의 [음소거]로 다룬다.
                     FilterChip(selected = fullDuplex, onClick = { fullDuplex = !fullDuplex },
-                        label = { Text("전이중(마이크 상시)", fontSize = 11.sp) })
+                        label = { Text("전이중(마이크 상시)", fontSize = Type.meta) })
                 }
             }
 
             OutlinedTextField(value = query, onValueChange = { query = it },
-                placeholder = { Text("이름·PTT 번호", fontSize = 13.sp) }, singleLine = true,
+                placeholder = { Text("이름·PTT 번호", fontSize = Type.strong) }, singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp))
 
             error?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp,
+                Text(it, color = MaterialTheme.colorScheme.error, fontSize = Type.body,
                     modifier = Modifier.padding(bottom = 4.dp))
             }
 
@@ -111,7 +112,7 @@ fun OriginateSheet(vm: PttChannelsViewModel, onDismiss: () -> Unit) {
                     Text(
                         if (book.entries.isEmpty()) "PTT 주소록을 받지 못했습니다 — 서버 연결을 확인하세요"
                         else "일치하는 사람이 없습니다",
-                        fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        fontSize = Type.strong, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else LazyColumn {
                     items(rows, key = { it.msisdn }) { e ->
                         Row(Modifier.fillMaxWidth()
@@ -122,12 +123,12 @@ fun OriginateSheet(vm: PttChannelsViewModel, onDismiss: () -> Unit) {
                                 .padding(vertical = 9.dp),
                             verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text(e.name.ifBlank { e.msisdn }, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                                Text(e.msisdn, fontSize = 11.sp,
+                                Text(e.name.ifBlank { e.msisdn }, fontSize = Type.title, fontWeight = FontWeight.Bold)
+                                Text(e.msisdn, fontSize = Type.meta,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Text(if (tab == OriginTab.PRIVATE) "걸기" else "추가",
-                                fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                                fontSize = Type.strong, color = MaterialTheme.colorScheme.primary)
                         }
                         HorizontalDivider()
                     }
@@ -140,7 +141,7 @@ fun OriginateSheet(vm: PttChannelsViewModel, onDismiss: () -> Unit) {
                 Text(
                     if (tab == OriginTab.PRIVATE) picked.firstOrNull()?.let { "대상 ${it.name.ifBlank { it.msisdn }}" } ?: "대상을 고르세요"
                     else "대상 ${picked.size}명",
-                    Modifier.weight(1f), fontSize = 12.sp)
+                    Modifier.weight(1f), fontSize = Type.body)
                 TextButton(onClick = close) { Text("취소") }
                 Button(
                     onClick = {

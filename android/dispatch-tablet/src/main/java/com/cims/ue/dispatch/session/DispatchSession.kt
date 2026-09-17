@@ -587,6 +587,17 @@ class DispatchSession(
             .toSet()
     }
 
+    /**
+     * 지금 열려 있는 청취 — 통화 감청(Join)과 PTT 청취를 **합쳐** 센다.
+     *
+     * 둘을 합치는 이유는 상한의 근거가 자원이기 때문이다 — 서버에서는 어느 쪽이든 청취 leg 하나다.
+     */
+    val listenCount: Int
+        get() = _sessions.value.count { it.isLive && it.kind.isSheet }
+
+    /** 동시 청취 상한에 걸렸나 — 새로 열기 전에 본다. */
+    fun listenLimitReached(): Boolean = listenCount >= settingsSnapshot().maxListen
+
     /** 청취 범위가 있는가 — 없으면 ② 청취 섹션이 비활성된다. */
     val canListenPtt: Boolean get() = dispatch.pttListen != "none" && dispatch.pttTargets.isNotEmpty()
 
@@ -817,11 +828,6 @@ class DispatchSession(
     }
 
     /** URI 에서 번호부만 — `tel:+8210…`·`sip:1001@dom` 둘 다. */
-    internal fun userPart(uri: String): String {
-        val noScheme = uri.substringAfter(':', uri)
-        return noScheme.substringBefore('@').substringBefore(';')
-    }
-
     /**
      * **1초 틱** — 경과 시간을 흐르게 한다(Windows `MainViewModel.Tick(now)` 대응).
      *

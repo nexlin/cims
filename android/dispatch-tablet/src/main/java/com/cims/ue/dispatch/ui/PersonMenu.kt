@@ -8,6 +8,7 @@
 // (§11). 없는 기능을 버튼으로 만들지 않는다.
 package com.cims.ue.dispatch.ui
 
+import com.cims.ue.dispatch.session.userPart
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
@@ -122,11 +123,6 @@ internal fun resolvePerson(
 }
 
 /** `sip:1001@d` · `tel:+8210…` · `1001` → 번호 부분. */
-internal fun userPart(uri: String): String {
-    val t = uri.trim()
-    val afterScheme = t.substringAfter(':', t)
-    return afterScheme.substringBefore('@').trim()
-}
 
 /** 사람 메뉴가 낼 수 있는 행동 — 화면이 이어 붙인다. */
 enum class PersonAction { PRIVATE_CALL, ADHOC_ADD, SDS, CALL }
@@ -147,9 +143,9 @@ fun PersonMenu(
     if (person == null) return
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
-            Text(person.head, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Text(person.head, fontWeight = FontWeight.Bold, fontSize = Type.strong)
             if (person.orgPath.isNotEmpty())
-                Text(person.orgPath, fontSize = 11.sp,
+                Text(person.orgPath, fontSize = Type.meta,
                      color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         HorizontalDivider()
@@ -167,7 +163,7 @@ fun PersonMenu(
         }
         if (!person.hasPtt && !person.hasLine) {
             Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
-                Text("걸 수 있는 회선이 없습니다", fontSize = 12.sp,
+                Text("걸 수 있는 회선이 없습니다", fontSize = Type.body,
                      color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
