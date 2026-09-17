@@ -24,7 +24,8 @@ public sealed class HistoryClient : IDisposable
     public const int PageLimit = 200;
 
     private readonly CscClient _csc;
-    private readonly Func<string?> _token;
+    private readonly Func<CancellationToken, Task<string?>> _token;
+    private readonly Func<string?, CancellationToken, Task<string?>> _renew;
     private readonly AppLog _log;
     private readonly SynchronizationContext? _ui = SynchronizationContext.Current;
     private readonly Dictionary<HistoryKind, (string Since, string ETag)> _cursor = new();
@@ -38,17 +39,28 @@ public sealed class HistoryClient : IDisposable
     /// <summary>새 항목(중복 제거 후, 오래된 것부터). UI 스레드로 전달된다.</summary>
     public event EventHandler<HistoryEntry>? Received;
 
-    public HistoryClient(CscClient csc, Func<string?> accessToken, AppLog log)
+    /// <summary><paramref name="renew"/> = 401 을 받았을 때 그 토큰을 넘겨 강제 갱신받는 창구(§6 세션 수명).</summary>
+    public HistoryClient(CscClient csc, Func<CancellationToken, Task<string?>> accessToken,
+                         Func<string?, CancellationToken, Task<string?>> renew, AppLog log)
     {
-        _csc = csc; _token = accessToken; _log = log;
+        _csc = csc; _token = accessToken; _renew = renew; _log = log;
+    }
+
+    /// <summary>GET 한 번 — 401 이면 토큰을 강제 갱신해 딱 한 번 다시 보낸다. 갱신이 안 되면 그 401 을 그대로 준다.
+    /// 로그인 전이면 null — 호출자가 «실패» 로 세지 않게 «요청 자체를 안 했음» 과 구분한다.</summary>
+    private async Task<Result<XcapDoc>?> GetAsync(string path, string? etag, CancellationToken ct)
+    {
+        if (await _token(ct) is not { } token) return null;
+        var r = await Task.Run(() => _csc.XcapGet(token, path, "application/json", etag), ct);
+        if (!r.Ok && r.Code == 401 && await _renew(token, ct) is { } fresh && fresh != token)
+            r = await Task.Run(() => _csc.XcapGet(fresh, path, "application/json", etag), ct);
+        return r;
     }
 
     /// <summary>API 존재 확인 — 200 이면 시작 가능, 404/501 이면 서버 미구현(비활성), 403 이면 범위 밖(비활성). 그 밖의 실패는 판단 보류(null).</summary>
     public async Task<bool?> ProbeAsync(CancellationToken ct = default)
     {
-        string? token = _token();
-        if (token is null) return null;
-        var r = await Task.Run(() => _csc.XcapGet(token, "/provisioning/history?kind=call&limit=1", "application/json"), ct);
+        if (await GetAsync("/provisioning/history?kind=call&limit=1", null, ct) is not { } r) return null;
         if (r.Ok) { Available = true; _log.Info("history: available"); return true; }
         if (r.Code is 404 or 501 or 405) { Available = false; _log.Info($"history: server does not provide it ({r.Code}) — polling off"); return false; }
         if (r.Code == 403) { Available = false; _log.Warn($"history: forbidden ({r.Reason}) — polling off"); return false; }
@@ -89,11 +101,9 @@ public sealed class HistoryClient : IDisposable
 
     private async Task PollOnceAsync(HistoryKind kind, CancellationToken ct)
     {
-        string? token = _token();
-        if (token is null) return;
         var (since, etag) = _cursor.TryGetValue(kind, out var c) ? c : ("", "");
         string path = $"/provisioning/history?kind={KindName(kind)}&limit={PageLimit}" + (since.Length > 0 ? "&since=" + Uri.EscapeDataString(since) : "");
-        var r = await Task.Run(() => _csc.XcapGet(token, path, "application/json", etag.Length > 0 ? etag : null), ct);
+        if (await GetAsync(path, etag.Length > 0 ? etag : null, ct) is not { } r) return;
         if (!r.Ok)
         {
             if (r.Code is 404 or 501 or 403) { _log.Warn($"history {kind}: {r.Code} — polling off"); Available = false; Stop(); }

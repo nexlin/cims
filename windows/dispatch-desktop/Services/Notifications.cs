@@ -21,7 +21,7 @@ public sealed partial class Toast : ObservableObject
     public bool IsWarn => Level == ToastLevel.Warn;
 }
 
-public enum BannerKind { PilotIncoming, DirectIncoming, PttPrivateIncoming, Emergency, ImminentPeril, Alert, ServerCert }
+public enum BannerKind { PilotIncoming, DirectIncoming, PttPrivateIncoming, Emergency, ImminentPeril, Alert, ServerCert, Credential }
 
 /// <summary>착신 배너(세션 1개) · 긴급 배너(그룹 1개) · 서버 인증서 만료 배너(세션당 1개, sip_tls_signaling.md §8.6.2) — 스택(최신 위).
 /// 배너 레이어는 상단 바 아래 공통이라 관제 캔버스를 포함한 어느 화면에서나 보인다(§3.4).</summary>
@@ -45,8 +45,10 @@ public sealed partial class Banner : ObservableObject
     public bool IsPeril => Kind == BannerKind.ImminentPeril;
     public bool IsAlert => Kind == BannerKind.Alert;
     public bool IsServerCert => Kind == BannerKind.ServerCert;
-    /// <summary>경과 시간 표시 — 착신·긴급은 "언제부터" 가 뜻이 있고, 인증서 만료는 잔여 일수가 제목이라 경과를 보이지 않는다.</summary>
-    public bool ShowElapsed => !IsServerCert;
+    /// <summary>경고 계열(서버 인증서 만료·자격 갱신 실패) — 같은 시각 처리(경고 아이콘 + 빨강 계열, 경과 숨김)를 받는다.</summary>
+    public bool IsWarning => Kind is BannerKind.ServerCert or BannerKind.Credential;
+    /// <summary>경과 시간 표시 — 착신·긴급은 "언제부터" 가 뜻이 있고, 경고 계열은 제목이 이미 상태라 경과를 보이지 않는다.</summary>
+    public bool ShowElapsed => !IsWarning;
     public void Tick(DateTime now) => Elapsed = now - Time;
 }
 

@@ -170,7 +170,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     public bool CanManageDirectory => Profile?.Dispatch.CanAdminDirectory == true;
     private ManagementClient? _management;
     /// <summary>관리 평면 클라이언트(조직/구성원/번호·그룹 목록·이력 창 조회·녹취) — 로그인 전 null.</summary>
-    public ManagementClient? Management => _csc is null || _tokens is null ? null : (_management ??= new ManagementClient(_csc, () => _tokens?.AccessToken, Log));
+    public ManagementClient? Management => _csc is null || _tokens is null ? null : (_management ??= new ManagementClient(_csc, AccessTokenAsync, RenewAccessTokenAsync, Log));
     public string PttDomain => PttService?.Domain ?? "";
 
     partial void OnProfileChanged(Profile? value)
@@ -214,7 +214,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         var csc = MakeCsc(host, port);
         var tok = await csc.LoginAsync(loginId, password, ct);
         if (!tok.Ok) return tok.WithoutValue();
-        _tokens = tok.Value;
+        NoteTokens(tok.Value);
         _loginPw = password;
         Settings.Update(s => { s.CscHost = host; s.CscPort = port; s.LoginId = loginId; });
         if (Settings.Current.AutoLogin && tok.Value.RefreshToken.Length > 0) Credentials.Save(RefreshTokenKey, tok.Value.RefreshToken);
@@ -231,15 +231,131 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         var csc = MakeCsc(s.CscHost, s.CscPort);
         var tok = await csc.RefreshAsync(rt, ct);
         if (!tok.Ok) { Credentials.Delete(RefreshTokenKey); return tok.WithoutValue(); }
-        _tokens = tok.Value;
-        if (tok.Value.RefreshToken.Length > 0) Credentials.Save(RefreshTokenKey, tok.Value.RefreshToken);
+        NoteTokens(tok.Value);
         return await FetchProfileAsync(ct);
+    }
+
+    // ── OAuth 토큰 수명 (§6 «세션 수명 — 자격은 둘이지만 로그인은 하나다») ──
+    //   SIP 자격(H(A1))은 재등록으로 사실상 안 죽지만 MC 서비스 인가(OAuth2)는 1시간에 만료된다. 관제사에게
+    //   «통화는 되는데 조회만 안 되는» 반쯤 로그인된 상태를 보이지 않으려면 앱이 조용히 갱신해야 한다.
+    //   토큰을 쓰는 곳은 전부 AccessTokenAsync 하나를 지난다 — 직접 _tokens.AccessToken 을 읽지 않는다.
+
+    /// <summary>만료 몇 초 전부터 선제 갱신하나 — 느린 회선에서도 요청이 옛 토큰으로 나가지 않을 만큼.</summary>
+    private const int TokenRenewMarginSec = 60;
+    private DateTime _tokenExpiresAtUtc = DateTime.MinValue;
+    private readonly SemaphoreSlim _tokenLock = new(1, 1);
+    /// <summary>틱이 토큰을 들여다보는 주기(초) — 만료는 1시간이라 자주 볼 이유가 없다. 실제 갱신 판정은 AccessTokenAsync 가 한다.</summary>
+    private const int TokenCheckSec = 30;
+    private DateTime _nextTokenCheck = DateTime.MinValue;
+    /// <summary>생성 시점(UI 스레드)의 컨텍스트 — 갱신은 이력 폴링 스레드에서도 일어나므로 배너·로그아웃은 여기로 올린다.</summary>
+    private readonly SynchronizationContext? _ui = SynchronizationContext.Current;
+    private void OnUi(Action a) { if (_ui is null || _ui == SynchronizationContext.Current) a(); else _ui.Post(_ => a(), null); }
+
+    /// <summary>갱신이 실패하는 중(네트워크·5xx) — 옛 토큰으로 버티는 동안 미리 알린다. 조회를 누른 그 순간에 튕기지 않게.</summary>
+    [ObservableProperty] private bool _credentialWarning;
+
+    private void NoteTokens(TokenSet t)
+    {
+        _tokens = t;
+        _endingSession = false;                          // Logout() 에서 풀면 EndSession 핸들러 안에서 바로 풀려 가드가 무력해진다
+        _tokenExpiresAtUtc = t.ExpiresInSec > 0 ? DateTime.UtcNow.AddSeconds(t.ExpiresInSec) : DateTime.MinValue;
+        if (Settings.Current.AutoLogin && t.RefreshToken.Length > 0) Credentials.Save(RefreshTokenKey, t.RefreshToken);
+        SetCredentialWarning(false);
+    }
+
+    /// <summary>유효한 access token. 만료가 가까우면 먼저 갱신한다. 로그인 전이면 null.</summary>
+    public async Task<string?> AccessTokenAsync(CancellationToken ct = default)
+    {
+        var cur = _tokens;
+        if (_csc is null || cur is null) return null;
+        if (_tokenExpiresAtUtc == DateTime.MinValue || DateTime.UtcNow < _tokenExpiresAtUtc.AddSeconds(-TokenRenewMarginSec))
+            return cur.AccessToken;
+        return await RenewLockedAsync(null, ct);
+    }
+
+    /// <summary>401 을 받은 뒤의 강제 갱신 — <paramref name="stale"/> 은 그 401 을 받은 토큰.
+    /// 잠금을 기다리는 사이 다른 호출이 이미 갱신했으면 갱신을 또 하지 않고 새 토큰을 준다.</summary>
+    public Task<string?> RenewAccessTokenAsync(string? stale, CancellationToken ct = default)
+        => _csc is null || _tokens is null ? Task.FromResult<string?>(null) : RenewLockedAsync(stale ?? "", ct);
+
+    private async Task<string?> RenewLockedAsync(string? stale, CancellationToken ct)
+    {
+        await _tokenLock.WaitAsync(ct);
+        try
+        {
+            var csc = _csc; var cur = _tokens;
+            if (csc is null || cur is null) return null;
+            if (stale is null)
+            {
+                if (DateTime.UtcNow < _tokenExpiresAtUtc.AddSeconds(-TokenRenewMarginSec)) return cur.AccessToken;
+            }
+            else if (!string.Equals(cur.AccessToken, stale, StringComparison.Ordinal))
+            {
+                return cur.AccessToken;                       // 남이 이미 갱신했다
+            }
+
+            var r = await csc.RefreshAsync(cur.RefreshToken, ct);
+            if (r.Ok) { NoteTokens(r.Value); Log.Info("csc token refreshed"); return r.Value.AccessToken; }
+
+            if (IsSessionEnded(r.Code, r.Reason))
+            {
+                Log.Warn($"csc session ended: {r.Code} {r.Reason}");
+                OnUi(() => EndSession("로그인이 만료되었습니다 — 다시 로그인하세요"));
+                return null;
+            }
+            // 일시 실패 — 옛 토큰을 유지한 채 경고만 띄운다(다음 요청·다음 틱이 다시 시도한다).
+            Log.Warn($"csc token refresh failed (일시): {r.Code} {r.Reason}");
+            SetCredentialWarning(true);
+            return cur.AccessToken;
+        }
+        finally { _tokenLock.Release(); }
+    }
+
+    /// <summary>되살릴 수 없는 실패인가 — refresh 폐기·회전 실패·만료(RFC 6749 §5.2 invalid_grant)와 401.
+    /// 네트워크·5xx 는 여기 들지 않는다(일시 실패로 다뤄 옛 토큰을 유지한다).</summary>
+    internal static bool IsSessionEnded(int code, string? reason)
+    {
+        if (code == 401) return true;
+        string r = reason ?? "";
+        return code == 400 && (r.Contains("invalid_grant", StringComparison.OrdinalIgnoreCase)
+                            || r.Contains("invalid_token", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>자격이 끝났다 — 실제 정리(등록 해제·창 전환)는 App 이 한다. 여기서는 사유와 함께 알리기만 한다:
+    /// Logout() 만 불러서는 틱 정지·창 숨김·로그인 창 복귀가 빠져 반쯤 로그아웃된 상태가 된다.</summary>
+    public void EndSession(string why)
+    {
+        if (_endingSession) return;                      // 여러 요청이 동시에 401 을 받아도 한 번만
+        _endingSession = true;
+        CredentialsEnded?.Invoke(this, why);
+    }
+    private bool _endingSession;
+
+    /// <summary>자격 만료로 세션이 끝났다 — 셸이 로그인 창을 띄운다.</summary>
+    public event EventHandler<string>? CredentialsEnded;
+
+    private void SetCredentialWarning(bool on) => OnUi(() => ApplyCredentialWarning(on));
+
+    private void ApplyCredentialWarning(bool on)
+    {
+        if (CredentialWarning == on) return;
+        CredentialWarning = on;
+        var cur = Notify.BannerOfKind(BannerKind.Credential);
+        if (!on) { if (cur is not null) Notify.RemoveBanner(cur); return; }
+        if (cur is not null) return;
+        Notify.ShowBanner(new Banner
+        {
+            Kind = BannerKind.Credential,
+            Title = "서버 자격 갱신 실패",
+            Subtitle = "이력·관리·PTT 그룹 조회가 곧 막힐 수 있습니다 — 통화는 계속됩니다. 서버 연결을 확인하세요",
+        });
     }
 
     private async Task<Result> FetchProfileAsync(CancellationToken ct)
     {
         if (_csc is null || _tokens is null) return Result.Fail(-1, "로그인 전");
-        var p = await _csc.FetchProfileAsync(_tokens.AccessToken, ct);
+        if (await AccessTokenAsync(ct) is not { } tk) return Result.Fail(-1, "로그인 전");
+        var p = await _csc.FetchProfileAsync(tk, ct);
         if (!p.Ok) return p.WithoutValue();
         Profile = p.Value;
         Directory.CountryCode = p.Value.CountryCode;
@@ -255,7 +371,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     public async Task SyncDirectoryAsync(CancellationToken ct = default)
     {
         if (_csc is null || _tokens is null) return;
-        var csc = _csc; string token = _tokens.AccessToken;
+        var csc = _csc; if (await AccessTokenAsync() is not { } token) return;
         foreach (string service in new[] { "volte", "ptt" })
         {
             if (service == "ptt" && Ptt is null && PttService is null) continue;
@@ -333,7 +449,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     {
         if (_csc is null || _tokens is null || !HasDesk) return;
         _history?.Dispose();
-        _history = new HistoryClient(_csc, () => _tokens?.AccessToken, Log);
+        _history = new HistoryClient(_csc, AccessTokenAsync, RenewAccessTokenAsync, Log);
         _history.Received += (_, e) => OnHistory(e);
         if (await _history.ProbeAsync() == true)
             _history.Start(new[] { HistoryKind.Call, HistoryKind.Ptt, HistoryKind.Message });
@@ -406,7 +522,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     public async Task<Result> RefreshGroupsAsync(CancellationToken ct = default)
     {
         if (Ptt is null || _csc is null || _tokens is null) return Result.Fail(-1, "PTT 계정 없음");
-        var csc = _csc; string token = _tokens.AccessToken; var ptt = Ptt;
+        var csc = _csc; var ptt = Ptt;
+        if (await AccessTokenAsync() is not { } token) return Result.Fail(-1, "로그인 전");
         var groups = await csc.ListGroupsAsync(token, MyPttId, ct);
         if (!groups.Ok) { Notify.Warn("그룹 목록을 받지 못했습니다", groups.ToString()); return groups.WithoutValue(); }
         if (Ptt != ptt) return Result.Fail(-1, "세션 종료");                 // 조회 중 로그아웃
@@ -472,7 +589,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     private async Task RefreshDispatchAsync()
     {
         if (_csc is null || _tokens is null || Profile is null) return;
-        var csc = _csc; string token = _tokens.AccessToken;
+        var csc = _csc; if (await AccessTokenAsync() is not { } token) return;
         var r = await Task.Run(() => csc.XcapGet(token, "/provisioning/me", "application/json", _profileEtag.Length > 0 ? _profileEtag : null));
         if (!r.Ok) { Log.Warn($"provisioning/me poll: {r}"); return; }
         if (r.Value.NotModified || Profile is null) return;
@@ -516,10 +633,11 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     /// <summary>새 그룹 uri — XCAP 은 클라이언트가 문서를 명명한다. 정규형 `tel:g-&lt;소문자 hex 8&gt;`(mcptt_api.md §2; `adhoc-`/`priv-` 예약).</summary>
     public string NewGroupUri() => "tel:g-" + Guid.NewGuid().ToString("N")[..8];
 
-    public Task<Result<GroupDoc>> GetGroupAsync(GroupInfo g, CancellationToken ct = default)
+    public async Task<Result<GroupDoc>> GetGroupAsync(GroupInfo g, CancellationToken ct = default)
     {
-        if (_csc is null || _tokens is null) return Task.FromResult(Result<GroupDoc>.Fail(-1, "로그인 전"));
-        return _csc.GetGroupAsync(_tokens.AccessToken, MyPttId, g.Uri, ct);
+        if (_csc is null || _tokens is null) return Result<GroupDoc>.Fail(-1, "로그인 전");
+        if (await AccessTokenAsync(ct) is not { } tk) return Result<GroupDoc>.Fail(-1, "로그인 전");
+        return await _csc.GetGroupAsync(tk, MyPttId, g.Uri, ct);
     }
 
     /// <summary>그룹 생성/수정(PUT). ifMatch = 편집 시작 시 ETag(충돌 412). 신규 id 충돌(409 `uri_taken`)은 id 를 다시 만들어 한 번만
@@ -527,14 +645,15 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     public async Task<Result<GroupDoc>> SaveGroupAsync(GroupDoc doc, string? ifMatch, CancellationToken ct = default)
     {
         if (_csc is null || _tokens is null) return Result<GroupDoc>.Fail(-1, "로그인 전");
+        if (await AccessTokenAsync(ct) is not { } tk) return Result<GroupDoc>.Fail(-1, "로그인 전");
         bool isNew = ifMatch is null || ifMatch.Length == 0;
-        var r = await _csc.PutGroupAsync(_tokens.AccessToken, MyPttId, doc, ifMatch, ct);
+        var r = await _csc.PutGroupAsync(tk, MyPttId, doc, ifMatch, ct);
         if (!r.Ok && isNew && r.Code == 409 && ResponseText.GroupError(r.Reason).Error == "uri_taken")
         {
             // 클라이언트 명명 id 가 타인 소유와 충돌(mcptt_api.md §2) — 첫 409 는 사용자에게 보이지 않는다
             Log.Info($"putGroup {doc.Uri}: uri_taken — id 재생성 후 재시도");
             doc.Uri = NewGroupUri();
-            r = await _csc.PutGroupAsync(_tokens.AccessToken, MyPttId, doc, null, ct);
+            r = await _csc.PutGroupAsync(tk, MyPttId, doc, null, ct);
         }
         if (!r.Ok) { Notify.Error(ResponseText.Describe(ResponseText.Area.Group, r.Code, r.Reason), r.ToString()); return r; }
         Activity.Add(ActivityPanel.Ptt, ActivityKind.Note, $"그룹 {(isNew ? "생성" : "편집")} {r.Value.DisplayName}", $"멤버 {r.Value.Members.Count}");
@@ -546,7 +665,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     public async Task<Result> DeleteGroupAsync(GroupInfo g, CancellationToken ct = default)
     {
         if (_csc is null || _tokens is null) return Result.Fail(-1, "로그인 전");
-        var r = await _csc.DeleteGroupAsync(_tokens.AccessToken, MyPttId, g.Uri, ct);
+        if (await AccessTokenAsync(ct) is not { } tk) return Result.Fail(-1, "로그인 전");
+        var r = await _csc.DeleteGroupAsync(tk, MyPttId, g.Uri, ct);
         if (!r.Ok)
         {
             Notify.Error(ResponseText.Describe(ResponseText.Area.Group, r.Code, r.Reason), r.ToString());
@@ -602,7 +722,9 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         _history?.Dispose(); _history = null;
         Engine.Stop();
         Credentials.Delete(RefreshTokenKey);
-        _tokens = null; _loginPw = ""; _management = null;
+        _tokens = null; _tokenExpiresAtUtc = DateTime.MinValue; _nextTokenCheck = DateTime.MinValue; _loginPw = ""; _management = null;
+        if (Notify.BannerOfKind(BannerKind.Credential) is { } crb) Notify.RemoveBanner(crb);
+        CredentialWarning = false;
         Volte = null; Ptt = null; Profile = null;
         _accountKinds.Clear(); _watched.Clear(); _pendingOps.Clear(); _pendingConsult.Clear(); _adhocMembers.Clear(); _regRetryAt.Clear(); _regBackoff.Clear();
         Sessions.Clear(); Groups.Clear(); Dialogs.Clear();
@@ -1182,6 +1304,9 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         if (now.Date != _lastPrune) { _lastPrune = now.Date; Activity.Prune(now); }   // 날짜가 바뀐 첫 틱 — 정각 틱을 놓쳐도 하루 밀리지 않게
         if (IsReady && HasDesk && now >= _nextDispatchPoll) { _nextDispatchPoll = now.AddSeconds(DispatchPollSec); _ = RefreshDispatchAsync(); }
         if (IsReady && now >= _nextServerCertCheck) { _nextServerCertCheck = now.AddSeconds(ServerCertCheckSec); UpdateServerCertBanner(); }
+        // 아무것도 조회하지 않는 관제석도 토큰은 살아 있어야 한다 — 만료가 가까우면 틱이 먼저 갱신한다(§6).
+        //   갱신이 실패하는 중이면 다음 틱이 다시 시도하므로 경고 띠가 붙은 채 스스로 회복한다.
+        if (_tokens is not null && now >= _nextTokenCheck) { _nextTokenCheck = now.AddSeconds(TokenCheckSec); _ = AccessTokenAsync(); }
     }
     private DateTime _lastPrune = DateTime.Today;
 

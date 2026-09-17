@@ -26,10 +26,14 @@ namespace DispatchDesktop.Services;
 public sealed class ManagementClient
 {
     private readonly CscClient _csc;
-    private readonly Func<string?> _token;
+    private readonly Func<CancellationToken, Task<string?>> _token;
+    private readonly Func<string?, CancellationToken, Task<string?>> _renew;
     private readonly AppLog _log;
 
-    public ManagementClient(CscClient csc, Func<string?> accessToken, AppLog log) { _csc = csc; _token = accessToken; _log = log; }
+    /// <summary><paramref name="renew"/> = 401 을 받았을 때 그 토큰을 넘겨 강제 갱신받는 창구(§6 세션 수명).</summary>
+    public ManagementClient(CscClient csc, Func<CancellationToken, Task<string?>> accessToken,
+                            Func<string?, CancellationToken, Task<string?>> renew, AppLog log)
+    { _csc = csc; _token = accessToken; _renew = renew; _log = log; }
 
     private static string Enc(string s) => Uri.EscapeDataString(s);
     private static string Str(JsonElement e, string name) => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
@@ -45,9 +49,11 @@ public sealed class ManagementClient
     /// <summary>요청 공통 — 토큰 없으면 -1, 실패는 (code, reason=오류 본문) 로 ResponseText 사전에 맞춘다.</summary>
     private async Task<Result<HttpResponse>> SendAsync(string method, string path, string? json = null, string? ifNoneMatch = null, CancellationToken ct = default)
     {
-        string? token = _token();
-        if (token is null) return Result<HttpResponse>.Fail(-1, "로그인 전");
+        if (await _token(ct) is not { } token) return Result<HttpResponse>.Fail(-1, "로그인 전");
         var r = await _csc.RequestJsonAsync(token, method, path, json, null, ifNoneMatch, ct);
+        // 401 = 토큰이 먼저 죽었다(서버 재기동·회전). 강제 갱신 후 딱 한 번 다시 보낸다 — 관제사는 몰라야 한다.
+        if (!r.Ok && r.Code == 401 && await _renew(token, ct) is { } fresh && fresh != token)
+            r = await _csc.RequestJsonAsync(fresh, method, path, json, null, ifNoneMatch, ct);
         if (!r.Ok)
         {
             string body = r.Value?.Body is { Length: > 0 } b ? System.Text.Encoding.UTF8.GetString(b) : "";

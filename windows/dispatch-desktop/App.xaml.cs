@@ -64,6 +64,8 @@ public partial class App : Application
         directory.Load(settings.Current.DirectoryCsv.Length > 0 ? settings.Current.DirectoryCsv : null);
 
         _session = new DispatchSession(settings, directory, _log);           // UI 스레드에서 생성 — SynchronizationContext.Current 캡처
+        // 토큰 자격이 되살릴 수 없게 끝났다(refresh 폐기·회전 실패) — 통화만 살아 있는 반쯤 로그인된 상태를 두지 않는다(§6 세션 수명).
+        _session.CredentialsEnded += (_, why) => { _log!.Warn("session ended: " + why); _pendingLoginError = why; Logout(); };
         _hotKeys = new HotKeyMap();
         _layout = new LayoutStore();
         _layout.Load();
@@ -126,6 +128,7 @@ public partial class App : Application
         {
             var s = _session!;
             var login = new LoginViewModel(s);
+            if (_pendingLoginError.Length > 0) { login.Error = _pendingLoginError; _pendingLoginError = ""; }
             bool ok = false;
             if (s.HasSavedLogin) ok = await login.ResumeAsync();
             if (!ok)
@@ -181,6 +184,9 @@ public partial class App : Application
         dict.Insert(0, new ResourceDictionary { Source = uri });
         _main?.ApplyDockTheme(theme);
     }
+
+    /// <summary>자격 만료로 끝난 세션의 사유 — 다음 로그인 창에 한 번 띄운다.</summary>
+    private string _pendingLoginError = "";
 
     /// <summary>로그아웃 — 등록 해제·토큰 폐기 후 로그인 창으로.</summary>
     public void Logout()
