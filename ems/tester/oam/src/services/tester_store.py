@@ -9,6 +9,7 @@ run 색인(관리 store) + run 본체(Tester.DataDir).
 """
 from __future__ import annotations
 
+import glob
 import os
 import shutil
 import time
@@ -37,19 +38,38 @@ def init(component_root: str, config: dict) -> None:
     os.makedirs(user_scenarios_dir(), exist_ok=True)
 
 
+def _mtime(p: str) -> float:
+    try:
+        return os.path.getmtime(p)
+    except OSError:
+        return 0.0
+
+
+def _has_content(d: str) -> bool:
+    """data 디렉터리에 실제 파일이 있는가 — 설치가 만든 빈 runs/·scenarios/ 만 있는 것은 내용이 아니다."""
+    for _root, _dirs, files in os.walk(d):
+        if files:
+            return True
+    return False
+
+
 def _default_data_dir() -> str:
     """기본 DataDir — 배포 레이아웃(`<모듈>/<버전>/<모듈>/` + `<모듈>/runtime/`)이면 버전과 무관한 `runtime/data`,
     아니면(소스 트리·단독 실행) 컴포넌트 아래 `data`. agent 가 만드는 `runtime/` 은 업그레이드에 살아남는다
-    (인증서와 같은 자리 — agent.md). 처음 옮겨 갈 때는 그 버전 디렉터리의 `data` 를 복사해 잇는다."""
+    (인증서와 같은 자리 — agent.md). 처음 옮겨 갈 때는 기존 `data`(이 버전 디렉터리, 비었으면 가장 최근 형제 버전 디렉터리)를 복사해 잇는다."""
     legacy = os.path.join(_component_root, 'data')
     runtime = os.path.normpath(os.path.join(_component_root, '..', '..', 'runtime'))
     if not os.path.isdir(runtime):
         return legacy
     d = os.path.join(runtime, 'data')
     if not os.path.isdir(d):
+        # 이어받을 원본 — 이 버전 디렉터리의 data, 없으면(업그레이드 직후라 비어 있다) 형제 버전 디렉터리 중 내용이 있는 가장 최근 것
+        mod = os.path.basename(_component_root)
+        cands = [legacy] + sorted(glob.glob(os.path.join(runtime, '..', '*', mod, 'data')), key=_mtime, reverse=True)
+        src = next((c for c in cands if _has_content(c)), None)
         try:
-            if os.path.isdir(legacy) and os.listdir(legacy):
-                shutil.copytree(legacy, d)
+            if src:
+                shutil.copytree(src, d)
             else:
                 os.makedirs(d, exist_ok=True)
         except OSError:

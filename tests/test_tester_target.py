@@ -260,6 +260,14 @@ class TokenAndDataDir(unittest.TestCase):
             d = TS.data_dir()
             self.assertEqual(d, os.path.join(root, 'oam-cims-tester', 'runtime', 'data'))
             self.assertTrue(os.path.isfile(os.path.join(d, 'scenarios', 'creds', 'volte.jsonl')))   # 이어받음
+            # 구버전(데이터가 버전 디렉터리 안)에서 올라온 첫 기동 — runtime/data 가 아직 없고 새 버전 data 는 빈 뼈대뿐
+            shutil.rmtree(d)
+            comp_new = os.path.join(root, 'oam-cims-tester', '0.2.0', 'oam-cims-tester')
+            os.makedirs(os.path.join(comp_new, 'data', 'runs'))
+            os.makedirs(os.path.join(comp_new, 'data', 'scenarios'))
+            TS._component_root, TS._data_dir_cache = comp_new, None
+            d = TS.data_dir()
+            self.assertTrue(os.path.isfile(os.path.join(d, 'scenarios', 'creds', 'volte.jsonl')), '이전 버전 디렉터리의 data 를 이어받아야 한다')
             comp2 = os.path.join(root, 'oam-cims-tester', '0.1.1', 'oam-cims-tester')     # 업그레이드 — 새 버전 디렉터리
             os.makedirs(comp2)
             TS._component_root, TS._data_dir_cache = comp2, None
