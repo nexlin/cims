@@ -429,6 +429,7 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
             return HandlerResult(status=200, body={'endpoints': [
                 '/api/v1/stats/health', '/api/v1/stats/messages',
                 '/api/v1/stats/calls', '/api/v1/stats/calls/rebuild',
+                '/api/v1/stats/calls/rebuild/{job_id}',
                 '/api/v1/stats/leak-reclaims',
                 '/api/v1/stats/service/voip', '/api/v1/stats/service/ptt',
                 '/api/v1/stats/service/summary'
@@ -470,20 +471,30 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
                                             qp('from'), qp('to'), gran)
 
         if parts[0] == 'calls' and len(parts) > 1 and parts[1] == 'rebuild':
-            # 재집계는 변이 — 조회와 달리 admin 을 요구한다.
             from services.admin_auth import require_role
-            _p, deny = require_role(handler_args, 'admin')
+            if method == 'GET':
+                # 진행 상태는 **조회**다 — 다른 통계 조회와 같은 등급(monitor)으로 연다.
+                #   실행 권한이 없는 당직자도 "지금 재집계가 도는 중" 은 볼 수 있어야
+                #   숫자가 흔들리는 이유를 안다.
+                _p, deny = require_role(handler_args, 'monitor')
+                if deny:
+                    return deny
+                return _calls_rebuild_status(parts[2] if len(parts) > 2 else '')
+            if method != 'POST':
+                return HandlerResult(status=405,
+                                     body={'error': 'GET(진행 상태) 또는 POST(실행)'})
+            # 재집계 실행은 변이 — 조회와 달리 admin 을 요구한다.
+            p_admin, deny = require_role(handler_args, 'admin')
             if deny:
                 return deny
-            if method != 'POST':
-                return HandlerResult(status=405, body={'error': 'POST only'})
             d = qp('date')
             f = (qp('from') or d or '')[:10]
             t = (qp('to') or d or f)[:10]
             if len(f) != 10 or len(t) != 10:
                 return HandlerResult(status=400,
                                      body={'error': 'from/to (YYYY-MM-DD) 또는 date 필요'})
-            return await _calls_rebuild(config, f, t)
+            return _calls_rebuild_start(config, f, t,
+                                        (p_admin or {}).get('login_id', ''))
 
         if parts[0] == 'calls':
             gran = qp('granularity', '1h')
@@ -534,9 +545,71 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
 _CALLS_MAX_DAYS = {'1m': 2, '5m': 3, '10m': 7}
 
 
-@_offload
-def _calls_rebuild(config: dict, from_day: str, to_day: str) -> HandlerResult:
-    """1분 집계를 원본에서 다시 만든다 (운영/검증용).
+# ── 재집계 job ────────────────────────────────────────────────
+#  재집계는 **오래 걸리는 작업**이다(원본을 날마다 통째로 다시 훑는다 — 실측 16일 1.9초,
+#  63일이면 그 네 배 위). 그런데 응답은 게이트웨이 프록시를 지나야 하고 거기 한도가 5초다
+#  (handlers/gateway._DEFAULT_TIMEOUT). 동기로 내면 **작업은 끝까지 도는데 화면에는 504** 가
+#  뜨고, 운영자는 실패로 읽어 다시 누른다 — 같은 일을 두 번 시킨다(F-47, 9/3 실측).
+#
+#  그래서 설치·업그레이드·검증과 같은 규약으로 돌린다: **접수(202) → job_id → 진행률 폴링.**
+#  job 은 프로세스 메모리에만 둔다 — 재집계는 되풀이해도 결과가 같고(멱등), oam-svc 가
+#  재기동하면 진행 중이던 작업도 함께 사라지므로 남길 상태가 없다.
+_REBUILD_JOBS: dict = {}
+_REBUILD_LOCK = threading.Lock()
+_REBUILD_KEEP = 10          # 최근 job 보관 수 — 이력이 아니라 직전 결과 확인용
+_REBUILD_SEQ = 0            # 같은 초에 두 번 걸어도 앞 job 을 덮지 않게 하는 일련번호
+
+
+def _rebuild_public(job: dict) -> dict:
+    """job → 응답 바디. 내부 키(_ 로 시작)는 내지 않는다."""
+    return {k: v for k, v in job.items() if not k.startswith('_')}
+
+
+def _rebuild_running() -> dict:
+    """진행 중인 job (없으면 None). 재집계는 한 번에 하나만 돈다 —
+    `stats_rollup` 이 쓰기를 단일 writer 로 잡으므로 둘째는 조용히 0 을 내고 끝난다.
+    그 침묵을 응답으로 드러낸다."""
+    for job in _REBUILD_JOBS.values():
+        if job.get('state') == 'running':
+            return job
+    return None
+
+
+def _rebuild_worker(job_id: str, from_day: str, to_day: str) -> None:
+    """재집계 본체 — 스레드에서 돈다(블로킹 파일 I/O)."""
+    def _on_day(day, done, buckets):
+        with _REBUILD_LOCK:
+            job = _REBUILD_JOBS.get(job_id)
+            if job:
+                job['days_done'] = done
+                job['buckets'] = buckets
+                job['last_day'] = day
+    try:
+        n = stats_rollup.rebuild_range(from_day, to_day, on_day=_on_day)
+        with _REBUILD_LOCK:
+            job = _REBUILD_JOBS.get(job_id)
+            if job:
+                job['buckets'] = n
+                # 단일 writer 를 못 잡으면 rebuild_range 가 아무것도 안 하고 0 을 낸다 —
+                #   "성공했는데 0 건" 과 구분되게 그 사실을 사유로 남긴다.
+                if n == 0 and job['days_done'] == 0:
+                    job['note'] = ('아무것도 다시 만들지 않았습니다 — 그 구간에 원본이 없거나, '
+                                   '다른 노드가 집계 쓰기를 잡고 있습니다')
+                job['state'] = 'done'
+                job['ended_at'] = time.time()
+    except Exception as e:
+        logger.exception('[stats] 재집계 실패 %s', job_id)
+        with _REBUILD_LOCK:
+            job = _REBUILD_JOBS.get(job_id)
+            if job:
+                job['state'] = 'failed'
+                job['error'] = str(e)
+                job['ended_at'] = time.time()
+
+
+def _calls_rebuild_start(config: dict, from_day: str, to_day: str,
+                         login_id: str = '') -> HandlerResult:
+    """1분 집계 재생성을 **접수**한다 → 202 + job_id (작업은 뒤에서 돈다).
 
     왜 필요한가: 롤업은 미결·신규 버킷만 다시 계산하므로, **집계 스키마에 축이 추가되면
     이미 적힌 버킷은 그 축이 빈 채로 남는다**(그룹 축 추가 때 실측). 첫 기동 소급이 1일치인
@@ -548,9 +621,64 @@ def _calls_rebuild(config: dict, from_day: str, to_day: str) -> HandlerResult:
         return HandlerResult(status=409, body={
             'error': 'rollup_disabled',
             'hint': 'StatsRollup.Enabled 가 꺼져 있으면 집계 파일을 만들지 않습니다'})
-    n = stats_rollup.rebuild_range(from_day, to_day)
-    return HandlerResult(status=200, body={
-        'ok': True, 'from': from_day, 'to': to_day, 'buckets': n})
+    try:
+        a = datetime.strptime(from_day, '%Y-%m-%d')
+        b = datetime.strptime(to_day, '%Y-%m-%d')
+    except ValueError:
+        return HandlerResult(status=400, body={'error': 'from/to 는 YYYY-MM-DD 형식입니다'})
+    if b < a:
+        a, b = b, a
+    global _REBUILD_SEQ
+    with _REBUILD_LOCK:
+        busy = _rebuild_running()
+        if busy:
+            # 이미 돌고 있다 — 두 번 눌러도 일이 두 배가 되지 않는다는 것을 응답으로 알린다.
+            return HandlerResult(status=409, body={
+                'error': 'rebuild_in_progress', 'job_id': busy['job_id'],
+                'hint': f"진행 중인 재집계가 있습니다 — GET /api/v1/stats/calls/rebuild/{busy['job_id']}"})
+        _REBUILD_SEQ += 1
+        # 시각만으로는 모자란다 — 같은 초에 두 번 접수되면 앞 job 의 결과가 사라진다.
+        job_id = (f"rb-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+                  f"-{os.getpid() % 1000:03d}-{_REBUILD_SEQ:03d}")
+        job = {
+            'job_id': job_id, 'state': 'running',
+            'from': a.strftime('%Y-%m-%d'), 'to': b.strftime('%Y-%m-%d'),
+            'days_total': (b - a).days + 1, 'days_done': 0, 'last_day': '',
+            'buckets': 0, 'started_at': time.time(), 'ended_at': None,
+            'requested_by': login_id, 'error': '', 'note': '',
+        }
+        _REBUILD_JOBS[job_id] = job
+        for old_id in list(_REBUILD_JOBS)[:-_REBUILD_KEEP]:
+            if _REBUILD_JOBS[old_id].get('state') != 'running':
+                _REBUILD_JOBS.pop(old_id, None)
+    # **전용 스레드**로 던지고 기다리지 않는다 — 이 요청은 접수증만 돌려준다.
+    #   기본 executor(`asyncio.to_thread`)를 쓰지 않는 이유: 그 풀은 이 모듈의 짧은 조회
+    #   오프로드(`_offload`)가 함께 쓴다. 분 단위로 도는 작업이 한 자리를 물고 있으면
+    #   조회가 그만큼 좁은 문으로 지나간다.
+    threading.Thread(target=_rebuild_worker, args=(job_id, job['from'], job['to']),
+                     name=f'stats-rebuild-{job_id}', daemon=True).start()
+    logger.info('[stats] 재집계 접수 %s %s~%s (%s일) by=%s',
+                job_id, job['from'], job['to'], job['days_total'], login_id or '-')
+    body = _rebuild_public(job)
+    body['hint'] = f'진행 상태: GET /api/v1/stats/calls/rebuild/{job_id}'
+    return HandlerResult(status=202, body=body)
+
+
+def _calls_rebuild_status(job_id: str) -> HandlerResult:
+    """재집계 진행 상태. job_id 없으면 최근 job 목록(진행 중인 것 포함)."""
+    with _REBUILD_LOCK:
+        if not job_id:
+            jobs = [_rebuild_public(j) for j in _REBUILD_JOBS.values()]
+            jobs.reverse()                       # 최근 것부터
+            running = _rebuild_running()
+            return HandlerResult(status=200, body={
+                'running': running['job_id'] if running else None, 'jobs': jobs})
+        job = _REBUILD_JOBS.get(job_id)
+        if not job:
+            return HandlerResult(status=404, body={
+                'error': 'unknown job_id',
+                'hint': 'job 은 oam-svc 메모리에만 있습니다 — 재기동하면 사라집니다'})
+        return HandlerResult(status=200, body=_rebuild_public(job))
 
 
 def _source_of(cov: dict) -> str:
@@ -601,7 +729,15 @@ def _calls_stats(config: dict, from_dt: str, to_dt: str, gran: str, svc: str) ->
             'hint': 'ServiceLogging.Dir 미설정'})
 
     rows, cov = stats_rollup.read_range_filled(root, from_dt, to_dt, config, gran=gran)
-    buckets, totals = stats_rollup.aggregate(rows, gran, svc)
+    # **읽은 구간의 0 건은 0 으로 낸다.** 요청한 서비스의 호가 한 건도 없으면 집계는 그
+    #   서비스 칸을 만들지 않고, 화면은 없는 경로를 `—`(자료 없음)으로 그린다 — 조용한
+    #   주말·PTT 만 쓰는 현장처럼 **정상적으로 0 건인 날이 통계 고장과 구분되지 않는다**
+    #   (실측 2026-09-17: VoLTE 지표 타일 6개가 전부 `—`).
+    #   그래서 "구간을 실제로 읽었는가" 를 커버리지로 판정해 칸을 0 으로 채운다. 빠진 날이
+    #   하나라도 있으면(`missing`) 채우지 않는다 — 못 본 구간을 0 이라고 말하는 것이 이
+    #   축에서 가장 하면 안 되는 일이다. 비율은 분모 0 이라 그대로 `—` 로 나간다.
+    looked = bool(cov.get('rollup') or cov.get('scanned')) and not cov.get('missing')
+    buckets, totals = stats_rollup.aggregate(rows, gran, svc, ensure_svc=looked)
     # 시간축을 **구간 전체로 채운다** — 자료가 있는 버킷만 내면 축이 띄엄띄엄해져(10:51 ·
     #   11:46 · 11:59 …) 그 사이가 0 이었는지 조회에서 빠진 것인지 알 수 없다. 나타나는
     #   행조차 "호가 있던 분" 이 아니라 "SIP 메시지라도 있던 분" 이라 기준이 안 보인다.
@@ -622,9 +758,10 @@ def _calls_stats(config: dict, from_dt: str, to_dt: str, gran: str, svc: str) ->
                                f"POST /api/v1/stats/calls/rebuild 로 그 구간 집계를 만들면 "
                                f"바로 조회됩니다.")
         else:
-            body['warning'] = (f"{cov['missing']}일이 집계 보존기간을 넘어 제외됐습니다 "
-                               f"(ServiceLogging.StatsRetainDays.1m). 필요하면 보존기간을 늘리고 "
-                               f"POST /api/v1/stats/calls/rebuild 로 다시 만드세요.")
+            body['warning'] = (f"{cov['missing']}일이 집계·원본 어디에도 없어 제외됐습니다 "
+                               f"— 보존기간(ServiceLogging.StatsRetainDays.1m)이 지났거나 그 날 "
+                               f"기록이 없습니다. 원본이 남아 있다면 "
+                               f"POST /api/v1/stats/calls/rebuild 로 다시 만들 수 있습니다.")
     return HandlerResult(status=200, body=body)
 
 
@@ -2953,19 +3090,58 @@ CIMS_STATS_API_DOCS = [
          {'name': 'to', 'in': 'query', 'type': 'string', 'required': False, 'desc': 'YYYY-MM-DD'},
          {'name': 'date', 'in': 'query', 'type': 'string', 'required': False, 'desc': '하루만 재생성'},
      ],
-     'response': '{ok, from, to, buckets}',
+     'response': '202 {job_id, state, from, to, days_total, days_done, buckets, …}',
      'response_fields': [
-         {'name': 'buckets', 'type': 'integer', 'unit': '개', 'desc': '다시 적은 버킷 수'},
+         {'name': 'job_id', 'type': 'string', 'desc': '진행 상태 조회 키'},
+         {'name': 'state', 'type': 'string', 'desc': 'running | done | failed'},
+         {'name': 'days_total', 'type': 'integer', 'unit': '일', 'desc': '재집계할 날 수'},
+         {'name': 'days_done', 'type': 'integer', 'unit': '일', 'desc': '지금까지 끝낸 날 수'},
+         {'name': 'buckets', 'type': 'integer', 'unit': '개', 'desc': '다시 적은 버킷 수(누계)'},
      ],
-     'example': {'ok': True, 'from': '2026-09-03', 'to': '2026-09-03', 'buckets': 12},
+     'example': {'job_id': 'rb-20260917-104233-712', 'state': 'running',
+                 'from': '2026-09-03', 'to': '2026-09-03', 'days_total': 1,
+                 'days_done': 0, 'buckets': 0},
      'errors': list(_ERR_COMMON) + [
          {'status': 409, 'when': 'StatsRollup.Enabled 가 꺼져 있음',
-          'body': {'error': 'rollup_disabled'}}],
+          'body': {'error': 'rollup_disabled'}},
+         {'status': 409, 'when': '이미 재집계가 진행 중',
+          'body': {'error': 'rebuild_in_progress', 'job_id': 'rb-…'}}],
      'notes': ['롤업은 미결·신규 버킷만 다시 계산한다 — 집계 스키마에 축이 추가되면 이미 적힌 '
                '버킷은 그 축이 빈 채 남으므로 이 API 로 채운다.',
                'watermark 를 건드리지 않는다 — 과거 재생성이 이후의 정상 집계를 되돌리지 않는다.',
-               '변이라서 admin 권한을 요구한다(조회는 monitor).'],
+               '**즉시 202 로 접수만 하고 작업은 뒤에서 돈다** — 긴 구간은 게이트웨이 프록시 '
+               '한도(5초)를 넘겨 504 가 뜨는데 작업은 끝까지 돌아, 실패로 읽은 운영자가 같은 '
+               '일을 두 번 시켰다(F-47).',
+               '한 번에 하나만 돈다 — 진행 중에 또 부르면 409 와 진행 중인 job_id 를 돌려준다.',
+               '변이라서 admin 권한을 요구한다(진행 상태 조회는 monitor).'],
      'auth': {'scheme': 'bearer', 'role': 'admin', 'token_from': 'POST /api/v1/auth/login'}},
+
+    {'id': 'stats.calls.rebuild.status', 'module': 'oam-svc', 'method': 'GET',
+     'path': '/api/v1/stats/calls/rebuild/{job_id}',
+     'summary': '재집계 진행 상태 (job_id 생략 시 최근 job 목록)',
+     'params': [
+         {'name': 'job_id', 'in': 'path', 'type': 'string', 'required': False,
+          'desc': 'POST 가 돌려준 접수 키. 생략하면 최근 job 목록'},
+     ],
+     'response': '{job_id, state, days_total, days_done, last_day, buckets, error, note} '
+                 '| {running, jobs[]}',
+     'response_fields': [
+         {'name': 'state', 'type': 'string', 'desc': 'running | done | failed'},
+         {'name': 'last_day', 'type': 'string', 'desc': '마지막으로 끝낸 날 (YYYY-MM-DD)'},
+         {'name': 'running', 'type': 'string', 'desc': '진행 중인 job_id (없으면 null)'},
+         {'name': 'note', 'type': 'string',
+          'desc': '0 건으로 끝난 이유 — 원본이 없거나 다른 노드가 집계 쓰기를 잡고 있음'},
+     ],
+     'example': {'job_id': 'rb-20260917-104233-712', 'state': 'done',
+                 'from': '2026-07-16', 'to': '2026-09-16', 'days_total': 63,
+                 'days_done': 63, 'last_day': '2026-09-16', 'buckets': 5820},
+     'errors': list(_ERR_COMMON) + [
+         {'status': 404, 'when': '모르는 job_id (oam-svc 재기동 시 사라짐)',
+          'body': {'error': 'unknown job_id'}}],
+     'notes': ['job 은 oam-svc 프로세스 메모리에만 있다 — 재기동하면 사라진다. 재집계는 '
+               '멱등이라 다시 걸면 된다.',
+               '최근 10건까지 보관한다(이력이 아니라 직전 결과 확인용).'],
+     'auth': dict(_AUTH_MONITOR)},
 
     {'id': 'stats.messages', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/messages',
      'summary': '전 인터페이스 메시지 카운터 (시간대 버킷 + 메서드/상태코드별 집계)',

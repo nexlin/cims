@@ -38,6 +38,13 @@ def _write(root, unit, day, buckets):
         [{'bucket': b, 'svc': 'volte', 'call': {'attempts': 1}} for b in buckets])
 
 
+def _raw_day(root, day):
+    """그 날의 **원본 날 디렉터리**를 심는다 — 즉석 집계가 0 을 낸 것이 사실인지 가르는
+    근거(`_raw_day_exists`). 원본이 없는 날은 훑어도 빈손이고, 그 빈손은 0 이 아니라
+    모름이라 조회에서 제외된다."""
+    os.makedirs(os.path.join(root, day[0:4], day[5:7], day[8:10]), exist_ok=True)
+
+
 def _hours(day, n=24):
     return [f'{day} {h:02d}:00' for h in range(n)]
 
@@ -122,9 +129,10 @@ class ReadRangeBucketCoverageTest(unittest.TestCase):
     def test_롤업이_없으면_그_구간만_즉석_집계_대상(self):
         """1h 가 덮은 뒤 남은 구간만 원본으로 간다 — 하루 전체가 아니라."""
         _write(self.root, '1h', DAY, _hours(DAY))
+        _raw_day(self.root, DAY)
         rows, cov = R.read_range_filled(
             self.root, f'{DAY} 00:00:00', f'{DAY} 12:42:59', {}, gran='1h')
-        # 원본 트리가 없으니 즉석 집계 결과는 비지만, '시도했다' 는 사실이 남는다.
+        # 그 날 원본은 남아 있다 — 호가 없어 결과는 비지만 '훑었다' 는 사실이 남는다.
         self.assertEqual(cov['scanned'], 1)
         self.assertEqual(cov['by_unit'].get('1h'), 1, '롤업은 그대로 쓰였어야 한다')
 
@@ -167,6 +175,7 @@ class ReadRangeBucketCoverageTest(unittest.TestCase):
 
     def test_음수_상한은_상한_없음(self):
         """0 과 음수는 모두 '상한 없음' — 재집계·검증 경로가 쓴다."""
+        _raw_day(self.root, DAY)
         rows, cov = R.read_range_filled(
             self.root, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {},
             gran='1h', deadline_sec=-1)
@@ -174,6 +183,7 @@ class ReadRangeBucketCoverageTest(unittest.TestCase):
         self.assertEqual(cov['scanned'], 1)
 
     def test_데드라인_없으면_상한_없이_채운다(self):
+        _raw_day(self.root, DAY)
         rows, cov = R.read_range_filled(
             self.root, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {},
             gran='1h', deadline_sec=0)           # 0 = 상한 없음
@@ -192,6 +202,102 @@ class ReadRangeBucketCoverageTest(unittest.TestCase):
         self.assertEqual(max(R._need_offsets(DAY, f'{DAY} 00:00', f'{DAY} 12:42')), 762)
         self.assertEqual(R._need_offsets(DAY, '2026-09-12 00:00', '2026-09-12 10:00'), set())
         self.assertEqual(len(R._need_offsets(DAY, '2026-09-01 00:00', '2026-09-30 23:59')), 1440)
+
+
+class RawSourceGoneTest(unittest.TestCase):
+    """**집계도 원본도 없는 날은 0 이 아니라 모름이다** (F-48 잔여).
+
+    구간 양 끝의 반쪽 날은 거친 계층(1h·1d)의 버킷이 구간 경계를 넘어 쓸 수 없다 —
+    남은 조각은 1분 계층으로, 거기도 없으면 원본으로 내려간다. 그런데 1분 계층은 14일,
+    원본은 그보다 먼저 지워질 수 있어 **둘 다 없는 조각**이 생긴다. 그때 즉석 집계는
+    조용히 빈손으로 돌아오고, 조회는 성공한 얼굴로 작은 값을 낸다.
+
+    운영자는 그 감소를 **실제 트래픽 변화로 읽는다.** 그래서 빠졌다고 말해야 한다.
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix='rollup_raw_')
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_원본이_없는_날은_빠진_날로_신고한다(self):
+        rows, cov = R.read_range_filled(
+            self.root, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {}, gran='1h')
+        self.assertEqual(cov['scanned'], 0, '훑을 원본이 없다')
+        self.assertEqual(cov['missing'], 1)
+        self.assertIn(DAY, cov['missing_days'])
+
+    def test_원본이_있으면_빈_결과도_0_으로_받는다(self):
+        """디렉터리는 있는데 호가 없던 날 — 이건 **진짜 0** 이라 신고 대상이 아니다."""
+        _raw_day(self.root, DAY)
+        rows, cov = R.read_range_filled(
+            self.root, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {}, gran='1h')
+        self.assertEqual(cov['missing'], 0)
+        self.assertEqual(cov['scanned'], 1)
+
+    def test_호_기록만_남은_날도_원본으로_친다(self):
+        """원문 로그가 지워져도 호 기록(volte/)이 남아 있으면 되짚을 수 있다."""
+        os.makedirs(os.path.join(self.root, 'volte', DAY[0:4], DAY[5:7], DAY[8:10]))
+        _, cov = R.read_range_filled(
+            self.root, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {}, gran='1h')
+        self.assertEqual(cov['missing'], 0)
+
+    def test_반쪽_날만_원본이_없어도_그_날이_신고된다(self):
+        """가운데 날은 1시간 계층이 온전히 덮고, 양 끝 반쪽만 원본이 필요하다."""
+        d0, d1 = '2026-09-10', '2026-09-11'
+        _write(self.root, '1h', d1, _hours(d1))
+        _raw_day(self.root, d1)
+        _, cov = R.read_range_filled(
+            self.root, f'{d0} 10:30:00', f'{d1} 23:59:59', {}, gran='1h')
+        self.assertIn(d0, cov['missing_days'], '원본이 없는 반쪽 날')
+        self.assertNotIn(d1, cov['missing_days'], '계층으로 덮인 날')
+
+
+class EnsureSvcCellTest(unittest.TestCase):
+    """**읽은 구간의 0 건은 0 으로 낸다** (F-49).
+
+    집계는 들어온 행에 있는 서비스로만 칸을 만든다. 그래서 그 서비스의 호가 한 건도 없는
+    날은 `totals` 에 칸이 아예 없고, 화면은 없는 경로를 `—`(자료 없음)으로 그린다 —
+    조용한 주말·PTT 만 쓰는 현장처럼 **정상적으로 0 건인 날이 통계 고장과 구분되지 않는다**
+    (실측 2026-09-17: VoLTE 지표 타일 6개가 전부 `—`).
+    """
+
+    def _rows(self, svc='ptt'):
+        return [{'bucket': f'{DAY} 09:00', 'svc': svc,
+                 'call': {'attempts': 2, 'sessions': 2, 'talked': 2}}]
+
+    def test_끄면_없는_서비스_칸이_안_생긴다(self):
+        """기본 동작 — 구간을 읽었는지 모르는 호출자는 0 을 지어내면 안 된다."""
+        _, totals = R.aggregate(self._rows(), '1h', 'volte')
+        self.assertNotIn('volte', totals)
+
+    def test_켜면_0_으로_칸이_생긴다(self):
+        _, totals = R.aggregate(self._rows(), '1h', 'volte', ensure_svc=True)
+        self.assertIn('volte', totals)
+        self.assertEqual(totals['volte']['attempts'], 0)
+        self.assertEqual(totals['volte']['sessions'], 0)
+
+    def test_0_인_칸의_비율은_0_이_아니라_빈칸이다(self):
+        """분모가 0 이면 비율은 정의되지 않는다 — 0% 로 내면 '전부 실패' 와 같아진다."""
+        _, totals = R.aggregate(self._rows(), '1h', 'volte', ensure_svc=True)
+        for k in ('success_rate', 'talk_rate', 'completion_rate', 'ner'):
+            self.assertIsNone(totals['volte'][k], k)
+
+    def test_자료가_있으면_켜도_값이_그대로다(self):
+        _, totals = R.aggregate(self._rows('volte'), '1h', 'volte', ensure_svc=True)
+        self.assertEqual(totals['volte']['attempts'], 2)
+        self.assertEqual(totals['volte']['success_rate'], 100.0)
+
+    def test_행이_하나도_없어도_칸을_만든다(self):
+        """구간을 읽었는데 아무 서비스도 없던 경우 — `all` 까지 0 으로."""
+        _, totals = R.aggregate([], '1h', 'volte', ensure_svc=True)
+        self.assertEqual(totals['volte']['attempts'], 0)
+        self.assertEqual(totals['all']['attempts'], 0)
+
+    def test_all_축은_필터와_무관하게_전체_합계다(self):
+        _, totals = R.aggregate(self._rows(), '1h', 'volte', ensure_svc=True)
+        self.assertEqual(totals['all']['attempts'], 2, 'PTT 2건이 all 에 남아야 한다')
 
 
 if __name__ == '__main__':

@@ -925,10 +925,15 @@ def run_once() -> dict:
         }
 
 
-def rebuild_range(from_day: str, to_day: str) -> int:
+def rebuild_range(from_day: str, to_day: str, on_day=None) -> int:
     """구간을 원본에서 다시 집계 (운영/검증용). 반환 = 기록한 버킷 수.
 
     watermark 를 건드리지 않는다 — 과거 재생성이 이후의 정상 집계를 되돌리면 안 된다.
+
+    `on_day(day, days_done, buckets_total)` 을 주면 **하루를 끝낼 때마다** 부른다. 구간이
+    길면 이 작업은 분 단위로 걸려 호출자가 동기로 기다릴 수 없다(게이트웨이 프록시 한도
+    5초). 진행률을 밖에서 보여 주려면 여기서 알리는 수밖에 없고, 하루가 그 최소 단위다.
+    콜백이 던지는 예외는 집계를 멈추지 않는다 — 보고가 작업을 죽이면 안 된다.
     """
     if not _enabled or _store is None:
         return 0
@@ -940,7 +945,7 @@ def rebuild_range(from_day: str, to_day: str) -> int:
         return 0
     if b < a:
         a, b = b, a
-    total = 0
+    total, done = 0, 0
     with _lock:
         cur = a
         while cur <= b:
@@ -954,6 +959,12 @@ def rebuild_range(from_day: str, to_day: str) -> int:
             rebuild_periods(day)
             total += len(records)
             logger.log_info(f"[stats-rollup] rebuild {day}: 버킷 {len(records)}건")
+            done += 1
+            if on_day is not None:
+                try:
+                    on_day(day, done, total)
+                except Exception as e:
+                    logger.log_warning(f"[stats-rollup] rebuild 진행 보고 실패({day}): {e}")
             cur += timedelta(days=1)
     return total
 
@@ -1016,6 +1027,26 @@ def _bucket_offsets(label: str, unit: str, day: str):
         return None
     s = dt.hour * 60 + dt.minute
     return s, min(s + _UNIT_SPAN_MIN.get(unit, 1) - 1, 1439)
+
+
+def _raw_day_exists(root: str, day: str) -> bool:
+    """그 날 **원본이 아직 있는가** — 즉석 집계가 0 을 낸 것이 사실인지 가르는 근거.
+
+    집계 계층이 보존기간으로 지워진 구간은 원본에서 다시 만드는데, 원본마저 지워졌으면
+    `build_minutes` 는 **조용히 빈손으로 돌아온다**. 그걸 그대로 두면 "그 시간엔 아무 일도
+    없었다"(0)와 "확인할 수 없다"(모름)가 같은 값이 된다 — 조회는 성공한 얼굴을 하고
+    작은 값을 낸다. 그래서 훑기 전에 원본이 있었는지를 먼저 묻는다.
+
+    판정은 **날 디렉터리의 존재**다: 원문 로그 `<root>/YYYY/MM/DD` 또는 호 기록
+    `<root>/volte/YYYY/MM/DD`. 서버가 그 날 기록을 남겼다면 둘 중 하나는 있다(SIP 가 한
+    통도 안 오간 날은 없다 — 등록 갱신만으로도 원문이 쌓인다). 디렉터리가 있는데 대상
+    구간이 비어 있는 것은 **진짜 0** 이다.
+    """
+    if not root or len(day) != 10:
+        return False
+    y, m, d = day[0:4], day[5:7], day[8:10]
+    return (os.path.isdir(os.path.join(root, y, m, d))
+            or os.path.isdir(os.path.join(root, 'volte', y, m, d)))
 
 
 def _need_offsets(day: str, lo: str, hi: str) -> set:
@@ -1082,6 +1113,12 @@ def _read_days(root: str, days: list, lo: str, hi: str, chain: tuple,
         if deadline is not None and time.monotonic() >= deadline:
             omitted.append(d)          # 시간 상한 — 남은 날은 빠진 구간으로 알린다
             deadline_hit = True
+            continue
+        if not _raw_day_exists(root, d):
+            # 집계도 원본도 없다 — 훑어봐야 빈손이고, 그 빈손은 0 이 아니라 **모름**이다.
+            #   여기서 걸러 내지 않으면 보존기간 밖 구간이 조용히 0 으로 섞여 들어간다
+            #   (구간 양 끝의 반쪽 날이 거친 계층에 덮이지 않을 때 늘 이 경로다).
+            omitted.append(d)
             continue
         day0 = _parse(d + ' 00:00:00')
         minutes = {(day0 + timedelta(minutes=i)).strftime(_MIN_FMT) for i in need}
@@ -1483,7 +1520,8 @@ def with_rates(c: dict, no_attempt_svcs=()) -> dict:
     return out
 
 
-def aggregate(rows: list, gran: str, svc: str = 'all', include_msg: bool = False) -> tuple:
+def aggregate(rows: list, gran: str, svc: str = 'all', include_msg: bool = False,
+              ensure_svc: bool = False) -> tuple:
     """1분 레코드들을 요청 단위로 접는다 → (buckets, totals).
 
     buckets = [{bucket, bucket_start, <svc>: {…}, all: {…}}]  (시간 오름차순)
@@ -1493,6 +1531,13 @@ def aggregate(rows: list, gran: str, svc: str = 'all', include_msg: bool = False
     읽는 쪽이 그걸 시스템 전체로 오해한다 — 필터는 어떤 서비스 칸을 낼지만 정한다.
 
     `include_msg` 는 메시지 축까지 실을지. 호 조회에는 필요 없고 응답만 커진다.
+
+    `ensure_svc` = **요청한 서비스 칸을 자료가 없어도 0 으로 만든다.** 기본은 끄고, 호출자가
+    "구간을 실제로 읽었다"를 아는 경우에만 켠다(`coverage` 판정 — handlers/stats._calls_stats).
+    끈 채로 두면 그 서비스의 호가 0 건인 날 `totals` 에 칸이 아예 없고, 화면은 없는 경로를
+    **`—`(자료 없음)** 으로 그린다 — 정상적으로 조용한 날이 통계 고장과 구분되지 않는다
+    (실측 2026-09-17: VoLTE 지표 타일 6개가 전부 `—`). 0 과 모름의 구분이 이 축의 전부라
+    (§2.1a), 켠 쪽은 `시도 0 · 비율 —`(분모 0)으로, 끈 쪽은 지금처럼 빈칸으로 낸다.
     """
     want = None if svc in (None, '', 'all') else {svc}
     by_bucket: dict = {}
@@ -1503,6 +1548,13 @@ def aggregate(rows: list, gran: str, svc: str = 'all', include_msg: bool = False
         # (서비스 칸은 자기 자신뿐이라 섞일 일이 없다 — 아래 keys 구성 참조).
         return store.setdefault(key, {'call': _zero_call(), 'msg': {'in': {}, 'out': {}},
                                       'gap': set()})
+
+    if ensure_svc:
+        # 읽은 구간에는 **칸이 있다** — 0 건도 사실이다. 버킷에는 만들지 않는다(§ fill_buckets:
+        # 시간축의 빈 칸은 화면이 0 으로 그린다). 합계 칸만 있으면 지표 타일이 살아난다.
+        _cell(totals, 'all')
+        if want:
+            _cell(totals, svc)
 
     for r in rows:
         sv = r.get('svc') or 'unknown'
