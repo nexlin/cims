@@ -175,8 +175,6 @@ public sealed partial class PttChannelsViewModel : ObservableObject
     public event EventHandler<GroupInfo>? ThreadRequested;
     /// <summary>3줄 [편집](내 소유 그룹) → 채널 편집 드로어.</summary>
     public event EventHandler<GroupInfo>? EditRequested;
-    /// <summary>3줄 [로스터 전체] — 로스터 전체 보기(카드 안 펼침).</summary>
-    [ObservableProperty] private bool _rosterExpanded;
 
     public PttChannelsViewModel(DispatchSession s)
     {
@@ -335,7 +333,6 @@ public sealed partial class PttChannelsViewModel : ObservableObject
     [RelayCommand] private void PersonMenu(RosterRow r) => PersonMenuRequested?.Invoke(this, r.Uri);
     [RelayCommand] private void OpenThread(ChannelCard c) { if (c.Group is not null) ThreadRequested?.Invoke(this, c.Group); }
     [RelayCommand] private void EditGroup(ChannelCard c) { if (c.Group is not null) EditRequested?.Invoke(this, c.Group); }
-    [RelayCommand] private void ToggleRoster() => RosterExpanded = !RosterExpanded;
 
     public void Tick() { foreach (var c in Cards) if (c.Session is not null) c.Refresh(); }
 

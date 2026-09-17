@@ -113,6 +113,25 @@ public sealed partial class GroupAdminViewModel : ObservableObject
     [RelayCommand] private void SetFilter(string f) => ListFilter = f;
     [RelayCommand] private void GoToChannel() { if (Selected is not null) ChannelRequested?.Invoke(this, Selected.Id); }
 
+    /// <summary>목록이 오기 전에 들어온 선택 요청(① 3줄 [로스터 전체]) — <see cref="Filter"/> 가 소비한다.</summary>
+    private string _pendingSelect = "";
+
+    /// <summary>
+    /// ① 채널 카드 3줄 [로스터 전체] — 밖에서 그룹 id 로 상세를 연다(§4.1 → §4.7 상세의 멤버 표).
+    ///
+    /// 필터·검색을 [전체]로 되돌린다: 지금 필터가 그 그룹을 걸러 내면 <see cref="Filter"/> 의 폴백이
+    /// 첫 행을 고르므로 **엉뚱한 그룹이 열린다**. 목록이 아직 없으면(첫 진입의 지연 적재 —
+    /// MainViewModel.LoadScreensAsync) 요청을 들고 있다가 적재가 끝난 <see cref="Filter"/> 에서 적용한다.
+    /// </summary>
+    public void SelectById(string groupId)
+    {
+        if (groupId.Length == 0 || IsEditing) return;   // 편집 중에는 선택이 바뀌지 않는다(§4.7)
+        _pendingSelect = groupId;
+        ListFilter = "all";                             // 값이 바뀌면 setter 가 Filter() 를 부른다
+        Search = "";
+        Filter();                                       // 둘 다 그대로였을 때를 위해 한 번 더
+    }
+
     private string OwnerLabel(string owner)
     {
         if (owner.Length == 0) return "—";
@@ -206,6 +225,13 @@ public sealed partial class GroupAdminViewModel : ObservableObject
             Groups.Add(new GroupAdminRow(g, g.OrgCode.Length > 0 ? _s.Directory.OrgPath(g.OrgCode) : "", g.IsOwner ? $"{_s.DisplayName}(나)" : owners.GetValueOrDefault(g.Id, "")));
         }
         OnPropertyChanged(nameof(TotalCount));
+        // 밖에서 지목한 그룹이 먼저다 — 그것이 목록에 있으면 «보던 것 유지» 보다 앞선다.
+        if (_pendingSelect.Length > 0 && Groups.FirstOrDefault(x => x.Id == _pendingSelect) is { } want)
+        {
+            _pendingSelect = "";
+            Selected = want;
+            return;
+        }
         Selected = Groups.FirstOrDefault(x => x.Id == keep) ?? Groups.FirstOrDefault();
     }
 

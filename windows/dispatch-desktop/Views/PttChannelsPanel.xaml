@@ -215,7 +215,7 @@
                                                     <Button Style="{StaticResource Btn.Xs}" Command="{Binding ToggleRouteCommand}" IsEnabled="{Binding CanToggleRoute}" Margin="0,0,4,0" ToolTip="출력 라우트: 헤드셋 / 데스크 스피커" Visibility="{Binding IsJoined, Converter={StaticResource BoolToVis}}">
                                                         <Path Style="{StaticResource Icon}" Width="13" Height="13" Data="{Binding RouteIsSpeaker, Converter={StaticResource RouteIcon}}" />
                                                     </Button>
-                                                    <Button Style="{StaticResource Btn.Xs}" Margin="0,0,4,0" Visibility="{Binding HasRosterMore, Converter={StaticResource BoolToVis}}" ToolTip="로스터 전체는 [PTT 그룹] 화면 상세" Command="{Binding DataContext.GroupsScreen.GoToChannelCommand, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                                                    <Button Style="{StaticResource Btn.Xs}" Margin="0,0,4,0" Visibility="{Binding HasRosterMore, Converter={StaticResource BoolToVis}}" ToolTip="로스터 전체는 [PTT 그룹] 화면 상세" Command="{Binding DataContext.ShowRosterCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding Id}">
                                                         <TextBlock><Run Text="로스터 전체 +" /><Run Text="{Binding RosterMore, Mode=OneWay}" /></TextBlock>
                                                     </Button>
                                                     <Button Content="참여" Command="{Binding JoinCommand}" Margin="0,0,4,0">

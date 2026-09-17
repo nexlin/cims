@@ -284,6 +284,15 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand] private void AnswerBanner(Banner b) { if (b.Session is not null) { Session.Answer(b.Session); Screen = AppScreen.Dispatch; } }
     [RelayCommand] private void RejectBanner(Banner b) { if (b.Session is not null) Session.Reject(b.Session); }
     [RelayCommand] private void GoToChannel(Banner b) { Screen = AppScreen.Dispatch; if (b.GroupId.Length > 0) PttChannels.FocusGroup(b.GroupId); }
+
+    /// <summary>
+    /// ① 채널 카드 3줄 [로스터 전체] — 그 그룹의 [PTT 그룹] 화면 상세를 연다(§4.1 툴팁이 가리키는 곳).
+    ///
+    /// 카드 안에서 펼치지 않는다 — 3×2 격자는 카드 높이가 고정이라야 서고, 큰 그룹 하나가 격자를 먹으면
+    /// «화면 한 장»(§1)이 깨진다. 화면을 먼저 바꾸는 이유는 첫 진입이면 그때 목록 적재가 시작되기
+    /// 때문이다(<see cref="LoadScreensAsync"/>) — 선택은 적재가 끝난 뒤에 적용된다.
+    /// </summary>
+    [RelayCommand] private void ShowRoster(string groupId) { Screen = AppScreen.PttGroups; GroupsScreen.SelectById(groupId); }
     [RelayCommand] private void DismissToast(Toast t) => Notify.Dismiss(t);
     [RelayCommand] private void ToggleToastDetail(Toast t) => t.ShowDetail = !t.ShowDetail;
 
