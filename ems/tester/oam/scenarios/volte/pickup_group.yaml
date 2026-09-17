@@ -1,0 +1,19 @@
+# 당겨받기 — 그룹 픽업 (volte_supplementary_services.md §5) — A→B 링잉(B 응답 보류) 중 C 가 피처코드 <code> 를 다이얼하면 서버 PickUp 이
+#   B 의 링잉 leg 를 회수(CANCEL)하고 그 자리를 C 로 재키잉해 A–C 를 연결한다(RELAY_MODIFY). 픽업 축 = 같은 pickup_group(§5.1).
+#   피처코드는 대상의 접속서비스 pickup_feature_code — 바인딩 ${pickup_code} 로 준다(검증 S3-SEED 는 "**"). 검증 S3-SCN-PICKUP P1.
+id: VOLTE-PICKUP-GROUP
+title: 당겨받기 그룹 픽업 (링잉 호 → 픽업 단말)
+tags: [volte, pickup]
+roles:
+  caller: { pool: volte_ue }
+  callee: { pool: volte_ue, disjoint_from: caller }
+  picker: { pool: volte_ue, disjoint_from: callee }
+flow:
+  - { step: register,   who: [caller, callee, picker], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: callee, media: { audio: amr-wb } }
+  - { step: wait,       seconds: 2 }                                                   # callee 링잉(180 만) 유지
+  - { step: pickup,     from: picker, payload: "${pickup_code}", expect: { code: 200, srd_ms: { p95: 3000 } } }
+  - { step: media_hold, seconds: "${ht}", expect: { rtp_loss_pct: { max: 1 } } }
+  - { step: bye,        from: caller }
+target_evidence:
+  - { kind: recording_created, min: 1 }

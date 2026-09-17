@@ -15,7 +15,7 @@ import LiveCharts from '@tester/components/LiveCharts'
 import SipDrawer from '@tester/components/SipDrawer'
 import MiniChart from '@tester/components/MiniChart'
 import { fmtNum, fmtPct, fmtTime, fmtUnix, fmtDuration, SUMMARY_ROWS, TIMER_ROWS, STEP_LABEL, summaryValue, VERDICT_LABEL } from '@tester/lib/fmt'
-import { thresholdsFromScenario, expectText, type ProfileLike } from '@tester/lib/metrics'
+import { thresholdsFromScenario, expectText, LOWER_BETTER, type ProfileLike } from '@tester/lib/metrics'
 
 function stepText(s: NonNullable<ScenarioDoc['flow']>[number]): string {
   const who = s.who?.length ? s.who.join(', ') : s.from ? `${s.from} → ${s.to ?? ''}` : ''
@@ -38,7 +38,7 @@ function margin(r: ExpectResult): number | null {
   const want = typeof r.expect === 'number' ? r.expect : (r.expect && typeof r.expect === 'object') ? (Object.values(r.expect as Record<string, unknown>).find(v => typeof v === 'number') as number | undefined) : undefined
   const got = typeof r.observed === 'number' ? r.observed : (r.observed && typeof r.observed === 'object') ? (Object.values(r.observed as Record<string, unknown>).find(v => typeof v === 'number') as number | undefined) : undefined
   if (want == null || got == null || want === 0) return null
-  const up = r.metric.endsWith('_pct') && r.metric !== 'rtp_loss_pct'
+  const up = (r.metric.endsWith('_pct') && !LOWER_BETTER.has(r.metric)) || r.metric === 'mos'
   return up ? want / Math.max(got, 1e-9) : got / want
 }
 
@@ -48,6 +48,7 @@ const KNOWN: { when: (f: ExpectResult, run: RunDoc) => boolean; text: string }[]
   { when: (f, run) => f.kind === 'register' && /trunk|pbx/i.test(run.scenario_id) && !f.ok, text: '트렁크 계정 REGISTER 수신 미구현 — 403(§12)' },
   { when: (f, run) => f.metric === 'code' && /603/.test(String(f.observed)) && /5\d\d/.test(JSON.stringify(f.expect)) && /trunk/i.test(run.scenario_id), text: '트렁크 5xx 가 발신자에 603 으로 매핑된다(§12)' },
   { when: (f, run) => /FAILOVER/.test(run.scenario_id) && !f.ok, text: 'RouteSet 헬스체크 부재 — 무응답 피어에서 Timer B 까지 대기(§12)' },
+  { when: (f, run) => f.metric === 'video_pct' && !f.ok && /^PTT-/.test(run.scenario_id), text: 'PTT 그룹콜 video 오퍼에 PTT-AS 200 이 m=video 를 생략(§12 — RFC 3264 §6 는 port 0 거절)' },
 ]
 
 function whySentence(run: RunDoc, isLoad: boolean, p: ProfileLike | null): React.ReactNode {
@@ -134,6 +135,9 @@ export default function RunReport({ run, scenario, series, events, markdown, pri
   const vTone = run.verdict === 'pass' ? 'border-success' : run.verdict === 'fail' || run.verdict === 'error' ? 'border-destructive' : run.verdict === 'aborted' ? 'border-warning' : 'border-info'
   const evidence = scenario?.target_evidence ?? []
   const tgtPeak = typeof s.target_cpu_peak_pct === 'number' ? s.target_cpu_peak_pct : null
+  const fmtMap = (m: unknown, unit: string) => (m && typeof m === 'object' && Object.keys(m as object).length) ? Object.entries(m as Record<string, number>).map(([k, v]) => `${k} ${fmtNum(v, 1)}${unit}`).join(', ') : null
+  const procPeak = fmtMap(s.target_proc_peak_pct, ' %')
+  const rssDelta = fmtMap(s.target_rss_delta_mb, ' MB')
   const seedRestored = (run.notes ?? []).some(n => n.includes('csp seed restored'))
   const jump = (id: string) => document.getElementById(`rr-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
@@ -324,13 +328,21 @@ export default function RunReport({ run, scenario, series, events, markdown, pri
       )}
 
       <section id="rr-evidence" className="flex flex-col gap-1.5 break-inside-avoid">
-        <h3 className="text-sm font-semibold text-muted-foreground">대상 증거 <span className="font-normal">— target_evidence(2차 판정 — 대상 OAM 의 녹취·알람·이벤트를 run 창으로 센다){tgtPeak != null ? ` · 대상 호스트 CPU 피크 ${fmtNum(tgtPeak, 1)} %` : ''}</span></h3>
+        <h3 className="text-sm font-semibold text-muted-foreground">대상 증거 <span className="font-normal">— target_evidence(2차 판정 — 대상 OAM 의 녹취·알람·이벤트를 run 창으로 센다, log_errors 는 호스트 SSH 관측){tgtPeak != null ? ` · 대상 호스트 CPU 피크 ${fmtNum(tgtPeak, 1)} %` : ''}{procPeak ? ` · 프로세스 CPU 피크 ${procPeak}` : ''}{rssDelta ? ` · RSS 증감 ${rssDelta}` : ''}{typeof s.target_log_errors === 'number' ? ` · 로그 ERROR 증분 ${s.target_log_errors}` : ''}</span></h3>
         {tgt && Object.keys(tgt.agents).length > 0 && (
           <div className="grid gap-2 sm:grid-cols-2">
             {Object.entries(tgt.agents).map(([name, a], i) => (
               <MiniChart key={name} t={a.t} label={`대상 호스트 ${name} — CPU / 메모리`} unit="%" max={100} hover={tgtHover} onHover={setTgtHover}
                          threshold={p?.stop_on?.target_cpu_pct ?? null} thresholdLabel="stop_on"
                          series={[{ key: 'cpu', values: a.cpu_pct, color: `var(--chart-${(i % 5) + 1})`, label: 'cpu' }, { key: 'mem', values: a.mem_pct, color: 'var(--chart-4)', label: 'mem', dashed: true }]} />
+            ))}
+          </div>
+        )}
+        {tgt?.procs && Object.keys(tgt.procs).length > 0 && (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {Object.entries(tgt.procs).map(([name, a], i) => (
+              <MiniChart key={name} t={a.t} label={`프로세스 ${name} — CPU % / RSS MB (SSH 관측)`} unit="" hover={tgtHover} onHover={setTgtHover}
+                         series={[{ key: 'cpu', values: a.cpu_pct, color: `var(--chart-${(i % 5) + 1})`, label: 'cpu %' }, { key: 'rss', values: a.rss_mb, color: 'var(--chart-5)', label: 'rss MB', dashed: true }]} />
             ))}
           </div>
         )}

@@ -52,7 +52,8 @@ class Host(_Strict):
     """서버 — 주소·SSH 자격의 유일한 자리. 계측기/대상/동거 구분은 필드가 아니라 그 위에 무엇이 있느냐(파생)."""
     name: Optional[str] = None
     ip: str = Field(min_length=1)
-    ssh: Optional[HostSsh] = Field(default=None, description='있으면 노드 procs 의 CPU/메모리를 SSH 로 관측(stop_on.target_cpu_pct 원천)')
+    ssh: Optional[HostSsh] = Field(default=None, description='있으면 run 동안 SSH 로 호스트 CPU/메모리·노드 procs 의 프로세스별 CPU/RSS 를 관측하고(stop_on.target_cpu_pct 원천) '
+                                                            'nodes.*.logs 의 늘어난 ERROR 줄을 센다(log_errors). 비밀은 key_env 의 개인키 파일')
 
 
 class WorkerMedia(_Strict):
@@ -191,6 +192,9 @@ class TargetNode(_Strict):
     fn: Optional[str] = Field(default=None, description='표시용 — CSP · P-CSCF · IBCF · MRF …')
     label: Optional[str] = None
     procs: List[str] = Field(default_factory=list)
+    logs: List[str] = Field(default_factory=list,
+                            description='이 노드 모듈의 로그 파일 경로(호스트 기준, 글롭 가능 — 예 /opt/cims/csp/log/csp_*.log). hosts.*.ssh 관측이 run 동안 '
+                                        '늘어난 ERROR/FATAL 줄을 세어 target_evidence log_errors 의 원천으로 쓴다')
     sip: Optional[NodeSip] = None
     tas: Optional[NodeTas] = None
     media: Optional[NodeMedia] = None
@@ -652,7 +656,14 @@ WORKER_STEPS = frozenset((
     'register', 'deregister', 'invite', 'progress', 'answer', 'reject', 'bye',
     'hold', 'resume', 'dtmf', 'refer', 'media_hold', 'media_send', 'media_stop', 'wait', 'expect',
     'group_call', 'floor_request', 'floor_release',
+    'pickup', 'subscribe', 'replaces', 'join', 'publish',
 ))
+
+# publish.payload — MCPTT affiliation 명령(TS 24.379 §9): affiliate(기본) | deaffiliate
+PUBLISH_COMMANDS = ('affiliate', 'deaffiliate')
+# subscribe.payload — 이벤트 패키지 토큰(RFC 6665 §7.2.1 event-type). 기본 dialog(RFC 4235)
+_EVENT_TOKEN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9.\-_]{0,63}$')
+_BIND_REF = re.compile(r'^\$\{(\w+)\}$')
 
 # floor_request.payload — 기대 결과(TS 24.380 Granted / Deny / Queue Position Info). any = 결과가 나오기만 하면 된다
 FLOOR_OUTCOMES = ('granted', 'denied', 'queued', 'any')
@@ -672,7 +683,7 @@ STEP_VOCAB = {
     'register':      {'group': 'reg',   'actor': 'who',     'kind': 'ue|trunk', 'metrics': ['code', 'rrd_ms'], 'desc': '역할 단말 전부 등록 (prelude)'},
     'deregister':    {'group': 'reg',   'actor': 'who',     'kind': 'ue|trunk', 'metrics': ['code'], 'desc': 'run 종료 시 등록 해제 (epilogue)'},
     'wait':          {'group': 'reg',   'actor': 'seconds', 'kind': None,       'metrics': [], 'desc': '대기 (seconds)'},
-    'invite':        {'group': 'call',  'actor': 'fromto',  'kind': None,       'metrics': ['code', 'srd_ms', 'ser_pct', 'seer_pct'], 'desc': 'INVITE from → to (비동기)'},
+    'invite':        {'group': 'call',  'actor': 'fromto',  'kind': None,       'metrics': ['code', 'srd_ms', 'ser_pct', 'seer_pct', 'video_pct'], 'desc': 'INVITE from → to (비동기). from 이 통화 중이면 상담 통화(두 번째 다이얼로그 — attended 전달의 전제)'},
     'progress':      {'group': 'peer',  'actor': 'who',     'kind': 'peer',     'metrics': ['early_media_pct', 'early_rtp_pct', 'prack_pct'], 'desc': '183 early media · PRACK (피어)'},
     'answer':        {'group': 'call',  'actor': 'who',     'kind': None,       'metrics': ['code', 'srd_ms', 'ser_pct'], 'desc': '착신 대기 → after_ms 뒤 200'},
     'reject':        {'group': 'call',  'actor': 'who',     'kind': None,       'metrics': ['code', 'q850_rx_pct'], 'desc': '착신 대기 → payload 코드로 거절'},
@@ -683,13 +694,13 @@ STEP_VOCAB = {
     'dtmf':          {'group': 'media', 'actor': 'from',    'kind': None,       'metrics': ['dtmf_rx_pct'], 'desc': 'RFC 4733 숫자열 송신 (payload)'},
     'media_send':    {'group': 'media', 'actor': 'who',     'kind': None,       'metrics': [], 'desc': 'RTP 송출 시작 — sample(생략 = 기본 원천)·loop·after_ms. SDP 교환 뒤에만'},
     'media_stop':    {'group': 'media', 'actor': 'who',     'kind': None,       'metrics': [], 'desc': 'RTP 송출 정지 (수신은 계속)'},
-    'refer':         {'group': 'xfer',  'actor': 'fromto',  'kind': 'peer',     'metrics': ['code'], 'desc': 'blind REFER from(전달자) → to'},
-    'replaces':      {'group': 'xfer',  'actor': 'fromto',  'kind': None,       'metrics': ['code'], 'desc': 'INVITE-Replaces (RFC 3891)'},
-    'join':          {'group': 'xfer',  'actor': 'fromto',  'kind': None,       'metrics': ['code'], 'desc': 'Join 합류 (RFC 3911)'},
-    'pickup':        {'group': 'xfer',  'actor': 'from',    'kind': None,       'metrics': ['code'], 'desc': '당겨받기 (피처코드)'},
-    'subscribe':     {'group': 'ctl',   'actor': 'who',     'kind': None,       'metrics': ['code'], 'desc': 'SUBSCRIBE (dialog/reg)'},
-    'publish':       {'group': 'ctl',   'actor': 'who',     'kind': None,       'metrics': ['code'], 'desc': 'PUBLISH'},
-    'group_call':    {'group': 'ptt',   'actor': 'fromto',  'kind': 'ptt',      'metrics': ['code', 'srd_ms', 'group_fanout_ms'], 'desc': 'PTT 그룹콜 — from 이 자기 그룹으로 INVITE, to(multi 역할) 멤버 전원 합류까지'},
+    'refer':         {'group': 'xfer',  'actor': 'fromto',  'kind': None,       'metrics': ['code'], 'desc': 'REFER 전달 from(전달자) → to (RFC 3515) — 전달자가 to 와 상담 통화 중이면 attended(Refer-To 에 Replaces), 아니면 blind'},
+    'replaces':      {'group': 'xfer',  'actor': 'fromto',  'kind': 'ue',       'metrics': ['code', 'srd_ms'], 'desc': 'INVITE-Replaces (RFC 3891) — from 이 dialog 구독(subscribe)으로 배운 to 의 다이얼로그를 가져온다(BLF 클릭 픽업)'},
+    'join':          {'group': 'xfer',  'actor': 'fromto',  'kind': 'ue',       'metrics': ['code', 'join_tap_pct'], 'desc': 'INVITE-Join (RFC 3911) — from 이 dialog 구독으로 배운 to 의 세션에 recvonly 청취 leg 로 합류(합법감청, SSRC 2개)'},
+    'pickup':        {'group': 'xfer',  'actor': 'fromto',  'kind': 'ue',       'metrics': ['code', 'srd_ms'], 'desc': '당겨받기 — payload 피처코드를 다이얼(<code> 그룹 픽업 · to 가 있으면 <code><번호> 지정 픽업)'},
+    'subscribe':     {'group': 'ctl',   'actor': 'who',     'kind': 'ue',       'metrics': ['code'], 'desc': 'SUBSCRIBE (RFC 6665) — payload 이벤트 패키지(기본 dialog), to = 감시 대상 역할(생략 = 자기 AoR). 최종 응답까지'},
+    'publish':       {'group': 'ctl',   'actor': 'who',     'kind': 'ptt',      'metrics': ['code', 'affiliate_ms'], 'desc': 'PUBLISH — MCPTT affiliation 명령(TS 24.379 §9): payload affiliate|deaffiliate, group 생략 = 신원의 그룹'},
+    'group_call':    {'group': 'ptt',   'actor': 'fromto',  'kind': 'ptt',      'metrics': ['code', 'srd_ms', 'group_fanout_ms', 'video_pct'], 'desc': 'PTT 그룹콜 — from 이 자기 그룹으로 INVITE, to(multi 역할) 멤버 전원 합류까지'},
     'floor_request': {'group': 'ptt',   'actor': 'who',     'kind': 'ptt',      'metrics': ['floor_grant_ms', 'floor_taken_ms', 'floor_queue_ms', 'floor_grant_pct'], 'desc': 'Floor Request → 결과(payload: granted|denied|queued|any)'},
     'floor_release': {'group': 'ptt',   'actor': 'who',     'kind': 'ptt',      'metrics': ['floor_idle_ms'], 'desc': 'Floor Release → Idle 도달'},
     'sds_send':      {'group': 'ptt',   'actor': 'from',    'kind': 'ue',       'metrics': ['sds_delay_ms'], 'desc': 'MCData SDS 송신'},
@@ -708,9 +719,10 @@ METRIC_LABELS = {
     'isa_pct': 'ISA — 시도 실패율', 'rtp_loss_pct': 'RTP 손실률', 'jitter_ms': 'RTP 지터', 'mos': 'MOS',
     'floor_grant_ms': 'Floor grant 지연', 'floor_taken_ms': 'Floor taken 도달', 'floor_queue_ms': 'Floor 큐 대기',
     'floor_idle_ms': 'Floor idle 도달', 'floor_grant_pct': 'Floor 허가율', 'group_fanout_ms': '그룹 fan-out 완료',
+    'affiliate_ms': 'affiliation PUBLISH 지연',
     'sds_delay_ms': 'SDS 지연', 'sds_disposition_pct': 'SDS disposition 률', 'dtmf_rx_pct': 'DTMF 수신률',
     'q850_rx_pct': 'Q.850 Reason 수신률', 'early_media_pct': '183 early media 률', 'prack_pct': 'PRACK 률',
-    'early_rtp_pct': 'early media RTP 도달률',
+    'early_rtp_pct': 'early media RTP 도달률', 'join_tap_pct': 'Join 청취 leg SSRC 2개 도달률', 'video_pct': '영상 협상률(m=video 활성 answer)',
 }
 
 # Reason: Q.850 cause (ITU-T Q.850) — 편집기 목록
@@ -722,6 +734,9 @@ Q850_CAUSES = {
 AUDIO_CODECS = ('amr-wb', 'amr', 'pcmu', 'pcma', 'g722')
 VIDEO_CODECS = ('h264', 'none')
 
+# 낮을수록 좋은 비율 — 기대치는 상한(스칼라 또는 max ≤). 나머지 비율은 하한(≥)
+LOWER_BETTER_RATIOS = frozenset(('isa_pct',))
+
 # expect 키 = RFC 6076 / RFC 3550 / TS 24.380 지표 이름(§5). 여기 없는 이름은 거절.
 METRIC_NAMES = (
     'code',
@@ -729,24 +744,34 @@ METRIC_NAMES = (
     'ser_pct', 'seer_pct', 'scr_pct', 'isa_pct',
     'rtp_loss_pct', 'jitter_ms', 'mos',
     # PTT(TS 24.380 메시지 시각) — 요청→Granted · 요청→다른 참가자의 Taken · 큐 경유 요청→Granted · 해제→Idle, 그룹 INVITE→마지막 멤버 합류
-    'floor_grant_ms', 'floor_taken_ms', 'floor_queue_ms', 'floor_idle_ms', 'floor_grant_pct', 'group_fanout_ms',
+    'floor_grant_ms', 'floor_taken_ms', 'floor_queue_ms', 'floor_idle_ms', 'floor_grant_pct', 'group_fanout_ms', 'affiliate_ms',
     'sds_delay_ms', 'sds_disposition_pct',
     # 피어 pbx/mgcf 축(D) — 비율은 발생기 관측(송신 대비 수신)
     'dtmf_rx_pct', 'q850_rx_pct', 'early_media_pct', 'prack_pct',
     # 미디어 평면 — 183+SDP 뒤 200 전에 발신자가 실제 RTP 를 받았는가(시그널링 early_media_pct 와 별개)
     'early_rtp_pct',
+    # 합법감청 청취 leg(RFC 3911 Join) — 서버가 양 화자를 SSRC 2개로 분리 인도했는가
+    'join_tap_pct',
+    # 영상 — m=video 를 실은 발신 중 answer 에 활성 video m-line(포트>0)이 온 비율
+    'video_pct',
 )
 
 # 비율 지표의 분자/분모 카운터 — 요약·판정이 같은 정의를 쓴다(§5)
 RATIO_METRICS = {
     'ser_pct': ('sessions', 'attempts'),
     'scr_pct': ('completed', 'sessions'),
+    # RFC 6076 §4.4 SEER = (200 + 480/486/600/603) / INVITE 송신 · §4.6 ISA = (408/500/503/504 + Timer B 만료) / INVITE 송신
+    #   분모 invite_tx = 워커가 낸 세션 개시 INVITE 전부(invite·상담·pickup·replaces·join·group_call). 401/407 재시도는 psip 이 흡수한다
+    'seer_pct': ('seer_ok', 'invite_tx'),
+    'isa_pct': ('isa_fail', 'invite_tx'),
     'dtmf_rx_pct': ('dtmf_rx', 'dtmf_tx'),          # 수신 이벤트 수 / 송신 숫자 수
     'q850_rx_pct': ('q850_rx', 'q850_tx'),          # Reason Q.850 수신 / 송신 (B2BUA 투과 여부)
     'early_media_pct': ('early_media', 'progress_tx'),   # 발신자에 도달한 183+SDP / 피어가 낸 183
     'prack_pct': ('prack_rx', 'progress_tx'),       # 피어 UAS 가 받은 PRACK / 낸 신뢰 183
     'early_rtp_pct': ('early_rtp_ok', 'progress_tx'),   # 200 전에 RTP(≥ 5 패킷)를 받은 발신자 / 피어가 낸 183
     'floor_grant_pct': ('floor_granted', 'floor_request_tx'),   # Granted 수신 / Floor Request 송신
+    'join_tap_pct': ('join_ssrc2', 'join_ok'),      # 표본 때 SSRC 2개를 받은 청취 leg / 확립된 Join
+    'video_pct': ('video_ok', 'video_offered'),     # answer 에 활성 m=video / m=video 를 실은 INVITE(워커 Media.VideoFile 필요)
 }
 
 
@@ -807,8 +832,9 @@ class Step(_Strict):
     after_ms: Optional[int] = Field(default=None, ge=0)
     seconds: Optional[Union[int, str]] = Field(default=None, description='정수 또는 ${ht} 같은 바인딩')
     media: Optional[Media] = None
-    group: Optional[str] = Field(default=None, description='group_call — MCPTT 그룹 id 를 직접 지정(생략 = 인스턴스가 잡은 그룹, 곧 발신 멤버의 affiliation 그룹)')
-    payload: Optional[str] = Field(default=None, description='dtmf: 숫자열(0-9*#A-D) · reject: 응답 코드 · floor_request: 기대 결과 granted|denied|queued|any')
+    group: Optional[str] = Field(default=None, description='group_call — MCPTT 그룹 id 를 직접 지정(생략 = 인스턴스가 잡은 그룹, 곧 발신 멤버의 affiliation 그룹) · publish — affiliation 대상 그룹(생략 = 신원의 그룹)')
+    payload: Optional[str] = Field(default=None, description='dtmf: 숫자열(0-9*#A-D) · reject: 응답 코드 · floor_request: 기대 결과 granted|denied|queued|any · '
+                                                                 'pickup: 피처코드(${var} 바인딩 가능) · subscribe: 이벤트 패키지(기본 dialog) · publish: affiliate|deaffiliate')
     cause: Optional[int] = Field(default=None, ge=1, le=127,
                                  description='bye/reject 의 Reason: Q.850;cause= (RFC 3326 — MGCF 종료 사유, 16=정상 34=회선 없음)')
     during: Optional[List[During]] = Field(default=None, description='media_hold 만 — 유지 구간 안 통화 중 동작(at_s 순)')
@@ -828,6 +854,19 @@ class Step(_Strict):
     def _actor(self):
         if self.step in ('invite', 'refer', 'bye', 'sds_send', 'hold', 'resume', 'dtmf') and not (self.from_ or self.who):
             raise ValueError(f'{self.step} 단계는 from 또는 who 가 필요하다')
+        if self.step in ('pickup', 'replaces', 'join') and not self.from_:
+            raise ValueError(f'{self.step} 단계는 from(발신 단말 역할)이 필요하다')
+        if self.step in ('replaces', 'join') and not self.to:
+            raise ValueError(f'{self.step} 단계는 to(대상 다이얼로그의 당사자 역할)가 필요하다 — from 이 그 역할을 dialog 구독(subscribe)해 배운다')
+        if self.step == 'pickup':
+            if not self.payload:
+                raise ValueError('pickup 단계는 payload(당겨받기 피처코드 — 접속서비스 pickup_feature_code, ${var} 바인딩 가능)가 필요하다')
+            if not (_BIND_REF.match(self.payload) or re.match(r'^[0-9*#+A-Da-d]{1,16}$', self.payload)):
+                raise ValueError('pickup 의 payload 는 다이얼 가능한 피처코드(0-9 * # A-D) 또는 ${var} 바인딩')
+        if self.step == 'subscribe' and self.payload is not None and not (_BIND_REF.match(self.payload) or _EVENT_TOKEN.match(self.payload)):
+            raise ValueError('subscribe 의 payload 는 이벤트 패키지 토큰(RFC 6665 event-type — dialog·reg·…)')
+        if self.step == 'publish' and self.payload is not None and self.payload not in PUBLISH_COMMANDS:
+            raise ValueError(f'publish 의 payload(affiliation 명령)는 {list(PUBLISH_COMMANDS)} 중 하나')
         if self.step in ('register', 'deregister', 'answer', 'reject', 'progress', 'subscribe', 'publish',
                          'floor_request', 'floor_release', 'sds_recv', 'media_send', 'media_stop') and not self.who:
             raise ValueError(f'{self.step} 단계는 who 가 필요하다')
@@ -842,8 +881,8 @@ class Step(_Strict):
             raise ValueError('group_call 단계는 from(발신 멤버 역할)이 필요하다 — to 는 합류를 기다릴 multi 역할(선택)')
         if self.step == 'floor_request' and self.payload is not None and self.payload not in FLOOR_OUTCOMES:
             raise ValueError(f'floor_request 의 payload(기대 결과)는 {list(FLOOR_OUTCOMES)} 중 하나')
-        if self.group is not None and self.step != 'group_call':
-            raise ValueError('group 은 group_call 단계에만 둔다')
+        if self.group is not None and self.step not in ('group_call', 'publish'):
+            raise ValueError('group 은 group_call/publish 단계에만 둔다')
         if self.cause is not None and self.step not in ('bye', 'reject'):
             raise ValueError('cause 는 bye/reject 단계에만 둔다')
         if (self.sample is not None or self.loop is not None) and self.step != 'media_send':
@@ -900,6 +939,7 @@ class Scenario(_Strict):
                     if ref and ref not in names:
                         raise ValueError(f'flow[{i}].during ({d.step}) 가 정의되지 않은 역할 {ref!r} 을 참조한다')
         self._check_group_session(names)
+        self._check_dialog_learning()
         # 송출 제어(media_send/media_stop)는 그 호에서 SDP 가 오간 뒤(183 progress 또는 200 answer)에만, rtp: none 인 호에는 못 둔다
         rtp, sdp = None, False
         for i, s in enumerate(self.flow):
@@ -919,6 +959,19 @@ class Scenario(_Strict):
                 if rtp == 'none':
                     raise ValueError(f'flow[{i}] {c} — 그 호의 invite.media.rtp 가 none(시그널링 전용)이다')
         return self
+
+    def _check_dialog_learning(self) -> None:
+        """replaces/join(RFC 3891/3911)은 대상 다이얼로그를 dialog 이벤트(RFC 4235)로 배워야 한다 — 앞에 from 이 to 를 감시하는
+        subscribe(payload dialog) 가 있어야 한다. 워커도 같은 전제로 NOTIFY(early|confirmed) 를 기다린다."""
+        watching = set()   # (subscriber, watched)
+        for i, s in enumerate(self.flow):
+            if s.step == 'subscribe' and (s.payload in (None, 'dialog')):
+                for w in s.who or []:
+                    watching.add((w, s.to or w))
+            elif s.step in ('replaces', 'join'):
+                if (s.from_, s.to) not in watching:
+                    raise ValueError(f'flow[{i}] {s.step}: {s.from_!r} 이 {s.to!r} 를 dialog 구독하는 subscribe 단계가 앞에 있어야 한다'
+                                     f"(RFC 4235 NOTIFY 로 대상 다이얼로그를 배운다) — {{ step: subscribe, who: [{s.from_}], to: {s.to} }}")
 
     def is_group_session(self) -> bool:
         return any(s.step == 'group_call' for s in self.flow)
@@ -944,7 +997,7 @@ class Scenario(_Strict):
             raise ValueError(f'그룹 세션 시나리오의 역할은 모두 같은 풀이어야 한다 — {sorted(pools)}')
         in_session = False
         for i, s in enumerate(self.flow):
-            if s.step in ('invite', 'answer', 'reject', 'progress', 'refer', 'hold', 'resume', 'dtmf'):
+            if s.step in ('invite', 'answer', 'reject', 'progress', 'refer', 'hold', 'resume', 'dtmf', 'pickup', 'replaces', 'join'):
                 raise ValueError(f'flow[{i}] {s.step} — 그룹 세션 시나리오에는 1:1 호 단계를 섞지 않는다')
             if s.step == 'group_call':
                 if s.from_ in multi:
@@ -1243,7 +1296,8 @@ class RunRecord(_Strict):
     ended_at: Optional[str] = None
     verdict: Verdict = 'running'
     workers: List[str] = Field(default_factory=list)
-    summary: Dict[str, Union[int, float, str, None]] = Field(default_factory=dict)
+    summary: Dict[str, Union[int, float, str, Dict[str, float], None]] = Field(default_factory=dict,
+                                                                          description="RFC 6076 요약 — 값은 수·문자열(코드 분해) 또는 이름별 수(프로세스별 CPU 피크·RSS 증감)")
     target_build: Optional[str] = Field(default=None, description='대상 git sha / 패키지 manifest 해시 — 회귀 비교 축')
     label: Optional[str] = Field(default=None, max_length=120)
     stop_reason: Optional[str] = None

@@ -41,7 +41,7 @@ export default function ScenarioCanvas({ doc, onChange, onCommit, topologies, to
   const [tab, setTab] = useState<'yaml' | 'issues' | 'fit' | 'table'>('yaml')
   const [drawerOpen, setDrawerOpen] = useState(true)
   const [drawerH, onDrawerHandle] = useDrawerHeight('tester-scn-drawer', 240)
-  const [bind, setBind] = useState<Record<string, number>>({ ht: 20 })
+  const [bind, setBind] = useState<S.Bind>({ ht: 20 })
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [drag, setDrag] = useState<Drag | null>(null)
   const [hot, setHot] = useState<string | null>(null)
@@ -169,6 +169,10 @@ export default function ScenarioCanvas({ doc, onChange, onCommit, topologies, to
       case 'bye': return `BYE${s.cause ? ` · Q.850 ${s.cause}` : ''}`
       case 'dtmf': return `DTMF ${s.payload ?? ''}`; case 'progress': return '183 + SDP'; case 'register': return 'REGISTER'; case 'deregister': return 'Expires: 0'
       case 'refer': return 'REFER'
+      case 'pickup': return `픽업 ${s.payload ?? ''}${s.to ? ` → ${s.to}` : ''}`
+      case 'replaces': return 'INVITE-Replaces'; case 'join': return 'INVITE-Join (recvonly)'
+      case 'subscribe': return `SUBSCRIBE ${s.payload ?? 'dialog'}${s.to ? ` → ${s.to}` : ''}`
+      case 'publish': return `PUBLISH ${s.payload ?? 'affiliate'}${s.group ? ` ${s.group}` : ''}`
       case 'group_call': return `그룹콜${s.group ? ` ${s.group}` : ''}${s.media ? ` · ${s.media.audio ?? 'amr-wb'}` : ''}${s.media?.rtp && s.media.rtp !== 'auto' ? ` · rtp ${s.media.rtp}` : ''}`
       case 'floor_request': return `Floor 요청${s.payload && s.payload !== 'granted' ? ` → ${s.payload}` : ''}`
       case 'floor_release': return 'Floor 해제'
@@ -240,7 +244,7 @@ export default function ScenarioCanvas({ doc, onChange, onCommit, topologies, to
         </Select>
         <span className="ml-2 text-muted-foreground">바인딩</span>
         {S.bindVars(doc).length === 0 && <span className="font-mono text-muted-foreground">없음 — seconds 에 ${'{ht}'} 를 쓰면 프로파일 ht 로 묶입니다</span>}
-        {S.bindVars(doc).map(v => <span key={v} className={`inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono ${v in bind ? 'border-border' : 'border-warning'}`}>${'{'}{v}{'}'} = <Input value={bind[v] ?? ''} onChange={e => setBind(b => { const nb = { ...b }; if (e.target.value === '') delete nb[v]; else nb[v] = Number(e.target.value); return nb })} className="h-5 w-14 px-1 text-xs" inputMode="numeric" /> s</span>)}
+        {S.bindVars(doc).map(v => { const numeric = doc.flow.some(s => S.bindRef(s.seconds) === v); return <span key={v} className={`inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono ${v in bind ? 'border-border' : 'border-warning'}`}>${'{'}{v}{'}'} = <Input value={bind[v] ?? ''} onChange={e => setBind(b => { const nb = { ...b }; const t = e.target.value; if (t === '') delete nb[v]; else nb[v] = numeric ? Number(t) : t; return nb })} className="h-5 w-16 px-1 text-xs" inputMode={numeric ? 'numeric' : undefined} placeholder={numeric ? '' : '**'} />{numeric ? ' s' : ''}</span> })}
         {profDoc && <span className="text-muted-foreground">profile {profDoc.model}</span>}
       </div>
 
@@ -379,6 +383,11 @@ function ProcedureTable({ doc, vocab, plan }: { doc: Doc; vocab: ScenarioVocab |
       case 'dtmf': return `${a} DTMF ${s.payload} 송신`; case 'refer': return `${s.from} 가 ${s.to} 로 전달 (REFER)`; case 'progress': return `${a} 183 + SDP (early media)`
       case 'hold': return `${a} 보류 (re-INVITE sendonly)`; case 'resume': return `${a} 재개`
       case 'media_send': return `${a} RTP 송출 시작 (${s.sample ? `샘플 ${s.sample}` : '기본 원천'}${s.loop === false ? ', 한 번 재생' : ''})`; case 'media_stop': return `${a} RTP 송출 정지 (수신은 계속)`
+      case 'pickup': return `${a} 당겨받기 — 피처코드 ${s.payload ?? '?'}${(s as Step).to ? ` + ${(s as Step).to} 번호 (지정 픽업)` : ' (그룹 픽업)'}`
+      case 'replaces': return `${a} 가 ${(s as Step).to} 의 다이얼로그를 INVITE-Replaces 로 가져온다 (RFC 3891)`
+      case 'join': return `${a} 가 ${(s as Step).to} 의 세션에 INVITE-Join recvonly 로 합류 (RFC 3911, 청취)`
+      case 'subscribe': return `${a} SUBSCRIBE Event: ${s.payload ?? 'dialog'} → ${(s as Step).to ?? '자기 AoR'}`
+      case 'publish': return `${a} PUBLISH affiliation ${s.payload ?? 'affiliate'}${(s as Step).group ? ` (group ${(s as Step).group})` : ''}`
       default: return `${a} ${s.step}`
     }
   }
@@ -430,7 +439,7 @@ function Chips({ roles, selected, multi, gate, onToggle, disabled, kindOf }: { r
 }
 
 function Inspector({ doc, sel, setSel, mutate, topo, vocab, issues, canWrite, source, bind, plan, onRemoveRole, onRemoveStep, onDupStep, onDuringToStep, onStepToDuring }: {
-  doc: Doc; sel: Sel; setSel: (s: Sel) => void; mutate: (fn: (d: Doc) => void) => void; topo: TopologyDoc | null; vocab: ScenarioVocab | null; issues: S.Issue[]; canWrite: boolean; source: 'bundled' | 'user' | null; bind: Record<string, number>; plan: PlanResult | null
+  doc: Doc; sel: Sel; setSel: (s: Sel) => void; mutate: (fn: (d: Doc) => void) => void; topo: TopologyDoc | null; vocab: ScenarioVocab | null; issues: S.Issue[]; canWrite: boolean; source: 'bundled' | 'user' | null; bind: S.Bind; plan: PlanResult | null
   onRemoveRole: (n: string) => void; onRemoveStep: (i: number) => void; onDupStep: (i: number) => void
   onDuringToStep: (i: number, k: number) => void; onStepToDuring: (i: number) => void
 }) {
@@ -525,14 +534,17 @@ function Inspector({ doc, sel, setSel, mutate, topo, vocab, issues, canWrite, so
     {(D?.actor === 'who' || D?.actor === 'from' || D?.actor === 'fromto') && <>
       {D.actor === 'who' ? <F label="행위자 (who — 여럿)"><Chips roles={R} selected={s.who ?? []} multi disabled={ro} kindOf={kindOf} gate={D.kind === 'ue|trunk' ? r => { const x = S.resolvePool(doc, topo, r); return !x || x.kind !== 'peer' || !!(Object.values(x.pools)[0] as { register?: unknown }).register } : gate} onToggle={r => ST(x => { const w = new Set(x.who ?? []); if (w.has(r)) w.delete(r); else w.add(r); x.who = [...w] })} /></F>
         : <F label="행위자 (from)"><Chips roles={R} selected={[s.from ?? ''].filter(Boolean)} multi={false} disabled={ro} kindOf={kindOf} gate={gate} onToggle={r => ST(x => { if (r) x.from = r; else delete x.from })} /></F>}
-      {(D.actor === 'fromto' || s.step === 'invite') && <F label={s.step === 'refer' ? '전달 대상 (to)' : s.step === 'group_call' ? '합류 대기 (to — multi 역할, 선택)' : '상대 (to)'}><Chips roles={s.step === 'group_call' ? R.filter(r => M.includes(r)) : R} selected={[s.to ?? ''].filter(Boolean)} multi={false} disabled={ro} kindOf={kindOf} onToggle={r => ST(x => { if (r && x.to !== r) x.to = r; else delete x.to })} /></F>}
+      {(D.actor === 'fromto' || s.step === 'invite' || s.step === 'subscribe') && <F label={s.step === 'refer' ? '전달 대상 (to)' : s.step === 'group_call' ? '합류 대기 (to — multi 역할, 선택)' : s.step === 'pickup' ? '지정 픽업 대상 (to — 선택, 생략 = 그룹 픽업)' : s.step === 'subscribe' ? '감시 대상 (to — 선택, 생략 = 자기 AoR)' : s.step === 'replaces' || s.step === 'join' ? '대상 다이얼로그의 당사자 (to)' : '상대 (to)'}><Chips roles={s.step === 'group_call' ? R.filter(r => M.includes(r)) : R} selected={[s.to ?? ''].filter(Boolean)} multi={false} disabled={ro} kindOf={kindOf} onToggle={r => ST(x => { if (r && x.to !== r) x.to = r; else delete x.to })} /></F>}
     </>}
     {(s.step === 'answer' || s.step === 'progress' || s.step === 'reject' || s.step === 'invite' || S.MEDIA_CTL.has(s.step)) && <F label="after_ms" help="직전 이벤트 뒤 지연(ms)"><Txt value={s.after_ms} mono type="number" placeholder="0" disabled={ro} onCommit={v => ST(x => { if (v === '') delete x.after_ms; else x.after_ms = Math.max(0, Number(v)) })} /></F>}
     {D?.actor === 'seconds' && <div className="grid grid-cols-[1fr_auto] items-end gap-2">
       <F label={isBind ? '바인딩 변수' : 'seconds'}><Txt value={isBind ? String(s.seconds).slice(2, -1) : s.seconds} mono type={isBind ? undefined : 'number'} disabled={ro} onCommit={v => ST(x => { x.seconds = isBind ? `\${${v.trim()}}` : Number(v) })} /></F>
-      <Button variant="outline" size="sm" disabled={ro} onClick={() => ST(x => { x.seconds = isBind ? (bind.ht ?? 10) : '${ht}' })}>{isBind ? '고정값으로' : '바인딩 ${ht}'}</Button>
+      <Button variant="outline" size="sm" disabled={ro} onClick={() => ST(x => { x.seconds = isBind ? (Number(bind.ht) || 10) : '${ht}' })}>{isBind ? '고정값으로' : '바인딩 ${ht}'}</Button>
     </div>}
-    {s.step === 'group_call' && <F label="group" help="MCPTT 그룹 id 직접 지정 — 생략 = 인스턴스가 잡은 그룹(발신 멤버의 affiliation 그룹)"><Txt value={s.group} mono placeholder="(인스턴스 그룹)" disabled={ro} onCommit={v => ST(x => { if (v.trim()) x.group = v.trim(); else delete x.group })} /></F>}
+    {s.step === 'pickup' && <F label="피처코드 (payload)" help="접속서비스 pickup_feature_code — ${pickup_code} 바인딩을 권장(대상마다 다르다)"><Txt value={s.payload} mono placeholder="${pickup_code}" disabled={ro} onCommit={v => ST(x => { x.payload = v.trim() })} /></F>}
+    {s.step === 'subscribe' && <F label="이벤트 패키지 (payload)" help="RFC 6665 event-type — 기본 dialog(RFC 4235). 미지 패키지는 489 를 기대치로"><Txt value={s.payload} mono placeholder="dialog" disabled={ro} onCommit={v => ST(x => { if (v.trim()) x.payload = v.trim(); else delete x.payload })} /></F>}
+    {s.step === 'publish' && <F label="affiliation 명령 (payload)" help="TS 24.379 §9 — affiliate(Expires 3600) · deaffiliate(Expires 0)"><Sel value={s.payload ?? 'affiliate'} disabled={ro} options={S.PUBLISH_COMMANDS.map(v => ({ v }))} onChange={v => ST(x => { if (v === 'affiliate') delete x.payload; else x.payload = v })} /></F>}
+    {(s.step === 'group_call' || s.step === 'publish') && <F label="group" help={s.step === 'publish' ? 'affiliation 대상 MCPTT 그룹 id — 생략 = 신원의 그룹' : 'MCPTT 그룹 id 직접 지정 — 생략 = 인스턴스가 잡은 그룹(발신 멤버의 affiliation 그룹)'}><Txt value={s.group} mono placeholder="(인스턴스 그룹)" disabled={ro} onCommit={v => ST(x => { if (v.trim()) x.group = v.trim(); else delete x.group })} /></F>}
     {s.step === 'floor_request' && <F label="기대 결과 (payload)" help="granted = 허가(기본) · denied = 거절 · queued = 큐 · any = 결과만 나오면 됨(동시 요청 경합)"><Sel value={s.payload ?? 'granted'} disabled={ro} options={S.FLOOR_OUTCOMES.map(v => ({ v }))} onChange={v => ST(x => { if (v === 'granted') delete x.payload; else x.payload = v })} /></F>}
     {(s.step === 'invite' || s.step === 'group_call') && <div className="grid grid-cols-3 gap-2">
       <F label="audio"><Sel value={s.media?.audio ?? 'amr-wb'} disabled={ro} options={(vocab?.audio ?? ['amr-wb', 'amr', 'pcmu', 'pcma', 'g722']).map(v => ({ v }))} onChange={v => ST(x => { x.media = { ...(x.media ?? {}), audio: v } })} /></F>

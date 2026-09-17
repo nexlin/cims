@@ -1,0 +1,12 @@
+# MCPTT affiliation 명령 PUBLISH (TS 24.379 §9, RFC 3903) — 기동 절차로 affiliation 된 멤버가 de-affiliate(Expires 0) 뒤 다시 affiliate 한다.
+#   응답 코드와 affiliate_ms 를 잰다. de-affiliate 된 단말은 다시 affiliate 될 때까지 그룹 fan-out 대상이 아니다(준비 상태).
+id: PTT-AFFILIATION-CHURN
+title: PTT affiliation 해제·재제휴 (PUBLISH)
+tags: [ptt, affiliation]
+roles:
+  member: { pool: ptt_ue }
+flow:
+  - { step: register,   who: [member], expect: { code: 200 } }
+  - { step: publish,    who: [member], payload: deaffiliate, expect: { code: 200 } }
+  - { step: wait,       seconds: 1 }
+  - { step: publish,    who: [member], payload: affiliate, expect: { code: 200, affiliate_ms: { p95: 500 } } }

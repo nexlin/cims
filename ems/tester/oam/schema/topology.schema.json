@@ -116,7 +116,7 @@
             }
           ],
           "default": null,
-          "description": "있으면 노드 procs 의 CPU/메모리를 SSH 로 관측(stop_on.target_cpu_pct 원천)"
+          "description": "있으면 run 동안 SSH 로 호스트 CPU/메모리·노드 procs 의 프로세스별 CPU/RSS 를 관측하고(stop_on.target_cpu_pct 원천) nodes.*.logs 의 늘어난 ERROR 줄을 센다(log_errors). 비밀은 key_env 의 개인키 파일"
         }
       },
       "required": [
@@ -1036,6 +1036,14 @@
           ],
           "default": null,
           "title": "Label"
+        },
+        "logs": {
+          "description": "이 노드 모듈의 로그 파일 경로(호스트 기준, 글롭 가능 — 예 /opt/cims/csp/log/csp_*.log). hosts.*.ssh 관측이 run 동안 늘어난 ERROR/FATAL 줄을 세어 target_evidence log_errors 의 원천으로 쓴다",
+          "items": {
+            "type": "string"
+          },
+          "title": "Logs",
+          "type": "array"
         },
         "media": {
           "anyOf": [

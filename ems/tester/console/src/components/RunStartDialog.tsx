@@ -35,6 +35,8 @@ export default function RunStartDialog({ onClose, onStarted, scenarioId, lastTop
   const [instances, setInstances] = useState(String(initial?.instances ?? 1))
   const [rate, setRate] = useState('')
   const [ht, setHt] = useState(initial?.bindings?.ht != null ? String(initial.bindings.ht) : '')
+  // ${var} 바인딩 추가분(k=v 한 줄에 하나 — pickup 피처코드 등 문자열 값도). ht 는 위 필드
+  const [binds, setBinds] = useState(Object.entries(initial?.bindings ?? {}).filter(([k]) => k !== 'ht').map(([k, v]) => `${k}=${String(v)}`).join('\n'))
   const [label, setLabel] = useState(initial?.label ?? '')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -59,10 +61,13 @@ export default function RunStartDialog({ onClose, onStarted, scenarioId, lastTop
       const n = parseInt(instances, 10); if (isFinite(n) && n >= 1) b.instances = n
       const r = parseFloat(rate); if (isFinite(r) && r > 0) b.rate_saps = r
     }
-    const h = parseInt(ht, 10); if (isFinite(h) && h >= 0) b.bindings = { ht: h }
+    const bb: Record<string, number | string> = {}
+    for (const line of binds.split(/\n|,/)) { const [k, ...rest] = line.split('='); const v = rest.join('=').trim(); if (k.trim() && v) bb[k.trim()] = /^\d+$/.test(v) ? Number(v) : v }
+    const h = parseInt(ht, 10); if (isFinite(h) && h >= 0) bb.ht = h
+    if (Object.keys(bb).length) b.bindings = bb
     if (label.trim()) b.label = label.trim()
     return b
-  }, [scenario, topology, profile, instances, rate, ht, label])
+  }, [scenario, topology, profile, instances, rate, ht, binds, label])
 
   // 계획 미리보기 — 입력 디바운스
   useEffect(() => {
@@ -130,6 +135,9 @@ export default function RunStartDialog({ onClose, onStarted, scenarioId, lastTop
           <div className="grid grid-cols-2 gap-3">
             <FormField label="${'{ht}'} 세션 유지(초)" help="시나리오의 ${'{ht}'} 바인딩 — 프로파일 ht 보다 우선">
               <Input value={ht} onChange={e => setHt(e.target.value)} inputMode="numeric" placeholder="프로파일/기본" />
+            </FormField>
+            <FormField label="바인딩 추가" help="시나리오의 다른 ${'{var}'} — k=v (쉼표/줄바꿈 구분). 예: pickup_code=** (당겨받기 피처코드)">
+              <Input value={binds} onChange={e => setBinds(e.target.value)} className="font-mono" placeholder="pickup_code=**" />
             </FormField>
             <FormField label="라벨" help="보고서·비교에 표시 (예: CSP 0.2.126 회귀)">
               <Input value={label} onChange={e => setLabel(e.target.value)} maxLength={120} />

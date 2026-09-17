@@ -1,0 +1,19 @@
+# BLF 클릭 당겨받기 — 표준형 (RFC 4235 dialog 이벤트 + RFC 3891 INVITE-Replaces, volte_supplementary_services.md §6.2)
+#   C 가 B 를 dialog 구독 → A→B 링잉 시 서버가 dialog-info NOTIFY 로 링잉 leg Call-ID 를 통지 → C 가 그 Call-ID 로 INVITE-Replaces → 서버가
+#   원 relay 를 유지한 채 C 를 재고정해 A–C 연결. 감시 인가 = 같은 전화 그룹(dispatch_center.md §5.2 규칙 1). 검증 S3-SCN-DIALOG D1·D2.
+id: VOLTE-BLF-PICKUP
+title: BLF 당겨받기 (dialog NOTIFY → INVITE-Replaces)
+tags: [volte, pickup, dialog]
+roles:
+  caller: { pool: volte_ue }
+  callee: { pool: volte_ue, disjoint_from: caller }
+  picker: { pool: volte_ue, disjoint_from: callee }
+flow:
+  - { step: register,   who: [caller, callee, picker], expect: { code: 200 } }
+  - { step: subscribe,  who: [picker], to: callee, expect: { code: 200 } }            # Event: dialog — B 감시
+  - { step: invite,     from: caller, to: callee, media: { audio: amr-wb } }
+  - { step: replaces,   from: picker, to: callee, expect: { code: 200 } }             # NOTIFY(early) 의 Call-ID 로 Replaces
+  - { step: media_hold, seconds: "${ht}", expect: { rtp_loss_pct: { max: 1 } } }
+  - { step: bye,        from: caller }
+target_evidence:
+  - { kind: recording_created, min: 1 }

@@ -1,4 +1,5 @@
 #include "Worker.h"
+#include "EModel.h"
 
 #include <algorithm>
 #include <dirent.h>
@@ -151,9 +152,17 @@ void Worker::OnByeResponse(SimSession* s, const std::string& callId, int st, lon
     std::lock_guard<std::mutex> lk(m_evMtx);
     m_events.push_back({ Event::BYERESP, s, nullptr, st, ms, callId, "", false });
 }
-void Worker::OnAffiliate(SimSession* s, const std::string&, int st, long long ms) {
+void Worker::OnAffiliate(SimSession* s, const std::string& group, int st, long long ms, bool deaff) {
     std::lock_guard<std::mutex> lk(m_evMtx);
-    m_events.push_back({ Event::AFFILIATE, s, nullptr, st, ms, "", "", false });
+    m_events.push_back({ Event::AFFILIATE, s, nullptr, st, ms, "", group, deaff });
+}
+void Worker::OnSubscribeResponse(SimSession* s, const std::string& event, const std::string& resource, int st) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::SUBSCRIBE_RESP, s, nullptr, st, 0, "", resource, false, false, 0, 0, event });
+}
+void Worker::OnDialogNotify(SimSession* s, const std::string& watched, const std::string& state, const std::string& callId) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::DLG_NOTIFY, s, nullptr, 0, 0, callId, watched, false, false, 0, 0, state });
 }
 void Worker::OnCallAnswered(SimSession* s, const std::string& callId) {
     std::lock_guard<std::mutex> lk(m_evMtx);
@@ -445,7 +454,8 @@ HttpResponse Worker::poolDelete(const std::string& name) {
 
 static const char* kSupported[] = { "register", "deregister", "invite", "answer", "reject", "bye",
                                     "media_hold", "wait", "expect", "progress", "hold", "resume", "dtmf", "refer",
-                                    "media_send", "media_stop", "group_call", "floor_request", "floor_release" };
+                                    "media_send", "media_stop", "group_call", "floor_request", "floor_release",
+                                    "pickup", "subscribe", "replaces", "join", "publish" };
 
 static int rtpModeOf(const Json& media) {
     std::string m = media["rtp"].asString("auto");
@@ -513,7 +523,7 @@ HttpResponse Worker::runStart(const Json& d) {
     if (!unsupported.empty()) {
         std::string list;
         for (auto& u : unsupported) list += (list.empty() ? "" : ",") + u;
-        return errResp(400, "unsupported_step", list + " — 워커는 register/invite/answer/reject/bye/media_hold/wait/expect/progress/hold/resume/dtmf/refer/media_send/media_stop/group_call/floor_request/floor_release 만");
+        return errResp(400, "unsupported_step", list + " — 워커는 register/invite/answer/reject/bye/media_hold/wait/expect/progress/hold/resume/dtmf/refer/media_send/media_stop/group_call/floor_request/floor_release/pickup/subscribe/replaces/join/publish 만");
     }
     if (spec->steps.empty()) return errResp(400, "steps_required");
     // 샘플 라이브러리(§4) — 컨트롤러가 토폴로지 media.samples 에서 이 시나리오가 참조하는 것만 보낸다. 파일은 지금 확인한다
@@ -890,9 +900,15 @@ void Worker::onEvent(const Event& e) {
         }
         break;
     case Event::CALLSTART:
-        ep->inCall = true;
+        ep->outPending = false;
         ep->pendingInvite = false;
-        m_metrics.counter("sessions");
+        if (!ep->consultCallId.empty() && e.callId == ep->consultCallId) ep->inConsult = true;   // 상담 통화(두 번째 다이얼로그) 확립
+        else ep->inCall = true;
+        // 세션(SER 분자)은 1:1 호의 발신 INVITE 확립만 — 상담 호·픽업·Replaces·Join 은 같은 시도 안의 부가 다이얼로그라 <kind>_ok 로 따로 센다
+        if (!ep->outKind.empty() && ep->outKind != "invite") { m_metrics.counter(ep->outKind + "_ok"); if (ep->outKind == "join") ep->joined = true; }
+        else m_metrics.counter("sessions");
+        m_metrics.counter("seer_ok");   // RFC 6076 §4.4 SEER 분자 — 200 (거절 480/486/600/603 은 CALLEND 에서)
+        if (!ep->isPeer() && ep->s->m_clsRtpThread.m_bVideoOffer && ep->s->m_clsRtpThread.m_iDestVideoPort > 0) m_metrics.counter("video_ok");   // answer 의 활성 m=video
         m_metrics.timer("srd_ms", (double)e.ms);
         if (in && in->progressTx && in->rtpMode != CRtpThread::E_MEDIA_NONE) {
             // early media 의 미디어 평면 — 183+SDP 뒤 200 전까지 발신자가 실제로 RTP 를 받았는가(시그널링 early_media 와 별개).
@@ -929,6 +945,23 @@ void Worker::onEvent(const Event& e) {
         if (in->phase == Instance::WAIT_EVENT && in->awaitKind == "groupup") checkGroupUp(*in, now);
         break;
     case Event::AFFILIATE:
+        if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "pubresp" &&
+            std::find(in->respWait.begin(), in->respWait.end(), ep) != in->respWait.end()) {
+            // publish 단계(affiliation 명령 PUBLISH, TS 24.379 §9)의 최종 응답 — 기대 코드와 다르면 인스턴스 실패
+            m_metrics.counter("publish_codes." + std::to_string(e.status));
+            if (e.status / 100 == 2) { ep->affiliated = !e.hasPai; if (!e.hasPai) m_metrics.timer("affiliate_ms", (double)e.ms); }
+            int want = in->expectCode > 0 ? in->expectCode : 200;
+            if (e.status != want) {
+                emitEvent(std::string(e.hasPai ? "de-affiliate" : "affiliate") + " PUBLISH expected " + std::to_string(want) + " got " + std::to_string(e.status), ep, "publish", e.status);
+                finishInstance(*in, true, "publish " + std::to_string(e.status), now);
+                break;
+            }
+            auto& rw = in->respWait;
+            rw.erase(std::remove(rw.begin(), rw.end(), ep), rw.end());
+            if (rw.empty()) advance(*in, now);
+            break;
+        }
+        if (e.hasPai) { if (e.status / 100 == 2) ep->affiliated = false; break; }   // 로그아웃의 de-affiliate 응답 — 준비 상태만 내린다
         if (e.status / 100 == 2) {
             ep->affiliated = true;
             m_metrics.counter("affiliated_ok");
@@ -944,8 +977,35 @@ void Worker::onEvent(const Event& e) {
         onFloor(ep, in, e.status, e.us, now);
         break;
     case Event::CALLEND: {
+        if (!ep->consultCallId.empty() && e.callId == ep->consultCallId) {
+            // 상담 통화(두 번째 다이얼로그) 종료 — 전달 완결 뒤 서버 BYE 는 정상, 상담 INVITE 의 실패 최종 응답은 인스턴스 실패. 첫 통화 상태는 그대로
+            bool pending = ep->outPending && ep->outKind == "consult";
+            ep->consultCallId.clear();
+            ep->inConsult = false;
+            if (pending) ep->outPending = false;
+            if (e.status >= 300 && in && in->phase != Instance::DONE) {
+                m_metrics.counter("codes." + std::to_string(e.status));
+                emitEvent("consultation call failed", ep, "invite", e.status, e.callId);
+                finishInstance(*in, true, "consult final " + std::to_string(e.status), now);
+            }
+            break;
+        }
+        if (ep->cancelExpected && ep->pendingInvite && ep->tStartCallMs == 0) {
+            // 픽업·Replaces 로 다른 단말이 가져간 링잉 착신 leg 를 서버가 CANCEL 했다(487) — 정상 경로, 인스턴스 실패가 아니다
+            ep->cancelExpected = false;
+            ep->pendingInvite = false;
+            ep->inCall = false;
+            m_metrics.counter("ringing_leg_cancelled");
+            break;
+        }
+        if (ep->outPending && e.status >= 300) {
+            // 자기 INVITE 의 실패 최종 응답 — RFC 6076 §4.4 SEER(사용자 측 거절은 유효 시도) · §4.6 ISA(망 측 실패·Timer B)
+            if (e.status == 480 || e.status == 486 || e.status == 600 || e.status == 603) m_metrics.counter("seer_ok");
+            if (e.status == 408 || e.status == 500 || e.status == 503 || e.status == 504) m_metrics.counter("isa_fail");
+        }
         ep->inCall = false;
         ep->pendingInvite = false;
+        ep->outPending = false;
         if (ep->isPeer() && ep->callId == e.callId) epClearCall(ep);
         if (e.q850 > 0) { m_metrics.counter("q850_rx"); m_metrics.counter("q850." + std::to_string(e.q850)); }
         if (!in) break;
@@ -1013,12 +1073,38 @@ void Worker::onEvent(const Event& e) {
                    finishInstance(*in, true, "refer " + std::to_string(e.status), now); }
         }
         break;
+    case Event::SUBSCRIBE_RESP:
+        m_metrics.counter("subscribe_codes." + std::to_string(e.status));
+        if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "subresp" &&
+            std::find(in->respWait.begin(), in->respWait.end(), ep) != in->respWait.end()) {
+            int want = in->expectCode > 0 ? in->expectCode : 200;
+            if (e.status != want) {
+                emitEvent("SUBSCRIBE Event:" + e.event + " expected " + std::to_string(want) + " got " + std::to_string(e.status), ep, "subscribe", e.status);
+                finishInstance(*in, true, "subscribe " + std::to_string(e.status), now);
+                break;
+            }
+            auto& rw = in->respWait;
+            rw.erase(std::remove(rw.begin(), rw.end(), ep), rw.end());
+            if (rw.empty()) advance(*in, now);
+        }
+        break;
+    case Event::DLG_NOTIFY:
+        // dialog 이벤트 NOTIFY(RFC 4235) — 감시 대상의 dialog 가 early/confirmed 가 되면 replaces/join 단계가 그 Call-ID 로 INVITE 를 낸다
+        m_metrics.counter("notify_rx");
+        if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "dialog:" + roleOf(in, ep) &&
+            (e.event == "early" || e.event == "confirmed")) {
+            in->phase = Instance::RUNNING;
+            in->awaitKind.clear();
+            execStep(*in, now);   // 같은 단계를 다시 — 이번엔 학습된 다이얼로그로 진행
+        }
+        break;
     case Event::BYERESP:
         ep->inCall = false;
         m_metrics.timer("sdd_ms", (double)e.ms);
-        // 완료(SCR 분자)는 세션 단위 — 그룹 세션의 멤버 leg BYE 는 세지 않는다(발신자 leg 만)
+        // 완료(SCR 분자)는 세션 단위 — bye 단계가 낸 BYE 만(정리 BYE 는 세지 않는다), 그룹 세션의 멤버 leg BYE 는 세지 않는다(발신자 leg 만)
         if (e.status / 100 != 2) m_metrics.counter("bye_fail");
-        else if (!ep->isPtt() || ep->tStartCallMs > 0) m_metrics.counter("completed");
+        else if (ep->byeByStep && (!ep->isPtt() || ep->tStartCallMs > 0)) m_metrics.counter("completed");
+        ep->byeByStep = false;
         if (ep->isPeer() && ep->callId == e.callId) epClearCall(ep);
         if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "byeresp") {
             auto& bw = in->byeWait;
@@ -1042,6 +1128,14 @@ bool Worker::startEndpoint(Endpoint* ep) {
     return true;
 }
 
+/** 코덱 테이블 PT → rtpmap 이름 (미지 = 빈 문자열) — 수신 wire PT 로 MOS 코덱(E-model Ie/Bpl)을 고른다 */
+static std::string codecNameOf(int pt) {
+    if (pt < 0) return "";
+    for (const auto& e : CSipCodecTable::GetList())
+        if (e.m_iPt == pt) return e.m_strName;
+    return pt == 0 ? "PCMU" : pt == 8 ? "PCMA" : pt == 18 ? "G729" : "";
+}
+
 /** 시나리오 media.audio 이름 → 코덱 테이블 PT (-1 = 지정 없음/미지) */
 static int codecPtOf(const std::string& name) {
     if (name.empty()) return -1;
@@ -1060,6 +1154,9 @@ bool Worker::epStartCall(Endpoint* from, Endpoint* to, const Json& media) {
         if (callId.empty()) return false;
         from->callId = callId;
         pool->byCall[callId] = from;
+        from->outPending = true;
+        from->outKind = "invite";
+        m_metrics.counter("invite_tx");
         return true;
     }
     if (!from->started && !startEndpoint(from)) return false;
@@ -1069,8 +1166,57 @@ bool Worker::epStartCall(Endpoint* from, Endpoint* to, const Json& media) {
     //   (DID/E.164 — CSP 가 번호 prefix 규칙으로 트렁크를 고른다, 실 단말이 다이얼하는 꼴)
     std::string target = to->id.user;
     if (to->isPeer() && to->poolRef->profile == "ibcf") target += "@" + to->id.domain;
+    if (from->inCall && !from->s->m_strInviteId.empty()) {
+        // 통화 중인 단말의 두 번째 INVITE = 상담 통화(consultation, 두 번째 다이얼로그) — attended transfer(RFC 3515 + Refer-To Replaces)의 전제.
+        //   첫 통화는 유지된다(실 단말은 hold 하지만 계측기는 미디어 방향을 판정하지 않는다 — 전달 뒤 전달자는 빠진다)
+        if (!from->consultCallId.empty()) return false;
+        from->s->StartConsultCall(target);
+        if (from->s->m_strConsultId.empty()) return false;
+        from->consultCallId = from->s->m_strConsultId;
+        from->outPending = true;
+        from->outKind = "consult";
+        m_metrics.counter("consult_tx");
+        m_metrics.counter("invite_tx");
+        return true;
+    }
     from->s->StartCall(target);
-    return !from->s->m_strInviteId.empty();
+    if (from->s->m_strInviteId.empty()) return false;
+    from->outPending = true;
+    from->outKind = "invite";
+    m_metrics.counter("invite_tx");
+    return true;
+}
+
+/** 픽업·Replaces·Join 발신(UE 세션만) — kind 별 INVITE 를 낸다. 실패(스택 거절·대상 다이얼로그 미학습) 는 false. */
+static bool startSpecialCall(Endpoint* from, Endpoint* to, const std::string& kind, const std::string& payload) {
+    SimSession* s = from->s;
+    if (kind == "pickup") {
+        // 피처코드 다이얼(volte_supplementary_services.md §5.2) — <code> 그룹 픽업 · <code><번호> 지정 픽업
+        s->StartCall(payload + (to ? to->id.user : std::string()));
+    } else {
+        // RFC 3891/3911 — dialog 이벤트(RFC 4235)로 학습한 대상 다이얼로그. 태그 방향: 우리 to-tag = 상대(remote)·from-tag = 대상(local)
+        if (s->m_strWatchedDlgCallId.empty()) return false;
+        if (kind == "replaces") s->StartCallWithReplaces(to->id.user, s->m_strWatchedDlgCallId, s->m_strWatchedDlgRemoteTag, s->m_strWatchedDlgLocalTag);
+        else s->StartCallWithJoin(to->id.user, s->m_strWatchedDlgCallId, s->m_strWatchedDlgRemoteTag, s->m_strWatchedDlgLocalTag);
+    }
+    if (s->m_strInviteId.empty()) return false;
+    from->outPending = true;
+    from->outKind = kind;
+    return true;
+}
+
+bool Worker::epSubscribe(Endpoint* ep, const std::string& event, const std::string& resource) {
+    if (ep->isPeer() || !ep->started) return false;
+    if (event == "dialog") { ep->s->SubscribeDialog(resource); ep->dlgWatching = true; }
+    else { ep->s->SubscribeEvent(event, resource); ep->evtWatching = true; }
+    return true;
+}
+
+void Worker::epUnsubscribe(Endpoint* ep) {
+    if (ep->isPeer()) return;
+    if (ep->dlgWatching) { ep->s->UnsubscribeDialogs(); ep->dlgWatching = false; }
+    if (ep->evtWatching) { ep->s->UnsubscribeEvent(); ep->evtWatching = false; }
+    ep->s->ClearWatchedDialog();
 }
 
 int Worker::epProgress(Endpoint* ep) {
@@ -1086,12 +1232,28 @@ bool Worker::epHold(Endpoint* ep, bool hold) {
     return hold ? ep->s->Hold() : ep->s->Resume();
 }
 
-bool Worker::epRefer(Endpoint* from, Endpoint* to) {
+bool Worker::epRefer(Endpoint* from, Endpoint* to, bool attended) {
     // Refer-To 사용자부 = 전달 대상 신원(psip 이 상대 Contact host 로 URI 를 만든다 — B2BUA(CSP)가 종단·재라우팅)
     if (from->isPeer()) return !from->callId.empty() && from->poolRef->peer->Refer(from->callId, to->id.user);
     if (from->s->m_strInviteId.empty()) return false;
+    if (attended) {
+        // 전달자가 to 와 상담 통화 중 → Refer-To 에 상담 다이얼로그의 Replaces(RFC 3515 + RFC 3891 — TS 24.629 consultative ECT)
+        if (!from->inConsult) return false;
+        from->s->AttendedTransfer();
+        m_metrics.counter("refer_attended_tx");
+        return true;
+    }
     from->s->BlindTransfer(to->id.user);
     return true;
+}
+
+/** 영상(invite/group_call 의 media.video) — h264 면 이 인스턴스 단말들의 오퍼에 m=video 를 싣는다(워커 Media.VideoFile 이 있어야 비디오 소켓이 있다).
+ *  파일이 없으면 오디오만 나가고 video_unavailable 로 센다(조용히 넘기지 않는다). 발신자 기준 video_offered, answer 의 활성 m=video 는 CALLSTART 에서 video_ok. */
+void Worker::epSetVideo(Instance& in, Endpoint* from, bool want) {
+    for (auto* ep : endpointsOf(in)) if (!ep->isPeer()) ep->s->m_clsRtpThread.m_bVideoOffer = want;
+    if (!want || !from || from->isPeer()) return;
+    if (from->s->m_clsRtpThread.m_iVideoPort > 0) m_metrics.counter("video_offered");
+    else { m_metrics.counter("video_unavailable"); emitEvent("media.video h264 requested but worker has no Media.VideoFile — audio only", from, "invite", 0); }
 }
 
 void Worker::epSetMediaMode(Endpoint* ep, int mode) {
@@ -1370,7 +1532,7 @@ void Worker::tickBody(long long now) {
                 }
                 m_metrics.counter("progress_tx");
                 in.progressTx = true;
-                std::string caller = callerRole(in);
+                std::string caller = pendingCallerRole(in);
                 if (!caller.empty()) {
                     in.phase = Instance::WAIT_EVENT;
                     in.awaitKind = "ring:" + caller;
@@ -1401,11 +1563,10 @@ void Worker::tickBody(long long now) {
                 ep->pendingInvite = false;
                 if (in.pending == Instance::ANSWER) {
                     ep->inCall = true;
-                    // 발신자 확립(200 OK 수신) 을 기다린다 — 다음 단계는 그 뒤
-                    std::string caller;
-                    for (auto& a : in.actors) if (a.second->tStartCallMs > 0) caller = a.first;
+                    // 발신자 확립(200 OK 수신) 을 기다린다 — 다음 단계는 그 뒤. 상담 호(두 번째 다이얼로그)도 같은 대기
+                    std::string caller = pendingCallerRole(in);
                     in.pending = Instance::NONE;
-                    if (!caller.empty() && !in.actors[caller]->inCall) {
+                    if (!caller.empty()) {
                         in.phase = Instance::WAIT_EVENT;
                         in.awaitKind = "callstart:" + caller;
                         in.deadlineMs = now + m_cfg.inviteTimeoutMs;
@@ -1413,8 +1574,7 @@ void Worker::tickBody(long long now) {
                     }
                 } else {
                     // 거절: 발신자의 최종 응답 도착을 기다린다
-                    std::string caller;
-                    for (auto& a : in.actors) if (a.second->tStartCallMs > 0) caller = a.first;
+                    std::string caller = pendingCallerRole(in);
                     in.pending = Instance::NONE;
                     if (!caller.empty()) {
                         in.phase = Instance::WAIT_EVENT;
@@ -1435,6 +1595,7 @@ void Worker::tickBody(long long now) {
                 what += " — joined " + std::to_string(joined) + "/" + std::to_string(total);
             }
             emitEvent("timeout waiting " + what, nullptr, in.stepIdx < m_body.size() ? m_body[in.stepIdx].step : "", 0);
+            if (!pendingCallerRole(in).empty()) m_metrics.counter("isa_fail");   // 최종 응답 없이 시한 — Timer B 만료 상당(RFC 6076 §4.6)
             finishInstance(in, true, "timeout " + in.awaitKind, now);
         }
     }
@@ -1593,16 +1754,17 @@ void Worker::execStep(Instance& in, long long now) {
             in.expectCode = (int)st.expect["code"].asInt(0);
             in.rtpMode = rtpModeOf(st.media);   // 이 호의 미디어 평면 — 인스턴스의 모든 단말(전달 대상 포함)에 같은 모드
             for (auto& a : in.actors) epSetMediaMode(a.second, in.rtpMode);
-            if (!epStartCall(from, to, st.media)) { finishInstance(in, true, "invite: StartCall refused (busy/stack?)", now); return; }
-            noteCallId(&in, from->isPeer() ? from->callId : from->s->m_strInviteId);
+            epSetVideo(in, from, st.media["video"].asString("") == "h264");
+            if (!epStartCall(from, to, st.media)) { finishInstance(in, true, "invite: StartCall refused (busy/stack/consult?)", now); return; }
+            if (from->outKind == "consult") from->consultTo = st.to;
+            noteCallId(&in, from->isPeer() ? from->callId : from->outKind == "consult" ? from->consultCallId : from->s->m_strInviteId);
             m_metrics.counter("legs", 2);
             bool calleeActs = in.stepIdx + 1 < m_body.size() &&
                               (m_body[in.stepIdx + 1].step == "reject" || m_body[in.stepIdx + 1].step == "answer" ||
                                m_body[in.stepIdx + 1].step == "progress");
             if (in.expectCode >= 300 && !calleeActs) {
-                // 거절이 기대값(ACL 403·라우팅 reject 등 대상이 스스로 거절) — 발신자의 최종 응답을 여기서 기다린다.
+                // 거절이 기대값(ACL 403·라우팅 reject 등 대상이 스스로 거절) — 발신자의 최종 응답을 여기서 기다린다(advance 가 다음 단계로).
                 //   다음 단계가 착신 측 reject(피어 MGCF 503 등)면 그 단계가 거절을 내고 최종 응답을 기다린다.
-                in.stepIdx++;
                 in.phase = Instance::WAIT_EVENT;
                 in.awaitKind = "callend:" + st.from;
                 in.deadlineMs = now + m_cfg.inviteTimeoutMs;
@@ -1625,17 +1787,19 @@ void Worker::execStep(Instance& in, long long now) {
             in.expectCode = (int)st.expect["code"].asInt(0);
             in.rtpMode = rtpModeOf(st.media);
             for (auto* ep : endpointsOf(in)) epSetMediaMode(ep, in.rtpMode);
+            epSetVideo(in, from, st.media["video"].asString("") == "h264");
             from->s->SetOfferCodec(codecPtOf(st.media["audio"].asString("")));   // 시나리오 오퍼 코덱(PTT 표준 = amr-wb). 없으면 풀 기본
             from->s->StartGroupCall(group);
             if (from->s->m_strInviteId.empty()) { finishInstance(in, true, "group_call: StartGroupCall refused (busy/stack?)", now); return; }
             noteCallId(&in, from->s->m_strInviteId);
             m_metrics.counter("legs");
             m_metrics.counter("group_calls");
-            in.stepIdx++;
+            m_metrics.counter("invite_tx");
+            from->outPending = true;
+            from->outKind = "invite";
             in.phase = Instance::WAIT_EVENT;
-            in.awaitKind = in.expectCode >= 300 ? "callend:" + st.from : "groupup";
+            in.awaitKind = in.expectCode >= 300 ? "callend:" + st.from : "groupup";   // 둘 다 advance 가 stepIdx++ 한다
             in.deadlineMs = now + m_cfg.inviteTimeoutMs;
-            if (in.expectCode < 300) in.stepIdx--;   // groupup 은 advance 가 stepIdx++ 한다
             return;
         }
         if (st.step == "floor_request" || st.step == "floor_release") {
@@ -1697,9 +1861,8 @@ void Worker::execStep(Instance& in, long long now) {
             return;
         }
         if (st.step == "media_hold") {
-            std::string caller;
-            for (auto& a : in.actors) if (a.second->tStartCallMs > 0) caller = a.first;
-            if (!caller.empty() && !in.actors[caller]->inCall) {
+            std::string caller = pendingCallerRole(in);
+            if (!caller.empty()) {
                 in.phase = Instance::WAIT_EVENT; in.awaitKind = "callstart:" + caller; in.deadlineMs = now + m_cfg.inviteTimeoutMs;
                 // 확립되면 다시 이 단계로 온다(advance 가 stepIdx++ 하므로 하나 되돌린다)
                 in.stepIdx--;
@@ -1752,8 +1915,8 @@ void Worker::execStep(Instance& in, long long now) {
             if (!ep) { finishInstance(in, true, st.step + ": role missing", now); return; }
             if (!ep->inCall) {
                 // 확립 전이면 발신자 확립을 기다렸다가 다시 이 단계로
-                std::string caller = callerRole(in);
-                if (!caller.empty() && !in.actors[caller]->inCall) {
+                std::string caller = pendingCallerRole(in);
+                if (!caller.empty()) {
                     in.phase = Instance::WAIT_EVENT; in.awaitKind = "callstart:" + caller; in.deadlineMs = now + m_cfg.inviteTimeoutMs;
                     in.stepIdx--;
                     return;
@@ -1772,8 +1935,8 @@ void Worker::execStep(Instance& in, long long now) {
             Endpoint* ep = in.actors[role];
             if (!ep) { finishInstance(in, true, "dtmf: role missing", now); return; }
             if (!ep->inCall) {
-                std::string caller = callerRole(in);
-                if (!caller.empty() && !in.actors[caller]->inCall) {
+                std::string caller = pendingCallerRole(in);
+                if (!caller.empty()) {
                     in.phase = Instance::WAIT_EVENT; in.awaitKind = "callstart:" + caller; in.deadlineMs = now + m_cfg.inviteTimeoutMs;
                     in.stepIdx--;
                     return;
@@ -1797,17 +1960,20 @@ void Worker::execStep(Instance& in, long long now) {
             Endpoint* from = in.actors[st.from];
             Endpoint* to = st.to.empty() ? nullptr : in.actors[st.to];
             if (!from || !to) { finishInstance(in, true, "refer: from/to role required", now); return; }
-            if (!from->inCall) {
-                std::string caller = callerRole(in);
-                if (!caller.empty() && !in.actors[caller]->inCall) {
+            {
+                // 첫 통화·상담 통화(있으면) 확립을 기다렸다가 다시 이 단계로
+                std::string caller = pendingCallerRole(in);
+                if (!caller.empty()) {
                     in.phase = Instance::WAIT_EVENT; in.awaitKind = "callstart:" + caller; in.deadlineMs = now + m_cfg.inviteTimeoutMs;
                     in.stepIdx--;
                     return;
                 }
-                finishInstance(in, true, "refer: not in call", now); return;
             }
+            if (!from->inCall) { finishInstance(in, true, "refer: not in call", now); return; }
+            // attended = 전달자가 to 와 상담 통화 중(같은 인스턴스에서 from 이 to 를 두 번째 다이얼로그로 불렀다) — Refer-To 에 Replaces. 아니면 blind
+            bool attended = !from->isPeer() && from->inConsult && from->consultTo == st.to;
             in.expectCode = (int)st.expect["code"].asInt(202);
-            if (!epRefer(from, to)) { finishInstance(in, true, "refer: REFER not sent", now); return; }
+            if (!epRefer(from, to, attended)) { finishInstance(in, true, "refer: REFER not sent", now); return; }
             m_metrics.counter("refer_tx");
             in.phase = Instance::WAIT_EVENT;
             in.awaitKind = "referresp:" + st.from;
@@ -1830,6 +1996,7 @@ void Worker::execStep(Instance& in, long long now) {
             in.byeWait.clear();
             for (auto* ep : eps) {
                 if (!ep->inCall || !epHasCall(ep)) continue;   // 이미 끝난 호(상대 종료·실패) — BYE 없이 통과
+                ep->byeByStep = true;
                 epBye(ep, st.cause);
                 if (st.cause > 0) m_metrics.counter("q850_tx");
                 in.byeWait.push_back(ep);
@@ -1840,10 +2007,94 @@ void Worker::execStep(Instance& in, long long now) {
             in.deadlineMs = now + m_cfg.byeTimeoutMs;
             return;
         }
+        if (st.step == "pickup" || st.step == "replaces" || st.step == "join") {
+            // 당겨받기(피처코드, volte_supplementary_services.md §5) · INVITE-Replaces(RFC 3891, BLF 클릭 픽업 §6.2) · INVITE-Join(RFC 3911, 합법감청 청취 dispatch_center.md §5.3)
+            //   from 이 새 다이얼로그를 열고 서버가 대상 호를 재고정(픽업·Replaces)하거나 청취 leg 를 붙인다(Join). 완료 = from 의 200(또는 expect.code 의 거절)
+            Endpoint* from = in.actors[st.from];
+            Endpoint* to = st.to.empty() ? nullptr : in.actors[st.to];
+            if (!from || from->isPeer()) { finishInstance(in, true, st.step + ": from 은 UE 역할이어야 한다", now); return; }
+            if (st.step != "pickup" && !to) { finishInstance(in, true, st.step + ": to(대상 다이얼로그의 당사자 역할) 필요", now); return; }
+            if (st.step == "pickup" && st.payload.empty()) { finishInstance(in, true, "pickup: payload(피처코드) 필요", now); return; }
+            if (from->inCall || from->outPending) { finishInstance(in, true, st.step + ": from 이 이미 통화 중", now); return; }
+            if (st.step != "pickup" && from->s->m_strWatchedDlgCallId.empty()) {
+                // dialog 이벤트 NOTIFY 로 대상 다이얼로그를 아직 못 배웠다 — NOTIFY(early|confirmed) 가 오면 이 단계를 다시 실행한다
+                if (!from->dlgWatching) { finishInstance(in, true, st.step + ": from 이 to 를 dialog 구독하지 않았다(subscribe 단계 선행)", now); return; }
+                in.phase = Instance::WAIT_EVENT;
+                in.awaitKind = "dialog:" + st.from;
+                in.deadlineMs = now + m_cfg.inviteTimeoutMs;
+                return;
+            }
+            markCancelExpected(in);
+            if (!from->started && !startEndpoint(from)) { finishInstance(in, true, st.step + ": stack", now); return; }
+            from->s->SetOfferCodec(codecPtOf(st.media["audio"].asString("")));
+            from->tStartCallMs = now;
+            in.expectCode = (int)st.expect["code"].asInt(0);
+            if (!startSpecialCall(from, to, st.step, st.payload)) { finishInstance(in, true, st.step + ": INVITE not sent", now); return; }
+            noteCallId(&in, from->s->m_strInviteId);
+            m_metrics.counter("legs");
+            m_metrics.counter(st.step + "_tx");
+            m_metrics.counter("invite_tx");
+            in.phase = Instance::WAIT_EVENT;
+            in.awaitKind = (in.expectCode >= 300 ? "callend:" : "callstart:") + st.from;
+            in.deadlineMs = now + m_cfg.inviteTimeoutMs;
+            return;
+        }
+        if (st.step == "subscribe") {
+            // out-of-dialog SUBSCRIBE(RFC 6665) — payload = 이벤트 패키지(기본 dialog, RFC 4235), to = 감시 대상 역할(생략 = 자기 AoR).
+            //   완료 = who 전원의 최종 응답(expect.code, 기본 200 — 403 그룹 밖 감시·489 미지 패키지도 기대값으로 둘 수 있다)
+            std::string event = st.payload.empty() ? "dialog" : st.payload;
+            Endpoint* to = st.to.empty() ? nullptr : in.actors[st.to];
+            if (!st.to.empty() && !to) { finishInstance(in, true, "subscribe: to role missing", now); return; }
+            in.expectCode = (int)st.expect["code"].asInt(0);
+            in.respWait.clear();
+            for (auto& role : st.who) {
+                Endpoint* ep = in.actors[role];
+                if (!ep) { finishInstance(in, true, "subscribe: role missing", now); return; }
+                if (!epSubscribe(ep, event, to ? to->id.user : ep->id.user)) { finishInstance(in, true, "subscribe: " + role + " 은 등록된 UE 여야 한다", now); return; }
+                m_metrics.counter("subscribe_tx");
+                in.respWait.push_back(ep);
+            }
+            if (in.respWait.empty()) { finishInstance(in, true, "subscribe: who required", now); return; }
+            in.phase = Instance::WAIT_EVENT;
+            in.awaitKind = "subresp";
+            in.deadlineMs = now + m_cfg.inviteTimeoutMs;
+            return;
+        }
+        if (st.step == "publish") {
+            // MCPTT affiliation 명령 PUBLISH(TS 24.379 §9, RFC 3903) — payload = affiliate(기본)|deaffiliate, group = 대상 그룹(생략 = 신원의 그룹).
+            //   완료 = who 전원의 최종 응답(expect.code, 기본 200 — 비멤버 403 도 기대값으로). de-affiliate 는 단말의 준비 상태를 내린다
+            bool deaff = st.payload == "deaffiliate";
+            in.expectCode = (int)st.expect["code"].asInt(0);
+            in.respWait.clear();
+            for (auto& role : st.who) {
+                for (auto* ep : roleEndpoints(in, role)) {
+                    if (!ep->isPtt() || !ep->registered) { finishInstance(in, true, "publish: " + role + " 은 등록된 PTT 단말이어야 한다", now); return; }
+                    ep->s->AffiliateGroup(deaff, st.group);
+                    m_metrics.counter("publish_tx");
+                    in.respWait.push_back(ep);
+                }
+            }
+            if (in.respWait.empty()) { finishInstance(in, true, "publish: who required", now); return; }
+            in.phase = Instance::WAIT_EVENT;
+            in.awaitKind = "pubresp";
+            in.deadlineMs = now + m_cfg.inviteTimeoutMs;
+            return;
+        }
         if (st.step == "expect") { in.stepIdx++; continue; }
         finishInstance(in, true, "unsupported step " + st.step, now);
         return;
     }
+}
+
+std::string Worker::pendingCallerRole(Instance& in) {
+    for (auto& a : in.actors) if (a.second && a.second->outPending) return a.first;
+    return "";
+}
+
+void Worker::markCancelExpected(Instance& in) {
+    // 링잉 중인(응답 보류) 착신 leg — 픽업·Replaces 가 그 호를 가져가면 서버가 CANCEL 한다(487). 인스턴스 실패로 세지 않는다
+    for (auto* ep : endpointsOf(in))
+        if (ep->pendingInvite && ep->tStartCallMs == 0) ep->cancelExpected = true;
 }
 
 void Worker::sampleRtp(Endpoint* ep) {
@@ -1856,13 +2107,27 @@ void Worker::sampleRtp(Endpoint* ep) {
         rx = rt.m_ullRecvTotal.load(); lost = rt.m_ullRecvLost.load(); jitterUs = rt.m_llRecvJitterUs.load();
     }
     unsigned long long tx = ep->isPeer() ? ep->poolRef->peer->RtpSent(ep->callId) : ep->s->m_clsRtpThread.m_ullSentTotal.load();
-    logf("debug", "rtp sample %s(%s): tx=%llu rx=%llu lost=%llu jitter_us=%lld", roleOf(ep->inst, ep).c_str(), ep->id.user.c_str(), tx, rx, lost, jitterUs);
+    // 수신 품질 부가 — wire PT(MOS 코덱)·RTCP SR/RR 수신 통계(상대가 본 우리 스트림의 fraction lost)
+    int pt = -1, rtcpRx = 0, rrFrac = -1;
+    if (ep->isPeer()) ep->poolRef->peer->RtpQuality(ep->callId, pt, rtcpRx, rrFrac);
+    else { CRtpThread& rt = ep->s->m_clsRtpThread; pt = rt.m_iRecvPt.load(); rtcpRx = rt.m_iRtcpRecv.load(); rrFrac = rt.m_iRtcpRrFractionLost.load(); }
+    logf("debug", "rtp sample %s(%s): tx=%llu rx=%llu lost=%llu jitter_us=%lld pt=%d rtcp_rx=%d rr_frac=%d", roleOf(ep->inst, ep).c_str(), ep->id.user.c_str(), tx, rx, lost, jitterUs, pt, rtcpRx, rrFrac);
     m_metrics.counter("rtp_tx", (long long)tx);
     m_metrics.counter("rtp_rx", (long long)rx);
     m_metrics.counter("rtp_lost", (long long)lost);
+    if (rtcpRx > 0) { m_metrics.counter("rtcp_rx", rtcpRx); if (rrFrac >= 0) { m_metrics.counter("rtcp_rr_rx"); m_metrics.timer("rtcp_remote_loss_pct", rrFrac * 100.0 / 256.0); } }
+    if (ep->joined && !ep->isPeer()) {
+        // 청취 leg(RFC 3911 Join) — 서버가 양 화자를 SSRC 2개로 분리 인도했는가(dispatch_center.md §5.3, RFC 5576 라벨링)
+        size_t ssrc = ep->s->RecvSsrcCount();
+        if (ssrc >= 2) m_metrics.counter("join_ssrc2");
+        else emitEvent("join tap received " + std::to_string(ssrc) + " SSRC (expected 2)", ep, "join", 0, ep->s->m_strInviteId);
+    }
     if (rx + lost > 0) {
-        m_metrics.timer("rtp_loss_pct", 100.0 * (double)lost / (double)(rx + lost));
-        m_metrics.timer("jitter_ms", (double)jitterUs / 1000.0);
+        double lossPct = 100.0 * (double)lost / (double)(rx + lost), jitterMs = (double)jitterUs / 1000.0;
+        m_metrics.timer("rtp_loss_pct", lossPct);
+        m_metrics.timer("jitter_ms", jitterMs);
+        // MOS 추정(G.107 E-model, 코덱 = 수신 wire PT) — 손실·지터에서, 단방향 망 지연은 0 으로 둔다(RTCP RTT 미측정)
+        m_metrics.timer("mos", emodelMos(emodelCodec(codecNameOf(pt)), lossPct, jitterMs));
     } else if (!(ep->isPtt() && ep->talked)) {
         m_metrics.counter("rtp_silent_legs");   // PTT 발언자는 자기 발언 동안 수신이 없는 것이 정상
     }
@@ -1873,13 +2138,21 @@ void Worker::sampleRtp(Endpoint* ep) {
 
 void Worker::releaseEndpoint(Endpoint* ep) {
     if (ep->pendingInvite) { epReject(ep, 480); ep->pendingInvite = false; }
-    else if (ep->inCall || epHasCall(ep)) epBye(ep);
+    else if (ep->inCall || epHasCall(ep)) epBye(ep);   // UE 는 상담 통화도 함께 내린다(StopCall)
     ep->inCall = false;
     ep->tStartCallMs = 0;
+    ep->outPending = false;
+    ep->outKind.clear();
+    ep->byeByStep = false;
+    ep->consultCallId.clear();
+    ep->consultTo.clear();
+    ep->inConsult = false;
+    ep->cancelExpected = false;
+    ep->joined = false;
     ep->floor = Endpoint::F_IDLE;
     ep->tReleasedMs = nowMs();
     if (ep->isPeer()) epClearCall(ep);
-    else ep->s->SetMediaMode(CRtpThread::E_MEDIA_AUTO);
+    else { epUnsubscribe(ep); ep->s->SetMediaMode(CRtpThread::E_MEDIA_AUTO); }
     Instance* in = ep->inst;
     ep->inst = nullptr;
     // 그룹 단위 인스턴스는 free 목록을 쓰지 않는다(그룹 목록에서 고른다)

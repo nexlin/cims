@@ -284,6 +284,11 @@ org 폴백이라 happy-path 만 판정하고 그룹 경계 검사는 SKIP 으로
 피처코드는 S3-SEED 가 volte 접속서비스에 `pickup_feature_code="**"` 를 시드해 **서비스 필드
 경로**(전역 `CallPickupId` 폴백 아님)를 태운다.
 
+계측기가 설정돼 있으면(`CIMS_TESTER_URL`·`CIMS_TESTER_TOPOLOGY`, [test_instrument.md](test_instrument.md) §9) 같은 검사를 계측기 동봉 시나리오로
+돈다 — X1/X2/X3 `VOLTE-XFER-BLIND`/`-ATTENDED`/`-DENIED`, P1~P4 `VOLTE-PICKUP-GROUP`/`-DIRECTED`/`-DIRECTED-DENIED`/`-GROUP-NOCALL`,
+D1~D4 `VOLTE-BLF-PICKUP`/`VOLTE-BLF-DENIED`/`VOLTE-SUBSCRIBE-BAD-EVENT`(D5 는 cspsim). 판정 정본은 계측기 verdict(RFC 6076 기대치 + `expect.code`),
+`pickup_group`/`service_ref` 픽스처는 계획이 준 역할 신원에 입힌다.
+
 ```bash
 ./cims-verify run --items S3-SEED,S3-SCN-XFER      # X1/X2 전달 + X3 transfer_allowed 403
 ./cims-verify run --items S3-SEED,S3-SCN-PICKUP    # P1/P2 그룹·지정 픽업 + P3/P4 그룹 경계 403/404

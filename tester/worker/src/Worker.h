@@ -84,6 +84,17 @@ struct Endpoint {
     bool pendingInvite = false;     // deferred 착신 대기 중
     bool inCall = false;
     long long tStartCallMs = 0;     // 발신 시각(SRD 기점 — SimSession 도 갖지만 인스턴스 판정용)
+    bool outPending = false;        // 자기가 낸 INVITE(invite·consult·pickup·replaces·join)의 최종 응답 대기 중
+    std::string outKind;            // 그 INVITE 의 종류 — 확립 때 <kind>_ok 로 센다(invite 는 sessions)
+    // 전달·합류(volte_supplementary_services.md §5·§6, dispatch_center.md §5) — UE 세션만
+    std::string consultCallId;      // attended transfer 상담 통화(두 번째 다이얼로그) Call-ID
+    std::string consultTo;          // 상담 통화 상대 역할 — refer.to 와 같으면 attended(Refer-To 에 Replaces)
+    bool inConsult = false;
+    bool cancelExpected = false;    // 링잉 착신 leg 가 서버 CANCEL 로 끝나는 것이 정상(픽업·Replaces 가 가져간 호)
+    bool joined = false;            // INVITE-Join(RFC 3911) 청취 leg — 표본 때 SSRC 2개(양 화자) 도달을 센다
+    bool byeByStep = false;         // bye 단계가 낸 BYE — 그 응답만 completed(SCR 분자)로 센다(정리 BYE 는 세지 않는다)
+    bool dlgWatching = false;       // dialog 구독(RFC 4235)을 냈다 — 반환 때 Expires 0
+    bool evtWatching = false;       // 이벤트 패키지 구독을 냈다 — 반환 때 Expires 0
     // PTT
     bool affStarted = false;        // affiliation PUBLISH 를 냈다
     bool affiliated = false;
@@ -155,6 +166,7 @@ struct Instance {
     std::vector<Endpoint*> floorWait;          // floor 단계가 결과를 기다리는 단말
     std::string floorWant;                     // floor_request 기대 결과 granted|denied|queued|any
     std::vector<Endpoint*> byeWait;            // bye 단계가 응답을 기다리는 단말
+    std::vector<Endpoint*> respWait;           // subscribe/publish 단계가 최종 응답을 기다리는 단말
     std::string groupTo;                       // group_call.to — 합류를 기다리는 multi 역할(빈 값 = 발신자 확립만)
     long long tLastJoinMs = 0;                 // 마지막 멤버 합류(자동응답 200) 시각
     std::vector<std::string> callIds;          // 이 인스턴스에 속한 Call-ID — 끝날 때 SIP 덤프를 올리거나 버린다
@@ -191,7 +203,9 @@ public:
     void OnReInvite(SimSession* s, const std::string& callId, bool bRemoteHold) override;
     void OnReInviteResponse(SimSession* s, const std::string& callId, int iSipStatus) override;
     void OnReferResponse(SimSession* s, const std::string& callId, int iSipStatus) override;
-    void OnAffiliate(SimSession* s, const std::string& group, int iSipStatus, long long affMs) override;
+    void OnAffiliate(SimSession* s, const std::string& group, int iSipStatus, long long affMs, bool bDeaffiliate) override;
+    void OnSubscribeResponse(SimSession* s, const std::string& event, const std::string& resource, int iSipStatus) override;
+    void OnDialogNotify(SimSession* s, const std::string& watched, const std::string& state, const std::string& callId) override;
     void OnCallAnswered(SimSession* s, const std::string& callId) override;
     void OnFloor(SimSession* s, int iSubtype, long long tUs) override;
     // ICsimPeerObserver — 스택 스레드
@@ -209,17 +223,18 @@ public:
 private:
     struct Event {
         enum Kind { REGISTER, INCOMING, CALLSTART, CALLEND, BYERESP, RING, PRACK, REINVITE, REINVITE_RESP, REFER_RESP,
-                    AFFILIATE, ANSWERED, FLOOR } kind;
+                    AFFILIATE, ANSWERED, FLOOR, SUBSCRIBE_RESP, DLG_NOTIFY } kind;
         SimSession* s;
         CsimPeer* peer;
         int status;
         long long ms;
         std::string callId;
         std::string user;   // peer INCOMING: To user
-        bool hasPai;        // INCOMING: P-Asserted-Identity 존재 · RING: SDP 있음(early media) · REINVITE: 상대 hold
+        bool hasPai;        // INCOMING: P-Asserted-Identity 존재 · RING: SDP 있음(early media) · REINVITE: 상대 hold · AFFILIATE: 해제 명령의 응답
         bool prack = false; // RING: PRACK 을 냈다
         int q850 = 0;       // CALLEND: 상대 Reason Q.850 cause
         long long us = 0;   // FLOOR: 수신 시각(µs)
+        std::string event;  // SUBSCRIBE_RESP: 이벤트 패키지(user = 자원) · DLG_NOTIFY: dialog 상태(user = 감시 대상, callId = 그 dialog)
     };
 
     WorkerConfig m_cfg;
@@ -309,9 +324,10 @@ private:
     bool epReject(Endpoint* ep, int code, int cause = 0);
     bool epBye(Endpoint* ep, int cause = 0);
     bool epHold(Endpoint* ep, bool hold);
-    bool epRefer(Endpoint* from, Endpoint* to);
+    bool epRefer(Endpoint* from, Endpoint* to, bool attended);   // attended = 전달자가 to 와 상담 통화 중(Refer-To 에 Replaces)
     bool epDtmf(Endpoint* ep, const std::string& digits);
     void epSetMediaMode(Endpoint* ep, int mode);
+    void epSetVideo(Instance& in, Endpoint* from, bool want);   // invite/group_call 의 media.video — 오퍼 m=video 유무(워커 Media.VideoFile 전제)
     bool epMediaSend(Endpoint* ep, const CompiledStep& st);   // false = SDP 교환 전(RTP 미기동)
     bool epMediaStop(Endpoint* ep);
     bool resolveSample(const std::string& file, std::string& out, std::string& err) const;
@@ -326,6 +342,10 @@ private:
     int m_bodyRtpMode = 0;                  // body 첫 invite 의 media.rtp — 인스턴스 시작 모드·RTP 상한 판정
     void sampleDtmf(Endpoint* ep);
     std::string callerRole(Instance& in);
+    std::string pendingCallerRole(Instance& in);       // 자기 INVITE 의 최종 응답을 기다리는 역할(상담 호 포함) — answer/reject 완료·in-dialog 단계의 확립 대기
+    void markCancelExpected(Instance& in);             // 픽업·Replaces 직전 — 링잉 중인 착신 leg 들은 서버 CANCEL 로 끝나는 것이 정상
+    bool epSubscribe(Endpoint* ep, const std::string& event, const std::string& resource);
+    void epUnsubscribe(Endpoint* ep);
     void epClearCall(Endpoint* ep);
     std::string roleOf(Instance* in, Endpoint* ep);
     static long long nowMs();

@@ -1,0 +1,22 @@
+# 호 전달 attended (RFC 3515 REFER + Refer-To 의 Replaces RFC 3891, TS 24.629 consultative ECT — volte_supplementary_services.md §6.2)
+#   A→B 확립 → A 가 C 를 상담 통화(두 번째 다이얼로그)로 부르고 → attended REFER 로 두 상대를 묶는다. 전달 뒤 B–C 미디어, A 는 빠진다.
+#   워커는 `invite` 의 from 이 통화 중이면 상담 통화를 열고, `refer` 의 to 가 그 상담 상대면 attended 로 낸다. 검증 S3-SCN-XFER X2.
+id: VOLTE-XFER-ATTENDED
+title: 호 전달 attended REFER (상담 뒤 Replaces)
+tags: [volte, xfer]
+roles:
+  transferor: { pool: volte_ue }
+  transferee: { pool: volte_ue, disjoint_from: transferor }
+  target:     { pool: volte_ue, disjoint_from: transferee }
+flow:
+  - { step: register,   who: [transferor, transferee, target], expect: { code: 200 } }
+  - { step: invite,     from: transferor, to: transferee, media: { audio: amr-wb } }
+  - { step: answer,     who: [transferee], after_ms: 500 }
+  - { step: media_hold, seconds: 1 }
+  - { step: invite,     from: transferor, to: target, media: { audio: amr-wb } }    # 상담 통화(consultation)
+  - { step: answer,     who: [target], after_ms: 300 }
+  - { step: refer,      from: transferor, to: target, expect: { code: 202 } }         # attended — Refer-To 에 상담 다이얼로그 Replaces
+  - { step: media_hold, seconds: "${ht}", expect: { rtp_loss_pct: { max: 1 } } }
+  - { step: bye,        from: transferee }
+target_evidence:
+  - { kind: recording_created, min: 1 }

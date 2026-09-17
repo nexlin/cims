@@ -67,6 +67,8 @@ export const SUMMARY_ROWS: [string, string, 'int' | 'pct' | 'num' | 'str'][] = [
   ['attempts', '호 시도(attempt)', 'int'], ['sessions', '세션(성립)', 'int'], ['completed', '완료(정상 BYE)', 'int'],
   ['failed', '실패', 'int'], ['skipped', '단말 부족으로 건너뜀', 'int'],
   ['ser_pct', 'SER (Session Establishment Ratio)', 'pct'], ['scr_pct', 'SCR (Session Completion Ratio)', 'pct'],
+  ['seer_pct', 'SEER (유효 성립률 — 거절 480/486/600/603 포함)', 'pct'], ['isa_pct', 'ISA (부적절 시도 — 408/500/503/504·Timer B)', 'pct'],
+  ['mos_mean', 'MOS 추정 평균 (G.107)', 'num'], ['mos_min', 'MOS 추정 최솟값(최악 leg)', 'num'], ['rtcp_rx', 'RTCP SR/RR 수신', 'int'],
   ['registered_ok', '등록 성공', 'int'], ['registered_fail', '등록 실패', 'int'], ['doc_saps', 'DOC (SApS)', 'num'],
   ['rtp_rx', 'RTP 수신', 'int'], ['rtp_lost', 'RTP 손실', 'int'], ['rtp_loss_pct', 'RTP 손실 %', 'pct'],
   ['early_media_pct', 'early media 비율(183+SDP)', 'pct'], ['prack_pct', 'PRACK 비율', 'pct'],
@@ -76,14 +78,15 @@ export const SUMMARY_ROWS: [string, string, 'int' | 'pct' | 'num' | 'str'][] = [
 
 export const TIMER_ROWS: [string, string][] = [
   ['rrd_ms', 'RRD (등록 지연) ms'], ['srd_ms', 'SRD (세션 요청 지연) ms'], ['sdd_ms', 'SDD (세션 해제 지연) ms'],
-  ['sdt_s', 'SDT (세션 지속) s'], ['jitter_ms', '지터 ms'], ['rtp_loss_pct', 'RTP 손실 %(호별)'],
+  ['sdt_s', 'SDT (세션 지속) s'], ['jitter_ms', '지터 ms'], ['rtp_loss_pct', 'RTP 손실 %(호별)'], ['mos', 'MOS 추정 (G.107, min 이 판정)'],
 ]
 
 export const STEP_LABEL: Record<string, string> = {
   register: '등록', invite: '발신 INVITE', answer: '응답(200)', progress: '183 early media', hold: 'hold(re-INVITE)',
   resume: 'resume(re-INVITE)', dtmf: 'DTMF(RFC 4733)', refer: 'REFER 전달', media_hold: '미디어 유지', bye: 'BYE',
-  reject: '거절', deregister: '등록 해제', ptt_join: 'PTT 합류', floor_request: 'floor 요청', floor_release: 'floor 해제',
-  sds: 'SDS 송신', wait: '대기',
+  reject: '거절', deregister: '등록 해제', group_call: 'PTT 그룹콜', floor_request: 'floor 요청', floor_release: 'floor 해제',
+  pickup: '당겨받기', replaces: 'INVITE-Replaces', join: 'INVITE-Join 청취', subscribe: 'SUBSCRIBE', publish: 'PUBLISH affiliation',
+  media_send: 'RTP 송출', media_stop: '송출 정지', sds_send: 'SDS 송신', sds_recv: 'SDS 수신', wait: '대기', expect: '누계 게이트',
 }
 
 export function summaryValue(s: Summary | undefined, key: string, kind: 'int' | 'pct' | 'num' | 'str'): string {

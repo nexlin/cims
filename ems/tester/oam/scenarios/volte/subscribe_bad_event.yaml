@@ -1,0 +1,10 @@
+# SUBSCRIBE 분류 (RFC 6665 §8.2.1) — 미지원 이벤트 패키지는 489 Bad Event, 대조로 자기 AoR 의 dialog 자기감시는 200. 검증 S3-SCN-DIALOG D4.
+id: VOLTE-SUBSCRIBE-BAD-EVENT
+title: SUBSCRIBE 미지 이벤트 489 / dialog 자기감시 200
+tags: [volte, dialog]
+roles:
+  ue: { pool: volte_ue }
+flow:
+  - { step: register,   who: [ue], expect: { code: 200 } }
+  - { step: subscribe,  who: [ue], payload: cims-tester-bogus, expect: { code: 489 } }
+  - { step: subscribe,  who: [ue], payload: dialog, expect: { code: 200 } }

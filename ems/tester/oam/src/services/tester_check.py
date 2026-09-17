@@ -125,7 +125,18 @@ def check_topology(topology: Topology, topology_doc: dict, requester_token=None)
         if h.ssh is not None:
             it = _tcp_connect(f'{hid}:ssh', h.ip, h.ssh.port, tls=False)
             it['target'] = {'kind': 'host', 'id': hid}
-            it['detail'] += ' (SSH 관측은 도달 확인만 — 프로세스 CPU 관측은 후속)'
+            if it['ok']:
+                # 도달 뒤 실제 키 인증 + /proc 읽기(관측 명령과 같은 도구) — 실패하면 run 의 SSH 관측도 실패한다
+                from services import tester_observe
+                t0 = time.time()
+                try:
+                    out = tester_observe.ssh_run(h, 'echo "@T $(date +%s.%N) $(getconf CLK_TCK 2>/dev/null || echo 100)"; head -1 /proc/stat', timeout=10)
+                    ok = '@T ' in out and 'cpu ' in out
+                    it['detail'] += f" · ssh {h.ssh.user}@{h.ip} 인증·/proc 읽기 {'OK' if ok else '실패(출력 이상)'} {int((time.time() - t0) * 1000)} ms"
+                    it['ok'] = it['ok'] and ok
+                except Exception as e:
+                    it['ok'] = False
+                    it['detail'] += f' · ssh 실패: {e}'
             items.append(it)
     if not topology.target.nodes:
         t0 = time.time()

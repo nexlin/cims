@@ -61,6 +61,8 @@ public:
 
     /** 비디오 파일 경로 (H.264 Annex B raw NAL 파일) 설정 */
     void SetVideoFile(const std::string& strPath) { m_strVideoFile = strPath; }
+    /** 이 호의 오퍼에 m=video 를 실을지 — 파일(비디오 소켓)이 있어도 시나리오가 끄면 오디오만(계측기 `invite.media.video`). 호마다 재설정. */
+    bool m_bVideoOffer = true;
 
 	// ── 송출 제어 — 계측기 미디어 평면(test_instrument.md §4 `invite.media.rtp`·`media_send`/`media_stop`) ──
 	//   모드: AUTO = SDP 교환 즉시 기본 원천으로 송출(기존 동작) · NONE = 시그널링 전용(Start 가 스레드를 띄우지 않는다 — SDP 는
@@ -158,9 +160,17 @@ public:
     //   지터 = 도착 간격 편차의 지수 평균(A.8), 단위 µs(클록은 wire PT 로 유도: 0/8=8 kHz, 그 외 16 kHz).
     std::atomic<unsigned long long> m_ullRecvLost{0};
     std::atomic<long long>          m_llRecvJitterUs{0};
+    std::atomic<int>                m_iRecvPt{-1};        // 마지막 수신 audio RTP 의 wire PT(telephone-event 제외) — MOS 코덱 판정(E-model Ie/Bpl)
+    // ── RTCP 수신 통계 (RFC 3550 §6.4 — RTP 포트+1 로 들어오는 SR/RR compound) ──
+    //   상대(CMP 또는 피어)가 우리 스트림에 대해 보고한 fraction lost·interarrival jitter. 워커 카운터 rtcp_rx·rtcp_rr_rx, 표본 rtcp_remote_loss_pct.
+    std::atomic<int>                m_iRtcpRecv{0};          // SR/RR 패킷 수
+    std::atomic<int>                m_iRtcpRrBlocks{0};      // 보고 블록 수
+    std::atomic<int>                m_iRtcpRrFractionLost{-1};   // 마지막 보고 블록의 fraction lost(0~255, -1 = 없음)
+    std::atomic<unsigned int>       m_uRtcpRrJitter{0};      // 마지막 보고 블록의 interarrival jitter(클록 틱)
     /** 새 호마다 초기화 — 시퀀스 기준·지터 누적을 버린다(SSRC 도). */
     void ResetRecvStats() {
         m_ullRecvLost = 0; m_llRecvJitterUs = 0; m_ullRecvTotal = 0;
+        m_iRecvPt = -1; m_iRtcpRecv = 0; m_iRtcpRrBlocks = 0; m_iRtcpRrFractionLost = -1; m_uRtcpRrJitter = 0;
         std::lock_guard<std::mutex> lk(m_mtxSsrc); m_setRecvSsrc.clear();
         m_bRecvSeqInit = false;
     }

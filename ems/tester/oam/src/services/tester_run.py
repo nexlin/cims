@@ -26,7 +26,7 @@ from typing import Dict, List, Optional
 from services import tester_store as store
 from services import tester_workers, tester_compile, tester_target, tester_observe
 from services.tester_bus import publish
-from services.tester_models import RunRecord, RunRequest, LoadProfile, RATIO_METRICS
+from services.tester_models import RunRecord, RunRequest, LoadProfile, RATIO_METRICS, LOWER_BETTER_RATIOS
 
 _LOG = None
 
@@ -415,6 +415,7 @@ class RunDriver(threading.Thread):
         self._t_started = time.time()
         self.ended_at: Optional[str] = None
         self.observer: Optional[tester_observe.TargetObserver] = None
+        self.ssh_observer: Optional[tester_observe.SshObserver] = None    # hosts.*.ssh — 호스트/프로세스 자원 + log_errors
         self.evidence_results: List[dict] = []
         self.notes: List[str] = []
         self.expect_results: List[dict] = []
@@ -535,6 +536,10 @@ class RunDriver(threading.Thread):
             self.observer = tester_observe.TargetObserver(self.run_id, os.path.join(self.rec.dir, 'metrics.sqlite'),
                                                           self.topology, self._requester_token)
             self.observer.start()
+        # 호스트 SSH 관측(§5) — ssh 가 있는 호스트의 CPU/메모리 + 대상 노드 procs 의 프로세스별 CPU/RSS, run 끝에 nodes.*.logs 의 ERROR 증분
+        if tester_observe.SshObserver.wanted(self.topology):
+            self.ssh_observer = tester_observe.SshObserver(self.run_id, os.path.join(self.rec.dir, 'metrics.sqlite'), self.topology)
+            self.ssh_observer.start()
         for w in self.workers:
             w.run_start(self.plan['workers'][w.name]['run'])
         self.state = 'running'
@@ -595,13 +600,15 @@ class RunDriver(threading.Thread):
                 self.verdict = 'fail'
                 return True
         if so.target_cpu_pct is not None:
-            cpu = self.observer.cpu_now() if self.observer is not None else None
+            vals = [o.cpu_now() for o in (self.observer, self.ssh_observer) if o is not None]
+            vals = [v for v in vals if v is not None]
+            cpu = max(vals) if vals else None
             if cpu is not None and cpu > so.target_cpu_pct:
                 self.request_stop(f'stop_on target_cpu_pct {cpu:.1f} > {so.target_cpu_pct}')
                 self.verdict = 'fail'
                 return True
-            if self.observer is None and not any(n.startswith('target_cpu:') for n in self.notes):
-                self.notes.append('target_cpu: 대상 관측이 꺼져 있다(oam 노드 observe 에 agent_heartbeat 없음) — stop_on.target_cpu_pct 미적용')
+            if self.observer is None and self.ssh_observer is None and not any(n.startswith('target_cpu:') for n in self.notes):
+                self.notes.append('target_cpu: 대상 관측이 꺼져 있다(oam 노드 observe 에 agent_heartbeat 없음·hosts.*.ssh 없음) — stop_on.target_cpu_pct 미적용')
         return False
 
     def _drive(self) -> None:
@@ -689,16 +696,32 @@ class RunDriver(threading.Thread):
             self.observer.join(timeout=10)
             if self.observer.note:
                 self.notes.append(self.observer.note)
+        log_errors = None
+        if self.ssh_observer is not None:
+            self.ssh_observer.stop()
+            self.ssh_observer.join(timeout=15)
+            try:
+                log_errors = self.ssh_observer.log_errors()
+            except Exception as e:
+                self.notes.append(f'log_errors 조회 실패: {e}')
+            if self.ssh_observer.note:
+                self.notes.append(self.ssh_observer.note)
         snap = self.rec.snapshot()
         summary = self._summary(snap)
-        if self.observer is not None and self.observer.peak_cpu is not None:
-            summary['target_cpu_peak_pct'] = self.observer.peak_cpu
+        peaks = [o.peak_cpu for o in (self.observer, self.ssh_observer) if o is not None and o.peak_cpu is not None]
+        if peaks:
+            summary['target_cpu_peak_pct'] = max(peaks)
+        if self.ssh_observer is not None and self.ssh_observer.proc_peak:
+            summary['target_proc_peak_pct'] = {k: round(v, 1) for k, v in self.ssh_observer.proc_peak.items()}
+            summary['target_rss_delta_mb'] = self.ssh_observer.rss_delta_mb()   # 소크 누수 판정 원천 — 처음↔끝 RSS 차
+        if log_errors is not None:
+            summary['target_log_errors'] = log_errors
         # 대상 증거(2차 판정) — 운영자 중단·오류 run 은 판정하지 않는다
         if self.scenario.target_evidence and self.verdict == 'running' and not (
                 self._stop_req.is_set() and (self.stop_reason or '').startswith('operator')):
             try:
                 self.evidence_results = tester_observe.evaluate_evidence(
-                    self.scenario, self.topology, self._t_started, t_ended, self._requester_token)
+                    self.scenario, self.topology, self._t_started, t_ended, self._requester_token, log_errors)
             except Exception as e:
                 self.notes.append(f'target_evidence 판정 실패: {e}')
         if self.verdict == 'running':
@@ -769,6 +792,13 @@ class RunDriver(threading.Thread):
         for k in ('progress_tx', 'early_media', 'prack_tx', 'prack_rx', 'reinvite_ok', 'reinvite_fail', 'reinvite_rx',
                   'dtmf_tx', 'dtmf_sent', 'dtmf_rx', 'q850_tx', 'q850_rx', 'refer_tx',
                   'rtp_tx', 'rtp_silent_legs', 'media_send', 'media_stop', 'skipped_rtp_cap', 'early_rtp_ok', 'early_rtp_rx',
+                  # 전달·합류·구독(volte_supplementary_services §5·§6 · dispatch_center §5 · RFC 6665)
+                  'consult_tx', 'consult_ok', 'refer_attended_tx', 'pickup_tx', 'pickup_ok', 'replaces_tx', 'replaces_ok',
+                  'join_tx', 'join_ok', 'join_ssrc2', 'ringing_leg_cancelled', 'subscribe_tx', 'notify_rx', 'publish_tx',
+                  # RFC 6076 SEER/ISA 원천 · RTCP 수신 통계
+                  'invite_tx', 'seer_ok', 'isa_fail', 'rtcp_rx', 'rtcp_rr_rx',
+                  # 영상(invite.media.video) — 오퍼에 m=video 를 실은 수·활성 answer·워커에 비디오 파일이 없어 오디오만 나간 수
+                  'video_offered', 'video_ok', 'video_unavailable',
                   # PTT — affiliation·그룹 세션·floor(TS 24.380)
                   'affiliated_ok', 'affiliated_fail', 'group_calls', 'group_joined', 'floor_request_tx', 'floor_granted',
                   'floor_denied', 'floor_queued', 'floor_revoked', 'floor_release_tx'):
@@ -779,9 +809,10 @@ class RunDriver(threading.Thread):
                 continue
             if c.get(den):
                 out[name] = 100.0 * c.get(num, 0) / c[den]
-        refer_codes = ','.join(f'{k[12:]}:{v}' for k, v in sorted(c.items()) if k.startswith('refer_codes.'))
-        if refer_codes:
-            out['refer_codes'] = refer_codes
+        for pref in ('refer_codes.', 'subscribe_codes.', 'publish_codes.'):
+            codes = ','.join(f'{k[len(pref):]}:{v}' for k, v in sorted(c.items()) if k.startswith(pref))
+            if codes:
+                out[pref[:-1]] = codes
         q850 = ','.join(f'{k[5:]}:{v}' for k, v in sorted(c.items()) if k.startswith('q850.'))
         if q850:
             out['q850_causes'] = q850
@@ -791,6 +822,13 @@ class RunDriver(threading.Thread):
             if h:
                 out[f'{name}_p50'] = h.get('p50')
                 out[f'{name}_p95'] = h.get('p95')
+                out[f'{name}_max'] = h.get('max')
+        # MOS(G.107 추정, 1~4.5)는 로그 버킷 백분위가 거칠어 평균·최솟값(최악 leg)으로 요약한다 — 기대치도 min
+        for name in ('mos', 'rtcp_remote_loss_pct'):
+            h = t.get(name)
+            if h:
+                out[f'{name}_mean'] = h.get('mean')
+                out[f'{name}_min'] = h.get('min')
                 out[f'{name}_max'] = h.get('max')
         # expect 판정 — 단계별
         self.expect_results = []
@@ -802,10 +840,18 @@ class RunDriver(threading.Thread):
                     if s.step == 'register':
                         got_bad = c.get('registered_fail', 0)
                         r.update({'observed': f'ok={c.get("registered_ok", 0)} fail={got_bad}', 'ok': got_bad == 0 if want == 200 else True})
-                    elif s.step in ('invite', 'group_call') and want is not None and want >= 300:
-                        # 기대한 거절(ACL 403·라우팅 reject) — 그 코드가 관측되고 실패 인스턴스가 없어야 한다
+                    elif s.step in ('invite', 'group_call', 'pickup', 'replaces', 'join') and want is not None and want >= 300:
+                        # 기대한 거절(ACL 403·라우팅 reject·타 그룹 픽업 403·링잉 호 없음 404) — 그 코드가 관측되고 실패 인스턴스가 없어야 한다
                         r.update({'observed': f'codes.{want}={c.get(f"codes.{want}", 0)} failed={c.get("failed", 0)}',
                                   'ok': c.get(f'codes.{want}', 0) > 0 and c.get('failed', 0) == 0})
+                    elif s.step in ('pickup', 'replaces', 'join'):
+                        ok_n = c.get(f'{s.step}_ok', 0)
+                        r.update({'observed': f'{s.step}_ok={ok_n} failed={c.get("failed", 0)}', 'ok': ok_n > 0 and c.get('failed', 0) == 0})
+                    elif s.step in ('subscribe', 'publish'):
+                        # 최종 응답 코드 카운터(워커 <step>_codes.N) — 기대 코드가 관측되고 실패 인스턴스가 없어야 한다(403·489 도 기대값이 된다)
+                        want = want or 200
+                        key = f'{s.step}_codes.{want}'
+                        r.update({'observed': f'{key}={c.get(key, 0)} failed={c.get("failed", 0)}', 'ok': c.get(key, 0) > 0 and c.get('failed', 0) == 0})
                     elif s.step in ('invite', 'answer', 'bye', 'group_call'):
                         r.update({'observed': f'sessions={sessions} failed={c.get("failed", 0)}', 'ok': c.get('failed', 0) == 0 if want == 200 else True})
                     elif s.step == 'reject':
@@ -826,11 +872,15 @@ class RunDriver(threading.Thread):
                 elif metric in RATIO_METRICS:
                     num, den = RATIO_METRICS[metric]
                     val = out.get(metric)
-                    want = float(exp) if isinstance(exp, (int, float)) else float(getattr(exp, 'min', None) or 0)
+                    lower = metric in LOWER_BETTER_RATIOS
+                    if isinstance(exp, (int, float)):
+                        want = float(exp)
+                    else:
+                        want = float((getattr(exp, 'max', None) if lower else getattr(exp, 'min', None)) or 0)
                     if not c.get(den):
                         r.update({'observed': None, 'ok': False, 'why': f'분모 {den} 없음'})
                     else:
-                        r.update({'observed': val, 'ok': val is not None and val >= want})
+                        r.update({'observed': val, 'ok': val is not None and (val <= want if lower else val >= want)})
                 else:
                     h = t.get(metric)
                     if not h or not h.get('count'):

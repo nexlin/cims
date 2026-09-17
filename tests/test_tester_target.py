@@ -331,6 +331,71 @@ class Observe(unittest.TestCase):
             oam.srv.shutdown()
 
 
+class SshObservation(unittest.TestCase):
+    """호스트 SSH 관측 — 가짜 실행기가 /proc 표본 두 장을 준다: 호스트 CPU 차분·프로세스 CPU(틱/CLK_TCK/경과)·RSS·log_errors(늘어난 ERROR 줄)."""
+
+    def _topology(self):
+        return M.Topology.model_validate({'name': 'ut-ssh', 'hosts': {'h1': {'ip': '10.0.0.9', 'ssh': {'user': 'cims', 'key_env': 'UT_SSH_KEY'}}},
+            'workers': [{'name': 'w1', 'host': 'h1'}],
+            'target': {'name': 'sut', 'kind': 'cims', 'nodes': {
+                'csp': {'role': 'sip', 'host': 'h1', 'procs': ['csp'], 'logs': ['/opt/cims/csp/log/csp_*.log'],
+                        'sip': {'listeners': {'udp': {'edge': 'access', 'port': 5060}}, 'domains': ['x.test']}}}},
+            'pools': {'ue': {'kind': 'ue', 'worker': 'w1', 'access': 'csp', 'source': {'creds': 'c.jsonl'}}}})
+
+    def test_ssh_observer_samples_and_log_errors(self):
+        from services import tester_observe as O
+        topo = self._topology()
+        self.assertTrue(O.SshObserver.wanted(topo))
+        calls = []
+        samples = iter([
+            '@T 1000.0 100\n@S cpu 1000 0 500 8000 100 0 0 0\n@M MemTotal: 8000000 kB\n@M MemAvailable: 4000000 kB\n@L 0.5\n@P csp 4242 300 102400\n@F 5000 /opt/cims/csp/log/csp_a.log\n',
+            '@T 1003.0 100\n@S cpu 1300 0 600 8500 100 0 0 0\n@M MemTotal: 8000000 kB\n@M MemAvailable: 3000000 kB\n@L 0.9\n@P csp 4242 390 112640\n@F 5300 /opt/cims/csp/log/csp_a.log\n',
+        ])
+
+        def runner(host, cmd):
+            calls.append(cmd)
+            if '@N' in cmd:
+                return '@N /opt/cims/csp/log/csp_a.log\n@N /opt/cims/csp/log/csp_b.log\n'
+            if 'grep -c' in cmd:
+                self.assertIn('tail -c +5001 /opt/cims/csp/log/csp_a.log', cmd)   # 시작 크기 다음 바이트부터
+                self.assertIn('tail -c +1 /opt/cims/csp/log/csp_b.log', cmd)      # run 중 생긴 파일은 전체
+                return '2\n1\n'
+            return next(samples)
+
+        db = os.path.join(_TMP, 'ssh.sqlite')
+        ob = O.SshObserver('ut-ssh', db, topo, runner=runner, poll_s=0.05)
+        ob.start()
+        for _ in range(60):
+            if ob.samples >= 1:
+                break
+            time.sleep(0.05)
+        ob.stop(); ob.join(5)
+        self.assertEqual(ob.samples, 1)
+        # 호스트 CPU = (Δ전체 − Δidle)/Δ전체 = (900 − 500)/900 → 44.4 % · 프로세스 = 90 틱 / 100 / 3 s → 30 %
+        self.assertAlmostEqual(ob.peak_cpu, 44.4, delta=0.2)
+        self.assertAlmostEqual(ob.proc_peak['h1/csp'], 30.0, delta=0.1)
+        self.assertAlmostEqual(ob.rss_delta_mb()['h1/csp'], 10.0, delta=0.1)
+        self.assertAlmostEqual(ob.cpu_now(), 44.4, delta=0.2)
+        ser = O.target_series(db)
+        self.assertEqual(list(ser['agents']), ['h1'])
+        self.assertEqual(list(ser['procs']), ['h1/csp'])
+        self.assertAlmostEqual(ser['agents']['h1']['mem_pct'][0], 62.5, delta=0.1)
+        self.assertEqual(ob.log_errors(), 3)
+        sc = M.Scenario.model_validate({'id': 'UT-LOG', 'roles': {'a': {'pool': 'ue'}}, 'flow': [{'step': 'register', 'who': ['a']}],
+                                        'target_evidence': [{'kind': 'log_errors', 'max': 0}]})
+        res = O.evaluate_evidence(sc, topo, 0, 1, None, log_errors=3)
+        self.assertEqual((res[0]['observed'], res[0]['ok']), (3, False))
+        res = O.evaluate_evidence(sc, topo, 0, 1, None, log_errors=None)
+        self.assertIsNone(res[0]['ok'])
+        # ssh argv — 개인키는 환경변수의 경로, 비밀은 레코드에 없다
+        os.environ['UT_SSH_KEY'] = '/tmp/k'
+        try:
+            argv = O.ssh_argv(topo.hosts['h1'], 'true')
+            self.assertIn('-i', argv); self.assertIn('/tmp/k', argv); self.assertEqual(argv[-2], 'cims@10.0.0.9')
+        finally:
+            os.environ.pop('UT_SSH_KEY', None)
+
+
 class WorkerDiscovery(unittest.TestCase):
     def test_discover_deployed_workers_from_base_oam(self):
         """base OAM 배포 목록의 cims-tester-worker → 주소(agent ip)·포트(배포 설정 Server.Port, 없으면 7100)·cpus."""

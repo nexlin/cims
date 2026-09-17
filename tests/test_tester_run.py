@@ -133,7 +133,8 @@ class FakeWorker:
                       'srd_ms': {'count': 1, 'sum': 1500, 'min': 1500, 'max': 1500, 'buckets': {'2000': 1}},
                       'sdd_ms': {'count': 1, 'sum': 2, 'min': 2, 'max': 2, 'buckets': {'2': 1}},
                       'jitter_ms': {'count': 2, 'sum': 20, 'min': 10, 'max': 10, 'buckets': {'10': 2}},
-                      'rtp_loss_pct': {'count': 2, 'sum': 0.2, 'min': 0.1, 'max': 0.1, 'buckets': {'1': 2}}}
+                      'rtp_loss_pct': {'count': 2, 'sum': 0.2, 'min': 0.1, 'max': 0.1, 'buckets': {'1': 2}},
+                      'mos': {'count': 2, 'sum': 8.4, 'min': 4.2, 'max': 4.2, 'buckets': {'5': 2}}}
             if fail and i == n - 1:
                 counters = {'attempts': 1, 'failed': 1, 'codes.503': 1, 'legs': 2}
                 timers = {}
@@ -240,11 +241,18 @@ class Compile(unittest.TestCase):
         self.assertEqual(plan['steps'][3].get('expect', {}), {})
         self.assertEqual(plan['steps'][5]['expect'], {'rtp_loss_pct': {'max': 1}})
         self.assertNotIn('src', plan['workers']['w1']['run']['steps'][0])      # 워커 계약에는 src 없음
-        # 워커가 지원하지 않는 단계는 컴파일 오류
+        # 워커가 지원하지 않는 단계(sds_send — MCData 미구현)는 컴파일 오류
         sc2 = M.Scenario.model_validate({'id': 'UT-NS', 'roles': {'a': {'pool': 'volte_ue'}},
-                                         'flow': [{'step': 'pickup', 'from': 'a'}]})
+                                         'flow': [{'step': 'sds_send', 'from': 'a'}]})
         with self.assertRaises(C.CompileError):
             C.compile_run('r3', sc2, topo, topo_doc, None, {}, TW.discover(topo_doc), lambda w: 'x:1', 1, None)
+        # pickup 의 payload(피처코드) 는 ${var} 바인딩으로 준다 — 컴파일이 문자열로 푼다(숫자 문자열도 문자열). 없으면 오류
+        sc3, _, _ = S.get_scenario('VOLTE-PICKUP-GROUP')
+        with self.assertRaises(C.CompileError):
+            C.compile_steps(sc3, {'ht': 3})
+        steps3 = C.compile_steps(sc3, {'ht': 3, 'pickup_code': '**'})
+        self.assertEqual([s for s in steps3 if s['step'] == 'pickup'][0]['payload'], '**')
+        self.assertEqual([s for s in C.compile_steps(sc3, {'ht': 3, 'pickup_code': 77}) if s['step'] == 'pickup'][0]['payload'], '77')
 
     def test_ptt_group_session(self):
         """그룹 세션(group_call) — 역할은 신원 창을 나누지 않고(전부 풀 전체) multi_roles·service·ptt_group 이 워커 계약으로 간다.

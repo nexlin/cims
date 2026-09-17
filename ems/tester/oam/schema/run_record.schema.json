@@ -75,10 +75,17 @@
             "type": "string"
           },
           {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object"
+          },
+          {
             "type": "null"
           }
         ]
       },
+      "description": "RFC 6076 요약 — 값은 수·문자열(코드 분해) 또는 이름별 수(프로세스별 CPU 피크·RSS 증감)",
       "title": "Summary",
       "type": "object"
     },

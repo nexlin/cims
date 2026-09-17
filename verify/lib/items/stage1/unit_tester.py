@@ -22,7 +22,7 @@ _ID = "S1-UNIT-TESTER"
 _NAME = "계측기 계약/핸들러/오케스트레이터/피어 시드/게이트웨이 SSE unit test + libcsim RTP DTMF·미디어 평면 루프백 (python3 -m unittest tests.test_tester_models tests.test_tester_handler tests.test_tester_run tests.test_tester_target tests.test_gateway_stream · build/bin/csim_rtp_dtmf_test · build/bin/csim_rtp_media_test)"
 _MODULES = ("tests.test_tester_models", "tests.test_tester_handler", "tests.test_tester_run", "tests.test_tester_target",
             "tests.test_gateway_stream")
-_NATIVES = ("csim_rtp_dtmf_test", "csim_rtp_media_test", "tester_sip_capture_test")
+_NATIVES = ("csim_rtp_dtmf_test", "csim_rtp_media_test", "tester_sip_capture_test", "tester_emodel_test")
 
 
 @verify_item(

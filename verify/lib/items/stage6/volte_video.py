@@ -4,6 +4,7 @@ from __future__ import annotations
 from ...registry import verify_item, ItemResult
 from ...context import VerifyContext
 from ...common.subscribers import cred_args
+from ...common.tester import run_tester_scenario
 from ._helpers import run_scenario, target_ip, local_ip_args
 
 
@@ -16,6 +17,10 @@ from ._helpers import run_scenario, target_ip, local_ip_args
     execution_order=40,
 )
 def scn_volte_video(ctx: VerifyContext) -> ItemResult:
+    # 계측기가 설정돼 있으면 `VOLTE-CALL-VIDEO`(m=video 협상 video_pct 100 + 녹취 증거). 없으면 cspsim 경로 (test_instrument.md §9)
+    r = run_tester_scenario(ctx, "S6-SCN-VOLTE-VIDEO", "VoLTE 영상 2자 통화", "VOLTE-CALL-VIDEO", stage=6, instances=1, ht=5)
+    if r is not None:
+        return r
     s = ctx.state
     _tgt = target_ip("csp", ctx.sim_ip)
     args = [

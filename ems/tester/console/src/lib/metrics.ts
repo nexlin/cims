@@ -41,7 +41,7 @@ export function judgeMetric(metric: string, exp: unknown, counters: Record<strin
     if (v == null) return 'none'
     const want = pct(exp)
     if (want == null) return 'none'
-    return metric === 'rtp_loss_pct' ? (v <= want ? 'ok' : 'bad') : (v >= want ? 'ok' : 'bad')
+    return LOWER_BETTER.has(metric) ? (v <= want ? 'ok' : 'bad') : (v >= want ? 'ok' : 'bad')
   }
   const h = timers[metric]
   if (!h || !h.count) return 'none'
@@ -58,6 +58,8 @@ export function judgeMetric(metric: string, exp: unknown, counters: Record<strin
   return ok ? 'ok' : 'bad'
 }
 
+/** 낮을수록 좋은 비율(기대치 = 상한) — 컨트롤러 LOWER_BETTER_RATIOS + 호별 손실 */
+export const LOWER_BETTER = new Set(['rtp_loss_pct', 'isa_pct'])
 /** 비율 지표 값 — 컨트롤러 RATIO_METRICS 와 같은 분자/분모. */
 export function ratiosFrom(c: Record<string, number>): Record<string, number | null> {
   const r = (n: number, d: number) => (d ? (100 * n) / d : null)
@@ -65,6 +67,12 @@ export function ratiosFrom(c: Record<string, number>): Record<string, number | n
   return {
     ser_pct: r(c.sessions ?? 0, c.attempts ?? 0),
     scr_pct: r(c.completed ?? 0, c.sessions ?? 0),
+    seer_pct: r(c.seer_ok ?? 0, c.invite_tx ?? 0),
+    isa_pct: r(c.isa_fail ?? 0, c.invite_tx ?? 0),
+    join_tap_pct: r(c.join_ssrc2 ?? 0, c.join_ok ?? 0),
+    video_pct: r(c.video_ok ?? 0, c.video_offered ?? 0),
+    early_rtp_pct: r(c.early_rtp_ok ?? 0, c.progress_tx ?? 0),
+    floor_grant_pct: r(c.floor_granted ?? 0, c.floor_request_tx ?? 0),
     rtp_loss_pct: lossTot ? (100 * (c.rtp_lost ?? 0)) / lossTot : null,
     dtmf_rx_pct: r(c.dtmf_rx ?? 0, c.dtmf_tx ?? 0),
     q850_rx_pct: r(c.q850_rx ?? 0, c.q850_tx ?? 0),
@@ -102,6 +110,8 @@ export function funnelRows(sc: ScenarioDoc | null | undefined, plan: RunPlan | n
       case 'hold': case 'resume': entered = c.sessions ?? 0; done = c.reinvite_ok ?? 0; failed = c.reinvite_fail ?? 0; break
       case 'dtmf': entered = c.dtmf_tx ?? 0; done = c.dtmf_rx ?? 0; break
       case 'refer': entered = c.refer_tx ?? 0; done = Object.entries(c).filter(([k]) => k.startsWith('refer_codes.2')).reduce((a, [, v]) => a + v, 0); break
+      case 'pickup': case 'replaces': case 'join': entered = c[`${s.step}_tx`] ?? 0; done = c[`${s.step}_ok`] ?? 0; break
+      case 'subscribe': case 'publish': entered = c[`${s.step}_tx`] ?? 0; done = Object.entries(c).filter(([k]) => k.startsWith(`${s.step}_codes.2`)).reduce((a, [, v]) => a + v, 0); break
       case 'bye': entered = c.sessions ?? 0; done = c.completed ?? 0; break
       case 'deregister': done = null; break
       default: break

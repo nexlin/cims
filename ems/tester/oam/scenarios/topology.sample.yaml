@@ -12,6 +12,7 @@ workers:                                 # 호스트 위의 cims-tester-worker �
 media:                                   # 미디어 샘플 라이브러리 — media_send 의 sample. 값 = 워커 Media.SampleDir 안 파일 | synthetic
   samples:                               #   코덱별(amr-wb = raw 61 B 프레임 · pcmu/pcma = raw 160 B/20 ms). 합의 코덱 항목이 없으면 합성
     ringback: { pcmu: ringback_kr.pcmu, pcma: ringback_kr.pcma, amr-wb: synthetic }
+    voice:    { amr-wb: sample_voice.amrwb }                                  # 동봉 AMR-WB 음성(raw 61 B 프레임) — media_send 표본·녹취 청취용
     tone_1k:  { pcmu: tone_1k.pcmu, pcma: tone_1k.pcma }
 target:
   name: media01
@@ -21,7 +22,8 @@ target:
       role: sip
       fn: CSP
       host: h45
-      procs: [csp]
+      procs: [csp]                       # 호스트 SSH 관측이 볼 프로세스(CPU·RSS) — hosts.h45.ssh 가 있을 때
+      logs: [/opt/cims/csp/log/csp_*.log]   # run 동안 늘어난 ERROR 줄 = target_evidence log_errors (SSH 관측)
       sip:
         domains: [volte.cims.example.kr, ptt.cims.example.kr]
         listeners:                       # 수신점 N 개 = CSP local_nodes 와 1:1. ip 를 비우면 노드 addr → 호스트 ip

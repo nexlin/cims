@@ -18,7 +18,7 @@ import ssl
 import subprocess
 import time
 import urllib.request
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from ..registry import ItemResult, ItemStatus
 from ..context import VerifyContext
@@ -71,6 +71,70 @@ def summarize(rec: dict) -> List[str]:
     return out
 
 
+def _cli(ctx: VerifyContext, cfg: Dict[str, str], token: str, *args: str, timeout: int) -> subprocess.CompletedProcess:
+    cmd = ['python3', os.path.join(ctx.repo_root, _CLI), '--url', cfg['url'], '--token', token, '--json', *args]
+    return subprocess.run(cmd, cwd=ctx.repo_root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout + 30, text=True)
+
+
+def _run_args(scenario_id: str, cfg: Dict[str, str], instances: int, timeout: int, label: str, ht: Optional[int],
+              binds: Optional[Dict[str, object]]) -> List[str]:
+    out = [scenario_id, '--topology', cfg['topology'], '--instances', str(instances), '--timeout', str(timeout), '--label', label]
+    if ht is not None:
+        out += ['--ht', str(ht)]
+    for k, v in (binds or {}).items():
+        out += ['--bind', f'{k}={v}']
+    return out
+
+
+def tester_role_identities(ctx: VerifyContext, scenario_id: str, ht: Optional[int] = None,
+                           binds: Optional[Dict[str, object]] = None) -> Optional[Dict[str, List[str]]]:
+    """계측기 계획 드라이런(`cims-tester plan`) → 역할별 신원 사용자부. 대상 DB 픽스처(pickup_group·전화 그룹·역할)를
+    계측기가 실제로 쓸 신원에 입히기 위한 것. 계측기 미설정이면 None, 설정했는데 실패면 RuntimeError."""
+    cfg = tester_config()
+    if cfg is None:
+        return None
+    token = _login(cfg['url'])
+    proc = _cli(ctx, cfg, token, 'plan', *_run_args(scenario_id, cfg, 1, 60, 'plan', ht, binds), timeout=60)
+    try:
+        out = json.loads(proc.stdout)
+    except Exception:
+        raise RuntimeError(f'계획 응답 이상(rc={proc.returncode}): {(proc.stdout or proc.stderr).strip()[-300:]}')
+    if not out.get('ok'):
+        raise RuntimeError('계획 오류: ' + '; '.join(out.get('errors') or ['?']))
+    return {r: list(v) for r, v in (out.get('identities_by_role') or {}).items()}
+
+
+def run_tester(ctx: VerifyContext, scenario_id: str, label: str, instances: int = 1, ht: Optional[int] = None,
+               binds: Optional[Dict[str, object]] = None, timeout: int = 240) -> Tuple[Optional[dict], str]:
+    """계측기로 시나리오 단발 실행 → (run 기록, 오류 문구). 설정이 없으면 (None, '') — 호출자가 cspsim 경로로 간다.
+    항목 안의 검사 하나(check)로 쓰는 저수준 함수 — 보고서 줄은 호출자가 `summarize` 로 만든다."""
+    cfg = tester_config()
+    if cfg is None:
+        return None, ''
+    try:
+        token = _login(cfg['url'])
+        proc = _cli(ctx, cfg, token, 'run', *_run_args(scenario_id, cfg, instances, timeout, label, ht, binds), timeout=timeout)
+        rec = json.loads(proc.stdout) if proc.stdout.strip().startswith('{') else None
+    except Exception as e:      # 설정했는데 못 닿음 — cspsim 으로 조용히 돌아가지 않는다
+        return None, f'계측기 호출 실패: {e}'
+    if rec is None or 'verdict' not in rec:
+        return None, f"계측기 응답 이상(rc={proc.returncode}): {(proc.stdout or proc.stderr or '').strip()[-300:]}"
+    return rec, ''
+
+
+def tester_check(ctx: VerifyContext, name: str, scenario_id: str, label: str, ht: Optional[int] = None,
+                 binds: Optional[Dict[str, object]] = None, timeout: int = 240) -> Tuple[str, Optional[bool], str]:
+    """검사 하나를 계측기 시나리오로 — (이름, ok, 상세) 꼴(S3 항목의 checks 목록과 같다). 상세에 run id·결과 화면 경로."""
+    rec, err = run_tester(ctx, scenario_id, label, 1, ht, binds, timeout)
+    if rec is None:
+        return name, False, f'[계측기 {scenario_id}] {err or "미설정"}'
+    lines = summarize(rec)
+    fails = [ln for ln in lines[2:] if ln.startswith('기대치 FAIL') or ln.startswith('대상 증거')]
+    return (name, rec.get('verdict') == 'pass',
+            f"[계측기 {scenario_id}] verdict={rec.get('verdict')} run={rec.get('id')} · {lines[1]}"
+            + (' · ' + ' · '.join(fails) if fails else '') + f" · /test/results?id={rec.get('id')}")
+
+
 def run_tester_scenario(ctx: VerifyContext, item_id: str, title: str, scenario_id: str, stage: int,
                         instances: int = 1, ht: Optional[int] = None, binds: Optional[Dict[str, object]] = None,
                         timeout: int = 240, state_prefix: Optional[str] = None) -> Optional[ItemResult]:
@@ -85,29 +149,11 @@ def run_tester_scenario(ctx: VerifyContext, item_id: str, title: str, scenario_i
         ctx.state[f'{state_prefix}_T0'] = t0
     ctx.w(f'### {item_id} — {title}')
     ctx.w(f"- 계측기 `{scenario_id}` @ {cfg['url']} · 토폴로지 {cfg['topology']} · 인스턴스 {instances}")
-    try:
-        token = _login(cfg['url'])
-        cmd = ['python3', os.path.join(ctx.repo_root, _CLI), '--url', cfg['url'], '--token', token, '--json',
-               'run', scenario_id, '--topology', cfg['topology'], '--instances', str(instances), '--timeout', str(timeout),
-               '--label', item_id]
-        if ht is not None:
-            cmd += ['--ht', str(ht)]
-        for k, v in (binds or {}).items():
-            cmd += ['--bind', f'{k}={v}']
-        proc = subprocess.run(cmd, cwd=ctx.repo_root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout + 30, text=True)
-        rec = json.loads(proc.stdout) if proc.stdout.strip().startswith('{') else None
-    except Exception as e:      # 설정했는데 못 닿음 — cspsim 으로 조용히 돌아가지 않는다
-        ctx.w(f'- [FAIL] 계측기 호출 실패: {e}')
+    rec, err = run_tester(ctx, scenario_id, item_id, instances, ht, binds, timeout)
+    if rec is None:
+        ctx.w(f'- [FAIL] {err}')
         ctx.w()
-        return ItemResult(id=item_id, name=title, status=ItemStatus.FAIL, detail=f'계측기 호출 실패: {e}', stage=stage)
-    if rec is None or 'verdict' not in rec:
-        tail = (proc.stdout or proc.stderr or '').strip()[-600:]
-        ctx.w(f'- [FAIL] 계측기가 run 기록을 돌려주지 않았다(rc={proc.returncode})')
-        ctx.w('```')
-        ctx.w(tail)
-        ctx.w('```')
-        ctx.w()
-        return ItemResult(id=item_id, name=title, status=ItemStatus.FAIL, detail=f'계측기 응답 이상(rc={proc.returncode})\n{tail}', stage=stage)
+        return ItemResult(id=item_id, name=title, status=ItemStatus.FAIL, detail=err, stage=stage)
     lines = summarize(rec)
     ok = rec.get('verdict') == 'pass'
     if state_prefix:

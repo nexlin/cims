@@ -15,6 +15,9 @@ export interface Issue { lv: Lv; who: string; msg: string; ref: Sel | null }
 
 export const deep = <T,>(o: T): T => JSON.parse(JSON.stringify(o))
 export const INDIALOG = new Set(['dtmf', 'hold', 'resume', 'refer'])
+/** 새 다이얼로그를 여는 발신 단계 — 세션 추적·행 화살표. pickup/replaces/join 은 서버가 대상 호를 재고정·합류시킨다(from 의 200 이 완료) */
+export const OPENERS = new Set(['invite', 'pickup', 'replaces', 'join'])
+export const PUBLISH_COMMANDS = ['affiliate', 'deaffiliate']
 /** 송출 제어(미디어 평면) — 그 호에서 SDP 가 오간 뒤(progress/answer 뒤)에만, rtp: none 호에는 못 둔다. 행위자는 who(여럿) */
 export const MEDIA_CTL = new Set(['media_send', 'media_stop'])
 /** media_hold 의 during 에 둘 수 있는 것 = 통화 중 동작 + 송출 제어 */
@@ -50,12 +53,21 @@ export function phases(sc: Doc): { pre: number; epi: number } {
 }
 export const phaseOf = (sc: Doc, i: number): 'prelude' | 'body' | 'epilogue' => { const { pre, epi } = phases(sc); return i < pre ? 'prelude' : i >= epi ? 'epilogue' : 'body' }
 
-export interface Session { a: string; b: string; start: number; est: number | null; end: number; prog: number | null; via?: 'refer' }
-/** 다이얼로그 추적 — invite 로 열리고 answer/progress 로 확립, bye/reject 로 닫힌다. refer 는 닫으면서 새 세션을 연다. */
+export interface Session { a: string; b: string; start: number; est: number | null; end: number; prog: number | null; via?: 'refer' | 'pickup' | 'replaces' | 'join' | 'consult' }
+/** 다이얼로그 추적 — invite 로 열리고 answer/progress 로 확립, bye/reject 로 닫힌다. refer 는 닫으면서 새 세션을 연다.
+ *  통화 중인 역할의 두 번째 invite 는 상담 통화(consult). pickup/replaces 는 링잉 호를 가져와 from 의 200 에서 확립(대상 leg 는 CANCEL),
+ *  join 은 세션에 청취 leg 로 합류(원 세션 유지). */
 export function sessions(sc: Doc): Session[] {
   const out: Session[] = []; const open: Session[] = []
   ;(sc.flow ?? []).forEach((s, i) => {
-    if (s.step === 'invite' && s.from && s.to) { open.push({ a: s.from, b: s.to, start: i, est: null, end: -1, prog: null }); return }
+    if (s.step === 'invite' && s.from && s.to) { const consult = open.some(x => x.est != null && (x.a === s.from || x.b === s.from)); open.push({ a: s.from, b: s.to, start: i, est: null, end: -1, prog: null, via: consult ? 'consult' : undefined }); return }
+    if ((s.step === 'pickup' || s.step === 'replaces') && s.from) {
+      // 링잉 호(확립 전 세션)를 가져온다 — 그 세션의 착신 leg 가 from 으로 바뀌고 이 행에서 확립
+      const o = open.find(x => x.est == null && (!s.to || x.b === s.to)) ?? open.find(x => x.est == null)
+      if (o) { o.b = s.from; o.est = i; o.via = s.step } else open.push({ a: s.from, b: s.to ?? s.from, start: i, est: i, end: -1, prog: null, via: s.step })
+      return
+    }
+    if (s.step === 'join' && s.from) { open.push({ a: s.from, b: s.to ?? s.from, start: i, est: i, end: -1, prog: null, via: 'join' }); return }
     // 그룹 세션 — group_call 완료 = 발신자 200 + 멤버 자동응답, 그 행에서 확립된 것으로 본다(to 없으면 발신자 혼자 열린 세션)
     if (s.step === 'group_call' && s.from) { open.push({ a: s.from, b: s.to ?? s.from, start: i, est: i, end: -1, prog: null }); return }
     if ((s.step === 'answer' || s.step === 'progress') && s.who) { const o = open.find(x => x.est == null && s.who!.includes(x.b)) ?? open.find(x => x.est == null); if (!o) return; if (s.step === 'answer') o.est = i; else if (o.prog == null) o.prog = i; return }
@@ -72,20 +84,28 @@ export function mediaCtx(sc: Doc, i: number): { sdp: boolean; rtp: 'auto' | 'non
   return { sdp: i > first, rtp: sc.flow[o.start]?.media?.rtp ?? 'auto' }
 }
 export const inSession = (sc: Doc, i: number) => sessions(sc).some(o => o.est != null && i > o.est && (i < o.end || (i === o.end && sc.flow[i]?.step === 'refer')))
+/** ${var} 참조 — seconds(ht) 와 문자열 인자(pickup 피처코드 payload) */
+export const bindRef = (v: unknown): string | null => { if (typeof v !== 'string') return null; const m = v.match(/^\$\{(\w+)\}$/); return m ? m[1] : null }
+/** replaces/join 앞에 from 이 to 를 dialog 구독하는 subscribe 가 있는가(RFC 4235 → RFC 3891/3911) — 컨트롤러 _check_dialog_learning 과 같다 */
+export function dialogLearned(sc: Doc, i: number): boolean {
+  const s = sc.flow[i]; if (!s?.from || !s.to) return false
+  return (sc.flow ?? []).slice(0, i).some(x => x.step === 'subscribe' && (x.payload == null || x.payload === 'dialog') && (x.who ?? []).includes(s.from!) && (x.to ?? '') === s.to || (x.step === 'subscribe' && (x.payload == null || x.payload === 'dialog') && (x.who ?? []).includes(s.from!) && !x.to && s.from === s.to))
+}
 
-export function secondsOf(s: Step, bind: Record<string, number>): number {
+export type Bind = Record<string, number | string>
+export function secondsOf(s: Step, bind: Bind): number {
   if (s.seconds == null || s.seconds === '') return 0
-  if (typeof s.seconds === 'string') { const m = s.seconds.match(/^\$\{(\w+)\}$/); return m ? (bind[m[1]] ?? 0) : (+s.seconds || 0) }
+  if (typeof s.seconds === 'string') { const m = s.seconds.match(/^\$\{(\w+)\}$/); return m ? (Number(bind[m[1]]) || 0) : (+s.seconds || 0) }
   return +s.seconds || 0
 }
 /** 누적 시각(body 기준, s) — after_ms + seconds 합. 행 왼쪽 t+ 와 Little SDT 가 같은 값 */
-export function timeline(sc: Doc, bind: Record<string, number>): (number | null)[] {
+export function timeline(sc: Doc, bind: Bind): (number | null)[] {
   const { pre } = phases(sc); let t = 0
   return (sc.flow ?? []).map((s, i) => { if (i < pre) return null; const at = t; t += (s.after_ms ?? 0) / 1000 + secondsOf(s, bind); return at })
 }
-export function bindVars(sc: Doc): string[] { const out = new Set<string>(); for (const s of sc.flow ?? []) if (typeof s.seconds === 'string') { const m = s.seconds.match(/^\$\{(\w+)\}$/); if (m) out.add(m[1]) } return [...out] }
+export function bindVars(sc: Doc): string[] { const out = new Set<string>(); for (const s of sc.flow ?? []) { for (const v of [s.seconds, s.payload]) { const b = bindRef(v); if (b) out.add(b) } } return [...out] }
 
-export function validate(sc: Doc, topo: TopologyDoc | null, vocab: ScenarioVocab | null, bind: Record<string, number>): Issue[] {
+export function validate(sc: Doc, topo: TopologyDoc | null, vocab: ScenarioVocab | null, bind: Bind): Issue[] {
   const out: Issue[] = []
   const E = (who: string, msg: string, ref: Sel | null) => out.push({ lv: 'error', who, msg, ref })
   const W = (who: string, msg: string, ref: Sel | null) => out.push({ lv: 'warning', who, msg, ref })
@@ -115,14 +135,21 @@ export function validate(sc: Doc, topo: TopologyDoc | null, vocab: ScenarioVocab
     }
     if (s.step === 'refer' && !(s.from && s.to)) E(who, 'refer 는 from(전달자)과 to(전달 대상)가 필요하다', ref)
     if (s.step === 'invite' && !s.to) E(who, 'invite 는 to 가 필요하다', ref)
+    if ((s.step === 'pickup' || s.step === 'replaces' || s.step === 'join') && !s.from) E(who, `${s.step} 는 from(발신 단말 역할)이 필요하다`, ref)
+    if ((s.step === 'replaces' || s.step === 'join') && !s.to) E(who, `${s.step} 는 to(대상 다이얼로그의 당사자 역할)가 필요하다`, ref)
+    if ((s.step === 'replaces' || s.step === 'join') && s.from && s.to && !dialogLearned(sc, i)) E(who, `${s.step} 앞에 '${s.from}' 이 '${s.to}' 를 dialog 구독하는 subscribe 단계가 있어야 한다(RFC 4235 NOTIFY 로 대상 다이얼로그를 배운다)`, ref)
+    if (s.step === 'pickup') { if (!s.payload) E(who, 'pickup 은 payload(당겨받기 피처코드 — 접속서비스 pickup_feature_code, ${var} 바인딩 가능)가 필요하다', ref); else if (!bindRef(s.payload) && !/^[0-9*#+A-Da-d]{1,16}$/.test(s.payload)) E(who, 'pickup 의 payload 는 다이얼 가능한 피처코드(0-9 * # A-D) 또는 ${var}', ref) }
+    if (s.step === 'subscribe' && s.payload != null && !bindRef(s.payload) && !/^[A-Za-z0-9][A-Za-z0-9.\-_]{0,63}$/.test(s.payload)) E(who, 'subscribe 의 payload 는 이벤트 패키지 토큰(RFC 6665 — dialog·reg·…)', ref)
+    if (s.step === 'publish' && s.payload != null && !PUBLISH_COMMANDS.includes(s.payload)) E(who, `publish 의 payload(affiliation 명령)는 ${PUBLISH_COMMANDS.join('|')} 중 하나`, ref)
+    if (s.step === 'invite' && s.from && sessions(sc).some(o => o.start < i && o.est != null && o.end > i && (o.a === s.from || o.b === s.from))) I(who, `'${s.from}' 이 통화 중 — 두 번째 다이얼로그(상담 통화). 뒤의 refer 가 to 를 가리키면 attended 전달`, ref)
     if (s.step === 'group_call' && !s.from) E(who, 'group_call 은 from(발신 멤버 역할)이 필요하다', ref)
     if (s.step === 'floor_request' && s.payload != null && !FLOOR_OUTCOMES.includes(s.payload)) E(who, `floor_request 의 payload(기대 결과)는 ${FLOOR_OUTCOMES.join('|')} 중 하나`, ref)
-    if (s.group != null && s.step !== 'group_call') E(who, 'group 은 group_call 에만 둔다', ref)
+    if (s.group != null && s.step !== 'group_call' && s.step !== 'publish') E(who, 'group 은 group_call/publish 에만 둔다', ref)
     if (s.media?.rtp && s.media.rtp !== 'auto' && s.step !== 'invite' && s.step !== 'group_call') E(who, 'media.rtp 는 invite/group_call 에만 둔다', ref)
     if (s.step === 'dtmf' && !(s.payload && /^[0-9*#A-Da-d]+$/.test(s.payload))) E(who, 'dtmf 는 payload 숫자열(0-9 * # A-D)이 필요하다', ref)
     if (s.cause != null && !['bye', 'reject'].includes(s.step)) E(who, 'cause 는 bye/reject 에만 둔다', ref)
     for (const k of Object.keys(s.expect ?? {})) if (vocab && !vocab.metrics[k]) E(who, `알 수 없는 지표 '${k}'`, ref)
-    if (typeof s.seconds === 'string') { const m = s.seconds.match(/^\$\{(\w+)\}$/); if (m && !bound.has(m[1])) W(who, `바인딩 \${${m[1]}} 값이 없다 — profile.ht 또는 요청 bindings`, ref) }
+    for (const v of [s.seconds, s.payload]) { const b = bindRef(v); if (b && !bound.has(b)) W(who, `바인딩 \${${b}} 값이 없다 — profile.ht 또는 요청 bindings`, ref) }
     if ((s.step === 'register' || s.step === 'deregister') && i >= pre && i < epi) E(who, `${s.step} 는 body 안에 둘 수 없다 — 앞쪽(prelude) 또는 끝(epilogue)으로`, ref)
     // kind 게이트
     const actors = [...(s.who ?? []), s.from].filter((x): x is string => !!x)
@@ -158,7 +185,7 @@ export function validate(sc: Doc, topo: TopologyDoc | null, vocab: ScenarioVocab
         if (d.step === 'dtmf' && !(d.payload && /^[0-9*#A-Da-d]+$/.test(d.payload))) E(w2, 'dtmf payload 숫자열 필요', r2)
         for (const rr of [...(d.who ?? []), d.from, d.to]) if (rr && !names.has(rr)) E(w2, `정의되지 않은 역할 '${rr}'`, r2)
         const a = d.from ?? (d.who ?? [])[0]; const rp = a ? resolvePool(sc, topo, a) : null
-        if (d.step === 'refer' && rp && rp.kind !== 'peer') E(w2, `refer 의 행위자 '${a}' 는 피어 풀이어야 한다`, r2)
+        void rp
       })
     }
   })
@@ -176,7 +203,7 @@ export function validate(sc: Doc, topo: TopologyDoc | null, vocab: ScenarioVocab
     let inS = false
     ;(sc.flow ?? []).forEach((s, i) => {
       const ref: Sel = { kind: 'step', idx: i }, who = `flow[${i}]`
-      if (['invite', 'answer', 'reject', 'progress', 'refer', 'hold', 'resume', 'dtmf'].includes(s.step)) E(who, `${s.step} — 그룹 세션 시나리오에는 1:1 호 단계를 섞지 않는다`, ref)
+      if (['invite', 'answer', 'reject', 'progress', 'refer', 'hold', 'resume', 'dtmf', 'pickup', 'replaces', 'join'].includes(s.step)) E(who, `${s.step} — 그룹 세션 시나리오에는 1:1 호 단계를 섞지 않는다`, ref)
       if (s.step === 'group_call') {
         if (s.from && multi.includes(s.from)) E(who, `group_call.from='${s.from}' 은 단일 역할이어야 한다`, ref)
         if (s.to && !multi.includes(s.to)) E(who, `group_call.to='${s.to}' 는 multi 역할이어야 한다(합류를 기다릴 나머지 멤버)`, ref)
@@ -205,6 +232,10 @@ export function newStep(kind: string, sc: Doc, topo: TopologyDoc | null, vocab: 
   if (kind === 'answer' || kind === 'progress') s.after_ms = 500
   if (kind === 'dtmf') s.payload = '1234#'
   if (kind === 'reject') { s.payload = '486'; s.after_ms = 300 }
+  if (kind === 'pickup') { s.payload = '${pickup_code}'; delete s.to; s.expect = { code: 200 } }
+  if (kind === 'subscribe') { delete s.to; s.expect = { code: 200 } }
+  if (kind === 'replaces' || kind === 'join') s.expect = { code: 200 }
+  if (kind === 'publish') s.expect = { code: 200 }
   if (kind === 'register') s.expect = { code: 200 }
   return s
 }

@@ -135,6 +135,8 @@ public:
     bool Connected(const std::string& callId);
     /** 수신 RTP 품질(누계) — 호가 없으면 false. */
     bool RtpStats(const std::string& callId, unsigned long long& rx, unsigned long long& lost, long long& jitterUs);
+    /** 수신 품질 부가 — wire PT(MOS 코덱 판정)·RTCP SR/RR 수신 수·마지막 보고 블록 fraction lost(0~255, -1 없음). */
+    bool RtpQuality(const std::string& callId, int& pt, int& rtcpRx, int& rrFractionLost);
     /** DTMF 송수신 누계 — 호가 없으면 false. */
     bool DtmfStats(const std::string& callId, int& sent, int& recv, std::string& recvDigits, int& negotiatedPt);
     void ResetRtpStats(const std::string& callId);

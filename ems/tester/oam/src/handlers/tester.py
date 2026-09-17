@@ -22,7 +22,7 @@
   POST /runs/<id>/hold              {hold: bool} 단계 고정/재개 — 프로파일 시계 정지, 율 유지
   GET  /runs/<id>/hist?timer=       지연 지표 버킷 분포(로그 상한) + p50/p95/p99 — 행 펼침 히스토그램
   GET  /workers/discovered          자기 base OAM 배포 목록의 cims-tester-worker (Tester.BaseOamUrl 필요)
-  GET  /runs/<id>/target-series     대상 호스트 자원 시계열(agent 별 cpu_pct·mem_pct — 대상 관측 §5)
+  GET  /runs/<id>/target-series     대상 자원 시계열(호스트 cpu_pct·mem_pct + SSH 프로세스별 cpu_pct·rss_mb — 대상 관측 §5)
   GET  /runs/<id>/sip               SIP 덤프 목록(call_id·bytes·messages)
   GET  /runs/<id>/sip/<call_id>     그 Call-ID 의 실패 이벤트 + SIP 덤프(runs/<id>/sip/<call_id>.log 가 있을 때)
   GET  /runs/<id>/target-alerts     대상 OAM 알람/이벤트를 run 창(started~ended)으로 잘라 — 대상 oam 노드 필요
@@ -814,8 +814,8 @@ TESTER_API_DOCS = [
      'summary': '자기 base OAM 의 배포 목록에서 찾은 cims-tester-worker — 토폴로지 편집기의 "발견된 워커"(주소 = agent ip, 포트 = 배포 설정 Server.Port)',
      'response': '{items: [{name, agent_id, hostname, ip, port, cpus, version, live_state, deployment_id}], note}', 'auth': _AUTH_MON},
     {'id': 'tester.run.target_series', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs/{{id}}/target-series',
-     'summary': 'run 동안 모은 대상 호스트 자원 시계열 — 대상 OAM agent heartbeat(cpu_pct·mem_pct), stop_on.target_cpu_pct 의 원천',
-     'response': '{id, agents: {이름: {t[], cpu_pct[], mem_pct[]}}}', 'auth': _AUTH_MON},
+     'summary': 'run 동안 모은 대상 자원 시계열 — 호스트(대상 OAM agent heartbeat 또는 hosts.*.ssh 의 /proc: cpu_pct·mem_pct) + 프로세스별(SSH: cpu_pct·rss_mb), stop_on.target_cpu_pct 의 원천',
+     'response': '{id, agents: {이름: {t[], cpu_pct[], mem_pct[]}}, procs: {"호스트/프로세스": {t[], cpu_pct[], rss_mb[]}}}', 'auth': _AUTH_MON},
     {'id': 'tester.run.target_alerts', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs/{{id}}/target-alerts',
      'summary': '대상 OAM 알람/이벤트를 run 창(started_at~ended_at)으로 잘라 — 시간축 차트의 알람 레인',
      'response': '{id, alerts[], window[], oam | note}', 'auth': _AUTH_MON},

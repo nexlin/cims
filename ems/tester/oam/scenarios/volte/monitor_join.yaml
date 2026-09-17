@@ -1,0 +1,18 @@
+# 업무망 합법감청 청취 (RFC 3911 INVITE-Join, dispatch_center.md §5.3) — A↔B 통화 중 감청자 M 이 B 의 dialog 를 구독해 활성 호 Call-ID 를 배운 뒤
+#   recvonly INVITE-Join 으로 합류한다. 서버가 CMP 청취 leg(RELAY_TAP)를 붙여 양 화자를 SSRC 2개로 분리 인도하고 A/B 는 무영향(은닉).
+#   인가 = M 회선 역할의 monitor_call 범위(§5.2 규칙 2). join_tap_pct = 표본 때 SSRC 2개를 받은 청취 leg 비율. 검증 S3-SCN-MONITOR M2.
+id: VOLTE-MONITOR-JOIN
+title: 합법감청 청취 (dialog 구독 → INVITE-Join recvonly, SSRC 2개)
+tags: [volte, monitor, dialog]
+roles:
+  caller:  { pool: volte_ue }
+  callee:  { pool: volte_ue, disjoint_from: caller }
+  monitor: { pool: volte_ue, disjoint_from: callee }
+flow:
+  - { step: register,   who: [caller, callee, monitor], expect: { code: 200 } }
+  - { step: subscribe,  who: [monitor], to: callee, expect: { code: 200 } }
+  - { step: invite,     from: caller, to: callee, media: { audio: amr-wb } }
+  - { step: answer,     who: [callee], after_ms: 500 }
+  - { step: join,       from: monitor, to: callee, expect: { code: 200 } }
+  - { step: media_hold, seconds: "${ht}", expect: { rtp_loss_pct: { max: 1 }, join_tap_pct: 100 } }
+  - { step: bye,        from: caller }

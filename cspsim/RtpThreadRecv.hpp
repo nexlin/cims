@@ -19,9 +19,33 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+/** RTCP compound(RFC 3550 §6.4) 수신 통계 — SR(200)/RR(201) 의 보고 블록에서 상대가 본 우리 스트림의 fraction lost·jitter 를 기록한다.
+ *  SDES/BYE/APP 등 다른 패킷은 세지 않는다(floor APP 은 별도 소켓). 상대가 RTCP 를 내지 않으면 값이 없다(-1). */
+static void RtcpRecvStats(CRtpThread* pRtpThread, const unsigned char* p, int iLen) {
+  while (iLen >= 8) {
+    int iPt = p[1];
+    int iLenWords = ((int)p[2] << 8 | p[3]) + 1;
+    int iBytes = iLenWords * 4;
+    if (iBytes > iLen) break;
+    if (iPt == 200 || iPt == 201) {
+      pRtpThread->m_iRtcpRecv.fetch_add(1, std::memory_order_relaxed);
+      int iRc = p[0] & 0x1F;
+      int iOff = iPt == 200 ? 28 : 8;   // SR: 헤더4 + SSRC4 + sender info 20 · RR: 헤더4 + SSRC4
+      for (int k = 0; k < iRc && iOff + 24 <= iBytes; ++k, iOff += 24) {
+        const unsigned char* b = p + iOff;
+        pRtpThread->m_iRtcpRrBlocks.fetch_add(1, std::memory_order_relaxed);
+        pRtpThread->m_iRtcpRrFractionLost.store(b[4], std::memory_order_relaxed);
+        pRtpThread->m_uRtcpRrJitter.store(((unsigned)b[12] << 24) | ((unsigned)b[13] << 16) | ((unsigned)b[14] << 8) | b[15], std::memory_order_relaxed);
+      }
+    }
+    p += iBytes;
+    iLen -= iBytes;
+  }
+}
+
 THREAD_API RtpThreadRecv(LPVOID lpParameter) {
   CRtpThread *pRtpThread = (CRtpThread *)lpParameter;
-  pollfd sttPoll[1];
+  pollfd sttPoll[2];
   char szPacket[320], szPCM[320], szIp[21];
   int iPacketLen;
   unsigned short sPort;
@@ -29,6 +53,8 @@ THREAD_API RtpThreadRecv(LPVOID lpParameter) {
   pRtpThread->m_bRecvThreadRun = true;
 
   TcpSetPollIn(sttPoll[0], pRtpThread->m_hSocket);
+  const bool bRtcp = pRtpThread->m_hRtcpSocket != INVALID_SOCKET;
+  if (bRtcp) TcpSetPollIn(sttPoll[1], pRtpThread->m_hRtcpSocket);   // RTCP(RTP+1) 수신 통계 — SR/RR
 
 /*
 #if !defined(WIN32) && !defined(NO_ALSA)
@@ -78,8 +104,17 @@ THREAD_API RtpThreadRecv(LPVOID lpParameter) {
 
 
   while (pRtpThread->m_bStopEvent == false) {
-    if (poll(sttPoll, 1, 200) <= 0) {
+    if (poll(sttPoll, bRtcp ? 2 : 1, 200) <= 0) {
       continue;
+    }
+    if (bRtcp && (sttPoll[1].revents & POLLIN)) {
+      char szRtcp[1500];
+      int iRtcpLen = sizeof(szRtcp);
+      char szRtcpIp[21];
+      unsigned short sRtcpPort;
+      if (UdpRecv(pRtpThread->m_hRtcpSocket, szRtcp, &iRtcpLen, szRtcpIp, sizeof(szRtcpIp), &sRtcpPort))
+        RtcpRecvStats(pRtpThread, (const unsigned char*)szRtcp, iRtcpLen);
+      if (!(sttPoll[0].revents & POLLIN)) continue;
     }
 
     iPacketLen = sizeof(szPacket);
@@ -129,6 +164,7 @@ THREAD_API RtpThreadRecv(LPVOID lpParameter) {
         // RFC 4733 telephone-event — 이벤트 수(E 비트 패킷, 같은 (ts,event) 의 반복 종료 패킷은 한 번)·숫자열.
         //   지터 계산에서는 제외한다(이벤트 동안 타임스탬프가 고정이라 A.8 이 흔들린다).
         bool bTelEvent = pRtpThread->m_iDtmfPt >= 0 && iPt == pRtpThread->m_iDtmfPt;
+        if (!bTelEvent) pRtpThread->m_iRecvPt.store(iPt, std::memory_order_relaxed);
         if (bTelEvent && iPacketLen >= (int)sizeof(RtpHeader) + 4) {
             const unsigned char* pEv = (const unsigned char*)(szPacket + sizeof(RtpHeader));
             if (pEv[1] & 0x80) {

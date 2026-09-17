@@ -18,6 +18,9 @@ dialog 구독이 거절되면 Join 을 생략하고 그 응답을 join_status �
   M5a 인가 — 범위 밖 역할(monitor_call=own, 타 그룹) M' → dialog 구독 403(Join 생략), 미디어 없음
   M5b 인가 — 전화 그룹원(A·B 와 같은 그룹)이지만 역할 없음 → 자기 그룹원 BLF dialog 200, Join 403, 미디어 없음
   M5c 인가 — 타 전화 그룹원·역할 없음 → dialog 구독 403
+
+계측기 경로(test_instrument.md §9): M2 → `VOLTE-MONITOR-JOIN`(계획의 caller/callee 신원을 대상 그룹에, monitor 신원에 감시 역할을 시드).
+M8(회수 시점 훅)·M5a/b/c 는 cspsim 으로 판정한다(검사 줄에 경로 표기).
 """
 from __future__ import annotations
 
@@ -27,6 +30,7 @@ import re
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 from ...common.cspsim import run_cspsim
+from ...common.tester import tester_config, tester_check, tester_role_identities
 from ._xfer_common import (
     select_same_org, trio_cred_args, parse_marker_int, VOLTE_DOMAIN, FLOW_MIN, DROP_MAX, fmt_checks, emit_checks,
 )
@@ -142,16 +146,19 @@ def monitor(ctx: VerifyContext) -> ItemResult:
         ctx.w(f"- 시드 스키마={tgt.schema} (대상 그룹 {_GRP_TARGET}: A·B)")
 
         # ── M2: 인가된 감청자(역할 monitor_call=all)가 A↔B 를 청취 ──
-        with fixture(role=RoleSpec(_ROLE_MON, [M["user"]], monitor_call="all")) as fm:
-            if not fm.active:
-                checks.append(("M2 청취 (Join 200, M SSRC 2개, A·B 무영향)", False, f"역할 시드 실패 — {fm.reason}"))
-            else:
-                ctx.w(f"- M 역할 {_ROLE_MON}(monitor_call=all) person={fm.persons.get(M['user'], '-')}")
-                rc, d, st, prog = run([A, B, M], "mon_m2")
-                ok = (d is not None and st == 200 and d[2] >= FLOW_MIN and d[3] == 2 and
-                      d[4] >= FLOW_MIN and d[5] >= FLOW_MIN)
-                checks.append(("M2 청취 (Join 200, M SSRC 2개, A·B 무영향)", ok,
-                               f"{mstr(d, st, prog)} (M·A·B≥{FLOW_MIN}, SSRC=2) rc={rc}"))
+        if tester_config() is not None:
+            checks.append(_m2_via_tester(ctx, fixture))
+        else:
+            with fixture(role=RoleSpec(_ROLE_MON, [M["user"]], monitor_call="all")) as fm:
+                if not fm.active:
+                    checks.append(("M2 청취 (Join 200, M SSRC 2개, A·B 무영향)", False, f"역할 시드 실패 — {fm.reason}"))
+                else:
+                    ctx.w(f"- M 역할 {_ROLE_MON}(monitor_call=all) person={fm.persons.get(M['user'], '-')}")
+                    rc, d, st, prog = run([A, B, M], "mon_m2")
+                    ok = (d is not None and st == 200 and d[2] >= FLOW_MIN and d[3] == 2 and
+                          d[4] >= FLOW_MIN and d[5] >= FLOW_MIN)
+                    checks.append(("M2 청취 (Join 200, M SSRC 2개, A·B 무영향)", ok,
+                                   f"{mstr(d, st, prog)} (M·A·B≥{FLOW_MIN}, SSRC=2) rc={rc}"))
 
         # ── M8: 인가 회수 (§5.10) — 청취가 선 뒤 역할 범위를 거두면 서버가 감청 leg 에 BYE 를 보내고 tap 을
         #    회수해야 한다. 원 통화(A↔B)는 그대로여야 한다 — 자격 회수와 업무 통화 차단은 다른 정책이다. ──
@@ -218,3 +225,26 @@ def monitor(ctx: VerifyContext) -> ItemResult:
 
     all_ok = emit_checks(ctx, checks)
     return done(ItemStatus.PASS if all_ok else ItemStatus.FAIL, fmt_checks(checks))
+
+
+def _m2_via_tester(ctx: VerifyContext, fixture) -> tuple:
+    """M2 를 계측기로 — 계획의 caller/callee 신원을 대상 전화 그룹(pg-verify-tester)에, monitor 신원에 감시 역할(monitor_call=all)을 시드한 뒤
+    `VOLTE-MONITOR-JOIN`(Join 200 + join_tap_pct 100 = SSRC 2개). A·B 무영향은 시나리오 RTP 손실 기대치가 본다."""
+    name = "M2 청취 (Join 200, M SSRC 2개, A·B 무영향)"
+    cfg = tester_config()
+    ctx.w(f"- M2 경로: 계측기 @ {cfg['url']} · 토폴로지 {cfg['topology']} (M8·M5 는 cspsim)")
+    try:
+        ids = tester_role_identities(ctx, "VOLTE-MONITOR-JOIN", ht=4) or {}
+        ab = [u for r in ("caller", "callee") for u in ids.get(r) or []]
+        mons = ids.get("monitor") or []
+        if not ab or not mons:
+            raise RuntimeError("계획에 역할 신원이 없다")
+    except Exception as e:
+        return (name, False, f"계측기 계획 실패: {e}")
+    with fixture("pg-verify-tester", ab) as tg:
+        if not tg.active:
+            return (name, False, f"그룹 시드 실패 — {tg.reason}")
+        with fixture(role=RoleSpec(_ROLE_MON, mons, monitor_call="all")) as fm:
+            if not fm.active:
+                return (name, False, f"역할 시드 실패 — {fm.reason}")
+            return tester_check(ctx, name, "VOLTE-MONITOR-JOIN", f"{_RID}/M2", ht=4)

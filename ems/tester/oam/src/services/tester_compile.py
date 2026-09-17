@@ -213,6 +213,13 @@ def bind_value(v, bindings: Dict[str, object]):
     return v
 
 
+def bind_str(v: Optional[str], bindings: Dict[str, object]) -> Optional[str]:
+    """문자열 인자의 `${var}` 바인딩(pickup 피처코드 등) — 참조 꼴이 아니면 그대로(숫자 문자열도 문자열로 둔다)."""
+    if isinstance(v, str) and _BIND.match(v.strip()):
+        return str(bind_value(v, bindings))
+    return v
+
+
 def compile_steps(scenario: Scenario, bindings: Dict[str, object]) -> List[dict]:
     """단계 → CompiledStep(dict). `media_hold.during` 은 `hold at_s → 동작 → hold 나머지` 로 푼다(마지막 조각이 기대치를 갖는다).
     idx 는 시나리오 flow 인덱스(원 단계) — 풀린 조각은 같은 idx 를 공유하고 `src` 로 원 단계를 가리킨다."""
@@ -246,7 +253,7 @@ def compile_steps(scenario: Scenario, bindings: Dict[str, object]) -> List[dict]
             emit(i, 'media_hold', seconds=max(1, int(round(seconds - cur))), expect=s.expect)
             continue
         emit(i, s.step, who=s.who, from_=s.from_, to=s.to, after_ms=s.after_ms, seconds=seconds, media=s.media,
-             group=s.group, payload=s.payload, cause=s.cause, expect=s.expect, sample=s.sample, loop=s.loop)
+             group=s.group, payload=bind_str(s.payload, bindings), cause=s.cause, expect=s.expect, sample=s.sample, loop=s.loop)
     return out
 
 
@@ -318,7 +325,7 @@ def check_register_roles(scenario: Scenario, topology: Topology, role_pool: Dict
 
 
 def check_kind_gates(scenario: Scenario, topology: Topology, role_pool: Dict[str, str]) -> None:
-    """단계의 행위자 kind 게이트(STEP_VOCAB.kind) — progress/refer 는 피어, PTT 단계는 UE."""
+    """단계의 행위자 kind 게이트(STEP_VOCAB.kind) — progress 는 피어, 전달·합류·구독은 UE, PTT 단계는 service=ptt UE."""
     from services.tester_models import STEP_VOCAB
     for i, st in enumerate(scenario.flow):
         gate = (STEP_VOCAB.get(st.step) or {}).get('kind')

@@ -405,8 +405,8 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/tester/worker/config/config_template.json    ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/config/config_template.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/tester/worker/config/cims-tester-worker.json ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/config/cims-tester-worker.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/tester/worker/pkg.json ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/pkg.json
-    # 동봉 미디어 샘플(G.711 raw — tester/worker/samples/gen_tones.py 산출물). 운영자 샘플은 같은 디렉터리에 추가
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/tester/worker/samples/ringback_kr.pcmu ${CMAKE_SOURCE_DIR}/tester/worker/samples/ringback_kr.pcma ${CMAKE_SOURCE_DIR}/tester/worker/samples/tone_1k.pcmu ${CMAKE_SOURCE_DIR}/tester/worker/samples/tone_1k.pcma ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/samples/
+    # 동봉 미디어 샘플(G.711 raw — tester/worker/samples/gen_tones.py 산출물 · H.264 Annex B 비디오 = Media.VideoFile 기본). 운영자 샘플은 같은 디렉터리에 추가
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/tester/worker/samples/ringback_kr.pcmu ${CMAKE_SOURCE_DIR}/tester/worker/samples/ringback_kr.pcma ${CMAKE_SOURCE_DIR}/tester/worker/samples/tone_1k.pcmu ${CMAKE_SOURCE_DIR}/tester/worker/samples/tone_1k.pcma ${CMAKE_SOURCE_DIR}/tester/worker/samples/sample_video.h264 ${CMAKE_SOURCE_DIR}/tester/worker/samples/sample_voice.amrwb ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/samples/
 
     # ── 3. 설정 템플릿 복사 (deploy_value: "@PLACEHOLDER@" 포함, configure.sh 로 채움) ──
     #    CSP/CMP/CSC 모두 A안 통합 — config_template.json 하나가 UI 메타+deploy_value 둘 다 담당.

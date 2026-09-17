@@ -25,6 +25,7 @@ import time
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext, sanitized_env
 from ...common.ibcf_routing import IBCF_PEER_DOMAIN
+from ...common.tester import run_tester_scenario
 from .seed import IBCF_MOCK_PEER_IP, IBCF_MOCK_PEER_PORT
 from ._helpers import target_ip
 
@@ -97,6 +98,12 @@ def scn_ibcf_trunk(ctx: VerifyContext) -> ItemResult:
     """
     item_id = "S6-SCN-IBCF-TRUNK"
     title = "IBCF 트렁크 라우팅"
+
+    # 계측기가 설정돼 있으면 `TRUNK-IBCF-OUTBOUND`(가입자 → 피어링 접속점 → ibcf 피어 풀; 토폴로지에 ibcf 피어 풀 + 시드 필요).
+    #   판정 = 계측기 verdict(피어 200·SRD·RTP). 없으면 mock peer cspsim 경로 (test_instrument.md §9)
+    r = run_tester_scenario(ctx, item_id, title, "TRUNK-IBCF-OUTBOUND", stage=6, instances=1, ht=3)
+    if r is not None:
+        return r
 
     isp_ip = target_ip("isp", "127.0.0.5")
 

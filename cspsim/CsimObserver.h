@@ -29,8 +29,15 @@ struct ICsimObserver {
     /** 로컬 BYE 의 최종 응답 — sddMs = StopCall → 응답. */
     virtual void OnByeResponse(SimSession* /*s*/, const std::string& /*callId*/, int /*iSipStatus*/, long long /*sddMs*/) {}
     // ── PTT(MCPTT) — 계측기 워커 단계 group_call/floor_request/floor_release (test_instrument.md §4) ──
-    /** 그룹 affiliation PUBLISH(TS 24.379 §9) 최종 응답 — affMs = PUBLISH 송신 → 응답. 해제(Expires 0)의 응답은 통지하지 않는다. */
-    virtual void OnAffiliate(SimSession* /*s*/, const std::string& /*group*/, int /*iSipStatus*/, long long /*affMs*/) {}
+    /** 그룹 affiliation PUBLISH(TS 24.379 §9, RFC 3903) 최종 응답 — affMs = PUBLISH 송신 → 응답. bDeaffiliate = 해제(Expires 0) 명령의 응답. */
+    virtual void OnAffiliate(SimSession* /*s*/, const std::string& /*group*/, int /*iSipStatus*/, long long /*affMs*/, bool /*bDeaffiliate*/) {}
+    // ── 이벤트 구독·다이얼로그 이벤트 — 계측기 워커 단계 subscribe/replaces/join (test_instrument.md §4) ──
+    /** out-of-dialog SUBSCRIBE(RFC 6665) 최종 응답 — event = 패키지 토큰(dialog·reg·…), resource = 감시 자원 AoR 사용자부.
+     *  401 Digest 재전송의 중간 응답은 통지하지 않는다(재전송 뒤의 최종 응답만). */
+    virtual void OnSubscribeResponse(SimSession* /*s*/, const std::string& /*event*/, const std::string& /*resource*/, int /*iSipStatus*/) {}
+    /** dialog 이벤트 NOTIFY(RFC 4235) — watched = 감시 대상 AoR 사용자부, state = early|confirmed|terminated(dialog 요소가 없으면 빈 값),
+     *  callId = 그 dialog 의 Call-ID. INVITE-Replaces/Join 은 이 값으로 대상 다이얼로그를 가리킨다(RFC 3891/3911). */
+    virtual void OnDialogNotify(SimSession* /*s*/, const std::string& /*watched*/, const std::string& /*state*/, const std::string& /*callId*/) {}
     /** PTT 착신(그룹 fan-out INVITE)에 자동응답 200 을 냈다 — 이 단말이 그룹 세션에 합류한 시각. */
     virtual void OnCallAnswered(SimSession* /*s*/, const std::string& /*callId*/) {}
     /** floor 제어 메시지 수신(TS 24.380 §8.2 subtype: 1 Granted · 2 Taken · 3 Deny · 5 Idle · 6 Revoke · 9 Queue Position Info).

@@ -268,6 +268,11 @@ public:
     /** 임의 이벤트 패키지 SUBSCRIBE 프로브 — strEvent 를 Event 헤더에 그대로 싣고 최종 응답을
      *  m_iEventSubStatus 에 기록한다 (RFC 6665 §8.2.1: 미지원 패키지 → 489 Bad Event 판정용). */
     void SubscribeEvent(const std::string& strEvent, const std::string& strResourceAor);
+    /** dialog 구독 전부 / 이벤트 프로브 구독을 Expires 0 로 내린다(RFC 6665 §4.2.1.4) — 계측기 워커가 단말을 인스턴스에서 돌려줄 때.
+     *  200 을 받은 구독만 내리고, 판정 필드·감시 다이얼로그 학습값(m_strWatchedDlg*)을 비워 다음 인스턴스가 새로 시작한다. */
+    void UnsubscribeDialogs();
+    void UnsubscribeEvent();
+    void ClearWatchedDialog();
     std::atomic<int>  m_iEventSubStatus{0};
     std::string       m_strEventSubRealm;   // 401 챌린지 realm — 서버가 요청자 서비스 realm 을 줬는지(volte 폴백 아님) 판정용
     /** 401 에 대한 Digest 재전송(RFC 3261 §22) — 실 UE 처럼 챌린지 realm 을 그대로 echo 한다. HA1 은 -creds 의 ha1
@@ -298,12 +303,15 @@ public:
      * SUBSCRIBE → 200 OK + 즉시 스냅샷 NOTIFY, 이후 멤버 변동마다 구독 경로로
      * NOTIFY. */
     void SubscribeConference(const std::string &strGroupId);
-    void AffiliateGroup(bool bDeaffiliate = false);   // MCPTT 그룹 affiliation (TS 24.379 §9) — 그룹 URI 로 PUBLISH
+    /** MCPTT 그룹 affiliation 명령 PUBLISH(TS 24.379 §9, RFC 3903) — strGroup 이 비면 m_strGroupId. 최종 응답은 관측자 OnAffiliate. */
+    void AffiliateGroup(bool bDeaffiliate = false, const std::string& strGroup = "");
     /** affiliation 대상 그룹 — 계측기 워커는 풀 신원의 그룹을 Start() 뒤에 정한다(cspsim 은 생성자 인자). */
     void SetGroupId(const std::string& strGroupId) { m_strGroupId = strGroupId; }
     /** IFloorSink — floor 수신 스레드 → 관측자(OnFloor). */
     virtual void OnFloorMessage(int iSubtype, long long tUs);
-    std::string  m_strAffCallId;          // 마지막 affiliate(Expires>0) PUBLISH 의 Call-ID — 응답을 관측자에 짝짓는다
+    std::string  m_strAffCallId;          // 마지막 affiliation PUBLISH 의 Call-ID — 응답을 관측자에 짝짓는다
+    std::string  m_strAffGroup;           // 그 PUBLISH 의 대상 그룹
+    bool         m_bAffDeaff = false;     // 그 PUBLISH 가 해제(Expires 0) 명령이었다
     long long    m_tAffStartMs = 0;
     void SendPttRequest();
     void SendPttRelease();
@@ -395,6 +403,8 @@ public:
     std::string  m_strDlgSubFromTag;
     std::string  m_strDlgWatchedAor;   // 감시 대상 AoR (첫 구독)
     std::map<std::string, std::string> m_mapDlgSubs;
+    struct DlgSubDialog { std::string strFromTag; int iSeq = 1; bool bOk = false; };
+    std::map<std::string, DlgSubDialog> m_mapDlgSubDialogs;   // Call-ID → 구독 다이얼로그(해제에 필요한 From-tag·CSeq, 200 여부)
     std::vector<DlgNotifyRec> m_vecDlgRecs;   // m_mtxConf 보호
 
     // 이벤트 패키지 프로브 다이얼로그 (SubscribeEvent) — 401 재전송을 위해 요청 인자를 보관
@@ -429,11 +439,12 @@ private:
                        int& iSeqOut,
                        std::string& strFromTagOut);
 
-    // SUBSCRIBE Expires=0 — 기존 다이얼로그(Call-ID/From-tag) 재사용
+    // SUBSCRIBE Expires=0 — 기존 다이얼로그(Call-ID/From-tag) 재사용. pszEvent 가 없으면 Call-ID 로 패키지를 고른다(reg/conference/xcap-diff)
     void SendUnsubscribe(const std::string& strPsi,
                          const std::string& strCallId,
                          int& iSeq,
-                         const std::string& strFromTag);
+                         const std::string& strFromTag,
+                         const char* pszEvent = nullptr);
 
     // 표준 로그아웃 플로우: de-affiliate → SUBSCRIBE Expires=0 × 2
     // (REGISTER Expires=0 는 m_clsUserAgent.Stop() 에서 자동 처리)

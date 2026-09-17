@@ -1,0 +1,16 @@
+# VoLTE 1:1 영상 통화 — invite.media.video: h264 면 워커가 오퍼에 m=video(H.264, 워커 Media.VideoFile — 동봉 samples/sample_video.h264)를 싣고
+#   answer 의 활성 m=video 로 협상을 판정한다(`video_pct`). 워커에 비디오 파일이 없으면 오디오만 나가고 video_unavailable 로 드러난다. 검증 S6-SCN-VOLTE-VIDEO.
+id: VOLTE-CALL-VIDEO
+title: VoLTE 1:1 영상 통화 (AMR-WB + H.264)
+tags: [volte, video]
+roles:
+  caller: { pool: volte_ue }
+  callee: { pool: volte_ue, disjoint_from: caller }
+flow:
+  - { step: register,   who: [caller, callee], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: callee, media: { audio: amr-wb, video: h264 }, expect: { video_pct: 100 } }
+  - { step: answer,     who: [callee], after_ms: 1000, expect: { srd_ms: { p95: 2000 } } }
+  - { step: media_hold, seconds: "${ht}", expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: caller }
+target_evidence:
+  - { kind: recording_created, min: 1 }

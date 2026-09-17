@@ -2,7 +2,7 @@
   "Worker": { "Name": "" },
   "Server": { "Ip": "0.0.0.0", "Port": 7100 },
   "Sip": { "LocalIp": "", "PortBase": 0, "Capture": "failed", "DumpMax": 500 },
-  "Media": { "AudioFile": "", "VideoFile": "", "PeerCertFile": "", "SampleDir": "samples", "MaxRtpStreams": 0 },
+  "Media": { "AudioFile": "samples/sample_voice.amrwb", "VideoFile": "samples/sample_video.h264", "PeerCertFile": "", "SampleDir": "samples", "MaxRtpStreams": 0 },
   "Limits": { "EndpointsPerCore": 200, "SapsPerCore": 10 },
   "Timers": { "RegisterIntervalMs": 20, "RegisterTimeoutS": 60, "InviteTimeoutMs": 32000, "ByeTimeoutMs": 8000, "FloorTimeoutMs": 5000, "GroupReuseGapMs": 1000 }
 }

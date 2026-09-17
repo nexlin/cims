@@ -1,0 +1,17 @@
+# PTT 그룹 영상 통화 — 발신 멤버가 그룹 URI 로 audio+video(H.264) INVITE, 멤버 fan-out·자동응답 뒤 floor 를 잡고 송출한다.
+#   영상 협상은 `video_pct`(answer 의 활성 m=video). 검증 S6-SCN-PTT-VIDEO.
+id: PTT-GROUP-CALL-VIDEO
+title: PTT 그룹 영상 통화 (fan-out + floor + H.264)
+tags: [ptt, video]
+roles:
+  talker:  { pool: ptt_ue }
+  members: { pool: ptt_ue, multi: true }
+flow:
+  - { step: register,      who: [talker, members], expect: { code: 200 } }
+  - { step: group_call,    from: talker, to: members, media: { audio: amr-wb, video: h264 }, expect: { code: 200, video_pct: 100, group_fanout_ms: { p95: 3000 } } }
+  - { step: floor_request, who: [talker], expect: { floor_grant_ms: { p95: 500 } } }
+  - { step: media_hold,    seconds: "${ht}", expect: { rtp_loss_pct: { max: 1 } } }
+  - { step: floor_release, who: [talker] }
+  - { step: bye,           who: [talker, members] }
+target_evidence:
+  - { kind: recording_created, min: 1 }

@@ -746,6 +746,47 @@ void SimSession::SubscribeDialog(const std::string& strWatchedAor)
     SendEventSubscribe("dialog", "application/dialog-info+xml", strWatchedAor, strCallId, iSeq, strFromTag, nullptr,
                        true);
     if (bFirst) m_iDlgSubSeq = iSeq;
+    m_mapDlgSubDialogs[strCallId] = DlgSubDialog{ strFromTag, iSeq, false };
+}
+
+// dialog 구독 전부 해제(Expires 0, RFC 6665 §4.2.1.4) — 200 을 받은 다이얼로그만. 판정·학습값을 비운다.
+void SimSession::UnsubscribeDialogs()
+{
+    for (auto& kv : m_mapDlgSubDialogs) {
+        if (!kv.second.bOk) continue;
+        auto it = m_mapDlgSubs.find(kv.first);
+        if (it == m_mapDlgSubs.end()) continue;
+        SendUnsubscribe(it->second, kv.first, kv.second.iSeq, kv.second.strFromTag, "dialog");
+    }
+    m_mapDlgSubDialogs.clear();
+    m_mapDlgSubs.clear();
+    m_strDlgSubCallId.clear();
+    m_strDlgSubFromTag.clear();
+    m_strDlgWatchedAor.clear();
+    m_iDlgSubSeq = 0;
+    m_iDlgSubStatus = 0;
+    m_iDlgSubOkCount = 0;
+    ClearWatchedDialog();
+}
+
+void SimSession::UnsubscribeEvent()
+{
+    if (m_iEventSubStatus == 200 && !m_strEventSubCallId.empty())
+        SendUnsubscribe(m_strEventSubResource, m_strEventSubCallId, m_iEventSubSeq, m_strEventSubFromTag,
+                        m_strEventSubEvent.c_str());
+    m_strEventSubCallId.clear();
+    m_strEventSubFromTag.clear();
+    m_iEventSubSeq = 0;
+    m_iEventSubStatus = 0;
+}
+
+void SimSession::ClearWatchedDialog()
+{
+    m_strWatchedDlgCallId.clear();
+    m_strWatchedDlgState.clear();
+    m_strWatchedDlgLocalTag.clear();
+    m_strWatchedDlgRemoteTag.clear();
+    m_iDialogNotifyCount = 0;
 }
 
 // 이벤트 패키지 프로브 — Event 토큰 임의 지정. 자원은 보통 자기 AoR (인가 축 무관하게 분류만 본다).
@@ -863,6 +904,7 @@ void SimSession::StartCallWithReplaces(const std::string& strTarget, const std::
                                        const std::string& strToTag, const std::string& strFromTag)
 {
     if (!m_strInviteId.empty() || strReplacesCallId.empty()) return;
+    m_stats.tCallStart = NowMs();   // SRD 기점 — EventCallStart 가 200 까지를 잰다
 
     CSipCallRtp clsRtp;
     CSipCallRoute clsRoute;
@@ -896,6 +938,7 @@ void SimSession::StartCallWithJoin(const std::string& strTarget, const std::stri
                                    const std::string& strToTag, const std::string& strFromTag)
 {
     if (!m_strInviteId.empty() || strJoinCallId.empty()) return;
+    m_stats.tCallStart = NowMs();
 
     CSipCallRtp clsRtp;
     CSipCallRoute clsRoute;
@@ -932,7 +975,8 @@ void SimSession::StartCallWithJoin(const std::string& strTarget, const std::stri
 void SimSession::SendUnsubscribe(const std::string& strPsi,
                                   const std::string& strCallId,
                                   int& iSeq,
-                                  const std::string& strFromTag)
+                                  const std::string& strFromTag,
+                                  const char* pszEvent)
 {
     if (strCallId.empty() || strFromTag.empty()) return;  // 구독 없음 — skip
 
@@ -960,7 +1004,8 @@ void SimSession::SendUnsubscribe(const std::string& strPsi,
     pMsg->AddHeader("Expires", "0");
     // reg-event 다이얼로그(자신의 AoR 구독)면 Event: reg, 그 외 xcap-diff
     // 다이얼로그별 이벤트 패키지 — reg-event(자신의 AoR) / conference(그룹 참가자 정보) / 그 외 xcap-diff
-    pMsg->AddHeader("Event", strCallId == m_strRegSubCallId ? "reg" : strCallId == m_strConfSubCallId ? "conference" : "xcap-diff");
+    pMsg->AddHeader("Event", pszEvent ? pszEvent
+                             : strCallId == m_strRegSubCallId ? "reg" : strCallId == m_strConfSubCallId ? "conference" : "xcap-diff");
 
     char szContact[128];
     snprintf(szContact, sizeof(szContact), "<sip:%s@%s:%d>",
@@ -1006,6 +1051,9 @@ void SimSession::Logout()
         SendUnsubscribe(m_strConfSubGroup, m_strConfSubCallId, m_iConfSubSeq, m_strConfSubFromTag);
         m_strConfSubCallId.clear();
     }
+    // dialog 구독(RFC 4235)·이벤트 프로브 구독도 같은 이유로 내린다
+    UnsubscribeDialogs();
+    UnsubscribeEvent();
 
     // 3. REGISTER Expires=0 — m_clsUserAgent.Stop() 내부에서 자동 전송되므로 여기서는 생략
 }
@@ -1014,15 +1062,17 @@ void SimSession::Logout()
 //   Content-Type: application/vnd.3gpp.mcptt-affiliation-command+xml.
 //   CSP CscfModule::RecvRequestPublish 가 Request-URI 그룹이면 (user,group,client) affiliation 등록.
 //   Expires>0=affiliate, Expires:0(또는 body de-affiliate)=해제.
-void SimSession::AffiliateGroup(bool bDeaffiliate) {
-    if (!m_bPttMode || m_strGroupId.empty()) return;
+void SimSession::AffiliateGroup(bool bDeaffiliate, const std::string& strGroup) {
+    const std::string strTarget = strGroup.empty() ? m_strGroupId : strGroup;
+    if (!m_bPttMode || strTarget.empty()) return;
 
     const std::string& strLocalIp = m_clsSetup.m_strLocalIp;
     int iLocalPort = m_iLocalPort;
 
     char szCallId[128];
-    snprintf(szCallId, sizeof(szCallId), "aff_%s_%s_%d_%d",
-             m_strGroupId.c_str(), m_strUser.c_str(), m_iId, (int)time(NULL));
+    static std::atomic<int> s_iAffSerial{0};   // 같은 초에 affiliate/de-affiliate 를 이어 내도 Call-ID 가 겹치지 않게
+    snprintf(szCallId, sizeof(szCallId), "aff_%s_%s_%d_%d_%d",
+             strTarget.c_str(), m_strUser.c_str(), m_iId, (int)time(NULL), ++s_iAffSerial);
 
     char szTag[64];
     SipMakeTag(szTag, sizeof(szTag));
@@ -1030,7 +1080,7 @@ void SimSession::AffiliateGroup(bool bDeaffiliate) {
     CSipMessage* pMsg = new CSipMessage();
     pMsg->m_strSipMethod = "PUBLISH";
     // Request-URI: sip:{group}@domain — group id 로 affiliation 대상 지정
-    pMsg->m_clsReqUri.Set("sip", m_strGroupId.c_str(), m_strDomain.c_str(), m_iServerPort);
+    pMsg->m_clsReqUri.Set("sip", strTarget.c_str(), m_strDomain.c_str(), m_iServerPort);
 
     char szBranch[SIP_BRANCH_MAX_SIZE];
     SipMakeBranch(szBranch, sizeof(szBranch));
@@ -1038,7 +1088,7 @@ void SimSession::AffiliateGroup(bool bDeaffiliate) {
 
     pMsg->m_clsFrom.m_clsUri.Set("sip", m_strUser.c_str(), m_strDomain.c_str(), 0);
     pMsg->m_clsFrom.InsertParam(SIP_TAG, szTag);
-    pMsg->m_clsTo.m_clsUri.Set("sip", m_strGroupId.c_str(), m_strDomain.c_str(), 0);
+    pMsg->m_clsTo.m_clsUri.Set("sip", strTarget.c_str(), m_strDomain.c_str(), 0);
     pMsg->m_clsCallId.Parse(szCallId, (int)strlen(szCallId));
     pMsg->m_clsCSeq.Set(1, "PUBLISH");
     pMsg->m_iMaxForwards = 70;
@@ -1057,7 +1107,7 @@ void SimSession::AffiliateGroup(bool bDeaffiliate) {
     strBody  = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
     strBody += "<mcptt-affiliation-command xmlns=\"urn:3gpp:ns:mcpttAffiliation:1.0\">\r\n";
     strBody += std::string("  <") + (bDeaffiliate ? "de-affiliate" : "affiliate")
-             + " group=\"sip:" + m_strGroupId + "@" + m_strDomain + "\"/>\r\n";
+             + " group=\"sip:" + strTarget + "@" + m_strDomain + "\"/>\r\n";
     strBody += "</mcptt-affiliation-command>\r\n";
     pMsg->m_clsContentType.Set("application", "vnd.3gpp.mcptt-affiliation-command+xml");
     pMsg->m_strBody = strBody;
@@ -1066,8 +1116,11 @@ void SimSession::AffiliateGroup(bool bDeaffiliate) {
     pMsg->AddRoute(m_strServerIp.c_str(), RoutePort(), m_eTransport);
 
     printf("[%d] %s group=%s Call-ID=%s\n", m_iId, bDeaffiliate ? "DE-AFFILIATE" : "AFFILIATE",
-           m_strGroupId.c_str(), szCallId);
-    if (!bDeaffiliate) { m_strAffCallId = szCallId; m_tAffStartMs = NowMs(); }
+           strTarget.c_str(), szCallId);
+    m_strAffCallId = szCallId;
+    m_strAffGroup = strTarget;
+    m_bAffDeaff = bDeaffiliate;
+    m_tAffStartMs = NowMs();
     m_clsUserAgent.m_clsSipStack.SendSipMessage(pMsg);
 }
 
@@ -1117,7 +1170,7 @@ void SimSession::StartCall(const std::string& strTarget) {
                         bSrtpOffer ? "AES_CM_128_HMAC_SHA1_80" : "", m_strSrtpLocalKey, "1", iOfferDtmfPt, iOfferDtmfClock);
     // Video media line (if video file set) — SRTP 오퍼 시 비디오도 자기 키로 a=crypto (m-line 단위)
     m_strSrtpVideoLocalKey.clear();
-    if (m_clsRtpThread.m_iVideoPort > 0) {
+    if (m_clsRtpThread.m_iVideoPort > 0 && m_clsRtpThread.m_bVideoOffer) {
         if (bSrtpOffer) {
             m_strSrtpVideoLocalKey = SrtpGenInlineKeyB64();
             if (m_strSrtpVideoLocalKey.empty()) {
@@ -1237,6 +1290,12 @@ bool SimSession::RejectCall(int iSipCode) {
 }
 
 void SimSession::StopCall() {
+    if (!m_strConsultId.empty()) {
+        // 상담 통화(attended transfer 의 두 번째 다이얼로그)도 함께 내린다 — 전달이 완결됐으면 서버 BYE 로 이미 비어 있다
+        printf("[%d] [TD] StopCall consult callid=%s\n", m_iId, m_strConsultId.c_str());
+        m_clsUserAgent.StopCall(m_strConsultId.c_str());
+        m_strConsultId.clear();
+    }
     if (!m_strInviteId.empty()) {
         // [TEARDOWN-DIAG] establish(200 OK 수신=m_bInCall) 여부 기록.
         //   inCall=0 이면 psip StopCall 이 BYE 대신 CANCEL/no-op → CSP no-BYE 누수 원인 후보.
@@ -1272,6 +1331,7 @@ void SimSession::StartConsultCall(const std::string& strTarget) {
     }
     // 상담 통화는 두 번째 다이얼로그 — 첫 통화(m_strInviteId)와 RtpThread 를 공유한다(발신자는
     //   전달 후 빠지므로 상담 구간의 미디어 방향은 검증 대상이 아니다). VoIP 전용(PTT/긴급 없음).
+    m_stats.tCallStart = NowMs();   // 상담 INVITE 의 SRD 기점
     CSipCallRtp clsRtp;
     CSipCallRoute clsRoute;
     clsRtp.m_strIp  = m_clsSetup.m_strLocalIp;
@@ -1424,6 +1484,13 @@ bool SimSession::RecvRequest(int /*iThreadId*/, CSipMessage* pclsMessage) {
         }
         printf("[%d] [BLF] dialog NOTIFY watched=%s state=%s call-id=%s\n", m_iId,
                pclsMessage->m_clsTo.m_clsUri.m_strUser.c_str(), st.c_str(), cid.c_str());
+        if (m_pObserver) {
+            // 감시 대상 = 이 NOTIFY 의 구독 다이얼로그(Call-ID)가 가리키는 AoR — 첫 구독 필드가 아니라 맵에서 찾는다
+            std::string strSubId;
+            pclsMessage->GetCallId(strSubId);
+            auto wit = m_mapDlgSubs.find(strSubId);
+            m_pObserver->OnDialogNotify(this, wit != m_mapDlgSubs.end() ? wit->second : m_strDlgWatchedAor, st, cid);
+        }
         // 판정용 기록 — entity/version(문서 헤더) + dialog 요소마다 id/direction/state/local/remote.
         //   dialog 요소가 없는 문서(빈 full)도 version 연속성 판정을 위해 id="-" 로 1건 남긴다.
         {
@@ -1578,6 +1645,17 @@ bool SimSession::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
     // affiliation PUBLISH 응답 검증 (TS 24.379 §9 / RFC 3903) — CSP 멤버십 게이트(item 1)
     //   덕에 비멤버 그룹 제휴는 403 으로 거부됨. 200 OK(SIP-ETag) vs 4xx 를 구분 기록해
     //   affiliation E2E(멤버=200 / 비멤버=403) 를 검증 가능하게 한다.
+    // REFER 최종 응답(RFC 3515) — psip 의 EventTransferResponse 는 다이얼로그가 살아 있을 때만 불린다. attended 전달에서 서버(CSP)가 전달자 leg 에
+    //   BYE 를 먼저 보내고 202 를 뒤에 내면 다이얼로그가 이미 없어 응답이 버려진다 — 응답을 여기서 먼저 관측해 관측자에 올린다(전달 결과 코드의 정본).
+    if (pclsMessage->m_clsCSeq.m_strMethod == "REFER" && pclsMessage->m_iStatusCode >= 200) {
+        std::string strReferId;
+        pclsMessage->GetCallId(strReferId);
+        m_iReferStatus = pclsMessage->m_iStatusCode;
+        printf("[%d] [XFER] REFER response status=%d CallId=%s\n", m_iId, pclsMessage->m_iStatusCode, strReferId.c_str());
+        if (m_pObserver) m_pObserver->OnReferResponse(this, strReferId, pclsMessage->m_iStatusCode);
+        return false;   // UA 도 처리(EventTransferResponse — 다이얼로그가 있을 때)
+    }
+
     if (pclsMessage->m_clsCSeq.m_strMethod == "PUBLISH") {
         int st = pclsMessage->m_iStatusCode;
         if (m_pObserver && st >= 200 && !m_strAffCallId.empty()) {
@@ -1585,7 +1663,7 @@ bool SimSession::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
             pclsMessage->GetCallId(strPubId);
             if (strPubId == m_strAffCallId) {
                 m_strAffCallId.clear();
-                m_pObserver->OnAffiliate(this, m_strGroupId, st, NowMs() - m_tAffStartMs);
+                m_pObserver->OnAffiliate(this, m_strAffGroup, st, NowMs() - m_tAffStartMs, m_bAffDeaff);
             }
         }
         if (st / 100 == 2) {
@@ -1621,10 +1699,14 @@ bool SimSession::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
         } else if (m_mapDlgSubs.count(strCallId)) {
             if (strCallId == m_strDlgSubCallId) m_iDlgSubStatus = 200;
             m_iDlgSubOkCount++;
+            auto dit = m_mapDlgSubDialogs.find(strCallId);
+            if (dit != m_mapDlgSubDialogs.end()) dit->second.bOk = true;
             printf("[%d] [BLF] dialog SUBSCRIBED OK watched=%s\n", m_iId, m_mapDlgSubs[strCallId].c_str());
+            if (m_pObserver) m_pObserver->OnSubscribeResponse(this, "dialog", m_mapDlgSubs[strCallId], 200);
         } else if (strCallId == m_strEventSubCallId) {
             m_iEventSubStatus = 200;
             printf("[%d] EVENT-PROBE SUBSCRIBED OK\n", m_iId);
+            if (m_pObserver) m_pObserver->OnSubscribeResponse(this, m_strEventSubEvent, m_strEventSubResource, 200);
         } else if (strCallId == m_strConfSubCallId) {
             m_iConfSubStatus = 200;
             printf("[%d] CONFERENCE SUBSCRIBED OK group=%s\n", m_iId, m_strConfSubGroup.c_str());
@@ -1633,8 +1715,10 @@ bool SimSession::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
         // dialog 구독·이벤트 프로브·conference 구독의 최종 응답은 검증 판정값
         //   (403 그룹 밖 감시 / 489 Bad Event / 403 Warning 138 conference 인가 거절)
         CSipHeader* pWarn = pclsMessage->GetHeader("Warning");
-        if (strCallId == m_strDlgSubCallId) m_iDlgSubStatus = iStatus;
-        else if (m_mapDlgSubs.count(strCallId)) { /* 추가 감시 대상 거절 — OK 수에 미포함 */ }
+        if (m_mapDlgSubs.count(strCallId)) {
+            if (strCallId == m_strDlgSubCallId) m_iDlgSubStatus = iStatus;   // 추가 감시 대상 거절은 OK 수에 미포함
+            if (m_pObserver) m_pObserver->OnSubscribeResponse(this, "dialog", m_mapDlgSubs[strCallId], iStatus);
+        }
         else if (strCallId == m_strEventSubCallId && iStatus == 401 && !pclsMessage->m_clsWwwAuthenticateList.empty()) {
             // 서버 Digest 챌린지 — realm 을 기록(검증 마커)하고 실 UE 처럼 1회 재전송한다.
             const CSipChallenge& clsCh = pclsMessage->m_clsWwwAuthenticateList.front();
@@ -1648,8 +1732,12 @@ bool SimSession::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
                 return true;
             }
             m_iEventSubStatus = iStatus;   // 재시도 뒤에도 401 — 자격 거절(realm/HA1 불일치)로 판정
+            if (m_pObserver) m_pObserver->OnSubscribeResponse(this, m_strEventSubEvent, m_strEventSubResource, iStatus);
         }
-        else if (strCallId == m_strEventSubCallId) m_iEventSubStatus = iStatus;
+        else if (strCallId == m_strEventSubCallId) {
+            m_iEventSubStatus = iStatus;
+            if (m_pObserver) m_pObserver->OnSubscribeResponse(this, m_strEventSubEvent, m_strEventSubResource, iStatus);
+        }
         else if (strCallId == m_strConfSubCallId) {
             m_iConfSubStatus = iStatus;
             m_strConfSubWarning = pWarn ? pWarn->m_strValue : "";
@@ -2024,9 +2112,11 @@ void SessionSipClient::AnswerPtt(const char* pszCallId, CSipCallRtp* pclsRtp, CS
         BuildAudioMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iPort, clsLocalRtp.m_iCodec, pclsRtp,
                         bSrtpAnswer && pclsRtp->m_bRemoteSavp, bSrtpAnswer ? strSrtpSuite : "",
                         m_pOwner->m_strSrtpLocalKey, strSrtpTag);
-    if (m_pOwner->m_clsRtpThread.m_iVideoPort > 0)
-        BuildVideoMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iVideoPort, bVideoSrtpAnswer && bVideoSavp,
-                        bVideoSrtpAnswer ? strVideoSuite : "", m_pOwner->m_strSrtpVideoLocalKey, strVideoTag);
+    // RFC 3264 §6 — answer 의 m-line 은 오퍼와 같은 수·순서. 오퍼에 m=video 가 있을 때만 답하고(우리 비디오 소켓이 없으면 port 0 으로 거절),
+    //   오퍼에 없으면 덧붙이지 않는다(전에는 비디오 파일이 있으면 무조건 실었다 — 오퍼에 없는 m-line 추가)
+    if (pclsRtp && FindActiveMediaPort(pclsRtp->m_clsMediaList, "video") > 0)
+        BuildVideoMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iVideoPort > 0 ? m_pOwner->m_clsRtpThread.m_iVideoPort : 0,
+                        bVideoSrtpAnswer && bVideoSavp, bVideoSrtpAnswer ? strVideoSuite : "", m_pOwner->m_strSrtpVideoLocalKey, strVideoTag);
 #endif
 
     // PTT 200 OK: m=application(floor 수신 포트) 광고
@@ -2150,9 +2240,10 @@ void SessionSipClient::AnswerVoip(const char* pszCallId, CSipCallRtp* pclsRtp) {
         BuildAudioMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iPort, clsLocalRtp.m_iCodec, pclsRtp,
                         bSrtpAnswer && pclsRtp->m_bRemoteSavp, bSrtpAnswer ? strSrtpSuite : "",
                         m_pOwner->m_strSrtpLocalKey, strSrtpTag, iAnsDtmfPt, iAnsDtmfClock);
-    if (m_pOwner->m_clsRtpThread.m_iVideoPort > 0)
-        BuildVideoMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iVideoPort, bVideoSrtpAnswer && bVideoSavp,
-                        bVideoSrtpAnswer ? strVideoSuite : "", m_pOwner->m_strSrtpVideoLocalKey, strVideoTag);
+    // RFC 3264 §6 — 오퍼에 m=video 가 있을 때만 답한다(비디오 소켓이 없으면 port 0 거절). 오퍼에 없는 m-line 은 덧붙이지 않는다
+    if (pclsRtp && FindActiveMediaPort(pclsRtp->m_clsMediaList, "video") > 0)
+        BuildVideoMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iVideoPort > 0 ? m_pOwner->m_clsRtpThread.m_iVideoPort : 0,
+                        bVideoSrtpAnswer && bVideoSavp, bVideoSrtpAnswer ? strVideoSuite : "", m_pOwner->m_strSrtpVideoLocalKey, strVideoTag);
 #endif
 
     m_pUserAgent->AcceptCall(pszCallId, &clsLocalRtp);
@@ -2244,6 +2335,12 @@ void SessionSipClient::EventCallEnd(const char* pszCallId, int iSipStatus) {
     m_pOwner->m_iPendingQ850 = 0;
     m_pOwner->m_iLastQ850 = iQ850;
     if (m_pOwner->m_pObserver) m_pOwner->m_pObserver->OnCallEnd(m_pOwner, pszCallId, iSipStatus, iQ850);
+    // 상담 통화(attended transfer 두 번째 다이얼로그)의 종료 — 전달 완결 뒤 서버 BYE 또는 상담 실패. 첫 통화 상태는 그대로.
+    if (!m_pOwner->m_strConsultId.empty() && pszCallId && m_pOwner->m_strConsultId == pszCallId) {
+        printf("[%d] CALL ENDED (consult) CallId=%s status=%d\n", m_pOwner->m_iId, pszCallId, iSipStatus);
+        m_pOwner->m_strConsultId.clear();
+        return;
+    }
     // 다른 다이얼로그(예: 당겨받기 뒤 서버가 CANCEL 한 자기 링잉 착신 leg, 487)의 종료는 현재 호 상태를 건드리지 않는다.
     if (!m_pOwner->m_strInviteId.empty() && pszCallId && m_pOwner->m_strInviteId != pszCallId) {
         printf("[%d] CALL ENDED (other dialog) CallId=%s status=%d — current=%s kept\n", m_pOwner->m_iId, pszCallId,
@@ -2252,14 +2349,15 @@ void SessionSipClient::EventCallEnd(const char* pszCallId, int iSipStatus) {
     }
     m_pOwner->m_bInCall = false;
     m_pOwner->m_strInviteId.clear();
+    if (m_pOwner->m_strPendingCallId == pszCallId) { m_pOwner->m_strPendingCallId.clear(); m_pOwner->m_bPendingOffer = false; }   // 응답 전 CANCEL 된 착신(487)
     m_pOwner->m_iLastCallEndStatus = iSipStatus;
     printf("[%d] CALL ENDED CallId=%s status=%d\n", m_pOwner->m_iId, pszCallId, iSipStatus);
 }
 
 void SessionSipClient::EventTransferResponse(const char* pszCallId, int iSipStatus) {
+    // 관측자 통지는 SimSession::RecvResponse(REFER) 가 한다 — 여기는 다이얼로그가 살아 있을 때만 불려 attended 의 늦은 202 를 놓친다
     m_pOwner->m_iReferStatus = iSipStatus;
-    printf("[%d] [XFER] REFER response status=%d CallId=%s\n", m_pOwner->m_iId, iSipStatus, pszCallId);
-    if (iSipStatus >= 200 && m_pOwner->m_pObserver) m_pOwner->m_pObserver->OnReferResponse(m_pOwner, pszCallId, iSipStatus);
+    (void)pszCallId;
 }
 
 void SessionSipClient::EventCallRing(const char* pszCallId, int iSipStatus, CSipCallRtp* pclsRtp) {

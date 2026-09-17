@@ -22,6 +22,8 @@ KNOWN_TARGET_ISSUES = [
      'text': '트렁크 REGISTER 는 CSP 가 계정을 받지 않아 403(§12) — 등록형 트렁크 시나리오는 attempts 0 으로 닫힌다'},
     {'when': lambda sc, topo: any(getattr(p, 'answer', '') == 'silent' for p in topo.pools.values()),
      'text': 'RouteSet 헬스체크가 없어 무응답 피어에서 Timer B(32 s)까지 기다린다(§12) — failover 는 실측 fail'},
+    {'when': lambda sc, topo: any(s.step == 'group_call' and s.media and s.media.video == 'h264' for s in sc.flow),
+     'text': 'PTT 그룹콜의 video 오퍼에 PTT-AS 200 이 m=video 를 생략한다(§12, RFC 3264 §6) — video_pct 기대치는 FAIL 이 예상된다'},
 ]
 
 
@@ -83,7 +85,7 @@ def procedure(scenario: Scenario, phases: Dict[str, List[int]]) -> List[dict]:
         if s.from_ and s.to:
             parts.append(f'{s.from_} → {s.to}')
         elif actors:
-            parts.append(', '.join(actors))
+            parts.append(', '.join(actors) + (f' → {s.to}' if s.to else ''))
         if s.media:
             parts.append(f"{s.media.audio or ''}{'+' + s.media.video if s.media.video else ''}"
                          + (f' · rtp {s.media.rtp}' if s.media.rtp != 'auto' else ''))
@@ -284,10 +286,17 @@ def build_plan(scenario: Scenario, topology: Topology, topology_doc: dict, profi
                 out['warnings'].append('알려진 CSP 과제: ' + issue['text'])
         except Exception:
             pass
+    # 역할 → 그 창의 신원 사용자부(비밀 없음) — 검증 다리가 대상 DB 픽스처(pickup_group·전화 그룹·역할)를 계측기가 쓸 신원에 입힌다
+    by_role: Dict[str, List[str]] = {}
+    for pw in plan['workers'].values():
+        pools = {p['pool']: p for p in pw['pools']}
+        for role, (pool, b, e) in pw['roles'].items():
+            ids = (pools.get(pool) or {}).get('identities') or []
+            by_role.setdefault(role, []).extend(str(x.get('user')) for x in ids[b:e] if x.get('user'))
     out.update({
         'roles': plan['roles'], 'workers': wrows, 'steps': steps, 'phases': phases, 'procedure': procedure(scenario, phases),
         'bindings': plan['bindings'], 'rate_total': plan['rate_total'], 'max_instances': plan['max_instances'],
-        'identities': plan['identities'], 'peer_pools': plan['peer_pools'], 'pinned': plan['pinned'],
+        'identities': plan['identities'], 'identities_by_role': by_role, 'peer_pools': plan['peer_pools'], 'pinned': plan['pinned'],
         'samples': plan.get('samples') or {}, 'media': {'modes': modes, 'uses_rtp': uses_rtp}, 'group_session': gs,
         'seed': seed, 'env': env, 'little': little,
         'estimate': {'duration_s': estimate_duration(profile, plan['rate_total'], plan['max_instances'], sdt),

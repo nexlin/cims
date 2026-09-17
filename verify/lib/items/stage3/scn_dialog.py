@@ -13,6 +13,10 @@ Replaces 수신)이 한 흐름으로 엮인다. 그룹 축은 scn_pickup 과 같
   D5 미등록 SUBSCRIBE  — REGISTER 없이(-no_register) PTT 가입자가 자기 AoR dialog SUBSCRIBE → 서버는 등록 여부가 아닌
                          신원으로 인증(RFC 6665 §4.2.1): 401 의 realm 이 **요청자 서비스 realm(ptt)** 이고(volte 폴백 아님),
                          Digest 응답 뒤 200. 재기동으로 등록표가 빈 뒤 재REGISTER 까지 구독이 전멸하던 결함의 회귀.
+
+계측기 경로(test_instrument.md §9): D1·D2 → `VOLTE-BLF-PICKUP`(subscribe dialog → replaces), D3 → `VOLTE-BLF-DENIED`(watcher 다른 그룹, 403),
+D4 → `VOLTE-SUBSCRIBE-BAD-EVENT`(489 + 대조 200). 픽스처는 계획의 역할 신원에 입힌다. D5(미등록 SUBSCRIBE)는 워커 단말이 항상 등록하므로
+계측기 경로에서도 cspsim 으로 판정한다(검사 줄에 경로 표기).
 """
 from __future__ import annotations
 
@@ -21,6 +25,7 @@ import os
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 from ...common.cspsim import run_cspsim
+from ...common.tester import tester_config, tester_check, tester_role_identities
 from ...common import db as _db
 from ...common.subscribers import MCPTT_DOMAIN
 from ._xfer_common import (
@@ -77,6 +82,9 @@ def dialog(ctx: VerifyContext) -> ItemResult:
     def done(status: ItemStatus, detail: str) -> ItemResult:
         ctx.w()
         return ItemResult(id=_RID, name=_RNAME, status=status, detail=detail, stage=3)
+
+    if tester_config() is not None:
+        return _via_tester(ctx, done)
 
     creds, org = select_same_org(ctx.dist_dir, 4)
     if len(creds) < 4:
@@ -139,23 +147,57 @@ def dialog(ctx: VerifyContext) -> ItemResult:
                    f"Event:{_BOGUS_EVENT} → {st_bogus} (기대 489) / 대조 Event:dialog 자기감시 → {st_ctrl} (기대 200) "
                    f"rc={rc_b}/{rc_c}"))
 
-    # ── D5: 미등록 PTT 가입자의 SUBSCRIBE — 신원(Digest)으로 수락, 챌린지 realm = 요청자 서비스 realm ──
+    checks.append(_check_d5(ctx))
+
+    all_ok = emit_checks(ctx, checks)
+    return done(ItemStatus.PASS if all_ok else ItemStatus.FAIL, f"axis={fx.axis}\n" + fmt_checks(checks))
+
+
+def _check_d5(ctx: VerifyContext) -> tuple:
+    """D5 — 미등록 PTT 가입자의 SUBSCRIBE(Digest 수락, realm = 요청자 서비스). cspsim 전용(워커 단말은 항상 등록한다)."""
     P = _pick_ptt_digest_subscriber(ctx.dist_dir)
     if P is None:
-        checks.append(("D5 미등록 SUBSCRIBE Digest 수락 (realm=요청자 서비스)", None, "PTT digest 가입자(ha1) 미확보"))
-    else:
-        args = [
-            "-mode", "ptt", "-scenario", "subscribe_event", "-count", "1",
-            "-ip", ctx.sim_ip, "-domain", MCPTT_DOMAIN,
-            *trio_cred_args([P], "dialog_d5"), "-event", "dialog", "-no_register",
-        ]
-        rc_p, tail_p = run_cspsim(ctx.repo_root, args, timeout=90)
-        st_p = parse_marker_int(tail_p, "status")
-        realm_p = _parse_marker_str(tail_p, "realm") or "-"
-        ok = st_p == 200 and realm_p == MCPTT_DOMAIN
-        checks.append(("D5 미등록 SUBSCRIBE Digest 수락 (realm=요청자 서비스)", ok,
-                       f"user={P['user']} -no_register Event:dialog → 401 realm={realm_p} (기대 {MCPTT_DOMAIN}, volte 폴백 아님) "
-                       f"→ Digest → status={st_p} (기대 200) rc={rc_p}"))
+        return ("D5 미등록 SUBSCRIBE Digest 수락 (realm=요청자 서비스)", None, "PTT digest 가입자(ha1) 미확보")
+    args = [
+        "-mode", "ptt", "-scenario", "subscribe_event", "-count", "1",
+        "-ip", ctx.sim_ip, "-domain", MCPTT_DOMAIN,
+        *trio_cred_args([P], "dialog_d5"), "-event", "dialog", "-no_register",
+    ]
+    rc_p, tail_p = run_cspsim(ctx.repo_root, args, timeout=90)
+    st_p = parse_marker_int(tail_p, "status")
+    realm_p = _parse_marker_str(tail_p, "realm") or "-"
+    ok = st_p == 200 and realm_p == MCPTT_DOMAIN
+    return ("D5 미등록 SUBSCRIBE Digest 수락 (realm=요청자 서비스)", ok,
+            f"[cspsim] user={P['user']} -no_register Event:dialog → 401 realm={realm_p} (기대 {MCPTT_DOMAIN}, volte 폴백 아님) "
+            f"→ Digest → status={st_p} (기대 200) rc={rc_p}")
 
+
+def _via_tester(ctx: VerifyContext, done) -> ItemResult:
+    """계측기 경로 — 계획의 역할 신원에 pickup_group 픽스처를 입히고 BLF 픽업(D1/D2)·그룹 밖 구독 403(D3)·미지 Event 489(D4)를 동봉 시나리오로."""
+    cfg = tester_config()
+    ctx.w(f"- 경로: 계측기 @ {cfg['url']} · 토폴로지 {cfg['topology']} (D5 는 cspsim)")
+    try:
+        ids = tester_role_identities(ctx, "VOLTE-BLF-PICKUP", ht=4) or {}
+        ids_d = tester_role_identities(ctx, "VOLTE-BLF-DENIED") or {}
+        same = [u for r in ("caller", "callee", "picker") for u in ids.get(r) or []]
+        if not same:
+            raise RuntimeError("계획에 역할 신원이 없다")
+    except Exception as e:
+        ctx.w(f"- [FAIL] 계측기 계획 실패: {e}")
+        return done(ItemStatus.FAIL, f"계측기 계획 실패: {e}")
+    grp = "vfy-pg-tester"
+    checks = []
+    with PickupGroupFixture(ctx.dist_dir, ctx.sim_ip, {u: grp for u in same}) as fx:
+        ctx.w(f"- 그룹 축: {fx.axis}")
+        checks.append(tester_check(ctx, "D1/D2 dialog NOTIFY → Replaces 재고정", "VOLTE-BLF-PICKUP", f"{_RID}/D1", ht=4))
+    if not fx.active:
+        checks.append(("D3 그룹 밖 dialog 구독 403", None, "pickup_group 컬럼 부재 — org 폴백 축에서는 그룹 경계 검사 불가"))
+    else:
+        other = {u: grp for u in ids_d.get("callee") or []}
+        other.update({u: grp + "-x" for u in ids_d.get("watcher") or []})
+        with PickupGroupFixture(ctx.dist_dir, ctx.sim_ip, other):
+            checks.append(tester_check(ctx, "D3 그룹 밖 dialog 구독 403", "VOLTE-BLF-DENIED", f"{_RID}/D3"))
+    checks.append(tester_check(ctx, "D4 미지 Event 489 (대조 dialog 자기감시 200)", "VOLTE-SUBSCRIBE-BAD-EVENT", f"{_RID}/D4"))
+    checks.append(_check_d5(ctx))
     all_ok = emit_checks(ctx, checks)
     return done(ItemStatus.PASS if all_ok else ItemStatus.FAIL, f"axis={fx.axis}\n" + fmt_checks(checks))

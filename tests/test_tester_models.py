@@ -119,10 +119,53 @@ class Strictness(unittest.TestCase):
         self.assertEqual(errs, [])
         self.assertEqual(m.flow[-1].cause, 16)
 
+    def test_transfer_join_steps(self):
+        # pickup 은 from + payload(피처코드|${var}) · replaces/join 은 from·to + 앞선 subscribe(dialog) · subscribe payload 는 이벤트 토큰 ·
+        # publish payload 는 affiliate|deaffiliate, group 은 publish 에도 · 그룹 세션에 1:1 전달 단계 금지
+        def bad(flow, key):
+            doc = self._scn()
+            doc['roles']['c'] = {'pool': 'volte_ue'}
+            doc['flow'] = doc['flow'][:1] + flow
+            _, errs = validate('scenario', doc)
+            self.assertTrue(any(key in e for e in errs), (key, errs))
+        bad([{'step': 'pickup', 'from': 'c'}], 'payload')
+        bad([{'step': 'pickup', 'from': 'c', 'payload': 'xyz'}], '피처코드')
+        bad([{'step': 'replaces', 'from': 'c'}], 'to')
+        bad([{'step': 'invite', 'from': 'a', 'to': 'b'}, {'step': 'replaces', 'from': 'c', 'to': 'b'}], 'subscribe')
+        bad([{'step': 'subscribe', 'who': ['c'], 'to': 'a'}, {'step': 'invite', 'from': 'a', 'to': 'b'},
+             {'step': 'join', 'from': 'c', 'to': 'b'}], 'subscribe')          # a 를 감시했는데 b 에 합류
+        bad([{'step': 'subscribe', 'who': ['c'], 'payload': 'bad token!'}], '이벤트 패키지')
+        bad([{'step': 'publish', 'who': ['c'], 'payload': 'join'}], 'affiliate')
+        bad([{'step': 'invite', 'from': 'a', 'to': 'b', 'group': 'g1'}], 'group')
+        doc = self._scn()
+        doc['roles']['c'] = {'pool': 'volte_ue'}
+        doc['flow'] = [doc['flow'][0],
+                       {'step': 'subscribe', 'who': ['c'], 'to': 'b', 'expect': {'code': 200}},
+                       {'step': 'invite', 'from': 'a', 'to': 'b'},
+                       {'step': 'replaces', 'from': 'c', 'to': 'b', 'expect': {'code': 200}},
+                       {'step': 'pickup', 'from': 'c', 'to': 'b', 'payload': '${pickup_code}'},
+                       {'step': 'publish', 'who': ['c'], 'payload': 'deaffiliate', 'group': 'g1'},
+                       {'step': 'bye', 'from': 'a'}]
+        m, errs = validate('scenario', doc)
+        self.assertEqual(errs, [])
+        self.assertEqual(m.flow[3].to, 'b')
+        from services.tester_models import WORKER_STEPS
+        for k in ('pickup', 'subscribe', 'replaces', 'join', 'publish', 'refer'):
+            self.assertIn(k, WORKER_STEPS)
+
     def test_ratio_metrics_are_metric_names(self):
-        from services.tester_models import METRIC_NAMES, RATIO_METRICS
+        from services.tester_models import METRIC_NAMES, RATIO_METRICS, LOWER_BETTER_RATIOS
         for k in RATIO_METRICS:
             self.assertIn(k, METRIC_NAMES)
+        # RFC 6076 SEER/ISA 는 카운터 비율(분모 invite_tx), ISA 는 낮을수록 좋다(기대치 상한)
+        self.assertEqual(RATIO_METRICS['seer_pct'], ('seer_ok', 'invite_tx'))
+        self.assertEqual(RATIO_METRICS['isa_pct'], ('isa_fail', 'invite_tx'))
+        self.assertTrue(LOWER_BETTER_RATIOS <= set(RATIO_METRICS))
+        # mos 는 타이머 지표 — 기대치 min(하한)으로 쓴다
+        doc = self._scn()
+        doc['flow'].insert(2, {'step': 'media_hold', 'seconds': 3, 'expect': {'mos': {'min': 3.5}, 'isa_pct': {'max': 1}}})
+        _, errs = validate('scenario', doc)
+        self.assertEqual(errs, [])
 
     def test_pool_options(self):
         m, errs = validate('topology', _load(os.path.join(_TESTER, 'scenarios', 'topology.sample.yaml')))

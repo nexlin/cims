@@ -1,0 +1,21 @@
+# 호 전달 blind (RFC 3515 REFER, TS 24.629 ECT — volte_supplementary_services.md §6.1) — A→B 확립 뒤 A 가 REFER 로 B 를 C 에게 넘긴다.
+#   서버(B2BUA)가 REFER 를 종단하고 원 relay 를 유지한 채 교체되는 leg 만 RELAY_MODIFY 로 재고정한다. 전달 뒤 B–C 미디어, A(전달자)는 빠진다.
+#   워커는 전달자가 to 와 상담 통화 중이 아니므로 blind REFER 를 낸다. 검증 S3-SCN-XFER X1 의 계측기 경로.
+id: VOLTE-XFER-BLIND
+title: 호 전달 blind REFER (A→B 통화를 C 에게)
+tags: [volte, xfer]
+roles:
+  transferor: { pool: volte_ue }
+  transferee: { pool: volte_ue, disjoint_from: transferor }
+  target:     { pool: volte_ue, disjoint_from: transferee }
+flow:
+  - { step: register,   who: [transferor, transferee, target], expect: { code: 200 } }
+  - { step: invite,     from: transferor, to: transferee, media: { audio: amr-wb } }
+  - { step: answer,     who: [transferee], after_ms: 500, expect: { srd_ms: { p95: 2000 } } }
+  - { step: media_hold, seconds: 2 }
+  - { step: refer,      from: transferor, to: target, expect: { code: 202 } }
+  - { step: answer,     who: [target], after_ms: 300 }                       # 서버가 B 대신 C 를 부른다
+  - { step: media_hold, seconds: "${ht}", expect: { rtp_loss_pct: { max: 1 } } }
+  - { step: bye,        from: transferee }
+target_evidence:
+  - { kind: recording_created, min: 1 }
