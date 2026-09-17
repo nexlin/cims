@@ -612,13 +612,13 @@ int main(int argc, char** argv) {
     }
 
     if (o.cmd == "sds") {
-        std::string msgId = eng.sendGroupSds(acc, o.target, o.text);
-        if (msgId.empty()) { s.outcome = "sds_send_failed"; rc = 7; return finish(-1); }
+        SdsSend sds = eng.sendGroupSds(acc, o.target, o.text);
+        if (!sds.ok) { s.outcome = "sds_send_failed"; rc = 7; return finish(-1); }
         bool got = ls.waitFor([&] { for (auto& kv : ls.results) if (kv.second.method == "MESSAGE") return true; return false; }, o.timeoutSec);
         int code = 0;
         for (auto& kv : ls.results) if (kv.second.method == "MESSAGE") { code = kv.second.code; s.reason = kv.second.reason; }
         s.code = code;
-        s.extra = ",\"msg_id\":\"" + msgId + "\"";
+        s.extra = ",\"msg_id\":\"" + sds.msgId + "\"";
         if (!got || code / 100 != 2) { s.outcome = got ? "sds_rejected" : "sds_timeout"; rc = 7; }
         return finish(-1);
     }

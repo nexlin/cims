@@ -123,13 +123,22 @@ if(CIMSUE_SHARED)
                                             ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 endif()
 
-# 헤드리스 UE — 검증 도구 (build/bin/cimsue-cli)
-add_executable(cimsue-cli cli/main.cpp)
-target_link_libraries(cimsue-cli PRIVATE cimsue)
-if(NOT MSVC)
-    target_link_options(cimsue-cli PRIVATE -rdynamic)  # 크래시 백트레이스 심볼 (glibc execinfo)
+# 헤드리스 UE — 검증 도구 (build/bin/cimsue-cli). 데스크톱(Linux/Windows) 전용 — cli/main.cpp 의 크래시
+# 백트레이스가 glibc execinfo 를 쓰고 bionic 에는 없다. Android 는 라이브러리(JNI)만 낸다.
+if(ANDROID)
+    set(_cimsue_cli_default OFF)
+else()
+    set(_cimsue_cli_default ON)
 endif()
-set_target_properties(cimsue-cli PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+option(CIMSUE_BUILD_CLI "헤드리스 UE cimsue-cli 빌드 (ue_sdk.md §4.7)" ${_cimsue_cli_default})
+if(CIMSUE_BUILD_CLI)
+    add_executable(cimsue-cli cli/main.cpp)
+    target_link_libraries(cimsue-cli PRIVATE cimsue)
+    if(NOT MSVC)
+        target_link_options(cimsue-cli PRIVATE -rdynamic)  # 크래시 백트레이스 심볼 (glibc execinfo)
+    endif()
+    set_target_properties(cimsue-cli PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+endif()
 
 # 단위시험 (S1-UE-UNIT / S1-UE-FLOOR-CODEC) — googletest 는 루트(Linux)·sdk/windows 슈퍼빌드(Windows) 의 ExternalProject 산출물
 if(DEFINED GTEST_DIR)

@@ -795,11 +795,10 @@ cimsue_status_t CIMSUE_CALL cimsue_engine_send_group_sds(cimsue_engine_t* e, int
                                                          const char* text, int32_t request_delivery, char* msg_id_out,
                                                          int32_t msg_id_cap, int64_t* token_out) {
     if (!e) { g_lastError = "no engine"; return -1; }
-    int64_t token = -1;
-    std::string id = e->eng.sendGroupSds(account_id, S(group_id), S(text), request_delivery != 0, &token);
-    if (id.empty()) { g_lastError = "sendGroupSds failed"; return -1; }
-    copyOut(id, msg_id_out, msg_id_cap);
-    if (token_out) *token_out = token;
+    SdsSend r = e->eng.sendGroupSds(account_id, S(group_id), S(text), request_delivery != 0);
+    if (token_out) *token_out = r.token;
+    if (!r.ok) { g_lastError = r.reason.empty() ? "sendGroupSds failed" : r.reason; return -1; }
+    copyOut(r.msgId, msg_id_out, msg_id_cap);
     return CIMSUE_OK;
 }
 
@@ -807,10 +806,9 @@ cimsue_status_t CIMSUE_CALL cimsue_engine_send_sds_notification(cimsue_engine_t*
                                                                 const char* peer, const char* conv_id,
                                                                 const char* msg_id, int32_t notif_type, int64_t* token_out) {
     if (!e) return -1;
-    int64_t token = -1;
-    cimsue_status_t st = ret(e->eng.sendSdsNotification(account_id, S(peer), S(conv_id), S(msg_id), notif_type, &token));
-    if (token_out) *token_out = token;
-    return st;
+    SdsSend r = e->eng.sendSdsNotification(account_id, S(peer), S(conv_id), S(msg_id), notif_type);
+    if (token_out) *token_out = r.token;
+    return ret(Result{r.ok, r.code, r.reason});
 }
 
 // 장치

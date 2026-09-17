@@ -221,6 +221,25 @@ struct Engine::Impl {
         f(ci);
         if (out) *out = ci;
     }
+
+    /**
+     * **새 호가 시작될 때 낡은 항목을 비운다.**
+     *
+     * `callInfos` 는 종료된 호도 64건까지 보존하는데(조회·최종 통계) pjsua 는 call id 를 순환
+     * 재사용한다(`pjsua_call.c` `alloc_call_id`). 그래서 같은 id 를 다시 쓰면 새 호가 **옛 호의 필드를
+     * 물려받는다** — 새 호 경로가 명시적으로 덮지 않는 `listenOnly`·`joinedDialog`·`isMcptt`·`groupId`·
+     * `mcptt`·`muted`·`video` 가 그대로 남는다.
+     *
+     * 실제로 이것이 관제 앱에서 «감청을 끊은 뒤 걸려 온 전화가 감청 leg 으로 분류돼 응답 버튼이
+     * 사라지는» 증상을 만들었다. 새 호는 언제나 깨끗한 항목에서 시작한다.
+     */
+    void resetCall(int callId) {
+        std::lock_guard<std::mutex> lk(snapM);
+        CallInfo fresh;
+        fresh.callId = callId;
+        callInfos[callId] = fresh;
+        finalStats.erase(callId);
+    }
     void applyCodecPolicy();
     PjCall* findCall(int callId);
     static bool rxOnlyLeg(PjCall* call);
@@ -286,6 +305,17 @@ public:
 
     std::unique_ptr<McpttSession> mcptt;
     bool recvOnly = false;               // 감청 Join 등 청취 전용 평문 leg (a=recvonly, 마이크 없음)
+
+    /**
+     * 이 호가 **낡은 스냅샷을 아직 비우지 않았다**.
+     *
+     * pjsua 는 call id 를 순환 재사용하므로(`alloc_call_id`) 새 호는 같은 id 의 옛 항목을 물려받는다.
+     * `PjCall` 은 호마다 새로 만들어지므로, 그 객체가 처음 스냅샷을 건드릴 때 한 번 비우면 된다.
+     * 발신은 `makeCall` 이 **동기적으로** `onCallState(CALLING)` 을 부르므로 그 콜백이 첫 지점이고,
+     * 착신은 `onIncomingCall` 이 첫 지점이다.
+     */
+    bool needsReset_ = true;
+    void claimFresh(int id) { if (needsReset_) { needsReset_ = false; o_->resetCall(id); } }
     int accountId() const { return accountId_; }
 
     /** MCPTT 세션 신원을 CallInfo 에 투영. 발신은 makeCall 이 동기적으로 onCallState(CALLING) 를 부르므로
@@ -400,6 +430,7 @@ public:
     void onCallState(pj::OnCallStateParam&) override {
         pj::CallInfo ci = getInfo();
         const int id = getId();
+        claimFresh(id);                  // 재사용된 call id 의 낡은 상태를 물려받지 않는다
         CallInfo snap;
         bool changed = false;
         o_->updateCall(id, [&](CallInfo& c) {
@@ -502,6 +533,7 @@ public:
     void onIncomingCall(pj::OnIncomingCallParam& prm) override {
         auto* call = new PjCall(o_, *this, accountId_, prm.callId);
         call->sealCallId(prm.callId);
+        call->claimFresh(prm.callId);                   // 재사용된 call id 의 낡은 상태를 물려받지 않는다
         std::string whole;
         try { whole = prm.rdata.wholeMsg; } catch (...) {}
         std::string remote;
@@ -973,11 +1005,25 @@ Result Engine::resume(int callId) {
         c.reinvite(prm);
     });
 }
+/**
+ * 명령이 바꾼 스냅샷을 **앱에 알린다**.
+ *
+ * `setMuted`·`setListen`·`setRxLevel`·`setCallRoute` 는 `CallInfo` 를 바꾸지만 SIP 상태가 바뀌지 않아
+ * `onCallState` 가 뒤따르지 않는다. 알리지 않으면 앱은 명령 전 스냅샷을 그대로 들고 있어 **토글이
+ * 화면에 반영되지 않고**, 다음 누름이 같은 값을 다시 보내 해제되지 않는다(관제 앱 음소거 증상).
+ * 미디어 이벤트 축으로 낸다 — 상태 전이가 아니라 미디어 배치의 변화이기 때문이다.
+ */
+static void emitMediaSnapshot(Engine::Impl* o, int callId) {
+    CallInfo snap = o->snapshotCall(callId);
+    o->emit([o, snap] { o->listener->onCallMedia(snap); });
+}
+
 Result Engine::setMuted(int callId, bool muted) {
     Impl* o = impl_.get();
     return withCall(o, callId, [o, callId, muted](PjCall& c) {
         o->updateCall(callId, [&](CallInfo& ci) { ci.muted = muted; });
         o->wireMedia(&c, callId);
+        emitMediaSnapshot(o, callId);
     });
 }
 Result Engine::setListen(int callId, bool listen) {
@@ -985,14 +1031,16 @@ Result Engine::setListen(int callId, bool listen) {
     return withCall(o, callId, [o, callId, listen](PjCall& c) {
         o->updateCall(callId, [&](CallInfo& ci) { ci.listen = listen; });
         o->wireMedia(&c, callId);
+        emitMediaSnapshot(o, callId);
     });
 }
 Result Engine::setRxLevel(int callId, float level) {
     Impl* o = impl_.get();
-    return withCall(o, callId, [o, level](PjCall& c) {
+    return withCall(o, callId, [o, callId, level](PjCall& c) {
         pj::AudioMedia* aud = o->activeAudio(&c);
         if (!aud) throw pj::Error(PJ_EINVALIDOP, "setRxLevel", "no active audio", __FILE__, __LINE__);
         aud->adjustRxLevel(level);
+        emitMediaSnapshot(o, callId);
     });
 }
 Result Engine::sendDtmf(int callId, const std::string& digits) {
@@ -1253,12 +1301,13 @@ Result Engine::transferAttended(int callId, int consultCallId) {
     });
 }
 
-std::string Engine::sendGroupSds(int accountId, const std::string& groupId, const std::string& text, bool requestDelivery,
-                                 int64_t* tokenOut) {
-    if (!impl_->running || text.empty()) return std::string();
+SdsSend Engine::sendGroupSds(int accountId, const std::string& groupId, const std::string& text, bool requestDelivery) {
+    SdsSend out;
+    if (!impl_->running) { out.code = -1; out.reason = "not running"; return out; }
+    if (text.empty())    { out.code = -2; out.reason = "empty text";  return out; }
     std::string msgId = mcdata::newMessageId();
     int64_t token = impl_->nextToken++;
-    if (tokenOut) *tokenOut = token;
+    out.token = token;
     bool ok = impl_->ctl.runSync([=]() -> bool {
         Impl* o = impl_.get();
         auto ic = o->accountCfgs.find(accountId);
@@ -1267,22 +1316,28 @@ std::string Engine::sendGroupSds(int accountId, const std::string& groupId, cons
                                                requestDelivery, (int64_t)std::time(nullptr));
         return o->doSendRequest(accountId, "MESSAGE", "sip:" + groupId + "@" + ic->second.domain, b.contentType, b.body, {}, token) >= 0;
     });
-    return ok ? msgId : std::string();
+    if (!ok) { out.code = -3; out.reason = "send failed"; return out; }
+    out.ok = true;
+    out.msgId = msgId;
+    return out;
 }
 
-Result Engine::sendSdsNotification(int accountId, const std::string& peer, const std::string& convId,
-                                   const std::string& msgId, int notifType, int64_t* tokenOut) {
-    if (!impl_->running) return Result::fail(-1, "not running");
+SdsSend Engine::sendSdsNotification(int accountId, const std::string& peer, const std::string& convId,
+                                    const std::string& msgId, int notifType) {
+    SdsSend out;
+    if (!impl_->running) { out.code = -1; out.reason = "not running"; return out; }
     int64_t token = impl_->nextToken++;
-    if (tokenOut) *tokenOut = token;
-    return impl_->ctl.runSync([=]() -> Result {
+    out.token = token;
+    Result r = impl_->ctl.runSync([=]() -> Result {
         Impl* o = impl_.get();
         auto ic = o->accountCfgs.find(accountId);
         if (ic == o->accountCfgs.end()) return Result::fail(-2, "no such account");
         mcdata::Body b = mcdata::buildNotification(convId, msgId, notifType, (int64_t)std::time(nullptr));
-        int64_t r = o->doSendRequest(accountId, "MESSAGE", "sip:" + mcptt::bareId(peer) + "@" + ic->second.domain, b.contentType, b.body, {}, token);
-        return r < 0 ? Result::fail(-3, "send failed") : Result::success();
+        int64_t rc = o->doSendRequest(accountId, "MESSAGE", "sip:" + mcptt::bareId(peer) + "@" + ic->second.domain, b.contentType, b.body, {}, token);
+        return rc < 0 ? Result::fail(-3, "send failed") : Result::success();
     });
+    out.ok = r.ok; out.code = r.code; out.reason = r.reason;
+    return out;
 }
 
 std::vector<AudioDeviceInfo> Engine::audioDevices() const {
@@ -1368,6 +1423,7 @@ Result Engine::setCallRoute(int callId, int routeId) {
         if (snap.mediaActive) {
             try { o->wireMedia(c, callId); } catch (pj::Error& e) { return fromError(e); }
         }
+        emitMediaSnapshot(o, callId);
         return Result::success();
     });
 }

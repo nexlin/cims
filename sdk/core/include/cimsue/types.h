@@ -252,6 +252,16 @@ struct SdsMessage {
     int64_t fileSize = 0;
 };
 
+/** SDS 발신의 즉시 결과. 최종 응답은 onRequestResult(MESSAGE, token) 으로 오므로 앱이 token 으로 상관한다
+ *  (disposition 통지 발신과 구분). 출력 인자를 두지 않는 이유는 ue_sdk.md / android_dispatch_tablet.md §3.3. */
+struct SdsSend {
+    bool ok = false;
+    int code = 0;                     // 0 = ok, 그 외 = 코어 오류 코드
+    std::string reason;
+    std::string msgId;                // 그룹 SDS 가 생성한 UUID hex32. disposition 통지는 빈 문자열
+    int64_t token = -1;               // onRequestResult 상관 키. 요청을 만들지 못했으면 -1
+};
+
 struct StreamStats {
     unsigned rxPackets = 0, rxBytes = 0, rxLoss = 0, rxDiscard = 0;
     unsigned txPackets = 0, txBytes = 0;
