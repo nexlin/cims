@@ -1220,7 +1220,10 @@ def read_range_filled(root: str, from_dt: str, to_dt: str, config: dict = None,
     return rows, {
         'days': len(days), 'unit': unit, 'by_unit': by_unit,
         'rollup': sum(by_unit.values()), 'scanned': len(fill),
-        'missing': len(omitted), 'missing_days': omitted[:40],
+        # **자르지 않는다** — 표가 "이 행은 자료가 없다" 를 이 목록으로 판정한다. 여기서
+        # 40개로 자르면 41번째 날부터 다시 0 으로 그려진다(자료 없음이 0 건으로 위장).
+        # 응답 크기 제한은 싣기 직전에 핸들러가 건다.
+        'missing': len(omitted), 'missing_days': omitted,
         'deadline_hit': deadline_hit,
     }
 
@@ -1281,6 +1284,53 @@ def bucket_of(label: str, gran: str) -> str:
     if gran == '1y':
         return dt.strftime('%Y')
     return ''
+
+
+def mark_missing_buckets(buckets: list, gran: str, from_dt: str, to_dt: str,
+                         missing_days) -> list:
+    """자료가 없는 날의 버킷 행에 `missing: True` 를 단다.
+
+    왜 필요한가: 시간축 표는 **빈 칸을 0 으로 그린다**(§2.1c — 자료가 없는 버킷에 서비스 칸을
+    만들지 않고, 화면이 없는 경로를 0 건으로 읽는다). 그 규약은 "구간을 읽었고 그 시간엔 호가
+    없었다" 일 때는 맞지만, **그 날 자료 자체가 없을 때는 거짓말이 된다** — 철거·보존기간
+    경과로 원본이 없는 날이 `0 건`으로 보이고, 운영자는 그것을 통화가 없었던 날로 읽는다
+    (실측 2026-09-17: 9/1~9/3 행이 9/17 행과 똑같이 0 으로 나왔다).
+
+    합계 칸은 이 표시가 필요 없다 — 구간을 온전히 읽었을 때만 서비스 칸을 0 으로 채우므로
+    (`aggregate(ensure_svc=)`), 합계에 칸이 없다는 것 자체가 "못 읽었다" 는 뜻이다.
+
+    거친 단위(주·월·년)는 **덮는 날이 전부 빠졌을 때만** 단다. 일부만 빠진 버킷은 남은 날의
+    실제 값을 담고 있어서, 통째로 비우면 있는 자료를 숨기게 된다(그 사실은 `warning` 이 말한다).
+    """
+    miss = set(missing_days or ())
+    if not miss or not buckets:
+        return buckets
+    lo, hi = _minute(from_dt), _minute(to_dt)
+    for b in buckets:
+        days = _bucket_days(b.get('bucket', ''), gran)
+        # 조회 구간 밖의 날은 애초에 읽지 않았으므로 판정에서 뺀다.
+        days = [d for d in days if _need_offsets(d, lo, hi)]
+        if days and all(d in miss for d in days):
+            b['missing'] = True
+    return buckets
+
+
+def _bucket_days(label: str, gran: str) -> list:
+    """버킷 라벨이 덮는 날들(YYYY-MM-DD). 분~일은 하루, 주·월·년은 여럿."""
+    dt = parse_bucket(label)
+    if dt is None:
+        return []
+    if gran == '1w':
+        d0 = dt.date()
+        return [(d0 + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(7)]
+    if gran == '1M':
+        return _days_of_month(dt.strftime('%Y-%m'))
+    if gran == '1y':
+        out = []
+        for m in range(1, 13):
+            out.extend(_days_of_month(f'{dt.year}-{m:02d}'))
+        return out
+    return [dt.strftime('%Y-%m-%d')]
 
 
 def fill_buckets(buckets: list, gran: str, from_dt: str, to_dt: str) -> list:

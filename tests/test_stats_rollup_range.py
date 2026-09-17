@@ -254,6 +254,65 @@ class RawSourceGoneTest(unittest.TestCase):
         self.assertNotIn(d1, cov['missing_days'], '계층으로 덮인 날')
 
 
+class MarkMissingBucketsTest(unittest.TestCase):
+    """**자료가 없는 날의 행은 0 이 아니라 빈칸이다.**
+
+    시간축 표는 빈 버킷을 0 으로 그린다(§2.1c). 그 규약은 "읽었고 호가 없었다" 일 때만
+    참이고, 철거·보존기간 경과로 자료가 없는 날에는 거짓말이 된다 — 실측(2026-09-17):
+    9/1~9/3 행이 9/17(자료 있고 호 0건) 행과 **화면에서 똑같이 0** 으로 나왔다.
+    """
+
+    def _buckets(self, labels):
+        return [{'bucket': b, 'bucket_start': b} for b in labels]
+
+    def test_빠진_날의_행만_표시된다(self):
+        bs = R.mark_missing_buckets(
+            self._buckets(['2026-09-01', '2026-09-02', '2026-09-03']), '1d',
+            '2026-09-01 00:00:00', '2026-09-03 23:59:59', ['2026-09-02'])
+        self.assertEqual([b.get('missing') for b in bs], [None, True, None])
+
+    def test_빠진_날이_없으면_아무것도_안_단다(self):
+        bs = R.mark_missing_buckets(self._buckets(['2026-09-01']), '1d',
+                                    '2026-09-01 00:00:00', '2026-09-01 23:59:59', [])
+        self.assertNotIn('missing', bs[0])
+
+    def test_시간_버킷은_그_날을_따른다(self):
+        bs = R.mark_missing_buckets(
+            self._buckets(['2026-09-02 03:00', '2026-09-03 03:00']), '1h',
+            '2026-09-02 00:00:00', '2026-09-03 23:59:59', ['2026-09-02'])
+        self.assertEqual([b.get('missing') for b in bs], [True, None])
+
+    def test_월_버킷은_덮는_날이_전부_빠졌을_때만(self):
+        """일부만 빠진 달을 통째로 비우면 **있는 자료를 숨긴다.**"""
+        days = R._days_of_month('2026-09')
+        part = R.mark_missing_buckets(self._buckets(['2026-09']), '1M',
+                                      '2026-09-01 00:00:00', '2026-09-30 23:59:59',
+                                      days[:5])
+        self.assertNotIn('missing', part[0], '5일만 빠진 달은 통째로 비우지 않는다')
+        whole = R.mark_missing_buckets(self._buckets(['2026-09']), '1M',
+                                       '2026-09-01 00:00:00', '2026-09-30 23:59:59', days)
+        self.assertTrue(whole[0].get('missing'))
+
+    def test_조회_구간_밖의_날은_판정에서_뺀다(self):
+        """9/2 하루만 조회했는데 그 달의 다른 날까지 요구하면 영원히 표시되지 않는다."""
+        bs = R.mark_missing_buckets(self._buckets(['2026-09-02']), '1d',
+                                    '2026-09-02 00:00:00', '2026-09-02 23:59:59',
+                                    ['2026-09-02'])
+        self.assertTrue(bs[0].get('missing'))
+
+    def test_구간_조회가_빠진_날_목록을_자르지_않는다(self):
+        """40개로 자르면 41번째 날부터 다시 0 으로 그려진다(표가 이 목록으로 판정한다)."""
+        root = tempfile.mkdtemp(prefix='rollup_miss_')
+        try:
+            _, cov = R.read_range_filled(root, '2026-06-01 00:00:00',
+                                         '2026-09-01 23:59:59', {}, gran='1d')
+            self.assertEqual(cov['missing'], len(cov['missing_days']),
+                             '신고한 수와 목록 길이가 같아야 한다')
+            self.assertGreater(cov['missing'], 40)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+
 class EnsureSvcCellTest(unittest.TestCase):
     """**읽은 구간의 0 건은 0 으로 낸다** (F-49).
 

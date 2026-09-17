@@ -743,6 +743,13 @@ def _calls_stats(config: dict, from_dt: str, to_dt: str, gran: str, svc: str) ->
     #   행조차 "호가 있던 분" 이 아니라 "SIP 메시지라도 있던 분" 이라 기준이 안 보인다.
     #   버킷 수 상한은 `_clamp_calls_range` 가 이미 단위별로 잡아 뒀다(1분=2일).
     buckets = stats_rollup.fill_buckets(buckets, gran, from_dt, to_dt)
+    # **자료가 없는 날의 행을 표시한다.** 빈 버킷은 화면이 0 으로 그리는데(§2.1c), 그 규약은
+    #   "읽었고 호가 없었다" 일 때만 참이다. 철거·보존기간 경과로 원본이 없는 날까지 0 으로
+    #   그리면 통화가 없었던 날과 구분되지 않는다(실측 2026-09-17).
+    buckets = stats_rollup.mark_missing_buckets(buckets, gran, from_dt, to_dt,
+                                                cov.get('missing_days'))
+    # 응답 크기 제한은 여기서 건다 — 판정(위)은 온전한 목록으로 해야 한다.
+    cov = dict(cov, missing_days=(cov.get('missing_days') or [])[:40])
     body = {
         'from': from_dt, 'to': to_dt, 'granularity': gran, 'svc': svc or 'all',
         'source': _source_of(cov), 'coverage': cov,
@@ -1235,6 +1242,9 @@ def _messages_stats_rollup(config, from_dt: str, to_dt: str, gran: str,
         out_buckets.append(row)
 
     svc_totals = {k: sum(_flat(totals.get(k) or {}).values()) for k in ('volte', 'ptt')}
+    # 응답 크기 제한 — `read_range_filled` 는 판정용으로 온전한 목록을 낸다(호 통계의 행
+    #   표시가 그걸 쓴다). 메시지 축은 표시에 쓰지 않으므로 여기서 바로 자른다.
+    cov = dict(cov, missing_days=(cov.get('missing_days') or [])[:40])
     return HandlerResult(status=200, body={
         'from': from_dt, 'to': to_dt, 'granularity': gran, 'truncated': truncated,
         'date': (date or from_dt[:10]), 'interface': 'sip', 'svc': svc or 'all',
