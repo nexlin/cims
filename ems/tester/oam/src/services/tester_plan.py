@@ -210,7 +210,8 @@ def build_plan(scenario: Scenario, topology: Topology, topology_doc: dict, profi
                 if oam is None:
                     out['errors'].append('피어 풀 시드에는 대상 oam 노드가 필요하다(또는 seed.enabled=false)')
                 else:
-                    env.append({'env': oam.token_env or 'TESTER_OAM_TOKEN', 'for': f'{oam.node}: 대상 OAM 토큰(시드·target_build)'})
+                    env.append({'env': oam.token_env or 'TESTER_OAM_TOKEN', 'for': f'{oam.node}: 대상 OAM 토큰(시드·target_build) — 없으면 요청자 로그인 토큰을 쓴다(동거 형태)',
+                                'optional': True})
             for pn in used - set(pools):
                 out['notes'].append(f'{pn}: seed.enabled=false — 대상 라우팅을 수동 구성')
         else:

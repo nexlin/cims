@@ -93,26 +93,34 @@ class OamClient:
         return out or {}
 
 
-def token_from_env(oam) -> str:
+def resolve_token(oam, requester_token: Optional[str] = None) -> str:
+    """대상 OAM 토큰 — ① 환경변수(`oam.token_env`, 기본 TESTER_OAM_TOKEN: 독립 형태처럼 대상 OAM 이 남의 것일 때)
+    ② 없으면 **이 요청을 낸 운영자의 토큰**(동거 형태 — 대상 OAM 이 자기 base 라 그 토큰이 그대로 통한다. 시드·복원이 그 운영자의
+    권한·감사 신원으로 수행된다). 요청자 토큰은 메모리에서만 쓰고 run 기록에 남기지 않는다."""
     env = getattr(oam, 'token_env', None) or 'TESTER_OAM_TOKEN'
-    tok = (os.environ.get(env) or '').strip()
+    tok = (os.environ.get(env) or '').strip() or (requester_token or '').strip()
     if not tok:
-        raise TargetError(f'target.oam 토큰이 없다 — 환경변수 {env} 에 대상 OAM 로그인 토큰을 둔다')
+        raise TargetError(f'target.oam 토큰이 없다 — 환경변수 {env} 에 대상 OAM 로그인 토큰을 두거나(독립 형태), '
+                          f'콘솔/CLI 로그인 토큰으로 요청한다(동거 형태)')
     return tok
+
+
+def token_from_env(oam) -> str:
+    return resolve_token(oam, None)
 
 
 # ──────────────────────────────────────────────────────────────────────────
 #  시드 파생 — 토폴로지 → CSP 컬렉션 레코드
 # ──────────────────────────────────────────────────────────────────────────
 
-def csp_build(topology: Topology) -> Optional[str]:
+def csp_build(topology: Topology, requester_token: Optional[str] = None) -> Optional[str]:
     """대상 CSP 배포의 패키지 버전 문자열(예: 'csp 0.2.126 (dep 34)') — run 색인 `target_build`(비교 화면의 회귀 축).
     대상 OAM 이 없거나 토큰이 없으면 None. 실패는 run 을 막지 않는다."""
     oam = topology.oam_ref()
     if oam is None:
         return None
     try:
-        client = OamClient(oam.url, token_from_env(oam))
+        client = OamClient(oam.url, resolve_token(oam, requester_token))
         rows = client.deployments()
         dep_id = client.find_csp_deployment(oam.csp_deployment_id)
         row = next((r for r in rows if int(r.get('id') or 0) == dep_id), None)
@@ -267,7 +275,7 @@ class CspSeeder:
         return ','.join(seen)
 
     @classmethod
-    def for_run(cls, topology: Topology, used_pools: Set[str]) -> Optional['CspSeeder']:
+    def for_run(cls, topology: Topology, used_pools: Set[str], requester_token: Optional[str] = None) -> Optional['CspSeeder']:
         pools = seed_pools(topology, used_pools)
         if not pools:
             return None
@@ -276,7 +284,7 @@ class CspSeeder:
         oam = topology.oam_ref()
         if oam is None:
             raise TargetError('피어 풀 시드에는 대상 oam 노드가 필요하다 (또는 풀의 seed.enabled=false 로 수동 구성)')
-        client = OamClient(oam.url, token_from_env(oam))
+        client = OamClient(oam.url, resolve_token(oam, requester_token))
         dep = client.find_csp_deployment(oam.csp_deployment_id)
         return cls(client, dep, topology, pools)
 

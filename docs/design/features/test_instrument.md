@@ -191,7 +191,7 @@ run 전에 대상 OAM 의 컬렉션 API(`PUT /api/v1/deployments/{id}/collection
   접속점 = 수신점 항목의 `local_node` 이름이 대상에 있으면 그 레코드, 없으면 같은 protocol·port 의 기존 레코드(access 수신점을 가리킨 피어는 대개
   여기서 끝난다), 그것도 없으면 그 이름(비면 `cims-tester-<수신점 id>`)·그 edge 로 시드한다(CSP 가 SIGUSR1 로 포트를 연다, 복원 시 닫힌다).
   피어 풀마다 접속점이 다를 수 있다(풀별 `local_node_ref`).
-- **대상 OAM.** `oam` 노드(url = `https://<host.ip>:<port>`) + `token_env`(환경변수의 로그인 토큰) + `csp_deployment_id`(비면 배포 목록에서 패키지 `csp`). 시드/복원
+- **대상 OAM.** `oam` 노드(url = `https://<host.ip>:<port>`) + 토큰(① `token_env` 환경변수의 로그인 토큰 — 대상 OAM 이 남의 것인 독립 형태 ② 없으면 **그 요청을 낸 운영자의 로그인 토큰** — 동거 형태는 대상 OAM 이 자기 base 라 그대로 통하고, 시드·복원·연결 검사·알람 조회가 그 운영자의 권한·감사 신원으로 나간다. 요청자 토큰은 메모리에서만 쓰고 run 기록에 남기지 않는다 — `tester_target.resolve_token`) + `csp_deployment_id`(비면 배포 목록에서 패키지 `csp`). 시드/복원
   결과는 run 노트(`csp seed(dep …): remote_nodes+1 …` / `csp seed restored`).
 - **CSP 정합**: 피어 신뢰는 접속점 edge 가 아니라 **인바운드 Route 식별**에서 나온다 — CSP 가 (수신 LocalNode, 소스 IP[:UDP 포트]) 로 Route 를 찾고
   `inbound_auth=none` 이면 Digest 없이 받는다(TS 24.229 §5.10 IBCF, TS 29.165 II-NNI). `edge=peering` 접속점은 Route 없는 소스에 403,
@@ -423,6 +423,8 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 저장: run 마다 `<DataDir>/runs/<id>/run.json`(정의·verdict·요약), `metrics.sqlite`(1초 버킷 × 지표, 히스토그램은 로그 버킷),
 `events.jsonl`(실패 개별 건 — Call-ID·코드·시각·워커), `sip/<call_id>.log`(워커 SIP 덤프 — 블록 머리 `>>> `송신/`<<< `수신 + 요청·상태 줄 · 시각 · transport · 상대 · 워커, 이어서 메시지 원문. 같은 Call-ID 를 두 워커가 올리면 한 파일에 이어 적는다).
 `DataDir` 은 모듈 설정(`Tester.DataDir`, §8) — oam-svc 의 `ServiceLogging.Dir` 과 같은 지위. file_store 에는 run 색인 레코드만 둔다.
+비우면 배포본은 **버전과 무관한 `<모듈>/runtime/data`**(agent 가 만드는 `runtime/` — 인증서와 같은 자리라 업그레이드에 살아남는다. 처음 옮겨 갈 때
+그 버전 디렉터리의 `data/` 를 이어받는다), 소스 트리·단독 실행은 컴포넌트 아래 `data/`. 운영자 시나리오·creds(`scenarios/`)도 여기 있다.
 
 ---
 

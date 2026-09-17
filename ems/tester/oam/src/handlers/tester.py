@@ -99,6 +99,12 @@ def _body(handler_args: HandlerArgs):
     return None
 
 
+def _bearer(handler_args) -> Optional[str]:
+    """요청의 Bearer 토큰 — 동거 형태에서 대상 OAM(자기 base)을 요청자 권한으로 부를 때 쓴다(tester_target.resolve_token)."""
+    auth = (getattr(handler_args, 'headers', None) or {}).get('authorization', '')
+    return auth[7:].strip() if auth.startswith('Bearer ') else None
+
+
 def _json(status: int, body) -> HandlerResult:
     return HandlerResult(status=status, body=body)
 
@@ -278,7 +284,7 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             model = store.topology_model(rec)
             if model is None:
                 return _json(400, {'error': 'invalid_topology', 'id': tid})
-            items = await asyncio.get_running_loop().run_in_executor(None, tester_check.check_topology, model, rec.get('doc') or {})
+            items = await asyncio.get_running_loop().run_in_executor(None, tester_check.check_topology, model, rec.get('doc') or {}, _bearer(handler_args))
             return _json(200, {'id': tid, 'ok': all(i['ok'] or i.get('info') for i in items), 'items': items})
 
     if head == 'runs':
@@ -303,7 +309,7 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             if req is None:
                 return _json(400, {'error': 'invalid_run_request', 'errors': errs})
             try:
-                d = RUNS.start(req)
+                d = RUNS.start(req, _bearer(handler_args))
             except RuntimeError as e:
                 return _json(409, {'error': str(e)})
             except ValueError as e:
@@ -395,7 +401,7 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
                 rec = _load_run_doc(rid)
                 if rec is None:
                     return _json(404, {'error': 'run_not_found', 'id': rid})
-                out = await asyncio.get_running_loop().run_in_executor(None, target_alerts, rec)
+                out = await asyncio.get_running_loop().run_in_executor(None, target_alerts, rec, _bearer(handler_args))
                 return _json(200, {'id': rid, **out})
             if len(parts) == 3 and parts[2] == 'stream' and method == 'GET':
                 return _sse(rid)
@@ -516,7 +522,7 @@ async def _plan(body: dict, config: dict):
     return 200, out
 
 
-def target_alerts(run_doc: dict) -> dict:
+def target_alerts(run_doc: dict, requester_token: Optional[str] = None) -> dict:
     """대상 OAM `/api/v1/alerts` 를 run 창(started_at~ended_at)으로 잘라 — 시간축 알람 레인. 대상 oam 노드가 없으면 빈 목록 + note."""
     topo_rec = store.find_topology(run_doc.get('topology'))
     topology = store.topology_model(topo_rec) if topo_rec else None
@@ -524,7 +530,7 @@ def target_alerts(run_doc: dict) -> dict:
     if oam is None:
         return {'alerts': [], 'note': '대상 oam 노드가 없다(또는 토폴로지 삭제됨) — 알람 타임라인 없음'}
     try:
-        client = tester_target.OamClient(oam.url, tester_target.token_from_env(oam))
+        client = tester_target.OamClient(oam.url, tester_target.resolve_token(oam, requester_token))
         st, out = client._req('GET', '/api/v1/alerts?days=7&limit=2000')
         if st != 200:
             return {'alerts': [], 'note': f'대상 OAM alerts {st}'}

@@ -25,21 +25,46 @@ DOMAIN_RUNS = 'modules/oam-cims-tester/runtime/runs'
 
 _component_root = ''
 _config: dict = {}
+_data_dir_cache = None
 
 
 def init(component_root: str, config: dict) -> None:
-    global _component_root, _config
+    global _component_root, _config, _data_dir_cache
     _component_root = component_root
     _config = config or {}
+    _data_dir_cache = None
     os.makedirs(runs_dir(), exist_ok=True)
     os.makedirs(user_scenarios_dir(), exist_ok=True)
 
 
-def data_dir() -> str:
-    d = ((_config.get('Tester') or {}).get('DataDir') or '').strip()
-    if not d:
-        d = os.path.join(_component_root, 'data')
+def _default_data_dir() -> str:
+    """기본 DataDir — 배포 레이아웃(`<모듈>/<버전>/<모듈>/` + `<모듈>/runtime/`)이면 버전과 무관한 `runtime/data`,
+    아니면(소스 트리·단독 실행) 컴포넌트 아래 `data`. agent 가 만드는 `runtime/` 은 업그레이드에 살아남는다
+    (인증서와 같은 자리 — agent.md). 처음 옮겨 갈 때는 그 버전 디렉터리의 `data` 를 복사해 잇는다."""
+    legacy = os.path.join(_component_root, 'data')
+    runtime = os.path.normpath(os.path.join(_component_root, '..', '..', 'runtime'))
+    if not os.path.isdir(runtime):
+        return legacy
+    d = os.path.join(runtime, 'data')
+    if not os.path.isdir(d):
+        try:
+            if os.path.isdir(legacy) and os.listdir(legacy):
+                shutil.copytree(legacy, d)
+            else:
+                os.makedirs(d, exist_ok=True)
+        except OSError:
+            return legacy
     return d
+
+
+def data_dir() -> str:
+    global _data_dir_cache
+    d = ((_config.get('Tester') or {}).get('DataDir') or '').strip()
+    if d:
+        return d
+    if _data_dir_cache is None:
+        _data_dir_cache = _default_data_dir()
+    return _data_dir_cache
 
 
 def runs_dir() -> str:

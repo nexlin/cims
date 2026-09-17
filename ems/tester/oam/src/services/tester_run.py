@@ -393,8 +393,10 @@ class StreamServer:
 
 class RunDriver(threading.Thread):
     def __init__(self, mgr: 'RunManager', run_id: str, req: RunRequest, scenario, topology, topology_doc,
-                 profile: Optional[LoadProfile], profile_name: Optional[str], topology_name: str):
+                 profile: Optional[LoadProfile], profile_name: Optional[str], topology_name: str,
+                 requester_token: Optional[str] = None):
         super().__init__(name=f'tester-run-{run_id}', daemon=True)
+        self._requester_token = requester_token      # 대상 OAM 호출용(환경변수 토큰이 없을 때) — 메모리에서만, 기록하지 않는다
         self.mgr, self.run_id, self.req = mgr, run_id, req
         self.scenario, self.topology, self.topology_doc = scenario, topology, topology_doc
         self.profile, self.profile_name, self.topology_name = profile, profile_name, topology_name
@@ -511,12 +513,12 @@ class RunDriver(threading.Thread):
                 raise tester_compile.CompileError(f'{w.name}: 필요 단말 {need} > 용량 {cap}')
         self.rate = float(self.plan['rate_total'])
         self.state = 'provisioning'
-        self.target_build = tester_target.csp_build(self.topology) if self.topology.target.kind == 'cims' else None
+        self.target_build = tester_target.csp_build(self.topology, self._requester_token) if self.topology.target.kind == 'cims' else None
         self._publish_state()
         # 피어 풀 — 대상 CSP 컬렉션 시드(접속점·remote_nodes·routes(inbound_auth)·route_sets·rules·routing_policies·acl scope=route) → run 끝에 복원
         if self.plan.get('peer_pools'):
             used = set(self.plan['peer_pools'])
-            self.seeder = tester_target.CspSeeder.for_run(self.topology, used)
+            self.seeder = tester_target.CspSeeder.for_run(self.topology, used, self._requester_token)
             if self.seeder is not None:
                 applied = self.seeder.apply()
                 self.notes.append(f'csp seed(dep {self.seeder.dep_id}, ln={self.seeder.local_node_ref}): '
@@ -867,7 +869,7 @@ class RunManager:
         if d is not None:
             d.rec.on_record(rec)
 
-    def start(self, req: RunRequest) -> RunDriver:
+    def start(self, req: RunRequest, requester_token: Optional[str] = None) -> RunDriver:
         scenario, sdoc, errs = store.get_scenario(req.scenario_id)
         if sdoc is None:
             raise ValueError(f'scenario_not_found: {req.scenario_id}')
@@ -891,7 +893,7 @@ class RunManager:
                 raise RuntimeError('run_active: ' + ','.join(self._active))
             run_id = datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:6]
             d = RunDriver(self, run_id, req, scenario, topology, topo_rec.get('doc') or {}, profile, req.profile,
-                          str((topo_rec.get('doc') or {}).get('name') or topo_rec.get('id')))
+                          str((topo_rec.get('doc') or {}).get('name') or topo_rec.get('id')), requester_token)
             self._active[run_id] = d
         store.save_run_index(RunRecord(id=run_id, scenario_id=scenario.id, topology=d.topology_name,
                                        profile=req.profile, started_at=d.started_at, verdict='running', label=req.label))

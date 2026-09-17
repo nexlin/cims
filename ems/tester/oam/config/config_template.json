@@ -50,7 +50,7 @@
           "type": "path",
           "default": "",
           "restart": true,
-          "help": "runs/<id>/{run.json,metrics.sqlite,events.jsonl,sip/} 가 쌓이는 곳. 비우면 모듈 로컬 data/ 를 쓴다. 1초 버킷 지표라 관리 store(jsonl 레코드)가 아니라 별도 디렉터리다."
+          "help": "runs/<id>/{run.json,metrics.sqlite,events.jsonl,sip/} 가 쌓이는 곳. 운영자 시나리오·creds(scenarios/)도 여기. 비우면 배포본은 버전과 무관한 <모듈>/runtime/data(업그레이드에 살아남는다), 소스 트리 실행은 모듈 로컬 data/. 1초 버킷 지표라 관리 store(jsonl 레코드)가 아니라 별도 디렉터리다."
         },
         {
           "key": "Tester.RunRetainDays",

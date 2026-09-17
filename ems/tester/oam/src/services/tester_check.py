@@ -79,11 +79,11 @@ def _tcp_connect(name: str, ip: str, port: int, tls: bool, timeout: float = 2.0)
         return _item(name, False, f'{ip}:{port} {e}', t0)
 
 
-def _oam_token(topology: Topology, nid: str) -> dict:
+def _oam_token(topology: Topology, nid: str, requester_token=None) -> dict:
     t0 = time.time()
     oam = topology.oam_ref()
     try:
-        client = tester_target.OamClient(oam.url, tester_target.token_from_env(oam))
+        client = tester_target.OamClient(oam.url, tester_target.resolve_token(oam, requester_token))
         rows = client.deployments()
         try:
             dep = client.find_csp_deployment(oam.csp_deployment_id)
@@ -94,7 +94,7 @@ def _oam_token(topology: Topology, nid: str) -> dict:
         return _item(f'{nid}:oam', False, str(e), t0)
 
 
-def check_topology(topology: Topology, topology_doc: dict) -> List[dict]:
+def check_topology(topology: Topology, topology_doc: dict, requester_token=None) -> List[dict]:
     items: List[dict] = []
     for nid, n in topology.target.nodes.items():
         ip = topology.node_ip(nid)
@@ -113,7 +113,7 @@ def check_topology(topology: Topology, topology_doc: dict) -> List[dict]:
         elif n.role == 'db' and n.db is not None:
             items.append(_tcp_connect(f'{nid}:db', ip, n.db.port, tls=False))
         elif n.role == 'oam':
-            items.append(_oam_token(topology, nid))
+            items.append(_oam_token(topology, nid, requester_token))
         elif n.role == 'media' and n.media is not None and n.media.control:
             it = _tcp_connect(f'{nid}:control', ip, n.media.control, tls=False)
             it['info'] = True   # CMP 제어는 UDP JSON — TCP 도달은 참고

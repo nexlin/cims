@@ -126,7 +126,7 @@ cmd_pkg() {
                 csc) _sync_set[csc]=1 ;;   # OAM 분리 Phase 2 — sync csc 가 oam/src 도 함께
                 oam) _sync_set[csc]=1; _sync_set[console]=1 ;;  # oam-base: csc 블록이 oam/src(자체 httpsrv/util/services)도 동기화 + console 번들(팩 전부) 동봉 (oam 은 자족 — csc 코드 미동봉)
                 oam-svc) _sync_set[oam-svc]=1; _sync_set[csc]=1 ;;  # oam-svc = thin(자기 src) — 콘솔 팩은 oam 동봉 번들에 포함(자기 번들 미동봉); csc 블록이 oam/src 동기화 → 런타임/dev import 가능
-                oam-cims-tester) _sync_set[oam-cims-tester]=1; _sync_set[csc]=1 ;;  # 계측기 컨트롤러 — 콘솔 팩은 console 번들에 포함(자기 번들 미동봉)
+                oam-cims-tester) _sync_set[oam-cims-tester]=1 ;;  # 계측기 컨트롤러 — 자기 트리만 담는 thin 패키지(콘솔 팩은 console 번들). csc 블록(→ dist/oam/src rsync)은 끌어오지 않는다: tarball 에 필요 없고, dist/oam/src 에서 돌고 있는 base OAM 을 패키징이 건드려 죽인다
                 agent)   _sync_set[agent]=1 ;;
                 console) _sync_set[console]=1 ;;
             esac

@@ -223,6 +223,50 @@ class CompilePeer(unittest.TestCase):
         self.assertEqual(plan['peer_pools'], [])
 
 
+class TokenAndDataDir(unittest.TestCase):
+    def test_token_resolution_env_then_requester(self):
+        """대상 OAM 토큰 — 환경변수가 먼저, 없으면 요청자 토큰(동거 형태), 둘 다 없으면 TargetError."""
+        from services import tester_target as TT
+
+        class O:
+            token_env = 'UT_TESTER_OAM_TOKEN_X'
+        os.environ.pop('UT_TESTER_OAM_TOKEN_X', None)
+        self.assertEqual(TT.resolve_token(O(), 'req-token'), 'req-token')
+        with self.assertRaises(TT.TargetError):
+            TT.resolve_token(O(), None)
+        os.environ['UT_TESTER_OAM_TOKEN_X'] = 'env-token'
+        try:
+            self.assertEqual(TT.resolve_token(O(), 'req-token'), 'env-token')
+        finally:
+            os.environ.pop('UT_TESTER_OAM_TOKEN_X', None)
+
+    def test_default_data_dir_survives_upgrade(self):
+        """배포 레이아웃(<모듈>/<버전>/<모듈>/ + <모듈>/runtime/)이면 기본 DataDir = runtime/data, 처음엔 버전 디렉터리 data 를 잇는다."""
+        from services import tester_store as TS
+        keep = (TS._component_root, TS._config, TS._data_dir_cache)
+        root = tempfile.mkdtemp(prefix='ut-tester-layout-')
+        try:
+            comp = os.path.join(root, 'oam-cims-tester', '0.1.0', 'oam-cims-tester')
+            os.makedirs(os.path.join(comp, 'data', 'scenarios', 'creds'))
+            open(os.path.join(comp, 'data', 'scenarios', 'creds', 'volte.jsonl'), 'w').write('{}\n')
+            TS._component_root, TS._config, TS._data_dir_cache = comp, {}, None
+            self.assertEqual(TS.data_dir(), os.path.join(comp, 'data'))                  # runtime/ 없음 = 소스 트리 꼴
+            os.makedirs(os.path.join(root, 'oam-cims-tester', 'runtime'))
+            TS._data_dir_cache = None
+            d = TS.data_dir()
+            self.assertEqual(d, os.path.join(root, 'oam-cims-tester', 'runtime', 'data'))
+            self.assertTrue(os.path.isfile(os.path.join(d, 'scenarios', 'creds', 'volte.jsonl')))   # 이어받음
+            comp2 = os.path.join(root, 'oam-cims-tester', '0.1.1', 'oam-cims-tester')     # 업그레이드 — 새 버전 디렉터리
+            os.makedirs(comp2)
+            TS._component_root, TS._data_dir_cache = comp2, None
+            self.assertEqual(TS.data_dir(), d)
+            TS._config = {'Tester': {'DataDir': '/x/explicit'}}
+            self.assertEqual(TS.data_dir(), '/x/explicit')                                # 명시값이 이긴다
+        finally:
+            TS._component_root, TS._config, TS._data_dir_cache = keep
+            shutil.rmtree(root, ignore_errors=True)
+
+
 class SeedDerivation(unittest.TestCase):
     def _topo(self, **kw):
         return M.Topology.model_validate(_topology([], **kw))
