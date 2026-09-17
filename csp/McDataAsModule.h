@@ -16,7 +16,7 @@ public:
     }
     bool IsEnabled() const override;
 
-    bool OnMessage( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage ) override;
+    bool OnMessage( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage, int &iStatus ) override;
 };
 
 #endif

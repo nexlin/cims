@@ -235,7 +235,7 @@ CSP fan-out (하이브리드):
   - **전송 상태 말풍선**: C-plane·MSRP 모두 PENDING(🕓, MSRP 는 +진행률%·진행 바) → 성공
     SENT(✓)/실패 FAILED(⚠, 탭=같은 msgId 재전송) — `MessageStore.sendState`+`PttController.
     sendResult/sendProgress`. C-plane 의 결과는 MESSAGE 트랜잭션 최종 응답(`sendRequest` token
-    상관 — 2xx=SENT, 403/404/408/503 등=FAILED). 401/407 은 native(`cims_send_request_reauth`)가 재발행하므로 앱에는
+    상관 — 2xx=SENT, 403/404/408/480/500/503 등=FAILED). 401/407 은 native(`cims_send_request_reauth`)가 재발행하므로 앱에는
     최종 결과만 온다. DELIVERED 통지 수신 시 ✓✓. 서비스 재기동 시 잔존 PENDING 은 FAILED 로
     마감(재전송 유도). 첨부(FD) 발신은 업로드 성공 시 SENT.
   - 진행률 육안 시험(릴리스 무영향): `adb shell setprop debug.cims.msrp.slow <청크간 ms>`
@@ -281,11 +281,12 @@ CSP fan-out (하이브리드):
 | 수신 본문 취득(앱) | pjsua2 `OnInstantMessageParam.msgBody` | **`multipart/mixed` 는 msgBody 가 빈 문자열·contentType 에 boundary 누락** → 착신 INVITE 와 동일하게 `rdata.wholeMsg` 원문에서 Content-Type(boundary 포함) 헤더·본문 직접 추출 (`core/…/sip/CimsAccount.kt`) | pjsua2 Java 바인딩이 multipart body 를 String 으로 재구성하지 않음 — 이 우회 없이는 그룹 SDS/FD 수신·delivered 통지가 앱에 반영 안 됨. text/plain 등 단일 파트는 msgBody 사용 |
 | 라우팅 | participating PSI 로 송신, 그룹은 mcdata-info 로 | Request-URI=그룹 URI 직행 (mcdata-info 도 포함) | 통합 배치 단순화. 서버는 양쪽 모두 수용 |
 | 1:1 SDS | participating → 상대 participating 경유, 서버 보관 | Request-URI=상대 AoR 직행 + `one-to-one-sds` mcdata-info. CSP 는 등록 바인딩으로 본문 그대로 전달(게이트 없음, 보관은 `Setup.McData.StoreOneToOneSds` 시 §4.3) | 통합 배치 단순화. 관제 이력은 §4.3 |
+| 착신 도달 불가 응답 | — | **480 Temporarily Unavailable** (가입자는 알지만 유효한 등록 바인딩 없음) / **404 Not Found** (가입자 자체를 모름) / **500** (전달 자체 실패) | RFC 3261 §21.4.18 이 "가입자는 알지만 유효한 전달 위치가 없음"을 480 으로 규정. TS 24.229 의 미등록 처리와 같은 구분. 603 Decline 은 "착신자가 거부했다"는 전역 실패라 포크·재시도까지 막으므로 쓰지 않는다 |
 | media plane SDS 대상 | 그룹·1:1 모두 | **그룹만** (`McDataMediaService` 가 그룹 조회 필수) — 1:1 은 크기와 무관하게 C-plane, C-plane 임계 게이트(§4.7)도 그룹 대상만 | 1:1 standalone 은 §8 |
 | FD 콘텐츠 서버 | media storage function (absolute URI discovery 등) | CSC 4430 `/mcdata/fd` 고정 경로 + IdMS Bearer | 단일 도메인. URL 은 FD SIGNALLING 으로 전달되므로 discovery 불필요 |
 | FD 통지 | FD NOTIFICATION(다운로드 완료 등) | 미사용 | 최소 프로파일 — 필요 시 후속 |
 | ICSI feature tag | Accept-Contact/P-Asserted-Service 로 요청 구분 | Content-Type 로 구분 | 단일 서비스 도메인이라 불필요 |
-| 성공 응답 | 참여기능 202/200 | 200 OK (거부 403/413 은 선행 송신 — 후행 200 은 트랜잭션상 무시됨) | psip RecvMessageRequest 계약(긴급경보 경로와 동일) |
+| 성공 응답 | 참여기능 202/200 | 200 OK | psip `RecvMessageRequest` 는 `EventMessage` 가 **반환한 상태코드**로 응답한다 — 응용이 도달 가능성을 아는 유일한 주체이므로 코드 선택도 응용이 한다. 0 을 반환하면 콜백이 직접 응답했다는 뜻이라 psip 는 보내지 않는다(최종 응답 중복 방지) |
 | E2E 보안 (TS 33.180) | Protected Payload | 미적용 (TLS + 서버측 RBAC) | 서버 보관·관리자 모니터링 요구와 상충 |
 | READ 통지·InReplyTo | 지원 | 미사용 (DELIVERED 만; 파서는 IE skip 지원) | 최소 프로파일 |
 | media plane SDS 의 SDP | `m=message` 단독 | **더미 `m=audio` 라인 동반** — 서버는 포트≠0(9) + `a=inactive` 로 응답/오퍼 (CMP 할당·RTP 없음). 서버발 오퍼의 더미 오디오는 **PCMU+PCMA(0 8)** 병기 | pjsua2 는 알려진 미디어가 포트≠0 으로 협상돼야 콜 유지 (`got_media` 규칙). 앱 코덱 정책이 PCMU 를 비활성(PCMA 안전망만 유지)하므로 PCMU 단독 오퍼는 자동 488 — 실기기 확인 | 

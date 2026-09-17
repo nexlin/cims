@@ -166,9 +166,17 @@ nat leg 의 `learned_ip/learned_port`
 
 NAT 뒤 단말을 수용하는 access service 배치 체크리스트:
 
-- **시그널링 바인딩 유지**: NAT UDP 매핑은 통상 수십 초에 소멸한다.
-  `Setup.Sip.SendOptionsPeriod` 를 활성(권장 25s 이하)하거나 UE 의 재등록/keepalive 주기를
-  그 이하로 설정한다. TCP/TLS 등록은 연결 유지로 충분하다.
+- **시그널링 바인딩 유지**: NAT UDP 매핑은 통상 수십 초에 소멸한다. UE 의 keepalive 주기를
+  그 이하로 두는 것이 정공법이고(PJSIP 계열 `natConfig.udpKaIntervalSec`), 서버측 보조로
+  `Setup.Sip.SendOptionsPeriod`(권장 25s 이하)가 있다. TCP/TLS 등록은 연결 유지로 충분하다.
+- **UDP 바인딩 생존 판정**: 단말 keepalive 는 psip 이 응용까지 올린다. `Setup.Sip.UdpFlowSilenceSec`
+  (기본 90초) 넘게 조용한 UDP 바인딩은 도달 경로 선택에서 빠진다 — 죽은 주소로 계속 보내며
+  성공한 척하는 대신 발신자에게 480 을 돌려준다
+  ([registration_binding_set.md §4.1](registration_binding_set.md#41-udp--keepalive-로-판정한다)).
+- **NAT 포트 변경 복구**: 매핑이 만료되면 NAT 는 다음 패킷에 새 공인 포트를 준다. 단말도 서버도
+  그 사실을 모르므로, UDP 등록 수명을 `Setup.Sip.UdpRegisterExpires`(기본 300초)로 제한해 복구
+  창을 묶는다. 단말이 keepalive 를 STUN Binding Request 로 보내면(RFC 5626 §4.4.2) 서버가
+  XOR-MAPPED-ADDRESS 로 답하므로 단말이 주소 변화를 즉시 알고 재등록한다 — 서버는 이미 응답한다.
 - **미디어 바인딩 유지**: UE 는 RTP keepalive(무음 구간 empty RTP 등)를 송신해야
   하향 경로 latch 와 NAT 매핑이 유지된다. PJSIP 계열은 `PJMEDIA_STREAM_ENABLE_KA` 로
   제어되며 **기본값이 0(비활성)** — CIMS UE 빌드는 config_site.h 에서 활성화한다
@@ -208,6 +216,9 @@ CIMS 의 규격 적합 확장이다. Ack 는 서버 상태를 바꾸지 않아 �
 | RFC 3581 / RFC 5626 | 시그널링 NAT — received/rport, outbound 연결 재사용 | [§2](#2-시그널링-평면-csp--psip) |
 | RFC 4961 | Symmetric RTP/RTCP — latch 의 전제 | [§3](#3-미디어-평면--leg-별-전용-포트셋) 송신 소스 포트 = 광고 포트 |
 | RFC 6263 | RTP keepalive (empty RTP 등) — 수신 전용 단말의 매핑 소멸 문제 | [§7.1](#71-ue-구현-요건-ptt) |
+| RFC 5626 §4.4.1 | CRLF keepalive (ping=CRLF 2개 / pong=CRLF 1개) — 서버가 pong 으로 답한다 | [§7](#7-운영-요건) |
+| RFC 5626 §4.4.2 | STUN keepalive — 응답의 매핑 주소로 단말이 flow 실패를 감지하고 재등록 | [§7](#7-운영-요건) |
+| RFC 5389 §15.2 | XOR-MAPPED-ADDRESS — 서버가 관측한 출발지를 돌려주는 속성 | [§7](#7-운영-요건) |
 | RFC 7362 | Latching(Hosted NAT Traversal) — 기법과 한계(스푸핑, 무송신 단말 latch 불가) 문서화 | [§5](#5-목적지-latch-cmp) + IP guard + SSRC 고정 |
 | RFC 8445 (ICE) | 양방향 connectivity check — 무송신 단말까지 해소 | **미지원** ([§9](#9-미구현향후-과제)) |
 | 3GPP TS 23.228 Annex G / TS 24.229 | IMS NAT traversal 모델 (IMS-ALG + IMS-AGW) | CSP=ALG, CMP=AGW 로 동형 |

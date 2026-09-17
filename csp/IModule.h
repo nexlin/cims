@@ -49,7 +49,10 @@ public:
     virtual bool OnBlindTransfer( const char *pszCallId, const char *pszReferToId ) {
         return false;
     }
-    virtual bool OnMessage( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage ) {
+    /** MESSAGE 처리 훅. 반환값 = 이 모듈이 처리했는가.
+     *  처리했으면 iStatus 에 psip 가 보낼 최종 응답 코드를 담는다 — 0 이면 모듈이 응답을
+     *  이미 보냈다는 뜻이라 psip 는 보내지 않는다(최종 응답 중복 방지). */
+    virtual bool OnMessage( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage, int &iStatus ) {
         return false;
     }
 };

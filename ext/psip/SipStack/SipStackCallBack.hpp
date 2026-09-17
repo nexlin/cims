@@ -119,6 +119,17 @@ void CSipStack::SendTimeout( int iThreadId, CSipMessage * pclsMessage )
 	}
 }
 
+// UDP keepalive 수신을 응용에 전달한다.
+void CSipStack::EventKeepAlive( const char * pszIp, int iPort, ESipTransport eTransport )
+{
+	SIP_STACK_CALLBACK_LIST::iterator itList;
+
+	for( itList = m_clsCallBackList.begin(); itList != m_clsCallBackList.end(); ++itList )
+	{
+		(*itList)->EventKeepAlive( pszIp, iPort, eTransport );
+	}
+}
+
 // TCP/TLS 세션 종료에 대한 callback 메소드를 호출한다.
 void CSipStack::TcpSessionEnd( const char * pszIp, int iPort, ESipTransport eTransport )
 {

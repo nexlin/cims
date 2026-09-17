@@ -37,6 +37,7 @@ CUserInfo::CUserInfo()
       m_iOptionsSeq( 0 ),
       m_iSendOptionsTime( 0 ),
       m_iLastSeenTime( 0 ),
+      m_bKeepAliveSeen( false ),
       m_bMcDataMsrp( false ),
       m_bMediaSecSdes( false ),
       m_iRegisterCSeq( 0 ),
@@ -64,6 +65,18 @@ static void _releaseBindingSa( const CUserInfo &clsBind, const char *pszWhy ) {
     gclsIpsecSaSetMap.Release( clsBind.m_iSaReqId, IPSEC_RELEASE_GRACE_SEC );
 }
 
+int GrantedRegisterExpires( int iRequested, ESipTransport eTransport, bool bIpsec ) {
+    if ( eTransport != E_SIP_UDP || bIpsec ) return iRequested;
+    if ( gclsSetup.m_iUdpRegisterExpires <= 0 ) return iRequested;
+
+    int iCap = gclsSetup.m_iUdpRegisterExpires;
+    // 우리가 공표한 최소 수명(423 Min-Expires)보다 짧게 주면 자기모순이다.
+    if ( gclsSetup.m_iMinRegisterTimeout > 0 && iCap < gclsSetup.m_iMinRegisterTimeout )
+        iCap = gclsSetup.m_iMinRegisterTimeout;
+
+    return iRequested > iCap ? iCap : iRequested;
+}
+
 size_t CUserMap::_findBinding( const USER_BINDING_LIST &clsList, const std::string &strIp, int iPort,
                                ESipTransport eTransport ) {
     for ( size_t i = 0; i < clsList.size(); ++i ) {
@@ -73,18 +86,37 @@ size_t CUserMap::_findBinding( const USER_BINDING_LIST &clsList, const std::stri
     return (size_t)-1;
 }
 
+/** UDP 바인딩이 침묵으로 죽었다고 볼 것인가.
+ *  UDP 는 연결이 없어 스택이 판정할 수 없으므로 응용이 최근 수신 시각으로 판정한다
+ *  (SipStack.h 의 IsFlowAlive 주석이 이 판정을 응용에 위임하고 있다).
+ *  keepalive 를 보낸 적 없는 바인딩은 판정 대상이 아니다 — 조용한 것이 정상이기 때문이다. */
+static bool _isUdpSilent( const CUserInfo &clsBind, time_t iNow ) {
+    if ( gclsSetup.m_iUdpFlowSilenceSec <= 0 ) return false;
+    if ( clsBind.m_eTransport != E_SIP_UDP ) return false;
+    if ( !clsBind.m_bKeepAliveSeen || clsBind.m_iLastSeenTime == 0 ) return false;
+    return ( iNow - clsBind.m_iLastSeenTime ) > gclsSetup.m_iUdpFlowSilenceSec;
+}
+
 size_t CUserMap::_pickBinding( const USER_BINDING_LIST &clsList ) {
-    size_t iBest = 0, iNewest = 0;
+    size_t iBest = 0;
     bool bFoundAlive = false;
+    time_t iNow;
+
+    time( &iNow );
 
     for ( size_t i = 0; i < clsList.size(); ++i ) {
-        if ( clsList[i].m_iLoginTime > clsList[iNewest].m_iLoginTime ) iNewest = i;
-
-        // 스트림 transport 는 연결이 살아있어야 도달한다 — 죽은 flow 로 보내면 신규 연결 시도가
-        //   되어 NAT 뒤 상대에게는 실패한다. 스택에 직접 묻는다(추측하지 않는다).
+        // 도달 불가가 **확인된** 경로만 후보에서 뺀다. 판정할 수 없는 경로는 살아있는 것으로 둔다
+        //   (keepalive 를 보내지 않는 UDP 단말은 조용한 것이 정상이다).
+        //
+        //   스트림 — 연결이 없으면 죽음이 확인된 것이다. 죽은 flow 로 보내면 신규 연결 시도가
+        //     되어 NAT 뒤 상대에게는 실패한다. 스택에 직접 묻는다(추측하지 않는다).
+        //   UDP   — 스택은 답할 수 없으므로 keepalive 침묵으로 판정한다. 바인딩을 지우지는
+        //     않는다: 등록 자체는 살아 있고 만료가 회수한다. 지우면 등록 해제로 이어져
+        //     PTT affiliation 까지 회수된다(registration_binding_set.md §4.1).
         if ( !gclsUserAgent.m_clsSipStack.IsFlowAlive( clsList[i].m_strIp.c_str(), clsList[i].m_iPort,
                                                        clsList[i].m_eTransport ) )
             continue;
+        if ( _isUdpSilent( clsList[i], iNow ) ) continue;
 
         if ( !bFoundAlive || clsList[i].m_iLoginTime > clsList[iBest].m_iLoginTime ) {
             iBest = i;
@@ -92,8 +124,10 @@ size_t CUserMap::_pickBinding( const USER_BINDING_LIST &clsList ) {
         }
     }
 
-    // 살아있는 바인딩이 없으면 가장 최근 것 — 도달은 실패하겠지만 종전 동작과 같고 무해하다.
-    return bFoundAlive ? iBest : iNewest;
+    // 전부 죽음이 확인됐으면 고르지 않는다. 죽은 주소를 돌려주면 소비자는 보낸 줄 알고
+    //   발신자에게도 성공으로 답하게 된다 — 침묵 유실의 원인이 그것이다. 고를 수 없음을
+    //   알려야 상위가 480 으로 정직하게 답한다.
+    return bFoundAlive ? iBest : NO_BINDING;
 }
 
 CUserMap::CUserMap() {
@@ -130,6 +164,8 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bInt
         if ( eExpires == E_SIP_EXPIRES_INVALID ) return false;
         if ( bExpiresValid && uiReqExpires == 0 ) return false;
         clsInfo.m_iLoginTimeout = bExpiresValid ? ExpiresToInt( uiReqExpires ) : REGISTER_DEFAULT_EXPIRES_SEC;
+        clsInfo.m_iLoginTimeout =
+            GrantedRegisterExpires( clsInfo.m_iLoginTimeout, pclsMessage->m_eTransport, pclsIpsec != NULL );
     } else {
         clsInfo.m_iLoginTimeout = bExpiresValid ? ExpiresToInt( uiReqExpires ) : 0;
     }
@@ -287,8 +323,12 @@ bool CUserMap::Select( const char *pszUserId, CUserInfo &clsInfo ) {
     itMap = m_clsMap.find( pszUserId );
     if ( itMap != m_clsMap.end() && !itMap->second.empty() ) {
         // 소비자는 "이 가입자에게 보낼 도달 정보 하나"를 원한다 — 여기서 고른다.
-        clsInfo = itMap->second[_pickBinding( itMap->second )];
-        bRes = true;
+        //   살아있는 경로가 하나도 없으면 실패로 답한다(도달 불가가 확인된 상태).
+        const size_t iIdx = _pickBinding( itMap->second );
+        if ( iIdx != NO_BINDING ) {
+            clsInfo = itMap->second[iIdx];
+            bRes = true;
+        }
     }
     m_clsMutex.release();
 
@@ -403,6 +443,30 @@ void CUserMap::TouchFlow( const char *pszUserId, ESipTransport eTransport ) {
         for ( size_t i = 0; i < itMap->second.size(); ++i ) {
             if ( itMap->second[i].m_eTransport == eTransport ) time( &itMap->second[i].m_iLastSeenTime );
         }
+    }
+    m_clsMutex.release();
+}
+
+void CUserMap::TouchKeepAlive( const char *pszIp, int iPort, ESipTransport eTransport ) {
+    USER_MAP::iterator itMap;
+
+    if ( pszIp == NULL || pszIp[0] == '\0' || iPort <= 0 ) return;
+
+    // 주소로 바인딩을 찾는다. 가입자 수가 많지 않고 keepalive 주기도 길어 전수 조회로 충분하다
+    //   (필요해지면 (ip,port,transport) 역인덱스를 둔다).
+    m_clsMutex.acquire();
+    for ( itMap = m_clsMap.begin(); itMap != m_clsMap.end(); ++itMap ) {
+        size_t iIdx = _findBinding( itMap->second, pszIp, iPort, eTransport );
+        if ( iIdx == (size_t)-1 ) continue;
+
+        CUserInfo &clsBind = itMap->second[iIdx];
+        if ( !clsBind.m_bKeepAliveSeen ) {
+            clsBind.m_bKeepAliveSeen = true;
+            CLog::Print( LOG_DEBUG, "keepalive: user(%s) flow(%s:%d:%d) 관측 시작", itMap->first.c_str(), pszIp, iPort,
+                         eTransport );
+        }
+        time( &clsBind.m_iLastSeenTime );
+        break;
     }
     m_clsMutex.release();
 }

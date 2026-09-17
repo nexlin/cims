@@ -86,6 +86,8 @@ CSipServerSetup::CSipServerSetup()
       m_iMinRegisterTimeout( 300 ),
       m_bUseRtpRelay( false ),
       m_iSendOptionsPeriod( 0 ),
+      m_iUdpFlowSilenceSec( 90 ),
+      m_iUdpRegisterExpires( 300 ),
       m_bUseRegisterSession( false ),
       m_iUserTimeout( 3600 ),
       m_iStaleCallTimeout( 300 ),
@@ -271,6 +273,8 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if ( sip.Has( "UserTimeout" ) ) m_iUserTimeout = (int)sip.GetInt( "UserTimeout" );
                 if ( sip.Has( "StaleCallTimeout" ) ) m_iStaleCallTimeout = (int)sip.GetInt( "StaleCallTimeout" );
                 if ( sip.Has( "SendOptionsPeriod" ) ) m_iSendOptionsPeriod = (int)sip.GetInt( "SendOptionsPeriod" );
+                if ( sip.Has( "UdpFlowSilenceSec" ) ) m_iUdpFlowSilenceSec = (int)sip.GetInt( "UdpFlowSilenceSec" );
+                if ( sip.Has( "UdpRegisterExpires" ) ) m_iUdpRegisterExpires = (int)sip.GetInt( "UdpRegisterExpires" );
 
                 // 세션 타이머 (RFC 4028) — docs/design/features/leg_liveness.md
                 if ( sip.Has( "SessionTimer" ) ) {

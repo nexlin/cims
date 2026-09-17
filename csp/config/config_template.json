@@ -62,6 +62,26 @@
           "reload_hint": "SIGUSR1 로 재로드. 0 = 비활성. 양의 값이면 등록된 UE 에 주기적 OPTIONS."
         },
         {
+          "key": "Setup.Sip.UdpFlowSilenceSec",
+          "label": "UDP 바인딩 침묵 임계 (s)",
+          "type": "int",
+          "default": 90,
+          "min": 0,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 판정부터 적용.",
+          "help": "UDP 는 연결이 없어 스택이 도달 경로의 죽음을 판정할 수 없다. 단말이 보내는 NAT keepalive 가 유일한 생존 신호이므로, 이 시간 넘게 조용한 UDP 바인딩은 서버 발신 대상에서 뺀다(바인딩 자체는 만료가 회수 — PTT affiliation 을 흔들지 않는다). keepalive 를 한 번도 보낸 적 없는 바인딩에는 적용하지 않는다(구 SDK·시뮬레이터 보호). 0 = 판정하지 않음."
+        },
+        {
+          "key": "Setup.Sip.UdpRegisterExpires",
+          "label": "UDP 등록 수명 상한 (s)",
+          "type": "int",
+          "default": 300,
+          "min": 0,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 REGISTER 부터 적용.",
+          "help": "NAT 가 공인 포트를 바꾸면 단말도 서버도 그 사실을 모르고, 복구는 재등록만이 할 수 있다(RFC 3261 §10.2.1 — 등록기는 요청보다 짧게 부여할 수 있다). 이 값으로 착신 불가 창의 상한을 묶는다. 스트림(TCP/TLS)은 연결 사망이 곧 감지라, IPsec 은 NAT 뒤가 아니라 제외한다. 0 = 제한 없음(요청값 그대로)."
+        },
+        {
           "key": "Setup.SecAgree.Require",
           "label": "sec-agree 협상 강제 (TLS 정책 가입자)",
           "type": "bool",

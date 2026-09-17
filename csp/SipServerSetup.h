@@ -122,6 +122,18 @@ public:
     /** 로그인된 사용자에게 OPTIONS 메시지를 전송하는 주기 (초단위) */
     int m_iSendOptionsPeriod;
 
+    /** UDP 바인딩 침묵 판정 임계(초). 0 = 판정하지 않음(종전 동작).
+     *  UDP 는 연결이 없어 스택이 생존을 판정할 수 없으므로(registration_binding_set.md §2.1),
+     *  keepalive 를 보내는 단말에 한해 이 시간 넘게 조용하면 그 도달 경로를 죽은 것으로 본다.
+     *  keepalive 를 한 번도 보낸 적 없는 바인딩에는 적용하지 않는다(구 SDK·시뮬레이터 보호). */
+    int m_iUdpFlowSilenceSec;
+
+    /** UDP 등록에 부여할 수명 상한(초). 0 = 제한 없음(요청값 그대로).
+     *  NAT 가 공인 포트를 바꾸면 서버는 다음 재등록 전까지 알 수 없다 — 그 창을 이 값으로 묶는다.
+     *  스트림은 연결 사망이 곧 감지이므로 제한하지 않는다. IPsec 등록도 제외(NAT 뒤가 아니고
+     *  재등록마다 SA 를 흔들 이유가 없다). */
+    int m_iUdpRegisterExpires;
+
     /** 사용자 계정 정보 저장 폴더 - 비어 있으면 DB 를 사용한다. */
     std::string m_strUserDataFolder;
 

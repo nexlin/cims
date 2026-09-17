@@ -479,6 +479,12 @@ bool CModuleDispatcher::RecvResponse( int iThreadId, CSipMessage *pclsMessage ) 
     return false;
 }
 
+void CModuleDispatcher::EventKeepAlive( const char *pszIp, int iPort, ESipTransport eTransport ) {
+    // keepalive 에는 신원이 없다 — 주소가 일치하는 바인딩의 생존 기록에만 쓴다.
+    //   포트가 바뀐 단말은 여기서 살릴 수 없고, 재등록(인증)만이 복구할 수 있다.
+    gclsUserMap.TouchKeepAlive( pszIp, iPort, eTransport );
+}
+
 bool CModuleDispatcher::SendTimeout( int iThreadId, CSipMessage *pclsMessage ) {
     (void)iThreadId;
     if ( pclsMessage == NULL ) return false;
@@ -1533,7 +1539,7 @@ bool CModuleDispatcher::EventBlindTransfer( const char *pszCallId, const char *p
     return m_clsTas.IsEnabled() && m_clsTas.OnBlindTransfer( pszCallId, pszReferToId );
 }
 
-bool CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage ) {
+int CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage ) {
     // MCPTT emergency alert (TS 24.379): mcptt-info alert-ind 판별 → SMS 와 분기.
     //   Phase 3a 탐지/로깅/ack + Phase 3b 그룹 멤버 fan-out(같은 alert MESSAGE 전파, 취소도 동일).
     if ( pclsMessage && pclsMessage->m_strBody.find( "alert-ind" ) != std::string::npos ) {
@@ -1584,17 +1590,27 @@ bool CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CS
         }
         CLog::Print( LOG_INFO, "EventMessage: MCPTT emergency %s from(%s) to(%s) group=%d fanout=%d", pszEvt, pszFrom,
                      pszTo, bGroupTarget, iFanout );
-        // 200 OK ack (경보 수신 확인).
-        SendResponse( pclsMessage, SIP_OK );
-        return true;
+        // 200 OK ack (경보 수신 확인) — 응답은 psip 가 이 반환값으로 보낸다.
+        return SIP_OK;
     }
 
     // MCData 그룹 SDS (TS 24.282) — 그룹 대상 MESSAGE 는 MCDATA-AS 가 게이트+fan-out.
-    if ( m_clsMcDataAs.IsEnabled() && m_clsMcDataAs.OnMessage( pszFrom, pszTo, pclsMessage ) ) return true;
+    int iMcStatus = SIP_OK;
+    if ( m_clsMcDataAs.IsEnabled() && m_clsMcDataAs.OnMessage( pszFrom, pszTo, pclsMessage, iMcStatus ) )
+        return iMcStatus;
 
     CUserInfo clsUserInfo;
     CSipCallRoute clsRoute;
-    if ( gclsUserMap.Select( pszTo, clsUserInfo ) == false ) return false;
+    if ( gclsUserMap.Select( pszTo, clsUserInfo ) == false ) {
+        // 착신자에게 보낼 등록 바인딩이 없다.
+        //   RFC 3261 §21.4.18 — 가입자는 알지만 유효한 도달 경로가 없으면 480 Temporarily Unavailable.
+        //   가입자 자체를 모르면 404 Not Found (TS 24.229 의 미등록 처리와 같은 구분).
+        //   603 Decline 은 "착신자가 거부했다"는 전역 실패라 이 상황과 의미가 다르다 - 포크·재시도까지 막는다.
+        CspUser clsTarget;
+        int iStatus = gclsCspUserMap.Select( pszTo, clsTarget ) ? SIP_TEMPORARILY_UNAVAILABLE : SIP_NOT_FOUND;
+        CLog::Print( LOG_INFO, "EventMessage: 1:1 from(%s) to(%s) no binding -> %d", pszFrom, pszTo, iStatus );
+        return iStatus;
+    }
     clsUserInfo.GetCallRoute( clsRoute );
     // 1:1 전달 — Content-Type 보존 (MCData disposition 통지 등 text/plain 이외 본문 대응)
     char szContentType[512];
@@ -1623,6 +1639,10 @@ bool CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CS
         }
     }
 
-    return gclsUserAgent.SendSms( pszFrom, pszTo, pclsMessage->m_strBody.c_str(), &clsRoute,
-                                  szContentType[0] ? szContentType : NULL );
+    if ( gclsUserAgent.SendSms( pszFrom, pszTo, pclsMessage->m_strBody.c_str(), &clsRoute,
+                                szContentType[0] ? szContentType : NULL ) == false ) {
+        CLog::Print( LOG_ERROR, "EventMessage: 1:1 from(%s) to(%s) send failed", pszFrom, pszTo );
+        return SIP_INTERNAL_SERVER_ERROR;
+    }
+    return SIP_OK;
 }

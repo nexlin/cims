@@ -23,6 +23,7 @@
 #define USE_MEDIA_LIST
 
 #include "SipStackDefine.h"
+#include "SipStatusCode.h"
 #include "SipServerInfo.h"
 #include "SdpMedia.h"
 #include "RtpDirection.h"
@@ -135,7 +136,10 @@ public:
 	virtual void EventTransferResponse( const char * pszCallId, int iSipStatus ){};
 
 	// SIP MESSAGE 수신 이벤트 핸들러
-	virtual bool EventMessage( const char * pszFrom, const char * pszTo, CSipMessage * pclsMessage ){ return false; };
+	//  반환값 = psip 가 보낼 최종 응답 코드. 응용이 도달 가능성을 아는 유일한 주체이므로
+	//  코드 선택도 응용이 한다 (미등록 착신 480 등). 0 을 반환하면 콜백이 직접 응답을 보냈다는
+	//  뜻이라 psip 는 아무것도 보내지 않는다 - 최종 응답 중복 송신 방지.
+	virtual int EventMessage( const char * pszFrom, const char * pszTo, CSipMessage * pclsMessage ){ return SIP_DECLINE; };
 
 	// SIP 메시지 수신 쓰레드가 종료됨을 알려주는 이벤트 핸들러
 	virtual void EventThreadEnd( int iThreadId ){};
