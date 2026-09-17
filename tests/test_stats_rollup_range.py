@@ -13,6 +13,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 import unittest.mock
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -36,6 +37,13 @@ def _write(root, unit, day, buckets):
     S.for_root(root).replace_day(
         unit, day,
         [{'bucket': b, 'svc': 'volte', 'call': {'attempts': 1}} for b in buckets])
+
+
+def _raw_day(root, day):
+    """그 날의 **원본 날 디렉터리**를 심는다 — 즉석 집계가 0 을 낸 것이 사실인지 가르는
+    근거(`_raw_day_exists`). 원본이 없는 날은 훑어도 빈손이고, 그 빈손은 0 이 아니라
+    모름이라 조회에서 제외된다."""
+    os.makedirs(os.path.join(root, day[0:4], day[5:7], day[8:10]), exist_ok=True)
 
 
 def _hours(day, n=24):
@@ -122,9 +130,10 @@ class ReadRangeBucketCoverageTest(unittest.TestCase):
     def test_롤업이_없으면_그_구간만_즉석_집계_대상(self):
         """1h 가 덮은 뒤 남은 구간만 원본으로 간다 — 하루 전체가 아니라."""
         _write(self.root, '1h', DAY, _hours(DAY))
+        _raw_day(self.root, DAY)
         rows, cov = R.read_range_filled(
             self.root, f'{DAY} 00:00:00', f'{DAY} 12:42:59', {}, gran='1h')
-        # 원본 트리가 없으니 즉석 집계 결과는 비지만, '시도했다' 는 사실이 남는다.
+        # 그 날 원본은 남아 있다 — 호가 없어 결과는 비지만 '훑었다' 는 사실이 남는다.
         self.assertEqual(cov['scanned'], 1)
         self.assertEqual(cov['by_unit'].get('1h'), 1, '롤업은 그대로 쓰였어야 한다')
 
@@ -167,6 +176,7 @@ class ReadRangeBucketCoverageTest(unittest.TestCase):
 
     def test_음수_상한은_상한_없음(self):
         """0 과 음수는 모두 '상한 없음' — 재집계·검증 경로가 쓴다."""
+        _raw_day(self.root, DAY)
         rows, cov = R.read_range_filled(
             self.root, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {},
             gran='1h', deadline_sec=-1)
@@ -174,6 +184,7 @@ class ReadRangeBucketCoverageTest(unittest.TestCase):
         self.assertEqual(cov['scanned'], 1)
 
     def test_데드라인_없으면_상한_없이_채운다(self):
+        _raw_day(self.root, DAY)
         rows, cov = R.read_range_filled(
             self.root, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {},
             gran='1h', deadline_sec=0)           # 0 = 상한 없음
@@ -192,6 +203,212 @@ class ReadRangeBucketCoverageTest(unittest.TestCase):
         self.assertEqual(max(R._need_offsets(DAY, f'{DAY} 00:00', f'{DAY} 12:42')), 762)
         self.assertEqual(R._need_offsets(DAY, '2026-09-12 00:00', '2026-09-12 10:00'), set())
         self.assertEqual(len(R._need_offsets(DAY, '2026-09-01 00:00', '2026-09-30 23:59')), 1440)
+
+
+class RawSourceGoneTest(unittest.TestCase):
+    """**집계도 원본도 없는 날은 0 이 아니라 모름이다** (F-48 잔여).
+
+    구간 양 끝의 반쪽 날은 거친 계층(1h·1d)의 버킷이 구간 경계를 넘어 쓸 수 없다 —
+    남은 조각은 1분 계층으로, 거기도 없으면 원본으로 내려간다. 그런데 1분 계층은 14일,
+    원본은 그보다 먼저 지워질 수 있어 **둘 다 없는 조각**이 생긴다. 그때 즉석 집계는
+    조용히 빈손으로 돌아오고, 조회는 성공한 얼굴로 작은 값을 낸다.
+
+    운영자는 그 감소를 **실제 트래픽 변화로 읽는다.** 그래서 빠졌다고 말해야 한다.
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix='rollup_raw_')
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_원본이_없는_날은_빠진_날로_신고한다(self):
+        rows, cov = R.read_range_filled(
+            self.root, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {}, gran='1h')
+        self.assertEqual(cov['scanned'], 0, '훑을 원본이 없다')
+        self.assertEqual(cov['missing'], 1)
+        self.assertIn(DAY, cov['missing_days'])
+
+    def test_원본이_있으면_빈_결과도_0_으로_받는다(self):
+        """디렉터리는 있는데 호가 없던 날 — 이건 **진짜 0** 이라 신고 대상이 아니다."""
+        _raw_day(self.root, DAY)
+        rows, cov = R.read_range_filled(
+            self.root, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {}, gran='1h')
+        self.assertEqual(cov['missing'], 0)
+        self.assertEqual(cov['scanned'], 1)
+
+    def test_호_기록만_남은_날도_원본으로_친다(self):
+        """원문 로그가 지워져도 호 기록(volte/)이 남아 있으면 되짚을 수 있다."""
+        os.makedirs(os.path.join(self.root, 'volte', DAY[0:4], DAY[5:7], DAY[8:10]))
+        _, cov = R.read_range_filled(
+            self.root, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {}, gran='1h')
+        self.assertEqual(cov['missing'], 0)
+
+    def test_반쪽_날만_원본이_없어도_그_날이_신고된다(self):
+        """가운데 날은 1시간 계층이 온전히 덮고, 양 끝 반쪽만 원본이 필요하다."""
+        d0, d1 = '2026-09-10', '2026-09-11'
+        _write(self.root, '1h', d1, _hours(d1))
+        _raw_day(self.root, d1)
+        _, cov = R.read_range_filled(
+            self.root, f'{d0} 10:30:00', f'{d1} 23:59:59', {}, gran='1h')
+        self.assertIn(d0, cov['missing_days'], '원본이 없는 반쪽 날')
+        self.assertNotIn(d1, cov['missing_days'], '계층으로 덮인 날')
+
+
+class MarkMissingBucketsTest(unittest.TestCase):
+    """**자료가 없는 날의 행은 0 이 아니라 빈칸이다.**
+
+    시간축 표는 빈 버킷을 0 으로 그린다(§2.1c). 그 규약은 "읽었고 호가 없었다" 일 때만
+    참이고, 철거·보존기간 경과로 자료가 없는 날에는 거짓말이 된다 — 실측(2026-09-17):
+    9/1~9/3 행이 9/17(자료 있고 호 0건) 행과 **화면에서 똑같이 0** 으로 나왔다.
+    """
+
+    def _buckets(self, labels):
+        return [{'bucket': b, 'bucket_start': b} for b in labels]
+
+    def test_빠진_날의_행만_표시된다(self):
+        bs = R.mark_missing_buckets(
+            self._buckets(['2026-09-01', '2026-09-02', '2026-09-03']), '1d',
+            '2026-09-01 00:00:00', '2026-09-03 23:59:59', ['2026-09-02'])
+        self.assertEqual([b.get('missing') for b in bs], [None, True, None])
+
+    def test_빠진_날이_없으면_아무것도_안_단다(self):
+        bs = R.mark_missing_buckets(self._buckets(['2026-09-01']), '1d',
+                                    '2026-09-01 00:00:00', '2026-09-01 23:59:59', [])
+        self.assertNotIn('missing', bs[0])
+
+    def test_시간_버킷은_그_날을_따른다(self):
+        bs = R.mark_missing_buckets(
+            self._buckets(['2026-09-02 03:00', '2026-09-03 03:00']), '1h',
+            '2026-09-02 00:00:00', '2026-09-03 23:59:59', ['2026-09-02'])
+        self.assertEqual([b.get('missing') for b in bs], [True, None])
+
+    def test_월_버킷은_덮는_날이_전부_빠졌을_때만(self):
+        """일부만 빠진 달을 통째로 비우면 **있는 자료를 숨긴다.**"""
+        days = R._days_of_month('2026-09')
+        part = R.mark_missing_buckets(self._buckets(['2026-09']), '1M',
+                                      '2026-09-01 00:00:00', '2026-09-30 23:59:59',
+                                      days[:5])
+        self.assertNotIn('missing', part[0], '5일만 빠진 달은 통째로 비우지 않는다')
+        whole = R.mark_missing_buckets(self._buckets(['2026-09']), '1M',
+                                       '2026-09-01 00:00:00', '2026-09-30 23:59:59', days)
+        self.assertTrue(whole[0].get('missing'))
+
+    def test_조회_구간_밖의_날은_판정에서_뺀다(self):
+        """9/2 하루만 조회했는데 그 달의 다른 날까지 요구하면 영원히 표시되지 않는다."""
+        bs = R.mark_missing_buckets(self._buckets(['2026-09-02']), '1d',
+                                    '2026-09-02 00:00:00', '2026-09-02 23:59:59',
+                                    ['2026-09-02'])
+        self.assertTrue(bs[0].get('missing'))
+
+    def test_구간_조회가_빠진_날_목록을_자르지_않는다(self):
+        """40개로 자르면 41번째 날부터 다시 0 으로 그려진다(표가 이 목록으로 판정한다)."""
+        root = tempfile.mkdtemp(prefix='rollup_miss_')
+        try:
+            _, cov = R.read_range_filled(root, '2026-06-01 00:00:00',
+                                         '2026-09-01 23:59:59', {}, gran='1d')
+            self.assertEqual(cov['missing'], len(cov['missing_days']),
+                             '신고한 수와 목록 길이가 같아야 한다')
+            self.assertGreater(cov['missing'], 40)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+
+class FutureDaysTest(unittest.TestCase):
+    """**아직 오지 않은 날은 "못 본 날" 이 아니다.**
+
+    자료가 없는 것은 같지만 성질이 다르다 — 못 본 날은 조치가 있고(보존기간을 늘려 재집계)
+    미래는 없다. 한데 세면 `이번 달` 처럼 달 끝까지 잡는 조회에서 남은 날이 전부 "자료 없음"
+    으로 신고되고 재집계 권고까지 붙는다(실측 2026-09-17: 9/10~9/25 조회에 9/18~9/25 8일이
+    경고 띠에 나열됐다 — 내일 것을 재집계할 수는 없다).
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix='rollup_future_')
+        self.today = datetime.now().strftime('%Y-%m-%d')
+        self.tomorrow = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+        self.next_week = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_미래_날은_빠진_날로_세지_않는다(self):
+        _, cov = R.read_range_filled(self.root, f'{self.tomorrow} 00:00:00',
+                                     f'{self.next_week} 23:59:59', {}, gran='1d')
+        self.assertEqual(cov['missing'], 0, '경고 대상이 아니다')
+        self.assertEqual(cov['missing_days'], [])
+        self.assertGreater(cov['future'], 0, '미래 날은 따로 센다')
+        self.assertIn(self.tomorrow, cov['future_days'])
+
+    def test_과거의_결손은_그대로_신고한다(self):
+        """미래를 가른다고 진짜 구멍까지 조용해지면 안 된다."""
+        past = '2026-01-02'
+        _, cov = R.read_range_filled(self.root, f'{past} 00:00:00',
+                                     f'{past} 23:59:59', {}, gran='1d')
+        self.assertEqual(cov['missing'], 1)
+        self.assertEqual(cov['future'], 0)
+
+    def test_섞이면_각자의_칸으로_간다(self):
+        _raw_day(self.root, self.today)
+        _, cov = R.read_range_filled(self.root, '2026-01-02 00:00:00',
+                                     f'{self.tomorrow} 23:59:59', {}, gran='1d')
+        self.assertIn('2026-01-02', cov['missing_days'])
+        self.assertNotIn(self.tomorrow, cov['missing_days'])
+        self.assertIn(self.tomorrow, cov['future_days'])
+
+    def test_오늘은_미래가_아니다(self):
+        """진행 중인 날은 남은 시간이 비어 있어도 '읽은 날' 이다(원본이 있다)."""
+        _raw_day(self.root, self.today)
+        _, cov = R.read_range_filled(self.root, f'{self.today} 00:00:00',
+                                     f'{self.today} 23:59:59', {}, gran='1d')
+        self.assertEqual(cov['future'], 0)
+        self.assertEqual(cov['missing'], 0)
+
+
+class EnsureSvcCellTest(unittest.TestCase):
+    """**읽은 구간의 0 건은 0 으로 낸다** (F-49).
+
+    집계는 들어온 행에 있는 서비스로만 칸을 만든다. 그래서 그 서비스의 호가 한 건도 없는
+    날은 `totals` 에 칸이 아예 없고, 화면은 없는 경로를 `—`(자료 없음)으로 그린다 —
+    조용한 주말·PTT 만 쓰는 현장처럼 **정상적으로 0 건인 날이 통계 고장과 구분되지 않는다**
+    (실측 2026-09-17: VoLTE 지표 타일 6개가 전부 `—`).
+    """
+
+    def _rows(self, svc='ptt'):
+        return [{'bucket': f'{DAY} 09:00', 'svc': svc,
+                 'call': {'attempts': 2, 'sessions': 2, 'talked': 2}}]
+
+    def test_끄면_없는_서비스_칸이_안_생긴다(self):
+        """기본 동작 — 구간을 읽었는지 모르는 호출자는 0 을 지어내면 안 된다."""
+        _, totals = R.aggregate(self._rows(), '1h', 'volte')
+        self.assertNotIn('volte', totals)
+
+    def test_켜면_0_으로_칸이_생긴다(self):
+        _, totals = R.aggregate(self._rows(), '1h', 'volte', ensure_svc=True)
+        self.assertIn('volte', totals)
+        self.assertEqual(totals['volte']['attempts'], 0)
+        self.assertEqual(totals['volte']['sessions'], 0)
+
+    def test_0_인_칸의_비율은_0_이_아니라_빈칸이다(self):
+        """분모가 0 이면 비율은 정의되지 않는다 — 0% 로 내면 '전부 실패' 와 같아진다."""
+        _, totals = R.aggregate(self._rows(), '1h', 'volte', ensure_svc=True)
+        for k in ('success_rate', 'talk_rate', 'completion_rate', 'ner'):
+            self.assertIsNone(totals['volte'][k], k)
+
+    def test_자료가_있으면_켜도_값이_그대로다(self):
+        _, totals = R.aggregate(self._rows('volte'), '1h', 'volte', ensure_svc=True)
+        self.assertEqual(totals['volte']['attempts'], 2)
+        self.assertEqual(totals['volte']['success_rate'], 100.0)
+
+    def test_행이_하나도_없어도_칸을_만든다(self):
+        """구간을 읽었는데 아무 서비스도 없던 경우 — `all` 까지 0 으로."""
+        _, totals = R.aggregate([], '1h', 'volte', ensure_svc=True)
+        self.assertEqual(totals['volte']['attempts'], 0)
+        self.assertEqual(totals['all']['attempts'], 0)
+
+    def test_all_축은_필터와_무관하게_전체_합계다(self):
+        _, totals = R.aggregate(self._rows(), '1h', 'volte', ensure_svc=True)
+        self.assertEqual(totals['all']['attempts'], 2, 'PTT 2건이 all 에 남아야 한다')
 
 
 if __name__ == '__main__':

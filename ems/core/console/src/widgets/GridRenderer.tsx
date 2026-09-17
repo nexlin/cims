@@ -6,6 +6,7 @@
 // registry 에 없는 위젯 id → fallback 카드(graceful, 레이아웃 안 깨짐).
 
 import type { CSSProperties } from 'react'
+import DataNoticeBanner from '../components/DataNoticeBanner'
 import WidgetApiBadge from '../components/WidgetApiBadge'
 import { getWidget } from './registry'
 import type { PageLayout } from './types'
@@ -39,9 +40,18 @@ function UnknownWidget({ id }: { id: string }) {
 export function GridRenderer({ layout }: { layout: PageLayout }) {
   const widgets = useVisibleWidgets(layout.widgets)
   const shown = widgets === layout.widgets ? layout : { ...layout, widgets }
-  return isGridLayout(shown.widgets)
-    ? <GridCanvas layout={shown} />
-    : <FlowGrid layout={shown} />
+  // 조회가 못 본 구간이 있으면 **캔버스 위**에 한 줄 띄운다. 카드 안이 아니라 여기인 이유는
+  //   둘이다: 카드 안 배치는 운영자가 편집해 저장한 것이라 새 블록을 넣어도 그 화면엔 안
+  //   나타나고(저장본 우선), 세로 예산 48행을 쓰는 자리라 평소에 빈 줄이 남는다. 띠는
+  //   경고가 있을 때만 그려지므로 정상 화면의 한 장 규칙을 건드리지 않는다.
+  return (
+    <>
+      <DataNoticeBanner />
+      {isGridLayout(shown.widgets)
+        ? <GridCanvas layout={shown} />
+        : <FlowGrid layout={shown} />}
+    </>
+  )
 }
 
 // ── 2D grid 렌더 ─────────────────────────────────────────────────────────

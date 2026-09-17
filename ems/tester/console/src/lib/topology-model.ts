@@ -234,6 +234,23 @@ export function createFromPalette(d: TopologyDoc, kind: PaletteKind, pos: Pos, c
   if (kind === 'pbx') p.register = { user: name, ha1_env: `${name.toUpperCase()}_HA1` }
   d.pools[name] = p; return { sel: { kind: 'pool', id: name }, made }
 }
+/** 풀·노드 복제 — 이름은 `_2` 식으로 비켜, 피어 bind 포트는 같은 워커 안에서 빈 포트로, 노드는 수신점을 그대로 두되(검증이 겹침을 잡는다) 카드는 오른쪽 아래로. 반환 = 새 이름 */
+export function duplicateFocus(d: TopologyDoc, f: Focus): string | null {
+  if (f.kind === 'pool') {
+    const p = d.pools[f.id]; if (!p) return null
+    const n = uniq(d, f.id.replace(/_\d+$/, '')); const c = deep(p)
+    if (isPeer(c)) { const used = Object.values(d.pools).filter(q => isPeer(q) && q.worker === c.worker).map(q => (q as PeerPoolDoc).bind.port); while (used.includes(c.bind.port)) c.bind.port++; if (c.register) c.register.user = n }
+    else if ('creds' in c.source) c.source.creds = `creds/${n}.jsonl`
+    d.pools[n] = c; return n
+  }
+  if (f.kind === 'node') {
+    const x = d.target.nodes[f.id]; if (!x) return null
+    const n = uniq(d, f.id.replace(/_\d+$/, '')); d.target.nodes[n] = deep(x)
+    const L = ensureLayout(d); const it = L.items[f.id] ?? { x: 14, y: 12 }; L.items[n] = { x: it.x + 30, y: it.y + 30 }
+    return n
+  }
+  return null
+}
 export function deleteFocus(d: TopologyDoc, f: Focus) {
   const L = ensureLayout(d)
   if (f.kind === 'host') { delete d.hosts[f.id]; delete L.regions[f.id] }

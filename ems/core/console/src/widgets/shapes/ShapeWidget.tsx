@@ -8,6 +8,7 @@ import type { WidgetDef, WidgetProps } from '../types'
 import type { ShapeData, KpiData, SeriesBarData, DistributionData, SourceParams } from './types'
 import { SHAPE_LABELS, SHAPE_ADAPTER } from './types'
 import { catalogSources, sourcesForShape, useDataSourceCatalog, loadSource } from './sourceRegistry'
+import { noticeOf, noticeScope, publishNotice } from './sourceNotice'
 import { GRAN_LABELS, defaultRange, granFits, useHasPageControl, usePageParam, usePageControl } from '../pageParams'
 import { TimeBarChart, SeriesBarChart, StatValue, DistributionBars, KvTable, MatrixTable } from './renderers'
 import { RotateCw } from 'lucide-react'
@@ -75,6 +76,9 @@ function ShapeWidgetBody({ shape, config }: { shape: WidgetShape; config?: Recor
  setLoading(true); setErr('')
  try {
  const raw = await loadSource(src, { date, granularity: gran, from, to } as SourceParams)
+      // 조회가 **못 본 구간**을 페이지 상단 띠로 올린다 — 표의 `—` 는 표를 훑어야 보인다.
+      //   같은 조건을 보는 블록이 여럿이어도 문구는 하나로 합쳐진다(sourceNotice).
+ publishNotice(`${noticeScope(from, to, gran)}|${src.id}`, noticeOf(raw))
  const adapt = src[SHAPE_ADAPTER[shape]] as ((r: unknown) => ShapeData) | undefined
  const d = adapt ? adapt(raw) : null
       // stat: 지표 묶음(KpiData)에서 지정한 하나만 남긴다 — 카드 하나에 값 하나.

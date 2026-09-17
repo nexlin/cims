@@ -7,6 +7,10 @@
                                       롤업에서 통째로 밀려나 원본을 전량 훑던 회귀 + 즉석 집계 시간 상한
   · tests/test_stats_store.py         집계 저장소 계약 — **단일 writer**(둘이 쓰면 결과가 서로를 덮고 공유
                                       파일시스템에서는 노드가 멈춘다) + 키 단위 upsert 규칙
+  · tests/test_stats_rebuild_job.py   재집계는 접수(202)하고 뒤에서 돈다 — 동기로 내면 게이트웨이 한도(5초)에
+                                      504 인데 작업은 끝까지 돌아 운영자가 두 번 시킨다 + 0 건 서비스 칸 배선
+  · tests/test_stats_ptt_attempts.py  PTT 시도 장부 — 분모가 생겼는지, 없을 때 거짓값(성공률 350%·0%)을 안 내는지
+  · tests/test_stats_descriptor_reasons.py  표 열이 가리키는 집계 경로가 실제 응답 키와 맞는지(툴팁 합 = 칸 값)
 """
 from __future__ import annotations
 
@@ -19,7 +23,9 @@ from ...context import VerifyContext
 _ID = "S1-UNIT-OAM-STATS"
 _NAME = "OAM SIP 통계 서비스축·프로브·구간 조회·저장소 unit test (tests/test_oam_stats_*.py · test_stats_*.py)"
 _TESTS = ["tests/test_oam_stats_classify.py", "tests/test_stats_probe.py",
-          "tests/test_stats_rollup_range.py", "tests/test_stats_store.py"]
+          "tests/test_stats_rollup_range.py", "tests/test_stats_store.py",
+          "tests/test_stats_rebuild_job.py", "tests/test_stats_ptt_attempts.py",
+          "tests/test_stats_descriptor_reasons.py"]
 
 
 @verify_item(

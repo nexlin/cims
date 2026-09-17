@@ -1,6 +1,9 @@
 // 시나리오 캔버스 편집기 — 팔레트(역할·단계 축별, vocab 이 정본) · 시퀀스 캔버스(레인 = 역할, 행 = 단계, 구간 띠 자동, 세션 열, during 마커) ·
 // 속성 패널(시나리오/역할/단계/during) · 하단 드로어(YAML 양방향 · 검증 · 토폴로지 적합성 = compile-check · 절차표) (test_instrument.md §7).
-// 문서는 부모(페이지)가 소유하고 저장한다. 기준 토폴로지는 편집 문맥이지 시나리오 속성이 아니다(저장 안 함).
+// 문서는 부모(페이지)가 소유하고 저장한다. 기준 토폴로지는 편집 문맥이지 시나리오 속성이 아니다(저장 안 함) — 그래서 검증 배지는
+// 문서 오류(저장 게이트)와 토폴로지 적합 오류(문맥)를 따로 센다. YAML 드로어는 YamlEditor(타이핑 중 컨트롤러 검증) + [적용]. 드로어 높이는 손잡이로.
+// 키: ↑↓ 행 이동 · Alt+↑↓ 순서 바꾸기 · Del · Ctrl+D 복제 · Esc.
+// during ↔ 행: in-dialog 행을 통화 유지 바 위에 놓으면 during 이 되고, during 마커를 바 밖(행 사이)으로 끌어 놓으면 행이 된다 — 속성 패널 버튼도 같은 일.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ChevronDown, ChevronRight, Trash2, Copy, Plus, X } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
@@ -12,6 +15,8 @@ import { useToast } from '@core/components/Toast'
 import { useConfirm } from '@core/components/custom/confirm'
 import { testerApi, type TopologyDoc, type ScenarioVocab, type PlanResult, type ProfileRow } from '@tester/api/tester'
 import PlanPreview from '@tester/components/PlanPreview'
+import YamlEditor from '@tester/components/YamlEditor'
+import { useDrawerHeight } from '@tester/lib/use-drawer-height'
 import * as S from '@tester/lib/scenario-model'
 import type { Doc, Step, Sel, During } from '@tester/lib/scenario-model'
 import { fmtNum } from '@tester/lib/fmt'
@@ -22,8 +27,8 @@ const PH: Record<string, [string, string]> = { prelude: ['PRELUDE', 'run 시작 
 
 type Drag = { type: 'newstep'; step: string } | { type: 'newrole'; role: 'ue' | 'peer' } | { type: 'move'; idx: number } | { type: 'lane'; id: string }
 
-export default function ScenarioCanvas({ doc, onChange, topologies, topoId, setTopoId, profiles, profileId, setProfileId, vocab, canWrite, source }: {
-  doc: Doc; onChange: (d: Doc) => void
+export default function ScenarioCanvas({ doc, onChange, onCommit, topologies, topoId, setTopoId, profiles, profileId, setProfileId, vocab, canWrite, source }: {
+  doc: Doc; onChange: (d: Doc, transient?: boolean) => void; onCommit?: () => void
   topologies: { id: number; name: string; doc: TopologyDoc }[]; topoId: number | null; setTopoId: (id: number | null) => void
   profiles: ProfileRow[]; profileId: string; setProfileId: (p: string) => void
   vocab: ScenarioVocab | null; canWrite: boolean; source: 'bundled' | 'user' | null
@@ -34,11 +39,13 @@ export default function ScenarioCanvas({ doc, onChange, topologies, topoId, setT
   const [sel, setSel] = useState<Sel>({ kind: 'scenario' })
   const [tab, setTab] = useState<'yaml' | 'issues' | 'fit' | 'table'>('yaml')
   const [drawerOpen, setDrawerOpen] = useState(true)
+  const [drawerH, onDrawerHandle] = useDrawerHeight('tester-scn-drawer', 240)
   const [bind, setBind] = useState<Record<string, number>>({ ht: 20 })
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [drag, setDrag] = useState<Drag | null>(null)
   const [hot, setHot] = useState<string | null>(null)
   const [mk, setMk] = useState<{ idx: number; k: number; rect: DOMRect; len: number } | null>(null)
+  const hotRef = useRef<string | null>(null)
   const [plan, setPlan] = useState<PlanResult | null>(null)
   const [planning, setPlanning] = useState(false)
   const profDoc = useMemo(() => profiles.find(p => p.name === profileId), [profiles, profileId])
@@ -46,10 +53,16 @@ export default function ScenarioCanvas({ doc, onChange, topologies, topoId, setT
 
   useEffect(() => { if (profileId && profileId !== NONE) testerApi.profile(profileId).then(p => { const ht = (p.doc as { ht?: number }).ht; if (ht != null) setBind(b => ({ ...b, ht })) }).catch(() => {}) }, [profileId])
 
-  const mutate = useCallback((fn: (d: Doc) => void) => { const d = S.deep(doc); fn(d); onChange(d) }, [doc, onChange])
+  const mutate = useCallback((fn: (d: Doc) => void, transient = false) => { const d = S.deep(doc); fn(d); onChange(d, transient) }, [doc, onChange])
   const R = S.roles(doc)
   const issues = useMemo(() => S.validate(doc, topo, vocab, bind), [doc, topo, vocab, bind])
+  // 문서 자체(토폴로지 없이) 오류 = 저장 게이트 · 나머지 = 기준 토폴로지 적합 오류(문맥)
+  const docKeys = useMemo(() => new Set(S.validate(doc, null, vocab, bind).map(i => `${i.lv}|${i.who}|${i.msg}`)), [doc, vocab, bind])
+  const isTopoIssue = (i: S.Issue) => !docKeys.has(`${i.lv}|${i.who}|${i.msg}`)
   const errN = issues.filter(i => i.lv === 'error').length, warnN = issues.filter(i => i.lv === 'warning').length
+  const docErrN = issues.filter(i => i.lv === 'error' && !isTopoIssue(i)).length, topoErrN = errN - docErrN
+  const LV = { error: 0, warning: 1, info: 2 }
+  const sortedIssues = useMemo(() => [...issues].sort((a, b) => LV[a.lv] - LV[b.lv] || a.who.localeCompare(b.who)), [issues])   // eslint-disable-line react-hooks/exhaustive-deps
   const SESS = useMemo(() => S.sessions(doc), [doc])
   const TL = useMemo(() => S.timeline(doc, bind), [doc, bind])
   const rp = (n: string) => S.resolvePool(doc, topo, n)
@@ -78,12 +91,16 @@ export default function ScenarioCanvas({ doc, onChange, topologies, topoId, setT
   const onDragEnd = () => { setDrag(null); setHot(null) }
   const gapOver = (i: number) => (e: React.DragEvent) => { const d = dragRef.current; if (d && (d.type === 'newstep' || d.type === 'move')) { e.preventDefault(); setHot(`gap:${i}`) } }
   const gapDrop = (i: number) => (e: React.DragEvent) => { const d = dragRef.current; if (!d) return; e.preventDefault(); if (d.type === 'newstep') insertStep(d.step, i); else if (d.type === 'move') moveStep(d.idx, i); onDragEnd() }
-  const holdOver = (i: number) => (e: React.DragEvent) => { const d = dragRef.current; if (d && d.type === 'newstep' && S.INDIALOG.has(d.step)) { e.preventDefault(); e.stopPropagation(); setHot(`hold:${i}`) } }
+  // 통화 유지 바 위 — 팔레트의 in-dialog 단계(새 during) 또는 기존 in-dialog 행(행 → during)
+  const holdAccepts = (d: Drag | null, i: number) => !!d && ((d.type === 'newstep' && S.INDIALOG.has(d.step)) || (d.type === 'move' && d.idx !== i && S.INDIALOG.has(doc.flow[d.idx]?.step)))
+  const holdOver = (i: number) => (e: React.DragEvent) => { if (holdAccepts(dragRef.current, i)) { e.preventDefault(); e.stopPropagation(); setHot(`hold:${i}`) } }
   const holdDrop = (i: number) => (e: React.DragEvent) => {
-    const d = dragRef.current; if (!d || d.type !== 'newstep' || !S.INDIALOG.has(d.step)) return
+    const d = dragRef.current; if (!holdAccepts(d, i) || !d) return
     e.preventDefault(); e.stopPropagation()
     const r = e.currentTarget.getBoundingClientRect(); const len = S.secondsOf(doc.flow[i], bind) || 1
     const at = Math.round(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * len * 2) / 2
+    if (d.type === 'move') { mutate(x => { const res = S.stepToDuring(x, d.idx, i, at); if (res) setSel({ kind: 'sub', ...res }) }); onDragEnd(); return }
+    if (d.type !== 'newstep') return
     mutate(x => { const s = x.flow[i]; const peer = R.find(n => rp(n)?.kind === 'peer'); const from = d.step === 'refer' ? (peer ?? R[0]) : R[0]
       const dd: During = { at_s: at, step: d.step as During['step'], from }
       if (d.step === 'dtmf') dd.payload = '1234#'; if (d.step === 'refer') dd.to = R.find(n => n !== from) ?? R[0]
@@ -95,11 +112,21 @@ export default function ScenarioCanvas({ doc, onChange, topologies, topoId, setT
   const addOver = (e: React.DragEvent) => { const d = dragRef.current; if (d?.type === 'newrole') { e.preventDefault(); setHot('laneadd') } }
   const addDrop = (e: React.DragEvent) => { const d = dragRef.current; if (d?.type === 'newrole') { e.preventDefault(); addRole(d.role) } onDragEnd() }
 
-  // during 마커 포인터 드래그
+  // during 마커 포인터 드래그 — 바 위에서는 at_s, 바에서 세로로 24px 넘게 벗어나 행 사이(gap)에 놓으면 독립 행으로
+  hotRef.current = hot
   useEffect(() => {
     if (!mk) return
-    const move = (e: PointerEvent) => { const f = Math.max(0, Math.min(1, (e.clientX - mk.rect.left) / mk.rect.width)); const at = Math.round(f * mk.len * 2) / 2; const d = doc.flow[mk.idx]?.during?.[mk.k]; if (d && d.at_s !== at) mutate(x => { x.flow[mk.idx].during![mk.k].at_s = at }) }
-    const up = () => { setSel({ kind: 'sub', idx: mk.idx, k: mk.k }); setMk(null) }
+    const move = (e: PointerEvent) => {
+      const dy = e.clientY - (mk.rect.top + mk.rect.height / 2)
+      if (Math.abs(dy) > 24) { const g = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-gap]') as HTMLElement | null; setHot(g ? `gap:${g.dataset.gap}` : 'detach'); return }
+      if (hotRef.current) setHot(null)
+      const f = Math.max(0, Math.min(1, (e.clientX - mk.rect.left) / mk.rect.width)); const at = Math.round(f * mk.len * 2) / 2; const d = doc.flow[mk.idx]?.during?.[mk.k]; if (d && d.at_s !== at) mutate(x => { x.flow[mk.idx].during![mk.k].at_s = at }, true)
+    }
+    const up = () => {
+      const h = hotRef.current; setHot(null); setMk(null); onCommit?.()
+      if (h?.startsWith('gap:')) { const at = Number(h.slice(4)); mutate(x => { const n = S.duringToStep(x, mk.idx, mk.k, at); if (n >= 0) setSel({ kind: 'step', idx: n }) }); return }
+      setSel({ kind: 'sub', idx: mk.idx, k: mk.k })
+    }
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
     return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
   }, [mk, doc, mutate])
@@ -108,6 +135,14 @@ export default function ScenarioCanvas({ doc, onChange, topologies, topoId, setT
     const kd = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).closest('input,select,textarea')) return
       if (e.key === 'Escape') setSel({ kind: 'scenario' })
+      // ↑↓ = 행 선택 이동, Alt+↑↓ = 순서 바꾸기
+      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && doc.flow.length && !(e.target as HTMLElement).closest('button,[role=combobox],[role=listbox],[role=option]')) {
+        const dir = e.key === 'ArrowUp' ? -1 : 1
+        if (e.altKey) { if (canWrite && sel.kind === 'step') { const to = sel.idx + dir; if (to >= 0 && to < doc.flow.length) { e.preventDefault(); moveStep(sel.idx, dir > 0 ? to + 1 : to) } } return }
+        e.preventDefault()
+        const cur = sel.kind === 'step' ? sel.idx : sel.kind === 'sub' ? sel.idx : dir > 0 ? -1 : doc.flow.length
+        setSel({ kind: 'step', idx: Math.max(0, Math.min(doc.flow.length - 1, cur + dir)) }); return
+      }
       if (!canWrite) return
       if (e.key === 'Delete' && sel.kind === 'step') removeStep(sel.idx)
       if (e.key === 'Delete' && sel.kind === 'sub') mutate(d => { d.flow[sel.idx].during!.splice(sel.k, 1); setSel({ kind: 'step', idx: sel.idx }) })
@@ -143,14 +178,14 @@ export default function ScenarioCanvas({ doc, onChange, topologies, topoId, setT
       const so = SESS.find(o => o.est != null && i > o.est && i < o.end)
       return <>{grid}
         <span data-hold={i} onDragOver={holdOver(i)} onDrop={holdDrop(i)} className={`absolute inset-x-[6%] top-1/2 h-2 -translate-y-1/2 rounded-sm ${hot === `hold:${i}` ? 'ring-2 ring-success' : ''}`} style={{ background: `color-mix(in srgb, ${GROUP_COLOR.media} 45%, transparent)` }}>
-          {[0, 0.25, 0.5, 0.75, 1].map(f => <span key={f} className="absolute top-2.5 -translate-x-1/2 text-[9px] text-muted-foreground" style={{ left: `${f * 100}%` }}>{+(f * len).toFixed(1)}</span>)}
+          {[0, 0.25, 0.5, 0.75, 1].map(f => <span key={f} className="absolute top-2.5 -translate-x-1/2 text-[10px] text-muted-foreground" style={{ left: `${f * 100}%` }}>{+(f * len).toFixed(1)}</span>)}
         </span>
         <span className="absolute left-[6%] top-[3px] text-[10px] text-muted-foreground">통화 유지 {String(s.seconds ?? '?')} s · {so ? 'RTP 표본' : '세션 밖'}</span>
         {(s.during ?? []).map((d, k) => { const x = 6 + Math.max(0, Math.min(1, (d.at_s ?? 0) / len)) * 88; const a = d.from ?? (d.who ?? [])[0] ?? ''; const on = sel.kind === 'sub' && sel.idx === i && sel.k === k
           const lab = d.step === 'dtmf' ? `DTMF ${d.payload ?? ''}` : d.step === 'refer' ? `REFER → ${d.to ?? '?'}` : d.step.toUpperCase()
           return <span key={k} onPointerDown={e => { e.stopPropagation(); e.preventDefault(); if (!canWrite) { setSel({ kind: 'sub', idx: i, k }); return } const hb = (e.currentTarget.parentElement as HTMLElement).querySelector(`[data-hold="${i}"]`)!; setMk({ idx: i, k, rect: hb.getBoundingClientRect(), len }) }}
-                       className={`absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize rounded-full border-2 bg-card ${on ? 'ring-2 ring-primary' : ''}`} style={{ left: `${x}%`, borderColor: kindColor(a) }} title={`${d.step} @ ${d.at_s}s · ${a}`}>
-            <span className={`absolute left-1/2 -translate-x-1/2 whitespace-nowrap text-[9px] ${k % 2 ? 'top-4' : '-top-4'}`}>+{d.at_s}s {a} {lab}</span></span> })}
+                       className={`absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize rounded-full border-2 bg-card ${on ? 'ring-2 ring-primary' : ''}`} style={{ left: `${x}%`, borderColor: kindColor(a) }} title={`${d.step} @ ${d.at_s}s · ${a} — 좌우로 끌면 시각, 위아래로 끌어 행 사이에 놓으면 독립 행`}>
+            <span className={`absolute left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] ${k % 2 ? 'top-4' : '-top-4'}`}>+{d.at_s}s {a} {lab}</span></span> })}
       </>
     }
     if (D?.actor === 'seconds' || D?.actor === 'none') return <>{grid}<span className="absolute inset-x-[6%] top-1/2 h-1 -translate-y-1/2 rounded-sm bg-muted-foreground/40" /><span className="absolute left-[6%] top-[3px] text-[10px] text-muted-foreground">{s.step === 'expect' ? '누계 게이트' : `대기 ${String(s.seconds ?? '?')} s`}</span></>
@@ -160,7 +195,7 @@ export default function ScenarioCanvas({ doc, onChange, topologies, topoId, setT
         <span className="absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ left: `${a}%`, background: c }} />
         <span className="absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 bg-card" style={{ left: `${b}%`, borderColor: kindColor(s.to) }} />
         <span className="absolute top-1/2 h-[2px] -translate-y-1/2" style={{ left: `${Math.min(a, b)}%`, width: `${Math.abs(b - a)}%`, background: c }} />
-        <span className="absolute top-1/2 -translate-y-1/2 text-[9px]" style={{ left: `${Math.max(a, b)}%`, transform: `translate(${b < a ? '-100%' : '-100%'}, -50%)`, color: c }}>{b < a ? '◀' : '▶'}</span>
+        <span className="absolute top-1/2 -translate-y-1/2 text-[10px]" style={{ left: `${Math.max(a, b)}%`, transform: `translate(${b < a ? '-100%' : '-100%'}, -50%)`, color: c }}>{b < a ? '◀' : '▶'}</span>
         <span className="absolute -top-0.5 -translate-x-1/2 rounded-sm bg-card px-1 text-[10px]" style={{ left: `${(a + b) / 2}%` }}>{stepLabel(s)}</span></>
     }
     const xs = actors.filter(r => R.includes(r)).map(cx)
@@ -173,13 +208,14 @@ export default function ScenarioCanvas({ doc, onChange, topologies, topoId, setT
     const x = 6 + si * 22; const first = o.prog ?? o.est
     const els: ReactNode[] = []
     if (i >= o.start && (first == null ? i <= o.end : i <= first)) els.push(<span key="ring" className="absolute inset-y-0 w-[3px] border-l-2 border-dashed" style={{ left: x, borderColor: 'var(--muted-foreground)' }} title={`${o.a} → ${o.b} INVITE~확립`} />)
-    if (i === o.start) els.push(<span key="lab" className="absolute top-0 text-[9px] text-muted-foreground" style={{ left: x + 6 }}>{o.via === 'refer' ? 'REFER' : 'INVITE'}</span>)
+    if (i === o.start) els.push(<span key="lab" className="absolute top-0 text-[10px] text-muted-foreground" style={{ left: x + 6 }}>{o.via === 'refer' ? 'REFER' : 'INVITE'}</span>)
     if (first != null && i >= first && i <= o.end) els.push(<span key="media" className="absolute inset-y-0 w-[6px] rounded-sm" style={{ left: x, background: GROUP_COLOR.media, opacity: 0.8 }} title={`${o.a} ⇄ ${o.b} RTP`} />)
     return <span key={si}>{els}</span>
   })
 
   const phaseRow = (ph: string) => <div key={`ph-${ph}`} className="flex items-center gap-2 border-t border-border bg-muted px-3 py-0.5 text-[10px] font-semibold text-muted-foreground"><span>{PH[ph][0]}</span><span className="font-normal">{PH[ph][1]}</span></div>
-  const Gap = ({ i }: { i: number }) => <div data-gap={i} onDragOver={gapOver(i)} onDrop={gapDrop(i)} className={`h-2 transition-colors ${hot === `gap:${i}` ? 'bg-success/50' : drag ? 'bg-primary/10' : ''}`} />
+  // 끌기 중에는 놓을 자리를 키운다(8 → 16px)
+  const Gap = ({ i }: { i: number }) => <div data-gap={i} onDragOver={gapOver(i)} onDrop={gapDrop(i)} className={`transition-all ${(drag && (drag.type === 'newstep' || drag.type === 'move')) || mk ? 'h-4' : 'h-2'} ${hot === `gap:${i}` ? 'bg-success/50' : drag || mk ? 'bg-primary/10' : ''}`} />
   let lastPh: string | null = null
 
   return (
@@ -219,12 +255,12 @@ export default function ScenarioCanvas({ doc, onChange, topologies, topoId, setT
                      onClick={() => canWrite && d.supported && insertStep(k, sel.kind === 'step' ? sel.idx + 1 : doc.flow.length)}
                      title={d.supported ? '캔버스 행 사이로 끌어 놓기 (클릭 = 선택 단계 뒤에 삽입)' : '워커 미지원 — 워커 재빌드 필요'}
                      className={`mb-1 flex select-none items-center gap-2 rounded-sm border border-border bg-muted px-2 py-1 ${d.supported && canWrite ? 'cursor-grab hover:border-primary' : 'opacity-45'}`}>
-                  <span className="inline-flex h-5 w-6 shrink-0 items-center justify-center rounded-sm text-[9px] font-bold text-white" style={{ background: GROUP_COLOR[g.id] ?? 'var(--chart-6)' }}>{k.slice(0, 2).toUpperCase()}</span>
+                  <span className="inline-flex h-5 w-6 shrink-0 items-center justify-center rounded-sm text-[10px] font-bold text-white" style={{ background: GROUP_COLOR[g.id] ?? 'var(--chart-6)' }}>{k.slice(0, 2).toUpperCase()}</span>
                   <span className="min-w-0"><b>{k}</b><div className="truncate text-[10px] text-muted-foreground">{d.desc}{d.supported ? '' : ' · 미지원'}</div></span>
                 </div>))}
             </div>
           })}
-          <div className="rounded-sm border border-border p-2 text-[11px] leading-relaxed text-muted-foreground"><b>레인 = 역할, 행 = 단계.</b> 팔레트에서 행 사이로 끌어 놓습니다. 구간은 자동(앞쪽 register/wait = prelude · 끝 deregister = epilogue). 세션 열(오른쪽)은 다이얼로그마다 막대 하나 — INVITE~확립 점선, 확립~bye RTP. 통화 중 동작(dtmf·hold·resume·refer)은 확립된 세션 안에만, <b>통화 유지 바 위에 놓으면 during</b>(at_s). <kbd>Del</kbd> 삭제 · <kbd>Ctrl+D</kbd> 복제 · <kbd>Esc</kbd></div>
+          <div className="rounded-sm border border-border p-2 text-[11px] leading-relaxed text-muted-foreground"><b>레인 = 역할, 행 = 단계.</b> 팔레트에서 행 사이로 끌어 놓습니다. 구간은 자동(앞쪽 register/wait = prelude · 끝 deregister = epilogue). 세션 열(오른쪽)은 다이얼로그마다 막대 하나 — INVITE~확립 점선, 확립~bye RTP. 통화 중 동작(dtmf·hold·resume·refer)은 확립된 세션 안에만, <b>통화 유지 바 위에 놓으면 during</b>(at_s) — 기존 행을 끌어 놓아도, 마커를 행 사이로 끌어내도 됩니다. <kbd>↑↓</kbd> 행 이동 · <kbd>Alt+↑↓</kbd> 순서 · <kbd>Del</kbd> 삭제 · <kbd>Ctrl+D</kbd> 복제 · <kbd>Ctrl+Z</kbd>/<kbd>Ctrl+Y</kbd> 실행취소/다시실행 · <kbd>Esc</kbd></div>
         </aside>
 
         {/* 시퀀스 캔버스 */}
@@ -236,7 +272,7 @@ export default function ScenarioCanvas({ doc, onChange, topologies, topoId, setT
                 {R.map(r => { const res = rp(r); const role = doc.roles[r]; const on = sel.kind === 'role' && sel.id === r
                   return <div key={r} draggable={canWrite} onDragStart={onDragStart({ type: 'lane', id: r })} onDragEnd={onDragEnd} onDragOver={laneOver(r)} onDrop={laneDrop(r)} onClick={() => setSel({ kind: 'role', id: r })}
                               className={`cursor-pointer border-l border-border px-2 py-1 ${on ? 'bg-accent' : ''} ${hot === `lane:${r}` ? 'ring-2 ring-success' : ''}`}>
-                    <div className="flex items-center gap-1"><b>{r}</b>{role.count ? <span className="font-mono text-muted-foreground">×{role.count}</span> : null}{role.disjoint_from && <span title={`disjoint_from ${role.disjoint_from}`}>⟷</span>}<Badge variant={res ? (res.kind === 'peer' ? 'warningSoft' : 'infoSoft') : 'dangerSoft'} className="ml-auto h-4 px-1 text-[10px]">{res ? S.roleKindTag(doc, topo, r) : '?'}</Badge></div>
+                    <div className="flex items-center gap-1"><b>{r}</b>{role.count ? <span className="font-mono text-muted-foreground">×{role.count}</span> : null}{role.disjoint_from && <span title={`disjoint_from ${role.disjoint_from}`}>⟷</span>}<Badge variant={res ? (res.kind === 'peer' ? 'warningSoft' : 'infoSoft') : 'dangerSoft'} className="ml-auto">{res ? S.roleKindTag(doc, topo, r) : '?'}</Badge></div>
                     <div className="truncate font-mono text-[10px] text-muted-foreground">{role.pool}{res && !res.byName ? ' ≡ group' : ''}{res ? ` → ${Object.keys(res.pools).join('+')}` : topo ? ' → 풀 없음' : ''}</div>
                   </div> })}
                 <div onDragOver={addOver} onDrop={addDrop} onClick={() => canWrite && addRole('ue')} className={`flex cursor-pointer items-center justify-center border-l border-dashed border-border text-[10px] text-muted-foreground hover:bg-accent ${hot === 'laneadd' ? 'ring-2 ring-success' : ''}`}>+ 역할</div>
@@ -256,7 +292,7 @@ export default function ScenarioCanvas({ doc, onChange, topologies, topoId, setT
                   <div className="flex min-w-0 flex-col justify-center px-2"><b>{s.step}{D && !D.supported && <span title="워커 미지원" className="ml-1 text-warning">⚠</span>}</b><span className="truncate text-[10px] text-muted-foreground">{sum || D?.desc}</span></div>
                   <div className="relative">{lanesFor(s, i)}</div>
                   <div className="relative border-l border-border">{railFor(i)}</div>
-                  <div className="flex flex-wrap items-center gap-1 px-2 py-1">{Object.entries(s.expect ?? {}).map(([k, v]) => <Badge key={k} variant={vocab && !vocab.metrics[k] ? 'dangerSoft' : 'neutralSoft'} className="h-4 px-1 font-mono text-[10px]">{k} {typeof v === 'object' && v ? Object.entries(v as Record<string, unknown>).map(([a, b]) => `${a}≤${b}`).join(' ') : `= ${String(v)}`}</Badge>)}{!Object.keys(s.expect ?? {}).length && <span className="text-muted-foreground">—</span>}</div>
+                  <div className="flex flex-wrap items-center gap-1 px-2 py-1">{Object.entries(s.expect ?? {}).map(([k, v]) => <Badge key={k} variant={vocab && !vocab.metrics[k] ? 'dangerSoft' : 'neutralSoft'} className="font-mono" title={vocab?.metrics[k]}>{k} {typeof v === 'object' && v ? Object.entries(v as Record<string, unknown>).map(([a, b]) => `${a}${S.thrOp(a)}${b}`).join(' ') : `= ${String(v)}`}</Badge>)}{!Object.keys(s.expect ?? {}).length && <span className="text-muted-foreground">—</span>}</div>
                   <div className="flex items-center justify-center">{canWrite && <button onClick={e => { e.stopPropagation(); removeStep(i) }} className="opacity-0 group-hover:opacity-100" title="삭제"><X size={12} /></button>}</div>
                 </div>
               </div>
@@ -270,26 +306,31 @@ export default function ScenarioCanvas({ doc, onChange, topologies, topoId, setT
         <aside className="min-h-0 overflow-auto border-l border-border bg-card p-3 text-xs">
           <Inspector doc={doc} sel={sel} setSel={setSel} mutate={mutate} topo={topo} vocab={vocab} issues={issues} canWrite={canWrite} source={source} bind={bind} plan={plan}
                      onRemoveRole={async n => { const refs = doc.flow.filter(s => (s.who ?? []).includes(n) || s.from === n || s.to === n).length; if (refs && !await confirm({ title: `역할 ${n} 삭제`, body: `${refs} 개 단계가 참조합니다. 참조는 비워집니다.`, confirmLabel: '삭제', tone: 'danger' })) return; mutate(d => S.removeRole(d, n)); setSel({ kind: 'scenario' }) }}
-                     onRemoveStep={removeStep} onDupStep={dupStep} />
+                     onRemoveStep={removeStep} onDupStep={dupStep}
+                     onDuringToStep={(i, k) => mutate(x => { const n = S.duringToStep(x, i, k, i + 1); if (n >= 0) setSel({ kind: 'step', idx: n }) })}
+                     onStepToDuring={i => { const h = S.nearestHold(doc, i); if (h < 0) { show('붙일 media_hold(통화 유지) 단계가 없습니다', 'err'); return } const len = S.secondsOf(doc.flow[h], bind); mutate(x => { const res = S.stepToDuring(x, i, h, h < i ? len : 0); if (res) setSel({ kind: 'sub', ...res }) }) }} />
         </aside>
       </div>
 
       {/* 드로어 */}
       <div className="border-t border-border bg-card">
+        {drawerOpen && <div onPointerDown={onDrawerHandle} className="group flex h-2 cursor-row-resize items-center justify-center hover:bg-accent" title="끌어서 높이 조절"><span className="h-0.5 w-10 rounded-full bg-border group-hover:bg-muted-foreground" /></div>}
         <div className="flex items-center gap-1 px-3 py-1 text-xs">
           {(['yaml', 'issues', 'fit', 'table'] as const).map(t => (
             <button key={t} onClick={() => { setTab(t); setDrawerOpen(true) }} className={`h-6 rounded-sm px-2 ${tab === t && drawerOpen ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}>
-              {t === 'yaml' ? 'YAML' : t === 'issues' ? <>검증 <Badge variant={errN ? 'dangerSoft' : warnN ? 'warningSoft' : 'successSoft'} className="ml-1 h-4 px-1 text-[10px]">{issues.length}</Badge></> : t === 'fit' ? <>토폴로지 적합성 {plan && <Badge variant={plan.ok ? (plan.warnings.length ? 'warningSoft' : 'successSoft') : 'dangerSoft'} className="ml-1 h-4 px-1 text-[10px]">{plan.ok ? (plan.warnings.length ? `경고 ${plan.warnings.length}` : 'OK') : `오류 ${plan.errors.length}`}</Badge>}</> : '절차표'}
+              {t === 'yaml' ? 'YAML' : t === 'issues' ? <>검증 {docErrN ? <Badge variant="dangerSoft" className="ml-1" title="문서 오류 — 저장이 잠깁니다">문서 {docErrN}</Badge> : null}{topoErrN ? <Badge variant="warningSoft" className="ml-1" title={`기준 토폴로지 ${topo?.name ?? ''} 와의 적합 오류 — 저장은 되지만 이 토폴로지로는 실행할 수 없습니다`}>토폴로지 {topoErrN}</Badge> : null}{!errN && <Badge variant={warnN ? 'warningSoft' : 'successSoft'} className="ml-1">{issues.length}</Badge>}</> : t === 'fit' ? <>토폴로지 적합성 {plan && <Badge variant={plan.ok ? (plan.warnings.length ? 'warningSoft' : 'successSoft') : 'dangerSoft'} className="ml-1">{plan.ok ? (plan.warnings.length ? `경고 ${plan.warnings.length}` : 'OK') : `오류 ${plan.errors.length}`}</Badge>}</> : '절차표'}
             </button>))}
           <span className="ml-2 text-muted-foreground">{doc.flow.length} 단계 · {R.length} 역할 · {source === 'user' ? '운영자본' : source === 'bundled' ? '동봉' : '새 문서'}</span>
           <button className="ml-auto text-muted-foreground" onClick={() => setDrawerOpen(o => !o)}>{drawerOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</button>
         </div>
         {drawerOpen && (
-          <div className="max-h-[240px] overflow-auto border-t border-border px-3 py-2 text-xs">
-            {tab === 'yaml' && <YamlTab doc={doc} onApply={d => { onChange(d); setSel({ kind: 'scenario' }); show('YAML 적용 — 캔버스 재구성', 'ok') }} canWrite={canWrite} />}
-            {tab === 'issues' && (issues.length === 0 ? <div className="text-success">검증 통과 — 스키마·행위자·구간·kind 게이트 모두 정상</div> : <div className="flex flex-col gap-1">{issues.map((it, k) => (
+          <div className="overflow-auto border-t border-border px-3 py-2 text-xs" style={{ height: drawerH }}>
+            {tab === 'yaml' && <YamlTab doc={doc} height={drawerH - 20} onApply={d => { onChange(d); setSel({ kind: 'scenario' }); show('YAML 적용 — 캔버스 재구성', 'ok') }} canWrite={canWrite} />}
+            {tab === 'issues' && (issues.length === 0 ? <div className="text-success">검증 통과 — 스키마·행위자·구간·kind 게이트 모두 정상{topo ? ` · 기준 토폴로지 ${topo.name} 적합` : ''}</div> : <div className="flex flex-col gap-1">
+              {topoErrN > 0 && docErrN === 0 && <div className="text-muted-foreground">문서는 유효합니다(저장 가능). 아래 오류는 기준 토폴로지 <b>{topo?.name}</b> 와의 적합 문제 — 토폴로지를 바꾸거나 역할의 pool 을 고치십시오</div>}
+              {sortedIssues.map((it, k) => (
               <button key={k} onClick={() => it.ref && setSel(it.ref)} className={`flex items-center gap-2 rounded-sm border-l-2 px-2 py-1 text-left hover:bg-accent ${it.lv === 'error' ? 'border-destructive' : it.lv === 'warning' ? 'border-warning' : 'border-info'}`}>
-                <Badge variant={it.lv === 'error' ? 'dangerSoft' : it.lv === 'warning' ? 'warningSoft' : 'infoSoft'}>{it.lv === 'error' ? '오류' : it.lv === 'warning' ? '경고' : '참고'}</Badge><span className="font-mono text-muted-foreground">{it.who}</span><span>{it.msg}</span></button>))}</div>)}
+                <Badge variant={it.lv === 'error' ? 'dangerSoft' : it.lv === 'warning' ? 'warningSoft' : 'infoSoft'}>{it.lv === 'error' ? '오류' : it.lv === 'warning' ? '경고' : '참고'}</Badge>{isTopoIssue(it) && <Badge variant="neutralSoft" title="기준 토폴로지 문맥의 문제">토폴로지</Badge>}<span className="font-mono text-muted-foreground">{it.who}</span><span>{it.msg}</span></button>))}</div>)}
             {tab === 'fit' && (!topoId ? <div className="text-muted-foreground">기준 토폴로지를 고르면 compile_run 드라이런(역할→풀→워커 창·용량·시드·Little 검산)을 보입니다</div> : errN ? <div className="text-muted-foreground">검증 오류를 먼저 해결하십시오 — 오류가 있는 문서는 컴파일하지 않습니다</div> : <PlanPreview plan={plan} loading={planning} compact />)}
             {tab === 'table' && <ProcedureTable doc={doc} vocab={vocab} plan={plan} />}
           </div>
@@ -299,30 +340,23 @@ export default function ScenarioCanvas({ doc, onChange, topologies, topoId, setT
   )
 }
 
-function YamlTab({ doc, onApply, canWrite }: { doc: Doc; onApply: (d: Doc) => void; canWrite: boolean }) {
+function YamlTab({ doc, height, onApply, canWrite }: { doc: Doc; height: number; onApply: (d: Doc) => void; canWrite: boolean }) {
   const text = useMemo(() => S.toYaml(doc), [doc])
   const [edit, setEdit] = useState<string | null>(null)
-  const [err, setErr] = useState<string[]>([])
-  const [busy, setBusy] = useState(false)
+  const [parsed, setParsed] = useState<unknown>(null)     // 타이핑 중 컨트롤러가 돌려준 doc — [적용] 은 이것으로 캔버스를 다시 그린다
+  const [ok, setOk] = useState(true)
   const { show } = useToast()
-  const apply = async () => {
-    setBusy(true)
-    try {
-      const r = await testerApi.validate('scenario', { yaml: edit ?? text })
-      if (!r.doc) { setErr(r.errors.length ? r.errors : ['YAML 파싱 실패']); return }
-      if (!r.ok) setErr(r.errors); else setErr([])
-      onApply(S.fromApiDoc(r.doc as Record<string, unknown>, edit ?? text)); setEdit(null)
-    } catch (e) { setErr([String(e)]) } finally { setBusy(false) }
-  }
+  const apply = () => { if (!parsed) return; onApply(S.fromApiDoc(parsed as Record<string, unknown>, edit ?? text)); setEdit(null) }
   return (
     <div className="flex gap-2">
-      <textarea value={edit ?? text} onChange={e => setEdit(e.target.value)} readOnly={!canWrite} spellCheck={false} className="h-[200px] min-w-0 flex-1 resize-none rounded-sm border border-border bg-muted p-2 font-mono text-[11px]" />
+      <div className="min-w-0 flex-1">
+        <YamlEditor kind="scenario" value={edit ?? text} onChange={v => setEdit(v)} disabled={!canWrite} minHeight={Math.max(120, height - 4)} onValid={(o, d) => { setOk(o); setParsed(d ?? null) }} />
+      </div>
       <div className="flex w-[180px] flex-col gap-1 text-[11px] text-muted-foreground">
-        <b>정본은 YAML</b><span>캔버스 편집 → YAML 재생성(머리 주석 보존, 행 안 주석 유실). YAML 편집 → [적용] 으로 캔버스 재구성(파서는 컨트롤러).</span>
-        <Button variant="outline" size="sm" disabled={!canWrite || edit == null || busy} onClick={apply}>적용</Button>
+        <b>정본은 YAML</b><span>캔버스 편집 → YAML 재생성(머리 주석 보존, 행 안 주석 유실). 여기서 고치면 타이핑 중 컨트롤러가 검증하고, [적용] 으로 캔버스를 다시 그립니다.</span>
+        <Button variant="outline" size="sm" disabled={!canWrite || edit == null || !parsed} onClick={apply} title={edit != null && !ok ? '검증 오류가 있어도 적용은 됩니다 — 캔버스 [검증] 에서 고치십시오' : undefined}>적용{edit != null && !ok ? ' (오류 있음)' : ''}</Button>
         <Button variant="ghost" size="sm" onClick={async () => { try { await navigator.clipboard.writeText(edit ?? text); show('YAML 복사', 'ok') } catch { show('클립보드 접근 실패', 'err') } }}><Copy size={12} /> 복사</Button>
-        {edit != null && <Button variant="ghost" size="sm" onClick={() => { setEdit(null); setErr([]) }}>취소</Button>}
-        {err.map((e, i) => <span key={i} className="text-destructive">{e}</span>)}
+        {edit != null && <Button variant="ghost" size="sm" onClick={() => setEdit(null)}>취소</Button>}
       </div>
     </div>
   )
@@ -341,7 +375,7 @@ function ProcedureTable({ doc, vocab, plan }: { doc: Doc; vocab: ScenarioVocab |
       default: return `${a} ${s.step}`
     }
   }
-  const exp = (e: Record<string, unknown> | undefined) => Object.entries(e ?? {}).map(([k, v]) => { const lab = (vocab?.metrics[k] ?? k).split(' — ')[0]; return typeof v === 'object' && v ? Object.entries(v as Record<string, unknown>).map(([p, x]) => `${lab} ${p} ≤ ${x}`).join(', ') : `${lab} = ${String(v)}` }).join('; ') || '—'
+  const exp = (e: Record<string, unknown> | undefined) => Object.entries(e ?? {}).map(([k, v]) => { const lab = (vocab?.metrics[k] ?? k).split(' — ')[0]; return typeof v === 'object' && v ? Object.entries(v as Record<string, unknown>).map(([p, x]) => `${lab} ${p} ${S.thrOp(p)} ${x}`).join(', ') : `${lab} = ${String(v)}` }).join('; ') || '—'
   const how = (s: Step) => vocab?.steps[s.step]?.actor === 'seconds' ? '발생기 RTP 표본(손실·지터)' : '발생기 SIP 관측 (RFC 6076)'
   return <>
     <DataTable>
@@ -368,14 +402,20 @@ function Sel({ value, options, onChange, empty, disabled }: { value: string | un
   return <Select value={value || NONE} onValueChange={v => onChange(v === NONE ? '' : v)} disabled={disabled}><SelectTrigger className="h-[26px] font-mono text-xs"><SelectValue /></SelectTrigger><SelectContent>{empty !== undefined && <SelectItem value={NONE}>{empty}</SelectItem>}{options.map(o => <SelectItem key={o.v} value={o.v}>{o.l ?? o.v}</SelectItem>)}</SelectContent></Select>
 }
 function Sec({ title, right, children }: { title: string; right?: ReactNode; children: ReactNode }) { return <div className="mt-3 flex flex-col gap-1.5 border-t border-border pt-2"><div className="flex items-center gap-2 text-[11px] font-semibold text-muted-foreground">{title}<span className="ml-auto">{right}</span></div>{children}</div> }
+/** 여러 줄 입력 — blur 때 커밋(키 입력마다 문서를 다시 만들지 않게) */
+function Area({ value, onCommit, disabled, rows = 3 }: { value: string; onCommit: (v: string) => void; disabled?: boolean; rows?: number }) {
+  const [v, setV] = useState(value); useEffect(() => { setV(value) }, [value])
+  return <textarea value={v} disabled={disabled} rows={rows} onChange={e => setV(e.target.value)} onBlur={() => { if (v !== value) onCommit(v) }} className="rounded-sm border border-border bg-background p-1.5 text-xs" />
+}
 function Chips({ roles, selected, multi, gate, onToggle, disabled, kindOf }: { roles: string[]; selected: string[]; multi: boolean; gate?: (r: string) => boolean; onToggle: (r: string) => void; disabled?: boolean; kindOf: (r: string) => string | undefined }) {
   return <div className="flex flex-wrap gap-1">{roles.map(r => { const on = selected.includes(r); const off = gate && !gate(r); const k = kindOf(r)
-    return <button key={r} disabled={disabled} onClick={() => onToggle(r)} title={off ? '이 단계의 행위자가 될 수 없는 풀 kind' : (k ?? '풀 없음')} className={`inline-flex h-6 items-center gap-1 rounded-sm border px-1.5 text-[11px] ${on ? 'border-primary bg-primary text-primary-foreground' : 'border-border'} ${off ? 'opacity-40' : ''}`}><span className="inline-block h-2 w-2 rounded-full" style={{ background: k === 'peer' ? 'var(--chart-2)' : k ? 'var(--chart-1)' : 'var(--destructive)' }} />{r}</button> })}{!multi && <button disabled={disabled} onClick={() => onToggle('')} className={`h-6 rounded-sm border px-1.5 text-[11px] ${!selected.length ? 'border-primary bg-primary text-primary-foreground' : 'border-border'}`}>없음</button>}</div>
+    return <button key={r} disabled={disabled || (off && !on)} onClick={() => onToggle(r)} title={off ? `'${r}' 는 이 단계의 행위자가 될 수 없습니다 (풀 kind ${k ?? '없음'})` : (k ?? '풀 없음')} className={`inline-flex h-6 items-center gap-1 rounded-sm border px-1.5 text-[11px] ${on ? 'border-primary bg-primary text-primary-foreground' : 'border-border'} ${off ? 'border-dashed text-muted-foreground line-through' : ''}`}><span className="inline-block h-2 w-2 rounded-full" style={{ background: k === 'peer' ? 'var(--chart-2)' : k ? 'var(--chart-1)' : 'var(--destructive)' }} />{r}</button> })}{!multi && <button disabled={disabled} onClick={() => onToggle('')} className={`h-6 rounded-sm border px-1.5 text-[11px] ${!selected.length ? 'border-primary bg-primary text-primary-foreground' : 'border-border'}`}>없음</button>}</div>
 }
 
-function Inspector({ doc, sel, setSel, mutate, topo, vocab, issues, canWrite, source, bind, plan, onRemoveRole, onRemoveStep, onDupStep }: {
+function Inspector({ doc, sel, setSel, mutate, topo, vocab, issues, canWrite, source, bind, plan, onRemoveRole, onRemoveStep, onDupStep, onDuringToStep, onStepToDuring }: {
   doc: Doc; sel: Sel; setSel: (s: Sel) => void; mutate: (fn: (d: Doc) => void) => void; topo: TopologyDoc | null; vocab: ScenarioVocab | null; issues: S.Issue[]; canWrite: boolean; source: 'bundled' | 'user' | null; bind: Record<string, number>; plan: PlanResult | null
   onRemoveRole: (n: string) => void; onRemoveStep: (i: number) => void; onDupStep: (i: number) => void
+  onDuringToStep: (i: number, k: number) => void; onStepToDuring: (i: number) => void
 }) {
   const ro = !canWrite
   const R = S.roles(doc)
@@ -391,7 +431,7 @@ function Inspector({ doc, sel, setSel, mutate, topo, vocab, issues, canWrite, so
       <F label="id" help="대문자·숫자·하이픈 3~64. 보고서·run 색인의 키 — 저장 경로 id 와 같아야 한다"><Txt value={doc.id} mono disabled={ro} onCommit={v => mutate(d => { d.id = v.trim() })} /></F>
       <F label="title"><Txt value={doc.title} disabled={ro} onCommit={v => mutate(d => { d.title = v.trim() || undefined })} /></F>
       <F label="tags (쉼표)" help="목록 필터 — volte · ptt · trunk · …"><Txt value={(doc.tags ?? []).join(', ')} mono disabled={ro} onCommit={v => mutate(d => { d.tags = v.split(',').map(x => x.trim()).filter(Boolean) })} /></F>
-      <F label="머리 주석" help="YAML 첫 줄 # 주석 — 재직렬화 때 보존"><textarea value={doc.comment ?? ''} disabled={ro} rows={3} onChange={e => mutate(d => { d.comment = e.target.value })} className="rounded-sm border border-border bg-background p-1.5 text-xs" /></F>
+      <F label="머리 주석" help="YAML 첫 줄 # 주석 — 재직렬화 때 보존"><Area value={doc.comment ?? ''} disabled={ro} onCommit={v => mutate(d => { d.comment = v })} /></F>
       <Sec title="대상 증거 (2차 판정)" right={<Button variant="ghost" size="sm" disabled={ro} onClick={() => mutate(d => { d.target_evidence = [...(d.target_evidence ?? []), { kind: 'recording_created', min: 1 }] })}><Plus size={12} /> 추가</Button>}>
         {(doc.target_evidence ?? []).map((e, k) => <div key={k} className="grid grid-cols-[1fr_60px_60px_24px] gap-1">
           <Sel value={e.kind} disabled={ro} options={(vocab?.evidence_kinds ?? ['recording_created', 'log_errors', 'alarm_raised', 'event_logged']).map(v => ({ v }))} onChange={v => mutate(d => { d.target_evidence![k].kind = v })} />
@@ -441,7 +481,7 @@ function Inspector({ doc, sel, setSel, mutate, topo, vocab, issues, canWrite, so
       <F label="행위자 (from)"><Chips roles={R} selected={[d.from ?? ''].filter(Boolean)} multi={false} disabled={ro} kindOf={kindOf} gate={d.step === 'refer' ? r => kindOf(r) === 'peer' : undefined} onToggle={r => D(x => { if (r) x.from = r; else delete x.from })} /></F>
       {d.step === 'dtmf' && <F label="payload (0-9 * # A-D)"><Txt value={d.payload} mono disabled={ro} onCommit={v => D(x => { x.payload = v })} /></F>}
       {d.step === 'refer' && <F label="전달 대상 (to)"><Chips roles={R} selected={[d.to ?? ''].filter(Boolean)} multi={false} disabled={ro} kindOf={kindOf} onToggle={r => D(x => { if (r) x.to = r; else delete x.to })} /></F>}
-      <div className="mt-4 flex gap-2 border-t border-border pt-2"><Button variant="outline" size="sm" onClick={() => setSel({ kind: 'step', idx: sel.idx })}>단계로</Button><Button variant="destructive" size="sm" disabled={ro} onClick={() => mutate(x => { x.flow[sel.idx].during!.splice(sel.k, 1); setSel({ kind: 'step', idx: sel.idx }) })}><Trash2 size={12} /> 동작 삭제</Button></div>
+      <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-2"><Button variant="outline" size="sm" onClick={() => setSel({ kind: 'step', idx: sel.idx })}>단계로</Button><Button variant="outline" size="sm" disabled={ro} onClick={() => onDuringToStep(sel.idx, sel.k)} title="통화 유지 단계 바로 뒤의 독립 행으로 뺍니다 (마커를 행 사이로 끌어도 됨)">행으로 빼기</Button><Button variant="destructive" size="sm" disabled={ro} onClick={() => mutate(x => { x.flow[sel.idx].during!.splice(sel.k, 1); setSel({ kind: 'step', idx: sel.idx }) })}><Trash2 size={12} /> 동작 삭제</Button></div>
     </div>
   }
   // step
@@ -485,6 +525,6 @@ function Inspector({ doc, sel, setSel, mutate, topo, vocab, issues, canWrite, so
       </div>)}
       {!Object.keys(s.expect ?? {}).length && <span className="text-muted-foreground">없음 — ★ 는 이 단계에 맞는 지표</span>}
     </Sec>
-    <div className="mt-4 flex gap-2 border-t border-border pt-2"><Button variant="outline" size="sm" disabled={ro} onClick={() => onDupStep(i)}><Copy size={12} /> 복제</Button><Button variant="destructive" size="sm" disabled={ro} onClick={() => onRemoveStep(i)}><Trash2 size={12} /> 단계 삭제</Button></div>
+    <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-2"><Button variant="outline" size="sm" disabled={ro} onClick={() => onDupStep(i)}><Copy size={12} /> 복제</Button>{S.INDIALOG.has(s.step) && <Button variant="outline" size="sm" disabled={ro} onClick={() => onStepToDuring(i)} title="가장 가까운 통화 유지(media_hold) 단계의 during 으로 옮깁니다 (행을 유지 바 위로 끌어도 됨)">during 으로</Button>}<Button variant="destructive" size="sm" disabled={ro} onClick={() => onRemoveStep(i)}><Trash2 size={12} /> 단계 삭제</Button></div>
   </div>
 }

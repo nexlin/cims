@@ -228,6 +228,10 @@ export function buildDataSource(spec: DataSourceSpec): DataSource {
         const numOrNull = (v: unknown, isRate = false): number | null =>
           v === null ? null
             : (v === undefined ? (isRate ? null : 0) : (Number(v) || 0))
+        // 합계 칸 전용 — **undefined 를 0 으로 읽지 않는다.** 버킷과 달리 합계는 서버가
+        //   읽은 구간이면 0 으로 채워 보내므로(ensure_svc), 없는 것은 곧 모르는 것이다.
+        const numOrNullStrict = (v: unknown): number | null =>
+          (v === null || v === undefined) ? null : (Number(v) || 0)
         // 합계 행의 상세도 **같은 규칙**으로 만든다. 행 상세를 그냥 더하면 합계 숫자와
         //   어긋날 수 있다(합계는 `totalPath` 에서 오고 행 합은 버킷들의 합이다) — 그러면
         //   툴팁이 칸의 숫자를 설명하지 못한다. 그래서 원인·코드 축을 **날것으로** 모아 두고,
@@ -260,8 +264,14 @@ export function buildDataSource(spec: DataSourceSpec): DataSource {
         const rows = asArray(raw, c.from).map(it => {
           const cells: Record<string, number | null> = {}
           const details: Record<string, string> = {}
+          // **자료가 없는 날의 행은 통째로 빈칸이다.** 서버가 `missing` 을 세운 행은 그 날
+          //   집계도 원본도 없어 아무것도 모르는 구간이다(sip_statistics.md §7.2). 없는 축을
+          //   0 으로 읽는 기본 규칙(numOrNull)을 그대로 적용하면 **철거·보존기간 경과로
+          //   자료가 사라진 날이 "통화 0 건" 으로 보인다** — 운영자는 그것을 트래픽 감소로
+          //   읽는다(실측 2026-09-17: 9/1~9/3 행이 9/17 행과 똑같이 0 이었다).
+          const rowMissing = (it as Record<string, unknown>).missing === true
           for (const sp of specs) {
-            cells[sp.key] = numOrNull(getPath(it, sp.path), sp.unit === '%')
+            cells[sp.key] = rowMissing ? null : numOrNull(getPath(it, sp.path), sp.unit === '%')
             const [txt] = pickDetail(sp, it, cells[sp.key])
             if (txt) details[sp.key] = txt
             addRaw(sp.key, sp.detailFrom, it)
@@ -270,8 +280,11 @@ export function buildDataSource(spec: DataSourceSpec): DataSource {
           return { label: String(firstField(it, c.label) ?? ''), cells, total: 0, details }
         })
         const columns = specs.map(sp => {
+          // 합계 칸은 `totalPath`(응답의 totals) 에서 온다. 서버는 **구간을 온전히 읽었을
+          //   때만** 요청한 서비스 칸을 0 으로 채우므로(§2.1a-1), 칸이 아예 없다는 것은
+          //   "못 읽었다" 는 뜻이다 — 0 이 아니라 빈칸으로 낸다.
           const total = sp.totalPath !== undefined
-            ? numOrNull(getPath(raw, sp.totalPath), sp.unit === '%')
+            ? numOrNullStrict(getPath(raw, sp.totalPath))
             : rows.reduce((a, r) => a + (r.cells[sp.key] ?? 0), 0)
           return {
             key: sp.key, label: sp.label, unit: sp.unit, total,

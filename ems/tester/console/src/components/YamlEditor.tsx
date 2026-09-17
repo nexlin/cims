@@ -13,7 +13,8 @@ export default function YamlEditor({ value, onChange, kind, disabled, placeholde
   minHeight?: number
   /** yaml = 원문을 그대로 검증 / json = JSON.parse 뒤 doc 으로 검증 (토폴로지) */
   mode?: 'yaml' | 'json'
-  onValid?: (ok: boolean) => void
+  /** 검증 결과 — ok 와 함께 컨트롤러가 돌려준 doc(파싱 성공 시) */
+  onValid?: (ok: boolean, doc?: unknown) => void
 }) {
   const [issues, setIssues] = useState<string[]>([])
   const [checked, setChecked] = useState<'idle' | 'checking' | 'ok' | 'bad'>('idle')
@@ -27,7 +28,7 @@ export default function YamlEditor({ value, onChange, kind, disabled, placeholde
     setChecked('checking')
     timer.current = window.setTimeout(async () => {
       try {
-        let res: { ok: boolean; errors: string[] }
+        let res: { ok: boolean; errors: string[]; doc?: unknown }
         if (mode === 'json') {
           let doc: unknown
           try { doc = JSON.parse(value) } catch (e) { res = { ok: false, errors: [`JSON 파싱 실패: ${String(e)}`] }; doc = undefined }
@@ -36,7 +37,7 @@ export default function YamlEditor({ value, onChange, kind, disabled, placeholde
           res = await testerApi.validate(kind, { yaml: value })
         }
         if (my !== seq.current) return
-        setIssues(res.errors); setChecked(res.ok ? 'ok' : 'bad'); onValid?.(res.ok)
+        setIssues(res.errors); setChecked(res.ok ? 'ok' : 'bad'); onValid?.(res.ok, res.doc)
       } catch (e) {
         if (my !== seq.current) return
         setIssues([String(e)]); setChecked('bad'); onValid?.(false)

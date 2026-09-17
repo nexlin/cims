@@ -226,5 +226,38 @@ for (const [lbl, key] of [['거절', 'r_rejected'], ['통화중', 'r_busy'],
       tv === sumOf(vcol(key).detail), vcol(key).detail)
 }
 
+// ── [9] 자료가 없는 날 vs 호가 0 건인 날 ───────────────────────────────────
+//   표는 빈 칸을 0 으로 그린다(§2.1c). 그 규약은 "읽었고 호가 없었다" 일 때만 참이라,
+//   서버가 `missing` 을 세운 행(집계도 원본도 없는 날)은 통째로 빈칸이어야 한다.
+//   실측(2026-09-17): 9/1~9/3 행이 9/17(자료 있고 0건) 행과 화면에서 똑같이 0 이었다.
+console.log('[9] 자료 없는 날은 0 이 아니라 빈칸')
+const MISS = {
+  totals: { volte: { attempts: 0, sessions: 0, talked: 0, completed: 0,
+                     success_rate: null, ner: null, talk_rate: null, completion_rate: null,
+                     reasons: {}, statuses: {} } },
+  buckets: [
+    { bucket: '2026-09-02', missing: true },                 // 자료 자체가 없는 날
+    { bucket: '2026-09-17', all: { attempts: 0 } },          // 자료는 있고 VoLTE 만 0 건
+  ],
+}
+const mds = buildDataSource(seed.data_sources.find(s => s.id === 'cims.svc.volte'))
+const mmx = mds.toMatrix(MISS)
+const mrow = lbl => mmx.rows.find(r => r.label === lbl)
+chk('자료 없는 날(9/02) 시도 칸이 빈칸', mrow('2026-09-02').cells.attempts === null,
+    JSON.stringify(mrow('2026-09-02').cells.attempts))
+chk('자료 없는 날은 사유 칸도 빈칸', mrow('2026-09-02').cells.r_rejected === null)
+chk('0 건인 날(9/17) 시도 칸은 0', mrow('2026-09-17').cells.attempts === 0,
+    JSON.stringify(mrow('2026-09-17').cells.attempts))
+chk('0 건인 날의 비율은 빈칸', mrow('2026-09-17').cells.success === null)
+
+//   합계 칸은 서버가 읽은 구간이면 0 으로 채워 보낸다(ensure_svc) — 없는 것은 곧 모르는 것.
+const NOREAD = { totals: {}, buckets: [{ bucket: '2026-09-02', missing: true }] }
+const nmx = mds.toMatrix(NOREAD)
+const ncol = k => nmx.columns.find(c => c.key === k)
+chk('못 읽은 구간의 합계 시도는 빈칸', ncol('attempts').total === null,
+    JSON.stringify(ncol('attempts').total))
+const rmx = mds.toMatrix(MISS)
+chk('읽은 구간의 합계 시도는 0', rmx.columns.find(c => c.key === 'attempts').total === 0)
+
 console.log(`\n합계: ${pass} pass / ${fail} fail`)
 process.exit(fail ? 1 : 0)
