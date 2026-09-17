@@ -20,9 +20,6 @@ KNOWN_TARGET_ISSUES = [
     {'when': lambda sc, topo: any(s.step == 'register' and any(getattr(topo.pools.get(sc.roles[r].pool, None), 'kind', '') == 'peer'
                                                               for r in (s.who or []) if r in sc.roles) for s in sc.flow),
      'text': '트렁크 REGISTER 는 CSP 가 계정을 받지 않아 403(§12) — 등록형 트렁크 시나리오는 attempts 0 으로 닫힌다'},
-    {'when': lambda sc, topo: any('early_rtp_pct' in (s.expect or {}) for s in sc.flow),
-     'text': '18x 의 SDP 는 CSP 가 CMP 에 앵커링하지 않는다(§12 — 발신자에 피어 주소 그대로, B-leg 주소는 200 에야 CMP 로) — '
-             'early media RTP 는 200 전까지 발신자에 닿지 않아 early_rtp_pct 기대치는 FAIL 이 예상된다'},
     {'when': lambda sc, topo: any(getattr(p, 'answer', '') == 'silent' for p in topo.pools.values()),
      'text': 'RouteSet 헬스체크가 없어 무응답 피어에서 Timer B(32 s)까지 기다린다(§12) — failover 는 실측 fail'},
 ]
