@@ -375,12 +375,18 @@ export function MatrixTable({ data }: { data: MatrixData }) {
    * 축이라 겹치지 않는다.
    *
    * 첫 데이터 열에는 긋지 않는다 — 바로 왼쪽이 시각 열이라 이미 갈려 있다.
+   *
+   * **선 하나로는 부족하다** — 값 음영(보라) 위에서 옅은 선은 묻힌다(실측 2026-09-17: 화면에서
+   * 안 보인다는 확인). 선을 굵게 하면 표가 무거워지므로, 진한 hairline 에 **묶음 앞 여백**을
+   * 더해 선이 옅게 보이는 각도에서도 간격으로 읽히게 한다.
    */
   const groupStart = new Set(
     data.columns.filter((c, i) => i > 0 && c.group && c.group !== data.columns[i - 1].group)
       .map(c => c.key))
   const groupTd = (key: string): CSSProperties =>
-    (groupStart.has(key) ? { borderLeft: '1px solid var(--border-strong)' } : {})
+    (groupStart.has(key)
+      ? { borderLeft: '1px solid var(--border-stronger)', paddingLeft: 22 }
+      : {})
   const cellBg = (key: string, v: number | null) => {
     if (v === 0 && paintZero.get(key)) {
       return 'color-mix(in srgb, var(--primary) 22%, transparent)'
