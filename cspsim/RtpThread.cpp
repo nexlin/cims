@@ -243,12 +243,33 @@ bool CRtpThread::Start(const char *pszDestIp, int iDestPort) {
   m_strDestIp = pszDestIp;
   m_iDestPort = iDestPort;
 
-  if (m_bSendThreadRun || m_bRecvThreadRun) {
+  // 시그널링 전용 호 — SDP 는 오퍼했지만 RTP 는 송수신하지 않는다 (계측기 `invite.media.rtp: none`)
+  if (m_iMediaMode == E_MEDIA_NONE) {
     return true;
   }
 
+  if (m_bSendThreadRun || m_bRecvThreadRun) {
+    m_iSourceGen++;   // 183 → 200 사이 합의 코덱이 달라졌을 수 있다 — 송신 스레드가 원천을 다시 고른다
+    return true;
+  }
+
+  // 새 호 — 송출 상태 초기화. EXPLICIT 는 MediaSend 까지 송출을 멈춘 채 수신만 한다.
+  {
+    std::lock_guard<std::mutex> lk(m_mtxSource);
+    m_bSourceOverride = false;
+    m_strSrcAmrWb.clear(); m_strSrcPcmu.clear(); m_strSrcPcma.clear();
+    m_bSrcLoop = true;
+  }
+  m_bSendPaused = (m_iMediaMode == E_MEDIA_EXPLICIT);
+  m_bHoldPaused = false;
+  m_bSourceEnded = false;
+  m_ullSentTotal = 0;
+  m_iSourceGen++;
+
 #ifndef WIN32
+  m_bSendThreadRun = true;   // 스레드가 뜨기 전에 표식 — Start 직후의 MediaSend/MediaStop 이 "미기동" 으로 보지 않게
   if (StartThread("RtpThreadSend", RtpThreadSend, this) == false) {
+    m_bSendThreadRun = false;
     Stop();
     return false;
   }
@@ -291,6 +312,32 @@ bool CRtpThread::Stop() {
   m_bStopEvent = false;
 
   return true;
+}
+
+void CRtpThread::MediaSend(const std::string &strAmrWbFile, const std::string &strPcmuFile,
+                           const std::string &strPcmaFile, bool bLoop) {
+  {
+    std::lock_guard<std::mutex> lk(m_mtxSource);
+    m_bSourceOverride = true;
+    m_strSrcAmrWb = strAmrWbFile;
+    m_strSrcPcmu = strPcmuFile;
+    m_strSrcPcma = strPcmaFile;
+    m_bSrcLoop = bLoop;
+  }
+  m_bSourceEnded = false;
+  m_iSourceGen++;
+  m_bSendPaused = false;
+}
+
+void CRtpThread::MediaSendDefault() {
+  {
+    std::lock_guard<std::mutex> lk(m_mtxSource);
+    m_bSourceOverride = false;
+    m_bSrcLoop = true;
+  }
+  m_bSourceEnded = false;
+  m_iSourceGen++;
+  m_bSendPaused = false;
 }
 
 bool CRtpThread::SendDtmf(const std::string &strDigits, int iDurationMs, int iGapMs) {

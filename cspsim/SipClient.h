@@ -21,7 +21,7 @@ public:
 	virtual void EventReInvite( const char * pszCallId, CSipCallRtp * pclsRemoteRtp, CSipCallRtp * pclsLocalRtp );
 	virtual bool EventTransfer( const char * pszCallId, const char * pszReferToCallId, bool bScreenedTransfer );
 	virtual bool EventBlindTransfer( const char * pszCallId, const char * pszReferToId );
-	virtual bool EventMessage( const char * pszFrom, const char * pszTo, CSipMessage * pclsMessage );
+	virtual int EventMessage( const char * pszFrom, const char * pszTo, CSipMessage * pclsMessage );
 
 	CSipCallRtp m_clsDestRtp;
 	

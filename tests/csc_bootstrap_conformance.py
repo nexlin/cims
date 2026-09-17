@@ -364,8 +364,13 @@ def main():
         check(pr is not None and pr.find(f'{UP}entry') is not None and pr.find(f'{UP}ProSeUserID-entry/{UP}User-Info-ID') is not None,
               "PrivateCall/EmergencyCall/MCPTTPrivateRecipient entry + ProSeUserID-entry (8d)")
         check(on is not None and on.find(f'{UP}PrivateEmergencyAlert/{UP}entry') is not None, "OnNetwork/PrivateEmergencyAlert entry (10f)")
+        _XL = '{http://www.w3.org/XML/1998/namespace}lang'
         al = root.find(f'{UP}Common/{UP}UserAlias/{UP}alias-entry')
-        check(al is not None and al.get('index') is not None, "alias-entry index 속성(병기)")
+        nm = root.find(f'{UP}Name')
+        check(al is not None and al.get('index') is not None and al.get(_XL), "alias-entry index·xml:lang 속성(선택, 병기)")
+        check(al is not None and nm is not None and al.get(_XL) == nm.get(_XL), "Name 과 alias-entry 의 xml:lang 동일")
+        pt = root.find(f'{UP}Common/{UP}ParticipantType')
+        check(pt is not None and (pt.text or '').strip(), f"Common/ParticipantType (선택, 병기 — got {pt.text if pt is not None else None})")
         rs = root.find('{urn:ietf:params:xml:ns:common-policy}ruleset')
         check(rs is not None and rs.find('.//' + UP + 'allow-emergency-group-call') is not None,
               "common-policy ruleset + allow-* 인가 요소")

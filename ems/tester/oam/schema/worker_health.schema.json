@@ -1,5 +1,39 @@
 {
   "$defs": {
+    "WorkerHealthMedia": {
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "description": "샘플 디렉터리의 파일 이름 — 컨트롤러가 샘플 라이브러리와 대조",
+          "items": {
+            "type": "string"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "max_rtp_streams": {
+          "default": 0,
+          "description": "Media.MaxRtpStreams — 0 = 제한 없음",
+          "minimum": 0,
+          "title": "Max Rtp Streams",
+          "type": "integer"
+        },
+        "rtp_streams": {
+          "default": 0,
+          "description": "RTP 를 쓰는 단말 수(진행 중 인스턴스의 단말, rtp: none 제외)",
+          "minimum": 0,
+          "title": "Rtp Streams",
+          "type": "integer"
+        },
+        "sample_dir": {
+          "default": "",
+          "title": "Sample Dir",
+          "type": "string"
+        }
+      },
+      "title": "WorkerHealthMedia",
+      "type": "object"
+    },
     "WorkerPoolState": {
       "additionalProperties": false,
       "properties": {
@@ -65,6 +99,18 @@
       "title": "Cpu Pct",
       "type": "number"
     },
+    "local_ip": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Local Ip"
+    },
     "max_endpoints": {
       "minimum": 0,
       "title": "Max Endpoints",
@@ -74,6 +120,17 @@
       "minimum": 0,
       "title": "Max Saps",
       "type": "number"
+    },
+    "media": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkerHealthMedia"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "pools": {
       "items": {

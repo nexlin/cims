@@ -46,6 +46,8 @@ add_executable(cspsim
 # libcsim RTP 단위시험 (RFC 4733 DTMF 루프백) — cims-verify S1-UNIT-TESTER 가 실행한다
 add_executable(csim_rtp_dtmf_test CsimRtpDtmfTest.cpp)
 target_link_libraries(csim_rtp_dtmf_test PRIVATE csim)
+add_executable(csim_rtp_media_test CsimRtpMediaTest.cpp)
+target_link_libraries(csim_rtp_media_test PRIVATE csim)
 target_link_libraries(cspsim PRIVATE csim mariadb)
 
 target_include_directories(cspsim PRIVATE

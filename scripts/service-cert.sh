@@ -671,9 +671,20 @@ cmd_install() {
     local want src miss
     want=$(node_required_san "$prefix" 2>/tmp/.sc_src.$$); src=$(cat /tmp/.sc_src.$$; rm -f /tmp/.sc_src.$$)
     miss=$(_san_missing "$bundle/csc/server.crt" "$want")
+    # hostname(DNS:)만 빠진 경우 — 단말은 IP 로 붙으므로 검증에는 영향이 없다. 위험은 agent 가 재기동 때
+    # "SAN 부족"으로 그룹 CA 인증서를 덮어쓰는 것인데, 09-13 이후 엔진(cert.sh 에 site_ca_missing 갈래)은
+    # 교차 인증서가 없는 노드의 루트 직서명 leaf 를 재발급하지 않는다(강등 금지). 그 엔진이 있으면 경고만 하고 진행한다.
+    if [[ -n "$miss" ]] && (( ! skip_san )); then
+        local only_dns=1 e lib
+        IFS=',' read -ra _m <<< "$miss"; for e in "${_m[@]}"; do [[ "$e" == DNS:* ]] || only_dns=0; done
+        if (( only_dns )) && lib=$(_agent_cert_lib "$prefix") && grep -q "site_ca_missing" "$lib" 2>/dev/null; then
+            warn "SAN 에 hostname($miss)이 없지만 진행한다 — 이 노드의 엔진(09-13 이후)은 루트 직서명 인증서를 덮어쓰지 않는다(강등 금지). 단말은 IP 로 검증한다"
+            miss=""
+        fi
+    fi
     if [[ -n "$miss" ]]; then
         if (( skip_san )); then
-            warn "SAN 부족(무시됨, --skip-san-check): $miss — CSC 재기동 시 그룹 CA 인증서로 덮일 수 있다"
+            warn "SAN 부족(무시됨, --skip-san-check): $miss — 09-13 이전 agent 면 CSC 재기동 시 그룹 CA 인증서로 덮일 수 있다"
         else
             err "인증서 SAN 에 이 노드가 요구하는 항목이 없다: $miss"
             err "  (요구 목록 출처: $src)"

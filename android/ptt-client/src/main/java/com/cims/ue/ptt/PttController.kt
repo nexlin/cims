@@ -2,6 +2,7 @@ package com.cims.ue.ptt
 
 import android.os.SystemClock
 import android.util.Log
+import com.cims.ue.core.account.TokenRetry
 import com.cims.ue.core.config.SipAccountConfig
 import com.cims.ue.core.sip.CallState
 import com.cims.ue.core.sip.RegState
@@ -10,6 +11,7 @@ import com.cims.ue.core.sip.SipController
 import com.cims.ue.ptt.audio.PttFeedback
 import com.cims.ue.ptt.csc.CscClient
 import com.cims.ue.ptt.csc.CscConfig
+import com.cims.ue.ptt.csc.CscHttpException
 import com.cims.ue.ptt.csc.GroupDoc
 import com.cims.ue.ptt.csc.GroupSummary
 import com.cims.ue.ptt.csc.TokenSet
@@ -347,6 +349,38 @@ class PttController(
     @Volatile private var token: TokenSet? = null
     /** CSC 토큰 보유 여부 — 서비스의 SSO 주입 중복 방지용(주입은 [setAccessToken]). */
     val hasAccessToken: Boolean get() = token != null
+
+    /**
+     * SSO 토큰 갱신 훅 — 서버가 토큰을 거절(401)하거나 만료 임박이면 [withFreshToken] 이 이것으로 새 토큰을
+     * 받는다. 호스트(PttService)가 AccountManager 갱신(`CimsAccounts.renewToken`)을 꽂는다. null 이면(수동 CSC
+     * 로그인 모드) 재시도 없이 원래 실패를 낸다.
+     */
+    @Volatile var tokenRefresher: ((stale: String) -> String?)? = null
+    private val renewLock = Any()
+
+    /** 갱신 직렬화 — 동시에 401 을 받은 호출들(로그인 직후 XCAP 4건)이 refresh 를 겹쳐 돌리지 않게 한다. */
+    private fun renewToken(stale: String): String? = synchronized(renewLock) {
+        val cur = token?.accessToken
+        if (cur != null && cur != stale) return cur          // 다른 호출이 이미 갱신했다
+        val fresh = tokenRefresher?.invoke(stale) ?: return null
+        token = token?.copy(accessToken = fresh)
+            ?: TokenSet(accessToken = fresh, tokenType = "Bearer", refreshToken = null, idToken = null,
+                        expiresInSec = 3600, scope = null)
+        Log.i(TAG, "CSC 토큰 갱신 반영")
+        fresh
+    }
+
+    /**
+     * 토큰이 필요한 CSC 호출을 감싼다([TokenRetry]) — 만료 임박이면 먼저 갱신, 401 이면 갱신 후 1회 재시도.
+     * 블로킹(호출자가 Dispatchers.IO). 토큰 없으면 [IllegalStateException] — 호출자가 앞서 걸러 둔다.
+     */
+    private fun <T> withFreshToken(block: (String) -> T): T =
+        TokenRetry.run(
+            token = token?.accessToken ?: throw IllegalStateException("토큰 없음"),
+            refresh = ::renewToken,
+            isAuthFailure = { it is CscHttpException && it.code == 401 },
+            block = block,
+        ).value
     @Volatile private var pttHeld = false
     private var requestTimeout: Job? = null
     private val ssrc: Long = (mcpttId.hashCode().toLong() and 0xffffffffL).let { if (it == 0L) 1L else it }
@@ -1297,8 +1331,8 @@ class PttController(
 
     fun loadGroups() = scope.launch {
         val c = csc ?: return@launch
-        val t = token?.accessToken ?: run { _status.value = "토큰 없음"; return@launch }
-        runCatching { withContext(Dispatchers.IO) { c.listGroups(t, mcpttId) } }
+        if (token == null) { _status.value = "토큰 없음"; return@launch }
+        runCatching { withContext(Dispatchers.IO) { withFreshToken { c.listGroups(it, mcpttId) } } }
             .onSuccess { list ->
                 _groups.value = list
                 // 선택 그룹(TS 24.484 currently-selected group) 복원 — 마지막 주채널 우선,
@@ -1312,7 +1346,11 @@ class PttController(
                 syncRosterSubs() // 목록이 채워졌으니 로스터 구독도 그 집합으로 맞춘다
                 _status.value = "그룹 ${list.size}개"
             }
-            .onFailure { _status.value = "그룹 조회 실패: ${it.message}" }
+            .onFailure {
+                // 갱신 뒤에도 401 = 계정 문제(refresh 만료·회수) — 재로그인 안내. 그 외는 원문.
+                _status.value = if (it is CscHttpException && it.code == 401)
+                    "그룹 조회 실패: 인증 만료 — CIMS 앱에서 다시 로그인" else "그룹 조회 실패: ${it.message}"
+            }
         // 설정 문서(user-profile·service-config)는 cms 구독이 있으면 NOTIFY 로 온다 — 목록 갱신
         //   계기마다 재조회하지 않는다. 편성 변경 NOTIFY 는 그룹마다 1건씩 오므로 그대로 두면
         //   설정 GET 이 그룹 수만큼 증폭된다(실측: g001~g003 → 각 3회). 구독이 없거나 죽었을
@@ -1343,8 +1381,8 @@ class PttController(
      *  ETag(If-None-Match) 캐시 — 변경 통지·그룹 목록 갱신마다 불려도 내용이 같으면 304 로 끝난다. */
     fun loadUserProfile() = scope.launch {
         val c = csc ?: return@launch
-        val t = token?.accessToken ?: return@launch
-        runCatching { withContext(Dispatchers.IO) { c.getUserProfile(t, mcpttId, userProfileEtag) } }
+        if (token == null) return@launch
+        runCatching { withContext(Dispatchers.IO) { withFreshToken { c.getUserProfile(it, mcpttId, userProfileEtag) } } }
             .onSuccess { doc ->
                 if (doc.notModified) return@onSuccess
                 doc.body?.let { body ->
@@ -1403,8 +1441,8 @@ class PttController(
     /** service-config 문서 조회 — user-profile 과 같은 규율(실패 무해 · ETag 캐시). */
     fun loadServiceConfig() = scope.launch {
         val c = csc ?: return@launch
-        val t = token?.accessToken ?: return@launch
-        runCatching { withContext(Dispatchers.IO) { c.getServiceConfig(t, mcpttId, serviceConfigEtag) } }
+        if (token == null) return@launch
+        runCatching { withContext(Dispatchers.IO) { withFreshToken { c.getServiceConfig(it, mcpttId, serviceConfigEtag) } } }
             .onSuccess { doc ->
                 if (doc.notModified) return@onSuccess
                 doc.body?.let { body ->
@@ -1440,10 +1478,10 @@ class PttController(
     /** 그룹 문서(TS 24.481, GMS XCAP) 조회 — 채널 상세 진입 시 호출. ETag(If-None-Match) 캐시. */
     fun loadGroupDetail(groupId: String) = scope.launch {
         val c = csc ?: return@launch
-        val t = token?.accessToken ?: return@launch
+        if (token == null) return@launch
         val uri = _groups.value.firstOrNull { bareId(it.uri) == groupId }?.uri ?: "tel:$groupId"
         val cached = _groupDocs.value[groupId]
-        runCatching { withContext(Dispatchers.IO) { c.getGroupDoc(t, mcpttId, uri, cached?.etag) } }
+        runCatching { withContext(Dispatchers.IO) { withFreshToken { c.getGroupDoc(it, mcpttId, uri, cached?.etag) } } }
             .onSuccess { doc ->
                 if (!doc.notModified) doc.body?.let { body ->
                     _groupDocs.value = _groupDocs.value + (groupId to GroupDoc.parse(uri, body, doc.etag))
@@ -1774,8 +1812,8 @@ class PttController(
      */
     fun sendAttachment(peer: String, data: ByteArray, fileName: String, mime: String): FdSent? {
         val c = csc ?: return null
-        val t = token?.accessToken ?: run { _status.value = "첨부: 토큰 없음"; return null }
-        val up = runCatching { c.uploadFd(t, data, fileName, mime, peer) }
+        if (token == null) { _status.value = "첨부: 토큰 없음"; return null }
+        val up = runCatching { withFreshToken { c.uploadFd(it, data, fileName, mime, peer) } }
             .onFailure { Log.w(TAG, "FD 업로드 실패: ${it.message}"); _status.value = "첨부 업로드 실패" }
             .getOrNull() ?: return null
         val group = isGroupId(peer)
@@ -1797,8 +1835,8 @@ class PttController(
     /** FD 첨부 다운로드 — 블로킹, Dispatchers.IO 에서 호출. */
     fun downloadAttachment(url: String): ByteArray? {
         val c = csc ?: return null
-        val t = token?.accessToken ?: return null
-        return runCatching { c.downloadFd(t, url) }
+        if (token == null) return null
+        return runCatching { withFreshToken { c.downloadFd(it, url) } }
             .onFailure { Log.w(TAG, "FD 다운로드 실패: ${it.message}") }
             .getOrNull()
     }

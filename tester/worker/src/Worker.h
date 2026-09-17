@@ -41,6 +41,8 @@ struct WorkerConfig {
     std::string mediaFile;          // AMR-WB raw 프레임 파일 — 비면 합성 PCMU
     std::string videoFile;          // H.264 Annex B — 비면 비디오 없음
     std::string peerCertFile;       // 피어 풀 TLS 수신점 인증서(PEM) — 비면 TLS 피어 거절
+    std::string sampleDir;          // 미디어 샘플 디렉터리 — media_send 의 sample 파일은 이 안의 상대 경로(§4 미디어 평면)
+    int maxRtpStreams = 0;          // RTP 를 쓰는 단말 동시 상한(0 = 제한 없음) — 넘으면 인스턴스 발생을 건너뛴다(skipped)
     int dtmfDigitMs = 160;          // RFC 4733 이벤트 길이·간격 — dtmf 단계의 송신 완료 대기 계산
     int dtmfGapMs = 100;
     int registerIntervalMs = 20;    // prelude 등록 간격
@@ -100,6 +102,8 @@ struct CompiledStep {
     int seconds = 0;
     int cause = 0;                  // bye/reject 의 Reason Q.850 cause (0 = 없음)
     std::string group, payload;
+    std::string sample;             // media_send — 샘플 id(빈 값 = 풀 기본 원천)
+    bool loop = true;               // media_send — false 면 샘플 끝에서 송출 정지
     Json media, expect;
 };
 
@@ -108,6 +112,7 @@ struct RunSpec {
     std::map<std::string, std::string> roles;                 // 역할 → 풀
     std::map<std::string, std::pair<int, int>> slices;        // 역할 → [begin,end)
     std::vector<CompiledStep> steps;
+    std::map<std::string, std::map<std::string, std::string>> samples;   // 샘플 id → {코덱(amr-wb|pcmu|pcma): 절대 경로 | ""(합성)}
     double rate = 0;
     long long maxInstances = 0;     // >0 이면 단발 — 그만큼 발생 뒤 인스턴스가 다 끝나면 run 을 닫는다
 };
@@ -119,10 +124,13 @@ struct Instance {
     enum Phase { RUNNING, WAIT_EVENT, WAIT_TIME, DONE } phase = RUNNING;
     std::string awaitKind;                     // "callstart:<role>" 등
     long long waitUntilMs = 0, deadlineMs = 0, tStartMs = 0;
-    enum Pending { NONE, ANSWER, REJECT, PROGRESS } pending = NONE;
+    enum Pending { NONE, ANSWER, REJECT, PROGRESS, MEDIA } pending = NONE;
     int pendingCause = 0;
     int pendingCode = 0;
     std::string pendingRole;
+    int rtpMode = 0;                           // CRtpThread::EMediaMode — invite 단계의 media.rtp (auto|none|explicit)
+    bool mediaHeld = false;                    // media_hold 를 지났다 — bye 진입 시 RTP 표본
+    bool progressTx = false;                   // 피어가 183+SDP 를 냈다 — 발신자 확립(200) 시점에 early media RTP 도달을 표본
     int expectCode = 0;                        // invite 단계 expect.code — 200 이 아니면 그 최종 응답이 성공 조건(ACL 403 등)
     bool failed = false;
 };
@@ -245,6 +253,12 @@ private:
     bool epHold(Endpoint* ep, bool hold);
     bool epRefer(Endpoint* from, Endpoint* to);
     bool epDtmf(Endpoint* ep, const std::string& digits);
+    void epSetMediaMode(Endpoint* ep, int mode);
+    bool epMediaSend(Endpoint* ep, const CompiledStep& st);   // false = SDP 교환 전(RTP 미기동)
+    bool epMediaStop(Endpoint* ep);
+    bool resolveSample(const std::string& file, std::string& out, std::string& err) const;
+    long long rtpStreams() const;
+    int m_bodyRtpMode = 0;                  // body 첫 invite 의 media.rtp — 인스턴스 시작 모드·RTP 상한 판정
     void sampleDtmf(Endpoint* ep);
     std::string callerRole(Instance& in);
     void epClearCall(Endpoint* ep);

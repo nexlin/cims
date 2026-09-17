@@ -134,7 +134,8 @@ if (g_reloadFlag) {
 ```
 
 **`csp.json` 도 같이 다시 읽는다.** 사용 시점에 값을 읽는 스칼라(`CallPickupId`,
-`StaleCallTimeout`, `UserTimeout`, `MinRegisterTimeout`, `SendOptionsPeriod` 등)는 재기동 없이
+`StaleCallTimeout`, `UserTimeout`, `MinRegisterTimeout`, `SendOptionsPeriod`, `UdpFlowSilenceSec`,
+`UdpRegisterExpires` 등)는 재기동 없이
 반영된다. 반면 기동 시 1회만 소비되는 부트스트랩 값(`UdpThreadCount`, `StackExecutePeriod`,
 `Database.*`, `Monitor.*`)은 이미 생성된 객체에 적용되지 않으므로 재기동이 필요하다.
 

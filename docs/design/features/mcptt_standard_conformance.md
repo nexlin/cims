@@ -420,7 +420,7 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
   §8.3.2.1 이 "shall" 로 요구하는 긴급 요소(8d ii·8e ii~iv·10f)는 **대상 미지정에도 항상 싣고**, 미지정은 entry-info 로 표현한다
   (그룹 `UseCurrentlySelectedGroup` + 폴백 uri-entry, 사설 `LocallyDetermined` + 폴백 uri-entry); 개시 인가는 요소 유무가 아니라
   `<cp:ruleset>` allow-* 가 말한다(DedicatedGroup 모드 긴급그룹 미지정 → 그룹 긴급·경보 false, UsePreConfigured 모드 수신자 미지정 →
-  긴급 사설콜 false — CSP 403 판정과 일치). 선택 요소(`ParticipantType`, alias-entry `xml:lang`)는 싣지 않는다. 소유-비멤버 그룹과 자체 JSON 목록(`GET …/groups/users/{me}`)은
+  긴급 사설콜 false — CSP 403 판정과 일치). 규격상 **선택**이지만 필수로 읽는 단말이 있어 항상 싣는 것 = alias-entry 의 `index`·`xml:lang`, `<ParticipantType>`(§8.3.2.1 f). 값은 `UserProfile.ParticipantType`·`UserProfile.Language` 설정이고, `xml:lang` 은 `<Name>` 과 같은 값을 써 한 문서 안에서 어긋나지 않는다. 소유-비멤버 그룹과 자체 JSON 목록(`GET …/groups/users/{me}`)은
   전환기 공존 — 클라이언트가 MCPTTGroupInfo 로 옮기면 JSON 목록 제거([mcx_identity_scope.md](mcx_identity_scope.md) 와 같은 방식).
 - **S4 service-config**: 값의 SoT 는 DB `mcptt_service_config` **단일 행**(id=1)이다. 기동 시
   `load_shared_data` 가 `SERVICE_CONFIG` 캐시로 읽고, `get_service_config_xml` 이 그 캐시를 XML 로

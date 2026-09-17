@@ -333,6 +333,10 @@ payload 는 RELAY_ADD 와 동일. 기존 세션의 원격 피어 주소만 갱�
 선언 주소·NAT 속성이 직전과 동일한 재요청(세션 refresh 성 re-INVITE, 재전송)은
 latch 를 유지한다.
 
+발행 시점(CSP): 착신 leg(peer1)는 **SDP 가 실린 첫 응답**에서 확정한다 — 18x+SDP(early media)면 그때, 아니면 200 에서.
+18x 에서 확정한 뒤의 200 은 같은 선언의 재요청이라 latch 를 유지하고, 키가 그대로면 `media_crypto` 를 싣지 않는다
+(§6.4 — 컨텍스트 재생성 없음). 절차는 [volte_flows.md](../design/features/volte_flows.md) C1a.
+
 ### 6.3 RELAY_REMOVE — relay 해제
 
 | payload 필드 | 필수 | 설명 |

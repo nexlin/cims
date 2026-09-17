@@ -330,7 +330,9 @@ def _fold_ptt_attempt(row: dict, agg: dict) -> None:
     if (row.get('outcome') or '') == 'established':
         _bump(c, 'sessions')
         return
-    reason = row.get('reason') or 'error'
+    # 사유가 안 실린 줄은 **모름**이다 — `error` 로 단정하면 "붙지 못한 원인이 오류였다" 는
+    #   말이 되어, 기록이 빠진 것과 실제 오류가 한 칸에 섞인다.
+    reason = row.get('reason') or 'unknown'
     _bump(c['reasons'], reason)
     # 원인 — 반환 지점마다 하나. 사유(denied/error) 두 칸과 응답코드로는 가릴 수 없는 것을
     #   여기서 가른다: 같은 488 이 codec_mismatch·srtp_failed 둘이고, session_expired·
@@ -413,9 +415,26 @@ def _fold_volte(rec: dict, agg: dict) -> None:
         _bump(c, 'duration_sum_sec', dur)
     if answered and state == 'ended' and reason == 'normal':
         _bump(c, 'completed')
-    if state == 'ended' and reason:
-        _bump(c['reasons'], reason)
     st = int(rec.get('end_status', 0) or 0)
+    if state == 'ended' and reason:
+        # **개시 결말과 세션 종료는 다른 축이다**(§2.1b — PTT 에만 있던 규칙을 VoLTE 에도).
+        #   한 축에 담으면 `오류` 칸이 *"붙지도 못함"* 과 *"붙었다가 끊김"* 을 함께 세어
+        #   검산식이 깨진다 — 실측(2026-09-17): 시도 3 · 성립 2 · 거절 1 · 오류 1 이 나와
+        #   "시도가 4여야 하지 않나" 라는 물음을 낳았다(오류 1 은 이미 성립 2 안에 있었다).
+        #
+        #   가르는 기준은 **응답 여부**다. 응답이 있었으면 붙은 것이고, 그 뒤의 끝맺음은
+        #   완료율이 보는 축이다.
+        if answered:
+            # 세션 종료 축 — 정상종료 / 드롭. 드롭에 `unknown` 을 따로 두지 않는다:
+            #   붙었다가 끊긴 것은 **끊겼다는 사실이 이미 사유**이고, 왜 끊겼는지는
+            #   응답코드 툴팁이 말한다.
+            _bump(c['end_reasons'], 'normal' if reason == 'normal' else 'error')
+        else:
+            # 개시 결말 축 — 붙지 못한 사유. **아무것도 특정할 수 없는 것은 `unknown`**
+            #   이다: `error` 는 이름이 붙은 사유처럼 보이지만 실제로는 "200 이 아니었다"
+            #   는 뜻뿐이고(CallDir.h), 응답코드마저 없으면 나중에 세분화해도 가를 근거가
+            #   없다. 코드가 있는 `error` 는 그대로 둔다.
+            _bump(c['reasons'], 'unknown' if (reason == 'error' and not st) else reason)
     if state == 'ended' and st and st != 200:
         _bump(c['statuses'], str(st))
     # 1:1 통화의 leg 은 발신 1 + 착신 1. 참여율 분모는 착신 leg 이다(§1.2).
@@ -1535,7 +1554,15 @@ def with_rates(c: dict, no_attempt_svcs=()) -> dict:
     #   normal 로 단정하면 강제 회수가 정상종료로 잡혀 늘 100% 가 되고(실측 2026-09-16),
     #   실패로 단정하면 0% 가 된다 — 둘 다 거짓이다. 모르는 만큼은 분모에서 뺀다.
     ended_unknown = int((c.get('end_reasons') or {}).get('unknown', 0) or 0)
-    m_ended = max(0, int(c.get('sessions', 0) or 0) - ended_unknown)
+    # 분모는 **끝난 성립 호**다. 종료 축(`end_reasons`)은 끝난 세션만 담으므로 그 합이 곧
+    #   분모이고, 아직 진행 중인 성립 호는 저절로 빠진다 — 안 빼면 통화가 길게 걸려 있는
+    #   시간대마다 완료율이 낮게 보인다(실측 2026-09-17: 성립 2 중 1건이 진행 중인데 50%).
+    #   사유를 모르는 세션은 거기서 또 뺀다(아는 것끼리 나눈다).
+    #   종료 축이 아예 비어 있으면 그 축을 싣지 않던 시절의 레코드다 — 옛 규칙으로 센다
+    #   (없는 축을 근거로 전 구간 완료율을 빈칸으로 만들지 않는다).
+    er_sum = sum(int(v or 0) for v in (c.get('end_reasons') or {}).values())
+    m_ended = (max(0, er_sum - ended_unknown) if er_sum
+               else max(0, int(c.get('sessions', 0) or 0) - ended_unknown))
     out['sessions_end_known'] = m_ended
     out['completion_rate'] = _rate(c.get('completed', 0), m_ended)
     # 드롭률 = 완료율의 여집합 (3GPP TS 32.410 Call Drop Rate). 업계는 보통 이 방향으로 보고
@@ -1544,6 +1571,14 @@ def with_rates(c: dict, no_attempt_svcs=()) -> dict:
     out['drop_rate'] = (round(100.0 - out['completion_rate'], 1)
                         if m_ended and out['completion_rate'] is not None else None)
     out['join_rate'] = _rate(c.get('legs_joined', 0), c.get('legs_invited', 0))
+    # **결말 축(`outcomes`) — 표시 전용 합본.** 끝난 호 하나가 정확히 한 칸에만 들어간다:
+    #   붙지 못한 사유(개시 축) + 붙은 뒤의 끝맺음(종료 축). 분포 위젯은 한 map 만 읽는데,
+    #   축이 둘로 갈리면 "이 호들이 어떻게 됐나" 를 한 그림으로 못 보여준다. 저장하지 않고
+    #   여기서 만든다 — 파생값이라 합산 근거가 아니다(§5.1).
+    outcomes = dict(out['reasons'])
+    for k, v in (out['end_reasons'] or {}).items():
+        outcomes[k] = outcomes.get(k, 0) + int(v or 0)
+    out['outcomes'] = dict(sorted(outcomes.items(), key=lambda x: -x[1]))
     # 세션을 분모로 한 소통률 — **PTT 용**이다. 시도 기준 소통률(talk_rate)은 "몇 건이
     # 말까지 갔나" 를 보지만, PTT 에서 알아야 하는 것은 "선 세션 중 몇 개가 벙어리였나" 다.
     # "세션은 섰는데 아무도 발언하지 못한" floor 장애는 이 값에서만 드러난다.

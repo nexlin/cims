@@ -909,6 +909,7 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
         //   자른다(운영 상한은 별도 정책).
         int iGrantedExpires =
             ( bReqExpiresGiven && uiReqExpires > 0 ) ? ExpiresToInt( uiReqExpires ) : REGISTER_DEFAULT_EXPIRES_SEC;
+        iGrantedExpires = GrantedRegisterExpires( iGrantedExpires, pclsMessage->m_eTransport, bIpsecRegister );
         char szExpires[16];
         snprintf( szExpires, sizeof( szExpires ), "%d", iGrantedExpires );
 

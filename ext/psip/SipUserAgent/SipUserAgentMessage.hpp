@@ -19,6 +19,8 @@
 // SIP MESSAGE 요청 메시지 수신 이벤트 핸들러
 bool CSipUserAgent::RecvMessageRequest( int iThreadId, CSipMessage * pclsMessage )
 {
+	int iStatus = SIP_DECLINE;
+
 	if( m_pclsCallBack )
 	{
 		if( m_pclsCallBack->EventIncomingRequestAuth( pclsMessage ) == false )
@@ -26,14 +28,14 @@ bool CSipUserAgent::RecvMessageRequest( int iThreadId, CSipMessage * pclsMessage
 			return true;
 		}
 
-		if( m_pclsCallBack->EventMessage( pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), pclsMessage->m_clsTo.m_clsUri.m_strUser.c_str(), pclsMessage ) )
-		{
-			m_clsSipStack.SendSipMessage( pclsMessage->CreateResponse( SIP_OK ) );
-			return true;
-		}
+		iStatus = m_pclsCallBack->EventMessage( pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), pclsMessage->m_clsTo.m_clsUri.m_strUser.c_str(), pclsMessage );
 	}
 
-	m_clsSipStack.SendSipMessage( pclsMessage->CreateResponse( SIP_DECLINE ) );
+	// 0 = 콜백이 스스로 응답을 보냈다. psip 가 또 보내면 최종 응답이 둘이 된다.
+	if( iStatus > 0 )
+	{
+		m_clsSipStack.SendSipMessage( pclsMessage->CreateResponse( iStatus ) );
+	}
 
 	return true;
 }

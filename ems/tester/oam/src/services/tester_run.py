@@ -678,7 +678,8 @@ class RunDriver(threading.Thread):
         }
         # 피어 pbx/mgcf 축 관측(있을 때만) — 비율은 RATIO_METRICS 정의로
         for k in ('progress_tx', 'early_media', 'prack_tx', 'prack_rx', 'reinvite_ok', 'reinvite_fail', 'reinvite_rx',
-                  'dtmf_tx', 'dtmf_sent', 'dtmf_rx', 'q850_tx', 'q850_rx', 'refer_tx'):
+                  'dtmf_tx', 'dtmf_sent', 'dtmf_rx', 'q850_tx', 'q850_rx', 'refer_tx',
+                  'rtp_tx', 'rtp_silent_legs', 'media_send', 'media_stop', 'skipped_rtp_cap', 'early_rtp_ok', 'early_rtp_rx'):
             if c.get(k):
                 out[k] = c[k]
         for name, (num, den) in RATIO_METRICS.items():

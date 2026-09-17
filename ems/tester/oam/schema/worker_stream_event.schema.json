@@ -120,6 +120,8 @@
             "sds_send",
             "sds_recv",
             "media_hold",
+            "media_send",
+            "media_stop",
             "wait",
             "expect"
           ],

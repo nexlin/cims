@@ -95,8 +95,8 @@ SIP 스택에 `[CModuleDispatcher, CSipUserAgent]` 순서로 콜백 등록:
 | `RecvRequest(msg)` | SIP 요청 라우팅 (REGISTER→CSCF, INVITE→라우팅 판단) |
 | `RecvResponse(msg)` | SIP 응답 로깅 |
 | `EventIncomingCall(callId, from, to, rtp)` | B2BUA 착신 이벤트 → 발신 leg 생성 |
-| `EventCallRing(callId, statusCode)` | 180/183 브릿징 |
-| `EventCallStart(callId, rtp)` | 200 OK 브릿징, ReINVITE 전송 |
+| `EventCallRing(callId, statusCode, rtp)` | 180/183 브릿징. 18x 에 SDP 가 있으면(early media) **확정 answer 와 같은 절차로 미디어를 앵커링**한다 — answer leg 를 relay 에 반영(`ApplyRelayAnswerLeg`: SDES 검증·NAT 판정·`RELAY_MODIFY`)한 뒤 상대 leg 로 가는 SDP 를 relay 주소로 재작성(`SetIpPort` — m= 포트·미디어 레벨 c= 포함). [volte_flows.md](../features/volte_flows.md) C1a |
+| `EventCallStart(callId, rtp)` | 200 OK 브릿징, ReINVITE 전송. answer leg 의 relay 반영은 18x 와 같은 `ApplyRelayAnswerLeg` — 18x 에서 이미 반영한 주소·키면 CMP 는 latch·SRTP 컨텍스트를 유지한다 |
 | `EventCallEnd(callId, reason)` | 양 leg 종료, CDR 저장, 로그 기록 |
 | `SetCallOwner(callId, module)` | 호 소유권 추적 |
 | `GetCallOwner(callId)` | 호 담당 모듈 조회 |

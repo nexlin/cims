@@ -30,6 +30,19 @@ FLOW_LOGGER = os.path.join(_REPO, "ems", "core", "oam", "src", "services", "flow
 # 사유 열이 아닌 것 — 사유 축이 아니라 집계·비율 축이다.
 _NOT_REASON = "normal"          # `정상종료` 열이 이미 센다
 
+# 집계가 파생한 사유 축 — 원천(`end_reason`) 어휘에는 없다. `unknown` 은 "사유도 응답코드도
+# 없어 특정할 수 없는 실패" 를 담는 칸이라 CSP 가 적을 수 있는 값이 아니다(sip_statistics.md
+# §2.3). enum 대조에서 빼되, **열이 있는지는 따로 지킨다**.
+_DERIVED = {'unknown'}
+
+# 호 이력 화면에만 있는 사유 — **통계에는 원천이 없다.** `timeout` 은 CSP 가 쓰는 코드가 아예
+# 없고(408·480 은 `no_answer` 로 간다), `incomplete` 는 OAM 이 **조회 시점에** 종료 기록 없는
+# 호에 붙이는 라벨이라 원본(`call.json`)에 적히지 않는다. 통계에서 그 사건은 `미결`(open) →
+# `보존초과`(late_dropped) 로 흐른다. 열을 두면 "이 사유는 안 생기나 보다" 라는 잘못된 안심만
+# 남아서 뺐다 — 아래 시험이 **CSP 가 쓰기 시작하면** 다시 만들라고 알려준다.
+_HISTORY_ONLY = {'timeout', 'incomplete'}
+CSP_DIR = os.path.join(_REPO, "csp")
+
 # 응답코드 → 종료 사유. csp/CallDir.h::_ReasonOfStatus 와 같은 규칙이어야 한다.
 def _reason_of_status(st: int) -> str:
     if st in (486, 600):
@@ -86,9 +99,56 @@ class VolteReasonColumns(unittest.TestCase):
         }
 
     def test_모든_종료_사유에_열이_있다(self):
-        want = {r for r in _reason_enum() if r != _NOT_REASON}
-        self.assertEqual(want, set(self.reason_cols),
+        want = {r for r in _reason_enum() if r != _NOT_REASON} - _HISTORY_ONLY
+        self.assertEqual(want, set(self.reason_cols) - _DERIVED,
                          "사유 열과 종료 사유 enum 이 어긋난다 — 빠진 사유로 끝난 호는 표에 안 나온다")
+
+    def test_파생_축에도_열이_있다(self):
+        """집계가 만드는 축은 원천 enum 에 없다 — 그래도 표에 자리가 있어야 한다.
+
+        `unknown` 은 CSP 가 적는 값이 아니라 **집계가 만든 칸**이다(사유도 응답코드도 없어
+        무엇 때문에 실패했는지 특정할 수 없는 호). 열이 없으면 그 호들이 표 어디에도 안
+        나타나고, 시도 수와 사유 합이 어긋난 채로 남는다."""
+        self.assertTrue(_DERIVED <= set(self.reason_cols),
+                        f"파생 사유 축에 열이 없다: {_DERIVED - set(self.reason_cols)}")
+
+    def test_원천이_없는_사유에는_열을_두지_않는다(self):
+        """늘 0 인 칸은 "그런 일이 안 일어난다" 는 잘못된 안심을 준다 — 셀 수단이 없는 것이다."""
+        self.assertEqual(set(), _HISTORY_ONLY & set(self.reason_cols),
+                         "통계에 원천이 없는 사유에 열이 있다")
+
+    def test_CSP_가_그_사유를_쓰기_시작하면_알린다(self):
+        """원천이 생기면 열을 **다시 만들어야** 한다 — 그때 이 시험이 먼저 걸린다.
+
+        **호 종료 사유를 쓰는 자리만** 본다: 어휘가 사는 `CallDir.h` 와, 기록 함수를 부르는
+        줄이다. 파일 전체에서 낱말을 찾으면 엉뚱한 것이 걸린다 — 처음 만들었을 때 RFC 6665
+        구독 종료 사유(`Subscription-State: terminated;reason=timeout`)가 잡혔다.
+        """
+        if not os.path.isdir(CSP_DIR):
+            self.skipTest('csp 소스 없음')
+        writers = ('VoipCallEnd(', 'VoipCallRejected(', 'PttSessionEnd(', 'PttAttempt(')
+        hits = []
+        for root, _dirs, files in os.walk(CSP_DIR):
+            for fn in files:
+                if not fn.endswith(('.cpp', '.h', '.hpp')):
+                    continue
+                path = os.path.join(root, fn)
+                rel = os.path.relpath(path, _REPO)
+                try:
+                    with open(path, encoding='utf-8', errors='replace') as f:
+                        lines = f.read().splitlines()
+                except OSError:
+                    continue
+                vocab_file = os.path.basename(path) == 'CallDir.h'
+                for no, line in enumerate(lines, 1):
+                    if not (vocab_file or any(w in line for w in writers)):
+                        continue
+                    for r in _HISTORY_ONLY:
+                        if f'"{r}"' in line:
+                            hits.append(f'{rel}:{no} → "{r}"')
+        self.assertEqual([], hits,
+                         'CSP 가 이 사유를 기록하기 시작했다 — 표에 열을 다시 만들어야 한다: '
+                         + ' · '.join(hits))
 
     def test_정상종료_열이_따로_있다(self):
         keys = {c["key"] for c in self.cols}

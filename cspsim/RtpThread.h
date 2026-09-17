@@ -26,6 +26,8 @@
 #include <set>
 #include <mutex>
 #include <deque>
+#include <map>
+#include <memory>
 
 // libsrtp 불투명 핸들 전방선언 (srtp2/srtp.h 는 RtpThread.cpp 에서만 포함)
 struct srtp_ctx_t_;
@@ -50,6 +52,36 @@ public:
 
     /** 비디오 파일 경로 (H.264 Annex B raw NAL 파일) 설정 */
     void SetVideoFile(const std::string& strPath) { m_strVideoFile = strPath; }
+
+	// ── 송출 제어 — 계측기 미디어 평면(test_instrument.md §4 `invite.media.rtp`·`media_send`/`media_stop`) ──
+	//   모드: AUTO = SDP 교환 즉시 기본 원천으로 송출(기존 동작) · NONE = 시그널링 전용(Start 가 스레드를 띄우지 않는다 — SDP 는
+	//   오퍼하되 RTP 송수신 없음) · EXPLICIT = 수신만 시작하고 송출은 MediaSend 가 부를 때까지 멈춘다.
+	//   원천: 기본 = m_strMediaFile(AMR-WB 합의 시) 또는 합성. MediaSend 가 코덱별 파일로 덮어쓴다(빈 값 = 그 코덱은 합성 —
+	//   AMR-WB 합성은 RFC 4867 NO_DATA 프레임, G.711 은 상수 PCM). 파일 = AMR-WB raw 61 B 프레임 / G.711 raw 160 B(20 ms).
+	//   송출 정지 중에도 타임스탬프는 흐르고 시퀀스는 멈춘다(수신 측 손실 계산에 공백이 안 생긴다). DTMF 이벤트는 정지와 무관.
+	enum EMediaMode { E_MEDIA_AUTO = 0, E_MEDIA_NONE = 1, E_MEDIA_EXPLICIT = 2 };
+	/** 다음 Start(새 호)부터 적용 */
+	void SetMediaMode( int iMode ) { m_iMediaMode = iMode; }
+	int MediaMode() const { return m_iMediaMode; }
+	/** 원천을 코덱별 파일로 바꾸고 송출 시작. bLoop=false 면 끝에서 멈춘다(SourceEnded). */
+	void MediaSend( const std::string & strAmrWbFile, const std::string & strPcmuFile, const std::string & strPcmaFile, bool bLoop );
+	/** 기본 원천으로 송출 시작(재개) */
+	void MediaSendDefault();
+	void MediaStop() { m_bSendPaused = true; }
+	/** 상대 hold(a=sendonly/inactive, RFC 3264 §8.4) 동안 송출 정지 — MediaStop 과 독립 */
+	void SetHoldPaused( bool bPaused ) { m_bHoldPaused = bPaused; }
+	bool MediaRunning() const { return m_bSendThreadRun; }
+	bool SourceEnded() const { return m_bSourceEnded; }
+	std::atomic<unsigned long long> m_ullSentTotal{0};   // 송신 오디오 RTP 패킷 누계(호마다 초기화)
+	std::atomic<bool> m_bSendPaused{false};
+	std::atomic<bool> m_bHoldPaused{false};
+	std::atomic<bool> m_bSourceEnded{false};
+	std::atomic<int>  m_iSourceGen{0};       // 원천·코덱이 바뀔 때마다 증가 — 송신 스레드가 다음 틱에 다시 고른다
+	std::atomic<int>  m_iMediaMode{E_MEDIA_AUTO};
+	std::mutex m_mtxSource;
+	bool m_bSourceOverride = false;          // m_mtxSource 보호 ↓
+	std::string m_strSrcAmrWb, m_strSrcPcmu, m_strSrcPcma;
+	bool m_bSrcLoop = true;
 
 	/** 협상된 오디오 wire PT (SDP 오퍼/answer 확정값) — 파일 미디어(AMR-WB) 송신 시 스탬핑.
 	 *  -1 = 미협상(레거시 99 폴백). 합성 PCMU 는 정적 PT 0 고정. */

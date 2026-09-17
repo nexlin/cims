@@ -62,6 +62,7 @@ public:
     // ISipStackCallBack
     bool RecvRequest( int iThreadId, CSipMessage *pclsMessage ) override;
     bool RecvResponse( int iThreadId, CSipMessage *pclsMessage ) override;
+    void EventKeepAlive( const char *pszIp, int iPort, ESipTransport eTransport ) override;
     bool SendTimeout( int iThreadId, CSipMessage *pclsMessage ) override;
 
     // ISipUserAgentCallBack
@@ -83,7 +84,7 @@ public:
     void EventPrack( const char *pszCallId, CSipCallRtp *pclsRtp ) override;
     bool EventTransfer( const char *pszCallId, const char *pszReferToCallId, bool bScreenedTransfer ) override;
     bool EventBlindTransfer( const char *pszCallId, const char *pszReferToId ) override;
-    bool EventMessage( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage ) override;
+    int EventMessage( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage ) override;
 
     // ISipStackSecurityCallBack
     bool IsAllowUserAgent( const char *pszSipUserAgent ) override;

@@ -3,7 +3,7 @@
 // YAML → 문서는 컨트롤러 POST /validate 가 돌려준 doc 을 쓴다(파서는 서버 하나).
 import type { ScenarioDoc, ScenarioStep, TopologyDoc, PoolDoc, ScenarioVocab } from '@tester/api/tester'
 
-export interface During { at_s: number; step: 'dtmf' | 'hold' | 'resume' | 'refer'; who?: string[]; from?: string; to?: string; payload?: string; expect?: Record<string, unknown> }
+export interface During { at_s: number; step: 'dtmf' | 'hold' | 'resume' | 'refer' | 'media_send' | 'media_stop'; who?: string[]; from?: string; to?: string; payload?: string; sample?: string; loop?: boolean; expect?: Record<string, unknown> }
 export interface Step extends ScenarioStep { during?: During[]; group?: string }
 export interface Doc extends Omit<ScenarioDoc, 'flow' | 'roles' | 'tags' | 'target_evidence'> {
   roles: NonNullable<ScenarioDoc['roles']>; flow: Step[]; tags: string[]; target_evidence: NonNullable<ScenarioDoc['target_evidence']>; comment?: string
@@ -14,6 +14,10 @@ export interface Issue { lv: Lv; who: string; msg: string; ref: Sel | null }
 
 export const deep = <T,>(o: T): T => JSON.parse(JSON.stringify(o))
 export const INDIALOG = new Set(['dtmf', 'hold', 'resume', 'refer'])
+/** 송출 제어(미디어 평면) — 그 호에서 SDP 가 오간 뒤(progress/answer 뒤)에만, rtp: none 호에는 못 둔다. 행위자는 who(여럿) */
+export const MEDIA_CTL = new Set(['media_send', 'media_stop'])
+/** media_hold 의 during 에 둘 수 있는 것 = 통화 중 동작 + 송출 제어 */
+export const DURING_OK = new Set([...INDIALOG, ...MEDIA_CTL])
 /** 기대치 임계의 부등호 — min 은 하한(≥), 나머지(p50/p95/p99/max)는 상한(≤). 단일 값(code·비율)은 = */
 export const thrOp = (q: string) => (q === 'min' ? '≥' : '≤')
 export const roles = (sc: Doc) => Object.keys(sc.roles ?? {})
@@ -53,6 +57,12 @@ export function sessions(sc: Doc): Session[] {
   })
   for (const o of open) { o.end = (sc.flow ?? []).length; out.push(o) }
   return out
+}
+/** 행 i 가 속한 호 — SDP 가 오갔는가(183 progress 또는 200 answer 뒤) + 그 호의 invite.media.rtp */
+export function mediaCtx(sc: Doc, i: number): { sdp: boolean; rtp: 'auto' | 'none' | 'explicit' } | null {
+  const o = sessions(sc).find(x => i > x.start && i <= x.end); if (!o) return null
+  const first = Math.min(o.prog ?? Infinity, o.est ?? Infinity)
+  return { sdp: i > first, rtp: sc.flow[o.start]?.media?.rtp ?? 'auto' }
 }
 export const inSession = (sc: Doc, i: number) => sessions(sc).some(o => o.est != null && i > o.est && (i < o.end || (i === o.end && sc.flow[i]?.step === 'refer')))
 
@@ -114,14 +124,24 @@ export function validate(sc: Doc, topo: TopologyDoc | null, vocab: ScenarioVocab
     if (s.cause != null) { const a = s.from ?? (s.who ?? [])[0]; const rp = a ? resolvePool(sc, topo, a) : null; if (rp && rp.kind !== 'peer') E(who, 'cause(Reason Q.850) 는 피어 역할만 보낸다', ref) }
     if (s.step === 'invite' && s.to) { const rp = resolvePool(sc, topo, s.to); const p0 = rp && Object.values(rp.pools)[0]; if (p0 && (p0 as { answer?: string }).answer === 'silent') I(who, `to '${s.to}' 는 answer=silent 풀 — 무응답 상대(failover 시험)`, ref) }
     if (INDIALOG.has(s.step) && !inSession(sc, i)) E(who, `${s.step} 는 확립된 세션 안에서만 — answer/progress 뒤·bye 앞에 두거나 media_hold 의 during 으로`, ref)
+    const ctl = [...(MEDIA_CTL.has(s.step) ? [s as Step | During] : []), ...(s.during ?? []).filter(d => MEDIA_CTL.has(d.step))]
+    if (ctl.length) {
+      const mc = mediaCtx(sc, i)
+      if (!mc || !mc.sdp) E(who, '송출 제어(media_send/media_stop)는 invite 뒤 SDP 가 오간 다음(progress/answer 뒤)에만 둔다', ref)
+      else if (mc.rtp === 'none') E(who, '그 호의 invite.media.rtp 가 none(시그널링 전용) — 송출 제어를 둘 수 없다', ref)
+      for (const c of ctl) if (c.sample && topo && !topo.media?.samples?.[c.sample]) E(who, `샘플 '${c.sample}' 가 기준 토폴로지 ${topo.name} 의 media.samples 에 없다`, ref)
+    }
+    if ((s.sample != null || s.loop != null) && s.step !== 'media_send') E(who, 'sample/loop 은 media_send 에만 둔다', ref)
+    if (s.step === 'invite' && s.media?.rtp === 'explicit' && !(sc.flow ?? []).some(x => x.step === 'media_send' || (x.during ?? []).some(d => d.step === 'media_send'))) W(who, 'media.rtp: explicit 인데 media_send 가 없다 — 아무도 송출하지 않는다', ref)
+    if (s.step === 'invite' && s.media?.rtp === 'none') I(who, '시그널링 전용 — RTP 를 송수신하지 않는다(RTP 기대치는 표본이 없다)', ref)
     if (s.during) {
       if (s.step !== 'media_hold') E(who, 'during 은 media_hold 에만 둔다', ref)
       const len = secondsOf(s, bind)
       s.during.forEach((d, k) => {
         const w2 = `${who}.during[${k}] ${d.step}`; const r2: Sel = { kind: 'sub', idx: i, k }
-        if (!INDIALOG.has(d.step)) E(w2, `during 에는 통화 중 동작(dtmf/hold/resume/refer)만`, r2)
+        if (!DURING_OK.has(d.step)) E(w2, `during 에는 통화 중 동작(dtmf/hold/resume/refer)과 송출 제어(media_send/media_stop)만`, r2)
         if (d.at_s == null || d.at_s < 0 || (len && d.at_s > len)) E(w2, `at_s 는 0 ~ seconds(${len}) 안`, r2)
-        if (!(d.from || (d.who && d.who.length))) E(w2, 'from 이 필요하다', r2)
+        if (!(d.from || (d.who && d.who.length))) E(w2, MEDIA_CTL.has(d.step) ? 'who 가 필요하다' : 'from 이 필요하다', r2)
         if (d.step === 'refer' && !(d.from && d.to)) E(w2, 'refer 는 from·to 가 필요하다', r2)
         if (d.step === 'dtmf' && !(d.payload && /^[0-9*#A-Da-d]+$/.test(d.payload))) E(w2, 'dtmf payload 숫자열 필요', r2)
         for (const rr of [...(d.who ?? []), d.from, d.to]) if (rr && !names.has(rr)) E(w2, `정의되지 않은 역할 '${rr}'`, r2)
@@ -152,14 +172,15 @@ export function newStep(kind: string, sc: Doc, topo: TopologyDoc | null, vocab: 
   if (kind === 'register') s.expect = { code: 200 }
   return s
 }
-// ── during ↔ 행 변환 — 통화 중 동작(dtmf/hold/resume/refer)은 독립 행으로도, media_hold 의 during 으로도 둘 수 있다 ──
+// ── during ↔ 행 변환 — 통화 중 동작(dtmf/hold/resume/refer)과 송출 제어(media_send/media_stop)는 독립 행으로도, media_hold 의 during 으로도 둘 수 있다 ──
 /** 행 i(in-dialog 단계)를 flow[holdIdx](media_hold) 의 during 으로. 반환 = 새 during 의 (holdIdx, k) — holdIdx 는 행 제거로 밀릴 수 있다 */
 export function stepToDuring(sc: Doc, i: number, holdIdx: number, at_s: number): { idx: number; k: number } | null {
   const s = sc.flow[i], h = sc.flow[holdIdx]
-  if (!s || !h || h.step !== 'media_hold' || !INDIALOG.has(s.step) || i === holdIdx) return null
+  if (!s || !h || h.step !== 'media_hold' || !DURING_OK.has(s.step) || i === holdIdx) return null
   const d: During = { at_s, step: s.step as During['step'] }
   if (s.from) d.from = s.from; else if (s.who?.length) d.who = [...s.who]
   if (s.to) d.to = s.to; if (s.payload) d.payload = s.payload; if (s.expect && Object.keys(s.expect).length) d.expect = s.expect
+  if (s.sample) d.sample = s.sample; if (s.loop != null) d.loop = s.loop
   h.during = [...(h.during ?? []), d]
   sc.flow.splice(i, 1)
   const idx = i < holdIdx ? holdIdx - 1 : holdIdx
@@ -171,6 +192,7 @@ export function duringToStep(sc: Doc, holdIdx: number, k: number, at: number): n
   const s: Step = { step: d.step }
   if (d.from) s.from = d.from; else if (d.who?.length) s.who = [...d.who]
   if (d.to) s.to = d.to; if (d.payload) s.payload = d.payload; if (d.expect) s.expect = d.expect
+  if (d.sample) s.sample = d.sample; if (d.loop != null) s.loop = d.loop
   h.during!.splice(k, 1); if (!h.during!.length) delete h.during
   sc.flow.splice(Math.max(0, Math.min(sc.flow.length, at)), 0, s)
   return Math.max(0, Math.min(sc.flow.length - 1, at))

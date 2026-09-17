@@ -7,8 +7,10 @@ CSP 가 "이 가입자에게 어떻게 도달하는가"를 관리하는 구조�
 관련 문서: [ue_nat_traversal.md](ue_nat_traversal.md) · [sip_tls_signaling.md](sip_tls_signaling.md) ·
 [modules/csp.md](../modules/csp.md)
 
-> **상태**: 구현·실측 완료(A안 — flow 추적). 남은 것은 reg-event 를 contact 목록으로 확장하는
-> 정합 작업뿐이다([§5](#5-reg-eventrfc-3680-정합)). 멀티 디바이스(한 계정 여러 단말 동시 사용)는
+> **상태**: 구현·실측 완료(A안 — flow 추적) + UDP 생존 판정(keepalive 상향·침묵 판정·UDP 등록
+> 수명 상한·STUN 응답). 남은 것은 reg-event 를 contact 목록으로 확장하는 정합 작업
+> ([§5](#5-reg-eventrfc-3680-정합))과 단말의 STUN keepalive 채택
+> ([§4.1a](#41a-nat-가-공인-포트를-바꾸면--복구는-재등록만-한다))이다. 멀티 디바이스(한 계정 여러 단말 동시 사용)는
 > 이 문서의 범위가 아니다([§8](#8-멀티-디바이스는-범위-밖-b안)).
 
 ## 1. 왜 바인딩 집합인가
@@ -43,11 +45,13 @@ CUserMap:  AoR ──▶ [ Binding{ ip, port, transport, contact, 만료, last-s
 | transport | 판정 | 근거 |
 |---|---|---|
 | TCP / TLS | psip 소켓맵에 그 (ip,port) 연결이 있는가 (`CSipStack::IsFlowAlive`) | 연결이 닫히면 맵에서 제거된다(`TcpSessionList`) |
-| UDP | **판정하지 않는다**(항상 살아있는 것으로 본다) | 연결 개념이 없다. 회수는 재등록 교체·만료가 담당한다([§4.1](#41-udp-는-예외--죽음을-감지할-수-없다)) |
+| UDP | **응용이 keepalive 수신 시각으로 판정한다** (`Setup.Sip.UdpFlowSilenceSec`, 기본 90초) | 연결 개념이 없어 스택은 답할 수 없다(`IsFlowAlive` 는 항상 true). 단말이 보내는 NAT keepalive 가 그 경로의 유일한 생존 신호다([§4.1](#41-udp--keepalive-로-판정한다)) |
 
 psip 은 소켓맵 조회 API(`CTcpSocketMap::Select`)를 이미 갖고 있고, `IsFlowAlive` 는 그 얇은
-래퍼다 — 연결 핸들을 응용까지 전달할 필요가 없다. `CUserInfo::m_iLastSeenTime`(저장 경로로
-요청이 마지막에 도착한 시각)은 기록만 하고 판정에는 쓰지 않는다(진단용).
+래퍼다 — 연결 핸들을 응용까지 전달할 필요가 없다. UDP 는 스택이 답할 수 없으므로 판정을 응용에
+위임하고, 응용은 `CUserInfo::m_iLastSeenTime`(저장 경로로 단말발 패킷이 마지막에 도착한 시각)으로
+답한다. keepalive 는 SIP 메시지가 아니라 종전에는 소켓 계층에서 버려졌으나, 이제 psip 이
+`ISipStackCallBack::EventKeepAlive` 로 응용까지 올린다(`ext/psip/SipStack/SipUdpThread.cpp`).
 
 ### 2.2 선택 정책 (서버 발신)
 
@@ -100,11 +104,46 @@ bool Select( const char *pszUserId, CUserInfo &clsInfo );   // 26곳이 이것�
 가입자당 상한(`MAX_BINDING_PER_USER = 8`)은 위 세 계기가 모두 늦을 때를 위한 **안전망**이다.
 정상 상태에서는 transport 당 1개(전환 과도기만 2개)로 수렴한다.
 
-### 4.1 UDP 는 예외 — 죽음을 감지할 수 없다
+### 4.1 UDP — keepalive 로 판정한다
 
-UDP 는 연결이 없어 `IsFlowAlive` 가 판정할 수 없다(항상 true). 따라서 UDP 바인딩의 회수 수단은
-**계기 1(같은 transport 재등록)과 3(만료)** 뿐이다. NAT rebind 로 소스 포트가 바뀌면 단말이
-재등록하면서 교체되므로 실사용에서는 문제되지 않는다.
+UDP 는 연결이 없어 `IsFlowAlive` 가 판정할 수 없다(항상 true). 대신 **단말이 보내는 NAT
+keepalive** 가 그 경로의 생존 신호다. psip 이 keepalive 를 응용까지 올리고(`EventKeepAlive`),
+`CUserMap::TouchKeepAlive` 가 주소가 일치하는 바인딩의 `m_iLastSeenTime` 을 갱신한다.
+
+| 규칙 | 값 |
+|---|---|
+| 침묵 임계 | `Setup.Sip.UdpFlowSilenceSec` (기본 90초 = keepalive 6회분) |
+| 적용 대상 | keepalive 를 **한 번이라도 보낸** 바인딩만 (`m_bKeepAliveSeen`) |
+| 침묵한 바인딩의 처리 | `Select` 가 **고르지 않는다**. 바인딩은 지우지 않는다 |
+
+두 가지가 규율이다.
+
+- **keepalive 를 보내지 않는 단말에는 적용하지 않는다.** 조용한 것이 정상인 구 SDK·시뮬레이터를
+  끊어버리면 안 된다. 그래서 "보내던 단말이 멈췄다" 일 때만 도달 불가로 본다.
+- **침묵으로 바인딩을 지우지 않는다.** 지우면 마지막 바인딩일 때 등록 해제로 이어지고, 등록에
+  종속된 PTT affiliation 까지 회수되어 단말이 잘 때마다 그룹 소속이 출렁인다. 등록은 만료가
+  회수하고([§4](#4-바인딩-수명과-정리-정책) 계기 3), 침묵은 **도달 경로 선택에서만** 뺀다.
+
+### 4.1a NAT 가 공인 포트를 바꾸면 — 복구는 재등록만 한다
+
+NAT 는 매핑이 유휴로 만료되면 그것을 지우고, 다음에 나가는 패킷에 **새 공인 포트**를 준다.
+단말 소켓은 그대로이므로 단말도 자기 주소가 바뀐 것을 모른다(등록 때 학습한 값을 계속 믿는다).
+서버의 바인딩은 낡은 포트를 가리키고, 그 사이 서버 발신은 전량 유실된다.
+
+**keepalive 로는 이것을 고칠 수 없다.** keepalive 본문에는 신원이 없어 새 주소에서 온 것을 특정
+가입자에게 귀속시킬 수 없고, 귀속시키면 같은 NAT 뒤의 다른 단말이 남의 착신을 가로챌 수 있다.
+그래서 `TouchKeepAlive` 는 **이미 아는 바인딩과 주소가 정확히 일치할 때만** 기록한다.
+
+복구는 Digest 인증이 붙는 **재등록**만이 할 수 있다. 그 창을 두 가지로 줄인다.
+
+| 수단 | 효과 |
+|---|---|
+| `Setup.Sip.UdpRegisterExpires` (기본 300초) — UDP 등록에만 수명 상한. 스트림·IPsec 은 제외 | 창의 상한을 재등록 주기로 묶는다. 단말 변경 없음 |
+| 단말의 STUN keepalive (RFC 5626 §4.4.2) | 단말이 응답의 XOR-MAPPED-ADDRESS 로 주소 변화를 즉시 알고 재등록 — 창이 keepalive 주기로 줄어든다 |
+
+서버는 SIP 리스너에서 STUN Binding Request 에 이미 응답한다(`SipUdpThread.cpp`, psip `StunParser`).
+단말이 keepalive 를 CRLF 대신 STUN 으로 보내면 그대로 동작한다. RFC 5626 §4.4.1 의 CRLF
+ping(CRLF 2개)에는 규격대로 pong(CRLF 1개)으로 답한다.
 
 ### 4.2 죽은 바인딩을 통지에 실으면 안 되는 이유
 
@@ -125,11 +164,9 @@ RFC 3680 의 contact state 는 `active`(등록 유효) / `terminated`(등록 종
 - **멀티 디바이스 지원**([§8](#8-멀티-디바이스는-범위-밖-b안)) — 계기 1의 "한 transport 에 한 경로"
   전제가 깨진다. 그때는 instance-id 로 기기를 구분해 **같은 기기의 같은 transport** 만 교체해야
   한다. 단말의 instance-id 유일화가 선행 조건이다.
-- **UDP flow 생존 판정 도입** — `last-seen` 과 keepalive 주기로 UDP 바인딩의 죽음을 추정하게
-  되면 계기 2가 UDP 로 확장된다. 다만 SIP 요청이 아닌 keepalive(CRLF)는 `last-seen` 을 갱신하지
-  않으므로, 그 신호를 응용까지 올리는 psip 변경이 선행된다.
-- **Expires 단축** — 현재 3600초는 만료 기반 회수를 사실상 무력화한다(계기 2·3의 시간차가 큼).
-  짧은 Expires 로 바꾸면 계기 3의 실효성이 올라간다.
+- **UDP 침묵을 계기 2로 승격** — 지금은 침묵한 UDP 바인딩을 선택에서 빼기만 하고 지우지 않는다
+  ([§4.1](#41-udp--keepalive-로-판정한다)). 등록에 종속된 PTT affiliation 을 흔들지 않을 회수
+  절차(예: 재등록 유예를 둔 단계적 회수)가 정해지면 계기 2를 UDP 로 확장할 수 있다.
 
 ## 5. reg-event(RFC 3680) 정합
 
@@ -155,6 +192,11 @@ reg-event NOTIFY 를 contact 목록으로 확장하는 것([§5](#5-reg-eventrfc
 | 3 | 대형 INVITE 로 TCP 승격 유발 | 승격 flow 가 별개 바인딩으로 들어오고 **등록 flow 를 덮지 않음** |
 | 4 | 모든 바인딩 만료 | 등록 해제 통지 1회 |
 | 5 | 실기기 회귀 (그룹콜·NOTIFY·세션 갱신) | 오늘과 동일 동작 |
+| 6 | UDP 등록 후 keepalive 중단 | 임계 경과 뒤 그 바인딩이 선택에서 빠짐 — 1:1 문자는 480, 바인딩은 유지 |
+| 7 | keepalive 를 보낸 적 없는 UDP 등록 | 침묵 판정 미적용 (종전대로 도달 대상) |
+
+psip 계층(응용까지 올라오는가·pong·STUN 응답)은 `tests/psip_keepalive_test.cpp` 가
+`S1-UNIT-PSIP` 에서 루프백으로 검증한다.
 
 ## 8. 멀티 디바이스는 범위 밖 (B안)
 

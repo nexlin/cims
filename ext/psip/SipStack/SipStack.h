@@ -145,6 +145,7 @@ public:
 	void RecvRequest( int iThreadId, CSipMessage * pclsMessage );
 	void RecvResponse( int iThreadId, CSipMessage * pclsMessage );
 	void SendTimeout( int iThreadId, CSipMessage * pclsMessage );
+	void EventKeepAlive( const char * pszIp, int iPort, ESipTransport eTransport );
 	void TcpSessionEnd( const char * pszIp, int iPort, ESipTransport eTransport );
 	void ThreadEnd( int iThreadId );
 

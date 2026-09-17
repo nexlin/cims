@@ -35,6 +35,12 @@ static inline int ExpiresToInt( uint32_t uiExpires ) {
     return uiExpires > 0x7FFFFFFFu ? 0x7FFFFFFF : (int)uiExpires;
 }
 
+/** 등록기가 실제로 부여하는 수명 — RFC 3261 §10.2.1 은 요청보다 짧게 주는 것을 허용한다.
+ *  UDP 바인딩은 스택이 죽음을 감지할 수 없고(registration_binding_set.md §2.1), NAT 가 공인
+ *  포트를 바꿔도 다음 재등록 전까지 서버가 알 길이 없다. 그 창을 재등록 주기로 묶는다.
+ *  스트림은 연결 사망이 곧 감지이므로, IPsec 은 NAT 뒤가 아니므로 제한하지 않는다. */
+int GrantedRegisterExpires( int iRequested, ESipTransport eTransport, bool bIpsec );
+
 typedef std::list<std::string> USER_ID_LIST;
 
 class CUserInfo;
@@ -73,8 +79,13 @@ public:
 
     /** 저장된 도달 경로(latch)로 마지막으로 요청이 도착한 시각.
      *  수신 소스가 저장값과 일치할 때만 갱신되므로, "이 latch 가 아직 살아 있는가" 의 근거가 된다.
-     *  stale latch 진단용 — 판정 로직에는 아직 쓰지 않는다. */
+     *  keepalive(CRLF)도 이 값을 갱신한다 — UDP 바인딩 침묵 판정의 근거. */
     time_t m_iLastSeenTime;
+
+    /** 이 바인딩으로 keepalive 를 한 번이라도 받았는가 — 침묵 판정의 적용 조건.
+     *  keepalive 를 보내지 않는 단말(구 SDK·시뮬레이터)까지 조용하다고 끊으면 안 되므로,
+     *  "보내던 단말이 멈췄다" 일 때만 도달 불가로 본다. */
+    bool m_bKeepAliveSeen;
 
     /** Call Pickup 을 위한 그룹 아이디 */
     std::string m_strGroupId;
@@ -156,6 +167,13 @@ public:
      *  수신 transport 가 저장 transport 와 다르면 무시한다 — 그 요청은 latch 의 생존 근거가 아니다. */
     void TouchFlow( const char *pszUserId, ESipTransport eTransport );
 
+    /** keepalive 수신을 그 도달 경로의 생존 기록으로 남긴다.
+     *  keepalive 본문에는 신원이 없으므로 **이미 아는 바인딩과 주소가 정확히 일치할 때만**
+     *  기록한다. 새 주소에서 온 keepalive 로 바인딩을 옮기는 것은 인증이 없어 허용하지
+     *  않는다 — 같은 NAT 뒤의 다른 단말이 남의 착신을 가로챌 수 있기 때문이다.
+     *  포트가 바뀐 단말의 복구는 재등록(Digest 인증)만이 할 수 있다. */
+    void TouchKeepAlive( const char *pszIp, int iPort, ESipTransport eTransport );
+
     void DeleteTimeout( int iTimeout );
     void DeleteTimeout( int iTimeout, USER_ID_LIST &clsDeletedList );
     void DeleteTimeout( int iTimeout, USER_INFO_LIST &clsDeletedInfoList );
@@ -166,11 +184,14 @@ public:
     void GetString( CMonitorString &strBuf );
 
 private:
-    /** 살아있는 바인딩 중 가장 최근 것의 인덱스. 살아있는 것이 없으면 가장 최근 바인딩.
+    /** 살아있는 바인딩 중 가장 최근 것의 인덱스. 하나도 없으면 NO_BINDING.
      *  생존 판정은 스트림 transport 만 스택에 묻는다(UDP 는 연결 개념이 없어 항상 살아있는
      *  것으로 취급하고 등록 만료에 맡긴다) — registration_binding_set.md §2.1.
      *  호출 전 m_clsMutex 를 잡고 있어야 한다. */
     static size_t _pickBinding( const USER_BINDING_LIST &clsList );
+
+    /** _pickBinding 이 "고를 수 있는 경로가 없다" 를 알리는 값. */
+    static const size_t NO_BINDING = (size_t)-1;
 
     /** (IP, 포트, transport) 가 같은 바인딩의 인덱스. 없으면 npos. */
     static size_t _findBinding( const USER_BINDING_LIST &clsList, const std::string &strIp, int iPort,

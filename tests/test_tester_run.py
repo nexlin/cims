@@ -74,9 +74,12 @@ class FakeWorker:
 
             def do_GET(self):
                 if self.path == '/health':
-                    self._send(200, {'worker': outer.name, 'version': 't', 'max_endpoints': 100, 'max_saps': 10,
-                                     'cpu_pct': 1.0, 'active_endpoints': 0, 'active_run': None,
-                                     'clock_unix_ms': int(time.time() * 1000), 'pools': []})
+                    h = {'worker': outer.name, 'version': 't', 'max_endpoints': 100, 'max_saps': 10,
+                         'cpu_pct': 1.0, 'active_endpoints': 0, 'active_run': None,
+                         'clock_unix_ms': int(time.time() * 1000), 'pools': []}
+                    if outer.behaviour.get('media') is not None:
+                        h['media'] = outer.behaviour['media']
+                    self._send(200, h)
                 elif self.path.startswith('/runs/'):
                     self._send(200, {'state': outer.state, 'counters': {}})
                 else:
@@ -242,6 +245,58 @@ class Compile(unittest.TestCase):
                                          'flow': [{'step': 'group_call', 'from': 'a', 'group': 'g1'}]})
         with self.assertRaises(C.CompileError):
             C.compile_run('r3', sc2, topo, topo_doc, None, {}, TW.discover(topo_doc), lambda w: 'x:1', 1, None)
+
+    def test_media_plane_samples_and_plan(self):
+        """샘플 발췌(RunStart.samples)·sample/loop/rtp 의 워커 계약 전달 · 계획 미리보기의 샘플 파일 대조·RTP 상한·모드 경고."""
+        from services import tester_workers as TW
+        from services import tester_plan as P
+        w1 = FakeWorker('w1', {'media': {'rtp_streams': 0, 'max_rtp_streams': 2, 'sample_dir': '/s', 'files': ['rb.pcmu']}})
+        topo_doc = _topology([w1])
+        topo_doc['media'] = {'samples': {'rb': {'pcmu': 'rb.pcmu', 'pcma': 'rb.pcma', 'amr-wb': 'synthetic'}, 'unused': {'pcmu': 'u.pcmu'}}}
+        topo = M.Topology.model_validate(topo_doc)
+        flow = [{'step': 'register', 'who': ['a', 'b']},
+                {'step': 'invite', 'from': 'a', 'to': 'b', 'media': {'audio': 'pcmu', 'rtp': 'explicit'}},
+                {'step': 'answer', 'who': ['b']},
+                {'step': 'media_send', 'who': ['a'], 'sample': 'rb', 'loop': False, 'after_ms': 100},
+                {'step': 'media_hold', 'seconds': 4, 'during': [{'at_s': 2, 'step': 'media_stop', 'who': ['a']}]},
+                {'step': 'bye', 'from': 'a'}]
+        roles = {'a': {'pool': 'volte_ue', 'count': 2}, 'b': {'pool': 'volte_ue', 'disjoint_from': 'a', 'count': 2}}
+        sc = M.Scenario.model_validate({'id': 'UT-MEDIA', 'roles': roles, 'flow': flow})
+        plan = C.compile_run('r5', sc, topo, topo_doc, None, {}, TW.discover(topo_doc), lambda w: 'x:1', 1, None)
+        run = plan['workers']['w1']['run']
+        self.assertEqual(run['samples'], {'rb': {'pcmu': 'rb.pcmu', 'pcma': 'rb.pcma', 'amr-wb': 'synthetic'}})   # 참조한 것만
+        steps = {s['step']: s for s in run['steps']}
+        self.assertEqual(steps['invite']['media']['rtp'], 'explicit')
+        self.assertEqual((steps['media_send']['sample'], steps['media_send']['loop'], steps['media_send']['after_ms']), ('rb', False, 100))
+        self.assertEqual([s['step'] for s in run['steps']][4:7], ['media_hold', 'media_stop', 'media_hold'])
+        # 계획 미리보기 — 워커 샘플 디렉터리에 rb.pcma 가 없다 → 오류, 동시 2 인스턴스 × 역할 2 = RTP 4 > 상한 2 → 경고
+        out = P.build_plan(sc, topo, topo_doc, None, {}, 2, 5.0)
+        self.assertFalse(out['ok'])
+        self.assertTrue(any('rb.pcma' in e for e in out['errors']), out['errors'])
+        self.assertTrue(any('MaxRtpStreams' in w for w in out['warnings']), out['warnings'])
+        self.assertEqual(out['media'], {'modes': ['explicit'], 'uses_rtp': True})
+        # 라이브러리에 없는 샘플 = 컴파일 오류
+        flow2 = [dict(f) for f in flow]
+        flow2[3] = {**flow2[3], 'sample': 'nope'}
+        sc2 = M.Scenario.model_validate({'id': 'UT-MEDIA2', 'roles': roles, 'flow': flow2})
+        with self.assertRaises(C.CompileError):
+            C.compile_run('r6', sc2, topo, topo_doc, None, {}, TW.discover(topo_doc), lambda w: 'x:1', 1, None)
+        # 워커가 보유 샘플을 좁혀 선언했는데 그 안에 없다 → 오류
+        topo_doc['workers'][0]['media'] = {'samples': ['other']}
+        topo3 = M.Topology.model_validate(topo_doc)
+        out3 = P.build_plan(sc, topo3, topo_doc, None, {}, 1, None)
+        self.assertTrue(any('보유하지 않는다' in e for e in out3['errors']), out3['errors'])
+        # 시그널링 전용 — RTP 기대치 경고
+        sig = M.Scenario.model_validate({'id': 'UT-SIG', 'roles': roles, 'flow': [
+            {'step': 'register', 'who': ['a', 'b']}, {'step': 'invite', 'from': 'a', 'to': 'b', 'media': {'rtp': 'none'}},
+            {'step': 'answer', 'who': ['b']}, {'step': 'media_hold', 'seconds': 2, 'expect': {'rtp_loss_pct': {'max': 1}}},
+            {'step': 'bye', 'from': 'a'}]})
+        del topo_doc['workers'][0]['media']
+        out4 = P.build_plan(sig, M.Topology.model_validate(topo_doc), topo_doc, None, {}, 1, None)
+        self.assertTrue(out4['ok'], out4['errors'])
+        self.assertTrue(any('시그널링 전용' in w for w in out4['warnings']), out4['warnings'])
+        self.assertFalse(out4['media']['uses_rtp'])
+        w1.close() if hasattr(w1, 'close') else None
 
     def test_disjoint_needs_room(self):
         # caller.count=8 이 풀 전체를 쓰면 disjoint 인 callee 창이 없다 → CompileError

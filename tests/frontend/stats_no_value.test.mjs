@@ -185,10 +185,12 @@ const vds = buildDataSource(vspec)
 
 // 한 버킷 — 시도 20 = 성립 12 + 거절 4 + 통화중 2 + 무응답 1 + 오류 1.
 //   `statuses` 는 그 실패들의 응답코드 합이다(200 은 담기지 않는다).
+//   `unknown`(사유 모름) = 사유도 응답코드도 없어 특정 못 하는 실패 — 응답코드 축에 없다.
 const VCALL = {
   attempts: 20, sessions: 12, talked: 12, completed: 11,
-  reasons: { normal: 11, incomplete: 1, rejected: 4, busy: 2, no_answer: 1, error: 1 },
+  reasons: { normal: 11, rejected: 4, busy: 2, no_answer: 1, error: 1, unknown: 1 },
   statuses: { 603: 2, 404: 1, 403: 1, 486: 2, 480: 1, 503: 1 },
+  open: 1, late_dropped: 0,
 }
 const VBUCKET = {
   totals: { volte: VCALL },
@@ -200,10 +202,20 @@ const vcol = k => vmx.columns.find(c => c.key === k)
 
 for (const [lbl, key, want] of [['거절', 'r_rejected', 4], ['통화중', 'r_busy', 2],
                                 ['무응답', 'r_noanswer', 1], ['오류', 'r_error', 1],
-                                ['비정상종료', 'r_incomplete', 1]]) {
+                                ['사유 모름', 'r_unknown', 1], ['미결', 'open', 1],
+                                ['보존초과', 'late', 0]]) {
   chk(`${lbl} 열이 있고 값이 ${want}`, (vrow.cells[key] ?? null) === want,
       String(vrow.cells[key]))
 }
+
+// 원천이 없는 사유(`timeout`·`incomplete`)에는 열을 두지 않는다 — 늘 0 인 칸은 "그런 일은
+//   안 일어난다" 는 잘못된 안심을 준다. 통계에서 그 사건은 미결 → 보존초과로 흐른다.
+for (const key of ['r_timeout', 'r_incomplete']) {
+  chk(`${key} 열은 없다(원천 없음)`, vcol(key) === undefined)
+}
+
+// 사유 모름 칸에는 응답코드 상세가 붙지 않는다 — 코드가 없다는 것이 그 칸의 정의다.
+chk('사유 모름 칸에 상세가 없다', !(vrow.details ?? {}).r_unknown)
 
 const vd = vrow.details ?? {}
 chk('거절 툴팁 = 603 2건 · 404 1건 · 403 1건',
@@ -258,6 +270,29 @@ chk('못 읽은 구간의 합계 시도는 빈칸', ncol('attempts').total === n
     JSON.stringify(ncol('attempts').total))
 const rmx = mds.toMatrix(MISS)
 chk('읽은 구간의 합계 시도는 0', rmx.columns.find(c => c.key === 'attempts').total === 0)
+
+// ── [10] 묶음(비율 + 그 근거) 경계 ─────────────────────────────────────────
+//   열이 16개를 넘어 가로로 길어지면 어디까지가 한 벌인지 안 보인다. 소스가 선언한 `group`
+//   이 그대로 넘어와야 렌더러가 세트가 바뀌는 자리에 선을 긋는다.
+console.log('[10] 묶음 경계')
+const gcols = mds.toMatrix(MISS).columns
+const gmap = Object.fromEntries(gcols.map(c => [c.key, c.group]))
+chk('열에 묶음 키가 실려 온다', gcols.every(c => !!c.group),
+    JSON.stringify(gcols.filter(c => !c.group).map(c => c.key)))
+// NER 열은 표에 두지 않는다 — 표의 열들로 계산되는 파생값이다(지표 카드에는 남는다).
+chk('NER 열은 표에 없다', gmap.ner === undefined)
+chk('드롭률·드롭·정상종료가 한 묶음', gmap.drop === gmap.dropped && gmap.drop === gmap.completed)
+chk('완료율 열은 표에 없다(드롭률과 여집합)', gmap.comp === undefined)
+chk('실패 사유 다섯이 한 묶음',
+    new Set(['r_rejected', 'r_busy', 'r_noanswer', 'r_error', 'r_unknown']
+      .map(k => gmap[k])).size === 1)
+// 성공률과 그 하락 사유는 **한 묶음**이다 — 성공률이 낮은 이유가 바로 오른쪽에 있다.
+chk('성공률과 실패 사유가 한 묶음', gmap.r_rejected === gmap.success)
+chk('기준 수량(시도·성립)은 다른 묶음', gmap.attempts !== gmap.success)
+chk('미결·보존초과가 한 묶음이고 사유와 다르다',
+    gmap.open === gmap.late && gmap.open !== gmap.r_unknown)
+// 첫 열(시도)도 자기 묶음을 갖는다 — 시각 열과의 경계에도 선이 그어진다.
+chk('첫 데이터 열에도 묶음이 있다', !!gmap.attempts && gmap.attempts !== gmap.success)
 
 console.log(`\n합계: ${pass} pass / ${fail} fail`)
 process.exit(fail ? 1 : 0)

@@ -56,8 +56,10 @@ class Host(_Strict):
 
 
 class WorkerMedia(_Strict):
-    samples: List[str] = Field(default_factory=list, description='워커가 보유한 미디어 샘플 id(§7 ⓖ) — health 보고와 대조')
-    max_rtp_streams: Optional[int] = Field(default=None, ge=0)
+    samples: List[str] = Field(default_factory=list,
+                               description='이 워커가 보유한다고 선언한 샘플 id(topology.media.samples 의 키) — 비면 전부 보유로 본다. '
+                                           '실제 파일은 health media.files 와 대조')
+    max_rtp_streams: Optional[int] = Field(default=None, ge=0, description='RTP 를 쓰는 단말 동시 상한 선언(워커 Media.MaxRtpStreams 와 같은 뜻 — 계획 미리보기 용량 경고)')
 
 
 class Worker(_Strict):
@@ -357,13 +359,29 @@ class Layout(_Strict):
     items: Dict[str, LayoutItem] = Field(default_factory=dict)
 
 
-class MediaSample(_Strict):
-    """샘플 라이브러리 항목(§7 ⓖ) — 코덱 → 파일 경로 또는 synthetic."""
-    model_config = ConfigDict(extra='allow')
+# 샘플이 파일로 가질 수 있는 코덱 — 워커 송신기(libcsim CRtpThread)가 읽는 raw 형식: amr-wb = 61 B 프레임, pcmu/pcma = 160 B(20 ms)
+SAMPLE_CODECS = ('amr-wb', 'pcmu', 'pcma')
 
 
 class TopologyMedia(_Strict):
-    samples: Dict[str, Dict[str, str]] = Field(default_factory=dict, description='id → {코덱: 파일|synthetic}')
+    """미디어 샘플 라이브러리(§4 미디어 평면) — id → {코덱: 워커 샘플 디렉터리(Media.SampleDir) 안 상대 경로 | 'synthetic'}.
+    합의 코덱에 해당하는 항목이 없으면 그 코덱은 합성으로 나간다."""
+    samples: Dict[str, Dict[str, str]] = Field(default_factory=dict, description='id → {amr-wb|pcmu|pcma: 파일|synthetic}')
+
+    @field_validator('samples')
+    @classmethod
+    def _samples(cls, v):
+        for sid, m in v.items():
+            if not re.match(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$', sid):
+                raise ValueError(f'media.samples 의 id {sid!r} 는 영숫자·_.- 64자 이내')
+            if not m:
+                raise ValueError(f'media.samples.{sid} 에 코덱 항목이 없다')
+            for codec, f in m.items():
+                if codec not in SAMPLE_CODECS:
+                    raise ValueError(f'media.samples.{sid}.{codec} — 코덱은 {list(SAMPLE_CODECS)} 중 하나')
+                if not f or f.startswith('/') or '..' in f:
+                    raise ValueError(f'media.samples.{sid}.{codec}={f!r} — 워커 샘플 디렉터리 안의 상대 경로 또는 synthetic')
+        return v
 
 
 # ── 워커 계약(PoolCreate.target_csp) — 컨트롤러가 토폴로지 노드 참조에서 파생한다. 워커 계약은 그대로다 ──
@@ -602,17 +620,21 @@ StepKind = Literal[
     'hold', 'resume', 'dtmf',
     'refer', 'replaces', 'join', 'pickup', 'subscribe', 'publish',
     'group_call', 'floor_request', 'floor_release', 'sds_send', 'sds_recv',
-    'media_hold', 'wait', 'expect',
+    'media_hold', 'media_send', 'media_stop', 'wait', 'expect',
 ]
 
 # 워커가 실행할 수 있는 단계(§4) — 나머지는 모델에는 있지만 컴파일 시 거절한다(콘솔 팔레트는 회색).
 WORKER_STEPS = frozenset((
     'register', 'deregister', 'invite', 'progress', 'answer', 'reject', 'bye',
-    'hold', 'resume', 'dtmf', 'refer', 'media_hold', 'wait', 'expect',
+    'hold', 'resume', 'dtmf', 'refer', 'media_hold', 'media_send', 'media_stop', 'wait', 'expect',
 ))
 
 # media_hold.during 에 둘 수 있는 통화 중 동작(§7 ⓓ) — 컴파일러가 평평한 단계열로 푼다
-DURING_STEPS = ('dtmf', 'hold', 'resume', 'refer')
+DURING_STEPS = ('dtmf', 'hold', 'resume', 'refer', 'media_send', 'media_stop')
+
+# invite.media.rtp — 그 호의 미디어 평면(§4): auto = SDP 교환 즉시 기본 원천으로 송출 · none = 시그널링 전용(SDP 는 오퍼, RTP 없음)
+#   · explicit = 수신만 시작하고 송출은 media_send 가 부를 때
+RTP_MODES = ('auto', 'none', 'explicit')
 
 # 단계 어휘 표 — 콘솔 편집기 팔레트·속성 폼·kind 게이트의 정본(GET /scenarios/vocab).
 #   group   : 팔레트 묶음 · actor: 행위자 인자 꼴(who|from|fromto|seconds|none)
@@ -623,7 +645,7 @@ STEP_VOCAB = {
     'deregister':    {'group': 'reg',   'actor': 'who',     'kind': 'ue|trunk', 'metrics': ['code'], 'desc': 'run 종료 시 등록 해제 (epilogue)'},
     'wait':          {'group': 'reg',   'actor': 'seconds', 'kind': None,       'metrics': [], 'desc': '대기 (seconds)'},
     'invite':        {'group': 'call',  'actor': 'fromto',  'kind': None,       'metrics': ['code', 'srd_ms', 'ser_pct', 'seer_pct'], 'desc': 'INVITE from → to (비동기)'},
-    'progress':      {'group': 'peer',  'actor': 'who',     'kind': 'peer',     'metrics': ['early_media_pct', 'prack_pct'], 'desc': '183 early media · PRACK (피어)'},
+    'progress':      {'group': 'peer',  'actor': 'who',     'kind': 'peer',     'metrics': ['early_media_pct', 'early_rtp_pct', 'prack_pct'], 'desc': '183 early media · PRACK (피어)'},
     'answer':        {'group': 'call',  'actor': 'who',     'kind': None,       'metrics': ['code', 'srd_ms', 'ser_pct'], 'desc': '착신 대기 → after_ms 뒤 200'},
     'reject':        {'group': 'call',  'actor': 'who',     'kind': None,       'metrics': ['code', 'q850_rx_pct'], 'desc': '착신 대기 → payload 코드로 거절'},
     'bye':           {'group': 'call',  'actor': 'from',    'kind': None,       'metrics': ['sdd_ms', 'code', 'scr_pct', 'q850_rx_pct', 'dtmf_rx_pct'], 'desc': 'BYE → 최종 응답 (SDD)'},
@@ -631,6 +653,8 @@ STEP_VOCAB = {
     'hold':          {'group': 'media', 'actor': 'from',    'kind': None,       'metrics': ['code'], 'desc': 're-INVITE sendonly'},
     'resume':        {'group': 'media', 'actor': 'from',    'kind': None,       'metrics': ['code'], 'desc': 're-INVITE sendrecv'},
     'dtmf':          {'group': 'media', 'actor': 'from',    'kind': None,       'metrics': ['dtmf_rx_pct'], 'desc': 'RFC 4733 숫자열 송신 (payload)'},
+    'media_send':    {'group': 'media', 'actor': 'who',     'kind': None,       'metrics': [], 'desc': 'RTP 송출 시작 — sample(생략 = 기본 원천)·loop·after_ms. SDP 교환 뒤에만'},
+    'media_stop':    {'group': 'media', 'actor': 'who',     'kind': None,       'metrics': [], 'desc': 'RTP 송출 정지 (수신은 계속)'},
     'refer':         {'group': 'xfer',  'actor': 'fromto',  'kind': 'peer',     'metrics': ['code'], 'desc': 'blind REFER from(전달자) → to'},
     'replaces':      {'group': 'xfer',  'actor': 'fromto',  'kind': None,       'metrics': ['code'], 'desc': 'INVITE-Replaces (RFC 3891)'},
     'join':          {'group': 'xfer',  'actor': 'fromto',  'kind': None,       'metrics': ['code'], 'desc': 'Join 합류 (RFC 3911)'},
@@ -657,6 +681,7 @@ METRIC_LABELS = {
     'floor_grant_ms': 'Floor grant 지연', 'floor_taken_ms': 'Floor taken 지연', 'floor_queue_ms': 'Floor 대기',
     'sds_delay_ms': 'SDS 지연', 'sds_disposition_pct': 'SDS disposition 률', 'dtmf_rx_pct': 'DTMF 수신률',
     'q850_rx_pct': 'Q.850 Reason 수신률', 'early_media_pct': '183 early media 률', 'prack_pct': 'PRACK 률',
+    'early_rtp_pct': 'early media RTP 도달률',
 }
 
 # Reason: Q.850 cause (ITU-T Q.850) — 편집기 목록
@@ -678,6 +703,8 @@ METRIC_NAMES = (
     'sds_delay_ms', 'sds_disposition_pct',
     # 피어 pbx/mgcf 축(D) — 비율은 발생기 관측(송신 대비 수신)
     'dtmf_rx_pct', 'q850_rx_pct', 'early_media_pct', 'prack_pct',
+    # 미디어 평면 — 183+SDP 뒤 200 전에 발신자가 실제 RTP 를 받았는가(시그널링 early_media_pct 와 별개)
+    'early_rtp_pct',
 )
 
 # 비율 지표의 분자/분모 카운터 — 요약·판정이 같은 정의를 쓴다(§5)
@@ -688,6 +715,7 @@ RATIO_METRICS = {
     'q850_rx_pct': ('q850_rx', 'q850_tx'),          # Reason Q.850 수신 / 송신 (B2BUA 투과 여부)
     'early_media_pct': ('early_media', 'progress_tx'),   # 발신자에 도달한 183+SDP / 피어가 낸 183
     'prack_pct': ('prack_rx', 'progress_tx'),       # 피어 UAS 가 받은 PRACK / 낸 신뢰 183
+    'early_rtp_pct': ('early_rtp_ok', 'progress_tx'),   # 200 전에 RTP(≥ 5 패킷)를 받은 발신자 / 피어가 낸 183
 }
 
 
@@ -711,16 +739,20 @@ Expectation = Union[int, float, Percentiles]
 class Media(_Strict):
     audio: Optional[str] = Field(default='amr-wb', description='amr-wb | amr | pcmu | pcma | g722')
     video: Optional[str] = Field(default=None, description='h264 | none')
+    rtp: Literal['auto', 'none', 'explicit'] = Field(
+        default='auto', description='미디어 평면 — auto: SDP 교환 즉시 송출 · none: 시그널링 전용 · explicit: media_send 가 부를 때만 송출')
 
 
 class During(_Strict):
     """media_hold 유지 구간 안 시각 지정 동작(§7 ⓓ) — at_s = 확립 뒤 경과 초. 컴파일러가 `hold at_s → 동작 → hold 나머지` 로 푼다."""
     at_s: float = Field(ge=0)
-    step: Literal['dtmf', 'hold', 'resume', 'refer']
+    step: Literal['dtmf', 'hold', 'resume', 'refer', 'media_send', 'media_stop']
     who: Optional[List[str]] = None
     from_: Optional[str] = Field(default=None, alias='from')
     to: Optional[str] = None
     payload: Optional[str] = None
+    sample: Optional[str] = Field(default=None, description='media_send — 샘플 id(topology.media.samples). 생략 = 풀 기본 원천')
+    loop: Optional[bool] = Field(default=None, description='media_send — false 면 샘플 끝에서 송출 정지(기본 true)')
     expect: Dict[str, Expectation] = Field(default_factory=dict)
 
     @model_validator(mode='after')
@@ -731,6 +763,8 @@ class During(_Strict):
             raise ValueError('during dtmf 는 payload 에 숫자열(0-9 * # A-D)이 필요하다')
         if self.step == 'refer' and not (self.from_ and self.to):
             raise ValueError('during refer 는 from 과 to 가 필요하다')
+        if (self.sample is not None or self.loop is not None) and self.step != 'media_send':
+            raise ValueError('sample/loop 은 media_send 에만 둔다')
         return self
 
 
@@ -747,6 +781,8 @@ class Step(_Strict):
     cause: Optional[int] = Field(default=None, ge=1, le=127,
                                  description='bye/reject 의 Reason: Q.850;cause= (RFC 3326 — MGCF 종료 사유, 16=정상 34=회선 없음)')
     during: Optional[List[During]] = Field(default=None, description='media_hold 만 — 유지 구간 안 통화 중 동작(at_s 순)')
+    sample: Optional[str] = Field(default=None, description='media_send — 샘플 id(topology.media.samples). 생략 = 풀 기본 원천')
+    loop: Optional[bool] = Field(default=None, description='media_send — false 면 샘플 끝에서 송출 정지(기본 true)')
     expect: Dict[str, Expectation] = Field(default_factory=dict)
 
     @field_validator('expect')
@@ -762,7 +798,7 @@ class Step(_Strict):
         if self.step in ('invite', 'refer', 'bye', 'sds_send', 'hold', 'resume', 'dtmf') and not (self.from_ or self.who):
             raise ValueError(f'{self.step} 단계는 from 또는 who 가 필요하다')
         if self.step in ('register', 'deregister', 'answer', 'reject', 'progress', 'subscribe', 'publish',
-                         'floor_request', 'floor_release', 'sds_recv') and not self.who:
+                         'floor_request', 'floor_release', 'sds_recv', 'media_send', 'media_stop') and not self.who:
             raise ValueError(f'{self.step} 단계는 who 가 필요하다')
         if self.step in ('media_hold', 'wait') and self.seconds is None:
             raise ValueError(f'{self.step} 단계는 seconds 가 필요하다')
@@ -773,6 +809,10 @@ class Step(_Strict):
             raise ValueError('refer 단계는 from(전달자)과 to(전달 대상 역할)가 필요하다')
         if self.cause is not None and self.step not in ('bye', 'reject'):
             raise ValueError('cause 는 bye/reject 단계에만 둔다')
+        if (self.sample is not None or self.loop is not None) and self.step != 'media_send':
+            raise ValueError('sample/loop 은 media_send 단계에만 둔다')
+        if self.media is not None and self.media.rtp != 'auto' and self.step != 'invite':
+            raise ValueError('media.rtp 는 invite 단계에만 둔다')
         if self.during:
             if self.step != 'media_hold':
                 raise ValueError('during 은 media_hold 단계에만 둔다')
@@ -821,7 +861,32 @@ class Scenario(_Strict):
                 for ref in [*(d.who or []), d.from_, d.to]:
                     if ref and ref not in names:
                         raise ValueError(f'flow[{i}].during ({d.step}) 가 정의되지 않은 역할 {ref!r} 을 참조한다')
+        # 송출 제어(media_send/media_stop)는 그 호에서 SDP 가 오간 뒤(183 progress 또는 200 answer)에만, rtp: none 인 호에는 못 둔다
+        rtp, sdp = None, False
+        for i, s in enumerate(self.flow):
+            if s.step == 'invite':
+                rtp, sdp = (s.media.rtp if s.media else 'auto'), False
+            elif s.step in ('answer', 'progress'):
+                sdp = True
+            elif s.step == 'bye':
+                rtp, sdp = None, False
+            ctl = [s.step] if s.step in ('media_send', 'media_stop') else []
+            ctl += [d.step for d in (s.during or []) if d.step in ('media_send', 'media_stop')]
+            for c in ctl:
+                if rtp is None or not sdp:
+                    raise ValueError(f'flow[{i}] {c} 는 invite 뒤 SDP 가 오간 다음(progress/answer 뒤)에만 둔다')
+                if rtp == 'none':
+                    raise ValueError(f'flow[{i}] {c} — 그 호의 invite.media.rtp 가 none(시그널링 전용)이다')
         return self
+
+    def sample_refs(self) -> List[str]:
+        """이 시나리오가 참조하는 샘플 id(순서 보존·중복 제거)."""
+        out: List[str] = []
+        for s in self.flow:
+            for x in [s, *(s.during or [])]:
+                if x.step == 'media_send' and x.sample and x.sample not in out:
+                    out.append(x.sample)
+        return out
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -940,6 +1005,8 @@ class CompiledStep(_Strict):
     group: Optional[str] = None
     payload: Optional[str] = None
     cause: Optional[int] = None
+    sample: Optional[str] = None
+    loop: Optional[bool] = None
     expect: Dict[str, Expectation] = Field(default_factory=dict)
 
 
@@ -951,6 +1018,8 @@ class RunStart(_Strict):
     role_slices: Dict[str, List[int]] = Field(
         default_factory=dict, description='역할 → 이 워커가 맡는 신원 인덱스 [begin, end) — 워커 분산')
     steps: List[CompiledStep] = Field(min_length=1)
+    samples: Dict[str, Dict[str, str]] = Field(
+        default_factory=dict, description='이 시나리오가 참조하는 샘플 — id → {코덱: 워커 샘플 디렉터리 안 파일|synthetic} (topology.media.samples 발췌)')
     rate_saps: float = Field(ge=0, description='이 워커 몫의 시도율 (컨트롤러가 워커 수로 나눔)')
     max_instances: Optional[int] = Field(default=None, ge=1,
                                          description='이 워커가 발생시킬 인스턴스 상한 — 단발(기능) 실행. 다 끝나면 워커가 run 을 스스로 닫는다')
@@ -974,6 +1043,13 @@ class WorkerPoolState(_Strict):
     registered: int = 0
 
 
+class WorkerHealthMedia(_Strict):
+    rtp_streams: int = Field(default=0, ge=0, description='RTP 를 쓰는 단말 수(진행 중 인스턴스의 단말, rtp: none 제외)')
+    max_rtp_streams: int = Field(default=0, ge=0, description='Media.MaxRtpStreams — 0 = 제한 없음')
+    sample_dir: str = ''
+    files: List[str] = Field(default_factory=list, description='샘플 디렉터리의 파일 이름 — 컨트롤러가 샘플 라이브러리와 대조')
+
+
 class WorkerHealth(_Strict):
     """GET /health 응답 — 용량 선언 + 시계 확인(§6.1)."""
     worker: str
@@ -985,6 +1061,8 @@ class WorkerHealth(_Strict):
     active_run: Optional[str] = None
     clock_unix_ms: int = Field(description='워커 시각 — 컨트롤러가 오차를 계산, > 50 ms 면 경고')
     pools: List[WorkerPoolState] = Field(default_factory=list)
+    local_ip: Optional[str] = None
+    media: Optional[WorkerHealthMedia] = None
 
 
 # ──────────────────────────────────────────────────────────────────────────

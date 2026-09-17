@@ -429,7 +429,18 @@ OAM 미도달 502 `oam_unreachable`. 구현 `csc/src/handlers/dispatch_recording
 
 - **core `provision/`** (공유): `Pkce`(PKCE S256), `ProvisioningClient`(IdMS 로그인 + `/provisioning/me` 조회, OkHttp), `ProvisioningModels`(ProvisioningProfile/ServiceProfile/SipServer/AccountInfo/TokenSet), `ServiceProfile.toSipAccountConfig(loginId, displayName, countryCode)`.
 - **volte-client / ptt-client**: 첫 진입 = `LoginScreen` → `ProvisioningClient` → 자기 kind 프로파일을 `ConfigStore` 에 저장 → 홈. 수동 설정은 §5-1 수동 설정 모드.
-- 토큰: access_token 보관, 만료 시 재로그인(또는 refresh). SIP 자격(`sipHa1`) 미수신 시 등록하지 않는다.
+- 토큰 수명(SSO): access_token 은 1시간(서버 `IdMs.AccessTokenTtl`), refresh_token 은 오너앱이 공유 계정에 보관.
+  AccountManager 는 토큰 만료를 모르므로 두 겹으로 방어한다 —
+  ① **인증기**(`CimsAuthenticator.getAuthToken`) 가 캐시 토큰의 JWT `exp` 를 읽어(`JwtClaims`, 서명 검증 없음,
+     여유 60초) 만료(임박)면 `invalidateAuthToken` 후 refresh 로 새 토큰을 발급한다.
+  ② **호출자** 는 토큰 호출을 `TokenRetry` 로 감싼다 — 서버가 401 을 주면 `CimsAccounts.renewToken`(무효화 +
+     `getAuthToken`)으로 새 토큰을 받아 **정확히 1회** 재시도, 갱신 뒤에도 401 이면 계정 문제(refresh 만료·회수)로
+     재로그인 안내. 그 외 오류는 재시도하지 않는다. PTT 는 `PttController.withFreshToken`(GMS/CMS XCAP·MCData FD,
+     갱신은 직렬화), 프로비저닝은 `SsoProvisioner` 가 같은 규율. `CscClient` 의 비-2xx 는 `CscHttpException(code)`.
+  SIP 자격(`sipHa1`) 미수신 시 등록하지 않는다.
+  ⚠️ 갱신은 **CIMS 오너앱 프로세스**에서 일어난다(인증기 = `AuthenticatorService`). 그 앱이 배터리 최적화
+  예외 목록에 없으면 대기모드(doze)에서 netd 가 그 UID 의 망을 막아 갱신이 연결 타임아웃으로 실패하고,
+  호출 앱(PTT/VoLTE)이 doze 예외여도 소용없다 — 실측 09-17. 실패 사유는 `CimsAuth` 태그로 남는다.
 - 서버 엔드포인트 준비 전: 로그인/프로비저닝 실패 시 **수동설정으로 graceful fallback**.
 
 ### 5-1. 설정 화면·수동 설정 모드 (volte-client)
@@ -457,4 +468,4 @@ OAM 미도달 502 `oam_unreachable`. 구현 `csc/src/handlers/dispatch_recording
 
 - CSC 주소 기본값(빌드 설정) vs 입력 — 현재 입력(기본값 채움). 사내 배포 시 기본값 고정 가능.
 - 다중 서비스 동시(한 단말이 VoLTE+PTT 둘 다) — 현재는 앱별 단일 서비스. 통합 앱 시 확장.
-- refresh_token 회전·EncryptedSharedPreferences(토큰/비번 보관). (로그아웃은 §1-1 로 구현됨.)
+- EncryptedSharedPreferences(토큰/비번 보관). refresh_token 회전은 인증기가 반영(`setPassword`), 로그아웃은 §1-1 로 구현됨.

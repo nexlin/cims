@@ -133,7 +133,10 @@ CSP 발신 offer 의 형태를 per-call 폴백 없이 결정하기 위해, **단
   UE 키/서버 키)로 다시 싣는다. 판단 규칙은 PTT 와 동일(§4 표): A(발신) leg 는 offer 내용
   ×정책, B(착신) leg 는 정책×착신 바인딩 mediasec 능력으로 offer 형태(SAVP/AVP)를 결정하고,
   SAVP offer 에 crypto 없는/불일치 answer 는 호 종료(평문 폴백 금지). 키는 `RELAY_ADD`
-  (peer0)·`RELAY_MODIFY`(peer1/재협상) 의 `media_crypto[_video]` 로 CMP 에 내린다. 서버가
+  (peer0)·`RELAY_MODIFY`(peer1/재협상) 의 `media_crypto[_video]` 로 CMP 에 내린다.
+  **18x 의 SDP(early media)** 도 같은 검증으로 착신 leg 키를 그때 CMP 에 내린다(링백이 SRTP 로
+  온다 — [volte_flows.md](volte_flows.md) C1a). 어긋난 18x 는 SDP 를 떼고 전달하고 종료 판정은
+  200 에서 하며, 200 의 키가 18x 와 같으면 `media_crypto` 를 다시 싣지 않는다(컨텍스트 유지). 서버가
   전달한 re-INVITE 의 재-answer 재키잉은 `EventReInviteResponse` 가 감지해 키 변경 시에만
   MODIFY 를 재발행한다(불변 = 무동작 — CMP 세션 유지). 호 전환(REFER — attended/blind)·
   당겨받기도 SRTP 를 유지한다 — 원 통화의 relay 세션을 유지한 채 교체되는 leg 만

@@ -7,6 +7,7 @@
    (oam_base_service_split.md §5·§10). 통과가 깨지면 라이브 KPI 화면이 5 s 뒤 504 로 끊긴다.
 ④ tester_target — 피어 풀 시드 파생(도메인·번호 접두 규칙)·트렁크 REGISTER 비밀 해석·CspSeeder apply/restore.
 ⑤ 네이티브 `build/bin/csim_rtp_dtmf_test` — libcsim RTP 의 RFC 4733 telephone-event 송수신 루프백(빌드돼 있을 때만).
+⑥ 네이티브 `build/bin/csim_rtp_media_test` — 미디어 평면(RTP 모드 none/explicit·샘플 송출·정지·hold 정지) 루프백.
 """
 from __future__ import annotations
 
@@ -17,10 +18,10 @@ from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 
 _ID = "S1-UNIT-TESTER"
-_NAME = "계측기 계약/핸들러/오케스트레이터/피어 시드/게이트웨이 SSE unit test + libcsim RTP DTMF 루프백 (python3 -m unittest tests.test_tester_models tests.test_tester_handler tests.test_tester_run tests.test_tester_target tests.test_gateway_stream · build/bin/csim_rtp_dtmf_test)"
+_NAME = "계측기 계약/핸들러/오케스트레이터/피어 시드/게이트웨이 SSE unit test + libcsim RTP DTMF·미디어 평면 루프백 (python3 -m unittest tests.test_tester_models tests.test_tester_handler tests.test_tester_run tests.test_tester_target tests.test_gateway_stream · build/bin/csim_rtp_dtmf_test · build/bin/csim_rtp_media_test)"
 _MODULES = ("tests.test_tester_models", "tests.test_tester_handler", "tests.test_tester_run", "tests.test_tester_target",
             "tests.test_gateway_stream")
-_NATIVE = os.path.join("build", "bin", "csim_rtp_dtmf_test")
+_NATIVES = ("csim_rtp_dtmf_test", "csim_rtp_media_test")
 
 
 @verify_item(
@@ -53,21 +54,22 @@ def unit_tester(ctx: VerifyContext) -> ItemResult:
         err = (e.stderr.decode("utf-8", "replace") if e.stderr else "") \
               + f"\n[TIMEOUT after 120s] {e}"
     full = (out + err).strip()
-    # 네이티브 RTP DTMF 루프백 — 빌드 산출물이 있을 때만(없으면 결과에 표시만, python 시험 판정은 그대로)
-    native = os.path.join(ctx.repo_root, _NATIVE)
-    if os.path.isfile(native) and os.access(native, os.X_OK):
-        try:
-            nproc = subprocess.run([native], cwd=ctx.repo_root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                   timeout=30, text=True)
-            nlines = [l for l in nproc.stdout.splitlines() if "RTP STATS" not in l and "Floor recv" not in l]
-            full += "\n[csim_rtp_dtmf_test] " + " | ".join(nlines[-2:]) + f" (rc={nproc.returncode})"
-            if nproc.returncode != 0:
-                rc = rc or nproc.returncode
-        except subprocess.TimeoutExpired:
-            full += "\n[csim_rtp_dtmf_test] TIMEOUT"
-            rc = rc or -1
-    else:
-        full += f"\n[csim_rtp_dtmf_test] 미빌드({_NATIVE}) — 건너뜀"
+    # 네이티브 RTP 루프백 — 빌드 산출물이 있을 때만(없으면 결과에 표시만, python 시험 판정은 그대로)
+    for name in _NATIVES:
+        native = os.path.join(ctx.repo_root, "build", "bin", name)
+        if os.path.isfile(native) and os.access(native, os.X_OK):
+            try:
+                nproc = subprocess.run([native], cwd=ctx.repo_root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                       timeout=30, text=True)
+                nlines = [l for l in nproc.stdout.splitlines() if "RTP STATS" not in l and "Floor recv" not in l]
+                full += f"\n[{name}] " + " | ".join(nlines[-2:]) + f" (rc={nproc.returncode})"
+                if nproc.returncode != 0:
+                    rc = rc or nproc.returncode
+            except subprocess.TimeoutExpired:
+                full += f"\n[{name}] TIMEOUT"
+                rc = rc or -1
+        else:
+            full += f"\n[{name}] 미빌드(build/bin/{name}) — 건너뜀"
     tail = "\n".join(full.splitlines()[-30:])
     ctx.w(f"## {_ID} — 계측기 unit test")
     ctx.w("```")

@@ -43,8 +43,10 @@ export interface ScenarioStep {
   to?: string
   after_ms?: number
   seconds?: number | string
-  media?: { audio?: string; video?: string }
+  media?: { audio?: string; video?: string; rtp?: 'auto' | 'none' | 'explicit' }
   payload?: string
+  sample?: string
+  loop?: boolean
   cause?: number
   expect?: Record<string, unknown>
 }
@@ -144,7 +146,7 @@ export interface WorkerRow {
   health: {
     version?: string; max_endpoints?: number; max_saps?: number; cpu_pct?: number; active_endpoints?: number
     active_run?: string | null; clock_skew_ms?: number
-    media?: { rtp_streams?: number; max_rtp_streams?: number; samples?: string[] }
+    media?: { rtp_streams?: number; max_rtp_streams?: number; sample_dir?: string; files?: string[] }
     pools?: { pool: string; kind: string; endpoints: number; registered?: number }[]
   } | null
 }
@@ -315,6 +317,7 @@ export interface PlanResult {
   phases?: { prelude: number[]; body: number[]; epilogue: number[] }; procedure?: ProcedureRow[]
   bindings?: Record<string, unknown>; rate_total?: number; max_instances?: number | null; identities?: Record<string, number>
   peer_pools?: string[]; pinned?: string | null
+  samples?: Record<string, Record<string, string>>; media?: { modes: string[]; uses_rtp: boolean }
   seed?: { collection: string; count: number; names: string[]; note?: string }[]
   env?: { env: string; for: string }[]
   little?: { sdt_s: number; peak_rate: number; concurrent: number; rows: { rate: number; need: number; ok: boolean; short: string[] }[]; first_short_rate: number | null; recommend_max: number | null }
@@ -333,7 +336,7 @@ export interface ScenarioVocab {
   ratio_metrics: Record<string, [string, string]>
   thresholds: string[]
   q850: Record<string, string>
-  audio: string[]; video: string[]
+  audio: string[]; video: string[]; rtp_modes?: string[]; sample_codecs?: string[]
   evidence_kinds: string[]; profile_models: string[]
   pool_kinds: string[]; peer_profiles: string[]; transports: string[]; srtp: string[]; node_roles: string[]; target_kinds: string[]
   phases: Record<string, string>

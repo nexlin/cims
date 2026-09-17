@@ -20,11 +20,10 @@ bool CMcDataAsModule::IsEnabled() const {
 
 /**
  * 그룹 SDS 처리 (TS 24.282 group standard SDS, controlling function).
- * 처리했으면(성공·거부 모두) true — 거부 응답(403/413)은 여기서 직접 송신하며, 이후
- * RecvMessageRequest 의 자동 200 은 SIP 트랜잭션 상 후행 최종응답이라 클라이언트가 무시한다
- * (긴급경보 경로와 동일한 기존 계약).
+ * 처리했으면(성공·거부 모두) true 이고, 보낼 최종 응답 코드를 iStatus 로 돌려준다.
+ * Warning 헤더가 필요한 거부만 여기서 직접 응답하고 iStatus=0 으로 표시한다.
  */
-bool CMcDataAsModule::OnMessage( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage ) {
+bool CMcDataAsModule::OnMessage( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage, int &iStatus ) {
     if ( pclsMessage == NULL ) return false;
     if ( gclsGroupMap.Contains( pszTo ) == false ) return false;  // 1:1 → 디스패처 기본 경로
 
@@ -55,13 +54,14 @@ bool CMcDataAsModule::OnMessage( const char *pszFrom, const char *pszTo, CSipMes
                                      "203 CIMS \"message too large to send over signalling control plane\"" );
             gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
         }
+        iStatus = 0;  // Warning 헤더가 붙어야 해서 여기서 직접 보냈다.
         return true;
     }
 
     // 게이트 1·2 — allow_sds/allow_fd + 발신자 멤버십 (media plane 과 공용, McDataGates)
     int iGate = McDataGateCheck( clsGroup, pszFrom, bFd );
     if ( iGate != 0 ) {
-        gclsDispatcher.SendResponse( pclsMessage, iGate );
+        iStatus = iGate;
         return true;
     }
 
@@ -70,7 +70,7 @@ bool CMcDataAsModule::OnMessage( const char *pszFrom, const char *pszTo, CSipMes
     if ( !bFd && clsGroup._maxSdsSize > 0 && iPayloadSize > clsGroup._maxSdsSize ) {
         CLog::Print( LOG_INFO, "McDataAs: group(%s) payload %d > max %d — reject 413", pszTo, iPayloadSize,
                      clsGroup._maxSdsSize );
-        gclsDispatcher.SendResponse( pclsMessage, SIP_REQUEST_ENTITY_TOO_LARGE );
+        iStatus = SIP_REQUEST_ENTITY_TOO_LARGE;
         return true;
     }
 
@@ -98,5 +98,6 @@ bool CMcDataAsModule::OnMessage( const char *pszFrom, const char *pszTo, CSipMes
 
     CLog::Print( LOG_INFO, "McDataAs: group SDS from(%s) to(%s) mcdata=%d size=%d fanout=%d conv(%s) msg(%s)", pszFrom,
                  pszTo, bMcData, iPayloadSize, iFanout, clsInfo.m_strConvId.c_str(), clsInfo.m_strMsgId.c_str() );
-    return true;  // RecvMessageRequest 가 200 OK 송신
+    iStatus = SIP_OK;
+    return true;
 }

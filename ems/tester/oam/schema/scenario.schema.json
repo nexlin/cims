@@ -38,6 +38,19 @@
           "default": null,
           "title": "From"
         },
+        "loop": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "media_send — false 면 샘플 끝에서 송출 정지(기본 true)",
+          "title": "Loop"
+        },
         "payload": {
           "anyOf": [
             {
@@ -50,12 +63,27 @@
           "default": null,
           "title": "Payload"
         },
+        "sample": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "media_send — 샘플 id(topology.media.samples). 생략 = 풀 기본 원천",
+          "title": "Sample"
+        },
         "step": {
           "enum": [
             "dtmf",
             "hold",
             "resume",
-            "refer"
+            "refer",
+            "media_send",
+            "media_stop"
           ],
           "title": "Step",
           "type": "string"
@@ -169,6 +197,17 @@
           "default": "amr-wb",
           "description": "amr-wb | amr | pcmu | pcma | g722",
           "title": "Audio"
+        },
+        "rtp": {
+          "default": "auto",
+          "description": "미디어 평면 — auto: SDP 교환 즉시 송출 · none: 시그널링 전용 · explicit: media_send 가 부를 때만 송출",
+          "enum": [
+            "auto",
+            "none",
+            "explicit"
+          ],
+          "title": "Rtp",
+          "type": "string"
         },
         "video": {
           "anyOf": [
@@ -382,6 +421,19 @@
           "default": null,
           "title": "Group"
         },
+        "loop": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "media_send — false 면 샘플 끝에서 송출 정지(기본 true)",
+          "title": "Loop"
+        },
         "media": {
           "anyOf": [
             {
@@ -405,6 +457,19 @@
           "default": null,
           "description": "dtmf: 숫자열(0-9*#A-D) · reject: 응답 코드",
           "title": "Payload"
+        },
+        "sample": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "media_send — 샘플 id(topology.media.samples). 생략 = 풀 기본 원천",
+          "title": "Sample"
         },
         "seconds": {
           "anyOf": [
@@ -446,6 +511,8 @@
             "sds_send",
             "sds_recv",
             "media_hold",
+            "media_send",
+            "media_stop",
             "wait",
             "expect"
           ],

@@ -196,6 +196,33 @@ UE-A                    CSP (Proxy)                 UE-B
   │ ◄── 200 OK ──────── │    [DB] state → ended      │
 ```
 
+### C1a. early media — 18x 의 SDP 도 미디어 앵커를 지난다
+
+착신 측(단말·IP-PBX·MGCF)이 183(또는 180)에 SDP 를 실으면 그 SDP 는 그 다이얼로그의 answer 다(RFC 3264 §5, 신뢰 응답이면
+RFC 3262 §5 — 뒤의 200 은 같은 SDP). 링백·안내음(RFC 3960, TS 24.628)이 200 전에 흐르므로 CSP 는 **200 과 같은 앵커링을 18x 에서**
+수행한다 — 미디어가 relay 를 우회하지 않고(녹취·SRTP 종단·NAT latch·토폴로지 은닉 유지) B-leg 주소가 발신자에 노출되지 않는다.
+
+```
+UE-A                    CSP                    CMP                     B (UE / 트렁크 피어)
+  │ ── INVITE (SDP a) ─► │ ── RELAY_ADD peer0=a ─► │                         │
+  │                      │ ── INVITE (SDP = relay B측) ─────────────────────► │
+  │                      │ ◄── 183 (SDP b) ─────────────────────────────────── │
+  │                      │ ── RELAY_MODIFY peer1=b ► │  [B-leg 주소·키 확정]  │
+  │ ◄── 183 (SDP = relay A측) │                      │ ◄══ early media RTP ══ │
+  │ ◄════════════ early media RTP (relay 경유) ═════ │                         │
+  │                      │ ◄── 200 (SDP b) ─────────────────────────────────── │
+  │                      │ ── RELAY_MODIFY peer1=b ► │  [같은 선언 — latch·SRTP 컨텍스트 유지]
+  │ ◄── 200 (SDP = relay A측) │                      │                         │
+```
+
+- 18x 에 SDP 가 없으면(일반 180) 그대로 전달한다 — relay 변경 없음.
+- SRTP(SDES) leg: 18x answer 의 `a=crypto` 를 200 과 같은 규칙으로 검증해 CMP 에 내린다. SAVP offer 에 crypto 가 없는/어긋난 18x 는
+  **SDP 를 떼고** 전달한다(early media 없음) — 평문 폴백 금지에 따른 호 종료 판정은 확정 answer(200)에서 한다. 200 의 키가 18x 와
+  같으면 `RELAY_MODIFY` 에 `media_crypto` 를 싣지 않는다(CMP 컨텍스트 재생성 = replay 창·ROC 소실 방지).
+- 대표번호 포크(Flexible Alerting)의 대기 leg 18x 는 TAS 가 소비한다([dispatch_center.md](dispatch_center.md)) — 승자만 200 에서
+  relay 에 고정되므로 포크 중에는 early media 를 앵커링하지 않는다.
+- 검증: 계측기 `TRUNK-MGCF-EARLY-MEDIA` 의 `early_rtp_pct`(200 전에 발신자가 RTP 를 받았는가 — [test_instrument.md](test_instrument.md) §5).
+
 ### C2. DND 거부
 
 ```

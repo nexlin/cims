@@ -104,9 +104,10 @@ public:
     bool Registered() const { return m_bRegistered; }
 
     /** 발신 — fromUser(자기 범위) → toUser@toDomain, 다음 홉 = destIp:destPort(상대의 피어링 접속점).
-     *  반환 = Call-ID, 실패면 빈 문자열. */
+     *  iMediaMode = CRtpThread::EMediaMode(AUTO/NONE/EXPLICIT). 반환 = Call-ID, 실패면 빈 문자열. */
     std::string StartCall(const std::string& fromUser, const std::string& toUser, const std::string& toDomain,
-                          const std::string& destIp, int destPort, ESipTransport eTransport);
+                          const std::string& destIp, int destPort, ESipTransport eTransport,
+                          int iMediaMode = CRtpThread::E_MEDIA_AUTO);
     bool Ring(const std::string& callId, int iCode = 180);
     /** 착신 183 Session Progress + SDP answer(early media — 링백/안내음 RTP 송신 시작). INVITE 가 100rel 을 지원하고 config.prack 이면
      *  RSeq 를 싣는다(상대 PRACK → OnPeerPrack). 반환 0=성공, 488=공통 코덱 없음/SAVP, 481=대기 착신 없음. */
@@ -123,6 +124,13 @@ public:
     bool Refer(const std::string& callId, const std::string& toUser);
     /** RFC 4733 DTMF 숫자열 송신 — telephone-event 가 협상되지 않았으면 false. */
     bool SendDtmf(const std::string& callId, const std::string& digits);
+    /** 미디어 평면(test_instrument.md §4) — 착신 호의 RTP 모드는 Progress/Answer 전에 정한다(발신은 StartCall 인자). */
+    bool SetMediaMode(const std::string& callId, int iMediaMode);
+    /** 송출 시작 — bDefault 면 풀 기본 원천, 아니면 코덱별 샘플 파일(빈 값 = 합성). SDP 교환 전(RTP 미기동)이면 false. */
+    bool MediaSend(const std::string& callId, bool bDefault, const std::string& amrWbFile, const std::string& pcmuFile,
+                   const std::string& pcmaFile, bool bLoop);
+    bool MediaStop(const std::string& callId);
+    unsigned long long RtpSent(const std::string& callId);
     bool HasCall(const std::string& callId);
     bool Connected(const std::string& callId);
     /** 수신 RTP 품질(누계) — 호가 없으면 false. */

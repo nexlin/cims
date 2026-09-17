@@ -1,6 +1,8 @@
 #include "Worker.h"
 
 #include <algorithm>
+#include <dirent.h>
+#include <sys/stat.h>
 #include <arpa/inet.h>
 #include <chrono>
 #include <cstdarg>
@@ -237,6 +239,27 @@ HttpResponse Worker::health() {
     if (m_run && m_runState != "stopped") j["active_run"] = Json(m_run->runId); else j["active_run"] = Json();
     j["clock_unix_ms"] = Json(nowMs());
     j["pools"] = pools;
+    // 미디어 평면(§4) — RTP 를 쓰는 단말 수·상한·샘플 디렉터리의 파일 목록(컨트롤러가 토폴로지 샘플 라이브러리와 대조)
+    Json media = Json::Object();
+    media["rtp_streams"] = Json(rtpStreams());
+    media["max_rtp_streams"] = Json((long long)m_cfg.maxRtpStreams);
+    media["sample_dir"] = Json(m_cfg.sampleDir);
+    Json files = Json::Array();
+    if (!m_cfg.sampleDir.empty()) {
+        if (DIR* dp = opendir(m_cfg.sampleDir.c_str())) {
+            std::vector<std::string> names;
+            while (struct dirent* de = readdir(dp)) {
+                if (de->d_name[0] == '.') continue;
+                struct stat sb;
+                if (stat((m_cfg.sampleDir + "/" + de->d_name).c_str(), &sb) == 0 && S_ISREG(sb.st_mode)) names.push_back(de->d_name);
+            }
+            closedir(dp);
+            std::sort(names.begin(), names.end());
+            for (size_t i = 0; i < names.size() && i < 500; ++i) files.push(Json(names[i]));
+        }
+    }
+    media["files"] = files;
+    j["media"] = media;
     return jsonResp(200, j);
 }
 
@@ -393,7 +416,32 @@ HttpResponse Worker::poolDelete(const std::string& name) {
 }
 
 static const char* kSupported[] = { "register", "deregister", "invite", "answer", "reject", "bye",
-                                    "media_hold", "wait", "expect", "progress", "hold", "resume", "dtmf", "refer" };
+                                    "media_hold", "wait", "expect", "progress", "hold", "resume", "dtmf", "refer",
+                                    "media_send", "media_stop" };
+
+static int rtpModeOf(const Json& media) {
+    std::string m = media["rtp"].asString("auto");
+    return m == "none" ? CRtpThread::E_MEDIA_NONE : m == "explicit" ? CRtpThread::E_MEDIA_EXPLICIT : CRtpThread::E_MEDIA_AUTO;
+}
+
+/** 샘플 파일 — 샘플 디렉터리 안의 상대 경로만(절대 경로·`..` 거절). "synthetic"/빈 값은 합성(out 빈 문자열). */
+bool Worker::resolveSample(const std::string& file, std::string& out, std::string& err) const {
+    out.clear();
+    if (file.empty() || file == "synthetic") return true;
+    if (file[0] == '/' || file.find("..") != std::string::npos) { err = file + " — 샘플 디렉터리 안의 상대 경로만"; return false; }
+    if (m_cfg.sampleDir.empty()) { err = file + " — 워커에 Media.SampleDir 가 없다"; return false; }
+    out = m_cfg.sampleDir + "/" + file;
+    struct stat sb;
+    if (stat(out.c_str(), &sb) != 0 || !S_ISREG(sb.st_mode) || sb.st_size <= 0) { err = out + " — 파일 없음"; return false; }
+    return true;
+}
+
+long long Worker::rtpStreams() const {
+    long long n = 0;
+    for (auto& in : m_instances)
+        if (in->phase != Instance::DONE && in->rtpMode != CRtpThread::E_MEDIA_NONE) n += (long long)in->actors.size();
+    return n;
+}
 
 HttpResponse Worker::runStart(const Json& d) {
     auto spec = std::make_unique<RunSpec>();
@@ -421,6 +469,8 @@ HttpResponse Worker::runStart(const Json& d) {
         cs.cause = (int)s["cause"].asInt(0);
         cs.group = s["group"].asString();
         cs.payload = s["payload"].asString();
+        cs.sample = s["sample"].asString();
+        cs.loop = s["loop"].asBool(true);
         cs.media = s["media"];
         cs.expect = s["expect"];
         bool ok = false;
@@ -431,9 +481,22 @@ HttpResponse Worker::runStart(const Json& d) {
     if (!unsupported.empty()) {
         std::string list;
         for (auto& u : unsupported) list += (list.empty() ? "" : ",") + u;
-        return errResp(400, "unsupported_step", list + " — 워커는 register/invite/answer/reject/bye/media_hold/wait/expect/progress/hold/resume/dtmf/refer 만");
+        return errResp(400, "unsupported_step", list + " — 워커는 register/invite/answer/reject/bye/media_hold/wait/expect/progress/hold/resume/dtmf/refer/media_send/media_stop 만");
     }
     if (spec->steps.empty()) return errResp(400, "steps_required");
+    // 샘플 라이브러리(§4) — 컨트롤러가 토폴로지 media.samples 에서 이 시나리오가 참조하는 것만 보낸다. 파일은 지금 확인한다
+    for (auto& kv : d["samples"].items()) {
+        for (auto& ck : kv.second.items()) {
+            if (ck.first != "amr-wb" && ck.first != "pcmu" && ck.first != "pcma")
+                return errResp(400, "sample_codec_unsupported", kv.first + "." + ck.first + " — amr-wb|pcmu|pcma");
+            std::string path, serr;
+            if (!resolveSample(ck.second.asString(), path, serr)) return errResp(400, "sample_missing", kv.first + "." + ck.first + ": " + serr);
+            spec->samples[kv.first][ck.first] = path;
+        }
+    }
+    for (auto& cs : spec->steps)
+        if (cs.step == "media_send" && !cs.sample.empty() && !spec->samples.count(cs.sample))
+            return errResp(400, "sample_unknown", cs.sample + " — RunStart.samples 에 없다");
 
     std::lock_guard<std::mutex> lk(m_mtx);
     if (m_run && m_runState != "stopped" && m_runState != "idle") return errResp(409, "run_active", m_run->runId);
@@ -451,6 +514,8 @@ HttpResponse Worker::runStart(const Json& d) {
     for (auto& st : m_body)
         if (st.step == "register" || st.step == "deregister")
             return errResp(400, "register_in_body", "register/deregister 는 흐름의 앞(prelude)/끝(epilogue)에만 둘 수 있다");
+    m_bodyRtpMode = CRtpThread::E_MEDIA_AUTO;
+    for (auto& st : m_body) if (st.step == "invite") { m_bodyRtpMode = rtpModeOf(st.media); break; }
 
     // prelude 대상 단말 목록 + body 역할별 free 목록
     m_preludeList.clear();
@@ -572,6 +637,7 @@ void Worker::schedLoop() {
                     m_metrics.gauge("registered", (double)reg);
                     m_metrics.gauge("concurrent_sessions", (double)conc);
                     m_metrics.gauge("active_instances", (double)act);
+                    m_metrics.gauge("rtp_streams", (double)rtpStreams());
                     m_metrics.gauge("rate_saps", m_rate.load());
                     m_metrics.gauge("cpu_pct", m_cpuPct.load());
                     m_stream.send(m_metrics.flush(m_run->runId, m_cfg.name, (double)nowS).dump());
@@ -700,6 +766,8 @@ void Worker::onEvent(const Event& e) {
         break;
     case Event::INCOMING:
         ep->pendingInvite = true;
+        // 피어 착신 호는 엔진이 INVITE 수신 때 만든다 — Progress/Answer 전에 인스턴스의 RTP 모드를 입힌다
+        if (in && ep->isPeer()) ep->poolRef->peer->SetMediaMode(e.callId, in->rtpMode);
         if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "incoming:" + roleOf(in, ep)) {
             // answer/reject 단계가 착신을 기다리고 있었다 — after_ms 뒤 응답
             in->phase = Instance::WAIT_TIME;
@@ -717,6 +785,18 @@ void Worker::onEvent(const Event& e) {
         ep->pendingInvite = false;
         m_metrics.counter("sessions");
         m_metrics.timer("srd_ms", (double)e.ms);
+        if (in && in->progressTx && in->rtpMode != CRtpThread::E_MEDIA_NONE) {
+            // early media 의 미디어 평면 — 183+SDP 뒤 200 전까지 발신자가 실제로 RTP 를 받았는가(시그널링 early_media 와 별개).
+            //   이벤트 처리 지연(≤ 스케줄러 틱) 동안 200 뒤 패킷이 한둘 섞일 수 있어 5 패킷(100 ms) 이상을 도달로 본다.
+            unsigned long long rx = 0, lost = 0;
+            long long jit = 0;
+            if (ep->isPeer()) ep->poolRef->peer->RtpStats(e.callId, rx, lost, jit);
+            else rx = ep->s->m_clsRtpThread.m_ullRecvTotal.load();
+            m_metrics.counter("early_rtp_rx", (long long)rx);
+            if (rx >= 5) m_metrics.counter("early_rtp_ok");
+            else emitEvent("early media RTP not received before 200 (rx=" + std::to_string(rx) + ")", ep, "progress", 183, e.callId);
+            in->progressTx = false;
+        }
         if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind.rfind("callstart:", 0) == 0) {
             std::string role = in->awaitKind.substr(10);
             if (in->actors[role] == ep) advance(*in, now);
@@ -830,7 +910,7 @@ bool Worker::epStartCall(Endpoint* from, Endpoint* to, const Json& media) {
     if (from->isPeer()) {
         Pool* pool = from->poolRef;
         std::string callId = pool->peer->StartCall(from->id.user, to->id.user, to->id.domain, pool->targetIp, pool->targetPort,
-                                                   parseTransport(pool->transport));
+                                                   parseTransport(pool->transport), rtpModeOf(media));
         if (callId.empty()) return false;
         from->callId = callId;
         pool->byCall[callId] = from;
@@ -866,6 +946,29 @@ bool Worker::epRefer(Endpoint* from, Endpoint* to) {
     if (from->s->m_strInviteId.empty()) return false;
     from->s->BlindTransfer(to->id.user);
     return true;
+}
+
+void Worker::epSetMediaMode(Endpoint* ep, int mode) {
+    // UE 는 세션의 RTP 스레드에 — 다음 Start(새 호)부터 적용. 피어는 호마다(StartCall 인자 / INCOMING 이벤트)
+    if (!ep->isPeer()) ep->s->SetMediaMode(mode);
+}
+
+bool Worker::epMediaSend(Endpoint* ep, const CompiledStep& st) {
+    std::string amrwb, pcmu, pcma;
+    bool def = st.sample.empty();
+    if (!def) {
+        auto& m = m_run->samples[st.sample];
+        amrwb = m.count("amr-wb") ? m["amr-wb"] : "";
+        pcmu = m.count("pcmu") ? m["pcmu"] : "";
+        pcma = m.count("pcma") ? m["pcma"] : "";
+    }
+    if (ep->isPeer()) return !ep->callId.empty() && ep->poolRef->peer->MediaSend(ep->callId, def, amrwb, pcmu, pcma, st.loop);
+    return ep->s->MediaSend(def, amrwb, pcmu, pcma, st.loop);
+}
+
+bool Worker::epMediaStop(Endpoint* ep) {
+    if (ep->isPeer()) return !ep->callId.empty() && ep->poolRef->peer->MediaStop(ep->callId);
+    return ep->s->MediaStop();
 }
 
 bool Worker::epDtmf(Endpoint* ep, const std::string& digits) {
@@ -984,6 +1087,12 @@ void Worker::tickBody(long long now) {
     for (auto& inp : m_instances) {
         Instance& in = *inp;
         if (in.phase == Instance::WAIT_TIME && now >= in.waitUntilMs) {
+            if (in.pending == Instance::MEDIA) {
+                // media_send/media_stop 의 after_ms 가 지났다 — 같은 단계를 다시 실행(이번엔 동작)
+                in.phase = Instance::RUNNING;
+                execStep(in, now);
+                continue;
+            }
             if (in.pending == Instance::PROGRESS) {
                 // 183 early media(피어 UAS) — 발신자의 1xx 도달(RING 이벤트)까지 기다린다: CSP 가 183/SDP 를 전달하는지가 시험 대상
                 Endpoint* ep = in.actors[in.pendingRole];
@@ -996,6 +1105,7 @@ void Worker::tickBody(long long now) {
                     continue;
                 }
                 m_metrics.counter("progress_tx");
+                in.progressTx = true;
                 std::string caller = callerRole(in);
                 if (!caller.empty()) {
                     in.phase = Instance::WAIT_EVENT;
@@ -1122,13 +1232,23 @@ void Worker::launchInstance(long long now) {
         }
         actors[kv.first] = pick;
     }
+    // RTP 동시 상한(Media.MaxRtpStreams) — 넘으면 이 슬롯은 건너뛴다(단말 부족과 같은 skipped, 사유 카운터 따로)
+    if (m_cfg.maxRtpStreams > 0 && m_bodyRtpMode != CRtpThread::E_MEDIA_NONE &&
+        rtpStreams() + (long long)actors.size() > m_cfg.maxRtpStreams) {
+        for (auto& a : actors) m_free[a.first].push_back(a.second);
+        m_metrics.counter("skipped");
+        m_metrics.counter("skipped_rtp_cap");
+        return;
+    }
     auto in = std::make_unique<Instance>();
     in->id = m_nextInstanceId++;
     in->actors = actors;
     in->tStartMs = now;
+    in->rtpMode = m_bodyRtpMode;
     for (auto& a : actors) {
         a.second->inst = in.get();
         a.second->tStartCallMs = 0;
+        epSetMediaMode(a.second, in->rtpMode);
         if (a.second->s) a.second->s->m_clsRtpThread.ResetRecvStats();
     }
     Instance* raw = in.get();
@@ -1148,6 +1268,8 @@ void Worker::execStep(Instance& in, long long now) {
             if (!from || !to) { finishInstance(in, true, "invite: role missing", now); return; }
             from->tStartCallMs = now;
             in.expectCode = (int)st.expect["code"].asInt(0);
+            in.rtpMode = rtpModeOf(st.media);   // 이 호의 미디어 평면 — 인스턴스의 모든 단말(전달 대상 포함)에 같은 모드
+            for (auto& a : in.actors) epSetMediaMode(a.second, in.rtpMode);
             if (!epStartCall(from, to, st.media)) { finishInstance(in, true, "invite: StartCall refused (busy/stack?)", now); return; }
             m_metrics.counter("legs", 2);
             bool calleeActs = in.stepIdx + 1 < m_body.size() &&
@@ -1191,8 +1313,35 @@ void Worker::execStep(Instance& in, long long now) {
             in.phase = Instance::WAIT_TIME;
             in.waitUntilMs = now + (long long)st.seconds * 1000;
             in.pending = Instance::NONE;
-            // 대기가 끝나면 advance → 다음 단계 전에 RTP 표본을 뜬다 (bye 단계 진입 시)
+            in.mediaHeld = true;
+            // 대기가 끝나면 advance → RTP 표본은 bye 단계 진입 시 뜬다
             return;
+        }
+        if (st.step == "media_send" || st.step == "media_stop") {
+            // 송출 제어 — 그 역할이 SDP 를 주고받은 뒤(183+SDP 또는 200)에만. after_ms 는 실행 전 지연(WAIT_TIME 뒤 다시 이 단계로)
+            if (in.rtpMode == CRtpThread::E_MEDIA_NONE) { finishInstance(in, true, st.step + ": media.rtp=none 인 호", now); return; }
+            if (st.afterMs > 0 && in.pending != Instance::MEDIA) {
+                in.pending = Instance::MEDIA;
+                in.phase = Instance::WAIT_TIME;
+                in.waitUntilMs = now + st.afterMs;
+                return;
+            }
+            in.pending = Instance::NONE;
+            std::vector<std::string> roles = st.who;
+            if (roles.empty() && !st.from.empty()) roles.push_back(st.from);
+            for (auto& role : roles) {
+                Endpoint* ep = in.actors[role];
+                if (!ep) { finishInstance(in, true, st.step + ": role missing", now); return; }
+                bool ok = st.step == "media_send" ? epMediaSend(ep, st) : epMediaStop(ep);
+                if (!ok) {
+                    emitEvent(st.step + ": no media session (SDP 미교환)", ep, st.step, 0, ep->callId);
+                    finishInstance(in, true, st.step + ": " + role + " has no media session", now);
+                    return;
+                }
+                m_metrics.counter(st.step == "media_send" ? "media_send" : "media_stop");
+            }
+            in.stepIdx++;
+            continue;
         }
         if (st.step == "wait") {
             in.phase = Instance::WAIT_TIME;
@@ -1271,8 +1420,10 @@ void Worker::execStep(Instance& in, long long now) {
         if (st.step == "bye") {
             // media_hold 직후라면 RTP 품질 표본. DTMF 수신 수는 항상 표본(단계 dtmf 가 있었을 때만 값이 있다)
             for (auto& a : in.actors) sampleDtmf(a.second);   // RTP 표본이 카운터를 리셋하므로 먼저
-            if (in.stepIdx > 0 && m_body[in.stepIdx - 1].step == "media_hold")
+            if (in.mediaHeld && in.rtpMode != CRtpThread::E_MEDIA_NONE) {
                 for (auto& a : in.actors) sampleRtp(a.second);
+                in.mediaHeld = false;
+            }
             Endpoint* from = in.actors[st.from];
             if (!from) { finishInstance(in, true, "bye: role missing", now); return; }
             if (!from->inCall || !epHasCall(from)) {
@@ -1302,6 +1453,9 @@ void Worker::sampleRtp(Endpoint* ep) {
         CRtpThread& rt = ep->s->m_clsRtpThread;
         rx = rt.m_ullRecvTotal.load(); lost = rt.m_ullRecvLost.load(); jitterUs = rt.m_llRecvJitterUs.load();
     }
+    unsigned long long tx = ep->isPeer() ? ep->poolRef->peer->RtpSent(ep->callId) : ep->s->m_clsRtpThread.m_ullSentTotal.load();
+    logf("debug", "rtp sample %s(%s): tx=%llu rx=%llu lost=%llu jitter_us=%lld", roleOf(ep->inst, ep).c_str(), ep->id.user.c_str(), tx, rx, lost, jitterUs);
+    m_metrics.counter("rtp_tx", (long long)tx);
     m_metrics.counter("rtp_rx", (long long)rx);
     m_metrics.counter("rtp_lost", (long long)lost);
     if (rx + lost > 0) {
@@ -1320,6 +1474,7 @@ void Worker::releaseEndpoint(Endpoint* ep) {
     ep->inCall = false;
     ep->tStartCallMs = 0;
     if (ep->isPeer()) epClearCall(ep);
+    else ep->s->SetMediaMode(CRtpThread::E_MEDIA_AUTO);
     Instance* in = ep->inst;
     ep->inst = nullptr;
     if (in) for (auto& a : in->actors) if (a.second == ep) { m_free[a.first].insert(m_free[a.first].begin(), ep); break; }

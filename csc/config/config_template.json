@@ -864,6 +864,24 @@
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드.",
           "help": "비우면 UeInitConfig.Name 을 쓴다."
+        },
+        {
+          "key": "UserProfile.ParticipantType",
+          "label": "사용자 기능 범주 (ParticipantType)",
+          "type": "string",
+          "default": "user",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "TS 24.484 §8.3.2.7 — 사용자의 기능 범주(예: user, first responder, dispatch). 규격상 선택 요소지만 필수로 읽는 단말이 있어 항상 싣는다."
+        },
+        {
+          "key": "UserProfile.Language",
+          "label": "표시 이름 언어 태그 (xml:lang)",
+          "type": "string",
+          "default": "en",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "<Name>·<alias-entry> 의 xml:lang 값(예: en, ko). 한 문서 안에서 같은 값을 쓴다."
         }
       ],
       "scope": "service"

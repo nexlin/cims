@@ -67,6 +67,18 @@
           "title": "Idx",
           "type": "integer"
         },
+        "loop": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Loop"
+        },
         "media": {
           "anyOf": [
             {
@@ -89,6 +101,18 @@
           ],
           "default": null,
           "title": "Payload"
+        },
+        "sample": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sample"
         },
         "seconds": {
           "anyOf": [
@@ -126,6 +150,8 @@
             "sds_send",
             "sds_recv",
             "media_hold",
+            "media_send",
+            "media_stop",
             "wait",
             "expect"
           ],
@@ -175,6 +201,17 @@
           "default": "amr-wb",
           "description": "amr-wb | amr | pcmu | pcma | g722",
           "title": "Audio"
+        },
+        "rtp": {
+          "default": "auto",
+          "description": "미디어 평면 — auto: SDP 교환 즉시 송출 · none: 시그널링 전용 · explicit: media_send 가 부를 때만 송출",
+          "enum": [
+            "auto",
+            "none",
+            "explicit"
+          ],
+          "title": "Rtp",
+          "type": "string"
         },
         "video": {
           "anyOf": [
@@ -306,6 +343,17 @@
     "run_id": {
       "title": "Run Id",
       "type": "string"
+    },
+    "samples": {
+      "additionalProperties": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "description": "이 시나리오가 참조하는 샘플 — id → {코덱: 워커 샘플 디렉터리 안 파일|synthetic} (topology.media.samples 발췌)",
+      "title": "Samples",
+      "type": "object"
     },
     "scenario_id": {
       "title": "Scenario Id",

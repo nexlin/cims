@@ -36,6 +36,12 @@ public:
 	// SIP 메시지 전송 timeout 이벤트 핸들러
 	virtual bool SendTimeout( int iThreadId, CSipMessage * pclsMessage ) = 0;
 
+	// UDP keepalive(RFC 5626 §4.4.1 CRLF) 수신 이벤트 핸들러.
+	//  keepalive 는 SIP 메시지가 아니라 파서로 가지 않지만, UDP 도달 경로가 살아 있다는
+	//  유일한 신호라 응용에는 올린다. 본문에 신원이 없으므로 응용은 이 주소와 일치하는
+	//  바인딩의 생존 기록에만 써야 하고, 바인딩을 옮기는 근거로 삼아서는 안 된다.
+	virtual void EventKeepAlive( const char * pszIp, int iPort, ESipTransport eTransport ){};
+
 	// TCP/TLS 세션 종료 이벤트 핸들러
 	virtual void TcpSessionEnd( const char * pszIp, int iPort, ESipTransport eTransport ){};
 

@@ -253,17 +253,19 @@ bool CsimPeer::buildAnswer(Call& c) {
     c.rtp->m_iDtmfPt = dtmfPt;
     if (dtmfPt >= 0) c.rtp->m_iDtmfClock = dtmfClock;
     // 파일 미디어(AMR-WB)는 그 코덱으로 합의됐을 때만, 아니면 합성 PCMU
-    if (strcasecmp(e->m_strName.c_str(), "AMR-WB") != 0) c.rtp->SetMediaFile("");
+    c.rtp->m_bUseMediaFile = strcasecmp(e->m_strName.c_str(), "AMR-WB") == 0;
+    if (!c.rtp->m_bUseMediaFile) c.rtp->SetMediaFile("");
     c.answer = clsLocal;
     c.hasAnswer = true;
     return true;
 }
 
 std::string CsimPeer::StartCall(const std::string& fromUser, const std::string& toUser, const std::string& toDomain,
-                                const std::string& destIp, int destPort, ESipTransport eTransport) {
+                                const std::string& destIp, int destPort, ESipTransport eTransport, int iMediaMode) {
     if (!m_bStarted) return "";
     CRtpThread* rtp = newRtp();
     if (!rtp) return "";
+    rtp->SetMediaMode(iMediaMode);
     CSipCallRtp clsRtp;
     buildOffer(clsRtp, rtp);
     CSipCallRoute clsRoute;
@@ -416,6 +418,38 @@ bool CsimPeer::SendDtmf(const std::string& callId, const std::string& digits) {
     return rtp && rtp->SendDtmf(digits);
 }
 
+bool CsimPeer::SetMediaMode(const std::string& callId, int iMediaMode) {
+    std::lock_guard<std::mutex> lk(m_mtx);
+    auto it = m_calls.find(callId);
+    if (it == m_calls.end() || !it->second.rtp) return false;
+    it->second.rtp->SetMediaMode(iMediaMode);
+    return true;
+}
+
+bool CsimPeer::MediaSend(const std::string& callId, bool bDefault, const std::string& amrWbFile, const std::string& pcmuFile,
+                         const std::string& pcmaFile, bool bLoop) {
+    std::lock_guard<std::mutex> lk(m_mtx);
+    auto it = m_calls.find(callId);
+    if (it == m_calls.end() || !it->second.rtp || !it->second.rtp->MediaRunning()) return false;
+    if (bDefault) it->second.rtp->MediaSendDefault();
+    else it->second.rtp->MediaSend(amrWbFile, pcmuFile, pcmaFile, bLoop);
+    return true;
+}
+
+bool CsimPeer::MediaStop(const std::string& callId) {
+    std::lock_guard<std::mutex> lk(m_mtx);
+    auto it = m_calls.find(callId);
+    if (it == m_calls.end() || !it->second.rtp || !it->second.rtp->MediaRunning()) return false;
+    it->second.rtp->MediaStop();
+    return true;
+}
+
+unsigned long long CsimPeer::RtpSent(const std::string& callId) {
+    std::lock_guard<std::mutex> lk(m_mtx);
+    auto it = m_calls.find(callId);
+    return (it == m_calls.end() || !it->second.rtp) ? 0 : it->second.rtp->m_ullSentTotal.load();
+}
+
 bool CsimPeer::HasCall(const std::string& callId) {
     std::lock_guard<std::mutex> lk(m_mtx);
     return m_calls.count(callId) > 0;
@@ -513,7 +547,7 @@ void CsimPeer::EventCallRing(const char* pszCallId, int iSipStatus, CSipCallRtp*
     if (hasSdp && !early && rtp) {
         // early media — answer 코덱으로 송신 시작(링백 수신 통계도 여기서부터)
         const CSipCodecEntry* e = CSipCodecTable::FindByPt(pclsRtp->m_iCodec);
-        if (e) { rtp->m_iAudioPt = e->m_iPt; if (strcasecmp(e->m_strName.c_str(), "AMR-WB") != 0) rtp->SetMediaFile(""); }
+        if (e) { rtp->m_iAudioPt = e->m_iPt; rtp->m_bUseMediaFile = strcasecmp(e->m_strName.c_str(), "AMR-WB") == 0; if (!rtp->m_bUseMediaFile) rtp->SetMediaFile(""); }
         applyRemoteDtmf(rtp, *pclsRtp);
         rtp->ResetRecvStats();
         rtp->Start(pclsRtp->m_strIp.c_str(), pclsRtp->m_iPort);
@@ -538,7 +572,7 @@ void CsimPeer::EventCallStart(const char* pszCallId, CSipCallRtp* pclsRtp) {
     if (outbound && rtp && pclsRtp) {
         // answer 가 고른 코덱 — 파일 미디어는 AMR-WB 합의일 때만. 183 early media 로 이미 흐르면 목적지만 갱신
         const CSipCodecEntry* e = CSipCodecTable::FindByPt(pclsRtp->m_iCodec);
-        if (e) { rtp->m_iAudioPt = e->m_iPt; if (strcasecmp(e->m_strName.c_str(), "AMR-WB") != 0) rtp->SetMediaFile(""); }
+        if (e) { rtp->m_iAudioPt = e->m_iPt; rtp->m_bUseMediaFile = strcasecmp(e->m_strName.c_str(), "AMR-WB") == 0; if (!rtp->m_bUseMediaFile) rtp->SetMediaFile(""); }
         applyRemoteDtmf(rtp, *pclsRtp);
         if (!early) rtp->ResetRecvStats();
         rtp->Start(pclsRtp->m_strIp.c_str(), pclsRtp->m_iPort);
@@ -569,6 +603,7 @@ void CsimPeer::EventReInvite(const char* pszCallId, CSipCallRtp* pclsRemoteRtp, 
         auto it = m_calls.find(pszCallId);
         if (it == m_calls.end()) return;
         it->second.remoteHold = hold;
+        if (it->second.rtp) it->second.rtp->SetHoldPaused(hold);   // 상대가 sendonly/inactive 면 우리는 보내지 않는다
     }
     if (m_pObserver) m_pObserver->OnPeerReInvite(this, pszCallId, hold);
 }

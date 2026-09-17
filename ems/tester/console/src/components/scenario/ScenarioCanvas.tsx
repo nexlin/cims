@@ -9,6 +9,7 @@ import { ChevronDown, ChevronRight, Trash2, Copy, Plus, X } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
 import { Badge } from '@core/components/ui/badge'
 import { Input } from '@core/components/ui/input'
+import { Checkbox } from '@core/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { useToast } from '@core/components/Toast'
@@ -92,7 +93,7 @@ export default function ScenarioCanvas({ doc, onChange, onCommit, topologies, to
   const gapOver = (i: number) => (e: React.DragEvent) => { const d = dragRef.current; if (d && (d.type === 'newstep' || d.type === 'move')) { e.preventDefault(); setHot(`gap:${i}`) } }
   const gapDrop = (i: number) => (e: React.DragEvent) => { const d = dragRef.current; if (!d) return; e.preventDefault(); if (d.type === 'newstep') insertStep(d.step, i); else if (d.type === 'move') moveStep(d.idx, i); onDragEnd() }
   // 통화 유지 바 위 — 팔레트의 in-dialog 단계(새 during) 또는 기존 in-dialog 행(행 → during)
-  const holdAccepts = (d: Drag | null, i: number) => !!d && ((d.type === 'newstep' && S.INDIALOG.has(d.step)) || (d.type === 'move' && d.idx !== i && S.INDIALOG.has(doc.flow[d.idx]?.step)))
+  const holdAccepts = (d: Drag | null, i: number) => !!d && ((d.type === 'newstep' && S.DURING_OK.has(d.step)) || (d.type === 'move' && d.idx !== i && S.DURING_OK.has(doc.flow[d.idx]?.step)))
   const holdOver = (i: number) => (e: React.DragEvent) => { if (holdAccepts(dragRef.current, i)) { e.preventDefault(); e.stopPropagation(); setHot(`hold:${i}`) } }
   const holdDrop = (i: number) => (e: React.DragEvent) => {
     const d = dragRef.current; if (!holdAccepts(d, i) || !d) return
@@ -102,7 +103,7 @@ export default function ScenarioCanvas({ doc, onChange, onCommit, topologies, to
     if (d.type === 'move') { mutate(x => { const res = S.stepToDuring(x, d.idx, i, at); if (res) setSel({ kind: 'sub', ...res }) }); onDragEnd(); return }
     if (d.type !== 'newstep') return
     mutate(x => { const s = x.flow[i]; const peer = R.find(n => rp(n)?.kind === 'peer'); const from = d.step === 'refer' ? (peer ?? R[0]) : R[0]
-      const dd: During = { at_s: at, step: d.step as During['step'], from }
+      const dd: During = S.MEDIA_CTL.has(d.step) ? { at_s: at, step: d.step as During['step'], who: [R[0]] } : { at_s: at, step: d.step as During['step'], from }
       if (d.step === 'dtmf') dd.payload = '1234#'; if (d.step === 'refer') dd.to = R.find(n => n !== from) ?? R[0]
       s.during = [...(s.during ?? []), dd]; setSel({ kind: 'sub', idx: i, k: s.during.length - 1 }) })
     onDragEnd()
@@ -160,7 +161,9 @@ export default function ScenarioCanvas({ doc, onChange, onCommit, topologies, to
   const cx = (r: string) => ((R.indexOf(r) + 0.5) / n) * 100
   const stepLabel = (s: Step) => {
     switch (s.step) {
-      case 'invite': return (s.media ? [s.media.audio, s.media.video].filter(Boolean).join('/') : 'INVITE')
+      case 'invite': return (s.media ? [s.media.audio, s.media.video].filter(Boolean).join('/') : 'INVITE') + (s.media?.rtp && s.media.rtp !== 'auto' ? ` · rtp ${s.media.rtp}` : '')
+      case 'media_send': return `송출 ${s.sample ?? '기본 원천'}${s.loop === false ? ' · 1회' : ''}${s.after_ms ? ` · ${s.after_ms} ms` : ''}`
+      case 'media_stop': return '송출 정지'
       case 'answer': return `200 · ${s.after_ms ?? 0} ms`
       case 'reject': return `${s.payload ?? '4xx'} · ${s.after_ms ?? 0} ms${s.cause ? ` · Q.850 ${s.cause}` : ''}`
       case 'bye': return `BYE${s.cause ? ` · Q.850 ${s.cause}` : ''}`
@@ -182,7 +185,7 @@ export default function ScenarioCanvas({ doc, onChange, onCommit, topologies, to
         </span>
         <span className="absolute left-[6%] top-[3px] text-[10px] text-muted-foreground">통화 유지 {String(s.seconds ?? '?')} s · {so ? 'RTP 표본' : '세션 밖'}</span>
         {(s.during ?? []).map((d, k) => { const x = 6 + Math.max(0, Math.min(1, (d.at_s ?? 0) / len)) * 88; const a = d.from ?? (d.who ?? [])[0] ?? ''; const on = sel.kind === 'sub' && sel.idx === i && sel.k === k
-          const lab = d.step === 'dtmf' ? `DTMF ${d.payload ?? ''}` : d.step === 'refer' ? `REFER → ${d.to ?? '?'}` : d.step.toUpperCase()
+          const lab = d.step === 'dtmf' ? `DTMF ${d.payload ?? ''}` : d.step === 'refer' ? `REFER → ${d.to ?? '?'}` : d.step === 'media_send' ? `송출 ${d.sample ?? '기본'}` : d.step === 'media_stop' ? '송출 정지' : d.step.toUpperCase()
           return <span key={k} onPointerDown={e => { e.stopPropagation(); e.preventDefault(); if (!canWrite) { setSel({ kind: 'sub', idx: i, k }); return } const hb = (e.currentTarget.parentElement as HTMLElement).querySelector(`[data-hold="${i}"]`)!; setMk({ idx: i, k, rect: hb.getBoundingClientRect(), len }) }}
                        className={`absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize rounded-full border-2 bg-card ${on ? 'ring-2 ring-primary' : ''}`} style={{ left: `${x}%`, borderColor: kindColor(a) }} title={`${d.step} @ ${d.at_s}s · ${a} — 좌우로 끌면 시각, 위아래로 끌어 행 사이에 놓으면 독립 행`}>
             <span className={`absolute left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] ${k % 2 ? 'top-4' : '-top-4'}`}>+{d.at_s}s {a} {lab}</span></span> })}
@@ -367,11 +370,12 @@ function ProcedureTable({ doc, vocab, plan }: { doc: Doc; vocab: ScenarioVocab |
     const a = (s.who ?? []).join(', ') || s.from || ''
     switch (s.step) {
       case 'register': return `${a} 등록 (REGISTER)`; case 'deregister': return `${a} 등록 해제`
-      case 'invite': return `${(s as Step).from} → ${(s as Step).to} 발신${(s as Step).media ? ` (${[(s as Step).media!.audio, (s as Step).media!.video].filter(Boolean).join('/')})` : ''}`
+      case 'invite': return `${(s as Step).from} → ${(s as Step).to} 발신${(s as Step).media ? ` (${[(s as Step).media!.audio, (s as Step).media!.video].filter(Boolean).join('/')}${(s as Step).media!.rtp && (s as Step).media!.rtp !== 'auto' ? `, rtp ${(s as Step).media!.rtp}` : ''})` : ''}`
       case 'answer': return `${a} 착신 ${(s as Step).after_ms ?? 0} ms 뒤 응답`; case 'reject': return `${a} ${s.payload ?? ''} 거절${(s as Step).cause ? ` (Q.850 ${(s as Step).cause})` : ''}`
       case 'bye': return `${a} 종료 (BYE${(s as Step).cause ? `, Q.850 ${(s as Step).cause}` : ''})`; case 'media_hold': return `통화 유지 ${(s as Step).seconds} s`; case 'wait': return `대기 ${(s as Step).seconds} s`
       case 'dtmf': return `${a} DTMF ${s.payload} 송신`; case 'refer': return `${s.from} 가 ${s.to} 로 전달 (REFER)`; case 'progress': return `${a} 183 + SDP (early media)`
       case 'hold': return `${a} 보류 (re-INVITE sendonly)`; case 'resume': return `${a} 재개`
+      case 'media_send': return `${a} RTP 송출 시작 (${s.sample ? `샘플 ${s.sample}` : '기본 원천'}${s.loop === false ? ', 한 번 재생' : ''})`; case 'media_stop': return `${a} RTP 송출 정지 (수신은 계속)`
       default: return `${a} ${s.step}`
     }
   }
@@ -403,6 +407,16 @@ function Sel({ value, options, onChange, empty, disabled }: { value: string | un
 }
 function Sec({ title, right, children }: { title: string; right?: ReactNode; children: ReactNode }) { return <div className="mt-3 flex flex-col gap-1.5 border-t border-border pt-2"><div className="flex items-center gap-2 text-[11px] font-semibold text-muted-foreground">{title}<span className="ml-auto">{right}</span></div>{children}</div> }
 /** 여러 줄 입력 — blur 때 커밋(키 입력마다 문서를 다시 만들지 않게) */
+/** media_send 의 원천 — 샘플(기준 토폴로지 media.samples 의 id, 비면 풀 기본 원천) + 반복 여부 */
+function SampleFields({ sample, loop, samples, disabled, onSample, onLoop }: { sample?: string; loop?: boolean; samples: string[]; disabled?: boolean; onSample: (v: string) => void; onLoop: (v: boolean) => void }) {
+  const opts = [...samples, ...(sample && !samples.includes(sample) ? [sample] : [])]
+  return <div className="grid grid-cols-[1fr_auto] items-end gap-2">
+    <F label="sample" help={samples.length ? '기준 토폴로지 media.samples 의 id — 합의 코덱 항목이 없으면 합성' : '기준 토폴로지에 샘플 라이브러리(media.samples)가 없다 — 토폴로지 속성에서 추가'}>
+      <Sel value={sample} disabled={disabled} options={opts.map(v => ({ v, l: samples.includes(v) ? v : `${v} (라이브러리에 없음)` }))} empty="기본 원천" onChange={onSample} />
+    </F>
+    <label className="mb-1.5 inline-flex items-center gap-1"><Checkbox checked={loop !== false} disabled={disabled} onCheckedChange={v => onLoop(v === true)} /> 반복</label>
+  </div>
+}
 function Area({ value, onCommit, disabled, rows = 3 }: { value: string; onCommit: (v: string) => void; disabled?: boolean; rows?: number }) {
   const [v, setV] = useState(value); useEffect(() => { setV(value) }, [value])
   return <textarea value={v} disabled={disabled} rows={rows} onChange={e => setV(e.target.value)} onBlur={() => { if (v !== value) onCommit(v) }} className="rounded-sm border border-border bg-background p-1.5 text-xs" />
@@ -420,6 +434,7 @@ function Inspector({ doc, sel, setSel, mutate, topo, vocab, issues, canWrite, so
   const ro = !canWrite
   const R = S.roles(doc)
   const kindOf = (r: string) => S.resolvePool(doc, topo, r)?.kind
+  const sampleIds = Object.keys(topo?.media?.samples ?? {})
   const mine = issues.filter(i => i.ref && JSON.stringify(i.ref) === JSON.stringify(sel))
   const issueBlock = mine.length ? <div className="mb-2 flex flex-col gap-1">{mine.map((i, k) => <div key={k} className={`rounded-sm border-l-2 px-2 py-1 ${i.lv === 'error' ? 'border-destructive bg-dangersoft/40' : i.lv === 'warning' ? 'border-warning bg-warning-soft/40' : 'border-info bg-info-soft/40'}`}>{i.msg}</div>)}</div> : null
   const head = (title: string, badge: ReactNode) => <div className="mb-2 flex items-center gap-2"><b className="text-sm">{title}</b>{badge}</div>
@@ -476,9 +491,14 @@ function Inspector({ doc, sel, setSel, mutate, topo, vocab, issues, canWrite, so
       {head(`during ${d.step}`, <Badge variant="neutralSoft">#{sel.idx + 1} 통화 유지 안</Badge>)}{issueBlock}
       <div className="grid grid-cols-2 gap-2">
         <F label="at_s" help={`확립 뒤 경과 초 (0 ~ ${len})`}><Txt value={d.at_s} mono type="number" disabled={ro} onCommit={v => D(x => { x.at_s = Math.max(0, Number(v)) })} /></F>
-        <F label="동작"><Sel value={d.step} disabled={ro} options={(vocab?.during_steps ?? ['dtmf', 'hold', 'resume', 'refer']).map(v => ({ v }))} onChange={v => D(x => { x.step = v as During['step']; if (v !== 'dtmf') delete x.payload; else x.payload = x.payload ?? '1234#'; if (v !== 'refer') delete x.to; else x.to = x.to ?? R.find(r => r !== x.from) })} /></F>
+        <F label="동작"><Sel value={d.step} disabled={ro} options={(vocab?.during_steps ?? ['dtmf', 'hold', 'resume', 'refer']).map(v => ({ v }))} onChange={v => D(x => { x.step = v as During['step']; if (v !== 'dtmf') delete x.payload; else x.payload = x.payload ?? '1234#'; if (v !== 'refer') delete x.to; else x.to = x.to ?? R.find(r => r !== x.from)
+          if (S.MEDIA_CTL.has(v)) { if (!x.who?.length) x.who = [x.from ?? R[0]].filter(Boolean); delete x.from } else { if (!x.from) x.from = x.who?.[0] ?? R[0]; delete x.who }
+          if (v !== 'media_send') { delete x.sample; delete x.loop } })} /></F>
       </div>
-      <F label="행위자 (from)"><Chips roles={R} selected={[d.from ?? ''].filter(Boolean)} multi={false} disabled={ro} kindOf={kindOf} gate={d.step === 'refer' ? r => kindOf(r) === 'peer' : undefined} onToggle={r => D(x => { if (r) x.from = r; else delete x.from })} /></F>
+      {S.MEDIA_CTL.has(d.step)
+        ? <F label="행위자 (who — 여럿)"><Chips roles={R} selected={d.who ?? []} multi disabled={ro} kindOf={kindOf} onToggle={r => D(x => { const w = new Set(x.who ?? []); if (w.has(r)) w.delete(r); else w.add(r); x.who = R.filter(n => w.has(n)) })} /></F>
+        : <F label="행위자 (from)"><Chips roles={R} selected={[d.from ?? ''].filter(Boolean)} multi={false} disabled={ro} kindOf={kindOf} gate={d.step === 'refer' ? r => kindOf(r) === 'peer' : undefined} onToggle={r => D(x => { if (r) x.from = r; else delete x.from })} /></F>}
+      {d.step === 'media_send' && <SampleFields sample={d.sample} loop={d.loop} samples={sampleIds} disabled={ro} onSample={v => D(x => { if (v) x.sample = v; else delete x.sample })} onLoop={v => D(x => { if (v) delete x.loop; else x.loop = false })} />}
       {d.step === 'dtmf' && <F label="payload (0-9 * # A-D)"><Txt value={d.payload} mono disabled={ro} onCommit={v => D(x => { x.payload = v })} /></F>}
       {d.step === 'refer' && <F label="전달 대상 (to)"><Chips roles={R} selected={[d.to ?? ''].filter(Boolean)} multi={false} disabled={ro} kindOf={kindOf} onToggle={r => D(x => { if (r) x.to = r; else delete x.to })} /></F>}
       <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-2"><Button variant="outline" size="sm" onClick={() => setSel({ kind: 'step', idx: sel.idx })}>단계로</Button><Button variant="outline" size="sm" disabled={ro} onClick={() => onDuringToStep(sel.idx, sel.k)} title="통화 유지 단계 바로 뒤의 독립 행으로 뺍니다 (마커를 행 사이로 끌어도 됨)">행으로 빼기</Button><Button variant="destructive" size="sm" disabled={ro} onClick={() => mutate(x => { x.flow[sel.idx].during!.splice(sel.k, 1); setSel({ kind: 'step', idx: sel.idx }) })}><Trash2 size={12} /> 동작 삭제</Button></div>
@@ -501,15 +521,17 @@ function Inspector({ doc, sel, setSel, mutate, topo, vocab, issues, canWrite, so
         : <F label="행위자 (from)"><Chips roles={R} selected={[s.from ?? ''].filter(Boolean)} multi={false} disabled={ro} kindOf={kindOf} gate={gate} onToggle={r => ST(x => { if (r) x.from = r; else delete x.from })} /></F>}
       {(D.actor === 'fromto' || s.step === 'invite') && <F label={s.step === 'refer' ? '전달 대상 (to)' : '상대 (to)'}><Chips roles={R} selected={[s.to ?? ''].filter(Boolean)} multi={false} disabled={ro} kindOf={kindOf} onToggle={r => ST(x => { if (r) x.to = r; else delete x.to })} /></F>}
     </>}
-    {(s.step === 'answer' || s.step === 'progress' || s.step === 'reject' || s.step === 'invite') && <F label="after_ms" help="직전 이벤트 뒤 지연(ms)"><Txt value={s.after_ms} mono type="number" placeholder="0" disabled={ro} onCommit={v => ST(x => { if (v === '') delete x.after_ms; else x.after_ms = Math.max(0, Number(v)) })} /></F>}
+    {(s.step === 'answer' || s.step === 'progress' || s.step === 'reject' || s.step === 'invite' || S.MEDIA_CTL.has(s.step)) && <F label="after_ms" help="직전 이벤트 뒤 지연(ms)"><Txt value={s.after_ms} mono type="number" placeholder="0" disabled={ro} onCommit={v => ST(x => { if (v === '') delete x.after_ms; else x.after_ms = Math.max(0, Number(v)) })} /></F>}
     {D?.actor === 'seconds' && <div className="grid grid-cols-[1fr_auto] items-end gap-2">
       <F label={isBind ? '바인딩 변수' : 'seconds'}><Txt value={isBind ? String(s.seconds).slice(2, -1) : s.seconds} mono type={isBind ? undefined : 'number'} disabled={ro} onCommit={v => ST(x => { x.seconds = isBind ? `\${${v.trim()}}` : Number(v) })} /></F>
       <Button variant="outline" size="sm" disabled={ro} onClick={() => ST(x => { x.seconds = isBind ? (bind.ht ?? 10) : '${ht}' })}>{isBind ? '고정값으로' : '바인딩 ${ht}'}</Button>
     </div>}
-    {s.step === 'invite' && <div className="grid grid-cols-2 gap-2">
+    {s.step === 'invite' && <div className="grid grid-cols-3 gap-2">
       <F label="audio"><Sel value={s.media?.audio ?? 'amr-wb'} disabled={ro} options={(vocab?.audio ?? ['amr-wb', 'amr', 'pcmu', 'pcma', 'g722']).map(v => ({ v }))} onChange={v => ST(x => { x.media = { ...(x.media ?? {}), audio: v } })} /></F>
       <F label="video"><Sel value={s.media?.video} disabled={ro} options={[{ v: 'h264' }]} empty="없음" onChange={v => ST(x => { x.media = { ...(x.media ?? {}) }; if (v) x.media.video = v; else delete x.media.video })} /></F>
+      <F label="rtp" help="auto = SDP 교환 즉시 송출 · none = 시그널링 전용(RTP 없음) · explicit = media_send 가 부를 때만 송출(수신은 시작)"><Sel value={s.media?.rtp ?? 'auto'} disabled={ro} options={(vocab?.rtp_modes ?? ['auto', 'none', 'explicit']).map(v => ({ v }))} onChange={v => ST(x => { x.media = { ...(x.media ?? {}) }; if (v && v !== 'auto') x.media.rtp = v as 'none' | 'explicit'; else delete x.media.rtp })} /></F>
     </div>}
+    {s.step === 'media_send' && <SampleFields sample={s.sample} loop={s.loop} samples={sampleIds} disabled={ro} onSample={v => ST(x => { if (v) x.sample = v; else delete x.sample })} onLoop={v => ST(x => { if (v) delete x.loop; else x.loop = false })} />}
     {s.step === 'dtmf' && <F label="payload (0-9 * # A-D)"><Txt value={s.payload} mono disabled={ro} onCommit={v => ST(x => { x.payload = v })} /></F>}
     {s.step === 'reject' && <F label="응답 코드 (payload)"><Txt value={s.payload} mono placeholder="486" disabled={ro} onCommit={v => ST(x => { x.payload = v })} /></F>}
     {(s.step === 'bye' || s.step === 'reject') && <F label="cause — Reason: Q.850 (RFC 3326, 피어만)"><Sel value={s.cause != null ? String(s.cause) : ''} disabled={ro} options={Object.entries(vocab?.q850 ?? {}).map(([k, l]) => ({ v: k, l: `${k} ${l}` }))} empty="(없음)" onChange={v => ST(x => { if (v) x.cause = Number(v); else delete x.cause })} /></F>}
@@ -525,6 +547,6 @@ function Inspector({ doc, sel, setSel, mutate, topo, vocab, issues, canWrite, so
       </div>)}
       {!Object.keys(s.expect ?? {}).length && <span className="text-muted-foreground">없음 — ★ 는 이 단계에 맞는 지표</span>}
     </Sec>
-    <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-2"><Button variant="outline" size="sm" disabled={ro} onClick={() => onDupStep(i)}><Copy size={12} /> 복제</Button>{S.INDIALOG.has(s.step) && <Button variant="outline" size="sm" disabled={ro} onClick={() => onStepToDuring(i)} title="가장 가까운 통화 유지(media_hold) 단계의 during 으로 옮깁니다 (행을 유지 바 위로 끌어도 됨)">during 으로</Button>}<Button variant="destructive" size="sm" disabled={ro} onClick={() => onRemoveStep(i)}><Trash2 size={12} /> 단계 삭제</Button></div>
+    <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-2"><Button variant="outline" size="sm" disabled={ro} onClick={() => onDupStep(i)}><Copy size={12} /> 복제</Button>{S.DURING_OK.has(s.step) && <Button variant="outline" size="sm" disabled={ro} onClick={() => onStepToDuring(i)} title="가장 가까운 통화 유지(media_hold) 단계의 during 으로 옮깁니다 (행을 유지 바 위로 끌어도 됨)">during 으로</Button>}<Button variant="destructive" size="sm" disabled={ro} onClick={() => onRemoveStep(i)}><Trash2 size={12} /> 단계 삭제</Button></div>
   </div>
 }

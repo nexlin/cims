@@ -128,7 +128,7 @@ bool CSipClient::EventBlindTransfer( const char * pszCallId, const char * pszRef
 
 
 
-bool CSipClient::EventMessage( const char * pszFrom, const char * pszTo, CSipMessage * pclsMessage )
+int CSipClient::EventMessage( const char * pszFrom, const char * pszTo, CSipMessage * pclsMessage )
 {
 	char	szContentType[255];
 
@@ -139,5 +139,5 @@ bool CSipClient::EventMessage( const char * pszFrom, const char * pszTo, CSipMes
 	printf( "content-type[%s]\n", szContentType );
 	printf( "body[%s]\n", pclsMessage->m_strBody.c_str() );
 
-	return true;
+	return SIP_OK;
 }

@@ -188,6 +188,43 @@ class TopologyV2(unittest.TestCase):
         doc['flow'][0]['during'] = [{'at_s': 1, 'step': 'hold', 'from': 'a'}]
         self.assertTrue(any('media_hold' in e for e in validate('scenario', doc)[1]))
 
+    def test_media_plane(self):
+        """invite.media.rtp · media_send/media_stop 자리 검증 · 샘플 라이브러리 (§4 미디어 평면)."""
+        def doc(flow):
+            return {'id': 'T-MEDIA', 'roles': {'a': {'pool': 'p'}, 'b': {'pool': 'p'}}, 'flow': flow}
+        ok = doc([{'step': 'invite', 'from': 'a', 'to': 'b', 'media': {'audio': 'pcmu', 'rtp': 'explicit'}},
+                  {'step': 'answer', 'who': ['b']},
+                  {'step': 'media_send', 'who': ['a'], 'sample': 'ringback', 'loop': False, 'after_ms': 200},
+                  {'step': 'media_hold', 'seconds': 5, 'during': [{'at_s': 2, 'step': 'media_stop', 'who': ['a']},
+                                                                   {'at_s': 3, 'step': 'media_send', 'who': ['b'], 'sample': 'tone'}]},
+                  {'step': 'bye', 'from': 'a'}])
+        m, errs = validate('scenario', ok)
+        self.assertEqual(errs, [])
+        self.assertEqual(m.flow[0].media.rtp, 'explicit')
+        self.assertEqual(m.sample_refs(), ['ringback', 'tone'])
+        # SDP 가 오가기 전(answer/progress 전)·호 밖·rtp none 호에는 못 둔다
+        early = doc([{'step': 'invite', 'from': 'a', 'to': 'b'}, {'step': 'media_send', 'who': ['a']}])
+        self.assertTrue(any('SDP' in e for e in validate('scenario', early)[1]))
+        after_bye = doc([{'step': 'invite', 'from': 'a', 'to': 'b'}, {'step': 'answer', 'who': ['b']}, {'step': 'bye', 'from': 'a'},
+                         {'step': 'media_stop', 'who': ['a']}])
+        self.assertTrue(any('SDP' in e for e in validate('scenario', after_bye)[1]))
+        none = doc([{'step': 'invite', 'from': 'a', 'to': 'b', 'media': {'rtp': 'none'}}, {'step': 'answer', 'who': ['b']},
+                    {'step': 'media_send', 'who': ['a']}])
+        self.assertTrue(any('none' in e for e in validate('scenario', none)[1]))
+        # 필드 자리 — sample/loop 은 media_send 만, media.rtp 는 invite 만, 모드 오타 거절
+        bad = doc([{'step': 'invite', 'from': 'a', 'to': 'b'}, {'step': 'answer', 'who': ['b'], 'sample': 'x'}])
+        self.assertTrue(any('sample' in e for e in validate('scenario', bad)[1]))
+        bad = doc([{'step': 'invite', 'from': 'a', 'to': 'b', 'media': {'rtp': 'manual'}}])
+        self.assertTrue(validate('scenario', bad)[1])
+        bad = doc([{'step': 'invite', 'from': 'a', 'to': 'b'}, {'step': 'answer', 'who': ['b'], 'media': {'rtp': 'none'}}])
+        self.assertTrue(any('invite' in e for e in validate('scenario', bad)[1]))
+        # 샘플 라이브러리 — 코덱 키·경로
+        from services.tester_models import TopologyMedia
+        TopologyMedia.model_validate({'samples': {'rb': {'pcmu': 'rb.pcmu', 'amr-wb': 'synthetic'}}})
+        for m_bad in ({'rb': {'g722': 'x'}}, {'rb': {'pcmu': '/etc/passwd'}}, {'rb': {'pcmu': '../x'}}, {'rb': {}}, {'r b': {'pcmu': 'x'}}):
+            with self.assertRaises(Exception):
+                TopologyMedia.model_validate({'samples': m_bad})
+
     def test_vocab_consistency(self):
         from services.tester_models import STEP_VOCAB, WORKER_STEPS, METRIC_NAMES, StepKind
         import typing

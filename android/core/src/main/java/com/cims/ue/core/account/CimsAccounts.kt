@@ -83,6 +83,16 @@ object CimsAccounts {
     }
 
     /**
+     * 서버가 거절한(401)·만료 임박 토큰을 버리고 새 토큰을 받는다 — [TokenRetry] 의 refresh 훅.
+     * 블로킹(IO 스레드). 계정 없음·인증자 연결 실패는 null — 호출자는 원래 실패를 그대로 표면화한다.
+     */
+    fun renewToken(am: AccountManager, tokenType: String, stale: String?): String? {
+        invalidate(am, stale)
+        val account = get(am) ?: return null
+        return runCatching { blockingToken(am, account, tokenType) }.getOrNull()
+    }
+
+    /**
      * 미로그인(공유 계정 없음, 수동 설정 모드 아님)이면 CIMS 오너 앱 로그인 화면으로 전환한다.
      * companion 앱(Phone/PTT)이 Activity 진입 시 호출 — true 반환 시 호출자는 자기 화면을
      * finish 한다. CIMS 앱 미설치 등으로 전환 실패면 false(호출자는 자체 안내 화면 폴백).
