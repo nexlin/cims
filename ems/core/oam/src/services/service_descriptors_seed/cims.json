@@ -561,7 +561,7 @@
           "unit": "건"
         },
         "distribution": {
-          "fromObject": "totals.volte.reasons",
+          "fromObject": "totals.volte.outcomes",
           "totalPath": "totals.volte.attempts"
         },
         "matrix": {
@@ -717,6 +717,23 @@
               "totalPath": "totals.volte.completed",
               "unit": "건",
               "group": "end"
+            },
+            {
+              "key": "dropped",
+              "label": "드롭",
+              "path": "volte.end_reasons.error",
+              "totalPath": "totals.volte.end_reasons.error",
+              "unit": "건",
+              "group": "end",
+              "help": "붙은 뒤 정상 종료가 아닌 것으로 끝난 호(BYE 없이 사라져 회수된 호 포함). 붙지 못한 실패와 다른 축이다 — 성립 안에 들어 있다.",
+              "statusFrom": "volte.statuses",
+              "statusLabels": {
+                "408": "408 요청 시간초과",
+                "503": "503 서비스 불가",
+                "500": "500 서버 내부 오류",
+                "487": "487 발신 취소"
+              },
+              "detailUnknownLabel": "응답코드 미기록"
             },
             {
               "key": "open",

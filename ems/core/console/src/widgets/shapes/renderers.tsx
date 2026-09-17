@@ -374,14 +374,16 @@ export function MatrixTable({ data }: { data: MatrixData }) {
    * "값이 크다" 와 "이 묶음이다" 두 뜻의 배경이 얹히면 둘 다 안 읽힌다. 테두리는 다른
    * 축이라 겹치지 않는다.
    *
-   * 첫 데이터 열에는 긋지 않는다 — 바로 왼쪽이 시각 열이라 이미 갈려 있다.
+   * **첫 데이터 열에도 긋는다** — 시각 열과 값의 경계도 묶음 경계와 같은 자리다(사용자
+   * 요청 2026-09-17). 시각 열은 sticky 라 가로 스크롤 중에 값이 그 아래로 지나가는데,
+   * 선이 없으면 어디까지가 라벨인지 흐려진다.
    *
    * **선 하나로는 부족하다** — 값 음영(보라) 위에서 옅은 선은 묻힌다(실측 2026-09-17: 화면에서
    * 안 보인다는 확인). 선을 굵게 하면 표가 무거워지므로, 진한 hairline 에 **묶음 앞 여백**을
    * 더해 선이 옅게 보이는 각도에서도 간격으로 읽히게 한다.
    */
   const groupStart = new Set(
-    data.columns.filter((c, i) => i > 0 && c.group && c.group !== data.columns[i - 1].group)
+    data.columns.filter((c, i) => c.group && (i === 0 || c.group !== data.columns[i - 1].group))
       .map(c => c.key))
   const groupTd = (key: string): CSSProperties =>
     (groupStart.has(key)

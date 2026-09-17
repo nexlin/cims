@@ -286,6 +286,8 @@ chk('실패 사유 다섯이 한 묶음',
 chk('사유 묶음과 성립 묶음은 다르다', gmap.r_rejected !== gmap.success)
 chk('미결·보존초과가 한 묶음이고 사유와 다르다',
     gmap.open === gmap.late && gmap.open !== gmap.r_unknown)
+// 첫 열(시도)도 자기 묶음을 갖는다 — 시각 열과의 경계에도 선이 그어진다.
+chk('첫 데이터 열에도 묶음이 있다', !!gmap.attempts && gmap.attempts !== gmap.success)
 
 console.log(`\n합계: ${pass} pass / ${fail} fail`)
 process.exit(fail ? 1 : 0)

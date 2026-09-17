@@ -404,12 +404,12 @@ class UnknownReasonTest(unittest.TestCase):
             self.assertEqual(agg['call']['reasons'].get(rs), 1, rs)
             self.assertIsNone(agg['call']['reasons'].get('unknown'), rs)
 
-    def test_정상종료는_모름으로_새지_않는다(self):
+    def test_정상종료는_종료축으로_가고_모름으로_안_샌다(self):
         agg = self._fold(self._rec(end_reason='normal', answer_time='2026-09-15 10:00:03',
                                    duration=5, end_status=200))
-        self.assertEqual(agg['call']['reasons'].get('normal'), 1)
+        self.assertEqual(agg['call']['end_reasons'].get('normal'), 1)
         self.assertEqual(agg['call']['completed'], 1)
-        self.assertIsNone(agg['call']['reasons'].get('unknown'))
+        self.assertEqual(agg['call']['reasons'], {}, '개시 축에는 안 담긴다')
 
     def test_안_끝난_호는_미결이지_모름이_아니다(self):
         """미결 판정은 집계와 되짚기가 **같은 규칙**(사유 유무)을 쓴다 — 여기만 바꾸면 갈린다."""
@@ -429,6 +429,77 @@ class UnknownReasonTest(unittest.TestCase):
         R._fold_ptt_attempt({'outcome': 'failed', 'reason': '', 'cause': '', 'status': 0}, agg)
         self.assertEqual(agg['call']['reasons'].get('unknown'), 1)
         self.assertIsNone(agg['call']['reasons'].get('error'))
+
+
+class VolteAxisSplitTest(unittest.TestCase):
+    """**개시 결말과 세션 종료는 다른 축이다** — PTT 에만 있던 규칙(§2.1b)을 VoLTE 에도.
+
+    한 축에 담으면 `오류` 칸이 "붙지도 못함" 과 "붙었다가 끊김" 을 함께 세어 검산식이
+    깨진다. 실측(2026-09-17): 시도 3 · 성립 2 · 거절 1 · 오류 1 이 나와 "시도가 4여야
+    하지 않나" 라는 물음을 낳았다 — 오류 1 은 이미 성립 2 안에 들어 있었다.
+    """
+
+    def _fold(self, **kw):
+        base = {'state': 'ended', 'invite_time': '2026-09-15 10:00:00',
+                'answer_time': None, 'duration': 0, 'end_reason': 'error', 'end_status': 0}
+        base.update(kw)
+        agg = {'call': R._zero_call(), 'msg': {'in': {}, 'out': {}}}
+        R._fold_volte(base, agg)
+        return agg['call']
+
+    def test_붙었다가_끊기면_종료축_드롭(self):
+        c = self._fold(answer_time='2026-09-15 10:00:01', duration=122, end_status=408)
+        self.assertEqual(c['end_reasons'].get('error'), 1, '드롭')
+        self.assertEqual(c['reasons'], {}, '개시 실패가 아니다')
+        self.assertEqual(c['sessions'], 1)
+
+    def test_못_붙으면_개시축(self):
+        c = self._fold(end_reason='rejected', end_status=603)
+        self.assertEqual(c['reasons'].get('rejected'), 1)
+        self.assertEqual(c['end_reasons'], {})
+        self.assertEqual(c['sessions'], 0)
+
+    def test_검산_시도는_성립과_개시실패의_합(self):
+        """세 호(정상·거절·드롭)를 접으면 시도 3 = 성립 2 + 개시실패 1 이어야 한다."""
+        agg = {'call': R._zero_call(), 'msg': {'in': {}, 'out': {}}}
+        for rec in (
+            {'state': 'ended', 'invite_time': '2026-09-15 10:00:00',
+             'answer_time': '2026-09-15 10:00:01', 'duration': 5,
+             'end_reason': 'normal', 'end_status': 200},
+            {'state': 'ended', 'invite_time': '2026-09-15 10:01:00', 'answer_time': None,
+             'duration': 0, 'end_reason': 'rejected', 'end_status': 603},
+            {'state': 'ended', 'invite_time': '2026-09-15 10:02:00',
+             'answer_time': '2026-09-15 10:02:01', 'duration': 122,
+             'end_reason': 'error', 'end_status': 408},
+        ):
+            R._fold_volte(rec, agg)
+        c = agg['call']
+        fail = sum(c['reasons'].values())
+        self.assertEqual(c['attempts'], 3)
+        self.assertEqual(c['sessions'], 2)
+        self.assertEqual(fail, 1, '개시 실패는 거절 1 뿐')
+        self.assertEqual(c['attempts'], c['sessions'] + fail, '시도 = 성립 + 개시실패')
+        self.assertEqual(c['end_reasons'], {'normal': 1, 'error': 1})
+
+    def test_진행_중인_성립은_완료율_분모에서_빠진다(self):
+        """통화가 길게 걸려 있는 시간대마다 완료율이 낮게 보이면 안 된다."""
+        out = R.with_rates({'attempts': 2, 'sessions': 2, 'completed': 1,
+                            'end_reasons': {'normal': 1}})
+        self.assertEqual(out['sessions_end_known'], 1, '끝난 성립만 분모')
+        self.assertEqual(out['completion_rate'], 100.0)
+
+    def test_종료축이_없던_옛_레코드는_옛_규칙(self):
+        """축을 싣지 않던 시절 자료까지 빈칸으로 만들지 않는다."""
+        out = R.with_rates({'attempts': 4, 'sessions': 4, 'completed': 3, 'end_reasons': {}})
+        self.assertEqual(out['sessions_end_known'], 4)
+        self.assertEqual(out['completion_rate'], 75.0)
+
+    def test_결말_합본은_호_하나가_한_칸(self):
+        out = R.with_rates({'attempts': 3, 'sessions': 2, 'completed': 1,
+                            'reasons': {'rejected': 1},
+                            'end_reasons': {'normal': 1, 'error': 1}})
+        self.assertEqual(out['outcomes'], {'rejected': 1, 'normal': 1, 'error': 1})
+        self.assertEqual(sum(out['outcomes'].values()), out['attempts'])
 
 
 class EnsureSvcCellTest(unittest.TestCase):
