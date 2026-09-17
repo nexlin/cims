@@ -279,7 +279,10 @@ const gcols = mds.toMatrix(MISS).columns
 const gmap = Object.fromEntries(gcols.map(c => [c.key, c.group]))
 chk('열에 묶음 키가 실려 온다', gcols.every(c => !!c.group),
     JSON.stringify(gcols.filter(c => !c.group).map(c => c.key)))
-chk('성공률·NER 이 한 묶음', gmap.success === gmap.ner)
+// NER 열은 표에 두지 않는다 — 표의 열들로 계산되는 파생값이다(지표 카드에는 남는다).
+chk('NER 열은 표에 없다', gmap.ner === undefined)
+chk('드롭률·드롭·정상종료가 한 묶음', gmap.drop === gmap.dropped && gmap.drop === gmap.completed)
+chk('완료율 열은 표에 없다(드롭률과 여집합)', gmap.comp === undefined)
 chk('실패 사유 다섯이 한 묶음',
     new Set(['r_rejected', 'r_busy', 'r_noanswer', 'r_error', 'r_unknown']
       .map(k => gmap[k])).size === 1)

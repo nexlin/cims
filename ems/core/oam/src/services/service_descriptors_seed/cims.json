@@ -523,8 +523,8 @@
               "unit": "%"
             },
             {
-              "label": "완료율",
-              "path": "totals.volte.completion_rate",
+              "label": "드롭률",
+              "path": "totals.volte.drop_rate",
               "unit": "%"
             },
             {
@@ -594,14 +594,6 @@
               "label": "성공률",
               "path": "volte.success_rate",
               "totalPath": "totals.volte.success_rate",
-              "unit": "%",
-              "group": "setup"
-            },
-            {
-              "key": "ner",
-              "label": "NER",
-              "path": "volte.ner",
-              "totalPath": "totals.volte.ner",
               "unit": "%",
               "group": "setup"
             },
@@ -695,27 +687,11 @@
               "group": "talk"
             },
             {
-              "key": "comp",
-              "label": "완료율",
-              "path": "volte.completion_rate",
-              "totalPath": "totals.volte.completion_rate",
-              "unit": "%",
-              "group": "end"
-            },
-            {
               "key": "drop",
               "label": "드롭률",
               "path": "volte.drop_rate",
               "totalPath": "totals.volte.drop_rate",
               "unit": "%",
-              "group": "end"
-            },
-            {
-              "key": "completed",
-              "label": "정상종료",
-              "path": "volte.completed",
-              "totalPath": "totals.volte.completed",
-              "unit": "건",
               "group": "end"
             },
             {
@@ -734,6 +710,14 @@
                 "487": "487 발신 취소"
               },
               "detailUnknownLabel": "응답코드 미기록"
+            },
+            {
+              "key": "completed",
+              "label": "정상종료",
+              "path": "volte.completed",
+              "totalPath": "totals.volte.completed",
+              "unit": "건",
+              "group": "end"
             },
             {
               "key": "open",
