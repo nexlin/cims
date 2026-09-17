@@ -139,3 +139,11 @@ windows/**/obj/
 # 콘솔 화면 캡처·계산된 스타일 확인에 쓴다 (console_design_system.md §8.3)
 /package.json
 /package-lock.json
+
+# 단말 SDK Android 산출물 (sdk/android/build-native.sh) — 생성물은 커밋하지 않는다
+# (docs/design/features/android_dispatch_tablet.md §2.1)
+/sdk/android/cimsue-engine/src/main/jniLibs/
+/sdk/android/cimsue-engine/src/main/java/org/
+/sdk/android/cimsue/src/main/jniLibs/
+/sdk/android/cimsue/src/swig/java/
+/build-android/

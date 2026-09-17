@@ -10,6 +10,7 @@ lifecycleService = "2.10.0"
 coroutines = "1.10.2"
 okhttp = "4.12.0"
 junit = "4.13.2"
+json = "20250107"
 
 minSdk = "26"
 compileSdk = "37"
@@ -23,6 +24,8 @@ androidx-lifecycle-service = { group = "androidx.lifecycle", name = "lifecycle-s
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+# JVM 단위시험용 org.json — 기기에서는 플랫폼이 같은 API 를 이미 제공한다(android.jar).
+org-json = { group = "org.json", name = "json", version.ref = "json" }
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
 androidx-ui = { group = "androidx.compose.ui", name = "ui" }
 androidx-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }

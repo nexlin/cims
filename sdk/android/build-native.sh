@@ -1,31 +1,41 @@
 #!/bin/bash
-# 단말 SDK 엔진(ext/pjproject) Android 네이티브 빌드 — configure-android → make → SWIG Java → 산출물 배치.
-#   정본: docs/design/features/ue_sdk.md §3·§8. 소스 정본은 ext/pjproject 트리 자체이며 이 스크립트는
-#   패치를 적용하지 않는다(upstream clone·sed 패치 단계 없음). 수정은 트리에서 직접 하고 커밋한다.
+# 단말 SDK Android 네이티브 빌드 — 엔진(ext/pjproject) + 코어(sdk/core) → 두 AAR 모듈의 산출물.
+#   정본: docs/design/features/ue_sdk.md §3·§8, docs/design/features/android_dispatch_tablet.md §2.1·§2.2.
+#   소스 정본은 ext/pjproject 트리 자체이며 이 스크립트는 패치를 적용하지 않는다(upstream clone·sed 패치
+#   단계 없음). 수정은 트리에서 직접 하고 커밋한다.
+#
+# 산출물은 **모듈 둘**로 갈라 배치한다(android_dispatch_tablet.md §2.2 엔진 단일화):
+#   sdk/android/cimsue-engine/  org.pjsip.**(SWIG) + libpjsua2.so   ← android/core 가 쓴다(기존 앱)
+#   sdk/android/cimsue/         com.cims.ue.sdk.jni.*(SWIG) + libcimsue.so ← 관제 태블릿이 쓴다
+# 둘 다 libc++_shared.so 를 각자 싣는다 — 한 앱이 두 모듈을 같이 쓰지 않으므로 충돌하지 않는다.
+# 생성물은 커밋하지 않는다(.gitignore).
 #
 # 전제(WSL2/Ubuntu 빌드 머신, android_ue_m1_pjsip_integration.md §2.2):
 #   ANDROID_NDK_ROOT  NDK 경로 (r27+)
 #   OPENSSL_PREFIX    Android arm64 정적 OpenSSL (m1_build_openssl.sh 산출, 기본 ~/opt/openssl-android-arm64)
 #   swig, python3, JDK 가 PATH 에 있을 것. ~/.m1env 가 있으면 source 한다(m1_provision.sh 산출).
 #
-# 사용: sdk/android/build-native.sh [--no-install] [--abi arm64-v8a] [--platform 28]
-#   산출물: libpjsua2.so + libc++_shared.so → $OUT_JNI (기본 android/core/src/pjsua2/jniLibs/<abi>)
-#           org/pjsip/pjsua2/*.java + PjCamera*.java → $OUT_JAVA (기본 android/core/src/pjsua2/java)
-#   ※ B 단계(sdk/core·libcimsue 도입) 이후 산출물 위치는 sdk/android/cimsue 로 옮겨진다(ue_sdk.md §5.1).
+# 사용: sdk/android/build-native.sh [--no-install] [--abi arm64-v8a] [--platform 28] [--engine-only]
+#   --no-install    산출물을 AAR 모듈에 배치하지 않는다(빌드만 확인)
+#   --engine-only   엔진(pjproject)만 — 코어·cimsue 바인딩 단계를 건너뛴다
 set -e -o pipefail
 [ -f ~/.m1env ] && source ~/.m1env
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PJ_DIR="$ROOT/ext/pjproject"
 CONFIG_SITE="$ROOT/sdk/engine/config_site/android.h"
-OUT_JNI_BASE="${OUT_JNI:-$ROOT/android/core/src/pjsua2/jniLibs}"
-OUT_JAVA="${OUT_JAVA:-$ROOT/android/core/src/pjsua2/java}"
+ENGINE_MOD="$ROOT/sdk/android/cimsue-engine"          # :cimsue-engine — org.pjsip.**
+CORE_MOD="$ROOT/sdk/android/cimsue"                   # :cimsue — com.cims.ue.sdk.*
+OUT_JNI_BASE="${OUT_JNI:-$ENGINE_MOD/src/main/jniLibs}"
+OUT_JAVA="${OUT_JAVA:-$ENGINE_MOD/src/main/java}"
 INSTALL=1
+ENGINE_ONLY=0
 export TARGET_ABI="${TARGET_ABI:-arm64-v8a}"
 export APP_PLATFORM="${APP_PLATFORM:-28}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-install) INSTALL=0 ;;
+    --engine-only) ENGINE_ONLY=1 ;;
     --abi) TARGET_ABI="$2"; shift ;;
     --platform) APP_PLATFORM="$2"; shift ;;
     *) echo "unknown arg: $1"; exit 2 ;;
@@ -87,11 +97,57 @@ file "$JNIDIR/libpjsua2.so" | grep -q aarch64 && echo "ABI=arm64 OK"
 ls -la "$JNIDIR"; echo "java: $JAVADIR ($(ls "$JAVADIR" | wc -l) files)"
 
 if [ "$INSTALL" = 1 ]; then
-  echo "=== [5] 배치 → $OUT_JNI_BASE/$TARGET_ABI, $OUT_JAVA ==="
+  echo "=== [5] 엔진 배치 → :cimsue-engine ($OUT_JNI_BASE/$TARGET_ABI, $OUT_JAVA) ==="
+  # 소스셋을 통째로 비우고 다시 채운다 — 엔진 구성이 바뀌어 사라진 클래스가 남으면 .so 와 어긋난다.
+  rm -rf "$OUT_JAVA/org" "$OUT_JNI_BASE/$TARGET_ABI"
   mkdir -p "$OUT_JNI_BASE/$TARGET_ABI" "$OUT_JAVA/org/pjsip/pjsua2"
   cp -f "$JNIDIR"/libpjsua2.so "$JNIDIR"/libc++_shared.so "$OUT_JNI_BASE/$TARGET_ABI/"
   cp -f "$JAVADIR"/*.java "$OUT_JAVA/org/pjsip/pjsua2/"
   cp -f "$(dirname "$JAVADIR")"/PjCamera*.java "$OUT_JAVA/org/pjsip/" 2>/dev/null || true
+fi
+
+if [ "$ENGINE_ONLY" = 1 ]; then
+  echo "=== --engine-only — 코어 단계 건너뜀 ==="
+else
+  echo "=== [6] 코어 libcimsue.so + cimsue SWIG 바인딩 (NDK CMake) ==="
+  # 래퍼가 ext/pjproject/build.mak 에 툴체인·링크 목록을 물어보므로 위 [2] 단계가 선행이다.
+  CORE_BUILD="${CORE_BUILD:-$ROOT/build-android}"
+  command -v cmake >/dev/null || { echo "!! cmake 없음"; exit 1; }
+  cmake -S "$ROOT/sdk/android" -B "$CORE_BUILD" \
+        -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
+        -DANDROID_ABI="$TARGET_ABI" -DANDROID_PLATFORM="android-$APP_PLATFORM" \
+        -DANDROID_STL=c++_shared \
+        -DJAVA_OUT_DIR="$CORE_MOD/src/swig/java" 2>&1 | tail -8
+  cmake --build "$CORE_BUILD" -j"$(nproc)" 2>&1 | tail -8
+  test -f "$CORE_BUILD/libcimsue.so" || { echo "!! libcimsue.so 없음"; exit 1; }
+  file "$CORE_BUILD/libcimsue.so" | grep -q aarch64 && echo "libcimsue.so ABI=arm64 OK"
+
+  # ── 바인딩 자기검사 — S1-UE-ANDROID-BIND (android_dispatch_tablet.md §9) ──
+  JNI_JAVA="$CORE_MOD/src/swig/java/com/cims/ue/sdk/jni"
+  # ① Java 가 아예 없으면 .so 만 최신인 반쪽 산출물이다. "0개" 를 통과로 세지 않는다.
+  N_JAVA=$(ls "$JNI_JAVA"/*.java 2>/dev/null | wc -l)
+  [ "$N_JAVA" -gt 0 ] || { echo "!! SWIG Java 산출물 없음 ($JNI_JAVA) — .so 만 있는 AAR 이 된다"; exit 1; }
+  # ② 불투명 타입이 남으면 앱이 쓸 수 없다.
+  N_SWIGTYPE=$(ls "$JNI_JAVA" | grep -c '^SWIGTYPE_' || true)
+  [ "$N_SWIGTYPE" = 0 ] || { echo "!! SWIGTYPE_p_* 잔존 — cimsue.i 의 %template/%ignore 를 보완할 것"; exit 1; }
+  # ③ 이진 본문이 String 으로 새면 녹취(MP4/AAC)가 첫 NUL 에서 잘린다 — 생성 코드로 확인한다.
+  grep -q 'public byte\[\] getBody' "$JNI_JAVA/HttpResult.java" || {
+      echo "!! HttpResult.body 가 byte[] 가 아니다 — cimsue.i 의 이진 typemap 이 빠졌다"; exit 1; }
+  awk '/HttpResult_1body_1get/,/^}/' "$CORE_BUILD/cimsue_wrap.cpp" | grep -q 'NewByteArray' || {
+      echo "!! HttpResult.body 게터가 길이 기반 변환이 아니다"; exit 1; }
+  awk '/HttpResult_1body_1get/,/^}/' "$CORE_BUILD/cimsue_wrap.cpp" | grep -q 'NewStringUTF' && {
+      echo "!! HttpResult.body 게터가 NewStringUTF 를 쓴다 — NUL 에서 잘린다"; exit 1; }
+  echo "cimsue Java: $N_JAVA 개, 불투명 타입 0, HttpResult.body=byte[] OK"
+
+  if [ "$INSTALL" = 1 ]; then
+    echo "=== [7] 코어 배치 → :cimsue ($CORE_MOD/src/main/jniLibs/$TARGET_ABI) ==="
+    rm -rf "$CORE_MOD/src/main/jniLibs/$TARGET_ABI"
+    mkdir -p "$CORE_MOD/src/main/jniLibs/$TARGET_ABI"
+    cp -f "$CORE_BUILD/libcimsue.so" "$CORE_MOD/src/main/jniLibs/$TARGET_ABI/"
+    # libc++_shared 는 두 모듈이 각자 싣는다(한 앱이 둘을 같이 쓰지 않는다 — §2.2).
+    cp -f "$JNIDIR/libc++_shared.so" "$CORE_MOD/src/main/jniLibs/$TARGET_ABI/"
+    ls -la "$CORE_MOD/src/main/jniLibs/$TARGET_ABI/"
+  fi
 fi
 
 echo "=== 트리 청결 확인 (정본 트리는 빌드 후에도 변경이 없어야 한다) ==="
