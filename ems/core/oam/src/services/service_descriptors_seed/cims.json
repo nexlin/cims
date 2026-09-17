@@ -578,21 +578,24 @@
               "label": "시도",
               "path": "volte.attempts",
               "totalPath": "totals.volte.attempts",
-              "unit": "건"
+              "unit": "건",
+              "group": "attempt"
             },
             {
               "key": "success",
               "label": "성공률",
               "path": "volte.success_rate",
               "totalPath": "totals.volte.success_rate",
-              "unit": "%"
+              "unit": "%",
+              "group": "setup"
             },
             {
               "key": "ner",
               "label": "NER",
               "path": "volte.ner",
               "totalPath": "totals.volte.ner",
-              "unit": "%"
+              "unit": "%",
+              "group": "setup"
             },
             {
               "key": "r_rejected",
@@ -609,7 +612,8 @@
                 "400": "400 잘못된 요청",
                 "604": "604 없는 사용자"
               },
-              "detailUnknownLabel": "응답코드 미기록"
+              "detailUnknownLabel": "응답코드 미기록",
+              "group": "fail"
             },
             {
               "key": "r_busy",
@@ -622,7 +626,8 @@
                 "486": "486 통화중",
                 "600": "600 전부 통화중"
               },
-              "detailUnknownLabel": "응답코드 미기록"
+              "detailUnknownLabel": "응답코드 미기록",
+              "group": "fail"
             },
             {
               "key": "r_noanswer",
@@ -635,7 +640,8 @@
                 "408": "408 요청 시간초과",
                 "480": "480 일시 불가"
               },
-              "detailUnknownLabel": "응답코드 미기록"
+              "detailUnknownLabel": "응답코드 미기록",
+              "group": "fail"
             },
             {
               "key": "r_error",
@@ -652,7 +658,8 @@
                 "504": "504 게이트웨이 시간초과",
                 "606": "606 수락 불가"
               },
-              "detailUnknownLabel": "응답코드 미기록"
+              "detailUnknownLabel": "응답코드 미기록",
+              "group": "fail"
             },
             {
               "key": "r_unknown",
@@ -660,49 +667,56 @@
               "path": "volte.reasons.unknown",
               "totalPath": "totals.volte.reasons.unknown",
               "unit": "건",
-              "help": "사유도 응답코드도 없어 무엇 때문에 실패했는지 특정할 수 없는 호. 나중에 사유를 세분화해도 가를 근거가 없는 건들이라 따로 센다 — 이 칸이 줄어드는 것이 세분화의 진척도다."
+              "help": "사유도 응답코드도 없어 무엇 때문에 실패했는지 특정할 수 없는 호. 나중에 사유를 세분화해도 가를 근거가 없는 건들이라 따로 센다 — 이 칸이 줄어드는 것이 세분화의 진척도다.",
+              "group": "fail"
             },
             {
               "key": "talk",
               "label": "소통률",
               "path": "volte.talk_rate",
               "totalPath": "totals.volte.talk_rate",
-              "unit": "%"
+              "unit": "%",
+              "group": "talk"
             },
             {
               "key": "talked",
               "label": "소통",
               "path": "volte.talked",
               "totalPath": "totals.volte.talked",
-              "unit": "건"
+              "unit": "건",
+              "group": "talk"
             },
             {
               "key": "comp",
               "label": "완료율",
               "path": "volte.completion_rate",
               "totalPath": "totals.volte.completion_rate",
-              "unit": "%"
+              "unit": "%",
+              "group": "end"
             },
             {
               "key": "drop",
               "label": "드롭률",
               "path": "volte.drop_rate",
               "totalPath": "totals.volte.drop_rate",
-              "unit": "%"
+              "unit": "%",
+              "group": "end"
             },
             {
               "key": "sessions",
               "label": "성립",
               "path": "volte.sessions",
               "totalPath": "totals.volte.sessions",
-              "unit": "건"
+              "unit": "건",
+              "group": "end"
             },
             {
               "key": "completed",
               "label": "정상종료",
               "path": "volte.completed",
               "totalPath": "totals.volte.completed",
-              "unit": "건"
+              "unit": "건",
+              "group": "end"
             },
             {
               "key": "open",
@@ -710,7 +724,8 @@
               "path": "volte.open",
               "totalPath": "totals.volte.open",
               "unit": "건",
-              "help": "아직 끝나지 않아 값이 확정되지 않은 호. 끝나면 그 버킷이 다시 계산된다."
+              "help": "아직 끝나지 않아 값이 확정되지 않은 호. 끝나면 그 버킷이 다시 계산된다.",
+              "group": "pending"
             },
             {
               "key": "late",
@@ -718,7 +733,8 @@
               "path": "volte.late_dropped",
               "totalPath": "totals.volte.late_dropped",
               "unit": "건",
-              "help": "끝나기 전에 1분 집계 보존기간이 지나 되짚지 못한 호. 계속 오르면 보존기간이 짧다."
+              "help": "끝나기 전에 1분 집계 보존기간이 지나 되짚지 못한 호. 계속 오르면 보존기간이 짧다.",
+              "group": "pending"
             }
           ],
           "notes": [
@@ -880,7 +896,8 @@
               "label": "시도",
               "path": "ptt.attempts",
               "totalPath": "totals.ptt.attempts",
-              "unit": "건"
+              "unit": "건",
+              "group": "attempt"
             },
             {
               "key": "success",
@@ -888,7 +905,8 @@
               "path": "ptt.success_rate",
               "totalPath": "totals.ptt.success_rate",
               "unit": "%",
-              "paintZero": true
+              "paintZero": true,
+              "group": "setup"
             },
             {
               "key": "r_denied",
@@ -910,7 +928,8 @@
                 "404": "404 그룹 없음",
                 "403": "403 비멤버 또는 권한·조건 거부"
               },
-              "detailUnknownLabel": "원인 미기록(응답코드 없음)"
+              "detailUnknownLabel": "원인 미기록(응답코드 없음)",
+              "group": "fail"
             },
             {
               "key": "r_error",
@@ -930,7 +949,8 @@
                 "503": "503 서비스 불가",
                 "500": "500 서버 오류"
               },
-              "detailUnknownLabel": "원인 미기록(응답코드 없음)"
+              "detailUnknownLabel": "원인 미기록(응답코드 없음)",
+              "group": "fail"
             },
             {
               "key": "r_noanswer",
@@ -947,73 +967,8 @@
                 "480": "480 상대 불가",
                 "408": "408 요청 시간초과"
               },
-              "detailUnknownLabel": "원인 미기록(응답코드 없음)"
-            },
-            {
-              "key": "talk",
-              "label": "소통률",
-              "path": "ptt.talk_rate_sessions",
-              "totalPath": "totals.ptt.talk_rate_sessions",
-              "unit": "%",
-              "paintZero": true
-            },
-            {
-              "key": "sessions",
-              "label": "세션",
-              "path": "ptt.sessions",
-              "totalPath": "totals.ptt.sessions",
-              "unit": "건"
-            },
-            {
-              "key": "talked",
-              "label": "발언있음",
-              "path": "ptt.talked",
-              "totalPath": "totals.ptt.talked",
-              "unit": "건"
-            },
-            {
-              "key": "join",
-              "label": "참여율",
-              "path": "ptt.join_rate",
-              "totalPath": "totals.ptt.join_rate",
-              "unit": "%",
-              "paintZero": true
-            },
-            {
-              "key": "invited",
-              "label": "초대 leg",
-              "path": "ptt.legs_invited",
-              "totalPath": "totals.ptt.legs_invited",
-              "unit": "개"
-            },
-            {
-              "key": "joined",
-              "label": "참여 leg",
-              "path": "ptt.legs_joined",
-              "totalPath": "totals.ptt.legs_joined",
-              "unit": "개"
-            },
-            {
-              "key": "comp",
-              "label": "완료율",
-              "path": "ptt.completion_rate",
-              "totalPath": "totals.ptt.completion_rate",
-              "unit": "%",
-              "paintZero": true
-            },
-            {
-              "key": "completed",
-              "label": "정상종료",
-              "path": "ptt.completed",
-              "totalPath": "totals.ptt.completed",
-              "unit": "건"
-            },
-            {
-              "key": "reclaimed",
-              "label": "강제회수",
-              "path": "ptt.end_reasons.error",
-              "totalPath": "totals.ptt.end_reasons.error",
-              "unit": "건"
+              "detailUnknownLabel": "원인 미기록(응답코드 없음)",
+              "group": "fail"
             },
             {
               "key": "r_unknown",
@@ -1021,7 +976,83 @@
               "path": "ptt.reasons.unknown",
               "totalPath": "totals.ptt.reasons.unknown",
               "unit": "건",
-              "help": "사유도 응답코드도 없어 무엇 때문에 실패했는지 특정할 수 없는 호. 나중에 사유를 세분화해도 가를 근거가 없는 건들이라 따로 센다 — 이 칸이 줄어드는 것이 세분화의 진척도다."
+              "help": "사유도 응답코드도 없어 무엇 때문에 실패했는지 특정할 수 없는 호. 나중에 사유를 세분화해도 가를 근거가 없는 건들이라 따로 센다 — 이 칸이 줄어드는 것이 세분화의 진척도다.",
+              "group": "fail"
+            },
+            {
+              "key": "talk",
+              "label": "소통률",
+              "path": "ptt.talk_rate_sessions",
+              "totalPath": "totals.ptt.talk_rate_sessions",
+              "unit": "%",
+              "paintZero": true,
+              "group": "talk"
+            },
+            {
+              "key": "sessions",
+              "label": "세션",
+              "path": "ptt.sessions",
+              "totalPath": "totals.ptt.sessions",
+              "unit": "건",
+              "group": "talk"
+            },
+            {
+              "key": "talked",
+              "label": "발언있음",
+              "path": "ptt.talked",
+              "totalPath": "totals.ptt.talked",
+              "unit": "건",
+              "group": "talk"
+            },
+            {
+              "key": "join",
+              "label": "참여율",
+              "path": "ptt.join_rate",
+              "totalPath": "totals.ptt.join_rate",
+              "unit": "%",
+              "paintZero": true,
+              "group": "join"
+            },
+            {
+              "key": "invited",
+              "label": "초대 leg",
+              "path": "ptt.legs_invited",
+              "totalPath": "totals.ptt.legs_invited",
+              "unit": "개",
+              "group": "join"
+            },
+            {
+              "key": "joined",
+              "label": "참여 leg",
+              "path": "ptt.legs_joined",
+              "totalPath": "totals.ptt.legs_joined",
+              "unit": "개",
+              "group": "join"
+            },
+            {
+              "key": "comp",
+              "label": "완료율",
+              "path": "ptt.completion_rate",
+              "totalPath": "totals.ptt.completion_rate",
+              "unit": "%",
+              "paintZero": true,
+              "group": "end"
+            },
+            {
+              "key": "completed",
+              "label": "정상종료",
+              "path": "ptt.completed",
+              "totalPath": "totals.ptt.completed",
+              "unit": "건",
+              "group": "end"
+            },
+            {
+              "key": "reclaimed",
+              "label": "강제회수",
+              "path": "ptt.end_reasons.error",
+              "totalPath": "totals.ptt.end_reasons.error",
+              "unit": "건",
+              "group": "end"
             },
             {
               "key": "open",
@@ -1029,7 +1060,8 @@
               "path": "ptt.open",
               "totalPath": "totals.ptt.open",
               "unit": "건",
-              "help": "아직 끝나지 않은 세션. 끝나면 그 버킷이 다시 계산된다."
+              "help": "아직 끝나지 않은 세션. 끝나면 그 버킷이 다시 계산된다.",
+              "group": "pending"
             },
             {
               "key": "late",
@@ -1037,7 +1069,8 @@
               "path": "ptt.late_dropped",
               "totalPath": "totals.ptt.late_dropped",
               "unit": "건",
-              "help": "끝나기 전에 1분 집계 보존기간이 지나 되짚지 못한 세션."
+              "help": "끝나기 전에 1분 집계 보존기간이 지나 되짚지 못한 세션.",
+              "group": "pending"
             }
           ],
           "notes": [

@@ -271,5 +271,21 @@ chk('못 읽은 구간의 합계 시도는 빈칸', ncol('attempts').total === n
 const rmx = mds.toMatrix(MISS)
 chk('읽은 구간의 합계 시도는 0', rmx.columns.find(c => c.key === 'attempts').total === 0)
 
+// ── [10] 묶음(비율 + 그 근거) 경계 ─────────────────────────────────────────
+//   열이 16개를 넘어 가로로 길어지면 어디까지가 한 벌인지 안 보인다. 소스가 선언한 `group`
+//   이 그대로 넘어와야 렌더러가 세트가 바뀌는 자리에 선을 긋는다.
+console.log('[10] 묶음 경계')
+const gcols = mds.toMatrix(MISS).columns
+const gmap = Object.fromEntries(gcols.map(c => [c.key, c.group]))
+chk('열에 묶음 키가 실려 온다', gcols.every(c => !!c.group),
+    JSON.stringify(gcols.filter(c => !c.group).map(c => c.key)))
+chk('성공률·NER 이 한 묶음', gmap.success === gmap.ner)
+chk('실패 사유 다섯이 한 묶음',
+    new Set(['r_rejected', 'r_busy', 'r_noanswer', 'r_error', 'r_unknown']
+      .map(k => gmap[k])).size === 1)
+chk('사유 묶음과 성립 묶음은 다르다', gmap.r_rejected !== gmap.success)
+chk('미결·보존초과가 한 묶음이고 사유와 다르다',
+    gmap.open === gmap.late && gmap.open !== gmap.r_unknown)
+
 console.log(`\n합계: ${pass} pass / ${fail} fail`)
 process.exit(fail ? 1 : 0)

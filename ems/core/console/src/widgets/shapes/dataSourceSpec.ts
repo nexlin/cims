@@ -47,6 +47,9 @@ interface MatrixMap {
     /** 열 이름만으로 뜻이 안 서는 칸의 설명(헤더 툴팁) — `사유 모름`·`보존초과` 처럼
      *  숫자를 어떻게 읽어야 하는지가 이름에 다 담기지 않는 열에 쓴다. */
     help?: string
+    /** 묶음 키 — 비율 하나와 그 비율을 설명하는 건수들이 한 세트다(§2.3 열 순서).
+     *  열이 16개를 넘어 가로로 길어지면 어디까지가 한 벌인지가 안 보인다. */
+    group?: string
     /**
      * 이 열의 숫자가 **왜** 나왔는지를 담은 버킷 안 {원인: 수} map 경로.
      * detailLabels 에 있는 키만 읽는다 — 원인 축 하나(`ptt.causes`)를 여러 열이 나눠 갖기
@@ -290,7 +293,7 @@ export function buildDataSource(spec: DataSourceSpec): DataSource {
             ? numOrNullStrict(getPath(raw, sp.totalPath))
             : rows.reduce((a, r) => a + (r.cells[sp.key] ?? 0), 0)
           return {
-            key: sp.key, label: sp.label, unit: sp.unit, total, help: sp.help,
+            key: sp.key, label: sp.label, unit: sp.unit, total, help: sp.help, group: sp.group,
             paintZero: sp.paintZero === true,
             detail: pickDetail(sp, rawSrc(sp.key), total)[0] || undefined,
           }

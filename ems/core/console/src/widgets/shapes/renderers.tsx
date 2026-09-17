@@ -365,6 +365,22 @@ export function MatrixTable({ data }: { data: MatrixData }) {
    * 됐다" 만 뜻한다(§2.1a).
    */
   const paintZero = new Map(data.columns.map(c => [c.key, c.paintZero === true]))
+  /**
+   * 묶음 경계 — **비율 하나와 그 비율을 설명하는 건수들**이 한 세트다(sip_statistics.md §2.3).
+   * 열이 16개를 넘으면 가로로 길어져 어디까지가 한 벌인지 안 보인다. 세트가 바뀌는 자리에만
+   * 얇은 세로선을 긋는다.
+   *
+   * **배경을 쓰지 않는 이유**: 칸 배경은 이미 값 농도(위 `cellBg`)가 쓰고 있다. 한 칸에
+   * "값이 크다" 와 "이 묶음이다" 두 뜻의 배경이 얹히면 둘 다 안 읽힌다. 테두리는 다른
+   * 축이라 겹치지 않는다.
+   *
+   * 첫 데이터 열에는 긋지 않는다 — 바로 왼쪽이 시각 열이라 이미 갈려 있다.
+   */
+  const groupStart = new Set(
+    data.columns.filter((c, i) => i > 0 && c.group && c.group !== data.columns[i - 1].group)
+      .map(c => c.key))
+  const groupTd = (key: string): CSSProperties =>
+    (groupStart.has(key) ? { borderLeft: '1px solid var(--border-strong)' } : {})
   const cellBg = (key: string, v: number | null) => {
     if (v === 0 && paintZero.get(key)) {
       return 'color-mix(in srgb, var(--primary) 22%, transparent)'
@@ -410,7 +426,7 @@ export function MatrixTable({ data }: { data: MatrixData }) {
           <tr>
             <Th className="sticky left-0 z-[1] whitespace-nowrap bg-card z-[2]">시각</Th>
             {data.columns.map(c => (
-              <Th className="text-right whitespace-nowrap" key={c.key}
+              <Th className="text-right whitespace-nowrap" key={c.key} style={groupTd(c.key)}
                   title={[c.total === null ? `전 구간 ${NO_VALUE} (자료 없음)`
                                             : `전 구간 ${c.total}${c.unit ?? data.unit ?? '건'}`,
                           c.help].filter(Boolean).join('\n\n')}>
@@ -427,7 +443,8 @@ export function MatrixTable({ data }: { data: MatrixData }) {
                 <Td className="sticky left-0 z-[1] whitespace-nowrap bg-card">{r.label}</Td>
                 {data.columns.map(c => {
                   const v = r.cells[c.key] ?? null
-                  return <Td key={c.key} style={numTd(v, cellBg(c.key, v), c.key)}>
+                  return <Td key={c.key} style={{ ...numTd(v, cellBg(c.key, v), c.key),
+                                                 ...groupTd(c.key) }}>
                     {withDetail(v, r.details?.[c.key])}
                   </Td>
                 })}
@@ -464,6 +481,7 @@ export function MatrixTable({ data }: { data: MatrixData }) {
             <Td className="sticky left-0 z-[1] whitespace-nowrap bg-card font-bold">{data.rowTotal ? '합계' : '전 구간'}</Td>
             {data.columns.map(c => (
               <Td key={c.key} style={{ ...numTd(c.total, cellBg(c.key, c.total), c.key),
+                                       ...groupTd(c.key),
                                        fontWeight: 700 }}>
                 {withDetail(c.total, c.detail)}
               </Td>
