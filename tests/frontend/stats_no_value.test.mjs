@@ -185,10 +185,12 @@ const vds = buildDataSource(vspec)
 
 // 한 버킷 — 시도 20 = 성립 12 + 거절 4 + 통화중 2 + 무응답 1 + 오류 1.
 //   `statuses` 는 그 실패들의 응답코드 합이다(200 은 담기지 않는다).
+//   `unknown`(사유 모름) = 사유도 응답코드도 없어 특정 못 하는 실패 — 응답코드 축에 없다.
 const VCALL = {
   attempts: 20, sessions: 12, talked: 12, completed: 11,
-  reasons: { normal: 11, incomplete: 1, rejected: 4, busy: 2, no_answer: 1, error: 1 },
+  reasons: { normal: 11, rejected: 4, busy: 2, no_answer: 1, error: 1, unknown: 1 },
   statuses: { 603: 2, 404: 1, 403: 1, 486: 2, 480: 1, 503: 1 },
+  open: 1, late_dropped: 0,
 }
 const VBUCKET = {
   totals: { volte: VCALL },
@@ -200,10 +202,20 @@ const vcol = k => vmx.columns.find(c => c.key === k)
 
 for (const [lbl, key, want] of [['거절', 'r_rejected', 4], ['통화중', 'r_busy', 2],
                                 ['무응답', 'r_noanswer', 1], ['오류', 'r_error', 1],
-                                ['비정상종료', 'r_incomplete', 1]]) {
+                                ['사유 모름', 'r_unknown', 1], ['미결', 'open', 1],
+                                ['보존초과', 'late', 0]]) {
   chk(`${lbl} 열이 있고 값이 ${want}`, (vrow.cells[key] ?? null) === want,
       String(vrow.cells[key]))
 }
+
+// 원천이 없는 사유(`timeout`·`incomplete`)에는 열을 두지 않는다 — 늘 0 인 칸은 "그런 일은
+//   안 일어난다" 는 잘못된 안심을 준다. 통계에서 그 사건은 미결 → 보존초과로 흐른다.
+for (const key of ['r_timeout', 'r_incomplete']) {
+  chk(`${key} 열은 없다(원천 없음)`, vcol(key) === undefined)
+}
+
+// 사유 모름 칸에는 응답코드 상세가 붙지 않는다 — 코드가 없다는 것이 그 칸의 정의다.
+chk('사유 모름 칸에 상세가 없다', !(vrow.details ?? {}).r_unknown)
 
 const vd = vrow.details ?? {}
 chk('거절 툴팁 = 603 2건 · 404 1건 · 403 1건',

@@ -440,6 +440,20 @@ error` 로만 적는다(`CallDir.h` — `_ReasonOfStatus` 는 CSP 자체 거절 
 `unknown` 은 원천 어휘(`end_reason` enum)에 없는 **집계가 파생한 축**이다. 표 열 대조 시험은
 그 구분을 안다(`tests/test_stats_descriptor_reasons.py`).
 
+#### 원천이 없는 사유는 열을 두지 않는다 — `timeout` · `incomplete`
+
+둘 다 호 이력 화면의 어휘이고 **통계에는 원천이 없다.** `timeout` 은 CSP 가 쓰는 코드가 아예
+없고(408·480 은 `no_answer` 로 간다), `incomplete` 는 OAM 이 **조회 시점에** 종료 기록 없는
+호에 붙이는 라벨이라 원본(`call.json`)에 적히지 않는다. 표에 열을 두면 늘 0 이라 *"그런 일은
+안 일어난다"* 는 잘못된 안심을 준다 — 실제로는 **셀 수단이 없는** 것이다. 그래서 뺐다.
+
+통계에서 그 사건은 `미결`(open) → 끝내 안 끝나면 `보존초과`(late_dropped) 로 흐른다. 원천이
+생기면(예: 세션 타이머 회수를 CSP 가 기록) 열을 다시 만든다 —
+`tests/test_stats_descriptor_reasons.py` 가 CSP 소스를 훑어 **그때 먼저 걸린다.**
+
+> 같은 사건을 두 화면이 다르게 부른다: 호 이력은 `비정상 종료(기록 없음)`, 통계는 `미결`.
+> 이름 정리는 별건으로 남는다.
+
 #### 끝나지 않은 호 — `open` · `late_dropped`
 
 실패가 아니라 **아직 값이 확정되지 않은** 호다. 판정 기준은 `end_reason` 의 유무이고,

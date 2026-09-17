@@ -697,20 +697,6 @@
               "detailUnknownLabel": "응답코드 미기록"
             },
             {
-              "key": "r_timeout",
-              "label": "시간초과",
-              "path": "volte.reasons.timeout",
-              "totalPath": "totals.volte.reasons.timeout",
-              "unit": "건"
-            },
-            {
-              "key": "r_incomplete",
-              "label": "비정상종료",
-              "path": "volte.reasons.incomplete",
-              "totalPath": "totals.volte.reasons.incomplete",
-              "unit": "건"
-            },
-            {
               "key": "r_unknown",
               "label": "사유 모름",
               "path": "volte.reasons.unknown",
