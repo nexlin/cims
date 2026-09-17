@@ -61,6 +61,8 @@ docs/
 | 모듈 소스 수정 | `design/modules/<module>.md` |
 | 콘솔 UI 수정 | `design/console_design_system.md` (시각) + `design/console_platform.md` (기능·위젯) |
 | UE 연동 개발 | `user-manual/<volte|ptt>_ue.md` |
+| 단말 SDK 수정 | `design/features/ue_sdk.md` (코어·바인딩 정본) |
+| 관제조작반 앱 수정 | `design/features/dispatch_desktop_ui.md` (화면 의미론) + `design/features/android_dispatch_tablet.md` (태블릿 이식) |
 | 빌드/패키징 워크플로우 | `design/features/build_and_packaging.md` |
 | OS 이식성(지원 배포판·OS 의존 지점) | `design/features/os_portability.md` |
 | 검증 절차 (S1~S6) | `VERIFICATION_PROCESS.md` (SSOT) → `VERIFICATION_MANUAL.md` |

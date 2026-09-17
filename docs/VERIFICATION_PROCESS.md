@@ -153,6 +153,19 @@ def my_check(ctx: VerifyContext) -> ItemResult:
 | S1-UNIT-GRID-BUDGET | 콘솔 그리드 세로 예산·잠금 | `node tests/frontend/grid_budget.test.mjs` (gridLayout.ts esbuild 번들) |
 | S1-UNIT-OAM-PTT | OAM PTT 세션 인덱스·진행중 병합 | `python3 tests/oam_ptt_index_test.py · tests/oam_ptt_sessions_live_test.py` |
 | S1-UNIT-OAM-STATS | OAM SIP 통계 서비스축(voip→volte 합산)·프로브 | `python3 tests/test_oam_stats_classify.py · tests/test_stats_probe.py` |
+| S1-UE-UNIT | 단말 SDK 코어 단위시험 | `build/bin/cimsue_test` (공개 반환형·C API ABI 포함) |
+| S1-UE-FLOOR-CODEC | floor 정의 정본 일치 | `scripts/gen_floor_defs.py --check` (정본 = `mcptt_floor_defs.yaml`) |
+| S1-UE-ANDROID-BIND | SWIG 바인딩 건전성 | 생성 Java 에 `SWIGTYPE_p_*` 부재 + `HttpResult.body=byte[]` |
+| S1-UE-ENGINE-SINGLE | 엔진 단일 제공처 | 커밋된 엔진 산출물 부재 + `org.pjsip` 제공처가 `:cimsue-engine` 하나 |
+| S1-UE-SDS-XCHECK | SDS 코덱 드리프트 | 코어 `sds_codec.h` ↔ `ptt-client/mcdata/McDataCodec.kt` TLV·콘텐츠 타입 |
+| S1-UE-CSC-XCHECK | CSC 경로 드리프트 | 코어 `csc_client.cpp`+`csc.h` ↔ 앱 `CscClient.kt`+`ProvisioningClient.kt` |
+| S1-UE-TABLET-UNIT | 관제 태블릿 단위시험 | `android/gradlew testDebugUnitTest` (`:dispatch-tablet`·`:cimsue`, 기기 불필요) |
+
+`S1-UE-*` 는 단말 SDK·관제 앱 축이다(정본 [design/features/ue_sdk.md](design/features/ue_sdk.md),
+[android_dispatch_tablet.md](design/features/android_dispatch_tablet.md) §9). **빌드 산출물이 없으면
+FAIL 이 아니라 SKIP** 이고 건너뛴 이유를 문구로 남긴다 — S1 은 정적 stage 라 모든 개발 장비에
+Android SDK 나 `build/` 가 있다고 전제하지 않는다. 기기가 필요한 판정(감청 SSRC 귀속·오디오 분리
+출력·화면 밀도)은 S1 이 아니라 실기기 항목이다.
 
 S1 FAIL → S2~S6 자동 BLOCKED (stage gate).
 

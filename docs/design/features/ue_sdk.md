@@ -182,10 +182,14 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
 ### 4.4 HTTP 전송 인터페이스
 
 코어가 **프로토콜**(PKCE·Bearer·XCAP 경로·ETag/304·프로비저닝 파싱·FD 업로드)을 소유하고, **전송**은
-`IHttpTransport{request(method, url, headers, body) → response}` 로 추상한다. 기본 구현은 `libcurl + OpenSSL`
-(pjproject 가 이미 OpenSSL 을 링크하므로 추가 의존은 curl 하나). Android 에서 인증서 정책·프록시 이유로
-OkHttp 가 필요하면 파사드가 구현체를 주입한다. TLS 트러스트(사설 CA)는 `EngineConfig.trustAnchors` 로 코어에
-넘기고 SIP TLS 와 HTTPS 가 같은 앵커를 쓴다.
+`http::ITransport{request(method, url, headers, body) → Response}` 로 추상한다. 구현은 OpenSSL 하나
+(`OpenSslTransport` — pjproject 가 이미 OpenSSL 을 링크하므로 추가 의존이 없다). TLS 트러스트(사설 CA)는
+`EngineConfig.trustAnchors`·`CscEndpoint.caPem` 으로 코어에 넘기고 SIP TLS 와 HTTPS 가 같은 앵커를 쓴다.
+
+**주입은 아직 열려 있지 않다.** 인터페이스가 내부 헤더(`sdk/core/src/http/https_client.h`)에 있고 C API 에도
+진입점이 없어(`cimsue_csc_create` 는 endpoint 만 받는다) Windows `.NET`·Android SWIG 어느 쪽도 구현체를
+전달하지 못한다. 인증서 정책은 위 신뢰 앵커로 해결되므로 당장 막히는 것은 **프록시 경유**뿐이다. 열려면
+인터페이스를 공개 헤더로 올리고 세 바인딩(SWIG director·C API·.NET)에 같이 내야 한다(§11).
 
 ### 4.5 미디어 경계
 
@@ -248,16 +252,23 @@ cimsue-cli --csc-host H --user U --pw P --from-profile volte|ptt [--server IP --
 
 ```
 sdk/android/
-  cimsue/                  Gradle Android Library → cimsue-android.aar
-    src/main/jniLibs/      arm64-v8a/{libcimsue,libpjsua2,libc++_shared}.so  (빌드 산출물, 커밋 안 함)
-    src/swig/              SWIG 생성 Java (com.cims.ue.sdk.jni.*) — 손코드와 소스셋 분리
+  cimsue/                  Gradle Android Library → cimsue AAR (앱이 쓰는 유일한 공개면)
+    src/main/jniLibs/      arm64-v8a/{libcimsue,libc++_shared}.so  (빌드 산출물, 커밋 안 함)
+    src/swig/java/         SWIG 생성 Java (com.cims.ue.sdk.jni.*) — 손코드와 소스셋 분리
     src/main/java/com/cims/ue/sdk/
-      CimsUe.kt            Kotlin 파사드: 코어 상태 → StateFlow, 이벤트 → SharedFlow, 명령 → fun (메인 스레드 마샬링)
-      platform/            Android 접점: AudioRouter(모드·포커스·SCO) · CameraCapture · UeForegroundService 헬퍼 ·
-                           SecureStore(Keystore/EncryptedSharedPreferences) · SsoAccount(AccountManager) · BootRegister
-      http/                OkHttpTransport (IHttpTransport 구현, 선택)
-  build-native.sh          ext/pjproject + sdk/core 를 NDK 로 빌드 → jniLibs + SWIG Java
+      CimsUe.kt            Kotlin 파사드: 상태 → StateFlow, 이벤트 → SharedFlow/Channel, 명령 → suspend
+      CscClient.kt         IdMS PKCE · XCAP(GMS/CMS) · 프로비저닝 · 범용 요청(관리·이력·녹취)
+      Types.kt             값 컨테이너(CallInfo·FloorInfo·Profile …)
+      TrustAnchors.kt      APK 동봉 루트 CA (Android 에는 OpenSSL 기본 인증서 경로가 없다)
+      platform/            Android 접점: AudioRouter(모드·포커스·SCO) · UeForegroundService · SecureStore(Keystore)
+  cimsue-engine/           pjsua2 전용 모듈 — org.pjsip.** + libpjsua2.so 의 **유일한 제공처**
+  CMakeLists.txt           ext/pjproject 빌드 변수를 읽어 코어+SWIG 을 NDK 로 빌드
+  build-native.sh          위를 실행하고 산출물을 AAR 모듈에 배치(`--no-install` 은 배치 생략 — 빌드 확인용)
 ```
+
+- **엔진은 한 벌이다.** `org.pjsip.**` 과 `libpjsua2.so` 는 `:cimsue-engine` 만 낸다. 예전에
+  `android/core/src/pjsua2` 에 커밋돼 있던 생성물은 폐기했다 — 두 벌이면 `ext/pjproject` 패치를 두 곳에
+  반영해야 하고 커밋본이 조용히 어긋난다. `S1-UE-ENGINE-SINGLE` 이 이를 정적으로 못박는다.
 
 - **바인딩은 SWIG.** pjsua2 가 이미 SWIG 을 쓰므로 코어도 `cimsue.i` 한 파일로 Java 를 생성한다. 이벤트
   리스너는 director. 손 JNI 는 두지 않는다.
@@ -286,7 +297,13 @@ android_ue_client §13 그대로.
 | `android/core/{account,provision,contacts,calllog,message,config}` 저장·SSO | `sdk/android/platform` (Android 접점) 또는 앱 |
 | `android/cims` (SSO 로그인 앱) | 유지 — `sdk/android` 의 `SsoAccount` 를 사용 |
 | `volte-client`·`ptt-client` | `implementation(project(":sdk:cimsue"))` 로 전환 |
-| 신규 `android/dispatch-tablet` | 관제조작반 태블릿 앱 (§7) |
+| 신규 `android/dispatch-tablet` | 관제조작반 태블릿 앱 (§7) — **구현 완료**, 정본 [android_dispatch_tablet.md](android_dispatch_tablet.md) |
+
+**엔진 단일화는 이미 끝났다**(위 표의 첫 줄) — `:core` 가 `api(project(":cimsue-engine"))` 로 받고
+커밋 산출물 312파일을 지웠다. 나머지 행(앱 로직의 파사드 이전)은 **이식 완료 후 별도 과제**다.
+공존 기간의 코드 중복은 `S1-UE-SDS-XCHECK`·`S1-UE-CSC-XCHECK` 가 드리프트를 막는다.
+남은 선결 조건은 `PttController` 의 이전 대상지로 지목한 코어 `domain/` 이 아직 없다는 것 —
+만들지, 아니면 그 로직을 앱 계층에 둘지 정해야 한다.
 
 ---
 
@@ -428,7 +445,7 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 | B. 코어 골격 + sip/media | `sdk/core` 생성, 공개 헤더 §4.2, `ue-ctl` 스레딩, Account/Call(등록·1:1·영상·SRTP·TLS·AKA), SWIG `cimsue.i`, `cimsue-cli` 등록/1:1 | `S3-UE-CLI` 등록·1:1 PASS. volte-client 가 파사드로 전환 |
 | C. floor + mcdata + 구독 | 정의 테이블(§4.6)·floor participant·SDS/MSRP·conference/xcap-diff 구독·그룹콜/affiliation/긴급 | `S1-UE-FLOOR-CODEC`·`S3-UE-CLI` 그룹콜/floor/SDS PASS. ptt-client 가 파사드로 전환, PttController 분해 |
 | D. csc + domain + 관제 API | PKCE/XCAP/프로비저닝(dispatch 블록)·`Capabilities`·dialogWatch·join·pickup·transfer·listenGroupCall·`MediaSources` 라벨 | `S3-UE-CLI` Join/픽업/PTT 청취 PASS |
-| E. 관제 태블릿 앱 | `android/dispatch-tablet` — §7 다섯 구획 | 실기기 실측(§9) |
+| E. 관제 태블릿 앱 | `android/dispatch-tablet` — §7 다섯 구획. **구현 완료** — 정본 [android_dispatch_tablet.md](android_dispatch_tablet.md). 하단 내비 넷 + [관제] 탭 둘(6패널), [이력]·[PTT 그룹]·[관리]·감청 시트·관제 요약 띠·착신 배너/알림·주소록·발신 시트. 엔진 단일화(`:cimsue-engine` 하나, 커밋 산출물 폐기)와 SWIG 이진 typemap 이 여기서 들어왔다. 실기 확인 = 로그인·등록·그룹콜 floor·SDS·감청(Join)·착신/발신·통화 내역 | 실기기 실측(§9) — 남은 것: [이력]·[PTT 그룹]·[관리] 세 화면이 서버 응답으로 미검증, 무전/통화 분리 출력, 6시간·부팅 상주 |
 | F1. Windows 엔진·코어 | `sdk/windows` 슈퍼빌드로 pjproject(WMME)·AMR-WB·`cimsue.dll`·`cimsue-cli.exe` MSVC 빌드 — **빌드 확정**(§6.1 엔진 빌드 확정·CRT 행). 남은 것: WMME 장치 열거 실측 | Windows 에서 `cimsue-cli` 등록·1:1(TLS+SRTP)·그룹콜 floor·Join 이 Linux 와 같은 결과 (S3 실측 전) |
 | F2. Windows C API·.NET 파사드·관제 앱 | C API `cimsue_c.h`(§6.4) — **구현·단위시험 반영**(`cimsue.dll` 이 80 함수 export — `cimsue_struct_size` ABI 자기검사 포함, `cimsue_test` 가 슈퍼빌드의 googletest 로 Windows 에서도 돈다) → `sdk/windows/dotnet/CimsUe`(파사드 + 접점: 엔드포인트·핫플러그·핫키·DPAPI·단일 인스턴스 — **구현·단위시험 50건 통과**: ABI 레이아웃 27 구조체 대조·헤드리스 엔진 수명·컨텍스트 마샬링·프로파일 파싱·접점. 네이티브 `cimsue.dll` 은 관리 `CimsUe.dll` 과 이름이 겹치므로 출력·패키지 모두 `runtimes/win-x64/native/` 에 두고 로더가 그곳을 먼저 본다) → `windows/dispatch-desktop`(WPF, §6.1 — **구현·빌드 완료**, [dispatch_desktop_ui.md](dispatch_desktop_ui.md) §11 구조 그대로. 로그인·메인 창 기동 확인, `--ui-preview` 로 로그인 없이 화면 점검) | 파사드로 `cimsue-cli` 와 같은 S3 시나리오 재현, 재생 라우트 이중 출력·핫플러그 실측, 관제 시나리오(BLF→Join→픽업→전달→PTT 청취) 실기 — **앱 실기 시험은 서버(CSC/CSP) 연결 후 일괄** |
 | F3. Windows 영상 | `PJMEDIA_HAS_VIDEO 1` + OpenH264 + DSHOW + CIMS 콜백 렌더 장치 패치 → `onVideoFrame` | 감청 영상 격자 실측 |
@@ -443,6 +460,8 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
   CIMS 패치로 추가해 `onVideoFrame` 을 채운다(Android 프레임 콜백 선택지와 같은 장치를 공유).
 - **Android 영상 경로 선택** — Surface 직결(현행) vs 프레임 콜백(§4.5). 감청 격자 합성이 필요한 관제 태블릿은
   프레임 콜백이 맞고, 1:1 영상 앱은 Surface 직결이 싸다. 파사드가 둘을 다 제공할지 결정.
+- **HTTP 전송 주입** — §4.4 의 `http::ITransport` 는 코어 내부에만 있고 주입 통로가 없다(세 플랫폼 공통).
+  프록시 경유가 필요해지면 인터페이스를 공개 헤더로 올리고 SWIG director·C API·.NET 에 같이 낸다.
 - **C API 생성 자동화** — §6.4 의 C API 는 손 평탄화가 출발점. C++ 헤더가 커지면 SWIG C# 백엔드 또는 헤더 파서 기반
   생성으로 전환할지 F2 종료 시 판단(정본은 어느 쪽이든 C++ 공개 헤더).
 - **개발 서버 TLS 인증서** — `build/dist/csp/cert/csp.pem` 이 자가서명·SAN 없음이라 코어의 서버 검증(`tlsVerifyServer`)을
