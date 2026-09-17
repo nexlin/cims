@@ -8,6 +8,7 @@
 // 애드혹 구성 중에는 바깥을 눌러도 닫히지 않는다(§4.1) — 고른 대상이 말없이 사라지면 안 된다.
 package com.cims.ue.dispatch.ui.ptt
 
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -37,6 +38,18 @@ fun OriginateSheet(vm: PttChannelsViewModel, onDismiss: () -> Unit) {
     var query by remember { mutableStateOf("") }
     val book by vm.pttBook.collectAsStateWithLifecycle()
     val error by vm.originError.collectAsStateWithLifecycle()
+
+    // 사람 메뉴가 심어 둔 씨앗 — 애드혹 탭으로 열고 그 사람을 미리 골라 둔다(§6.2f).
+    //   주소록에 없으면 이름 없이 번호만으로 항목을 만든다 — 고른 것이 안 보이면 «추가가 안 됐다» 로 읽힌다.
+    LaunchedEffect(book) {
+        val seed = vm.consumeAdhocSeed()
+        if (seed.isBlank()) return@LaunchedEffect
+        val key = DirectoryBook.normalize(seed)
+        val e = book.entries.firstOrNull { DirectoryBook.normalize(it.msisdn) == key }
+            ?: DirectoryEntry("", "", seed)
+        tab = OriginTab.ADHOC
+        if (picked.none { DirectoryBook.normalize(it.msisdn) == key }) picked = picked + e
+    }
 
     // 애드혹을 구성 중이면 바깥 탭으로 닫지 않는다 — 고른 대상이 말없이 사라지면 안 된다(§4.1).
     val composing = tab == OriginTab.ADHOC && picked.isNotEmpty()

@@ -25,6 +25,9 @@ import com.cims.ue.dispatch.session.pickup
 import com.cims.ue.dispatch.session.sendDtmf
 import com.cims.ue.dispatch.session.setMuted
 import com.cims.ue.dispatch.session.transfer
+import com.cims.ue.dispatch.ui.PersonEntry
+import com.cims.ue.dispatch.ui.mergePeople
+import com.cims.ue.dispatch.ui.resolvePerson
 import com.cims.ue.sdk.CallState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -89,6 +92,25 @@ data class CallCard(
     val stateText: String get() = when {
         incoming -> "착신"; held -> "보류"; active -> "통화"; else -> "연결 중"
     }
+}
+
+/** ⑥ 필터의 «해제» 값 — 데스크톱과 같은 문자열을 쓴다(`CallActivityViewModel.Filter`). */
+internal const val DESK_ALL = "all"
+
+/**
+ * 오늘 데스크 칩 필터의 판정 — 순수 함수(시험 대상).
+ *
+ * 데스크톱 `CallActivityViewModel.Refilter` 와 같은 규칙이다. 태블릿의 `CallLogKind` 에는 청취 종료가 따로
+ * 없으므로(데스크톱 `ListenStart`/`ListenEnd` → `MONITOR` 하나) 감청은 그 한 종류로 판정한다.
+ * 당겨받기(`PICKUP`)는 «내가 받은 호» 라 집계에서 응대로 세는데(`addCallLog`), 필터에서도 같게 다룬다.
+ */
+internal fun keepInDesk(row: CallLogRow, filter: String): Boolean = when (filter) {
+    DESK_ALL -> true
+    "missed" -> row.kind == CallLogKind.MISSED
+    "outgoing" -> row.kind == CallLogKind.OUTGOING
+    "transfer" -> row.kind == CallLogKind.TRANSFER
+    "monitor" -> row.kind == CallLogKind.MONITOR
+    else -> true
 }
 
 internal fun userPartOf(uri: String): String =
@@ -347,9 +369,40 @@ class CallDeskViewModel(private val s: DispatchSession) : ScreenViewModel() {
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     val tally: StateFlow<DeskTally> = s.tally
-    val callLog: StateFlow<List<CallLogRow>> = s.callLog
+
+    /**
+     * 사람 메뉴가 쓰는 사람 목록 — 두 주소록을 사람 단위로 묶은 것(`mergePeople`).
+     *
+     * **내 회선은 뺀다.** 나에게 사설콜·통화를 거는 항목이 목록에 있으면 안 된다.
+     */
+    val people: StateFlow<List<PersonEntry>> =
+        combine(s.phoneBook, s.pttBook) { phone, ptt ->
+            mergePeople(phone, ptt, exclude = s.myLineKeys())
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    /** 번호·URI 하나로 사람을 찾는다 — 없으면 그 번호만 가진 항목을 만든다(주소록 밖 상대도 메뉴가 뜬다). */
+    fun personAt(numberOrUri: String): PersonEntry? =
+        resolvePerson(people.value, numberOrUri, s.phoneBook.value,
+                      fallbackName = s.displayLabel(numberOrUri))
+
+    /**
+     * 오늘 데스크 칩이 거는 ⑥ 필터 — 데스크톱과 같은 값 집합(`all|missed|outgoing|transfer|monitor`,
+     * `CallActivityViewModel.Filter`). **«응대» 칩은 `all` 이다** — 데스크톱에서도 그 칩의 뜻은 «응대만 보기»가
+     * 아니라 «전체로 되돌리기» 다(`CallDeskPanel.xaml` 의 툴팁 "⑥ 전체"). 응대는 기본 목록의 대부분이라
+     * 따로 거를 이유가 없고, 칩 다섯 중 하나는 해제 자리여야 한다.
+     */
+    private val _deskFilter = MutableStateFlow(DESK_ALL)
+    val deskFilter: StateFlow<String> = _deskFilter.asStateFlow()
+
+    /** ⑥ 에 실제로 그릴 행 — 필터 적용분. 원본은 세션이 갖는다. */
+    val callLog: StateFlow<List<CallLogRow>> =
+        combine(s.callLog, _deskFilter) { rows, f -> rows.filter { keepInDesk(it, f) } }
+            .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     // ── 조작 ──
+    /** 같은 칩을 다시 누르면 전체로 되돌린다 — 해제 수단이 칩 말고 없다. */
+    fun setDeskFilter(f: String) { _deskFilter.value = if (_deskFilter.value == f) DESK_ALL else f }
+
     fun setDialNumber(v: String) { _dialNumber.value = v }
 
     fun dial() {

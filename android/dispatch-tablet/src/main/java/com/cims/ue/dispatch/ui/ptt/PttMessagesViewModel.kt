@@ -35,15 +35,33 @@ class PttMessagesViewModel(private val s: DispatchSession) : ScreenViewModel() {
         combine(s.messages, groupId) { all, g -> if (g == null) emptyList() else all[g].orEmpty() }
             .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
+    // 스레드 키는 그룹 id 이거나 **사람의 PTT 번호**다 — 1:1 SDS 는 서버가 `groupUri` 없이 오므로 세션이
+    //   보낸 사람 번호를 키로 삼는다(`applySds`). 그래서 제목도 그룹 → 주소록 이름 → 키 순으로 찾는다.
     val title: StateFlow<String> =
         groupId.let { f -> combine(f, s.groups) { g, groups ->
-            g?.let { id -> groups.firstOrNull { it.id == id }?.name ?: id } ?: "채널을 고르세요"
+            g?.let { id ->
+                groups.firstOrNull { it.id == id }?.name
+                    ?: s.displayLabel(id).ifBlank { id }
+            } ?: "채널을 고르세요"
         } }.stateIn(scope, SharingStarted.Eagerly, "")
 
     /** ① 이 포커스를 바꾸면 부른다. */
     fun onFocusChanged(groupId: String?) {
         _focusGroupId.value = groupId
         if (_follow.value && groupId != null) s.markRead(groupId)
+    }
+
+    /**
+     * 임의 스레드 열기 — 사람 메뉴의 «문자(SDS)» 가 부른다.
+     *
+     * 채널 따라가기를 **끄고** 고정한다. 켜 둔 채로 키만 바꾸면 ① 의 포커스가 다음 순간 덮어써서 방금 연
+     * 스레드가 사라진다(데스크톱 `SelectKey` 도 스레드를 직접 지정한다).
+     */
+    fun openThread(key: String) {
+        if (key.isBlank()) return
+        _follow.value = false
+        _pinned.value = key
+        s.markRead(key)
     }
 
     fun toggleFollow() {

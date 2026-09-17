@@ -573,6 +573,20 @@ class DispatchSession(
     val myPttId: String
         get() = _profile.value?.pttService?.let { it.mcpttId.ifBlank { "tel:" + it.msisdn } } ?: ""
 
+    /**
+     * 내 회선의 비교 정규형 집합 — 사람 목록에서 나를 빼는 데 쓴다.
+     *
+     * 전화 계열과 PTT 를 모두 넣는다. 한쪽만 빼면 다른 축의 주소록에서 «나» 가 남아, 자기에게 사설콜을
+     * 거는 항목이 목록에 보인다.
+     */
+    fun myLineKeys(): Set<String> {
+        val p = _profile.value ?: return emptySet()
+        return listOfNotNull(p.phoneService?.msisdn, p.pttService?.msisdn)
+            .filter { it.isNotBlank() }
+            .map { DirectoryBook.normalize(it) }
+            .toSet()
+    }
+
     /** 청취 범위가 있는가 — 없으면 ② 청취 섹션이 비활성된다. */
     val canListenPtt: Boolean get() = dispatch.pttListen != "none" && dispatch.pttTargets.isNotEmpty()
 

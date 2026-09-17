@@ -4,6 +4,7 @@
 // 재생성돼도 등록이 끊기지 않는다 — 복원은 스냅샷 재조회뿐이다(§6.7).
 package com.cims.ue.dispatch.ui
 
+import androidx.compose.material.icons.filled.Search
 import android.Manifest
 import android.os.Build
 import android.os.Bundle
@@ -124,6 +125,7 @@ private fun Shell(vm: MainViewModel, onShutdown: () -> Unit) {
     val session = DispatchService.session
 
     var sheetOpen by remember { mutableStateOf(false) }
+    var searchOpen by remember { mutableStateOf(false) }
     val monitors = session?.let { rememberMonitorSessions(it) }.orEmpty()
     // 마지막 감청이 끝나면 칩도 사라지므로 시트 플래그를 내려 둔다.
     LaunchedEffect(monitors.isEmpty()) { if (monitors.isEmpty()) sheetOpen = false }
@@ -151,6 +153,10 @@ private fun Shell(vm: MainViewModel, onShutdown: () -> Unit) {
                     if (monitors.isNotEmpty()) AssistChip(
                         onClick = { sheetOpen = true },
                         label = { Text("감청 ${monitors.size}", fontSize = 12.sp) })
+                    // 통합 검색 — 데스크톱의 `Ctrl+K` 자리. 태블릿엔 그 입력이 없어 상단 바가 입구다(§6.2f).
+                    IconButton(onClick = { searchOpen = true }) {
+                        Icon(Icons.Filled.Search, contentDescription = "검색")
+                    }
                     SessionMenu(vm, onShutdown)
                 })
         },
@@ -191,10 +197,25 @@ private fun Shell(vm: MainViewModel, onShutdown: () -> Unit) {
     }
 
     if (sheetOpen && session != null) MonitorSheet(session) { sheetOpen = false }
+
+    // 통합 검색 — 사람 목록은 ③ VM 이 이미 묶어 두었다(두 벌로 만들지 않는다).
+    val searchVm = vm.calls
+    if (searchOpen && session != null && searchVm != null) {
+        val people by searchVm.people.collectAsStateWithLifecycle()
+        val groups by session.groups.collectAsStateWithLifecycle()
+        SearchSheet(
+            people = people, groups = groups,
+            onPerson = { a, n -> vm.runPersonAction(a, n) },
+            onChannel = { id -> vm.focusChannel(id) },
+            onDismiss = { searchOpen = false })
+    }
 }
 
 /**
- * 사람 메뉴 — 로그아웃·앱 종료.
+ * 세션 메뉴 — 로그아웃·앱 종료·설정.
+ *
+ * 데스크톱의 «사람 메뉴»(`PersonActionsViewModel` — 주소록의 한 사람에게 사설콜·SDS·통화를 거는 메뉴)와
+ * 다른 것이다. 이름이 겹치지 않게 «세션 메뉴» 로 부른다.
  *
  * 둘은 다르다. **로그아웃**은 등록을 풀고 자격을 지우지만 서비스는 남는다(다른 사람이 이어 쓴다).
  * **앱 종료**는 서비스까지 내린다 — 그러지 않으면 START_STICKY 때문에 앱을 닫아도 계속 등록 상태로 남는다.
@@ -266,7 +287,7 @@ private fun DispatchCanvas(vm: MainViewModel, tab: DispatchTab) {
                     PttTab(ptt, vm.scoped!!, vm.messages!!, vm.activity!!, Modifier.weight(1f))
                 else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             DispatchTab.CALLS ->
-                vm.calls?.let { CallTab(it, Modifier.weight(1f)) }
+                vm.calls?.let { CallTab(it, onPerson = vm::runPersonAction, modifier = Modifier.weight(1f)) }
                     ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         }
     }

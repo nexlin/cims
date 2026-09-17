@@ -4,6 +4,7 @@
 // 카드 모드는 **타일**이고, 필터·검색은 ② 에만 있다.
 package com.cims.ue.dispatch.ui.ptt
 
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -89,6 +90,9 @@ private fun MyChannels(vm: PttChannelsViewModel) {
         OutlinedButton(onClick = { sheet = true },
             contentPadding = PaddingValues(horizontal = 10.dp)) { Text("사설콜·애드혹", fontSize = 12.sp) }
     }
+    // 사람 메뉴의 «애드혹에 추가» 가 심어 둔 씨앗이 있으면 시트를 연다(§6.2f). 씨앗은 시트가 소비한다.
+    val seed by vm.adhocSeed.collectAsStateWithLifecycle()
+    LaunchedEffect(seed) { if (seed.isNotBlank()) sheet = true }
     if (sheet) OriginateSheet(vm) { sheet = false }
 
     if (cards.isEmpty()) { Empty("참여할 채널이 없습니다"); return }

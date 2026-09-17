@@ -4,6 +4,8 @@
 // 만든다 — 그래야 Activity 가 재생성돼도 세션이 끊기지 않는다.
 package com.cims.ue.dispatch.ui
 
+import com.cims.ue.dispatch.session.dial
+import com.cims.ue.dispatch.session.startPrivateCall
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -146,6 +148,51 @@ class MainViewModel : ViewModel() {
     fun goToCalls() {
         _screen.value = AppScreen.DISPATCH
         _tab.value = DispatchTab.CALLS
+    }
+
+    /**
+     * 사람 메뉴가 고른 행동을 잇는다 — 데스크톱 `MainViewModel` 이 `PersonActionsViewModel` 의 이벤트를 잇는
+     * 것과 같은 자리다(§6.2f).
+     *
+     * **왜 여기인가.** 네 행동 중 셋이 [PTT] 탭의 상태를 건드린다(사설콜·애드혹 시트·SDS 스레드). 행동을
+     * 띄운 ③ 패널은 그 상태를 모르므로, 두 탭을 다 아는 이 VM 이 잇는다.
+     *
+     * **세션을 만드는 조작은 관제로 돌아간다**(dispatch_desktop_ui.md §3.4) — 사설콜을 걸어 놓고 [이력]
+     * 화면에 남아 있으면 끊을 방법이 없다.
+     */
+    fun runPersonAction(action: PersonAction, number: String) {
+        if (number.isBlank()) return
+        val s = bound() ?: return
+        when (action) {
+            PersonAction.CALL -> {
+                viewModelScope.launch { s.dial(number) }
+                goToCalls()
+            }
+            PersonAction.PRIVATE_CALL -> {
+                viewModelScope.launch { s.startPrivateCall(number) }
+                _screen.value = AppScreen.DISPATCH
+                _tab.value = DispatchTab.PTT
+            }
+            PersonAction.ADHOC_ADD -> {
+                // 시트는 ① 패널이 소유하는 화면 상태라 여기서 직접 못 연다 — 씨앗만 심고 탭을 옮긴다.
+                ptt?.seedAdhoc(number)
+                _screen.value = AppScreen.DISPATCH
+                _tab.value = DispatchTab.PTT
+            }
+            PersonAction.SDS -> {
+                messages?.openThread(number)
+                _screen.value = AppScreen.DISPATCH
+                _tab.value = DispatchTab.PTT
+            }
+        }
+    }
+
+    /** 통합 검색의 «채널로» — 그 채널에 포커스를 두고 관제 > PTT 로 간다(데스크톱 `PttChannels.FocusGroup`). */
+    fun focusChannel(groupId: String) {
+        if (groupId.isBlank()) return
+        ptt?.focus(groupId)
+        _screen.value = AppScreen.DISPATCH
+        _tab.value = DispatchTab.PTT
     }
 
     /** 화면 복원 — 세션은 살아 있으므로 스냅샷만 다시 읽는다(§6.7). */

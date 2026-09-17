@@ -225,6 +225,20 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
      * 카드 체크 — 발언 대상 집합에 넣고 뺀다. **포커스는 건드리지 않는다.**
      * 상한([maxTargets])을 넘으면 가장 오래된 것을 밀어낸다(팬아웃 전에는 1개라 교체가 된다).
      */
+    /**
+     * 사람 메뉴의 «애드혹에 추가» 가 심어 두는 상대 — 발신 시트가 열릴 때 미리 골라 둔다.
+     *
+     * 시트를 직접 열지 않고 씨앗만 두는 이유: 시트는 ① 패널이 소유하는 화면 상태라 다른 탭(③ 일반통화)에서
+     * 직접 띄울 수 없다. 데스크톱은 `PttOriginate.AddAdhoc(n)` + `PttOriginateOpen = true` 로 같은 일을 한다.
+     */
+    private val _adhocSeed = MutableStateFlow("")
+    val adhocSeed: StateFlow<String> = _adhocSeed.asStateFlow()
+
+    fun seedAdhoc(number: String) { if (number.isNotBlank()) _adhocSeed.value = number }
+
+    /** 시트가 씨앗을 받아 갔다 — 한 번만 쓴다(닫았다 다시 열 때 또 끼어들면 안 된다). */
+    fun consumeAdhocSeed(): String = _adhocSeed.value.also { _adhocSeed.value = "" }
+
     fun toggleTarget(id: String) {
         val card = cards.value.firstOrNull { it.id == id } ?: return
         if (!card.canCheck) return

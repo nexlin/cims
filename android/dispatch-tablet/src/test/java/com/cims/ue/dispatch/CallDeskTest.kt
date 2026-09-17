@@ -4,8 +4,12 @@
 // 내 회선과 감시 회선의 구분, 픽업·청취 자격, 대표번호 포크의 묶음.
 package com.cims.ue.dispatch
 
+import com.cims.ue.dispatch.session.CallLogKind
+import com.cims.ue.dispatch.session.CallLogRow
 import com.cims.ue.dispatch.session.DialogRow
+import com.cims.ue.dispatch.ui.call.DESK_ALL
 import com.cims.ue.dispatch.ui.call.MemberChip
+import com.cims.ue.dispatch.ui.call.keepInDesk
 import com.cims.ue.dispatch.ui.call.userPartOf
 import com.cims.ue.sdk.DialogInfo
 import org.junit.Assert.assertEquals
@@ -150,5 +154,29 @@ class CallLogRowTest {
             kind = com.cims.ue.dispatch.session.CallLogKind.ANSWERED,
             startedAtMs = t0 + 9_000L, answeredAtMs = t0)
         assertEquals(0, rang.ringSec)
+    }
+
+    // ── 오늘 데스크 칩 → ⑥ 필터 (데스크톱 CallActivityViewModel.Refilter 와 같은 규칙) ──
+    private fun row(kind: CallLogKind) = CallLogRow(atMs = 0, peer = "p", text = "t", kind = kind)
+
+    @Test fun `전체는 모든 종류를 통과시킨다`() {
+        CallLogKind.entries.forEach { assertTrue(it.name, keepInDesk(row(it), DESK_ALL)) }
+    }
+
+    @Test fun `각 필터는 그 종류만 남긴다`() {
+        mapOf("missed" to CallLogKind.MISSED, "outgoing" to CallLogKind.OUTGOING,
+              "transfer" to CallLogKind.TRANSFER, "monitor" to CallLogKind.MONITOR)
+            .forEach { (f, keep) ->
+                CallLogKind.entries.forEach { k ->
+                    assertEquals("$f/$k", k == keep, keepInDesk(row(k), f))
+                }
+            }
+    }
+
+    // «응대» 칩은 필터가 아니라 **해제**다 — 데스크톱도 그 칩에 all 을 건다(CallDeskPanel.xaml 툴팁 "⑥ 전체").
+    //   여기서 ANSWERED 만 남기도록 바꾸면 당겨받기(PICKUP)가 사라져 집계와 목록이 어긋난다.
+    @Test fun `모르는 필터 값은 전체로 본다`() {
+        assertTrue(keepInDesk(row(CallLogKind.PICKUP), "answered"))
+        assertTrue(keepInDesk(row(CallLogKind.ANSWERED), ""))
     }
 }

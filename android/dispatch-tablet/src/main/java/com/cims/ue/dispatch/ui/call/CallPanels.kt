@@ -1,3 +1,4 @@
+@file:OptIn(ExperimentalFoundationApi::class)
 // [일반통화] 탭 화면 — ③ 일반통화 + ⑥ 통화 내역 (android_dispatch_tablet.md §6.3)
 //
 // 탭 폭이 전부(1280)라 ③ 를 **2열**로 편다 — 좌: 그룹원 띠·대표번호 대기열 / 우: 오늘 데스크·내 통화.
@@ -5,6 +6,10 @@
 // DTMF·전달은 한 통화에 묶인 조작이라 **카드 안에서** 편다(§6.6).
 package com.cims.ue.dispatch.ui.call
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import com.cims.ue.dispatch.ui.PersonAction
+import com.cims.ue.dispatch.ui.PersonMenu
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -38,16 +43,25 @@ private fun fmt(ms: Long): String {
     else "%02d:%02d".format(t / 60, t % 60)
 }
 
-/** [일반통화] 탭 — 위 ③(2열) / 아래 ⑥. */
+/**
+ * [일반통화] 탭 — 위 ③(2열) / 아래 ⑥.
+ *
+ * @param onPerson 사람 메뉴가 고른 행동. **여기서 처리하지 않고 올린다** — 사설콜·애드혹·SDS 는 [PTT] 탭의
+ *   상태를 건드리므로 두 탭을 다 아는 곳(`MainViewModel`)이 이어야 한다(데스크톱도 `MainViewModel` 이 잇는다).
+ */
 @Composable
-fun CallTab(vm: CallDeskViewModel, modifier: Modifier = Modifier) {
+fun CallTab(
+    vm: CallDeskViewModel,
+    onPerson: (PersonAction, String) -> Unit = { _, _ -> },
+    modifier: Modifier = Modifier,
+) {
     Column(modifier.fillMaxSize()) {
         Row(Modifier.weight(0.6f).fillMaxWidth()) {
             Column(Modifier.weight(1f).fillMaxHeight().padding(8.dp)) {
                 QuickDial(vm)
                 Spacer(Modifier.height(8.dp))
                 SectionTitle("관제 그룹원")
-                Members(vm)
+                Members(vm, onPerson)
                 Spacer(Modifier.height(8.dp))
                 SectionTitle("대표번호 대기열")
                 Queue(vm)
@@ -64,7 +78,7 @@ fun CallTab(vm: CallDeskViewModel, modifier: Modifier = Modifier) {
         HorizontalDivider()
         Column(Modifier.weight(0.4f).fillMaxWidth().padding(8.dp)) {
             SectionTitle("⑥ 통화 내역")
-            CallLog(vm)
+            CallLog(vm, onPerson)
         }
     }
 }
@@ -106,17 +120,25 @@ private fun QuickDial(vm: CallDeskViewModel) {
 
 // ── 그룹원 띠 ────────────────────────────────────────────────────────────────
 @Composable
-private fun Members(vm: CallDeskViewModel) {
+private fun Members(vm: CallDeskViewModel, onPerson: (PersonAction, String) -> Unit) {
     val members by vm.members.collectAsStateWithLifecycle()
     if (members.isEmpty()) { Hint("전화 그룹원이 없습니다"); return }
+
+    // 열린 메뉴는 **한 번에 하나** — 어느 줄에서 열렸는지를 키로 든다. 줄마다 boolean 을 두면 스크롤로
+    //   재사용될 때 엉뚱한 줄에 붙는다.
+    var menuFor by remember { mutableStateOf<String?>(null) }
 
     Column(Modifier.verticalScroll(rememberScrollState()).heightIn(max = 150.dp)) {
         members.forEach { m ->
             Row(
-                Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                    .combinedClickable(onClick = {}, onLongClick = { if (!m.isMe) menuFor = m.number }),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                if (menuFor == m.number) PersonMenu(
+                    person = vm.personAt(m.number), expanded = true,
+                    onDismiss = { menuFor = null }, onPick = onPerson)
                 Dot(ringing = m.ringing, talking = m.talking)
                 Text(m.number + if (m.isMe) " (나)" else "", fontSize = 12.sp,
                      fontWeight = if (m.isMe) FontWeight.Bold else FontWeight.Normal)
@@ -169,10 +191,17 @@ private fun Queue(vm: CallDeskViewModel) {
 @Composable
 private fun Tally(vm: CallDeskViewModel) {
     val t by vm.tally.collectAsStateWithLifecycle()
+    val f by vm.deskFilter.collectAsStateWithLifecycle()
+    // 칩은 **집계이면서 ⑥ 의 필터**다(데스크톱 `CallDeskPanel.xaml` 과 같은 값). «응대» 는 전체로 되돌리는
+    //   자리라 선택 표시를 하지 않는다 — 누르면 필터가 풀린다.
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        listOf("응대" to t.answered, "부재" to t.missed, "발신" to t.outgoing,
-               "전달" to t.transfer, "감청" to t.monitor).forEach { (label, n) ->
-            AssistChip(onClick = {}, label = { Text("$label $n", fontSize = 11.sp) })
+        listOf(Triple("응대", t.answered, DESK_ALL), Triple("부재", t.missed, "missed"),
+               Triple("발신", t.outgoing, "outgoing"), Triple("전달", t.transfer, "transfer"),
+               Triple("감청", t.monitor, "monitor")).forEach { (label, n, key) ->
+            FilterChip(
+                selected = key != DESK_ALL && f == key,
+                onClick = { vm.setDeskFilter(key) },
+                label = { Text("$label $n", fontSize = 11.sp) })
         }
     }
 }
@@ -261,7 +290,7 @@ private fun Transfer(vm: CallDeskViewModel, c: CallCard, target: String) {
 // 콘솔·[이력] 화면과 같은 축을 든다 — **시작 · 응답 · 종료 · 통화시간**(§4.6). 한 줄만 보고
 // «언제 걸려 와서 얼마나 울렸고 몇 분 통화했는지» 를 알 수 있어야 한다.
 @Composable
-private fun CallLog(vm: CallDeskViewModel) {
+private fun CallLog(vm: CallDeskViewModel, onPerson: (PersonAction, String) -> Unit) {
     val log by vm.callLog.collectAsStateWithLifecycle()
     val live by vm.live.collectAsStateWithLifecycle()
 
@@ -297,15 +326,24 @@ private fun CallLog(vm: CallDeskViewModel) {
         }
     }
     HorizontalDivider()
+    // 열린 메뉴는 한 번에 하나 — 행 키로 든다(③ 그룹원 띠와 같은 규칙).
+    var menuFor by remember { mutableStateOf<String?>(null) }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-        items(log, key = { it.atMs.toString() + it.number + it.peer }) { r -> CallLogRowView(r) }
+        items(log, key = { it.atMs.toString() + it.number + it.peer }) { r ->
+            val key = r.atMs.toString() + r.number
+            CallLogRowView(r, onLongPress = { if (r.number.isNotBlank()) menuFor = key })
+            if (menuFor == key) PersonMenu(
+                person = vm.personAt(r.number), expanded = true,
+                onDismiss = { menuFor = null }, onPick = onPerson)
+        }
     }
 }
 
 @Composable
-private fun CallLogRowView(r: CallLogRow) {
+private fun CallLogRowView(r: CallLogRow, onLongPress: () -> Unit = {}) {
     val missed = r.kind == CallLogKind.MISSED
-    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp),
+    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)
+            .combinedClickable(onClick = {}, onLongClick = onLongPress),
         verticalAlignment = Alignment.CenterVertically) {
         Text(hhmmss.format(Date(r.startedAtMs)), Modifier.width(64.dp), fontSize = 11.sp)
         // 이름과 번호를 같이 — 이름만 두면 누군지는 알아도 다시 걸 수가 없다.
