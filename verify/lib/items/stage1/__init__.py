@@ -13,4 +13,16 @@
 - S1-UNIT-OAM-PTT        : python3 tests/oam_ptt_index_test.py · tests/oam_ptt_sessions_live_test.py (PTT 세션 인덱스 · 진행중 병합 규약)
 - S1-UNIT-OAM-HTTPSRV    : python3 -m unittest tests.test_httpsrv_bind (HttpServer 기동 계약 — bind 성공이라야 기동 성공, 떠 있는 척 차단)
 - S1-UNIT-OAM-STATS      : python3 tests/test_oam_stats_classify.py · test_stats_probe.py · test_stats_rollup_range.py · test_stats_store.py (SIP 통계 서비스축 · 미디어 프로브 · 구간 조회 계층 선택 · 집계 저장소 단일 writer)
+
+단말 SDK(`sdk/`·`android/`) — 정본 [docs/design/features/ue_sdk.md](../../../../docs/design/features/ue_sdk.md),
+[android_dispatch_tablet.md](../../../../docs/design/features/android_dispatch_tablet.md) §9.
+빌드 산출물이 없으면 FAIL 이 아니라 SKIP 이고, 건너뛴 이유를 문구로 남긴다.
+
+- S1-UE-UNIT             : build/bin/cimsue_test (코어 단위시험 — 공개 반환형·C API ABI 포함)
+- S1-UE-FLOOR-CODEC      : scripts/gen_floor_defs.py --check (floor 정의 정본 = mcptt_floor_defs.yaml 일치)
+- S1-UE-ANDROID-BIND     : SWIG 생성 Java 에 SWIGTYPE_p_* 부재 + HttpResult.body=byte[] (녹취 MP4 가 NUL 에서 잘리지 않게)
+- S1-UE-ENGINE-SINGLE    : 커밋된 엔진 산출물 부재 + org.pjsip 제공처가 :cimsue-engine 하나
+- S1-UE-SDS-XCHECK       : 코어 sds_codec.h ↔ ptt-client McDataCodec.kt TLV 상수·콘텐츠 타입 대조 (공존 기간 드리프트 방어)
+- S1-UE-CSC-XCHECK       : 코어 csc_client.cpp ↔ ptt-client CscClient.kt XCAP·IdMS 경로 대조
+- S1-UE-TABLET-UNIT      : android/gradlew testDebugUnitTest (:dispatch-tablet·:cimsue — 기기 불필요)
 """
