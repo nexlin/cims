@@ -789,7 +789,10 @@ export default function VerificationV2Page() {
     } catch (e: unknown) {
       setError('데이터 초기화 시작 실패: ' + (e instanceof Error ? e.message : String(e)))
     }
-  }, [prepResetRunning, pipelineRunning, soloStage])
+    // `confirm` 은 Provider 가 useCallback 으로 고정한 값이라(components/custom/confirm.tsx) 넣어도
+    // 콜백이 매 렌더 새로 만들어지지 않는다. 빠뜨리면 React Compiler 가 기존 메모이제이션을
+    // 보존하지 못해 컴파일을 건너뛴다.
+  }, [prepResetRunning, pipelineRunning, soloStage, confirm])
 
   // 개별 stage 단독 실행/중단 toggle
   const toggleStageRun = useCallback(async (stageNum: number) => {

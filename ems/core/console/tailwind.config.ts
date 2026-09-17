@@ -1,4 +1,5 @@
 import type { Config } from 'tailwindcss'
+import tailwindcssAnimate from 'tailwindcss-animate'
 
 /**
  * CIMS Console — Tailwind 설정
@@ -11,6 +12,9 @@ import type { Config } from 'tailwindcss'
  *   2. darkMode 를 `.dark` 클래스가 아니라 우리 테마 스위치(`:root[data-theme="dark"]`)에 건다.
  *   3. preflight(전역 reset)를 끈다 — index.css 의 reset 과 동시에 켜면 버튼·표 높이가
  *      어긋난다. index.css reset 을 걷어내는 T4 에서 켠다.
+ *   4. 플러그인을 `require()` 가 아니라 ESM import 로 받는다. 이 패키지는 `"type": "module"` 이라
+ *      `require` 가 정의돼 있지 않고(지금은 tailwind 로더가 삼켜 준다), lint 규칙
+ *      `@typescript-eslint/no-require-imports` 가 S1 게이트를 막는다. 값은 같다.
  *
  * 색은 여기서 새로 정의하지 않는다. 값은 전부 index.css 의 토큰(= Figma 01)에만 있다.
  */
@@ -95,7 +99,7 @@ const config: Config = {
       },
     },
   },
-  plugins: [require('tailwindcss-animate')],
+  plugins: [tailwindcssAnimate],
 }
 
 export default config

@@ -70,8 +70,10 @@ export function TimeBarChart({ data }: { data: TimeBarData }) {
 // 범례 아래에 한 줄로 알린다(선택을 막지는 않는다 — 참조선으로 겹쳐 보고 싶을 수 있다).
 export function SeriesBarChart({ data }: { data: SeriesBarData }) {
   const { buckets, series, unit } = data
+  // `w` = 툴팁을 가둘 폭. **렌더 중에는 ref 를 읽을 수 없으므로**(React 규약 — 그 값으로 다시 그리지
+  // 않아 위치가 낡는다) 마우스 이벤트에서 재어 함께 담는다.
   const [hover, setHover] = useState<
-    { x: number; y: number; bucket: string; key: string; total: number } | null>(null)
+    { x: number; y: number; w: number; bucket: string; key: string; total: number } | null>(null)
   const wrap = useRef<HTMLDivElement>(null)
 
   if (series.length === 0) return <EmptyState title="표시할 계열을 선택하세요" />
@@ -87,9 +89,10 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
   const overlap = series.filter(sp => (sp.includes ?? []).some(k => shownKeys.has(k)))
 
   const move = (e: React.MouseEvent, bucket: string, key: string, total: number) => {
-    const r = wrap.current?.getBoundingClientRect()
-    if (!r) return
-    setHover({ x: e.clientX - r.left, y: e.clientY - r.top, bucket, key, total })
+    const el = wrap.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    setHover({ x: e.clientX - r.left, y: e.clientY - r.top, w: el.clientWidth, bucket, key, total })
   }
   const hoveredBucket = hover ? buckets.find(b => String(b.label) === hover.bucket) : undefined
 
@@ -144,7 +147,7 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
       </div>
       {hover && hoveredBucket && (
         <div style={{
-          position: 'absolute', left: Math.min(hover.x + 12, (wrap.current?.clientWidth ?? 0) - 190),
+          position: 'absolute', left: Math.min(hover.x + 12, hover.w - 190),
           top: Math.max(hover.y - 12, 0), zIndex: 30, pointerEvents: 'none', width: 178,
           background: 'var(--card)', border: '1px solid var(--border)',
           borderRadius: 'var(--radius)', boxShadow: 'var(--cims-elevation-lg)', padding: '8px 10px', fontSize: 12,

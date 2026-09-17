@@ -17,8 +17,8 @@
 #include <string>
 
 #include "FmReporter.h"
-#include "SimpleJson.h"
 #include "Log.h"
+#include "SimpleJson.h"
 #include "StoreOpWriter.h"
 
 /**
