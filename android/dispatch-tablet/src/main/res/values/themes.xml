@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 플랫폼 테마 사용(Material Components 의존 회피). UI 는 Compose Material3 로 렌더. -->
+    <style name="Theme.CimsDispatch" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#0D1211</item>
+        <item name="android:statusBarColor">#0D1211</item>
+        <item name="android:navigationBarColor">#111917</item>
+    </style>
+</resources>

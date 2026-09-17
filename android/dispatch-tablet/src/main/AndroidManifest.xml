@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- 등록 유지 = specialUse, 캡처 중에는 마이크 타입으로 재승격한다(§5·§6.1).
+         dataSync 를 쓰지 않는 이유: Android 15+ 에서 하루 6시간 누적 제한이 걸리고 BOOT_COMPLETED 에서
+         시작할 수 없다 — 상주·부팅 재등록 약속이 성립하지 않는다. 기존 ptt-client 도 같은 조합을 쓴다. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- API 29~33 의 기본 타입. specialUse 는 API 34 에 생겼으므로 그 아래에서는 쓸 수 없다. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- 착신을 잠금 화면 위로 띄운다 — 관제석은 전화를 놓치면 안 된다(§6.2). -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+
+    <application
+        android:label="CIMS 관제"
+        android:supportsRtl="true"
+        android:usesCleartextTraffic="false"
+        android:theme="@style/Theme.CimsDispatch">
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:screenOrientation="userLandscape"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|density"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:label="CIMS 관제">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 세션·엔진의 수명을 갖는다. Activity 가 재생성돼도 등록이 끊기지 않게(§6.1). -->
+        <service
+            android:name=".session.DispatchService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse|microphone|dataSync">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="mcptt_dispatch_keepalive" />
+        </service>
+
+        <receiver
+            android:name=".session.DispatchBootRegister"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

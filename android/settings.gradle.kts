@@ -31,3 +31,5 @@ include(":core")
 include(":cims")
 include(":volte-client")
 include(":ptt-client")
+
+include(":dispatch-tablet")
