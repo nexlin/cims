@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose 가 전부 그리므로 플랫폼 기본 테마에 액션바만 뺀다(기존 앱과 같은 방식). -->
+    <style name="Theme.CimsProbe" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

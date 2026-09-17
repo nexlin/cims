@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 통신 모드 진입·통신 장치 선택(BT 헤드셋)에 필요. 녹음은 하지 않는다. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <application
+        android:label="CIMS 오디오 탐침"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.CimsProbe">
+        <activity
+            android:name=".ProbeActivity"
+            android:exported="true"
+            android:label="CIMS 오디오 탐침">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

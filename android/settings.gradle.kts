@@ -33,3 +33,6 @@ include(":volte-client")
 include(":ptt-client")
 
 include(":dispatch-tablet")
+
+// 오디오 라우팅 탐침 — F5 판정용 일회성 앱(docs/design/features/android_dispatch_tablet.md §8)
+include(":audio-probe")
