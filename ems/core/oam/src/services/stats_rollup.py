@@ -330,7 +330,9 @@ def _fold_ptt_attempt(row: dict, agg: dict) -> None:
     if (row.get('outcome') or '') == 'established':
         _bump(c, 'sessions')
         return
-    reason = row.get('reason') or 'error'
+    # 사유가 안 실린 줄은 **모름**이다 — `error` 로 단정하면 "붙지 못한 원인이 오류였다" 는
+    #   말이 되어, 기록이 빠진 것과 실제 오류가 한 칸에 섞인다.
+    reason = row.get('reason') or 'unknown'
     _bump(c['reasons'], reason)
     # 원인 — 반환 지점마다 하나. 사유(denied/error) 두 칸과 응답코드로는 가릴 수 없는 것을
     #   여기서 가른다: 같은 488 이 codec_mismatch·srtp_failed 둘이고, session_expired·
@@ -413,9 +415,15 @@ def _fold_volte(rec: dict, agg: dict) -> None:
         _bump(c, 'duration_sum_sec', dur)
     if answered and state == 'ended' and reason == 'normal':
         _bump(c, 'completed')
-    if state == 'ended' and reason:
-        _bump(c['reasons'], reason)
     st = int(rec.get('end_status', 0) or 0)
+    if state == 'ended' and reason:
+        # **아무것도 특정할 수 없는 실패는 `unknown` 으로 따로 센다.** `error` 는 이름이
+        #   붙은 사유처럼 보이지만 실제로는 "200 이 아니었다" 는 뜻뿐이고(CallDir.h —
+        #   착신까지 나간 호는 `200 아니면 error`), 응답코드마저 없으면 나중에 사유를
+        #   세분화할 때도 **가를 근거가 없다**. 코드가 있는 것과 없는 것을 미리 갈라 두면
+        #   세분화 대상이 좁혀지고, 이 칸이 줄어드는 것이 곧 진척도가 된다.
+        #   코드가 있는 `error` 는 그대로 둔다 — 지금 쌓는 방식을 바꾸지 않는다.
+        _bump(c['reasons'], 'unknown' if (reason == 'error' and not st) else reason)
     if state == 'ended' and st and st != 200:
         _bump(c['statuses'], str(st))
     # 1:1 통화의 leg 은 발신 1 + 착신 1. 참여율 분모는 착신 leg 이다(§1.2).

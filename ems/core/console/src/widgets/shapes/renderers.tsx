@@ -411,8 +411,9 @@ export function MatrixTable({ data }: { data: MatrixData }) {
             <Th className="sticky left-0 z-[1] whitespace-nowrap bg-card z-[2]">시각</Th>
             {data.columns.map(c => (
               <Th className="text-right whitespace-nowrap" key={c.key}
-                  title={c.total === null ? `전 구간 ${NO_VALUE} (자료 없음)`
-                                          : `전 구간 ${c.total}${c.unit ?? data.unit ?? '건'}`}>
+                  title={[c.total === null ? `전 구간 ${NO_VALUE} (자료 없음)`
+                                            : `전 구간 ${c.total}${c.unit ?? data.unit ?? '건'}`,
+                          c.help].filter(Boolean).join('\n\n')}>
                 {c.label}{c.unit === '%' ? ' (%)' : ''}
               </Th>
             ))}

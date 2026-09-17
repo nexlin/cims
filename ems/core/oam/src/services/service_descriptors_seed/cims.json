@@ -709,6 +709,30 @@
               "path": "volte.reasons.incomplete",
               "totalPath": "totals.volte.reasons.incomplete",
               "unit": "건"
+            },
+            {
+              "key": "r_unknown",
+              "label": "사유 모름",
+              "path": "volte.reasons.unknown",
+              "totalPath": "totals.volte.reasons.unknown",
+              "unit": "건",
+              "help": "사유도 응답코드도 없어 무엇 때문에 실패했는지 특정할 수 없는 호. 나중에 사유를 세분화해도 가를 근거가 없는 건들이라 따로 센다 — 이 칸이 줄어드는 것이 세분화의 진척도다."
+            },
+            {
+              "key": "open",
+              "label": "미결",
+              "path": "volte.open",
+              "totalPath": "totals.volte.open",
+              "unit": "건",
+              "help": "아직 끝나지 않아 값이 확정되지 않은 호. 끝나면 그 버킷이 다시 계산된다."
+            },
+            {
+              "key": "late",
+              "label": "보존초과",
+              "path": "volte.late_dropped",
+              "totalPath": "totals.volte.late_dropped",
+              "unit": "건",
+              "help": "끝나기 전에 1분 집계 보존기간이 지나 되짚지 못한 호. 계속 오르면 보존기간이 짧다."
             }
           ],
           "notes": [
@@ -1004,6 +1028,30 @@
               "path": "ptt.end_reasons.error",
               "totalPath": "totals.ptt.end_reasons.error",
               "unit": "건"
+            },
+            {
+              "key": "r_unknown",
+              "label": "사유 모름",
+              "path": "ptt.reasons.unknown",
+              "totalPath": "totals.ptt.reasons.unknown",
+              "unit": "건",
+              "help": "사유도 응답코드도 없어 무엇 때문에 실패했는지 특정할 수 없는 호. 나중에 사유를 세분화해도 가를 근거가 없는 건들이라 따로 센다 — 이 칸이 줄어드는 것이 세분화의 진척도다."
+            },
+            {
+              "key": "open",
+              "label": "미결",
+              "path": "ptt.open",
+              "totalPath": "totals.ptt.open",
+              "unit": "건",
+              "help": "아직 끝나지 않은 세션. 끝나면 그 버킷이 다시 계산된다."
+            },
+            {
+              "key": "late",
+              "label": "보존초과",
+              "path": "ptt.late_dropped",
+              "totalPath": "totals.ptt.late_dropped",
+              "unit": "건",
+              "help": "끝나기 전에 1분 집계 보존기간이 지나 되짚지 못한 세션."
             }
           ],
           "notes": [

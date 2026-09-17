@@ -365,6 +365,72 @@ class FutureDaysTest(unittest.TestCase):
         self.assertEqual(cov['missing'], 0)
 
 
+class UnknownReasonTest(unittest.TestCase):
+    """**아무것도 특정할 수 없는 실패는 `unknown` 으로 따로 센다.**
+
+    `error` 는 이름이 붙은 사유처럼 보이지만 실제로는 "200 이 아니었다" 는 뜻뿐이다
+    (CallDir.h — 착신까지 나간 호는 `200 아니면 error`). 응답코드마저 없으면 나중에 사유를
+    세분화해도 **가를 근거가 없다.** 코드가 있는 것과 없는 것을 미리 갈라 두면 세분화
+    대상이 좁혀지고, 이 칸이 줄어드는 것이 곧 진척도가 된다.
+    """
+
+    def _fold(self, rec):
+        agg = {'call': R._zero_call(), 'msg': {'in': {}, 'out': {}}}
+        R._fold_volte(rec, agg)
+        return agg
+
+    def _rec(self, **kw):
+        base = {'state': 'ended', 'invite_time': '2026-09-15 10:00:00',
+                'answer_time': None, 'duration': 0, 'end_reason': 'error', 'end_status': 0}
+        base.update(kw)
+        return base
+
+    def test_오류인데_코드가_없으면_모름(self):
+        agg = self._fold(self._rec())
+        self.assertEqual(agg['call']['reasons'].get('unknown'), 1)
+        self.assertIsNone(agg['call']['reasons'].get('error'))
+
+    def test_오류에_코드가_있으면_그대로_오류(self):
+        """지금 쌓는 방식을 바꾸지 않는다 — 가를 근거가 있는 건은 건드리지 않는다."""
+        agg = self._fold(self._rec(end_status=503))
+        self.assertEqual(agg['call']['reasons'].get('error'), 1)
+        self.assertIsNone(agg['call']['reasons'].get('unknown'))
+        self.assertEqual(agg['call']['statuses'].get('503'), 1)
+
+    def test_이름이_붙은_사유는_코드가_없어도_그대로(self):
+        """거절·통화중·무응답은 CSP 가 응답코드로 판정해 붙인 이름이다."""
+        for rs in ('rejected', 'busy', 'no_answer'):
+            agg = self._fold(self._rec(end_reason=rs))
+            self.assertEqual(agg['call']['reasons'].get(rs), 1, rs)
+            self.assertIsNone(agg['call']['reasons'].get('unknown'), rs)
+
+    def test_정상종료는_모름으로_새지_않는다(self):
+        agg = self._fold(self._rec(end_reason='normal', answer_time='2026-09-15 10:00:03',
+                                   duration=5, end_status=200))
+        self.assertEqual(agg['call']['reasons'].get('normal'), 1)
+        self.assertEqual(agg['call']['completed'], 1)
+        self.assertIsNone(agg['call']['reasons'].get('unknown'))
+
+    def test_안_끝난_호는_미결이지_모름이_아니다(self):
+        """미결 판정은 집계와 되짚기가 **같은 규칙**(사유 유무)을 쓴다 — 여기만 바꾸면 갈린다."""
+        agg = self._fold(self._rec(state='ringing', end_reason=None))
+        self.assertEqual(agg.get('open'), 1)
+        self.assertEqual(agg['call']['reasons'], {})
+
+    def test_모름은_NER_분자에_안_들어간다(self):
+        """NER 은 '상대 사정' 만 면제한다 — 모르는 것을 면제하면 망 책임이 지워진다."""
+        out = R.with_rates({'attempts': 2, 'sessions': 1, 'talked': 1,
+                            'reasons': {'unknown': 1}})
+        self.assertEqual(out['ner_ok'], 1)
+        self.assertEqual(out['ner'], 50.0)
+
+    def test_PTT_장부에_사유가_없으면_모름(self):
+        agg = {'call': R._zero_call(), 'msg': {'in': {}, 'out': {}}}
+        R._fold_ptt_attempt({'outcome': 'failed', 'reason': '', 'cause': '', 'status': 0}, agg)
+        self.assertEqual(agg['call']['reasons'].get('unknown'), 1)
+        self.assertIsNone(agg['call']['reasons'].get('error'))
+
+
 class EnsureSvcCellTest(unittest.TestCase):
     """**읽은 구간의 0 건은 0 으로 낸다** (F-49).
 

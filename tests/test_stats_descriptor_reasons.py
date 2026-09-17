@@ -30,6 +30,11 @@ FLOW_LOGGER = os.path.join(_REPO, "ems", "core", "oam", "src", "services", "flow
 # 사유 열이 아닌 것 — 사유 축이 아니라 집계·비율 축이다.
 _NOT_REASON = "normal"          # `정상종료` 열이 이미 센다
 
+# 집계가 파생한 사유 축 — 원천(`end_reason`) 어휘에는 없다. `unknown` 은 "사유도 응답코드도
+# 없어 특정할 수 없는 실패" 를 담는 칸이라 CSP 가 적을 수 있는 값이 아니다(sip_statistics.md
+# §2.3). enum 대조에서 빼되, **열이 있는지는 따로 지킨다**.
+_DERIVED = {'unknown'}
+
 # 응답코드 → 종료 사유. csp/CallDir.h::_ReasonOfStatus 와 같은 규칙이어야 한다.
 def _reason_of_status(st: int) -> str:
     if st in (486, 600):
@@ -87,8 +92,17 @@ class VolteReasonColumns(unittest.TestCase):
 
     def test_모든_종료_사유에_열이_있다(self):
         want = {r for r in _reason_enum() if r != _NOT_REASON}
-        self.assertEqual(want, set(self.reason_cols),
+        self.assertEqual(want, set(self.reason_cols) - _DERIVED,
                          "사유 열과 종료 사유 enum 이 어긋난다 — 빠진 사유로 끝난 호는 표에 안 나온다")
+
+    def test_파생_축에도_열이_있다(self):
+        """집계가 만드는 축은 원천 enum 에 없다 — 그래도 표에 자리가 있어야 한다.
+
+        `unknown` 은 CSP 가 적는 값이 아니라 **집계가 만든 칸**이다(사유도 응답코드도 없어
+        무엇 때문에 실패했는지 특정할 수 없는 호). 열이 없으면 그 호들이 표 어디에도 안
+        나타나고, 시도 수와 사유 합이 어긋난 채로 남는다."""
+        self.assertTrue(_DERIVED <= set(self.reason_cols),
+                        f"파생 사유 축에 열이 없다: {_DERIVED - set(self.reason_cols)}")
 
     def test_정상종료_열이_따로_있다(self):
         keys = {c["key"] for c in self.cols}

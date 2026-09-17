@@ -30,6 +30,8 @@ export interface MatrixData {
    * detail = 전 구간의 칸 상세(아래 rows.details 와 같은 문구) — 합계 행에 건다.
    */
   columns: { key: string; label: string; total: number | null; unit?: string; detail?: string
+             /** 열 이름만으로 뜻이 안 서는 칸의 설명 — 헤더 툴팁. 소스가 선언한다. */
+             help?: string
              /** 0 을 **보이게 칠한다** — 다른 칸과 같은 보라 계열, 고정 농도. */
              paintZero?: boolean }[]
   /**
