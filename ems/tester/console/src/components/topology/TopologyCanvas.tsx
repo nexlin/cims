@@ -1,8 +1,10 @@
 // 토폴로지 캔버스 편집기 — 팔레트(왼쪽) · 캔버스(호스트 영역 안에 워커·대상 노드 카드, 워커 안에 풀, 선은 모델에서 파생) · 속성 패널(오른쪽) ·
 // 하단 드로어(레코드 JSON · 검증 · 연결 검사). 빈 곳에 놓으면 상자 자동 생성, 카드 위치·영역 크기는 레코드 layout 에 저장
-// (test_instrument.md §7 토폴로지 캔버스 사양 ①~⑥). 문서는 부모(페이지)가 소유 — 이 컴포넌트는 doc 을 받아 바뀐 사본을 onChange 로 준다.
+// (test_instrument.md §7 토폴로지 캔버스 사양 ①~⑥). 문서는 부모(페이지)가 소유 — 이 컴포넌트는 doc 을 받아 바뀐 사본을 onChange 로 준다
+// (끌기 중 연속 변경은 transient=true, 놓으면 onCommit — 페이지 이력이 한 걸음으로 묶는다; 영역 자동 확장은 onLayout — 이력에 안 쌓는다).
+// 줌(Ctrl+휠·버튼·화면 맞춤)은 스테이지 transform 하나 — 좌표 계산은 전부 zoom 으로 나눈다. 팔레트는 접을 수 있고 클릭 = 선택한 상자 위에 추가.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Server, Cpu, Radio, Waves, Users, Activity, Database, Smartphone, Globe, Phone, Router, Terminal, ChevronDown, ChevronRight, Trash2 } from 'lucide-react'
+import { Server, Cpu, Radio, Waves, Users, Activity, Database, Smartphone, Globe, Phone, Router, Terminal, ChevronDown, ChevronRight, Trash2, Copy, PanelLeftClose, PanelLeftOpen, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
 import { Badge } from '@core/components/ui/badge'
 import { Input } from '@core/components/ui/input'
@@ -14,6 +16,7 @@ import { useConfirm } from '@core/components/custom/confirm'
 import type { TopologyDoc, TopoNode, PoolDoc, PeerPoolDoc, UePoolDoc, CheckItem, NodeRole, Transport, WorkerRow, SipListener } from '@tester/api/tester'
 import * as M from '@tester/lib/topology-model'
 import type { Focus, Issue, PaletteKind, Pos } from '@tester/lib/topology-model'
+import { useDrawerHeight } from '@tester/lib/use-drawer-height'
 
 const HC = (i: number) => `var(--chart-${i})`
 const ROLE_ICON: Record<NodeRole, ReactNode> = { sip: <Radio size={12} />, tas: <Cpu size={12} />, media: <Waves size={12} />, subscriber: <Users size={12} />, oam: <Activity size={12} />, db: <Database size={12} /> }
@@ -30,7 +33,7 @@ const PALETTE: { group: string; items: { kind: PaletteKind; label: string; hint:
 ]
 
 type Drag =
-  | { type: 'new'; kind: PaletteKind; x: number; y: number }
+  | { type: 'new'; kind: PaletteKind; x: number; y: number; sx: number; sy: number }
   | { type: 'pool'; id: string; x: number; y: number; sx: number; sy: number; moved: boolean }
   | { type: 'link'; id: string; ax: number; ay: number; x: number; y: number }      // 풀 앵커에서 수신점 행으로 선 잇기
   | { type: 'card'; kind: 'worker' | 'node'; id: string; x: number; y: number; ox: number; oy: number; moved: boolean }
@@ -42,10 +45,16 @@ const EDGE_COLOR: Record<Edge['cls'], string> = { udp: 'var(--chart-1)', tcp: 'v
 
 const snap = (v: number) => Math.round(v / 10) * 10
 
-export default function TopologyCanvas({ doc, onChange, check, workers, canWrite, onFocusCheck }: {
+export default function TopologyCanvas({ doc, onChange, onLayout, onCommit, check, checkStale, workers, canWrite, onFocusCheck }: {
   doc: TopologyDoc
-  onChange: (next: TopologyDoc) => void
+  onChange: (next: TopologyDoc, transient?: boolean) => void
+  /** 배치만 바뀐 변경(영역 자동 확장) — 이력에 안 쌓는다. 없으면 onChange */
+  onLayout?: (next: TopologyDoc) => void
+  /** 끌기 한 묶음의 끝 */
+  onCommit?: () => void
   check: { items: CheckItem[]; at: string } | null
+  /** 검사 뒤 문서가 바뀌었다 — 결과를 흐리게 */
+  checkStale?: boolean
   workers: WorkerRow[]
   canWrite: boolean
   onFocusCheck?: () => void
@@ -60,6 +69,10 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
   const [hot, setHot] = useState<Hot | null>(null)
   const [edges, setEdges] = useState<Edge[]>([])
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem('tester-topo-palette') || '{}') } catch { return {} } })
+  const [palOpen, setPalOpen] = useState(() => { try { return localStorage.getItem('tester-topo-palette-open') !== '0' } catch { return true } })
+  const togglePal = () => setPalOpen(o => { try { localStorage.setItem('tester-topo-palette-open', o ? '0' : '1') } catch { /* 무시 */ } return !o })
+  const [zoom, setZoom] = useState(1)
+  const [drawerH, onDrawerHandle] = useDrawerHeight('tester-topo-drawer', 220)
   const stageRef = useRef<HTMLDivElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<Drag | null>(null)
@@ -67,7 +80,7 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
 
   const issues = useMemo(() => M.validate(doc), [doc])
   const errsFor = useCallback((f: Focus) => issues.filter(i => i.focus && i.focus.kind === f.kind && i.focus.id === f.id), [issues])
-  const mutate = useCallback((fn: (d: TopologyDoc) => void) => { const d = M.deep(doc); M.ensureLayout(d); fn(d); onChange(d) }, [doc, onChange])
+  const mutate = useCallback((fn: (d: TopologyDoc) => void, transient = false) => { const d = M.deep(doc); M.ensureLayout(d); fn(d); onChange(d, transient) }, [doc, onChange])
   const L = doc.layout ?? { regions: {}, items: {} }
   const checkOf = useCallback((name: string) => check?.items.find(i => i.name === name), [check])
   const healthOf = useCallback((wname: string) => workers.find(w => w.name === wname), [workers])
@@ -76,14 +89,22 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
   useLayoutEffect(() => {
     const st = stageRef.current; if (!st) return
     const sr = st.getBoundingClientRect()
-    const ctr = (el: Element | null) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left - sr.left + r.width / 2, y: r.top - sr.top + r.height / 2 } }
+    const ctr = (el: Element | null) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: (r.left - sr.left + r.width / 2) / zoom, y: (r.top - sr.top + r.height / 2) / zoom } }
     const portA = (id: string) => ctr(st.querySelector(`[data-port="${id}"] [data-pa]`))
     const failing = (id: string) => { const c = checkOf(id); return !!c && !c.ok && !c.info }
     const out: Edge[] = []
-    const edge = (a: Pos | null, b: Pos | null, cls: Edge['cls'], label: string | null, hi: boolean, fail: boolean) => {
+    // 라벨 겹침 방지 — 같은 수신점으로 가는 같은 라벨은 한 번만, 다른 라벨은 세로로 비켜 놓는다(선택된 풀의 선은 항상 라벨을 단다)
+    const seenLabel = new Set<string>(); const perTarget = new Map<string, number>()
+    const edge = (a: Pos | null, b: Pos | null, cls: Edge['cls'], label: string | null, hi: boolean, fail: boolean, tgt = '') => {
       if (!a || !b) return
       const dx = Math.max(60, Math.abs(b.x - a.x) * 0.5)
-      out.push({ d: `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`, cls, label, lx: 0.125 * a.x + 0.375 * (a.x + dx) + 0.375 * (b.x - dx) + 0.125 * b.x, ly: (a.y + b.y) / 2, hi, dim: !!sel && !hi, fail })
+      let ly = (a.y + b.y) / 2
+      if (label && !hi && tgt) {
+        const k = `${tgt}|${label}`
+        if (seenLabel.has(k)) label = null
+        else { seenLabel.add(k); const n = perTarget.get(tgt) ?? 0; perTarget.set(tgt, n + 1); ly += n * 14 }
+      }
+      out.push({ d: `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`, cls, label, lx: 0.125 * a.x + 0.375 * (a.x + dx) + 0.375 * (b.x - dx) + 0.125 * b.x, ly, hi, dim: !!sel && !hi, fail })
     }
     for (const [n, p] of Object.entries(doc.pools ?? {})) {
       const hi = sel?.kind === 'pool' && sel.id === n
@@ -93,7 +114,7 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
         const seed = p.seed ?? {}
         const lbl = (doc.target.kind ?? 'cims') === 'cims' ? (seed.acl ? `ACL ${seed.acl}` : seed.route_set ? `${seed.route_set} · p${seed.priority ?? 100}${seed.distribution && seed.distribution !== 'failover' ? ` · ${seed.distribution}` : ''}` : `rs ${n}`) : `→ ${p.peering}`
         const pid = `${p.peering}:${lid}`
-        edge(a, portA(pid), 'peer', lbl, hi, failing(pid))
+        edge(a, portA(pid), 'peer', lbl, hi, failing(pid), pid)
         if (p.register) {
           // 트렁크 REGISTER 는 같은 노드의 같은 transport access 수신점(피어가 가리킨 항목이 access 면 그 항목)
           const nd = doc.target.nodes[p.peering]; const reg = M.accessListeners(nd).find(([, l]) => (l.protocol ?? 'udp') === (p.bind.protocol ?? 'udp'))?.[0] ?? M.accessListeners(nd)[0]?.[0]
@@ -101,9 +122,9 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
         }
       } else {
         const tr = M.poolTransport(doc, p); const pid = `${p.access}:${lid}`
-        edge(a, portA(pid), tr, `${tr}${p.srtp && p.srtp !== 'off' ? ` · srtp ${p.srtp}` : ''}`, hi, failing(pid))
+        edge(a, portA(pid), tr, `${tr}${p.srtp && p.srtp !== 'off' ? ` · srtp ${p.srtp}` : ''}`, hi, failing(pid), pid)
         for (const m of M.mediaNodes(doc)) edge({ x: a.x, y: a.y + 6 }, portA(`${m}:rtp`), 'rtp', hi ? 'RTP' : null, hi, false)
-        if (M.isUe(p) && 'db' in p.source) { const d = doc.target.nodes[p.source.db]; edge({ x: a.x, y: a.y + 10 }, portA(`${p.source.db}:${d?.role === 'db' ? 'db' : 'api'}`), 'db', `${p.source.table} ×${p.source.count}`, hi, false) }
+        if (M.isUe(p) && 'db' in p.source) { const d = doc.target.nodes[p.source.db]; edge({ x: a.x, y: a.y + 10 }, portA(`${p.source.db}:${d?.role === 'db' ? 'db' : 'api'}`), 'db', `${p.source.table} ×${p.source.count}`, hi, false, `${p.source.db}:db`) }
       }
     }
     setEdges(prev => JSON.stringify(prev) === JSON.stringify(out) ? prev : out)
@@ -119,11 +140,11 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
       if (r.w < need.w) { r.w = Math.ceil(need.w / 10) * 10; grew = true }
       if (r.h < need.h) { r.h = Math.ceil(need.h / 10) * 10; grew = true }
     }
-    if (grew && !drag) onChange(d)
+    if (grew && !drag) (onLayout ?? onChange)(d)
   })
 
   // ── 포인터 DnD ───────────────────────────────────────────────────────────
-  const stagePt = (e: { clientX: number; clientY: number }): Pos => { const r = stageRef.current!.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top } }
+  const stagePt = (e: { clientX: number; clientY: number }): Pos => { const r = stageRef.current!.getBoundingClientRect(); return { x: (e.clientX - r.left) / zoom, y: (e.clientY - r.top) / zoom } }
   const under = (e: { clientX: number; clientY: number }) => document.elementFromPoint(e.clientX, e.clientY)
   const ctxOf = (el: Element | null) => {
     const h = el?.closest('[data-region]') as HTMLElement | null, w = el?.closest('[data-worker]') as HTMLElement | null, n = el?.closest('[data-node]') as HTMLElement | null
@@ -187,14 +208,16 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
         const el = under(e); const rg = (el?.closest('[data-region]') as HTMLElement | null)?.dataset.region ?? null
         setHot(rg ? { kind: 'host', id: rg } : null)
       } else if (d.type === 'region') {
-        mutate(x => { const r = M.ensureLayout(x).regions[d.id]; if (!r) return; r.x = snap(Math.max(10, e.clientX - d.ox)); r.y = snap(Math.max(10, e.clientY - d.oy)) })
+        mutate(x => { const r = M.ensureLayout(x).regions[d.id]; if (!r) return; r.x = snap(Math.max(10, (e.clientX - d.ox) / zoom)); r.y = snap(Math.max(10, (e.clientY - d.oy) / zoom)) }, true)
       } else if (d.type === 'resize') {
-        mutate(x => { const r = M.ensureLayout(x).regions[d.id]; if (!r) return; r.w = snap(Math.max(200, e.clientX - d.ox)); r.h = snap(Math.max(90, e.clientY - d.oy)) })
+        mutate(x => { const r = M.ensureLayout(x).regions[d.id]; if (!r) return; r.w = snap(Math.max(200, (e.clientX - d.ox) / zoom)); r.h = snap(Math.max(90, (e.clientY - d.oy) / zoom)) }, true)
       }
     }
     const up = (e: PointerEvent) => {
       const d = dragRef.current; setDrag(null); setHot(null); if (!d) return
+      if (d.type === 'region' || d.type === 'resize') { onCommit?.(); return }
       if (d.type === 'new') {
+        if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 4) { clickAdd(d.kind); return }   // 끌지 않고 눌렀다 뗌 = 선택한 상자 위에 추가
         const el = under(e); const ctx = ctxOf(el); if (!ctx.inCanvas) return
         const pos = stagePt(e)
         mutate(x => { const r = M.createFromPalette(x, d.kind, pos, { host: ctx.host, worker: ctx.worker }); if (r.made.length) show(`${r.made.join(' · ')} 를 만들어 그 위에 놓았습니다 — 주소·포트를 확인하십시오`, 'ok'); if (r.sel) setSel(r.sel) })
@@ -227,42 +250,80 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!drag, doc])
 
-  const startNew = (kind: PaletteKind) => (e: React.PointerEvent) => { if (!canWrite) return; e.preventDefault(); setDrag({ type: 'new', kind, x: e.clientX, y: e.clientY }) }
+  const startNew = (kind: PaletteKind) => (e: React.PointerEvent) => { if (!canWrite) return; e.preventDefault(); setDrag({ type: 'new', kind, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY }) }
+  /** 팔레트 클릭 — 선택한 카드가 속한 호스트/워커(없으면 첫 것) 위에, 그 영역의 카드 아래 빈 자리에 만든다 */
+  const clickAdd = (kind: PaletteKind) => {
+    if (!canWrite) return
+    const s = sel
+    let host: string | null = s?.kind === 'host' ? s.id : s?.kind === 'node' ? doc.target.nodes[s.id]?.host ?? null : s?.kind === 'worker' ? M.worker(doc, s.id)?.host ?? null : s?.kind === 'pool' ? M.worker(doc, doc.pools[s.id]?.worker)?.host ?? null : null
+    let wname: string | null = s?.kind === 'worker' ? s.id : s?.kind === 'pool' ? doc.pools[s.id]?.worker ?? null : null
+    if (M.POOL_KINDS.includes(kind) && !wname) { const w = doc.workers.find(w => !host || w.host === host) ?? doc.workers[0]; if (w) { wname = w.name; host = w.host } }
+    if (!host && kind !== 'host') host = M.hosts(doc)[0]?.[0] ?? null
+    if (!host) { show('먼저 호스트를 놓으십시오 — 팔레트의 [호스트]를 캔버스로 끌어 놓습니다', 'err'); return }
+    const r = L.regions[host] ?? { x: 40, y: 40, w: 300, h: 120 }
+    let bottom = 0; stageRef.current?.querySelectorAll<HTMLElement>(`[data-region="${host}"] [data-card]`).forEach(c => { bottom = Math.max(bottom, c.offsetTop + c.offsetHeight) })
+    const pos = { x: r.x + 20 + 14, y: r.y + 30 + 10 + (bottom ? bottom + 12 : 12) }
+    mutate(x => { const res = M.createFromPalette(x, kind, kind === 'host' ? { x: r.x + r.w + 60, y: r.y } : pos, { host: kind === 'host' ? null : host, worker: wname }); if (res.made.length) show(`${res.made.join(' · ')} 를 만들었습니다`, 'ok'); if (res.sel) setSel(res.sel) })
+  }
   const startPool = (id: string) => (e: React.PointerEvent) => { e.stopPropagation(); e.preventDefault(); setSel({ kind: 'pool', id }); if (canWrite) setDrag({ type: 'pool', id, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, moved: false }) }
   const startLink = (id: string) => (e: React.PointerEvent) => {
     e.stopPropagation(); e.preventDefault(); setSel({ kind: 'pool', id }); if (!canWrite) return
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); const sr = stageRef.current!.getBoundingClientRect()
-    const ax = r.left - sr.left + r.width / 2, ay = r.top - sr.top + r.height / 2
+    const ax = (r.left - sr.left + r.width / 2) / zoom, ay = (r.top - sr.top + r.height / 2) / zoom
     setDrag({ type: 'link', id, ax, ay, x: ax, y: ay })
   }
   const startCard = (kind: 'worker' | 'node', id: string) => (e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest('input,select,button')) return
     e.stopPropagation(); e.preventDefault(); setSel({ kind, id }); if (!canWrite) return
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); const sr = stageRef.current!.getBoundingClientRect()
-    setDrag({ type: 'card', kind, id, x: r.left - sr.left, y: r.top - sr.top, ox: e.clientX - r.left, oy: e.clientY - r.top, moved: false })
+    setDrag({ type: 'card', kind, id, x: (r.left - sr.left) / zoom, y: (r.top - sr.top) / zoom, ox: (e.clientX - r.left) / zoom, oy: (e.clientY - r.top) / zoom, moved: false })
   }
   const startRegion = (id: string) => (e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest('input,select,button,[data-card]')) return
     e.preventDefault(); setSel({ kind: 'host', id }); if (!canWrite) return
     const r = L.regions[id]; if (!r) return
-    if ((e.target as HTMLElement).closest('[data-resize]')) { setDrag({ type: 'resize', id, ox: e.clientX - r.w, oy: e.clientY - r.h }); return }
-    setDrag({ type: 'region', id, ox: e.clientX - r.x, oy: e.clientY - r.y })
+    if ((e.target as HTMLElement).closest('[data-resize]')) { setDrag({ type: 'resize', id, ox: e.clientX - r.w * zoom, oy: e.clientY - r.h * zoom }); return }
+    setDrag({ type: 'region', id, ox: e.clientX - r.x * zoom, oy: e.clientY - r.y * zoom })
   }
 
+  const dup = (f: Focus) => { if (f.kind !== 'pool' && f.kind !== 'node') return; mutate(x => { const n = M.duplicateFocus(x, f); if (n) { setSel({ kind: f.kind, id: n }); show(`${f.id} → ${n} 복제 — 이름·포트를 확인하십시오`, 'ok') } }) }
   const del = async (f: Focus) => {
     const refs = M.refsOf(doc, f)
     if (refs.length && !await confirm({ title: `${f.id} 삭제`, body: `${f.id} 위/참조: ${refs.join(', ')}. 지우면 그것들은 놓일 곳이 없어집니다. 지울까요?`, confirmLabel: '삭제', tone: 'danger' })) return
     mutate(x => M.deleteFocus(x, f)); setSel(null)
   }
   useEffect(() => {
-    const kd = (e: KeyboardEvent) => { if ((e.target as HTMLElement).closest('input,select,textarea')) return; if (e.key === 'Escape') setSel(null); if ((e.key === 'Delete') && sel && canWrite) del(sel) }
+    const kd = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement).closest('input,select,textarea')) return
+      if (e.key === 'Escape') setSel(null)
+      if (e.key === 'Delete' && sel && canWrite) del(sel)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd' && sel && canWrite && (sel.kind === 'pool' || sel.kind === 'node')) { e.preventDefault(); dup(sel) }
+    }
     window.addEventListener('keydown', kd); return () => window.removeEventListener('keydown', kd)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel, doc, canWrite])
 
   const focusIssue = (f: Focus | null) => { if (f) setSel(f) }
-  const errBadge = (f: Focus) => errsFor(f).some(i => i.level === 'err') ? <Badge variant="dangerSolid" className="h-4 px-1 text-[10px]">!</Badge> : null
-  const resBadge = (name: string) => { const r = checkOf(name); if (!r) return null; return r.ok ? <Badge variant="successSoft" className="h-4 px-1 text-[10px]">OK {r.ms}ms</Badge> : r.info ? <Badge variant="neutralSoft" className="h-4 px-1 text-[10px]">참고</Badge> : <Badge variant="dangerSoft" className="h-4 px-1 text-[10px]">실패</Badge> }
+  const errBadge = (f: Focus) => errsFor(f).some(i => i.level === 'err') ? <Badge variant="dangerSolid">!</Badge> : null
+  const staleCls = checkStale ? ' opacity-50' : ''; const staleTitle = checkStale ? '저장 전 결과 — 편집 뒤 다시 검사하십시오' : undefined
+  const resBadge = (name: string) => { const r = checkOf(name); if (!r) return null; return r.ok ? <Badge variant="successSoft" className={staleCls.trim() || undefined} title={staleTitle}>OK {r.ms}ms</Badge> : r.info ? <Badge variant="neutralSoft" className={staleCls.trim() || undefined} title={staleTitle}>참고</Badge> : <Badge variant="dangerSoft" className={staleCls.trim() || undefined} title={staleTitle}>실패</Badge> }
+
+  // ── 줌 — 스테이지 transform 하나. 화면 맞춤 = 영역 전체가 보이도록(최대 100 %) ──
+  const ZOOMS = [0.3, 0.4, 0.5, 0.65, 0.8, 1, 1.25, 1.5]
+  const zoomStep = (dir: 1 | -1) => setZoom(z => { const i = ZOOMS.findIndex(v => v >= z - 1e-6); const j = Math.max(0, Math.min(ZOOMS.length - 1, (i < 0 ? ZOOMS.length - 1 : i) + dir)); return ZOOMS[j] })
+  const fit = () => {
+    const w = wrapRef.current; if (!w) return
+    let right = 0, bottom = 0
+    for (const [id] of M.hosts(doc)) { const r = L.regions[id]; if (r) { right = Math.max(right, r.x + r.w); bottom = Math.max(bottom, r.y + r.h) } }
+    if (!right) { setZoom(1); return }
+    const z = Math.min(1, (w.clientWidth - 24) / (right + 20), (w.clientHeight - 24) / (bottom + 20))
+    setZoom(Math.max(0.3, Math.round(z * 100) / 100)); w.scrollTo({ left: 0, top: 0 })
+  }
+  useEffect(() => {
+    const w = wrapRef.current; if (!w) return
+    const wheel = (e: WheelEvent) => { if (!(e.ctrlKey || e.metaKey)) return; e.preventDefault(); zoomStep(e.deltaY < 0 ? 1 : -1) }
+    w.addEventListener('wheel', wheel, { passive: false }); return () => w.removeEventListener('wheel', wheel)
+  }, [])
   const isSel = (k: Focus['kind'], id: string) => sel?.kind === k && sel.id === id
   const isHot = (k: Focus['kind'], id: string) => hot?.kind === k && hot.id === id
 
@@ -303,19 +364,20 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
   }
   const PoolCard = ({ pn, p }: { pn: string; p: PoolDoc }) => {
     const dragging = drag?.type === 'pool' && drag.id === pn
-    const group = p.group ? <Badge variant="neutralSoft" className="h-4 px-1 text-[10px]" title={`논리 풀 ${p.group} — 시나리오는 이 이름으로 참조`}>≡ {p.group}</Badge> : null
+    const group = p.group ? <Badge variant="neutralSoft" title={`논리 풀 ${p.group} — 시나리오는 이 이름으로 참조`}>≡ {p.group}</Badge> : null
     const anchorColor = M.isPeer(p) ? EDGE_COLOR.peer : EDGE_COLOR[M.poolTransport(doc, p)]
     let body: ReactNode
     if (M.isPeer(p)) { const idn = p.identities ?? {}; const rng = idn.e164_range ? `${idn.e164_range[0]}…${idn.e164_range[1].slice(-4)}` : idn.did_range ? `${idn.did_range[0]}…${idn.did_range[1].slice(-3)}` : '신원 없음'
-      body = <><Badge variant={p.answer === 'silent' ? 'dangerSoft' : 'warningSoft'} className="h-4 px-1 text-[10px]">{p.profile}{p.answer === 'silent' ? ' · silent' : ''}</Badge><b className="truncate">{pn}</b><span className="truncate font-mono text-[10px] text-muted-foreground">{p.bind.ip ? p.bind.ip : ''}:{p.bind.port}/{p.bind.protocol ?? 'udp'} → {p.peering || '?'}{p.listener ? `:${p.listener}` : ''} · {rng}</span></> }
+      body = <><Badge variant={p.answer === 'silent' ? 'dangerSoft' : 'warningSoft'}>{p.profile}{p.answer === 'silent' ? ' · silent' : ''}</Badge><b className="truncate">{pn}</b><span className="truncate font-mono text-[10px] text-muted-foreground">{p.bind.ip ? p.bind.ip : ''}:{p.bind.port}/{p.bind.protocol ?? 'udp'} → {p.peering || '?'}{p.listener ? `:${p.listener}` : ''} · {rng}</span></> }
     else { const src = 'db' in p.source ? `${p.source.table.replace('_subscriptions', '')} ${p.source.offset ?? 0}+${p.source.count}` : `creds${p.source.count ? ` ${p.source.count}` : ''}`
-      body = <><Badge variant={p.kind === 'ue' ? 'infoSoft' : 'successSoft'} className="h-4 px-1 text-[10px]">{p.kind}</Badge>{group}<b className="truncate">{pn}</b><span className="truncate font-mono text-[10px] text-muted-foreground">→ {p.access || '?'}{p.listener ? `:${p.listener}` : ''} {M.poolTransport(doc, p)}{p.srtp && p.srtp !== 'off' ? '+srtp' : ''} · {src}</span></> }
+      body = <><Badge variant={p.kind === 'ue' ? 'infoSoft' : 'successSoft'}>{p.kind}</Badge>{group}<b className="truncate">{pn}</b><span className="truncate font-mono text-[10px] text-muted-foreground">→ {p.access || '?'}{p.listener ? `:${p.listener}` : ''} {M.poolTransport(doc, p)}{p.srtp && p.srtp !== 'off' ? '+srtp' : ''} · {src}</span></> }
     return (
       <div data-pool={pn} onPointerDown={startPool(pn)} title={pn}
            className={`relative flex cursor-grab select-none items-center gap-1.5 rounded-sm border bg-muted px-2 py-1 text-xs ${isSel('pool', pn) ? 'border-primary ring-1 ring-primary' : 'border-border'} ${dragging ? 'opacity-40' : ''}`}>
         {body}{errBadge({ kind: 'pool', id: pn })}
         <span data-pool-anchor={pn} onPointerDown={startLink(pn)} title="끌어서 수신점 행에 연결 — UE 는 access 수신점(접속점+transport), 피어는 어느 수신점이든(다음 홉), DB/API 행은 신원 원천"
-              className="absolute -right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-card hover:scale-125" style={{ background: anchorColor }} />
+              className={`absolute top-1/2 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-card hover:scale-125 ${isSel('pool', pn) ? '-right-2.5 h-4 w-4 ring-2 ring-primary/40' : '-right-1.5 h-3 w-3'}`} style={{ background: anchorColor }} />
+        {isSel('pool', pn) && canWrite && drag?.type !== 'link' && <span className="pointer-events-none absolute left-full top-1/2 z-[12] ml-4 -translate-y-1/2 whitespace-nowrap rounded-sm border border-primary bg-card px-1.5 py-0.5 text-[10px] text-foreground">← 점을 끌어 수신점 행에 연결</span>}
       </div>
     )
   }
@@ -346,19 +408,29 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
   const stageW = Math.max(1440, ...M.hosts(doc).map(([id]) => (L.regions[id]?.x ?? 0) + (L.regions[id]?.w ?? 0) + 40))
   const stageH = Math.max(900, ...M.hosts(doc).map(([id]) => (L.regions[id]?.y ?? 0) + (L.regions[id]?.h ?? 0) + 40))
   const errN = issues.filter(i => i.level === 'err').length, warnN = issues.filter(i => i.level === 'warn').length
+  const LV = { err: 0, warn: 1, info: 2 }
+  const sortedIssues = useMemo(() => [...issues].sort((a, b) => LV[a.level] - LV[b.level] || a.who.localeCompare(b.who)), [issues])   // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="grid min-h-0 flex-1 grid-cols-[210px_minmax(0,1fr)_320px]">
+      <div className={`grid min-h-0 flex-1 ${palOpen ? 'grid-cols-[210px_minmax(0,1fr)_320px]' : 'grid-cols-[36px_minmax(0,1fr)_320px]'}`}>
         {/* 팔레트 */}
+        {!palOpen ? (
+          <aside className="flex min-h-0 flex-col items-center gap-2 border-r border-border bg-card py-2">
+            <Button variant="ghost" size="iconSm" onClick={togglePal} title="팔레트 펼치기"><PanelLeftOpen size={14} /></Button>
+            <span className="text-[10px] text-muted-foreground [writing-mode:vertical-rl]">팔레트</span>
+          </aside>
+        ) : (
         <aside className="min-h-0 overflow-auto border-r border-border bg-card p-2 text-xs">
+          <div className="mb-1 flex items-center"><span className="text-[11px] font-semibold text-muted-foreground">팔레트</span><Button variant="ghost" size="iconSm" className="ml-auto" onClick={togglePal} title="팔레트 접기"><PanelLeftClose size={14} /></Button></div>
           {PALETTE.map(g => (
             <div key={g.group} className="mb-2">
               <button className="flex w-full items-center gap-1 py-1 text-[11px] font-semibold text-muted-foreground" onClick={() => setCollapsed(c => { const n = { ...c, [g.group]: !c[g.group] }; try { localStorage.setItem('tester-topo-palette', JSON.stringify(n)) } catch { /* 무시 */ } return n })}>
                 {collapsed[g.group] ? <ChevronRight size={12} /> : <ChevronDown size={12} />}{g.group}
               </button>
               {!collapsed[g.group] && g.items.map(it => (
-                <div key={it.kind} onPointerDown={startNew(it.kind)} tabIndex={0}
+                <div key={it.kind} onPointerDown={startNew(it.kind)} tabIndex={0} role="button" onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); clickAdd(it.kind) } }}
+                     title={canWrite ? '캔버스로 끌어 놓기 · 클릭 = 선택한 호스트/워커 위에 추가' : '읽기 전용'}
                      className={`mb-1 flex select-none items-center gap-2 rounded-sm border border-border bg-muted px-2 py-1.5 ${canWrite ? 'cursor-grab hover:border-primary' : 'opacity-60'}`}>
                   <span className="text-muted-foreground">{it.icon}</span><span><b>{it.label}</b><div className="text-[10px] text-muted-foreground">{it.hint}</div></span>
                 </div>
@@ -366,7 +438,7 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
             </div>
           ))}
           <div className="mt-2 rounded-sm border border-border p-2 text-[11px] leading-relaxed text-muted-foreground">
-            <b>놓는 자리가 소속을 정합니다.</b> 호스트 영역 안에 워커·대상 노드, 워커 카드 안에 풀. 빈 곳에 놓으면 담을 상자를 만듭니다. 선은 모델에서 나옵니다 — 풀 카드의 오른쪽 <b>앵커 점을 끌어 수신점 행</b>에 놓으면 그 수신점이 접속점(UE — access 행만)·다음 홉(피어 — 어느 행이든, CSP 는 Route 로 신뢰)·신원 원천(DB/API 행)이 됩니다. 풀 카드를 SIP 노드 위에 놓으면 기본 수신점으로 갑니다. 수신점은 노드 속성에서 N 개(IP/포트/프로토콜/edge) 둡니다. <kbd>Del</kbd> 삭제 · <kbd>Esc</kbd> 해제
+            <b>놓는 자리가 소속을 정합니다.</b> 호스트 영역 안에 워커·대상 노드, 워커 카드 안에 풀. 빈 곳에 놓으면 담을 상자를 만들고, 팔레트를 <b>클릭</b>하면 선택한 상자 위에 만듭니다. 선은 모델에서 나옵니다 — 풀 카드의 오른쪽 <b>앵커 점을 끌어 수신점 행</b>에 놓으면 그 수신점이 접속점(UE — access 행만)·다음 홉(피어 — 어느 행이든, CSP 는 Route 로 신뢰)·신원 원천(DB/API 행)이 됩니다. 풀 카드를 SIP 노드 위에 놓으면 기본 수신점으로 갑니다. 수신점은 노드 속성에서 N 개(IP/포트/프로토콜/edge) 둡니다. <kbd>Del</kbd> 삭제 · <kbd>Ctrl+D</kbd> 풀/노드 복제 · <kbd>Ctrl+Z</kbd>/<kbd>Ctrl+Y</kbd> 실행취소/다시실행 · <kbd>Ctrl+휠</kbd> 줌 · <kbd>Esc</kbd> 해제
           </div>
           <div className="mt-2 flex flex-col gap-1">
             <span className="text-[11px] font-semibold text-muted-foreground">프리셋</span>
@@ -378,10 +450,19 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
             ))}
           </div>
         </aside>
+        )}
 
-        {/* 캔버스 */}
-        <div ref={wrapRef} className="relative min-h-0 overflow-auto bg-background" onPointerDown={e => { if (e.target === e.currentTarget || (e.target as HTMLElement).dataset.stage) setSel(null) }}>
-          <div ref={stageRef} data-stage className="relative" style={{ width: stageW, height: stageH, backgroundImage: 'radial-gradient(var(--border) 1px, transparent 1px)', backgroundSize: '20px 20px' }}>
+        {/* 캔버스 — 바깥 상자가 줌 컨트롤을 고정하고, 안쪽이 스크롤한다 */}
+        <div className="relative min-h-0">
+          <div className="absolute right-3 top-2 z-[30] flex items-center gap-0.5 rounded-md border border-border bg-card p-0.5 shadow-sm">
+            <Button variant="ghost" size="iconSm" onClick={() => zoomStep(-1)} disabled={zoom <= ZOOMS[0]} title="축소 (Ctrl+휠)"><ZoomOut size={14} /></Button>
+            <button className="h-[26px] min-w-[44px] rounded-sm px-1 font-mono text-xs text-muted-foreground hover:bg-accent" onClick={() => setZoom(1)} title="100 %">{Math.round(zoom * 100)}%</button>
+            <Button variant="ghost" size="iconSm" onClick={() => zoomStep(1)} disabled={zoom >= ZOOMS[ZOOMS.length - 1]} title="확대 (Ctrl+휠)"><ZoomIn size={14} /></Button>
+            <Button variant="ghost" size="iconSm" onClick={fit} title="화면에 맞춤"><Maximize2 size={14} /></Button>
+          </div>
+        <div ref={wrapRef} className="h-full overflow-auto bg-background" onPointerDown={e => { if (e.target === e.currentTarget || (e.target as HTMLElement).dataset.stage || (e.target as HTMLElement).dataset.sizer) setSel(null) }}>
+          <div data-sizer style={{ width: stageW * zoom, height: stageH * zoom }}>
+          <div ref={stageRef} data-stage className="relative" style={{ width: stageW, height: stageH, transform: `scale(${zoom})`, transformOrigin: '0 0', backgroundImage: 'radial-gradient(var(--border) 1px, transparent 1px)', backgroundSize: '20px 20px' }}>
             {M.hosts(doc).map(([hid, h]) => {
               const r = L.regions[hid] ?? { x: 40, y: 40, w: 300, h: 120 }; const hc = HC(M.colorOf(doc, hid)); const hk = M.hostKind(doc, hid)
               const ws = doc.workers.filter(w => w.host === hid), ns = M.nodes(doc).filter(([, n]) => n.host === hid)
@@ -391,7 +472,7 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
                      style={{ left: r.x, top: r.y, width: r.w, height: r.h, borderColor: hc, background: `color-mix(in srgb, ${hc} 6%, var(--card))` }}>
                   <div className="flex h-[30px] cursor-move items-center gap-1.5 px-2 text-xs">
                     <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: hc }} /><Server size={12} className="text-muted-foreground" /><b>{h.name ?? hid}</b>
-                    <Badge variant="neutralSoft" className="h-4 px-1 text-[10px]">{M.HOST_LABEL[hk]}</Badge>{errBadge({ kind: 'host', id: hid })}
+                    <Badge variant="neutralSoft">{M.HOST_LABEL[hk]}</Badge>{errBadge({ kind: 'host', id: hid })}
                     {h.ssh && <span data-port={`${hid}:ssh`} className="inline-flex items-center gap-1 text-[10px] text-muted-foreground"><span data-pa /> ssh {h.ssh.user}@ {resBadge(`${hid}:ssh`)}</span>}
                     <span className="ml-auto font-mono text-[11px] text-muted-foreground">{h.ip}</span>
                   </div>
@@ -423,39 +504,43 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
             {/* 이동 중인 카드 — 포인터 이벤트를 꺼서 놓는 자리(elementFromPoint)가 카드 자신이 아니라 아래 호스트 영역으로 잡히게 */}
             {dragCard && <div className="pointer-events-none relative z-[20]">{dragCard.kind === 'node' ? <NodeCard id={dragCard.id} n={doc.target.nodes[dragCard.id]} abs={{ x: dragCard.x, y: dragCard.y }} /> : <WorkerCard name={dragCard.id} abs={{ x: dragCard.x, y: dragCard.y }} />}</div>}
           </div>
+          </div>
           {drag && (drag.type === 'new' || drag.type === 'pool') && (
             <div className="pointer-events-none fixed z-[200] rounded-sm border border-primary bg-card px-2 py-1 text-xs shadow-md" style={{ left: drag.x + 8, top: drag.y + 8 }}>
               {drag.type === 'new' ? PALETTE.flatMap(g => g.items).find(i => i.kind === drag.kind)?.label : drag.id}
             </div>
           )}
         </div>
+        </div>
 
         {/* 속성 */}
         <aside className="min-h-0 overflow-auto border-l border-border bg-card p-3 text-xs">
-          <Inspector doc={doc} sel={sel} setSel={setSel} mutate={mutate} issues={sel ? errsFor(sel) : []} canWrite={canWrite} onDelete={del} workers={workers} />
+          <Inspector doc={doc} sel={sel} setSel={setSel} mutate={mutate} issues={sel ? errsFor(sel) : []} canWrite={canWrite} onDelete={del} onDup={dup} workers={workers} />
         </aside>
       </div>
 
       {/* 드로어 */}
       <div className="border-t border-border bg-card">
+        {drawerOpen && <div onPointerDown={onDrawerHandle} className="group flex h-2 cursor-row-resize items-center justify-center hover:bg-accent" title="끌어서 높이 조절"><span className="h-0.5 w-10 rounded-full bg-border group-hover:bg-muted-foreground" /></div>}
         <div className="flex items-center gap-1 px-3 py-1 text-xs">
           {(['issues', 'json', 'check'] as const).map(t => (
             <button key={t} onClick={() => { setTab(t); setDrawerOpen(true) }} className={`h-6 rounded-sm px-2 ${tab === t && drawerOpen ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}>
-              {t === 'issues' ? <>검증 <Badge variant={errN ? 'dangerSoft' : warnN ? 'warningSoft' : 'successSoft'} className="ml-1 h-4 px-1 text-[10px]">{issues.length}</Badge></> : t === 'json' ? '레코드 JSON' : <>연결 검사 <Badge variant={check ? (check.items.every(i => i.ok || i.info) ? 'successSoft' : 'dangerSoft') : 'neutralSoft'} className="ml-1 h-4 px-1 text-[10px]">{check ? `${check.items.filter(i => i.ok).length}/${check.items.length}` : '—'}</Badge></>}
+              {t === 'issues' ? <>검증 <Badge variant={errN ? 'dangerSoft' : warnN ? 'warningSoft' : 'successSoft'} className="ml-1">{issues.length}</Badge></> : t === 'json' ? '레코드 JSON' : <>연결 검사 <Badge variant={check ? (check.items.every(i => i.ok || i.info) ? 'successSoft' : 'dangerSoft') : 'neutralSoft'} className="ml-1 h-4 px-1 text-[10px]">{check ? `${check.items.filter(i => i.ok).length}/${check.items.length}` : '—'}</Badge></>}
             </button>
           ))}
           <button className="ml-auto text-muted-foreground" onClick={() => setDrawerOpen(o => !o)}>{drawerOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</button>
         </div>
         {drawerOpen && (
-          <div className="max-h-[220px] overflow-auto border-t border-border px-3 py-2 text-xs">
+          <div className="overflow-auto border-t border-border px-3 py-2 text-xs" style={{ height: drawerH }}>
             {tab === 'issues' && (issues.length === 0 ? <div className="text-success">스키마·구조 검증 통과 — 저장할 수 있습니다</div> : (
-              <div className="flex flex-col gap-1">{issues.map((i, k) => (
+              <div className="flex flex-col gap-1">{sortedIssues.map((i, k) => (
                 <button key={k} onClick={() => focusIssue(i.focus)} className={`flex items-center gap-2 rounded-sm border-l-2 px-2 py-1 text-left hover:bg-accent ${i.level === 'err' ? 'border-destructive' : i.level === 'warn' ? 'border-warning' : 'border-info'}`}>
                   <Badge variant={i.level === 'err' ? 'dangerSoft' : i.level === 'warn' ? 'warningSoft' : 'infoSoft'}>{i.level === 'err' ? '오류' : i.level === 'warn' ? '경고' : '참고'}</Badge><span className="font-mono text-muted-foreground">{i.who}</span><span>{i.msg}</span>
                 </button>))}</div>
             ))}
             {tab === 'json' && <JsonTab doc={doc} onApply={d => { onChange(d); setSel(null) }} canWrite={canWrite} />}
-            {tab === 'check' && (check ? (
+            {tab === 'check' && (check ? (<>
+              {checkStale && <div className="mb-1 rounded-sm border-l-2 border-warning bg-warning-soft px-2 py-1 text-warning-on">검사 뒤 문서가 바뀌었습니다 — 아래는 저장 시점의 결과입니다. 저장하고 다시 검사하십시오</div>}
               <DataTable>
                 <thead><tr><Th>항목</Th><Th width={70}>결과</Th><Th>상세</Th><Th align="right">ms</Th></tr></thead>
                 <tbody>{check.items.map(i => (
@@ -463,7 +548,7 @@ export default function TopologyCanvas({ doc, onChange, check, workers, canWrite
                     <Td mono>{i.name}</Td><Td>{i.ok ? <Badge variant="successSoft">OK</Badge> : i.info ? <Badge variant="neutralSoft">참고</Badge> : <Badge variant="dangerSoft">실패</Badge>}</Td><Td className="break-all text-xs">{i.detail}</Td><Td align="right" mono>{i.ms}</Td>
                   </tr>))}</tbody>
               </DataTable>
-            ) : <div className="text-muted-foreground">[연결 검사] 는 저장된 레코드에 대해 수신점 단위로 확인합니다 — SIP 접속점 OPTIONS/TCP/TLS · 피어링(참고) · 가입자 API · OAM 토큰 · DB 접속 · 호스트 SSH · 워커 health. 결과는 카드의 같은 행에 붙습니다.{onFocusCheck && <Button variant="outline" size="sm" className="ml-2" onClick={onFocusCheck}>검사 실행</Button>}</div>)}
+            </>) : <div className="text-muted-foreground">[연결 검사] 는 저장된 레코드에 대해 수신점 단위로 확인합니다 — SIP 접속점 OPTIONS/TCP/TLS · 피어링(참고) · 가입자 API · OAM 토큰 · DB 접속 · 호스트 SSH · 워커 health. 결과는 카드의 같은 행에 붙습니다.{onFocusCheck && <Button variant="outline" size="sm" className="ml-2" onClick={onFocusCheck}>검사 실행</Button>}</div>)}
           </div>
         )}
       </div>
@@ -515,13 +600,15 @@ function Sec({ title, right, children }: { title: string; right?: ReactNode; chi
 const num = (v: string) => (v === '' ? undefined : Number(v))
 const csv = (v: string) => v.split(',').map(s => s.trim()).filter(Boolean)
 
-function Inspector({ doc, sel, setSel, mutate, issues, canWrite, onDelete, workers }: {
-  doc: TopologyDoc; sel: Focus | null; setSel: (f: Focus | null) => void; mutate: (fn: (d: TopologyDoc) => void) => void; issues: Issue[]; canWrite: boolean; onDelete: (f: Focus) => void; workers: WorkerRow[]
+function Inspector({ doc, sel, setSel, mutate, issues, canWrite, onDelete, onDup, workers }: {
+  doc: TopologyDoc; sel: Focus | null; setSel: (f: Focus | null) => void; mutate: (fn: (d: TopologyDoc) => void) => void; issues: Issue[]; canWrite: boolean; onDelete: (f: Focus) => void; onDup: (f: Focus) => void; workers: WorkerRow[]
 }) {
   const ro = !canWrite
   const issueBlock = issues.length ? <div className="mb-2 flex flex-col gap-1">{issues.map((i, k) => <div key={k} className={`rounded-sm border-l-2 px-2 py-1 ${i.level === 'err' ? 'border-destructive bg-dangersoft/40' : i.level === 'warn' ? 'border-warning bg-warning-soft/40' : 'border-info bg-info-soft/40'}`}>{i.msg}</div>)}</div> : null
   const head = (title: string, badge: ReactNode) => <div className="mb-2 flex items-center gap-2"><b className="text-sm">{title}</b>{badge}</div>
-  const delBtn = sel && <div className="mt-4 border-t border-border pt-2"><Button variant="destructive" size="sm" disabled={ro} onClick={() => onDelete(sel)}><Trash2 size={12} /> {sel.kind === 'host' ? '호스트' : sel.kind === 'worker' ? '워커' : sel.kind === 'node' ? '노드' : '풀'} 삭제</Button></div>
+  const delBtn = sel && <div className="mt-4 flex gap-2 border-t border-border pt-2">
+    {(sel.kind === 'pool' || sel.kind === 'node') && <Button variant="outline" size="sm" disabled={ro} onClick={() => onDup(sel)} title="Ctrl+D"><Copy size={12} /> 복제</Button>}
+    <Button variant="destructive" size="sm" disabled={ro} onClick={() => onDelete(sel)}><Trash2 size={12} /> {sel.kind === 'host' ? '호스트' : sel.kind === 'worker' ? '워커' : sel.kind === 'node' ? '노드' : '풀'} 삭제</Button></div>
 
   if (!sel) return (
     <div>
@@ -608,7 +695,7 @@ function Inspector({ doc, sel, setSel, mutate, issues, canWrite, onDelete, worke
                 <div className="mb-1 flex items-center gap-1.5 text-[11px]">
                   <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: peer ? EDGE_COLOR.peer : EDGE_COLOR[(l.protocol ?? 'udp') as Transport] }} />
                   <b className="font-mono">{lid}</b>
-                  <Badge variant={peer ? 'warningSoft' : 'infoSoft'} className="h-4 px-1 text-[10px]">{peer ? '피어링' : 'access'}</Badge>
+                  <Badge variant={peer ? 'warningSoft' : 'infoSoft'}>{peer ? '피어링' : 'access'}</Badge>
                   <span className="truncate font-mono text-muted-foreground">{lip}:{l.port}/{l.protocol ?? 'udp'}</span>
                   <button disabled={ro} title="수신점 삭제" className="ml-auto text-muted-foreground hover:text-destructive disabled:opacity-40" onClick={() => LS((x, d) => { delete x[lid]; Object.values(d.pools).forEach(p => { if ((M.isPeer(p) ? p.peering : p.access) === id && p.listener === lid) delete p.listener }) })}><Trash2 size={12} /></button>
                 </div>

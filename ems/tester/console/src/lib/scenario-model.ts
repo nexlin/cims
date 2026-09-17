@@ -14,6 +14,8 @@ export interface Issue { lv: Lv; who: string; msg: string; ref: Sel | null }
 
 export const deep = <T,>(o: T): T => JSON.parse(JSON.stringify(o))
 export const INDIALOG = new Set(['dtmf', 'hold', 'resume', 'refer'])
+/** 기대치 임계의 부등호 — min 은 하한(≥), 나머지(p50/p95/p99/max)는 상한(≤). 단일 값(code·비율)은 = */
+export const thrOp = (q: string) => (q === 'min' ? '≥' : '≤')
 export const roles = (sc: Doc) => Object.keys(sc.roles ?? {})
 
 export interface Resolved { pools: Record<string, PoolDoc>; kind: 'ue' | 'peer' | 'real-ue'; logical: string; byName: boolean }
@@ -150,6 +152,36 @@ export function newStep(kind: string, sc: Doc, topo: TopologyDoc | null, vocab: 
   if (kind === 'register') s.expect = { code: 200 }
   return s
 }
+// ── during ↔ 행 변환 — 통화 중 동작(dtmf/hold/resume/refer)은 독립 행으로도, media_hold 의 during 으로도 둘 수 있다 ──
+/** 행 i(in-dialog 단계)를 flow[holdIdx](media_hold) 의 during 으로. 반환 = 새 during 의 (holdIdx, k) — holdIdx 는 행 제거로 밀릴 수 있다 */
+export function stepToDuring(sc: Doc, i: number, holdIdx: number, at_s: number): { idx: number; k: number } | null {
+  const s = sc.flow[i], h = sc.flow[holdIdx]
+  if (!s || !h || h.step !== 'media_hold' || !INDIALOG.has(s.step) || i === holdIdx) return null
+  const d: During = { at_s, step: s.step as During['step'] }
+  if (s.from) d.from = s.from; else if (s.who?.length) d.who = [...s.who]
+  if (s.to) d.to = s.to; if (s.payload) d.payload = s.payload; if (s.expect && Object.keys(s.expect).length) d.expect = s.expect
+  h.during = [...(h.during ?? []), d]
+  sc.flow.splice(i, 1)
+  const idx = i < holdIdx ? holdIdx - 1 : holdIdx
+  return { idx, k: sc.flow[idx].during!.length - 1 }
+}
+/** flow[holdIdx].during[k] 를 독립 행으로 — at(행 사이 위치, 삭제 전 인덱스 기준)에 끼운다. 반환 = 새 행 인덱스 */
+export function duringToStep(sc: Doc, holdIdx: number, k: number, at: number): number {
+  const h = sc.flow[holdIdx]; const d = h?.during?.[k]; if (!d) return -1
+  const s: Step = { step: d.step }
+  if (d.from) s.from = d.from; else if (d.who?.length) s.who = [...d.who]
+  if (d.to) s.to = d.to; if (d.payload) s.payload = d.payload; if (d.expect) s.expect = d.expect
+  h.during!.splice(k, 1); if (!h.during!.length) delete h.during
+  sc.flow.splice(Math.max(0, Math.min(sc.flow.length, at)), 0, s)
+  return Math.max(0, Math.min(sc.flow.length - 1, at))
+}
+/** 행 i 가 붙을 수 있는 가장 가까운 media_hold — 위쪽 먼저, 없으면 아래쪽. 없으면 -1 */
+export function nearestHold(sc: Doc, i: number): number {
+  for (let j = i - 1; j >= 0; j--) if (sc.flow[j].step === 'media_hold') return j
+  for (let j = i + 1; j < sc.flow.length; j++) if (sc.flow[j].step === 'media_hold') return j
+  return -1
+}
+
 export function renameRole(sc: Doc, o: string, n: string): boolean {
   if (!n || n === o || sc.roles[n]) return false
   const R: Doc['roles'] = {}; for (const [k, v] of Object.entries(sc.roles)) R[k === o ? n : k] = v

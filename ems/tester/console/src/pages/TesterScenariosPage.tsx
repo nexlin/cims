@@ -1,9 +1,11 @@
 // 시험 > 시나리오 — 탭 둘. **시나리오** = 시퀀스 캔버스 편집기(ScenarioCanvas — 레인×행·팔레트·속성·YAML/검증/적합성/절차표 드로어) +
 // 툴바(선택·템플릿에서 새로·검증 배지·되돌리기·저장(운영자본)·삭제·단발 실행·프로파일 결합). **부하 프로파일** = YAML 편집기(스키마 검증).
 // 동봉본을 저장하면 같은 id 의 운영자본(override)이 생긴다. 기준 토폴로지·미리보기 프로파일은 편집 문맥이라 저장하지 않는다.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+// 문서 이력은 useDocHistory(Ctrl+Z/Y). 변경이 있으면 다른 시나리오로 옮기기 전에 묻고 탭 닫기도 경고한다. 변경 중 [저장하고 실행] 이 저장 → 실행 창을 한 번에 연다.
+// 부하 프로파일 탭은 YAML 편집기 + 검증된 문서의 시간축 율 곡선(ProfileCurve).
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { RefreshCw, Plus, Save, Trash2, Play, RotateCcw } from 'lucide-react'
+import { RefreshCw, Plus, Save, Trash2, Play, RotateCcw, Undo2, Redo2, Gauge } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { Button } from '@core/components/ui/button'
 import { Badge } from '@core/components/ui/badge'
@@ -20,8 +22,12 @@ import { testerApi, type ScenarioRow, type ProfileRow, type TopologyRow, type Sc
 import YamlEditor from '@tester/components/YamlEditor'
 import RunStartDialog from '@tester/components/RunStartDialog'
 import ScenarioCanvas from '@tester/components/scenario/ScenarioCanvas'
+import ListRail, { RailRow, RailGroup } from '@tester/components/ListRail'
+import ProfileCurve from '@tester/components/ProfileCurve'
 import * as S from '@tester/lib/scenario-model'
 import type { Doc } from '@tester/lib/scenario-model'
+import type { ProfileLike } from '@tester/lib/metrics'
+import { useDocHistory, useUndoKeys, useUnsavedGuard } from '@tester/lib/use-history'
 
 type Kind = 'scenario' | 'profile'
 
@@ -50,11 +56,14 @@ stop_on: { csp_5xx_pct: 1.0 }
 
 const TEMPLATE_IDS = ['VOLTE-CALL-BASIC', 'VOLTE-REGISTER', 'TRUNK-IBCF-OUTBOUND', 'TRUNK-PBX-TRANSFER', 'TRUNK-PBX-DTMF']
 
-function ScenarioEditor({ scenarioId, rows, onSaved, onDeleted }: {
+function ScenarioEditor({ scenarioId, rows, onSaved, onDeleted, onDirty, autoRun, onAutoRunDone }: {
   scenarioId: string | null          // null = 새 문서
   rows: ScenarioRow[]
-  onSaved: (id: string) => void
+  onSaved: (id: string, thenRun?: 'single' | 'profile') => void
   onDeleted: () => void
+  onDirty: (dirty: boolean) => void  // 페이지가 전환 전에 묻기 위해
+  autoRun?: 'single' | 'profile' | null   // 새 문서 저장 → id 가 바뀌어 다시 마운트된 뒤 실행 창을 이어 연다
+  onAutoRunDone?: () => void
 }) {
   const nav = useNavigate()
   const { show } = useToast()
@@ -62,7 +71,8 @@ function ScenarioEditor({ scenarioId, rows, onSaved, onDeleted }: {
   const { user } = useAuth()
   const canWrite = hasRole(user, 'operator')
   const canDelete = hasRole(user, 'manager')
-  const [doc, setDoc] = useState<Doc | null>(null)
+  const H = useDocHistory<Doc>()
+  const doc = H.doc; const setDoc = H.set
   const [orig, setOrig] = useState('')
   const [source, setSource] = useState<'bundled' | 'user' | null>(null)
   const [serverErrs, setServerErrs] = useState<string[]>([])
@@ -90,29 +100,40 @@ function ScenarioEditor({ scenarioId, rows, onSaved, onDeleted }: {
         flow: [{ step: 'register', who: ['caller', 'callee'], expect: { code: 200, rrd_ms: { p95: 500 } } }, { step: 'invite', from: 'caller', to: 'callee', media: { audio: 'amr-wb' } },
                { step: 'answer', who: ['callee'], after_ms: 1500, expect: { srd_ms: { p95: 2000 } } }, { step: 'media_hold', seconds: '${ht}', expect: { rtp_loss_pct: { max: 0.5 } } }, { step: 'bye', from: 'caller', expect: { sdd_ms: { p95: 300 } } }],
         target_evidence: [], comment: '새 시나리오 — id 는 대문자·숫자·하이픈(3~64). roles 의 pool 은 토폴로지 풀 이름 또는 group.' }
-      setDoc(d); setOrig(JSON.stringify(d)); setSource(null); return
+      H.reset(d); setOrig(JSON.stringify(d)); setSource(null); return
     }
     try {
       const r = await testerApi.scenario(id)
       const d = S.fromApiDoc(r.doc, r.yaml)
       if (!d.id) d.id = id
-      setDoc(d); setOrig(JSON.stringify(d)); setSource(r.source)
+      H.reset(d); setOrig(JSON.stringify(d)); setSource(r.source)
       if (r.errors.length) setServerErrs(r.errors)
     } catch (e) { show(String(e), 'err') }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show])
   useEffect(() => { loadDoc(scenarioId) }, [scenarioId, loadDoc])
 
   const dirty = doc != null && JSON.stringify(doc) !== orig
+  useEffect(() => { onDirty(dirty); return () => onDirty(false) }, [dirty, onDirty])
+  useUndoKeys(H.undo, H.redo, canWrite && !!doc)
+  useUnsavedGuard(dirty)
   const errN = useMemo(() => (doc ? S.validate(doc, null, vocab, {}).filter(i => i.lv === 'error').length : 0), [doc, vocab])
 
-  const save = async () => {
-    if (!doc) return
+  /** 저장 — 성공하면 저장된 id, 실패하면 null. thenRun 이면 페이지가 (id 가 바뀌어 다시 마운트되더라도) 실행 창을 이어 연다 */
+  const save = async (thenRun?: 'single' | 'profile'): Promise<string | null> => {
+    if (!doc) return null
     setSaving(true); setServerErrs([])
     try {
       const row = await testerApi.saveScenario(doc.id, S.toYaml(doc))
-      show(source === 'bundled' ? '저장 — 운영자본(override)' : '저장 — 운영자본', 'ok'); setOrig(JSON.stringify(doc)); setSource('user'); onSaved(row.id)
-    } catch (e) { const errs = (e as { data?: { errors?: string[] } })?.data?.errors; if (errs?.length) setServerErrs(errs); show(String(e), 'err') } finally { setSaving(false) }
+      show(source === 'bundled' ? '저장 — 운영자본(override)' : '저장 — 운영자본', 'ok'); setOrig(JSON.stringify(doc)); setSource('user'); onSaved(row.id, thenRun); return row.id
+    } catch (e) { const errs = (e as { data?: { errors?: string[] } })?.data?.errors; if (errs?.length) setServerErrs(errs); show(String(e), 'err'); return null } finally { setSaving(false) }
   }
+  /** 변경이 있으면 저장부터 하고 실행 창을 연다 */
+  const runAfterSave = async (mode: 'single' | 'profile') => {
+    if (dirty || !scenarioId) { await save(mode); return }
+    setRunOpen(mode)
+  }
+  useEffect(() => { if (autoRun && scenarioId && doc && !dirty) { setRunOpen(autoRun); onAutoRunDone?.() } }, [autoRun, scenarioId, doc, dirty, onAutoRunDone])
   const del = async () => {
     if (!scenarioId) return
     if (!await confirm({ title: '시나리오 삭제', body: `${scenarioId} 의 운영자본을 지웁니다. 같은 id 의 패키지 동봉본이 있으면 그것이 다시 보입니다.`, confirmLabel: '삭제', tone: 'danger' })) return
@@ -123,13 +144,15 @@ function ScenarioEditor({ scenarioId, rows, onSaved, onDeleted }: {
   }
 
   if (!doc) return <EmptyState title="불러오는 중…" />
+  const runReason = !canWrite ? null : errN ? `오류 ${errN} 해결 뒤` : null
+  const saveReason = errN ? `오류 ${errN} 해결 뒤` : (!dirty && !!scenarioId && source === 'user') ? '변경 없음' : null
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted px-3 py-1.5 text-xs">
         <span className="font-mono text-sm font-semibold">{doc.id}</span>
         {source && <Badge variant={source === 'user' ? 'brandSoft' : 'neutralSoft'}>{source === 'user' ? '운영자본' : '패키지 동봉'}</Badge>}
         {!scenarioId && <Badge variant="infoSoft">새 문서</Badge>}
-        {errN ? <Badge variant="dangerSoft">오류 {errN}</Badge> : <Badge variant="successSoft">검증 통과</Badge>}
+        {errN ? <Badge variant="dangerSoft" title="문서 자체의 오류 — 저장이 잠깁니다. 기준 토폴로지와의 적합성은 캔버스 아래 [검증] 드로어">문서 오류 {errN}</Badge> : <Badge variant="successSoft" title="문서 자체는 유효합니다. 기준 토폴로지와의 적합성은 캔버스 아래 [검증] 드로어에 따로 보입니다">문서 검증 통과</Badge>}
         {dirty && <Badge variant="warningSoft">변경됨</Badge>}
         {source === 'bundled' && <span className="text-muted-foreground">저장하면 같은 id 의 운영자본이 생겨 동봉본을 덮습니다</span>}
         {serverErrs.map((e, i) => <span key={i} className="text-destructive">{e}</span>)}
@@ -138,14 +161,22 @@ function ScenarioEditor({ scenarioId, rows, onSaved, onDeleted }: {
             <SelectTrigger className="h-[26px] w-[170px] text-xs"><SelectValue placeholder="템플릿에서 새로…" /></SelectTrigger>
             <SelectContent>{rows.filter(r => TEMPLATE_IDS.includes(r.id) && !r.errors.length).map(r => <SelectItem key={r.id} value={r.id}>{r.id}</SelectItem>)}</SelectContent>
           </Select>
-          <Button variant="outline" size="sm" onClick={() => setDoc(JSON.parse(orig))} disabled={!dirty}><RotateCcw size={13} /> 되돌리기</Button>
-          {scenarioId && source === 'user' && canDelete && <Button variant="destructive" size="sm" onClick={del}><Trash2 size={13} /> 삭제</Button>}
-          <Button variant="default" size="sm" onClick={save} disabled={!canWrite || saving || errN > 0 || (!dirty && !!scenarioId && source === 'user')}><Save size={13} /> {source === 'bundled' ? '저장 (override)' : '저장'}</Button>
-          <Button variant="outline" size="sm" onClick={() => setRunOpen('single')} disabled={!canWrite || dirty || !scenarioId || errN > 0} title={dirty ? '저장 뒤 실행' : undefined}><Play size={13} /> 단발 실행</Button>
-          <Button variant="outline" size="sm" onClick={() => setRunOpen('profile')} disabled={!canWrite || dirty || !scenarioId || errN > 0}>프로파일 결합</Button>
+          {scenarioId && source === 'user' && canDelete && <Button variant="outline" size="sm" className="text-destructive" onClick={del}><Trash2 size={13} /> 삭제</Button>}
+          <Button variant="ghost" size="iconSm" onClick={H.undo} disabled={!canWrite || !H.canUndo} title="실행취소 (Ctrl+Z)"><Undo2 size={13} /></Button>
+          <Button variant="ghost" size="iconSm" onClick={H.redo} disabled={!canWrite || !H.canRedo} title="다시실행 (Ctrl+Y)"><Redo2 size={13} /></Button>
+          <Button variant="outline" size="sm" onClick={() => setDoc(JSON.parse(orig))} disabled={!dirty} title="저장 시점으로 전부 되돌리기"><RotateCcw size={13} /> 되돌리기</Button>
+          <span className="inline-flex items-center gap-1">
+            <Button variant="default" size="sm" onClick={() => save()} disabled={!canWrite || saving || !!saveReason}><Save size={13} /> {source === 'bundled' ? '저장 (override)' : '저장'}</Button>
+            {saveReason && canWrite && <span className="text-muted-foreground">{saveReason}</span>}
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <Button variant="outline" size="sm" onClick={() => runAfterSave('single')} disabled={!canWrite || saving || !!runReason} title="인스턴스 몇 개로 기능 확인 — 변경이 있으면 먼저 저장합니다"><Play size={13} /> {dirty || !scenarioId ? '저장하고 단발 실행' : '단발 실행'}</Button>
+            <Button variant="outline" size="sm" onClick={() => runAfterSave('profile')} disabled={!canWrite || saving || !!runReason} title="부하 프로파일(미리보기 프로파일이 기본값)로 실행 창 열기 — 변경이 있으면 먼저 저장합니다"><Gauge size={13} /> {dirty || !scenarioId ? '저장하고 부하 실행…' : '부하 실행…'}</Button>
+            {runReason && <span className="text-muted-foreground">{runReason}</span>}
+          </span>
         </div>
       </div>
-      <ScenarioCanvas doc={doc} onChange={setDoc} topologies={topologies} topoId={topoId} setTopoId={setTopoId} profiles={profiles} profileId={profileId} setProfileId={setProfileId} vocab={vocab} canWrite={canWrite} source={source} />
+      <ScenarioCanvas doc={doc} onChange={setDoc} onCommit={H.commit} topologies={topologies} topoId={topoId} setTopoId={setTopoId} profiles={profiles} profileId={profileId} setProfileId={setProfileId} vocab={vocab} canWrite={canWrite} source={source} />
       {runOpen && scenarioId && (
         <RunStartDialog scenarioId={scenarioId} lastTopologyId={topoId} initial={runOpen === 'profile' && profileId !== '__none__' ? { scenario_id: scenarioId, profile: profileId } : undefined}
                         onClose={() => setRunOpen(null)} onStarted={() => { setRunOpen(null); nav('/test/runs') }} />
@@ -171,6 +202,7 @@ function Editor({ kind, keyName, onSaved, onDeleted }: {
   const [source, setSource] = useState<'bundled' | 'user' | null>(null)
   const [newKey, setNewKey] = useState('')
   const [valid, setValid] = useState(false)
+  const [parsed, setParsed] = useState<ProfileLike | null>(null)
   const [saving, setSaving] = useState(false)
   const [runOpen, setRunOpen] = useState(false)
 
@@ -225,7 +257,8 @@ function Editor({ kind, keyName, onSaved, onDeleted }: {
           <Button variant="default" size="sm" onClick={save} disabled={!canWrite || saving || !valid || (!dirty && !!keyName && source === 'user')}><Save size={13} /> 저장</Button>
         </div>
       </div>
-      <YamlEditor kind={kind} value={text} onChange={setText} disabled={!canWrite} onValid={setValid} minHeight={420} />
+      <YamlEditor kind={kind} value={text} onChange={setText} disabled={!canWrite} onValid={(ok, d) => { setValid(ok); setParsed(ok && d ? (d as ProfileLike) : null) }} minHeight={kind === 'profile' ? 300 : 420} />
+      {kind === 'profile' && <ProfileCurve profile={parsed} />}
       {runOpen && keyName && (
         <RunStartDialog scenarioId={keyName} onClose={() => setRunOpen(false)}
                         onStarted={() => { setRunOpen(false); nav('/test/runs') }} />
@@ -235,7 +268,11 @@ function Editor({ kind, keyName, onSaved, onDeleted }: {
 }
 
 export default function TesterScenariosPage() {
+  const confirm = useConfirm()
   const [params, setParams] = useSearchParams()
+  const dirtyRef = useRef(false)
+  const setDirty = useCallback((d: boolean) => { dirtyRef.current = d }, [])
+  const discardOk = async () => !dirtyRef.current || await confirm({ title: '변경을 버릴까요?', body: '저장하지 않은 편집이 있습니다. 다른 시나리오로 옮기면 사라집니다.', confirmLabel: '버리고 이동', tone: 'danger' })
   const [scenarios, setScenarios] = useState<ScenarioRow[]>([])
   const [profiles, setProfiles] = useState<ProfileRow[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -243,8 +280,12 @@ export default function TesterScenariosPage() {
   const [tab, setTab] = useState<Kind>('scenario')
   const selScenario: string | null | undefined = params.has('id') ? (params.get('id') || null) : undefined   // undefined = 아직 안 고름 · '' = 새 문서
   const setSelScenario = (v: string | null | undefined) => setParams(p => { const q = new URLSearchParams(p); if (v === undefined) q.delete('id'); else q.set('id', v ?? ''); return q })
+  const pickScenario = async (v: string | null | undefined) => { if (v !== selScenario && !await discardOk()) return; setSelScenario(v) }
   const [selProfile, setSelProfile] = useState<string | null | undefined>(undefined)
+  const [autoRun, setAutoRun] = useState<'single' | 'profile' | null>(null)
+  const autoRunDone = useCallback(() => setAutoRun(null), [])
   const [filter, setFilter] = useState('')
+  const [q, setQ] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -257,7 +298,9 @@ export default function TesterScenariosPage() {
   useEffect(() => { load() }, [load])
 
   const tags = useMemo(() => Array.from(new Set(scenarios.flatMap(s => s.tags))).sort(), [scenarios])
-  const shown = useMemo(() => scenarios.filter(s => !filter || s.tags.includes(filter) || s.id.includes(filter.toUpperCase())), [scenarios, filter])
+  // 레일 = 태그 칩 + 검색(id·제목), 출처별 그룹(운영자본 먼저)
+  const shown = useMemo(() => { const k = q.trim().toLowerCase(); return scenarios.filter(s => (!filter || s.tags.includes(filter)) && (!k || s.id.toLowerCase().includes(k) || (s.title ?? '').toLowerCase().includes(k))) }, [scenarios, filter, q])
+  const railGroups = useMemo(() => (['user', 'bundled'] as const).map(src => [src, shown.filter(s => s.source === src)] as const).filter(([, r]) => r.length), [shown])
 
   return (
     <div className="flex h-full flex-col">
@@ -276,25 +319,33 @@ export default function TesterScenariosPage() {
           <TabsTrigger value="profile">부하 프로파일 ({profiles.length})</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="scenario" className="flex min-h-0 flex-1 flex-col">
-          <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-4 py-2">
-            <Select value={selScenario === undefined ? '' : (selScenario ?? '__new__')} onValueChange={v => setSelScenario(v === '__new__' ? null : v)}>
-              <SelectTrigger className="h-[28px] w-[380px] text-sm"><SelectValue placeholder="시나리오 선택" /></SelectTrigger>
-              <SelectContent>
-                {shown.map(s => <SelectItem key={s.id} value={s.id}><span className="font-mono">{s.id}</span> <span className="text-muted-foreground">— {s.title ?? ''} · {s.steps} 단계 · {s.source === 'user' ? '운영자' : '동봉'}{s.errors.length ? ` · 오류 ${s.errors.length}` : ''}</span></SelectItem>)}
-                {selScenario === null && <SelectItem value="__new__">(새 시나리오)</SelectItem>}
-              </SelectContent>
-            </Select>
-            <Button variant={filter === '' ? 'default' : 'outline'} size="sm" onClick={() => setFilter('')}>전체</Button>
-            {tags.map(t => <Button key={t} variant={filter === t ? 'default' : 'outline'} size="sm" onClick={() => setFilter(t)}>{t}</Button>)}
-            <Button variant="outline" size="sm" className="ml-auto" onClick={() => setSelScenario(null)}><Plus size={13} /> 새 시나리오</Button>
+        <TabsContent value="scenario" className="flex min-h-0 flex-1">
+          <ListRail storageKey="tester-scn-rail" label="시나리오" search={{ value: q, onChange: setQ, placeholder: 'id·제목 검색' }}
+                    chips={<>{[['', '전체'], ...tags.map(t => [t, t])].map(([c, l]) => (
+                      <button key={c} onClick={() => setFilter(c)} className={`h-6 rounded-sm border px-2 text-xs ${filter === c ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-muted-foreground hover:bg-accent'}`}>{l}</button>))}</>}
+                    action={<Button variant="outline" size="sm" className="w-full" onClick={() => pickScenario(null)}><Plus size={13} /> 새 시나리오</Button>}>
+            {selScenario === null && <RailRow selected top={<><Badge variant="infoSoft">새</Badge><span className="font-mono font-medium">NEW-SCENARIO</span></>} bottom={<span>저장하면 운영자본으로 목록에 들어갑니다</span>} onClick={() => {}} />}
+            {railGroups.length === 0 && <div className="p-3 text-xs text-muted-foreground">{scenarios.length ? '검색 결과 없음' : '시나리오 없음'}</div>}
+            {railGroups.map(([src, rows]) => (
+              <div key={src}>
+                <RailGroup>{src === 'user' ? '운영자본' : '패키지 동봉'} · {rows.length}</RailGroup>
+                {rows.map(s => (
+                  <RailRow key={s.id} selected={s.id === selScenario} onClick={() => pickScenario(s.id)} title={s.path}
+                           top={<><span className="truncate font-mono font-medium">{s.id}</span>{s.errors.length > 0 && <Badge variant="dangerSoft" title={s.errors.join('\n')}>오류 {s.errors.length}</Badge>}<span className="ml-auto whitespace-nowrap font-mono text-muted-foreground">{s.steps} 단계</span></>}
+                           bottom={<><span className="truncate">{s.title ?? '—'}</span><span className="ml-auto whitespace-nowrap font-mono">{s.tags.join(' ')}</span></>} />
+                ))}
+              </div>
+            ))}
+          </ListRail>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {selScenario === undefined ? (
+              <div className="p-4"><EmptyState title="왼쪽에서 시나리오를 고르십시오" description="고르면 시퀀스 캔버스(레인 = 역할, 행 = 단계)로 편집합니다. 기준 토폴로지를 고르면 역할→풀→워커 해석과 컴파일 드라이런(적합성)을 편집 시점에 미리 봅니다. 검증 오류가 있는 파일도 열어 고칠 수 있습니다."
+                                            action={<Button variant="outline" size="sm" onClick={() => pickScenario(null)}><Plus size={13} /> 새 시나리오</Button>} /></div>
+            ) : (
+              <ScenarioEditor key={selScenario ?? '__new__'} scenarioId={selScenario} rows={scenarios} onDirty={setDirty} autoRun={autoRun} onAutoRunDone={autoRunDone}
+                              onSaved={(k, run) => { load(); setSelScenario(k); setAutoRun(run ?? null) }} onDeleted={() => { load(); setSelScenario(undefined) }} />
+            )}
           </div>
-          {selScenario === undefined ? (
-            <div className="p-4"><EmptyState title="시나리오를 고르십시오" description="위에서 고르면 시퀀스 캔버스(레인 = 역할, 행 = 단계)로 편집합니다. 기준 토폴로지를 고르면 역할→풀→워커 해석과 컴파일 드라이런(적합성)을 편집 시점에 미리 봅니다. 검증 오류가 있는 파일도 열어 고칠 수 있습니다."
-                                          action={<Button variant="outline" size="sm" onClick={() => setSelScenario(null)}><Plus size={13} /> 새 시나리오</Button>} /></div>
-          ) : (
-            <ScenarioEditor key={selScenario ?? '__new__'} scenarioId={selScenario} rows={scenarios} onSaved={k => { load(); setSelScenario(k) }} onDeleted={() => { load(); setSelScenario(undefined) }} />
-          )}
         </TabsContent>
 
         <TabsContent value="profile" className="min-h-0 flex-1 overflow-auto p-4">
