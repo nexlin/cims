@@ -118,23 +118,34 @@ class VolteReasonColumns(unittest.TestCase):
                          "통계에 원천이 없는 사유에 열이 있다")
 
     def test_CSP_가_그_사유를_쓰기_시작하면_알린다(self):
-        """원천이 생기면 열을 **다시 만들어야** 한다 — 그때 이 시험이 먼저 걸린다."""
+        """원천이 생기면 열을 **다시 만들어야** 한다 — 그때 이 시험이 먼저 걸린다.
+
+        **호 종료 사유를 쓰는 자리만** 본다: 어휘가 사는 `CallDir.h` 와, 기록 함수를 부르는
+        줄이다. 파일 전체에서 낱말을 찾으면 엉뚱한 것이 걸린다 — 처음 만들었을 때 RFC 6665
+        구독 종료 사유(`Subscription-State: terminated;reason=timeout`)가 잡혔다.
+        """
         if not os.path.isdir(CSP_DIR):
             self.skipTest('csp 소스 없음')
+        writers = ('VoipCallEnd(', 'VoipCallRejected(', 'PttSessionEnd(', 'PttAttempt(')
         hits = []
         for root, _dirs, files in os.walk(CSP_DIR):
             for fn in files:
                 if not fn.endswith(('.cpp', '.h', '.hpp')):
                     continue
                 path = os.path.join(root, fn)
+                rel = os.path.relpath(path, _REPO)
                 try:
                     with open(path, encoding='utf-8', errors='replace') as f:
-                        src = f.read()
+                        lines = f.read().splitlines()
                 except OSError:
                     continue
-                for r in _HISTORY_ONLY:
-                    if f'"{r}"' in src:
-                        hits.append(f'{os.path.relpath(path, _REPO)} → "{r}"')
+                vocab_file = os.path.basename(path) == 'CallDir.h'
+                for no, line in enumerate(lines, 1):
+                    if not (vocab_file or any(w in line for w in writers)):
+                        continue
+                    for r in _HISTORY_ONLY:
+                        if f'"{r}"' in line:
+                            hits.append(f'{rel}:{no} → "{r}"')
         self.assertEqual([], hits,
                          'CSP 가 이 사유를 기록하기 시작했다 — 표에 열을 다시 만들어야 한다: '
                          + ' · '.join(hits))
