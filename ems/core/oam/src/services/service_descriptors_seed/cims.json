@@ -582,6 +582,14 @@
               "group": "attempt"
             },
             {
+              "key": "sessions",
+              "label": "성립",
+              "path": "volte.sessions",
+              "totalPath": "totals.volte.sessions",
+              "unit": "건",
+              "group": "attempt"
+            },
+            {
               "key": "success",
               "label": "성공률",
               "path": "volte.success_rate",
@@ -700,14 +708,6 @@
               "path": "volte.drop_rate",
               "totalPath": "totals.volte.drop_rate",
               "unit": "%",
-              "group": "end"
-            },
-            {
-              "key": "sessions",
-              "label": "성립",
-              "path": "volte.sessions",
-              "totalPath": "totals.volte.sessions",
-              "unit": "건",
               "group": "end"
             },
             {
