@@ -1129,6 +1129,70 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     }
 }
 
+/** answer leg 의 SDP 를 relay(CMP)에 반영한다 — SDES 검증·UE 키 확정, NAT 판정, PT, RELAY_MODIFY(peer_index=answer
+ * leg). 확정 answer(200, EventCallStart)와 **18x 의 SDP**(early media, EventCallRing)가 같은 절차를 쓴다: 18x+SDP 는 그
+ * 다이얼로그의 answer 이고(RFC 3264 §5·RFC 3262 §5 — 뒤의 200 은 같은 SDP), 미디어 앵커가 그때 B-leg 주소를 알아야
+ * early media(링백·안내음, RFC 3960)가 relay 를 지난다. 18x 에서 이미 반영한 키가 200 에서 그대로면 CMP SRTP 컨텍스트를
+ * 다시 만들지 않는다 (media_crypto 생략 — 재생성은 replay 창·ROC 를 버린다). 주소가 같은 재-MODIFY 는 CMP 가 latch 를
+ * 유지한다. 반환 false = SAVP offer 에 crypto 없는/불일치 answer (호출자가 평문 폴백 없이 처리). */
+static bool ApplyRelayAnswerLeg( const char *pszCallId, const CCallInfo &clsCallInfo, CSipCallRtp *pclsRtp,
+                                 const char *pszWhere ) {
+    if ( clsCallInfo.m_strRelaySessionId.empty() ) return true;
+    // answer leg 의 relay peer index — 통상 착신 leg=peer1 이지만, 전달로 재구성된 pair 는
+    //   answer leg 가 peer0 을 승계할 수 있다. m_bRecv(=peer0 표식)로 일반화.
+    const int iAnswerIdx = clsCallInfo.m_bRecv ? 0 : 1;
+    // ── answer leg SDES 검증·UE 키 확정 (media_security.md §5.2) — UE 키는 CMP 해당 peer rx 로 내린다.
+    RelaySdesLeg clsSdesB = clsCallInfo.m_clsSdesLeg[iAnswerIdx];
+    const std::string strPrevAudioKey = clsSdesB.clsAudio.strUeKey, strPrevVideoKey = clsSdesB.clsVideo.strUeKey;
+    CmpMediaCrypto clsCalleeAudioCrypto, clsCalleeVideoCrypto;
+    if ( !MediaSdes::EvalRelayAnswerSdes( pclsRtp->m_clsMediaList, "audio", clsSdesB.clsAudio, clsCalleeAudioCrypto ) ||
+         !MediaSdes::EvalRelayAnswerSdes( pclsRtp->m_clsMediaList, "video", clsSdesB.clsVideo,
+                                          clsCalleeVideoCrypto ) ) {
+        CLog::Print( LOG_ERROR, "%s: callee(%s) SDES answer missing/mismatched crypto on SAVP offer (CallId=%s)",
+                     pszWhere, clsCallInfo.m_strRelayCallee.c_str(), pszCallId );
+        return false;
+    }
+    gclsCallMap.SetRelaySdesLeg( pszCallId, iAnswerIdx, clsSdesB );
+    const bool bAudioKeyKept = !strPrevAudioKey.empty() && strPrevAudioKey == clsSdesB.clsAudio.strUeKey;
+    const bool bVideoKeyKept = !strPrevVideoKey.empty() && strPrevVideoKey == clsSdesB.clsVideo.strUeKey;
+
+    // answer leg RTP 주소를 CMP 에 MODIFY (peer_index=iAnswerIdx) — session_id 로 직접 지목.
+    int iAudioPort = pclsRtp->GetAudioPort();
+    if ( iAudioPort <= 0 && pclsRtp->m_iPort > 0 ) iAudioPort = pclsRtp->m_iPort;
+    int iVideoPort = ( pclsRtp->GetMediaCount() >= 2 ) ? pclsRtp->GetVideoPort() : 0;
+    if ( iAudioPort <= 0 ) return true;
+    // 착신(callee) leg NAT 판정 — answer SDP IP vs 착신 등록 바인딩(received/rport latch).
+    int iCalleeNat = 0;
+    std::string strCalleeGuardIp;
+    {
+        std::string strCalleeId;
+        gclsUserAgent.GetToId( pszCallId, strCalleeId );
+        ServiceInfo clsNatSvc = gclsServiceMap.GetForUser( strCalleeId, "volte" );
+        std::string strSigIp;
+        CUserInfo clsToInfo;
+        if ( !strCalleeId.empty() && gclsUserMap.Select( strCalleeId.c_str(), clsToInfo ) )
+            strSigIp = clsToInfo.m_strIp;
+        if ( CCspServiceMap::EvalMediaNat( clsNatSvc, pclsRtp->m_strIp, strSigIp, strCalleeGuardIp ) ) {
+            iCalleeNat = 1;
+            CLog::Print( LOG_INFO, "%s: callee leg NAT (svc=%s sdp=%s sig=%s guard=%s)", pszWhere,
+                         clsNatSvc.name.c_str(), pclsRtp->m_strIp.c_str(), strSigIp.c_str(), strCalleeGuardIp.c_str() );
+        }
+    }
+    // 착신(B) leg PT/코덱 — 서버 offer(코덱 테이블) vs 착신 answer wire PT
+    //   (bServerOffered=true). 녹취 세그먼트 메타(audio_pt_b/audio_codec_b) 근거.
+    int iCalleePt = 0, iCalleeSrcPt = 0, iCalleeTePt = 0, iCalleeSrcTePt = 0;
+    std::string strCalleeCodec;
+    CGroupCallService::GetLegPt( pszCallId, true, iCalleePt, iCalleeSrcPt, iCalleeTePt, iCalleeSrcTePt,
+                                 &strCalleeCodec );
+    gclsCmpClient.ModifySession( clsCallInfo.m_strRelaySessionId, pclsRtp->m_strIp, iAudioPort,
+                                 iVideoPort > 0 ? iVideoPort : 0, iAnswerIdx, clsCallInfo.m_strRelayCaller,
+                                 clsCallInfo.m_strRelayCallee, clsCallInfo.m_strRelaySesId, iCalleeNat,
+                                 strCalleeGuardIp, iCalleePt, iCalleeSrcPt, iCalleeTePt, iCalleeSrcTePt, strCalleeCodec,
+                                 ( clsCalleeAudioCrypto.bEnabled && !bAudioKeyKept ) ? &clsCalleeAudioCrypto : NULL,
+                                 ( clsCalleeVideoCrypto.bEnabled && !bVideoKeyKept ) ? &clsCalleeVideoCrypto : NULL );
+    return true;
+}
+
 void CModuleDispatcher::EventCallRing( const char *pszCallId, int iSipStatus, CSipCallRtp *pclsRtp ) {
     CCallInfo clsCallInfo;
     CLog::Print( LOG_DEBUG, "EventCallRing(%s,%d)", pszCallId, iSipStatus );
@@ -1139,15 +1203,25 @@ void CModuleDispatcher::EventCallRing( const char *pszCallId, int iSipStatus, CS
 
     if ( gclsCallMap.Select( pszCallId, clsCallInfo ) ) {
         if ( pclsRtp && clsCallInfo.m_iPeerRtpPort > 0 ) {
-            pclsRtp->m_iPort = clsCallInfo.m_iPeerRtpPort;
-            pclsRtp->m_strIp = clsCallInfo.m_strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress()
-                                                                     : clsCallInfo.m_strRelayLocalIp;
-            // 18x(early media) SDP 도 전달받는 leg 상태로 재작성 — 링잉 leg crypto 투과 차단 (§5.2).
-            //   링잉 leg 키의 CMP 반영·검증은 확정 answer(EventCallStart)에서. leg index 는
-            //   m_bRecv(=peer0 표식)로 판정 — 전달·픽업 재결합 pair 는 남는 쪽이 peer1 일 수 있다.
-            if ( !clsCallInfo.m_strRelaySessionId.empty() )
-                MediaSdes::RewriteRelaySdpForLeg( pclsRtp->m_clsMediaList,
-                                                  clsCallInfo.m_clsSdesLeg[clsCallInfo.m_bRecv ? 1 : 0], false );
+            // 18x 의 SDP(early media) = 미디어 앵커링 대상 — 확정 answer 와 같은 절차로 answer leg 를 relay 에 반영한
+            // 뒤
+            //   (B-leg 주소·키가 CMP 에 있어야 링백이 relay 를 지난다), 상대 leg 로 나가는 SDP 를 relay 주소로
+            //   재작성한다. (포크 대기 leg 의 18x 는 위 TAS 가 소비한다 — 여기 오는 것은 CallMap pair 의 단일 B-leg.)
+            //   SAVP offer 에 crypto 가 어긋난 18x 는 SDP 를 떼고 전달한다(early media 없음 — 호 종료 판정은 200 에서).
+            if ( !ApplyRelayAnswerLeg( pszCallId, clsCallInfo, pclsRtp, "EventCallRing" ) ) {
+                pclsRtp = NULL;
+            } else {
+                // 링잉 leg crypto 투과 차단 + 전달받는 leg 상태로 재광고 (§5.2). leg index 는 m_bRecv(=peer0 표식)로
+                //   판정 — 전달·픽업 재결합 pair 는 남는 쪽이 peer1 일 수 있다.
+                if ( !clsCallInfo.m_strRelaySessionId.empty() )
+                    MediaSdes::RewriteRelaySdpForLeg( pclsRtp->m_clsMediaList,
+                                                      clsCallInfo.m_clsSdesLeg[clsCallInfo.m_bRecv ? 1 : 0], false );
+                // m= 포트·미디어 레벨 c= 까지 relay 로 — m_iPort/m_strIp 만 바꾸면 미디어 목록이 있는 SDP 는 원래
+                // 포트로 나간다
+                pclsRtp->SetIpPort( clsCallInfo.m_strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress().c_str()
+                                                                          : clsCallInfo.m_strRelayLocalIp.c_str(),
+                                    clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
+            }
         }
         int iRSeq = gclsUserAgent.GetRSeq( pszCallId );
         if ( iRSeq != -1 ) gclsUserAgent.SetRSeq( clsCallInfo.m_strPeerCallId.c_str(), iRSeq );
@@ -1190,61 +1264,13 @@ void CModuleDispatcher::EventCallStart( const char *pszCallId, CSipCallRtp *pcls
             // answer leg 의 relay peer index — 통상 착신 leg=peer1 이지만, 전달로 재구성된 pair 는
             //   answer leg 가 peer0 을 승계할 수 있다. m_bRecv(=peer0 표식)로 일반화.
             const int iAnswerIdx = clsCallInfo.m_bRecv ? 0 : 1;
-            // ── answer leg SDES 검증·UE 키 확정 (media_security.md §5.2) — SAVP offer 에
-            //    crypto 없는/불일치 answer 는 종료(평문 폴백 금지). UE 키는 CMP 해당 peer rx 로 내린다.
-            RelaySdesLeg clsSdesB = clsCallInfo.m_clsSdesLeg[iAnswerIdx];
-            CmpMediaCrypto clsCalleeAudioCrypto, clsCalleeVideoCrypto;
-            if ( !clsCallInfo.m_strRelaySessionId.empty() ) {
-                if ( !MediaSdes::EvalRelayAnswerSdes( pclsRtp->m_clsMediaList, "audio", clsSdesB.clsAudio,
-                                                      clsCalleeAudioCrypto ) ||
-                     !MediaSdes::EvalRelayAnswerSdes( pclsRtp->m_clsMediaList, "video", clsSdesB.clsVideo,
-                                                      clsCalleeVideoCrypto ) ) {
-                    CLog::Print( LOG_ERROR,
-                                 "EventCallStart: callee(%s) SDES answer missing/mismatched crypto on SAVP offer — "
-                                 "평문 폴백 금지, 호 종료 (CallId=%s)",
-                                 clsCallInfo.m_strRelayCallee.c_str(), pszCallId );
-                    gclsUserAgent.StopCall( pszCallId );
-                    return;
-                }
-                gclsCallMap.SetRelaySdesLeg( pszCallId, iAnswerIdx, clsSdesB );
-            }
-            // answer leg RTP 주소를 CMP 에 MODIFY (peer_index=iAnswerIdx) — session_id 로 직접 지목.
-            if ( !clsCallInfo.m_strRelaySessionId.empty() ) {
-                int iAudioPort = pclsRtp->GetAudioPort();
-                if ( iAudioPort <= 0 && pclsRtp->m_iPort > 0 ) iAudioPort = pclsRtp->m_iPort;
-                int iVideoPort = ( pclsRtp->GetMediaCount() >= 2 ) ? pclsRtp->GetVideoPort() : 0;
-                if ( iAudioPort > 0 ) {
-                    // 착신(callee) leg NAT 판정 — answer SDP IP vs 착신 등록 바인딩(received/rport latch).
-                    int iCalleeNat = 0;
-                    std::string strCalleeGuardIp;
-                    {
-                        std::string strCalleeId;
-                        gclsUserAgent.GetToId( pszCallId, strCalleeId );
-                        ServiceInfo clsNatSvc = gclsServiceMap.GetForUser( strCalleeId, "volte" );
-                        std::string strSigIp;
-                        CUserInfo clsToInfo;
-                        if ( !strCalleeId.empty() && gclsUserMap.Select( strCalleeId.c_str(), clsToInfo ) )
-                            strSigIp = clsToInfo.m_strIp;
-                        if ( CCspServiceMap::EvalMediaNat( clsNatSvc, pclsRtp->m_strIp, strSigIp, strCalleeGuardIp ) ) {
-                            iCalleeNat = 1;
-                            CLog::Print( LOG_INFO, "EventCallStart: callee leg NAT (svc=%s sdp=%s sig=%s guard=%s)",
-                                         clsNatSvc.name.c_str(), pclsRtp->m_strIp.c_str(), strSigIp.c_str(),
-                                         strCalleeGuardIp.c_str() );
-                        }
-                    }
-                    // 착신(B) leg PT/코덱 — 서버 offer(코덱 테이블) vs 착신 answer wire PT
-                    //   (bServerOffered=true). 녹취 세그먼트 메타(audio_pt_b/audio_codec_b) 근거.
-                    int iCalleePt = 0, iCalleeSrcPt = 0, iCalleeTePt = 0, iCalleeSrcTePt = 0;
-                    std::string strCalleeCodec;
-                    CGroupCallService::GetLegPt( pszCallId, true, iCalleePt, iCalleeSrcPt, iCalleeTePt, iCalleeSrcTePt,
-                                                 &strCalleeCodec );
-                    gclsCmpClient.ModifySession(
-                        clsCallInfo.m_strRelaySessionId, pclsRtp->m_strIp, iAudioPort, iVideoPort > 0 ? iVideoPort : 0,
-                        iAnswerIdx, clsCallInfo.m_strRelayCaller, clsCallInfo.m_strRelayCallee,
-                        clsCallInfo.m_strRelaySesId, iCalleeNat, strCalleeGuardIp, iCalleePt, iCalleeSrcPt, iCalleeTePt,
-                        iCalleeSrcTePt, strCalleeCodec, clsCalleeAudioCrypto.bEnabled ? &clsCalleeAudioCrypto : NULL,
-                        clsCalleeVideoCrypto.bEnabled ? &clsCalleeVideoCrypto : NULL );
-                }
+            // ── answer leg 를 relay 에 반영 — SDES 검증·UE 키 확정·NAT·PT·RELAY_MODIFY (media_security.md §5.2).
+            //    SAVP offer 에 crypto 없는/불일치 answer 는 종료(평문 폴백 금지). 18x 에서 이미 반영했으면 같은 값의
+            //    재확인이다.
+            if ( !ApplyRelayAnswerLeg( pszCallId, clsCallInfo, pclsRtp, "EventCallStart" ) ) {
+                CLog::Print( LOG_ERROR, "EventCallStart: 평문 폴백 금지, 호 종료 (CallId=%s)", pszCallId );
+                gclsUserAgent.StopCall( pszCallId );
+                return;
             }
 
             int iRemoteAudio = pclsRtp->GetAudioPort();
