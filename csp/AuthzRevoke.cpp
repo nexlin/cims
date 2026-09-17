@@ -6,10 +6,13 @@
 
 #include <atomic>
 #include <list>
+#include <mutex>
 #include <string>
 
 #include "CspPhoneGroup.h"
 #include "CspRole.h"
+#include "CspUser.h"
+#include "DbManager.h"
 #include "GroupCallService.h"
 #include "Log.h"
 #include "ModuleDispatcher.h"
@@ -68,9 +71,18 @@ static int AuthzSweepConferenceSubscriptions( const char *pszWhy ) {
     for ( const auto &sub : lstSubs ) {
         if ( sub.strResourceId.empty() ) continue;
         std::string strWarning, strReason;
-        if ( CGroupCallService::CheckConferenceSubscribe( sub.strResourceId, sub.strUserId, strWarning, strReason ) ==
-             0 )
+        bool bUnavail = false;
+        if ( CGroupCallService::CheckConferenceSubscribe( sub.strResourceId, sub.strUserId, strWarning, strReason,
+                                                          &bUnavail ) == 0 )
             continue;
+        if ( bUnavail ) {
+            // **조회 불능은 권한 상실이 아니다** — 이미 선 구독은 걷지 않는다(fail open, §5.10). 다만
+            //   «걷지 않는다» 와 «잊는다» 는 다르다 — 빚으로 남겨야 DB 가 복구된 뒤 다시 판정한다.
+            CLog::Print( LOG_ERROR, "AuthzRevoke(%s): conference 구독 판정 불능 — %s on %s (%s) — 회수 보류", pszWhy,
+                         sub.strUserId.c_str(), sub.strResourceId.c_str(), strReason.c_str() );
+            CspAuthz::NotePolicyReloadOwed( pszWhy );
+            continue;
+        }
         CLog::Print( LOG_INFO, "AuthzRevoke(%s): conference subscription revoked — %s on group %s (%s)", pszWhy,
                      sub.strUserId.c_str(), sub.strResourceId.c_str(), strReason.c_str() );
         SendTerminatedNotify( sub, AuthzTerminateReason( pszWhy ) );
@@ -90,6 +102,77 @@ namespace CspAuthz {
 
     void BumpPolicyGeneration() {
         g_uPolicyGen.fetch_add( 1, std::memory_order_acq_rel );
+    }
+
+    // ── 밀린 정책 적재 ──────────────────────────────────────────────────────────
+    static std::mutex g_clsOwedMutex;
+    static bool g_bReloadOwed = false;
+    static std::string g_strOwedWhy;
+    static time_t g_tNextReloadTry = 0;
+    static int g_iReloadTries = 0;
+
+    // 빚에 **세대**를 붙인다. 적재는 락을 놓고 도는데(DB 왕복), 그 사이 다른 스레드(CSC 수신)가 새 실패를
+    //   기록할 수 있다. 완료 처리에서 플래그를 무조건 내리면 **그 새 빚까지 지워진다** — 정책 변경 하나가
+    //   통째로 유실된다. 그래서 «내가 집어 온 세대» 와 지금 세대가 같을 때만 갚은 것으로 친다.
+    static unsigned g_uOwedSeq = 0;
+
+    void NotePolicyReloadOwed( const char *pszWhy ) {
+        std::lock_guard<std::mutex> lock( g_clsOwedMutex );
+        if ( !g_bReloadOwed ) {
+            g_bReloadOwed = true;
+            g_iReloadTries = 0;
+            g_strOwedWhy = pszWhy ? pszWhy : "authz";
+            g_tNextReloadTry = time( NULL ) + 2;  // 첫 기록만 기한을 잡는다
+        }
+        // 이미 빚이 있으면 **기한을 미루지 않는다** — 연속 실패 통지가 올 때마다 2초씩 밀면 영원히 안 돈다.
+        ++g_uOwedSeq;
+    }
+
+    void RetryPendingPolicyReload() {
+        std::string strWhy;
+        unsigned uSeq = 0;
+        {
+            std::lock_guard<std::mutex> lock( g_clsOwedMutex );
+            if ( !g_bReloadOwed || g_tNextReloadTry > time( NULL ) ) return;
+            strWhy = g_strOwedWhy;
+            uSeq = g_uOwedSeq;
+        }
+        // 어느 맵이 실패했는지 가리지 않고 둘 다 다시 적재한다 — 적재는 싸고, 가리려다 틀리면 빚이 남는다.
+        //   사용자 캐시도 같이 읽는다 — `EffectiveGroupOf` 의 폴백이 그 캐시라, 낡은 채로 판정하면
+        //   그룹에서 빠진 사람이 «여전히 같은 그룹» 으로 보인다(§5.10 의 PUT 계기와 같은 이유).
+        //   `LoadFromDb` 의 반환값은 «적재된 행이 있는가» 라 가입자 0명과 조회 실패를 못 가른다 —
+        //   빚의 성패는 **조회 불능** 여부로 판정한다(0명인 현장을 영구 미납으로 만들지 않게).
+        bool bUsersUnavail = false;
+        gclsCspUserMap.LoadFromDb( &bUsersUnavail );
+        bool bOk = !bUsersUnavail;
+        if ( gclsDbManager.HasPhoneGroupTables() ) bOk = gclsPhoneGroupMap.LoadFromDb() && bOk;
+        if ( gclsDbManager.HasRoleTables() ) bOk = gclsRoleMap.LoadFromDb() && bOk;
+        if ( bOk ) {
+            bool bStillMine = false;
+            {
+                std::lock_guard<std::mutex> lock( g_clsOwedMutex );
+                bStillMine = ( g_uOwedSeq == uSeq );
+                if ( bStillMine ) {
+                    g_bReloadOwed = false;
+                    g_iReloadTries = 0;
+                } else {
+                    // 적재 도중 새 빚이 들어왔다 — 지우지 않고 바로 다시 돌게 둔다.
+                    g_tNextReloadTry = time( NULL );
+                }
+            }
+            CLog::Print( LOG_SYSTEM, "AuthzRevoke: 밀린 정책 적재 성공(%s)%s — 회수한다", strWhy.c_str(),
+                         bStillMine ? "" : " · 도중 새 요청 있음(빚 유지)" );
+            RevokeUnauthorized( strWhy.c_str() );
+            return;
+        }
+        std::lock_guard<std::mutex> lock( g_clsOwedMutex );
+        ++g_iReloadTries;
+        int iWait = 2 << ( g_iReloadTries < 5 ? g_iReloadTries : 5 );  // 4·8·16·32·64 → 상한 60
+        if ( iWait > 60 ) iWait = 60;
+        g_tNextReloadTry = time( NULL ) + iWait;
+        if ( g_iReloadTries <= 3 || g_iReloadTries % 20 == 0 )  // 로그 폭주 방지
+            CLog::Print( LOG_ERROR, "AuthzRevoke: 밀린 정책 적재 %d회 실패(%s) — %d초 뒤 재시도", g_iReloadTries,
+                         strWhy.c_str(), iWait );
     }
 
     int RevokeUnauthorized( const char *pszWhy ) {

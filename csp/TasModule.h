@@ -205,11 +205,20 @@ private:
         int iTries = 0;
         time_t tNextTry = 0;
     };
+    /** 대기열 상한 — 안전망이다. 같은 키를 한 건으로 접으므로 정상 운용에서는 살아 있는 감청 leg 수를
+     *  넘지 않는다. 넘었다면 회수가 아니라 상류가 고장난 상태이므로 로그로 드러낸다. */
+    static const size_t PENDING_TAP_MAX = 256;
     std::vector<PendingTapRemove> m_vecPendingTapRemove;
     std::recursive_mutex m_mutexMonitor;
 
     /** 대기열에서 만기된 건을 재시도한다 — 1초 Tick 에서 부른다. 한 틱에 처리 상한을 둔다(CMP 왕복은 블로킹). */
     void RetryPendingTapRemovals();
+
+    /** tap 회수 요청 — 실패하면 대기열에 넣는다. **tap 을 지우는 모든 경로가 이것만 쓴다.**
+     *  개설 취소(인가 상실·AcceptCall 실패)는 `MonitorLeg` 등록 **전**이라 스윕도 찾지 못하므로, 여기서
+     *  놓치면 회수할 주인이 영영 없다. */
+    void RemoveTapOrQueue( const std::string &strSessionId, const std::string &strTapId, const std::string &strMonitor,
+                           const std::string &strSesId, const std::string &strService, const char *pszWhy );
 
     /** dialog-event(RFC 4235) 상태 통지 — 한 호의 두 당사자(caller/callee) 각각을 감시하는 구독자에게
      *  그 당사자의 CSP 측 leg Call-ID 로 partial NOTIFY 를 낸다(당겨받기 BLF, §6.2). */

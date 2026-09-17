@@ -336,8 +336,8 @@ static bool ScanUserFiles( const char *pszDirName, std::list<std::string> &clsUs
     return true;
 }
 
-bool CspUserMap::LoadFromDb() {
-    return gclsDbManager.LoadAllUsers( *this );
+bool CspUserMap::LoadFromDb( bool *pbUnavailable ) {
+    return gclsDbManager.LoadAllUsers( *this, pbUnavailable );
 }
 
 bool CspUserMap::Load( const char *pszDirName ) {

@@ -540,9 +540,13 @@ bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGro
     return true;
 }
 
-bool CDbManager::LoadAllUsers( CspUserMap &clsMap ) {
+bool CDbManager::LoadAllUsers( CspUserMap &clsMap, bool *pbUnavailable ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
-    if ( !m_pMysql && !Reconnect() ) return false;
+    if ( pbUnavailable ) *pbUnavailable = false;
+    if ( !m_pMysql && !Reconnect() ) {
+        if ( pbUnavailable ) *pbUnavailable = true;
+        return false;
+    }
 
     int count = 0;
     // 가입 테이블 = 접속환경 kind (voip·volte·ptt) — 목록은 SubTables() 하나(voip 는 테이블이 있을 때만).
@@ -556,7 +560,12 @@ bool CDbManager::LoadAllUsers( CspUserMap &clsMap ) {
                              PickupGroupCol( "s" ) + " FROM " + t.pszTable + " s JOIN users u ON s.user_id = u.id";
 
         MYSQL_RES *pRes = ExecuteSelect( strSql );
-        if ( !pRes ) continue;
+        if ( !pRes ) {
+            // 반환값(`count > 0`)만으로는 «가입자 0명» 과 «조회 실패» 가 구분되지 않는다 — 인가 판정의
+            //   근거로 쓰는 호출자(§5.10 의 빚 갚기·CSC_RESTART)는 이 값을 보고 방향을 정한다.
+            if ( pbUnavailable ) *pbUnavailable = true;
+            continue;
+        }
 
         MYSQL_ROW row;
         while ( ( row = mysql_fetch_row( pRes ) ) != nullptr ) {
@@ -592,7 +601,8 @@ bool CDbManager::LoadAllUsers( CspUserMap &clsMap ) {
 //  Phone group / role operations (dispatch_center.md §3·§8.1)
 // ─────────────────────────────────────────────
 
-bool CDbManager::SelectPhoneGroup( const std::string &strGroupId, CspPhoneGroup &clsGroup ) {
+bool CDbManager::SelectPhoneGroup( const std::string &strGroupId, CspPhoneGroup &clsGroup, bool *pbUnavailable ) {
+    if ( pbUnavailable ) *pbUnavailable = true;  // 아래에서 «행이 없다» 가 확정될 때만 false 로 내린다
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_bHasPhoneGroupTables ) return false;
     if ( !m_pMysql && !Reconnect() ) return false;
@@ -607,8 +617,10 @@ bool CDbManager::SelectPhoneGroup( const std::string &strGroupId, CspPhoneGroup 
     MYSQL_ROW row = mysql_fetch_row( pRes );
     if ( !row ) {
         mysql_free_result( pRes );
+        if ( pbUnavailable ) *pbUnavailable = false;  // 질의는 됐고 행이 없다 = 삭제됨
         return false;
     }
+    if ( pbUnavailable ) *pbUnavailable = false;
     clsGroup.Clear();
     clsGroup.m_strId = row[0] ? row[0] : "";
     clsGroup.m_strName = row[1] ? row[1] : "";
@@ -623,16 +635,22 @@ bool CDbManager::SelectPhoneGroup( const std::string &strGroupId, CspPhoneGroup 
 
     pRes = ExecuteSelect( "SELECT user_id, alert_order FROM phone_group_members WHERE group_id='" +
                           Escape( strGroupId ) + "' ORDER BY alert_order, user_id" );
-    if ( pRes ) {
-        while ( ( row = mysql_fetch_row( pRes ) ) != nullptr ) {
-            if ( !row[0] ) continue;
-            CspPhoneGroupMember m;
-            m.strUserId = row[0];
-            m.iAlertOrder = row[1] ? atoi( row[1] ) : 0;
-            clsGroup.m_vecMembers.push_back( m );
-        }
-        mysql_free_result( pRes );
+    if ( !pRes ) {
+        // **멤버 질의 실패를 «멤버 없음» 으로 게시하지 않는다.** 멤버 명단은 픽업 축·그룹원 BLF(규칙 1)·
+        //   monitor_call=own 판정의 근거다 — 빈 명단으로 바꿔 걸면 그룹 전원이 자격을 잃은 것처럼 보여
+        //   회수 스윕이 정당한 감시를 걷는다. 조회 불능으로 올려 호출자가 기존 값을 지키게 한다(§5.10).
+        if ( pbUnavailable ) *pbUnavailable = true;
+        CLog::Print( LOG_ERROR, "[DB] SelectPhoneGroup(%s): 멤버 질의 실패 — 조회 불능으로 처리", strGroupId.c_str() );
+        return false;
     }
+    while ( ( row = mysql_fetch_row( pRes ) ) != nullptr ) {
+        if ( !row[0] ) continue;
+        CspPhoneGroupMember m;
+        m.strUserId = row[0];
+        m.iAlertOrder = row[1] ? atoi( row[1] ) : 0;
+        clsGroup.m_vecMembers.push_back( m );
+    }
+    mysql_free_result( pRes );
     return true;
 }
 
@@ -649,16 +667,24 @@ bool CDbManager::LoadAllPhoneGroups( CCspPhoneGroupMap &clsMap ) {
         if ( row[0] ) vecIds.push_back( row[0] );
     mysql_free_result( pRes );
 
-    clsMap.Clear();
-    int iLoaded = 0;
+    // 단건 조회 실패는 «없음» 이 아니라 **조회 불능**일 수 있다 — 그것을 삭제로 읽어 게시하면 그룹이 통째로
+    //   사라지고, 그 상태로 도는 인가 판정이 멀쩡한 감시·픽업을 끊는다. 하나라도 실패하면 기존 맵을 그대로
+    //   두고 false 를 돌린다(dispatch_center.md §5.10).
+    std::map<std::string, CspPhoneGroup> mapFresh;
     for ( const auto &strId : vecIds ) {
         CspPhoneGroup clsGroup;
-        if ( SelectPhoneGroup( strId, clsGroup ) ) {
-            clsMap.Insert( clsGroup );
-            ++iLoaded;
+        bool bUnavail = false;
+        if ( !SelectPhoneGroup( strId, clsGroup, &bUnavail ) ) {
+            if ( !bUnavail ) continue;  // 목록 조회와 단건 조회 사이에 지워졌다 — 그 그룹만 빼고 계속
+            CLog::Print( LOG_ERROR, "[DB] LoadAllPhoneGroups: 그룹(%s) 조회 실패 — 적재 취소(기존 맵 유지)",
+                         strId.c_str() );
+            return false;
         }
+        mapFresh[strId] = clsGroup;
     }
-    CLog::Print( LOG_INFO, "[DB] LoadAllPhoneGroups: %d groups loaded", iLoaded );
+    // **완성된 스냅샷을 한 번에 건다** (위와 같은 이유).
+    clsMap.Replace( mapFresh );
+    CLog::Print( LOG_INFO, "[DB] LoadAllPhoneGroups: %d groups loaded", (int)mapFresh.size() );
     return true;
 }
 
@@ -734,8 +760,8 @@ bool CDbManager::LoadAllRoles( CCspRoleMap &clsMap ) {
     }
     mysql_free_result( pRes );
 
-    clsMap.Clear();
-    for ( auto &kv : mapRoles ) clsMap.Insert( kv.second );
+    // **완성된 스냅샷을 한 번에 건다** — Clear + Insert 반복은 독자에게 중간 상태를 보인다(§5.10).
+    clsMap.Replace( mapRoles );
     CLog::Print( LOG_INFO, "[DB] LoadAllRoles: %d roles, %d assigned lines", (int)mapRoles.size(), iLines );
     return true;
 }

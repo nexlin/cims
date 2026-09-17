@@ -177,7 +177,8 @@ public:
     bool Select( const char *pszUserId, CspUser &clsXmlUser );
     void Insert( CspUser &clsXmlUser );
     bool Load( const char *pszDirName );
-    bool LoadFromDb();
+    /** DB 전량 적재. @param pbUnavailable (선택) true = 조회 불능(0명과 구분). */
+    bool LoadFromDb( bool *pbUnavailable = nullptr );
     bool Remove( std::string strUserId );
     bool ReloadFromDb( std::string strUserId );
 

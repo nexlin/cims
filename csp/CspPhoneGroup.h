@@ -43,7 +43,6 @@ public:
         Clear();
     }
     void Clear();
-
     bool HasPilot() const {
         return !m_strPilotId.empty();
     }
@@ -63,12 +62,17 @@ public:
 class CCspPhoneGroupMap {
 public:
     bool LoadFromDb();
-    bool LoadOneFromDb( const char *pszGroupId );
+    /** 단건 재적재. @param pbUnavailable (선택) false 반환의 뜻 — true = 조회 불능, false = 없음(삭제됨).
+     *  호출자는 둘을 다르게 다뤄야 한다(dispatch_center.md §5.10). */
+    bool LoadOneFromDb( const char *pszGroupId, bool *pbUnavailable = nullptr );
     bool Load( const char *pszDirName );
 
     void Insert( const CspPhoneGroup &clsGroup );
     void Remove( const char *pszGroupId );
     void Clear();
+    /** 전량 원자 교체 — 재적재의 유일한 게시 수단(사유는 CCspRoleMap::Replace 와 같다).
+     *  전화 그룹은 감시 인가의 한 축(규칙 1·monitor_call=own)이라 중간 상태를 읽으면 같은 사고가 난다. */
+    void Replace( const std::map<std::string, CspPhoneGroup> &clsNew );
 
     bool Select( const char *pszGroupId, CspPhoneGroup &clsGroup );
     bool Contains( const char *pszGroupId );

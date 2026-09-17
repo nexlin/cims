@@ -4,6 +4,7 @@
 
 #include "GroupCallService.h"
 
+#include <algorithm>
 #include <ctime>
 #include <set>
 
@@ -102,6 +103,7 @@ bool CGroupCallService::GetOrAllocMemberPort( const std::string &strGroupId, con
     }
     // 캐시에 없음(늦은 참가자/로스터 외) — PTT_JOIN ①(선할당, user_ip 없이)로 멤버 전용 포트 확보 (멱등)
     int iLocalAudio = 0, iLocalVideo = 0;
+    PurgePendingLeave( strGroupId, strMemberId );  // JOIN 이 «지금 있다» 는 권위 — 밀린 LEAVE 를 버린다
     if ( !gclsCmpClient.JoinGroup( strGroupId, strMemberId, "", 0, 0, 0, GetOrIssueGroupSesId( strGroupId ), "",
                                    &iLocalAudio, &iLocalVideo ) ||
          iLocalAudio <= 0 ) {
@@ -497,6 +499,10 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
             if ( !strLost.empty() ) {
                 CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) listener(%s) lost scope while joining (%s) → 403",
                              pszGroupId, pszCallerInfo, strLost.c_str() );
+                // 여기 오기 전에 `GetOrAllocMemberPort` 가 CMP 에 선할당 PTT_JOIN 을 이미 보냈다 — 거절하고
+                //   끝내면 **주인 없는 멤버·포트가 남는다.** 같이 걷는다(§5.10).
+                LeaveGroupOrQueue( pszGroupId, pszCallerInfo, strGroupSesId, "합류 중 인가 상실" );
+                InvalidateMemberPort( pszGroupId, pszCallerInfo );
                 gclsUserAgent.StopCall( pszCallId, SIP_FORBIDDEN );
                 EmitPttListenAudit( "denied", pszCallerInfo, strListenGroup, pszGroupId, "", -1 );
                 return true;
@@ -637,6 +643,7 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                 // 청취 leg: recv_only=1 (상향 미중계·floor 요청 거절). floor_suppress 는 쓰지 않는다 — 청취자는
                 //   Floor Taken(Permission=0 변형, 단말 U6)으로 현재 발언자를 알아야 하고, 유니캐스트 floor 메시지는
                 //   다른 참가자에게 드러나지 않는다.
+                PurgePendingLeave( pszGroupId, pszCallerInfo );
                 gclsCmpClient.JoinGroup( pszGroupId, pszCallerInfo, pclsRtp->m_strIp, iCallerAudio, iCallerFloor,
                                          iCallerVideo, GetOrIssueGroupSesId( pszGroupId ), strCallerRole, NULL, NULL,
                                          iCallerNat, strCallerGuardIp, iCallerPt, iCallerSrcPt, iCallerTePt,
@@ -678,7 +685,34 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         //   은닉 청취 leg 는 로스터 변경이 아니다(참가자에게 통지 없음 — §5.6 hidden).
         if ( !bListen || !bListenHidden ) SendConferenceNotify( pszGroupId, pszCallerInfo, "connected", "full" );
         if ( bListen ) {
+            // 감사 `started` 는 **재검사보다 앞**이다 — 여기까지 왔다면 CMP `JoinGroup` 이 이미 끝나 청취
+            //   미디어가 실제로 흘렀다. 재검사가 곧바로 회수하더라도 `OnCallTerminated` 가 `ended` 를 올리므로,
+            //   뒤에 두면 **짝 없는 `ended`** 가 남는다(§9 M7 은 시작/종료 한 쌍을 요구한다).
             EmitPttListenAudit( "started", pszCallerInfo, strListenGroup, pszGroupId, strGroupSesId, -1 );
+            // **등록 뒤 한 번 더 본다 — 창을 닫는 마지막 조각**(dispatch_center.md §5.10). 세션 맵 등록(위)과
+            //   CMP `JoinGroup`(위) 사이에 회수 스윕이 지나갔을 수 있다. 그러면 스윕은 맵에서 지우고 LEAVE 를
+            //   보냈는데 이 경로가 이어서 JoinGroup 을 해 **주인 없는 CMP 청취 멤버**가 남는다. 맵에 아직
+            //   있는지와(스윕이 지나갔나) 자격이 그대로인지(세대가 올랐으면 재판정)를 확인하고, 아니면
+            //   여기서 걷는다 — 스윕이 했을 일과 같다.
+            bool bStillRegistered;
+            {
+                std::lock_guard<std::recursive_mutex> lock( m_mutex );
+                bStillRegistered = m_mapCallSession.find( pszCallId ) != m_mapCallSession.end();
+            }
+            std::string strLate;
+            if ( CspAuthz::PolicyGeneration() != uListenAuthzGen )
+                strLate = ListenDenyReason( clsGroup, pszCallerInfo );
+            if ( !bStillRegistered || !strLate.empty() ) {
+                CLog::Print( LOG_INFO,
+                             "ProcessGroupCall: Group(%s) listener(%s) 회수와 경쟁 — 합류 취소 (registered=%d, %s)",
+                             pszGroupId, pszCallerInfo, (int)bStillRegistered,
+                             strLate.empty() ? "스윕이 먼저 지나감" : strLate.c_str() );
+                LeaveGroupOrQueue( pszGroupId, pszCallerInfo, strGroupSesId, "합류과 회수의 경쟁" );
+                InvalidateMemberPort( pszGroupId, pszCallerInfo );
+                gclsUserAgent.StopCall( pszCallId );
+                OnCallTerminated( pszCallId );  // 맵에 남아 있으면 정리, 이미 지워졌으면 무동작
+                return true;
+            }
             CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) listener(%s) role(%s) joined recv_only (%s)",
                          pszGroupId, pszCallerInfo, strListenGroup.c_str(), bListenHidden ? "hidden" : "visible" );
             return true;  // 청취 합류는 fan-out 을 일으키지 않는다
@@ -906,7 +940,7 @@ void CGroupCallService::ClearUserCall( const std::string &strUserId ) {
         // lock 해제 후 CMP/DB 호출
         const std::string &strGroupId = clsItem.strGroupId;
         if ( strGroupId.empty() ) continue;
-        gclsCmpClient.LeaveGroup( strGroupId, clsItem.strSessionId, GetOrIssueGroupSesId( strGroupId ) );
+        LeaveGroupOrQueue( strGroupId, clsItem.strSessionId, GetOrIssueGroupSesId( strGroupId ), "세션 정리" );
         InvalidateMemberPort( strGroupId, clsItem.strSessionId );
 
         // PTT history: member leave event
@@ -1017,7 +1051,7 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
         // lock 해제하고 CMP 정리
         lock.unlock();
         if ( !strStaleGroup.empty() ) {
-            gclsCmpClient.LeaveGroup( strStaleGroup, strStaleSession, GetOrIssueGroupSesId( strStaleGroup ) );
+            LeaveGroupOrQueue( strStaleGroup, strStaleSession, GetOrIssueGroupSesId( strStaleGroup ), "고아 leg" );
             InvalidateMemberPort( strStaleGroup, strStaleSession );
         }
         // 재획득 후 계속 진행
@@ -1374,6 +1408,8 @@ void CGroupCallService::MonitorLoop() {
         std::this_thread::sleep_for( std::chrono::seconds( 1 ) );
         if ( !m_bMonitorRunning ) break;
         ++iTickSec;
+
+        RetryPendingLeaves();  // 실패한 PTT_LEAVE 재시도 — 대기열이 비면 즉시 반환한다
 
         // Periodic member state check (every 10s) — detects dead calls
         if ( iTickSec % 10 == 0 ) {
@@ -1764,6 +1800,7 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
     }
     const CmpMediaCrypto *pclsMemberCrypto = clsMemberCrypto.bEnabled ? &clsMemberCrypto : NULL;
     int iJoinLocalAudio = 0, iJoinLocalVideo = 0;
+    PurgePendingLeave( strGroupId, strSessionId );  // JOIN 이 «지금 있다» 는 권위 — 밀린 LEAVE 를 버린다
     bool bJoined = gclsCmpClient.JoinGroup(
         strGroupId, strSessionId, strRemoteIp, iRemotePort, iFloorPort, iVideoPort, GetOrIssueGroupSesId( strGroupId ),
         strRole, &iJoinLocalAudio, &iJoinLocalVideo, iMemberNat, strMemberGuardIp, iMemberPt, iMemberSrcPt, iMemberTePt,
@@ -1814,6 +1851,7 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
             CLog::Print( LOG_INFO,
                          "OnCallStarted: Group(%s) NOT_FOUND → AddGroup re-established (floor=%d), retry JoinGroup",
                          strGroupId.c_str(), iReAddFloor );
+            PurgePendingLeave( strGroupId, strSessionId );
             bJoined = gclsCmpClient.JoinGroup( strGroupId, strSessionId, strRemoteIp, iRemotePort, iFloorPort,
                                                iVideoPort, GetOrIssueGroupSesId( strGroupId ), strRole, NULL, NULL,
                                                iMemberNat, strMemberGuardIp, iMemberPt, iMemberSrcPt, iMemberTePt,
@@ -1938,7 +1976,7 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
     // 2. lock 해제 후 외부 호출 (CMP, DB)
     CLog::Print( LOG_INFO, "OnCallTerminated: Group Call Terminated. CallId=%s", strCallId.c_str() );
     EmitPttDialog( clsDlgLeg, "terminated" );  // dialog-event(§5.6a) — 그룹 컨텍스트가 아직 살아 있을 때
-    gclsCmpClient.LeaveGroup( strGroupId, strSessionId, GetOrIssueGroupSesId( strGroupId ) );
+    LeaveGroupOrQueue( strGroupId, strSessionId, GetOrIssueGroupSesId( strGroupId ), "leg 종료" );
     InvalidateMemberPort( strGroupId, strSessionId );
     if ( bListen ) {
         EmitPttListenAudit( "ended", strMemberId, strListenGroup, strGroupId, GetOrIssueGroupSesId( strGroupId ),
@@ -2085,7 +2123,9 @@ bool CGroupCallService::HasActiveLeg( const std::string &strGroupId ) const {
 //   사전 모니터링 구독(진행 중·참가자 수)을 같은 축으로 허용한다. 프로파일 부재·DB 불가는 불허(fail-closed).
 //   즉석 세션(adhoc-/priv-)은 그룹 문서가 없고 참가자 = fan-out 대상이라 통과, 미지 자원은 기존 처리에 맡긴다.
 int CGroupCallService::CheckConferenceSubscribe( const std::string &strGroupId, const std::string &strUserId,
-                                                 std::string &strWarning, std::string &strReason ) {
+                                                 std::string &strWarning, std::string &strReason,
+                                                 bool *pbUnavailable ) {
+    if ( pbUnavailable ) *pbUnavailable = false;
     CspPttGroup clsGroup;
     if ( !gclsGroupMap.Select( strGroupId.c_str(), clsGroup ) ) return 0;
     if ( clsGroup._isAdhoc ) {
@@ -2093,7 +2133,7 @@ int CGroupCallService::CheckConferenceSubscribe( const std::string &strGroupId, 
         //   즉석 세션 관측 인가(자격 + 참가자 monitor_scope). 세션 id 를 아는 것만으로 로스터가 열리지 않게
         //   한다(§5.6a).
         std::string strWhy;
-        if ( CanObserveEphemeral( clsGroup, strUserId, strWhy ) ) return 0;
+        if ( CanObserveEphemeral( clsGroup, strUserId, strWhy, pbUnavailable ) ) return 0;
         strWarning = "138 CIMS \"subscription of conference events not allowed\"";
         strReason = "ephemeral session, " + strWhy;
         return SIP_FORBIDDEN;
@@ -2113,6 +2153,7 @@ int CGroupCallService::CheckConferenceSubscribe( const std::string &strGroupId, 
     if ( bMember && clsGroup._allowConferenceState ) return 0;
     CspUserProfile clsProf;
     const int iProf = gclsDbManager.SelectUserProfile( strUserId.c_str(), clsProf );
+    if ( iProf < 0 && pbUnavailable ) *pbUnavailable = true;
     const std::string strDg = gclsRoleMap.RoleIdForLine( strUserId.c_str() );
     if ( iProf == 1 && clsProf.m_bAllowAmbientListening &&
          gclsRoleMap.CanListenPtt( strUserId.c_str(), strGroupId.c_str() ) ) {
@@ -2136,11 +2177,13 @@ int CGroupCallService::CheckConferenceSubscribe( const std::string &strGroupId, 
 //   ptt_listen(그룹 목록)이 아닌 "참가자 중 한 명의 전화 그룹이 관측자 역할 monitor_call 안"(VoLTE 통화 Join·dialog
 //   감시와 같은 CanWatch)다. 자격은 그룹콜 청취와 같은 allow_ambient_listening(TS 24.484). 참가자 자신은 항상 허용.
 bool CGroupCallService::CanObserveEphemeral( const CspPttGroup &clsGroup, const std::string &strUserId,
-                                             std::string &strReason ) {
+                                             std::string &strReason, bool *pbUnavailable ) {
+    if ( pbUnavailable ) *pbUnavailable = false;
     for ( const auto &pUser : clsGroup._pusers )
         if ( pUser && ( pUser->_id == strUserId || pUser->_mcpttId == strUserId ) ) return true;
     CspUserProfile clsProf;
     const int iProf = gclsDbManager.SelectUserProfile( strUserId.c_str(), clsProf );
+    if ( iProf < 0 && pbUnavailable ) *pbUnavailable = true;  // 조회 불능 — 자격 없음과 다르다
     if ( iProf != 1 || !clsProf.m_bAllowAmbientListening ) {
         strReason = ( iProf < 0 ) ? "profile unavailable" : ( iProf != 1 ) ? "no profile" : "allow_ambient_listening=0";
         return false;
@@ -2154,20 +2197,109 @@ bool CGroupCallService::CanObserveEphemeral( const CspPttGroup &clsGroup, const 
     return false;
 }
 
-std::string CGroupCallService::ListenDenyReason( const CspPttGroup &clsGroup, const std::string &strListener ) {
+std::string CGroupCallService::ListenDenyReason( const CspPttGroup &clsGroup, const std::string &strListener,
+                                                 bool *pbUnavailable ) {
+    if ( pbUnavailable ) *pbUnavailable = false;
     CspUserProfile clsProf;
     const int iProf = gclsDbManager.SelectUserProfile( strListener.c_str(), clsProf );
+    if ( iProf < 0 && pbUnavailable ) *pbUnavailable = true;  // 조회 불능 — 자격 없음과 다르다
     if ( iProf != 1 || !clsProf.m_bAllowAmbientListening )
         return ( iProf < 0 ) ? "profile unavailable" : "allow_ambient_listening=0";
     if ( clsGroup._isAdhoc ) {
         // 즉석 세션(사설콜·애드혹)은 PTT 그룹이 아니라 사람 사이의 세션 — 범위 축은 ptt_listen 이 아닌 참가자
         //   전화 그룹에 대한 관측자 역할 monitor_call(VoLTE 통화 Join 과 같은 규칙, §5.6a).
         std::string strReason;
-        if ( !CanObserveEphemeral( clsGroup, strListener, strReason ) ) return "ephemeral " + strReason;
+        if ( !CanObserveEphemeral( clsGroup, strListener, strReason, pbUnavailable ) ) return "ephemeral " + strReason;
         return "";
     }
     if ( !gclsRoleMap.CanListenPtt( strListener.c_str(), clsGroup._id.c_str() ) ) return "ptt_listen scope";
     return "";
+}
+
+void CGroupCallService::LeaveGroupOrQueue( const std::string &strGroupId, const std::string &strSessionId,
+                                           const std::string &strSesId, const char *pszWhy ) {
+    if ( gclsCmpClient.LeaveGroup( strGroupId, strSessionId, strSesId ) ) return;
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    // CMP 멤버 키가 `(group, user)` 하나뿐이라 같은 짝은 한 건으로 접는다 — 두 건이 있어도 걷는 대상은 같다.
+    for ( const auto &clsOld : m_vecPendingLeave )
+        if ( clsOld.strGroupId == strGroupId && clsOld.strSessionId == strSessionId ) return;
+    if ( m_vecPendingLeave.size() >= PENDING_LEAVE_MAX ) {
+        CLog::Print( LOG_ERROR, "PTT_LEAVE 대기열 상한(%zu) 초과 — **회수 유실**(group=%s member=%s)",
+                     (size_t)PENDING_LEAVE_MAX, strGroupId.c_str(), strSessionId.c_str() );
+        return;
+    }
+    m_vecPendingLeave.push_back( { strGroupId, strSessionId, strSesId, 0, time( NULL ) + 1 } );
+    CLog::Print( LOG_ERROR, "PTT_LEAVE 실패(%s, group=%s member=%s) — 재시도 대기 %zu 건", pszWhy ? pszWhy : "?",
+                 strGroupId.c_str(), strSessionId.c_str(), m_vecPendingLeave.size() );
+}
+
+void CGroupCallService::PurgePendingLeave( const std::string &strGroupId, const std::string &strMemberId ) {
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    if ( m_vecPendingLeave.empty() ) return;
+    const size_t uBefore = m_vecPendingLeave.size();
+    m_vecPendingLeave.erase( std::remove_if( m_vecPendingLeave.begin(), m_vecPendingLeave.end(),
+                                             [&]( const PendingLeave &p ) {
+                                                 return p.strGroupId == strGroupId && p.strSessionId == strMemberId;
+                                             } ),
+                             m_vecPendingLeave.end() );
+    if ( m_vecPendingLeave.size() != uBefore )
+        CLog::Print( LOG_INFO, "PTT_LEAVE 대기 취소 — %s 가 group(%s) 에 다시 합류했다", strMemberId.c_str(),
+                     strGroupId.c_str() );
+}
+
+void CGroupCallService::RetryPendingLeaves() {
+    // **포기하지 않는다.** 여기서 포기하면 자격을 잃은 청취자가 그룹이 해제될 때까지 계속 듣는다. PTT_LEAVE 는
+    //   없는 그룹·멤버에도 `OK`(cmp_media_api.md §7.5 — 자연 멱등)라 무한 재시도가 스스로 끝난다 — 그룹이
+    //   사라졌으면 CMP 가 OK 로 답하고 대기열에서 빠진다. CMP 불통일 때만 남고, 그때는 간격 상한이 비용을 묶는다.
+    static const int SLOW_AFTER = 6;  // 1+2+4+8+16+32초 ≈ 1분 — 이후는 간격 고정 + 희소 로그
+    static const int MAX_WAIT = 30;
+    static const int MAX_PER_TICK = 4;  // CMP 왕복은 블로킹 — 1초 틱을 넘기지 않게
+    std::vector<PendingLeave> vecDue;
+    {
+        std::lock_guard<std::recursive_mutex> lock( m_mutex );
+        if ( m_vecPendingLeave.empty() ) return;
+        const time_t tNow = time( NULL );
+        for ( auto it = m_vecPendingLeave.begin();
+              it != m_vecPendingLeave.end() && (int)vecDue.size() < MAX_PER_TICK; ) {
+            if ( it->tNextTry > tNow ) {
+                ++it;
+                continue;
+            }
+            vecDue.push_back( *it );
+            it = m_vecPendingLeave.erase( it );
+        }
+    }
+    for ( auto &clsItem : vecDue ) {
+        // **보내기 직전에 한 번 더 본다.** 대기 중에 그 멤버가 다시 합류했으면 이 LEAVE 는 새 멤버를 걷는다.
+        //   Purge 가 주 방어이고 이것은 그 사이에 들어온 합류를 잡는 그물이다.
+        {
+            std::lock_guard<std::recursive_mutex> lock( m_mutex );
+            bool bRejoined = false;
+            for ( const auto &kv : m_mapCallSession )
+                if ( kv.second.strGroupId == clsItem.strGroupId && kv.second.strMemberId == clsItem.strSessionId ) {
+                    bRejoined = true;
+                    break;
+                }
+            if ( bRejoined ) {
+                CLog::Print( LOG_INFO, "PTT_LEAVE 재시도 취소 — %s 가 group(%s) 에 다시 합류했다",
+                             clsItem.strSessionId.c_str(), clsItem.strGroupId.c_str() );
+                continue;
+            }
+        }
+        if ( gclsCmpClient.LeaveGroup( clsItem.strGroupId, clsItem.strSessionId, clsItem.strSesId ) ) {
+            CLog::Print( LOG_INFO, "PTT_LEAVE 재시도 성공 (%d회차, group=%s member=%s)", clsItem.iTries + 1,
+                         clsItem.strGroupId.c_str(), clsItem.strSessionId.c_str() );
+            continue;
+        }
+        ++clsItem.iTries;
+        if ( clsItem.iTries == SLOW_AFTER || ( clsItem.iTries > SLOW_AFTER && clsItem.iTries % 60 == 0 ) )
+            CLog::Print( LOG_ERROR, "PTT_LEAVE %d회 실패(group=%s member=%s) — %d초 간격으로 계속 재시도",
+                         clsItem.iTries, clsItem.strGroupId.c_str(), clsItem.strSessionId.c_str(), MAX_WAIT );
+        const int iWait = clsItem.iTries >= SLOW_AFTER ? MAX_WAIT : ( 1 << clsItem.iTries );
+        clsItem.tNextTry = time( NULL ) + iWait;
+        std::lock_guard<std::recursive_mutex> lock( m_mutex );
+        m_vecPendingLeave.push_back( clsItem );
+    }
 }
 
 int CGroupCallService::RevokeUnauthorizedListeners( const char *pszWhy ) {
@@ -2192,8 +2324,18 @@ int CGroupCallService::RevokeUnauthorizedListeners( const char *pszWhy ) {
         CspPttGroup clsGroup;
         if ( gclsGroupMap.Select( clsSnap.strGroupId.c_str(), clsGroup ) == false )
             continue;  // 그룹이 없으면 별 경로(CheckMemberState)로 정리된다
-        const std::string strDeny = ListenDenyReason( clsGroup, clsSnap.strMember );
+        bool bUnavail = false;
+        const std::string strDeny = ListenDenyReason( clsGroup, clsSnap.strMember, &bUnavail );
         if ( strDeny.empty() ) continue;
+        if ( bUnavail ) {
+            // **조회 불능은 권한 상실이 아니다.** 새 합류는 막되(fail closed) 이미 선 것은 걷지 않는다
+            //   (fail open) — DB 일시 장애로 멀쩡한 청취를 끊으면 장애가 서비스 정지가 된다(§5.10).
+            //   «걷지 않는다» 와 «잊는다» 는 다르다 — 빚으로 남겨야 DB 가 복구된 뒤 다시 판정한다.
+            CLog::Print( LOG_ERROR, "AuthzRevoke(%s): ptt listen leg(%s) 판정 불능(%s) — 회수 보류",
+                         pszWhy ? pszWhy : "authz", clsSnap.strCallId.c_str(), strDeny.c_str() );
+            CspAuthz::NotePolicyReloadOwed( pszWhy ? pszWhy : "authz" );
+            continue;
+        }
         CLog::Print( LOG_INFO, "AuthzRevoke(%s): ptt listen leg(%s) revoked — %s on group %s (%s, role %s)",
                      pszWhy ? pszWhy : "authz", clsSnap.strCallId.c_str(), clsSnap.strMember.c_str(),
                      clsSnap.strGroupId.c_str(), strDeny.c_str(),

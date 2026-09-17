@@ -101,7 +101,9 @@ public:
     bool RemoveAffiliationsByUser( const std::string &strUserId );
 
     /** 전체 가입자를 DB에서 읽어 맵에 로드한다 */
-    bool LoadAllUsers( CspUserMap &clsMap );
+    /** 가입자 전량 적재(맵에 병합 — 등록 상태 보존). @param pbUnavailable (선택) true = 조회 불능.
+     *  반환값은 «적재된 행이 있는가»(count>0)라 0명과 실패를 못 가른다 — 인가 판정 근거로 쓸 때는 이 인자를 본다. */
+    bool LoadAllUsers( CspUserMap &clsMap, bool *pbUnavailable = nullptr );
 
     // ─────────────────────────────────────────────
     //  Phone group / role operations (dispatch_center.md §3·§8.1) — 테이블 부재 시 그 기능 비활성
@@ -116,7 +118,11 @@ public:
         return m_bHasRoleTables;
     }
     /** 단일 전화 그룹(+멤버) 조회 */
-    bool SelectPhoneGroup( const std::string &strGroupId, CspPhoneGroup &clsGroup );
+    /** 전화 그룹 단건 조회.
+     *  @param pbUnavailable (선택) false 반환의 뜻을 가른다 — true = **조회 불능**(연결·질의 실패),
+     *         false = **없음**(행이 없다). 둘을 섞으면 DB 장애를 «그룹 삭제» 로 읽어 멀쩡한 감시·픽업이
+     *         끊긴다(dispatch_center.md §5.10). */
+    bool SelectPhoneGroup( const std::string &strGroupId, CspPhoneGroup &clsGroup, bool *pbUnavailable = nullptr );
     /** 전체 전화 그룹을 읽어 맵을 재구축한다 */
     bool LoadAllPhoneGroups( CCspPhoneGroupMap &clsMap );
     /** 전체 역할 + user 배정(person → voip·volte·ptt 전 회선으로 펼침) + 대상 목록을 읽어 맵을 재구축한다 */

@@ -98,10 +98,11 @@ bool CCspPhoneGroupMap::LoadFromDb() {
     return gclsDbManager.LoadAllPhoneGroups( *this );
 }
 
-bool CCspPhoneGroupMap::LoadOneFromDb( const char *pszGroupId ) {
+bool CCspPhoneGroupMap::LoadOneFromDb( const char *pszGroupId, bool *pbUnavailable ) {
+    if ( pbUnavailable ) *pbUnavailable = false;
     if ( pszGroupId == NULL || pszGroupId[0] == '\0' ) return false;
     CspPhoneGroup clsGroup;
-    if ( gclsDbManager.SelectPhoneGroup( pszGroupId, clsGroup ) == false ) return false;
+    if ( gclsDbManager.SelectPhoneGroup( pszGroupId, clsGroup, pbUnavailable ) == false ) return false;
     Insert( clsGroup );
     return true;
 }
@@ -175,6 +176,14 @@ void CCspPhoneGroupMap::Remove( const char *pszGroupId ) {
     if ( it == m_clsMap.end() ) return;
     _unindex( it->second );
     m_clsMap.erase( it );
+}
+
+void CCspPhoneGroupMap::Replace( const std::map<std::string, CspPhoneGroup> &clsNew ) {
+    std::lock_guard<std::recursive_mutex> lock( m_clsMutex );
+    m_clsMap = clsNew;
+    m_clsPilotIndex.clear();
+    m_clsMemberIndex.clear();
+    for ( const auto &kv : m_clsMap ) _index( kv.second );
 }
 
 void CCspPhoneGroupMap::Clear() {

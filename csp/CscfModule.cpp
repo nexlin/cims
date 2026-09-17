@@ -12,6 +12,7 @@
 #include <map>
 #include <mutex>
 
+#include "AuthzRevoke.h"
 #include "Base64.h"
 #include "CscAvClient.h"
 #include "CspAddressing.h"
@@ -999,11 +1000,28 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
  *  해석해야 할 응답 목록(404·405·410·416·480·481·484·489·501·604)에 **403 은 없다**. 즉 거절만 하면 구독자는
  *  구독이 살아 있다고 보고, 서버 기록도 남아 만료까지 NOTIFY 가 계속 나간다. 종료 NOTIFY 를 함께 보내고
  *  기록을 지워야 회수가 성립한다. 초기 구독에는 끝낼 구독이 없으므로 무동작. */
+/** 판정 불능(정책 자료 조회 실패)으로 **새** 구독을 받지 못할 때의 응답 — 403 이 아니라 503 + Retry-After.
+ *  «자격이 없다» 와 «지금 판정할 수 없다» 는 다른 사실이다. 403 으로 답하면 구독자는 자격을 잃은 것으로 보고
+ *  물러나므로, DB 가 돌아와도 스스로 복구하지 않는다. */
+static void SendSubscribeUnavailable( CSipMessage *pclsMessage, int iRetryAfterSec ) {
+    CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_SERVICE_UNAVAILABLE );
+    if ( pclsResponse == NULL ) return;
+    char szRetry[16];
+    snprintf( szRetry, sizeof( szRetry ), "%d", iRetryAfterSec );
+    pclsResponse->AddHeader( "Retry-After", szRetry );
+    gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
+}
+
+/** 사유는 `deactivated` 다 — `rejected`("재구독하지 말 것")가 아니다. 이 거절은 «지금 이 순간의 판정» 이고,
+ *  CSC 는 한 사람의 그룹 이동을 통지 둘로 보내므로 그 사이에 도착한 갱신은 «아직 어느 그룹에도 없는» 순간을
+ *  본다. 거기에 `rejected` 를 보내면 정당한 관제사가 재구독하지 않아 영구히 눈이 먼다. `deactivated` 면 즉시
+ *  재구독하고 서버가 그때 다시 판정한다 — 자격을 정말 잃었으면 그 재구독이 403 이므로 회수는 그대로 성립한다
+ *  (AuthzRevoke.cpp `AuthzTerminateReason` 과 같은 판단, dispatch_center.md §5.10). */
 static void TerminateDeniedRefresh( bool bRefresh, const std::string &strCallId ) {
     if ( !bRefresh ) return;
     SubscriptionInfo clsSub;
     if ( gclsSubscriptionManager.GetSubscriptionByCallId( strCallId, clsSub ) ) {
-        SendTerminatedNotify( clsSub, "rejected" );
+        SendTerminatedNotify( clsSub, "deactivated" );
         gclsSubscriptionManager.RemoveSubscription( strCallId );
     }
 }
@@ -1208,6 +1226,15 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
         SipMakeTag( szToTag, sizeof( szToTag ) );
     }
 
+    // 구독자 dialog 가 **이미 서 있는가** — 거절을 어떻게 전할지가 여기서 갈린다. 서 있으면 403 만으로는 끊기지
+    //   않는다(RFC 6665 §4.1.2.2 의 구독 종료 응답 목록에 403 은 없다) — 종료 NOTIFY 를 같이 보내야 한다.
+    //   in-dialog 갱신인데 서버 기록이 없는 경우(재기동 뒤)도 구독자 쪽 dialog 는 살아 있으므로 같이 친다.
+    const bool bDialogStanding = bRefresh || !strReqToTag.empty();
+
+    // 인가 검사 **전**의 정책 세대 — 검사와 `AddSubscription` 사이에 회수 스윕이 지나가면 그 스윕은 아직
+    //   등록되지 않은 이 구독을 놓친다. 등록 뒤에 세대가 달라졌으면 같은 판정을 한 번 더 한다(§5.10).
+    const unsigned uSubAuthzGen = CspAuthz::PolicyGeneration();
+
     // dialog-event 인가 (관제 BLF, volte_supplementary_services.md §6.2) — 구독자와 감시 대상(watched AoR)이
     //   같은 픽업 그룹인지, 아니면 감시자 역할의 monitor_call 범위 안인지 확인한다. 그룹 밖 감시는 403(타
     //   가입자 호 상태 노출 방지). 자기 자신 감시는 허용.
@@ -1252,9 +1279,29 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
     //   판정 본체는 CGroupCallService::CheckConferenceSubscribe(청취 leg 게이트와 같은 축).
     if ( strEventType == "conference" && !strReqUriUser.empty() ) {
         std::string strWarning, strReason;
+        bool bUnavail = false;
         const int iDeny =
-            CGroupCallService::CheckConferenceSubscribe( strReqUriUser, strFromId, strWarning, strReason );
-        if ( iDeny ) {
+            CGroupCallService::CheckConferenceSubscribe( strReqUriUser, strFromId, strWarning, strReason, &bUnavail );
+        if ( iDeny && bUnavail ) {
+            // **조회 불능은 불허가 아니다** — 회수 스윕의 fail open 과 같은 판단(§5.10). 다만 방향이 둘로 갈린다:
+            //   이미 한 번 인가받은 구독의 갱신은 그대로 두고(끊으면 판정도 못 한 채 눈을 감긴다), 아직 아무 판정도
+            //   받은 적 없는 **새** 구독은 열어 줄 수 없다 — 대신 «금지» 가 아니라 «지금은 못 한다»(503)로 답한다.
+            //   어느 쪽이든 빚으로 남겨(§5.10) 자료가 돌아온 뒤 스윕이 다시 판정한다.
+            CspAuthz::NotePolicyReloadOwed( "conference subscribe" );
+            // fail open 의 기준은 `bDialogStanding` 이 아니라 **서버가 전에 이 구독을 승인했다는 기록**이다
+            //   (`bRefresh`). 재기동 뒤의 상태 없는 in-dialog 갱신은 그 기록이 없다 — To tag 는 요청이 주장하는
+            //   값이라 판정 자료 없이 그것만 믿고 열어 주면, 자격을 인증받은 계정이 장애 창을 노려 남의 그룹
+            //   로스터를 얻을 수 있다. 기록이 없으면 새 구독과 같이 다룬다(503).
+            if ( !bRefresh ) {
+                CLog::Print( LOG_ERROR, "SUBSCRIBE conference 판정 불능 — %s on group %s (%s) → 503 (재시도 요청)",
+                             strFromId.c_str(), strReqUriUser.c_str(), strReason.c_str() );
+                SendSubscribeUnavailable( pclsMessage, 5 );
+                return true;
+            }
+            CLog::Print( LOG_ERROR,
+                         "SUBSCRIBE conference 판정 불능 — %s on group %s (%s) — 기존 갱신은 유지(fail open)",
+                         strFromId.c_str(), strReqUriUser.c_str(), strReason.c_str() );
+        } else if ( iDeny ) {
             CLog::Print( LOG_INFO, "SUBSCRIBE conference denied — %s on group %s (%s) → %d", strFromId.c_str(),
                          strReqUriUser.c_str(), strReason.c_str(), iDeny );
             SendResponseWithWarning( pclsMessage, iDeny, strWarning.c_str() );
@@ -1290,6 +1337,47 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
     info.eSrcTransport = pclsMessage->m_eTransport;
 
     gclsSubscriptionManager.AddSubscription( strReqUri, info );
+
+    // **등록 뒤 한 번 더 본다.** 스윕은 등록된 것만 보므로 등록 전에 지나간 스윕은 이 구독을 놓쳤다.
+    //   세대가 그 사실을 알려 준다 — 달라졌으면 같은 판정을 다시 하고, 잃었으면 200 을 보내지 않고 여기서 끊는다.
+    if ( CspAuthz::PolicyGeneration() != uSubAuthzGen && !strReqUriUser.empty() ) {
+        bool bLost = false;
+        bool bUnavail = false;
+        std::string strWhy;
+        if ( strEventType == "dialog" && strReqUriUser != strFromId ) {
+            std::string strG;
+            CspPhoneGroup clsPg;
+            if ( gclsPhoneGroupMap.SelectByPilot( strReqUriUser.c_str(), clsPg ) )
+                strG = clsPg.m_strId;
+            else
+                strG = gclsPhoneGroupMap.EffectiveGroupOf( strReqUriUser.c_str() );
+            bLost = !gclsRoleMap.CanWatch( strFromId.c_str(), strG );
+            strWhy = "dialog watch scope";
+        } else if ( strEventType == "conference" ) {
+            std::string strWarn, strReason;
+            bLost = CGroupCallService::CheckConferenceSubscribe( strReqUriUser, strFromId, strWarn, strReason,
+                                                                 &bUnavail ) != 0;
+            strWhy = strReason;
+        }
+        if ( bLost && bUnavail ) {
+            // 재검사에서의 조회 실패도 불허가 아니다 — 방금 사전 판정을 통과한 구독을 자료 없는 채로 되돌리지
+            //   않는다(fail open). 빚으로 남겨 뒤에 스윕이 판정한다(§5.10).
+            CLog::Print( LOG_ERROR, "SUBSCRIBE %s 재검사 판정 불능 — %s on %s (%s) — 유지(fail open)",
+                         strEventType.c_str(), strFromId.c_str(), strReqUriUser.c_str(), strWhy.c_str() );
+            CspAuthz::NotePolicyReloadOwed( "subscribe recheck" );
+        } else if ( bLost ) {
+            CLog::Print( LOG_INFO, "SUBSCRIBE %s — %s lost scope on %s right after accept (%s) → 403",
+                         strEventType.c_str(), strFromId.c_str(), strReqUriUser.c_str(), strWhy.c_str() );
+            SendResponse( pclsMessage, 403 );
+            // 구독자 dialog 가 이미 서 있으면(갱신) 403 은 구독을 끊지 못한다 — 종료 NOTIFY 까지 보내고
+            //   기록을 지운다. 초기 구독이면 dialog 가 없으므로 기록만 지운다.
+            if ( bDialogStanding )
+                TerminateDeniedRefresh( true, strSubCallId );
+            else
+                gclsSubscriptionManager.RemoveSubscription( strSubCallId );
+            return true;
+        }
+    }
 
     CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( 200 );
     if ( pclsResponse ) {

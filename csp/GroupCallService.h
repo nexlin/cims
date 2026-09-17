@@ -150,13 +150,38 @@ public:
      *  청취 leg 와 같은 2단(allow_ambient_listening + ptt_listen 범위)으로 판정한다 — 즉석 세션(adhoc/priv)·미지 자원은
      * 통과. */
     static int CheckConferenceSubscribe( const std::string &strGroupId, const std::string &strUserId,
-                                         std::string &strWarning, std::string &strReason );
+                                         std::string &strWarning, std::string &strReason,
+                                         bool *pbUnavailable = nullptr );
 
     /** PTT 청취 인가 판정 — **합류(§5.6)·합류 중 재확인·회수 스윕이 같은 식을 쓰게 하는 단일 지점.**
      *  셋이 갈라지면 허용된 것을 걷거나 잃은 것을 남긴다. 반환 = "" 허용, 그 외 거절 사유(로그·감사용).
      *  2단 = 자격 `allow_ambient_listening`(TS 24.484, 역할 배정에 맞춰 CSC 가 동기) + 범위(즉석 세션은
-     *  `CanObserveEphemeral`, 그 외는 역할 `ptt_listen`). DB(프로파일)를 읽으므로 락 밖에서 부른다. */
-    static std::string ListenDenyReason( const CspPttGroup &clsGroup, const std::string &strListener );
+     *  `CanObserveEphemeral`, 그 외는 역할 `ptt_listen`). DB(프로파일)를 읽으므로 락 밖에서 부른다.
+     *  @param pbUnavailable (선택) 거절 사유가 **조회 불능**이면 true. 합류(새 권한)는 이것을 무시하고 막지만
+     *         (fail closed), 회수(기존 권한)는 이때 걷지 않는다(fail open) — DB 장애를 «자격 상실» 로 읽으면
+     *         멀쩡한 청취가 끊긴다(dispatch_center.md §5.10). */
+    static std::string ListenDenyReason( const CspPttGroup &clsGroup, const std::string &strListener,
+                                         bool *pbUnavailable = nullptr );
+
+    /** CMP 멤버 해제 요청 — 실패하면 재시도 대기열에 넣는다. **PTT_LEAVE 를 보내는 모든 경로가 이것만 쓴다.**
+     *  `LeaveGroup` 은 실제 전송 결과를 돌려주는데(`CmpClient.cpp`) 지금까지 그 값을 아무도 보지 않았다.
+     *  요청이 유실되면 세션 맵에서는 지워졌는데 **CMP 에는 멤버가 남아 RTP 를 계속 받는다** — 청취 leg 이면
+     *  회수가 성립하지 않고, 일반 멤버면 끊은 뒤에도 소리가 간다. 재시도할 주인이 없으므로 여기서 잡는다. */
+    void LeaveGroupOrQueue( const std::string &strGroupId, const std::string &strSessionId, const std::string &strSesId,
+                            const char *pszWhy );
+
+    /** 대기열에서 만기된 건을 재시도한다 — MonitorLoop 1초 틱에서 부른다. 한 틱 처리 상한을 둔다. */
+    void RetryPendingLeaves();
+
+    /**
+     * 그 멤버의 밀린 `PTT_LEAVE` 를 버린다 — **JOIN 이 «지금 있다» 는 권위다.**
+     *
+     * CMP 멤버 키는 `(group, user)` 라 재합류해도 같다. 그래서 옛 LEAVE 재시도가 **방금 들어온 멤버의
+     * 미디어·floor 를 걷어 간다** — SIP 는 살아 있는데 무음이 된다. 이것은 Call-ID 재사용 같은 비정상
+     * 입력이 아니라 **앱이 BYE 없이 재INVITE 하는 정상 재합류**에서 난다. 그래서 `ProcessGroupCall` 의
+     * 재조인 처리도 옛 leg 에 CMP LEAVE 를 보내지 않는다(같은 파일, 재조인 주석). 밀린 것도 같은 이유로
+     * 버려야 한다. */
+    void PurgePendingLeave( const std::string &strGroupId, const std::string &strMemberId );
 
     /** 인가를 잃은 PTT 청취 leg 회수 (dispatch_center.md §5.10) — 역할 재적재 뒤 전수 재판정한다.
      *  판정은 합류 시(§5.6 ProcessGroupCall)와 **같은 2단**이다: 자격 `allow_ambient_listening`(CSC 가 역할
@@ -308,8 +333,8 @@ private:
     static std::string PttSessionUri( const std::string &strGroupId );
     /** 즉석 세션(priv-/adhoc-) 관측 인가 — 청취 leg 합류·conference 구독 공용 (dispatch_center.md §5.6a).
      *  참가자는 항상. 그 외는 자격 allow_ambient_listening + 참가자 중 한 명이 관제 그룹 monitor_scope(CanWatch) 안. */
-    static bool CanObserveEphemeral( const CspPttGroup &clsGroup, const std::string &strUserId,
-                                     std::string &strReason );
+    static bool CanObserveEphemeral( const CspPttGroup &clsGroup, const std::string &strUserId, std::string &strReason,
+                                     bool *pbUnavailable = nullptr );
     // CallId -> Info
     std::map<std::string, CallSessionInfo> m_mapCallSession;
 
@@ -327,6 +352,19 @@ private:
     // BYE 처리 중 race condition 방지: OnCallTerminated 호출 시 그룹별 최종 종료 시각 기록.
     // CheckGroupIntegrity가 BYE 처리 틈새에서 재-INVITE하지 않도록 5초 grace period 부여.
     std::map<std::string, std::chrono::steady_clock::time_point> m_mapGroupLastTerminate;
+
+    /** CMP 멤버 해제에 실패한 건 — 재시도 대기열(§5.10). 세션 맵에는 되돌리지 않는다(되돌리면 이미 끝난
+     *  leg 이 살아 있는 것처럼 보인다). 상한 근거 = 마지막 멤버 이탈 시 `PTT_GROUP_REMOVE` 가 그룹을 통째로
+     *  걷는다 — 최종 안전망이 따로 있다. */
+    struct PendingLeave {
+        std::string strGroupId, strSessionId, strSesId;
+        int iTries = 0;
+        time_t tNextTry = 0;
+    };
+    /** 대기열 상한 — 안전망. 같은 (group, member) 를 한 건으로 접으므로 정상 운용에서는 살아 있는 멤버 수를
+     *  넘지 않는다. 넘었다면 회수가 아니라 상류가 고장난 상태다. */
+    static const size_t PENDING_LEAVE_MAX = 256;
+    std::vector<PendingLeave> m_vecPendingLeave;
 
     std::recursive_mutex m_mutex;
 };

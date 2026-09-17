@@ -389,7 +389,7 @@ RELAY_TAP_ADD (멱등) payload:
 | payload 필드 | 필수 | 설명 |
 |---|---|---|
 | `session_id` | O | 대상 relay 세션. 없으면 `NOT_FOUND`(부활 금지) |
-| `tap_id` | O | client 명명(세션 내 유일). 같은 키 재요청은 동일 포트·SSRC 반환(멱등) |
+| `tap_id` | O | client 명명(세션 내 유일). 같은 키 재요청은 동일 포트·SSRC 반환(멱등) — client 는 **시도마다 새 키**를 쓴다(밀린 REMOVE 가 새 tap 을 걷지 않게) |
 | `remote_ip` / `remote_port` | O | 청취 단말 RTP 주소 |
 | `remote_video_port` | - | 청취 단말 Video RTP 포트(영상 tap 시) |
 | `remote_pt` / `remote_te_pt` | - | 청취 단말이 수신 선언한 audio/TE PT — tap egress 스탬프 |
@@ -404,7 +404,7 @@ SSRC — caller/callee 라벨링 대상, client 가 SDP `a=ssrc … label:caller
 ```json
 { "hdr": { "ver": 2, "cmd": "RELAY_TAP_ADD", "type": "request",
            "sesid": "…", "service": "volte" },
-  "payload": { "session_id": "csp_…_1", "tap_id": "tap-<callid>", "monitor": "+8210…",
+  "payload": { "session_id": "csp_…_1", "tap_id": "tap-<callid>-<seq>", "monitor": "+8210…",
                "remote_ip": "203.0.113.9", "remote_port": 34308, "remote_pt": 96, "remote_te_pt": 101,
                "tap_mode": "both" } }
 ```

@@ -148,6 +148,13 @@ void CCspRoleMap::Remove( const char *pszRoleId ) {
     m_clsMap.erase( it );
 }
 
+void CCspRoleMap::Replace( const std::map<std::string, CspRole> &clsNew ) {
+    std::lock_guard<std::recursive_mutex> lock( m_clsMutex );
+    m_clsMap = clsNew;
+    m_clsLineIndex.clear();
+    for ( const auto &kv : m_clsMap ) _index( kv.second );
+}
+
 void CCspRoleMap::Clear() {
     std::lock_guard<std::recursive_mutex> lock( m_clsMutex );
     m_clsMap.clear();

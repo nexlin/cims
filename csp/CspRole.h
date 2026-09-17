@@ -55,6 +55,11 @@ public:
     void Insert( const CspRole &clsRole );
     void Remove( const char *pszRoleId );
     void Clear();
+    /** 전량 원자 교체 — 재적재의 유일한 게시 수단.
+     *  `Clear()` 뒤 `Insert()` 를 반복하면 각 호출이 락을 따로 잡아 **독자가 빈 맵이나 절반만 찬 맵을 본다.**
+     *  그 순간 인가 판정이 돌면(구독 갱신 재검사·회수 스윕 — dispatch_center.md §5.10) 실제로는 권한이 그대로인
+     *  관제사의 구독이 403 과 종료 NOTIFY 를 맞는다. 완성된 스냅샷을 한 번에 건다. */
+    void Replace( const std::map<std::string, CspRole> &clsNew );
 
     bool Select( const char *pszRoleId, CspRole &clsRole );
     /** 회선(SIP 신원)의 역할 — 배정 없으면 false. */

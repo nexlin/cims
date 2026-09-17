@@ -22,6 +22,7 @@
 #include <csignal>
 #include <set>
 
+#include "AuthzRevoke.h"
 #include "CallDir.h"
 #include "CspAddressing.h"
 
@@ -536,6 +537,8 @@ int ServiceMain() {
         gclsUserAgent.CheckSessionTimer();
         // 관제 — 대표번호 포크 집합 무응답 판정 (dispatch_center.md §4.4)
         gclsDispatcher.GetTas()->Tick();
+        // 관제 — 적재 실패로 못 한 인가 회수를 갚는다 (§5.10). 빚이 없으면 즉시 반환한다.
+        CspAuthz::RetryPendingPolicyReload();
 
         // IPsec SA 셋 — 임시 유예·retiring·해제 유예·수명 만료 회수 (sip_access_security.md §8.3)
         gclsIpsecSaSetMap.Sweep( time( NULL ) );

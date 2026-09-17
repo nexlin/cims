@@ -47,6 +47,23 @@ namespace CspAuthz {
     /** 인가 근거가 바뀌었음을 알린다 — `RevokeUnauthorized` 가 스윕 전에 스스로 부른다. */
     void BumpPolicyGeneration();
 
+    /**
+     * @brief 정책 적재가 실패해 **회수를 못 했다**고 기록한다.
+     *
+     * 적재가 실패하면 판정 근거가 낡았으므로 그 자리에서 걷지 않는다(§5.10). 문제는 그것이 «지연» 이 아니라
+     * «유실» 이라는 점이다 — 통지는 한 번뿐이라, DB 가 복구돼도 **다음 변경 통지가 올 때까지 옛 권한이 그대로
+     * 유지된다.** 통지를 잃지 않으려면 빚으로 남겨 두고 갚아야 한다.
+     */
+    void NotePolicyReloadOwed( const char *pszWhy );
+
+    /**
+     * @brief 밀린 정책 적재를 다시 시도하고, 성공하면 그때 회수한다. 1초 주기에서 부른다.
+     *
+     * 빚이 없으면 즉시 반환한다. 재시도 간격은 2·4·8…60초로 늘리되 **포기하지 않는다** — 자원 회수와 달리
+     * 정책 반영은 대신 갚아 줄 최종 안전망이 없다.
+     */
+    void RetryPendingPolicyReload();
+
 }  // namespace CspAuthz
 
 #endif

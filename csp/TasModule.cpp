@@ -9,6 +9,8 @@
 
 #include "TasModule.h"
 
+#include <atomic>
+
 #include "AuthzRevoke.h"
 #include "CallDir.h"
 #include "CallMap.h"
@@ -1450,8 +1452,35 @@ void CTasModule::OverflowFork( const std::string &strACallId ) {
     if ( iLegs == 0 ) FailFork( strACallId, SIP_TEMPORARILY_UNAVAILABLE );
 }
 
+void CTasModule::RemoveTapOrQueue( const std::string &strSessionId, const std::string &strTapId,
+                                   const std::string &strMonitor, const std::string &strSesId,
+                                   const std::string &strService, const char *pszWhy ) {
+    if ( gclsCmpClient.RemoveTap( strSessionId, strTapId, strMonitor, strSesId, strService ) ) return;
+    std::lock_guard<std::recursive_mutex> lock( m_mutexMonitor );
+    // 같은 자원 키 `(session_id, tap_id)` 는 한 건만 둔다 — 두 번 걸어도 CMP 왕복만 늘고 회수는 같다.
+    for ( const auto &clsOld : m_vecPendingTapRemove )
+        if ( clsOld.strSessionId == strSessionId && clsOld.strTapId == strTapId ) return;
+    if ( m_vecPendingTapRemove.size() >= PENDING_TAP_MAX ) {
+        CLog::Print( LOG_ERROR,
+                     "Join — tap(%s) 회수 대기열 상한(%zu) 초과 — **회수 유실**(session=%s monitor=%s) [TAS]",
+                     strTapId.c_str(), (size_t)PENDING_TAP_MAX, strSessionId.c_str(), strMonitor.c_str() );
+        return;
+    }
+    m_vecPendingTapRemove.push_back(
+        { strSessionId, strTapId, strMonitor, strSesId, strService, 0, time( NULL ) + 1 } );
+    CLog::Print( LOG_ERROR, "Join — tap(%s) 회수 실패(%s, session=%s monitor=%s) — 재시도 대기 %zu 건 [TAS]",
+                 strTapId.c_str(), pszWhy ? pszWhy : "?", strSessionId.c_str(), strMonitor.c_str(),
+                 m_vecPendingTapRemove.size() );
+}
+
 void CTasModule::RetryPendingTapRemovals() {
-    static const int MAX_TRIES = 6;     // 1+2+4+8+16+32초 ≈ 1분. 그 뒤는 원 통화 종료의 RELAY_REMOVE 에 맡긴다(§5.9)
+    // **포기하지 않는다.** 회수를 포기하면 자격을 잃은 감청이 원 통화가 끝날 때까지 계속 들린다 —
+    //   «자원이 언젠가 회수된다» 는 것과 «지금 안 들려야 한다» 는 다른 요구다. RELAY_TAP_REMOVE 는 없는
+    //   키에도 `OK` 라(cmp_media_api.md §6.5 — 자연 멱등) 무한 재시도는 스스로 끝난다: 세션이 사라졌으면
+    //   CMP 가 OK 로 답하고 대기열에서 빠진다. 끝나지 않는 유일한 경우는 CMP 불통이고, 그때는 간격 상한이
+    //   비용을 묶는다.
+    static const int SLOW_AFTER = 6;  // 1+2+4+8+16+32초 ≈ 1분 — 이후는 간격 고정 + 희소 로그
+    static const int MAX_WAIT = 30;
     static const int MAX_PER_TICK = 4;  // CMP 왕복은 블로킹(최대 3×100ms) — 1초 틱을 넘기지 않게
     std::vector<PendingTapRemove> vecDue;
     {
@@ -1475,14 +1504,14 @@ void CTasModule::RetryPendingTapRemovals() {
                          clsItem.iTries + 1 );
             continue;
         }
-        if ( ++clsItem.iTries >= MAX_TRIES ) {
+        ++clsItem.iTries;
+        if ( clsItem.iTries == SLOW_AFTER || ( clsItem.iTries > SLOW_AFTER && clsItem.iTries % 60 == 0 ) )
             CLog::Print( LOG_ERROR,
-                         "Join — tap(%s) 회수 %d회 실패, 포기(session=%s monitor=%s) — 원 통화 종료 시 일괄 회수 [TAS]",
+                         "Join — tap(%s) 회수 %d회 실패(session=%s monitor=%s) — %d초 간격으로 계속 재시도 [TAS]",
                          clsItem.strTapId.c_str(), clsItem.iTries, clsItem.strSessionId.c_str(),
-                         clsItem.strMonitor.c_str() );
-            continue;
-        }
-        clsItem.tNextTry = time( NULL ) + ( 1 << clsItem.iTries );
+                         clsItem.strMonitor.c_str(), MAX_WAIT );
+        const int iWait = clsItem.iTries >= SLOW_AFTER ? MAX_WAIT : ( 1 << clsItem.iTries );
+        clsItem.tNextTry = time( NULL ) + iWait;
         std::lock_guard<std::recursive_mutex> lock( m_mutexMonitor );
         m_vecPendingTapRemove.push_back( clsItem );
     }
@@ -1599,6 +1628,11 @@ bool CTasModule::HandleIncomingJoin( const char *pszCallId, const char *pszFrom,
         strCaller = clsTgtParty.bInitiator ? clsTgtParty.strUser : clsOtherParty.strUser;
         strCallee = clsTgtParty.bInitiator ? clsOtherParty.strUser : clsTgtParty.strUser;
     }
+    // **판정보다 먼저** 정책 세대를 읽는다 — 아래 CMP 왕복 동안 자격을 거두면 스윕은 아직 등록되지 않은 이
+    //   leg 을 지나친다. 판정 **뒤**에 읽으면 «허용 판정 → 정책 변경·스윕 → 세대 읽기» 순서에서 이미 오른
+    //   값을 읽어 재검사를 건너뛴다. 앞에서 읽으면 그 경우 세대가 달라 재판정이 돈다. 반대로 읽기와 판정
+    //   사이에 올라가면 새 정책으로 판정했는데도 달라 보이는데, 재검사는 **재판정**이라 같은 답이 나온다.
+    const unsigned uAuthzGen = CspAuthz::PolicyGeneration();
     {
         const std::string strRole = gclsRoleMap.RoleIdForLine( strMonitor.c_str() );
         if ( !CanMonitorPair( strMonitor, strCaller, strCallee ) ) {
@@ -1611,10 +1645,6 @@ bool CTasModule::HandleIncomingJoin( const char *pszCallId, const char *pszFrom,
             return true;
         }
     }
-    // 판정 시점의 정책 세대 — 아래 CMP 왕복 동안 자격을 거두면 스윕은 아직 없는 이 leg 을 지나친다.
-    //   등록 직전에 세대가 달라졌으면 같은 판정을 한 번 더 한다(dispatch_center.md §5.10).
-    const unsigned uAuthzGen = CspAuthz::PolicyGeneration();
-
     // 세션당 tap 상한 (§5.5) — CSP 인메모리 카운트 + CMP 기능 광고(resource.tap).
     if ( gclsCmpClient.SupportsTap() == false ) {
         CLog::Print( LOG_INFO, "Join — CMP does not advertise resource.tap → 488 (from %s)", strMonitor.c_str() );
@@ -1674,7 +1704,15 @@ bool CTasModule::HandleIncomingJoin( const char *pszCallId, const char *pszFrom,
     std::string strMonCodec;
     CGroupCallService::GetLegPt( pszCallId, false, iMonPt, iMonSrcPt, iMonTePt, iMonSrcTePt, &strMonCodec );
 
-    std::string strTapId = std::string( "tap-" ) + pszCallId;
+    // tap_id 는 **이 감청 시도 하나**를 가리켜야 한다. CMP 자원 키는 `(session_id, tap_id)` 이고 같은 키의
+    //   재요청은 멱등(cmp_media_api.md §6.5)이라, Call-ID 만으로 지으면 같은 호에 다시 붙은 tap 과 앞선
+    //   시도가 **같은 자원**이 된다 — 큐에 남은 옛 회수가 새 tap 을 걷어 방금 연 감청이 조용히 죽는다
+    //   (PTT_LEAVE 에서 같은 사고를 이미 겪었다 — GroupCallService.cpp `PurgePendingLeave`).
+    static std::atomic<unsigned> s_uTapSeq{ 0 };
+    char szTapId[192];
+    snprintf( szTapId, sizeof( szTapId ), "tap-%s-%u", pszCallId,
+              s_uTapSeq.fetch_add( 1, std::memory_order_relaxed ) + 1 );
+    std::string strTapId = szTapId;
     std::string strTapMode = "both";
     {
         CSipHeader *pMode = pclsMessage->GetHeader( "X-Tap-Mode" );  // 운용 선택(민원인만 등) — 확장 헤더
@@ -1691,6 +1729,14 @@ bool CTasModule::HandleIncomingJoin( const char *pszCallId, const char *pszFrom,
                                 iTapLocalPort, iTapLocalVideoPort, strErrCode ) ) {
         int iRc = ( strErrCode == "LIMIT" ) ? SIP_BUSY_HERE : SIP_NOT_ACCEPTABLE_HERE;
         CLog::Print( LOG_ERROR, "Join — AddTap failed (%s) → %d", strErrCode.c_str(), iRc );
+        // **응답을 못 받은 실패는 «안 걸렸다» 가 아니다.** CMP 가 tap 을 만든 뒤 응답만 유실됐을 수 있는데,
+        //   CSP 는 이 호를 거절하므로 감청 leg 기록(m_mapMonitorLeg)이 남지 않는다 → 어떤 회수 스윕도 그
+        //   tap 을 찾지 못하고, 기록 없는 감청이 원 통화가 끝날 때까지 CMP 안에 산다(자원·감사 둘 다).
+        //   확정 거절(CMP 가 코드로 답한 경우)은 만들어지지 않았으니 그대로 두고, 불명(TIMEOUT/PARSE)만
+        //   회수를 걸어 CMP 가 확인해 줄 때까지 재시도한다 — RELAY_TAP_REMOVE 는 없는 키에 OK 다(멱등).
+        if ( strErrCode == "TIMEOUT" || strErrCode == "PARSE" )
+            RemoveTapOrQueue( clsTarget.m_strRelaySessionId, strTapId, strMonitor, clsTarget.m_strRelaySesId, "volte",
+                              "AddTap 응답 불명" );
         gclsDispatcher.StopCall( pszCallId, iRc );
         return true;
     }
@@ -1704,8 +1750,8 @@ bool CTasModule::HandleIncomingJoin( const char *pszCallId, const char *pszFrom,
     for ( auto &clsMedia : pclsRtp->m_clsMediaList ) {
         if ( clsMedia.m_strMedia != "audio" ) continue;
         char szA[96], szB[96];
-        snprintf( szA, sizeof( szA ), "%u cname:tap-%s", uSsrcA, strTapId.c_str() );
-        snprintf( szB, sizeof( szB ), "%u cname:tap-%s", uSsrcB, strTapId.c_str() );
+        snprintf( szA, sizeof( szA ), "%u cname:%s", uSsrcA, strTapId.c_str() );
+        snprintf( szB, sizeof( szB ), "%u cname:%s", uSsrcB, strTapId.c_str() );
         clsMedia.AddAttribute( "ssrc", szA );
         clsMedia.AddAttribute( "ssrc", ( std::string( szA ) + " label:caller" ).c_str() );
         clsMedia.AddAttribute( "ssrc", szB );
@@ -1716,14 +1762,14 @@ bool CTasModule::HandleIncomingJoin( const char *pszCallId, const char *pszFrom,
     if ( CspAuthz::PolicyGeneration() != uAuthzGen && !CanMonitorPair( strMonitor, strCaller, strCallee ) ) {
         CLog::Print( LOG_INFO, "Join denied — %s lost monitor scope while opening (%s/%s) → 403 [TAS]",
                      strMonitor.c_str(), strCaller.c_str(), strCallee.c_str() );
-        gclsCmpClient.RemoveTap( clsTarget.m_strRelaySessionId, strTapId, strMonitor, clsTarget.m_strRelaySesId,
-                                 "volte" );
+        RemoveTapOrQueue( clsTarget.m_strRelaySessionId, strTapId, strMonitor, clsTarget.m_strRelaySesId, "volte",
+                          "개설 중 인가 상실" );
         gclsDispatcher.StopCall( pszCallId, SIP_FORBIDDEN );
         return true;
     }
     if ( gclsUserAgent.AcceptCall( pszCallId, pclsRtp ) == false ) {
-        gclsCmpClient.RemoveTap( clsTarget.m_strRelaySessionId, strTapId, strMonitor, clsTarget.m_strRelaySesId,
-                                 "volte" );
+        RemoveTapOrQueue( clsTarget.m_strRelaySessionId, strTapId, strMonitor, clsTarget.m_strRelaySesId, "volte",
+                          "AcceptCall 실패" );
         gclsUserAgent.StopCall( pszCallId );
         return true;
     }
@@ -1745,7 +1791,24 @@ bool CTasModule::HandleIncomingJoin( const char *pszCallId, const char *pszFrom,
         m_mapSessionMonitors[leg.strSessionId].insert( pszCallId );
     }
     gclsDispatcher.SetCallOwner( pszCallId, this );
+
+    // 감사 `started` 는 **재검사보다 앞**이다 — 이미 200 OK 를 보냈고 tap 도 붙어 미디어가 흐르기 시작했다.
+    //   재검사가 회수하면 `HandleMonitorLegEnd` 가 `ended` 를 올리므로, 뒤에 두면 **짝 없는 `ended`** 가
+    //   남는다(§9 M7 은 시작/종료 한 쌍을 요구한다).
     _emitCallMonitored( leg, "started", -1 );
+
+    // **등록 뒤 한 번 더 본다 — 창을 닫는 마지막 조각.** 스윕은 등록된 것만 보므로, 등록 전에 지나간 스윕은
+    //   이 leg 을 놓쳤다. 등록이 끝난 지금은 이후의 어떤 스윕도 이 leg 을 보므로, «등록 전에 지나간
+    //   스윕»만 여기서 보상하면 된다 — 세대가 그 사실을 알려 준다. 이 시점엔 이미 200 OK 를 보냈으므로
+    //   회수는 403 이 아니라 BYE + tap 회수(HandleMonitorLegEnd)다 — 스윕이 했을 일과 같다.
+    if ( CspAuthz::PolicyGeneration() != uAuthzGen && !CanMonitorPair( strMonitor, strCaller, strCallee ) ) {
+        CLog::Print( LOG_INFO, "Join — %s lost monitor scope right after accept (%s/%s) → BYE [TAS]",
+                     strMonitor.c_str(), strCaller.c_str(), strCallee.c_str() );
+        gclsUserAgent.StopCall( pszCallId );
+        HandleMonitorLegEnd( pszCallId );
+        return true;
+    }
+
     CLog::Print( LOG_INFO, "Join — %s monitoring session=%s (targets %s/%s) tap=%s mode=%s ssrc=%u/%u [TAS]",
                  strMonitor.c_str(), leg.strSessionId.c_str(), strCaller.c_str(), strCallee.c_str(), strTapId.c_str(),
                  strTapMode.c_str(), uSsrcA, uSsrcB );
@@ -1768,14 +1831,7 @@ bool CTasModule::HandleMonitorLegEnd( const char *pszCallId ) {
     }
     // **CMP 회수 실패를 성공으로 처리하지 않는다.** 요청이 유실되면 CMP 는 계속 RTP 를 복사하는데 CSP 는
     //   맵에서 지운 뒤라 다음 스윕의 대상도 아니다 — 회수가 조용히 새는 자리다. 재시도 대기열로 옮긴다.
-    if ( !gclsCmpClient.RemoveTap( leg.strSessionId, leg.strTapId, leg.strMonitor, leg.strSesId, leg.strService ) ) {
-        std::lock_guard<std::recursive_mutex> lock( m_mutexMonitor );
-        m_vecPendingTapRemove.push_back(
-            { leg.strSessionId, leg.strTapId, leg.strMonitor, leg.strSesId, leg.strService, 0, time( NULL ) + 1 } );
-        CLog::Print( LOG_ERROR, "Join — tap(%s) 회수 실패(session=%s monitor=%s) — 재시도 대기 %zu 건 [TAS]",
-                     leg.strTapId.c_str(), leg.strSessionId.c_str(), leg.strMonitor.c_str(),
-                     m_vecPendingTapRemove.size() );
-    }
+    RemoveTapOrQueue( leg.strSessionId, leg.strTapId, leg.strMonitor, leg.strSesId, leg.strService, "leg 종료" );
     gclsDispatcher.RemoveCallOwner( pszCallId );
     int iDurMs = leg.tStart > 0 ? (int)( ( time( NULL ) - leg.tStart ) * 1000 ) : -1;
     _emitCallMonitored( leg, "ended", iDurMs );
