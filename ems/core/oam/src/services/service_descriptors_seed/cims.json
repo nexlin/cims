@@ -581,27 +581,6 @@
               "unit": "건"
             },
             {
-              "key": "sessions",
-              "label": "성립",
-              "path": "volte.sessions",
-              "totalPath": "totals.volte.sessions",
-              "unit": "건"
-            },
-            {
-              "key": "talked",
-              "label": "소통",
-              "path": "volte.talked",
-              "totalPath": "totals.volte.talked",
-              "unit": "건"
-            },
-            {
-              "key": "completed",
-              "label": "정상종료",
-              "path": "volte.completed",
-              "totalPath": "totals.volte.completed",
-              "unit": "건"
-            },
-            {
               "key": "success",
               "label": "성공률",
               "path": "volte.success_rate",
@@ -613,27 +592,6 @@
               "label": "NER",
               "path": "volte.ner",
               "totalPath": "totals.volte.ner",
-              "unit": "%"
-            },
-            {
-              "key": "talk",
-              "label": "소통률",
-              "path": "volte.talk_rate",
-              "totalPath": "totals.volte.talk_rate",
-              "unit": "%"
-            },
-            {
-              "key": "comp",
-              "label": "완료율",
-              "path": "volte.completion_rate",
-              "totalPath": "totals.volte.completion_rate",
-              "unit": "%"
-            },
-            {
-              "key": "drop",
-              "label": "드롭률",
-              "path": "volte.drop_rate",
-              "totalPath": "totals.volte.drop_rate",
               "unit": "%"
             },
             {
@@ -703,6 +661,48 @@
               "totalPath": "totals.volte.reasons.unknown",
               "unit": "건",
               "help": "사유도 응답코드도 없어 무엇 때문에 실패했는지 특정할 수 없는 호. 나중에 사유를 세분화해도 가를 근거가 없는 건들이라 따로 센다 — 이 칸이 줄어드는 것이 세분화의 진척도다."
+            },
+            {
+              "key": "talk",
+              "label": "소통률",
+              "path": "volte.talk_rate",
+              "totalPath": "totals.volte.talk_rate",
+              "unit": "%"
+            },
+            {
+              "key": "talked",
+              "label": "소통",
+              "path": "volte.talked",
+              "totalPath": "totals.volte.talked",
+              "unit": "건"
+            },
+            {
+              "key": "comp",
+              "label": "완료율",
+              "path": "volte.completion_rate",
+              "totalPath": "totals.volte.completion_rate",
+              "unit": "%"
+            },
+            {
+              "key": "drop",
+              "label": "드롭률",
+              "path": "volte.drop_rate",
+              "totalPath": "totals.volte.drop_rate",
+              "unit": "%"
+            },
+            {
+              "key": "sessions",
+              "label": "성립",
+              "path": "volte.sessions",
+              "totalPath": "totals.volte.sessions",
+              "unit": "건"
+            },
+            {
+              "key": "completed",
+              "label": "정상종료",
+              "path": "volte.completed",
+              "totalPath": "totals.volte.completed",
+              "unit": "건"
             },
             {
               "key": "open",
