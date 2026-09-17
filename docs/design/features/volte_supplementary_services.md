@@ -301,6 +301,9 @@ org 폴백이라 happy-path 만 판정하고 그룹 경계 검사는 SKIP 으로
 - `listener_id` 전파의 TCP/TLS 확장 — 관제 전용 listener 를 `inbound_policy=restricted` 로
   울타리 치려면 필요 ([sip_service_model.md](sip_service_model.md) §9 갭). 그 전까지 유선
   서비스 격리는 domain·가입자 `service_ref` 로만 성립한다.
+- 전화 B-leg(From/To/P-Asserted-Identity) 신원 도메인 — CSP 가 만드는 착신 leg 헤더가 스택 기본(`volte`) 도메인으로
+  고정돼 유선 `voip` 회선이 `volte` 로 표기된다(동작 지장 없음, 표기 어긋남). 정리 범위·선행 과제(psip From/To 분리 훅)·검증은
+  [sip_service_model.md §9.1](sip_service_model.md).
 
 ---
 

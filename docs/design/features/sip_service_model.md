@@ -385,6 +385,11 @@ From URI 단독 매칭은 **fallback 으로 강등**. IMS 표준을 참고한 �
 
 1/2 가 주 경로. 3 은 IBCF incoming. 4/5 는 의심스러운 fallback (로그에 `svc_source=from_header_fallback` 표식).
 
+**착신(callee) 해석은 이 판별과 별개다** — INVITE 의 To/Request-URI **user 부분(E.164)만**으로 `CspUserMap` 을 조회하고
+호스트는 보지 않는다(`ModuleDispatcher::RecvRequest`·`EventIncomingCall`). 번호가 volte·voip·ptt 가입 테이블과 대표번호에
+걸쳐 유일하므로(§2-9) user 만으로 착신이 하나로 정해지며, 단말이 자기 홈 도메인을 붙여 건 `sip:+E.164@<자기 도메인>`
+(TS 24.229 관례)도 도메인 간(voip↔volte) 그대로 붙는다. CSP 가 착신 쪽으로 새로 만드는 B-leg 의 From/To 도메인은 §9.1.
+
 **피어 인증 — 신뢰의 근거는 Route 다.** `RecvRequest` 가 (수신 LocalNode, 소스 IP[:UDP 소스 포트], transport) 로 **인바운드 Route** 를 식별한다
 (`CCspRouteMap::FindInbound`, §2-3). 식별되면 그 요청은 설정된 피어(RemoteNode)의 것이고, `inbound_auth=none` 이면
 `EventIncomingRequestAuth` 가 Digest 챌린지를 하지 않는다(TS 24.229 §5.10 IBCF · TS 29.165 II-NNI — 상대는 신뢰 피어 망이지 가입자가 아니다).
@@ -533,3 +538,38 @@ AccessServices:
 | 헬스체크 `invite_response` 모드 | 2차 |
 | Rule field: `record_route`, `p_charging_vector` 등 | 필요시 추가 |
 | listener_id 전파 | UDP·TCP·TLS 수신 경로 전부(psip `TcpSessionList.m_iListenerId`). 레거시 단일 TCP 리스너(id 0)만 LocalNode 매칭이 없다 |
+| 전화 B-leg 신원 도메인 (From / To / P-Asserted-Identity) | 스택 기본 도메인(`volte`)으로 고정 — 유선 `voip` 회선도 `volte` 로 표기된다. 동작 지장 없음(user 매칭 폴백), 표기만 어긋남. 정리 범위·선행 과제는 §9.1 |
+
+### 9.1 전화 B-leg 신원 도메인 — 각 회선의 서비스 도메인으로 (미착수)
+
+**현재 동작.** CSP 가 착신 쪽으로 새로 만드는 전화(volte·voip) B-leg INVITE 의 From·To·P-Asserted-Identity 호스트는
+psip 스택 기본 도메인 하나로 조립된다 — `CspServer.cpp` `clsSetup.m_strDomain = gclsServiceMap.GetDomainByKind("volte")`
+(`ext/psip/SipUserAgent/SipDialog.cpp` `CreateMessage`). 발신·착신 회선이 `voip` 여도 `@volte.<domain>` 으로 나간다.
+PTT 그룹콜 leg 는 `CreateCall(..., pszOverrideDomain)` 으로 `ptt` 도메인을 넘겨 정확하다(`GroupCallService::InviteMember`).
+
+착신 단말(pjsua)은 계정 매칭에서 host 불일치 시 user 부분으로 폴백하고, CSP 자신도 도메인을 읽지 않으므로 통화는 성립한다.
+그러나 발신자가 등록하지 않은 도메인의 신원을 P-Asserted-Identity 로 단언하는 셈이라 RFC 3325 / TS 24.229 의 신원 표기와
+어긋나고, 도메인을 엄격히 검사하는 단말·외부 피어·도메인별 정책(ACL `to_uri_host`, 통계 라벨)에서 문제가 된다.
+
+**목표.** From/PAI = 발신 회선의 서비스 도메인, To = 착신 회선의 서비스 도메인 — 각각 `CCspServiceMap::GetForUser(id, kind)`
+의 `domain`. Request-URI 는 지금처럼 착신 Contact(IP:port).
+
+**선행 과제 — psip 훅 확장.** `CSipDialog::m_strOverrideDomain` 은 From·To·PAI 를 **한 도메인**으로 묶고, `m_strContactUri` 가
+비어 있으면 **Request-URI 호스트까지** 바꾼다(`SipDialog.cpp` `CreateMessage`). 전화 B-leg(발신 voip · 착신 volte 조합)를 정확히
+쓰려면 From 도메인/To 도메인을 따로 받는 필드가 필요하고, Request-URI 는 건드리지 않아야 한다. 공용 스택 변경이라 cspsim 도
+재빌드하며 PTT 경로가 쓰는 기존 훅과 호환을 유지한다.
+
+**같은 결함군 — 한 번에 맞춘다** (하나만 고치면 표기가 더 어긋난다):
+
+| 위치 | 현재 |
+|---|---|
+| `ModuleDispatcher::EventIncomingCall` 1:1 B2BUA `CreateCall` | override 없음 → 기본(volte) |
+| `TasModule::ForkAlert` 대표번호 포크 `CreateCall` | `clsSet.strDomain`(pilot 서비스 도메인)을 구해 두고 넘기지 않는다 |
+| `CscfModule` REGISTER 200 OK `strRegDomain` | `ptt` 외 전부 `volte` — voip 등록 응답에 volte 도메인 |
+| `CspServer` dialog-info NOTIFY `DialogDomainSuffixFor` | `ptt` 외 전부 `volte` — voip 회선 entity/identity 가 volte |
+
+**제외.** 라우팅 정책으로 외부 피어에 나가는 leg(`PendingRouteMap` 소비, `v3Routed`)에는 적용하지 않는다 — Contact URI 가 없어
+Request-URI 호스트가 도메인으로 바뀌면 피어 동작이 달라진다(피어 쪽 도메인은 `remote_nodes.remote_domain` 의 몫).
+
+**검증.** 정지창 S3 — `S3-SCN-FA`·`S3-SCN-XFER`·`S3-SCN-PICKUP`·`S3-SCN-MONITOR` + voip↔volte 양방향 B-leg From/To/PAI 도메인 대조
+항목 신설 + 실단말(VoLTE 앱·관제 프로그램). CSP 재기동이 따르므로 정지창에서 한다.
