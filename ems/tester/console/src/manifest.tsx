@@ -36,7 +36,7 @@ export const testerManifest: ServiceManifest = {
         { path: '/test/scenarios',  title: '시나리오',   component: TesterScenariosPage,  requiredRole: 'monitor',
           apis: ['tester.scenarios', 'tester.scenario', 'tester.scenario.put', 'tester.scenario.delete', 'tester.scenarios.vocab', 'tester.scenarios.compile_check', 'tester.profiles', 'tester.profile', 'tester.validate', 'tester.topologies', 'tester.run.start'] },
         { path: '/test/topologies', title: '토폴로지',   component: TesterTopologiesPage, requiredRole: 'monitor',
-          apis: ['tester.topologies', 'tester.topology.save', 'tester.topology.check', 'tester.workers', 'tester.validate'] },
+          apis: ['tester.topologies', 'tester.topology.save', 'tester.topology.check', 'tester.workers.discovered', 'tester.workers', 'tester.validate'] },
       ],
     },
   ],

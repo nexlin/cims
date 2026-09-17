@@ -6,6 +6,7 @@
     "CimsRuntimeDir": "",
     "Tester": {
         "DataDir": "",
+    "BaseOamUrl": "",
         "RunRetainDays": 90,
         "WorkerControlPort": 7100,
         "WorkerStreamPort": 7110,

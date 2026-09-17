@@ -462,8 +462,13 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
   verdict: pass = 기대치 전부 만족 ∧ 실패 인스턴스 0 ∧ 시도 ≥ 1 · fail · aborted(운영자 중단) · error(컴파일/워커 오류).
 - 관리 store 리스: 컨트롤러는 기동 시 자기 서브트리 `modules/oam-cims-tester/runtime` 에 소유권 리스(flock)를 잡는다 — base `oam` 이 잡는 루트와
   별개(I5 단일 소유, oam_ha §4.4 단일 writer). 못 잡으면 read-only 로 떠서 토폴로지 저장·run 색인이 `not_lease_owner` 로 거절된다.
-- 워커 발견: 컨트롤러는 자기 base 의 배포 목록(`GET /api/v1/deployments`, 패키지 `cims-tester-worker`)에서 워커 주소를 자동 수집한다.
-  토폴로지의 `workers` 항목(호스트 참조 + 포트)은 이를 덮어쓰거나 보탠다(agent 없는 호스트).
+- 워커 발견: `GET /workers/discovered` — 컨트롤러가 **자기 base OAM**(`Tester.BaseOamUrl`, 비면 기능만 꺼진다)의 배포 목록에서 패키지
+  `cims-tester-worker` 를 찾아 `{name, ip, ips[], port, cpus, version, live_state}` 로 낸다(요청한 운영자의 토큰으로 조회). 주소 = agent `ip_address`
+  → 관리망 인터페이스(`mgmt`) → 기본 경로 인터페이스 → 첫 주소, 포트 = 배포 설정 `Server.Port`(없으면 7100). 토폴로지 편집기 팔레트의
+  **발견된 워커**를 누르면 같은 ip 의 호스트 위에(없으면 호스트를 만들어) 워커가 들어간다. 토폴로지의 `workers` 가 정본이고 발견은 입력 보조다
+  (agent 없는 호스트의 워커는 손으로 적는다).
+- 워커 분산: 풀 하나 = 워커 하나이므로 워커마다 풀 + 같은 `group`(§4). **신원은 워커마다 달라야 한다** — 같은 creds 파일을 `source.offset`/`count`
+  로 구간을 나누거나 파일을 나눈다. 같은 신원이 두 UE 풀에 겹치면 컴파일 오류다(등록 바인딩이 서로를 덮는다). 율은 cpus 가중으로 나눈다.
 
 ### 6.2 컨트롤러 ↔ base OAM (서비스 모듈 규약)
 
@@ -494,7 +499,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 | 보고서 | 결과 화면의 [인쇄] = `window.print()` — 검증 콘솔과 같은 인쇄 규약(셸·툴바·레일·이벤트 표 숨김, `.tester-report` 만 A4, 구획 단위 쪽 나눔), 표지에 발행 일시. Markdown 은 CLI `report` 와 같은 본문 |
 
 컴포넌트는 팩 안 `components/`(MiniChart · LiveCharts · WorkerFleet · LiveSidebar · RunLivePanel · RunIndex · RunStartDialog · PlanPreview · SipDrawer · RunReport · YamlEditor(`onValid(ok, doc)`) · ProfileCurve · ListRail(레코드 레일 + RailRow/RailGroup) · topology/TopologyCanvas · scenario/ScenarioCanvas), 모델·표시 헬퍼 `lib/`(fmt.ts = RFC 6076 라벨·판정 톤·수치 형식 · metrics.ts = 기대치 임계·라이브 누계 판정·절차 진행·SDT/예상 소요(컨트롤러 규칙과 동일) · topology-model.ts · scenario-model.ts · use-history.ts = 문서 이력·Ctrl+Z/Y·이탈 경고 · use-drawer-height.ts = 드로어 높이). 차트는 라이브러리 없이 SVG(`--chart-N` 토큰), 지표별 소형 차트는 자기 축. 배지는 크기 오버라이드 없이 계약(12px SemiBold) 그대로(console_design_system §7-31).
-**남은 것** = 대상 관측 후속(호스트 SSH 관측 — 프로세스별 CPU·RSS·모듈 로그 `log_errors`) · cims-verify S3/S6 시나리오 항목의 `cims-tester` 호출 이전 · 워커 자동 발견(agent 배포 목록) · 미디어 평면 후속(AMR-WB 샘플 동봉·비디오 송출 제어·미디어 전담 워커 분리).
+**남은 것** = 대상 관측 후속(호스트 SSH 관측 — 프로세스별 CPU·RSS·모듈 로그 `log_errors`) · cims-verify S3/S6 시나리오 항목의 `cims-tester` 호출 이전 · 미디어 평면 후속(AMR-WB 샘플 동봉·비디오 송출 제어·미디어 전담 워커 분리).
 
 **메뉴 자리** — 관리 영역(`admin`)에 그룹 `test`(**시험**)를 새로 둔다. ITU-T M.3400 Maintenance 기능군의 *Testing* 에
 해당하며, 릴리스 그룹(SW Mgmt — 검증/패키징)과 다르다: 검증은 배포 게이트, 시험은 부하·피어 시험 도구다.
@@ -562,7 +567,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 | 단계 | 내용 | 산출물 · 완료 기준 | 규모 |
 |---|---|---|---|
 | **A. 계약 + base 확장** | 시나리오/프로파일 YAML 스키마, 워커 제어·관측 JSONL 스키마, 지표 정의표(§5), 목표 규모(§11) 확정. base 확장 셋 — ① 게이트웨이 SSE 통과(§6.2) ② 콘솔 번들 하나 + nav 섹션 서비스 게이팅(§7) ③ nav 그룹 `test` | 본 문서 갱신 + `ems/tester/oam/schema/*.json`(스키마 단위시험). base 확장은 기존 콘솔·oam-svc 동작 무변경으로 S3 게이트 PASS | M |
-| **B. UE 축 + 컨트롤러 최소** | `libcsim` 추출(SimSession/RtpThread → 라이브러리, cspsim 은 그 위 CLI), `cims-tester-worker` ue 풀·단계 실행기·1초 집계 스트림, `oam-cims-tester` run/저장/CLI + pkg·config_template·self-register, 프로파일 constant·step(+ramp·soak·burst) | **구현 반영** — 개발서버 CSP(UDP 15060) 상대로 `cims-tester run VOLTE-CALL-BASIC --topology … --instances 3` 완주(SER 100 %, RRD p95 5 ms, SRD ≈ after_ms+20 ms, RTP 손실 0, 보고서·기대치 판정), 워커 단독 4쌍 1 SApS 지속. 남은 것 = 부하 강화 문서 시험(4 cps/HT20, 10 cps/HT5) 재현 실측·워커 2대 분산 실측·`db` 신원 원천(대상 CSC 위임)·워커 자동 발견(base 배포 목록)·대상 관측(`stop_on.target_cpu_pct`) | L |
+| **B. UE 축 + 컨트롤러 최소** | `libcsim` 추출(SimSession/RtpThread → 라이브러리, cspsim 은 그 위 CLI), `cims-tester-worker` ue 풀·단계 실행기·1초 집계 스트림, `oam-cims-tester` run/저장/CLI + pkg·config_template·self-register, 프로파일 constant·step(+ramp·soak·burst) | **구현 반영** — 개발서버 CSP(UDP 15060) 상대로 `cims-tester run VOLTE-CALL-BASIC --topology … --instances 3` 완주(SER 100 %, RRD p95 5 ms, SRD ≈ after_ms+20 ms, RTP 손실 0, 보고서·기대치 판정), 워커 단독 4쌍 1 SApS 지속. 워커 2대 분산 실측(같은 호스트 워커 둘, creds 40 을 offset 으로 20/20): constant 2 SApS × 40 s·HT 4 → 시도 78 = 워커당 39, SER 100 %, 등록 40, skipped 0, RTP 손실 0. 남은 것 = 부하 강화 문서 시험(4 cps/HT20, 10 cps/HT5) 재현 실측(개발서버 CMP relay 포트 풀이 20 세션이라 동시 20 을 넘는 부하는 대상 설정 변경 뒤)·`db` 신원 원천(대상 CSC 위임) | L |
 | **C. 피어 축 — ibcf** | peer 엔진(고정 수신점·신원 범위·응답 정책·무응답) + `ibcf` 프로파일, 대상 CSP 컬렉션 시드/복원, 트렁크 in/out·route_set failover·ACL 시나리오 | **구현 반영** — `CsimPeer` 엔진·워커 peer 풀·컨트롤러 시드/복원(§3.2). 개발서버 CSP 상대 실측: `TRUNK-IBCF-OUTBOUND`(가입자→피어, SRD p95 820 ms, RTP 손실 0)·`TRUNK-IBCF-ACL-DENY`(피어링 접속점 ACL → 403) **pass**, `TRUNK-IBCF-INBOUND`(피어→피어링 접속점→가입자, SRD p95 1185 ms, RTP 손실 0) **pass**(CSP 피어링 접속점 인증 생략 반영본), `TRUNK-IBCF-FAILOVER` 는 CSP 헬스체크 부재로 우선(무응답) 피어에서 Timer B — §12 확인. 남은 것 = 오류 주입(응답 지연·특정 코드·재전송 유실)·TLS 상호인증·THIG 흔적 | M |
 | **D. 피어 축 — pbx · mgcf** | 트렁크 REGISTER, DID/내선, 183 early media·PRACK, hold/resume, REFER 발신, RFC 4733 DTMF, Q.850 Reason, G.711 | **구현 반영**(§3.2 pbx·mgcf) — 시나리오 `trunk/pbx_{outbound,inbound,dtmf,hold_resume,transfer,register}.yaml`·`trunk/mgcf_{outbound,inbound,reject_q850}.yaml`. 개발서버 실측 7 pass / 3 fail — fail 은 전부 CIMS 측(§12: Reason 미투과·503→603·트렁크 계정). 남은 것 = UE 측 183(실 단말 착신 모사 아님)·in-band DTMF·G.722·TLS 상호인증 | M |
 | **E. 콘솔 팩** | §7 화면 전부, SSE 라이브, 비교·보고서. cims-verify S3/S6 시나리오 항목의 `cims-tester` 호출 이전 | **구현 반영**(§7 표) — 컨트롤러 = 토폴로지 v2 모델·v1 승계·계획 미리보기(`runs/plan`=`compile-check`)·`vocab`·`hold`·`hist`·`sip/{call_id}`·`target-alerts`·색인 필터·`compare?format=`·`during` 평탄화·연결 검사 `노드:수신점`; 콘솔 팩 = 토폴로지 캔버스 편집기·시나리오 시퀀스 캔버스 편집기·실행(워커 띠·단계 사다리·종료 조건·소형 차트·절차 진행·SIP 드로어·색인 필터·계획 미리보기)·결과(run 레일·판정 요약·히스토그램·여유 막대·알람 마커·대상 증거)·비교(run 카드·Δ 매트릭스·t+0 겹침·기대치 diff·추세). 개발서버 실측: 연결 검사 CSP OPTIONS 200 OK / TLS 1.3 / 워커 health, `VOLTE-CALL-BASIC` 단발 3 인스턴스 완주(pass, SER 100 %), 단위시험 73 건(S1-UNIT-TESTER PASS), 콘솔 tsc·vite build 통과. 남은 것 = §7 '남은 것' + 콘솔 화면 실기 확인(oam 패키지 재빌드·배포) | L |

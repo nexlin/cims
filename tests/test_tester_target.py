@@ -119,7 +119,7 @@ def setUpModule():
     R.RUNS.init(cfg)
     os.makedirs(os.path.join(S.user_scenarios_dir(), 'creds'), exist_ok=True)
     with open(os.path.join(S.user_scenarios_dir(), 'creds', 'ue.jsonl'), 'w') as f:
-        for i in range(4):
+        for i in range(16):     # 워커마다 4 신원 — 풀이 source.offset 으로 구간을 나눠 쓴다
             f.write(json.dumps({'user': f'+8213000000{i:02d}', 'authId': f'450338213000000{i:02d}', 'ha1': 'ab' * 16}) + '\n')
     os.environ['UT_OAM_TOKEN'] = 'tok'
 
@@ -142,7 +142,7 @@ def _topology(workers, oam_url=None, peering=True, dead=True):
     wrows = [{'name': w.name, 'host': 'hw', 'port': w.port, 'cpus': 1} for w in workers] or [{'name': 'w1', 'host': 'hw', 'port': 7100}]
     first = wrows[0]['name']
     pools = {f"ue_{w['name']}": {'kind': 'ue', 'worker': w['name'], 'group': 'volte_ue', 'access': 'csp',
-                                 'source': {'creds': 'creds/ue.jsonl'}} for w in wrows}
+                                 'source': {'creds': 'creds/ue.jsonl', 'offset': 4 * i, 'count': 4}} for i, w in enumerate(wrows)}
     if peering:
         pools.update({
             'peer_kt': {'kind': 'peer', 'worker': first, 'peering': 'csp', 'profile': 'ibcf', 'bind': {'port': 5080, 'protocol': 'udp'},
@@ -320,6 +320,30 @@ class Observe(unittest.TestCase):
                              [('recording_created', 1, True), ('alarm_raised', 1, False), ('event_logged', 1, True), ('log_errors', None, None)])
         finally:
             os.environ.pop('UT_OBS_TOKEN', None)
+            oam.srv.shutdown()
+
+
+class WorkerDiscovery(unittest.TestCase):
+    def test_discover_deployed_workers_from_base_oam(self):
+        """base OAM 배포 목록의 cims-tester-worker → 주소(agent ip)·포트(배포 설정 Server.Port, 없으면 7100)·cpus."""
+        from services import tester_workers as TW
+        oam = FakeOam()
+        oam.extra['/api/v1/agents'] = {'items': [{'id': 5, 'name': 'gen-a', 'hostname': 'gena', 'ip_address': '10.0.0.61', 'cpu_cores': 8},
+                                                 {'id': 6, 'name': 'gen-b', 'hostname': 'genb', 'ip_address': '', 'cpu_cores': 4,   # 주소 미기재 → 관리망 인터페이스
+                                                  'interfaces': [{'name': 'e0', 'ip': '203.0.113.9'}, {'name': 'e1', 'ip': '10.0.0.62', 'mgmt': True}],
+                                                  'routes': [{'dst': 'default', 'dev': 'e0', 'is_default': True}]}]}
+        oam.extra['/api/v1/deployments'] = {'items': [
+            {'id': 1, 'package_name': 'csp', 'agent_id': 5},
+            {'id': 2, 'package_name': 'cims-tester-worker', 'agent_id': 5, 'agent_name': 'gen-a', 'package_version': '0.1.2', 'live_state': 'up', 'config': {}},
+            {'id': 3, 'package_name': 'cims-tester-worker', 'agent_id': 6, 'agent_name': 'gen-b', 'package_version': '0.1.2', 'live_state': 'down',
+             'config': {'Server.Port': 7105}}]}
+        try:
+            rows = TW.discover_deployed(oam.url, 'tok')
+            self.assertEqual([(r['name'], r['ip'], r['port'], r['cpus'], r['live_state']) for r in rows],
+                             [('gen-a', '10.0.0.61', 7100, 8, 'up'), ('gen-b', '10.0.0.62', 7105, 4, 'down')])
+            with self.assertRaises(T.TargetError):
+                TW.discover_deployed(oam.url, 'wrong-token')
+        finally:
             oam.srv.shutdown()
 
 

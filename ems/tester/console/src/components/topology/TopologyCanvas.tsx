@@ -4,7 +4,7 @@
 // (끌기 중 연속 변경은 transient=true, 놓으면 onCommit — 페이지 이력이 한 걸음으로 묶는다; 영역 자동 확장은 onLayout — 이력에 안 쌓는다).
 // 줌(Ctrl+휠·버튼·화면 맞춤)은 스테이지 transform 하나 — 좌표 계산은 전부 zoom 으로 나눈다. 팔레트는 접을 수 있고 클릭 = 선택한 상자 위에 추가.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Server, Cpu, Radio, Waves, Users, Activity, Database, Smartphone, Globe, Phone, Router, Terminal, ChevronDown, ChevronRight, Trash2, Copy, Plus, PanelLeftClose, PanelLeftOpen, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
+import { Server, Cpu, Radio, Waves, Users, Activity, Database, Smartphone, Globe, Phone, Router, Terminal, ChevronDown, ChevronRight, Trash2, Copy, Plus, RefreshCw, PanelLeftClose, PanelLeftOpen, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
 import { Badge } from '@core/components/ui/badge'
 import { Input } from '@core/components/ui/input'
@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { useToast } from '@core/components/Toast'
 import { useConfirm } from '@core/components/custom/confirm'
+import { testerApi, type DiscoveredWorker } from '@tester/api/tester'
 import type { TopologyDoc, TopoNode, PoolDoc, PeerPoolDoc, UePoolDoc, CheckItem, NodeRole, Transport, WorkerRow, SipListener } from '@tester/api/tester'
 import * as M from '@tester/lib/topology-model'
 import type { Focus, Issue, PaletteKind, Pos } from '@tester/lib/topology-model'
@@ -252,6 +253,19 @@ export default function TopologyCanvas({ doc, onChange, onLayout, onCommit, chec
 
   const startNew = (kind: PaletteKind) => (e: React.PointerEvent) => { if (!canWrite) return; e.preventDefault(); setDrag({ type: 'new', kind, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY }) }
   /** 팔레트 클릭 — 선택한 카드가 속한 호스트/워커(없으면 첫 것) 위에, 그 영역의 카드 아래 빈 자리에 만든다 */
+  // 발견된 워커 — 자기 base OAM 배포 목록의 cims-tester-worker (GET /workers/discovered). 누르면 호스트(같은 ip 가 없을 때)+워커를 넣는다
+  const [discovered, setDiscovered] = useState<{ items: DiscoveredWorker[]; note?: string | null } | null>(null)
+  const loadDiscovered = useCallback(() => { setDiscovered(null); testerApi.discoveredWorkers().then(setDiscovered).catch(e => setDiscovered({ items: [], note: String(e) })) }, [])
+  useEffect(() => { loadDiscovered() }, [loadDiscovered])
+  const addDiscovered = (w: DiscoveredWorker) => {
+    if (!canWrite) return
+    let res: ReturnType<typeof M.addDiscoveredWorker> = null
+    mutate(d => { res = M.addDiscoveredWorker(d, w) })
+    const r = res as ReturnType<typeof M.addDiscoveredWorker>
+    if (!r) { show('agent 주소를 몰라 넣을 수 없습니다', 'err'); return }
+    setSel({ kind: 'worker', id: r.worker })
+    show(r.existed ? `이미 있는 워커 ${r.worker}` : `워커 ${r.worker} 추가${r.madeHost ? ` (호스트 ${r.madeHost} 생성)` : ''}`, 'ok')
+  }
   const clickAdd = (kind: PaletteKind) => {
     if (!canWrite) return
     const s = sel
@@ -369,7 +383,7 @@ export default function TopologyCanvas({ doc, onChange, onLayout, onCommit, chec
     let body: ReactNode
     if (M.isPeer(p)) { const idn = p.identities ?? {}; const rng = idn.e164_range ? `${idn.e164_range[0]}…${idn.e164_range[1].slice(-4)}` : idn.did_range ? `${idn.did_range[0]}…${idn.did_range[1].slice(-3)}` : '신원 없음'
       body = <><Badge variant={p.answer === 'silent' ? 'dangerSoft' : 'warningSoft'}>{p.profile}{p.answer === 'silent' ? ' · silent' : ''}</Badge><b className="truncate">{pn}</b><span className="truncate font-mono text-[10px] text-muted-foreground">{p.bind.ip ? p.bind.ip : ''}:{p.bind.port}/{p.bind.protocol ?? 'udp'} → {p.peering || '?'}{p.listener ? `:${p.listener}` : ''} · {rng}</span></> }
-    else { const src = 'db' in p.source ? `${p.source.table.replace('_subscriptions', '')} ${p.source.offset ?? 0}+${p.source.count}` : `creds${p.source.count ? ` ${p.source.count}` : ''}`
+    else { const src = 'db' in p.source ? `${p.source.table.replace('_subscriptions', '')} ${p.source.offset ?? 0}+${p.source.count}` : `creds${p.source.offset ? ` ${p.source.offset}+` : ' '}${p.source.count ?? '전체'}`
       body = <><Badge variant={p.kind === 'ue' ? 'infoSoft' : 'successSoft'}>{p.kind}</Badge>{group}<b className="truncate">{pn}</b><span className="truncate font-mono text-[10px] text-muted-foreground">→ {p.access || '?'}{p.listener ? `:${p.listener}` : ''} {M.poolTransport(doc, p)}{p.srtp && p.srtp !== 'off' ? '+srtp' : ''} · {src}</span></> }
     return (
       <div data-pool={pn} onPointerDown={startPool(pn)} title={pn}
@@ -437,6 +451,22 @@ export default function TopologyCanvas({ doc, onChange, onLayout, onCommit, chec
               ))}
             </div>
           ))}
+          <div className="mb-2">
+            <div className="flex items-center gap-1 py-1 text-[11px] font-semibold text-muted-foreground">발견된 워커<Button variant="ghost" size="iconSm" className="ml-auto" onClick={loadDiscovered} title="base OAM 배포 목록 다시 읽기"><RefreshCw size={12} /></Button></div>
+            {discovered === null ? <div className="text-[10px] text-muted-foreground">읽는 중…</div>
+              : discovered.items.length === 0 ? <div className="text-[10px] leading-relaxed text-muted-foreground">{discovered.note ?? 'base OAM 에 배포된 cims-tester-worker 가 없습니다'}</div>
+              : discovered.items.map(w => {
+                const has = !!w.ip && doc.workers.some(x => doc.hosts[x.host]?.ip === w.ip && (x.port ?? 7100) === w.port)
+                return (
+                  <button key={`${w.deployment_id}`} disabled={!canWrite || has || !w.ip} onClick={() => addDiscovered(w)}
+                          title={has ? '이미 토폴로지에 있습니다' : !w.ip ? 'agent 주소를 모릅니다' : '누르면 호스트(없으면 생성)와 워커를 넣습니다'}
+                          className="mb-1 flex w-full items-center gap-2 rounded-sm border border-border bg-muted px-2 py-1.5 text-left enabled:hover:border-primary disabled:opacity-60">
+                    <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${w.live_state === 'up' ? 'bg-success' : 'bg-muted-foreground'}`} />
+                    <span className="min-w-0"><b className="block truncate">{w.name}</b><span className="block truncate font-mono text-[10px] text-muted-foreground">{w.ip ?? '?'}:{w.port} · v{w.version ?? '?'}{has ? ' · 있음' : ''}</span></span>
+                  </button>
+                )
+              })}
+          </div>
           <div className="mt-2 rounded-sm border border-border p-2 text-[11px] leading-relaxed text-muted-foreground">
             <b>놓는 자리가 소속을 정합니다.</b> 호스트 영역 안에 워커·대상 노드, 워커 카드 안에 풀. 빈 곳에 놓으면 담을 상자를 만들고, 팔레트를 <b>클릭</b>하면 선택한 상자 위에 만듭니다. 선은 모델에서 나옵니다 — 풀 카드의 오른쪽 <b>앵커 점을 끌어 수신점 행</b>에 놓으면 그 수신점이 접속점(UE — access 행만)·다음 홉(피어 — 어느 행이든, CSP 는 Route 로 신뢰)·신원 원천(DB/API 행)이 됩니다. 풀 카드를 SIP 노드 위에 놓으면 기본 수신점으로 갑니다. 수신점은 노드 속성에서 N 개(IP/포트/프로토콜/edge) 둡니다. <kbd>Del</kbd> 삭제 · <kbd>Ctrl+D</kbd> 풀/노드 복제 · <kbd>Ctrl+Z</kbd>/<kbd>Ctrl+Y</kbd> 실행취소/다시실행 · <kbd>Ctrl+휠</kbd> 줌 · <kbd>Esc</kbd> 해제
           </div>
@@ -809,7 +839,7 @@ function Inspector({ doc, sel, setSel, mutate, issues, canWrite, onDelete, onDup
         <F label="가입 테이블"><Sel value={u.source.table} disabled={ro} options={['volte_subscriptions', 'voip_subscriptions', 'ptt_subscriptions'].map(v => ({ v }))} onChange={v => PU(x => { if ('db' in x.source) x.source.table = v })} /></F>
         <div className="grid grid-cols-2 gap-2"><F label="offset"><Txt value={u.source.offset ?? 0} mono type="number" disabled={ro} onCommit={v => PU(x => { if ('db' in x.source) x.source.offset = num(v) ?? 0 })} /></F><F label="count"><Txt value={u.source.count} mono type="number" disabled={ro} onCommit={v => PU(x => { if ('db' in x.source) x.source.count = num(v) ?? 1 })} /></F></div>
         <span className="text-muted-foreground">DB 원천은 컨트롤러 후속(지금은 creds-from-db 로 JSONL 을 만들어 creds 로) · 워커 둘에 나누려면 풀 둘을 offset 으로 잘라 같은 group</span></>
-        : <><F label="creds JSONL" help="scenarios/·DataDir 상대 또는 절대 경로 (cims-tester creds-from-db)"><Txt value={'creds' in u.source ? u.source.creds : ''} mono disabled={ro} onCommit={v => PU(x => { if ('creds' in x.source) x.source.creds = v })} /></F><F label="count"><Txt value={'creds' in u.source ? u.source.count : undefined} mono type="number" placeholder="파일 전체" disabled={ro} onCommit={v => PU(x => { if ('creds' in x.source) x.source.count = num(v) })} /></F></>}
+        : <><F label="creds JSONL" help="scenarios/·DataDir 상대 또는 절대 경로 (cims-tester creds-from-db)"><Txt value={'creds' in u.source ? u.source.creds : ''} mono disabled={ro} onCommit={v => PU(x => { if ('creds' in x.source) x.source.creds = v })} /></F><F label="offset" help="파일의 몇 번째 신원부터 — 워커 둘에 나누려면 풀 둘을 offset/count 로 잘라 같은 group (겹치면 컴파일 오류)"><Txt value={'creds' in u.source ? u.source.offset : undefined} mono type="number" placeholder="0" disabled={ro} onCommit={v => PU(x => { if ('creds' in x.source) { if (v === '' || Number(v) <= 0) delete x.source.offset; else x.source.offset = Number(v) } })} /></F><F label="count"><Txt value={'creds' in u.source ? u.source.count : undefined} mono type="number" placeholder="파일 전체" disabled={ro} onCommit={v => PU(x => { if ('creds' in x.source) x.source.count = num(v) })} /></F></>}
     </Sec>
     {p.kind === 'ue' && <Sec title="등록·시그널링"><div className="grid grid-cols-2 gap-2"><F label="register_expires"><Txt value={u.register_expires ?? 3600} mono type="number" disabled={ro} onCommit={v => PU(x => { x.register_expires = num(v) ?? 3600 })} /></F><div className="mt-4 flex flex-col gap-1"><label className="inline-flex items-center gap-1"><Checkbox checked={!!u.prack} disabled={ro} onCheckedChange={v => PU(x => { x.prack = v === true })} /> 100rel/PRACK</label><label className="inline-flex items-center gap-1"><Checkbox checked={u.dtmf !== false} disabled={ro} onCheckedChange={v => PU(x => { x.dtmf = v === true })} /> RFC 4733 DTMF</label></div></div></Sec>}
     {delBtn}

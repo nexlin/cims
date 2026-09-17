@@ -20,6 +20,13 @@
           "description": "creds JSONL 경로(cspsim -creds 승계) — scenarios/ 상대 또는 절대",
           "title": "Creds",
           "type": "string"
+        },
+        "offset": {
+          "default": 0,
+          "description": "파일의 몇 번째 신원부터(0 기준) — 워커 여럿이 같은 creds 파일의 다른 구간을 나눠 쓸 때",
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
         }
       },
       "required": [

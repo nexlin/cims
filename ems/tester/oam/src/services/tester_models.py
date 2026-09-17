@@ -234,6 +234,7 @@ class DbSource(_Strict):
 
 class CredsSource(_Strict):
     creds: str = Field(description='creds JSONL 경로(cspsim -creds 승계) — scenarios/ 상대 또는 절대')
+    offset: int = Field(default=0, ge=0, description='파일의 몇 번째 신원부터(0 기준) — 워커 여럿이 같은 creds 파일의 다른 구간을 나눠 쓸 때')
     count: Optional[int] = Field(default=None, ge=1)
 
 

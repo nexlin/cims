@@ -21,6 +21,7 @@
   POST /runs/<id>/rate              {rate_saps} 율 변경(진행 중)
   POST /runs/<id>/hold              {hold: bool} 단계 고정/재개 — 프로파일 시계 정지, 율 유지
   GET  /runs/<id>/hist?timer=       지연 지표 버킷 분포(로그 상한) + p50/p95/p99 — 행 펼침 히스토그램
+  GET  /workers/discovered          자기 base OAM 배포 목록의 cims-tester-worker (Tester.BaseOamUrl 필요)
   GET  /runs/<id>/target-series     대상 호스트 자원 시계열(agent 별 cpu_pct·mem_pct — 대상 관측 §5)
   GET  /runs/<id>/sip               SIP 덤프 목록(call_id·bytes·messages)
   GET  /runs/<id>/sip/<call_id>     그 Call-ID 의 실패 이벤트 + SIP 덤프(runs/<id>/sip/<call_id>.log 가 있을 때)
@@ -67,10 +68,12 @@ from starlette.responses import PlainTextResponse
 
 _BASE = '/api/v1/tester'
 _VERSION = '0.1.0'
+_BASE_OAM_URL = ''      # Tester.BaseOamUrl — 워커 발견(GET /workers/discovered)이 부르는 자기 base OAM
 
 
 def init(component_root: str, config: dict) -> None:
-    global _VERSION
+    global _VERSION, _BASE_OAM_URL
+    _BASE_OAM_URL = str(((config or {}).get('Tester') or {}).get('BaseOamUrl') or '').strip()
     store.init(component_root, config)
     try:
         with open(os.path.join(component_root, 'pkg.json'), 'r', encoding='utf-8') as f:
@@ -437,6 +440,16 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
                             pass
                 return _json(200, {'events': rows})
 
+    if head == 'workers' and len(parts) == 2 and parts[1] == 'discovered' and method == 'GET':
+        if not _BASE_OAM_URL:
+            return _json(200, {'items': [], 'note': 'Tester.BaseOamUrl 이 비어 있다 — 자기 base OAM 주소(예: https://127.0.0.1:4445)를 배포 설정에 준다'})
+        tok = _bearer(handler_args)
+        try:
+            items = await asyncio.get_running_loop().run_in_executor(
+                None, tester_workers.discover_deployed, _BASE_OAM_URL, tok or '')
+        except Exception as e:
+            return _json(200, {'items': [], 'note': f'base OAM 조회 실패 — {e}'})
+        return _json(200, {'items': items, 'note': None})
     if head == 'workers' and method == 'GET':
         q = handler_args.query_params or {}
         topos = store.list_topologies()
@@ -794,6 +807,9 @@ TESTER_API_DOCS = [
     {'id': 'tester.run.sip', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs/{{id}}/sip/{{call_id}}',
      'summary': 'Call-ID 하나의 실패 이벤트 + SIP 덤프(계측기 호스트 runs/<id>/sip/<call_id>.log 가 있을 때)',
      'response': '{id, call_id, events[], dump|null, note}', 'auth': _AUTH_MON},
+    {'id': 'tester.workers.discovered', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/workers/discovered',
+     'summary': '자기 base OAM 의 배포 목록에서 찾은 cims-tester-worker — 토폴로지 편집기의 "발견된 워커"(주소 = agent ip, 포트 = 배포 설정 Server.Port)',
+     'response': '{items: [{name, agent_id, hostname, ip, port, cpus, version, live_state, deployment_id}], note}', 'auth': _AUTH_MON},
     {'id': 'tester.run.target_series', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs/{{id}}/target-series',
      'summary': 'run 동안 모은 대상 호스트 자원 시계열 — 대상 OAM agent heartbeat(cpu_pct·mem_pct), stop_on.target_cpu_pct 의 원천',
      'response': '{id, agents: {이름: {t[], cpu_pct[], mem_pct[]}}}', 'auth': _AUTH_MON},

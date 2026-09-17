@@ -106,7 +106,7 @@ export interface TopoNode {
 export interface TopoPoolBase { worker: string; group?: string }
 export interface UePoolDoc extends TopoPoolBase {
   kind: 'ue'; access: string; listener?: string
-  source: { creds: string; count?: number } | { db: string; table: string; offset?: number; count: number }
+  source: { creds: string; offset?: number; count?: number } | { db: string; table: string; offset?: number; count: number }
   transport?: Transport; srtp?: 'off' | 'optional' | 'required'; register_expires?: number; prack?: boolean; dtmf?: boolean
 }
 export interface PeerPoolDoc extends TopoPoolBase {
@@ -117,7 +117,7 @@ export interface PeerPoolDoc extends TopoPoolBase {
   seed?: { enabled?: boolean; route_set?: string; distribution?: string; priority?: number; weight?: number; acl?: 'allow' | 'deny' }
 }
 export interface RealUePoolDoc extends TopoPoolBase {
-  kind: 'real-ue'; access: string; listener?: string; source: { creds: string; count?: number }; transport?: Transport; srtp?: 'off' | 'optional' | 'required'
+  kind: 'real-ue'; access: string; listener?: string; source: { creds: string; offset?: number; count?: number }; transport?: Transport; srtp?: 'off' | 'optional' | 'required'
 }
 export type PoolDoc = UePoolDoc | PeerPoolDoc | RealUePoolDoc
 export interface TopoLayout { regions: Record<string, { x: number; y: number; w: number; h: number }>; items: Record<string, { x: number; y: number }> }
@@ -346,6 +346,7 @@ export interface ScenarioVocab {
 export interface HistResult { id: string; timer: string; count: number; mean?: number | null; min?: number | null; max?: number | null; p50?: number | null; p95?: number | null; p99?: number | null; buckets: { ub: number | null; count: number }[] }
 export interface EvidenceResult { kind: string; code?: string | null; min?: number | null; max?: number | null; observed: number | null; ok: boolean | null; why?: string | null }
 export interface TargetSeries { id: string; agents: Record<string, { t: number[]; cpu_pct: (number | null)[]; mem_pct: (number | null)[] }> }
+export interface DiscoveredWorker { name: string; agent_id?: number; hostname?: string | null; ip?: string | null; port: number; ips?: string[]; cpus?: number | null; version?: string | null; live_state?: string | null; deployment_id?: number }
 export interface SipDumpRow { call_id: string; bytes: number; messages: number }
 export interface CallDump { id: string; call_id: string; events: RunEvent[]; dump: string | null; note?: string | null }
 export interface TargetAlerts { id: string; alerts: Record<string, unknown>[]; window?: [string, string]; oam?: string; note?: string }
@@ -399,6 +400,7 @@ export const testerApi = {
   plan: (body: PlanRequest) => api.post<PlanResult>('/tester/runs/plan', body),
   holdRun: (id: string, hold: boolean) => api.post<{ id: string; hold: boolean }>(`/tester/runs/${enc(id)}/hold`, { hold }),
   hist: (id: string, timer: string) => api.get<HistResult>(`/tester/runs/${enc(id)}/hist?timer=${enc(timer)}`),
+  discoveredWorkers: () => api.get<{ items: DiscoveredWorker[]; note?: string | null }>('/tester/workers/discovered'),
   targetSeries: (id: string) => api.get<TargetSeries>(`/tester/runs/${enc(id)}/target-series`),
   sipDumps: (id: string) => api.get<{ id: string; dumps: SipDumpRow[] }>(`/tester/runs/${enc(id)}/sip`),
   callDump: (id: string, callId: string) => api.get<CallDump>(`/tester/runs/${enc(id)}/sip/${enc(callId)}`),

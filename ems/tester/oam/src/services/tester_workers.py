@@ -110,6 +110,48 @@ class WorkerClient:
                 'health': self.health, 'error': self.health_error, 'up': self.health is not None}
 
 
+def _agent_ip(a: dict) -> tuple:
+    """agent 의 워커 제어 주소 — ① `ip_address` ② 관리망 인터페이스(`mgmt`) ③ 기본 경로 인터페이스 ④ 주소가 있는 첫 인터페이스.
+    반환 (고른 주소, 후보 전부) — 컨트롤러가 워커 제어 포트로 닿는 망은 관리망이 기본이다."""
+    ifs = [i for i in (a.get('interfaces') or []) if isinstance(i, dict) and i.get('ip')]
+    ips = [str(i['ip']) for i in ifs]
+    if a.get('ip_address'):
+        return str(a['ip_address']), ips
+    for i in ifs:
+        if i.get('mgmt') or i.get('role') == 'mgmt':
+            return str(i['ip']), ips
+    dev = next((r.get('dev') for r in (a.get('routes') or []) if isinstance(r, dict) and r.get('is_default')), None)
+    for i in ifs:
+        if dev and i.get('name') == dev:
+            return str(i['ip']), ips
+    return (ips[0] if ips else ''), ips
+
+
+def discover_deployed(base_url: str, token: str) -> List[dict]:
+    """자기 base OAM 의 배포 목록에서 `cims-tester-worker` 를 찾는다(§6.1 워커 발견) — agent 가 배포·감독하는 워커의 주소를 손으로 옮겨 적지
+    않게. 반환 = [{name, agent_id, hostname, ip, ips[], port, cpus, version, live_state, deployment_id}] — 토폴로지 편집기가 호스트+워커로 넣는다.
+    주소 = `_agent_ip`(ip_address → 관리망 인터페이스 → 기본 경로 → 첫 주소), 제어 포트 = 배포 설정 overlay `Server.Port`(없으면 7100)."""
+    from services import tester_target
+    client = tester_target.OamClient(base_url.rstrip('/'), token)
+    st, out = client._req('GET', '/api/v1/agents')
+    if st != 200:
+        raise tester_target.TargetError(f'base OAM agents {st}: {out}')
+    agents = {int(a['id']): a for a in ((out or {}).get('items') or (out or {}).get('agents') or []) if a.get('id') is not None}
+    rows = []
+    for d in client.deployments():
+        if str(d.get('package_name') or '') != 'cims-tester-worker':
+            continue
+        a = agents.get(int(d.get('agent_id') or 0)) or {}
+        cfg = d.get('config') if isinstance(d.get('config'), dict) else {}
+        port = cfg.get('Server.Port') or ((cfg.get('Server') or {}).get('Port') if isinstance(cfg.get('Server'), dict) else None) or 7100
+        ip, ips = _agent_ip(a)
+        rows.append({'name': str(d.get('agent_name') or a.get('name') or f"agent{d.get('agent_id')}"),
+                     'agent_id': d.get('agent_id'), 'hostname': a.get('hostname'), 'ip': ip, 'ips': ips,
+                     'port': int(port), 'cpus': a.get('cpu_cores'), 'version': d.get('package_version'),
+                     'live_state': d.get('live_state'), 'deployment_id': d.get('id')})
+    return rows
+
+
 def discover(topology_doc: dict) -> List[WorkerClient]:
     """토폴로지(v2) 의 workers[] → 클라이언트. url = http://<hosts[host].ip>:<port> 파생(§4). host 가 없는 항목은 건너뛴다."""
     out = []

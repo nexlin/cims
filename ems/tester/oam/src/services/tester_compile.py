@@ -82,6 +82,8 @@ def load_identities(pool_name: str, pool_doc: dict) -> List[dict]:
                            f'creds JSONL 을 만들어 source.creds 로 지정한다')
     path = _creds_path(str(src.get('creds') or ''))
     count = src.get('count')
+    offset = int(src.get('offset') or 0)
+    seen = 0
     ids: List[dict] = []
     with open(path, 'r', encoding='utf-8') as f:
         for n, line in enumerate(f, 1):
@@ -95,6 +97,9 @@ def load_identities(pool_name: str, pool_doc: dict) -> List[dict]:
             user = str(d.get('user') or '')
             if not user:
                 raise CompileError(f'{path}:{n}: user 누락')
+            seen += 1
+            if seen <= offset:
+                continue
             domain = str(d.get('domain') or '')
             ident = {'user': user, 'domain': domain}
             if d.get('authId'):
@@ -111,7 +116,7 @@ def load_identities(pool_name: str, pool_doc: dict) -> List[dict]:
             if count and len(ids) >= int(count):
                 break
     if not ids:
-        raise CompileError(f'{path}: 신원이 없다')
+        raise CompileError(f'{path}: 신원이 없다' + (f' (offset {offset} 뒤)' if offset else ''))
     return ids
 
 
@@ -433,6 +438,15 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
         tot = sum(p['run'].get('max_instances', 0) for p in plan_workers.values())
         first = plan_workers[cand[0].name]['run']
         first['max_instances'] = max(1, first.get('max_instances', 0) + (max_instances - tot))
+    # 같은 신원을 두 풀(= 두 워커)이 쓰면 등록 바인딩이 서로를 덮는다 — 워커마다 다른 신원(creds 파일을 나누거나 source.offset/count)
+    owner: Dict[str, str] = {}
+    for pn, ids in identities.items():
+        if topology.pools[pn].kind != 'ue':
+            continue
+        for it in ids:
+            k = f"{it['user']}@{it['domain']}"
+            if owner.setdefault(k, pn) != pn:
+                raise CompileError(f'신원 {k} 가 풀 {owner[k]} 와 {pn} 에 겹친다 — 워커마다 다른 신원을 준다(source.offset/count 또는 creds 파일 분리)')
     roles_out = {}
     for role, r in scenario.roles.items():
         per = {wn: plan_workers[wn]['roles'][role] for wn in plan_workers}

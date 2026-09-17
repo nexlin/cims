@@ -162,7 +162,7 @@ def setUpModule():
     R.RUNS.init(_CFG)
     os.makedirs(os.path.join(S.user_scenarios_dir(), 'creds'), exist_ok=True)
     with open(os.path.join(S.user_scenarios_dir(), 'creds', 'ue.jsonl'), 'w') as f:
-        for i in range(8):
+        for i in range(32):      # 워커마다 8 신원 — 풀이 source.offset 으로 구간을 나눠 쓴다(같은 신원을 두 워커가 쓰면 컴파일 오류)
             f.write(json.dumps({'user': f'+8213000000{i:02d}', 'authId': f'450338213000000{i:02d}', 'ha1': 'ab' * 16}) + '\n')
 
 
@@ -180,7 +180,7 @@ def _topology(workers):
             'target': {'name': 'sut', 'kind': 'cims', 'nodes': {
                 'csp': {'role': 'sip', 'host': 'h1', 'sip': {'access': {'udp': 5060, 'domains': ['volte.test']}}}}},
             'pools': {f'ue_{w.name}': {'kind': 'ue', 'worker': w.name, 'group': 'volte_ue', 'access': 'csp',
-                                       'source': {'creds': 'creds/ue.jsonl'}} for w in workers}}
+                                       'source': {'creds': 'creds/ue.jsonl', 'offset': 8 * i, 'count': 8}} for i, w in enumerate(workers)}}
 
 
 def _wait_done(d, timeout=20):
@@ -297,6 +297,17 @@ class Compile(unittest.TestCase):
         self.assertTrue(any('시그널링 전용' in w for w in out4['warnings']), out4['warnings'])
         self.assertFalse(out4['media']['uses_rtp'])
         w1.close() if hasattr(w1, 'close') else None
+
+    def test_identity_overlap_across_workers_rejected(self):
+        # 두 워커 풀이 같은 creds 구간을 쓰면 등록 바인딩이 서로를 덮는다 — 컴파일 오류. offset 으로 나누면 통과(test_roles_workers_bindings)
+        from services import tester_workers as TW
+        w1, w2 = FakeWorker('w1'), FakeWorker('w2')
+        topo_doc = _topology([w1, w2])
+        topo_doc['pools']['ue_w2']['source'] = {'creds': 'creds/ue.jsonl', 'offset': 4, 'count': 8}    # [4,12) — ue_w1 [0,8) 과 겹친다
+        sc, _, _ = S.get_scenario('VOLTE-CALL-BASIC')
+        with self.assertRaises(C.CompileError) as cm:
+            C.compile_run('r9', sc, M.Topology.model_validate(topo_doc), topo_doc, None, {'ht': 1}, TW.discover(topo_doc), lambda w: 'x:1', 2, None)
+        self.assertIn('겹친다', str(cm.exception))
 
     def test_disjoint_needs_room(self):
         # caller.count=8 이 풀 전체를 쓰면 disjoint 인 callee 창이 없다 → CompileError

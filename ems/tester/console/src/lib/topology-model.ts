@@ -197,6 +197,26 @@ export function newWorker(d: TopologyDoc, host: string, pos: Pos): string {
   const name = uniq(d, `w${d.workers.length + 1}`)
   d.workers.push({ name, host, port: 7100 + d.workers.filter(w => w.host === host).length, cpus: 8 }); ensureLayout(d).items[name] = relPos(d, host, pos); return name
 }
+/** 발견된 워커(base OAM 배포 목록) 넣기 — 같은 ip 의 호스트가 있으면 그 위에, 없으면 호스트를 만든다. 이미 있는 워커(같은 호스트·포트)면 그 이름 */
+export function addDiscoveredWorker(d: TopologyDoc, w: { name: string; hostname?: string | null; ip?: string | null; port: number; cpus?: number | null }): { worker: string; madeHost: string | null; existed: boolean } | null {
+  if (!w.ip) return null
+  const L = ensureLayout(d)
+  let host = Object.keys(d.hosts).find(h => d.hosts[h].ip === w.ip) ?? null
+  let madeHost: string | null = null
+  if (!host) {
+    host = uniq(d, (w.hostname || w.name || 'host').toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^-+|-+$/g, '') || 'host')
+    d.hosts[host] = { name: w.hostname || w.name, ip: w.ip }
+    const maxY = Math.max(20, ...Object.values(L.regions).map(r => r.y + r.h + 20))
+    L.regions[host] = { x: 30, y: maxY, w: 300, h: 140 }
+    madeHost = host
+  }
+  const dup = d.workers.find(x => x.host === host && (x.port ?? 7100) === w.port)
+  if (dup) return { worker: dup.name, madeHost, existed: true }
+  const name = uniq(d, (w.name || 'w').toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^-+|-+$/g, '') || 'w')
+  d.workers.push({ name, host, port: w.port, ...(w.cpus ? { cpus: w.cpus } : {}) })
+  L.items[name] = { x: 14, y: 12 + d.workers.filter(x => x.host === host).length * 10 }
+  return { worker: name, madeHost, existed: false }
+}
 /** 팔레트에서 놓기 — 빈 곳이면 담을 상자를 만든다(워커·노드 → 호스트, 풀 → 호스트+워커). 반환 = {sel, made[]} */
 export function createFromPalette(d: TopologyDoc, kind: PaletteKind, pos: Pos, ctx: { host: string | null; worker: string | null }): { sel: Focus | null; made: string[] } {
   let { host, worker: wname } = ctx
