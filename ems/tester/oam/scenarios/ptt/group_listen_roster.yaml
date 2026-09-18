@@ -1,0 +1,19 @@
+# PTT 그룹콜 청취 — conference 구독 인가·로스터 노출(S3-SCN-PTT-LISTEN L1b/L5 의 계측기 경로). 그룹 밖 관제사(monitor, member: false)가 청취 합류한 뒤
+#   그룹 AoR 에 conference SUBSCRIBE(TS 24.379 §10.1.3.4.1 — 범위 안 관제사 200) 하고, 멤버(talker)의 conference NOTIFY 로스터에 monitor 가
+#   드러나는지(listen_visibility=visible → conference_roster_visible, hidden → conference_roster_hidden)를 check 한다. 로스터 판정 종류는 ${roster} 바인딩.
+#   자격(allow_ambient_listening)·역할·listen_visibility 는 검증 픽스처(ListenerFixture)가 시드한다.
+id: PTT-GROUP-LISTEN-ROSTER
+title: PTT 청취 — conference SUBSCRIBE 200 · 로스터 노출/은닉 판정
+tags: [ptt, dispatch, listen, conference]
+roles:
+  talker:    { pool: ptt_ue }
+  listeners: { pool: ptt_ue, multi: true }
+  monitor:   { pool: ptt_ue, member: false }
+flow:
+  - { step: register,   who: [talker, listeners, monitor], expect: { code: 200 } }
+  - { step: group_call, from: talker, to: listeners, media: { audio: amr-wb }, expect: { code: 200 } }
+  - { step: group_call, from: monitor, payload: listen, expect: { code: 200, listen_pct: 100 } }
+  - { step: subscribe,  who: [monitor], payload: conference, expect: { code: 200 } }
+  - { step: check,      who: [talker], to: monitor, payload: "${roster}", after_ms: 1500, expect: { check_pct: 100 } }
+  - { step: media_hold, seconds: 1 }
+  - { step: bye,        from: talker }

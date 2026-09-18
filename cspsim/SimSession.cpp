@@ -1872,7 +1872,9 @@ bool SimSession::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
             if (m_pObserver) m_pObserver->OnSubscribeResponse(this, m_strEventSubEvent, m_strEventSubResource, 200);
         } else if (strCallId == m_strConfSubCallId) {
             m_iConfSubStatus = 200;
+            m_iConfSubWarningCode = 0;
             printf("[%d] CONFERENCE SUBSCRIBED OK group=%s\n", m_iId, m_strConfSubGroup.c_str());
+            if (m_pObserver) m_pObserver->OnSubscribeResponse(this, "conference", m_strConfSubGroup, 200);
         }
     } else if (iStatus >= 400) {
         // dialog 구독·이벤트 프로브·conference 구독의 최종 응답은 검증 판정값
@@ -1904,6 +1906,8 @@ bool SimSession::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
         else if (strCallId == m_strConfSubCallId) {
             m_iConfSubStatus = iStatus;
             m_strConfSubWarning = pWarn ? pWarn->m_strValue : "";
+            m_iConfSubWarningCode = pWarn ? atoi(pWarn->m_strValue.c_str()) : 0;   // RFC 3261 §20.43 warn-code(3자리) — TS 24.379 인가 거절 138
+            if (m_pObserver) m_pObserver->OnSubscribeResponse(this, "conference", m_strConfSubGroup, iStatus);
         }
         printf("[%d] SUBSCRIBE %d error (CallId=%s)%s%s\n",
                m_iId, iStatus, strCallId.c_str(), pWarn ? " Warning: " : "", pWarn ? pWarn->m_strValue.c_str() : "");

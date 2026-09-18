@@ -217,7 +217,7 @@ struct Instance {
     enum Phase { RUNNING, WAIT_EVENT, WAIT_TIME, DONE } phase = RUNNING;
     std::string awaitKind;                     // "callstart:<role>" 등
     long long waitUntilMs = 0, deadlineMs = 0, tStartMs = 0;
-    enum Pending { NONE, ANSWER, REJECT, PROGRESS, MEDIA } pending = NONE;
+    enum Pending { NONE, ANSWER, REJECT, PROGRESS, MEDIA, CHECK } pending = NONE;   // CHECK = check 단계의 after_ms 대기 뒤 판정
     int pendingCause = 0;
     int pendingCode = 0;
     std::string pendingRole;
@@ -421,6 +421,8 @@ private:
     std::string pendingCallerRole(Instance& in);       // 자기 INVITE 의 최종 응답을 기다리는 역할(상담 호 포함) — answer/reject 완료·in-dialog 단계의 확립 대기
     void markCancelExpected(Instance& in);             // 픽업·Replaces 직전 — 링잉 중인 착신 leg 들은 서버 CANCEL 로 끝나는 것이 정상
     bool epSubscribe(Endpoint* ep, const std::string& event, const std::string& resource);
+    bool runCheck(Instance& in, const CompiledStep& st, long long now);   // check 단계 — 관측 정합 판정(conference 로스터·Warning·dialog NOTIFY 열)
+    static bool dialogConsistent(SimSession* s, std::string& detail);    // RFC 4235 NOTIFY 열 정합 — entity 별 단일 dialog·local/remote/direction 불변·상태 전진·version 단조
     void epUnsubscribe(Endpoint* ep);
     void epClearCall(Endpoint* ep);
     std::string roleOf(Instance* in, Endpoint* ep);

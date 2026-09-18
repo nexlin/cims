@@ -33,7 +33,7 @@ export const multiRoles = (sc: Doc) => Object.entries(sc.roles ?? {}).filter(([,
 export const FLOOR_OUTCOMES = ['granted', 'denied', 'queued', 'any']
 /** group_call 의 payload — listen = 그룹 밖 역할(member: false)의 a=recvonly 청취 합류 */
 export const GROUP_CALL_MODES = ['listen']
-/** invite/pickup 의 to 가 역할이 아닌 다이얼 번호(대표번호) 또는 ${var} 바인딩인가 — 컨트롤러 is_dial_literal 과 같다 */
+/** invite/pickup/subscribe 의 to 가 역할이 아닌 다이얼 번호(대표번호) 또는 ${var} 바인딩인가 — 컨트롤러 is_dial_literal 과 같다 */
 export const isDialLiteral = (v: string | undefined) => !!v && (/^[0-9*#+]{1,32}$/.test(v) || /^\$\{\w+\}$/.test(v))
 /** 그룹 세션의 그룹 밖 역할(member: false) */
 export const guestRoles = (sc: Doc) => Object.entries(sc.roles ?? {}).filter(([, r]) => r.member === false).map(([n]) => n)
@@ -132,7 +132,7 @@ export function validate(sc: Doc, topo: TopologyDoc | null, vocab: ScenarioVocab
     const who = `flow[${i}] ${s.step}`; const ref: Sel = { kind: 'step', idx: i }
     const D = vocab?.steps[s.step]
     if (vocab && !D) { E(who, `알 수 없는 단계 ${s.step}`, ref); return }
-    for (const rr of [...(s.who ?? []), s.from, s.to]) if (rr && !names.has(rr)) { if (rr === s.to && (s.step === 'invite' || s.step === 'pickup') && isDialLiteral(rr)) continue; E(who, `정의되지 않은 역할 '${rr}' 참조${rr === s.to && (s.step === 'invite' || s.step === 'pickup') ? ' (to 는 번호 리터럴(0-9*#+) 또는 ${var} 도 된다)' : ''}`, ref) }
+    for (const rr of [...(s.who ?? []), s.from, s.to]) if (rr && !names.has(rr)) { if (rr === s.to && (s.step === 'invite' || s.step === 'pickup' || s.step === 'subscribe') && isDialLiteral(rr)) continue; E(who, `정의되지 않은 역할 '${rr}' 참조${rr === s.to && (s.step === 'invite' || s.step === 'pickup' || s.step === 'subscribe') ? ' (to 는 번호 리터럴(0-9*#+) 또는 ${var} 도 된다)' : ''}`, ref) }
     if (D) {
       if (D.actor === 'who' && !(s.who && s.who.length)) E(who, 'who 가 필요하다', ref)
       if ((D.actor === 'from' || D.actor === 'fromto') && !(s.from || (s.who && s.who.length))) E(who, 'from 또는 who 가 필요하다', ref)

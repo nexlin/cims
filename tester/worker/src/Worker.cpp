@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <dirent.h>
+#include <set>
 #include <fcntl.h>
 #include <sched.h>
 #include <sys/stat.h>
@@ -699,7 +700,7 @@ HttpResponse Worker::poolDelete(const std::string& name) {
 static const char* kSupported[] = { "register", "deregister", "invite", "answer", "reject", "bye",
                                     "media_hold", "wait", "expect", "progress", "hold", "resume", "dtmf", "refer",
                                     "media_send", "media_stop", "group_call", "floor_request", "floor_release",
-                                    "pickup", "subscribe", "replaces", "join", "publish", "sds_send", "sds_recv" };
+                                    "pickup", "subscribe", "replaces", "join", "publish", "sds_send", "sds_recv", "check" };
 
 static int rtpModeOf(const Json& media) {
     std::string m = media["rtp"].asString("auto");
@@ -769,7 +770,7 @@ HttpResponse Worker::runStart(const Json& d) {
     if (!unsupported.empty()) {
         std::string list;
         for (auto& u : unsupported) list += (list.empty() ? "" : ",") + u;
-        return errResp(400, "unsupported_step", list + " — 워커는 register/invite/answer/reject/bye/media_hold/wait/expect/progress/hold/resume/dtmf/refer/media_send/media_stop/group_call/floor_request/floor_release/pickup/subscribe/replaces/join/publish/sds_send/sds_recv 만");
+        return errResp(400, "unsupported_step", list + " — 워커는 register/invite/answer/reject/bye/media_hold/wait/expect/progress/hold/resume/dtmf/refer/media_send/media_stop/group_call/floor_request/floor_release/pickup/subscribe/replaces/join/publish/sds_send/sds_recv/check 만");
     }
     if (spec->steps.empty()) return errResp(400, "steps_required");
     // 샘플 라이브러리(§4) — 컨트롤러가 토폴로지 media.samples 에서 이 시나리오가 참조하는 것만 보낸다. 파일은 지금 확인한다
@@ -1446,6 +1447,11 @@ void Worker::onEvent(const Event& e) {
         break;
     case Event::SUBSCRIBE_RESP:
         m_metrics.counter("subscribe_codes." + std::to_string(e.status));
+        if (e.event == "conference") {
+            // conference 구독(TS 24.379 §10.1.3.4.1) — 거절의 Warning warn-code 도 센다(138 = 범위 밖 관제사)
+            m_metrics.counter("conf_sub_codes." + std::to_string(e.status));
+            if (ep->isSim() && ep->s->m_iConfSubWarningCode.load() > 0) m_metrics.counter("conf_sub_warning." + std::to_string(ep->s->m_iConfSubWarningCode.load()));
+        }
         if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "subresp" &&
             std::find(in->respWait.begin(), in->respWait.end(), ep) != in->respWait.end()) {
             int want = in->expectCode > 0 ? in->expectCode : 200;
@@ -1653,7 +1659,78 @@ static bool startSpecialCall(Endpoint* from, Endpoint* to, const std::string& ki
 bool Worker::epSubscribe(Endpoint* ep, const std::string& event, const std::string& resource) {
     if (!ep->isSim() || !ep->started) return false;
     if (event == "dialog") { ep->s->SubscribeDialog(resource); ep->dlgWatching = true; }
+    else if (event == "conference") { ep->s->SubscribeConference(resource); }   // 그룹 AoR — RFC 4575, 로그아웃이 내린다(TS 24.379 §10.1.3.4.1 인가 판정)
     else { ep->s->SubscribeEvent(event, resource); ep->evtWatching = true; }
+    return true;
+}
+
+bool Worker::dialogConsistent(SimSession* s, std::string& detail) {
+    // cims-verify S3-SCN-FA F7 의 cspsim 판정과 같은 규칙 — entity 마다: version 단조(한 NOTIFY 의 dialog 여럿은 같은 version 연속 허용),
+    //   dialog id 하나, local = entity, direction·remote 불변, 상태는 early→confirmed→terminated 순으로 전진(중복 없음)·terminated 는 마지막 1회.
+    auto recs = s->DialogNotifyRecords();
+    std::map<std::string, std::vector<SimSession::DlgNotifyRec>> byEnt;
+    for (auto& r : recs) byEnt[r.strEntity].push_back(r);
+    if (byEnt.empty()) { detail = "dialog NOTIFY 없음"; return false; }
+    bool ok = true;
+    auto rank = [](const std::string& st) { return st == "trying" ? 0 : st == "proceeding" ? 1 : st == "early" ? 2 : st == "confirmed" ? 3 : st == "terminated" ? 4 : -1; };
+    for (auto& kv : byEnt) {
+        auto& v = kv.second;
+        bool mono = true;
+        for (size_t i = 1; i < v.size(); ++i) {
+            if (v[i].iVersion < v[i - 1].iVersion) mono = false;
+            if (v[i].iVersion == v[i - 1].iVersion && !v[i].strId.empty() && v[i].strId == v[i - 1].strId) mono = false;
+        }
+        std::set<std::string> ids, dirs, locals, remotes;
+        std::vector<std::string> states;
+        for (auto& r : v) {
+            if (r.strId.empty() || r.strId == "-") continue;
+            ids.insert(r.strId); dirs.insert(r.strDir); locals.insert(r.strLocal); remotes.insert(r.strRemote); states.push_back(r.strState);
+        }
+        bool progress = true;
+        for (size_t i = 1; i < states.size(); ++i) if (rank(states[i]) <= rank(states[i - 1])) progress = false;
+        int term = 0; for (auto& st : states) if (st == "terminated") ++term;
+        bool e_ok = mono && ids.size() == 1 && dirs.size() == 1 && remotes.size() == 1 && (locals.size() == 1 && *locals.begin() == kv.first)
+                    && progress && term <= 1 && (term == 0 || states.back() == "terminated");
+        char buf[400];
+        std::string sts; for (auto& st : states) sts += (sts.empty() ? "" : ">") + st;
+        snprintf(buf, sizeof(buf), "%s%s: ids=%zu dir=%zu local=%s remote=%zu states=%s ver_mono=%d", e_ok ? "" : "!", kv.first.c_str(), ids.size(), dirs.size(),
+                 locals.size() == 1 ? locals.begin()->c_str() : "?", remotes.size(), sts.c_str(), mono ? 1 : 0);
+        detail += (detail.empty() ? "" : " · ") + std::string(buf);
+        ok = ok && e_ok;
+    }
+    return ok;
+}
+
+bool Worker::runCheck(Instance& in, const CompiledStep& st, long long now) {
+    // check 단계 — payload 종류별 판정. who 전원이 맞아야 통과. 실패는 인스턴스 실패(check_fail + event), 성공은 check_ok(check_pct = ok / tx)
+    Endpoint* subj = st.to.empty() ? nullptr : in.actors[st.to];
+    if ((st.payload == "conference_roster_visible" || st.payload == "conference_roster_hidden") && !subj) { finishInstance(in, true, "check: to(로스터에서 찾을 역할) required", now); return false; }
+    std::string why;
+    bool all = true;
+    for (auto& role : st.who) {
+        for (auto* ep : roleEndpoints(in, role)) {
+            if (!ep->isSim()) { finishInstance(in, true, "check: " + role + " 은 가상 UE 여야 한다", now); return false; }
+            bool ok = false; std::string d;
+            if (st.payload == "conference_roster_visible" || st.payload == "conference_roster_hidden") {
+                bool has = ep->s->ConfRosterHas(subj->id.user);
+                ok = (st.payload == "conference_roster_visible") == has;
+                d = role + ": roster " + (has ? "has " : "lacks ") + subj->id.user;
+            } else if (st.payload == "conference_warning_138") {
+                int wc = ep->s->m_iConfSubWarningCode.load();
+                ok = wc == 138;
+                d = role + ": conference SUBSCRIBE " + std::to_string(ep->s->m_iConfSubStatus.load()) + " Warning " + std::to_string(wc);
+            } else if (st.payload == "dialog_consistent") {
+                ok = dialogConsistent(ep->s, d);
+                d = role + ": " + d;
+            } else { finishInstance(in, true, "check: unknown payload " + st.payload, now); return false; }
+            m_metrics.counter("check_tx");
+            m_metrics.counter(ok ? "check_ok" : "check_fail");
+            if (!ok) { emitEvent("check " + st.payload + " failed — " + d, ep, "check", 0); all = false; }
+            why += (why.empty() ? "" : " · ") + d;
+        }
+    }
+    logf("debug", "check %s: %s", st.payload.c_str(), why.c_str());
+    if (!all) { finishInstance(in, true, "check " + st.payload, now); return false; }
     return true;
 }
 
@@ -2031,8 +2108,8 @@ void Worker::tickBody(long long now) {
     for (auto& inp : m_instances) {
         Instance& in = *inp;
         if (in.phase == Instance::WAIT_TIME && now >= in.waitUntilMs) {
-            if (in.pending == Instance::MEDIA) {
-                // media_send/media_stop 의 after_ms 가 지났다 — 같은 단계를 다시 실행(이번엔 동작)
+            if (in.pending == Instance::MEDIA || in.pending == Instance::CHECK) {
+                // media_send/media_stop·check 의 after_ms 가 지났다 — 같은 단계를 다시 실행(이번엔 동작·판정)
                 in.phase = Instance::RUNNING;
                 execStep(in, now);
                 continue;
@@ -2615,14 +2692,18 @@ void Worker::execStep(Instance& in, long long now) {
             // out-of-dialog SUBSCRIBE(RFC 6665) — payload = 이벤트 패키지(기본 dialog, RFC 4235), to = 감시 대상 역할(생략 = 자기 AoR).
             //   완료 = who 전원의 최종 응답(expect.code, 기본 200 — 403 그룹 밖 감시·489 미지 패키지도 기대값으로 둘 수 있다)
             std::string event = st.payload.empty() ? "dialog" : st.payload;
+            // to = 역할(그 신원) 또는 번호 리터럴(대표번호 — 역할 아닌 감시 대상, F7). conference 는 그룹 AoR(step.group 또는 인스턴스 그룹)
             Endpoint* to = st.to.empty() ? nullptr : in.actors[st.to];
-            if (!st.to.empty() && !to) { finishInstance(in, true, "subscribe: to role missing", now); return; }
+            std::string literal = (!st.to.empty() && !to) ? st.to : "";
+            std::string confGroup = st.group.empty() ? in.group : st.group;
+            if (event == "conference" && confGroup.empty()) { finishInstance(in, true, "subscribe conference: 그룹(step.group 또는 그룹 세션) 이 필요하다", now); return; }
             in.expectCode = (int)st.expect["code"].asInt(0);
             in.respWait.clear();
             for (auto& role : st.who) {
                 Endpoint* ep = in.actors[role];
                 if (!ep) { finishInstance(in, true, "subscribe: role missing", now); return; }
-                if (!epSubscribe(ep, event, to ? to->id.user : ep->id.user)) { finishInstance(in, true, "subscribe: " + role + " 은 등록된 UE 여야 한다", now); return; }
+                std::string res = event == "conference" ? confGroup : to ? to->id.user : !literal.empty() ? literal : ep->id.user;
+                if (!epSubscribe(ep, event, res)) { finishInstance(in, true, "subscribe: " + role + " 은 등록된 UE 여야 한다", now); return; }
                 m_metrics.counter("subscribe_tx");
                 in.respWait.push_back(ep);
             }
@@ -2692,6 +2773,20 @@ void Worker::execStep(Instance& in, long long now) {
             in.awaitKind = "sdsrecv";
             in.deadlineMs = now + std::max(st.afterMs, 0) + m_cfg.inviteTimeoutMs;
             return;
+        }
+        if (st.step == "check") {
+            // 관측 정합 판정 — after_ms 뒤(NOTIFY 도착 여유) who 전원을 판정. payload = conference_roster_visible|conference_roster_hidden(to = 찾을 역할)
+            //   | conference_warning_138 | dialog_consistent(RFC 4235 NOTIFY 열 정합 — S3-SCN-FA F7)
+            if (st.afterMs > 0 && in.pending != Instance::CHECK) {
+                in.pending = Instance::CHECK;
+                in.phase = Instance::WAIT_TIME;
+                in.waitUntilMs = now + st.afterMs;
+                return;
+            }
+            in.pending = Instance::NONE;
+            if (!runCheck(in, st, now)) return;
+            in.stepIdx++;
+            continue;
         }
         if (st.step == "expect") { in.stepIdx++; continue; }
         finishInstance(in, true, "unsupported step " + st.step, now);

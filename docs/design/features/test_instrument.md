@@ -472,7 +472,11 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
   `srd_ms.min ≥ 단계 시한` 으로, 무응답 overflow 는 `answer who: overflow`(포크가 CANCEL 된 뒤 도착하는 착신을 기다린다)로 본다. 동봉 `volte/fa_{parallel,
   overflow,pickup,sequential}` — 전화 그룹·pilot 은 대상 DB 픽스처(검증 다리가 계획의 역할 신원에 입힌다, S3-SCN-FA F1/F3/F5/F6).
   워커 지원 = `register/invite/progress/answer/reject/bye/hold/resume/dtmf/refer/media_hold/media_send/media_stop/wait/expect/deregister/group_call/floor_request/floor_release/
-  pickup/subscribe/replaces/join/publish/sds_send/sds_recv`. 실단말(`real-ue`) 역할은 그중 `REAL_UE_STEPS`(§3.3)만 행위자가 된다.
+  pickup/subscribe/replaces/join/publish/sds_send/sds_recv/check`. `subscribe` 의 `to` 는 역할 또는 대표번호 리터럴(`${pilot}` — 그룹원 BLF 감시), `payload: conference` 는 그룹 AoR(`group` 또는
+  인스턴스 그룹 — TS 24.379 §10.1.3.4.1 인가 판정 200/403 Warning 138). **`check`**(who·payload·after_ms) = 관측 정합 판정 — `conference_roster_visible|hidden`(who 의 conference NOTIFY
+  로스터에 `to` 역할 신원이 있는가/없는가 = listen_visibility) · `conference_warning_138`(who 의 conference SUBSCRIBE 거절 Warning warn-code) · `dialog_consistent`(who 가 받은 dialog
+  NOTIFY 열 — entity 별 dialog 하나·local/remote/direction 불변·상태 전진·terminated 1회·version 단조, cims-verify F7 cspsim 판정과 같은 규칙). 카운터 `check_tx/ok/fail`, 비율 `check_pct`;
+  틀리면 인스턴스 실패 + event(사유). 동봉 `VOLTE-FA-DIALOG-FORK`(F7)·`PTT-GROUP-LISTEN-ROSTER`(L1b/L5, `${roster}` 바인딩)·`PTT-GROUP-LISTEN-CONF-DENIED`(L2b/L3b). 실단말(`real-ue`) 역할은 그중 `REAL_UE_STEPS`(§3.3)만 행위자가 된다.
 - **실행 의미(워커)** — 흐름을 셋으로 나눈다. **prelude** = 앞쪽의 `register`(+`wait`) 단계: 역할 슬라이스의 단말 **전부**를 run 시작 때 한 번
   등록한다(`Timers.RegisterIntervalMs` 간격, 이미 등록된 단말은 재사용). **body** = 나머지: **시나리오 인스턴스** 하나가 실행하는 단위 — 인스턴스는
   `rate_saps` 로 발생하고(토큰 버킷), 역할마다 free 단말을 하나씩 잡아 단계를 차례로 실행한 뒤 돌려준다. free 단말이 모자라면 그 슬롯은 `skipped`
@@ -635,7 +639,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 | 보고서 | 결과 화면의 [인쇄] = `window.print()` — 검증 콘솔과 같은 인쇄 규약(셸·툴바·레일·이벤트 표 숨김, `.tester-report` 만 A4, 구획 단위 쪽 나눔), 표지에 발행 일시. Markdown 은 CLI `report` 와 같은 본문 |
 
 컴포넌트는 팩 안 `components/`(MiniChart · LiveCharts · WorkerFleet · LiveSidebar · RunLivePanel · RunIndex · RunStartDialog · PlanPreview · SipDrawer · RunReport · YamlEditor(`onValid(ok, doc)`) · ProfileCurve · ListRail(레코드 레일 + RailRow/RailGroup) · topology/TopologyCanvas · scenario/ScenarioCanvas), 모델·표시 헬퍼 `lib/`(fmt.ts = RFC 6076 라벨·판정 톤·수치 형식 · metrics.ts = 기대치 임계·라이브 누계 판정·절차 진행·SDT/예상 소요(컨트롤러 규칙과 동일) · topology-model.ts · scenario-model.ts · use-history.ts = 문서 이력·Ctrl+Z/Y·이탈 경고 · use-drawer-height.ts = 드로어 높이). 차트는 라이브러리 없이 SVG(`--chart-N` 토큰), 지표별 소형 차트는 자기 축. 배지는 크기 오버라이드 없이 계약(12px SemiBold) 그대로(console_design_system §7-31).
-**남은 것** = 미디어 평면 후속(미디어 전담 워커 분리) · conference SUBSCRIBE 정합·로스터 노출(S3-SCN-PTT-LISTEN L1b/L5)·dialog 포크 정합(S3-SCN-FA F7) 검사의 계측기 이전(지금은 cspsim). 토폴로지 속성 패널은 피어 오류 주입(유실 벌 수·임의 유실 %)·DTMF 방식·THIG·TLS 상호인증 3 플래그, UE DTMF 방식·TLS 검증/클라이언트 인증서를 편집한다.
+**남은 것** = 미디어 평면 후속(미디어 전담 워커 분리). conference SUBSCRIBE 정합·로스터 노출(S3-SCN-PTT-LISTEN L1b/L2b/L3b/L5)·dialog 포크 정합(S3-SCN-FA F7)은 `subscribe conference`·`check` 단계로 계측기에 이전됐다(cspsim 경로는 계측기 미설정일 때만). F5(링잉 대표번호 지정 픽업)만 cspsim. 토폴로지 속성 패널은 피어 오류 주입(유실 벌 수·임의 유실 %)·DTMF 방식·THIG·TLS 상호인증 3 플래그, UE DTMF 방식·TLS 검증/클라이언트 인증서를 편집한다.
 
 **메뉴 자리** — 관리 영역(`admin`)에 그룹 `test`(**시험**)를 새로 둔다. ITU-T M.3400 Maintenance 기능군의 *Testing* 에
 해당하며, 릴리스 그룹(SW Mgmt — 검증/패키징)과 다르다: 검증은 배포 게이트, 시험은 부하·피어 시험 도구다.

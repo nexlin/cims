@@ -718,7 +718,7 @@ StepKind = Literal[
     'hold', 'resume', 'dtmf',
     'refer', 'replaces', 'join', 'pickup', 'subscribe', 'publish',
     'group_call', 'floor_request', 'floor_release', 'sds_send', 'sds_recv',
-    'media_hold', 'media_send', 'media_stop', 'wait', 'expect',
+    'media_hold', 'media_send', 'media_stop', 'wait', 'expect', 'check',
 ]
 
 # 워커가 실행할 수 있는 단계(§4) — 나머지는 모델에는 있지만 컴파일 시 거절한다(콘솔 팔레트는 회색).
@@ -727,8 +727,13 @@ WORKER_STEPS = frozenset((
     'hold', 'resume', 'dtmf', 'refer', 'media_hold', 'media_send', 'media_stop', 'wait', 'expect',
     'group_call', 'floor_request', 'floor_release',
     'pickup', 'subscribe', 'replaces', 'join', 'publish',
-    'sds_send', 'sds_recv',
+    'sds_send', 'sds_recv', 'check',
 ))
+# check.payload — 관측 정합 판정 종류(cspsim 검사의 계측기 이전 — S3-SCN-PTT-LISTEN L1b/L5 · S3-SCN-FA F7):
+#   conference_roster_visible|hidden = who 의 conference NOTIFY 로스터에 to 역할 신원이 있는가/없는가(listen_visibility)
+#   conference_warning_138 = who 의 conference SUBSCRIBE 거절 Warning warn-code 138(TS 24.379 §10.1.3.4.1 범위 밖)
+#   dialog_consistent = who 가 받은 dialog NOTIFY 열(RFC 4235) 정합 — entity 별 dialog 하나·local/remote/direction 불변·상태 전진·terminated 1회·version 단조
+CHECK_KINDS = ('conference_roster_visible', 'conference_roster_hidden', 'conference_warning_138', 'dialog_consistent')
 # 실단말(real-ue) 역할이 행위자(from/who)가 될 수 있는 단계 — cimsue-cli drive 명령이 있는 것만(§3.3). 나머지는 컴파일 오류.
 #   빠진 것: progress(피어) · refer(실스택이 REFER 최종 응답을 이벤트로 내지 않음) · replaces/join/subscribe(dialog 학습은 실스택 앱 몫) ·
 #   publish(affiliation 은 기동 절차가 한다) · media_send/media_stop(송출은 실스택 것) · sds_*
@@ -791,6 +796,7 @@ STEP_VOCAB = {
     'sds_send':      {'group': 'ptt',   'actor': 'fromto',  'kind': 'ue',       'metrics': ['code', 'sds_delay_ms', 'sds_disposition_pct'], 'desc': 'MCData SDS 송신(TS 24.282 SIP MESSAGE) — payload 본문, to 역할 = 1:1 · to 없음 = 그룹 SDS(인스턴스 그룹 또는 group, 수신자는 multi 역할), disposition = delivery 회신 요청. 완료 = MESSAGE 최종 응답'},
     'sds_recv':      {'group': 'ptt',   'actor': 'who',     'kind': 'ue',       'metrics': ['sds_delay_ms'], 'desc': 'who 전원이 앞선 sds_send 의 SDS 를 받을 때까지(단계 진입 전 도착도 인정) — sds_delay_ms = 송신 → 도착'},
     'expect':        {'group': 'ctl',   'actor': 'none',    'kind': None,       'metrics': ['ser_pct', 'scr_pct', 'isa_pct'], 'desc': '누계 지표 게이트'},
+    'check':         {'group': 'ctl',   'actor': 'who',     'kind': 'ue',       'metrics': ['check_pct'], 'desc': '관측 정합 판정 — payload: conference_roster_visible|hidden(to = 로스터에서 찾을 역할) · conference_warning_138 · dialog_consistent(RFC 4235 NOTIFY 열). after_ms 뒤 판정, 틀리면 인스턴스 실패'},
 }
 for _k, _v in STEP_VOCAB.items():
     _v['real'] = _k in REAL_UE_STEPS   # 실단말(real-ue) 역할이 행위자가 될 수 있는가 — 편집기 행위자 칩 게이트
@@ -811,7 +817,7 @@ METRIC_LABELS = {
     'q850_rx_pct': 'Q.850 Reason 수신률', 'early_media_pct': '183 early media 률', 'prack_pct': 'PRACK 률',
     'early_rtp_pct': 'early media RTP 도달률', 'join_tap_pct': 'Join 청취 leg SSRC 2개 도달률', 'video_pct': '영상 협상률(m=video 활성 answer)',
     'fork_alert_pct': '대표번호 포크 alert 률(그룹원 착신/기대)', 'listen_pct': 'PTT 청취 합류율(recvonly 200)',
-    'retrans_rx_pct': 'INVITE 재전송 도달률(유실 주입 뒤)', 'thig_pct': 'THIG 토큰화 Via 보존률',
+    'retrans_rx_pct': 'INVITE 재전송 도달률(유실 주입 뒤)', 'thig_pct': 'THIG 토큰화 Via 보존률', 'check_pct': '관측 정합 판정 통과율(check)',
 }
 
 # Reason: Q.850 cause (ITU-T Q.850) — 편집기 목록
@@ -845,6 +851,8 @@ METRIC_NAMES = (
     'video_pct',
     # 피어 오류 주입 후속(C) — 유실 주입 뒤 INVITE 재전송 도달률 · ibcf THIG 토큰화 Via 보존률
     'retrans_rx_pct', 'thig_pct',
+    # check 단계(관측 정합 판정) 통과율
+    'check_pct',
     # 대표번호(TS 24.239 Flexible Alerting) — to 가 번호 리터럴인 invite 에서 인스턴스의 다른 UE 역할(그룹원)에 포크 INVITE 가 도달한 비율
     'fork_alert_pct',
     # PTT 청취(dispatch_center.md §5.6) — group_call payload listen 의 recvonly INVITE 가 200 으로 확립된 비율
@@ -875,6 +883,7 @@ RATIO_METRICS = {
     'retrans_rx_pct': ('invite_retrans_rx', 'peer_fault_drop'),   # 유실 주입 뒤 닿은 INVITE 재전송 벌 / 버린 벌 — 대상의 Timer A 재전송 복원력
     'thig_pct': ('thig_via_ok', 'thig_tx'),          # 응답에 토큰화 Via 가 보존된 발신 / THIG Via 를 얹은 ibcf 발신 INVITE
     'sds_disposition_pct': ('sds_disposition_rx', 'sds_disposition_req'),   # 발신자에 닿은 SDS NOTIFICATION(delivered) / delivery 를 요청한 SDS
+    'check_pct': ('check_ok', 'check_tx'),           # check 단계 판정 통과 / 판정 수
 }
 
 
@@ -935,7 +944,7 @@ class Step(_Strict):
     after_ms: Optional[int] = Field(default=None, ge=0)
     seconds: Optional[Union[int, str]] = Field(default=None, description='정수 또는 ${ht} 같은 바인딩')
     media: Optional[Media] = None
-    group: Optional[str] = Field(default=None, description='group_call — MCPTT 그룹 id 를 직접 지정(생략 = 인스턴스가 잡은 그룹, 곧 발신 멤버의 affiliation 그룹) · publish — affiliation 대상 그룹(생략 = 신원의 그룹)')
+    group: Optional[str] = Field(default=None, description='group_call — MCPTT 그룹 id 를 직접 지정(생략 = 인스턴스가 잡은 그룹, 곧 발신 멤버의 affiliation 그룹) · publish — affiliation 대상 그룹(생략 = 신원의 그룹) · sds_send/subscribe conference — 대상 그룹(생략 = 인스턴스 그룹)')
     payload: Optional[str] = Field(default=None, description='dtmf: 숫자열(0-9*#A-D) · reject: 응답 코드 · floor_request: 기대 결과 granted|denied|queued|any · '
                                                                  'pickup: 피처코드(${var} 바인딩 가능) · subscribe: 이벤트 패키지(기본 dialog) · publish: affiliate|deaffiliate')
     cause: Optional[int] = Field(default=None, ge=1, le=127,
@@ -971,8 +980,13 @@ class Step(_Strict):
             raise ValueError('subscribe 의 payload 는 이벤트 패키지 토큰(RFC 6665 event-type — dialog·reg·…)')
         if self.step == 'publish' and self.payload is not None and self.payload not in PUBLISH_COMMANDS:
             raise ValueError(f'publish 의 payload(affiliation 명령)는 {list(PUBLISH_COMMANDS)} 중 하나')
+        if self.step == 'check':
+            if not (self.payload and (self.payload in CHECK_KINDS or _BIND_REF.match(self.payload))):
+                raise ValueError(f'check 의 payload 는 {list(CHECK_KINDS)} 중 하나(또는 ${{var}} 바인딩 — 컴파일 때 검사)')
+            if self.payload.startswith('conference_roster_') and not self.to:
+                raise ValueError('check conference_roster_* 는 to(로스터에서 찾을 역할)가 필요하다')
         if self.step in ('register', 'deregister', 'answer', 'reject', 'progress', 'subscribe', 'publish',
-                         'floor_request', 'floor_release', 'sds_recv', 'media_send', 'media_stop') and not self.who:
+                         'floor_request', 'floor_release', 'sds_recv', 'media_send', 'media_stop', 'check') and not self.who:
             raise ValueError(f'{self.step} 단계는 who 가 필요하다')
         if self.step in ('media_hold', 'wait') and self.seconds is None:
             raise ValueError(f'{self.step} 단계는 seconds 가 필요하다')
@@ -1063,8 +1077,8 @@ class Scenario(_Strict):
         for i, s in enumerate(self.flow):
             for ref in [*(s.who or []), s.from_, s.to]:
                 if ref and ref not in names:
-                    if ref == s.to and s.step in ('invite', 'pickup') and is_dial_literal(ref):
-                        continue   # 다이얼 번호 리터럴(대표번호·${pilot}) — 역할이 아니다
+                    if ref == s.to and s.step in ('invite', 'pickup', 'subscribe') and is_dial_literal(ref):
+                        continue   # 다이얼 번호 리터럴(대표번호·${pilot}) — 역할이 아니다(subscribe 는 대표번호 dialog 감시 — F7)
                     raise ValueError(f'flow[{i}] ({s.step}) 가 정의되지 않은 역할 {ref!r} 을 참조한다'
                                      + (' (invite/pickup 의 to 는 번호 리터럴(0-9*#+) 또는 ${var} 도 된다)' if ref == s.to and s.step in ('invite', 'pickup') else ''))
             for d in (s.during or []):

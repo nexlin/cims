@@ -299,6 +299,27 @@ class TopologyV2(unittest.TestCase):
         self.assertIsNone(STEP_VOCAB['progress']['kind'])   # 착신 UE 도 183 을 낸다
         self.assertIn('g722', SAMPLE_CODECS)
 
+    def test_check_step_and_subscribe_literal(self):
+        """check 단계(관측 정합 판정) — payload 는 CHECK_KINDS 또는 ${var}, 로스터 판정은 to 필수, who 필수 · subscribe.to 는 대표번호 리터럴도 된다(F7)."""
+        from services.tester_models import CHECK_KINDS
+        def doc(flow, roles=None):
+            return {'id': 'T-CHK', 'roles': roles or {'a': {'pool': 'p'}, 'b': {'pool': 'p'}}, 'flow': flow}
+        ok = doc([{'step': 'register', 'who': ['a', 'b']}, {'step': 'subscribe', 'who': ['a'], 'to': '${pilot}'}, {'step': 'subscribe', 'who': ['a'], 'to': 'b'},
+                  {'step': 'invite', 'from': 'b', 'to': '${pilot}'}, {'step': 'bye', 'from': 'b'},
+                  {'step': 'check', 'who': ['a'], 'payload': 'dialog_consistent', 'after_ms': 1000, 'expect': {'check_pct': 100}},
+                  {'step': 'check', 'who': ['a'], 'payload': '${roster}', 'to': 'b'}])
+        m, errs = validate('scenario', ok)
+        self.assertEqual(errs, [])
+        self.assertEqual(m.flow[1].to, '${pilot}')
+        for bad, word in ((doc([{'step': 'check', 'who': ['a'], 'payload': 'nope'}]), 'payload'),
+                          (doc([{'step': 'check', 'who': ['a'], 'payload': 'conference_roster_visible'}]), 'to'),
+                          (doc([{'step': 'check', 'payload': 'dialog_consistent'}]), 'who'),
+                          (doc([{'step': 'invite', 'from': 'a', 'to': 'b'}, {'step': 'subscribe', 'who': ['a'], 'to': 'zzz'}]), '정의되지')):
+            self.assertTrue(any(word in e for e in validate('scenario', bad)[1]), (word, validate('scenario', bad)[1]))
+        self.assertIn('check', STEP_VOCAB)
+        self.assertIn('check_pct', RATIO_METRICS)
+        self.assertEqual(len(CHECK_KINDS), 4)
+
     def test_ptt_group_session_rules(self):
         """그룹 세션(group_call) 시나리오 규칙 — multi 역할 하나·같은 풀·group_call.from 단일/to multi·floor 는 group_call 뒤·1:1 단계 금지."""
         def doc(flow, roles=None):

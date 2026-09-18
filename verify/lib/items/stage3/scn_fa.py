@@ -25,7 +25,8 @@ PHONE_GROUP_CHANGED 를 보낸다(멤버 pickup_group 도 그룹 id 로 파생, 
 
 계측기 경로(CIMS_TESTER_URL 설정 시, test_instrument.md §9): F1/F3/F5/F6 는 `VOLTE-FA-{PARALLEL,OVERFLOW,PICKUP,SEQUENTIAL}` —
 invite.to 가 역할 아닌 대표번호 리터럴(`${pilot}` 바인딩), 포크 착신은 `fork_alert_pct`, 승자 외 CANCEL 은 정상. 전화 그룹 픽스처는 계획
-드라이런의 역할 신원(memberB·memberC·overflow·picker)에 입힌다. F7(dialog 포크 정합)은 cspsim 검사로 남는다(-hunt_watch).
+드라이런의 역할 신원(memberB·memberC·overflow·picker)에 입힌다. F7 도 계측기(VOLTE-FA-DIALOG-FORK — subscribe to 대표번호 리터럴 + check dialog_consistent);
+cspsim 경로(-hunt_watch)는 계측기 미설정일 때.
 """
 from __future__ import annotations
 
@@ -139,9 +140,9 @@ def _f7_cspsim(ctx: VerifyContext, creds4: list, pilot: str, group_id: str, chec
 
 def _via_tester(ctx: VerifyContext, done) -> ItemResult:
     """F1/F3/F5/F6 를 계측기로 — 계획 드라이런의 역할 신원을 전화 그룹(대표번호 pilot)에 시드한 뒤 `VOLTE-FA-*` 를 `--bind pilot=` 로.
-    포크 판정은 시나리오 기대치(fork_alert_pct 100 · 승자 200 · CANCEL 정상 · F6 srd_ms.min ≥ 단계 시한). F7 은 cspsim(-hunt_watch)."""
+    포크 판정은 시나리오 기대치(fork_alert_pct 100 · 승자 200 · CANCEL 정상 · F6 srd_ms.min ≥ 단계 시한). F7 은 VOLTE-FA-DIALOG-FORK 의 check dialog_consistent."""
     cfg = tester_config()
-    ctx.w(f"- 경로: 계측기 @ {cfg['url']} · 토폴로지 {cfg['topology']} (F5·F7 은 cspsim)")
+    ctx.w(f"- 경로: 계측기 @ {cfg['url']} · 토폴로지 {cfg['topology']} (F5 는 cspsim)")
     checks = []
     def dstr(d) -> str:
         return "RTP delta 미출력" if d is None else f"recv A=+{d[0]} B=+{d[1]} C=+{d[2]} D=+{d[3]}"
@@ -204,7 +205,17 @@ def _via_tester(ctx: VerifyContext, done) -> ItemResult:
     #   가릴 수 없다(MONITOR 가 M2 만 계측기로 두는 것과 같은 이유). cspsim 헬퍼는 대상 CSP 의 SIP 접속점(dev 5060)이 필요하므로 계측기 모드
     #   (대개 배포 15060)에서는 생략하고 정보로만 남긴다 — dev CSP 5060 상대로 계측기 미설정(cspsim 경로)일 때 F1~F7 전부 판정된다(D5·M8·M5 와 같은 규약).
     checks.append(("F5 대표번호 링잉 호 지정 픽업 (PickUpFork)", None, "cspsim 경로 — dev CSP 5060 필요(계측기 미설정 시 판정). 계측기 모드에서는 생략"))
-    checks.append(("F7 dialog 이벤트 포크 정합 (RFC 4235)", None, "cspsim 경로 — dev CSP 5060 필요(계측기 미설정 시 판정). 계측기 모드에서는 생략"))
+    # F7 dialog 포크 정합 — 계측기 VOLTE-FA-DIALOG-FORK: memberB 가 pilot·caller·memberC 를 dialog 구독, check dialog_consistent(entity 별 dialog 하나·
+    #   local/remote/direction 불변·상태 전진·terminated 1회·version 단조 — cspsim _judge_dialog_entity 와 같은 규칙). caller 도 전화 그룹원(B 가 A 를 감시 — CanWatch 규칙 1)
+    try:
+        r7 = ids("VOLTE-FA-DIALOG-FORK")
+        with DispatchFixture(ctx.dist_dir, ctx.sim_ip, group_id, pilot=pilot, members=[r7["caller"], r7["memberB"], r7["memberC"]]) as fx7:
+            if fx7.active:
+                checks.append(check("F7 dialog 이벤트 포크 정합 (RFC 4235 — entity/direction/remote 불변·terminated 1회·version 단조)", "VOLTE-FA-DIALOG-FORK", "F7", pilot))
+            else:
+                checks.append(("F7 dialog 이벤트 포크 정합 (RFC 4235)", False, f"시드 실패 — {fx7.reason}"))
+    except Exception as e:
+        checks.append(("F7 dialog 이벤트 포크 정합 (RFC 4235)", False, f"계측기 계획 실패: {e}"))
 
     all_ok = emit_checks(ctx, checks)
     return done(ItemStatus.PASS if all_ok else ItemStatus.FAIL, fmt_checks(checks))

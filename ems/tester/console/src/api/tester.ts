@@ -365,6 +365,8 @@ export interface ScenarioVocab {
   q850: Record<string, string>
   audio: string[]; video: string[]; rtp_modes?: string[]; sample_codecs?: string[]
   evidence_kinds: string[]; profile_models: string[]
+  /** check.payload 종류 — conference_roster_visible|hidden · conference_warning_138 · dialog_consistent */
+  check_kinds?: string[]
   pool_kinds: string[]; peer_profiles: string[]; transports: string[]; srtp: string[]; node_roles: string[]; target_kinds: string[]
   phases: Record<string, string>
 }

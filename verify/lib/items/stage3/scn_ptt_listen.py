@@ -22,7 +22,7 @@ allow_ambient_listening 컬럼 미적용 DB 면 SKIP. 전환 전 스키마(`disp
 계측기 경로(CIMS_TESTER_URL 설정 시, test_instrument.md §9): L1/L2/L3/L3c → `PTT-GROUP-LISTEN`/`PTT-GROUP-LISTEN-DENIED`(그룹 밖 역할
 monitor 의 `group_call payload: listen`, listen_pct·floor DENY·수신 RTP 는 시나리오 기대치), L4 → `PTT-GROUP-NONMEMBER-DENIED`. 청취자 M 과
 그룹은 계획 드라이런(identities_by_role.monitor[0]·group_session.first_group)이 준 것에 자격·역할 픽스처를 입힌다. conference SUBSCRIBE
-정합(L1b/L2b/L3b)·로스터 노출(L5)은 cspsim 검사로 남는다.
+정합(L1b/L2b/L3b)·로스터 노출(L5)도 계측기(subscribe conference + check 단계); cspsim 경로는 계측기 미설정일 때.
 """
 from __future__ import annotations
 
@@ -267,9 +267,9 @@ def ptt_listen(ctx: VerifyContext) -> ItemResult:
 
 
 def _via_tester(ctx: VerifyContext, done, state) -> ItemResult:
-    """L1~L4 를 계측기로, conference SUBSCRIBE 정합(L1b/L2b/L3b)·로스터 노출(L5)은 cspsim(S3-SEED 자격 창이 있을 때)."""
+    """L1~L5 전부 계측기 — conference SUBSCRIBE 정합(L1b/L2b/L3b)은 PTT-GROUP-LISTEN-ROSTER/CONF-DENIED 의 subscribe conference + check, 로스터 노출(L5)은 check ${roster}."""
     cfg = tester_config()
-    ctx.w(f"- 경로: 계측기 @ {cfg['url']} · 토폴로지 {cfg['topology']} (L1b/L2b/L3b/L5 는 cspsim)")
+    ctx.w(f"- 경로: 계측기 @ {cfg['url']} · 토폴로지 {cfg['topology']}")
     try:
         plan = tester_plan(ctx, "PTT-GROUP-LISTEN", ht=4) or {}
         group = ((plan.get("group_session") or {}).get("first_group")) or ""
@@ -316,45 +316,22 @@ def _via_tester(ctx: VerifyContext, done, state) -> ItemResult:
             else:
                 checks.append((name_3c, False, f"전화 그룹 시드 실패 — {fx.reason}"))
 
-    # ── cspsim 검사: conference SUBSCRIBE 정합(L1b/L2b/L3b)·로스터 노출(L5) — S3-SEED 자격 창(3명+)·그룹이 있을 때 ──
-    members = [c for c in (state.get("PTT_CREDS") or []) if c.get("ha1")]
-    sgroup = state.get("PTT_GROUP", "")
-    if len(members) >= 3 and sgroup:
-        A, B = members[0], members[1]
-        Mc = _pick_listener(_db.csp_db_config(ctx.dist_dir), sgroup, members[-1])
-        media_dir = os.path.join(ctx.repo_root, "tests", "media")
-
-        def run(tag: str):
-            args = ["-mode", "ptt", "-scenario", "ptt_listen", "-count", "3", "-ip", ctx.sim_ip,
-                    "-domain", state.get("PTT_DOM", MCPTT_DOMAIN), *trio_cred_args([A, B, Mc], tag), "-group", sgroup,
-                    "-media_dir", media_dir, "-duration", "4"]
-            rc, tail = run_cspsim(ctx.repo_root, args, timeout=240, tail_lines=400)
-            return rc, _parse_res(tail)
-
-        with ListenerFixture(ctx.dist_dir, ctx.sim_ip, sgroup, Mc["user"], 1, "listed", "hidden") as fx:
-            if fx.active:
-                rc, r = run("lsn_l1b")
-                checks.append(("L1b 범위 안 관제사 conference SUBSCRIBE → 200 (TS 24.379 §10.1.3.4.1) [cspsim]",
-                               r is not None and r["conf_sub"] == 200, f"M_conf_sub={r['conf_sub'] if r else '-'} rc={rc}"))
-        with ListenerFixture(ctx.dist_dir, ctx.sim_ip, sgroup, Mc["user"], 0, "listed", "hidden") as fx:
-            if fx.active:
-                rc, r = run("lsn_l2b")
-                checks.append(("L2b 자격 없음 conference SUBSCRIBE → 403 + Warning 138 [cspsim]",
-                               r is not None and r["conf_sub"] == 403 and r["conf_warn"] == 138,
-                               f"M_conf_sub={r['conf_sub'] if r else '-'} warn={r['conf_warn'] if r else '-'} rc={rc}"))
-        with ListenerFixture(ctx.dist_dir, ctx.sim_ip, sgroup, Mc["user"], 1, "none", "hidden") as fx:
-            if fx.active:
-                rc, r = run("lsn_l3b")
-                checks.append(("L3b 범위 밖 conference SUBSCRIBE → 403 + Warning 138 [cspsim]",
-                               r is not None and r["conf_sub"] == 403 and r["conf_warn"] == 138,
-                               f"M_conf_sub={r['conf_sub'] if r else '-'} warn={r['conf_warn'] if r else '-'} rc={rc}"))
-        with ListenerFixture(ctx.dist_dir, ctx.sim_ip, sgroup, Mc["user"], 1, "listed", "visible") as fx:
-            if fx.active:
-                rc, r = run("lsn_l5")
-                checks.append(("L5 공개 청취(listen_visibility=visible) — 로스터 노출 [cspsim]",
-                               r is not None and r["join"] == 200 and r["hidden"] == 0, f"{r} rc={rc}"))
-    else:
-        checks.append(("L1b/L2b/L3b/L5 conference SUBSCRIBE 정합·로스터 노출 [cspsim]", None, "S3-SEED PTT 자격 창(3명+)·그룹 미확보 — cspsim 검사 불가"))
+    # ── conference SUBSCRIBE 정합(L1b/L2b/L3b)·로스터 노출(L5) — 계측기: PTT-GROUP-LISTEN-ROSTER(subscribe conference 200 + check 로스터 ${roster}),
+    #    PTT-GROUP-LISTEN-CONF-DENIED(subscribe conference 403 + check conference_warning_138). 자격·역할·listen_visibility 는 같은 ListenerFixture
+    with ListenerFixture(ctx.dist_dir, ctx.sim_ip, group, M, 1, "listed", "hidden") as fx:
+        if fx.active:
+            checks.append(tester_check(ctx, "L1b 범위 안 관제사 conference SUBSCRIBE → 200 + 로스터 은닉(hidden) (TS 24.379 §10.1.3.4.1)",
+                                       "PTT-GROUP-LISTEN-ROSTER", f"{_RID}/L1b", ht=4, binds={"roster": "conference_roster_hidden"}))
+    with ListenerFixture(ctx.dist_dir, ctx.sim_ip, group, M, 0, "listed", "hidden") as fx:
+        if fx.active:
+            checks.append(tester_check(ctx, "L2b 자격 없음 conference SUBSCRIBE → 403 + Warning 138", "PTT-GROUP-LISTEN-CONF-DENIED", f"{_RID}/L2b", ht=4))
+    with ListenerFixture(ctx.dist_dir, ctx.sim_ip, group, M, 1, "none", "hidden") as fx:
+        if fx.active:
+            checks.append(tester_check(ctx, "L3b 범위 밖 conference SUBSCRIBE → 403 + Warning 138", "PTT-GROUP-LISTEN-CONF-DENIED", f"{_RID}/L3b", ht=4))
+    with ListenerFixture(ctx.dist_dir, ctx.sim_ip, group, M, 1, "listed", "visible") as fx:
+        if fx.active:
+            checks.append(tester_check(ctx, "L5 공개 청취(listen_visibility=visible) — 로스터 노출", "PTT-GROUP-LISTEN-ROSTER", f"{_RID}/L5", ht=4,
+                                       binds={"roster": "conference_roster_visible"}))
 
     all_ok = emit_checks(ctx, checks)
     return done(ItemStatus.PASS if all_ok else ItemStatus.FAIL, fmt_checks(checks))

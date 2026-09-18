@@ -123,7 +123,8 @@
             "media_send",
             "media_stop",
             "wait",
-            "expect"
+            "expect",
+            "check"
           ],
           "type": "string"
         },

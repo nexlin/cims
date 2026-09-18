@@ -165,7 +165,8 @@
             "media_send",
             "media_stop",
             "wait",
-            "expect"
+            "expect",
+            "check"
           ],
           "title": "Step",
           "type": "string"

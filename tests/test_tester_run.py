@@ -261,6 +261,13 @@ class Compile(unittest.TestCase):
         self.assertTrue(sc_g.is_group_session())
         with self.assertRaises(Exception):
             M.Scenario.model_validate({'id': 'UT-NS', 'roles': {'a': {'pool': 'volte_ue'}}, 'flow': [{'step': 'sds_send', 'from': 'a'}]})
+        # check 단계 — payload 바인딩은 컴파일 때 CHECK_KINDS 검사
+        sc_c = M.Scenario.model_validate({'id': 'UT-CHK', 'roles': {'a': {'pool': 'volte_ue'}, 'b': {'pool': 'volte_ue'}},
+                                          'flow': [{'step': 'register', 'who': ['a', 'b']}, {'step': 'check', 'who': ['a'], 'payload': '${roster}', 'to': 'b'}]})
+        st_c = C.compile_steps(sc_c, {'ht': 3, 'roster': 'conference_roster_hidden'})
+        self.assertEqual(st_c[1]['payload'], 'conference_roster_hidden')
+        with self.assertRaises(C.CompileError):
+            C.compile_steps(sc_c, {'ht': 3, 'roster': 'bogus'})
         with self.assertRaises(Exception):   # disposition 은 sds_send 에만
             M.Scenario.model_validate({'id': 'UT-NS2', 'roles': {'a': {'pool': 'volte_ue'}}, 'flow': [{'step': 'register', 'who': ['a'], 'disposition': True}]})
         # pickup 의 payload(피처코드) 는 ${var} 바인딩으로 준다 — 컴파일이 문자열로 푼다(숫자 문자열도 문자열). 없으면 오류

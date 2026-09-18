@@ -310,6 +310,7 @@ public:
      *  (범위 안 200 / 밖 403 Warning 138). m_strConfSubWarning = 거절 응답의 Warning 헤더 값. */
     std::atomic<int>  m_iConfSubStatus{0};
     std::string       m_strConfSubWarning;
+    std::atomic<int>  m_iConfSubWarningCode{0};   // 거절 응답 Warning 의 warn-code(138 = TS 24.379 §10.1.3.4.1 범위 밖) — 계측기 check 단계
     std::string       m_strWatchedDlgCallId;     // 마지막 dialog NOTIFY 의 활성 dialog Call-ID (Replaces 대상)
     std::string       m_strWatchedDlgState;      // early|confirmed|terminated
     std::string       m_strWatchedDlgLocalTag;   // dialog-info local-tag

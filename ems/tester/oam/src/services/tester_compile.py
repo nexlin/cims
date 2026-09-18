@@ -20,7 +20,7 @@ from typing import Dict, List, Optional, Tuple
 
 from services import tester_store as store
 from services.tester_models import (LoadProfile, Scenario, Topology, PoolCreate, RunStart, CompiledStep, Identity,
-                                    TrunkRegister, WorkerPeer, WorkerPeerBind, WORKER_STEPS, Role)
+                                    TrunkRegister, WorkerPeer, WorkerPeerBind, WORKER_STEPS, Role, CHECK_KINDS)
 
 
 class CompileError(Exception):
@@ -253,9 +253,12 @@ def compile_steps(scenario: Scenario, bindings: Dict[str, object]) -> List[dict]
             emit(i, 'media_hold', seconds=max(1, int(round(seconds - cur))), expect=s.expect)
             continue
         # to 가 역할이 아닌 다이얼 리터럴(${pilot} 대표번호)이면 바인딩을 푼다 — 역할 이름은 그대로
+        payload = bind_str(s.payload, bindings)
+        if s.step == 'check' and payload not in CHECK_KINDS:
+            raise CompileError(f'flow[{i}] check: payload {payload!r} 는 {list(CHECK_KINDS)} 중 하나여야 한다(바인딩 값 확인)')
         emit(i, s.step, who=s.who, from_=s.from_, to=bind_str(s.to, bindings) if s.to not in scenario.roles else s.to,
              after_ms=s.after_ms, seconds=seconds, media=s.media,
-             group=s.group, payload=bind_str(s.payload, bindings), cause=s.cause, expect=s.expect, sample=s.sample, loop=s.loop,
+             group=s.group, payload=payload, cause=s.cause, expect=s.expect, sample=s.sample, loop=s.loop,
              disposition=s.disposition)
     return out
 
