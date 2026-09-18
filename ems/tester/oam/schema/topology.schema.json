@@ -1267,6 +1267,30 @@
       "title": "TopologyMedia",
       "type": "object"
     },
+    "UeNat": {
+      "additionalProperties": false,
+      "description": "NAT 뒤 단말 모사(§3.1 nat, ue_nat_traversal.md 검증) — 워커 호스트의 network namespace 안에서 UE 스택·RTP 소켓을 만든다(setns, 워커에\nCAP_SYS_ADMIN). netns·veth·MASQUERADE 는 워커 패키지 scripts/nat-netns.sh create <netns> 가 만든다. 대상은 호스트 주소로 변환된 소스만 본다.",
+      "properties": {
+        "local_ip": {
+          "description": "netns 안 단말 주소 — SDP·Via·Contact 의 로컬 IP(스크립트 기본 <cidr>.2)",
+          "minLength": 7,
+          "title": "Local Ip",
+          "type": "string"
+        },
+        "netns": {
+          "description": "워커 호스트의 netns 이름(/var/run/netns/<netns>, Nat.NetnsDir)",
+          "pattern": "^[A-Za-z0-9_-]{1,15}$",
+          "title": "Netns",
+          "type": "string"
+        }
+      },
+      "required": [
+        "netns",
+        "local_ip"
+      ],
+      "title": "UeNat",
+      "type": "object"
+    },
     "UePool": {
       "additionalProperties": false,
       "properties": {
@@ -1317,6 +1341,18 @@
           "default": null,
           "description": "그 노드의 수신점 id — 비면 transport 와 같은 protocol 의 첫 access 수신점",
           "title": "Listener"
+        },
+        "nat": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UeNat"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "NAT 뒤 단말 — 워커 호스트 netns 안에서 소켓을 만든다(대상은 변환된 주소만 본다). 워커 health nat 과 대조"
         },
         "prack": {
           "default": false,

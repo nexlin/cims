@@ -1235,13 +1235,20 @@ def _grant_ipsec_capability(module_root: str, install_path: str) -> str:
     설치/기동마다 다시 걸어야 한다. 특권이 없어도 모듈은 기동한다(ipsec-3gpp 미제시) — 실패는
     로그만. 반환: 로그용 짧은 문자열."""
     name = os.path.basename((module_root or "").rstrip("/"))
-    if name not in ("csp", "cspsim"):
+    if name not in ("csp", "cspsim", "cims-tester-worker"):
         return ""
     # 버전 디렉토리 레이아웃은 <install>/<모듈>/bin/<모듈> — 평탄 <install>/bin/ 은 legacy.
     binp = os.path.join(install_path, name, "bin", name)
     if not os.path.isfile(binp):
         binp = os.path.join(install_path, "bin", name)
     if not os.path.isfile(binp):
+        return ""
+    if name == "cims-tester-worker":
+        # 계측기 워커 NAT 풀(test_instrument.md §3.1) — setns(CLONE_NEWNET) 에 CAP_SYS_ADMIN. 없어도 기동한다(NAT 풀 생성만 400)
+        rc, out, err = _run_cims_priv("setcap-sys-admin", binp, timeout=20)
+        if rc == 0:
+            return " cap_sys_admin"
+        print(f"[agent] {name}: CAP_SYS_ADMIN 부여 실패 rc={rc} ({(err or out).strip()[:120]}) — NAT(netns) 풀 불가로 기동", flush=True)
         return ""
     rc, out, err = _run_cims_priv("setcap-net-admin", binp, timeout=20)
     if rc == 0:

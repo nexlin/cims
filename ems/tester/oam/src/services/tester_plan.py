@@ -212,6 +212,19 @@ def build_plan(scenario: Scenario, topology: Topology, topology_doc: dict, profi
                     out['errors'].append(f'{w.name}: TLS 피어 풀 {need_peer_cert} 에는 워커 Tls.PeerCertFile 이 필요하다')
             if ht is not None:
                 row['capacity']['tls'] = ht
+            # NAT 풀(§3.1 nat) — 워커에 CAP_SYS_ADMIN 과 그 netns(scripts/nat-netns.sh) 가 있어야 풀 생성이 된다
+            nat_pools = [(p['pool'], p['nat']['netns']) for p in pw['pools'] if p.get('nat')]
+            if nat_pools:
+                hn = h.get('nat') if h else None
+                if h and hn is None:
+                    out['warnings'].append(f'{w.name}: 워커가 nat 상태를 보고하지 않는다(구버전) — NAT 풀 {[n for n, _ in nat_pools]} 을 만들 수 없다')
+                elif hn is not None:
+                    if not hn.get('capable'):
+                        out['errors'].append(f'{w.name}: 워커에 CAP_SYS_ADMIN 이 없다(cims-priv setcap-sys-admin) — NAT 풀 {[n for n, _ in nat_pools]} 불가')
+                    missing = sorted({ns for _, ns in nat_pools if ns not in (hn.get('netns') or [])})
+                    if missing:
+                        out['errors'].append(f'{w.name}: netns {missing} 가 워커 호스트에 없다 — sudo scripts/nat-netns.sh create <name>')
+                    row['capacity']['nat'] = hn
             rtp_cap = int(hm.get('max_rtp_streams') or (w.media.max_rtp_streams if w.media and w.media.max_rtp_streams else 0) or 0)
             row['capacity']['rtp'] = rtp_cap or None
             row['capacity']['rtp_streams'] = hm.get('rtp_streams')

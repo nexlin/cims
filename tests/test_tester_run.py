@@ -83,6 +83,8 @@ class FakeWorker:
                         h['real_ue'] = outer.behaviour['real_ue']
                     if outer.behaviour.get('tls') is not None:
                         h['tls'] = outer.behaviour['tls']
+                    if outer.behaviour.get('nat') is not None:
+                        h['nat'] = outer.behaviour['nat']
                     self._send(200, h)
                 elif self.path.startswith('/runs/'):
                     self._send(200, {'state': outer.state, 'counters': {}})
@@ -531,6 +533,35 @@ class TlsPlan(unittest.TestCase):
         w1.behaviour['tls'] = {'ca': True, 'client_cert': True, 'peer_cert': True}
         plan_doc = P.build_plan(sc, topo, topo_doc, None, {}, 1, None, probe=True, stream_port=1)
         self.assertFalse(any('Tls.' in e for e in plan_doc['errors']), plan_doc['errors'])
+
+
+class NatPlan(unittest.TestCase):
+    def test_nat_pool_plan_checks(self):
+        """NAT 풀(§3.1 nat) — PoolCreate 에 nat 이 내려가고, 계획 미리보기가 워커 health.nat(CAP_SYS_ADMIN·netns 목록)과 대조한다."""
+        from services import tester_workers as TW, tester_plan as P
+        w1 = FakeWorker('w1', behaviour={'nat': {'capable': False, 'netns': []}})
+        topo_doc = _topology([w1])
+        topo_doc['pools']['ue_w1']['nat'] = {'netns': 'cims-nat1', 'local_ip': '10.200.1.2'}
+        topo = M.Topology.model_validate(topo_doc)
+        sc = M.Scenario.model_validate({'id': 'UT-NAT', 'roles': {'a': {'pool': 'volte_ue'}, 'b': {'pool': 'volte_ue'}},
+                                        'flow': [{'step': 'register', 'who': ['a', 'b']}, {'step': 'invite', 'from': 'a', 'to': 'b'},
+                                                 {'step': 'answer', 'who': ['b']}, {'step': 'bye', 'from': 'a'}]})
+        ws = TW.discover(topo_doc)
+        for w in ws:
+            w.probe()
+        plan = C.compile_run('rn', sc, topo, topo_doc, None, {}, ws, lambda w: 'x:1', 1, None)
+        self.assertEqual(plan['workers']['w1']['pools'][0]['nat'], {'netns': 'cims-nat1', 'local_ip': '10.200.1.2'})
+        plan_doc = P.build_plan(sc, topo, topo_doc, None, {}, 1, None, probe=True, stream_port=1)
+        errs = ' '.join(plan_doc['errors'])
+        self.assertIn('CAP_SYS_ADMIN', errs)
+        self.assertIn('cims-nat1', errs)
+        w1.behaviour['nat'] = {'capable': True, 'netns': ['cims-nat1']}
+        plan_doc = P.build_plan(sc, topo, topo_doc, None, {}, 1, None, probe=True, stream_port=1)
+        self.assertFalse(any('netns' in e or 'CAP_SYS_ADMIN' in e for e in plan_doc['errors']), plan_doc['errors'])
+        self.assertEqual(plan_doc['workers'][0]['capacity']['nat'], {'capable': True, 'netns': ['cims-nat1']})
+        for bad in ({'netns': 'bad name', 'local_ip': '10.0.0.2'}, {'netns': 'n'}):
+            with self.assertRaises(Exception):
+                M.UeNat.model_validate(bad)
 
 
 class SipDump(unittest.TestCase):

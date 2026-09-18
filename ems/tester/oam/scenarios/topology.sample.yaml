@@ -61,6 +61,13 @@ pools:                                   # 풀 하나 = 워커 하나. 워커 �
     source: { creds: creds/volte-b.jsonl, offset: 10, count: 5 }
     transport: udp
     dtmf: inband
+  volte_ue_nat:                          # NAT 뒤 단말(VOLTE-CALL-NAT) — 워커 호스트 netns cims-nat1 안(sudo scripts/nat-netns.sh create cims-nat1), 단말 주소 10.200.1.2
+    kind: ue
+    worker: w1
+    access: csp
+    source: { creds: creds/volte-a.jsonl, offset: 10, count: 4 }
+    transport: udp
+    nat: { netns: cims-nat1, local_ip: 10.200.1.2 }
   ptt_ue:                                # MCPTT 단말 — service: ptt (PTT 도메인·GMS/CMS 구독·그룹 affiliation·floor). creds 줄마다 `group` = affiliation 그룹
     kind: ue
     worker: w1

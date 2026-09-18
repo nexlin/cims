@@ -56,6 +56,7 @@ struct WorkerConfig {
     std::string tlsClientCertFile;  // 풀 tls_client_cert — 대상 접속점이 상호인증을 요구할 때 제시하는 클라이언트 인증서(PEM 체인)
     std::string tlsClientKeyFile;
     std::string sampleDir;          // 미디어 샘플 디렉터리 — media_send 의 sample 파일은 이 안의 상대 경로(§4 미디어 평면)
+    std::string natNetnsDir = "/var/run/netns";   // NAT 풀(§3.1 nat) — netns 이름을 이 디렉터리의 파일로 연다(setns 에 CAP_SYS_ADMIN)
     std::string sipCapture = "failed"; // SIP 덤프 — off | failed(실패한 인스턴스의 호만 올린다) | all(모든 인스턴스 — 기능 시험용)
     int sipDumpMax = 500;           // run 하나에서 올리는 덤프(Call-ID) 상한
     int maxRtpStreams = 0;          // RTP 를 쓰는 단말 동시 상한(0 = 제한 없음) — 넘으면 인스턴스 발생을 건너뛴다(skipped)
@@ -160,6 +161,10 @@ struct Pool {
     std::map<std::string, Endpoint*> byUser;   // peer: 신원 user → Endpoint (착신 귀속)
     std::map<std::string, Endpoint*> byCall;   // peer: 활성 Call-ID → Endpoint
     std::vector<std::unique_ptr<RealUeProcess>> reals;   // real-ue: 신원 순 프로세스(Endpoint::real 이 가리킨다)
+    // NAT 풀(§3.1) — UE 스택·RTP 소켓을 이 network namespace 안에서 만든다(SimSession::Start 를 setns 한 스레드에서). 대상은 변환된 주소만 본다
+    std::string natNs;              // netns 이름(비면 NAT 없음)
+    std::string natLocalIp;         // netns 안 단말 주소(SDP·Via·Contact 의 로컬 IP)
+    int natFd = -1;                 // open(<NetnsDir>/<netns>) — 풀 수명
     std::vector<std::unique_ptr<Endpoint>> eps;
 };
 
@@ -379,6 +384,8 @@ private:
     Endpoint* endpointOf(SimSession* s);
     Endpoint* endpointOfPeerCall(CsimPeer* p, const std::string& callId);
     bool startEndpoint(Endpoint* ep);
+    bool startInNetns(Endpoint* ep, std::string& err);   // NAT 풀 — setns(CLONE_NEWNET) 한 스레드에서 SimSession::Start(소켓이 그 netns 에 생긴다)
+    static bool hasCapSysAdmin();                        // /proc/self/status CapEff 의 CAP_SYS_ADMIN(21) 비트
     bool epStartCall(Endpoint* from, Endpoint* to, const Json& media, const std::string& dial = "");   // to 없으면 dial(번호 리터럴)을 부른다
     bool epHasCall(Endpoint* ep);
     int epAnswer(Endpoint* ep);                 // 0=성공, 그 외 SIP 코드(488 코덱 불일치 등)

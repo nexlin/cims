@@ -402,6 +402,30 @@
       "title": "TrunkRegister",
       "type": "object"
     },
+    "UeNat": {
+      "additionalProperties": false,
+      "description": "NAT 뒤 단말 모사(§3.1 nat, ue_nat_traversal.md 검증) — 워커 호스트의 network namespace 안에서 UE 스택·RTP 소켓을 만든다(setns, 워커에\nCAP_SYS_ADMIN). netns·veth·MASQUERADE 는 워커 패키지 scripts/nat-netns.sh create <netns> 가 만든다. 대상은 호스트 주소로 변환된 소스만 본다.",
+      "properties": {
+        "local_ip": {
+          "description": "netns 안 단말 주소 — SDP·Via·Contact 의 로컬 IP(스크립트 기본 <cidr>.2)",
+          "minLength": 7,
+          "title": "Local Ip",
+          "type": "string"
+        },
+        "netns": {
+          "description": "워커 호스트의 netns 이름(/var/run/netns/<netns>, Nat.NetnsDir)",
+          "pattern": "^[A-Za-z0-9_-]{1,15}$",
+          "title": "Netns",
+          "type": "string"
+        }
+      },
+      "required": [
+        "netns",
+        "local_ip"
+      ],
+      "title": "UeNat",
+      "type": "object"
+    },
     "WorkerPeer": {
       "additionalProperties": false,
       "description": "워커에 내려가는 피어 엔진 사양 — 토폴로지 PeerPool 에서 워커·노드 참조를 떼고 bind.ip(워커 호스트 주소)를 채운 것.",
@@ -575,6 +599,18 @@
       ],
       "title": "Kind",
       "type": "string"
+    },
+    "nat": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UeNat"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "kind=ue — NAT 풀: 워커가 netns 안에서 스택을 띄운다(local_ip 가 단말 주소)"
     },
     "peer": {
       "anyOf": [

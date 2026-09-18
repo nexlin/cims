@@ -270,6 +270,13 @@ class _PoolBase(_Strict):
                                  description='논리 풀 이름 — 워커 여럿에 나눌 때 워커마다 풀 + 같은 group. 시나리오 roles.X.pool 이 참조')
 
 
+class UeNat(_Strict):
+    """NAT 뒤 단말 모사(§3.1 nat, ue_nat_traversal.md 검증) — 워커 호스트의 network namespace 안에서 UE 스택·RTP 소켓을 만든다(setns, 워커에
+    CAP_SYS_ADMIN). netns·veth·MASQUERADE 는 워커 패키지 scripts/nat-netns.sh create <netns> 가 만든다. 대상은 호스트 주소로 변환된 소스만 본다."""
+    netns: str = Field(pattern=r'^[A-Za-z0-9_-]{1,15}$', description='워커 호스트의 netns 이름(/var/run/netns/<netns>, Nat.NetnsDir)')
+    local_ip: str = Field(min_length=7, description='netns 안 단말 주소 — SDP·Via·Contact 의 로컬 IP(스크립트 기본 <cidr>.2)')
+
+
 class UePool(_PoolBase):
     kind: Literal['ue']
     access: str = Field(description='접속점 노드 id — edge=access 수신점이 있는 SIP 노드')
@@ -285,6 +292,7 @@ class UePool(_PoolBase):
     dtmf: DtmfMode = Field(default='rfc4733', description='DTMF 방식 — rfc4733(telephone-event 오퍼/echo) · inband(G.711 톤 — 협상 코덱이 pcmu/pcma 일 때만) · off. 옛 bool 도 받는다')
     tls_verify: bool = Field(default=False, description='transport=tls — 접속점 서버 인증서를 워커 Tls.CaFile 로 검증(체인만, 호스트명 대조 없음). 기본 끔(개발 스택 자체 서명)')
     tls_client_cert: bool = Field(default=False, description='transport=tls — 접속점이 클라이언트 인증서를 요구할 때(상호인증) 워커 Tls.ClientCertFile 을 제시')
+    nat: Optional[UeNat] = Field(default=None, description='NAT 뒤 단말 — 워커 호스트 netns 안에서 소켓을 만든다(대상은 변환된 주소만 본다). 워커 health nat 과 대조')
 
     @field_validator('dtmf', mode='before')
     @classmethod
@@ -1283,6 +1291,7 @@ class PoolCreate(_Strict):
     dtmf: DtmfMode = Field(default='rfc4733', description='kind=ue — rfc4733(telephone-event 오퍼/echo) · inband(G.711 톤) · off')
     tls_verify: bool = Field(default=False, description='kind=ue|real-ue — 서버 TLS 인증서 검증(ue: 워커 Tls.CaFile · real-ue: RealUe.TlsCaFile 앵커, 없으면 검증 없이)')
     tls_client_cert: bool = Field(default=False, description='kind=ue — 워커 Tls.ClientCertFile 을 클라이언트 인증서로 제시(대상 접속점 상호인증)')
+    nat: Optional[UeNat] = Field(default=None, description='kind=ue — NAT 풀: 워커가 netns 안에서 스택을 띄운다(local_ip 가 단말 주소)')
     target_csp: TargetCsp = Field(description='풀이 닿는 SIP 서버 — 컨트롤러가 토폴로지 노드 참조에서 파생')
     peer: Optional[WorkerPeer] = Field(default=None, description='kind=peer 일 때 프로파일·bind·신원 범위')
     trunk_register: Optional[TrunkRegister] = Field(default=None, description='kind=peer(pbx) 트렁크 REGISTER 계정 — 비밀 해석 완료본')

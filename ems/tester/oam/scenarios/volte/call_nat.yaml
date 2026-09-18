@@ -1,0 +1,19 @@
+# NAT 뒤 단말 통화(ue_nat_traversal.md) — 발신 UE 풀(volte_ue_nat)이 워커 호스트 netns 안에서 뜨고 MASQUERADE 로 소스 주소·포트가 바뀐다.
+#   대상이 등록 바인딩을 received/rport 로 잡고(RFC 3581), 미디어를 SDP 주소가 아니라 첫 RTP 의 소스로 latch(CMP)하면 양방향 RTP 가 흐른다 —
+#   rtp_loss_pct·양측 수신(무음 leg 0)이 판정. 착신 UE 는 보통 풀. 전제 = 워커 호스트 sudo scripts/nat-netns.sh create cims-nat1 + 워커 CAP_SYS_ADMIN.
+id: VOLTE-CALL-NAT
+title: NAT 뒤 가입자 → 가입자 통화 (netns + MASQUERADE)
+tags: [volte, nat]
+roles:
+  caller: { pool: volte_ue_nat }
+  callee: { pool: volte_ue }
+flow:
+  - { step: register,   who: [caller, callee], expect: { code: 200, rrd_ms: { p95: 500 } } }
+  - { step: invite,     from: caller, to: callee, media: { audio: amr-wb } }
+  - { step: answer,     who: [callee], after_ms: 500, expect: { code: 200, srd_ms: { p95: 2000 } } }
+  - { step: media_hold, seconds: 4, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: callee, expect: { sdd_ms: { p95: 300 } } }
+  - { step: invite,     from: callee, to: caller, media: { audio: amr-wb } }
+  - { step: answer,     who: [caller], after_ms: 500, expect: { code: 200, srd_ms: { p95: 2000 } } }
+  - { step: media_hold, seconds: 4, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }

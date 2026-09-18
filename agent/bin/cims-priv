@@ -13,6 +13,7 @@
 #   sudo -n cims-priv keepalived-unmask               # 설치 중단으로 남은 mask 잔재 해제
 #   sudo -n cims-priv policy-rc-clear                 # 구버전이 남긴 policy-rc.d 잔재 제거
 #   sudo -n cims-priv setcap-net-admin <bin>          # csp/cspsim 에 CAP_NET_ADMIN (IMS AKA+IPsec XFRM)
+#   sudo -n cims-priv setcap-sys-admin <bin>          # cims-tester-worker 에 CAP_SYS_ADMIN (NAT 풀 setns — test_instrument.md §3.1)
 #   sudo -n cims-priv version
 #
 # ip-add 는 항상 'label <iface>:cims' 를 부여 — collect_interfaces 가 label 로
@@ -85,6 +86,24 @@ do_setcap_net_admin() {
     [[ -n "$setcap_cmd" ]] || { err "setcap not installed (libcap2-bin)"; exit 4; }
     if "$setcap_cmd" cap_net_admin+ep "$path"; then
         ok "cap_net_admin+ep $path"
+    else
+        err "setcap failed: $path"
+        exit 3
+    fi
+}
+
+# CAP_SYS_ADMIN 파일 capability — 계측기 워커의 NAT 풀(test_instrument.md §3.1 nat) 이 UE 스택 소켓을 다른 network namespace 안에서 만들려면
+#   setns(CLONE_NEWNET) 이 필요하다. 대상은 cims-tester-worker 실행 파일뿐(시험 대상 밖 계측기 호스트). 나머지 규칙은 setcap-net-admin 과 같다.
+do_setcap_sys_admin() {
+    local path="$1"
+    [[ "$path" == /* && "$path" != *..* ]] || { err "setcap-sys-admin: absolute path without '..' required"; exit 2; }
+    local base; base="$(basename "$path")"
+    [[ "$base" == "cims-tester-worker" ]] || { err "setcap-sys-admin: only cims-tester-worker binary"; exit 2; }
+    [[ -f "$path" && ! -L "$path" ]] || { err "setcap-sys-admin: not a regular file: $path"; exit 2; }
+    local setcap_cmd; setcap_cmd="$(command -v setcap 2>/dev/null || true)"
+    [[ -n "$setcap_cmd" ]] || { err "setcap not installed (libcap2-bin)"; exit 4; }
+    if "$setcap_cmd" cap_sys_admin+ep "$path"; then
+        ok "cap_sys_admin+ep $path"
     else
         err "setcap failed: $path"
         exit 3
@@ -616,6 +635,10 @@ case "${1:-}" in
     setcap-net-admin)
         [[ $# -eq 2 ]] || { err "usage: cims-priv setcap-net-admin <bin>"; exit 1; }
         do_setcap_net_admin "$2"
+        ;;
+    setcap-sys-admin)
+        [[ $# -eq 2 ]] || { err "usage: cims-priv setcap-sys-admin <bin>"; exit 1; }
+        do_setcap_sys_admin "$2"
         ;;
     net-sysctl)
         [[ $# -eq 3 ]] || { err "usage: cims-priv net-sysctl <key> <value>"; exit 1; }

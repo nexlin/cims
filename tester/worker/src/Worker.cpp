@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <dirent.h>
+#include <fcntl.h>
+#include <sched.h>
 #include <sys/stat.h>
 #include <arpa/inet.h>
 #include <chrono>
@@ -335,6 +337,19 @@ HttpResponse Worker::health() {
     tls["client_cert"] = Json(!m_cfg.tlsClientCertFile.empty() && access(m_cfg.tlsClientCertFile.c_str(), R_OK) == 0);
     tls["peer_cert"] = Json(!m_cfg.peerCertFile.empty() && access(m_cfg.peerCertFile.c_str(), R_OK) == 0);
     j["tls"] = tls;
+    // NAT 풀(§3.1) — CAP_SYS_ADMIN 보유·이 호스트의 netns 목록(scripts/nat-netns.sh 가 만든 것) — 계획 미리보기가 풀 nat.netns 와 대조
+    Json nat = Json::Object();
+    nat["capable"] = Json(hasCapSysAdmin());
+    Json nss = Json::Array();
+    if (DIR* dp = opendir(m_cfg.natNetnsDir.c_str())) {
+        std::vector<std::string> names;
+        while (struct dirent* de = readdir(dp)) if (de->d_name[0] != '.') names.push_back(de->d_name);
+        closedir(dp);
+        std::sort(names.begin(), names.end());
+        for (auto& n : names) nss.push(Json(n));
+    }
+    nat["netns"] = nss;
+    j["nat"] = nat;
     return jsonResp(200, j);
 }
 
@@ -348,6 +363,7 @@ void Worker::destroyPool(Pool* pool) {
     for (auto& ep : pool->eps) {
         if (ep->s) { m_bySession.erase(ep->s); if (ep->started) ep->s->Stop(5); delete ep->s; ep->s = nullptr; }
     }
+    if (pool->natFd >= 0) { close(pool->natFd); pool->natFd = -1; }
     if (pool->peer) { m_byPeer.erase(pool->peer.get()); pool->peer->Stop(); pool->peer.reset(); }
     if (!pool->reals.empty()) {
         for (auto& r : pool->reals) r->stop();
@@ -370,6 +386,18 @@ bool Worker::buildUePool(Pool* pool, const Json& d, std::string& err) {
     // TLS 서버 검증·클라이언트 인증서(§3.1) — 풀이 켜면 워커의 Tls.* 파일이 있어야 한다
     const bool tlsVerify = d["tls_verify"].asBool(false), tlsClientCert = d["tls_client_cert"].asBool(false);
     if (!tlsRequirements(pool->transport == "tls" && tlsVerify, pool->transport == "tls" && tlsClientCert, err)) return false;
+    // NAT 풀(§3.1 nat) — netns 파일을 열어 두고 단말 로컬 IP 를 netns 안 주소로. 파일이 없거나 권한이 없으면 400
+    std::string localIp = m_cfg.localIp;
+    if (d["nat"].isObject()) {
+        pool->natNs = d["nat"]["netns"].asString();
+        pool->natLocalIp = d["nat"]["local_ip"].asString();
+        if (pool->natNs.empty() || pool->natLocalIp.empty()) { err = "nat.netns/local_ip required"; return false; }
+        if (!hasCapSysAdmin()) { err = "nat_cap_missing: 워커에 CAP_SYS_ADMIN 이 없다(cims-priv setcap-sys-admin <bin>) — NAT(netns) 풀 불가"; return false; }
+        std::string path = m_cfg.natNetnsDir + "/" + pool->natNs;
+        pool->natFd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+        if (pool->natFd < 0) { err = "nat_netns_missing: " + path + " — " + strerror(errno) + " (scripts/nat-netns.sh create " + pool->natNs + ")"; return false; }
+        localIp = pool->natLocalIp;
+    }
     const Json& ids = d["identities"];
     for (size_t i = 0; i < ids.size(); ++i) {
         const Json& x = ids.at(i);
@@ -392,7 +420,7 @@ bool Worker::buildUePool(Pool* pool, const Json& d, std::string& err) {
         if (!authId.empty() && authId.find('@') == std::string::npos) authId += "@" + ep->id.domain;
         int localPort = m_cfg.sipPortBase > 0 ? m_cfg.sipPortBase + 2 * (int)i : 0;
         ep->s = new SimSession((int)i, ep->id.user, authId, ep->id.domain, ep->id.password, ep->id.ha1,
-                               pool->targetIp, pool->targetPort, m_cfg.localIp, localPort, ptt, ep->id.pttGroup);
+                               pool->targetIp, pool->targetPort, localIp, localPort, ptt, ep->id.pttGroup);
         // MCPTT 단말 — xcap-diff NOTIFY 는 받되 XCAP 문서 GET(IdMS 토큰 필요)은 하지 않는다. 착신은 libcsim 이 자동응답(automatic commencement)
         if (ptt) { ep->s->SetNoXcap(true); if (!ep->id.pttGroup.empty()) pool->groups[ep->id.pttGroup].push_back(ep.get()); }
         if (pool->transport == "tls") ep->s->SetTransport(E_SIP_TLS);
@@ -1478,13 +1506,42 @@ bool Worker::startEndpoint(Endpoint* ep) {
         return true;
     }
     ep->s->m_clsRtpThread.ResetRecvStats();
-    if (!ep->s->Start()) {
+    bool ok;
+    std::string nerr;
+    if (ep->poolRef && ep->poolRef->natFd >= 0) ok = startInNetns(ep, nerr);   // NAT 풀 — 소켓을 netns 안에서
+    else ok = ep->s->Start();
+    if (!ok) {
         m_metrics.counter("registered_fail");
-        emitEvent("stack start failed", ep, "register", 0);
+        emitEvent(nerr.empty() ? "stack start failed" : "stack start failed: " + nerr, ep, "register", 0);
         return false;
     }
     ep->started = true;
     return true;
+}
+
+bool Worker::startInNetns(Endpoint* ep, std::string& err) {
+    // setns 는 부른 스레드만 옮긴다 — 스케줄러 스레드를 옮기지 않고 임시 스레드에서 Start() 한다. psip 스택·RTP 소켓은 Start() 안에서(부른 스레드에서)
+    //   만들어지고, Start() 가 띄우는 수신 스레드들은 그 netns 를 물려받는다. 뒤의 Stop()/재Start 도 같은 경로.
+    bool ok = false;
+    std::string e;
+    std::thread th([&] {
+        if (setns(ep->poolRef->natFd, CLONE_NEWNET) != 0) { e = std::string("setns(") + ep->poolRef->natNs + "): " + strerror(errno) + " — 워커에 CAP_SYS_ADMIN 이 필요하다(cims-priv setcap-sys-admin)"; return; }
+        ok = ep->s->Start();
+        if (!ok) e = "stack start failed in netns " + ep->poolRef->natNs;
+    });
+    th.join();
+    err = e;
+    return ok;
+}
+
+bool Worker::hasCapSysAdmin() {
+    FILE* f = fopen("/proc/self/status", "r");
+    if (!f) return false;
+    char line[256];
+    unsigned long long eff = 0;
+    while (fgets(line, sizeof(line), f)) if (sscanf(line, "CapEff: %llx", &eff) == 1) break;
+    fclose(f);
+    return (eff >> 21) & 1ULL;   // CAP_SYS_ADMIN = 21
 }
 
 /** 코덱 테이블 PT → rtpmap 이름 (미지 = 빈 문자열) — 수신 wire PT 로 MOS 코덱(E-model Ie/Bpl)을 고른다 */

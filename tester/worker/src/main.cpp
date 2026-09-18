@@ -1,7 +1,7 @@
 // cims-tester-worker — 계측기 워커 엔트리 (test_instrument.md §2·§8).
 //   cims-tester-worker [config/cims-tester-worker.json] [--preflight] [--verbose]
 // 설정 키(config_template.json 선언): Worker.Name · Server.Ip/Port · Sip.LocalIp/PortBase/Capture/DumpMax · Media.AudioFile/VideoFile/SampleDir/MaxRtpStreams
-//   · Tls.CaFile/ClientCertFile/ClientKeyFile/PeerCertFile/PeerKeyFile(구 Media.PeerCertFile 승계)
+//   · Tls.CaFile/ClientCertFile/ClientKeyFile/PeerCertFile/PeerKeyFile(구 Media.PeerCertFile 승계) · Nat.NetnsDir(NAT 풀 netns 디렉터리)
 //   · RealUe.CliPath/MaxProcesses/LogLevel/StartTimeoutS/TlsCaFile · Limits.EndpointsPerCore/SapsPerCore · Timers.RegisterIntervalMs/RegisterTimeoutS/InviteTimeoutMs/ByeTimeoutMs
 // libcsim(SimSession) 의 printf 진단은 부하 중 초당 수천 줄이라 stdout 을 /dev/null 로 돌린다(--verbose 면 유지).
 // 워커 자기 로그는 stderr — agent lifecycle 이 로그 파일로 모은다.
@@ -81,6 +81,7 @@ int main(int argc, char** argv) {
         cfg.tlsClientCertFile = c["Tls"]["ClientCertFile"].asString("");
         cfg.tlsClientKeyFile = c["Tls"]["ClientKeyFile"].asString("");
         cfg.sampleDir = c["Media"]["SampleDir"].asString("");
+        cfg.natNetnsDir = c["Nat"]["NetnsDir"].asString(cfg.natNetnsDir);
         cfg.maxRtpStreams = (int)c["Media"]["MaxRtpStreams"].asInt(0);
         // 상대 경로 SampleDir — 모듈 디렉터리(<모듈>/bin/cims-tester-worker 의 위) 기준, 거기 없으면 작업 디렉터리 기준
         if (!cfg.sampleDir.empty() && cfg.sampleDir[0] != '/') {

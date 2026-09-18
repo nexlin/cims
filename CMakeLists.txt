@@ -393,6 +393,7 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/config
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/log
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/samples
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/scripts
 
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/run
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/log
@@ -411,6 +412,8 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/tester/worker/config/config_template.json    ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/config/config_template.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/tester/worker/config/cims-tester-worker.json ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/config/cims-tester-worker.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/tester/worker/pkg.json ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/pkg.json
+    # NAT 풀(test_instrument.md §3.1) — 워커 호스트에 netns + veth + MASQUERADE 를 만드는 운영자 스크립트(root)
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/tester/worker/scripts/nat-netns.sh ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/scripts/
     # 동봉 미디어 샘플(G.711 raw — tester/worker/samples/gen_tones.py 산출물 · H.264 Annex B 비디오 = Media.VideoFile 기본). 운영자 샘플은 같은 디렉터리에 추가
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/tester/worker/samples/ringback_kr.pcmu ${CMAKE_SOURCE_DIR}/tester/worker/samples/ringback_kr.pcma ${CMAKE_SOURCE_DIR}/tester/worker/samples/tone_1k.pcmu ${CMAKE_SOURCE_DIR}/tester/worker/samples/tone_1k.pcma ${CMAKE_SOURCE_DIR}/tester/worker/samples/sample_video.h264 ${CMAKE_SOURCE_DIR}/tester/worker/samples/sample_voice.amrwb ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/samples/
 

@@ -116,6 +116,8 @@ export interface UePoolDoc extends TopoPoolBase {
   dtmf?: DtmfMode | boolean
   /** transport=tls — 서버 인증서 검증(워커 Tls.CaFile) · 클라이언트 인증서 제시(워커 Tls.ClientCertFile, 접속점 상호인증) */
   tls_verify?: boolean; tls_client_cert?: boolean
+  /** NAT 뒤 단말 — 워커 호스트 netns 안에서 스택을 띄운다(scripts/nat-netns.sh create <netns>, 워커 CAP_SYS_ADMIN) */
+  nat?: { netns: string; local_ip: string }
 }
 export type DtmfMode = 'rfc4733' | 'inband' | 'off'
 export interface PeerPoolDoc extends TopoPoolBase {

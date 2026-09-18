@@ -576,7 +576,8 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
             else:
                 pc = PoolCreate(pool=pname, kind='ue', identities=ids_of(pname), transport=p.transport, srtp=p.srtp,
                                 service=topology.pool_service(pname), prack=bool(p.prack), dtmf=p.dtmf, target_csp=tc,
-                                tls_verify=bool(p.tls_verify and p.transport == 'tls'), tls_client_cert=bool(p.tls_client_cert and p.transport == 'tls'))
+                                tls_verify=bool(p.tls_verify and p.transport == 'tls'), tls_client_cert=bool(p.tls_client_cert and p.transport == 'tls'),
+                                nat=p.nat)
             pools.append(pc.model_dump(by_alias=True, exclude_none=True))
         slices = {role: [b, e] for role, (_p, b, e) in pw['ranges'].items()}
         rs = RunStart(run_id=run_id, scenario_id=scenario.id, roles=dict(pw['role_pool']), role_slices=slices,
