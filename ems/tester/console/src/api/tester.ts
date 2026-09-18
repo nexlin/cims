@@ -118,6 +118,8 @@ export interface UePoolDoc extends TopoPoolBase {
   tls_verify?: boolean; tls_client_cert?: boolean
   /** NAT 뒤 단말 — 워커 호스트 netns 안에서 스택을 띄운다(scripts/nat-netns.sh create <netns>, 워커 CAP_SYS_ADMIN) */
   nat?: { netns: string; local_ip: string }
+  /** 미디어 전담 워커 — 이 풀의 RTP 를 그 워커(에이전트 /media/*)에서 굴린다(자기 워커와 다른 이름, PTT 불가) */
+  media_worker?: string
 }
 export type DtmfMode = 'rfc4733' | 'inband' | 'off'
 export interface PeerPoolDoc extends TopoPoolBase {

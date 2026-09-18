@@ -13,6 +13,7 @@
 ⑨ 네이티브 `build/bin/csim_peer_fault_test` — 피어 오류 주입 후속(재전송 유실 → Timer A 재전송 도달·THIG 토큰화 Via 보존)·G.722 협상(UDP 루프백 피어 둘).
 ⑩ 네이티브 `build/bin/csim_tls_mutual_test` — TLS 상호인증(수신점 클라이언트 인증서 요구·제시·서버 검증 — openssl CLI 임시 인증서).
 ⑪ 네이티브 `build/bin/csim_sds_test` — MCData SDS 코덱 왕복(TS 24.282 §15 TLV·conversation ID 단말 호환).
+⑫ 네이티브 `build/bin/tester_media_agent_test` — 미디어 전담 워커(에이전트 HTTP·클라이언트·CRtpThread 원격 모드 루프백).
 """
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ _NAME = "계측기 계약/핸들러/오케스트레이터/피어 시드/게이�
 _MODULES = ("tests.test_tester_models", "tests.test_tester_handler", "tests.test_tester_run", "tests.test_tester_target",
             "tests.test_gateway_stream")
 _NATIVES = ("csim_rtp_dtmf_test", "csim_rtp_media_test", "csim_peer_fault_test", "csim_tls_mutual_test", "csim_sds_test", "tester_sip_capture_test",
-            "tester_emodel_test", "tester_real_ue_test")
+            "tester_emodel_test", "tester_real_ue_test", "tester_media_agent_test")
 
 
 @verify_item(

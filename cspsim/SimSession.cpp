@@ -1004,7 +1004,7 @@ void SimSession::StartCallWithReplaces(const std::string& strTarget, const std::
 
     CSipCallRtp clsRtp;
     CSipCallRoute clsRoute;
-    clsRtp.m_strIp  = m_clsSetup.m_strLocalIp;
+    clsRtp.m_strIp  = MediaIp();
     clsRtp.m_iPort  = m_clsRtpThread.m_iPort;
     clsRtp.m_iCodec = m_clsRtpThread.m_strMediaFile.empty() ? 0 : CSipCodecTable::GetTop().m_iPt;
 #ifdef USE_MEDIA_LIST
@@ -1038,7 +1038,7 @@ void SimSession::StartCallWithJoin(const std::string& strTarget, const std::stri
 
     CSipCallRtp clsRtp;
     CSipCallRoute clsRoute;
-    clsRtp.m_strIp  = m_clsSetup.m_strLocalIp;
+    clsRtp.m_strIp  = MediaIp();
     clsRtp.m_iPort  = m_clsRtpThread.m_iPort;
     clsRtp.m_iCodec = m_clsRtpThread.m_strMediaFile.empty() ? 0 : CSipCodecTable::GetTop().m_iPt;
 #ifdef USE_MEDIA_LIST
@@ -1231,7 +1231,7 @@ void SimSession::StartCall(const std::string& strTarget) {
     CSipCallRtp clsRtp;
     CSipCallRoute clsRoute;
 
-    clsRtp.m_strIp  = m_clsSetup.m_strLocalIp;
+    clsRtp.m_strIp  = MediaIp();
     clsRtp.m_iPort  = m_clsRtpThread.m_iPort;
     // 미디어 파일 지정 시 서비스 코덱(테이블 최우선 — 기본 AMR-WB 96), 아니면 합성 PCMU(0). 계측기는 SetOfferCodec 으로 지정
     clsRtp.m_iCodec = m_iOfferCodec >= 0 ? m_iOfferCodec
@@ -1444,7 +1444,7 @@ void SimSession::StartConsultCall(const std::string& strTarget) {
     m_stats.tCallStart = NowMs();   // 상담 INVITE 의 SRD 기점
     CSipCallRtp clsRtp;
     CSipCallRoute clsRoute;
-    clsRtp.m_strIp  = m_clsSetup.m_strLocalIp;
+    clsRtp.m_strIp  = MediaIp();
     clsRtp.m_iPort  = m_clsRtpThread.m_iPort;
     clsRtp.m_iCodec = m_clsRtpThread.m_strMediaFile.empty() ? 0 : CSipCodecTable::GetTop().m_iPt;
 #ifdef USE_MEDIA_LIST
@@ -2271,7 +2271,7 @@ void SessionSipClient::AnswerPtt(const char* pszCallId, CSipCallRtp* pclsRtp, CS
     usleep(200000); // 200ms
 
     CSipCallRtp clsLocalRtp;
-    clsLocalRtp.m_strIp  = m_pOwner->m_clsSetup.m_strLocalIp;
+    clsLocalRtp.m_strIp  = m_pOwner->MediaIp();
     clsLocalRtp.m_iPort  = m_pOwner->m_clsRtpThread.m_iPort;
     clsLocalRtp.m_iCodec = pclsRtp ? pclsRtp->m_iCodec : 0;  // GetSipCallRtp 가 테이블 PT 로 정규화한 identity
 
@@ -2417,7 +2417,7 @@ bool SessionSipClient::BuildAnswer(const char* pszCallId, CSipCallRtp* pclsRtp, 
         m_pOwner->m_clsRtpThread.m_iDestVideoPort = FindActiveMediaPort(pclsRtp->m_clsMediaList, "video");
     }
 
-    clsLocalRtp.m_strIp  = m_pOwner->m_clsSetup.m_strLocalIp;
+    clsLocalRtp.m_strIp  = m_pOwner->MediaIp();
     clsLocalRtp.m_iPort  = m_pOwner->m_clsRtpThread.m_iPort;
     clsLocalRtp.m_iCodec = pclsRtp ? pclsRtp->m_iCodec : 0;  // GetSipCallRtp 가 테이블 PT 로 정규화한 identity
 

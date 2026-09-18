@@ -1342,6 +1342,19 @@
           "description": "그 노드의 수신점 id — 비면 transport 와 같은 protocol 의 첫 access 수신점",
           "title": "Listener"
         },
+        "media_worker": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "미디어 전담 워커(§4 미디어 평면 후속) — 이 풀의 RTP 소켓·송수신을 그 워커(에이전트 /media/*)에 둔다. SDP c=/m= 는 그 호스트를 가리키고 시그널링은 worker 에 남는다. 자기 워커와 다른 이름, PTT(floor) 풀은 불가",
+          "title": "Media Worker"
+        },
         "nat": {
           "anyOf": [
             {

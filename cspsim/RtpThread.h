@@ -20,6 +20,7 @@
 #define _RTP_THREAD_H_
 
 #include "SipUdp.h"
+#include "RtpRemote.h"
 #include <string>
 #include <vector>
 #include <atomic>
@@ -48,6 +49,17 @@ public:
 	bool Destroy( );
 	bool Start( const char * pszDestIp, int iDestPort );
 	bool Stop( );
+
+	// ── 원격 모드(미디어 전담 워커 — RtpRemote.h) — Create 전에 둔다. 소켓·스레드는 에이전트에, 이 객체는 SDP 값(포트·광고 IP)과 통계 사본을 든다.
+	//   통계 필드(m_ullRecvTotal…)는 RemoteSync() 가 에이전트에서 받아 채운다 — 표본을 뜨기 전에 부른다. floor(PTT)는 원격 모드에 없다.
+	void SetRemote( IRtpRemote * p ) { m_pRemote = p; }
+	bool IsRemote() const { return m_pRemote != nullptr; }
+	bool RemoteSync();
+	std::string m_strMediaIp;            // 원격 모드 — SDP c= 에 광고할 에이전트 IP(비면 로컬)
+	IRtpRemote * m_pRemote = nullptr;
+	std::string m_strRemoteId;
+	bool m_bRemoteRunning = false;
+	std::string m_strPendSuite, m_strPendLocal, m_strPendRemote, m_strPendVSuite, m_strPendVLocal, m_strPendVRemote;   // 원격 — Start 에 실을 SDES 키
 
     bool SendFloorControl(int iOpCode);
     /** floor 수신 통지 대상 — Create() 전에 둔다(수신 스레드는 호 동안만 돈다). */
@@ -79,9 +91,9 @@ public:
 	                const std::string & strG722File = "" );
 	/** 기본 원천으로 송출 시작(재개) */
 	void MediaSendDefault();
-	void MediaStop() { m_bSendPaused = true; }
+	void MediaStop() { m_bSendPaused = true; if( m_pRemote ) m_pRemote->Control( m_strRemoteId, "stop" ); }
 	/** 상대 hold(a=sendonly/inactive, RFC 3264 §8.4) 동안 송출 정지 — MediaStop 과 독립 */
-	void SetHoldPaused( bool bPaused ) { m_bHoldPaused = bPaused; }
+	void SetHoldPaused( bool bPaused ) { m_bHoldPaused = bPaused; if( m_pRemote ) m_pRemote->Control( m_strRemoteId, "hold", bPaused ? "on" : "off" ); }
 	bool MediaRunning() const { return m_bSendThreadRun; }
 	bool SourceEnded() const { return m_bSourceEnded; }
 	std::atomic<unsigned long long> m_ullSentTotal{0};   // 송신 오디오 RTP 패킷 누계(호마다 초기화)
@@ -174,6 +186,7 @@ public:
     std::atomic<unsigned int>       m_uRtcpRrJitter{0};      // 마지막 보고 블록의 interarrival jitter(클록 틱)
     /** 새 호마다 초기화 — 시퀀스 기준·지터 누적을 버린다(SSRC 도). */
     void ResetRecvStats() {
+        if (m_pRemote && !m_strRemoteId.empty()) m_pRemote->Control(m_strRemoteId, "reset");
         m_ullRecvLost = 0; m_llRecvJitterUs = 0; m_ullRecvTotal = 0;
         m_iRecvPt = -1; m_iRtcpRecv = 0; m_iRtcpRrBlocks = 0; m_iRtcpRrFractionLost = -1; m_uRtcpRrJitter = 0;
         std::lock_guard<std::mutex> lk(m_mtxSsrc); m_setRecvSsrc.clear();

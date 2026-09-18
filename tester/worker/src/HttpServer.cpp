@@ -27,6 +27,10 @@ bool HttpServer::start(const std::string& ip, int port, Handler h, std::string& 
     }
     if (listen(m_fd, 16) < 0) { err = "listen() failed"; close(m_fd); m_fd = -1; return false; }
     m_port = port;
+    if (port == 0) {   // OS 자동 포트(단위시험) — 실제 bind 포트를 기록
+        sockaddr_in b{}; socklen_t bl = sizeof(b);
+        if (getsockname(m_fd, (sockaddr*)&b, &bl) == 0) m_port = ntohs(b.sin_port);
+    }
     m_stop = false;
     m_thread = std::thread([this] { acceptLoop(); });
     return true;

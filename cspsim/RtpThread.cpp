@@ -153,20 +153,43 @@ bool CRtpThread::Unprotect(SrtpSession &clsSes, char *pszBuf, int &iLen) {
 
 bool CRtpThread::SetSrtpKeys(const std::string &strSuite, const std::string &strLocalInlineB64,
                              const std::string &strRemoteInlineB64) {
+  if (m_pRemote) {
+    // 원격 — 키는 Start 에 실어 보낸다(에이전트가 세션을 만든다). 형식만 여기서 검사(suite·30 B)
+    if (strSuite != "AES_CM_128_HMAC_SHA1_80" && strSuite != "AES_CM_128_HMAC_SHA1_32") return false;
+    m_strPendSuite = strSuite; m_strPendLocal = strLocalInlineB64; m_strPendRemote = strRemoteInlineB64;
+    return true;
+  }
   return SetSessionKeys(m_clsSrtpAudio, "audio", strSuite, strLocalInlineB64, strRemoteInlineB64);
 }
 
 bool CRtpThread::SetVideoSrtpKeys(const std::string &strSuite, const std::string &strLocalInlineB64,
                                   const std::string &strRemoteInlineB64) {
+  if (m_pRemote) { m_strPendVSuite = strSuite; m_strPendVLocal = strLocalInlineB64; m_strPendVRemote = strRemoteInlineB64; return true; }
   return SetSessionKeys(m_clsSrtpVideo, "video", strSuite, strLocalInlineB64, strRemoteInlineB64);
 }
 
 void CRtpThread::ClearSrtp() {
+  m_strPendSuite.clear(); m_strPendLocal.clear(); m_strPendRemote.clear();
+  m_strPendVSuite.clear(); m_strPendVLocal.clear(); m_strPendVRemote.clear();
   ClearSession(m_clsSrtpAudio);
   ClearSession(m_clsSrtpVideo);
 }
 
-void CRtpThread::ClearVideoSrtp() { ClearSession(m_clsSrtpVideo); }
+void CRtpThread::ClearVideoSrtp() { m_strPendVSuite.clear(); m_strPendVLocal.clear(); m_strPendVRemote.clear(); ClearSession(m_clsSrtpVideo); }
+
+bool CRtpThread::RemoteSync() {
+  // 에이전트의 통계를 이 객체의 필드에 사본으로 — 워커 표본(sampleRtp/sampleDtmf)이 로컬과 같은 코드로 읽는다
+  if (!m_pRemote || m_strRemoteId.empty()) return false;
+  RtpRemoteStats st;
+  if (!m_pRemote->Stats(m_strRemoteId, st)) return false;
+  m_ullSentTotal = st.tx; m_ullRecvTotal = st.rx; m_ullRecvLost = st.lost; m_llRecvJitterUs = st.jitterUs;
+  m_iRecvPt = st.recvPt; m_iRtcpRecv = st.rtcpRx; m_iRtcpRrBlocks = st.rtcpRrBlocks; m_iRtcpRrFractionLost = st.rrFractionLost;
+  m_iDtmfSent = st.dtmfSent; m_iDtmfRecv = st.dtmfRecv;
+  { std::lock_guard<std::mutex> lk(m_mtxDtmf); m_strDtmfRecv = st.dtmfDigits; }
+  { std::lock_guard<std::mutex> lk(m_mtxSsrc); m_setRecvSsrc.clear(); for (unsigned i = 0; i < st.ssrcCount && i < 16; ++i) m_setRecvSsrc.insert(i + 1); }
+  m_bSourceEnded = st.sourceEnded;
+  return true;
+}
 
 bool CRtpThread::SrtpProtect(char *pszBuf, int &iLen, int iCap) { return Protect(m_clsSrtpAudio, pszBuf, iLen, iCap); }
 bool CRtpThread::SrtpUnprotect(char *pszBuf, int &iLen) { return Unprotect(m_clsSrtpAudio, pszBuf, iLen); }
@@ -174,6 +197,14 @@ bool CRtpThread::SrtpVideoProtect(char *pszBuf, int &iLen, int iCap) { return Pr
 bool CRtpThread::SrtpVideoUnprotect(char *pszBuf, int &iLen) { return Unprotect(m_clsSrtpVideo, pszBuf, iLen); }
 
 bool CRtpThread::Create() {
+  if (m_pRemote) {
+    // 원격 모드 — 에이전트가 소켓을 열고 포트를 준다. 비디오는 파일 설정이 있을 때만(로컬과 같은 규칙)
+    if (!m_strRemoteId.empty()) return true;
+    std::string id, ip; int port = 0, vport = 0;
+    if (!m_pRemote->Allocate(!m_strVideoFile.empty(), id, ip, port, vport)) { printf("[RTP] remote allocate failed\n"); return false; }
+    m_strRemoteId = id; m_strMediaIp = ip; m_iPort = port; m_iVideoPort = vport; m_iFloorRecvPort = 0;
+    return true;
+  }
   if (m_hSocket != INVALID_SOCKET) {
     return true;
   }
@@ -216,6 +247,11 @@ bool CRtpThread::Create() {
 }
 
 bool CRtpThread::Destroy() {
+  if (m_pRemote) {
+    if (!m_strRemoteId.empty()) { m_pRemote->Release(m_strRemoteId); m_strRemoteId.clear(); }
+    m_iPort = 0; m_iVideoPort = 0; m_bRemoteRunning = false;
+    return true;
+  }
   if (m_hSocket != INVALID_SOCKET) {
     closesocket(m_hSocket);
     m_hSocket = INVALID_SOCKET;
@@ -237,6 +273,23 @@ bool CRtpThread::Destroy() {
 }
 
 bool CRtpThread::Start(const char *pszDestIp, int iDestPort) {
+  if (m_pRemote) {
+    if (m_strRemoteId.empty()) return false;
+    m_strDestIp = pszDestIp;
+    m_iDestPort = iDestPort;
+    RtpRemoteStart st;
+    st.destIp = pszDestIp; st.destPort = iDestPort; st.audioPt = m_iAudioPt; st.dtmfPt = m_iDtmfPt; st.dtmfClock = m_iDtmfClock;
+    st.dtmfInband = m_bDtmfInband; st.mode = m_iMediaMode; st.useMediaFile = m_bUseMediaFile; st.destVideoPort = m_iDestVideoPort; st.videoOffer = m_bVideoOffer;
+    st.srtpSuite = m_strPendSuite; st.srtpLocal = m_strPendLocal; st.srtpRemote = m_strPendRemote;
+    st.vSuite = m_strPendVSuite; st.vLocal = m_strPendVLocal; st.vRemote = m_strPendVRemote;
+    if (!m_pRemote->Start(m_strRemoteId, st)) return false;
+    if (!m_bRemoteRunning) { m_ullSentTotal = 0; m_bSourceEnded = false; }
+    m_bSendPaused = (m_iMediaMode == E_MEDIA_EXPLICIT);
+    m_bHoldPaused = false;
+    m_bRemoteRunning = (m_iMediaMode != E_MEDIA_NONE);
+    m_bSendThreadRun = m_bRemoteRunning;   // MediaRunning() — 로컬과 같은 뜻
+    return true;
+  }
   if (m_hSocket == INVALID_SOCKET) {
     return false;
   }
@@ -307,6 +360,11 @@ bool CRtpThread::Start(const char *pszDestIp, int iDestPort) {
 }
 
 bool CRtpThread::Stop() {
+  if (m_pRemote) {
+    if (!m_strRemoteId.empty() && m_bRemoteRunning) { RemoteSync(); m_pRemote->Stop(m_strRemoteId); }
+    m_bRemoteRunning = false; m_bSendThreadRun = false;
+    return true;
+  }
   m_bStopEvent = true;
 
   for (int i = 0; i < 100; ++i) {
@@ -325,6 +383,7 @@ bool CRtpThread::Stop() {
 
 void CRtpThread::MediaSend(const std::string &strAmrWbFile, const std::string &strPcmuFile,
                            const std::string &strPcmaFile, bool bLoop, const std::string &strG722File) {
+  if (m_pRemote) { m_bSendPaused = false; m_bSourceEnded = false; m_pRemote->Control(m_strRemoteId, "send", strAmrWbFile, strPcmuFile, strPcmaFile, strG722File, bLoop); return; }
   {
     std::lock_guard<std::mutex> lk(m_mtxSource);
     m_bSourceOverride = true;
@@ -340,6 +399,7 @@ void CRtpThread::MediaSend(const std::string &strAmrWbFile, const std::string &s
 }
 
 void CRtpThread::MediaSendDefault() {
+  if (m_pRemote) { m_bSendPaused = false; m_bSourceEnded = false; m_pRemote->Control(m_strRemoteId, "send_default"); return; }
   {
     std::lock_guard<std::mutex> lk(m_mtxSource);
     m_bSourceOverride = false;
@@ -354,6 +414,7 @@ bool CRtpThread::SendDtmf(const std::string &strDigits, int iDurationMs, int iGa
   // RFC 4733 협상이 없으면 in-band(G.711 톤)만 — 그것도 협상 코덱이 G.711 일 때만
   if (m_iDtmfPt < 0 && !(m_bDtmfInband && (m_iAudioPt == 0 || m_iAudioPt == 8))) return false;
   if (strDigits.empty()) return false;
+  if (m_pRemote) return m_pRemote->Control(m_strRemoteId, "dtmf", strDigits);
   std::lock_guard<std::mutex> lk(m_mtxDtmf);
   for (char c : strDigits) {
     if ((c >= '0' && c <= '9') || c == '*' || c == '#' || (c >= 'A' && c <= 'D') || (c >= 'a' && c <= 'd'))

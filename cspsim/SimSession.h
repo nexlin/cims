@@ -315,6 +315,8 @@ public:
     std::string       m_strWatchedDlgState;      // early|confirmed|terminated
     std::string       m_strWatchedDlgLocalTag;   // dialog-info local-tag
     std::string       m_strWatchedDlgRemoteTag;  // dialog-info remote-tag
+    /** SDP c= 에 광고할 미디어 주소 — 원격 RTP(미디어 전담 워커)면 에이전트 IP, 아니면 스택 로컬 IP. */
+    std::string MediaIp() const { return m_clsRtpThread.m_strMediaIp.empty() ? m_clsSetup.m_strLocalIp : m_clsRtpThread.m_strMediaIp; }
     /** 누적 수신 RTP 패킷 수 — 전달·픽업 후 미디어 흐름 검증용. */
     unsigned long long RecvPackets() const { return m_clsRtpThread.m_ullRecvTotal.load(); }
     /** 수신 audio RTP 의 서로 다른 SSRC 수 — 감청 leg 는 caller/callee 2개를 받는다(S3-SCN-MONITOR). */

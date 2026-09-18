@@ -571,6 +571,39 @@ class NatPlan(unittest.TestCase):
                 M.UeNat.model_validate(bad)
 
 
+class MediaWorkerPlan(unittest.TestCase):
+    def test_media_worker_pool(self):
+        """미디어 전담 워커(§4) — PoolCreate.media_agent = 그 워커 URL, 자기 워커·미정의 워커·PTT 풀 거절, 계획 미리보기가 에이전트 보고(media.agent_streams)를 검산."""
+        from services import tester_workers as TW, tester_plan as P
+        w1 = FakeWorker('w1'); w2 = FakeWorker('w2', behaviour={'media': {'agent_streams': 0, 'files': []}})
+        topo_doc = _topology([w1, w2])
+        topo_doc['pools']['ue_w1']['media_worker'] = 'w2'
+        topo = M.Topology.model_validate(topo_doc)
+        sc = M.Scenario.model_validate({'id': 'UT-MW', 'roles': {'a': {'pool': 'volte_ue'}, 'b': {'pool': 'volte_ue'}},
+                                        'flow': [{'step': 'register', 'who': ['a', 'b']}, {'step': 'invite', 'from': 'a', 'to': 'b'},
+                                                 {'step': 'answer', 'who': ['b']}, {'step': 'bye', 'from': 'a'}]})
+        ws = TW.discover(topo_doc)
+        for w in ws:
+            w.probe()
+        plan = C.compile_run('rm', sc, topo, topo_doc, None, {}, ws, lambda w: 'x:1', 1, None)
+        p1 = {p['pool']: p for p in plan['workers']['w1']['pools']}
+        self.assertEqual(p1['ue_w1']['media_agent'], f'http://127.0.0.1:{w2.port}')
+        self.assertNotIn('media_agent', {p['pool']: p for p in plan['workers']['w2']['pools']}['ue_w2'])
+        plan_doc = P.build_plan(sc, topo, topo_doc, None, {}, 1, None, probe=True, stream_port=1)
+        self.assertFalse(any('미디어 전담' in e for e in plan_doc['errors']), plan_doc['errors'])
+        self.assertTrue(any('미디어 전담 워커 w2' in n for n in plan_doc['notes']), plan_doc['notes'])
+        w2.behaviour['media'] = {'files': []}   # 구버전 — 에이전트 미보고
+        plan_doc = P.build_plan(sc, topo, topo_doc, None, {}, 1, None, probe=True, stream_port=1)
+        self.assertTrue(any('에이전트를 보고하지 않는다' in e for e in plan_doc['errors']), plan_doc['errors'])
+        for bad in ('w1', 'w9'):
+            d2 = json.loads(json.dumps(topo_doc)); d2['pools']['ue_w1']['media_worker'] = bad
+            with self.assertRaises(Exception):
+                M.Topology.model_validate(d2)
+        d3 = json.loads(json.dumps(topo_doc)); d3['pools']['ue_w1']['service'] = 'ptt'
+        with self.assertRaises(Exception):
+            M.Topology.model_validate(d3)
+
+
 class SipDump(unittest.TestCase):
     def test_recorder_writes_ladder_file_and_list(self):
         """워커 `sip` 레코드 → runs/<id>/sip/<call_id>.log (블록 머리 >>>/<<< + 요청·상태 줄) · 목록 · 스키마."""

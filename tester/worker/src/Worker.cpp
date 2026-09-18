@@ -97,6 +97,7 @@ Worker::~Worker() { stop(); }
 
 bool Worker::start(std::string& err) {
     CsimPeer::EnsureCodecTable();   // G.722(PT 9) — psip 기본 테이블에 없다(시나리오 media.audio: g722·피어 codecs G722)
+    m_mediaAgent = std::make_unique<MediaAgent>(m_cfg.localIp, m_cfg.mediaFile, m_cfg.videoFile);   // 모든 워커가 에이전트가 될 수 있다(풀 media_worker 가 고른다)
     if (!m_http.start(m_cfg.bindIp, m_cfg.port, [this](const HttpRequest& r) { return handle(r); }, err)) return false;
     m_stop = false;
     m_sipCapture.install(SipCapture::ParseMode(m_cfg.sipCapture));
@@ -112,6 +113,7 @@ void Worker::stop() {
     m_sched.join();
     m_http.stop();
     m_stream.stop();
+    if (m_mediaAgent) m_mediaAgent->stopAll();
     std::lock_guard<std::mutex> lk(m_mtx);
     for (auto& kv : m_pools) {
         for (auto& ep : kv.second->eps)
@@ -256,6 +258,7 @@ HttpResponse Worker::handle(const HttpRequest& req) {
     }
     const std::string& p = req.path;
     if (req.method == "GET" && p == "/health") return health();
+    if (p.rfind("/media/", 0) == 0) return m_mediaAgent ? m_mediaAgent->handle(req, body) : errResp(503, "media_agent_unavailable");   // 미디어 전담 워커 얼굴
     if (req.method == "POST" && p == "/pools") return poolCreate(body);
     if (req.method == "DELETE" && p.rfind("/pools/", 0) == 0) return poolDelete(p.substr(7));
     if (req.method == "POST" && p == "/runs") return runStart(body);
@@ -307,8 +310,9 @@ HttpResponse Worker::health() {
     j["pools"] = pools;
     // 미디어 평면(§4) — RTP 를 쓰는 단말 수·상한·샘플 디렉터리의 파일 목록(컨트롤러가 토폴로지 샘플 라이브러리와 대조)
     Json media = Json::Object();
-    media["rtp_streams"] = Json(rtpStreams());
+    media["rtp_streams"] = Json(rtpStreams() + (m_mediaAgent ? m_mediaAgent->running() : 0));   // 자기 단말 + 에이전트로 굴리는 남의 스트림
     media["max_rtp_streams"] = Json((long long)m_cfg.maxRtpStreams);
+    media["agent_streams"] = Json(m_mediaAgent ? m_mediaAgent->streams() : 0);   // 미디어 전담 워커 — 다른 워커 풀이 위임한 스트림(할당 수)
     media["sample_dir"] = Json(m_cfg.sampleDir);
     Json files = Json::Array();
     if (!m_cfg.sampleDir.empty()) {
@@ -387,6 +391,14 @@ bool Worker::buildUePool(Pool* pool, const Json& d, std::string& err) {
     // TLS 서버 검증·클라이언트 인증서(§3.1) — 풀이 켜면 워커의 Tls.* 파일이 있어야 한다
     const bool tlsVerify = d["tls_verify"].asBool(false), tlsClientCert = d["tls_client_cert"].asBool(false);
     if (!tlsRequirements(pool->transport == "tls" && tlsVerify, pool->transport == "tls" && tlsClientCert, err)) return false;
+    // 미디어 전담 워커(§4) — RTP 를 다른 워커의 에이전트에 위임. 에이전트 도달·버전을 여기서 확인(400). PTT 는 floor 소켓이 RTP 스레드에 있어 불가(컴파일 게이트)
+    if (!d["media_agent"].asString().empty()) {
+        if (ptt) { err = "media_agent_ptt_unsupported: PTT 풀(floor 제어)은 미디어 전담 워커를 쓸 수 없다"; return false; }
+        pool->mediaAgentUrl = d["media_agent"].asString();
+        pool->mediaClient = std::make_unique<MediaAgentClient>(pool->mediaAgentUrl);
+        std::string perr;
+        if (!pool->mediaClient->probe(perr)) { err = "media_agent_unreachable: " + perr; return false; }
+    }
     // NAT 풀(§3.1 nat) — netns 파일을 열어 두고 단말 로컬 IP 를 netns 안 주소로. 파일이 없거나 권한이 없으면 400
     std::string localIp = m_cfg.localIp;
     if (d["nat"].isObject()) {
@@ -436,6 +448,7 @@ bool Worker::buildUePool(Pool* pool, const Json& d, std::string& err) {
         ep->s->SetObserver(this);
         if (!m_cfg.mediaFile.empty()) ep->s->m_clsRtpThread.SetMediaFile(m_cfg.mediaFile);
         if (!m_cfg.videoFile.empty()) ep->s->m_clsRtpThread.SetVideoFile(m_cfg.videoFile);
+        if (pool->mediaClient) ep->s->m_clsRtpThread.SetRemote(pool->mediaClient.get());   // Create/Start/Stop/송출/DTMF/통계가 에이전트로
         m_bySession[ep->s] = ep.get();
         pool->eps.push_back(std::move(ep));
     }
@@ -1953,6 +1966,7 @@ void Worker::sampleDtmf(Endpoint* ep) {
     } else if (ep->isReal()) {
         return;   // 실스택은 수신 DTMF 를 세지 않는다(pjsua2 onDtmfDigit 미노출)
     } else {
+        if (ep->s->m_clsRtpThread.IsRemote()) ep->s->m_clsRtpThread.RemoteSync();
         pt = ep->s->m_clsRtpThread.m_iDtmfPt;
         sent = ep->s->m_clsRtpThread.m_iDtmfSent.load();
         recv = ep->s->m_clsRtpThread.m_iDtmfRecv.load();
@@ -2841,6 +2855,7 @@ void Worker::sampleRtp(Endpoint* ep) {
         if (ep->callId.empty() || !ep->poolRef->peer->RtpStats(ep->callId, rx, lost, jitterUs)) return;
     } else {
         CRtpThread& rt = ep->s->m_clsRtpThread;
+        if (rt.IsRemote() && !rt.RemoteSync()) { m_metrics.counter("rtp_remote_nosample"); return; }   // 미디어 전담 워커 — 통계 사본을 먼저 받는다
         rx = rt.m_ullRecvTotal.load(); lost = rt.m_ullRecvLost.load(); jitterUs = rt.m_llRecvJitterUs.load();
     }
     unsigned long long tx = ep->isPeer() ? ep->poolRef->peer->RtpSent(ep->callId) : ep->s->m_clsRtpThread.m_ullSentTotal.load();

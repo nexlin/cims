@@ -225,6 +225,20 @@ def build_plan(scenario: Scenario, topology: Topology, topology_doc: dict, profi
                     if missing:
                         out['errors'].append(f'{w.name}: netns {missing} 가 워커 호스트에 없다 — sudo scripts/nat-netns.sh create <name>')
                     row['capacity']['nat'] = hn
+            # 미디어 전담 워커(§4) — 풀이 가리킨 에이전트 워커가 떠 있고 media.agent_streams 를 보고해야 풀 생성이 된다. 그 풀의 RTP 는 에이전트 워커 용량으로 센다
+            for p in pw['pools']:
+                if not p.get('media_agent'):
+                    continue
+                mw = next((x for x in workers if x.url == p['media_agent']), None)
+                mh = (mw.health if mw else None) or {}
+                if mw is None or not mh:
+                    if probe:
+                        out['errors'].append(f'{w.name}: 풀 {p["pool"]} 의 미디어 전담 워커 {p["media_agent"]} 미응답 — 풀 생성 불가(media_agent_unreachable)')
+                elif 'agent_streams' not in (mh.get('media') or {}):
+                    out['errors'].append(f'{w.name}: 풀 {p["pool"]} 의 미디어 전담 워커 {mw.name} 가 에이전트를 보고하지 않는다(구버전)')
+                else:
+                    out['notes'].append(f'{w.name}: 풀 {p["pool"]} 의 RTP 는 미디어 전담 워커 {mw.name}({p["media_agent"]}) 에서 — 에이전트 스트림 {(mh.get("media") or {}).get("agent_streams")} 진행 중')
+                    row['capacity']['media_worker'] = mw.name
             rtp_cap = int(hm.get('max_rtp_streams') or (w.media.max_rtp_streams if w.media and w.media.max_rtp_streams else 0) or 0)
             row['capacity']['rtp'] = rtp_cap or None
             row['capacity']['rtp_streams'] = hm.get('rtp_streams')

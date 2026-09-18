@@ -61,6 +61,13 @@ pools:                                   # 풀 하나 = 워커 하나. 워커 �
     source: { creds: creds/volte-b.jsonl, offset: 10, count: 5 }
     transport: udp
     dtmf: inband
+  volte_ue_split:                        # 미디어 전담 워커 — 시그널링은 w1, RTP 는 w2 의 에이전트(SDP 가 w2 호스트를 가리킴). RTP CPU 분리
+    kind: ue
+    worker: w1
+    access: csp
+    source: { creds: creds/volte-a.jsonl, offset: 14, count: 4 }
+    transport: udp
+    media_worker: w2
   volte_ue_nat:                          # NAT 뒤 단말(VOLTE-CALL-NAT) — 워커 호스트 netns cims-nat1 안(sudo scripts/nat-netns.sh create cims-nat1), 단말 주소 10.200.1.2
     kind: ue
     worker: w1

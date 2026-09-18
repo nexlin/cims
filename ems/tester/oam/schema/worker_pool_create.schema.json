@@ -600,6 +600,19 @@
       "title": "Kind",
       "type": "string"
     },
+    "media_agent": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "kind=ue — 미디어 전담 워커의 제어 URL(http://ip:port) — CRtpThread 원격 모드(RtpRemote.h)",
+      "title": "Media Agent"
+    },
     "nat": {
       "anyOf": [
         {

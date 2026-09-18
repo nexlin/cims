@@ -293,6 +293,8 @@ class UePool(_PoolBase):
     tls_verify: bool = Field(default=False, description='transport=tls — 접속점 서버 인증서를 워커 Tls.CaFile 로 검증(체인만, 호스트명 대조 없음). 기본 끔(개발 스택 자체 서명)')
     tls_client_cert: bool = Field(default=False, description='transport=tls — 접속점이 클라이언트 인증서를 요구할 때(상호인증) 워커 Tls.ClientCertFile 을 제시')
     nat: Optional[UeNat] = Field(default=None, description='NAT 뒤 단말 — 워커 호스트 netns 안에서 소켓을 만든다(대상은 변환된 주소만 본다). 워커 health nat 과 대조')
+    media_worker: Optional[str] = Field(default=None, description='미디어 전담 워커(§4 미디어 평면 후속) — 이 풀의 RTP 소켓·송수신을 그 워커(에이전트 /media/*)에 둔다. '
+                                                                     'SDP c=/m= 는 그 호스트를 가리키고 시그널링은 worker 에 남는다. 자기 워커와 다른 이름, PTT(floor) 풀은 불가')
 
     @field_validator('dtmf', mode='before')
     @classmethod
@@ -548,6 +550,14 @@ class Topology(_Strict):
         for pname, p in self.pools.items():
             if p.worker not in names:
                 raise ValueError(f'pools.{pname}.worker={p.worker!r} 는 workers 에 없다')
+            mw = getattr(p, 'media_worker', None)
+            if mw is not None:
+                if mw not in names:
+                    raise ValueError(f'pools.{pname}.media_worker={mw!r} 는 workers 에 없다')
+                if mw == p.worker:
+                    raise ValueError(f'pools.{pname}.media_worker 는 자기 워커({p.worker})와 달라야 한다 — 같은 워커면 분리할 것이 없다')
+                if self.pool_service(pname) == 'ptt':
+                    raise ValueError(f'pools.{pname}: PTT 풀(service ptt)은 media_worker 를 쓸 수 없다 — floor 제어 소켓이 RTP 스레드에 있다')
             if p.group:
                 if p.group in self.pools:
                     raise ValueError(f'pools.{pname}.group={p.group!r} 이 다른 풀 이름과 같다 — 역할 해석이 모호해진다')
@@ -1306,6 +1316,7 @@ class PoolCreate(_Strict):
     tls_verify: bool = Field(default=False, description='kind=ue|real-ue — 서버 TLS 인증서 검증(ue: 워커 Tls.CaFile · real-ue: RealUe.TlsCaFile 앵커, 없으면 검증 없이)')
     tls_client_cert: bool = Field(default=False, description='kind=ue — 워커 Tls.ClientCertFile 을 클라이언트 인증서로 제시(대상 접속점 상호인증)')
     nat: Optional[UeNat] = Field(default=None, description='kind=ue — NAT 풀: 워커가 netns 안에서 스택을 띄운다(local_ip 가 단말 주소)')
+    media_agent: Optional[str] = Field(default=None, description='kind=ue — 미디어 전담 워커의 제어 URL(http://ip:port) — CRtpThread 원격 모드(RtpRemote.h)')
     target_csp: TargetCsp = Field(description='풀이 닿는 SIP 서버 — 컨트롤러가 토폴로지 노드 참조에서 파생')
     peer: Optional[WorkerPeer] = Field(default=None, description='kind=peer 일 때 프로파일·bind·신원 범위')
     trunk_register: Optional[TrunkRegister] = Field(default=None, description='kind=peer(pbx) 트렁크 REGISTER 계정 — 비밀 해석 완료본')

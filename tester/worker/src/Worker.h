@@ -34,6 +34,7 @@
 #include "CsimPeer.h"
 #include "HttpServer.h"
 #include "Json.h"
+#include "MediaAgent.h"
 #include "Metrics.h"
 #include "RealUe.h"
 #include "SipCapture.h"
@@ -165,6 +166,9 @@ struct Pool {
     std::string natNs;              // netns 이름(비면 NAT 없음)
     std::string natLocalIp;         // netns 안 단말 주소(SDP·Via·Contact 의 로컬 IP)
     int natFd = -1;                 // open(<NetnsDir>/<netns>) — 풀 수명
+    // 미디어 전담 워커(§4 미디어 평면 후속) — 이 풀의 RTP 를 다른 워커(에이전트)에 위임. SimSession 의 CRtpThread 가 원격 모드(RtpRemote.h)
+    std::string mediaAgentUrl;
+    std::unique_ptr<MediaAgentClient> mediaClient;
     std::vector<std::unique_ptr<Endpoint>> eps;
 };
 
@@ -301,6 +305,7 @@ private:
 
     WorkerConfig m_cfg;
     HttpServer m_http;
+    std::unique_ptr<MediaAgent> m_mediaAgent;   // 이 워커의 에이전트 얼굴(/media/*) — 다른 워커 풀의 RTP 를 굴린다
     Metrics m_metrics;
     StreamClient m_stream;
     std::mutex m_mtx;                       // 풀·run 상태 (HTTP 스레드 ↔ 스케줄러)
