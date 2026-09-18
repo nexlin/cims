@@ -70,7 +70,15 @@ bool SSLServerCtxReload( const char * szCertFile, const char * szKeyFile, const 
 /** 지정된 ctx 로 accept. ctx 가 NULL 이면 기본 global server ctx 사용. */
 bool SSLAcceptWithCtx( Socket iFd, SSL_CTX * ctx, SSL ** ppsttSsl, bool bCheckClientCert, int iVerifyDepth, int iAcceptTimeout );
 
-bool SSLConnect( Socket iFd, SSL ** ppsttSsl );
+/** 클라이언트 연결 — bVerifyServer 면 서버 인증서 체인을 검증한다(앵커 = SSLClientLoadCa 로 넣은 CA, 없으면 시스템 기본 저장소;
+ *  호스트명은 대조하지 않는다). pszClientCert/Key 가 있으면 이 연결의 클라이언트 인증서로 제시한다(상대가 상호인증을 요구할 때).
+ *  둘 다 연결(SSL) 단위라 전역 클라이언트 ctx 를 공유하는 여러 스택이 다른 값을 쓸 수 있다. */
+bool SSLConnect( Socket iFd, SSL ** ppsttSsl, bool bVerifyServer = false, const char * pszClientCert = NULL, const char * pszClientKey = NULL,
+                 const char * pszVerifyCa = NULL );
+/** pszVerifyCa 가 있으면 그 CA(PEM) 만을 이 연결의 검증 저장소로 쓴다(SSL_set1_verify_cert_store — 스택마다 다른 앵커. 파일별 캐시).
+ *  없으면 SSLClientLoadCa 로 누적된 전역 앵커(합집합), 그것도 없으면 시스템 기본 저장소. */
+/** 클라이언트 ctx 에 서버 검증 앵커(CA PEM)를 더한다 — 같은 경로는 한 번만. ctx 가 없으면 만든다. */
+bool SSLClientLoadCa( const char * pszCaFile );
 bool SSLAccept( Socket iFd, SSL ** ppsttSsl, bool bCheckClientCert, int iVerifyDepth, int iAcceptTimeout );
 int SSLSend( SSL * ssl, const char * szBuf, int iBufLen );
 int SSLRecv( SSL * ssl, char * szBuf, int iBufLen );

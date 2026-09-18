@@ -74,8 +74,9 @@ public:
 	/** 다음 Start(새 호)부터 적용 */
 	void SetMediaMode( int iMode ) { m_iMediaMode = iMode; }
 	int MediaMode() const { return m_iMediaMode; }
-	/** 원천을 코덱별 파일로 바꾸고 송출 시작. bLoop=false 면 끝에서 멈춘다(SourceEnded). */
-	void MediaSend( const std::string & strAmrWbFile, const std::string & strPcmuFile, const std::string & strPcmaFile, bool bLoop );
+	/** 원천을 코덱별 파일로 바꾸고 송출 시작. bLoop=false 면 끝에서 멈춘다(SourceEnded). strG722File = G.722 raw 160 B/20 ms(PT 9). */
+	void MediaSend( const std::string & strAmrWbFile, const std::string & strPcmuFile, const std::string & strPcmaFile, bool bLoop,
+	                const std::string & strG722File = "" );
 	/** 기본 원천으로 송출 시작(재개) */
 	void MediaSendDefault();
 	void MediaStop() { m_bSendPaused = true; }
@@ -91,7 +92,7 @@ public:
 	std::atomic<int>  m_iMediaMode{E_MEDIA_AUTO};
 	std::mutex m_mtxSource;
 	bool m_bSourceOverride = false;          // m_mtxSource 보호 ↓
-	std::string m_strSrcAmrWb, m_strSrcPcmu, m_strSrcPcma;
+	std::string m_strSrcAmrWb, m_strSrcPcmu, m_strSrcPcma, m_strSrcG722;
 	bool m_bSrcLoop = true;
 
 	/** 협상된 오디오 wire PT (SDP 오퍼/answer 확정값) — 파일 미디어(AMR-WB) 송신 시 스탬핑.
@@ -104,6 +105,10 @@ public:
 	//   타임스탬프 고정·마커는 첫 패킷·duration 누적, 끝은 E 비트 패킷 3회(§2.5.1.4). 수신: E 비트 기준 이벤트 수·숫자열.
 	int		m_iDtmfPt = -1;
 	int		m_iDtmfClock = 8000;
+	/** in-band DTMF(DtmfInband.h — Q.23 이중음을 G.711 오디오에 싣고 수신 G.711 을 Goertzel 로 검출) — telephone-event 를 협상하지 않는
+	 *  PSTN 게이트웨이 경로(MGCF in-band 옵션). 켜져 있고 협상 코덱이 G.711(PT 0/8)이면 SendDtmf 가 telephone-event 없이도 받아 톤을 낸다
+	 *  (톤 동안 오디오 원천 대신 톤, 간격은 무음). 수신은 같은 카운터(m_iDtmfRecv·DtmfRecv). 다른 코덱(AMR-WB·G.722)에서는 내지 않는다. */
+	bool	m_bDtmfInband = false;
 	bool SendDtmf( const std::string & strDigits, int iDurationMs = 160, int iGapMs = 100 );
 	std::atomic<int> m_iDtmfSent{0};
 	std::atomic<int> m_iDtmfRecv{0};

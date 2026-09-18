@@ -23,6 +23,7 @@ sys.path.insert(2, os.path.join(_REPO, 'ems', 'core', 'oam', 'vendor'))
 
 import yaml  # noqa: E402
 from services.tester_models import SCHEMAS, schema_json, validate  # noqa: E402
+from services.tester_models import METRIC_NAMES, RATIO_METRICS, STEP_VOCAB, SAMPLE_CODECS  # noqa: E402
 
 
 def _load(p):
@@ -264,9 +265,39 @@ class TopologyV2(unittest.TestCase):
         # 샘플 라이브러리 — 코덱 키·경로
         from services.tester_models import TopologyMedia
         TopologyMedia.model_validate({'samples': {'rb': {'pcmu': 'rb.pcmu', 'amr-wb': 'synthetic'}}})
-        for m_bad in ({'rb': {'g722': 'x'}}, {'rb': {'pcmu': '/etc/passwd'}}, {'rb': {'pcmu': '../x'}}, {'rb': {}}, {'r b': {'pcmu': 'x'}}):
+        TopologyMedia.model_validate({'samples': {'wb': {'g722': 'wb.g722'}}})   # G.722 raw 160 B/20 ms 도 샘플 코덱
+        for m_bad in ({'rb': {'gsm': 'x'}}, {'rb': {'pcmu': '/etc/passwd'}}, {'rb': {'pcmu': '../x'}}, {'rb': {}}, {'r b': {'pcmu': 'x'}}):
             with self.assertRaises(Exception):
                 TopologyMedia.model_validate({'samples': m_bad})
+
+    def test_peer_fault_drop_tls_thig_dtmf(self):
+        """피어 오류 주입 후속·TLS 상호인증·THIG·DTMF 방식(§3.1·§3.2) — 옛 bool dtmf 승계, drop 은 UDP 만, thig 는 ibcf 만, tls_client_auth 는 bind tls 만."""
+        from services.tester_models import PeerPool, UePool, PoolCreate
+        base = {'kind': 'peer', 'worker': 'w', 'peering': 'csp', 'profile': 'ibcf', 'bind': {'port': 5080}, 'domain': 'x.test',
+                'identities': {'e164_range': ['+821', '+829']}}
+        p = PeerPool.model_validate({**base, 'fault': {'drop_invite': 1, 'drop_pct': 10}, 'thig': True, 'dtmf': False, 'tls_verify': True})
+        self.assertEqual((p.fault.drop_invite, p.fault.drop_pct, p.thig, p.dtmf, p.answer), (1, 10, True, 'off', 'normal'))
+        self.assertEqual(PeerPool.model_validate({**base, 'dtmf': True}).dtmf, 'rfc4733')
+        self.assertEqual(PeerPool.model_validate({**base, 'dtmf': 'inband'}).dtmf, 'inband')
+        for bad in ({**base, 'bind': {'port': 5061, 'protocol': 'tls'}, 'fault': {'drop_invite': 1}},   # 재전송은 UDP 만
+                    {**base, 'profile': 'pbx', 'identities': {'did_range': ['1000', '1009']}, 'thig': True},   # THIG 는 ibcf
+                    {**base, 'tls_client_auth': True},                                                # bind udp 에 클라이언트 인증 요구
+                    {**base, 'dtmf': 'tones'}, {**base, 'fault': {'drop_invite': 9}}):
+            with self.assertRaises(Exception):
+                PeerPool.model_validate(bad)
+        PeerPool.model_validate({**base, 'bind': {'port': 5061, 'protocol': 'tls'}, 'tls_client_auth': True, 'tls_verify': True, 'tls_client_cert': True})
+        u = UePool.model_validate({'kind': 'ue', 'worker': 'w', 'access': 'csp', 'source': {'creds': 'c.jsonl'}, 'transport': 'tls',
+                                   'dtmf': 'inband', 'tls_verify': True, 'tls_client_cert': True})
+        self.assertEqual((u.dtmf, u.tls_verify, u.tls_client_cert), ('inband', True, True))
+        self.assertEqual(UePool.model_validate({'kind': 'ue', 'worker': 'w', 'access': 'csp', 'source': {'creds': 'c.jsonl'}, 'dtmf': False}).dtmf, 'off')
+        pc = PoolCreate.model_validate({'pool': 'p', 'kind': 'ue', 'dtmf': 'inband', 'tls_verify': True, 'tls_client_cert': True,
+                                        'target_csp': {'ip': '10.0.0.1', 'domain_volte': 'volte.test'}})
+        self.assertEqual(pc.dtmf, 'inband')
+        for k in ('retrans_rx_pct', 'thig_pct'):
+            self.assertIn(k, METRIC_NAMES)
+            self.assertIn(k, RATIO_METRICS)
+        self.assertIsNone(STEP_VOCAB['progress']['kind'])   # 착신 UE 도 183 을 낸다
+        self.assertIn('g722', SAMPLE_CODECS)
 
     def test_ptt_group_session_rules(self):
         """그룹 세션(group_call) 시나리오 규칙 — multi 역할 하나·같은 풀·group_call.from 단일/to multi·floor 는 group_call 뒤·1:1 단계 금지."""

@@ -322,7 +322,8 @@ class PlanAndVocab(unittest.TestCase):
         self.assertTrue(r.body['steps']['group_call']['supported'])
         self.assertEqual(r.body['steps']['floor_request']['kind'], 'ptt')
         self.assertFalse(r.body['steps']['sds_send']['supported'])
-        self.assertEqual(r.body['steps']['progress']['kind'], 'peer')
+        self.assertIsNone(r.body['steps']['progress']['kind'])   # UE 측 183 도 허용 — 게이트 없음
+        self.assertEqual(r.body['steps']['replaces']['kind'], 'ue')
         self.assertIn('srd_ms', r.body['metrics'])
         self.assertEqual(r.body['q850']['16'], '정상 종료')
 
@@ -357,11 +358,11 @@ class PlanAndVocab(unittest.TestCase):
             self.assertTrue(r2.body['ok'], r2.body)
             self.assertEqual(r2.body['max_instances'], 2)
             self.assertEqual(r2.body['estimate']['model'], 'single')
-            y = 'id: UT-PLAN\nroles: { a: { pool: volte_ue }, b: { pool: volte_ue } }\nflow:\n  - { step: invite, from: a, to: b }\n  - { step: progress, who: [b] }\n'
+            y = 'id: UT-PLAN\nroles: { a: { pool: volte_ue }, b: { pool: volte_ue } }\nflow:\n  - { step: invite, from: a, to: b }\n  - { step: progress, who: [b] }\n  - { step: answer, who: [b] }\n  - { step: publish, who: [a] }\n'
             r3 = _call('POST', '/api/v1/tester/scenarios/compile-check', role='operator', body={'yaml': y, 'topology_id': tid, 'probe': False})
             self.assertEqual(r3.status, 200)
             self.assertFalse(r3.body['ok'])
-            self.assertTrue(any('피어 풀' in e for e in r3.body['errors']), r3.body['errors'])
+            self.assertTrue(any('ptt' in e for e in r3.body['errors']), r3.body['errors'])   # progress 는 UE 도 되고, publish 는 ptt 풀만
             self.assertEqual(_call('POST', '/api/v1/tester/runs/plan', role='monitor', body=body).status, 403)
             self.assertEqual(_call('POST', '/api/v1/tester/runs/plan', role='operator', body={'scenario_id': 'NOPE', 'topology_id': tid}).status, 404)
         finally:

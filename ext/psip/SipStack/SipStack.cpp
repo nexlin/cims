@@ -181,6 +181,16 @@ bool CSipStack::Start( CSipStackSetup & clsSetup )
 	}
 
 #ifdef USE_TLS
+	// 클라이언트 서버 인증서 검증 앵커 — 발신 TLS 연결(SipTlsClientThread)이 SSL_VERIFY_PEER 로 대조할 CA. 클라이언트 ctx 는 프로세스 전역이라
+	//   앵커는 누적(합집합)되고 검증 여부는 스택(연결)마다 정한다.
+	if( m_clsSetup.m_bTlsVerifyServer )
+	{
+		const std::string & strAnchor = m_clsSetup.m_strTlsVerifyCaFile.empty() ? m_clsSetup.m_strCaCertFile : m_clsSetup.m_strTlsVerifyCaFile;
+		if( strAnchor.empty() == false && SSLClientLoadCa( strAnchor.c_str() ) == false )
+		{
+			CLog::Print( LOG_ERROR, "SSLClientLoadCa('%s') error — TLS 서버 인증서 검증 앵커 없음", strAnchor.c_str() );
+		}
+	}
 	if( m_clsSetup.m_iLocalTlsPort > 0 )
 	{
 		// TLS 접속점 개설 실패는 **그 접속점만 서비스 불가**로 격리한다 — 여기서 _Stop() 하면
@@ -204,6 +214,24 @@ bool CSipStack::Start( CSipStackSetup & clsSetup )
 			pTlsPrimary->m_iPort     = m_clsSetup.m_iLocalTlsPort;
 			pTlsPrimary->m_bIpv6     = m_clsSetup.m_bIpv6;
 			pTlsPrimary->m_pclsStack = this;
+			if( m_clsSetup.m_bTlsPrivateCtx )
+			{
+				// 접속점 전용 ctx — 같은 프로세스의 다른 스택이 전역 서버 ctx 를 갈아치워도 이 접속점의 인증서·클라이언트 인증 정책은 그대로
+				pTlsPrimary->m_strCertFile   = m_clsSetup.m_strCertFile;
+				pTlsPrimary->m_strKeyFile    = m_clsSetup.m_strKeyFile;
+				pTlsPrimary->m_strCaCertFile = m_clsSetup.m_strCaCertFile;
+				pTlsPrimary->m_pSslCtx = SSLServerCtxCreate( m_clsSetup.m_strCertFile.c_str(), m_clsSetup.m_strKeyFile.c_str(),
+				                                             m_clsSetup.m_strCaCertFile.c_str() );
+				if( pTlsPrimary->m_pSslCtx == NULL )
+				{
+					CLog::Print( LOG_ERROR, "SSLServerCtxCreate(private) error — TLS 접속점(%d) 비활성", m_clsSetup.m_iLocalTlsPort );
+					delete pTlsPrimary;
+					pTlsPrimary = NULL;
+				}
+			}
+		}
+		if( pTlsPrimary )
+		{
 
 			if( !_StartTlsListenerLocked( pTlsPrimary ) )
 			{

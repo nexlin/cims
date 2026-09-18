@@ -196,6 +196,22 @@ def build_plan(scenario: Scenario, topology: Topology, topology_doc: dict, profi
                     if int(hr.get('max') or 0) and real_need + int(hr.get('processes') or 0) > int(hr.get('max')):
                         out['errors'].append(f'{w.name}: 실단말 {real_need} + 진행 중 {hr.get("processes")} > RealUe.MaxProcesses {hr.get("max")}')
                 row['capacity']['real_ue'] = {'need': real_need, 'processes': (h.get('real_ue') or {}).get('processes'), 'max': (h.get('real_ue') or {}).get('max')}
+            # TLS 파일(§3.1·§3.2) — 풀이 켠 tls_verify/tls_client_cert/tls_client_auth·TLS 피어 bind 는 워커 Tls.CaFile/ClientCertFile/PeerCertFile 이 있어야 풀 생성이 된다
+            ht = h.get('tls') if h else None
+            need_ca = [p['pool'] for p in pw['pools'] if p.get('tls_verify') or (p.get('peer') or {}).get('tls_client_auth')]
+            need_client = [p['pool'] for p in pw['pools'] if p.get('tls_client_cert')]
+            need_peer_cert = [p['pool'] for p in pw['pools'] if p['kind'] == 'peer' and (p.get('peer') or {}).get('bind', {}).get('protocol') == 'tls']
+            if h and ht is None and (need_ca or need_client or need_peer_cert):
+                out['warnings'].append(f'{w.name}: 워커가 tls 상태를 보고하지 않는다(구버전) — TLS 파일 보유를 확인할 수 없다')
+            elif ht is not None:
+                if need_ca and not ht.get('ca'):
+                    out['errors'].append(f'{w.name}: 풀 {need_ca} 의 tls_verify/tls_client_auth 에는 워커 Tls.CaFile 이 필요하다')
+                if need_client and not ht.get('client_cert'):
+                    out['errors'].append(f'{w.name}: 풀 {need_client} 의 tls_client_cert 에는 워커 Tls.ClientCertFile 이 필요하다')
+                if need_peer_cert and not ht.get('peer_cert'):
+                    out['errors'].append(f'{w.name}: TLS 피어 풀 {need_peer_cert} 에는 워커 Tls.PeerCertFile 이 필요하다')
+            if ht is not None:
+                row['capacity']['tls'] = ht
             rtp_cap = int(hm.get('max_rtp_streams') or (w.media.max_rtp_streams if w.media and w.media.max_rtp_streams else 0) or 0)
             row['capacity']['rtp'] = rtp_cap or None
             row['capacity']['rtp_streams'] = hm.get('rtp_streams')

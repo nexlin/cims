@@ -1,0 +1,17 @@
+# MGCF in-band DTMF — telephone-event 를 협상하지 않는 PSTN 게이트웨이(mgcf_inband, dtmf: inband — TS 29.163 §7.2.3.2.2 in-band 경로)가
+#   G.711 통화 안에 Q.23 이중음으로 숫자열을 낸다. 착신 UE(volte_ue_inband, dtmf: inband)는 수신 G.711 을 풀어 Goertzel 로 검출한다.
+#   대상이 G.711 을 relay 하면 dtmf_rx_pct 100 — 트랜스코딩 경로(cmp.md §11)를 거치면 톤 왜곡으로 떨어질 수 있다(그 자체가 관측 대상).
+#   오퍼 코덱을 pcmu 로 맞춰야 in-band 가 성립한다(AMR-WB 합의면 mgcf 가 dtmf 단계를 거절 → 실패).
+id: TRUNK-MGCF-DTMF-INBAND
+title: MGCF → 가입자 in-band DTMF (G.711 톤, telephone-event 없음)
+tags: [trunk, mgcf, dtmf, inband]
+roles:
+  mgcf:   { pool: mgcf_inband }
+  callee: { pool: volte_ue_inband }
+flow:
+  - { step: register,   who: [callee], expect: { code: 200 } }
+  - { step: invite,     from: mgcf, to: callee, media: { audio: pcmu } }
+  - { step: answer,     who: [callee], after_ms: 500, expect: { code: 200, srd_ms: { p95: 2000 } } }
+  - { step: dtmf,       from: mgcf, payload: "1234#" }
+  - { step: media_hold, seconds: 3, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: mgcf, cause: 16, expect: { sdd_ms: { p95: 300 }, dtmf_rx_pct: 100 } }

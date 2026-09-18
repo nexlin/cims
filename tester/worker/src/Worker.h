@@ -49,7 +49,12 @@ struct WorkerConfig {
     int sipPortBase = 0;            // 0 = OS 자동. >0 이면 base + 2*idx (IPsec/TLS 고정 포트가 필요할 때)
     std::string mediaFile;          // AMR-WB raw 프레임 파일 — 비면 합성 PCMU
     std::string videoFile;          // H.264 Annex B — 비면 비디오 없음
-    std::string peerCertFile;       // 피어 풀 TLS 수신점 인증서(PEM) — 비면 TLS 피어 거절
+    std::string peerCertFile;       // 피어 풀 TLS 수신점 인증서(PEM) — 비면 TLS 피어 거절 (Tls.PeerCertFile, 구 Media.PeerCertFile)
+    std::string peerKeyFile;        // 그 개인키 — 비면 인증서 파일에서(cert+key 결합 PEM)
+    // TLS 상호인증·서버 검증(test_instrument.md §3.1·§3.2) — 프로세스 안 모든 풀이 같은 파일을 쓴다(풀은 켤지 말지만 정한다)
+    std::string tlsCaFile;          // 앵커 CA(PEM) — 풀 tls_verify(서버 인증서 검증)·피어 tls_client_auth(수신점이 요구하는 클라이언트 인증서의 발급자)
+    std::string tlsClientCertFile;  // 풀 tls_client_cert — 대상 접속점이 상호인증을 요구할 때 제시하는 클라이언트 인증서(PEM 체인)
+    std::string tlsClientKeyFile;
     std::string sampleDir;          // 미디어 샘플 디렉터리 — media_send 의 sample 파일은 이 안의 상대 경로(§4 미디어 평면)
     std::string sipCapture = "failed"; // SIP 덤프 — off | failed(실패한 인스턴스의 호만 올린다) | all(모든 인스턴스 — 기능 시험용)
     int sipDumpMax = 500;           // run 하나에서 올리는 덤프(Call-ID) 상한
@@ -250,12 +255,15 @@ public:
     void OnPeerReferResponse(CsimPeer* p, const std::string& callId, int iSipStatus) override;
     void OnPeerRegister(CsimPeer* p, int iSipStatus, long long rrdMs) override;
     void OnPeerFaultReject(CsimPeer* p, const std::string& callId, const std::string& toUser, int iCode) override;
+    void OnPeerWireDrop(CsimPeer* p, const std::string& callId, const std::string& method) override;
+    void OnPeerInviteRetrans(CsimPeer* p, const std::string& callId) override;
+    void OnPeerThig(CsimPeer* p, const std::string& callId, bool bOk) override;
 
 private:
     struct Event {
         enum Kind { REGISTER, INCOMING, CALLSTART, CALLEND, BYERESP, RING, PRACK, REINVITE, REINVITE_RESP, REFER_RESP,
-                    AFFILIATE, ANSWERED, FLOOR, SUBSCRIBE_RESP, DLG_NOTIFY, FAULT_REJECT,
-                    REAL_CALL, REAL_STATS, REAL_EXIT } kind;   // REAL_* = 실단말 프로세스 이벤트(onEvent 가 위의 종류로 다시 푼다)
+                    AFFILIATE, ANSWERED, FLOOR, SUBSCRIBE_RESP, DLG_NOTIFY, FAULT_REJECT, WIRE_DROP, INVITE_RETRANS, THIG,
+                    REAL_CALL, REAL_STATS, REAL_EXIT } kind;   // WIRE_DROP(user = method)·INVITE_RETRANS·THIG(status = ok) = 피어 오류 주입·THIG 관측   // REAL_* = 실단말 프로세스 이벤트(onEvent 가 위의 종류로 다시 푼다)
         SimSession* s;
         CsimPeer* peer;
         int status;
@@ -379,6 +387,7 @@ private:
     bool epUnregister(Endpoint* ep);            // epilogue deregister — UE 스택 정지 / 실단말 unregister
     Json realRequest(Endpoint* ep, const std::string& cmd);
     bool resolveSample(const std::string& file, std::string& out, std::string& err) const;
+    bool tlsRequirements(bool needCa, bool needClientCert, std::string& err) const;   // 풀 TLS 옵션 ↔ 워커 Tls.* 파일
     long long rtpStreams() const;
     // SIP 덤프 — 인스턴스가 끝나고 조금 뒤(정리 BYE/487 까지 담기게) 올린다
     struct SipPending { long long dueMs; bool ship; long long instance; std::vector<std::string> callIds; };

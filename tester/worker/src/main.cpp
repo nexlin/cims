@@ -1,6 +1,7 @@
 // cims-tester-worker — 계측기 워커 엔트리 (test_instrument.md §2·§8).
 //   cims-tester-worker [config/cims-tester-worker.json] [--preflight] [--verbose]
 // 설정 키(config_template.json 선언): Worker.Name · Server.Ip/Port · Sip.LocalIp/PortBase/Capture/DumpMax · Media.AudioFile/VideoFile/SampleDir/MaxRtpStreams
+//   · Tls.CaFile/ClientCertFile/ClientKeyFile/PeerCertFile/PeerKeyFile(구 Media.PeerCertFile 승계)
 //   · RealUe.CliPath/MaxProcesses/LogLevel/StartTimeoutS/TlsCaFile · Limits.EndpointsPerCore/SapsPerCore · Timers.RegisterIntervalMs/RegisterTimeoutS/InviteTimeoutMs/ByeTimeoutMs
 // libcsim(SimSession) 의 printf 진단은 부하 중 초당 수천 줄이라 stdout 을 /dev/null 로 돌린다(--verbose 면 유지).
 // 워커 자기 로그는 stderr — agent lifecycle 이 로그 파일로 모은다.
@@ -74,7 +75,11 @@ int main(int argc, char** argv) {
         cfg.sipDumpMax = (int)c["Sip"]["DumpMax"].asInt(cfg.sipDumpMax);
         cfg.mediaFile = c["Media"]["AudioFile"].asString("");
         cfg.videoFile = c["Media"]["VideoFile"].asString("");
-        cfg.peerCertFile = c["Media"]["PeerCertFile"].asString("");
+        cfg.peerCertFile = c["Tls"]["PeerCertFile"].asString(c["Media"]["PeerCertFile"].asString(""));
+        cfg.peerKeyFile = c["Tls"]["PeerKeyFile"].asString("");
+        cfg.tlsCaFile = c["Tls"]["CaFile"].asString("");
+        cfg.tlsClientCertFile = c["Tls"]["ClientCertFile"].asString("");
+        cfg.tlsClientKeyFile = c["Tls"]["ClientKeyFile"].asString("");
         cfg.sampleDir = c["Media"]["SampleDir"].asString("");
         cfg.maxRtpStreams = (int)c["Media"]["MaxRtpStreams"].asInt(0);
         // 상대 경로 SampleDir — 모듈 디렉터리(<모듈>/bin/cims-tester-worker 의 위) 기준, 거기 없으면 작업 디렉터리 기준
@@ -104,6 +109,13 @@ int main(int argc, char** argv) {
                 if (!moduleDir.empty() && access(cand.c_str(), X_OK) == 0) cfg.realUeCli = cand;
                 else if (access(cfg.realUeCli.c_str(), X_OK) != 0 && !moduleDir.empty()) cfg.realUeCli = cand;   // 없어도 모듈 경로로 — 오류 메시지가 그 경로를 가리킨다
             }
+            // TLS 파일 상대 경로 — 모듈 디렉터리 기준(있을 때만 바꾼다 — 없으면 오류 메시지가 원래 값을 가리킨다)
+            for (std::string* p : { &cfg.peerCertFile, &cfg.peerKeyFile, &cfg.tlsCaFile, &cfg.tlsClientCertFile, &cfg.tlsClientKeyFile }) {
+                if (p->empty() || (*p)[0] == '/' || moduleDir.empty()) continue;
+                std::string cand = moduleDir + "/" + *p;
+                if (access(cand.c_str(), R_OK) == 0) *p = cand;
+            }
+            if (cfg.realUeTlsCaFile.empty()) cfg.realUeTlsCaFile = cfg.tlsCaFile;   // 실단말 앵커 기본 = 같은 CA
             cfg.realUeLogDir = c["RealUe"]["LogDir"].asString("");
             if (cfg.realUeLogDir.empty()) cfg.realUeLogDir = (moduleDir.empty() ? std::string("log") : moduleDir + "/log") + "/real-ue";
             else if (cfg.realUeLogDir[0] != '/' && !moduleDir.empty()) cfg.realUeLogDir = moduleDir + "/" + cfg.realUeLogDir;

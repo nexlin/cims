@@ -8,6 +8,7 @@
 
 #include "SipCodecTable.h"
 #include "SipMessage.h"
+#include "SipVia.h"
 
 /** 오퍼 첫 audio m-line 에서 엔트리 코덱이 선언된 PT — rtpmap 이름 일치, 없으면 정적 PT(<96) 가 fmt 목록에 있을 때 그 번호. -1 = 없음.
  *  RFC 3264: answer 는 오퍼가 선언한 PT 를 echo 한다. */
@@ -107,6 +108,20 @@ int CsimPeer::parseQ850(CSipMessage* pclsMessage) {
     return v > 0 ? v : 0;
 }
 
+void CsimPeer::EnsureCodecTable() {
+    for (const auto& e : CSipCodecTable::GetList())
+        if (strcasecmp(e.m_strName.c_str(), "G722") == 0) return;
+    SIP_CODEC_ENTRY_LIST clsList = CSipCodecTable::GetList();
+    CSipCodecEntry e;
+    e.m_iPt = 9;
+    e.m_strName = "G722";
+    e.m_iClockRate = 8000;   // RFC 3551 §4.5.2 — 16 kHz 표본이지만 RTP 클록은 8000 으로 표기한다
+    e.m_iChannels = 0;
+    e.m_iPtime = 0;
+    clsList.push_back(e);
+    CSipCodecTable::Set(clsList);
+}
+
 std::vector<std::string> CsimPeer::DefaultCodecs(const std::string& profile) {
     // §3.2 — IP-PBX 는 G.711 필수(SIPconnect 2.0), IM-MGW/타 IMS 는 AMR-WB 를 오퍼한다(TS 29.163 §9, IR.92)
     if (profile == "pbx") return { "PCMA", "PCMU" };
@@ -122,11 +137,21 @@ CsimPeer::CsimPeer(const CsimPeerConfig& cfg) : m_cfg(cfg) {
     if (m_cfg.transport == E_SIP_TLS) {
         m_clsSetup.m_iLocalTlsPort = m_cfg.port;
         m_clsSetup.m_strCertFile = m_cfg.certFile;
+        m_clsSetup.m_strKeyFile = m_cfg.keyFile;
+        if (m_cfg.tlsClientAuth) m_clsSetup.m_strCaCertFile = m_cfg.caCertFile;   // psip 리스너 — CA 가 있으면 클라이언트 인증서를 요구한다
+        m_clsSetup.m_iLocalUdpPort = 0; m_clsSetup.m_iUdpThreadCount = 0;         // 수신점은 하나 — psip 기본 UDP 5060 을 함께 열지 않는다
+        m_clsSetup.m_bTlsPrivateCtx = true;   // 한 워커에 TLS 피어 여럿 — 접속점마다 자기 인증서·클라이언트 인증 정책(전역 ctx 는 나중 스택이 덮는다)
     } else if (m_cfg.transport == E_SIP_TCP) {
         m_clsSetup.m_iLocalTcpPort = m_cfg.port;
+        m_clsSetup.m_iLocalUdpPort = 0; m_clsSetup.m_iUdpThreadCount = 0;
     } else {
         m_clsSetup.m_iLocalUdpPort = m_cfg.port;
     }
+    // 발신 TLS 연결(트렁크 REGISTER·피어 → CSP TLS 수신점) — 서버 검증 앵커·클라이언트 인증서는 연결 단위(psip SSLConnect)
+    m_clsSetup.m_bTlsVerifyServer = m_cfg.tlsVerifyServer;
+    m_clsSetup.m_strTlsVerifyCaFile = m_cfg.caCertFile;
+    m_clsSetup.m_strClientCertFile = m_cfg.clientCertFile;
+    m_clsSetup.m_strClientKeyFile = m_cfg.clientKeyFile;
 }
 
 CsimPeer::~CsimPeer() { Stop(); }
@@ -135,6 +160,8 @@ bool CsimPeer::Start(std::string& err) {
     if (m_bStarted) return true;
     if (m_cfg.bindIp.empty() || m_cfg.port <= 0) { err = "bind ip/port required"; return false; }
     if (m_cfg.transport == E_SIP_TLS && m_cfg.certFile.empty()) { err = "tls transport needs certFile"; return false; }
+    if (m_cfg.transport == E_SIP_TLS && m_cfg.tlsClientAuth && m_cfg.caCertFile.empty()) { err = "tls client auth needs caCertFile"; return false; }
+    if (m_cfg.tlsVerifyServer && m_cfg.caCertFile.empty()) { err = "tls verify needs caCertFile"; return false; }
     m_codecs.clear();
     for (const auto& name : m_cfg.codecs) {
         const CSipCodecEntry* found = nullptr;
@@ -150,10 +177,13 @@ bool CsimPeer::Start(std::string& err) {
         return false;
     }
     m_bStarted = true;
-    printf("[peer %s] started %s:%d %s domain=%s profile=%s codecs=%zu prack=%d dtmf=%d%s%s\n", m_cfg.name.c_str(),
+    printf("[peer %s] started %s:%d %s domain=%s profile=%s codecs=%zu prack=%d dtmf=%s%s%s%s%s%s\n", m_cfg.name.c_str(),
            m_cfg.bindIp.c_str(), m_cfg.port, m_cfg.transport == E_SIP_TLS ? "tls" : m_cfg.transport == E_SIP_TCP ? "tcp" : "udp",
-           m_cfg.domain.c_str(), m_cfg.profile.c_str(), m_codecs.size(), m_cfg.prack ? 1 : 0, m_cfg.dtmf ? 1 : 0,
-           m_cfg.silent ? " (silent)" : "", m_cfg.trunk.user.empty() ? "" : " (trunk register)");
+           m_cfg.domain.c_str(), m_cfg.profile.c_str(), m_codecs.size(), m_cfg.prack ? 1 : 0,
+           m_cfg.dtmfInband ? "inband" : m_cfg.dtmf ? "rfc4733" : "off",
+           m_cfg.silent ? " (silent)" : "", m_cfg.trunk.user.empty() ? "" : " (trunk register)",
+           (m_cfg.dropInvite > 0 || m_cfg.dropPct > 0) ? " (wire drop)" : "", m_cfg.thig ? " (thig)" : "",
+           m_cfg.tlsClientAuth ? " (mtls)" : "");
     return true;
 }
 
@@ -190,6 +220,7 @@ bool CsimPeer::Register() {
 
 CRtpThread* CsimPeer::newRtp() {
     CRtpThread* rtp = new CRtpThread();
+    rtp->m_bDtmfInband = m_cfg.dtmfInband;
     if (!m_cfg.mediaFile.empty()) rtp->SetMediaFile(m_cfg.mediaFile);
     if (!rtp->Create()) { delete rtp; return nullptr; }
     return rtp;
@@ -216,7 +247,7 @@ void CsimPeer::buildOffer(CSipCallRtp& clsRtp, CRtpThread* rtp) {
             clsAudio.AddAttribute("fmtp", szVal);
         }
     }
-    if (m_cfg.dtmf) {
+    if (m_cfg.dtmf && !m_cfg.dtmfInband) {
         // 클록 = 첫 코덱 클록(RFC 4733 §2.1 — 오디오와 같은 타임스탬프 축)
         int clock = m_codecs[0]->m_iClockRate > 0 ? m_codecs[0]->m_iClockRate : 8000;
         addTelephoneEvent(clsAudio, m_cfg.dtmfPt, clock);
@@ -249,7 +280,7 @@ bool CsimPeer::buildAnswer(Call& c) {
     clsLocal.m_iPort = c.rtp->m_iPort;
     clsLocal.m_iCodec = e->m_iPt;
     int dtmfPt = -1, dtmfClock = 8000;
-    c.rtp->m_iAudioPt = buildAnswerAudio(clsLocal, c.rtp->m_iPort, *e, c.offer, m_cfg.dtmf, dtmfPt, dtmfClock);
+    c.rtp->m_iAudioPt = buildAnswerAudio(clsLocal, c.rtp->m_iPort, *e, c.offer, m_cfg.dtmf && !m_cfg.dtmfInband, dtmfPt, dtmfClock);
     c.rtp->m_iDtmfPt = dtmfPt;
     if (dtmfPt >= 0) c.rtp->m_iDtmfClock = dtmfClock;
     // 파일 미디어(AMR-WB)는 그 코덱으로 합의됐을 때만, 아니면 합성 PCMU
@@ -289,6 +320,19 @@ std::string CsimPeer::StartCall(const std::string& fromUser, const std::string& 
         // TS 24.229 §7.2A.5 / RFC 7315 — 타 IMS 코어가 II-NNI 로 넘길 때 싣는 과금 상관 벡터
         std::string pcv = "icid-value=" + genIcid() + ";orig-ioi=" + m_cfg.domain;
         pInvite->AddHeader("P-Charging-Vector", pcv.c_str());
+        if (m_cfg.thig) {
+            // THIG 흔적(TS 24.229 §5.10.4) — 상대 망의 IBCF 가 자기 뒤 홉의 Via 를 암호화 토큰으로 바꿔 넘긴 꼴. 자기(맨 위) Via 는 그대로,
+            //   그 아래에 `SIP/2.0/<tr> <token>;tokenized-by=<domain>` 을 얹는다. CSP(B2BUA/프록시)가 응답에 Via 스택을 온전히 되돌리는지가 관측 대상
+            CSipVia clsVia;
+            clsVia.m_strProtocolName = "SIP";
+            clsVia.m_strProtocolVersion = "2.0";
+            clsVia.m_strTransport = eTransport == E_SIP_TLS ? "TLS" : eTransport == E_SIP_TCP ? "TCP" : "UDP";
+            clsVia.m_strHost = genIcid().substr(0, 20);
+            clsVia.m_iPort = -1;
+            clsVia.InsertParam("tokenized-by", m_cfg.domain.c_str());
+            clsVia.InsertParam("branch", ("z9hG4bK" + genIcid().substr(0, 16)).c_str());
+            pInvite->m_clsViaList.push_back(clsVia);
+        }
     }
     {
         std::lock_guard<std::mutex> lk(m_mtx);
@@ -427,12 +471,12 @@ bool CsimPeer::SetMediaMode(const std::string& callId, int iMediaMode) {
 }
 
 bool CsimPeer::MediaSend(const std::string& callId, bool bDefault, const std::string& amrWbFile, const std::string& pcmuFile,
-                         const std::string& pcmaFile, bool bLoop) {
+                         const std::string& pcmaFile, bool bLoop, const std::string& g722File) {
     std::lock_guard<std::mutex> lk(m_mtx);
     auto it = m_calls.find(callId);
     if (it == m_calls.end() || !it->second.rtp || !it->second.rtp->MediaRunning()) return false;
     if (bDefault) it->second.rtp->MediaSendDefault();
-    else it->second.rtp->MediaSend(amrWbFile, pcmuFile, pcmaFile, bLoop);
+    else it->second.rtp->MediaSend(amrWbFile, pcmuFile, pcmaFile, bLoop, g722File);
     return true;
 }
 
@@ -651,10 +695,57 @@ bool CsimPeer::RecvRequest(int /*iThreadId*/, CSipMessage* pclsMessage) {
     return false;
 }
 
-bool CsimPeer::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
-    if (pclsMessage->m_iStatusCode < 200) return false;
+bool CsimPeer::RecvFilter(CSipMessage* pclsMessage, const char* /*pszIp*/, int /*iPort*/, ESipTransport /*eTransport*/) {
+    if (m_cfg.dropInvite <= 0 && m_cfg.dropPct <= 0) return true;
     std::string callId;
     pclsMessage->GetCallId(callId);
+    if (pclsMessage->IsRequest() && pclsMessage->IsMethod(SIP_METHOD_INVITE) && pclsMessage->m_clsTo.SelectParam(SIP_TAG) == false) {
+        // 새 착신 INVITE — 같은 트랜잭션(Call-ID·CSeq·branch)의 벌 수를 센다. 첫 dropInvite 벌은 버리고, 두 번째부터는 재전송으로 관측
+        const char* branch = pclsMessage->m_clsViaList.empty() ? NULL : pclsMessage->m_clsViaList.front().SelectParamValue("branch");
+        std::string key = callId + "|" + std::to_string(pclsMessage->m_clsCSeq.m_iDigit) + "|" + (branch ? branch : "");
+        int seen;
+        {
+            std::lock_guard<std::mutex> lk(m_mtxWire);
+            if (m_inviteSeen.size() > 20000) m_inviteSeen.clear();   // 부하 시험 — 무한 성장 방지(재전송 창은 수 초)
+            seen = ++m_inviteSeen[key];
+        }
+        if (seen > 1 && m_pObserver) m_pObserver->OnPeerInviteRetrans(this, callId);
+        if (m_cfg.dropInvite > 0 && seen <= m_cfg.dropInvite) {
+            if (m_pObserver) m_pObserver->OnPeerWireDrop(this, callId, "INVITE");
+            return false;
+        }
+    }
+    if (m_cfg.dropPct > 0) {
+        static thread_local std::mt19937 rng{std::random_device{}()};
+        if ((int)(rng() % 100) < m_cfg.dropPct) {
+            std::string what = pclsMessage->IsRequest() ? pclsMessage->m_strSipMethod
+                                                        : std::to_string(pclsMessage->m_iStatusCode) + "/" + pclsMessage->m_clsCSeq.m_strMethod;
+            if (m_pObserver) m_pObserver->OnPeerWireDrop(this, callId, what);
+            return false;
+        }
+    }
+    return true;
+}
+
+bool CsimPeer::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
+    std::string callId;
+    pclsMessage->GetCallId(callId);
+    if (m_cfg.thig && pclsMessage->m_iStatusCode >= 180 && pclsMessage->m_clsCSeq.m_strMethod == "INVITE") {
+        // THIG — 우리 발신 호의 첫 의미 있는 응답에 토큰화 Via(tokenized-by)가 남아 있는가(RFC 3261 §8.1.3.3 응답 Via 보존)
+        bool check = false;
+        {
+            std::lock_guard<std::mutex> lk(m_mtx);
+            auto it = m_calls.find(callId);
+            if (it != m_calls.end() && it->second.outbound && !it->second.thigChecked) { it->second.thigChecked = true; check = true; }
+        }
+        if (check) {
+            bool ok = false;
+            for (CSipVia& v : pclsMessage->m_clsViaList)
+                if (v.SelectParamValue("tokenized-by") != NULL) { ok = true; break; }
+            if (m_pObserver) m_pObserver->OnPeerThig(this, callId, ok);
+        }
+    }
+    if (pclsMessage->m_iStatusCode < 200) return false;
     if (pclsMessage->m_clsCSeq.m_strMethod == "INVITE" && pclsMessage->m_iStatusCode >= 300) {
         // 발신 실패 최종 응답의 Reason (MGCF 503 + Q.850;cause=34 등)
         int q = parseQ850(pclsMessage);

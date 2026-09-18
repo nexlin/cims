@@ -129,8 +129,11 @@ cspsim/                   libcsim(SimSession·RtpThread 추출) + cspsim CLI(전
 cspsim `SimSession` 의 능력을 그대로 승계한다 — REGISTER/AKA/sec-agree/IPsec, UDP/TCP/TLS, SRTP SDES
 off/optional/required, AMR-WB/H.264, MCPTT(그룹콜·floor·affiliation·GMS/CMS SUBSCRIBE·emergency·preempt·adhoc·listen),
 CSC/IdMS·XCAP, VoLTE 보조(REFER blind/attended·INVITE-Replaces·Join·pickup·hunt·dialog 이벤트).
-**추가할 것**: MCData SDS(MESSAGE·MSRP, 현재 SDK 에만 있음), TLS 서버 인증서 검증(현재 미검증), RTCP 수신 통계,
-RFC 4028 세션 타이머 응답, 신원마다 개별 행동 스크립트(§4).
+**추가할 것**: MCData SDS(MESSAGE·MSRP, 현재 SDK 에만 있음), RFC 4028 세션 타이머 응답, 신원마다 개별 행동 스크립트(§4).
+**TLS 보안**(구현 반영) — UE 풀 `tls_verify`(대상 서버 인증서를 워커 `Tls.CaFile` 로 체인 검증 — 호스트명(SAN) 대조는 하지 않는다, IP 로 붙는 관례)·
+`tls_client_cert`(대상 접속점이 상호인증을 요구하면 워커 `Tls.ClientCertFile` 을 제시). psip 은 클라이언트 SSL_CTX 가 프로세스 전역이지만 검증 저장소
+(`SSL_set1_verify_cert_store`)·클라이언트 인증서를 **연결(SSL) 단위**로 적용하므로 한 워커 안의 풀마다 다르게 둘 수 있다(`CSipStackSetup::m_bTlsVerifyServer·
+m_strTlsVerifyCaFile·m_strClientCertFile`). 파일은 워커 것 하나 — 풀은 켤지만 정한다(계획 미리보기가 `GET /health tls{ca,client_cert,peer_cert}` 로 검산).
 
 **libcsim 이 cspsim 위에 더한 것**(워커용, `cspsim/CsimObserver.h`·`SimSession`): ① 관측자 훅 `ICsimObserver`
 (최초 REGISTER 응답+RRD · 착신 도착 · 발신 확립+SRD · 다이얼로그 종료 · 로컬 BYE 최종 응답+SDD — psip 스택 스레드에서 불리므로
@@ -151,7 +154,14 @@ fan-out INVITE 에 자동응답 200 = 합류 시각) · `OnFloor(subtype, tUs)`(
 대상 그룹 인자 · `UnsubscribeDialogs`/`UnsubscribeEvent`(Expires 0 — 단말 반환 때, 로그아웃에도) · 상담 통화(`m_strConsultId`)가 종료 이벤트에서 비워지고 `StopCall` 이
 함께 내린다 · 응답 전 CANCEL 된 착신(487)이 보관 오퍼를 비운다. 워커가 지원하는 단계 = `register`(prelude)·`invite`·`answer`·`reject`·`bye`·`media_hold`·
 `wait`·`expect`·`deregister`(epilogue) + 피어 축·미디어 평면 + PTT `group_call`·`floor_request`·`floor_release` + 전달·합류·구독 `refer`·`pickup`·`replaces`·`join`·
-`subscribe`·`publish`(§4). 나머지 단계(`sds_send`·`sds_recv`)는 run 시작 시 400 `unsupported_step`. `invite`/`group_call` 의 `expect.code` 가 300 이상이면 그 최종 응답이 성공 조건이다(ACL 403·비멤버 403·라우팅 reject) — 워커는
+`subscribe`·`publish`(§4). 나머지 단계(`sds_send`·`sds_recv`)는 run 시작 시 400 `unsupported_step`. ⑧ **UE 측 183**(`ProgressCall` — deferred 착신에
+183 + SDP answer 를 내고 early media 송수신을 시작한다(실 단말의 착신 안내음·컬러링 모사, TS 24.628). 그 뒤 `AnswerCall` 은 **같은 answer**(같은 SRTP 키·
+코덱)로 200 을 낸다 — `BuildAnswer` 를 183/200 이 공유. 착신 INVITE 가 100rel 을 지원하고 풀 `prack` 이면 RSeq 를 실어 신뢰 1xx) — 단계 `progress who: [UE]`.
+⑨ **DTMF 방식**(`SetDtmfInband`) — `rfc4733`(telephone-event 오퍼/echo) 외에 `inband`: telephone-event 를 오퍼/echo 하지 않고 G.711 통화 안에 Q.23 이중음을
+낸다(`CRtpThread::m_bDtmfInband`, `cspsim/DtmfInband.h` — 톤 합성·Goertzel 검출, 160 샘플 블록 2개 이상 이어진 톤이 끊길 때 숫자 확정). 협상 코덱이 PCMU/PCMA 가
+아니면 `SendDtmf` 가 거절한다(AMR-WB/G.722 에 in-band 없음). ⑩ **G.722**(PT 9, RFC 3551 §4.5.2 — RTP 클록 8000 표기·64 kbit/s 160 B/20 ms) — 오퍼/answer·합성
+(상수 코드워드)·샘플 파일(`media.samples{id:{g722: 파일}}`)·수신 지터 클록 8 kHz·MOS 코덱 판정. psip 기본 코덱 테이블에 없어 `CsimPeer::EnsureCodecTable()` 이
+워커 기동 때 더한다. `invite`/`group_call` 의 `expect.code` 가 300 이상이면 그 최종 응답이 성공 조건이다(ACL 403·비멤버 403·라우팅 reject) — 워커는
 발신자의 최종 응답을 기다려 코드가 다르면 실패로 센다.
 
 **PTT 풀(`service: ptt`)의 단말** = MCPTT 단말(cspsim `-mode ptt` 승계): Contact feature tag `+g.3gpp.mcptt`·PTT 도메인, 착신은 **자동응답**
@@ -172,7 +182,7 @@ Granted 1 · Taken 2 · Deny 3 · Release 4 · Idle 5 · Revoke 6 · Queue Posit
 |---|---|---|
 | `ibcf` | TS 29.165(II-NNI Ici/Izi), TS 24.229 | 타 IMS 코어처럼 — `P-Asserted-Identity`·`P-Charging-Vector`·`Route/Record-Route` 다중 hop, THIG 흔적(토큰화 Via), 100rel/PRACK, `Privacy`, 도메인 기반 착신, TLS 상호인증 옵션, 다중 peer(장애조치·round-robin 상대) |
 | `pbx` | RFC 3261/3262/3311/3515/4733, **SIP Forum SIPconnect 2.0**(IP-PBX↔사업자 SIP 트렁크 프로파일) | 트렁크 REGISTER(계정 1개로 DID 범위 대표) 또는 고정 IP 피어링, 내선 범위·DID 매핑, 183 early media, hold/resume(`sendonly`/`inactive` re-INVITE), REFER 발신(PBX 측 전달), DTMF RFC 4733, 세션 타이머 refresher. **코덱 = G.711 A/μ 기본**(SIPconnect 필수 코덱 — 광대역은 선택이고 기업 PBX 는 AMR-WB 를 거의 안 가짐), 시나리오로 G.722·AMR-WB 추가 오퍼 가능 → CIMS 트랜스코딩 경로(§12)와 순수 relay 경로를 둘 다 시험 |
-| `mgcf` | TS 29.163(Mg — CSCF↔MGCF 는 **평문 SIP**, TS 24.229 프로파일), Q.850 | E.164 만, 183+ringback early media, `Reason: Q.850;cause=` 종료, 응답 지연(PSTN 셋업 모사), in-band DTMF 옵션. **코덱 = AMR-WB 기본 + AMR + G.711**(IM-MGW 가 IMS 쪽에 AMR-WB 를 오퍼하고 PSTN 쪽 G.711 로 자기 트랜스코딩 — TS 29.163 §9 IM-MGW 기능, GSMA IR.92 코덱 세트) → CIMS 는 relay 만 하면 된다. **SIP-I(ISUP 캡슐화, ITU-T Q.1912.5)는 범위 밖** — Mg 에는 없고 CS 상호접속 트렁크의 프로파일이라 VoLTE IMS 연동에 필요하지 않다 |
+| `mgcf` | TS 29.163(Mg — CSCF↔MGCF 는 **평문 SIP**, TS 24.229 프로파일), Q.850 | E.164 만, 183+ringback early media, `Reason: Q.850;cause=` 종료, 응답 지연(PSTN 셋업 모사), in-band DTMF 옵션(`dtmf: inband` — telephone-event 없이 G.711 톤, TS 29.163 §7.2.3.2.2 in-band 경로. 동봉 `trunk/mgcf_dtmf_inband`, 착신 UE 풀도 `dtmf: inband` 로 검출). **코덱 = AMR-WB 기본 + AMR + G.711**(IM-MGW 가 IMS 쪽에 AMR-WB 를 오퍼하고 PSTN 쪽 G.711 로 자기 트랜스코딩 — TS 29.163 §9 IM-MGW 기능, GSMA IR.92 코덱 세트) → CIMS 는 relay 만 하면 된다. **SIP-I(ISUP 캡슐화, ITU-T Q.1912.5)는 범위 밖** — Mg 에는 없고 CS 상호접속 트렁크의 프로파일이라 VoLTE IMS 연동에 필요하지 않다 |
 
 CSP 쪽 상대 설정은 기존 모델 그대로다 — `remote_nodes`(피어 주소)·`routes`·`route_sets`(failover/round_robin/weighted)·
 `rules`/`routing_policies`(도메인·번호 prefix)·`acl_policies`. 계측기는 **토폴로지의 피어 풀 정의에서 이 레코드를 파생**해
@@ -187,8 +197,21 @@ run 전에 대상 OAM 의 컬렉션 API(`PUT /api/v1/deployments/{id}/collection
   `normal`(시나리오 단계가 응답) · `silent`(착신에 아무 응답도 내지 않는다 — 죽은 피어, Timer B failover) · `reject`(엔진이 관측자에 알리지 않고
   즉시 `fault.code`(기본 503, `fault.q850` 이면 Reason 동봉)로 거절 — 5xx failover·사용자 측 거절·Reason 투과 시험, 카운터 `peer_fault_reject`·
   `peer_fault_codes.N` + event) · `delay`(착신 뒤 `fault.delay_ms` 동안 100 Trying 만 — 응답 지연, 시나리오 `answer/progress/reject` 의 `after_ms`
-  와 합쳐 늦은 쪽에 응답, `peer_fault_delay`). 와이어 손실(재전송 유실)·TLS 상호인증(클라이언트 인증서 검증)은 psip 에 수신 훅·`bCheckClientCert`
-  가 없어(`SipTlsThread` 가 false 고정) 아직 없다 — psip 변경이 선행 조건(§10 C). 동봉 `trunk/ibcf_failover_5xx`(peer_kt_503 = reject 503).
+  와 합쳐 늦은 쪽에 응답, `peer_fault_delay`). 동봉 `trunk/ibcf_failover_5xx`(peer_kt_503 = reject 503).
+- **와이어 유실(재전송 유실)** — `fault.drop_invite: N`(새 착신 INVITE 마다 첫 N 벌을 버린다) · `fault.drop_pct: p`(모든 수신 메시지를 p % 로 버린다), answer 정책과
+  독립, `bind.protocol: udp` 에서만(TCP/TLS 는 SIP 재전송이 없다). 구현 = psip `ISipStackCallBack::RecvFilter`(파싱·보안 검사 뒤, 트랜잭션 계층에 넣기 **전**에
+  불리는 와이어 필터 — false 면 응답·카운터 없이 버린다) 를 `CsimPeer` 가 구현. 같은 트랜잭션(Call-ID·CSeq·branch)의 두 번째 벌부터는 **재전송으로 관측**
+  (`OnPeerInviteRetrans` → `invite_retrans_rx`), 버린 벌은 `peer_fault_drop`(+`peer_fault_drop_methods.<m>`). 비율 `retrans_rx_pct` = 재전송 도달 / 버린 벌 — 100 % 면
+  대상이 RFC 3261 §17.1.1.2 Timer A 재전송을 낸다. SRD 가 T1(500 ms) 만큼 늘어난다(단위시험 실측 525 ms). 동봉 `trunk/ibcf_retrans_loss`(peer_kt_lossy).
+- **TLS 상호인증** — `bind.protocol: tls` 피어의 수신점은 워커 `Tls.PeerCertFile(+PeerKeyFile)` 로 열리고, `tls_client_auth: true` 면 **클라이언트 인증서를 요구**
+  한다(psip 리스너 CA = 워커 `Tls.CaFile` → `SSL_VERIFY_PEER|FAIL_IF_NO_PEER_CERT`). 발신 연결(대상 수신점·트렁크 REGISTER)은 `tls_verify`(서버 인증서를 `Tls.CaFile` 로
+  검증)·`tls_client_cert`(`Tls.ClientCertFile` 제시). 한 워커에 TLS 피어가 여럿이라 접속점마다 자기 SSL_CTX 를 갖는다(psip `CSipStackSetup::m_bTlsPrivateCtx` —
+  종래 전역 서버 ctx 는 나중에 뜬 스택이 갈아치웠다). TLS/TCP 피어는 psip 기본 UDP 5060 을 함께 열지 않는다. 대상 CSP 가 TLS 로 피어에 붙을 때 클라이언트 인증서를
+  내지 않으면(psip UAC 기본) 핸드셰이크가 실패한다 = §12 과제. 동봉 `trunk/ibcf_tls_mutual`(peer_kt_tls), 단위시험 `csim_tls_mutual_test`(openssl CLI 임시 CA —
+  상호인증 성립 / 인증서 없는 클라이언트 거절 / 다른 CA 앵커의 서버 검증 실패).
+- **THIG 흔적**(ibcf `thig: true`) — 발신 INVITE 에 자기 Via 아래 토큰화 Via `SIP/2.0/<tr> <token>;tokenized-by=<domain>`(TS 24.229 §5.10.4 topology hiding 을 거친
+  타 IMS 모사)을 얹고, 첫 응답(≥ 180)에 그 Via 가 남아 있는지 본다(`OnPeerThig` → `thig_via_ok/lost`, 비율 `thig_pct` = ok / `thig_tx`). RFC 3261 §8.2.6.2 —
+  응답의 Via 는 요청 그대로. 동봉 `trunk/ibcf_thig`(peer_kt_thig).
 - **신원.** 풀의 `identities.e164_range|did_range`(+`count`)를 컨트롤러가 펼쳐 워커에 `Identity(user, domain=풀 domain)` 로 보낸다.
   워커 Endpoint 하나 = 신원 하나(스택 없음, `callId` 로 엔진 호를 가리킴). 착신 INVITE 의 To user 가 범위 밖이면 404, 같은 신원의
   두 번째 호는 486. `ibcf` 프로파일은 착신에 `P-Asserted-Identity` 가 없으면 `pai_missing` 로 센다.
@@ -243,6 +266,7 @@ run 전에 대상 OAM 의 컬렉션 API(`PUT /api/v1/deployments/{id}/collection
   `tester-rule-<풀>-prefix`) — CSP 가 자기 도메인 Request-URI 의 번호 접두로 트렁크 RouteSet 을 고르는 것을 실측 확인(BGCF 식 번호 라우팅).
 - **오퍼 코덱** — `invite` 의 `media.audio`(pcmu/pcma/amr-wb …)를 UE 오퍼 코덱으로 쓴다(`SimSession::SetOfferCodec`). 협상 코덱이 AMR-WB 가 아니면 파일
   미디어 대신 합성 PCMU(G.711 PT 로 스탬프) — pbx 상대 G.711 relay 경로와 AMR-WB 단독 오퍼(488, cmp.md §11 트랜스코딩 전) 를 시나리오가 고른다.
+  **G.722**(`media.audio: g722` / 피어 `codecs: [G722, …]`) — SIPconnect 2.0 선택 광대역 코덱, PT 9 합성·샘플 원천(동봉 `trunk/pbx_g722`, pbx_wb 풀).
 - **실측**(개발서버 CSP 0.2.126, 워커 동거): `TRUNK-PBX-OUTBOUND`(UE PCMU → PBX DID, 번호 prefix 라우팅) pass · `TRUNK-PBX-INBOUND` pass ·
   `TRUNK-PBX-HOLD-RESUME`(re-INVITE 2/2 200) pass · `TRUNK-PBX-TRANSFER`(REFER 202 → 대상 착신·전달자 BYE) pass · `TRUNK-PBX-DTMF` dtmf_rx 100 %
   (CMP 가 telephone-event PT 를 투과) · `TRUNK-MGCF-OUTBOUND` early_media 100 %·prack 100 %(CSP 가 183/SDP·PRACK 전달) · `TRUNK-MGCF-INBOUND` pass.
@@ -483,7 +507,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
   `loop: false` = 샘플 끝에서 정지. `media_stop {who}` = 송출 정지(수신은 계속). 둘 다 **그 호에서 SDP 가 오간 뒤**(`progress` 또는 `answer` 뒤,
   `bye` 앞)에만 둘 수 있고 `rtp: none` 호에는 못 둔다 — 시나리오 검증 오류. `auto` 호에서도 쓸 수 있다(원천 교체·일시 정지). 비동기 단계
   (`after_ms` 뒤 실행하고 곧바로 다음 단계). SDP 교환 전(RTP 미기동)에 닿으면 인스턴스 실패 + event.
-  **샘플 라이브러리** = 토폴로지 `media.samples{id: {amr-wb|pcmu|pcma: 파일 | synthetic}}` — 파일은 워커 샘플 디렉터리(`Media.SampleDir`) 안의
+  **샘플 라이브러리** = 토폴로지 `media.samples{id: {amr-wb|pcmu|pcma|g722: 파일 | synthetic}}` — 파일은 워커 샘플 디렉터리(`Media.SampleDir`) 안의
   상대 경로(절대 경로·`..` 거절), raw 형식(amr-wb = 61 B 프레임 23.85 kbps · pcmu/pcma = 160 B/20 ms). 송신기는 **합의 코덱**의 항목을 쓰고,
   항목이 없거나 `synthetic` 이면 그 코덱의 합성을 낸다. 컨트롤러는 시나리오가 참조한 샘플만 발췌해 워커에 보낸다(`RunStart.samples`);
   라이브러리에 없는 id 는 컴파일 오류. 워커 패키지는 G.711 샘플 `ringback_kr`(440+480 Hz, 1 s on / 2 s off)·`tone_1k` 를 동봉한다
@@ -512,7 +536,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 | 세션 비율 | SER · SEER · SCR · ISA | RFC 6076 — `ser_pct` = `sessions`/`attempts`(성립 200 / 시나리오 시도) · `seer_pct` = `seer_ok`/`invite_tx`(§4.4 — 200 과 사용자 측 거절 480/486/600/603 은 유효 시도) · `scr_pct` = `completed`/`sessions`(bye 단계가 낸 BYE 의 200 — 정리 BYE 는 세지 않는다) · `isa_pct` = `isa_fail`/`invite_tx`(§4.6 — 408/500/503/504 최종 또는 최종 응답 없이 시한 = Timer B 만료; **낮을수록 좋다** — 기대치는 상한, 스칼라 또는 `max`). `invite_tx` = 워커가 낸 세션 개시 INVITE 전부(invite·상담 호·pickup·replaces·join·group_call; 401/407 재시도는 psip 이 흡수). `sessions` 는 1:1 `invite` 의 확립만 — 상담·픽업·Replaces·Join 확립은 `<kind>_ok` |
 | 부하 | SApS · 동시 세션 · DOC · IHS | 단계별 시도율, 순간 동시, 설계 목표 용량(IHS 임계 넘기 직전 단계), 부적절 처리 비율 |
 | 미디어 | 손실 % · 지터 ms · 단방향 무음 · MOS 추정 · RTCP 수신 | RTP seq/timestamp(RFC 3550 A.1/A.8). **MOS**(`mos`) = ITU-T G.107 E-model(워커 `EModel.h`): R = 93.2 − 1.41 − Id − Ie,eff, Id = 0.024d + 0.11(d−177.3)H(d−177.3) 에 d = 20 ms + 2×지터(단방향 망 지연은 0 — RTCP RTT 미측정), Ie,eff = Ie + (95−Ie)·Ppl/(Ppl+Bpl), MOS = 1 + 0.035R + R(R−60)(100−R)·7e-6(Annex B). 코덱 = 수신 wire PT: G.711 Ie 0/Bpl 25.1(PLC, G.113 App.I) · G.729 11/19 · AMR 5/10 · AMR-WB 6/13 · G.722 13/10(광대역 둘은 협대역 척도 근사 — 상대 비교용). 표본 = 호별 leg(`media_hold` 뒤 `bye` 진입), 요약 = `mos_mean`·`mos_min`(최악 leg), **기대치는 `min`**(로그 버킷 백분위는 1~4.5 범위에서 거칠다). **RTCP 수신 통계** = RTP 포트+1 로 들어온 SR/RR compound(§6.4) 를 세고 보고 블록의 fraction lost 를 `rtcp_remote_loss_pct` 표본으로 남긴다(`rtcp_rx`·`rtcp_rr_rx`; 상대가 RTCP 를 내지 않으면 값 없음 — CMP relay 는 내지 않는다, 실측). 카운터 `rtp_tx`·`rtp_rx`·`rtp_lost`·`rtp_silent_legs`(표본 시점에 수신 0 인 단말)·`media_send`·`media_stop`·`skipped_rtp_cap`, 게이지 `rtp_streams`. 표본은 `media_hold` 를 지난 인스턴스의 `bye` 진입 때(`rtp: none` 호는 뜨지 않는다). 워커 디버그 로그에 단말별 `rtp sample <역할>: tx rx lost jitter` |
-| 피어 트렁크 | `early_media_pct` · `early_rtp_pct` · `prack_pct` · `dtmf_rx_pct` · `q850_rx_pct` · re-INVITE/REFER 코드 | 발신기 관측 비율(`RATIO_METRICS` — 분자/분모 카운터 정의 단일): 183+SDP 도달/183 송신, **200 전에 RTP(≥ 5 패킷)를 받은 발신자/183 송신**, PRACK 수신/신뢰 183, DTMF 수신 이벤트/송신 숫자, Reason 수신/송신. B2BUA 투과 여부를 말한다. `early_media_pct` 는 시그널링(183 의 SDP 가 발신자에 닿았는가), `early_rtp_pct` 는 미디어 평면(링백 RTP 가 실제로 닿았는가 — 미디어 앵커가 18x SDP 를 반영해야 100 %)이다 |
+| 피어 트렁크 | `early_media_pct` · `early_rtp_pct` · `prack_pct` · `dtmf_rx_pct` · `q850_rx_pct` · `retrans_rx_pct` · `thig_pct` · re-INVITE/REFER 코드 | 발신기 관측 비율(`RATIO_METRICS` — 분자/분모 카운터 정의 단일): 183+SDP 도달/183 송신, **200 전에 RTP(≥ 5 패킷)를 받은 발신자/183 송신**, PRACK 수신/신뢰 183, DTMF 수신 이벤트/송신 숫자, Reason 수신/송신. B2BUA 투과 여부를 말한다. `early_media_pct` 는 시그널링(183 의 SDP 가 발신자에 닿았는가), `early_rtp_pct` 는 미디어 평면(링백 RTP 가 실제로 닿았는가 — 미디어 앵커가 18x SDP 를 반영해야 100 %)이다. `retrans_rx_pct` = 유실 주입(`fault.drop_invite`) 뒤 닿은 INVITE 재전송 벌 / 버린 벌(대상의 Timer A 재전송), `thig_pct` = 응답에 토큰화 Via 가 보존된 발신 / THIG Via 를 얹은 ibcf 발신(`thig_tx`). `dtmf_rx_pct` 는 방식(rfc4733/inband)에 무관 |
 | PTT | `affiliate_ms` · `group_fanout_ms` · `floor_grant_ms` · `floor_taken_ms` · `floor_queue_ms` · `floor_idle_ms` · `floor_grant_pct` | TS 24.380 메시지 **수신 시각**(floor 스레드, µs)으로 잰다: affiliation PUBLISH → 200 · 그룹 INVITE → 마지막 멤버 합류(자동응답) · Floor Request → Granted(큐를 거치지 않은 요청) · Request → 다른 참가자의 Taken 도달 · 큐를 거친 Request → Granted · Release → 발언자의 Idle. 비율 `floor_grant_pct` = `floor_granted`/`floor_request_tx`. 카운터 `affiliated_ok/fail`·`group_calls`·`group_joined`·`floor_request_tx`·`floor_granted`·`floor_denied`·`floor_queued`·`floor_revoked`·`floor_release_tx`·`floor_taken_rx`·`floor_idle_rx`. 그룹 세션의 leg = 발신자 1 + 합류 멤버 수 |
 | 실단말 | `real_srd_ms` · `real_rtp_loss_pct` · `real_jitter_ms` · `real_mos`(min) | 실단말(real-ue, §3.3) leg 만 따로 — 같은 표본이 전체 지표에도 들어간다. 카운터 `real_legs`·`real_rtp_tx/rx/lost`·`real_rtp_silent_legs`·`real_rtp_nosample`(표본 없이 bye)·`real_ue_exit`(프로세스 종료) |
 | 대표번호 · 청취 | `fork_alert_pct` · `listen_pct` | 발생기 관측 비율 — `fork_rx`/`fork_expected`(번호 리터럴 다이얼 뒤 발신자를 뺀 UE 역할에 도달한 포크 INVITE, TS 24.239) · `listen_ok`/`listen_tx`(recvonly 청취 INVITE 의 200 확립, dispatch_center.md §5.6). 부가 카운터 `fork_dial_tx`·`ringing_leg_cancelled`·`pcpid_ok`·`group_join_ok` |
@@ -600,7 +624,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 | 보고서 | 결과 화면의 [인쇄] = `window.print()` — 검증 콘솔과 같은 인쇄 규약(셸·툴바·레일·이벤트 표 숨김, `.tester-report` 만 A4, 구획 단위 쪽 나눔), 표지에 발행 일시. Markdown 은 CLI `report` 와 같은 본문 |
 
 컴포넌트는 팩 안 `components/`(MiniChart · LiveCharts · WorkerFleet · LiveSidebar · RunLivePanel · RunIndex · RunStartDialog · PlanPreview · SipDrawer · RunReport · YamlEditor(`onValid(ok, doc)`) · ProfileCurve · ListRail(레코드 레일 + RailRow/RailGroup) · topology/TopologyCanvas · scenario/ScenarioCanvas), 모델·표시 헬퍼 `lib/`(fmt.ts = RFC 6076 라벨·판정 톤·수치 형식 · metrics.ts = 기대치 임계·라이브 누계 판정·절차 진행·SDT/예상 소요(컨트롤러 규칙과 동일) · topology-model.ts · scenario-model.ts · use-history.ts = 문서 이력·Ctrl+Z/Y·이탈 경고 · use-drawer-height.ts = 드로어 높이). 차트는 라이브러리 없이 SVG(`--chart-N` 토큰), 지표별 소형 차트는 자기 축. 배지는 크기 오버라이드 없이 계약(12px SemiBold) 그대로(console_design_system §7-31).
-**남은 것** = 미디어 평면 후속(미디어 전담 워커 분리) · conference SUBSCRIBE 정합·로스터 노출(S3-SCN-PTT-LISTEN L1b/L5)·dialog 포크 정합(S3-SCN-FA F7) 검사의 계측기 이전(지금은 cspsim).
+**남은 것** = 미디어 평면 후속(미디어 전담 워커 분리) · conference SUBSCRIBE 정합·로스터 노출(S3-SCN-PTT-LISTEN L1b/L5)·dialog 포크 정합(S3-SCN-FA F7) 검사의 계측기 이전(지금은 cspsim). 토폴로지 속성 패널은 피어 오류 주입(유실 벌 수·임의 유실 %)·DTMF 방식·THIG·TLS 상호인증 3 플래그, UE DTMF 방식·TLS 검증/클라이언트 인증서를 편집한다.
 
 **메뉴 자리** — 관리 영역(`admin`)에 그룹 `test`(**시험**)를 새로 둔다. ITU-T M.3400 Maintenance 기능군의 *Testing* 에
 해당하며, 릴리스 그룹(SW Mgmt — 검증/패키징)과 다르다: 검증은 배포 게이트, 시험은 부하·피어 시험 도구다.
@@ -640,11 +664,14 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
   `cimsue-cli`(sdk/core `CIMSUE_BUILD_CLI`, 타깃이 있을 때)를 같은 `bin/` 에 동봉한다 — 워커 `RealUe.CliPath` 기본 `bin/cimsue-cli`. cimsue-cli 는 libssl/
   libcrypto/libz/libzstd 만 동적 링크한다(대상 호스트 공통 라이브러리).
 - 워커 설정(`tester/worker/config/config_template.json`): `Worker.Name`(비면 hostname) · `Server.Ip/Port`(제어 7100) · `Sip.LocalIp`(비면 자동 탐지)·
-  `Sip.PortBase`(0=OS 자동, >0 = base+2i) · `Media.AudioFile/VideoFile`(비면 합성 PCMU/비디오 없음) · `RealUe.CliPath/MaxProcesses/LogLevel/StartTimeoutS/TlsCaFile`
-  (실단말 풀, §3.3) · `Limits.EndpointsPerCore/SapsPerCore`(용량 선언) · `Timers.*`. 배포 overlay `config.json`(평면 키)은 lifecycle 가 모듈 설정에 머지하고 워커도 자기 옆의 것을 읽는다. libcsim 의 printf 진단은 부하 중
+  `Sip.PortBase`(0=OS 자동, >0 = base+2i) · `Media.AudioFile/VideoFile`(비면 합성 PCMU/비디오 없음) · `Tls.PeerCertFile/PeerKeyFile`(TLS 피어 수신점 인증서 —
+  구 `Media.PeerCertFile` 승계) · `Tls.CaFile`(풀 `tls_verify`·피어 `tls_client_auth` 의 앵커, `RealUe.TlsCaFile` 이 비면 실단말도 이것) · `Tls.ClientCertFile/ClientKeyFile`
+  (풀 `tls_client_cert`) · `RealUe.CliPath/MaxProcesses/LogLevel/StartTimeoutS/TlsCaFile`(실단말 풀, §3.3) · `Limits.EndpointsPerCore/SapsPerCore`(용량 선언) · `Timers.*`.
+  health 가 `tls{ca,client_cert,peer_cert}` 보유를 보고하고 계획 미리보기가 풀 옵션과 대조한다(풀 생성은 400 `tls_ca_missing`/`tls_client_cert_missing`/`tls_peer_cert_missing`). 배포 overlay `config.json`(평면 키)은 lifecycle 가 모듈 설정에 머지하고 워커도 자기 옆의 것을 읽는다. libcsim 의 printf 진단은 부하 중
   초당 수천 줄이라 워커는 stdout 을 `/dev/null` 로 돌리고(`--verbose` 로 유지) 자기 로그는 stderr 로 낸다.
 - 검증 게이트: `S1-UNIT-TESTER`(계약·핸들러·오케스트레이터(가짜 워커)·피어 시드 파생·게이트웨이 SSE 단위시험 + 네이티브 `build/bin/csim_rtp_dtmf_test`
-  RFC 4733 루프백 · `csim_rtp_media_test` · `tester_sip_capture_test` · `tester_emodel_test` · `tester_real_ue_test`(실단말 프로세스 관리 — drive 프로토콜 스텁)) · `S1-CONFIG-PORTABILITY` 대상에 두 모듈 설정 ·
+  RFC 4733·in-band·G.722 루프백 · `csim_rtp_media_test` · `csim_peer_fault_test`(재전송 유실·THIG·G.722 협상 — UDP 루프백 피어 둘) · `csim_tls_mutual_test`(TLS 상호인증 —
+  openssl CLI 임시 인증서) · `tester_sip_capture_test` · `tester_emodel_test` · `tester_real_ue_test`(실단말 프로세스 관리 — drive 프로토콜 스텁)) · `S1-CONFIG-PORTABILITY` 대상에 두 모듈 설정 ·
   `S2-PREFLIGHT` 네이티브 바이너리 목록 · `S4-PKG-BUILD` 기대 tarball 에 `oam-cims-tester`·`cims-tester-worker`.
 - 파이썬 인터프리터 선택은 [os_portability.md](os_portability.md) 규칙(`--python` > 동봉 > `python3.14` > `python3`)을 따른다.
 - 워커 호스트 = 시험 대상과 **다른** 호스트(N 대). 독립 형태의 컨트롤러 노드는 워커 중 한 대에 동거해도 된다(소규모).
@@ -671,8 +698,8 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 |---|---|---|---|
 | **A. 계약 + base 확장** | 시나리오/프로파일 YAML 스키마, 워커 제어·관측 JSONL 스키마, 지표 정의표(§5), 목표 규모(§11) 확정. base 확장 셋 — ① 게이트웨이 SSE 통과(§6.2) ② 콘솔 번들 하나 + nav 섹션 서비스 게이팅(§7) ③ nav 그룹 `test` | 본 문서 갱신 + `ems/tester/oam/schema/*.json`(스키마 단위시험). base 확장은 기존 콘솔·oam-svc 동작 무변경으로 S3 게이트 PASS | M |
 | **B. UE 축 + 컨트롤러 최소** | `libcsim` 추출(SimSession/RtpThread → 라이브러리, cspsim 은 그 위 CLI), `cims-tester-worker` ue 풀·단계 실행기·1초 집계 스트림, `oam-cims-tester` run/저장/CLI + pkg·config_template·self-register, 프로파일 constant·step(+ramp·soak·burst) | **구현 반영** — 개발서버 CSP(UDP 15060) 상대로 `cims-tester run VOLTE-CALL-BASIC --topology … --instances 3` 완주(SER 100 %, RRD p95 5 ms, SRD ≈ after_ms+20 ms, RTP 손실 0, 보고서·기대치 판정), 워커 단독 4쌍 1 SApS 지속. 워커 2대 분산 실측(같은 호스트 워커 둘, creds 40 을 offset 으로 20/20): constant 2 SApS × 40 s·HT 4 → 시도 78 = 워커당 39, SER 100 %, 등록 40, skipped 0, RTP 손실 0. `db` 신원 원천 실측: 대상 DB offset 8 에서 8 명 → 등록 8/8·호 pass, run 기록에 H(A1) 없음. 남은 것 = 부하 강화 문서 시험(4 cps/HT20, 10 cps/HT5) 재현 실측(개발서버 CMP relay 포트 풀이 20 세션이라 동시 20 을 넘는 부하는 대상 설정 변경 뒤) | L |
-| **C. 피어 축 — ibcf** | peer 엔진(고정 수신점·신원 범위·응답 정책·무응답) + `ibcf` 프로파일, 대상 CSP 컬렉션 시드/복원, 트렁크 in/out·route_set failover·ACL 시나리오 | **구현 반영** — `CsimPeer` 엔진·워커 peer 풀·컨트롤러 시드/복원(§3.2). 개발서버 CSP 상대 실측: `TRUNK-IBCF-OUTBOUND`(가입자→피어, SRD p95 820 ms, RTP 손실 0)·`TRUNK-IBCF-ACL-DENY`(피어링 접속점 ACL → 403) **pass**, `TRUNK-IBCF-INBOUND`(피어→피어링 접속점→가입자, SRD p95 1185 ms, RTP 손실 0) **pass**(CSP 피어링 접속점 인증 생략 반영본), `TRUNK-IBCF-FAILOVER` 는 CSP 헬스체크 부재로 우선(무응답) 피어에서 Timer B — §12 확인. 오류 주입 = `answer: reject`(즉시 특정 코드 + Reason)·`answer: delay`(응답 지연) 구현 반영(§3.2, `TRUNK-IBCF-FAILOVER-5XX`). 남은 것 = 재전송 유실(psip 수신 훅 필요)·TLS 상호인증(psip `bCheckClientCert` 노출 필요)·THIG 흔적 | M |
-| **D. 피어 축 — pbx · mgcf** | 트렁크 REGISTER, DID/내선, 183 early media·PRACK, hold/resume, REFER 발신, RFC 4733 DTMF, Q.850 Reason, G.711 | **구현 반영**(§3.2 pbx·mgcf) — 시나리오 `trunk/pbx_{outbound,inbound,dtmf,hold_resume,transfer,register}.yaml`·`trunk/mgcf_{outbound,inbound,reject_q850}.yaml`. 개발서버 실측 7 pass / 3 fail — fail 은 전부 CIMS 측(§12: Reason 미투과·503→603·트렁크 계정). 남은 것 = UE 측 183(실 단말 착신 모사 아님)·in-band DTMF·G.722·TLS 상호인증 | M |
+| **C. 피어 축 — ibcf** | peer 엔진(고정 수신점·신원 범위·응답 정책·무응답) + `ibcf` 프로파일, 대상 CSP 컬렉션 시드/복원, 트렁크 in/out·route_set failover·ACL 시나리오 | **구현 반영** — `CsimPeer` 엔진·워커 peer 풀·컨트롤러 시드/복원(§3.2). 개발서버 CSP 상대 실측: `TRUNK-IBCF-OUTBOUND`(가입자→피어, SRD p95 820 ms, RTP 손실 0)·`TRUNK-IBCF-ACL-DENY`(피어링 접속점 ACL → 403) **pass**, `TRUNK-IBCF-INBOUND`(피어→피어링 접속점→가입자, SRD p95 1185 ms, RTP 손실 0) **pass**(CSP 피어링 접속점 인증 생략 반영본), `TRUNK-IBCF-FAILOVER` 는 CSP 헬스체크 부재로 우선(무응답) 피어에서 Timer B — §12 확인. 오류 주입 = `answer: reject`(즉시 특정 코드 + Reason)·`answer: delay`(응답 지연)·**재전송 유실**(`fault.drop_invite/drop_pct` — psip `RecvFilter`, `retrans_rx_pct`)·**TLS 상호인증**(`tls_client_auth/tls_verify/tls_client_cert` — psip 연결 단위 클라이언트 인증서·검증 저장소, 접속점 전용 ctx)·**THIG 흔적**(`thig` — 토큰화 Via, `thig_pct`) 구현 반영(§3.2 — 단위시험 `csim_peer_fault_test`·`csim_tls_mutual_test`, 동봉 `TRUNK-IBCF-RETRANS-LOSS`·`TRUNK-IBCF-TLS-MUTUAL`·`TRUNK-IBCF-THIG`). 대상 상대 실측은 배포 뒤(TLS 상호인증은 CSP 클라이언트 인증서 §12) | M |
+| **D. 피어 축 — pbx · mgcf** | 트렁크 REGISTER, DID/내선, 183 early media·PRACK, hold/resume, REFER 발신, RFC 4733 DTMF, Q.850 Reason, G.711 | **구현 반영**(§3.2 pbx·mgcf) — 시나리오 `trunk/pbx_{outbound,inbound,dtmf,hold_resume,transfer,register}.yaml`·`trunk/mgcf_{outbound,inbound,reject_q850}.yaml`. 개발서버 실측 7 pass / 3 fail — fail 은 전부 CIMS 측(§12: Reason 미투과·503→603·트렁크 계정). **UE 측 183**(`progress who: [UE]` — `SimSession::ProgressCall`, 동봉 `VOLTE-CALL-UE-EARLY-MEDIA`)·**in-band DTMF**(풀 `dtmf: inband` — G.711 톤·Goertzel, 동봉 `TRUNK-MGCF-DTMF-INBAND`)·**G.722**(PT 9 오퍼/answer·합성·샘플, 동봉 `TRUNK-PBX-G722`)·TLS 상호인증(C 행) 구현 반영 — 단위시험 `csim_rtp_dtmf_test`(in-band·G.722)·`csim_peer_fault_test`(G.722 협상). 대상 상대 실측은 배포 뒤 | M |
 | **E. 콘솔 팩** | §7 화면 전부, SSE 라이브, 비교·보고서. cims-verify S3/S6 시나리오 항목의 `cims-tester` 호출 이전 | **구현 반영**(§7 표) — 컨트롤러 = 토폴로지 v2 모델·v1 승계·계획 미리보기(`runs/plan`=`compile-check`)·`vocab`·`hold`·`hist`·`sip/{call_id}`·`target-alerts`·색인 필터·`compare?format=`·`during` 평탄화·연결 검사 `노드:수신점`; 콘솔 팩 = 토폴로지 캔버스 편집기·시나리오 시퀀스 캔버스 편집기·실행(워커 띠·단계 사다리·종료 조건·소형 차트·절차 진행·SIP 드로어·색인 필터·계획 미리보기)·결과(run 레일·판정 요약·히스토그램·여유 막대·알람 마커·대상 증거)·비교(run 카드·Δ 매트릭스·t+0 겹침·기대치 diff·추세). 개발서버 실측: 연결 검사 CSP OPTIONS 200 OK / TLS 1.3 / 워커 health, `VOLTE-CALL-BASIC` 단발 3 인스턴스 완주(pass, SER 100 %), 단위시험 73 건(S1-UNIT-TESTER PASS), 콘솔 tsc·vite build 통과. 남은 것 = §7 '남은 것' + 콘솔 화면 실기 확인(oam 패키지 재빌드·배포) | L |
 | **미디어 평면** | `invite.media.rtp`(auto/none/explicit)·`media_send`/`media_stop`·샘플 라이브러리의 워커 이행 — libcsim `CRtpThread` 송출 제어·원천 교체(단일 송신 루프, AMR-WB/G.711 파일·합성)·상대 hold 정지, 워커 단계·샘플 검증·health `media`·RTP 상한, 컨트롤러 모델·컴파일(샘플 발췌)·계획 미리보기 검산·`early_rtp_pct`, 콘솔 편집 | **구현 반영**(§4 미디어 평면) — 단위시험: libcsim `csim_rtp_media_test`(none·explicit·샘플 1회 재생 = 프레임 수만큼·정지/재개에 시퀀스 공백 없음·hold 정지·AMR-WB NO_DATA) + 컨트롤러 모델·컴파일·계획(S1-UNIT-TESTER). 개발서버 CSP/CMP 실측: `VOLTE-CALL-SIGNALING` pass(RTP 카운터 0) · `VOLTE-CALL-ONEWAY-MEDIA` pass(발신자만 4 s — tx 197 = rx 197, 손실 0, 무수신 단말 1, CMP relay 경유) · `VOLTE-CALL-BASIC` 회귀 pass(CMP 녹취 PT = 협상 PT 96) · `TRUNK-MGCF-EARLY-MEDIA` — CSP 0.2.132 에서 `early_rtp_pct` 0 % 로 **18x SDP 미앵커링을 드러냈고**, 앵커링 반영본(0.2.134)에서 pass(100 %, §12). **영상** = `invite`/`group_call` 의 `media.video: h264` 가 오퍼 m=video 유무를 정한다(libcsim `m_bVideoOffer`, 워커 `Media.VideoFile` 기본 = 동봉 `samples/sample_video.h264` — 없으면 오디오만 + `video_unavailable`), 지표 `video_pct` = answer 활성 m=video / m=video 오퍼. 동봉 샘플 = `ringback_kr`·`tone_1k`(G.711)·`sample_voice.amrwb`(AMR-WB raw, 워커 `Media.AudioFile` 기본 — 기본 원천이 합성 NO_DATA 대신 실제 음성)·`sample_video.h264`. 남은 것 = 미디어 전담 워커 분리 | M |
 | **F. 확장** | MCData SDS/MSRP ue 단계, `real-ue` 편입, NAT(netns) 풀, MOS 추정, soak 프로파일 + 누수 판정, 대상 알람 타임라인 겹침 | **`real-ue` 편입 구현 반영**(§3.3) — cimsue-cli `drive` 모드 + 워커 `RealUe` 프로세스 풀 + 컨트롤러 `RealUePool`/`REAL_UE_STEPS`/`real_*` 지표 + 콘솔 속성 패널·행위자 게이트, 동봉 `VOLTE-CALL-REAL-UE`, 실측 VoLTE·PTT 그룹콜 pass. MOS 추정은 §5 반영. 남은 것 = MCData·NAT(netns)·soak 누수 판정 시나리오·알람 타임라인 | M |
@@ -709,7 +736,8 @@ B 가 끝나면 성능 시험이, C·D 가 끝나면 피어 연동 기능 시험
 | 트렁크 REGISTER(`register_to_remote`, 수신 측 트렁크 계정) | 미구현 | **실측**(`TRUNK-PBX-REGISTER`): PBX 계정의 Digest REGISTER 가 가입자 조회에서 403 — 등록형 트렁크 시나리오는 attempts 0 으로 닫힌다. 고정 IP 피어링(ACL 신뢰)만 동작 |
 | attended 전달의 REFER 응답 순서 | 관찰(과제 아님) | **실측**(`VOLTE-XFER-ATTENDED`, CSP 0.2.134): CSP 가 Refer-To Replaces 를 처리하면서 전달자 두 leg 에 BYE 를 먼저 보내고 REFER 의 202 를 그 뒤에 낸다. 다이얼로그 기준으로 응답을 짝짓는 UAC(psip `EventTransferResponse`)는 이 202 를 버린다 — libcsim 은 REFER 응답을 `RecvResponse` 에서 먼저 관측해 지표로 남긴다. RFC 3515 §2.4.2 가 순서를 강제하지는 않으나 실 단말 호환을 위해 202 → NOTIFY → BYE 순이 자연스럽다 |
 | PTT 그룹콜 video 협상 | 미구현 — 200 answer 가 m=video 를 **생략** | **실측**(`PTT-GROUP-CALL-VIDEO`, CSP 0.2.134): 발신 멤버가 audio+video+application 을 오퍼하면 PTT-AS 의 200 은 audio+application 만 낸다 — RFC 3264 §6(answer 의 m-line 수·순서 = 오퍼, 거절은 port 0)에 어긋나고 멤버 fan-out INVITE 에도 video 가 없다(CMP 는 PTT 멤버 유닛에 video 포트를 갖고 있다). 계측기 `video_pct` 0 으로 드러남 — 1:1 VoLTE 는 100 %. 그룹 video 를 중계하지 않는다면 m=video 0 으로 거절해야 한다(`CspPttGroup._videoEnabled` 축) |
-| THIG·번호 정규화·`Privacy` | 없음 | ibcf 프로파일의 신원·프라이버시 검사 실패. (`P-Asserted-Identity` 는 psip 이 발신 leg 도메인으로 실어 B-leg 에 있다 — 실측 `pai_missing` 0) |
+| THIG·번호 정규화·`Privacy` | 없음 | ibcf 프로파일의 신원·프라이버시 검사 실패. (`P-Asserted-Identity` 는 psip 이 발신 leg 도메인으로 실어 B-leg 에 있다 — 실측 `pai_missing` 0). 상대 IBCF 의 토큰화 Via 보존은 `TRUNK-IBCF-THIG`(`thig_pct`)가 본다 — B2BUA 가 응답 Via 를 요청대로 되돌리면 100 % |
+| TLS 발신 연결의 클라이언트 인증서(NNI 상호인증) | psip UAC 기본 — 인증서를 제시하지 않고 서버도 검증하지 않는다(CSP 설정 없음) | `TRUNK-IBCF-TLS-MUTUAL`: 피어 수신점이 클라이언트 인증서를 요구하면(`tls_client_auth`) CSP → 피어 TLS 핸드셰이크가 실패해 INVITE 가 닿지 않는다. TS 33.310 NDS/IP·TS 29.165 II-NNI 는 상호인증이 기본 — CSP `remote_nodes` 에 클라이언트 인증서·검증 앵커 설정이 필요(psip 은 연결 단위 `m_strClientCertFile`/`m_bTlsVerifyServer` 를 갖췄다) |
 | 피어 인바운드 인증 | **반영** — 신뢰는 접속점 edge 가 아니라 **인바운드 Route 식별**(수신 LocalNode + 소스 IP[:UDP 포트] → Route, `routes.inbound_auth=none`) 에서 나온다. `edge=peering` 접속점은 Route 없는 소스에 403, access 접속점의 피어도 Route 가 있으면 Digest 없이 통과. 라우팅 정책이 트렁크를 고른 호라고 인증을 건너뛰던 우회(PendingRouteMap — 미등록 발신자의 무인증 트렁크 발신 구멍)는 제거. ACL `scope=route/route_set` 인바운드 동작 | `TRUNK-IBCF-INBOUND` 가 401 로 실패 + psip UAC 가 401 에 INVITE 를 무한 재송(그 전 변경에서 수정) → 시드 ACL 은 `scope=route` 로 그 피어에만 |
 | PRACK/100rel·183 시그널링 트렁크 전달 | **정상 확인** — `TRUNK-MGCF-OUTBOUND` 실측 early_media 100 %·prack 100 %(CSP 가 183/SDP 를 A-leg 로, A-leg PRACK 을 B-leg 로 전달, PRACK SDP 재작성 §5.2) | 회귀 시험 항목으로 유지. 시그널링 도달만 말한다 — 미디어 경로는 아래 행 |
 | 18x SDP 의 미디어 앵커링(early media RTP) | **정상 확인**(CSP 0.2.134 — [volte_flows.md](volte_flows.md) C1a) — `TRUNK-MGCF-EARLY-MEDIA` 실측 `early_rtp_pct` 100 %(200 전 발신자 수신 149 패킷, 발신자 rx 396 = 피어 tx 396, 손실 0). CSP SIP 로그: 발신자에 가는 183 의 `m=` 포트 = CMP A측, CMP 로그: `RELAY_MODIFY peer[1]` 이 183 시각에 나가고 200 의 재요청은 `unchanged — keep latch` | 회귀 시험 항목. 이 항목은 계측기 미디어 평면이 드러냈다 — 앵커링 전에는 링백 RTP 가 CMP 에서 폐기되고(`early_rtp_pct` 0 %) 발신자의 early RTP 가 CMP 를 우회했다 |

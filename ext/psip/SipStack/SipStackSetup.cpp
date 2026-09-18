@@ -36,6 +36,7 @@ CSipStackSetup::CSipStackSetup() : m_iLocalUdpPort(SIP_UDP_PORT), m_iUdpThreadCo
 	, m_bStateful(true), m_bTlsClient(false), m_bTcpClient(false), m_bUseContactListenPort(false)
 	, m_bUseRegisterSession(false)
 	, m_bSendTrying(true)
+	, m_bTlsVerifyServer(false), m_bTlsPrivateCtx(false)
 {
 }
 

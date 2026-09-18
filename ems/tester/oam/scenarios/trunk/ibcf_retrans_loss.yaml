@@ -1,0 +1,16 @@
+# IBCF 피어 재전송 유실 — 피어(peer_kt_lossy, fault.drop_invite 1)가 새 INVITE 의 첫 벌을 와이어 유실처럼 버린다.
+#   대상(CSP)이 RFC 3261 §17.1.1.2 Timer A(T1 500 ms) 재전송을 내면 두 번째 벌이 닿아 호가 성립하고 SRD 가 T1 만큼 늘어난다.
+#   retrans_rx_pct = 닿은 재전송 벌 / 버린 벌(100 % = 대상이 재전송을 낸다) · srd_ms p50 ≥ 500 이 아니면 유실이 주입되지 않은 것.
+#   UDP 수신점에서만 뜻이 있다(TCP/TLS 는 SIP 재전송이 없다).
+id: TRUNK-IBCF-RETRANS-LOSS
+title: IBCF 피어 INVITE 첫 벌 유실 → 대상의 Timer A 재전송
+tags: [trunk, ibcf, fault, retransmission]
+roles:
+  caller: { pool: volte_ue }
+  peer:   { pool: peer_kt_lossy }
+flow:
+  - { step: register,   who: [caller], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: peer, media: { audio: amr-wb }, expect: { retrans_rx_pct: 100 } }
+  - { step: answer,     who: [peer], after_ms: 300, expect: { code: 200, srd_ms: { min: 500, p95: 3000 } } }
+  - { step: media_hold, seconds: 2, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }

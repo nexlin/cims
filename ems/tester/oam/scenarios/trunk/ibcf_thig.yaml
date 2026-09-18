@@ -1,0 +1,15 @@
+# IBCF THIG 흔적 — 타 IMS 의 IBCF 가 topology hiding(TS 24.229 §5.10.4)을 거쳐 넘긴 INVITE 모사: 피어(peer_kt_thig, thig: true)가
+#   자기 Via 아래에 토큰화 Via(`SIP/2.0/UDP <token>;tokenized-by=ims.kt.test`)를 얹는다. 대상이 응답에 Via 스택을 온전히 되돌리면
+#   (RFC 3261 §8.2.6.2) thig_pct 100. 토큰화 Via 를 지우거나 고치면 상대 IBCF 가 응답을 되돌리지 못한다 — 피어 → 가입자 착신 흐름.
+id: TRUNK-IBCF-THIG
+title: 타 IMS(THIG 토큰화 Via) → 가입자 착신 — 응답 Via 보존
+tags: [trunk, ibcf, thig]
+roles:
+  peer:   { pool: peer_kt_thig }
+  callee: { pool: volte_ue }
+flow:
+  - { step: register,   who: [callee], expect: { code: 200 } }
+  - { step: invite,     from: peer, to: callee, media: { audio: amr-wb }, expect: { thig_pct: 100 } }
+  - { step: answer,     who: [callee], after_ms: 500, expect: { code: 200, srd_ms: { p95: 3000 } } }
+  - { step: media_hold, seconds: 2, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: peer, expect: { sdd_ms: { p95: 300 } } }

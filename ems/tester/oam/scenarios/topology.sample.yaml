@@ -54,6 +54,13 @@ pools:                                   # 풀 하나 = 워커 하나. 워커 �
     transport: tls
     srtp: optional
     prack: true
+  volte_ue_inband:                       # in-band DTMF 단말 — telephone-event 없이 G.711 톤을 내고 Goertzel 로 받는다(TRUNK-MGCF-DTMF-INBAND). 다른 신원 구간(offset)
+    kind: ue
+    worker: w2
+    access: csp
+    source: { creds: creds/volte-b.jsonl, offset: 10, count: 5 }
+    transport: udp
+    dtmf: inband
   ptt_ue:                                # MCPTT 단말 — service: ptt (PTT 도메인·GMS/CMS 구독·그룹 affiliation·floor). creds 줄마다 `group` = affiliation 그룹
     kind: ue
     worker: w1
@@ -99,6 +106,39 @@ pools:                                   # 풀 하나 = 워커 하나. 워커 �
     answer: reject
     fault: { code: 503, q850: 38 }
     seed: { route_set: rs-kt, priority: 40 }
+  peer_kt_lossy:                         # 재전송 유실 주입 — 새 INVITE 첫 벌을 버린다(TRUNK-IBCF-RETRANS-LOSS, retrans_rx_pct). UDP 만. 자기 RouteSet(도메인 규칙은 같아도 시드는 선언한 풀만)
+    kind: peer
+    worker: w2
+    peering: csp
+    profile: ibcf
+    bind: { port: 5084, protocol: udp }
+    domain: ims.lossy.test
+    identities: { e164_range: ["+82213340000", "+82213340009"] }
+    fault: { drop_invite: 1 }
+    seed: { route_set: rs-lossy }
+  peer_kt_thig:                          # THIG 흔적 — 발신 INVITE 에 토큰화 Via(TRUNK-IBCF-THIG, thig_pct)
+    kind: peer
+    worker: w2
+    peering: csp
+    profile: ibcf
+    bind: { port: 5085, protocol: udp }
+    domain: ims.thig.test
+    identities: { e164_range: ["+82214340000", "+82214340009"] }
+    thig: true
+    seed: { route_set: rs-thig }
+  peer_kt_tls:                           # TLS 상호인증 피어 — 수신점 TLS(워커 Tls.PeerCertFile) + 클라이언트 인증서 요구(Tls.CaFile), 발신은 서버 검증·클라이언트 인증서 제시(TRUNK-IBCF-TLS-MUTUAL)
+    kind: peer
+    worker: w2
+    peering: csp
+    listener: tls
+    profile: ibcf
+    bind: { port: 5086, protocol: tls }
+    domain: ims.tls.test
+    identities: { e164_range: ["+82215340000", "+82215340009"] }
+    tls_client_auth: true
+    tls_verify: true
+    tls_client_cert: true
+    seed: { route_set: rs-tls }
   peer_blocked:                          # ACL deny 대상 피어 (TRUNK-IBCF-ACL-DENY)
     kind: peer
     worker: w2
@@ -126,6 +166,25 @@ pools:                                   # 풀 하나 = 워커 하나. 워커 �
     bind: { port: 5095, protocol: udp }
     domain: mgcf.pstn.test
     identities: { e164_range: ["+82312340000", "+82312340099"] }
+  mgcf_inband:                           # in-band DTMF 게이트웨이 — telephone-event 없이 G.711 톤(TRUNK-MGCF-DTMF-INBAND). 코덱은 G.711 우선
+    kind: peer
+    worker: w2
+    peering: csp
+    profile: mgcf
+    bind: { port: 5096, protocol: udp }
+    domain: mgcf.inband.test
+    identities: { e164_range: ["+82313340000", "+82313340009"] }
+    codecs: [PCMU, PCMA, AMR-WB]
+    dtmf: inband
+  pbx_wb:                                # 광대역 IP-PBX — G.722 우선(TRUNK-PBX-G722), 고정 IP 피어링(등록 없음)
+    kind: peer
+    worker: w2
+    peering: csp
+    profile: pbx
+    bind: { port: 5091, protocol: udp }
+    domain: pbx.wb.test
+    identities: { did_range: ["0312345000", "0312345009"], ext_len: 4 }
+    codecs: [G722, PCMA]
 layout:                                  # UI 배치 — 캔버스 영역(호스트) 좌표·크기, 카드(워커·노드) 좌표. 컴파일러는 읽지 않는다
   regions: { h45: { x: 420, y: 40, w: 990, h: 470 }, h61: { x: 30, y: 40, w: 360, h: 330 }, h62: { x: 30, y: 400, w: 360, h: 380 } }
   items: { csp: { x: 14, y: 12 }, cmp: { x: 290, y: 12 }, csc: { x: 560, y: 12 }, oam: { x: 290, y: 150 }, db: { x: 560, y: 150 }, w1: { x: 14, y: 12 }, w2: { x: 14, y: 12 } }

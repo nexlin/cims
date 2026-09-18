@@ -68,8 +68,24 @@ public:
 	 *  인증서와 키를 별도 파일로 두는 배치에서 필요하다. */
 	std::string	m_strKeyFile;
 
-	// TLS 세션으로 연결한 클라이언트 인증을 위한 인증 기관 인증서 PEM 파일
+	// TLS 세션으로 연결한 클라이언트 인증을 위한 인증 기관 인증서 PEM 파일. 서버(리스너) 쪽에 주면 **클라이언트 인증서를 요구**한다
+	//   (SSL_VERIFY_PEER|FAIL_IF_NO_PEER_CERT — 상호인증). m_bTlsVerifyServer 가 켜진 클라이언트 쪽에서는 서버 인증서 검증의 앵커다.
 	std::string m_strCaCertFile;
+
+	/** TLS 클라이언트(발신 연결)가 **서버 인증서를 검증**하는가 — 앵커 = m_strTlsVerifyCaFile(비면 m_strCaCertFile, 둘 다 비면 시스템 기본
+	 *  저장소). 체인 검증만 하고 호스트명(SAN)은 대조하지 않는다(IP 로 접속하는 SIP 코어 간 NNI 관례 — TS 33.310 NDS/IP 는 체인·발급자
+	 *  기준). 기본 false(기존 동작 유지). m_strCaCertFile 은 리스너의 클라이언트 인증서 요구도 켜므로, 검증 앵커만 두려면 이 필드를 쓴다. */
+	bool m_bTlsVerifyServer;
+	std::string m_strTlsVerifyCaFile;
+	/** bootstrap TLS 접속점(m_iLocalTlsPort)이 **자기 전용 SSL_CTX**(m_strCertFile/KeyFile/CaCertFile)를 갖는가. 기본 false = 전역 서버 ctx
+	 *  공유(ReloadTlsServerCert 로 무중단 교체되는 종래 동작 — CSP). 한 프로세스에 TLS 스택을 여럿 두는 응용(계측기 워커의 피어 엔진들)은
+	 *  나중에 뜬 스택의 SSLServerStart 가 전역 ctx 를 갈아치우므로 true 로 두어 접속점마다 인증서를 고정한다. */
+	bool m_bTlsPrivateCtx;
+	/** TLS 클라이언트가 핸드셰이크에 **제시하는 클라이언트 인증서**(PEM 체인)와 개인키(비면 인증서 파일에서). 상대(서버)가 상호인증을
+	 *  요구할 때 필요하다. 비면 제시하지 않는다. 클라이언트 SSL_CTX 는 프로세스 전역이지만 인증서·검증은 연결(SSL)마다 적용하므로
+	 *  한 프로세스의 스택마다 다르게 둘 수 있다. */
+	std::string m_strClientCertFile;
+	std::string m_strClientKeyFile;
 
 	// SIP UserAgent 헤더에 저장될 문자열
 	std::string	m_strUserAgent;

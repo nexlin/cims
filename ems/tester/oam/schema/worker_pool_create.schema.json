@@ -116,7 +116,7 @@
     },
     "PeerFault": {
       "additionalProperties": false,
-      "description": "피어 오류 주입 — answer 정책의 매개변수. 재전송 유실(와이어 손실)·TLS 상호인증은 psip 수신 훅/클라이언트 인증서 검증이 없어 아직 없다(§10 C).",
+      "description": "피어 오류 주입 — answer 정책의 매개변수(code/q850/delay_ms) + answer 와 독립인 **와이어 유실**(drop_invite/drop_pct — psip RecvFilter 로\n수신 메시지를 트랜잭션에 넣기 전에 버린다 → 상대의 Timer A/E 재전송이 닿는지, SRD 가 T1 만큼 늘어나는지 시험. UDP 에서만 뜻이 있다).",
       "properties": {
         "code": {
           "default": 503,
@@ -132,6 +132,22 @@
           "maximum": 120000,
           "minimum": 0,
           "title": "Delay Ms",
+          "type": "integer"
+        },
+        "drop_invite": {
+          "default": 0,
+          "description": "새 착신 INVITE 마다 첫 N 벌을 와이어 유실처럼 버린다(1 = 상대 Timer A 500 ms 재전송이 첫 도달 — 카운터 peer_fault_drop·invite_retrans_rx, 비율 retrans_rx_pct)",
+          "maximum": 5,
+          "minimum": 0,
+          "title": "Drop Invite",
+          "type": "integer"
+        },
+        "drop_pct": {
+          "default": 0,
+          "description": "모든 수신 메시지를 이 확률(%)로 버린다 — 재전송·재시도 복원력(응답 유실 → 상대의 200 재전송 등)",
+          "maximum": 90,
+          "minimum": 0,
+          "title": "Drop Pct",
           "type": "integer"
         },
         "q850": {
@@ -424,9 +440,14 @@
           "type": "string"
         },
         "dtmf": {
-          "default": true,
+          "default": "rfc4733",
+          "enum": [
+            "rfc4733",
+            "inband",
+            "off"
+          ],
           "title": "Dtmf",
-          "type": "boolean"
+          "type": "string"
         },
         "fault": {
           "anyOf": [
@@ -462,6 +483,26 @@
           ],
           "title": "Profile",
           "type": "string"
+        },
+        "thig": {
+          "default": false,
+          "title": "Thig",
+          "type": "boolean"
+        },
+        "tls_client_auth": {
+          "default": false,
+          "title": "Tls Client Auth",
+          "type": "boolean"
+        },
+        "tls_client_cert": {
+          "default": false,
+          "title": "Tls Client Cert",
+          "type": "boolean"
+        },
+        "tls_verify": {
+          "default": false,
+          "title": "Tls Verify",
+          "type": "boolean"
         }
       },
       "required": [
@@ -509,10 +550,15 @@
   "description": "POST /pools — 풀 생성·신원 적재. 멱등(pool 이름 기준).",
   "properties": {
     "dtmf": {
-      "default": true,
-      "description": "kind=ue — telephone-event 오퍼/echo",
+      "default": "rfc4733",
+      "description": "kind=ue — rfc4733(telephone-event 오퍼/echo) · inband(G.711 톤) · off",
+      "enum": [
+        "rfc4733",
+        "inband",
+        "off"
+      ],
       "title": "Dtmf",
-      "type": "boolean"
+      "type": "string"
     },
     "identities": {
       "items": {
@@ -577,9 +623,15 @@
       "$ref": "#/$defs/TargetCsp",
       "description": "풀이 닿는 SIP 서버 — 컨트롤러가 토폴로지 노드 참조에서 파생"
     },
+    "tls_client_cert": {
+      "default": false,
+      "description": "kind=ue — 워커 Tls.ClientCertFile 을 클라이언트 인증서로 제시(대상 접속점 상호인증)",
+      "title": "Tls Client Cert",
+      "type": "boolean"
+    },
     "tls_verify": {
       "default": false,
-      "description": "kind=real-ue — 서버 TLS 인증서 검증(워커 RealUe.TlsCaFile 앵커, 없으면 --no-tls-verify)",
+      "description": "kind=ue|real-ue — 서버 TLS 인증서 검증(ue: 워커 Tls.CaFile · real-ue: RealUe.TlsCaFile 앵커, 없으면 검증 없이)",
       "title": "Tls Verify",
       "type": "boolean"
     },

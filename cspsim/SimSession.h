@@ -45,6 +45,12 @@ public:
      *  deferred(SimSession::AnswerCall 이 호출) 두 모드가 같은 AnswerVoip 를 쓴다. */
     void AnswerPtt(const char* pszCallId, CSipCallRtp* pclsRtp, CSipMessage* pclsMessage);
     void AnswerVoip(const char* pszCallId, CSipCallRtp* pclsRtp);
+    /** answer SDP 구성(SRTP 협상·코덱 echo·telephone-event·video) — 183 과 200 이 같은 answer 를 쓴다(SimSession::Progress → AnswerCall).
+     *  실패(SAVP 수락 불가 등)면 488 을 내고 false. */
+    bool BuildAnswer(const char* pszCallId, CSipCallRtp* pclsRtp, CSipCallRtp& clsLocalRtp);
+    /** deferred 착신에 183 Session Progress + SDP answer(early media — RTP 송수신 시작). INVITE 가 100rel 을 지원하고 m_bPrack 이면 RSeq.
+     *  반환 0 = 성공 · 488 · 481(대기 착신 없음). */
+    int ProgressVoip(const char* pszCallId, CSipCallRtp* pclsRtp, bool b100rel);
 
     SimSession* m_pOwner;
 };
@@ -182,10 +188,25 @@ public:
     /** deferred 모드 — 보관한 착신 오퍼에 200 OK / 오류 응답. 대기 착신이 없으면 false. */
     bool AnswerCall();
     bool RejectCall(int iSipCode);
+    /** deferred 모드 — 200 전에 183 + SDP answer(UE 측 early media, 실 단말의 착신 안내음 모사 — 계측기 단계 `progress who: [UE]`).
+     *  반환 0 = 성공 · 481 = 대기 착신 없음/이미 냄 · 488 = answer 구성 실패. 그 뒤 AnswerCall 은 같은 answer 로 200 을 낸다. */
+    int  ProgressCall();
     bool HasPendingCall() const { return !m_strPendingCallId.empty(); }
     std::string  m_strPendingCallId;
     CSipCallRtp  m_clsPendingOffer;
     bool         m_bPendingOffer = false;
+    bool         m_bPending100rel = false;   // 보관한 착신 INVITE 가 100rel 을 지원(Supported/Require)
+    CSipCallRtp  m_clsPendingAnswer;         // 183 에 낸 answer — 200 이 같은 SDP(같은 SRTP 키)를 되낸다
+    bool         m_bPendingAnswer = false;
+
+    // ── TLS 클라이언트 보안(sip_tls_signaling.md·test_instrument.md §3.1 'TLS 서버 인증서 검증') — Start() 전에 둔다 ──
+    /** 서버 인증서 검증(앵커 = strCaFile, 호스트명 대조 없음)과 클라이언트 인증서 제시(상대 접속점이 상호인증을 요구할 때). */
+    void SetTls(bool bVerifyServer, const std::string& strCaFile, const std::string& strClientCert, const std::string& strClientKey) {
+        m_clsSetup.m_bTlsVerifyServer = bVerifyServer;
+        m_clsSetup.m_strTlsVerifyCaFile = strCaFile;
+        m_clsSetup.m_strClientCertFile = strClientCert;
+        m_clsSetup.m_strClientKeyFile = strClientKey;
+    }
     std::string  m_strByeCallId;          // StopCall 이 보낸 BYE 의 Call-ID — RecvResponse 가 최종 응답을 짝짓는다
     long long    m_tStopCallMs = 0;       // BYE 송신 시각 (SDD 기점)
 
@@ -197,6 +218,9 @@ public:
     void SetDtmf(bool b) { m_bDtmf = b; }
     bool m_bDtmf = false;
     int  m_iDtmfPt = 101;
+    /** in-band DTMF — telephone-event 를 오퍼/echo 하지 않고 G.711 톤으로 내고 Goertzel 로 받는다(CRtpThread::m_bDtmfInband). */
+    void SetDtmfInband(bool b) { m_bDtmfInband = b; m_clsRtpThread.m_bDtmfInband = b; }
+    bool m_bDtmfInband = false;
     /** 다음 발신의 오퍼 코덱(테이블 PT, -1 = 기본: 미디어 파일 있으면 AMR-WB, 없으면 PCMU). 호마다 재설정하지 않으면 유지. */
     void SetOfferCodec(int iPt) { m_iOfferCodec = iPt; }
     int  m_iOfferCodec = -1;
@@ -208,7 +232,7 @@ public:
     // 미디어 평면(test_instrument.md §4) — 모드는 다음 호부터(CRtpThread::EMediaMode), 송출 제어는 SDP 교환 뒤(RTP 기동 중)에만
     void SetMediaMode(int iMode) { m_clsRtpThread.SetMediaMode(iMode); }
     bool MediaSend(bool bDefault, const std::string& strAmrWbFile, const std::string& strPcmuFile, const std::string& strPcmaFile,
-                   bool bLoop);
+                   bool bLoop, const std::string& strG722File = "");
     bool MediaStop();
     int  m_iPendingQ850 = 0;             // 상대 BYE/최종 응답의 Reason Q.850 cause — EventCallEnd 가 관측자에 전달
     int  m_iLastQ850 = 0;

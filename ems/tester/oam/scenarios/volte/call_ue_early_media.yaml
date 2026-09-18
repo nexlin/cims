@@ -1,0 +1,19 @@
+# UE 측 early media — 착신 UE 가 200 전에 183 Session Progress + SDP answer 를 내고(실 단말의 착신 안내음·컬러링 모사, TS 24.628 early media)
+#   안내음 샘플을 송출한다. 발신자는 183 의 SDP 로 early media 를 받는다(early_media_pct — 대상이 183/SDP 를 전달하는가,
+#   early_rtp_pct — 미디어 앵커가 18x SDP 를 반영해 링백 RTP 가 발신자에 실제로 닿는가, volte_flows.md C1a). 그 뒤 answer 는 같은 answer 로 200.
+#   UE 풀이 prack: true 면 착신 UE 의 183 은 신뢰 1xx(RSeq) 로 나가 발신자 PRACK 을 받는다(prack_pct).
+id: VOLTE-CALL-UE-EARLY-MEDIA
+title: 가입자 → 가입자 — 착신 UE 의 183 early media(안내음) 뒤 200
+tags: [volte, early-media, media]
+roles:
+  caller: { pool: volte_ue }
+  callee: { pool: volte_ue }
+flow:
+  - { step: register,   who: [caller, callee], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: callee, media: { audio: amr-wb, rtp: explicit } }
+  - { step: progress,   who: [callee], after_ms: 300, expect: { code: 183, early_media_pct: 100, early_rtp_pct: 100 } }
+  - { step: media_send, who: [callee], sample: ringback }
+  - { step: answer,     who: [callee], after_ms: 2000, expect: { code: 200, srd_ms: { p95: 3000 } } }
+  - { step: media_send, who: [caller, callee] }
+  - { step: media_hold, seconds: 3, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }

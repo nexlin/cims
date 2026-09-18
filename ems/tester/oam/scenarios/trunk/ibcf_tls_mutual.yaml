@@ -1,0 +1,20 @@
+# IBCF TLS 상호인증 — 피어(peer_kt_tls)의 수신점이 TLS 이고 클라이언트 인증서를 요구한다(tls_client_auth — 워커 Tls.CaFile 이 발급자,
+#   TS 33.310 NDS/IP·TS 29.165 II-NNI 보안). 가입자 → 피어 발신에서 대상 CSP 가 TLS 로 피어에 붙을 때 클라이언트 인증서를 내야 핸드셰이크가 선다.
+#   CSP 가 인증서를 내지 않으면 INVITE 가 피어에 닿지 않아 실패 = test_instrument.md §12 항목(CSP TLS 발신 연결의 클라이언트 인증서).
+#   피어 → 가입자 방향(피어가 tls_verify·tls_client_cert 로 대상 접속점에 붙는다)은 두 번째 호.
+id: TRUNK-IBCF-TLS-MUTUAL
+title: IBCF 피어 TLS 상호인증 (수신점 클라이언트 인증서 요구 · 발신 서버 검증)
+tags: [trunk, ibcf, tls, security]
+roles:
+  caller: { pool: volte_ue }
+  peer:   { pool: peer_kt_tls }
+flow:
+  - { step: register,   who: [caller], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: peer, media: { audio: amr-wb } }
+  - { step: answer,     who: [peer], after_ms: 300, expect: { code: 200, srd_ms: { p95: 3000 } } }
+  - { step: media_hold, seconds: 2, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }
+  - { step: invite,     from: peer, to: caller, media: { audio: amr-wb } }
+  - { step: answer,     who: [caller], after_ms: 300, expect: { code: 200, srd_ms: { p95: 3000 } } }
+  - { step: media_hold, seconds: 2 }
+  - { step: bye,        from: peer, expect: { sdd_ms: { p95: 300 } } }

@@ -109,13 +109,25 @@ export interface UePoolDoc extends TopoPoolBase {
   source: { creds: string; offset?: number; count?: number } | { db: string; table: string; offset?: number; count: number; ptt_group?: string }
   /** 접속환경 클래스 — ptt 면 MCPTT 단말(PTT 도메인·GMS/CMS 구독·그룹 affiliation·floor). 생략 = table 이 ptt_subscriptions 면 ptt, 그 외 volte */
   service?: 'volte' | 'voip' | 'ptt'
-  transport?: Transport; srtp?: 'off' | 'optional' | 'required'; register_expires?: number; prack?: boolean; dtmf?: boolean
+  transport?: Transport; srtp?: 'off' | 'optional' | 'required'; register_expires?: number; prack?: boolean
+  /** DTMF 방식 — rfc4733(telephone-event, 기본) · inband(G.711 톤) · off. 옛 문서의 boolean(true=rfc4733, false=off)도 서버가 읽는다 */
+  dtmf?: DtmfMode | boolean
+  /** transport=tls — 서버 인증서 검증(워커 Tls.CaFile) · 클라이언트 인증서 제시(워커 Tls.ClientCertFile, 접속점 상호인증) */
+  tls_verify?: boolean; tls_client_cert?: boolean
 }
+export type DtmfMode = 'rfc4733' | 'inband' | 'off'
 export interface PeerPoolDoc extends TopoPoolBase {
   kind: 'peer'; peering: string; listener?: string; profile: 'ibcf' | 'pbx' | 'mgcf'; bind: { ip?: string; port: number; protocol?: Transport }; domain: string
   identities: { e164_range?: [string, string]; did_range?: [string, string]; ext_len?: number; count?: number }
   register?: { user: string; ha1_env?: string; password_env?: string; realm?: string; expires?: number }
-  codecs?: string[]; answer?: 'normal' | 'silent' | 'reject' | 'delay'; fault?: { code?: number; q850?: number; delay_ms?: number }; prack?: boolean; dtmf?: boolean
+  codecs?: string[]; answer?: 'normal' | 'silent' | 'reject' | 'delay'
+  /** 오류 주입 — answer 매개변수(code/q850/delay_ms) + 와이어 유실(drop_invite: 새 INVITE 첫 N 벌 · drop_pct: 임의 메시지 %, UDP 만) */
+  fault?: { code?: number; q850?: number; delay_ms?: number; drop_invite?: number; drop_pct?: number }
+  prack?: boolean; dtmf?: DtmfMode | boolean
+  /** ibcf — 발신 INVITE 에 토큰화 Via(THIG 흔적)를 얹고 응답 보존을 관측(thig_pct) */
+  thig?: boolean
+  /** TLS 상호인증 — tls_client_auth: 수신점(bind tls)이 클라이언트 인증서를 요구 · tls_verify: 발신 연결의 서버 검증 · tls_client_cert: 클라이언트 인증서 제시 */
+  tls_client_auth?: boolean; tls_verify?: boolean; tls_client_cert?: boolean
   seed?: { enabled?: boolean; route_set?: string; distribution?: string; priority?: number; weight?: number; acl?: 'allow' | 'deny' }
 }
 /** 실단말 풀(test_instrument.md §3.3) — 신원마다 워커가 cimsue-cli(libcimsue/pjsua2 실스택) 프로세스를 띄운다. 단계는 vocab.real_ue_steps 만, 미디어 평면은 실스택 것 */

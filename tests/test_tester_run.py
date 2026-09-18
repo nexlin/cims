@@ -81,6 +81,8 @@ class FakeWorker:
                         h['media'] = outer.behaviour['media']
                     if outer.behaviour.get('real_ue') is not None:
                         h['real_ue'] = outer.behaviour['real_ue']
+                    if outer.behaviour.get('tls') is not None:
+                        h['tls'] = outer.behaviour['tls']
                     self._send(200, h)
                 elif self.path.startswith('/runs/'):
                     self._send(200, {'state': outer.state, 'counters': {}})
@@ -489,6 +491,35 @@ class Compile(unittest.TestCase):
         self.assertTrue(M.STEP_VOCAB['invite']['real'] and not M.STEP_VOCAB['refer']['real'] and not M.STEP_VOCAB['media_send']['real'])
         for n in ('real_srd_ms', 'real_rtp_loss_pct', 'real_jitter_ms', 'real_mos'):
             self.assertIn(n, M.METRIC_NAMES)
+
+
+class TlsPlan(unittest.TestCase):
+    def test_plan_checks_worker_tls_files(self):
+        """계획 미리보기 — 풀의 tls_verify/tls_client_cert/tls_client_auth·TLS 피어 bind 는 워커 health.tls(ca/client_cert/peer_cert) 보유와 대조한다(§3.1·§3.2)."""
+        from services import tester_workers as TW, tester_plan as P
+        w1 = FakeWorker('w1', behaviour={'tls': {'ca': False, 'client_cert': False, 'peer_cert': False}})
+        topo_doc = _topology([w1])
+        topo_doc['target']['nodes']['csp']['sip'] = {'domains': ['volte.test'], 'listeners': {
+            'udp': {'edge': 'access', 'port': 5060, 'protocol': 'udp'}, 'tls': {'edge': 'access', 'port': 5061, 'protocol': 'tls'},
+            'peering': {'edge': 'peering', 'port': 5070, 'protocol': 'udp', 'local_node': 'cims-tester-peering'}}}
+        topo_doc['pools']['ue_w1'].update({'transport': 'tls', 'tls_verify': True, 'tls_client_cert': True})
+        topo_doc['pools']['peer_kt'] = {'kind': 'peer', 'worker': 'w1', 'peering': 'csp', 'listener': 'tls', 'profile': 'ibcf',
+                                        'bind': {'port': 5086, 'protocol': 'tls'}, 'domain': 'ims.kt.test', 'tls_client_auth': True,
+                                        'identities': {'e164_range': ['+82212340000', '+82212340009']}}
+        topo = M.Topology.model_validate(topo_doc)
+        sc = M.Scenario.model_validate({'id': 'UT-TLS', 'roles': {'a': {'pool': 'volte_ue'}, 'p': {'pool': 'peer_kt'}},
+                                        'flow': [{'step': 'register', 'who': ['a']}, {'step': 'invite', 'from': 'a', 'to': 'p'},
+                                                 {'step': 'answer', 'who': ['p']}, {'step': 'bye', 'from': 'a'}]})
+        plan_doc = P.build_plan(sc, topo, topo_doc, None, {}, 1, None, probe=True, stream_port=1)
+        self.assertFalse(plan_doc['ok'])
+        errs = ' '.join(plan_doc['errors'])
+        self.assertIn('Tls.CaFile', errs)
+        self.assertIn('Tls.ClientCertFile', errs)
+        self.assertIn('Tls.PeerCertFile', errs)
+        self.assertEqual(plan_doc['workers'][0]['capacity']['tls'], {'ca': False, 'client_cert': False, 'peer_cert': False})
+        w1.behaviour['tls'] = {'ca': True, 'client_cert': True, 'peer_cert': True}
+        plan_doc = P.build_plan(sc, topo, topo_doc, None, {}, 1, None, probe=True, stream_port=1)
+        self.assertFalse(any('Tls.' in e for e in plan_doc['errors']), plan_doc['errors'])
 
 
 class SipDump(unittest.TestCase):

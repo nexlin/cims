@@ -19,6 +19,7 @@
 #include "SimSession.h"
 #include "SipCodecTable.h"
 
+static std::string dtmfModeOf(const Json& v);   // 아래 정의 — 풀 dtmf 값(bool|rfc4733|inband|off) → 모드
 static void logf(const char* level, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
 static void logf(const char* level, const char* fmt, ...) {
     char buf[1024];
@@ -92,6 +93,7 @@ Worker::Worker(const WorkerConfig& cfg) : m_cfg(cfg) {
 Worker::~Worker() { stop(); }
 
 bool Worker::start(std::string& err) {
+    CsimPeer::EnsureCodecTable();   // G.722(PT 9) — psip 기본 테이블에 없다(시나리오 media.audio: g722·피어 codecs G722)
     if (!m_http.start(m_cfg.bindIp, m_cfg.port, [this](const HttpRequest& r) { return handle(r); }, err)) return false;
     m_stop = false;
     m_sipCapture.install(SipCapture::ParseMode(m_cfg.sipCapture));
@@ -213,6 +215,18 @@ void Worker::OnPeerFaultReject(CsimPeer* p, const std::string& callId, const std
     std::lock_guard<std::mutex> lk(m_evMtx);
     m_events.push_back({ Event::FAULT_REJECT, nullptr, p, iCode, 0, callId, toUser, false });
 }
+void Worker::OnPeerWireDrop(CsimPeer* p, const std::string& callId, const std::string& method) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::WIRE_DROP, nullptr, p, 0, 0, callId, method, false });
+}
+void Worker::OnPeerInviteRetrans(CsimPeer* p, const std::string& callId) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::INVITE_RETRANS, nullptr, p, 0, 0, callId, "", false });
+}
+void Worker::OnPeerThig(CsimPeer* p, const std::string& callId, bool bOk) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::THIG, nullptr, p, bOk ? 1 : 0, 0, callId, "", false });
+}
 void Worker::OnPeerByeResponse(CsimPeer* p, const std::string& callId, int st, long long ms) {
     std::lock_guard<std::mutex> lk(m_evMtx);
     m_events.push_back({ Event::BYERESP, nullptr, p, st, ms, callId, "", false });
@@ -303,6 +317,12 @@ HttpResponse Worker::health() {
     real["max"] = Json((long long)m_cfg.realUeMax);
     real["cli"] = Json(m_cfg.realUeCli);
     j["real_ue"] = real;
+    // TLS 파일 보유(§3.1·§3.2) — 컨트롤러 계획 미리보기가 풀의 tls_verify/tls_client_cert/tls_client_auth·TLS 피어 bind 와 대조한다
+    Json tls = Json::Object();
+    tls["ca"] = Json(!m_cfg.tlsCaFile.empty() && access(m_cfg.tlsCaFile.c_str(), R_OK) == 0);
+    tls["client_cert"] = Json(!m_cfg.tlsClientCertFile.empty() && access(m_cfg.tlsClientCertFile.c_str(), R_OK) == 0);
+    tls["peer_cert"] = Json(!m_cfg.peerCertFile.empty() && access(m_cfg.peerCertFile.c_str(), R_OK) == 0);
+    j["tls"] = tls;
     return jsonResp(200, j);
 }
 
@@ -335,6 +355,9 @@ bool Worker::buildUePool(Pool* pool, const Json& d, std::string& err) {
     if (pool->targetIp.empty()) { err = "target_csp.ip_required"; return false; }
     pool->service = d["service"].asString("volte");
     const bool ptt = pool->service == "ptt";
+    // TLS 서버 검증·클라이언트 인증서(§3.1) — 풀이 켜면 워커의 Tls.* 파일이 있어야 한다
+    const bool tlsVerify = d["tls_verify"].asBool(false), tlsClientCert = d["tls_client_cert"].asBool(false);
+    if (!tlsRequirements(pool->transport == "tls" && tlsVerify, pool->transport == "tls" && tlsClientCert, err)) return false;
     const Json& ids = d["identities"];
     for (size_t i = 0; i < ids.size(); ++i) {
         const Json& x = ids.at(i);
@@ -366,7 +389,9 @@ bool Worker::buildUePool(Pool* pool, const Json& d, std::string& err) {
         if (!ep->id.akaK.empty()) ep->s->SetAka(ep->id.akaK, ep->id.akaOpc, 0);
         ep->s->SetAnswerMode(SimSession::E_ANSWER_DEFERRED);
         ep->s->SetPrack(d["prack"].asBool(false));
-        ep->s->SetDtmf(d["dtmf"].asBool(true));
+        { std::string dm = dtmfModeOf(d["dtmf"]); ep->s->SetDtmf(dm != "off"); ep->s->SetDtmfInband(dm == "inband"); }
+        if (pool->transport == "tls" && (tlsVerify || tlsClientCert))
+            ep->s->SetTls(tlsVerify, m_cfg.tlsCaFile, tlsClientCert ? m_cfg.tlsClientCertFile : "", tlsClientCert ? m_cfg.tlsClientKeyFile : "");
         ep->s->SetObserver(this);
         if (!m_cfg.mediaFile.empty()) ep->s->m_clsRtpThread.SetMediaFile(m_cfg.mediaFile);
         if (!m_cfg.videoFile.empty()) ep->s->m_clsRtpThread.SetVideoFile(m_cfg.videoFile);
@@ -392,10 +417,23 @@ bool Worker::buildPeerPool(Pool* pool, const Json& d, std::string& err) {
         pc.silent = ans == "silent";
         if (ans == "reject") { pc.rejectCode = (int)pd["fault"]["code"].asInt(503); pc.rejectQ850 = (int)pd["fault"]["q850"].asInt(0); }
         if (ans == "delay") pool->answerDelayMs = (int)pd["fault"]["delay_ms"].asInt(0);
+        // 와이어 유실(answer 정책과 독립) — 새 착신 INVITE 첫 N 벌 / 임의 메시지 p %
+        pc.dropInvite = (int)pd["fault"]["drop_invite"].asInt(0);
+        pc.dropPct = (int)pd["fault"]["drop_pct"].asInt(0);
     }
     pc.certFile = m_cfg.peerCertFile;
+    pc.keyFile = m_cfg.peerKeyFile;
+    // TLS 상호인증(§3.2) — 수신점의 클라이언트 인증서 요구 / 발신 연결의 서버 검증·클라이언트 인증서 제시. 파일은 워커 Tls.*
+    pc.tlsClientAuth = pd["tls_client_auth"].asBool(false);
+    pc.tlsVerifyServer = pd["tls_verify"].asBool(false);
+    const bool peerClientCert = pd["tls_client_cert"].asBool(false);
+    if (pc.transport == E_SIP_TLS && pc.certFile.empty()) { err = "tls_peer_cert_missing: 피어 TLS 수신점에 Tls.PeerCertFile 이 필요하다"; return false; }
+    if (!tlsRequirements(pc.tlsVerifyServer || pc.tlsClientAuth, peerClientCert, err)) return false;
+    pc.caCertFile = m_cfg.tlsCaFile;
+    if (peerClientCert) { pc.clientCertFile = m_cfg.tlsClientCertFile; pc.clientKeyFile = m_cfg.tlsClientKeyFile; }
+    pc.thig = pd["thig"].asBool(false) && pc.profile == "ibcf";
     pc.prack = pd["prack"].isBool() ? pd["prack"].asBool() : CsimPeerConfig::DefaultPrack(pc.profile);
-    pc.dtmf = pd["dtmf"].asBool(true);
+    { std::string dm = dtmfModeOf(pd["dtmf"]); pc.dtmf = dm != "off"; pc.dtmfInband = dm == "inband"; }
     for (size_t i = 0; i < pd["codecs"].size(); ++i) pc.codecs.push_back(pd["codecs"].at(i).asString());
     if (pc.codecs.empty()) pc.codecs = CsimPeer::DefaultCodecs(pc.profile);
     // 파일 미디어(AMR-WB)는 첫 코덱이 AMR-WB 일 때만 — 나머지는 합성 PCMU
@@ -1061,6 +1099,19 @@ void Worker::onEvent(const Event& e) {
             emitEvent("peer fault: INVITE rejected " + std::to_string(e.status) + " (answer=reject)", uit == peerPool->byUser.end() ? nullptr : uit->second, "invite", e.status, e.callId);
             return;
         }
+        if (e.kind == Event::WIRE_DROP) {
+            // 오류 주입(fault.drop_*) — 와이어 유실처럼 버린 벌. 재전송이 닿으면 INVITE_RETRANS 가 뒤따른다(retrans_rx_pct 의 분자/분모)
+            m_metrics.counter("peer_fault_drop");
+            m_metrics.counter("peer_fault_drop_methods." + e.user);
+            return;
+        }
+        if (e.kind == Event::INVITE_RETRANS) { m_metrics.counter("invite_retrans_rx"); return; }
+        if (e.kind == Event::THIG) {
+            // THIG 흔적 — 발신 INVITE 에 얹은 토큰화 Via 가 응답에 보존됐는가(thig_pct = ok / thig_tx)
+            m_metrics.counter(e.status ? "thig_via_ok" : "thig_via_lost");
+            if (!e.status) { auto cit = peerPool->byCall.find(e.callId); emitEvent("THIG tokenized Via lost in response", cit == peerPool->byCall.end() ? nullptr : cit->second, "invite", 0, e.callId); }
+            return;
+        }
         if (e.kind == Event::REGISTER) {
             // 트렁크 REGISTER 결과 — 계정 하나가 풀 신원 전부를 대표한다
             bool ok = e.status == 200;
@@ -1399,6 +1450,20 @@ static std::string codecNameOf(int pt) {
     return pt == 0 ? "PCMU" : pt == 8 ? "PCMA" : pt == 18 ? "G729" : "";
 }
 
+/** 풀 dtmf 값 → 모드 문자열 — bool(true=rfc4733, false=off) 또는 "rfc4733"|"inband"|"off"(컨트롤러 DtmfMode) */
+static std::string dtmfModeOf(const Json& v) {
+    if (v.isBool()) return v.asBool() ? "rfc4733" : "off";
+    std::string s = v.asString("rfc4733");
+    return (s == "inband" || s == "off") ? s : "rfc4733";
+}
+
+/** TLS 옵션이 요구하는 워커 파일(Tls.CaFile / Tls.ClientCertFile) 확인 — 없으면 400 사유 */
+bool Worker::tlsRequirements(bool needCa, bool needClientCert, std::string& err) const {
+    if (needCa && (m_cfg.tlsCaFile.empty() || access(m_cfg.tlsCaFile.c_str(), R_OK) != 0)) { err = "tls_ca_missing: tls_verify/tls_client_auth 에는 워커 Tls.CaFile 이 필요하다"; return false; }
+    if (needClientCert && (m_cfg.tlsClientCertFile.empty() || access(m_cfg.tlsClientCertFile.c_str(), R_OK) != 0)) { err = "tls_client_cert_missing: tls_client_cert 에는 워커 Tls.ClientCertFile 이 필요하다"; return false; }
+    return true;
+}
+
 /** 시나리오 media.audio 이름 → 코덱 테이블 PT (-1 = 지정 없음/미지) */
 static int codecPtOf(const std::string& name) {
     if (name.empty()) return -1;
@@ -1421,6 +1486,7 @@ bool Worker::epStartCall(Endpoint* from, Endpoint* to, const Json& media, const 
         from->outPending = true;
         from->outKind = "invite";
         m_metrics.counter("invite_tx");
+        if (pool->peer->Config().thig) m_metrics.counter("thig_tx");
         return true;
     }
     if (!from->started && !startEndpoint(from)) return false;
@@ -1497,8 +1563,10 @@ void Worker::epUnsubscribe(Endpoint* ep) {
 }
 
 int Worker::epProgress(Endpoint* ep) {
-    if (!ep->isPeer()) return 481;   // UE 시뮬레이터는 183 early media 를 내지 않는다(실 단말 착신 모사 아님)
-    return ep->callId.empty() ? 481 : ep->poolRef->peer->Progress(ep->callId);
+    if (ep->isPeer()) return ep->callId.empty() ? 481 : ep->poolRef->peer->Progress(ep->callId);
+    if (ep->isReal()) return 481;    // 실스택은 앱이 183 을 내지 않는다(컴파일 게이트 — REAL_UE_STEPS 밖)
+    // UE 측 183 + SDP(deferred 착신 — 실 단말의 착신 안내음·early media 모사). 그 뒤 answer 는 같은 answer 로 200
+    return ep->s->ProgressCall();
 }
 
 bool Worker::epHold(Endpoint* ep, bool hold) {
@@ -1672,17 +1740,18 @@ void Worker::checkFloorWait(Instance& in, long long now) {
 }
 
 bool Worker::epMediaSend(Endpoint* ep, const CompiledStep& st) {
-    std::string amrwb, pcmu, pcma;
+    std::string amrwb, pcmu, pcma, g722;
     bool def = st.sample.empty();
     if (!def) {
         auto& m = m_run->samples[st.sample];
         amrwb = m.count("amr-wb") ? m["amr-wb"] : "";
         pcmu = m.count("pcmu") ? m["pcmu"] : "";
         pcma = m.count("pcma") ? m["pcma"] : "";
+        g722 = m.count("g722") ? m["g722"] : "";
     }
-    if (ep->isPeer()) return !ep->callId.empty() && ep->poolRef->peer->MediaSend(ep->callId, def, amrwb, pcmu, pcma, st.loop);
+    if (ep->isPeer()) return !ep->callId.empty() && ep->poolRef->peer->MediaSend(ep->callId, def, amrwb, pcmu, pcma, st.loop, g722);
     if (ep->isReal()) return false;   // 실단말의 송출은 실스택 것 — 컴파일 게이트
-    return ep->s->MediaSend(def, amrwb, pcmu, pcma, st.loop);
+    return ep->s->MediaSend(def, amrwb, pcmu, pcma, st.loop, g722);
 }
 
 bool Worker::epMediaStop(Endpoint* ep) {
@@ -2329,8 +2398,8 @@ void Worker::execStep(Instance& in, long long now) {
             if (st.payload.empty()) { finishInstance(in, true, "dtmf: payload(digits) required", now); return; }
             if (!epDtmf(ep, st.payload)) {
                 m_metrics.counter("dtmf_unsupported");
-                emitEvent("DTMF not negotiated (telephone-event)", ep, "dtmf", 0, ep->callId);
-                finishInstance(in, true, "dtmf: telephone-event not negotiated", now); return;
+                emitEvent("DTMF unavailable (telephone-event not negotiated, in-band needs G.711)", ep, "dtmf", 0, ep->callId);
+                finishInstance(in, true, "dtmf: telephone-event not negotiated / in-band not G.711", now); return;
             }
             m_metrics.counter("dtmf_tx", (long long)st.payload.size());
             // 숫자열이 다 나갈 때까지(이벤트 길이+간격) 기다린 뒤 다음 단계 — 수신 수는 bye 에서 표본

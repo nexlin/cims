@@ -9,6 +9,7 @@
 #include <openssl/rand.h>
 #include <sstream>
 #include <chrono>
+#include <random>
 #include <cstring>
 #include <cctype>
 #include <vector>
@@ -1143,7 +1144,7 @@ void SimSession::StartCall(const std::string& strTarget) {
     ApplyMediaFileForCodec(m_clsRtpThread, clsRtp.m_iCodec);
     m_clsRtpThread.m_iDtmfPt = -1;   // answer 가 echo 하면 EventCallStart 에서 확정
     int iOfferDtmfPt = -1, iOfferDtmfClock = 8000;
-    if (m_bDtmf) {
+    if (m_bDtmf && !m_bDtmfInband) {
         const CSipCodecEntry* pclsOfferEntry = CSipCodecTable::FindByPt(clsRtp.m_iCodec);
         iOfferDtmfPt = m_iDtmfPt;
         if (pclsOfferEntry && pclsOfferEntry->m_iClockRate > 0) iOfferDtmfClock = pclsOfferEntry->m_iClockRate;
@@ -1272,12 +1273,25 @@ void SimSession::StartCall(const std::string& strTarget) {
 
 bool SimSession::AnswerCall() {
     // deferred 모드에서 보관한 오퍼로 200 OK — AnswerVoip 가 auto 모드와 같은 경로(SRTP 협상·RTP 시작)를 탄다.
+    //   183 을 먼저 냈으면(ProgressCall) 그 answer 를 그대로 200 에 되낸다 — SRTP 키·코덱이 바뀌면 안 된다(RFC 3262 §3, RFC 3264 §6)
     if (m_strPendingCallId.empty()) return false;
     std::string strId = m_strPendingCallId;
     m_strPendingCallId.clear();
-    m_pSipClient->AnswerVoip(strId.c_str(), m_bPendingOffer ? &m_clsPendingOffer : NULL);
+    if (m_bPendingAnswer) {
+        m_pSipClient->m_pUserAgent->AcceptCall(strId.c_str(), &m_clsPendingAnswer);
+        m_bPendingAnswer = false;
+    } else {
+        m_pSipClient->AnswerVoip(strId.c_str(), m_bPendingOffer ? &m_clsPendingOffer : NULL);
+    }
     m_bPendingOffer = false;
     return true;
+}
+
+int SimSession::ProgressCall() {
+    if (m_strPendingCallId.empty() || m_bPendingAnswer) return 481;
+    int rc = m_pSipClient->ProgressVoip(m_strPendingCallId.c_str(), m_bPendingOffer ? &m_clsPendingOffer : NULL, m_bPending100rel);
+    if (rc == 488) { m_strPendingCallId.clear(); m_bPendingOffer = false; }
+    return rc;
 }
 
 bool SimSession::RejectCall(int iSipCode) {
@@ -1285,6 +1299,7 @@ bool SimSession::RejectCall(int iSipCode) {
     std::string strId = m_strPendingCallId;
     m_strPendingCallId.clear();
     m_bPendingOffer = false;
+    m_bPendingAnswer = false;
     if (m_strInviteId == strId) m_strInviteId.clear();
     return m_clsUserAgent.StopCall(strId.c_str(), iSipCode > 0 ? iSipCode : 486);
 }
@@ -2025,6 +2040,8 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
         m_pOwner->m_strPendingCallId = pszCallId;
         m_pOwner->m_bPendingOffer = (pclsRtp != NULL);
         if (pclsRtp) m_pOwner->m_clsPendingOffer = *pclsRtp;
+        m_pOwner->m_bPending100rel = pclsMessage && pclsMessage->Is100rel();
+        m_pOwner->m_bPendingAnswer = false;
         m_pUserAgent->RingCall(pszCallId, 180, NULL);
         return;
     }
@@ -2162,6 +2179,31 @@ void SessionSipClient::AnswerPtt(const char* pszCallId, CSipCallRtp* pclsRtp, CS
 /** VoIP 착신 응답 — SRTP 협상 + 200 OK + RTP 송신 시작. auto 모드(EventIncomingCall)와 deferred 모드
  *  (SimSession::AnswerCall) 가 같은 경로를 쓴다. 180 은 호출자가 이미 보냈다. */
 void SessionSipClient::AnswerVoip(const char* pszCallId, CSipCallRtp* pclsRtp) {
+    CSipCallRtp clsLocalRtp;
+    if (!BuildAnswer(pszCallId, pclsRtp, clsLocalRtp)) return;
+    m_pUserAgent->AcceptCall(pszCallId, &clsLocalRtp);
+    // 200 OK 후 150ms 대기 → RTP 송출 시작 (CMP 녹취 세그먼트 초반에 SPS/PPS 포함 보장)
+    usleep(150000);
+    if (pclsRtp) m_pOwner->m_clsRtpThread.Start(pclsRtp->m_strIp.c_str(), pclsRtp->m_iPort);
+}
+
+int SessionSipClient::ProgressVoip(const char* pszCallId, CSipCallRtp* pclsRtp, bool b100rel) {
+    CSipCallRtp clsLocalRtp;
+    if (!BuildAnswer(pszCallId, pclsRtp, clsLocalRtp)) return 488;
+    if (b100rel && m_pOwner->m_bPrack) {
+        // RFC 3262 §3 — 신뢰 183: RSeq(임의 시작) + Require: 100rel, 상대 PRACK 은 psip UA 가 받는다
+        static std::mt19937 rng{std::random_device{}()};
+        m_pUserAgent->SetRSeq(pszCallId, 1 + (int)(rng() % 100000));
+    }
+    if (!m_pUserAgent->RingCall(pszCallId, 183, &clsLocalRtp)) return 481;
+    m_pOwner->m_clsPendingAnswer = clsLocalRtp;
+    m_pOwner->m_bPendingAnswer = true;
+    // early media — 안내음/링백을 오퍼 주소로 송신, 수신 통계도 시작(200 뒤 Start 는 같은 스레드를 유지한다)
+    if (pclsRtp) m_pOwner->m_clsRtpThread.Start(pclsRtp->m_strIp.c_str(), pclsRtp->m_iPort);
+    return 0;
+}
+
+bool SessionSipClient::BuildAnswer(const char* pszCallId, CSipCallRtp* pclsRtp, CSipCallRtp& clsLocalRtp) {
     // 미디어 SRTP answer 협상 (media_security.md §8.1) — 오퍼 crypto 존재 && 모드>0 이면
     //   수락(suite/tag echo + 자기 키 선언). SAVP 오퍼인데 수락 불가면 평문 answer 가
     //   성립하지 않으므로 488. answer protocol 은 오퍼 echo (SAVP/AVP+crypto).
@@ -2180,14 +2222,14 @@ void SessionSipClient::AnswerVoip(const char* pszCallId, CSipCallRtp* pclsRtp) {
     if (pclsRtp && pclsRtp->m_bRemoteSavp && !bSrtpAnswer) {
         printf("[%d] [SRTP] SAVP offer but srtp mode=off/unusable — 488\n", m_pOwner->m_iId);
         m_pUserAgent->StopCall(pszCallId, 488);
-        return;
+        return false;
     }
     if (bSrtpAnswer &&
         !m_pOwner->m_clsRtpThread.SetSrtpKeys(strSrtpSuite, m_pOwner->m_strSrtpLocalKey,
                                               pclsRtp->m_strRemoteCryptoKey)) {
         printf("[%d] [SRTP] session setup failed — 488\n", m_pOwner->m_iId);
         m_pUserAgent->StopCall(pszCallId, 488);
-        return;
+        return false;
     }
     if (!bSrtpAnswer) m_pOwner->m_clsRtpThread.ClearSrtp();
 
@@ -2210,20 +2252,19 @@ void SessionSipClient::AnswerVoip(const char* pszCallId, CSipCallRtp* pclsRtp) {
         if (bVideoSavp && !bVideoSrtpAnswer) {
             printf("[%d] [SRTP] video SAVP offer but srtp mode=off/unusable — 488\n", m_pOwner->m_iId);
             m_pUserAgent->StopCall(pszCallId, 488);
-            return;
+            return false;
         }
         if (bVideoSrtpAnswer && m_pOwner->m_clsRtpThread.m_iVideoPort > 0 &&
             !m_pOwner->m_clsRtpThread.SetVideoSrtpKeys(strVideoSuite, m_pOwner->m_strSrtpVideoLocalKey,
                                                        strVideoRemoteKey)) {
             printf("[%d] [SRTP] video session setup failed — 488\n", m_pOwner->m_iId);
             m_pUserAgent->StopCall(pszCallId, 488);
-            return;
+            return false;
         }
         // 비디오 송신 목적지 = 오퍼 m=video 포트 (RFC 3264) — 없으면 PTT X-Video-Port 헤더 폴백(아래)
         m_pOwner->m_clsRtpThread.m_iDestVideoPort = FindActiveMediaPort(pclsRtp->m_clsMediaList, "video");
     }
 
-    CSipCallRtp clsLocalRtp;
     clsLocalRtp.m_strIp  = m_pOwner->m_clsSetup.m_strLocalIp;
     clsLocalRtp.m_iPort  = m_pOwner->m_clsRtpThread.m_iPort;
     clsLocalRtp.m_iCodec = pclsRtp ? pclsRtp->m_iCodec : 0;  // GetSipCallRtp 가 테이블 PT 로 정규화한 identity
@@ -2232,7 +2273,7 @@ void SessionSipClient::AnswerVoip(const char* pszCallId, CSipCallRtp* pclsRtp) {
     // 200 OK SDP에 audio(오퍼 PT echo) + video 미디어 포함
     // telephone-event echo (RFC 4733) — 오퍼가 냈고 이 세션이 DTMF 를 켰을 때만. 협상 코덱이 AMR-WB 가 아니면 합성 PCMU
     int iAnsDtmfClock = 8000;
-    int iAnsDtmfPt = m_pOwner->m_bDtmf ? FindOfferedTelephoneEvent(pclsRtp, iAnsDtmfClock) : -1;
+    int iAnsDtmfPt = (m_pOwner->m_bDtmf && !m_pOwner->m_bDtmfInband) ? FindOfferedTelephoneEvent(pclsRtp, iAnsDtmfClock) : -1;   // in-band 모드면 echo 하지 않는다
     m_pOwner->m_clsRtpThread.m_iDtmfPt = iAnsDtmfPt;
     if (iAnsDtmfPt >= 0) m_pOwner->m_clsRtpThread.m_iDtmfClock = iAnsDtmfClock;
     ApplyMediaFileForCodec(m_pOwner->m_clsRtpThread, clsLocalRtp.m_iCodec);
@@ -2245,11 +2286,7 @@ void SessionSipClient::AnswerVoip(const char* pszCallId, CSipCallRtp* pclsRtp) {
         BuildVideoMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iVideoPort > 0 ? m_pOwner->m_clsRtpThread.m_iVideoPort : 0,
                         bVideoSrtpAnswer && bVideoSavp, bVideoSrtpAnswer ? strVideoSuite : "", m_pOwner->m_strSrtpVideoLocalKey, strVideoTag);
 #endif
-
-    m_pUserAgent->AcceptCall(pszCallId, &clsLocalRtp);
-    // 200 OK 후 150ms 대기 → RTP 송출 시작 (CMP 녹취 세그먼트 초반에 SPS/PPS 포함 보장)
-    usleep(150000);
-    if (pclsRtp) m_pOwner->m_clsRtpThread.Start(pclsRtp->m_strIp.c_str(), pclsRtp->m_iPort);
+    return true;
 }
 
 void SessionSipClient::EventCallStart(const char* pszCallId, CSipCallRtp* pclsRtp) {
@@ -2402,10 +2439,10 @@ bool SimSession::Resume() {
 }
 
 bool SimSession::MediaSend(bool bDefault, const std::string& strAmrWbFile, const std::string& strPcmuFile,
-                           const std::string& strPcmaFile, bool bLoop) {
+                           const std::string& strPcmaFile, bool bLoop, const std::string& strG722File) {
     if (!m_clsRtpThread.MediaRunning()) return false;
     if (bDefault) m_clsRtpThread.MediaSendDefault();
-    else m_clsRtpThread.MediaSend(strAmrWbFile, strPcmuFile, strPcmaFile, bLoop);
+    else m_clsRtpThread.MediaSend(strAmrWbFile, strPcmuFile, strPcmaFile, bLoop, strG722File);
     return true;
 }
 

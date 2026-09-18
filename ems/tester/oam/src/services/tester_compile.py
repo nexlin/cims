@@ -448,7 +448,8 @@ def group_session_info(scenario: Scenario, pool_name: str, ids: List[dict], begi
 def worker_peer(topology: Topology, pname: str) -> WorkerPeer:
     p = topology.pools[pname]
     return WorkerPeer(profile=p.profile, bind=WorkerPeerBind(ip=topology.pool_bind_ip(pname), port=p.bind.port, protocol=p.bind.protocol),
-                      domain=p.domain, identities=p.identities, codecs=p.codecs, answer=p.answer, fault=p.fault, prack=p.prack, dtmf=p.dtmf)
+                      domain=p.domain, identities=p.identities, codecs=p.codecs, answer=p.answer, fault=p.fault, prack=p.prack, dtmf=p.dtmf,
+                      thig=p.thig, tls_client_auth=p.tls_client_auth, tls_verify=p.tls_verify, tls_client_cert=p.tls_client_cert)
 
 
 def initial_rate(profile: LoadProfile) -> float:
@@ -562,7 +563,7 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
             tc = topology.target_csp_for(pname)
             if p.kind == 'peer':
                 pc = PoolCreate(pool=pname, kind='peer', identities=ids_of(pname), transport=p.bind.protocol,
-                                target_csp=tc, peer=worker_peer(topology, pname),
+                                target_csp=tc, peer=worker_peer(topology, pname), tls_verify=p.tls_verify, tls_client_cert=p.tls_client_cert,
                                 trunk_register=trunk_register_for(pname, p, tc.domain_volte))
             elif p.kind == 'real-ue':
                 ids = ids_of(pname)
@@ -573,7 +574,8 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
                                 service=topology.pool_service(pname), tls_verify=bool(p.tls_verify), target_csp=tc)
             else:
                 pc = PoolCreate(pool=pname, kind='ue', identities=ids_of(pname), transport=p.transport, srtp=p.srtp,
-                                service=topology.pool_service(pname), prack=bool(p.prack), dtmf=bool(p.dtmf), target_csp=tc)
+                                service=topology.pool_service(pname), prack=bool(p.prack), dtmf=p.dtmf, target_csp=tc,
+                                tls_verify=bool(p.tls_verify and p.transport == 'tls'), tls_client_cert=bool(p.tls_client_cert and p.transport == 'tls'))
             pools.append(pc.model_dump(by_alias=True, exclude_none=True))
         slices = {role: [b, e] for role, (_p, b, e) in pw['ranges'].items()}
         rs = RunStart(run_id=run_id, scenario_id=scenario.id, roles=dict(pw['role_pool']), role_slices=slices,

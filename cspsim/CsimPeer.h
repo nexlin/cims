@@ -14,6 +14,12 @@
 //           UAC 는 RSeq 있는 1xx 에 PRACK 을 낸다), hold/resume(re-INVITE a=sendonly/sendrecv — RFC 3264 §8.4),
 //           blind REFER 발신(RFC 3515), RFC 4733 telephone-event DTMF(오퍼/echo → CRtpThread), RFC 3326 Reason
 //           `Q.850;cause=` 송신·수신 관측, pbx 트렁크 REGISTER(계정 하나로 DID 범위 대표 — SIPconnect 2.0 §8, Digest H(A1)).
+//   · 오류 주입 후속: **재전송 유실**(psip ISipStackCallBack::RecvFilter — 새 착신 INVITE 의 첫 N 벌 또는 임의 메시지의 p % 를 와이어 유실처럼
+//           버린다 → 상대의 Timer A/E 재전송이 닿는지·SRD 가 T1 만큼 늘어나는지 시험, 재전송 벌 도달을 `OnPeerInviteRetrans` 로 관측),
+//           **TLS 상호인증**(수신점이 클라이언트 인증서를 요구 — psip 리스너 CA / 발신 연결에서 서버 인증서 검증·클라이언트 인증서 제시 —
+//           TS 33.310 NDS/IP·TS 29.165 II-NNI 보안), **THIG 흔적**(ibcf — 발신 INVITE 에 토큰화 Via `SIP/2.0/<tr> <token>;tokenized-by=<domain>`
+//           을 자기 Via 아래에 얹고(TS 24.229 §5.10.4 topology hiding 을 거친 타 IMS 모사) 응답의 Via 보존을 관측), **in-band DTMF**(mgcf —
+//           telephone-event 없이 G.711 톤, CRtpThread::m_bDtmfInband).
 #ifndef _CSIM_PEER_H_
 #define _CSIM_PEER_H_
 
@@ -55,6 +61,12 @@ struct ICsimPeerObserver {
     virtual void OnPeerRegister(CsimPeer* /*p*/, int /*iSipStatus*/, long long /*rrdMs*/) {}
     /** 오류 주입(config.rejectCode) — 엔진이 착신 INVITE 를 즉시 거절했다(관측자 착신 통지 없음). 워커는 세기만 한다. */
     virtual void OnPeerFaultReject(CsimPeer* /*p*/, const std::string& /*callId*/, const std::string& /*toUser*/, int /*iCode*/) {}
+    /** 오류 주입(config.dropInvite/dropPct) — 수신 메시지 한 벌을 와이어 유실처럼 버렸다(method = 요청 method 또는 응답 "<code>/<method>"). 수신 스레드. */
+    virtual void OnPeerWireDrop(CsimPeer* /*p*/, const std::string& /*callId*/, const std::string& /*method*/) {}
+    /** 같은 착신 INVITE(Call-ID·CSeq·branch)의 재전송 벌이 닿았다 — 상대(CSP)의 Timer A 재전송 증거(유실 주입 뒤 회복). 수신 스레드. */
+    virtual void OnPeerInviteRetrans(CsimPeer* /*p*/, const std::string& /*callId*/) {}
+    /** THIG(config.thig) — 발신 호의 첫 응답에 우리가 실은 토큰화 Via 가 보존됐는가. 호마다 한 번. */
+    virtual void OnPeerThig(CsimPeer* /*p*/, const std::string& /*callId*/, bool /*bOk*/) {}
 };
 
 /** pbx 트렁크 REGISTER 계정 — 대상의 access 접속점(Digest 챌린지가 있는 쪽)으로 등록한다. */
@@ -81,7 +93,19 @@ struct CsimPeerConfig {
     bool silent = false;                // 착신 INVITE 무응답(죽은 피어)
     int rejectCode = 0;                 // >0 이면 착신 INVITE 를 관측자에 알리지 않고 즉시 이 코드로 거절(오류 주입 — 5xx failover·Reason 투과 시험)
     int rejectQ850 = 0;                 // 그 거절에 실을 Reason: Q.850;cause=
-    std::string certFile;               // transport=TLS 서버 인증서(PEM, key 결합)
+    std::string certFile;               // transport=TLS 서버 인증서(PEM, key 결합 또는 keyFile 별도)
+    std::string keyFile;                // TLS 개인키 — 비면 certFile 에서
+    // ── TLS 상호인증(test_instrument.md §3.2) — caCertFile 은 두 용도의 앵커: 수신점이 요구하는 클라이언트 인증서의 발급자, 발신 연결의 서버 인증서 검증
+    std::string caCertFile;
+    bool tlsClientAuth = false;         // 수신점(bind TLS)이 클라이언트 인증서를 요구한다(caCertFile 필요) — 상대(CSP)가 인증서를 내지 않으면 핸드셰이크 실패
+    bool tlsVerifyServer = false;       // 발신 TLS 연결에서 상대 서버 인증서 체인을 검증한다(caCertFile 앵커, 호스트명 대조 없음)
+    std::string clientCertFile;         // 발신 TLS 연결에 제시하는 클라이언트 인증서(PEM 체인) — 상대가 상호인증을 요구할 때
+    std::string clientKeyFile;
+    // ── 오류 주입 후속 — 와이어 유실(UDP 재전송 시험)
+    int dropInvite = 0;                 // 새 착신 INVITE 마다 첫 N 벌을 버린다(N=1 → 상대 Timer A 500 ms 재전송이 첫 도달)
+    int dropPct = 0;                    // 모든 수신 메시지를 이 확률(%)로 버린다(0 = 없음)
+    bool thig = false;                  // ibcf — 발신 INVITE 에 토큰화 Via 를 얹고 응답의 보존을 관측(OnPeerThig)
+    bool dtmfInband = false;            // in-band DTMF(G.711 톤) — telephone-event 를 오퍼/echo 하지 않는다(mgcf in-band 옵션)
     std::string userAgent;              // User-Agent 헤더 — 비면 "cims-tester-peer/<profile>"
     bool prack = false;                 // RFC 3262 — 발신 INVITE 에 Supported/Require: 100rel, 1xx(RSeq) 에 PRACK. 착신은 INVITE 가 100rel 이면 RSeq
     bool dtmf = true;                   // RFC 4733 telephone-event 를 오퍼/echo
@@ -132,7 +156,9 @@ public:
     bool SetMediaMode(const std::string& callId, int iMediaMode);
     /** 송출 시작 — bDefault 면 풀 기본 원천, 아니면 코덱별 샘플 파일(빈 값 = 합성). SDP 교환 전(RTP 미기동)이면 false. */
     bool MediaSend(const std::string& callId, bool bDefault, const std::string& amrWbFile, const std::string& pcmuFile,
-                   const std::string& pcmaFile, bool bLoop);
+                   const std::string& pcmaFile, bool bLoop, const std::string& g722File = "");
+    /** libcsim 코덱 테이블 보강 — psip 기본 테이블에 없는 G.722(PT 9, RFC 3551 §4.5.2)를 더한다. 워커·cspsim 이 기동 때 한 번 부른다. */
+    static void EnsureCodecTable();
     bool MediaStop(const std::string& callId);
     unsigned long long RtpSent(const std::string& callId);
     bool HasCall(const std::string& callId);
@@ -162,6 +188,8 @@ public:
     bool RecvRequest(int iThreadId, CSipMessage* pclsMessage) override;
     bool RecvResponse(int iThreadId, CSipMessage* pclsMessage) override;
     bool SendTimeout(int, CSipMessage*) override { return false; }
+    /** 와이어 수신 필터(오류 주입 — 재전송 유실). false = 이 벌을 버린다. */
+    bool RecvFilter(CSipMessage* pclsMessage, const char* pszIp, int iPort, ESipTransport eTransport) override;
 
 private:
     struct Call {
@@ -179,6 +207,7 @@ private:
         bool hasAnswer = false;
         long long tStart = 0;           // INVITE 송신 시각(SRD 기점)
         long long tBye = 0;             // BYE 송신 시각(SDD 기점) — 0 이면 미송신
+        bool thigChecked = false;       // 발신 호 — 첫 응답의 토큰화 Via 보존 여부를 이미 관측했다
     };
 
     CsimPeerConfig m_cfg;
@@ -192,6 +221,8 @@ private:
     bool m_bRegistered = false;
     long long m_tRegStart = 0;
     std::vector<const CSipCodecEntry*> m_codecs;   // 해석된 코덱 엔트리(우선순위 순)
+    std::mutex m_mtxWire;                          // 수신 스레드 — 유실 주입 상태
+    std::map<std::string, int> m_inviteSeen;       // 착신 INVITE (Call-ID|CSeq|branch) → 본 벌 수(재전송 판정·유실 주입 카운트)
 
     CRtpThread* newRtp();
     void freeRtp(CRtpThread* rtp);

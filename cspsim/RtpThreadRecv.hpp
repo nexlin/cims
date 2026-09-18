@@ -44,6 +44,7 @@ static void RtcpRecvStats(CRtpThread* pRtpThread, const unsigned char* p, int iL
 }
 
 THREAD_API RtpThreadRecv(LPVOID lpParameter) {
+  csim_dtmf::Detector clsInbandDetector;   // in-band DTMF — 이 호(수신 스레드 수명) 동안의 검출 상태
   CRtpThread *pRtpThread = (CRtpThread *)lpParameter;
   pollfd sttPoll[2];
   char szPacket[320], szPCM[320], szIp[21];
@@ -165,6 +166,19 @@ THREAD_API RtpThreadRecv(LPVOID lpParameter) {
         //   지터 계산에서는 제외한다(이벤트 동안 타임스탬프가 고정이라 A.8 이 흔들린다).
         bool bTelEvent = pRtpThread->m_iDtmfPt >= 0 && iPt == pRtpThread->m_iDtmfPt;
         if (!bTelEvent) pRtpThread->m_iRecvPt.store(iPt, std::memory_order_relaxed);
+        // in-band DTMF 검출(DtmfInband.h) — telephone-event 미협상 + m_bDtmfInband + G.711 20 ms 프레임
+        if (!bTelEvent && pRtpThread->m_bDtmfInband && pRtpThread->m_iDtmfPt < 0 && (iPt == 0 || iPt == 8) &&
+            iPacketLen == (int)sizeof(RtpHeader) + 160) {
+            short pcm[160];
+            if (iPt == 8) AlawToPcm(szPacket + sizeof(RtpHeader), 160, (char*)pcm, sizeof(pcm));
+            else UlawToPcm(szPacket + sizeof(RtpHeader), 160, (char*)pcm, sizeof(pcm));
+            char cDigit = clsInbandDetector.Feed(pcm, 160);
+            if (cDigit) {
+                std::lock_guard<std::mutex> lk(pRtpThread->m_mtxDtmf);
+                pRtpThread->m_strDtmfRecv.push_back(cDigit);
+                pRtpThread->m_iDtmfRecv++;
+            }
+        }
         if (bTelEvent && iPacketLen >= (int)sizeof(RtpHeader) + 4) {
             const unsigned char* pEv = (const unsigned char*)(szPacket + sizeof(RtpHeader));
             if (pEv[1] & 0x80) {
@@ -179,7 +193,8 @@ THREAD_API RtpThreadRecv(LPVOID lpParameter) {
                 }
             }
         }
-        double dClock = (iPt == 0 || iPt == 8 || iPt == 18) ? 8000.0 : 16000.0;
+        // RTP 클록 — 정적 협대역 PT(0/8/18)와 G.722(9 — RFC 3551 §4.5.2 는 16 kHz 표본이지만 클록을 8000 으로 표기)는 8 kHz, 그 외(AMR-WB) 16 kHz
+        double dClock = (iPt == 0 || iPt == 8 || iPt == 9 || iPt == 18) ? 8000.0 : 16000.0;
         if (!pRtpThread->m_bRecvSeqInit || pRtpThread->m_uRecvSsrc != uSsrc) {
             pRtpThread->m_bRecvSeqInit = true;
             pRtpThread->m_uRecvSsrc = uSsrc;

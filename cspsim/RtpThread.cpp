@@ -20,6 +20,7 @@
 #include "RtpThread.h"
 #include "Base64.h"
 #include "G711.h"
+#include "DtmfInband.h"
 #include "RtpHeader.h"
 #include "ServerUtility.h"
 #include "SipClientSetup.h"
@@ -265,7 +266,7 @@ bool CRtpThread::Start(const char *pszDestIp, int iDestPort) {
   {
     std::lock_guard<std::mutex> lk(m_mtxSource);
     m_bSourceOverride = false;
-    m_strSrcAmrWb.clear(); m_strSrcPcmu.clear(); m_strSrcPcma.clear();
+    m_strSrcAmrWb.clear(); m_strSrcPcmu.clear(); m_strSrcPcma.clear(); m_strSrcG722.clear();
     m_bSrcLoop = true;
   }
   m_bSendPaused = (m_iMediaMode == E_MEDIA_EXPLICIT);
@@ -323,13 +324,14 @@ bool CRtpThread::Stop() {
 }
 
 void CRtpThread::MediaSend(const std::string &strAmrWbFile, const std::string &strPcmuFile,
-                           const std::string &strPcmaFile, bool bLoop) {
+                           const std::string &strPcmaFile, bool bLoop, const std::string &strG722File) {
   {
     std::lock_guard<std::mutex> lk(m_mtxSource);
     m_bSourceOverride = true;
     m_strSrcAmrWb = strAmrWbFile;
     m_strSrcPcmu = strPcmuFile;
     m_strSrcPcma = strPcmaFile;
+    m_strSrcG722 = strG722File;
     m_bSrcLoop = bLoop;
   }
   m_bSourceEnded = false;
@@ -349,7 +351,9 @@ void CRtpThread::MediaSendDefault() {
 }
 
 bool CRtpThread::SendDtmf(const std::string &strDigits, int iDurationMs, int iGapMs) {
-  if (m_iDtmfPt < 0 || strDigits.empty()) return false;
+  // RFC 4733 협상이 없으면 in-band(G.711 톤)만 — 그것도 협상 코덱이 G.711 일 때만
+  if (m_iDtmfPt < 0 && !(m_bDtmfInband && (m_iAudioPt == 0 || m_iAudioPt == 8))) return false;
+  if (strDigits.empty()) return false;
   std::lock_guard<std::mutex> lk(m_mtxDtmf);
   for (char c : strDigits) {
     if ((c >= '0' && c <= '9') || c == '*' || c == '#' || (c >= 'A' && c <= 'D') || (c >= 'a' && c <= 'd'))

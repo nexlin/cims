@@ -467,7 +467,7 @@
     },
     "PeerFault": {
       "additionalProperties": false,
-      "description": "피어 오류 주입 — answer 정책의 매개변수. 재전송 유실(와이어 손실)·TLS 상호인증은 psip 수신 훅/클라이언트 인증서 검증이 없어 아직 없다(§10 C).",
+      "description": "피어 오류 주입 — answer 정책의 매개변수(code/q850/delay_ms) + answer 와 독립인 **와이어 유실**(drop_invite/drop_pct — psip RecvFilter 로\n수신 메시지를 트랜잭션에 넣기 전에 버린다 → 상대의 Timer A/E 재전송이 닿는지, SRD 가 T1 만큼 늘어나는지 시험. UDP 에서만 뜻이 있다).",
       "properties": {
         "code": {
           "default": 503,
@@ -483,6 +483,22 @@
           "maximum": 120000,
           "minimum": 0,
           "title": "Delay Ms",
+          "type": "integer"
+        },
+        "drop_invite": {
+          "default": 0,
+          "description": "새 착신 INVITE 마다 첫 N 벌을 와이어 유실처럼 버린다(1 = 상대 Timer A 500 ms 재전송이 첫 도달 — 카운터 peer_fault_drop·invite_retrans_rx, 비율 retrans_rx_pct)",
+          "maximum": 5,
+          "minimum": 0,
+          "title": "Drop Invite",
+          "type": "integer"
+        },
+        "drop_pct": {
+          "default": 0,
+          "description": "모든 수신 메시지를 이 확률(%)로 버린다 — 재전송·재시도 복원력(응답 유실 → 상대의 200 재전송 등)",
+          "maximum": 90,
+          "minimum": 0,
+          "title": "Drop Pct",
           "type": "integer"
         },
         "q850": {
@@ -612,10 +628,15 @@
           "type": "string"
         },
         "dtmf": {
-          "default": true,
-          "description": "RFC 4733 telephone-event 오퍼/echo",
+          "default": "rfc4733",
+          "description": "DTMF 방식 — rfc4733(telephone-event 오퍼/echo) · inband(G.711 톤 — mgcf in-band 옵션) · off. 옛 bool 도 받는다",
+          "enum": [
+            "rfc4733",
+            "inband",
+            "off"
+          ],
           "title": "Dtmf",
-          "type": "boolean"
+          "type": "string"
         },
         "fault": {
           "anyOf": [
@@ -627,7 +648,7 @@
             }
           ],
           "default": null,
-          "description": "answer reject/delay 의 매개변수(오류 주입)"
+          "description": "answer reject/delay 의 매개변수 + 와이어 유실 drop_invite/drop_pct(오류 주입)"
         },
         "group": {
           "anyOf": [
@@ -705,6 +726,30 @@
         },
         "seed": {
           "$ref": "#/$defs/PeerSeed"
+        },
+        "thig": {
+          "default": false,
+          "description": "ibcf — 발신 INVITE 에 토큰화 Via(tokenized-by, TS 24.229 §5.10.4 THIG 흔적)를 얹고 응답의 Via 보존을 관측(thig_pct)",
+          "title": "Thig",
+          "type": "boolean"
+        },
+        "tls_client_auth": {
+          "default": false,
+          "description": "bind.protocol=tls — 수신점이 클라이언트 인증서를 요구(상호인증, 워커 Tls.CaFile 이 발급자). 대상 CSP 가 인증서를 내지 않으면 핸드셰이크 실패 = §12 과제 드러남",
+          "title": "Tls Client Auth",
+          "type": "boolean"
+        },
+        "tls_client_cert": {
+          "default": false,
+          "description": "발신 TLS 연결에 워커 Tls.ClientCertFile 을 클라이언트 인증서로 제시(대상 접속점이 상호인증을 요구할 때)",
+          "title": "Tls Client Cert",
+          "type": "boolean"
+        },
+        "tls_verify": {
+          "default": false,
+          "description": "발신 TLS 연결(→ 대상 수신점·트렁크 REGISTER)에서 서버 인증서를 워커 Tls.CaFile 로 검증",
+          "title": "Tls Verify",
+          "type": "boolean"
         },
         "worker": {
           "description": "이 풀이 놓인 워커(풀 하나 = 워커 하나)",
@@ -1214,7 +1259,7 @@
             },
             "type": "object"
           },
-          "description": "id → {amr-wb|pcmu|pcma: 파일|synthetic}",
+          "description": "id → {amr-wb|pcmu|pcma|g722: 파일|synthetic}",
           "title": "Samples",
           "type": "object"
         }
@@ -1231,10 +1276,15 @@
           "type": "string"
         },
         "dtmf": {
-          "default": true,
-          "description": "RFC 4733 telephone-event 를 오퍼/echo — dtmf 단계의 전제",
+          "default": "rfc4733",
+          "description": "DTMF 방식 — rfc4733(telephone-event 오퍼/echo) · inband(G.711 톤 — 협상 코덱이 pcmu/pcma 일 때만) · off. 옛 bool 도 받는다",
+          "enum": [
+            "rfc4733",
+            "inband",
+            "off"
+          ],
           "title": "Dtmf",
-          "type": "boolean"
+          "type": "string"
         },
         "group": {
           "anyOf": [
@@ -1270,7 +1320,7 @@
         },
         "prack": {
           "default": false,
-          "description": "RFC 3262 100rel — 발신 INVITE 에 Supported/Require: 100rel, RSeq 1xx 에 PRACK (mgcf early media 시험)",
+          "description": "RFC 3262 100rel — 발신 INVITE 에 Supported/Require: 100rel, RSeq 1xx 에 PRACK (mgcf early media 시험). 착신 UE 의 progress(183) 도 신뢰 1xx 로",
           "title": "Prack",
           "type": "boolean"
         },
@@ -1318,6 +1368,18 @@
           ],
           "title": "Srtp",
           "type": "string"
+        },
+        "tls_client_cert": {
+          "default": false,
+          "description": "transport=tls — 접속점이 클라이언트 인증서를 요구할 때(상호인증) 워커 Tls.ClientCertFile 을 제시",
+          "title": "Tls Client Cert",
+          "type": "boolean"
+        },
+        "tls_verify": {
+          "default": false,
+          "description": "transport=tls — 접속점 서버 인증서를 워커 Tls.CaFile 로 검증(체인만, 호스트명 대조 없음). 기본 끔(개발 스택 자체 서명)",
+          "title": "Tls Verify",
+          "type": "boolean"
         },
         "transport": {
           "default": "udp",

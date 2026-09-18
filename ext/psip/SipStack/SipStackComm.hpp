@@ -227,6 +227,19 @@ bool CSipStack::RecvSipMessage( int iThreadId, const char * pszBuf, int iBufLen,
 		}
 	}
 
+	// 와이어 수신 필터 — 응용이 false 를 돌려주면 유실된 것으로 본다(트랜잭션 삽입 전이라 재전송이 오면 정상 처리된다)
+	{
+		SIP_STACK_CALLBACK_LIST::iterator itCb;
+		for( itCb = m_clsCallBackList.begin(); itCb != m_clsCallBackList.end(); ++itCb )
+		{
+			if( (*itCb)->RecvFilter( pclsMessage, pszIp, iPort, eTransport ) == false )
+			{
+				delete pclsMessage;
+				return false;
+			}
+		}
+	}
+
 	if( pclsMessage->IsRequest() )
 	{
 		pclsMessage->AddIpPortToTopVia( pszIp, iPort );

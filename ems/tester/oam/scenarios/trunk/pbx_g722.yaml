@@ -1,0 +1,14 @@
+# IP-PBX 광대역 G.722 — SIPconnect 2.0 선택 광대역 코덱. UE 가 g722 를 오퍼하고 PBX(pbx_wb, codecs [G722, PCMA])가 G.722 로 answer 하면
+#   대상은 relay 만 하면 된다(RFC 3551 §4.5.2 — PT 9, RTP 클록 8000 표기·64 kbit/s 160 B/20 ms). 수신 wire PT 9 로 MOS 코덱(G.722 Ie 13/Bpl 10)이 잡힌다.
+id: TRUNK-PBX-G722
+title: 가입자 → IP-PBX G.722 광대역 통화
+tags: [trunk, pbx, codec, g722]
+roles:
+  caller: { pool: volte_ue }
+  pbx:    { pool: pbx_wb }
+flow:
+  - { step: register,   who: [caller], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: pbx, media: { audio: g722 } }
+  - { step: answer,     who: [pbx], after_ms: 500, expect: { code: 200, srd_ms: { p95: 2000 } } }
+  - { step: media_hold, seconds: 3, expect: { rtp_loss_pct: { max: 0.5 }, mos: { min: 3.5 } } }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }

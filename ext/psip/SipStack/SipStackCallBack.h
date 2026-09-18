@@ -36,6 +36,12 @@ public:
 	// SIP 메시지 전송 timeout 이벤트 핸들러
 	virtual bool SendTimeout( int iThreadId, CSipMessage * pclsMessage ) = 0;
 
+	// 와이어 수신 필터 — 파싱·보안 검사 뒤, 트랜잭션 계층에 넣기 **전**에 불린다. false 를 돌려주면 그 메시지는
+	//  와이어에서 유실된 것처럼 조용히 버린다(응답·카운터 없음). 재전송 유실 주입(계측기 피어 오류 주입 —
+	//  UDP Timer A/E 재전송이 도달하는지 시험)처럼 스택 밖에서 손실을 만들어야 할 때만 구현한다.
+	//  등록된 콜백 중 하나라도 false 면 버린다. 수신 스레드에서 불리므로 짧게 끝낸다.
+	virtual bool RecvFilter( CSipMessage * /*pclsMessage*/, const char * /*pszIp*/, int /*iPort*/, ESipTransport /*eTransport*/ ){ return true; }
+
 	// UDP keepalive(RFC 5626 §4.4.1 CRLF) 수신 이벤트 핸들러.
 	//  keepalive 는 SIP 메시지가 아니라 파서로 가지 않지만, UDP 도달 경로가 살아 있다는
 	//  유일한 신호라 응용에는 올린다. 본문에 신원이 없으므로 응용은 이 주소와 일치하는

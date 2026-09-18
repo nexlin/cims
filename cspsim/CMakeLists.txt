@@ -48,6 +48,12 @@ add_executable(csim_rtp_dtmf_test CsimRtpDtmfTest.cpp)
 target_link_libraries(csim_rtp_dtmf_test PRIVATE csim)
 add_executable(csim_rtp_media_test CsimRtpMediaTest.cpp)
 target_link_libraries(csim_rtp_media_test PRIVATE csim)
+# 피어 엔진 오류 주입 후속(재전송 유실·THIG)·G.722 협상 — UDP 루프백 피어 둘
+add_executable(csim_peer_fault_test CsimPeerFaultTest.cpp)
+target_link_libraries(csim_peer_fault_test PRIVATE csim)
+# TLS 상호인증(클라이언트 인증서 요구·제시·서버 검증) — openssl CLI 로 임시 인증서
+add_executable(csim_tls_mutual_test CsimTlsMutualTest.cpp)
+target_link_libraries(csim_tls_mutual_test PRIVATE csim)
 target_link_libraries(cspsim PRIVATE csim mariadb)
 
 target_include_directories(cspsim PRIVATE

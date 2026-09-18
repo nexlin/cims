@@ -596,16 +596,27 @@ class PbxMgcf(unittest.TestCase):
         sc2 = M.Scenario.model_validate({'id': 'UT-REG2', 'roles': {'p': {'pool': 'pbx_hq'}, 'u': {'pool': 'volte_ue'}},
                                          'flow': [{'step': 'register', 'who': ['p', 'u']}, {'step': 'invite', 'from': 'p', 'to': 'u'}]})
         C.check_register_roles(sc2, topo, {'p': 'pbx_hq', 'u': 'ue_w1'})   # 트렁크 계정 있음 — 통과
-        # kind 게이트 — progress 는 피어만
+        # kind 게이트 — progress 는 피어와 착신 UE 둘 다(UE 측 183 early media), replaces 는 UE 만
         sc3 = M.Scenario.model_validate({'id': 'UT-GATE', 'roles': {'u': {'pool': 'volte_ue'}, 'p': {'pool': 'pbx_hq'}},
                                          'flow': [{'step': 'invite', 'from': 'p', 'to': 'u'}, {'step': 'progress', 'who': ['u']}]})
+        C.check_kind_gates(sc3, topo, {'u': 'ue_w1', 'p': 'pbx_hq'})
+        sc4 = M.Scenario.model_validate({'id': 'UT-GATE2', 'roles': {'u': {'pool': 'volte_ue'}, 'p': {'pool': 'pbx_hq'}},
+                                         'flow': [{'step': 'subscribe', 'who': ['p'], 'to': 'u'}, {'step': 'invite', 'from': 'u', 'to': 'p'},
+                                                  {'step': 'replaces', 'from': 'p', 'to': 'u'}]})
         with self.assertRaises(C.CompileError):
-            C.check_kind_gates(sc3, topo, {'u': 'ue_w1', 'p': 'pbx_hq'})
+            C.check_kind_gates(sc4, topo, {'u': 'ue_w1', 'p': 'pbx_hq'})
 
     def test_compile_pool_create_carries_options(self):
         w, doc, topo = self._topo()
         os.environ['UT_PBX_HA1'] = 'cd' * 16
         doc['pools']['ue_w1']['prack'] = True
+        doc['target']['nodes']['csp']['sip']['listeners']['tls'] = {'edge': 'access', 'port': 5061, 'protocol': 'tls'}
+        doc['pools']['ue_w1']['dtmf'] = 'inband'
+        doc['pools']['ue_w1']['transport'] = 'tls'
+        doc['pools']['ue_w1']['tls_verify'] = True
+        doc['pools']['pbx_hq']['fault'] = {'drop_invite': 1}
+        doc['pools']['pbx_hq']['dtmf'] = False
+        doc['pools']['pbx_hq']['tls_client_cert'] = True
         topo = M.Topology.model_validate(doc)
         sc, _, _ = S.get_scenario('TRUNK-PBX-REGISTER')
         from services import tester_workers as TW
@@ -616,6 +627,9 @@ class PbxMgcf(unittest.TestCase):
         pools = {p['pool']: p for p in plan['workers']['w1']['pools']}
         self.assertEqual(pools['pbx_hq']['trunk_register']['ha1'], 'cd' * 16)
         self.assertTrue(pools['ue_w1']['prack'])
+        self.assertEqual((pools['ue_w1']['dtmf'], pools['ue_w1']['tls_verify'], pools['ue_w1']['tls_client_cert']), ('inband', True, False))
+        self.assertEqual((pools['pbx_hq']['peer']['fault']['drop_invite'], pools['pbx_hq']['peer']['dtmf'], pools['pbx_hq']['peer']['thig']), (1, 'off', False))
+        self.assertTrue(pools['pbx_hq']['tls_client_cert'] and pools['pbx_hq']['peer']['tls_client_cert'])
         self.assertEqual(pools['pbx_hq']['trunk_register']['realm'], 'volte.test')   # 비면 접속점 기본 도메인
         steps = {s['step']: s for s in plan['steps']}
         self.assertIn('register', steps)

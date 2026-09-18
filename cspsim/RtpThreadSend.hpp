@@ -54,15 +54,51 @@ static bool LoadAmrWbFrames(const std::string& strPath,
 }
 
 
-/** RFC 4733 송신 상태 — 20 ms 틱마다 DtmfTick 이 본다. 이벤트 중이면 오디오 대신 이벤트 패킷을 낸다. */
+/** RFC 4733 송신 상태 — 20 ms 틱마다 DtmfTick 이 본다. 이벤트 중이면 오디오 대신 이벤트 패킷을 낸다. in-band 모드(DtmfInbandTick)도 같은 상태를 쓴다. */
 struct DtmfTxState {
     bool active = false;
     int event = 0;          // 0-9, 10='*', 11='#', 12-15='A'-'D'
+    char digit = 0;         // in-band — 톤을 내는 숫자 문자
     int elapsedMs = 0;
     int endSent = 0;
     int gapLeftMs = 0;
     uint32_t ts = 0;        // 이벤트 시작 타임스탬프(이벤트 동안 고정)
+    csim_dtmf::ToneGen tone;
 };
+
+/** in-band DTMF 틱 — telephone-event 미협상 + m_bDtmfInband + G.711 이면 이 틱의 오디오 페이로드(160 B)를 톤(또는 간격 무음)으로 채운다.
+ *  true = payload 를 채웠다(호출자는 원천 프레임 대신 이것을 보낸다 — 시퀀스·타임스탬프는 오디오처럼 흐른다). 톤이 끝나면 m_iDtmfSent++. */
+static bool DtmfInbandTick(CRtpThread* pRtpThread, DtmfTxState& st, char* payload, int iPt) {
+    if (pRtpThread->m_iDtmfPt >= 0 || !pRtpThread->m_bDtmfInband || !(iPt == 0 || iPt == 8)) return false;
+    short pcm[160];
+    if (st.gapLeftMs > 0) {
+        // 숫자 사이 간격 — 무음(검출기가 톤 끝을 확정하는 구간)
+        st.gapLeftMs -= 20;
+        memset(pcm, 0, sizeof(pcm));
+    } else {
+        if (!st.active) {
+            char c = 0;
+            {
+                std::lock_guard<std::mutex> lk(pRtpThread->m_mtxDtmf);
+                if (pRtpThread->m_dtmfQueue.empty()) return false;
+                c = pRtpThread->m_dtmfQueue.front();
+                pRtpThread->m_dtmfQueue.pop_front();
+            }
+            if (!st.tone.Set(c)) return false;
+            st.active = true; st.digit = c; st.elapsedMs = 0;
+        }
+        st.tone.Fill(pcm, 160);
+        st.elapsedMs += 20;
+        if (st.elapsedMs >= pRtpThread->m_iDtmfDurationMs) {
+            st.active = false;
+            st.gapLeftMs = pRtpThread->m_iDtmfGapMs > 0 ? pRtpThread->m_iDtmfGapMs : 40;   // Q.24 최소 간격
+            pRtpThread->m_iDtmfSent++;
+        }
+    }
+    if (iPt == 8) PcmToAlaw((const char*)pcm, 320, payload, 160);
+    else PcmToUlaw((const char*)pcm, 320, payload, 160);
+    return true;
+}
 
 static int DtmfEventCode(char c) {
     if (c >= '0' && c <= '9') return c - '0';
@@ -145,9 +181,10 @@ static std::shared_ptr<const RtpFrameVec> LoadFramesCached(const std::string& st
     return pFrames;
 }
 
-/** 송신 원천 — 합의 코덱과 (기본|MediaSend 지정) 파일로 정한다. 파일이 없거나 못 읽으면 그 코덱의 합성. */
+/** 송신 원천 — 합의 코덱과 (기본|MediaSend 지정) 파일로 정한다. 파일이 없거나 못 읽으면 그 코덱의 합성.
+ *  G.722(PT 9, RFC 3551 §4.5.2 — RTP 클록 8000 표기·64 kbit/s = 160 B/20 ms)는 G.711 과 같은 프레임 크기의 파일 또는 합성(상수 코드워드). */
 struct RtpTxSource {
-    enum Kind { SYNTH_G711, SYNTH_AMRWB, FILE_AMRWB, FILE_G711 } kind = SYNTH_G711;
+    enum Kind { SYNTH_G711, SYNTH_AMRWB, FILE_AMRWB, FILE_G711, SYNTH_G722, FILE_G722 } kind = SYNTH_G711;
     std::shared_ptr<const RtpFrameVec> frames;
     std::string path;
     int pt = 0;
@@ -157,19 +194,25 @@ struct RtpTxSource {
 };
 
 static void ResolveTxSource(CRtpThread* pRtpThread, RtpTxSource& src) {
-    bool bOverride; bool bLoop; std::string strAmrWb, strPcmu, strPcma;
+    bool bOverride; bool bLoop; std::string strAmrWb, strPcmu, strPcma, strG722;
     {
         std::lock_guard<std::mutex> lk(pRtpThread->m_mtxSource);
         bOverride = pRtpThread->m_bSourceOverride;
-        strAmrWb = pRtpThread->m_strSrcAmrWb; strPcmu = pRtpThread->m_strSrcPcmu; strPcma = pRtpThread->m_strSrcPcma;
+        strAmrWb = pRtpThread->m_strSrcAmrWb; strPcmu = pRtpThread->m_strSrcPcmu; strPcma = pRtpThread->m_strSrcPcma; strG722 = pRtpThread->m_strSrcG722;
         bLoop = pRtpThread->m_bSrcLoop;
     }
     int iPt = pRtpThread->m_iAudioPt;
     bool bG711 = (iPt == 0 || iPt == 8);
-    bool bAmrWb = !bG711 && pRtpThread->m_bUseMediaFile;   // m_bUseMediaFile = AMR-WB 합의
+    bool bG722 = (iPt == 9);
+    bool bAmrWb = !bG711 && !bG722 && pRtpThread->m_bUseMediaFile;   // m_bUseMediaFile = AMR-WB 합의
     RtpTxSource clsNew;
     clsNew.loop = bLoop;
-    if (bOverride) {
+    if (bG722) {
+        // G.722 — 파일(MediaSend 지정) 또는 합성. 기본 원천(AMR-WB 파일)은 이 코덱에 쓸 수 없다
+        clsNew.kind = RtpTxSource::SYNTH_G722; clsNew.pt = 9; clsNew.tsStep = 160; clsNew.path = bOverride ? strG722 : "";
+        if (!clsNew.path.empty() && (clsNew.frames = LoadFramesCached(clsNew.path, 160))) clsNew.kind = RtpTxSource::FILE_G722;
+        else if (!clsNew.path.empty()) printf("[RTP] Failed to load media sample: %s (falling back to synthetic)\n", clsNew.path.c_str());
+    } else if (bOverride) {
         if (bAmrWb) {
             clsNew.path = strAmrWb; clsNew.kind = RtpTxSource::SYNTH_AMRWB; clsNew.pt = iPt >= 0 ? iPt : 99; clsNew.tsStep = 320;
             if (!strAmrWb.empty() && (clsNew.frames = LoadFramesCached(strAmrWb, 61))) clsNew.kind = RtpTxSource::FILE_AMRWB;
@@ -250,8 +293,12 @@ THREAD_API RtpThreadSend(LPVOID lpParameter) {
 
       char* payload = szPacket + sizeof(RtpHeader);
       int payloadLen = 0;
-      bool bFile = (clsSrc.kind == RtpTxSource::FILE_AMRWB || clsSrc.kind == RtpTxSource::FILE_G711);
-      if (clsSrc.kind == RtpTxSource::FILE_AMRWB) {
+      bool bFile = (clsSrc.kind == RtpTxSource::FILE_AMRWB || clsSrc.kind == RtpTxSource::FILE_G711 || clsSrc.kind == RtpTxSource::FILE_G722);
+      if (DtmfInbandTick(pRtpThread, sttDtmf, payload, clsSrc.pt)) {
+          // in-band DTMF — 이 틱은 톤(또는 간격 무음) 160 B. 파일 원천의 재생 위치는 그대로(톤 뒤 이어서 재생)
+          payloadLen = 160;
+          bFile = false;
+      } else if (clsSrc.kind == RtpTxSource::FILE_AMRWB) {
           // AMR-WB RTP: RFC 4867 octet-aligned — [CMR(4bit)+0000] + [ToC] + [frame data]
           //   CMR = 0x80 (mode 8 = 23.85 kbps) · ToC = F=0, FT=8, Q=1 → 0x44. 원본 프레임의 첫 바이트는 ToC 라 건너뛴다.
           const std::vector<char>& vecFrame = (*clsSrc.frames)[clsSrc.idx];
@@ -259,10 +306,14 @@ THREAD_API RtpThreadSend(LPVOID lpParameter) {
           payload[1] = 0x44;
           memcpy(payload + 2, vecFrame.data() + 1, vecFrame.size() - 1);
           payloadLen = 2 + (int)vecFrame.size() - 1;
-      } else if (clsSrc.kind == RtpTxSource::FILE_G711) {
+      } else if (clsSrc.kind == RtpTxSource::FILE_G711 || clsSrc.kind == RtpTxSource::FILE_G722) {
           const std::vector<char>& vecFrame = (*clsSrc.frames)[clsSrc.idx];
           memcpy(payload, vecFrame.data(), vecFrame.size());
           payloadLen = (int)vecFrame.size();
+      } else if (clsSrc.kind == RtpTxSource::SYNTH_G722) {
+          // 합성 G.722 — 상수 코드워드 160 B(64 kbit/s). 흐름·손실·지터 계측용(디코더 무음 근사)
+          memset(payload, 0x55, 160);
+          payloadLen = 160;
       } else if (clsSrc.kind == RtpTxSource::SYNTH_AMRWB) {
           // 합성 AMR-WB — NO_DATA 프레임(FT=15, Q=1): CMR 15(요청 없음) + ToC 0x7C. 흐름·손실·지터 계측용
           payload[0] = (char)0xF0;

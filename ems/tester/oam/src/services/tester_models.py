@@ -32,6 +32,17 @@ class _Strict(BaseModel):
 # ──────────────────────────────────────────────────────────────────────────
 
 Transport = Literal['udp', 'tcp', 'tls']
+# DTMF 방식 — rfc4733: telephone-event 오퍼/echo(기본) · inband: G.711 톤(telephone-event 없음 — PSTN 게이트웨이 뒤 in-band 경로, 협상 코덱이 G.711 일 때만 송신)
+#   · off: 없음. YAML 의 옛 bool 은 true→rfc4733, false→off 로 읽는다
+DtmfMode = Literal['rfc4733', 'inband', 'off']
+
+
+def _dtmf_mode(v):
+    if v is True:
+        return 'rfc4733'
+    if v is False:
+        return 'off'
+    return v
 ListenerEdge = Literal['access', 'peering']
 SrtpMode = Literal['off', 'optional', 'required']
 PeerProfile = Literal['ibcf', 'pbx', 'mgcf']
@@ -270,8 +281,15 @@ class UePool(_PoolBase):
     transport: Transport = Field(default='udp', description='listener 를 주면 그 protocol 로 맞춘다(둘 다 주고 다르면 오류)')
     srtp: SrtpMode = 'off'
     register_expires: int = Field(default=3600, ge=60)
-    prack: bool = Field(default=False, description='RFC 3262 100rel — 발신 INVITE 에 Supported/Require: 100rel, RSeq 1xx 에 PRACK (mgcf early media 시험)')
-    dtmf: bool = Field(default=True, description='RFC 4733 telephone-event 를 오퍼/echo — dtmf 단계의 전제')
+    prack: bool = Field(default=False, description='RFC 3262 100rel — 발신 INVITE 에 Supported/Require: 100rel, RSeq 1xx 에 PRACK (mgcf early media 시험). 착신 UE 의 progress(183) 도 신뢰 1xx 로')
+    dtmf: DtmfMode = Field(default='rfc4733', description='DTMF 방식 — rfc4733(telephone-event 오퍼/echo) · inband(G.711 톤 — 협상 코덱이 pcmu/pcma 일 때만) · off. 옛 bool 도 받는다')
+    tls_verify: bool = Field(default=False, description='transport=tls — 접속점 서버 인증서를 워커 Tls.CaFile 로 검증(체인만, 호스트명 대조 없음). 기본 끔(개발 스택 자체 서명)')
+    tls_client_cert: bool = Field(default=False, description='transport=tls — 접속점이 클라이언트 인증서를 요구할 때(상호인증) 워커 Tls.ClientCertFile 을 제시')
+
+    @field_validator('dtmf', mode='before')
+    @classmethod
+    def _dtmf(cls, v):
+        return _dtmf_mode(v)
 
 
 class PeerBind(_Strict):
@@ -326,10 +344,13 @@ PeerAnswer = Literal['normal', 'silent', 'reject', 'delay']
 
 
 class PeerFault(_Strict):
-    """피어 오류 주입 — answer 정책의 매개변수. 재전송 유실(와이어 손실)·TLS 상호인증은 psip 수신 훅/클라이언트 인증서 검증이 없어 아직 없다(§10 C)."""
+    """피어 오류 주입 — answer 정책의 매개변수(code/q850/delay_ms) + answer 와 독립인 **와이어 유실**(drop_invite/drop_pct — psip RecvFilter 로
+    수신 메시지를 트랜잭션에 넣기 전에 버린다 → 상대의 Timer A/E 재전송이 닿는지, SRD 가 T1 만큼 늘어나는지 시험. UDP 에서만 뜻이 있다)."""
     code: int = Field(default=503, ge=300, le=699, description='answer=reject 의 최종 응답 코드(503 = 5xx failover, 486/603 = 사용자 측 거절)')
     q850: Optional[int] = Field(default=None, ge=1, le=127, description='거절에 실을 Reason: Q.850;cause= (RFC 3326 — 대상의 Reason 투과 시험)')
     delay_ms: int = Field(default=0, ge=0, le=120000, description='answer=delay — 착신 INVITE 뒤 이 시간 동안 아무 응답도 내지 않는다(100 Trying 은 스택)')
+    drop_invite: int = Field(default=0, ge=0, le=5, description='새 착신 INVITE 마다 첫 N 벌을 와이어 유실처럼 버린다(1 = 상대 Timer A 500 ms 재전송이 첫 도달 — 카운터 peer_fault_drop·invite_retrans_rx, 비율 retrans_rx_pct)')
+    drop_pct: int = Field(default=0, ge=0, le=90, description='모든 수신 메시지를 이 확률(%)로 버린다 — 재전송·재시도 복원력(응답 유실 → 상대의 200 재전송 등)')
 
 
 class PeerPool(_PoolBase):
@@ -350,10 +371,19 @@ class PeerPool(_PoolBase):
     answer: PeerAnswer = Field(default='normal', description='착신 정책 — normal: 시나리오 단계가 응답 · silent: 무응답(죽은 피어 — Timer B failover) · '
                                                             'reject: 엔진이 즉시 fault.code 로 거절(5xx failover·Reason 투과) · delay: fault.delay_ms 동안 '
                                                             '100 Trying 뒤 침묵(응답 지연 — 대상 타이머·early media 대기 시험), 그 뒤 시나리오 단계가 응답')
-    fault: Optional[PeerFault] = Field(default=None, description='answer reject/delay 의 매개변수(오류 주입)')
+    fault: Optional[PeerFault] = Field(default=None, description='answer reject/delay 의 매개변수 + 와이어 유실 drop_invite/drop_pct(오류 주입)')
     prack: Optional[bool] = Field(default=None, description='RFC 3262 100rel/PRACK — 생략=프로파일 기본(ibcf/mgcf 켬, pbx 끔)')
-    dtmf: bool = Field(default=True, description='RFC 4733 telephone-event 오퍼/echo')
+    dtmf: DtmfMode = Field(default='rfc4733', description='DTMF 방식 — rfc4733(telephone-event 오퍼/echo) · inband(G.711 톤 — mgcf in-band 옵션) · off. 옛 bool 도 받는다')
+    thig: bool = Field(default=False, description='ibcf — 발신 INVITE 에 토큰화 Via(tokenized-by, TS 24.229 §5.10.4 THIG 흔적)를 얹고 응답의 Via 보존을 관측(thig_pct)')
+    tls_client_auth: bool = Field(default=False, description='bind.protocol=tls — 수신점이 클라이언트 인증서를 요구(상호인증, 워커 Tls.CaFile 이 발급자). 대상 CSP 가 인증서를 내지 않으면 핸드셰이크 실패 = §12 과제 드러남')
+    tls_verify: bool = Field(default=False, description='발신 TLS 연결(→ 대상 수신점·트렁크 REGISTER)에서 서버 인증서를 워커 Tls.CaFile 로 검증')
+    tls_client_cert: bool = Field(default=False, description='발신 TLS 연결에 워커 Tls.ClientCertFile 을 클라이언트 인증서로 제시(대상 접속점이 상호인증을 요구할 때)')
     seed: PeerSeed = Field(default_factory=PeerSeed)
+
+    @field_validator('dtmf', mode='before')
+    @classmethod
+    def _dtmf(cls, v):
+        return _dtmf_mode(v)
 
     @model_validator(mode='after')
     def _fault(self):
@@ -361,6 +391,12 @@ class PeerPool(_PoolBase):
             raise ValueError('answer: delay 는 fault.delay_ms(> 0) 가 필요하다')
         if self.answer == 'reject' and self.fault is None:
             self.fault = PeerFault()
+        if self.fault and (self.fault.drop_invite or self.fault.drop_pct) and self.bind.protocol != 'udp':
+            raise ValueError('fault.drop_invite/drop_pct 는 bind.protocol: udp 에서만 — TCP/TLS 는 SIP 재전송이 없다(RFC 3261 §17.1.1.2)')
+        if self.thig and self.profile != 'ibcf':
+            raise ValueError('thig 는 profile: ibcf 에서만(토큰화 Via 는 IBCF 의 흔적)')
+        if (self.tls_client_auth) and self.bind.protocol != 'tls':
+            raise ValueError('tls_client_auth 는 bind.protocol: tls 에서만')
         return self
 
     @property
@@ -404,14 +440,14 @@ class Layout(_Strict):
     items: Dict[str, LayoutItem] = Field(default_factory=dict)
 
 
-# 샘플이 파일로 가질 수 있는 코덱 — 워커 송신기(libcsim CRtpThread)가 읽는 raw 형식: amr-wb = 61 B 프레임, pcmu/pcma = 160 B(20 ms)
-SAMPLE_CODECS = ('amr-wb', 'pcmu', 'pcma')
+# 샘플이 파일로 가질 수 있는 코덱 — 워커 송신기(libcsim CRtpThread)가 읽는 raw 형식: amr-wb = 61 B 프레임, pcmu/pcma/g722 = 160 B(20 ms)
+SAMPLE_CODECS = ('amr-wb', 'pcmu', 'pcma', 'g722')
 
 
 class TopologyMedia(_Strict):
     """미디어 샘플 라이브러리(§4 미디어 평면) — id → {코덱: 워커 샘플 디렉터리(Media.SampleDir) 안 상대 경로 | 'synthetic'}.
     합의 코덱에 해당하는 항목이 없으면 그 코덱은 합성으로 나간다."""
-    samples: Dict[str, Dict[str, str]] = Field(default_factory=dict, description='id → {amr-wb|pcmu|pcma: 파일|synthetic}')
+    samples: Dict[str, Dict[str, str]] = Field(default_factory=dict, description='id → {amr-wb|pcmu|pcma|g722: 파일|synthetic}')
 
     @field_validator('samples')
     @classmethod
@@ -723,15 +759,15 @@ STEP_VOCAB = {
     'register':      {'group': 'reg',   'actor': 'who',     'kind': 'ue|trunk', 'metrics': ['code', 'rrd_ms'], 'desc': '역할 단말 전부 등록 (prelude)'},
     'deregister':    {'group': 'reg',   'actor': 'who',     'kind': 'ue|trunk', 'metrics': ['code'], 'desc': 'run 종료 시 등록 해제 (epilogue)'},
     'wait':          {'group': 'reg',   'actor': 'seconds', 'kind': None,       'metrics': [], 'desc': '대기 (seconds)'},
-    'invite':        {'group': 'call',  'actor': 'fromto',  'kind': None,       'metrics': ['code', 'srd_ms', 'ser_pct', 'seer_pct', 'video_pct', 'fork_alert_pct'], 'desc': 'INVITE from → to (비동기). to 는 역할 또는 다이얼 번호 리터럴(대표번호 — 인스턴스의 다른 UE 역할이 포크 착신, ${var} 바인딩 가능). from 이 통화 중이면 상담 통화(두 번째 다이얼로그 — attended 전달의 전제)'},
-    'progress':      {'group': 'peer',  'actor': 'who',     'kind': 'peer',     'metrics': ['early_media_pct', 'early_rtp_pct', 'prack_pct'], 'desc': '183 early media · PRACK (피어)'},
+    'invite':        {'group': 'call',  'actor': 'fromto',  'kind': None,       'metrics': ['code', 'srd_ms', 'ser_pct', 'seer_pct', 'video_pct', 'fork_alert_pct', 'retrans_rx_pct', 'thig_pct'], 'desc': 'INVITE from → to (비동기). to 는 역할 또는 다이얼 번호 리터럴(대표번호 — 인스턴스의 다른 UE 역할이 포크 착신, ${var} 바인딩 가능). from 이 통화 중이면 상담 통화(두 번째 다이얼로그 — attended 전달의 전제)'},
+    'progress':      {'group': 'peer',  'actor': 'who',     'kind': None,       'metrics': ['early_media_pct', 'early_rtp_pct', 'prack_pct'], 'desc': '183 Session Progress + SDP(early media) · 신뢰 1xx 면 PRACK — 피어(pbx/mgcf 링백) 또는 착신 UE(실 단말 안내음 모사; 그 뒤 answer 는 같은 answer 로 200)'},
     'answer':        {'group': 'call',  'actor': 'who',     'kind': None,       'metrics': ['code', 'srd_ms', 'ser_pct'], 'desc': '착신 대기 → after_ms 뒤 200'},
     'reject':        {'group': 'call',  'actor': 'who',     'kind': None,       'metrics': ['code', 'q850_rx_pct'], 'desc': '착신 대기 → payload 코드로 거절'},
     'bye':           {'group': 'call',  'actor': 'from',    'kind': None,       'metrics': ['sdd_ms', 'code', 'scr_pct', 'q850_rx_pct', 'dtmf_rx_pct'], 'desc': 'BYE → 최종 응답 (SDD)'},
     'media_hold':    {'group': 'media', 'actor': 'seconds', 'kind': None,       'metrics': ['rtp_loss_pct', 'jitter_ms', 'mos'], 'desc': '확립 뒤 seconds 유지, 끝에 RTP 표본 (during 로 통화 중 동작)'},
     'hold':          {'group': 'media', 'actor': 'from',    'kind': None,       'metrics': ['code'], 'desc': 're-INVITE sendonly'},
     'resume':        {'group': 'media', 'actor': 'from',    'kind': None,       'metrics': ['code'], 'desc': 're-INVITE sendrecv'},
-    'dtmf':          {'group': 'media', 'actor': 'from',    'kind': None,       'metrics': ['dtmf_rx_pct'], 'desc': 'RFC 4733 숫자열 송신 (payload)'},
+    'dtmf':          {'group': 'media', 'actor': 'from',    'kind': None,       'metrics': ['dtmf_rx_pct'], 'desc': '숫자열 송신 (payload) — 풀 dtmf 방식대로 RFC 4733 telephone-event 또는 in-band G.711 톤'},
     'media_send':    {'group': 'media', 'actor': 'who',     'kind': None,       'metrics': [], 'desc': 'RTP 송출 시작 — sample(생략 = 기본 원천)·loop·after_ms. SDP 교환 뒤에만'},
     'media_stop':    {'group': 'media', 'actor': 'who',     'kind': None,       'metrics': [], 'desc': 'RTP 송출 정지 (수신은 계속)'},
     'refer':         {'group': 'xfer',  'actor': 'fromto',  'kind': None,       'metrics': ['code'], 'desc': 'REFER 전달 from(전달자) → to (RFC 3515) — 전달자가 to 와 상담 통화 중이면 attended(Refer-To 에 Replaces), 아니면 blind'},
@@ -766,6 +802,7 @@ METRIC_LABELS = {
     'q850_rx_pct': 'Q.850 Reason 수신률', 'early_media_pct': '183 early media 률', 'prack_pct': 'PRACK 률',
     'early_rtp_pct': 'early media RTP 도달률', 'join_tap_pct': 'Join 청취 leg SSRC 2개 도달률', 'video_pct': '영상 협상률(m=video 활성 answer)',
     'fork_alert_pct': '대표번호 포크 alert 률(그룹원 착신/기대)', 'listen_pct': 'PTT 청취 합류율(recvonly 200)',
+    'retrans_rx_pct': 'INVITE 재전송 도달률(유실 주입 뒤)', 'thig_pct': 'THIG 토큰화 Via 보존률',
 }
 
 # Reason: Q.850 cause (ITU-T Q.850) — 편집기 목록
@@ -797,6 +834,8 @@ METRIC_NAMES = (
     'join_tap_pct',
     # 영상 — m=video 를 실은 발신 중 answer 에 활성 video m-line(포트>0)이 온 비율
     'video_pct',
+    # 피어 오류 주입 후속(C) — 유실 주입 뒤 INVITE 재전송 도달률 · ibcf THIG 토큰화 Via 보존률
+    'retrans_rx_pct', 'thig_pct',
     # 대표번호(TS 24.239 Flexible Alerting) — to 가 번호 리터럴인 invite 에서 인스턴스의 다른 UE 역할(그룹원)에 포크 INVITE 가 도달한 비율
     'fork_alert_pct',
     # PTT 청취(dispatch_center.md §5.6) — group_call payload listen 의 recvonly INVITE 가 200 으로 확립된 비율
@@ -824,6 +863,8 @@ RATIO_METRICS = {
     'video_pct': ('video_ok', 'video_offered'),     # answer 에 활성 m=video / m=video 를 실은 INVITE(워커 Media.VideoFile 필요)
     'fork_alert_pct': ('fork_rx', 'fork_expected'),  # 번호 리터럴 다이얼 뒤 인스턴스 UE 에 도달한 포크 INVITE / 발신자를 뺀 UE 역할 수
     'listen_pct': ('listen_ok', 'listen_tx'),       # 확립된 청취 합류(200) / recvonly 청취 INVITE
+    'retrans_rx_pct': ('invite_retrans_rx', 'peer_fault_drop'),   # 유실 주입 뒤 닿은 INVITE 재전송 벌 / 버린 벌 — 대상의 Timer A 재전송 복원력
+    'thig_pct': ('thig_via_ok', 'thig_tx'),          # 응답에 토큰화 Via 가 보존된 발신 / THIG Via 를 얹은 ibcf 발신 INVITE
 }
 
 
@@ -1199,7 +1240,11 @@ class WorkerPeer(_Strict):
     answer: PeerAnswer = 'normal'
     fault: Optional[PeerFault] = None
     prack: Optional[bool] = None
-    dtmf: bool = True
+    dtmf: DtmfMode = 'rfc4733'
+    thig: bool = False
+    tls_client_auth: bool = False
+    tls_verify: bool = False
+    tls_client_cert: bool = False
 
 
 class PoolCreate(_Strict):
@@ -1211,8 +1256,9 @@ class PoolCreate(_Strict):
     srtp: SrtpMode = 'off'
     service: ServiceKind = Field(default='volte', description='kind=ue — ptt 면 MCPTT 단말(기동 절차·자동응답·floor)')
     prack: bool = Field(default=False, description='kind=ue — 100rel/PRACK')
-    dtmf: bool = Field(default=True, description='kind=ue — telephone-event 오퍼/echo')
-    tls_verify: bool = Field(default=False, description='kind=real-ue — 서버 TLS 인증서 검증(워커 RealUe.TlsCaFile 앵커, 없으면 --no-tls-verify)')
+    dtmf: DtmfMode = Field(default='rfc4733', description='kind=ue — rfc4733(telephone-event 오퍼/echo) · inband(G.711 톤) · off')
+    tls_verify: bool = Field(default=False, description='kind=ue|real-ue — 서버 TLS 인증서 검증(ue: 워커 Tls.CaFile · real-ue: RealUe.TlsCaFile 앵커, 없으면 검증 없이)')
+    tls_client_cert: bool = Field(default=False, description='kind=ue — 워커 Tls.ClientCertFile 을 클라이언트 인증서로 제시(대상 접속점 상호인증)')
     target_csp: TargetCsp = Field(description='풀이 닿는 SIP 서버 — 컨트롤러가 토폴로지 노드 참조에서 파생')
     peer: Optional[WorkerPeer] = Field(default=None, description='kind=peer 일 때 프로파일·bind·신원 범위')
     trunk_register: Optional[TrunkRegister] = Field(default=None, description='kind=peer(pbx) 트렁크 REGISTER 계정 — 비밀 해석 완료본')

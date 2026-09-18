@@ -25,6 +25,9 @@
 #include "Log.h"
 #include "FileUtility.h"
 #include "MemoryDebug.h"
+#include <vector>
+#include <map>
+#include <string>
 
 static SSL_CTX	* gpsttServerCtx = NULL;
 static SSL_CTX	* gpsttClientCtx = NULL;
@@ -127,6 +130,20 @@ static void SSLPrintError( )
 	CLog::Print( ERR_print_errors_fp );
 }
 
+// 클라이언트 ctx 에 넣은 검증 앵커 경로 — ctx 가 다시 만들어지면(SSLClientStop 뒤 재기동) 같은 앵커를 다시 넣는다
+static std::vector<std::string> gvecClientCaFiles;
+
+static bool _SSLClientLoadCaLocked( SSL_CTX * ctx, const char * pszCaFile )
+{
+	if( SSL_CTX_load_verify_locations( ctx, pszCaFile, NULL ) == 0 )
+	{
+		CLog::Print( LOG_ERROR, "[SSL] client ca load_verify_locations('%s') error", pszCaFile );
+		SSLPrintError();
+		return false;
+	}
+	return true;
+}
+
 // SSL 서버 라이브러리를 시작한다.
 bool SSLServerStart( const char * szCertFile, const char * szKeyFile, const char * szCaCertFile )
 {
@@ -162,10 +179,15 @@ bool SSLServerStart( const char * szCertFile, const char * szKeyFile, const char
 		return false;
 	}
 
-	if( (gpsttClientCtx = SSL_CTX_new( gpsttClientMeth )) == NULL )
+	// 클라이언트 ctx 는 프로세스 전역 하나 — 이미 있으면 유지한다(다른 스택이 넣어 둔 서버 검증 앵커를 잃지 않게). 없으면 만들고 앵커를 넣는다
+	if( gpsttClientCtx == NULL )
 	{
-		CLog::Print( LOG_ERROR, "SSL_CTX_new error - client" );
-		return false;
+		if( (gpsttClientCtx = SSL_CTX_new( gpsttClientMeth )) == NULL )
+		{
+			CLog::Print( LOG_ERROR, "SSL_CTX_new error - client" );
+			return false;
+		}
+		for( size_t i = 0; i < gvecClientCaFiles.size(); ++i ) _SSLClientLoadCaLocked( gpsttClientCtx, gvecClientCaFiles[i].c_str() );
 	}
 
 	// 체인 파일 로딩 — PEM 의 첫 인증서를 서버 인증서로, 나머지를 중간 CA 체인으로 등록해
@@ -249,10 +271,15 @@ bool SSLClientStart( )
 #else
 	gpsttClientMeth = TLSv1_client_method();
 #endif
-	if( (gpsttClientCtx = SSL_CTX_new( gpsttClientMeth )) == NULL )
+	if( gpsttClientCtx == NULL )
 	{
-		CLog::Print( LOG_ERROR, "SSL_CTX_new error - client" );
-		return false;
+		if( (gpsttClientCtx = SSL_CTX_new( gpsttClientMeth )) == NULL )
+		{
+			CLog::Print( LOG_ERROR, "SSL_CTX_new error - client" );
+			return false;
+		}
+		// 이전에 넣어 둔 서버 검증 앵커를 새 ctx 에도 넣는다(SSLClientLoadCa 누적분)
+		for( size_t i = 0; i < gvecClientCaFiles.size(); ++i ) _SSLClientLoadCaLocked( gpsttClientCtx, gvecClientCaFiles[i].c_str() );
 	}
 
 	gbStartSslServer = true;
@@ -327,13 +354,66 @@ static bool SSLEnsureClientCtx( )
 	return bOk;
 }
 
-bool SSLConnect( Socket iFd, SSL ** ppsttSsl )
+bool SSLClientLoadCa( const char * pszCaFile )
+{
+	if( pszCaFile == NULL || pszCaFile[0] == '\0' ) return false;
+	if( SSLEnsureClientCtx() == false ) return false;
+	gclsClientCtxMutex.acquire();
+	bool bKnown = false;
+	for( size_t i = 0; i < gvecClientCaFiles.size(); ++i ) if( gvecClientCaFiles[i] == pszCaFile ) { bKnown = true; break; }
+	bool bOk = true;
+	if( bKnown == false )
+	{
+		bOk = _SSLClientLoadCaLocked( gpsttClientCtx, pszCaFile );
+		if( bOk ) gvecClientCaFiles.push_back( pszCaFile );
+	}
+	gclsClientCtxMutex.release();
+	return bOk;
+}
+
+/** 연결 단위 검증 저장소 — CA 파일별 X509_STORE 캐시(프로세스 수명). SSL_set1_verify_cert_store 가 참조를 올리므로 공유해도 안전하다. */
+static X509_STORE * _VerifyStoreFor( const char * pszCaFile )
+{
+	static std::map<std::string, X509_STORE *> s_map;
+	gclsClientCtxMutex.acquire();
+	std::map<std::string, X509_STORE *>::iterator it = s_map.find( pszCaFile );
+	X509_STORE * pStore = NULL;
+	if( it != s_map.end() ) pStore = it->second;
+	else
+	{
+		pStore = X509_STORE_new();
+		if( pStore && X509_STORE_load_locations( pStore, pszCaFile, NULL ) != 1 )
+		{
+			CLog::Print( LOG_ERROR, "[SSL] verify store load('%s') error", pszCaFile );
+			X509_STORE_free( pStore );
+			pStore = NULL;
+		}
+		if( pStore ) s_map[pszCaFile] = pStore;
+	}
+	gclsClientCtxMutex.release();
+	return pStore;
+}
+
+bool SSLConnect( Socket iFd, SSL ** ppsttSsl, bool bVerifyServer, const char * pszClientCert, const char * pszClientKey, const char * pszVerifyCa )
 {
 	SSL * psttSsl;
 
 	if( SSLEnsureClientCtx() == false )
 	{
 		return false;
+	}
+	X509_STORE * pVerifyStore = NULL;
+	if( bVerifyServer && pszVerifyCa && pszVerifyCa[0] )
+	{
+		pVerifyStore = _VerifyStoreFor( pszVerifyCa );
+		if( pVerifyStore == NULL ) return false;   // 앵커를 못 읽으면 검증 없이 잇지 않는다
+	}
+	if( bVerifyServer && pVerifyStore == NULL && gvecClientCaFiles.empty() )
+	{
+		// 앵커를 아무도 넣지 않았다 — 시스템 기본 저장소로 검증한다(사이트 CA 가 시스템에 없으면 실패가 정상)
+		gclsClientCtxMutex.acquire();
+		SSL_CTX_set_default_verify_paths( gpsttClientCtx );
+		gclsClientCtxMutex.release();
 	}
 	if( (psttSsl = SSL_new( gpsttClientCtx )) == NULL )
 	{
@@ -344,6 +424,23 @@ bool SSLConnect( Socket iFd, SSL ** ppsttSsl )
 	try
 	{
 		SSL_set_fd( psttSsl, (int)iFd );
+		if( bVerifyServer )
+		{
+			if( pVerifyStore ) SSL_set1_verify_cert_store( psttSsl, pVerifyStore );
+			SSL_set_verify( psttSsl, SSL_VERIFY_PEER, NULL );
+		}
+		if( pszClientCert && pszClientCert[0] )
+		{
+			const char * pszKey = ( pszClientKey && pszClientKey[0] ) ? pszClientKey : pszClientCert;
+			if( SSL_use_certificate_chain_file( psttSsl, pszClientCert ) <= 0 ||
+			    SSL_use_PrivateKey_file( psttSsl, pszKey, SSL_FILETYPE_PEM ) <= 0 || SSL_check_private_key( psttSsl ) != 1 )
+			{
+				CLog::Print( LOG_ERROR, "[SSL] client cert '%s' key '%s' load error", pszClientCert, pszKey );
+				SSLPrintError();
+				SSL_free( psttSsl );
+				return false;
+			}
+		}
 		int iRet = SSL_connect( psttSsl );
 		if( iRet != 1 )
 		{

@@ -1,7 +1,7 @@
 {
   "name": "oam-cims-tester",
   "description": "CIMS 계측기 컨트롤러 — 시나리오/부하 프로파일·run 오케스트레이션·RFC 6076 지표·보고서. base OAM 게이트웨이 뒤 loopback 독립 모듈(oam-svc 와 동격, test_instrument.md)",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "ha_capability": "standalone",
   "gateway": {
     "default_port": 4490,
