@@ -780,6 +780,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             if ( !bHasInit )
                 clsAdhoc._pusers.push_back( std::make_shared<CspPttUser>( pszFrom, 5, "participant", "" ) );
             gclsGroupMap.Insert( clsAdhoc );
+            CGroupCallService::EmitRegroupEvent( "created", pszTo, "ad-hoc" );
             CLog::Print( LOG_INFO, "EventIncomingCall: ad-hoc group(%s) created %zu members init(%s) [PTT-AS]", pszTo,
                          clsAdhoc._pusers.size(), pszFrom );
         }

@@ -83,6 +83,10 @@ export const EVENT_TYPE_LABEL: Record<string, string> = {
   csp_resync_sent: '재동기 요청 발신',
   deploy_job: '배포 job 결과',
   deployment_failed: '배포 실패',
+  // PTT 감사·상태 (alarm_catalog §10.1) — 긴급 모드는 진입/해제 양방향 1슬러그(action 파라미터로 구분).
+  emergency_mode_changed: '긴급 모드 전이',
+  affiliation_changed: '그룹 제휴 변경',
+  regroup_changed: '즉석 세션 생성·해제',
   // 구 슬러그 하위호환 (알람 쪽과 같은 방식 — 옛 레코드를 읽을 때 필요)
   //   control_peer_changed → csp_control_peer_changed 로 개정됨.
   //   catalog_registered 는 CSV 에 감지 행이 없다(발화 주체 없음) — 지우면 옛 레코드가

@@ -144,6 +144,14 @@ public:
      *  멤버의 비선점 요청은 Deny #1). */
     static void ParseMcpttFmtp( class CSipCallRtp *pclsRtp, struct McpttFmtp &clsFmtp );
 
+    /** ad-hoc 그룹 생성·해제 감사 (E-AUD-010 regroup_changed) — created/released.
+     *  임시 그룹은 GroupMap 에서 조용히 사라져 존재했다는 사실조차 안 남았다. 생성은
+     *  ModuleDispatcher(개시 경로), 해제는 teardown 경로에서 부른다.
+     *  사설콜(priv-)은 대상이 아니다 — 정의는 ad-hoc/regroup 이고, 1:1 통화마다 감사가
+     *  쌓이는 것은 그 요구가 아니다.
+     *  @param pszScope 세션 종류 — 현행 "ad-hoc". */
+    static void EmitRegroupEvent( const char *pszAction, const std::string &strGroupId, const char *pszScope );
+
     /** conference 이벤트(RFC 4575) 구독 인가 — TS 24.379 §10.1.3.4.1 (dispatch_center.md §5.6).
      *  0=허용. 아니면 보낼 SIP 상태(403 = 그룹 문서 <on-network-allow-conference-state> 불허·Warning 138 /
      *  480 = 브로드캐스트 그룹·Warning 105)와 Warning 헤더 값·거절 사유(로그용). 멤버는 그룹 속성으로, 비멤버 관제사는
@@ -344,6 +352,11 @@ private:
      *  strRole = 청취자 역할 id (dispatch_center.md §5.7). */
     static void EmitPttListenAudit( const char *pszPhase, const std::string &strMonitor, const std::string &strRole,
                                     const std::string &strPttGroup, const std::string &strSesId, int iDurMs );
+    /** 긴급/임박 모드 전이 이벤트 (E-STC-007 emergency_mode_changed) — activated/cancelled.
+     *  세션 이력(PttLogEvent)에만 남던 전이를 운용 이벤트 스트림에도 올린다 — 세션을 열지
+     *  않고 기간으로 조회할 수 있어야 한다 (alarm_catalog.md §10.1). */
+    static void EmitEmergencyModeEvent( const char *pszAction, int iTier, const std::string &strGroupId,
+                                        const std::string &strActor, const std::string &strSesId );
 
     // Track Active Calls ((UserId, GroupId) -> CallId)
     //   멀티그룹 동시 참여: 사용자는 그룹별 독립 다이얼로그를 가진다 (그룹당 1콜).

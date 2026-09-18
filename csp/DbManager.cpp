@@ -877,6 +877,26 @@ bool CDbManager::SelectAffiliatedMembers( const std::string &strGroupId, std::ve
     return true;
 }
 
+bool CDbManager::SelectAffiliatedGroupsByUser( const std::string &strUserId, std::vector<std::string> &vecGroupIds ) {
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    if ( !m_pMysql && !Reconnect() ) return false;
+
+    // 만료·status 로 거르지 않는다 — RemoveAffiliationsByUser 가 행 전량을 지우므로,
+    //   지워질 행이 가리키는 그룹 전부가 감사 대상이다.
+    std::string strSql =
+        "SELECT DISTINCT g.mcptt_group_id FROM ptt_affiliations a JOIN ptt_groups g ON a.group_id=g.id "
+        "WHERE a.user_id='" +
+        Escape( strUserId ) + "'";
+    MYSQL_RES *pRes = ExecuteSelect( strSql );
+    if ( !pRes ) return false;
+    MYSQL_ROW row;
+    while ( ( row = mysql_fetch_row( pRes ) ) != nullptr ) {
+        if ( row[0] ) vecGroupIds.push_back( row[0] );
+    }
+    mysql_free_result( pRes );
+    return true;
+}
+
 bool CDbManager::RemoveAffiliationsByUser( const std::string &strUserId ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_pMysql && !Reconnect() ) return false;

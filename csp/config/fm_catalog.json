@@ -188,6 +188,24 @@
       "code": "E-AUD-016",
       "kind": "audit",
       "msg": "Call monitored: {monitor} → session {session} ({phase})"
+    },
+    {
+      "type": "emergency_mode_changed",
+      "code": "E-STC-007",
+      "kind": "stateChange",
+      "msg": "Emergency mode {action} (group {gid}, user {uri})"
+    },
+    {
+      "type": "affiliation_changed",
+      "code": "E-AUD-009",
+      "kind": "audit",
+      "msg": "Affiliation updated (group {gid}, {count} members)"
+    },
+    {
+      "type": "regroup_changed",
+      "code": "E-AUD-010",
+      "kind": "audit",
+      "msg": "Regroup {action} (group {gid}, {scope})"
     }
   ]
 }

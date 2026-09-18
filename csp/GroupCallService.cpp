@@ -853,6 +853,7 @@ void CGroupCallService::ApplyInCallCondition( const std::string &strGroupId, con
         if ( gclsCallDir.IsEnabled() )
             gclsCallDir.PttLogEvent( strGroupId, pszEvt,
                                      std::string( "{\"actor\":\"" ) + strMemberId + "\",\"by\":\"reinvite\"}" );
+        EmitEmergencyModeEvent( "activated", iNewCond, strGroupId, strMemberId, strSesId );
         CLog::Print( LOG_INFO, "ApplyInCallCondition: %s group(%s) by(%s) tier=%d", pszEvt, strGroupId.c_str(),
                      strMemberId.c_str(), iNewCond );
         // 상향을 확립 멤버 leg 에 재광고 (TS 24.379 §6.3.3.1.15 — §9-5 멤버 전파)
@@ -873,6 +874,7 @@ void CGroupCallService::ApplyInCallCondition( const std::string &strGroupId, con
         if ( gclsCallDir.IsEnabled() )
             gclsCallDir.PttLogEvent( strGroupId, pszEvt,
                                      std::string( "{\"actor\":\"" ) + strTgt + "\",\"by\":\"reinvite\"}" );
+        EmitEmergencyModeEvent( "cancelled", iCur, strGroupId, strTgt, strSesId );
         if ( iNewCond <= 0 ) {
             m_mapGroupCondition.erase( strGroupId );
             m_mapGroupCondActor.erase( strGroupId );
@@ -1006,6 +1008,9 @@ void CGroupCallService::ClearUserCall( const std::string &strUserId ) {
                 // ad hoc 임시 그룹: 통화 종료 시 GroupMap 에서도 제거(ephemeral — 다음 개시 시 새 멤버로 재생성)
                 if ( bSelected && clsGrp._isAdhoc ) {
                     gclsGroupMap.Remove( strGroupId.c_str() );
+                    // 사설콜(priv-)은 제외 — 정의(E-AUD-010)는 ad-hoc/regroup 이다. _isAdhoc 은
+                    //   ephemeral 수명 표시일 뿐 "ad-hoc 그룹"이 아니다.
+                    if ( clsGrp._groupType != "private" ) EmitRegroupEvent( "released", strGroupId, "ad-hoc" );
                     CLog::Print( LOG_INFO, "GroupCall: ad-hoc group(%s) removed from map (session ended)",
                                  strGroupId.c_str() );
                 }
@@ -2100,6 +2105,7 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
             //   다음 개시 시 발신 SDP 기준 새 모드로 재생성. de-register 경로와 동일 계약)
             if ( bSelected && clsGrp._isAdhoc ) {
                 gclsGroupMap.Remove( strGroupId.c_str() );
+                if ( clsGrp._groupType != "private" ) EmitRegroupEvent( "released", strGroupId, "ad-hoc" );
                 CLog::Print( LOG_INFO, "OnCallTerminated: ad-hoc group(%s) removed from map (session ended)",
                              strGroupId.c_str() );
             }
@@ -2477,6 +2483,35 @@ void CGroupCallService::EmitPttListenAudit( const char *pszPhase, const std::str
     p.Set( "tap_mode", "ptt_listen" );
     if ( iDurMs >= 0 ) p.Set( "dur_ms", iDurMs );
     gclsFmReporter.SendEvent( "call_monitored", "audit", gclsFmReporter.Node() + "/csp", p );
+}
+
+// TS 23.379 — ad-hoc 그룹 생성·해제 감사(E-AUD-010 regroup_changed).
+//   ad-hoc 그룹은 ephemeral 이라 통화가 끝나면 GroupMap 에서 사라진다 — 지금까지는
+//   **존재했다는 사실 자체가 남지 않아** 사후에 "그때 누구를 묶어 통신했나" 를 답할 수 없었다.
+void CGroupCallService::EmitRegroupEvent( const char *pszAction, const std::string &strGroupId, const char *pszScope ) {
+    if ( !gclsFmReporter.IsEnabled() ) return;
+    SimpleJson::JsonNode p;
+    p.Set( "action", pszAction );
+    p.Set( "gid", strGroupId );
+    p.Set( "scope", pszScope );
+    gclsFmReporter.SendEvent( "regroup_changed", "audit", gclsFmReporter.Node() + "/csp", p );
+}
+
+// mcptt_emergency_modes.md §4 — 긴급/임박 모드 전이 감사(E-STC-007 emergency_mode_changed).
+//   전이 자체는 PttLogEvent 가 세션 이력에 남기지만, 그것은 세션을 열어야 보인다. 운용은
+//   "어제 긴급이 몇 번 걸렸나" 를 기간으로 묻는다 — 그래서 이벤트 스트림에도 같이 올린다.
+//   등급(iTier)은 **전이 대상이 아니라 그 전이가 말하는 상태** 다: 상향은 새 등급, 취소는 직전 등급.
+void CGroupCallService::EmitEmergencyModeEvent( const char *pszAction, int iTier, const std::string &strGroupId,
+                                                const std::string &strActor, const std::string &strSesId ) {
+    if ( !gclsFmReporter.IsEnabled() ) return;
+    SimpleJson::JsonNode p;
+    p.Set( "action", pszAction );
+    p.Set( "condition", iTier >= 2 ? "emergency" : "imminent-peril" );
+    p.Set( "gid", strGroupId );
+    p.Set( "uri", strActor );
+    p.Set( "tier", iTier );
+    if ( !strSesId.empty() ) p.Set( "sesid", strSesId );
+    gclsFmReporter.SendEvent( "emergency_mode_changed", "stateChange", gclsFmReporter.Node() + "/csp", p );
 }
 
 std::string CGroupCallService::BuildConferenceInfoBody(

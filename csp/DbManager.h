@@ -97,6 +97,10 @@ public:
     /** 그룹의 affiliate 된 멤버 user_id 목록 */
     bool SelectAffiliatedMembers( const std::string &strGroupId, std::vector<std::string> &vecUserIds );
 
+    /** 가입자가 affiliate 한 그룹(mcptt_group_id) 목록 — de-register 로 한꺼번에 빠질 때
+     *  어느 그룹이 영향받는지 **지우기 전에** 알아내는 용도 (감사 E-AUD-009). */
+    bool SelectAffiliatedGroupsByUser( const std::string &strUserId, std::vector<std::string> &vecGroupIds );
+
     /** 가입자 de-register/logout 시 전 affiliation 제거 */
     bool RemoveAffiliationsByUser( const std::string &strUserId );
 
