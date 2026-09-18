@@ -145,6 +145,13 @@ NAT 는 매핑이 유휴로 만료되면 그것을 지우고, 다음에 나가�
 단말이 keepalive 를 CRLF 대신 STUN 으로 보내면 그대로 동작한다. RFC 5626 §4.4.1 의 CRLF
 ping(CRLF 2개)에는 규격대로 pong(CRLF 1개)으로 답한다.
 
+가장 앞선 방어는 **매핑을 잃지 않는 것**이다. 매핑이 죽는 직접 원인은 단말이 절전에 들어 keepalive
+타이머가 멈추는 것이므로, CIMS 단말 앱은 배터리 최적화 예외 + 등록 유지 서비스의 부분 wakelock 상시
+보유로 절전 중에도 keepalive 를 이어 보낸다([android_ue_client.md §8](android_ue_client.md#8-안드로이드-런타임-설계)).
+예외만으로는 부족하다 — Doze 는 망을 열어 주되 CPU 는 재우므로 wakelock 이 없으면 타이머가 서고, 그 상태에서
+매핑이 매시간 새 포트로 옮겨 가는 것이 실측됐다. 위의 서버 판정·수명 상한·STUN 은 그래도 매핑이 죽는 경우
+(공유기 재부팅·테이블 축출·Wi-Fi 순단)를 위한 두 번째 층이다.
+
 ### 4.2 죽은 바인딩을 통지에 실으면 안 되는 이유
 
 RFC 3680 의 contact state 는 `active`(등록 유효) / `terminated`(등록 종료) 뿐이고 **"flow 가

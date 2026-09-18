@@ -441,6 +441,10 @@ OAM 미도달 502 `oam_unreachable`. 구현 `csc/src/handlers/dispatch_recording
   ⚠️ 갱신은 **CIMS 오너앱 프로세스**에서 일어난다(인증기 = `AuthenticatorService`). 그 앱이 배터리 최적화
   예외 목록에 없으면 대기모드(doze)에서 netd 가 그 UID 의 망을 막아 갱신이 연결 타임아웃으로 실패하고,
   호출 앱(PTT/VoLTE)이 doze 예외여도 소용없다 — 실측 09-17. 실패 사유는 `CimsAuth` 태그로 남는다.
+  그래서 오너앱은 **로그인 성공 직후** 배터리 최적화 예외를 요청하고(`LoginActivity` →
+  `core/power/BatteryExemption.requestOnce`), **이미 로그인된 단말**에서는 오너앱에 진입점이 없으므로 동반 앱(PTT/VoLTE)이
+  홈 진입 때 오너앱을 대신해 묻는다(`requestOnceWithOwner` — 설정 앱은 URI 의 패키지로 다이얼로그를 띄운다, 실측 09-18).
+  한 진입에 다이얼로그 하나. 손으로 설정 화면에서 넣는 절차는 필요 없다.
 - 서버 엔드포인트 준비 전: 로그인/프로비저닝 실패 시 **수동설정으로 graceful fallback**.
 
 ### 5-1. 설정 화면·수동 설정 모드 (volte-client)

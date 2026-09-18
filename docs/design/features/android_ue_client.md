@@ -477,7 +477,7 @@ PTT up(RELEASE): 🎤mic 슬롯 ──disconnect─ 통화 stream  (송신 중�
 
 | 항목 | 설계 |
 |---|---|
-| 등록 유지 | **Foreground Service**(통화/대기 알림) + 부분 wakelock, 배터리 최적화 예외 요청 |
+| 등록 유지 | **Foreground Service**(통화/대기 알림) + **부분 wakelock 상시**(`core/power/PartialWakeLock` — 서비스 onCreate 의 전경 승격 뒤 획득, onDestroy 해제. pjsip NAT keepalive 는 사용자 공간 타이머라 CPU 가 잠들면 멈추고 공유기가 UDP 매핑을 회수한다 — 실측 09-17) + **배터리 최적화 예외 요청**(`core/power/BatteryExemption.requestOnce` — Doze 의 망 차단·알람 유예·wakelock 무시를 면제. 홈 진입/권한 답 뒤 시스템 동의 다이얼로그, 프로세스당·패키지당 1회, 거부 시 다음 진입에 재요청. PTT/VoLTE 는 `requestOnceWithOwner` 로 **오너앱(cims)도 대신 묻는다** — 오너앱은 로그인 화면 외 진입점이 없어 이미 로그인된 단말에선 스스로 못 묻는다. 한 진입에 다이얼로그 하나. 매니페스트 `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`). 둘은 세트 — 예외 없는 wakelock 은 Doze 가 무시하고, wakelock 없는 예외는 CPU 를 깨우지 못한다. 네 앱(cims·volte·ptt·dispatch) 공통, dispatch 는 `sdk/android` 의 같은 계약 |
 | Doze/네트워크 | FGS 유지 + 등록 refresh(서버 Expires 추종) + **등록 keepalive 보강**: ①PJSIP 등록 실패 자동 재시도(`regConfig.firstRetryIntervalSec=5`/`retryIntervalSec=30`) ②NAT 바인딩 UDP keep-alive(`natConfig.udpKaIntervalSec=15`, contact/via rewrite) ③기본 네트워크 복귀 시 재등록(`ConnectivityManager.registerDefaultNetworkCallback`→`SipController.reregister`) ④앱 포그라운드 복귀 시 재등록(`MainActivity.onResume`→`SipService.poke`) |
 | 스레딩 | PJSIP 콜백=워커 스레드 → UI는 main으로 디스패치. **PJSIP 외 스레드에서 호출 시 `Endpoint.libRegisterThread()` 필수** |
 | 객체 수명 | `Account`/`Call`/`AudioMedia` 래퍼 GC 방지(강참조 유지) + 명시적 delete |

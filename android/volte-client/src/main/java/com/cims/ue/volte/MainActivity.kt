@@ -21,6 +21,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import com.cims.ue.core.power.BatteryExemption
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -364,7 +365,12 @@ private fun HomeScreen(
     // 통화/알림 권한 — 진입 시 1회 요청(승인되면 재등록 트리거).
     val permLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
-    ) { service?.ensureRegistered() }
+    ) {
+        service?.ensureRegistered()
+        // 배터리 최적화 예외 — Doze 가 망·알람·wakelock 을 막지 않게. 자기 앱 + 오너앱(cims, 토큰 갱신 프로세스).
+        //   권한 답 뒤에 물어 다이얼로그가 겹치지 않게.
+        BatteryExemption.requestOnceWithOwner(context)
+    }
     LaunchedEffect(Unit) { permLauncher.launch(requiredPermissions()) }
 
     // 화면 최상단 전역 상태배지 — '다른 앱 위에 표시' 권한 안내(1회).

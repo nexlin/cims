@@ -28,6 +28,7 @@ import com.cims.ue.core.message.MessageEntry
 import com.cims.ue.core.message.MessageStore
 import com.cims.ue.core.message.MsgDirection
 import com.cims.ue.core.message.SendState
+import com.cims.ue.core.power.PartialWakeLock
 import com.cims.ue.core.sip.CallState
 import com.cims.ue.core.sip.PjLib
 import com.cims.ue.core.sip.RegState
@@ -79,6 +80,9 @@ class SipService : Service() {
     private val binder = LocalBinder()
     override fun onBind(intent: Intent?): IBinder = binder
 
+    /** 로그인 중 CPU 를 재우지 않는다 — keepalive 가 멈추면 NAT 포트가 유실된다(core/power/PartialWakeLock). */
+    private val wakeLock by lazy { PartialWakeLock(this, "cims:volte") }
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -86,6 +90,7 @@ class SipService : Service() {
         PjLib.cameraManager = getSystemService(Context.CAMERA_SERVICE) as? CameraManager
         createChannel()
         startForegroundCompat(buildNotification("CIMS VoLTE", "시작 중…"))
+        wakeLock.acquire()
         registerNetworkCallback()
         registerMicHandoffReceiver()
     }
@@ -597,6 +602,7 @@ class SipService : Service() {
 
     override fun onDestroy() {
         instance = null
+        wakeLock.release()
         stopRinging()
         runCatching { unregisterReceiver(micHandoffReceiver) }
         mainHandler.removeCallbacks(micResumeWatchdog)

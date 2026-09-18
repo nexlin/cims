@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.cims.ue.core.config.ConfigStore
+import com.cims.ue.core.power.PartialWakeLock
 import com.cims.ue.ptt.csc.CscConfig
 import com.cims.ue.ptt.mcdata.McDataCodec
 import kotlinx.coroutines.CoroutineScope
@@ -286,11 +287,15 @@ class PttService : Service() {
         }
     }
 
+    /** 로그인 중 CPU 를 재우지 않는다 — keepalive 가 멈추면 NAT 포트가 유실된다(core/power/PartialWakeLock). */
+    private val wakeLock by lazy { PartialWakeLock(this, "cims:ptt") }
+
     override fun onCreate() {
         super.onCreate()
         instance = this
         createChannel()
         startForegroundCompat(notification("CIMS PTT", "시작 중…"))
+        wakeLock.acquire()
         runCatching {
             if (Build.VERSION.SDK_INT >= 33)
                 registerReceiver(vendorKeyReceiver, VendorPttReceiver.filter(), RECEIVER_EXPORTED)
@@ -584,6 +589,7 @@ class PttService : Service() {
 
     override fun onDestroy() {
         instance = null
+        wakeLock.release()
         runCatching { unregisterReceiver(vendorKeyReceiver) }
         runCatching { unregisterReceiver(routeHandoffReceiver) }
         mainHandler.removeCallbacks(routeResumeWatchdog)

@@ -282,6 +282,10 @@ UeForegroundService  ─ 프로세스 상주. 알림·wakelock. 여기서 CimsUe
 ```
 
 - **`DispatchSession` 은 Service 수명**을 산다. Activity 가 죽었다 살아나도 세션·등록은 유지된다.
+- **Doze 는 이 서비스를 건드리지 못해야 한다.** `UeForegroundService` 가 wakelock 을 상시 잡아 CPU 를 재우지
+  않고, 앱은 첫 진입의 권한 답 뒤에 배터리 최적화 예외를 요청한다(`sdk/platform/BatteryExemption.requestOnce`,
+  시스템 동의 다이얼로그). 예외가 없으면 Doze 가 wakelock 을 무시하므로 둘은 세트다. `:core` 앱들과 같은
+  계약([android_ue_client.md §8](android_ue_client.md#8-안드로이드-런타임-설계)).
   세션의 준비·교체는 `DispatchService.sessionFlow` 로 **관측 가능하게** 낸다 — 정적 필드만으로는 화면이
   Service 보다 먼저 서면 재구성이 걸리지 않아 대기 화면에 머무른다. 세션이 바뀌면 화면은 패널 VM 을 버리고
   새 세션에 다시 붙는다(옛 세션을 참조한 채 남지 않게).

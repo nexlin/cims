@@ -7,6 +7,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import com.cims.ue.core.power.BatteryExemption
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
@@ -132,6 +133,9 @@ class LoginActivity : ComponentActivity() {
                     loggedInUser.value = account.name
                     startCompanionServices()
                     onResult(true, "로그인 성공 — 계정이 등록되었습니다")
+                    // 토큰 갱신(인증기)이 이 프로세스에서 돈다 — 오너앱이 Doze 예외가 아니면 대기모드에서
+                    //   갱신이 망 차단에 걸린다. 로그인 성공 직후가 물을 자리다(android_ue_provisioning.md §5).
+                    BatteryExemption.requestOnce(this@LoginActivity)
                     finish()
                 }
             } catch (e: Exception) {

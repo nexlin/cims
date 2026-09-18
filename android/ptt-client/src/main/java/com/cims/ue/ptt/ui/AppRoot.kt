@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.cims.ue.core.power.BatteryExemption
 import com.cims.ue.core.sip.RegState
 import com.cims.ue.core.sip.SipController
 import com.cims.ue.ptt.GroupCallState
@@ -139,6 +140,7 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
     // 마이크/알림 권한 — 홈 진입 시 1회 요청
     val perm = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         svc?.ensureRegistered()
+        BatteryExemption.requestOnceWithOwner(context)   // 권한 답 뒤에 — 시스템 다이얼로그가 겹치지 않게
     }
 
     var nav by remember { mutableStateOf<Nav>(Nav.Splash) }
@@ -151,6 +153,9 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
                 add(Manifest.permission.RECORD_AUDIO)
                 if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
             }.toTypedArray())
+        } else if (nav is Nav.Home) {
+            // 배터리 최적화 예외 — Doze 가 망·알람·wakelock 을 막지 않게. 자기 앱 + 오너앱(cims, 토큰 갱신 프로세스).
+            BatteryExemption.requestOnceWithOwner(context)
         }
     }
 

@@ -7,6 +7,8 @@ package com.cims.ue.dispatch.ui
 import androidx.compose.material.icons.filled.Search
 import android.Manifest
 import android.os.Build
+import androidx.compose.ui.platform.LocalContext
+import com.cims.ue.sdk.platform.BatteryExemption
 import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
@@ -82,7 +84,11 @@ private fun Root(vm: MainViewModel, onShutdown: () -> Unit) {
     val state by (vm.state ?: return Waiting()).collectAsStateWithLifecycle()
 
     // 알림·마이크 권한 — 등록 유지 서비스와 발언에 필요하다.
-    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
+    //   답이 오면 배터리 최적화 예외도 묻는다 — Doze 가 망·알람·wakelock 을 막지 않게(§6.1).
+    val context = LocalContext.current
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        BatteryExemption.requestOnce(context)
+    }
     LaunchedEffect(Unit) {
         val want = buildList {
             add(Manifest.permission.RECORD_AUDIO)
