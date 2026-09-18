@@ -303,6 +303,9 @@ public:
      *  (realm 결박) 우선, 없으면 MD5(authId:realm:pwd). 1회만 재시도. */
     bool _BuildDigestCredential(const char* pszMethod, const std::string& strResourceAor, const CSipChallenge& clsCh,
                                 CSipCredential& clsCred);
+    struct SdsTx;   // 아래 public 정의
+    /** SDS MESSAGE 를 (다시) 보낸다 — pclsCred 가 있으면 401/407 재전송(CSeq+1, 같은 Call-ID/From-tag). */
+    void _SendSdsMessage(const std::string& strCallId, SdsTx& tx, const CSipCredential* pclsCred, bool bProxy);
     /** conference 구독(SubscribeConference)의 최종 응답 상태 — 0=대기. TS 24.379 §10.1.3.4.1 인가 판정값
      *  (범위 안 200 / 밖 403 Warning 138). m_strConfSubWarning = 거절 응답의 Warning 헤더 값. */
     std::atomic<int>  m_iConfSubStatus{0};
@@ -339,6 +342,19 @@ public:
     long long    m_tAffStartMs = 0;
     void SendPttRequest();
     void SendPttRelease();
+
+    // ── MCData SDS(TS 24.282 §15 — SIP MESSAGE multipart/mixed, cspsim/McDataSds.h) — 계측기 단계 sds_send/sds_recv ──
+    /** SDS 송신 — groupId 가 있으면 그룹 SDS(Request-URI sip:<gid>@domain, request-type group-sds), 아니면 toUser 에 1:1(one-to-one-sds).
+     *  bRequestDelivery = disposition DELIVERY 요청(수신 단말이 SDS NOTIFICATION 을 되보낸다). 반환 = message ID(hex32), 실패면 빈 문자열.
+     *  최종 응답은 관측자 OnSdsResponse(401 이면 Digest 로 1회 재전송 뒤). */
+    std::string SendSds(const std::string& toUser, const std::string& groupId, const std::string& text, bool bRequestDelivery);
+    /** SDS NOTIFICATION(delivered 등)을 원 발신자에게 1:1 MESSAGE 로. 수신 SDS 가 disposition 을 요청하면 자동으로 낸다(m_bSdsAutoDelivered). */
+    bool SendSdsNotification(const std::string& toUser, const std::string& strConvId, const std::string& strMsgId, int iNotifType);
+    bool m_bSdsAutoDelivered = true;
+    struct SdsTx { std::string msgId, toUser, groupId, text, convId; bool delivery = false; long long tSendMs = 0; int seq = 1; std::string fromTag; bool authRetried = false; long long timeSec = 0; };
+    std::map<std::string, SdsTx> m_mapSdsTx;   // Call-ID → 송신 중 SDS(응답 대기·401 재전송 재료)
+    std::atomic<int> m_iSdsRecv{0};
+    std::atomic<int> m_iSdsNotifRecv{0};
 
     // ISipStackCallBack (SUBSCRIBE/NOTIFY 처리)
     virtual bool RecvRequest(int iThreadId, CSipMessage* pclsMessage);

@@ -805,6 +805,8 @@ class RunDriver(threading.Thread):
                   'join_tx', 'join_ok', 'join_ssrc2', 'ringing_leg_cancelled', 'subscribe_tx', 'notify_rx', 'publish_tx',
                   # RFC 6076 SEER/ISA 원천 · RTCP 수신 통계
                   'invite_tx', 'seer_ok', 'isa_fail', 'rtcp_rx', 'rtcp_rr_rx',
+                  # MCData SDS(TS 24.282) — 송신·그룹 송신·도착·disposition 요청/회신·통지 수신
+                  'sds_tx', 'sds_group_tx', 'sds_rx', 'sds_disposition_req', 'sds_disposition_rx', 'sds_notif_rx',
                   # 실단말(real-ue, §3.3) — 실스택 leg 수·RTP 카운터·표본 없음·프로세스 종료
                   'real_legs', 'real_rtp_tx', 'real_rtp_rx', 'real_rtp_lost', 'real_rtp_silent_legs', 'real_rtp_nosample', 'real_ue_exit',
                   # 영상(invite.media.video) — 오퍼에 m=video 를 실은 수·활성 answer·워커에 비디오 파일이 없어 오디오만 나간 수
@@ -819,7 +821,7 @@ class RunDriver(threading.Thread):
                 continue
             if c.get(den):
                 out[name] = 100.0 * c.get(num, 0) / c[den]
-        for pref in ('refer_codes.', 'subscribe_codes.', 'publish_codes.'):
+        for pref in ('refer_codes.', 'subscribe_codes.', 'publish_codes.', 'sds_codes.'):
             codes = ','.join(f'{k[len(pref):]}:{v}' for k, v in sorted(c.items()) if k.startswith(pref))
             if codes:
                 out[pref[:-1]] = codes
@@ -830,7 +832,7 @@ class RunDriver(threading.Thread):
             out['real_rtp_loss_pct'] = 100.0 * c.get('real_rtp_lost', 0) / (c.get('real_rtp_rx', 0) + c.get('real_rtp_lost', 0))
         for name in ('rrd_ms', 'srd_ms', 'sdd_ms', 'jitter_ms', 'sdt_s',
                      'group_fanout_ms', 'floor_grant_ms', 'floor_taken_ms', 'floor_queue_ms', 'floor_idle_ms', 'affiliate_ms',
-                     'real_srd_ms', 'real_jitter_ms'):
+                     'real_srd_ms', 'real_jitter_ms', 'sds_delay_ms'):
             h = t.get(name)
             if h:
                 out[f'{name}_p50'] = h.get('p50')

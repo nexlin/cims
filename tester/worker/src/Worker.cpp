@@ -159,6 +159,18 @@ void Worker::OnAffiliate(SimSession* s, const std::string& group, int st, long l
     std::lock_guard<std::mutex> lk(m_evMtx);
     m_events.push_back({ Event::AFFILIATE, s, nullptr, st, ms, "", group, deaff });
 }
+void Worker::OnSdsResponse(SimSession* s, const std::string& msgId, int st, long long ms) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::SDS_RESP, s, nullptr, st, ms, "", msgId, false });
+}
+void Worker::OnSdsRecv(SimSession* s, const std::string& from, const std::string& msgId, const std::string& group, const std::string& /*text*/, int dispReq) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::SDS_RECV, s, nullptr, dispReq, 0, from, msgId, false, false, 0, 0, group });
+}
+void Worker::OnSdsNotification(SimSession* s, const std::string& msgId, int notifType) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::SDS_NOTIF, s, nullptr, notifType, 0, "", msgId, false });
+}
 void Worker::OnSubscribeResponse(SimSession* s, const std::string& event, const std::string& resource, int st) {
     std::lock_guard<std::mutex> lk(m_evMtx);
     m_events.push_back({ Event::SUBSCRIBE_RESP, s, nullptr, st, 0, "", resource, false, false, 0, 0, event });
@@ -659,7 +671,7 @@ HttpResponse Worker::poolDelete(const std::string& name) {
 static const char* kSupported[] = { "register", "deregister", "invite", "answer", "reject", "bye",
                                     "media_hold", "wait", "expect", "progress", "hold", "resume", "dtmf", "refer",
                                     "media_send", "media_stop", "group_call", "floor_request", "floor_release",
-                                    "pickup", "subscribe", "replaces", "join", "publish" };
+                                    "pickup", "subscribe", "replaces", "join", "publish", "sds_send", "sds_recv" };
 
 static int rtpModeOf(const Json& media) {
     std::string m = media["rtp"].asString("auto");
@@ -718,6 +730,7 @@ HttpResponse Worker::runStart(const Json& d) {
         cs.payload = s["payload"].asString();
         cs.sample = s["sample"].asString();
         cs.loop = s["loop"].asBool(true);
+        cs.disposition = s["disposition"].asBool(false);
         cs.media = s["media"];
         cs.expect = s["expect"];
         bool ok = false;
@@ -728,7 +741,7 @@ HttpResponse Worker::runStart(const Json& d) {
     if (!unsupported.empty()) {
         std::string list;
         for (auto& u : unsupported) list += (list.empty() ? "" : ",") + u;
-        return errResp(400, "unsupported_step", list + " — 워커는 register/invite/answer/reject/bye/media_hold/wait/expect/progress/hold/resume/dtmf/refer/media_send/media_stop/group_call/floor_request/floor_release/pickup/subscribe/replaces/join/publish 만");
+        return errResp(400, "unsupported_step", list + " — 워커는 register/invite/answer/reject/bye/media_hold/wait/expect/progress/hold/resume/dtmf/refer/media_send/media_stop/group_call/floor_request/floor_release/pickup/subscribe/replaces/join/publish/sds_send/sds_recv 만");
     }
     if (spec->steps.empty()) return errResp(400, "steps_required");
     // 샘플 라이브러리(§4) — 컨트롤러가 토폴로지 media.samples 에서 이 시나리오가 참조하는 것만 보낸다. 파일은 지금 확인한다
@@ -767,7 +780,8 @@ HttpResponse Worker::runStart(const Json& d) {
     m_groupBound = false;
     m_groupPool.clear(); m_singleRoles.clear(); m_usedMulti.clear(); m_groupNames.clear(); m_guestRoles.clear();
     m_groupCursor = 0;
-    for (auto& st : m_body) if (st.step == "group_call") { m_groupBound = true; break; }
+    // 그룹 SDS(sds_send 에 to 없음 = 그룹 대상)도 그룹 단위 인스턴스 — 수신자는 multi 역할(그룹의 나머지 멤버)
+    for (auto& st : m_body) if (st.step == "group_call" || (st.step == "sds_send" && st.to.empty())) { m_groupBound = true; break; }
     if (m_groupBound) {
         m_guestRoles = spec->guestRoles;
         auto isMulti = [&](const std::string& r) { return std::find(spec->multiRoles.begin(), spec->multiRoles.end(), r) != spec->multiRoles.end(); };
@@ -1370,6 +1384,37 @@ void Worker::onEvent(const Event& e) {
             else { emitEvent("REFER expected " + std::to_string(want) + " got " + std::to_string(e.status), ep, "refer", e.status, e.callId);
                    finishInstance(*in, true, "refer " + std::to_string(e.status), now); }
         }
+        break;
+    case Event::SDS_RESP:
+        // sds_send 의 MESSAGE 최종 응답 — 기대 코드(기본 200)와 다르면 인스턴스 실패. 응답이 오면 다음 단계(sds_recv 가 수신을 기다린다)
+        m_metrics.counter("sds_codes." + std::to_string(e.status));
+        if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "sdsresp" && e.user == in->sdsMsgId) {
+            int want = in->expectCode > 0 ? in->expectCode : 200;
+            if (e.status != want) {
+                emitEvent("SDS MESSAGE expected " + std::to_string(want) + " got " + std::to_string(e.status), ep, "sds_send", e.status);
+                finishInstance(*in, true, "sds_send " + std::to_string(e.status), now);
+                break;
+            }
+            advance(*in, now);
+        }
+        break;
+    case Event::SDS_RECV: {
+        // SDS 도착 — 단말이 받은 msgId 를 기억한다(sds_recv 단계가 나중에 진입해도 찾는다). 자기 인스턴스가 기다리는 msgId 면 지연 표본·대기 해제
+        m_metrics.counter("sds_rx");
+        if (ep->sdsRx.size() > 64) ep->sdsRx.erase(ep->sdsRx.begin());
+        ep->sdsRx.push_back(e.user);
+        if (in && e.user == in->sdsMsgId && in->sdsSendMs > 0) m_metrics.timer("sds_delay_ms", (double)(now - in->sdsSendMs));
+        if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "sdsrecv" && e.user == in->sdsMsgId) {
+            auto& w = in->sdsWait;
+            w.erase(std::remove(w.begin(), w.end(), ep), w.end());
+            if (w.empty()) advance(*in, now);
+        }
+        break;
+    }
+    case Event::SDS_NOTIF:
+        // 자기 SDS 의 SDS NOTIFICATION(delivered) — disposition 회신율의 분자(sds_disposition_pct)
+        m_metrics.counter("sds_notif_rx");
+        if (e.status == 2 && in && e.user == in->sdsMsgId && in->sdsDisposition) m_metrics.counter("sds_disposition_rx");
         break;
     case Event::SUBSCRIBE_RESP:
         m_metrics.counter("subscribe_codes." + std::to_string(e.status));
@@ -2548,6 +2593,47 @@ void Worker::execStep(Instance& in, long long now) {
             in.phase = Instance::WAIT_EVENT;
             in.awaitKind = "pubresp";
             in.deadlineMs = now + m_cfg.inviteTimeoutMs;
+            return;
+        }
+        if (st.step == "sds_send") {
+            // MCData SDS(TS 24.282) — from 이 to 역할에 1:1 SDS 또는(to 없음) 인스턴스의 그룹(또는 step.group)에 그룹 SDS 를 낸다. payload = 본문.
+            //   완료 = MESSAGE 최종 응답(expect.code, 기본 200). disposition: true 면 delivery 요청(수신 단말이 NOTIFICATION 회신 → sds_disposition_pct)
+            std::string role = st.from.empty() ? (st.who.empty() ? "" : st.who[0]) : st.from;
+            Endpoint* from = in.actors[role];
+            if (!from) { finishInstance(in, true, "sds_send: from role missing", now); return; }
+            if (!from->isSim() || !from->registered) { finishInstance(in, true, "sds_send: " + role + " 은 등록된 가상 UE 여야 한다", now); return; }
+            Endpoint* to = st.to.empty() ? nullptr : in.actors[st.to];
+            if (!st.to.empty() && !to) { finishInstance(in, true, "sds_send: to role missing", now); return; }
+            std::string group = to ? "" : (st.group.empty() ? in.group : st.group);
+            if (!to && group.empty()) { finishInstance(in, true, "sds_send: to 역할 또는 그룹(그룹 세션·group) 이 필요하다", now); return; }
+            if (st.payload.empty()) { finishInstance(in, true, "sds_send: payload(본문) required", now); return; }
+            std::string msgId = from->s->SendSds(to ? to->id.user : "", group, st.payload, st.disposition);
+            if (msgId.empty()) { finishInstance(in, true, "sds_send: 스택 거절", now); return; }
+            in.sdsMsgId = msgId;
+            in.sdsSendMs = now;
+            in.sdsDisposition = st.disposition;
+            in.expectCode = (int)st.expect["code"].asInt(0);
+            m_metrics.counter("sds_tx");
+            if (!group.empty()) m_metrics.counter("sds_group_tx");
+            if (st.disposition) m_metrics.counter("sds_disposition_req");
+            in.phase = Instance::WAIT_EVENT;
+            in.awaitKind = "sdsresp";
+            in.deadlineMs = now + m_cfg.inviteTimeoutMs;
+            return;
+        }
+        if (st.step == "sds_recv") {
+            // who 전원이 인스턴스의 마지막 SDS(msgId)를 받을 때까지 — 이미 받은 단말은 바로 지운다(단계 진입 전 도착)
+            if (in.sdsMsgId.empty()) { finishInstance(in, true, "sds_recv: 앞선 sds_send 가 없다", now); return; }
+            in.sdsWait.clear();
+            for (auto& role : st.who)
+                for (auto* ep : roleEndpoints(in, role)) {
+                    if (!ep->isSim()) { finishInstance(in, true, "sds_recv: " + role + " 은 가상 UE 여야 한다", now); return; }
+                    if (std::find(ep->sdsRx.begin(), ep->sdsRx.end(), in.sdsMsgId) == ep->sdsRx.end()) in.sdsWait.push_back(ep);
+                }
+            if (in.sdsWait.empty()) { in.stepIdx++; continue; }
+            in.phase = Instance::WAIT_EVENT;
+            in.awaitKind = "sdsrecv";
+            in.deadlineMs = now + std::max(st.afterMs, 0) + m_cfg.inviteTimeoutMs;
             return;
         }
         if (st.step == "expect") { in.stepIdx++; continue; }

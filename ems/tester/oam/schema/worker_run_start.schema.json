@@ -21,6 +21,18 @@
           "default": null,
           "title": "Cause"
         },
+        "disposition": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition"
+        },
         "expect": {
           "additionalProperties": {
             "anyOf": [

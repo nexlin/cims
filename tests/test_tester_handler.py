@@ -321,7 +321,7 @@ class PlanAndVocab(unittest.TestCase):
         self.assertTrue(r.body['steps']['register']['supported'])
         self.assertTrue(r.body['steps']['group_call']['supported'])
         self.assertEqual(r.body['steps']['floor_request']['kind'], 'ptt')
-        self.assertFalse(r.body['steps']['sds_send']['supported'])
+        self.assertTrue(r.body['steps']['sds_send']['supported'])   # MCData SDS — libcsim MESSAGE 경로
         self.assertIsNone(r.body['steps']['progress']['kind'])   # UE 측 183 도 허용 — 게이트 없음
         self.assertEqual(r.body['steps']['replaces']['kind'], 'ue')
         self.assertIn('srd_ms', r.body['metrics'])

@@ -1,0 +1,14 @@
+# MCData 그룹 SDS(TS 24.282 §15, TS 24.481 그룹 게이트) — 그룹 세션 시나리오(인스턴스 = MCPTT 그룹 하나): t 가 그룹 URI(sip:<gid>@domain,
+#   mcdata-info group-sds)로 MESSAGE 를 내면 CSP MCDATA-AS 가 멤버 전원에 fan-out 한다. l(multi 역할 = 그룹의 나머지 멤버) 전원이 받을 때까지 기다린다.
+#   그룹은 인스턴스가 잡은 affiliation 그룹(sds_send 에 to 없음) — 통화 없이도 그룹 단위 인스턴스가 된다. 비멤버 발신은 CSP 게이트가 403 으로 거절(expect.code).
+id: MCDATA-SDS-GROUP
+title: MCData 그룹 SDS — fan-out 도달 · delivered 통지
+tags: [mcdata, sds, ptt]
+roles:
+  t: { pool: ptt_ue }
+  l: { pool: ptt_ue, multi: true }
+flow:
+  - { step: register, who: [t, l], expect: { code: 200 } }
+  - { step: sds_send, from: t, payload: "group sds from tester", disposition: true, expect: { code: 200 } }
+  - { step: sds_recv, who: [l], expect: { sds_delay_ms: { p95: 800 } } }
+  - { step: wait, seconds: 1, expect: { sds_disposition_pct: 100 } }

@@ -1,0 +1,14 @@
+# MCData 1:1 SDS(TS 24.282 §15) — a 가 b 에게 SIP MESSAGE(multipart/mixed: mcdata-info one-to-one-sds + SDS SIGNALLING PAYLOAD + DATA PAYLOAD TEXT)를 낸다.
+#   CSP 는 등록 바인딩으로 본문을 그대로 전달한다(mcdata_messaging.md §7 — 1:1 은 Request-URI 상대 AoR 직행). disposition: true 면 b 가
+#   SDS NOTIFICATION(DELIVERED)을 a 에게 1:1 로 되보내 sds_disposition_pct 가 100 이 된다. sds_delay_ms = a 송신 → b 도착.
+id: MCDATA-SDS-1TO1
+title: MCData 1:1 SDS — MESSAGE 전달 · delivered 통지
+tags: [mcdata, sds]
+roles:
+  a: { pool: volte_ue }
+  b: { pool: volte_ue }
+flow:
+  - { step: register, who: [a, b], expect: { code: 200 } }
+  - { step: sds_send, from: a, to: b, payload: "hello from tester", disposition: true, expect: { code: 200 } }
+  - { step: sds_recv, who: [b], expect: { sds_delay_ms: { p95: 500 } } }
+  - { step: wait, seconds: 1, expect: { sds_disposition_pct: 100 } }

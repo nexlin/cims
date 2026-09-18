@@ -43,6 +43,14 @@ struct ICsimObserver {
     /** floor 제어 메시지 수신(TS 24.380 §8.2 subtype: 1 Granted · 2 Taken · 3 Deny · 5 Idle · 6 Revoke · 9 Queue Position Info).
      *  tUs = 수신 시각(µs, system_clock) — floor 수신 스레드에서 불린다. 지연 지표는 스케줄러 틱이 아니라 이 시각으로 잰다. */
     virtual void OnFloor(SimSession* /*s*/, int /*iSubtype*/, long long /*tUs*/) {}
+    // ── MCData SDS(TS 24.282 — SIP MESSAGE multipart) — 계측기 워커 단계 sds_send/sds_recv (test_instrument.md §4) ──
+    /** 자기 SDS MESSAGE 의 최종 응답(401 Digest 재전송 뒤의 최종만) — msMs = 송신 → 응답. */
+    virtual void OnSdsResponse(SimSession* /*s*/, const std::string& /*msgId*/, int /*iSipStatus*/, long long /*ms*/) {}
+    /** SDS MESSAGE 수신(200 은 libcsim 이 낸다) — from = 발신자 사용자부, group = 그룹 SDS 면 그룹 id(1:1 이면 빈 값), dispReq = disposition 요청(0/1/2/3). */
+    virtual void OnSdsRecv(SimSession* /*s*/, const std::string& /*from*/, const std::string& /*msgId*/, const std::string& /*group*/,
+                           const std::string& /*text*/, int /*dispReq*/) {}
+    /** 자기가 보낸 SDS 에 대한 SDS NOTIFICATION 수신(notifType 2 = delivered) — disposition 회신율의 분자. */
+    virtual void OnSdsNotification(SimSession* /*s*/, const std::string& /*msgId*/, int /*notifType*/) {}
 };
 
 #endif

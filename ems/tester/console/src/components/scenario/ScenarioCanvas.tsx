@@ -168,6 +168,7 @@ export default function ScenarioCanvas({ doc, onChange, onCommit, topologies, to
       case 'reject': return `${s.payload ?? '4xx'} · ${s.after_ms ?? 0} ms${s.cause ? ` · Q.850 ${s.cause}` : ''}`
       case 'bye': return `BYE${s.cause ? ` · Q.850 ${s.cause}` : ''}`
       case 'dtmf': return `DTMF ${s.payload ?? ''}`; case 'progress': return '183 + SDP'; case 'register': return 'REGISTER'; case 'deregister': return 'Expires: 0'
+      case 'sds_send': return `SDS ${s.to ? `→ ${s.to}` : `그룹${(s as Step).group ? ` ${(s as Step).group}` : ''}`}${s.disposition ? ' · delivery' : ''}`; case 'sds_recv': return 'SDS 도착 대기'
       case 'refer': return 'REFER'
       case 'pickup': return `픽업 ${s.payload ?? ''}${s.to ? ` → ${s.to}` : ''}`
       case 'replaces': return 'INVITE-Replaces'; case 'join': return 'INVITE-Join (recvonly)'
@@ -381,6 +382,7 @@ function ProcedureTable({ doc, vocab, plan }: { doc: Doc; vocab: ScenarioVocab |
       case 'answer': return `${a} 착신 ${(s as Step).after_ms ?? 0} ms 뒤 응답`; case 'reject': return `${a} ${s.payload ?? ''} 거절${(s as Step).cause ? ` (Q.850 ${(s as Step).cause})` : ''}`
       case 'bye': return `${a} 종료 (BYE${(s as Step).cause ? `, Q.850 ${(s as Step).cause}` : ''})`; case 'media_hold': return `통화 유지 ${(s as Step).seconds} s`; case 'wait': return `대기 ${(s as Step).seconds} s`
       case 'dtmf': return `${a} DTMF ${s.payload} 송신`; case 'refer': return `${s.from} 가 ${s.to} 로 전달 (REFER)`; case 'progress': return `${a} 183 + SDP (early media)`
+      case 'sds_send': return `${a} 가 ${s.to ?? '그룹'} 에 MCData SDS MESSAGE 송신${s.disposition ? ' (delivery 요청)' : ''}`; case 'sds_recv': return `${a} 가 SDS 를 받을 때까지`
       case 'hold': return `${a} 보류 (re-INVITE sendonly)`; case 'resume': return `${a} 재개`
       case 'media_send': return `${a} RTP 송출 시작 (${s.sample ? `샘플 ${s.sample}` : '기본 원천'}${s.loop === false ? ', 한 번 재생' : ''})`; case 'media_stop': return `${a} RTP 송출 정지 (수신은 계속)`
       case 'pickup': return `${a} 당겨받기 — 피처코드 ${s.payload ?? '?'}${(s as Step).to ? ` + ${(s as Step).to} 번호 (지정 픽업)` : ' (그룹 픽업)'}`
@@ -561,6 +563,9 @@ function Inspector({ doc, sel, setSel, mutate, topo, vocab, issues, canWrite, so
     </div>}
     {s.step === 'media_send' && <SampleFields sample={s.sample} loop={s.loop} samples={sampleIds} disabled={ro} onSample={v => ST(x => { if (v) x.sample = v; else delete x.sample })} onLoop={v => ST(x => { if (v) delete x.loop; else x.loop = false })} />}
     {s.step === 'dtmf' && <F label="payload (0-9 * # A-D)"><Txt value={s.payload} mono disabled={ro} onCommit={v => ST(x => { x.payload = v })} /></F>}
+    {s.step === 'sds_send' && <><F label="SDS 본문 (payload)" help="TS 24.282 DATA PAYLOAD TEXT. to 역할 = 1:1 · to 없음 = 그룹 SDS(인스턴스가 잡은 그룹 또는 group — 수신자는 multi 역할)"><Txt value={s.payload} disabled={ro} onCommit={v => ST(x => { x.payload = v })} /></F>
+      <F label="group" help="그룹 SDS 의 그룹 id 직접 지정 — 생략 = 인스턴스가 잡은 affiliation 그룹(to 가 있으면 무시)"><Txt value={(s as Step).group} mono placeholder="(인스턴스 그룹)" disabled={ro} onCommit={v => ST(x => { if (v.trim()) (x as Step).group = v.trim(); else delete (x as Step).group })} /></F>
+      <label className="inline-flex items-center gap-1"><Checkbox checked={!!s.disposition} disabled={ro} onCheckedChange={v => ST(x => { if (v === true) x.disposition = true; else delete x.disposition })} /> disposition(delivery) 요청 — 수신 단말의 SDS NOTIFICATION 회신(sds_disposition_pct)</label></>}
     {s.step === 'reject' && <F label="응답 코드 (payload)"><Txt value={s.payload} mono placeholder="486" disabled={ro} onCommit={v => ST(x => { x.payload = v })} /></F>}
     {(s.step === 'bye' || s.step === 'reject') && <F label="cause — Reason: Q.850 (RFC 3326, 피어만)"><Sel value={s.cause != null ? String(s.cause) : ''} disabled={ro} options={Object.entries(vocab?.q850 ?? {}).map(([k, l]) => ({ v: k, l: `${k} ${l}` }))} empty="(없음)" onChange={v => ST(x => { if (v) x.cause = Number(v); else delete x.cause })} /></F>}
     {s.step === 'media_hold' && <Sec title="통화 중 동작 (during)" right={<Button variant="ghost" size="sm" disabled={ro} onClick={() => ST(x => { x.during = [...(x.during ?? []), { at_s: 0, step: 'dtmf', from: R[0], payload: '1234#' }] })}><Plus size={12} /> 동작</Button>}>

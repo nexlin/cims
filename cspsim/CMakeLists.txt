@@ -9,6 +9,7 @@ add_library(csim STATIC
     SipClientSetup.cpp
     G711.cpp
     RtpThread.cpp
+    McDataSds.cpp
 )
 target_include_directories(csim PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -54,6 +55,9 @@ target_link_libraries(csim_peer_fault_test PRIVATE csim)
 # TLS 상호인증(클라이언트 인증서 요구·제시·서버 검증) — openssl CLI 로 임시 인증서
 add_executable(csim_tls_mutual_test CsimTlsMutualTest.cpp)
 target_link_libraries(csim_tls_mutual_test PRIVATE csim)
+# MCData SDS 코덱 왕복(TS 24.282 §15 TLV·conversation ID 호환)
+add_executable(csim_sds_test CsimSdsTest.cpp)
+target_link_libraries(csim_sds_test PRIVATE csim)
 target_link_libraries(cspsim PRIVATE csim mariadb)
 
 target_include_directories(cspsim PRIVATE

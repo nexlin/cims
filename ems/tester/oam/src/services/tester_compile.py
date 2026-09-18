@@ -229,10 +229,10 @@ def compile_steps(scenario: Scenario, bindings: Dict[str, object]) -> List[dict]
         raise CompileError(f'워커가 지원하지 않는 단계 {unsupported} — 지원: {sorted(WORKER_STEPS)}')
 
     def emit(i, step, who=None, from_=None, to=None, after_ms=0, seconds=None, media=None, group=None,
-             payload=None, cause=None, expect=None, sample=None, loop=None):
+             payload=None, cause=None, expect=None, sample=None, loop=None, disposition=None):
         cs = CompiledStep(idx=len(out), step=step, who=list(who or []), **{'from': from_}, to=to,
                           after_ms=int(after_ms or 0), seconds=seconds, media=media, group=group,
-                          payload=payload, cause=cause, sample=sample, loop=loop, expect=expect or {})
+                          payload=payload, cause=cause, sample=sample, loop=loop, disposition=disposition, expect=expect or {})
         d = cs.model_dump(by_alias=True, exclude_none=True)
         d['src'] = i
         out.append(d)
@@ -255,7 +255,8 @@ def compile_steps(scenario: Scenario, bindings: Dict[str, object]) -> List[dict]
         # to 가 역할이 아닌 다이얼 리터럴(${pilot} 대표번호)이면 바인딩을 푼다 — 역할 이름은 그대로
         emit(i, s.step, who=s.who, from_=s.from_, to=bind_str(s.to, bindings) if s.to not in scenario.roles else s.to,
              after_ms=s.after_ms, seconds=seconds, media=s.media,
-             group=s.group, payload=bind_str(s.payload, bindings), cause=s.cause, expect=s.expect, sample=s.sample, loop=s.loop)
+             group=s.group, payload=bind_str(s.payload, bindings), cause=s.cause, expect=s.expect, sample=s.sample, loop=s.loop,
+             disposition=s.disposition)
     return out
 
 

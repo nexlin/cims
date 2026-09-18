@@ -245,11 +245,22 @@ class Compile(unittest.TestCase):
         self.assertEqual(plan['steps'][3].get('expect', {}), {})
         self.assertEqual(plan['steps'][5]['expect'], {'rtp_loss_pct': {'max': 1}})
         self.assertNotIn('src', plan['workers']['w1']['run']['steps'][0])      # 워커 계약에는 src 없음
-        # 워커가 지원하지 않는 단계(sds_send — MCData 미구현)는 컴파일 오류
-        sc2 = M.Scenario.model_validate({'id': 'UT-NS', 'roles': {'a': {'pool': 'volte_ue'}},
-                                         'flow': [{'step': 'sds_send', 'from': 'a'}]})
-        with self.assertRaises(C.CompileError):
-            C.compile_run('r3', sc2, topo, topo_doc, None, {}, TW.discover(topo_doc), lambda w: 'x:1', 1, None)
+        # MCData SDS 단계(sds_send/sds_recv) — 1:1(to) 은 일반 인스턴스, disposition 이 CompiledStep 으로 내려간다
+        sc2 = M.Scenario.model_validate({'id': 'UT-SDS', 'roles': {'a': {'pool': 'volte_ue'}, 'b': {'pool': 'volte_ue'}},
+                                         'flow': [{'step': 'register', 'who': ['a', 'b']}, {'step': 'sds_send', 'from': 'a', 'to': 'b', 'payload': 'hi', 'disposition': True},
+                                                  {'step': 'sds_recv', 'who': ['b']}]})
+        plan_sds = C.compile_run('r3', sc2, topo, topo_doc, None, {}, TW.discover(topo_doc), lambda w: 'x:1', 1, None)
+        self.assertEqual([s['step'] for s in plan_sds['steps']], ['register', 'sds_send', 'sds_recv'])
+        self.assertTrue(plan_sds['steps'][1]['disposition'])
+        self.assertFalse(sc2.is_group_session())
+        # 그룹 SDS(to 없음) = 그룹 세션 — multi 역할이 수신자, payload 는 필수
+        sc_g = M.Scenario.model_validate({'id': 'UT-SDSG', 'roles': {'t': {'pool': 'volte_ue'}, 'l': {'pool': 'volte_ue', 'multi': True}},
+                                          'flow': [{'step': 'sds_send', 'from': 't', 'payload': 'g'}, {'step': 'sds_recv', 'who': ['l']}]})
+        self.assertTrue(sc_g.is_group_session())
+        with self.assertRaises(Exception):
+            M.Scenario.model_validate({'id': 'UT-NS', 'roles': {'a': {'pool': 'volte_ue'}}, 'flow': [{'step': 'sds_send', 'from': 'a'}]})
+        with self.assertRaises(Exception):   # disposition 은 sds_send 에만
+            M.Scenario.model_validate({'id': 'UT-NS2', 'roles': {'a': {'pool': 'volte_ue'}}, 'flow': [{'step': 'register', 'who': ['a'], 'disposition': True}]})
         # pickup 의 payload(피처코드) 는 ${var} 바인딩으로 준다 — 컴파일이 문자열로 푼다(숫자 문자열도 문자열). 없으면 오류
         sc3, _, _ = S.get_scenario('VOLTE-PICKUP-GROUP')
         with self.assertRaises(C.CompileError):

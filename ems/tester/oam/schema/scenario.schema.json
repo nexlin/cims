@@ -391,6 +391,19 @@
           "description": "bye/reject 의 Reason: Q.850;cause= (RFC 3326 — MGCF 종료 사유, 16=정상 34=회선 없음)",
           "title": "Cause"
         },
+        "disposition": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "sds_send — delivery disposition 요청(TS 24.282 §9.2.2): 수신 단말이 SDS NOTIFICATION(delivered)을 되보낸다(sds_disposition_pct)",
+          "title": "Disposition"
+        },
         "during": {
           "anyOf": [
             {

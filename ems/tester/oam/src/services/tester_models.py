@@ -719,6 +719,7 @@ WORKER_STEPS = frozenset((
     'hold', 'resume', 'dtmf', 'refer', 'media_hold', 'media_send', 'media_stop', 'wait', 'expect',
     'group_call', 'floor_request', 'floor_release',
     'pickup', 'subscribe', 'replaces', 'join', 'publish',
+    'sds_send', 'sds_recv',
 ))
 # 실단말(real-ue) 역할이 행위자(from/who)가 될 수 있는 단계 — cimsue-cli drive 명령이 있는 것만(§3.3). 나머지는 컴파일 오류.
 #   빠진 것: progress(피어) · refer(실스택이 REFER 최종 응답을 이벤트로 내지 않음) · replaces/join/subscribe(dialog 학습은 실스택 앱 몫) ·
@@ -779,8 +780,8 @@ STEP_VOCAB = {
     'group_call':    {'group': 'ptt',   'actor': 'fromto',  'kind': 'ptt',      'metrics': ['code', 'srd_ms', 'group_fanout_ms', 'video_pct', 'listen_pct'], 'desc': 'PTT 그룹콜 — from 이 자기 그룹으로 INVITE, to(multi 역할) 멤버 전원 합류까지. payload listen = 그룹 밖 역할(member: false)의 a=recvonly 청취 합류(진행 중 세션에)'},
     'floor_request': {'group': 'ptt',   'actor': 'who',     'kind': 'ptt',      'metrics': ['floor_grant_ms', 'floor_taken_ms', 'floor_queue_ms', 'floor_grant_pct'], 'desc': 'Floor Request → 결과(payload: granted|denied|queued|any)'},
     'floor_release': {'group': 'ptt',   'actor': 'who',     'kind': 'ptt',      'metrics': ['floor_idle_ms'], 'desc': 'Floor Release → Idle 도달'},
-    'sds_send':      {'group': 'ptt',   'actor': 'from',    'kind': 'ue',       'metrics': ['sds_delay_ms'], 'desc': 'MCData SDS 송신'},
-    'sds_recv':      {'group': 'ptt',   'actor': 'who',     'kind': 'ue',       'metrics': ['sds_delay_ms', 'sds_disposition_pct'], 'desc': 'MCData SDS 수신 대기'},
+    'sds_send':      {'group': 'ptt',   'actor': 'fromto',  'kind': 'ue',       'metrics': ['code', 'sds_delay_ms', 'sds_disposition_pct'], 'desc': 'MCData SDS 송신(TS 24.282 SIP MESSAGE) — payload 본문, to 역할 = 1:1 · to 없음 = 그룹 SDS(인스턴스 그룹 또는 group, 수신자는 multi 역할), disposition = delivery 회신 요청. 완료 = MESSAGE 최종 응답'},
+    'sds_recv':      {'group': 'ptt',   'actor': 'who',     'kind': 'ue',       'metrics': ['sds_delay_ms'], 'desc': 'who 전원이 앞선 sds_send 의 SDS 를 받을 때까지(단계 진입 전 도착도 인정) — sds_delay_ms = 송신 → 도착'},
     'expect':        {'group': 'ctl',   'actor': 'none',    'kind': None,       'metrics': ['ser_pct', 'scr_pct', 'isa_pct'], 'desc': '누계 지표 게이트'},
 }
 for _k, _v in STEP_VOCAB.items():
@@ -865,6 +866,7 @@ RATIO_METRICS = {
     'listen_pct': ('listen_ok', 'listen_tx'),       # 확립된 청취 합류(200) / recvonly 청취 INVITE
     'retrans_rx_pct': ('invite_retrans_rx', 'peer_fault_drop'),   # 유실 주입 뒤 닿은 INVITE 재전송 벌 / 버린 벌 — 대상의 Timer A 재전송 복원력
     'thig_pct': ('thig_via_ok', 'thig_tx'),          # 응답에 토큰화 Via 가 보존된 발신 / THIG Via 를 얹은 ibcf 발신 INVITE
+    'sds_disposition_pct': ('sds_disposition_rx', 'sds_disposition_req'),   # 발신자에 닿은 SDS NOTIFICATION(delivered) / delivery 를 요청한 SDS
 }
 
 
@@ -933,6 +935,7 @@ class Step(_Strict):
     during: Optional[List[During]] = Field(default=None, description='media_hold 만 — 유지 구간 안 통화 중 동작(at_s 순)')
     sample: Optional[str] = Field(default=None, description='media_send — 샘플 id(topology.media.samples). 생략 = 풀 기본 원천')
     loop: Optional[bool] = Field(default=None, description='media_send — false 면 샘플 끝에서 송출 정지(기본 true)')
+    disposition: Optional[bool] = Field(default=None, description='sds_send — delivery disposition 요청(TS 24.282 §9.2.2): 수신 단말이 SDS NOTIFICATION(delivered)을 되보낸다(sds_disposition_pct)')
     expect: Dict[str, Expectation] = Field(default_factory=dict)
 
     @field_validator('expect')
@@ -968,6 +971,13 @@ class Step(_Strict):
         if self.step == 'dtmf':
             if not self.payload or any(c not in '0123456789*#ABCDabcd' for c in self.payload):
                 raise ValueError('dtmf 단계는 payload 에 숫자열(0-9 * # A-D)이 필요하다')
+        if self.step == 'sds_send':
+            if not self.payload:
+                raise ValueError('sds_send 단계는 payload(SDS 본문)가 필요하다')
+            if not self.from_:
+                raise ValueError('sds_send 단계는 from(발신 단말 역할)이 필요하다 — to 역할 = 1:1, to 없음 = 그룹 SDS(그룹 세션 또는 group)')
+        if self.disposition is not None and self.step != 'sds_send':
+            raise ValueError('disposition 은 sds_send 에만 둔다')
         if self.step == 'refer' and not (self.from_ and self.to):
             raise ValueError('refer 단계는 from(전달자)과 to(전달 대상 역할)가 필요하다')
         if self.step == 'group_call' and not self.from_:
@@ -1089,7 +1099,8 @@ class Scenario(_Strict):
                                      f"(RFC 4235 NOTIFY 로 대상 다이얼로그를 배운다) — {{ step: subscribe, who: [{s.from_}], to: {s.to} }}")
 
     def is_group_session(self) -> bool:
-        return any(s.step == 'group_call' for s in self.flow)
+        """인스턴스 = MCPTT 그룹 하나인 시나리오 — group_call 또는 to 없는 sds_send(그룹 SDS, 수신자 = multi 역할)."""
+        return any(s.step == 'group_call' or (s.step == 'sds_send' and not s.to and not s.group) for s in self.flow)
 
     def multi_roles(self) -> List[str]:
         return [r for r, spec in self.roles.items() if spec.multi]
@@ -1113,7 +1124,7 @@ class Scenario(_Strict):
         guests = self.guest_roles()
         if not self.is_group_session():
             if multi:
-                raise ValueError(f'roles.{multi[0]}.multi 는 group_call 이 있는 시나리오에만 둔다')
+                raise ValueError(f'roles.{multi[0]}.multi 는 group_call(또는 그룹 SDS sds_send)이 있는 시나리오에만 둔다')
             if guests:
                 raise ValueError(f'roles.{guests[0]}.member=false 는 group_call 이 있는 시나리오에만 둔다(그룹 밖 신원)')
             for i, s in enumerate(self.flow):
@@ -1292,6 +1303,7 @@ class CompiledStep(_Strict):
     cause: Optional[int] = None
     sample: Optional[str] = None
     loop: Optional[bool] = None
+    disposition: Optional[bool] = None
     expect: Dict[str, Expectation] = Field(default_factory=dict)
 
 

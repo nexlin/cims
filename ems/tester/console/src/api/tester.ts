@@ -48,6 +48,8 @@ export interface ScenarioStep {
   sample?: string
   loop?: boolean
   cause?: number
+  /** sds_send — delivery disposition 요청(수신 단말이 SDS NOTIFICATION 을 되보낸다) */
+  disposition?: boolean
   expect?: Record<string, unknown>
 }
 

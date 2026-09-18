@@ -5,6 +5,7 @@
 #include "SdpMedia.h"
 #include "SdpAttributeCrypto.h"
 #include "SipCodecTable.h"
+#include "McDataSds.h"
 #include "Log.h"
 #include <openssl/rand.h>
 #include <sstream>
@@ -855,6 +856,100 @@ void SimSession::SendEventSubscribe(const std::string& strEvent, const std::stri
     m_clsUserAgent.m_clsSipStack.SendSipMessage(pMsg);
 }
 
+void SimSession::_SendSdsMessage(const std::string& strCallId, SdsTx& tx, const CSipCredential* pclsCred, bool bProxy)
+{
+    // Request-URI/To = 그룹(sip:<gid>@domain) 또는 상대(sip:<user>@domain) — SDK Engine::sendGroupSds 와 같은 꼴(mcdata_messaging.md §7 라우팅 편차:
+    //   그룹 URI 직행 + mcdata-info). 다음 홉 = 등록 접속점(Route).
+    const std::string strTarget = tx.groupId.empty() ? tx.toUser : tx.groupId;
+    csim_mcdata::Body b = tx.groupId.empty()
+        ? csim_mcdata::buildOneToOneSds(tx.toUser, tx.text, tx.convId, tx.msgId, tx.delivery, tx.timeSec)
+        : csim_mcdata::buildGroupSds(tx.groupId, tx.text, tx.convId, tx.msgId, tx.delivery, tx.timeSec);
+    if (pclsCred) ++tx.seq;
+    CSipMessage* pMsg = new CSipMessage();
+    pMsg->m_strSipMethod = "MESSAGE";
+    pMsg->m_clsReqUri.Set("sip", strTarget.c_str(), m_strDomain.c_str(), m_iServerPort);
+    char szBranch[SIP_BRANCH_MAX_SIZE];
+    SipMakeBranch(szBranch, sizeof(szBranch));
+    pMsg->AddVia(m_clsSetup.m_strLocalIp.c_str(), m_iLocalPort, szBranch);
+    pMsg->m_clsFrom.m_clsUri.Set("sip", m_strUser.c_str(), m_strDomain.c_str(), 0);
+    pMsg->m_clsFrom.InsertParam(SIP_TAG, tx.fromTag.c_str());
+    pMsg->m_clsTo.m_clsUri.Set("sip", strTarget.c_str(), m_strDomain.c_str(), 0);
+    pMsg->m_clsCallId.Parse(strCallId.c_str(), (int)strCallId.size());
+    pMsg->m_clsCSeq.Set(tx.seq, "MESSAGE");
+    pMsg->m_iMaxForwards = 70;
+    pMsg->AddHeader("Accept-Contact", "*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata\"");
+    pMsg->AddHeader("P-Preferred-Identity", ("<sip:" + m_strUser + "@" + m_strDomain + ">").c_str());
+    // Content-Type: multipart/mixed;boundary=… — 파서가 boundary 를 파라미터로 다시 붙인다
+    std::string strBoundary;
+    size_t bpos = b.contentType.find("boundary=");
+    if (bpos != std::string::npos) strBoundary = b.contentType.substr(bpos + 9);
+    pMsg->m_clsContentType.Set("multipart", "mixed");
+    if (!strBoundary.empty()) pMsg->m_clsContentType.InsertParam("boundary", strBoundary.c_str());
+    pMsg->m_strBody = b.body;
+    pMsg->m_iContentLength = (int)b.body.size();
+    if (pclsCred) {
+        if (bProxy) pMsg->m_clsProxyAuthorizationList.push_back(*pclsCred);
+        else pMsg->m_clsAuthorizationList.push_back(*pclsCred);
+    }
+    pMsg->AddRoute(m_strServerIp.c_str(), RoutePort(), m_eTransport);
+    m_clsUserAgent.m_clsSipStack.SendSipMessage(pMsg);
+}
+
+std::string SimSession::SendSds(const std::string& toUser, const std::string& groupId, const std::string& text, bool bRequestDelivery)
+{
+    if (text.empty() || (toUser.empty() && groupId.empty())) return "";
+    static std::atomic<int> s_iSdsSerial{0};
+    char szCallId[160];
+    snprintf(szCallId, sizeof(szCallId), "sds_%s_%d_%d_%d", m_strUser.c_str(), m_iId, (int)time(NULL), ++s_iSdsSerial);
+    SdsTx tx;
+    tx.msgId = csim_mcdata::newMessageId();
+    tx.toUser = toUser;
+    tx.groupId = groupId;
+    tx.text = text;
+    tx.convId = groupId.empty() ? csim_mcdata::conversationIdOneToOne(m_strUser, toUser) : csim_mcdata::conversationIdOf(groupId);
+    tx.delivery = bRequestDelivery;
+    tx.timeSec = (long long)time(NULL);
+    tx.tSendMs = NowMs();
+    char szTag[64];
+    SipMakeTag(szTag, sizeof(szTag));
+    tx.fromTag = szTag;
+    m_mapSdsTx[szCallId] = tx;
+    _SendSdsMessage(szCallId, m_mapSdsTx[szCallId], nullptr, false);
+    return tx.msgId;
+}
+
+bool SimSession::SendSdsNotification(const std::string& toUser, const std::string& strConvId, const std::string& strMsgId, int iNotifType)
+{
+    if (toUser.empty() || strMsgId.size() != 32 || strConvId.size() != 32) return false;
+    csim_mcdata::Body b = csim_mcdata::buildNotification(strConvId, strMsgId, iNotifType, (long long)time(NULL));
+    static std::atomic<int> s_iNtfSerial{0};
+    char szCallId[160];
+    snprintf(szCallId, sizeof(szCallId), "sdsntf_%s_%d_%d_%d", m_strUser.c_str(), m_iId, (int)time(NULL), ++s_iNtfSerial);
+    CSipMessage* pMsg = new CSipMessage();
+    pMsg->m_strSipMethod = "MESSAGE";
+    pMsg->m_clsReqUri.Set("sip", toUser.c_str(), m_strDomain.c_str(), m_iServerPort);
+    char szBranch[SIP_BRANCH_MAX_SIZE];
+    SipMakeBranch(szBranch, sizeof(szBranch));
+    pMsg->AddVia(m_clsSetup.m_strLocalIp.c_str(), m_iLocalPort, szBranch);
+    char szTag[64];
+    SipMakeTag(szTag, sizeof(szTag));
+    pMsg->m_clsFrom.m_clsUri.Set("sip", m_strUser.c_str(), m_strDomain.c_str(), 0);
+    pMsg->m_clsFrom.InsertParam(SIP_TAG, szTag);
+    pMsg->m_clsTo.m_clsUri.Set("sip", toUser.c_str(), m_strDomain.c_str(), 0);
+    pMsg->m_clsCallId.Parse(szCallId, (int)strlen(szCallId));
+    pMsg->m_clsCSeq.Set(1, "MESSAGE");
+    pMsg->m_iMaxForwards = 70;
+    std::string strBoundary;
+    size_t bpos = b.contentType.find("boundary=");
+    if (bpos != std::string::npos) strBoundary = b.contentType.substr(bpos + 9);
+    pMsg->m_clsContentType.Set("multipart", "mixed");
+    if (!strBoundary.empty()) pMsg->m_clsContentType.InsertParam("boundary", strBoundary.c_str());
+    pMsg->m_strBody = b.body;
+    pMsg->m_iContentLength = (int)b.body.size();
+    pMsg->AddRoute(m_strServerIp.c_str(), RoutePort(), m_eTransport);
+    return m_clsUserAgent.m_clsSipStack.SendSipMessage(pMsg);
+}
+
 bool SimSession::_BuildDigestCredential(const char* pszMethod, const std::string& strResourceAor,
                                         const CSipChallenge& clsCh, CSipCredential& clsCred)
 {
@@ -1462,6 +1557,35 @@ bool SimSession::RecvRequest(int /*iThreadId*/, CSipMessage* pclsMessage) {
         return false;  // SipUserAgent가 계속 처리하도록
     }
 
+    // MCData SDS MESSAGE(TS 24.282) — multipart 본문에 mcdata-signalling 이 있으면 여기서 종단한다(200 + 관측자 통지 + disposition 요청 시
+    //   DELIVERED 통지 자동 회신). MCData 가 아닌 MESSAGE 는 UA(CSipClient::EventMessage)에 위임.
+    if (pclsMessage->IsMethod("MESSAGE")) {
+        std::string strCt = pclsMessage->m_clsContentType.m_strType + "/" + pclsMessage->m_clsContentType.m_strSubType;
+        const char* pszB = pclsMessage->m_clsContentType.SelectParamValue("boundary");
+        if (pszB) strCt += std::string(";boundary=") + pszB;
+        csim_mcdata::SdsMsg sds;
+        if (!csim_mcdata::parse(strCt, pclsMessage->m_strBody, sds)) return false;
+        CSipMessage* pRes = pclsMessage->CreateResponseWithToTag(200);
+        if (pRes) m_clsUserAgent.m_clsSipStack.SendSipMessage(pRes);
+        std::string strFrom = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
+        if (sds.notification) {
+            m_iSdsNotifRecv++;
+            printf("[%d] [SDS] NOTIFICATION type=%d msg=%s from=%s\n", m_iId, sds.notifType, sds.msgId.c_str(), strFrom.c_str());
+            if (m_pObserver) m_pObserver->OnSdsNotification(this, sds.msgId, sds.notifType);
+            return true;
+        }
+        m_iSdsRecv++;
+        std::string strGroup;
+        if (sds.requestType == "group-sds" && sds.requestUri.rfind("tel:", 0) == 0) strGroup = sds.requestUri.substr(4);
+        printf("[%d] [SDS] recv %s msg=%s from=%s group=%s disp=%d text=%s\n", m_iId, sds.requestType.c_str(), sds.msgId.c_str(),
+               strFrom.c_str(), strGroup.c_str(), sds.dispositionReq, sds.text.c_str());
+        if (m_pObserver) m_pObserver->OnSdsRecv(this, strFrom, sds.msgId, strGroup, sds.text, sds.dispositionReq);
+        // TS 24.282 §9.2.2 — disposition 요청(delivery)이 있으면 수신 단말이 SDS NOTIFICATION(DELIVERED)을 원 발신자에게 1:1 로
+        if (m_bSdsAutoDelivered && (sds.dispositionReq & csim_mcdata::kDispReqDelivery) && !strFrom.empty())
+            SendSdsNotification(strFrom, sds.convId, sds.msgId, csim_mcdata::kNotifDelivered);
+        return true;
+    }
+
     if (!pclsMessage->IsMethod("NOTIFY")) return false;
 
     // To 헤더의 사용자가 나인지 확인
@@ -1662,6 +1786,30 @@ bool SimSession::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
     //   affiliation E2E(멤버=200 / 비멤버=403) 를 검증 가능하게 한다.
     // REFER 최종 응답(RFC 3515) — psip 의 EventTransferResponse 는 다이얼로그가 살아 있을 때만 불린다. attended 전달에서 서버(CSP)가 전달자 leg 에
     //   BYE 를 먼저 보내고 202 를 뒤에 내면 다이얼로그가 이미 없어 응답이 버려진다 — 응답을 여기서 먼저 관측해 관측자에 올린다(전달 결과 코드의 정본).
+    // MCData SDS MESSAGE 최종 응답 — Call-ID 로 짝짓는다. 401/407 Digest 챌린지는 실 UE 처럼 1회 재전송(같은 Call-ID, CSeq+1) 뒤의 최종만 관측자에.
+    if (pclsMessage->m_clsCSeq.m_strMethod == "MESSAGE" && pclsMessage->m_iStatusCode >= 200) {
+        std::string strMsgCallId;
+        pclsMessage->GetCallId(strMsgCallId);
+        auto itTx = m_mapSdsTx.find(strMsgCallId);
+        if (itTx == m_mapSdsTx.end()) return false;
+        int iSt = pclsMessage->m_iStatusCode;
+        if ((iSt == 401 && !pclsMessage->m_clsWwwAuthenticateList.empty()) || (iSt == 407 && !pclsMessage->m_clsProxyAuthenticateList.empty())) {
+            const CSipChallenge& clsCh = iSt == 401 ? pclsMessage->m_clsWwwAuthenticateList.front() : pclsMessage->m_clsProxyAuthenticateList.front();
+            CSipCredential clsCred;
+            std::string strRes = itTx->second.groupId.empty() ? itTx->second.toUser : itTx->second.groupId;
+            if (!itTx->second.authRetried && _BuildDigestCredential("MESSAGE", strRes, clsCh, clsCred)) {
+                itTx->second.authRetried = true;
+                _SendSdsMessage(strMsgCallId, itTx->second, &clsCred, iSt == 407);
+                return true;
+            }
+        }
+        SdsTx tx = itTx->second;
+        m_mapSdsTx.erase(itTx);
+        printf("[%d] [SDS] MESSAGE %s → %d (%lld ms)\n", m_iId, tx.msgId.c_str(), iSt, NowMs() - tx.tSendMs);
+        if (m_pObserver) m_pObserver->OnSdsResponse(this, tx.msgId, iSt, NowMs() - tx.tSendMs);
+        return true;
+    }
+
     if (pclsMessage->m_clsCSeq.m_strMethod == "REFER" && pclsMessage->m_iStatusCode >= 200) {
         std::string strReferId;
         pclsMessage->GetCallId(strReferId);

@@ -319,7 +319,7 @@ class TopologyV2(unittest.TestCase):
             (doc([{'step': 'group_call', 'from': 't'}, {'step': 'answer', 'who': ['t']}]), '1:1'),
             (doc([{'step': 'group_call', 'from': 't'}], {'t': {'pool': 'p'}, 'l': {'pool': 'q', 'multi': True}}), '같은 풀'),
             (doc([{'step': 'group_call', 'from': 't'}], {'t': {'pool': 'p'}, 'l': {'pool': 'p', 'multi': True}, 'k': {'pool': 'p', 'multi': True}}), '하나만'),
-            (doc([{'step': 'invite', 'from': 't', 'to': 'l'}]), 'group_call 이 있는'),
+            (doc([{'step': 'invite', 'from': 't', 'to': 'l'}]), 'group_call(또는 그룹 SDS sds_send)이 있는'),
             (doc([{'step': 'group_call', 'to': 'l'}]), 'from'),
             (doc([{'step': 'group_call', 'from': 't'}, {'step': 'bye', 'from': 't', 'group': 'g'}]), 'group 은'),
         ):

@@ -133,6 +133,8 @@ struct Endpoint {
     bool idleSeen = false;          // 이번 floor 해제의 Idle(또는 다음 발언자의 Taken)을 봤다
     long long tReleasedMs = 0;      // 인스턴스에서 풀려난 시각 — 그룹 재사용 간격(정리 BYE 가 끝날 시간)
     bool talked = false;            // 표본 구간 안에 floor 를 가졌다 — 발언자는 수신 0 이 정상(무음 leg 로 세지 않는다)
+    // MCData SDS(TS 24.282) — 받은 SDS message ID 들(sds_recv 단계가 인스턴스의 msgId 를 여기서 찾는다 — 단계 진입 전에 도착해도 된다)
+    std::vector<std::string> sdsRx;
     bool isPtt() const;
     bool ready() const { return registered && (!isPtt() || affiliated); }
     bool isPeer() const { return kind == K_PEER; }
@@ -174,6 +176,7 @@ struct CompiledStep {
     std::string group, payload;
     std::string sample;             // media_send — 샘플 id(빈 값 = 풀 기본 원천)
     bool loop = true;               // media_send — false 면 샘플 끝에서 송출 정지
+    bool disposition = false;       // sds_send — disposition(delivery) 요청: 수신 단말이 SDS NOTIFICATION 을 되보낸다
     Json media, expect;
 };
 
@@ -218,6 +221,11 @@ struct Instance {
     bool progressTx = false;                   // 피어가 183+SDP 를 냈다 — 발신자 확립(200) 시점에 early media RTP 도달을 표본
     int expectCode = 0;                        // invite 단계 expect.code — 200 이 아니면 그 최종 응답이 성공 조건(ACL 403 등)
     bool failed = false;
+    // MCData SDS — 마지막 sds_send 의 message ID·송신 시각(sds_delay_ms 기점)·수신을 기다리는 단말(sds_recv)·disposition 요청 여부
+    std::string sdsMsgId;
+    long long sdsSendMs = 0;
+    std::vector<Endpoint*> sdsWait;
+    bool sdsDisposition = false;
 };
 
 class Worker : public ICsimObserver, public ICsimPeerObserver {
@@ -243,6 +251,9 @@ public:
     void OnDialogNotify(SimSession* s, const std::string& watched, const std::string& state, const std::string& callId) override;
     void OnCallAnswered(SimSession* s, const std::string& callId) override;
     void OnFloor(SimSession* s, int iSubtype, long long tUs) override;
+    void OnSdsResponse(SimSession* s, const std::string& msgId, int iSipStatus, long long ms) override;
+    void OnSdsRecv(SimSession* s, const std::string& from, const std::string& msgId, const std::string& group, const std::string& text, int dispReq) override;
+    void OnSdsNotification(SimSession* s, const std::string& msgId, int notifType) override;
     // ICsimPeerObserver — 스택 스레드
     void OnPeerIncoming(CsimPeer* p, const std::string& callId, const std::string& from, const std::string& to, bool hasPai) override;
     void OnPeerCallStart(CsimPeer* p, const std::string& callId, long long srdMs) override;
@@ -263,6 +274,7 @@ private:
     struct Event {
         enum Kind { REGISTER, INCOMING, CALLSTART, CALLEND, BYERESP, RING, PRACK, REINVITE, REINVITE_RESP, REFER_RESP,
                     AFFILIATE, ANSWERED, FLOOR, SUBSCRIBE_RESP, DLG_NOTIFY, FAULT_REJECT, WIRE_DROP, INVITE_RETRANS, THIG,
+                    SDS_RESP, SDS_RECV, SDS_NOTIF,   // MCData SDS — user = msgId · SDS_RECV: callId = 발신자, event = 그룹 id, status = disposition 요청 · SDS_NOTIF: status = notifType
                     REAL_CALL, REAL_STATS, REAL_EXIT } kind;   // WIRE_DROP(user = method)·INVITE_RETRANS·THIG(status = ok) = 피어 오류 주입·THIG 관측   // REAL_* = 실단말 프로세스 이벤트(onEvent 가 위의 종류로 다시 푼다)
         SimSession* s;
         CsimPeer* peer;
