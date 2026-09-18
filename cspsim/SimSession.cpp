@@ -413,25 +413,7 @@ SimSession::SimSession(int id,
     // 3GPP IMS 헤더 — 실제 단말과 동일한 패턴
     m_clsServerInfo.m_strPPreferredIdentity = "<sip:" + m_strUser + "@" + m_strDomain + ">";
     m_clsServerInfo.m_strPAccessNetworkInfo = "3GPP-E-UTRAN-FDD;utran-cell-id-3gpp=0000000000000000";
-    // Contact feature tag — PTT: mcptt, VoLTE: mmtel. MCData media plane 능력은 icsi-ref 값 목록에 mcdata.sds 를 더한다
-    //   (RFC 3840 — 한 feature tag 에 값 여럿은 따옴표 안 쉼표 목록. 서버는 icsi.mcdata 포함 여부로 MSRP 배포 대상을 고른다).
-    {
-        std::string strIcsi = m_bPttMode ? "urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt" : "urn%3Aurn-7%3A3gpp-service.ims.icsi.mmtel";
-        if (m_bMcDataMsrp) strIcsi += std::string(",") + csim_msrp::kIcsiMcDataSds;
-        if( m_bPttMode ) {
-            m_clsServerInfo.m_vecContactFeatureTags = {
-                { "+g.3gpp.icsi-ref", "\"" + strIcsi + "\"" },
-                { "+g.3gpp.mcptt",    "" },
-                { "video",            "" }
-            };
-        } else {
-            m_clsServerInfo.m_vecContactFeatureTags = {
-                { "+g.3gpp.icsi-ref", "\"" + strIcsi + "\"" },
-                { "+g.3gpp.smsip",    "" },
-                { "video",            "" }
-            };
-        }
-    }
+    _ApplyContactFeatureTags();   // Start() 에서 다시 만든다 — SetMcDataMsrp 등 생성 뒤 설정을 반영
 
     m_clsSetup.m_iLocalUdpPort = m_iLocalPort;
     m_clsSetup.m_strLocalIp    = m_strLocalIp;
@@ -450,8 +432,31 @@ SimSession::~SimSession() {
 // ─────────────────────────────────────────────
 //  시작 / 정지
 // ─────────────────────────────────────────────
+void SimSession::_ApplyContactFeatureTags() {
+// Contact feature tag — PTT: mcptt, VoLTE: mmtel. MCData media plane 능력은 icsi-ref 값 목록에 mcdata.sds 를 더한다
+//   (RFC 3840 — 한 feature tag 에 값 여럿은 따옴표 안 쉼표 목록. 서버는 icsi.mcdata 포함 여부로 MSRP 배포 대상을 고른다).
+{
+    std::string strIcsi = m_bPttMode ? "urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt" : "urn%3Aurn-7%3A3gpp-service.ims.icsi.mmtel";
+    if (m_bMcDataMsrp) strIcsi += std::string(",") + csim_msrp::kIcsiMcDataSds;
+    if( m_bPttMode ) {
+        m_clsServerInfo.m_vecContactFeatureTags = {
+            { "+g.3gpp.icsi-ref", "\"" + strIcsi + "\"" },
+            { "+g.3gpp.mcptt",    "" },
+            { "video",            "" }
+        };
+    } else {
+        m_clsServerInfo.m_vecContactFeatureTags = {
+            { "+g.3gpp.icsi-ref", "\"" + strIcsi + "\"" },
+            { "+g.3gpp.smsip",    "" },
+            { "video",            "" }
+        };
+    }
+}
+}
+
 bool SimSession::Start() {
     m_stats.tRegStart = NowMs();
+    _ApplyContactFeatureTags();
 
     // IdMS auth — REGISTER 전에 먼저 수행 (올바른 순서: IdMS → REGISTER → SUBSCRIBE → ...)
     if (!m_strCscHost.empty() && m_iCscPort > 0) {

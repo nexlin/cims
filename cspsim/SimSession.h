@@ -374,6 +374,8 @@ public:
     std::string   m_strMsrpRxCallId;    // 수신 media SDS 의 서버발 INVITE Call-ID
     std::thread   m_thrMsrp;
     void _JoinMsrp();
+    /** REGISTER Contact feature tag(icsi-ref 목록·mcptt/mmtel·video) 구성 — 생성자와 Start() 에서(Start 전 Set* 설정 반영). */
+    void _ApplyContactFeatureTags();
     void _MsrpSendThread(std::string strServerPath);
     void _MsrpRecvThread(std::string strServerPath, std::string strLocalPath, std::string strFrom, std::string strGroup);
     struct SdsTx { std::string msgId, toUser, groupId, text, convId; bool delivery = false; long long tSendMs = 0; int seq = 1; std::string fromTag; bool authRetried = false; long long timeSec = 0; };
