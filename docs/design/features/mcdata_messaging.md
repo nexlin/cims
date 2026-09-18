@@ -216,7 +216,9 @@ CSP fan-out (하이브리드):
   - csc.json `Provisioning.McData.MaxPayloadSdsCplaneBytes` → `/provisioning/me` 의 ptt
     프로파일 `mcdata.maxPayloadSdsCplaneBytes` 로 단말에 전달. **CSP 값과 운영자 동기 유지.**
 - **시험**: `tests/cmdp_msrp_parser_test.cpp`(프레이머 단위, 단독 g++),
-  `tests/msrp_sds_client.py`(sender/receiver/fallback/negative — 라이브 CSP+cmdp 대상 E2E).
+  `tests/msrp_sds_client.py`(sender/receiver/fallback/negative — 라이브 CSP+cmdp 대상 E2E),
+  계측기 = libcsim `cspsim/McDataMsrp.{h,cpp}` + `SimSession::SendSdsMedia`(발신)·`AnswerMsrp`(수신, UE 풀 `msrp`) — 단계 `sds_send plane: media`,
+  동봉 `MCDATA-SDS-GROUP-MEDIA`([test_instrument.md](test_instrument.md) §3.1 ⑪′).
 - 패키징/수명주기: `cims.sh pkg` 대상·`cims-svc`·`cims-health(9100/udp)`·verify S4 EXPECTED 에
   cmdp 등록. agent 계약은 cmp 와 동일(`bin/cmdp config/cmdp.json`).
 

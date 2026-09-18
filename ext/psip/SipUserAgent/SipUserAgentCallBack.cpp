@@ -95,6 +95,9 @@ int CSipCallRtp::GetAudioPort( )
 // 미디어 리스트에서 video media 를 검색한 후, video media 에 대한 포트 번호를 리턴한다.
 int CSipCallRtp::GetVideoPort( )
 {
+	// 명시 설정된 video 포트가 우선 (합성 SDP 경로).
+	if( m_iVideoPort > 0 ) return m_iVideoPort;
+
 	int iPort = -1;
 
 #ifdef USE_MEDIA_LIST

@@ -20,7 +20,8 @@ bool CSipUserAgent::RecvByeRequest( int iThreadId, CSipMessage * pclsMessage )
 
 	if( SetCallEnd( strCallId.c_str() ) )
 	{
-		if( m_pclsCallBack ) m_pclsCallBack->EventCallEnd( strCallId.c_str(), SIP_OK );
+		CSipHeader * pclsReason = pclsMessage->GetHeader( "Reason" );
+		if( m_pclsCallBack ) m_pclsCallBack->EventCallEnd( strCallId.c_str(), SIP_OK, pclsReason ? pclsReason->m_strValue.c_str() : NULL );
 		Delete( strCallId.c_str() );
 	}
 

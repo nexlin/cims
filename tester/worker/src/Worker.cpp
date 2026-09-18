@@ -172,6 +172,10 @@ void Worker::OnSdsRecv(SimSession* s, const std::string& from, const std::string
     std::lock_guard<std::mutex> lk(m_evMtx);
     m_events.push_back({ Event::SDS_RECV, s, nullptr, dispReq, 0, from, msgId, false, false, 0, 0, group });
 }
+void Worker::OnSdsMediaRecv(SimSession* s, const std::string& from, const std::string& msgId, const std::string& group, const std::string& /*text*/, int dispReq) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back({ Event::SDS_RECV, s, nullptr, dispReq, 0, from, msgId, true, false, 0, 0, group });
+}
 void Worker::OnSdsNotification(SimSession* s, const std::string& msgId, int notifType) {
     std::lock_guard<std::mutex> lk(m_evMtx);
     m_events.push_back({ Event::SDS_NOTIF, s, nullptr, notifType, 0, "", msgId, false });
@@ -302,6 +306,7 @@ HttpResponse Worker::health() {
             pj["affiliated"] = Json(aff);
             pj["groups"] = Json((long long)kv.second->groups.size());
         }
+        if (kv.second->msrp) pj["msrp"] = Json(true);
         pools.push(pj);
     }
     j["active_endpoints"] = Json(active);
@@ -388,6 +393,7 @@ bool Worker::buildUePool(Pool* pool, const Json& d, std::string& err) {
     if (pool->targetIp.empty()) { err = "target_csp.ip_required"; return false; }
     pool->service = d["service"].asString("volte");
     const bool ptt = pool->service == "ptt";
+    pool->msrp = d["msrp"].asBool(false);
     // TLS 서버 검증·클라이언트 인증서(§3.1) — 풀이 켜면 워커의 Tls.* 파일이 있어야 한다
     const bool tlsVerify = d["tls_verify"].asBool(false), tlsClientCert = d["tls_client_cert"].asBool(false);
     if (!tlsRequirements(pool->transport == "tls" && tlsVerify, pool->transport == "tls" && tlsClientCert, err)) return false;
@@ -441,6 +447,7 @@ bool Worker::buildUePool(Pool* pool, const Json& d, std::string& err) {
         ep->s->SetSrtpMode(pool->srtp == "required" ? 2 : pool->srtp == "optional" ? 1 : 0);
         if (!ep->id.akaK.empty()) ep->s->SetAka(ep->id.akaK, ep->id.akaOpc, 0);
         ep->s->SetAnswerMode(SimSession::E_ANSWER_DEFERRED);
+        ep->s->SetMcDataMsrp(pool->msrp);
         ep->s->SetPrack(d["prack"].asBool(false));
         { std::string dm = dtmfModeOf(d["dtmf"]); ep->s->SetDtmf(dm != "off"); ep->s->SetDtmfInband(dm == "inband"); }
         if (pool->transport == "tls" && (tlsVerify || tlsClientCert))
@@ -773,6 +780,7 @@ HttpResponse Worker::runStart(const Json& d) {
         cs.sample = s["sample"].asString();
         cs.loop = s["loop"].asBool(true);
         cs.disposition = s["disposition"].asBool(false);
+        cs.plane = s["plane"].asString("control");
         cs.media = s["media"];
         cs.expect = s["expect"];
         bool ok = false;
@@ -1443,6 +1451,7 @@ void Worker::onEvent(const Event& e) {
     case Event::SDS_RECV: {
         // SDS 도착 — 단말이 받은 msgId 를 기억한다(sds_recv 단계가 나중에 진입해도 찾는다). 자기 인스턴스가 기다리는 msgId 면 지연 표본·대기 해제
         m_metrics.counter("sds_rx");
+        if (e.hasPai) m_metrics.counter("sds_media_rx");   // media plane(MSRP) 으로 도착 — sds_media_pct 분자
         if (ep->sdsRx.size() > 64) ep->sdsRx.erase(ep->sdsRx.begin());
         ep->sdsRx.push_back(e.user);
         if (in && e.user == in->sdsMsgId && in->sdsSendMs > 0) m_metrics.timer("sds_delay_ms", (double)(now - in->sdsSendMs));
@@ -2762,13 +2771,17 @@ void Worker::execStep(Instance& in, long long now) {
             std::string group = to ? "" : (st.group.empty() ? in.group : st.group);
             if (!to && group.empty()) { finishInstance(in, true, "sds_send: to 역할 또는 그룹(그룹 세션·group) 이 필요하다", now); return; }
             if (st.payload.empty()) { finishInstance(in, true, "sds_send: payload(본문) required", now); return; }
-            std::string msgId = from->s->SendSds(to ? to->id.user : "", group, st.payload, st.disposition);
-            if (msgId.empty()) { finishInstance(in, true, "sds_send: 스택 거절", now); return; }
+            // plane: media — INVITE(m=message) + MSRP SEND(TS 24.282 §9.2.3, cmdp 종단). 완료 이벤트는 같은 SDS_RESP(MSRP 전송 결과 코드)
+            const bool media = st.plane == "media";
+            std::string msgId = media ? from->s->SendSdsMedia(to ? to->id.user : "", group, st.payload, st.disposition)
+                                      : from->s->SendSds(to ? to->id.user : "", group, st.payload, st.disposition);
+            if (msgId.empty()) { finishInstance(in, true, std::string("sds_send: 스택 거절") + (media ? "(media plane 진행 중?)" : ""), now); return; }
             in.sdsMsgId = msgId;
             in.sdsSendMs = now;
             in.sdsDisposition = st.disposition;
             in.expectCode = (int)st.expect["code"].asInt(0);
             m_metrics.counter("sds_tx");
+            if (media) m_metrics.counter("sds_media_tx");
             if (!group.empty()) m_metrics.counter("sds_group_tx");
             if (st.disposition) {
                 // 회신 기대 수 = 수신자 수 — 1:1 은 1, 그룹 SDS 는 인스턴스 multi 역할 단말 전부(멤버마다 DELIVERED 하나)

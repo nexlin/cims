@@ -332,6 +332,45 @@ bool CSipStack::Start( CSipStackSetup & clsSetup )
 }
 
 // SIP stack 을 중지시킨다.
+#ifdef USE_TLS
+static std::string _TlsPeerKey( const char * pszIp, int iPort )
+{
+	char szKey[128];
+	snprintf( szKey, sizeof(szKey), "%s:%d", pszIp ? pszIp : "", iPort );
+	return szKey;
+}
+
+void CSipStack::SetTlsPeerPolicy( const char * pszIp, int iPort, const CSipTlsPeerPolicy & clsPolicy )
+{
+	m_clsTlsPeerPolicyMutex.acquire();
+	m_mapTlsPeerPolicy[ _TlsPeerKey( pszIp, iPort ) ] = clsPolicy;
+	m_clsTlsPeerPolicyMutex.release();
+}
+
+void CSipStack::ClearTlsPeerPolicy( )
+{
+	m_clsTlsPeerPolicyMutex.acquire();
+	m_mapTlsPeerPolicy.clear();
+	m_clsTlsPeerPolicyMutex.release();
+}
+
+bool CSipStack::GetTlsPeerPolicy( const char * pszIp, int iPort, CSipTlsPeerPolicy & clsPolicy )
+{
+	bool bRes = false;
+
+	m_clsTlsPeerPolicyMutex.acquire();
+	std::map<std::string, CSipTlsPeerPolicy>::iterator itMap = m_mapTlsPeerPolicy.find( _TlsPeerKey( pszIp, iPort ) );
+	if( itMap != m_mapTlsPeerPolicy.end() )
+	{
+		clsPolicy = itMap->second;
+		bRes = true;
+	}
+	m_clsTlsPeerPolicyMutex.release();
+
+	return bRes;
+}
+#endif
+
 bool CSipStack::Stop( )
 {
 	if( m_bStarted == false || m_bStopEvent ) return false;

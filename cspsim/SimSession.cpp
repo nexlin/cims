@@ -5,6 +5,7 @@
 #include "SdpMedia.h"
 #include "SdpAttributeCrypto.h"
 #include "SipCodecTable.h"
+#include "McDataMsrp.h"
 #include "McDataSds.h"
 #include "Log.h"
 #include <openssl/rand.h>
@@ -412,19 +413,24 @@ SimSession::SimSession(int id,
     // 3GPP IMS 헤더 — 실제 단말과 동일한 패턴
     m_clsServerInfo.m_strPPreferredIdentity = "<sip:" + m_strUser + "@" + m_strDomain + ">";
     m_clsServerInfo.m_strPAccessNetworkInfo = "3GPP-E-UTRAN-FDD;utran-cell-id-3gpp=0000000000000000";
-    // Contact feature tag — PTT: mcptt, VoLTE: mmtel
-    if( m_bPttMode ) {
-        m_clsServerInfo.m_vecContactFeatureTags = {
-            { "+g.3gpp.icsi-ref", "\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\"" },
-            { "+g.3gpp.mcptt",    "" },
-            { "video",            "" }
-        };
-    } else {
-        m_clsServerInfo.m_vecContactFeatureTags = {
-            { "+g.3gpp.icsi-ref", "\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mmtel\"" },
-            { "+g.3gpp.smsip",    "" },
-            { "video",            "" }
-        };
+    // Contact feature tag — PTT: mcptt, VoLTE: mmtel. MCData media plane 능력은 icsi-ref 값 목록에 mcdata.sds 를 더한다
+    //   (RFC 3840 — 한 feature tag 에 값 여럿은 따옴표 안 쉼표 목록. 서버는 icsi.mcdata 포함 여부로 MSRP 배포 대상을 고른다).
+    {
+        std::string strIcsi = m_bPttMode ? "urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt" : "urn%3Aurn-7%3A3gpp-service.ims.icsi.mmtel";
+        if (m_bMcDataMsrp) strIcsi += std::string(",") + csim_msrp::kIcsiMcDataSds;
+        if( m_bPttMode ) {
+            m_clsServerInfo.m_vecContactFeatureTags = {
+                { "+g.3gpp.icsi-ref", "\"" + strIcsi + "\"" },
+                { "+g.3gpp.mcptt",    "" },
+                { "video",            "" }
+            };
+        } else {
+            m_clsServerInfo.m_vecContactFeatureTags = {
+                { "+g.3gpp.icsi-ref", "\"" + strIcsi + "\"" },
+                { "+g.3gpp.smsip",    "" },
+                { "video",            "" }
+            };
+        }
     }
 
     m_clsSetup.m_iLocalUdpPort = m_iLocalPort;
@@ -517,6 +523,7 @@ void SimSession::Stop(int iFlushMs) {
     if (iFlushMs > 0) usleep((useconds_t)iFlushMs * 1000);
     m_clsRtpThread.Stop();
     m_clsUserAgent.Stop();
+    _JoinMsrp();
 }
 
 // ─────────────────────────────────────────────
@@ -916,6 +923,192 @@ std::string SimSession::SendSds(const std::string& toUser, const std::string& gr
     m_mapSdsTx[szCallId] = tx;
     _SendSdsMessage(szCallId, m_mapSdsTx[szCallId], nullptr, false);
     return tx.msgId;
+}
+
+// ── MCData SDS media plane (MSRP, TS 24.282 §9.2.3 — McDataMsrp.h) ──
+static bool _MsrpPathOf(CSipCallRtp* pclsRtp, std::string& strPath) {
+    strPath.clear();
+    if (!pclsRtp) return false;
+    for (const auto& m : pclsRtp->m_clsMediaList) {
+        if (m.m_strMedia != "message" || m.m_strProtocol.find("MSRP") == std::string::npos) continue;
+        for (const auto& a : m.m_clsAttributeList)
+            if (a.m_strName == "path") { strPath = a.m_strValue; size_t sp = strPath.find(' '); if (sp != std::string::npos) strPath = strPath.substr(0, sp); }
+        return !strPath.empty();
+    }
+    return false;
+}
+/** mcdata-info 의 <mcdata-request-uri>/<mcdata-calling-user-id> 안 mcdataURI → user 부분(sip:/tel: 과 @domain 제거). */
+static std::string _McDataInfoUser(const std::string& strBody, const char* pszElem) {
+    size_t p = strBody.find(std::string("<") + pszElem);
+    if (p == std::string::npos) return "";
+    size_t u = strBody.find("<mcdataURI>", p);
+    if (u == std::string::npos) return "";
+    u += 11;
+    size_t e = strBody.find("</mcdataURI>", u);
+    std::string v = e == std::string::npos ? "" : strBody.substr(u, e - u);
+    if (v.rfind("sip:", 0) == 0 || v.rfind("tel:", 0) == 0) v = v.substr(4);
+    size_t at = v.find('@');
+    if (at != std::string::npos) v = v.substr(0, at);
+    return v;
+}
+static CSdpMedia _MsrpMessageMedia(const std::string& strLocalPath, const char* pszSetup, const char* pszDir) {
+    CSdpMedia m("message", csim_msrp::kLocalPort, "TCP/MSRP");
+    m.m_clsFmtList.push_back("*");
+    m.AddAttribute("path", strLocalPath.c_str());
+    m.AddAttribute("accept-types", csim_msrp::kAcceptTypes);
+    m.AddAttribute("setup", pszSetup);
+    m.AddAttribute(pszDir, "");
+    return m;
+}
+
+void SimSession::_JoinMsrp() {
+    if (m_thrMsrp.joinable()) m_thrMsrp.join();
+}
+
+std::string SimSession::SendSdsMedia(const std::string& toUser, const std::string& groupId, const std::string& text, bool bRequestDelivery)
+{
+    if (text.empty() || (toUser.empty() && groupId.empty()) || !m_strMsrpCallId.empty()) return "";
+    _JoinMsrp();
+    MsrpTx tx;
+    tx.msgId = csim_mcdata::newMessageId();
+    tx.convId = groupId.empty() ? csim_mcdata::conversationIdOneToOne(m_strUser, toUser) : csim_mcdata::conversationIdOf(groupId);
+    tx.text = text;
+    tx.delivery = bRequestDelivery;
+    tx.timeSec = (long long)time(NULL);
+    tx.tSendMs = NowMs();
+    tx.localPath = csim_msrp::localPath(m_clsSetup.m_strLocalIp, csim_msrp::newSessionId());
+
+    // 오퍼 = 더미 m=audio(우리 RTP 포트, 서버는 port 9 inactive 로 답한다) + m=message TCP/MSRP a=sendonly a=setup:actpass (서버 항상 passive)
+    CSipCallRtp clsRtp;
+    clsRtp.m_strIp = MediaIp();
+    clsRtp.m_iPort = m_clsRtpThread.m_iPort;
+    clsRtp.m_iCodec = 0;
+    BuildAudioMedia(clsRtp, m_clsRtpThread.m_iPort, 0, NULL);
+    clsRtp.m_clsMediaList.push_back(_MsrpMessageMedia(tx.localPath, "actpass", "sendonly"));
+    CSipCallRoute clsRoute;
+    clsRoute.m_strDestIp = m_strServerIp;
+    clsRoute.m_iDestPort = RoutePort();
+    clsRoute.m_eTransport = m_eTransport;
+    const std::string strTarget = groupId.empty() ? toUser : groupId;
+    CSipMessage* pInvite = NULL;
+    std::string strCallId;
+    if (!m_clsUserAgent.CreateCall(m_strUser.c_str(), strTarget.c_str(), &clsRtp, &clsRoute, strCallId, &pInvite, NULL) || !pInvite) {
+        printf("[%d] [SDS-MSRP] CreateCall failed\n", m_iId);
+        return "";
+    }
+    pInvite->m_clsReqUri.Set(SIP_PROTOCOL, strTarget.c_str(), m_strDomain.c_str(), 0);
+    pInvite->m_clsReqUri.InsertTransport(m_eTransport);
+    pInvite->m_clsTo.m_clsUri.Set(SIP_PROTOCOL, strTarget.c_str(), m_strDomain.c_str(), 0);
+    pInvite->AddHeader("Accept-Contact", (std::string("*;+g.3gpp.icsi-ref=\"") + csim_msrp::kIcsiMcDataSds + "\";require;explicit").c_str());
+    pInvite->AddHeader("P-Preferred-Service", "urn:urn-7:3gpp-service.ims.icsi.mcdata.sds");
+    pInvite->AddHeader("P-Preferred-Identity", ("<sip:" + m_strUser + "@" + m_strDomain + ">").c_str());
+    m_msrpTx = tx;
+    m_strMsrpCallId = strCallId;
+    printf("[%d] [SDS-MSRP] INVITE → %s msg=%s (%zu bytes)\n", m_iId, strTarget.c_str(), tx.msgId.c_str(), text.size());
+    if (!m_clsUserAgent.StartCall(strCallId.c_str(), pInvite)) { m_strMsrpCallId.clear(); return ""; }
+    return tx.msgId;
+}
+
+void SimSession::_MsrpSendThread(std::string strServerPath)
+{
+    MsrpTx tx = m_msrpTx;
+    int iCode = 200;
+    std::string strHost;
+    int iPort = 0;
+    csim_msrp::Client cli;
+    csim_msrp::Frame f;
+    if (!csim_msrp::parsePath(strServerPath, strHost, iPort) || !cli.Connect(strHost, iPort, 5000)) {
+        printf("[%d] [SDS-MSRP] connect %s failed\n", m_iId, strServerPath.c_str());
+        iCode = 503;
+    } else {
+        // SEND 1: SDS SIGNALLING PAYLOAD · SEND 2: DATA PAYLOAD(TEXT) + Success-Report — 각 200, 마지막에 REPORT(있으면)
+        std::string tid1 = csim_msrp::newTransId(), tid2 = csim_msrp::newTransId();
+        bool ok = cli.Send(csim_msrp::buildSend(tid1, strServerPath, tx.localPath, "m1", csim_mcdata::kCtSignalling,
+                                                csim_mcdata::signallingTlv(tx.convId, tx.msgId, tx.delivery, tx.timeSec), false));
+        while (ok && iCode == 200) {
+            if (!cli.RecvFrame(f, 5000)) { iCode = 408; break; }
+            if (!f.request && f.tid == tid1) { if (f.status != 200) iCode = f.status; break; }
+        }
+        if (ok && iCode == 200) {
+            ok = cli.Send(csim_msrp::buildSend(tid2, strServerPath, tx.localPath, "m2", csim_mcdata::kCtPayload, csim_mcdata::payloadTlv(tx.text), true));
+            bool bResp = false, bReport = false;
+            while (ok && iCode == 200 && !(bResp && bReport)) {
+                if (!cli.RecvFrame(f, bResp ? 3000 : 5000)) { if (!bResp) iCode = 408; break; }   // REPORT 는 3 초만 기다린다(없어도 완료)
+                if (!f.request && f.tid == tid2) { bResp = true; if (f.status != 200) iCode = f.status; }
+                else if (f.request && f.method == "REPORT") bReport = true;
+            }
+        }
+        if (!ok && iCode == 200) iCode = 503;
+    }
+    cli.Close();
+    long long ms = NowMs() - tx.tSendMs;
+    printf("[%d] [SDS-MSRP] msg=%s → %d (%lld ms)\n", m_iId, tx.msgId.c_str(), iCode, ms);
+    if (m_pObserver) m_pObserver->OnSdsResponse(this, tx.msgId, iCode, ms);
+}
+
+void SimSession::_MsrpRecvThread(std::string strServerPath, std::string strLocalPath, std::string strFrom, std::string strGroup)
+{
+    std::string strHost;
+    int iPort = 0;
+    csim_msrp::Client cli;
+    if (!csim_msrp::parsePath(strServerPath, strHost, iPort) || !cli.Connect(strHost, iPort, 5000)) {
+        printf("[%d] [SDS-MSRP] recv connect %s failed\n", m_iId, strServerPath.c_str());
+        return;
+    }
+    cli.Send(csim_msrp::buildSend(csim_msrp::newTransId(), strServerPath, strLocalPath, "b0", "", "", false));   // bodiless — 연결 바인딩
+    std::string strBody, strCt;
+    csim_msrp::Frame f;
+    for (int i = 0; i < 200; ++i) {
+        if (!cli.RecvFrame(f, 15000)) { printf("[%d] [SDS-MSRP] recv timeout\n", m_iId); break; }
+        if (!f.request || f.method != "SEND") continue;
+        cli.Send(csim_msrp::buildResponse(f.tid, 200, f.header("From-Path"), strLocalPath));
+        std::string ct = f.header("Content-Type");
+        if (ct.empty()) continue;   // bodiless
+        if (!ct.empty()) strCt = ct;
+        strBody += f.body;
+        if (f.flag != '$') continue;
+        csim_mcdata::SdsMsg sds;
+        if (!csim_mcdata::parse(strCt, strBody, sds) || sds.notification) { strBody.clear(); continue; }
+        m_iSdsRecv++;
+        printf("[%d] [SDS-MSRP] recv msg=%s from=%s group=%s disp=%d bytes=%zu\n", m_iId, sds.msgId.c_str(), strFrom.c_str(), strGroup.c_str(),
+               sds.dispositionReq, sds.text.size());
+        if (m_pObserver) m_pObserver->OnSdsMediaRecv(this, strFrom, sds.msgId, strGroup, sds.text, sds.dispositionReq);
+        // disposition(delivery) 요청 — SDS NOTIFICATION 은 시그널링 평면 MESSAGE 로 원 발신자에게(TS 24.282 §9.2.2)
+        if (m_bSdsAutoDelivered && (sds.dispositionReq & csim_mcdata::kDispReqDelivery) && !strFrom.empty())
+            SendSdsNotification(strFrom, sds.convId, sds.msgId, csim_mcdata::kNotifDelivered);
+        break;
+    }
+    cli.Close();
+}
+
+bool SessionSipClient::AnswerMsrp(const char* pszCallId, CSipCallRtp* pclsRtp, CSipMessage* pclsMessage) {
+    std::string strServerPath;
+    if (!_MsrpPathOf(pclsRtp, strServerPath)) { m_pUserAgent->StopCall(pszCallId, 488); return true; }
+    const std::string strBody = pclsMessage ? pclsMessage->m_strBody : "";
+    std::string strFrom = _McDataInfoUser(strBody, "mcdata-calling-user-id");
+    if (strFrom.empty() && pclsMessage) strFrom = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
+    std::string strGroup = _McDataInfoUser(strBody, "mcdata-request-uri");
+    if (strGroup == m_pOwner->m_strUser) strGroup.clear();   // 1:1 은 request-uri 가 나 자신
+    m_pOwner->_JoinMsrp();
+    const std::string strLocalPath = csim_msrp::localPath(m_pOwner->m_clsSetup.m_strLocalIp, csim_msrp::newSessionId());
+    // answer: 오퍼 audio 는 port 9 inactive 로 echo(fmt 유지), m=message 는 recvonly + setup:active(우리가 서버 path 로 접속)
+    CSipCallRtp clsAns;
+    clsAns.m_strIp = m_pOwner->m_clsSetup.m_strLocalIp;
+    clsAns.m_iPort = 9;
+    for (const auto& m : pclsRtp->m_clsMediaList) {
+        if (m.m_strMedia != "audio") continue;
+        CSdpMedia a("audio", 9, m.m_strProtocol.c_str());
+        a.m_clsFmtList = m.m_clsFmtList;
+        a.AddAttribute("inactive", "");
+        clsAns.m_clsMediaList.push_back(a);
+        break;
+    }
+    clsAns.m_clsMediaList.push_back(_MsrpMessageMedia(strLocalPath, "active", "recvonly"));
+    m_pOwner->m_strMsrpRxCallId = pszCallId;
+    if (!m_pUserAgent->AcceptCall(pszCallId, &clsAns)) { m_pOwner->m_strMsrpRxCallId.clear(); return true; }
+    printf("[%d] [SDS-MSRP] INVITE from=%s group=%s path=%s → 200, connecting\n", m_pOwner->m_iId, strFrom.c_str(), strGroup.c_str(), strServerPath.c_str());
+    m_pOwner->m_thrMsrp = std::thread(&SimSession::_MsrpRecvThread, m_pOwner, strServerPath, strLocalPath, strFrom, strGroup);
+    return true;
 }
 
 bool SimSession::SendSdsNotification(const std::string& toUser, const std::string& strConvId, const std::string& strMsgId, int iNotifType)
@@ -2162,6 +2355,12 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
         m_pOwner->m_strLastPCalledParty = pclsPcp ? pclsPcp->m_strValue : "";
     }
 
+    // MCData media plane 착신(서버발 INVITE, m=message TCP/MSRP) — 통화와 무관한 SDS 세션이라 통화 상태·관측자 호 이벤트를 건드리지 않는다
+    if (m_pOwner->m_bMcDataMsrp && pclsRtp) {
+        for (const auto& m : pclsRtp->m_clsMediaList)
+            if (m.m_strMedia == "message" && m.m_strProtocol.find("MSRP") != std::string::npos) { AnswerMsrp(pszCallId, pclsRtp, pclsMessage); return; }
+    }
+
     // TS 24.379: 이미 통화 중이면 486 Busy Here (실 단말과 동일)
     if (m_pOwner->m_bInCall) {
         printf("[%d] [PTT] Already in call — reject INVITE with 486 Busy\n", m_pOwner->m_iId);
@@ -2442,6 +2641,22 @@ bool SessionSipClient::BuildAnswer(const char* pszCallId, CSipCallRtp* pclsRtp, 
 }
 
 void SessionSipClient::EventCallStart(const char* pszCallId, CSipCallRtp* pclsRtp) {
+    // media SDS 발신 leg 의 200 — answer 의 a=path(cmdp)로 MSRP 송신 스레드. RTP·통화 상태·관측자 호 이벤트 없음
+    if (m_pOwner->IsMsrpCall(pszCallId)) {
+        CSipClient::EventCallStart(pszCallId, pclsRtp);
+        std::string strPath;
+        if (pszCallId && m_pOwner->m_strMsrpCallId == pszCallId) {
+            if (!_MsrpPathOf(pclsRtp, strPath)) {
+                printf("[%d] [SDS-MSRP] 200 without a=path — abort\n", m_pOwner->m_iId);
+                if (m_pOwner->m_pObserver) m_pOwner->m_pObserver->OnSdsResponse(m_pOwner, m_pOwner->m_msrpTx.msgId, 488, SimSession::NowMs() - m_pOwner->m_msrpTx.tSendMs);
+                m_pUserAgent->StopCall(pszCallId);
+                return;
+            }
+            m_pOwner->_JoinMsrp();
+            m_pOwner->m_thrMsrp = std::thread(&SimSession::_MsrpSendThread, m_pOwner, strPath);
+        }
+        return;
+    }
     // 미디어 SRTP (media_security.md §8.1) — 오퍼에 키를 실었으면 answer 의 a=crypto 로 세션을
     //   확정한다. RTP 송신은 부모(EventCallStart→RtpThread.Start)에서 시작되므로 그 전에 처리.
     if (!m_pOwner->m_strSrtpLocalKey.empty()) {
@@ -2519,6 +2734,18 @@ void SessionSipClient::EventCallStart(const char* pszCallId, CSipCallRtp* pclsRt
 
 void SessionSipClient::EventCallEnd(const char* pszCallId, int iSipStatus) {
     CSipClient::EventCallEnd(pszCallId, iSipStatus);
+    // media SDS leg 종료(서버 BYE, 또는 INVITE 실패 응답) — 통화 상태·관측자 호 이벤트 없음. INVITE 가 실패로 끝났으면 송신 결과로 올린다
+    if (m_pOwner->IsMsrpCall(pszCallId)) {
+        if (pszCallId && m_pOwner->m_strMsrpCallId == pszCallId) {
+            if (iSipStatus >= 300 && m_pOwner->m_pObserver)
+                m_pOwner->m_pObserver->OnSdsResponse(m_pOwner, m_pOwner->m_msrpTx.msgId, iSipStatus, SimSession::NowMs() - m_pOwner->m_msrpTx.tSendMs);
+            m_pOwner->m_strMsrpCallId.clear();
+        } else {
+            m_pOwner->m_strMsrpRxCallId.clear();
+        }
+        printf("[%d] [SDS-MSRP] leg ended CallId=%s status=%d\n", m_pOwner->m_iId, pszCallId, iSipStatus);
+        return;
+    }
     m_pOwner->m_stats.iCallEnd++;
     int iQ850 = m_pOwner->m_iPendingQ850;
     m_pOwner->m_iPendingQ850 = 0;
@@ -2551,6 +2778,7 @@ void SessionSipClient::EventTransferResponse(const char* pszCallId, int iSipStat
 
 void SessionSipClient::EventCallRing(const char* pszCallId, int iSipStatus, CSipCallRtp* pclsRtp) {
     CSipClient::EventCallRing(pszCallId, iSipStatus, pclsRtp);
+    if (m_pOwner->IsMsrpCall(pszCallId)) return;   // media SDS leg — 호 이벤트 아님
     // RFC 3262 §4 — RSeq 가 실린 신뢰 1xx 는 PRACK 으로 확인(psip 은 RSeq 적재만, PRACK 은 UA 몫). 183 의 SDP 는 우리 오퍼의
     //   answer 라 PRACK 은 SDP 없이 낸다. 183 early media 면 링백 수신을 위해 RTP 를 그 주소로 시작한다(200 에서 목적지 갱신).
     bool bPrackSent = false;

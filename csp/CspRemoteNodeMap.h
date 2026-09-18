@@ -38,6 +38,11 @@ public:
 
     bool Sync();
 
+    /** TLS 피어의 발신 연결 정책을 psip 에 옮긴다 — `tls_verify` 인 노드는 서버 인증서를 검증(앵커 = TLS primary
+     *  local_node 의 tls_ca_path, 비면 시스템 저장소). 클라이언트 인증서는 자기 노드 인증서(CspServer 전역).
+     *  Sync 끝에 호출되며 Setup 이 확정된 뒤 다시 불러도 된다(전부 비우고 재등록). */
+    void ApplyTlsPolicies() const;
+
     RemoteNodeInfo GetByName( const std::string &name ) const;
     RemoteNodeInfo GetById( const std::string &id ) const;
     std::vector<RemoteNodeInfo> GetAll() const;

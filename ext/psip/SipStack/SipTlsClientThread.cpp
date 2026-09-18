@@ -57,10 +57,17 @@ THREAD_API SipTlsClientThread( LPVOID lpParameter )
 		CLog::Print( LOG_DEBUG, "%s(%s:%d) connected", __FUNCTION__, pclsArg->m_strIp.c_str(), pclsArg->m_iPort );
 
 		const CSipStackSetup & clsSetup = pclsArg->m_pclsSipStack->m_clsSetup;
-		const std::string & strVerifyCa = clsSetup.m_strTlsVerifyCaFile.empty() ? clsSetup.m_strCaCertFile : clsSetup.m_strTlsVerifyCaFile;
-		if( SSLConnect( hSocket, &psttSsl, clsSetup.m_bTlsVerifyServer,
-		                clsSetup.m_strClientCertFile.empty() ? NULL : clsSetup.m_strClientCertFile.c_str(),
-		                clsSetup.m_strClientKeyFile.empty() ? NULL : clsSetup.m_strClientKeyFile.c_str(),
+		// 목적지별 정책이 있으면 그 값을, 비어 있는 필드는 Setup 전역값을 쓴다 (CSipTlsPeerPolicy).
+		CSipTlsPeerPolicy clsPeer;
+		const bool bPeer = pclsArg->m_pclsSipStack->GetTlsPeerPolicy( pclsArg->m_strIp.c_str(), pclsArg->m_iPort, clsPeer );
+		const bool bVerify = bPeer ? clsPeer.m_bVerifyServer : clsSetup.m_bTlsVerifyServer;
+		std::string strVerifyCa = ( bPeer && clsPeer.m_strVerifyCaFile.empty() == false ) ? clsPeer.m_strVerifyCaFile : clsSetup.m_strTlsVerifyCaFile;
+		if( strVerifyCa.empty() ) strVerifyCa = clsSetup.m_strCaCertFile;
+		const std::string & strClientCert = ( bPeer && clsPeer.m_strClientCertFile.empty() == false ) ? clsPeer.m_strClientCertFile : clsSetup.m_strClientCertFile;
+		const std::string & strClientKey = ( bPeer && clsPeer.m_strClientKeyFile.empty() == false ) ? clsPeer.m_strClientKeyFile : clsSetup.m_strClientKeyFile;
+		if( SSLConnect( hSocket, &psttSsl, bVerify,
+		                strClientCert.empty() ? NULL : strClientCert.c_str(),
+		                strClientKey.empty() ? NULL : strClientKey.c_str(),
 		                strVerifyCa.empty() ? NULL : strVerifyCa.c_str() ) )
 		{
 			CLog::Print( LOG_DEBUG, "%s(%s:%d) SSL connected", __FUNCTION__, pclsArg->m_strIp.c_str(), pclsArg->m_iPort );

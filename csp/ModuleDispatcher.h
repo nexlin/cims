@@ -73,6 +73,15 @@ public:
     void EventCallRing( const char *pszCallId, int iSipStatus, CSipCallRtp *pclsRtp ) override;
     void EventCallStart( const char *pszCallId, CSipCallRtp *pclsRtp ) override;
     void EventCallEnd( const char *pszCallId, int iSipStatus ) override;
+    /** 종료 이벤트 + 상대 leg 가 실은 Reason(RFC 3326). B2BUA 는 종료 사유(BYE/CANCEL 의 Reason)와 최종 응답
+     *  코드를 다른 leg 로 그대로 옮긴다 — 코드 매핑은 RelayEndStatus(). */
+    void EventCallEnd( const char *pszCallId, int iSipStatus, const char *pszReason ) override;
+    /** 한 leg 의 종료 상태를 상대 leg 의 최종 응답 코드로 옮긴다(상대 leg 가 미응답 INVITE 일 때만 쓰인다 —
+     *  확립된 leg 는 BYE, 미응답 발신 leg 는 CANCEL 이라 코드가 무시된다).
+     *  4xx/5xx/6xx 는 그대로(RFC 3261 §16.7 — 503 을 사용자 거절 603 으로 바꾸지 않는다),
+     *  401/407 은 자격증명 없는 401 을 낼 수 없어 403, 3xx 는 B2BUA 가 재귀하지 않으므로 480,
+     *  410 은 psip 의 전송 타임아웃 표지(SendTimeout)라 408, 2xx(BYE)는 0. */
+    static int RelayEndStatus( int iSipStatus );
     void EventReInvite( const char *pszCallId, CSipCallRtp *pclsRemoteRtp, CSipCallRtp *pclsLocalRtp ) override;
     /** 서버가 전달한 re-INVITE 의 최종 응답 — relay SRTP leg 의 재-answer 재키잉을 CMP 에 반영
      *  (media_security.md §5.2). 주소/PT 갱신은 기존 EventReInvite→MODIFY 경로가 담당. */

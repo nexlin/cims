@@ -34,7 +34,7 @@ typedef std::list< int > CODEC_LIST;
 class CSipCallRtp
 {
 public:
-	CSipCallRtp() : m_iPort(-1), m_iCodec(-1), m_eDirection( E_RTP_SEND_RECV ), m_iApplicationPort(-1)
+	CSipCallRtp() : m_iPort(-1), m_iCodec(-1), m_eDirection( E_RTP_SEND_RECV ), m_iApplicationPort(-1), m_iVideoPort(-1)
 	{}
 
 	void SetIpPort( const char * pszIp, int iPort, int iSocketCountPerMedia );
@@ -52,6 +52,10 @@ public:
 
 	// MCPTT floor control(m=application) 포트. >0 이면 GetApplicationPort 가 이 값을 반환.
 	int					m_iApplicationPort;
+
+	// 합성 SDP(미디어 리스트 없는 경로)에 실을 local video 포트. >0 이면 AddSdp 가 m=video 를 광고/수락하고
+	//   GetVideoPort 가 이 값을 반환한다. -1 이면 상대가 낸 m=video 는 port 0 으로 거절된다(RFC 3264 §6).
+	int					m_iVideoPort;
 
 	// 선택된 코덱 번호
 	int					m_iCodec;
@@ -105,6 +109,10 @@ public:
 
 	// SIP 통화 종료 이벤트 핸들러
 	virtual void EventCallEnd( const char * pszCallId, int iSipStatus ) = 0;
+
+	/** 통화 종료 이벤트 + 상대가 실은 Reason 헤더(RFC 3326 — BYE·CANCEL·INVITE 최종 응답의 첫 Reason 값,
+	 *  없으면 NULL). B2BUA 가 종료 사유를 다른 leg 로 옮길 때 쓴다. 기본 구현은 2-인자 EventCallEnd 로 위임한다. */
+	virtual void EventCallEnd( const char * pszCallId, int iSipStatus, const char * pszReason ){ EventCallEnd( pszCallId, iSipStatus ); };
 
 	/** 서버가 먼저 거는 in-dialog 요청(BYE·re-INVITE·NOTIFY·REFER·INFO — 세션 갱신 포함)의 **현재 도달 주소**를
 	 *  응용에 묻는다. psip 은 요청을 만들기 직전(RefreshLegDest)과 세션 갱신 주기(CheckSessionTimer)에 부른다.

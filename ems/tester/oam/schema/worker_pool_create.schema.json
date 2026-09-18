@@ -613,6 +613,12 @@
       "description": "kind=ue — 미디어 전담 워커의 제어 URL(http://ip:port) — CRtpThread 원격 모드(RtpRemote.h)",
       "title": "Media Agent"
     },
+    "msrp": {
+      "default": false,
+      "description": "kind=ue — MCData media plane 능력(Contact icsi-ref 에 mcdata.sds) — MSRP 배포 수신 대상",
+      "title": "Msrp",
+      "type": "boolean"
+    },
     "nat": {
       "anyOf": [
         {

@@ -483,6 +483,12 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         // MCPTT floor (TS 24.379/24.380): 200 OK 에 m=application(SharedFloorPort) 광고 →
         //   개시자가 floor dest 를 학습해 floor REQUEST 를 올바른 포트로 송신(명시적 GRANT).
         clsCallerRtp.m_iApplicationPort = iSharedFloorPort;
+        // 영상 answer (RFC 3264 §6) — 개시자가 m=video 를 오퍼했고 그룹이 video 를 중계하면 이 멤버의 CMP video
+        //   포트로 수락, 아니면 psip 이 m=video 0 으로 거절한다(라인 생략은 규격 위반 — answer 의 m= 수·순서 = offer).
+        clsCallerRtp.m_iVideoPort =
+            ( clsGroup._videoEnabled && iCallerLocalVideo > 0 && pclsRtp && pclsRtp->GetVideoPort() > 0 )
+                ? iCallerLocalVideo
+                : -1;
         if ( bListen ) clsCallerRtp.SetDirection( E_RTP_SEND );  // recvonly offer 의 answer 는 sendonly (RFC 3264 §6.1)
         // 미디어 SRTP answer — offer 의 tag/suite echo + 서버측 키 선언 (media_security.md §5.1)
         if ( !strCallerSrvKey.empty() && pclsRtp ) {
@@ -600,8 +606,10 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
             if ( iCallerAudio > 0 ) {
                 int iCallerFloor = pclsRtp->GetApplicationPort();
                 if ( iCallerFloor <= 0 ) iCallerFloor = iCallerAudio + 1;
+                // video 는 협상된 경우만(answer 에 port 를 냈을 때) — 비협상 leg 에 audio+2 유령 포트를 주면
+                //   CMP 가 무효 목적지로 video 를 송신한다 (멤버 leg OnCallStarted 와 같은 규칙).
                 int iCallerVideo = pclsRtp->GetVideoPort();
-                if ( iCallerVideo <= 0 && clsGroup._videoEnabled ) iCallerVideo = iCallerAudio + 2;
+                if ( iCallerVideo <= 0 || clsCallerRtp.m_iVideoPort <= 0 ) iCallerVideo = 0;
                 std::string strCallerRole = "participant";
                 for ( const auto &pUser : clsGroup._pusers ) {
                     if ( pUser && pUser->_id == pszCallerInfo ) {
@@ -1191,6 +1199,9 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
     }
     CSipCallRtp clsRtp;
     clsRtp.SetIpPort( strSharedIp.c_str(), iMemberAudioPort, SOCKET_COUNT_PER_MEDIA );
+    // 영상 그룹은 fan-out 오퍼에 m=video(이 멤버의 CMP video 포트, H.264)를 싣는다 — 멤버 answer 의 video 포트가
+    //   OnCallStarted 로 CMP JoinGroup 에 전달된다. (X-Video-Port 헤더는 cwrtc 호환용으로 남긴다.)
+    clsRtp.m_iVideoPort = ( bVideoEnabled && iMemberVideoPort > 0 ) ? iMemberVideoPort : -1;
 
     // 서비스 코덱 (Setup.Media.Codecs 최우선 — 기본 AMR-WB PT=96). fan-out 오퍼는 CSP 가
     // 오퍼러라 이 PT 가 그룹 wire PT 가 된다 — CMP 는 relay 시 PT 를 재작성하지 않으므로 그룹

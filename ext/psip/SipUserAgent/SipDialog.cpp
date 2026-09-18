@@ -27,7 +27,7 @@
 // 생성자
 CSipDialog::CSipDialog( CSipStack * pclsSipStack ) : m_iSeq(0), m_iNextSeq(0), m_iInviteSeq(0), m_iContactPort(-1), m_eTransport(E_SIP_UDP)
 	, m_iOutboundLocalPort(-1)
-	, m_iLocalRtpPort(-1), m_iLocalApplicationPort(-1), m_eLocalDirection(E_RTP_SEND_RECV), m_iRemoteRtpPort(-1), m_eRemoteDirection(E_RTP_SEND_RECV), m_iCodec(-1), m_iRSeq(-1), m_b100rel(false)
+	, m_iLocalRtpPort(-1), m_iLocalApplicationPort(-1), m_iLocalVideoPort(-1), m_eLocalDirection(E_RTP_SEND_RECV), m_iRemoteRtpPort(-1), m_eRemoteDirection(E_RTP_SEND_RECV), m_iCodec(-1), m_iRSeq(-1), m_b100rel(false)
 	, m_pclsInvite(NULL), m_pclsSipStack( pclsSipStack )
 	, m_iSessionVersion(0)
 	, m_bSendCall(true)
@@ -334,6 +334,42 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage, bool bKeepSdpVersion )
 		}
 	}
 
+#ifdef USE_MEDIA_LIST
+	// m=video (합성 SDP 경로 — PTT-AS 그룹콜 등). RFC 3264 §6: answer 의 m= 라인 수·순서는 offer 와 같고
+	//   쓰지 않는 스트림은 port 0 으로 거절한다. offer 는 local video 포트가 있을 때만 싣는다.
+	//   코덱은 H.264 하나 — answer 는 offer 의 PT·fmtp 를 echo, offer 는 테이블(GetVideo) 값.
+	//   SRTP(SAVP) leg 의 video 는 별도 키가 필요해 아직 거절한다(port 0).
+	if( m_clsLocalMediaList.empty() )
+	{
+		const CSdpMedia * pclsRemoteVideo = FindRemoteMedia( "video" );
+		// answer(응답)는 offer 에 없던 m= 라인을 더할 수 없다 — 상대가 video 를 안 냈으면 아무것도 싣지 않는다.
+		const bool bAnswer = ( pclsMessage->IsRequest() == false ) || pclsRemoteVideo != NULL;
+		if( bAnswer == false || pclsRemoteVideo != NULL )
+		{
+			const CSipCodecEntry & clsVideo = CSipCodecTable::GetVideo();
+			const bool bLocalSrtp = ( m_strLocalCryptoSuite.empty() == false && m_strLocalCryptoKey.empty() == false );
+			int iVideoPt = -1;
+			if( pclsRemoteVideo ) iVideoPt = FindRemotePayloadType( clsVideo.GetMatchPrefix().c_str(), "video" );
+
+			if( pclsRemoteVideo && ( m_iLocalVideoPort <= 0 || iVideoPt < 0 || bLocalSrtp ) )
+			{
+				const char * pszFmt = pclsRemoteVideo->m_clsFmtList.empty() ? "97" : pclsRemoteVideo->m_clsFmtList.front().c_str();
+				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=video 0 %s %s\r\n", pclsRemoteVideo->m_strProtocol.c_str(), pszFmt );
+			}
+			else if( m_iLocalVideoPort > 0 && bLocalSrtp == false )
+			{
+				if( iVideoPt < 0 ) iVideoPt = clsVideo.m_iPt;
+				std::string strFmtp = bAnswer ? FindRemoteFmtp( pclsRemoteVideo, iVideoPt ) : clsVideo.m_strFmtp;
+				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=video %d RTP/AVP %d\r\na=rtpmap:%d %s\r\n",
+					m_iLocalVideoPort, iVideoPt, iVideoPt, clsVideo.GetRtpmap().c_str() );
+				if( strFmtp.empty() == false )
+					iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=fmtp:%d %s\r\n", iVideoPt, strFmtp.c_str() );
+				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=%s\r\n", GetRtpDirectionString( m_eLocalDirection ) );
+			}
+		}
+	}
+#endif
+
 	// MCPTT floor control 미디어 (3GPP TS 24.379/24.380) — local application(floor) 포트가
 	//   설정된 경우에만 m=application 라인 추가. PTT 그룹콜 개시자 200 OK 등에서 floor 포트를
 	//   광고해 UE 가 floor dest 를 학습하게 한다. (미설정(-1)이면 VoLTE/일반 호 SDP 무변경.)
@@ -374,6 +410,7 @@ bool CSipDialog::SetLocalRtp( CSipCallRtp * pclsRtp )
 	m_clsCodecList = pclsRtp->m_clsCodecList;
 	m_eLocalDirection = pclsRtp->m_eDirection;
 	m_iLocalApplicationPort = pclsRtp->GetApplicationPort();  // MCPTT floor 포트 (없으면 -1)
+	m_iLocalVideoPort = pclsRtp->m_iVideoPort;                 // 합성 SDP video 포트 (명시값만 — 리스트 경로는 m= 그대로)
 	// 미디어 SRTP — local a=crypto (AddSdp 가 방출). 빈 값 설정 = SRTP 미사용으로 해제.
 	m_strLocalCryptoTag = pclsRtp->m_strLocalCryptoTag;
 	m_strLocalCryptoSuite = pclsRtp->m_strLocalCryptoSuite;
@@ -533,7 +570,33 @@ static bool _RtpMapPrefixIEq( const char * s, const char * prefix )
 	return true;
 }
 
-int CSipDialog::FindRemotePayloadType( const char * pszEncoding )
+const CSdpMedia * CSipDialog::FindRemoteMedia( const char * pszMedia )
+{
+#ifdef USE_MEDIA_LIST
+	SDP_MEDIA_LIST::iterator itM;
+	for( itM = m_clsRemoteMediaList.begin(); itM != m_clsRemoteMediaList.end(); ++itM )
+	{
+		if( !strcasecmp( itM->m_strMedia.c_str(), pszMedia ) ) return &(*itM);
+	}
+#endif
+	return NULL;
+}
+
+std::string CSipDialog::FindRemoteFmtp( const CSdpMedia * pclsMedia, int iPt )
+{
+	if( pclsMedia == NULL ) return "";
+	char szPrefix[16];
+	snprintf( szPrefix, sizeof(szPrefix), "%d ", iPt );
+	SDP_ATTRIBUTE_LIST::const_iterator itA;
+	for( itA = pclsMedia->m_clsAttributeList.begin(); itA != pclsMedia->m_clsAttributeList.end(); ++itA )
+	{
+		if( strcasecmp( itA->m_strName.c_str(), "fmtp" ) ) continue;
+		if( !strncmp( itA->m_strValue.c_str(), szPrefix, strlen( szPrefix ) ) ) return itA->m_strValue.substr( strlen( szPrefix ) );
+	}
+	return "";
+}
+
+int CSipDialog::FindRemotePayloadType( const char * pszEncoding, const char * pszMedia )
 {
 	if( pszEncoding == NULL ) return -1;
 
@@ -541,7 +604,7 @@ int CSipDialog::FindRemotePayloadType( const char * pszEncoding )
 	SDP_MEDIA_LIST::iterator itM;
 	for( itM = m_clsRemoteMediaList.begin(); itM != m_clsRemoteMediaList.end(); ++itM )
 	{
-		if( strcasecmp( itM->m_strMedia.c_str(), "audio" ) ) continue;
+		if( strcasecmp( itM->m_strMedia.c_str(), pszMedia ) ) continue;
 
 		SDP_ATTRIBUTE_LIST::iterator itA;
 		for( itA = itM->m_clsAttributeList.begin(); itA != itM->m_clsAttributeList.end(); ++itA )

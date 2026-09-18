@@ -95,6 +95,9 @@ public:
 	// local MCPTT floor control (m=application) 포트. -1 이면 SDP 에 floor media 미사용.
 	int					m_iLocalApplicationPort;
 
+	// 합성 SDP 의 local video 포트. -1 이면 offer 에 m=video 를 싣지 않고, 상대 offer 의 m=video 는 port 0 거절.
+	int					m_iLocalVideoPort;
+
 	// ── 미디어 SRTP (SDES — media_security.md §5.1). local suite 설정 시 AddSdp 가
 	//    m=audio 를 RTP/SAVP + a=crypto 로 방출한다. key = base64(key||salt) 원문. ──
 	std::string	m_strLocalCryptoTag;
@@ -205,6 +208,8 @@ public:
 
 	/** 상대(offer) SDP 에 m=application(MCPTT floor) 미디어가 있었는가 — RFC 3264 m= 미러링 판정용. */
 	bool HasRemoteApplicationMedia( );
+	/** 상대(offer) SDP 에서 media 이름(audio/video/application)의 첫 m= 라인 — 없으면 NULL. */
+	const CSdpMedia * FindRemoteMedia( const char * pszMedia );
 
 	bool SetLocalRtp( CSipCallRtp * pclsRtp );
 	bool SetRemoteRtp( CSipCallRtp * pclsRtp );
@@ -221,7 +226,9 @@ public:
 	 *  해당하는 payload type 을 찾는다 — RFC 3264: answer 는 코덱을 rtpmap 이름으로 식별하고
 	 *  오퍼의 PT 를 그대로 echo 해야 한다(PT 번호는 dynamic 96-127, RFC 3551). 없으면 -1
 	 *  (호출측이 하드코딩 fallback → 기존 VoLTE 동작 보존). */
-	int FindRemotePayloadType( const char * pszEncoding );
+	int FindRemotePayloadType( const char * pszEncoding, const char * pszMedia = "audio" );
+	/** 원격 m= 라인의 a=fmtp:<pt> 값 — answer 가 수락 파라미터로 echo 한다. 없으면 빈 문자열. */
+	std::string FindRemoteFmtp( const CSdpMedia * pclsMedia, int iPt );
 
 private:
 	CSipMessage * CreateMessage( const char * pszSipMethod );

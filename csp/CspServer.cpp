@@ -47,6 +47,7 @@ CCallDir gclsCallDir;
 #include "CspPhoneGroup.h"
 #include "CspRemoteNodeMap.h"
 #include "CspRole.h"
+#include "CspRouteHealth.h"
 #include "CspRouteMap.h"
 #include "CspRouteSetMap.h"
 #include "CspRoutingPolicyEngine.h"
@@ -244,6 +245,11 @@ int ServiceMain() {
     clsSetup.m_strCertFile = gclsSetup.m_strCertFile;
     clsSetup.m_strKeyFile = gclsSetup.m_strKeyFile;
     clsSetup.m_strCaCertFile = gclsSetup.m_strCaCertFile;
+    // 발신 TLS 연결(트렁크·피어 NNI)이 상호인증 요구를 받으면 **자기 노드 인증서**를 클라이언트 인증서로 제시한다
+    //   (TS 33.310 NDS/IP — 노드 인증서 한 장이 서버·클라이언트 양쪽 역할). 상대가 요구하지 않으면 제시되지 않는다.
+    //   서버 인증서 검증은 remote_nodes.tls_verify 로 피어마다(CCspRemoteNodeMap::ApplyTlsPolicies).
+    clsSetup.m_strClientCertFile = gclsSetup.m_strCertFile;
+    clsSetup.m_strClientKeyFile = gclsSetup.m_strKeyFile;
 
     clsSetup.m_strUserAgent = "csp_";
     clsSetup.m_strUserAgent.append( CSP_SERVER_VERSION );
@@ -542,6 +548,9 @@ int ServiceMain() {
 
         // IPsec SA 셋 — 임시 유예·retiring·해제 유예·수명 만료 회수 (sip_access_security.md §8.3)
         gclsIpsecSaSetMap.Sweep( time( NULL ) );
+
+        // RouteSet 헬스체크 — OPTIONS 프로브 송신·미응답 실패 처리 (sip_service_model.md §3, A-COM-003)
+        gclsRouteHealth.Tick( (long)time( NULL ) );
 
         if ( iSecond % 10 == 0 ) {
             gclsNonceMap.DeleteTimeout( 1000 );

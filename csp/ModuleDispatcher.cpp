@@ -23,6 +23,7 @@
 #include "CspPendingRouteMap.h"
 #include "CspPttGroup.h"
 #include "CspRemoteNodeMap.h"
+#include "CspRouteHealth.h"
 #include "CspRouteMap.h"
 #include "CspRouteSetMap.h"
 #include "CspRoutingPolicyEngine.h"
@@ -468,10 +469,11 @@ static void ReapSubscriptionOnNotifyFailure( CSipMessage *pclsMessage, int iStat
 }
 
 bool CModuleDispatcher::RecvResponse( int iThreadId, CSipMessage *pclsMessage ) {
-    // v3 (2026-04-22): OPTIONS 헬스체크는 RouteSet 의 health_check 가 담당하도록 이관 예정.
-    //   현 스테이지는 헬스체크 송신/수신 자체를 아직 구현 안함.
     (void)iThreadId;
     if ( pclsMessage == NULL ) return false;
+
+    // RouteSet 헬스체크(OPTIONS 프로브) 응답 — 프로브였으면 여기서 소비한다 (CspRouteHealth).
+    if ( gclsRouteHealth.OnResponse( pclsMessage ) ) return true;
 
     ReapSubscriptionOnNotifyFailure( pclsMessage, pclsMessage->m_iStatusCode );
 
@@ -489,6 +491,7 @@ bool CModuleDispatcher::SendTimeout( int iThreadId, CSipMessage *pclsMessage ) {
     (void)iThreadId;
     if ( pclsMessage == NULL ) return false;
 
+    if ( gclsRouteHealth.OnSendTimeout( pclsMessage ) ) return true;
     ReapSubscriptionOnNotifyFailure( pclsMessage, 0 );
     return false;
 }
@@ -1326,8 +1329,20 @@ static int _CallDurationSec( const char *pszCallId ) {
 }
 
 void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus ) {
+    EventCallEnd( pszCallId, iSipStatus, NULL );
+}
+
+int CModuleDispatcher::RelayEndStatus( int iSipStatus ) {
+    if ( iSipStatus < SIP_MULTIPLE_CHOICES ) return 0;
+    if ( iSipStatus < SIP_BAD_REQUEST ) return SIP_TEMPORARILY_UNAVAILABLE;  // 3xx
+    if ( iSipStatus == SIP_UNAUTHORIZED || iSipStatus == SIP_PROXY_AUTHENTICATION_REQUIRED ) return SIP_FORBIDDEN;
+    if ( iSipStatus == SIP_GONE ) return SIP_REQUEST_TIME_OUT;
+    return iSipStatus;
+}
+
+void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus, const char *pszReason ) {
     CCallInfo clsCallInfo;
-    CLog::Print( LOG_DEBUG, "EventCallEnd(%s:%d)", pszCallId, iSipStatus );
+    CLog::Print( LOG_DEBUG, "EventCallEnd(%s:%d) reason=%s", pszCallId, iSipStatus, pszReason ? pszReason : "-" );
 
     // MCData media plane 레그 — cmdp 세션 정리 (UE 발 BYE·실패 응답 포함)
     if ( gclsMcDataMediaService.OnCallTerminated( pszCallId ) ) return;
@@ -1373,7 +1388,9 @@ void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus ) {
         // CMP 리소스 해제 → BYE 순서 (리소스 먼저 해제 후 SIP 종료)
         bool bIsGroup = gclsGroupCallService.OnCallTerminated( pszCallId );
         gclsCallMap.Delete( pszCallId, !bIsGroup );
-        gclsUserAgent.StopCall( clsCallInfo.m_strPeerCallId.c_str() );
+        // 상대 leg 종료 — 종료 사유(Reason, RFC 3326 §2)와 최종 응답 코드를 그대로 옮긴다
+        //   (TS 24.229 §5.4.3.2 — 미응답 착신 leg 는 발신 leg 의 실패 코드로 끝나야 통계·사용자 표시가 맞는다).
+        gclsUserAgent.StopCall( clsCallInfo.m_strPeerCallId.c_str(), RelayEndStatus( iSipStatus ), pszReason );
 
         RemoveCallOwner( pszCallId );
         RemoveCallOwner( clsCallInfo.m_strPeerCallId.c_str() );

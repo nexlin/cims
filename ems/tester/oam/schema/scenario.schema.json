@@ -499,6 +499,23 @@
           "description": "dtmf: 숫자열(0-9*#A-D) · reject: 응답 코드 · floor_request: 기대 결과 granted|denied|queued|any · pickup: 피처코드(${var} 바인딩 가능) · subscribe: 이벤트 패키지(기본 dialog) · publish: affiliate|deaffiliate",
           "title": "Payload"
         },
+        "plane": {
+          "anyOf": [
+            {
+              "enum": [
+                "control",
+                "media"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "sds_send — control(기본): SIP MESSAGE(C-plane) · media: MSRP media plane(TS 24.282 §9.2.3 — INVITE m=message → cmdp 종단, 수신자는 풀 msrp 면 MSRP 배포·아니면 FILEURL 폴백). 대상 CSP 는 그룹 SDS 만 media plane 을 받는다(1:1 은 403)",
+          "title": "Plane"
+        },
         "sample": {
           "anyOf": [
             {

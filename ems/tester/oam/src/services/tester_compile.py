@@ -229,10 +229,10 @@ def compile_steps(scenario: Scenario, bindings: Dict[str, object]) -> List[dict]
         raise CompileError(f'워커가 지원하지 않는 단계 {unsupported} — 지원: {sorted(WORKER_STEPS)}')
 
     def emit(i, step, who=None, from_=None, to=None, after_ms=0, seconds=None, media=None, group=None,
-             payload=None, cause=None, expect=None, sample=None, loop=None, disposition=None):
+             payload=None, cause=None, expect=None, sample=None, loop=None, disposition=None, plane=None):
         cs = CompiledStep(idx=len(out), step=step, who=list(who or []), **{'from': from_}, to=to,
                           after_ms=int(after_ms or 0), seconds=seconds, media=media, group=group,
-                          payload=payload, cause=cause, sample=sample, loop=loop, disposition=disposition, expect=expect or {})
+                          payload=payload, cause=cause, sample=sample, loop=loop, disposition=disposition, plane=plane, expect=expect or {})
         d = cs.model_dump(by_alias=True, exclude_none=True)
         d['src'] = i
         out.append(d)
@@ -259,7 +259,7 @@ def compile_steps(scenario: Scenario, bindings: Dict[str, object]) -> List[dict]
         emit(i, s.step, who=s.who, from_=s.from_, to=bind_str(s.to, bindings) if s.to not in scenario.roles else s.to,
              after_ms=s.after_ms, seconds=seconds, media=s.media,
              group=s.group, payload=payload, cause=s.cause, expect=s.expect, sample=s.sample, loop=s.loop,
-             disposition=s.disposition)
+             disposition=s.disposition, plane=s.plane)
     return out
 
 
@@ -580,7 +580,8 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
                 pc = PoolCreate(pool=pname, kind='ue', identities=ids_of(pname), transport=p.transport, srtp=p.srtp,
                                 service=topology.pool_service(pname), prack=bool(p.prack), dtmf=p.dtmf, target_csp=tc,
                                 tls_verify=bool(p.tls_verify and p.transport == 'tls'), tls_client_cert=bool(p.tls_client_cert and p.transport == 'tls'),
-                                nat=p.nat, media_agent=(topology.worker_url(next(x for x in topology.workers if x.name == p.media_worker)) if p.media_worker else None))
+                                nat=p.nat, media_agent=(topology.worker_url(next(x for x in topology.workers if x.name == p.media_worker)) if p.media_worker else None),
+                                msrp=bool(p.msrp))
             pools.append(pc.model_dump(by_alias=True, exclude_none=True))
         slices = {role: [b, e] for role, (_p, b, e) in pw['ranges'].items()}
         rs = RunStart(run_id=run_id, scenario_id=scenario.id, roles=dict(pw['role_pool']), role_slices=slices,

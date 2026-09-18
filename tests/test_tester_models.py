@@ -85,6 +85,21 @@ class Strictness(unittest.TestCase):
         _, errs = validate('scenario', doc)
         self.assertTrue(any('answer' in e for e in errs))
 
+    def test_sds_plane(self):
+        # sds_send plane: media(MSRP media plane) — sds_send 에만 둔다
+        doc = self._scn()
+        doc['flow'].append({'step': 'sds_send', 'from': 'a', 'to': 'b', 'payload': 'x', 'plane': 'media'})
+        _, errs = validate('scenario', doc)
+        self.assertEqual(errs, [])
+        doc = self._scn()
+        doc['flow'].append({'step': 'sds_send', 'from': 'a', 'to': 'b', 'payload': 'x', 'plane': 'msrp'})
+        _, errs = validate('scenario', doc)
+        self.assertTrue(errs)
+        doc = self._scn()
+        doc['flow'].append({'step': 'sds_recv', 'who': ['b'], 'plane': 'media'})
+        _, errs = validate('scenario', doc)
+        self.assertTrue(any('plane' in e for e in errs))
+
     def test_profile_required_by_model(self):
         _, errs = validate('profile', {'model': 'step', 'start': 5})
         self.assertTrue(any('step' in e and 'hold_s' in e for e in errs))

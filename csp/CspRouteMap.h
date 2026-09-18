@@ -55,6 +55,7 @@ struct RouteConfig {
 struct RouteRuntime {
     std::atomic<bool> alive{ true };
     std::atomic<int> consecutive_failures{ 0 };
+    std::atomic<int> consecutive_successes{ 0 };  // dead 상태에서의 회복 프로브 계수 (health_check_recovery_probes)
     std::atomic<int> last_rtt_ms{ -1 };
     std::atomic<long> last_ping_at{ 0 };
     std::atomic<long> last_reply_at{ 0 };
@@ -63,6 +64,7 @@ struct RouteRuntime {
     RouteRuntime( const RouteRuntime &o )
         : alive( o.alive.load() ),
           consecutive_failures( o.consecutive_failures.load() ),
+          consecutive_successes( o.consecutive_successes.load() ),
           last_rtt_ms( o.last_rtt_ms.load() ),
           last_ping_at( o.last_ping_at.load() ),
           last_reply_at( o.last_reply_at.load() ) {
@@ -70,6 +72,7 @@ struct RouteRuntime {
     RouteRuntime &operator=( const RouteRuntime &o ) {
         alive = o.alive.load();
         consecutive_failures = o.consecutive_failures.load();
+        consecutive_successes = o.consecutive_successes.load();
         last_rtt_ms = o.last_rtt_ms.load();
         last_ping_at = o.last_ping_at.load();
         last_reply_at = o.last_reply_at.load();
@@ -113,10 +116,18 @@ public:
 
     size_t Size() const;
 
-    // ─ 런타임 상태 조작 (헬스체크 모듈이 호출) ─
+    // ─ 런타임 상태 조작 (헬스체크 모듈 CCspRouteHealth 가 호출) ─
+    /** 프로브 성공. dead 였으면 연속 성공이 iRecoveryProbes 이상일 때 alive 로 전이 — 전이하면 bWentAlive=true. */
+    bool MarkAlive( const std::string &routeName, int rtt_ms, int iRecoveryProbes, bool &bWentAlive );
+    /** 프로브 실패. 연속 실패가 iDeadThreshold(>0) 이상이면 dead 로 전이 — 전이하면 bWentDead=true. */
+    bool MarkFail( const std::string &routeName, int iDeadThreshold, bool &bWentDead );
     bool MarkAlive( const std::string &routeName, int rtt_ms );
     bool MarkFail( const std::string &routeName );
     bool IsAlive( const std::string &routeName ) const;
+    /** 프로브 송신 시각 기록 (헬스체크 주기 판정용). */
+    void TouchPing( const std::string &routeName, long now );
+    /** 런타임 스냅샷 — 상태 export 용 (없으면 false). */
+    bool GetRuntime( const std::string &routeName, RouteRuntime &out ) const;
 
 private:
     mutable std::mutex m_mutex;

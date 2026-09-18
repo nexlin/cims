@@ -3,6 +3,8 @@
 #include "CspConfigCache.h"
 #include "Log.h"
 #include "SimpleJson.h"
+#include "SipServer.h"
+#include "SipServerSetup.h"
 
 CCspRemoteNodeMap gclsRemoteNodeMap;
 
@@ -58,6 +60,7 @@ bool CCspRemoteNodeMap::Sync() {
         m_byName.swap( newMap );
     }
     CLog::Print( LOG_INFO, "RemoteNodeMap: sync complete, %zu nodes", Size() );
+    ApplyTlsPolicies();
     return true;
 }
 
@@ -92,4 +95,24 @@ size_t CCspRemoteNodeMap::Size() const {
 bool CCspRemoteNodeMap::HasName( const std::string &name ) const {
     std::lock_guard<std::mutex> lk( m_mutex );
     return m_byName.find( name ) != m_byName.end();
+}
+
+void CCspRemoteNodeMap::ApplyTlsPolicies() const {
+    gclsUserAgent.m_clsSipStack.ClearTlsPeerPolicy();
+    int iCount = 0;
+    std::lock_guard<std::mutex> lk( m_mutex );
+    for ( const auto &kv : m_byName ) {
+        const RemoteNodeInfo &n = kv.second;
+        if ( !n.enabled || n.protocol != "TLS" || n.ip.empty() || n.port <= 0 ) continue;
+        CSipTlsPeerPolicy clsPolicy;
+        clsPolicy.m_bVerifyServer = n.tls_verify;
+        clsPolicy.m_strVerifyCaFile = gclsSetup.m_strCaCertFile;  // 사이트 CA(교차 인증서 체인) — 비면 시스템 저장소
+        gclsUserAgent.m_clsSipStack.SetTlsPeerPolicy( n.ip.c_str(), n.port, clsPolicy );
+        ++iCount;
+        CLog::Print( LOG_INFO, "RemoteNodeMap: TLS peer '%s' %s:%d verify=%d ca=%s", n.name.c_str(), n.ip.c_str(),
+                     n.port, n.tls_verify ? 1 : 0,
+                     gclsSetup.m_strCaCertFile.empty() ? "<system>" : gclsSetup.m_strCaCertFile.c_str() );
+    }
+    if ( iCount )
+        CLog::Print( LOG_INFO, "RemoteNodeMap: %d TLS peer polic%s applied", iCount, iCount == 1 ? "y" : "ies" );
 }

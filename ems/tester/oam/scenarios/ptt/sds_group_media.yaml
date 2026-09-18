@@ -1,0 +1,16 @@
+# MCData 그룹 SDS **media plane**(TS 24.282 §9.2.3) — a 가 그룹에 대용량 SDS 를 MSRP 로 낸다: INVITE(더미 m=audio + m=message TCP/MSRP a=sendonly)
+#   → CSP McDataMediaService 가 cmdp 수신 세션을 잡고 200(a=path) → a 가 cmdp 로 SEND(SDS SIGNALLING·DATA PAYLOAD TLV) → cmdp 종단·FD 스토어 →
+#   CSP 하이브리드 fan-out: 풀 msrp(Contact mcdata.sds) 멤버는 서버발 INVITE(mcdata-info + m=message) → MSRP 로 받고, 나머지는 FD SIGNALLING(FILEURL)
+#   MESSAGE 로 받는다. sds_media_pct = MSRP 로 받은 멤버 비율(멤버 풀 전부 msrp 면 100). disposition 은 C-plane SDS NOTIFICATION 으로 되온다.
+#   CSP 는 그룹 SDS 만 media plane 을 받는다(1:1 은 403 — mcdata_messaging.md §4.7 phase 1).
+id: MCDATA-SDS-GROUP-MEDIA
+title: MCData 그룹 SDS media plane(MSRP) — INVITE m=message · cmdp 종단 · 멤버 MSRP 배포
+tags: [mcdata, sds, msrp]
+roles:
+  a: { pool: ptt_ue }
+  m: { pool: ptt_ue, multi: true }
+flow:
+  - { step: register, who: [a, m], expect: { code: 200 } }
+  - { step: sds_send, from: a, plane: media, payload: "large group message over media plane large group message over media plane large group message over media plane large group message over media plane large group message over media plane large group message over media plane large group message over media plane large group message over media plane large group message over media plane large group message over media plane large group message over media plane large group message over media plane large group message over media plane large group message over media plane large group message over media plane large group message over media plane large group message over media plane large group message over media plane large group message over media plane large group message over media plane large group message over media plane large group message over media plane large group message over media plane large group message over media plane", disposition: true, expect: { code: 200 } }
+  - { step: sds_recv, who: [m], expect: { sds_delay_ms: { p95: 2000 }, sds_media_pct: 100 } }
+  - { step: wait, seconds: 2, expect: { sds_disposition_pct: 100 } }

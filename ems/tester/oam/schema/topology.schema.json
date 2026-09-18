@@ -1355,6 +1355,12 @@
           "description": "미디어 전담 워커(§4 미디어 평면 후속) — 이 풀의 RTP 소켓·송수신을 그 워커(에이전트 /media/*)에 둔다. SDP c=/m= 는 그 호스트를 가리키고 시그널링은 worker 에 남는다. 자기 워커와 다른 이름, PTT(floor) 풀은 불가",
           "title": "Media Worker"
         },
+        "msrp": {
+          "default": false,
+          "description": "MCData media plane 능력(TS 24.282 §9.2.3) — REGISTER Contact 의 +g.3gpp.icsi-ref 에 mcdata.sds 를 더해 서버가 대용량 SDS 를 MSRP(INVITE m=message)로 배포하는 대상이 된다. 끄면 FD SIGNALLING(FILEURL) MESSAGE 폴백으로 받는다. sds_send plane: media 의 발신 쪽은 이 플래그와 무관",
+          "title": "Msrp",
+          "type": "boolean"
+        },
         "nat": {
           "anyOf": [
             {

@@ -36,6 +36,22 @@
 
 #include <vector>
 #include <set>
+#include <map>
+
+/** 목적지(ip:port)별 TLS 클라이언트 정책 — 발신 TLS 연결이 그 피어에 제시할 클라이언트 인증서와 서버 인증서 검증 앵커.
+ *  비어 있는 필드는 CSipStackSetup 전역값(m_strClientCertFile/m_bTlsVerifyServer/m_strTlsVerifyCaFile)으로 폴백한다.
+ *  응용(CSP)이 remote_nodes 의 tls_verify 같은 피어 설정을 여기로 옮긴다 — 클라이언트 SSL_CTX 는 전역이지만
+ *  인증서·검증 저장소는 연결(SSL) 단위로 적용되므로 피어마다 다르게 둘 수 있다(TS 33.310 NDS/IP 상호인증). */
+class CSipTlsPeerPolicy
+{
+public:
+	CSipTlsPeerPolicy() : m_bVerifyServer(false) {}
+
+	bool m_bVerifyServer;
+	std::string m_strVerifyCaFile;
+	std::string m_strClientCertFile;
+	std::string m_strClientKeyFile;
+};
 
 typedef std::list< ISipStackCallBack * > SIP_STACK_CALLBACK_LIST;
 
@@ -73,6 +89,14 @@ public:
 	 *  소스 포트가 맞아야 ESP 로 나간다. UDP 는 Via 매칭 리스너 소켓이 같은 역할을 한다(R5.b'). */
 	void AddTcpSourcePort( int iPort );
 	void RemoveTcpSourcePort( int iPort );
+
+	// ── 목적지별 TLS 클라이언트 정책 (CSipTlsPeerPolicy) ──────────
+	/** ip:port 로 나가는 TLS 연결의 정책을 등록/교체한다. 등록이 없는 목적지는 Setup 전역값을 쓴다. */
+	void SetTlsPeerPolicy( const char * pszIp, int iPort, const CSipTlsPeerPolicy & clsPolicy );
+	/** 등록된 정책 전부 제거 (설정 재적재 시 응용이 비우고 다시 채운다). */
+	void ClearTlsPeerPolicy( );
+	/** 목적지 정책 조회 — 없으면 false. */
+	bool GetTlsPeerPolicy( const char * pszIp, int iPort, CSipTlsPeerPolicy & clsPolicy );
 	/** 요청의 Via[0] 포트가 등록돼 있으면 그 포트, 아니면 0 (OS 자동) */
 	int SelectTcpSourcePort( CSipMessage * pclsMessage );
 
@@ -193,6 +217,8 @@ public:
 	bool						m_bTlsThreadListInit;
 	CTcpSocketMap		m_clsTlsSocketMap;
 	CTcpConnectMap	m_clsTlsConnectMap;
+	std::map<std::string, CSipTlsPeerPolicy> m_mapTlsPeerPolicy;	// "ip:port" → 정책
+	CSipMutex				m_clsTlsPeerPolicyMutex;
 #endif
 
 private:

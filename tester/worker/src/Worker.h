@@ -154,6 +154,7 @@ struct Pool {
     std::string targetDomain;       // 대상 홈 도메인(target_csp.domain_volte) — 피어가 역할 없는 번호 리터럴을 부를 때 Request-URI host
     std::string profile;            // peer 프로파일
     std::string service = "volte";  // ue: 접속환경 클래스 volte|voip|ptt — ptt 면 MCPTT 단말(feature tag·기동 절차·floor)
+    bool msrp = false;              // ue: MCData media plane 능력 — REGISTER Contact 에 mcdata.sds ICSI(서버가 MSRP 배포 대상으로 고른다)
     std::map<std::string, std::vector<Endpoint*>> groups;   // ptt: MCPTT 그룹 id → 이 풀의 멤버(신원 순)
     std::unique_ptr<CsimPeer> peer; // kind=peer 엔진
     int answerDelayMs = 0;          // peer answer=delay — 착신 INVITE 뒤 이 시간 동안 응답을 보류(시나리오 answer/progress 의 after_ms 와 합쳐 늦은 쪽)
@@ -186,6 +187,7 @@ struct CompiledStep {
     std::string sample;             // media_send — 샘플 id(빈 값 = 풀 기본 원천)
     bool loop = true;               // media_send — false 면 샘플 끝에서 송출 정지
     bool disposition = false;       // sds_send — disposition(delivery) 요청: 수신 단말이 SDS NOTIFICATION 을 되보낸다
+    std::string plane;              // sds_send — control(기본, SIP MESSAGE) | media(MSRP — TS 24.282 §9.2.3, SimSession::SendSdsMedia)
     Json media, expect;
 };
 
@@ -263,6 +265,7 @@ public:
     void OnSdsResponse(SimSession* s, const std::string& msgId, int iSipStatus, long long ms) override;
     void OnSdsRecv(SimSession* s, const std::string& from, const std::string& msgId, const std::string& group, const std::string& text, int dispReq) override;
     void OnSdsNotification(SimSession* s, const std::string& msgId, int notifType) override;
+    void OnSdsMediaRecv(SimSession* s, const std::string& from, const std::string& msgId, const std::string& group, const std::string& text, int dispReq) override;
     // ICsimPeerObserver — 스택 스레드
     void OnPeerIncoming(CsimPeer* p, const std::string& callId, const std::string& from, const std::string& to, bool hasPai) override;
     void OnPeerCallStart(CsimPeer* p, const std::string& callId, long long srdMs) override;
@@ -283,7 +286,7 @@ private:
     struct Event {
         enum Kind { REGISTER, INCOMING, CALLSTART, CALLEND, BYERESP, RING, PRACK, REINVITE, REINVITE_RESP, REFER_RESP,
                     AFFILIATE, ANSWERED, FLOOR, SUBSCRIBE_RESP, DLG_NOTIFY, FAULT_REJECT, WIRE_DROP, INVITE_RETRANS, THIG,
-                    SDS_RESP, SDS_RECV, SDS_NOTIF,   // MCData SDS — user = msgId · SDS_RECV: callId = 발신자, event = 그룹 id, status = disposition 요청 · SDS_NOTIF: status = notifType
+                    SDS_RESP, SDS_RECV, SDS_NOTIF,   // MCData SDS — user = msgId · SDS_RECV: callId = 발신자, event = 그룹 id, status = disposition 요청, hasPai = media plane(MSRP) 도착 · SDS_NOTIF: status = notifType
                     REAL_CALL, REAL_STATS, REAL_EXIT } kind;   // WIRE_DROP(user = method)·INVITE_RETRANS·THIG(status = ok) = 피어 오류 주입·THIG 관측   // REAL_* = 실단말 프로세스 이벤트(onEvent 가 위의 종류로 다시 푼다)
         SimSession* s;
         CsimPeer* peer;

@@ -10,6 +10,7 @@ add_library(csim STATIC
     G711.cpp
     RtpThread.cpp
     McDataSds.cpp
+    McDataMsrp.cpp
 )
 target_include_directories(csim PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -58,6 +59,9 @@ target_link_libraries(csim_tls_mutual_test PRIVATE csim)
 # MCData SDS 코덱 왕복(TS 24.282 §15 TLV·conversation ID 호환)
 add_executable(csim_sds_test CsimSdsTest.cpp)
 target_link_libraries(csim_sds_test PRIVATE csim)
+# MCData SDS media plane(MSRP) — 프레이밍 왕복 + 루프백 cmdp 흉내(수신·응답·REPORT) 상대 송신/수신 절차
+add_executable(csim_msrp_test CsimMsrpTest.cpp)
+target_link_libraries(csim_msrp_test PRIVATE csim)
 target_link_libraries(cspsim PRIVATE csim mariadb)
 
 target_include_directories(cspsim PRIVATE

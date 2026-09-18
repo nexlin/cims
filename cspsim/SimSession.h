@@ -16,6 +16,7 @@
 #include <vector>
 #include <mutex>
 #include <set>
+#include <thread>
 
 // Forward declaration
 class SimSession;
@@ -45,6 +46,8 @@ public:
      *  deferred(SimSession::AnswerCall 이 호출) 두 모드가 같은 AnswerVoip 를 쓴다. */
     void AnswerPtt(const char* pszCallId, CSipCallRtp* pclsRtp, CSipMessage* pclsMessage);
     void AnswerVoip(const char* pszCallId, CSipCallRtp* pclsRtp);
+    /** MCData media plane 착신(서버발 INVITE, m=message) — 200(audio inactive + m=message recvonly a=setup:active) 뒤 MSRP 수신 스레드. */
+    bool AnswerMsrp(const char* pszCallId, CSipCallRtp* pclsRtp, CSipMessage* pclsMessage);
     /** answer SDP 구성(SRTP 협상·코덱 echo·telephone-event·video) — 183 과 200 이 같은 answer 를 쓴다(SimSession::Progress → AnswerCall).
      *  실패(SAVP 수락 불가 등)면 488 을 내고 false. */
     bool BuildAnswer(const char* pszCallId, CSipCallRtp* pclsRtp, CSipCallRtp& clsLocalRtp);
@@ -354,6 +357,25 @@ public:
     /** SDS NOTIFICATION(delivered 등)을 원 발신자에게 1:1 MESSAGE 로. 수신 SDS 가 disposition 을 요청하면 자동으로 낸다(m_bSdsAutoDelivered). */
     bool SendSdsNotification(const std::string& toUser, const std::string& strConvId, const std::string& strMsgId, int iNotifType);
     bool m_bSdsAutoDelivered = true;
+    // ── MCData SDS **media plane**(MSRP, TS 24.282 §9.2.3 — cspsim/McDataMsrp.h) — 계측기 단계 sds_send plane: media ──
+    /** REGISTER Contact 에 mcdata.sds ICSI 를 광고한다(서버가 MSRP 배포 대상으로 고른다). Start() 전. */
+    void SetMcDataMsrp(bool b) { m_bMcDataMsrp = b; }
+    bool m_bMcDataMsrp = false;
+    /** SDS 를 media plane 으로 — INVITE(더미 audio + m=message sendonly) → 200 의 a=path 로 MSRP SEND(signalling·payload TLV) → 200/REPORT.
+     *  완료는 관측자 OnSdsResponse(msgId, 200 | 실패 코드: 503 접속 실패·408 무응답·MSRP 오류 코드, ms). 서버가 BYE 로 leg 를 닫는다(호 이벤트 아님).
+     *  반환 = message ID, 실패(진행 중인 media SDS 가 있음·인자 없음)면 빈 문자열. */
+    std::string SendSdsMedia(const std::string& toUser, const std::string& groupId, const std::string& text, bool bRequestDelivery);
+    bool IsMsrpCall(const char* pszCallId) const {
+        return pszCallId && ((!m_strMsrpCallId.empty() && m_strMsrpCallId == pszCallId) || (!m_strMsrpRxCallId.empty() && m_strMsrpRxCallId == pszCallId));
+    }
+    struct MsrpTx { std::string msgId, convId, text, localPath; bool delivery = false; long long tSendMs = 0; long long timeSec = 0; };
+    MsrpTx        m_msrpTx;
+    std::string   m_strMsrpCallId;      // 발신 media SDS 의 INVITE Call-ID
+    std::string   m_strMsrpRxCallId;    // 수신 media SDS 의 서버발 INVITE Call-ID
+    std::thread   m_thrMsrp;
+    void _JoinMsrp();
+    void _MsrpSendThread(std::string strServerPath);
+    void _MsrpRecvThread(std::string strServerPath, std::string strLocalPath, std::string strFrom, std::string strGroup);
     struct SdsTx { std::string msgId, toUser, groupId, text, convId; bool delivery = false; long long tSendMs = 0; int seq = 1; std::string fromTag; bool authRetried = false; long long timeSec = 0; };
     std::map<std::string, SdsTx> m_mapSdsTx;   // Call-ID → 송신 중 SDS(응답 대기·401 재전송 재료)
     std::atomic<int> m_iSdsRecv{0};

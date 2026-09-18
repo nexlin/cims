@@ -105,6 +105,19 @@
       "recommended_action": "소스 IP 분포 확인(params ip/top_count)·차단 검토. 정상 단말이면 단말의 Security-Client/Verify 구현과 Setup.SecAgree.Require 정책 확인"
     },
     {
+      "type": "connection_lost",
+      "code": "A-COM-003",
+      "perceived_severity": "major",
+      "event_type": "communications",
+      "probable_cause": "communicationsSubsystemFailure",
+      "mo_class": "peer",
+      "metric": "트렁크/IBCF 피어(remote_node) OPTIONS 헬스체크",
+      "msg_open": "Peer {peer} unreachable: OPTIONS keepalive timeout ({fails} consecutive, route {route}, {reason})",
+      "msg_close": "Peer connectivity restored ({mo})",
+      "effect": "해당 Route 가 dead 로 전이해 RouteSet 분배에서 제외됨 — 이 피어 방향 호는 다른 멤버로 우회하거나(failover) 전원 dead 면 fallback_policy 로 거절",
+      "recommended_action": "대국 상태·네트워크·방화벽(OPTIONS 응답) 확인. 회복은 recovery_probes 연속 성공 뒤 자동"
+    },
+    {
       "type": "storage_failure",
       "code": "A-PRC-013",
       "perceived_severity": "critical",

@@ -111,7 +111,8 @@ CSP 가 수신하는 bind 포트. `edge` 는 **인터페이스 분류**다 — p
 |---|---|
 | `ip`, `port`, `protocol` | transport |
 | `remote_domain` | SIP URI host (outgoing Request-URI/To 의 host 로 사용) |
-| `srv_lookup`, `dns_fallback`, `tls_verify` | 고급 transport 옵션 |
+| `srv_lookup`, `dns_fallback` | 고급 transport 옵션(예약) |
+| `tls_verify` | `protocol=TLS` 피어로 **나가는** 연결에서 서버 인증서를 체인 검증한다(앵커 = TLS primary LocalNode 의 `tls_ca_path`, 비면 시스템 저장소 — 호스트명(SAN)은 대조하지 않는다, IP 로 붙는 NNI 관례). 상호인증의 클라이언트 쪽은 설정이 없다 — 피어가 요구하면 CSP 는 **자기 노드 인증서**(TLS primary LocalNode 의 cert/key)를 제시한다(TS 33.310 NDS/IP, 노드 인증서 한 장이 양쪽 역할). psip 은 목적지별 정책(`CSipTlsPeerPolicy`)으로 이를 연결 단위에 적용한다 |
 
 ### 2-3. Route — (LocalNode, RemoteNode) unique
 
@@ -140,7 +141,7 @@ Peering cluster (1:1:1, 1 active + N standby 등) 를 표현.
 | `members[].route_ref` | 포함할 Route |
 | `members[].priority` | failover 순서 (낮을수록 우선) |
 | `members[].weight` | weighted 분배 비율 |
-| `health_check_*` | OPTIONS ping 주기 / dead 임계 / recovery 임계. **런타임 미구현** — 프로브를 보내지 않아 모든 Route 가 alive 로 취급된다 (§9) |
+| `health_check_*` | `mode=options_ping` 이면 `CCspRouteHealth` 가 멤버 Route 마다 `interval_sec` 간격으로 OPTIONS 를 RemoteNode 로 보낸다(Via/From 은 Route 의 LocalNode). 응답 2xx~4xx·6xx = 성공, 5xx·전송 타임아웃·주기 내 무응답 = 실패. 연속 `dead_threshold` 실패 → dead(`RouteRuntime.alive=false`, A-COM-003 open), dead 에서 연속 `recovery_probes` 성공 → alive(close). `mode=none` 은 프로브 없음(항상 alive). `invite_response` 는 미구현(§9) |
 | `fallback_policy` | 전체 dead 시 `reject` / `next_policy` |
 
 같은 Route 가 다른 RouteSet 에 다른 priority 로 속할 수 있다.
@@ -527,7 +528,6 @@ AccessServices:
 
 | 항목 | 상태 |
 |------|------|
-| RouteSet 헬스체크 (`health_check_*`) | 프로브 송신 코드가 없다. `RouteRuntime.alive` 가 항상 true 이므로 dead peer 도 계속 선택된다. 손절체는 `routes.enabled=false` 로 한다 |
 | `routes.register_to_remote` / `register_expires` | 트렁크 REGISTER 워커 미구현 — 값만 보관 |
 | Rule field `dst_ip` / `p_asserted_identity` / `via_host` | `MessageCtx` 에 채워지지 않아 항상 빈 값. 수신 인터페이스 구분은 ACL `scope=local_node` 로 대체 |
 | `routing_policies.target_type=access_service` | 매칭·로그까지만. 이후는 기존 TAS/B2BUA 경로가 처리 |
@@ -535,7 +535,7 @@ AccessServices:
 | 인바운드 Route 식별의 RemoteNode 호스트명 | `FindInbound` 는 RemoteNode.ip 를 IP 리터럴로 비교한다 — 호스트명 RemoteNode 의 피어는 인바운드에서 식별되지 않는다(발신은 된다) |
 | `routing_policies.transform_rule_set_refs` (메시지 변환) | 예약 필드 |
 | RuleSet 중첩 (tree AND/OR/NOT) | 2차 |
-| 헬스체크 `invite_response` 모드 | 2차 |
+| 헬스체크 `invite_response` 모드 | 미구현 — 그 RouteSet 은 프로브를 내지 않아 항상 alive. `options_ping` 을 쓴다 |
 | Rule field: `record_route`, `p_charging_vector` 등 | 필요시 추가 |
 | listener_id 전파 | UDP·TCP·TLS 수신 경로 전부(psip `TcpSessionList.m_iListenerId`). 레거시 단일 TCP 리스너(id 0)만 LocalNode 매칭이 없다 |
 | 전화 B-leg 신원 도메인 (From / To / P-Asserted-Identity) | 스택 기본 도메인(`volte`)으로 고정 — 유선 `voip` 회선도 `volte` 로 표기된다. 동작 지장 없음(user 매칭 폴백), 표기만 어긋남. 정리 범위·선행 과제는 §9.1 |

@@ -51,6 +51,9 @@ struct ICsimObserver {
                            const std::string& /*text*/, int /*dispReq*/) {}
     /** 자기가 보낸 SDS 에 대한 SDS NOTIFICATION 수신(notifType 2 = delivered) — disposition 회신율의 분자. */
     virtual void OnSdsNotification(SimSession* /*s*/, const std::string& /*msgId*/, int /*notifType*/) {}
+    /** media plane(MSRP, TS 24.282 §9.2.3)으로 도착한 SDS — 기본은 OnSdsRecv 와 같게 다룬다(계측기는 경로를 따로 센다). */
+    virtual void OnSdsMediaRecv(SimSession* s, const std::string& from, const std::string& msgId, const std::string& group,
+                                const std::string& text, int dispositionReq) { OnSdsRecv(s, from, msgId, group, text, dispositionReq); }
 };
 
 #endif

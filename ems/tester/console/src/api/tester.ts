@@ -50,6 +50,8 @@ export interface ScenarioStep {
   cause?: number
   /** sds_send — delivery disposition 요청(수신 단말이 SDS NOTIFICATION 을 되보낸다) */
   disposition?: boolean
+  /** sds_send — control(기본, SIP MESSAGE) · media(MSRP media plane — INVITE m=message → cmdp, 그룹 SDS 만) */
+  plane?: 'control' | 'media'
   expect?: Record<string, unknown>
 }
 
@@ -120,6 +122,8 @@ export interface UePoolDoc extends TopoPoolBase {
   nat?: { netns: string; local_ip: string }
   /** 미디어 전담 워커 — 이 풀의 RTP 를 그 워커(에이전트 /media/*)에서 굴린다(자기 워커와 다른 이름, PTT 불가) */
   media_worker?: string
+  /** MCData media plane 능력 — Contact icsi-ref 에 mcdata.sds → 대용량 SDS 를 MSRP 로 받는 배포 대상(끄면 FILEURL 폴백) */
+  msrp?: boolean
 }
 export type DtmfMode = 'rfc4733' | 'inband' | 'off'
 export interface PeerPoolDoc extends TopoPoolBase {

@@ -114,6 +114,22 @@
           "default": null,
           "title": "Payload"
         },
+        "plane": {
+          "anyOf": [
+            {
+              "enum": [
+                "control",
+                "media"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plane"
+        },
         "sample": {
           "anyOf": [
             {

@@ -171,31 +171,65 @@ size_t CCspRouteMap::Size() const {
     return m_byName.size();
 }
 
-bool CCspRouteMap::MarkAlive( const std::string &routeName, int rtt_ms ) {
+bool CCspRouteMap::MarkAlive( const std::string &routeName, int rtt_ms, int iRecoveryProbes, bool &bWentAlive ) {
+    bWentAlive = false;
     std::lock_guard<std::mutex> lk( m_mutex );
     auto it = m_byName.find( routeName );
     if ( it == m_byName.end() ) return false;
+    RouteRuntime &rt = it->second.rt;
     long now = (long)time( nullptr );
-    bool was = it->second.rt.alive.load();
-    it->second.rt.alive.store( true );
-    it->second.rt.consecutive_failures.store( 0 );
-    it->second.rt.last_rtt_ms.store( rtt_ms );
-    it->second.rt.last_reply_at.store( now );
-    if ( !was ) {
-        CLog::Print( LOG_SYSTEM, "RouteMap: route '%s' went ALIVE (rtt=%dms)", routeName.c_str(), rtt_ms );
+    rt.consecutive_failures.store( 0 );
+    rt.last_rtt_ms.store( rtt_ms );
+    rt.last_reply_at.store( now );
+    int succ = ++rt.consecutive_successes;
+    if ( !rt.alive.load() ) {
+        // dead → alive 는 recovery_probes 연속 성공 뒤에만 (플래핑 방지)
+        if ( succ < ( iRecoveryProbes > 0 ? iRecoveryProbes : 1 ) ) return true;
+        rt.alive.store( true );
+        bWentAlive = true;
+        CLog::Print( LOG_SYSTEM, "RouteMap: route '%s' went ALIVE (rtt=%dms, %d probe%s)", routeName.c_str(), rtt_ms,
+                     succ, succ == 1 ? "" : "s" );
     }
     return true;
 }
 
-bool CCspRouteMap::MarkFail( const std::string &routeName ) {
+bool CCspRouteMap::MarkFail( const std::string &routeName, int iDeadThreshold, bool &bWentDead ) {
+    bWentDead = false;
     std::lock_guard<std::mutex> lk( m_mutex );
     auto it = m_byName.find( routeName );
     if ( it == m_byName.end() ) return false;
-    int fails = ++it->second.rt.consecutive_failures;
-    // dead 임계는 RouteSet 에서 판단 (여기선 카운트만 유지).
-    // RouteSetMap 이 dead_threshold 넘으면 MarkDead 별도 호출 가능하지만,
-    // 편의상 fails 만으로 판단하고 싶으면 여기서 alive=false 로.
-    (void)fails;
+    RouteRuntime &rt = it->second.rt;
+    rt.consecutive_successes.store( 0 );
+    int fails = ++rt.consecutive_failures;
+    if ( iDeadThreshold > 0 && fails >= iDeadThreshold && rt.alive.load() ) {
+        rt.alive.store( false );
+        bWentDead = true;
+        CLog::Print( LOG_SYSTEM, "RouteMap: route '%s' went DEAD (%d consecutive failures)", routeName.c_str(), fails );
+    }
+    return true;
+}
+
+bool CCspRouteMap::MarkAlive( const std::string &routeName, int rtt_ms ) {
+    bool bDummy = false;
+    return MarkAlive( routeName, rtt_ms, 1, bDummy );
+}
+
+bool CCspRouteMap::MarkFail( const std::string &routeName ) {
+    bool bDummy = false;
+    return MarkFail( routeName, 0, bDummy );
+}
+
+void CCspRouteMap::TouchPing( const std::string &routeName, long now ) {
+    std::lock_guard<std::mutex> lk( m_mutex );
+    auto it = m_byName.find( routeName );
+    if ( it != m_byName.end() ) it->second.rt.last_ping_at.store( now );
+}
+
+bool CCspRouteMap::GetRuntime( const std::string &routeName, RouteRuntime &out ) const {
+    std::lock_guard<std::mutex> lk( m_mutex );
+    auto it = m_byName.find( routeName );
+    if ( it == m_byName.end() ) return false;
+    out = it->second.rt;
     return true;
 }
 

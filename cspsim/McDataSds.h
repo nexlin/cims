@@ -47,6 +47,9 @@ Body buildGroupSds(const std::string& groupId, const std::string& text, const st
 /** 1:1 SDS 본문(request-type one-to-one-sds, request-uri tel:<상대>). */
 Body buildOneToOneSds(const std::string& toUser, const std::string& text, const std::string& convId, const std::string& msgId,
                       bool requestDelivery, int64_t timeSec);
+/** raw TLV — media plane(MSRP SEND 본문)용. C-plane MESSAGE 는 같은 TLV 를 base64 파트로 싣는다. */
+std::string signallingTlv(const std::string& convId, const std::string& msgId, bool requestDelivery, int64_t timeSec);
+std::string payloadTlv(const std::string& text);
 /** SDS NOTIFICATION(전달/읽음 통지) 본문 — 원 발신자에게 1:1 MESSAGE 로. */
 Body buildNotification(const std::string& convId, const std::string& msgId, int notifType, int64_t timeSec);
 

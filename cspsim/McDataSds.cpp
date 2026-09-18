@@ -94,7 +94,7 @@ static int64_t readDateTime(const std::string& b, size_t off) {
     return v;
 }
 
-static std::string signallingTlv(const std::string& convId, const std::string& msgId, bool requestDelivery, int64_t timeSec) {
+std::string signallingTlv(const std::string& convId, const std::string& msgId, bool requestDelivery, int64_t timeSec) {
     std::string s;
     s += (char)kMsgSdsSignalling;
     putDateTime(s, timeSec);
@@ -104,7 +104,7 @@ static std::string signallingTlv(const std::string& convId, const std::string& m
     return s;
 }
 
-static std::string payloadTlv(const std::string& text) {
+std::string payloadTlv(const std::string& text) {
     std::string s;
     s += (char)kMsgDataPayload;
     s += (char)1;

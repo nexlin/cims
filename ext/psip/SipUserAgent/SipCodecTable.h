@@ -84,6 +84,9 @@ public:
 
 	/** telephone-event 엔트리 */
 	static const CSipCodecEntry & GetTelephoneEvent();
+	/** 합성 SDP 의 video 코덱 엔트리 — H.264/90000 PT 97, fmtp 는 RFC 6184 baseline(pjsip 기본과 같은 값).
+	 *  answer 는 offer 의 PT·fmtp 를 echo 하므로 이 값은 offer(fan-out INVITE)에만 쓰인다. */
+	static const CSipCodecEntry & GetVideo();
 
 	/** payload type 으로 검색 — 없으면 NULL */
 	static const CSipCodecEntry * FindByPt( int iPt );

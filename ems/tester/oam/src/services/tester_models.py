@@ -35,6 +35,7 @@ Transport = Literal['udp', 'tcp', 'tls']
 # DTMF 방식 — rfc4733: telephone-event 오퍼/echo(기본) · inband: G.711 톤(telephone-event 없음 — PSTN 게이트웨이 뒤 in-band 경로, 협상 코덱이 G.711 일 때만 송신)
 #   · off: 없음. YAML 의 옛 bool 은 true→rfc4733, false→off 로 읽는다
 DtmfMode = Literal['rfc4733', 'inband', 'off']
+SdsPlane = Literal['control', 'media']
 
 
 def _dtmf_mode(v):
@@ -295,6 +296,9 @@ class UePool(_PoolBase):
     nat: Optional[UeNat] = Field(default=None, description='NAT 뒤 단말 — 워커 호스트 netns 안에서 소켓을 만든다(대상은 변환된 주소만 본다). 워커 health nat 과 대조')
     media_worker: Optional[str] = Field(default=None, description='미디어 전담 워커(§4 미디어 평면 후속) — 이 풀의 RTP 소켓·송수신을 그 워커(에이전트 /media/*)에 둔다. '
                                                                      'SDP c=/m= 는 그 호스트를 가리키고 시그널링은 worker 에 남는다. 자기 워커와 다른 이름, PTT(floor) 풀은 불가')
+    msrp: bool = Field(default=False, description='MCData media plane 능력(TS 24.282 §9.2.3) — REGISTER Contact 의 +g.3gpp.icsi-ref 에 mcdata.sds 를 더해 서버가 '
+                                                  '대용량 SDS 를 MSRP(INVITE m=message)로 배포하는 대상이 된다. 끄면 FD SIGNALLING(FILEURL) MESSAGE 폴백으로 받는다. '
+                                                  'sds_send plane: media 의 발신 쪽은 이 플래그와 무관')
 
     @field_validator('dtmf', mode='before')
     @classmethod
@@ -803,8 +807,8 @@ STEP_VOCAB = {
     'group_call':    {'group': 'ptt',   'actor': 'fromto',  'kind': 'ptt',      'metrics': ['code', 'srd_ms', 'group_fanout_ms', 'video_pct', 'listen_pct'], 'desc': 'PTT 그룹콜 — from 이 자기 그룹으로 INVITE, to(multi 역할) 멤버 전원 합류까지. payload listen = 그룹 밖 역할(member: false)의 a=recvonly 청취 합류(진행 중 세션에)'},
     'floor_request': {'group': 'ptt',   'actor': 'who',     'kind': 'ptt',      'metrics': ['floor_grant_ms', 'floor_taken_ms', 'floor_queue_ms', 'floor_grant_pct'], 'desc': 'Floor Request → 결과(payload: granted|denied|queued|any)'},
     'floor_release': {'group': 'ptt',   'actor': 'who',     'kind': 'ptt',      'metrics': ['floor_idle_ms'], 'desc': 'Floor Release → Idle 도달'},
-    'sds_send':      {'group': 'ptt',   'actor': 'fromto',  'kind': 'ue',       'metrics': ['code', 'sds_delay_ms', 'sds_disposition_pct'], 'desc': 'MCData SDS 송신(TS 24.282 SIP MESSAGE) — payload 본문, to 역할 = 1:1 · to 없음 = 그룹 SDS(인스턴스 그룹 또는 group, 수신자는 multi 역할), disposition = delivery 회신 요청. 완료 = MESSAGE 최종 응답'},
-    'sds_recv':      {'group': 'ptt',   'actor': 'who',     'kind': 'ue',       'metrics': ['sds_delay_ms'], 'desc': 'who 전원이 앞선 sds_send 의 SDS 를 받을 때까지(단계 진입 전 도착도 인정) — sds_delay_ms = 송신 → 도착'},
+    'sds_send':      {'group': 'ptt',   'actor': 'fromto',  'kind': 'ue',       'metrics': ['code', 'sds_delay_ms', 'sds_disposition_pct', 'sds_media_pct'], 'desc': 'MCData SDS 송신(TS 24.282) — payload 본문, to 역할 = 1:1 · to 없음 = 그룹 SDS(인스턴스 그룹 또는 group, 수신자는 multi 역할), disposition = delivery 회신 요청. plane: control(기본) = SIP MESSAGE(완료 = 최종 응답) · media = MSRP media plane(INVITE m=message → cmdp, 완료 = MSRP SEND 200/REPORT — 대상 CSP 는 그룹 SDS 만)'},
+    'sds_recv':      {'group': 'ptt',   'actor': 'who',     'kind': 'ue',       'metrics': ['sds_delay_ms', 'sds_media_pct'], 'desc': 'who 전원이 앞선 sds_send 의 SDS 를 받을 때까지(단계 진입 전 도착도 인정) — sds_delay_ms = 송신 → 도착. media plane 배포(풀 msrp)·FILEURL 폴백 둘 다 도착으로 센다'},
     'expect':        {'group': 'ctl',   'actor': 'none',    'kind': None,       'metrics': ['ser_pct', 'scr_pct', 'isa_pct'], 'desc': '누계 지표 게이트'},
     'check':         {'group': 'ctl',   'actor': 'who',     'kind': 'ue',       'metrics': ['check_pct'], 'desc': '관측 정합 판정 — payload: conference_roster_visible|hidden(to = 로스터에서 찾을 역할) · conference_warning_138 · dialog_consistent(RFC 4235 NOTIFY 열). after_ms 뒤 판정, 틀리면 인스턴스 실패'},
 }
@@ -823,7 +827,7 @@ METRIC_LABELS = {
     'floor_grant_ms': 'Floor grant 지연', 'floor_taken_ms': 'Floor taken 도달', 'floor_queue_ms': 'Floor 큐 대기',
     'floor_idle_ms': 'Floor idle 도달', 'floor_grant_pct': 'Floor 허가율', 'group_fanout_ms': '그룹 fan-out 완료',
     'affiliate_ms': 'affiliation PUBLISH 지연',
-    'sds_delay_ms': 'SDS 지연', 'sds_disposition_pct': 'SDS disposition 률', 'dtmf_rx_pct': 'DTMF 수신률',
+    'sds_delay_ms': 'SDS 지연', 'sds_disposition_pct': 'SDS disposition 률', 'sds_media_pct': 'SDS media plane(MSRP) 도착률', 'dtmf_rx_pct': 'DTMF 수신률',
     'q850_rx_pct': 'Q.850 Reason 수신률', 'early_media_pct': '183 early media 률', 'prack_pct': 'PRACK 률',
     'early_rtp_pct': 'early media RTP 도달률', 'join_tap_pct': 'Join 청취 leg SSRC 2개 도달률', 'video_pct': '영상 협상률(m=video 활성 answer)',
     'fork_alert_pct': '대표번호 포크 alert 률(그룹원 착신/기대)', 'listen_pct': 'PTT 청취 합류율(recvonly 200)',
@@ -850,7 +854,7 @@ METRIC_NAMES = (
     'rtp_loss_pct', 'jitter_ms', 'mos',
     # PTT(TS 24.380 메시지 시각) — 요청→Granted · 요청→다른 참가자의 Taken · 큐 경유 요청→Granted · 해제→Idle, 그룹 INVITE→마지막 멤버 합류
     'floor_grant_ms', 'floor_taken_ms', 'floor_queue_ms', 'floor_idle_ms', 'floor_grant_pct', 'group_fanout_ms', 'affiliate_ms',
-    'sds_delay_ms', 'sds_disposition_pct',
+    'sds_delay_ms', 'sds_disposition_pct', 'sds_media_pct',
     # 피어 pbx/mgcf 축(D) — 비율은 발생기 관측(송신 대비 수신)
     'dtmf_rx_pct', 'q850_rx_pct', 'early_media_pct', 'prack_pct',
     # 미디어 평면 — 183+SDP 뒤 200 전에 발신자가 실제 RTP 를 받았는가(시그널링 early_media_pct 와 별개)
@@ -893,6 +897,7 @@ RATIO_METRICS = {
     'retrans_rx_pct': ('invite_retrans_rx', 'peer_fault_drop'),   # 유실 주입 뒤 닿은 INVITE 재전송 벌 / 버린 벌 — 대상의 Timer A 재전송 복원력
     'thig_pct': ('thig_via_ok', 'thig_tx'),          # 응답에 토큰화 Via 가 보존된 발신 / THIG Via 를 얹은 ibcf 발신 INVITE
     'sds_disposition_pct': ('sds_disposition_rx', 'sds_disposition_req'),   # 발신자에 닿은 SDS NOTIFICATION(delivered) / delivery 를 요청한 SDS
+    'sds_media_pct': ('sds_media_rx', 'sds_rx'),                           # MSRP(media plane)로 도착한 SDS / 도착한 SDS 전부(FILEURL 폴백 포함)
     'check_pct': ('check_ok', 'check_tx'),           # check 단계 판정 통과 / 판정 수
 }
 
@@ -963,6 +968,8 @@ class Step(_Strict):
     sample: Optional[str] = Field(default=None, description='media_send — 샘플 id(topology.media.samples). 생략 = 풀 기본 원천')
     loop: Optional[bool] = Field(default=None, description='media_send — false 면 샘플 끝에서 송출 정지(기본 true)')
     disposition: Optional[bool] = Field(default=None, description='sds_send — delivery disposition 요청(TS 24.282 §9.2.2): 수신 단말이 SDS NOTIFICATION(delivered)을 되보낸다(sds_disposition_pct)')
+    plane: Optional[SdsPlane] = Field(default=None, description='sds_send — control(기본): SIP MESSAGE(C-plane) · media: MSRP media plane(TS 24.282 §9.2.3 — INVITE m=message → cmdp 종단, '
+                                                                 '수신자는 풀 msrp 면 MSRP 배포·아니면 FILEURL 폴백). 대상 CSP 는 그룹 SDS 만 media plane 을 받는다(1:1 은 403)')
     expect: Dict[str, Expectation] = Field(default_factory=dict)
 
     @field_validator('expect')
@@ -1010,6 +1017,8 @@ class Step(_Strict):
                 raise ValueError('sds_send 단계는 from(발신 단말 역할)이 필요하다 — to 역할 = 1:1, to 없음 = 그룹 SDS(그룹 세션 또는 group)')
         if self.disposition is not None and self.step != 'sds_send':
             raise ValueError('disposition 은 sds_send 에만 둔다')
+        if self.plane is not None and self.step != 'sds_send':
+            raise ValueError('plane 은 sds_send 에만 둔다')
         if self.step == 'refer' and not (self.from_ and self.to):
             raise ValueError('refer 단계는 from(전달자)과 to(전달 대상 역할)가 필요하다')
         if self.step == 'group_call' and not self.from_:
@@ -1317,6 +1326,7 @@ class PoolCreate(_Strict):
     tls_client_cert: bool = Field(default=False, description='kind=ue — 워커 Tls.ClientCertFile 을 클라이언트 인증서로 제시(대상 접속점 상호인증)')
     nat: Optional[UeNat] = Field(default=None, description='kind=ue — NAT 풀: 워커가 netns 안에서 스택을 띄운다(local_ip 가 단말 주소)')
     media_agent: Optional[str] = Field(default=None, description='kind=ue — 미디어 전담 워커의 제어 URL(http://ip:port) — CRtpThread 원격 모드(RtpRemote.h)')
+    msrp: bool = Field(default=False, description='kind=ue — MCData media plane 능력(Contact icsi-ref 에 mcdata.sds) — MSRP 배포 수신 대상')
     target_csp: TargetCsp = Field(description='풀이 닿는 SIP 서버 — 컨트롤러가 토폴로지 노드 참조에서 파생')
     peer: Optional[WorkerPeer] = Field(default=None, description='kind=peer 일 때 프로파일·bind·신원 범위')
     trunk_register: Optional[TrunkRegister] = Field(default=None, description='kind=peer(pbx) 트렁크 REGISTER 계정 — 비밀 해석 완료본')
@@ -1338,6 +1348,7 @@ class CompiledStep(_Strict):
     sample: Optional[str] = None
     loop: Optional[bool] = None
     disposition: Optional[bool] = None
+    plane: Optional[SdsPlane] = None
     expect: Dict[str, Expectation] = Field(default_factory=dict)
 
 

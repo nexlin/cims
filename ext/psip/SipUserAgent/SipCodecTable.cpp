@@ -109,6 +109,12 @@ static CSipCodecEntry & _TelephoneEvent()
 	return clsEntry;
 }
 
+static CSipCodecEntry & _Video()
+{
+	static CSipCodecEntry clsEntry = _MakeEntry( 97, "H264", 90000, 0, "profile-level-id=42e01e;packetization-mode=1", 0 );
+	return clsEntry;
+}
+
 void CSipCodecTable::Set( const SIP_CODEC_ENTRY_LIST & clsList )
 {
 	SIP_CODEC_ENTRY_LIST clsCodecList;
@@ -164,6 +170,11 @@ const CSipCodecEntry & CSipCodecTable::GetTop()
 const CSipCodecEntry & CSipCodecTable::GetTelephoneEvent()
 {
 	return _TelephoneEvent();
+}
+
+const CSipCodecEntry & CSipCodecTable::GetVideo()
+{
+	return _Video();
 }
 
 const CSipCodecEntry * CSipCodecTable::FindByPt( int iPt )

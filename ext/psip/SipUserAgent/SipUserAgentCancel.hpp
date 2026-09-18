@@ -59,7 +59,8 @@ bool CSipUserAgent::RecvCancelRequest( int iThreadId, CSipMessage * pclsMessage 
 	if( pclsResponse )
 	{
 		m_clsSipStack.SendSipMessage( pclsResponse );
-		if( m_pclsCallBack ) m_pclsCallBack->EventCallEnd( strCallId.c_str(), SIP_REQUEST_TERMINATED );
+		CSipHeader * pclsReason = pclsMessage->GetHeader( "Reason" );
+		if( m_pclsCallBack ) m_pclsCallBack->EventCallEnd( strCallId.c_str(), SIP_REQUEST_TERMINATED, pclsReason ? pclsReason->m_strValue.c_str() : NULL );
 
 		Delete( strCallId.c_str() );
 	}
