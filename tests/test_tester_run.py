@@ -79,6 +79,8 @@ class FakeWorker:
                          'clock_unix_ms': int(time.time() * 1000), 'pools': []}
                     if outer.behaviour.get('media') is not None:
                         h['media'] = outer.behaviour['media']
+                    if outer.behaviour.get('real_ue') is not None:
+                        h['real_ue'] = outer.behaviour['real_ue']
                     self._send(200, h)
                 elif self.path.startswith('/runs/'):
                     self._send(200, {'state': outer.state, 'counters': {}})
@@ -428,6 +430,65 @@ class Compile(unittest.TestCase):
     def test_db_source_rejected(self):
         with self.assertRaises(C.CompileError):
             C.load_identities('p', {'kind': 'ue', 'source': {'db': 'target', 'table': 'volte_subscriptions', 'count': 2}})
+
+    def test_real_ue_pool(self):
+        """실단말(real-ue) 풀(§3.3) — PoolCreate kind=real-ue(service·tls_verify·신원), 단계 게이트(REAL_UE_STEPS), 호는 rtp auto 만,
+        AKA 신원 거절, 신원 겹침 검사 포함, 계획 미리보기의 RealUe.MaxProcesses 검산."""
+        from services import tester_workers as TW, tester_plan as P
+        w1 = FakeWorker('w1', behaviour={'real_ue': {'processes': 1, 'max': 2, 'cli': '/opt/w/bin/cimsue-cli'}})
+        topo_doc = _topology([w1])
+        topo_doc['pools']['real_w1'] = {'kind': 'real-ue', 'worker': 'w1', 'access': 'csp', 'transport': 'udp', 'srtp': 'off', 'tls_verify': True,
+                                        'source': {'creds': 'creds/ue.jsonl', 'offset': 8, 'count': 2}}
+        topo = M.Topology.model_validate(topo_doc)
+        self.assertEqual(topo.pool_service('real_w1'), 'volte')
+        ws = TW.discover(topo_doc)
+        for w in ws:
+            w.probe()
+        sc = M.Scenario.model_validate({'id': 'UT-REAL', 'roles': {'real': {'pool': 'real_w1'}, 'callee': {'pool': 'volte_ue', 'count': 2}},
+                                        'flow': [{'step': 'register', 'who': ['real', 'callee']}, {'step': 'invite', 'from': 'real', 'to': 'callee'},
+                                                 {'step': 'answer', 'who': ['callee'], 'expect': {'real_srd_ms': {'p95': 2000}}},
+                                                 {'step': 'media_hold', 'seconds': 3, 'expect': {'real_rtp_loss_pct': {'max': 1}, 'real_mos': {'min': 3.5}}},
+                                                 {'step': 'bye', 'from': 'real'}]})
+        plan = C.compile_run('rr', sc, topo, topo_doc, None, {}, ws, lambda w: 'x:1', 1, None)
+        pools = {p['pool']: p for p in plan['workers']['w1']['pools']}
+        self.assertEqual(pools['real_w1']['kind'], 'real-ue')
+        self.assertEqual(pools['real_w1']['service'], 'volte')
+        self.assertTrue(pools['real_w1']['tls_verify'])
+        self.assertEqual([i['user'] for i in pools['real_w1']['identities']], ['+821300000008', '+821300000009'])
+        self.assertEqual(plan['roles']['real']['kind'], 'real-ue')
+        self.assertEqual(plan['roles']['real']['service'], 'volte')
+        self.assertEqual(plan['workers']['w1']['run']['roles'], {'real': 'real_w1', 'callee': 'ue_w1'})
+        # 단계 게이트 — refer(실스택이 REFER 응답을 이벤트로 내지 않음)·media_send 는 실단말 행위자 불가, 호의 media.rtp 는 auto 만
+        for bad in ([{'step': 'register', 'who': ['real', 'callee']}, {'step': 'invite', 'from': 'callee', 'to': 'real'}, {'step': 'answer', 'who': ['real']},
+                     {'step': 'refer', 'from': 'real', 'to': 'callee'}],
+                    [{'step': 'register', 'who': ['real', 'callee']}, {'step': 'invite', 'from': 'real', 'to': 'callee', 'media': {'rtp': 'none'}},
+                     {'step': 'answer', 'who': ['callee']}, {'step': 'bye', 'from': 'real'}],
+                    [{'step': 'register', 'who': ['real', 'callee']}, {'step': 'invite', 'from': 'callee', 'to': 'real'}, {'step': 'answer', 'who': ['real']},
+                     {'step': 'media_send', 'who': ['real']}, {'step': 'bye', 'from': 'real'}]):
+            sc_bad = M.Scenario.model_validate({'id': 'UT-REAL-BAD', 'roles': {'real': {'pool': 'real_w1'}, 'callee': {'pool': 'volte_ue', 'count': 2}}, 'flow': bad})
+            with self.assertRaises(C.CompileError):
+                C.compile_run('rb', sc_bad, topo, topo_doc, None, {}, ws, lambda w: 'x:1', 1, None)
+        # 같은 신원이 가상 풀과 겹치면 오류(source.offset 이 겹치게)
+        topo_doc2 = json.loads(json.dumps(topo_doc))
+        topo_doc2['pools']['real_w1']['source']['offset'] = 4
+        with self.assertRaises(C.CompileError):
+            C.compile_run('ro', sc, M.Topology.model_validate(topo_doc2), topo_doc2, None, {}, ws, lambda w: 'x:1', 1, None)
+        # AKA 신원은 cimsue-cli 가 받지 않는다
+        with open(os.path.join(S.user_scenarios_dir(), 'creds', 'aka.jsonl'), 'w') as f:
+            f.write(json.dumps({'user': '+821399000001', 'authId': '450339000000001', 'k': '00' * 16, 'opc': '11' * 16}) + '\n')
+        topo_doc3 = json.loads(json.dumps(topo_doc))
+        topo_doc3['pools']['real_w1']['source'] = {'creds': 'creds/aka.jsonl'}
+        with self.assertRaises(C.CompileError):
+            C.compile_run('ra', sc, M.Topology.model_validate(topo_doc3), topo_doc3, None, {}, ws, lambda w: 'x:1', 1, None)
+        # 계획 미리보기 — 실단말 2 + 진행 중 1 > RealUe.MaxProcesses 2 → 오류, 용량 행에 real_ue
+        plan_doc = P.build_plan(sc, topo, topo_doc, None, {}, 1, None, probe=True, stream_port=1)
+        self.assertFalse(plan_doc['ok'])
+        self.assertTrue(any('RealUe.MaxProcesses' in e for e in plan_doc['errors']), plan_doc['errors'])
+        self.assertEqual(plan_doc['workers'][0]['capacity']['real_ue'], {'need': 2, 'processes': 1, 'max': 2})
+        # STEP_VOCAB.real — 실단말 행위자 가능 단계 표시(편집기 게이트) · 지표 이름
+        self.assertTrue(M.STEP_VOCAB['invite']['real'] and not M.STEP_VOCAB['refer']['real'] and not M.STEP_VOCAB['media_send']['real'])
+        for n in ('real_srd_ms', 'real_rtp_loss_pct', 'real_jitter_ms', 'real_mos'):
+            self.assertIn(n, M.METRIC_NAMES)
 
 
 class SipDump(unittest.TestCase):

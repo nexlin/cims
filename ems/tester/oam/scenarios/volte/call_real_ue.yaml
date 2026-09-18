@@ -1,0 +1,17 @@
+# 실단말(real-ue) 표본 호 — 실스택 단말(cimsue-cli/libcimsue) 이 발신, 가상 단말이 착신 (test_instrument.md §3.3).
+# 같은 토폴로지의 대량 가상 부하(VOLTE-CALL-BASIC + 부하 프로파일)와 나란히 돌려 실단말이 보는 품질(real_* 지표)을 표본으로 잰다.
+# 실단말 역할은 REAL_UE_STEPS 의 단계만(등록·1:1 호·hold/resume·DTMF·픽업·그룹콜·floor), 미디어 평면은 실스택 것(rtp: auto 만).
+id: VOLTE-CALL-REAL-UE
+title: 실단말 → 가상 단말 1:1 호 (real-ue 표본)
+tags: [volte, real-ue]
+roles:
+  real: { pool: real_ue }                 # kind: real-ue 풀 — 신원마다 cimsue-cli 프로세스
+  callee: { pool: volte_ue }
+flow:
+  - { step: register,   who: [real, callee], expect: { code: 200 } }
+  - { step: invite,     from: real, to: callee }
+  - { step: answer,     who: [callee], after_ms: 1000, expect: { srd_ms: { p95: 2500 }, real_srd_ms: { p95: 2500 } } }
+  - { step: media_hold, seconds: "${ht}", expect: { real_rtp_loss_pct: { max: 1 }, real_jitter_ms: { p95: 40 }, real_mos: { min: 3.5 } } }
+  - { step: bye,        from: real, expect: { sdd_ms: { p95: 500 } } }
+target_evidence:
+  - { kind: recording_created, min: 1 }

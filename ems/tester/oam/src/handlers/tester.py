@@ -54,7 +54,7 @@ from httpsrv.handler import HandlerArgs, HandlerResult
 from services.admin_auth import require_role
 from services import tester_store as store
 from services.tester_bus import TESTER_BUS
-from services.tester_models import (SCHEMAS, schema_json, validate, RunRequest, STEP_VOCAB, STEP_GROUPS, METRIC_NAMES,
+from services.tester_models import (SCHEMAS, schema_json, validate, RunRequest, STEP_VOCAB, STEP_GROUPS, METRIC_NAMES, REAL_UE_STEPS,
                                     METRIC_LABELS, RATIO_METRICS, WORKER_STEPS, DURING_STEPS, Q850_CAUSES, AUDIO_CODECS,
                                     VIDEO_CODECS, RTP_MODES, SAMPLE_CODECS)
 from services.tester_run import RUNS
@@ -472,6 +472,7 @@ def scenario_vocab() -> dict:
     """GET /scenarios/vocab — 편집기 팔레트·속성 폼·kind 게이트의 정본(tester_models 어휘 표)."""
     return {
         'steps': {k: {**v, 'supported': k in WORKER_STEPS} for k, v in STEP_VOCAB.items()},
+        'real_ue_steps': sorted(REAL_UE_STEPS),
         'groups': STEP_GROUPS,
         'worker_steps': sorted(WORKER_STEPS),
         'during_steps': list(DURING_STEPS),
@@ -624,7 +625,8 @@ def report_markdown(doc: dict) -> str:
     for name, label in (('rrd_ms', 'RRD ms'), ('srd_ms', 'SRD ms'), ('sdd_ms', 'SDD ms'), ('sdt_s', 'SDT s'), ('jitter_ms', '지터 ms'),
                         ('rtp_loss_pct', 'RTP 손실 %(호별)'), ('affiliate_ms', 'Affiliation ms'), ('group_fanout_ms', '그룹 fan-out ms'),
                         ('floor_grant_ms', 'Floor grant ms'), ('floor_taken_ms', 'Floor taken ms'), ('floor_queue_ms', 'Floor 큐 대기 ms'),
-                        ('floor_idle_ms', 'Floor idle ms')):
+                        ('floor_idle_ms', 'Floor idle ms'), ('real_srd_ms', '실단말 SRD ms'), ('real_jitter_ms', '실단말 지터 ms'),
+                        ('real_rtp_loss_pct', '실단말 RTP 손실 %(호별)'), ('real_mos', '실단말 MOS 추정')):
         h = t.get(name)
         if h:
             lines.append(f"| {label} | {h.get('count')} | {fmt(h.get('p50'))} | {fmt(h.get('p95'))} | {fmt(h.get('p99'))} | {fmt(h.get('max'))} |")

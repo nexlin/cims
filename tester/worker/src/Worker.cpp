@@ -112,6 +112,7 @@ void Worker::stop() {
         for (auto& ep : kv.second->eps)
             if (ep->s && ep->started) { ep->s->Stop(5); ep->started = false; }
         if (kv.second->peer) kv.second->peer->Stop();
+        for (auto& r : kv.second->reals) r->stop();
     }
 }
 
@@ -296,7 +297,19 @@ HttpResponse Worker::health() {
     }
     media["files"] = files;
     j["media"] = media;
+    // 실단말 풀(§3.3) — 프로세스 수·상한·cimsue-cli 경로(컨트롤러 계획 미리보기가 검산)
+    Json real = Json::Object();
+    real["processes"] = Json(realProcesses());
+    real["max"] = Json((long long)m_cfg.realUeMax);
+    real["cli"] = Json(m_cfg.realUeCli);
+    j["real_ue"] = real;
     return jsonResp(200, j);
+}
+
+long long Worker::realProcesses() const {
+    long long n = 0;
+    for (auto& kv : m_pools) for (auto& r : kv.second->reals) if (r->alive()) n++;
+    return n;
 }
 
 void Worker::destroyPool(Pool* pool) {
@@ -304,6 +317,14 @@ void Worker::destroyPool(Pool* pool) {
         if (ep->s) { m_bySession.erase(ep->s); if (ep->started) ep->s->Stop(5); delete ep->s; ep->s = nullptr; }
     }
     if (pool->peer) { m_byPeer.erase(pool->peer.get()); pool->peer->Stop(); pool->peer.reset(); }
+    if (!pool->reals.empty()) {
+        for (auto& r : pool->reals) r->stop();
+        pool->reals.clear();
+        // 리더 스레드가 남긴 이 풀 단말의 이벤트(process_exit 등)는 버린다 — Endpoint 가 곧 사라진다
+        std::lock_guard<std::mutex> lk(m_evMtx);
+        m_events.erase(std::remove_if(m_events.begin(), m_events.end(), [pool](const Event& e) { return e.ep && e.ep->poolRef == pool; }), m_events.end());
+        for (auto& ep : pool->eps) ep->real = nullptr;
+    }
 }
 
 bool Worker::buildUePool(Pool* pool, const Json& d, std::string& err) {
@@ -410,6 +431,7 @@ bool Worker::buildPeerPool(Pool* pool, const Json& d, std::string& err) {
         ep->idx = (int)i;
         ep->pool = pool->name;
         ep->poolRef = pool;
+        ep->kind = Endpoint::K_PEER;
         ep->id.user = x["user"].asString();
         ep->id.domain = x["domain"].asString(pc.domain);
         if (ep->id.user.empty()) { err = "identity_user_required"; return false; }
@@ -423,11 +445,143 @@ bool Worker::buildPeerPool(Pool* pool, const Json& d, std::string& err) {
     return true;
 }
 
+/** real-ue 풀(§3.3) — 신원마다 `cimsue-cli … drive` 프로세스를 띄우고 ready 를 기다린다. 계정 인자는 cspsim creds 규약과 같다
+ *  (IMPI = auth_id(없으면 user)@domain, H(A1) 또는 비밀번호). AKA 신원은 cli 가 받지 않아 거절. TLS 는 풀 tls_verify 가 켜져 있고 워커에
+ *  RealUe.TlsCaFile 이 있으면 그 앵커로 검증, 아니면 검증 없이 접속(--no-tls-verify). */
+bool Worker::buildRealUePool(Pool* pool, const Json& d, std::string& err) {
+    if (m_cfg.realUeCli.empty() || access(m_cfg.realUeCli.c_str(), X_OK) != 0) { err = "real_ue_cli_missing: " + (m_cfg.realUeCli.empty() ? std::string("RealUe.CliPath 비어 있음") : m_cfg.realUeCli); return false; }
+    const Json& tc = d["target_csp"];
+    pool->targetIp = tc["ip"].asString();
+    pool->targetPort = (int)(pool->transport == "tls" ? tc["tls"].asInt(5061)
+                             : pool->transport == "tcp" ? tc["tcp"].asInt(25061) : tc["udp"].asInt(5060));
+    if (pool->targetIp.empty()) { err = "target_csp.ip_required"; return false; }
+    pool->service = d["service"].asString("volte");
+    const bool tlsVerify = d["tls_verify"].asBool(false);
+    const Json& ids = d["identities"];
+    long long others = realProcesses();
+    if (others + (long long)ids.size() > m_cfg.realUeMax) { err = "real_ue_limit: " + std::to_string(others + (long long)ids.size()) + " > RealUe.MaxProcesses " + std::to_string(m_cfg.realUeMax); return false; }
+    if (!m_cfg.realUeLogDir.empty()) mkdir(m_cfg.realUeLogDir.c_str(), 0755);
+    for (size_t i = 0; i < ids.size(); ++i) {
+        const Json& x = ids.at(i);
+        auto ep = std::make_unique<Endpoint>();
+        ep->kind = Endpoint::K_REAL;
+        ep->idx = (int)i;
+        ep->pool = pool->name;
+        ep->poolRef = pool;
+        ep->id.user = x["user"].asString();
+        ep->id.domain = x["domain"].asString();
+        ep->id.ha1 = x["ha1"].asString();
+        ep->id.password = x["password"].asString();
+        ep->id.display = x["display"].asString();
+        ep->id.pttGroup = x["ptt_group"].asString();
+        ep->id.authScheme = x["auth_scheme"].asString("digest");
+        if (ep->id.user.empty() || ep->id.domain.empty()) { err = "identity_user_domain_required"; return false; }
+        if (ep->id.authScheme == "aka") { err = "real_ue_aka_unsupported: " + ep->id.user + " — cimsue-cli 는 Digest 계정만"; return false; }
+        if (ep->id.ha1.empty() && ep->id.password.empty()) { err = "real_ue_secret_required: " + ep->id.user; return false; }
+        std::string authId = x["auth_id"].asString();
+        if (authId.empty()) authId = ep->id.user;
+        if (authId.find('@') == std::string::npos) authId += "@" + ep->id.domain;
+        std::vector<std::string> argv = { m_cfg.realUeCli, "--server", pool->targetIp, "--port", std::to_string(pool->targetPort),
+                                          "--transport", pool->transport, "--domain", ep->id.domain, "--msisdn", ep->id.user, "--auth-id", authId,
+                                          "--srtp", pool->srtp, "--log-level", std::to_string(m_cfg.realUeLogLevel) };
+        if (!ep->id.ha1.empty()) { argv.push_back("--ha1"); argv.push_back(ep->id.ha1); } else { argv.push_back("--password"); argv.push_back(ep->id.password); }
+        if (!ep->id.display.empty()) { argv.push_back("--display-name"); argv.push_back(ep->id.display); }
+        if (pool->service == "ptt") { argv.push_back("--mcptt-id"); argv.push_back("tel:" + ep->id.user); }
+        if (tlsVerify && !m_cfg.realUeTlsCaFile.empty()) { argv.push_back("--tls-ca"); argv.push_back(m_cfg.realUeTlsCaFile); }
+        else argv.push_back("--no-tls-verify");
+        argv.push_back("drive");
+        Endpoint* raw = ep.get();
+        auto proc = std::make_unique<RealUeProcess>(pool->name + "/" + ep->id.user, [this, raw](const Json& ev) { onRealEvent(raw, ev); });
+        std::string logFile = m_cfg.realUeLogDir.empty() ? "" : m_cfg.realUeLogDir + "/" + pool->name + "-" + ep->id.user + ".log";
+        std::string perr;
+        if (!proc->start(argv, logFile, perr)) { err = "real_ue_spawn_failed: " + ep->id.user + " — " + perr; return false; }
+        ep->real = proc.get();
+        if (pool->service == "ptt" && !ep->id.pttGroup.empty()) pool->groups[ep->id.pttGroup].push_back(ep.get());
+        pool->reals.push_back(std::move(proc));
+        pool->eps.push_back(std::move(ep));
+    }
+    // 전부 ready(엔진 기동) 까지 — 하나라도 못 뜨면 풀 생성 실패(프로세스는 destroyPool 이 내린다)
+    for (auto& ep : pool->eps) {
+        if (!ep->real->waitReady(m_cfg.realUeStartTimeoutS * 1000)) {
+            err = "real_ue_start_timeout: " + ep->id.user + (ep->real->alive() ? " (ready 없음)" : " (프로세스 종료 — log/real-ue 의 로그 확인)");
+            return false;
+        }
+    }
+    return true;
+}
+
+/** 실단말 프로세스 이벤트(리더 스레드) → Event. 큐에만 넣는다 — onEvent 가 스케줄러 스레드에서 가상 단말과 같은 종류로 다시 푼다. */
+void Worker::onRealEvent(Endpoint* ep, const Json& ev) {
+    const std::string kind = ev["event"].asString();
+    Event e{};
+    e.ep = ep;
+    e.s = nullptr;
+    e.peer = nullptr;
+    auto stats = [&](Event& x) {
+        if (!ev["stats_valid"].asBool(false)) return;
+        x.statsValid = true;
+        x.rx = (unsigned long long)ev["rx_pkts"].asInt(0);
+        x.tx = (unsigned long long)ev["tx_pkts"].asInt(0);
+        x.lost = (unsigned long long)ev["rx_loss"].asInt(0);
+        x.jit = ev["jitter_us"].asInt(0);
+    };
+    if (kind == "reg") {
+        std::string st = ev["state"].asString();
+        if (st != "registered" && st != "failed") return;
+        e.kind = Event::REGISTER;
+        e.status = st == "registered" ? 200 : (int)(ev["code"].asInt(0) > 0 ? ev["code"].asInt(0) : 500);
+        e.ms = ev["rrd_ms"].asInt(0);
+    } else if (kind == "incoming") {
+        if (ev["mcptt"].asBool(false)) return;   // 그룹 fan-out INVITE — 실스택이 자동응답(automatic commencement), call active 가 ANSWERED
+        e.kind = Event::INCOMING;
+        e.rcall = (int)ev["call"].asInt(-1);
+        e.hasPai = true;
+    } else if (kind == "call") {
+        e.kind = Event::REAL_CALL;
+        e.event = ev["state"].asString();
+        e.user = ev["dir"].asString("out");
+        e.status = (int)ev["code"].asInt(0);
+        e.hasPai = ev["by_us"].asBool(false);
+        e.prack = ev["mcptt"].asBool(false);
+        e.rcall = (int)ev["call"].asInt(-1);
+        e.ms = ev.has("srd_ms") ? ev["srd_ms"].asInt(0) : ev.has("sdd_ms") ? ev["sdd_ms"].asInt(0) : 0;
+        stats(e);
+    } else if (kind == "floor") {
+        int sub = (int)ev["subtype"].asInt(-1);
+        if (sub < 0) return;
+        e.kind = Event::FLOOR;
+        e.status = sub;
+        e.us = ev["t_us"].asInt(0);
+    } else if (kind == "request") {
+        if (ev["op"].asString() != "affiliate") return;
+        e.kind = Event::AFFILIATE;
+        e.status = (int)ev["code"].asInt(0);
+        e.ms = ev["ms"].asInt(0);
+        e.hasPai = !ev["on"].asBool(true);   // 해제 명령의 응답
+    } else if (kind == "stats") {
+        e.kind = Event::REAL_STATS;
+        e.rcall = (int)ev["call"].asInt(-1);
+        stats(e);
+        if (!e.statsValid) return;
+    } else if (kind == "exit" || kind == "process_exit" || kind == "engine_stopped") {
+        e.kind = Event::REAL_EXIT;
+        e.status = (int)ev["status"].asInt(0);
+        e.event = ev["error"].asString();
+    } else return;
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    m_events.push_back(e);
+}
+
+Json Worker::realRequest(Endpoint* ep, const std::string& cmd) {
+    if (!ep->real) { Json j = Json::Object(); j["ok"] = Json(false); j["reason"] = Json("no process"); return j; }
+    return ep->real->request(cmd, m_cfg.realUeCmdTimeoutMs);
+}
+
 HttpResponse Worker::poolCreate(const Json& d) {
     std::string name = d["pool"].asString();
     std::string kind = d["kind"].asString("ue");
     if (name.empty()) return errResp(400, "pool_required");
-    if (kind != "ue" && kind != "peer") return errResp(400, "unsupported_kind", kind + " — real-ue 는 F 단계");
+    if (kind != "ue" && kind != "peer" && kind != "real-ue") return errResp(400, "unsupported_kind", kind);
     std::lock_guard<std::mutex> lk(m_mtx);
     if (m_run && m_runState != "stopped" && m_runState != "idle") return errResp(409, "run_active");
     auto it = m_pools.find(name);
@@ -438,7 +592,7 @@ HttpResponse Worker::poolCreate(const Json& d) {
     pool->transport = d["transport"].asString("udp");
     pool->srtp = d["srtp"].asString("off");
     std::string err;
-    bool ok = kind == "ue" ? buildUePool(pool.get(), d, err) : buildPeerPool(pool.get(), d, err);
+    bool ok = kind == "ue" ? buildUePool(pool.get(), d, err) : kind == "peer" ? buildPeerPool(pool.get(), d, err) : buildRealUePool(pool.get(), d, err);
     if (!ok) { destroyPool(pool.get()); return errResp(400, err); }
     logf("info", "pool %s created — kind=%s endpoints=%zu transport=%s srtp=%s target=%s:%d%s",
          name.c_str(), kind.c_str(), pool->eps.size(), pool->transport.c_str(), pool->srtp.c_str(),
@@ -447,6 +601,7 @@ HttpResponse Worker::poolCreate(const Json& d) {
     j["pool"] = Json(name);
     j["endpoints"] = Json((long long)pool->eps.size());
     if (pool->peer) j["bind"] = Json(pool->peer->Config().bindIp + ":" + std::to_string(pool->peer->Config().port));
+    if (!pool->reals.empty()) j["processes"] = Json((long long)pool->reals.size());
     m_pools[name] = std::move(pool);
     return jsonResp(201, j);
 }
@@ -851,7 +1006,48 @@ void Worker::flushSipPending(long long now, bool all) {
 void Worker::onEvent(const Event& e) {
     Endpoint* ep = nullptr;
     Pool* peerPool = nullptr;
-    if (e.s) {
+    if (e.ep) {
+        ep = e.ep;
+        if (e.statsValid) ep->realStats = { e.rx, e.tx, e.lost, e.jit, true };
+        if (e.kind == Event::REAL_STATS) return;
+        if (e.kind == Event::REAL_EXIT) {
+            // 프로세스가 죽었다 — 단말은 쓸 수 없다(등록 상태 내림). 인스턴스 중이면 실패
+            bool wasUp = ep->started || ep->registered;
+            ep->started = false; ep->registered = false; ep->realRegFailed = true; ep->realCall = -1;
+            ep->affStarted = ep->affiliated = false;
+            if (wasUp) { m_metrics.counter("real_ue_exit"); emitEvent("real-ue process exited" + (e.event.empty() ? "" : " — " + e.event), ep, "", e.status); }
+            if (ep->inst && ep->inst->phase != Instance::DONE) finishInstance(*ep->inst, true, "real-ue process exited", nowMs());
+            return;
+        }
+        if (e.kind == Event::INCOMING) ep->realCall = e.rcall;
+        if (e.kind == Event::REAL_CALL) {
+            // 실단말 호 상태 → 가상 단말과 같은 이벤트로. active(out) = 확립(SRD) · active(in, mcptt) = fan-out 자동응답 합류 ·
+            //   held / held→active = 우리 hold/resume 의 re-INVITE 200 · disconnected = by_us 면 BYE 응답(SDD), 아니면 상대 종료/최종 응답
+            Event x = e;
+            x.ep = ep;
+            const std::string& st = e.event;
+            if (st == "active") {
+                if (ep->realHeld) { ep->realHeld = false; if (ep->realReinviteWait) { ep->realReinviteWait = false; x.kind = Event::REINVITE_RESP; x.status = 200; onEvent(x); } return; }
+                if (e.user == "out") { x.kind = Event::CALLSTART; x.status = 200; onEvent(x); }
+                else if (e.prack) { x.kind = Event::ANSWERED; x.status = 200; onEvent(x); }
+                return;   // 착신 1:1 확립 — epAnswer 가 이미 inCall 로 두었다
+            }
+            if (st == "held") {
+                ep->realHeld = true;
+                if (ep->realReinviteWait) { ep->realReinviteWait = false; x.kind = Event::REINVITE_RESP; x.status = 200; onEvent(x); }
+                return;
+            }
+            if (st == "disconnected") {
+                if (ep->realCall == e.rcall) ep->realCall = -1;
+                ep->realHeld = false;
+                ep->realReinviteWait = false;
+                if (e.hasPai) { x.kind = Event::BYERESP; x.status = 200; onEvent(x); }
+                else { x.kind = Event::CALLEND; x.status = e.status > 0 ? e.status : 200; onEvent(x); }
+                return;
+            }
+            return;   // outgoing/incoming/null — 관측만
+        }
+    } else if (e.s) {
         ep = endpointOf(e.s);
     } else if (e.peer) {
         auto pit = m_byPeer.find(e.peer);
@@ -926,7 +1122,7 @@ void Worker::onEvent(const Event& e) {
             //   P-Called-Party-ID 가 다이얼한 대표번호를 실었는가(dispatch_center.md §4 — 착신 표시)
             ep->cancelExpected = true;
             m_metrics.counter("fork_rx");
-            if (!ep->isPeer()) {
+            if (ep->isSim()) {
                 const std::string& pcp = ep->s->m_strLastPCalledParty;
                 if (!pcp.empty() && pcp.find(in->dialTarget) != std::string::npos) m_metrics.counter("pcpid_ok");
                 else if (!pcp.empty()) emitEvent("P-Called-Party-ID " + pcp + " != dialed " + in->dialTarget, ep, "invite", 0, e.callId);
@@ -955,14 +1151,16 @@ void Worker::onEvent(const Event& e) {
         if (!ep->outKind.empty() && ep->outKind != "invite") { m_metrics.counter(ep->outKind + "_ok"); if (ep->outKind == "join") ep->joined = true; }
         else m_metrics.counter("sessions");
         m_metrics.counter("seer_ok");   // RFC 6076 §4.4 SEER 분자 — 200 (거절 480/486/600/603 은 CALLEND 에서)
-        if (!ep->isPeer() && ep->s->m_clsRtpThread.m_bVideoOffer && ep->s->m_clsRtpThread.m_iDestVideoPort > 0) m_metrics.counter("video_ok");   // answer 의 활성 m=video
+        if (ep->isSim() && ep->s->m_clsRtpThread.m_bVideoOffer && ep->s->m_clsRtpThread.m_iDestVideoPort > 0) m_metrics.counter("video_ok");   // answer 의 활성 m=video
         m_metrics.timer("srd_ms", (double)e.ms);
+        if (ep->isReal()) { m_metrics.counter("real_legs"); m_metrics.timer("real_srd_ms", (double)e.ms); }   // 실단말 표본은 따로도 남긴다(§3.3)
         if (in && in->progressTx && in->rtpMode != CRtpThread::E_MEDIA_NONE) {
             // early media 의 미디어 평면 — 183+SDP 뒤 200 전까지 발신자가 실제로 RTP 를 받았는가(시그널링 early_media 와 별개).
             //   이벤트 처리 지연(≤ 스케줄러 틱) 동안 200 뒤 패킷이 한둘 섞일 수 있어 5 패킷(100 ms) 이상을 도달로 본다.
             unsigned long long rx = 0, lost = 0;
             long long jit = 0;
             if (ep->isPeer()) ep->poolRef->peer->RtpStats(e.callId, rx, lost, jit);
+            else if (ep->isReal()) rx = ep->realStats.rx;
             else rx = ep->s->m_clsRtpThread.m_ullRecvTotal.load();
             m_metrics.counter("early_rtp_rx", (long long)rx);
             if (rx >= 5) m_metrics.counter("early_rtp_ok");
@@ -979,8 +1177,10 @@ void Worker::onEvent(const Event& e) {
     case Event::ANSWERED:
         // PTT 멤버가 그룹 fan-out INVITE 에 자동응답했다 — 세션 합류(leg 하나)
         ep->inCall = true;
+        if (ep->isReal()) ep->realCall = e.rcall;
         m_metrics.counter("legs");
         m_metrics.counter("group_joined");
+        if (ep->isReal()) m_metrics.counter("real_legs");
         if (!in) {
             // 인스턴스 밖의 그룹 세션(이 워커가 연 것이 아니다) — 자리를 비운다
             epBye(ep);
@@ -1159,12 +1359,28 @@ void Worker::onEvent(const Event& e) {
             if (bw.empty()) advance(*in, now);
         }
         break;
+    default:
+        break;   // FAULT_REJECT·REAL_* 는 위에서 풀어 처리했다
     }
 }
 
 // ── 단말 동작 (UE 세션 / 피어 신원) ────────────────────────────────────────
 bool Worker::startEndpoint(Endpoint* ep) {
     if (ep->isPeer() || ep->started) return true;
+    if (ep->isReal()) {
+        // 실단말 — 프로세스에 register 명령. 결과(REGISTER 200/실패)는 reg 이벤트로 온다
+        ep->realRegFailed = false;
+        ep->realStats.valid = false;
+        Json r = realRequest(ep, "register");
+        if (!r["ok"].asBool(false)) {
+            ep->realRegFailed = true;
+            m_metrics.counter("registered_fail");
+            emitEvent("real-ue register refused: " + r["reason"].asString(), ep, "register", 0);
+            return false;
+        }
+        ep->started = true;
+        return true;
+    }
     ep->s->m_clsRtpThread.ResetRecvStats();
     if (!ep->s->Start()) {
         m_metrics.counter("registered_fail");
@@ -1208,6 +1424,19 @@ bool Worker::epStartCall(Endpoint* from, Endpoint* to, const Json& media, const 
         return true;
     }
     if (!from->started && !startEndpoint(from)) return false;
+    if (from->isReal()) {
+        // 실단말 — dial <번호|user@도메인>. 두 번째 다이얼로그(상담 통화)는 지원하지 않는다(컴파일 게이트). 오퍼 코덱은 실스택 것
+        if (from->realCall >= 0 || from->inCall) return false;
+        std::string target = to ? to->id.user : dial;
+        if (to && to->isPeer() && to->poolRef->profile == "ibcf") target += "@" + to->id.domain;
+        Json r = realRequest(from, "dial " + target + (from->realVideo ? " video" : ""));
+        if (!r["ok"].asBool(false)) { emitEvent("real-ue dial refused: " + r["reason"].asString(), from, "invite", 0); return false; }
+        from->realCall = (int)r["call"].asInt(-1);
+        from->outPending = true;
+        from->outKind = "invite";
+        m_metrics.counter("invite_tx");
+        return true;
+    }
     // 시나리오가 오퍼 코덱을 지정하면(pcma/pcmu/amr-wb …) 그 코덱으로 — 트렁크 G.711 경로 시험. 없으면 풀 기본
     from->s->SetOfferCodec(codecPtOf(media["audio"].asString("")));
     // UE 가 피어 신원을 부를 때 — ibcf(타 IMS) 는 user@피어도메인(Request-URI host → req_uri_host 규칙), pbx/mgcf 는 번호 그대로
@@ -1254,14 +1483,14 @@ static bool startSpecialCall(Endpoint* from, Endpoint* to, const std::string& ki
 }
 
 bool Worker::epSubscribe(Endpoint* ep, const std::string& event, const std::string& resource) {
-    if (ep->isPeer() || !ep->started) return false;
+    if (!ep->isSim() || !ep->started) return false;
     if (event == "dialog") { ep->s->SubscribeDialog(resource); ep->dlgWatching = true; }
     else { ep->s->SubscribeEvent(event, resource); ep->evtWatching = true; }
     return true;
 }
 
 void Worker::epUnsubscribe(Endpoint* ep) {
-    if (ep->isPeer()) return;
+    if (!ep->isSim()) return;
     if (ep->dlgWatching) { ep->s->UnsubscribeDialogs(); ep->dlgWatching = false; }
     if (ep->evtWatching) { ep->s->UnsubscribeEvent(); ep->evtWatching = false; }
     ep->s->ClearWatchedDialog();
@@ -1277,12 +1506,20 @@ bool Worker::epHold(Endpoint* ep, bool hold) {
         if (ep->callId.empty()) return false;
         return hold ? ep->poolRef->peer->Hold(ep->callId) : ep->poolRef->peer->Resume(ep->callId);
     }
+    if (ep->isReal()) {
+        if (ep->realCall < 0) return false;
+        ep->realReinviteWait = true;
+        Json r = realRequest(ep, (hold ? "hold " : "resume ") + std::to_string(ep->realCall));
+        if (!r["ok"].asBool(false)) { ep->realReinviteWait = false; return false; }
+        return true;
+    }
     return hold ? ep->s->Hold() : ep->s->Resume();
 }
 
 bool Worker::epRefer(Endpoint* from, Endpoint* to, bool attended) {
     // Refer-To 사용자부 = 전달 대상 신원(psip 이 상대 Contact host 로 URI 를 만든다 — B2BUA(CSP)가 종단·재라우팅)
     if (from->isPeer()) return !from->callId.empty() && from->poolRef->peer->Refer(from->callId, to->id.user);
+    if (from->isReal()) return false;   // 실스택은 REFER 최종 응답을 이벤트로 내지 않는다 — 컴파일 게이트(REAL_UE_STEPS)가 막는다
     if (from->s->m_strInviteId.empty()) return false;
     if (attended) {
         // 전달자가 to 와 상담 통화 중 → Refer-To 에 상담 다이얼로그의 Replaces(RFC 3515 + RFC 3891 — TS 24.629 consultative ECT)
@@ -1298,8 +1535,8 @@ bool Worker::epRefer(Endpoint* from, Endpoint* to, bool attended) {
 /** 영상(invite/group_call 의 media.video) — h264 면 이 인스턴스 단말들의 오퍼에 m=video 를 싣는다(워커 Media.VideoFile 이 있어야 비디오 소켓이 있다).
  *  파일이 없으면 오디오만 나가고 video_unavailable 로 센다(조용히 넘기지 않는다). 발신자 기준 video_offered, answer 의 활성 m=video 는 CALLSTART 에서 video_ok. */
 void Worker::epSetVideo(Instance& in, Endpoint* from, bool want) {
-    for (auto* ep : endpointsOf(in)) if (!ep->isPeer()) ep->s->m_clsRtpThread.m_bVideoOffer = want;
-    if (!want || !from || from->isPeer()) return;
+    for (auto* ep : endpointsOf(in)) { if (ep->isSim()) ep->s->m_clsRtpThread.m_bVideoOffer = want; else if (ep->isReal()) ep->realVideo = want; }
+    if (!want || !from || !from->isSim()) return;   // 실단말의 영상은 실스택 빌드 몫(Linux pjproject 는 --disable-video) — 세지 않는다
     if (from->s->m_clsRtpThread.m_iVideoPort > 0) m_metrics.counter("video_offered");
     else { m_metrics.counter("video_unavailable"); emitEvent("media.video h264 requested but worker has no Media.VideoFile — audio only", from, "invite", 0); }
 }
@@ -1307,7 +1544,7 @@ void Worker::epSetVideo(Instance& in, Endpoint* from, bool want) {
 void Worker::epSetMediaMode(Endpoint* ep, int mode) {
     // UE 는 세션의 RTP 스레드에 — 다음 Start(새 호)부터 적용. 피어는 호마다(StartCall 인자 / INCOMING 이벤트)
     //   PTT 단말의 auto = floor 를 가진 동안만 송출(TS 24.380 — 허가 없이 미디어를 내지 않는다): 수신만 시작하고 Granted 에 송출, 해제·Revoke 에 정지
-    if (ep->isPeer()) return;
+    if (!ep->isSim()) return;   // 실단말의 미디어 평면은 실스택 것(rtp 모드 없음 — 컴파일이 auto 만 허용)
     ep->s->SetMediaMode(ep->isPtt() && mode == CRtpThread::E_MEDIA_AUTO ? CRtpThread::E_MEDIA_EXPLICIT : mode);
 }
 
@@ -1315,6 +1552,13 @@ void Worker::startPtt(Endpoint* ep) {
     // MCPTT 기동 절차(실 단말 순서) — GMS/CMS xcap-diff 구독 → 그룹 affiliation → conference 구독. prelude 는 affiliation 200 까지 기다린다
     if (!ep->isPtt() || ep->affStarted) return;
     ep->affStarted = true;
+    if (ep->isReal()) {
+        // 실단말 — affiliation PUBLISH 만(GMS/CMS·conference 구독은 실스택 앱 몫). 결과는 request 이벤트 → AFFILIATE
+        if (ep->id.pttGroup.empty()) { ep->affiliated = true; return; }
+        Json r = realRequest(ep, "affiliate " + ep->id.pttGroup + " on");
+        if (!r["ok"].asBool(false)) { ep->affFailed = true; m_metrics.counter("affiliated_fail"); emitEvent("real-ue affiliate refused: " + r["reason"].asString(), ep, "register", 0); }
+        return;
+    }
     ep->s->SubscribeGms();
     ep->s->SubscribeCms();
     if (ep->id.pttGroup.empty()) { ep->affiliated = true; return; }   // 그룹 없는 PTT 신원 — 등록만(사설콜 등)
@@ -1359,7 +1603,7 @@ void Worker::onFloor(Endpoint* ep, Instance* in, int subtype, long long us, long
         if (ep->wasQueued && in) in->tFloorReqUs = 0;   // 큐를 거친 허가의 Taken 은 요청 시각과 무관 — floor_taken_ms 표본에서 뺀다
         ep->floor = Endpoint::F_GRANTED;
         ep->talked = true;
-        if (in && in->rtpMode != CRtpThread::E_MEDIA_NONE) ep->s->MediaSend(true, "", "", "", true);
+        if (in && in->rtpMode != CRtpThread::E_MEDIA_NONE && ep->isSim()) ep->s->MediaSend(true, "", "", "", true);   // 실스택은 floor 가 마이크를 게이트한다
         break;
     case 3:
         if (ep->floor != Endpoint::F_REQUESTED) break;
@@ -1375,7 +1619,7 @@ void Worker::onFloor(Endpoint* ep, Instance* in, int subtype, long long us, long
     case 6:
         if (ep->floor != Endpoint::F_GRANTED) break;
         m_metrics.counter("floor_revoked");
-        ep->s->MediaStop();
+        if (ep->isSim()) ep->s->MediaStop();
         ep->floor = Endpoint::F_IDLE;
         break;
     case 2:
@@ -1437,16 +1681,19 @@ bool Worker::epMediaSend(Endpoint* ep, const CompiledStep& st) {
         pcma = m.count("pcma") ? m["pcma"] : "";
     }
     if (ep->isPeer()) return !ep->callId.empty() && ep->poolRef->peer->MediaSend(ep->callId, def, amrwb, pcmu, pcma, st.loop);
+    if (ep->isReal()) return false;   // 실단말의 송출은 실스택 것 — 컴파일 게이트
     return ep->s->MediaSend(def, amrwb, pcmu, pcma, st.loop);
 }
 
 bool Worker::epMediaStop(Endpoint* ep) {
     if (ep->isPeer()) return !ep->callId.empty() && ep->poolRef->peer->MediaStop(ep->callId);
+    if (ep->isReal()) return false;
     return ep->s->MediaStop();
 }
 
 bool Worker::epDtmf(Endpoint* ep, const std::string& digits) {
     if (ep->isPeer()) return !ep->callId.empty() && ep->poolRef->peer->SendDtmf(ep->callId, digits);
+    if (ep->isReal()) return ep->realCall >= 0 && realRequest(ep, "dtmf " + std::to_string(ep->realCall) + " " + digits)["ok"].asBool(false);
     return ep->s->SendDtmf(digits);
 }
 
@@ -1455,6 +1702,8 @@ void Worker::sampleDtmf(Endpoint* ep) {
     std::string digits;
     if (ep->isPeer()) {
         if (ep->callId.empty() || !ep->poolRef->peer->DtmfStats(ep->callId, sent, recv, digits, pt)) return;
+    } else if (ep->isReal()) {
+        return;   // 실스택은 수신 DTMF 를 세지 않는다(pjsua2 onDtmfDigit 미노출)
     } else {
         pt = ep->s->m_clsRtpThread.m_iDtmfPt;
         sent = ep->s->m_clsRtpThread.m_iDtmfSent.load();
@@ -1465,7 +1714,7 @@ void Worker::sampleDtmf(Endpoint* ep) {
         logf("debug", "dtmf sample %s(%s): te_pt=%d sent=%d recv=%d digits=%s", roleOf(ep->inst, ep).c_str(), ep->id.user.c_str(), pt, sent, recv, digits.c_str());
     if (sent > 0) m_metrics.counter("dtmf_sent", sent);   // RTP 로 실제 나간 이벤트 수(단계 카운터 dtmf_tx 와 대조)
     if (recv > 0) m_metrics.counter("dtmf_rx", recv);
-    if (!ep->isPeer()) ep->s->m_clsRtpThread.ResetDtmf();
+    if (ep->isSim()) ep->s->m_clsRtpThread.ResetDtmf();
 }
 
 std::string Worker::callerRole(Instance& in) {
@@ -1475,11 +1724,13 @@ std::string Worker::callerRole(Instance& in) {
 
 bool Worker::epHasCall(Endpoint* ep) {
     if (ep->isPeer()) return !ep->callId.empty() && ep->poolRef->peer->HasCall(ep->callId);
+    if (ep->isReal()) return ep->realCall >= 0;
     return !ep->s->m_strInviteId.empty();
 }
 
 int Worker::epAnswer(Endpoint* ep) {
     if (ep->isPeer()) return ep->callId.empty() ? 481 : ep->poolRef->peer->Answer(ep->callId);
+    if (ep->isReal()) return ep->realCall >= 0 && realRequest(ep, "answer " + std::to_string(ep->realCall) + (ep->realVideo ? " video" : ""))["ok"].asBool(false) ? 0 : 481;
     return ep->s->AnswerCall() ? 0 : 481;
 }
 
@@ -1489,12 +1740,60 @@ bool Worker::epReject(Endpoint* ep, int code, int cause) {
         return ep->poolRef->peer->Reject(ep->callId, code, cause);
     }
     // UE 시뮬레이터의 거절은 Reason 없이(실 단말 거절 코드만) — cause 는 피어 프로파일(MGCF Q.850) 몫
+    if (ep->isReal()) return ep->realCall >= 0 && realRequest(ep, "reject " + std::to_string(ep->realCall) + " " + std::to_string(code))["ok"].asBool(false);
     return ep->s->RejectCall(code);
 }
 
 bool Worker::epBye(Endpoint* ep, int cause) {
     if (ep->isPeer()) return !ep->callId.empty() && ep->poolRef->peer->Bye(ep->callId, cause);
+    if (ep->isReal()) return ep->realCall >= 0 && realRequest(ep, "hangup " + std::to_string(ep->realCall))["ok"].asBool(false);
     ep->s->StopCall();
+    return true;
+}
+
+bool Worker::epGroupCall(Endpoint* from, const std::string& group, bool listen, const Json& media) {
+    if (from->isReal()) {
+        if (from->realCall >= 0) return false;
+        Json r = realRequest(from, "group_call " + group + (listen ? " listen" : ""));
+        if (!r["ok"].asBool(false)) return false;
+        from->realCall = (int)r["call"].asInt(-1);
+        return true;
+    }
+    from->s->SetOfferCodec(codecPtOf(media["audio"].asString("")));   // 시나리오 오퍼 코덱(PTT 표준 = amr-wb). 없으면 풀 기본
+    from->s->SetListenOnly(listen);
+    from->s->StartGroupCall(group);
+    return !from->s->m_strInviteId.empty();
+}
+
+bool Worker::epFloorRequest(Endpoint* ep) {
+    if (ep->isReal()) return ep->realCall >= 0 && realRequest(ep, "floor_request " + std::to_string(ep->realCall))["ok"].asBool(false);
+    ep->s->SendPttRequest();
+    return true;
+}
+
+void Worker::epFloorRelease(Endpoint* ep, bool held) {
+    if (ep->isReal()) { if (ep->realCall >= 0) realRequest(ep, "floor_release " + std::to_string(ep->realCall)); return; }
+    if (held) ep->s->MediaStop();
+    ep->s->SendPttRelease();
+}
+
+bool Worker::epPickup(Endpoint* from, const std::string& code, const std::string& number) {
+    Json r = realRequest(from, "pickup " + code + (number.empty() ? "" : " " + number));
+    if (!r["ok"].asBool(false)) return false;
+    from->realCall = (int)r["call"].asInt(-1);
+    from->outPending = true;
+    from->outKind = "pickup";
+    return true;
+}
+
+bool Worker::epUnregister(Endpoint* ep) {
+    if (ep->isReal()) { if (ep->started) realRequest(ep, "unregister"); }
+    else if (ep->s && ep->started) ep->s->Stop(5);
+    else return false;
+    ep->started = false;
+    ep->registered = false;
+    ep->realCall = -1;
+    ep->affStarted = ep->affiliated = ep->affFailed = false;
     return true;
 }
 
@@ -1541,7 +1840,7 @@ void Worker::tickPrelude(long long now) {
         // 등록 통계(iRegFail) 를 본다.
         size_t failed = 0;
         for (auto* ep : m_preludeList)
-            if (ep->started && !ep->ready() && (ep->isPeer() ? ep->poolRef->regFailed : (ep->s->m_stats.iRegFail > 0 || ep->affFailed))) failed++;
+            if (ep->started && !ep->ready() && (ep->isPeer() ? ep->poolRef->regFailed : ep->isReal() ? (ep->realRegFailed || ep->affFailed) : (ep->s->m_stats.iRegFail > 0 || ep->affFailed))) failed++;
         if (failed < pending) return;
     }
     for (auto& kv : m_free) {
@@ -1581,6 +1880,7 @@ void Worker::tickBody(long long now) {
                 m_metrics.counter("progress_tx");
                 in.progressTx = true;
                 std::string caller = pendingCallerRole(in);
+                if (!caller.empty() && in.actors[caller]->isReal()) caller.clear();   // 실스택은 1xx 를 이벤트로 내지 않는다 — 183 도달 대기 없이 진행
                 if (!caller.empty()) {
                     in.phase = Instance::WAIT_EVENT;
                     in.awaitKind = "ring:" + caller;
@@ -1803,6 +2103,7 @@ void Worker::launchInstance(long long now) {
         ep->talked = false;
         epSetMediaMode(ep, in->rtpMode);
         if (ep->s) ep->s->m_clsRtpThread.ResetRecvStats();
+        ep->realStats.valid = false;
     }
     Instance* raw = in.get();
     m_instances.push_back(std::move(in));
@@ -1837,7 +2138,7 @@ void Worker::execStep(Instance& in, long long now) {
             }
             if (!epStartCall(from, to, st.media, dial ? st.to : std::string())) { finishInstance(in, true, "invite: StartCall refused (busy/stack/consult?)", now); return; }
             if (from->outKind == "consult") from->consultTo = st.to;
-            noteCallId(&in, from->isPeer() ? from->callId : from->outKind == "consult" ? from->consultCallId : from->s->m_strInviteId);
+            noteCallId(&in, from->isPeer() ? from->callId : from->isReal() ? std::string() : from->outKind == "consult" ? from->consultCallId : from->s->m_strInviteId);
             m_metrics.counter("legs", 2);
             bool calleeActs = in.stepIdx + 1 < m_body.size() &&
                               (m_body[in.stepIdx + 1].step == "reject" || m_body[in.stepIdx + 1].step == "answer" ||
@@ -1872,11 +2173,8 @@ void Worker::execStep(Instance& in, long long now) {
             if (!sessionUp) { in.rtpMode = rtpModeOf(st.media); for (auto* ep : endpointsOf(in)) epSetMediaMode(ep, in.rtpMode); }
             else epSetMediaMode(from, in.rtpMode);
             epSetVideo(in, from, st.media["video"].asString("") == "h264");
-            from->s->SetOfferCodec(codecPtOf(st.media["audio"].asString("")));   // 시나리오 오퍼 코덱(PTT 표준 = amr-wb). 없으면 풀 기본
-            from->s->SetListenOnly(listen);
-            from->s->StartGroupCall(group);
-            if (from->s->m_strInviteId.empty()) { finishInstance(in, true, "group_call: StartGroupCall refused (busy/stack?)", now); return; }
-            noteCallId(&in, from->s->m_strInviteId);
+            if (!epGroupCall(from, group, listen, st.media)) { finishInstance(in, true, "group_call: StartGroupCall refused (busy/stack?)", now); return; }
+            if (from->isSim()) noteCallId(&in, from->s->m_strInviteId);
             m_metrics.counter("legs");
             if (!sessionUp) m_metrics.counter("group_calls");
             m_metrics.counter("invite_tx");
@@ -1905,7 +2203,7 @@ void Worker::execStep(Instance& in, long long now) {
                     ep->floor = Endpoint::F_REQUESTED;
                     ep->wasQueued = false;
                     ep->tFloorReqUs = nowUs();
-                    ep->s->SendPttRequest();
+                    if (!epFloorRequest(ep)) { finishInstance(in, true, "floor_request: " + ep->id.user + " 요청 거절", now); return; }
                     m_metrics.counter("floor_request_tx");
                 }
                 in.phase = Instance::WAIT_EVENT;
@@ -1920,8 +2218,7 @@ void Worker::execStep(Instance& in, long long now) {
             for (auto* ep : eps) {
                 if (ep->floor != Endpoint::F_GRANTED && ep->floor != Endpoint::F_QUEUED && ep->floor != Endpoint::F_REQUESTED) continue;
                 bool held = ep->floor == Endpoint::F_GRANTED;
-                if (held) ep->s->MediaStop();
-                ep->s->SendPttRelease();
+                epFloorRelease(ep, held);
                 ep->floor = Endpoint::F_IDLE;
                 m_metrics.counter("floor_release_tx");
                 if (held) in.floorWait.push_back(ep);
@@ -2105,6 +2402,21 @@ void Worker::execStep(Instance& in, long long now) {
             if (st.step == "pickup" && !st.to.empty() && !to && !dialTo) { finishInstance(in, true, "pickup: to role missing", now); return; }
             if (st.step == "pickup" && st.payload.empty()) { finishInstance(in, true, "pickup: payload(피처코드) 필요", now); return; }
             if (from->inCall || from->outPending) { finishInstance(in, true, st.step + ": from 이 이미 통화 중", now); return; }
+            if (from->isReal()) {
+                // 실단말 — 픽업만(피처코드 다이얼). Replaces/Join 은 dialog 학습이 실스택 앱 몫이라 컴파일 게이트가 막는다
+                if (st.step != "pickup") { finishInstance(in, true, st.step + ": real-ue 는 pickup 만", now); return; }
+                markCancelExpected(in);
+                from->tStartCallMs = now;
+                in.expectCode = (int)st.expect["code"].asInt(0);
+                if (!epPickup(from, st.payload, to ? to->id.user : dialTo ? st.to : std::string())) { finishInstance(in, true, "pickup: INVITE not sent", now); return; }
+                m_metrics.counter("legs");
+                m_metrics.counter("pickup_tx");
+                m_metrics.counter("invite_tx");
+                in.phase = Instance::WAIT_EVENT;
+                in.awaitKind = (in.expectCode >= 300 ? "callend:" : "callstart:") + st.from;
+                in.deadlineMs = now + m_cfg.inviteTimeoutMs;
+                return;
+            }
             if (st.step != "pickup" && from->s->m_strWatchedDlgCallId.empty()) {
                 // dialog 이벤트 NOTIFY 로 대상 다이얼로그를 아직 못 배웠다 — NOTIFY(early|confirmed) 가 오면 이 단계를 다시 실행한다
                 if (!from->dlgWatching) { finishInstance(in, true, st.step + ": from 이 to 를 dialog 구독하지 않았다(subscribe 단계 선행)", now); return; }
@@ -2157,7 +2469,7 @@ void Worker::execStep(Instance& in, long long now) {
             in.respWait.clear();
             for (auto& role : st.who) {
                 for (auto* ep : roleEndpoints(in, role)) {
-                    if (!ep->isPtt() || !ep->registered) { finishInstance(in, true, "publish: " + role + " 은 등록된 PTT 단말이어야 한다", now); return; }
+                    if (!ep->isPtt() || !ep->registered || !ep->isSim()) { finishInstance(in, true, "publish: " + role + " 은 등록된 PTT 가상 단말이어야 한다", now); return; }
                     ep->s->AffiliateGroup(deaff, st.group);
                     m_metrics.counter("publish_tx");
                     in.respWait.push_back(ep);
@@ -2189,6 +2501,35 @@ void Worker::markCancelExpected(Instance& in) {
 void Worker::sampleRtp(Endpoint* ep) {
     unsigned long long rx = 0, lost = 0;
     long long jitterUs = 0;
+    if (ep->isReal()) {
+        // 실단말 표본 — 프로세스가 1 초마다 올린 RTP/RTCP 통계(pjmedia). leg 하나이므로 전체 지표(rtp_*·jitter_ms·mos)에 다른 단말과 같이 들어가고,
+        //   부하 아래 실단말 품질만 따로 보려는 real_* 시리즈에도 같은 표본을 남긴다(§3.3). 코덱 = 접속환경 표준(수신 PT 는 실스택이 내지 않는다)
+        if (!ep->realStats.valid) { m_metrics.counter("real_rtp_nosample"); return; }
+        rx = ep->realStats.rx; lost = ep->realStats.lost; jitterUs = ep->realStats.jitterUs;
+        logf("debug", "real-ue rtp sample %s(%s): tx=%llu rx=%llu lost=%llu jitter_us=%lld", roleOf(ep->inst, ep).c_str(), ep->id.user.c_str(), ep->realStats.tx, rx, lost, jitterUs);
+        m_metrics.counter("rtp_tx", (long long)ep->realStats.tx);
+        m_metrics.counter("rtp_rx", (long long)rx);
+        m_metrics.counter("rtp_lost", (long long)lost);
+        m_metrics.counter("real_rtp_tx", (long long)ep->realStats.tx);
+        m_metrics.counter("real_rtp_rx", (long long)rx);
+        m_metrics.counter("real_rtp_lost", (long long)lost);
+        if (rx + lost > 0) {
+            double lossPct = 100.0 * (double)lost / (double)(rx + lost), jitterMs = (double)jitterUs / 1000.0;
+            double mos = emodelMos(emodelCodec(ep->isPtt() || ep->poolRef->service == "volte" ? "AMR-WB" : "PCMU"), lossPct, jitterMs);
+            m_metrics.timer("rtp_loss_pct", lossPct);
+            m_metrics.timer("jitter_ms", jitterMs);
+            m_metrics.timer("mos", mos);
+            m_metrics.timer("real_rtp_loss_pct", lossPct);
+            m_metrics.timer("real_jitter_ms", jitterMs);
+            m_metrics.timer("real_mos", mos);
+        } else if (!(ep->isPtt() && ep->talked)) {
+            m_metrics.counter("rtp_silent_legs");
+            m_metrics.counter("real_rtp_silent_legs");
+        }
+        ep->talked = ep->floor == Endpoint::F_GRANTED;
+        ep->realStats.valid = false;
+        return;
+    }
     if (ep->isPeer()) {
         if (ep->callId.empty() || !ep->poolRef->peer->RtpStats(ep->callId, rx, lost, jitterUs)) return;
     } else {
@@ -2241,6 +2582,7 @@ void Worker::releaseEndpoint(Endpoint* ep) {
     ep->floor = Endpoint::F_IDLE;
     ep->tReleasedMs = nowMs();
     if (ep->isPeer()) epClearCall(ep);
+    else if (ep->isReal()) { ep->realReinviteWait = false; ep->realHeld = false; ep->realVideo = false; }
     else { epUnsubscribe(ep); ep->s->SetMediaMode(CRtpThread::E_MEDIA_AUTO); ep->s->SetListenOnly(false); }
     Instance* in = ep->inst;
     ep->inst = nullptr;
@@ -2272,14 +2614,7 @@ void Worker::endRun(const std::string& state) {
             if (rit == m_run->roles.end()) continue;
             Pool* pool = m_pools[rit->second].get();
             auto sl = m_run->slices[role];
-            for (int i = sl.first; i < sl.second && i < (int)pool->eps.size(); ++i) {
-                Endpoint* ep = pool->eps[i].get();
-                if (!ep->s || !ep->started) continue;
-                ep->s->Stop(5);
-                ep->started = false;
-                ep->registered = false;
-                ep->affStarted = ep->affiliated = ep->affFailed = false;
-            }
+            for (int i = sl.first; i < sl.second && i < (int)pool->eps.size(); ++i) epUnregister(pool->eps[i].get());
         }
     }
     // 남은 SIP 덤프(마지막 인스턴스들) → 마지막 집계 + 종료 로그

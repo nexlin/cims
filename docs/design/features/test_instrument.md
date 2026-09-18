@@ -122,7 +122,7 @@ cspsim/                   libcsim(SimSession·RtpThread 추출) + cspsim CLI(전
 |---|---|---|---|---|---|
 | `ue` | 가입자(DB `*_subscriptions` 또는 creds JSONL — cspsim `-db`/`-creds` 승계) | REGISTER (Digest/AKA, sec-agree, IPsec, TLS) | UE 마다 포트 | RTP/SRTP 송수신·측정 | 접속 서비스 시험·부하 |
 | `peer` | 도메인 하나 + 가상 신원 범위(DID/내선/E.164) | 없음(고정 IP) 또는 트렁크 REGISTER(PBX 프로파일) | **풀당 하나**(CSP `remote_nodes` 가 가리키는 ip:port:protocol) | 신원별 RTP | IBCF·PBX·MGCF 시뮬레이션 |
-| `real-ue` | 가입자 | REGISTER | 프로세스당 1 | pjsua2 실코덱 | 정합 표본 검사(소수) |
+| `real-ue` | 가입자(creds JSONL 또는 DB — `ue` 와 같은 원천, Digest 만) | REGISTER (프로세스가 낸다) | 프로세스당 1(pjsua 임의 포트) | pjsua2 실코덱·지터버퍼·SRTP | 정합 표본 검사(소수 — 워커 `RealUe.MaxProcesses`) |
 
 ### 3.1 `ue` 풀
 
@@ -251,8 +251,41 @@ run 전에 대상 OAM 의 컬렉션 API(`PUT /api/v1/deployments/{id}/collection
 
 ### 3.3 `real-ue`
 
-`cimsue-cli --json` 을 워커가 스폰해 JSON 한 줄 결과(`rx_pkts`·`granted`·exit code 표)를 지표로 받는다.
-같은 시나리오에서 `ue` 풀 100 + `real-ue` 2 처럼 섞어, 대량 부하 아래 실스택 단말의 품질을 표본 측정한다.
+**실단말 풀** — 신원 하나 = `cimsue-cli … drive` **자식 프로세스 하나**(libcimsue/pjsua2 실스택, [ue_sdk.md §4.7](ue_sdk.md) 구동 모드).
+워커는 `POST /pools` 에서 프로세스를 띄워 `ready` 를 기다리고(풀 수명 = 프로세스 수명 — 교체·삭제·워커 정지에서 `quit`→SIGTERM→SIGKILL),
+run 동안 stdin 한 줄 명령으로 구동하며(`register`·`dial`·`answer`·`reject`·`hangup`·`hold`/`resume`·`dtmf`·`pickup`·`group_call`·`floor_request`/
+`floor_release`·`affiliate`·`unregister`) stdout 의 한 줄 JSON 이벤트(`reg`·`incoming`·`call`·`floor`·`request`·`stats`·`exit`)를 받는다. 이벤트는 리더
+스레드가 큐에만 넣고 스케줄러가 **가상 단말과 같은 Event 종류**(REGISTER·INCOMING·CALLSTART·ANSWERED·CALLEND·BYERESP·REINVITE_RESP·FLOOR·AFFILIATE)로
+다시 풀어 처리하므로 단계 실행기·지표·판정은 Endpoint 종류를 모른다(`Worker.h` — `Endpoint::Kind` K_UE/K_PEER/K_REAL, ep* 헬퍼의 실단말 분기, `RealUe.h`
+프로세스 관리). 같은 시나리오에서 `ue` 풀 100 + `real-ue` 2 처럼 섞어 대량 부하 아래 실스택 단말이 보는 품질을 표본으로 잰다.
+
+- **시각은 프로세스 안에서 잔다** — `rrd_ms`(registerAccount → Registered) · `srd_ms`(dial → Active) · `sdd_ms`(hangup → Disconnected) · floor `t_us`
+  (이벤트 스레드 도달 시각). 확립 = `call state=active`(발신 = CALLSTART·SRD, MCPTT 착신 자동응답 = ANSWERED 합류) · 종료 = `disconnected`(`by_us` 면 BYE 응답
+  = SDD, 아니면 상대 종료/최종 응답 코드) · `held`/held→active 전이 = 우리 hold/resume 의 re-INVITE 200. 실스택은 1xx 를 이벤트로 내지 않아 `ring_rx`·
+  `early_media`·PRACK 은 관측하지 않고, 피어 `progress` 뒤 발신자 183 도달 대기는 발신자가 실단말이면 건너뛴다.
+- **미디어는 실스택 것** — `invite.media.rtp` 는 `auto` 만(컴파일 오류), `media_send`/`media_stop`·오퍼 코덱 지정 없음, 영상은 실스택 빌드 몫(Linux pjproject
+  는 `--disable-video`). RTP 품질은 프로세스가 1 초마다(그리고 종료 이벤트에) 올리는 pjmedia 통계(`rx_pkts`·`tx_pkts`·`rx_loss`·`jitter_us` — `StreamStats.rxJitterUs`)
+  가 원천이고 `media_hold` 뒤 `bye` 진입 때 표본을 뜬다 — **전체 지표**(`rtp_*`·`rtp_loss_pct`·`jitter_ms`·`mos`)에 다른 단말과 같이 들어가고(leg 하나),
+  **`real_*` 시리즈**(`real_legs`·`real_rtp_tx/rx/lost`·`real_rtp_loss_pct`·`real_jitter_ms`·`real_mos`·`real_srd_ms`·`real_rtp_silent_legs`·`real_rtp_nosample`·
+  `real_ue_exit`)에도 같은 표본을 남겨 부하 아래 실단말 품질만 따로 본다(MOS 코덱 = 접속환경 표준 AMR-WB, 수신 PT 미노출). PTT 실단말은 floor 가 마이크를
+  게이트하므로 talker 의 수신 0 은 정상(`talked`).
+- **단계 게이트 `REAL_UE_STEPS`**(컨트롤러 컴파일·콘솔 편집기 행위자 칩·`vocab.steps[*].real`) = `register`·`deregister`·`wait`·`expect`·`invite`·`answer`·
+  `reject`·`bye`·`media_hold`·`hold`·`resume`·`dtmf`·`pickup`·`group_call`·`floor_request`·`floor_release`. 빠진 것 = `progress`(피어)·`refer`(실스택이 REFER
+  최종 응답을 이벤트로 내지 않는다)·`replaces`/`join`/`subscribe`(dialog 학습은 실스택 앱 몫)·`publish`(affiliation 은 기동 절차가 한다)·`media_send`/`media_stop`·
+  상담 통화(두 번째 다이얼로그)·`sds_*`. PTT 실단말(`service: ptt`) 기동 = REGISTER → `affiliate <group> on`(PUBLISH, `affiliate_ms`) — GMS/CMS·conference 구독은
+  하지 않는다. 그룹 세션의 멤버 역할은 같은 풀 규칙 그대로(실단말 그룹 = 멤버 전원이 실단말 풀).
+- **풀 정의**(`RealUePool`) = `access`·`listener`·`source`(creds | db — `ue` 와 같은 원천, AKA 신원은 컴파일 오류)·`service`·`transport`·`srtp`·`tls_verify`
+  (서버 인증서 검증 — 워커 `RealUe.TlsCaFile` 앵커, 기본 끔 = 개발 스택 자체 서명). 신원은 가상 풀과 겹치면 안 된다(등록 바인딩 — 같은 겹침 검사).
+  워커 계약 `PoolCreate{kind: real-ue, service, srtp, transport, tls_verify, identities}` → 프로세스 인자 `--server/--port/--transport/--domain/--msisdn/
+  --auth-id(<auth_id|user>@domain)/--ha1|--password/--srtp[/--mcptt-id tel:<user>][/--tls-ca|--no-tls-verify] drive`.
+- **워커 설정** `RealUe.CliPath`(기본 `bin/cimsue-cli` — 워커 패키지가 동봉, 없으면 400 `real_ue_cli_missing`)·`MaxProcesses`(기본 8 — 넘으면 400 `real_ue_limit`,
+  계획 미리보기가 `GET /health real_ue{processes,max,cli}` 로 검산)·`LogLevel`(프로세스 stderr = pjsip 로그 → `log/real-ue/<풀>-<신원>.log`)·`StartTimeoutS`·
+  `TlsCaFile`. 프로세스가 죽으면(`process_exit`) 단말은 등록 상태를 잃고(`real_ue_exit` + event) 진행 중 인스턴스는 실패. 그 풀의 프로세스는 다른 풀을 만들어도
+  남으므로(가상 풀의 SimSession 과 같다) 용량 검산은 살아 있는 프로세스 전부를 센다 — 안 쓰는 실단말 풀은 `DELETE /pools/{name}` 으로 내린다.
+- **실측**(개발서버 워커 동거, 배포 CSP 0.2.134 @15060): `VOLTE-CALL-REAL-UE`(실단말 발신 → 가상 착신) pass — 등록 8/8, SRD 1075 ms(착신 after_ms 1000),
+  RTP tx 287/rx 275 손실 0, 지터 0.33 ms, MOS 4.21, 3 인스턴스 연속(프로세스 재사용) pass · `PTT-GROUP-CALL-BASIC` 을 멤버 3 전원 실단말로 — affiliation 5 ms,
+  fan-out 79 ms, floor grant 0.96 ms·taken 1.3 ms·idle 2.4 ms, talker tx 191 = listener rx 192×2. 단위시험 = `tester_real_ue_test`(파이썬 스텁이 drive 프로토콜을
+  흉내 — 스폰·ready·동기 결과·이벤트·정상/비정상 종료·exec 실패) + 컨트롤러 `test_real_ue_pool`.
 
 ---
 
@@ -404,7 +437,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
   `srd_ms.min ≥ 단계 시한` 으로, 무응답 overflow 는 `answer who: overflow`(포크가 CANCEL 된 뒤 도착하는 착신을 기다린다)로 본다. 동봉 `volte/fa_{parallel,
   overflow,pickup,sequential}` — 전화 그룹·pilot 은 대상 DB 픽스처(검증 다리가 계획의 역할 신원에 입힌다, S3-SCN-FA F1/F3/F5/F6).
   워커 지원 = `register/invite/progress/answer/reject/bye/hold/resume/dtmf/refer/media_hold/media_send/media_stop/wait/expect/deregister/group_call/floor_request/floor_release/
-  pickup/subscribe/replaces/join/publish`(미지원 = `sds_send`·`sds_recv`).
+  pickup/subscribe/replaces/join/publish`(미지원 = `sds_send`·`sds_recv`). 실단말(`real-ue`) 역할은 그중 `REAL_UE_STEPS`(§3.3)만 행위자가 된다.
 - **실행 의미(워커)** — 흐름을 셋으로 나눈다. **prelude** = 앞쪽의 `register`(+`wait`) 단계: 역할 슬라이스의 단말 **전부**를 run 시작 때 한 번
   등록한다(`Timers.RegisterIntervalMs` 간격, 이미 등록된 단말은 재사용). **body** = 나머지: **시나리오 인스턴스** 하나가 실행하는 단위 — 인스턴스는
   `rate_saps` 로 발생하고(토큰 버킷), 역할마다 free 단말을 하나씩 잡아 단계를 차례로 실행한 뒤 돌려준다. free 단말이 모자라면 그 슬롯은 `skipped`
@@ -481,6 +514,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 | 미디어 | 손실 % · 지터 ms · 단방향 무음 · MOS 추정 · RTCP 수신 | RTP seq/timestamp(RFC 3550 A.1/A.8). **MOS**(`mos`) = ITU-T G.107 E-model(워커 `EModel.h`): R = 93.2 − 1.41 − Id − Ie,eff, Id = 0.024d + 0.11(d−177.3)H(d−177.3) 에 d = 20 ms + 2×지터(단방향 망 지연은 0 — RTCP RTT 미측정), Ie,eff = Ie + (95−Ie)·Ppl/(Ppl+Bpl), MOS = 1 + 0.035R + R(R−60)(100−R)·7e-6(Annex B). 코덱 = 수신 wire PT: G.711 Ie 0/Bpl 25.1(PLC, G.113 App.I) · G.729 11/19 · AMR 5/10 · AMR-WB 6/13 · G.722 13/10(광대역 둘은 협대역 척도 근사 — 상대 비교용). 표본 = 호별 leg(`media_hold` 뒤 `bye` 진입), 요약 = `mos_mean`·`mos_min`(최악 leg), **기대치는 `min`**(로그 버킷 백분위는 1~4.5 범위에서 거칠다). **RTCP 수신 통계** = RTP 포트+1 로 들어온 SR/RR compound(§6.4) 를 세고 보고 블록의 fraction lost 를 `rtcp_remote_loss_pct` 표본으로 남긴다(`rtcp_rx`·`rtcp_rr_rx`; 상대가 RTCP 를 내지 않으면 값 없음 — CMP relay 는 내지 않는다, 실측). 카운터 `rtp_tx`·`rtp_rx`·`rtp_lost`·`rtp_silent_legs`(표본 시점에 수신 0 인 단말)·`media_send`·`media_stop`·`skipped_rtp_cap`, 게이지 `rtp_streams`. 표본은 `media_hold` 를 지난 인스턴스의 `bye` 진입 때(`rtp: none` 호는 뜨지 않는다). 워커 디버그 로그에 단말별 `rtp sample <역할>: tx rx lost jitter` |
 | 피어 트렁크 | `early_media_pct` · `early_rtp_pct` · `prack_pct` · `dtmf_rx_pct` · `q850_rx_pct` · re-INVITE/REFER 코드 | 발신기 관측 비율(`RATIO_METRICS` — 분자/분모 카운터 정의 단일): 183+SDP 도달/183 송신, **200 전에 RTP(≥ 5 패킷)를 받은 발신자/183 송신**, PRACK 수신/신뢰 183, DTMF 수신 이벤트/송신 숫자, Reason 수신/송신. B2BUA 투과 여부를 말한다. `early_media_pct` 는 시그널링(183 의 SDP 가 발신자에 닿았는가), `early_rtp_pct` 는 미디어 평면(링백 RTP 가 실제로 닿았는가 — 미디어 앵커가 18x SDP 를 반영해야 100 %)이다 |
 | PTT | `affiliate_ms` · `group_fanout_ms` · `floor_grant_ms` · `floor_taken_ms` · `floor_queue_ms` · `floor_idle_ms` · `floor_grant_pct` | TS 24.380 메시지 **수신 시각**(floor 스레드, µs)으로 잰다: affiliation PUBLISH → 200 · 그룹 INVITE → 마지막 멤버 합류(자동응답) · Floor Request → Granted(큐를 거치지 않은 요청) · Request → 다른 참가자의 Taken 도달 · 큐를 거친 Request → Granted · Release → 발언자의 Idle. 비율 `floor_grant_pct` = `floor_granted`/`floor_request_tx`. 카운터 `affiliated_ok/fail`·`group_calls`·`group_joined`·`floor_request_tx`·`floor_granted`·`floor_denied`·`floor_queued`·`floor_revoked`·`floor_release_tx`·`floor_taken_rx`·`floor_idle_rx`. 그룹 세션의 leg = 발신자 1 + 합류 멤버 수 |
+| 실단말 | `real_srd_ms` · `real_rtp_loss_pct` · `real_jitter_ms` · `real_mos`(min) | 실단말(real-ue, §3.3) leg 만 따로 — 같은 표본이 전체 지표에도 들어간다. 카운터 `real_legs`·`real_rtp_tx/rx/lost`·`real_rtp_silent_legs`·`real_rtp_nosample`(표본 없이 bye)·`real_ue_exit`(프로세스 종료) |
 | 대표번호 · 청취 | `fork_alert_pct` · `listen_pct` | 발생기 관측 비율 — `fork_rx`/`fork_expected`(번호 리터럴 다이얼 뒤 발신자를 뺀 UE 역할에 도달한 포크 INVITE, TS 24.239) · `listen_ok`/`listen_tx`(recvonly 청취 INVITE 의 200 확립, dispatch_center.md §5.6). 부가 카운터 `fork_dial_tx`·`ringing_leg_cancelled`·`pcpid_ok`·`group_join_ok` |
 | MCData | SDS 전달 지연 · disposition 회신율 | TS 24.282 |
 | 대상 측 | 호스트 CPU·메모리·load · 알람 발생 · 이벤트 · 녹취 생성 | **대상 관측**(`services/tester_observe.py`) — 원천 = 대상 OAM API(토큰은 §3 대상 OAM 규칙). ① **호스트 자원**: oam 노드 `observe` 에 `agent_heartbeat`(또는 `oam_stats`)가 있으면 run 동안 `GET /api/v1/agents/{id}/metrics`(약 3 s 간격)를 모아 `metrics.sqlite` `target(t, agent, cpu_pct, mem_pct, load)` + SSE `target` + 요약 `target_cpu_peak_pct` — 관측 대상 agent = 대상 노드 `procs` 와 패키지/프로세스 이름이 맞는 배포의 agent. `stop_on.target_cpu_pct` 는 agent 별 최근 3 표본 평균의 최댓값으로 판정한다(관측이 꺼져 있으면 미적용 + 참고). 프로세스별 CPU 는 heartbeat 에 없다 — **호스트 SSH 관측**(`SshObserver`, `hosts.*.ssh` 가 있는 호스트에 대상 노드가 있으면 켜진다) 이 원천: run 동안 약 3 s 간격으로 `ssh -i $<key_env> user@ip` 한 번에 `/proc/stat`·`/proc/meminfo`·`/proc/loadavg`·`pgrep -x <procs>` 의 `/proc/<pid>/stat`(utime+stime 틱)·`/proc/<pid>/status`(VmRSS)·`nodes.*.logs` 파일 크기를 읽어 호스트 CPU(전체−idle 차분)·메모리·load 를 `target(agent=<호스트 id>)` 에, 프로세스별 CPU(틱 차분/CLK_TCK/경과 — `ps` 의 수명 평균이 아니다)·RSS 를 `target_proc(t, host, proc, pid, cpu_pct, rss_mb)` 에 넣는다(SSE `target`·`target_proc`). 요약 `target_proc_peak_pct{호스트/프로세스}`·`target_rss_delta_mb`(처음↔끝 RSS 차 — 소크 누수 판정 원천)·`target_log_errors`; `stop_on.target_cpu_pct` 는 agent·SSH 관측값의 최댓값으로 판정. 대상에는 아무것도 설치하지 않는다(sh·awk·pgrep·stat·tail·grep). 연결 검사 `<호스트>:ssh` 는 도달 뒤 실제 키 인증과 `/proc` 읽기까지 확인한다. ② **증거 판정**(`target_evidence`, 2차): run 창(시작 −2 s ~ 종료 +10 s)으로 `recording_created`=`/recordings` · `alarm_raised`=`/alerts`(code, cleared 제외) · `event_logged`=`/events`(code) 건수를 세어 min/max 와 비교 — 어긋나면 run 은 fail, 원천을 못 읽은 항목(대상 OAM 미도달·`log_errors` 인데 `hosts.*.ssh`+`nodes.*.logs` 가 없음)은 `ok=null` 로 판정에서 빼고 참고로만 남긴다. **`log_errors`** 의 원천은 SSH 관측 — run 시작 때 각 로그 파일 크기를 재고 끝에 그 뒤 바이트에서 `ERROR|FATAL` 줄을 센다(run 중 생긴 파일은 전체)(대상 OAM 이 죽었다고 시험이 뒤집히지 않는다). 운영자 중단·오류 run 은 판정하지 않는다 |
@@ -506,6 +540,8 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
   (400 `sample_missing`·`sample_unknown`·`sample_codec_unsupported`). `GET /health` 의 `media{rtp_streams, max_rtp_streams, sample_dir, files[]}` 로
   컨트롤러 계획 미리보기가 샘플 파일 보유·RTP 상한을 검산한다. 워커 설정 `Media.SampleDir`(상대 경로는 모듈 디렉터리 기준, 기본 `samples`)·
   `Media.MaxRtpStreams`(0 = 제한 없음 — 넘는 인스턴스 슬롯은 `skipped` + `skipped_rtp_cap`).
+  `kind=real-ue` 풀은 신원마다 `cimsue-cli … drive` 프로세스를 띄워 `ready` 까지 기다린다(§3.3 — 400 `real_ue_cli_missing`·`real_ue_limit`·`real_ue_aka_unsupported`·
+  `real_ue_start_timeout`), `PoolCreate.tls_verify` 가 서버 인증서 검증, `GET /health` 의 `real_ue{processes, max, cli}` 로 계획 미리보기가 프로세스 상한을 검산한다.
   `kind=peer` 풀은 `PoolCreate.peer`(토폴로지 PeerPool 그대로)로 엔진을 만들고 생성 즉시 bind 한다(실패 400 `peer_bind_failed`);
   `target_csp.peering` 이 발신 다음 홉이다(컨트롤러가 풀이 가리킨 수신점에서 채운다 — edge 무관).
   신원 `Identity.auth_id` 는 IMPI 사용자부 — `@` 가 없으면 워커가 `domain` 을 붙인다(cspsim `-creds` authId 규약; CSP 는 `authId@domain` 을 기대한다).
@@ -600,13 +636,15 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 - 기동 순서: base → `oam-cims-tester` → 워커(워커는 컨트롤러 없이도 떠서 `GET /health` 만 응답).
 - 빌드: 루트 CMake `option(CIMS_TESTER ON)` 으로 `cims-tester-worker`(+`libcsim`)를 `build/bin/` 에. `libcsim` = `cspsim/` 의 `add_library(csim STATIC …)`
   (SimSession·RtpThread·SipClient·G711) — cspsim CLI 와 워커가 같은 정적 라이브러리를 링크한다. 링크 순서: `libsrtp2` 가 psip(동봉 opensrtp) 보다 앞
-  (심볼 충돌). `make dist` 가 `dist/cims-tester-worker/{bin,config/{config_template,cims-tester-worker}.json,pkg.json}` 을 채운다.
+  (심볼 충돌). `make dist` 가 `dist/cims-tester-worker/{bin,config/{config_template,cims-tester-worker}.json,pkg.json,samples}` 을 채우고, 실단말 풀(§3.3)의
+  `cimsue-cli`(sdk/core `CIMSUE_BUILD_CLI`, 타깃이 있을 때)를 같은 `bin/` 에 동봉한다 — 워커 `RealUe.CliPath` 기본 `bin/cimsue-cli`. cimsue-cli 는 libssl/
+  libcrypto/libz/libzstd 만 동적 링크한다(대상 호스트 공통 라이브러리).
 - 워커 설정(`tester/worker/config/config_template.json`): `Worker.Name`(비면 hostname) · `Server.Ip/Port`(제어 7100) · `Sip.LocalIp`(비면 자동 탐지)·
-  `Sip.PortBase`(0=OS 자동, >0 = base+2i) · `Media.AudioFile/VideoFile`(비면 합성 PCMU/비디오 없음) · `Limits.EndpointsPerCore/SapsPerCore`(용량 선언) ·
-  `Timers.*`. 배포 overlay `config.json`(평면 키)은 lifecycle 가 모듈 설정에 머지하고 워커도 자기 옆의 것을 읽는다. libcsim 의 printf 진단은 부하 중
+  `Sip.PortBase`(0=OS 자동, >0 = base+2i) · `Media.AudioFile/VideoFile`(비면 합성 PCMU/비디오 없음) · `RealUe.CliPath/MaxProcesses/LogLevel/StartTimeoutS/TlsCaFile`
+  (실단말 풀, §3.3) · `Limits.EndpointsPerCore/SapsPerCore`(용량 선언) · `Timers.*`. 배포 overlay `config.json`(평면 키)은 lifecycle 가 모듈 설정에 머지하고 워커도 자기 옆의 것을 읽는다. libcsim 의 printf 진단은 부하 중
   초당 수천 줄이라 워커는 stdout 을 `/dev/null` 로 돌리고(`--verbose` 로 유지) 자기 로그는 stderr 로 낸다.
 - 검증 게이트: `S1-UNIT-TESTER`(계약·핸들러·오케스트레이터(가짜 워커)·피어 시드 파생·게이트웨이 SSE 단위시험 + 네이티브 `build/bin/csim_rtp_dtmf_test`
-  RFC 4733 루프백) · `S1-CONFIG-PORTABILITY` 대상에 두 모듈 설정 ·
+  RFC 4733 루프백 · `csim_rtp_media_test` · `tester_sip_capture_test` · `tester_emodel_test` · `tester_real_ue_test`(실단말 프로세스 관리 — drive 프로토콜 스텁)) · `S1-CONFIG-PORTABILITY` 대상에 두 모듈 설정 ·
   `S2-PREFLIGHT` 네이티브 바이너리 목록 · `S4-PKG-BUILD` 기대 tarball 에 `oam-cims-tester`·`cims-tester-worker`.
 - 파이썬 인터프리터 선택은 [os_portability.md](os_portability.md) 규칙(`--python` > 동봉 > `python3.14` > `python3`)을 따른다.
 - 워커 호스트 = 시험 대상과 **다른** 호스트(N 대). 독립 형태의 컨트롤러 노드는 워커 중 한 대에 동거해도 된다(소규모).
@@ -620,7 +658,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 | `cims-verify` S1~S6 | 상용 배포 게이트(정적·빌드·스모크·패키징·배포·통합) | 유지. S3/S6 의 **시나리오 항목**이 `cims.sh sim` 대신 `cims-tester run <scenario> --json` 을 호출하도록 단계적 이전 — 다리 = `verify/lib/common/tester.py` `run_tester_scenario`(환경변수 `CIMS_TESTER_URL`·`CIMS_TESTER_TOPOLOGY`·토큰/계정; 없으면 `None` → 그 항목의 cspsim 경로, 설정했는데 못 닿으면 FAIL). 항목 판정 = 계측기 verdict, 보고서에 run id·결과 화면 경로. 이전된 항목: `S6-SCN-VOLTE-VOICE` → `VOLTE-CALL-BASIC` · `S6-SCN-VOLTE-VIDEO` → `VOLTE-CALL-VIDEO`(m=video 협상 `video_pct`) · `S6-SCN-PTT-VIDEO` → `PTT-GROUP-CALL-VIDEO` · `S6-SCN-IBCF-TRUNK` → `TRUNK-IBCF-OUTBOUND`(토폴로지에 ibcf 피어 풀) · `S6-SCN-PTT-VOICE` → `PTT-GROUP-CALL-BASIC`(토폴로지에 `service: ptt` 풀 필요; 다리가 cspsim 헬퍼와 같은 상태 키 `S6_PTT_VOICE_T0/_TAIL/_RC` 를 남겨 `S6-MCPTT-FLOOR-GRANT` 의 CMP flow 창이 그대로 선다) · **S3 보조 서비스 항목**(검사 단위로 — 항목 안 checks 의 각 줄이 `[계측기 <시나리오>]` 로 경로를 밝힌다): `S3-SCN-XFER` X1/X2/X3 → `VOLTE-XFER-BLIND`/`-ATTENDED`/`-DENIED` · `S3-SCN-PICKUP` P1~P4 → `VOLTE-PICKUP-GROUP`/`-DIRECTED`/`-DIRECTED-DENIED`/`-GROUP-NOCALL`(바인딩 `pickup_code=**`) · `S3-SCN-DIALOG` D1/D2/D3/D4 → `VOLTE-BLF-PICKUP`/`VOLTE-BLF-DENIED`/`VOLTE-SUBSCRIBE-BAD-EVENT`(D5 미등록 SUBSCRIBE 는 워커 단말이 항상 등록하므로 cspsim) · `S3-SCN-MONITOR` M2 → `VOLTE-MONITOR-JOIN`(M8 회수 시점 훅·M5 인가 변형은 cspsim). · `S3-SCN-FA` F1/F3/F6 → `VOLTE-FA-{PARALLEL,OVERFLOW,SEQUENTIAL}`(대표번호 = `--bind pilot=`, 전화 그룹 픽스처를 계획의 memberB·memberC·overflow 신원에; 계측기는 fork 도달(`fork_alert_pct`)·확립·미디어만 판정하고 overflow/순차 **타이밍**·F5 PickUpFork 승계·F7 dialog 포크 NOTIFY 방향은 cspsim 경로에 남는다 — dev CSP 5060 필요, 계측기 모드에서는 SKIP) · `S3-SCN-PTT-LISTEN` L1/L2/L3/L3c/L4 → `PTT-GROUP-LISTEN`/`-LISTEN-DENIED`/`PTT-GROUP-NONMEMBER-DENIED`(청취자 = 계획 `identities_by_role.monitor[0]`, 그룹 = `group_session.first_group`; conference SUBSCRIBE 정합·로스터 노출은 cspsim). 대상 DB 픽스처(pickup_group·전화 그룹·역할·service_ref)는 계획 드라이런(`cims-tester plan --json` 의 `identities_by_role`)이 준 **계측기가 쓸 역할 신원**에 입힌다 — 다리 `tester_role_identities`·검사 단위 `tester_check`. 나머지는 시나리오가 확정되는 대로 같은 방식으로 옮긴다. 게이트 판정·불변성·보고서는 그대로 |
 | `oam-svc` `verification`(`/release/verify`) | 게이트 실행·이력 콘솔 | 유지. 동거 형태에서는 같은 base 뒤에 있으므로 검증 결과에 계측기 run 링크(`/test/runs/<id>`)를 남긴다(교차 참조). 두 모듈 사이 코드 의존은 없다 |
 | `cspsim` | 경량 UE·mock peer CLI | `libcsim` 위의 얇은 CLI 로 유지(기존 플래그 호환). 이전이 끝난 항목부터 의존 제거 |
-| `cimsue-cli` | 실스택 UE | 계측기 `real-ue` 로 편입, 수동 부록에서 자동 표본 검사로 |
+| `cimsue-cli` | 실스택 UE | 계측기 `real-ue` 풀(§3.3 — `drive` 모드, 워커 패키지 동봉)로 편입됨. 수동 명령형은 그대로 남는다 |
 | `scripts/longrun_8h.sh` 등 소크 스크립트 | 야간 부하 | `soak` 프로파일로 대체 |
 
 ---
@@ -637,7 +675,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 | **D. 피어 축 — pbx · mgcf** | 트렁크 REGISTER, DID/내선, 183 early media·PRACK, hold/resume, REFER 발신, RFC 4733 DTMF, Q.850 Reason, G.711 | **구현 반영**(§3.2 pbx·mgcf) — 시나리오 `trunk/pbx_{outbound,inbound,dtmf,hold_resume,transfer,register}.yaml`·`trunk/mgcf_{outbound,inbound,reject_q850}.yaml`. 개발서버 실측 7 pass / 3 fail — fail 은 전부 CIMS 측(§12: Reason 미투과·503→603·트렁크 계정). 남은 것 = UE 측 183(실 단말 착신 모사 아님)·in-band DTMF·G.722·TLS 상호인증 | M |
 | **E. 콘솔 팩** | §7 화면 전부, SSE 라이브, 비교·보고서. cims-verify S3/S6 시나리오 항목의 `cims-tester` 호출 이전 | **구현 반영**(§7 표) — 컨트롤러 = 토폴로지 v2 모델·v1 승계·계획 미리보기(`runs/plan`=`compile-check`)·`vocab`·`hold`·`hist`·`sip/{call_id}`·`target-alerts`·색인 필터·`compare?format=`·`during` 평탄화·연결 검사 `노드:수신점`; 콘솔 팩 = 토폴로지 캔버스 편집기·시나리오 시퀀스 캔버스 편집기·실행(워커 띠·단계 사다리·종료 조건·소형 차트·절차 진행·SIP 드로어·색인 필터·계획 미리보기)·결과(run 레일·판정 요약·히스토그램·여유 막대·알람 마커·대상 증거)·비교(run 카드·Δ 매트릭스·t+0 겹침·기대치 diff·추세). 개발서버 실측: 연결 검사 CSP OPTIONS 200 OK / TLS 1.3 / 워커 health, `VOLTE-CALL-BASIC` 단발 3 인스턴스 완주(pass, SER 100 %), 단위시험 73 건(S1-UNIT-TESTER PASS), 콘솔 tsc·vite build 통과. 남은 것 = §7 '남은 것' + 콘솔 화면 실기 확인(oam 패키지 재빌드·배포) | L |
 | **미디어 평면** | `invite.media.rtp`(auto/none/explicit)·`media_send`/`media_stop`·샘플 라이브러리의 워커 이행 — libcsim `CRtpThread` 송출 제어·원천 교체(단일 송신 루프, AMR-WB/G.711 파일·합성)·상대 hold 정지, 워커 단계·샘플 검증·health `media`·RTP 상한, 컨트롤러 모델·컴파일(샘플 발췌)·계획 미리보기 검산·`early_rtp_pct`, 콘솔 편집 | **구현 반영**(§4 미디어 평면) — 단위시험: libcsim `csim_rtp_media_test`(none·explicit·샘플 1회 재생 = 프레임 수만큼·정지/재개에 시퀀스 공백 없음·hold 정지·AMR-WB NO_DATA) + 컨트롤러 모델·컴파일·계획(S1-UNIT-TESTER). 개발서버 CSP/CMP 실측: `VOLTE-CALL-SIGNALING` pass(RTP 카운터 0) · `VOLTE-CALL-ONEWAY-MEDIA` pass(발신자만 4 s — tx 197 = rx 197, 손실 0, 무수신 단말 1, CMP relay 경유) · `VOLTE-CALL-BASIC` 회귀 pass(CMP 녹취 PT = 협상 PT 96) · `TRUNK-MGCF-EARLY-MEDIA` — CSP 0.2.132 에서 `early_rtp_pct` 0 % 로 **18x SDP 미앵커링을 드러냈고**, 앵커링 반영본(0.2.134)에서 pass(100 %, §12). **영상** = `invite`/`group_call` 의 `media.video: h264` 가 오퍼 m=video 유무를 정한다(libcsim `m_bVideoOffer`, 워커 `Media.VideoFile` 기본 = 동봉 `samples/sample_video.h264` — 없으면 오디오만 + `video_unavailable`), 지표 `video_pct` = answer 활성 m=video / m=video 오퍼. 동봉 샘플 = `ringback_kr`·`tone_1k`(G.711)·`sample_voice.amrwb`(AMR-WB raw, 워커 `Media.AudioFile` 기본 — 기본 원천이 합성 NO_DATA 대신 실제 음성)·`sample_video.h264`. 남은 것 = 미디어 전담 워커 분리 | M |
-| **F. 확장** | MCData SDS/MSRP ue 단계, `real-ue` 편입, NAT(netns) 풀, MOS 추정, soak 프로파일 + 누수 판정, 대상 알람 타임라인 겹침 | 야간 소크 스크립트 대체 | M |
+| **F. 확장** | MCData SDS/MSRP ue 단계, `real-ue` 편입, NAT(netns) 풀, MOS 추정, soak 프로파일 + 누수 판정, 대상 알람 타임라인 겹침 | **`real-ue` 편입 구현 반영**(§3.3) — cimsue-cli `drive` 모드 + 워커 `RealUe` 프로세스 풀 + 컨트롤러 `RealUePool`/`REAL_UE_STEPS`/`real_*` 지표 + 콘솔 속성 패널·행위자 게이트, 동봉 `VOLTE-CALL-REAL-UE`, 실측 VoLTE·PTT 그룹콜 pass. MOS 추정은 §5 반영. 남은 것 = MCData·NAT(netns)·soak 누수 판정 시나리오·알람 타임라인 | M |
 
 B 가 끝나면 성능 시험이, C·D 가 끝나면 피어 연동 기능 시험이 가능하다. E 는 B 와 병행 착수할 수 있다(API 계약이 A 에서 고정되므로).
 

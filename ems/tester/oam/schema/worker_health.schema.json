@@ -34,6 +34,33 @@
       "title": "WorkerHealthMedia",
       "type": "object"
     },
+    "WorkerHealthRealUe": {
+      "additionalProperties": false,
+      "properties": {
+        "cli": {
+          "default": "",
+          "description": "RealUe.CliPath 해석 결과",
+          "title": "Cli",
+          "type": "string"
+        },
+        "max": {
+          "default": 0,
+          "description": "RealUe.MaxProcesses",
+          "minimum": 0,
+          "title": "Max",
+          "type": "integer"
+        },
+        "processes": {
+          "default": 0,
+          "description": "살아 있는 cimsue-cli 프로세스 수",
+          "minimum": 0,
+          "title": "Processes",
+          "type": "integer"
+        }
+      },
+      "title": "WorkerHealthRealUe",
+      "type": "object"
+    },
     "WorkerPoolState": {
       "additionalProperties": false,
       "properties": {
@@ -181,6 +208,17 @@
       },
       "title": "Pools",
       "type": "array"
+    },
+    "real_ue": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkerHealthRealUe"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "version": {
       "title": "Version",

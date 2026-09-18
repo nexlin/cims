@@ -370,12 +370,17 @@ class PeerPool(_PoolBase):
 
 
 class RealUePool(_PoolBase):
+    """실단말 풀(§3.3) — 신원마다 워커가 `cimsue-cli … drive`(libcimsue/pjsua2 실스택) 프로세스 하나를 띄운다. 소수(워커 RealUe.MaxProcesses)로
+    대량 가상 부하 아래 실단말 품질을 표본 측정한다. 지원 단계 = REAL_UE_STEPS(등록·1:1 호·hold/resume·DTMF·픽업·그룹콜·floor), 미디어는 실스택 것
+    (invite.media.rtp 는 auto 만, media_send/stop 불가). AKA 신원은 받지 않는다."""
     kind: Literal['real-ue']
-    access: str
+    access: str = Field(description='접속점 노드 id — edge=access 수신점이 있는 SIP 노드')
     listener: Optional[str] = None
-    source: CredsSource
+    source: Union[DbSource, CredsSource]
+    service: Optional[ServiceKind] = Field(default=None, description='접속환경 클래스 — ptt 면 MCPTT 단말(mcptt-id·affiliation·floor). 생략 = source.table 이 ptt_subscriptions 면 ptt, 그 외 volte')
     transport: Transport = 'tls'
     srtp: SrtpMode = 'optional'
+    tls_verify: bool = Field(default=False, description='서버 TLS 인증서 검증 — 워커 RealUe.TlsCaFile 을 앵커로(없으면 검증 없이 접속). 기본은 개발 스택(자체 서명) 전제로 끔')
 
 
 Pool = Union[UePool, PeerPool, RealUePool]
@@ -519,7 +524,7 @@ class Topology(_Strict):
                     p.transport = l.protocol
                 elif not any(l.protocol == p.transport for l in node.sip.by_edge('access').values()):
                     raise ValueError(f'pools.{pname}: transport {p.transport} 인데 {p.access} 에 {p.transport} access 수신점이 없다')
-                if p.kind == 'ue' and isinstance(p.source, DbSource):
+                if isinstance(p.source, DbSource):
                     src = self.target.nodes.get(p.source.db)
                     if src is None or not (src.role == 'db' or (src.role == 'subscriber' and src.api is not None)):
                         raise ValueError(f'pools.{pname}.source.db={p.source.db!r} 는 db 노드 또는 api 있는 subscriber 노드가 아니다')
@@ -578,7 +583,7 @@ class Topology(_Strict):
     def pool_service(self, pname: str) -> str:
         """UE 풀의 접속환경 클래스 — service, 비면 source.table 이 ptt_subscriptions 일 때 ptt, 그 외 volte."""
         p = self.pools[pname]
-        if p.kind != 'ue':
+        if p.kind not in ('ue', 'real-ue'):
             return 'volte'
         if p.service:
             return p.service
@@ -679,6 +684,11 @@ WORKER_STEPS = frozenset((
     'group_call', 'floor_request', 'floor_release',
     'pickup', 'subscribe', 'replaces', 'join', 'publish',
 ))
+# 실단말(real-ue) 역할이 행위자(from/who)가 될 수 있는 단계 — cimsue-cli drive 명령이 있는 것만(§3.3). 나머지는 컴파일 오류.
+#   빠진 것: progress(피어) · refer(실스택이 REFER 최종 응답을 이벤트로 내지 않음) · replaces/join/subscribe(dialog 학습은 실스택 앱 몫) ·
+#   publish(affiliation 은 기동 절차가 한다) · media_send/media_stop(송출은 실스택 것) · sds_*
+REAL_UE_STEPS = frozenset(('register', 'deregister', 'wait', 'expect', 'invite', 'answer', 'reject', 'bye', 'media_hold',
+                           'hold', 'resume', 'dtmf', 'pickup', 'group_call', 'floor_request', 'floor_release'))
 
 # publish.payload — MCPTT affiliation 명령(TS 24.379 §9): affiliate(기본) | deaffiliate
 PUBLISH_COMMANDS = ('affiliate', 'deaffiliate')
@@ -737,6 +747,8 @@ STEP_VOCAB = {
     'sds_recv':      {'group': 'ptt',   'actor': 'who',     'kind': 'ue',       'metrics': ['sds_delay_ms', 'sds_disposition_pct'], 'desc': 'MCData SDS 수신 대기'},
     'expect':        {'group': 'ctl',   'actor': 'none',    'kind': None,       'metrics': ['ser_pct', 'scr_pct', 'isa_pct'], 'desc': '누계 지표 게이트'},
 }
+for _k, _v in STEP_VOCAB.items():
+    _v['real'] = _k in REAL_UE_STEPS   # 실단말(real-ue) 역할이 행위자가 될 수 있는가 — 편집기 행위자 칩 게이트
 STEP_GROUPS = [
     {'id': 'reg', 'label': '등록'}, {'id': 'call', 'label': '호'}, {'id': 'media', 'label': '미디어'},
     {'id': 'peer', 'label': '피어 축'}, {'id': 'xfer', 'label': '전달·합류'}, {'id': 'ptt', 'label': 'PTT · MCData'},
@@ -789,7 +801,10 @@ METRIC_NAMES = (
     'fork_alert_pct',
     # PTT 청취(dispatch_center.md §5.6) — group_call payload listen 의 recvonly INVITE 가 200 으로 확립된 비율
     'listen_pct',
+    # 실단말(real-ue) 표본(§3.3) — 실스택 단말 leg 만 따로: 발신 SRD · RTP 손실/지터(pjmedia 통계) · MOS(min 이 판정)
+    'real_srd_ms', 'real_rtp_loss_pct', 'real_jitter_ms', 'real_mos',
 )
+
 
 # 비율 지표의 분자/분모 카운터 — 요약·판정이 같은 정의를 쓴다(§5)
 RATIO_METRICS = {
@@ -1197,6 +1212,7 @@ class PoolCreate(_Strict):
     service: ServiceKind = Field(default='volte', description='kind=ue — ptt 면 MCPTT 단말(기동 절차·자동응답·floor)')
     prack: bool = Field(default=False, description='kind=ue — 100rel/PRACK')
     dtmf: bool = Field(default=True, description='kind=ue — telephone-event 오퍼/echo')
+    tls_verify: bool = Field(default=False, description='kind=real-ue — 서버 TLS 인증서 검증(워커 RealUe.TlsCaFile 앵커, 없으면 --no-tls-verify)')
     target_csp: TargetCsp = Field(description='풀이 닿는 SIP 서버 — 컨트롤러가 토폴로지 노드 참조에서 파생')
     peer: Optional[WorkerPeer] = Field(default=None, description='kind=peer 일 때 프로파일·bind·신원 범위')
     trunk_register: Optional[TrunkRegister] = Field(default=None, description='kind=peer(pbx) 트렁크 REGISTER 계정 — 비밀 해석 완료본')
@@ -1265,6 +1281,12 @@ class WorkerHealthMedia(_Strict):
     files: List[str] = Field(default_factory=list, description='샘플 디렉터리의 파일 이름 — 컨트롤러가 샘플 라이브러리와 대조')
 
 
+class WorkerHealthRealUe(_Strict):
+    processes: int = Field(default=0, ge=0, description='살아 있는 cimsue-cli 프로세스 수')
+    max: int = Field(default=0, ge=0, description='RealUe.MaxProcesses')
+    cli: str = Field(default='', description='RealUe.CliPath 해석 결과')
+
+
 class WorkerHealth(_Strict):
     """GET /health 응답 — 용량 선언 + 시계 확인(§6.1)."""
     worker: str
@@ -1278,6 +1300,7 @@ class WorkerHealth(_Strict):
     pools: List[WorkerPoolState] = Field(default_factory=list)
     local_ip: Optional[str] = None
     media: Optional[WorkerHealthMedia] = None
+    real_ue: Optional[WorkerHealthRealUe] = None
 
 
 # ──────────────────────────────────────────────────────────────────────────

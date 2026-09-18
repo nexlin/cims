@@ -118,8 +118,14 @@ export interface PeerPoolDoc extends TopoPoolBase {
   codecs?: string[]; answer?: 'normal' | 'silent' | 'reject' | 'delay'; fault?: { code?: number; q850?: number; delay_ms?: number }; prack?: boolean; dtmf?: boolean
   seed?: { enabled?: boolean; route_set?: string; distribution?: string; priority?: number; weight?: number; acl?: 'allow' | 'deny' }
 }
+/** 실단말 풀(test_instrument.md §3.3) — 신원마다 워커가 cimsue-cli(libcimsue/pjsua2 실스택) 프로세스를 띄운다. 단계는 vocab.real_ue_steps 만, 미디어 평면은 실스택 것 */
 export interface RealUePoolDoc extends TopoPoolBase {
-  kind: 'real-ue'; access: string; listener?: string; source: { creds: string; offset?: number; count?: number }; transport?: Transport; srtp?: 'off' | 'optional' | 'required'
+  kind: 'real-ue'; access: string; listener?: string
+  source: { creds: string; offset?: number; count?: number } | { db: string; table: string; offset?: number; count: number; ptt_group?: string }
+  service?: 'volte' | 'voip' | 'ptt'
+  transport?: Transport; srtp?: 'off' | 'optional' | 'required'
+  /** 서버 TLS 인증서 검증(워커 RealUe.TlsCaFile 앵커) — 기본 끔(개발 스택 자체 서명) */
+  tls_verify?: boolean
 }
 export type PoolDoc = UePoolDoc | PeerPoolDoc | RealUePoolDoc
 export interface TopoLayout { regions: Record<string, { x: number; y: number; w: number; h: number }>; items: Record<string, { x: number; y: number }> }
@@ -328,11 +334,13 @@ export interface PlanResult {
   active_runs?: string[]
 }
 
-export interface StepVocab { group: string; actor: 'who' | 'from' | 'fromto' | 'seconds' | 'none'; kind: string | null; metrics: string[]; desc: string; supported: boolean }
+export interface StepVocab { group: string; actor: 'who' | 'from' | 'fromto' | 'seconds' | 'none'; kind: string | null; metrics: string[]; desc: string; supported: boolean; real?: boolean }
 export interface ScenarioVocab {
   steps: Record<string, StepVocab>
   groups: { id: string; label: string }[]
   worker_steps: string[]
+  /** 실단말(real-ue) 역할이 행위자가 될 수 있는 단계 */
+  real_ue_steps?: string[]
   during_steps: string[]
   metrics: Record<string, string>
   pct_metrics: string[]

@@ -522,8 +522,10 @@ function Inspector({ doc, sel, setSel, mutate, topo, vocab, issues, canWrite, so
   const i = sel.idx; const s = doc.flow[i]; if (!s) { setSel({ kind: 'scenario' }); return null }
   const D = vocab?.steps[s.step]
   const ST = (fn: (x: Step) => void) => mutate(x => fn(x.flow[i]))
-  const gate = D?.kind === 'peer' ? (r: string) => kindOf(r) === 'peer' : D?.kind === 'ue' ? (r: string) => kindOf(r) !== 'peer'
-    : D?.kind === 'ptt' ? (r: string) => { const x = S.resolvePool(doc, topo, r); return !x || (x.kind === 'ue' && x.service === 'ptt') } : undefined
+  const kindGate = D?.kind === 'peer' ? (r: string) => kindOf(r) === 'peer' : D?.kind === 'ue' ? (r: string) => kindOf(r) !== 'peer'
+    : D?.kind === 'ptt' ? (r: string) => { const x = S.resolvePool(doc, topo, r); return !x || ((x.kind === 'ue' || x.kind === 'real-ue') && x.service === 'ptt') } : undefined
+  // 실단말(real-ue) 역할은 vocab.steps[*].real 이 참인 단계만 행위자가 된다(cimsue-cli drive 명령이 있는 것 — test_instrument.md §3.3)
+  const gate = D && D.real === false ? (r: string) => (kindGate ? kindGate(r) : true) && S.resolvePool(doc, topo, r)?.kind !== 'real-ue' : kindGate
   const M = S.multiRoles(doc)
   const isBind = typeof s.seconds === 'string' && /^\$\{/.test(s.seconds)
   const suggested = D?.metrics ?? []; const allMetrics = Object.keys(vocab?.metrics ?? {})

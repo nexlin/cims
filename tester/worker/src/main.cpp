@@ -1,7 +1,7 @@
 // cims-tester-worker — 계측기 워커 엔트리 (test_instrument.md §2·§8).
 //   cims-tester-worker [config/cims-tester-worker.json] [--preflight] [--verbose]
 // 설정 키(config_template.json 선언): Worker.Name · Server.Ip/Port · Sip.LocalIp/PortBase/Capture/DumpMax · Media.AudioFile/VideoFile/SampleDir/MaxRtpStreams
-//   · Limits.EndpointsPerCore/SapsPerCore · Timers.RegisterIntervalMs/RegisterTimeoutS/InviteTimeoutMs/ByeTimeoutMs
+//   · RealUe.CliPath/MaxProcesses/LogLevel/StartTimeoutS/TlsCaFile · Limits.EndpointsPerCore/SapsPerCore · Timers.RegisterIntervalMs/RegisterTimeoutS/InviteTimeoutMs/ByeTimeoutMs
 // libcsim(SimSession) 의 printf 진단은 부하 중 초당 수천 줄이라 stdout 을 /dev/null 로 돌린다(--verbose 면 유지).
 // 워커 자기 로그는 stderr — agent lifecycle 이 로그 파일로 모은다.
 #include <csignal>
@@ -87,6 +87,26 @@ int main(int argc, char** argv) {
                 dir = dir.substr(0, dir.rfind('/')) + "/" + cfg.sampleDir;
                 if (access(dir.c_str(), R_OK | X_OK) == 0) cfg.sampleDir = dir;
             }
+        }
+        // real-ue 풀(§3.3) — cimsue-cli 경로(상대 = 모듈 디렉터리 기준, 그다음 작업 디렉터리)·프로세스 상한·로그
+        cfg.realUeCli = c["RealUe"]["CliPath"].asString("bin/cimsue-cli");
+        cfg.realUeMax = (int)c["RealUe"]["MaxProcesses"].asInt(cfg.realUeMax);
+        cfg.realUeLogLevel = (int)c["RealUe"]["LogLevel"].asInt(cfg.realUeLogLevel);
+        cfg.realUeStartTimeoutS = (int)c["RealUe"]["StartTimeoutS"].asInt(cfg.realUeStartTimeoutS);
+        cfg.realUeTlsCaFile = c["RealUe"]["TlsCaFile"].asString("");
+        {
+            char exe[4096] = { 0 };
+            ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+            std::string moduleDir;
+            if (n > 0) { moduleDir = std::string(exe, (size_t)n); moduleDir = moduleDir.substr(0, moduleDir.rfind('/')); moduleDir = moduleDir.substr(0, moduleDir.rfind('/')); }
+            if (!cfg.realUeCli.empty() && cfg.realUeCli[0] != '/') {
+                std::string cand = moduleDir + "/" + cfg.realUeCli;
+                if (!moduleDir.empty() && access(cand.c_str(), X_OK) == 0) cfg.realUeCli = cand;
+                else if (access(cfg.realUeCli.c_str(), X_OK) != 0 && !moduleDir.empty()) cfg.realUeCli = cand;   // 없어도 모듈 경로로 — 오류 메시지가 그 경로를 가리킨다
+            }
+            cfg.realUeLogDir = c["RealUe"]["LogDir"].asString("");
+            if (cfg.realUeLogDir.empty()) cfg.realUeLogDir = (moduleDir.empty() ? std::string("log") : moduleDir + "/log") + "/real-ue";
+            else if (cfg.realUeLogDir[0] != '/' && !moduleDir.empty()) cfg.realUeLogDir = moduleDir + "/" + cfg.realUeLogDir;
         }
         cfg.maxEndpointsPerCore = (int)c["Limits"]["EndpointsPerCore"].asInt(cfg.maxEndpointsPerCore);
         cfg.maxSapsPerCore = c["Limits"]["SapsPerCore"].asDouble(cfg.maxSapsPerCore);

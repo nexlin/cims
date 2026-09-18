@@ -74,7 +74,7 @@ export const mediaNodes = (d: TopologyDoc) => nodes(d).filter(([, n]) => n.role 
 export const isPeer = (p: PoolDoc): p is PeerPoolDoc => p.kind === 'peer'
 export const isUe = (p: PoolDoc): p is UePoolDoc => p.kind === 'ue'
 /** UE 풀의 접속환경 클래스 — service, 비면 source.table 이 ptt_subscriptions 일 때 ptt, 그 외 volte (컨트롤러 Topology.pool_service 와 같은 규칙) */
-export const poolService = (p: PoolDoc): 'volte' | 'voip' | 'ptt' => (p.kind !== 'ue' ? 'volte' : p.service ?? (('table' in p.source && p.source.table === 'ptt_subscriptions') ? 'ptt' : 'volte'))
+export const poolService = (p: PoolDoc): 'volte' | 'voip' | 'ptt' => (p.kind === 'peer' ? 'volte' : p.service ?? (('table' in p.source && p.source.table === 'ptt_subscriptions') ? 'ptt' : 'volte'))
 export function poolSize(p: PoolDoc): number {
   if (isPeer(p)) { const rg = p.identities?.e164_range ?? p.identities?.did_range; if (!rg) return 0; const n = parseInt(rg[1].replace(/\D/g, ''), 10) - parseInt(rg[0].replace(/\D/g, ''), 10) + 1; return p.identities.count ? Math.min(n, p.identities.count) : n }
   return ('count' in p.source ? p.source.count : undefined) ?? 0

@@ -265,6 +265,7 @@ struct SdsSend {
 struct StreamStats {
     unsigned rxPackets = 0, rxBytes = 0, rxLoss = 0, rxDiscard = 0;
     unsigned txPackets = 0, txBytes = 0;
+    unsigned rxJitterUs = 0;          // 수신 지터 평균(µs, RFC 3550 A.8 — pjmedia rtcp rxStat.jitter.mean)
     bool valid = false;
 };
 

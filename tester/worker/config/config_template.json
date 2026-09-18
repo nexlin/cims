@@ -38,6 +38,23 @@
       "scope": "service"
     },
     {
+      "key": "real_ue",
+      "title": "실단말(real-ue) 풀 — cimsue-cli 프로세스",
+      "description": "신원마다 cimsue-cli(libcimsue/pjsua2 실스택) 프로세스 하나를 drive 모드로 띄워 구동한다(test_instrument.md §3.3). 워커 패키지가 bin/cimsue-cli 를 동봉한다.",
+      "fields": [
+        { "key": "RealUe.CliPath", "label": "cimsue-cli 경로", "type": "path", "default": "bin/cimsue-cli", "restart": true,
+          "help": "상대 경로는 모듈 디렉터리 기준. 없으면 real-ue 풀 생성이 400 real_ue_cli_missing 으로 거절된다." },
+        { "key": "RealUe.MaxProcesses", "label": "실단말 프로세스 상한", "type": "int", "default": 8, "min": 1, "max": 256, "restart": true,
+          "help": "워커당 동시 cimsue-cli 프로세스 수(프로세스 하나 ≈ 수십 MB·스레드 여럿). 계획 미리보기가 real-ue 신원 수와 대조한다." },
+        { "key": "RealUe.LogLevel", "label": "프로세스 로그 레벨", "type": "int", "default": 2, "min": 0, "max": 6, "restart": true,
+          "help": "pjsip 로그 레벨 — 프로세스 stderr 를 log/real-ue/<풀>-<신원>.log 로 받는다(스폰마다 새로 씀)." },
+        { "key": "RealUe.StartTimeoutS", "label": "기동 대기(s)", "type": "int", "default": 15, "min": 1, "restart": true },
+        { "key": "RealUe.TlsCaFile", "label": "TLS 서버 인증서 앵커(PEM)", "type": "path", "default": "", "restart": true,
+          "help": "풀 tls_verify 가 켜졌을 때 실단말이 검증에 쓰는 CA. 비면 검증 없이 접속(--no-tls-verify)." }
+      ],
+      "scope": "service"
+    },
+    {
       "key": "limits",
       "title": "용량 선언·타이머",
       "fields": [

@@ -345,6 +345,10 @@ endif()
 #add_subdirectory(cwrtc)
 
 # --- Distribution Target ---
+set(_dist_real_ue_cli)
+if(TARGET cimsue-cli)
+    set(_dist_real_ue_cli COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:cimsue-cli> ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/bin/)
+endif()
 add_custom_target(dist
     COMMENT "Creating distribution package..."
 
@@ -402,6 +406,8 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/cspsim/SipClient.xml       ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/cspsim/SipClientCaller.xml ${CMAKE_BINARY_DIR}/dist/cspsim/bin/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/bin/cims-tester-worker ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/bin/
+    # real-ue 풀(test_instrument.md §3.3) — 실스택 단말 cimsue-cli 를 워커 패키지에 동봉(RealUe.CliPath 기본 bin/cimsue-cli). 타깃이 없으면(CIMSUE_BUILD_CLI OFF) 비어 있다
+    ${_dist_real_ue_cli}
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/tester/worker/config/config_template.json    ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/config/config_template.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/tester/worker/config/cims-tester-worker.json ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/config/cims-tester-worker.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/tester/worker/pkg.json ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/pkg.json

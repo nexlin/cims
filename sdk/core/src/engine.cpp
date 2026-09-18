@@ -199,6 +199,7 @@ struct Engine::Impl {
         s.rxPackets = st.rtcp.rxStat.pkt; s.rxBytes = st.rtcp.rxStat.bytes;
         s.rxLoss = st.rtcp.rxStat.loss; s.rxDiscard = st.rtcp.rxStat.discard;
         s.txPackets = st.rtcp.txStat.pkt; s.txBytes = st.rtcp.txStat.bytes;
+        s.rxJitterUs = (unsigned)st.rtcp.rxStat.jitterUsec.mean;
         s.valid = true;
         return s;
     }

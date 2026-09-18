@@ -164,11 +164,13 @@ export function validate(sc: Doc, topo: TopologyDoc | null, vocab: ScenarioVocab
       const rp = resolvePool(sc, topo, a); if (!rp) continue
       if (D?.kind === 'peer' && rp.kind !== 'peer') E(who, `${s.step} 의 행위자 '${a}' 는 피어 풀이어야 한다 (${rp.logical} = ${rp.kind})`, ref)
       if (D?.kind === 'ue' && rp.kind === 'peer') E(who, `${s.step} 의 행위자 '${a}' 는 UE 풀이어야 한다`, ref)
-      if (D?.kind === 'ptt' && !(rp.kind === 'ue' && rp.service === 'ptt')) E(who, `${s.step} 의 행위자 '${a}' 는 service=ptt UE 풀이어야 한다 (${rp.logical} = ${rp.kind}${rp.kind === 'ue' ? ' · ' + rp.service : ''})`, ref)
+      if (D?.kind === 'ptt' && !((rp.kind === 'ue' || rp.kind === 'real-ue') && rp.service === 'ptt')) E(who, `${s.step} 의 행위자 '${a}' 는 service=ptt UE 풀이어야 한다 (${rp.logical} = ${rp.kind}${rp.kind !== 'peer' ? ' · ' + rp.service : ''})`, ref)
+      if (rp.kind === 'real-ue' && D && D.real === false) E(who, `${s.step} 의 행위자 '${a}' 는 실단말(real-ue) 풀이 될 수 없다 — 실단말 단계: ${(vocab?.real_ue_steps ?? []).join(', ')}`, ref)
       if (D?.kind === 'ue|trunk' && rp.kind === 'peer' && !(Object.values(rp.pools)[0] as { register?: unknown }).register) E(who, `역할 '${a}' 의 피어 풀에는 register(트렁크 계정)가 없다 — 고정 IP 피어는 등록하지 않는다`, ref)
     }
     if (s.cause != null) { const a = s.from ?? (s.who ?? [])[0]; const rp = a ? resolvePool(sc, topo, a) : null; if (rp && rp.kind !== 'peer') E(who, 'cause(Reason Q.850) 는 피어 역할만 보낸다', ref) }
     if (s.step === 'invite' && s.to) { const rp = resolvePool(sc, topo, s.to); const p0 = rp && Object.values(rp.pools)[0]; if (p0 && (p0 as { answer?: string }).answer === 'silent') I(who, `to '${s.to}' 는 answer=silent 풀 — 무응답 상대(failover 시험)`, ref) }
+    if ((s.step === 'invite' || s.step === 'group_call') && s.media?.rtp && s.media.rtp !== 'auto' && Object.keys(sc.roles).some(r => resolvePool(sc, topo, r)?.kind === 'real-ue')) E(who, `media.rtp=${s.media.rtp} — 실단말(real-ue) 역할이 있는 시나리오의 호는 auto 만(실스택의 미디어 평면)`, ref)
     if (INDIALOG.has(s.step) && !inSession(sc, i)) E(who, `${s.step} 는 확립된 세션 안에서만 — answer/progress 뒤·bye 앞에 두거나 media_hold 의 during 으로`, ref)
     const ctl = [...(MEDIA_CTL.has(s.step) ? [s as Step | During] : []), ...(s.during ?? []).filter(d => MEDIA_CTL.has(d.step))]
     if (ctl.length) {

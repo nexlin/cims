@@ -9,6 +9,7 @@
 ⑤ 네이티브 `build/bin/csim_rtp_dtmf_test` — libcsim RTP 의 RFC 4733 telephone-event 송수신 루프백(빌드돼 있을 때만).
 ⑥ 네이티브 `build/bin/csim_rtp_media_test` — 미디어 평면(RTP 모드 none/explicit·샘플 송출·정지·hold 정지) 루프백.
 ⑦ 네이티브 `build/bin/tester_sip_capture_test` — 워커 SIP 캡처(psip 네트워크 로그 줄 파싱·Call-ID 묶음).
+⑧ 네이티브 `build/bin/tester_real_ue_test` — 실단말(real-ue) 프로세스 관리(cimsue-cli drive 프로토콜 스텁 — 스폰·ready·동기 결과·이벤트·종료).
 """
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ _ID = "S1-UNIT-TESTER"
 _NAME = "계측기 계약/핸들러/오케스트레이터/피어 시드/게이트웨이 SSE unit test + libcsim RTP DTMF·미디어 평면 루프백 (python3 -m unittest tests.test_tester_models tests.test_tester_handler tests.test_tester_run tests.test_tester_target tests.test_gateway_stream · build/bin/csim_rtp_dtmf_test · build/bin/csim_rtp_media_test)"
 _MODULES = ("tests.test_tester_models", "tests.test_tester_handler", "tests.test_tester_run", "tests.test_tester_target",
             "tests.test_gateway_stream")
-_NATIVES = ("csim_rtp_dtmf_test", "csim_rtp_media_test", "tester_sip_capture_test", "tester_emodel_test")
+_NATIVES = ("csim_rtp_dtmf_test", "csim_rtp_media_test", "tester_sip_capture_test", "tester_emodel_test", "tester_real_ue_test")
 
 
 @verify_item(

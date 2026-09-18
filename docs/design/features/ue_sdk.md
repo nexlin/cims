@@ -242,7 +242,23 @@ cimsue-cli --csc-host H --user U --pw P --from-profile volte|ptt [--server IP --
 ```
 
 오디오 장치는 null(헤드리스) — 브리지는 돌고 RTP 는 흐른다. 통계는 스트림 소멸 시점(`onStreamDestroyed`)에
-보존해 상대가 먼저 끊어도 남는다. 사용 예는 [VERIFICATION_MANUAL.md](../../VERIFICATION_MANUAL.md) 부록.
+보존해 상대가 먼저 끊어도 남는다(`StreamStats.rxJitterUs` = pjmedia rtcp rxStat jitter 평균). 사용 예는 [VERIFICATION_MANUAL.md](../../VERIFICATION_MANUAL.md) 부록.
+
+**구동 모드 `drive`** — 계측기 `real-ue` 풀([test_instrument.md §3.3](test_instrument.md))이 프로세스를 가상 단말처럼 단계별로 구동하는 접점. 엔진을 띄운 채
+(등록은 자동으로 하지 않는다) stdin 한 줄 = 명령 하나(공백 토큰), stdout 한 줄 = JSON 이벤트 하나. 명령마다 동기 결과 `result{op,ok,call,code,reason}` 하나를 내고
+(dial/group_call/pickup 은 `call` id), 진행은 이벤트로 온다. 시각은 프로세스 안에서 잔다(`rrd_ms`·`srd_ms`·`sdd_ms`·floor `t_us`).
+```
+cimsue-cli [계정] drive
+  명령: register | unregister | dial <번호|URI> [video] | answer <call> [video] | reject <call> [code] | hangup <call> | hold <call> | resume <call>
+        dtmf <call> <digits> | transfer <call> <대상> | group_call <group> [listen] [emergency] | floor_request <call> | floor_release <call>
+        affiliate <group> on|off | pickup <code> [number] | stats [call] | quit
+  이벤트: ready{version,aor} · reg{state,code,reason,expires,rrd_ms} · incoming{call,from,called,video,mcptt,group}
+        · call{call,dir,state outgoing|incoming|active|held|disconnected,code,reason,media,mcptt,video,by_us,group,srd_ms|sdd_ms,rx_pkts,tx_pkts,rx_loss,rx_bytes,jitter_us}
+        · floor{call,kind,subtype(TS 24.380 §8.2),t_us,cause,queue_position,duration} · request{method,op,on,code,reason,ms,token}(affiliate PUBLISH)
+        · stats{call,rx_pkts,tx_pkts,rx_loss,rx_bytes,jitter_us}(활성 호마다 1 초) · roster · dialog · sds · engine_stopped · exit
+```
+MCPTT 착신은 코어가 자동응답(`autoAnswerMcptt`)하므로 `incoming{mcptt:true}` 뒤 `call{dir:in,state:active}` 가 합류 신호다. `disconnected` 이벤트는 그 호의
+최종 통계를 함께 싣는다(우리가 끊었으면 `by_us` + `sdd_ms`). 1xx 는 이벤트로 내지 않는다(코어 `onCallState` 는 상태 전이만).
 
 ---
 

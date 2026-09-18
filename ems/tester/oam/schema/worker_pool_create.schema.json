@@ -577,6 +577,12 @@
       "$ref": "#/$defs/TargetCsp",
       "description": "풀이 닿는 SIP 서버 — 컨트롤러가 토폴로지 노드 참조에서 파생"
     },
+    "tls_verify": {
+      "default": false,
+      "description": "kind=real-ue — 서버 TLS 인증서 검증(워커 RealUe.TlsCaFile 앵커, 없으면 --no-tls-verify)",
+      "title": "Tls Verify",
+      "type": "boolean"
+    },
     "transport": {
       "default": "udp",
       "enum": [

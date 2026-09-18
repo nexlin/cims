@@ -59,7 +59,7 @@ export function judgeMetric(metric: string, exp: unknown, counters: Record<strin
 }
 
 /** 낮을수록 좋은 비율(기대치 = 상한) — 컨트롤러 LOWER_BETTER_RATIOS + 호별 손실 */
-export const LOWER_BETTER = new Set(['rtp_loss_pct', 'isa_pct'])
+export const LOWER_BETTER = new Set(['rtp_loss_pct', 'isa_pct', 'real_rtp_loss_pct'])
 /** 비율 지표 값 — 컨트롤러 RATIO_METRICS 와 같은 분자/분모. */
 export function ratiosFrom(c: Record<string, number>): Record<string, number | null> {
   const r = (n: number, d: number) => (d ? (100 * n) / d : null)

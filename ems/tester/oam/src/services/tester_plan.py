@@ -184,6 +184,18 @@ def build_plan(scenario: Scenario, topology: Topology, topology_doc: dict, profi
                         out['errors'].append(f'{w.name}: 샘플 {sid!r} 파일 없음 {miss} — 워커 샘플 디렉터리 {hm.get("sample_dir") or "(미설정)"}')
                 elif h and any(f != 'synthetic' for f in codecs.values()):
                     out['warnings'].append(f'{w.name}: 워커가 media 상태를 보고하지 않는다(구버전) — 샘플 {sid!r} 파일을 확인할 수 없다')
+            # 실단말(real-ue) 프로세스 — 워커 RealUe.MaxProcesses 와 대조(§3.3). 풀 생성이 400 real_ue_limit/real_ue_cli_missing 으로 거절되기 전에 본다
+            real_need = sum(len(p['identities']) for p in pw['pools'] if p['kind'] == 'real-ue')
+            if real_need:
+                hr = h.get('real_ue')
+                if h and hr is None:
+                    out['warnings'].append(f'{w.name}: 워커가 real_ue 상태를 보고하지 않는다(구버전) — 실단말 풀을 만들 수 없다')
+                elif hr is not None:
+                    if not hr.get('cli'):
+                        out['errors'].append(f'{w.name}: 워커에 cimsue-cli 가 없다(RealUe.CliPath) — 실단말 풀 불가')
+                    if int(hr.get('max') or 0) and real_need + int(hr.get('processes') or 0) > int(hr.get('max')):
+                        out['errors'].append(f'{w.name}: 실단말 {real_need} + 진행 중 {hr.get("processes")} > RealUe.MaxProcesses {hr.get("max")}')
+                row['capacity']['real_ue'] = {'need': real_need, 'processes': (h.get('real_ue') or {}).get('processes'), 'max': (h.get('real_ue') or {}).get('max')}
             rtp_cap = int(hm.get('max_rtp_streams') or (w.media.max_rtp_streams if w.media and w.media.max_rtp_streams else 0) or 0)
             row['capacity']['rtp'] = rtp_cap or None
             row['capacity']['rtp_streams'] = hm.get('rtp_streams')

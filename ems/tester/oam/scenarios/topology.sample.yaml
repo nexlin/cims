@@ -61,6 +61,14 @@ pools:                                   # 풀 하나 = 워커 하나. 워커 �
     access: csp
     source: { creds: creds/ptt.jsonl }
     transport: udp
+  real_ue:                               # 실단말 풀(§3.3) — 신원마다 cimsue-cli(libcimsue/pjsua2) 프로세스. 소수(워커 RealUe.MaxProcesses)로 부하 아래 품질 표본
+    kind: real-ue
+    worker: w1
+    access: csp
+    source: { creds: creds/real.jsonl }  # 가상 단말과 다른 신원(겹치면 컴파일 오류). service 생략 = volte, ptt 면 MCPTT 단말
+    transport: tls
+    srtp: optional
+    tls_verify: false                    # true 면 워커 RealUe.TlsCaFile 로 서버 인증서 검증
   peer_kt:                               # 타 IMS 코어 — w2 호스트에 수신점(ip 파생). 시드 = remote_node/route/rule/routing_policy(자동)
     kind: peer
     worker: w2

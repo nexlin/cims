@@ -852,8 +852,10 @@
     },
     "RealUePool": {
       "additionalProperties": false,
+      "description": "실단말 풀(§3.3) — 신원마다 워커가 `cimsue-cli … drive`(libcimsue/pjsua2 실스택) 프로세스 하나를 띄운다. 소수(워커 RealUe.MaxProcesses)로\n대량 가상 부하 아래 실단말 품질을 표본 측정한다. 지원 단계 = REAL_UE_STEPS(등록·1:1 호·hold/resume·DTMF·픽업·그룹콜·floor), 미디어는 실스택 것\n(invite.media.rtp 는 auto 만, media_send/stop 불가). AKA 신원은 받지 않는다.",
       "properties": {
         "access": {
+          "description": "접속점 노드 id — edge=access 수신점이 있는 SIP 노드",
           "title": "Access",
           "type": "string"
         },
@@ -888,8 +890,34 @@
           "default": null,
           "title": "Listener"
         },
+        "service": {
+          "anyOf": [
+            {
+              "enum": [
+                "volte",
+                "voip",
+                "ptt"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "접속환경 클래스 — ptt 면 MCPTT 단말(mcptt-id·affiliation·floor). 생략 = source.table 이 ptt_subscriptions 면 ptt, 그 외 volte",
+          "title": "Service"
+        },
         "source": {
-          "$ref": "#/$defs/CredsSource"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DbSource"
+            },
+            {
+              "$ref": "#/$defs/CredsSource"
+            }
+          ],
+          "title": "Source"
         },
         "srtp": {
           "default": "optional",
@@ -900,6 +928,12 @@
           ],
           "title": "Srtp",
           "type": "string"
+        },
+        "tls_verify": {
+          "default": false,
+          "description": "서버 TLS 인증서 검증 — 워커 RealUe.TlsCaFile 을 앵커로(없으면 검증 없이 접속). 기본은 개발 스택(자체 서명) 전제로 끔",
+          "title": "Tls Verify",
+          "type": "boolean"
         },
         "transport": {
           "default": "tls",

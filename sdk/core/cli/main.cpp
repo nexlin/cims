@@ -15,7 +15,17 @@
 //   cimsue-cli [계정 옵션] pickup [number] --code <피처코드> [--duration S]
 //   cimsue-cli [계정 옵션] transfer <peer> --to <target> [--transfer-after S]   (peer 와 통화 후 REFER)
 //   cimsue-cli --csc-host H [--csc-port 4430] --user U --pw P [--csc-ca FILE|--no-tls-verify] login
+//   cimsue-cli [계정 옵션] drive                          (구동 모드 — stdin 명령 / stdout JSON 이벤트, 계측기 real-ue 풀이 쓴다)
 //   (계정 옵션 대신 --from-profile volte|ptt 로 프로비저닝 프로파일에서 계정을 채울 수 있다)
+//
+// 구동 모드(drive): 엔진을 띄운 채 stdin 에서 한 줄 = 명령 하나(공백 구분 토큰)를 읽고, 진행은 stdout 에 한 줄 = JSON 이벤트 하나로 낸다
+//   (test_instrument.md §3.3 — 워커가 프로세스를 가상 단말처럼 단계별로 구동한다). 등록은 자동으로 하지 않는다 — `register` 명령이 한다.
+//   명령: register | unregister | dial <번호|URI> [video] | answer <call> [video] | reject <call> [code] | hangup <call> | hold <call> | resume <call>
+//         dtmf <call> <digits> | transfer <call> <대상> | group_call <group> [listen] [emergency] | floor_request <call> | floor_release <call>
+//         affiliate <group> on|off | pickup <code> [number] | stats [call] | quit
+//   이벤트: {"event":"ready"} · reg{state,code,reason,rrd_ms} · incoming{call,from,called,video,mcptt,group} · call{call,dir,state,code,reason,media,
+//         mcptt,video,by_us,srd_ms|sdd_ms,rx_pkts,tx_pkts,rx_loss,jitter_us} · floor{call,kind,subtype,t_us,cause,queue_position} · request{op,method,code,ms,on}
+//         · stats{call,rx_pkts,tx_pkts,rx_loss,rx_bytes,jitter_us} · result{op,ok,call,code,reason}(명령마다 하나) · dialog · sds · exit
 //
 // 계정 옵션: --server IP --port N --transport udp|tcp|tls --domain D --msisdn M (--imsi I | --auth-id IMPI)
 //           (--ha1 HEX32 | --password P) [--mcptt-id tel:..] [--affiliate G[,G2]] [--srtp off|optional|required]
@@ -29,8 +39,10 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <atomic>
 #include <map>
 #include <mutex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -93,6 +105,7 @@ void usage() {
         "  group-call GROUP [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency]\n"
         "  sds GROUP TEXT | sds-recv [--duration S] | login\n"
         "  dialog-watch AOR [--duration S] | join AOR [--duration S] | pickup [NUMBER] --code CODE | transfer PEER --to X\n"
+        "  drive   (구동 모드 — stdin 명령 / stdout JSON 이벤트; 소스 머리 주석의 명령표)\n"
         "  groups | group-get URI | group-put URI --name N [--members tel:..,tel:..] | group-delete URI   (--csc-host --user --pw)\n");
 }
 
@@ -157,9 +170,10 @@ bool parse(int argc, char** argv, Opts& o) {
     for (auto n : needTarget) if (o.cmd == n) { if (pos.size() < 2) return false; o.target = pos[1]; }
     if (o.cmd == "sds") { if (pos.size() < 3) return false; o.target = pos[1]; for (size_t i = 2; i < pos.size(); ++i) o.text += (i > 2 ? " " : "") + pos[i]; }
     if (o.cmd == "pickup") { if (pos.size() >= 2) o.target = pos[1]; if (o.code.empty()) return false; }
+    if (o.cmd == "drive") o.json = true;   // 구동 모드는 언제나 JSON 이벤트
     if (o.cmd == "transfer" && o.transferTo.empty()) return false;
     static const char* known[] = {"register", "call", "answer", "group-call", "sds", "sds-recv", "login", "dialog-watch", "join", "pickup", "transfer",
-                                  "groups", "group-get", "group-put", "group-delete"};
+                                  "groups", "group-get", "group-put", "group-delete", "drive"};
     bool ok = false;
     for (auto k : known) if (o.cmd == k) ok = true;
     return ok;
@@ -329,6 +343,201 @@ int cscLogin(const Opts& o, Profile& prof, TokenSet& tok) {
     return 0;
 }
 
+// ── 구동 모드(drive) — 계측기 real-ue 풀 (test_instrument.md §3.3) ─────────────────────────────────────────────────────
+// stdout 은 한 줄 = JSON 이벤트 하나. 이벤트 스레드(Listener)·stats 스레드·main(명령 응답) 이 함께 쓰므로 줄 단위로 잠근다.
+// 시각은 단말 프로세스 안에서 잰다 — rrd_ms(registerAccount → Registered) · srd_ms(dial → Active) · sdd_ms(hangup → Disconnected).
+std::mutex g_outMtx;
+void outLine(const std::string& line) {
+    std::lock_guard<std::mutex> lk(g_outMtx);
+    std::fputs(line.c_str(), stdout);
+    std::fputc('\n', stdout);
+    std::fflush(stdout);
+}
+long long nowUs() { return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count(); }
+long long msSince(std::chrono::steady_clock::time_point t) {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t).count();
+}
+std::string statsJson(const StreamStats& st) {
+    return ",\"rx_pkts\":" + std::to_string(st.rxPackets) + ",\"tx_pkts\":" + std::to_string(st.txPackets) + ",\"rx_loss\":" + std::to_string(st.rxLoss) +
+           ",\"rx_bytes\":" + std::to_string(st.rxBytes) + ",\"jitter_us\":" + std::to_string(st.rxJitterUs) + ",\"stats_valid\":" + (st.valid ? "true" : "false");
+}
+
+class DriveListener : public Listener {
+public:
+    explicit DriveListener(int logLevel) : logLevel_(logLevel) {}
+    Engine* eng = nullptr;
+    void onLog(int level, const std::string& msg) override { if (level <= logLevel_) std::fprintf(stderr, "%s\n", msg.c_str()); }
+    void onRegState(const RegInfo& r) override {
+        long long ms = -1;
+        { std::lock_guard<std::mutex> lk(m_); if (regPending_) { ms = msSince(tReg_); if (r.state != RegState::Registering) regPending_ = false; } }
+        const char* st = r.state == RegState::Registered ? "registered" : r.state == RegState::Failed ? "failed" : r.state == RegState::Registering ? "registering" : "unregistered";
+        outLine("{\"event\":\"reg\",\"state\":\"" + std::string(st) + "\",\"code\":" + std::to_string(r.code) + ",\"reason\":\"" + jsonEsc(r.reason) +
+                "\",\"expires\":" + std::to_string(r.expiresSec) + ",\"rrd_ms\":" + std::to_string(ms) + "}");
+    }
+    void onIncomingCall(const CallInfo& c) override {
+        { std::lock_guard<std::mutex> lk(m_); active_.insert(c.callId); }
+        outLine("{\"event\":\"incoming\",\"call\":" + std::to_string(c.callId) + ",\"from\":\"" + jsonEsc(c.remoteUri) + "\",\"called\":\"" + jsonEsc(c.calledParty) +
+                "\",\"video\":" + (c.video ? "true" : "false") + ",\"mcptt\":" + (c.isMcptt ? "true" : "false") + ",\"group\":\"" + jsonEsc(c.groupId) + "\"}");
+    }
+    void onCallState(const CallInfo& c) override {
+        const char* st = c.state == CallState::Outgoing ? "outgoing" : c.state == CallState::Incoming ? "incoming" : c.state == CallState::Active ? "active"
+                       : c.state == CallState::Held ? "held" : c.state == CallState::Disconnected ? "disconnected" : "null";
+        std::string extra;
+        bool byUs = false;
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            auto d = tDial_.find(c.callId);
+            if (c.state == CallState::Active && d != tDial_.end()) { extra += ",\"srd_ms\":" + std::to_string(msSince(d->second)); tDial_.erase(d); }
+            auto h = tHangup_.find(c.callId);
+            if (c.state == CallState::Disconnected) {
+                if (h != tHangup_.end()) { byUs = true; extra += ",\"sdd_ms\":" + std::to_string(msSince(h->second)); tHangup_.erase(h); }
+                tDial_.erase(c.callId);
+                active_.erase(c.callId);
+            }
+        }
+        if (c.state == CallState::Disconnected && eng) extra += statsJson(eng->streamStats(c.callId));   // 소멸 시점의 최종 통계
+        outLine("{\"event\":\"call\",\"call\":" + std::to_string(c.callId) + ",\"dir\":\"" + (c.dir == CallDir::Outgoing ? "out" : "in") + "\",\"state\":\"" + st +
+                "\",\"code\":" + std::to_string(c.lastCode) + ",\"reason\":\"" + jsonEsc(c.lastReason) + "\",\"media\":" + (c.mediaActive ? "true" : "false") +
+                ",\"mcptt\":" + (c.isMcptt ? "true" : "false") + ",\"video\":" + (c.video ? "true" : "false") + ",\"by_us\":" + (byUs ? "true" : "false") +
+                ",\"group\":\"" + jsonEsc(c.groupId) + "\"" + extra + "}");
+    }
+    void onFloor(const FloorEvent& ev) override {
+        // TS 24.380 §8.2 subtype 로도 낸다(워커가 가상 단말과 같은 표로 센다) — Granted 1 · Taken 2 · Deny 3 · Idle 5 · Revoke 6 · Queue Position Info 9
+        const char* k = "other"; int sub = -1;
+        switch (ev.kind) {
+        case FloorEvent::Kind::Granted: k = "granted"; sub = 1; break;
+        case FloorEvent::Kind::Taken: k = "taken"; sub = 2; break;
+        case FloorEvent::Kind::Denied: k = "denied"; sub = 3; break;
+        case FloorEvent::Kind::Idle: k = "idle"; sub = 5; break;
+        case FloorEvent::Kind::Revoked: k = "revoked"; sub = 6; break;
+        case FloorEvent::Kind::QueuePosition: k = "queue"; sub = 9; break;
+        case FloorEvent::Kind::QueueCancelled: k = "queue_cancelled"; break;
+        case FloorEvent::Kind::RequestTimeout: k = "request_timeout"; break;
+        case FloorEvent::Kind::TalkerLeft: k = "talker_left"; break;
+        case FloorEvent::Kind::TalkLimit: k = "talk_limit"; break;
+        default: break;
+        }
+        outLine("{\"event\":\"floor\",\"call\":" + std::to_string(ev.callId) + ",\"kind\":\"" + k + "\",\"subtype\":" + std::to_string(sub) + ",\"t_us\":" + std::to_string(nowUs()) +
+                ",\"cause\":" + std::to_string(ev.cause) + ",\"queue_position\":" + std::to_string(ev.queuePosition) + ",\"duration\":" + std::to_string(ev.durationSec) + "}");
+    }
+    void onRoster(int, const std::string& g, const std::vector<RosterEntry>& users, bool full) override {
+        outLine("{\"event\":\"roster\",\"group\":\"" + jsonEsc(g) + "\",\"full\":" + (full ? "true" : "false") + ",\"users\":" + std::to_string(users.size()) + "}");
+    }
+    void onDialogInfo(const DialogInfo& d) override {
+        outLine("{\"event\":\"dialog\",\"watched\":\"" + jsonEsc(d.watched) + "\",\"state\":\"" + d.state + "\",\"call_id\":\"" + jsonEsc(d.callId) + "\",\"direction\":\"" +
+                d.direction + "\",\"remote\":\"" + jsonEsc(d.remoteIdentity) + "\"}");
+    }
+    void onSds(const SdsMessage& m) override {
+        outLine("{\"event\":\"sds\",\"from\":\"" + jsonEsc(m.fromUri) + "\",\"group\":\"" + jsonEsc(m.groupUri) + "\",\"msg_id\":\"" + jsonEsc(m.msgId) + "\",\"notification\":" +
+                (m.notification ? "true" : "false") + ",\"text\":\"" + jsonEsc(m.text) + "\"}");
+    }
+    void onRequestResult(const RequestResult& r) override {
+        std::string op, on;
+        long long ms = -1;
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            auto it = tokens_.find(r.token);
+            if (it != tokens_.end()) { op = it->second.op; on = it->second.on ? "true" : "false"; ms = msSince(it->second.t); tokens_.erase(it); }
+        }
+        outLine("{\"event\":\"request\",\"method\":\"" + jsonEsc(r.method) + "\",\"op\":\"" + op + "\",\"on\":" + (on.empty() ? "null" : on) + ",\"code\":" + std::to_string(r.code) +
+                ",\"reason\":\"" + jsonEsc(r.reason) + "\",\"ms\":" + std::to_string(ms) + ",\"token\":" + std::to_string((long long)r.token) + "}");
+    }
+    void onEngineStopped() override { outLine("{\"event\":\"engine_stopped\"}"); }
+
+    // main 스레드가 명령 시각을 기록한다
+    void markRegister() { std::lock_guard<std::mutex> lk(m_); tReg_ = std::chrono::steady_clock::now(); regPending_ = true; }
+    void markDial(int callId) { std::lock_guard<std::mutex> lk(m_); tDial_[callId] = std::chrono::steady_clock::now(); active_.insert(callId); }
+    void markHangup(int callId) { std::lock_guard<std::mutex> lk(m_); tHangup_[callId] = std::chrono::steady_clock::now(); }
+    void markToken(int64_t tok, const std::string& op, bool on) { std::lock_guard<std::mutex> lk(m_); tokens_[tok] = { op, on, std::chrono::steady_clock::now() }; }
+    std::vector<int> activeCalls() { std::lock_guard<std::mutex> lk(m_); return std::vector<int>(active_.begin(), active_.end()); }
+
+private:
+    struct Tok { std::string op; bool on; std::chrono::steady_clock::time_point t; };
+    int logLevel_;
+    std::mutex m_;
+    bool regPending_ = false;
+    std::chrono::steady_clock::time_point tReg_;
+    std::map<int, std::chrono::steady_clock::time_point> tDial_, tHangup_;
+    std::map<int64_t, Tok> tokens_;
+    std::set<int> active_;
+};
+
+/** 구동 루프 — stdin 한 줄 = 명령 하나. 명령마다 result 이벤트 하나(동기 결과 — dial/group_call 은 call id). EOF 또는 quit 에 엔진을 내린다. */
+int driveLoop(Engine& eng, DriveListener& ls, int acc, const Opts& o) {
+    std::atomic<bool> stop{false};
+    // stats 스레드 — 활성 호마다 1 초 간격으로 RTP/RTCP 통계(워커의 media_hold 표본 원천)
+    std::thread stats([&] {
+        while (!stop) {
+            for (int i = 0; i < 10 && !stop; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            if (stop) break;
+            for (int id : ls.activeCalls()) {
+                StreamStats st = eng.streamStats(id);
+                if (st.valid) outLine("{\"event\":\"stats\",\"call\":" + std::to_string(id) + statsJson(st) + "}");
+            }
+        }
+    });
+    auto result = [&](const std::string& op, bool ok, int call, int code, const std::string& reason) {
+        outLine("{\"event\":\"result\",\"op\":\"" + op + "\",\"ok\":" + (ok ? "true" : "false") + ",\"call\":" + std::to_string(call) + ",\"code\":" + std::to_string(code) +
+                ",\"reason\":\"" + jsonEsc(reason) + "\"}");
+    };
+    auto res = [&](const std::string& op, const Result& r, int call = -1) { result(op, r.ok, call, r.code, r.reason); };
+    outLine("{\"event\":\"ready\",\"version\":\"" + jsonEsc(Engine::version()) + "\",\"aor\":\"" + jsonEsc(o.acc.aor()) + "\"}");
+    std::string line;
+    bool quit = false;
+    while (!quit && std::getline(std::cin, line)) {
+        std::vector<std::string> tk;
+        { std::stringstream ss(line); std::string t; while (ss >> t) tk.push_back(t); }
+        if (tk.empty()) continue;
+        const std::string& op = tk[0];
+        auto arg = [&](size_t i) { return i < tk.size() ? tk[i] : std::string(); };
+        auto argi = [&](size_t i, int def) { return i < tk.size() ? std::atoi(tk[i].c_str()) : def; };
+        auto has = [&](const char* flag) { for (size_t i = 1; i < tk.size(); ++i) if (tk[i] == flag) return true; return false; };
+        if (op == "quit") { quit = true; result(op, true, -1, 0, ""); }
+        else if (op == "register") { ls.markRegister(); res(op, eng.registerAccount(acc)); }
+        else if (op == "unregister") { res(op, eng.unregisterAccount(acc)); }
+        else if (op == "dial") {
+            CallOptions co; co.video = has("video");
+            int id = eng.dial(acc, arg(1), co);
+            if (id >= 0) ls.markDial(id);
+            result(op, id >= 0, id, 0, id >= 0 ? "" : "dial refused");
+        } else if (op == "answer") { CallOptions co; co.video = has("video"); res(op, eng.answer(argi(1, -1), co), argi(1, -1)); }
+        else if (op == "reject") { res(op, eng.reject(argi(1, -1), argi(2, 486)), argi(1, -1)); }
+        else if (op == "hangup") { ls.markHangup(argi(1, -1)); res(op, eng.hangup(argi(1, -1)), argi(1, -1)); }
+        else if (op == "hold") { res(op, eng.hold(argi(1, -1)), argi(1, -1)); }
+        else if (op == "resume") { res(op, eng.resume(argi(1, -1)), argi(1, -1)); }
+        else if (op == "dtmf") { res(op, eng.sendDtmf(argi(1, -1), arg(2)), argi(1, -1)); }
+        else if (op == "transfer") { res(op, eng.transfer(argi(1, -1), arg(2)), argi(1, -1)); }
+        else if (op == "group_call") {
+            GroupCallOptions go; go.listenOnly = has("listen"); go.emergency = has("emergency");
+            int id = eng.joinGroupCall(acc, arg(1), go);
+            if (id >= 0) ls.markDial(id);
+            result(op, id >= 0, id, 0, id >= 0 ? "" : "group call refused");
+        } else if (op == "floor_request") { res(op, eng.floorRequest(argi(1, -1)), argi(1, -1)); }
+        else if (op == "floor_release") { res(op, eng.floorRelease(argi(1, -1)), argi(1, -1)); }
+        else if (op == "affiliate") {
+            bool on = arg(2) != "off";
+            int64_t tok = eng.affiliate(acc, arg(1), on);
+            if (tok >= 0) ls.markToken(tok, op, on);
+            result(op, tok >= 0, -1, 0, tok >= 0 ? "" : "affiliate refused");
+        } else if (op == "pickup") {
+            int id = eng.pickup(acc, arg(1), arg(2));
+            if (id >= 0) ls.markDial(id);
+            result(op, id >= 0, id, 0, id >= 0 ? "" : "pickup refused");
+        } else if (op == "stats") {
+            std::vector<int> ids = tk.size() > 1 ? std::vector<int>{ argi(1, -1) } : ls.activeCalls();
+            for (int id : ids) outLine("{\"event\":\"stats\",\"call\":" + std::to_string(id) + statsJson(eng.streamStats(id)) + "}");
+            result(op, true, -1, 0, "");
+        } else result(op, false, -1, 0, "unknown command");
+    }
+    stop = true;
+    stats.join();
+    for (int id : ls.activeCalls()) eng.hangup(id);
+    eng.unregisterAccount(acc);
+    eng.stop();
+    outLine("{\"event\":\"exit\"}");
+    return 0;
+}
+
 }  // namespace
 
 // 진단 — SIGSEGV/SIGABRT 시 백트레이스(-rdynamic 심볼)를 stderr 로. 실기기 없는 개발 서버에 gdb 가 없어 필요하다.
@@ -465,6 +674,17 @@ int main(int argc, char** argv) {
     ec.nullAudioDevice = true;
     ec.tlsVerifyServer = o.tlsVerify;
     if (!o.tlsCaFile.empty()) ec.tlsCaPem = readFile(o.tlsCaFile);
+
+    if (o.cmd == "drive") {
+        DriveListener dl(o.logLevel);
+        Engine eng;
+        dl.eng = &eng;
+        Result r = eng.start(ec, &dl);
+        if (!r.ok) { outLine("{\"event\":\"exit\",\"error\":\"engine start failed: " + jsonEsc(r.reason) + "\"}"); return 3; }
+        int acc = eng.addAccount(o.acc);
+        if (acc < 0) { outLine("{\"event\":\"exit\",\"error\":\"addAccount failed\"}"); eng.stop(); return 3; }
+        return driveLoop(eng, dl, acc, o);
+    }
 
     CliListener ls(o.logLevel, o.json);
     Engine eng;

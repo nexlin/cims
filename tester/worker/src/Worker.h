@@ -2,7 +2,9 @@
 //
 //  · 풀(POST /pools): kind=ue — 신원마다 libcsim SimSession 하나(스택 미기동). kind=peer — 풀당 CsimPeer 엔진 하나
 //    (고정 수신점, 생성 즉시 bind) + 신원(E.164/DID)마다 Endpoint 하나(스택 없음, 엔진의 호를 Call-ID 로 귀속).
-//    real-ue 는 F 단계.
+//    kind=real-ue — 신원마다 `cimsue-cli … drive` 자식 프로세스 하나(libcimsue/pjsua2 실스택, RealUe.h) — 풀 생성 때 스폰·ready 대기,
+//    stdin 명령/stdout JSON 이벤트로 구동(등록·발신·응답·hold·DTMF·그룹콜·floor·픽업). 미디어는 실스택 것(송출 제어·rtp 모드 없음),
+//    RTP 품질은 프로세스가 1 초마다 올리는 stats 를 표본으로 `real_*` 지표에 따로 남긴다(대량 가상 부하 아래 실단말 표본).
 //  · run(POST /runs): 컴파일된 단계 목록을 셋으로 나눈다 —
 //      prelude  = 앞쪽의 register(+wait) 단계: 역할 슬라이스의 단말 전부를 한 번 등록(간격 두고 Start). 피어 신원은 등록 없음
 //      body     = 나머지: 시나리오 인스턴스 하나가 실행하는 단위. 인스턴스는 rate_saps 로 발생(SApS),
@@ -13,7 +15,7 @@
 //    affiliation 200 까지가 prelude. body 에 group_call 이 있으면 인스턴스는 **그룹 단위**로 발생한다 — 멤버 전원이 free 인 그룹을
 //    하나 잡아 단일 역할에 멤버를 하나씩, multi 역할에 나머지 전부를 배정한다(역할 창·free 목록 대신 그룹 목록).
 //    floor 단계(floor_request/floor_release)는 TS 24.380 메시지 수신 시각(µs)으로 지연을 잰다.
-//  · 단말 동작은 Endpoint 종류(UE 세션 / 피어 신원)에 따라 ep* 헬퍼가 갈라 처리한다 — 단계 실행기는 종류를 모른다.
+//  · 단말 동작은 Endpoint 종류(UE 세션 / 피어 신원 / 실단말 프로세스)에 따라 ep* 헬퍼가 갈라 처리한다 — 단계 실행기는 종류를 모른다.
 //  · 지표: Metrics 1초 버킷 → StreamClient(TCP JSONL). 실패 개별 건은 event 레코드.
 #ifndef _CIMS_TESTER_WORKER_H_
 #define _CIMS_TESTER_WORKER_H_
@@ -33,6 +35,7 @@
 #include "HttpServer.h"
 #include "Json.h"
 #include "Metrics.h"
+#include "RealUe.h"
 #include "SipCapture.h"
 #include "StreamClient.h"
 
@@ -61,6 +64,14 @@ struct WorkerConfig {
     int floorTimeoutMs = 5000;      // floor 요청 결과(Granted/Deny/Queue)·해제 뒤 Idle 대기 상한
     int maxEndpointsPerCore = 200;  // 용량 선언(cspsim 실측 기준)
     double maxSapsPerCore = 10;
+    // real-ue 풀(§3.3) — cimsue-cli 경로·동시 프로세스 상한·프로세스 stderr 로그 레벨/디렉터리·기동 대기·TLS 앵커
+    std::string realUeCli;          // 비면 real-ue 풀 생성 거절(400 real_ue_cli_missing)
+    int realUeMax = 8;              // 워커당 실단말 프로세스 상한(pjsua2 프로세스 하나 ≈ 수십 MB·스레드 여럿)
+    int realUeLogLevel = 2;
+    std::string realUeLogDir;       // 프로세스 stderr(pjsip 로그) — <모듈>/log/real-ue
+    int realUeStartTimeoutS = 15;
+    std::string realUeTlsCaFile;    // 풀 tls_verify 일 때 서버 인증서 앵커(PEM) — 비면 검증 없이 접속
+    int realUeCmdTimeoutMs = 5000;  // 명령 동기 결과 대기
     std::string version = "0.1.0";
 };
 
@@ -73,12 +84,21 @@ struct Instance;
 struct Pool;
 
 struct Endpoint {
+    enum Kind { K_UE, K_PEER, K_REAL } kind = K_UE;   // 가상 단말(SimSession) / 피어 신원(엔진 호) / 실단말 프로세스(cimsue-cli)
     int idx = 0;
     std::string pool;
     Pool* poolRef = nullptr;
     Identity id;
     SimSession* s = nullptr;        // kind=ue — 가상 단말 스택
     std::string callId;             // kind=peer — 이 신원이 지금 붙어 있는 엔진 호(Call-ID)
+    // kind=real-ue — 프로세스(풀이 소유)·현재 호(cli call id)·마지막 RTP 통계(프로세스가 1 초마다 올린다 — media_hold 표본 원천)
+    RealUeProcess* real = nullptr;
+    int realCall = -1;
+    bool realRegFailed = false;     // register 명령 거절 또는 REGISTER 실패 응답
+    bool realReinviteWait = false;  // hold/resume 명령을 냈다 — held/active 전이 = re-INVITE 200
+    bool realHeld = false;
+    bool realVideo = false;
+    struct RealStats { unsigned long long rx = 0, tx = 0, lost = 0; long long jitterUs = 0; bool valid = false; } realStats;
     bool started = false;           // Start() 호출됨(등록 진행/완료)
     bool registered = false;
     Instance* inst = nullptr;       // 지금 이 단말을 쓰는 인스턴스
@@ -110,7 +130,9 @@ struct Endpoint {
     bool talked = false;            // 표본 구간 안에 floor 를 가졌다 — 발언자는 수신 0 이 정상(무음 leg 로 세지 않는다)
     bool isPtt() const;
     bool ready() const { return registered && (!isPtt() || affiliated); }
-    bool isPeer() const { return s == nullptr; }
+    bool isPeer() const { return kind == K_PEER; }
+    bool isReal() const { return kind == K_REAL; }
+    bool isSim() const { return kind == K_UE; }     // SimSession 을 직접 만지는 곳은 이 검사 뒤에만
 };
 
 struct Pool {
@@ -130,6 +152,7 @@ struct Pool {
     bool regFailed = false;
     std::map<std::string, Endpoint*> byUser;   // peer: 신원 user → Endpoint (착신 귀속)
     std::map<std::string, Endpoint*> byCall;   // peer: 활성 Call-ID → Endpoint
+    std::vector<std::unique_ptr<RealUeProcess>> reals;   // real-ue: 신원 순 프로세스(Endpoint::real 이 가리킨다)
     std::vector<std::unique_ptr<Endpoint>> eps;
 };
 
@@ -231,7 +254,8 @@ public:
 private:
     struct Event {
         enum Kind { REGISTER, INCOMING, CALLSTART, CALLEND, BYERESP, RING, PRACK, REINVITE, REINVITE_RESP, REFER_RESP,
-                    AFFILIATE, ANSWERED, FLOOR, SUBSCRIBE_RESP, DLG_NOTIFY, FAULT_REJECT } kind;
+                    AFFILIATE, ANSWERED, FLOOR, SUBSCRIBE_RESP, DLG_NOTIFY, FAULT_REJECT,
+                    REAL_CALL, REAL_STATS, REAL_EXIT } kind;   // REAL_* = 실단말 프로세스 이벤트(onEvent 가 위의 종류로 다시 푼다)
         SimSession* s;
         CsimPeer* peer;
         int status;
@@ -242,7 +266,12 @@ private:
         bool prack = false; // RING: PRACK 을 냈다
         int q850 = 0;       // CALLEND: 상대 Reason Q.850 cause
         long long us = 0;   // FLOOR: 수신 시각(µs)
-        std::string event;  // SUBSCRIBE_RESP: 이벤트 패키지(user = 자원) · DLG_NOTIFY: dialog 상태(user = 감시 대상, callId = 그 dialog)
+        std::string event;  // SUBSCRIBE_RESP: 이벤트 패키지(user = 자원) · DLG_NOTIFY: dialog 상태(user = 감시 대상, callId = 그 dialog) · REAL_CALL: 호 상태(user = dir in|out, hasPai = by_us, prack = mcptt)
+        Endpoint* ep = nullptr;   // real-ue: 리더 스레드가 아는 단말(세션·엔진 없음)
+        int rcall = -1;           // real-ue: cli call id
+        unsigned long long rx = 0, tx = 0, lost = 0;   // real-ue: RTP 통계(statsValid 일 때)
+        long long jit = 0;
+        bool statsValid = false;
     };
 
     WorkerConfig m_cfg;
@@ -284,6 +313,9 @@ private:
     void destroyPool(Pool* pool);
     bool buildUePool(Pool* pool, const Json& d, std::string& err);
     bool buildPeerPool(Pool* pool, const Json& d, std::string& err);
+    bool buildRealUePool(Pool* pool, const Json& d, std::string& err);
+    void onRealEvent(Endpoint* ep, const Json& ev);   // 리더 스레드 — Event 로 바꿔 큐에만 넣는다
+    long long realProcesses() const;
 
     // 스케줄러
     void schedLoop();
@@ -340,6 +372,12 @@ private:
     void epSetVideo(Instance& in, Endpoint* from, bool want);   // invite/group_call 의 media.video — 오퍼 m=video 유무(워커 Media.VideoFile 전제)
     bool epMediaSend(Endpoint* ep, const CompiledStep& st);   // false = SDP 교환 전(RTP 미기동)
     bool epMediaStop(Endpoint* ep);
+    bool epGroupCall(Endpoint* from, const std::string& group, bool listen, const Json& media);   // MCPTT 그룹 INVITE(발신자) — false = 스택 거절
+    bool epFloorRequest(Endpoint* ep);
+    void epFloorRelease(Endpoint* ep, bool held);
+    bool epPickup(Endpoint* from, const std::string& code, const std::string& number);   // real-ue 픽업(피처코드 다이얼)
+    bool epUnregister(Endpoint* ep);            // epilogue deregister — UE 스택 정지 / 실단말 unregister
+    Json realRequest(Endpoint* ep, const std::string& cmd);
     bool resolveSample(const std::string& file, std::string& out, std::string& err) const;
     long long rtpStreams() const;
     // SIP 덤프 — 인스턴스가 끝나고 조금 뒤(정리 BYE/487 까지 담기게) 올린다
