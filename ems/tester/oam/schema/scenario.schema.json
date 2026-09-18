@@ -144,7 +144,9 @@
             "recording_created",
             "log_errors",
             "alarm_raised",
-            "event_logged"
+            "event_logged",
+            "rss_growth_mb",
+            "fd_growth"
           ],
           "title": "Kind",
           "type": "string"
@@ -153,7 +155,7 @@
           "anyOf": [
             {
               "minimum": 0,
-              "type": "integer"
+              "type": "number"
             },
             {
               "type": "null"
@@ -166,7 +168,7 @@
           "anyOf": [
             {
               "minimum": 0,
-              "type": "integer"
+              "type": "number"
             },
             {
               "type": "null"
@@ -174,6 +176,19 @@
           ],
           "default": null,
           "title": "Min"
+        },
+        "proc": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "rss_growth_mb/fd_growth — 판정할 프로세스(\"host/proc\" 또는 프로세스 이름 = 모든 호스트). 비면 관측된 프로세스 전부 중 최댓값",
+          "title": "Proc"
         }
       },
       "required": [

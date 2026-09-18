@@ -1,0 +1,7 @@
+# 30 분 소크 — 누수 판정 시나리오(VOLTE-CALL-SOAK-LEAK)의 짧은 형. 판정은 target_evidence rss_growth_mb/fd_growth(호스트 SSH 관측)가 한다.
+name: soak_30m
+model: soak
+rate: 2
+duration_s: 1800
+ht: 20
+stop_on: { csp_5xx_pct: 2.0, ser_pct_min: 95 }

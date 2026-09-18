@@ -1,4 +1,4 @@
-# 야간 소크 — scripts/longrun_8h.sh 대체. 누수 판정은 대상 측 세션/포트 관측이 한다.
+# 야간 소크 — scripts/longrun_8h.sh 대체. 누수 판정은 시나리오 target_evidence rss_growth_mb/fd_growth(호스트 SSH 관측의 프로세스별 RSS·fd 처음↔끝 차)가 한다 — VOLTE-CALL-SOAK-LEAK.
 name: soak_8h
 model: soak
 rate: 2

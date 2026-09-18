@@ -18,7 +18,7 @@ import subprocess
 import threading
 import time
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from services import tester_target
 from services.tester_bus import publish
@@ -138,15 +138,19 @@ def target_series(db_path: str) -> dict:
     procs: Dict[str, dict] = {}
     try:
         db = sqlite3.connect(db_path)
-        prow = db.execute('SELECT t, host, proc, cpu_pct, rss_mb FROM target_proc ORDER BY t').fetchall()
+        try:
+            prow = db.execute('SELECT t, host, proc, cpu_pct, rss_mb, fds FROM target_proc ORDER BY t').fetchall()
+        except sqlite3.Error:   # fds 열이 없는 옛 run
+            prow = [(*r, None) for r in db.execute('SELECT t, host, proc, cpu_pct, rss_mb FROM target_proc ORDER BY t').fetchall()]
         db.close()
     except sqlite3.Error:
         prow = []
-    for t, host, proc, cpu, rss in prow:
-        a = procs.setdefault(f'{host}/{proc}', {'t': [], 'cpu_pct': [], 'rss_mb': []})
+    for t, host, proc, cpu, rss, fds in prow:
+        a = procs.setdefault(f'{host}/{proc}', {'t': [], 'cpu_pct': [], 'rss_mb': [], 'fds': []})
         a['t'].append(t)
         a['cpu_pct'].append(cpu)
         a['rss_mb'].append(rss)
+        a['fds'].append(fds)
     return {'agents': out, 'procs': procs}
 
 
@@ -154,10 +158,32 @@ def _in_window(ts: Optional[float], t0: float, t1: float) -> bool:
     return ts is not None and t0 <= ts <= t1
 
 
+def _growth_evidence(ev, deltas: Optional[dict], unit: str) -> dict:
+    """rss_growth_mb / fd_growth — 호스트 SSH 관측의 프로세스별 처음↔끝 차(deltas {"host/proc": v}) 중 ev.proc 에 맞는 것의 최댓값을 판정한다.
+    ev.proc 은 "host/proc" 또는 프로세스 이름(모든 호스트). None(원천 없음)·해당 프로세스 없음 = 판정 불가."""
+    r = {'kind': ev.kind, 'code': ev.code, 'proc': ev.proc, 'min': ev.min, 'max': ev.max, 'observed': None, 'ok': None, 'why': None}
+    if deltas is None:
+        r['why'] = '판정 불가 — hosts.*.ssh 와 nodes.*.procs 가 있어야 프로세스별 RSS/fd 를 관측한다'
+        return r
+    picked = {k: v for k, v in deltas.items() if not ev.proc or k == ev.proc or k.split('/', 1)[-1] == ev.proc}
+    if not picked:
+        r['why'] = f'판정 불가 — 관측된 프로세스 없음(procs={sorted(deltas) or "[]"}' + (f', proc={ev.proc!r}' if ev.proc else '') + ')'
+        return r
+    worst = max(picked, key=lambda k: picked[k])
+    v = picked[worst]
+    r['observed'] = v
+    r['ok'] = (ev.min is None or v >= ev.min) and (ev.max is None or v <= ev.max)
+    if not r['ok']:
+        r['why'] = f'{worst} {v:+g} {unit} — 기대 ' + ' · '.join(x for x in (f'≥ {ev.min}' if ev.min is not None else '', f'≤ {ev.max}' if ev.max is not None else '') if x)
+    return r
+
+
 def evaluate_evidence(scenario: Scenario, topology: Topology, started: float, ended: float,
-                      requester_token: Optional[str], log_errors: Optional[int] = None) -> List[dict]:
+                      requester_token: Optional[str], log_errors: Optional[int] = None,
+                      rss_delta: Optional[Dict[str, float]] = None, fd_delta: Optional[Dict[str, int]] = None) -> List[dict]:
     """target_evidence → [{kind, code, min, max, observed, ok(True|False|None), why}] — 창은 시작 −2 s ~ 종료 +10 s(대상의 기록 지연).
-    log_errors = 호스트 SSH 관측(SshObserver.log_errors)이 센 run 동안 늘어난 모듈 로그 ERROR 줄 수(None = 원천 없음 → 판정 불가)."""
+    log_errors = 호스트 SSH 관측(SshObserver.log_errors)이 센 run 동안 늘어난 모듈 로그 ERROR 줄 수(None = 원천 없음 → 판정 불가).
+    rss_delta/fd_delta = 같은 관측의 프로세스별 RSS(MB)·열린 fd 처음↔끝 차(소크 누수 판정 rss_growth_mb/fd_growth — None = 원천 없음)."""
     if not scenario.target_evidence:
         return []
     t0, t1 = started - 2, ended + 10
@@ -187,6 +213,9 @@ def evaluate_evidence(scenario: Scenario, topology: Topology, started: float, en
 
     res = []
     for ev in scenario.target_evidence:
+        if ev.kind in ('rss_growth_mb', 'fd_growth'):
+            res.append(_growth_evidence(ev, rss_delta if ev.kind == 'rss_growth_mb' else fd_delta, 'MB' if ev.kind == 'rss_growth_mb' else 'fd'))
+            continue
         r = {'kind': ev.kind, 'code': ev.code, 'min': ev.min, 'max': ev.max, 'observed': None, 'ok': None, 'why': None}
         if ev.kind == 'log_errors':
             # 원천 = 호스트 SSH 관측(hosts.*.ssh + nodes.*.logs) — 대상 OAM 이 아니다
@@ -267,15 +296,16 @@ def _sample_cmd(procs: List[str], logs: List[str]) -> str:
              "awk '/^MemTotal|^MemAvailable/{print \"@M\", $1, $2}' /proc/meminfo", 'echo "@L $(cut -d" " -f1 /proc/loadavg)"']
     for c in procs:
         q = shlex.quote(c)
+        # 프로세스 행 = 이름 pid 틱 RSS(kB) 열린 fd 수 — fd 수는 소켓·파일 누수(소크 판정 fd_growth)의 원천
         parts.append(f'for p in $(pgrep -x -- {q} 2>/dev/null); do echo "@P {q} $p $(awk \'{{print $14+$15}}\' /proc/$p/stat 2>/dev/null) '
-                     f'$(awk \'/VmRSS/{{print $2}}\' /proc/$p/status 2>/dev/null)"; done')
+                     f'$(awk \'/VmRSS/{{print $2}}\' /proc/$p/status 2>/dev/null) $(ls /proc/$p/fd 2>/dev/null | wc -l)"; done')
     for g in logs:
         parts.append(f'for f in {g}; do [ -f "$f" ] && echo "@F $(stat -c %s "$f") $f"; done')
     return '; '.join(parts)
 
 
 def parse_sample(text: str) -> dict:
-    """원격 출력 → {t, clk, cpu:[…8], mem_total, mem_avail, load, procs:{(proc,pid): (ticks, rss_kb)}, files:{path: size}}."""
+    """원격 출력 → {t, clk, cpu:[…8], mem_total, mem_avail, load, procs:{(proc,pid): (ticks, rss_kb, fds)}, files:{path: size}}. fds 는 구 출력(5 열)이면 None."""
     out: dict = {'t': None, 'clk': 100, 'cpu': None, 'mem_total': None, 'mem_avail': None, 'load': None, 'procs': {}, 'files': {}}
     for ln in text.splitlines():
         f = ln.split()
@@ -292,7 +322,7 @@ def parse_sample(text: str) -> dict:
             elif f[0] == '@L':
                 out['load'] = float(f[1])
             elif f[0] == '@P' and len(f) >= 5:
-                out['procs'][(f[1], int(f[2]))] = (int(f[3]), int(f[4]))
+                out['procs'][(f[1], int(f[2]))] = (int(f[3]), int(f[4]), int(f[5]) if len(f) >= 6 else None)
             elif f[0] == '@F' and len(f) >= 3:
                 out['files'][' '.join(f[2:])] = int(f[1])
         except (ValueError, IndexError):
@@ -330,6 +360,9 @@ class SshObserver(threading.Thread):
         self.proc_peak: Dict[str, float] = {}     # "host/proc" → 피크 CPU %
         self.rss_first: Dict[str, float] = {}     # "host/proc" → 첫 RSS MB
         self.rss_last: Dict[str, float] = {}
+        self.fd_first: Dict[str, int] = {}        # "host/proc" → 첫 열린 fd 수(소켓·파일 누수 판정 원천)
+        self.fd_last: Dict[str, int] = {}
+        self.rss_points: Dict[str, List[Tuple[float, float]]] = {}   # "host/proc" → [(t, rss_mb)] — 기울기(MB/h) 추정
         for hid, h in topology.hosts.items():
             if h.ssh is None:
                 continue
@@ -355,6 +388,26 @@ class SshObserver(threading.Thread):
     def rss_delta_mb(self) -> Dict[str, float]:
         return {k: round(self.rss_last[k] - self.rss_first[k], 1) for k in self.rss_first if k in self.rss_last}
 
+    def fd_delta(self) -> Dict[str, int]:
+        """프로세스별 열린 fd 수 처음↔끝 차 — 소크 누수 판정(fd_growth). fd 를 못 읽은 프로세스는 없다."""
+        return {k: self.fd_last[k] - self.fd_first[k] for k in self.fd_first if k in self.fd_last}
+
+    def rss_slope_mb_per_h(self) -> Dict[str, float]:
+        """프로세스별 RSS 최소제곱 기울기(MB/h) — 처음↔끝 차보다 표본 잡음에 덜 흔들리는 누수 추정(표본 3개 이상·10 초 이상일 때만)."""
+        out: Dict[str, float] = {}
+        with self._lock:
+            for k, pts in self.rss_points.items():
+                if len(pts) < 3 or pts[-1][0] - pts[0][0] < 10:
+                    continue
+                n = len(pts)
+                mt = sum(p[0] for p in pts) / n
+                mr = sum(p[1] for p in pts) / n
+                den = sum((p[0] - mt) ** 2 for p in pts)
+                if den <= 0:
+                    continue
+                out[k] = round(3600.0 * sum((p[0] - mt) * (p[1] - mr) for p in pts) / den, 2)
+        return out
+
     def _sample(self, hid: str, db) -> None:
         e = self.hosts[hid]
         cur = parse_sample(self._runner(e['host'], _sample_cmd(e['procs'], e['logs'])))
@@ -367,19 +420,26 @@ class SshObserver(threading.Thread):
         t = int(cur['t'])
         dt = (cur['t'] - prev['t']) if prev else 0.0
         # 프로세스 행은 첫 표본부터(RSS 의 처음값 — 누수 판정의 기점), CPU 는 차분이라 두 번째 표본부터
-        for (proc, pid), (ticks, rss_kb) in cur['procs'].items():
+        for (proc, pid), (ticks, rss_kb, fds) in cur['procs'].items():
             key = f'{hid}/{proc}'
             rss_mb = rss_kb / 1024.0
             pcpu = None
             if prev and (proc, pid) in prev['procs'] and dt > 0:
                 pcpu = max(0.0, 100.0 * (ticks - prev['procs'][(proc, pid)][0]) / max(1, cur['clk']) / dt)
-            db.execute('INSERT INTO target_proc VALUES (?,?,?,?,?,?)', (t, hid, proc, pid, pcpu, rss_mb))
+            db.execute('INSERT INTO target_proc VALUES (?,?,?,?,?,?,?)', (t, hid, proc, pid, pcpu, rss_mb, fds))
             with self._lock:
                 if pcpu is not None:
                     self.proc_peak[key] = max(self.proc_peak.get(key, 0.0), pcpu)
                 self.rss_first.setdefault(key, rss_mb)
                 self.rss_last[key] = rss_mb
-            publish('target_proc', {'run_id': self.run_id, 't': t, 'host': hid, 'proc': proc, 'pid': pid, 'cpu_pct': pcpu, 'rss_mb': round(rss_mb, 1)})
+                pts = self.rss_points.setdefault(key, [])
+                pts.append((cur['t'], rss_mb))
+                if len(pts) > 20000:      # 8 h 소크 × 3 s ≈ 9600 — 상한을 넘으면 절반으로 솎는다
+                    del pts[::2]
+                if fds is not None:
+                    self.fd_first.setdefault(key, fds)
+                    self.fd_last[key] = fds
+            publish('target_proc', {'run_id': self.run_id, 't': t, 'host': hid, 'proc': proc, 'pid': pid, 'cpu_pct': pcpu, 'rss_mb': round(rss_mb, 1), 'fds': fds})
         if prev is None:
             return
         cpu = host_cpu_pct(prev, cur)
@@ -403,7 +463,7 @@ class SshObserver(threading.Thread):
         db = sqlite3.connect(self.db_path, check_same_thread=False)
         db.execute('CREATE TABLE IF NOT EXISTS target (t INTEGER, agent TEXT, cpu_pct REAL, mem_pct REAL, load REAL)')
         db.execute('CREATE INDEX IF NOT EXISTS target_t ON target (t)')
-        db.execute('CREATE TABLE IF NOT EXISTS target_proc (t INTEGER, host TEXT, proc TEXT, pid INTEGER, cpu_pct REAL, rss_mb REAL)')
+        db.execute('CREATE TABLE IF NOT EXISTS target_proc (t INTEGER, host TEXT, proc TEXT, pid INTEGER, cpu_pct REAL, rss_mb REAL, fds INTEGER)')
         db.execute('CREATE INDEX IF NOT EXISTS target_proc_t ON target_proc (t)')
         while not self._stop_ev.is_set():
             for hid in list(self.hosts):

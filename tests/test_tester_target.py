@@ -348,8 +348,8 @@ class SshObservation(unittest.TestCase):
         self.assertTrue(O.SshObserver.wanted(topo))
         calls = []
         samples = iter([
-            '@T 1000.0 100\n@S cpu 1000 0 500 8000 100 0 0 0\n@M MemTotal: 8000000 kB\n@M MemAvailable: 4000000 kB\n@L 0.5\n@P csp 4242 300 102400\n@F 5000 /opt/cims/csp/log/csp_a.log\n',
-            '@T 1003.0 100\n@S cpu 1300 0 600 8500 100 0 0 0\n@M MemTotal: 8000000 kB\n@M MemAvailable: 3000000 kB\n@L 0.9\n@P csp 4242 390 112640\n@F 5300 /opt/cims/csp/log/csp_a.log\n',
+            '@T 1000.0 100\n@S cpu 1000 0 500 8000 100 0 0 0\n@M MemTotal: 8000000 kB\n@M MemAvailable: 4000000 kB\n@L 0.5\n@P csp 4242 300 102400 120\n@F 5000 /opt/cims/csp/log/csp_a.log\n',
+            '@T 1003.0 100\n@S cpu 1300 0 600 8500 100 0 0 0\n@M MemTotal: 8000000 kB\n@M MemAvailable: 3000000 kB\n@L 0.9\n@P csp 4242 390 112640 133\n@F 5300 /opt/cims/csp/log/csp_a.log\n',
         ])
 
         def runner(host, cmd):
@@ -375,10 +375,13 @@ class SshObservation(unittest.TestCase):
         self.assertAlmostEqual(ob.peak_cpu, 44.4, delta=0.2)
         self.assertAlmostEqual(ob.proc_peak['h1/csp'], 30.0, delta=0.1)
         self.assertAlmostEqual(ob.rss_delta_mb()['h1/csp'], 10.0, delta=0.1)
+        self.assertEqual(ob.fd_delta(), {'h1/csp': 13})                        # 열린 fd 120 → 133
+        self.assertEqual(ob.rss_slope_mb_per_h(), {})                          # 표본 2개·3 s — 기울기는 3개·10 s 부터
         self.assertAlmostEqual(ob.cpu_now(), 44.4, delta=0.2)
         ser = O.target_series(db)
         self.assertEqual(list(ser['agents']), ['h1'])
         self.assertEqual(list(ser['procs']), ['h1/csp'])
+        self.assertEqual(ser['procs']['h1/csp']['fds'], [120, 133])
         self.assertAlmostEqual(ser['agents']['h1']['mem_pct'][0], 62.5, delta=0.1)
         self.assertEqual(ob.log_errors(), 3)
         sc = M.Scenario.model_validate({'id': 'UT-LOG', 'roles': {'a': {'pool': 'ue'}}, 'flow': [{'step': 'register', 'who': ['a']}],
@@ -387,6 +390,18 @@ class SshObservation(unittest.TestCase):
         self.assertEqual((res[0]['observed'], res[0]['ok']), (3, False))
         res = O.evaluate_evidence(sc, topo, 0, 1, None, log_errors=None)
         self.assertIsNone(res[0]['ok'])
+        # 소크 누수 판정 — 프로세스별 RSS/fd 처음↔끝 차(proc 지정 = 이름 또는 host/proc, 비면 최댓값), 원천 없음·프로세스 없음 = 판정 불가
+        sc2 = M.Scenario.model_validate({'id': 'UT-LEAK', 'roles': {'a': {'pool': 'ue'}}, 'flow': [{'step': 'register', 'who': ['a']}],
+                                         'target_evidence': [{'kind': 'rss_growth_mb', 'proc': 'csp', 'max': 5}, {'kind': 'fd_growth', 'max': 20},
+                                                             {'kind': 'rss_growth_mb', 'proc': 'cmp', 'max': 5}, {'kind': 'fd_growth', 'proc': 'h1/csp', 'max': 10}]})
+        res = O.evaluate_evidence(sc2, topo, 0, 1, None, rss_delta={'h1/csp': 10.0, 'h1/cmp': 1.0}, fd_delta={'h1/csp': 13})
+        self.assertEqual([(r['observed'], r['ok']) for r in res], [(10.0, False), (13, True), (1.0, True), (13, False)])
+        self.assertIn('h1/csp +10 MB', res[0]['why'])
+        res = O.evaluate_evidence(sc2, topo, 0, 1, None)                      # SSH 관측 없음 → 전부 판정 불가
+        self.assertTrue(all(r['ok'] is None for r in res))
+        for bad in ({'kind': 'log_errors', 'proc': 'csp', 'max': 0}, {'kind': 'rss_growth_mb', 'code': 'A-X', 'max': 1}, {'kind': 'fd_growth'}):
+            with self.assertRaises(Exception):
+                M.Evidence.model_validate(bad)
         # ssh argv — 개인키는 환경변수의 경로, 비밀은 레코드에 없다
         os.environ['UT_SSH_KEY'] = '/tmp/k'
         try:

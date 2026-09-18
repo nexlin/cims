@@ -57,7 +57,7 @@ export interface ScenarioDoc {
   tags?: string[]
   roles?: Record<string, { pool: string; disjoint_from?: string; count?: number; multi?: boolean; member?: boolean }>
   flow?: ScenarioStep[]
-  target_evidence?: { kind: string; min?: number; max?: number; code?: string }[]
+  target_evidence?: { kind: string; min?: number; max?: number; code?: string; proc?: string }[]
 }
 
 export interface ProfileRow {
@@ -367,7 +367,7 @@ export interface ScenarioVocab {
 
 export interface HistResult { id: string; timer: string; count: number; mean?: number | null; min?: number | null; max?: number | null; p50?: number | null; p95?: number | null; p99?: number | null; buckets: { ub: number | null; count: number }[] }
 export interface EvidenceResult { kind: string; code?: string | null; min?: number | null; max?: number | null; observed: number | null; ok: boolean | null; why?: string | null }
-export interface TargetSeries { id: string; agents: Record<string, { t: number[]; cpu_pct: (number | null)[]; mem_pct: (number | null)[] }>; procs?: Record<string, { t: number[]; cpu_pct: (number | null)[]; rss_mb: (number | null)[] }> }
+export interface TargetSeries { id: string; agents: Record<string, { t: number[]; cpu_pct: (number | null)[]; mem_pct: (number | null)[] }>; procs?: Record<string, { t: number[]; cpu_pct: (number | null)[]; rss_mb: (number | null)[]; fds?: (number | null)[] }> }
 export interface DiscoveredWorker { name: string; agent_id?: number; hostname?: string | null; ip?: string | null; port: number; ips?: string[]; cpus?: number | null; version?: string | null; live_state?: string | null; deployment_id?: number }
 export interface SipDumpRow { call_id: string; bytes: number; messages: number }
 export interface CallDump { id: string; call_id: string; events: RunEvent[]; dump: string | null; note?: string | null }

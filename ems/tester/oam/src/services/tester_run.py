@@ -714,6 +714,12 @@ class RunDriver(threading.Thread):
         if self.ssh_observer is not None and self.ssh_observer.proc_peak:
             summary['target_proc_peak_pct'] = {k: round(v, 1) for k, v in self.ssh_observer.proc_peak.items()}
             summary['target_rss_delta_mb'] = self.ssh_observer.rss_delta_mb()   # 소크 누수 판정 원천 — 처음↔끝 RSS 차
+            slope = self.ssh_observer.rss_slope_mb_per_h()
+            if slope:
+                summary['target_rss_slope_mb_per_h'] = slope                    # 최소제곱 기울기(MB/h) — 소크 보고서의 누수 추정
+            fd = self.ssh_observer.fd_delta()
+            if fd:
+                summary['target_fd_delta'] = fd                                   # 열린 fd 수 처음↔끝 차(소켓·파일 누수)
         if log_errors is not None:
             summary['target_log_errors'] = log_errors
         # 대상 증거(2차 판정) — 운영자 중단·오류 run 은 판정하지 않는다
@@ -721,7 +727,9 @@ class RunDriver(threading.Thread):
                 self._stop_req.is_set() and (self.stop_reason or '').startswith('operator')):
             try:
                 self.evidence_results = tester_observe.evaluate_evidence(
-                    self.scenario, self.topology, self._t_started, t_ended, self._requester_token, log_errors)
+                    self.scenario, self.topology, self._t_started, t_ended, self._requester_token, log_errors,
+                    rss_delta=(self.ssh_observer.rss_delta_mb() if self.ssh_observer is not None and self.ssh_observer.rss_first else None),
+                    fd_delta=(self.ssh_observer.fd_delta() if self.ssh_observer is not None and self.ssh_observer.fd_first else None))
             except Exception as e:
                 self.notes.append(f'target_evidence 판정 실패: {e}')
         if self.verdict == 'running':

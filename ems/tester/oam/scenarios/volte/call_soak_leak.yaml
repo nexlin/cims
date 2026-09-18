@@ -1,0 +1,22 @@
+# 소크 누수 판정 — soak 프로파일(예 profiles/soak_30m·soak_8h)로 같은 호를 오래 반복하고, 호스트 SSH 관측(hosts.*.ssh + nodes.*.procs)이 잰
+#   대상 프로세스의 RSS·열린 fd 수 처음↔끝 차로 누수를 판정한다(target_evidence rss_growth_mb / fd_growth — 원천 없으면 판정 불가로 참고만).
+#   요약 target_rss_slope_mb_per_h(최소제곱 기울기)가 보고서에 실린다. log_errors 는 run 동안 늘어난 모듈 로그 ERROR 줄.
+#   상한은 대상 규모에 맞춰 조정한다 — 30 분에 csp RSS +20 MB·fd +20 이면 세션/leg 회수 누수를 의심할 값.
+id: VOLTE-CALL-SOAK-LEAK
+title: VoLTE 1:1 통화 소크 — 대상 프로세스 RSS·fd 누수 판정
+tags: [volte, soak, leak]
+roles:
+  caller: { pool: volte_ue }
+  callee: { pool: volte_ue }
+flow:
+  - { step: register,   who: [caller, callee], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: callee, media: { audio: amr-wb }, expect: { ser_pct: 99.5 } }
+  - { step: answer,     who: [callee], after_ms: 500, expect: { code: 200, srd_ms: { p95: 1500 } } }
+  - { step: media_hold, seconds: "${ht}", expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 }, scr_pct: 99.5 } }
+target_evidence:
+  - { kind: rss_growth_mb, proc: csp, max: 20 }
+  - { kind: rss_growth_mb, proc: cmp, max: 20 }
+  - { kind: fd_growth,     proc: csp, max: 20 }
+  - { kind: fd_growth,     proc: cmp, max: 20 }
+  - { kind: log_errors,    max: 0 }

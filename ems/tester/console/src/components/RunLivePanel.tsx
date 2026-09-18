@@ -17,7 +17,7 @@ import { useConfirm } from '@core/components/custom/confirm'
 import LiveCharts, { type ColumnSeries } from '@tester/components/LiveCharts'
 import LiveSidebar from '@tester/components/LiveSidebar'
 import SipDrawer from '@tester/components/SipDrawer'
-import { testerApi, openTesterStream, type RunRow, type RunLive, type RunEvent, type AggFrame, type RunStateFrame, type StepLogRow, type ScenarioDoc } from '@tester/api/tester'
+import { testerApi, openTesterStream, type RunRow, type RunLive, type RunEvent, type AggFrame, type RunStateFrame, type StepLogRow, type ScenarioDoc, type TargetAlerts } from '@tester/api/tester'
 import { fmtNum, fmtPct, fmtUnix, fmtDuration, fmtTime, STATE_LABEL, VERDICT_TONE, VERDICT_LABEL, STEP_LABEL } from '@tester/lib/fmt'
 import { thresholdsFromScenario, funnelRows, estimateDuration, sdtSeconds, ratiosFrom, type ProfileLike, type Judge } from '@tester/lib/metrics'
 
@@ -71,7 +71,23 @@ export default function RunLivePanel({ run, onEnded, scenario }: { run: RunRow; 
   const [codeFilter, setCodeFilter] = useState<string | null>(null)
   const [sipCall, setSipCall] = useState<string | null>(null)
   const [sc, setSc] = useState<ScenarioDoc | null>(scenario ?? null)
+  const [alerts, setAlerts] = useState<TargetAlerts | null>(null)
   const storeRef = useRef<LiveSeries>({ t: [], buckets: new Map() })
+
+  // 대상 알람 타임라인 — run 동안 15 초마다 대상 OAM 알람/이벤트를 run 창으로 받아 소형 차트에 마커로 겹친다(대상 oam 노드가 있을 때만 값이 온다)
+  useEffect(() => {
+    let alive = true
+    const pull = () => testerApi.targetAlerts(run.id).then(a => { if (alive) setAlerts(a) }).catch(() => {})
+    pull()
+    if (state.state === 'stopped') return () => { alive = false }
+    const id = window.setInterval(pull, 15000)
+    return () => { alive = false; window.clearInterval(id) }
+  }, [run.id, state.state])
+  const markers = useMemo(() => (alerts?.alerts ?? []).map(a => {
+    const ts = String(a.ts ?? a.time ?? '')
+    const sev = String(a.severity ?? a.level ?? '').toLowerCase()
+    return { t: new Date(ts).getTime() / 1000, label: `${ts.slice(11, 19)} ${String(a.type ?? a.code ?? a.kind ?? '')} ${String(a.message ?? a.detail ?? '')}`.trim(), tone: (/crit|major|error/.test(sev) ? 'danger' : /minor|warn/.test(sev) ? 'warning' : 'info') as 'danger' | 'warning' | 'info' }
+  }).filter(m => isFinite(m.t)), [alerts])
 
   useEffect(() => { if (scenario) setSc(scenario); else testerApi.scenario(run.scenario_id).then(s => setSc(s.doc)).catch(() => {}) }, [run.scenario_id, scenario])
 
@@ -237,7 +253,8 @@ export default function RunLivePanel({ run, onEnded, scenario }: { run: RunRow; 
             {live?.doc_rate != null && <KpiTile label="DOC" value={`${fmtNum(live.doc_rate, 1)} SApS`} sub="IHS 임계 직전 단계" />}
           </div>
 
-          <LiveCharts data={data} thresholds={th} bands={bands} stopOn={profile?.stop_on} />
+          <LiveCharts data={data} thresholds={th} bands={bands} stopOn={profile?.stop_on} markers={markers} />
+          {markers.length > 0 && <div className="text-[11px] text-muted-foreground">대상 알람·이벤트 {markers.length} 건이 시간축에 마커로 겹쳐 있다(15 초 갱신 — 대상 OAM {alerts?.oam ?? ''})</div>}
 
           {(live?.notes?.length ?? 0) > 0 && (
             <ul className="list-disc pl-5 text-xs text-muted-foreground">{live!.notes.map((n, i) => <li key={i}>{n}</li>)}</ul>

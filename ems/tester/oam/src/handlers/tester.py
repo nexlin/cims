@@ -483,7 +483,7 @@ def scenario_vocab() -> dict:
         'q850': {str(k): v for k, v in Q850_CAUSES.items()},
         'audio': list(AUDIO_CODECS), 'video': list(VIDEO_CODECS),
         'rtp_modes': list(RTP_MODES), 'sample_codecs': list(SAMPLE_CODECS),
-        'evidence_kinds': ['recording_created', 'log_errors', 'alarm_raised', 'event_logged'],
+        'evidence_kinds': ['recording_created', 'log_errors', 'alarm_raised', 'event_logged', 'rss_growth_mb', 'fd_growth'],
         'profile_models': ['constant', 'step', 'ramp', 'soak', 'burst'],
         'pool_kinds': ['ue', 'peer', 'real-ue'], 'peer_profiles': ['ibcf', 'pbx', 'mgcf'],
         'transports': ['udp', 'tcp', 'tls'], 'srtp': ['off', 'optional', 'required'],

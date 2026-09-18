@@ -71,6 +71,12 @@ function whySentence(run: RunDoc, isLoad: boolean, p: ProfileLike | null): React
 
 const SECTIONS = [['verdict', '판정'], ['timeline', '시간축'], ['metrics', '지표'], ['procedure', '절차'], ['events', '실패'], ['steplog', '단계 로그'], ['evidence', '대상 증거'], ['markdown', 'Markdown']] as const
 
+/** target_evidence 종류 설명 — 결과 카드(원천을 함께 적는다 — 판정 불가 사유를 읽는 데 필요) */
+const EVIDENCE_LABEL: Record<string, string> = {
+  recording_created: '대상 OAM 녹취 생성 수(run 창)', alarm_raised: '대상 OAM 알람 발생 수(cleared 제외)', event_logged: '대상 OAM 이벤트 수',
+  log_errors: '모듈 로그 ERROR/FATAL 증분(호스트 SSH 관측)', rss_growth_mb: '프로세스 RSS 처음↔끝 차 MB(호스트 SSH 관측 — 소크 누수)', fd_growth: '프로세스 열린 fd 처음↔끝 차(호스트 SSH 관측 — 소켓·파일 누수)',
+}
+
 export default function RunReport({ run, scenario, series, events, markdown, print, runs, onRerun }: {
   run: RunDoc
   scenario?: ScenarioDoc | null
@@ -332,7 +338,7 @@ export default function RunReport({ run, scenario, series, events, markdown, pri
         {tgt && Object.keys(tgt.agents).length > 0 && (
           <div className="grid gap-2 sm:grid-cols-2">
             {Object.entries(tgt.agents).map(([name, a], i) => (
-              <MiniChart key={name} t={a.t} label={`대상 호스트 ${name} — CPU / 메모리`} unit="%" max={100} hover={tgtHover} onHover={setTgtHover}
+              <MiniChart key={name} t={a.t} label={`대상 호스트 ${name} — CPU / 메모리`} unit="%" max={100} hover={tgtHover} onHover={setTgtHover} markers={markers}
                          threshold={p?.stop_on?.target_cpu_pct ?? null} thresholdLabel="stop_on"
                          series={[{ key: 'cpu', values: a.cpu_pct, color: `var(--chart-${(i % 5) + 1})`, label: 'cpu' }, { key: 'mem', values: a.mem_pct, color: 'var(--chart-4)', label: 'mem', dashed: true }]} />
             ))}
@@ -341,8 +347,9 @@ export default function RunReport({ run, scenario, series, events, markdown, pri
         {tgt?.procs && Object.keys(tgt.procs).length > 0 && (
           <div className="grid gap-2 sm:grid-cols-2">
             {Object.entries(tgt.procs).map(([name, a], i) => (
-              <MiniChart key={name} t={a.t} label={`프로세스 ${name} — CPU % / RSS MB (SSH 관측)`} unit="" hover={tgtHover} onHover={setTgtHover}
-                         series={[{ key: 'cpu', values: a.cpu_pct, color: `var(--chart-${(i % 5) + 1})`, label: 'cpu %' }, { key: 'rss', values: a.rss_mb, color: 'var(--chart-5)', label: 'rss MB', dashed: true }]} />
+              <MiniChart key={name} t={a.t} label={`프로세스 ${name} — CPU % / RSS MB / fd (SSH 관측)`} unit="" hover={tgtHover} onHover={setTgtHover} markers={markers}
+                         series={[{ key: 'cpu', values: a.cpu_pct, color: `var(--chart-${(i % 5) + 1})`, label: 'cpu %' }, { key: 'rss', values: a.rss_mb, color: 'var(--chart-5)', label: 'rss MB', dashed: true },
+                                  ...(a.fds && a.fds.some(v => v != null) ? [{ key: 'fds', values: a.fds, color: 'var(--chart-7)', label: 'fd', dashed: true }] : [])]} />
             ))}
           </div>
         )}
@@ -352,9 +359,10 @@ export default function RunReport({ run, scenario, series, events, markdown, pri
               const r = (run.evidence_results ?? [])[i]
               return (
                 <div key={i} className="rounded-md border border-border p-2.5 text-xs">
-                  <div className="flex items-center gap-1.5"><span className="font-mono font-semibold">{e.kind}</span>
+                  <div className="flex items-center gap-1.5"><span className="font-mono font-semibold">{e.kind}</span>{e.proc && <span className="font-mono text-muted-foreground">{e.proc}</span>}
                     <Badge variant={!r || r.ok == null ? 'neutralSoft' : r.ok ? 'successSoft' : 'dangerSoft'} className="ml-auto">{!r ? '판정 없음' : r.ok == null ? '판정 불가' : r.ok ? 'OK' : 'FAIL'}</Badge></div>
-                  <div className="mt-1 text-muted-foreground">기대 {e.min != null ? `≥ ${e.min}` : ''}{e.max != null ? ` ≤ ${e.max}` : ''}{e.code ? ` ${e.code}` : ''}{r && r.observed != null ? <> · 관측 <b className="text-foreground">{r.observed}</b></> : null}</div>
+                  <div className="text-[10px] text-muted-foreground">{EVIDENCE_LABEL[e.kind] ?? ''}</div>
+                  <div className="mt-1 text-muted-foreground">기대 {e.min != null ? `≥ ${e.min}` : ''}{e.max != null ? ` ≤ ${e.max}` : ''}{e.code ? ` ${e.code}` : ''}{r && r.observed != null ? <> · 관측 <b className="text-foreground">{typeof r.observed === 'number' ? fmtNum(r.observed, 1) : String(r.observed)}</b>{e.kind === 'rss_growth_mb' ? ' MB' : ''}</> : null}</div>
                   {r?.why && <div className="mt-0.5 break-words text-muted-foreground">{r.why}</div>}
                 </div>
               )

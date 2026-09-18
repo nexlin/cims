@@ -461,11 +461,14 @@ function Inspector({ doc, sel, setSel, mutate, topo, vocab, issues, canWrite, so
       <F label="머리 주석" help="YAML 첫 줄 # 주석 — 재직렬화 때 보존"><Area value={doc.comment ?? ''} disabled={ro} onCommit={v => mutate(d => { d.comment = v })} /></F>
       <Sec title="대상 증거 (2차 판정)" right={<Button variant="ghost" size="sm" disabled={ro} onClick={() => mutate(d => { d.target_evidence = [...(d.target_evidence ?? []), { kind: 'recording_created', min: 1 }] })}><Plus size={12} /> 추가</Button>}>
         {(doc.target_evidence ?? []).map((e, k) => <div key={k} className="grid grid-cols-[1fr_60px_60px_24px] gap-1">
-          <Sel value={e.kind} disabled={ro} options={(vocab?.evidence_kinds ?? ['recording_created', 'log_errors', 'alarm_raised', 'event_logged']).map(v => ({ v }))} onChange={v => mutate(d => { d.target_evidence![k].kind = v })} />
+          <Sel value={e.kind} disabled={ro} options={(vocab?.evidence_kinds ?? ['recording_created', 'log_errors', 'alarm_raised', 'event_logged', 'rss_growth_mb', 'fd_growth']).map(v => ({ v }))} onChange={v => mutate(d => { const x = d.target_evidence![k]; x.kind = v; if (!/growth/.test(v)) delete x.proc; if (!/alarm_raised|event_logged/.test(v)) delete x.code })} />
+          {/growth/.test(e.kind) && <Txt value={e.proc ?? ''} mono placeholder="proc" disabled={ro} onCommit={v => mutate(d => { const x = d.target_evidence![k]; if (v.trim() === '') delete x.proc; else x.proc = v.trim() })} />}
+          {/alarm_raised|event_logged/.test(e.kind) && <Txt value={e.code ?? ''} mono placeholder="code" disabled={ro} onCommit={v => mutate(d => { const x = d.target_evidence![k]; if (v.trim() === '') delete x.code; else x.code = v.trim() })} />}
           <Txt value={e.min} mono type="number" placeholder="min" disabled={ro} onCommit={v => mutate(d => { const x = d.target_evidence![k]; if (v === '') delete x.min; else x.min = Number(v) })} />
           <Txt value={e.max} mono type="number" placeholder="max" disabled={ro} onCommit={v => mutate(d => { const x = d.target_evidence![k]; if (v === '') delete x.max; else x.max = Number(v) })} />
           <button disabled={ro} onClick={() => mutate(d => { d.target_evidence!.splice(k, 1) })}><X size={12} /></button></div>)}
         {!(doc.target_evidence ?? []).length && <span className="text-muted-foreground">없음 — 발생기 측 관측(1차)만으로 판정</span>}
+        {(doc.target_evidence ?? []).some(e => /growth/.test(e.kind)) && <span className="text-muted-foreground">rss_growth_mb / fd_growth = 호스트 SSH 관측(hosts.*.ssh + nodes.*.procs)의 프로세스별 처음↔끝 차 — soak 프로파일과 짝. proc 은 "host/proc" 또는 이름(비면 최댓값)</span>}
       </Sec>
       <Sec title="구간 요약"><div className="grid grid-cols-3 gap-1 text-center"><div><div className="text-muted-foreground">prelude</div><b>{pre}</b></div><div><div className="text-muted-foreground">body</div><b>{epi - pre}</b></div><div><div className="text-muted-foreground">epilogue</div><b>{doc.flow.length - epi}</b></div></div></Sec>
       <div className="mt-3 text-muted-foreground"><ul className="list-disc pl-4"><li>레인 헤더 클릭 = 역할 속성</li><li>행 클릭 = 단계 속성</li><li>빈 곳 클릭 = 시나리오 속성</li></ul></div>

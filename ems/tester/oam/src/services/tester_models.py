@@ -1005,14 +1005,27 @@ class Role(_Strict):
                                                   '역할 풀에서 배정한다(다른 풀도 됨). 첫 group_call 의 from·to 는 될 수 없다')
 
 
-EvidenceKind = Literal['recording_created', 'log_errors', 'alarm_raised', 'event_logged']
+# 대상 증거 종류 — recording_created/alarm_raised/event_logged = 대상 OAM API 를 run 창으로 센다 · log_errors = 호스트 SSH 관측의 로그 ERROR 증분 ·
+#   rss_growth_mb/fd_growth = 호스트 SSH 관측의 프로세스별 RSS(MB)·열린 fd 수 처음↔끝 차(소크 누수 판정 — soak 프로파일과 짝, 원천 없으면 판정 불가)
+EvidenceKind = Literal['recording_created', 'log_errors', 'alarm_raised', 'event_logged', 'rss_growth_mb', 'fd_growth']
 
 
 class Evidence(_Strict):
     kind: EvidenceKind
-    min: Optional[int] = Field(default=None, ge=0)
-    max: Optional[int] = Field(default=None, ge=0)
+    min: Optional[float] = Field(default=None, ge=0)
+    max: Optional[float] = Field(default=None, ge=0)
     code: Optional[str] = Field(default=None, description='알람/이벤트 정의 코드 (alarm_catalog)')
+    proc: Optional[str] = Field(default=None, description='rss_growth_mb/fd_growth — 판정할 프로세스("host/proc" 또는 프로세스 이름 = 모든 호스트). 비면 관측된 프로세스 전부 중 최댓값')
+
+    @model_validator(mode='after')
+    def _fields(self):
+        if self.proc and self.kind not in ('rss_growth_mb', 'fd_growth'):
+            raise ValueError('proc 은 rss_growth_mb/fd_growth 에만')
+        if self.code and self.kind not in ('alarm_raised', 'event_logged'):
+            raise ValueError('code 는 alarm_raised/event_logged 에만')
+        if self.min is None and self.max is None:
+            raise ValueError('min 또는 max 하나는 필요하다')
+        return self
 
 
 class Scenario(_Strict):
