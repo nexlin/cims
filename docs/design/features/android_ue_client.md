@@ -491,6 +491,61 @@ PTT up(RELEASE): 🎤mic 슬롯 ──disconnect─ 통화 stream  (송신 중�
 | 하드웨어 PTT | 러기드 단말의 물리 PTT 키 매핑(KeyEvent/벤더 인텐트) — 옵션, M2+ |
 | UX 모드 | VoLTE=전이중 다이얼러, PTT=반이중 푸시투토크(발언권 표시/대기열) |
 
+### 8.1 상시 등록 수명주기 — 로그인 1회 뒤 유지되는 것과 끊기는 것
+
+목표: **최초 로그인 한 번**으로 이후 사람 손 없이 등록·착신 가능 상태를 유지한다 — 화면이 꺼져 Doze 에 들어가도,
+등록이 살아 있는 동안 전화(INVITE)·문자(MESSAGE)가 단말에 도달해야 한다. 유지해야 할 층은 둘이고 성질이 다르다.
+
+| 층 | 무엇 | 수명·갱신 | 끊기면 |
+|---|---|---|---|
+| **SIP 등록** | Digest(`sipHa1`) REGISTER | 만료 개념 없음. 갱신 주기는 서버가 준 Expires 추종 — UDP 는 서버가 300 s 로 캡([registration_binding_set.md](registration_binding_set.md) §4) → 약 290 s 마다 재등록 | 전화·문자 착신 불가 |
+| **SSO 토큰**(IdMS) | HTTP 평면 — `/provisioning/me`·GMS/CMS XCAP·MCData FD | access 1 h(`IdMs.AccessTokenTtl`), refresh **7 일**(`IdMs.RefreshTokenTtl`, 기본 604800 s). refresh 는 **갱신마다 회전**되어 만료가 다시 7 일로 리셋([dispatch_desktop_ui.md](dispatch_desktop_ui.md) 토큰 절) | SIP 는 살아 있어 통화·문자는 되지만 그룹 조회·XCAP·FD 가 실패("그룹 조회 실패") → 재로그인 |
+
+**토큰 창이 밀리는 조건** — 인증기는 토큰을 *요청받을 때* `exp` 를 보고 갱신한다([android_ue_provisioning.md](android_ue_provisioning.md) §5).
+주기적으로 HTTP 를 치는 코드는 없으므로(PTT 의 60 s 루프는 SIP PUBLISH/SUBSCRIBE 만) **7 일 안에 토큰이 실제로 한 번은
+쓰여야** 창이 밀린다. 실사용에선 앱/단말 재기동(기동 시 프로비저닝 재조회)·그룹 화면 진입·FD 송수신이 그 역할을 한다.
+7 일 넘게 ⓐ 전원 OFF/오프라인이거나 ⓑ 켜져 있어도 HTTP 를 한 번도 안 쓰면 만료된다 — ⓑ 는 §8.1.3 의 후속 과제.
+
+#### 8.1.1 유지 메커니즘
+
+| 사건 | 동작 |
+|---|---|
+| 화면 OFF·Doze | 배터리 최적화 예외(4 앱, 오너앱은 PTT/VoLTE 가 대리 요청) + PTT/VoLTE 서비스 부분 wakelock 상시(§8 표) → pjsua keepalive 타이머가 제때 발화. wakelock 이 있으면 CRLF 공백 ≤14 s, 없으면 CPU 가 suspend 되어 공백이 46~100 s 로 벌어져 서버 침묵 임계(90 s)를 넘는다. Doze 자체는 막지 않는다(단말 전체 상태) — 영향만 받지 않는다 |
+| 단말 재부팅 | `core/boot/CimsBootReceiver`(BOOT_COMPLETED) — 공유 계정이 있으면 각 앱이 자기 서비스를 `startForegroundService` → onCreate 에서 wakelock 획득 → 등록. 사용자 조작 불필요 |
+| 서버측 안전층 | ①UDP Expires 300 캡 = keepalive 가 멈춰도 290 s 재등록이 NAT 매핑을 갱신 ②침묵 90 s 판정 + 480 = 죽은 바인딩으로 보내지 않고 발신측에 알린다([registration_binding_set.md](registration_binding_set.md) §4) |
+| 토큰 만료·401 | 인증기 `exp` 검사 + `TokenRetry` 1 회 재시도([android_ue_provisioning.md](android_ue_provisioning.md) §5) |
+
+#### 8.1.2 끊기는 경우와 복구
+
+| 상황 | 결과 | 복구 |
+|---|---|---|
+| 7 일 이상 연속 오프라인/전원 OFF, 또는 7 일간 토큰 미사용 | refresh 만료 → HTTP 평면 실패, SIP 등록은 유지 | 재로그인 |
+| 사용자가 앱 **강제 종료** | Android stopped 상태 — BOOT_COMPLETED 도 배달되지 않는다 | 앱 1 회 실행 |
+| **APK 업데이트**(스토어·`adb install -r`) | 서비스 종료, `MY_PACKAGE_REPLACED` 수신기 없음 | 앱 1 회 실행 |
+| **PIN/패턴 잠금** 기기 재부팅 | 첫 잠금 해제 전엔 자격증명 암호화 저장소가 잠겨 BOOT_COMPLETED 가 늦게 온다(직접 부팅 `LOCKED_BOOT_COMPLETED` 미지원) | 잠금 1 회 해제 |
+| 로그아웃·비밀번호 변경·가입 삭제·서버 403 | 등록 거절 | 재로그인/관리자 조치 |
+| CSP 재기동 | 등록표 소실(Redis 복제 미구현) → 다음 재등록(≤5 분)에 복구되어야 하나 **미검증** | 실측 필요 |
+| 장시간 망 단절 후 복귀(Wi-Fi 재연결·IP 변경) | pjsua 등록 재시도(`regConfig.firstRetryIntervalSec`/`retryIntervalSec`) 에 의존 — **미검증** | 실측 필요 |
+
+#### 8.1.3 후속 과제
+
+- 토큰 **선제 갱신** — 7 일 내 HTTP 미사용 단말 대비: 서비스가 하루 1 회(또는 잔여 < 2 일) `getAuthToken` 을 호출해 회전시킨다.
+- `MY_PACKAGE_REPLACED` 수신기로 업데이트 뒤 서비스 자동 재기동.
+- 직접 부팅(`LOCKED_BOOT_COMPLETED` + device-protected storage) 지원 여부 결정 — PIN 기기에서 첫 해제 전 착신이 필요한가.
+- CSP 재기동·망 복귀 후 재등록 실측.
+- 제조사 자체 절전 관리(삼성 "절전 앱", 샤오미 자동실행 제한 등)는 Doze 와 별개 층 — 기종별 확인.
+
+#### 8.1.4 검증 절차(Doze)
+
+- 진입 조건: 충전 케이블 분리(**USB adb 도 충전으로 인식되어 Doze 에 못 들어간다** — 무선 디버깅 사용) → 화면 OFF → 정지 상태.
+  진입 시간은 기종별(MF52 ≈ light 2 분·full 4 분, 순정 기본값은 30 분 이상). 즉시 진입은 `dumpsys deviceidle force-idle`
+  (해제 `unforce`, 재부팅 시 소멸 — 시험 플래그이므로 최종 판정은 자연 진입으로).
+- 확인: `dumpsys deviceidle get deep` = `IDLE`, `dumpsys deviceidle whitelist | grep cims`(예외), `dumpsys power | grep cims:`(wakelock).
+- 혼입 변수: **PTT 그룹콜 참여 중이면** 오디오 출력 스레드가 audioserver 의 `AudioMix` wakelock 을 앱 몫으로 잡아 wakelock 유무와
+  무관하게 CPU 가 깨어 있고, 서버 세션타이머 re-INVITE(90 s)도 포트를 살린다 — wakelock 효과는 **미참여 상태**에서만 보인다.
+- 판정: 서버 캡처에서 단말 NAT 포트별 CRLF 공백·재등록 포트 불변, `dumpsys batterystats --history` 의 `device_idle=full`
+  과 `±running`(CPU 수면 전이), 그리고 Doze 중 실제 MESSAGE/INVITE 에 대한 단말 응답(200 OK / 180 Ringing).
+
 ---
 
 ## 9. 빌드 / 모듈 구조

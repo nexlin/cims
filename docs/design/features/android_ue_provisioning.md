@@ -429,7 +429,10 @@ OAM 미도달 502 `oam_unreachable`. 구현 `csc/src/handlers/dispatch_recording
 
 - **core `provision/`** (공유): `Pkce`(PKCE S256), `ProvisioningClient`(IdMS 로그인 + `/provisioning/me` 조회, OkHttp), `ProvisioningModels`(ProvisioningProfile/ServiceProfile/SipServer/AccountInfo/TokenSet), `ServiceProfile.toSipAccountConfig(loginId, displayName, countryCode)`.
 - **volte-client / ptt-client**: 첫 진입 = `LoginScreen` → `ProvisioningClient` → 자기 kind 프로파일을 `ConfigStore` 에 저장 → 홈. 수동 설정은 §5-1 수동 설정 모드.
-- 토큰 수명(SSO): access_token 은 1시간(서버 `IdMs.AccessTokenTtl`), refresh_token 은 오너앱이 공유 계정에 보관.
+- 토큰 수명(SSO): access_token 은 1시간(서버 `IdMs.AccessTokenTtl`), refresh_token 은 **7 일**(`IdMs.RefreshTokenTtl`, 기본
+  604800 s)이며 오너앱이 공유 계정에 보관한다. refresh 그랜트마다 새 refresh_token 이 새 7 일로 회전 발급되므로 창은
+  계속 밀리지만, 갱신은 토큰이 *요청될 때*만 일어난다 — 7 일간 한 번도 쓰이지 않으면 만료. 단말 상시 등록 수명주기
+  전체(부팅 자동 기동·Doze·끊기는 경우)는 [android_ue_client.md](android_ue_client.md) §8.1.
   AccountManager 는 토큰 만료를 모르므로 두 겹으로 방어한다 —
   ① **인증기**(`CimsAuthenticator.getAuthToken`) 가 캐시 토큰의 JWT `exp` 를 읽어(`JwtClaims`, 서명 검증 없음,
      여유 60초) 만료(임박)면 `invalidateAuthToken` 후 refresh 로 새 토큰을 발급한다.
