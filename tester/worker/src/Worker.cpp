@@ -1716,7 +1716,8 @@ bool Worker::dialogConsistent(SimSession* s, std::string& detail) {
 
 bool Worker::runCheck(Instance& in, const CompiledStep& st, long long now) {
     // check 단계 — payload 종류별 판정. who 전원이 맞아야 통과. 실패는 인스턴스 실패(check_fail + event), 성공은 check_ok(check_pct = ok / tx)
-    Endpoint* subj = st.to.empty() ? nullptr : in.actors[st.to];
+    auto subjIt = st.to.empty() ? in.actors.end() : in.actors.find(st.to);
+    Endpoint* subj = subjIt == in.actors.end() ? nullptr : subjIt->second;
     if ((st.payload == "conference_roster_visible" || st.payload == "conference_roster_hidden") && !subj) { finishInstance(in, true, "check: to(로스터에서 찾을 역할) required", now); return false; }
     std::string why;
     bool all = true;
@@ -2707,7 +2708,9 @@ void Worker::execStep(Instance& in, long long now) {
             //   완료 = who 전원의 최종 응답(expect.code, 기본 200 — 403 그룹 밖 감시·489 미지 패키지도 기대값으로 둘 수 있다)
             std::string event = st.payload.empty() ? "dialog" : st.payload;
             // to = 역할(그 신원) 또는 번호 리터럴(대표번호 — 역할 아닌 감시 대상, F7). conference 는 그룹 AoR(step.group 또는 인스턴스 그룹)
-            Endpoint* to = st.to.empty() ? nullptr : in.actors[st.to];
+            //   리터럴은 actors 에 없다 — operator[] 로 찾으면 null 항목이 끼어 들어 뒤의 actors 순회가 깨진다(find 로)
+            auto toIt = st.to.empty() ? in.actors.end() : in.actors.find(st.to);
+            Endpoint* to = toIt == in.actors.end() ? nullptr : toIt->second;
             std::string literal = (!st.to.empty() && !to) ? st.to : "";
             std::string confGroup = st.group.empty() ? in.group : st.group;
             if (event == "conference" && confGroup.empty()) { finishInstance(in, true, "subscribe conference: 그룹(step.group 또는 그룹 세션) 이 필요하다", now); return; }
@@ -2767,7 +2770,12 @@ void Worker::execStep(Instance& in, long long now) {
             in.expectCode = (int)st.expect["code"].asInt(0);
             m_metrics.counter("sds_tx");
             if (!group.empty()) m_metrics.counter("sds_group_tx");
-            if (st.disposition) m_metrics.counter("sds_disposition_req");
+            if (st.disposition) {
+                // 회신 기대 수 = 수신자 수 — 1:1 은 1, 그룹 SDS 는 인스턴스 multi 역할 단말 전부(멤버마다 DELIVERED 하나)
+                long long recipients = 1;
+                if (!group.empty()) { recipients = 0; for (auto& m : in.multi) recipients += (long long)m.second.size(); if (recipients <= 0) recipients = 1; }
+                m_metrics.counter("sds_disposition_req", recipients);
+            }
             in.phase = Instance::WAIT_EVENT;
             in.awaitKind = "sdsresp";
             in.deadlineMs = now + m_cfg.inviteTimeoutMs;
