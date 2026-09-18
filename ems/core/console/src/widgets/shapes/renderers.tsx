@@ -1,8 +1,9 @@
 // shape별 순수 렌더러 — shape 데이터만 받아 그린다 (소스/fetch 무관). 테마 토큰 사용.
 //
 // **차트 높이는 담긴 칸을 따라간다** — px 를 박아 두면 카드를 키워도 여백만 생기고 줄이면 잘린다.
-// 캔버스가 고정 예산(화면 한 장)이라 카드 크기가 배치마다 다르므로, 막대 높이는 플롯 영역 대비
-// **비율(%)** 로 그린다(플롯 영역은 flex:1 로 남은 높이를 전부 차지).
+// 캔버스가 고정 예산(화면 한 장)이라 카드 크기가 배치마다 다르므로, 값은 플롯 영역 대비
+// **비율**로 그린다 — 분포 막대는 %, 시계열 선은 viewBox 좌표(플롯 영역은 flex:1 로 남은 높이를
+// 전부 차지하고, SVG 는 preserveAspectRatio="none" 로 그 높이에 늘어난다).
 import { Fragment, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { TimeBarData, SeriesBarData, KpiData, DistributionData, TableData, MatrixData } from './types'
@@ -44,16 +45,30 @@ function compactLabels(labels: (string | number)[]): string[] {
 }
 
 /**
- * 버킷이 이보다 많으면 **막대 대신 선**으로 그린다.
+ * 가로축 눈금 인덱스 — 최대 5개, **중복 없이**.
  *
- * 막대는 칸마다 폭을 나눠 가져야 한다 — 추이 카드 폭(그리드 26칸 ≈ 864px)에 1분 단위 하루치
- * 900버킷을 넣으면 한 칸이 1px 미만이 되어 **그래프가 안 보인다**(실측 2026-09-16).
- * 선은 폭이 필요 없어서 버킷이 아무리 많아도 모양이 남는다 — 자료를 묶어 버리지 않고(압축)
- * 해상도를 그대로 둔 채 조회 구간 전체가 한 화면에 들어온다.
- *
- * 반대로 성길 때는 막대가 낫다 — 칸 경계가 보여서 구간끼리 비교가 쉽다. 그래서 자동 전환한다.
+ * 버킷이 5개 미만이면 `[0,.25,.5,.75,1] × (n-1)` 이 같은 인덱스를 여러 번 만든다
+ * (n=2 → 0,0,1,1,1 → 같은 날짜가 두 번 찍힌다). 인덱스를 그대로 React key 로 쓰면
+ * **키까지 겹쳐** 렌더 결과가 예측 불가가 된다. 그래서 여기서 한 번에 솎는다.
  */
-const LINE_MIN_BUCKETS = 120
+function axisTicks(n: number): number[] {
+  if (n <= 0) return []
+  if (n <= 5) return Array.from({ length: n }, (_, i) => i)
+  return [...new Set([0, 0.25, 0.5, 0.75, 1].map(f => Math.round((n - 1) * f)))]
+}
+
+/**
+ * 이보다 버킷이 적으면 선 위에 **점**을 함께 찍는다.
+ *
+ * 추이는 **항상 선**이다. 막대는 칸마다 폭을 나눠 가져야 해서, 추이 카드 폭(그리드 26칸
+ * ≈ 864px)에 1분 단위 하루치 900버킷을 넣으면 한 칸이 1px 미만이 되어 **그래프가 안 보인다**
+ * (실측 2026-09-16). 선은 폭이 필요 없어 버킷이 아무리 많아도 모양이 남는다 — 자료를 묶지
+ * 않고(압축) 해상도를 그대로 둔 채 조회 구간 전체가 한 화면에 들어온다.
+ *
+ * 성길 때는 **점을 함께 찍는다** — 버킷이 몇 개뿐이면 선만으로는 값이 어느 구간의 것인지
+ * 짚어지지 않는다. 촘촘하면 점 간격이 1~2px 라 점이 선을 두껍게 만들 뿐이므로 끈다.
+ */
+const LINE_DOT_MAX_BUCKETS = 60
 
 export function TimeBarChart({ data }: { data: TimeBarData }) {
   const { buckets, unit } = data
@@ -64,17 +79,19 @@ export function TimeBarChart({ data }: { data: TimeBarData }) {
   if (buckets.length === 0) return <EmptyState title="데이터 없음" />
   const labels = compactLabels(buckets.map(b => b.label))
 
-  if (buckets.length > LINE_MIN_BUCKETS) {
-    // ── 선 모드 ───────────────────────────────────────────────────────────
-    // 점은 찍지 않는다: 이 밀도에서 점 간격은 1~2px 라 점끼리 붙어 **선이 두꺼워진 것처럼만**
-    // 보이고(값 위치를 짚어 주는 역할을 못 한다), SVG 노드가 버킷 수만큼 늘어난다.
+  {
+    // ── 선 ────────────────────────────────────────────────────────────────
+    // 버킷이 하나면 선이 될 수 없다 — 점만 찍는다. 그때 영역을 닫으면 밑변 1000px 짜리
+    //   **쐐기**가 생겨 있지도 않은 하락 추세처럼 보인다.
+    const single = buckets.length === 1
+    const dots = single || buckets.length <= LINE_DOT_MAX_BUCKETS
     const W = 1000, H = 100
-    const x = (i: number) => (i / Math.max(1, buckets.length - 1)) * W
+    const x = (i: number) => (single ? W / 2 : (i / (buckets.length - 1)) * W)
     const y = (v: number) => H - (v / max) * (H - 4) - 2
     const line = vals.map((v, i) => `${i ? 'L' : 'M'} ${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(' ')
-    const area = `${line} L ${W} ${H} L 0 ${H} Z`
+    const area = single ? '' : `${line} L ${W} ${H} L 0 ${H} Z`
     // 가로축 눈금은 **축에 직접** 둔다 — 칸 안에 넣으면 1px 칸에서 글자가 서로 겹친다.
-    const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => Math.round((buckets.length - 1) * f))
+    const ticks = axisTicks(buckets.length)
     const at = (e: React.MouseEvent) => {
       const r = wrap.current?.getBoundingClientRect()
       if (!r || r.width === 0) return
@@ -91,13 +108,22 @@ export function TimeBarChart({ data }: { data: TimeBarData }) {
              onMouseLeave={() => setHover(null)}>
           <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" width="100%" height="100%"
                role="img" aria-label={`추이 ${buckets.length}구간, 최대 ${max}${unit || ''}`}>
-            <path d={area} fill="color-mix(in srgb, var(--primary) 16%, transparent)" />
-            <path d={line} fill="none" stroke="var(--primary)" strokeWidth={1.2}
-                  vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+            {area && <path d={area} fill="color-mix(in srgb, var(--primary) 16%, transparent)" />}
+            {!single && (
+              <path d={line} fill="none" stroke="var(--primary)" strokeWidth={1.2}
+                    vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+            )}
             {hover !== null && (
               <line x1={x(hover)} x2={x(hover)} y1={0} y2={H} stroke="var(--muted-foreground)"
                     strokeWidth={1} vectorEffect="non-scaling-stroke" strokeDasharray="3 3" />
             )}
+            {/* 점 — preserveAspectRatio="none" 이라 원은 찌그러진다. r 대신 non-scaling-stroke
+                짧은 선분(linecap=round)을 찍어 가로세로 비율과 무관하게 동그랗게 남긴다. */}
+            {dots && vals.map((v, i) => (
+              <line key={i} x1={x(i)} x2={x(i)} y1={y(v)} y2={y(v)}
+                    stroke="var(--primary)" strokeWidth={hover === i ? 7 : 4.5}
+                    strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+            ))}
           </svg>
         </div>
         <div className="flex-none flex justify-between text-xs text-muted-foreground pt-1 tabular-nums">
@@ -106,128 +132,113 @@ export function TimeBarChart({ data }: { data: TimeBarData }) {
       </div>
     )
   }
-
-  // ── 막대 모드 (성길 때) ─────────────────────────────────────────────────
-  // 라벨·값은 몇 칸 걸러 하나만 — 막대는 다 보이되 글자만 솎는다(겹쳐 뭉개지는 것보다 낫다).
-  const every = Math.ceil(buckets.length / 24)
-  return (
-    <div className="flex-1 min-h-0 flex items-end py-0 px-1 gap-0.5">
-      {buckets.map((b, i) => (
-        <div className="flex-1 min-w-0 h-full flex flex-col items-center" key={i}>
-          <div className="flex-none text-xs text-muted-foreground mb-0.5">
-            {b.value > 0 && i % every === 0 ? b.value : ''}
-          </div>
-          {/* 막대 영역 — 남은 높이 전부. 막대는 그 안에서 값 비율만큼 차지한다. */}
-          <div className="flex-1 min-h-0 w-full flex items-end justify-center">
-            <div title={`${b.label}: ${b.value}${unit || ''}`}
-                 style={{ width: '100%', maxWidth: 32, height: `${(b.value / max) * 100}%`, minHeight: 2,
-                          background: 'var(--primary)', borderRadius: '2px 2px 0 0' }} />
-          </div>
-          <div className="flex-none text-xs text-muted-foreground mt-0.5">
-            {i % every === 0 ? labels[i] : ''}
-          </div>
-        </div>
-      ))}
-    </div>
-  )
 }
 
-// 계열 시계열 — 한 버킷에 **막대 하나**, 고른 계열을 색으로 **쌓아** 올린다(아래→위 = 선언 순서).
-// 쌓기는 "부분의 합"을 뜻하므로 막대 높이가 곧 고른 계열의 합계다 — VoLTE 4 위에 PTT 4 를 얹으면
-// 8 짜리 막대가 된다. 포함관계인 계열(전체 ⊃ VoLTE)을 같이 켜면 그 합이 중복이라, 그럴 때만
-// 범례 아래에 한 줄로 알린다(선택을 막지는 않는다 — 참조선으로 겹쳐 보고 싶을 수 있다).
+// 계열 시계열 — 계열마다 **선 하나**. 쌓지 않으므로 세로 위치가 곧 그 계열의 값이고,
+// 계열끼리의 높낮이 비교가 바로 읽힌다(쌓으면 아래 계열이 위 계열의 바닥을 밀어 올려
+// 눈으로는 비교가 안 된다). 대신 "고른 계열의 합계"는 모양으로 드러나지 않으므로 툴팁이 낸다.
+// 포함관계인 계열(전체 ⊃ VoLTE)을 같이 켜면 **그 툴팁 합계가 중복**이라 범례 아래에 한 줄로
+// 알린다(선택을 막지는 않는다 — 참조선으로 겹쳐 보고 싶을 수 있다).
 export function SeriesBarChart({ data }: { data: SeriesBarData }) {
   const { buckets, series, unit } = data
   // `w` = 툴팁을 가둘 폭. **렌더 중에는 ref 를 읽을 수 없으므로**(React 규약 — 그 값으로 다시 그리지
   // 않아 위치가 낡는다) 마우스 이벤트에서 재어 함께 담는다.
-  const [hover, setHover] = useState<
-    { x: number; y: number; w: number; bucket: string; key: string; total: number } | null>(null)
+  const [hover, setHover] = useState<{ x: number; y: number; w: number; i: number } | null>(null)
   const wrap = useRef<HTMLDivElement>(null)
 
   if (series.length === 0) return <EmptyState title="표시할 계열을 선택하세요" />
   if (buckets.length === 0) return <EmptyState title="데이터 없음" />
 
-  const sum = (b: typeof buckets[number]) => series.reduce((a, sp) => a + (b.values[sp.key] || 0), 0)
-  const max = Math.max(1, ...buckets.map(sum))
-  // 라벨이 촘촘하면(버킷이 많으면) 몇 칸 걸러 하나만 적는다 — 겹쳐 뭉개지는 것보다 낫다.
-  const every = Math.ceil(buckets.length / 24)
+  // 쌓지 않으므로 세로 상한은 **계열 개별 최댓값** — 합계로 잡으면 선들이 아래로 눌린다.
+  const max = Math.max(1, ...buckets.flatMap(b => series.map(sp => b.values[sp.key] || 0)))
   const labels = compactLabels(buckets.map(b => b.label))
-  // 고른 계열 중 포함관계로 겹치는 쌍이 있으면 합계가 중복된다.
+  // 버킷이 하나면 선이 될 수 없다 — 점만 찍는다(TimeBarChart 와 같은 규약).
+  const single = buckets.length === 1
+  const dots = single || buckets.length <= LINE_DOT_MAX_BUCKETS
+  const ticks = axisTicks(buckets.length)
+  // 고른 계열 중 포함관계로 겹치는 쌍이 있으면 툴팁 합계가 중복된다.
   const shownKeys = new Set(series.map(sp => sp.key))
   const overlap = series.filter(sp => (sp.includes ?? []).some(k => shownKeys.has(k)))
 
-  const move = (e: React.MouseEvent, bucket: string, key: string, total: number) => {
+  const W = 1000, H = 100
+  const x = (i: number) => (single ? W / 2 : (i / (buckets.length - 1)) * W)
+  const y = (v: number) => H - (v / max) * (H - 4) - 2
+
+  const at = (e: React.MouseEvent) => {
     const el = wrap.current
     if (!el) return
     const r = el.getBoundingClientRect()
-    setHover({ x: e.clientX - r.left, y: e.clientY - r.top, w: el.clientWidth, bucket, key, total })
+    if (r.width === 0) return
+    const i = Math.round(((e.clientX - r.left) / r.width) * (buckets.length - 1))
+    setHover({ x: e.clientX - r.left, y: e.clientY - r.top, w: el.clientWidth,
+               i: Math.max(0, Math.min(buckets.length - 1, i)) })
   }
-  const hoveredBucket = hover ? buckets.find(b => String(b.label) === hover.bucket) : undefined
+  const hb = hover ? buckets[hover.i] : undefined
+  const total = hb ? series.reduce((a, sp) => a + (hb.values[sp.key] || 0), 0) : 0
 
   return (
-    <div className="relative flex-1 min-h-0 flex flex-col" ref={wrap}
-         onMouseLeave={() => setHover(null)}>
+    <div className="relative flex-1 min-h-0 flex flex-col">
       <div className="flex-none flex gap-3.5 flex-wrap mb-2">
         {series.map(sp => (
           <span className="flex items-center gap-[5px] text-sm" key={sp.key}>
-            <span style={{ width: 10, height: 10, borderRadius: 2, background: sp.color }} />
+            <span style={{ width: 10, height: 2.5, borderRadius: 2, background: sp.color }} />
             {sp.label}
           </span>
         ))}
       </div>
       {overlap.length > 0 && (
         <div className="flex-none text-xs text-muted-foreground mb-2">
-          ※ {overlap.map(sp => sp.label).join(' · ')} 은(는) 다른 계열을 포함합니다 — 함께 쌓으면 합계가 중복됩니다.
+          ※ {overlap.map(sp => sp.label).join(' · ')} 은(는) 다른 계열을 포함합니다 — 툴팁의 합계가 중복됩니다.
         </div>
       )}
-      <div className="flex-1 min-h-0 flex items-end gap-0.5 py-0 px-1">
-        {buckets.map((b, i) => {
-          const total = sum(b)
-          const on = hover?.bucket === String(b.label)
-          return (
-            <div className="flex-1 min-w-0 flex flex-col items-center h-full" key={i}>
-              <div className="flex-1 w-full min-h-0 flex flex-col-reverse items-center justify-start">
-                {/* column-reverse — 선언 순서 첫 계열이 바닥에 깔린다 */}
-                {series.map(sp => {
-                  const v = b.values[sp.key] || 0
-                  if (v <= 0) return null
-                  return (
-                    <div key={sp.key}
-                         onMouseMove={e => move(e, String(b.label), sp.key, total)}
-                         style={{ width: '100%', maxWidth: 26, height: `${(v / max) * 100}%`, minHeight: 2,
-                                  background: sp.color,
-                                  opacity: !hover || hover.key === sp.key ? 1 : 0.45,
-                                  cursor: 'default' }} />
-                  )
-                })}
-                {total === 0 && (
-                  <div className="w-full max-w-[26px] h-[2px] bg-border" onMouseMove={e => move(e, String(b.label), '', 0)}/>
-                )}
-              </div>
-              <div style={{ flex: 'none', fontSize: 10, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden',
-                            color: on ? 'var(--foreground)' : 'var(--muted-foreground)',
-                            fontWeight: on ? 600 : 400 }}>
-                {i % every === 0 || on ? labels[i] : ''}
-              </div>
-            </div>
-          )
-        })}
+      <div className="flex-none h-4 text-xs text-muted-foreground text-right pr-1 tabular-nums">
+        {hb ? String(labels[hover!.i]) : `최대 ${max}${unit || ''}`}
       </div>
-      {hover && hoveredBucket && (
+      <div ref={wrap} className="flex-1 min-h-0 relative" onMouseMove={at}
+           onMouseLeave={() => setHover(null)}>
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" width="100%" height="100%"
+             role="img" aria-label={`시계열 ${series.length}계열 ${buckets.length}구간, 최대 ${max}${unit || ''}`}>
+          {hover && (
+            <line x1={x(hover.i)} x2={x(hover.i)} y1={0} y2={H} stroke="var(--muted-foreground)"
+                  strokeWidth={1} vectorEffect="non-scaling-stroke" strokeDasharray="3 3" />
+          )}
+          {series.map(sp => {
+            const d = buckets.map((b, i) =>
+              `${i ? 'L' : 'M'} ${x(i).toFixed(1)} ${y(b.values[sp.key] || 0).toFixed(1)}`).join(' ')
+            return (
+              <g key={sp.key}>
+                {!single && (
+                  <path d={d} fill="none" stroke={sp.color} strokeWidth={1.4}
+                        vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+                )}
+                {/* 점 — preserveAspectRatio="none" 이라 원은 찌그러진다. 짧은 선분 + round cap. */}
+                {dots && buckets.map((b, i) => (
+                  <line key={i} x1={x(i)} x2={x(i)} y1={y(b.values[sp.key] || 0)} y2={y(b.values[sp.key] || 0)}
+                        stroke={sp.color} strokeWidth={hover?.i === i ? 6.5 : 4}
+                        strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+                ))}
+              </g>
+            )
+          })}
+        </svg>
+      </div>
+      <div className="flex-none flex justify-between text-xs text-muted-foreground pt-1 tabular-nums">
+        {ticks.map(i => <span key={i}>{labels[i]}</span>)}
+      </div>
+      {hover && hb && (
         <div style={{
           position: 'absolute', left: Math.min(hover.x + 12, hover.w - 190),
           top: Math.max(hover.y - 12, 0), zIndex: 30, pointerEvents: 'none', width: 178,
           background: 'var(--card)', border: '1px solid var(--border)',
           borderRadius: 'var(--radius)', boxShadow: 'var(--cims-elevation-lg)', padding: '8px 10px', fontSize: 12,
         }}>
-          <div className="text-muted-foreground mb-[5px]">{hover.bucket}</div>
+          <div className="text-muted-foreground mb-[5px]">{hb.label}</div>
           {series.map(sp => {
-            const v = hoveredBucket.values[sp.key] || 0
-            const cur = sp.key === hover.key
+            const v = hb.values[sp.key] || 0
             return (
               <div key={sp.key} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2,
-                                         fontWeight: cur ? 700 : 400, opacity: cur || v > 0 ? 1 : 0.5 }}>
-                <span style={{ width: 8, height: 8, borderRadius: 2, background: sp.color, flex: 'none' }} />
+                                         opacity: v > 0 ? 1 : 0.5 }}>
+                <span style={{ width: 8, height: 2.5, borderRadius: 2, background: sp.color, flex: 'none' }} />
                 <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
                   {sp.label}
                 </span>
@@ -237,7 +248,7 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
           })}
           {series.length > 1 && (
             <div className="flex justify-between mt-1.5 pt-[5px] border-t border-border text-muted-foreground">
-              <span>합계</span><span className="font-bold text-foreground">{hover.total}{unit || ''}</span>
+              <span>합계</span><span className="font-bold text-foreground">{total}{unit || ''}</span>
             </div>
           )}
         </div>

@@ -235,7 +235,7 @@ function SeriesSelectBody({ config }: { config?: Record<string, unknown> }) {
  return (
     <div className="flex gap-2.5 flex-wrap">
       {/* '전체' 타일 — 계열이 아니라 **전부 선택** 버튼이다. 계열은 서로 겹치지 않으므로
-          전부 켠 막대가 곧 전체이고, 그래서 전체를 따로 쌓을 계열로 두지 않는다. */}
+          전부 켠 선들의 합이 곧 전체이고, 그래서 전체를 따로 계열로 두지 않는다. */}
       <button type="button" onClick={() => setSel('')} title={`${allLabel} — 모든 계열 표시`}
  style={{
  flex: '1 1 130px', textAlign: 'left', cursor: 'pointer', font: 'inherit',

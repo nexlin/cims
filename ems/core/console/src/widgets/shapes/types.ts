@@ -56,9 +56,10 @@ export interface MatrixData {
   /** 값 없는 구간을 접은 줄에 적을 말 (예: "호가 없는 시간"). 없으면 "자료가 없는 시간". */
   blankLabel?: string
 }
-// 계열 시계열 — series 는 **선언 순서**가 색 순서(--chart-1..5)이자 쌓는 순서(아래→위)다.
-// includes = 이 계열이 **품고 있는** 다른 계열들(예: '전체'는 volte/ptt 를 포함). 쌓기는 "부분의
-// 합"이라 포함관계인 둘을 같이 켜면 막대가 중복으로 커진다 — 렌더러가 그때만 알려준다.
+// 계열 시계열 — series 는 **선언 순서**가 색 순서(--chart-1..5)다. 계열마다 선 하나를 그리며
+// 쌓지 않는다(세로 위치 = 그 계열의 값).
+// includes = 이 계열이 **품고 있는** 다른 계열들(예: '전체'는 volte/ptt 를 포함). 선은 겹쳐 그려도
+// 서로를 밀지 않지만 **툴팁의 합계는 중복**된다 — 렌더러가 그때만 알려준다.
 export interface SeriesSpec { key: string; label: string; color: string; includes?: string[] }
 export interface SeriesBarData {
   unit?: string

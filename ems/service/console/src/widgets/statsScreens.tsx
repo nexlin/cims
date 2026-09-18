@@ -37,7 +37,7 @@ const svcLayout = (source: string, items: number[], trend: string, dist: string)
     { widgetId: 'shape.distribution', x: 26, y: 11, w: 22, h: 23, config: { source, title: dist } },
     // 구간별 상세 표 — 소스의 `map.matrix`(행=버킷, 열=지표, 합계 행은 `totalPath`).
     //
-    // 지표 타일은 **구간 전체의 한 값**이라 "언제 나빠졌나" 를 답하지 못한다. 추이 막대는
+    // 지표 타일은 **구간 전체의 한 값**이라 "언제 나빠졌나" 를 답하지 못한다. 추이 선은
     // 한 지표만 보여주고, 분포는 시간축이 없다. 성공률이 떨어진 구간에서 시도·성립·소통·
     // 정상종료가 **함께** 어떻게 움직였는지는 이 표에서만 읽힌다 — 비율이 떨어진 것이
     // 분모가 늘어서인지 분자가 줄어서인지가 갈린다.
@@ -56,7 +56,7 @@ const svcLayout = (source: string, items: number[], trend: string, dist: string)
 //
 // 서비스축(VoLTE/PTT)은 메뉴가 아니라 **계열**이다. `core.series-select` 가 파라미터 `series` 를
 // 소유하고, 시계열과 메서드 비중이 함께 그 선택을 따른다. '전체 메시지' 타일은 계열이 아니라 전부
-// 선택 버튼이다(계열이 겹치지 않으므로 전부 켠 막대가 곧 전체다).
+// 선택 버튼이다(계열이 겹치지 않으므로 전부 켠 선들의 합이 곧 전체다).
 const IFACE_SOURCE = 'cims.msg.sip'
 const ifaceLayout: WidgetPlacement[] = [
   { widgetId: 'core.page-filter', x: 0, y: 0, w: 48, h: 4 },
