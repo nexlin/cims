@@ -164,6 +164,40 @@ class Strictness(unittest.TestCase):
         self.assertEqual(errs, [])
         self.assertEqual(m.flow[-1].cause, 16)
 
+    def test_invite_dial_form(self):
+        # invite.dial — 착신 역할의 E.164 를 국내형/국제 접두 꼴로 다이얼(대상 다이얼 플랜 번역 시험). invite 에만, 역할 대상에만
+        doc = self._scn()
+        doc['flow'][1] = {'step': 'invite', 'from': 'a', 'to': 'b', 'dial': 'national'}
+        m, errs = validate('scenario', doc)
+        self.assertEqual(errs, [])
+        self.assertEqual(m.flow[1].dial, 'national')
+        doc = self._scn()
+        doc['flow'][1] = {'step': 'invite', 'from': 'a', 'to': '+82210001000', 'dial': 'national'}
+        _, errs = validate('scenario', doc)
+        self.assertTrue(any('dial' in e for e in errs), errs)
+        doc = self._scn()
+        doc['flow'].append({'step': 'bye', 'from': 'a', 'dial': 'national'})
+        _, errs = validate('scenario', doc)
+        self.assertTrue(any('dial' in e for e in errs), errs)
+        doc = self._scn()
+        doc['flow'][1] = {'step': 'invite', 'from': 'a', 'to': 'b', 'dial': 'local'}
+        _, errs = validate('scenario', doc)
+        self.assertTrue(errs)
+
+    def test_topology_dial_plan(self):
+        # SIP 노드 sip.dial_plan → 워커 계약 target_csp.dial_plan · 피어 풀 dial_plan 은 시드 Route 의 인바운드 플랜(test_tester_target)
+        from services.tester_models import Topology
+        with open(os.path.join(_TESTER, 'scenarios', 'topology.sample.yaml'), encoding='utf-8') as f:
+            t = Topology.model_validate(yaml.safe_load(f))
+        tc = t.target_csp_for('volte_ue_a')
+        self.assertIsNotNone(tc.dial_plan)
+        self.assertEqual((tc.dial_plan.country_code, tc.dial_plan.national_prefix, tc.dial_plan.international_prefix), ('82', '0', '00'))
+        self.assertEqual(t.pools['pbx_hq'].dial_plan.country_code, '82')
+        bad = yaml.safe_load(open(os.path.join(_TESTER, 'scenarios', 'topology.sample.yaml'), encoding='utf-8'))
+        bad['target']['nodes']['csp']['sip']['dial_plan'] = {'country_code': '+82'}
+        with self.assertRaises(Exception):
+            Topology.model_validate(bad)
+
     def test_transfer_join_steps(self):
         # pickup 은 from + payload(피처코드|${var}) · replaces/join 은 from·to + 앞선 subscribe(dialog) · subscribe payload 는 이벤트 토큰 ·
         # publish payload 는 affiliate|deaffiliate, group 은 publish 에도 · 그룹 세션에 1:1 전달 단계 금지

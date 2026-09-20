@@ -19,6 +19,7 @@
 #include "CmpClient.h"
 #include "CspAclPolicyEngine.h"
 #include "CspAddressing.h"
+#include "CspDialPlan.h"
 #include "CspLocalNodeMap.h"
 #include "CspPendingRouteMap.h"
 #include "CspPttGroup.h"
@@ -226,6 +227,72 @@ static bool TrunkRegisteredSource( const RouteConfig &rc, const CSipMessage *pcl
                                                   SipGetTransport( pclsMessage->m_eTransport ) );
 }
 
+// ──────────────────────────────────────────────────────────────
+//  착신 번호 번역(다이얼 플랜) — CspDialPlan, sip_service_model.md §2-10
+//  TS 24.229 §5.4.3.2: 국제형이 아닌 착신(국내형·phone-context)은 홈 망이 E.164 로 번역하고, 못 하면 484.
+// ──────────────────────────────────────────────────────────────
+
+/** 요청의 인바운드 Route(피어 식별) — 수신 listener id → LocalNode 이름 → InboundRouteOf. */
+static RouteConfig InboundRouteFor( const CSipMessage *pclsMessage ) {
+    std::string strLn;
+    if ( pclsMessage && pclsMessage->m_iListenerId > 0 ) {
+        LocalNodeInfo ln = gclsLocalNodeMap.GetByIntId( pclsMessage->m_iListenerId );
+        if ( ln.IsValid() ) strLn = ln.name;
+    }
+    return InboundRouteOf( pclsMessage, strLn );
+}
+
+/** 요청에 적용할 다이얼 플랜 — ① 인바운드 Route(피어가 보낸 요청은 그 Route 의 플랜) ② `phone-context` 가 접속서비스
+ *  도메인이면 그 서비스 ③ 발신 가입자의 접속서비스(service_ref → kind 대표 폴백). strSource 는 로그용 출처. */
+static DialPlan DialPlanFor( const RouteConfig &clsInRoute, const std::string &strFrom,
+                             const std::string &strPhoneContext, std::string &strSource ) {
+    if ( clsInRoute.IsValid() ) {
+        strSource = "route:" + clsInRoute.name;
+        return clsInRoute.dial_plan;
+    }
+    if ( !strPhoneContext.empty() && strPhoneContext[0] != '+' ) {
+        ServiceInfo svc = gclsServiceMap.GetByDomain( strPhoneContext );
+        if ( svc.id > 0 ) {
+            strSource = "phone-context:" + svc.name;
+            return svc.dial_plan;
+        }
+    }
+    ServiceInfo svc = gclsServiceMap.GetForUser( strFrom, "volte" );
+    strSource = ( svc.id > 0 ) ? "service:" + svc.name : "none";
+    return svc.dial_plan;
+}
+
+/** 착신 해석 + 번역. 착신 = **Request-URI**(sip user / tel host — 라우팅 키, RFC 3261 §16.6), 번호가 없으면 To user
+ * 폴백. 그룹 id(메모리·DB 단건)는 번호가 아니므로 그대로. TRANSLATED 면 Request-URI 를 재작성한다 — To 는 손대지 않는다
+ *  (§8.2.6.2 응답의 To 는 요청 그대로). 반환 뒤 strCallee 가 이후 조회·라우팅·B-leg 가 쓸 착신이다. 멱등(재호출 무해).
+ */
+static EDialPlanResult ResolveCallee( CSipMessage *pclsMessage, const RouteConfig &clsInRoute,
+                                      const std::string &strFrom, std::string &strCallee, std::string &strSource ) {
+    strCallee.clear();
+    strSource.clear();
+    std::string strNum, strCtx;
+    const bool bFromReqUri = CspDialPlan::ExtractNumber( pclsMessage->m_clsReqUri, strNum, strCtx );
+    if ( !bFromReqUri && !CspDialPlan::ExtractNumber( pclsMessage->m_clsTo.m_clsUri, strNum, strCtx ) )
+        return DIAL_PLAN_UNCHANGED;
+    if ( gclsGroupMap.Contains( strNum.c_str() ) ) {
+        strCallee = strNum;
+        strSource = "group";
+        return DIAL_PLAN_UNCHANGED;
+    }
+    DialPlan clsPlan = DialPlanFor( clsInRoute, strFrom, strCtx, strSource );
+    std::string strOut;
+    EDialPlanResult eRes = CspDialPlan::Normalize( strNum, strCtx, clsPlan, strOut );
+    if ( eRes == DIAL_PLAN_INCOMPLETE && gclsDbManager.IsConnected() && gclsGroupMap.LoadOneFromDb( strNum.c_str() ) ) {
+        // 숫자열 그룹 id 가 아직 메모리에 없었다 — 단건 DB 조회(EventIncomingCall 의 lazy-load 와 같은 안전망)
+        strCallee = strNum;
+        strSource = "group";
+        return DIAL_PLAN_UNCHANGED;
+    }
+    strCallee = ( eRes == DIAL_PLAN_TRANSLATED ) ? strOut : strNum;
+    if ( eRes == DIAL_PLAN_TRANSLATED && bFromReqUri ) CspDialPlan::RewriteNumber( pclsMessage->m_clsReqUri, strOut );
+    return eRes;
+}
+
 bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
     std::string strCallId;
     pclsMessage->GetCallId( strCallId );
@@ -306,6 +373,29 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
         std::string strTo = pclsMessage->m_clsTo.m_clsUri.m_strUser;
         std::string strFrom = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
 
+        // 착신 번호 번역(다이얼 플랜, §2-10) — 초기 INVITE 만(To tag 없음). 착신은 Request-URI 에서 읽어 +E.164 로
+        // 번역하고
+        //   Request-URI 를 재작성한다. 이후 그룹 조회·라우팅 규칙(req_uri_user)·TAS 스크린·EventIncomingCall 이 번역된
+        //   번호를 본다. 번역 불가(접두 없는 숫자열)는 TS 24.229 §5.4.3.2 대로 484 Address Incomplete.
+        if ( !pclsMessage->m_clsTo.SelectParam( SIP_TAG ) ) {
+            std::string strCallee, strPlanSource;
+            EDialPlanResult eDial = ResolveCallee( pclsMessage, clsInRoute, strFrom, strCallee, strPlanSource );
+            if ( eDial == DIAL_PLAN_INCOMPLETE ) {
+                CLog::Print( LOG_INFO, "DialPlan: INVITE from(%s) callee(%s) 번역 불가(plan=%s) → 484 [callId=%s]",
+                             strFrom.c_str(), strCallee.c_str(), strPlanSource.c_str(), strCallId.c_str() );
+                // 시도 장부 — 다이얼로그 생성 전 거절도 시도다(TAS ScreenInvite 의 603 과 같은 이유). 응답은 484.
+                if ( gclsCallDir.IsEnabled() )
+                    gclsCallDir.VoipCallRejected( strCallId, strFrom, strCallee, SIP_ADDRESS_INCOMPLETE );
+                SendResponse( pclsMessage, SIP_ADDRESS_INCOMPLETE );
+                return true;
+            }
+            if ( eDial == DIAL_PLAN_TRANSLATED )
+                CLog::Print( LOG_INFO, "DialPlan: INVITE from(%s) callee %s → %s (plan=%s) [callId=%s]",
+                             strFrom.c_str(), strTo.c_str(), strCallee.c_str(), strPlanSource.c_str(),
+                             strCallId.c_str() );
+            if ( !strCallee.empty() ) strTo = strCallee;  // Request-URI 기준 착신(번역 뒤) — To user 는 표시용
+        }
+
         // MCPTT 진행 중 호의 condition 변경(re-INVITE 업그레이드/취소, TS 24.379) 엿보기.
         //   초기 INVITE 는 아직 세션맵 미등록 → 미발동(초기 긴급은 EventIncomingCall 경로가 처리).
         //   재-INVITE(in-dialog, 동일 Call-ID)만 활성 그룹콜로 매칭되어 floor tier 갱신. 흐름은 그대로 진행.
@@ -381,7 +471,8 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
             mctx.to_uri_host = pclsMessage->m_clsTo.m_clsUri.m_strHost;
             mctx.to_uri_user = pclsMessage->m_clsTo.m_clsUri.m_strUser;
             mctx.req_uri_host = pclsMessage->m_clsReqUri.m_strHost;
-            mctx.req_uri_user = pclsMessage->m_clsReqUri.m_strUser;
+            // 라우팅 규칙의 착신 번호 = 번역된 착신(tel: URI 는 user 가 비어 있어 종전엔 prefix 규칙에 걸리지 않았다)
+            mctx.req_uri_user = strTo.empty() ? pclsMessage->m_clsReqUri.m_strUser : strTo;
             mctx.src_ip = pclsMessage->m_strClientIp;
             mctx.user_agent = pclsMessage->m_strUserAgent;
             mctx.method = pclsMessage->m_strSipMethod;
@@ -670,20 +761,23 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
          m_clsTas.OnIncomingCall( pszCallId, pszFrom, pszTo, pclsRtp, pclsMessage ) == E_ROUTE_HANDLED )
         return;
 
-    // tel: URI 착신 정규화 — HM-TRCP 등 MMTEL 단말은 착신을 tel:+82..(userinfo 없음)로
-    //   보낸다. psip 는 '@' 부재로 번호를 host 에 파싱 → To user 가 비어 pszTo 가 빈 문자열.
-    //   이 경우 To/Request-URI 가 tel: 이면 host(전화번호)를 착신으로 채택한다. (sip: 는 무변)
-    std::string strTelCallee;
-    if ( ( pszTo == NULL || pszTo[0] == '\0' ) && pclsMessage ) {
-        if ( strcasecmp( pclsMessage->m_clsTo.m_clsUri.m_strProtocol.c_str(), "tel" ) == 0 &&
-             !pclsMessage->m_clsTo.m_clsUri.m_strHost.empty() )
-            strTelCallee = pclsMessage->m_clsTo.m_clsUri.m_strHost;
-        else if ( strcasecmp( pclsMessage->m_clsReqUri.m_strProtocol.c_str(), "tel" ) == 0 &&
-                  !pclsMessage->m_clsReqUri.m_strHost.empty() )
-            strTelCallee = pclsMessage->m_clsReqUri.m_strHost;
-        if ( !strTelCallee.empty() ) {
-            CLog::Print( LOG_INFO, "EventIncomingCall: tel: URI 착신 정규화 → %s", strTelCallee.c_str() );
-            pszTo = strTelCallee.c_str();  // 이후 라우팅(가입자/그룹 조회)이 sip: 와 동일하게 동작
+    // 착신 해석 — Request-URI(sip user / tel host)가 라우팅 키(RFC 3261 §16.6)다. RecvRequest 가 다이얼 플랜(§2-10)으로
+    //   +E.164 로 번역해 두었고, 여기서 같은 해석을 한 번 더 거친다(멱등 — tel: URI·To 폴백 경로까지 한 함수로).
+    //   psip 는 To user 를 pszTo 로 넘기는데 tel:+82..(userinfo 없음) 단말은 그것이 비어 있었다(HM-TRCP 등 MMTEL).
+    std::string strCalleeResolved;
+    if ( pclsMessage ) {
+        std::string strPlanSource;
+        EDialPlanResult eDial = ResolveCallee( pclsMessage, InboundRouteFor( pclsMessage ), pszFrom ? pszFrom : "",
+                                               strCalleeResolved, strPlanSource );
+        if ( eDial == DIAL_PLAN_INCOMPLETE ) {
+            CLog::Print( LOG_INFO, "EventIncomingCall: callee(%s) 번역 불가(plan=%s) → 484", strCalleeResolved.c_str(),
+                         strPlanSource.c_str() );
+            return StopCall( pszCallId, SIP_ADDRESS_INCOMPLETE );
+        }
+        if ( !strCalleeResolved.empty() && strcmp( strCalleeResolved.c_str(), pszTo ? pszTo : "" ) != 0 ) {
+            CLog::Print( LOG_INFO, "EventIncomingCall: 착신 To(%s) → Request-URI %s (%s)", pszTo ? pszTo : "",
+                         strCalleeResolved.c_str(), CspDialPlan::ResultName( eDial ) );
+            pszTo = strCalleeResolved.c_str();
         }
     }
 
@@ -1788,10 +1882,44 @@ bool CModuleDispatcher::EventTransfer( const char *pszCallId, const char *pszRef
 
 bool CModuleDispatcher::EventBlindTransfer( const char *pszCallId, const char *pszReferToId ) {
     // 호 전달(blind) → TAS 모듈 (volte_supplementary_services.md §6.1)
-    return m_clsTas.IsEnabled() && m_clsTas.OnBlindTransfer( pszCallId, pszReferToId );
+    //   Refer-To 의 전달 대상도 다이얼 플랜(§2-10)을 거친다 — 전달자(REFER 지시자 leg 의 가입자 쪽 신원)의 접속서비스
+    //   플랜
+    std::string strReferTo = pszReferToId ? pszReferToId : "";
+    {
+        std::string strA, strB, strOut;
+        gclsUserAgent.GetFromId( pszCallId, strA );
+        gclsUserAgent.GetToId( pszCallId, strB );
+        CspUser clsTmp;
+        const std::string &strReferrer = gclsCspUserMap.Select( strA.c_str(), clsTmp ) ? strA : strB;
+        ServiceInfo svc = gclsServiceMap.GetForUser( strReferrer, "volte" );
+        if ( CspDialPlan::Normalize( strReferTo, "", svc.dial_plan, strOut ) == DIAL_PLAN_TRANSLATED ) {
+            CLog::Print( LOG_INFO, "DialPlan: REFER referrer(%s) Refer-To %s → %s (service=%s)", strReferrer.c_str(),
+                         strReferTo.c_str(), strOut.c_str(), svc.name.c_str() );
+            strReferTo = strOut;
+        }
+    }
+    return m_clsTas.IsEnabled() && m_clsTas.OnBlindTransfer( pszCallId, strReferTo.c_str() );
 }
 
 int CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage ) {
+    // 착신 번역(다이얼 플랜, §2-10) — MESSAGE 도 Request-URI 기준 착신. 국내형 → +E.164, 번역 불가 → 484
+    std::string strMsgCallee;
+    if ( pclsMessage ) {
+        std::string strPlanSource;
+        EDialPlanResult eDial = ResolveCallee( pclsMessage, InboundRouteFor( pclsMessage ), pszFrom ? pszFrom : "",
+                                               strMsgCallee, strPlanSource );
+        if ( eDial == DIAL_PLAN_INCOMPLETE ) {
+            CLog::Print( LOG_INFO, "DialPlan: MESSAGE from(%s) callee(%s) 번역 불가(plan=%s) → 484",
+                         pszFrom ? pszFrom : "", strMsgCallee.c_str(), strPlanSource.c_str() );
+            return SIP_ADDRESS_INCOMPLETE;
+        }
+        if ( !strMsgCallee.empty() ) {
+            if ( eDial == DIAL_PLAN_TRANSLATED )
+                CLog::Print( LOG_INFO, "DialPlan: MESSAGE from(%s) callee %s → %s (plan=%s)", pszFrom ? pszFrom : "",
+                             pszTo ? pszTo : "", strMsgCallee.c_str(), strPlanSource.c_str() );
+            pszTo = strMsgCallee.c_str();
+        }
+    }
     // MCPTT emergency alert (TS 24.379): mcptt-info alert-ind 판별 → SMS 와 분기.
     //   Phase 3a 탐지/로깅/ack + Phase 3b 그룹 멤버 fan-out(같은 alert MESSAGE 전파, 취소도 동일).
     if ( pclsMessage && pclsMessage->m_strBody.find( "alert-ind" ) != std::string::npos ) {

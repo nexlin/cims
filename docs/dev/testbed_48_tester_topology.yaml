@@ -1,0 +1,178 @@
+# .48 테스트베드(121.161.164.48, 관리평면 4419) 검증용 계측기 토폴로지 — test_instrument.md §4 모델.
+# 등록은 콘솔 [시험 > 토폴로지] YAML 드로어에 붙이거나 `POST /api/v1/tester/topologies {doc}` 로 한다.
+# 비밀(트렁크 H(A1)·DB 자격·SSH 키)은 환경변수 이름만 적는다 — 배포 컨트롤러는 agent 의 환경을 물려받으므로 agent#13 기동 환경에 둔다.
+name: tb48
+hosts:
+  h48: { name: media01, ip: 121.161.164.48 }        # 대상 CSP/CMP/CMDP/CSC/OAM + 워커 동거(shared) — 부하 시험 CPU 지표는 워커 몫이 섞인다
+  h45: { name: db45, ip: 121.161.164.45 }           # MariaDB(가입자 SoT). 같은 호스트에 다른 CSP/CMP 스택이 있으므로 워커를 두지 않는다
+  # ssh: { user: cims, key_env: TESTER_SSH_KEY } 를 h48 에 주면 프로세스별 CPU/RSS·로그 ERROR 증분(log_errors)을 관측한다 — 키 배치 뒤 켠다
+workers:
+  - { name: w1, host: h48, port: 7100, cpus: 4 }    # dep36 cims-tester-worker 0.1.12 — health cpus 4(#1 의 8 은 과대)
+media:
+  samples:
+    ringback: { pcmu: ringback_kr.pcmu, pcma: ringback_kr.pcma, amr-wb: synthetic }
+    voice:    { amr-wb: sample_voice.amrwb }
+    tone_1k:  { pcmu: tone_1k.pcmu, pcma: tone_1k.pcma }
+target:
+  name: tb48
+  kind: cims
+  nodes:
+    csp:
+      role: sip
+      fn: CSP
+      host: h48
+      procs: [csp]
+      logs: [/home/cims/work/cims/build/dist/mgmt-server/csp/current/csp/log/csp_*.log]
+      sip:
+        domains: [volte.cims.example.kr, ptt.cims.example.kr]
+        dial_plan: { country_code: "82", national_prefix: "0", international_prefix: "00" }   # = dep34 access_services.country_code — VOLTE-CALL-NATIONAL-DIAL 이 0… 으로 다이얼
+        listeners:                                   # dep34 local_nodes 와 1:1 (이름을 적어 시드가 기존 레코드를 쓰게 한다)
+          udp:     { edge: access,  port: 15060, protocol: udp, local_node: access-udp }
+          tcp:     { edge: access,  port: 15060, protocol: tcp, local_node: access-tcp }
+          tls:     { edge: access,  port: 15061, protocol: tls, local_node: access-tls }
+          peering: { edge: peering, port: 15070, protocol: udp, local_node: cims-tester-peering }   # 피어 풀 다음 홉 — run 시드가 열고 복원이 닫는다
+    cmp:
+      role: media
+      fn: CMP
+      host: h48
+      procs: [cmp]
+      media: { rtp_range: [50000, 50039], control: 9001 }   # dep32 cmp.json RtpStartPort 50000 · RtpPoolSize 20(세션 20 상한 — 동시 20 넘는 부하는 대상 설정 뒤)
+    csc:
+      role: subscriber
+      fn: CSC
+      host: h48
+      procs: [csc]
+      api: { port: 4430, tls: true }                 # McpttServer.Port — IdMS 토큰·GMS/CMS·MCData FD(POST/GET /mcdata/fd)
+    oam:
+      role: oam
+      fn: OAM
+      host: h48
+      procs: [oam]
+      oam: { port: 4419, tls: true, token_env: TESTER_OAM_TOKEN, csp_deployment_id: 34, observe: [oam_stats, oam_alarms, agent_heartbeat] }
+      # 동거 형태 — TESTER_OAM_TOKEN 이 없으면 요청자(콘솔/CLI 로그인) 토큰으로 시드·복원·관측한다
+    db:
+      role: db
+      fn: MariaDB
+      host: h45
+      db: { port: 3306, name: cims, user_env: TESTER_DB_USER, password_env: TESTER_DB_PASS }
+      # source.db 풀을 쓸 때만 필요. creds 파일 원천(creds-from-db --csp-json)만 쓰면 환경변수 없이 된다
+pools:
+  # ── 접속 단말(access) — DB 에 이미 있는 가입자 ────────────────────────────────
+  volte_ue:                                          # VoLTE +821300000001~040 (UDP, TEAM01/02). creds-from-db --table volte_subscriptions --count 40
+    kind: ue
+    worker: w1
+    access: csp
+    source: { creds: creds/volte.jsonl }
+    transport: udp
+    srtp: 'off'
+  volte_ue_tls:                                      # 관제 VoLTE 회선 +821310001001~003 (sip_transport=TLS 고착 — UDP 로는 403). --transport TLS
+    kind: ue
+    worker: w1
+    access: csp
+    listener: tls
+    source: { creds: creds/volte_tls.jsonl }
+    srtp: 'off'
+  voip_ue:                                           # 관제 VoIP 회선 +82210001001~003 (kind=voip, TLS, pickup_group dg-dispatch01, 대표번호 +82210001000)
+    kind: ue                                         # 전제: dep34 access_services 에 voip 레코드(.45 dep2 사본) — 없으면 REGISTER 403
+    worker: w1
+    access: csp
+    listener: tls
+    service: voip
+    source: { creds: creds/voip.jsonl }
+    srtp: 'off'
+  ptt_ue:                                            # MCPTT g001 멤버 8(+82500000001~006·011·012, 로그인 test0xx) — creds-from-db --table ptt_subscriptions --ptt-group g001
+    kind: ue                                         # FD(fd_send/fd_recv)는 login/loginPw 가 실린 creds 가 필요(현 ptt.jsonl 5줄은 없음 → 재생성)
+    worker: w1
+    access: csp
+    service: ptt
+    source: { creds: creds/ptt.jsonl }
+    transport: udp
+    msrp: true                                       # 대용량 SDS 를 MSRP 로 받는 단말(cmdp 경로) — 끄면 FILEURL 폴백
+    subscriber: csc
+  # real_ue:                                         # 실단말 표본(cimsue-cli 동봉, RealUe.MaxProcesses 8) — 가상 풀과 겹치지 않는 신원 구간이 필요(예: +82500000013~)
+  #   kind: real-ue
+  #   worker: w1
+  #   access: csp
+  #   source: { creds: creds/real.jsonl }
+  #   transport: tls
+  #   srtp: 'off'
+
+  # ── IP-PBX 연동 02-1000-1010 ~ 02-1000-1019 (10) ─────────────────────────────
+  # 번호는 E.164 국제형(+8221000101x)으로 둔다 — SIPconnect 2.0 은 Request-URI/To/From 을 RFC 3966 global number(+E.164)로 요구하고,
+  # 가입자 번호(+821300…)와 같은 번호계획에 놓여야 CSP `req_uri_user prefix` 규칙(= "+8221000101")이 가입자 조회와 어긋나지 않는다.
+  # 국내형(0210001010)으로 두면 시드 규칙도 "021000101" 이 되어 UE 가 그대로 다이얼하면 동작은 하지만, 같은 블록의 VoIP 가입자(+8221000100x)와 표기가 갈린다.
+  pbx_hq:                                            # 고정 IP 피어링(등록 없음) — TRUNK-PBX-OUTBOUND/INBOUND/HOLD-RESUME/TRANSFER/DTMF/TRANSCODE
+    kind: peer
+    worker: w1
+    peering: csp
+    profile: pbx
+    bind: { port: 5090, protocol: udp }
+    domain: pbx.hq.test
+    identities: { did_range: ["+82210001010", "+82210001014"], ext_len: 4 }   # 02-1000-1010~1014 (고정 IP 몫)
+    dial_plan: { country_code: "82" }             # 시드 Route 인바운드 플랜 — PBX 가 국내형으로 보낸 착신을 CSP 가 번역(TRUNK-PBX-INBOUND-NATIONAL)
+    codecs: [PCMA, PCMU]                             # G.711 만 오퍼 → 시드 remote_node.transcode_codecs=[PCMA,PCMU] → CSP 코덱 삽입·CMP AMR-WB↔G.711 변환
+  pbx_reg:                                           # 등록형 트렁크(SIPconnect 2.0 §8) — TRUNK-PBX-REGISTER 전용(운영자본 시나리오 pbx: {pool: pbx_reg})
+    kind: peer                                       # 등록형 Route 는 바인딩 없으면 dead 라 pbx_hq 와 한 풀에 못 둔다. 시드 규칙이 번호 대역(in_range)이라 10개 블록을 1010~1014 / 1015~1019 로 나눠도 겹치지 않는다
+    worker: w1
+    peering: csp
+    profile: pbx
+    bind: { port: 5091, protocol: udp }
+    domain: pbx.reg.test
+    register: { user: pbx-hq, ha1_env: PBX_HA1, expires: 3600 }   # realm = volte.cims.example.kr(접속점 기본 도메인) → H(A1)=MD5("pbx-hq:volte.cims.example.kr:<pw>")
+    identities: { did_range: ["+82210001015", "+82210001019"], ext_len: 4 }   # 02-1000-1015~1019 (등록형 몫) — 주신 10개 안에서 나눔
+    codecs: [PCMA, PCMU]
+
+  # ── MGCF 연동 02-2000-1010 ~ 02-2000-1019 (10) ────────────────────────────────
+  mgcf_pstn:                                         # TS 29.163 Mg — E.164 만, 183+ringback early media·100rel, Reason Q.850. 코덱 = 프로파일 기본(AMR-WB,AMR,PCMU,PCMA)
+    kind: peer                                       # TRUNK-MGCF-OUTBOUND/INBOUND/REJECT-Q850/EARLY-MEDIA
+    worker: w1
+    peering: csp
+    profile: mgcf
+    bind: { port: 5095, protocol: udp }
+    domain: mgcf.pstn.test
+    identities: { e164_range: ["+82220001010", "+82220001019"] }
+
+  # ── IBCF 연동 010-1000-1000 ~ 010-1000-1009 (10) ──────────────────────────────
+  # ibcf 프로파일은 UE 가 user@피어도메인 을 다이얼한다(Request-URI host 규칙) — 번호 범위는 신원(From/PAI)·착신 범위 판정에 쓰이고
+  # 라우팅 키는 도메인이다. 같은 RouteSet(rs-kt) 의 형제 풀(dead·503)은 같은 도메인·같은 범위를 공유해도 된다(역할로 선언한 풀만 시드·기동).
+  peer_kt:                                           # 타 IMS 코어(II-NNI) — TRUNK-IBCF-INBOUND/OUTBOUND, failover 의 '살아 있는' 피어
+    kind: peer
+    worker: w1
+    peering: csp
+    profile: ibcf
+    bind: { port: 5080, protocol: udp }
+    domain: ims.kt.test
+    identities: { e164_range: ["+821010001000", "+821010001009"] }
+    seed: { route_set: rs-kt, priority: 100 }
+  peer_kt_dead:                                      # 우선 피어 무응답(Timer B → 다음 피어) — TRUNK-IBCF-FAILOVER. RouteSet 헬스체크(OPTIONS)·A-COM-003 관측
+    kind: peer
+    worker: w1
+    peering: csp
+    profile: ibcf
+    bind: { port: 5081, protocol: udp }
+    domain: ims.kt.test
+    identities: { e164_range: ["+821010001000", "+821010001009"] }
+    answer: silent
+    seed: { route_set: rs-kt, priority: 50 }
+  peer_kt_503:                                       # 우선 피어 즉시 503 + Reason Q.850 cause=38 — TRUNK-IBCF-FAILOVER-5XX
+    kind: peer
+    worker: w1
+    peering: csp
+    profile: ibcf
+    bind: { port: 5083, protocol: udp }
+    domain: ims.kt.test
+    identities: { e164_range: ["+821010001000", "+821010001009"] }
+    answer: reject
+    fault: { code: 503, q850: 38 }
+    seed: { route_set: rs-kt, priority: 40 }
+  peer_blocked:                                      # ACL deny(scope=route) → 403 — TRUNK-IBCF-ACL-DENY. 도메인이 달라 같은 번호 범위를 써도 라우팅이 갈린다
+    kind: peer
+    worker: w1
+    peering: csp
+    profile: ibcf
+    bind: { port: 5082, protocol: udp }
+    domain: ims.blocked.test
+    identities: { e164_range: ["+821010001000", "+821010001009"] }
+    seed: { acl: deny }
+  # 추가 후보(별도 준비물): peer_kt_tls(워커 Tls.PeerCertFile/CaFile/ClientCertFile + TLS peering 수신점) · peer_kt_thig · peer_kt_lossy ·
+  #   mgcf_inband(volte_ue_inband 짝) · pbx_wb(G.722) — 각각 자기 번호 범위·포트가 필요하다

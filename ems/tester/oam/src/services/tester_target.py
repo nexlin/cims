@@ -172,8 +172,18 @@ def pick_local_node(topology: Topology, current_local_nodes: List[dict], node_id
     }
 
 
+def number_range(p: PeerPool) -> Optional[str]:
+    """신원 범위(e164_range/did_range) → pbx/mgcf 번호 대역 라우팅 규칙(`req_uri_user in_range`, sip_service_model.md §2-5)의 값 "lo-hi".
+    접두(공통 prefix)가 아니라 정확한 대역이라 10진 경계에 맞지 않는 블록(1010~1014 / 1015~1019)을 두 풀로 나눠도 규칙이 겹치지 않는다.
+    CSP 는 번역 뒤 +E.164 착신과 비교하므로 범위도 국제형으로 적는 것이 맞다(국내형 DID 범위는 국내형 다이얼에만 걸린다)."""
+    rng = p.identities.e164_range or p.identities.did_range
+    if not rng:
+        return None
+    return f'{rng[0]}-{rng[1]}'
+
+
 def number_prefix(p: PeerPool) -> Optional[str]:
-    """신원 범위(e164_range/did_range)의 공통 접두 — pbx/mgcf 번호 라우팅 규칙(req_uri_user prefix)의 값. 접두가 비면 None."""
+    """신원 범위의 공통 접두 — 표시·검산용(시드 규칙은 number_range 를 쓴다)."""
     rng = p.identities.e164_range or p.identities.did_range
     if not rng:
         return None
@@ -189,8 +199,8 @@ def derive_records(topology: Topology, pools: Dict[str, PeerPool], local_node_re
     Route 는 `inbound_auth: none`(신뢰 피어 — CSP 가 이 Route 로 식별한 요청은 Digest 없이 받는다), ACL 은 `scope=route` 로 그 피어에만.
     pbx `register` 가 있으면 등록형 트렁크 — `inbound_auth: digest` + 트렁크 계정(auth_user·auth_ha1|auth_password·auth_realm·register_expires).
 
-    매칭 규칙 = 도메인(`req_uri_host eq` — ibcf, UE 가 user@피어도메인 을 다이얼) OR 번호 접두(`req_uri_user prefix` — pbx/mgcf,
-    UE 가 DID/E.164 를 그대로 다이얼, BGCF 식 번호 라우팅). 두 규칙을 같은 RouteSet 의 match 집합에 OR 로 넣는다."""
+    매칭 규칙 = 도메인(`req_uri_host eq` — ibcf, UE 가 user@피어도메인 을 다이얼) OR 번호 대역(`req_uri_user in_range lo-hi` — pbx/mgcf,
+    UE 가 DID/E.164 를 그대로 다이얼, BGCF 식 번호 라우팅 — 번역 뒤 +E.164 와 비교). 두 규칙을 같은 RouteSet 의 match 집합에 OR 로 넣는다."""
     out: Dict[str, List[dict]] = {c: [] for c in COLLECTIONS}
     by_set: Dict[str, List[Tuple[str, PeerPool]]] = {}
     match_rules: Dict[str, List[str]] = {}
@@ -214,6 +224,10 @@ def derive_records(topology: Topology, pools: Dict[str, PeerPool], local_node_re
             'name': rt, 'enabled': True, 'local_node_ref': local_node_ref, 'remote_node_ref': rn, 'inbound_auth': 'none',
             'register_to_remote': False, 'tags': [SEED_TAG], 'note': f'cims-tester {local_node_ref} ↔ {name}',
         }
+        if p.dial_plan is not None:
+            # 인바운드 다이얼 플랜(sip_service_model.md §2-10) — 이 피어가 국내형 DID 로 보낸 착신을 CSP 가 +E.164 로 번역
+            route.update({'country_code': p.dial_plan.country_code, 'national_prefix': p.dial_plan.national_prefix,
+                          'international_prefix': p.dial_plan.international_prefix})
         if p.trunk_register is not None:
             # 등록형 트렁크(SIPconnect 2.0 §8) — 피어가 이 계정으로 REGISTER 한다: Route 는 inbound_auth=digest + 트렁크 계정(auth_user·H(A1)|password·realm).
             #   CSP 는 바인딩(REGISTER 소스)을 다음 홉으로 쓰고 바인딩 없으면 Route dead — 비밀은 환경변수에서(컴파일과 같은 해석)
@@ -227,13 +241,13 @@ def derive_records(topology: Topology, pools: Dict[str, PeerPool], local_node_re
             'tags': [SEED_TAG, 'routing'],
         })
         rules = [f'tester-rule-{name}-domain']
-        prefix = number_prefix(p) if p.dial == 'number' else None
-        if prefix:
+        rng = number_range(p) if p.dial == 'number' else None
+        if rng:
             out['rules'].append({
-                'name': f'tester-rule-{name}-prefix', 'enabled': True, 'field': 'req_uri_user', 'op': 'prefix', 'value': prefix,
+                'name': f'tester-rule-{name}-range', 'enabled': True, 'field': 'req_uri_user', 'op': 'in_range', 'value': rng,
                 'tags': [SEED_TAG, 'routing'],
             })
-            rules.append(f'tester-rule-{name}-prefix')
+            rules.append(f'tester-rule-{name}-range')
         match_rules[name] = rules
         if p.seed.acl:
             out['rules'].append({

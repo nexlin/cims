@@ -169,7 +169,8 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
   등록 가입자 간 `MESSAGE` 전달은 이 값과 무관. SoT = csc.json `Provisioning.Services.<kind>.sms_gateway`(기본 `false` —
   CIMS 는 게이트웨이를 내장하지 않으므로 외부 게이트웨이 연동 시 운영자가 켠다). 구 서버 응답에 없으면 전부 `false`.
 - `countryCode`: 홈 국가코드(E.164 digits, `+` 없음. 예 `"82"`) — 단말 번호 로컬 표기(§3-1)의 **SoT**.
-  CSC 설정 `Provisioning.CountryCode` 우선, 미설정이면 로그인 msisdn 에서 서버가 유도. 판정 불가면
+  접속서비스 다이얼 플랜 `country_code`(CSP 정본 미러 — 서버 번호 번역 [sip_service_model.md §2-10](sip_service_model.md)과 같은 값)
+  → CSC 설정 `Provisioning.CountryCode` → 로그인 msisdn 에서 서버가 유도. 판정 불가면
   빈 문자열(`""`) — 명시적 `null` 은 보내지 않는다(Android `org.json` 이 `"null"` 문자열로 오독).
 - `phoneGroup`: **전화 그룹**([dispatch_center.md §3.1·§8.4](dispatch_center.md)) — 사용자의 회선이 전화 그룹
   (`phone_group_members`) 소속일 때만 실린다(미소속·테이블 미적용 DB 는 키 생략, `null` 없음). 유선 전화 기능이며 관제 권한과 무관.
@@ -416,8 +417,9 @@ OAM 미도달 502 `oam_unreachable`. 구현 `csc/src/handlers/dispatch_recording
      host 가 비어 있거나 CSP_IP 인 서비스만 정합하고, 다른 서버를 가리키면 운영자 값을 보존한다.
 3. SIP 자격: 응답 `account.sipHa1`(H(A1)) 로 인증한다 — 평문 SIP 비밀번호는 망에 실리지 않고 단말도 갖지
    않는다. `sipHa1` 이 없는 가입(H(A1) 미생성)은 단말이 등록을 시도하지 않는다.
-4. **홈 국가코드** ← CSC 설정 `Provisioning.CountryCode`(템플릿 default 82, configure.sh `--country-code`).
-   미설정 시 로그인 msisdn 에서 유도(`_country_code_of`, 단말 fallback 과 동일한 ITU 자릿수 규칙).
+4. **홈 국가코드** ← 접속서비스 다이얼 플랜 `country_code`(CSP 정본 미러, [sip_service_model.md §2-10](sip_service_model.md)) →
+   CSC 설정 `Provisioning.CountryCode`(템플릿 default 82, configure.sh `--country-code`) → 로그인 msisdn 에서 유도(`_country_code_of`,
+   단말 fallback 과 동일한 ITU 자릿수 규칙). 단말 정규화(`toE164`)는 규격상 선택이고, 국내형 그대로 보내도 서버가 번역한다.
    응답 `countryCode` 로 내려주며 단말은 이 값을 번호 로컬 표기의 SoT 로 저장(`SipAccountConfig.countryCode`).
 5. **내선 라벨 자릿수** ← CSC 설정 `Provisioning.ExtensionDigits`(템플릿 default 4, 0=전체 digits) —
    `dispatch.members[].extension` 이 가입 번호 끝자리 몇 자리인가([volte_supplementary_services.md](volte_supplementary_services.md) §4

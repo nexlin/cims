@@ -1,0 +1,15 @@
+# IP-PBX 트렁크 착신 — PBX 가 가입자를 국내형(0130000000x)으로 호출한다(SIPconnect 2.0 은 global number 를 권고하지만 현장 PBX 는 국내형 DID 를 보내는 일이 흔하다).
+#   대상 CSP 는 이 피어의 인바운드 Route 다이얼 플랜(시드: 풀 dial_plan → routes.country_code, sip_service_model.md §2-10)으로 착신을 +E.164 로 번역한다.
+#   전제: 토폴로지 pbx 풀에 dial_plan { country_code: 82 } + SIP 노드 sip.dial_plan(워커가 국내형 다이얼 문자열을 만드는 규칙).
+id: TRUNK-PBX-INBOUND-NATIONAL
+title: IP-PBX → 가입자 착신, 국내형 DID (Route 다이얼 플랜 번역)
+tags: [trunk, pbx, dialplan]
+roles:
+  pbx:    { pool: pbx_hq }
+  callee: { pool: volte_ue }
+flow:
+  - { step: register,   who: [callee], expect: { code: 200 } }
+  - { step: invite,     from: pbx, to: callee, dial: national, media: { audio: pcma } }
+  - { step: answer,     who: [callee], after_ms: 1000, expect: { code: 200, srd_ms: { p95: 2000 } } }
+  - { step: media_hold, seconds: 5, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: pbx, expect: { sdd_ms: { p95: 300 } } }

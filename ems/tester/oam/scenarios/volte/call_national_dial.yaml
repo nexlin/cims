@@ -1,0 +1,16 @@
+# 국내형 다이얼 — 발신 UE 가 착신 번호를 국가번호 없이(02-1000-1010 → 0210001010) 그대로 보낸다(TS 24.229 §5.1.2A.1.5 — 단말의 국제형 변환은 선택).
+#   대상 CSP 가 발신 가입자 접속서비스의 다이얼 플랜(country_code, sip_service_model.md §2-10)으로 Request-URI 를 +E.164 로 번역해야
+#   착신 가입자 조회에 닿는다(§5.4.3.2). 번역이 없으면 404 로 끝나 SER 0 — 전제: 토폴로지 SIP 노드 sip.dial_plan.country_code = 대상
+#   access_services.country_code(예 82). 착신은 같은 풀의 다른 단말(E.164 신원)이며 워커가 발신 시점에 국내형으로 바꿔 다이얼한다.
+id: VOLTE-CALL-NATIONAL-DIAL
+title: VoLTE 1:1 국내형 다이얼 (서버 번호 번역 — 0… → +82…)
+tags: [volte, dialplan]
+roles:
+  caller: { pool: volte_ue }
+  callee: { pool: volte_ue, disjoint_from: caller }
+flow:
+  - { step: register,   who: [caller, callee], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: callee, dial: national, media: { audio: amr-wb } }
+  - { step: answer,     who: [callee], after_ms: 800, expect: { code: 200, srd_ms: { p95: 2000 } } }
+  - { step: media_hold, seconds: 3, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }

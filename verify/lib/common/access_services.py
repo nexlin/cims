@@ -47,6 +47,8 @@ def seed_access_services(cfg_dir: str, voip_ref: str, ptt_ref: str,
         }
         if kind in ("volte", "voip"):
             rec.update({"pickup_feature_code": "**", "transfer_allowed": True})
+        # 다이얼 플랜(sip_service_model.md §2-10) — 국내형 다이얼(0…)을 +82… 로 번역. 세 kind 공통(PTT 사설콜도 번호 착신)
+        rec.update({"country_code": "82", "national_prefix": "0", "international_prefix": "00"})
         rec.update(extra)
         seeded.append(rec)
 

@@ -26,6 +26,7 @@ target:
       logs: [/opt/cims/csp/log/csp_*.log]   # run 동안 늘어난 ERROR 줄 = target_evidence log_errors (SSH 관측)
       sip:
         domains: [volte.cims.example.kr, ptt.cims.example.kr]
+        dial_plan: { country_code: "82", national_prefix: "0", international_prefix: "00" }   # 대상 접속서비스 country_code 와 같은 값 — invite.dial: national 이 +82… 를 0… 으로 바꿔 다이얼(대상 번역 시험)
         listeners:                       # 수신점 N 개 = CSP local_nodes 와 1:1. ip 를 비우면 노드 addr → 호스트 ip
           udp:     { edge: access, port: 5060, protocol: udp }
           tcp:     { edge: access, port: 25061, protocol: tcp }
@@ -173,6 +174,7 @@ pools:                                   # 풀 하나 = 워커 하나. 워커 �
     register: { user: pbx-hq, ha1_env: PBX_HA1 }
     identities: { did_range: ["0212345000", "0212345099"], ext_len: 4 }
     codecs: [PCMA, PCMU]
+    dial_plan: { country_code: "82" }        # 시드 Route 인바운드 플랜 — PBX 가 국내형 DID 로 보낸 착신을 CSP 가 +82… 로 번역(TRUNK-PBX-INBOUND-NATIONAL)
   mgcf_pstn:                             # MGCF(IM-MGW 가 AMR-WB 오퍼) — E.164 만, 183 early media + 100rel, Q.850 Reason
     kind: peer
     worker: w2

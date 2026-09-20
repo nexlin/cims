@@ -391,6 +391,24 @@
           "description": "bye/reject 의 Reason: Q.850;cause= (RFC 3326 — MGCF 종료 사유, 16=정상 34=회선 없음)",
           "title": "Cause"
         },
+        "dial": {
+          "anyOf": [
+            {
+              "enum": [
+                "e164",
+                "national",
+                "international"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "invite 만 — 착신 역할의 E.164 신원을 어떤 꼴로 다이얼하는가: e164(기본, +82…) · national(국내형 0… — 대상 노드 sip.dial_plan 의 접두) · international(국제 접두 00+82…). 대상 CSP 의 다이얼 플랜 번역(TS 24.229 §5.4.3.2) 시험. 역할 대상에만(번호 리터럴 to 에는 못 둔다)",
+          "title": "Dial"
+        },
         "disposition": {
           "anyOf": [
             {

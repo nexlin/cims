@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include "CspDialPlan.h"
+
 /**
  * CspServiceMap — sip_service 설정 캐시를 메모리에 유지.
  *
@@ -41,6 +43,9 @@ struct ServiceInfo {
     /** 호 전달(REFER) 허용 (volte_supplementary_services.md §6.3) — false 면 이 서비스
      *  가입자의 REFER 는 403. 기본 true(기존 동작 보존). */
     bool transfer_allowed = true;
+    /** 다이얼 플랜(sip_service_model.md §2-10) — 이 서비스 가입자가 국내형으로 다이얼한 착신을 +E.164 로 번역하는 규칙
+     *  (country_code·national_prefix·international_prefix·emergency_numbers). country_code 가 비면 번역 비활성. */
+    DialPlan dial_plan;
     int priority = 100;
     bool enabled = true;
     std::vector<std::string> allowed_local_node_refs;  // v3: LocalNode name 참조 (SOT)

@@ -17,6 +17,7 @@
 #include "CscAvClient.h"
 #include "CspAddressing.h"
 #include "CspConfigCache.h"  // CspUuidToIntId
+#include "CspDialPlan.h"
 #include "CspLocalNodeMap.h"
 #include "CspPhoneGroup.h"
 #include "CspPttGroup.h"
@@ -1191,6 +1192,18 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
         CLog::Print( LOG_INFO,
                      "SUBSCRIBE refresh without state — resource restored from To URI (%s, user=%s, event=%s)",
                      strReqUriUser.c_str(), strFromId.c_str(), strEventType.c_str() );
+    }
+
+    // dialog 이벤트(RFC 4235 BLF)의 감시 대상도 착신 번호다 — 국내형이면 구독자의 접속서비스 다이얼 플랜으로 +E.164 로
+    //   (sip_service_model.md §2-10). 갱신은 자원을 바꿀 수 없으므로 초기 구독만.
+    if ( !bRefresh && strEventType == "dialog" && !strReqUriUser.empty() ) {
+        ServiceInfo svcSub = gclsServiceMap.GetForUser( strFromId, "volte" );
+        std::string strNorm;
+        if ( CspDialPlan::Normalize( strReqUriUser, "", svcSub.dial_plan, strNorm ) == DIAL_PLAN_TRANSLATED ) {
+            CLog::Print( LOG_INFO, "DialPlan: SUBSCRIBE dialog from(%s) target %s → %s (service=%s)", strFromId.c_str(),
+                         strReqUriUser.c_str(), strNorm.c_str(), svcSub.name.c_str() );
+            strReqUriUser = strNorm;
+        }
     }
 
     // 부여값 = min(요청, 상한); 요청에 없으면 기본값. 형식 오류 → 400 (RFC 3261 §21.4.1).

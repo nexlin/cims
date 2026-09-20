@@ -3171,9 +3171,15 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
         return HandlerResult(status=503, body={"error": "db_error", "detail": str(e)}, media_type="application/json")
 
     # 홈 국가코드(digits, 예 '82') — 단말 번호 로컬 표기(+82… → 0…)의 SoT.
-    # 설정 Provisioning.CountryCode 우선, 없으면 로그인 msisdn 에서 유도.
+    # ① 접속서비스 다이얼 플랜 country_code(CSP 정본 미러 — 서버 번호 번역과 같은 값, sip_service_model.md §2-10)
+    # ② 설정 Provisioning.CountryCode ③ 로그인 msisdn 에서 유도.
     country = ''
-    if isinstance(PROVISIONING, dict):
+    try:
+        from services import access_services as _acc
+        country = _acc.country_code(None, '', 'volte')
+    except Exception as e:
+        logger.log_info(f"[provisioning/me] access_services country_code skipped: {e}")
+    if not country and isinstance(PROVISIONING, dict):
         country = str(PROVISIONING.get('CountryCode') or '').lstrip('+').strip()
     if not country:
         country = _country_code_of(msisdn)

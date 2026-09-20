@@ -37,7 +37,8 @@ PTT_KINDS = ('ptt', 'mcptt')
 
 # 미러 레코드에서 csc.json 항목 위로 덧쓰는 정의 필드(CSP 소유 값). 도달 정보(host·포트·transport 등)는 덧쓰지 않는다.
 IDENTITY_FIELDS = ('name', 'kind', 'domain', 'auth_realm', 'media_srtp', 'sec_mechanisms',
-                   'pickup_feature_code', 'transfer_allowed', 'media_nat_mode')
+                   'pickup_feature_code', 'transfer_allowed', 'media_nat_mode',
+                   'country_code', 'national_prefix', 'international_prefix')   # 다이얼 플랜(sip_service_model.md §2-10)
 
 _config: dict = {}                 # configure() 로 받은 csc 설정 — collection_dir 해석용(CimsRuntimeDir/ServiceLogging.Dir)
 _lock = threading.Lock()
@@ -125,6 +126,16 @@ def pick_by_kind(config: Optional[dict], kind: str) -> Optional[dict]:
         if (r.get('kind') or '').lower() in wanted:
             return r
     return None
+
+
+def country_code(config: Optional[dict], service_ref: str = '', kind: str = 'volte') -> str:
+    """홈 국가코드(digits) — 접속서비스 다이얼 플랜 `country_code`(CSP 정본, sip_service_model.md §2-10). 가입 행의 서비스 →
+    kind 대표 순으로 보고, 없으면 ''(호출자가 Provisioning.CountryCode → msisdn 유도로 폴백). 단말 로컬 표기와 서버 번역이 한
+    값을 보게 하는 축이다."""
+    rec = resolve(config, service_ref, kind)
+    if not rec:
+        return ''
+    return str(rec.get('country_code') or '').lstrip('+').strip()
 
 
 def resolve(config: Optional[dict], service_ref: str, kind: str) -> Optional[dict]:

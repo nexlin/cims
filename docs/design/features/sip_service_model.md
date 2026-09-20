@@ -191,12 +191,20 @@ ACL `scope=local_node` 를 쓴다.
 
 ```
 eq        ne        prefix    suffix    contains
-regex     in_cidr   in_list   exists    not_exists
+regex     in_cidr   in_list   in_range  exists    not_exists
 ```
 
 - `regex` — `std::regex` **ECMAScript** 문법 (`\d`, `\w`, 비탐욕 `*?` 사용 가능). 컴파일 실패 시 false + ERROR 로그
 - `in_cidr` — IPv4 전용
 - `in_list` — 콤마 구분 문자열
+- `in_range` — **번호 대역** `lo-hi`(예 `+82210001010-+82210001019`). 양끝과 대상의 `+`·구분자를 떼고 **같은 자릿수**의 digits 로
+  lo ≤ n ≤ hi. 접두(`prefix`)로 표현되지 않는 대역(1010~1014 처럼 10진 경계에 맞지 않는 블록)을 정확히 가른다(`CspDialPlan::InNumberRange`)
+
+**번호 대역 라우팅.** 착신 번호 규칙(`req_uri_user`)은 다이얼 플랜 번역(§2-10) **뒤**의 `+E.164` 를 본다 — 단말이 `0210001010` 으로
+걸어도 규칙은 `+82210001010` 과 비교한다. 그래서 트렁크·피어 대역은 국제형으로 적는다: 10진 경계 블록은 `prefix`(`+8221000101` = 1010~1019),
+임의 대역은 `in_range`, 흩어진 번호는 `in_list`, 복합 패턴은 `regex`. 대역 규칙을 `from_uri_host`(발신 서비스 도메인)·`src_ip` 규칙과 같은
+RuleSet(AND)에 묶으면 "이 서비스 가입자가 이 대역을 부를 때만 이 RouteSet" 이 되고, RoutingPolicy `priority` 가 겹치는 대역의 우선순위를
+정한다(낮을수록 먼저, 첫 매치). 국내형만 받는 피어(Route `country_code` 없음)는 국제형 그대로 비교된다
 - `exists` / `not_exists` — 값이 빈 문자열이면 "없음"으로 본다
 
 `tags[]` 가 중요: 같은 Rule 이 다양한 RuleSet 에 재사용될 때 용도를 구분한다.
@@ -332,6 +340,7 @@ UE 가 직접 REGISTER 하는 서비스 도메인. **`kind` 는 접속환경 클
 | `media_srtp` | `off`(기본) / `optional` / `required` — UE↔CMP SRTP(SDES) 정책 ([media_security.md](media_security.md) §4) |
 | `pickup_feature_code` | 당겨받기 피처코드(도메인 번호계획). 빈 값 = 이 서비스에서 픽업 비활성. `voip` 서비스에 둔다 ([volte_supplementary_services.md §5.2](volte_supplementary_services.md)) |
 | `transfer_allowed` | 호 전달(REFER) 허용 — 도메인 기본값(기본 true) ([volte_supplementary_services.md §6.3](volte_supplementary_services.md)) |
+| `country_code` · `national_prefix` · `international_prefix` · `emergency_numbers[]` | **다이얼 플랜**(§2-10) — 이 서비스 가입자가 국내형으로 다이얼한 착신을 +E.164 로 번역하는 규칙. `country_code`(digits, 예 `82`)가 비면 번역 비활성. 기본 `national_prefix=0`·`international_prefix=00`·긴급번호 `112`·`119`. CSC `countryCode`(단말 로컬 표기)의 정본이기도 하다 |
 | `priority` | 같은 domain 중복 시 먼저 매칭될 순서 |
 
 같은 kind 의 서비스가 둘 이상일 수 있다(도메인이 다르면). 가입자 → 서비스 해석은 항상 **`service_ref`(name)** 이며(§3),
@@ -341,6 +350,48 @@ kind 대표 서비스(`GetByKind`/`GetDomainByKind` — priority 순 첫 enabled
 CSC 는 단말 프로비저닝·H(A1) 파생을 위해 서비스의 도메인·realm·포트·정책을 알아야 한다 — 가입 행의 `service_ref` 로
 `Provisioning.Services` 안에서 `name` 이 일치하는 항목을 고르고, 없으면 kind 키 폴백([android_ue_provisioning.md §4](android_ue_provisioning.md)).
 접속서비스 SoT 는 CSP 소유 컬렉션이므로 두 값은 운영자가 동기한다(SoT 단일화는 후속 과제).
+
+### 2-10. 다이얼 플랜 — 착신 번호 번역
+
+**규격.** TS 24.229 §5.1.2A.1.5 — 단말은 누른 숫자를 그대로 보낼 수 있고 국제형이 아닌 번호에는 `phone-context`(RFC 3966 §5.1.5)를
+붙인다. 국제형 변환은 단말의 선택이다. §5.4.3.2 — S-CSCF 는 Request-URI 가 국제형이 아닌 번호면 `phone-context` 와 로컬 정책으로
+E.164 국제형으로 번역하고, 번역할 수 없으면 **484 Address Incomplete** 를 낸다. 즉 국내형 착신을 받아 주는 책임은 홈 망(CSP)의
+것이다. CIMS 단말 앱은 프로비저닝 `countryCode` 로 스스로 `+82…` 를 붙이지만(허용되는 선택), 타사 단말·데스크폰·국내형 DID 를
+보내는 IP-PBX 는 서버 번역이 없으면 404 로 끝났다.
+
+**모델.** 플랜 = `{country_code, national_prefix, international_prefix, emergency_numbers[]}`. 두 원천에 둔다.
+
+| 원천 | 적용 대상 | 비고 |
+|---|---|---|
+| `access_services` 레코드 | 그 서비스 가입자가 낸 요청(발신 UE 의 `service_ref` → 서비스, 없으면 kind 대표) | `voip`·`volte`·`ptt` 각각. 한 사이트는 보통 같은 국가코드 |
+| `routes` 레코드(`country_code`·`national_prefix`·`international_prefix`) | 그 인바운드 Route 로 식별된 피어의 요청 | 비면 번역 없음 — NNI 는 국제형이 기본(TS 29.163 Mg·TS 29.165 II-NNI). 국내형 DID 를 보내는 IP-PBX Route 에만 켠다 |
+
+`phone-context` 가 접속서비스 도메인이면 그 서비스의 플랜을 쓴다(발신자와 무관). `+…` 컨텍스트(global-number-digits)는 그 접두에
+local number 를 붙인 것이 global number 이므로 플랜 없이 결합한다.
+
+**절차**(`CspDialPlan::Normalize`, `ModuleDispatcher::ResolveCallee`).
+
+1. 착신 = **Request-URI**(sip: user / tel: host — 라우팅 키, RFC 3261 §16.6). 번호가 없으면(도메인만) To user 폴백.
+2. 이미 알려진 그룹 id(메모리, 없으면 DB 단건)는 번호가 아니다 → 그대로.
+3. `*`/`#` 로 시작 = 피처코드(당겨받기 `**` 등) → 그대로(TAS 가 뒤의 지정 대상만 같은 플랜으로 번역).
+4. 시각 구분자(`-`·`.`·`(`·`)`·공백) 제거. 문자가 남으면(그룹 id·`adhoc-…`·`priv-…`) 번호가 아니다 → 그대로.
+5. `+digits` = 이미 국제형 → 그대로(구분자만 정리).
+6. 긴급번호(`emergency_numbers`, 기본 112·119) → 그대로(TS 24.229 §5.1.6 긴급 절차의 몫).
+7. `phone-context=+…` → 결합. 그 외 플랜: `international_prefix`(00) → `+`, `national_prefix`(0) → `+country_code`, 접두 없는
+   국가(`national_prefix` 빈 값) → `+country_code`+digits.
+8. 어느 규칙에도 맞지 않는 숫자열(내선 라벨·단축) → **484**(플랜이 켜진 서비스만. `country_code` 가 비면 그대로 두어 종전과 같다).
+9. TRANSLATED 면 **Request-URI 만 재작성**한다. To 는 표시용이라 손대지 않는다(RFC 3261 §8.2.6.2 — 응답의 To 는 요청 그대로).
+
+**적용 지점.** 초기 INVITE(`RecvRequest` — 이후 그룹 조회·라우팅 규칙 `req_uri_user`·TAS 스크린·`EventIncomingCall` 이 번역된
+번호를 본다; 484 는 시도 장부에 남는다) · `EventIncomingCall`(멱등 재해석 — tel: URI·To 폴백 포함) · MESSAGE(`EventMessage`) ·
+REFER `Refer-To`(`EventBlindTransfer`, 전달자의 서비스 플랜) · dialog SUBSCRIBE 감시 대상(RFC 4235 BLF, 구독자의 서비스 플랜) ·
+당겨받기 지정 대상(`**<번호>`). 라우팅 규칙 컨텍스트의 `req_uri_user` 는 번역된 착신이므로 트렁크 번호 접두 규칙은 `+E.164` 로
+쓴다(tel: URI 착신도 종전과 달리 규칙에 걸린다). `to_uri_user` 는 원문이다.
+
+**단말과의 관계.** 단말의 `toE164` 정규화는 그대로 유효하다(규격상 허용). CSC `/provisioning/me` 의 `countryCode` 는 접속서비스
+`country_code`(kind 대표) → `Provisioning.CountryCode` → msisdn 유도 순으로 정해 단말 로컬 표기와 서버 번역이 한 값을 본다.
+검증 = `S1-UNIT-CSP`(`tests/csp_dial_plan_test.cpp`) · 계측기 `invite.dial: national|international`(`VOLTE-CALL-NATIONAL-DIAL`·
+`TRUNK-PBX-INBOUND-NATIONAL`, [test_instrument.md](test_instrument.md) §4).
 
 ---
 
@@ -400,10 +451,12 @@ From URI 단독 매칭은 **fallback 으로 강등**. IMS 표준을 참고한 �
 
 1/2 가 주 경로. 3 은 IBCF incoming. 4/5 는 의심스러운 fallback (로그에 `svc_source=from_header_fallback` 표식).
 
-**착신(callee) 해석은 이 판별과 별개다** — INVITE 의 To/Request-URI **user 부분(E.164)만**으로 `CspUserMap` 을 조회하고
-호스트는 보지 않는다(`ModuleDispatcher::RecvRequest`·`EventIncomingCall`). 번호가 volte·voip·ptt 가입 테이블과 대표번호에
-걸쳐 유일하므로(§2-9) user 만으로 착신이 하나로 정해지며, 단말이 자기 홈 도메인을 붙여 건 `sip:+E.164@<자기 도메인>`
-(TS 24.229 관례)도 도메인 간(voip↔volte) 그대로 붙는다. CSP 가 착신 쪽으로 새로 만드는 B-leg 의 From/To 도메인은 §9.1.
+**착신(callee) 해석은 이 판별과 별개다** — INVITE 의 **Request-URI 번호**(sip: user / tel: host, 없으면 To user)를 다이얼
+플랜(§2-10)으로 +E.164 로 번역한 값만으로 `CspUserMap` 을 조회하고 호스트는 보지 않는다(`ModuleDispatcher::RecvRequest`·
+`EventIncomingCall`). 번호가 volte·voip·ptt 가입 테이블과 대표번호에 걸쳐 유일하므로(§2-9) user 만으로 착신이 하나로 정해지며,
+단말이 자기 홈 도메인을 붙여 건 `sip:+E.164@<자기 도메인>`(TS 24.229 관례)도 도메인 간(voip↔volte) 그대로 붙는다. 국내형
+(`sip:0210001010@…`·`tel:0210001010;phone-context=…`)은 번역돼 같은 조회에 닿고, 번역 불가는 484. CSP 가 착신 쪽으로 새로 만드는
+B-leg 의 From/To 도메인은 §9.1.
 
 **피어 인증 — 신뢰의 근거는 Route 다.** `RecvRequest` 가 (수신 LocalNode, 소스 IP[:UDP 소스 포트], transport) 로 **인바운드 Route** 를 식별한다
 (`CCspRouteMap::FindInbound`, §2-3). 식별되면 그 요청은 설정된 피어(RemoteNode)의 것이고, `inbound_auth=none` 이면
@@ -492,6 +545,7 @@ AccessServices:
 | ACL 결정 | `CAclPolicyEngine` | |
 | RemoteNode/Route/RouteSet 캐시 | `CspRemoteNodeMap`, `CspRouteMap`, `CspRouteSetMap` | |
 | Access service 캐시 | `CCspServiceMap` (`gclsServiceMap`, volte/voip/ptt) | |
+| 다이얼 플랜(착신 번호 번역) | `CspDialPlan` (`Normalize`·`ExtractNumber`·`RewriteNumber`) + `ModuleDispatcher` `ResolveCallee`/`DialPlanFor` | §2-10. 플랜 = `ServiceInfo::dial_plan`·`RouteConfig::dial_plan` |
 
 ---
 
@@ -518,6 +572,7 @@ AccessServices:
 | `csp/CspRoutingPolicyEngine.{h,cpp}` | routing 결정 |
 | `csp/CspAclPolicyEngine.{h,cpp}` | ACL 결정 |
 | `csp/CspServiceMap.{h,cpp}` | Access service (volte/ptt) — `CCspServiceMap` |
+| `csp/CspDialPlan.{h,cpp}` | 착신 번호 번역(다이얼 플랜, §2-10) — 순수 함수, `tests/csp_dial_plan_test.cpp`(S1-UNIT-CSP) |
 | `csp/CspListenerManager.{h,cpp}` | local_nodes → psip 리스너 add/remove (무중단 rebind) |
 | `csp/SipServerSetup.{h,cpp}` | Setup.Sip 파싱 |
 

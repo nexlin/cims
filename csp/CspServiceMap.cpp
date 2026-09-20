@@ -1,6 +1,7 @@
 #include "CspServiceMap.h"
 
 #include <algorithm>
+#include <cctype>
 
 #include "CspConfigCache.h"
 #include "CspLocalNodeMap.h"
@@ -61,6 +62,29 @@ bool CCspServiceMap::Sync() {
             // 호 전달(REFER) 허용 — 기본 true (§6.3)
             std::string tr = row.GetString( "transfer_allowed" );
             s.transfer_allowed = ( tr != "false" && tr != "0" );
+            // 다이얼 플랜(§2-10) — country_code 가 비면 이 서비스의 국내형 번역은 비활성(레거시·국제형만 받는 망)
+            s.dial_plan.country_code = row.GetString( "country_code" );
+            s.dial_plan.national_prefix = row.Has( "national_prefix" ) ? row.GetString( "national_prefix" ) : "0";
+            s.dial_plan.international_prefix =
+                row.Has( "international_prefix" ) ? row.GetString( "international_prefix" ) : "00";
+            {
+                SimpleJson::JsonNode em = row.Get( "emergency_numbers" );
+                if ( em.type == SimpleJson::JSON_ARRAY ) {
+                    for ( size_t j = 0; j < em.Size(); ++j ) {
+                        std::string e = em.At( j ).AsString();
+                        if ( !e.empty() ) s.dial_plan.emergency_numbers.push_back( e );
+                    }
+                }
+            }
+            for ( char c : s.dial_plan.country_code ) {
+                if ( !isdigit( (unsigned char)c ) ) {
+                    CLog::Print( LOG_ERROR,
+                                 "AccessServiceMap: service '%s' country_code '%s' 는 숫자만 — 다이얼 플랜 비활성",
+                                 s.name.c_str(), s.dial_plan.country_code.c_str() );
+                    s.dial_plan.country_code.clear();
+                    break;
+                }
+            }
 
             // sec_mechanisms[] — ipsec-3gpp 는 ESP transport mode 라 NAT 와 상호배제 (§8.3 정적 겹)
             SimpleJson::JsonNode mechs = row.Get( "sec_mechanisms" );

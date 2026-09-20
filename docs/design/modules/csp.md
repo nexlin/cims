@@ -92,7 +92,7 @@ SIP 스택에 `[CModuleDispatcher, CSipUserAgent]` 순서로 콜백 등록:
 
 | 메서드 | 역할 |
 |--------|------|
-| `RecvRequest(msg)` | SIP 요청 라우팅 (REGISTER→CSCF, INVITE→라우팅 판단) |
+| `RecvRequest(msg)` | SIP 요청 라우팅 (REGISTER→CSCF, INVITE→착신 번호 번역(다이얼 플랜, [sip_service_model.md §2-10](../features/sip_service_model.md)) → 라우팅 판단) |
 | `RecvResponse(msg)` | RouteSet 헬스체크 OPTIONS 프로브 응답 소비(`CCspRouteHealth`), NOTIFY 실패 구독 회수 |
 | `EventIncomingCall(callId, from, to, rtp)` | B2BUA 착신 이벤트 → 발신 leg 생성 |
 | `EventCallRing(callId, statusCode, rtp)` | 180/183 브릿징. 18x 에 SDP 가 있으면(early media) **확정 answer 와 같은 절차로 미디어를 앵커링**한다 — answer leg 를 relay 에 반영(`ApplyRelayAnswerLeg`: SDES 검증·NAT 판정·`RELAY_MODIFY`)한 뒤 상대 leg 로 가는 SDP 를 relay 주소로 재작성(`SetIpPort` — m= 포트·미디어 레벨 c= 포함). [volte_flows.md](../features/volte_flows.md) C1a |

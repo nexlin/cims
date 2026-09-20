@@ -501,6 +501,19 @@ class SeedDerivation(unittest.TestCase):
         self.assertEqual(lt.domains_of('csp'), ['volte.test'])
         self.assertEqual(M.normalize_topology_doc(legacy)['target']['nodes']['csp']['sip']['listeners']['tls'], {'edge': 'access', 'port': 5061, 'protocol': 'tls'})
 
+    def test_derive_records_route_dial_plan(self):
+        # 피어 풀 dial_plan → 시드 Route 의 인바운드 다이얼 플랜(country_code·접두) — 없는 풀의 Route 에는 키가 없다(NNI 기본 = 국제형)
+        t = self._topo()
+        doc = t.model_dump(by_alias=True, exclude_none=True)
+        doc['pools']['peer_kt']['dial_plan'] = {'country_code': '82'}
+        t2 = T.Topology.model_validate(doc)
+        recs = T.derive_records(t2, {'peer_kt': t2.pools['peer_kt'], 'peer_kt_dead': t2.pools['peer_kt_dead']},
+                                {'peer_kt': 'ln-x', 'peer_kt_dead': 'ln-x'})
+        by = {r['name']: r for r in recs['routes']}
+        self.assertEqual((by['tester-r-peer_kt']['country_code'], by['tester-r-peer_kt']['national_prefix'], by['tester-r-peer_kt']['international_prefix']),
+                         ('82', '0', '00'))
+        self.assertNotIn('country_code', by['tester-r-peer_kt_dead'])
+
     def test_derive_records(self):
         t = self._topo()
         recs = T.derive_records(t, T.seed_pools(t, {'peer_kt', 'peer_kt_dead', 'peer_blocked'}), {p: 'ln-x' for p in ('peer_kt', 'peer_kt_dead', 'peer_blocked')})
@@ -578,19 +591,23 @@ class PbxMgcf(unittest.TestCase):
                                      'domain': 'mgcf.pstn.test', 'identities': {'e164_range': ['+82312340000', '+82312340099']}}
         return w, doc, M.Topology.model_validate(doc)
 
-    def test_number_prefix_rule(self):
+    def test_number_range_rule(self):
+        # pbx/mgcf(dial=number) — 신원 범위 그대로 `req_uri_user in_range lo-hi`(접두가 아니라 대역 — 10진 경계에 안 맞는 블록도 정확). ibcf 는 도메인만
         _, _, topo = self._topo()
-        self.assertEqual(T.number_prefix(topo.pools['pbx_hq']), '02123450')
+        self.assertEqual(T.number_range(topo.pools['pbx_hq']), '0212345000-0212345099')
+        self.assertEqual(T.number_range(topo.pools['mgcf_pstn']), '+82312340000-+82312340099')
         self.assertEqual(T.number_prefix(topo.pools['mgcf_pstn']), '+823123400')
-        recs = T.derive_records(topo, {'pbx_hq': topo.pools['pbx_hq'], 'mgcf_pstn': topo.pools['mgcf_pstn'],
-                                       'peer_kt': topo.pools['peer_kt']}, {p: 'cims-tester-peering' for p in ('pbx_hq', 'mgcf_pstn', 'peer_kt')})
+        pools = {n: topo.pools[n] for n in ('pbx_hq', 'mgcf_pstn', 'peer_kt')}
+        recs = T.derive_records(topo, pools, {n: 'ln-x' for n in pools})
         names = {r['name']: r for r in recs['rules']}
-        self.assertEqual(names['tester-rule-pbx_hq-prefix']['field'], 'req_uri_user')
-        self.assertEqual(names['tester-rule-pbx_hq-prefix']['op'], 'prefix')
-        self.assertEqual(names['tester-rule-mgcf_pstn-prefix']['value'], '+823123400')
-        self.assertNotIn('tester-rule-peer_kt-prefix', names)   # ibcf 는 도메인만
+        self.assertEqual(names['tester-rule-pbx_hq-range']['field'], 'req_uri_user')
+        self.assertEqual(names['tester-rule-pbx_hq-range']['op'], 'in_range')
+        self.assertEqual(names['tester-rule-mgcf_pstn-range']['value'], '+82312340000-+82312340099')
+        self.assertNotIn('tester-rule-peer_kt-range', names)   # ibcf 는 도메인만
+        match = {r['name']: r for r in recs['rule_sets']}['tester-rs-pbx_hq-match']
+        self.assertEqual([m['rule_ref'] for m in match['members']], ['tester-rule-pbx_hq-domain', 'tester-rule-pbx_hq-range'])
         match = {r['name']: r for r in recs['rule_sets']}['tester-rs-mgcf_pstn-match']
-        self.assertEqual([m['rule_ref'] for m in match['members']], ['tester-rule-mgcf_pstn-domain', 'tester-rule-mgcf_pstn-prefix'])
+        self.assertEqual([m['rule_ref'] for m in match['members']], ['tester-rule-mgcf_pstn-domain', 'tester-rule-mgcf_pstn-range'])
 
     def test_trunk_register_secret(self):
         _, _, topo = self._topo()

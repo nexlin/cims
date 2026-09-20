@@ -1526,6 +1526,28 @@
             "help": "이 Route 의 RemoteNode 에서 들어온 요청의 인증. none=신뢰 피어(Digest 없음, IBCF/고정 IP 트렁크 — TS 24.229 §5.10) · digest=등록형 트렁크: auth_user 계정의 REGISTER 를 받고(auth_ha1|auth_password·auth_realm), 그 바인딩 소스의 요청을 신뢰한다. 바인딩이 없으면 Route 는 dead(A-COM-003). 인바운드 Route 는 수신 LocalNode + 소스 IP(UDP 는 포트까지) 또는 트렁크 바인딩 소스로 식별한다."
           },
           {
+            "key": "country_code",
+            "label": "인바운드 국가코드 (다이얼 플랜)",
+            "type": "string",
+            "default": "",
+            "advanced": true,
+            "help": "이 Route 의 피어(IP-PBX 등)가 국내형 DID 로 착신을 보낼 때 +E.164 로 번역하는 국가코드(digits). 비우면 번역 없음 — NNI 는 국제형이 기본(TS 29.163/29.165). sip_service_model.md §2-10"
+          },
+          {
+            "key": "national_prefix",
+            "label": "인바운드 국내 접두",
+            "type": "string",
+            "default": "0",
+            "advanced": true
+          },
+          {
+            "key": "international_prefix",
+            "label": "인바운드 국제 접두",
+            "type": "string",
+            "default": "00",
+            "advanced": true
+          },
+          {
             "key": "max_concurrent_calls",
             "label": "동시 호 제한",
             "type": "int",
@@ -1783,6 +1805,7 @@
               "regex",
               "in_cidr",
               "in_list",
+              "in_range",
               "exists",
               "not_exists"
             ]
@@ -1792,7 +1815,7 @@
             "label": "값",
             "type": "string",
             "default": "",
-            "help": "in_list 는 콤마 분리. in_cidr 은 IPv4 전용 1.2.3.0/24. regex 는 ECMAScript 문법. exists/not_exists 는 무시."
+            "help": "in_list 는 콤마 분리. in_cidr 은 IPv4 전용 1.2.3.0/24. in_range 는 번호 대역 lo-hi(예 +82210001010-+82210001019 — 같은 자릿수, + 무시; 번역 뒤 착신 +E.164 기준). regex 는 ECMAScript 문법. exists/not_exists 는 무시."
           },
           {
             "key": "tags",
@@ -2258,6 +2281,40 @@
             "type": "bool",
             "default": true,
             "help": "이 서비스 가입자의 호 전달(REFER — blind/attended) 허용. false 면 REFER 403. volte_supplementary_services.md §6.3"
+          },
+          {
+            "key": "country_code",
+            "label": "국가코드 (다이얼 플랜)",
+            "type": "string",
+            "default": "",
+            "help": "이 서비스 가입자가 국내형으로 다이얼한 착신(예 0210001010)을 +E.164(+82210001010) 로 번역하는 E.164 국가코드(digits, 예 82). TS 24.229 §5.4.3.2 — 번역은 홈 망(CSP)의 몫이고 단말 변환은 선택이다. 비우면 번역 비활성(국제형만 받는다 — 국내형은 그대로 조회돼 404). 번역은 Request-URI 에만 적용하고 To 는 그대로 둔다. CSC Provisioning.CountryCode(단말 로컬 표기)와 같은 값을 둔다. docs/design/features/sip_service_model.md §2-10"
+          },
+          {
+            "key": "national_prefix",
+            "label": "국내 접두",
+            "type": "string",
+            "default": "0",
+            "advanced": true,
+            "help": "국내형 번호의 트렁크 접두(한국 0). 떼고 +국가코드 를 붙인다. 접두가 없는 국가(북미)는 비운다 — 숫자열 전체에 국가코드를 붙인다."
+          },
+          {
+            "key": "international_prefix",
+            "label": "국제 접두",
+            "type": "string",
+            "default": "00",
+            "advanced": true,
+            "help": "국제 다이얼 접두(한국 00·001 등, 북미 011). 떼고 + 를 붙인다."
+          },
+          {
+            "key": "emergency_numbers",
+            "label": "긴급번호",
+            "type": "string_list",
+            "default": [
+              "112",
+              "119"
+            ],
+            "advanced": true,
+            "help": "번역하지 않는 긴급번호(TS 24.229 §5.1.6 긴급 절차의 몫). 비우면 112·119."
           },
           {
             "key": "allowed_local_node_refs",

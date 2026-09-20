@@ -1,0 +1,13 @@
+# 국제 접두 다이얼 — 발신 UE 가 착신을 00+국가코드(0082…)로 보낸다. 대상 CSP 다이얼 플랜의 international_prefix(00) 번역 → +E.164 (sip_service_model.md §2-10).
+id: VOLTE-CALL-INTL-DIAL
+title: VoLTE 1:1 국제 접두 다이얼 (서버 번호 번역 — 0082… → +82…)
+tags: [volte, dialplan]
+roles:
+  caller: { pool: volte_ue }
+  callee: { pool: volte_ue, disjoint_from: caller }
+flow:
+  - { step: register,   who: [caller, callee], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: callee, dial: international, media: { audio: amr-wb } }
+  - { step: answer,     who: [callee], after_ms: 800, expect: { code: 200, srd_ms: { p95: 2000 } } }
+  - { step: media_hold, seconds: 3, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }

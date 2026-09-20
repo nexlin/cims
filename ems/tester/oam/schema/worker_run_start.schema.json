@@ -21,6 +21,24 @@
           "default": null,
           "title": "Cause"
         },
+        "dial": {
+          "anyOf": [
+            {
+              "enum": [
+                "e164",
+                "national",
+                "international"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "invite — 착신 역할 신원의 다이얼 꼴(e164|national|international, 풀 target_csp.dial_plan 으로 변환)",
+          "title": "Dial"
+        },
         "disposition": {
           "anyOf": [
             {

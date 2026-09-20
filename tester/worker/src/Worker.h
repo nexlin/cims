@@ -156,6 +156,11 @@ struct Pool {
     std::string targetIp;           // ue: CSP 접속점 · peer: CSP 피어링 접속점(발신 다음 홉)
     int targetPort = 5060;
     std::string targetDomain;       // 대상 홈 도메인(target_csp.domain_volte) — 피어가 역할 없는 번호 리터럴을 부를 때 Request-URI host
+    // 대상 번호계획(target_csp.dial_plan — sip_service_model.md §2-10) — 단계 invite.dial: national|international 이 착신 역할의 +E.164 를
+    //   이 접두로 바꿔 다이얼한다(대상 CSP 가 번역해야 착신에 닿는다). 비면 dial 은 e164 그대로
+    std::string dialCountryCode;    // 예 "82"
+    std::string dialNationalPrefix = "0";
+    std::string dialInternationalPrefix = "00";
     std::string profile;            // peer 프로파일
     std::string service = "volte";  // ue: 접속환경 클래스 volte|voip|ptt — ptt 면 MCPTT 단말(feature tag·기동 절차·floor)
     bool msrp = false;              // ue: MCData media plane 능력 — REGISTER Contact 에 mcdata.sds ICSI(서버가 MSRP 배포 대상으로 고른다)
@@ -187,6 +192,7 @@ struct CompiledStep {
     std::string step;
     std::vector<std::string> who;
     std::string from, to;
+    std::string dial;               // invite — 착신 역할 신원의 다이얼 꼴: ""|e164 그대로 · national(0…) · international(00+…) — 풀 dial* 접두
     int afterMs = 0;
     int seconds = 0;
     int cause = 0;                  // bye/reject 의 Reason Q.850 cause (0 = 없음)
@@ -413,7 +419,8 @@ private:
     bool startEndpoint(Endpoint* ep);
     bool startInNetns(Endpoint* ep, std::string& err);   // NAT 풀 — setns(CLONE_NEWNET) 한 스레드에서 SimSession::Start(소켓이 그 netns 에 생긴다)
     static bool hasCapSysAdmin();                        // /proc/self/status CapEff 의 CAP_SYS_ADMIN(21) 비트
-    bool epStartCall(Endpoint* from, Endpoint* to, const Json& media, const std::string& dial = "");   // to 없으면 dial(번호 리터럴)을 부른다
+    bool epStartCall(Endpoint* from, Endpoint* to, const Json& media, const std::string& dial = "", const std::string& dialForm = "");   // to 없으면 dial(번호 리터럴)을 부른다 · dialForm = 착신 역할 신원의 꼴(national|international)
+    static std::string dialFormOf(const Endpoint* to, const std::string& form, const Pool* fromPool);   // +E.164 → 국내형/국제 접두 꼴(풀 dial* 접두)
     bool epHasCall(Endpoint* ep);
     int epAnswer(Endpoint* ep);                 // 0=성공, 그 외 SIP 코드(488 코덱 불일치 등)
     int epProgress(Endpoint* ep);               // 183 early media — 피어 신원만(UE 는 481)

@@ -95,11 +95,21 @@ class SipListener(_Strict):
     local_node: Optional[str] = Field(default=None, description='cims: 대상 local_nodes 이름 — 비면 cims-tester-<id>')
 
 
+class DialPlanSpec(_Strict):
+    """다이얼 플랜(sip_service_model.md §2-10) — 국가코드·접두. SIP 노드에 두면 그 대상의 번호계획(단계 `invite.dial: national` 이 E.164 신원을
+    국내형으로 바꿔 다이얼할 때의 규칙), 피어 풀에 두면 시드 Route 의 인바운드 플랜(피어가 국내형 DID 로 보낸 착신을 CSP 가 번역)."""
+    country_code: str = Field(pattern=r'^[0-9]{1,3}$', description='E.164 국가코드 digits(예 82)')
+    national_prefix: str = Field(default='0', pattern=r'^[0-9]{0,3}$', description='국내 트렁크 접두(비면 접두 없는 국가)')
+    international_prefix: str = Field(default='00', pattern=r'^[0-9]{0,4}$', description='국제 접두')
+
+
 class NodeSip(_Strict):
     """SIP 노드의 수신점 N 개 + 도메인. 입력이 이전 꼴(`access{udp,tcp,tls,domains}`·`peering{port,protocol,local_node}`)이면
     `normalize_sip_block` 이 수신점 항목 `udp`/`tcp`/`tls`/`peering` 으로 승계한다(store 도 읽을 때 같은 함수로 바꿔 저장)."""
     domains: List[str] = Field(default_factory=list, description='첫 항목 = 기본 홈 도메인, "ptt" 가 든 항목 = PTT 풀 도메인')
     listeners: Dict[str, SipListener] = Field(default_factory=dict)
+    dial_plan: Optional[DialPlanSpec] = Field(default=None, description='대상의 번호계획(접속서비스 country_code 와 같은 값) — 단계 invite.dial: national|international 이 '
+                                                                       '착신 역할의 E.164 신원을 그 꼴로 바꿔 다이얼한다(대상 CSP 다이얼 플랜 번역 시험). 없으면 그 단계는 컴파일 오류')
 
     @model_validator(mode='before')
     @classmethod
@@ -394,6 +404,8 @@ class PeerPool(_PoolBase):
     tls_client_auth: bool = Field(default=False, description='bind.protocol=tls — 수신점이 클라이언트 인증서를 요구(상호인증, 워커 Tls.CaFile 이 발급자). 대상 CSP 가 인증서를 내지 않으면 핸드셰이크 실패 = §12 과제 드러남')
     tls_verify: bool = Field(default=False, description='발신 TLS 연결(→ 대상 수신점·트렁크 REGISTER)에서 서버 인증서를 워커 Tls.CaFile 로 검증')
     tls_client_cert: bool = Field(default=False, description='발신 TLS 연결에 워커 Tls.ClientCertFile 을 클라이언트 인증서로 제시(대상 접속점이 상호인증을 요구할 때)')
+    dial_plan: Optional[DialPlanSpec] = Field(default=None, description='시드 Route 의 인바운드 다이얼 플랜(sip_service_model.md §2-10) — 이 피어가 국내형 DID 로 착신을 보낼 때 '
+                                                                       '대상 CSP 가 +E.164 로 번역한다(TRUNK-PBX-INBOUND-NATIONAL). 없으면 NNI 기본 = 국제형만')
     seed: PeerSeed = Field(default_factory=PeerSeed)
 
     @field_validator('dtmf', mode='before')
@@ -491,7 +503,7 @@ class TargetPeering(_Strict):
 
 
 class TargetCsp(_Strict):
-    """풀이 닿는 SIP 서버(워커 관점) — access 포트 + 도메인 + (피어 풀) 피어링 다음 홉."""
+    """풀이 닿는 SIP 서버(워커 관점) — access 포트 + 도메인 + (피어 풀) 피어링 다음 홉 + 번호계획(dial 변환)."""
     ip: str
     udp: int = 5060
     tcp: int = 25061
@@ -499,6 +511,7 @@ class TargetCsp(_Strict):
     domain_volte: Optional[str] = None
     domain_ptt: Optional[str] = None
     peering: Optional[TargetPeering] = None
+    dial_plan: Optional[DialPlanSpec] = Field(default=None, description='노드 sip.dial_plan — 워커가 invite.dial: national|international 의 다이얼 문자열을 만든다')
 
 
 class OamRef:
@@ -704,6 +717,8 @@ class Topology(_Strict):
                 kw['domain_ptt'] = None
         if p.kind == 'peer':
             kw['peering'] = TargetPeering(ip=ip, port=l.port, protocol=l.protocol, local_node=self.local_node_name(lid, l))
+        if node.sip.dial_plan is not None:
+            kw['dial_plan'] = node.sip.dial_plan
         return TargetCsp(**kw)
 
     def target_csc_for(self, pname: str) -> Optional[TargetCsc]:
@@ -811,7 +826,7 @@ STEP_VOCAB = {
     'register':      {'group': 'reg',   'actor': 'who',     'kind': 'ue|trunk', 'metrics': ['code', 'rrd_ms'], 'desc': '역할 단말 전부 등록 (prelude)'},
     'deregister':    {'group': 'reg',   'actor': 'who',     'kind': 'ue|trunk', 'metrics': ['code'], 'desc': 'run 종료 시 등록 해제 (epilogue)'},
     'wait':          {'group': 'reg',   'actor': 'seconds', 'kind': None,       'metrics': [], 'desc': '대기 (seconds)'},
-    'invite':        {'group': 'call',  'actor': 'fromto',  'kind': None,       'metrics': ['code', 'srd_ms', 'ser_pct', 'seer_pct', 'video_pct', 'fork_alert_pct', 'retrans_rx_pct', 'thig_pct'], 'desc': 'INVITE from → to (비동기). to 는 역할 또는 다이얼 번호 리터럴(대표번호 — 인스턴스의 다른 UE 역할이 포크 착신, ${var} 바인딩 가능). from 이 통화 중이면 상담 통화(두 번째 다이얼로그 — attended 전달의 전제)'},
+    'invite':        {'group': 'call',  'actor': 'fromto',  'kind': None,       'metrics': ['code', 'srd_ms', 'ser_pct', 'seer_pct', 'video_pct', 'fork_alert_pct', 'retrans_rx_pct', 'thig_pct'], 'desc': 'INVITE from → to (비동기). to 는 역할 또는 다이얼 번호 리터럴(대표번호 — 인스턴스의 다른 UE 역할이 포크 착신, ${var} 바인딩 가능). from 이 통화 중이면 상담 통화(두 번째 다이얼로그 — attended 전달의 전제). dial: national|international 이면 착신 역할의 E.164 를 그 꼴로 다이얼한다(대상 다이얼 플랜 번역 시험 — 노드 sip.dial_plan 필요)'},
     'progress':      {'group': 'peer',  'actor': 'who',     'kind': None,       'metrics': ['early_media_pct', 'early_rtp_pct', 'prack_pct'], 'desc': '183 Session Progress + SDP(early media) · 신뢰 1xx 면 PRACK — 피어(pbx/mgcf 링백) 또는 착신 UE(실 단말 안내음 모사; 그 뒤 answer 는 같은 answer 로 200)'},
     'answer':        {'group': 'call',  'actor': 'who',     'kind': None,       'metrics': ['code', 'srd_ms', 'ser_pct'], 'desc': '착신 대기 → after_ms 뒤 200'},
     'reject':        {'group': 'call',  'actor': 'who',     'kind': None,       'metrics': ['code', 'q850_rx_pct'], 'desc': '착신 대기 → payload 코드로 거절'},
@@ -981,11 +996,17 @@ class During(_Strict):
         return self
 
 
+DialForm = Literal['e164', 'national', 'international']
+
+
 class Step(_Strict):
     step: StepKind
     who: Optional[List[str]] = None
     from_: Optional[str] = Field(default=None, alias='from')
     to: Optional[str] = None
+    dial: Optional[DialForm] = Field(default=None, description='invite 만 — 착신 역할의 E.164 신원을 어떤 꼴로 다이얼하는가: e164(기본, +82…) · national(국내형 0… — 대상 노드 '
+                                                                'sip.dial_plan 의 접두) · international(국제 접두 00+82…). 대상 CSP 의 다이얼 플랜 번역(TS 24.229 §5.4.3.2) 시험. '
+                                                                '역할 대상에만(번호 리터럴 to 에는 못 둔다)')
     after_ms: Optional[int] = Field(default=None, ge=0)
     seconds: Optional[Union[int, str]] = Field(default=None, description='정수 또는 ${ht} 같은 바인딩')
     media: Optional[Media] = None
@@ -1142,6 +1163,11 @@ class Scenario(_Strict):
                 for ref in [*(d.who or []), d.from_, d.to]:
                     if ref and ref not in names:
                         raise ValueError(f'flow[{i}].during ({d.step}) 가 정의되지 않은 역할 {ref!r} 을 참조한다')
+            if s.dial is not None:
+                if s.step != 'invite':
+                    raise ValueError(f'flow[{i}] dial 은 invite 에만 둔다')
+                if not s.to or s.to not in names:
+                    raise ValueError(f'flow[{i}] invite dial={s.dial} 은 착신이 역할일 때만 — 번호 리터럴 to 는 이미 다이얼 꼴이다')
         self._check_group_session(names)
         self._check_dialog_learning()
         # 송출 제어(media_send/media_stop)는 그 호에서 SDP 가 오간 뒤(183 progress 또는 200 answer)에만, rtp: none 인 호에는 못 둔다
@@ -1389,6 +1415,7 @@ class CompiledStep(_Strict):
     who: List[str] = Field(default_factory=list, description='역할 이름 — 워커는 roles 매핑으로 풀을 찾는다')
     from_: Optional[str] = Field(default=None, alias='from')
     to: Optional[str] = None
+    dial: Optional[DialForm] = Field(default=None, description='invite — 착신 역할 신원의 다이얼 꼴(e164|national|international, 풀 target_csp.dial_plan 으로 변환)')
     after_ms: int = 0
     seconds: Optional[int] = None
     media: Optional[Media] = None

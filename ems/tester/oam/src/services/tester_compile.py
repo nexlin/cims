@@ -242,8 +242,8 @@ def compile_steps(scenario: Scenario, bindings: Dict[str, object]) -> List[dict]
         raise CompileError(f'워커가 지원하지 않는 단계 {unsupported} — 지원: {sorted(WORKER_STEPS)}')
 
     def emit(i, step, who=None, from_=None, to=None, after_ms=0, seconds=None, media=None, group=None,
-             payload=None, cause=None, expect=None, sample=None, loop=None, disposition=None, plane=None):
-        cs = CompiledStep(idx=len(out), step=step, who=list(who or []), **{'from': from_}, to=to,
+             payload=None, cause=None, expect=None, sample=None, loop=None, disposition=None, plane=None, dial=None):
+        cs = CompiledStep(idx=len(out), step=step, who=list(who or []), **{'from': from_}, to=to, dial=dial,
                           after_ms=int(after_ms or 0), seconds=seconds, media=media, group=group,
                           payload=payload, cause=cause, sample=sample, loop=loop, disposition=disposition, plane=plane, expect=expect or {})
         d = cs.model_dump(by_alias=True, exclude_none=True)
@@ -272,7 +272,7 @@ def compile_steps(scenario: Scenario, bindings: Dict[str, object]) -> List[dict]
         emit(i, s.step, who=s.who, from_=s.from_, to=bind_str(s.to, bindings) if s.to not in scenario.roles else s.to,
              after_ms=s.after_ms, seconds=seconds, media=s.media,
              group=s.group, payload=payload, cause=s.cause, expect=s.expect, sample=s.sample, loop=s.loop,
-             disposition=s.disposition, plane=s.plane)
+             disposition=s.disposition, plane=s.plane, dial=s.dial)
     return out
 
 
@@ -479,6 +479,22 @@ def initial_rate(profile: LoadProfile) -> float:
     return 0.0
 
 
+def check_dial_gates(scenario: Scenario, topology: Topology, role_pool: Dict[str, str]) -> None:
+    """`invite.dial: national|international` — 발신 역할의 풀이 닿는 SIP 노드에 `sip.dial_plan`(국가코드·접두)이 있어야 워커가 착신 E.164 를
+    그 꼴로 바꿀 수 있다(sip_service_model.md §2-10 대상 번역 시험). 착신 역할의 신원이 `+<국가코드>` 로 시작하지 않으면 워커가 그대로 다이얼한다."""
+    for i, st in enumerate(scenario.flow):
+        if st.step != 'invite' or st.dial in (None, 'e164'):
+            continue
+        pn = role_pool.get(st.from_ or '', '')
+        if pn not in topology.pools:
+            continue
+        tc = topology.target_csp_for(pn)
+        if tc.dial_plan is None:
+            nid = topology.pool_node(pn)
+            raise CompileError(f'flow[{i}] invite dial={st.dial}: 역할 {st.from_!r} 의 풀 {pn} 이 닿는 노드 {nid} 에 sip.dial_plan(country_code) 이 없다 — '
+                               f'대상 접속서비스 country_code 와 같은 값을 토폴로지에 둔다')
+
+
 def check_fd_gates(scenario: Scenario, topology: Topology, role_pool: Dict[str, str], ids_of) -> None:
     """MCData FD 단계 게이트 — fd_send 의 from · fd_recv(download) 의 who 는 ① 풀이 CSC 에 닿아야 하고(target_csc — subscriber 노드 api)
     ② 신원 전부에 IdMS 로그인(login)이 있어야 한다(토큰 없이는 /mcdata/fd 가 401). fd_recv payload signal 은 도착만 보므로 ②를 요구하지 않는다."""
@@ -561,6 +577,7 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
         check_register_roles(scenario, topology, role_pool)
         check_kind_gates(scenario, topology, role_pool)
         check_fd_gates(scenario, topology, role_pool, ids_of)
+        check_dial_gates(scenario, topology, role_pool)
         sizes = {pn: len(ids_of(pn)) for pn in set(role_pool.values())}
         if group_session:
             # 그룹 세션 — 멤버 역할은 신원 창을 나누지 않는다(그룹 멤버가 풀 전체에 걸쳐 있다). 멤버 역할 = 그룹 풀 전체, 배정은 워커가 그룹 단위로.

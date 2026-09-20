@@ -59,6 +59,11 @@ bool CCspRouteMap::Sync() {
                              c.name.c_str(), c.inbound_auth.c_str() );
                 c.inbound_auth = "none";
             }
+            // 인바운드 다이얼 플랜(§2-10) — 피어가 국내형 DID 를 보낼 때만 country_code 를 둔다
+            c.dial_plan.country_code = row.GetString( "country_code" );
+            c.dial_plan.national_prefix = row.Has( "national_prefix" ) ? row.GetString( "national_prefix" ) : "0";
+            c.dial_plan.international_prefix =
+                row.Has( "international_prefix" ) ? row.GetString( "international_prefix" ) : "00";
             c.enabled = _boolish( row.GetString( "enabled" ), true );
             c.tags = _readStringArray( row.Get( "tags" ) );
             c.note = row.GetString( "note" );

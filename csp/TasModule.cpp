@@ -16,6 +16,7 @@
 #include "CallMap.h"
 #include "CmpClient.h"
 #include "CspAddressing.h"
+#include "CspDialPlan.h"
 #include "CspPhoneGroup.h"
 #include "CspRole.h"
 #include "CspServiceMap.h"
@@ -612,7 +613,12 @@ bool CTasModule::IsPickupDial( const char *pszFrom, const char *pszTo, std::stri
     const size_t iLen = strCode.size();
     if ( strncmp( pszTo, strCode.c_str(), iLen ) != 0 ) return false;
     if ( pszTo[iLen] == '\0' ) return true;  // 그룹 픽업
-    strTarget = pszTo + iLen;                // 지정 픽업 — "<code><내선>"
+    strTarget = pszTo + iLen;                // 지정 픽업 — "<code><번호>"
+    // 국내형 지정 대상은 가입자 플랜으로 +E.164 로(sip_service_model.md §2-10). 내선 라벨(접두 없는 짧은 숫자열)은
+    //   INCOMPLETE 라 그대로 남는다 — PickUp 이 끝자리 라벨 매칭으로 푼다
+    std::string strNorm;
+    if ( CspDialPlan::Normalize( strTarget, "", clsSvc.dial_plan, strNorm ) == DIAL_PLAN_TRANSLATED )
+        strTarget = strNorm;
     return true;
 }
 

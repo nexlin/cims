@@ -405,9 +405,19 @@ void Worker::destroyPool(Pool* pool) {
     }
 }
 
+// 대상 번호계획(target_csp.dial_plan) → 풀 dial* 접두 — 단계 invite.dial 의 다이얼 문자열 변환(sip_service_model.md §2-10 시험)
+static void readDialPlan(Pool* pool, const Json& tc) {
+    const Json& dp = tc["dial_plan"];
+    if (!dp.isObject()) return;
+    pool->dialCountryCode = dp["country_code"].asString();
+    pool->dialNationalPrefix = dp["national_prefix"].asString("0");
+    pool->dialInternationalPrefix = dp["international_prefix"].asString("00");
+}
+
 bool Worker::buildUePool(Pool* pool, const Json& d, std::string& err) {
     const Json& tc = d["target_csp"];
     pool->targetIp = tc["ip"].asString();
+    readDialPlan(pool, tc);
     pool->targetPort = (int)(pool->transport == "tls" ? tc["tls"].asInt(5061)
                              : pool->transport == "tcp" ? tc["tcp"].asInt(25061) : tc["udp"].asInt(5060));
     if (pool->targetIp.empty()) { err = "target_csp.ip_required"; return false; }
@@ -534,6 +544,7 @@ bool Worker::buildPeerPool(Pool* pool, const Json& d, std::string& err) {
     const Json& tc = d["target_csp"];
     const Json& pr = tc["peering"];
     pool->targetIp = pr["ip"].asString(tc["ip"].asString());
+    readDialPlan(pool, tc);
     pool->targetPort = (int)(pr.isObject() ? pr["port"].asInt(tc["udp"].asInt(5060)) : tc["udp"].asInt(5060));
     pool->transport = pr.isObject() ? pr["protocol"].asString("udp") : "udp";
     pool->profile = pc.profile;
@@ -581,6 +592,7 @@ bool Worker::buildRealUePool(Pool* pool, const Json& d, std::string& err) {
     if (m_cfg.realUeCli.empty() || access(m_cfg.realUeCli.c_str(), X_OK) != 0) { err = "real_ue_cli_missing: " + (m_cfg.realUeCli.empty() ? std::string("RealUe.CliPath 비어 있음") : m_cfg.realUeCli); return false; }
     const Json& tc = d["target_csp"];
     pool->targetIp = tc["ip"].asString();
+    readDialPlan(pool, tc);
     pool->targetPort = (int)(pool->transport == "tls" ? tc["tls"].asInt(5061)
                              : pool->transport == "tcp" ? tc["tcp"].asInt(25061) : tc["udp"].asInt(5060));
     if (pool->targetIp.empty()) { err = "target_csp.ip_required"; return false; }
@@ -852,6 +864,7 @@ HttpResponse Worker::runStart(const Json& d) {
         for (size_t k = 0; k < s["who"].size(); ++k) cs.who.push_back(s["who"].at(k).asString());
         cs.from = s["from"].asString();
         cs.to = s["to"].asString();
+        cs.dial = s["dial"].asString();
         cs.afterMs = (int)s["after_ms"].asInt(0);
         cs.seconds = (int)s["seconds"].asInt(0);
         cs.cause = (int)s["cause"].asInt(0);
@@ -1758,11 +1771,23 @@ static int codecPtOf(const std::string& name) {
     return -1;
 }
 
-bool Worker::epStartCall(Endpoint* from, Endpoint* to, const Json& media, const std::string& dial) {
+std::string Worker::dialFormOf(const Endpoint* to, const std::string& form, const Pool* fromPool) {
+    // 착신 역할의 신원(+E.164)을 발신 풀 대상의 번호계획으로 바꾼다 — national: +<cc>… → <national_prefix>… · international: +… → <international_prefix>…
+    //   (대상 CSP 다이얼 플랜 번역 시험, sip_service_model.md §2-10). 꼴이 e164/빈 값이거나 신원이 +<cc> 로 시작하지 않으면 그대로
+    if (!to || form.empty() || form == "e164" || !fromPool) return to ? to->id.user : std::string();
+    const std::string& u = to->id.user;
+    if (u.empty() || u[0] != '+') return u;
+    if (form == "international") return fromPool->dialInternationalPrefix + u.substr(1);
+    if (form == "national" && !fromPool->dialCountryCode.empty() && u.compare(1, fromPool->dialCountryCode.size(), fromPool->dialCountryCode) == 0)
+        return fromPool->dialNationalPrefix + u.substr(1 + fromPool->dialCountryCode.size());
+    return u;
+}
+
+bool Worker::epStartCall(Endpoint* from, Endpoint* to, const Json& media, const std::string& dial, const std::string& dialForm) {
     if (from->isPeer()) {
         Pool* pool = from->poolRef;
-        // to 없으면 번호 리터럴(대표번호·DID) — 피어는 상대(대상) 도메인으로 부른다
-        std::string callId = pool->peer->StartCall(from->id.user, to ? to->id.user : dial, to ? to->id.domain : pool->targetDomain,
+        // to 없으면 번호 리터럴(대표번호·DID) — 피어는 상대(대상) 도메인으로 부른다. dialForm 이면 착신 신원을 국내형/국제 꼴로(대상 Route 플랜 번역 시험)
+        std::string callId = pool->peer->StartCall(from->id.user, to ? dialFormOf(to, dialForm, pool) : dial, to ? to->id.domain : pool->targetDomain,
                                                    pool->targetIp, pool->targetPort, parseTransport(pool->transport), rtpModeOf(media));
         if (callId.empty()) return false;
         from->callId = callId;
@@ -1777,7 +1802,7 @@ bool Worker::epStartCall(Endpoint* from, Endpoint* to, const Json& media, const 
     if (from->isReal()) {
         // 실단말 — dial <번호|user@도메인>. 두 번째 다이얼로그(상담 통화)는 지원하지 않는다(컴파일 게이트). 오퍼 코덱은 실스택 것
         if (from->realCall >= 0 || from->inCall) return false;
-        std::string target = to ? to->id.user : dial;
+        std::string target = to ? dialFormOf(to, dialForm, from->poolRef) : dial;
         if (to && to->isPeer() && to->poolRef->profile == "ibcf") target += "@" + to->id.domain;
         Json r = realRequest(from, "dial " + target + (from->realVideo ? " video" : ""));
         if (!r["ok"].asBool(false)) { emitEvent("real-ue dial refused: " + r["reason"].asString(), from, "invite", 0); return false; }
@@ -1791,7 +1816,8 @@ bool Worker::epStartCall(Endpoint* from, Endpoint* to, const Json& media, const 
     from->s->SetOfferCodec(codecPtOf(media["audio"].asString("")));
     // UE 가 피어 신원을 부를 때 — ibcf(타 IMS) 는 user@피어도메인(Request-URI host → req_uri_host 규칙), pbx/mgcf 는 번호 그대로
     //   (DID/E.164 — CSP 가 번호 prefix 규칙으로 트렁크를 고른다, 실 단말이 다이얼하는 꼴)
-    std::string target = to ? to->id.user : dial;   // 역할 없는 번호 리터럴(대표번호) 은 실 단말이 다이얼하는 꼴 그대로
+    //   dialForm(national|international) 이면 착신 역할의 +E.164 를 그 꼴로 — 대상 CSP 다이얼 플랜이 번역해야 착신에 닿는다
+    std::string target = to ? dialFormOf(to, dialForm, from->poolRef) : dial;   // 역할 없는 번호 리터럴(대표번호) 은 실 단말이 다이얼하는 꼴 그대로
     if (to && to->isPeer() && to->poolRef->profile == "ibcf") target += "@" + to->id.domain;
     if (from->inCall && !from->s->m_strInviteId.empty()) {
         // 통화 중인 단말의 두 번째 INVITE = 상담 통화(consultation, 두 번째 다이얼로그) — attended transfer(RFC 3515 + Refer-To Replaces)의 전제.
@@ -2562,7 +2588,7 @@ void Worker::execStep(Instance& in, long long now) {
                 m_metrics.counter("fork_expected", expected);
                 m_metrics.counter("fork_dial_tx");
             }
-            if (!epStartCall(from, to, st.media, dial ? st.to : std::string())) { finishInstance(in, true, "invite: StartCall refused (busy/stack/consult?)", now); return; }
+            if (!epStartCall(from, to, st.media, dial ? st.to : std::string(), st.dial)) { finishInstance(in, true, "invite: StartCall refused (busy/stack/consult?)", now); return; }
             if (from->outKind == "consult") from->consultTo = st.to;
             noteCallId(&in, from->isPeer() ? from->callId : from->isReal() ? std::string() : from->outKind == "consult" ? from->consultCallId : from->s->m_strInviteId);
             m_metrics.counter("legs", 2);

@@ -22,7 +22,7 @@
 | 요구 | 결론 |
 |---|---|
 | USIM 없는 단말 | **이미 지원** — `auth_scheme=digest` + `sip_transport=TLS` + `ha1`. USIM 자료(k/opc) 불요. 신규 코드 없음, 규약만 고정(§3) |
-| 내선번호 | **가입 id(AoR) = E.164**, 내선 = 표시 라벨(끝자리 N — `Provisioning.ExtensionDigits`)(§4). 서버 다이얼 플랜 없음 — 내선 확장은 단말이 한다. 별칭(내선을 망 주소로) 계층은 향후 과제(§9) |
+| 내선번호 | **가입 id(AoR) = E.164**, 내선 = 표시 라벨(끝자리 N — `Provisioning.ExtensionDigits`)(§4). 서버 다이얼 플랜은 **국가코드 번역**([sip_service_model.md §2-10](sip_service_model.md) — 국내형 `0…` → `+82…`, 규격 TS 24.229 §5.4.3.2)까지다. 내선 확장은 단말이 한다. 별칭(내선을 망 주소로) 계층은 향후 과제(§9) |
 | 당겨받기 | 기존 `PickUp()` 경로를 보완 — 그룹 축을 `pickup_group`(= 전화 그룹 id)으로 독립(§5), 미디어를 CMP 경유로 정합(§7) |
 | 호 전달 | psip REFER(blind/attended) 위에 미디어 재고정을 `RELAY_MODIFY` 로 정합(§6, §7) |
 
@@ -84,10 +84,12 @@ INVITE 경로에 DB 질의를 넣지 않는다 — 모든 신규 판정(내선 �
 
 ## 4. 내선 다이얼링
 
-서버에는 **다이얼 플랜 계층이 없다.** INVITE 의 To user 는 항상 E.164 이고 기존 `EventIncomingCall` 의
-`gclsCspUserMap.isAlive(pszTo)` 조회가 그대로 맞는다. 내선 다이얼(짧은 번호로 걸기)은 단말이 한다 — 관제 앱의 빠른
-발신 줄·그룹원 띠는 프로비저닝이 내려준 `extension` 라벨을 같은 전화 그룹/조직의 E.164 로 확장해 건다
-([dispatch_desktop_ui.md](dispatch_desktop_ui.md) §4.3). 데스크폰은 단축 다이얼 또는 전화번호부로 대신한다.
+서버 다이얼 플랜은 **국가코드 번역**만 한다([sip_service_model.md §2-10](sip_service_model.md) — TS 24.229 §5.4.3.2). 착신은
+Request-URI 번호이고, 국내형(`0210001010`)·`phone-context` 는 접속서비스의 `country_code` 로 `+E.164` 로 번역돼
+`EventIncomingCall` 의 `gclsCspUserMap.isAlive(callee)` 조회에 닿는다. 접두 없는 짧은 숫자열(내선 라벨)은 서버가 번역할 수 없어
+484 다 — 내선 다이얼(짧은 번호로 걸기)은 단말이 한다. 관제 앱의 빠른 발신 줄·그룹원 띠는 프로비저닝이 내려준 `extension`
+라벨을 같은 전화 그룹/조직의 E.164 로 확장해 건다([dispatch_desktop_ui.md](dispatch_desktop_ui.md) §4.3). 데스크폰은 단축
+다이얼 또는 전화번호부로 대신한다. 지정 픽업 `**<번호>` 의 대상도 같은 번역을 거친다(내선 라벨은 그대로 끝자리 매칭).
 
 내선을 망 주소(별칭)로 받아야 하는 요구가 생기면, 그때 별칭 인덱스를 `CspUserMap` 에 두고(`isAlive` 직전 정규화,
 인메모리) CSC 에 SoT 컬럼을 신설한다 — routing-policy 의 예약 필드 `transform_rule_set_refs` 를 이 용도로 실체화하는

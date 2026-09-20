@@ -269,7 +269,8 @@ run 전에 대상 OAM 의 컬렉션 API(`PUT /api/v1/deployments/{id}/collection
 - **시드 파생 규칙**(`tester_target.derive_records`, 태그 `cims-tester` 로 재실행 시 잔재 제거): 시나리오 **역할이 선언한** 피어 풀만
   (`seed.enabled`) — 같은 `route_set` 의 형제라도 선언하지 않으면 시드하지 않는다(워커가 열지 않은 피어를 CSP 가 고르면 호가 죽는다).
   풀 P 마다 `tester-rn-P`(remote_node — 주소는 `bind.ip` → 워커 호스트)·`tester-r-P`(route, `local_node_ref` = 그 풀이 가리킨 수신점의 LocalNode,
-  **`inbound_auth: none`** — CSP 는 이 Route 로 식별한 요청을 Digest 없이 받는다)·`tester-rule-P-domain`(`req_uri_host eq`),
+  **`inbound_auth: none`** — CSP 는 이 Route 로 식별한 요청을 Digest 없이 받는다; 풀 `dial_plan` 이 있으면 `country_code/national_prefix/international_prefix`
+  = 인바운드 다이얼 플랜, sip_service_model.md §2-10)·`tester-rule-P-domain`(`req_uri_host eq`),
   `seed.route_set`(기본 = 풀 이름)마다 `tester-rs-<set>`(members = priority/weight, `health_check_mode: none`)·`tester-rs-<set>-match`(OR)·
   `tester-rp-<set>`(priority 50 → route_set, fail_action reject). `seed.acl: allow|deny` 면 `src_ip eq <피어 수신점 ip>` 규칙 + ACL 정책
   **scope=route(그 피어의 Route)** — CSP 가 (수신 접속점, 소스 주소) 로 인바운드 Route 를 식별하므로 같은 접속점의 UE 나 다른 피어에는 걸리지 않는다.
@@ -304,8 +305,10 @@ run 전에 대상 OAM 의 컬렉션 API(`PUT /api/v1/deployments/{id}/collection
   쪽, bind 와 같은 transport, psip 등록 스레드가 401 을 처리). 결과로 풀 신원 전부를 `registered` 로 표시(계정 하나가 DID 범위 대표). 시나리오
   `register who: [pbx]` 는 트렁크 계정이 있는 피어 풀만 허용(컴파일·워커 양쪽 검사). 등록 실패면 그 역할의 free 단말이 없어 run 이 곧 닫힌다.
 - **다이얼·시드** — UE 가 피어 신원을 부르는 꼴은 프로파일이 정한다: ibcf = `user@피어도메인`(Request-URI host → `req_uri_host eq` 규칙), **pbx/mgcf =
-  번호 그대로**(DID/E.164 — 실 단말이 다이얼하는 꼴). 시드 매칭 집합은 도메인 규칙 OR **번호 접두 규칙**(`req_uri_user prefix` = 신원 범위의 공통 접두,
-  `tester-rule-<풀>-prefix`) — CSP 가 자기 도메인 Request-URI 의 번호 접두로 트렁크 RouteSet 을 고르는 것을 실측 확인(BGCF 식 번호 라우팅).
+  번호 그대로**(DID/E.164 — 실 단말이 다이얼하는 꼴). 시드 매칭 집합은 도메인 규칙 OR **번호 대역 규칙**(`req_uri_user in_range lo-hi` = 신원 범위 그대로,
+  `tester-rule-<풀>-range` — sip_service_model.md §2-5) — CSP 가 자기 도메인 Request-URI 의 번호로 트렁크 RouteSet 을 고른다(BGCF 식 번호 라우팅).
+  대역은 접두가 아니라 정확한 구간이라 10진 경계에 맞지 않는 블록(1010~1014 / 1015~1019)을 두 풀(고정 IP / 등록형)로 나눠도 규칙이 겹치지 않는다.
+  CSP 는 다이얼 플랜 번역(§2-10) 뒤의 `+E.164` 와 비교하므로 피어 신원 범위는 국제형으로 적는다.
 - **오퍼 코덱** — `invite` 의 `media.audio`(pcmu/pcma/amr-wb …)를 UE 오퍼 코덱으로 쓴다(`SimSession::SetOfferCodec`). 협상 코덱이 AMR-WB 가 아니면 파일
   미디어 대신 합성 PCMU(G.711 PT 로 스탬프) — pbx 상대 G.711 relay 경로와 AMR-WB 단독 오퍼(488, cmp.md §11 트랜스코딩 전) 를 시나리오가 고른다.
   **G.722**(`media.audio: g722` / 피어 `codecs: [G722, …]`) — SIPconnect 2.0 선택 광대역 코덱, PT 9 합성·샘플 원천(동봉 `trunk/pbx_g722`, pbx_wb 풀).
@@ -504,6 +507,13 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
   승자 외 링잉 leg 의 서버 CANCEL(487)은 정상(`ringing_leg_cancelled`), P-Called-Party-ID 가 다이얼한 번호를 실으면 `pcpid_ok`. sequential alerting 은
   `srd_ms.min ≥ 단계 시한` 으로, 무응답 overflow 는 `answer who: overflow`(포크가 CANCEL 된 뒤 도착하는 착신을 기다린다)로 본다. 동봉 `volte/fa_{parallel,
   overflow,pickup,sequential}` — 전화 그룹·pilot 은 대상 DB 픽스처(검증 다리가 계획의 역할 신원에 입힌다, S3-SCN-FA F1/F3/F5/F6).
+- **다이얼 꼴(대상 번호 번역 시험 — [sip_service_model.md §2-10](sip_service_model.md), TS 24.229 §5.4.3.2)** — `invite.dial: e164(기본)|national|international`.
+  착신이 **역할**일 때 워커가 그 신원의 `+E.164` 를 발신 풀 대상 노드의 `sip.dial_plan{country_code, national_prefix, international_prefix}` 로 국내형(`+82…`→`0…`)·
+  국제 접두(`+…`→`00…`) 꼴로 바꿔 다이얼한다(`Worker::dialFormOf`, 계약 `PoolCreate.target_csp.dial_plan`·`CompiledStep.dial`). 대상 CSP 의 접속서비스
+  `country_code` 가 같은 값이면 Request-URI 가 `+E.164` 로 번역돼 착신에 닿고, 없으면 404(플랜 비활성) 또는 484(번역 불가)로 SER 0 이 드러난다. 노드에 `dial_plan`
+  이 없으면 컴파일 오류(`check_dial_gates`). 피어 풀 `dial_plan{country_code,…}` 은 시드 **Route 의 인바운드 플랜**(`routes.country_code/national_prefix/
+  international_prefix`) — 피어(IP-PBX)가 국내형 DID 로 보낸 착신을 CSP 가 번역한다. 동봉 `volte/call_national_dial`(VOLTE-CALL-NATIONAL-DIAL)·
+  `volte/call_international_dial`(VOLTE-CALL-INTL-DIAL)·`trunk/pbx_inbound_national`(TRUNK-PBX-INBOUND-NATIONAL). 번호 리터럴 `to` 에는 `dial` 을 못 둔다(이미 다이얼 꼴).
   워커 지원 = `register/invite/progress/answer/reject/bye/hold/resume/dtmf/refer/media_hold/media_send/media_stop/wait/expect/deregister/group_call/floor_request/floor_release/
   pickup/subscribe/replaces/join/publish/sds_send/sds_recv/fd_send/fd_recv/check`. `subscribe` 의 `to` 는 역할 또는 대표번호 리터럴(`${pilot}` — 그룹원 BLF 감시), `payload: conference` 는 그룹 AoR(`group` 또는
   인스턴스 그룹 — TS 24.379 §10.1.3.4.1 인가 판정 200/403 Warning 138). **`check`**(who·payload·after_ms) = 관측 정합 판정 — `conference_roster_visible|hidden`(who 의 conference NOTIFY

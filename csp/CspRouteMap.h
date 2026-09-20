@@ -23,6 +23,8 @@
 
 #include <atomic>
 
+#include "CspDialPlan.h"
+
 struct RouteConfig {
     std::string id;
     std::string name;
@@ -42,6 +44,9 @@ struct RouteConfig {
     /** 이 Route 로 들어온 요청의 인증 — "none"(기본, 신뢰 피어: Digest 없음) | "digest"(가입자 인증 흐름 — 등록형
      * 트렁크). */
     std::string inbound_auth = "none";
+    /** 인바운드 다이얼 플랜(sip_service_model.md §2-10) — 이 Route 의 피어(IP-PBX 등)가 국내형으로 보낸 착신을 +E.164
+     * 로 번역하는 규칙. country_code 가 비면 번역 없음(국제형만 받는 NNI — TS 29.163/29.165 기본). */
+    DialPlan dial_plan;
     bool enabled = true;
     std::vector<std::string> tags;
     std::string note;

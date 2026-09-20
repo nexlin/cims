@@ -7,6 +7,7 @@
 #include <sstream>
 
 #include "CspConfigCache.h"
+#include "CspDialPlan.h"
 #include "Log.h"
 #include "SimpleJson.h"
 
@@ -202,6 +203,10 @@ bool CspRuleEvaluator::_applyOp( const std::string &fv, const std::string &op, c
         }
     }
     if ( op == "in_cidr" ) return _cidrMatch( fv, val );
+    // 번호 대역 "lo-hi" — 접두로 표현되지 않는 대역 라우팅(BGCF 식). 번역 뒤의 착신(+E.164)과 값의 `+` 는 무시하고 같은
+    // 자릿수의
+    //   digits 로 비교한다(CspDialPlan::InNumberRange, sip_service_model.md §2-5)
+    if ( op == "in_range" ) return CspDialPlan::InNumberRange( fv, val );
     if ( op == "in_list" ) {
         auto items = _splitList( val );
         for ( const auto &it : items )
