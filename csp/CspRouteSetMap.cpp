@@ -147,6 +147,16 @@ bool CCspRouteSetMap::HasName( const std::string &name ) const {
 
 std::string CCspRouteSetMap::SelectRoute( const std::string &routeSetName, const std::string &hashKey,
                                           std::string &outReason ) {
+    return SelectRoute( routeSetName, hashKey, outReason, std::set<std::string>() );
+}
+
+bool CCspRouteSetMap::_usable( const std::string &routeRef, const std::set<std::string> &exclude ) const {
+    if ( exclude.count( routeRef ) ) return false;  // 이 호에서 이미 실패한 Route — 재라우팅 후보에서 제외
+    return gclsRouteMap.IsAlive( routeRef );
+}
+
+std::string CCspRouteSetMap::SelectRoute( const std::string &routeSetName, const std::string &hashKey,
+                                          std::string &outReason, const std::set<std::string> &exclude ) {
     // RouteMap.IsAlive 는 자체 mutex 를 쓰므로 m_mutex 를 잡은 채 호출해도 교차 lock 없음.
     std::lock_guard<std::mutex> lk( m_mutex );
     auto it = m_byName.find( routeSetName );
@@ -165,26 +175,28 @@ std::string CCspRouteSetMap::SelectRoute( const std::string &routeSetName, const
     }
 
     const std::string &pol = e.cfg.distribution_policy;
-    if ( pol == "round_robin" ) return _selectRoundRobin( e, outReason );
-    if ( pol == "weighted" ) return _selectWeighted( e, outReason );
-    if ( pol == "hash_by_caller" ) return _selectHashByCaller( e, hashKey, outReason );
-    return _selectFailover( e, outReason );  // default
+    if ( pol == "round_robin" ) return _selectRoundRobin( e, outReason, exclude );
+    if ( pol == "weighted" ) return _selectWeighted( e, outReason, exclude );
+    if ( pol == "hash_by_caller" ) return _selectHashByCaller( e, hashKey, outReason, exclude );
+    return _selectFailover( e, outReason, exclude );  // default
 }
 
-std::string CCspRouteSetMap::_selectFailover( RouteSetEntry &e, std::string &outReason ) {
+std::string CCspRouteSetMap::_selectFailover( RouteSetEntry &e, std::string &outReason,
+                                              const std::set<std::string> &exclude ) {
     // priority 오름차순 정렬 후 alive 첫번째
     std::vector<RouteSetMember> sorted = e.cfg.members;
     std::sort( sorted.begin(), sorted.end(),
                []( const RouteSetMember &a, const RouteSetMember &b ) { return a.priority < b.priority; } );
     for ( const auto &m : sorted ) {
         if ( m.weight == 0 ) continue;  // weight=0 은 분배 제외
-        if ( gclsRouteMap.IsAlive( m.route_ref ) ) return m.route_ref;
+        if ( _usable( m.route_ref, exclude ) ) return m.route_ref;
     }
     outReason = "all routes dead (failover)";
     return "";
 }
 
-std::string CCspRouteSetMap::_selectRoundRobin( RouteSetEntry &e, std::string &outReason ) {
+std::string CCspRouteSetMap::_selectRoundRobin( RouteSetEntry &e, std::string &outReason,
+                                                const std::set<std::string> &exclude ) {
     int n = (int)e.cfg.members.size();
     if ( n <= 0 ) {
         outReason = "no members";
@@ -195,7 +207,7 @@ std::string CCspRouteSetMap::_selectRoundRobin( RouteSetEntry &e, std::string &o
         int idx = ( start + tries ) % n;
         const RouteSetMember &m = e.cfg.members[idx];
         if ( m.weight == 0 ) continue;
-        if ( gclsRouteMap.IsAlive( m.route_ref ) ) {
+        if ( _usable( m.route_ref, exclude ) ) {
             e.rt.rr_cursor.store( ( idx + 1 ) % n );
             return m.route_ref;
         }
@@ -204,7 +216,8 @@ std::string CCspRouteSetMap::_selectRoundRobin( RouteSetEntry &e, std::string &o
     return "";
 }
 
-std::string CCspRouteSetMap::_selectWeighted( RouteSetEntry &e, std::string &outReason ) {
+std::string CCspRouteSetMap::_selectWeighted( RouteSetEntry &e, std::string &outReason,
+                                              const std::set<std::string> &exclude ) {
     // Deficit-round-robin 근사: 가중치 합 단위로 순회, 각 membership 의 weight 만큼 선택권.
     // 단순 구현: 누적 weight 를 모아 전체 합에서 커서를 쪼개 선택.
     int n = (int)e.cfg.members.size();
@@ -226,7 +239,7 @@ std::string CCspRouteSetMap::_selectWeighted( RouteSetEntry &e, std::string &out
         for ( const auto &m : e.cfg.members ) {
             if ( m.weight <= 0 ) continue;
             if ( t < m.weight ) {
-                if ( gclsRouteMap.IsAlive( m.route_ref ) ) {
+                if ( _usable( m.route_ref, exclude ) ) {
                     e.rt.rr_cursor.store( ( e.rt.rr_cursor.load() + 1 ) % totalW );
                     return m.route_ref;
                 }
@@ -241,7 +254,7 @@ std::string CCspRouteSetMap::_selectWeighted( RouteSetEntry &e, std::string &out
 }
 
 std::string CCspRouteSetMap::_selectHashByCaller( const RouteSetEntry &e, const std::string &key,
-                                                  std::string &outReason ) {
+                                                  std::string &outReason, const std::set<std::string> &exclude ) {
     int n = (int)e.cfg.members.size();
     if ( n <= 0 ) {
         outReason = "no members";
@@ -253,7 +266,7 @@ std::string CCspRouteSetMap::_selectHashByCaller( const RouteSetEntry &e, const 
         int idx = (int)( ( h + tries ) % n );
         const RouteSetMember &m = e.cfg.members[idx];
         if ( m.weight == 0 ) continue;
-        if ( gclsRouteMap.IsAlive( m.route_ref ) ) return m.route_ref;
+        if ( _usable( m.route_ref, exclude ) ) return m.route_ref;
     }
     outReason = "all routes dead (hash)";
     return "";

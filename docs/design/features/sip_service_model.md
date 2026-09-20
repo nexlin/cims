@@ -169,6 +169,15 @@ Peering cluster (1:1:1, 1 active + N standby 등) 를 표현.
 - `weight: 0` 인 member 는 모든 정책에서 **분배 제외**
 - 참조가 깨진 member 는 RouteSet 을 유지한 채 선택에서만 skip
 
+**재라우팅(실패 응답 기반 failover)** — `ModuleDispatcher::TryRerouteLeg`. RoutingPolicy 가 고른 피어 B-leg 가 **확립 전** 5xx·408·
+410(전송 타임아웃 — Timer B)으로 끝나면 CSP 는 그 코드를 발신자에게 넘기지 않고 **같은 RouteSet 에서 이미 실패한 Route 를 제외해 다시
+선택**(`SelectRoute(…, exclude)`, 분배 정책 그대로)하고, 실패 leg 가 냈던 오퍼(relay 재작성·코덱 삽입 포함)와 From/To 로 새 B-leg INVITE 를 낸다
+— RFC 3261 §16.7 순차 forking(실패 응답 뒤 다음 대상 시도), TS 24.229 §5.10 IBCF alternative routing. A-leg·CMP relay 세션·SDES·코덱
+상태는 그대로 이어지고(CallMap 은 A↔새 B 로 교체, 실패 Route 는 `m_vecRoutesTried` 에 누적) 세션 로그·sesid 도 승계된다. 4xx(486·404 등)·
+6xx 는 상대가 판단을 내린 것이라 재라우팅하지 않는다(§16.7 — 6xx 는 즉시 종결). 후보가 없으면(전부 시도·dead) 종전대로 실패 코드를
+A 에 전달한다(`RelayEndStatus`). 헬스체크(OPTIONS)는 죽은 피어를 **미리** 빼고, 재라우팅은 헬스체크가 아직 못 본 실패를 **호 단위로** 구제한다
+— 둘이 보완한다. 검증 = 계측기 `TRUNK-IBCF-FAILOVER-5XX`(우선 피어 503 → 다음 피어)·`TRUNK-IBCF-FAILOVER`(무응답 — 헬스체크 dead 뒤 다음 피어).
+
 ### 2-5. Rule — 원자 조건
 
 SIP 메시지의 한 필드 + 연산자 + 값.
@@ -249,7 +258,7 @@ Rule Set 이 match 하면 target 으로 호를 routing.
 | `target_type` | `route_set` / `access_service` / `reject` |
 | `target_ref` | target_type 에 따른 참조 대상 |
 | `transform_rule_set_refs[]` | **예약 필드** — 런타임 미구현 |
-| `fail_action` | target=route_set 이 모두 dead 일 때 `reject` / `next_policy` |
+| `fail_action` | target=route_set 이 **선택 시점에** 모두 dead 일 때 `reject` / `next_policy`. 선택된 피어가 5xx·타임아웃으로 실패하면 RouteSet 안에서 재라우팅한다(§2-4) |
 
 `target_type` 별 런타임 동작:
 

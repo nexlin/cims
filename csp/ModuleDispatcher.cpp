@@ -13,6 +13,7 @@
 
 #include <cctype>
 #include <cstdio>
+#include <set>
 
 #include "CallDir.h"
 #include "CallMap.h"
@@ -523,6 +524,7 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
                         pe.route_set = rd.target_name;
                         pe.policy_name = rd.matched_policy;
                         pe.local_node_ref = rc.local_node_ref;  // outbound leg 자기 주소 결정용
+                        pe.hash_key = hashKey;                  // 재라우팅 재선택(hash_by_caller)에 같은 키
                         gclsPendingRouteMap.Insert( strCallId, pe );
                         CLog::Print( LOG_SYSTEM,
                                      "RoutingPolicyEngine: policy='%s' route_set='%s' picked_route='%s' → RemoteNode "
@@ -978,6 +980,8 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     //   없으면 아래 내부 가입자 경로 (PTT 그룹 / legacy IBCF / TAS) 로 진행.
     //   Route 의 auth_user/password 는 Route map 재조회로 보강 (RemoteNode 에는 auth 정보 없음).
     bool v3Routed = false;
+    PendingRouteEntry
+        clsRoutePending;  // B 가 피어면 그 결정(RouteSet·Route·정책·해시키) — CallMap 라우팅 상태(재라우팅 근거)
     // T3: route 결정으로 결정된 outbound leg 의 자기 주소 (Via/Contact 자기 IP/Port) hint.
     //     EventIncomingCall 이 CreateCall 호출 전에 clsRoute 에 채워서 dialog 까지 전달.
     std::string strOutboundLocalIp;
@@ -999,6 +1003,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
                                                                   : E_SIP_UDP;
             bRoutePrefix = true;
             strBRouteName = pe.route_name;
+            clsRoutePending = pe;
             SetCallOwner( pszCallId, &m_clsIbcf );
             v3Routed = true;
             // T3: local_node_ref → bind_ip/bind_port 추출. 미정 또는 dangling 시 fallback 으로 진행.
@@ -1286,6 +1291,10 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     //   A(수신) entry = peer1 포트(B leg SDP 용), B(발신) entry = peer0 포트(A leg SDP 용).
     gclsCallMap.Insert( pszCallId, strCallId.c_str(), iStartPortB, iStartPort );
     SetCallOwner( strCallId.c_str(), GetCallOwner( pszCallId ) );
+    // 피어 B-leg 의 라우팅 상태 — 5xx·타임아웃이면 같은 RouteSet 의 다음 멤버로 재라우팅(TryRerouteLeg, §2-4)
+    if ( v3Routed && !clsRoutePending.route_set.empty() )
+        gclsCallMap.SetRouteInfo( pszCallId, clsRoutePending.route_set, clsRoutePending.route_name,
+                                  clsRoutePending.policy_name, clsRoutePending.hash_key, std::vector<std::string>() );
 
     // CMP relay descriptor 를 양 leg(수신/발신 Call-ID)에 기록 → teardown(BYE)·answer MODIFY 가
     //   포트가 아닌 session_id 로 CMP 세션을 직접 지목 (포트충돌 오지목/누수 차단).
@@ -1627,6 +1636,128 @@ static int _CallDurationSec( const char *pszCallId ) {
     return iDur > 0 ? iDur : 0;
 }
 
+/**
+ * @brief 피어 B-leg 실패 시 같은 RouteSet 의 다음 멤버로 재라우팅 — RFC 3261 §16.7 순차 forking(실패 응답 뒤 다음 대상
+ * 시도), TS 24.229 §5.10 IBCF alternative routing, sip_service_model.md §2-4.
+ *
+ * 대상 = RoutingPolicy 가 고른 피어 B-leg(CallMap 라우팅 상태 있음)가 **확립 전** 5xx / 408 / 410(전송 타임아웃 — psip
+ * SendTimeout) 으로 끝났을 때. 4xx(486·404 등)·6xx 는 상대가 판단을 내린 것이라 재라우팅하지 않는다(RFC 3261 §16.7 —
+ * 6xx 는 즉시 종결). 헬스체크가 아직 dead 로 표시하지 않은 피어의 첫 실패도 여기서 받는다 — 헬스체크(§2-4)와 재라우팅은
+ * 서로 보완한다.
+ *
+ * 절차: 이미 실패한 Route 를 제외해 RouteSet 재선택 → 실패 B-leg 가 냈던 오퍼(relay 재작성·코덱 삽입 포함,
+ * GetLocalCallRtp) 그대로 새 B-leg INVITE(From/To 동일, 다음 홉 = 새 RemoteNode 또는 트렁크 바인딩) → CallMap 은 A↔새 B
+ * 로 교체(relay·SDES·코덱 상태 복사, 실패 Route 를 tried 에 누적) → 세션 로그·sesid 승계 → 전송. 후보가 없으면 false 를
+ * 돌려 종전 종료 경로로.
+ */
+bool CModuleDispatcher::TryRerouteLeg( const char *pszCallId, const CCallInfo &clsB, int iSipStatus ) {
+    if ( clsB.m_bRecv || clsB.m_bEstablished || clsB.m_strRouteSet.empty() ) return false;
+    const bool bRetriable = ( iSipStatus == SIP_REQUEST_TIME_OUT || iSipStatus == SIP_GONE ||
+                              ( iSipStatus >= SIP_INTERNAL_SERVER_ERROR && iSipStatus < 600 ) );
+    if ( !bRetriable ) return false;
+    if ( !m_clsIbcf.IsEnabled() ) return false;
+
+    const std::string strACallId = clsB.m_strPeerCallId;
+    std::set<std::string> setExclude( clsB.m_vecRoutesTried.begin(), clsB.m_vecRoutesTried.end() );
+    setExclude.insert( clsB.m_strRouteName );
+    std::string strReason;
+    const std::string strNext =
+        gclsRouteSetMap.SelectRoute( clsB.m_strRouteSet, clsB.m_strRouteHashKey, strReason, setExclude );
+    if ( strNext.empty() ) {
+        CLog::Print( LOG_INFO,
+                     "RouteSet failover: route='%s' set='%s' ended %d — 다음 멤버 없음(%s, tried=%zu) → 발신자에게 "
+                     "전달 [callId=%s]",
+                     clsB.m_strRouteName.c_str(), clsB.m_strRouteSet.c_str(), iSipStatus, strReason.c_str(),
+                     setExclude.size(), pszCallId );
+        return false;
+    }
+    RouteConfig rc = gclsRouteMap.GetByName( strNext );
+    RemoteNodeInfo rn = gclsRemoteNodeMap.GetByName( rc.remote_node_ref );
+    TrunkBinding tb;
+    if ( rc.IsTrunkAccount() && gclsTrunkRegistrar.Get( rc.name, tb ) ) {
+        rn.ip = tb.ip;
+        rn.port = tb.port;
+        rn.protocol = tb.transport;
+    }
+    if ( !rc.IsValid() || rn.ip.empty() || rn.port <= 0 ) {
+        CLog::Print( LOG_ERROR, "RouteSet failover: next route='%s' remote_node='%s' 조회 실패 [callId=%s]",
+                     strNext.c_str(), rc.remote_node_ref.c_str(), pszCallId );
+        return false;
+    }
+
+    // 실패 B-leg 가 냈던 오퍼·신원 그대로(다이얼로그는 이 콜백 뒤에 psip 이 지운다 — 지금 읽어야 한다)
+    CSipCallRtp clsRtp;
+    std::string strFrom, strTo;
+    if ( !gclsUserAgent.GetLocalCallRtp( pszCallId, &clsRtp ) || !gclsUserAgent.GetFromId( pszCallId, strFrom ) ||
+         !gclsUserAgent.GetToId( pszCallId, strTo ) ) {
+        CLog::Print( LOG_ERROR, "RouteSet failover: 실패 leg 의 오퍼/신원을 읽지 못함 [callId=%s]", pszCallId );
+        return false;
+    }
+    CSipCallRoute clsRoute;
+    clsRoute.m_strDestIp = rn.ip;
+    clsRoute.m_iDestPort = rn.port;
+    clsRoute.m_eTransport = ( rn.protocol == "TCP" ) ? E_SIP_TCP : ( rn.protocol == "TLS" ) ? E_SIP_TLS : E_SIP_UDP;
+    clsRoute.m_b100rel = gclsUserAgent.Is100rel( strACallId.c_str() );
+    if ( !rc.local_node_ref.empty() ) {
+        LocalNodeInfo ln = gclsLocalNodeMap.GetByName( rc.local_node_ref );
+        if ( ln.IsValid() ) {
+            clsRoute.m_strOutboundLocalIp =
+                ( ln.bind_ip.empty() || ln.bind_ip == "0.0.0.0" ) ? gclsSetup.m_strLocalIp : ln.bind_ip;
+            clsRoute.m_iOutboundLocalPort = ln.bind_port;
+        }
+    }
+    std::string strNewCallId;
+    CSipMessage *pclsInvite = NULL;
+    if ( !gclsUserAgent.CreateCall( strFrom.c_str(), strTo.c_str(), &clsRtp, &clsRoute, strNewCallId, &pclsInvite ) ) {
+        CLog::Print( LOG_ERROR, "RouteSet failover: CreateCall 실패 route='%s' [callId=%s]", strNext.c_str(),
+                     pszCallId );
+        return false;
+    }
+
+    // CallMap: A ↔ 새 B. relay 세션·SDES·코덱 상태는 실패 leg 의 것을 그대로(같은 CMP 세션·peer1 포트), 라우팅 상태만
+    // 갱신
+    CCallInfo clsNew = clsB;
+    clsNew.m_vecRoutesTried.push_back( clsB.m_strRouteName );
+    clsNew.m_strRouteName = strNext;
+    time( &clsNew.m_iLastActivityTime );
+    gclsCallMap.Insert( strNewCallId.c_str(), clsNew );
+    gclsCallMap.Update( strACallId.c_str(), strNewCallId.c_str() );
+    gclsCallMap.DeleteOne( pszCallId );  // 실패 leg 만 — relay 세션은 유지(bStopPort 경로 아님)
+    gclsCallMap.SetRouteInfo( strNewCallId.c_str(), clsNew.m_strRouteSet, clsNew.m_strRouteName,
+                              clsNew.m_strRoutePolicy, clsNew.m_strRouteHashKey, clsNew.m_vecRoutesTried );
+    SetCallOwner( strNewCallId.c_str(), GetCallOwner( pszCallId ) ? GetCallOwner( pszCallId ) : &m_clsIbcf );
+
+    // 세션 로그·sesid 승계 — 새 B-leg 도 같은 세션의 착신 leg
+    std::string strLegASesId = gclsSipLogger.GetSesIdByCallId( strACallId );
+    if ( !strLegASesId.empty() ) gclsSipLogger.SetCallSesId( strNewCallId, strLegASesId );
+    if ( gclsCallDir.IsEnabled() ) {
+        std::string strSessionId = gclsCallDir.GetSessionId( strACallId );
+        if ( !strSessionId.empty() ) {
+            gclsCallDir.MapCallToSession( strNewCallId, strSessionId );
+            gclsCallDir.WriteSessionMapping( strSessionId, strACallId, strNewCallId, strLegASesId );
+        }
+    }
+
+    CLog::Print(
+        LOG_SYSTEM,
+        "RouteSet failover: route='%s' ended %d → re-route via route='%s' (%s:%d %s) set='%s' policy='%s' attempt=%zu "
+        "[A=%s old=%s new=%s]",
+        clsB.m_strRouteName.c_str(), iSipStatus, strNext.c_str(), rn.ip.c_str(), rn.port, rn.protocol.c_str(),
+        clsB.m_strRouteSet.c_str(), clsB.m_strRoutePolicy.c_str(), clsNew.m_vecRoutesTried.size() + 1,
+        strACallId.c_str(), pszCallId, strNewCallId.c_str() );
+
+    if ( !gclsUserAgent.StartCall( strNewCallId.c_str(), pclsInvite ) ) {
+        // 전송 실패 — 새 B 를 걷고 A 를 종전 실패 코드로 끝낸다(relay 는 Delete 가 회수)
+        CLog::Print( LOG_ERROR, "RouteSet failover: StartCall 실패 route='%s' → A 종료 %d [callId=%s]", strNext.c_str(),
+                     RelayEndStatus( iSipStatus ), strNewCallId.c_str() );
+        gclsCallMap.Delete( strNewCallId.c_str() );
+        gclsUserAgent.StopCall( strACallId.c_str(), RelayEndStatus( iSipStatus ) );
+        RemoveCallOwner( strNewCallId.c_str() );
+        RemoveCallOwner( strACallId.c_str() );
+    }
+    return true;
+}
+
 void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus ) {
     EventCallEnd( pszCallId, iSipStatus, NULL );
 }
@@ -1654,6 +1785,14 @@ void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus, con
     // TAS — dialog-event 종료(terminated) 통지(CallMap 삭제 전, §6.2 — 통과) / blind transfer 전환 leg
     //   실패 NOTIFY + trans entry 정리 (CallMap 밖 trans leg — 소비) / 대표번호 포크 leg·A 취소 (소비)
     if ( m_clsTas.IsEnabled() && m_clsTas.OnCallEnd( pszCallId, iSipStatus ) ) {
+        RemoveCallOwner( pszCallId );
+        return;
+    }
+
+    // 피어 B-leg 의 5xx·타임아웃 — 같은 RouteSet 의 다음 멤버로 새 B-leg 를 낸다(A-leg·relay 세션 유지). 성공하면 이
+    // leg 의
+    //   종료는 여기서 끝난다(A 에는 아무 것도 보내지 않는다).
+    if ( bSelHit && TryRerouteLeg( pszCallId, clsCallInfo, iSipStatus ) ) {
         RemoveCallOwner( pszCallId );
         return;
     }

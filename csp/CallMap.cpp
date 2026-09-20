@@ -313,6 +313,28 @@ void CCallMap::SetRelayCodecLeg( const char *pszCallId, int iLeg, const RelayCod
     m_clsMutex.release();
 }
 
+void CCallMap::SetRouteInfo( const char *pszCallId, const std::string &strRouteSet, const std::string &strRoute,
+                             const std::string &strPolicy, const std::string &strHashKey,
+                             const std::vector<std::string> &vecTried ) {
+    m_clsMutex.acquire();
+    auto apply = [&]( CALL_MAP::iterator it ) {
+        if ( it == m_clsMap.end() ) return;
+        it->second.m_strRouteSet = strRouteSet;
+        it->second.m_strRouteName = strRoute;
+        it->second.m_strRoutePolicy = strPolicy;
+        it->second.m_strRouteHashKey = strHashKey;
+        it->second.m_vecRoutesTried = vecTried;
+    };
+    auto it = m_clsMap.find( pszCallId );
+    std::string strPeer;
+    if ( it != m_clsMap.end() ) {
+        strPeer = it->second.m_strPeerCallId;
+        apply( it );
+    }
+    if ( !strPeer.empty() ) apply( m_clsMap.find( strPeer ) );  // B2BUA 양 leg 공유 상태
+    m_clsMutex.release();
+}
+
 bool CCallMap::DeleteOne( const char *pszCallId ) {
     CALL_MAP::iterator itMap;
     bool bRes = false;

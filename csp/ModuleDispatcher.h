@@ -24,6 +24,8 @@
  *  → Proxy 대상 INVITE 는 ModuleDispatcher 가 직접 처리 (return true)
  *  → B2BUA 대상 INVITE 는 CSipUserAgent 로 전달 (return false)
  */
+class CCallInfo;
+
 class CModuleDispatcher : public ISipStackCallBack, ISipUserAgentCallBack, ISipStackSecurityCallBack {
 public:
     CModuleDispatcher();
@@ -39,6 +41,9 @@ public:
 
     // 공유 헬퍼
     bool SendResponse( CSipMessage *pclsMessage, int iStatusCode );
+    /** 피어 B-leg 의 5xx·타임아웃 재라우팅(RouteSet 다음 멤버, sip_service_model.md §2-4). true = 새 B-leg 로 이어
+     * 감(이 leg 종료 처리 끝). */
+    bool TryRerouteLeg( const char *pszCallId, const CCallInfo &clsB, int iSipStatus );
     void StopCall( const char *pszCallId, int iResponseCode );
     void OnCallEnded( const char *pszCallId, int iSipStatus );
 

@@ -23,6 +23,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 
 #include "MediaSdes.h"
 #include "RelayCodec.h"
@@ -82,6 +83,15 @@ public:
      * 재작성). 양 leg entry 에 동일 기록. */
     RelayCodec::LegCodecs m_clsCodecLeg[2];
 
+    /** B-leg 가 RoutingPolicy 로 고른 피어 Route 일 때의 라우팅 상태(sip_service_model.md §2-4 재라우팅) — 양 leg entry
+     * 동일. B-leg 가 5xx·타임아웃으로 끝나면 같은 RouteSet 의 시도하지 않은 alive 멤버로 새 B-leg 를 낸다(RFC 3261
+     * §16.7 순차 forking, TS 24.229 §5.10 alternative routing). 비어 있으면 피어 leg 가 아니다(가입자 B-leg). */
+    std::string m_strRouteSet;                  // RouteSet name
+    std::string m_strRouteName;                 // 현재 B-leg 의 Route
+    std::string m_strRoutePolicy;               // 고른 RoutingPolicy(로그)
+    std::string m_strRouteHashKey;              // hash_by_caller 키(발신자 from@host)
+    std::vector<std::string> m_vecRoutesTried;  // 이미 실패한 Route(현재 것 제외)
+
     /** 마지막 SIP activity 시간 (통화 생성/갱신 시 기록) */
     time_t m_iLastActivityTime;
 
@@ -119,6 +129,11 @@ public:
     void SetRelaySdesLeg( const char *pszCallId, int iLeg, const RelaySdesLeg &clsLeg );
     /** relay leg(iLeg) 의 코덱 상태를 양 leg entry 에 기록 (RelayCodec, cmp.md §11). */
     void SetRelayCodecLeg( const char *pszCallId, int iLeg, const RelayCodec::LegCodecs &clsLeg );
+    /** 피어 B-leg 의 라우팅 상태(RouteSet·Route·정책·해시키·실패 Route 목록)를 양 leg entry 에 기록 — 재라우팅의 근거.
+     */
+    void SetRouteInfo( const char *pszCallId, const std::string &strRouteSet, const std::string &strRoute,
+                       const std::string &strPolicy, const std::string &strHashKey,
+                       const std::vector<std::string> &vecTried );
     bool Update( const char *pszCallId, const char *pszPeerCallId );
     bool Select( const char *pszCallId, std::string &strCallId );
     bool Select( const char *pszCallId, CCallInfo &clsCallInfo );

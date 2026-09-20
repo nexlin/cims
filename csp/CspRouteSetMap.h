@@ -4,6 +4,7 @@
 #include <atomic>
 #include <map>
 #include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -91,16 +92,21 @@ public:
      *  @param outReason     실패 시 이유 (no members / all dead / ...)
      *  @return 선택된 route_ref (빈 문자열이면 선택 불가) */
     std::string SelectRoute( const std::string &routeSetName, const std::string &hashKey, std::string &outReason );
+    /** 같은 선택이되 exclude(이미 시도해 실패한 Route)는 dead 처럼 건너뛴다 — B-leg 5xx·타임아웃 재라우팅(§2-4). */
+    std::string SelectRoute( const std::string &routeSetName, const std::string &hashKey, std::string &outReason,
+                             const std::set<std::string> &exclude );
 
 private:
     mutable std::mutex m_mutex;
     std::map<std::string, RouteSetEntry> m_byName;
 
-    // 내부: 정책별 선택 함수. m_mutex 를 잡고 호출.
-    std::string _selectFailover( RouteSetEntry &e, std::string &outReason );
-    std::string _selectRoundRobin( RouteSetEntry &e, std::string &outReason );
-    std::string _selectWeighted( RouteSetEntry &e, std::string &outReason );
-    std::string _selectHashByCaller( const RouteSetEntry &e, const std::string &key, std::string &outReason );
+    // 내부: 정책별 선택 함수. m_mutex 를 잡고 호출. exclude 의 Route 는 dead 로 취급.
+    bool _usable( const std::string &routeRef, const std::set<std::string> &exclude ) const;
+    std::string _selectFailover( RouteSetEntry &e, std::string &outReason, const std::set<std::string> &exclude );
+    std::string _selectRoundRobin( RouteSetEntry &e, std::string &outReason, const std::set<std::string> &exclude );
+    std::string _selectWeighted( RouteSetEntry &e, std::string &outReason, const std::set<std::string> &exclude );
+    std::string _selectHashByCaller( const RouteSetEntry &e, const std::string &key, std::string &outReason,
+                                     const std::set<std::string> &exclude );
 };
 
 extern CCspRouteSetMap gclsRouteSetMap;
