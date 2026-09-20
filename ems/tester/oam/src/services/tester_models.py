@@ -645,11 +645,14 @@ class Topology(_Strict):
         n = self.target.nodes.get(nid)
         return list(n.sip.domains) if n and n.sip else []
 
-    def default_domain(self, nid: str, ptt: bool = False) -> str:
+    def default_domain(self, nid: str, ptt: bool = False, service: Optional[str] = None) -> str:
+        """노드 도메인 중 접속환경 클래스의 것 — 이름에 그 kind(`ptt`·`voip`)가 든 항목, 없으면 첫 항목(volte). Digest username 은
+        `imsi@<서비스 domain>` 이라(sip_service_model.md §3) voip 풀이 volte 도메인으로 등록하면 403(username mismatch)."""
         doms = self.domains_of(nid)
-        if ptt:
+        kind = 'ptt' if ptt else (service or '')
+        if kind in ('ptt', 'voip'):
             for d in doms:
-                if 'ptt' in d:
+                if kind in d:
                     return d
         return doms[0] if doms else ''
 

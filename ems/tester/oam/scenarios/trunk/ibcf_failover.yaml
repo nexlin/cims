@@ -1,6 +1,6 @@
 # IBCF 피어 다중화 failover — RouteSet(failover) 의 우선 피어(peer_kt_dead, answer=silent)가 응답하지 않을 때 다음 피어(peer_kt)로
 #   넘어가는가. 두 풀은 같은 seed.route_set 을 갖는다. dead 역할은 흐름에 없지만 선언해야 그 풀이 (무응답으로) 열린다.
-#   CSP RouteSet 헬스체크가 없으면(sip_service_model.md §9) 우선 피어에서 Timer B 만료 → 실패 = test_instrument.md §12 항목.
+#   시드가 다중 피어 RouteSet 에 OPTIONS 헬스체크(2 s × 2 회)를 켜고, silent 피어는 OPTIONS 에도 답하지 않아 dead 로 빠진다 → 다음 피어로.
 id: TRUNK-IBCF-FAILOVER
 title: IBCF 피어 failover (우선 피어 무응답 → 다음 피어)
 tags: [trunk, ibcf, failover]
@@ -10,6 +10,7 @@ roles:
   dead:   { pool: peer_kt_dead }
 flow:
   - { step: register,   who: [caller], expect: { code: 200 } }
+  - { step: wait,       seconds: 8 }   # 시드 RouteSet 헬스체크(OPTIONS 2 s × 2 회)가 우선 피어를 dead 로 판정할 시간 — 운영에서도 헬스체크가 failover 의 근거다
   - { step: invite,     from: caller, to: peer, media: { audio: amr-wb } }
   - { step: answer,     who: [peer], after_ms: 500, expect: { code: 200, srd_ms: { p95: 8000 } } }
   - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }

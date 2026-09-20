@@ -1179,7 +1179,9 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             if ( clsARoute.IsValid() && !bRoutePrefix ) {
                 // A 가 피어(트렁크), B 가 가입자 — 가입자 leg 오퍼에 서비스 코덱
                 RelayCodec::CodecDesc svc = RelayCodec::ServiceCodec();
-                if ( svc.Valid() && !RelayCodec::Find( clsCodecA.offered, svc ) ) vecInsert.push_back( svc );
+                if ( svc.Valid() && !RelayCodec::Find( clsCodecA.offered, svc ) &&
+                     RelayCodec::HasTranscodableSource( clsCodecA.offered, svc ) )
+                    vecInsert.push_back( svc );
             }
             if ( bRoutePrefix && !strBRouteName.empty() ) {
                 // B 가 피어 — 그 RemoteNode 정책 코덱
@@ -1192,7 +1194,14 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
                                      clsBNode.name.c_str(), strName.c_str() );
                         continue;
                     }
-                    if ( !RelayCodec::Find( clsCodecA.offered, d ) ) vecInsert.push_back( d );
+                    // A 가 이미 낸 코덱은 그대로, A 의 어떤 코덱과도 변환 쌍이 안 되는 코덱은 끼우지 않는다 — 예: A 가
+                    // PCMU 를
+                    //   냈는데 PCMA 를 끼우면 PBX 가 PCMA 를 골라도 PCMU↔PCMA 변환이 없어 488 이 났다(tb48
+                    //   TRUNK-PBX-OUTBOUND 실측). G.711 을 낸 A 는 삽입 없이 PBX 와 직접 맞고, AMR-WB 만 낸 A 에만
+                    //   G.711 이 끼워진다.
+                    if ( !RelayCodec::Find( clsCodecA.offered, d ) &&
+                         RelayCodec::HasTranscodableSource( clsCodecA.offered, d ) )
+                        vecInsert.push_back( d );
                 }
             }
             if ( !vecInsert.empty() ) {

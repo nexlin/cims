@@ -923,7 +923,9 @@ IMS 에서 이 일은 **NNI 의 TrGW(IBCF 제어, TS 23.228 §4.14 · TS 29.162)
    테이블 §6.1 첫 엔트리)을 **추가**한다. 가입자가 AMR-WB 를 고르면 피어 leg 는 G.711 로 답하고 CMP 가 변환, 가입자가
    G.711 을 고르면 순수 relay.
 2. **가입자 → 피어 방향 오퍼**: 피어 노드 정책(`remote_nodes.transcode_codecs`, 예 `["PCMA","PCMU"]`)이 있으면 피어 leg 오퍼에
-   그 코덱을 추가한다. 피어가 그 코덱으로 답하고 가입자 오퍼에 그 코덱이 없었으면 변환.
+   그 코덱을 추가한다. 피어가 그 코덱으로 답하고 가입자 오퍼에 그 코덱이 없었으면 변환. **끼워 넣는 코덱은 가입자 오퍼의 어떤 코덱과
+   변환 쌍(AMR-WB ↔ G.711)을 이루는 것만**이다(`HasTranscodableSource`) — 가입자가 이미 PCMU 를 냈는데 PCMA 를 끼우면 PBX 가 PCMA 를 골라도
+   PCMU↔PCMA 변환이 없어 488 이 난다(tb48 실측). G.711 을 낸 가입자는 삽입 없이 PBX 와 직접 맞고, AMR-WB 만 낸 가입자에만 G.711 이 끼워진다.
 3. 판정은 **leg 별 최종 협상 코덱이 다른가** 하나다. 다르면 CSP 가 `RELAY_MODIFY` 에 leg 별 코덱 선언(`media_codec`,
    [cmp_media_api.md](../../api/cmp_media_api.md) §6.6)을 양 leg 에 실어 보내고, CMP 는 그때만 변환 유닛을 붙인다. 같으면 현행
    PT-blind relay(`remote_pt` 재작성 포함) 그대로다.

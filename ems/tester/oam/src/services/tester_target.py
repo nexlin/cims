@@ -267,12 +267,19 @@ def derive_records(topology: Topology, pools: Dict[str, PeerPool], local_node_re
         by_set.setdefault(p.seed.route_set or name, []).append((name, p))
     for rs_name, members in by_set.items():
         first = members[0][1]
-        out['route_sets'].append({
+        rs = {
             'name': f'tester-rs-{rs_name}', 'enabled': True, 'distribution_policy': first.seed.distribution,
             'members': [{'route_ref': f'tester-r-{n}', 'priority': int(p.seed.priority), 'weight': int(p.seed.weight)}
                         for n, p in sorted(members, key=lambda x: x[1].seed.priority)],
             'health_check_mode': 'none', 'fallback_policy': 'reject', 'tags': [SEED_TAG],
-        })
+        }
+        if len(members) > 1:
+            # 다중 피어 RouteSet — CSP RouteSet 헬스체크(OPTIONS 프로브, sip_service_model.md §2-4)를 켠다. 무응답 피어(answer: silent —
+            #   OPTIONS 에도 답하지 않는다)가 dead 로 빠져 다음 피어로 넘어가는 failover 가 운영 구성과 같은 방식으로 성립한다.
+            #   짧은 주기(2 s × 2 회)라 시나리오는 register 뒤 `wait` 로 첫 판정을 기다린다(TRUNK-IBCF-FAILOVER*)
+            rs.update({'health_check_mode': 'options_ping', 'health_check_interval_sec': 2, 'health_check_dead_threshold': 2,
+                       'health_check_recovery_probes': 1})
+        out['route_sets'].append(rs)
         out['rule_sets'].append({
             'name': f'tester-rs-{rs_name}-match', 'enabled': True, 'combinator': 'OR',
             'members': [{'rule_ref': r, 'negate': False} for n, _ in members for r in match_rules[n]], 'tags': [SEED_TAG],

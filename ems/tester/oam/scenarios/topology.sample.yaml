@@ -25,7 +25,7 @@ target:
       procs: [csp]                       # 호스트 SSH 관측이 볼 프로세스(CPU·RSS) — hosts.h45.ssh 가 있을 때
       logs: [/opt/cims/csp/log/csp_*.log]   # run 동안 늘어난 ERROR 줄 = target_evidence log_errors (SSH 관측)
       sip:
-        domains: [volte.cims.example.kr, ptt.cims.example.kr]
+        domains: [volte.cims.example.kr, ptt.cims.example.kr, voip.cims.example.kr]   # 이름에 ptt/voip 가 든 항목 = 그 서비스 풀의 도메인(Digest username), 첫 항목 = volte
         dial_plan: { country_code: "82", national_prefix: "0", international_prefix: "00" }   # 대상 접속서비스 country_code 와 같은 값 — invite.dial: national 이 +82… 를 0… 으로 바꿔 다이얼(대상 번역 시험)
         listeners:                       # 수신점 N 개 = CSP local_nodes 와 1:1. ip 를 비우면 노드 addr → 호스트 ip
           udp:     { edge: access, port: 5060, protocol: udp }

@@ -244,6 +244,13 @@ namespace RelayCodec {
         return ( a.IsAmrWb() && b.IsG711() ) || ( a.IsG711() && b.IsAmrWb() );
     }
 
+    bool HasTranscodableSource( const std::vector<CodecDesc> &vecOffered, const CodecDesc &d ) {
+        for ( const CodecDesc &c : vecOffered ) {
+            if ( TranscodablePair( c, d ) ) return true;
+        }
+        return false;
+    }
+
     int DecideLeg( const std::vector<CodecDesc> &vecOfferedA, const CodecDesc &negB, CodecDesc &codecA ) {
         if ( const CodecDesc *same = Find( vecOfferedA, negB ) ) {
             codecA = *same;

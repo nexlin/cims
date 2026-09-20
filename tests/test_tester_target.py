@@ -525,7 +525,9 @@ class SeedDerivation(unittest.TestCase):
         kt = rs['tester-rs-rs-kt']
         self.assertEqual(kt['distribution_policy'], 'failover')
         self.assertEqual([m['route_ref'] for m in kt['members']], ['tester-r-peer_kt_dead', 'tester-r-peer_kt'])   # priority 순
-        self.assertEqual(kt['health_check_mode'], 'none')
+        # 다중 피어 RouteSet 은 OPTIONS 헬스체크(2 s × 2 회)를 켠다 — silent 피어가 dead 로 빠져 failover 가 성립. 단일 피어는 none
+        self.assertEqual((kt['health_check_mode'], kt['health_check_interval_sec'], kt['health_check_dead_threshold']), ('options_ping', 2, 2))
+        self.assertEqual(rs['tester-rs-peer_blocked']['health_check_mode'], 'none')
         rules = {r['name']: r for r in recs['rules']}
         self.assertEqual(rules['tester-rule-peer_kt-domain'], {'name': 'tester-rule-peer_kt-domain', 'enabled': True,
                                                                'field': 'req_uri_host', 'op': 'eq', 'value': 'ims.kt.test',

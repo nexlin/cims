@@ -67,6 +67,9 @@ namespace RelayCodec {
                        const std::string &strTeFmtp );
     /** CMP 가 변환할 수 있는 쌍 (AMR-WB ↔ PCMU/PCMA) */
     bool TranscodablePair( const CodecDesc &a, const CodecDesc &b );
+    /** 오퍼 목록 안에 d 와 변환 쌍을 이루는 코덱이 있는가 — 삽입할 코덱은 A 가 낸 어떤 코덱과도 CMP 가 변환할 수 있어야
+     *  뜻이 있다(없는 것을 끼워 넣으면 B 가 그것을 골라도 A 와 잇지 못해 488). */
+    bool HasTranscodableSource( const std::vector<CodecDesc> &vecOffered, const CodecDesc &d );
     /** answer leg(B) 가 고른 코덱 negB 와 상대 leg(A) 오퍼 → A 쪽 코덱. 반환 0 = 같은 코덱(relay, codecA = A 오퍼의 그
      * 항목), 1 = 변환(codecA = A 오퍼에서 변환 가능한 첫 코덱), -1 = 성립 불가(488). */
     int DecideLeg( const std::vector<CodecDesc> &vecOfferedA, const CodecDesc &negB, CodecDesc &codecA );

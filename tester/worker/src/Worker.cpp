@@ -390,8 +390,23 @@ long long Worker::realProcesses() const {
 }
 
 void Worker::destroyPool(Pool* pool) {
+    // UE 스택 정리는 병렬로 — SimSession::Stop(로그아웃 + 스택 정지)이 단말당 1~2 s 걸려 40 단말 풀 교체가 80 s 를 넘겼다
+    //   (컨트롤러 POST /pools 60 s 시한 초과 → run error, tb48 실측). 맵 항목은 먼저 떼고 정지·해제만 스레드로 나눈다
+    std::vector<SimSession*> sessions;
     for (auto& ep : pool->eps) {
-        if (ep->s) { m_bySession.erase(ep->s); if (ep->started) ep->s->Stop(5); delete ep->s; ep->s = nullptr; }
+        if (ep->s) { m_bySession.erase(ep->s); sessions.push_back(ep->started ? ep->s : nullptr); if (!ep->started) delete ep->s; ep->s = nullptr; }
+    }
+    {
+        const size_t nThreads = std::min<size_t>(8, std::max<size_t>(1, sessions.size()));
+        std::vector<std::thread> workers;
+        std::atomic<size_t> next{0};
+        for (size_t t = 0; t < nThreads; ++t)
+            workers.emplace_back([&]() {
+                for (size_t i = next++; i < sessions.size(); i = next++) {
+                    if (sessions[i]) { sessions[i]->Stop(5); delete sessions[i]; }
+                }
+            });
+        for (auto& w : workers) w.join();
     }
     if (pool->natFd >= 0) { close(pool->natFd); pool->natFd = -1; }
     if (pool->peer) { m_byPeer.erase(pool->peer.get()); pool->peer->Stop(); pool->peer.reset(); }

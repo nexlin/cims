@@ -24,7 +24,7 @@ target:
       procs: [csp]
       logs: [/home/cims/work/cims/build/dist/mgmt-server/csp/current/csp/log/csp_*.log]
       sip:
-        domains: [volte.cims.example.kr, ptt.cims.example.kr]
+        domains: [volte.cims.example.kr, ptt.cims.example.kr, voip.cims.example.kr]   # 이름에 ptt/voip 가 든 항목 = 그 서비스 풀의 도메인(Digest username), 첫 항목 = volte
         dial_plan: { country_code: "82", national_prefix: "0", international_prefix: "00" }   # = dep34 access_services.country_code — VOLTE-CALL-NATIONAL-DIAL 이 0… 으로 다이얼
         listeners:                                   # dep34 local_nodes 와 1:1 (이름을 적어 시드가 기존 레코드를 쓰게 한다)
           udp:     { edge: access,  port: 15060, protocol: udp, local_node: access-udp }

@@ -210,7 +210,7 @@ def _default_domain(topology: Topology, pname: str) -> str:
     p = topology.pools[pname]
     if p.kind == 'peer':
         return p.domain
-    return topology.default_domain(p.access, ptt=topology.pool_service(pname) == 'ptt') or topology.default_domain(p.access)
+    return topology.default_domain(p.access, service=topology.pool_service(pname)) or topology.default_domain(p.access)
 
 
 def bind_value(v, bindings: Dict[str, object]):

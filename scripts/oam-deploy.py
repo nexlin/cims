@@ -162,12 +162,15 @@ def cmd_upgrade(oam: Oam, args) -> int:
         _wait(oam, did, lambda d: d.get('live_state') == 'down', args.timeout, 'down')
         r = oam.call('POST', f'/deployments/{did}/upgrade', {'package_id': pid})
         print(f"  upgrade job {r.get('job_id')}")
-        d = _wait(oam, did, lambda d: str(d.get('package_id')) == str(pid) and d.get('live_state') == 'up', args.timeout, 'upgrade+up')
+        # upgrade job 은 설치·current 전환까지만 하고 프로세스를 띄우지 않는다(실측 — live 는 down 으로 남는다). 패키지 전환만 기다리고 바로 start
+        d = _wait(oam, did, lambda d: str(d.get('package_id')) == str(pid), args.timeout, 'upgrade(package 전환)')
+        if str(d.get('package_id')) != str(pid):
+            print('  ! 패키지 전환이 반영되지 않았다 — job 결과 확인(GET /agents/{aid}/jobs/{jid})')
+            rc = 1
+            continue
+        time.sleep(3)   # 설치 마무리(current 심볼릭·overlay 머지) 여유
+        d = oam.deployment(did)
         if d.get('live_state') != 'up':
-            if str(d.get('package_id')) != str(pid):
-                print('  ! 패키지 전환이 반영되지 않았다 — job 결과 확인(GET /agents/{aid}/jobs/{jid})')
-                rc = 1
-                continue
             r = oam.call('POST', f'/deployments/{did}/job', {'job_type': 'start'})
             print(f"  start job {r.get('job_id')}")
             d = _wait(oam, did, lambda d: d.get('live_state') == 'up', args.timeout, 'up')

@@ -43,7 +43,7 @@ API 는 job 을 큐에 넣고 바로 돌아오므로 스크립트가 `GET /deplo
 | 패키지 등록 | `POST /api/v1/packages {file_path, force?}` | `id`·`module`·`version`. 같은 모듈·같은 버전이 있으면 충돌 — 내용이 바뀌었으면 pkg.json 버전을 올려 다시 패키징(`force` 는 덮어쓰기) |
 | 정지 | `POST /api/v1/deployments/{id}/job {job_type: stop}` | `job_id`. `GET /deployments/{id}` 의 `live_state == down` 까지 대기 |
 | 업그레이드 | `POST /api/v1/deployments/{id}/upgrade {package_id}` | 패키지 전환(PUT) + upgrade job 큐잉을 서버가 한 번에. `package_id` 생략 = 같은 모듈의 최근 업로드. `GET /deployments/{id}` 의 `package_id` 가 바뀌고 `install_path` 가 새 버전 디렉터리로 |
-| 시작 | `POST /api/v1/deployments/{id}/job {job_type: start}` | upgrade job 뒤 `live_state` 가 up 이 아니면. up 까지 대기 |
+| 시작 | `POST /api/v1/deployments/{id}/job {job_type: start}` | **upgrade job 은 설치·current 전환까지만 하고 프로세스를 띄우지 않는다**(실측 — live 는 down). `package_id` 가 바뀐 것을 본 뒤 바로 start, up 까지 대기 |
 | job 상세 | `GET /api/v1/agents/{agent_id}/jobs/{job_id}` | `result_code`·`stdout`·`stderr` — 실패 원인. (`/jobs/{id}` 경로는 없다) |
 | 설정 overlay | `PUT /api/v1/deployments/{id}/config {config: {"Setup.X.Y": v}}` → `POST …/job {job_type: restart}` | 병합·update_config job. 재기동이 필요한 키는 restart |
 | 컬렉션 | `GET/PUT /api/v1/deployments/{id}/collection/{name} {records, signal}` | csp `local_nodes`·`access_services`·`routes`·`remote_nodes`·`route_sets`·`rules`·`rule_sets`·`routing_policies`·`acl_policies`. `signal: true` = SIGUSR1 리로드(재기동 없음). 참조 무결성은 검사하지 않는다 — CSP 로그 `references missing` 확인 |
@@ -68,6 +68,6 @@ ems/tester/oam/bin/cims-tester --url https://127.0.0.1:4419 --token $OAM_TOKEN r
 
 - `POST /packages` 는 같은 버전 재등록을 거절한다 — `cims.sh pkg` 의 auto-bump 를 쓰고, `--no-bump` 는 내용이 안 바뀐 재패키징에만.
 - `cims.sh pkg` 도중 dev OAM·CSC 가 죽은 적이 있다 — pkg 뒤 `status` 로 4419 가 응답하는지 본다.
-- 업그레이드 job 이 끝나도 `live_state` 가 down 으로 남으면(agent 가 start 를 겸하지 않은 경로) start job 을 한 번 더 — 스크립트가 처리한다.
+- 업그레이드 job 은 프로세스를 띄우지 않는다 — `package_id` 전환 확인 뒤 start job 이 항상 필요하다(스크립트가 처리). up 을 기다리며 시한을 태우지 않는다.
 - 컬렉션 PUT 은 **레코드 전체 교체**다. 필드 하나를 바꿀 때도 GET 한 레코드를 수정해 전부 되돌려 놓는다(`--set` 이 그렇게 한다).
 - 로그인 토큰 수명은 7 일(`handlers/auth.py` `_TTL_SEC`) — 401 이 나면 JwtSecret 이 바뀐 것(configure 재실행·base 재기동)이니 다시 로그인.

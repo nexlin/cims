@@ -696,6 +696,9 @@ bool CsimPeer::RecvRequest(int /*iThreadId*/, CSipMessage* pclsMessage) {
 }
 
 bool CsimPeer::RecvFilter(CSipMessage* pclsMessage, const char* /*pszIp*/, int /*iPort*/, ESipTransport /*eTransport*/) {
+    // 죽은 피어(answer: silent) 는 와이어에서 **아무 것에도** 답하지 않는다 — INVITE 뿐 아니라 OPTIONS 헬스체크 프로브도(psip 가
+    //   OPTIONS 에 자동 200 을 내면 대상 RouteSet 헬스체크가 이 피어를 살아 있다고 보아 failover 가 성립하지 않는다)
+    if (m_cfg.silent) return false;
     if (m_cfg.dropInvite <= 0 && m_cfg.dropPct <= 0) return true;
     std::string callId;
     pclsMessage->GetCallId(callId);
