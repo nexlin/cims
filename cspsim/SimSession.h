@@ -17,6 +17,7 @@
 #include <mutex>
 #include <set>
 #include <thread>
+#include <condition_variable>
 
 // Forward declaration
 class SimSession;
@@ -378,8 +379,35 @@ public:
     void _ApplyContactFeatureTags();
     void _MsrpSendThread(std::string strServerPath);
     void _MsrpRecvThread(std::string strServerPath, std::string strLocalPath, std::string strFrom, std::string strGroup);
-    struct SdsTx { std::string msgId, toUser, groupId, text, convId; bool delivery = false; long long tSendMs = 0; int seq = 1; std::string fromTag; bool authRetried = false; long long timeSec = 0; };
-    std::map<std::string, SdsTx> m_mapSdsTx;   // Call-ID → 송신 중 SDS(응답 대기·401 재전송 재료)
+    struct SdsTx {
+        std::string msgId, toUser, groupId, text, convId; bool delivery = false; long long tSendMs = 0; int seq = 1; std::string fromTag; bool authRetried = false; long long timeSec = 0;
+        bool fd = false;                                   // FD SIGNALLING(파일 URL) — 아래 file* 을 싣고 DATA PAYLOAD 는 없다
+        std::string fileUrl, fileName, fileType; long long fileSize = 0;
+    };
+    std::map<std::string, SdsTx> m_mapSdsTx;   // Call-ID → 송신 중 SDS/FD MESSAGE(응답 대기·401 재전송 재료) — m_mtxSdsTx 아래
+    std::mutex m_mtxSdsTx;                     // 워커 스레드(SendSds)·FD 스레드(_FdSendThread)·스택 스레드(RecvResponse)가 같이 만진다
+
+    // ── MCData FD(파일 배포 — TS 23.282 §7.4 HTTP 콘텐츠 서버 + TS 24.282 §15.1.3 FD SIGNALLING) — 계측기 단계 fd_send/fd_recv ──
+    /** FD 콘텐츠 서버 = CSC McpttServer(IdMS `/idms/*` 와 `/mcdata/fd` 가 같은 host:port). 토큰은 처음 쓸 때 취득·캐시(REGISTER 전 IdMS auth 가 아님 —
+     *  m_strCscHost 와 별개). IdMS 로그인 자격은 SetIdmsLogin. */
+    void SetFdServer(const std::string& strHost, int iPort, bool bTls) { m_strFdHost = strHost; m_iFdPort = iPort; m_bFdTls = bTls; }
+    bool HasFdServer() const { return !m_strFdHost.empty() && m_iFdPort > 0; }
+    /** 파일 배포 — 스레드에서 ① IdMS 토큰(캐시) ② POST /mcdata/fd?name=&group=&type=(octet-stream) → 관측자 OnFdUpload(msgId, http 상태, ms, bytes)
+     *  ③ 201 이면 FD SIGNALLING MESSAGE(그룹 = group-fd · 1:1 = one-to-one-fd, FILEURL+Metadata) → 최종 응답은 OnSdsResponse(msgId).
+     *  반환 = message ID, 빈 문자열 = 인자 없음·FD 서버 미설정·앞선 FD 송신 진행 중. */
+    std::string SendFd(const std::string& toUser, const std::string& groupId, const std::string& fileName, const std::string& data, const std::string& mime);
+    /** 받은 FD 의 FILEURL 을 내려받는다(GET, Bearer — 앱의 자동 다운로드 자리) — 스레드에서, 완료는 OnFdDownload(msgId, http 상태, bytes, ms). 동시 여러 건 가능. */
+    bool DownloadFd(const std::string& msgId, const std::string& fileUrl);
+    std::string   m_strFdHost;
+    int           m_iFdPort = 0;
+    bool          m_bFdTls = false;
+    std::mutex    m_mtxFd;                      // 토큰 취득 직렬화 + FD 스레드 수 대기
+    std::condition_variable m_cvFd;
+    int           m_iFdThreads = 0;             // 진행 중 FD 스레드(업로드·다운로드, detach — Stop 이 0 을 기다린다)
+    std::atomic<bool> m_bFdSending{false};
+    void _FdSendThread(std::string strCallId, std::string strGroupParam, std::string strData, std::string strMime);
+    void _FdDownloadThread(std::string strMsgId, std::string strUrl);
+    void _JoinFd();
     std::atomic<int> m_iSdsRecv{0};
     std::atomic<int> m_iSdsNotifRecv{0};
 

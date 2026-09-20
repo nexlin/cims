@@ -17,6 +17,7 @@
 #include "ConsistentHashRing.h"
 #include "CspPttGroup.h"
 #include "MediaSdes.h"
+#include "RelayCodec.h"
 #include "SimpleJson.h"
 #include "SipStackDefine.h"
 
@@ -71,13 +72,15 @@ public:
                      const std::string &strSesId = "", int iRemoteNat = 0, const std::string &strRemoteSigIp = "",
                      int iRemotePt = 0, int iRemoteSrcPt = 0, int iRemoteTePt = 0, int iRemoteSrcTePt = 0,
                      const std::string &strRemoteCodec = "", const CmpMediaCrypto *pclsCrypto = NULL,
-                     const CmpMediaCrypto *pclsCryptoVideo = NULL );
+                     const CmpMediaCrypto *pclsCryptoVideo = NULL, const CmpMediaCodec *pclsCodec = NULL );
+    //   pclsCodec: 그 leg 의 협상 코덱 선언 `media_codec`(cmp_media_api.md §6.6) — 양 leg 가 다를 때만(피어 leg
+    //   트랜스코딩, cmp.md §11). CMP 가 슬롯 부족이면 TRANSCODE_CAPACITY 로 거절한다(호출자가 488 로 종결).
     bool ModifySession( const std::string &strSessionId, const std::string &strRmtIp, int iRmtPort, int iRmtVideoPort,
                         int iPeerIdx, const std::string &strCaller = "", const std::string &strCallee = "",
                         const std::string &strSesId = "", int iRemoteNat = 0, const std::string &strRemoteSigIp = "",
                         int iRemotePt = 0, int iRemoteSrcPt = 0, int iRemoteTePt = 0, int iRemoteSrcTePt = 0,
                         const std::string &strRemoteCodec = "", const CmpMediaCrypto *pclsCrypto = NULL,
-                        const CmpMediaCrypto *pclsCryptoVideo = NULL );
+                        const CmpMediaCrypto *pclsCryptoVideo = NULL, const CmpMediaCodec *pclsCodec = NULL );
     bool RemoveSession( const std::string &strSessionId, const std::string &strCaller = "",
                         const std::string &strCallee = "", const std::string &strSesId = "" );
 

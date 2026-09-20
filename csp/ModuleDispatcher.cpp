@@ -29,6 +29,7 @@
 #include "CspRoutingPolicyEngine.h"
 #include "CspServer.h"
 #include "CspServiceMap.h"
+#include "CspTrunkRegistrar.h"
 #include "CspUser.h"
 #include "DbManager.h"
 #include "Directory.h"
@@ -40,6 +41,7 @@
 #include "McpttInfo.h"
 #include "MemoryDebug.h"
 #include "NonceMap.h"
+#include "RelayCodec.h"
 #include "RtpMap.h"
 #include "SipMd5.h"
 #include "SipMessageLogger.h"
@@ -206,8 +208,22 @@ void CModuleDispatcher::OnCallEnded( const char *pszCallId, int iSipStatus ) {
 static RouteConfig InboundRouteOf( const CSipMessage *pclsMessage, const std::string &strLocalNodeName ) {
     if ( pclsMessage == NULL || pclsMessage->m_strClientIp.empty() ) return RouteConfig();
     int iSrcPort = ( pclsMessage->m_eTransport == E_SIP_UDP ) ? pclsMessage->m_iClientPort : 0;
-    return gclsRouteMap.FindInbound( strLocalNodeName, pclsMessage->m_strClientIp, iSrcPort,
-                                     SipGetTransport( pclsMessage->m_eTransport ) );
+    RouteConfig rc = gclsRouteMap.FindInbound( strLocalNodeName, pclsMessage->m_strClientIp, iSrcPort,
+                                               SipGetTransport( pclsMessage->m_eTransport ) );
+    if ( rc.IsValid() ) return rc;
+    // 등록형 트렁크(CCspTrunkRegistrar) — RemoteNode.ip 가 동적이거나 NAT 뒤라 소스가 설정 주소와 다르면 등록 바인딩의
+    // 소스로 식별
+    return gclsTrunkRegistrar.FindBySource( strLocalNodeName, pclsMessage->m_strClientIp, iSrcPort,
+                                            SipGetTransport( pclsMessage->m_eTransport ) );
+}
+
+/** 등록형 트렁크의 요청 신뢰 — 그 Route 의 바인딩(REGISTER 소스)에서 온 요청은 등록으로 인증된 것이다(UE 등록 바인딩과
+ * 같은 규칙). */
+static bool TrunkRegisteredSource( const RouteConfig &rc, const CSipMessage *pclsMessage ) {
+    if ( !rc.IsTrunkAccount() ) return false;
+    int iSrcPort = ( pclsMessage->m_eTransport == E_SIP_UDP ) ? pclsMessage->m_iClientPort : 0;
+    return gclsTrunkRegistrar.IsRegisteredSource( rc.name, pclsMessage->m_strClientIp, iSrcPort,
+                                                  SipGetTransport( pclsMessage->m_eTransport ) );
 }
 
 bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
@@ -377,6 +393,18 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
                 SendResponse( pclsMessage, 403 );
                 return true;
             }
+            if ( rd.type == ROUTING_ROUTE_SET && !m_clsIbcf.IsEnabled() ) {
+                // 역할 격리(Setup.Roles.IBCF=false) — 피어(트렁크) 라우팅은 IBCF 역할의 것이다. 정책이 RouteSet 을
+                // 골라도 이 노드는 피어로
+                //   내보내지 않는다(403). 종전엔 가드가 없어 역할을 끈 노드가 트렁크 발신을 했다(test_instrument.md
+                //   §12).
+                CLog::Print(
+                    LOG_INFO,
+                    "RoutingPolicyEngine: policy='%s' route_set='%s' picked but Roles.IBCF=false → 403 [callId=%s]",
+                    rd.matched_policy.c_str(), rd.target_name.c_str(), strCallId.c_str() );
+                SendResponse( pclsMessage, 403 );
+                return true;
+            }
             if ( rd.type == ROUTING_ROUTE_SET ) {
                 // G1 (2026-04-23): picked_route → RouteConfig → RemoteNode 정보를 PendingRouteMap 에
                 //   Call-ID 로 저장. CSipUserAgent 가 dialog 를 만들어 EventIncomingCall 을 호출하면
@@ -385,6 +413,16 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
                 RouteConfig rc = gclsRouteMap.GetByName( rd.picked_route );
                 if ( rc.IsValid() ) {
                     RemoteNodeInfo rn = gclsRemoteNodeMap.GetByName( rc.remote_node_ref );
+                    // 등록형 트렁크 — 다음 홉은 RemoteNode 설정 주소가 아니라 등록 바인딩(REGISTER 소스, SIPconnect 2.0
+                    // §8)
+                    TrunkBinding tb;
+                    const bool bTrunk = rc.IsTrunkAccount() && gclsTrunkRegistrar.Get( rc.name, tb );
+                    if ( bTrunk ) {
+                        rn.name = rc.remote_node_ref;
+                        rn.ip = tb.ip;
+                        rn.port = tb.port;
+                        rn.protocol = tb.transport;
+                    }
                     if ( rn.IsValid() && !rn.ip.empty() && rn.port > 0 ) {
                         PendingRouteEntry pe;
                         pe.remote_ip = rn.ip;
@@ -552,7 +590,9 @@ bool CModuleDispatcher::EventIncomingRequestAuth( CSipMessage *pclsMessage ) {
             if ( clsLn.IsValid() ) strLocalNodeName = clsLn.name;
         }
         RouteConfig clsInRoute = InboundRouteOf( pclsMessage, strLocalNodeName );
-        if ( clsInRoute.IsValid() && clsInRoute.TrustsInbound() ) return true;
+        if ( clsInRoute.IsValid() &&
+             ( clsInRoute.TrustsInbound() || TrunkRegisteredSource( clsInRoute, pclsMessage ) ) )
+            return true;
     }
 
     // ⚠️ 테스트 환경 전용 (Setup.TestEnvOpenTermination=true) — 상용 원복 대상.
@@ -620,6 +660,8 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     CspUser clsUser;
     CUserInfo clsUserInfo;
     bool bRoutePrefix = false;
+    std::string strBRouteName;  // B-leg 이 피어(RoutingPolicy 가 고른 Route)면 그 Route 이름 — RemoteNode
+                                // transcode_codecs(cmp.md §11.2)
     std::string strTo;
 
     // 수신 INVITE 의 Replaces(RFC 3891) → TAS — 관제 BLF 당겨받기·표준 attended 완결. 헤더가 있으면
@@ -862,6 +904,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
                                        : ( pe.protocol == "TLS" ) ? E_SIP_TLS
                                                                   : E_SIP_UDP;
             bRoutePrefix = true;
+            strBRouteName = pe.route_name;
             SetCallOwner( pszCallId, &m_clsIbcf );
             v3Routed = true;
             // T3: local_node_ref → bind_ip/bind_port 추출. 미정 또는 dangling 시 fallback 으로 진행.
@@ -940,7 +983,8 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
 
     // CMP relay descriptor — CreateCall 실패 시 회수 + CallMap.SetRelayInfo 에 사용 (블록 밖 scope).
     std::string strRelaySessionId, strRelaySesId, strRelayLocalIp;
-    RelaySdesLeg clsSdesA, clsSdesB;  // leg 별 SDES 상태 — CallMap 기록용 (블록 밖 scope)
+    RelaySdesLeg clsSdesA, clsSdesB;             // leg 별 SDES 상태 — CallMap 기록용 (블록 밖 scope)
+    RelayCodec::LegCodecs clsCodecA, clsCodecB;  // leg 별 오퍼 코덱(코덱 삽입 뒤) — CallMap 기록용
     if ( gclsSetup.m_bUseRtpRelay ) {
         // 녹취 경로: Recording 활성화 시 세션 디렉터리 사용
         std::string strRecordDir;
@@ -1024,6 +1068,53 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
                     clsVolteSvc.name.c_str(), clsVolteSvc.media_srtp.c_str() );
         }
 
+        // ── 피어 leg 코덱 삽입(cmp.md §11.2, TS 29.162 트랜스코딩 제어 모델) — 피어→가입자 오퍼에는 서비스 코덱(코덱
+        // 테이블 top, AMR-WB)을,
+        //    가입자→피어 오퍼에는 RemoteNode.transcode_codecs 를 더한다(있는 코덱은 그대로). leg 별 최종 코덱은 answer
+        //    때 정하고(ApplyRelayAnswerLeg) 다르면 CMP 가 변환한다. 정책이 없으면 종전 동작(삽입 없음).
+        {
+            clsCodecA.offered = RelayCodec::AudioCodecs( pclsRtp->m_clsMediaList, &clsCodecA.tePt, &clsCodecA.teRtpmap,
+                                                         &clsCodecA.teFmtp );
+            std::vector<RelayCodec::CodecDesc> vecInsert;
+            std::string strInLn;
+            if ( pclsMessage && pclsMessage->m_iListenerId > 0 ) {
+                LocalNodeInfo clsInLn = gclsLocalNodeMap.GetByIntId( pclsMessage->m_iListenerId );
+                if ( clsInLn.IsValid() ) strInLn = clsInLn.name;
+            }
+            const RouteConfig clsARoute = pclsMessage ? InboundRouteOf( pclsMessage, strInLn ) : RouteConfig();
+            if ( clsARoute.IsValid() && !bRoutePrefix ) {
+                // A 가 피어(트렁크), B 가 가입자 — 가입자 leg 오퍼에 서비스 코덱
+                RelayCodec::CodecDesc svc = RelayCodec::ServiceCodec();
+                if ( svc.Valid() && !RelayCodec::Find( clsCodecA.offered, svc ) ) vecInsert.push_back( svc );
+            }
+            if ( bRoutePrefix && !strBRouteName.empty() ) {
+                // B 가 피어 — 그 RemoteNode 정책 코덱
+                RouteConfig clsBRoute = gclsRouteMap.GetByName( strBRouteName );
+                RemoteNodeInfo clsBNode = gclsRemoteNodeMap.GetByName( clsBRoute.remote_node_ref );
+                for ( const std::string &strName : clsBNode.transcode_codecs ) {
+                    RelayCodec::CodecDesc d = RelayCodec::ByName( strName );
+                    if ( d.name.empty() ) {
+                        CLog::Print( LOG_ERROR, "EventIncomingCall: remote_node %s transcode_codecs '%s' 모름 — 건너뜀",
+                                     clsBNode.name.c_str(), strName.c_str() );
+                        continue;
+                    }
+                    if ( !RelayCodec::Find( clsCodecA.offered, d ) ) vecInsert.push_back( d );
+                }
+            }
+            if ( !vecInsert.empty() ) {
+                int n = RelayCodec::InsertCodecs( pclsRtp->m_clsMediaList, vecInsert );
+                std::string strList;
+                for ( const RelayCodec::CodecDesc &d : vecInsert ) strList += ( strList.empty() ? "" : "," ) + d.name;
+                CLog::Print( LOG_INFO,
+                             "EventIncomingCall: codec insertion %s → %d codec(s) [%s] (A %s, B %s) CallId=%s",
+                             clsARoute.IsValid() ? "peer→ue" : "ue→peer", n, strList.c_str(),
+                             clsARoute.IsValid() ? clsARoute.remote_node_ref.c_str() : "ue",
+                             bRoutePrefix ? "peer" : "ue", pszCallId );
+            }
+            clsCodecB.offered = RelayCodec::AudioCodecs( pclsRtp->m_clsMediaList, &clsCodecB.tePt, &clsCodecB.teRtpmap,
+                                                         &clsCodecB.teFmtp );
+        }
+
         // CMP relay 생성: session_id(전역 유일) 발행 후 RELAY_ADD 직접 전송.
         //   (구 gclsRtpMap.CreatePort 대체 — 포트단독키 bookkeeping 제거. 멀티 미디어노드에서 포트가
         //    노드별 비유일이라 포트키 충돌로 teardown 이 엉뚱한 세션을 회수→relay 누수하던 근본버그 제거.)
@@ -1101,6 +1192,9 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         // leg 별 SDES 협상 상태 — answer 재작성(offer echo)·re-INVITE 키 유지/갱신의 원천 (§5.2)
         gclsCallMap.SetRelaySdesLeg( pszCallId, 0, clsSdesA );
         gclsCallMap.SetRelaySdesLeg( pszCallId, 1, clsSdesB );
+        // leg 별 오퍼 코덱(코덱 삽입 뒤) — answer 때 협상 코덱 판정·변환 결정의 원천 (cmp.md §11.2)
+        gclsCallMap.SetRelayCodecLeg( pszCallId, 0, clsCodecA );
+        gclsCallMap.SetRelayCodecLeg( pszCallId, 1, clsCodecB );
     }
 
     // B2BUA: 착신 leg Call-ID에도 발신 leg의 sesid 계승 등록
@@ -1139,8 +1233,18 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
  * early media(링백·안내음, RFC 3960)가 relay 를 지난다. 18x 에서 이미 반영한 키가 200 에서 그대로면 CMP SRTP 컨텍스트를
  * 다시 만들지 않는다 (media_crypto 생략 — 재생성은 replay 창·ROC 를 버린다). 주소가 같은 재-MODIFY 는 CMP 가 latch 를
  * 유지한다. 반환 false = SAVP offer 에 crypto 없는/불일치 answer (호출자가 평문 폴백 없이 처리). */
+/** ApplyRelayAnswerLeg 의 코덱 판정 결과 — 변환 호면 상대 leg(A)로 나가는 answer 를 A 코덱으로 재작성해야
+ * 한다(RelayCodec::RewriteAudio). */
+struct RelayAnswerCodec {
+    bool bTranscode = false;
+    bool bReject = false;  // 성립 불가(공통 코덱도 변환 쌍도 없음) 또는 CMP 변환 자원 없음 → 488
+    RelayCodec::CodecDesc clsCodecA;
+    int iTePtA = -1;
+    std::string strTeRtpmapA, strTeFmtpA;
+};
+
 static bool ApplyRelayAnswerLeg( const char *pszCallId, const CCallInfo &clsCallInfo, CSipCallRtp *pclsRtp,
-                                 const char *pszWhere ) {
+                                 const char *pszWhere, RelayAnswerCodec *pclsOut = NULL ) {
     if ( clsCallInfo.m_strRelaySessionId.empty() ) return true;
     // answer leg 의 relay peer index — 통상 착신 leg=peer1 이지만, 전달로 재구성된 pair 는
     //   answer leg 가 peer0 을 승계할 수 있다. m_bRecv(=peer0 표식)로 일반화.
@@ -1188,12 +1292,86 @@ static bool ApplyRelayAnswerLeg( const char *pszCallId, const CCallInfo &clsCall
     std::string strCalleeCodec;
     CGroupCallService::GetLegPt( pszCallId, true, iCalleePt, iCalleeSrcPt, iCalleeTePt, iCalleeSrcTePt,
                                  &strCalleeCodec );
-    gclsCmpClient.ModifySession( clsCallInfo.m_strRelaySessionId, pclsRtp->m_strIp, iAudioPort,
-                                 iVideoPort > 0 ? iVideoPort : 0, iAnswerIdx, clsCallInfo.m_strRelayCaller,
-                                 clsCallInfo.m_strRelayCallee, clsCallInfo.m_strRelaySesId, iCalleeNat,
-                                 strCalleeGuardIp, iCalleePt, iCalleeSrcPt, iCalleeTePt, iCalleeSrcTePt, strCalleeCodec,
-                                 ( clsCalleeAudioCrypto.bEnabled && !bAudioKeyKept ) ? &clsCalleeAudioCrypto : NULL,
-                                 ( clsCalleeVideoCrypto.bEnabled && !bVideoKeyKept ) ? &clsCalleeVideoCrypto : NULL );
+
+    // ── leg 별 협상 코덱(cmp.md §11.2) — answer leg(B)의 첫 오디오 코덱 vs 상대 leg(A) 오퍼. A 오퍼에 있으면 relay(PT
+    // 만 leg 별),
+    //    없으면 변환 가능 쌍(AMR-WB↔G.711)이어야 한다 — 아니면 488. 변환이면 양 leg 에 media_codec 을 실어 CMP 변환
+    //    유닛을 붙인다.
+    RelayCodec::LegCodecs clsLegB = clsCallInfo.m_clsCodecLeg[iAnswerIdx];
+    RelayCodec::LegCodecs clsLegA = clsCallInfo.m_clsCodecLeg[1 - iAnswerIdx];
+    int iAnsTePt = -1;
+    std::vector<RelayCodec::CodecDesc> vecAns = RelayCodec::AudioCodecs( pclsRtp->m_clsMediaList, &iAnsTePt );
+    CmpMediaCodec clsCodecB, clsCodecA;
+    bool bTranscode = false;
+    if ( !vecAns.empty() && !clsLegA.offered.empty() ) {
+        RelayCodec::CodecDesc negB = vecAns.front(), negA;
+        const int iDecide = RelayCodec::DecideLeg( clsLegA.offered, negB, negA );
+        if ( iDecide < 0 ) {
+            std::string strA;
+            for ( const RelayCodec::CodecDesc &c : clsLegA.offered ) strA += ( strA.empty() ? "" : "," ) + c.Label();
+            CLog::Print( LOG_ERROR, "%s: no common/transcodable codec — answer %s vs offer [%s] → 488 (CallId=%s)",
+                         pszWhere, negB.Label().c_str(), strA.c_str(), pszCallId );
+            if ( pclsOut ) pclsOut->bReject = true;
+            return false;
+        }
+        bTranscode = ( iDecide == 1 );
+        clsLegB.negotiated = negB;
+        clsLegA.negotiated = negA;
+        clsLegA.transcode = clsLegB.transcode = bTranscode;
+        gclsCallMap.SetRelayCodecLeg( pszCallId, iAnswerIdx, clsLegB );
+        gclsCallMap.SetRelayCodecLeg( pszCallId, 1 - iAnswerIdx, clsLegA );
+        // B leg 의 wire PT 는 answer 가 말한 값(코덱 테이블 top 이 아니어도 — G.711 피어)
+        iCalleePt = iCalleeSrcPt = negB.pt;
+        if ( iAnsTePt >= 0 ) iCalleeTePt = iCalleeSrcTePt = iAnsTePt;
+        strCalleeCodec = negB.Label();
+        if ( bTranscode ) {
+            clsCodecB = CmpMediaCodec::From( negB );
+            clsCodecA = CmpMediaCodec::From( negA );
+            CLog::Print( LOG_SYSTEM, "%s: transcode %s(peer%d) <-> %s(peer%d) (CallId=%s)", pszWhere,
+                         negB.Label().c_str(), iAnswerIdx, negA.Label().c_str(), 1 - iAnswerIdx, pszCallId );
+        }
+        if ( pclsOut ) {
+            pclsOut->bTranscode = bTranscode;
+            pclsOut->clsCodecA = negA;
+            pclsOut->iTePtA = clsLegA.tePt;
+            pclsOut->strTeRtpmapA = clsLegA.teRtpmap;
+            pclsOut->strTeFmtpA = clsLegA.teFmtp;
+        }
+    }
+    const bool bOkB = gclsCmpClient.ModifySession(
+        clsCallInfo.m_strRelaySessionId, pclsRtp->m_strIp, iAudioPort, iVideoPort > 0 ? iVideoPort : 0, iAnswerIdx,
+        clsCallInfo.m_strRelayCaller, clsCallInfo.m_strRelayCallee, clsCallInfo.m_strRelaySesId, iCalleeNat,
+        strCalleeGuardIp, iCalleePt, iCalleeSrcPt, iCalleeTePt, iCalleeSrcTePt, strCalleeCodec,
+        ( clsCalleeAudioCrypto.bEnabled && !bAudioKeyKept ) ? &clsCalleeAudioCrypto : NULL,
+        ( clsCalleeVideoCrypto.bEnabled && !bVideoKeyKept ) ? &clsCalleeVideoCrypto : NULL,
+        bTranscode ? &clsCodecB : NULL );
+    if ( !bTranscode && clsLegA.negotiated.Valid() && !clsLegA.negotiated.Same( RelayCodec::ServiceCodec() ) ) {
+        // relay 인데 A 의 코덱이 서비스 코덱(코덱 테이블 top)이 아니다(예 UE 가 PCMU 오퍼 → G.711 relay) — RELAY_ADD 는
+        // top PT 로 갔으니 A leg PT 를
+        //   협상 값으로 바로잡는다(주소 미변경). 종전엔 egress 에 top PT(96) 가 스탬프되어 규격 준수 단말이 버릴 수
+        //   있었다.
+        gclsCmpClient.ModifySession( clsCallInfo.m_strRelaySessionId, "", 0, 0, 1 - iAnswerIdx,
+                                     clsCallInfo.m_strRelayCaller, clsCallInfo.m_strRelayCallee,
+                                     clsCallInfo.m_strRelaySesId, 0, "", clsLegA.negotiated.pt, clsLegA.negotiated.pt,
+                                     clsLegA.tePt > 0 ? clsLegA.tePt : 0, clsLegA.tePt > 0 ? clsLegA.tePt : 0,
+                                     clsLegA.negotiated.Label() );
+    }
+    if ( bTranscode ) {
+        // A leg — 주소는 그대로(remote_port 0 = 미변경), PT·코덱 선언만. 둘 중 하나라도 CMP 가
+        // 거절(TRANSCODE_CAPACITY)하면 488 — 무음 relay 를 만들지 않는다
+        const bool bOkA =
+            bOkB && gclsCmpClient.ModifySession(
+                        clsCallInfo.m_strRelaySessionId, "", 0, 0, 1 - iAnswerIdx, clsCallInfo.m_strRelayCaller,
+                        clsCallInfo.m_strRelayCallee, clsCallInfo.m_strRelaySesId, 0, "", clsLegA.negotiated.pt,
+                        clsLegA.negotiated.pt, clsLegA.tePt > 0 ? clsLegA.tePt : 0, clsLegA.tePt > 0 ? clsLegA.tePt : 0,
+                        clsLegA.negotiated.Label(), NULL, NULL, &clsCodecA );
+        if ( !bOkA ) {
+            CLog::Print( LOG_ERROR, "%s: CMP transcode setup failed (capacity?) → 488 (CallId=%s)", pszWhere,
+                         pszCallId );
+            if ( pclsOut ) pclsOut->bReject = true;
+            return false;
+        }
+    }
     return true;
 }
 
@@ -1212,9 +1390,15 @@ void CModuleDispatcher::EventCallRing( const char *pszCallId, int iSipStatus, CS
             //   (B-leg 주소·키가 CMP 에 있어야 링백이 relay 를 지난다), 상대 leg 로 나가는 SDP 를 relay 주소로
             //   재작성한다. (포크 대기 leg 의 18x 는 위 TAS 가 소비한다 — 여기 오는 것은 CallMap pair 의 단일 B-leg.)
             //   SAVP offer 에 crypto 가 어긋난 18x 는 SDP 를 떼고 전달한다(early media 없음 — 호 종료 판정은 200 에서).
-            if ( !ApplyRelayAnswerLeg( pszCallId, clsCallInfo, pclsRtp, "EventCallRing" ) ) {
+            RelayAnswerCodec clsAns;
+            if ( !ApplyRelayAnswerLeg( pszCallId, clsCallInfo, pclsRtp, "EventCallRing", &clsAns ) ) {
                 pclsRtp = NULL;
             } else {
+                // 변환 호 — 상대 leg(A)로 가는 early answer 는 A 의 코덱으로(B 의 G.711 SDP 를 그대로 넘기면 A 가
+                // 488/무음)
+                if ( clsAns.bTranscode )
+                    RelayCodec::RewriteAudio( pclsRtp->m_clsMediaList, clsAns.clsCodecA, clsAns.iTePtA,
+                                              clsAns.strTeRtpmapA, clsAns.strTeFmtpA );
                 // 링잉 leg crypto 투과 차단 + 전달받는 leg 상태로 재광고 (§5.2). leg index 는 m_bRecv(=peer0 표식)로
                 //   판정 — 전달·픽업 재결합 pair 는 남는 쪽이 peer1 일 수 있다.
                 if ( !clsCallInfo.m_strRelaySessionId.empty() )
@@ -1271,11 +1455,22 @@ void CModuleDispatcher::EventCallStart( const char *pszCallId, CSipCallRtp *pcls
             // ── answer leg 를 relay 에 반영 — SDES 검증·UE 키 확정·NAT·PT·RELAY_MODIFY (media_security.md §5.2).
             //    SAVP offer 에 crypto 없는/불일치 answer 는 종료(평문 폴백 금지). 18x 에서 이미 반영했으면 같은 값의
             //    재확인이다.
-            if ( !ApplyRelayAnswerLeg( pszCallId, clsCallInfo, pclsRtp, "EventCallStart" ) ) {
-                CLog::Print( LOG_ERROR, "EventCallStart: 평문 폴백 금지, 호 종료 (CallId=%s)", pszCallId );
+            RelayAnswerCodec clsAns;
+            if ( !ApplyRelayAnswerLeg( pszCallId, clsCallInfo, pclsRtp, "EventCallStart", &clsAns ) ) {
+                // SAVP 불일치(평문 폴백 금지) 또는 코덱 성립 불가/CMP 변환 자원 없음 — 양 leg 종료. 미응답 A 에는 488
+                // Not Acceptable Here
+                CLog::Print( LOG_ERROR, "EventCallStart: %s, 호 종료 (CallId=%s)",
+                             clsAns.bReject ? "코덱 성립 불가/변환 자원 없음 → 488" : "평문 폴백 금지", pszCallId );
                 gclsUserAgent.StopCall( pszCallId );
+                if ( clsAns.bReject && !clsCallInfo.m_strPeerCallId.empty() &&
+                     !gclsUserAgent.IsConnected( clsCallInfo.m_strPeerCallId.c_str() ) )
+                    gclsUserAgent.StopCall( clsCallInfo.m_strPeerCallId.c_str(), SIP_NOT_ACCEPTABLE_HERE );
                 return;
             }
+            // 변환 호 — 상대 leg(A)로 가는 answer 는 A 의 협상 코덱(+A 의 telephone-event)으로 재작성 (cmp.md §11.2)
+            if ( clsAns.bTranscode )
+                RelayCodec::RewriteAudio( pclsRtp->m_clsMediaList, clsAns.clsCodecA, clsAns.iTePtA, clsAns.strTeRtpmapA,
+                                          clsAns.strTeFmtpA );
 
             int iRemoteAudio = pclsRtp->GetAudioPort();
             if ( iRemoteAudio <= 0 && pclsRtp->m_iPort > 0 ) iRemoteAudio = pclsRtp->m_iPort;
@@ -1465,6 +1660,13 @@ void CModuleDispatcher::EventReInvite( const char *pszCallId, CSipCallRtp *pclsR
                 int iLegPt = 0, iLegSrcPt = 0, iLegTePt = 0, iLegSrcTePt = 0;
                 std::string strLegCodec;
                 CGroupCallService::GetLegPt( pszCallId, false, iLegPt, iLegSrcPt, iLegTePt, iLegSrcTePt, &strLegCodec );
+                // 협상 코덱이 확정된 leg(G.711 피어 등 코덱 테이블 top 이 아닐 수 있다)는 그 PT 를 쓴다 (cmp.md §11)
+                if ( clsCallInfo.m_clsCodecLeg[iPeerIdx].negotiated.Valid() ) {
+                    iLegPt = iLegSrcPt = clsCallInfo.m_clsCodecLeg[iPeerIdx].negotiated.pt;
+                    strLegCodec = clsCallInfo.m_clsCodecLeg[iPeerIdx].negotiated.Label();
+                    if ( clsCallInfo.m_clsCodecLeg[iPeerIdx].tePt > 0 )
+                        iLegTePt = iLegSrcTePt = clsCallInfo.m_clsCodecLeg[iPeerIdx].tePt;
+                }
                 // 재협상 leg SDES — UE 재키잉만 반영(서버 키 유지: psip 자동 200 이 기존 local SDP
                 //   로 답한다). 동일 선언 재전송 = CMP 세션 유지 (§5.2·§6.3).
                 RelaySdesLeg clsSdesLeg = clsCallInfo.m_clsSdesLeg[iPeerIdx];
@@ -1489,6 +1691,12 @@ void CModuleDispatcher::EventReInvite( const char *pszCallId, CSipCallRtp *pclsR
                 int iTargetLeg = clsCallInfo.m_bRecv ? 1 : 0;
                 MediaSdes::RewriteRelaySdpForLeg( pclsRemoteRtp->m_clsMediaList, clsCallInfo.m_clsSdesLeg[iTargetLeg],
                                                   true );
+                // 변환 호 — 대상 leg 로 가는 re-offer 는 그 leg 의 협상 코덱으로(hold/resume 의 AMR-WB re-offer 가
+                // G.711 피어에 그대로 가면 488)
+                const RelayCodec::LegCodecs &clsTgt = clsCallInfo.m_clsCodecLeg[iTargetLeg];
+                if ( clsTgt.transcode && clsTgt.negotiated.Valid() )
+                    RelayCodec::RewriteAudio( pclsRemoteRtp->m_clsMediaList, clsTgt.negotiated, clsTgt.tePt,
+                                              clsTgt.teRtpmap, clsTgt.teFmtp );
             }
             // 재협상 SDP 에도 CMP relay IP 를 광고 (멀티 미디어노드에서 CSP 로컬 주소 오광고 방지)
             std::string strRelayIp = clsCallInfo.m_strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress()

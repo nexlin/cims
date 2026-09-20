@@ -187,6 +187,7 @@ def number_prefix(p: PeerPool) -> Optional[str]:
 def derive_records(topology: Topology, pools: Dict[str, PeerPool], local_node_refs: Dict[str, str]) -> Dict[str, List[dict]]:
     """피어 풀 → 컬렉션별 새 레코드(태그 cims-tester). 이름 규약: tester-<종류>-<풀|route_set>. local_node_refs = 풀 → 접속점 이름.
     Route 는 `inbound_auth: none`(신뢰 피어 — CSP 가 이 Route 로 식별한 요청은 Digest 없이 받는다), ACL 은 `scope=route` 로 그 피어에만.
+    pbx `register` 가 있으면 등록형 트렁크 — `inbound_auth: digest` + 트렁크 계정(auth_user·auth_ha1|auth_password·auth_realm·register_expires).
 
     매칭 규칙 = 도메인(`req_uri_host eq` — ibcf, UE 가 user@피어도메인 을 다이얼) OR 번호 접두(`req_uri_user prefix` — pbx/mgcf,
     UE 가 DID/E.164 를 그대로 다이얼, BGCF 식 번호 라우팅). 두 규칙을 같은 RouteSet 의 match 집합에 OR 로 넣는다."""
@@ -197,16 +198,30 @@ def derive_records(topology: Topology, pools: Dict[str, PeerPool], local_node_re
         rn = f'tester-rn-{name}'
         rt = f'tester-r-{name}'
         bind_ip = topology.pool_bind_ip(name)
-        out['remote_nodes'].append({
+        rn_rec = {
             'name': rn, 'enabled': True, 'ip': bind_ip, 'port': int(p.bind.port), 'protocol': p.bind.protocol.upper(),
             'remote_domain': p.domain, 'srv_lookup': False, 'dns_fallback': False, 'tls_verify': False,
             'tags': [SEED_TAG, p.profile], 'note': f'cims-tester peer pool {name}',
-        })
+        }
+        if p.profile == 'pbx':
+            # IP-PBX 는 G.711 필수(SIPconnect 2.0) — 가입자→PBX 오퍼에 CSP 가 끼워 넣을 코덱(cmp.md §11.2). 피어 오퍼 코덱 목록의 G.711 만(AMR-WB 는 서비스 코덱)
+            g711 = [c.upper() for c in (p.codecs or ['PCMA', 'PCMU']) if c.upper() in ('PCMA', 'PCMU')]
+            if g711:
+                rn_rec['transcode_codecs'] = g711
+        out['remote_nodes'].append(rn_rec)
         local_node_ref = local_node_refs[name]
-        out['routes'].append({
+        route = {
             'name': rt, 'enabled': True, 'local_node_ref': local_node_ref, 'remote_node_ref': rn, 'inbound_auth': 'none',
             'register_to_remote': False, 'tags': [SEED_TAG], 'note': f'cims-tester {local_node_ref} ↔ {name}',
-        })
+        }
+        if p.trunk_register is not None:
+            # 등록형 트렁크(SIPconnect 2.0 §8) — 피어가 이 계정으로 REGISTER 한다: Route 는 inbound_auth=digest + 트렁크 계정(auth_user·H(A1)|password·realm).
+            #   CSP 는 바인딩(REGISTER 소스)을 다음 홉으로 쓰고 바인딩 없으면 Route dead — 비밀은 환경변수에서(컴파일과 같은 해석)
+            from services.tester_compile import trunk_register_for
+            tr = trunk_register_for(name, p, None)
+            route.update({'inbound_auth': 'digest', 'auth_user': tr.user, 'auth_realm': tr.realm or '',
+                          'auth_ha1': tr.ha1 or '', 'auth_password': tr.password or '', 'register_expires': int(tr.expires)})
+        out['routes'].append(route)
         out['rules'].append({
             'name': f'tester-rule-{name}-domain', 'enabled': True, 'field': 'req_uri_host', 'op': 'eq', 'value': p.domain,
             'tags': [SEED_TAG, 'routing'],

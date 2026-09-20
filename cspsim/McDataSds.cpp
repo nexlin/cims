@@ -4,6 +4,7 @@
 
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <random>
 #include <vector>
@@ -116,6 +117,27 @@ std::string payloadTlv(const std::string& text) {
     return s;
 }
 
+std::string fdSignallingTlv(const std::string& convId, const std::string& msgId, const std::string& fileUrl, const std::string& fileName,
+                            long long fileSize, const std::string& fileType, int64_t timeSec) {
+    std::string name = fileName;
+    for (size_t p; (p = name.find('"')) != std::string::npos;) name.erase(p, 1);
+    std::string meta = "name:\"" + name + "\" size:" + std::to_string(fileSize) + " type:" + fileType;
+    std::string s;
+    s += (char)kMsgFdSignalling;
+    putDateTime(s, timeSec);
+    s += hexDecode(convId);
+    s += hexDecode(msgId);
+    size_t l = 1 + fileUrl.size();   // content-type(FILEURL) + URL
+    s += (char)0x78;
+    s += (char)((l >> 8) & 0xFF); s += (char)(l & 0xFF);
+    s += (char)0x04;   // FILEURL (§15.2.13)
+    s += fileUrl;
+    s += (char)0x79;
+    s += (char)((meta.size() >> 8) & 0xFF); s += (char)(meta.size() & 0xFF);
+    s += meta;
+    return s;
+}
+
 static std::string infoXml(const std::string& requestType, const std::string& uri) {
     return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
            "<mcdatainfo xmlns=\"urn:3gpp:ns:mcdataInfo:1.0\">\n"
@@ -154,6 +176,26 @@ Body buildGroupSds(const std::string& groupId, const std::string& text, const st
 Body buildOneToOneSds(const std::string& toUser, const std::string& text, const std::string& convId, const std::string& msgId,
                       bool requestDelivery, int64_t timeSec) {
     return buildSds("one-to-one-sds", "tel:" + toUser, text, convId, msgId, requestDelivery, timeSec);
+}
+
+static Body buildFd(const std::string& requestType, const std::string& uri, const std::string& fileUrl, const std::string& fileName,
+                    long long fileSize, const std::string& fileType, const std::string& convId, const std::string& msgId, int64_t timeSec) {
+    std::string boundary = "mcdata-fd-" + msgId.substr(0, 14);
+    std::string body;
+    appendPart(body, boundary, kCtInfo, nullptr, infoXml(requestType, uri));
+    appendPart(body, boundary, kCtSignalling, "base64", base64Encode(fdSignallingTlv(convId, msgId, fileUrl, fileName, fileSize, fileType, timeSec)));
+    body += "--" + boundary + "--\r\n";
+    return Body{"multipart/mixed;boundary=" + boundary, body};
+}
+
+Body buildGroupFd(const std::string& groupId, const std::string& fileUrl, const std::string& fileName, long long fileSize,
+                  const std::string& fileType, const std::string& convId, const std::string& msgId, int64_t timeSec) {
+    return buildFd(kReqGroupFd, "tel:" + groupId, fileUrl, fileName, fileSize, fileType, convId, msgId, timeSec);
+}
+
+Body buildOneToOneFd(const std::string& toUser, const std::string& fileUrl, const std::string& fileName, long long fileSize,
+                     const std::string& fileType, const std::string& convId, const std::string& msgId, int64_t timeSec) {
+    return buildFd(kReqOneToOneFd, "tel:" + toUser, fileUrl, fileName, fileSize, fileType, convId, msgId, timeSec);
 }
 
 Body buildNotification(const std::string& convId, const std::string& msgId, int notifType, int64_t timeSec) {
@@ -269,6 +311,30 @@ bool parse(const std::string& contentType, const std::string& body, SdsMsg& out)
                 out.timeSec = readDateTime(raw, 1);
                 out.convId = hexEncode(raw.substr(6, 16));
                 out.msgId = hexEncode(raw.substr(22, 16));
+                // 선택 IE(TS 24.282 §15.1.3): FD disposition 요청 0x9x·mandatory download 0xAx(TV 1) · InReplyTo 0x21(TV 17) · Application ID 0x22(TV 2) ·
+                //   Payload 0x78 / Metadata 0x79(TLV-E). Payload 의 content-type 0x04 = FILEURL, Metadata = RFC 5547 file-selector(name/size/type)
+                size_t i = 38;
+                while (i < raw.size()) {
+                    int iei = (unsigned char)raw[i];
+                    if ((iei & 0xF0) == 0x90 || (iei & 0xF0) == 0xA0) { i += 1; continue; }
+                    if (iei == 0x21) { i += 17; continue; }
+                    if (iei == 0x22) { i += 2; continue; }
+                    if (iei != 0x78 && iei != 0x79) break;
+                    if (i + 3 > raw.size()) break;
+                    size_t l = ((unsigned char)raw[i + 1] << 8) | (unsigned char)raw[i + 2];
+                    if (i + 3 + l > raw.size()) break;
+                    if (iei == 0x78 && l >= 1 && (unsigned char)raw[i + 3] == 0x04) out.fileUrl = raw.substr(i + 4, l - 1);
+                    else if (iei == 0x79) {
+                        std::string meta = raw.substr(i + 3, l);
+                        size_t np = meta.find("name:\"");
+                        if (np != std::string::npos) { size_t ne = meta.find('"', np + 6); if (ne != std::string::npos) out.fileName = meta.substr(np + 6, ne - np - 6); }
+                        size_t sp = meta.find("size:");
+                        if (sp != std::string::npos) out.fileSize = std::atoll(meta.c_str() + sp + 5);
+                        size_t tp = meta.find("type:");
+                        if (tp != std::string::npos) { size_t te = meta.find(' ', tp); out.fileType = meta.substr(tp + 5, te == std::string::npos ? std::string::npos : te - tp - 5); }
+                    }
+                    i += 3 + l;
+                }
             }
         } else if (p.ct == kCtPayload) {
             if (raw.size() < 6 || ((unsigned char)raw[0] & 0x3F) != kMsgDataPayload) continue;

@@ -80,8 +80,9 @@ pools:                                   # 풀 하나 = 워커 하나. 워커 �
     worker: w1
     service: ptt
     access: csp
-    source: { creds: creds/ptt.jsonl }
+    source: { creds: creds/ptt.jsonl }   # MCData FD(fd_send/fd_recv)면 줄마다 login/loginPw(IdMS — creds-from-db 가 users.login_id 를 싣는다)도 필요
     transport: udp
+    # subscriber: csc                    # FD 의 CSC(api 노드) — 생략 = 대상의 유일한 subscriber 노드
   real_ue:                               # 실단말 풀(§3.3) — 신원마다 cimsue-cli(libcimsue/pjsua2) 프로세스. 소수(워커 RealUe.MaxProcesses)로 부하 아래 품질 표본
     kind: real-ue
     worker: w1

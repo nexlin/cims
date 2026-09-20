@@ -1110,6 +1110,50 @@ if __name__ == '__main__':
                 kw = dict(mo=mo, host=host_name, pct=disk, threshold=thr)
                 tinfo = {'observed': disk, 'threshold': thr, 'unit': rule.get('unit') or '%'}
                 res.append((mo, is_open, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw), tinfo, sev))
+            elif chk in ('cpu_high', 'mem_high', 'load_high', 'mount_high'):
+                # 호스트 자원 임계 — disk_high 와 같은 단계 임계 평가, 객체만 다르다(§3.5). 관측값이 없으면 판정하지 않는다.
+                def _staged(observed, extra_kw, mo_sub):
+                    thr = int(rule.get('threshold', 90))
+                    sev = None
+                    if isinstance(rule.get('thresholds'), dict):
+                        sev, sthr = alarm_sweeper.staged_severity(rule, observed)
+                        if sthr is not None:
+                            thr = int(sthr)
+                        is_open = sev is not None
+                    else:
+                        is_open = observed >= thr
+                    mo = f"{host}/{mo_sub}"
+                    kw = dict(mo=mo, host=host_name, pct=observed, threshold=thr, **extra_kw)
+                    tinfo = {'observed': observed, 'threshold': thr, 'unit': rule.get('unit') or '%'}
+                    res.append((mo, is_open, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw), tinfo, sev))
+                if chk == 'cpu_high':
+                    v = metric.get('cpu_pct')
+                    if v is not None:
+                        _staged(round(float(v), 1), {}, 'cpu')
+                elif chk == 'mem_high':
+                    v = metric.get('mem_pct')
+                    if v is not None:
+                        _staged(round(float(v), 1), {}, 'mem')
+                elif chk == 'load_high':
+                    # 1분 load 를 코어 수로 정규화(%) — 코어 수(agent 등록 사양)를 모르면 판정 대상 아님
+                    la = str(metric.get('load_avg') or '')
+                    try:
+                        load1 = float(la.split(',')[0]) if la else None
+                        cores = int(agent.get('cpu_cores') or 0)
+                    except (TypeError, ValueError):
+                        load1, cores = None, 0
+                    if load1 is not None and cores > 0:
+                        _staged(round(load1 / cores * 100.0, 1), {'load': load1}, 'load')
+                else:
+                    # 루트 외 로컬 마운트(agent collect_per_mount — /dev/ 디바이스만, NAS 는 수집 밖). 루트는 disk_high 의 몫
+                    for mnt in (metric.get('mounts') or []):
+                        if not isinstance(mnt, dict):
+                            continue
+                        path = str(mnt.get('mount') or '')
+                        pct = mnt.get('pct')
+                        if not path or path == '/' or pct is None:
+                            continue
+                        _staged(round(float(pct), 1), {'mount': path}, f"disk{path}")
             elif chk == 'store_unavailable':
                 # agent 가 보고한 직전 판정 그대로 쓴다 — OAM 이 다시 probe 하지 않는다.
                 # (OAM 이 재확인하면 그 write 가 같은 멈춘 마운트에서 블록돼 스위퍼가

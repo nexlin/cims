@@ -100,6 +100,35 @@ class Strictness(unittest.TestCase):
         _, errs = validate('scenario', doc)
         self.assertTrue(any('plane' in e for e in errs))
 
+    def test_fd_steps(self):
+        # MCData FD — fd_send 는 from + payload(합성 크기 | 샘플 파일), fd_recv 는 who + payload download|signal. plane/disposition 은 여기 못 둔다
+        for payload in ('256k', '65536', '2m', 'sample_voice.amrwb', 'files/photo.jpg'):
+            doc = self._scn()
+            doc['flow'].append({'step': 'fd_send', 'from': 'a', 'to': 'b', 'payload': payload})
+            doc['flow'].append({'step': 'fd_recv', 'who': ['b']})
+            self.assertEqual(validate('scenario', doc)[1], [], payload)
+        for bad, word in ((
+            {'step': 'fd_send', 'to': 'b', 'payload': '1k'}, 'from'),
+            ({'step': 'fd_send', 'from': 'a', 'to': 'b'}, 'payload'),
+            ({'step': 'fd_send', 'from': 'a', 'to': 'b', 'payload': '../etc/passwd'}, 'payload'),
+            ({'step': 'fd_send', 'from': 'a', 'to': 'b', 'payload': '1k', 'plane': 'media'}, 'plane'),
+            ({'step': 'fd_recv', 'who': ['b'], 'payload': 'upload'}, 'download'),
+            ({'step': 'fd_recv'}, 'who'),
+        ):
+            doc = self._scn()
+            doc['flow'].append(bad)
+            errs = validate('scenario', doc)[1]
+            self.assertTrue(any(word in e for e in errs), (bad, errs))
+        doc = self._scn()
+        doc['flow'].append({'step': 'fd_recv', 'who': ['b'], 'payload': 'signal'})
+        self.assertEqual(validate('scenario', doc)[1], [])
+        # to 없는 fd_send = 그룹 세션(multi 역할 허용)
+        from services.tester_models import Scenario
+        sc = Scenario.model_validate({'id': 'T-FD', 'roles': {'a': {'pool': 'p'}, 'm': {'pool': 'p', 'multi': True}},
+                                      'flow': [{'step': 'fd_send', 'from': 'a', 'payload': '1k'}, {'step': 'fd_recv', 'who': ['m']}]})
+        self.assertTrue(sc.is_group_session())
+        self.assertEqual(sc.multi_roles(), ['m'])
+
     def test_profile_required_by_model(self):
         _, errs = validate('profile', {'model': 'step', 'start': 5})
         self.assertTrue(any('step' in e and 'hold_s' in e for e in errs))
@@ -355,7 +384,7 @@ class TopologyV2(unittest.TestCase):
             (doc([{'step': 'group_call', 'from': 't'}, {'step': 'answer', 'who': ['t']}]), '1:1'),
             (doc([{'step': 'group_call', 'from': 't'}], {'t': {'pool': 'p'}, 'l': {'pool': 'q', 'multi': True}}), '같은 풀'),
             (doc([{'step': 'group_call', 'from': 't'}], {'t': {'pool': 'p'}, 'l': {'pool': 'p', 'multi': True}, 'k': {'pool': 'p', 'multi': True}}), '하나만'),
-            (doc([{'step': 'invite', 'from': 't', 'to': 'l'}]), 'group_call(또는 그룹 SDS sds_send)이 있는'),
+            (doc([{'step': 'invite', 'from': 't', 'to': 'l'}]), 'group_call(또는 그룹 SDS/FD sds_send·fd_send)이 있는'),
             (doc([{'step': 'group_call', 'to': 'l'}]), 'from'),
             (doc([{'step': 'group_call', 'from': 't'}, {'step': 'bye', 'from': 't', 'group': 'g'}]), 'group 은'),
         ):

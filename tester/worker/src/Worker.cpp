@@ -176,6 +176,26 @@ void Worker::OnSdsMediaRecv(SimSession* s, const std::string& from, const std::s
     std::lock_guard<std::mutex> lk(m_evMtx);
     m_events.push_back({ Event::SDS_RECV, s, nullptr, dispReq, 0, from, msgId, true, false, 0, 0, group });
 }
+void Worker::OnFdUpload(SimSession* s, const std::string& msgId, int st, long long ms, long long bytes) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    Event e{ Event::FD_UPLOAD, s, nullptr, st, ms, "", msgId, false };
+    e.bytes = bytes;
+    m_events.push_back(e);
+}
+void Worker::OnFdRecv(SimSession* s, const std::string& from, const std::string& msgId, const std::string& group, const std::string& fileUrl,
+                      const std::string& /*fileName*/, long long fileSize, const std::string& /*fileType*/) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    Event e{ Event::FD_RECV, s, nullptr, 0, 0, from, msgId, false, false, 0, 0, group };
+    e.url = fileUrl;
+    e.bytes = fileSize;
+    m_events.push_back(e);
+}
+void Worker::OnFdDownload(SimSession* s, const std::string& msgId, int st, long long bytes, long long ms) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    Event e{ Event::FD_DOWNLOAD, s, nullptr, st, ms, "", msgId, false };
+    e.bytes = bytes;
+    m_events.push_back(e);
+}
 void Worker::OnSdsNotification(SimSession* s, const std::string& msgId, int notifType) {
     std::lock_guard<std::mutex> lk(m_evMtx);
     m_events.push_back({ Event::SDS_NOTIF, s, nullptr, notifType, 0, "", msgId, false });
@@ -394,6 +414,12 @@ bool Worker::buildUePool(Pool* pool, const Json& d, std::string& err) {
     pool->service = d["service"].asString("volte");
     const bool ptt = pool->service == "ptt";
     pool->msrp = d["msrp"].asBool(false);
+    // 대상 CSC(subscriber 노드 api) — MCData FD 의 IdMS 토큰·콘텐츠 서버. 없으면 fd_send/fd_recv 단계가 인스턴스 실패로 닫힌다(컨트롤러가 컴파일 때 막는다)
+    if (d["target_csc"].isObject()) {
+        pool->cscHost = d["target_csc"]["ip"].asString();
+        pool->cscPort = (int)d["target_csc"]["port"].asInt(4430);
+        pool->cscTls = d["target_csc"]["tls"].asBool(true);
+    }
     // TLS 서버 검증·클라이언트 인증서(§3.1) — 풀이 켜면 워커의 Tls.* 파일이 있어야 한다
     const bool tlsVerify = d["tls_verify"].asBool(false), tlsClientCert = d["tls_client_cert"].asBool(false);
     if (!tlsRequirements(pool->transport == "tls" && tlsVerify, pool->transport == "tls" && tlsClientCert, err)) return false;
@@ -433,6 +459,8 @@ bool Worker::buildUePool(Pool* pool, const Json& d, std::string& err) {
         ep->id.authScheme = x["auth_scheme"].asString("digest");
         ep->id.akaK = x["aka_k"].asString();
         ep->id.akaOpc = x["aka_opc"].asString();
+        ep->id.login = x["login"].asString();
+        ep->id.loginPw = x["login_pw"].asString();
         std::string authId = x["auth_id"].asString();
         if (ep->id.user.empty() || ep->id.domain.empty()) { err = "identity_user_domain_required"; return false; }
         // IMPI — '@' 없으면 도메인을 붙인다 (cspsim -creds authId 규약과 같다; CSP 는 authId@domain 을 기대한다)
@@ -448,6 +476,8 @@ bool Worker::buildUePool(Pool* pool, const Json& d, std::string& err) {
         if (!ep->id.akaK.empty()) ep->s->SetAka(ep->id.akaK, ep->id.akaOpc, 0);
         ep->s->SetAnswerMode(SimSession::E_ANSWER_DEFERRED);
         ep->s->SetMcDataMsrp(pool->msrp);
+        if (!ep->id.login.empty()) ep->s->SetIdmsLogin(ep->id.login, ep->id.loginPw);
+        if (!pool->cscHost.empty()) ep->s->SetFdServer(pool->cscHost, pool->cscPort, pool->cscTls);
         ep->s->SetPrack(d["prack"].asBool(false));
         { std::string dm = dtmfModeOf(d["dtmf"]); ep->s->SetDtmf(dm != "off"); ep->s->SetDtmfInband(dm == "inband"); }
         if (pool->transport == "tls" && (tlsVerify || tlsClientCert))
@@ -720,7 +750,7 @@ HttpResponse Worker::poolDelete(const std::string& name) {
 static const char* kSupported[] = { "register", "deregister", "invite", "answer", "reject", "bye",
                                     "media_hold", "wait", "expect", "progress", "hold", "resume", "dtmf", "refer",
                                     "media_send", "media_stop", "group_call", "floor_request", "floor_release",
-                                    "pickup", "subscribe", "replaces", "join", "publish", "sds_send", "sds_recv", "check" };
+                                    "pickup", "subscribe", "replaces", "join", "publish", "sds_send", "sds_recv", "fd_send", "fd_recv", "check" };
 
 static int rtpModeOf(const Json& media) {
     std::string m = media["rtp"].asString("auto");
@@ -737,6 +767,56 @@ bool Worker::resolveSample(const std::string& file, std::string& out, std::strin
     struct stat sb;
     if (stat(out.c_str(), &sb) != 0 || !S_ISREG(sb.st_mode) || sb.st_size <= 0) { err = out + " — 파일 없음"; return false; }
     return true;
+}
+
+bool Worker::fdPayload(const std::string& payload, std::string& data, std::string& name, std::string& mime, std::string& err) const {
+    // `<n>[k|m]` = 합성 바이트(결정적 패턴 — 내용은 시험 대상이 아니다, 크기 상한 64 MiB — CSC McDataFd.MaxBytes 기본 50 MB 가 413 으로 게이트) · 그 외 = 샘플 디렉터리 파일
+    if (payload.empty()) { err = "payload(합성 크기 `256k` 또는 샘플 파일 이름) required"; return false; }
+    size_t n = 0;
+    while (n < payload.size() && isdigit((unsigned char)payload[n])) n++;
+    if (n > 0 && (n == payload.size() || (n + 1 == payload.size() && strchr("kKmM", payload[n])))) {
+        long long sz = atoll(payload.substr(0, n).c_str());
+        if (n < payload.size()) sz *= (payload[n] == 'k' || payload[n] == 'K') ? 1024LL : 1024LL * 1024LL;
+        if (sz <= 0 || sz > 64LL * 1024 * 1024) { err = payload + " — 합성 크기는 1 B ~ 64 MiB"; return false; }
+        data.resize((size_t)sz);
+        for (size_t i = 0; i < data.size(); ++i) data[i] = (char)(0x21 + (i * 7 + (i >> 8)) % 93);
+        name = "fd_" + payload + ".bin";
+        mime = "application/octet-stream";
+        return true;
+    }
+    std::string path;
+    if (!resolveSample(payload, path, err)) return false;
+    std::ifstream f(path, std::ios::binary);
+    data.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+    if (data.empty()) { err = path + " — 빈 파일"; return false; }
+    name = payload.substr(payload.rfind('/') == std::string::npos ? 0 : payload.rfind('/') + 1);
+    std::string ext = name.rfind('.') == std::string::npos ? "" : name.substr(name.rfind('.') + 1);
+    for (auto& c : ext) c = (char)tolower((unsigned char)c);
+    mime = ext == "jpg" || ext == "jpeg" ? "image/jpeg" : ext == "png" ? "image/png" : ext == "mp4" ? "video/mp4" : ext == "txt" ? "text/plain"
+         : ext == "amrwb" || ext == "awb" ? "audio/amr-wb" : ext == "h264" ? "video/h264" : ext == "pdf" ? "application/pdf" : "application/octet-stream";
+    return true;
+}
+
+bool Worker::startFdDownloads(Instance& in, const CompiledStep& st, long long now) {
+    // fd_recv 의 ② — payload signal 이면 도착으로 끝. download(기본)은 who 전원이 FILEURL 을 내려받는다(각자 IdMS 토큰·GET). 반환 true = 단계 완료(바로 다음 단계)
+    if (st.payload == "signal") return true;
+    in.fdDlWait.clear();
+    for (auto& role : st.who)
+        for (auto* ep : roleEndpoints(in, role)) {
+            if (!ep->isSim()) continue;
+            std::string url;
+            for (auto& r : ep->fdRx) if (r.msgId == in.fdMsgId) url = r.url;
+            if (url.empty()) { emitEvent("FD without FILEURL", ep, "fd_recv", 0); finishInstance(in, true, "fd_recv: FILEURL 없음", now); return false; }
+            if (ep->id.login.empty()) { finishInstance(in, true, "fd_recv: " + role + " 신원에 IdMS 로그인(login)이 없다 — 다운로드 불가(payload: signal 로 도착만 볼 수 있다)", now); return false; }
+            if (!ep->s->DownloadFd(in.fdMsgId, url)) { finishInstance(in, true, "fd_recv: 다운로드 개시 실패", now); return false; }
+            m_metrics.counter("fd_dl_tx");
+            in.fdDlWait.push_back(ep);
+        }
+    if (in.fdDlWait.empty()) return true;
+    in.phase = Instance::WAIT_EVENT;
+    in.awaitKind = "fddl";
+    in.deadlineMs = now + m_cfg.inviteTimeoutMs + 30000;
+    return false;
 }
 
 long long Worker::rtpStreams() const {
@@ -791,7 +871,7 @@ HttpResponse Worker::runStart(const Json& d) {
     if (!unsupported.empty()) {
         std::string list;
         for (auto& u : unsupported) list += (list.empty() ? "" : ",") + u;
-        return errResp(400, "unsupported_step", list + " — 워커는 register/invite/answer/reject/bye/media_hold/wait/expect/progress/hold/resume/dtmf/refer/media_send/media_stop/group_call/floor_request/floor_release/pickup/subscribe/replaces/join/publish/sds_send/sds_recv/check 만");
+        return errResp(400, "unsupported_step", list + " — 워커는 register/invite/answer/reject/bye/media_hold/wait/expect/progress/hold/resume/dtmf/refer/media_send/media_stop/group_call/floor_request/floor_release/pickup/subscribe/replaces/join/publish/sds_send/sds_recv/fd_send/fd_recv/check 만");
     }
     if (spec->steps.empty()) return errResp(400, "steps_required");
     // 샘플 라이브러리(§4) — 컨트롤러가 토폴로지 media.samples 에서 이 시나리오가 참조하는 것만 보낸다. 파일은 지금 확인한다
@@ -831,7 +911,7 @@ HttpResponse Worker::runStart(const Json& d) {
     m_groupPool.clear(); m_singleRoles.clear(); m_usedMulti.clear(); m_groupNames.clear(); m_guestRoles.clear();
     m_groupCursor = 0;
     // 그룹 SDS(sds_send 에 to 없음 = 그룹 대상)도 그룹 단위 인스턴스 — 수신자는 multi 역할(그룹의 나머지 멤버)
-    for (auto& st : m_body) if (st.step == "group_call" || (st.step == "sds_send" && st.to.empty())) { m_groupBound = true; break; }
+    for (auto& st : m_body) if (st.step == "group_call" || ((st.step == "sds_send" || st.step == "fd_send") && st.to.empty())) { m_groupBound = true; break; }
     if (m_groupBound) {
         m_guestRoles = spec->guestRoles;
         auto isMulti = [&](const std::string& r) { return std::find(spec->multiRoles.begin(), spec->multiRoles.end(), r) != spec->multiRoles.end(); };
@@ -1437,6 +1517,20 @@ void Worker::onEvent(const Event& e) {
         break;
     case Event::SDS_RESP:
         // sds_send 의 MESSAGE 최종 응답 — 기대 코드(기본 200)와 다르면 인스턴스 실패. 응답이 오면 다음 단계(sds_recv 가 수신을 기다린다)
+        if (in && e.user == in->fdMsgId) {
+            // fd_send 의 FD SIGNALLING MESSAGE 최종 응답(업로드 뒤) — 기대 코드(기본 200)와 다르면 인스턴스 실패
+            m_metrics.counter("fd_codes." + std::to_string(e.status));
+            if (in->phase == Instance::WAIT_EVENT && in->awaitKind == "fdresp") {
+                int want = in->expectCode > 0 ? in->expectCode : 200;
+                if (e.status != want) {
+                    emitEvent("FD MESSAGE expected " + std::to_string(want) + " got " + std::to_string(e.status), ep, "fd_send", e.status);
+                    finishInstance(*in, true, "fd_send " + std::to_string(e.status), now);
+                    break;
+                }
+                advance(*in, now);
+            }
+            break;
+        }
         m_metrics.counter("sds_codes." + std::to_string(e.status));
         if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "sdsresp" && e.user == in->sdsMsgId) {
             int want = in->expectCode > 0 ? in->expectCode : 200;
@@ -1458,6 +1552,66 @@ void Worker::onEvent(const Event& e) {
         if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "sdsrecv" && e.user == in->sdsMsgId) {
             auto& w = in->sdsWait;
             w.erase(std::remove(w.begin(), w.end(), ep), w.end());
+            if (w.empty()) advance(*in, now);
+        }
+        break;
+    }
+    case Event::FD_UPLOAD:
+        // fd_send ① 콘텐츠 업로드(IdMS 토큰 + POST /mcdata/fd) 결과 — 201 이면 libcsim 이 FD MESSAGE 를 냈다(→ SDS_RESP 로 최종 응답). 아니면 인스턴스 실패
+        m_metrics.counter("fd_upload_codes." + std::to_string(e.status));
+        if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "fdupload" && e.user == in->fdMsgId) {
+            if (e.status != 201) {
+                emitEvent("FD upload " + std::to_string(e.status) + (e.status == 0 ? " (CSC 접속 실패)" : e.status == 401 ? " (IdMS 토큰 실패)" : ""), ep, "fd_send", e.status);
+                finishInstance(*in, true, "fd_send upload " + std::to_string(e.status), now);
+                break;
+            }
+            m_metrics.timer("fd_upload_ms", (double)e.ms);
+            in->fdSendMs = now;          // MESSAGE 는 지금 나간다 — fd_delay_ms 기점
+            in->awaitKind = "fdresp";
+            in->deadlineMs = now + m_cfg.inviteTimeoutMs;
+        }
+        break;
+    case Event::FD_RECV: {
+        // FD SIGNALLING 도착 — ① 자기 인스턴스의 media SDS(sds_send plane: media) 의 FILEURL 폴백이면 SDS 도착으로(sds_rx·sds_delay_ms·sds_recv 해제 — MSRP 가
+        //   아닌 경로라 sds_media_pct 분자엔 넣지 않는다) ② 아니면 FD 도착(fd_rx·fd_delay_ms·fd_recv 해제, URL·크기를 단말에 기억 → 다운로드)
+        if (in && !in->sdsMsgId.empty() && e.user == in->sdsMsgId) {
+            m_metrics.counter("sds_rx");
+            if (ep->sdsRx.size() > 64) ep->sdsRx.erase(ep->sdsRx.begin());
+            ep->sdsRx.push_back(e.user);
+            if (in->sdsSendMs > 0) m_metrics.timer("sds_delay_ms", (double)(now - in->sdsSendMs));
+            if (in->phase == Instance::WAIT_EVENT && in->awaitKind == "sdsrecv") {
+                auto& w = in->sdsWait;
+                w.erase(std::remove(w.begin(), w.end(), ep), w.end());
+                if (w.empty()) advance(*in, now);
+            }
+            break;
+        }
+        m_metrics.counter("fd_rx");
+        if (ep->fdRx.size() > 64) ep->fdRx.erase(ep->fdRx.begin());
+        ep->fdRx.push_back({ e.user, e.url, e.bytes });
+        if (in && e.user == in->fdMsgId && in->fdSendMs > 0) m_metrics.timer("fd_delay_ms", (double)(now - in->fdSendMs));
+        if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "fdrecv" && e.user == in->fdMsgId) {
+            auto& w = in->fdWait;
+            w.erase(std::remove(w.begin(), w.end(), ep), w.end());
+            if (w.empty()) {
+                if (startFdDownloads(*in, m_body[in->stepIdx], now)) advance(*in, now);
+            }
+        }
+        break;
+    }
+    case Event::FD_DOWNLOAD: {
+        // fd_recv ② 다운로드 결과 — 200 + 크기 일치(FD 의 Metadata size)가 성공(fd_download_pct 분자). 실패는 인스턴스 실패
+        m_metrics.counter("fd_download_codes." + std::to_string(e.status));
+        const bool ok = e.status == 200 && (!in || in->fdSize <= 0 || e.bytes == in->fdSize);
+        if (ok) { m_metrics.counter("fd_dl_ok"); m_metrics.timer("fd_download_ms", (double)e.ms); }
+        if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "fddl" && e.user == in->fdMsgId) {
+            auto& w = in->fdDlWait;
+            w.erase(std::remove(w.begin(), w.end(), ep), w.end());
+            if (!ok) {
+                emitEvent("FD download " + std::to_string(e.status) + " (" + std::to_string(e.bytes) + "/" + std::to_string(in->fdSize) + " bytes)", ep, "fd_recv", e.status);
+                finishInstance(*in, true, "fd_recv download " + std::to_string(e.status), now);
+                break;
+            }
             if (w.empty()) advance(*in, now);
         }
         break;
@@ -2806,6 +2960,56 @@ void Worker::execStep(Instance& in, long long now) {
             if (in.sdsWait.empty()) { in.stepIdx++; continue; }
             in.phase = Instance::WAIT_EVENT;
             in.awaitKind = "sdsrecv";
+            in.deadlineMs = now + std::max(st.afterMs, 0) + m_cfg.inviteTimeoutMs;
+            return;
+        }
+        if (st.step == "fd_send") {
+            // MCData FD(TS 23.282 §7.4 + TS 24.282 §15.1.3) — from 이 to 역할(1:1) 또는 그룹에 파일을 배포한다: IdMS 토큰 → POST /mcdata/fd(CSC 게이트 allow_fd·멤버십·크기)
+            //   → FD SIGNALLING MESSAGE(FILEURL+Metadata). payload = 합성 크기(`65536`·`256k`·`2m`) 또는 워커 샘플 디렉터리의 파일 이름. 완료 = MESSAGE 최종 응답(expect.code, 기본 200)
+            std::string role = st.from.empty() ? (st.who.empty() ? "" : st.who[0]) : st.from;
+            Endpoint* from = in.actors[role];
+            if (!from) { finishInstance(in, true, "fd_send: from role missing", now); return; }
+            if (!from->isSim() || !from->registered) { finishInstance(in, true, "fd_send: " + role + " 은 등록된 가상 UE 여야 한다", now); return; }
+            Endpoint* to = st.to.empty() ? nullptr : in.actors[st.to];
+            if (!st.to.empty() && !to) { finishInstance(in, true, "fd_send: to role missing", now); return; }
+            std::string group = to ? "" : (st.group.empty() ? in.group : st.group);
+            if (!to && group.empty()) { finishInstance(in, true, "fd_send: to 역할 또는 그룹(그룹 세션·group) 이 필요하다", now); return; }
+            if (!from->s->HasFdServer()) { finishInstance(in, true, "fd_send: 풀에 대상 CSC(subscriber 노드 api)가 없다", now); return; }
+            if (from->id.login.empty()) { finishInstance(in, true, "fd_send: " + role + " 신원에 IdMS 로그인(login)이 없다", now); return; }
+            std::string data, name, mime, err;
+            if (!fdPayload(st.payload, data, name, mime, err)) { finishInstance(in, true, "fd_send: " + err, now); return; }
+            std::string msgId = from->s->SendFd(to ? to->id.user : "", group, name, data, mime);
+            if (msgId.empty()) { finishInstance(in, true, "fd_send: 스택 거절(앞선 FD 송신 진행 중?)", now); return; }
+            in.fdMsgId = msgId;
+            in.fdSize = (long long)data.size();
+            in.fdSendMs = 0;
+            in.expectCode = (int)st.expect["code"].asInt(0);
+            m_metrics.counter("fd_tx");
+            m_metrics.counter("fd_tx_bytes", (long long)data.size());
+            if (!group.empty()) m_metrics.counter("fd_group_tx");
+            in.phase = Instance::WAIT_EVENT;
+            in.awaitKind = "fdupload";
+            in.deadlineMs = now + m_cfg.inviteTimeoutMs + 30000;   // 업로드(토큰 포함)는 INVITE 타이머보다 길 수 있다
+            return;
+        }
+        if (st.step == "fd_recv") {
+            // who 전원이 인스턴스의 마지막 FD(msgId)를 받을 때까지(단계 진입 전 도착 인정) → payload download(기본)이면 각자 FILEURL 을 내려받아 크기 대조(fd_download_pct) · signal = 도착만
+            if (in.fdMsgId.empty()) { finishInstance(in, true, "fd_recv: 앞선 fd_send 가 없다", now); return; }
+            in.fdWait.clear();
+            for (auto& role : st.who)
+                for (auto* ep : roleEndpoints(in, role)) {
+                    if (!ep->isSim()) { finishInstance(in, true, "fd_recv: " + role + " 은 가상 UE 여야 한다", now); return; }
+                    bool have = false;
+                    for (auto& r : ep->fdRx) if (r.msgId == in.fdMsgId) { have = true; break; }
+                    if (!have) in.fdWait.push_back(ep);
+                }
+            if (in.fdWait.empty()) {
+                if (in.phase == Instance::DONE) return;
+                if (startFdDownloads(in, st, now)) { in.stepIdx++; continue; }
+                return;
+            }
+            in.phase = Instance::WAIT_EVENT;
+            in.awaitKind = "fdrecv";
             in.deadlineMs = now + std::max(st.afterMs, 0) + m_cfg.inviteTimeoutMs;
             return;
         }

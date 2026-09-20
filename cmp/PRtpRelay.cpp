@@ -68,8 +68,66 @@ void PRtpRelay::reset() {
         // SRTP 컨텍스트 폐기 — 풀 재사용 relay 에 이전 세션 키가 잔존하면 안 된다
         leg.crypto.reset();
         leg.cryptoVideo.reset();
+        leg.codecDesc = PCodecDesc();
+        leg.ptOut = leg.srcPt = leg.tePtOut = leg.srcTePt = 0;
+        leg.codec.clear();
     }
+    _xcode[0].reset();
+    _xcode[1].reset();
     _taps.clear();  // 객체 회수는 PCmpServer(freeResource → collectTaps) 몫 — 여기서는 참조만 끊는다
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  피어 leg 트랜스코딩 (cmp.md §11)
+// ════════════════════════════════════════════════════════════════════════════
+void PRtpRelay::setPeerCodec(int peerIdx, const PCodecDesc& desc) {
+    PAutoLock lock(_mutex);
+    _legs[peerIdx & 1].codecDesc = desc;
+}
+
+bool PRtpRelay::updateTranscode(std::string& err) {
+    PAutoLock lock(_mutex);
+    const PCodecDesc& a = _legs[0].codecDesc;
+    const PCodecDesc& b = _legs[1].codecDesc;
+    const bool want = a.valid() && b.valid() && !a.sameCodec(b);
+    if (!want) {
+        if (_xcode[0]) LOG_INFO("PRtpRelay", "transcode off session=%s", _sessionId.c_str());
+        _xcode[0].reset();
+        _xcode[1].reset();
+        return true;
+    }
+    if (!PTranscoder::supportedPair(a, b)) {
+        err = "unsupported codec pair " + a.label() + " <-> " + b.label() + " (AMR-WB <-> PCMU/PCMA only)";
+        _xcode[0].reset();
+        _xcode[1].reset();
+        return false;
+    }
+    // 이미 같은 쌍이면 유지(재선언 = 세션 유지). 코덱·PT·fmtp 가 바뀌었으면 재생성
+    if (_xcode[0] && _xcode[0]->in().sameCodec(a) && _xcode[0]->out().sameCodec(b) && _xcode[0]->out().pt == b.pt &&
+        _xcode[1]->out().pt == a.pt && _xcode[0]->in().fmtp == a.fmtp && _xcode[0]->out().fmtp == b.fmtp)
+        return true;
+    std::unique_ptr<PTranscoder> ab(new PTranscoder(a, b)), ba(new PTranscoder(b, a));
+    if (!ab->ok() || !ba->ok()) { err = "transcoder init failed"; return false; }
+    _xcode[0] = std::move(ab);
+    _xcode[1] = std::move(ba);
+    LOG_INFO("PRtpRelay", "transcode on session=%s %s", _sessionId.c_str(), transcodeLabel().c_str());
+    _applyTranscodeRecorderMeta();
+    return true;
+}
+
+std::string PRtpRelay::transcodeLabel() const {
+    if (!_xcode[0]) return "";
+    return _xcode[0]->in().label() + "<->" + _xcode[0]->out().label();
+}
+
+void PRtpRelay::_applyTranscodeRecorderMeta() {
+    // 호출자가 _mutex 보유. 녹취는 AMR-WB 쪽 표현으로 남긴다(recording.md 의 AMR-WB 전제) — G.711 leg 트랙에는 변환 출력(상대 leg 의 AMR-WB PT)
+    if (!_recorder || !_xcode[0]) return;
+    for (int i = 0; i < 2; ++i) {
+        if (_legs[i].codecDesc.isAmrWb()) continue;
+        const PCodecDesc& amr = _legs[1 - i].codecDesc;
+        if (amr.isAmrWb()) _recorder->setTrackPtCodec(i == 0 ? "a" : "b", amr.pt, amr.label());
+    }
 }
 
 void PRtpRelay::attachTap(PRtpTap* tap) {
@@ -380,14 +438,66 @@ bool PRtpRelay::proc() {
             if (!srcOk) _natLatch(i, false, ip, port);
             touchActivity();
 
+            bool isTe = false;
+            if (len >= 12) {
+                unsigned char inPt = (unsigned char)(pkt[1] & 0x7F);
+                isTe = (src.srcTePt > 0) ? (inPt == (unsigned char)(src.srcTePt & 0x7F)) : (inPt == 101);
+            }
+
+            // ── 피어 leg 트랜스코딩(cmp.md §11) — 이 방향에 변환 유닛이 있으면 원본 대신 변환 프레임을 relay·tap·녹취에 쓴다.
+            //    tap·녹취는 AMR-WB 쪽 표현(파이프라인의 AMR-WB 전제): src 가 AMR-WB 면 원본, G.711 이면 변환 출력.
+            //    telephone-event 는 변환하지 않고 timestamp(출력 clock)·PT 만 재작성.
+            if (_xcode[i] && _legs[dst].active) {
+                std::vector<std::string> xout;
+                if (isTe) {
+                    xout.emplace_back(pkt, len);
+                    _xcode[i]->rescaleTimestamp((unsigned char*)&xout.back()[0], (int)xout.back().size());
+                    if (_legs[dst].tePtOut > 0) xout.back()[1] = (char)((xout.back()[1] & 0x80) | (_legs[dst].tePtOut & 0x7F));
+                } else if (!_xcode[i]->transcode((const unsigned char*)pkt, len, xout)) {
+                    if (++_xcodeDrop % 500 == 1)
+                        LOG_WARN("PRtpRelay", "transcode: bad payload dropped peer[%d] (%ld total) session=%s", i, _xcodeDrop, _sessionId.c_str());
+                    continue;
+                }
+                const bool srcAmr = src.codecDesc.isAmrWb();
+                Leg& d = _legs[dst];
+                const bool dstSec = d.crypto && d.crypto->enabled();
+                if (_recorder && !_firstRtpReceived) { _firstRtpReceived = true; _segStartUsec = _getTimeUsec(); }
+                if (srcAmr) {
+                    // src 가 AMR-WB — tap·녹취는 원본 1건(출력이 여럿이어도 한 번)
+                    if (!_taps.empty()) for (PRtpTap* t : _taps) if (t->wants(i)) t->sendRtp(i, false, pkt, len, isTe);
+                    if (_recorder) _recorder->writePacket(i == 0 ? "a" : "b", pkt, len);
+                }
+                for (std::string& o : xout) {
+                    if (!srcAmr) {
+                        // src 가 G.711 — tap·녹취는 변환 출력(AMR-WB)
+                        if (!_taps.empty()) for (PRtpTap* t : _taps) if (t->wants(i)) t->sendRtp(i, false, o.data(), (int)o.size(), isTe);
+                        if (_recorder) _recorder->writePacket(i == 0 ? "a" : "b", o.data(), (int)o.size());
+                    }
+                    if (dstSec) {
+                        char outb[2048];
+                        int outLen = (int)o.size();
+                        if (outLen > (int)sizeof(outb)) continue;
+                        memcpy(outb, o.data(), outLen);
+                        if (d.crypto->protectRtp(outb, outLen, sizeof(outb))) d.rtp.sendTo(outb, outLen, &d.addrRtp);
+                        else LOG_ERROR("PRtpRelay", "SRTP protect failed peer[%d] session=%s", dst, _sessionId.c_str());
+                    } else {
+                        d.rtp.sendTo(o.data(), (int)o.size(), &d.addrRtp);
+                    }
+                }
+                if (_recorder && _segStartUsec > 0) {
+                    int64_t now = _getTimeUsec();
+                    if ((now - _segStartUsec) >= (int64_t)_segmentIntervalSec * 1000000LL) {
+                        _recorder->finishSegment();
+                        _recorder->startSegment(_recorder->getCurrentSeq() + 1);
+                        _segStartUsec = now;
+                    }
+                }
+                continue;
+            }
+
             // 청취 leg(tap) — 복호된 평문 ingress 복사(녹취 탭 지점과 동일), 원본 SSRC→tap SSRC 재매핑.
             //   상대 leg 로의 relay·녹취와 독립이라 A/B 에게는 아무 변화가 없다(은닉, dispatch_center.md §5.4).
             if (!_taps.empty()) {
-                bool isTe = false;
-                if (len >= 12) {
-                    unsigned char inPt = (unsigned char)(pkt[1] & 0x7F);
-                    isTe = (src.srcTePt > 0) ? (inPt == (unsigned char)(src.srcTePt & 0x7F)) : (inPt == 101);
-                }
                 for (PRtpTap* t : _taps) if (t->wants(i)) t->sendRtp(i, false, pkt, len, isTe);
             }
 
@@ -396,12 +506,7 @@ bool PRtpRelay::proc() {
                 //   녹취는 아래에서 talker 원본(pkt)을 기록하므로 egress 사본에만 스탬프.
                 //   marker bit(0x80) 보존. TE 분류는 src leg 의 srcTePt(미지정=관례 101).
                 int stampPt = 0;
-                if (len >= 12) {
-                    unsigned char inPt = (unsigned char)(pkt[1] & 0x7F);
-                    bool isTe = (src.srcTePt > 0) ? (inPt == (unsigned char)(src.srcTePt & 0x7F))
-                                                  : (inPt == 101);
-                    stampPt = isTe ? _legs[dst].tePtOut : _legs[dst].ptOut;
-                }
+                if (len >= 12) stampPt = isTe ? _legs[dst].tePtOut : _legs[dst].ptOut;
                 Leg& d = _legs[dst];
                 bool dstSec = d.crypto && d.crypto->enabled();
                 if (stampPt > 0 || dstSec) {
@@ -523,6 +628,7 @@ void PRtpRelay::startRecording(const std::string& rawDir, const std::string& ses
             _recorder->setTrackPtCodec(i == 0 ? "a" : "b", _legs[i].srcPt, _legs[i].codec);
     }
     _recorder->startSegment(1);
+    _applyTranscodeRecorderMeta();
 
     LOG_INFO("PRtpRelay", "Recording started: dir=%s session=%s interval=%ds",
              rawDir.c_str(), sessionId.c_str(), segmentIntervalSec);

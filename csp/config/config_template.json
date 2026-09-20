@@ -1376,6 +1376,14 @@
             "advanced": true
           },
           {
+            "key": "transcode_codecs",
+            "label": "삽입 코덱 (트랜스코딩)",
+            "type": "string_list",
+            "default": [],
+            "advanced": true,
+            "help": "가입자→이 피어 오퍼에 끼워 넣는 코덱(예 PCMA, PCMU — IP-PBX G.711 필수 코덱). 피어가 그 코덱으로 답하고 가입자 오퍼에 없었으면 CMP 가 피어 leg 를 AMR-WB 와 변환한다(cmp.md §11, CMP TranscodeSlots). 비면 삽입 없음. 피어→가입자 오퍼에는 서비스 코덱(AMR-WB)이 항상 삽입된다."
+          },
+          {
             "key": "tags",
             "label": "태그",
             "type": "string_list",
@@ -1476,19 +1484,29 @@
             "label": "REGISTER expires (s)",
             "type": "int",
             "default": 3600,
-            "advanced": true
+            "advanced": true,
+            "help": "등록형 트렁크(inbound_auth=digest) — REGISTER 에 Expires 가 없을 때 부여하는 수명. register_to_remote 의 발신 수명 자리도 같다."
           },
           {
             "key": "auth_user",
             "label": "Auth user",
             "type": "string",
-            "default": ""
+            "default": "",
+            "help": "트렁크 계정 사용자부. inbound_auth=digest 와 함께 두면 등록형 트렁크 계정(SIPconnect 2.0 §8) — 이 계정의 REGISTER 를 CSP 가 받아 바인딩(등록 소스)을 다음 홉으로 쓴다. register_to_remote(미구현)의 발신 계정 자리도 같다."
           },
           {
             "key": "auth_password",
             "label": "Auth password",
             "type": "password",
             "default": ""
+          },
+          {
+            "key": "auth_ha1",
+            "label": "Auth H(A1)",
+            "type": "password",
+            "default": "",
+            "advanced": true,
+            "help": "H(A1)=MD5(auth_user:auth_realm:password). 있으면 auth_password 대신 이 값으로 트렁크 계정의 REGISTER 를 검증한다(평문 보관 회피). auth_realm 과 같은 realm 으로 만든 값이어야 한다."
           },
           {
             "key": "auth_realm",
@@ -1505,7 +1523,7 @@
               "digest"
             ],
             "default": "none",
-            "help": "이 Route 의 RemoteNode 에서 들어온 요청의 인증. none=신뢰 피어(Digest 없음, IBCF/고정 IP 트렁크 — TS 24.229 §5.10) · digest=가입자 인증 흐름(등록형 트렁크). 인바운드 Route 는 수신 LocalNode + 소스 IP(UDP 는 포트까지)로 식별한다."
+            "help": "이 Route 의 RemoteNode 에서 들어온 요청의 인증. none=신뢰 피어(Digest 없음, IBCF/고정 IP 트렁크 — TS 24.229 §5.10) · digest=등록형 트렁크: auth_user 계정의 REGISTER 를 받고(auth_ha1|auth_password·auth_realm), 그 바인딩 소스의 요청을 신뢰한다. 바인딩이 없으면 Route 는 dead(A-COM-003). 인바운드 Route 는 수신 LocalNode + 소스 IP(UDP 는 포트까지) 또는 트렁크 바인딩 소스로 식별한다."
           },
           {
             "key": "max_concurrent_calls",

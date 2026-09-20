@@ -1424,6 +1424,19 @@
           "title": "Srtp",
           "type": "string"
         },
+        "subscriber": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "MCData FD(fd_send/fd_recv) 가 쓰는 CSC — role=subscriber 노드 id(api 블록). 생략 = 대상의 유일한 subscriber 노드(둘 이상이면 지정). 신원에 IdMS 로그인(creds login/loginPw · DB users.login_id)이 있어야 한다",
+          "title": "Subscriber"
+        },
         "tls_client_cert": {
           "default": false,
           "description": "transport=tls — 접속점이 클라이언트 인증서를 요구할 때(상호인증) 워커 Tls.ClientCertFile 을 제시",

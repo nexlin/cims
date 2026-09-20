@@ -378,6 +378,52 @@ class Compile(unittest.TestCase):
         self.assertFalse(out4['media']['uses_rtp'])
         w1.close() if hasattr(w1, 'close') else None
 
+    def test_fd_gates_and_target_csc(self):
+        """MCData FD — fd_send/fd_recv 는 ① 풀이 CSC(subscriber 노드 api)에 닿고 ② 신원 전부에 IdMS 로그인이 있어야 컴파일된다.
+        통과하면 PoolCreate.target_csc(주소·포트·tls) 와 신원 login/login_pw 가 워커 계약에 실린다."""
+        from services import tester_workers as TW
+        def write_creds(with_login):
+            with open(os.path.join(S.user_scenarios_dir(), 'creds', 'fd.jsonl'), 'w') as f:
+                for i in range(4):
+                    rec = {'user': f'+8215000000{i:02d}', 'authId': f'450338215000000{i:02d}', 'ha1': 'ef' * 16, 'group': 'g5'}
+                    if with_login:
+                        rec['login'], rec['loginPw'] = f'fd{i}', f'pw{i}'
+                    f.write(json.dumps(rec) + '\n')
+        w1 = FakeWorker('w1')
+        topo_doc = _topology([w1])
+        topo_doc['target']['nodes']['csp']['sip']['access']['domains'] = ['volte.test', 'ptt.test']
+        topo_doc['pools']['ptt_ue'] = {'kind': 'ue', 'worker': 'w1', 'service': 'ptt', 'access': 'csp', 'source': {'creds': 'creds/fd.jsonl'}}
+        sc, _, errs = S.get_scenario('MCDATA-FD-GROUP')
+        self.assertEqual(errs, [])
+        write_creds(True)
+        with self.assertRaises(C.CompileError) as cm:      # subscriber 노드 없음
+            C.compile_run('rf1', sc, M.Topology.model_validate(topo_doc), topo_doc, None, {}, TW.discover(topo_doc), lambda w: 'x:1', 1, None)
+        self.assertIn('CSC', str(cm.exception))
+        topo_doc['target']['nodes']['csc'] = {'role': 'subscriber', 'host': 'h1', 'api': {'port': 4430, 'tls': True}}
+        write_creds(False)
+        with self.assertRaises(C.CompileError) as cm:      # 로그인 없는 신원
+            C.compile_run('rf2', sc, M.Topology.model_validate(topo_doc), topo_doc, None, {}, TW.discover(topo_doc), lambda w: 'x:1', 1, None)
+        self.assertIn('IdMS 로그인', str(cm.exception))
+        write_creds(True)
+        plan = C.compile_run('rf3', sc, M.Topology.model_validate(topo_doc), topo_doc, None, {}, TW.discover(topo_doc), lambda w: 'x:1', 1, None)
+        pool = plan['workers']['w1']['pools'][0]
+        self.assertEqual(pool['target_csc'], {'ip': '10.0.0.1', 'port': 4430, 'tls': True})
+        self.assertEqual((pool['identities'][0]['login'], pool['identities'][0]['login_pw']), ('fd0', 'pw0'))
+        steps = [s['step'] for s in plan['workers']['w1']['run']['steps']]
+        self.assertEqual(steps, ['register', 'fd_send', 'fd_recv'])
+        self.assertEqual(plan['workers']['w1']['run']['multi_roles'], ['m'])
+        # fd_recv payload signal 은 로그인 없이도 도착만 본다 — 게이트 통과
+        sc2 = M.Scenario.model_validate({'id': 'T-FD-SIG', 'roles': {'a': {'pool': 'ptt_ue'}, 'm': {'pool': 'ptt_ue', 'multi': True}},
+                                          'flow': [{'step': 'fd_send', 'from': 'a', 'payload': '1k'}, {'step': 'fd_recv', 'who': ['m'], 'payload': 'signal'}]})
+        C.check_fd_gates(sc2, M.Topology.model_validate(topo_doc), {'a': 'ptt_ue', 'm': 'ptt_ue'}, lambda pn: [{'user': 'x', 'login': 'l'}])
+        with self.assertRaises(C.CompileError):           # fd_send 의 from 은 signal 과 무관하게 로그인 필요
+            C.check_fd_gates(sc2, M.Topology.model_validate(topo_doc), {'a': 'ptt_ue', 'm': 'ptt_ue'}, lambda pn: [{'user': 'x'}])
+        # 두 subscriber 노드면 풀 subscriber 로 골라야 한다
+        topo_doc['target']['nodes']['csc2'] = {'role': 'subscriber', 'host': 'h1', 'addr': '10.0.0.9', 'api': {'port': 4431}}
+        self.assertIsNone(M.Topology.model_validate(topo_doc).target_csc_for('ptt_ue'))
+        topo_doc['pools']['ptt_ue']['subscriber'] = 'csc2'
+        self.assertEqual(M.Topology.model_validate(topo_doc).target_csc_for('ptt_ue').model_dump(), {'ip': '10.0.0.9', 'port': 4431, 'tls': True})
+
     def test_identity_overlap_across_workers_rejected(self):
         # 두 워커 풀이 같은 creds 구간을 쓰면 등록 바인딩이 서로를 덮는다 — 컴파일 오류. offset 으로 나누면 통과(test_roles_workers_bindings)
         from services import tester_workers as TW
@@ -397,8 +443,14 @@ class Compile(unittest.TestCase):
 
         class Cur:
             def execute(self, q, args):
-                calls['q'], calls['args'] = q, args
+                if 'users' in q:      # IdMS 로그인 join(users.login_id/passwd) — 두 번째 질의
+                    calls['login_q'], calls['login_args'] = q, args
+                else:
+                    calls['q'], calls['args'] = q, args
+                self.last = q
             def fetchall(self):
+                if 'users' in self.last:
+                    return [(f'+82130000{i:04d}', f'user{i}', f'pw{i}') for i in range(3)]   # 3 명만 로그인 계정이 있다
                 return [(f'+82130000{i:04d}', f'45033{i:010d}', 'cd' * 16) for i in range(8)]
 
         class Conn:
@@ -428,6 +480,9 @@ class Compile(unittest.TestCase):
             self.assertTrue(calls.get('closed'))
             ident = plan['workers']['w1']['pools'][0]['identities'][0]
             self.assertEqual((ident['user'], ident['domain'], ident['ha1'], ident['auth_id']), ('+821300000000', 'volte.test', 'cd' * 16, '450330000000000'))
+            self.assertEqual((ident['login'], ident['login_pw']), ('user0', 'pw0'))          # users join — MCData FD 토큰 자격
+            self.assertIn('JOIN users', calls['login_q'])
+            self.assertNotIn('login', plan['workers']['w1']['pools'][0]['identities'][5])   # 계정 없는 가입자는 비어 있다(fd_* 게이트가 잡는다)
         finally:
             os.environ.pop('UT_DB_USER', None); os.environ.pop('UT_DB_PASS', None)
             if keep is not None:

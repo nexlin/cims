@@ -19,6 +19,11 @@ constexpr int kNotifDelivered = 0x02;
 constexpr const char* kCtInfo = "application/vnd.3gpp.mcdata-info+xml";
 constexpr const char* kCtSignalling = "application/vnd.3gpp.mcdata-signalling";
 constexpr const char* kCtPayload = "application/vnd.3gpp.mcdata-payload";
+// mcdata-info <request-type>(TS 24.282 Annex D) — 그룹/1:1 × SDS/FD. FD = 파일 배포(TS 23.282 §7.4 HTTP 콘텍츠 서버 + FD SIGNALLING PAYLOAD §15.1.3)
+constexpr const char* kReqGroupSds = "group-sds";
+constexpr const char* kReqOneToOneSds = "one-to-one-sds";
+constexpr const char* kReqGroupFd = "group-fd";
+constexpr const char* kReqOneToOneFd = "one-to-one-fd";
 
 struct SdsMsg {
     std::string requestType;          // group-sds | one-to-one-sds (mcdata-info)
@@ -29,7 +34,9 @@ struct SdsMsg {
     std::string text;
     bool notification = false;        // SDS NOTIFICATION
     int notifType = 0;                // 2 delivered / 3 read …
-    bool fd = false;                  // FD SIGNALLING(파일 URL) — 여기서는 관측만
+    bool fd = false;                  // FD SIGNALLING PAYLOAD(0x02) — 아래 file* 이 Payload FILEURL·Metadata IE(RFC 5547 file-selector) 값
+    std::string fileUrl, fileName, fileType;
+    long long fileSize = 0;
 };
 
 struct Body { std::string contentType; std::string body; };
@@ -50,6 +57,16 @@ Body buildOneToOneSds(const std::string& toUser, const std::string& text, const 
 /** raw TLV — media plane(MSRP SEND 본문)용. C-plane MESSAGE 는 같은 TLV 를 base64 파트로 싣는다. */
 std::string signallingTlv(const std::string& convId, const std::string& msgId, bool requestDelivery, int64_t timeSec);
 std::string payloadTlv(const std::string& text);
+/** FD SIGNALLING PAYLOAD raw TLV(TS 24.282 §15.1.3 — CSP McDataBuildFdSignallingBody·앱 buildFd 동형): Payload IE(0x78)=FILEURL(0x04)+URL,
+ *  Metadata IE(0x79)=`name:"<name>" size:<n> type:<mime>`. */
+std::string fdSignallingTlv(const std::string& convId, const std::string& msgId, const std::string& fileUrl, const std::string& fileName,
+                            long long fileSize, const std::string& fileType, int64_t timeSec);
+/** 그룹 FD 본문(request-type group-fd, request-uri tel:<gid>) — 파일은 이미 콘텐츠 서버(POST /mcdata/fd)에 있고 URL 만 싣는다. */
+Body buildGroupFd(const std::string& groupId, const std::string& fileUrl, const std::string& fileName, long long fileSize,
+                  const std::string& fileType, const std::string& convId, const std::string& msgId, int64_t timeSec);
+/** 1:1 FD 본문(request-type one-to-one-fd, request-uri tel:<상대>). */
+Body buildOneToOneFd(const std::string& toUser, const std::string& fileUrl, const std::string& fileName, long long fileSize,
+                     const std::string& fileType, const std::string& convId, const std::string& msgId, int64_t timeSec);
 /** SDS NOTIFICATION(전달/읽음 통지) 본문 — 원 발신자에게 1:1 MESSAGE 로. */
 Body buildNotification(const std::string& convId, const std::string& msgId, int notifType, int64_t timeSec);
 

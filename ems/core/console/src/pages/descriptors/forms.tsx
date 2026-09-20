@@ -33,7 +33,7 @@ const SHAPES = ['time-bar', 'kpi', 'distribution', 'table'] as const
 const SHAPE_LABEL: Record<string, string> = { 'time-bar': '시계열 차트', kpi: 'KPI', distribution: '분포', table: '표' }
 // 구 probe check(process_down/service_unresponsive)는 process_unresponsive 로 개정 —
 // 서버가 read 시 이행(check 개정).
-const CHECKS = ['process_unresponsive', 'db_down', 'rtp_pct_gte', 'disk_high', 'module_down']
+const CHECKS = ['process_unresponsive', 'db_down', 'rtp_pct_gte', 'disk_high', 'cpu_high', 'mem_high', 'load_high', 'mount_high', 'module_down']
 // 알람 표준화(X.733/32.111)
 const ALARM_CLASSES = ['process_down', 'process_unresponsive', 'connection_lost', 'threshold_crossed']
 const SEVERITIES = ['critical', 'major', 'minor', 'warning', 'indeterminate']
@@ -219,7 +219,7 @@ export function AlertRuleForm({ svc, index, onClose, onSaved }: {
                 {(r.check === 'process_unresponsive' || r.check === 'service_unresponsive' || r.check === 'process_down') && (
                   <Field label="target" hint="(모듈명)"><Input  className="w-[80px]" value={r.target ?? ''}
                     onChange={e => up({ target: e.target.value })} /></Field>)}
-                {(r.check === 'rtp_pct_gte' || r.check === 'disk_high') && (
+                {(r.check === 'rtp_pct_gte' || r.check === 'disk_high' || r.check === 'cpu_high' || r.check === 'mem_high' || r.check === 'load_high' || r.check === 'mount_high') && (
                   <Field label="threshold"><Input  className="w-[80px]" type="number" value={r.threshold ?? ''}
                     onChange={e => up({ threshold: e.target.value ? Number(e.target.value) : undefined })} /></Field>)}
               </div>

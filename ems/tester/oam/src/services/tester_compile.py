@@ -97,6 +97,7 @@ def db_identities(pool_name: str, src: dict, topology: Topology, transport: str)
     except Exception as e:
         raise CompileError(f'pool {pool_name}: DB 접속 실패({topology.node_ip(nid)}:{node.db.port}/{node.db.name}) — {e}')
     groups: Dict[str, str] = {}
+    logins: Dict[str, tuple] = {}
     try:
         cur = conn.cursor()
         want_group = str(src.get('ptt_group') or '')
@@ -121,6 +122,13 @@ def db_identities(pool_name: str, src: dict, topology: Topology, transport: str)
                             f"WHERE m.user_id IN ({marks}) ORDER BY g.mcptt_group_id DESC, m.priority DESC", [r[0] for r in rows])
                 for uid, gid in cur.fetchall():   # 역순으로 덮어써서 마지막에 남는 것이 첫 그룹
                     groups[str(uid)] = str(gid)
+        # IdMS 로그인(users.login_id/passwd — 가입 행 user_id → users.id) — MCData FD 토큰. 없는 가입자는 fd_* 행위자가 될 수 없다(컴파일 게이트)
+        if rows:
+            marks = ','.join(['%s'] * len(rows))
+            cur.execute(f"SELECT s.id, u.login_id, u.passwd FROM {table} s JOIN users u ON u.id = s.user_id "
+                        f"WHERE s.id IN ({marks}) AND u.login_id IS NOT NULL AND u.login_id<>''", [r[0] for r in rows])
+            for sid, login, pw in cur.fetchall():
+                logins[str(sid)] = (str(login), str(pw or ''))
     except Exception as e:
         raise CompileError(f'pool {pool_name}: DB 질의 실패({table}) — {e}')
     finally:
@@ -132,6 +140,8 @@ def db_identities(pool_name: str, src: dict, topology: Topology, transport: str)
             ident['auth_id'] = str(imsi)
         if groups.get(str(uid)):
             ident['ptt_group'] = groups[str(uid)]
+        if str(uid) in logins:
+            ident['login'], ident['login_pw'] = logins[str(uid)]
         ids.append(ident)
     if not ids:
         raise CompileError(f'pool {pool_name}: {table} 에 H(A1) 보유 가입자가 없다(offset {src.get("offset") or 0}, transport {transport})')
@@ -184,6 +194,9 @@ def load_identities(pool_name: str, pool_doc: dict, topology: Optional[Topology]
                 ident['aka_opc'] = str(d.get('opc') or '')
             if d.get('ptt_group') or d.get('group'):
                 ident['ptt_group'] = str(d.get('ptt_group') or d.get('group'))
+            if d.get('login'):   # IdMS 로그인(cspsim -creds login/loginPw 규약) — MCData FD 토큰
+                ident['login'] = str(d['login'])
+                ident['login_pw'] = str(d.get('loginPw') or d.get('login_pw') or '')
             ids.append(ident)
             if count and len(ids) >= int(count):
                 break
@@ -466,6 +479,28 @@ def initial_rate(profile: LoadProfile) -> float:
     return 0.0
 
 
+def check_fd_gates(scenario: Scenario, topology: Topology, role_pool: Dict[str, str], ids_of) -> None:
+    """MCData FD 단계 게이트 — fd_send 의 from · fd_recv(download) 의 who 는 ① 풀이 CSC 에 닿아야 하고(target_csc — subscriber 노드 api)
+    ② 신원 전부에 IdMS 로그인(login)이 있어야 한다(토큰 없이는 /mcdata/fd 가 401). fd_recv payload signal 은 도착만 보므로 ②를 요구하지 않는다."""
+    for i, st in enumerate(scenario.flow):
+        if st.step not in ('fd_send', 'fd_recv'):
+            continue
+        need_login = st.step == 'fd_send' or st.payload != 'signal'
+        actors = [st.from_] if st.from_ else list(st.who or [])
+        for role in actors:
+            pn = role_pool.get(role, '')
+            if pn not in topology.pools or topology.pools[pn].kind != 'ue':
+                continue
+            if topology.target_csc_for(pn) is None:
+                raise CompileError(f'flow[{i}] {st.step}: 역할 {role!r} 의 풀 {pn} 이 CSC 에 닿지 않는다 — 대상에 role=subscriber 노드(api 블록)를 두고, '
+                                   f'둘 이상이면 풀 subscriber 로 고른다')
+            if need_login:
+                missing = [x['user'] for x in ids_of(pn) if not x.get('login')]
+                if missing:
+                    raise CompileError(f'flow[{i}] {st.step}: 풀 {pn} 신원 {len(missing)}개에 IdMS 로그인이 없다(예 {missing[:3]}) — creds 에 login/loginPw '
+                                       f'(cims-tester creds-from-db 는 users.login_id 를 싣는다) 또는 source.db 가입자의 users 행. fd_recv 는 payload: signal 로 도착만 볼 수 있다')
+
+
 def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_doc: dict,
                 profile: Optional[LoadProfile], bindings: Dict[str, object],
                 workers: List[object], stream_for, instances: Optional[int], rate_saps: Optional[float]):
@@ -525,6 +560,7 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
         role_pool = per_worker_roles[w.name]
         check_register_roles(scenario, topology, role_pool)
         check_kind_gates(scenario, topology, role_pool)
+        check_fd_gates(scenario, topology, role_pool, ids_of)
         sizes = {pn: len(ids_of(pn)) for pn in set(role_pool.values())}
         if group_session:
             # 그룹 세션 — 멤버 역할은 신원 창을 나누지 않는다(그룹 멤버가 풀 전체에 걸쳐 있다). 멤버 역할 = 그룹 풀 전체, 배정은 워커가 그룹 단위로.
@@ -581,7 +617,7 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
                                 service=topology.pool_service(pname), prack=bool(p.prack), dtmf=p.dtmf, target_csp=tc,
                                 tls_verify=bool(p.tls_verify and p.transport == 'tls'), tls_client_cert=bool(p.tls_client_cert and p.transport == 'tls'),
                                 nat=p.nat, media_agent=(topology.worker_url(next(x for x in topology.workers if x.name == p.media_worker)) if p.media_worker else None),
-                                msrp=bool(p.msrp))
+                                msrp=bool(p.msrp), target_csc=topology.target_csc_for(pname))
             pools.append(pc.model_dump(by_alias=True, exclude_none=True))
         slices = {role: [b, e] for role, (_p, b, e) in pw['ranges'].items()}
         rs = RunStart(run_id=run_id, scenario_id=scenario.id, roles=dict(pw['role_pool']), role_slices=slices,

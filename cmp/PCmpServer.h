@@ -200,6 +200,10 @@ private:
     int _rtpStartPort;
     int _rtpPoolSize;
     std::string _rtpIp;
+    // 피어 leg 트랜스코딩 슬롯(cmp.md §11.4) — 동시에 변환 유닛을 붙일 수 있는 relay 세션 수. 0 = 기능 비활성(resource.transcode 미광고 →
+    //   media_codec 이 다른 RELAY_ADD/MODIFY 는 TRANSCODE_CAPACITY). 사용량은 세션의 transcoding() 을 세어 얻는다(카운터 비동기 없음)
+    int _transcodeSlots = 8;
+    int countTranscoding() const;   // 호출자가 _mutex 보유
 
     // 청취 leg(tap) 풀 (dispatch_center.md §6) — TapStartPort 부터 4포트 블록. 0 = 기능 비활성(resource.tap 미광고)
     int _tapStartPort = 58000;

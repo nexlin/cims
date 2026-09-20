@@ -23,6 +23,9 @@ struct RemoteNodeInfo {
     bool srv_lookup = false;
     bool dns_fallback = true;
     bool tls_verify = false;
+    /** 가입자→이 피어 오퍼에 CSP 가 끼워 넣는 코덱(예 ["PCMA","PCMU"] — IP-PBX G.711). 피어가 그 코덱으로 답하면 CMP 가
+     * 가입자 leg 와 변환한다(cmp.md §11.2, TS 29.162 코덱 삽입). 비면 삽입 없음(종전 동작). */
+    std::vector<std::string> transcode_codecs;
     bool enabled = true;
     std::vector<std::string> tags;
     std::string note;

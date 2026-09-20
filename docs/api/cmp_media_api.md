@@ -425,10 +425,11 @@ RELAY_TAP_MODIFY 는 같은 payload 로 주소·crypto 만 갱신(포트·SSRC �
 오류: `NOT_FOUND`(세션 없음), `LIMIT`(세션당 상한 `MaxTapsPerSession` 초과), `NO_RESOURCE`(tap 풀 고갈),
 `BAD_REQUEST`(tap 미지원/키 형식 오류).
 
-### 6.6 media_codec — leg 별 코덱 선언 (설계, 구현 전)
+### 6.6 media_codec — leg 별 코덱 선언
 
-피어 leg 트랜스코딩([../design/modules/cmp.md](../design/modules/cmp.md) §11) 용. `RELAY_ADD`/`RELAY_MODIFY` payload 의 peer
-객체마다 선택 필드. **양 leg 의 협상 코덱이 다를 때만** CSP 가 싣고, 생략이면 현행 PT-blind relay(`remote_pt` 재작성만).
+피어 leg 트랜스코딩([../design/modules/cmp.md](../design/modules/cmp.md) §11) 용. `RELAY_ADD`/`RELAY_MODIFY` payload 의 선택 필드
+(`peer_index` 필수 — 그 leg 의 선언). **양 leg 의 협상 코덱이 다를 때만** CSP 가 싣고(answer 때 두 leg 에 MODIFY), 생략이면 현행
+PT-blind relay(`remote_pt` 재작성만). 같은 선언 재전송 = 유지, 두 leg 가 같아지면 변환 해제.
 
 | 필드 | 설명 |
 |---|---|
@@ -437,8 +438,18 @@ RELAY_TAP_MODIFY 는 같은 payload 로 주소·crypto 만 갱신(포트·SSRC �
 | `media_codec.pt` | wire PT (기존 `remote_pt` 와 같은 값 — 둘 다 오면 일치해야 함) |
 | `media_codec.fmtp` | AMR-WB `octet-align`·`mode-set` 등 원문 |
 
-두 peer 의 `media_codec.name` 이 다르면 CMP 가 변환 유닛을 붙이고, 자원이 없으면 `E_TRANSCODE_CAPACITY`(§9 채번은 구현 시)로
-거절한다. `telephone-event` 는 변환하지 않고 clock 에 맞춰 timestamp·PT 만 재작성한다.
+두 peer 의 `media_codec.name` 이 다르면 CMP 가 변환 유닛을 붙이고(`INT TRANSCODE` flow 로그), 자원(`TranscodeSlots`)이 없으면
+`TRANSCODE_CAPACITY`, 지원 밖 쌍이면 `BAD_REQUEST` 로 거절한다 — 상태 변경 없이(fail-fast). `telephone-event` 는 변환하지 않고 clock 에
+맞춰 timestamp 를, PT 는 `remote_te_pt` 로 재작성한다. 자원 광고 = HEARTBEAT/STATS `resource.transcode{total,used}`.
+
+```json
+{ "cmd": "RELAY_MODIFY", "session_id": "csp_20260920…_7", "peer_index": 1, "remote_ip": "10.0.0.50", "remote_port": 4000,
+  "remote_pt": 8, "remote_src_pt": 8, "remote_codec": "PCMA/8000",
+  "media_codec": { "name": "PCMA", "rate": 8000, "pt": 8 } }
+{ "cmd": "RELAY_MODIFY", "session_id": "csp_20260920…_7", "peer_index": 0, "remote_ip": "", "remote_port": 0,
+  "remote_pt": 96, "remote_src_pt": 96, "remote_codec": "AMR-WB/16000",
+  "media_codec": { "name": "AMR-WB", "rate": 16000, "pt": 96, "fmtp": "octet-align=1" } }
+```
 
 ## 7. PTT — 그룹통화 + floor control
 
@@ -733,5 +744,6 @@ Call Control 파트의 후속 과제다([mcptt_csp_cmp_roadmap_contract.md](../d
 | `NO_RESOURCE` | 자원 풀 고갈 (relay/ptt 포트) |
 | `NOT_FOUND` | 대상 자원 없음 (group/session/tap) |
 | `LIMIT` | 세션당 청취 leg(tap) 상한 초과 (§6.5) |
+| `TRANSCODE_CAPACITY` | 피어 leg 트랜스코딩 슬롯 소진 (§6.6, cmp.md §11.4) — CSP 는 488 로 종결 |
 | `UNSUPPORTED_VER` | 지원하지 않는 `hdr.ver` |
 | `INTERNAL` | CMP 내부 오류 |

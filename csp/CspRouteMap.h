@@ -34,6 +34,8 @@ struct RouteConfig {
     int register_expires = 3600;
     std::string auth_user;
     std::string auth_password;
+    std::string auth_ha1;  // H(A1)=MD5(auth_user:auth_realm:password) — 평문 대신(sip_access_security.md §4.5). 등록형
+                           // 트렁크 계정 검증의 우선 재료
     std::string auth_realm;
     int max_concurrent_calls = 0;
     int cps_limit = 0;
@@ -49,6 +51,12 @@ struct RouteConfig {
     }
     bool TrustsInbound() const {
         return inbound_auth != "digest";
+    }
+    /** 등록형 트렁크 계정(SIPconnect 2.0 §8 등록 모드) — inbound_auth=digest 이고 auth_user 가 있으면 그 계정의
+     * REGISTER 를 CCspTrunkRegistrar 가 받고(가입자 아님), 도달 주소는 바인딩(등록 소스)이다. 바인딩이 없으면 Route 는
+     * dead. */
+    bool IsTrunkAccount() const {
+        return inbound_auth == "digest" && !auth_user.empty();
     }
 };
 
@@ -123,6 +131,9 @@ public:
     bool MarkFail( const std::string &routeName, int iDeadThreshold, bool &bWentDead );
     bool MarkAlive( const std::string &routeName, int rtt_ms );
     bool MarkFail( const std::string &routeName );
+    /** 상태를 직접 놓는다 — 등록형 트렁크(바인딩 유무 = 도달 가능성, CCspTrunkRegistrar). 전이가 있었으면
+     * bChanged=true. */
+    bool SetAlive( const std::string &routeName, bool bAlive, bool &bChanged );
     bool IsAlive( const std::string &routeName ) const;
     /** 프로브 송신 시각 기록 (헬스체크 주기 판정용). */
     void TouchPing( const std::string &routeName, long now );

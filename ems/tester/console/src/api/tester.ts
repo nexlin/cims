@@ -124,6 +124,8 @@ export interface UePoolDoc extends TopoPoolBase {
   media_worker?: string
   /** MCData media plane 능력 — Contact icsi-ref 에 mcdata.sds → 대용량 SDS 를 MSRP 로 받는 배포 대상(끄면 FILEURL 폴백) */
   msrp?: boolean
+  /** MCData FD(fd_send/fd_recv)가 쓰는 CSC — role=subscriber 노드 id(api). 생략 = 대상의 유일한 subscriber 노드 */
+  subscriber?: string
 }
 export type DtmfMode = 'rfc4733' | 'inband' | 'off'
 export interface PeerPoolDoc extends TopoPoolBase {

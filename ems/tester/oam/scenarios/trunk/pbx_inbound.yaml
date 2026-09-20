@@ -1,4 +1,5 @@
-# IP-PBX 트렁크 착신 — PBX 내선(G.711)이 CIMS 가입자(AMR-WB)를 호출. CMP 트랜스코딩 경로(cmp.md §11).
+# IP-PBX 트렁크 착신 — PBX 내선(G.711)이 CIMS 가입자(AMR-WB)를 호출. CSP 가 가입자 오퍼에 서비스 코덱(AMR-WB)을 끼워 넣고 UE 가 AMR-WB 로
+#   답하면 CMP 트랜스코딩(cmp.md §11) — PBX leg PCMA ↔ UE leg AMR-WB. rtp_loss 표본이 양 leg 에 실제 미디어가 흐른 증거다.
 id: TRUNK-PBX-INBOUND
 title: IP-PBX → 가입자 착신 (G.711 ↔ AMR-WB)
 tags: [trunk, pbx, transcode]

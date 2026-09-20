@@ -77,6 +77,16 @@
           "help": "동시 처리 가능한 VoIP 호 수 (호당 8 포트 블록)."
         },
         {
+          "key": "TranscodeSlots",
+          "label": "트랜스코딩 슬롯",
+          "type": "int",
+          "default": 8,
+          "min": 0,
+          "max": 1000,
+          "restart": false,
+          "help": "피어 leg G.711↔AMR-WB 트랜스코딩(cmp.md §11)을 동시에 붙일 수 있는 relay 세션 수. 변환은 relay 보다 CPU 비용이 한 자리 크다(AMR-WB 인코딩). 0 = 비활성(HEARTBEAT resource.transcode 미광고, 코덱이 다른 세션은 TRANSCODE_CAPACITY → CSP 488)."
+        },
+        {
           "key": "TapStartPort",
           "label": "청취 leg(tap) 시작 포트",
           "type": "int",

@@ -42,6 +42,7 @@ bool CCspRemoteNodeMap::Sync() {
             n.srv_lookup = _boolish( row.GetString( "srv_lookup" ), false );
             n.dns_fallback = _boolish( row.GetString( "dns_fallback" ), true );
             n.tls_verify = _boolish( row.GetString( "tls_verify" ), false );
+            n.transcode_codecs = _readStringArray( row.Get( "transcode_codecs" ) );
             n.enabled = _boolish( row.GetString( "enabled" ), true );
             n.tags = _readStringArray( row.Get( "tags" ) );
             n.note = row.GetString( "note" );

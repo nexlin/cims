@@ -121,6 +121,14 @@ def _cmd_creds(a):
                         f"WHERE m.user_id IN ({marks}) ORDER BY g.mcptt_group_id DESC, m.priority DESC", [r[0] for r in rows])
             for uid, gid in cur.fetchall():   # 역순으로 덮어써서 마지막에 남는 것이 첫 그룹
                 groups[uid] = gid
+    # IdMS 로그인(users.login_id/passwd — 가입 행 user_id → users.id) — MCData FD(fd_send/fd_recv) 토큰. cspsim -creds 의 login/loginPw 규약
+    logins = {}
+    if rows:
+        marks = ','.join(['%s'] * len(rows))
+        cur.execute(f"SELECT s.id, u.login_id, u.passwd FROM {tbl} s JOIN users u ON u.id = s.user_id "
+                    f"WHERE s.id IN ({marks}) AND u.login_id IS NOT NULL AND u.login_id<>''", [r[0] for r in rows])
+        for sid, login, pw in cur.fetchall():
+            logins[sid] = (login, pw or '')
     conn.close()
     n = 0
     with open(a.out, 'w', encoding='utf-8') as f:
@@ -130,6 +138,8 @@ def _cmd_creds(a):
                 rec['domain'] = a.domain
             if groups.get(r[0]):
                 rec['group'] = groups[r[0]]
+            if r[0] in logins:
+                rec['login'], rec['loginPw'] = logins[r[0]]
             f.write(json.dumps(rec) + '\n')
             n += 1
     print(f'{n} creds → {a.out}  (table={tbl}, offset={a.offset})')

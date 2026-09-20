@@ -602,6 +602,29 @@ class PbxMgcf(unittest.TestCase):
         self.assertEqual((tr.user, tr.ha1, tr.expires, tr.realm), ('pbx-hq', 'cd' * 16, 3600, 'volte.test'))
         self.assertIsNone(C.trunk_register_for('mgcf_pstn', topo.pools['mgcf_pstn'], None))
 
+    def test_trunk_register_seed_route(self):
+        """pbx register → 시드 Route 가 등록형 트렁크 계정(inbound_auth=digest + auth_user/auth_ha1/auth_realm/register_expires)이 된다.
+        비밀 환경변수가 없으면 시드도 컴파일과 같은 오류로 멈춘다(조용히 none 으로 시드하지 않는다)."""
+        _, _, topo = self._topo()
+        os.environ.pop('UT_PBX_HA1', None)
+        with self.assertRaises(C.CompileError):
+            T.derive_records(topo, {'pbx_hq': topo.pools['pbx_hq']}, {'pbx_hq': 'ln-x'})
+        os.environ['UT_PBX_HA1'] = 'cd' * 16
+        try:
+            recs = T.derive_records(topo, {'pbx_hq': topo.pools['pbx_hq'], 'mgcf_pstn': topo.pools['mgcf_pstn']}, {'pbx_hq': 'ln-x', 'mgcf_pstn': 'ln-x'})
+        finally:
+            os.environ.pop('UT_PBX_HA1', None)
+        routes = {r['name']: r for r in recs['routes']}
+        pbx = routes['tester-r-pbx_hq']
+        self.assertEqual((pbx['inbound_auth'], pbx['auth_user'], pbx['auth_ha1'], pbx['auth_realm'], pbx['register_expires']),
+                         ('digest', 'pbx-hq', 'cd' * 16, '', 3600))
+        self.assertEqual(routes['tester-r-mgcf_pstn']['inbound_auth'], 'none')      # 고정 IP 피어는 그대로 신뢰 피어
+        self.assertNotIn('auth_user', routes['tester-r-mgcf_pstn'])
+        # pbx RemoteNode 는 G.711 삽입 코덱(트랜스코딩 정책, cmp.md §11.2) — mgcf 는 IM-MGW 가 AMR-WB 를 오퍼하므로 없음
+        rns = {r['name']: r for r in recs['remote_nodes']}
+        self.assertEqual(rns['tester-rn-pbx_hq']['transcode_codecs'], ['PCMA', 'PCMU'])
+        self.assertNotIn('transcode_codecs', rns['tester-rn-mgcf_pstn'])
+
     def test_register_role_on_peer_requires_trunk(self):
         _, _, topo = self._topo()
         sc = M.Scenario.model_validate({'id': 'UT-REG', 'roles': {'m': {'pool': 'mgcf_pstn'}, 'u': {'pool': 'volte_ue'}},

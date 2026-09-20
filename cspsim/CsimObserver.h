@@ -51,6 +51,16 @@ struct ICsimObserver {
                            const std::string& /*text*/, int /*dispReq*/) {}
     /** 자기가 보낸 SDS 에 대한 SDS NOTIFICATION 수신(notifType 2 = delivered) — disposition 회신율의 분자. */
     virtual void OnSdsNotification(SimSession* /*s*/, const std::string& /*msgId*/, int /*notifType*/) {}
+    // ── MCData FD(파일 배포 — TS 23.282 §7.4 HTTP 콘텐츠 서버 + TS 24.282 §15.1.3 FD SIGNALLING MESSAGE) — 계측기 워커 단계 fd_send/fd_recv ──
+    /** 자기 FD 의 콘텐츠 업로드(IdMS 토큰 → POST /mcdata/fd) 결과 — iHttpStatus 201 정상(그 뒤 FD SIGNALLING MESSAGE 를 내고 최종 응답은 OnSdsResponse),
+     *  0 = 접속 실패, 401 토큰 취득 실패, 403 scope·allow_fd·멤버십, 413 크기. ms = 토큰 취득 포함 업로드 시간, bytes = 올린 크기. */
+    virtual void OnFdUpload(SimSession* /*s*/, const std::string& /*msgId*/, int /*iHttpStatus*/, long long /*ms*/, long long /*bytes*/) {}
+    /** FD SIGNALLING MESSAGE 수신(200 은 libcsim 이 낸다) — fileUrl/fileName/fileSize/fileType = Payload FILEURL·Metadata IE. group = 그룹 FD 면 그룹 id.
+     *  기본 구현은 OnSdsRecv(text = URL, dispReq 0) 로 넘긴다 — media SDS 의 FILEURL 폴백을 SDS 도착으로 보는 관측자와 호환. */
+    virtual void OnFdRecv(SimSession* s, const std::string& from, const std::string& msgId, const std::string& group, const std::string& fileUrl,
+                          const std::string& /*fileName*/, long long /*fileSize*/, const std::string& /*fileType*/) { OnSdsRecv(s, from, msgId, group, fileUrl, 0); }
+    /** DownloadFd 결과 — iHttpStatus 200 정상(bytes = 받은 크기), 0 = 접속 실패·URL 오류, 401 토큰 취득 실패. ms = 요청 → 완료. */
+    virtual void OnFdDownload(SimSession* /*s*/, const std::string& /*msgId*/, int /*iHttpStatus*/, long long /*bytes*/, long long /*ms*/) {}
     /** media plane(MSRP, TS 24.282 §9.2.3)으로 도착한 SDS — 기본은 OnSdsRecv 와 같게 다룬다(계측기는 경로를 따로 센다). */
     virtual void OnSdsMediaRecv(SimSession* s, const std::string& from, const std::string& msgId, const std::string& group,
                                 const std::string& text, int dispositionReq) { OnSdsRecv(s, from, msgId, group, text, dispositionReq); }

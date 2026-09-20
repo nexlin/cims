@@ -56,10 +56,10 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 
 | 기능 | 규격 | 상태 |
 |---|---|---|
-| **Private call (1:1)** — on-demand | TS 24.379 §11.1 | ✗ 미구현 (`session-type` 이 prearranged/chat/broadcast 3종만, `csp/McpttInfo.h`) |
+| **Private call (1:1)** — on-demand | TS 24.379 §11.1 | ✓ 구현 — mcptt-info `session-type=private` INVITE(상대 MCPTT ID 직접, affiliation 불요) → CSP 가 2인 세션(`private:<from>-<to>`)을 CMP `PTT_GROUP_ADD group_type:"private"` + `floor_control`(on/off — fmtp `mc_no_floor_ctrl`)로 세운다([mcptt_csp_cmp_roadmap_contract.md](mcptt_csp_cmp_roadmap_contract.md) §A.1). 착신 미등록 480 |
 | **Private call — pre-established session** | TS 24.379 §11.2 | ✗ |
 | **Private call call-back** (요청/취소) | TS 24.379 §11.3 | ✗ |
-| **Private emergency call** / 통화 중 emergency upgrade | TS 24.379 §11 | ✗ (그룹콜 emergency 는 [mcptt_emergency_modes.md](mcptt_emergency_modes.md) 로 구현) |
+| **Private emergency call** / 통화 중 emergency upgrade | TS 24.379 §11 | ✓ 개시 인가 구현 — 사용자 프로파일 `allow-emergency-private-call` + `MCPTTPrivateRecipient`(UsePreConfigured 모드는 사전 지정 수신자 일치까지, `IsConditionInitAuthorized` private 분기). 그룹콜 emergency 는 [mcptt_emergency_modes.md](mcptt_emergency_modes.md) |
 | **First-to-answer call** | TS 24.379 | ✗ |
 | **Ambient listening call** (원격 감청) | TS 24.379 | △ 그룹콜 청취(관제사가 `a=recvonly` 로 진행 중 그룹콜에 합류 — `allow_ambient_listening` 자격 + 역할 `ptt_listen` 범위, CMP `recv_only`)는 구현([dispatch_center.md](dispatch_center.md) §5.6). 규격의 remote-init 1:1 ambient listening(`session-type=ambient-listening`, 단말 무표시 자동응답)은 미구현(§10) |
 | **Remotely initiated call** (원격 개시) | TS 24.379 | ✗ |

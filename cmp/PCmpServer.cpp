@@ -492,6 +492,13 @@ SimpleJson::JsonNode PCmpServer::buildResourceSummary() {
     SimpleJson::JsonNode resource;
     resource.Set("relay", relay);
     resource.Set("ptt", ptt);
+    // 피어 leg 트랜스코딩(cmp.md §11) — 키 존재가 기능 광고. 슬롯 0 이면 광고하지 않는다
+    if (_transcodeSlots > 0) {
+        SimpleJson::JsonNode xc;
+        xc.Set("total", _transcodeSlots);
+        xc.Set("used", countTranscoding());
+        resource.Set("transcode", xc);
+    }
     // 청취 leg(tap) — 키 존재가 기능 광고(dispatch_center.md §6.3). 풀 0 이면 광고하지 않는다.
     if (!_tapPool.empty()) {
         SimpleJson::JsonNode tap;
@@ -501,6 +508,12 @@ SimpleJson::JsonNode PCmpServer::buildResourceSummary() {
         resource.Set("tap", tap);
     }
     return resource;
+}
+
+int PCmpServer::countTranscoding() const {
+    int n = 0;
+    for (auto const& kv : _sessions) if (kv.second && kv.second->transcoding()) ++n;
+    return n;
 }
 
 // FNV-1a 64bit — 세션ID 문자열의 안정 해시. XOR 누적이 순서무관이라 지문 대조에 적합.
@@ -752,8 +765,8 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
     int txSeq = sendOk(ip, port, transId, "STATS", "", "", &body);
     logFlow("stats", "cmp", "csp", "JSON", "OK", "",
             txIdStr.c_str(), "system", sesid.c_str(), "", txSeq, "csp");
-    LOG_INFO("PCmpServer", "STATS: sessions=%d groups=%d ports_free=%d/%d", (int)_sessions.size(),
-             (int)_groups.size(), (int)_freeResources.size(), _rtpPoolSize);
+    LOG_INFO("PCmpServer", "STATS: sessions=%d groups=%d ports_free=%d/%d transcode=%d/%d", (int)_sessions.size(),
+             (int)_groups.size(), (int)_freeResources.size(), _rtpPoolSize, countTranscoding(), _transcodeSlots);
 }
 
 // SESSION_LIST — audit 재조정용 세션 열거(페이지). 응답 datagram 4KB 계약 내에서 페이지당 제한.
@@ -984,6 +997,50 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
                            (int)payload.GetInt("remote_te_pt", 0),
                            (int)payload.GetInt("remote_src_te_pt", 0),
                            payload.GetString("remote_codec"));
+        }
+
+        // leg 코덱 선언(media_codec — cmp_media_api.md §6.6) → 양 leg 가 다르면 피어 leg 트랜스코딩(cmp.md §11).
+        //   같은 쌍 재선언 = 유지, 같아지면 해제. 지원 밖 쌍 = BAD_REQUEST, 슬롯 소진 = TRANSCODE_CAPACITY(CSP 가 488 로 종결 — 무음 relay 를 만들지 않는다)
+        if (peerIdx >= 0 && payload.Has("media_codec")) {
+            const SimpleJson::JsonNode mc = payload.Get("media_codec");
+            PCodecDesc desc = PCodecDesc::make(mc.GetString("name"), (int)mc.GetInt("rate", 0), (int)mc.GetInt("pt", -1), mc.GetString("fmtp"));
+            std::string xErr;
+            if (!desc.valid()) xErr = "media_codec requires name/pt";
+            else {
+                rtp->setPeerCodec(peerIdx, desc);
+                const bool wasOn = rtp->transcoding();
+                const PCodecDesc& other = rtp->peerCodec(1 - (peerIdx & 1));
+                const bool want = other.valid() && !other.sameCodec(desc);
+                if (want && !wasOn && countTranscoding() >= _transcodeSlots) {
+                    xErr = "transcode slots exhausted";
+                    std::string txIdStr = std::to_string(transId);
+                    logFlow(sessionId, "csp", "cmp", "JSON", cmdName.c_str(), detail.c_str(), txIdStr.c_str(),
+                            svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp", caller.c_str(), callee.c_str());
+                    int txSeq = sendErr(ip, port, transId, cmdName, sesid, svc, "TRANSCODE_CAPACITY", xErr.c_str());
+                    logFlow(sessionId, "cmp", "csp", "JSON", "ERROR", xErr.c_str(), txIdStr.c_str(),
+                            svc.c_str(), sesid.c_str(), "", txSeq, "csp", caller.c_str(), callee.c_str());
+                    LOG_WARN("PCmpServer", "%s session=%s rejected: %s (%d/%d)", cmdName.c_str(), sessionId.c_str(), xErr.c_str(),
+                             countTranscoding(), _transcodeSlots);
+                    return;
+                }
+                if (!rtp->updateTranscode(xErr)) { /* xErr 채워짐 */ }
+                else if (rtp->transcoding() && !wasOn) {
+                    logFlow(sessionId, "cmp", "cmp", "INT", "TRANSCODE", rtp->transcodeLabel().c_str(), "", svc.c_str(),
+                            sesid.c_str(), "", 0, "", caller.c_str(), callee.c_str());
+                    LOG_INFO("PCmpServer", "%s session=%s transcode on %s (%d/%d)", cmdName.c_str(), sessionId.c_str(),
+                             rtp->transcodeLabel().c_str(), countTranscoding(), _transcodeSlots);
+                }
+            }
+            if (!xErr.empty()) {
+                std::string txIdStr = std::to_string(transId);
+                logFlow(sessionId, "csp", "cmp", "JSON", cmdName.c_str(), detail.c_str(), txIdStr.c_str(),
+                        svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp", caller.c_str(), callee.c_str());
+                int txSeq = sendErr(ip, port, transId, cmdName, sesid, svc, "BAD_REQUEST", xErr.c_str());
+                logFlow(sessionId, "cmp", "csp", "JSON", "ERROR", xErr.c_str(), txIdStr.c_str(),
+                        svc.c_str(), sesid.c_str(), "", txSeq, "csp", caller.c_str(), callee.c_str());
+                LOG_WARN("PCmpServer", "%s session=%s rejected: %s", cmdName.c_str(), sessionId.c_str(), xErr.c_str());
+                return;
+            }
         }
 
         // leg 미디어 SRTP 컨텍스트 (media_crypto[_video]) — 키 오류는 명령 거부 (fail-fast).
@@ -1954,6 +2011,7 @@ void PCmpServer::loadConfig() {
         if (root.Has("RtpStartPort")) _rtpStartPort = (int)root.GetInt("RtpStartPort");
         if (root.Has("RtpPoolSize")) _rtpPoolSize = (int)root.GetInt("RtpPoolSize");
         if (root.Has("RtpIp")) _rtpIp = root.GetString("RtpIp");
+        if (root.Has("TranscodeSlots")) _transcodeSlots = (int)root.GetInt("TranscodeSlots");
         // 청취 leg(tap) 풀 — dispatch_center.md §6 (TapPoolSize=0 이면 비활성: resource.tap 미광고 → CSP 가 Join 488)
         if (root.Has("TapStartPort")) _tapStartPort = (int)root.GetInt("TapStartPort");
         if (root.Has("TapPoolSize")) _tapPoolSize = (int)root.GetInt("TapPoolSize");
@@ -2017,6 +2075,7 @@ void PCmpServer::loadConfig() {
                 if (sscanf(line, "%[^=]=%s", key, val) == 2) {
                     if (strcmp(key, "RtpStartPort") == 0) _rtpStartPort = atoi(val);
                     if (strcmp(key, "RtpPoolSize") == 0) _rtpPoolSize = atoi(val);
+                    if (strcmp(key, "TranscodeSlots") == 0) _transcodeSlots = atoi(val);
                     if (strcmp(key, "RtpIp") == 0) _rtpIp = val;
                     if (strcmp(key, "ServerIp") == 0) _serverIp = val;
                     if (strcmp(key, "ServerPort") == 0) _serverPort = atoi(val);

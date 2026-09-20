@@ -529,6 +529,7 @@ void SimSession::Stop(int iFlushMs) {
     m_clsRtpThread.Stop();
     m_clsUserAgent.Stop();
     _JoinMsrp();
+    _JoinFd();
 }
 
 // ─────────────────────────────────────────────
@@ -872,11 +873,15 @@ void SimSession::_SendSdsMessage(const std::string& strCallId, SdsTx& tx, const 
 {
     // Request-URI/To = 그룹(sip:<gid>@domain) 또는 상대(sip:<user>@domain) — SDK Engine::sendGroupSds 와 같은 꼴(mcdata_messaging.md §7 라우팅 편차:
     //   그룹 URI 직행 + mcdata-info). 다음 홉 = 등록 접속점(Route).
+    //   FD(tx.fd) 는 FD SIGNALLING PAYLOAD(FILEURL+Metadata, TS 24.282 §15.1.3) 만 싣는다 — 파일은 콘텐츠 서버에 있다(SendFd).
     const std::string strTarget = tx.groupId.empty() ? tx.toUser : tx.groupId;
-    csim_mcdata::Body b = tx.groupId.empty()
-        ? csim_mcdata::buildOneToOneSds(tx.toUser, tx.text, tx.convId, tx.msgId, tx.delivery, tx.timeSec)
-        : csim_mcdata::buildGroupSds(tx.groupId, tx.text, tx.convId, tx.msgId, tx.delivery, tx.timeSec);
-    if (pclsCred) ++tx.seq;
+    csim_mcdata::Body b = tx.fd
+        ? (tx.groupId.empty()
+               ? csim_mcdata::buildOneToOneFd(tx.toUser, tx.fileUrl, tx.fileName, tx.fileSize, tx.fileType, tx.convId, tx.msgId, tx.timeSec)
+               : csim_mcdata::buildGroupFd(tx.groupId, tx.fileUrl, tx.fileName, tx.fileSize, tx.fileType, tx.convId, tx.msgId, tx.timeSec))
+        : (tx.groupId.empty()
+               ? csim_mcdata::buildOneToOneSds(tx.toUser, tx.text, tx.convId, tx.msgId, tx.delivery, tx.timeSec)
+               : csim_mcdata::buildGroupSds(tx.groupId, tx.text, tx.convId, tx.msgId, tx.delivery, tx.timeSec));
     CSipMessage* pMsg = new CSipMessage();
     pMsg->m_strSipMethod = "MESSAGE";
     pMsg->m_clsReqUri.Set("sip", strTarget.c_str(), m_strDomain.c_str(), m_iServerPort);
@@ -925,9 +930,134 @@ std::string SimSession::SendSds(const std::string& toUser, const std::string& gr
     char szTag[64];
     SipMakeTag(szTag, sizeof(szTag));
     tx.fromTag = szTag;
-    m_mapSdsTx[szCallId] = tx;
-    _SendSdsMessage(szCallId, m_mapSdsTx[szCallId], nullptr, false);
+    { std::lock_guard<std::mutex> lk(m_mtxSdsTx); m_mapSdsTx[szCallId] = tx; }
+    _SendSdsMessage(szCallId, tx, nullptr, false);
     return tx.msgId;
+}
+
+// ── MCData FD(파일 배포 — TS 23.282 §7.4 HTTP 콘텐츠 서버 + TS 24.282 §15.1.3 FD SIGNALLING MESSAGE) ──
+//   앱(PttController.sendFd)과 같은 순서: IdMS 토큰 → POST /mcdata/fd(CSC 가 allow_fd·멤버십·크기를 게이트) → {url} 을 FILEURL 로 실은 MESSAGE.
+//   HTTP 는 raw-socket 동기 클라이언트라 스레드에서 돈다(워커 스케줄러를 막지 않는다). 스레드는 detach — Stop() 이 m_iFdThreads 0 을 기다린다.
+namespace {
+struct FdThreadGuard {
+    SimSession* s; std::mutex& m; std::condition_variable& cv; int& n;
+    ~FdThreadGuard() { std::lock_guard<std::mutex> lk(m); --n; cv.notify_all(); }
+};
+}   // namespace
+
+void SimSession::_JoinFd() {
+    std::unique_lock<std::mutex> lk(m_mtxFd);
+    m_cvFd.wait(lk, [&] { return m_iFdThreads == 0; });
+}
+
+std::string SimSession::SendFd(const std::string& toUser, const std::string& groupId, const std::string& fileName, const std::string& data, const std::string& mime)
+{
+    if (data.empty() || (toUser.empty() && groupId.empty()) || !HasFdServer()) return "";
+    if (m_bFdSending.exchange(true)) return "";
+    static std::atomic<int> s_iFdSerial{0};
+    char szCallId[160];
+    snprintf(szCallId, sizeof(szCallId), "fd_%s_%d_%d_%d", m_strUser.c_str(), m_iId, (int)time(NULL), ++s_iFdSerial);
+    SdsTx tx;
+    tx.fd = true;
+    tx.msgId = csim_mcdata::newMessageId();
+    tx.toUser = toUser;
+    tx.groupId = groupId;
+    tx.convId = groupId.empty() ? csim_mcdata::conversationIdOneToOne(m_strUser, toUser) : csim_mcdata::conversationIdOf(groupId);
+    tx.timeSec = (long long)time(NULL);
+    tx.tSendMs = NowMs();
+    tx.fileName = fileName.empty() ? "fd_" + tx.msgId.substr(0, 8) + ".bin" : fileName;
+    tx.fileType = mime.empty() ? "application/octet-stream" : mime;
+    tx.fileSize = (long long)data.size();
+    char szTag[64];
+    SipMakeTag(szTag, sizeof(szTag));
+    tx.fromTag = szTag;
+    { std::lock_guard<std::mutex> lk(m_mtxSdsTx); m_mapSdsTx[szCallId] = tx; }
+    {
+        std::lock_guard<std::mutex> lk(m_mtxFd);
+        ++m_iFdThreads;
+        std::thread(&SimSession::_FdSendThread, this, std::string(szCallId), groupId, data, tx.fileType).detach();
+    }
+    return tx.msgId;
+}
+
+void SimSession::_FdSendThread(std::string strCallId, std::string strGroupParam, std::string strData, std::string strMime)
+{
+    FdThreadGuard guard{this, m_mtxFd, m_cvFd, m_iFdThreads};
+    SdsTx tx;
+    {
+        std::lock_guard<std::mutex> lk(m_mtxSdsTx);
+        auto it = m_mapSdsTx.find(strCallId);
+        if (it == m_mapSdsTx.end()) { m_bFdSending = false; return; }
+        tx = it->second;
+    }
+    const long long t0 = NowMs();
+    int iStatus = 0;
+    std::string strBody, strEtag, strUrl;
+    bool bToken;
+    { std::lock_guard<std::mutex> lk(m_mtxFd); bToken = AcquireXcapToken(m_strFdHost, m_iFdPort, m_bFdTls); }
+    if (!bToken) {
+        iStatus = 401;
+    } else {
+        std::string strPath = "/mcdata/fd?name=" + XcapUrlEncode(tx.fileName) + "&type=" + XcapUrlEncode(strMime);
+        if (!strGroupParam.empty()) strPath += "&group=" + XcapUrlEncode(strGroupParam);
+        std::vector<std::pair<std::string, std::string> > hdrs;
+        hdrs.push_back(std::make_pair("Authorization", "Bearer " + m_strAccessToken));
+        if (!XcapHttp(m_strFdHost, m_iFdPort, m_bFdTls, "POST", strPath, hdrs, strData, "application/octet-stream", iStatus, strBody, strEtag)) iStatus = 0;
+        else if (iStatus == 201) { strUrl = XcapJsonStr(strBody, "url"); if (strUrl.empty()) iStatus = 502; }
+    }
+    const long long ms = NowMs() - t0;
+    printf("[%d] [FD] upload %s (%zu bytes, group=%s) → %d (%lld ms)%s%s\n", m_iId, tx.fileName.c_str(), strData.size(), strGroupParam.c_str(), iStatus, ms,
+           strUrl.empty() ? "" : " url=", strUrl.c_str());
+    if (iStatus != 201) {
+        { std::lock_guard<std::mutex> lk(m_mtxSdsTx); m_mapSdsTx.erase(strCallId); }
+        m_bFdSending = false;
+        if (m_pObserver) m_pObserver->OnFdUpload(this, tx.msgId, iStatus, ms, (long long)strData.size());
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> lk(m_mtxSdsTx);
+        auto it = m_mapSdsTx.find(strCallId);
+        if (it != m_mapSdsTx.end()) { it->second.fileUrl = strUrl; it->second.tSendMs = NowMs(); tx = it->second; }
+    }
+    m_bFdSending = false;
+    if (m_pObserver) m_pObserver->OnFdUpload(this, tx.msgId, iStatus, ms, (long long)strData.size());
+    _SendSdsMessage(strCallId, tx, nullptr, false);
+}
+
+bool SimSession::DownloadFd(const std::string& msgId, const std::string& fileUrl)
+{
+    if (msgId.empty() || fileUrl.empty()) return false;
+    std::lock_guard<std::mutex> lk(m_mtxFd);
+    ++m_iFdThreads;
+    std::thread(&SimSession::_FdDownloadThread, this, msgId, fileUrl).detach();
+    return true;
+}
+
+void SimSession::_FdDownloadThread(std::string strMsgId, std::string strUrl)
+{
+    FdThreadGuard guard{this, m_mtxFd, m_cvFd, m_iFdThreads};
+    const long long t0 = NowMs();
+    std::string strHost, strPath, strBody, strEtag;
+    int iPort = 0, iStatus = 0;
+    if (XcapParseUrl(strUrl, strHost, iPort, strPath)) {
+        const bool bTls = strUrl.rfind("https://", 0) == 0;
+        // 토큰은 FD 서버(설정돼 있으면)에서 — CSC 가 URL 을 요청 Host 로 만들어 같은 서버다. 미설정이면 URL 의 호스트에서 시도
+        bool bToken;
+        {
+            std::lock_guard<std::mutex> lk(m_mtxFd);
+            bToken = HasFdServer() ? AcquireXcapToken(m_strFdHost, m_iFdPort, m_bFdTls) : AcquireXcapToken(strHost, iPort, bTls);
+        }
+        if (!bToken) {
+            iStatus = 401;
+        } else {
+            std::vector<std::pair<std::string, std::string> > hdrs;
+            hdrs.push_back(std::make_pair("Authorization", "Bearer " + m_strAccessToken));
+            if (!XcapHttp(strHost, iPort, bTls, "GET", strPath, hdrs, "", "", iStatus, strBody, strEtag)) iStatus = 0;
+        }
+    }
+    const long long ms = NowMs() - t0;
+    printf("[%d] [FD] download msg=%s %s → %d (%zu bytes, %lld ms)\n", m_iId, strMsgId.c_str(), strUrl.c_str(), iStatus, strBody.size(), ms);
+    if (m_pObserver) m_pObserver->OnFdDownload(this, strMsgId, iStatus, (long long)strBody.size(), ms);
 }
 
 // ── MCData SDS media plane (MSRP, TS 24.282 §9.2.3 — McDataMsrp.h) ──
@@ -1774,7 +1904,16 @@ bool SimSession::RecvRequest(int /*iThreadId*/, CSipMessage* pclsMessage) {
         }
         m_iSdsRecv++;
         std::string strGroup;
-        if (sds.requestType == "group-sds" && sds.requestUri.rfind("tel:", 0) == 0) strGroup = sds.requestUri.substr(4);
+        // 그룹 판정 — SDS 는 group-sds, FD 는 group-fd(앱) 또는 group-sds(CSP 의 FILEURL 폴백 빌더). 1:1 은 request-uri 가 상대 AoR
+        if ((sds.requestType == csim_mcdata::kReqGroupSds || sds.requestType == csim_mcdata::kReqGroupFd) && sds.requestUri.rfind("tel:", 0) == 0)
+            strGroup = sds.requestUri.substr(4);
+        if (sds.fd) {
+            // FD SIGNALLING(TS 24.282 §15.1.3) — 파일은 FILEURL 에. 다운로드는 관측자 몫(DownloadFd — 앱의 자동 다운로드 자리). disposition 자동 회신 없음
+            printf("[%d] [FD] recv %s msg=%s from=%s group=%s url=%s name=%s size=%lld type=%s\n", m_iId, sds.requestType.c_str(), sds.msgId.c_str(),
+                   strFrom.c_str(), strGroup.c_str(), sds.fileUrl.c_str(), sds.fileName.c_str(), sds.fileSize, sds.fileType.c_str());
+            if (m_pObserver) m_pObserver->OnFdRecv(this, strFrom, sds.msgId, strGroup, sds.fileUrl, sds.fileName, sds.fileSize, sds.fileType);
+            return true;
+        }
         printf("[%d] [SDS] recv %s msg=%s from=%s group=%s disp=%d text=%s\n", m_iId, sds.requestType.c_str(), sds.msgId.c_str(),
                strFrom.c_str(), strGroup.c_str(), sds.dispositionReq, sds.text.c_str());
         if (m_pObserver) m_pObserver->OnSdsRecv(this, strFrom, sds.msgId, strGroup, sds.text, sds.dispositionReq);
@@ -1988,22 +2127,31 @@ bool SimSession::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
     if (pclsMessage->m_clsCSeq.m_strMethod == "MESSAGE" && pclsMessage->m_iStatusCode >= 200) {
         std::string strMsgCallId;
         pclsMessage->GetCallId(strMsgCallId);
-        auto itTx = m_mapSdsTx.find(strMsgCallId);
-        if (itTx == m_mapSdsTx.end()) return false;
         int iSt = pclsMessage->m_iStatusCode;
-        if ((iSt == 401 && !pclsMessage->m_clsWwwAuthenticateList.empty()) || (iSt == 407 && !pclsMessage->m_clsProxyAuthenticateList.empty())) {
-            const CSipChallenge& clsCh = iSt == 401 ? pclsMessage->m_clsWwwAuthenticateList.front() : pclsMessage->m_clsProxyAuthenticateList.front();
-            CSipCredential clsCred;
-            std::string strRes = itTx->second.groupId.empty() ? itTx->second.toUser : itTx->second.groupId;
-            if (!itTx->second.authRetried && _BuildDigestCredential("MESSAGE", strRes, clsCh, clsCred)) {
-                itTx->second.authRetried = true;
-                _SendSdsMessage(strMsgCallId, itTx->second, &clsCred, iSt == 407);
-                return true;
+        SdsTx tx;
+        bool bRetry = false;
+        CSipCredential clsCred;
+        {
+            std::lock_guard<std::mutex> lk(m_mtxSdsTx);   // 스택을 부르는 동안은 잡지 않는다(워커·FD 스레드와의 잠금 순서)
+            auto itTx = m_mapSdsTx.find(strMsgCallId);
+            if (itTx == m_mapSdsTx.end()) return false;
+            if ((iSt == 401 && !pclsMessage->m_clsWwwAuthenticateList.empty()) || (iSt == 407 && !pclsMessage->m_clsProxyAuthenticateList.empty())) {
+                const CSipChallenge& clsCh = iSt == 401 ? pclsMessage->m_clsWwwAuthenticateList.front() : pclsMessage->m_clsProxyAuthenticateList.front();
+                std::string strRes = itTx->second.groupId.empty() ? itTx->second.toUser : itTx->second.groupId;
+                if (!itTx->second.authRetried && _BuildDigestCredential("MESSAGE", strRes, clsCh, clsCred)) {
+                    itTx->second.authRetried = true;
+                    ++itTx->second.seq;
+                    bRetry = true;
+                }
             }
+            tx = itTx->second;
+            if (!bRetry) m_mapSdsTx.erase(itTx);
         }
-        SdsTx tx = itTx->second;
-        m_mapSdsTx.erase(itTx);
-        printf("[%d] [SDS] MESSAGE %s → %d (%lld ms)\n", m_iId, tx.msgId.c_str(), iSt, NowMs() - tx.tSendMs);
+        if (bRetry) {
+            _SendSdsMessage(strMsgCallId, tx, &clsCred, iSt == 407);
+            return true;
+        }
+        printf("[%d] [%s] MESSAGE %s → %d (%lld ms)\n", m_iId, tx.fd ? "FD" : "SDS", tx.msgId.c_str(), iSt, NowMs() - tx.tSendMs);
         if (m_pObserver) m_pObserver->OnSdsResponse(this, tx.msgId, iSt, NowMs() - tx.tSendMs);
         return true;
     }
@@ -2201,6 +2349,12 @@ void SimSession::ProbeXcap(const std::string& strXcapRoot) {
 //   IdMS 는 XCAP 와 동일 CSC host:port 에서 /idms/* 로 서빙.
 //   세션당 1회만 취득해 m_strAccessToken 에 캐시.
 // ─────────────────────────────────────────────
+// 요청 scope(TS 33.180 Annex B.4.2.2 MC 서비스 scope) — IdMS 는 요청∩카탈로그를 발급한다(RFC 6749 §3.3). GMS/CMS 문서·MCData FD(/mcdata/fd 는
+//   3gpp:mc:data_service 검사, IdMs.ScopeEnforcement)까지 이 토큰 하나로.
+static const char* kIdmsScopes =
+    "openid 3gpp:mc:ptt_service 3gpp:mc:data_service 3gpp:mc:ptt_group_management_service 3gpp:mc:ptt_config_management_service "
+    "3gpp:mc:data_group_management_service 3gpp:mc:data_config_management_service";
+
 bool SimSession::AcquireXcapToken(const std::string& strHost, int iPort, bool bTls) {
     if (!m_strAccessToken.empty()) return true;
 
@@ -2234,7 +2388,7 @@ bool SimSession::AcquireXcapToken(const std::string& strHost, int iPort, bool bT
         "/idms/authreq?user_name=" + XcapUrlEncode(strUserUri) +
         "&user_password=" + XcapUrlEncode(strLoginPw) +
         "&client_id=MCPTT_UE&redirect_uri=" + XcapUrlEncode(strRedirect) +
-        "&scope=&code_challenge=" + strChallenge + "&code_challenge_method=S256";
+        "&scope=" + XcapUrlEncode(kIdmsScopes) + "&code_challenge=" + strChallenge + "&code_challenge_method=S256";
 
     std::vector<std::pair<std::string, std::string> > noHdr;
     int iStatus = 0; std::string strRespBody, strRespEtag;

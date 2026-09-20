@@ -15,6 +15,7 @@
 - S1-UNIT-OAM-HTTPSRV    : python3 -m unittest tests.test_httpsrv_bind (HttpServer 기동 계약 — bind 성공이라야 기동 성공, 떠 있는 척 차단)
 - S1-UNIT-OAM-STATS      : python3 tests/test_oam_stats_classify.py · test_stats_probe.py · test_stats_rollup_range.py · test_stats_store.py (SIP 통계 서비스축 · 미디어 프로브 · 구간 조회 계층 선택 · 집계 저장소 단일 writer)
 - S1-UNIT-PSIP           : g++ tests/psip_leg_dest_test.cpp ← build/csp/psip_build/*.a → 127.0.0.1 루프백 실행 (서버 발신 in-dialog 요청 목적지 재해석; 라이브러리 없으면 SKIP)
+- S1-UNIT-CMP            : g++ tests/cmp_transcoder_test.cpp + cmp/PTranscoder.cpp ← pkg/ AMR-WB 정적 라이브러리 (피어 leg G.711↔AMR-WB 트랜스코더 — 프레이밍·변환·왕복; 라이브러리 없으면 SKIP)
 
 단말 SDK(`sdk/`·`android/`) — 정본 [docs/design/features/ue_sdk.md](../../../../docs/design/features/ue_sdk.md),
 [android_dispatch_tablet.md](../../../../docs/design/features/android_dispatch_tablet.md) §9.

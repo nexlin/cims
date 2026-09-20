@@ -85,10 +85,22 @@ class TestCodeRevisions(unittest.TestCase):
     def test_qos001_split_by_check(self):
         """구 CIMS-QOS-001 이 3정의로 분할 — 저장된 구 코드는 check 기본값이 배정."""
         for chk, want in [('disk_high', 'A-QOS-001'), ('ha_flap', 'A-QOS-023'),
-                          ('rtp_pct_gte', 'A-QOS-024')]:
+                          ('rtp_pct_gte', 'A-QOS-024'), ('cpu_high', 'A-QOS-001'), ('mem_high', 'A-QOS-001'),
+                          ('load_high', 'A-QOS-001'), ('mount_high', 'A-QOS-001')]:
             out = service_registry.normalize_alert_rule(
                 {'check': chk, 'code': 'CIMS-QOS-001', 'type': 'threshold_crossed'})
             self.assertEqual(out['code'], want, chk)
+
+    def test_host_resource_rules_share_qos001(self):
+        """호스트 자원(cpu/mem/load/루트 외 마운트) 임계는 disk 와 같은 조건 클래스 A-QOS-001 의 다른 객체(표준화 §3.5) —
+        코어 규칙에 단계 임계·agent scope·host mo_class 로 존재한다."""
+        by = {r.get('check'): r for r in service_registry._CORE_ALERT_RULES}
+        for chk in ('disk_high', 'cpu_high', 'mem_high', 'load_high', 'mount_high'):
+            r = by.get(chk)
+            self.assertIsNotNone(r, chk)
+            self.assertEqual((r['code'], r['type'], r['scope'], r['mo_class']), ('A-QOS-001', 'capacity_threshold', 'agent', 'host'), chk)
+            self.assertIsInstance(r.get('thresholds'), dict)
+        self.assertEqual(by['load_high']['unit'], '% of cores')
 
     def test_legacy_mo_instance_dropped(self):
         out = service_registry.normalize_alert_rule(

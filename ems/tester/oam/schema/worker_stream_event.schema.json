@@ -119,6 +119,8 @@
             "floor_release",
             "sds_send",
             "sds_recv",
+            "fd_send",
+            "fd_recv",
             "media_hold",
             "media_send",
             "media_stop",

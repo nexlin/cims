@@ -22,6 +22,7 @@
 #include "CspPttGroup.h"
 #include "CspRole.h"
 #include "CspServiceMap.h"
+#include "CspTrunkRegistrar.h"
 #include "CspUser.h"
 #include "DbManager.h"
 #include "FmReporter.h"
@@ -714,6 +715,18 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
     ServiceInfo svcReg = gclsServiceMap.GetByDomain( pclsMessage->m_clsReqUri.m_strHost );
     const std::string strRegRealm =
         ( svcReg.id > 0 ) ? CCspServiceMap::EffectiveRealm( svcReg ) : pclsMessage->m_clsReqUri.m_strHost;
+
+    // 등록형 트렁크 계정(sip_service_model.md §2-3 — Route inbound_auth=digest + auth_user, SIPconnect 2.0 §8):
+    // 가입자가 아니라
+    //   피어 망(IP-PBX)의 REGISTER 다. To 가 트렁크 계정이면 CCspTrunkRegistrar 가 챌린지·검증·바인딩·응답까지 끝낸다.
+    {
+        std::string strLocalNodeName;
+        if ( pclsMessage->m_iListenerId > 0 ) {
+            LocalNodeInfo clsLn = gclsLocalNodeMap.GetByIntId( pclsMessage->m_iListenerId );
+            if ( clsLn.IsValid() ) strLocalNodeName = clsLn.name;
+        }
+        if ( gclsTrunkRegistrar.HandleRegister( pclsMessage, strLocalNodeName, strRegRealm ) ) return true;
+    }
 
     // ── RFC 3329 sec-agree (TS 24.229 §5.1.1.5.1 프로파일, sip_access_security.md §8.1) ──
     //   초기 REGISTER: Security-Client → 401 에 Security-Server 동봉(발급 보관).

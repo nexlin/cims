@@ -49,6 +49,7 @@ bool CCspRouteMap::Sync() {
             c.register_expires = (int)row.GetInt( "register_expires", 3600 );
             c.auth_user = row.GetString( "auth_user" );
             c.auth_password = row.GetString( "auth_password" );
+            c.auth_ha1 = row.GetString( "auth_ha1" );
             c.auth_realm = row.GetString( "auth_realm" );
             c.max_concurrent_calls = (int)row.GetInt( "max_concurrent_calls", 0 );
             c.cps_limit = (int)row.GetInt( "cps_limit", 0 );
@@ -217,6 +218,23 @@ bool CCspRouteMap::MarkAlive( const std::string &routeName, int rtt_ms ) {
 bool CCspRouteMap::MarkFail( const std::string &routeName ) {
     bool bDummy = false;
     return MarkFail( routeName, 0, bDummy );
+}
+
+bool CCspRouteMap::SetAlive( const std::string &routeName, bool bAlive, bool &bChanged ) {
+    bChanged = false;
+    std::lock_guard<std::mutex> lk( m_mutex );
+    auto it = m_byName.find( routeName );
+    if ( it == m_byName.end() ) return false;
+    RouteRuntime &rt = it->second.rt;
+    if ( rt.alive.load() == bAlive ) return true;
+    rt.alive.store( bAlive );
+    rt.consecutive_failures.store( 0 );
+    rt.consecutive_successes.store( 0 );
+    if ( bAlive ) rt.last_reply_at.store( (long)time( nullptr ) );
+    bChanged = true;
+    CLog::Print( LOG_SYSTEM, "RouteMap: route '%s' set %s (trunk registration)", routeName.c_str(),
+                 bAlive ? "ALIVE" : "DEAD" );
+    return true;
 }
 
 void CCspRouteMap::TouchPing( const std::string &routeName, long now ) {

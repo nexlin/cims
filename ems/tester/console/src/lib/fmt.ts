@@ -88,7 +88,8 @@ export const STEP_LABEL: Record<string, string> = {
   resume: 'resume(re-INVITE)', dtmf: 'DTMF(RFC 4733)', refer: 'REFER 전달', media_hold: '미디어 유지', bye: 'BYE',
   reject: '거절', deregister: '등록 해제', group_call: 'PTT 그룹콜', floor_request: 'floor 요청', floor_release: 'floor 해제',
   pickup: '당겨받기', replaces: 'INVITE-Replaces', join: 'INVITE-Join 청취', subscribe: 'SUBSCRIBE', publish: 'PUBLISH affiliation',
-  media_send: 'RTP 송출', media_stop: '송출 정지', sds_send: 'SDS 송신', sds_recv: 'SDS 수신', wait: '대기', expect: '누계 게이트',
+  media_send: 'RTP 송출', media_stop: '송출 정지', sds_send: 'SDS 송신', sds_recv: 'SDS 수신', fd_send: 'FD 파일 배포', fd_recv: 'FD 수신·다운로드',
+  wait: '대기', expect: '누계 게이트',
 }
 
 export function summaryValue(s: Summary | undefined, key: string, kind: 'int' | 'pct' | 'num' | 'str'): string {

@@ -77,6 +77,32 @@
           "default": null,
           "title": "Ha1"
         },
+        "login": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "IdMS 로그인 id(users.login_id — SIP 자격과 별개, creds `login`/DB users) — MCData FD 의 토큰(POST/GET /mcdata/fd). 비면 fd_send/fd_recv(download) 의 행위자가 될 수 없다(컴파일 오류)",
+          "title": "Login"
+        },
+        "login_pw": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "IdMS 로그인 비밀번호(users.passwd, creds `loginPw`)",
+          "title": "Login Pw"
+        },
         "password": {
           "anyOf": [
             {
@@ -236,6 +262,33 @@
         }
       },
       "title": "PeerIdentities",
+      "type": "object"
+    },
+    "TargetCsc": {
+      "additionalProperties": false,
+      "description": "풀이 닿는 CSC(subscriber 노드 api — IdMS `/idms/*` + MCData FD 콘텐츠 서버 `/mcdata/fd`, 같은 host:port). 컨트롤러가 토폴로지에서 파생.",
+      "properties": {
+        "ip": {
+          "title": "Ip",
+          "type": "string"
+        },
+        "port": {
+          "default": 4430,
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Port",
+          "type": "integer"
+        },
+        "tls": {
+          "default": true,
+          "title": "Tls",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ip"
+      ],
+      "title": "TargetCsc",
       "type": "object"
     },
     "TargetCsp": {
@@ -673,6 +726,18 @@
       ],
       "title": "Srtp",
       "type": "string"
+    },
+    "target_csc": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TargetCsc"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "kind=ue — 대상 CSC(subscriber 노드 api) — MCData FD 의 IdMS 토큰·콘텐츠 서버. 토폴로지에 subscriber 노드가 있으면 파생(풀 subscriber 로 고른다), 없으면 fd_* 단계 불가"
     },
     "target_csp": {
       "$ref": "#/$defs/TargetCsp",

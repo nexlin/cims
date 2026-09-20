@@ -85,6 +85,7 @@ struct WorkerConfig {
 struct Identity {
     std::string user, domain, ha1, password, display, authScheme, akaK, akaOpc;
     std::string pttGroup;           // service=ptt — affiliation 대상 MCPTT 그룹 id
+    std::string login, loginPw;     // IdMS 로그인 자격(users.login_id/passwd — SIP 자격과 별개) — MCData FD 의 토큰(POST/GET /mcdata/fd). 비면 fd_* 불가
 };
 
 struct Instance;
@@ -137,6 +138,9 @@ struct Endpoint {
     bool talked = false;            // 표본 구간 안에 floor 를 가졌다 — 발언자는 수신 0 이 정상(무음 leg 로 세지 않는다)
     // MCData SDS(TS 24.282) — 받은 SDS message ID 들(sds_recv 단계가 인스턴스의 msgId 를 여기서 찾는다 — 단계 진입 전에 도착해도 된다)
     std::vector<std::string> sdsRx;
+    // MCData FD — 받은 FD SIGNALLING(msgId → FILEURL·크기). fd_recv 가 여기서 찾아 내려받는다(단계 진입 전 도착도 인정)
+    struct FdRx { std::string msgId, url; long long size = 0; };
+    std::vector<FdRx> fdRx;
     bool isPtt() const;
     bool ready() const { return registered && (!isPtt() || affiliated); }
     bool isPeer() const { return kind == K_PEER; }
@@ -155,6 +159,9 @@ struct Pool {
     std::string profile;            // peer 프로파일
     std::string service = "volte";  // ue: 접속환경 클래스 volte|voip|ptt — ptt 면 MCPTT 단말(feature tag·기동 절차·floor)
     bool msrp = false;              // ue: MCData media plane 능력 — REGISTER Contact 에 mcdata.sds ICSI(서버가 MSRP 배포 대상으로 고른다)
+    std::string cscHost;            // ue: 대상 CSC(subscriber 노드 api — IdMS /idms/* + FD 콘텐츠 서버 /mcdata/fd). 비면 fd_send/fd_recv 불가
+    int cscPort = 0;
+    bool cscTls = true;
     std::map<std::string, std::vector<Endpoint*>> groups;   // ptt: MCPTT 그룹 id → 이 풀의 멤버(신원 순)
     std::unique_ptr<CsimPeer> peer; // kind=peer 엔진
     int answerDelayMs = 0;          // peer answer=delay — 착신 INVITE 뒤 이 시간 동안 응답을 보류(시나리오 answer/progress 의 after_ms 와 합쳐 늦은 쪽)
@@ -237,6 +244,11 @@ struct Instance {
     long long sdsSendMs = 0;
     std::vector<Endpoint*> sdsWait;
     bool sdsDisposition = false;
+    // MCData FD — 마지막 fd_send 의 message ID·파일 크기(다운로드 크기 대조)·MESSAGE 송신 시각(업로드 완료 = fd_delay_ms 기점)·fd_recv 대기 단말·다운로드 대기 단말
+    std::string fdMsgId;
+    long long fdSize = 0;
+    long long fdSendMs = 0;
+    std::vector<Endpoint*> fdWait, fdDlWait;
 };
 
 class Worker : public ICsimObserver, public ICsimPeerObserver {
@@ -266,6 +278,10 @@ public:
     void OnSdsRecv(SimSession* s, const std::string& from, const std::string& msgId, const std::string& group, const std::string& text, int dispReq) override;
     void OnSdsNotification(SimSession* s, const std::string& msgId, int notifType) override;
     void OnSdsMediaRecv(SimSession* s, const std::string& from, const std::string& msgId, const std::string& group, const std::string& text, int dispReq) override;
+    void OnFdUpload(SimSession* s, const std::string& msgId, int iHttpStatus, long long ms, long long bytes) override;
+    void OnFdRecv(SimSession* s, const std::string& from, const std::string& msgId, const std::string& group, const std::string& fileUrl,
+                  const std::string& fileName, long long fileSize, const std::string& fileType) override;
+    void OnFdDownload(SimSession* s, const std::string& msgId, int iHttpStatus, long long bytes, long long ms) override;
     // ICsimPeerObserver — 스택 스레드
     void OnPeerIncoming(CsimPeer* p, const std::string& callId, const std::string& from, const std::string& to, bool hasPai) override;
     void OnPeerCallStart(CsimPeer* p, const std::string& callId, long long srdMs) override;
@@ -287,6 +303,7 @@ private:
         enum Kind { REGISTER, INCOMING, CALLSTART, CALLEND, BYERESP, RING, PRACK, REINVITE, REINVITE_RESP, REFER_RESP,
                     AFFILIATE, ANSWERED, FLOOR, SUBSCRIBE_RESP, DLG_NOTIFY, FAULT_REJECT, WIRE_DROP, INVITE_RETRANS, THIG,
                     SDS_RESP, SDS_RECV, SDS_NOTIF,   // MCData SDS — user = msgId · SDS_RECV: callId = 발신자, event = 그룹 id, status = disposition 요청, hasPai = media plane(MSRP) 도착 · SDS_NOTIF: status = notifType
+                    FD_UPLOAD, FD_RECV, FD_DOWNLOAD,   // MCData FD — user = msgId · FD_UPLOAD: status = HTTP(201 정상), ms, bytes · FD_RECV: callId = 발신자, event = 그룹, url, bytes = 크기 · FD_DOWNLOAD: status = HTTP, bytes, ms
                     REAL_CALL, REAL_STATS, REAL_EXIT } kind;   // WIRE_DROP(user = method)·INVITE_RETRANS·THIG(status = ok) = 피어 오류 주입·THIG 관측   // REAL_* = 실단말 프로세스 이벤트(onEvent 가 위의 종류로 다시 푼다)
         SimSession* s;
         CsimPeer* peer;
@@ -304,6 +321,8 @@ private:
         unsigned long long rx = 0, tx = 0, lost = 0;   // real-ue: RTP 통계(statsValid 일 때)
         long long jit = 0;
         bool statsValid = false;
+        std::string url;          // FD_RECV: FILEURL
+        long long bytes = 0;      // FD_UPLOAD/FD_RECV/FD_DOWNLOAD: 파일 크기
     };
 
     WorkerConfig m_cfg;
@@ -430,6 +449,9 @@ private:
     void markCancelExpected(Instance& in);             // 픽업·Replaces 직전 — 링잉 중인 착신 leg 들은 서버 CANCEL 로 끝나는 것이 정상
     bool epSubscribe(Endpoint* ep, const std::string& event, const std::string& resource);
     bool runCheck(Instance& in, const CompiledStep& st, long long now);   // check 단계 — 관측 정합 판정(conference 로스터·Warning·dialog NOTIFY 열)
+    // MCData FD(fd_send/fd_recv) — payload 해석(합성 크기 `256k` | 샘플 디렉터리 파일) · fd_recv 의 다운로드 개시(true = 단계가 끝나 다음으로 진행)
+    bool fdPayload(const std::string& payload, std::string& data, std::string& name, std::string& mime, std::string& err) const;
+    bool startFdDownloads(Instance& in, const CompiledStep& st, long long now);
     static bool dialogConsistent(SimSession* s, std::string& detail);    // RFC 4235 NOTIFY 열 정합 — entity 별 단일 dialog·local/remote/direction 불변·상태 전진·version 단조
     void epUnsubscribe(Endpoint* ep);
     void epClearCall(Endpoint* ep);

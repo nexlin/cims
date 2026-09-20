@@ -645,6 +645,9 @@ PRtpRelay* allocResource(rtpIp, rtpPort, videoPort);  // _freeResources.pop_back
 void freeResource(PRtpRelay* rtp);                     // _freeResources.push_back()
 ```
 
+**트랜스코딩 슬롯**(`TranscodeSlots`, §11.4) — 별도 풀이 아니라 relay 세션 중 변환 유닛을 붙일 수 있는 수. `countTranscoding()` 이 세션을 세어
+`resource.transcode.used` 를 만들고, 초과 요청은 `TRANSCODE_CAPACITY`. `reset()` 이 변환 유닛·코덱 선언을 함께 지운다.
+
 ### 4.2 PTT 리소스 풀
 
 **초기화 (initPttResourcePool + initPttMemberPool):**
@@ -852,6 +855,7 @@ CmpServer (PModule)
 {
   "RtpStartPort": 50000,         // VoIP Audio RTP 시작 포트
   "RtpPoolSize": 20,             // VoIP 4포트 블록 수
+  "TranscodeSlots": 8,           // 피어 leg G.711↔AMR-WB 변환 동시 세션 수 (§11.4, 0=비활성)
   "PttRtpStartPort": 52000,      // PTT Audio RTP 시작 포트
   "PttRtpPoolSize": 10,          // PTT 2포트 블록 수
   "PttFloorStartPort": 54000,    // PTT Floor Control 시작 포트
@@ -896,7 +900,7 @@ CmpServer (PModule)
 
 ---
 
-## 11. 트랜스코딩 — 피어 leg 한정 G.711 ↔ AMR-WB (설계, 구현 전)
+## 11. 트랜스코딩 — 피어 leg 한정 G.711 ↔ AMR-WB
 
 ### 11.1 왜 필요한가 · 어디에 두는가
 
@@ -920,35 +924,52 @@ IMS 에서 이 일은 **NNI 의 TrGW(IBCF 제어, TS 23.228 §4.14 · TS 29.162)
    G.711 을 고르면 순수 relay.
 2. **가입자 → 피어 방향 오퍼**: 피어 노드 정책(`remote_nodes.transcode_codecs`, 예 `["PCMA","PCMU"]`)이 있으면 피어 leg 오퍼에
    그 코덱을 추가한다. 피어가 그 코덱으로 답하고 가입자 오퍼에 그 코덱이 없었으면 변환.
-3. 판정은 **leg 별 최종 협상 코덱이 다른가** 하나다. 다르면 CSP 가 `RELAY_ADD/MODIFY` 에 leg 별 코덱 선언(`media_codec`,
-   [cmp_media_api.md](../../api/cmp_media_api.md) §6.6)을 실어 보내고, CMP 는 그때만 변환 유닛을 붙인다. 같으면 현행
+3. 판정은 **leg 별 최종 협상 코덱이 다른가** 하나다. 다르면 CSP 가 `RELAY_MODIFY` 에 leg 별 코덱 선언(`media_codec`,
+   [cmp_media_api.md](../../api/cmp_media_api.md) §6.6)을 양 leg 에 실어 보내고, CMP 는 그때만 변환 유닛을 붙인다. 같으면 현행
    PT-blind relay(`remote_pt` 재작성 포함) 그대로다.
-4. 정책 없음 = 현행 동작(코덱 삽입 없음). 변환 자원 부족(§11.4)이면 CMP 가 `E_TRANSCODE_CAPACITY` 로 거절하고 CSP 는 488
-   Not Acceptable Here 로 종결한다 — 조용히 무음 relay 를 만들지 않는다.
+4. 정책 없음 = 현행 동작(코덱 삽입 없음). 변환 자원 부족(§11.4)이면 CMP 가 `TRANSCODE_CAPACITY` 로 거절하고 CSP 는 488
+   Not Acceptable Here 로 종결한다 — 조용히 무음 relay 를 만들지 않는다. 공통 코덱도 변환 가능 쌍도 없으면 같은 488.
+
+**CSP 구현**(`csp/RelayCodec.{h,cpp}` + `ModuleDispatcher`): `EventIncomingCall` 이 오퍼의 audio m= 라인에서 코덱 목록(`AudioCodecs` — fmt 순,
+rtpmap/정적 PT 표, telephone-event 분리)을 읽고 ① A 가 인바운드 Route 로 식별된 피어이고 B 가 가입자면 서비스 코덱(코덱 테이블 top)을, ② B 가
+RoutingPolicy 가 고른 피어면 그 RemoteNode `transcode_codecs` 를 끼워 넣는다(`InsertCodecs` — 정적 PT 는 그대로, 동적은 비어 있는 96..127, rtpmap·fmtp
+동봉). 양 leg 의 오퍼 코덱·telephone-event 는 `CCallInfo::m_clsCodecLeg[2]` 에 남는다. answer(`ApplyRelayAnswerLeg` — 200 과 18x+SDP 공용)에서
+B 의 첫 오디오 코덱과 A 오퍼를 대조(`DecideLeg`): A 오퍼에 있으면 relay(A leg PT 를 협상 값으로 바로잡는 MODIFY — 종전엔 코덱 테이블 top PT 가
+스탬프됐다), 없으면 변환 가능 쌍인 A 의 첫 코덱을 A 코덱으로 삼아 B leg·A leg MODIFY 에 `media_codec` 을 싣고, A 로 나가는 answer(200·18x)와
+이후 A→B re-INVITE(hold/resume) 의 re-offer 를 **각 leg 의 협상 코덱으로 재작성**한다(`RewriteAudio` — fmt·rtpmap·fmtp 교체, 방향·ptime·crypto
+유지). CMP 가 MODIFY 를 거절하면(슬롯 소진) B 종료 + 미응답 A 에 488.
 
 ### 11.3 CMP 안의 변환 유닛
 
 - `PRtpRelay` 방향(direction)마다 선택적 `Transcoder` 하나: `decode(A) → resample(8k↔16k) → encode(B)`. 20 ms 프레임 단위,
   jitter 흡수는 기존 relay 경로와 동일(재정렬 없음 — 순서 뒤집힌 패킷은 decoder PLC 에 맡긴다).
-- 코덱 구현: AMR-WB 디코더 `opencore-amrwb`, 인코더 `vo-amrwbenc`(둘 다 이미 빌드 트리의 ExternalProject — cspsim 이 링크
-  중, CMP 는 아직 미링크), G.711 μ/A 는 자체 테이블. AMR-WB 는 octet-aligned/bandwidth-efficient 둘 다 수신(payload
-  format RFC 4867), 송신은 leg 의 fmtp 를 따른다. 모드 세트는 fmtp `mode-set` 존중, 기본 최고 모드.
-- 녹취는 **가입자 leg 원본**(AMR-WB)을 기록한다 — 변환 파이프라인([../features/recording.md](../features/recording.md))이
-  AMR-WB 전제라는 불변식을 지킨다. 피어 leg 는 기록하지 않는다.
-- SRTP 종단(§6.4 `media_crypto`) 뒤에서 변환한다 — 평문 전제는 믹스·녹취와 같다.
+- 구현 `cmp/PTranscoder.{h,cpp}`(`PCodecDesc` + `PTranscoder`) — `PRtpRelay::setPeerCodec/updateTranscode` 가 양 leg 선언이 유효하고 다르면
+  방향마다 하나씩(`_xcode[i]` = peer i 수신 → peer 1-i 송신) 붙인다. `transcode()` 는 RTP 를 프레임 단위로 풀어 새 RTP 로 낸다: 헤더 새로
+  (V2·dst PT·자기 seq·**입력 clock 을 출력 clock 으로 비례 사상한 timestamp**·입력 SSRC·marker 보존), 입력 1 패킷 → 출력 0..N 패킷(G.711
+  10 ms ×2 → AMR-WB 1 프레임, AMR-WB 다중 프레임 → G.711 여러 패킷). 순서 뒤집힘·손실 은닉은 하지 않는다(디코더 PLC).
+- 코덱 구현: AMR-WB 디코더 `opencore-amrwb`(`D_IF_decode`, RFC 4867 저장 형식 헤더), 인코더 `vo-amrwbenc`(`E_IF_encode`, 모드 = fmtp `mode-set`
+  최고, 기본 8 = 23.85 kbit/s) — 둘 다 빌드 트리의 ExternalProject 정적 라이브러리(cmp CMake 가 링크), G.711 μ/A 는 자체 테이블(Sun g711 동형).
+  AMR-WB 는 octet-aligned/bandwidth-efficient 둘 다 수신(fmtp 없으면 자동 판정 — CMR 하위 4비트 0 + 길이 일치 = octet-aligned), 송신은 leg 의 fmtp.
+  리샘플링 8k↔16k 는 47탭 해밍 창 sinc 하프밴드 FIR.
+- 녹취·tap 은 **AMR-WB 쪽 표현**으로 남긴다 — 변환 파이프라인([../features/recording.md](../features/recording.md))이 AMR-WB 전제라는 불변식을
+  지킨다: 가입자(AMR-WB) leg 는 원본 ingress, 피어(G.711) leg 트랙은 변환 출력(상대 leg 의 AMR-WB PT — 녹취 트랙 메타 `audio_pt/codec` 도 그것).
+  청취 leg(tap)도 같은 규칙.
+- SRTP 종단(§6.4 `media_crypto`) 뒤에서 변환한다 — 평문 전제는 믹스·녹취와 같다. `telephone-event` 는 timestamp 재작성 + dst leg TE PT 스탬프.
 
 ### 11.4 자원·관측
 
-- 변환은 relay 보다 CPU 비용이 한 자리 크다(AMR-WB 인코딩). 리소스 풀(§4.1)에 `transcode_slots` 를 따로 두고 `HEARTBEAT`·
-  `STATS` 에 사용량을 싣는다. 슬롯 소진 = `capacity_threshold` 계열 알람(카탈로그 채번은 구현 시).
-- Flow 로그(§7)에 leg 별 코덱과 변환 여부를 남긴다 — 통계의 실패 사유 분해(488)와 맞물린다.
-- 검증: S1 단위(코덱 왕복·PLC), `S3-SCN-TRANSCODE`(cspsim G.711 ↔ AMR-WB 1:1 호, 계측기 도입 뒤 pbx 프로파일 시나리오로 이전 —
-  [../features/test_instrument.md](../features/test_instrument.md) §12).
+- 변환은 relay 보다 CPU 비용이 한 자리 크다(AMR-WB 인코딩). cmp.json `TranscodeSlots`(기본 8, 0 = 비활성)가 동시에 변환 유닛을 붙일 수 있는
+  세션 수다. `HEARTBEAT`·`STATS` `resource.transcode{total,used}`(키 존재 = 기능 광고, used 는 세션의 `transcoding()` 계수). 슬롯 소진 →
+  `TRANSCODE_CAPACITY`. 지원 밖 쌍(G.722·AMR-NB) → `BAD_REQUEST`.
+- Flow 로그(§7): 변환 유닛이 붙는 순간 `INT TRANSCODE`(detail `AMR-WB/16000<->PCMA/8000`) 한 줄 — 통계의 실패 사유 분해(488)와 맞물린다.
+- 검증: S1 `S1-UNIT-CMP`(`tests/cmp_transcoder_test.cpp` — 프레이밍·변환·1 kHz 왕복 상관·TE 재작성), 계측기 `TRUNK-PBX-TRANSCODE`(UE AMR-WB →
+  pbx PCMA, rtp_loss·MOS)·`TRUNK-PBX-INBOUND`(PBX → UE) — [../features/test_instrument.md](../features/test_instrument.md) §12.
 
 ### 11.5 범위 밖
 
 SIP-I(ISUP 캡슐화) 트렁크는 미디어 문제가 아니라 CIMS 가 MGCF 역할을 하는 문제라 여기 없다. 영상 트랜스코딩·PTT 그룹의
-혼합 코덱·G.722/AMR-NB 는 계약에 자리만 둔다.
+혼합 코덱·G.722/AMR-NB 는 계약에 자리만 둔다. 변환 호의 PRACK SDP·전달/픽업 재고정(TasModule 의 UE↔UE 재결합)은 코덱 재작성을 하지 않는다 —
+변환 호가 전달되면 새 pair 의 코덱 판정은 다음 answer 에서 다시 선다.
 
 ---
 

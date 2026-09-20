@@ -299,6 +299,8 @@ class UePool(_PoolBase):
     msrp: bool = Field(default=False, description='MCData media plane 능력(TS 24.282 §9.2.3) — REGISTER Contact 의 +g.3gpp.icsi-ref 에 mcdata.sds 를 더해 서버가 '
                                                   '대용량 SDS 를 MSRP(INVITE m=message)로 배포하는 대상이 된다. 끄면 FD SIGNALLING(FILEURL) MESSAGE 폴백으로 받는다. '
                                                   'sds_send plane: media 의 발신 쪽은 이 플래그와 무관')
+    subscriber: Optional[str] = Field(default=None, description='MCData FD(fd_send/fd_recv) 가 쓰는 CSC — role=subscriber 노드 id(api 블록). 생략 = 대상의 유일한 '
+                                                                  'subscriber 노드(둘 이상이면 지정). 신원에 IdMS 로그인(creds login/loginPw · DB users.login_id)이 있어야 한다')
 
     @field_validator('dtmf', mode='before')
     @classmethod
@@ -704,6 +706,23 @@ class Topology(_Strict):
             kw['peering'] = TargetPeering(ip=ip, port=l.port, protocol=l.protocol, local_node=self.local_node_name(lid, l))
         return TargetCsp(**kw)
 
+    def target_csc_for(self, pname: str) -> Optional[TargetCsc]:
+        """워커 계약 PoolCreate.target_csc — 풀 subscriber(없으면 대상의 유일한 role=subscriber 노드)의 api 블록. 없으면 None(fd_* 단계 컴파일 오류).
+        주소 = 노드 addr(VIP) 또는 호스트 ip."""
+        p = self.pools[pname]
+        want = getattr(p, 'subscriber', None)
+        subs = {nid: n for nid, n in self.target.nodes.items() if n.role == 'subscriber' and n.api is not None}
+        if want:
+            if want not in subs:
+                raise ValueError(f'pool {pname}: subscriber={want!r} 는 api 블록이 있는 role=subscriber 노드가 아니다')
+            nid = want
+        elif len(subs) == 1:
+            nid = next(iter(subs))
+        else:
+            return None
+        n = subs[nid]
+        return TargetCsc(ip=self.node_ip(nid), port=n.api.port, tls=n.api.tls)
+
     def peer_listeners(self, pools: List[str]) -> Dict[str, Tuple[str, str, SipListener]]:
         """피어 풀 이름 → (노드, 수신점 id, 항목). 시드가 풀마다 접속점(LocalNode)을 고르는 데 쓴다."""
         return {pn: self.pool_listener(pn) for pn in pools if self.pools[pn].kind == 'peer'}
@@ -731,7 +750,7 @@ StepKind = Literal[
     'register', 'deregister', 'invite', 'progress', 'answer', 'reject', 'bye',
     'hold', 'resume', 'dtmf',
     'refer', 'replaces', 'join', 'pickup', 'subscribe', 'publish',
-    'group_call', 'floor_request', 'floor_release', 'sds_send', 'sds_recv',
+    'group_call', 'floor_request', 'floor_release', 'sds_send', 'sds_recv', 'fd_send', 'fd_recv',
     'media_hold', 'media_send', 'media_stop', 'wait', 'expect', 'check',
 ]
 
@@ -741,8 +760,13 @@ WORKER_STEPS = frozenset((
     'hold', 'resume', 'dtmf', 'refer', 'media_hold', 'media_send', 'media_stop', 'wait', 'expect',
     'group_call', 'floor_request', 'floor_release',
     'pickup', 'subscribe', 'replaces', 'join', 'publish',
-    'sds_send', 'sds_recv', 'check',
+    'sds_send', 'sds_recv', 'fd_send', 'fd_recv', 'check',
 ))
+# fd_recv.payload — 도착 뒤 동작: download(기본 — who 전원이 FILEURL 을 내려받아 Metadata size 와 대조, fd_download_pct) | signal(FD SIGNALLING 도착만)
+FD_RECV_MODES = ('download', 'signal')
+# fd_send.payload — 합성 크기(`65536`·`256k`·`2m`, 1 B ~ 64 MiB) 또는 워커 Media.SampleDir 의 파일 이름(상대 경로, `..` 불가)
+_FD_SIZE = re.compile(r'^[0-9]{1,8}[kKmM]?$')
+_FD_FILE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._\-/]{0,127}$')
 # check.payload — 관측 정합 판정 종류(cspsim 검사의 계측기 이전 — S3-SCN-PTT-LISTEN L1b/L5 · S3-SCN-FA F7):
 #   conference_roster_visible|hidden = who 의 conference NOTIFY 로스터에 to 역할 신원이 있는가/없는가(listen_visibility)
 #   conference_warning_138 = who 의 conference SUBSCRIBE 거절 Warning warn-code 138(TS 24.379 §10.1.3.4.1 범위 밖)
@@ -808,6 +832,8 @@ STEP_VOCAB = {
     'floor_request': {'group': 'ptt',   'actor': 'who',     'kind': 'ptt',      'metrics': ['floor_grant_ms', 'floor_taken_ms', 'floor_queue_ms', 'floor_grant_pct'], 'desc': 'Floor Request → 결과(payload: granted|denied|queued|any)'},
     'floor_release': {'group': 'ptt',   'actor': 'who',     'kind': 'ptt',      'metrics': ['floor_idle_ms'], 'desc': 'Floor Release → Idle 도달'},
     'sds_send':      {'group': 'ptt',   'actor': 'fromto',  'kind': 'ue',       'metrics': ['code', 'sds_delay_ms', 'sds_disposition_pct', 'sds_media_pct'], 'desc': 'MCData SDS 송신(TS 24.282) — payload 본문, to 역할 = 1:1 · to 없음 = 그룹 SDS(인스턴스 그룹 또는 group, 수신자는 multi 역할), disposition = delivery 회신 요청. plane: control(기본) = SIP MESSAGE(완료 = 최종 응답) · media = MSRP media plane(INVITE m=message → cmdp, 완료 = MSRP SEND 200/REPORT — 대상 CSP 는 그룹 SDS 만)'},
+    'fd_send':       {'group': 'ptt',   'actor': 'fromto',  'kind': 'ue',       'metrics': ['code', 'fd_upload_ms', 'fd_delay_ms'], 'desc': 'MCData FD 파일 배포(TS 23.282 §7.4 + TS 24.282 §15.1.3) — IdMS 토큰 → POST /mcdata/fd(CSC 게이트 allow_fd·멤버십·크기) → FD SIGNALLING MESSAGE(FILEURL+Metadata). payload = 합성 크기(256k·2m) 또는 워커 샘플 파일, to 역할 = 1:1 · to 없음 = 그룹 FD(인스턴스 그룹 또는 group, 수신자는 multi 역할). 신원에 IdMS 로그인 필요'},
+    'fd_recv':       {'group': 'ptt',   'actor': 'who',     'kind': 'ue',       'metrics': ['fd_delay_ms', 'fd_download_ms', 'fd_download_pct'], 'desc': 'who 전원이 앞선 fd_send 의 FD SIGNALLING 을 받을 때까지(단계 진입 전 도착도 인정) → payload download(기본)이면 각자 FILEURL 을 내려받아 크기 대조(fd_download_pct) · signal = 도착만. fd_delay_ms = MESSAGE 송신 → 도착'},
     'sds_recv':      {'group': 'ptt',   'actor': 'who',     'kind': 'ue',       'metrics': ['sds_delay_ms', 'sds_media_pct'], 'desc': 'who 전원이 앞선 sds_send 의 SDS 를 받을 때까지(단계 진입 전 도착도 인정) — sds_delay_ms = 송신 → 도착. media plane 배포(풀 msrp)·FILEURL 폴백 둘 다 도착으로 센다'},
     'expect':        {'group': 'ctl',   'actor': 'none',    'kind': None,       'metrics': ['ser_pct', 'scr_pct', 'isa_pct'], 'desc': '누계 지표 게이트'},
     'check':         {'group': 'ctl',   'actor': 'who',     'kind': 'ue',       'metrics': ['check_pct'], 'desc': '관측 정합 판정 — payload: conference_roster_visible|hidden(to = 로스터에서 찾을 역할) · conference_warning_138 · dialog_consistent(RFC 4235 NOTIFY 열). after_ms 뒤 판정, 틀리면 인스턴스 실패'},
@@ -828,6 +854,7 @@ METRIC_LABELS = {
     'floor_idle_ms': 'Floor idle 도달', 'floor_grant_pct': 'Floor 허가율', 'group_fanout_ms': '그룹 fan-out 완료',
     'affiliate_ms': 'affiliation PUBLISH 지연',
     'sds_delay_ms': 'SDS 지연', 'sds_disposition_pct': 'SDS disposition 률', 'sds_media_pct': 'SDS media plane(MSRP) 도착률', 'dtmf_rx_pct': 'DTMF 수신률',
+    'fd_upload_ms': 'FD 업로드(토큰 포함)', 'fd_delay_ms': 'FD SIGNALLING 지연', 'fd_download_ms': 'FD 다운로드', 'fd_download_pct': 'FD 다운로드 성공률',
     'q850_rx_pct': 'Q.850 Reason 수신률', 'early_media_pct': '183 early media 률', 'prack_pct': 'PRACK 률',
     'early_rtp_pct': 'early media RTP 도달률', 'join_tap_pct': 'Join 청취 leg SSRC 2개 도달률', 'video_pct': '영상 협상률(m=video 활성 answer)',
     'fork_alert_pct': '대표번호 포크 alert 률(그룹원 착신/기대)', 'listen_pct': 'PTT 청취 합류율(recvonly 200)',
@@ -855,6 +882,8 @@ METRIC_NAMES = (
     # PTT(TS 24.380 메시지 시각) — 요청→Granted · 요청→다른 참가자의 Taken · 큐 경유 요청→Granted · 해제→Idle, 그룹 INVITE→마지막 멤버 합류
     'floor_grant_ms', 'floor_taken_ms', 'floor_queue_ms', 'floor_idle_ms', 'floor_grant_pct', 'group_fanout_ms', 'affiliate_ms',
     'sds_delay_ms', 'sds_disposition_pct', 'sds_media_pct',
+    # MCData FD(TS 23.282 §7.4 HTTP 콘텐츠 서버) — 업로드(IdMS 토큰 포함) · FD SIGNALLING MESSAGE 송신→도착 · 다운로드 · 다운로드 성공(200 + 크기 일치)률
+    'fd_upload_ms', 'fd_delay_ms', 'fd_download_ms', 'fd_download_pct',
     # 피어 pbx/mgcf 축(D) — 비율은 발생기 관측(송신 대비 수신)
     'dtmf_rx_pct', 'q850_rx_pct', 'early_media_pct', 'prack_pct',
     # 미디어 평면 — 183+SDP 뒤 200 전에 발신자가 실제 RTP 를 받았는가(시그널링 early_media_pct 와 별개)
@@ -898,6 +927,7 @@ RATIO_METRICS = {
     'thig_pct': ('thig_via_ok', 'thig_tx'),          # 응답에 토큰화 Via 가 보존된 발신 / THIG Via 를 얹은 ibcf 발신 INVITE
     'sds_disposition_pct': ('sds_disposition_rx', 'sds_disposition_req'),   # 발신자에 닿은 SDS NOTIFICATION(delivered) / delivery 를 요청한 SDS
     'sds_media_pct': ('sds_media_rx', 'sds_rx'),                           # MSRP(media plane)로 도착한 SDS / 도착한 SDS 전부(FILEURL 폴백 포함)
+    'fd_download_pct': ('fd_dl_ok', 'fd_dl_tx'),                            # 200 + Metadata size 일치로 내려받은 FD / fd_recv 가 개시한 다운로드
     'check_pct': ('check_ok', 'check_tx'),           # check 단계 판정 통과 / 판정 수
 }
 
@@ -961,7 +991,8 @@ class Step(_Strict):
     media: Optional[Media] = None
     group: Optional[str] = Field(default=None, description='group_call — MCPTT 그룹 id 를 직접 지정(생략 = 인스턴스가 잡은 그룹, 곧 발신 멤버의 affiliation 그룹) · publish — affiliation 대상 그룹(생략 = 신원의 그룹) · sds_send/subscribe conference — 대상 그룹(생략 = 인스턴스 그룹)')
     payload: Optional[str] = Field(default=None, description='dtmf: 숫자열(0-9*#A-D) · reject: 응답 코드 · floor_request: 기대 결과 granted|denied|queued|any · '
-                                                                 'pickup: 피처코드(${var} 바인딩 가능) · subscribe: 이벤트 패키지(기본 dialog) · publish: affiliate|deaffiliate')
+                                                                 'pickup: 피처코드(${var} 바인딩 가능) · subscribe: 이벤트 패키지(기본 dialog) · publish: affiliate|deaffiliate · '
+                                                                 'fd_send: 파일 원천(합성 크기 256k|2m 또는 워커 샘플 파일 이름) · fd_recv: download(기본)|signal')
     cause: Optional[int] = Field(default=None, ge=1, le=127,
                                  description='bye/reject 의 Reason: Q.850;cause= (RFC 3326 — MGCF 종료 사유, 16=정상 34=회선 없음)')
     during: Optional[List[During]] = Field(default=None, description='media_hold 만 — 유지 구간 안 통화 중 동작(at_s 순)')
@@ -982,7 +1013,7 @@ class Step(_Strict):
 
     @model_validator(mode='after')
     def _actor(self):
-        if self.step in ('invite', 'refer', 'bye', 'sds_send', 'hold', 'resume', 'dtmf') and not (self.from_ or self.who):
+        if self.step in ('invite', 'refer', 'bye', 'sds_send', 'fd_send', 'hold', 'resume', 'dtmf') and not (self.from_ or self.who):
             raise ValueError(f'{self.step} 단계는 from 또는 who 가 필요하다')
         if self.step in ('pickup', 'replaces', 'join') and not self.from_:
             raise ValueError(f'{self.step} 단계는 from(발신 단말 역할)이 필요하다')
@@ -1003,7 +1034,7 @@ class Step(_Strict):
             if self.payload.startswith('conference_roster_') and not self.to:
                 raise ValueError('check conference_roster_* 는 to(로스터에서 찾을 역할)가 필요하다')
         if self.step in ('register', 'deregister', 'answer', 'reject', 'progress', 'subscribe', 'publish',
-                         'floor_request', 'floor_release', 'sds_recv', 'media_send', 'media_stop', 'check') and not self.who:
+                         'floor_request', 'floor_release', 'sds_recv', 'fd_recv', 'media_send', 'media_stop', 'check') and not self.who:
             raise ValueError(f'{self.step} 단계는 who 가 필요하다')
         if self.step in ('media_hold', 'wait') and self.seconds is None:
             raise ValueError(f'{self.step} 단계는 seconds 가 필요하다')
@@ -1015,6 +1046,13 @@ class Step(_Strict):
                 raise ValueError('sds_send 단계는 payload(SDS 본문)가 필요하다')
             if not self.from_:
                 raise ValueError('sds_send 단계는 from(발신 단말 역할)이 필요하다 — to 역할 = 1:1, to 없음 = 그룹 SDS(그룹 세션 또는 group)')
+        if self.step == 'fd_send':
+            if not self.from_:
+                raise ValueError('fd_send 단계는 from(발신 단말 역할)이 필요하다 — to 역할 = 1:1, to 없음 = 그룹 FD(그룹 세션 또는 group)')
+            if not self.payload or not (_FD_SIZE.match(self.payload) or _FD_FILE.match(self.payload)) or '..' in self.payload:
+                raise ValueError('fd_send 단계는 payload(파일 원천)가 필요하다 — 합성 크기(`65536`·`256k`·`2m`) 또는 워커 샘플 디렉터리의 파일 이름')
+        if self.step == 'fd_recv' and self.payload is not None and self.payload not in FD_RECV_MODES:
+            raise ValueError(f'fd_recv 의 payload 는 {list(FD_RECV_MODES)} 중 하나(생략 = download)')
         if self.disposition is not None and self.step != 'sds_send':
             raise ValueError('disposition 은 sds_send 에만 둔다')
         if self.plane is not None and self.step != 'sds_send':
@@ -1140,8 +1178,8 @@ class Scenario(_Strict):
                                      f"(RFC 4235 NOTIFY 로 대상 다이얼로그를 배운다) — {{ step: subscribe, who: [{s.from_}], to: {s.to} }}")
 
     def is_group_session(self) -> bool:
-        """인스턴스 = MCPTT 그룹 하나인 시나리오 — group_call 또는 to 없는 sds_send(그룹 SDS, 수신자 = multi 역할)."""
-        return any(s.step == 'group_call' or (s.step == 'sds_send' and not s.to and not s.group) for s in self.flow)
+        """인스턴스 = MCPTT 그룹 하나인 시나리오 — group_call 또는 to 없는 sds_send/fd_send(그룹 SDS·FD, 수신자 = multi 역할)."""
+        return any(s.step == 'group_call' or (s.step in ('sds_send', 'fd_send') and not s.to and not s.group) for s in self.flow)
 
     def multi_roles(self) -> List[str]:
         return [r for r, spec in self.roles.items() if spec.multi]
@@ -1165,7 +1203,7 @@ class Scenario(_Strict):
         guests = self.guest_roles()
         if not self.is_group_session():
             if multi:
-                raise ValueError(f'roles.{multi[0]}.multi 는 group_call(또는 그룹 SDS sds_send)이 있는 시나리오에만 둔다')
+                raise ValueError(f'roles.{multi[0]}.multi 는 group_call(또는 그룹 SDS/FD sds_send·fd_send)이 있는 시나리오에만 둔다')
             if guests:
                 raise ValueError(f'roles.{guests[0]}.member=false 는 group_call 이 있는 시나리오에만 둔다(그룹 밖 신원)')
             for i, s in enumerate(self.flow):
@@ -1278,6 +1316,16 @@ class Identity(_Strict):
     aka_k: Optional[str] = None
     aka_opc: Optional[str] = None
     ptt_group: Optional[str] = Field(default=None, description='service=ptt — 이 단말이 affiliation 하는 MCPTT 그룹 id(가상 단말 하나 = 그룹 하나)')
+    login: Optional[str] = Field(default=None, description='IdMS 로그인 id(users.login_id — SIP 자격과 별개, creds `login`/DB users) — MCData FD 의 토큰(POST/GET /mcdata/fd). '
+                                                            '비면 fd_send/fd_recv(download) 의 행위자가 될 수 없다(컴파일 오류)')
+    login_pw: Optional[str] = Field(default=None, description='IdMS 로그인 비밀번호(users.passwd, creds `loginPw`)')
+
+
+class TargetCsc(_Strict):
+    """풀이 닿는 CSC(subscriber 노드 api — IdMS `/idms/*` + MCData FD 콘텐츠 서버 `/mcdata/fd`, 같은 host:port). 컨트롤러가 토폴로지에서 파생."""
+    ip: str
+    port: int = Field(default=4430, ge=1, le=65535)
+    tls: bool = True
 
 
 class TrunkRegister(_Strict):
@@ -1328,6 +1376,8 @@ class PoolCreate(_Strict):
     media_agent: Optional[str] = Field(default=None, description='kind=ue — 미디어 전담 워커의 제어 URL(http://ip:port) — CRtpThread 원격 모드(RtpRemote.h)')
     msrp: bool = Field(default=False, description='kind=ue — MCData media plane 능력(Contact icsi-ref 에 mcdata.sds) — MSRP 배포 수신 대상')
     target_csp: TargetCsp = Field(description='풀이 닿는 SIP 서버 — 컨트롤러가 토폴로지 노드 참조에서 파생')
+    target_csc: Optional[TargetCsc] = Field(default=None, description='kind=ue — 대상 CSC(subscriber 노드 api) — MCData FD 의 IdMS 토큰·콘텐츠 서버. '
+                                                                       '토폴로지에 subscriber 노드가 있으면 파생(풀 subscriber 로 고른다), 없으면 fd_* 단계 불가')
     peer: Optional[WorkerPeer] = Field(default=None, description='kind=peer 일 때 프로파일·bind·신원 범위')
     trunk_register: Optional[TrunkRegister] = Field(default=None, description='kind=peer(pbx) 트렁크 REGISTER 계정 — 비밀 해석 완료본')
 

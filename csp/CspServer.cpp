@@ -55,6 +55,7 @@ CCallDir gclsCallDir;
 #include "CspServerDefine.h"
 #include "CspServerVersion.h"
 #include "CspServiceMap.h"
+#include "CspTrunkRegistrar.h"
 #include "CspUser.h"
 #include "DbManager.h"
 #include "Directory.h"
@@ -551,6 +552,8 @@ int ServiceMain() {
 
         // RouteSet 헬스체크 — OPTIONS 프로브 송신·미응답 실패 처리 (sip_service_model.md §3, A-COM-003)
         gclsRouteHealth.Tick( (long)time( NULL ) );
+        // 등록형 트렁크 바인딩 — 만료 회수·미등록 Route dead (sip_service_model.md §2-3, A-COM-003)
+        gclsTrunkRegistrar.Tick( (long)time( NULL ) );
 
         if ( iSecond % 10 == 0 ) {
             gclsNonceMap.DeleteTimeout( 1000 );

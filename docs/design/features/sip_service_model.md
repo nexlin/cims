@@ -112,6 +112,7 @@ CSP 가 수신하는 bind 포트. `edge` 는 **인터페이스 분류**다 — p
 | `ip`, `port`, `protocol` | transport |
 | `remote_domain` | SIP URI host (outgoing Request-URI/To 의 host 로 사용) |
 | `srv_lookup`, `dns_fallback` | 고급 transport 옵션(예약) |
+| `transcode_codecs` | 가입자→이 피어 오퍼에 CSP 가 끼워 넣는 코덱 목록(예 `["PCMA","PCMU"]` — IP-PBX 의 G.711 필수 코덱, SIPconnect 2.0). 피어가 그 코덱으로 답하고 가입자 오퍼에 없었으면 CMP 가 피어 leg 를 AMR-WB 와 변환한다([../modules/cmp.md](../modules/cmp.md) §11 — 코덱 삽입 모델, TS 29.162). 비면 삽입 없음. 피어→가입자 오퍼에는 서비스 코덱(AMR-WB)이 항상 삽입된다 |
 | `tls_verify` | `protocol=TLS` 피어로 **나가는** 연결에서 서버 인증서를 체인 검증한다(앵커 = TLS primary LocalNode 의 `tls_ca_path`, 비면 시스템 저장소 — 호스트명(SAN)은 대조하지 않는다, IP 로 붙는 NNI 관례). 상호인증의 클라이언트 쪽은 설정이 없다 — 피어가 요구하면 CSP 는 **자기 노드 인증서**(TLS primary LocalNode 의 cert/key)를 제시한다(TS 33.310 NDS/IP, 노드 인증서 한 장이 양쪽 역할). psip 은 목적지별 정책(`CSipTlsPeerPolicy`)으로 이를 연결 단위에 적용한다 |
 
 ### 2-3. Route — (LocalNode, RemoteNode) unique
@@ -122,9 +123,22 @@ LN 과 RN 을 묶은 실제 연결. auth 및 outbound 파라미터는 전부 여
 |---|---|
 | `local_node_ref`, `remote_node_ref` | 필수. pair unique. |
 | `outbound_proxy_ip`, `outbound_proxy_port` | RN 앞에 proxy 가 있을 때 |
-| `register_to_remote`, `register_expires` | trunk REGISTER 가 필요한 경우. **런타임 미구현** — 값만 보관하며 REGISTER 를 보내지 않는다 (§9) |
-| `auth_user`, `auth_password`, `auth_realm` | REGISTER/challenge 대응용 |
-| `inbound_auth` | 이 Route 의 RemoteNode 에서 **들어온** 요청의 인증 — `none`(기본, 신뢰 피어: Digest 없음, IBCF·고정 IP 트렁크) / `digest`(가입자 인증 흐름 — 등록형 트렁크, 트렁크 계정은 §9) |
+| `register_to_remote` | CSP 가 피어로 REGISTER 를 **보내는** 발신 등록. **런타임 미구현** — 값만 보관한다 (§9) |
+| `register_expires` | 등록형 트렁크(아래 `inbound_auth=digest`)의 REGISTER 에 Expires 가 없을 때 부여하는 수명(기본 3600). 발신 등록의 수명 자리도 같다 |
+| `auth_user`, `auth_ha1` \| `auth_password`, `auth_realm` | 트렁크 계정 — `inbound_auth=digest` 와 함께 두면 **등록형 트렁크 계정**(아래). `auth_ha1` = MD5(auth_user:auth_realm:password) 가 있으면 평문 대신 그것으로 검증한다([sip_access_security.md](sip_access_security.md) §4.5 H(A1) SoT). `auth_realm` 이 비면 challenge realm = Request-URI host 의 서비스 realm |
+| `inbound_auth` | 이 Route 의 RemoteNode 에서 **들어온** 요청의 인증 — `none`(기본, 신뢰 피어: Digest 없음, IBCF·고정 IP 트렁크) / `digest`(**등록형 트렁크**, SIPconnect 2.0 §8 등록 모드 — 아래) |
+
+**등록형 트렁크 계정**(`inbound_auth=digest` + `auth_user`, `CCspTrunkRegistrar`) — IP-PBX 계정 하나가 DID 범위를 대표하고, PBX 가 CSP 접속점에 Digest
+REGISTER 한다(개별 DID 등록·RFC 6140 GIN 은 받지 않는다). CSCF 의 가입자 REGISTER 흐름 **앞에서** To 사용자부가 어떤 enabled Route 의 `auth_user` 와
+같으면(받은 접속점의 Route 우선) 그 계정의 REGISTER 로 가려 받는다: From ≠ To 는 403(제3자 등록 없음) → Digest 401(realm = `auth_realm`, 가입자와 같은
+nonce 풀) → H(A1)(`auth_ha1` 우선, 없으면 `auth_password` 로 계산) 검증 → **바인딩** = REGISTER 의 소스 ip:port/transport + 받은 접속점(RFC 3261 §18.2.1
+received/rport latch — NAT 뒤 PBX 도 닿는다, Contact 원문은 200 에코·표시용), 수명 = Expires(없으면 `register_expires`), Expires 0 = 해제, `Min-Expires` 423.
+바인딩의 효과: ① **Route 상태** — 바인딩 있음 = alive, 없음(미등록·만료·해제·기동 직후) = dead(`CCspRouteMap::SetAlive`) → RouteSet 선택에서 빠지고
+A-COM-003(mo `<node>/csp/peer/<remote_node>`) 을 연다/닫는다, 헬스체크 OPTIONS 는 바인딩 주소로 나간다 ② **발신 다음 홉** — 그 Route 를 고른 호의
+B-leg 목적지는 RemoteNode 의 `ip:port` 가 아니라 바인딩 주소(PendingRoute) ③ **인바운드 식별·신뢰** — 바인딩 소스에서 온 요청은 그 Route 의 것이고
+(`FindInbound` 폴백 `FindBySource` — RemoteNode.ip 가 동적 `0.0.0.0` 이거나 NAT 뒤라도 식별된다) 등록으로 인증된 것으로 신뢰한다(UE 등록 바인딩과 같은
+규칙, Digest 재챌린지 없음). 등록형 트렁크의 RemoteNode 는 고정 주소(피어링 접속점의 첫 REGISTER 는 Route 식별이 있어야 403 을 피한다) 또는 동적
+(`0.0.0.0`, access 접속점으로 등록)으로 둔다. 계측기 pbx 풀 `register` 가 이 형태를 시드한다([test_instrument.md](test_instrument.md) §3.2).
 | `max_concurrent_calls`, `cps_limit` | 용량 제한 |
 
 Route 는 **양방향** 연결 정보다. 발신은 RoutingPolicy → RouteSet → Route 로 고르고, 인바운드는 (수신 LocalNode, 소스 IP, transport) 로 Route 를
@@ -394,7 +408,7 @@ From URI 단독 매칭은 **fallback 으로 강등**. IMS 표준을 참고한 �
 **피어 인증 — 신뢰의 근거는 Route 다.** `RecvRequest` 가 (수신 LocalNode, 소스 IP[:UDP 소스 포트], transport) 로 **인바운드 Route** 를 식별한다
 (`CCspRouteMap::FindInbound`, §2-3). 식별되면 그 요청은 설정된 피어(RemoteNode)의 것이고, `inbound_auth=none` 이면
 `EventIncomingRequestAuth` 가 Digest 챌린지를 하지 않는다(TS 24.229 §5.10 IBCF · TS 29.165 II-NNI — 상대는 신뢰 피어 망이지 가입자가 아니다).
-`inbound_auth=digest` 면 §3 가입자 흐름이다. 접속점 `edge` 는 신뢰를 정하지 않는다 — 피어가 access 접속점으로 와도 Route 가 있으면 피어이고,
+`inbound_auth=digest`(등록형 트렁크, §2-3) 면 그 Route 의 **트렁크 바인딩 소스**에서 온 요청만 신뢰하고(등록으로 인증), 그 외는 §3 가입자 흐름이다. 접속점 `edge` 는 신뢰를 정하지 않는다 — 피어가 access 접속점으로 와도 Route 가 있으면 피어이고,
 `edge=peering` 접속점에 Route 없는 소스가 오면 RecvRequest 가 403 을 낸다(NNI 는 알려진 상대와만, TS 33.210 NDS/IP 전제). 라우팅 정책이
 트렁크를 고른 호라는 이유로 인증을 건너뛰지 않는다(미등록 발신자의 무인증 트렁크 발신 = toll fraud 구멍이었다) — 발신 UE 는 등록 바인딩으로
 인증된다. ACL 은 같은 식별 결과로 `scope=route/route_set` 을 대조한다(§2-8).
@@ -528,10 +542,9 @@ AccessServices:
 
 | 항목 | 상태 |
 |------|------|
-| `routes.register_to_remote` / `register_expires` | 트렁크 REGISTER 워커 미구현 — 값만 보관 |
+| `routes.register_to_remote` | CSP 발신 트렁크 REGISTER 워커 미구현 — 값만 보관(수신 측 등록형 트렁크 계정은 §2-3 에 구현) |
 | Rule field `dst_ip` / `p_asserted_identity` / `via_host` | `MessageCtx` 에 채워지지 않아 항상 빈 값. 수신 인터페이스 구분은 ACL `scope=local_node` 로 대체 |
 | `routing_policies.target_type=access_service` | 매칭·로그까지만. 이후는 기존 TAS/B2BUA 경로가 처리 |
-| 트렁크 계정(`routes.inbound_auth=digest` 의 REGISTER 상대) | 등록형 트렁크(SIPconnect 등록 모드)가 REGISTER 하면 가입자 조회에서 403 — 계정 하나가 DID 범위를 대표하는 트렁크 계정 모델이 없다. `inbound_auth=digest` 는 인증 흐름만 가입자 쪽으로 보낸다 |
 | 인바운드 Route 식별의 RemoteNode 호스트명 | `FindInbound` 는 RemoteNode.ip 를 IP 리터럴로 비교한다 — 호스트명 RemoteNode 의 피어는 인바운드에서 식별되지 않는다(발신은 된다) |
 | `routing_policies.transform_rule_set_refs` (메시지 변환) | 예약 필드 |
 | RuleSet 중첩 (tree AND/OR/NOT) | 2차 |

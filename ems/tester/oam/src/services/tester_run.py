@@ -832,7 +832,7 @@ class RunDriver(threading.Thread):
             out['real_rtp_loss_pct'] = 100.0 * c.get('real_rtp_lost', 0) / (c.get('real_rtp_rx', 0) + c.get('real_rtp_lost', 0))
         for name in ('rrd_ms', 'srd_ms', 'sdd_ms', 'jitter_ms', 'sdt_s',
                      'group_fanout_ms', 'floor_grant_ms', 'floor_taken_ms', 'floor_queue_ms', 'floor_idle_ms', 'affiliate_ms',
-                     'real_srd_ms', 'real_jitter_ms', 'sds_delay_ms'):
+                     'real_srd_ms', 'real_jitter_ms', 'sds_delay_ms', 'fd_upload_ms', 'fd_delay_ms', 'fd_download_ms'):
             h = t.get(name)
             if h:
                 out[f'{name}_p50'] = h.get('p50')

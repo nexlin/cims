@@ -25,6 +25,7 @@
 #include <string>
 
 #include "MediaSdes.h"
+#include "RelayCodec.h"
 #include "SipMutex.h"
 
 class CMonitorString;
@@ -76,6 +77,11 @@ public:
      *  (media_security.md §5.2). 양 leg entry 에 동일하게 기록된다(SetRelaySdesLeg). */
     RelaySdesLeg m_clsSdesLeg[2];
 
+    /** relay leg 별 오디오 코덱 상태 — [0]=수신(peer0), [1]=발신(peer1). 오퍼 코덱 목록(코덱 삽입 뒤)·telephone-event
+     * PT·answer 뒤 협상 코덱· 변환 여부(cmp.md §11 — 다르면 CMP media_codec, A-leg answer/re-offer 는 자기 코덱으로
+     * 재작성). 양 leg entry 에 동일 기록. */
+    RelayCodec::LegCodecs m_clsCodecLeg[2];
+
     /** 마지막 SIP activity 시간 (통화 생성/갱신 시 기록) */
     time_t m_iLastActivityTime;
 
@@ -111,6 +117,8 @@ public:
 
     /** relay leg(iLeg: 0=수신/peer0, 1=발신/peer1)의 SDES 상태를 양 leg entry 에 기록. */
     void SetRelaySdesLeg( const char *pszCallId, int iLeg, const RelaySdesLeg &clsLeg );
+    /** relay leg(iLeg) 의 코덱 상태를 양 leg entry 에 기록 (RelayCodec, cmp.md §11). */
+    void SetRelayCodecLeg( const char *pszCallId, int iLeg, const RelayCodec::LegCodecs &clsLeg );
     bool Update( const char *pszCallId, const char *pszPeerCallId );
     bool Select( const char *pszCallId, std::string &strCallId );
     bool Select( const char *pszCallId, CCallInfo &clsCallInfo );

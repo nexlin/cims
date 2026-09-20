@@ -496,7 +496,7 @@
             }
           ],
           "default": null,
-          "description": "dtmf: 숫자열(0-9*#A-D) · reject: 응답 코드 · floor_request: 기대 결과 granted|denied|queued|any · pickup: 피처코드(${var} 바인딩 가능) · subscribe: 이벤트 패키지(기본 dialog) · publish: affiliate|deaffiliate",
+          "description": "dtmf: 숫자열(0-9*#A-D) · reject: 응답 코드 · floor_request: 기대 결과 granted|denied|queued|any · pickup: 피처코드(${var} 바인딩 가능) · subscribe: 이벤트 패키지(기본 dialog) · publish: affiliate|deaffiliate · fd_send: 파일 원천(합성 크기 256k|2m 또는 워커 샘플 파일 이름) · fd_recv: download(기본)|signal",
           "title": "Payload"
         },
         "plane": {
@@ -568,6 +568,8 @@
             "floor_release",
             "sds_send",
             "sds_recv",
+            "fd_send",
+            "fd_recv",
             "media_hold",
             "media_send",
             "media_stop",

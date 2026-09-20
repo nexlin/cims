@@ -1,0 +1,12 @@
+# MCData 1:1 FD(TS 24.282 §15.1.3 one-to-one-fd) — a 가 파일을 CSC 콘텐츠 서버에 올리고(POST /mcdata/fd — 그룹 없음: allow_fd 게이트 없이 토큰·scope·크기만)
+#   FD SIGNALLING MESSAGE 를 b 에 낸다 → b 가 FILEURL 을 내려받아 크기를 대조한다. 두 신원 모두 IdMS 로그인(creds login/loginPw)이 필요하다.
+id: MCDATA-FD-1TO1
+title: MCData 1:1 FD — 업로드 · FD SIGNALLING · 다운로드
+tags: [mcdata, fd]
+roles:
+  a: { pool: ptt_ue }
+  b: { pool: ptt_ue, disjoint_from: a }
+flow:
+  - { step: register, who: [a, b], expect: { code: 200 } }
+  - { step: fd_send, from: a, to: b, payload: 64k, expect: { code: 200 } }
+  - { step: fd_recv, who: [b], expect: { fd_delay_ms: { p95: 2000 }, fd_download_pct: 100 } }

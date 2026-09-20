@@ -147,6 +147,10 @@ MCDATA-AS 게이트 (모두 controlling function 검사, TS 24.282 §9.2.2):
   보관 레코드에 file_* 필드를 남긴다. 파일 크기 상한의 실효 강제 지점은 CSC 업로드 단.
 - 수신 앱: 그룹문서 `max-data-size-auto-recv` 이내면 자동 다운로드, 초과분은 말풍선 탭으로
   수동 다운로드 → FileProvider ACTION_VIEW 로 열기 (`files/mcdata/`).
+- **시험(계측기)**: libcsim `SimSession::SendFd`(IdMS 토큰 → `POST /mcdata/fd` → FD SIGNALLING MESSAGE)·`DownloadFd`(`GET`, Bearer) +
+  `McDataSds::buildGroupFd|buildOneToOneFd`/`parse`(FILEURL·Metadata) — 워커 단계 `fd_send`/`fd_recv`, 지표 `fd_upload_ms`·`fd_delay_ms`·
+  `fd_download_ms`·`fd_download_pct`, 동봉 `MCDATA-FD-GROUP`·`MCDATA-FD-1TO1`([test_instrument.md](test_instrument.md) §3.1 ⑪″). 신원의
+  IdMS 로그인은 creds `login/loginPw`(`cims-tester creds-from-db` 가 `users.login_id/passwd` 를 싣는다).
 
 ## 4.7 대용량 SDS — media plane (MSRP, TS 24.282 §9.2.3)
 

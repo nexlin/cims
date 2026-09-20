@@ -10,6 +10,7 @@
 #include "PRtpSocket.h"
 #include "PMediaCrypto.h"
 #include "PRtpTap.h"
+#include "PTranscoder.h"
 
 class PSyncRtpRecorder;
 
@@ -48,6 +49,15 @@ public:
     //   송신에 쓰는 PT(TE 분류 기준). 규격 준수 단말은 비대칭 PT 통과 가능 — 보험 필드.
     //   codec: 협상 오디오 코덱(remote_codec, 예 "AMR-WB/16000") — 녹취 세그먼트 메타용.
     void setPeerPt(int peerIdx, int pt, int srcPt, int tePt, int srcTePt, const std::string& codec = "");
+
+    // leg 별 코덱 선언(RELAY_ADD/MODIFY media_codec — cmp_media_api.md §6.6) → 양 leg 가 다르면 피어 leg 트랜스코딩(cmp.md §11).
+    //   updateTranscode: 선언 상태에 맞춰 변환 유닛을 붙이거나(둘 다 유효·다름·지원 쌍) 떼거나(같음·미선언) 갱신한다.
+    //   반환 false = 다르지만 지원하지 않는 쌍(err). 슬롯 계수는 PCmpServer 가 transcoding() 으로 센다.
+    void setPeerCodec(int peerIdx, const PCodecDesc& desc);
+    bool updateTranscode(std::string& err);
+    bool transcoding() const { return _xcode[0] != nullptr; }
+    std::string transcodeLabel() const;   // "AMR-WB/16000<->PCMA/8000" (관측·flow 로그)
+    const PCodecDesc& peerCodec(int peerIdx) const { return _legs[peerIdx & 1].codecDesc; }
 
     // leg 미디어 SRTP 컨텍스트 설정/재키잉 (RELAY_ADD/MODIFY media_crypto[_video] —
     //   media_security.md §6.2~6.3). rx*=UE 상향(UE 의 a=crypto 선언), tx*=CMP 하향
@@ -131,6 +141,7 @@ private:
         int tePtOut = 0;
         int srcTePt = 0;
         std::string codec;              // 협상 오디오 코덱 (remote_codec) — 녹취 세그먼트 메타용
+        PCodecDesc codecDesc;           // media_codec 선언(트랜스코딩 판정 — 비면 PT-blind relay)
 
         // NAT 목적지 latch (제어평면이 nat 지정한 leg 만 — ue_nat_traversal.md §5)
         bool nat = false;
@@ -172,6 +183,10 @@ private:
     time_t      _lastSrtpWarn = 0;
     Leg         _legs[2];
     std::vector<PRtpTap*> _taps;   // 청취 leg 참조 (송신 fan-out 대상, _mutex 보호)
+    // 피어 leg 트랜스코더 — [i] = peer i 수신 → peer 1-i 송신 방향 (둘 다 있거나 둘 다 없다)
+    std::unique_ptr<PTranscoder> _xcode[2];
+    long        _xcodeDrop = 0;    // 변환 실패(페이로드 형식) 폐기 누적
+    void _applyTranscodeRecorderMeta();   // 녹취 트랙 메타 — G.711 leg 트랙은 변환 뒤의 AMR-WB 로 기록된다
 
     // 녹취
     PSyncRtpRecorder* _recorder = nullptr;

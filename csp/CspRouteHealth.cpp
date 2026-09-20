@@ -7,6 +7,7 @@
 #include "CspRemoteNodeMap.h"
 #include "CspRouteMap.h"
 #include "CspRouteSetMap.h"
+#include "CspTrunkRegistrar.h"
 #include "FmReporter.h"
 #include "Log.h"
 #include "SipMessage.h"
@@ -62,6 +63,16 @@ bool CCspRouteHealth::_sendProbe( const std::string &routeName, const std::strin
     RouteConfig rc = gclsRouteMap.GetByName( routeName );
     if ( !rc.IsValid() || !rc.enabled ) return false;
     RemoteNodeInfo rn = gclsRemoteNodeMap.GetByName( rc.remote_node_ref );
+    if ( rc.IsTrunkAccount() ) {
+        // 등록형 트렁크 — 바인딩이 없으면 프로브할 곳이 없다(CCspTrunkRegistrar 가 dead 로 둔다). 있으면 바인딩 주소로
+        TrunkBinding tb;
+        if ( !gclsTrunkRegistrar.Get( rc.name, tb ) ) return false;
+        rn.name = rc.remote_node_ref;
+        rn.enabled = true;
+        rn.ip = tb.ip;
+        rn.port = tb.port;
+        rn.protocol = tb.transport;
+    }
     if ( !rn.IsValid() || !rn.enabled || rn.ip.empty() || rn.port <= 0 ) return false;
 
     // 자기 주소 = Route 의 local_node (발신 leg 와 같은 규칙 — EventIncomingCall 의 T3). 없으면 primary.

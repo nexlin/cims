@@ -142,6 +142,11 @@ REGISTER 수신
       └─ 실패 → 401 Unauthorized (재도전)
 ```
 
+**등록형 트렁크 계정**(`CspTrunkRegistrar.h/.cpp`, [sip_service_model.md §2-3](../features/sip_service_model.md)) — 가입자 흐름 앞에서 To 가 어떤
+Route 의 `auth_user`(`inbound_auth=digest`)와 같은 REGISTER 를 가려 받는다: 같은 NonceMap 으로 Digest 401/검증(H(A1) = `auth_ha1` | `auth_password`),
+바인딩 = 요청 소스 주소 + 접속점, 수명 = Expires | `register_expires`, Expires 0 해제. 바인딩 유무 = Route alive/dead(`CCspRouteMap::SetAlive` →
+RouteSet 선택·A-COM-003), 발신 다음 홉·인바운드 식별(`FindBySource`)·요청 신뢰(`IsRegisteredSource`)가 바인딩을 따른다. 1초 틱 `Tick` 이 만료를 회수한다.
+
 **SIP 헤더 주입 (IMS 규격 준수):**
 
 REGISTER 200 OK 와 B2BUA 발신 INVITE 에 `P-Asserted-Identity`(`<sip:user@domain>`)를 주입한다. 발신 INVITE 의
@@ -361,6 +366,10 @@ if (gclsSipServerMap.SelectRoutePrefix(pszTo, clsSipServer, strTo)) {
   <IncomingRoute>1234=5678</IncomingRoute>  <!-- 역방향 매핑 -->
 </SipServer>
 ```
+
+**피어 leg 코덱 삽입·트랜스코딩**(`RelayCodec.h/.cpp`, [cmp.md §11](cmp.md)) — B2BUA 오퍼에 피어→가입자면 서비스 코덱(AMR-WB)을, 가입자→피어면
+RemoteNode `transcode_codecs`(G.711)를 끼워 넣고, answer 때 leg 별 협상 코덱이 다르면 CMP `media_codec` 으로 변환 유닛을 붙이며 A 로 가는
+answer·re-offer 를 A 코덱으로 재작성한다. 공통도 변환 쌍도 없거나 CMP 슬롯이 없으면 488.
 
 ### 3.6 CCmpClient
 
@@ -877,6 +886,8 @@ class CCallInfo {                  // CallMap value (key = Call-ID)
     std::string m_strRelaySesId;      // flow 상관 sesid
     std::string m_strRelayLocalIp;    // CMP relay IP (answer MODIFY/SDP)
     std::string m_strRelayCaller, m_strRelayCallee;
+    RelaySdesLeg m_clsSdesLeg[2];          // leg 별 미디어 SRTP(SDES) 상태 (media_security.md §5.2)
+    RelayCodec::LegCodecs m_clsCodecLeg[2]; // leg 별 오디오 코덱 — 오퍼 목록(코덱 삽입 뒤)·TE PT·협상 코덱·변환 여부 (cmp.md §11)
     bool m_bEstablished; time_t m_iLastActivityTime;
 };
 ```

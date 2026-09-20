@@ -1,0 +1,16 @@
+# 가입자(AMR-WB) → IP-PBX(G.711) 트랜스코딩(cmp.md §11) — UE 는 서비스 코덱 AMR-WB 만 오퍼하고 CSP 가 PBX 오퍼에 RemoteNode
+#   transcode_codecs(계측기 시드 = PCMA,PCMU)를 끼워 넣는다 → PBX 가 PCMA 로 답하면 CSP 가 양 leg 에 media_codec 을 실어 CMP 변환 유닛
+#   (AMR-WB↔PCMA)을 붙이고 UE 에는 AMR-WB answer 를 낸다. 양쪽 RTP 손실 0·MOS 로 미디어가 실제로 흐르는지 본다(무음 relay 면 rtp 표본이 없다).
+#   CMP TranscodeSlots 소진이면 CSP 가 488 — expect.code 로 드러난다.
+id: TRUNK-PBX-TRANSCODE
+title: 가입자(AMR-WB) → IP-PBX(G.711) 트랜스코딩 relay
+tags: [trunk, pbx, transcode]
+roles:
+  caller: { pool: volte_ue }
+  pbx:    { pool: pbx_hq }
+flow:
+  - { step: register,   who: [caller], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: pbx, media: { audio: amr-wb } }
+  - { step: answer,     who: [pbx], after_ms: 800, expect: { code: 200, srd_ms: { p95: 2000 } } }
+  - { step: media_hold, seconds: 8, expect: { rtp_loss_pct: { max: 0.5 }, mos: { min: 3.0 } } }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }
