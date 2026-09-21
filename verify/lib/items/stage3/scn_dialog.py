@@ -25,7 +25,7 @@ import os
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 from ...common.cspsim import run_cspsim
-from ...common.tester import tester_config, tester_check, tester_role_identities
+from ...common.tester import tester_config, tester_check
 from ...common import db as _db
 from ...common.subscribers import MCPTT_DOMAIN
 from ._xfer_common import (
@@ -173,31 +173,13 @@ def _check_d5(ctx: VerifyContext) -> tuple:
 
 
 def _via_tester(ctx: VerifyContext, done) -> ItemResult:
-    """계측기 경로 — 계획의 역할 신원에 pickup_group 픽스처를 입히고 BLF 픽업(D1/D2)·그룹 밖 구독 403(D3)·미지 Event 489(D4)를 동봉 시나리오로."""
+    """계측기 경로 — BLF 픽업(D1/D2)·그룹 밖 구독 403(D3)·미지 Event 489(D4)를 동봉 시나리오로. 전화 그룹(감시 인가 규칙 1) 전제는 시나리오 `fixtures:` 가
+    선언하고 컨트롤러가 대상 CSC 관리 API 로 적용·복원한다. D5 는 cspsim."""
     cfg = tester_config()
-    ctx.w(f"- 경로: 계측기 @ {cfg['url']} · 토폴로지 {cfg['topology']} (D5 는 cspsim)")
-    try:
-        ids = tester_role_identities(ctx, "VOLTE-BLF-PICKUP", ht=4) or {}
-        ids_d = tester_role_identities(ctx, "VOLTE-BLF-DENIED") or {}
-        same = [u for r in ("caller", "callee", "picker") for u in ids.get(r) or []]
-        if not same:
-            raise RuntimeError("계획에 역할 신원이 없다")
-    except Exception as e:
-        ctx.w(f"- [FAIL] 계측기 계획 실패: {e}")
-        return done(ItemStatus.FAIL, f"계측기 계획 실패: {e}")
-    grp = "vfy-pg-tester"
-    checks = []
-    with PickupGroupFixture(ctx.dist_dir, ctx.sim_ip, {u: grp for u in same}) as fx:
-        ctx.w(f"- 그룹 축: {fx.axis}")
-        checks.append(tester_check(ctx, "D1/D2 dialog NOTIFY → Replaces 재고정", "VOLTE-BLF-PICKUP", f"{_RID}/D1", ht=4))
-    if not fx.active:
-        checks.append(("D3 그룹 밖 dialog 구독 403", None, "pickup_group 컬럼 부재 — org 폴백 축에서는 그룹 경계 검사 불가"))
-    else:
-        other = {u: grp for u in ids_d.get("callee") or []}
-        other.update({u: grp + "-x" for u in ids_d.get("watcher") or []})
-        with PickupGroupFixture(ctx.dist_dir, ctx.sim_ip, other):
-            checks.append(tester_check(ctx, "D3 그룹 밖 dialog 구독 403", "VOLTE-BLF-DENIED", f"{_RID}/D3"))
-    checks.append(tester_check(ctx, "D4 미지 Event 489 (대조 dialog 자기감시 200)", "VOLTE-SUBSCRIBE-BAD-EVENT", f"{_RID}/D4"))
-    checks.append(_check_d5(ctx))
+    ctx.w(f"- 경로: 계측기 @ {cfg['url']} · 토폴로지 {cfg['topology']} (D5 는 cspsim) — 전화 그룹은 시나리오 fixtures(대상 CSC 관리 API)")
+    checks = [tester_check(ctx, "D1/D2 dialog NOTIFY → Replaces 재고정", "VOLTE-BLF-PICKUP", f"{_RID}/D1", ht=4),
+              tester_check(ctx, "D3 그룹 밖 dialog 구독 403", "VOLTE-BLF-DENIED", f"{_RID}/D3"),
+              tester_check(ctx, "D4 미지 Event 489 (대조 dialog 자기감시 200)", "VOLTE-SUBSCRIBE-BAD-EVENT", f"{_RID}/D4"),
+              _check_d5(ctx)]
     all_ok = emit_checks(ctx, checks)
-    return done(ItemStatus.PASS if all_ok else ItemStatus.FAIL, f"axis={fx.axis}\n" + fmt_checks(checks))
+    return done(ItemStatus.PASS if all_ok else ItemStatus.FAIL, fmt_checks(checks))

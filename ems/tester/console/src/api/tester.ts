@@ -62,6 +62,8 @@ export interface ScenarioDoc {
   roles?: Record<string, { pool: string; disjoint_from?: string; count?: number; multi?: boolean; member?: boolean }>
   flow?: ScenarioStep[]
   target_evidence?: { kind: string; min?: number; max?: number; code?: string; proc?: string }[]
+  /** 시험 픽스처 — 키 = 이름, 값 = kind(phone_group|role|subscriber|access_service) 별 선언. run 직전 대상 CSC 관리 API 로 적용, 끝나면 복원 */
+  fixtures?: Record<string, Record<string, unknown> & { kind: string }>
 }
 
 export interface ProfileRow {
@@ -352,6 +354,8 @@ export interface PlanResult {
   peer_pools?: string[]; pinned?: string | null
   samples?: Record<string, Record<string, string>>; media?: { modes: string[]; uses_rtp: boolean }
   seed?: { collection: string; count: number; names: string[]; note?: string }[]
+  /** 픽스처 적용 계획(컴파일이 역할을 계획의 첫 신원으로 풀어 둔 것) */
+  fixtures?: ({ key: string; kind: string } & Record<string, unknown>)[]
   env?: { env: string; for: string }[]
   little?: { sdt_s: number; peak_rate: number; concurrent: number; rows: { rate: number; need: number; ok: boolean; short: string[] }[]; first_short_rate: number | null; recommend_max: number | null }
   estimate?: { duration_s: number; sdt_s: number; peak_rate: number; concurrent: number; model: string }

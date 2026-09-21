@@ -15,3 +15,5 @@ flow:
   - { step: pickup,     from: picker, to: "${pilot}", payload: "${pickup_code}", expect: { code: 200 } }
   - { step: media_hold, seconds: "${ht}", expect: { rtp_loss_pct: { max: 1 } } }
   - { step: bye,        from: caller }
+fixtures:                              # 그룹원 전원(memberB·memberC·picker)이 같은 전화 그룹 — picker 는 그룹원이어야 <code><pilot> 픽업이 된다
+  pg: { kind: phone_group, pilot: "${pilot}", members: [memberB, memberC, picker] }

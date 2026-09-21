@@ -474,7 +474,33 @@ target_evidence:                    # 대상 측 증거 (선택 — 기능 시�
   - { kind: log_errors, max: 0 }
   - { kind: rss_growth_mb, proc: csp, max: 20 }   # 소크 누수 판정 — 호스트 SSH 관측의 프로세스 RSS 처음↔끝 차(MB). proc = "host/proc" 또는 이름(비면 최댓값)
   - { kind: fd_growth, proc: cmp, max: 20 }       # 열린 fd 수 차(소켓·포트 누수). soak 프로파일과 짝 — VOLTE-CALL-SOAK-LEAK
+fixtures:                           # 시험 픽스처 (선택) — 시나리오의 전제인 운영 데이터. run 직전 대상의 운영 프로비저닝 경로로 적용·확인, run 뒤 복원
+  pg:   { kind: phone_group, pilot: "${pilot}", members: [memberB, memberC], alert_mode: parallel, no_answer_sec: 8, overflow: overflow }
+  mon:  { kind: role, monitor_call: listed, monitor_targets: [pg], assign: [monitor] }
+  lsn:  { kind: role, ptt_listen: listed, ptt_targets: ["${group}"], listen_visibility: hidden, assign: [monitor] }
+  nox:  { kind: access_service, from_role: transferor, set: { transfer_allowed: false } }
+  line: { kind: subscriber, roles: [transferor], service_ref: nox }
 ```
+
+- **시험 픽스처 `fixtures`** — 전화 그룹(픽업 그룹 + 대표번호)·역할(감청·청취 범위)·가입 서비스 소속·접속서비스 변종은 **운영 데이터**다. 상용에서는 운영자가
+  콘솔·관제 앱 → CSC 관리 API 로 만들고 CSC 가 단일 쓰기 주체로 DB 에 쓰고 CSP 에 통지한다([dispatch_center.md](dispatch_center.md) §8,
+  [sip_access_security.md](sip_access_security.md) P1). 계측기도 **같은 경로만** 쓴다 — 시나리오가 `fixtures:` 로 자기 전제를 선언하고, 컨트롤러
+  (`services/tester_fixtures.py`)가 run 직전(풀 생성 = REGISTER 앞 — 픽업 축은 다음 등록부터 반영)에 대상 **oam 노드 게이트웨이 경유 CSC 관리 API**
+  (`/api/v1/phone-groups`·`/members`, `/api/v1/roles`·`/monitor-targets`·`/ptt-targets`·`/assignments`, `/api/v1/users/{person}/{kind}/{msisdn}`)로 적용하고
+  읽어서 확인한 뒤 run 을 시작, 끝나면 **역순으로 복원**(이동한 멤버는 종전 그룹으로, 배정은 종전 역할로, service_ref 원복, 만든 그룹·역할·서비스 삭제).
+  DB 직접 쓰기·CSP 내부 통지는 없다. 종류: `phone_group`(members·overflow = 역할 이름 → 계획이 그 역할에 배정한 **첫 신원**(단발 첫 인스턴스), `pilot` =
+  번호 리터럴 또는 `${var}` — 바인딩이 없으면 컨트롤러가 `7<첫 멤버 끝 3자리>0` 을 만들어 그 바인딩에 넣으므로 단계 `to: "${pilot}"` 과 짝, `alert_mode`·
+  `no_answer_sec`·`service_ref`(비면 첫 멤버의 현 서비스)) · `role`(`assign` 역할의 person 에 배정, `monitor_call`/`ptt_listen` none|own|listed|all,
+  `monitor_targets` = phone_group 픽스처 키, `ptt_targets` = 그룹 id 또는 `${group}`(그룹 세션의 첫 그룹), `listen_visibility` hidden|visible|`${var}`,
+  `history_read`; `ptt_listen≠none` 이면 CSC 가 배정자의 `allow_ambient_listening` 을 동기한다) · `subscriber`(`roles` 회선의 `service_ref` 를 바꾼다 —
+  값은 access_service 픽스처 키 또는 대상에 있는 서비스명) · `access_service`(`from_role` 첫 신원의 현 서비스 레코드를 복제해 `set` 필드를 바꾼 변종을 대상
+  CSP 컬렉션 `access_services` 에 태그 `cims-tester` 로 넣는다 — 피어 시드와 같은 OAM 컬렉션 API·SIGUSR1 reload). 적용 순서 = access_service →
+  phone_group → role → subscriber. 규칙: 키 `[a-z][a-z0-9_]{0,31}` → id `pg-tester-<키>`·`role-tester-<키>`·`tester-svc-<키>`, 같은 키의 잔재(이전 run
+  중단)는 적용 전에 지우고 노트에, 부분 실패는 그 자리에서 되돌리고 run 은 error, 한 역할은 전화 그룹 하나에만, 전화 그룹 멤버는 전화 회선(volte/voip)
+  풀, 픽스처가 있는 시나리오는 `kind=cims` 대상 + oam 노드 필요(컴파일 게이트). 계획 미리보기 `fixtures[]`(역할 → 신원으로 풀린 적용 계획)·run.json
+  `fixtures{applied, reverted, notes, errors}`·노트 `fixtures applied/reverted`. 동봉 S3 축 시나리오 17종(FA 5·PICKUP 4·BLF 2·MONITOR 1·XFER-DENIED 1·
+  PTT-LISTEN 4)이 이걸로 자기 전제를 갖는다 — 콘솔·CLI 단독 실행에도 픽스처가 따라간다. 시험 가입자는 전용 번호 대역(예 +8250000xxxx)에 둔다 —
+  픽스처는 그 안에서만 움직이고 CSC 감사에 계측기 계정으로 남는다.
 
 ```yaml
 # profiles/step_load.yaml — 부하 프로파일 (ETSI TS 186 008 step 방식)
@@ -546,7 +572,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
   `allow_ambient_listening`·범위(역할 `ptt_listen`)를 2단 인가하고 CMP `PTT_JOIN recv_only` 로 붙인다; 완료 = 청취자 자기 200, `listen_pct` =
   `listen_ok`/`listen_tx`, floor 요청은 `payload: denied` 기대, talker 발언 동안 수신만) · payload 없이 `expect.code: 403` = TS 24.379 비멤버 일반 INVITE
   거절. 세션이 이미 선 뒤의 `group_call` 은 fan-out 을 다시 기다리지 않는다(`group_join`). 계획 드라이런 `group_session.first_group`(단발 첫 인스턴스가 잡는
-  그룹 = usable 정렬 첫째)·`identities_by_role.<guest>`(그 그룹의 비멤버 후보, 배정 순)로 검증 픽스처가 자격·역할을 입힌다. 동봉 `ptt/group_listen`·
+  그룹 = usable 정렬 첫째)·`identities_by_role.<guest>`(그 그룹의 비멤버 후보, 배정 순) — 시나리오 `fixtures:` 의 role 이 `${group}` 으로 그 그룹을 대상으로 잡고 guest 첫 신원의 person 에 배정된다. 동봉 `ptt/group_listen`·
   `group_listen_denied`·`group_nonmember_denied`(S3-SCN-PTT-LISTEN L1~L4).
 - **역할의 풀** — `roles.X.pool` 은 토폴로지 풀 **이름 또는 `group`**(논리 풀 이름, §4). 워커마다 그 워커의 로컬 풀 하나로 해석된다
   (`tester_compile.resolve_roles`). 워커가 지원하지 않는 단계(`WORKER_STEPS` 밖)와 행위자 kind 게이트 위반(`STEP_VOCAB.kind` — progress/refer 는
@@ -746,7 +772,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 
 | 구분 | 역할 | 계측기 도입 후 |
 |---|---|---|
-| `cims-verify` S1~S6 | 상용 배포 게이트(정적·빌드·스모크·패키징·배포·통합) | 유지. S3/S6 의 **시나리오 항목**이 `cims.sh sim` 대신 `cims-tester run <scenario> --json` 을 호출하도록 단계적 이전 — 다리 = `verify/lib/common/tester.py` `run_tester_scenario`(환경변수 `CIMS_TESTER_URL`·`CIMS_TESTER_TOPOLOGY`·토큰/계정; 없으면 `None` → 그 항목의 cspsim 경로, 설정했는데 못 닿으면 FAIL). 항목 판정 = 계측기 verdict, 보고서에 run id·결과 화면 경로. 이전된 항목: `S6-SCN-VOLTE-VOICE` → `VOLTE-CALL-BASIC` · `S6-SCN-VOLTE-VIDEO` → `VOLTE-CALL-VIDEO`(m=video 협상 `video_pct`) · `S6-SCN-PTT-VIDEO` → `PTT-GROUP-CALL-VIDEO` · `S6-SCN-IBCF-TRUNK` → `TRUNK-IBCF-OUTBOUND`(토폴로지에 ibcf 피어 풀) · `S6-SCN-PTT-VOICE` → `PTT-GROUP-CALL-BASIC`(토폴로지에 `service: ptt` 풀 필요; 다리가 cspsim 헬퍼와 같은 상태 키 `S6_PTT_VOICE_T0/_TAIL/_RC` 를 남겨 `S6-MCPTT-FLOOR-GRANT` 의 CMP flow 창이 그대로 선다) · **S3 보조 서비스 항목**(검사 단위로 — 항목 안 checks 의 각 줄이 `[계측기 <시나리오>]` 로 경로를 밝힌다): `S3-SCN-XFER` X1/X2/X3 → `VOLTE-XFER-BLIND`/`-ATTENDED`/`-DENIED` · `S3-SCN-PICKUP` P1~P4 → `VOLTE-PICKUP-GROUP`/`-DIRECTED`/`-DIRECTED-DENIED`/`-GROUP-NOCALL`(바인딩 `pickup_code=**`) · `S3-SCN-DIALOG` D1/D2/D3/D4 → `VOLTE-BLF-PICKUP`/`VOLTE-BLF-DENIED`/`VOLTE-SUBSCRIBE-BAD-EVENT`(D5 미등록 SUBSCRIBE 는 워커 단말이 항상 등록하므로 cspsim) · `S3-SCN-MONITOR` M2 → `VOLTE-MONITOR-JOIN`(M8 회수 시점 훅·M5 인가 변형은 cspsim). · `S3-SCN-FA` F1/F3/F6 → `VOLTE-FA-{PARALLEL,OVERFLOW,SEQUENTIAL}`(대표번호 = `--bind pilot=`, 전화 그룹 픽스처를 계획의 memberB·memberC·overflow 신원에; 계측기는 fork 도달(`fork_alert_pct`)·확립·미디어만 판정하고 overflow/순차 **타이밍**·F5 PickUpFork 승계·F7 dialog 포크 NOTIFY 방향은 cspsim 경로에 남는다 — dev CSP 5060 필요, 계측기 모드에서는 SKIP) · `S3-SCN-PTT-LISTEN` L1/L2/L3/L3c/L4 → `PTT-GROUP-LISTEN`/`-LISTEN-DENIED`/`PTT-GROUP-NONMEMBER-DENIED`(청취자 = 계획 `identities_by_role.monitor[0]`, 그룹 = `group_session.first_group`; conference SUBSCRIBE 정합·로스터 노출은 cspsim). 대상 DB 픽스처(pickup_group·전화 그룹·역할·service_ref)는 계획 드라이런(`cims-tester plan --json` 의 `identities_by_role`)이 준 **계측기가 쓸 역할 신원**에 입힌다 — 다리 `tester_role_identities`·검사 단위 `tester_check`. 나머지는 시나리오가 확정되는 대로 같은 방식으로 옮긴다. 게이트 판정·불변성·보고서는 그대로 |
+| `cims-verify` S1~S6 | 상용 배포 게이트(정적·빌드·스모크·패키징·배포·통합) | 유지. S3/S6 의 **시나리오 항목**이 `cims.sh sim` 대신 `cims-tester run <scenario> --json` 을 호출하도록 단계적 이전 — 다리 = `verify/lib/common/tester.py` `run_tester_scenario`(환경변수 `CIMS_TESTER_URL`·`CIMS_TESTER_TOPOLOGY`·토큰/계정; 없으면 `None` → 그 항목의 cspsim 경로, 설정했는데 못 닿으면 FAIL). 항목 판정 = 계측기 verdict, 보고서에 run id·결과 화면 경로. 이전된 항목: `S6-SCN-VOLTE-VOICE` → `VOLTE-CALL-BASIC` · `S6-SCN-VOLTE-VIDEO` → `VOLTE-CALL-VIDEO`(m=video 협상 `video_pct`) · `S6-SCN-PTT-VIDEO` → `PTT-GROUP-CALL-VIDEO` · `S6-SCN-IBCF-TRUNK` → `TRUNK-IBCF-OUTBOUND`(토폴로지에 ibcf 피어 풀) · `S6-SCN-PTT-VOICE` → `PTT-GROUP-CALL-BASIC`(토폴로지에 `service: ptt` 풀 필요; 다리가 cspsim 헬퍼와 같은 상태 키 `S6_PTT_VOICE_T0/_TAIL/_RC` 를 남겨 `S6-MCPTT-FLOOR-GRANT` 의 CMP flow 창이 그대로 선다) · **S3 보조 서비스 항목**(검사 단위로 — 항목 안 checks 의 각 줄이 `[계측기 <시나리오>]` 로 경로를 밝힌다): `S3-SCN-XFER` X1/X2/X3 → `VOLTE-XFER-BLIND`/`-ATTENDED`/`-DENIED` · `S3-SCN-PICKUP` P1~P4 → `VOLTE-PICKUP-GROUP`/`-DIRECTED`/`-DIRECTED-DENIED`/`-GROUP-NOCALL`(바인딩 `pickup_code=**`) · `S3-SCN-DIALOG` D1/D2/D3/D4 → `VOLTE-BLF-PICKUP`/`VOLTE-BLF-DENIED`/`VOLTE-SUBSCRIBE-BAD-EVENT`(D5 미등록 SUBSCRIBE 는 워커 단말이 항상 등록하므로 cspsim) · `S3-SCN-MONITOR` M2 → `VOLTE-MONITOR-JOIN`(M8 회수 시점 훅·M5 인가 변형은 cspsim). · `S3-SCN-FA` F1/F3/F6/F7 → `VOLTE-FA-{PARALLEL,OVERFLOW,SEQUENTIAL,DIALOG-FORK}`(대표번호 `${pilot}` 과 전화 그룹은 시나리오 `fixtures:` — 컨트롤러가 만들어 적용; 계측기는 fork 도달(`fork_alert_pct`)·확립·미디어·dialog 정합을 판정하고 overflow/순차 **타이밍**·F5 PickUpFork 승계는 cspsim 경로에 남는다 — dev CSP 5060 필요, 계측기 모드에서는 SKIP) · `S3-SCN-PTT-LISTEN` L1/L2·L3/L4/L1b/L2b·L3b/L5 → `PTT-GROUP-LISTEN`/`-LISTEN-DENIED`/`PTT-GROUP-NONMEMBER-DENIED`/`-LISTEN-ROSTER`/`-LISTEN-CONF-DENIED`(청취 역할은 `fixtures:` role ptt_listen — 대상 `${group}` = 인스턴스가 잡은 첫 그룹, `${visibility}`·`${roster}` 바인딩으로 은닉/노출 두 번). 전화 그룹·픽업 그룹·역할·service_ref 전제는 **시나리오 `fixtures:`**(§4)가 선언하고 컨트롤러가 대상 CSC 관리 API 로 적용·복원한다 — 다리는 시나리오를 부르기만(`tester_check`), DB 직접 쓰기·CSP 통지는 계측기 경로에 없다(cspsim 잔여 검사만 개발 스택 한정 `_dispatch_common` 픽스처). 나머지는 시나리오가 확정되는 대로 같은 방식으로 옮긴다. 게이트 판정·불변성·보고서는 그대로 |
 | `oam-svc` `verification`(`/release/verify`) | 게이트 실행·이력 콘솔 | 유지. 동거 형태에서는 같은 base 뒤에 있으므로 검증 결과에 계측기 run 링크(`/test/runs/<id>`)를 남긴다(교차 참조). 두 모듈 사이 코드 의존은 없다 |
 | `cspsim` | 경량 UE·mock peer CLI | `libcsim` 위의 얇은 CLI 로 유지(기존 플래그 호환). 이전이 끝난 항목부터 의존 제거 |
 | `cimsue-cli` | 실스택 UE | 계측기 `real-ue` 풀(§3.3 — `drive` 모드, 워커 패키지 동봉)로 편입됨. 수동 명령형은 그대로 남는다 |

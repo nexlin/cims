@@ -16,3 +16,6 @@ flow:
   - { step: join,       from: monitor, to: callee, expect: { code: 200 } }
   - { step: media_hold, seconds: "${ht}", expect: { rtp_loss_pct: { max: 1 }, join_tap_pct: 100 } }
   - { step: bye,        from: caller }
+fixtures:                              # 감청 대상 전화 그룹(caller·callee) + 감시 역할 monitor_call=all 을 monitor 의 person 에 배정(끝나면 종전 역할로)
+  pg:  { kind: phone_group, members: [caller, callee] }
+  mon: { kind: role, monitor_call: all, assign: [monitor] }

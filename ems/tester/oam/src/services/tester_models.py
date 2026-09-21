@@ -11,7 +11,7 @@ PASS 로 보인다. 지표 이름은 RFC 6076 어휘(`rrd_ms`·`srd_ms`·`sdd_ms
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Literal, Optional, Tuple, Union
+from typing import Annotated, Dict, List, Literal, Optional, Tuple, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -1141,6 +1141,87 @@ class Evidence(_Strict):
         return self
 
 
+# 시험 픽스처 — 시나리오가 자기 전제(전화 그룹·픽업 그룹·역할·가입 서비스)를 선언하고, 컨트롤러가 run 직전에 **대상의 운영 프로비저닝 경로**
+#   (CSC 관리 API — 대상 oam 노드 게이트웨이 경유: /api/v1/phone-groups·/api/v1/roles·/api/v1/users, 접속서비스는 CSP 컬렉션)로 적용·확인하고 run 뒤 되돌린다.
+#   DB 직접 쓰기·CSP 내부 통지는 쓰지 않는다 — CSC 가 단일 쓰기 주체로서 CSP 에 통지한다(dispatch_center.md §8, sip_access_security.md P1).
+#   멤버·배정 대상은 **역할 이름**으로 적는다 — 계획이 그 역할에 배정한 신원(단발 첫 인스턴스가 쓰는 것)에 입힌다.
+FIXTURE_KINDS = ('phone_group', 'role', 'subscriber', 'access_service')
+MonitorScope = Literal['none', 'own', 'listed', 'all']
+ListenVisibility = Literal['hidden', 'visible']
+_FIXTURE_KEY = re.compile(r'^[a-z][a-z0-9_]{0,31}$')
+
+
+class FixturePhoneGroup(_Strict):
+    """전화 그룹(dispatch_center.md §4·§5.1 — 픽업 그룹 + 선택 대표번호). 멤버 = 역할 이름(유선/이동 UE 풀). CSC 가 멤버의 pickup_group 을 그룹 id 로 파생한다."""
+    kind: Literal['phone_group']
+    members: List[str] = Field(min_length=1, description='그룹원 역할 이름 — 역할마다 계획의 첫 신원(단발 첫 인스턴스)이 멤버가 된다')
+    pilot: Optional[str] = Field(default=None, description='대표번호(TS 24.239 Flexible Alerting) — 번호 리터럴 또는 ${var}. ${var} 인데 바인딩이 없으면 컨트롤러가 '
+                                                            '내선형 번호(7<첫 멤버 끝 3자리>0)를 만들어 그 바인딩에 넣는다(시나리오 to: "${var}" 와 짝). 생략 = 픽업 그룹만')
+    service_ref: Optional[str] = Field(default=None, description='대표번호의 서비스명(pilot 있을 때) — 생략 = 첫 멤버 신원의 현 service_ref')
+    alert_mode: Literal['parallel', 'sequential'] = 'parallel'
+    no_answer_sec: int = Field(default=8, ge=1, le=120)
+    overflow: Optional[str] = Field(default=None, description='무응답 overflow 대상 역할 이름(선택)')
+
+    @model_validator(mode='after')
+    def _pilot_form(self):
+        if self.pilot is not None and not is_dial_literal(self.pilot):
+            raise ValueError('phone_group.pilot 은 번호 리터럴(0-9*#+) 또는 ${var}')
+        if self.overflow and self.overflow in self.members:
+            raise ValueError('phone_group.overflow 역할은 members 에 있을 수 없다')
+        return self
+
+
+class FixtureRole(_Strict):
+    """역할(mcptt_authorization.md — 능력+범위). assign 의 역할 신원이 속한 person(users.id)에 배정한다(사람당 역할 하나 — 되돌릴 때 종전 역할로)."""
+    kind: Literal['role']
+    assign: List[str] = Field(min_length=1, description='배정 대상 역할 이름')
+    monitor_call: MonitorScope = 'none'
+    monitor_targets: List[str] = Field(default_factory=list, description='monitor_call=listed — phone_group 픽스처 키')
+    ptt_listen: MonitorScope = 'none'
+    ptt_targets: List[str] = Field(default_factory=list, description='ptt_listen=listed — MCPTT 그룹 id 리터럴 또는 ${group}(그룹 세션이 잡는 첫 그룹)')
+    listen_visibility: str = Field(default='hidden', description='hidden|visible 또는 ${var} 바인딩(로스터 노출/은닉을 같은 시나리오로 두 번 볼 때)')
+    history_read: Literal['none', 'scope', 'all'] = 'scope'
+
+    @model_validator(mode='after')
+    def _scope(self):
+        if self.listen_visibility not in ('hidden', 'visible') and not _BIND_REF.match(self.listen_visibility):
+            raise ValueError('role.listen_visibility 는 hidden|visible 또는 ${var}')
+        if self.monitor_call == 'listed' and not self.monitor_targets:
+            raise ValueError('role.monitor_call=listed 는 monitor_targets 가 필요하다')
+        if self.monitor_call != 'listed' and self.monitor_targets:
+            raise ValueError('role.monitor_targets 는 monitor_call=listed 에만')
+        if self.ptt_listen == 'listed' and not self.ptt_targets:
+            raise ValueError('role.ptt_listen=listed 는 ptt_targets 가 필요하다')
+        if self.ptt_listen != 'listed' and self.ptt_targets:
+            raise ValueError('role.ptt_targets 는 ptt_listen=listed 에만')
+        return self
+
+
+class FixtureSubscriber(_Strict):
+    """가입 서비스 소속 — 역할 신원의 회선 service_ref 를 바꾼다(CSC PUT /users/{person}/{kind}/{msisdn}). run 뒤 종전 값으로."""
+    kind: Literal['subscriber']
+    roles: List[str] = Field(min_length=1)
+    service_ref: str = Field(min_length=1, description='접속서비스 이름 — access_service 픽스처 키 또는 대상에 이미 있는 서비스명')
+
+
+class FixtureAccessService(_Strict):
+    """접속서비스 변종 — 역할 신원의 현 서비스 레코드를 복제해 이름·필드를 바꿔 대상 CSP 컬렉션 access_services 에 넣는다(태그 cims-tester, run 뒤 제거).
+    subscriber 픽스처가 service_ref 로 참조한다(예: transfer_allowed=false 변종 — volte_supplementary_services.md §6.3 게이트)."""
+    kind: Literal['access_service']
+    from_role: str = Field(description='복제 원본 = 이 역할 첫 신원의 현 service_ref 레코드')
+    set: Dict[str, Union[bool, int, str]] = Field(min_length=1, description='바꿀 필드(예: {transfer_allowed: false}). name/id/kind/domain 은 못 바꾼다')
+
+    @model_validator(mode='after')
+    def _fields(self):
+        bad = {'id', 'name', 'kind', 'domain', 'tags'} & set(self.set)
+        if bad:
+            raise ValueError(f'access_service.set 에 {sorted(bad)} 는 둘 수 없다(복제본의 정체)')
+        return self
+
+
+Fixture = Annotated[Union[FixturePhoneGroup, FixtureRole, FixtureSubscriber, FixtureAccessService], Field(discriminator='kind')]
+
+
 class Scenario(_Strict):
     id: str = Field(pattern=r'^[A-Z0-9][A-Z0-9-]{2,63}$')
     title: Optional[str] = None
@@ -1148,10 +1229,12 @@ class Scenario(_Strict):
     roles: Dict[str, Role] = Field(min_length=1)
     flow: List[Step] = Field(min_length=1)
     target_evidence: List[Evidence] = Field(default_factory=list)
+    fixtures: Dict[str, Fixture] = Field(default_factory=dict, description='시험 픽스처 — 키 = 이름(소문자·숫자·_), 값 = kind 별 선언. run 직전 대상 CSC 관리 API 로 적용·확인, run 뒤 복원')
 
     @model_validator(mode='after')
     def _refs(self):
         names = set(self.roles)
+        self._check_fixtures(names)
         for r, spec in self.roles.items():
             if spec.disjoint_from and spec.disjoint_from not in names:
                 raise ValueError(f'roles.{r}.disjoint_from={spec.disjoint_from!r} 는 정의된 역할이 아니다')
@@ -1192,6 +1275,44 @@ class Scenario(_Strict):
                 if rtp == 'none':
                     raise ValueError(f'flow[{i}] {c} — 그 호의 invite.media.rtp 가 none(시그널링 전용)이다')
         return self
+
+    def _check_fixtures(self, names) -> None:
+        """픽스처 참조 무결성 — 역할 이름·픽스처 키·${group} 은 그룹 세션에서만."""
+        pg_keys = {k for k, f in self.fixtures.items() if f.kind == 'phone_group'}
+        svc_keys = {k for k, f in self.fixtures.items() if f.kind == 'access_service'}
+        for k, f in self.fixtures.items():
+            if not _FIXTURE_KEY.match(k):
+                raise ValueError(f'fixtures.{k}: 키는 소문자로 시작하는 [a-z0-9_] 32자 이내')
+            refs = []
+            if f.kind == 'phone_group':
+                refs = [*f.members, *([f.overflow] if f.overflow else [])]
+            elif f.kind == 'role':
+                refs = list(f.assign)
+                for t in f.monitor_targets:
+                    if t not in pg_keys:
+                        raise ValueError(f'fixtures.{k}.monitor_targets={t!r} 는 phone_group 픽스처 키가 아니다')
+                for t in f.ptt_targets:
+                    if _BIND_REF.match(t):
+                        if t != '${group}':
+                            raise ValueError(f'fixtures.{k}.ptt_targets 의 바인딩은 ${{group}} 만(그룹 세션의 첫 그룹)')
+                        if not self.is_group_session():
+                            raise ValueError(f'fixtures.{k}.ptt_targets=${{group}} 은 group_call 이 있는 시나리오에서만')
+            elif f.kind == 'subscriber':
+                refs = list(f.roles)
+                if f.service_ref in self.fixtures and f.service_ref not in svc_keys:
+                    raise ValueError(f'fixtures.{k}.service_ref={f.service_ref!r} 는 access_service 픽스처가 아니다')
+            elif f.kind == 'access_service':
+                refs = [f.from_role]
+            for r in refs:
+                if r not in names:
+                    raise ValueError(f'fixtures.{k} 가 정의되지 않은 역할 {r!r} 을 참조한다')
+        # 같은 역할이 두 전화 그룹의 멤버일 수는 없다(가입자당 그룹 하나)
+        seen: Dict[str, str] = {}
+        for k in sorted(pg_keys):
+            for r in self.fixtures[k].members:
+                if r in seen:
+                    raise ValueError(f'역할 {r!r} 이 전화 그룹 픽스처 {seen[r]}·{k} 둘에 있다 — 가입자당 그룹 하나')
+                seen[r] = k
 
     def _check_dialog_learning(self) -> None:
         """replaces/join(RFC 3891/3911)은 대상 다이얼로그를 dialog 이벤트(RFC 4235)로 배워야 한다 — 앞에 from 이 to 를 감시하는

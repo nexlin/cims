@@ -1,5 +1,5 @@
 # 당겨받기 그룹 밖 (volte_supplementary_services.md §5.1) — picker 의 pickup_group 에 링잉 호가 없으면 그룹 픽업 <code> 는 404.
-#   picker 역할의 신원을 caller/callee 와 다른 pickup_group 에 둔다(검증 S3-SCN-PICKUP P4).
+#   picker 는 caller/callee 와 다른 픽업 그룹(아래 fixtures — 검증 S3-SCN-PICKUP P4).
 id: VOLTE-PICKUP-GROUP-NOCALL
 title: 당겨받기 그룹 밖 그룹 픽업 → 404
 tags: [volte, pickup]
@@ -13,3 +13,6 @@ flow:
   - { step: wait,       seconds: 2 }
   - { step: pickup,     from: picker, payload: "${pickup_code}", expect: { code: 404 } }
   - { step: bye,        from: caller }
+fixtures:                              # picker 의 픽업 그룹에는 링잉 호가 없다 — 404
+  pg_a: { kind: phone_group, members: [caller, callee] }
+  pg_b: { kind: phone_group, members: [picker] }

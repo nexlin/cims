@@ -1,5 +1,5 @@
 # dialog 구독 인가 경계 (dispatch_center.md §5.2 규칙 1) — 다른 전화 그룹(pickup_group)의 단말이 B 를 dialog 구독하면 403, NOTIFY 없음.
-#   watcher 역할의 신원을 callee 와 다른 그룹에 둔다(검증 S3-SCN-DIALOG D3).
+#   watcher 는 callee 와 다른 전화 그룹(아래 fixtures — 검증 S3-SCN-DIALOG D3).
 id: VOLTE-BLF-DENIED
 title: 그룹 밖 dialog 구독 → 403
 tags: [volte, dialog]
@@ -9,3 +9,6 @@ roles:
 flow:
   - { step: register,   who: [callee, watcher], expect: { code: 200 } }
   - { step: subscribe,  who: [watcher], to: callee, expect: { code: 403 } }
+fixtures:                              # watcher 는 다른 전화 그룹 — dialog 구독 403
+  pg_a: { kind: phone_group, members: [callee] }
+  pg_b: { kind: phone_group, members: [watcher] }

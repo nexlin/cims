@@ -1,6 +1,6 @@
 # PTT 그룹콜 청취 (dispatch_center.md §5.6) — 멤버(talker·listeners)의 그룹 세션에 그룹 밖 관제사(monitor, member: false)가 그룹 URI 로
 #   a=recvonly INVITE(payload listen). CSP 가 자격(allow_ambient_listening)·범위(역할 ptt_listen) 2단 인가 뒤 청취 멤버로 합류(CMP PTT_JOIN recv_only)
-#   — monitor 의 floor 요청은 DENY, talker 발언 동안 monitor 는 수신만. listen_pct = recvonly INVITE 확립률. 검증 S3-SCN-PTT-LISTEN L1 (자격·역할은 검증 픽스처).
+#   — monitor 의 floor 요청은 DENY, talker 발언 동안 monitor 는 수신만. listen_pct = recvonly INVITE 확립률. 검증 S3-SCN-PTT-LISTEN L1 (자격·역할은 아래 fixtures).
 id: PTT-GROUP-LISTEN
 title: PTT 그룹콜 청취 (관제사 recvonly 합류 · floor DENY)
 tags: [ptt, dispatch, listen]
@@ -17,3 +17,5 @@ flow:
   - { step: media_hold,    seconds: "${ht}", expect: { rtp_loss_pct: { max: 1 } } }
   - { step: floor_release, who: [talker] }
   - { step: bye,           from: talker }
+fixtures:                              # 청취 역할 ptt_listen=listed(대상 = 인스턴스가 잡은 그룹)·hidden 을 monitor 의 person 에 배정 — CSC 가 allow_ambient_listening 을 동기한다
+  lsn: { kind: role, ptt_listen: listed, ptt_targets: ["${group}"], listen_visibility: hidden, assign: [monitor] }

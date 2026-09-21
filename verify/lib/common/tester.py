@@ -104,16 +104,6 @@ def tester_plan(ctx: VerifyContext, scenario_id: str, ht: Optional[int] = None,
     return out
 
 
-def tester_role_identities(ctx: VerifyContext, scenario_id: str, ht: Optional[int] = None,
-                           binds: Optional[Dict[str, object]] = None) -> Optional[Dict[str, List[str]]]:
-    """계측기 계획 드라이런 → 역할별 신원 사용자부. 대상 DB 픽스처(pickup_group·전화 그룹·역할)를
-    계측기가 실제로 쓸 신원에 입히기 위한 것. 계측기 미설정이면 None, 설정했는데 실패면 RuntimeError."""
-    out = tester_plan(ctx, scenario_id, ht, binds)
-    if out is None:
-        return None
-    return {r: list(v) for r, v in (out.get('identities_by_role') or {}).items()}
-
-
 def run_tester(ctx: VerifyContext, scenario_id: str, label: str, instances: int = 1, ht: Optional[int] = None,
                binds: Optional[Dict[str, object]] = None, timeout: int = 240) -> Tuple[Optional[dict], str]:
     """계측기로 시나리오 단발 실행 → (run 기록, 오류 문구). 설정이 없으면 (None, '') — 호출자가 cspsim 경로로 간다.

@@ -24,7 +24,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from services import tester_store as store
-from services import tester_workers, tester_compile, tester_target, tester_observe
+from services import tester_workers, tester_compile, tester_target, tester_observe, tester_fixtures
 from services.tester_bus import publish
 from services.tester_models import RunRecord, RunRequest, LoadProfile, RATIO_METRICS, LOWER_BETTER_RATIOS
 
@@ -421,6 +421,7 @@ class RunDriver(threading.Thread):
         self.expect_results: List[dict] = []
         self.step_log: List[dict] = []
         self.seeder: Optional[tester_target.CspSeeder] = None
+        self.fixtures: Optional[tester_fixtures.FixtureApplier] = None   # 시나리오 fixtures — 대상 CSC 관리 API 로 적용, run 끝에 복원
         self.target_build: Optional[str] = None
 
     # ── 외부 제어
@@ -528,6 +529,19 @@ class RunDriver(threading.Thread):
                 self.notes.append(f'csp seed(dep {self.seeder.dep_id}, ln={self.seeder.local_node_ref}): '
                                   + ', '.join(f'{k}+{v}' for k, v in applied.items()))
                 time.sleep(1.5)   # SIGUSR1 reload — 리스너 bind·라우팅 캐시 반영 여유
+        # 시험 픽스처(§4) — 전화 그룹·역할·가입 서비스를 대상의 운영 프로비저닝 경로(CSC 관리 API)로 적용·확인. 풀 생성(REGISTER) 앞 — 픽업 축은 다음 등록부터
+        if self.plan.get('fixtures'):
+            self.fixtures = tester_fixtures.FixtureApplier.for_run(self.topology, self.plan['fixtures'], self._requester_token)
+            try:
+                self.fixtures.apply()
+                bad = self.fixtures.verify()
+            except tester_fixtures.FixtureError as e:
+                raise tester_target.TargetError(str(e))
+            if bad:
+                self.fixtures.revert()
+                raise tester_target.TargetError('픽스처 확인 실패: ' + '; '.join(bad))
+            self.notes.append('fixtures applied: ' + ' · '.join(tester_fixtures.summarize(self.plan['fixtures'])))
+            self.notes.extend(self.fixtures.notes)
         for w in self.workers:
             for p in self.plan['workers'][w.name]['pools']:
                 w.pool_create(p)
@@ -689,6 +703,9 @@ class RunDriver(threading.Thread):
         if self.seeder is not None and self.seeder.applied:
             errs = self.seeder.restore()
             self.notes.append('csp seed restored' if not errs else 'csp seed restore FAILED: ' + '; '.join(errs))
+        if self.fixtures is not None and self.fixtures.applied:
+            errs = self.fixtures.revert()
+            self.notes.append('fixtures reverted' if not errs else 'fixtures revert FAILED: ' + '; '.join(errs))
         self.ended_at = _now_iso()
         t_ended = time.time()
         if self.observer is not None:
@@ -770,6 +787,7 @@ class RunDriver(threading.Thread):
             'counters': snap['counters'], 'timers': snap['timers'], 'events': snap['events'],
             'expect_results': self.expect_results, 'evidence_results': self.evidence_results, 'step_log': self.step_log,
             'stop_reason': self.stop_reason, 'doc_rate': self.doc_rate, 'notes': self.notes,
+            'fixtures': (self.fixtures.report() if self.fixtures is not None else None),
         }
         with open(os.path.join(self.rec.dir, 'run.json'), 'w', encoding='utf-8') as f:
             json.dump(detail, f, ensure_ascii=False, indent=2)

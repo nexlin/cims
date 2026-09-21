@@ -1,5 +1,5 @@
 # PTT 그룹콜 청취 거절 (dispatch_center.md §5.6) — 자격(allow_ambient_listening=0) 또는 범위(역할 ptt_listen=none · 역할 없음) 밖의 관제사가
-#   recvonly INVITE → 403. 어느 축이 막았는지는 검증 픽스처가 정한다. 검증 S3-SCN-PTT-LISTEN L2/L3/L3c.
+#   recvonly INVITE → 403. 여기서는 역할 ptt_listen=none(아래 fixtures). 검증 S3-SCN-PTT-LISTEN L2/L3/L3c.
 id: PTT-GROUP-LISTEN-DENIED
 title: PTT 그룹콜 청취 거절 (자격·범위 밖 → 403)
 tags: [ptt, dispatch, listen, negative]
@@ -12,3 +12,5 @@ flow:
   - { step: group_call, from: talker, to: listeners, media: { audio: amr-wb }, expect: { code: 200 } }
   - { step: group_call, from: monitor, payload: listen, expect: { code: 403 } }
   - { step: bye,        from: talker }
+fixtures:                              # 범위 밖 — 역할 ptt_listen=none(자격 allow_ambient_listening 도 CSC 가 0 으로 동기) → 403
+  lsn: { kind: role, ptt_listen: none, assign: [monitor] }

@@ -24,8 +24,8 @@ PHONE_GROUP_CHANGED 를 보낸다(멤버 pickup_group 도 그룹 id 로 파생, 
   F4 통화 중 제외(busy_members=skip)은 후속(SKIP 보고).
 
 계측기 경로(CIMS_TESTER_URL 설정 시, test_instrument.md §9): F1/F3/F5/F6 는 `VOLTE-FA-{PARALLEL,OVERFLOW,PICKUP,SEQUENTIAL}` —
-invite.to 가 역할 아닌 대표번호 리터럴(`${pilot}` 바인딩), 포크 착신은 `fork_alert_pct`, 승자 외 CANCEL 은 정상. 전화 그룹 픽스처는 계획
-드라이런의 역할 신원(memberB·memberC·overflow·picker)에 입힌다. F7 도 계측기(VOLTE-FA-DIALOG-FORK — subscribe to 대표번호 리터럴 + check dialog_consistent);
+invite.to 가 역할 아닌 대표번호 리터럴(`${pilot}` — 컨트롤러가 만든다), 포크 착신은 `fork_alert_pct`, 승자 외 CANCEL 은 정상. 전화 그룹은 시나리오
+`fixtures:` 가 선언하고 컨트롤러가 대상 CSC 관리 API 로 적용·복원한다(DB 직접 쓰기 없음). F7 도 계측기(VOLTE-FA-DIALOG-FORK — subscribe to 대표번호 리터럴 + check dialog_consistent);
 cspsim 경로(-hunt_watch)는 계측기 미설정일 때.
 """
 from __future__ import annotations
@@ -36,7 +36,7 @@ import re
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 from ...common.cspsim import run_cspsim
-from ...common.tester import tester_config, tester_check, tester_role_identities
+from ...common.tester import tester_config, tester_check
 from ._xfer_common import (
     select_same_org, trio_cred_args, parse_marker_int,
     VOLTE_DOMAIN, FLOW_MIN, DROP_MAX, fmt_checks, emit_checks,
@@ -139,87 +139,28 @@ def _f7_cspsim(ctx: VerifyContext, creds4: list, pilot: str, group_id: str, chec
 
 
 def _via_tester(ctx: VerifyContext, done) -> ItemResult:
-    """F1/F3/F5/F6 를 계측기로 — 계획 드라이런의 역할 신원을 전화 그룹(대표번호 pilot)에 시드한 뒤 `VOLTE-FA-*` 를 `--bind pilot=` 로.
-    포크 판정은 시나리오 기대치(fork_alert_pct 100 · 승자 200 · CANCEL 정상 · F6 srd_ms.min ≥ 단계 시한). F7 은 VOLTE-FA-DIALOG-FORK 의 check dialog_consistent."""
+    """F1/F3/F6/F7 을 계측기로 — 전화 그룹(대표번호·멤버·overflow·alert_mode) 전제는 시나리오 `fixtures:` 가 선언하고 컨트롤러가 대상 CSC 관리 API 로
+    적용·복원한다(대표번호 ${pilot} 은 컨트롤러가 만든다). 포크 판정은 시나리오 기대치(fork_alert_pct 100 · 승자 200 · CANCEL 정상 · F6 srd_ms.min ≥ 단계 시한).
+    F7 은 VOLTE-FA-DIALOG-FORK 의 check dialog_consistent."""
     cfg = tester_config()
-    ctx.w(f"- 경로: 계측기 @ {cfg['url']} · 토폴로지 {cfg['topology']} (F5 는 cspsim)")
-    checks = []
-    def dstr(d) -> str:
-        return "RTP delta 미출력" if d is None else f"recv A=+{d[0]} B=+{d[1]} C=+{d[2]} D=+{d[3]}"
-    binds0 = {"pilot": "0", "pickup_code": "**"}   # 계획 드라이런용 — 실제 pilot 은 시드 뒤 정한다
+    ctx.w(f"- 경로: 계측기 @ {cfg['url']} · 토폴로지 {cfg['topology']} (F5 는 cspsim) — 전화 그룹은 시나리오 fixtures(대상 CSC 관리 API)")
 
-    def ids(scenario: str) -> dict:
-        r = tester_role_identities(ctx, scenario, ht=4, binds=binds0) or {}
-        if not all(r.get(k) for k in r):
-            raise RuntimeError(f"{scenario}: 계획에 빈 역할 창 — {r}")
-        return {k: v[0] for k, v in r.items()}
+    def check(name: str, scenario: str, label: str) -> tuple:
+        return tester_check(ctx, name, scenario, f"{_RID}/{label}", ht=4, binds={"pickup_code": "**"})
 
-    def pilot_of(member: str) -> str:
-        # 가입 id(E.164 +…)와 겹치지 않는 짧은 내선형 대표번호 — 그룹원 번호 끝 3자리로 유일하게
-        return f"7{member[-3:]}0"
-
-    def check(name: str, scenario: str, label: str, pilot: str) -> tuple:
-        return tester_check(ctx, name, scenario, f"{_RID}/{label}", ht=4, binds={"pilot": pilot, "pickup_code": "**"})
-
-    try:
-        r1 = ids("VOLTE-FA-PARALLEL")
-    except Exception as e:
-        return done(ItemStatus.FAIL, f"계측기 계획 실패: {e}")
-    group_id = "pg-verify-tester-fa"
-    pilot = pilot_of(r1["memberB"])
-    ctx.w(f"- F1 신원 caller={r1['caller']} B={r1['memberB']} C={r1['memberC']} pilot={pilot} group={group_id}")
-    with DispatchFixture(ctx.dist_dir, ctx.sim_ip, group_id, pilot=pilot, members=[r1["memberB"], r1["memberC"]]) as fx:
-        if not fx.active:
-            ctx.w(f"- [SKIP] {fx.reason}")
-            return done(ItemStatus.SKIP, fx.reason)
-        ctx.w(f"- 시드 스키마={fx.schema} (전화 그룹 {group_id}, 역할 없음)")
-        checks.append(check("F1 병렬 호출·응답 (C 승자, B CANCEL)", "VOLTE-FA-PARALLEL", "F1", pilot))
-
-    # F3 무응답 → overflow(D) — no_answer_sec=8(기본), 그룹원 B·C 응답 없음 → D 로 재시도
-    try:
-        r3 = ids("VOLTE-FA-OVERFLOW")
-        with DispatchFixture(ctx.dist_dir, ctx.sim_ip, group_id, pilot=pilot, members=[r3["memberB"], r3["memberC"]],
-                             overflow=r3["overflow"]) as fx3:
-            if fx3.active:
-                checks.append(check("F3 무응답 → overflow 내선(D) 응답", "VOLTE-FA-OVERFLOW", "F3", pilot))
-            else:
-                checks.append(("F3 무응답 → overflow 내선(D) 응답", False, f"시드 실패 — {fx3.reason}"))
-    except Exception as e:
-        checks.append(("F3 무응답 → overflow 내선(D) 응답", False, f"계측기 계획 실패: {e}"))
-
-    checks.append(("F4 통화 중 그룹원 제외(busy_members=skip)", None, "후속 — 사전 통화 구성 필요"))
-
-    # F6 sequential alerting — first 단계 시한(4 s) 뒤 second 링·응답, srd_ms.min ≥ 4000 은 시나리오 기대치
-    try:
-        r6 = ids("VOLTE-FA-SEQUENTIAL")
-        with DispatchFixture(ctx.dist_dir, ctx.sim_ip, group_id, pilot=pilot, members=[r6["first"], r6["second"]],
-                             no_answer_sec=4, alert_mode="sequential") as fx6:
-            if fx6.active:
-                checks.append(check("F6 sequential alerting (first 단계 시한 → second 응답, TS 24.239)", "VOLTE-FA-SEQUENTIAL", "F6", pilot))
-            else:
-                checks.append(("F6 sequential alerting", False, f"시드 실패 — {fx6.reason}"))
-    except Exception as e:
-        checks.append(("F6 sequential alerting", False, f"계측기 계획 실패: {e}"))
-
-    # F5(링잉 대표번호 지정 픽업 — PickUpFork 완결)·F7(dialog 포크 정합)은 cspsim 검사 — 계측기 누계 지표로는 픽업 승계·entity 별 NOTIFY 방향을
-    #   가릴 수 없다(MONITOR 가 M2 만 계측기로 두는 것과 같은 이유). cspsim 헬퍼는 대상 CSP 의 SIP 접속점(dev 5060)이 필요하므로 계측기 모드
-    #   (대개 배포 15060)에서는 생략하고 정보로만 남긴다 — dev CSP 5060 상대로 계측기 미설정(cspsim 경로)일 때 F1~F7 전부 판정된다(D5·M8·M5 와 같은 규약).
+    checks = [check("F1 병렬 호출·응답 (C 승자, B CANCEL)", "VOLTE-FA-PARALLEL", "F1"),
+              check("F3 무응답 → overflow 내선(D) 응답", "VOLTE-FA-OVERFLOW", "F3"),
+              ("F4 통화 중 그룹원 제외(busy_members=skip)", None, "후속 — 사전 통화 구성 필요"),
+              check("F6 sequential alerting (first 단계 시한 → second 응답, TS 24.239)", "VOLTE-FA-SEQUENTIAL", "F6")]
+    # F5(링잉 대표번호 지정 픽업 — PickUpFork 완결)는 cspsim 검사 — 계측기 누계 지표로는 픽업 승계를 가릴 수 없다. cspsim 헬퍼는 대상 CSP 의 SIP 접속점
+    #   (dev 5060)이 필요하므로 계측기 모드에서는 생략하고 정보로만 남긴다(D5·M8·M5 와 같은 규약).
     checks.append(("F5 대표번호 링잉 호 지정 픽업 (PickUpFork)", None, "cspsim 경로 — dev CSP 5060 필요(계측기 미설정 시 판정). 계측기 모드에서는 생략"))
     # F7 dialog 포크 정합 — 계측기 VOLTE-FA-DIALOG-FORK: memberB 가 pilot·caller·memberC 를 dialog 구독, check dialog_consistent(entity 별 dialog 하나·
-    #   local/remote/direction 불변·상태 전진·terminated 1회·version 단조 — cspsim _judge_dialog_entity 와 같은 규칙). caller 도 전화 그룹원(B 가 A 를 감시 — CanWatch 규칙 1)
-    try:
-        r7 = ids("VOLTE-FA-DIALOG-FORK")
-        with DispatchFixture(ctx.dist_dir, ctx.sim_ip, group_id, pilot=pilot, members=[r7["caller"], r7["memberB"], r7["memberC"]]) as fx7:
-            if fx7.active:
-                checks.append(check("F7 dialog 이벤트 포크 정합 (RFC 4235 — entity/direction/remote 불변·terminated 1회·version 단조)", "VOLTE-FA-DIALOG-FORK", "F7", pilot))
-            else:
-                checks.append(("F7 dialog 이벤트 포크 정합 (RFC 4235)", False, f"시드 실패 — {fx7.reason}"))
-    except Exception as e:
-        checks.append(("F7 dialog 이벤트 포크 정합 (RFC 4235)", False, f"계측기 계획 실패: {e}"))
+    #   local/remote/direction 불변·상태 전진·terminated 1회·version 단조 — cspsim _judge_dialog_entity 와 같은 규칙). caller 도 전화 그룹원(fixtures)
+    checks.append(check("F7 dialog 이벤트 포크 정합 (RFC 4235 — entity/direction/remote 불변·terminated 1회·version 단조)", "VOLTE-FA-DIALOG-FORK", "F7"))
 
     all_ok = emit_checks(ctx, checks)
     return done(ItemStatus.PASS if all_ok else ItemStatus.FAIL, fmt_checks(checks))
-
 
 @verify_item(
     id=_RID,

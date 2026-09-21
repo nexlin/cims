@@ -1,7 +1,7 @@
 # 대표번호 포크 dialog 이벤트 정합(RFC 4235, S3-SCN-FA F7 의 계측기 경로) — 그룹원 memberB 가 대표번호(${pilot})·caller·memberC 를 dialog 구독한 뒤
 #   caller → ${pilot} 포크, memberC 응답, caller(발신자) 선종료. check dialog_consistent = memberB 가 받은 NOTIFY 열이 entity 마다 dialog 하나·local/remote/
 #   direction 불변·상태 전진(early→confirmed→terminated)·terminated 1회·version 단조인가(TS 24.239 포크 집합의 dialog 이벤트 — 승자 leg 로 재키잉돼도 흔들리지 않아야).
-#   전화 그룹(pilot·멤버 = caller·memberB·memberC — B 가 A 를 감시하려면 A 도 같은 전화 그룹, CanWatch 규칙 1)은 검증 픽스처가 시드한다.
+#   전화 그룹(pilot·멤버 = caller·memberB·memberC — B 가 A 를 감시하려면 A 도 같은 전화 그룹, CanWatch 규칙 1)은 아래 fixtures 가 선언한다.
 id: VOLTE-FA-DIALOG-FORK
 title: 대표번호 포크 dialog 이벤트 정합 (그룹원 BLF — entity·direction·remote 불변 · version 단조)
 tags: [volte, fa, dispatch, blf]
@@ -19,3 +19,5 @@ flow:
   - { step: media_hold, seconds: 2 }
   - { step: bye,        from: caller, expect: { sdd_ms: { p95: 500 } } }
   - { step: check,      who: [memberB], payload: dialog_consistent, after_ms: 1500, expect: { check_pct: 100 } }
+fixtures:                              # caller 도 그룹원 — B 가 A 를 감시하려면 같은 전화 그룹(CanWatch 규칙 1)
+  pg: { kind: phone_group, pilot: "${pilot}", members: [caller, memberB, memberC] }

@@ -1,6 +1,6 @@
 # 대표번호 병렬 호출 (TS 24.239 Flexible Alerting, dispatch_center.md §4) — caller 가 전화 그룹 대표번호(${pilot}, 역할 아닌 번호 리터럴)로 INVITE 하면
 #   CSP TAS 가 그룹원(memberB·memberC) 전원에게 포크한다. memberC 가 응답해 승자가 되고 memberB 의 링잉 leg 는 CANCEL(487 — 정상, ringing_leg_cancelled).
-#   fork_alert_pct = 발신자를 뺀 UE 역할 전부에 포크 INVITE 가 도달했는가. P-Called-Party-ID 에 대표번호(pcpid_ok). 검증 S3-SCN-FA F1 — 그룹원 시드는 검증 픽스처(계획의 역할 신원).
+#   fork_alert_pct = 발신자를 뺀 UE 역할 전부에 포크 INVITE 가 도달했는가. P-Called-Party-ID 에 대표번호(pcpid_ok). 검증 S3-SCN-FA F1 — 전화 그룹은 아래 fixtures 가 선언한다.
 id: VOLTE-FA-PARALLEL
 title: 대표번호 병렬 호출 (포크 · 승자 · CANCEL)
 tags: [volte, fa, dispatch]
@@ -14,3 +14,5 @@ flow:
   - { step: answer,     who: [memberC], after_ms: 1500, expect: { code: 200 } }
   - { step: media_hold, seconds: "${ht}", expect: { rtp_loss_pct: { max: 1 } } }
   - { step: bye,        from: caller, expect: { sdd_ms: { p95: 500 } } }
+fixtures:                              # 전화 그룹(대표번호 ${pilot} — 바인딩이 없으면 컨트롤러가 만든다) = memberB·memberC. run 직전 대상 CSC 관리 API 로 적용, 끝나면 복원
+  pg: { kind: phone_group, pilot: "${pilot}", members: [memberB, memberC] }

@@ -30,7 +30,7 @@ import re
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 from ...common.cspsim import run_cspsim
-from ...common.tester import tester_config, tester_check, tester_role_identities
+from ...common.tester import tester_config, tester_check
 from ._xfer_common import (
     select_same_org, trio_cred_args, parse_marker_int, VOLTE_DOMAIN, FLOW_MIN, DROP_MAX, fmt_checks, emit_checks,
 )
@@ -147,7 +147,7 @@ def monitor(ctx: VerifyContext) -> ItemResult:
 
         # ── M2: 인가된 감청자(역할 monitor_call=all)가 A↔B 를 청취 ──
         if tester_config() is not None:
-            checks.append(_m2_via_tester(ctx, fixture))
+            checks.append(_m2_via_tester(ctx))
         else:
             with fixture(role=RoleSpec(_ROLE_MON, [M["user"]], monitor_call="all")) as fm:
                 if not fm.active:
@@ -227,24 +227,10 @@ def monitor(ctx: VerifyContext) -> ItemResult:
     return done(ItemStatus.PASS if all_ok else ItemStatus.FAIL, fmt_checks(checks))
 
 
-def _m2_via_tester(ctx: VerifyContext, fixture) -> tuple:
-    """M2 를 계측기로 — 계획의 caller/callee 신원을 대상 전화 그룹(pg-verify-tester)에, monitor 신원에 감시 역할(monitor_call=all)을 시드한 뒤
-    `VOLTE-MONITOR-JOIN`(Join 200 + join_tap_pct 100 = SSRC 2개). A·B 무영향은 시나리오 RTP 손실 기대치가 본다."""
+def _m2_via_tester(ctx: VerifyContext) -> tuple:
+    """M2 를 계측기로 — 대상 전화 그룹(caller·callee)과 감시 역할(monitor_call=all → monitor 의 person)은 시나리오 `fixtures:` 가 선언하고 컨트롤러가
+    대상 CSC 관리 API 로 적용·복원한다. `VOLTE-MONITOR-JOIN`(Join 200 + join_tap_pct 100 = SSRC 2개). A·B 무영향은 시나리오 RTP 손실 기대치가 본다."""
     name = "M2 청취 (Join 200, M SSRC 2개, A·B 무영향)"
     cfg = tester_config()
-    ctx.w(f"- M2 경로: 계측기 @ {cfg['url']} · 토폴로지 {cfg['topology']} (M8·M5 는 cspsim)")
-    try:
-        ids = tester_role_identities(ctx, "VOLTE-MONITOR-JOIN", ht=4) or {}
-        ab = [u for r in ("caller", "callee") for u in ids.get(r) or []]
-        mons = ids.get("monitor") or []
-        if not ab or not mons:
-            raise RuntimeError("계획에 역할 신원이 없다")
-    except Exception as e:
-        return (name, False, f"계측기 계획 실패: {e}")
-    with fixture("pg-verify-tester", ab) as tg:
-        if not tg.active:
-            return (name, False, f"그룹 시드 실패 — {tg.reason}")
-        with fixture(role=RoleSpec(_ROLE_MON, mons, monitor_call="all")) as fm:
-            if not fm.active:
-                return (name, False, f"역할 시드 실패 — {fm.reason}")
-            return tester_check(ctx, name, "VOLTE-MONITOR-JOIN", f"{_RID}/M2", ht=4)
+    ctx.w(f"- M2 경로: 계측기 @ {cfg['url']} · 토폴로지 {cfg['topology']} (M8·M5 는 cspsim) — 전화 그룹·역할은 시나리오 fixtures(대상 CSC 관리 API)")
+    return tester_check(ctx, name, "VOLTE-MONITOR-JOIN", f"{_RID}/M2", ht=4)

@@ -24,7 +24,7 @@ import os
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 from ...common.cspsim import run_cspsim
-from ...common.tester import tester_config, tester_check, tester_role_identities
+from ...common.tester import tester_config, tester_check
 from ._xfer_common import (
     select_same_org, trio_cred_args, parse_recv_delta, parse_marker_int, PickupGroupFixture,
     VOLTE_DOMAIN, FLOW_MIN, DROP_MAX, fmt_checks, emit_checks,
@@ -118,32 +118,13 @@ _PICKUP_BIND = {"pickup_code": "**"}
 
 
 def _via_tester(ctx: VerifyContext, done) -> ItemResult:
-    """계측기 경로 — 계획의 역할 신원에 pickup_group 픽스처를 입히고 동봉 시나리오 4개(200·200·403·404)를 돈다."""
+    """계측기 경로 — 동봉 시나리오 4개(200·200·403·404). 픽업 그룹 전제(같은/다른 전화 그룹 → CSC 가 pickup_group 파생)는 시나리오 `fixtures:` 가
+    선언하고 컨트롤러가 대상 CSC 관리 API 로 적용·복원한다."""
     cfg = tester_config()
-    ctx.w(f"- 경로: 계측기 @ {cfg['url']} · 토폴로지 {cfg['topology']} · ${{pickup_code}}=**")
-    try:
-        ids = tester_role_identities(ctx, "VOLTE-PICKUP-GROUP", ht=4, binds=_PICKUP_BIND) or {}
-        same = [u for r in ("caller", "callee", "picker") for u in ids.get(r) or []]
-        if not same:
-            raise RuntimeError("계획에 역할 신원이 없다")
-    except Exception as e:
-        ctx.w(f"- [FAIL] 계측기 계획 실패: {e}")
-        return done(ItemStatus.FAIL, f"계측기 계획 실패: {e}")
-    grp = "vfy-pg-tester"
-    checks = []
-    ctx.w(f"- 역할 신원 caller={len(ids.get('caller') or [])} callee={len(ids.get('callee') or [])} picker={len(ids.get('picker') or [])}")
-    with PickupGroupFixture(ctx.dist_dir, ctx.sim_ip, {u: grp for u in same}) as fx:
-        ctx.w(f"- 그룹 축: {fx.axis}")
-        checks.append(tester_check(ctx, "P1 그룹 픽업", "VOLTE-PICKUP-GROUP", f"{_RID}/P1", ht=4, binds=_PICKUP_BIND))
-        checks.append(tester_check(ctx, "P2 지정 픽업 **<B>", "VOLTE-PICKUP-DIRECTED", f"{_RID}/P2", ht=4, binds=_PICKUP_BIND))
-    if not fx.active:
-        checks.append(("P3 타 그룹 지정 픽업 403", None, "pickup_group 컬럼 부재 — org 폴백 축에서는 그룹 경계 검사 불가"))
-        checks.append(("P4 그룹 밖 그룹 픽업 404", None, "pickup_group 컬럼 부재 — org 폴백 축에서는 그룹 경계 검사 불가"))
-    else:
-        other = {u: grp for r in ("caller", "callee") for u in ids.get(r) or []}
-        other.update({u: grp + "-x" for u in ids.get("picker") or []})
-        with PickupGroupFixture(ctx.dist_dir, ctx.sim_ip, other):
-            checks.append(tester_check(ctx, "P3 타 그룹 지정 픽업 403", "VOLTE-PICKUP-DIRECTED-DENIED", f"{_RID}/P3", ht=4, binds=_PICKUP_BIND))
-            checks.append(tester_check(ctx, "P4 그룹 밖 그룹 픽업 404", "VOLTE-PICKUP-GROUP-NOCALL", f"{_RID}/P4", ht=4, binds=_PICKUP_BIND))
+    ctx.w(f"- 경로: 계측기 @ {cfg['url']} · 토폴로지 {cfg['topology']} · ${{pickup_code}}=** — 픽업 그룹은 시나리오 fixtures(대상 CSC 관리 API)")
+    checks = [tester_check(ctx, "P1 그룹 픽업", "VOLTE-PICKUP-GROUP", f"{_RID}/P1", ht=4, binds=_PICKUP_BIND),
+              tester_check(ctx, "P2 지정 픽업 **<B>", "VOLTE-PICKUP-DIRECTED", f"{_RID}/P2", ht=4, binds=_PICKUP_BIND),
+              tester_check(ctx, "P3 타 그룹 지정 픽업 403", "VOLTE-PICKUP-DIRECTED-DENIED", f"{_RID}/P3", ht=4, binds=_PICKUP_BIND),
+              tester_check(ctx, "P4 그룹 밖 그룹 픽업 404", "VOLTE-PICKUP-GROUP-NOCALL", f"{_RID}/P4", ht=4, binds=_PICKUP_BIND)]
     all_ok = emit_checks(ctx, checks)
-    return done(ItemStatus.PASS if all_ok else ItemStatus.FAIL, f"axis={fx.axis}\n" + fmt_checks(checks))
+    return done(ItemStatus.PASS if all_ok else ItemStatus.FAIL, fmt_checks(checks))

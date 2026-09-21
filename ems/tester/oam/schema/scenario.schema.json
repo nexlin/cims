@@ -197,6 +197,241 @@
       "title": "Evidence",
       "type": "object"
     },
+    "FixtureAccessService": {
+      "additionalProperties": false,
+      "description": "접속서비스 변종 — 역할 신원의 현 서비스 레코드를 복제해 이름·필드를 바꿔 대상 CSP 컬렉션 access_services 에 넣는다(태그 cims-tester, run 뒤 제거).\nsubscriber 픽스처가 service_ref 로 참조한다(예: transfer_allowed=false 변종 — volte_supplementary_services.md §6.3 게이트).",
+      "properties": {
+        "from_role": {
+          "description": "복제 원본 = 이 역할 첫 신원의 현 service_ref 레코드",
+          "title": "From Role",
+          "type": "string"
+        },
+        "kind": {
+          "const": "access_service",
+          "title": "Kind",
+          "type": "string"
+        },
+        "set": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "description": "바꿀 필드(예: {transfer_allowed: false}). name/id/kind/domain 은 못 바꾼다",
+          "minProperties": 1,
+          "title": "Set",
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind",
+        "from_role",
+        "set"
+      ],
+      "title": "FixtureAccessService",
+      "type": "object"
+    },
+    "FixturePhoneGroup": {
+      "additionalProperties": false,
+      "description": "전화 그룹(dispatch_center.md §4·§5.1 — 픽업 그룹 + 선택 대표번호). 멤버 = 역할 이름(유선/이동 UE 풀). CSC 가 멤버의 pickup_group 을 그룹 id 로 파생한다.",
+      "properties": {
+        "alert_mode": {
+          "default": "parallel",
+          "enum": [
+            "parallel",
+            "sequential"
+          ],
+          "title": "Alert Mode",
+          "type": "string"
+        },
+        "kind": {
+          "const": "phone_group",
+          "title": "Kind",
+          "type": "string"
+        },
+        "members": {
+          "description": "그룹원 역할 이름 — 역할마다 계획의 첫 신원(단발 첫 인스턴스)이 멤버가 된다",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Members",
+          "type": "array"
+        },
+        "no_answer_sec": {
+          "default": 8,
+          "maximum": 120,
+          "minimum": 1,
+          "title": "No Answer Sec",
+          "type": "integer"
+        },
+        "overflow": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "무응답 overflow 대상 역할 이름(선택)",
+          "title": "Overflow"
+        },
+        "pilot": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "대표번호(TS 24.239 Flexible Alerting) — 번호 리터럴 또는 ${var}. ${var} 인데 바인딩이 없으면 컨트롤러가 내선형 번호(7<첫 멤버 끝 3자리>0)를 만들어 그 바인딩에 넣는다(시나리오 to: \"${var}\" 와 짝). 생략 = 픽업 그룹만",
+          "title": "Pilot"
+        },
+        "service_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "대표번호의 서비스명(pilot 있을 때) — 생략 = 첫 멤버 신원의 현 service_ref",
+          "title": "Service Ref"
+        }
+      },
+      "required": [
+        "kind",
+        "members"
+      ],
+      "title": "FixturePhoneGroup",
+      "type": "object"
+    },
+    "FixtureRole": {
+      "additionalProperties": false,
+      "description": "역할(mcptt_authorization.md — 능력+범위). assign 의 역할 신원이 속한 person(users.id)에 배정한다(사람당 역할 하나 — 되돌릴 때 종전 역할로).",
+      "properties": {
+        "assign": {
+          "description": "배정 대상 역할 이름",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Assign",
+          "type": "array"
+        },
+        "history_read": {
+          "default": "scope",
+          "enum": [
+            "none",
+            "scope",
+            "all"
+          ],
+          "title": "History Read",
+          "type": "string"
+        },
+        "kind": {
+          "const": "role",
+          "title": "Kind",
+          "type": "string"
+        },
+        "listen_visibility": {
+          "default": "hidden",
+          "description": "hidden|visible 또는 ${var} 바인딩(로스터 노출/은닉을 같은 시나리오로 두 번 볼 때)",
+          "title": "Listen Visibility",
+          "type": "string"
+        },
+        "monitor_call": {
+          "default": "none",
+          "enum": [
+            "none",
+            "own",
+            "listed",
+            "all"
+          ],
+          "title": "Monitor Call",
+          "type": "string"
+        },
+        "monitor_targets": {
+          "description": "monitor_call=listed — phone_group 픽스처 키",
+          "items": {
+            "type": "string"
+          },
+          "title": "Monitor Targets",
+          "type": "array"
+        },
+        "ptt_listen": {
+          "default": "none",
+          "enum": [
+            "none",
+            "own",
+            "listed",
+            "all"
+          ],
+          "title": "Ptt Listen",
+          "type": "string"
+        },
+        "ptt_targets": {
+          "description": "ptt_listen=listed — MCPTT 그룹 id 리터럴 또는 ${group}(그룹 세션이 잡는 첫 그룹)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Ptt Targets",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "assign"
+      ],
+      "title": "FixtureRole",
+      "type": "object"
+    },
+    "FixtureSubscriber": {
+      "additionalProperties": false,
+      "description": "가입 서비스 소속 — 역할 신원의 회선 service_ref 를 바꾼다(CSC PUT /users/{person}/{kind}/{msisdn}). run 뒤 종전 값으로.",
+      "properties": {
+        "kind": {
+          "const": "subscriber",
+          "title": "Kind",
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Roles",
+          "type": "array"
+        },
+        "service_ref": {
+          "description": "접속서비스 이름 — access_service 픽스처 키 또는 대상에 이미 있는 서비스명",
+          "minLength": 1,
+          "title": "Service Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "roles",
+        "service_ref"
+      ],
+      "title": "FixtureSubscriber",
+      "type": "object"
+    },
     "Media": {
       "additionalProperties": false,
       "properties": {
@@ -635,6 +870,36 @@
   },
   "additionalProperties": false,
   "properties": {
+    "fixtures": {
+      "additionalProperties": {
+        "discriminator": {
+          "mapping": {
+            "access_service": "#/$defs/FixtureAccessService",
+            "phone_group": "#/$defs/FixturePhoneGroup",
+            "role": "#/$defs/FixtureRole",
+            "subscriber": "#/$defs/FixtureSubscriber"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/FixturePhoneGroup"
+          },
+          {
+            "$ref": "#/$defs/FixtureRole"
+          },
+          {
+            "$ref": "#/$defs/FixtureSubscriber"
+          },
+          {
+            "$ref": "#/$defs/FixtureAccessService"
+          }
+        ]
+      },
+      "description": "시험 픽스처 — 키 = 이름(소문자·숫자·_), 값 = kind 별 선언. run 직전 대상 CSC 관리 API 로 적용·확인, run 뒤 복원",
+      "title": "Fixtures",
+      "type": "object"
+    },
     "flow": {
       "items": {
         "$ref": "#/$defs/Step"

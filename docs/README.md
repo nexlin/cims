@@ -77,6 +77,7 @@ docs/
 - 테스트베드(.48) 단말 대면 TLS 인증서 — Service CA 발급 절차(단말 로그인 실패 원인·.45 에서 이어 할 절차): `dev/testbed_48_ue_tls_cert.md`
 - OAM API 로 패키지 등록·배포 업그레이드·설정 컬렉션 주입(콘솔 없이, `scripts/oam-deploy.py`): `dev/oam_api_deploy_runbook.md`
 - 테스트베드(.48) 계측기 토폴로지 초안(호스트·대상 노드·풀·다이얼 플랜): `dev/testbed_48_tester_topology.yaml`
+- 테스트베드(.48) 계측기 검증 계획 — 현 상태(pass/미실측/토폴로지 빈칸)·단계 0~5·결정 필요 항목·회귀 표: `dev/testbed_48_tester_verification_plan.md`
 - 콘솔 메뉴 구조:
   - `대시보드` / `가입자관리` / `서비스` / `통계`
   - `패키징` (`/release/...`) — 검증 실행 / 검증 이력 / 빌드 & 패키징

@@ -1,5 +1,5 @@
 # 당겨받기 그룹 경계 (volte_supplementary_services.md §5.1) — 다른 pickup_group 의 단말이 <code><B 번호> 지정 픽업을 하면 403, 재고정 없음.
-#   picker 역할의 신원을 caller/callee 와 다른 pickup_group 에 두어야 뜻이 있다(검증 S3-SCN-PICKUP P3 가 픽스처로 부여한다).
+#   picker 역할의 신원을 caller/callee 와 다른 pickup_group 에 두어야 뜻이 있다(아래 fixtures — 검증 S3-SCN-PICKUP P3).
 id: VOLTE-PICKUP-DIRECTED-DENIED
 title: 당겨받기 타 그룹 지정 픽업 → 403
 tags: [volte, pickup]
@@ -13,3 +13,6 @@ flow:
   - { step: wait,       seconds: 2 }
   - { step: pickup,     from: picker, to: callee, payload: "${pickup_code}", expect: { code: 403 } }
   - { step: bye,        from: caller }
+fixtures:                              # picker 는 다른 픽업 그룹 — 그룹 경계 403
+  pg_a: { kind: phone_group, members: [caller, callee] }
+  pg_b: { kind: phone_group, members: [picker] }

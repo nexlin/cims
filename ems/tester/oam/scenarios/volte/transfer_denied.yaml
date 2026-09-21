@@ -1,5 +1,5 @@
 # 호 전달 권한 게이트 (volte_supplementary_services.md §6.3) — 전달자의 접속서비스가 transfer_allowed=false 면 REFER 는 403 이고 원 통화 A–B 는 유지된다.
-#   전달자 역할의 신원을 그 서비스의 가입자로 두어야 뜻이 있다(검증 S3-SCN-XFER X3 는 A 의 service_ref 를 시드 서비스로 플립한 뒤 이 시나리오를 돈다).
+#   전달자 신원의 서비스는 아래 fixtures 가 transfer_allowed=false 변종으로 바꾼다(검증 S3-SCN-XFER X3).
 id: VOLTE-XFER-DENIED
 title: 호 전달 거절 (transfer_allowed=false → REFER 403, 원 통화 유지)
 tags: [volte, xfer]
@@ -15,3 +15,6 @@ flow:
   - { step: refer,      from: transferor, to: target, expect: { code: 403 } }
   - { step: media_hold, seconds: "${ht}", expect: { rtp_loss_pct: { max: 1 } } }     # 원 통화 A–B 그대로
   - { step: bye,        from: transferor }
+fixtures:                              # transferor 의 서비스 복제본(transfer_allowed=false)을 대상 CSP 컬렉션에 넣고 transferor 회선을 그 서비스로(끝나면 원복)
+  noxfer: { kind: access_service, from_role: transferor, set: { transfer_allowed: false } }
+  line:   { kind: subscriber, roles: [transferor], service_ref: noxfer }

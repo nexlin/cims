@@ -333,6 +333,7 @@ export function toYaml(sc: Doc): string {
     L.push(`  - { step: ${(step + ',').padEnd(w + 1)} ${body} }`)
   }
   if (sc.target_evidence && sc.target_evidence.length) { L.push('target_evidence:'); for (const e of sc.target_evidence) L.push(`  - ${yv(e)}`) }
+  if (sc.fixtures && Object.keys(sc.fixtures).length) { L.push('fixtures:'); for (const [k, f] of Object.entries(sc.fixtures)) L.push(`  ${k}: ${yv(f)}`) }
   return L.join('\n') + '\n'
 }
 /** YAML 원문의 머리 주석(첫 키 앞 # 줄) */

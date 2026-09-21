@@ -12,6 +12,16 @@ function dur(s?: number | null): string {
   return m < 60 ? `${m}m ${s % 60}s` : `${Math.floor(m / 60)}h ${m % 60}m`
 }
 
+/** 픽스처 한 줄 — 컨트롤러 tester_fixtures.summarize 와 같은 요지 */
+function fixtureLabel(f: { key: string; kind: string } & Record<string, unknown>): string {
+  const users = (k: string) => ((f[k] as { user: string }[] | undefined) ?? []).map(x => x.user).join(',')
+  if (f.kind === 'phone_group') return `${f.id}[${users('members')}]${f.pilot ? ` 대표번호 ${f.pilot}` : ''}${f.overflow ? ` overflow ${(f.overflow as { user: string }).user}` : ''}`
+  if (f.kind === 'role') return `${f.id}(monitor_call=${f.monitor_call}, ptt_listen=${f.ptt_listen}) → ${users('assign')}`
+  if (f.kind === 'subscriber') return `service_ref=${f.service_ref} ← ${users('lines')}`
+  if (f.kind === 'access_service') return `${f.name} = ${f.from_user} 서비스 복제 + ${JSON.stringify(f.set)}`
+  return `${f.key}:${f.kind}`
+}
+
 export default function PlanPreview({ plan, loading, compact }: { plan: PlanResult | null; loading?: boolean; compact?: boolean }) {
   if (!plan) return <div className="rounded-md border border-border bg-muted p-3 text-xs text-muted-foreground">{loading ? '계획 계산 중…' : '시나리오·토폴로지를 고르면 계획을 미리 봅니다'}</div>
   const inRun = (plan.workers ?? []).filter(w => w.in_run)
@@ -51,6 +61,10 @@ export default function PlanPreview({ plan, loading, compact }: { plan: PlanResu
           </>}
           <span className="text-muted-foreground">대상 시드</span>
           <span className="font-mono">{plan.seed && plan.seed.length ? plan.seed.map(s => `${s.collection}+${s.count}`).join(' · ') + ' (종료 시 복원)' : '없음 (UE 만)'}</span>
+          {plan.fixtures && plan.fixtures.length > 0 && <>
+            <span className="text-muted-foreground">픽스처</span>
+            <span className="font-mono">{plan.fixtures.map(f => fixtureLabel(f)).join(' · ')} (대상 CSC 관리 API — 종료 시 복원)</span>
+          </>}
           <span className="text-muted-foreground">바인딩</span><span className="font-mono">{Object.entries(plan.bindings ?? {}).map(([k, v]) => `\${${k}} = ${String(v)}`).join(' · ') || '없음'}</span>
           {plan.env && plan.env.length > 0 && <><span className="text-muted-foreground">환경변수</span><span className="font-mono">{plan.env.map(e => `${e.env} — ${e.for}`).join(' · ')}</span></>}
           {plan.media && plan.media.modes.length > 0 && (plan.media.modes.some(m => m !== 'auto') || Object.keys(plan.samples ?? {}).length > 0) && <>

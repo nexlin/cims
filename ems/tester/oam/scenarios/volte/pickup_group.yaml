@@ -17,3 +17,5 @@ flow:
   - { step: bye,        from: caller }
 target_evidence:
   - { kind: recording_created, min: 1 }
+fixtures:                              # caller·callee·picker 같은 픽업 그룹(전화 그룹 멤버십 → CSC 가 pickup_group 파생)
+  pg: { kind: phone_group, members: [caller, callee, picker] }

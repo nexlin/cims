@@ -21,7 +21,7 @@ allow_ambient_listening 컬럼 미적용 DB 면 SKIP. 전환 전 스키마(`disp
 
 계측기 경로(CIMS_TESTER_URL 설정 시, test_instrument.md §9): L1/L2/L3/L3c → `PTT-GROUP-LISTEN`/`PTT-GROUP-LISTEN-DENIED`(그룹 밖 역할
 monitor 의 `group_call payload: listen`, listen_pct·floor DENY·수신 RTP 는 시나리오 기대치), L4 → `PTT-GROUP-NONMEMBER-DENIED`. 청취자 M 과
-그룹은 계획 드라이런(identities_by_role.monitor[0]·group_session.first_group)이 준 것에 자격·역할 픽스처를 입힌다. conference SUBSCRIBE
+청취 역할은 시나리오 fixtures(role ptt_listen, 대상 ${group} = 인스턴스가 잡은 첫 그룹)가 대상 CSC 관리 API 로 monitor 의 person 에 배정·복원한다. conference SUBSCRIBE
 정합(L1b/L2b/L3b)·로스터 노출(L5)도 계측기(subscribe conference + check 단계); cspsim 경로는 계측기 미설정일 때.
 """
 from __future__ import annotations
@@ -33,7 +33,7 @@ import time
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 from ...common.cspsim import run_cspsim
-from ...common.tester import tester_config, tester_check, tester_plan
+from ...common.tester import tester_config, tester_check
 from ...common import db as _db
 from ...common.subscribers import MCPTT_DOMAIN
 from ._xfer_common import trio_cred_args, parse_marker_int, FLOW_MIN, DROP_MAX, fmt_checks, emit_checks
@@ -267,71 +267,25 @@ def ptt_listen(ctx: VerifyContext) -> ItemResult:
 
 
 def _via_tester(ctx: VerifyContext, done, state) -> ItemResult:
-    """L1~L5 전부 계측기 — conference SUBSCRIBE 정합(L1b/L2b/L3b)은 PTT-GROUP-LISTEN-ROSTER/CONF-DENIED 의 subscribe conference + check, 로스터 노출(L5)은 check ${roster}."""
+    """L1~L5 전부 계측기 — 청취 역할(ptt_listen listed/none·대상 = 인스턴스 그룹·listen_visibility)은 시나리오 `fixtures:` 가 선언하고 컨트롤러가 대상
+    CSC 관리 API 로 monitor 의 person 에 배정·복원한다(자격 allow_ambient_listening 은 CSC 가 역할에서 동기 — 별도 축이 아니다). conference SUBSCRIBE
+    정합(L1b/L2b/L3b)은 PTT-GROUP-LISTEN-ROSTER/CONF-DENIED 의 subscribe conference + check, 로스터 노출(L5)은 check ${roster}."""
     cfg = tester_config()
-    ctx.w(f"- 경로: 계측기 @ {cfg['url']} · 토폴로지 {cfg['topology']}")
-    try:
-        plan = tester_plan(ctx, "PTT-GROUP-LISTEN", ht=4) or {}
-        group = ((plan.get("group_session") or {}).get("first_group")) or ""
-        mons = (plan.get("identities_by_role") or {}).get("monitor") or []
-        if not group or not mons:
-            raise RuntimeError(f"계획에 그룹/청취자 후보가 없다 (group={group!r}, monitor={mons})")
-    except Exception as e:
-        ctx.w(f"- [FAIL] 계측기 계획 실패: {e}")
-        return done(ItemStatus.FAIL, f"계측기 계획 실패: {e}")
-    M = mons[0]
-    ctx.w(f"- 그룹={group} 청취자 M={M} (계획: 첫 그룹 비멤버 후보 {len(mons)} 명 중 첫째)")
+    ctx.w(f"- 경로: 계측기 @ {cfg['url']} · 토폴로지 {cfg['topology']} — 청취 역할은 시나리오 fixtures(대상 CSC 관리 API, 그룹 = 인스턴스가 잡은 첫 그룹)")
 
-    def check(name: str, scenario: str, label: str) -> tuple:
-        return tester_check(ctx, name, scenario, f"{_RID}/{label}", ht=4)
+    def check(name: str, scenario: str, label: str, binds=None) -> tuple:
+        return tester_check(ctx, name, scenario, f"{_RID}/{label}", ht=4, binds=binds)
 
-    checks = []
-    legacy = False
-    # ── L1: 인가된 청취 (allow=1, 역할 ptt_listen=listed·대상=그룹, hidden) ──
-    with ListenerFixture(ctx.dist_dir, ctx.sim_ip, group, M, 1, "listed", "hidden") as fx:
-        if not fx.active:
-            ctx.w(f"- [SKIP] {fx.reason}")
-            return done(ItemStatus.SKIP, fx.reason)
-        legacy = fx.schema == SCHEMA_DISPATCH
-        ctx.w(f"- 시드 스키마={fx.schema} 역할 role-vfy-lsn-{group} person={fx.fx.persons.get(M, '-')}")
-        checks.append(check("L1 청취 합류 (200, 수신 RTP, floor DENY)", "PTT-GROUP-LISTEN", "L1"))
-    # ── L4: 비멤버 일반 INVITE → 403 (자격·역할 무관) ──
-    checks.append(check("L4 비멤버 일반 INVITE(sendrecv) → 403", "PTT-GROUP-NONMEMBER-DENIED", "L4"))
-    # ── L2: 자격 없음 → 403 ──
-    with ListenerFixture(ctx.dist_dir, ctx.sim_ip, group, M, 0, "listed", "hidden") as fx:
-        if fx.active:
-            checks.append(check("L2 자격 없음(allow_ambient_listening=0) → 403", "PTT-GROUP-LISTEN-DENIED", "L2"))
-    # ── L3: 범위 밖(역할 ptt_listen=none) → 403 ──
-    with ListenerFixture(ctx.dist_dir, ctx.sim_ip, group, M, 1, "none", "hidden") as fx:
-        if fx.active:
-            checks.append(check("L3 범위 밖(역할 ptt_listen=none) → 403", "PTT-GROUP-LISTEN-DENIED", "L3"))
-    # ── L3c: 전화 그룹원이지만 역할 없음(allow=1) → 403 ──
-    name_3c = "L3c 전화 그룹원·역할 없음 → 403"
-    if legacy:
-        checks.append((name_3c, None, "전환 전 스키마(dispatch_groups) — 역할 없음 = 관제 그룹 ptt_listen=none(L3 과 동일)"))
-    else:
-        with ListenerFixture(ctx.dist_dir, ctx.sim_ip, group, M, 1, None) as fx:
-            if fx.active:
-                checks.append(check(name_3c, "PTT-GROUP-LISTEN-DENIED", "L3c"))
-            else:
-                checks.append((name_3c, False, f"전화 그룹 시드 실패 — {fx.reason}"))
-
-    # ── conference SUBSCRIBE 정합(L1b/L2b/L3b)·로스터 노출(L5) — 계측기: PTT-GROUP-LISTEN-ROSTER(subscribe conference 200 + check 로스터 ${roster}),
-    #    PTT-GROUP-LISTEN-CONF-DENIED(subscribe conference 403 + check conference_warning_138). 자격·역할·listen_visibility 는 같은 ListenerFixture
-    with ListenerFixture(ctx.dist_dir, ctx.sim_ip, group, M, 1, "listed", "hidden") as fx:
-        if fx.active:
-            checks.append(tester_check(ctx, "L1b 범위 안 관제사 conference SUBSCRIBE → 200 + 로스터 은닉(hidden) (TS 24.379 §10.1.3.4.1)",
-                                       "PTT-GROUP-LISTEN-ROSTER", f"{_RID}/L1b", ht=4, binds={"roster": "conference_roster_hidden"}))
-    with ListenerFixture(ctx.dist_dir, ctx.sim_ip, group, M, 0, "listed", "hidden") as fx:
-        if fx.active:
-            checks.append(tester_check(ctx, "L2b 자격 없음 conference SUBSCRIBE → 403 + Warning 138", "PTT-GROUP-LISTEN-CONF-DENIED", f"{_RID}/L2b", ht=4))
-    with ListenerFixture(ctx.dist_dir, ctx.sim_ip, group, M, 1, "none", "hidden") as fx:
-        if fx.active:
-            checks.append(tester_check(ctx, "L3b 범위 밖 conference SUBSCRIBE → 403 + Warning 138", "PTT-GROUP-LISTEN-CONF-DENIED", f"{_RID}/L3b", ht=4))
-    with ListenerFixture(ctx.dist_dir, ctx.sim_ip, group, M, 1, "listed", "visible") as fx:
-        if fx.active:
-            checks.append(tester_check(ctx, "L5 공개 청취(listen_visibility=visible) — 로스터 노출", "PTT-GROUP-LISTEN-ROSTER", f"{_RID}/L5", ht=4,
-                                       binds={"roster": "conference_roster_visible"}))
-
+    checks = [
+        check("L1 청취 합류 (200, 수신 RTP, floor DENY)", "PTT-GROUP-LISTEN", "L1"),
+        check("L4 비멤버 일반 INVITE(sendrecv) → 403", "PTT-GROUP-NONMEMBER-DENIED", "L4"),
+        # 역할 모델에서 자격(allow_ambient_listening)은 역할 배정의 결과다 — ptt_listen=none 역할 = 자격 0 + 범위 없음(L2·L3 한 축), 전화 그룹원 여부는 무관(L3c)
+        check("L2/L3 자격·범위 밖(역할 ptt_listen=none → allow_ambient_listening 0) → 403", "PTT-GROUP-LISTEN-DENIED", "L3"),
+        check("L1b 범위 안 관제사 conference SUBSCRIBE → 200 + 로스터 은닉(hidden) (TS 24.379 §10.1.3.4.1)", "PTT-GROUP-LISTEN-ROSTER", "L1b",
+              {"roster": "conference_roster_hidden", "visibility": "hidden"}),
+        check("L2b/L3b 범위 밖 conference SUBSCRIBE → 403 + Warning 138", "PTT-GROUP-LISTEN-CONF-DENIED", "L3b"),
+        check("L5 공개 청취(listen_visibility=visible) — 로스터 노출", "PTT-GROUP-LISTEN-ROSTER", "L5",
+              {"roster": "conference_roster_visible", "visibility": "visible"}),
+    ]
     all_ok = emit_checks(ctx, checks)
     return done(ItemStatus.PASS if all_ok else ItemStatus.FAIL, fmt_checks(checks))

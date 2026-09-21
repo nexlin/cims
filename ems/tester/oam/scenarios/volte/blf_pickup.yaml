@@ -17,3 +17,5 @@ flow:
   - { step: bye,        from: caller }
 target_evidence:
   - { kind: recording_created, min: 1 }
+fixtures:                              # 감시 인가 = 같은 전화 그룹(규칙 1) — caller·callee·picker
+  pg: { kind: phone_group, members: [caller, callee, picker] }

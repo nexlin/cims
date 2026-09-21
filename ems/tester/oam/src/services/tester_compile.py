@@ -19,6 +19,7 @@ import re
 from typing import Dict, List, Optional, Tuple
 
 from services import tester_store as store
+from services import tester_fixtures
 from services.tester_models import (LoadProfile, Scenario, Topology, PoolCreate, RunStart, CompiledStep, Identity,
                                     TrunkRegister, WorkerPeer, WorkerPeerBind, WORKER_STEPS, Role, CHECK_KINDS)
 
@@ -495,6 +496,49 @@ def check_dial_gates(scenario: Scenario, topology: Topology, role_pool: Dict[str
                                f'대상 접속서비스 country_code 와 같은 값을 토폴로지에 둔다')
 
 
+def check_fixture_gates(scenario: Scenario, topology: Topology, role_pool: Dict[str, str]) -> None:
+    """픽스처 게이트 — 대상이 cims 이고 oam 노드(CSC 관리 API 게이트웨이)가 있어야 하며, 참조 역할은 UE 풀(피어는 가입자가 아니다).
+    전화 그룹 멤버·overflow 는 전화 회선(volte/voip) — PTT 회선은 픽업·대표번호 축이 아니다."""
+    if not scenario.fixtures:
+        return
+    if topology.target.kind != 'cims' or topology.oam_ref() is None:
+        raise CompileError('fixtures 가 있는 시나리오는 kind=cims 대상 + oam 노드(CSC 관리 API 게이트웨이)가 필요하다')
+    for key, f in scenario.fixtures.items():
+        refs = []
+        if f.kind == 'phone_group':
+            refs = [*f.members, *([f.overflow] if f.overflow else [])]
+        elif f.kind == 'role':
+            refs = list(f.assign)
+        elif f.kind == 'subscriber':
+            refs = list(f.roles)
+        elif f.kind == 'access_service':
+            refs = [f.from_role]
+        for r in refs:
+            pn = role_pool.get(r)
+            if pn is None:
+                continue
+            kind = topology.pools[pn].kind
+            if kind not in ('ue', 'real-ue'):
+                raise CompileError(f'fixtures.{key}: 역할 {r!r} 의 풀 {pn} 은 {kind} — 픽스처 대상은 가입자(UE 풀)여야 한다')
+            if f.kind == 'phone_group' and topology.pool_service(pn) == 'ptt':
+                raise CompileError(f'fixtures.{key}: 전화 그룹 멤버 {r!r} 의 풀 {pn} 은 service=ptt — 전화 회선(volte/voip)이어야 한다')
+
+
+def role_identity_lists(scenario: Scenario, ranges: Dict[str, Tuple[str, int, int]], ids_of, first_group: Optional[str]) -> Dict[str, List[dict]]:
+    """역할 → 그 창의 신원(**워커 배정 순** — [0] 이 단발 첫 인스턴스가 쓰는 신원). 워커 free 목록은 창의 끝에서부터 꺼내므로(pop_back) 뒤집고,
+    그룹 밖 역할(member: false)은 워커가 첫 그룹의 비멤버를 신원 순으로 고르므로 그 후보만."""
+    guests = set(scenario.guest_roles())
+    out: Dict[str, List[dict]] = {}
+    for role, (pool, b, e) in ranges.items():
+        window = ids_of(pool)[b:e]
+        if role in guests:
+            window = [x for x in window if x.get('ptt_group') != first_group]
+        else:
+            window = list(reversed(window))
+        out[role] = [{'user': x.get('user'), 'domain': x.get('domain'), 'ptt_group': x.get('ptt_group')} for x in window if x.get('user')]
+    return out
+
+
 def check_fd_gates(scenario: Scenario, topology: Topology, role_pool: Dict[str, str], ids_of) -> None:
     """MCData FD 단계 게이트 — fd_send 의 from · fd_recv(download) 의 who 는 ① 풀이 CSC 에 닿아야 하고(target_csc — subscriber 노드 api)
     ② 신원 전부에 IdMS 로그인(login)이 있어야 한다(토큰 없이는 /mcdata/fd 가 401). fd_recv payload signal 은 도착만 보므로 ②를 요구하지 않는다."""
@@ -528,7 +572,6 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
     bindings = dict(bindings or {})
     if profile is not None and profile.ht is not None and 'ht' not in bindings:
         bindings['ht'] = profile.ht
-    steps = compile_steps(scenario, bindings)
     samples = run_samples(scenario, topology)
 
     per_worker_roles, why = resolve_roles(scenario, topology)
@@ -578,6 +621,7 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
         check_kind_gates(scenario, topology, role_pool)
         check_fd_gates(scenario, topology, role_pool, ids_of)
         check_dial_gates(scenario, topology, role_pool)
+        check_fixture_gates(scenario, topology, role_pool)
         sizes = {pn: len(ids_of(pn)) for pn in set(role_pool.values())}
         if group_session:
             # 그룹 세션 — 멤버 역할은 신원 창을 나누지 않는다(그룹 멤버가 풀 전체에 걸쳐 있다). 멤버 역할 = 그룹 풀 전체, 배정은 워커가 그룹 단위로.
@@ -596,6 +640,20 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
         else:
             ranges = role_ranges(scenario.roles, role_pool, sizes)
         per_worker[w.name] = {'role_pool': role_pool, 'ranges': ranges}
+
+    # 역할 → 신원 목록(워커 배정 순) + 픽스처 — 첫 후보 워커의 첫 신원이 픽스처(전화 그룹·역할 배정)를 입는 신원이다
+    first_group = next(iter(groups_info.values()))['first_group'] if groups_info else None
+    role_identities: Dict[str, List[dict]] = {}
+    for w in cand:
+        for role, lst in role_identity_lists(scenario, per_worker[w.name]['ranges'], ids_of, first_group).items():
+            role_identities.setdefault(role, []).extend(lst)
+    role_first = {r: (lst[0] if lst else {}) for r, lst in role_identities.items()}
+    bindings.update(tester_fixtures.derive_bindings(scenario, role_first, bindings))
+    try:
+        fixtures = tester_fixtures.resolve(scenario, role_first, bindings, first_group)
+    except tester_fixtures.FixtureError as e:
+        raise CompileError(str(e))
+    steps = compile_steps(scenario, bindings)
 
     # 워커 배분(율·단발 인스턴스) — cpus 가중(없으면 health max_endpoints/200, 그것도 없으면 1)
     def weight(w) -> float:
@@ -671,6 +729,7 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
             'bindings': bindings, 'max_instances': max_instances,
             'identities': {p: len(v) for p, v in identities.items()}, 'peer_pools': peer_pools, 'pinned': pinned,
             'samples': samples, 'resolve_notes': why,
+            'role_identities': {r: [x['user'] for x in lst] for r, lst in role_identities.items()}, 'fixtures': fixtures,
             'group_session': ({'workers': groups_info, 'usable': sum(g['usable'] for g in groups_info.values()),
                                'groups': sum(g['groups'] for g in groups_info.values()),
                                'need_members': max(g['need_members'] for g in groups_info.values()),

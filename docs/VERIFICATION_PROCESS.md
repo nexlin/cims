@@ -217,7 +217,9 @@ S2 FAIL → S3~S6 BLOCKED.
   `verify/lib/items/stage3/_dispatch_common.py` 로 DB 에 직접 시드하고 CSP 에 `PHONE_GROUP_CHANGED`/`ROLE_CHANGED`/
   `USER_CHANGED` 를 보낸다(자기복원 — 시드분 삭제 + 종전 멤버십·pickup_group·person 의 종전 배정 복원). 스키마 프로브:
   신 테이블 없이 `dispatch_groups` 만 있으면 전환 전 스키마로 같은 의미를 시드(관제 그룹 범위 열, `DISPATCH_GROUP_CHANGED`),
-  둘 다 없으면 SKIP. cspsim `hunt`/`monitor`/`ptt_listen` 시나리오의 RTP delta·최종 응답 마커로 판정.
+  둘 다 없으면 SKIP. cspsim `hunt`/`monitor`/`ptt_listen` 시나리오의 RTP delta·최종 응답 마커로 판정. 이 DB 직접 시드는 **cspsim 경로(개발
+  스택) 한정**이다 — 계측기 경로(`CIMS_TESTER_URL` 설정)는 전화 그룹·역할·service_ref 전제를 시나리오 `fixtures:` 가 선언하고 계측기 컨트롤러가
+  대상 CSC 관리 API(운영 프로비저닝 경로)로 적용·복원한다([test_instrument.md §4](design/features/test_instrument.md)).
   FA = 전화 그룹 `pg-verify-a`(역할 없음) 대표번호 병렬 호출(F1 승자·CANCEL, F3 무응답 overflow, F5 링잉 대표번호 호
   지정 픽업, F6 sequential alerting 단계 시한, F7 그룹원 dialog 정합), MONITOR = 업무망 합법감청(대상 그룹 `pg-verify-a`
   A·B — M2 역할 `role-verify-mon` monitor_call=all 의 Join 200·SSRC 2개·A/B 무영향, M5a 범위 밖 역할 `role-verify-out`

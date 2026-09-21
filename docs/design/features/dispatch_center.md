@@ -1049,8 +1049,9 @@ cspsim 시나리오(3~4 단말)와 S3 항목. 판정 정본은 기존 방식 그
 `S3-SCN-PTT-LISTEN` 은 S3-SEED 의 PTT 자격 창(멤버 A·B)과 대상 그룹의 **비멤버** PTT 가입자(M)를 쓰고, M 의 관제
 역할(`role-vfy-lsn-<group>`, `ptt_listen` 대상 = 그 그룹)과 `ptt_user_profile.allow_ambient_listening` 을 검사별로 시드·복원한다.
 
-세 항목은 각자 공용 픽스처(`verify/lib/items/stage3/_dispatch_common.py` `DispatchFixture`)로 전화 그룹·역할을 DB 에
-직접 시드하고 종료 시 복원한다(자기복원 — S3-SEED 는 관여하지 않는다): `S3-SCN-FA` = `pg-verify-a`(대표번호, 역할 없음 —
+세 항목의 cspsim 경로는 각자 공용 픽스처(`verify/lib/items/stage3/_dispatch_common.py` `DispatchFixture`)로 전화 그룹·역할을 DB 에
+직접 시드하고 종료 시 복원한다(자기복원 — S3-SEED 는 관여하지 않는다; 개발 스택 한정). 계측기 경로는 시나리오 `fixtures:` 가 같은 전제를
+선언하고 컨트롤러가 CSC 관리 API — 운영자와 같은 프로비저닝 경로 — 로 적용·복원한다([test_instrument.md §4](test_instrument.md)): `S3-SCN-FA` = `pg-verify-a`(대표번호, 역할 없음 —
 포크·픽업·그룹원 BLF 는 규칙 1) / `S3-SCN-MONITOR` = `pg-verify-a`(A·B) + `role-verify-mon`(`monitor_call=all`, M 의 person
 배정) + M5 대조군(`pg-verify-b` 의 M' — `role-verify-out` own / 역할 없음 / 같은 그룹원이지만 역할 없음) /
 `S3-SCN-PTT-LISTEN` = `role-vfy-lsn-<group>`(`ptt_listen=listed`+대상) 또는 역할 없는 `pg-vfy-lsn-<group>`. 배정은 회선의

@@ -56,7 +56,7 @@ from services import tester_store as store
 from services.tester_bus import TESTER_BUS
 from services.tester_models import (SCHEMAS, schema_json, validate, RunRequest, STEP_VOCAB, STEP_GROUPS, METRIC_NAMES, REAL_UE_STEPS,
                                     METRIC_LABELS, RATIO_METRICS, WORKER_STEPS, DURING_STEPS, Q850_CAUSES, AUDIO_CODECS,
-                                    VIDEO_CODECS, RTP_MODES, SAMPLE_CODECS, CHECK_KINDS)
+                                    VIDEO_CODECS, RTP_MODES, SAMPLE_CODECS, CHECK_KINDS, FIXTURE_KINDS)
 from services.tester_run import RUNS
 from services import tester_workers
 from services import tester_check
@@ -485,6 +485,8 @@ def scenario_vocab() -> dict:
         'rtp_modes': list(RTP_MODES), 'sample_codecs': list(SAMPLE_CODECS),
         'evidence_kinds': ['recording_created', 'log_errors', 'alarm_raised', 'event_logged', 'rss_growth_mb', 'fd_growth'],
         'check_kinds': list(CHECK_KINDS),
+        'fixture_kinds': list(FIXTURE_KINDS),
+        'fixture_scopes': ['none', 'own', 'listed', 'all'], 'listen_visibility': ['hidden', 'visible'],
         'profile_models': ['constant', 'step', 'ramp', 'soak', 'burst'],
         'pool_kinds': ['ue', 'peer', 'real-ue'], 'peer_profiles': ['ibcf', 'pbx', 'mgcf'],
         'transports': ['udp', 'tcp', 'tls'], 'srtp': ['off', 'optional', 'required'],

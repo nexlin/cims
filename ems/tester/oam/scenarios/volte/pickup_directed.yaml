@@ -14,3 +14,5 @@ flow:
   - { step: pickup,     from: picker, to: callee, payload: "${pickup_code}", expect: { code: 200 } }
   - { step: media_hold, seconds: "${ht}", expect: { rtp_loss_pct: { max: 1 } } }
   - { step: bye,        from: caller }
+fixtures:
+  pg: { kind: phone_group, members: [caller, callee, picker] }

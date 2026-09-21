@@ -1,5 +1,5 @@
 # PTT 청취 — 자격 없음/범위 밖 관제사의 conference SUBSCRIBE 거절(S3-SCN-PTT-LISTEN L2b/L3b 의 계측기 경로): 그룹 밖 관제사(monitor)가 진행 중인
-#   그룹 세션의 그룹 AoR 에 conference SUBSCRIBE → 403 + Warning 138(TS 24.379 §10.1.3.4.1 — 범위 밖). 자격·역할은 검증 픽스처가 시드한다.
+#   그룹 세션의 그룹 AoR 에 conference SUBSCRIBE → 403 + Warning 138(TS 24.379 §10.1.3.4.1 — 범위 밖). 역할은 아래 fixtures(ptt_listen=none).
 id: PTT-GROUP-LISTEN-CONF-DENIED
 title: PTT 청취 — 비인가 관제사 conference SUBSCRIBE 403 + Warning 138
 tags: [ptt, dispatch, listen, conference]
@@ -13,3 +13,5 @@ flow:
   - { step: subscribe,  who: [monitor], payload: conference, expect: { code: 403 } }
   - { step: check,      who: [monitor], payload: conference_warning_138, expect: { check_pct: 100 } }
   - { step: bye,        from: talker }
+fixtures:                              # 범위 밖 관제사(역할 ptt_listen=none) — conference SUBSCRIBE 403 + Warning 138
+  lsn: { kind: role, ptt_listen: none, assign: [monitor] }

@@ -11,7 +11,7 @@ A→B 통화를 세운 뒤 A 가 REFER 로 상대를 C 에게 넘긴다. 서버(
 cspsim 3 단말(A,B,C)은 같은 org(픽업 그룹 축 무관)이며 dev DB 가입자에서 고른다.
 
 계측기 경로(test_instrument.md §9 — `CIMS_TESTER_URL`·`CIMS_TESTER_TOPOLOGY`): X1 → `VOLTE-XFER-BLIND`, X2 → `VOLTE-XFER-ATTENDED`,
-X3 → 계획 드라이런으로 transferor 역할의 신원을 얻어 service_ref 를 플립한 뒤 `VOLTE-XFER-DENIED`(REFER 403 기대). 판정 = 계측기 verdict.
+X3 → `VOLTE-XFER-DENIED`(REFER 403 기대) — 서비스 변종·service_ref 전환은 시나리오 fixtures 가 대상 CSC 관리 API 로 적용·복원. 판정 = 계측기 verdict.
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 from ...common import db as _db
 from ...common.cspsim import run_cspsim
-from ...common.tester import tester_config, tester_check, tester_role_identities
+from ...common.tester import tester_config, tester_check
 from ...common.access_services import NOXFER_SERVICE_REF
 from ...common.subscribers import get_service_ref, set_service_ref
 from ._xfer_common import (
@@ -141,35 +141,12 @@ def xfer(ctx: VerifyContext) -> ItemResult:
 
 
 def _via_tester(ctx: VerifyContext, done) -> ItemResult:
-    """계측기 경로 — 전달 3검사를 동봉 시나리오로. X3 는 계획의 transferor 신원 전부를 transfer_allowed=false 서비스로 플립한 뒤 돈다."""
+    """계측기 경로 — 전달 3검사를 동봉 시나리오로. X3 의 transfer_allowed=false 서비스 변종과 transferor 의 service_ref 전환은 시나리오 `fixtures:`
+    (access_service + subscriber)가 선언하고 컨트롤러가 대상 CSP 컬렉션·CSC 관리 API 로 적용·복원한다 — S3-SEED 의 dev 시드 서비스에 의존하지 않는다."""
     cfg = tester_config()
-    ctx.w(f"- 경로: 계측기 @ {cfg['url']} · 토폴로지 {cfg['topology']}")
+    ctx.w(f"- 경로: 계측기 @ {cfg['url']} · 토폴로지 {cfg['topology']} — X3 서비스 변종은 시나리오 fixtures")
     checks = [tester_check(ctx, "X1 blind 전달", "VOLTE-XFER-BLIND", f"{_RID}/X1", ht=4),
-              tester_check(ctx, "X2 attended 전달", "VOLTE-XFER-ATTENDED", f"{_RID}/X2", ht=4)]
-    if not _noxfer_seeded(ctx.dist_dir):
-        checks.append(("X3 transfer_allowed=false 403", None,
-                       f"접속서비스 '{NOXFER_SERVICE_REF}' 미시드 (S3-SEED with_noxfer) — 게이트 검사 생략"))
-    else:
-        db_cfg = _db.csp_db_config(ctx.dist_dir)
-        try:
-            users = (tester_role_identities(ctx, "VOLTE-XFER-DENIED", ht=4) or {}).get("transferor") or []
-            if not users:
-                raise RuntimeError("계획에 transferor 신원이 없다")
-            orig = {u: get_service_ref(db_cfg, VOLTE_TABLE, u) for u in users}
-            missing = [u for u, r in orig.items() if not r]
-            if missing:
-                raise RuntimeError(f"service_ref 조회 실패: {missing}")
-        except Exception as e:
-            checks.append(("X3 transfer_allowed=false 403", False, f"계측기 계획/신원 준비 실패: {e}"))
-        else:
-            try:
-                for u in users:
-                    set_service_ref(db_cfg, VOLTE_TABLE, u, NOXFER_SERVICE_REF)
-                    notify_user_changed(ctx.sim_ip, u)
-                checks.append(tester_check(ctx, "X3 transfer_allowed=false 403", "VOLTE-XFER-DENIED", f"{_RID}/X3", ht=4))
-            finally:
-                for u, r in orig.items():
-                    set_service_ref(db_cfg, VOLTE_TABLE, u, r)
-                    notify_user_changed(ctx.sim_ip, u)
+              tester_check(ctx, "X2 attended 전달", "VOLTE-XFER-ATTENDED", f"{_RID}/X2", ht=4),
+              tester_check(ctx, "X3 transfer_allowed=false 403", "VOLTE-XFER-DENIED", f"{_RID}/X3", ht=4)]
     all_ok = emit_checks(ctx, checks)
     return done(ItemStatus.PASS if all_ok else ItemStatus.FAIL, fmt_checks(checks))
