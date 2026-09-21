@@ -1531,6 +1531,16 @@ def job_install(params: dict, oam_url: str, session_token: str) -> tuple:
                         if os.path.isfile(s) and not os.path.exists(d):
                             shutil.copy2(s, d)
                             migrated += f" +{fn}"
+                # ①-b 모듈 자원 파일(운영자 안내음성 announcements/ — agent /module-file 가 둔 것, announcements.md §7.3)
+                #    → 신규 버전으로 이어받는다. 카탈로그(config/announcements.jsonl)와 짝이라 둘 중 하나만 옮기면 MEDIA_NOT_FOUND 가 난다.
+                src_ann = os.path.join(src, "announcements")
+                dst_ann = os.path.join(install_path, "announcements")
+                if os.path.isdir(src_ann) and not os.path.isdir(dst_ann):
+                    try:
+                        shutil.copytree(src_ann, dst_ann)
+                        migrated += " +announcements"
+                    except OSError as e:
+                        print(f"[agent] announcements carry-over failed: {e}", flush=True)
                 # ② deployment overlay (<pkg>/config.json; legacy 는 root config.json)
                 #    params.config 가 오면 그 값이 SoT — 이관 생략.
                 if not params.get("config"):
@@ -5277,10 +5287,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             # 모듈 자원 파일 목록(이름·크기·sha256) — OAM 안내음성 라이브러리의 노드 대조 (announcements.md §7.3)
             install_path = (q.get("install_path") or [""])[0]
             rel = (q.get("dir") or ["announcements/op"])[0]
-            target = self._module_file_target(install_path, rel.rstrip("/") + "/.")
-            if not target:
+            d = self._module_file_target(install_path, rel.rstrip("/"))   # 디렉토리 자체(realpath 는 뒤의 "/." 를 접는다)
+            if not d:
                 return self._respond(400, {"error": "bad_path"})
-            d = os.path.dirname(target)
             files = []
             if os.path.isdir(d):
                 import hashlib as _hl

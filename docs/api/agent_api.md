@@ -222,6 +222,7 @@ collection(jsonl)과 나란한 **바이너리 자원** 통로 — OAM 안내음�
 | DELETE | `/module-file?install_path=&path=…` | 파일 제거(없으면 404) |
 
 배포 순서 = 파일 PUT(없거나 지문 다른 것만) → `PUT /collection?name=announcements`(`signal:true` → SIGUSR1) → CMP 가 카탈로그·파일을 재적재한다.
+모듈 버전 업그레이드(`install` 의 이전 버전 이관)는 collection jsonl 과 함께 `<install_path>/announcements/` 도 새 버전으로 복사한다 — 카탈로그와 파일이 짝이라 한쪽만 옮기면 CMP 가 `MEDIA_NOT_FOUND` 를 낸다.
 
 ### `update_ha` 의 `ha_intent`
 

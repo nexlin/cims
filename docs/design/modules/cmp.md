@@ -985,7 +985,7 @@ SIP-I(ISUP 캡슐화) 트렁크는 미디어 문제가 아니라 CIMS 가 MGCF �
 CSP(MRFC)가 `RELAY_PLAY` 로 지시하면 relay 세션의 peer leg 하나에 재생기를 붙여 카탈로그 음원을 그 leg 코덱의 RTP 로 낸다
 ([../../api/cmp_media_api.md](../../api/cmp_media_api.md) §6.7). 실패 안내(early media 뒤 원코드)·보류 음악·서버 링백이 전부 이 하나로 나간다.
 
-- **`PAnnCatalog`** — `<AnnouncementDir>/sys/catalog.jsonl`(패키지 동봉 12종: 한국 신호음 5·TTS 안내 6·보류 음악) + `config/announcements.jsonl`
+- **`PAnnCatalog`** — `<AnnouncementDir>/sys/catalog.jsonl`(패키지 동봉 12종: 한국 신호음 5·TTS 안내 6·보류 음악) + `<install_path>/config/announcements.jsonl`
   (운영자 등록 — OAM 라이브러리가 agent `/collection` 으로 내린다)을 읽어 코덱별 20 ms 프레임 열로 **전량 메모리 상주**(재생 경로 디스크 I/O 없음).
   PCMU/PCMA/G722 = 160 B, AMR-WB = RFC 4867 저장 형식 프레임(NO_DATA 는 빈 프레임 — 무송신). 재적재 = SIGUSR1·`ANN_RELOAD`, 진행 중 재생은 shared_ptr
   스냅샷을 들고 있어 끊기지 않는다. 누락·형식 오류 항목은 빼고 적재하며 A-PRC-034 를 연다(STATS `detail.ann_catalog.missing`).

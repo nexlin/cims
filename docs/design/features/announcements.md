@@ -337,6 +337,10 @@ CMake `dist` 가 `dist/cmp/announcements/sys/` 에 복사하고, OAM 패키지�
   대조는 `GET /module-files?install_path=&dir=announcements/op`(name·size·sha256 — 라이브러리 지문과 비교해 **없거나 다른 파일만** 올린다), 카탈로그는 기존
   `PUT /collection?name=announcements`(`signal:true` → SIGUSR1 → CMP 재적재). CMP 배포 레코드 = package name `cmp`(없으면 process_name `CMP`·설치 경로 `/cmp/`).
   `DELETE /module-file` 로 걷는다(`?undeploy=1`). 노드 상태 = `ok|partial|missing|unreachable`.
+- **CMP 쪽 자리** = 배포 레이아웃 `<install_path>/`(버전 디렉토리) 아래 `config/announcements.jsonl`(카탈로그 컬렉션) + `announcements/op/*`(파일). CMP 는 자기 설정 파일
+  위치(`<install_path>/cmp/config/cmp.json`)에서 두 층 위를 install_path 로 보고 그 둘을 읽는다(`PCmpServer::annInstallRoot` — `config/`·`cmp/` 가 있는 배포 레이아웃일 때만,
+  스크래치 실행은 모듈 자기 `config/announcements.jsonl`·`announcements/` 폴백). 카탈로그 행의 `files` 경로는 `op/<file>`(운영자 루트 기준). agent 는 모듈 **버전 업그레이드 때
+  collection jsonl 과 함께 `announcements/` 를 새 버전으로 이어받는다**(둘 중 하나만 옮기면 `MEDIA_NOT_FOUND`).
 - **콘솔** `/service/announcements`(CIMS 서비스 팩, 서비스 섹션) : 목록·청취(마스터 WAV 를 인증 fetch → Blob)·WAV 등록(P.56 정규화 권장값 안내 -26·신호음 -16·음악 -20)·
   삭제(노드 파일도 걷음)·[CMP 배포] + 노드별 보유 띠. `Setup.Announcement.Rules` 의 tone/media 는 이 id 를 쓴다.
 - 설정 `Announcements.SampleConv`(변환기 경로 — 기본 패키지 `native/`, 개발 트리 `build/bin`).
@@ -396,7 +400,8 @@ CMake `dist` 가 `dist/cmp/announcements/sys/` 에 복사하고, OAM 패키지�
 | ⑥ OAM 라이브러리 | base OAM `services/announcements.py`·`handlers/announcements.py`(`/api/v1/announcements`)·agent `/module-files`·`/module-file`(GET/PUT/DELETE)·`_agent_proxy_call raw`·콘솔 `/service/announcements`(`AnnouncementsPage`)·`Announcements.SampleConv` | 서비스 오프라인 시험(등록·중복 409·삭제·sys 보호) pass · 콘솔 tsc pass · 노드 배포는 agent 0.2.103 배포 뒤 실측 |
 | ⑦ 문서 | 본 문서 · cmp_media_api §1.1/§5.1/§5.4/§6.7/§8/§9 · cmp.md §1.1/§9/§12 · csp.md §1.1/§3.1/§3.12/§6.0 · volte_flows C9/C10 · sip_service_model §2-2/§2-9 · agent_api Sync REST · alarm_catalog A-PRC-034·A-QOS-002 ann_pool · VERIFICATION_PROCESS S3-SCN-ANN · CLAUDE.md | — |
 
-| ⑧ P2 선반영 | 통화중대기 시그널링(Alert-Info + 발신자 `call_waiting` 안내/링백) · 가입자 링백(`ringback_media` 컬럼·CSC API·CSP 해석) · 감사 이벤트 E-AUD-017(등록·삭제·배포) · CSP 모니터 `MC_SIP_STATS` 에 `ann_started/ann_fallback/ann_active_*` | 빌드·단위시험 pass, 실측은 배포 뒤 |
+| ⑧ P2 선반영 | 통화중대기 시그널링(Alert-Info + 발신자 `call_waiting` 안내/링백) · 가입자 링백(`ringback_media` 컬럼·CSC API·CSP 해석) · 감사 이벤트 E-AUD-017(등록·삭제·배포) · CSP 모니터 `MC_SIP_STATS` 에 `ann_started/ann_fallback/ann_active_*` | 빌드·단위시험 pass · 라이브 CSP 로그에 통화중 착신의 `call waiting (Alert-Info)` 판정 확인 |
+| ⑨ 라이브 배포 실측 (.48 관리평면, 2026-09-21) | cmp 0.2.93 · csp 0.2.141 · csc 0.2.118 · oam 0.2.152 · agent 0.2.104 · oam-cims-tester 0.1.22 · cims-tester-worker 0.1.17 | 없는 번호 → 183+SDP → 6.16 s 안내 → 404(cspsim) · 계측기 `VOLTE-ANN-NOTFOUND` 4/4 pass · `VOLTE-ANN-NO-ANSWER`(착신 480 → 안내 → 480, early_media/early_rtp 100 %) 4/4 pass · 라이브러리 등록 → `/deploy`(파일 4 + 카탈로그 + SIGUSR1) → CMP STATS `ann_catalog.ids` 에 `op:` 포함(13 media) → `/nodes` presence ok → 재배포 idempotent(pushed []) → `DELETE ?undeploy=1` 로 노드 파일 회수·12 media · 감사 E-AUD-017 3건 |
 
-**남은 것(P1 실측)** = 보류 음악·서버 링백의 단말 실측(cspsim 에 hold 트리거가 없다 — 실단말 또는 계측기 `hold`/`resume` 단계), 배포 뒤 노드 배포·콘솔 등록 실측, CSP SipStats 에 `ann_started/ann_fallback` 노출.
-패키지 버전 = cmp 0.2.92 · csp 0.2.140 · oam 0.2.152 · agent 0.2.103 · oam-cims-tester 0.1.21 · cims-tester-worker 0.1.16 (라이브 배포는 정지창 — 안내 없는 구 CMP 와 새 CSP 의 혼용은 `resource.ann` 미광고로 안전하게 폴백한다).
+**남은 것(P1 실측)** = 보류 음악·서버 링백·가입자 링백의 단말 실측(cspsim 에 hold 트리거가 없다 — 실단말 또는 계측기 `hold`/`resume` 단계), `S3-SCN-ANN` 게이트 실행(dev 스택은 배포 모드), 업그레이드 때 `announcements/` 이어받기 실측, CSP SipStats 에 `ann_started/ann_fallback` 노출.
+안내 없는 구 CMP 와 새 CSP 의 혼용은 `resource.ann` 미광고로 안전하게 폴백한다.

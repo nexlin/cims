@@ -1,7 +1,7 @@
 {
   "name": "cims-tester-worker",
   "description": "CIMS 계측기 워커 — libcsim 가상 단말 풀(ue)·피어 엔진(peer)·실단말 프로세스 풀(real-ue, 동봉 cimsue-cli) 실행기. 컨트롤러(oam-cims-tester) 명령으로 등록·발신·응답·부하율을 바꾸고 1초 집계·이벤트를 TCP JSONL 로 올린다 (test_instrument.md §3·§6.1). 시험 대상과 다른 호스트에 둔다",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "ha_capability": "standalone",
   "service": {
     "processes": [

@@ -18,6 +18,7 @@
 #include "PMcpttGroup.h"
 #include "PSyncRtpRecorder.h"
 #include <fstream>
+#include <sys/stat.h>
 #include <tuple>
 #include <unordered_map>
 #include <chrono>
@@ -824,6 +825,8 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
         SimpleJson::JsonNode missArr; missArr.type = SimpleJson::JSON_ARRAY;
         for (const std::string& m : _annCatalog.missing()) missArr.Add(SimpleJson::JsonNode(m));
         cat.Set("root", _annCatalog.root());
+        cat.Set("op_root", _annCatalog.opRoot());
+        cat.Set("op_catalog", annOpCatalogPath());
         cat.Set("ids", idsArr);
         cat.Set("missing", missArr);
         detail.Set("ann_catalog", cat);
@@ -1257,7 +1260,31 @@ std::string PCmpServer::annRootPath() const {
     return dir + "/../" + _annDir;
 }
 
+// 운영자 음원 자리 — 배포본은 install_path(= <config dir>/../..) 아래 `config/announcements.jsonl`(agent /collection) +
+//   `announcements/op/`(agent /module-file). 그 층이 없으면(개발·스크래치 배치) 모듈 자기 config/·announcements/ 를 쓴다.
+static bool _dirExists(const std::string& p) {
+    struct stat st;
+    return stat(p.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+std::string PCmpServer::annInstallRoot() const {
+    std::string dir = _configFile;
+    size_t sl = dir.find_last_of('/');
+    dir = (sl == std::string::npos) ? "." : dir.substr(0, sl);
+    const std::string inst = dir + "/../..";
+    if (_dirExists(inst + "/config") && (_dirExists(inst + "/announcements") || _dirExists(inst + "/agent") || _dirExists(inst + "/cmp")))
+        return inst;   // 배포 레이아웃(<ver>/config + <ver>/<module>) — agent 가 여기 쓴다
+    return "";
+}
+
+std::string PCmpServer::annOpRootPath() const {
+    const std::string inst = annInstallRoot();
+    return inst.empty() ? annRootPath() : inst + "/announcements";
+}
+
 std::string PCmpServer::annOpCatalogPath() const {
+    const std::string inst = annInstallRoot();
+    if (!inst.empty()) return inst + "/config/announcements.jsonl";
     std::string dir = _configFile;
     size_t sl = dir.find_last_of('/');
     dir = (sl == std::string::npos) ? "." : dir.substr(0, sl);
@@ -1267,10 +1294,10 @@ std::string PCmpServer::annOpCatalogPath() const {
 void PCmpServer::reloadAnnouncements() {
     if (_annPlayers <= 0) return;
     std::vector<std::string> missing;
-    _annCatalog.load(annRootPath(), annOpCatalogPath(), missing);
+    _annCatalog.load(annRootPath(), annOpRootPath(), annOpCatalogPath(), missing);
     updateAnnMissingAlarm(missing);
-    LOG_INFO("PCmpServer", "announcements: %d media loaded from %s (+%s), missing/bad=%d", (int)_annCatalog.size(),
-             annRootPath().c_str(), annOpCatalogPath().c_str(), (int)missing.size());
+    LOG_INFO("PCmpServer", "announcements: %d media loaded — sys %s, op %s (+%s), missing/bad=%d", (int)_annCatalog.size(),
+             annRootPath().c_str(), annOpRootPath().c_str(), annOpCatalogPath().c_str(), (int)missing.size());
 }
 
 // 카탈로그가 가리키는 파일 누락·형식 오류 — A-PRC-034 media_missing (announcements.md §10). 해소되면 close.

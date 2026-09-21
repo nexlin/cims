@@ -1567,7 +1567,10 @@ void Worker::onEvent(const Event& e) {
         m_metrics.counter("ring_rx");
         if (e.hasPai) m_metrics.counter("early_media");
         // 망이 만든 183+SDP(서버 안내·링백, announcements.md §3) — progress 단계 없이도 early media 가 섰다: 200/실패 최종 응답 때 RTP 도달을 판정한다
-        if (e.hasPai && in && in->rtpMode != CRtpThread::E_MEDIA_NONE && in->actors.count(roleOf(in, ep)) && !in->progressTx) in->progressTx = true;
+        if (e.hasPai && in && in->rtpMode != CRtpThread::E_MEDIA_NONE && in->actors.count(roleOf(in, ep)) && !in->progressTx) {
+            in->progressTx = true;
+            m_metrics.counter("progress_tx");   // 분모 — 피어 progress 단계가 없는 망 183 도 early_media_pct/early_rtp_pct 의 모집단
+        }
         if (e.prack) m_metrics.counter("prack_tx");
         if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "ring:" + roleOf(in, ep)) advance(*in, now);
         break;

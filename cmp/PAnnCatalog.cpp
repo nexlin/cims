@@ -107,13 +107,14 @@ static bool _readFile(const std::string& path, std::string& out) {
     return true;
 }
 
-bool PAnnCatalog::load(const std::string& root, const std::string& opJsonl, std::vector<std::string>& missing) {
+bool PAnnCatalog::load(const std::string& root, const std::string& opRoot, const std::string& opJsonl, std::vector<std::string>& missing) {
     missing.clear();
     auto fresh = std::make_shared<std::map<std::string, std::shared_ptr<const PAnnMedia>>>();
     const std::string sources[2] = { root + "/sys/catalog.jsonl", opJsonl };
     int rows = 0;
     for (int s = 0; s < 2; ++s) {
         const std::string& path = sources[s];
+        const std::string& base = (s == 0) ? root : opRoot;   // 행의 files 경로 기준 루트 — 동봉/운영자 각각
         if (path.empty()) continue;
         std::ifstream f(path);
         if (!f) {
@@ -134,7 +135,7 @@ bool PAnnCatalog::load(const std::string& root, const std::string& opJsonl, std:
             }
             for (const auto& kv : m.files) {
                 std::string bytes;
-                const std::string full = root + "/" + kv.second;
+                const std::string full = base + "/" + kv.second;
                 if (!_readFile(full, bytes)) {
                     missing.push_back(m.id + "/" + kv.first + ": file not found (" + kv.second + ")");
                     LOG_ERROR("PAnnCatalog", "%s: %s file missing: %s", m.id.c_str(), kv.first.c_str(), full.c_str());
@@ -163,6 +164,7 @@ bool PAnnCatalog::load(const std::string& root, const std::string& opJsonl, std:
         _map = fresh;
         _missing = missing;
         _root = root;
+        _opRoot = opRoot;
     }
     LOG_INFO("PAnnCatalog", "loaded %d media from %s (missing/bad %d)", rows, root.c_str(), (int)missing.size());
     return true;
@@ -190,6 +192,11 @@ std::vector<std::string> PAnnCatalog::missing() const {
 size_t PAnnCatalog::size() const {
     std::lock_guard<std::mutex> lk(_mtx);
     return _map ? _map->size() : 0;
+}
+
+std::string PAnnCatalog::opRoot() const {
+    std::lock_guard<std::mutex> lk(_mtx);
+    return _opRoot;
 }
 
 std::string PAnnCatalog::root() const {

@@ -42,7 +42,12 @@ class PAnnCatalog {
 public:
     /** 카탈로그 적재/재적재 — root 아래 `sys/catalog.jsonl` + opJsonl(없으면 무시). 결과는 원자적으로 교체된다.
      *  missing 에는 참조 파일이 없거나 형식이 깨진 항목("id/codec: reason")이 쌓인다 — 그 코덱만 빼고 나머지는 적재. */
-    bool load(const std::string& root, const std::string& opJsonl, std::vector<std::string>& missing);
+    bool load(const std::string& root, const std::string& opJsonl, std::vector<std::string>& missing) {
+        return load(root, root, opJsonl, missing);
+    }
+    /** opRoot = 운영자 음원 루트(배포본은 install_path/announcements — agent /module-file 가 두는 자리, 카탈로그 행의 op/… 는 여기 기준) */
+    bool load(const std::string& sysRoot, const std::string& opRoot, const std::string& opJsonl, std::vector<std::string>& missing);
+    std::string opRoot() const;
 
     std::shared_ptr<const PAnnMedia> find(const std::string& id) const;
     std::vector<std::string> ids() const;
@@ -65,6 +70,7 @@ private:
     std::shared_ptr<const std::map<std::string, std::shared_ptr<const PAnnMedia>>> _map;
     std::vector<std::string> _missing;
     std::string _root;
+    std::string _opRoot;
 };
 
 #endif  // __PANN_CATALOG_H__

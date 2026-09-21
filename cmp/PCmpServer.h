@@ -223,7 +223,9 @@ private:
     std::vector<PAnnTicker*> _annTickers;   // 리액터별 20 ms 클록
     int countAnnPlayers() const;            // 호출자가 _mutex 보유
     std::string annRootPath() const;        // <config dir>/../<AnnouncementDir>
-    std::string annOpCatalogPath() const;   // <config dir>/announcements.jsonl
+    std::string annOpCatalogPath() const;   // 배포본 <install>/config/announcements.jsonl, 아니면 <config dir>/announcements.jsonl
+    std::string annInstallRoot() const;     // 배포 레이아웃이면 <config dir>/../.. (= install_path), 아니면 빈 문자열
+    std::string annOpRootPath() const;      // 운영자 음원 루트 — <install>/announcements 또는 sys 와 같은 루트
     void onAnnDone(const PAnnTicker::Done& d);   // 재생 완료 → RELAY_PLAY_DONE 이벤트 (리액터 스레드, relay 락 없음)
     void updateAnnMissingAlarm(const std::vector<std::string>& missing);
     bool _annMissingAlarm = false;
