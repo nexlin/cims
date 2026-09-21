@@ -316,7 +316,8 @@
         },
         "distribution": {
           "fromObject": "method_counts",
-          "totalPath": "total"
+          "totalPath": "total",
+          "series": "cmp-groups"
         },
         "series-bar": {
           "from": "buckets",
@@ -325,12 +326,10 @@
             "hour"
           ],
           "unit": "건",
-          "series": [
-            {
-              "key": "total",
-              "label": "전체",
-              "value": "count"
-            }
+          "series": "cmp-groups",
+          "cells": [
+            "in",
+            "out"
           ]
         },
         "matrix": {

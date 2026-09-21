@@ -12,7 +12,7 @@
 //           --format=esm --platform=node --outfile=<번들 경로>
 const bundle = process.argv[2]
 if (!bundle) { console.error('usage: node msg_key_order.test.mjs <dataSourceSpec 번들 경로>'); process.exit(2) }
-const { parseMsgKey, msgGroupOf, compareMsgKeys } = await import(bundle)
+const { parseMsgKey, msgGroupOf, compareMsgKeys, cmpGroupLabelOf } = await import(bundle)
 
 let pass = 0, fail = 0
 const chk = (name, cond, extra = '') => {
@@ -55,6 +55,44 @@ const real = ['INVITE/401', 'INVITE', 'INVITE/100', 'INVITE/488', '488', 'OPTION
 chk('트랜잭션이 흩어지지 않는다',
     sorted(real) === 'ACK INVITE INVITE/100 INVITE/401 INVITE/488 OPTIONS OPTIONS/200 100 488',
     sorted(real))
+
+console.log('[7] CMP 묶음 — 뜻이 한 벌인 명령끼리 (키에 /코드 가 없어 메서드=묶음 이 되는 것을 막는다)')
+chk('열고-닫는 짝이 같은 묶음',
+    msgGroupOf('RELAY_ADD') === '일반통화 미디어' && msgGroupOf('RELAY_REMOVE') === '일반통화 미디어')
+chk('PTT 참여', msgGroupOf('PTT_JOIN') === 'PTT 참여' && msgGroupOf('PTT_LEAVE') === 'PTT 참여')
+chk('생존 확인은 따로', msgGroupOf('HEARTBEAT') === '생존 확인')
+chk('아직 안 나온 명령도 자리를 갖는다',
+    msgGroupOf('RELAY_TAP_ADD') === '청취 leg' && msgGroupOf('PTT_GROUP_ABORTED') === 'PTT 그룹 세션')
+
+console.log('[8] 묶음 제목 줄 — CMP 만 이름이 있고 SIP 은 없다')
+chk('CMP 는 이름을 준다', cmpGroupLabelOf('RELAY_ADD') === '일반통화 미디어')
+chk('SIP 은 안 준다(제목이 열 이름을 되풀이할 뿐)',
+    cmpGroupLabelOf('INVITE') === undefined && cmpGroupLabelOf('INVITE/401') === undefined)
+chk('귀속 실패도 안 준다', cmpGroupLabelOf('488') === undefined)
+
+console.log('[9] CMP 열 순서 — 가나다가 아니라 묶음 차례, HEARTBEAT 는 맨 뒤')
+const cmpReal = ['FLOOR_TALKERS', 'HEARTBEAT', 'PTT_GROUP_ADD', 'PTT_GROUP_REMOVE',
+                 'PTT_JOIN', 'PTT_LEAVE', 'RELAY_ADD', 'RELAY_MODIFY', 'RELAY_REMOVE']
+const want = 'RELAY_ADD RELAY_MODIFY RELAY_REMOVE PTT_GROUP_ADD PTT_GROUP_REMOVE '
+           + 'PTT_JOIN PTT_LEAVE FLOOR_TALKERS HEARTBEAT'
+chk('실측 키 한 벌 (2026-09-16 .46 CMP)', sorted(cmpReal) === want, sorted(cmpReal))
+const order = sorted(cmpReal).split(' ')
+chk('ADD 바로 뒤에 REMOVE',
+    order.indexOf('PTT_GROUP_REMOVE') === order.indexOf('PTT_GROUP_ADD') + 1 &&
+    order.indexOf('PTT_LEAVE') === order.indexOf('PTT_JOIN') + 1)
+chk('HEARTBEAT 가 맨 뒤', order[order.length - 1] === 'HEARTBEAT')
+
+console.log('[10] SIP 순서는 그대로다 (회귀)')
+chk('가나다 + 요청→응답 유지',
+    sorted(['BYE', 'INVITE/200', 'ACK', 'INVITE']) === 'ACK BYE INVITE INVITE/200',
+    sorted(['BYE', 'INVITE/200', 'ACK', 'INVITE']))
+chk('묶음 이름은 메서드 그대로', msgGroupOf('INVITE/200') === 'INVITE')
+
+console.log('[11] 비교 함수가 한 줄 세우기여야 한다 — 시작 순서가 달라도 결과가 같다')
+const mixed = [...cmpReal, 'INVITE', 'BYE', '488']
+chk('두 번 섞어 정렬해도 같은 결과',
+    sorted(mixed) === sorted([...mixed].reverse()), sorted(mixed))
+
 
 console.log(`\n총 ${pass + fail} / PASS ${pass} / FAIL ${fail}`)
 process.exit(fail ? 1 : 0)

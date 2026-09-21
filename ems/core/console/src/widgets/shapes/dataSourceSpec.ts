@@ -14,14 +14,30 @@ interface TimeBarMap { from: string; label: string[]; value: string; unit?: stri
 // 계열 시계열 — 한 버킷 행에서 계열마다 다른 필드를 읽는다. 색은 선언 순서대로 --chart-1..5.
 interface SeriesBarMap {
   from: string; label: string[]; unit?: string
+  /**
+   * 계열 선언. 배열이면 버킷에서 계열마다 `value` 경로를 읽는다.
+   *
+   * `'cmp-groups'` = CMP 제어 메시지 묶음(`CMP_SERIES`)으로 자동 구성한다. 서비스축
+   * (VoLTE/PTT)은 SIP 전용이라 CMP 에는 나눌 축이 없었는데, 교차표에 쓰는 묶음 사전이
+   * 그 축이 된다. 목록을 기술자에 옮겨 적지 않는 이유는 표와 차트가 **같은 사전**을
+   * 봐야 새 명령이 한쪽에만 들어가는 일이 없기 때문이다.
+   */
   series: { key: string; label: string; value: string; color?: string; includes?: string[] }[]
+        | 'cmp-groups'
+  /** `series: 'cmp-groups'` 일 때 읽을 {메서드: 수} map 경로들. 여러 개면 합산(기본 in+out). */
+  cells?: string[]
 }
 interface KpiMap { items: { label: string; path: string; unit?: string; format?: string }[] }
 interface DistMap {
   fromObject?: string; totalPath: string; from?: string; label?: string[]; value?: string
   // 계열 분해(선택) — partsObject[항목라벨] = {계열키: 수}. series 는 색·순서를 정한다.
   partsObject?: string
-  series?: { key: string; label: string; value: string; color?: string }[]
+  /**
+   * `'cmp-groups'` = 시간대별 차트와 **같은 CMP 묶음 계열**을 쓴다. 한 메서드는 묶음 하나에만
+   * 들기 때문에 막대가 쪼개지지 않고 **자기 묶음 색 한 덩이**로 칠해진다 — 두 차트에서 같은
+   * 색이 같은 뜻을 갖는다(사용자 요청 2026-09-21).
+   */
+  series?: { key: string; label: string; value: string; color?: string }[] | 'cmp-groups'
 }
 /** 메시지 통계 키 한 조각 — `INVITE` / `INVITE/401` / `488`(귀속 실패). */
 interface MsgKey { method: string; code: string; orphan: boolean }
@@ -35,20 +51,101 @@ export function parseMsgKey(key: string): MsgKey {
   return { method: key, code: '', orphan: false }
 }
 
+/**
+ * CMP 제어 메시지 묶음 — 뜻이 한 벌인 명령끼리.
+ *
+ * SIP 키는 `INVITE` 밑에 `INVITE/200`·`INVITE/401` 이 딸려 **메서드 이름이 곧 묶음**이지만,
+ * CMP 키(`RELAY_ADD` 등)에는 `/코드` 가 없어 **메서드 하나 = 묶음 하나**가 된다. 그러면 교차표
+ * 열마다 경계선이 그어져 선이 "여기가 경계다" 라는 뜻을 잃는다.
+ *
+ * 묶는 기준은 **같이 봐야 값이 읽히는가** 다 — 특히 열고‑닫는 짝(`*_ADD` ↔ `*_REMOVE`)은
+ * 두 수가 같아야 정상이라 떨어져 있으면 눈으로 못 맞춘다. 배열 순서가 곧 열 순서이므로
+ * **`HEARTBEAT` 는 맨 뒤**다: 전체의 90% 를 넘는 배경 잡음이라 앞에 둘 이유가 없다.
+ *
+ * 아직 안 나온 명령도 미리 자리를 준다 — 나중에 떴을 때 엉뚱한 곳에 끼지 않게.
+ * 명령 목록 정본 = `docs/api/cmp_media_api.md`.
+ */
+const CMP_GROUPS: { name: string; keys: string[] }[] = [
+  { name: '일반통화 미디어', keys: ['RELAY_ADD', 'RELAY_MODIFY', 'RELAY_REMOVE',
+                                    'RELAY_ABORTED', 'RELAY_NAT_LATCHED'] },
+  { name: '청취 leg', keys: ['RELAY_TAP_ADD', 'RELAY_TAP_MODIFY', 'RELAY_TAP_REMOVE'] },
+  { name: 'PTT 그룹 세션', keys: ['PTT_GROUP_ADD', 'PTT_GROUP_MODIFY',
+                                  'PTT_GROUP_REMOVE', 'PTT_GROUP_ABORTED'] },
+  { name: 'PTT 참여', keys: ['PTT_JOIN', 'PTT_LEAVE'] },
+  { name: '발언권', keys: ['PTT_FLOOR_TIER', 'FLOOR_TALKERS'] },
+  { name: '생존 확인', keys: ['HEARTBEAT'] },
+]
+
+/** 메서드 → 묶음 이름·묶음 차례·묶음 안 차례. 사전에 없는 메서드(SIP·CSC)는 건드리지 않는다. */
+const CMP_INDEX = new Map<string, { group: string; gi: number; ki: number }>(
+  CMP_GROUPS.flatMap((g, gi) => g.keys.map((k, ki) =>
+    [k, { group: g.name, gi, ki }] as const)))
+
+/**
+ * CMP 시간대별 차트의 **계열** — 교차표 묶음보다 성글게 묶는다.
+ *
+ * 왜 PTT 셋을 합치나: 2주치 실측(2026-09-08~21)에서 `참여/세션` 이 8번 중 7번 정확히 4.0,
+ * `발언/세션` 이 1.8~2.0 이었다. 비율이 고정이면 세 선은 **같은 모양의 복사본**이라 차트에
+ * 같은 그림을 세 번 그리는 셈이다. 비율이 어긋난 한 번(9/18 21시, 2.9)도 선 높이가 아니라
+ * 비율이라 꺾은선으로는 안 읽힌다 — 그 비교는 바로 아래 **교차표**가 묶음별 숫자로 한다.
+ *
+ * 반대로 **일반통화 ↔ PTT ↔ 배경**은 실제로 따로 움직인다(같은 구간에서 일반통화만 있는
+ * 시간 5개, PTT 만 있는 시간 3개). 그래서 축은 이 셋이다.
+ *
+ * 메서드 목록은 `CMP_GROUPS` 에서 가져온다 — 두 군데 적으면 새 명령이 한쪽에만 들어간다.
+ */
+const CMP_SERIES: { key: string; label: string; groups: string[]; color?: string }[] = [
+  { key: 'media', label: '일반통화 미디어', groups: ['일반통화 미디어', '청취 leg'] },
+  { key: 'ptt', label: 'PTT', groups: ['PTT 그룹 세션', 'PTT 참여', '발언권'] },
+  // 하트비트는 값이 아니라 **배경**이다 — `chart-muted` 는 그런 계열용 토큰이다.
+  { key: 'alive', label: '생존 확인', groups: ['생존 확인'], color: 'chart-muted' },
+]
+
+/** 계열 키 → 그 계열이 품는 메서드들. */
+const CMP_SERIES_METHODS = new Map<string, string[]>(
+  CMP_SERIES.map(sp => [sp.key,
+    CMP_GROUPS.filter(g => sp.groups.includes(g.name)).flatMap(g => g.keys)]))
+
+/** 메서드 → 계열 키. 사전에 없으면 `undefined`(색을 찍지 않는다 — 아래 분포 차트 주석). */
+const CMP_SERIES_OF = new Map<string, string>(
+  [...CMP_SERIES_METHODS].flatMap(([key, ms]) => ms.map(m => [m, key] as const)))
+
+/** 계열 선언 — 시계열·분포가 **같은 배열·같은 차례**를 쓰므로 두 차트의 색이 저절로 맞는다. */
+function cmpSeriesDecl() {
+  return CMP_SERIES.map((sp, i) => ({ key: sp.key, label: sp.label, color: seriesColor(sp.color, i) }))
+}
+
+/** 사전에 있는 메서드면 묶음 이름, 아니면 `undefined` — 교차표의 묶음 제목 행이 이걸 본다. */
+export function cmpGroupLabelOf(key: string): string | undefined {
+  return CMP_INDEX.get(parseMsgKey(key).method)?.group
+}
+
 /** 메서드 묶음 이름 — 경계선(그룹)과 정렬에 함께 쓴다. */
 export function msgGroupOf(key: string): string {
   const k = parseMsgKey(key)
-  return k.orphan ? '(메서드 미상)' : k.method
+  if (k.orphan) return '(메서드 미상)'
+  return CMP_INDEX.get(k.method)?.group ?? k.method
 }
 
 /**
  * 메시지 키 정렬 — 메서드 가나다순, 묶음 안에서 **요청 먼저 그다음 응답(코드 오름차순)**.
- * 귀속 실패 응답은 맨 뒤.
+ * 귀속 실패 응답은 맨 뒤. CMP 키는 가나다가 아니라 **`CMP_GROUPS` 의 배열 순서**를 따른다.
+ *
+ * 비교는 `(귀속실패, 사전에 있나, 묶음·메서드, 코드)` 순서의 **한 줄 세우기**라 섞여 들어와도
+ * 순서가 뒤집히지 않는다(한 교차표에 두 인터페이스가 섞이는 일은 없지만, 비교 함수가
+ * 상황에 따라 다른 답을 내면 정렬 자체가 깨진다).
  */
 export function compareMsgKeys(a: string, b: string): number {
   const ka = parseMsgKey(a), kb = parseMsgKey(b)
   if (ka.orphan !== kb.orphan) return ka.orphan ? 1 : -1
-  if (ka.method !== kb.method) return ka.method.localeCompare(kb.method)
+  const ca = CMP_INDEX.get(ka.method), cb = CMP_INDEX.get(kb.method)
+  if (!!ca !== !!cb) return ca ? -1 : 1
+  if (ca && cb) {
+    if (ca.gi !== cb.gi) return ca.gi - cb.gi
+    if (ca.ki !== cb.ki) return ca.ki - cb.ki
+  } else if (ka.method !== kb.method) {
+    return ka.method.localeCompare(kb.method)
+  }
   // 요청(코드 없음)이 자기 응답들보다 앞
   if (!ka.code !== !kb.code) return ka.code ? 1 : -1
   const na = Number(ka.code), nb = Number(kb.code)
@@ -218,15 +315,36 @@ export function buildDataSource(spec: DataSourceSpec): DataSource {
   }
   if (m['series-bar']) {
     const c = m['series-bar'] as SeriesBarMap
+    if (c.series === 'cmp-groups') {
+      const cells = c.cells ?? ['in', 'out']
+      const sum = (it: Record<string, unknown>, keys: string[]) =>
+        cells.reduce((acc, path) => {
+          const mp = getPath(it, path)
+          if (!mp || typeof mp !== 'object') return acc
+          const rec = mp as Record<string, unknown>
+          return acc + keys.reduce((b, k) => b + (Number(rec[k]) || 0), 0)
+        }, 0)
+      ds.toSeriesBar = (raw): SeriesBarData => ({
+        unit: c.unit,
+        series: cmpSeriesDecl(),
+        buckets: asArray(raw, c.from).map(it => ({
+          label: firstField(it, c.label) as string | number,
+          values: Object.fromEntries(CMP_SERIES.map(sp =>
+            [sp.key, sum(it, CMP_SERIES_METHODS.get(sp.key) ?? [])])),
+        })),
+      })
+      return ds
+    }
+    const series = c.series
     ds.toSeriesBar = (raw): SeriesBarData => ({
       unit: c.unit,
       // 색은 선언 순서에 고정 — 조회 조건이 바뀌어도 같은 계열이 같은 색을 유지한다.
-      series: c.series.map((sp, i) => ({
+      series: series.map((sp, i) => ({
         key: sp.key, label: sp.label, includes: sp.includes, color: seriesColor(sp.color, i),
       })),
       buckets: asArray(raw, c.from).map(it => ({
         label: firstField(it, c.label) as string | number,
-        values: Object.fromEntries(c.series.map(sp => [sp.key, Number(getPath(it, sp.value)) || 0])),
+        values: Object.fromEntries(series.map(sp => [sp.key, Number(getPath(it, sp.value)) || 0])),
       })),
     })
   }
@@ -380,7 +498,8 @@ export function buildDataSource(spec: DataSourceSpec): DataSource {
       const ETC = '기타'
       const columns: MatrixData['columns'] = keys.map(k => ({
         key: k, label: c.cellLabels?.[k] ?? k, total: totals[k],
-        ...(c.order === 'message' ? { group: msgGroupOf(k) } : {}),
+        ...(c.order === 'message'
+            ? { group: msgGroupOf(k), groupLabel: cmpGroupLabelOf(k) } : {}),
       }))
       if (folded.length) {
         columns.push({ key: ETC, label: `${ETC}(${folded.length})`,
@@ -394,7 +513,21 @@ export function buildDataSource(spec: DataSourceSpec): DataSource {
         return { label: r.label, cells, total }
       })
       return {
-        unit: c.unit, columns, rows, rowTotal: true,
+        unit: c.unit, columns, rows,
+        /**
+         * 행 합계(오른쪽 고정 열)는 **메시지 교차표에는 두지 않는다** — 그 값은 같은 화면
+         * 바로 위 `시간대별 메시지 수` 차트의 막대 높이와 **정의상 같은 값**이다(둘 다 그
+         * 버킷의 전 메시지 수). 한 화면에서 같은 수를 두 번 그리는 셈이고, CMP 는 그 수의
+         * 90% 넘게가 HEARTBEAT 라 고정 열을 내줄 값이 못 된다(실측 2026-09-21: 24시간 중
+         * 19시간이 하트비트만인 `24`).
+         *
+         * 열 합계(아래 `전 구간` 줄)는 **남긴다** — 메서드별 절대 건수를 내는 유일한 자리라
+         * 이게 있어서 총계 2열표를 화면에서 뺄 수 있었다(statsScreens.tsx `ifaceLayout`).
+         *
+         * 서비스 통계(VoLTE/PTT)의 `구간별 상세` 는 `order` 가 `message` 가 아니라 종전대로
+         * 행 합계를 둔다 — 거기엔 같은 값을 그리는 차트가 없다.
+         */
+        rowTotal: c.order !== 'message',
         grandTotal: rows.reduce((a, r) => a + r.total, 0), notes: c.notes,
         blankLabel: c.blankLabel,
       }
@@ -403,15 +536,28 @@ export function buildDataSource(spec: DataSourceSpec): DataSource {
   }
   if (m.distribution) {
     const c = m.distribution as DistMap
+    const cmpGroups = c.series === 'cmp-groups'
+    const declared = c.series === 'cmp-groups' ? undefined : c.series
     ds.toDistribution = (raw): DistributionData => {
       const parts = c.partsObject
         ? (getPath(raw, c.partsObject) as Record<string, Record<string, number>> | undefined)
         : undefined
+      /**
+       * 묶음 색칠 — 항목(메서드) 하나는 묶음 하나에만 드므로 조각도 하나다.
+       * 사전에 없는 메서드는 **일부러 비운다**: 아무 색이나 찍으면 뜻이 틀린 색이 되고,
+       * 빈 막대로 남으면 "사전에 새 명령이 생겼다" 는 신호가 된다(`CMP_GROUPS` 갱신 대상).
+       */
+      const cmpParts = (k: string, v: number) => {
+        const key = CMP_SERIES_OF.get(parseMsgKey(k).method)
+        return key ? { [key]: v } : undefined
+      }
       return {
         total: Number(getPath(raw, c.totalPath)) || 0,
-        series: c.series?.map((sp, i) => ({ key: sp.key, label: sp.label, color: seriesColor(sp.color, i) })),
+        series: cmpGroups ? cmpSeriesDecl()
+          : declared?.map((sp, i) => ({ key: sp.key, label: sp.label, color: seriesColor(sp.color, i) })),
         items: c.fromObject
-          ? objEntries(raw, c.fromObject).map(([k, v]) => ({ label: k, value: v, parts: parts?.[k] }))
+          ? objEntries(raw, c.fromObject).map(([k, v]) =>
+              ({ label: k, value: v, parts: cmpGroups ? cmpParts(k, v) : parts?.[k] }))
           : asArray(raw, c.from || '').map(it => ({ label: String(firstField(it, c.label || [])), value: Number(it[c.value || '']) || 0 })),
       }
     }

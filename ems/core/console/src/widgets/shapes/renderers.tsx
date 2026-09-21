@@ -12,6 +12,7 @@ import { EmptyState } from '@core/components/custom/empty-state'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { NO_VALUE } from './dataSourceSpec'
 import { blankRange, foldBlankRuns } from './matrixFold'
+import { cn } from '@core/lib/utils'
 
 // 집계 불가 표시 — 서버가 `null` 로 내린 값. 0 과 구별해 빈 자리로 그리고, 왜 비었는지
 // 말해 준다(분모가 원천에 없는 기간이 섞였다 — sip_statistics.md §2.1).
@@ -423,6 +424,21 @@ export function MatrixTable({ data }: { data: MatrixData }) {
   }
   // 값 없는 구간 접기 — 규칙은 `matrixFold.ts` 가 정본이다(시험으로 덮는다).
   const chunks = useMemo(() => foldBlankRuns(data.rows, data.columns), [data.rows, data.columns])
+  /**
+   * 묶음 제목 줄 — 이어진 같은 `group` 열을 한 칸으로 합친다. 이름은 소스가 준 `groupLabel`
+   * 이고, **하나도 없으면 줄 자체를 내지 않는다**: SIP 은 묶음 키가 열 이름 그대로(`INVITE`)라
+   * 제목이 열 이름을 되풀이할 뿐이다. 묶음이 없는 열(`기타`)은 합치지 않고 빈 제목으로 둔다.
+   */
+  const captions = useMemo(() => {
+    if (!data.columns.some(c => c.groupLabel)) return null
+    const out: { key: string; span: number; label: string; g?: string }[] = []
+    for (const c of data.columns) {
+      const last = out[out.length - 1]
+      if (last && c.group !== undefined && last.g === c.group) { last.span++; continue }
+      out.push({ key: c.key, span: 1, label: c.groupLabel ?? '', g: c.group })
+    }
+    return out
+  }, [data.columns])
   const [opened, setOpened] = useState<Record<string, boolean>>({})
   // 칸 상세 — 건수만으로는 원인을 못 답하는 열(실패 사유 등)에 소스가 붙여 준다.
   // **점선 밑줄을 둔다**: 마우스를 올려야 보이는 것은 올릴 이유가 보여야 쓰인다. 값이 0 인
@@ -442,17 +458,37 @@ export function MatrixTable({ data }: { data: MatrixData }) {
     <div className="overflow-auto max-h-full">
       <DataTable sticky className="[&_td]:text-sm">
         <thead>
+          {captions && (
+            /* 묶음 제목 줄 — 소스가 묶음에 따로 이름을 준 표(CMP)에만 뜬다. 두 줄이 다 위에
+               붙으므로 아래 줄을 제목 줄 높이(24px)만큼 내린다(`!` = 표 껍데기의 `top-0` 을
+               이긴다). 제목 줄은 배경을 `card` 로 둬 머리글 띠와 구분한다. */
+            <tr>
+              <Th className="sticky left-0 !top-0 z-[3] h-6 bg-card" />
+              {captions.map(s => (
+                <Th key={s.key} colSpan={s.span} align="center"
+                    className="!top-0 h-6 whitespace-nowrap bg-card text-[10px] tracking-wide"
+                    style={groupTd(s.key)}>
+                  {s.label}
+                </Th>
+              ))}
+              {data.rowTotal && <Th className="sticky right-0 !top-0 z-[3] h-6 bg-card" />}
+            </tr>
+          )}
           <tr>
-            <Th className="sticky left-0 z-[1] whitespace-nowrap bg-card z-[2]">시각</Th>
+            <Th className={cn('sticky left-0 z-[1] whitespace-nowrap bg-card z-[2]',
+                              captions && '!top-6')}>시각</Th>
             {data.columns.map(c => (
-              <Th className="text-right whitespace-nowrap" key={c.key} style={groupTd(c.key)}
+              <Th className={cn('text-right whitespace-nowrap', captions && '!top-6')}
+                  key={c.key} style={groupTd(c.key)}
                   title={[c.total === null ? `전 구간 ${NO_VALUE} (자료 없음)`
                                             : `전 구간 ${c.total}${c.unit ?? data.unit ?? '건'}`,
                           c.help].filter(Boolean).join('\n\n')}>
                 {c.label}{c.unit === '%' ? ' (%)' : ''}
               </Th>
             ))}
-            {data.rowTotal && <Th align="right" className="sticky right-0 z-[1] bg-card z-[2]">합계</Th>}
+            {data.rowTotal && <Th align="right"
+                                  className={cn('sticky right-0 z-[1] bg-card z-[2]',
+                                                captions && '!top-6')}>합계</Th>}
           </tr>
         </thead>
         <tbody>
