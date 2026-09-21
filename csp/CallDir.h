@@ -270,6 +270,40 @@ public:
         m_mapDir.erase( strCallId );
     }
 
+    /** 안내 재생 기록 (announcements.md §9) — call.json 에 `announcement{situation,media,played_ms,result}` 를 더한다.
+     *  end_status/end_reason 은 건드리지 않는다(통계 정의 불변). result = completed|max|cancelled|fallback|stopped. */
+    void VoipCallAnnouncement( const std::string &strCallId, const std::string &strCaller, const std::string &strCallee,
+                               const std::string &strSituation, const std::string &strMedia, int iPlayedMs,
+                               const std::string &strResult ) {
+        // 자체 거절(VoipCallRejected)은 디렉터리 캐시를 지우므로 caller/callee 로 다시 유도한다 (GetVoipDir 이 m_mtx 를
+        // 스스로 잡는다)
+        std::string dir = GetVoipDir( strCallId, strCaller, strCallee );
+        std::lock_guard<std::mutex> lock( m_mtx );
+        if ( dir.empty() ) return;
+        m_mapDir.erase( strCallId );  // 거절 호의 캐시를 다시 남기지 않는다(VoipCallRejected 와 같은 뒷정리)
+        std::string path = dir + "/call.json";
+        std::string ann = "\"announcement\":{\"situation\":\"" + Esc( strSituation ) + "\",\"media\":\"" +
+                          Esc( strMedia ) + "\",\"played_ms\":" + std::to_string( iPlayedMs ) + ",\"result\":\"" +
+                          Esc( strResult ) + "\"}";
+        m_worker.Enqueue(
+            [path, ann]() {
+                std::string c = _readFile( path );
+                if ( c.empty() ) return false;
+                size_t k = c.find( "\"announcement\":" );
+                if ( k != std::string::npos ) {
+                    // 값 교체 — 같은 호에 링백 뒤 실패 안내가 이어지면 마지막 것이 남는다
+                    size_t e = c.find( '}', k );
+                    if ( e != std::string::npos ) c.replace( k, e - k + 1, ann );
+                } else {
+                    size_t lb = c.rfind( '}' );
+                    if ( lb == std::string::npos ) return false;
+                    c.insert( lb, "," + ann );
+                }
+                return _writeFileS( path, c );
+            },
+            ann.size() );
+    }
+
     void VoipCallAnswer( const std::string &strCallId ) {
         std::lock_guard<std::mutex> lock( m_mtx );
         std::string dir = _dir( strCallId );

@@ -296,6 +296,22 @@ void CCallMap::SetRelaySdesLeg( const char *pszCallId, int iLeg, const RelaySdes
     m_clsMutex.release();
 }
 
+void CCallMap::SetAnnProfile( const char *pszCallId, const std::string &strProfile ) {
+    m_clsMutex.acquire();
+    auto apply = [&]( CALL_MAP::iterator it ) {
+        if ( it == m_clsMap.end() ) return;
+        it->second.m_strAnnProfile = strProfile;
+    };
+    auto it = m_clsMap.find( pszCallId );
+    std::string strPeer;
+    if ( it != m_clsMap.end() ) {
+        strPeer = it->second.m_strPeerCallId;
+        apply( it );
+    }
+    if ( !strPeer.empty() ) apply( m_clsMap.find( strPeer ) );
+    m_clsMutex.release();
+}
+
 void CCallMap::SetRelayCodecLeg( const char *pszCallId, int iLeg, const RelayCodec::LegCodecs &clsLeg ) {
     if ( iLeg < 0 || iLeg > 1 ) return;
     m_clsMutex.acquire();

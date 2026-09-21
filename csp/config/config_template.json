@@ -233,6 +233,135 @@
       "scope": "service"
     },
     {
+      "key": "announcement",
+      "title": "안내음성·신호음·보류 음악",
+      "description": "상황별 네트워크 안내 정책 (announcements.md §6). 실패 안내는 early media(183+SDP → 재생 → 원래 최종 코드 그대로), 보류는 피보류 leg 에 음악, 서버 링백은 기본 off. 프로파일 = 상황→동작 표(Rules 행). 접속서비스 announcement_profile/hold_profile·피어 RemoteNode announcement_profile 이 프로파일을 고르고, 없으면 DefaultProfile. CMP 가 resource.ann 을 광고하지 않으면 전부 응답 코드만 나간다.",
+      "fields": [
+        {
+          "key": "Setup.Announcement.Enable",
+          "label": "안내 기능",
+          "type": "bool",
+          "default": true,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "false = 전 상황 응답 코드만(현행 동작)."
+        },
+        {
+          "key": "Setup.Announcement.MaxPlayMs",
+          "label": "재생 상한 (ms)",
+          "type": "int",
+          "default": 30000,
+          "min": 1000,
+          "max": 300000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "실패 안내 한 건의 총 재생 상한 — 넘으면 최종 응답을 낸다(CMP RELAY_PLAY max_ms). hold 음악은 STOP 까지."
+        },
+        {
+          "key": "Setup.Announcement.DefaultProfile",
+          "label": "기본 프로파일",
+          "type": "string",
+          "default": "default",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "접속서비스·피어에 프로파일이 없을 때 쓰는 프로파일 이름(Rules 의 profile 값)."
+        },
+        {
+          "key": "Setup.Announcement.Rules",
+          "label": "프로파일 표 (상황 → 동작)",
+          "type": "object_list",
+          "default": [],
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "행 = 프로파일 하나의 상황 하나. 비면 내장 기본 표(default 프로파일: busy 화중음 4 s→안내, no_answer/unreachable 안내, not_found/invalid 없는번호 안내, declined 화중음 6 s, congestion 혼잡음 6 s, hold moh_simple loop, ringback none). 같은 프로파일에 없는 상황은 DefaultProfile 의 값, 그것도 없으면 none.",
+          "item_schema": {
+            "fields": [
+              {
+                "key": "profile",
+                "label": "프로파일",
+                "type": "string",
+                "required": true,
+                "help": "예: default, trunk"
+              },
+              {
+                "key": "situation",
+                "label": "상황",
+                "type": "enum",
+                "options": [
+                  "ringback",
+                  "busy",
+                  "no_answer",
+                  "unreachable",
+                  "not_found",
+                  "invalid",
+                  "declined",
+                  "congestion",
+                  "forbidden",
+                  "hold",
+                  "call_waiting"
+                ],
+                "required": true
+              },
+              {
+                "key": "mode",
+                "label": "동작",
+                "type": "enum",
+                "options": [
+                  "none",
+                  "tone",
+                  "announce",
+                  "tone_then_announce",
+                  "media"
+                ],
+                "default": "none",
+                "required": true,
+                "help": "none=응답만 / tone=신호음 tone_ms / announce=안내음 repeat 회 / tone_then_announce=신호음 뒤 안내 / media=임의 음원(hold·ringback — loop)"
+              },
+              {
+                "key": "tone",
+                "label": "신호음 id",
+                "type": "string",
+                "default": "",
+                "help": "예: sys:busy_kr, sys:congestion_kr"
+              },
+              {
+                "key": "tone_ms",
+                "label": "신호음 길이 (ms)",
+                "type": "int",
+                "default": 4000,
+                "min": 0,
+                "max": 60000
+              },
+              {
+                "key": "media",
+                "label": "안내/음원 id",
+                "type": "string",
+                "default": "",
+                "help": "예: sys:ann_busy, sys:moh_simple, op:<name>"
+              },
+              {
+                "key": "repeat",
+                "label": "반복",
+                "type": "int",
+                "default": 1,
+                "min": 0,
+                "max": 10,
+                "help": "안내음 반복 수. hold/ringback(media·loop)은 무시(STOP 까지)."
+              },
+              {
+                "key": "loop",
+                "label": "loop",
+                "type": "bool",
+                "default": false,
+                "help": "media 모드에서 STOP 까지 반복(hold·ringback)"
+              }
+            ]
+          }
+        }
+      ],
+      "scope": "service"
+    },
+    {
       "key": "functions",
       "title": "기능 (Functions)",
       "description": "활성화할 IMS 서버 기능. AccessService 와 무관하게 전역 스위치.",
@@ -1384,6 +1513,14 @@
             "help": "가입자→이 피어 오퍼에 끼워 넣는 코덱(예 PCMA, PCMU — IP-PBX G.711 필수 코덱). 피어가 그 코덱으로 답하고 가입자 오퍼에 없었으면 CMP 가 피어 leg 를 AMR-WB 와 변환한다(cmp.md §11, CMP TranscodeSlots). 비면 삽입 없음. 피어→가입자 오퍼에는 서비스 코덱(AMR-WB)이 항상 삽입된다."
           },
           {
+            "key": "announcement_profile",
+            "label": "안내 프로파일 (피어 발신)",
+            "type": "string",
+            "default": "",
+            "advanced": true,
+            "help": "이 피어가 발신자인 호(트렁크 인바운드)에 적용할 안내음성 프로파일. NNI 관례는 안내 없이 응답 코드만 넘기는 것 — 예: trunk. 비면 DefaultProfile. announcements.md §6.2"
+          },
+          {
             "key": "tags",
             "label": "태그",
             "type": "string_list",
@@ -2281,6 +2418,20 @@
             "type": "bool",
             "default": true,
             "help": "이 서비스 가입자의 호 전달(REFER — blind/attended) 허용. false 면 REFER 403. volte_supplementary_services.md §6.3"
+          },
+          {
+            "key": "announcement_profile",
+            "label": "안내 프로파일 (발신자)",
+            "type": "string",
+            "default": "",
+            "help": "이 서비스 가입자가 발신자일 때의 안내음성 프로파일(Setup.Announcement.Rules 의 profile). 비면 DefaultProfile. announcements.md §6.2"
+          },
+          {
+            "key": "hold_profile",
+            "label": "보류 프로파일 (피보류자)",
+            "type": "string",
+            "default": "",
+            "help": "이 서비스 가입자가 피보류자일 때 듣는 보류 음악 프로파일(hold 상황만). 비면 announcement_profile → DefaultProfile."
           },
           {
             "key": "country_code",

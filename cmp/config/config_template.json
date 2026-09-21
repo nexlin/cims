@@ -120,6 +120,54 @@
       "scope": "service"
     },
     {
+      "key": "announcement",
+      "title": "안내음성·신호음 재생기",
+      "description": "relay leg 에 붙는 안내음·신호음·보류 음악 재생기 (announcements.md §4). CSP 가 RELAY_PLAY 로 지시하고 CMP 가 카탈로그 음원을 그 leg 코덱으로 낸다. 카탈로그 = <install>/<AnnouncementDir>/sys/catalog.jsonl(동봉) + config/announcements.jsonl(운영자 등록 collection).",
+      "fields": [
+        {
+          "key": "AnnPlayers",
+          "label": "동시 재생기 상한",
+          "type": "int",
+          "default": 32,
+          "min": 0,
+          "max": 4096,
+          "restart": true,
+          "help": "동시에 안내를 재생할 수 있는 leg 수. 0 = 기능 비활성(HEARTBEAT resource.ann 미광고 → CSP 는 안내 없이 응답 코드만 낸다). 재생 CPU 는 relay 한 방향과 같은 급(파일 프레임 복사 + SRTP)."
+        },
+        {
+          "key": "AnnMaxPlayMs",
+          "label": "재생 상한 (ms)",
+          "type": "int",
+          "default": 60000,
+          "min": 1000,
+          "max": 600000,
+          "restart": false,
+          "reload_hint": "다음 RELAY_PLAY 부터 적용.",
+          "help": "RELAY_PLAY 에 max_ms 가 없을 때의 총 재생 상한. repeat 0(STOP 까지 — 보류 음악·링백)은 예외."
+        },
+        {
+          "key": "AnnNatWaitMs",
+          "label": "NAT leg 시작 지연 상한 (ms)",
+          "type": "int",
+          "default": 500,
+          "min": 0,
+          "max": 5000,
+          "restart": false,
+          "help": "NAT 뒤 단말 leg 는 목적지 latch(첫 ingress RTP) 뒤에 안내를 시작한다 — 그 대기 상한. 지나면 선언 주소로 시작."
+        },
+        {
+          "key": "AnnouncementDir",
+          "label": "음원 루트",
+          "type": "string",
+          "default": "announcements",
+          "restart": false,
+          "reload_hint": "SIGUSR1/ANN_RELOAD 로 재적재.",
+          "help": "음원 파일 루트(install_path 기준 상대 또는 절대). sys/ = 패키지 동봉 기본 세트, op/ = 운영자 등록(콘솔 안내음성 라이브러리 [배포]가 agent 로 내려준다)."
+        }
+      ],
+      "scope": "service"
+    },
+    {
       "key": "ptt_rtp",
       "title": "PTT RTP 포트 풀",
       "description": "PTT 그룹콜 전용. 그룹당 공유 Floor(m=application) 포트 + 멤버당 전용 Audio/Video RTP 포트 (leg 별 포트셋).",
@@ -534,6 +582,97 @@
         }
       ],
       "scope": "system"
+    }
+  ],
+  "collections": [
+    {
+      "key": "announcements",
+      "title": "안내 음원 카탈로그 (운영자 등록)",
+      "description": "운영자가 콘솔 안내음성 라이브러리(/service/announcements)에 등록한 음원 목록 — OAM 이 agent /collection 으로 내려주고 음원 파일은 /module-file 로 announcements/op/ 에 둔다. 동봉 세트(sys:)는 패키지의 announcements/sys/catalog.jsonl 이 정본이라 여기 없다.",
+      "restart": false,
+      "reload_hint": "저장 시 CMP SIGUSR1 reload",
+      "schema": {
+        "primary_key": [
+          "id"
+        ],
+        "id_field": "id",
+        "id_type": "string",
+        "unique_keys": [
+          [
+            "id"
+          ]
+        ],
+        "fields": [
+          {
+            "key": "id",
+            "label": "음원 id",
+            "type": "string",
+            "required": true,
+            "help": "op:<name> — [a-z0-9_]{1,40}"
+          },
+          {
+            "key": "kind",
+            "label": "종류",
+            "type": "enum",
+            "options": [
+              "tone",
+              "announcement",
+              "music"
+            ],
+            "default": "announcement"
+          },
+          {
+            "key": "description",
+            "label": "설명",
+            "type": "string",
+            "default": ""
+          },
+          {
+            "key": "duration_ms",
+            "label": "길이 (ms)",
+            "type": "int",
+            "default": 0,
+            "readonly": true
+          },
+          {
+            "key": "loop",
+            "label": "loop 힌트",
+            "type": "bool",
+            "default": false
+          },
+          {
+            "key": "files",
+            "label": "코덱별 파일",
+            "type": "string",
+            "required": true,
+            "help": "{\"amr-wb\":\"op/<name>.amrwb\",\"pcmu\":…,\"pcma\":…,\"g722\":…} — 루트 기준 상대 경로 (JSON 문자열 — 콘솔 안내음성 라이브러리가 기록, 직접 편집하지 않는다)",
+            "readonly": true,
+            "default": ""
+          },
+          {
+            "key": "sha256",
+            "label": "파일 지문",
+            "type": "string",
+            "default": "",
+            "help": "코덱 → sha256 — 노드 배포 대조 (JSON 문자열 — 콘솔 안내음성 라이브러리가 기록, 직접 편집하지 않는다)",
+            "readonly": true
+          },
+          {
+            "key": "registered_at",
+            "label": "등록 시각",
+            "type": "string",
+            "default": "",
+            "readonly": true
+          },
+          {
+            "key": "registered_by",
+            "label": "등록자",
+            "type": "string",
+            "default": "",
+            "readonly": true
+          }
+        ]
+      }
     }
   ]
 }

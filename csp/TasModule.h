@@ -119,7 +119,8 @@ public:
     /** 착신 가입자 종단 서비스 — DND/착신거부 603, 착신전환 302 (수신 listener 주소로 Contact).
      *  true=응답 발신·소비, false=일반 B2BUA 진행. */
     bool ApplyTerminationServices( const char *pszCallId, const char *pszFrom, const char *pszTo,
-                                   const CspUser &clsUser );
+                                   const CspUser &clsUser, CSipCallRtp *pclsRtp = NULL,
+                                   CSipMessage *pclsMessage = NULL );
 
 private:
     /** 당겨받기 (volte_supplementary_services.md §5). pszTarget: 지정 픽업 대상 내선

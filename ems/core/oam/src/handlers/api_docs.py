@@ -83,6 +83,11 @@ def _recording_docs():
     return CIMS_RECORDING_API_DOCS
 
 
+def _announcements_docs():
+    from handlers.announcements import CIMS_ANNOUNCEMENTS_API_DOCS
+    return CIMS_ANNOUNCEMENTS_API_DOCS
+
+
 def _flow_docs():
     from services.flow_logger import FLOW_API_DOCS
     return FLOW_API_DOCS
@@ -99,7 +104,7 @@ def _csc_org_docs():
     return CIMS_ORG_API_DOCS
 
 
-_LOADERS = (_agent_docs, _stats_docs, _alerts_docs, _events_docs, _recording_docs, _flow_docs,
+_LOADERS = (_agent_docs, _stats_docs, _alerts_docs, _events_docs, _recording_docs, _announcements_docs, _flow_docs,
             _csc_admin_docs, _csc_org_docs)
 
 

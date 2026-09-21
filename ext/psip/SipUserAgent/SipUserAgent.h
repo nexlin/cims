@@ -69,6 +69,8 @@ public:
 	bool StopCall( const char * pszCallId, const char * pszForward );
 	bool RingCall( const char * pszCallId, CSipCallRtp * pclsRtp );
 	bool RingCall( const char * pszCallId, int iSipStatus, CSipCallRtp * pclsRtp );
+	/** 18x 에 부가 헤더를 싣는 오버로드 — 예: P-Early-Media: sendonly (RFC 5009, TS 24.628 early media 인가). */
+	bool RingCall( const char * pszCallId, int iSipStatus, CSipCallRtp * pclsRtp, const std::vector< std::pair<std::string, std::string> > & clsExtraHeaders );
 	bool AcceptCall( const char * pszCallId, CSipCallRtp * pclsRtp );
 	/** 200 OK 를 생성만 하고 전송하지 않는 2단계 API (CreateCall→StartCall 패턴) — 호출자가
 	 *  바디(multipart 등)를 부가한 뒤 m_clsSipStack.SendSipMessage() 로 전송한다. */

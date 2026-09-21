@@ -38,6 +38,19 @@
       "msg_close": "Service log store recovered — local spool drained ({mo})",
       "effect": "flow/msg 로그가 로컬 스풀로 우회 중 — 콘솔 Flow/이력 조회에 최신 구간 미표시 (회복 시 재생되어 자동 보완). 미디어/제어 처리에는 영향 없음",
       "recommended_action": "ServiceLogging.Dir 볼륨(NAS/NFS) 마운트·권한·용량 확인. 회복되면 스풀이 자동 재생되고 알람은 자연 회수된다"
+    },
+    {
+      "type": "media_missing",
+      "code": "A-PRC-034",
+      "perceived_severity": "major",
+      "event_type": "processingError",
+      "probable_cause": "fileError",
+      "mo_class": "service",
+      "metric": "안내 음원 카탈로그",
+      "msg_open": "Announcement media missing or malformed: {count} item(s) under {root} (first: {first})",
+      "msg_close": "Announcement media catalog restored ({mo})",
+      "effect": "해당 음원을 참조하는 안내(통화중·무응답·보류 음악 등)가 재생되지 않고 응답 코드만 나간다(CSP 폴백 MEDIA_NOT_FOUND) — 통화 자체는 정상",
+      "recommended_action": "STATS detail.ann_catalog.missing 확인 → 음원 재배포(콘솔 안내음성 라이브러리 [배포]) 또는 카탈로그 행 정리 뒤 SIGUSR1/ANN_RELOAD"
     }
   ],
   "events": [

@@ -25,6 +25,7 @@ CMP는 CIMS 시스템의 미디어 서버로, CSP의 제어 하에 RTP relay, PT
 | DTMF PTT | DTMF 숫자로 Floor REQUEST/RELEASE (레거시 단말 대응) |
 | 녹취 | VoIP 양방향 / PTT 세션 단위 raw RTP 저장 |
 | 세션 타임아웃 | 무활동 세션 자동 정리 |
+| 안내 재생기 | relay leg 에 붙는 안내음·신호음·보류 음악 재생(`RELAY_PLAY`, §12 — CSP 가 MRFC, CMP 가 MRFP) |
 
 ### 1.2 프로세스 구성
 
@@ -856,6 +857,10 @@ CmpServer (PModule)
   "RtpStartPort": 50000,         // VoIP Audio RTP 시작 포트
   "RtpPoolSize": 20,             // VoIP 4포트 블록 수
   "TranscodeSlots": 8,           // 피어 leg G.711↔AMR-WB 변환 동시 세션 수 (§11.4, 0=비활성)
+  "AnnouncementDir": "announcements", // 안내 음원 루트(install_path 기준 상대/절대 — sys/ 동봉 · op/ 운영자 등록, §12)
+  "AnnPlayers": 32,              // 동시 안내 재생기 상한 (0=비활성 → resource.ann 미광고)
+  "AnnMaxPlayMs": 60000,         // RELAY_PLAY max_ms 생략 시 상한 (repeat 0 은 STOP 까지)
+  "AnnNatWaitMs": 500,           // NAT leg 는 latch(첫 ingress)까지 재생 시작을 미룸 — 그 상한
   "PttRtpStartPort": 52000,      // PTT Audio RTP 시작 포트
   "PttRtpPoolSize": 10,          // PTT 2포트 블록 수
   "PttFloorStartPort": 54000,    // PTT Floor Control 시작 포트
@@ -975,6 +980,27 @@ SIP-I(ISUP 캡슐화) 트렁크는 미디어 문제가 아니라 CIMS 가 MGCF �
 
 ---
 
-## 12. 관련 문서
+## 12. 안내 재생기 — leg 에 붙는 재생 원천 (announcements.md §4)
+
+CSP(MRFC)가 `RELAY_PLAY` 로 지시하면 relay 세션의 peer leg 하나에 재생기를 붙여 카탈로그 음원을 그 leg 코덱의 RTP 로 낸다
+([../../api/cmp_media_api.md](../../api/cmp_media_api.md) §6.7). 실패 안내(early media 뒤 원코드)·보류 음악·서버 링백이 전부 이 하나로 나간다.
+
+- **`PAnnCatalog`** — `<AnnouncementDir>/sys/catalog.jsonl`(패키지 동봉 12종: 한국 신호음 5·TTS 안내 6·보류 음악) + `config/announcements.jsonl`
+  (운영자 등록 — OAM 라이브러리가 agent `/collection` 으로 내린다)을 읽어 코덱별 20 ms 프레임 열로 **전량 메모리 상주**(재생 경로 디스크 I/O 없음).
+  PCMU/PCMA/G722 = 160 B, AMR-WB = RFC 4867 저장 형식 프레임(NO_DATA 는 빈 프레임 — 무송신). 재적재 = SIGUSR1·`ANN_RELOAD`, 진행 중 재생은 shared_ptr
+  스냅샷을 들고 있어 끊기지 않는다. 누락·형식 오류 항목은 빼고 적재하며 A-PRC-034 를 연다(STATS `detail.ann_catalog.missing`).
+- **`PAnnPlayer`** — 시퀀스(항목 = 음원·repeat·max_ms)·전체 repeat(0 = STOP 까지)·delay 무음·max 상한. 자기 SSRC·seq, 코덱 클록 timestamp, marker(시작·무음 뒤),
+  AMR-WB 는 leg fmtp 의 octet-align 으로 페이로드. `tick(now)` 가 마감 지난 프레임을 최대 5개까지 따라잡아 낸다.
+- **`PAnnTicker`** — 리액터마다 timerfd 20 ms 하나(TFD_TIMER_ABSTIME — 드리프트 없음). relay 리액터는 epoll 이벤트 구동이라 클록이 없어 이것이 재생기의
+  클록이다. 재생기 있는 relay 만 집합에 두고 비면 disarm(idle CPU 0). relay 와 같은 리액터 스레드라 경합이 없고, 완료 통지는 relay 락을 놓은 뒤 서버
+  콜백(`onAnnDone` → `RELAY_PLAY_DONE`)으로 낸다(락 순서 역전 방지).
+- **`PRtpRelay`** — leg 당 재생기 1개(`_ann[2]`). `annTick` 이 프레임을 leg 소켓·leg SRTP 컨텍스트로 송신하고 `touchActivity`(재생 중 회수 없음). **replace 모드** =
+  재생 중인 leg 로는 반대 peer 의 오디오 relay 를 보내지 않는다(변환 유닛 출력도) — RTCP·영상·tap·녹취는 그대로. ingress 가 오면 재생기의 NAT 게이트를 연다.
+  `reset()` 이 재생기를 걷는다(세션 종속 수명). 재생 코덱 = `media_codec` → `remote_codec`(정적 PT 0 의 PCMU 도 `remote_codec` 만으로 남긴다).
+- 자원 = `AnnPlayers` 슬롯(`resource.ann{total,used,media}`, 소진 `ANN_CAPACITY`, 풀 고갈 알람은 A-QOS-002 `ann_pool`). CPU 는 relay 한 방향과 같은 급(인코딩 없음).
+- 검증: S1 `S1-UNIT-CMP`(`tests/cmp_ann_player_test.cpp` — 프레임화·페이싱·시퀀스·AMR 페이로드·NAT 게이트), `tests/cmp_smoke_announcement.py`(라이브 CMP 스모크).
+
+## 13. 관련 문서
 
 - [../features/flow_logging.md](./../features/flow_logging.md) — Flow/Msg 로깅 공통 규격, sesid 상속, CSP↔CMP 인터페이스 필드
+- [../features/announcements.md](../features/announcements.md) — 안내음성·신호음·보류 음악 (CSP=MRFC / CMP=MRFP 분담, 음원 라이브러리)

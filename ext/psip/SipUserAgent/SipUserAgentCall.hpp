@@ -198,6 +198,13 @@ bool CSipUserAgent::RingCall( const char * pszCallId, CSipCallRtp * pclsRtp )
 // SIP 통화 요청에 대한 Ring / Session Progress 응답 메시지를 전송한다. IP-PBX 에서 Ring / Session Progress 메시지를 전달할 때에 사용된다.
 bool CSipUserAgent::RingCall( const char * pszCallId, int iSipStatus, CSipCallRtp * pclsRtp )
 {
+	static const std::vector< std::pair<std::string, std::string> > clsNoHeaders;
+	return RingCall( pszCallId, iSipStatus, pclsRtp, clsNoHeaders );
+}
+
+// 18x + 부가 헤더 (P-Early-Media 등 — 서버가 만든 early media answer 를 낼 때)
+bool CSipUserAgent::RingCall( const char * pszCallId, int iSipStatus, CSipCallRtp * pclsRtp, const std::vector< std::pair<std::string, std::string> > & clsExtraHeaders )
+{
 	SIP_DIALOG_MAP::iterator		itMap;
 	CSipMessage * pclsMessage = NULL;
 	bool	bRes = false;
@@ -225,6 +232,11 @@ bool CSipUserAgent::RingCall( const char * pszCallId, int iSipStatus, CSipCallRt
 
 				snprintf( szRSeq, sizeof(szRSeq), "%d", itMap->second.m_iRSeq );
 				pclsMessage->AddHeader( "RSeq", szRSeq );
+			}
+
+			for( std::vector< std::pair<std::string, std::string> >::const_iterator itH = clsExtraHeaders.begin(); itH != clsExtraHeaders.end(); ++itH )
+			{
+				pclsMessage->AddHeader( itH->first.c_str(), itH->second.c_str() );
 			}
 
 			bRes = true;

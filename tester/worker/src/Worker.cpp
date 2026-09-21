@@ -1517,6 +1517,19 @@ void Worker::onEvent(const Event& e) {
         if (ep->isPeer() && ep->callId == e.callId) epClearCall(ep);
         if (e.q850 > 0) { m_metrics.counter("q850_rx"); m_metrics.counter("q850." + std::to_string(e.q850)); }
         if (!in) break;
+        if (in->progressTx && in->rtpMode != CRtpThread::E_MEDIA_NONE && e.status >= 300) {
+            // 183 뒤 실패 최종 응답 — 망 안내(announcements.md §3.1)가 early media 로 흘렀는가. CALLSTART 와 같은 판정(≥5 패킷)을
+            //   실패 종결에도 적용해 early_rtp_pct 가 안내 도달률이 된다
+            unsigned long long rx = 0, lost = 0;
+            long long jit = 0;
+            if (ep->isPeer()) ep->poolRef->peer->RtpStats(e.callId, rx, lost, jit);
+            else if (ep->isReal()) rx = ep->realStats.rx;
+            else rx = ep->s->m_clsRtpThread.m_ullRecvTotal.load();
+            m_metrics.counter("early_rtp_rx", (long long)rx);
+            if (rx >= 5) m_metrics.counter("early_rtp_ok");
+            else emitEvent("early media RTP not received before final " + std::to_string(e.status) + " (rx=" + std::to_string(rx) + ")", ep, "progress", 183, e.callId);
+            in->progressTx = false;
+        }
         std::string role = roleOf(in, ep);
         if (in->phase == Instance::WAIT_EVENT && in->awaitKind == "callend:" + role) {
             // reject 단계 또는 invite expect.code≥300: 발신자가 최종 응답을 받았다 — 기대 코드와 다르면 실패
@@ -1553,6 +1566,8 @@ void Worker::onEvent(const Event& e) {
         // 발신자의 1xx — 183 SDP 면 early media, RSeq 가 있었으면 PRACK 을 냈다(RFC 3262)
         m_metrics.counter("ring_rx");
         if (e.hasPai) m_metrics.counter("early_media");
+        // 망이 만든 183+SDP(서버 안내·링백, announcements.md §3) — progress 단계 없이도 early media 가 섰다: 200/실패 최종 응답 때 RTP 도달을 판정한다
+        if (e.hasPai && in && in->rtpMode != CRtpThread::E_MEDIA_NONE && in->actors.count(roleOf(in, ep)) && !in->progressTx) in->progressTx = true;
         if (e.prack) m_metrics.counter("prack_tx");
         if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "ring:" + roleOf(in, ep)) advance(*in, now);
         break;

@@ -20,6 +20,7 @@
 #include "CmpClient.h"
 #include "CspAclPolicyEngine.h"
 #include "CspAddressing.h"
+#include "CspAnnouncement.h"
 #include "CspDialPlan.h"
 #include "CspLocalNodeMap.h"
 #include "CspPendingRouteMap.h"
@@ -774,6 +775,10 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         if ( eDial == DIAL_PLAN_INCOMPLETE ) {
             CLog::Print( LOG_INFO, "EventIncomingCall: callee(%s) 번역 불가(plan=%s) → 484", strCalleeResolved.c_str(),
                          strPlanSource.c_str() );
+            // 없는 번호 안내(announcements.md §3.2) — 정책이 none 이거나 CMP 미지원이면 종전대로 484 만
+            if ( gclsAnnouncement.Reject( pszCallId, pclsRtp, pszFrom, pszTo, SIP_ADDRESS_INCOMPLETE, NULL,
+                                          pclsMessage ) )
+                return;
             return StopCall( pszCallId, SIP_ADDRESS_INCOMPLETE );
         }
         if ( !strCalleeResolved.empty() && strcmp( strCalleeResolved.c_str(), pszTo ? pszTo : "" ) != 0 ) {
@@ -972,6 +977,10 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     //   세므로(build_minutes) PTT 실패가 VoLTE 통계를 오염시킨다.
     auto RejectVoice = [&]( int iCode ) {
         if ( gclsCallDir.IsEnabled() ) gclsCallDir.VoipCallRejected( pszCallId, pszFrom, pszTo, iCode );
+        // 실패 안내(announcements.md §3.2) — early media 로 안내한 뒤 같은 코드로 끝난다(시도 기록은 위에서 이미
+        // 남겼다).
+        //   정책 none·CMP 미지원·조립 실패면 종전대로 응답만.
+        if ( gclsAnnouncement.Reject( pszCallId, pclsRtp, pszFrom, pszTo, iCode, NULL, pclsMessage ) ) return;
         return StopCall( pszCallId, iCode );
     };
 
@@ -1058,7 +1067,9 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     //   거절은 모듈 안에서 응답하므로 시도 기록도 **모듈 안에서** 남긴다(여기서 `RejectVoice`
     //   를 쓰면 응답을 두 번 보낸다). 착신 식별자를 넘기는 이유가 그것이다 — 장부의 callee 가
     //   표·이력의 다른 자리와 같은 문자열이어야 한다. 착신전환 302 는 남기지 않는다(TasModule).
-    if ( m_clsTas.IsEnabled() && m_clsTas.ApplyTerminationServices( pszCallId, pszFrom, pszTo, clsUser ) ) return;
+    if ( m_clsTas.IsEnabled() &&
+         m_clsTas.ApplyTerminationServices( pszCallId, pszFrom, pszTo, clsUser, pclsRtp, pclsMessage ) )
+        return;
 
     // B2BUA 호 설정
     if ( bRoutePrefix == false ) {
@@ -1291,6 +1302,10 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     //   A(수신) entry = peer1 포트(B leg SDP 용), B(발신) entry = peer0 포트(A leg SDP 용).
     gclsCallMap.Insert( pszCallId, strCallId.c_str(), iStartPortB, iStartPort );
     SetCallOwner( strCallId.c_str(), GetCallOwner( pszCallId ) );
+    // 발신자 안내 프로파일(announcements.md §6.2) — B 실패 때 A 에 낼 안내를 고르는 근거. 피어(inbound Route)면
+    // RemoteNode 의 것
+    gclsCallMap.SetAnnProfile( pszCallId,
+                               CCspAnnouncementService::ProfileForCaller( pszFrom ? pszFrom : "", pclsMessage ) );
     // 피어 B-leg 의 라우팅 상태 — 5xx·타임아웃이면 같은 RouteSet 의 다음 멤버로 재라우팅(TryRerouteLeg, §2-4)
     if ( v3Routed && !clsRoutePending.route_set.empty() )
         gclsCallMap.SetRouteInfo( pszCallId, clsRoutePending.route_set, clsRoutePending.route_name,
@@ -1523,6 +1538,20 @@ void CModuleDispatcher::EventCallRing( const char *pszCallId, int iSipStatus, CS
                                     clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
             }
         }
+        // 서버 링백(announcements.md §3.4 — 프로파일 ringback=media 일 때만): B 의 SDP 없는 첫 18x 에 A 로 183+SDP 를
+        // 내고
+        //   재생기를 붙였다면, 이어지는 SDP 없는 18x 도 같은 SDP(다이얼로그 local)를 실어 전달해 단말이 로컬 링백으로
+        //   갈아타지 않게 한다(RFC 3960 §3.2). B 의 SDP 있는 18x 는 링백 정지 뒤 위 C1a 앵커링 그대로.
+        CSipCallRtp clsRingbackSdp;
+        if ( pclsRtp == NULL ) {
+            CSipCallRtp *pclsUnused = NULL;
+            if ( gclsAnnouncement.OnRingback( pszCallId, clsCallInfo, &pclsUnused ) &&
+                 gclsUserAgent.GetLocalCallRtp( clsCallInfo.m_strPeerCallId.c_str(), &clsRingbackSdp ) &&
+                 clsRingbackSdp.m_iPort > 0 )
+                pclsRtp = &clsRingbackSdp;
+        } else {
+            gclsAnnouncement.OnRingbackEnd( pszCallId, clsCallInfo );
+        }
         int iRSeq = gclsUserAgent.GetRSeq( pszCallId );
         if ( iRSeq != -1 ) gclsUserAgent.SetRSeq( clsCallInfo.m_strPeerCallId.c_str(), iRSeq );
         gclsUserAgent.RingCall( clsCallInfo.m_strPeerCallId.c_str(), iSipStatus, pclsRtp );
@@ -1544,6 +1573,8 @@ void CModuleDispatcher::EventCallStart( const char *pszCallId, CSipCallRtp *pcls
     if ( m_clsTas.IsEnabled() && m_clsTas.OnCallStart( pszCallId, pclsRtp ) ) return;
 
     if ( gclsCallMap.Select( pszCallId, clsCallInfo ) ) {
+        // 서버 링백 정지(§3.4) — B 가 answer 했다
+        gclsAnnouncement.OnRingbackEnd( pszCallId, clsCallInfo );
         // Service log: VoipCallAnswer
         if ( gclsCallDir.IsEnabled() ) {
             std::string strOrigCallId = pszCallId;
@@ -1777,6 +1808,9 @@ void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus, con
     // MCData media plane 레그 — cmdp 세션 정리 (UE 발 BYE·실패 응답 포함)
     if ( gclsMcDataMediaService.OnCallTerminated( pszCallId ) ) return;
 
+    // 안내 재생 회수 — 이 leg 가 듣던 early 안내(CANCEL 등)·이 leg 가 관여한 보류 음악 (announcements.md §5.1)
+    gclsAnnouncement.OnCallEnd( pszCallId );
+
     bool bSelHit = gclsCallMap.Select( pszCallId, clsCallInfo );
     CLog::Print( LOG_DEBUG, "EventCallEnd callid=%s sip=%d selHit=%d peer=%s peerRtpPort=%d", pszCallId, iSipStatus,
                  bSelHit ? 1 : 0, bSelHit ? clsCallInfo.m_strPeerCallId.c_str() : "-",
@@ -1793,6 +1827,13 @@ void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus, con
     // leg 의
     //   종료는 여기서 끝난다(A 에는 아무 것도 보내지 않는다).
     if ( bSelHit && TryRerouteLeg( pszCallId, clsCallInfo, iSipStatus ) ) {
+        RemoveCallOwner( pszCallId );
+        return;
+    }
+    // 실패 안내(announcements.md §3.1) — B 의 최종 실패를 A 에 early media 안내로 들려준 뒤 같은 코드로 끝낸다.
+    //   인수되면 B entry 만 지운다(relay 는 A 가 끝날 때 회수). A 의 최종 응답은 서비스가 낸다.
+    if ( bSelHit && gclsAnnouncement.OnLegFailed( pszCallId, clsCallInfo, iSipStatus, pszReason ) ) {
+        gclsCallMap.DeleteOne( pszCallId );
         RemoveCallOwner( pszCallId );
         return;
     }
@@ -1944,6 +1985,19 @@ void CModuleDispatcher::EventReInvite( const char *pszCallId, CSipCallRtp *pclsR
             std::string strRelayIp = clsCallInfo.m_strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress()
                                                                            : clsCallInfo.m_strRelayLocalIp;
             pclsRemoteRtp->SetIpPort( strRelayIp.c_str(), clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
+            // 보류 음악(TS 24.610 §4.5.2.4, announcements.md §3.3) — offer 방향 sendonly/inactive = hold, sendrecv =
+            // resume.
+            //   SDP 는 relay 에 고정돼 있어 재협상 없이 CMP 원천만 바꾼다. inactive 는 음악을 들려주기 위해 B 로 가는
+            //   offer 를 sendonly 로 고친다(AS 가 방향을 고칠 수 있다). TAS 보조 서비스라 roles.TAS 게이트.
+            if ( m_clsTas.IsEnabled() && !clsCallInfo.m_strRelaySessionId.empty() ) {
+                const ERtpDirection eDir = pclsRemoteRtp->m_eDirection;
+                if ( eDir == E_RTP_SEND || eDir == E_RTP_INACTIVE ) {
+                    if ( gclsAnnouncement.OnHold( pszCallId, clsCallInfo ) && eDir == E_RTP_INACTIVE )
+                        pclsRemoteRtp->SetDirection( E_RTP_SEND );
+                } else if ( eDir == E_RTP_SEND_RECV ) {
+                    gclsAnnouncement.OnResume( pszCallId, clsCallInfo );
+                }
+            }
         }
         gclsUserAgent.SendReInvite( clsCallInfo.m_strPeerCallId.c_str(), pclsRemoteRtp );
     } else if ( pclsRemoteRtp ) {

@@ -210,6 +210,19 @@ CSC 는 결과에 따라 다음을 자동 처리:
 | `apply_mounts` | 마운트 적용 (cims-priv mount-add/del → `/etc/fstab` 영속) — sync REST `/apply-mounts` | `mounts[]` (`{op,fstype,source,target,options?}`) |
 | `update_ha` | HA 구성 반영 — `<prefix>/run/keepalived/ha.json` 기록 후 `cims-ha` 실행 | `ha_json` (`ha_intent` 포함 — 아래) |
 
+### Sync REST — 모듈 자원 파일 (`/module-files`, `/module-file`)
+
+collection(jsonl)과 나란한 **바이너리 자원** 통로 — OAM 안내음성 라이브러리가 CMP 노드에 운영자 음원을 내린다([announcements.md §7.3](../design/features/announcements.md)).
+경로는 `install_path` 아래 `announcements/` 로 고정(그 밖·`..` 은 400).
+
+| 메서드 | 경로 | 동작 |
+|---|---|---|
+| GET | `/module-files?install_path=&dir=announcements/op` | 파일 목록 `{files[]: {name, size, sha256}}` — OAM 이 라이브러리 지문과 대조 |
+| PUT | `/module-file?install_path=&path=announcements/op/<file>` | 본문 바이너리(≤ 64 MB) 를 atomic(tmp→rename) 배치 → `{ok, file, bytes, sha256}` |
+| DELETE | `/module-file?install_path=&path=…` | 파일 제거(없으면 404) |
+
+배포 순서 = 파일 PUT(없거나 지문 다른 것만) → `PUT /collection?name=announcements`(`signal:true` → SIGUSR1) → CMP 가 카탈로그·파일을 재적재한다.
+
 ### `update_ha` 의 `ha_intent`
 
 `ha_json.ha_intent` 가 agent 의 동작을 결정한다. **파괴적 동작(무장 해제)은 명시적

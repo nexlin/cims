@@ -46,6 +46,18 @@ PCmpServer::PCmpServer(const std::string& name, const std::string& configFile)
             LOG_ERROR("PCmpServer", "epoll_create1 failed for reactor %d: %s", i, strerror(errno));
     }
 
+    // 안내 재생 클록 — 리액터마다 timerfd 하나 (announcements.md §4.2). 재생기 0 이면 disarm 상태로 대기.
+    for (int i = 0; i < _rtpWorkerCount; ++i) {
+        PAnnTicker* t = new PAnnTicker(formatStr("AnnTicker_%d", i));
+        if (t->init()) {
+            t->setDoneCallback([this](const PAnnTicker::Done& d) { this->onAnnDone(d); });
+            epollAddHandler(i, t, std::vector<int>{ t->fd() });
+        } else {
+            LOG_ERROR("PCmpServer", "AnnTicker %d init failed — announcements disabled on this reactor", i);
+        }
+        _annTickers.push_back(t);
+    }
+
     initResourcePool();
     initTapPool();
     initPttResourcePool();
@@ -60,6 +72,8 @@ PCmpServer::PCmpServer(const std::string& name, const std::string& configFile)
 
 PCmpServer::~PCmpServer() {
     stopServer();
+    for (PAnnTicker* t : _annTickers) delete t;   // 리액터 스레드 join 뒤(stopServer) 에 해제
+    _annTickers.clear();
     for(auto const& [name, group] : _groups) {
         delete group;
     }
@@ -110,6 +124,9 @@ bool PCmpServer::startServer() {
     }
 
     _running = true;
+    // 안내 카탈로그 적재 (announcements.md §7.1) — 파일은 전량 메모리 상주, 누락은 알람(A-PRC-034)
+    if (_annPlayers > 0) reloadAnnouncements();
+    else LOG_INFO("PCmpServer", "Announcements disabled (AnnPlayers=0) — resource.ann not advertised");
     startServiceLogWriter();  // 서비스 로그 writer 기동 (control 스레드 NFS HOL 블로킹 제거 + 스풀 폴백)
     startRecStoreWriter();    // 녹취 저장 경로 op worker 기동 (RTP 리액터 저장 경로 무접촉 + A-PRC-017)
     std::thread([this]() {
@@ -164,7 +181,7 @@ void PCmpServer::fmMonitorLoop() {
     while (_running) {
         msleep(1000);
         if (!_running) break;
-        int relayFree, relayTotal, pttFree, pttTotal, memberFree, memberTotal;
+        int relayFree, relayTotal, pttFree, pttTotal, memberFree, memberTotal, annFree, annTotal;
         {
             PAutoLock lock(_mutex);
             relayFree = (int)_freeResources.size();
@@ -173,11 +190,14 @@ void PCmpServer::fmMonitorLoop() {
             pttTotal = (int)_pttPool.size();
             memberFree = (int)_freePttMembers.size();
             memberTotal = (int)_pttMemberPool.size();
+            annTotal = _annPlayers;
+            annFree = _annPlayers - countAnnPlayers();
         }
-        const struct { const char* comp; int freeN; int total; } pools[3] = {
+        const struct { const char* comp; int freeN; int total; } pools[4] = {
             {"rtp_pool", relayFree, relayTotal},
             {"ptt_floor_pool", pttFree, pttTotal},
             {"ptt_member_pool", memberFree, memberTotal},
+            {"ann_pool", annFree, annTotal},   // 안내 재생기 슬롯(announcements.md §10) — 같은 풀 고갈 알람
         };
         for (const auto& p : pools) {
             if (p.total <= 0) continue;  // 미구성 풀은 판정 제외
@@ -318,6 +338,9 @@ void PCmpServer::handlePacket(char* buf, int len, const std::string& ip, int por
     else if (cmdUpper == "RELAY_REMOVE") processRemove(payload, ip, port, transId);
     else if (cmdUpper == "RELAY_TAP_ADD" || cmdUpper == "RELAY_TAP_MODIFY") processTapAdd(payload, ip, port, transId);
     else if (cmdUpper == "RELAY_TAP_REMOVE") processTapRemove(payload, ip, port, transId);
+    else if (cmdUpper == "RELAY_PLAY") processPlay(payload, ip, port, transId);
+    else if (cmdUpper == "RELAY_PLAY_STOP") processPlayStop(payload, ip, port, transId);
+    else if (cmdUpper == "ANN_RELOAD") processAnnReload(payload, ip, port, transId);
     else if (cmdUpper == "HEARTBEAT") processAlive(payload, ip, port, transId);
     else if (cmdUpper == "PTT_GROUP_ADD") processAddGroup(payload, ip, port, transId);
     else if (cmdUpper == "PTT_GROUP_MODIFY") processModifyGroup(payload, ip, port, transId);
@@ -499,6 +522,14 @@ SimpleJson::JsonNode PCmpServer::buildResourceSummary() {
         xc.Set("used", countTranscoding());
         resource.Set("transcode", xc);
     }
+    // 안내 재생기(announcements.md §4.1) — 키 존재가 기능 광고. AnnPlayers 0 이면 광고하지 않는다(CSP 는 안내 없이 원코드).
+    if (_annPlayers > 0) {
+        SimpleJson::JsonNode ann;
+        ann.Set("total", _annPlayers);
+        ann.Set("used", countAnnPlayers());
+        ann.Set("media", (int)_annCatalog.size());
+        resource.Set("ann", ann);
+    }
     // 청취 leg(tap) — 키 존재가 기능 광고(dispatch_center.md §6.3). 풀 0 이면 광고하지 않는다.
     if (!_tapPool.empty()) {
         SimpleJson::JsonNode tap;
@@ -508,6 +539,12 @@ SimpleJson::JsonNode PCmpServer::buildResourceSummary() {
         resource.Set("tap", tap);
     }
     return resource;
+}
+
+int PCmpServer::countAnnPlayers() const {
+    int n = 0;
+    for (auto const& kv : _sessions) if (kv.second) n += kv.second->annCount();
+    return n;
 }
 
 int PCmpServer::countTranscoding() const {
@@ -758,6 +795,39 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
         detail.Set("taps", tapsArr);
         detail.Set("taps_total", tapsTotal);
     }
+    // 안내 재생기(announcements.md §9) — 진행 중 재생기 + 카탈로그 대조(ids/missing)
+    if (_annPlayers > 0) {
+        SimpleJson::JsonNode annArr;
+        annArr.type = SimpleJson::JSON_ARRAY;
+        int annTotal = 0;
+        for (auto const& [sid, rtp] : _sessions) {
+            if (!rtp || rtp->annCount() == 0) continue;
+            std::vector<PAnnTicker::Done> act;
+            rtp->collectAnn(act);
+            for (const auto& a : act) {
+                ++annTotal;
+                if ((int)annArr.array.size() >= kMaxStatsEntries) continue;
+                SimpleJson::JsonNode n;
+                n.Set("session_id", a.sessionId);
+                n.Set("peer_index", a.peerIdx);
+                n.Set("play_id", a.playId);
+                n.Set("media", a.media);
+                n.Set("played_ms", a.playedMs);
+                annArr.Add(n);
+            }
+        }
+        detail.Set("ann", annArr);
+        detail.Set("ann_total", annTotal);
+        SimpleJson::JsonNode cat;
+        SimpleJson::JsonNode idsArr; idsArr.type = SimpleJson::JSON_ARRAY;
+        for (const std::string& id : _annCatalog.ids()) idsArr.Add(SimpleJson::JsonNode(id));
+        SimpleJson::JsonNode missArr; missArr.type = SimpleJson::JSON_ARRAY;
+        for (const std::string& m : _annCatalog.missing()) missArr.Add(SimpleJson::JsonNode(m));
+        cat.Set("root", _annCatalog.root());
+        cat.Set("ids", idsArr);
+        cat.Set("missing", missArr);
+        detail.Set("ann_catalog", cat);
+    }
     detail.Set("groups", groupsArr);
     detail.Set("groups_total", groupsTotal);
     body.Set("detail", detail);
@@ -989,8 +1059,9 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
         // leg 별 PT 재작성 파라미터 (optional — 생략=0=재작성 없음, envelope v2 유지).
         //   remote_pt/remote_te_pt: 이 leg 가 수신 선언한 PT(egress 스탬프),
         //   remote_src_pt/remote_src_te_pt: 이 leg 가 송신에 쓰는 PT(TE 분류).
+        //   remote_codec 만 와도(정적 PT 0 = PCMU 는 remote_pt 가 생략된다) 코덱 문자열은 남긴다 — 안내 재생 파일 선택 근거(§6.7)
         if (peerIdx >= 0 && (payload.Has("remote_pt") || payload.Has("remote_te_pt") ||
-                             payload.Has("remote_src_pt") || payload.Has("remote_src_te_pt"))) {
+                             payload.Has("remote_src_pt") || payload.Has("remote_src_te_pt") || payload.Has("remote_codec"))) {
             rtp->setPeerPt(peerIdx,
                            (int)payload.GetInt("remote_pt", 0),
                            (int)payload.GetInt("remote_src_pt", 0),
@@ -1172,6 +1243,260 @@ void PCmpServer::processRemove(const SimpleJson::JsonNode& payload, const std::s
     // 세션 종료 후 캐시 정리
     _sesidMap.erase(sessionId);
     _serviceMap.erase(sessionId);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  안내 재생기 — announcements.md §4, cmp_media_api.md §6.7
+// ═══════════════════════════════════════════════════════════════
+
+std::string PCmpServer::annRootPath() const {
+    std::string dir = _configFile;
+    size_t sl = dir.find_last_of('/');
+    dir = (sl == std::string::npos) ? "." : dir.substr(0, sl);
+    if (!_annDir.empty() && _annDir[0] == '/') return _annDir;
+    return dir + "/../" + _annDir;
+}
+
+std::string PCmpServer::annOpCatalogPath() const {
+    std::string dir = _configFile;
+    size_t sl = dir.find_last_of('/');
+    dir = (sl == std::string::npos) ? "." : dir.substr(0, sl);
+    return dir + "/announcements.jsonl";
+}
+
+void PCmpServer::reloadAnnouncements() {
+    if (_annPlayers <= 0) return;
+    std::vector<std::string> missing;
+    _annCatalog.load(annRootPath(), annOpCatalogPath(), missing);
+    updateAnnMissingAlarm(missing);
+    LOG_INFO("PCmpServer", "announcements: %d media loaded from %s (+%s), missing/bad=%d", (int)_annCatalog.size(),
+             annRootPath().c_str(), annOpCatalogPath().c_str(), (int)missing.size());
+}
+
+// 카탈로그가 가리키는 파일 누락·형식 오류 — A-PRC-034 media_missing (announcements.md §10). 해소되면 close.
+void PCmpServer::updateAnnMissingAlarm(const std::vector<std::string>& missing) {
+    if (!gclsFmReporter.IsEnabled()) return;
+    const std::string mo = _systemId + "/" + _nodeName + "/ann/catalog";
+    if (!missing.empty()) {
+        SimpleJson::JsonNode params;
+        params.Set("count", (int)missing.size());
+        std::string first = missing.front();
+        if (first.size() > 160) first = first.substr(0, 160);
+        params.Set("first", first);
+        params.Set("root", annRootPath());
+        gclsFmReporter.AlarmOpen("A-PRC-034", mo, params);
+        _annMissingAlarm = true;
+    } else if (_annMissingAlarm) {
+        gclsFmReporter.AlarmClose("A-PRC-034", mo);
+        _annMissingAlarm = false;
+    }
+}
+
+// 재생 완료(리액터 스레드, relay 락 해제 뒤) → RELAY_PLAY_DONE 이벤트(§8 채널) + flow 로그
+void PCmpServer::onAnnDone(const PAnnTicker::Done& d) {
+    std::string sesid, svc;
+    {
+        PAutoLock lock(_mutex);
+        auto it = _sesidMap.find(d.sessionId);
+        if (it != _sesidMap.end()) sesid = it->second;
+        auto is = _serviceMap.find(d.sessionId);
+        svc = (is != _serviceMap.end()) ? is->second : "volte";
+    }
+    if (sesid.empty()) sesid = issueSesid("");
+    logFlow(d.sessionId, "cmp", "cmp", "INT", "ANN_DONE",
+            (d.media + " " + d.reason + " " + std::to_string(d.playedMs) + "ms").c_str(), "", svc.c_str(), sesid.c_str());
+    SimpleJson::JsonNode p;
+    p.Set("session_id", d.sessionId);
+    p.Set("peer_index", d.peerIdx);
+    p.Set("play_id", d.playId);
+    p.Set("reason", d.reason);
+    p.Set("played_ms", d.playedMs);
+    emitEvent("RELAY_PLAY_DONE", p, sesid, svc);
+    LOG_INFO("PCmpServer", "ann done session=%s peer=%d play=%s reason=%s played=%dms media=%s", d.sessionId.c_str(),
+             d.peerIdx, d.playId.c_str(), d.reason.c_str(), d.playedMs, d.media.c_str());
+}
+
+// RELAY_PLAY {session_id, peer_index, play_id, media[], repeat, delay_ms, max_ms, mode}
+void PCmpServer::processPlay(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
+    const std::string cmdName = "RELAY_PLAY";
+    std::string sessionId = payload.GetString("session_id");
+    std::string playId = payload.GetString("play_id");
+    int peerIdx = (int)payload.GetInt("peer_index", -1);
+    int repeat = (int)payload.GetInt("repeat", 1);
+    int delayMs = (int)payload.GetInt("delay_ms", 0);
+    int maxMs = (int)payload.GetInt("max_ms", 0);
+    std::string mode = payload.GetString("mode", "replace");
+    std::string txIdStr = std::to_string(transId);
+
+    PAutoLock lock(_mutex);
+    std::string sesid = payload.GetString("sesid");
+    if (sesid.empty()) { auto it = _sesidMap.find(sessionId); sesid = it != _sesidMap.end() ? it->second : issueSesid(""); }
+    std::string svc = payload.GetString("service");
+    if (svc.empty()) { auto it = _serviceMap.find(sessionId); svc = it != _serviceMap.end() ? it->second : "volte"; }
+
+    // 음원 목록 — 배열(문자열 또는 {id,repeat,max_ms} 객체) 또는 쉼표 문자열
+    struct Req { std::string id; int repeat = 1; int maxMs = 0; };
+    std::vector<Req> reqs;
+    SimpleJson::JsonNode media = payload.Get("media");
+    if (media.type == SimpleJson::JSON_ARRAY) {
+        for (size_t i = 0; i < media.Size(); ++i) {
+            SimpleJson::JsonNode m = media.At(i);
+            Req r;
+            if (m.type == SimpleJson::JSON_OBJECT) {
+                r.id = m.GetString("id");
+                r.repeat = (int)m.GetInt("repeat", 1);
+                r.maxMs = (int)m.GetInt("max_ms", 0);
+            } else {
+                r.id = m.AsString();
+            }
+            if (!r.id.empty()) reqs.push_back(r);
+        }
+    } else if (media.type == SimpleJson::JSON_STRING) {
+        std::string list = media.AsString();
+        size_t pos = 0;
+        while (pos <= list.size()) {
+            size_t c = list.find(',', pos);
+            std::string id = list.substr(pos, c == std::string::npos ? std::string::npos : c - pos);
+            if (!id.empty()) reqs.push_back(Req{ id, 1, 0 });
+            if (c == std::string::npos) break;
+            pos = c + 1;
+        }
+    }
+    std::string detail = playId;
+    for (const Req& r : reqs) detail += (detail.empty() ? "" : " ") + r.id;
+    logFlow(sessionId, "csp", "cmp", "JSON", cmdName.c_str(), detail.c_str(), txIdStr.c_str(), svc.c_str(), sesid.c_str(),
+            "", _lastRxSeq, "csp");
+
+    auto reject = [&](const char* code, const std::string& reason) {
+        int txSeq = sendErr(ip, port, transId, cmdName, sesid, svc, code, reason.c_str());
+        logFlow(sessionId, "cmp", "csp", "JSON", "ERROR", reason.c_str(), txIdStr.c_str(), svc.c_str(), sesid.c_str(), "",
+                txSeq, "csp");
+        LOG_WARN("PCmpServer", "%s session=%s play=%s rejected: %s", cmdName.c_str(), sessionId.c_str(), playId.c_str(),
+                 reason.c_str());
+    };
+    if (sessionId.empty() || playId.empty() || peerIdx < 0 || peerIdx > 1)
+        return reject("BAD_REQUEST", "session_id, play_id, peer_index required");
+    if (_annPlayers <= 0) return reject("BAD_REQUEST", "announcements not supported (AnnPlayers=0)");
+    if (mode != "replace") return reject("BAD_REQUEST", "mode not supported: " + mode);
+    if (reqs.empty()) return reject("BAD_REQUEST", "media required");
+    auto itS = _sessions.find(sessionId);
+    if (itS == _sessions.end()) return reject("NOT_FOUND", "session not found");   // 부활 금지
+    PRtpRelay* rtp = itS->second;
+
+    const std::string codec = rtp->legCodecName(peerIdx);
+    const int pt = rtp->legPtOut(peerIdx);
+    if (codec.empty() || pt < 0) return reject("BAD_REQUEST", "leg codec undetermined — media_codec/remote_codec required");
+
+    std::vector<PAnnPlayer::Item> items;
+    for (const Req& r : reqs) {
+        PAnnPlayer::Item it;
+        it.media = _annCatalog.find(r.id);
+        if (!it.media) return reject("MEDIA_NOT_FOUND", "media not found: " + r.id);
+        if (!it.media->hasCodec(codec)) return reject("MEDIA_NOT_FOUND", "media " + r.id + " has no " + codec + " file");
+        it.repeat = r.repeat < 0 ? 1 : r.repeat;
+        it.maxMs = r.maxMs;
+        items.push_back(it);
+    }
+    if (maxMs <= 0 && repeat != 0) maxMs = _annMaxPlayMs;
+    // 멱등 — 같은 play_id 가 진행 중이면 상태만 반환
+    std::vector<PAnnTicker::Done> act;
+    rtp->collectAnn(act);
+    for (const auto& a : act) {
+        if (a.peerIdx == peerIdx && a.playId == playId) {
+            SimpleJson::JsonNode respBody;
+            respBody.Set("codec", codec);
+            respBody.Set("played_ms", a.playedMs);
+            int txSeq = sendOk(ip, port, transId, cmdName, sesid, svc, &respBody);
+            logFlow(sessionId, "cmp", "csp", "JSON", "OK", "idempotent", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
+            return;
+        }
+    }
+    if (!rtp->annActive(peerIdx) && countAnnPlayers() >= _annPlayers)
+        return reject("ANN_CAPACITY", "announcement players exhausted");
+    // NAT 게이트 — nat leg 는 latch(첫 ingress)까지 시작을 미룬다(§8)
+    std::string learnedIp; int learnedPort = 0;
+    const bool natLeg = rtp->legIsNat(peerIdx) && !rtp->getNatLatched(peerIdx, learnedIp, learnedPort);
+    std::unique_ptr<PAnnPlayer> player(new PAnnPlayer(playId, peerIdx, codec, pt, rtp->legAmrOctetAlign(peerIdx), items,
+                                                      repeat, delayMs, maxMs, natLeg ? _annNatWaitMs : 0));
+    std::string err;
+    if (!player->ok(err)) return reject("BAD_REQUEST", err);
+    const int durationMs = player->durationMs();
+    std::string replaced;
+    if (!rtp->startAnn(peerIdx, std::move(player), replaced)) return reject("BAD_REQUEST", "leg not active");
+    if (!replaced.empty()) {
+        // 교체된 재생기 — client 명령의 결과지만 통일을 위해 항상 DONE 을 낸다(§4.1)
+        PAnnTicker::Done d;
+        d.sessionId = sessionId; d.peerIdx = peerIdx; d.playId = replaced; d.reason = "replaced";
+        SimpleJson::JsonNode p;
+        p.Set("session_id", sessionId); p.Set("peer_index", peerIdx); p.Set("play_id", replaced);
+        p.Set("reason", "replaced"); p.Set("played_ms", 0);
+        emitEvent("RELAY_PLAY_DONE", p, sesid, svc);
+    }
+    const int widx = rtp->workerIdx();
+    if (widx >= 0 && widx < (int)_annTickers.size() && _annTickers[widx]) _annTickers[widx]->add(rtp);
+
+    logFlow(sessionId, "cmp", "cmp", "INT", "ANN_PLAY", (detail + " " + codec).c_str(), "", svc.c_str(), sesid.c_str());
+    SimpleJson::JsonNode respBody;
+    respBody.Set("codec", codec + "/" + std::to_string(PAnnCatalog::TsStep(codec) * 50));
+    respBody.Set("duration_ms", durationMs);
+    int txSeq = sendOk(ip, port, transId, cmdName, sesid, svc, &respBody);
+    logFlow(sessionId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
+    LOG_INFO("PCmpServer", "%s session=%s peer=%d play=%s media=[%s] codec=%s pt=%d repeat=%d max=%dms nat_wait=%d (%d/%d)",
+             cmdName.c_str(), sessionId.c_str(), peerIdx, playId.c_str(), detail.c_str(), codec.c_str(), pt, repeat, maxMs,
+             natLeg ? _annNatWaitMs : 0, countAnnPlayers(), _annPlayers);
+}
+
+// RELAY_PLAY_STOP {session_id, play_id[, peer_index]} — 없으면 OK(자연 멱등)
+void PCmpServer::processPlayStop(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
+    const std::string cmdName = "RELAY_PLAY_STOP";
+    std::string sessionId = payload.GetString("session_id");
+    std::string playId = payload.GetString("play_id");
+    int peerIdx = (int)payload.GetInt("peer_index", -1);
+    std::string txIdStr = std::to_string(transId);
+    PAutoLock lock(_mutex);
+    std::string sesid = payload.GetString("sesid");
+    if (sesid.empty()) { auto it = _sesidMap.find(sessionId); sesid = it != _sesidMap.end() ? it->second : issueSesid(""); }
+    std::string svc = payload.GetString("service");
+    if (svc.empty()) { auto it = _serviceMap.find(sessionId); svc = it != _serviceMap.end() ? it->second : "volte"; }
+    logFlow(sessionId, "csp", "cmp", "JSON", cmdName.c_str(), playId.c_str(), txIdStr.c_str(), svc.c_str(), sesid.c_str(), "",
+            _lastRxSeq, "csp");
+    int playedMs = 0;
+    auto itS = _sessions.find(sessionId);
+    if (itS != _sessions.end()) {
+        for (int i = 0; i < 2; ++i) {
+            if (peerIdx >= 0 && i != peerIdx) continue;
+            PAnnTicker::Done d;
+            if (itS->second->stopAnn(i, playId, "stopped", d)) {
+                playedMs = d.playedMs;
+                logFlow(sessionId, "cmp", "cmp", "INT", "ANN_DONE", (d.media + " stopped " + std::to_string(d.playedMs) + "ms").c_str(),
+                        "", svc.c_str(), sesid.c_str());
+                SimpleJson::JsonNode p;
+                p.Set("session_id", sessionId); p.Set("peer_index", i); p.Set("play_id", d.playId);
+                p.Set("reason", "stopped"); p.Set("played_ms", d.playedMs);
+                emitEvent("RELAY_PLAY_DONE", p, sesid, svc);
+                LOG_INFO("PCmpServer", "%s session=%s peer=%d play=%s played=%dms", cmdName.c_str(), sessionId.c_str(), i,
+                         d.playId.c_str(), d.playedMs);
+            }
+        }
+    }
+    SimpleJson::JsonNode respBody;
+    respBody.Set("played_ms", playedMs);
+    int txSeq = sendOk(ip, port, transId, cmdName, sesid, svc, &respBody);
+    logFlow(sessionId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
+}
+
+// ANN_RELOAD — CORE 명령. 카탈로그 재적재 후 {media, missing} 반환
+void PCmpServer::processAnnReload(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
+    (void)payload;
+    if (_annPlayers <= 0) {
+        sendErr(ip, port, transId, "ANN_RELOAD", "", "", "BAD_REQUEST", "announcements not supported (AnnPlayers=0)");
+        return;
+    }
+    reloadAnnouncements();
+    SimpleJson::JsonNode body;
+    body.Set("media", (int)_annCatalog.size());
+    body.Set("missing", (int)_annCatalog.missing().size());
+    sendOk(ip, port, transId, "ANN_RELOAD", "", "", &body);
 }
 
 void PCmpServer::processModify(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
@@ -2012,6 +2337,11 @@ void PCmpServer::loadConfig() {
         if (root.Has("RtpPoolSize")) _rtpPoolSize = (int)root.GetInt("RtpPoolSize");
         if (root.Has("RtpIp")) _rtpIp = root.GetString("RtpIp");
         if (root.Has("TranscodeSlots")) _transcodeSlots = (int)root.GetInt("TranscodeSlots");
+        // 안내 재생기(announcements.md §4.3) — AnnPlayers=0 이면 비활성(resource.ann 미광고)
+        if (root.Has("AnnouncementDir")) _annDir = root.GetString("AnnouncementDir");
+        if (root.Has("AnnPlayers")) _annPlayers = (int)root.GetInt("AnnPlayers");
+        if (root.Has("AnnMaxPlayMs")) _annMaxPlayMs = (int)root.GetInt("AnnMaxPlayMs");
+        if (root.Has("AnnNatWaitMs")) _annNatWaitMs = (int)root.GetInt("AnnNatWaitMs");
         // 청취 leg(tap) 풀 — dispatch_center.md §6 (TapPoolSize=0 이면 비활성: resource.tap 미광고 → CSP 가 Join 488)
         if (root.Has("TapStartPort")) _tapStartPort = (int)root.GetInt("TapStartPort");
         if (root.Has("TapPoolSize")) _tapPoolSize = (int)root.GetInt("TapPoolSize");
@@ -2205,6 +2535,7 @@ void PCmpServer::initResourcePool() {
              // epoll 리액터에 소켓 fd 영구 등록 (소켓은 프로세스 종료까지 유지 → 1회 등록).
              int widx = i % _rtpWorkerCount;
              rtp->setWorkerName(formatStr("RtpWorker_%d", widx));
+             rtp->setWorkerIdx(widx);
              std::vector<int> fds; rtp->collectFds(fds);
              epollAddHandler(widx, rtp, fds);
              _resourcePool.push_back(rtp);

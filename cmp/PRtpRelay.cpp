@@ -74,6 +74,8 @@ void PRtpRelay::reset() {
     }
     _xcode[0].reset();
     _xcode[1].reset();
+    _ann[0].reset();   // 안내 재생기 — 세션 종속 수명(RELAY_REMOVE/회수 = 정지, 이벤트 없음)
+    _ann[1].reset();
     _taps.clear();  // 객체 회수는 PCmpServer(freeResource → collectTaps) 몫 — 여기서는 참조만 끊는다
 }
 
@@ -437,6 +439,10 @@ bool PRtpRelay::proc() {
             }
             if (!srcOk) _natLatch(i, false, ip, port);
             touchActivity();
+            if (_ann[i]) _ann[i]->onIngress();   // NAT 게이트 해제 — 이 leg 로 나가는 안내를 latch 된 주소로 낼 수 있다
+
+            // replace 모드 — 안내 재생 중인 leg 로는 반대 peer 의 오디오를 보내지 않는다(tap·녹취는 ingress 복사라 그대로)
+            const bool dstMuted = (_ann[dst] != nullptr);
 
             bool isTe = false;
             if (len >= 12) {
@@ -473,6 +479,7 @@ bool PRtpRelay::proc() {
                         if (!_taps.empty()) for (PRtpTap* t : _taps) if (t->wants(i)) t->sendRtp(i, false, o.data(), (int)o.size(), isTe);
                         if (_recorder) _recorder->writePacket(i == 0 ? "a" : "b", o.data(), (int)o.size());
                     }
+                    if (dstMuted) continue;
                     if (dstSec) {
                         char outb[2048];
                         int outLen = (int)o.size();
@@ -501,7 +508,7 @@ bool PRtpRelay::proc() {
                 for (PRtpTap* t : _taps) if (t->wants(i)) t->sendRtp(i, false, pkt, len, isTe);
             }
 
-            if (_legs[dst].active) {
+            if (_legs[dst].active && !dstMuted) {
                 // leg 별 PT 재작성 (cmp_media_api.md — remote_pt/remote_te_pt, 0=재작성 없음).
                 //   녹취는 아래에서 talker 원본(pkt)을 기록하므로 egress 사본에만 스탬프.
                 //   marker bit(0x80) 보존. TE 분류는 src leg 의 srcTePt(미지정=관례 101).
@@ -655,4 +662,128 @@ void PRtpRelay::stopRecording() {
     delete oldRecorder;
 
     LOG_INFO("PRtpRelay", "Recording stopped");
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  안내 재생기 (announcements.md §4.2, cmp_media_api.md §6.7)
+// ═══════════════════════════════════════════════════════════════
+
+std::string PRtpRelay::legCodecName(int peerIdx) const {
+    const Leg& leg = _legs[peerIdx & 1];
+    if (leg.codecDesc.valid()) return PAnnCatalog::NormalizeCodec(leg.codecDesc.name);
+    if (!leg.codec.empty()) return PAnnCatalog::NormalizeCodec(leg.codec);
+    return "";
+}
+
+int PRtpRelay::legPtOut(int peerIdx) const {
+    const Leg& leg = _legs[peerIdx & 1];
+    if (leg.ptOut > 0) return leg.ptOut;
+    if (leg.codecDesc.valid()) return leg.codecDesc.pt;
+    // 정적 PT 코덱은 이름으로 안다 (RFC 3551) — 동적 코덱(AMR-WB)은 선언이 있어야 한다
+    const std::string c = legCodecName(peerIdx);
+    if (c == "PCMU") return 0;
+    if (c == "PCMA") return 8;
+    if (c == "G722") return 9;
+    return -1;
+}
+
+bool PRtpRelay::legAmrOctetAlign(int peerIdx) const {
+    const Leg& leg = _legs[peerIdx & 1];
+    return leg.codecDesc.valid() ? leg.codecDesc.amrOctetAlign() : true;
+}
+
+bool PRtpRelay::startAnn(int peerIdx, std::unique_ptr<PAnnPlayer> player, std::string& replacedPlayId) {
+    PAutoLock lock(_mutex);
+    replacedPlayId.clear();
+    const int i = peerIdx & 1;
+    if (!_legs[i].active) return false;
+    if (_ann[i]) replacedPlayId = _ann[i]->playId();
+    _ann[i] = std::move(player);
+    touchActivity();
+    return true;
+}
+
+bool PRtpRelay::stopAnn(int peerIdx, const std::string& playId, const char* reason, PAnnTicker::Done& out) {
+    PAutoLock lock(_mutex);
+    const int i = peerIdx & 1;
+    if (!_ann[i]) return false;
+    if (!playId.empty() && _ann[i]->playId() != playId) return false;
+    out.sessionId = _sessionId;
+    out.peerIdx = i;
+    out.playId = _ann[i]->playId();
+    out.reason = reason;
+    out.playedMs = _ann[i]->playedMs(0);
+    out.media = _ann[i]->mediaLabel();
+    _ann[i].reset();
+    return true;
+}
+
+bool PRtpRelay::annActive(int peerIdx) const {
+    return _ann[peerIdx & 1] != nullptr;
+}
+
+int PRtpRelay::annCount() const {
+    return (_ann[0] ? 1 : 0) + (_ann[1] ? 1 : 0);
+}
+
+void PRtpRelay::collectAnn(std::vector<PAnnTicker::Done>& out) const {
+    PAutoLock lock(const_cast<PMutex&>(_mutex));
+    for (int i = 0; i < 2; ++i) {
+        if (!_ann[i]) continue;
+        PAnnTicker::Done d;
+        d.sessionId = _sessionId;
+        d.peerIdx = i;
+        d.playId = _ann[i]->playId();
+        d.playedMs = _ann[i]->playedMs(0);
+        d.media = _ann[i]->mediaLabel();
+        out.push_back(d);
+    }
+}
+
+// 재생기가 만든 RTP 를 leg 소켓으로 — leg SRTP 컨텍스트로 protect (relay egress 와 같은 규약)
+void PRtpRelay::_sendAnn(int legIdx, std::vector<std::string>& pkts) {
+    Leg& d = _legs[legIdx & 1];
+    if (!d.active) return;
+    const bool sec = d.crypto && d.crypto->enabled();
+    for (std::string& o : pkts) {
+        if (sec) {
+            char outb[2048];
+            int outLen = (int)o.size();
+            if (outLen > (int)sizeof(outb)) continue;
+            memcpy(outb, o.data(), outLen);
+            if (d.crypto->protectRtp(outb, outLen, sizeof(outb))) d.rtp.sendTo(outb, outLen, &d.addrRtp);
+            else LOG_ERROR("PRtpRelay", "ann SRTP protect failed peer[%d] session=%s", legIdx, _sessionId.c_str());
+        } else {
+            d.rtp.sendTo(o.data(), (int)o.size(), &d.addrRtp);
+        }
+    }
+}
+
+bool PRtpRelay::annTick(int64_t nowUs, std::vector<PAnnTicker::Done>& done) {
+    PAutoLock lock(_mutex);
+    bool any = false;
+    std::vector<std::string> pkts;
+    for (int i = 0; i < 2; ++i) {
+        if (!_ann[i]) continue;
+        pkts.clear();
+        _ann[i]->tick(nowUs, pkts);
+        if (!pkts.empty()) {
+            _sendAnn(i, pkts);
+            touchActivity();   // 재생 중에는 orphan/hold 회수 대상이 아니다(§4.2)
+        }
+        if (_ann[i]->done()) {
+            PAnnTicker::Done d;
+            d.sessionId = _sessionId;
+            d.peerIdx = i;
+            d.playId = _ann[i]->playId();
+            d.reason = _ann[i]->reason();
+            d.playedMs = _ann[i]->playedMs(nowUs);
+            d.media = _ann[i]->mediaLabel();
+            done.push_back(d);
+            _ann[i].reset();
+        } else {
+            any = true;
+        }
+    }
+    return any;
 }

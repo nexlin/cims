@@ -206,6 +206,7 @@ S2 FAIL → S3~S6 BLOCKED.
   접속서비스 `media_srtp` 를 required/optional/off 로 플립(SIGUSR1)하며 cspsim `-srtp` 군을 돌린다.
   R1 required 협상+CMP 종단+평문 녹취, R2 평문 offer 488 게이트, R3 optional best-effort 수용,
   R4 off 대조군(자기복원), R5 VoLTE relay leg 종단(volte 서비스 플립 + 영상 동반 2자 통화 — leg·m-line 별 독립 키, audio/video 각각)
+- **S3-SCN-ANN**: 실패 안내 회귀([announcements.md §3](design/features/announcements.md)) — 없는 번호로 건 호가 183+SDP(early media) → 안내 재생(≥ 5 s) → **404 그대로** 로 끝나는지 cspsim 출력(`=> RTP(` 줄·`CALL ENDED status=404`·간격)으로 판정. 183 없이 404 면 SKIP(안내 비활성 배치)
 - **S3-SCN-XFER / PICKUP / DIALOG**: 관제 소프트폰 보조 서비스 회귀
   ([volte_supplementary_services.md §8 검증](design/features/volte_supplementary_services.md)) — 같은 org VOIP
   4명(A,B,C,D)에 `pickup_group` 을 명시 부여(자기복원)해 실컬럼 축으로 호 전달(blind/attended + `transfer_allowed`

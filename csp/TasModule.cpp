@@ -16,6 +16,7 @@
 #include "CallMap.h"
 #include "CmpClient.h"
 #include "CspAddressing.h"
+#include "CspAnnouncement.h"
 #include "CspDialPlan.h"
 #include "CspPhoneGroup.h"
 #include "CspRole.h"
@@ -112,13 +113,16 @@ EModuleRouteResult CTasModule::OnIncomingCall( const char *pszCallId, const char
 }
 
 bool CTasModule::ApplyTerminationServices( const char *pszCallId, const char *pszFrom, const char *pszTo,
-                                           const CspUser &clsUser ) {
+                                           const CspUser &clsUser, CSipCallRtp *pclsRtp, CSipMessage *pclsMessage ) {
     if ( clsUser.isDnd() || clsUser.isReject( pszFrom ) ) {
         // 시도 장부 — `ScreenInvite` 를 지나온 호(그때는 착신이 등록 상태가 아니었던 경우)가
         //   여기서 603 으로 끝난다. 두 지점을 다 막지 않으면 같은 거절이 경로에 따라 세어지거나
         //   빠진다. `VoipCallRejected` 는 정상 경로가 이미 기록한 세션을 건드리지 않으므로
         //   두 지점이 겹쳐도 중복으로 세지 않는다.
         if ( gclsCallDir.IsEnabled() ) gclsCallDir.VoipCallRejected( pszCallId, pszFrom, pszTo, SIP_DECLINE );
+        // 거절 안내(announcements.md §3.2 declined) — 정책 none·CMP 미지원이면 종전대로 603 만
+        if ( pclsRtp && gclsAnnouncement.Reject( pszCallId, pclsRtp, pszFrom, pszTo, SIP_DECLINE, NULL, pclsMessage ) )
+            return true;
         gclsDispatcher.StopCall( pszCallId, SIP_DECLINE );
         return true;
     }
@@ -323,6 +327,8 @@ bool CTasModule::OnCallStart( const char *pszCallId, CSipCallRtp *pclsRtp ) {
             int iNewPt = 0, iNewSrcPt = 0, iNewTePt = 0, iNewSrcTePt = 0;
             std::string strNewCodec;
             CGroupCallService::GetLegPt( pszCallId, true, iNewPt, iNewSrcPt, iNewTePt, iNewSrcTePt, &strNewCodec );
+            gclsAnnouncement.OnLegReplaced(
+                clsOldInfo.m_strRelaySessionId );  // leg 교체 — 그 relay 의 보류 음악 정지 (announcements.md §3.3)
             gclsCmpClient.ModifySession(
                 clsOldInfo.m_strRelaySessionId, pclsRtp->m_strIp, iAudioPort, iVideoPort > 0 ? iVideoPort : 0, iNewIdx,
                 strNewCaller, strNewCallee, clsOldInfo.m_strRelaySesId, iNewNat, strNewGuardIp, iNewPt, iNewSrcPt,
@@ -444,6 +450,8 @@ bool CTasModule::OnTransfer( const char *pszCallId, const char *pszReferToCallId
                 std::string strJoinCodec;
                 CGroupCallService::GetLegPt( strJoinCallId, clsJoinInfo.m_bRecv ? false : true, iJoinPt, iJoinSrcPt,
                                              iJoinTePt, iJoinSrcTePt, &strJoinCodec );
+                gclsAnnouncement.OnLegReplaced(
+                    clsCallInfo.m_strRelaySessionId );  // leg 교체 — 그 relay 의 보류 음악 정지 (announcements.md §3.3)
                 gclsCmpClient.ModifySession( clsCallInfo.m_strRelaySessionId, clsReferToRtp.m_strIp, iAudioPort,
                                              iVideoPort > 0 ? iVideoPort : 0, iNewIdx, strNewCaller, strNewCallee,
                                              clsCallInfo.m_strRelaySesId, iJoinNat, strJoinGuardIp, iJoinPt, iJoinSrcPt,
@@ -778,6 +786,8 @@ int CTasModule::PickUpFork( const char *pszCallId, const char *pszFrom, CSipCall
         int iPickPt = 0, iPickSrcPt = 0, iPickTePt = 0, iPickSrcTePt = 0;
         std::string strPickCodec;
         CGroupCallService::GetLegPt( pszCallId, false, iPickPt, iPickSrcPt, iPickTePt, iPickSrcTePt, &strPickCodec );
+        gclsAnnouncement.OnLegReplaced(
+            clsSet.strRelaySessionId );  // leg 교체 — 그 relay 의 보류 음악 정지 (announcements.md §3.3)
         gclsCmpClient.ModifySession( clsSet.strRelaySessionId, pclsRtp->m_strIp, iAudioPort,
                                      iVideoPort > 0 ? iVideoPort : 0, 1, clsSet.strCaller, strPicker,
                                      clsSet.strRelaySesId, iPickNat, strPickGuardIp, iPickPt, iPickSrcPt, iPickTePt,
@@ -873,6 +883,8 @@ int CTasModule::PickUpLeg( const char *pszCallId, const char *pszFrom, CSipCallR
             std::string strPickCodec;
             CGroupCallService::GetLegPt( pszCallId, false, iPickPt, iPickSrcPt, iPickTePt, iPickSrcTePt,
                                          &strPickCodec );
+            gclsAnnouncement.OnLegReplaced(
+                clsOldCallInfo.m_strRelaySessionId );  // leg 교체 — 그 relay 의 보류 음악 정지 (announcements.md §3.3)
             gclsCmpClient.ModifySession( clsOldCallInfo.m_strRelaySessionId, pclsRtp->m_strIp, iAudioPort,
                                          iVideoPort > 0 ? iVideoPort : 0, 1, clsOldCallInfo.m_strRelayCaller,
                                          pszFrom ? pszFrom : "", clsOldCallInfo.m_strRelaySesId, iPickNat,

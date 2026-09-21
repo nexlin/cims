@@ -415,6 +415,8 @@ if __name__ == '__main__':
     from handlers.external_systems     import CIMS_EXTERNAL_SYSTEMS_HANDLER_LIST
     from handlers.gateway              import CIMS_GATEWAY_HANDLER_LIST, register_gateway
     from handlers.oam_join             import CIMS_OAM_JOIN_HANDLER_LIST
+    from handlers.announcements        import CIMS_ANNOUNCEMENTS_HANDLER_LIST
+    from services import announcements as _announcements
     from services import service_registry
     from services.flow_logger    import FLOW_HANDLER_LIST
 
@@ -820,6 +822,9 @@ if __name__ == '__main__':
         base_rules += _bind(CIMS_GATEWAY_HANDLER_LIST)   # /api/v1/gateway/* 제어면(base 소유)
         # /api/v1/ha/join* — 관리평면 2번째 노드 합류(그룹 공통 신원 전달). base 소유.
         base_rules += _bind(CIMS_OAM_JOIN_HANDLER_LIST)
+        # /api/v1/announcements — 서비스 안내음성 라이브러리(등록·CMP 노드 배포). 배포 자산 분배라 base 소유 (announcements.md §7.3)
+        _announcements.init(config)
+        base_rules += _bind(CIMS_ANNOUNCEMENTS_HANDLER_LIST)
 
         # D8 — /users/me(identity-plane)는 base 가 소유, 가입자 CRUD(/users/*)는 csc(resource).
         #   all  : ME 를 /api/v1/users 에 mount → 뒤의 SERVICE admin superset 이 overwrite(현행 동작).

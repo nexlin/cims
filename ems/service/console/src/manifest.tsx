@@ -27,6 +27,7 @@ import PttGroupsWorkbenchPage from './pages/PttGroupsWorkbenchPage'
 import PhoneGroupsPage from './pages/PhoneGroupsPage'
 import McpttPolicyPage from './pages/McpttPolicyPage'
 import RegisterFlowPage from './pages/RegisterFlowPage'
+import AnnouncementsPage from './pages/AnnouncementsPage'
 import { SERVICE_DEFS_LAYOUT } from '@core/widgets/layouts'  // 코어 레이아웃 — '구성' 그룹에 배치
 
 import {
@@ -72,6 +73,9 @@ export const cimsManifest: ServiceManifest = {
           layout: ABNORMAL_SESSIONS_LAYOUT, layoutId: 'service.abnormal-sessions' },
         { path: '/service/register-flow',     title: '메세지 이력', component: RegisterFlowPage,     requiredRole: 'monitor',
           apis: ['flow.user', 'flow.register', 'flow.register.list', 'flow.body'] },
+        // 안내음성 라이브러리(announcements.md §7) — 등록·청취·CMP 노드 배포. API 는 base OAM 소유(/api/v1/announcements)
+        { path: '/service/announcements',     title: '안내음성',   component: AnnouncementsPage,    requiredRole: 'monitor',
+          apis: ['announcements.list', 'announcements.register', 'announcements.get', 'announcements.delete', 'announcements.deploy', 'announcements.nodes'] },
       ],
     },
     // ── 성능 (ops) — 통계(KPI/카운터). FCAPS Performance. ──

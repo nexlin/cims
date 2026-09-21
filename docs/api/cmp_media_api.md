@@ -7,8 +7,8 @@ CMP 가 제공하는 미디어 서비스 기능(function)의 제어 API 정본�
 > **구현 상태**: 본 envelope v2 가 유일한 wire 규격이다 (`hdr` 없는 패킷은
 > `BAD_REQUEST` 로 거절). 명령별 payload 필드·내부 동작은
 > [modules/cmp.md](../design/modules/cmp.md) §3.2 참조. **규격만 예약되고 미구현인 것**:
-> ① 이벤트 채널([§8](#8-이벤트-type-event)), ② 자원 복합 키(멀티 client 격리 —
-> [§4](#4-자원-모델과-이벤트-라우팅)), ③ MIX function. CMDP(MCData 미디어평면)도 동일
+> ① 자원 복합 키(멀티 client 격리 —
+> [§4](#4-자원-모델과-이벤트-라우팅)), ② MIX function. 이벤트 채널([§8](#8-이벤트-type-event))은 RELAY_ABORTED·FLOOR_TALKERS·RELAY_PLAY_DONE 으로 구현. CMDP(MCData 미디어평면)도 동일
 > envelope v2 를 따른다 — 명령(`MSRP_*`)·이벤트 정본은
 > [mcdata_messaging.md](../design/features/mcdata_messaging.md) §4.7. CMDP 이벤트 채널은
 > §8 규격(ack=동일 trans_id 의 response, 1s×5 재전송)의 실구현 선례다.
@@ -29,7 +29,7 @@ CMP 가 제공하는 미디어 서비스 기능(function)의 제어 API 정본�
 | **RELAY** | 1:1 RTP relay (VoLTE 등) — peer 별 전용 포트 블록 | relay session | `(node, session_id)` — 생성 client 전속 |
 | **PTT** | 그룹통화(멤버별 전용 RTP 포트) + MCPTT floor control(그룹 공유 포트) | group / member | group: `(service, group_id)` — 동일 service 의 AS 들이 공유<br>member: `(node, session_id)` |
 | **MIX** *(예약)* | VoLTE 그룹통화 mixing/conference | mixer / participant | `(service, conf_id)` — PTT 와 동형 |
-| **ANN** *(설계 — [announcements.md](../design/features/announcements.md) §4)* | relay leg 에 붙는 안내음·신호음·보류 음악 재생기 (`RELAY_PLAY`/`RELAY_PLAY_STOP`, 이벤트 `RELAY_PLAY_DONE`, 자원 광고 `resource.ann`) | player | `(node, session_id, play_id)` — 세션 종속 수명 |
+| **ANN** | relay leg 에 붙는 안내음·신호음·보류 음악 재생기 (`RELAY_PLAY`/`RELAY_PLAY_STOP`, 이벤트 `RELAY_PLAY_DONE`, 자원 광고 `resource.ann`, CORE `ANN_RELOAD`) — [announcements.md](../design/features/announcements.md) §4 | player | `(node, session_id, play_id)` — 세션 종속 수명(RELAY_REMOVE·회수 = 일괄 정지) |
 
 ### 1.2 전송
 
@@ -136,7 +136,8 @@ client(CSP) 전제라 마지막 소스를 유지한다(다중 client 격리는 [
       "relay": { "total": 500, "used": 8, "sessions": 4 },
       "ptt":   { "total": 100, "used": 2, "groups": 2, "joined": 5,
                  "member_total": 200, "member_used": 5 },
-      "tap":   { "total": 16, "used": 1, "max_per_session": 4 }
+      "tap":   { "total": 16, "used": 1, "max_per_session": 4 },
+      "ann":   { "total": 32, "used": 2, "media": 12 }
     },
     "session_digest": {
       "relay": { "count": 4, "hash": "61799bd4b6b64b3f" },
@@ -154,6 +155,7 @@ client(CSP) 전제라 마지막 소스를 유지한다(다중 client 격리는 [
 | `ptt.groups` / `ptt.joined` | 활성 그룹 수 / 참가 멤버 총수 |
 | `ptt.member_total` / `ptt.member_used` | PTT 멤버 포트 유닛 풀 크기 / 사용 중 |
 | `tap.total` / `tap.used` / `tap.max_per_session` | 청취 leg(tap) 풀 크기 / 사용 중 / 세션당 상한 ([§6.5](#65-relay_tap_add--relay_tap_modify--relay_tap_remove--청취-legtap)). **키 존재 = 기능 광고** — 없으면 CSP 가 Join 을 488 로 거절 |
+| `ann.total` / `ann.used` / `ann.media` | 안내 재생기([§6.7](#67-relay_play--relay_play_stop--안내-재생기leg-에-붙는-재생-원천)) 슬롯 크기 / 사용 중 / 적재된 카탈로그 음원 수. **키 존재 = 기능 광고** — 없으면 CSP 는 안내 없이 응답 코드만 |
 
 client 는 이 요약으로 부하 기반 CMP 선택, 조기 호 거절(admission control)을 할 수 있다.
 
@@ -251,6 +253,12 @@ diff 한다. push(이벤트)로는 절체 후 새 active 가 옛 세션을 기�
 로 회수. `zombie`(CSP有 CMP無, 미디어 소실) → 호 종료(opt-in). 회수는 **active 역할일 때만**
 실행하고 standby 는 탐지·로그만 한다(hot-standby 가 active 세션을 오회수하지 않도록). 자세한
 수준·정책은 [ha_design.md](../design/ha_design.md) 수준2 참조.
+
+### 5.4 ANN_RELOAD — 안내 카탈로그 재적재
+
+CORE 명령(hdr 만, sesid/service 생략). `<install>/<AnnouncementDir>/sys/catalog.jsonl` + `config/announcements.jsonl` 을 다시 읽어 메모리에 올린다
+(진행 중 재생은 스냅샷을 들고 있어 끊기지 않는다). SIGUSR1 과 같은 동작 — agent 가 음원·카탈로그를 배포한 뒤 보낸다([announcements.md §7.3](../design/features/announcements.md)).
+응답 payload `{ "media": 12, "missing": 0 }`. `AnnPlayers=0` 이면 `BAD_REQUEST`.
 
 ## 6. RELAY — 1:1 RTP relay
 
@@ -451,6 +459,43 @@ PT-blind relay(`remote_pt` 재작성만). 같은 선언 재전송 = 유지, 두 
   "remote_pt": 96, "remote_src_pt": 96, "remote_codec": "AMR-WB/16000",
   "media_codec": { "name": "AMR-WB", "rate": 16000, "pt": 96, "fmtp": "octet-align=1" } }
 ```
+
+### 6.7 RELAY_PLAY / RELAY_PLAY_STOP — 안내 재생기(leg 에 붙는 재생 원천)
+
+relay 세션의 **peer leg 하나**에 붙어 카탈로그 음원(안내음·신호음·보류 음악)을 그 leg 코덱의 RTP 로 낸다 —
+[announcements.md](../design/features/announcements.md) §4. 자원 키 `(node, session_id, play_id)`, **수명은 세션에 종속**(RELAY_REMOVE·sweeper 회수 =
+일괄 정지, 이벤트 없음). leg 당 재생기 1개 — 같은 leg 에 새 RELAY_PLAY 는 이전 재생기를 교체한다(`RELAY_PLAY_DONE reason=replaced`).
+재생 중인 leg 로는 반대 peer 의 오디오를 relay 하지 않는다(**replace** 모드 — RTCP·영상은 통과, tap·녹취는 ingress 복사라 안내가 실리지 않는다).
+재생 코덱 = 그 leg 의 `media_codec` 선언 → 없으면 `remote_codec`/`remote_pt` → 둘 다 없으면 `BAD_REQUEST`(client 는 leg 코덱을 항상 알려야 한다).
+**기능 광고** = HEARTBEAT/STATS `resource.ann{total,used,media}` — 키가 없으면(`AnnPlayers=0`) 미지원이며 client 는 안내 없이 응답 코드만 낸다.
+
+RELAY_PLAY (멱등 — 같은 `play_id` 재요청은 진행 상태 `{codec, played_ms}` 반환):
+
+| payload 필드 | 필수 | 설명 |
+|---|---|---|
+| `session_id` | O | 대상 relay 세션. 없으면 `NOT_FOUND`(부활 금지) |
+| `peer_index` | O | 재생 대상 leg (0=A / 1=B) |
+| `play_id` | O | client 명명(세션 내 유일). client 는 **시도마다 새 키**를 쓴다(밀린 DONE 이 새 재생을 걷지 않게) |
+| `media` | O | 음원 열 — 문자열 id 또는 `{id, repeat, max_ms}` 객체(순서대로 재생). 항목 `repeat 0` = `max_ms` 까지 반복(신호음 구간). 배열 대신 쉼표 문자열도 수용 |
+| `repeat` | - | 시퀀스 전체 반복 수. 기본 1, **0 = STOP 까지**(보류 음악·링백) |
+| `delay_ms` | - | 반복 사이 무음(RFC 4240 `delay` — 패킷 없이 timestamp 만 진행). 기본 0 |
+| `max_ms` | - | 총 재생 상한 — 넘으면 `reason=max`. 생략 = cmp.json `AnnMaxPlayMs`(repeat 0 은 예외 — STOP 까지) |
+| `mode` | - | `replace`(기본). `mix`(활성 통화에 톤 삽입)는 예약 |
+
+응답 payload `{ "codec": "PCMU/8000", "duration_ms": 9000 }`(시퀀스 1회 길이, repeat 0 이면 0).
+RELAY_PLAY_STOP: `session_id` + `play_id`(+`peer_index` 선택) — 없거나 이미 끝났으면 `OK`(자연 멱등), 응답 `{ "played_ms": N }`.
+
+```json
+{ "hdr": { "ver": 2, "cmd": "RELAY_PLAY", "type": "request", "sesid": "…", "service": "volte" },
+  "payload": { "session_id": "csp_20260921…_1", "peer_index": 0, "play_id": "ann-<callid>-3",
+               "media": [ { "id": "sys:busy_kr", "repeat": 0, "max_ms": 4000 }, "sys:ann_busy" ], "repeat": 1, "max_ms": 30000 } }
+```
+
+- RTP: 재생기 자기 SSRC·seq, timestamp 는 코덱 클록(G.711/G.722 160, AMR-WB 320 per 20 ms), marker 는 시퀀스 시작·무음 뒤 첫 프레임. PT = leg 송신 PT(`remote_pt`/`media_codec.pt`, 정적 코덱은 이름으로). AMR-WB 는 leg fmtp 의 octet-align 으로 페이로드(RFC 4867), 파일의 NO_DATA 프레임은 무송신.
+- 페이싱 = 워커별 timerfd 20 ms(리액터 안). NAT leg(`remote_nat=1`, 미latch)는 첫 ingress 또는 `AnnNatWaitMs` 까지 시작을 미룬다(선언 주소 오송신 방지).
+- egress 는 leg SRTP 컨텍스트로 protect(§6.4). 재생 중 `touchActivity` — orphan/hold 회수 대상이 아니다.
+- 오류: `NOT_FOUND`(세션) · `MEDIA_NOT_FOUND`(음원 id 또는 그 코덱 파일 없음 — 런타임 인코딩은 하지 않는다, 라이브러리가 4 코덱을 만들어 두는 것이 계약) · `ANN_CAPACITY`(재생 슬롯 소진) · `BAD_REQUEST`(leg 코덱 미확정·mode 미지원). 상태 변경 없이 거부(fail-fast) — client 는 안내 없이 원코드.
+- 관측: STATS `detail.ann[]{session_id, peer_index, play_id, media, played_ms}`·`ann_total`·`detail.ann_catalog{root, ids[], missing[]}`, Flow 로그 `INT ANN_PLAY`/`ANN_DONE`.
 
 ## 7. PTT — 그룹통화 + floor control
 
@@ -695,6 +740,14 @@ push 대상은 마지막 제어 요청(HEARTBEAT 등)의 소스로 학습한 CSP
 | `RELAY_ABORTED` | 소유 node | `session_id`, `reason`(`orphan_no_rtp`=무RTP setup 실패 / `hold_timeout`=RTP 후 유휴), `held_sec` |
 | `PTT_GROUP_ABORTED` | 참여 node 전체 | `group_id`, `reason`(`idle_no_members`) |
 
+**안내 재생 완료 통지**(§6.7) — 재생기가 끝났거나 client 명령으로 정지·교체됐을 때(통일을 위해 항상 낸다 — client 는 stopped/replaced 를 무시할 수 있다):
+
+| cmd | 라우팅 | payload |
+|---|---|---|
+| `RELAY_PLAY_DONE` | 소유 node | `session_id`, `peer_index`, `play_id`, `reason`(`completed`·`max`·`stopped`·`replaced`), `played_ms` |
+
+CSP 는 `CCspAnnouncementService::OnPlayDone` 이 대기 중 최종 응답(486/404/408 …)을 낸다([announcements.md §5](../design/features/announcements.md)).
+
 ```json
 {
   "hdr": { "ver": 2, "trans_id": 90001, "node": "cmp01", "cmd": "RELAY_ABORTED",
@@ -746,5 +799,7 @@ Call Control 파트의 후속 과제다([mcptt_csp_cmp_roadmap_contract.md](../d
 | `NOT_FOUND` | 대상 자원 없음 (group/session/tap) |
 | `LIMIT` | 세션당 청취 leg(tap) 상한 초과 (§6.5) |
 | `TRANSCODE_CAPACITY` | 피어 leg 트랜스코딩 슬롯 소진 (§6.6, cmp.md §11.4) — CSP 는 488 로 종결 |
+| `MEDIA_NOT_FOUND` | 안내 음원 id 또는 그 leg 코덱의 파일 없음 (§6.7) — CSP 는 안내 없이 원코드 |
+| `ANN_CAPACITY` | 안내 재생기 슬롯(`AnnPlayers`) 소진 (§6.7) — CSP 는 안내 없이 원코드 |
 | `UNSUPPORTED_VER` | 지원하지 않는 `hdr.ver` |
 | `INTERNAL` | CMP 내부 오류 |

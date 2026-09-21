@@ -5101,6 +5101,9 @@ def job_rollback_agent(params: dict) -> tuple:
 #    GET  /collection?install_path=<path>&name=<name>
 #    PUT  /collection?install_path=<path>&name=<name>  body={records:[...]}
 #    POST /signal?install_path=<path>&sig=usr1|hup
+#    GET  /module-files?install_path=<path>&dir=announcements/op          모듈 자원 파일 목록(sha256)
+#    PUT  /module-file?install_path=<path>&path=announcements/op/<file>   body=바이너리 (atomic, announcements/ 만)
+#    DELETE /module-file?install_path=<path>&path=announcements/op/<file>
 # ──────────────────────────────────────────────────────────────
 
 def _ensure_self_signed_cert(state_dir: str) -> tuple:
@@ -5235,6 +5238,22 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         try: return json.loads(self.rfile.read(n).decode("utf-8"))
         except Exception: return {}
 
+    def _read_body_raw(self, limit: int = 64 * 1024 * 1024) -> bytes:
+        n = int(self.headers.get("Content-Length") or 0)
+        if n <= 0 or n > limit: return b""
+        return self.rfile.read(n)
+
+    @staticmethod
+    def _module_file_target(install_path: str, rel: str) -> str:
+        """모듈 자원 파일 경로 — install_path 아래 `announcements/` 만 허용(announcements.md §7.3). 빈 문자열 = 거부."""
+        if not install_path or not rel: return ""
+        rel = rel.replace("\\", "/").lstrip("/")
+        if ".." in rel.split("/") or not rel.startswith("announcements/"): return ""
+        root = os.path.realpath(install_path)
+        full = os.path.realpath(os.path.join(root, rel))
+        if not full.startswith(root + os.sep): return ""
+        return full
+
     # GET
     def do_GET(self):  # noqa: N802
         if not self._auth_ok():
@@ -5254,6 +5273,25 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             fpath = os.path.join(install_path, "config", f"{name}.jsonl")
             records = _read_jsonl(fpath)
             return self._respond(200, {"records": records, "file": fpath})
+        if path == "/module-files":
+            # 모듈 자원 파일 목록(이름·크기·sha256) — OAM 안내음성 라이브러리의 노드 대조 (announcements.md §7.3)
+            install_path = (q.get("install_path") or [""])[0]
+            rel = (q.get("dir") or ["announcements/op"])[0]
+            target = self._module_file_target(install_path, rel.rstrip("/") + "/.")
+            if not target:
+                return self._respond(400, {"error": "bad_path"})
+            d = os.path.dirname(target)
+            files = []
+            if os.path.isdir(d):
+                import hashlib as _hl
+                for fn in sorted(os.listdir(d)):
+                    fp = os.path.join(d, fn)
+                    if not os.path.isfile(fp): continue
+                    h = _hl.sha256()
+                    with open(fp, "rb") as f:
+                        for chunk in iter(lambda: f.read(1 << 16), b""): h.update(chunk)
+                    files.append({"name": fn, "size": os.path.getsize(fp), "sha256": h.hexdigest()})
+            return self._respond(200, {"dir": d, "files": files})
         return self._respond(404, {"error": "not_found"})
 
     # PUT
@@ -5279,6 +5317,40 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 signaled = pids
             return self._respond(200, {"ok": True, "count": n, "file": fpath,
                                         "signaled": signaled})
+        if path == "/module-file":
+            # 모듈 자원 파일 배치(바이너리, atomic) — install_path/announcements/** 만 (announcements.md §7.3). 상한 64 MB
+            install_path = (q.get("install_path") or [""])[0]
+            rel = (q.get("path") or [""])[0]
+            target = self._module_file_target(install_path, rel)
+            if not target:
+                return self._respond(400, {"error": "bad_path", "detail": "install_path 아래 announcements/ 만 허용"})
+            data = self._read_body_raw()
+            if not data:
+                return self._respond(400, {"error": "empty_body_or_too_large"})
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            tmp = target + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(data)
+            os.replace(tmp, target)
+            import hashlib as _hl
+            return self._respond(200, {"ok": True, "file": target, "bytes": len(data), "sha256": _hl.sha256(data).hexdigest()})
+        return self._respond(404, {"error": "not_found"})
+
+    # DELETE
+    def do_DELETE(self):  # noqa: N802
+        if not self._auth_ok():
+            return self._respond(401, {"error": "unauthorized"})
+        path, q = self._parse_query()
+        if path == "/module-file":
+            install_path = (q.get("install_path") or [""])[0]
+            rel = (q.get("path") or [""])[0]
+            target = self._module_file_target(install_path, rel)
+            if not target:
+                return self._respond(400, {"error": "bad_path"})
+            if not os.path.isfile(target):
+                return self._respond(404, {"error": "not_found"})
+            os.unlink(target)
+            return self._respond(200, {"ok": True, "file": target})
         return self._respond(404, {"error": "not_found"})
 
     # POST

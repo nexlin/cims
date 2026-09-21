@@ -1,0 +1,13 @@
+# 실패 안내(announcements.md §3.2) — 없는 번호로 건 호: CSP 가 발신자에게 183+SDP(a=sendrecv, P-Early-Media: sendonly)를 내고 CMP 가
+#   `sys:ann_invalid_number` 를 early media 로 들려준 뒤 **원래 최종 코드 404** 그대로 끝낸다(answer 모델 아님 — 통계 정의 불변).
+#   early_media_pct = 183/SDP 도달, early_rtp_pct = 최종 응답 전 발신자가 실제 안내 RTP 를 받았는가(≥ 5 패킷). 안내 정책이 none 이거나
+#   대상 CMP 가 resource.ann 을 광고하지 않으면 183 없이 404 → early_* 가 0 으로 떨어져 FAIL(의도: 안내 배치 여부를 시험이 드러낸다).
+id: VOLTE-ANN-NOTFOUND
+title: 없는 번호 → 183 early media 안내 → 404
+tags: [volte, announcement, media]
+roles:
+  caller: { pool: volte_ue }
+flow:
+  - { step: register, who: [caller], expect: { code: 200 } }
+  - { step: invite,   from: caller, to: "+820000009999", media: { audio: amr-wb, rtp: explicit },
+      expect: { code: 404, early_media_pct: 100, early_rtp_pct: 100 } }

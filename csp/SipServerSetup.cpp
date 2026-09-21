@@ -374,6 +374,15 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
             }
 
             // MCData media plane(cmdp, MSRP) 연동 — 기본 비활성 (cmdp 미배치 환경 무영향)
+            // 안내음성·신호음·보류 음악 정책 (announcements.md §6.1) — Rules 는 원문으로 보관, 서비스가 해석
+            if ( setup.Has( "Announcement" ) ) {
+                SimpleJson::JsonNode an = setup.Get( "Announcement" );
+                if ( an.Has( "Enable" ) ) m_bAnnEnable = ( an.Get( "Enable" ).AsString() == "true" );
+                if ( an.Has( "MaxPlayMs" ) ) m_iAnnMaxPlayMs = (int)an.GetInt( "MaxPlayMs" );
+                if ( an.Has( "DefaultProfile" ) ) m_strAnnDefaultProfile = an.GetString( "DefaultProfile" );
+                if ( an.Has( "Rules" ) && an.Get( "Rules" ).type == SimpleJson::JSON_ARRAY )
+                    m_strAnnRulesJson = an.Get( "Rules" ).ToString();
+            }
             if ( setup.Has( "McDataMedia" ) ) {
                 SimpleJson::JsonNode md = setup.Get( "McDataMedia" );
                 if ( md.Has( "Enable" ) ) m_bUseMcDataMedia = ( md.Get( "Enable" ).AsString() == "true" );

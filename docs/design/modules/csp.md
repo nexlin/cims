@@ -12,6 +12,7 @@ CSP는 CIMS 시스템의 SIP 시그널링 서버로, IMS 기반 역할(CSCF, TAS
 | VoIP 1:1 통화 | B2BUA 기반 호 처리, CMP RTP relay 연동 |
 | PTT 그룹콜 | 다자 SIP INVITE, CMP 그룹 RTP/Floor 연동 |
 | 부가서비스 | DND, 착신전환, 착신거부, 콜픽업 |
+| 안내음성 | 실패 안내(early media 뒤 원코드)·보류 음악·서버 링백 — CMP 재생기 지시(§3.12, [announcements.md](../features/announcements.md)) |
 | IP-PBX 트렁크 | 외부 SIP 서버 라우팅 (IBCF) |
 | 가입자/그룹 관리 | DB primary, JSON fallback |
 | 서비스 로깅 | Session-ID 기반 통합 이력, SIP 메시지 로깅 |
@@ -100,6 +101,7 @@ SIP 스택에 `[CModuleDispatcher, CSipUserAgent]` 순서로 콜백 등록:
 | `EventCallStart(callId, rtp)` | 200 OK 브릿징, ReINVITE 전송. answer leg 의 relay 반영은 18x 와 같은 `ApplyRelayAnswerLeg` — 18x 에서 이미 반영한 주소·키면 CMP 는 latch·SRTP 컨텍스트를 유지한다 |
 | `EventCallEnd(callId, status, reason)` | 양 leg 종료, CDR 저장. 상대 leg 로 **종료 사유와 코드를 그대로 옮긴다** — BYE/CANCEL 의 `Reason`(RFC 3326)은 상대 leg 의 BYE/CANCEL 에, B-leg 최종 실패 응답은 미응답 A-leg 에 같은 코드(+Reason)로(`RelayEndStatus`: 4xx/5xx/6xx 그대로 — 503 을 603 으로 바꾸지 않는다, 3xx→480, 401/407→403, 전송 타임아웃→408). psip 콜백 `EventCallEnd(callId, status, reason)` 이 수신 메시지의 첫 `Reason` 값을 올린다 |
 | `SetCallOwner(callId, module)` | 호 소유권 추적 |
+| (안내 훅) | `EventCallEnd` 는 재라우팅 소진 뒤 `gclsAnnouncement.OnLegFailed` 에 B 실패를 넘기고(인수되면 B entry 만 삭제, A 의 최종 응답은 재생 뒤 서비스가 낸다), 진입부에서 `OnCallEnd`(CANCEL 등 재생 회수). `EventIncomingCall` 의 거절(`RejectVoice`·다이얼 플랜 484)은 `Reject` 를 먼저 거친다. `EventReInvite` 는 offer 방향(sendonly/inactive/sendrecv)으로 `OnHold`/`OnResume`(inactive 는 B 로 sendonly 재작성). `EventCallRing` 의 SDP 없는 18x 는 `OnRingback`(프로파일 on 이면 183+SDP 뒤 같은 SDP 로 전달), SDP 있는 18x·200 은 `OnRingbackEnd` — §3.12 |
 | `GetCallOwner(callId)` | 호 담당 모듈 조회 |
 
 **INVITE 라우팅 로직:**
@@ -834,6 +836,20 @@ CSP 가 CSC 보다 먼저 기동하면 첫 조회는 실패하고, 이후 `CSC_R
 
 ---
 
+### 3.12 CCspAnnouncementService
+
+**파일:** `CspAnnouncement.h/.cpp` (전역 `gclsAnnouncement`) — 안내음성·신호음·보류 음악의 CSP 쪽(MRFC) 정책·상태 머신
+([../features/announcements.md](../features/announcements.md) §5). CMP 재생기(`RELAY_PLAY`)에 "언제·어느 leg·무엇" 을 지시한다.
+
+| 축 | 동작 |
+|---|---|
+| 정책 | `Setup.Announcement.Rules`(행 = profile·situation·mode·tone·tone_ms·media·repeat·loop) → `profile → situation → action` 표. 비면 내장 기본 표(default·trunk). 해석 `Resolve(situation, profile)` = 그 프로파일 → `DefaultProfile` → none. 발신자 프로파일은 INVITE 때 `ProfileForCaller`(inbound Route 피어면 RemoteNode `announcement_profile`, 가입자면 접속서비스)로 정해 `CCallInfo::m_strAnnProfile` 에 둔다 |
+| 판정 | `Classify(status, Reason)` — Reason `Q.850;cause=N` 우선(17 busy·18/19 no_answer·20 unreachable·21 declined·1 not_found·28 invalid·34/38/41/42/44/47 congestion) → SIP 코드(486/600·408/480·404/410·484·603/607·403·488/606/5xx). CSP 자체 480 은 unreachable |
+| 실패 안내 | `OnLegFailed`(B 최종 실패) / `Reject`(B leg 이전 거절 — relay 를 A 만으로 잡고 CallMap 에 A 단독 entry) → `BuildEarlyAnswer`(A offer 의 재생 가능 첫 코덱, 오디오만, SDES 재광고, relay 주소, `a=sendrecv`) → `RingCall(183, P-Early-Media: sendonly)` → `RELAY_MODIFY`(A leg remote_pt/remote_codec) → `RELAY_PLAY` → `OnPlayDone`/`Tick` 상한 → `FinishEarly`: CDR(`announcement{…}`)·`VoipCallEnd`·DB 종료·`StopCall(원코드, Reason)`·`CallMap.Delete`(RELAY_REMOVE) — 자체 거절한 UAS 다이얼로그는 psip 가 EventCallEnd 를 올리지 않아 마감을 직접 한다. A 가 이미 SDP 를 받았으면(B 18x+SDP·링백) 183 을 다시 내지 않는다. CMP 미지원·거절·조립 실패 = 안내 없이 즉시 원코드(`m_lFallback`) |
+| 보류 음악 | `OnHold(holder)` → 피보류 leg 에 `RELAY_PLAY repeat 0`(프로파일 = 피보류자 접속서비스 `hold_profile` → `announcement_profile` → 기본), 같은 보류의 재-INVITE 는 멱등. `OnResume`·양 leg 종료·`OnLegReplaced`(전달·픽업 재키잉 — TasModule 의 RELAY_MODIFY 앞) 에 STOP |
+| 서버 링백 | 프로파일 `ringback.mode=media` 일 때만 `OnRingback` — 183+SDP + loop 재생, B 의 SDP 있는 18x·200 에 `OnRingbackEnd`. 링백 뒤 실패 안내는 같은 SDP 위에서 재생만 교체 |
+| 스레드 | 상태 맵(`m_mapCalls`·`m_mapPlayToCall`·`m_mapHold`)은 `m_mtx`, SIP·CMP 호출은 락 밖(StopCall → EventCallEnd → OnCallEnd 재진입). `OnPlayDone` 은 CmpClient EventDispatchLoop 스레드, `Tick` 은 CspServer 1초 루프, `Init` 은 기동·SIGUSR1 |
+
 ## 4. 데이터 관리
 
 ### 4.1 가입자 관리 (CspUserMap)
@@ -1015,6 +1031,17 @@ relay bookkeeping 의 키는 **session_id**(`csp_{yyyymmddHHMMSSmmm}_{n}`, 재�
 > All-Active 분배). `LocalPort` 는 CSP 가 CMP 응답을 받는 로컬 bind 포트(단수). 구 배포 호환을 위해
 > `Setup.MediaServer.Host`/`ControlPort`, 그리고 더 오래된 `Setup.RtpRelay.{CmpIp,CmpPort,LocalCmpPort}` 는
 > Endpoints 가 비었을 때만 primary 로 읽힌다(deprecated fallback).
+
+### 6.0 안내음성 (`Setup.Announcement`)
+
+| 키 | 기본 | 뜻 |
+|---|---|---|
+| `Enable` | true | false = 전 상황 응답 코드만 |
+| `MaxPlayMs` | 30000 | 실패 안내 한 건의 총 재생 상한(RELAY_PLAY max_ms). 보류 음악은 STOP 까지 |
+| `DefaultProfile` | `default` | 접속서비스·피어에 프로파일이 없을 때 |
+| `Rules[]` | (내장 표) | 행 = `{profile, situation, mode, tone, tone_ms, media, repeat, loop}` — 콘솔 `object_list`. 상황 11종·mode 5종은 [announcements.md §2·§6](../features/announcements.md) |
+
+접속서비스 `announcement_profile`(발신자)·`hold_profile`(피보류자), RemoteNode `announcement_profile`(피어 발신) 이 프로파일을 고른다. SIGUSR1 재로드.
 
 ### 6.1 SDP 코덱 테이블 (`Setup.Media.Codecs`)
 

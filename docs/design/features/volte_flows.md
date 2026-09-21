@@ -34,6 +34,8 @@
 | C6 | 발신자 취소 | A→B, A가 CANCEL → 487 |
 | C7 | 수신자 거절 | A→B, B가 BYE/603 → 종료 |
 | C8 | RTP 릴레이 통화 | CMP 경유 미디어 중계 |
+| C9 | 실패 안내 | 통화중·무응답·없는 번호 → 183 early media 안내 → 원래 최종 코드 |
+| C10 | 보류 음악 | A 의 hold re-INVITE → 피보류 B 에 CMP 보류 음악, resume 에 정지 |
 
 ### Part D. 서비스 중 운용 변경
 
@@ -333,6 +335,43 @@ UE-A                    CSP (B2BUA)           CMP              UE-B
   │ ── BYE ────────────► │ ── BYE ──────────────────────────► │
   │                      │ ── remove ────────► │ 세션 해제     │
 ```
+
+### C9. 실패 안내 — early media 뒤 원래 최종 코드 (TS 24.628, RFC 3960)
+
+B-leg 실패(486·480·408·404·603·5xx)나 CSP 자체 거절(404·484·603)이 정책([announcements.md](announcements.md) §6)에 걸리면 CSP 가 A 에게 **자기가 만든
+answer 로 183** 을 내고 CMP 재생기가 안내를 들려준 뒤 **같은 코드**로 끝낸다. 200/BYE 로 바꾸지 않으므로 `end_status`·`end_reason`·통계는 그대로다.
+
+```
+UE-A                    CSP                          CMP                       UE-B
+  │ ── INVITE ─────────► │ ── RELAY_ADD peer0 ────────► │                          │
+  │                      │ ── INVITE ────────────────────────────────────────────► │
+  │                      │ ◄── 486 Busy Here ──────────────────────────────────── │
+  │                      │ ── RELAY_MODIFY peer0(remote_pt/codec) ─► │            │
+  │ ◄── 183 (SDP relay A측 a=sendrecv, P-Early-Media: sendonly)     │            │
+  │                      │ ── RELAY_PLAY peer0 [busy_kr 4 s → ann_busy] ────────► │
+  │ ◄════════ early media RTP ═══════════════════════ │                          │
+  │                      │ ◄── RELAY_PLAY_DONE(completed) ────────────────────── │
+  │ ◄── 486 Busy Here ── │ ── RELAY_REMOVE ───────────► │  [DB] end_status=486    │
+```
+
+- A 의 CANCEL 이 재생 중 오면 `RELAY_PLAY_STOP` 뒤 487(CDR `announcement.result=cancelled`). 재생 상한(`Setup.Announcement.MaxPlayMs`)이면 그때 최종 코드.
+- B 없는 거절(404·484·DND 603)은 RELAY_ADD 를 A 만으로 잡고 같은 절차 — CDR 은 거절 시도로 남고 `announcement{situation, media, played_ms, result}` 가 붙는다.
+- 안내가 없는 조건(정책 none·CMP `resource.ann` 미광고·음원 없음·SDES 불일치)은 종전대로 응답 코드만.
+
+### C10. 보류 음악 (TS 24.610 §4.5.2.4)
+
+```
+UE-A (보류)             CSP                          CMP                    UE-B (피보류)
+  │ ── re-INVITE (a=sendonly) ► │ ── RELAY_MODIFY peer0 ────► │                    │
+  │                      │ ── re-INVITE (a=sendonly, relay) ────────────────────► │
+  │                      │ ── RELAY_PLAY peer1 [moh_simple, repeat 0] ─────────► │
+  │                      │ ◄── 200 (a=recvonly) ────────────────────────────────  │
+  │ ◄── 200 (a=recvonly) │                             │ ══ 보류 음악 RTP ══════► │
+  │ ── re-INVITE (a=sendrecv) ► │ ── RELAY_PLAY_STOP ──────► │  → 일반 relay 재개    │
+```
+
+SDP 는 relay 에 고정돼 있어 재협상 없이 CMP 원천만 바뀐다. `a=inactive` 는 정책이 있으면 B 로 가는 offer 를 `sendonly` 로 고친다. 전달·픽업으로 leg 가
+교체되면 먼저 정지한다. 프로파일은 피보류자 접속서비스 `hold_profile`.
 
 ---
 

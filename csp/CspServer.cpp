@@ -40,6 +40,7 @@ CCallDir gclsCallDir;
 #include "CscEndpointCache.h"
 #include "CscInterface.h"
 #include "CspAclPolicyEngine.h"
+#include "CspAnnouncement.h"
 #include "CspConfigCache.h"
 #include "CspListenerManager.h"
 #include "CspLocalNodeMap.h"
@@ -334,6 +335,13 @@ int ServiceMain() {
         }
     } );
 
+    // 안내음성(announcements.md §5) — CMP RELAY_PLAY_DONE → 대기 중 최종 응답. 정책 표 적재.
+    gclsCmpClient.SetPlayDoneCallback( []( const std::string &strSessionId, int iPeerIdx, const std::string &strPlayId,
+                                           const std::string &strReason, int iPlayedMs ) {
+        gclsAnnouncement.OnPlayDone( strSessionId, iPeerIdx, strPlayId, strReason, iPlayedMs );
+    } );
+    gclsAnnouncement.Init();
+
     gclsGroupCallService.StartMonitor();
 
     // MCData media plane(cmdp, MSRP) — Setup.McDataMedia.Enable 시에만 기동
@@ -512,6 +520,7 @@ int ServiceMain() {
             //   bootstrap 성 필드(UdpThreadCount, DB 연결 등)는 재기동이 필요 — 여기서 반영해도 기존 객체엔 미적용.
             gclsSetup.Read();
             gclsSetup.WarnDeprecatedKeys();
+            gclsAnnouncement.Init();  // Setup.Announcement 정책 표 재적재
             gclsCspConfigCache.ReloadFromJsonl();
             gclsLocalNodeMap.Sync();
             gclsRemoteNodeMap.Sync();
@@ -544,6 +553,8 @@ int ServiceMain() {
         gclsUserAgent.CheckSessionTimer();
         // 관제 — 대표번호 포크 집합 무응답 판정 (dispatch_center.md §4.4)
         gclsDispatcher.GetTas()->Tick();
+        // 안내음성 — 상한 지난 early 대기 회수 (announcements.md §5.1)
+        gclsAnnouncement.Tick();
         // 관제 — 적재 실패로 못 한 인가 회수를 갚는다 (§5.10). 빚이 없으면 즉시 반환한다.
         CspAuthz::RetryPendingPolicyReload();
 

@@ -529,6 +529,8 @@ bool CCmpClient::_ProbeAlive( const CmpEndpoint &ep, int &iFreePorts ) {
         if ( bAny ) iFreePorts = iTotal;  // 지표 없으면 -1 유지 → 포화 판정 보류
         // 청취 leg 지원 광고 — resource.tap 키 존재가 기능 광고(dispatch_center.md §6.3). 없으면 Join 488.
         m_bTapSupported.store( res.Get( "tap" ).type == SimpleJson::JSON_OBJECT );
+        // 안내 재생기 지원 광고 — resource.ann 키 존재 (announcements.md §4.1). 없으면 안내 없이 원코드.
+        m_bAnnSupported.store( res.Get( "ann" ).type == SimpleJson::JSON_OBJECT );
     }
     return true;
 }
@@ -1340,9 +1342,84 @@ void CCmpClient::HandleEvent( const SimpleJson::JsonNode &event ) {
         }
         CLog::Print( LOG_INFO, "PTT_GROUP_ABORTED handled: group=%s reason=%s (캐시 정리)", strGid.c_str(),
                      strReason.c_str() );
+    } else if ( strCmd == "RELAY_PLAY_DONE" ) {
+        // 안내 재생 완료 (announcements.md §4.1) — 대기 중 최종 응답을 낼 차례. standby 도 상태만 정리하게 전달한다.
+        if ( m_fnPlayDone )
+            m_fnPlayDone( payload.GetString( "session_id" ), (int)payload.GetInt( "peer_index", 0 ),
+                          payload.GetString( "play_id" ), payload.GetString( "reason" ),
+                          (int)payload.GetInt( "played_ms", 0 ) );
     } else {
         CLog::Print( LOG_INFO, "CmpClient: unknown event cmd=%s (무시)", strCmd.c_str() );
     }
+}
+
+// ── 안내 재생기 — RELAY_PLAY / RELAY_PLAY_STOP (cmp_media_api.md §6.7) ──────────────────────────
+bool CCmpClient::PlayAnnouncement( const std::string &strSessionId, int iPeerIdx, const std::string &strPlayId,
+                                   const std::vector<AnnItem> &vecItems, int iRepeat, int iDelayMs, int iMaxMs,
+                                   const std::string &strSesId, const std::string &strService, int &iDurationMs,
+                                   std::string &strErrCode ) {
+    strErrCode.clear();
+    iDurationMs = 0;
+    SimpleJson::JsonNode req;
+    req.Set( "cmd", "RELAY_PLAY" );
+    req.Set( "session_id", strSessionId );
+    req.Set( "peer_index", iPeerIdx );
+    req.Set( "play_id", strPlayId );
+    SimpleJson::JsonNode arr;
+    arr.type = SimpleJson::JSON_ARRAY;
+    for ( const AnnItem &it : vecItems ) {
+        SimpleJson::JsonNode m;
+        m.Set( "id", it.strId );
+        m.Set( "repeat", it.iRepeat );
+        if ( it.iMaxMs > 0 ) m.Set( "max_ms", it.iMaxMs );
+        arr.Add( m );
+    }
+    req.Set( "media", arr );
+    req.Set( "repeat", iRepeat );
+    if ( iDelayMs > 0 ) req.Set( "delay_ms", iDelayMs );
+    if ( iMaxMs > 0 ) req.Set( "max_ms", iMaxMs );
+    std::string strFinalSesId = strSesId.empty() ? GetSesIdByKey( strSessionId ) : strSesId;
+    if ( !strFinalSesId.empty() ) req.Set( "sesid", strFinalSesId );
+    req.Set( "service", strService.empty() ? "volte" : strService );
+
+    std::string strResp;
+    if ( !SendRequestAndWait( strSessionId, req, strResp ) ) {
+        strErrCode = "TIMEOUT";
+        return false;
+    }
+    SimpleJson::JsonNode respNode = SimpleJson::JsonNode::Parse( strResp );
+    if ( respNode.type != SimpleJson::JSON_OBJECT ) {
+        strErrCode = "PARSE";
+        return false;
+    }
+    if ( !respNode.Has( "status" ) || respNode.Get( "status" ).AsString() != "OK" ) {
+        strErrCode = respNode.Has( "code" ) ? respNode.Get( "code" ).AsString() : "ERROR";
+        CLog::Print( LOG_ERROR, "CmpClient::PlayAnnouncement: session=%s play=%s ERROR: %s", strSessionId.c_str(),
+                     strPlayId.c_str(), strResp.c_str() );
+        return false;
+    }
+    if ( respNode.Has( "duration_ms" ) ) iDurationMs = respNode.Get( "duration_ms" ).AsInt();
+    return true;
+}
+
+bool CCmpClient::StopAnnouncement( const std::string &strSessionId, int iPeerIdx, const std::string &strPlayId,
+                                   const std::string &strSesId, const std::string &strService, int *piPlayedMs ) {
+    SimpleJson::JsonNode req;
+    req.Set( "cmd", "RELAY_PLAY_STOP" );
+    req.Set( "session_id", strSessionId );
+    if ( iPeerIdx >= 0 ) req.Set( "peer_index", iPeerIdx );
+    if ( !strPlayId.empty() ) req.Set( "play_id", strPlayId );
+    std::string strFinalSesId = strSesId.empty() ? GetSesIdByKey( strSessionId ) : strSesId;
+    if ( !strFinalSesId.empty() ) req.Set( "sesid", strFinalSesId );
+    req.Set( "service", strService.empty() ? "volte" : strService );
+    std::string strResp;
+    if ( !SendRequestAndWait( strSessionId, req, strResp ) ) return false;
+    SimpleJson::JsonNode respNode = SimpleJson::JsonNode::Parse( strResp );
+    if ( respNode.type != SimpleJson::JSON_OBJECT || !respNode.Has( "status" ) ||
+         respNode.Get( "status" ).AsString() != "OK" )
+        return false;
+    if ( piPlayedMs && respNode.Has( "played_ms" ) ) *piPlayedMs = respNode.Get( "played_ms" ).AsInt();
+    return true;
 }
 
 void CCmpClient::KeepAliveLoop() {

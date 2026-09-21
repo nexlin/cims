@@ -295,6 +295,15 @@ public:
     std::string m_strHaVip;
 
     // ================================================================
+    // 안내음성·신호음·보류 음악 (announcements.md §6) — Setup.Announcement.*
+    //   Rules = 프로파일 표(행 = {profile, situation, mode, tone, tone_ms, media, repeat, loop}) 의 JSON 원문 —
+    //   해석은 CCspAnnouncementService::Init 이 한다(Setup 은 SimpleJson 을 헤더에 끌어오지 않는다).
+    bool m_bAnnEnable = true;
+    int m_iAnnMaxPlayMs = 30000;
+    std::string m_strAnnDefaultProfile = "default";
+    std::string m_strAnnRulesJson;  // Setup.Announcement.Rules 배열 원문(비면 내장 기본 표)
+
+    // ================================================================
     // CMDP(MCData Media Plane, MSRP) 연동 설정 — Setup.McDataMedia.*
     bool m_bUseMcDataMedia;   // Enable (기본 false — cmdp 미배치 환경 무영향)
     std::string m_strCmdpIp;  // cmdp 제어 주소

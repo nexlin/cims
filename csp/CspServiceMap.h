@@ -46,6 +46,11 @@ struct ServiceInfo {
     /** 다이얼 플랜(sip_service_model.md §2-10) — 이 서비스 가입자가 국내형으로 다이얼한 착신을 +E.164 로 번역하는 규칙
      *  (country_code·national_prefix·international_prefix·emergency_numbers). country_code 가 비면 번역 비활성. */
     DialPlan dial_plan;
+    /** 안내음성 프로파일(announcements.md §6.2) — announcement_profile: 이 서비스 가입자가 **발신자**일 때(실패
+     * 안내·서버 링백), hold_profile: **피보류자**일 때(hold 만). 비면 announcement_profile →
+     * Setup.Announcement.DefaultProfile. */
+    std::string announcement_profile;
+    std::string hold_profile;
     int priority = 100;
     bool enabled = true;
     std::vector<std::string> allowed_local_node_refs;  // v3: LocalNode name 참조 (SOT)

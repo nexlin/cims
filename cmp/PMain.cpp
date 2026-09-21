@@ -9,6 +9,9 @@
 // (종전: 핸들러 부재 → 즉사, stopServer 미실행)
 static volatile sig_atomic_t g_stop = 0;
 static void onTerm(int) { g_stop = 1; }
+// SIGUSR1 = 안내 카탈로그 재적재 (announcements.md §7.3 — agent 가 음원·카탈로그를 배포한 뒤 보낸다). set-only, 처리는 메인 루프.
+static volatile sig_atomic_t g_reload = 0;
+static void onReload(int) { g_reload = 1; }
 
 int main(int argc, char** argv) {
     std::string configFile = "../config/cmp.conf";
@@ -37,8 +40,14 @@ int main(int argc, char** argv) {
     LOG_INFO("Main", "cmp started. config=%s", configFile.c_str());
 
     signal(SIGTERM, onTerm);
+    signal(SIGUSR1, onReload);
     while (!g_stop) {
         msleep(1000);
+        if (g_reload) {
+            g_reload = 0;
+            LOG_INFO("Main", "SIGUSR1 — reload announcements");
+            server.reloadAnnouncements();
+        }
     }
     LOG_INFO("Main", "SIGTERM — graceful stop");
     server.stopServer();

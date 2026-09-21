@@ -4564,7 +4564,8 @@ def _validate_record(schema: dict, record: dict) -> list:
 
 def _agent_proxy_call(method: str, agent: dict, path: str,
                       query: dict = None, body: dict = None,
-                      timeout: int = 15, config: dict = None) -> tuple:
+                      timeout: int = 15, config: dict = None,
+                      raw: bytes = None, content_type: str = None) -> tuple:
     """Agent 의 sync REST 로 TLS 요청. (status, json_body) 반환.
 
     per-agent mTLS: agent.mtls_enabled=1 인 레코드만 client cert 로 연결.
@@ -4583,6 +4584,10 @@ def _agent_proxy_call(method: str, agent: dict, path: str,
     if body is not None:
         data = json.dumps(body).encode("utf-8")
         headers["Content-Type"] = "application/json"
+    elif raw is not None:
+        # 바이너리 본문(모듈 자원 파일 — PUT /module-file, announcements.md §7.3)
+        data = raw
+        headers["Content-Type"] = content_type or "application/octet-stream"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
 
     ctx = _ssl.create_default_context()

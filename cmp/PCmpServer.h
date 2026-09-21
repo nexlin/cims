@@ -16,6 +16,8 @@
 #include "pmodule.h"
 #include "PRtpRelay.h"
 #include "PRtpTap.h"
+#include "PAnnCatalog.h"
+#include "PAnnTicker.h"
 #include "PRtpMulticast.h"
 #include "PPttMemberPort.h"
 #include "PMcpttGroup.h"
@@ -29,6 +31,8 @@ public:
 
     bool startServer();
     void stopServer();
+    /** 안내 카탈로그 재적재 — SIGUSR1(PMain)·ANN_RELOAD. 진행 중 재생은 스냅샷을 들고 있어 끊기지 않는다. */
+    void reloadAnnouncements();
 
     void runControlLoop(); // Main loop for UDP control
 
@@ -41,6 +45,10 @@ protected:
     void processTapAdd(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
     void processTapRemove(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
     void processAlive(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
+    // 안내 재생기 — RELAY_PLAY(멱등)/RELAY_PLAY_STOP + CORE ANN_RELOAD (announcements.md §4, cmp_media_api.md §6.7)
+    void processPlay(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
+    void processPlayStop(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
+    void processAnnReload(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
 
     // Group Management
     void processAddGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
@@ -204,6 +212,21 @@ private:
     //   media_codec 이 다른 RELAY_ADD/MODIFY 는 TRANSCODE_CAPACITY). 사용량은 세션의 transcoding() 을 세어 얻는다(카운터 비동기 없음)
     int _transcodeSlots = 8;
     int countTranscoding() const;   // 호출자가 _mutex 보유
+
+    // 안내 재생기(announcements.md §4) — AnnPlayers 0 = 기능 비활성(resource.ann 미광고 → CSP 는 안내 없이 원코드).
+    //   카탈로그 = <install>/<AnnouncementDir>/sys/catalog.jsonl(동봉) + <config>/announcements.jsonl(운영자 collection).
+    std::string _annDir = "announcements";
+    int _annPlayers = 32;
+    int _annMaxPlayMs = 60000;
+    int _annNatWaitMs = 500;
+    PAnnCatalog _annCatalog;
+    std::vector<PAnnTicker*> _annTickers;   // 리액터별 20 ms 클록
+    int countAnnPlayers() const;            // 호출자가 _mutex 보유
+    std::string annRootPath() const;        // <config dir>/../<AnnouncementDir>
+    std::string annOpCatalogPath() const;   // <config dir>/announcements.jsonl
+    void onAnnDone(const PAnnTicker::Done& d);   // 재생 완료 → RELAY_PLAY_DONE 이벤트 (리액터 스레드, relay 락 없음)
+    void updateAnnMissingAlarm(const std::vector<std::string>& missing);
+    bool _annMissingAlarm = false;
 
     // 청취 leg(tap) 풀 (dispatch_center.md §6) — TapStartPort 부터 4포트 블록. 0 = 기능 비활성(resource.tap 미광고)
     int _tapStartPort = 58000;

@@ -1,0 +1,13 @@
+# 실패 안내(announcements.md §3.1) — 착신 UE 가 응답하지 않아(Timer B 408 또는 480) B-leg 가 실패하면 CSP 가 발신자에게 183+SDP 를 내고
+#   `sys:ann_no_answer` 를 들려준 뒤 원래 최종 코드로 끝낸다. 착신 역할은 등록만 하고 INVITE 에 답하지 않는다(reject 없음 → 대상 링 타임아웃).
+#   대상 CSP 의 링 타이머·psip Timer B(32 s) 를 기다리므로 invite 의 기대 코드는 408(Timer B — 대상 링 타이머가 더 짧으면 480 으로 바꾼다).
+id: VOLTE-ANN-NO-ANSWER
+title: 무응답 착신 → 183 early media 안내 → 408/480
+tags: [volte, announcement, media]
+roles:
+  caller: { pool: volte_ue }
+  callee: { pool: volte_ue, disjoint_from: caller }
+flow:
+  - { step: register, who: [caller, callee], expect: { code: 200 } }
+  - { step: invite,   from: caller, to: callee, media: { audio: amr-wb, rtp: explicit },
+      expect: { code: 408, early_media_pct: 100, early_rtp_pct: 100 } }

@@ -11,6 +11,8 @@
 #include "PMediaCrypto.h"
 #include "PRtpTap.h"
 #include "PTranscoder.h"
+#include "PAnnPlayer.h"
+#include "PAnnTicker.h"
 
 class PSyncRtpRecorder;
 
@@ -43,6 +45,7 @@ public:
 
     // NAT latch 관측 (STATS detail.nat) — latch 완료 시 학습 주소 반환.
     bool getNatLatched(int peerIdx, std::string& learnedIp, int& learnedPort) const;
+    bool legIsNat(int peerIdx) const { return _legs[peerIdx & 1].nat; }
 
     // leg 별 PT 재작성 파라미터 (RELAY_ADD/MODIFY remote_pt 계열, 0=재작성 없음).
     //   pt/tePt: 이 leg 로 송신 시 스탬프할 audio/TE PT. srcPt/srcTePt: 이 leg 가
@@ -99,6 +102,24 @@ public:
     void collectTaps(std::vector<PRtpTap*>& out) const { out.insert(out.end(), _taps.begin(), _taps.end()); }
     void clearTaps() { PAutoLock lock(_mutex); _taps.clear(); }
     PRtpTap* findTap(const std::string& tapId) const;
+
+    // ── 안내 재생기(announcements.md §4.2, cmp_media_api.md §6.7) — leg 당 1개, 세션 종속 수명(reset 이 걷는다) ──
+    //   startAnn: 같은 leg 에 재생 중이면 교체(replaced 에 이전 play_id). annTick: 워커 타이머(PAnnTicker)가 20 ms 마다 부른다 —
+    //   각 leg 의 재생기가 낸 RTP 를 그 leg 소켓·SRTP 컨텍스트로 송신하고 끝난 재생기를 done 에 보고, 남은 재생기가 없으면 false.
+    //   재생 중인 leg 로는 반대 peer 의 오디오 relay 를 보내지 않는다(replace 모드 — proc 참조).
+    void setWorkerIdx(int idx) { _workerIdx = idx; }
+    int workerIdx() const { return _workerIdx; }
+    bool startAnn(int peerIdx, std::unique_ptr<PAnnPlayer> player, std::string& replacedPlayId);
+    bool stopAnn(int peerIdx, const std::string& playId, const char* reason, PAnnTicker::Done& out);
+    bool annActive(int peerIdx) const;
+    bool annTick(int64_t nowUs, std::vector<PAnnTicker::Done>& done);
+    int annCount() const;
+    // 관측(STATS detail.ann) — 활성 재생기 요약
+    void collectAnn(std::vector<PAnnTicker::Done>& out) const;
+    // leg 의 송신 코덱 판정(재생 파일 선택) — media_codec 선언 > remote_codec 문자열. 빈 값 = 미확정
+    std::string legCodecName(int peerIdx) const;
+    int legPtOut(int peerIdx) const;
+    bool legAmrOctetAlign(int peerIdx) const;
 
     void startRecording(const std::string& rawDir, const std::string& sessionId,
                         const std::string& caller = "", const std::string& callee = "",
@@ -185,6 +206,10 @@ private:
     std::vector<PRtpTap*> _taps;   // 청취 leg 참조 (송신 fan-out 대상, _mutex 보호)
     // 피어 leg 트랜스코더 — [i] = peer i 수신 → peer 1-i 송신 방향 (둘 다 있거나 둘 다 없다)
     std::unique_ptr<PTranscoder> _xcode[2];
+    // 안내 재생기 — [i] = peer i leg 로 송출 (호출자가 _mutex 보유; 리액터 스레드 안)
+    std::unique_ptr<PAnnPlayer> _ann[2];
+    int _workerIdx = 0;
+    void _sendAnn(int legIdx, std::vector<std::string>& pkts);
     long        _xcodeDrop = 0;    // 변환 실패(페이로드 형식) 폐기 누적
     void _applyTranscodeRecorderMeta();   // 녹취 트랙 메타 — G.711 leg 트랙은 변환 뒤의 AMR-WB 로 기록된다
 

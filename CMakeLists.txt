@@ -352,6 +352,12 @@ file(GLOB _dist_tester_samples
      ${CMAKE_SOURCE_DIR}/tester/worker/samples/*.g722 ${CMAKE_SOURCE_DIR}/tester/worker/samples/*.amrwb
      ${CMAKE_SOURCE_DIR}/tester/worker/samples/*.h264 ${CMAKE_SOURCE_DIR}/tester/worker/samples/samples.json)
 file(GLOB _dist_tester_masters ${CMAKE_SOURCE_DIR}/tester/worker/samples/pcm/*.wav)
+# 서비스 안내음성 기본 세트(sys:) — CMP 패키지 동봉 (media/announcements/sys — announcements.md §7.2)
+file(GLOB _dist_ann_sys
+     ${CMAKE_SOURCE_DIR}/media/announcements/sys/*.pcmu ${CMAKE_SOURCE_DIR}/media/announcements/sys/*.pcma
+     ${CMAKE_SOURCE_DIR}/media/announcements/sys/*.g722 ${CMAKE_SOURCE_DIR}/media/announcements/sys/*.amrwb
+     ${CMAKE_SOURCE_DIR}/media/announcements/sys/catalog.jsonl)
+file(GLOB _dist_ann_masters ${CMAKE_SOURCE_DIR}/media/announcements/pcm/*.wav)
 set(_dist_real_ue_cli)
 if(TARGET cimsue-cli)
     set(_dist_real_ue_cli COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:cimsue-cli> ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/bin/)
@@ -364,6 +370,8 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cmp/config
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cmp/cert
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cmp/log
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cmp/announcements/sys
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cmp/announcements/op
 
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cmdp/bin
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cmdp/config
@@ -429,6 +437,16 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/oam-cims-tester/samples ${CMAKE_BINARY_DIR}/dist/oam-cims-tester/native
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_dist_tester_samples} ${_dist_tester_masters} ${CMAKE_BINARY_DIR}/dist/oam-cims-tester/samples/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/bin/cims-sample-conv ${CMAKE_BINARY_DIR}/dist/oam-cims-tester/native/
+    # 서비스 안내음성 라이브러리(base OAM — announcements.md §7.3): 변환기 native/ + 동봉 세트 카탈로그·마스터(콘솔 청취·프로파일 선택기).
+    #   코덱 파일은 CMP 패키지(dist/cmp/announcements/sys)가 가진다 — OAM 은 운영자 등록분만 노드에 내린다
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/oam/native ${CMAKE_BINARY_DIR}/dist/oam/announcements/sys
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/bin/cims-sample-conv ${CMAKE_BINARY_DIR}/dist/oam/native/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/media/announcements/sys/catalog.jsonl ${CMAKE_BINARY_DIR}/dist/oam/announcements/sys_catalog.jsonl
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_dist_ann_masters} ${CMAKE_BINARY_DIR}/dist/oam/announcements/sys/
+
+    # 서비스 안내음성 기본 세트(media/announcements/gen_announcements.py 산출물 — announcements.md §7.2): 코덱 raw 4종 + sys/catalog.jsonl.
+    #   마스터 pcm/·생성기는 동봉하지 않는다. 운영자 등록(op:)은 OAM 라이브러리가 agent 로 announcements/op/ 에 내려준다.
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_dist_ann_sys} ${CMAKE_BINARY_DIR}/dist/cmp/announcements/sys/
 
     # ── 3. 설정 템플릿 복사 (deploy_value: "@PLACEHOLDER@" 포함, configure.sh 로 채움) ──
     #    CSP/CMP/CSC 모두 A안 통합 — config_template.json 하나가 UI 메타+deploy_value 둘 다 담당.

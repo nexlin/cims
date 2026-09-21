@@ -92,6 +92,10 @@ public:
     std::string m_strRouteHashKey;              // hash_by_caller 키(발신자 from@host)
     std::vector<std::string> m_vecRoutesTried;  // 이미 실패한 Route(현재 것 제외)
 
+    /** 발신자의 안내음성 프로파일 이름(announcements.md §6.2 — 피어면 RemoteNode, 가입자면 접속서비스). INVITE 때 정해
+     * 양 leg entry 에 기록. 비면 Setup.Announcement.DefaultProfile */
+    std::string m_strAnnProfile;
+
     /** 마지막 SIP activity 시간 (통화 생성/갱신 시 기록) */
     time_t m_iLastActivityTime;
 
@@ -129,6 +133,8 @@ public:
     void SetRelaySdesLeg( const char *pszCallId, int iLeg, const RelaySdesLeg &clsLeg );
     /** relay leg(iLeg) 의 코덱 상태를 양 leg entry 에 기록 (RelayCodec, cmp.md §11). */
     void SetRelayCodecLeg( const char *pszCallId, int iLeg, const RelayCodec::LegCodecs &clsLeg );
+    /** 발신자 안내 프로파일을 양 leg entry 에 기록 (announcements.md §6.2) */
+    void SetAnnProfile( const char *pszCallId, const std::string &strProfile );
     /** 피어 B-leg 의 라우팅 상태(RouteSet·Route·정책·해시키·실패 Route 목록)를 양 leg entry 에 기록 — 재라우팅의 근거.
      */
     void SetRouteInfo( const char *pszCallId, const std::string &strRouteSet, const std::string &strRoute,

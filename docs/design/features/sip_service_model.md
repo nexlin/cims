@@ -113,6 +113,7 @@ CSP 가 수신하는 bind 포트. `edge` 는 **인터페이스 분류**다 — p
 | `remote_domain` | SIP URI host (outgoing Request-URI/To 의 host 로 사용) |
 | `srv_lookup`, `dns_fallback` | 고급 transport 옵션(예약) |
 | `transcode_codecs` | 가입자→이 피어 오퍼에 CSP 가 끼워 넣는 코덱 목록(예 `["PCMA","PCMU"]` — IP-PBX 의 G.711 필수 코덱, SIPconnect 2.0). 피어가 그 코덱으로 답하고 가입자 오퍼에 없었으면 CMP 가 피어 leg 를 AMR-WB 와 변환한다([../modules/cmp.md](../modules/cmp.md) §11 — 코덱 삽입 모델, TS 29.162). 비면 삽입 없음. 피어→가입자 오퍼에는 서비스 코덱(AMR-WB)이 항상 삽입된다 |
+| `announcement_profile` | 이 피어가 **발신자**인 호(트렁크 인바운드)의 안내음성 프로파일([announcements.md §6.2](announcements.md)) — NNI 관례는 안내 없이 응답 코드만(`trunk`). 비면 `Setup.Announcement.DefaultProfile` |
 | `tls_verify` | `protocol=TLS` 피어로 **나가는** 연결에서 서버 인증서를 체인 검증한다(앵커 = TLS primary LocalNode 의 `tls_ca_path`, 비면 시스템 저장소 — 호스트명(SAN)은 대조하지 않는다, IP 로 붙는 NNI 관례). 상호인증의 클라이언트 쪽은 설정이 없다 — 피어가 요구하면 CSP 는 **자기 노드 인증서**(TLS primary LocalNode 의 cert/key)를 제시한다(TS 33.310 NDS/IP, 노드 인증서 한 장이 양쪽 역할). psip 은 목적지별 정책(`CSipTlsPeerPolicy`)으로 이를 연결 단위에 적용한다 |
 
 ### 2-3. Route — (LocalNode, RemoteNode) unique
@@ -349,6 +350,7 @@ UE 가 직접 REGISTER 하는 서비스 도메인. **`kind` 는 접속환경 클
 | `media_srtp` | `off`(기본) / `optional` / `required` — UE↔CMP SRTP(SDES) 정책 ([media_security.md](media_security.md) §4) |
 | `pickup_feature_code` | 당겨받기 피처코드(도메인 번호계획). 빈 값 = 이 서비스에서 픽업 비활성. `voip` 서비스에 둔다 ([volte_supplementary_services.md §5.2](volte_supplementary_services.md)) |
 | `transfer_allowed` | 호 전달(REFER) 허용 — 도메인 기본값(기본 true) ([volte_supplementary_services.md §6.3](volte_supplementary_services.md)) |
+| `announcement_profile` · `hold_profile` | 안내음성 프로파일([announcements.md §6.2](announcements.md)) — 이 서비스 가입자가 **발신자**일 때(실패 안내·서버 링백) / **피보류자**일 때(보류 음악). 비면 `announcement_profile` → `Setup.Announcement.DefaultProfile` |
 | `country_code` · `national_prefix` · `international_prefix` · `emergency_numbers[]` | **다이얼 플랜**(§2-10) — 이 서비스 가입자가 국내형으로 다이얼한 착신을 +E.164 로 번역하는 규칙. `country_code`(digits, 예 `82`)가 비면 번역 비활성. 기본 `national_prefix=0`·`international_prefix=00`·긴급번호 `112`·`119`. CSC `countryCode`(단말 로컬 표기)의 정본이기도 하다 |
 | `priority` | 같은 domain 중복 시 먼저 매칭될 순서 |
 

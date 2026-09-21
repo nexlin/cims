@@ -4,7 +4,7 @@
 > 규격 = TS 24.628(공통 기본 통신 절차 — early media·안내), TS 24.229 §5.7(AS)·TS 23.228 §4.7(MRFC/MRFP),
 > RFC 3960(early media·링백 모델), RFC 5009(P-Early-Media), RFC 4240(netann 의미론), RFC 3326(Reason),
 > TS 24.610(HOLD — 피보류자 안내), TS 24.615(통화중대기), RFC 7462(Alert-Info URN), ITU-T E.182(톤·안내 적용 원칙),
-> E.180 Sup.2(한국 신호음). 구현 상태는 §12 이행 순서가 정본이다 — P1 착수 전.
+> E.180 Sup.2(한국 신호음). P1(§12 ①~⑦)은 구현·실측 반영, P2(§11)는 로드맵이다.
 >
 > 관련: [../modules/cmp.md](../modules/cmp.md) · [../modules/csp.md](../modules/csp.md) · [../../api/cmp_media_api.md](../../api/cmp_media_api.md)
 > · [volte_flows.md](volte_flows.md) C1a · [sip_service_model.md](sip_service_model.md) §2-9 · [media_security.md](media_security.md)
@@ -102,12 +102,13 @@ UE-A                     CSP                          CMP                       
 
 ### 3.2 실패 안내 — B leg 이전 실패 (404·484·480 미등록·603 DND)
 
-`EventIncomingCall` 이후 psip UAS 다이얼로그가 있으면 같은 절차다: `RELAY_ADD`(peer0=A 만, peer1 미확정 `0.0.0.0:0`) → 183 → RELAY_PLAY → 원코드.
-현행 `StopCall(callId, code)` 호출 지점(다이얼 플랜 484·미등록 480·private call 480·`ApplyTerminationServices` 603)을 `m_clsAnn.Reject(callId, rtp, code, reason)`
-로 바꾼다 — 정책이 `none` 이거나 조건이 안 맞으면 그 안에서 종전처럼 `StopCall`.
+`EventIncomingCall` 이후 psip UAS 다이얼로그가 있으면 같은 절차다: `RELAY_ADD`(peer0=A 만, peer1 미확정) → CallMap 에 A 단독 entry → 183 → RELAY_PLAY → 원코드.
+거절 지점 = `RejectVoice`(404 미등록·488·500 등)·다이얼 플랜 484·TAS `ApplyTerminationServices`(DND·수신거부 603) 가 `gclsAnnouncement.Reject(callId, rtp, from, to, code, reason, msg)`
+를 먼저 부르고, 인수되지 않으면(정책 none·CMP 미지원·SDES 불일치·조립 실패) 종전처럼 `StopCall`. 시도 장부(`VoipCallRejected`)는 인수 여부와 무관하게 남는다.
+자체 거절한 UAS 다이얼로그에는 psip 가 `EventCallEnd` 를 올리지 않으므로 최종 응답 뒤의 마감(CDR·DB·`CallMap.Delete`→RELAY_REMOVE·소유권)은 서비스가 직접 한다.
 
-**다이얼로그 이전 거절**(`RecvRequest` 단계 — `ScreenInvite` 603, 다이얼 플랜 484 의 일부)은 early media 를 낼 다이얼로그가 없다. 안내 대상에 넣으려면
-판정 지점을 `EventIncomingCall` 로 옮겨야 하며 이는 시도 장부 기록 시점과 얽히므로 P1 에서는 **응답만**(현행)으로 두고 P2 에서 옮긴다(§11).
+**다이얼로그 이전 거절**(`RecvRequest` 단계 — `ScreenInvite` 603, 다이얼 플랜 484 의 일부)은 early media 를 낼 다이얼로그가 없어 **응답만** 나간다(현행).
+판정 지점을 `EventIncomingCall` 로 옮기는 것은 시도 장부 기록 시점과 얽혀 P2(§11).
 
 ### 3.3 보류 음악 (TS 24.610)
 
@@ -151,26 +152,26 @@ leg 당 동시 재생기 1개 — 같은 leg 에 새 RELAY_PLAY 는 이전 재�
 | `session_id` | O | 대상 relay 세션. 없으면 `NOT_FOUND`(부활 금지) |
 | `peer_index` | O | 재생 대상 leg (0=A / 1=B) |
 | `play_id` | O | client 명명(세션 내 유일). client 는 시도마다 새 키를 쓴다 |
-| `media` | O | 음원 id 배열 — 순서대로 재생(`["sys:busy_kr", "sys:ann_busy"]`). 항목은 `{id, repeat?, max_ms?}` 객체도 허용 |
+| `media` | O | 음원 열 — 문자열 id 또는 `{id, repeat, max_ms}` 객체(순서대로 재생). 항목 `repeat 0` = `max_ms` 까지 반복(tone_then_announce 의 신호음 구간). 쉼표 문자열도 수용 |
 | `repeat` | - | 전체 시퀀스 반복 수. 기본 1, **0 = STOP 까지 무한**(hold·ringback) |
 | `delay_ms` | - | 반복 사이 무음(RFC 4240 `delay`). 기본 0 |
 | `max_ms` | - | 총 재생 상한 — 넘으면 `reason=max`. 기본 = CMP `AnnMaxPlayMs` |
 | `mode` | - | `replace`(기본 — 재생 중 반대 peer 의 relay 를 이 leg 로 보내지 않음) / `mix`(**예약** — §11 통화중대기 톤 삽입) |
 
-응답 payload: `{ "codec": "AMR-WB/16000", "duration_ms": 9000 }`(시퀀스 1회 길이. repeat 0 이면 `duration_ms: 0`).
+응답 payload: `{ "codec": "AMR-WB/16000", "duration_ms": 9000 }`(시퀀스 1회 길이. repeat 0 이면 `duration_ms: 0`). 같은 `play_id` 재요청(멱등)은 `{codec, played_ms}`.
 
 **RELAY_PLAY_STOP**: `session_id` + `play_id`(없거나 이미 끝났으면 `OK` — 자연 멱등). 응답 payload `{ "played_ms": N }`.
 
 **이벤트 RELAY_PLAY_DONE**(§8 채널 — ack·1 s×5 재전송): `session_id`, `peer_index`, `play_id`, `reason`(`completed`|`max`|`stopped`|`replaced`|`error`),
 `played_ms`. `stopped`/`replaced` 는 client 가 낸 명령의 결과라 이벤트를 생략해도 되지만 **통일을 위해 항상 낸다**(CSP 는 무시 가능).
 
-**코덱 선택.** 재생 코덱 = 그 leg 의 `media_codec` 선언([§6.6](../../api/cmp_media_api.md)) → 없으면 `remote_codec`/`remote_pt` 로 추정(코덱 테이블 이름) →
-둘 다 없으면 `BAD_REQUEST`. CSP 는 안내 전용 세션(3.2)의 RELAY_ADD/MODIFY 에 **항상 `media_codec`** 을 싣는다. 파일은 카탈로그의 그 코덱 항목(§7.1) —
+**코덱 선택.** 재생 코덱 = 그 leg 의 `media_codec` 선언([§6.6](../../api/cmp_media_api.md)) → 없으면 `remote_codec`(+`remote_pt`, 정적 PT 0 인 PCMU 도 `remote_codec` 만으로 남는다) →
+둘 다 없으면 `BAD_REQUEST`. CSP 는 CSP 가 만든 answer 의 코덱을 `RELAY_ADD`/`RELAY_MODIFY` 의 `remote_pt`/`remote_codec` 으로 그 leg 에 알린다(`media_codec` 은 트랜스코딩 판정을 건드리므로 쓰지 않는다). 파일은 카탈로그의 그 코덱 항목(§7.1) —
 없으면 `MEDIA_NOT_FOUND`(런타임 인코딩은 하지 않는다 — 라이브러리가 4 코덱을 모두 만들어 두는 것이 계약). `telephone-event` 는 재생과 무관.
 
 **오류**: `NOT_FOUND`(세션) · `MEDIA_NOT_FOUND`(음원 id 또는 그 코덱 파일 없음 — 신설) · `ANN_CAPACITY`(재생 슬롯 소진 — 신설) · `BAD_REQUEST`(코덱 미확정·mode 미지원).
-**자원 광고**: HEARTBEAT/STATS `resource.ann{total,used}` — 키 없음 = 미지원(`AnnPlayers=0`), CSP 는 안내를 건너뛴다. STATS `detail.ann[]` = 진행 중 재생기
-(session·peer·media·played_ms). Flow 로그 `INT ANN_PLAY`/`INT ANN_DONE`(detail = media 열·reason).
+**자원 광고**: HEARTBEAT/STATS `resource.ann{total,used,media}` — 키 없음 = 미지원(`AnnPlayers=0`), CSP 는 안내를 건너뛴다. STATS `detail.ann[]` = 진행 중 재생기
+(session·peer·play_id·media·played_ms) + `detail.ann_catalog{root, ids[], missing[]}`. Flow 로그 `INT ANN_PLAY`/`INT ANN_DONE`(detail = media 열·reason). CORE `ANN_RELOAD` = 카탈로그 재적재(SIGUSR1 과 같다).
 
 ### 4.2 내부 구조
 
@@ -197,8 +198,10 @@ leg 당 동시 재생기 1개 — 같은 leg 에 새 RELAY_PLAY 는 이전 재�
 | `AnnouncementDir` | `announcements` | 음원 루트(`sys/`·`op/`·`sub/` 하위) — 상대 경로는 install_path 기준 |
 | `AnnPlayers` | 32 | 동시 재생기 상한. **0 = 기능 비활성**(`resource.ann` 미광고) |
 | `AnnMaxPlayMs` | 60000 | `max_ms` 생략 시 상한(repeat 0 은 예외 — STOP 까지) |
+| `AnnNatWaitMs` | 500 | NAT leg 의 재생 시작 지연 상한(latch 전 선언 주소 오송신 방지, §8) |
 
-`config_template.json` 섹션 `announcement`(scope service) + collection `announcements`(카탈로그 §7.1 — CMP 의 첫 collection).
+`config_template.json` 섹션 `announcement`(scope service) + collection `announcements`(운영자 카탈로그 §7.1 — agent `/collection` 이 `config/announcements.jsonl` 에 쓴다. CMP 의 첫 collection).
+구현 = `cmp/PAnnCatalog`·`PAnnPlayer`·`PAnnTicker` + `PRtpRelay::annTick`·`startAnn`·`stopAnn` + `PCmpServer::processPlay/processPlayStop/processAnnReload/onAnnDone`.
 
 ## 5. CSP — 정책·상태 머신
 
@@ -209,18 +212,19 @@ TAS(hold·전달·픽업·포크)와 IBCF(피어 실패)는 이 서비스를 **�
 
 | API | 호출 지점 | 동작 |
 |---|---|---|
-| `Classify(status, reason) → Situation` | 내부 | §2 판정 표(Reason Q.850 우선) |
-| `Resolve(situation, accessService, calleeUser) → Action` | 내부 | §6 프로파일 해석(가입자 → 접속서비스 → 전역) |
-| `bool OnLegFailed(aCallId, info, status, reason)` | `EventCallEnd`(B 실패, 재라우팅 소진 뒤) | true = 안내 인수(호출자는 StopCall 하지 않는다). 3.1 절차 |
-| `void Reject(callId, rtp, status, reason)` | `EventIncomingCall` 계열의 거절 지점 | 3.2 절차 — 정책 `none` 이면 그 자리에서 StopCall |
-| `void OnHold(info, heldPeerIdx)` / `OnResume(info)` | TAS `EventReInvite` 방향 감지 | 3.3 |
-| `void OnRingback(info)` / `OnRingbackEnd(info)` | `EventCallRing`(SDP 없는 첫 18x) / 18x+SDP·200 | 3.4 (프로파일 on 일 때만) |
-| `void OnPlayDone(sessionId, playId, reason)` | `CCmpClient` 이벤트 dispatch 스레드 | 대기 중 최종 응답 발사 |
-| `void OnCancel(callId)` / `OnLegReplaced(info, peerIdx)` | CANCEL·전달·픽업 | STOP |
-| `void Tick()` | 1 s 틱 | `MaxPlayMs` 만료 → 최종 응답 |
+| `Classify(status, reason) → Situation` | 내부 | §2 판정 표(Reason Q.850 우선). CSP 자체 480 은 `Reject` 가 unreachable 로 바꾼다 |
+| `Resolve(situation, profile) → Action` | 내부 | §6 프로파일 해석(그 프로파일 → DefaultProfile → none). 발신자 프로파일은 `ProfileForCaller(caller, msg)`(inbound Route 피어 → RemoteNode, 가입자 → 접속서비스)로 INVITE 때 정해 `CCallInfo::m_strAnnProfile` 에 둔다 |
+| `bool OnLegFailed(bCallId, clsB, status, reason)` | `EventCallEnd`(B 실패, 재라우팅 소진 뒤) | true = 인수(호출자는 B entry 만 지운다). 3.1 절차 — A 가 이미 SDP 를 받았으면(B 18x+SDP·링백) 183 생략 |
+| `bool Reject(callId, rtp, from, to, status, reason, msg)` | `EventIncomingCall` 거절 지점·TAS 603 | 3.2 절차 — 인수 못 하면 false(호출자가 원코드) |
+| `bool OnHold(holderCallId, clsHolder)` / `OnResume(...)` | `EventReInvite` 방향 감지(roles.TAS) | 3.3 — 반환 true 면 inactive 를 sendonly 로 재작성 |
+| `bool OnRingback(bCallId, clsB, …)` / `OnRingbackEnd(bCallId, clsB)` | `EventCallRing`(SDP 없는 18x) / 18x+SDP·`EventCallStart` | 3.4 (프로파일 `ringback=media` 일 때만) |
+| `void OnPlayDone(sessionId, peer, playId, reason, playedMs)` | `CCmpClient` 이벤트 dispatch 스레드 | 대기 중 최종 응답 발사(`FinishEarly`) |
+| `void OnCallEnd(callId)` / `OnLegReplaced(relaySessionId)` | `EventCallEnd` 진입부 / TAS 전달·픽업 RELAY_MODIFY 앞 | 재생 회수(STOP) — CANCEL 은 CDR `cancelled` |
+| `void Tick()` | CspServer 1 s 루프 | `MaxPlayMs`+3 s 지난 대기 → `timeout` 최종 응답 |
 
-호별 상태는 `CCallInfo::m_clsAnn { eState(idle|early_sent|playing|final_pending), strPlayId, eSituation, iFinalStatus, strFinalReason, tStart, vecMedia }`.
-`early_sent` 는 "CSP 가 만든 183 answer 를 이미 냈다"는 표식이라 3.1·3.4 가 공유한다(링백 재생 뒤 실패 안내로 이어질 때 183 을 다시 내지 않는다).
+호별 상태는 서비스 안의 맵(`m_mapCalls` A Call-ID → {relay, peer, play_id, situation, 최종 코드·Reason, 시작 시각, media}, `m_mapPlayToCall`, `m_mapHold`) —
+CallMap 은 relay 서술자와 `m_strAnnProfile` 만 갖는다. 링백 entry(최종 코드 0)의 `bEarlySent` 가 "CSP 가 만든 183 answer 를 이미 냈다"는 표식이라
+뒤따르는 실패 안내가 183 을 다시 내지 않는다. **락 규약**: 맵은 `m_mtx`, SIP·CMP 호출은 락 밖(`StopCall` → `EventCallEnd` → `OnCallEnd` 재진입).
 
 ### 5.2 발화 지점 정리 (현행 코드 → 변경)
 
@@ -230,14 +234,16 @@ TAS(hold·전달·픽업·포크)와 IBCF(피어 실패)는 이 서비스를 **�
 | `EventIncomingCall`: `StopCall(callId, 484/480/603/488…)` 각 지점 | `m_clsAnn.Reject(callId, rtp, code, reason)` |
 | `TryRerouteLeg` 소진·`TRANSCODE_CAPACITY` 488·CMP `NO_RESOURCE` | `congestion` 으로 `OnLegFailed`/`Reject` |
 | `EventReInvite`: 주소 MODIFY + `SendReInvite` 통과 | 방향 감지 → `OnHold`/`OnResume`(TAS 게이트 `roles.TAS`), inactive→sendonly 재작성 |
+| TasModule 전달·픽업의 `RELAY_MODIFY`(4곳) | 앞에 `OnLegReplaced(relay)` — 교체되는 leg 의 보류 음악 정지 |
+| TAS `ApplyTerminationServices` 603 | `Reject` 를 먼저(rtp·message 인자 추가) |
 | `EventCallRing`: 18x 브릿징 | 프로파일 ringback on 이면 `OnRingback`; SDP 있는 18x·200 은 `OnRingbackEnd` 뒤 현행 C1a |
 | `CCmpClient` 이벤트 dispatch | `RELAY_PLAY_DONE` → `OnPlayDone` |
 
 ### 5.3 psip 변경
 
-- `RingCall(callId, status, rtp, extraHeaders)` — 18x 에 부가 헤더(`P-Early-Media`) 를 싣는 오버로드. 기존 시그니처 유지.
-- `CSipCallRtp` 의 로컬 방향을 answer 로 낼 때 `sendrecv` 명시(현행 기본과 같다 — 확인만).
-- 변경은 `ext/psip` 스냅샷 + 단위시험(S1-UNIT-PSIP).
+- `RingCall(callId, status, rtp, const std::vector<std::pair<std::string,std::string>>& extraHeaders)` — 18x 에 부가 헤더(`P-Early-Media: sendonly`)를 싣는
+  오버로드(`SipUserAgentCall.hpp`). 기존 3-인자 시그니처는 빈 헤더 목록으로 위임.
+- 서버 answer 의 방향은 `CSipCallRtp::SetDirection(E_RTP_SEND_RECV)` 로 명시(미디어 목록의 `a=` 도 함께 바뀐다).
 
 ## 6. 정책 모델 — 프로파일
 
@@ -248,32 +254,22 @@ TAS(hold·전달·픽업·포크)와 IBCF(피어 실패)는 이 서비스를 **�
   "Enable": true,
   "MaxPlayMs": 30000,
   "DefaultProfile": "default",
-  "Profiles": {
-    "default": {
-      "ringback":     { "mode": "none" },
-      "busy":         { "mode": "tone_then_announce", "tone": "sys:busy_kr", "tone_ms": 4000, "media": "sys:ann_busy" },
-      "no_answer":    { "mode": "announce", "media": "sys:ann_no_answer" },
-      "unreachable":  { "mode": "announce", "media": "sys:ann_no_answer" },
-      "not_found":    { "mode": "announce", "media": "sys:ann_invalid_number" },
-      "invalid":      { "mode": "announce", "media": "sys:ann_invalid_number" },
-      "declined":     { "mode": "tone", "tone": "sys:busy_kr", "tone_ms": 6000 },
-      "congestion":   { "mode": "tone", "tone": "sys:congestion_kr", "tone_ms": 6000 },
-      "forbidden":    { "mode": "none" },
-      "hold":         { "mode": "media", "media": "sys:moh_simple", "loop": true },
-      "call_waiting": { "mode": "none" }
-    },
-    "trunk": {
-      "busy": { "mode": "none" }, "no_answer": { "mode": "none" }, "declined": { "mode": "none" },
-      "hold": { "mode": "none" }
-    }
-  }
+  "Rules": [
+    { "profile": "default", "situation": "busy",       "mode": "tone_then_announce", "tone": "sys:busy_kr", "tone_ms": 4000, "media": "sys:ann_busy" },
+    { "profile": "default", "situation": "no_answer",  "mode": "announce", "media": "sys:ann_no_answer" },
+    { "profile": "default", "situation": "hold",       "mode": "media",    "media": "sys:moh_simple", "loop": true },
+    { "profile": "trunk",   "situation": "busy",       "mode": "none" }
+  ]
 }
 ```
 
-- 프로파일 = 상황 → `{mode, tone, tone_ms, media, repeat, loop}`. 상황 키가 없으면 `DefaultProfile` 의 값, 그것도 없으면 `none`.
-- `tone_ms` 는 신호음 loop 길이(신호음 파일은 주기 1~2회 분량이라 CMP 가 `repeat 0 + max_ms` 로 돈다). `media` 의 `repeat` 기본 1.
-- `Enable=false` 또는 CMP `resource.ann` 미광고 = 전 상황 `none`.
-- 콘솔 편집은 `config_template.json` 섹션 `announcement`(scope service) — `Setup.Announcement.*`. 프로파일 객체는 JSON 편집 필드.
+- **프로파일 표 = `Rules` 행의 집합** — 행 하나가 프로파일 하나의 상황 하나(`{profile, situation, mode, tone, tone_ms, media, repeat, loop}`). 콘솔은 `object_list` 로 편집한다
+  (맵-오브-맵은 콘솔 필드 형식에 없다). 같은 프로파일에 없는 상황은 `DefaultProfile` 의 값, 그것도 없으면 `none`.
+- `Rules` 가 비면(키 없음·빈 배열) **내장 기본 표** — `default`(§2 표의 기본 동작 그대로 — busy 화중음 4 s→안내, no_answer/unreachable 안내, not_found/invalid 없는번호 안내,
+  declined 화중음 6 s, congestion 혼잡음 6 s, hold moh_simple loop, ringback/forbidden/call_waiting none) + `trunk`(전부 none — NNI 관례).
+- `tone_ms` 는 신호음 loop 길이(신호음 파일은 주기 1~2회 분량이라 CMP 가 항목 `repeat 0 + max_ms` 로 돈다). `media` 의 `repeat` 기본 1, hold/ringback 은 `loop`.
+- 검증: 모르는 상황·mode 는 건너뛰거나 `none` 으로 낮추고 ERROR 로그(설정 오류가 통화 장애로 번지지 않게). `Enable=false` 또는 CMP `resource.ann` 미광고 = 전 상황 `none`.
+- 콘솔 편집 = `config_template.json` 섹션 `announcement`(scope service). SIGUSR1 재로드(`CCspAnnouncementService::Init`).
 
 ### 6.2 접속서비스 override (`access_services`)
 
@@ -305,6 +301,7 @@ TS 29.165) 를 본다. 어느 것도 없으면 `DefaultProfile`.
   패키지 `native/` 에도 동봉)가 `pcmu`·`pcma`·`g722`·`amrwb` 4종을 만든다. **안내·신호음·MOH 는 DTX 끔**(무음 구간도 프레임 송출 — 단말 jitter buffer·NAT 바인딩 유지).
   레벨 = 안내 P.56 활성 −26 dBov, 신호음 −16 dBov(≈ −13 dBm0, E.180), MOH −20 dBov.
 - 음원 id = `<scope>:<name>` — `sys:`(패키지 동봉 기본 세트, 삭제 불가) · `op:`(운영자 등록) · `sub:<subscription_id>`(가입자 링백 — P2). `name` 은 `[a-z0-9_]{1,40}`.
+- 카탈로그는 두 파일이다: CMP 패키지의 `announcements/sys/catalog.jsonl`(동봉 세트, 불변) + `config/announcements.jsonl`(운영자 등록 — OAM 이 agent collection 으로 내린다). CMP 가 둘을 합쳐 적재하고 네임스페이스가 달라 충돌하지 않는다.
 - 카탈로그 `announcements.jsonl`(행 = 음원 하나) — CMP collection 이자 OAM 라이브러리의 목록:
 
 ```jsonl
@@ -316,8 +313,8 @@ TS 29.165) 를 본다. 어느 것도 없으면 `DefaultProfile`.
 
 ### 7.2 기본 세트 (`sys:`)
 
-레포 `media/announcements/pcm/*.wav`(마스터) + `gen_announcements.py`(변환 — 계측기 `gen_samples.py` 와 같은 `convert()` 규약, TTS 캐시 규약 동일) →
-CMake 가 `build/dist/cmp/announcements/sys/` 와 카탈로그 `sys` 행을 만든다. 마스터는 계측기 `tester/worker/samples/pcm/` 에서 **복사해 독립**시킨다(계측기 샘플 수정이
+레포 `media/announcements/pcm/*.wav`(마스터) + `gen_announcements.py`(변환기 `cims-sample-conv --no-dtx`, 산출물 `media/announcements/sys/*.{pcmu,pcma,g722,amrwb}` + `catalog.jsonl`(sha256 포함) — 커밋) →
+CMake `dist` 가 `dist/cmp/announcements/sys/` 에 복사하고, OAM 패키지에는 카탈로그(`announcements/sys_catalog.jsonl`)와 마스터(`announcements/sys/*.wav`, 콘솔 청취)·변환기(`native/cims-sample-conv`)를 넣는다. 마스터는 계측기 `tester/worker/samples/pcm/` 에서 **복사해 독립**시킨다(계측기 샘플 수정이
 서비스 음원을 바꾸지 않게).
 
 | id | kind | 내용 |
@@ -326,23 +323,28 @@ CMake 가 `build/dist/cmp/announcements/sys/` 와 카탈로그 `sys` 행을 만�
 | `sys:ann_connecting`·`ann_hold`·`ann_call_waiting`·`ann_busy`·`ann_no_answer`·`ann_invalid_number` | announcement | TTS 한국어 안내 6종 |
 | `sys:moh_simple` | music | 합성 보류 음악 |
 
-### 7.3 OAM — 등록·삭제·배포
+### 7.3 OAM — 등록·삭제·배포 (base OAM 소유)
 
-- **저장소** = OAM 관리 store `announcements/`(file_store 도메인 — [../runtime_store_design.md](../runtime_store_design.md) §1) : `catalog.jsonl` + `op/<name>.{pcmu,pcma,g722,amrwb}` + 마스터 `op/<name>.wav`(청취·재변환용).
-- **API**(`oam-svc`, `/api/v1/announcements`) : `GET`(목록 + 노드별 배포 상태) · `POST ?id=&kind=&description=`(본문 octet-stream WAV — 게이트웨이가 multipart 를
-  JSON 으로 환원하므로 계측기와 같은 규약) · `DELETE /{id}`(`op:` 만, 프로파일이 참조 중이면 409 `in_use`) · `GET /{id}/file/{codec}`(청취) · `POST /sync`(전 CMP 노드 배포).
-- **배포** = OAM → agent(sync REST) → CMP install_path : 카탈로그는 기존 `PUT /collection?install_path=&name=announcements`(jsonl — [sip_runtime_config.md §5](sip_runtime_config.md)),
-  음원 파일은 **신설 `PUT /module-file?install_path=&path=announcements/op/<file>`**(바이너리, 크기 상한 8 MB, atomic rename, `path` 는 install_path 아래
-  `announcements/` 로 고정 — 다른 경로 거부) → 끝에 agent `/signal SIGUSR1` 로 CMP 재적재. 삭제도 같은 경로(`DELETE /module-file`). 노드 상태는 CMP STATS
-  `detail.ann_catalog{ids, missing}` 로 대조한다.
-- **콘솔** `/service/announcements`(서비스 그룹) : 목록·청취(브라우저는 마스터 WAV 재생)·WAV 등록·삭제·노드 배포 상태·[배포]. 프로파일에서 음원을 고르는
-  선택기는 `Setup.Announcement` 편집 화면이 이 API 로 목록을 읽는다.
+배포 자산 분배(패키지·컬렉션과 같은 평면)라 **base OAM**(`ems/core/oam`)이 소유한다 — agent 토큰·배포 레코드가 base 에 있다. 서비스 모듈(oam-svc)이 아니다.
+
+- **저장소** = 관리 store `<store>/announcements/` : `catalog.jsonl`(op 행) + `op/<name>.wav`(마스터, 청취) + `op/<name>.{pcmu,pcma,g722,amrwb}`. 동봉 세트 표시용 카탈로그·마스터는 OAM 패키지 `announcements/`.
+- **API**(`ems/core/oam/src/handlers/announcements.py`, `/api/v1/announcements`) : `GET`(목록 `media[]`, `?nodes=1` 이면 CMP 노드별 보유 상태) · `POST ?id=&kind=&description=&loop=&normalize=&replace=`
+  (본문 octet-stream WAV — 게이트웨이가 multipart 를 JSON 으로 환원하므로 계측기와 같은 규약; `services/announcements.register` 가 변환기로 4 코덱 생성, DTX 끔) · `GET /nodes` ·
+  `POST /deploy {ids?}` · `GET /{id}` · `GET /{id}/master.wav` · `GET /{id}/files/{codec}` · `DELETE /{id}[?undeploy=1]`. 권한 GET=monitor·POST=operator·DELETE=manager.
+  삭제는 참조 검사를 하지 않는다 — 참조 중이던 프로파일의 안내는 `MEDIA_NOT_FOUND` 폴백(응답 코드만)으로 드러난다.
+- **배포** = OAM → agent(sync REST) → CMP install_path : 음원 파일은 신설 `PUT /module-file?install_path=&path=announcements/op/<file>`(바이너리 ≤ 64 MB, atomic, `announcements/` 밖·`..` 거부),
+  대조는 `GET /module-files?install_path=&dir=announcements/op`(name·size·sha256 — 라이브러리 지문과 비교해 **없거나 다른 파일만** 올린다), 카탈로그는 기존
+  `PUT /collection?name=announcements`(`signal:true` → SIGUSR1 → CMP 재적재). CMP 배포 레코드 = package name `cmp`(없으면 process_name `CMP`·설치 경로 `/cmp/`).
+  `DELETE /module-file` 로 걷는다(`?undeploy=1`). 노드 상태 = `ok|partial|missing|unreachable`.
+- **콘솔** `/service/announcements`(CIMS 서비스 팩, 서비스 섹션) : 목록·청취(마스터 WAV 를 인증 fetch → Blob)·WAV 등록(P.56 정규화 권장값 안내 -26·신호음 -16·음악 -20)·
+  삭제(노드 파일도 걷음)·[CMP 배포] + 노드별 보유 띠. `Setup.Announcement.Rules` 의 tone/media 는 이 id 를 쓴다.
+- 설정 `Announcements.SampleConv`(변환기 경로 — 기본 패키지 `native/`, 개발 트리 `build/bin`).
 - `oam-cims-tester` 의 `/api/v1/tester/samples`·`/test/samples` 는 그대로다 — 서로 참조하지 않는다.
 
 ## 8. NAT·SRTP·트랜스코딩·HA 상호작용
 
 - **NAT**: 3.1 의 sendrecv answer 로 단말이 RTP 를 보내 latch 가 선행한다. latch 전에 낸 프레임은 선언 주소로 나가 유실될 수 있다 — 발신 leg 가 `remote_nat=1`
-  이면 CMP 는 **latch(또는 첫 ingress) 까지 최대 `AnnNatWaitMs`(기본 500 ms) 재생 시작을 미룬다**(프레임을 버리지 않고 시작점을 늦춤). 미도착이면 선언 주소로 시작.
+  이면 CMP 는 **latch(또는 첫 ingress) 까지 최대 `AnnNatWaitMs`(기본 500 ms) 재생 시작을 미룬다**(프레임을 버리지 않고 시작점을 늦춤). 미도착이면 선언 주소로 시작(`PAnnPlayer` NAT 게이트).
 - **SRTP**: leg 컨텍스트로 protect — 키 변경(re-INVITE 재키잉)은 relay 와 같이 세션 재생성, 재생기는 SSRC 유지.
 - **트랜스코딩 호**(cmp.md §11): 재생 leg 의 코덱 = 그 leg 선언(`media_codec`) — 변환 유닛과 무관하게 leg 코덱 파일을 낸다.
 - **CMP All-Active**(csp.md §3.6): 재생기는 relay 세션과 같은 endpoint(session-sticky). endpoint DEAD 시 현행 능동 종료 경로가 호를 정리한다.
@@ -350,21 +352,23 @@ CMake 가 `build/dist/cmp/announcements/sys/` 와 카탈로그 `sys` 행을 만�
 
 ## 9. 관측·통계·CDR
 
-- `call.json`(CallDir) `announcement: { "situation": "busy", "media": ["sys:busy_kr","sys:ann_busy"], "played_ms": 8760, "result": "completed|max|cancelled|fallback" }`.
-  `end_status`·`end_reason` 은 불변 — 통계 3계층 정의 무변경. hold 는 세션 이력 이벤트(`hold_music_start/stop`)로 남긴다.
-- CSP 카운터(SipStats): `ann_started{situation}`·`ann_fallback{cause}`(CMP 미지원·MEDIA_NOT_FOUND·ANN_CAPACITY·SRTP 불일치). 콘솔 `/stats/volte` 에 "안내 재생" 행.
-- CMP STATS: `resource.ann`, `detail.ann[]`, `detail.ann_catalog`. Flow 로그 `INT ANN_PLAY`/`ANN_DONE`.
-- 계측기: `early_rtp_pct` 는 이미 있다(200 전 RTP). 추가 지표 `ann_pct`(최종 실패 응답 **전에** early media 를 받은 실패 시도 비율)·`ann_ms`(183→최종 사이 수신 RTP 지속).
+- `call.json`(CallDir) `announcement: { "situation": "busy", "media": "sys:busy_kr,sys:ann_busy", "played_ms": 8760, "result": "completed|max|stopped|cancelled|timeout" }` —
+  `VoipCallAnnouncement`. `end_status`·`end_reason` 은 불변(자체 거절은 `VoipCallRejected` 의 시도 기록 위에 붙는다) — 통계 3계층 정의 무변경.
+- CSP 로그 `Announcement: <situation> → <action> play=… final=<code>` / `done(<result>, <ms>) → final <code>` / 폴백 ERROR(`RELAY_PLAY rejected`·`RELAY_ADD failed`·`cannot build early answer`).
+  서비스 카운터 `m_lStarted`/`m_lFallback`(SipStats·콘솔 노출은 후속).
+- CMP STATS: `resource.ann{total,used,media}`, `detail.ann[]`, `detail.ann_catalog{ids, missing}`. Flow 로그 `INT ANN_PLAY`/`ANN_DONE`.
+- 계측기: 워커가 **망이 낸 183+SDP** 도 `progressTx` 로 잡아 200·실패 최종 응답 때 수신 RTP(≥ 5 패킷)를 판정한다 → `early_media_pct`·`early_rtp_pct` 가 안내 도달률이 된다
+  (`invite` 단계 expect 에 허용). 동봉 시나리오 `VOLTE-ANN-NOTFOUND`(없는 번호 → 404)·`VOLTE-ANN-NO-ANSWER`(무응답 → 408). 별도 `ann_pct` 지표는 두지 않는다.
+- 검증 게이트: `S1-UNIT-CMP`(`tests/cmp_ann_player_test.cpp`) · `S3-SCN-ANN`(cspsim 없는 번호 → `=> RTP(` 뒤 ≥ 5 s → `status=404`) · `tests/cmp_smoke_announcement.py`(라이브 CMP).
 
-## 10. 알람 (카탈로그 채번은 [../alarm_catalog.csv](../alarm_catalog.csv) 에서 — 아래는 제안)
+## 10. 알람 ([../alarm_catalog.csv](../alarm_catalog.csv) 정본)
 
-| 제안 code | type | severity | 감지 | 조건 |
+| code | type | severity | 감지 | 조건 |
 |---|---|---|---|---|
-| A-PRC-034 | `media_missing` | major | CMP | 카탈로그가 참조하는 파일 누락·형식 오류(적재 시), 또는 프로파일이 참조한 id 의 `MEDIA_NOT_FOUND` 반복(1분 5회) — mo `cmp/ann/<id>` |
-| A-QOS-030 | `capacity_threshold` | minor~major | CMP | `resource.ann` used/total 80 %/95 %, `ANN_CAPACITY` 발생 = major |
-| E-STC-013 | 이벤트 | info | OAM | 음원 등록·삭제·배포(감사 — actor·id) |
+| A-PRC-034 | `media_missing` | major | CMP | 카탈로그가 참조하는 파일 누락·형식 오류(적재 때) — mo `<서버>/cmp/ann/catalog`, params `count·first·root`. 해소되면 close |
+| A-QOS-002 | `resource_exhausted` | major | CMP | 풀 고갈 알람의 `ann_pool` 감지 행 — 재생기 슬롯(`AnnPlayers`) 전부 사용(`ANN_CAPACITY` 거절) |
 
-`A-COM-007`(CMP 두절)의 영향 문구는 이미 "안내방송" 을 포함한다 — 정의 변경 없음.
+`A-COM-007`(CMP 두절)의 영향 문구는 이미 "안내방송" 을 포함한다 — 정의 변경 없음. 음원 등록·삭제·배포의 감사 이벤트는 후속.
 
 ## 11. P2 — 후속 상황
 
@@ -377,16 +381,17 @@ CMake 가 `build/dist/cmp/announcements/sys/` 와 카탈로그 `sys` 행을 만�
   시퀀스 교체(RELAY_PLAY 교체 = `replaced`)를 얹는 것이다.
 - `mix` 모드·런타임 인코딩(PCM 마스터 → leg 코덱, 변환 슬롯 사용)·영상 안내.
 
-## 12. 이행 순서 (P1)
+## 12. 구현 상태 (P1)
 
-| 단계 | 내용 | 검증 |
+| 단계 | 구현 | 검증 |
 |---|---|---|
-| ① 음원 세트 | `media/announcements/` 마스터 + `gen_announcements.py` + CMake dist(`cmp/announcements/sys/`, 카탈로그 sys 행) | 파일 4 코덱 × 12 종, sha256 |
-| ② CMP 재생기 | `PAnnCatalog`·`PAnnPlayer`·워커 timerfd·`RELAY_PLAY/_STOP`·`RELAY_PLAY_DONE`·`resource.ann`·`ANN_RELOAD`/SIGUSR1·cmp.json 3 키·template 섹션+collection | `S1-UNIT-CMP` `cmp_ann_player_test`(프레이밍·20 ms 페이싱·SRTP egress·replace·시퀀스/repeat/max) |
-| ③ CSP 정책·상태 머신 | `CspAnnouncement`·`Setup.Announcement`·접속서비스 2 필드·RemoteNode `announcement_profile`·발화 지점 5곳·psip `RingCall` 오버로드·CDR | `S1-UNIT-CSP` 판정표·해석 순서 |
-| ④ 스모크 | cspsim: 통화중(486)·없는 번호(404)·보류 MOH·CANCEL 중단·CMP `AnnPlayers=0` 폴백 | `S3-SCN-ANN-BUSY`·`-NOTFOUND`·`-HOLD-MOH`·`-FALLBACK` |
-| ⑤ 계측기 | 시나리오 `VOLTE-ANN-BUSY`(기대 `ann_pct≥99`, 최종 486)·`VOLTE-HOLD-MOH`(피보류 UE `rtp_rx>0` during hold)·`TRUNK-PBX-BUSY-NOANN`(trunk 프로파일 — 안내 없음) | tb48 실측 |
-| ⑥ OAM 라이브러리 | `oam-svc` `services/announcements.py`·API·agent `/module-file`·콘솔 `/service/announcements`·`Setup.Announcement` 편집 | `S1-UNIT-OAM` 등록/삭제/in_use 409/배포 대조 |
-| ⑦ 문서 | cmp_media_api §6.7·§5.1·§8·§9 / cmp.md §12 / csp.md §3.1·§3.12·§6 / volte_flows C9(실패 안내)·C10(MOH) / sip_service_model §2-2·§2-9 / agent_api `/module-file` / alarm_catalog 채번 / CLAUDE.md 개요 | — |
+| ① 음원 세트 | `media/announcements/`(마스터 12 종 + `gen_announcements.py` → `sys/*.{pcmu,pcma,g722,amrwb}` + `catalog.jsonl`) · CMake `dist/cmp/announcements/sys`, `dist/oam/announcements` | 파일 4 코덱 × 12, sha256 |
+| ② CMP 재생기 | `PAnnCatalog`·`PAnnPlayer`·`PAnnTicker`·`PRtpRelay::annTick`·`RELAY_PLAY/_STOP`·`RELAY_PLAY_DONE`·`ANN_RELOAD`·SIGUSR1·`resource.ann`·STATS·A-PRC-034·`ann_pool`·cmp.json 4 키·template 섹션+collection | `S1-UNIT-CMP` 40 항목 pass · `tests/cmp_smoke_announcement.py` pass(150 pkt/3 s·20 ms 페이싱·DONE max/stopped/replaced·AMR-WB octet-aligned·재적재) |
+| ③ CSP | `CspAnnouncement`·`Setup.Announcement`(Rules)·접속서비스 2 필드·RemoteNode `announcement_profile`·`CCallInfo::m_strAnnProfile`·발화 지점(EventCallEnd/EventIncomingCall/TAS 603/EventReInvite/EventCallRing/EventCallStart/TAS RELAY_MODIFY 4곳)·psip `RingCall` 헤더 오버로드·CDR `announcement` | 스크래치 CSP+CMP+cspsim 실측(2026-09-21): 없는 번호 → 183+SDP → 6.16 s 안내 → **404**, CANCEL 중 → STOP → 487, 무응답(Timer B) → 안내 6 s → **408**, relay 즉시 회수, CDR `announcement` 기록 |
+| ④ 스모크 | `S3-SCN-ANN`(`verify/lib/items/stage3/scn_announcement.py`) | 게이트 등록(dev 스택 실행은 배포 정지창) |
+| ⑤ 계측기 | 워커 RING 183+SDP → `progressTx`, 실패 최종 응답에 early RTP 판정, `invite` expect 에 `early_media_pct/early_rtp_pct`, 시나리오 `VOLTE-ANN-NOTFOUND`·`VOLTE-ANN-NO-ANSWER` | tb48 실측은 배포 뒤 |
+| ⑥ OAM 라이브러리 | base OAM `services/announcements.py`·`handlers/announcements.py`(`/api/v1/announcements`)·agent `/module-files`·`/module-file`(GET/PUT/DELETE)·`_agent_proxy_call raw`·콘솔 `/service/announcements`(`AnnouncementsPage`)·`Announcements.SampleConv` | 서비스 오프라인 시험(등록·중복 409·삭제·sys 보호) pass · 콘솔 tsc pass · 노드 배포는 agent 0.2.103 배포 뒤 실측 |
+| ⑦ 문서 | 본 문서 · cmp_media_api §1.1/§5.1/§5.4/§6.7/§8/§9 · cmp.md §1.1/§9/§12 · csp.md §1.1/§3.1/§3.12/§6.0 · volte_flows C9/C10 · sip_service_model §2-2/§2-9 · agent_api Sync REST · alarm_catalog A-PRC-034·A-QOS-002 ann_pool · VERIFICATION_PROCESS S3-SCN-ANN · CLAUDE.md | — |
 
-패키지 버전은 CSP·CMP·oam-svc·agent 가 함께 오른다(라이브 배포는 정지창 — 안내 없는 구 CMP 와 새 CSP 의 혼용은 `resource.ann` 미광고로 안전하게 폴백한다).
+**남은 것(P1 실측)** = 보류 음악·서버 링백의 단말 실측(cspsim 에 hold 트리거가 없다 — 실단말 또는 계측기 `hold`/`resume` 단계), 배포 뒤 노드 배포·콘솔 등록 실측, CSP SipStats 에 `ann_started/ann_fallback` 노출.
+패키지 버전 = cmp 0.2.92 · csp 0.2.140 · oam 0.2.152 · agent 0.2.103 · oam-cims-tester 0.1.21 · cims-tester-worker 0.1.16 (라이브 배포는 정지창 — 안내 없는 구 CMP 와 새 CSP 의 혼용은 `resource.ann` 미광고로 안전하게 폴백한다).

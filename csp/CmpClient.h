@@ -99,6 +99,32 @@ public:
     bool RemoveTap( const std::string &strSessionId, const std::string &strTapId, const std::string &strMonitor,
                     const std::string &strSesId, const std::string &strService );
 
+    // ── 안내 재생기 (announcements.md §4, cmp_media_api.md §6.7) ──
+    //   items: {id, repeat, max_ms} 열(순서대로 재생). iRepeat 0 = STOP 까지, iMaxMs 0 = CMP 기본 상한.
+    //   응답: iDurationMs(시퀀스 1회 길이, repeat 0 이면 0),
+    //   strErrCode(TIMEOUT/PARSE/NOT_FOUND/MEDIA_NOT_FOUND/ANN_CAPACITY/BAD_REQUEST).
+    struct AnnItem {
+        std::string strId;
+        int iRepeat = 1;
+        int iMaxMs = 0;
+    };
+    bool PlayAnnouncement( const std::string &strSessionId, int iPeerIdx, const std::string &strPlayId,
+                           const std::vector<AnnItem> &vecItems, int iRepeat, int iDelayMs, int iMaxMs,
+                           const std::string &strSesId, const std::string &strService, int &iDurationMs,
+                           std::string &strErrCode );
+    bool StopAnnouncement( const std::string &strSessionId, int iPeerIdx, const std::string &strPlayId,
+                           const std::string &strSesId, const std::string &strService, int *piPlayedMs = NULL );
+    /** CMP 가 안내 재생기(HEARTBEAT resource.ann)를 광고했는가 — 없으면 CSP 는 안내 없이 응답 코드만 낸다. */
+    bool SupportsAnn() const {
+        return m_bAnnSupported.load();
+    }
+    typedef std::function<void( const std::string &strSessionId, int iPeerIdx, const std::string &strPlayId,
+                                const std::string &strReason, int iPlayedMs )>
+        PlayDoneCallback;
+    void SetPlayDoneCallback( PlayDoneCallback fn ) {
+        m_fnPlayDone = fn;
+    }
+
     /** 담당 CMP endpoint 가 청취 leg(HEARTBEAT resource.tap)를 광고했는가 — Join 을 488 로 거절할 근거.
      *  단일 CMP 전제라 endpoint 무관 집계값을 준다(다중 CMP 격리는 후속). */
     bool SupportsTap() const {
@@ -338,6 +364,9 @@ private:
     std::map<std::string, CmpDigest> m_mapEndpointDigest;  // endpoint key("ip:port") → relay digest
     // HEARTBEAT resource.tap 광고 학습 — 청취 leg 지원 CMP 격리(dispatch_center.md §6.3)
     std::atomic<bool> m_bTapSupported{ false };
+    // HEARTBEAT resource.ann 광고 학습 — 안내 재생기 지원 (announcements.md §4.1)
+    std::atomic<bool> m_bAnnSupported{ false };
+    PlayDoneCallback m_fnPlayDone;  // RELAY_PLAY_DONE → CSP 안내 서비스(EventDispatchLoop 스레드)
 
 public:
     void SetConnectionCallback( std::function<void( bool )> fnCallback ) {

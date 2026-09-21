@@ -59,6 +59,9 @@ bool CCspServiceMap::Sync() {
 
             // 당겨받기 피처코드 — 부재·빈 값 모두 비활성 (volte_supplementary_services.md §5.2). 전역 폴백 없음.
             if ( row.Has( "pickup_feature_code" ) ) s.pickup_feature_code = row.GetString( "pickup_feature_code" );
+            // 안내음성 프로파일 (announcements.md §6.2) — 비면 전역 기본 프로파일
+            s.announcement_profile = row.GetString( "announcement_profile" );
+            s.hold_profile = row.GetString( "hold_profile" );
             // 호 전달(REFER) 허용 — 기본 true (§6.3)
             std::string tr = row.GetString( "transfer_allowed" );
             s.transfer_allowed = ( tr != "false" && tr != "0" );
