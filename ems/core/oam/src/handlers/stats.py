@@ -452,15 +452,15 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
             iface = parts[1] if len(parts) > 1 else None  # sip, cmp, csc, https
             gran = qp('granularity', '1h')
             svc = (qp('svc', 'all') or 'all').lower()
-            # SIP 축만 1분 집계가 있다(다른 인터페이스는 집계 대상이 아니다). 집계가 있으면
-            # 그쪽으로, 없으면 옛 원본 스캔으로 — 도입 전 구간·롤업 비활성이 여기로 온다.
-            if iface == 'sip' and gran in stats_rollup.GRANULARITIES:
+            # 네 인터페이스 전부 1분 집계를 탄다. 집계가 있으면 그쪽으로, 없으면 옛 원본
+            # 스캔으로 — 도입 전 구간·롤업 비활성이 여기로 온다.
+            if iface in stats_rollup.MSG_IFACES and gran in stats_rollup.GRANULARITIES:
                 d = qp('date')
                 f = _norm_dt(qp('from') or (d or datetime.now().strftime('%Y-%m-%d')))
                 t = _norm_dt(qp('to') or (qp('from') or d or
                                           datetime.now().strftime('%Y-%m-%d')), end=True)
                 f, t, tr = _clamp_calls_range(f, t, gran)
-                r = await _messages_stats_rollup(config, f, t, gran, svc, d, tr)
+                r = await _messages_stats_rollup(config, f, t, gran, svc, d, tr, iface)
                 if r.status == 200:
                     return r
                 # 204 = 그 구간에 집계 없음 → 폴백
@@ -681,6 +681,32 @@ def _calls_rebuild_status(job_id: str) -> HandlerResult:
         return HandlerResult(status=200, body=_rebuild_public(job))
 
 
+_REBUILD_HINT = "POST /api/v1/stats/calls/rebuild 로 그 구간 집계를 만들면 바로 조회됩니다."
+
+
+def _coverage_warning(cov: dict) -> str:
+    """빠진/모자란 구간을 **말로** 낸다 — 조용히 작은 값을 내면 운영자가 그 감소를 실제
+    트래픽 변화로 읽는다.
+
+    셋을 가른다. 아예 못 본 날(`missing`)은 행이 `—` 로 비고, **훑다 만 날**(`partial`)은
+    값이 있으나 모자라며, 빠진 이유가 보존기간인지 시간 상한인지에 따라 조치가 다르다.
+    """
+    miss, part = cov.get('missing') or 0, cov.get('partial') or 0
+    if miss and cov.get('deadline_hit'):
+        return (f"집계가 없는 구간을 원본에서 계산하다 시간 상한에 걸려 {miss}일이 "
+                f"빠졌습니다" + (f"(그 밖에 {part}일은 일부만 세었습니다)" if part else "")
+                + ". " + _REBUILD_HINT)
+    if miss:
+        return (f"{miss}일이 집계·원본 어디에도 없어 제외됐습니다 — 보존기간"
+                f"(ServiceLogging.StatsRetainDays.1m)이 지났거나 그 날 기록이 없습니다. "
+                f"원본이 남아 있다면 POST /api/v1/stats/calls/rebuild 로 다시 만들 수 있습니다.")
+    if part:
+        # 값이 있으니 화면은 정상으로 보인다 — **그래서 반드시 말로 해야 한다.**
+        return (f"집계가 없는 구간을 원본에서 계산하다 시간 상한에 걸려 {part}일은 "
+                f"일부만 세었습니다 — 표시된 값이 실제보다 적습니다. " + _REBUILD_HINT)
+    return ''
+
+
 def _source_of(cov: dict) -> str:
     """조회가 어디서 왔는지 — rollup(집계) / scan(원본 즉석) / mixed(섞임) / none."""
     r, sc = cov.get('rollup', 0), cov.get('scanned', 0)
@@ -754,26 +780,16 @@ def _calls_stats(config: dict, from_dt: str, to_dt: str, gran: str, svc: str) ->
         list(cov.get('missing_days') or []) + list(cov.get('future_days') or []))
     # 응답 크기 제한은 여기서 건다 — 판정(위)은 온전한 목록으로 해야 한다.
     cov = dict(cov, missing_days=(cov.get('missing_days') or [])[:40],
-               future_days=(cov.get('future_days') or [])[:40])
+               future_days=(cov.get('future_days') or [])[:40],
+               partial_days=(cov.get('partial_days') or [])[:40])
     body = {
         'from': from_dt, 'to': to_dt, 'granularity': gran, 'svc': svc or 'all',
         'source': _source_of(cov), 'coverage': cov,
         'totals': totals, 'buckets': buckets,
     }
-    if cov.get('missing'):
-        # 빠진 구간을 **응답에 적는다** — 조용히 작은 값을 내면 운영자가 그 감소를 실제
-        # 트래픽 변화로 읽는다. 빠진 이유가 둘이라 문구를 나눈다: 보존기간 밖(되살리려면
-        # 보존기간부터) 과 즉석 집계 시간 상한(집계를 만들어 두면 즉시 해소).
-        if cov.get('deadline_hit'):
-            body['warning'] = (f"집계가 없는 구간을 원본에서 계산하다 시간 상한에 걸려 "
-                               f"{cov['missing']}일이 빠졌습니다. "
-                               f"POST /api/v1/stats/calls/rebuild 로 그 구간 집계를 만들면 "
-                               f"바로 조회됩니다.")
-        else:
-            body['warning'] = (f"{cov['missing']}일이 집계·원본 어디에도 없어 제외됐습니다 "
-                               f"— 보존기간(ServiceLogging.StatsRetainDays.1m)이 지났거나 그 날 "
-                               f"기록이 없습니다. 원본이 남아 있다면 "
-                               f"POST /api/v1/stats/calls/rebuild 로 다시 만들 수 있습니다.")
+    warn = _coverage_warning(cov)
+    if warn:
+        body['warning'] = warn
     return HandlerResult(status=200, body=body)
 
 
@@ -1233,19 +1249,28 @@ def _svc_bucket(label: str, count: int, svc_counts: dict, io_counts: dict = None
 
 @_offload
 def _messages_stats_rollup(config, from_dt: str, to_dt: str, gran: str,
-                           svc: str, date: str, truncated: bool) -> HandlerResult:
-    """SIP 메시지 통계 — 1분 집계 위에서 (sip_statistics.md §9 이행).
+                           svc: str, date: str, truncated: bool,
+                           iface: str = 'sip') -> HandlerResult:
+    """인터페이스별 메시지 통계 — 1분 집계 위에서 (sip_statistics.md §9 이행).
 
     옛 응답 필드(`total`·`method_counts`·`service_totals`·`buckets[].{label,count,volte,
     ptt,unknown}`)를 그대로 내고 통일 키(`bucket`·`bucket_start`)를 **덧붙인다** — 기존
     화면을 깨지 않으면서 1m·1w·1M 과 `svc` 를 열기 위해서다.
 
     집계가 없는 구간은 호출측이 옛 원본 스캔으로 폴백한다(도입 전 구간·롤업 비활성).
+
+    **sip 외 인터페이스는 세대 2 이상의 레코드만 쓴다.** sip 만 세던 시절의 레코드에는
+    그 칸이 아예 없는데, 그걸 그대로 읽으면 0 건으로 나가고 커버리지는 "덮였다" 고 한다 —
+    없는 것과 0 건은 다르다(§2.1a). 걸러진 구간은 원본에서 다시 세거나 `missing_days` 로
+    신고된다.
     """
     root = _service_log_dir(config)
     if not root:
         return HandlerResult(status=204, body=None)      # 폴백 신호 (호출측에서만 소비)
-    rows, cov = stats_rollup.read_range_filled(root, from_dt, to_dt, config, gran=gran)
+    row_ok = None if iface == 'sip' else \
+        (lambda r: stats_rollup.covers_iface(r, iface))
+    rows, cov = stats_rollup.read_range_filled(root, from_dt, to_dt, config, gran=gran,
+                                               row_ok=row_ok)
     if not rows:
         return HandlerResult(status=204, body=None)
 
@@ -1256,7 +1281,7 @@ def _messages_stats_rollup(config, from_dt: str, to_dt: str, gran: str,
     buckets = stats_rollup.fill_buckets(buckets, gran, from_dt, to_dt)
 
     def _flat(cell):
-        m = cell.get('msg') or {}
+        m = stats_rollup.msg_io(cell.get('msg'), iface)
         out = {}
         for io in ('in', 'out'):
             for k, v in (m.get(io) or {}).items():
@@ -1274,6 +1299,9 @@ def _messages_stats_rollup(config, from_dt: str, to_dt: str, gran: str,
         for meth, n in _flat(cell).items():
             method_service.setdefault(meth, {})[key] = n
 
+    def _io_of(cell, io):
+        return stats_rollup.msg_io((cell or {}).get('msg'), iface).get(io) or {}
+
     out_buckets = []
     for b in buckets:
         per = {k: sum(_flat(v).values()) for k, v in b.items()
@@ -1284,8 +1312,8 @@ def _messages_stats_rollup(config, from_dt: str, to_dt: str, gran: str,
             'count': per.get('all', 0),
             'volte': per.get('volte', 0), 'ptt': per.get('ptt', 0),
             'unknown': per.get('unknown', 0),
-            'in': _sanitize_count_map((b.get('all') or {}).get('msg', {}).get('in', {})),
-            'out': _sanitize_count_map((b.get('all') or {}).get('msg', {}).get('out', {})),
+            'in': _sanitize_count_map(_io_of(b.get('all'), 'in')),
+            'out': _sanitize_count_map(_io_of(b.get('all'), 'out')),
         }
         if gran == '1h':
             try:
@@ -1297,10 +1325,11 @@ def _messages_stats_rollup(config, from_dt: str, to_dt: str, gran: str,
     svc_totals = {k: sum(_flat(totals.get(k) or {}).values()) for k in ('volte', 'ptt')}
     # 응답 크기 제한 — `read_range_filled` 는 판정용으로 온전한 목록을 낸다(호 통계의 행
     #   표시가 그걸 쓴다). 메시지 축은 표시에 쓰지 않으므로 여기서 바로 자른다.
-    cov = dict(cov, missing_days=(cov.get('missing_days') or [])[:40])
+    cov = dict(cov, missing_days=(cov.get('missing_days') or [])[:40],
+               partial_days=(cov.get('partial_days') or [])[:40])
     return HandlerResult(status=200, body={
         'from': from_dt, 'to': to_dt, 'granularity': gran, 'truncated': truncated,
-        'date': (date or from_dt[:10]), 'interface': 'sip', 'svc': svc or 'all',
+        'date': (date or from_dt[:10]), 'interface': iface, 'svc': svc or 'all',
         'source': _source_of(cov), 'coverage': cov,
         'total': total, 'buckets': out_buckets,
         'method_counts': dict(sorted(method_counts.items(), key=lambda x: -x[1])),
@@ -1308,8 +1337,10 @@ def _messages_stats_rollup(config, from_dt: str, to_dt: str, gran: str,
         'service_totals': svc_totals,
         'voip_invite': (method_service.get('INVITE') or {}).get('volte', 0),
         'ptt_invite': (method_service.get('INVITE') or {}).get('ptt', 0),
-        **({'warning': f"{cov['missing']}일이 집계 보존기간을 넘어 제외됐습니다"}
-           if cov.get('missing') else {}),
+        # 빠진/모자란 구간은 **말로** 낸다 — 호 조회와 같은 문구 규칙(`_coverage_warning`).
+        #   메시지 축은 인터페이스 축 이전 레코드를 안 쓰므로(§5.1 세대) 배포 직후
+        #   이 경로를 자주 탄다: 그때 조용히 작은 값을 내면 "통신이 줄었다" 로 읽힌다.
+        **({'warning': _coverage_warning(cov)} if _coverage_warning(cov) else {}),
     })
 
 
@@ -1380,6 +1411,8 @@ def _messages_stats_v2(config, iface, date, from_dt=None, to_dt=None, gran='1h')
                             line = line.strip()
                             if not line:
                                 continue
+                            if '"HTTPS"' not in line:
+                                continue   # flow 는 대부분 SIP 흐름이다 — 파싱 전에 거른다
                             try:
                                 entry = json.loads(line)
                                 if entry.get('proto') != 'HTTPS':
@@ -1395,7 +1428,9 @@ def _messages_stats_v2(config, iface, date, from_dt=None, to_dt=None, gran='1h')
                                 _io[verb] = _io.get(verb, 0) + 1
                                 m = str(entry.get('detail', ''))
                                 if m.startswith('status='):
-                                    code = m[7:].split()[0]
+                                    # 응답 키는 `<동사>/<코드>` — 코드만 세면 조회 성공과
+                                    # 변경 성공이 한 칸에 합쳐진다(§2.4, 집계 경로와 동일).
+                                    code = verb + '/' + m[7:].split()[0]
                                     method_counts[code] = method_counts.get(code, 0) + 1
                                     _o = io_counts.setdefault(k, {}).setdefault('out', {})
                                     _o[code] = _o.get(code, 0) + 1

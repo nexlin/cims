@@ -174,6 +174,34 @@ class ReadRangeBucketCoverageTest(unittest.TestCase):
         self.assertGreater(cov['missing'], 0)
         self.assertEqual(cov['scanned'], 0, '한 날도 긁지 않고 멈춰야 한다')
 
+    def test_훑다_만_날은_채운_날로_세지_않는다(self):
+        """**값이 있으니 화면은 정상으로 보인다 — 그래서 반드시 말로 해야 한다.**
+
+        `build_minutes` 는 시간 디렉터리 경계에서 끊으므로, 상한이 하루 도중에 걸리면
+        그 날은 훑은 만큼만 들어온다. 그걸 `scanned`(다 채운 날)로만 세면 커버리지는
+        "빠진 것 없음" 이라 하고 조회는 **모자란 값**을 정답처럼 낸다 — 운영자는 그
+        감소를 실제 트래픽 변화로 읽는다.
+        """
+        _raw_day(self.root, DAY)
+        # 첫 두 호출(기준시각·첫 날 진입 판정)은 통과시키고 그 뒤로 지난 것으로 본다 —
+        #   그래야 build_minutes 가 들어갔다가 시간 경계에서 끊긴 모양이 된다.
+        clock = iter([0.0, 0.0, 0.0] + [1e9] * 10000)
+        with unittest.mock.patch.object(R.time, 'monotonic', lambda: next(clock)):
+            _rows, cov = R.read_range_filled(
+                self.root, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {},
+                gran='1h', deadline_sec=3.5)
+        self.assertTrue(cov['deadline_hit'])
+        self.assertEqual(cov['partial_days'], [DAY])
+        self.assertEqual(cov['missing'], 0, '아예 못 본 날은 아니다 — 훑기는 했다')
+
+    def test_온전히_채운_날은_훑다_만_날이_아니다(self):
+        _raw_day(self.root, DAY)
+        _rows, cov = R.read_range_filled(
+            self.root, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {},
+            gran='1h', deadline_sec=0)
+        self.assertEqual(cov['partial'], 0)
+        self.assertEqual(cov['partial_days'], [])
+
     def test_음수_상한은_상한_없음(self):
         """0 과 음수는 모두 '상한 없음' — 재집계·검증 경로가 쓴다."""
         _raw_day(self.root, DAY)

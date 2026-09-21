@@ -73,6 +73,62 @@ def unit_for(gran: str) -> str:
     return _GRAN_UNIT.get(gran, '1m')
 
 
+# ── 메시지 축의 인터페이스 (§5.1) ─────────────────────────────────────────
+#  네 인터페이스 전부 같은 집계 피라미드를 탄다. sip 만 미리 세고 나머지는 조회 때마다
+#  원본을 훑던 시절에는 긴 구간 조회가 게이트웨이 상한(5초)을 넘겨 504 가 됐다 —
+#  실측(2026-09-21): 하루 https 5.9초·7일 csc 5.3초로 둘 다 끊겼고, 서버는 호출자가
+#  떠난 뒤까지 긁었다. 미리 세면 30일이 1초대다(sip 실측 1.18초).
+MSG_IFACES = ('sip', 'cmp', 'csc', 'https')
+
+# 레코드 세대. **2 = 메시지 축에 인터페이스 칸(`msg.iface`)이 있는 레코드.**
+#
+#   세대를 적지 않으면 옛 레코드의 *없음* 이 **0 으로 읽힌다** — sip 만 세던 시절의
+#   레코드에는 cmp/csc/https 칸이 아예 없는데, 조회는 "그 구간은 집계가 있다" 고 판정하고
+#   빈 칸을 0 건으로 낸다. 화면은 정상 조회한 얼굴로 거짓을 말한다. 0 과 모름을 가르는
+#   것이 이 축의 전부라(§2.1a) 세대를 레코드에 명시하고, sip 외 인터페이스 조회는 세대가
+#   모자란 행을 **안 쓴다** — 그 구간은 원본에서 다시 세거나 `missing_days` 로 신고된다.
+RECORD_VERSION = 2
+
+
+def record_version(rec: dict) -> int:
+    """레코드 세대. 없으면 1(인터페이스 축 이전)."""
+    try:
+        return int((rec or {}).get('v', 1) or 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def covers_iface(rec: dict, iface: str) -> bool:
+    """그 레코드가 이 인터페이스를 **셌다고 말할 수 있는가.**
+
+    sip 은 레코드가 있으면 언제나 셌다(이 축의 기저). 그 밖은 세대 2 부터다.
+    """
+    return iface == 'sip' or record_version(rec) >= RECORD_VERSION
+
+
+def msg_io(msg: dict, iface: str = 'sip') -> dict:
+    """그 인터페이스의 `{'in': …, 'out': …}` 칸 (읽기용 — 없으면 빈 dict).
+
+    `sip` 은 `msg` 자신이 그 자리다. 인터페이스 축을 열면서 sip 을 `msg.iface.sip` 으로
+    **옮기지 않은** 이유는 저장본이다 — 월 계층은 영구, 일 계층은 2년인데 원본 로그는
+    그만큼 남지 않아 옮길 재료가 없다. 옮기면 되살릴 수 없는 구간이 통째로 빈다.
+
+    분기를 여기 한 곳에 가둔다. 읽는 자리마다 "sip 이면 루트, 아니면 iface 밑" 을
+    되풀이하면 한 군데를 빠뜨렸을 때 **조용히 0** 이 된다.
+    """
+    msg = msg or {}
+    if iface == 'sip':
+        return msg
+    return (msg.get('iface') or {}).get(iface) or {}
+
+
+def msg_io_slot(msg: dict, iface: str = 'sip') -> dict:
+    """`msg_io` 의 쓰기용 — 없으면 만든다."""
+    if iface == 'sip':
+        return msg
+    return msg.setdefault('iface', {}).setdefault(iface, {'in': {}, 'out': {}})
+
+
 _lock = threading.Lock()
 _service_log_dir = ''
 _config: dict = {}
@@ -173,6 +229,7 @@ def _empty(bucket: str, svc: str) -> dict:
     return {
         'bucket': bucket,
         'unit': '1m',
+        'v': RECORD_VERSION,
         'svc': svc,
         'call': {
             'attempts': 0, 'sessions': 0, 'talked': 0, 'completed': 0,
@@ -211,7 +268,9 @@ def _empty(bucket: str, svc: str) -> dict:
             # (전체 그룹 수와 무관). 값은 카운터라 상위 단위로 그대로 합산된다.
             'by_group': {},
         },
-        'msg': {'in': {}, 'out': {}},
+        # 메시지 통계. 루트의 `in`/`out` 이 **SIP** 이고(이 축의 기저), 그 밖의
+        # 인터페이스는 `iface.<이름>` 아래 같은 모양으로 붙는다 — 접근자 `msg_io`.
+        'msg': {'in': {}, 'out': {}, 'iface': {}},
         'open': 0,
         'late_dropped': 0,
     }
@@ -347,15 +406,17 @@ def _fold_ptt_attempt(row: dict, agg: dict) -> None:
         _bump(c['statuses'], str(st))
 
 
-def _scan_msg_hour(root: str, hour: str, dmap: dict) -> dict:
-    """그 시간의 SIP 원문 → {minute: {svc: {'in'|'out': {키: 건수}}}}.
+def _scan_msg_hour(root: str, hour: str, dmap: dict, iface: str = 'sip') -> dict:
+    """그 시간의 원문 → {minute: {svc: {'in'|'out': {키: 건수}}}}. 인터페이스 하나 분.
 
     **원문은 `errors='replace'` 로 읽는다** (이 모듈의 다른 읽기도 같다). SIP 포트로
     비-SIP 패킷이 들어오면 그 바이트가 원문 JSONL 에 실릴 수 있는데, strict 로 읽으면
     UnicodeDecodeError 가 `for line in f` 에서 나서 줄 단위 방어(json 파싱 except)를
     지나쳐 버리고, run_once 가 통째로 실패해 **watermark 가 그 지점에서 영구히 멈춘다**
     — 시스템 전체 통계가 정지한다(2026-09-10 실측: 0xfe 한 바이트에 6시간 정지).
-    한 파일의 손상은 그 줄만 버리고 넘어가는 것이 맞다."""
+    한 파일의 손상은 그 줄만 버리고 넘어가는 것이 맞다.
+
+    `systemId` 는 와일드카드다 — `csp_01` 로 박으면 csp_02(standby)·멀티노드가 빠진다."""
     import glob as _glob
     from handlers.stats import _classify_service, _parse_msg_method, _ts_full
 
@@ -363,8 +424,8 @@ def _scan_msg_hour(root: str, hour: str, dmap: dict) -> dict:
     if not os.path.isdir(base):
         return {}
     out: dict = {}
-    patterns = [os.path.join(base, '*_sip.msg.jsonl'),
-                os.path.join(base, '*_sip.msg.[0-9][0-9].jsonl')]
+    patterns = [os.path.join(base, f'*_{iface}.msg.jsonl'),
+                os.path.join(base, f'*_{iface}.msg.[0-9][0-9].jsonl')]
     for pattern in patterns:
         for fpath in _glob.glob(pattern):
             try:
@@ -389,6 +450,74 @@ def _scan_msg_hour(root: str, hour: str, dmap: dict) -> dict:
             except OSError:
                 continue
     return out
+
+
+def _scan_https_hour(root: str, hour: str) -> dict:
+    """그 시간의 HTTPS 요청 → {minute: {'unknown': {'in'|'out': {키: 건수}}}}.
+
+    **HTTPS 만 자기 원문 로그가 없다.** `*_ue.msg` 에는 본문이 실리지 않아 메서드를 얻을
+    수 없어서, flow 로그의 `proto=HTTPS` 엔트리에서 센다 — 요청은 `method`(`GET /path`),
+    응답 코드는 같은 줄의 `detail`(`status=NNN`) 이다. 요청을 `in`, 응답을 `out` 으로 둔다.
+
+    응답 키는 **`<동사>/<코드>`** 다(`GET/200`·`POST/404`). 코드만 세면 조회 성공과 변경
+    성공이 한 칸에 합쳐져 세어도 쓸 수 없다 — SIP 응답을 `INVITE/200` 으로 세는 것과 같은
+    근거다(§2.4).
+
+    서비스축 판정은 하지 않는다(`unknown`) — 웹 요청에는 SIP 도메인이 없다.
+
+    이 스캔이 인터페이스 축 중 가장 무겁다. flow 로그에는 SIP·CMP 의 흐름이 함께 들어
+    있고 그중 HTTPS 는 일부다(실측: `csp_01.flow` 1,814줄 중 0건). 그래도 **시간 단위로
+    한 번**이라 감당된다 — 조회 때마다 훑던 옛 경로는 같은 일을 하루 24MB·642파일,
+    한 달이면 그 30배로 했다.
+    """
+    import glob as _glob
+    from handlers.stats import _ts_full
+
+    base = os.path.join(root, hour[0:4], hour[5:7], hour[8:10], hour[11:13])
+    if not os.path.isdir(base):
+        return {}
+    out: dict = {}
+    patterns = [os.path.join(base, '*.flow.jsonl'),
+                os.path.join(base, '*.flow.[0-9][0-9].jsonl')]
+    for pattern in patterns:
+        for fpath in _glob.glob(pattern):
+            try:
+                with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or '"HTTPS"' not in line:
+                            continue        # 대부분이 SIP 흐름이다 — 파싱 전에 거른다
+                        try:
+                            entry = json.loads(line)
+                        except ValueError:
+                            continue
+                        if entry.get('proto') != 'HTTPS':
+                            continue
+                        mi = _minute(_ts_full(fpath, entry.get('ts')))
+                        if not mi:
+                            continue
+                        cell = out.setdefault(mi, {}).setdefault('unknown', {})
+                        verb = (str(entry.get('method', '')).split(' ', 1)[0].upper()
+                                or 'unknown')
+                        _bump(cell.setdefault('in', {}), verb)
+                        detail = str(entry.get('detail', ''))
+                        if detail.startswith('status='):
+                            code = detail[7:].split()[0]
+                            _bump(cell.setdefault('out', {}), f'{verb}/{code}')
+            except OSError:
+                continue
+    return out
+
+
+def scan_iface_hour(root: str, hour: str, dmap: dict, iface: str) -> dict:
+    """인터페이스 하나의 그 시간 원문 → {minute: {svc: {'in'|'out': {키: 건수}}}}.
+
+    원천이 인터페이스마다 다르다(§3) — sip/cmp/csc 는 자기 `*.msg.jsonl`, https 는 flow
+    로그다. 부르는 쪽이 그걸 알 필요는 없다.
+    """
+    if iface == 'https':
+        return _scan_https_hour(root, hour)
+    return _scan_msg_hour(root, hour, dmap, iface)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -554,14 +683,18 @@ def build_minutes(root: str, minutes: set, config: dict = None,
         for mi, rec, _path in _scan_volte_hour(root, hour):
             if mi in minutes:
                 _fold_volte(rec, _agg(mi, 'volte'))
-        for mi, per_svc in _scan_msg_hour(root, hour, dmap).items():
-            if mi not in minutes:
-                continue
-            for svc, io_counts in per_svc.items():
-                m = _agg(mi, svc)['msg']
-                for io, counts in io_counts.items():
-                    for k, n in counts.items():
-                        _bump(m[io], k, n)
+        # 메시지 축은 인터페이스마다 원천이 달라 따로 훑는다(§3). 같은 시간 디렉터리를
+        #   네 번 열지만 파일 집합이 서로 겹치지 않아 읽는 바이트는 나뉜 그대로다.
+        for ifc in MSG_IFACES:
+            for mi, per_svc in scan_iface_hour(root, hour, dmap, ifc).items():
+                if mi not in minutes:
+                    continue
+                for svc, io_counts in per_svc.items():
+                    m = msg_io_slot(_agg(mi, svc)['msg'], ifc)
+                    for io, counts in io_counts.items():
+                        tgt = m.setdefault(io, {})
+                        for k, n in counts.items():
+                            _bump(tgt, k, n)
 
     for day in days:
         if deadline is not None and time.monotonic() >= deadline:
@@ -690,7 +823,11 @@ def _is_empty(rec: dict) -> bool:
            ('attempts', 'sessions', 'talked', 'completed', 'legs_invited')):
         return False
     m = rec.get('msg') or {}
-    return not ((m.get('in') or {}) or (m.get('out') or {}))
+    if (m.get('in') or {}) or (m.get('out') or {}):
+        return False
+    # 인터페이스 칸도 본다 — SIP 이 조용한 분에도 콘솔 폴링(https)·CMP 제어는 오간다.
+    return not any((cell or {}).get('in') or (cell or {}).get('out')
+                   for cell in (m.get('iface') or {}).values())
 
 
 # ──────────────────────────────────────────────────────────────
@@ -735,10 +872,20 @@ def fold_records(rows: list, unit: str) -> list:
             g = c['by_group'].setdefault(gid, {'sessions': 0, 'talked': 0})
             for k in ('sessions', 'talked'):
                 g[k] = g.get(k, 0) + int((gv or {}).get(k, 0) or 0)
-        for io in ('in', 'out'):
-            m = tgt['msg'][io]
-            for k, v in ((r.get('msg') or {}).get(io) or {}).items():
-                m[k] = m.get(k, 0) + int(v or 0)
+        src_msg = r.get('msg') or {}
+        # 자료가 있는 칸만 만든다 — 없는 인터페이스까지 빈 칸을 찍으면 파일만 커진다.
+        for ifc in ('sip',) + tuple((src_msg.get('iface') or {}).keys()):
+            src_cell, dst_cell = msg_io(src_msg, ifc), msg_io_slot(tgt['msg'], ifc)
+            for io in ('in', 'out'):
+                if not (src_cell.get(io) or {}):
+                    continue
+                m = dst_cell.setdefault(io, {})
+                for k, v in src_cell[io].items():
+                    m[k] = m.get(k, 0) + int(v or 0)
+        # 세대는 **가장 낮은 것**을 따른다 — 세대 1 이 한 줄이라도 섞이면 그 합은
+        #   인터페이스 축을 온전히 덮지 못한다. 높은 쪽으로 적으면 그 구멍이 0 으로
+        #   위장되고, 접힌 뒤에는 어느 분이 비었는지 되물을 수 없다.
+        tgt['v'] = min(tgt.get('v', RECORD_VERSION), record_version(r))
         tgt['open'] = tgt.get('open', 0) + int(r.get('open', 0) or 0)
         tgt['late_dropped'] = tgt.get('late_dropped', 0) + int(r.get('late_dropped', 0) or 0)
     return list(out.values())
@@ -1080,8 +1227,9 @@ def _need_offsets(day: str, lo: str, hi: str) -> set:
 
 
 def _read_days(root: str, days: list, lo: str, hi: str, chain: tuple,
-               config: dict, budget: int, deadline: float = None) -> tuple:
-    """날짜별로 계층을 골라 읽는다 → (rows, by_unit, scanned_days, omitted_days, deadline_hit).
+               config: dict, budget: int, deadline: float = None,
+               row_ok=None) -> tuple:
+    """날짜별로 계층을 골라 읽는다 → (rows, by_unit, scanned, omitted, partial, deadline_hit).
 
     요청 단위가 감당되는 가장 거친 계층부터 보고, **그 계층이 덮지 못한 구간만** 더 잔
     계층으로 내려간다. 어느 계층에도 없는 구간만 원본에서 즉석 집계한다.
@@ -1091,6 +1239,11 @@ def _read_days(root: str, days: list, lo: str, hi: str, chain: tuple,
     밀려나, 이미 만들어 둔 1시간 집계를 버리고 원본을 통째로 훑는다. 성능 화면이 늘 보내는
     "오늘 00:00~지금" 이 항상 그 경로였다 — 같은 하루가 `date=` 로는 0.03초, `from`·`to` 로는
     125초 무응답이었다(2026-09-11 실측, 게이트웨이 504).
+
+    `row_ok` = **그 행을 이 조회에 쓸 수 있는가**. 걸러진 행의 버킷은 덮이지 않은 것으로
+    남아 더 잔 계층 → 원본 즉석 집계로 내려가고, 원본마저 없으면 `missing_days` 로 나간다.
+    인터페이스 축을 셀 줄 모르던 세대의 레코드를 이 술어가 막는다(`covers_iface`) —
+    없는 칸을 0 으로 읽으면 화면이 정상 조회한 얼굴로 거짓을 말한다(§5.1 세대).
     """
     store = stats_store.for_root(root)
     rows, by_unit, pending = [], {}, []
@@ -1109,6 +1262,8 @@ def _read_days(root: str, days: list, lo: str, hi: str, chain: tuple,
             # 서로의 판정을 바꾸지 않게.
             picked, covered = [], set()
             for r in store.read_day(unit, d):
+                if row_ok is not None and not row_ok(r):
+                    continue
                 off = _bucket_offsets(r.get('bucket', ''), unit, d)
                 if off is None:
                     continue
@@ -1126,6 +1281,9 @@ def _read_days(root: str, days: list, lo: str, hi: str, chain: tuple,
     # 예산을 넘으면 **최근 날부터** 채운다 — 오래된 쪽이 빠지는 것이 덜 놀랍다.
     fill_set = set([d for d, _ in pending][-budget:] if budget > 0 else [])
     scanned, omitted, deadline_hit = [], [d for d, _ in pending if d not in fill_set], False
+    # **도중에 잘린 날**. 채운 날로 세면 부족분이 0 으로 위장된다 — 훑기 시작은 했으므로
+    #   `missing`(아예 못 본 날)도 아니다. 값은 사실이되 모자라다는 것을 따로 알린다.
+    partial = []
     for d, need in pending:
         if d not in fill_set:
             continue
@@ -1145,8 +1303,11 @@ def _read_days(root: str, days: list, lo: str, hi: str, chain: tuple,
             rows.extend(build_minutes(root, minutes, config, deadline).values())
             scanned.append(d)
             if deadline is not None and time.monotonic() >= deadline:
-                deadline_hit = True    # 이 날이 도중에 잘렸을 수 있다
-    return rows, by_unit, scanned, sorted(omitted), deadline_hit
+                # 이 날은 훑다 말았다 — `build_minutes` 가 시간 디렉터리 경계에서 끊는다.
+                #   여기서 안 알리면 조회는 성공한 얼굴로 **모자란 값**을 낸다(§2.1a).
+                partial.append(d)
+                deadline_hit = True
+    return rows, by_unit, scanned, sorted(omitted), sorted(partial), deadline_hit
 
 
 def _month_bounds(month: str) -> tuple:
@@ -1155,7 +1316,8 @@ def _month_bounds(month: str) -> tuple:
     return f'{days[0]} 00:00', f'{days[-1]} 23:59'
 
 
-def _read_stored_periods(root: str, unit: str, lo: str, hi: str, days: list) -> tuple:
+def _read_stored_periods(root: str, unit: str, lo: str, hi: str, days: list,
+                         row_ok=None) -> tuple:
     """월 저장 계층에서 읽는다 → (rows, by_unit, 남은 날짜들).
 
     **구간이 온전히 덮는 달만** 저장 버킷을 쓴다 — 월 버킷은 쪼갤 수 없어서, 구간이 달
@@ -1179,7 +1341,8 @@ def _read_stored_periods(root: str, unit: str, lo: str, hi: str, days: list) -> 
         year = k[:4]
         if year not in cache:
             cache[year] = stats_store.for_root(root).read_year(unit, year)
-        hit = [r for r in cache[year] if r.get('bucket') == k]
+        hit = [r for r in cache[year] if r.get('bucket') == k
+               and (row_ok is None or row_ok(r))]
         if not hit:
             rest.extend(by_key[k])
             continue
@@ -1190,7 +1353,7 @@ def _read_stored_periods(root: str, unit: str, lo: str, hi: str, days: list) -> 
 
 def read_range_filled(root: str, from_dt: str, to_dt: str, config: dict = None,
                       budget: int = None, gran: str = '1m',
-                      deadline_sec: float = None) -> tuple:
+                      deadline_sec: float = None, row_ok=None) -> tuple:
     """구간 레코드 + 커버리지 → (rows, coverage).
 
     **계층을 골라 읽는다.** 월·년은 저장 버킷을 먼저 보고, 나머지(와 반쪽 기간)는 날마다
@@ -1207,11 +1370,13 @@ def read_range_filled(root: str, from_dt: str, to_dt: str, config: dict = None,
     즉석 집계에는 **시간 상한**(`deadline_sec`, 기본 `_SCAN_DEADLINE_SEC`)이 있다. 넘으면
     만든 만큼만 돌려주고 나머지는 `missing_days` 로 알린다 — 호출자가 이미 떠난 뒤까지
     긁지 않기 위해서다. 0/음수를 주면 상한 없음(재집계·검증 경로).
+
+    `row_ok` = 쓸 수 있는 행의 판정(`_read_days` 참조). 안 주면 전부 쓴다.
     """
     unit = unit_for(gran)
     empty_cov = {'days': 0, 'unit': unit, 'by_unit': {}, 'rollup': 0, 'scanned': 0,
                  'missing': 0, 'missing_days': [], 'future': 0, 'future_days': [],
-                 'deadline_hit': False}
+                 'partial': 0, 'partial_days': [], 'deadline_hit': False}
     a, b = _parse(from_dt), _parse(to_dt)
     if a is None or b is None:
         return [], empty_cov
@@ -1228,11 +1393,11 @@ def read_range_filled(root: str, from_dt: str, to_dt: str, config: dict = None,
     rows, by_unit = [], {}
     rest = days
     if unit in _PERIOD_UNITS:
-        rows, by_unit, rest = _read_stored_periods(root, unit, lo, hi, days)
+        rows, by_unit, rest = _read_stored_periods(root, unit, lo, hi, days, row_ok)
 
     chain = _FALLBACK.get('1d' if unit in _PERIOD_UNITS else unit, ('1m',))
-    d_rows, d_by_unit, fill, omitted, deadline_hit = _read_days(
-        root, rest, lo, hi, chain, config, budget, deadline)
+    d_rows, d_by_unit, fill, omitted, partial, deadline_hit = _read_days(
+        root, rest, lo, hi, chain, config, budget, deadline, row_ok)
     rows.extend(d_rows)
     for u, n in d_by_unit.items():
         by_unit[u] = by_unit.get(u, 0) + n
@@ -1257,6 +1422,9 @@ def read_range_filled(root: str, from_dt: str, to_dt: str, config: dict = None,
         # 40개로 자르면 41번째 날부터 다시 0 으로 그려진다(자료 없음이 0 건으로 위장).
         # 응답 크기 제한은 싣기 직전에 핸들러가 건다.
         'missing': len(omitted), 'missing_days': omitted,
+        # 훑다 만 날 — 값은 있으나 모자라다. `missing` 과 섞지 않는다: 저쪽은 행 자체를
+        #   `—` 로 비우지만(§2.1c) 이쪽은 실제 값이 있어 비우면 있는 자료를 버린다.
+        'partial': len(partial), 'partial_days': partial,
         'deadline_hit': deadline_hit,
     }
 
@@ -1454,10 +1622,15 @@ def _add_call(dst: dict, src: dict, open_n: int = 0, late_n: int = 0) -> None:
 
 
 def _add_msg(dst: dict, src: dict) -> None:
-    for io in ('in', 'out'):
-        tgt = dst.setdefault(io, {})
-        for k, v in (src.get(io) or {}).items():
-            tgt[k] = tgt.get(k, 0) + int(v or 0)
+    """메시지 축을 더한다 — 루트(SIP)와 인터페이스 칸 모두."""
+    for ifc in ('sip',) + tuple((src.get('iface') or {}).keys()):
+        src_cell, dst_cell = msg_io(src, ifc), msg_io_slot(dst, ifc)
+        for io in ('in', 'out'):
+            if not (src_cell.get(io) or {}):
+                continue
+            tgt = dst_cell.setdefault(io, {})
+            for k, v in src_cell[io].items():
+                tgt[k] = tgt.get(k, 0) + int(v or 0)
 
 
 def _rate(num: int, den: int):
