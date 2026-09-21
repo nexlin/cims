@@ -96,6 +96,13 @@
           "default": "0.0.0.0",
           "restart": true,
           "scope": "system"
+        },
+        {
+          "key": "Tester.SampleConv",
+          "label": "샘플 변환기 경로",
+          "type": "string",
+          "default": "",
+          "help": "미디어 샘플 등록(콘솔 시험>미디어 샘플)이 부르는 cims-sample-conv. 비면 패키지 native/cims-sample-conv → 개발 트리 build/bin → PATH 순서(test_instrument.md §4)."
         }
       ],
       "scope": "service"

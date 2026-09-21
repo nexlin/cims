@@ -406,7 +406,58 @@ export interface RunRequest {
 
 const enc = encodeURIComponent
 
+
+// 미디어 샘플 라이브러리(test_instrument.md §4) — 16 kHz PCM 마스터 + 코덱 파일. source=bundled(패키지)|user(콘솔 등록)
+export type SampleKind = 'tone' | 'announcement' | 'music' | 'speech' | 'other'
+export type SampleCodec = 'pcmu' | 'pcma' | 'g722' | 'amr-wb'
+export interface SampleRow {
+  id: string
+  source: 'bundled' | 'user'
+  kind: SampleKind
+  description: string
+  master: string
+  duration_s: number | null
+  p56_active_level_dbov: number | null
+  p56_activity_pct: number | null
+  rms_dbov: number | null
+  files: Partial<Record<SampleCodec, string>>
+  'amr-wb-dtx'?: string
+  dtx_frames?: { speech: number; sid: number; no_data: number; total: number }
+  dtx_channel_activity_pct?: number
+  pattern?: { activity_pct: number; talkspurt_mean_s: number; pause_mean_s: number; talkspurts: number } | null
+  pair?: string
+  created?: string | null
+}
+export type SamplePresence = 'ok' | 'partial' | 'missing' | 'unreachable'
+export interface SamplesResult {
+  samples: SampleRow[]
+  converter: boolean
+  user_dir: string
+  bundled_dir: string
+  presence?: Record<string, Record<string, SamplePresence>>
+  workers?: WorkerRow[]
+}
+export interface SampleRegisterOpts { id: string; kind: SampleKind; description?: string; dtx?: boolean; normalize?: number | null; replace?: boolean }
+
+/** 마스터 청취 — 인증 헤더가 필요하므로 <audio src> 직접 지정 대신 이 URL 을 fetch 해 Blob URL 로 쓴다(코어 useInlineAudio 와 같은 규약) */
+export const sampleMasterPath = (id: string) => `/api/v1/tester/samples/${enc(id)}/master.wav`
+
 export const testerApi = {
+  samples: (topologyId?: number | string) => api.get<SamplesResult>(`/tester/samples${topologyId != null && topologyId !== '' ? `?topology=${enc(String(topologyId))}` : ''}`),
+  sample: (id: string) => api.get<SampleRow>(`/tester/samples/${enc(id)}`),
+  deleteSample: (id: string) => api.delete<{ deleted: boolean }>(`/tester/samples/${enc(id)}`),
+  syncSamples: (topologyId: number | string, ids?: string[]) =>
+    api.post<{ result: Record<string, { pushed: string[]; errors?: string[]; error?: string }>; workers: WorkerRow[] }>('/tester/samples/sync', { topology_id: topologyId, ids }),
+  /** WAV 등록 — 본문은 파일 바이트(application/octet-stream — 게이트웨이가 그대로 통과), 메타는 query. 컨트롤러가 변환·측정한다 */
+  registerSample: async (file: Blob, o: SampleRegisterOpts): Promise<SampleRow> => {
+    const q = new URLSearchParams({ id: o.id, kind: o.kind, description: o.description ?? '', dtx: o.dtx === false ? '0' : '1' })
+    if (o.normalize != null) q.set('normalize', String(o.normalize))
+    if (o.replace) q.set('replace', '1')
+    const res = await fetch(`/api/v1/tester/samples?${q.toString()}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', ...authHeaders() }, body: file })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error((data as { detail?: string; error?: string }).detail || (data as { error?: string }).error || `HTTP ${res.status}`)
+    return data as SampleRow
+  },
   health: () => api.get<TesterHealth>('/tester/health'),
   validate: (kind: 'scenario' | 'profile' | 'topology' | 'run_request', body: { yaml?: string; doc?: unknown }) =>
     api.post<{ ok: boolean; errors: string[]; doc?: unknown }>('/tester/validate', { kind, ...body }),

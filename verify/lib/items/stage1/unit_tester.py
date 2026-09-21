@@ -6,6 +6,7 @@
 ③ handlers.gateway — text/event-stream 청크 passthrough 와 requires_base_oam 기록
    (oam_base_service_split.md §5·§10). 통과가 깨지면 라이브 KPI 화면이 5 s 뒤 504 로 끊긴다.
 ④ tester_target — 피어 풀 시드 파생(도메인·번호 접두 규칙)·트렁크 REGISTER 비밀 해석·CspSeeder apply/restore.
+④′ tester_samples — 샘플 라이브러리(동봉·운영자 등록, cims-sample-conv 변환이 빌드돼 있을 때, 워커 보유 판정·run 전 배포)·핸들러 /samples.
 ⑤ 네이티브 `build/bin/csim_rtp_dtmf_test` — libcsim RTP 의 RFC 4733 telephone-event 송수신 + in-band DTMF(G.711 톤·Goertzel) + G.722 원천 루프백(빌드돼 있을 때만).
 ⑥ 네이티브 `build/bin/csim_rtp_media_test` — 미디어 평면(RTP 모드 none/explicit·샘플 송출·정지·hold 정지) 루프백.
 ⑦ 네이티브 `build/bin/tester_sip_capture_test` — 워커 SIP 캡처(psip 네트워크 로그 줄 파싱·Call-ID 묶음).
@@ -27,7 +28,7 @@ from ...context import VerifyContext
 _ID = "S1-UNIT-TESTER"
 _NAME = "계측기 계약/핸들러/오케스트레이터/피어 시드/게이트웨이 SSE unit test + libcsim RTP DTMF·미디어 평면 루프백 (python3 -m unittest tests.test_tester_models tests.test_tester_handler tests.test_tester_run tests.test_tester_target tests.test_tester_fixtures tests.test_gateway_stream · build/bin/csim_rtp_dtmf_test · build/bin/csim_rtp_media_test)"
 _MODULES = ("tests.test_tester_models", "tests.test_tester_handler", "tests.test_tester_run", "tests.test_tester_target",
-            "tests.test_tester_fixtures", "tests.test_gateway_stream")
+            "tests.test_tester_fixtures", "tests.test_tester_samples", "tests.test_gateway_stream")
 _NATIVES = ("csim_rtp_dtmf_test", "csim_rtp_media_test", "csim_peer_fault_test", "csim_tls_mutual_test", "csim_sds_test", "csim_msrp_test", "tester_sip_capture_test",
             "tester_emodel_test", "tester_real_ue_test", "tester_media_agent_test")
 

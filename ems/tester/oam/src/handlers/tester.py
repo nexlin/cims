@@ -44,7 +44,7 @@ import asyncio
 import json
 import os
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from pathlib import PurePath
 from urllib.parse import unquote, urlparse
 
@@ -63,6 +63,7 @@ from services import tester_check
 from services import tester_plan
 from services import tester_observe
 from services import tester_target
+from services import tester_samples
 from services.tester_run import run_series, run_hist, run_call_events, run_sip_dumps
 from starlette.responses import PlainTextResponse
 
@@ -144,6 +145,74 @@ def _sse(run_id: str = '') -> HandlerResult:
         'Connection': 'keep-alive',
     })
     return HandlerResult(response=resp)
+
+
+def _workers_of_topology(ref) -> Tuple[Optional[list], Optional[str]]:
+    rec = store.find_topology(ref)
+    if not rec:
+        return None, 'topology_not_found'
+    ws = tester_workers.discover(rec.get('doc') or rec)
+    tester_workers.probe_all(ws)
+    return ws, None
+
+
+async def _samples(handler_args: HandlerArgs, method: str, parts: tuple) -> HandlerResult:
+    """미디어 샘플 라이브러리(§4) — 목록·등록(WAV 본문)·마스터 청취·코덱 파일·삭제·워커 동기화."""
+    q = handler_args.query_params or {}
+    try:
+        if len(parts) == 1 and method == 'GET':
+            rows = tester_samples.list_samples()
+            out = {'samples': rows, 'converter': tester_samples.converter_path() is not None,
+                   'user_dir': tester_samples.user_dir(), 'bundled_dir': tester_samples.bundled_dir()}
+            if q.get('topology'):
+                ws, err = _workers_of_topology(q['topology'])
+                if err:
+                    return _json(404, {'error': err, 'topology': q['topology']})
+                out['presence'] = tester_samples.presence(ws, rows)
+                out['workers'] = [w.to_dict() for w in ws]
+            return _json(200, out)
+        if len(parts) == 1 and method == 'POST':
+            # 본문 = WAV 바이트(application/octet-stream — 게이트웨이가 바이트 그대로 통과), 메타는 query. multipart 는 게이트웨이가 JSON 으로 환원하므로 쓰지 않는다
+            b = getattr(handler_args, 'body', None)
+            data = bytes(b) if isinstance(b, (bytes, bytearray)) else (b.get('file') if isinstance(b, dict) and isinstance(b.get('file'), (bytes, bytearray)) else None)
+            if not data:
+                return _json(400, {'error': 'wav_body_required', 'detail': 'WAV 파일을 application/octet-stream 본문으로, id 등은 query 로'})
+            norm = q.get('normalize')
+            row = tester_samples.register(
+                q.get('id') or '', bytes(data), kind=q.get('kind') or 'other', description=q.get('description') or '',
+                dtx=(q.get('dtx') or '1') not in ('0', 'false', 'no'), normalize=(float(norm) if norm not in (None, '') else None),
+                replace=(q.get('replace') or '') in ('1', 'true', 'yes'))
+            return _json(201, row)
+        if len(parts) == 2 and parts[1] == 'sync' and method == 'POST':
+            body = _body(handler_args) or {}
+            ws, err = _workers_of_topology(body.get('topology_id') or body.get('topology'))
+            if err:
+                return _json(404, {'error': err})
+            ids = body.get('ids') if isinstance(body.get('ids'), list) else None
+            return _json(200, {'result': tester_samples.sync_workers(ws, ids), 'workers': [w.to_dict() for w in ws]})
+        if len(parts) >= 2:
+            sid = parts[1]
+            row = tester_samples.get_sample(sid)
+            if row is None:
+                return _json(404, {'error': 'sample_not_found', 'id': sid})
+            if len(parts) == 2 and method == 'GET':
+                return _json(200, row)
+            if len(parts) == 2 and method == 'DELETE':
+                tester_samples.delete(sid)
+                return _json(200, {'deleted': True, 'id': sid})
+            if method == 'GET' and (parts[2:] == ('master.wav',) or (len(parts) == 4 and parts[2] == 'files')):
+                name = row['master'] if parts[2] == 'master.wav' else parts[3]
+                path = tester_samples.file_path(sid, name)
+                if not path:
+                    return _json(404, {'error': 'file_not_found', 'id': sid, 'name': name})
+                ct = 'audio/wav' if name.endswith('.wav') else 'application/octet-stream'
+                return HandlerResult(status=200, body='', headers={'X-File-Path': path, 'Content-Type': ct,
+                                                                    'Content-Disposition': f'inline; filename="{name}"'})
+        return _json(404, {'error': 'not_found', 'path': '/'.join(parts)})
+    except tester_samples.SampleError as e:
+        return _json(e.status, {'error': e.code, 'detail': e.detail})
+    except tester_workers.WorkerError as e:
+        return _json(502, {'error': 'worker_error', 'detail': str(e)})
 
 
 async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
@@ -246,6 +315,9 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
                     return _json(409, {'error': 'bundled_read_only', key: name,
                                        'detail': '패키지 동봉본은 지울 수 없다 — 운영자본(override)만 삭제 대상'})
                 return _json(404, {'error': f'{head[:-1]}_not_found', key: name})
+
+    if head == 'samples':
+        return await _samples(handler_args, method, parts)
 
     if head == 'topologies':
         if len(parts) == 1 and method == 'GET':
@@ -737,6 +809,30 @@ TESTER_API_DOCS = [
                 {'name': 'yaml', 'in': 'body', 'type': 'string', 'desc': 'doc 대신 YAML 원문'},
                 {'name': 'doc', 'in': 'body', 'type': 'object'}],
      'response': '{ok, errors[], doc}', 'auth': _AUTH_OP},
+    {'id': 'tester.samples', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/samples',
+     'summary': '미디어 샘플 라이브러리 — 패키지 동봉 + 운영자 등록(16 kHz PCM 마스터 + 코덱 파일, P.56 레벨·활동률·DTX 집계). ?topology= 이면 그 토폴로지 워커의 보유 상태',
+     'params': [{'name': 'topology', 'in': 'query', 'type': 'string', 'desc': '토폴로지 id|이름 — presence{샘플: {워커: ok|partial|missing|unreachable}}'}],
+     'response': '{samples[]: {id, source(bundled|user), kind, description, master, duration_s, p56_active_level_dbov, p56_activity_pct, files{codec: file}, amr-wb-dtx?, dtx_frames?, dtx_channel_activity_pct?, pattern?}, converter, presence?, workers?}',
+     'auth': _AUTH_MON},
+    {'id': 'tester.sample.register', 'module': _MOD, 'method': 'POST', 'path': f'{_P}/samples',
+     'summary': '샘플 등록 — WAV(PCM 8~48 kHz, mono/stereo) 를 본문으로. 컨트롤러가 cims-sample-conv 로 16 kHz 마스터 + pcmu/pcma/g722/amrwb(+DTX) 를 만들고 측정한다',
+     'params': [{'name': 'body', 'in': 'body', 'type': 'bytes', 'required': True, 'desc': 'WAV 바이트(Content-Type: application/octet-stream)'},
+                {'name': 'id', 'in': 'query', 'type': 'string', 'required': True}, {'name': 'kind', 'in': 'query', 'type': 'string', 'enum': list(tester_samples.SAMPLE_KINDS)},
+                {'name': 'description', 'in': 'query', 'type': 'string'}, {'name': 'dtx', 'in': 'query', 'type': 'bool', 'desc': '기본 1 — AMR-WB DTX 파일도'},
+                {'name': 'normalize', 'in': 'query', 'type': 'number', 'desc': 'P.56 활성 레벨을 이 dBov 로(예 -26). 비면 원음 그대로'},
+                {'name': 'replace', 'in': 'query', 'type': 'bool', 'desc': '같은 id 운영자본 교체'}],
+     'response': '등록된 샘플 행',
+     'errors': [{'status': 400, 'when': 'id·WAV 형식·변환 실패', 'body': {'error': 'bad_id|bad_wav|convert_failed', 'detail': '…'}},
+                {'status': 409, 'when': '같은 id', 'body': {'error': 'exists|bundled_read_only'}}, {'status': 503, 'when': '변환기 없음', 'body': {'error': 'converter_missing'}}],
+     'auth': _AUTH_OP},
+    {'id': 'tester.sample', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/samples/{{id}}',
+     'summary': '샘플 상세. `/master.wav` = 16 kHz PCM 마스터(콘솔 청취 — fetch+Blob, 인증 헤더), `/files/{{name}}` = 코덱 파일', 'auth': _AUTH_MON},
+    {'id': 'tester.sample.delete', 'module': _MOD, 'method': 'DELETE', 'path': f'{_P}/samples/{{id}}',
+     'summary': '운영자 등록 샘플 삭제(마스터·코덱 파일) — 동봉본은 409 bundled_read_only. 워커 사본은 두어도 무해', 'auth': _AUTH_MGR},
+    {'id': 'tester.samples.sync', 'module': _MOD, 'method': 'POST', 'path': f'{_P}/samples/sync',
+     'summary': '토폴로지 워커 전부에 라이브러리 코덱 파일을 맞춘다(이름+크기 대조, 없는 것만 PUT /samples/{{file}}). run 시작도 참조한 파일만 같은 방식으로 자동 배포',
+     'params': [{'name': 'topology_id', 'in': 'body', 'type': 'string', 'required': True}, {'name': 'ids', 'in': 'body', 'type': 'string[]', 'desc': '비면 전부'}],
+     'response': '{result{worker: {pushed[], errors[]|error}}, workers[]}', 'auth': _AUTH_OP},
     {'id': 'tester.topologies', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/topologies',
      'summary': '토폴로지(호스트›워커·대상 노드›풀) 레코드 목록 — Tester.DataDir/topologies. 이전 꼴(target.csp/workers[].url) 레코드는 읽을 때 v2 로 승계', 'response': '{topologies[]: {id, name, created_at, updated_at, doc, migrated_from?}}', 'auth': _AUTH_MON},
     {'id': 'tester.topology.save', 'module': _MOD, 'method': 'PUT', 'path': f'{_P}/topologies/{{id}}',

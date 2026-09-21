@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { useToast } from '@core/components/Toast'
 import { useConfirm } from '@core/components/custom/confirm'
-import { testerApi, type DiscoveredWorker } from '@tester/api/tester'
+import { testerApi, type DiscoveredWorker, type SampleRow } from '@tester/api/tester'
 import type { TopologyDoc, TopoNode, PoolDoc, PeerPoolDoc, UePoolDoc, RealUePoolDoc, CheckItem, NodeRole, Transport, WorkerRow, SipListener, DtmfMode } from '@tester/api/tester'
 import * as M from '@tester/lib/topology-model'
 import type { Focus, Issue, PaletteKind, Pos } from '@tester/lib/topology-model'
@@ -628,18 +628,34 @@ function Sel({ value, options, onChange, empty, disabled }: { value: string | un
   )
 }
 /** 미디어 샘플 라이브러리(topology.media.samples) — id → 코덱별 파일(워커 Media.SampleDir 안 상대 경로) | synthetic. 시나리오 media_send 의 sample */
-const SAMPLE_CODECS = ['pcmu', 'pcma', 'amr-wb'] as const
+const SAMPLE_CODECS = ['pcmu', 'pcma', 'g722', 'amr-wb'] as const
 function SampleLibrary({ doc, ro, mutate }: { doc: TopologyDoc; ro: boolean; mutate: (fn: (d: TopologyDoc) => void) => void }) {
   const samples = doc.media?.samples ?? {}
   const edit = (fn: (m: Record<string, Record<string, string>>) => void) => mutate(d => { const m = { ...(d.media?.samples ?? {}) }; fn(m); if (Object.keys(m).length) d.media = { ...(d.media ?? {}), samples: m }; else delete d.media })
-  return <Sec title={`미디어 샘플 라이브러리 (${Object.keys(samples).length})`} right={!ro && <Button variant="outline" size="sm" onClick={() => edit(m => { let n = 'sample', k = 2; while (m[n]) n = `sample${k++}`; m[n] = { pcmu: 'synthetic' } })}><Plus size={12} /> 샘플</Button>}>
-    <div className="text-muted-foreground">시나리오 <span className="font-mono">media_send.sample</span> 이 참조합니다. 값 = 워커 샘플 디렉터리 안 파일 이름 또는 <span className="font-mono">synthetic</span>. 비운 코덱은 합성으로 나갑니다.</div>
+  // 컨트롤러 샘플 라이브러리(시험 > 미디어 샘플 — 동봉 + 운영자 등록)에서 항목을 가져온다: id 와 코덱별 파일 이름을 그대로. DTX 변형은 `<id>_dtx` 로
+  const [registry, setRegistry] = useState<SampleRow[] | null>(null)
+  useEffect(() => { if (!ro && registry === null) testerApi.samples().then(r => setRegistry(r.samples)).catch(() => setRegistry([])) }, [ro, registry])
+  const importable = (registry ?? []).flatMap(r => {
+    const out: { key: string; label: string; files: Record<string, string> }[] = []
+    const files: Record<string, string> = {}
+    for (const c of SAMPLE_CODECS) if (r.files[c]) files[c] = r.files[c] as string
+    if (Object.keys(files).length && !samples[r.id]) out.push({ key: r.id, label: `${r.id} — ${r.description || r.kind}`, files })
+    if (r['amr-wb-dtx'] && !samples[`${r.id}_dtx`]) out.push({ key: `${r.id}_dtx`, label: `${r.id}_dtx — AMR-WB DTX`, files: { 'amr-wb': r['amr-wb-dtx'] } })
+    return out
+  })
+  return <Sec title={`미디어 샘플 라이브러리 (${Object.keys(samples).length})`} right={!ro && <span className="flex items-center gap-1">
+    {importable.length > 0 && <Select value="" onValueChange={v => { const it = importable.find(i => i.key === v); if (it) edit(m => { m[it.key] = { ...it.files } }) }}>
+      <SelectTrigger className="h-[26px] w-[190px] text-xs"><SelectValue placeholder="등록된 샘플에서 추가…" /></SelectTrigger>
+      <SelectContent>{importable.map(i => <SelectItem key={i.key} value={i.key}><span className="font-mono text-xs">{i.label}</span></SelectItem>)}</SelectContent>
+    </Select>}
+    <Button variant="outline" size="sm" onClick={() => edit(m => { let n = 'sample', k = 2; while (m[n]) n = `sample${k++}`; m[n] = { pcmu: 'synthetic' } })}><Plus size={12} /> 샘플</Button></span>}>
+    <div className="text-muted-foreground">시나리오 <span className="font-mono">media_send.sample</span> 이 참조합니다. 값 = 워커 샘플 디렉터리 안 파일 이름 또는 <span className="font-mono">synthetic</span>. 비운 코덱은 합성으로 나갑니다. 파일은 run 시작 때 컨트롤러 라이브러리(시험 › 미디어 샘플)에서 워커로 배포됩니다.</div>
     {Object.entries(samples).map(([id, m]) => <div key={id} className="flex flex-col gap-1 rounded-sm border border-border p-2">
       <div className="grid grid-cols-[1fr_auto] items-end gap-2">
         <F label="id"><Txt value={id} mono disabled={ro} onCommit={v => { const nv = v.trim(); if (!nv || nv === id || samples[nv]) return; edit(x => { const o: Record<string, Record<string, string>> = {}; for (const [k, val] of Object.entries(x)) o[k === id ? nv : k] = val; for (const k of Object.keys(x)) delete x[k]; Object.assign(x, o) }) }} /></F>
         <Button variant="ghost" size="sm" disabled={ro} onClick={() => edit(x => { delete x[id] })} title="샘플 삭제"><Trash2 size={12} /></Button>
       </div>
-      <div className="grid grid-cols-3 gap-2">{SAMPLE_CODECS.map(c => <F key={c} label={c}><Txt value={m[c]} mono placeholder="합성" disabled={ro} onCommit={v => edit(x => { const e = { ...x[id] }; if (v.trim()) e[c] = v.trim(); else delete e[c]; x[id] = Object.keys(e).length ? e : { [c]: 'synthetic' } })} /></F>)}</div>
+      <div className="grid grid-cols-4 gap-2">{SAMPLE_CODECS.map(c => <F key={c} label={c}><Txt value={m[c]} mono placeholder="합성" disabled={ro} onCommit={v => edit(x => { const e = { ...x[id] }; if (v.trim()) e[c] = v.trim(); else delete e[c]; x[id] = Object.keys(e).length ? e : { [c]: 'synthetic' } })} /></F>)}</div>
     </div>)}
   </Sec>
 }

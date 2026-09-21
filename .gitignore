@@ -147,3 +147,4 @@ windows/**/obj/
 /sdk/android/cimsue/src/main/jniLibs/
 /sdk/android/cimsue/src/swig/java/
 /build-android/
+tester/worker/samples/.tts-cache/

@@ -366,15 +366,30 @@ pools:
       acl: deny
 media:
   samples:
-    ringback:
-      pcmu: ringback_kr.pcmu
-      pcma: ringback_kr.pcma
-      amr-wb: synthetic
-    voice:
-      amr-wb: sample_voice.amrwb
-    tone_1k:
-      pcmu: tone_1k.pcmu
-      pcma: tone_1k.pcma
+    ringback:     { pcmu: ringback_kr.pcmu, pcma: ringback_kr.pcma, g722: ringback_kr.g722, amr-wb: ringback_kr.amrwb }
+    dial:         { pcmu: dial_kr.pcmu, pcma: dial_kr.pcma, g722: dial_kr.g722, amr-wb: dial_kr.amrwb }
+    busy:         { pcmu: busy_kr.pcmu, pcma: busy_kr.pcma, g722: busy_kr.g722, amr-wb: busy_kr.amrwb }
+    congestion:   { pcmu: congestion_kr.pcmu, pcma: congestion_kr.pcma, g722: congestion_kr.g722, amr-wb: congestion_kr.amrwb }
+    call_waiting: { pcmu: call_waiting_kr.pcmu, pcma: call_waiting_kr.pcma, g722: call_waiting_kr.g722, amr-wb: call_waiting_kr.amrwb }
+    tone_1k:      { pcmu: tone_1k.pcmu, pcma: tone_1k.pcma, g722: tone_1k.g722, amr-wb: tone_1k.amrwb }
+    moh:          { pcmu: moh_simple.pcmu, pcma: moh_simple.pcma, g722: moh_simple.g722, amr-wb: moh_simple.amrwb }
+    ann_connecting:     { pcmu: ann_connecting.pcmu, pcma: ann_connecting.pcma, g722: ann_connecting.g722, amr-wb: ann_connecting.amrwb }
+    ann_hold:           { pcmu: ann_hold.pcmu, pcma: ann_hold.pcma, g722: ann_hold.g722, amr-wb: ann_hold.amrwb }
+    ann_call_waiting:   { pcmu: ann_call_waiting.pcmu, pcma: ann_call_waiting.pcma, g722: ann_call_waiting.g722, amr-wb: ann_call_waiting.amrwb }
+    ann_busy:           { pcmu: ann_busy.pcmu, pcma: ann_busy.pcma, g722: ann_busy.g722, amr-wb: ann_busy.amrwb }
+    ann_no_answer:      { pcmu: ann_no_answer.pcmu, pcma: ann_no_answer.pcma, g722: ann_no_answer.g722, amr-wb: ann_no_answer.amrwb }
+    ann_invalid_number: { pcmu: ann_invalid_number.pcmu, pcma: ann_invalid_number.pcma, g722: ann_invalid_number.g722, amr-wb: ann_invalid_number.amrwb }
+    voice:        { amr-wb: sample_voice.amrwb }                                   # 15 s 연속 음성(워커 Media.AudioFile 기본)
+    speech_act40: { pcmu: speech_act40_kr.pcmu, g722: speech_act40_kr.g722, amr-wb: speech_act40_kr.amrwb }        # P.59 표 1 활동률 38.5 %
+    speech_act40_dtx: { amr-wb: speech_act40_kr_dtx.amrwb }                          # 같은 원음, AMR-WB DTX(SID·NO_DATA 무송신)
+    speech_act50: { pcmu: speech_act50_kr.pcmu, g722: speech_act50_kr.g722, amr-wb: speech_act50_kr.amrwb }        # 활동률 50 %
+    speech_act50_dtx: { amr-wb: speech_act50_kr_dtx.amrwb }
+    speech_act100: { pcmu: speech_act100_kr.pcmu, g722: speech_act100_kr.g722, amr-wb: speech_act100_kr.amrwb }    # 문장 연속(DTX 이득 없음)
+    speech_act100_dtx: { amr-wb: speech_act100_kr_dtx.amrwb }
+    conv_a:       { pcmu: conv_p59_a.pcmu, g722: conv_p59_a.g722, amr-wb: conv_p59_a.amrwb }                       # P.59 §3 대화 A 측(발신자)
+    conv_b:       { pcmu: conv_p59_b.pcmu, g722: conv_p59_b.g722, amr-wb: conv_p59_b.amrwb }                       # 같은 시간축의 B 측(착신자)
+    conv_a_dtx:   { amr-wb: conv_p59_a_dtx.amrwb }
+    conv_b_dtx:   { amr-wb: conv_p59_b_dtx.amrwb }
 layout:
   regions:
     h48:

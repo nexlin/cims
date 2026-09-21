@@ -362,6 +362,7 @@ private:
     // HTTP
     HttpResponse handle(const HttpRequest& req);
     HttpResponse health();
+    HttpResponse samplesFile(const HttpRequest& req);   // PUT/DELETE /samples/{file} — 컨트롤러 라이브러리의 사본 배포
     HttpResponse poolCreate(const Json& doc);
     HttpResponse poolDelete(const std::string& name);
     HttpResponse runStart(const Json& doc);

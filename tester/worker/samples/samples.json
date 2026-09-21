@@ -1,0 +1,346 @@
+{
+ "dial_kr": {
+  "kind": "tone",
+  "description": "발신음 350+440 Hz 연속",
+  "master": "pcm/dial_kr.wav",
+  "duration_s": 4.0,
+  "p56_active_level_dbov": -16.0,
+  "p56_activity_pct": 99.4,
+  "rms_dbov": -16.0,
+  "files": {
+   "pcmu": "dial_kr.pcmu",
+   "pcma": "dial_kr.pcma",
+   "g722": "dial_kr.g722",
+   "amr-wb": "dial_kr.amrwb"
+  }
+ },
+ "ringback_kr": {
+  "kind": "tone",
+  "description": "호출음(링백) 440+480 Hz 1 s on / 2 s off",
+  "master": "pcm/ringback_kr.wav",
+  "duration_s": 3.0,
+  "p56_active_level_dbov": -17.0,
+  "p56_activity_pct": 42.3,
+  "rms_dbov": -20.8,
+  "files": {
+   "pcmu": "ringback_kr.pcmu",
+   "pcma": "ringback_kr.pcma",
+   "g722": "ringback_kr.g722",
+   "amr-wb": "ringback_kr.amrwb"
+  }
+ },
+ "busy_kr": {
+  "kind": "tone",
+  "description": "화중음 480+620 Hz 0.5 s on / 0.5 s off",
+  "master": "pcm/busy_kr.wav",
+  "duration_s": 2.0,
+  "p56_active_level_dbov": -17.9,
+  "p56_activity_pct": 77.3,
+  "rms_dbov": -19.1,
+  "files": {
+   "pcmu": "busy_kr.pcmu",
+   "pcma": "busy_kr.pcma",
+   "g722": "busy_kr.g722",
+   "amr-wb": "busy_kr.amrwb"
+  }
+ },
+ "congestion_kr": {
+  "kind": "tone",
+  "description": "혼잡음(중계선 화중음) 480+620 Hz 0.3 s on / 0.2 s off",
+  "master": "pcm/congestion_kr.wav",
+  "duration_s": 2.0,
+  "p56_active_level_dbov": -18.3,
+  "p56_activity_pct": 98.9,
+  "rms_dbov": -18.3,
+  "files": {
+   "pcmu": "congestion_kr.pcmu",
+   "pcma": "congestion_kr.pcma",
+   "g722": "congestion_kr.g722",
+   "amr-wb": "congestion_kr.amrwb"
+  }
+ },
+ "call_waiting_kr": {
+  "kind": "tone",
+  "description": "통화중대기음 350+440 Hz 0.25/0.25/0.25/3.25 s",
+  "master": "pcm/call_waiting_kr.wav",
+  "duration_s": 4.0,
+  "p56_active_level_dbov": -19.2,
+  "p56_activity_pct": 25.8,
+  "rms_dbov": -25.1,
+  "files": {
+   "pcmu": "call_waiting_kr.pcmu",
+   "pcma": "call_waiting_kr.pcma",
+   "g722": "call_waiting_kr.g722",
+   "amr-wb": "call_waiting_kr.amrwb"
+  }
+ },
+ "tone_1k": {
+  "kind": "tone",
+  "description": "1 kHz 기준음 1 s — 경로·레벨 확인",
+  "master": "pcm/tone_1k.wav",
+  "duration_s": 1.0,
+  "p56_active_level_dbov": -15.9,
+  "p56_activity_pct": 97.6,
+  "rms_dbov": -16.0,
+  "files": {
+   "pcmu": "tone_1k.pcmu",
+   "pcma": "tone_1k.pcma",
+   "g722": "tone_1k.g722",
+   "amr-wb": "tone_1k.amrwb"
+  }
+ },
+ "moh_simple": {
+  "kind": "music",
+  "description": "합성 보류 음악(아르페지오 C–Am–F–G, 120 bpm) -20 dBov",
+  "master": "pcm/moh_simple.wav",
+  "duration_s": 24.0,
+  "p56_active_level_dbov": -20.0,
+  "p56_activity_pct": 99.9,
+  "rms_dbov": -20.0,
+  "files": {
+   "pcmu": "moh_simple.pcmu",
+   "pcma": "moh_simple.pcma",
+   "g722": "moh_simple.g722",
+   "amr-wb": "moh_simple.amrwb"
+  }
+ },
+ "ann_connecting": {
+  "kind": "announcement",
+  "description": "통화 연결 안내 — \"연결 중입니다. 잠시만 기다려 주십시오.\" (ko-KR-SunHiNeural)",
+  "master": "pcm/ann_connecting.wav",
+  "duration_s": 4.5,
+  "p56_active_level_dbov": -26.3,
+  "p56_activity_pct": 64.5,
+  "rms_dbov": -28.2,
+  "files": {
+   "pcmu": "ann_connecting.pcmu",
+   "pcma": "ann_connecting.pcma",
+   "g722": "ann_connecting.g722",
+   "amr-wb": "ann_connecting.amrwb"
+  }
+ },
+ "ann_hold": {
+  "kind": "announcement",
+  "description": "보류 안내 — \"통화가 보류되었습니다. 잠시만 기다려 주십시오.\" (ko-KR-SunHiNeural)",
+  "master": "pcm/ann_hold.wav",
+  "duration_s": 4.94,
+  "p56_active_level_dbov": -26.3,
+  "p56_activity_pct": 67.8,
+  "rms_dbov": -28.0,
+  "files": {
+   "pcmu": "ann_hold.pcmu",
+   "pcma": "ann_hold.pcma",
+   "g722": "ann_hold.g722",
+   "amr-wb": "ann_hold.amrwb"
+  }
+ },
+ "ann_call_waiting": {
+  "kind": "announcement",
+  "description": "통화중대기 안내 — \"다른 전화가 걸려 왔습니다. 잠시 후 다시 연결됩니다.\" (ko-KR-SunHiNeural)",
+  "master": "pcm/ann_call_waiting.wav",
+  "duration_s": 5.46,
+  "p56_active_level_dbov": -26.2,
+  "p56_activity_pct": 70.4,
+  "rms_dbov": -27.7,
+  "files": {
+   "pcmu": "ann_call_waiting.pcmu",
+   "pcma": "ann_call_waiting.pcma",
+   "g722": "ann_call_waiting.g722",
+   "amr-wb": "ann_call_waiting.amrwb"
+  }
+ },
+ "ann_busy": {
+  "kind": "announcement",
+  "description": "통화 중 안내 — \"지금 거신 전화는 통화 중이오니 잠시 후 다시 걸어 주십시오.\" (ko-KR-SunHiNeural)",
+  "master": "pcm/ann_busy.wav",
+  "duration_s": 5.0,
+  "p56_active_level_dbov": -26.2,
+  "p56_activity_pct": 86.0,
+  "rms_dbov": -26.9,
+  "files": {
+   "pcmu": "ann_busy.pcmu",
+   "pcma": "ann_busy.pcma",
+   "g722": "ann_busy.g722",
+   "amr-wb": "ann_busy.amrwb"
+  }
+ },
+ "ann_no_answer": {
+  "kind": "announcement",
+  "description": "무응답 안내 — \"고객이 전화를 받을 수 없습니다. 잠시 후 다시 걸어 주십시오.\" (ko-KR-SunHiNeural)",
+  "master": "pcm/ann_no_answer.wav",
+  "duration_s": 6.0,
+  "p56_active_level_dbov": -26.2,
+  "p56_activity_pct": 73.5,
+  "rms_dbov": -27.5,
+  "files": {
+   "pcmu": "ann_no_answer.pcmu",
+   "pcma": "ann_no_answer.pcma",
+   "g722": "ann_no_answer.g722",
+   "amr-wb": "ann_no_answer.amrwb"
+  }
+ },
+ "ann_invalid_number": {
+  "kind": "announcement",
+  "description": "없는 번호 안내 — \"지금 거신 번호는 없는 번호입니다. 다시 확인하시고 걸어 주십시오.\" (ko-KR-SunHiNeural)",
+  "master": "pcm/ann_invalid_number.wav",
+  "duration_s": 6.16,
+  "p56_active_level_dbov": -26.2,
+  "p56_activity_pct": 73.6,
+  "rms_dbov": -27.5,
+  "files": {
+   "pcmu": "ann_invalid_number.pcmu",
+   "pcma": "ann_invalid_number.pcma",
+   "g722": "ann_invalid_number.g722",
+   "amr-wb": "ann_invalid_number.amrwb"
+  }
+ },
+ "speech_act40_kr": {
+  "kind": "speech",
+  "description": "한쪽 화자 on/off — P.59 표 1 (talk-spurt 1.004 s · pause 1.587 s → 활동률 38.5 %). DTX 기준 원천",
+  "master": "pcm/speech_act40_kr.wav",
+  "duration_s": 30.0,
+  "p56_active_level_dbov": -26.0,
+  "p56_activity_pct": 39.5,
+  "rms_dbov": -30.0,
+  "files": {
+   "pcmu": "speech_act40_kr.pcmu",
+   "g722": "speech_act40_kr.g722",
+   "amr-wb": "speech_act40_kr.amrwb"
+  },
+  "pattern": {
+   "activity_pct": 38.0,
+   "talkspurt_mean_s": 0.95,
+   "pause_mean_s": 1.431,
+   "talkspurts": 12
+  },
+  "target_activity_pct": 38.7,
+  "amr-wb-dtx": "speech_act40_kr_dtx.amrwb",
+  "dtx_frames": {
+   "speech": 537,
+   "sid": 135,
+   "no_data": 828,
+   "total": 1500
+  },
+  "dtx_channel_activity_pct": 44.8
+ },
+ "speech_act50_kr": {
+  "kind": "speech",
+  "description": "한쪽 화자 on/off — 활동률 50 % (3GPP 용량 평가 VAF 50 %)",
+  "master": "pcm/speech_act50_kr.wav",
+  "duration_s": 30.0,
+  "p56_active_level_dbov": -26.0,
+  "p56_activity_pct": 51.9,
+  "rms_dbov": -28.9,
+  "files": {
+   "pcmu": "speech_act50_kr.pcmu",
+   "g722": "speech_act50_kr.g722",
+   "amr-wb": "speech_act50_kr.amrwb"
+  },
+  "pattern": {
+   "activity_pct": 50.0,
+   "talkspurt_mean_s": 1.0,
+   "pause_mean_s": 0.938,
+   "talkspurts": 15
+  },
+  "target_activity_pct": 50.0,
+  "amr-wb-dtx": "speech_act50_kr_dtx.amrwb",
+  "dtx_frames": {
+   "speech": 722,
+   "sid": 120,
+   "no_data": 658,
+   "total": 1500
+  },
+  "dtx_channel_activity_pct": 56.1
+ },
+ "speech_act100_kr": {
+  "kind": "speech",
+  "description": "문장 연속(간격 < 200 ms) — 활동률 100 %, DTX 이득 없는 상한",
+  "master": "pcm/speech_act100_kr.wav",
+  "duration_s": 30.0,
+  "p56_active_level_dbov": -26.0,
+  "p56_activity_pct": 97.1,
+  "rms_dbov": -26.1,
+  "files": {
+   "pcmu": "speech_act100_kr.pcmu",
+   "g722": "speech_act100_kr.g722",
+   "amr-wb": "speech_act100_kr.amrwb"
+  },
+  "pattern": {
+   "activity_pct": 96.9,
+   "talkspurt_mean_s": 3.635,
+   "pause_mean_s": 0.115,
+   "talkspurts": 8
+  },
+  "target_activity_pct": 100.0,
+  "amr-wb-dtx": "speech_act100_kr_dtx.amrwb",
+  "dtx_frames": {
+   "speech": 1460,
+   "sid": 12,
+   "no_data": 28,
+   "total": 1500
+  },
+  "dtx_channel_activity_pct": 98.1
+ },
+ "conv_p59_a": {
+  "kind": "speech",
+  "description": "P.59 §3 두 화자 대화 — A 측(여, 발신자용). conv_p59_b 와 같은 시간축",
+  "master": "pcm/conv_p59_a.wav",
+  "duration_s": 45.0,
+  "p56_active_level_dbov": -26.0,
+  "p56_activity_pct": 41.5,
+  "rms_dbov": -29.8,
+  "files": {
+   "pcmu": "conv_p59_a.pcmu",
+   "g722": "conv_p59_a.g722",
+   "amr-wb": "conv_p59_a.amrwb"
+  },
+  "pattern": {
+   "activity_pct": 39.6,
+   "talkspurt_mean_s": 0.99,
+   "pause_mean_s": 1.431,
+   "talkspurts": 18
+  },
+  "double_talk_pct": 10.3,
+  "mutual_silence_pct": 26.4,
+  "pair": "conv_p59_b",
+  "amr-wb-dtx": "conv_p59_a_dtx.amrwb",
+  "dtx_frames": {
+   "speech": 845,
+   "sid": 200,
+   "no_data": 1205,
+   "total": 2250
+  },
+  "dtx_channel_activity_pct": 46.4
+ },
+ "conv_p59_b": {
+  "kind": "speech",
+  "description": "P.59 §3 두 화자 대화 — B 측(남, 착신자용). conv_p59_a 와 같은 시간축",
+  "master": "pcm/conv_p59_b.wav",
+  "duration_s": 45.0,
+  "p56_active_level_dbov": -26.0,
+  "p56_activity_pct": 42.3,
+  "rms_dbov": -29.7,
+  "files": {
+   "pcmu": "conv_p59_b.pcmu",
+   "g722": "conv_p59_b.g722",
+   "amr-wb": "conv_p59_b.amrwb"
+  },
+  "pattern": {
+   "activity_pct": 40.9,
+   "talkspurt_mean_s": 0.968,
+   "pause_mean_s": 1.4,
+   "talkspurts": 19
+  },
+  "double_talk_pct": 10.3,
+  "mutual_silence_pct": 26.4,
+  "pair": "conv_p59_a",
+  "amr-wb-dtx": "conv_p59_b_dtx.amrwb",
+  "dtx_frames": {
+   "speech": 925,
+   "sid": 184,
+   "no_data": 1141,
+   "total": 2250
+  },
+  "dtx_channel_activity_pct": 49.3
+ }
+}

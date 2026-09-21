@@ -340,11 +340,18 @@ add_subdirectory(cspsim)
 option(CIMS_TESTER "계측기 워커(cims-tester-worker) 빌드 — test_instrument.md" ON)
 if(CIMS_TESTER)
 add_subdirectory(tester/worker)
+add_subdirectory(tester/sampleconv)
 endif()
 # cwrtc — 재설계 예정. 빌드/dist/패키징 제외 (cims-phone 웹 UI 도 함께 제외).
 #add_subdirectory(cwrtc)
 
 # --- Distribution Target ---
+# 계측기 워커 동봉 샘플 — 코덱 raw(pcmu/pcma/g722/amrwb)·h264·samples.json 만(마스터 pcm/·생성기 제외)
+file(GLOB _dist_tester_samples
+     ${CMAKE_SOURCE_DIR}/tester/worker/samples/*.pcmu ${CMAKE_SOURCE_DIR}/tester/worker/samples/*.pcma
+     ${CMAKE_SOURCE_DIR}/tester/worker/samples/*.g722 ${CMAKE_SOURCE_DIR}/tester/worker/samples/*.amrwb
+     ${CMAKE_SOURCE_DIR}/tester/worker/samples/*.h264 ${CMAKE_SOURCE_DIR}/tester/worker/samples/samples.json)
+file(GLOB _dist_tester_masters ${CMAKE_SOURCE_DIR}/tester/worker/samples/pcm/*.wav)
 set(_dist_real_ue_cli)
 if(TARGET cimsue-cli)
     set(_dist_real_ue_cli COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:cimsue-cli> ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/bin/)
@@ -414,8 +421,14 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/tester/worker/pkg.json ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/pkg.json
     # NAT 풀(test_instrument.md §3.1) — 워커 호스트에 netns + veth + MASQUERADE 를 만드는 운영자 스크립트(root)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/tester/worker/scripts/nat-netns.sh ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/scripts/
-    # 동봉 미디어 샘플(G.711 raw — tester/worker/samples/gen_tones.py 산출물 · H.264 Annex B 비디오 = Media.VideoFile 기본). 운영자 샘플은 같은 디렉터리에 추가
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/tester/worker/samples/ringback_kr.pcmu ${CMAKE_SOURCE_DIR}/tester/worker/samples/ringback_kr.pcma ${CMAKE_SOURCE_DIR}/tester/worker/samples/tone_1k.pcmu ${CMAKE_SOURCE_DIR}/tester/worker/samples/tone_1k.pcma ${CMAKE_SOURCE_DIR}/tester/worker/samples/sample_video.h264 ${CMAKE_SOURCE_DIR}/tester/worker/samples/sample_voice.amrwb ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/samples/
+    # 동봉 미디어 샘플(tester/worker/samples/gen_samples.py 산출물 — 코덱별 raw + samples.json 목록 · H.264 Annex B 비디오 = Media.VideoFile 기본).
+    #   16 kHz PCM 마스터(samples/pcm/*.wav)와 생성기는 동봉하지 않는다. 운영자 샘플은 같은 디렉터리에 추가
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_dist_tester_samples} ${CMAKE_BINARY_DIR}/dist/cims-tester-worker/samples/
+    # 계측기 컨트롤러(oam-cims-tester) — 샘플 라이브러리 동봉본(16 kHz PCM 마스터 + 코덱 파일 + samples.json, 콘솔 청취·워커 배포 원본)과
+    #   변환기 cims-sample-conv(native/ — scripts/sync.sh 가 손대지 않는 자리, 콘솔 등록 때 컨트롤러가 부른다). 나머지(src·scenarios·schema·bin)는 sync.sh 몫
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/oam-cims-tester/samples ${CMAKE_BINARY_DIR}/dist/oam-cims-tester/native
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_dist_tester_samples} ${_dist_tester_masters} ${CMAKE_BINARY_DIR}/dist/oam-cims-tester/samples/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/bin/cims-sample-conv ${CMAKE_BINARY_DIR}/dist/oam-cims-tester/native/
 
     # ── 3. 설정 템플릿 복사 (deploy_value: "@PLACEHOLDER@" 포함, configure.sh 로 채움) ──
     #    CSP/CMP/CSC 모두 A안 통합 — config_template.json 하나가 UI 메타+deploy_value 둘 다 담당.

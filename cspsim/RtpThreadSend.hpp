@@ -17,39 +17,44 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+/** RFC 4867 §4.4.3 표 — 프레임 유형(FT)별 옥텟 정렬 데이터 길이(ToC 제외). FT 9 = SID(5 B), FT 15 = NO_DATA(0 B), 10~13 은 정의되지 않음, 14 = speech lost */
+static const int kAmrWbFrameDataBytes[16] = { 17, 23, 32, 36, 40, 46, 50, 58, 60, 5, -1, -1, -1, -1, 0, 0 };
+
 /**
- * @brief AMR-WB raw 프레임 파일에서 프레임 데이터를 로드한다.
- * @param strPath  AMR-WB raw 프레임 파일 경로
- * @param vecFrames  (출력) 프레임 데이터 벡터
- * @param iFrameSize (출력) 프레임 크기 (고정 61 바이트)
- * @return 성공 시 true
- *
- * AMR-WB raw 프레임 파일은 61 바이트 프레임이 연속 저장된 형태.
- * (3GP extract_frames.py로 추출)
+ * @brief AMR-WB 프레임 파일을 로드한다 — 두 형식.
+ *   ① raw 61 B 프레임 연속(ToC + 60 B, 23.85 kbps 고정 — 3GP extract_frames.py 산출물)
+ *   ② RFC 4867 §5 저장 형식("#!AMR-WB\n" 매직 + 프레임마다 ToC 가 길이를 정함) — DTX 인코딩(SPEECH 61 B · SID 6 B · NO_DATA 1 B)
+ * 프레임 원소 = [ToC][데이터…]. 송신기는 ToC 의 FT 로 SID/NO_DATA 를 구분한다(NO_DATA 는 패킷을 내지 않는다).
+ * @param iFrameSize (출력) ① 이면 61, ② 이면 0(가변)
  */
 static bool LoadAmrWbFrames(const std::string& strPath,
                             std::vector<std::vector<char>>& vecFrames, int& iFrameSize) {
     FILE* fp = fopen(strPath.c_str(), "rb");
     if (!fp) return false;
-
     fseek(fp, 0, SEEK_END);
     long lFileSize = ftell(fp);
     fseek(fp, 0, SEEK_SET);
-
-    // AMR-WB 23.85 kbps: 61 bytes/frame
-    iFrameSize = 61;
-    int iFrameCount = (int)(lFileSize / iFrameSize);
-
-    vecFrames.resize(iFrameCount);
-    for (int i = 0; i < iFrameCount; ++i) {
-        vecFrames[i].resize(iFrameSize);
-        if (fread(vecFrames[i].data(), 1, iFrameSize, fp) != (size_t)iFrameSize) {
-            vecFrames.resize(i);
-            break;
-        }
-    }
-
+    std::vector<char> vecBuf(lFileSize > 0 ? lFileSize : 0);
+    if (lFileSize <= 0 || (long)fread(vecBuf.data(), 1, lFileSize, fp) != lFileSize) { fclose(fp); return false; }
     fclose(fp);
+
+    static const char kMagic[] = "#!AMR-WB\n";
+    const size_t iMagic = sizeof(kMagic) - 1;
+    vecFrames.clear();
+    if (vecBuf.size() >= iMagic && memcmp(vecBuf.data(), kMagic, iMagic) == 0) {
+        iFrameSize = 0;
+        for (size_t i = iMagic; i < vecBuf.size();) {
+            int iFt = ((uint8_t)vecBuf[i] >> 3) & 0x0F;
+            int iData = kAmrWbFrameDataBytes[iFt];
+            if (iData < 0 || i + 1 + iData > vecBuf.size()) break;   // 정의되지 않은 FT·잘린 꼬리 — 거기서 끝
+            vecFrames.emplace_back(vecBuf.begin() + i, vecBuf.begin() + i + 1 + iData);
+            i += 1 + iData;
+        }
+        return !vecFrames.empty();
+    }
+    // AMR-WB 23.85 kbps raw: 61 bytes/frame
+    iFrameSize = 61;
+    for (size_t i = 0; i + 61 <= vecBuf.size(); i += 61) vecFrames.emplace_back(vecBuf.begin() + i, vecBuf.begin() + i + 61);
     return !vecFrames.empty();
 }
 
@@ -264,6 +269,13 @@ THREAD_API RtpThreadSend(LPVOID lpParameter) {
   int iGen = -1;
   bool bTalkStart = true;   // 발화 시작(첫 패킷·정지 뒤 재개·원천 교체) — 마커 비트(RFC 3551 §4.1)
   char szPcm[320];
+  // 파일 원천 한 프레임 진행 — 끝이면 처음으로(loop) 또는 멈춤(MediaSend 가 다시 부를 때까지)
+  auto advanceFile = [&]() {
+      if (++clsSrc.idx >= clsSrc.frames->size()) {
+          clsSrc.idx = 0;
+          if (!clsSrc.loop) { pRtpThread->m_bSendPaused = true; pRtpThread->m_bSourceEnded = true; }
+      }
+  };
 
   while (pRtpThread->m_bStopEvent == false) {
       MiliSleep(20);
@@ -300,10 +312,20 @@ THREAD_API RtpThreadSend(LPVOID lpParameter) {
           bFile = false;
       } else if (clsSrc.kind == RtpTxSource::FILE_AMRWB) {
           // AMR-WB RTP: RFC 4867 octet-aligned — [CMR(4bit)+0000] + [ToC] + [frame data]
-          //   CMR = 0x80 (mode 8 = 23.85 kbps) · ToC = F=0, FT=8, Q=1 → 0x44. 원본 프레임의 첫 바이트는 ToC 라 건너뛴다.
+          //   CMR = 0x80 (mode 8 = 23.85 kbps) · ToC = 파일 프레임의 것(F=0 으로 — 패킷에 프레임 하나). raw 61 B 파일은 늘 FT 8 (0x44),
+          //   DTX 저장 형식은 SPEECH(FT 8)·SID(FT 9, 5 B)·NO_DATA(FT 15) 가 섞인다.
           const std::vector<char>& vecFrame = (*clsSrc.frames)[clsSrc.idx];
+          uint8_t ucToc = (uint8_t)vecFrame[0] & 0x7F;
+          if (((ucToc >> 3) & 0x0F) == 15) {
+              // NO_DATA — DTX 무송신 구간(TS 26.193 SCR, RFC 4867 §4.1): 패킷을 내지 않고 타임스탬프만 흐른다. 시퀀스는 그대로라
+              //   수신 측 손실 계산에 공백이 없고, 다음 송신 프레임에 마커(발화 재개)를 세운다
+              iTimeStamp += clsSrc.tsStep;
+              bTalkStart = true;
+              advanceFile();
+              continue;
+          }
           payload[0] = (char)0x80;
-          payload[1] = 0x44;
+          payload[1] = (char)ucToc;
           memcpy(payload + 2, vecFrame.data() + 1, vecFrame.size() - 1);
           payloadLen = 2 + (int)vecFrame.size() - 1;
       } else if (clsSrc.kind == RtpTxSource::FILE_G711 || clsSrc.kind == RtpTxSource::FILE_G722) {
@@ -342,13 +364,7 @@ THREAD_API RtpThreadSend(LPVOID lpParameter) {
           pRtpThread->m_ullSentTotal++;
       }
 
-      if (bFile && ++clsSrc.idx >= clsSrc.frames->size()) {
-          clsSrc.idx = 0;
-          if (!clsSrc.loop) {   // 한 번 재생 — 끝에서 멈춘다(MediaSend 가 다시 부를 때까지)
-              pRtpThread->m_bSendPaused = true;
-              pRtpThread->m_bSourceEnded = true;
-          }
-      }
+      if (bFile) advanceFile();
   }
 
   pRtpThread->m_bSendThreadRun = false;

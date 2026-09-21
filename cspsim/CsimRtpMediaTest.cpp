@@ -1,7 +1,8 @@
 // libcsim RTP 단위시험 — 계측기 미디어 평면(CRtpThread 모드·송출 제어) 루프백. S1-UNIT-TESTER 의 네이티브 항목.
 //   ① NONE = Start 가 스레드를 띄우지 않는다 ② EXPLICIT = MediaSend 전에는 수신만 ③ G.711 샘플 한 번 재생(loop=false) =
 //   프레임 수만큼만 나가고 끝에서 멈춘다 ④ 기본 원천 재개 → MediaStop 뒤 정지, 시퀀스 공백 없음(lost 0)
-//   ⑤ 상대 hold 정지 ⑥ AMR-WB 합의 + 합성 = NO_DATA 프레임이 협상 PT 로 흐른다 ⑦ 기본 원천(AMR-WB 파일)은 auto 에서 곧바로.
+//   ⑤ 상대 hold 정지 ⑥ AMR-WB 합의 + 합성 = NO_DATA 프레임이 협상 PT 로 흐른다 ⑦ 기본 원천(AMR-WB 파일)은 auto 에서 곧바로
+//   ⑧ RFC 4867 저장 형식 DTX 샘플 = SPEECH·SID 만 패킷으로 나가고 NO_DATA 구간은 무송신(시퀀스 공백 없음).
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -94,6 +95,31 @@ int main() {
         } else {
             printf("skip amr-wb file case (%s 없음)\n", pszAmr);
         }
+    }
+    {   // ⑧ DTX 저장 형식 — "#!AMR-WB\n" + 10 SPEECH(FT 8) + 3 SID(FT 9) + 12 NO_DATA(FT 15) + 5 SPEECH = 30 프레임(600 ms), 패킷은 18
+        char szDtx[] = "/tmp/csim_media_dtx_XXXXXX";
+        int fdx = mkstemp(szDtx);
+        if (fdx < 0) { printf("mkstemp failed\n"); return 2; }
+        std::string strFile = "#!AMR-WB\n";
+        auto speech = [&]() { strFile += (char)0x44; strFile += std::string(60, (char)0x33); };
+        for (int i = 0; i < 10; ++i) speech();
+        for (int i = 0; i < 3; ++i) { strFile += (char)0x4C; strFile += std::string(5, (char)0x11); }
+        for (int i = 0; i < 12; ++i) strFile += (char)0x7C;
+        for (int i = 0; i < 5; ++i) speech();
+        if (write(fdx, strFile.data(), strFile.size()) != (ssize_t)strFile.size()) return 2;
+        close(fdx);
+        CRtpThread a, b;
+        if (!a.Create() || !b.Create()) { printf("create failed\n"); return 2; }
+        a.m_iAudioPt = 100; a.m_bUseMediaFile = true; a.SetMediaMode(CRtpThread::E_MEDIA_EXPLICIT);
+        b.m_iAudioPt = 100; b.SetMediaMode(CRtpThread::E_MEDIA_EXPLICIT);
+        if (!a.Start("127.0.0.1", b.m_iPort) || !b.Start("127.0.0.1", a.m_iPort)) { printf("start failed\n"); return 2; }
+        a.MediaSend(szDtx, "", "", false);
+        sleepMs(1100);
+        unsigned long long rx = b.m_ullRecvTotal.load(), tx = a.m_ullSentTotal.load();
+        printf("     amr-wb dtx: tx=%llu rx=%llu lost=%llu ended=%d\n", tx, rx, b.m_ullRecvLost.load(), a.SourceEnded() ? 1 : 0);
+        check(tx == 18 && rx == 18 && b.m_ullRecvLost.load() == 0 && a.SourceEnded(), "amr-wb dtx 저장 형식: SPEECH·SID 18 패킷만, NO_DATA 는 무송신, lost 0");
+        a.Stop(); b.Stop();
+        unlink(szDtx);
     }
     unlink(szPath);
     printf(g_fail == 0 ? "PASS\n" : "FAIL\n");

@@ -24,6 +24,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from services import tester_store as store
+from services import tester_samples
 from services import tester_workers, tester_compile, tester_target, tester_observe, tester_fixtures
 from services.tester_bus import publish
 from services.tester_models import RunRecord, RunRequest, LoadProfile, RATIO_METRICS, LOWER_BETTER_RATIOS
@@ -542,6 +543,8 @@ class RunDriver(threading.Thread):
                 raise tester_target.TargetError('픽스처 확인 실패: ' + '; '.join(bad))
             self.notes.append('fixtures applied: ' + ' · '.join(tester_fixtures.summarize(self.plan['fixtures'])))
             self.notes.extend(self.fixtures.notes)
+        # 샘플 라이브러리 사본(§4) — 계획이 참조한 샘플 파일이 워커에 없으면(이름+크기) 여기서 밀어 넣는다. 워커의 run 시작 검사(sample_missing)가 뒤를 받친다
+        tester_samples.sync_for_run(self.workers, self.plan.get('samples') or {}, notes=self.notes)
         for w in self.workers:
             for p in self.plan['workers'][w.name]['pools']:
                 w.pool_create(p)

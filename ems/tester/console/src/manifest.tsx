@@ -12,6 +12,7 @@ import TesterResultsPage from './pages/TesterResultsPage'
 import TesterComparePage from './pages/TesterComparePage'
 import TesterScenariosPage from './pages/TesterScenariosPage'
 import TesterTopologiesPage from './pages/TesterTopologiesPage'
+import TesterSamplesPage from './pages/TesterSamplesPage'
 
 export const testerManifest: ServiceManifest = {
   id: 'tester',
@@ -36,7 +37,9 @@ export const testerManifest: ServiceManifest = {
         { path: '/test/scenarios',  title: '시나리오',   component: TesterScenariosPage,  requiredRole: 'monitor',
           apis: ['tester.scenarios', 'tester.scenario', 'tester.scenario.put', 'tester.scenario.delete', 'tester.scenarios.vocab', 'tester.scenarios.compile_check', 'tester.profiles', 'tester.profile', 'tester.validate', 'tester.topologies', 'tester.run.start'] },
         { path: '/test/topologies', title: '토폴로지',   component: TesterTopologiesPage, requiredRole: 'monitor',
-          apis: ['tester.topologies', 'tester.topology.save', 'tester.topology.check', 'tester.workers.discovered', 'tester.workers', 'tester.validate'] },
+          apis: ['tester.topologies', 'tester.topology.save', 'tester.topology.check', 'tester.workers.discovered', 'tester.workers', 'tester.validate', 'tester.samples'] },
+        { path: '/test/samples',    title: '미디어 샘플', component: TesterSamplesPage,    requiredRole: 'monitor',
+          apis: ['tester.samples', 'tester.sample', 'tester.sample.register', 'tester.sample.delete', 'tester.samples.sync', 'tester.topologies'] },
       ],
     },
   ],

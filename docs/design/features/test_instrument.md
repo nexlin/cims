@@ -61,7 +61,8 @@ CSP 골격(리스너·jsonl 설정·로깅·통계·패키징·HA)을 물려받�
 ems/tester/oam/           oam-cims-tester — pkg.json · config/config_template.json · src/oam_cims_tester_app.py
                           · src/handlers(run·scenario·topology·report·stream) · scenarios/ · schema/ · bin/cims-tester(CLI)
 ems/tester/console/       콘솔 팩 — manifest.tsx · pages/ · widgets/  (core console 이 @tester 로 참조)
-tester/worker/            cims-tester-worker — C++17, pkg.json, libcsim 위 (루트 CMake 대상)
+tester/worker/            cims-tester-worker — C++17, pkg.json, libcsim 위 (루트 CMake 대상) · samples/ 동봉 샘플(pcm/ 16 kHz 마스터 + gen_samples.py)
+tester/sampleconv/        cims-sample-conv — 샘플 변환기(WAV → 16 kHz 마스터·pcmu/pcma/g722/amrwb(+DTX)·P.56 측정), oam-cims-tester native/ 에 동봉
 cspsim/                   libcsim(SimSession·RtpThread 추출) + cspsim CLI(전환기)
 ```
 
@@ -594,10 +595,36 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
   `bye` 앞)에만 둘 수 있고 `rtp: none` 호에는 못 둔다 — 시나리오 검증 오류. `auto` 호에서도 쓸 수 있다(원천 교체·일시 정지). 비동기 단계
   (`after_ms` 뒤 실행하고 곧바로 다음 단계). SDP 교환 전(RTP 미기동)에 닿으면 인스턴스 실패 + event.
   **샘플 라이브러리** = 토폴로지 `media.samples{id: {amr-wb|pcmu|pcma|g722: 파일 | synthetic}}` — 파일은 워커 샘플 디렉터리(`Media.SampleDir`) 안의
-  상대 경로(절대 경로·`..` 거절), raw 형식(amr-wb = 61 B 프레임 23.85 kbps · pcmu/pcma = 160 B/20 ms). 송신기는 **합의 코덱**의 항목을 쓰고,
-  항목이 없거나 `synthetic` 이면 그 코덱의 합성을 낸다. 컨트롤러는 시나리오가 참조한 샘플만 발췌해 워커에 보낸다(`RunStart.samples`);
-  라이브러리에 없는 id 는 컴파일 오류. 워커 패키지는 G.711 샘플 `ringback_kr`(440+480 Hz, 1 s on / 2 s off)·`tone_1k` 를 동봉한다
-  (`tester/worker/samples/gen_tones.py` 산출물 — 인코더는 레포 `cspsim/G711.cpp` 와 전 구간 대조). AMR-WB 샘플은 운영자가 넣는다.
+  상대 경로(절대 경로·`..` 거절), raw 형식(pcmu/pcma/g722 = 160 B/20 ms · amr-wb = **61 B 프레임 23.85 kbps 연속 또는 RFC 4867 §5 저장 형식**
+  `#!AMR-WB\n` + ToC 가 길이를 정하는 가변 프레임 — DTX 인코딩(SPEECH 61 B · SID 6 B · NO_DATA 1 B). 송신기는 프레임의 ToC 를 그대로
+  싣고 **NO_DATA 프레임에서는 패킷을 내지 않는다**(TS 26.193 SCR·RFC 4867 §4.1 — 타임스탬프만 흐르고 시퀀스는 이어져 손실 계산에
+  공백 없음, 재개 프레임에 마커)). 송신기는 **합의 코덱**의 항목을 쓰고, 항목이 없거나 `synthetic` 이면 그 코덱의 합성을 낸다. 컨트롤러는
+  시나리오가 참조한 샘플만 발췌해 워커에 보낸다(`RunStart.samples`); 라이브러리에 없는 id 는 컴파일 오류.
+  **동봉 샘플**(`tester/worker/samples/` — 원음은 전부 16-bit PCM 16 kHz 마스터 `pcm/<id>.wav` 로 두고 `gen_samples.py` 가 코덱별
+  pcmu/pcma/g722/amrwb(+ `_dtx.amrwb`)로 변환, 측정값 목록 `samples.json`. 마스터·생성기는 패키지에 안 들어간다):
+  ① 신호음 — ITU-T E.180 Sup.2(한국)·전기통신설비의 기술기준에 관한 규칙: `dial_kr` 350+440 Hz 연속 · `ringback_kr` 440+480 Hz 1/2 s ·
+  `busy_kr` 480+620 Hz 0.5/0.5 s · `congestion_kr` 480+620 Hz 0.3/0.2 s · `call_waiting_kr` 350+440 Hz 0.25/0.25/0.25/3.25 s · `tone_1k`,
+  -16 dBov(≈ -13 dBm0) · `moh_simple` 합성 보류 음악 -20 dBov. ② 안내음(TTS 한국어, ITU-T P.56 활성 레벨 -26 dBov) — `ann_connecting`·
+  `ann_hold`·`ann_call_waiting`·`ann_busy`·`ann_no_answer`·`ann_invalid_number`. ③ 통화 음성(TTS 대화 문장, P.56 -26 dBov = TR 26.976
+  특성화 입력 레벨) — 발화/무음 비율이 DTX 이득을 정하므로 표준 on/off 모델로 배치: `speech_act40_kr` = **ITU-T P.59 표 1**(hangover 포함
+  측정 평균 — talk-spurt 지수분포 1.004 s · pause 0.2 s + 지수분포 평균 1.587 s → 활동률 38.5 %; AMR-WB VAD 가 클린 음성에서 보는
+  40 %·채널 활동률 51 % [TR 26.976 §29.2] 와 같은 급 — **DTX 시험의 기준 원천**) · `speech_act50_kr`(활동률 50 %, 3GPP 시스템 용량 평가의
+  VAF 50 % 관례) · `speech_act100_kr`(문장 연속, DTX 이득 없는 상한) · `conv_p59_a`/`conv_p59_b` = **P.59 §3 상태 전이 모델**(단독 발화
+  Tst = −0.854·ln x · 동시 발화 Tdt = −0.226·ln x · 상호 무음 Tms = −0.456·ln x, P1/P2/P3 = 40/50/50 %, 200 ms 미만 pause 규칙)로 만든
+  두 화자 대화 — 발신자에 a, 착신자에 b 를 주면 한 호 안에서 교대·동시 발화·상호 무음이 맞물린다. 짧은 파일(30~45 s)이라 seed 를 골라
+  실현값이 표 1 에 가장 가깝게(측정치는 `samples.json` `pattern`·`dtx_channel_activity_pct`). `sample_voice.amrwb`(15 s 연속 음성) 는
+  워커 `Media.AudioFile` 기본으로 유지.
+  **샘플 라이브러리(컨트롤러 정본)** = `services/tester_samples.py` — 두 뿌리: 패키지 동봉 `oam-cims-tester/samples/`(읽기 전용, 마스터·코덱 파일·
+  `samples.json`) + 운영자 등록 `Tester.DataDir/samples/`(같은 id 는 운영자본이 이김, 시나리오 규약). **변환기** `cims-sample-conv`(`tester/sampleconv`,
+  C++ — WAV PCM 8~48 kHz mono/stereo → 16 kHz 마스터 재표본(윈도우 sinc)·G.711(libcsim G711)·G.722(pjproject g722_enc 이식, 입력 ½ 스케일 = ffmpeg/
+  spandsp 관례)·AMR-WB 23.85(vo-amrwbenc, DTX 는 저장 형식)·P.56/on-off/DTX 측정 JSON, `--normalize <dBov>`)가 패키지 `native/` 에 동봉되어
+  콘솔 등록과 동봉 샘플 생성기가 **같은 변환 경로**를 쓴다. 컨트롤러 API `GET/POST /samples`(POST 본문 = WAV 바이트 `application/octet-stream` —
+  게이트웨이가 바이트 그대로 통과, 메타는 query id/kind/description/dtx/normalize/replace) · `GET /samples/{id}[/master.wav|/files/{name}]` ·
+  `DELETE /samples/{id}`(동봉 409) · `POST /samples/sync {topology_id, ids?}`. **워커는 사본** — `GET /health` 의 `media.files_detail[{name,size,mtime}]`
+  와 라이브러리 파일을 이름+크기로 대조해 없는 것만 `PUT /samples/{file}` 로 밀어 넣는다: run 시작(`sync_for_run` — 계획 `samples` 가 참조한 파일만,
+  풀 생성 앞) + 콘솔 [워커 동기화](토폴로지 워커 전부·전체). 라이브러리 밖 파일(운영자가 워커에 직접 둔 것)은 건드리지 않고 워커의 run 시작 검사
+  (`sample_missing`)가 판정한다. 콘솔 `/test/samples`(§7)에서 마스터를 듣고(인증 fetch → Blob) WAV 를 등록하며, 토폴로지 편집기 샘플 라이브러리는
+  [등록된 샘플에서 추가…] 로 id·코덱 파일을 가져온다(DTX 변형은 `<id>_dtx`).
   `workers[].media{samples[], max_rtp_streams}` = 그 워커가 보유한다고 선언한 샘플 id(비면 전부)·RTP 동시 상한 선언.
   동봉 예 = `VOLTE-CALL-SIGNALING`(none) · `VOLTE-CALL-ONEWAY-MEDIA`(explicit + during `media_stop`) · `TRUNK-MGCF-EARLY-MEDIA`(183 뒤 링백 샘플).
 - **역할의 신원 창** — `count` 생략 = 풀 전체. 단, 같은 풀에서 서로 `disjoint_from` 인 역할들이 `count` 없이 있으면 풀을 **균등 분할**한다
@@ -646,7 +673,8 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 - **계약 정본** = `ems/tester/oam/src/services/tester_models.py`(pydantic) → `schema/*.json`(`bin/gen-schemas` 생성, 워커 C++ 가 읽는다). 모든 모델은 `extra='forbid'` — 오타 난 키는 거절한다.
 - **제어(컨트롤러 → 워커)** HTTP/JSON: `POST /pools`(풀 생성·신원 적재 — `worker_pool_create`, 같은 이름은 교체), `DELETE /pools/{name}`,
   `POST /runs`(컴파일된 단계 + 역할 배분 — `worker_run_start`; `max_instances` 있으면 단발), `POST /runs/{id}/rate`(SApS 변경),
-  `POST /runs/{id}/stop {drain_s}`, `GET /runs/{id}`(상태·누계 스냅샷), `GET /health`(용량·CPU·활성 엔드포인트·시각 — `worker_health`).
+  `POST /runs/{id}/stop {drain_s}`, `GET /runs/{id}`(상태·누계 스냅샷), `GET /health`(용량·CPU·활성 엔드포인트·시각 — `worker_health`),
+  `PUT /samples/{file}`(본문 = 파일 바이트 → `Media.SampleDir` 원자적 저장, 이름은 한 단계·`..` 거절) · `DELETE /samples/{file}` — 컨트롤러 샘플 라이브러리 사본 배포(§4).
   워커는 시나리오 YAML 을 모르고 **컴파일된 단계 목록**만 받는다. 워커당 run 은 하나(409 `run_active`).
   미디어 평면(§4): 단계의 `media.rtp`·`sample`·`loop` 와 `RunStart.samples{id: {코덱: 파일|synthetic}}` — 워커는 run 시작 때 파일을 확인한다
   (400 `sample_missing`·`sample_unknown`·`sample_codec_unsupported`). `GET /health` 의 `media{rtp_streams, max_rtp_streams, sample_dir, files[]}` 로
@@ -709,6 +737,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 | 실행 `/test/runs` | ① **워커·대상 띠**(`WorkerFleet` — 토폴로지 워커마다 SIP 단말·RTP 스트림·CPU 막대, 최대 SApS·cpus·진행 run·시계 오차 > 50 ms 배지, 미응답은 점선; 대상 카드 = kind·SIP 노드 접속점·빌드(run 의 `target_build`), 진행 중이면 5 초·평상시 30 초 갱신) ② **라이브 패널**(`RunLivePanel`) — 머리(판정·상태·id·시나리오·라벨·토폴로지/프로파일/대상 빌드·라이브 점) + **진행 막대**(경과(고정 시간 제외) / 예상 소요 = 프로파일 규칙(step: 단계 수 × hold_s) / 종료 예정) + 왼쪽(`LiveSidebar`) **단계 사다리**(step 율마다 완료 ✓·IHS %, 현 단계 진행 막대, DOC 배지, 신원 부족 예상 단계는 흐리게 + 필요 신원) + **종료 조건 게이지**(IHS 현 단계 창 / 임계 · 대상 CPU(F) · CSP 5xx 60 초 창 · **Little 신원 여유** 율×SDT×역할 수) + **KPI 타일에 기대치 모서리**(시나리오 expect 유도, ok/bad 테두리) + **지표별 소형 차트 6장**(`LiveCharts`/`MiniChart` — 시도율·실패/초 · 동시 세션 · SER · SRD p95 · RTP 손실 · 워커/대상 CPU, 지표마다 자기 축 + 붉은 점선 기대치(stop_on 포함) + 단계 띠 + 십자선 호버 전 차트 동기) + **절차 진행 표**(flow 단계별 진입/완료/진행/실패 — 워커 누계 카운터 근사 + 누계 기대치 칩 `lib/metrics.judgeMetric`) + **실패 이벤트**(응답 코드/지표 칩 필터, 행 → **SIP 사다리 드로어** `SipDrawer` = `GET /runs/{id}/sip/{call_id}` 이벤트 + 덤프(있을 때)) + 워커 로그 접기 + 조작 = 율 적용 · **단계 고정**(`POST /runs/{id}/hold` — 프로파일 시계 정지, 율 유지) · 즉시 중단 ③ **run 색인**(`RunIndex`) — 필터 바(라벨/id/시나리오 검색·시나리오·대상 빌드·판정 칩(건수)·부하 run 만·기간 → `GET /runs?…` 300 ms 디바운스), **날짜 그룹**, 열 = 판정 먼저·시각·시나리오/라벨(중단 사유 배지)·프로파일·대상 빌드·시도·SER·SRD p95·손실·소요, 행 호버 액션 = **재실행**(같은 조건으로 시작 창)·결과, 체크 → 하단 고정 비교 바(첫 선택 = 기준) ④ **run 시작 창**(`RunStartDialog` + `PlanPreview`) — 입력이 바뀌면 500 ms 뒤 `POST /runs/plan`: 역할→풀→워커·신원 창 표, 예상 소요, 피크 율·동시 세션(SDT), 워커 SIP/RTP 용량·율·인스턴스, 대상 시드 예정 컬렉션, 바인딩 출처, 환경변수, 피어 고정, **Little 검산 경고·권고 max**, 워커 최대 SApS 초과·알려진 CSP 과제(§12) 경고; 컴파일 오류·진행 중 run 이 있으면 시작 잠금 |
 | 결과 `/test/results?id=` | ① **왼쪽 run 레일**(날짜 그룹·판정 점·검색·전체/FAIL/PASS/부하 칩, 툴바 ↑↓ 이전/다음) ② **판정 요약 머리**(`RunReport` — 왼쪽 색 띠 = 판정, 큰 PASS/FAIL + 기대치 n/m, **왜 그 판정인가** = 실패 기대치마다 `#단계 종류 지표 기대/관측`·실패 인스턴스·중단 사유·**알려진 CSP 과제 §12 연결**(q850_rx_pct·트렁크 REGISTER·5xx→603·failover)·PASS 면 DOC, 메타 칩(run·토폴로지·프로파일·대상 빌드·시작/소요(고정 포함)·워커·역할→풀·바인딩), 액션 = **이전 빌드와 비교**(같은 시나리오·프로파일의 직전 다른 빌드 run 을 기준으로)·같은 조건 재실행·시나리오 열기) ③ 고정 **구획 내비** ④ **시간축** = 소형 차트 6장(실행과 같은 구성) + **대상 알람·이벤트 마커**(`GET /runs/{id}/target-alerts` — run 창으로 자른 대상 OAM `/alerts`, 심각도 색 세로 마커 + 칩; oam 노드 없으면 note — 같은 마커가 대상 호스트 CPU/메모리·프로세스 CPU/RSS/fd 차트에도 겹친다(알람 시각 ↔ 자원 곡선 대조), 실행 라이브 패널은 run 동안 15 초마다 같은 API 로 마커를 갱신한다) · 대상 증거 카드는 종류 설명·`proc`·관측값 단위(MB)를 적는다 ⑤ **지연 분포 표 → 행 펼침 히스토그램**(`GET /runs/{id}/hist?timer=` 로그 상한 버킷 막대 + p50/p95/p99 마커 + 기대 초과 버킷 붉게) ⑥ **절차·예상·확인 표에 여유 막대**(관측/임계 비율, 80 % 넘으면 주의색, FAIL 행 강조) ⑦ 실패 이벤트 = 코드 칩 집계 + 행 → SIP 사다리 드로어 ⑧ 단계 로그 = IHS 막대(임계 위치 표시)·DOC·임계 초과 → 중단 배지 ⑨ **대상 증거 카드**(target_evidence 항목별 대기 — 대상 OAM 조회는 F, `seed_restored` 는 run 메모로 판정) ⑩ Markdown 미리보기·복사. 진행 중 run 이면 라이브 패널. 인쇄는 레일·내비·액션을 숨기고 구획 단위로 쪽 나눔 · 삭제(manager) |
 | 비교 `/test/compare?ids=&mode=` | 두 모드. **run 비교**: ① **run 카드 열**(색 견본 = 차트 색, 첫 카드 = 기준, 드래그/‹ › 순서 변경·[기준으로]·제거, [+ run 추가] picker 는 **같은 시나리오·프로파일 후보를 먼저**(다른 것은 [전부 보기] 로 흐리게)) ② **지표 매트릭스**(행 = 지표·방향, 열 = run(대상 빌드로 표기), 셀 = 값 + Δ(pt 또는 절대) + **중심 0 의 Δ 막대**, 회귀 붉게·개선 초록, 허용 오차 열 ±0.5 pt/±5 % — 판정은 `GET /runs/compare`) ③ **시간축 겹침**(행 클릭 → 그 지표의 run 별 `/series` 를 **run 시작 t+0 기준으로 정렬**해 한 차트에, 기준 run 굵게, 기대치 점선, 기준 run 의 단계 띠 — 프로파일이 다르면 경고) + 응답 코드 분해 run 별 ④ **기대치 판정 diff**(행 = 단계·지표·기대, 열 = run 별 PASS/FAIL, 변화 = 기준 PASS→마지막 FAIL **회귀** / FAIL→PASS **복구**, 하단 중단 사유). **추세**: 시나리오 × 프로파일 × 토폴로지 선택 → 모든 run 을 시간순 점으로(x = run 시각, 색 = 대상 빌드, ● PASS / ◆ FAIL·중단, 기대치 점선, **기준 = 첫 PASS run ± 허용 오차 회색 띠**, 벗어나면 '회귀' 라벨) 4 장(SRD p95·SER·손실·DOC) + run 목록(체크 → run 비교로). 내보내기 Markdown/CSV(`compare?format=`, 클립보드). 시나리오가 다르면 경고 배지 |
+| 미디어 샘플 `/test/samples` | 샘플 라이브러리(§4) — 표(id·종류·출처 동봉/운영자·설명·길이·P.56 레벨/활동률·DTX 채널 활동·코덱 배지·토폴로지를 고르면 워커별 보유 상태 보유/일부/없음/미응답) + [▶] 마스터 청취(16 kHz PCM 을 인증 fetch → Blob → `<audio>`) + 선택 행 상세(on/off 활동률·talk-spurt/pause 평균·DTX 프레임 집계·파일 목록·짝 a/b) + **[샘플 등록…]**(WAV 업로드 창 — id·종류·설명·DTX 생성·P.56 정규화 dBov·교체, 컨트롤러가 `cims-sample-conv` 로 변환·측정) + **[워커 동기화]**(선택 토폴로지 워커 전부에 코덱 파일 배포) + 운영자본 삭제(manager). 변환기가 없으면 등록 버튼 비활성 |
 | 보고서 | 결과 화면의 [인쇄] = `window.print()` — 검증 콘솔과 같은 인쇄 규약(셸·툴바·레일·이벤트 표 숨김, `.tester-report` 만 A4, 구획 단위 쪽 나눔), 표지에 발행 일시. Markdown 은 CLI `report` 와 같은 본문 |
 
 컴포넌트는 팩 안 `components/`(MiniChart · LiveCharts · WorkerFleet · LiveSidebar · RunLivePanel · RunIndex · RunStartDialog · PlanPreview · SipDrawer · RunReport · YamlEditor(`onValid(ok, doc)`) · ProfileCurve · ListRail(레코드 레일 + RailRow/RailGroup) · topology/TopologyCanvas · scenario/ScenarioCanvas), 모델·표시 헬퍼 `lib/`(fmt.ts = RFC 6076 라벨·판정 톤·수치 형식 · metrics.ts = 기대치 임계·라이브 누계 판정·절차 진행·SDT/예상 소요(컨트롤러 규칙과 동일) · topology-model.ts · scenario-model.ts · use-history.ts = 문서 이력·Ctrl+Z/Y·이탈 경고 · use-drawer-height.ts = 드로어 높이). 차트는 라이브러리 없이 SVG(`--chart-N` 토큰), 지표별 소형 차트는 자기 축. 배지는 크기 오버라이드 없이 계약(12px SemiBold) 그대로(console_design_system §7-31).
@@ -751,6 +780,9 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
   (심볼 충돌). `make dist` 가 `dist/cims-tester-worker/{bin,config/{config_template,cims-tester-worker}.json,pkg.json,samples}` 을 채우고, 실단말 풀(§3.3)의
   `cimsue-cli`(sdk/core `CIMSUE_BUILD_CLI`, 타깃이 있을 때)를 같은 `bin/` 에 동봉한다 — 워커 `RealUe.CliPath` 기본 `bin/cimsue-cli`. cimsue-cli 는 libssl/
   libcrypto/libz/libzstd 만 동적 링크한다(대상 호스트 공통 라이브러리).
+- 컨트롤러 패키지(`oam-cims-tester`)는 `scripts/sync.sh` 가 채우는 `src/scenarios/schema/bin` 에 더해 `make dist` 가 **`samples/`**(동봉 샘플 라이브러리 — 16 kHz PCM 마스터를
+  평평하게 + 코덱 파일 + `samples.json`)와 **`native/cims-sample-conv`**(변환기, `tester/sampleconv` — sync.sh 가 손대지 않는 자리)를 넣는다. 컨트롤러는 `Tester.SampleConv`
+  → `native/` → 개발 트리 `build/bin` → PATH 순서로 변환기를 찾고, 소스 트리 실행이면 동봉 라이브러리를 `tester/worker/samples/`(마스터 `pcm/`)에서 읽는다.
 - 워커 설정(`tester/worker/config/config_template.json`): `Worker.Name`(비면 hostname) · `Server.Ip/Port`(제어 7100) · `Sip.LocalIp`(비면 자동 탐지)·
   `Sip.PortBase`(0=OS 자동, >0 = base+2i) · `Media.AudioFile/VideoFile`(비면 합성 PCMU/비디오 없음) · `Tls.PeerCertFile/PeerKeyFile`(TLS 피어 수신점 인증서 —
   구 `Media.PeerCertFile` 승계) · `Tls.CaFile`(풀 `tls_verify`·피어 `tls_client_auth` 의 앵커, `RealUe.TlsCaFile` 이 비면 실단말도 이것) · `Tls.ClientCertFile/ClientKeyFile`
@@ -761,7 +793,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
   초당 수천 줄이라 워커는 stdout 을 `/dev/null` 로 돌리고(`--verbose` 로 유지) 자기 로그는 stderr 로 낸다.
 - 검증 게이트: `S1-UNIT-TESTER`(계약·핸들러·오케스트레이터(가짜 워커)·피어 시드 파생·게이트웨이 SSE 단위시험 + 네이티브 `build/bin/csim_rtp_dtmf_test`
   RFC 4733·in-band·G.722 루프백 · `csim_rtp_media_test` · `csim_peer_fault_test`(재전송 유실·THIG·G.722 협상 — UDP 루프백 피어 둘) · `csim_tls_mutual_test`(TLS 상호인증 —
-  openssl CLI 임시 인증서) · `tester_sip_capture_test` · `tester_emodel_test` · `tester_real_ue_test`(실단말 프로세스 관리 — drive 프로토콜 스텁)) · `S1-CONFIG-PORTABILITY` 대상에 두 모듈 설정 ·
+  openssl CLI 임시 인증서) · `tester_sip_capture_test` · `tester_emodel_test` · `tester_real_ue_test`(실단말 프로세스 관리 — drive 프로토콜 스텁) · 파이썬 `tests.test_tester_samples`(샘플 라이브러리·등록 변환·워커 배포 판정)) · `S1-CONFIG-PORTABILITY` 대상에 두 모듈 설정 ·
   `S2-PREFLIGHT` 네이티브 바이너리 목록 · `S4-PKG-BUILD` 기대 tarball 에 `oam-cims-tester`·`cims-tester-worker`.
 - 파이썬 인터프리터 선택은 [os_portability.md](os_portability.md) 규칙(`--python` > 동봉 > `python3.14` > `python3`)을 따른다.
 - 워커 호스트 = 시험 대상과 **다른** 호스트(N 대). 독립 형태의 컨트롤러 노드는 워커 중 한 대에 동거해도 된다(소규모).

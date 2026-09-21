@@ -52,6 +52,24 @@ class WorkerClient:
         except Exception as e:
             raise WorkerError(f'{self.name} {method} {path}: {e}')
 
+    def put_file(self, name: str, data: bytes, timeout: float = 120) -> dict:
+        """PUT /samples/{name} — 샘플 라이브러리 파일 사본 배포(본문 = 바이트, tester_samples)."""
+        req = urllib.request.Request(self.url + '/samples/' + name, data=data, method='PUT')
+        req.add_header('Content-Type', 'application/octet-stream')
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                raw = r.read().decode('utf-8', 'replace')
+                return json.loads(raw) if raw else {}
+        except urllib.error.HTTPError as e:
+            raise WorkerError(f'{self.name} PUT /samples/{name}: HTTP {e.code} {e.read().decode("utf-8", "replace")[:200]}')
+        except Exception as e:
+            raise WorkerError(f'{self.name} PUT /samples/{name}: {e}')
+
+    def delete_file(self, name: str) -> None:
+        st, out = self._req('DELETE', '/samples/' + name, timeout=30)
+        if st != 200:
+            raise WorkerError(f'{self.name} DELETE /samples/{name}: {st} {out}')
+
     def probe(self) -> Optional[dict]:
         """GET /health — 실패해도 예외 대신 None (health_error 에 이유). 시계 오차(clock_skew_ms)를 덧붙인다."""
         try:

@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstdarg>
 #include <cstdio>
+#include <cerrno>
 #include <cstring>
 #include <fstream>
 #include <netinet/in.h>
@@ -275,12 +276,13 @@ void Worker::OnPeerByeResponse(CsimPeer* p, const std::string& callId, int st, l
 
 // ── HTTP ───────────────────────────────────────────────────────────────────
 HttpResponse Worker::handle(const HttpRequest& req) {
+    const std::string& p = req.path;
+    if (p.rfind("/samples/", 0) == 0) return samplesFile(req);   // 본문이 파일 바이트 — JSON 파싱 앞
     Json body;
     if (!req.body.empty()) {
         std::string perr;
         if (!Json::parse(req.body, body, perr)) return errResp(400, "bad_json", perr);
     }
-    const std::string& p = req.path;
     if (req.method == "GET" && p == "/health") return health();
     if (p.rfind("/media/", 0) == 0) return m_mediaAgent ? m_mediaAgent->handle(req, body) : errResp(503, "media_agent_unavailable");   // 미디어 전담 워커 얼굴
     if (req.method == "POST" && p == "/pools") return poolCreate(body);
@@ -296,6 +298,33 @@ HttpResponse Worker::handle(const HttpRequest& req) {
         if (req.method == "GET" && action.empty()) return runGet(id);
     }
     return errResp(404, "not_found", req.method + " " + p);
+}
+
+/** 샘플 파일 배포(컨트롤러 → 워커, §6.1) — `PUT /samples/{file}`(본문 = 파일 바이트, application/octet-stream) 는 Media.SampleDir 에 원자적으로 쓰고,
+ *  `DELETE /samples/{file}` 은 지운다. 파일 이름은 샘플 디렉터리 바로 아래 한 단계(`/`·`..` 거절). 컨트롤러 샘플 라이브러리가 정본이고 워커는 사본. */
+HttpResponse Worker::samplesFile(const HttpRequest& req) {
+    std::string name = req.path.substr(9);
+    if (name.empty() || name.find('/') != std::string::npos || name.find("..") != std::string::npos || name[0] == '.')
+        return errResp(400, "bad_sample_name", name);
+    if (m_cfg.sampleDir.empty()) return errResp(503, "no_sample_dir", "워커에 Media.SampleDir 가 없다");
+    std::string path = m_cfg.sampleDir + "/" + name;
+    if (req.method == "PUT") {
+        if (req.body.empty()) return errResp(400, "empty_body", name);
+        std::string tmp = path + ".part";
+        FILE* fp = fopen(tmp.c_str(), "wb");
+        if (!fp) return errResp(500, "sample_write_failed", tmp + ": " + strerror(errno));
+        bool ok = fwrite(req.body.data(), 1, req.body.size(), fp) == req.body.size();
+        fclose(fp);
+        if (!ok || rename(tmp.c_str(), path.c_str()) != 0) { unlink(tmp.c_str()); return errResp(500, "sample_write_failed", path); }
+        Json j = Json::Object(); j["file"] = Json(name); j["size"] = Json((long long)req.body.size());
+        HttpResponse r; r.body = j.dump(); return r;
+    }
+    if (req.method == "DELETE") {
+        if (unlink(path.c_str()) != 0 && errno != ENOENT) return errResp(500, "sample_delete_failed", path + ": " + strerror(errno));
+        Json j = Json::Object(); j["file"] = Json(name); j["deleted"] = Json(true);
+        HttpResponse r; r.body = j.dump(); return r;
+    }
+    return errResp(404, "not_found", req.method + " " + req.path);
 }
 
 HttpResponse Worker::health() {
@@ -340,6 +369,7 @@ HttpResponse Worker::health() {
     media["agent_streams"] = Json(m_mediaAgent ? m_mediaAgent->streams() : 0);   // 미디어 전담 워커 — 다른 워커 풀이 위임한 스트림(할당 수)
     media["sample_dir"] = Json(m_cfg.sampleDir);
     Json files = Json::Array();
+    Json filesDetail = Json::Array();
     if (!m_cfg.sampleDir.empty()) {
         if (DIR* dp = opendir(m_cfg.sampleDir.c_str())) {
             std::vector<std::string> names;
@@ -351,9 +381,17 @@ HttpResponse Worker::health() {
             closedir(dp);
             std::sort(names.begin(), names.end());
             for (size_t i = 0; i < names.size() && i < 500; ++i) files.push(Json(names[i]));
+            // 크기까지 — 컨트롤러 샘플 라이브러리가 워커 사본의 최신 여부(이름+크기)를 판정한다(§4)
+            for (size_t i = 0; i < names.size() && i < 500; ++i) {
+                struct stat sb;
+                if (stat((m_cfg.sampleDir + "/" + names[i]).c_str(), &sb) != 0) continue;
+                Json f = Json::Object(); f["name"] = Json(names[i]); f["size"] = Json((long long)sb.st_size); f["mtime"] = Json((long long)sb.st_mtime);
+                filesDetail.push(f);
+            }
         }
     }
     media["files"] = files;
+    media["files_detail"] = filesDetail;
     j["media"] = media;
     // 실단말 풀(§3.3) — 프로세스 수·상한·cimsue-cli 경로(컨트롤러 계획 미리보기가 검산)
     Json real = Json::Object();
