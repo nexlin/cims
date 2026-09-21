@@ -333,20 +333,20 @@ export function buildDataSource(spec: DataSourceSpec): DataSource {
             [sp.key, sum(it, CMP_SERIES_METHODS.get(sp.key) ?? [])])),
         })),
       })
-      return ds
+    } else {
+      const series = c.series
+      ds.toSeriesBar = (raw): SeriesBarData => ({
+        unit: c.unit,
+        // 색은 선언 순서에 고정 — 조회 조건이 바뀌어도 같은 계열이 같은 색을 유지한다.
+        series: series.map((sp, i) => ({
+          key: sp.key, label: sp.label, includes: sp.includes, color: seriesColor(sp.color, i),
+        })),
+        buckets: asArray(raw, c.from).map(it => ({
+          label: firstField(it, c.label) as string | number,
+          values: Object.fromEntries(series.map(sp => [sp.key, Number(getPath(it, sp.value)) || 0])),
+        })),
+      })
     }
-    const series = c.series
-    ds.toSeriesBar = (raw): SeriesBarData => ({
-      unit: c.unit,
-      // 색은 선언 순서에 고정 — 조회 조건이 바뀌어도 같은 계열이 같은 색을 유지한다.
-      series: series.map((sp, i) => ({
-        key: sp.key, label: sp.label, includes: sp.includes, color: seriesColor(sp.color, i),
-      })),
-      buckets: asArray(raw, c.from).map(it => ({
-        label: firstField(it, c.label) as string | number,
-        values: Object.fromEntries(series.map(sp => [sp.key, Number(getPath(it, sp.value)) || 0])),
-      })),
-    })
   }
   if (m.kpi) {
     const c = m.kpi as KpiMap

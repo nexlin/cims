@@ -119,5 +119,35 @@ chk('parts 가 서비스축 그대로',
     JSON.stringify(sipDist.items[0].parts))
 
 
+console.log('[10] 한 소스가 선언한 shape 어댑터가 **전부** 만들어진다')
+//   실제 기술자는 shape 5개를 한 소스에 declare 한다. cmp-groups 분기에서 일찍 빠져나가면
+//   뒤쪽 shape(matrix·distribution·table)의 어댑터가 안 생기고, 화면은 그 위젯을
+//   "데이터 없음" 으로 그린다 — 2026-09-21 배포에서 실제로 그랬다(0.2.155 → 0.2.156 수정).
+const fullDs = buildDataSource({
+  id: 'cims.msg.cmp', label: 'CMP 메시지', endpoint: '/stats/messages/cmp',
+  shapes: ['time-bar', 'series-bar', 'distribution', 'table', 'matrix'],
+  map: {
+    'time-bar': { from: 'buckets', label: ['label'], value: 'count' },
+    'series-bar': { from: 'buckets', label: ['label'], unit: '건',
+                    series: 'cmp-groups', cells: ['in', 'out'] },
+    distribution: { fromObject: 'method_counts', totalPath: 'total', series: 'cmp-groups' },
+    table: { fromObject: 'method_counts', columns: ['메서드', '건수'] },
+    matrix: { from: 'buckets', label: ['bucket', 'label'], cells: ['in', 'out'],
+              unit: '건', order: 'message' },
+  },
+})
+for (const [name, fn] of [['toTimeBar', fullDs.toTimeBar], ['toSeriesBar', fullDs.toSeriesBar],
+                          ['toDistribution', fullDs.toDistribution], ['toTable', fullDs.toTable],
+                          ['toMatrix', fullDs.toMatrix]]) {
+  chk(`${name} 존재`, typeof fn === 'function', String(typeof fn))
+}
+const sample = { total: 82, method_counts: { HEARTBEAT: 26, PTT_JOIN: 16 },
+                 buckets: [{ bucket: '2026-09-16', label: '2026-09-16', count: 82,
+                             in: { HEARTBEAT: 13, PTT_JOIN: 8 }, out: { HEARTBEAT: 13, PTT_JOIN: 8 } }] }
+chk('matrix 가 열·행을 낸다', fullDs.toMatrix(sample).columns.length === 2 &&
+    fullDs.toMatrix(sample).rows.length === 1)
+chk('distribution 이 항목을 낸다', fullDs.toDistribution(sample).items.length === 2)
+
+
 console.log(`\n총 ${pass + fail} / PASS ${pass} / FAIL ${fail}`)
 process.exit(fail ? 1 : 0)
