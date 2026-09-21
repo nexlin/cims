@@ -1,0 +1,404 @@
+# tb48 검증 토폴로지 — 콘솔 [시험 > 토폴로지] 레코드 #2 의 YAML 표현(소스 관리본). 피어(ibcf/pbx/mgcf)·등록형 트렁크·VoIP/TLS 풀 포함. 비밀은 환경변수 이름만.
+name: tb48
+hosts:
+  h48:
+    name: media01
+    ip: 121.161.164.48
+  h45:
+    name: db45
+    ip: 121.161.164.45
+workers:
+- name: w1
+  host: h48
+  port: 7100
+  cpus: 4
+target:
+  name: tb48
+  kind: cims
+  nodes:
+    csp:
+      role: sip
+      host: h48
+      fn: CSP
+      procs:
+      - csp
+      logs:
+      - /home/cims/work/cims/build/dist/mgmt-server/csp/current/csp/log/csp_*.log
+      sip:
+        domains:
+        - volte.cims.example.kr
+        - ptt.cims.example.kr
+        - voip.cims.example.kr
+        listeners:
+          udp:
+            edge: access
+            port: 15060
+            protocol: udp
+            local_node: access-udp
+          tcp:
+            edge: access
+            port: 15060
+            protocol: tcp
+            local_node: access-tcp
+          tls:
+            edge: access
+            port: 15061
+            protocol: tls
+            local_node: access-tls
+          peering:
+            edge: peering
+            port: 15070
+            protocol: udp
+            local_node: cims-tester-peering
+        dial_plan:
+          country_code: '82'
+          national_prefix: '0'
+          international_prefix: '00'
+    cmp:
+      role: media
+      host: h48
+      fn: CMP
+      procs:
+      - cmp
+      logs: []
+      media:
+        rtp_range:
+        - 50000
+        - 50039
+        control: 9001
+    csc:
+      role: subscriber
+      host: h48
+      fn: CSC
+      procs:
+      - csc
+      logs: []
+      api:
+        port: 4430
+        tls: true
+    oam:
+      role: oam
+      host: h48
+      fn: OAM
+      procs:
+      - oam
+      logs: []
+      oam:
+        port: 4419
+        tls: true
+        token_env: TESTER_OAM_TOKEN
+        csp_deployment_id: 34
+        observe:
+        - oam_stats
+        - oam_alarms
+        - agent_heartbeat
+    db:
+      role: db
+      host: h45
+      fn: MariaDB
+      procs: []
+      logs: []
+      db:
+        port: 3306
+        name: cims
+        user_env: TESTER_DB_USER
+        password_env: TESTER_DB_PASS
+pools:
+  volte_ue:
+    worker: w1
+    kind: ue
+    access: csp
+    source:
+      creds: creds/volte.jsonl
+      offset: 0
+    transport: udp
+    srtp: 'off'
+    register_expires: 3600
+    prack: false
+    dtmf: rfc4733
+    tls_verify: false
+    tls_client_cert: false
+    msrp: false
+  volte_ue_tls:
+    worker: w1
+    kind: ue
+    access: csp
+    listener: tls
+    source:
+      creds: creds/volte_tls.jsonl
+      offset: 0
+    transport: tls
+    srtp: 'off'
+    register_expires: 3600
+    prack: false
+    dtmf: rfc4733
+    tls_verify: false
+    tls_client_cert: false
+    msrp: false
+  voip_ue:
+    worker: w1
+    kind: ue
+    access: csp
+    listener: tls
+    source:
+      creds: creds/voip.jsonl
+      offset: 0
+    service: voip
+    transport: tls
+    srtp: 'off'
+    register_expires: 3600
+    prack: false
+    dtmf: rfc4733
+    tls_verify: false
+    tls_client_cert: false
+    msrp: false
+  ptt_ue:
+    worker: w1
+    kind: ue
+    access: csp
+    source:
+      creds: creds/ptt.jsonl
+      offset: 0
+    service: ptt
+    transport: udp
+    srtp: 'off'
+    register_expires: 3600
+    prack: false
+    dtmf: rfc4733
+    tls_verify: false
+    tls_client_cert: false
+    msrp: true
+    subscriber: csc
+  pbx_hq:
+    worker: w1
+    kind: peer
+    peering: csp
+    profile: pbx
+    bind:
+      port: 5090
+      protocol: udp
+    domain: pbx.hq.test
+    identities:
+      did_range:
+      - '+82210001010'
+      - '+82210001014'
+      ext_len: 4
+    codecs:
+    - PCMA
+    - PCMU
+    answer: normal
+    dtmf: rfc4733
+    thig: false
+    tls_client_auth: false
+    tls_verify: false
+    tls_client_cert: false
+    dial_plan:
+      country_code: '82'
+      national_prefix: '0'
+      international_prefix: '00'
+    seed:
+      enabled: true
+      distribution: failover
+      priority: 100
+      weight: 1
+  pbx_reg:
+    worker: w1
+    kind: peer
+    peering: csp
+    profile: pbx
+    bind:
+      port: 5091
+      protocol: udp
+    domain: pbx.reg.test
+    identities:
+      did_range:
+      - '+82210001015'
+      - '+82210001019'
+      ext_len: 4
+    register:
+      user: pbx-hq
+      ha1_env: PBX_HA1
+      expires: 3600
+    codecs:
+    - PCMA
+    - PCMU
+    answer: normal
+    dtmf: rfc4733
+    thig: false
+    tls_client_auth: false
+    tls_verify: false
+    tls_client_cert: false
+    seed:
+      enabled: true
+      distribution: failover
+      priority: 100
+      weight: 1
+  mgcf_pstn:
+    worker: w1
+    kind: peer
+    peering: csp
+    profile: mgcf
+    bind:
+      port: 5095
+      protocol: udp
+    domain: mgcf.pstn.test
+    identities:
+      e164_range:
+      - '+82220001010'
+      - '+82220001019'
+    answer: normal
+    dtmf: rfc4733
+    thig: false
+    tls_client_auth: false
+    tls_verify: false
+    tls_client_cert: false
+    seed:
+      enabled: true
+      distribution: failover
+      priority: 100
+      weight: 1
+  peer_kt:
+    worker: w1
+    kind: peer
+    peering: csp
+    profile: ibcf
+    bind:
+      port: 5080
+      protocol: udp
+    domain: ims.kt.test
+    identities:
+      e164_range:
+      - '+821010001000'
+      - '+821010001009'
+    answer: normal
+    dtmf: rfc4733
+    thig: false
+    tls_client_auth: false
+    tls_verify: false
+    tls_client_cert: false
+    seed:
+      enabled: true
+      route_set: rs-kt
+      distribution: failover
+      priority: 100
+      weight: 1
+  peer_kt_dead:
+    worker: w1
+    kind: peer
+    peering: csp
+    profile: ibcf
+    bind:
+      port: 5081
+      protocol: udp
+    domain: ims.kt.test
+    identities:
+      e164_range:
+      - '+821010001000'
+      - '+821010001009'
+    answer: silent
+    dtmf: rfc4733
+    thig: false
+    tls_client_auth: false
+    tls_verify: false
+    tls_client_cert: false
+    seed:
+      enabled: true
+      route_set: rs-kt
+      distribution: failover
+      priority: 50
+      weight: 1
+  peer_kt_503:
+    worker: w1
+    kind: peer
+    peering: csp
+    profile: ibcf
+    bind:
+      port: 5083
+      protocol: udp
+    domain: ims.kt.test
+    identities:
+      e164_range:
+      - '+821010001000'
+      - '+821010001009'
+    answer: reject
+    fault:
+      code: 503
+      q850: 38
+      delay_ms: 0
+      drop_invite: 0
+      drop_pct: 0
+    dtmf: rfc4733
+    thig: false
+    tls_client_auth: false
+    tls_verify: false
+    tls_client_cert: false
+    seed:
+      enabled: true
+      route_set: rs-kt
+      distribution: failover
+      priority: 40
+      weight: 1
+  peer_blocked:
+    worker: w1
+    kind: peer
+    peering: csp
+    profile: ibcf
+    bind:
+      port: 5082
+      protocol: udp
+    domain: ims.blocked.test
+    identities:
+      e164_range:
+      - '+821010001000'
+      - '+821010001009'
+    answer: normal
+    dtmf: rfc4733
+    thig: false
+    tls_client_auth: false
+    tls_verify: false
+    tls_client_cert: false
+    seed:
+      enabled: true
+      distribution: failover
+      priority: 100
+      weight: 1
+      acl: deny
+media:
+  samples:
+    ringback:
+      pcmu: ringback_kr.pcmu
+      pcma: ringback_kr.pcma
+      amr-wb: synthetic
+    voice:
+      amr-wb: sample_voice.amrwb
+    tone_1k:
+      pcmu: tone_1k.pcmu
+      pcma: tone_1k.pcma
+layout:
+  regions:
+    h48:
+      x: 140.0
+      y: 20.0
+      w: 820.0
+      h: 680.0
+    h45:
+      x: 590.0
+      y: 480.0
+      w: 300.0
+      h: 120.0
+  items:
+    w1:
+      x: 40.0
+      y: 20.0
+    oam:
+      x: 430.0
+      y: 20.0
+    csc:
+      x: 440.0
+      y: 80.0
+    cmp:
+      x: 470.0
+      y: 320.0
+    csp:
+      x: 440.0
+      y: 150.0

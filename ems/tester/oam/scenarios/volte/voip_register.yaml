@@ -1,0 +1,10 @@
+# 관제 VoIP 회선(kind=voip, TLS) 등록 — .48 접속서비스 voip 레코드 검증 (운영자본, tb48)
+id: VOIP-REGISTER
+title: 유선 VoIP 회선 등록/해제 (TLS)
+tags: [voip, register]
+roles:
+  ue: { pool: voip_ue }
+flow:
+  - { step: register,   who: [ue], expect: { code: 200, rrd_ms: { p95: 1500 } } }
+  - { step: wait,       seconds: 3 }
+  - { step: deregister, who: [ue], expect: { code: 200 } }

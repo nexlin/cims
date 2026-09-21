@@ -1,0 +1,171 @@
+# media01 개발 서버(.48) 동거 토폴로지 — 콘솔 [시험 > 토폴로지] 레코드 #1 의 YAML 표현(소스 관리본). 비밀은 환경변수 이름만.
+name: media01-dev
+hosts:
+  h48:
+    name: media01
+    ip: 121.161.164.48
+workers:
+- name: w1
+  host: h48
+  port: 7100
+  cpus: 8
+target:
+  name: media01-dev
+  kind: cims
+  nodes:
+    csp:
+      role: sip
+      host: h48
+      fn: CSP
+      procs:
+      - csp
+      logs: []
+      sip:
+        domains:
+        - volte.cims.example.kr
+        - ptt.cims.example.kr
+        listeners:
+          udp:
+            edge: access
+            port: 15060
+            protocol: udp
+          tls:
+            edge: access
+            port: 15061
+            protocol: tls
+          peering:
+            edge: peering
+            port: 15070
+            protocol: udp
+            local_node: cims-tester-peering
+    cmp:
+      role: media
+      host: h48
+      fn: CMP
+      procs:
+      - cmp
+      logs: []
+      media:
+        rtp_range:
+        - 20000
+        - 29999
+        control: 9001
+    csc:
+      role: subscriber
+      host: h48
+      fn: CSC
+      procs:
+      - csc
+      logs: []
+      api:
+        port: 4430
+        tls: true
+    oam:
+      role: oam
+      host: h48
+      fn: OAM
+      procs:
+      - oam
+      logs: []
+      oam:
+        port: 4419
+        tls: true
+        token_env: TESTER_OAM_TOKEN
+        csp_deployment_id: 34
+        observe: []
+pools:
+  volte_ue:
+    worker: w1
+    kind: ue
+    access: csp
+    source:
+      creds: creds/volte.jsonl
+      offset: 0
+    transport: udp
+    srtp: 'off'
+    register_expires: 3600
+    prack: false
+    dtmf: rfc4733
+    tls_verify: false
+    tls_client_cert: false
+    msrp: false
+  pbx_hq:
+    worker: w1
+    kind: peer
+    peering: csp
+    profile: pbx
+    bind:
+      port: 5090
+      protocol: udp
+    domain: pbx.hq.test
+    identities:
+      did_range:
+      - '0212345000'
+      - 0212345099
+      ext_len: 4
+    register:
+      user: pbx-hq
+      ha1_env: PBX_HA1
+      expires: 3600
+    codecs:
+    - PCMA
+    - PCMU
+    answer: normal
+    dtmf: rfc4733
+    thig: false
+    tls_client_auth: false
+    tls_verify: false
+    tls_client_cert: false
+    seed:
+      enabled: true
+      distribution: failover
+      priority: 100
+      weight: 1
+  ptt_ue:
+    worker: w1
+    kind: ue
+    access: csp
+    source:
+      creds: creds/ptt.jsonl
+      offset: 0
+    service: ptt
+    transport: udp
+    srtp: 'off'
+    register_expires: 3600
+    prack: false
+    dtmf: rfc4733
+    tls_verify: false
+    tls_client_cert: false
+    msrp: true
+media:
+  samples:
+    ringback:
+      pcmu: ringback_kr.pcmu
+      pcma: ringback_kr.pcma
+      amr-wb: synthetic
+    tone_1k:
+      pcmu: tone_1k.pcmu
+      pcma: tone_1k.pcma
+layout:
+  regions:
+    h48:
+      x: 100.0
+      y: 70.0
+      w: 750.0
+      h: 450.0
+  items:
+    csp:
+      x: 450.0
+      y: 150.0
+    cmp:
+      x: 450.0
+      y: 290.0
+    csc:
+      x: 450.0
+      y: 80.0
+    oam:
+      x: 450.0
+      y: 10.0
+    w1:
+      x: 40.0
+      y: 170.0

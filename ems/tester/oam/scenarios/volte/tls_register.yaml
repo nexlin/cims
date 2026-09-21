@@ -1,0 +1,10 @@
+# 관제 VoLTE 회선(sip_transport=TLS 고착) 등록 — TLS 접속점 (운영자본, tb48)
+id: VOLTE-TLS-REGISTER
+title: 관제 VoLTE 회선 등록/해제 (TLS)
+tags: [volte, register]
+roles:
+  ue: { pool: volte_ue_tls }
+flow:
+  - { step: register,   who: [ue], expect: { code: 200, rrd_ms: { p95: 1500 } } }
+  - { step: wait,       seconds: 3 }
+  - { step: deregister, who: [ue], expect: { code: 200 } }

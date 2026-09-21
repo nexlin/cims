@@ -1,0 +1,13 @@
+# 동봉 TRUNK-PBX-REGISTER 의 tb48 사본 — 등록형 트렁크 풀 pbx_reg(1015~1019) 를 가리킨다(동봉본은 고정 IP 풀 pbx_hq).
+id: TRUNK-PBX-REGISTER-REG
+title: IP-PBX 트렁크 REGISTER(pbx_reg) 뒤 발신
+tags: [trunk, pbx, register]
+roles:
+  pbx:    { pool: pbx_reg }
+  callee: { pool: volte_ue }
+flow:
+  - { step: register,   who: [pbx, callee], expect: { code: 200 } }
+  - { step: invite,     from: pbx, to: callee }
+  - { step: answer,     who: [callee], after_ms: 500, expect: { code: 200 } }
+  - { step: media_hold, seconds: 3 }
+  - { step: bye,        from: pbx, expect: { sdd_ms: { p95: 300 } } }
