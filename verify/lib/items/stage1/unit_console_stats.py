@@ -7,6 +7,7 @@
                                             자료 없는 날 행/합계는 빈칸
   · tests/frontend/matrix_fold.test.mjs     빈 구간 접기 경계 · 범위 표기
   · tests/frontend/source_notice.test.mjs   못 본 구간 경고 띠 — 문구·조회 조건별 분리·해제
+  · tests/frontend/msg_key_order.test.mjs   메시지 교차표 열 순서 — 메서드 묶음·요청→응답·코드 수순
 
 TS 를 그대로 돌릴 수 없어 esbuild 로 번들해 node 로 실행한다. 콘솔 node_modules 가 없는
 환경(빌드 안 한 트리)에서는 SKIP — 검사할 수 없는 것과 실패를 구분한다.
@@ -31,6 +32,8 @@ _CASES = [
      "ems/core/console/src/widgets/shapes/matrixFold.ts"),
     ("tests/frontend/source_notice.test.mjs",
      "ems/core/console/src/widgets/shapes/sourceNotice.ts"),
+    ("tests/frontend/msg_key_order.test.mjs",
+     "ems/core/console/src/widgets/shapes/dataSourceSpec.ts"),
 ]
 
 

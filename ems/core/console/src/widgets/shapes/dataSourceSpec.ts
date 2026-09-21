@@ -23,6 +23,39 @@ interface DistMap {
   partsObject?: string
   series?: { key: string; label: string; value: string; color?: string }[]
 }
+/** 메시지 통계 키 한 조각 — `INVITE` / `INVITE/401` / `488`(귀속 실패). */
+interface MsgKey { method: string; code: string; orphan: boolean }
+
+/** 키를 (메서드, 응답코드)로 가른다. 규약은 handlers/stats.py `_parse_msg_method` 가 정본. */
+export function parseMsgKey(key: string): MsgKey {
+  const i = key.indexOf('/')
+  if (i > 0) return { method: key.slice(0, i), code: key.slice(i + 1), orphan: false }
+  // 생코드 = CSeq 를 못 읽어 원 요청에 귀속되지 않은 응답. 메서드가 없으므로 따로 몬다.
+  if (/^\d+$/.test(key)) return { method: '', code: key, orphan: true }
+  return { method: key, code: '', orphan: false }
+}
+
+/** 메서드 묶음 이름 — 경계선(그룹)과 정렬에 함께 쓴다. */
+export function msgGroupOf(key: string): string {
+  const k = parseMsgKey(key)
+  return k.orphan ? '(메서드 미상)' : k.method
+}
+
+/**
+ * 메시지 키 정렬 — 메서드 가나다순, 묶음 안에서 **요청 먼저 그다음 응답(코드 오름차순)**.
+ * 귀속 실패 응답은 맨 뒤.
+ */
+export function compareMsgKeys(a: string, b: string): number {
+  const ka = parseMsgKey(a), kb = parseMsgKey(b)
+  if (ka.orphan !== kb.orphan) return ka.orphan ? 1 : -1
+  if (ka.method !== kb.method) return ka.method.localeCompare(kb.method)
+  // 요청(코드 없음)이 자기 응답들보다 앞
+  if (!ka.code !== !kb.code) return ka.code ? 1 : -1
+  const na = Number(ka.code), nb = Number(kb.code)
+  if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb
+  return ka.code.localeCompare(kb.code)
+}
+
 interface TableMap { fromObject?: string; from?: string; key?: string; value?: string; columns: [string, string] }
 /**
  * 교차표 — 행은 버킷 배열, 칸은 버킷 안의 {항목: 수} map.
@@ -31,11 +64,25 @@ interface TableMap { fromObject?: string; from?: string; key?: string; value?: s
  *   cells       버킷 행 기준, {항목: 수} map 의 경로. 여러 개면 **합산**한다
  *               (예: ['in','out'] → 수신+송신 합).
  *   limit       열 상한(합계 내림차순). 초과분은 '기타' 로 접는다.
+ *   order       남은 열의 **배열 순서**. 'count'(기본)=합계 내림차순,
+ *               'message'=SIP/제어 메시지 키 규약으로 정렬(아래).
  */
 interface MatrixMap {
   from: string; label: string[]; limit?: number; unit?: string
   /** 동적 열 — 버킷 안의 {항목: 수} map 경로들. 여러 개면 합산(예: ['in','out']). */
   cells?: string[]
+  /**
+   * 열 배열 순서. **뽑는 기준(limit)은 언제나 합계 내림차순**이고 이것은 뽑힌 열을 어떻게
+   * 늘어놓을지만 정한다 — 둘을 같이 두면 자주 나오는 열이 잘려 나간다.
+   *
+   * 'message' = 메시지 통계 키 규약(`INVITE`, `INVITE/401`, 귀속 실패 시 생코드 `488`).
+   * 서버가 응답을 CSeq 로 원 요청에 귀속시켜 `메서드/코드` 로 내주는데
+   * (handlers/stats.py `_parse_msg_method`), 합계 내림차순으로 늘어놓으면 `INVITE/401`(3.5만)이
+   * `INVITE`(3천)보다 앞에 와서 **한 트랜잭션이 표 여기저기로 흩어진다.** 메서드로 묶고 그
+   * 안에서 요청 → 응답(코드 오름차순) 순으로 두면 눈이 트랜잭션 단위로 따라간다.
+   * 메서드에 귀속되지 않은 응답은 맨 뒤 `(메서드 미상)` 묶음으로 몬다.
+   */
+  order?: 'count' | 'message'
   /**
    * 고정 열 — 열이 미리 정해진 표(호 통계의 시도·성립·소통·완료).
    *   path      버킷 행 기준 경로
@@ -320,6 +367,7 @@ export function buildDataSource(spec: DataSourceSpec): DataSource {
       for (const r of rowsRaw) {
         for (const [k, v] of Object.entries(r.cells)) totals[k] = (totals[k] ?? 0) + v
       }
+      // **뽑기는 언제나 합계 내림차순** — 자주 나오는 열이 limit 에 잘려 나가면 안 된다.
       let keys = Object.keys(totals).sort((a, b) => totals[b] - totals[a] || a.localeCompare(b))
       let folded: string[] = []
       const lim = c.limit ?? 0
@@ -327,9 +375,12 @@ export function buildDataSource(spec: DataSourceSpec): DataSource {
         folded = keys.slice(lim)
         keys = keys.slice(0, lim)
       }
+      // 뽑은 뒤에 **늘어놓는 순서**만 바꾼다 (order='message' — 트랜잭션 단위로 묶기).
+      if (c.order === 'message') keys = [...keys].sort(compareMsgKeys)
       const ETC = '기타'
       const columns: MatrixData['columns'] = keys.map(k => ({
         key: k, label: c.cellLabels?.[k] ?? k, total: totals[k],
+        ...(c.order === 'message' ? { group: msgGroupOf(k) } : {}),
       }))
       if (folded.length) {
         columns.push({ key: ETC, label: `${ETC}(${folded.length})`,

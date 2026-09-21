@@ -276,9 +276,9 @@
             "in",
             "out"
           ],
-          "limit": 14,
           "unit": "건",
-          "blankLabel": "메시지가 없는 시간"
+          "blankLabel": "메시지가 없는 시간",
+          "order": "message"
         }
       }
     },
@@ -345,9 +345,9 @@
             "in",
             "out"
           ],
-          "limit": 14,
           "unit": "건",
-          "blankLabel": "메시지가 없는 시간"
+          "blankLabel": "메시지가 없는 시간",
+          "order": "message"
         }
       }
     },
@@ -414,9 +414,9 @@
             "in",
             "out"
           ],
-          "limit": 14,
           "unit": "건",
-          "blankLabel": "메시지가 없는 시간"
+          "blankLabel": "메시지가 없는 시간",
+          "order": "message"
         }
       }
     },
@@ -483,9 +483,9 @@
             "in",
             "out"
           ],
-          "limit": 14,
           "unit": "건",
-          "blankLabel": "메시지가 없는 시간"
+          "blankLabel": "메시지가 없는 시간",
+          "order": "message"
         }
       }
     },

@@ -11,6 +11,8 @@
                                       504 인데 작업은 끝까지 돌아 운영자가 두 번 시킨다 + 0 건 서비스 칸 배선
   · tests/test_stats_ptt_attempts.py  PTT 시도 장부 — 분모가 생겼는지, 없을 때 거짓값(성공률 350%·0%)을 안 내는지
   · tests/test_stats_descriptor_reasons.py  표 열이 가리키는 집계 경로가 실제 응답 키와 맞는지(툴팁 합 = 칸 값)
+  · tests/test_oam_stats_method_key.py  메시지 통계 **메서드 키** — 요청/응답(CSeq 귀속)/JSON 제어명령은 살리고
+       SIP 도 JSON 도 아닌 바이트(평문 포트로 온 TLS 레코드)는 `unknown` 으로 몬다
 """
 from __future__ import annotations
 
@@ -25,7 +27,8 @@ _NAME = "OAM SIP 통계 서비스축·프로브·구간 조회·저장소 unit t
 _TESTS = ["tests/test_oam_stats_classify.py", "tests/test_stats_probe.py",
           "tests/test_stats_rollup_range.py", "tests/test_stats_store.py",
           "tests/test_stats_rebuild_job.py", "tests/test_stats_ptt_attempts.py",
-          "tests/test_stats_descriptor_reasons.py"]
+          "tests/test_stats_descriptor_reasons.py",
+          "tests/test_oam_stats_method_key.py"]
 
 
 @verify_item(

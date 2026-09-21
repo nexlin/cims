@@ -1006,6 +1006,10 @@ _SIP_REQUEST_METHODS = {
     'SUBSCRIBE', 'NOTIFY', 'PUBLISH', 'INFO', 'REFER', 'MESSAGE', 'UPDATE',
 }
 
+# 메서드로 인정할 토큰 꼴 — 영문으로 시작하는 ASCII 토큰(RFC 3261 §25.1 token 의 실용 부분집합).
+# 표준 메서드 목록이 아니라 **꼴**로 거르는 이유는 위 `_parse_msg_method` 주석 참조.
+_METHOD_TOKEN_RE = re.compile(r'[A-Z][A-Z0-9_.\-]{0,31}')
+
 
 def _parse_msg_method(msg: str) -> str:
     """SIP/CMP 원문(msg)에서 통계용 키 추출.
@@ -1047,10 +1051,53 @@ def _parse_msg_method(msg: str) -> str:
         cseq = _cseq_method(msg)
         return f'{cseq}/{code}' if cseq else code
     method = tok[0].upper()
-    return method if method in _SIP_REQUEST_METHODS else method
+    if method in _SIP_REQUEST_METHODS:
+        return method
+    # 표준 14종 밖이어도 **메서드로 쓸 수 있는 토큰**이면 살린다 — 확장 메서드(RFC 6086 INFO
+    # 계열 등)와 이 파서를 함께 쓰는 CMP/CSC 명령(`RELAY_ADD`·`USER_CHANGED` 등, 평문으로
+    # 실려 오는 경우)이 여기로 온다. 화이트리스트로 자르면 그쪽 통계가 통째로 사라진다.
+    #
+    # 반대로 토큰 꼴조차 아닌 것은 **SIP 도 JSON 도 아닌 바이트**다 — 평문 포트로 들어온 TLS
+    # 레코드(0x16 …)가 실측된다. 그대로 두면 깨진 글자가 메서드 열/비중 차트에 자리를 차지하고
+    # 통계를 오염시킨다. 버리지 않고 `unknown` 한 칸으로 몬다 — 수가 튀는 것 자체가 신호다
+    # (평문 포트로 TLS 를 시도하는 스캐너).
+    return method if _METHOD_TOKEN_RE.fullmatch(method) else 'unknown'
 
 
-_CSEQ_RE = re.compile(r'^CSeq\s*:\s*\d+\s+([A-Za-z]+)\s*$', re.IGNORECASE | re.MULTILINE)
+def sanitize_method_key(key: str) -> str:
+    """저장된 메시지 통계 키를 표시 가능한 꼴로 정규화 — **읽는 쪽** 방어.
+
+    `_parse_msg_method` 가 쓰는 쪽을 막아도 **이미 집계 저장본에 박힌 키**는 그대로 남는다
+    (집계는 조회 때가 아니라 수집 때 한 번 돈다). 재집계 없이 과거 구간까지 바로잡으려면
+    읽을 때 한 번 더 걸러야 한다 — 그 자리가 여기다.
+
+    살리는 것: `INVITE`(요청) · `INVITE/401`(응답, 메서드 귀속됨) · `488`(귀속 실패한 생코드)
+    `unknown` 으로 모는 것: 메서드 자리가 토큰 꼴이 아닌 키 — 평문 포트로 들어온 TLS
+    레코드(0x16 …)가 실측된다. 여러 쓰레기 키가 한 칸으로 합쳐지도록 **합산**해 쓴다.
+    """
+    if not key:
+        return 'unknown'
+    head, sep, _tail = key.partition('/')
+    if not sep and head.isdigit():
+        return key                      # 귀속 실패 응답 — 코드만 남은 정상 키
+    return key if _METHOD_TOKEN_RE.fullmatch(head.upper()) else 'unknown'
+
+
+def _sanitize_count_map(m) -> dict:
+    """{키: 수} 맵을 정규화 — 같은 칸으로 모인 키는 합산한다."""
+    out: dict = {}
+    if not isinstance(m, dict):
+        return out
+    for k, v in m.items():
+        kk = sanitize_method_key(str(k))
+        out[kk] = out.get(kk, 0) + int(v or 0)
+    return out
+
+
+# 시퀀스 번호는 `-?\d+` — 규격(RFC 3261 §20.16)상 음수는 없지만 스캐너가 보내고 psip 이
+# 그대로 응답에 복사해 되돌려 보낸다(F-59). 여기서 안 받으면 그 응답이 원 요청에 귀속되지
+# 못하고 생코드(`488`·`100`)로 흩어진다.
+_CSEQ_RE = re.compile(r'^CSeq\s*:\s*-?\d+\s+([A-Za-z]+)\s*$', re.IGNORECASE | re.MULTILINE)
 
 
 def _cseq_method(msg: str) -> str:
@@ -1213,6 +1260,7 @@ def _messages_stats_rollup(config, from_dt: str, to_dt: str, gran: str,
         out = {}
         for io in ('in', 'out'):
             for k, v in (m.get(io) or {}).items():
+                k = sanitize_method_key(str(k))   # 저장본에 박힌 쓰레기 키 방어
                 out[k] = out.get(k, 0) + int(v or 0)
         return out
 
@@ -1236,8 +1284,8 @@ def _messages_stats_rollup(config, from_dt: str, to_dt: str, gran: str,
             'count': per.get('all', 0),
             'volte': per.get('volte', 0), 'ptt': per.get('ptt', 0),
             'unknown': per.get('unknown', 0),
-            'in': (b.get('all') or {}).get('msg', {}).get('in', {}),
-            'out': (b.get('all') or {}).get('msg', {}).get('out', {}),
+            'in': _sanitize_count_map((b.get('all') or {}).get('msg', {}).get('in', {})),
+            'out': _sanitize_count_map((b.get('all') or {}).get('msg', {}).get('out', {})),
         }
         if gran == '1h':
             try:
