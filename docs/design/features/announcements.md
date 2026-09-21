@@ -281,15 +281,16 @@ CallMap 은 relay 서술자와 `m_strAnnProfile` 만 갖는다. 링백 entry(최
 피어(트렁크) leg 가 발신자면 인바운드 Route 의 RemoteNode 정책 `announcement_profile`(예 `trunk` — 피어에는 안내를 내지 않고 코드만 넘기는 것이 NNI 관례,
 TS 29.165) 를 본다. 어느 것도 없으면 `DefaultProfile`.
 
-### 6.3 가입자 단위 — 링백 음원 (확장 자리, P1 은 훅만)
+### 6.3 가입자 단위 — 링백 음원
 
-**해석 순서**(모든 상황 공통): ① 가입자 항목 → ② 접속서비스 프로파일 → ③ 전역 기본 프로파일. P1 에서 ① 이 값을 갖는 상황은 없고 구조만 둔다.
+**해석 순서**(ringback 상황): ① 피착신 가입자 `ringback_media` → ② 접속서비스 프로파일 → ③ 전역 기본 프로파일. 스위치는 서비스(프로파일 `ringback` 이 `none` 이면
+가입자 값이 있어도 재생하지 않는다), 음원은 가입자.
 
-- 대상은 **`ringback` 음원 하나**(개인 컬러링 — 피착신 가입자가 고른 음원을 발신자가 듣는다). 실패 안내·MOH 는 사업자 정책이라 가입자 단위로 두지 않는다.
-- 자료 자리 = 가입 테이블(`volte_subscriptions`/`voip_subscriptions`) `ringback_media VARCHAR(64) NULL`(음원 id `sub:<sid>`/`op:<id>`/`sys:<id>`) — **P2 마이그레이션**.
-  CSP 는 `CspUser` 에 실어 `Resolve` ① 에서 읽는다(`CspUser.m_strRingbackMedia`, 비면 건너뜀). 콘솔·CSC 프로비저닝(`POST /users/{pid}/ringback` — WAV 업로드 →
-  라이브러리 `sub:` 등록 §7 → 컬럼 기록)은 P2.
-- 접속서비스 `ringback.mode=media` 가 켜져 있어야 ① 이 의미를 갖는다(스위치는 서비스, 음원은 가입자).
+- 대상은 **`ringback` 음원 하나**(개인 컬러링 — 피착신 가입자가 고른 음원을 발신자가 듣는다). 실패 안내·보류 음악은 사업자 정책이라 가입자 단위로 두지 않는다.
+- 자료 = 가입 테이블(`volte_subscriptions`/`voip_subscriptions`) `ringback_media VARCHAR(64) NULL`(`sql/migrate_subscription_ringback.sql`, 재실행 안전). 값 = 라이브러리 음원 id
+  `sys:<name>`·`op:<name>`(·`sub:<name>` 예약). CSC `POST/PUT /users/{pid}/{volte|voip}` 의 `ringback_media`(형식 검사, 컬럼 없으면 400 `schema_not_migrated`)가 쓰고
+  목록·단건 응답에 실린다. CSP 는 `DbManager` 가 컬럼 존재를 기동 때 확인해 `LoadAllUsers`/`SelectUser` 로 `CspUser::m_strRingbackMedia` 에 읽는다(USER_CHANGED 반영).
+- `CCspAnnouncementService::OnRingback` 이 프로파일 동작을 고른 뒤 피착신 `CspUser` 의 값이 있으면 `media` 만 바꾼다. 가입자별 WAV 업로드(`sub:` 등록)는 후속 — 지금은 라이브러리 id 선택.
 
 ## 7. 서비스 음원 라이브러리
 
@@ -372,11 +373,13 @@ CMake `dist` 가 `dist/cmp/announcements/sys/` 에 복사하고, OAM 패키지�
 
 ## 11. P2 — 후속 상황
 
-- **통화중대기(TS 24.615)**: CSP 가 착신 가입자의 활성 호(CallMap)를 보고 두 번째 INVITE 를 판정 → 착신 UE 로 가는 INVITE 에
-  `Alert-Info: <urn:alert:service:call-waiting>`(RFC 7462 — 단말이 대기음을 낸다) → 발신자에게 180 + 프로파일 `call_waiting`(`sys:ann_call_waiting` 또는 링백).
-  단말이 대기음을 못 내는 배치를 위한 **망 in-band 대기음**은 활성 통화에 톤을 섞는 `mode=mix`(디코드·믹스·재인코딩 — 변환 슬롯 소비) 가 선행돼야 한다.
+- **통화중대기(TS 24.615) — 시그널링 축은 구현**: `EventIncomingCall` 이 착신 가입자의 확립 호(`CCallMap::HasEstablishedCallFor`)를 보면 가입자 B-leg INVITE 에
+  `Alert-Info: <urn:alert:service:call-waiting>`(RFC 7462 — 단말이 대기음을 낸다)을 싣고 `CCallInfo::m_bCallWaiting` 을 켠다. 발신자에게는 B 의 SDP 없는 18x 에서
+  `OnRingback(…, ANN_SIT_CALL_WAITING)` — 프로파일 `call_waiting`(`mode: media|announce`, 예 `sys:ann_call_waiting` loop) 규칙이 있으면 그것으로, 없으면 `ringback` 규칙으로
+  183+SDP 안내/링백을 들려준다(기본 표는 둘 다 none — 배치가 켠다). 피어 착신·PTT 는 대상이 아니다.
+  **남은 것** = 단말이 대기음을 못 내는 배치를 위한 **망 in-band 대기음**(활성 통화에 톤을 섞는 `mode=mix` — 디코드·믹스·재인코딩, 변환 슬롯 소비)과 실단말 실측.
 - **착신전환 안내(TS 24.604)**: 현행 302 리다이렉트 모델은 안내 삽입 지점이 없다. 서버측 전환(B2BUA 가 새 B leg 를 낸다)으로 바꿀 때 `forwarded` 상황을 넣는다.
-- **다이얼로그 이전 거절**(3.2)의 판정 지점 이동 · **가입자 링백**(6.3 컬럼·프로비저닝·콘솔) · **다국어 세트**(프로파일을 언어별로 두면 된다 — 모델 변경 없음).
+- **다이얼로그 이전 거절**(3.2)의 판정 지점 이동 · **가입자 링백 WAV 업로드**(`sub:` 등록 — 6.3 은 라이브러리 id 선택까지 구현) · **다국어 세트**(프로파일을 언어별로 두면 된다 — 모델 변경 없음).
 - **관제 큐/ACD**([dispatch_center.md §10](dispatch_center.md)): 대표번호 대기열의 "잠시만 기다려 주십시오"·순번 안내는 3.4 의 링백 재생기(repeat 0)에
   시퀀스 교체(RELAY_PLAY 교체 = `replaced`)를 얹는 것이다.
 - `mix` 모드·런타임 인코딩(PCM 마스터 → leg 코덱, 변환 슬롯 사용)·영상 안내.
@@ -392,6 +395,8 @@ CMake `dist` 가 `dist/cmp/announcements/sys/` 에 복사하고, OAM 패키지�
 | ⑤ 계측기 | 워커 RING 183+SDP → `progressTx`, 실패 최종 응답에 early RTP 판정, `invite` expect 에 `early_media_pct/early_rtp_pct`, 시나리오 `VOLTE-ANN-NOTFOUND`·`VOLTE-ANN-NO-ANSWER` | tb48 실측은 배포 뒤 |
 | ⑥ OAM 라이브러리 | base OAM `services/announcements.py`·`handlers/announcements.py`(`/api/v1/announcements`)·agent `/module-files`·`/module-file`(GET/PUT/DELETE)·`_agent_proxy_call raw`·콘솔 `/service/announcements`(`AnnouncementsPage`)·`Announcements.SampleConv` | 서비스 오프라인 시험(등록·중복 409·삭제·sys 보호) pass · 콘솔 tsc pass · 노드 배포는 agent 0.2.103 배포 뒤 실측 |
 | ⑦ 문서 | 본 문서 · cmp_media_api §1.1/§5.1/§5.4/§6.7/§8/§9 · cmp.md §1.1/§9/§12 · csp.md §1.1/§3.1/§3.12/§6.0 · volte_flows C9/C10 · sip_service_model §2-2/§2-9 · agent_api Sync REST · alarm_catalog A-PRC-034·A-QOS-002 ann_pool · VERIFICATION_PROCESS S3-SCN-ANN · CLAUDE.md | — |
+
+| ⑧ P2 선반영 | 통화중대기 시그널링(Alert-Info + 발신자 `call_waiting` 안내/링백) · 가입자 링백(`ringback_media` 컬럼·CSC API·CSP 해석) · 감사 이벤트 E-AUD-017(등록·삭제·배포) · CSP 모니터 `MC_SIP_STATS` 에 `ann_started/ann_fallback/ann_active_*` | 빌드·단위시험 pass, 실측은 배포 뒤 |
 
 **남은 것(P1 실측)** = 보류 음악·서버 링백의 단말 실측(cspsim 에 hold 트리거가 없다 — 실단말 또는 계측기 `hold`/`resume` 단계), 배포 뒤 노드 배포·콘솔 등록 실측, CSP SipStats 에 `ann_started/ann_fallback` 노출.
 패키지 버전 = cmp 0.2.92 · csp 0.2.140 · oam 0.2.152 · agent 0.2.103 · oam-cims-tester 0.1.21 · cims-tester-worker 0.1.16 (라이브 배포는 정지창 — 안내 없는 구 CMP 와 새 CSP 의 혼용은 `resource.ann` 미광고로 안전하게 폴백한다).

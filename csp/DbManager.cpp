@@ -107,6 +107,13 @@ void CDbManager::ProbeSchema() {
     pRes = ExecuteSelect( "SHOW COLUMNS FROM volte_subscriptions LIKE 'pickup_group'" );
     m_bHasPickupColumn = pRes && mysql_num_rows( pRes ) > 0;
     if ( pRes ) mysql_free_result( pRes );
+    pRes = ExecuteSelect( "SHOW COLUMNS FROM volte_subscriptions LIKE 'ringback_media'" );
+    m_bHasRingbackColumn = pRes && mysql_num_rows( pRes ) > 0;
+    if ( !m_bHasRingbackColumn )
+        CLog::Print(
+            LOG_INFO,
+            "[DB] subscriptions.ringback_media 없음 — 가입자 링백 비활성 (migrate_subscription_ringback.sql)" );
+    if ( pRes ) mysql_free_result( pRes );
     if ( !m_bHasPickupColumn )
         CLog::Print( LOG_INFO,
                      "[DB] subscriptions.pickup_group column absent — migrate_subscription_pickup_group.sql 미적용. "
@@ -160,6 +167,11 @@ std::string CDbManager::AuthSchemeCol( const char *pszAlias ) const {
 std::string CDbManager::PickupGroupCol( const char *pszAlias ) const {
     if ( !m_bHasPickupColumn ) return "''";
     return std::string( "COALESCE(" ) + pszAlias + ".pickup_group,'')";
+}
+
+std::string CDbManager::RingbackCol( const char *pszAlias ) const {
+    if ( !m_bHasRingbackColumn ) return "''";
+    return std::string( "COALESCE(" ) + pszAlias + ".ringback_media,'')";
 }
 
 std::vector<CDbManager::SubTable> CDbManager::SubTables() const {
@@ -336,7 +348,7 @@ bool CDbManager::SelectUser( const std::string &strUserId, CspUser &clsUser ) {
                                  "SELECT s.id, u.name, u.org_id, s.dnd, s.forward_id, u.id AS person_id, "
                                  "       COALESCE(s.service_ref,''), COALESCE(s.imsi,''), " ) +
                              Ha1Col( "s" ) + ", COALESCE(s.sip_transport,''), " + AuthSchemeCol( "s" ) + ", " +
-                             PickupGroupCol( "s" ) + " FROM " + t.pszTable +
+                             PickupGroupCol( "s" ) + ", " + RingbackCol( "s" ) + " FROM " + t.pszTable +
                              " s JOIN users u ON s.user_id = u.id "
                              "WHERE s.id='" +
                              Escape( strUserId ) + "'";
@@ -368,6 +380,7 @@ bool CDbManager::SelectUser( const std::string &strUserId, CspUser &clsUser ) {
     clsUser.m_strSipTransport = row[9] ? row[9] : "";
     clsUser.m_strAuthScheme = row[10] ? row[10] : "digest";
     clsUser.m_strPickupGroup = row[11] ? row[11] : "";
+    clsUser.m_strRingbackMedia = row[12] ? row[12] : "";  // 가입자 링백 음원(announcements.md §6.3)
     clsUser._loadTime = time( nullptr );
 
     mysql_free_result( pRes );
@@ -557,7 +570,8 @@ bool CDbManager::LoadAllUsers( CspUserMap &clsMap, bool *pbUnavailable ) {
                                  "       COALESCE(s.service_ref, ''), COALESCE(s.imsi, ''), "
                                  "       " ) +
                              Ha1Col( "s" ) + ", COALESCE(s.sip_transport, ''), " + AuthSchemeCol( "s" ) + ", " +
-                             PickupGroupCol( "s" ) + " FROM " + t.pszTable + " s JOIN users u ON s.user_id = u.id";
+                             PickupGroupCol( "s" ) + ", " + RingbackCol( "s" ) + " FROM " + t.pszTable +
+                             " s JOIN users u ON s.user_id = u.id";
 
         MYSQL_RES *pRes = ExecuteSelect( strSql );
         if ( !pRes ) {
@@ -584,6 +598,7 @@ bool CDbManager::LoadAllUsers( CspUserMap &clsMap, bool *pbUnavailable ) {
             // pickup_group — 단건 SelectUser 와 같은 열. 전량 적재가 이 열을 빠뜨리면 부팅/CSC_RESTART 뒤
             //   전원이 org 폴백으로 등록돼 관제 그룹 축(dispatch_center.md §3.2)이 어긋난다.
             clsUser.m_strPickupGroup = row[11] ? row[11] : "";
+            clsUser.m_strRingbackMedia = row[12] ? row[12] : "";
             clsUser._loadTime = time( nullptr );
             if ( !clsUser.m_strId.empty() ) {
                 clsMap.Insert( clsUser );

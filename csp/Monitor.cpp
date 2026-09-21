@@ -2,6 +2,7 @@
 #include "Monitor.h"
 
 #include "CallMap.h"
+#include "CspAnnouncement.h"
 #include "Log.h"
 #include "MemoryDebug.h"
 #include "MonitorDefine.h"
@@ -45,6 +46,7 @@ bool CMonitor::RecvRequest( const char *pszRequest, CMonitorString &strResponse 
         gclsUserAgent.m_clsSipStack.GetString( strResponse );
     } else if ( !strcmp( pszRequest, MC_SIP_STATS ) ) {
         gclsSipStatsMonitor.GetString( strResponse );
+        gclsAnnouncement.GetString( strResponse );  // 안내음성 카운터 (announcements.md §9)
     }
 #ifdef _DEBUG
     else if ( !strcmp( pszRequest, MC_STOP ) ) {

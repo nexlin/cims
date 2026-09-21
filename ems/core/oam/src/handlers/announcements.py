@@ -17,6 +17,20 @@ from urllib.parse import unquote
 
 from httpsrv.handler import HandlerArgs, HandlerResult
 from services import announcements as ann
+from services import event_log, paths
+
+
+def _audit(config: dict, payload: dict, action: str, mid: str, extra: dict = None) -> None:
+    """감사 이벤트 E-AUD-017 announcement_changed — 등록·삭제·배포 (alarm_catalog). best-effort."""
+    try:
+        actor = f"console:{(payload or {}).get('login_id') or (payload or {}).get('sub') or ''}"
+        ev = {'type': 'announcement_changed', 'code': 'E-AUD-017', 'kind': 'audit',
+              'source': {'mo_class': 'service', 'mo_instance': 'oam/announcements', 'detected_by': 'oam'},
+              'message': f'Announcement media {action}: {mid} by {actor}',
+              'params': {'action': action, 'id': mid, 'actor': actor, **(extra or {})}}
+        event_log.record_event(paths.service_log_dir(config), ev)
+    except Exception:
+        pass
 
 _BASE = '/api/v1/announcements'
 _MOD = 'oam'
@@ -68,13 +82,17 @@ async def handle_announcements(handler_args: HandlerArgs, kwargs: dict) -> Handl
                                    description=q.get('description') or '', loop=(q.get('loop') or '') in ('1', 'true', 'yes'),
                                    normalize=(float(norm) if norm not in (None, '') else None),
                                    replace=(q.get('replace') or '') in ('1', 'true', 'yes'), actor=actor)
+                _audit(config, payload, 'registered', row['id'], {'kind': row.get('kind'), 'duration_ms': row.get('duration_ms')})
                 return _json(201, row)
         elif parts[0] == 'nodes' and len(parts) == 1 and method == 'GET':
             return _json(200, {'nodes': ann.node_status(config)})
         elif parts[0] == 'deploy' and len(parts) == 1 and method == 'POST':
             body = handler_args.body if isinstance(getattr(handler_args, 'body', None), dict) else {}
             ids = body.get('ids') if isinstance(body.get('ids'), list) else None
-            return _json(200, {'result': ann.deploy(config, ids)})
+            result = ann.deploy(config, ids)
+            _audit(config, payload, 'deployed', ','.join(ids) if ids else '*',
+                   {'nodes': {k: {'pushed': len(v.get('pushed') or []), 'errors': len(v.get('errors') or []), 'error': v.get('error')} for k, v in result.items()}})
+            return _json(200, {'result': result})
         else:
             mid = parts[0]
             row = ann.get_media(mid)
@@ -84,6 +102,7 @@ async def handle_announcements(handler_args: HandlerArgs, kwargs: dict) -> Handl
                 return _json(200, row)
             if len(parts) == 1 and method == 'DELETE':
                 ann.delete(mid)
+                _audit(config, payload, 'deleted', mid)
                 out = {'deleted': True, 'id': mid}
                 if (q.get('undeploy') or '') in ('1', 'true', 'yes'):
                     out['undeploy'] = ann.undeploy_file(config, mid)

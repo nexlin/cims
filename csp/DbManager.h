@@ -200,6 +200,9 @@ private:
     bool m_bHasAkaColumns = false;
     /** 픽업 그룹 컬럼(pickup_group — migrate_subscription_pickup_group.sql) 존재 여부 */
     bool m_bHasPickupColumn = false;
+    bool m_bHasRingbackColumn =
+        false;  // subscriptions.ringback_media (migrate_subscription_ringback.sql — announcements.md §6.3)
+    std::string RingbackCol( const char *pszAlias ) const;
     /** 전화 그룹 테이블(phone_groups — migrate_phone_groups_roles.sql) 존재 여부 */
     bool m_bHasPhoneGroupTables = false;
     /** 역할 테이블(roles·role_assignments — migrate_phone_groups_roles.sql) 존재 여부 */

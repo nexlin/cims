@@ -11,10 +11,12 @@
 #include "CspRemoteNodeMap.h"
 #include "CspRouteMap.h"
 #include "CspServiceMap.h"
+#include "CspUser.h"
 #include "GroupCallService.h"
 #include "Log.h"
 #include "MediaSdes.h"
 #include "ModuleDispatcher.h"
+#include "MonitorString.h"
 #include "RelayCodec.h"
 #include "RtpMap.h"
 #include "SimpleJson.h"
@@ -28,6 +30,7 @@ CCspAnnouncementService gclsAnnouncement;
 extern CSipServerSetup gclsSetup;
 extern CCallMap gclsCallMap;
 extern CUserMap gclsUserMap;
+extern CspUserMap gclsCspUserMap;
 extern CCspServiceMap gclsServiceMap;
 extern CCspRouteMap gclsRouteMap;
 extern CCspRemoteNodeMap gclsRemoteNodeMap;
@@ -787,8 +790,8 @@ void CCspAnnouncementService::OnResume( const char *pszHolderCallId, const CCall
 //  서버 링백 (§3.4) — 프로파일 ringback.mode=media 일 때만
 // ──────────────────────────────────────────────────────────────
 
-bool CCspAnnouncementService::OnRingback( const char *pszBCallId, const CCallInfo &clsB,
-                                          CSipCallRtp **ppclsAnswerForA ) {
+bool CCspAnnouncementService::OnRingback( const char *pszBCallId, const CCallInfo &clsB, CSipCallRtp **ppclsAnswerForA,
+                                          EAnnSituation eSit ) {
     (void)pszBCallId;
     if ( ppclsAnswerForA ) *ppclsAnswerForA = NULL;
     if ( !IsEnabled() || clsB.m_bRecv || clsB.m_strPeerCallId.empty() || clsB.m_strRelaySessionId.empty() )
@@ -796,8 +799,19 @@ bool CCspAnnouncementService::OnRingback( const char *pszBCallId, const CCallInf
     const std::string strACallId = clsB.m_strPeerCallId;
     CCallInfo clsA;
     if ( !gclsCallMap.Select( strACallId.c_str(), clsA ) ) return false;
-    const CAnnAction a = Resolve( ANN_SIT_RINGBACK, clsA.m_strAnnProfile );
-    if ( a.IsNone() || a.strMode != "media" || a.strMedia.empty() ) return false;
+    CAnnAction a = Resolve( eSit, clsA.m_strAnnProfile );
+    // 통화중대기(TS 24.615) 규칙이 없으면 일반 링백 규칙으로
+    if ( eSit == ANN_SIT_CALL_WAITING && a.IsNone() ) a = Resolve( ANN_SIT_RINGBACK, clsA.m_strAnnProfile );
+    if ( a.IsNone() || a.strMedia.empty() ) return false;
+    if ( a.strMode != "media" && a.strMode != "announce" ) return false;
+    // 가입자 링백(§6.3) — 피착신 가입자가 고른 음원. 스위치는 서비스 프로파일(none 이면 여기 오지 않는다), 음원은
+    // 가입자
+    if ( eSit == ANN_SIT_RINGBACK && !clsB.m_strRelayCallee.empty() ) {
+        CspUser clsCallee;
+        if ( gclsCspUserMap.Select( clsB.m_strRelayCallee.c_str(), clsCallee ) &&
+             !clsCallee.m_strRingbackMedia.empty() )
+            a.strMedia = clsCallee.m_strRingbackMedia;
+    }
     {
         std::lock_guard<std::mutex> lock( m_mtx );
         if ( m_mapCalls.count( strACallId ) ) return true;  // 이미 링백 중(두 번째 18x) — A 에 SDP 를 낸 상태
@@ -807,7 +821,7 @@ bool CCspAnnouncementService::OnRingback( const char *pszBCallId, const CCallInf
     c.strRelaySessionId = clsB.m_strRelaySessionId;
     c.strSesId = clsB.m_strRelaySesId;
     c.iPeerIdx = clsA.m_bRecv ? 0 : 1;
-    c.eSit = ANN_SIT_RINGBACK;
+    c.eSit = eSit;
     c.iFinalStatus = 0;
     c.strCaller = clsB.m_strRelayCaller;
     c.strCallee = clsB.m_strRelayCallee;
@@ -850,4 +864,21 @@ void CCspAnnouncementService::OnRingbackEnd( const char *pszBCallId, const CCall
     gclsCmpClient.StopAnnouncement( c.strRelaySessionId, c.iPeerIdx, c.strPlayId, c.strSesId, c.strService );
     CLog::Print( LOG_INFO, "Announcement: ringback stopped (answer/early media from B) play=%s CallId=%s",
                  c.strPlayId.c_str(), c.strACallId.c_str() );
+}
+
+void CCspAnnouncementService::GetString( CMonitorString &strBuf ) const {
+    size_t active = 0, hold = 0;
+    {
+        std::lock_guard<std::mutex> lock( m_mtx );
+        active = m_mapCalls.size();
+        hold = m_mapHold.size();
+    }
+    strBuf.AddCol( "ann_started" );
+    strBuf.AddRow( (uint32_t)m_lStarted );
+    strBuf.AddCol( "ann_fallback" );
+    strBuf.AddRow( (uint32_t)m_lFallback );
+    strBuf.AddCol( "ann_active_early" );
+    strBuf.AddRow( (uint32_t)active );
+    strBuf.AddCol( "ann_active_hold" );
+    strBuf.AddRow( (uint32_t)hold );
 }

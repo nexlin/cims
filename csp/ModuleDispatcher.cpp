@@ -1336,6 +1336,16 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         gclsCallDir.WriteSessionMapping( strSessionId, pszCallId, strCallId, strLegASesId );
     }
 
+    // 통화중대기(TS 24.615 §4.5.2) — 착신 가입자가 이미 확립 호 중이면 착신 INVITE 에 Alert-Info
+    // urn:alert:service:call-waiting
+    //   (RFC 7462)을 실어 단말이 대기음을 내게 하고, 발신자에게는 프로파일 `call_waiting` 의 안내/링백(EventCallRing) —
+    //   announcements.md §11. 피어(트렁크) 착신·PTT 는 대상이 아니다(가입자 B-leg 만).
+    if ( !bRoutePrefix && m_clsTas.IsEnabled() && gclsCallMap.HasEstablishedCallFor( pszTo ? pszTo : "" ) ) {
+        pclsInvite->AddHeader( "Alert-Info", "<urn:alert:service:call-waiting>" );
+        gclsCallMap.SetCallWaiting( pszCallId, true );
+        CLog::Print( LOG_INFO, "EventIncomingCall: callee(%s) busy → call waiting (Alert-Info) CallId=%s", pszTo,
+                     pszCallId );
+    }
     if ( gclsUserAgent.StartCall( strCallId.c_str(), pclsInvite ) == false ) {
         gclsCallMap.Delete( pszCallId );
         return RejectVoice( SIP_INTERNAL_SERVER_ERROR );
@@ -1545,7 +1555,8 @@ void CModuleDispatcher::EventCallRing( const char *pszCallId, int iSipStatus, CS
         CSipCallRtp clsRingbackSdp;
         if ( pclsRtp == NULL ) {
             CSipCallRtp *pclsUnused = NULL;
-            if ( gclsAnnouncement.OnRingback( pszCallId, clsCallInfo, &pclsUnused ) &&
+            if ( gclsAnnouncement.OnRingback( pszCallId, clsCallInfo, &pclsUnused,
+                                              clsCallInfo.m_bCallWaiting ? ANN_SIT_CALL_WAITING : ANN_SIT_RINGBACK ) &&
                  gclsUserAgent.GetLocalCallRtp( clsCallInfo.m_strPeerCallId.c_str(), &clsRingbackSdp ) &&
                  clsRingbackSdp.m_iPort > 0 )
                 pclsRtp = &clsRingbackSdp;

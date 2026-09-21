@@ -482,6 +482,7 @@ Content-Type: application/json
 | `imsi` | string | Y | - | Digest username 의 user 파트(`imsi@<domain>`). 유선(§4a)은 번호 숫자 규약 |
 | `service_ref` | string | N(call) / **Y(voip)** | kind 대표 서비스 | 접속서비스 name(`access_services`) — 이 테이블 kind(`volte`)의 서비스만(다른 kind → 400 `service_kind_mismatch`) |
 | `passwd` | string | Y | - | SIP Digest 비밀번호 — **저장되지 않는다.** `ha1=MD5(imsi@domain:realm:passwd)` 로 변환해 저장(realm = 서비스 `auth_realm ?? domain` — `access_services` 컬렉션, 미도달 시 csc.json `Provisioning.Services.<kind>`). 따라서 `service_ref` 가 해석되어야 한다(400) |
+| `ringback_media` | string | N | null | 가입자 링백(컬러링) 음원 id `sys:<name>`·`op:<name>`(안내 라이브러리, [announcements.md §6.3](../design/features/announcements.md)). 접속서비스 프로파일의 ringback 이 `media` 일 때 그 음원 대신 이 음원을 발신자에게 들려준다. `""`=null(서비스 프로파일 그대로). 컬럼 없으면 `400 schema_not_migrated`(`sql/migrate_subscription_ringback.sql`) |
 | `sip_transport` | string | N | null | 채널 정책 `UDP`/`TCP`/`TLS`/`ANY`(=null). **`TLS` 는 서버가 집행** — 이 번호의 비-TLS 채널 요청은 REGISTER 포함 403. `UDP`/`TCP` 는 단말 프로비저닝 힌트, null(ANY)은 단말 선택 |
 | `auth_scheme` | string | N | `digest` | 인증 체계 `digest`(SIP Digest, `ha1`) / `aka`(IMS AKA over TLS — `sip_transport` 와 무관하게 TLS 채널만 허용). 마이그레이션(`migrate_subscription_aka.sql`) 전 DB 에서는 400 |
 | `k` / `opc` / `op` / `amf` | string | aka 면 Y | - / `8000` | IMS AKA 자료(hex32 / hex32 / hex32 → OPc 유도 / hex4). **저장 형식은 CSC `AuC.Kek` 암호화**이며 어떤 응답에도 원문이 나가지 않는다(조회는 `auth_scheme`·`aka_provisioned`). 키를 넣으면 SQN 이 0 으로 리셋. `AuC.Kek` 미설정이면 503 |

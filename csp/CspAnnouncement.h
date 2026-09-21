@@ -94,7 +94,13 @@ public:
     void OnResume( const char *pszHolderCallId, const CCallInfo &clsHolder );
     /** 서버 링백(§3.4) — B 의 SDP 없는 18x. 프로파일 ringback 이 media 일 때만 재생. 반환 true = A 에 이미 SDP 를
      * 냈다(18x 를 SDP 와 함께 전달) */
-    bool OnRingback( const char *pszBCallId, const CCallInfo &clsB, CSipCallRtp **ppclsAnswerForA );
+    /** eSit = ANN_SIT_RINGBACK(일반) 또는 ANN_SIT_CALL_WAITING(착신자가 통화 중 — TS 24.615, 발신자에게 통화중대기
+     * 안내/링백). 가입자 링백(§6.3): ringback 상황이고 피착신 가입자의 `ringback_media` 가 있으면 프로파일 mode 가 none
+     * 이 아닐 때 그 음원으로 바꾼다 */
+    bool OnRingback( const char *pszBCallId, const CCallInfo &clsB, CSipCallRtp **ppclsAnswerForA,
+                     EAnnSituation eSit = ANN_SIT_RINGBACK );
+    /** 모니터(MC_SIP_STATS 뒤) — ann_started / ann_fallback / ann_active */
+    void GetString( class CMonitorString &strBuf ) const;
     /** B 의 SDP 있는 18x·200 — 링백 정지 */
     void OnRingbackEnd( const char *pszBCallId, const CCallInfo &clsB );
     /** 어느 leg 든 종료(CANCEL·BYE·실패) — 그 호의 재생을 걷는다(early 대기 중이면 최종 응답도 이 종료가 대신한다) */

@@ -124,6 +124,8 @@ public:
     //   빈 값 = 어떤 픽업·BLF 축에도 속하지 않는다(org 폴백 없음 — 같은 조직이라는 사실만으로 남의 호를
     //   당겨받거나 dialog 를 구독할 수 없다. volte_supplementary_services.md §5.1).
     std::string m_strPickupGroup;
+    /** 가입자 링백 음원 id(sys:|op:|sub: — announcements.md §6.3). 비면 접속서비스 프로파일의 ringback 그대로 */
+    std::string m_strRingbackMedia;
 
     /** 등록 바인딩·픽업 판정에 쓰는 유효 픽업 그룹 — pickup_group 우선, 비면 org 폴백. */
     const std::string &EffectivePickupGroup() const {

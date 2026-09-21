@@ -95,6 +95,10 @@ public:
     /** 발신자의 안내음성 프로파일 이름(announcements.md §6.2 — 피어면 RemoteNode, 가입자면 접속서비스). INVITE 때 정해
      * 양 leg entry 에 기록. 비면 Setup.Announcement.DefaultProfile */
     std::string m_strAnnProfile;
+    /** 통화중대기 착신(TS 24.615) — 착신자가 이미 확립 호 중이라 B-leg INVITE 에 Alert-Info
+     * urn:alert:service:call-waiting 을 실었다. 발신자 링백은 프로파일 `call_waiting` 상황을 본다(announcements.md §11
+     * → P1 후속 구현). 양 leg entry 동일 */
+    bool m_bCallWaiting = false;
 
     /** 마지막 SIP activity 시간 (통화 생성/갱신 시 기록) */
     time_t m_iLastActivityTime;
@@ -135,6 +139,10 @@ public:
     void SetRelayCodecLeg( const char *pszCallId, int iLeg, const RelayCodec::LegCodecs &clsLeg );
     /** 발신자 안내 프로파일을 양 leg entry 에 기록 (announcements.md §6.2) */
     void SetAnnProfile( const char *pszCallId, const std::string &strProfile );
+    /** 통화중대기 표식을 양 leg entry 에 기록 */
+    void SetCallWaiting( const char *pszCallId, bool bCw );
+    /** 이 가입자가 당사자(발/착)인 확립 호가 있는가 — 통화중대기 판정(TS 24.615 §4.5.2.1) */
+    bool HasEstablishedCallFor( const std::string &strUser );
     /** 피어 B-leg 의 라우팅 상태(RouteSet·Route·정책·해시키·실패 Route 목록)를 양 leg entry 에 기록 — 재라우팅의 근거.
      */
     void SetRouteInfo( const char *pszCallId, const std::string &strRouteSet, const std::string &strRoute,

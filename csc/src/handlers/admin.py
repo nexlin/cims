@@ -1,3 +1,4 @@
+import re
 """
 CIMS Admin REST API
 Subscriber and PTT group CRUD operations backed by MariaDB.
@@ -213,7 +214,7 @@ async def _list_users(config):
             for kind, table in _subs.tables(cur):
                 cur.execute(
                     "SELECT id, user_id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
-                    f"{aka_cols}{pickup_cols} FROM {table} ORDER BY user_id, id"
+                    f"{aka_cols}{pickup_cols}{_ringback_select_extra(cur)} FROM {table} ORDER BY user_id, id"
                 )
                 by_user = subs_by_kind.setdefault(kind, {})
                 for s in cur.fetchall():
@@ -270,7 +271,7 @@ async def _get_user(person_id: str, config):
             def _load_subs(table):
                 cur.execute(
                     "SELECT id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
-                    f"{aka_cols}{pickup_cols} FROM {table} WHERE user_id=%s ORDER BY id",
+                    f"{aka_cols}{pickup_cols}{_ringback_select_extra(cur)} FROM {table} WHERE user_id=%s ORDER BY id",
                     (person_id,)
                 )
                 return [_fill_sub_row(s) for s in cur.fetchall()]
@@ -479,7 +480,7 @@ async def _list_subscriptions(person_id: str, svc: str, config):
                 return HandlerResult(status=404, body={'error': 'User not found'})
             cur.execute(
                 f"SELECT id, service_ref, imsi, sip_transport, dnd, forward_id, "
-                f"       register_time, logout_time {_aka_select_extra(cur)}{_pickup_select_extra(cur)} "
+                f"       register_time, logout_time {_aka_select_extra(cur)}{_pickup_select_extra(cur)}{_ringback_select_extra(cur)} "
                 f"FROM {table} WHERE user_id=%s ORDER BY id",
                 (person_id,)
             )
@@ -621,6 +622,34 @@ def _pickup_select_extra(cur) -> str:
     return ", COALESCE(pickup_group,'') AS pickup_group" if _has_pickup_column(cur) else ""
 
 
+_HAS_RINGBACK_COL = None
+_RINGBACK_RE = re.compile(r'^(sys|op|sub):[a-z0-9_]{1,40}$')
+
+
+def _has_ringback_column(cur) -> bool:
+    """subscriptions.ringback_media 존재 여부 — migrate_subscription_ringback.sql (announcements.md §6.3). 한 번 확인 후 캐시."""
+    global _HAS_RINGBACK_COL
+    if _HAS_RINGBACK_COL is None:
+        cur.execute("SHOW COLUMNS FROM volte_subscriptions LIKE 'ringback_media'")
+        _HAS_RINGBACK_COL = cur.fetchone() is not None
+    return _HAS_RINGBACK_COL
+
+
+def _ringback_select_extra(cur) -> str:
+    return ", ringback_media" if _has_ringback_column(cur) else ""
+
+
+def _parse_ringback_media(body):
+    """body.ringback_media → str|None. 빈 값 = None(서비스 프로파일 그대로). 형식 = <sys|op|sub>:<name>."""
+    v = body.get('ringback_media')
+    if v in (None, '', 0):
+        return None
+    v = str(v).strip()
+    if not _RINGBACK_RE.match(v):
+        raise ValueError('ringback_media')
+    return v
+
+
 def _parse_pickup_group(body):
     """body.pickup_group → str|None. 빈 값/공백 = None(축 없음 — org 폴백은 없다)."""
     v = body.get('pickup_group')
@@ -740,6 +769,16 @@ async def _add_subscription(person_id: str, svc: str, body, config):
             aka_cols = ''.join(', ' + f.split('=')[0] for f in aka[0])
             aka_ph = ',%s' * len(aka[1])
             pickup_col, pickup_vals = '', []
+            if 'ringback_media' in body:
+                # 가입자 링백 음원(announcements.md §6.3) — 안내 라이브러리 id. 컬럼 없으면 400(마이그레이션 안내)
+                if not _has_ringback_column(cur):
+                    return HandlerResult(status=400, body={'error': 'schema_not_migrated',
+                                                           'detail': 'subscriptions.ringback_media 없음 — sql/migrate_subscription_ringback.sql'})
+                try:
+                    rb = _parse_ringback_media(body)
+                except ValueError:
+                    return HandlerResult(status=400, body={'error': 'ringback_media must be <sys|op|sub>:<name>'})
+                fields.append("ringback_media=%s"); values.append(rb)
             if 'pickup_group' in body:
                 if not _has_pickup_column(cur):
                     return HandlerResult(status=400, body=_PICKUP_SCHEMA_ERROR)
