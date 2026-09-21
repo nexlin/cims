@@ -1,4 +1,5 @@
 # tb48 검증 토폴로지 — 콘솔 [시험 > 토폴로지] 레코드 #2 의 YAML 표현(소스 관리본). 피어(ibcf/pbx/mgcf)·등록형 트렁크·VoIP/TLS 풀 포함. 비밀은 환경변수 이름만.
+# 피어 라우팅은 대상 CSP(dep34)에 사이트 설정으로 영구 배치(tb48-* 레코드, 피어링 접속점 tb48-peering) — 풀 seed.enabled=false 라 계측기는 시드하지 않고 그 설정을 검증한다.
 name: tb48
 hosts:
   h48:
@@ -49,7 +50,7 @@ target:
             edge: peering
             port: 15070
             protocol: udp
-            local_node: cims-tester-peering
+            local_node: tb48-peering
         dial_plan:
           country_code: '82'
           national_prefix: '0'
@@ -197,7 +198,7 @@ pools:
       national_prefix: '0'
       international_prefix: '00'
     seed:
-      enabled: true
+      enabled: false
       distribution: failover
       priority: 100
       weight: 1
@@ -229,7 +230,7 @@ pools:
     tls_verify: false
     tls_client_cert: false
     seed:
-      enabled: true
+      enabled: false
       distribution: failover
       priority: 100
       weight: 1
@@ -253,7 +254,7 @@ pools:
     tls_verify: false
     tls_client_cert: false
     seed:
-      enabled: true
+      enabled: false
       distribution: failover
       priority: 100
       weight: 1
@@ -277,7 +278,7 @@ pools:
     tls_verify: false
     tls_client_cert: false
     seed:
-      enabled: true
+      enabled: false
       route_set: rs-kt
       distribution: failover
       priority: 100
@@ -302,7 +303,7 @@ pools:
     tls_verify: false
     tls_client_cert: false
     seed:
-      enabled: true
+      enabled: false
       route_set: rs-kt
       distribution: failover
       priority: 50
@@ -333,7 +334,7 @@ pools:
     tls_verify: false
     tls_client_cert: false
     seed:
-      enabled: true
+      enabled: false
       route_set: rs-kt
       distribution: failover
       priority: 40
@@ -358,7 +359,7 @@ pools:
     tls_verify: false
     tls_client_cert: false
     seed:
-      enabled: true
+      enabled: false
       distribution: failover
       priority: 100
       weight: 1

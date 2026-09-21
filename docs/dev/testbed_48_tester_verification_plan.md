@@ -122,6 +122,27 @@ CIMS_TESTER_URL=… ./cims-verify --stage 6 --items S6-SCN-VOLTE-VOICE,S6-SCN-VO
 | 5 | PTT 그룹 | **적용 완료(2026-09-21, CSC 관리 API)** — g001 제외(실단말), g002 그대로(6명), g003 += +82500000013~017(7명), g004(video) += +82500000018~022(6명). 실단말 신원은 .45 CSP 에 붙어 있어 .48 fan-out 과 무관 | creds `--ptt-group g002|g003|g004` 그룹별 파일, 토폴로지 `ptt_ue_g00N` 풀. 청취·비멤버 후보 = 그룹 밖 +82500000023~040 |
 | 6 | 시험 픽스처(전화 그룹·픽업 그룹·역할) | **상용 기준 정상 경로 = ⓒ**(§5.2) — 시험 도구는 운영자와 같은 프로비저닝 경로(CSC 관리 API)만 쓰고, DB 직접 쓰기·CSP 내부 통지는 시험 코드에서 걷어낸다 | **구현 완료(2026-09-21, 미배포)** — §5.2. 배포 뒤 1-4·1-5·3단계 |
 
+### 5.0 대상 CSP 피어 라우팅 = 사이트 설정 (2026-09-21 적용)
+
+tb48 의 피어 풀 7개(pbx_hq·pbx_reg·mgcf_pstn·peer_kt/dead/503·peer_blocked)에 맞는 CSP 컬렉션 레코드를 **영구 배치**했다. run 마다 시드·원복하던 것을
+사이트 설정으로 바꾼 것이라, 계측기는 이제 그 설정을 검증한다(풀 `seed.enabled: false`, 소스 관리본 `topology.tb48.yaml` + store #2).
+
+| 컬렉션 | 건수 | 내용 |
+|---|---|---|
+| local_nodes | +1 | `tb48-peering` UDP 121.161.164.48:15070 (edge peering) |
+| remote_nodes | 7 | `tb48-rn-<풀>` — 워커 피어 수신점(5080~5095 UDP), pbx 는 `transcode_codecs [PCMA, PCMU]` |
+| routes | 7 | `tb48-r-<풀>` inbound_auth none, `pbx_reg` 는 digest + 트렁크 계정 pbx-hq |
+| route_sets | 5 | `tb48-rs-<풀>` · `tb48-rs-rs-kt`(peer_kt 100 / dead 50 / 503 40, `options_ping`) |
+| rules · rule_sets | 11 · 6 | 도메인 eq + 번호 대역 in_range(pbx 1010~1014 / 1015~1019, mgcf 2200 01010~019), peer_blocked 소스 IP(acl) |
+| routing_policies | 5 | `tb48-rp-<풀>` priority 50 |
+| acl_policies | 1 | `tb48-acl-peer_blocked` deny scope=route |
+
+만드는 법 = 계측기 파생 규칙 그대로(`tester_target.derive_records` + `pick_local_node`) → 이름 `tester-`→`tb48-`, 태그 `cims-tester`→`tb48`(계측기가 자기 시드로
+오인하지 않게) → `scripts/oam-deploy.py collection 34 <컬렉션> --file …`(마지막만 `--signal`). 재실측: TRUNK-PBX-OUTBOUND·INBOUND 각 1 호 pass, run 노트에
+시드 없음, CSP 로그 `tb48-rs-pbx_hq`/`InboundRoute … local_node=tb48-peering`. **부작용**: rs-kt 의 `options_ping` 이 워커 피어가 안 떠 있는 평상시에도 2 s 마다
+OPTIONS 를 보내 세 피어를 dead 로 판정(A-COM-003)하고, `pbx_reg` 는 트렁크 REGISTER 바인딩이 없을 때 Route dead 다 — 사이트 설정의 정상 동작이며 시험 중에만 해소된다.
+피어 시나리오를 안 돌리는 기간엔 이 두 RouteSet 의 health_check_mode 를 none 으로 두거나 알람을 감안한다.
+
 ### 5.1 PTT 그룹 구성 (적용 뒤, DB .45)
 
 | 그룹 | video | 멤버 | 계측기 사용 |
