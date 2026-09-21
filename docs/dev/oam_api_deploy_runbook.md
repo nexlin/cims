@@ -59,7 +59,7 @@ curl -s  http://127.0.0.1:7100/health                                           
 ems/tester/oam/bin/cims-tester --url https://127.0.0.1:4419 --token $OAM_TOKEN run VOLTE-CALL-BASIC --topology 2 --ht 3 --instances 1   # 스모크
 ```
 
-- 계측기 컨트롤러의 `Tester.DataDir` 은 버전 무관 `runtime/data` 라 creds·runs 가 업그레이드에 살아남는다. 토폴로지 store 도 같다.
+- 계측기 컨트롤러의 `Tester.DataDir` 은 버전 무관 `runtime/data`(또는 overlay 로 지정한 경로) 라 토폴로지(`topologies/`)·creds·runs 가 업그레이드에 살아남는다. 관리 store 에 남은 옛 토폴로지는 새 컨트롤러가 첫 기동 때 이어받는다.
   새 컨트롤러가 모르는 필드가 있는 토폴로지는 **컨트롤러 업그레이드 뒤** `PUT /api/v1/tester/topologies/{id}` 로 올린다.
 - CSC 를 올렸으면 `GET /api/v1/users/{id}` 가 200 인지(csc 프록시 401 이면 JwtSecret 불일치 — csc overlay 의 `CimsAuth.JwtSecret` 이 base 와 같은지).
 - csp/cmp 는 `PUT …/config` 로 바꾼 overlay 가 새 버전 디렉터리에 그대로 승계된다(`config.json` 은 버전 밖).

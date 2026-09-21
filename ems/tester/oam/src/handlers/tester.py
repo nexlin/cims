@@ -736,7 +736,7 @@ TESTER_API_DOCS = [
                 {'name': 'doc', 'in': 'body', 'type': 'object'}],
      'response': '{ok, errors[], doc}', 'auth': _AUTH_OP},
     {'id': 'tester.topologies', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/topologies',
-     'summary': '토폴로지(호스트›워커·대상 노드›풀) 레코드 목록 — 런타임 store. 이전 꼴(target.csp/workers[].url) 레코드는 읽을 때 v2 로 승계', 'response': '{topologies[]: {id, name, created_at, updated_at, doc, migrated_from?}}', 'auth': _AUTH_MON},
+     'summary': '토폴로지(호스트›워커·대상 노드›풀) 레코드 목록 — Tester.DataDir/topologies. 이전 꼴(target.csp/workers[].url) 레코드는 읽을 때 v2 로 승계', 'response': '{topologies[]: {id, name, created_at, updated_at, doc, migrated_from?}}', 'auth': _AUTH_MON},
     {'id': 'tester.topology.save', 'module': _MOD, 'method': 'PUT', 'path': f'{_P}/topologies/{{id}}',
      'summary': '토폴로지 저장(POST /topologies 는 생성) — 검증 통과분만',
      'errors': [{'status': 400, 'when': '검증 실패', 'body': {'error': 'invalid_topology', 'errors': ['…']}}], 'auth': _AUTH_OP},

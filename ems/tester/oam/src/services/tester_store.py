@@ -1,9 +1,12 @@
-"""계측기 저장소 — 시나리오/프로파일(패키지 동봉 YAML + 운영자 추가분), 토폴로지(관리 store),
+"""계측기 저장소 — 시나리오/프로파일(패키지 동봉 YAML + 운영자 추가분), 토폴로지(Tester.DataDir),
 run 색인(관리 store) + run 본체(Tester.DataDir).
 
 - 시나리오·프로파일 = 파일. 패키지 `scenarios/` 가 기본이고, `Tester.DataDir/scenarios/` 에
   운영자가 추가한 것이 같은 id 로 있으면 그것이 이긴다(패키지 업그레이드에 살아남는다).
-- 토폴로지 = file_store 도메인 `modules/oam-cims-tester/runtime/topologies` (레코드 1개 = 토폴로지 1개).
+- 토폴로지 = `Tester.DataDir/topologies/` 의 file_store 레코드(`<id>.json` + `.seq`, 레코드 1개 = 토폴로지 1개).
+  운영자 정의(시나리오·creds)와 같은 자리 — DataDir 하나만 옮기면 계측기 정의 전부가 따라간다.
+  옛 자리(관리 store 도메인 `modules/oam-cims-tester/runtime/topologies`)에 레코드가 있고 새 자리가 비어
+  있으면 기동 때 한 번 복사해 잇는다.
 - run 색인 = `modules/oam-cims-tester/runtime/runs` (RunRecord 요약). 1초 버킷 지표·이벤트는
   `Tester.DataDir/runs/<id>/` — jsonl 레코드 스토어의 대상이 아니다(test_instrument.md §1).
 """
@@ -21,7 +24,7 @@ import yaml
 from services import file_store
 from services.tester_models import LoadProfile, Scenario, Topology, RunRecord, validate, normalize_topology_doc
 
-DOMAIN_TOPOLOGIES = 'modules/oam-cims-tester/runtime/topologies'
+LEGACY_DOMAIN_TOPOLOGIES = 'modules/oam-cims-tester/runtime/topologies'   # 이어받기 원본(관리 store)
 DOMAIN_RUNS = 'modules/oam-cims-tester/runtime/runs'
 
 _component_root = ''
@@ -36,6 +39,7 @@ def init(component_root: str, config: dict) -> None:
     _data_dir_cache = None
     os.makedirs(runs_dir(), exist_ok=True)
     os.makedirs(user_scenarios_dir(), exist_ok=True)
+    _migrate_topologies()
 
 
 def _mtime(p: str) -> float:
@@ -101,6 +105,10 @@ def bundled_scenarios_dir() -> str:
 
 def user_scenarios_dir() -> str:
     return os.path.join(data_dir(), 'scenarios')
+
+
+def topologies_dir() -> str:
+    return os.path.join(data_dir(), 'topologies')
 
 
 # ── YAML 파일 계열 (시나리오·프로파일) ─────────────────────────────────────
@@ -270,10 +278,39 @@ def delete_profile(name: str) -> Tuple[bool, Optional[str]]:
     return False, 'not_found'
 
 
-# ── 토폴로지 (관리 store 레코드) ────────────────────────────────────────────
+# ── 토폴로지 (Tester.DataDir/topologies — file_store 레코드 꼴) ──────────────
 
 def _topo_dir() -> str:
-    return file_store.domain_dir(_config, DOMAIN_TOPOLOGIES)
+    d = topologies_dir()
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _legacy_topo_dir() -> str:
+    """옛 자리(관리 store 도메인) — 만들지 않고 경로만(domain_dir 는 makedirs 한다)."""
+    return os.path.join(file_store.runtime_root(_config), file_store._domain_rel(LEGACY_DOMAIN_TOPOLOGIES))
+
+
+def _migrate_topologies() -> int:
+    """관리 store 의 토폴로지 레코드를 `Tester.DataDir/topologies/` 로 한 번 이어받는다.
+    새 자리에 레코드가 하나라도 있으면 건드리지 않는다(운영자가 그 뒤 옛 자리를 고쳤더라도 새 자리가 정본).
+    `.seq` 도 함께 옮겨 id 가 이어진다. 원본은 지우지 않는다(되돌리기·구버전 병행). 반환 = 옮긴 레코드 수."""
+    dst = _topo_dir()
+    if glob.glob(os.path.join(dst, '*.json')):
+        return 0
+    src = _legacy_topo_dir()
+    if not os.path.isdir(src) or os.path.realpath(src) == os.path.realpath(dst):
+        return 0
+    n = 0
+    try:
+        for fn in os.listdir(src):
+            is_rec = fn.endswith('.json') and not fn.startswith('.')
+            if is_rec or fn == '.seq':
+                shutil.copy2(os.path.join(src, fn), os.path.join(dst, fn))
+                n += 1 if is_rec else 0
+    except OSError:
+        return n
+    return n
 
 
 def is_topology_v1(doc: dict) -> bool:

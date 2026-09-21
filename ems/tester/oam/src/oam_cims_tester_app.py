@@ -189,7 +189,8 @@ if __name__ == '__main__':
 
         tester_init(_COMPONENT_ROOT, config)
         logger.log_info(f"[tester] data_dir={tester_store.data_dir()} "
-                        f"scenarios={len(tester_store.list_scenarios())} profiles={len(tester_store.list_profiles())}")
+                        f"scenarios={len(tester_store.list_scenarios())} profiles={len(tester_store.list_profiles())} "
+                        f"topologies={len(tester_store.list_topologies())}")
         # run 오케스트레이터 + 워커 관측 스트림 수신(TCP JSONL, Tester.WorkerStreamIp:Port)
         from services.tester_run import RUNS
         RUNS.init(config, logger)
