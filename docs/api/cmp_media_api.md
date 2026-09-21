@@ -29,6 +29,7 @@ CMP 가 제공하는 미디어 서비스 기능(function)의 제어 API 정본�
 | **RELAY** | 1:1 RTP relay (VoLTE 등) — peer 별 전용 포트 블록 | relay session | `(node, session_id)` — 생성 client 전속 |
 | **PTT** | 그룹통화(멤버별 전용 RTP 포트) + MCPTT floor control(그룹 공유 포트) | group / member | group: `(service, group_id)` — 동일 service 의 AS 들이 공유<br>member: `(node, session_id)` |
 | **MIX** *(예약)* | VoLTE 그룹통화 mixing/conference | mixer / participant | `(service, conf_id)` — PTT 와 동형 |
+| **ANN** *(설계 — [announcements.md](../design/features/announcements.md) §4)* | relay leg 에 붙는 안내음·신호음·보류 음악 재생기 (`RELAY_PLAY`/`RELAY_PLAY_STOP`, 이벤트 `RELAY_PLAY_DONE`, 자원 광고 `resource.ann`) | player | `(node, session_id, play_id)` — 세션 종속 수명 |
 
 ### 1.2 전송
 
