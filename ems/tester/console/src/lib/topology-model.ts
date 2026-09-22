@@ -71,6 +71,14 @@ export const accessNodes = (d: TopologyDoc) => nodes(d).filter(([, n]) => n.role
 export const peeringNodes = (d: TopologyDoc) => nodes(d).filter(([, n]) => n.role === 'sip' && listenersOf(n).length).sort(([, a], [, b]) => Number(!!peeringListeners(b).length) - Number(!!peeringListeners(a).length)).map(([id]) => id)
 export const dbNodes = (d: TopologyDoc) => nodes(d).filter(([, n]) => n.role === 'db' || (n.role === 'subscriber' && n.api)).map(([id]) => id)
 export const mediaNodes = (d: TopologyDoc) => nodes(d).filter(([, n]) => n.role === 'media').map(([id]) => id)
+/** UE 풀이 닿는 CSC(컨트롤러 `target_csc_for` 와 같은 규칙) — 풀 `subscriber`(api 있는 subscriber 노드), 없으면 대상의 유일한 api 있는 subscriber 노드. 없으면 null */
+export const poolSubscriber = (d: TopologyDoc, p: PoolDoc): string | null => {
+  if (!isUe(p)) return null
+  const subs = nodes(d).filter(([, n]) => n.role === 'subscriber' && n.api).map(([id]) => id)
+  const want = (p as { subscriber?: string }).subscriber
+  if (want) return subs.includes(want) ? want : null
+  return subs.length === 1 ? subs[0] : null
+}
 export const isPeer = (p: PoolDoc): p is PeerPoolDoc => p.kind === 'peer'
 export const isUe = (p: PoolDoc): p is UePoolDoc => p.kind === 'ue'
 /** UE 풀의 접속환경 클래스 — service, 비면 source.table 이 ptt_subscriptions 일 때 ptt, 그 외 volte (컨트롤러 Topology.pool_service 와 같은 규칙) */

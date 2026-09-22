@@ -1,10 +1,11 @@
-// 시나리오 캔버스 편집기 — 팔레트(역할·단계 축별, vocab 이 정본) · 시퀀스 캔버스(레인 = 역할, 행 = 단계, 구간 띠 자동, 세션 열, during 마커) ·
-// 속성 패널(시나리오/역할/단계/during) · 하단 드로어(YAML 양방향 · 검증 · 토폴로지 적합성 = compile-check · 절차표) (test_instrument.md §7).
+// 시나리오 캔버스 편집기 — 팔레트(역할·단계 축별, vocab 이 정본 — 페이지 왼쪽 레일 [팔레트] 탭에 포털로 그린다 `paletteHost`) · 시퀀스 캔버스(레인 = 역할, 행 = 단계,
+// 구간 띠 자동, 세션 열, during 마커) · 속성 패널(시나리오/역할/단계/during — 왼쪽 가장자리를 끌어 폭 조절) · 하단 드로어(YAML 양방향 · 검증 · 토폴로지 적합성 = compile-check · 절차표) (test_instrument.md §7).
 // 문서는 부모(페이지)가 소유하고 저장한다. 기준 토폴로지는 편집 문맥이지 시나리오 속성이 아니다(저장 안 함) — 그래서 검증 배지는
 // 문서 오류(저장 게이트)와 토폴로지 적합 오류(문맥)를 따로 센다. YAML 드로어는 YamlEditor(타이핑 중 컨트롤러 검증) + [적용]. 드로어 높이는 손잡이로.
 // 키: ↑↓ 행 이동 · Alt+↑↓ 순서 바꾸기 · Del · Ctrl+D 복제 · Esc.
 // during ↔ 행: in-dialog 행을 통화 유지 바 위에 놓으면 during 이 되고, during 마커를 바 밖(행 사이)으로 끌어 놓으면 행이 된다 — 속성 패널 버튼도 같은 일.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronDown, ChevronRight, Trash2, Copy, Plus, X } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
 import { Badge } from '@core/components/ui/badge'
@@ -17,7 +18,7 @@ import { useConfirm } from '@core/components/custom/confirm'
 import { testerApi, type TopologyDoc, type ScenarioVocab, type PlanResult, type ProfileRow } from '@tester/api/tester'
 import PlanPreview from '@tester/components/PlanPreview'
 import YamlEditor from '@tester/components/YamlEditor'
-import { useDrawerHeight } from '@tester/lib/use-drawer-height'
+import { useDrawerHeight, usePanelWidth } from '@tester/lib/use-drawer-height'
 import * as S from '@tester/lib/scenario-model'
 import type { Doc, Step, Sel, During } from '@tester/lib/scenario-model'
 import { fmtNum } from '@tester/lib/fmt'
@@ -28,8 +29,10 @@ const PH: Record<string, [string, string]> = { prelude: ['PRELUDE', 'run 시작 
 
 type Drag = { type: 'newstep'; step: string } | { type: 'newrole'; role: 'ue' | 'peer' } | { type: 'move'; idx: number } | { type: 'lane'; id: string }
 
-export default function ScenarioCanvas({ doc, onChange, onCommit, topologies, topoId, setTopoId, profiles, profileId, setProfileId, vocab, canWrite, source }: {
+export default function ScenarioCanvas({ doc, onChange, onCommit, topologies, topoId, setTopoId, profiles, profileId, setProfileId, vocab, canWrite, source, paletteHost }: {
   doc: Doc; onChange: (d: Doc, transient?: boolean) => void; onCommit?: () => void
+  /** 왼쪽 레일 [팔레트] 탭의 상자 — 있으면 팔레트를 거기에 포털로 그린다 */
+  paletteHost?: HTMLElement | null
   topologies: { id: number; name: string; doc: TopologyDoc }[]; topoId: number | null; setTopoId: (id: number | null) => void
   profiles: ProfileRow[]; profileId: string; setProfileId: (p: string) => void
   vocab: ScenarioVocab | null; canWrite: boolean; source: 'bundled' | 'user' | null
@@ -41,6 +44,7 @@ export default function ScenarioCanvas({ doc, onChange, onCommit, topologies, to
   const [tab, setTab] = useState<'yaml' | 'issues' | 'fit' | 'table'>('yaml')
   const [drawerOpen, setDrawerOpen] = useState(true)
   const [drawerH, onDrawerHandle] = useDrawerHeight('tester-scn-drawer', 240)
+  const [inspW, onInspHandle] = usePanelWidth('tester-scn-insp-w', 320)
   const [bind, setBind] = useState<S.Bind>({ ht: 20 })
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [drag, setDrag] = useState<Drag | null>(null)
@@ -231,29 +235,9 @@ export default function ScenarioCanvas({ doc, onChange, onCommit, topologies, to
   const Gap = ({ i }: { i: number }) => <div data-gap={i} onDragOver={gapOver(i)} onDrop={gapDrop(i)} className={`transition-all ${(drag && (drag.type === 'newstep' || drag.type === 'move')) || mk ? 'h-4' : 'h-2'} ${hot === `gap:${i}` ? 'bg-success/50' : drag || mk ? 'bg-primary/10' : ''}`} />
   let lastPh: string | null = null
 
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      {/* 바인딩 바 */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted px-3 py-1 text-xs">
-        <span className="text-muted-foreground">기준 토폴로지</span>
-        <Select value={topoId != null ? String(topoId) : NONE} onValueChange={v => setTopoId(v === NONE ? null : Number(v))}>
-          <SelectTrigger className="h-[24px] w-[220px] text-xs"><SelectValue /></SelectTrigger>
-          <SelectContent><SelectItem value={NONE}>(없음 — 해석 안 함)</SelectItem>{topologies.map(t => <SelectItem key={t.id} value={String(t.id)}>{t.name} · {t.doc.target?.kind ?? 'cims'}</SelectItem>)}</SelectContent>
-        </Select>
-        <span className="text-muted-foreground">미리보기 프로파일</span>
-        <Select value={profileId || NONE} onValueChange={setProfileId}>
-          <SelectTrigger className="h-[24px] w-[190px] text-xs"><SelectValue /></SelectTrigger>
-          <SelectContent><SelectItem value={NONE}>(단발 — 프로파일 없음)</SelectItem>{profiles.map(p => <SelectItem key={p.name} value={p.name}>{p.name} · {p.model}</SelectItem>)}</SelectContent>
-        </Select>
-        <span className="ml-2 text-muted-foreground">바인딩</span>
-        {S.bindVars(doc).length === 0 && <span className="font-mono text-muted-foreground">없음 — seconds 에 ${'{ht}'} 를 쓰면 프로파일 ht 로 묶입니다</span>}
-        {S.bindVars(doc).map(v => { const numeric = doc.flow.some(s => S.bindRef(s.seconds) === v); return <span key={v} className={`inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono ${v in bind ? 'border-border' : 'border-warning'}`}>${'{'}{v}{'}'} = <Input value={bind[v] ?? ''} onChange={e => setBind(b => { const nb = { ...b }; const t = e.target.value; if (t === '') delete nb[v]; else nb[v] = numeric ? Number(t) : t; return nb })} className="h-5 w-16 px-1 text-xs" inputMode={numeric ? 'numeric' : undefined} placeholder={numeric ? '' : '**'} />{numeric ? ' s' : ''}</span> })}
-        {profDoc && <span className="text-muted-foreground">profile {profDoc.model}</span>}
-      </div>
-
-      <div className="grid min-h-0 flex-1 grid-cols-[200px_minmax(0,1fr)_320px]">
-        {/* 팔레트 */}
-        <aside className="min-h-0 overflow-auto border-r border-border bg-card p-2 text-xs">
+  // ── 팔레트 — 페이지 왼쪽 레일 [팔레트] 탭에 포털로 ─────────────────────────
+  const palette = (
+        <div className="p-2 text-xs">
           <div className="mb-2">
             <div className="py-1 text-[11px] font-semibold text-muted-foreground">역할 (레인) <span className="font-normal">{R.length}</span></div>
             {(['ue', 'peer'] as const).map(k => <div key={k} draggable={canWrite} onDragStart={onDragStart({ type: 'newrole', role: k })} onDragEnd={onDragEnd} onClick={() => canWrite && addRole(k)} className={`mb-1 flex select-none items-center gap-2 rounded-sm border border-border bg-muted px-2 py-1.5 ${canWrite ? 'cursor-grab hover:border-primary' : 'opacity-60'}`}>
@@ -274,8 +258,31 @@ export default function ScenarioCanvas({ doc, onChange, onCommit, topologies, to
             </div>
           })}
           <div className="rounded-sm border border-border p-2 text-[11px] leading-relaxed text-muted-foreground"><b>레인 = 역할, 행 = 단계.</b> 팔레트에서 행 사이로 끌어 놓습니다. 구간은 자동(앞쪽 register/wait = prelude · 끝 deregister = epilogue). 세션 열(오른쪽)은 다이얼로그마다 막대 하나 — INVITE~확립 점선, 확립~bye RTP. 통화 중 동작(dtmf·hold·resume·refer)은 확립된 세션 안에만, <b>통화 유지 바 위에 놓으면 during</b>(at_s) — 기존 행을 끌어 놓아도, 마커를 행 사이로 끌어내도 됩니다. <kbd>↑↓</kbd> 행 이동 · <kbd>Alt+↑↓</kbd> 순서 · <kbd>Del</kbd> 삭제 · <kbd>Ctrl+D</kbd> 복제 · <kbd>Ctrl+Z</kbd>/<kbd>Ctrl+Y</kbd> 실행취소/다시실행 · <kbd>Esc</kbd></div>
-        </aside>
+        </div>
+  )
 
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* 바인딩 바 */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted px-3 py-1 text-xs">
+        <span className="text-muted-foreground">기준 토폴로지</span>
+        <Select value={topoId != null ? String(topoId) : NONE} onValueChange={v => setTopoId(v === NONE ? null : Number(v))}>
+          <SelectTrigger className="h-[24px] w-[220px] text-xs"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem value={NONE}>(없음 — 해석 안 함)</SelectItem>{topologies.map(t => <SelectItem key={t.id} value={String(t.id)}>{t.name} · {t.doc.target?.kind ?? 'cims'}</SelectItem>)}</SelectContent>
+        </Select>
+        <span className="text-muted-foreground">미리보기 프로파일</span>
+        <Select value={profileId || NONE} onValueChange={setProfileId}>
+          <SelectTrigger className="h-[24px] w-[190px] text-xs"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem value={NONE}>(단발 — 프로파일 없음)</SelectItem>{profiles.map(p => <SelectItem key={p.name} value={p.name}>{p.name} · {p.model}</SelectItem>)}</SelectContent>
+        </Select>
+        <span className="ml-2 text-muted-foreground">바인딩</span>
+        {S.bindVars(doc).length === 0 && <span className="font-mono text-muted-foreground">없음 — seconds 에 ${'{ht}'} 를 쓰면 프로파일 ht 로 묶입니다</span>}
+        {S.bindVars(doc).map(v => { const numeric = doc.flow.some(s => S.bindRef(s.seconds) === v); return <span key={v} className={`inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono ${v in bind ? 'border-border' : 'border-warning'}`}>${'{'}{v}{'}'} = <Input value={bind[v] ?? ''} onChange={e => setBind(b => { const nb = { ...b }; const t = e.target.value; if (t === '') delete nb[v]; else nb[v] = numeric ? Number(t) : t; return nb })} className="h-5 w-16 px-1 text-xs" inputMode={numeric ? 'numeric' : undefined} placeholder={numeric ? '' : '**'} />{numeric ? ' s' : ''}</span> })}
+        {profDoc && <span className="text-muted-foreground">profile {profDoc.model}</span>}
+      </div>
+
+      {paletteHost && createPortal(palette, paletteHost)}
+      <div className="grid min-h-0 flex-1" style={{ gridTemplateColumns: `minmax(0,1fr) ${inspW}px` }}>
         {/* 시퀀스 캔버스 */}
         <div className="min-h-0 overflow-auto bg-background" onClick={e => { if (e.target === e.currentTarget) setSel({ kind: 'scenario' }) }}>
           <div className="min-w-[860px]">
@@ -315,8 +322,9 @@ export default function ScenarioCanvas({ doc, onChange, onCommit, topologies, to
           </div>
         </div>
 
-        {/* 속성 */}
-        <aside className="min-h-0 overflow-auto border-l border-border bg-card p-3 text-xs">
+        {/* 속성 — 왼쪽 가장자리를 끌어 폭 조절 */}
+        <aside className="relative min-h-0 overflow-auto border-l border-border bg-card p-3 text-xs">
+          <div onPointerDown={onInspHandle} className="absolute bottom-0 left-0 top-0 z-[2] w-1.5 cursor-col-resize hover:bg-accent" title="끌어서 폭 조절" />
           <Inspector doc={doc} sel={sel} setSel={setSel} mutate={mutate} topo={topo} vocab={vocab} issues={issues} canWrite={canWrite} source={source} bind={bind} plan={plan}
                      onRemoveRole={async n => { const refs = doc.flow.filter(s => (s.who ?? []).includes(n) || s.from === n || s.to === n).length; if (refs && !await confirm({ title: `역할 ${n} 삭제`, body: `${refs} 개 단계가 참조합니다. 참조는 비워집니다.`, confirmLabel: '삭제', tone: 'danger' })) return; mutate(d => S.removeRole(d, n)); setSel({ kind: 'scenario' }) }}
                      onRemoveStep={removeStep} onDupStep={dupStep}

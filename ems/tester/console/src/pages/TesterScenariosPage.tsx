@@ -1,11 +1,12 @@
-// 시험 > 시나리오 — 탭 둘. **시나리오** = 시퀀스 캔버스 편집기(ScenarioCanvas — 레인×행·팔레트·속성·YAML/검증/적합성/절차표 드로어) +
+// 시험 > 시나리오 — 탭 둘. **시나리오** = 왼쪽 레일 한 열에 탭 둘([시나리오] 목록 / [팔레트] — 캔버스가 포털로 그린다, 고르면 팔레트 탭으로) +
+// 시퀀스 캔버스 편집기(ScenarioCanvas — 레인×행·속성(폭 조절)·YAML/검증/적합성/절차표 드로어) +
 // 툴바(선택·템플릿에서 새로·검증 배지·되돌리기·저장(운영자본)·삭제·단발 실행·프로파일 결합). **부하 프로파일** = YAML 편집기(스키마 검증).
 // 동봉본을 저장하면 같은 id 의 운영자본(override)이 생긴다. 기준 토폴로지·미리보기 프로파일은 편집 문맥이라 저장하지 않는다.
 // 문서 이력은 useDocHistory(Ctrl+Z/Y). 변경이 있으면 다른 시나리오로 옮기기 전에 묻고 탭 닫기도 경고한다. 변경 중 [저장하고 실행] 이 저장 → 실행 창을 한 번에 연다.
 // 부하 프로파일 탭은 YAML 편집기 + 검증된 문서의 시간축 율 곡선(ProfileCurve).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { RefreshCw, Plus, Save, Trash2, Play, RotateCcw, Undo2, Redo2, Gauge } from 'lucide-react'
+import { RefreshCw, Plus, Save, Trash2, Play, RotateCcw, Undo2, Redo2, Gauge, List, Shapes } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { Button } from '@core/components/ui/button'
 import { Badge } from '@core/components/ui/badge'
@@ -56,7 +57,7 @@ stop_on: { csp_5xx_pct: 1.0 }
 
 const TEMPLATE_IDS = ['VOLTE-CALL-BASIC', 'VOLTE-REGISTER', 'TRUNK-IBCF-OUTBOUND', 'TRUNK-PBX-TRANSFER', 'TRUNK-PBX-DTMF']
 
-function ScenarioEditor({ scenarioId, rows, onSaved, onDeleted, onDirty, autoRun, onAutoRunDone }: {
+function ScenarioEditor({ scenarioId, rows, onSaved, onDeleted, onDirty, autoRun, onAutoRunDone, paletteHost }: {
   scenarioId: string | null          // null = 새 문서
   rows: ScenarioRow[]
   onSaved: (id: string, thenRun?: 'single' | 'profile') => void
@@ -64,6 +65,7 @@ function ScenarioEditor({ scenarioId, rows, onSaved, onDeleted, onDirty, autoRun
   onDirty: (dirty: boolean) => void  // 페이지가 전환 전에 묻기 위해
   autoRun?: 'single' | 'profile' | null   // 새 문서 저장 → id 가 바뀌어 다시 마운트된 뒤 실행 창을 이어 연다
   onAutoRunDone?: () => void
+  paletteHost?: HTMLElement | null        // 레일 [팔레트] 탭의 상자
 }) {
   const nav = useNavigate()
   const { show } = useToast()
@@ -176,7 +178,7 @@ function ScenarioEditor({ scenarioId, rows, onSaved, onDeleted, onDirty, autoRun
           </span>
         </div>
       </div>
-      <ScenarioCanvas doc={doc} onChange={setDoc} onCommit={H.commit} topologies={topologies} topoId={topoId} setTopoId={setTopoId} profiles={profiles} profileId={profileId} setProfileId={setProfileId} vocab={vocab} canWrite={canWrite} source={source} />
+      <ScenarioCanvas doc={doc} onChange={setDoc} onCommit={H.commit} topologies={topologies} topoId={topoId} setTopoId={setTopoId} profiles={profiles} profileId={profileId} setProfileId={setProfileId} vocab={vocab} canWrite={canWrite} source={source} paletteHost={paletteHost} />
       {runOpen && scenarioId && (
         <RunStartDialog scenarioId={scenarioId} lastTopologyId={topoId} initial={runOpen === 'profile' && profileId !== '__none__' ? { scenario_id: scenarioId, profile: profileId } : undefined}
                         onClose={() => setRunOpen(null)} onStarted={() => { setRunOpen(null); nav('/test/runs') }} />
@@ -280,7 +282,9 @@ export default function TesterScenariosPage() {
   const [tab, setTab] = useState<Kind>('scenario')
   const selScenario: string | null | undefined = params.has('id') ? (params.get('id') || null) : undefined   // undefined = 아직 안 고름 · '' = 새 문서
   const setSelScenario = (v: string | null | undefined) => setParams(p => { const q = new URLSearchParams(p); if (v === undefined) q.delete('id'); else q.set('id', v ?? ''); return q })
-  const pickScenario = async (v: string | null | undefined) => { if (v !== selScenario && !await discardOk()) return; setSelScenario(v) }
+  const pickScenario = async (v: string | null | undefined) => { if (v !== selScenario && !await discardOk()) return; setSelScenario(v); setLeftTab('pal') }
+  const [leftTab, setLeftTab] = useState<'rec' | 'pal'>('rec')
+  const [palHost, setPalHost] = useState<HTMLDivElement | null>(null)   // 레일 [팔레트] 탭의 상자 — 캔버스가 여기에 포털
   const [selProfile, setSelProfile] = useState<string | null | undefined>(undefined)
   const [autoRun, setAutoRun] = useState<'single' | 'profile' | null>(null)
   const autoRunDone = useCallback(() => setAutoRun(null), [])
@@ -321,6 +325,11 @@ export default function TesterScenariosPage() {
 
         <TabsContent value="scenario" className="flex min-h-0 flex-1">
           <ListRail storageKey="tester-scn-rail" label="시나리오" search={{ value: q, onChange: setQ, placeholder: 'id·제목 검색' }}
+                    tab={leftTab} onTab={k => setLeftTab(k as 'rec' | 'pal')}
+                    tabs={[
+                      { key: 'rec', label: '시나리오', icon: <List size={13} />, badge: <Badge variant="neutralSoft">{scenarios.length}</Badge> },
+                      { key: 'pal', label: '팔레트', icon: <Shapes size={13} />, content: selScenario !== undefined ? <div ref={setPalHost} className="min-h-0 flex-1" /> : <div className="p-3 text-xs text-muted-foreground">시나리오를 열면 여기에 팔레트가 나옵니다 — 역할(레인)과 단계를 캔버스 행 사이로 끌어 놓거나 클릭해 삽입합니다</div> },
+                    ]}
                     chips={<>{[['', '전체'], ...tags.map(t => [t, t])].map(([c, l]) => (
                       <button key={c} onClick={() => setFilter(c)} className={`h-6 rounded-sm border px-2 text-xs ${filter === c ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-muted-foreground hover:bg-accent'}`}>{l}</button>))}</>}
                     action={<Button variant="outline" size="sm" className="w-full" onClick={() => pickScenario(null)}><Plus size={13} /> 새 시나리오</Button>}>
@@ -342,7 +351,7 @@ export default function TesterScenariosPage() {
               <div className="p-4"><EmptyState title="왼쪽에서 시나리오를 고르십시오" description="고르면 시퀀스 캔버스(레인 = 역할, 행 = 단계)로 편집합니다. 기준 토폴로지를 고르면 역할→풀→워커 해석과 컴파일 드라이런(적합성)을 편집 시점에 미리 봅니다. 검증 오류가 있는 파일도 열어 고칠 수 있습니다."
                                             action={<Button variant="outline" size="sm" onClick={() => pickScenario(null)}><Plus size={13} /> 새 시나리오</Button>} /></div>
             ) : (
-              <ScenarioEditor key={selScenario ?? '__new__'} scenarioId={selScenario} rows={scenarios} onDirty={setDirty} autoRun={autoRun} onAutoRunDone={autoRunDone}
+              <ScenarioEditor key={selScenario ?? '__new__'} scenarioId={selScenario} rows={scenarios} onDirty={setDirty} autoRun={autoRun} onAutoRunDone={autoRunDone} paletteHost={leftTab === 'pal' ? palHost : null}
                               onSaved={(k, run) => { load(); setSelScenario(k); setAutoRun(run ?? null) }} onDeleted={() => { load(); setSelScenario(undefined) }} />
             )}
           </div>

@@ -1,15 +1,19 @@
-// 토폴로지 캔버스 편집기 — 팔레트(왼쪽) · 캔버스(호스트 영역 안에 워커·대상 노드 카드, 워커 안에 풀, 선은 모델에서 파생) · 속성 패널(오른쪽) ·
-// 하단 드로어(레코드 JSON · 검증 · 연결 검사). 빈 곳에 놓으면 상자 자동 생성, 카드 위치·영역 크기는 레코드 layout 에 저장
+// 토폴로지 캔버스 편집기 — 캔버스(호스트 영역 안에 워커·대상 노드 카드, 워커 안에 풀, 선은 모델에서 파생) · 속성 패널(오른쪽, 폭 조절) ·
+// 하단 드로어(연결 검사 — 검사 결과가 오면 열리고 Esc 로 닫는다). 팔레트는 페이지의 왼쪽 레일 [팔레트] 탭에 포털로 그린다(`paletteHost`) —
+// 끌어 놓기·클릭 추가는 그대로. 워커 카드·호스트 영역 머리의 [+] 메뉴로도 추가한다. 검증 목록은 속성 패널의 '선택 없음' 화면, 레코드 JSON 은
+// 페이지의 Dialog(`TopologyJsonEditor`). 빈 곳에 놓으면 상자 자동 생성, 카드 위치·영역 크기는 레코드 layout 에 저장
 // (test_instrument.md §7 토폴로지 캔버스 사양 ①~⑥). 문서는 부모(페이지)가 소유 — 이 컴포넌트는 doc 을 받아 바뀐 사본을 onChange 로 준다
 // (끌기 중 연속 변경은 transient=true, 놓으면 onCommit — 페이지 이력이 한 걸음으로 묶는다; 영역 자동 확장은 onLayout — 이력에 안 쌓는다).
-// 줌(Ctrl+휠·버튼·화면 맞춤)은 스테이지 transform 하나 — 좌표 계산은 전부 zoom 으로 나눈다. 팔레트는 접을 수 있고 클릭 = 선택한 상자 위에 추가.
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Server, Cpu, Radio, Waves, Users, Activity, Database, Smartphone, Globe, Phone, Router, Terminal, ChevronDown, ChevronRight, Trash2, Copy, Plus, RefreshCw, PanelLeftClose, PanelLeftOpen, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
+// 줌(Ctrl+휠·버튼·화면 맞춤)은 스테이지 transform 하나 — 좌표 계산은 전부 zoom 으로 나눈다. 열 때 화면 맞춤을 한 번 한다. 팔레트 클릭 = 선택한 상자 위에 추가.
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { Server, Cpu, Radio, Waves, Users, Activity, Database, Smartphone, Globe, Phone, Router, Terminal, ChevronDown, ChevronRight, Trash2, Copy, Plus, RefreshCw, X, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
 import { Badge } from '@core/components/ui/badge'
 import { Input } from '@core/components/ui/input'
 import { Checkbox } from '@core/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@core/components/ui/dropdown-menu'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { useToast } from '@core/components/Toast'
 import { useConfirm } from '@core/components/custom/confirm'
@@ -17,7 +21,7 @@ import { testerApi, type DiscoveredWorker, type SampleRow } from '@tester/api/te
 import type { TopologyDoc, TopoNode, PoolDoc, PeerPoolDoc, UePoolDoc, RealUePoolDoc, CheckItem, NodeRole, Transport, WorkerRow, SipListener, DtmfMode } from '@tester/api/tester'
 import * as M from '@tester/lib/topology-model'
 import type { Focus, Issue, PaletteKind, Pos } from '@tester/lib/topology-model'
-import { useDrawerHeight } from '@tester/lib/use-drawer-height'
+import { useDrawerHeight, usePanelWidth } from '@tester/lib/use-drawer-height'
 
 const HC = (i: number) => `var(--chart-${i})`
 const ROLE_ICON: Record<NodeRole, ReactNode> = { sip: <Radio size={12} />, tas: <Cpu size={12} />, media: <Waves size={12} />, subscriber: <Users size={12} />, oam: <Activity size={12} />, db: <Database size={12} /> }
@@ -46,7 +50,10 @@ const EDGE_COLOR: Record<Edge['cls'], string> = { udp: 'var(--chart-1)', tcp: 'v
 
 const snap = (v: number) => Math.round(v / 10) * 10
 
-export default function TopologyCanvas({ doc, onChange, onLayout, onCommit, check, checkStale, workers, canWrite, onFocusCheck }: {
+/** 페이지 툴바가 부르는 손잡이 — 검증 배지 → 속성 패널의 검증 목록, 검사 배지 → 드로어 */
+export interface TopologyCanvasHandle { showIssues(): void; showCheck(): void }
+
+const TopologyCanvas = forwardRef<TopologyCanvasHandle, {
   doc: TopologyDoc
   onChange: (next: TopologyDoc, transient?: boolean) => void
   /** 배치만 바뀐 변경(영역 자동 확장) — 이력에 안 쌓는다. 없으면 onChange */
@@ -59,21 +66,29 @@ export default function TopologyCanvas({ doc, onChange, onLayout, onCommit, chec
   workers: WorkerRow[]
   canWrite: boolean
   onFocusCheck?: () => void
-}) {
+  /** 왼쪽 레일 [팔레트] 탭의 상자 — 있으면 팔레트를 거기에 포털로 그린다 */
+  paletteHost?: HTMLElement | null
+}>(function TopologyCanvas({ doc, onChange, onLayout, onCommit, check, checkStale, workers, canWrite, onFocusCheck, paletteHost }, ref) {
   const { show } = useToast()
   const confirm = useConfirm()
   const [sel, setSel] = useState<Focus | null>(null)
-  const [tab, setTab] = useState<'json' | 'issues' | 'check'>('issues')
-  const [drawerOpen, setDrawerOpen] = useState(true)
+  const [drawerOpen, setDrawerOpen] = useState(false)   // 연결 검사 드로어 — 결과가 오면 열리고 Esc 로 닫는다
   const [drag, setDrag] = useState<Drag | null>(null)
   type Hot = Focus | { kind: 'port'; id: string }
   const [hot, setHot] = useState<Hot | null>(null)
   const [edges, setEdges] = useState<Edge[]>([])
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem('tester-topo-palette') || '{}') } catch { return {} } })
-  const [palOpen, setPalOpen] = useState(() => { try { return localStorage.getItem('tester-topo-palette-open') !== '0' } catch { return true } })
-  const togglePal = () => setPalOpen(o => { try { localStorage.setItem('tester-topo-palette-open', o ? '0' : '1') } catch { /* 무시 */ } return !o })
   const [zoom, setZoom] = useState(1)
   const [drawerH, onDrawerHandle] = useDrawerHeight('tester-topo-drawer', 220)
+  const [inspW, onInspHandle] = usePanelWidth('tester-topo-insp-w', 320)
+  const inspRef = useRef<HTMLElement>(null)
+  useImperativeHandle(ref, () => ({ showIssues: () => { setSel(null); inspRef.current?.scrollTo({ top: 0 }) }, showCheck: () => setDrawerOpen(true) }), [])
+  useEffect(() => { if (check) setDrawerOpen(true) }, [check])
+  useEffect(() => {
+    if (!drawerOpen) return
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target as HTMLElement)?.closest('input,textarea,select,[role=dialog],[role=menu]')) setDrawerOpen(false) }
+    window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k)
+  }, [drawerOpen])
   const stageRef = useRef<HTMLDivElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<Drag | null>(null)
@@ -126,6 +141,8 @@ export default function TopologyCanvas({ doc, onChange, onLayout, onCommit, chec
         edge(a, portA(pid), tr, `${tr}${p.srtp && p.srtp !== 'off' ? ` · srtp ${p.srtp}` : ''}`, hi, failing(pid), pid)
         for (const m of M.mediaNodes(doc)) edge({ x: a.x, y: a.y + 6 }, portA(`${m}:rtp`), 'rtp', hi ? 'RTP' : null, hi, false)
         if (M.isUe(p) && 'db' in p.source) { const d = doc.target.nodes[p.source.db]; edge({ x: a.x, y: a.y + 10 }, portA(`${p.source.db}:${d?.role === 'db' ? 'db' : 'api'}`), 'db', `${p.source.table} ×${p.source.count}`, hi, false, `${p.source.db}:db`) }
+        // CSC(IdMS 토큰·MCData FD) — 컨트롤러가 target_csc 로 파생하는 연결. 라벨은 선택한 풀만(RTP 와 같은 규칙)
+        { const cid = M.poolSubscriber(doc, p); if (cid) edge({ x: a.x, y: a.y + 14 }, portA(`${cid}:api`), 'db', hi ? 'CSC api · IdMS/FD' : null, hi, failing(`${cid}:api`)) }
       }
     }
     setEdges(prev => JSON.stringify(prev) === JSON.stringify(out) ? prev : out)
@@ -266,9 +283,10 @@ export default function TopologyCanvas({ doc, onChange, onLayout, onCommit, chec
     setSel({ kind: 'worker', id: r.worker })
     show(r.existed ? `이미 있는 워커 ${r.worker}` : `워커 ${r.worker} 추가${r.madeHost ? ` (호스트 ${r.madeHost} 생성)` : ''}`, 'ok')
   }
-  const clickAdd = (kind: PaletteKind) => {
+  /** 팔레트 클릭·카드 [+] 메뉴 — at 을 주면 그 호스트/워커 위에, 없으면 선택한 카드가 속한 호스트/워커(없으면 첫 것) 위에, 그 영역의 카드 아래 빈 자리에 만든다 */
+  const clickAdd = (kind: PaletteKind, at?: { host?: string; worker?: string }) => {
     if (!canWrite) return
-    const s = sel
+    const s = at ? (at.worker ? { kind: 'worker' as const, id: at.worker } : at.host ? { kind: 'host' as const, id: at.host } : null) : sel
     let host: string | null = s?.kind === 'host' ? s.id : s?.kind === 'node' ? doc.target.nodes[s.id]?.host ?? null : s?.kind === 'worker' ? M.worker(doc, s.id)?.host ?? null : s?.kind === 'pool' ? M.worker(doc, doc.pools[s.id]?.worker)?.host ?? null : null
     let wname: string | null = s?.kind === 'worker' ? s.id : s?.kind === 'pool' ? doc.pools[s.id]?.worker ?? null : null
     if (M.POOL_KINDS.includes(kind) && !wname) { const w = doc.workers.find(w => !host || w.host === host) ?? doc.workers[0]; if (w) { wname = w.name; host = w.host } }
@@ -317,7 +335,6 @@ export default function TopologyCanvas({ doc, onChange, onLayout, onCommit, chec
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel, doc, canWrite])
 
-  const focusIssue = (f: Focus | null) => { if (f) setSel(f) }
   const errBadge = (f: Focus) => errsFor(f).some(i => i.level === 'err') ? <Badge variant="dangerSolid">!</Badge> : null
   const staleCls = checkStale ? ' opacity-50' : ''; const staleTitle = checkStale ? '저장 전 결과 — 편집 뒤 다시 검사하십시오' : undefined
   const resBadge = (name: string) => { const r = checkOf(name); if (!r) return null; return r.ok ? <Badge variant="successSoft" className={staleCls.trim() || undefined} title={staleTitle}>OK {r.ms}ms</Badge> : r.info ? <Badge variant="neutralSoft" className={staleCls.trim() || undefined} title={staleTitle}>참고</Badge> : <Badge variant="dangerSoft" className={staleCls.trim() || undefined} title={staleTitle}>실패</Badge> }
@@ -333,11 +350,24 @@ export default function TopologyCanvas({ doc, onChange, onLayout, onCommit, chec
     const z = Math.min(1, (w.clientWidth - 24) / (right + 20), (w.clientHeight - 24) / (bottom + 20))
     setZoom(Math.max(0.3, Math.round(z * 100) / 100)); w.scrollTo({ left: 0, top: 0 })
   }
+  useLayoutEffect(() => { fit() }, [])   // eslint-disable-line react-hooks/exhaustive-deps -- 열 때 한 번 화면 맞춤(레코드가 바뀌면 페이지가 key 로 다시 만든다)
   useEffect(() => {
     const w = wrapRef.current; if (!w) return
     const wheel = (e: WheelEvent) => { if (!(e.ctrlKey || e.metaKey)) return; e.preventDefault(); zoomStep(e.deltaY < 0 ? 1 : -1) }
     w.addEventListener('wheel', wheel, { passive: false }); return () => w.removeEventListener('wheel', wheel)
   }, [])
+  /** 카드 머리의 [+] — 워커 = 풀 5종(+발견된 워커 없음), 호스트 = 워커·SSH 관측·노드 6 역할 */
+  const AddMenu = ({ at, title }: { at: { host?: string; worker?: string }; title: string }) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild><button disabled={!canWrite} onPointerDown={e => e.stopPropagation()} title={title} className="inline-flex h-5 w-5 items-center justify-center rounded-sm border border-border bg-card text-muted-foreground hover:border-primary hover:text-foreground disabled:opacity-50"><Plus size={12} /></button></DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-52 text-xs">
+        <DropdownMenuLabel className="text-[11px] text-muted-foreground">{title}</DropdownMenuLabel>
+        {PALETTE.filter(g => at.worker ? g.group === '풀' : g.group !== '풀').flatMap(g => g.items).filter(it => it.kind !== 'host').map(it => (
+          <DropdownMenuItem key={it.kind} onSelect={() => clickAdd(it.kind, at)}><span className="text-muted-foreground">{it.icon}</span>{it.label}<span className="ml-auto text-[10px] text-muted-foreground">{it.hint}</span></DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
   const isSel = (k: Focus['kind'], id: string) => sel?.kind === k && sel.id === id
   const isHot = (k: Focus['kind'], id: string) => hot?.kind === k && hot.id === id
 
@@ -406,7 +436,7 @@ export default function TopologyCanvas({ doc, onChange, onLayout, onCommit, chec
            style={{ left: pos.x, top: pos.y, borderTopColor: hc, borderTopWidth: 3, zIndex: drag?.type === 'card' && drag.id === name ? 20 : undefined }}>
         <div className="flex items-center gap-1.5 px-2 py-1">
           <Cpu size={12} className="text-muted-foreground" /><b>{name}</b>
-          <span className={`inline-block h-2 w-2 rounded-full ${up === null ? 'bg-muted-foreground' : up ? 'bg-success' : 'bg-destructive'}`} />{errBadge({ kind: 'worker', id: name })}
+          <span className={`inline-block h-2 w-2 rounded-full ${up === null ? 'bg-muted-foreground' : up ? 'bg-success' : 'bg-destructive'}`} />{errBadge({ kind: 'worker', id: name })}<AddMenu at={{ host: w.host, worker: name }} title={`${name} 에 풀 추가`} />
           <span className="ml-auto truncate font-mono text-[10px] text-muted-foreground">:{w.port ?? 7100} · {w.cpus ?? '?'} cpu{h?.health ? ` · ${h.health.active_endpoints ?? 0}/${h.health.max_endpoints ?? '?'} ep` : ''}</span>
         </div>
         <div className="flex min-h-[30px] flex-col gap-1 border-t border-border p-1.5">
@@ -421,22 +451,12 @@ export default function TopologyCanvas({ doc, onChange, onLayout, onCommit, chec
   const dragCard = drag?.type === 'card' ? drag : null
   const stageW = Math.max(1440, ...M.hosts(doc).map(([id]) => (L.regions[id]?.x ?? 0) + (L.regions[id]?.w ?? 0) + 40))
   const stageH = Math.max(900, ...M.hosts(doc).map(([id]) => (L.regions[id]?.y ?? 0) + (L.regions[id]?.h ?? 0) + 40))
-  const errN = issues.filter(i => i.level === 'err').length, warnN = issues.filter(i => i.level === 'warn').length
   const LV = { err: 0, warn: 1, info: 2 }
   const sortedIssues = useMemo(() => [...issues].sort((a, b) => LV[a.level] - LV[b.level] || a.who.localeCompare(b.who)), [issues])   // eslint-disable-line react-hooks/exhaustive-deps
 
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className={`grid min-h-0 flex-1 ${palOpen ? 'grid-cols-[210px_minmax(0,1fr)_320px]' : 'grid-cols-[36px_minmax(0,1fr)_320px]'}`}>
-        {/* 팔레트 */}
-        {!palOpen ? (
-          <aside className="flex min-h-0 flex-col items-center gap-2 border-r border-border bg-card py-2">
-            <Button variant="ghost" size="iconSm" onClick={togglePal} title="팔레트 펼치기"><PanelLeftOpen size={14} /></Button>
-            <span className="text-[10px] text-muted-foreground [writing-mode:vertical-rl]">팔레트</span>
-          </aside>
-        ) : (
-        <aside className="min-h-0 overflow-auto border-r border-border bg-card p-2 text-xs">
-          <div className="mb-1 flex items-center"><span className="text-[11px] font-semibold text-muted-foreground">팔레트</span><Button variant="ghost" size="iconSm" className="ml-auto" onClick={togglePal} title="팔레트 접기"><PanelLeftClose size={14} /></Button></div>
+  // ── 팔레트 — 페이지 왼쪽 레일 [팔레트] 탭에 포털로 ─────────────────────────
+  const palette = (
+        <div className="p-2 text-xs">
           {PALETTE.map(g => (
             <div key={g.group} className="mb-2">
               <button className="flex w-full items-center gap-1 py-1 text-[11px] font-semibold text-muted-foreground" onClick={() => setCollapsed(c => { const n = { ...c, [g.group]: !c[g.group] }; try { localStorage.setItem('tester-topo-palette', JSON.stringify(n)) } catch { /* 무시 */ } return n })}>
@@ -471,7 +491,7 @@ export default function TopologyCanvas({ doc, onChange, onLayout, onCommit, chec
             <b>놓는 자리가 소속을 정합니다.</b> 호스트 영역 안에 워커·대상 노드, 워커 카드 안에 풀. 빈 곳에 놓으면 담을 상자를 만들고, 팔레트를 <b>클릭</b>하면 선택한 상자 위에 만듭니다. 선은 모델에서 나옵니다 — 풀 카드의 오른쪽 <b>앵커 점을 끌어 수신점 행</b>에 놓으면 그 수신점이 접속점(UE — access 행만)·다음 홉(피어 — 어느 행이든, CSP 는 Route 로 신뢰)·신원 원천(DB/API 행)이 됩니다. 풀 카드를 SIP 노드 위에 놓으면 기본 수신점으로 갑니다. 수신점은 노드 속성에서 N 개(IP/포트/프로토콜/edge) 둡니다. <kbd>Del</kbd> 삭제 · <kbd>Ctrl+D</kbd> 풀/노드 복제 · <kbd>Ctrl+Z</kbd>/<kbd>Ctrl+Y</kbd> 실행취소/다시실행 · <kbd>Ctrl+휠</kbd> 줌 · <kbd>Esc</kbd> 해제
           </div>
           <div className="mt-2 flex flex-col gap-1">
-            <span className="text-[11px] font-semibold text-muted-foreground">프리셋</span>
+            <span className="text-[11px] font-semibold text-muted-foreground">프리셋으로 바꾸기</span>
             {(Object.keys(M.PRESETS) as (keyof typeof M.PRESETS)[]).map(k => (
               <Button key={k} variant="outline" size="sm" disabled={!canWrite} onClick={async () => {
                 if (!await confirm({ title: `프리셋 ${M.PRESETS[k].name}`, body: '대상 노드·풀(과 대상 전용 호스트)을 바꿉니다. 워커가 있는 호스트는 유지합니다.', confirmLabel: '적용' })) return
@@ -479,9 +499,13 @@ export default function TopologyCanvas({ doc, onChange, onLayout, onCommit, chec
               }}>{M.PRESETS[k].name} <span className="text-muted-foreground">· {k}</span></Button>
             ))}
           </div>
-        </aside>
-        )}
+        </div>
+  )
 
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {paletteHost && createPortal(palette, paletteHost)}
+      <div className="grid min-h-0 flex-1" style={{ gridTemplateColumns: `minmax(0,1fr) ${inspW}px` }}>
         {/* 캔버스 — 바깥 상자가 줌 컨트롤을 고정하고, 안쪽이 스크롤한다 */}
         <div className="relative min-h-0">
           <div className="absolute right-3 top-2 z-[30] flex items-center gap-0.5 rounded-md border border-border bg-card p-0.5 shadow-sm">
@@ -502,7 +526,7 @@ export default function TopologyCanvas({ doc, onChange, onLayout, onCommit, chec
                      style={{ left: r.x, top: r.y, width: r.w, height: r.h, borderColor: hc, background: `color-mix(in srgb, ${hc} 6%, var(--card))` }}>
                   <div className="flex h-[30px] cursor-move items-center gap-1.5 px-2 text-xs">
                     <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: hc }} /><Server size={12} className="text-muted-foreground" /><b>{h.name ?? hid}</b>
-                    <Badge variant="neutralSoft">{M.HOST_LABEL[hk]}</Badge>{errBadge({ kind: 'host', id: hid })}
+                    <Badge variant="neutralSoft">{M.HOST_LABEL[hk]}</Badge>{errBadge({ kind: 'host', id: hid })}<AddMenu at={{ host: hid }} title={`${h.name ?? hid} 에 추가`} />
                     {h.ssh && <span data-port={`${hid}:ssh`} className="inline-flex items-center gap-1 text-[10px] text-muted-foreground"><span data-pa /> ssh {h.ssh.user}@ {resBadge(`${hid}:ssh`)}</span>}
                     <span className="ml-auto font-mono text-[11px] text-muted-foreground">{h.ip}</span>
                   </div>
@@ -543,34 +567,26 @@ export default function TopologyCanvas({ doc, onChange, onLayout, onCommit, chec
         </div>
         </div>
 
-        {/* 속성 */}
-        <aside className="min-h-0 overflow-auto border-l border-border bg-card p-3 text-xs">
-          <Inspector doc={doc} sel={sel} setSel={setSel} mutate={mutate} issues={sel ? errsFor(sel) : []} canWrite={canWrite} onDelete={del} onDup={dup} workers={workers} />
+        {/* 속성 — 왼쪽 가장자리를 끌어 폭 조절 */}
+        <aside ref={inspRef} className="relative min-h-0 overflow-auto border-l border-border bg-card p-3 text-xs">
+          <div onPointerDown={onInspHandle} className="absolute bottom-0 left-0 top-0 z-[2] w-1.5 cursor-col-resize hover:bg-accent" title="끌어서 폭 조절" />
+          <Inspector doc={doc} sel={sel} setSel={setSel} mutate={mutate} issues={sel ? errsFor(sel) : []} allIssues={sortedIssues} canWrite={canWrite} onDelete={del} onDup={dup} workers={workers} />
         </aside>
       </div>
 
-      {/* 드로어 */}
-      <div className="border-t border-border bg-card">
-        {drawerOpen && <div onPointerDown={onDrawerHandle} className="group flex h-2 cursor-row-resize items-center justify-center hover:bg-accent" title="끌어서 높이 조절"><span className="h-0.5 w-10 rounded-full bg-border group-hover:bg-muted-foreground" /></div>}
-        <div className="flex items-center gap-1 px-3 py-1 text-xs">
-          {(['issues', 'json', 'check'] as const).map(t => (
-            <button key={t} onClick={() => { setTab(t); setDrawerOpen(true) }} className={`h-6 rounded-sm px-2 ${tab === t && drawerOpen ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}>
-              {t === 'issues' ? <>검증 <Badge variant={errN ? 'dangerSoft' : warnN ? 'warningSoft' : 'successSoft'} className="ml-1">{issues.length}</Badge></> : t === 'json' ? '레코드 JSON' : <>연결 검사 <Badge variant={check ? (check.items.every(i => i.ok || i.info) ? 'successSoft' : 'dangerSoft') : 'neutralSoft'} className="ml-1 h-4 px-1 text-[10px]">{check ? `${check.items.filter(i => i.ok).length}/${check.items.length}` : '—'}</Badge></>}
-            </button>
-          ))}
-          <button className="ml-auto text-muted-foreground" onClick={() => setDrawerOpen(o => !o)}>{drawerOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</button>
-        </div>
-        {drawerOpen && (
+      {/* 드로어 — 연결 검사 결과. 결과가 오면 열리고 Esc·✕ 로 닫는다. 결과는 카드의 같은 행에도 붙는다 */}
+      {drawerOpen && (
+        <div className="border-t border-border bg-card">
+          <div onPointerDown={onDrawerHandle} className="group flex h-2 cursor-row-resize items-center justify-center hover:bg-accent" title="끌어서 높이 조절"><span className="h-0.5 w-10 rounded-full bg-border group-hover:bg-muted-foreground" /></div>
+          <div className="flex items-center gap-2 px-3 py-1 text-xs">
+            <b>연결 검사</b>
+            {check ? <Badge variant={check.items.every(i => i.ok || i.info) ? 'successSoft' : 'dangerSoft'}>{check.items.filter(i => i.ok || i.info).length}/{check.items.length}</Badge> : <Badge variant="neutralSoft">아직 없음</Badge>}
+            {check && <span className="text-muted-foreground">{new Date(check.at).toLocaleTimeString()}</span>}
+            {checkStale && <Badge variant="warningSoft">검사 뒤 문서가 바뀜 — 저장 시점의 결과</Badge>}
+            <Button variant="ghost" size="iconSm" className="ml-auto" onClick={() => setDrawerOpen(false)} title="닫기 (Esc)"><X size={14} /></Button>
+          </div>
           <div className="overflow-auto border-t border-border px-3 py-2 text-xs" style={{ height: drawerH }}>
-            {tab === 'issues' && (issues.length === 0 ? <div className="text-success">스키마·구조 검증 통과 — 저장할 수 있습니다</div> : (
-              <div className="flex flex-col gap-1">{sortedIssues.map((i, k) => (
-                <button key={k} onClick={() => focusIssue(i.focus)} className={`flex items-center gap-2 rounded-sm border-l-2 px-2 py-1 text-left hover:bg-accent ${i.level === 'err' ? 'border-destructive' : i.level === 'warn' ? 'border-warning' : 'border-info'}`}>
-                  <Badge variant={i.level === 'err' ? 'dangerSoft' : i.level === 'warn' ? 'warningSoft' : 'infoSoft'}>{i.level === 'err' ? '오류' : i.level === 'warn' ? '경고' : '참고'}</Badge><span className="font-mono text-muted-foreground">{i.who}</span><span>{i.msg}</span>
-                </button>))}</div>
-            ))}
-            {tab === 'json' && <JsonTab doc={doc} onApply={d => { onChange(d); setSel(null) }} canWrite={canWrite} />}
-            {tab === 'check' && (check ? (<>
-              {checkStale && <div className="mb-1 rounded-sm border-l-2 border-warning bg-warning-soft px-2 py-1 text-warning-on">검사 뒤 문서가 바뀌었습니다 — 아래는 저장 시점의 결과입니다. 저장하고 다시 검사하십시오</div>}
+            {check ? (
               <DataTable>
                 <thead><tr><Th>항목</Th><Th width={70}>결과</Th><Th>상세</Th><Th align="right">ms</Th></tr></thead>
                 <tbody>{check.items.map(i => (
@@ -578,24 +594,25 @@ export default function TopologyCanvas({ doc, onChange, onLayout, onCommit, chec
                     <Td mono>{i.name}</Td><Td>{i.ok ? <Badge variant="successSoft">OK</Badge> : i.info ? <Badge variant="neutralSoft">참고</Badge> : <Badge variant="dangerSoft">실패</Badge>}</Td><Td className="break-all text-xs">{i.detail}</Td><Td align="right" mono>{i.ms}</Td>
                   </tr>))}</tbody>
               </DataTable>
-            </>) : <div className="text-muted-foreground">[연결 검사] 는 저장된 레코드에 대해 수신점 단위로 확인합니다 — SIP 접속점 OPTIONS/TCP/TLS · 피어링(참고) · 가입자 API · OAM 토큰 · DB 접속 · 호스트 SSH · 워커 health. 결과는 카드의 같은 행에 붙습니다.{onFocusCheck && <Button variant="outline" size="sm" className="ml-2" onClick={onFocusCheck}>검사 실행</Button>}</div>)}
+            ) : <div className="text-muted-foreground">[연결 검사] 는 저장된 레코드에 대해 수신점 단위로 확인합니다 — SIP 접속점 OPTIONS/TCP/TLS · 피어링(참고) · 가입자 API · OAM 토큰 · DB 접속 · 호스트 SSH · 워커 health. 결과는 카드의 같은 행에 붙습니다{onFocusCheck ? <> — <button className="underline" onClick={onFocusCheck}>지금 검사</button></> : null}</div>}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
-}
+})
+export default TopologyCanvas
 
-// ── JSON 탭 ────────────────────────────────────────────────────────────────
-function JsonTab({ doc, onApply, canWrite }: { doc: TopologyDoc; onApply: (d: TopologyDoc) => void; canWrite: boolean }) {
+// ── 레코드 JSON 편집기 — 페이지의 Dialog 안에 ─────────────────────────────────
+export function TopologyJsonEditor({ doc, onApply, canWrite }: { doc: TopologyDoc; onApply: (d: TopologyDoc) => void; canWrite: boolean }) {
   const text = useMemo(() => JSON.stringify(doc, null, 2), [doc])
   const [edit, setEdit] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const apply = () => { try { const d = JSON.parse(edit ?? text) as TopologyDoc; onApply(d); setEdit(null); setErr(null) } catch (e) { setErr(String(e)) } }
   return (
-    <div className="flex gap-2">
+    <div className="flex h-full min-h-[360px] gap-3">
       <textarea value={edit ?? text} onChange={e => setEdit(e.target.value)} readOnly={!canWrite} spellCheck={false}
-                className="h-[180px] min-w-0 flex-1 resize-none rounded-sm border border-border bg-muted p-2 font-mono text-[11px]" />
+                className="min-w-0 flex-1 resize-none rounded-sm border border-border bg-muted p-2 font-mono text-[11px]" />
       <div className="flex w-[160px] flex-col gap-1 text-[11px] text-muted-foreground">
         <b>레코드 = 이 JSON</b><span>캔버스 편집이 곧 이 문서다. 여기서 고치고 [적용]하면 캔버스가 다시 그려진다. 저장은 툴바.</span>
         <Button variant="outline" size="sm" disabled={!canWrite || edit == null} onClick={apply}>적용</Button>
@@ -660,13 +677,14 @@ function SampleLibrary({ doc, ro, mutate }: { doc: TopologyDoc; ro: boolean; mut
   </Sec>
 }
 function Sec({ title, right, children }: { title: string; right?: ReactNode; children: ReactNode }) {
-  return <div className="mt-3 flex flex-col gap-1.5 border-t border-border pt-2"><div className="flex items-center gap-2 text-[11px] font-semibold text-muted-foreground">{title}<span className="ml-auto">{right}</span></div>{children}</div>
+  // 머리는 sticky — 긴 풀 폼을 내려도 지금 어느 구획인지 보인다(-top-3 = 패널 padding 만큼 올려 패널 위 가장자리에 붙는다)
+  return <div className="mt-3 flex flex-col gap-1.5 border-t border-border pt-2"><div className="sticky -top-3 z-[1] flex items-center gap-2 bg-card py-0.5 text-[11px] font-semibold text-muted-foreground">{title}<span className="ml-auto">{right}</span></div>{children}</div>
 }
 const num = (v: string) => (v === '' ? undefined : Number(v))
 const csv = (v: string) => v.split(',').map(s => s.trim()).filter(Boolean)
 
-function Inspector({ doc, sel, setSel, mutate, issues, canWrite, onDelete, onDup, workers }: {
-  doc: TopologyDoc; sel: Focus | null; setSel: (f: Focus | null) => void; mutate: (fn: (d: TopologyDoc) => void) => void; issues: Issue[]; canWrite: boolean; onDelete: (f: Focus) => void; onDup: (f: Focus) => void; workers: WorkerRow[]
+function Inspector({ doc, sel, setSel, mutate, issues, allIssues, canWrite, onDelete, onDup, workers }: {
+  doc: TopologyDoc; sel: Focus | null; setSel: (f: Focus | null) => void; mutate: (fn: (d: TopologyDoc) => void) => void; issues: Issue[]; allIssues: Issue[]; canWrite: boolean; onDelete: (f: Focus) => void; onDup: (f: Focus) => void; workers: WorkerRow[]
 }) {
   const ro = !canWrite
   const issueBlock = issues.length ? <div className="mb-2 flex flex-col gap-1">{issues.map((i, k) => <div key={k} className={`rounded-sm border-l-2 px-2 py-1 ${i.level === 'err' ? 'border-destructive bg-dangersoft/40' : i.level === 'warn' ? 'border-warning bg-warning-soft/40' : 'border-info bg-info-soft/40'}`}>{i.msg}</div>)}</div> : null
@@ -681,6 +699,15 @@ function Inspector({ doc, sel, setSel, mutate, issues, canWrite, onDelete, onDup
       <div className="mt-2 leading-relaxed text-muted-foreground">캔버스에서 카드를 누르면 여기서 고칩니다.
         <ul className="mt-1 list-disc pl-4"><li><b>호스트</b> — 이름·주소·SSH 자격. 주소는 여기에만 있습니다</li><li><b>워커</b> — 제어 포트·cpus·health, 그 위의 풀</li><li><b>대상 노드</b> — 역할별 설정(수신점·RTP·API·OAM·DB) + 감시 프로세스</li><li><b>풀</b> — 접속점/다음 홉 노드·transport·원천·신원·시드</li></ul>
         선은 그리지 않습니다. 놓는 자리와 속성값에서 파생됩니다.</div>
+      <Sec title="검증" right={allIssues.length ? <Badge variant={allIssues.some(i => i.level === 'err') ? 'dangerSoft' : allIssues.some(i => i.level === 'warn') ? 'warningSoft' : 'infoSoft'}>{allIssues.length}</Badge> : <Badge variant="successSoft">통과</Badge>}>
+        {allIssues.length === 0 ? <div className="text-success">스키마·구조 검증 통과 — 저장할 수 있습니다</div> : (
+          <div className="flex flex-col gap-1">{allIssues.map((i, k) => (
+            <button key={k} onClick={() => { if (i.focus) setSel(i.focus) }} className={`flex flex-col gap-0.5 rounded-sm border-l-2 px-2 py-1 text-left hover:bg-accent ${i.level === 'err' ? 'border-destructive' : i.level === 'warn' ? 'border-warning' : 'border-info'}`}>
+              <span className="flex items-center gap-1.5"><Badge variant={i.level === 'err' ? 'dangerSoft' : i.level === 'warn' ? 'warningSoft' : 'infoSoft'}>{i.level === 'err' ? '오류' : i.level === 'warn' ? '경고' : '참고'}</Badge><span className="font-mono text-muted-foreground">{i.who}</span></span>
+              <span>{i.msg}</span>
+            </button>))}</div>
+        )}
+      </Sec>
       <Sec title="대상">
         <F label="대상 이름"><Txt value={doc.target.name} disabled={ro} onCommit={v => mutate(d => { d.target.name = v })} /></F>
         <F label="kind" help="cims 만 oam 노드로 컬렉션 시드·target_build"><Sel value={doc.target.kind ?? 'cims'} disabled={ro} options={[{ v: 'cims' }, { v: 'ims' }, { v: 'pbx' }]} onChange={v => mutate(d => { d.target.kind = v as 'cims' | 'ims' | 'pbx' })} /></F>
@@ -880,7 +907,7 @@ function Inspector({ doc, sel, setSel, mutate, issues, canWrite, onDelete, onDup
     </Sec>
     {p.kind === 'real-ue' && <Sec title="실단말 — cimsue-cli 프로세스(워커 RealUe.*)"><F label="service" help="접속환경 클래스 — ptt 면 MCPTT 단말(mcptt-id·affiliation·floor). 생략 = 가입 테이블이 ptt_subscriptions 면 ptt, 그 외 volte"><Sel value={u.service} disabled={ro} options={[{ v: 'volte', l: 'volte — 이동 VoLTE' }, { v: 'voip', l: 'voip — 유선 VoIP' }, { v: 'ptt', l: 'ptt — MCPTT' }]} empty={`(기본 ${M.poolService(p)})`} onChange={v => PU(x => { if (v) x.service = v as 'volte' | 'voip' | 'ptt'; else delete x.service })} /></F><label className="mt-1 inline-flex items-center gap-1"><Checkbox checked={!!(p as RealUePoolDoc).tls_verify} disabled={ro} onCheckedChange={v => P(x => { const r = x as RealUePoolDoc; if (v === true) r.tls_verify = true; else delete r.tls_verify })} /> 서버 TLS 인증서 검증 (워커 RealUe.TlsCaFile 앵커)</label><span className="text-muted-foreground">신원마다 실스택 프로세스 하나 — 워커 RealUe.MaxProcesses 이내(계획 미리보기가 검산). 단계는 실단말 지원 단계(등록·1:1 호·hold/resume·DTMF·픽업·그룹콜·floor)만, 미디어 평면은 실스택 것(rtp: auto)</span></Sec>}
     {p.kind === 'ue' && <Sec title="접속환경·등록"><F label="service" help="접속환경 클래스 — ptt 면 MCPTT 단말: PTT 도메인·GMS/CMS 구독·그룹 affiliation(신원의 group)·floor. 생략 = 가입 테이블이 ptt_subscriptions 면 ptt, 그 외 volte"><Sel value={u.service} disabled={ro} options={[{ v: 'volte', l: 'volte — 이동 VoLTE' }, { v: 'voip', l: 'voip — 유선 VoIP' }, { v: 'ptt', l: 'ptt — MCPTT' }]} empty={`(기본 ${M.poolService(p)})`} onChange={v => PU(x => { if (v) x.service = v as 'volte' | 'voip' | 'ptt'; else delete x.service })} /></F><div className="grid grid-cols-2 gap-2"><F label="register_expires"><Txt value={u.register_expires ?? 3600} mono type="number" disabled={ro} onCommit={v => PU(x => { x.register_expires = num(v) ?? 3600 })} /></F><div className="mt-4 flex flex-col gap-1"><label className="inline-flex items-center gap-1"><Checkbox checked={!!u.prack} disabled={ro} onCheckedChange={v => PU(x => { x.prack = v === true })} /> 100rel/PRACK</label><label className="inline-flex items-center gap-1"><Checkbox checked={!!u.msrp} disabled={ro} onCheckedChange={v => PU(x => { if (v === true) x.msrp = true; else delete x.msrp })} /> MCData media plane(MSRP) 수신 능력 — Contact mcdata.sds</label>
-      <F label="subscriber (MCData FD 의 CSC)" help="fd_send/fd_recv 가 IdMS 토큰·파일 업/다운로드에 쓰는 role=subscriber 노드(api). 생략 = 대상의 유일한 subscriber 노드(둘 이상이면 골라야 한다). 신원에 IdMS 로그인(creds login/loginPw)이 있어야 한다"><Sel value={u.subscriber} disabled={ro} empty="(유일한 subscriber 노드)" options={Object.entries(doc.target?.nodes ?? {}).filter(([, n]) => n.role === 'subscriber' && n.api).map(([id]) => ({ v: id }))} onChange={v => PU(x => { if (v) x.subscriber = v; else delete x.subscriber })} /></F></div></div>
+      <F label="CSC 노드 (subscriber — IdMS · MCData FD)" help="컨트롤러가 target_csc 로 파생해 워커에 내리는 CSC. fd_send/fd_recv 가 IdMS 토큰·파일 업/다운로드에 쓰는 role=subscriber 노드(api). 생략 = 대상의 유일한 subscriber 노드(둘 이상이면 골라야 한다). 신원에 IdMS 로그인(creds login/loginPw)이 있어야 한다"><Sel value={u.subscriber} disabled={ro} empty="(유일한 subscriber 노드)" options={Object.entries(doc.target?.nodes ?? {}).filter(([, n]) => n.role === 'subscriber' && n.api).map(([id]) => ({ v: id }))} onChange={v => PU(x => { if (v) x.subscriber = v; else delete x.subscriber })} /></F></div></div>
       <div className="grid grid-cols-2 gap-2"><F label="DTMF" help="rfc4733 = telephone-event 오퍼/echo · inband = G.711 톤(telephone-event 없음 — 협상 코덱이 PCMU/PCMA 일 때만 송신·검출) · off"><Sel value={dtmfMode(u.dtmf)} disabled={ro} options={[{ v: 'rfc4733', l: 'rfc4733 — telephone-event' }, { v: 'inband', l: 'inband — G.711 톤' }, { v: 'off' }]} onChange={v => PU(x => { if (v === 'rfc4733') delete x.dtmf; else x.dtmf = v as DtmfMode })} /></F>
         <div className="mt-4 flex flex-col gap-1"><label className="inline-flex items-center gap-1"><Checkbox checked={!!u.tls_verify} disabled={ro || M.poolTransport(doc, u) !== 'tls'} onCheckedChange={v => PU(x => { if (v === true) x.tls_verify = true; else delete x.tls_verify })} /> 서버 TLS 인증서 검증 (워커 Tls.CaFile)</label><label className="inline-flex items-center gap-1"><Checkbox checked={!!u.tls_client_cert} disabled={ro || M.poolTransport(doc, u) !== 'tls'} onCheckedChange={v => PU(x => { if (v === true) x.tls_client_cert = true; else delete x.tls_client_cert })} /> 클라이언트 인증서 제시 (워커 Tls.ClientCertFile — 접속점 상호인증)</label></div></div>
       <F label="미디어 전담 워커 (media_worker)" help="이 풀의 RTP 소켓·송수신을 다른 워커(에이전트 /media/*)에 둔다 — SDP 는 그 호스트를 가리키고 시그널링은 이 워커에 남는다. RTP CPU 분리. 자기 워커·PTT 풀은 불가. 계획 미리보기가 에이전트 도달을 검산"><Sel value={u.media_worker} disabled={ro} options={doc.workers.filter(w => w.name !== p.worker).map(w => ({ v: w.name, l: `${w.name} (${w.host})` }))} empty="(없음 — 같은 워커)" onChange={v => PU(x => { if (v) x.media_worker = v; else delete x.media_worker })} /></F>
