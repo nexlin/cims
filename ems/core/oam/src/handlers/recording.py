@@ -1439,10 +1439,11 @@ async def _list_recordings(base: str, qs: dict) -> HandlerResult:
     total = len(all_recs)
     page = all_recs[offset:offset + limit]
 
-    # dir를 id로 사용 (base 경로 제거하여 상대경로로)
+    # dir를 id로 사용 — base 기준 상대경로. VoIP 스캔은 절대경로, PTT 스캔은 이미 상대경로(`_scan_ptt_sessions`)를 주므로
+    # 절대경로일 때만 relpath 를 건다(상대경로에 한 번 더 걸면 cwd 기준 `../../../…` 로 깨진다)
     for r in page:
         d = r.pop('dir', '')
-        r['id'] = os.path.relpath(d, base) if base else d
+        r['id'] = os.path.relpath(d, base) if base and os.path.isabs(d) else d
 
     return HandlerResult(status=200, body={
         'total': total, 'limit': limit, 'offset': offset, 'recordings': page

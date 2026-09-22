@@ -1,9 +1,13 @@
-// 단일 <audio> 를 공유하는 인라인 재생 훅 — 이력 페이지의 발언/발화별 ▶ 버튼이 호출.
-// 서버는 GET segments/{seq}/audio 요청 시 raw→mp4 변환을 비동기 시작하고,
-// 변환 중 202·완료 200 을 반환 → 200 이 될 때까지 폴링한 뒤 <audio src> 지정.
+// 단일 <audio> 를 공유하는 인라인 재생 훅 — 이력 페이지의 발언/발화별 ▶ 버튼·타임라인 막대가 호출.
+// 서버는 GET segments/{seq}/audio|video 요청 시 raw→mp4 변환을 비동기 시작하고,
+// 변환 중 202·완료 200 을 반환 → 200 이 될 때까지 폴링한 뒤 element src 지정.
+// 영상이 있는 발화(`video: true`)는 audio 대신 video 를 받아 화면 오른쪽 아래 **미니 영상 도크**(360×202, 레터박스)에 튼다 —
+// 타임라인 클릭 한 번으로 영상이 보이고, ✕ 나 음성 발화 재생이 도크를 닫는다. [전체] 모달(SegmentPlayer)은 그대로.
 import { useState, useRef, useCallback, useEffect, type ReactElement } from 'react'
+import { X } from 'lucide-react'
 import { recordingsApi } from '../api/recordings'
 import { authHeaders } from '../api/client'
+import { Button } from './ui/button'
 
 // slot: 동시 발언·전이중 세그먼트의 슬롯 단독 재생. undefined = 믹스(화자 전원 합성).
 export type PlayRef = { recId: string; seq: number; slot?: number } | null
@@ -57,7 +61,8 @@ export function setMediaSrc(el: HTMLMediaElement, objectUrl: string) {
 }
 
 export interface InlineAudio {
-  play: (recId: string, seq: number, slot?: number) => Promise<void>
+  /** opts.video = 영상 있는 발화 — 미니 영상 도크로 튼다 */
+  play: (recId: string, seq: number, slot?: number, opts?: { video?: boolean }) => Promise<void>
   stop: () => void
   playing: PlayRef
   preparing: PlayRef
@@ -66,33 +71,43 @@ export interface InlineAudio {
 
 export function useInlineAudio(onError: (m: string) => void): InlineAudio {
   const audioRef = useRef<HTMLAudioElement>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState<PlayRef>(null)
   const [preparing, setPreparing] = useState<PlayRef>(null)
+  const [dock, setDock] = useState<PlayRef>(null)   // 미니 영상 도크에 올라 있는 발화(끝나도 남아 controls 로 다시 볼 수 있다)
   const abortRef = useRef<AbortController | null>(null)
 
+  const closeDock = useCallback(() => {
+    const v = videoRef.current
+    if (v) { v.pause(); const src = v.getAttribute('src'); if (src && src.startsWith('blob:')) URL.revokeObjectURL(src); v.removeAttribute('src') }
+    setDock(null)
+  }, [])
   const stop = useCallback(() => {
     abortRef.current?.abort()
     audioRef.current?.pause()
+    closeDock()
     setPlaying(null); setPreparing(null)
-  }, [])
+  }, [closeDock])
 
-  const play = useCallback(async (recId: string, seq: number, slot?: number) => {
-    const el = audioRef.current
-    if (!el) return
+  const play = useCallback(async (recId: string, seq: number, slot?: number, opts?: { video?: boolean }) => {
+    const video = !!opts?.video
     const ref: PlayRef = { recId, seq, slot }
     // 같은 발언 재클릭 = 토글 정지
     if (samePlay(playing, ref)) {
-      el.pause(); setPlaying(null); return
+      (video ? videoRef.current : audioRef.current)?.pause(); setPlaying(null); return
     }
     abortRef.current?.abort()
     const ac = new AbortController()
     abortRef.current = ac
-    const url = recordingsApi.segmentAudioUrl(recId, seq, slot)
+    if (video) { audioRef.current?.pause(); setDock(ref) } else closeDock()
+    const url = video ? recordingsApi.segmentVideoUrl(recId, seq, slot) : recordingsApi.segmentAudioUrl(recId, seq, slot)
     setPreparing(ref)
     try {
       const objUrl = await fetchMediaReady(url, ac.signal)
       if (ac.signal.aborted) { URL.revokeObjectURL(objUrl); return }
       setPreparing(null)
+      const el = video ? videoRef.current : audioRef.current   // 도크는 setDock 뒤 렌더돼야 ref 가 생긴다
+      if (!el) { URL.revokeObjectURL(objUrl); return }
       setMediaSrc(el, objUrl)
       setPlaying(ref)
       el.play().catch(() => {})
@@ -102,16 +117,31 @@ export function useInlineAudio(onError: (m: string) => void): InlineAudio {
         onError(e instanceof Error ? e.message : '재생 실패')
       }
     }
-  }, [playing, onError])
+  }, [playing, onError, closeDock])
 
   useEffect(() => () => {
     abortRef.current?.abort()
-    const src = audioRef.current?.getAttribute('src')
-    if (src && src.startsWith('blob:')) URL.revokeObjectURL(src)
+    for (const el of [audioRef.current, videoRef.current]) {
+      const src = el?.getAttribute('src')
+      if (src && src.startsWith('blob:')) URL.revokeObjectURL(src)
+    }
   }, [])
 
   const node = (
-    <audio className="hidden" ref={audioRef} onEnded={() => setPlaying(null)}/>
+    <>
+      <audio className="hidden" ref={audioRef} onEnded={() => setPlaying(null)}/>
+      {dock && (
+        <div className="fixed bottom-4 right-4 z-[140] w-[360px] max-w-[calc(100vw-32px)] overflow-hidden rounded-md border border-border bg-card shadow-lg" role="dialog" aria-label="영상 발화 재생">
+          <div className="flex items-center gap-2 border-b border-border px-2 py-1 text-xs">
+            <b>영상 발화</b><span className="font-mono text-muted-foreground">#{dock.seq}{dock.slot != null ? ` · 슬롯 ${dock.slot}` : ''}</span>
+            {preparing && samePlay(preparing, dock) && <span className="text-muted-foreground">변환 중…</span>}
+            <Button variant="ghost" size="iconSm" className="ml-auto" onClick={() => { closeDock(); if (samePlay(playing, dock)) setPlaying(null) }} title="닫기"><X size={14} /></Button>
+          </div>
+          {/* 영상 무대는 테마 표면이 아니라 레터박스 — SegmentPlayer 와 같은 검정 */}
+          <video ref={videoRef} controls playsInline className="block h-[202px] w-full bg-black object-contain" onEnded={() => setPlaying(null)} />
+        </div>
+      )}
+    </>
   )
   return { play, stop, playing, preparing, node }
 }

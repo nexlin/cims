@@ -943,7 +943,7 @@ export function FloorRow({ f, speakerOrder, names, border, role, turn, recId, au
       {turn ? (
         <Button className="min-w-[30px] py-px px-1.5" variant={isPlaying ? 'default' : 'outline'}
  disabled={!recId || !turn.playable}
- onClick={() => recId && audio?.play(recId, turn.seq, slot)}
+ onClick={() => recId && audio?.play(recId, turn.seq, slot, { video: turn.hasVideo })}
  title={turn.playable ? (turn.multi ? '이 화자만 재생 (동시 발언은 타임바의 “동시 N” 이 믹스)' : '재생/정지') : '녹취중'}>
           {isPrep ? '…' : isPlaying ? <Pause size={13} /> : <Play size={13} />}
         </Button>
@@ -1211,9 +1211,10 @@ function LaneTimebar({ turns, speakerOrder, recId, audio, names, fill, collapsed
  const seq = bandSeq(b)
  const on = seq != null && samePlay(audio.playing, { recId: recId || '', seq })
  const can = seq != null && !!recId
+ const vid = seq != null && turns.some(t => t.seq === seq && t.hasVideo)
  return (
                       <span key={i}
- onClick={() => { if (can && !dragRef.current.moved) audio.play(recId!, seq!) }}
+ onClick={() => { if (can && !dragRef.current.moved) audio.play(recId!, seq!, undefined, { video: vid }) }}
  title={can ? '믹스 재생 — 동시 발언 화자 전원 합성(실제로 들린 소리)' : undefined}
  style={{
  position: 'absolute', left: `${(pct(b.a) + pct(b.b)) / 2}%`, transform: 'translateX(-50%)',
@@ -1253,7 +1254,7 @@ function LaneTimebar({ turns, speakerOrder, recId, audio, names, fill, collapsed
  key={i}
  onClick={() => {
  if (dragRef.current.moved) return   // 이동 드래그였다
- if (recId && t.playable) audio.play(recId, t.seq, slot)
+ if (recId && t.playable) audio.play(recId, t.seq, slot, { video: t.hasVideo })
                             }}
  title={`${names.tipOf(t.spk)} · ${fmtClock(t.start)} · ${fmtMmss(t.durMs)}${t.multi ? ` · 슬롯 ${t.slot}` : ''}`}
  style={{
