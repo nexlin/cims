@@ -186,6 +186,7 @@ ANNOUNCEMENTS = {
     "ann_busy":           (VOICE_A, "지금 거신 전화는 통화 중이오니 잠시 후 다시 걸어 주십시오.",       "통화 중 안내"),
     "ann_no_answer":      (VOICE_A, "고객이 전화를 받을 수 없습니다. 잠시 후 다시 걸어 주십시오.",       "무응답 안내"),
     "ann_invalid_number": (VOICE_A, "지금 거신 번호는 없는 번호입니다. 다시 확인하시고 걸어 주십시오.",  "없는 번호 안내"),
+    "ann_forwarded":      (VOICE_A, "전화가 다른 번호로 연결됩니다. 잠시만 기다려 주십시오.",             "착신전환 안내"),
 }
 
 PHRASES_A = [

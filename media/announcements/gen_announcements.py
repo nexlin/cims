@@ -37,6 +37,7 @@ SET = [
     ("ann_busy",           "announcement", False, "통화 중 안내 — \"지금 거신 전화는 통화 중이오니 잠시 후 다시 걸어 주십시오.\""),
     ("ann_no_answer",      "announcement", False, "무응답 안내 — \"고객이 전화를 받을 수 없습니다. 잠시 후 다시 걸어 주십시오.\""),
     ("ann_invalid_number", "announcement", False, "없는 번호 안내 — \"지금 거신 번호는 없는 번호입니다. 다시 확인하시고 걸어 주십시오.\""),
+    ("ann_forwarded",      "announcement", False, "착신전환 안내 — \"전화가 다른 번호로 연결됩니다. 잠시만 기다려 주십시오.\" (TS 24.604 forwarded)"),
     ("moh_simple",         "music", True,  "합성 보류 음악(아르페지오 C–Am–F–G, 120 bpm) -20 dBov"),
 ]
 

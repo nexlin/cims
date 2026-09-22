@@ -2539,6 +2539,11 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
 
     // 관측자(워커) — 착신 도착 시각. 응답은 아래 모드에 따라 지금(auto) 또는 나중(deferred, AnswerCall) 에 낸다.
     if (m_pOwner->m_pObserver) m_pOwner->m_pObserver->OnIncomingCall(m_pOwner, pszCallId, pszFrom ? pszFrom : "");
+    if (m_pOwner->m_pObserver && pclsMessage) {
+        // 착신전환으로 온 호(TS 24.604) — 서버가 재타게팅 이력을 History-Info 로 실었다(워커 cdiv_hi_rx)
+        CSipHeader* pclsHi = pclsMessage->GetHeader("History-Info");
+        if (pclsHi && !pclsHi->m_strValue.empty()) m_pOwner->m_pObserver->OnIncomingDiverted(m_pOwner, pszCallId, pclsHi->m_strValue);
+    }
 
     if (m_pOwner->m_bPttMode) {
         AnswerPtt(pszCallId, pclsRtp, pclsMessage);

@@ -3,6 +3,8 @@
   · tests/csp_dial_plan_test.cpp   착신 번호 번역(csp/CspDialPlan.cpp — sip_service_model.md §2-10, TS 24.229 §5.4.3.2 · RFC 3966):
                                    국내형→+E.164 · 국제 접두 · 시각 구분자 · 그룹 id/피처코드/긴급번호 비번역 · 접두 없는 숫자열 484 ·
                                    플랜 비활성 · phone-context · sip/tel URI 추출·재작성 (psip SipParser 정적 라이브러리에 링크)
+  · tests/csp_diversion_test.cpp   착신전환(csp/CspDiversion.cpp — TS 24.604 §4.5.2.6, RFC 7044 History-Info · RFC 4458 cause):
+                                   첫 전환 index=1/1.1 mp=1 cause=302 · 연쇄 · 수신 값 이어 붙이기 · 전환 수(cause 항목) · 항목 분리 · URI 조립
 
 psip 정적 라이브러리(build/csp/psip_build/*.a)가 없으면 SKIP — S2 빌드 뒤 pre-package 프리셋에서 의미가 있다.
 """
@@ -16,11 +18,13 @@ from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 
 _ID = "S1-UNIT-CSP"
-_NAME = "CSP 로직 단위시험 (tests/csp_dial_plan_test.cpp — 착신 번호 번역·다이얼 플랜)"
+_NAME = "CSP 로직 단위시험 (tests/csp_dial_plan_test.cpp 다이얼 플랜 · csp_diversion_test.cpp 착신전환 History-Info)"
 _LIB_DIR = "build/csp/psip_build"
 # 시험 → (추가 소스, 링크할 psip 정적 라이브러리)
 _TESTS = {
     "tests/csp_dial_plan_test.cpp": (["csp/CspDialPlan.cpp"], ["libSipParser.a", "libSipPlatform.a"]),
+    # 착신전환 History-Info(RFC 7044)·cause(RFC 4458) 조립·전환 수 판정 — 순수 문자열(라이브러리 불필요)
+    "tests/csp_diversion_test.cpp": (["csp/CspDiversion.cpp"], []),
 }
 _INCS = ["csp", "ext/psip/SipParser", "ext/psip/SipPlatform"]
 

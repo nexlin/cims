@@ -1,7 +1,7 @@
 {
   "name": "cmp",
   "description": "CIMS Media Processor — RTP/RTCP relay + PTT mixing + 녹취",
-  "version": "0.2.94",
+  "version": "0.2.95",
   "ha_capability": "all_active",
   "service": {
     "functions": [

@@ -72,6 +72,7 @@ export const SUMMARY_ROWS: [string, string, 'int' | 'pct' | 'num' | 'str'][] = [
   ['registered_ok', '등록 성공', 'int'], ['registered_fail', '등록 실패', 'int'], ['doc_saps', 'DOC (SApS)', 'num'],
   ['rtp_rx', 'RTP 수신', 'int'], ['rtp_lost', 'RTP 손실', 'int'], ['rtp_loss_pct', 'RTP 손실 %', 'pct'],
   ['early_media_pct', 'early media 비율(183+SDP)', 'pct'], ['prack_pct', 'PRACK 비율', 'pct'],
+  ['cdiv_181_pct', '착신전환 181 통지 비율', 'pct'], ['cdiv_hi_pct', '착신전환 History-Info 비율', 'pct'],
   ['hold_resume_pct', 'hold/resume 성공 비율', 'pct'], ['refer_pct', 'REFER 성공 비율', 'pct'],
   ['q850_causes', 'Q.850 cause', 'str'], ['refer_codes', 'REFER 응답 코드', 'str'], ['codes', '응답 코드', 'str'],
   ['real_legs', '실단말(real-ue) leg', 'int'], ['real_rtp_loss_pct', '실단말 RTP 손실 %', 'pct'], ['real_mos_mean', '실단말 MOS 추정 평균', 'num'], ['real_mos_min', '실단말 MOS 추정 최솟값', 'num'],

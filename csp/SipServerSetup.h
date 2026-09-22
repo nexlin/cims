@@ -97,6 +97,12 @@ public:
     /** 그룹 no_answer_sec 상한 — 그룹 값이 이를 넘으면 clamp */
     int m_iDispatchForkRingTimeoutSec;
 
+    // 착신전환 (Setup.Sip.Cdiv — TS 24.604, volte_supplementary_services.md §6A · announcements.md §3.5)
+    /** 한 호의 전환 상한(수신 INVITE 의 History-Info 가 담은 전환 포함) — 넘으면 486 (TS 24.604 §4.5.2.6) */
+    int m_iCdivMaxDiversions = 5;
+    /** 전환 때 발신자에게 181 Call Is Being Forwarded 를 낸다(TS 24.604 §4.5.2.6.1 originating user notification) */
+    bool m_bCdivNotify181 = true;
+
     /** SIP stack 실행 주기 (ms 단위) */
     int m_iStackExecutePeriod;
 

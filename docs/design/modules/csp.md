@@ -12,7 +12,7 @@ CSP는 CIMS 시스템의 SIP 시그널링 서버로, IMS 기반 역할(CSCF, TAS
 | VoIP 1:1 통화 | B2BUA 기반 호 처리, CMP RTP relay 연동 |
 | PTT 그룹콜 | 다자 SIP INVITE, CMP 그룹 RTP/Floor 연동 |
 | 부가서비스 | DND, 착신전환, 착신거부, 콜픽업 |
-| 안내음성 | 실패 안내(early media 뒤 원코드)·보류 음악·서버 링백 — CMP 재생기 지시(§3.12, [announcements.md](../features/announcements.md)) |
+| 안내음성 | 실패 안내(early media 뒤 원코드)·보류 음악·서버 링백·착신전환 안내 — CMP 재생기 지시(§3.12, [announcements.md](../features/announcements.md)) |
 | IP-PBX 트렁크 | 외부 SIP 서버 라우팅 (IBCF) |
 | 가입자/그룹 관리 | DB primary, JSON fallback |
 | 서비스 로깅 | Session-ID 기반 통합 이력, SIP 메시지 로깅 |
@@ -112,7 +112,7 @@ RecvRequest(INVITE)
   ├─ 트렁크 prefix 매칭? ──→ IBCF (SetCallOwner → CIbcfModule)
   ├─ DND 활성화? ──────────→ 603 Decline 응답
   ├─ 착신거부 목록? ────────→ 603 Decline 응답
-  ├─ 착신전환 설정? ────────→ 302 Moved Temporarily
+  ├─ 착신전환 설정? ────────→ 181 + B-leg 를 전환 대상으로 (서버측 CDIV, History-Info — volte_supplementary_services.md §6A)
   └─ 기본 ─────────────────→ TAS B2BUA (SetCallOwner → CTasModule)
 ```
 
@@ -189,7 +189,7 @@ B2BUA 골격(라우팅·relay 수명)은 ModuleDispatcher 가 유지하고, 보�
 |--------|--------|------|
 | DND (착신거부) | `CspUser::m_bDnd == true` | 603 Decline (`ScreenInvite`/`ApplyTerminationServices`) |
 | 개별 착신거부 | `CspUser::m_vecReject`에 발신자 포함 | 603 Decline |
-| 착신전환 | `CspUser::m_strForward` 설정됨 | 302 Moved Temporarily (수신 listener 주소 Contact) |
+| 착신전환 | `CspUser::m_strForward` 설정됨(등록 여부 무관) | 서버측 전환(TS 24.604) — `ResolveDiversion` 이 대상(연쇄·상한 `Setup.Sip.Cdiv`)을 정하면 발신자 181, B-leg 를 전환 대상으로 + `History-Info`(RFC 7044 cause=302) + 전환 안내(`forwarded`) — [volte_supplementary_services.md §6A](../features/volte_supplementary_services.md) |
 | 당겨받기 | 피처코드 다이얼(`TryPickupDial`) / INVITE-Replaces(`OnIncomingCall`) | 링잉 leg 재키잉 + `RELAY_MODIFY` |
 | 호 전달 | REFER blind/attended (`OnBlindTransfer`/`OnTransfer`, 게이트=`OnSipRequest`) | 원 relay 유지·교체 leg `RELAY_MODIFY` |
 | dialog 이벤트 (RFC 4235) | 호 상태 변화 (`OnCallRing/OnCallStart/OnCallEnd`) | BLF dialog-info NOTIFY — 인가는 `CCspRoleMap::CanWatch`(규칙 1 같은 전화 그룹(`CCspPhoneGroupMap`) / 규칙 2 역할 `monitor_call` — dispatch_center.md §5.2) |
@@ -845,9 +845,10 @@ CSP 가 CSC 보다 먼저 기동하면 첫 조회는 실패하고, 이후 `CSC_R
 |---|---|
 | 정책 | `Setup.Announcement.Rules`(행 = profile·situation·mode·tone·tone_ms·media·repeat·loop) → `profile → situation → action` 표. 비면 내장 기본 표(default·trunk). 해석 `Resolve(situation, profile)` = 그 프로파일 → `DefaultProfile` → none. 발신자 프로파일은 INVITE 때 `ProfileForCaller`(inbound Route 피어면 RemoteNode `announcement_profile`, 가입자면 접속서비스)로 정해 `CCallInfo::m_strAnnProfile` 에 둔다 |
 | 판정 | `Classify(status, Reason)` — Reason `Q.850;cause=N` 우선(17 busy·18/19 no_answer·20 unreachable·21 declined·1 not_found·28 invalid·34/38/41/42/44/47 congestion) → SIP 코드(486/600·408/480·404/410·484·603/607·403·488/606/5xx). CSP 자체 480 은 unreachable |
-| 실패 안내 | `OnLegFailed`(B 최종 실패) / `Reject`(B leg 이전 거절 — relay 를 A 만으로 잡고 CallMap 에 A 단독 entry) → `BuildEarlyAnswer`(A offer 의 재생 가능 첫 코덱, 오디오만, SDES 재광고, relay 주소, `a=sendrecv`) → `RingCall(183, P-Early-Media: sendonly)` → `RELAY_MODIFY`(A leg remote_pt/remote_codec) → `RELAY_PLAY` → `OnPlayDone`/`Tick` 상한 → `FinishEarly`: CDR(`announcement{…}`)·`VoipCallEnd`·DB 종료·`StopCall(원코드, Reason)`·`CallMap.Delete`(RELAY_REMOVE) — 자체 거절한 UAS 다이얼로그는 psip 가 EventCallEnd 를 올리지 않아 마감을 직접 한다. A 가 이미 SDP 를 받았으면(B 18x+SDP·링백) 183 을 다시 내지 않는다. CMP 미지원·거절·조립 실패 = 안내 없이 즉시 원코드(`m_lFallback`) |
+| 실패 안내 | `OnLegFailed`(B 최종 실패) / `Reject`(B leg 이전 거절 — relay 를 A 만으로 잡고 CallMap 에 A 단독 entry) → `BuildEarlyAnswer`(A offer 의 재생 가능 첫 코덱, 오디오만, SDES 재광고, relay 주소, `a=sendrecv`) → `RELAY_MODIFY`(A leg remote_pt/remote_codec) → `RELAY_PLAY`(거절이면 answer 를 내지 않고 폴백) → `RingCall(183, P-Early-Media: sendonly)` → `OnPlayDone`/`Tick` 상한 → `FinishEarly`: CDR(`announcement{…}`)·`VoipCallEnd`·DB 종료·`StopCall(원코드, Reason)`·`CallMap.Delete`(RELAY_REMOVE) — 자체 거절한 UAS 다이얼로그는 psip 가 EventCallEnd 를 올리지 않아 마감을 직접 한다. A 가 이미 SDP 를 받았으면(B 18x+SDP·링백) 183 을 다시 내지 않는다. CMP 미지원·거절·조립 실패 = 안내 없이 즉시 원코드(`m_lFallback`) |
 | 보류 음악 | `OnHold(holder)` → 피보류 leg 에 `RELAY_PLAY repeat 0`(프로파일 = 피보류자 접속서비스 `hold_profile` → `announcement_profile` → 기본), 같은 보류의 재-INVITE 는 멱등. `OnResume`·양 leg 종료·`OnLegReplaced`(전달·픽업 재키잉 — TasModule 의 RELAY_MODIFY 앞) 에 STOP |
-| 서버 링백 | 프로파일 `ringback.mode=media` 일 때만 `OnRingback` — 183+SDP + loop 재생, B 의 SDP 있는 18x·200 에 `OnRingbackEnd`. 링백 뒤 실패 안내는 같은 SDP 위에서 재생만 교체 |
+| 서버 링백 | 프로파일 `ringback.mode=media` 일 때만 `OnRingback` — 183+SDP + loop 재생, B 의 SDP 있는 18x·200 에 `OnRingbackEnd`. 링백 뒤 실패 안내는 같은 SDP 위에서 재생만 교체. A 에 이미 answer 를 낸 호면 프로파일과 무관하게 true(18x 가 같은 SDP 로) |
+| 전환 안내 | `OnForwarded(A, B)` — 착신전환 B-leg `StartCall` 직전, 프로파일 `forwarded`(기본 `announce_then_tone`) 1 단계 안내 + 183+SDP; `OnPlayDone` 이 2 단계(신호음 또는 `ringback` 규칙 loop)로 잇고 CDR `announcement{forwarded}` 기록 — [announcements.md §3.5](../features/announcements.md) |
 | 스레드 | 상태 맵(`m_mapCalls`·`m_mapPlayToCall`·`m_mapHold`)은 `m_mtx`, SIP·CMP 호출은 락 밖(StopCall → EventCallEnd → OnCallEnd 재진입). `OnPlayDone` 은 CmpClient EventDispatchLoop 스레드, `Tick` 은 CspServer 1초 루프, `Init` 은 기동·SIGUSR1 |
 
 ## 4. 데이터 관리
@@ -868,7 +869,7 @@ CSP 가 CSC 보다 먼저 기동하면 첫 조회는 실패하고, 이후 `CSC_R
 | m_strSipTransport | string | 채널 정책 (DB `sip_transport`, JSON `sip_transport`). `TLS` 면 비-TLS 채널의 이 신원 요청은 403(RFC 3329 sec-agree 로 tls 를 결부한 등록도 같은 게이트, `Setup.SecAgree.Require` 로 정책 가입자에 협상 강제) — [sip_access_security.md §3](../features/sip_access_security.md) |
 | m_strAuthScheme | string | 인증 체계 (DB `auth_scheme`, JSON `auth_scheme`) — `digest`(기본) / `aka`(IMS AKA over TLS: REGISTER 챌린지를 CSC AV(`CscAvClient`)로 만들고 `AKAv1-MD5` 로 검증, TLS 채널 강제 대상) — [sip_access_security.md §8.2](../features/sip_access_security.md) |
 | m_bDnd | bool | 착신거부 (DND) |
-| m_strForward | string | 착신전환 번호 |
+| m_strForward | string | 착신전환(CFU) 대상 번호 — 서버측 전환의 근거(§3.3 `ResolveDiversion`, 접속서비스 다이얼 플랜으로 번역) |
 | m_vecReject | vector | 개별 착신거부 목록 |
 | m_strServiceType | string | "voip", "ptt", "both" |
 | m_strOrganizationId | string | 소속 조직 |
@@ -1039,9 +1040,18 @@ relay bookkeeping 의 키는 **session_id**(`csp_{yyyymmddHHMMSSmmm}_{n}`, 재�
 | `Enable` | true | false = 전 상황 응답 코드만 |
 | `MaxPlayMs` | 30000 | 실패 안내 한 건의 총 재생 상한(RELAY_PLAY max_ms). 보류 음악은 STOP 까지 |
 | `DefaultProfile` | `default` | 접속서비스·피어에 프로파일이 없을 때 |
-| `Rules[]` | (내장 표) | 행 = `{profile, situation, mode, tone, tone_ms, media, repeat, loop}` — 콘솔 `object_list`. 상황 11종·mode 5종은 [announcements.md §2·§6](../features/announcements.md) |
+| `Rules[]` | (내장 표) | 행 = `{profile, situation, mode, tone, tone_ms, media, repeat, loop}` — 콘솔 `object_list`. 상황 12종·mode 6종은 [announcements.md §2·§6](../features/announcements.md) |
 
 접속서비스 `announcement_profile`(발신자)·`hold_profile`(피보류자), RemoteNode `announcement_profile`(피어 발신) 이 프로파일을 고른다. SIGUSR1 재로드.
+
+### 6.0a 착신전환 (`Setup.Sip.Cdiv`)
+
+| 키 | 기본 | 뜻 |
+|---|---|---|
+| `MaxDiversions` | 5 | 한 호의 전환 상한(수신 INVITE 의 History-Info 전환 포함) — 넘거나 루프면 486 (TS 24.604 §4.5.2.6) |
+| `Notify181` | true | 전환 때 발신자에게 181 Call Is Being Forwarded |
+
+템플릿 섹션 `tas`, SIGUSR1 재로드. 절차는 [volte_supplementary_services.md §6A](../features/volte_supplementary_services.md).
 
 ### 6.1 SDP 코덱 테이블 (`Setup.Media.Codecs`)
 

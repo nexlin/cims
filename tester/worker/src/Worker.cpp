@@ -133,6 +133,12 @@ void Worker::OnIncomingCall(SimSession* s, const std::string& callId, const std:
     std::lock_guard<std::mutex> lk(m_evMtx);
     m_events.push_back({ Event::INCOMING, s, nullptr, 0, 0, callId, "", true });
 }
+void Worker::OnIncomingDiverted(SimSession* s, const std::string& callId, const std::string& hi) {
+    std::lock_guard<std::mutex> lk(m_evMtx);
+    Event e{ Event::DIVERTED, s, nullptr, 0, 0, callId, "", false };
+    e.event = hi;
+    m_events.push_back(e);
+}
 void Worker::OnCallStart(SimSession* s, const std::string& callId, long long ms) {
     std::lock_guard<std::mutex> lk(m_evMtx);
     m_events.push_back({ Event::CALLSTART, s, nullptr, 200, ms, callId, "", false });
@@ -1562,9 +1568,14 @@ void Worker::onEvent(const Event& e) {
         }
         break;
     }
+    case Event::DIVERTED:
+        // 착신 INVITE 의 History-Info — 서버가 착신전환(TS 24.604)을 수행하며 실은 재타게팅 이력(cdiv_hi_pct 분자)
+        m_metrics.counter("cdiv_hi_rx");
+        break;
     case Event::RING:
         // 발신자의 1xx — 183 SDP 면 early media, RSeq 가 있었으면 PRACK 을 냈다(RFC 3262)
         m_metrics.counter("ring_rx");
+        if (e.status == 181) m_metrics.counter("cdiv_181_rx");   // 181 Call Is Being Forwarded — 착신전환 통지(TS 24.604 §4.5.2.6.1)
         if (e.hasPai) m_metrics.counter("early_media");
         // 망이 만든 183+SDP(서버 안내·링백, announcements.md §3) — progress 단계 없이도 early media 가 섰다: 200/실패 최종 응답 때 RTP 도달을 판정한다
         if (e.hasPai && in && in->rtpMode != CRtpThread::E_MEDIA_NONE && in->actors.count(roleOf(in, ep)) && !in->progressTx) {

@@ -487,7 +487,7 @@ Content-Type: application/json
 | `auth_scheme` | string | N | `digest` | 인증 체계 `digest`(SIP Digest, `ha1`) / `aka`(IMS AKA over TLS — `sip_transport` 와 무관하게 TLS 채널만 허용). 마이그레이션(`migrate_subscription_aka.sql`) 전 DB 에서는 400 |
 | `k` / `opc` / `op` / `amf` | string | aka 면 Y | - / `8000` | IMS AKA 자료(hex32 / hex32 / hex32 → OPc 유도 / hex4). **저장 형식은 CSC `AuC.Kek` 암호화**이며 어떤 응답에도 원문이 나가지 않는다(조회는 `auth_scheme`·`aka_provisioned`). 키를 넣으면 SQN 이 0 으로 리셋. `AuC.Kek` 미설정이면 503 |
 | `dnd` | boolean | N | false | 방해금지 모드 |
-| `forward_id` | string | N | "" | 착신전환 번호 (E.164 형식) |
+| `forward_id` | string | N | "" | 착신전환(CFU) 대상 번호 — 숫자열(선행 `+` 허용, `*`/`#` 포함 가능), 빈 값 = 전환 없음. 형식 위반 400. CSP 가 가입자 접속서비스의 다이얼 플랜으로 번역해 **서버측 전환**(181·History-Info·전환 안내 — [volte_supplementary_services.md §6A](../design/features/volte_supplementary_services.md)) |
 
 > 변경(PUT) 시 `passwd` 는 바꿀 때만 보낸다 — 미전송/빈값이면 기존 `ha1` 이 유지된다. `ha1` 은
 > (imsi, 서비스 domain/realm) 에 결박되므로 **`imsi` 를 바꾸거나, `service_ref` 를 (domain, realm) 이 다른 서비스로
@@ -558,7 +558,7 @@ Authorization: Bearer <admin_token>
 Content-Type: application/json
 ```
 
-**요청:** (변경할 필드만)
+**요청:** (변경할 필드만 — **부분 업데이트**: 보낸 키만 바뀐다. `dnd`·`forward_id` 도 키가 없으면 유지)
 ```json
 {
   "auth_id": "new_auth_id",

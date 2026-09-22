@@ -113,6 +113,8 @@ def resolve(scenario: Scenario, role_first: Dict[str, dict], bindings: Dict[str,
                 fields['service_ref'] = svc_name(f.service_ref) if (f.service_ref in scenario.fixtures) else f.service_ref
             if f.ringback_media is not None:
                 fields['ringback_media'] = f.ringback_media
+            if f.forward_to is not None:
+                fields['forward_id'] = user_of(f.forward_to)   # 착신전환 대상 = 역할의 첫 신원(CSP 가 다이얼 플랜으로 번역)
             out.append({'key': key, 'kind': f.kind, 'fields': fields, 'service_ref': fields.get('service_ref'),
                         'lines': [{'role': r, 'user': user_of(r)} for r in f.roles]})
     return out
@@ -193,7 +195,7 @@ class FixtureApplier:
                         num = str(sub.get('id') or '')
                         if num:
                             m[num] = {'person': u.get('id'), 'kind': kind, 'service_ref': sub.get('service_ref'),
-                                      'ringback_media': sub.get('ringback_media')}
+                                      'ringback_media': sub.get('ringback_media'), 'forward_id': sub.get('forward_id')}
                             m[re.sub(r'\D', '', num)] = m[num]
             self._users = m
         return self._users

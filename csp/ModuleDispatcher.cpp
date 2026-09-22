@@ -22,6 +22,7 @@
 #include "CspAddressing.h"
 #include "CspAnnouncement.h"
 #include "CspDialPlan.h"
+#include "CspDiversion.h"
 #include "CspLocalNodeMap.h"
 #include "CspPendingRouteMap.h"
 #include "CspPttGroup.h"
@@ -295,6 +296,95 @@ static EDialPlanResult ResolveCallee( CSipMessage *pclsMessage, const RouteConfi
     return eRes;
 }
 
+/** routing_policies 평가(CspRoutingPolicyEngine) → 피어 RouteSet 이면 PendingRouteMap 에 B-leg 목적지를 Call-ID 로
+ * 넣는다 (EventIncomingCall 이 Take 로 꺼내 B2BUA B-leg peer 로 쓴다). RecvRequest(원착신)와 착신전환(EventIncomingCall
+ * 이 전환 대상으로 다시 판정)이 같은 함수를 쓴다. 반환 403 = 거절(REJECT 정책 또는 Roles.IBCF=false 인 노드의
+ * RouteSet), 1 = 피어 경로 등록, 0 = 가입자/내부 경로(정책 없음·access_service·조회 실패 legacy fallback). */
+int CModuleDispatcher::DecideOutboundRoute( CSipMessage *pclsMessage, const std::string &strTo,
+                                            const std::string &strCallId ) {
+    bool bInserted = false;
+    MessageCtx mctx;
+    mctx.from_uri_host = pclsMessage->m_clsFrom.m_clsUri.m_strHost;
+    mctx.from_uri_user = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
+    mctx.to_uri_host = pclsMessage->m_clsTo.m_clsUri.m_strHost;
+    mctx.to_uri_user = pclsMessage->m_clsTo.m_clsUri.m_strUser;
+    mctx.req_uri_host = pclsMessage->m_clsReqUri.m_strHost;
+    // 라우팅 규칙의 착신 번호 = 번역된 착신(tel: URI 는 user 가 비어 있어 종전엔 prefix 규칙에 걸리지 않았다)
+    mctx.req_uri_user = strTo.empty() ? pclsMessage->m_clsReqUri.m_strUser : strTo;
+    mctx.src_ip = pclsMessage->m_strClientIp;
+    mctx.user_agent = pclsMessage->m_strUserAgent;
+    mctx.method = pclsMessage->m_strSipMethod;
+    std::string hashKey = mctx.from_uri_user + "@" + mctx.from_uri_host;
+    RoutingDecision rd = gclsRoutingPolicyEngine.Decide( mctx, hashKey );
+    if ( rd.type == ROUTING_REJECT ) {
+        CLog::Print( LOG_INFO, "RoutingPolicyEngine: reject policy='%s' reason='%s'", rd.matched_policy.c_str(),
+                     rd.reason.c_str() );
+        return 403;
+    }
+    if ( rd.type == ROUTING_ROUTE_SET && !m_clsIbcf.IsEnabled() ) {
+        // 역할 격리(Setup.Roles.IBCF=false) — 피어(트렁크) 라우팅은 IBCF 역할의 것이다. 정책이 RouteSet 을
+        // 골라도 이 노드는 피어로
+        //   내보내지 않는다(403). 종전엔 가드가 없어 역할을 끈 노드가 트렁크 발신을 했다(test_instrument.md
+        //   §12).
+        CLog::Print( LOG_INFO,
+                     "RoutingPolicyEngine: policy='%s' route_set='%s' picked but Roles.IBCF=false → 403 [callId=%s]",
+                     rd.matched_policy.c_str(), rd.target_name.c_str(), strCallId.c_str() );
+        return 403;
+    }
+    if ( rd.type == ROUTING_ROUTE_SET ) {
+        // G1 (2026-04-23): picked_route → RouteConfig → RemoteNode 정보를 PendingRouteMap 에
+        //   Call-ID 로 저장. CSipUserAgent 가 dialog 를 만들어 EventIncomingCall 을 호출하면
+        //   거기서 Take() 로 꺼내 B2BUA B-leg peer 로 사용한다.
+        //   (직전 구현의 AddRoute()→return false 경로는 B-leg 메시지에 carry-over 되지 않아 무효였음.)
+        RouteConfig rc = gclsRouteMap.GetByName( rd.picked_route );
+        if ( rc.IsValid() ) {
+            RemoteNodeInfo rn = gclsRemoteNodeMap.GetByName( rc.remote_node_ref );
+            // 등록형 트렁크 — 다음 홉은 RemoteNode 설정 주소가 아니라 등록 바인딩(REGISTER 소스, SIPconnect 2.0
+            // §8)
+            TrunkBinding tb;
+            const bool bTrunk = rc.IsTrunkAccount() && gclsTrunkRegistrar.Get( rc.name, tb );
+            if ( bTrunk ) {
+                rn.name = rc.remote_node_ref;
+                rn.ip = tb.ip;
+                rn.port = tb.port;
+                rn.protocol = tb.transport;
+            }
+            if ( rn.IsValid() && !rn.ip.empty() && rn.port > 0 ) {
+                PendingRouteEntry pe;
+                pe.remote_ip = rn.ip;
+                pe.remote_port = rn.port;
+                pe.protocol = rn.protocol;
+                pe.route_name = rd.picked_route;
+                pe.route_set = rd.target_name;
+                pe.policy_name = rd.matched_policy;
+                pe.local_node_ref = rc.local_node_ref;  // outbound leg 자기 주소 결정용
+                pe.hash_key = hashKey;                  // 재라우팅 재선택(hash_by_caller)에 같은 키
+                gclsPendingRouteMap.Insert( strCallId, pe );
+                bInserted = true;
+                CLog::Print( LOG_SYSTEM,
+                             "RoutingPolicyEngine: policy='%s' route_set='%s' picked_route='%s' → RemoteNode "
+                             "%s (%s:%d %s) [pending callId=%s]",
+                             rd.matched_policy.c_str(), rd.target_name.c_str(), rd.picked_route.c_str(),
+                             rn.name.c_str(), rn.ip.c_str(), rn.port, rn.protocol.c_str(), strCallId.c_str() );
+            } else {
+                CLog::Print( LOG_ERROR,
+                             "RoutingPolicyEngine: picked_route='%s' remote_node_ref='%s' 조회 실패 — legacy fallback",
+                             rd.picked_route.c_str(), rc.remote_node_ref.c_str() );
+            }
+        } else {
+            CLog::Print( LOG_ERROR, "RoutingPolicyEngine: picked_route='%s' Route 조회 실패 — legacy fallback",
+                         rd.picked_route.c_str() );
+        }
+    } else if ( rd.type == ROUTING_ACCESS_SERVICE ) {
+        // ACCESS_SERVICE target 은 UE 에게 라우팅 (TAS/B2BUA 레거시 경로가 처리).
+        //   명시적 분기 없이 legacy TAS 판단 로직(DND/reject)으로 진행 → 로그만.
+        CLog::Print( LOG_INFO, "RoutingPolicyEngine: match policy='%s' access_service='%s' (legacy TAS path)",
+                     rd.matched_policy.c_str(), rd.target_name.c_str() );
+    }
+
+    return bInserted ? 1 : 0;
+}
+
 bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
     std::string strCallId;
     pclsMessage->GetCallId( strCallId );
@@ -464,89 +554,13 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
             return false;
         }
 
-        // v3 (2026-04-22): routing_policies 평가 — REJECT 즉시 반영.
-        //   route_set/access_service 분기는 후속 스테이지에서 배선 (현재는 로그만).
+        // routing_policies 평가 — REJECT 403 / 피어 RouteSet 이면 PendingRouteMap 에 B-leg 목적지(착신전환의 재판정과
+        // 같은 함수)
         {
-            MessageCtx mctx;
-            mctx.from_uri_host = pclsMessage->m_clsFrom.m_clsUri.m_strHost;
-            mctx.from_uri_user = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
-            mctx.to_uri_host = pclsMessage->m_clsTo.m_clsUri.m_strHost;
-            mctx.to_uri_user = pclsMessage->m_clsTo.m_clsUri.m_strUser;
-            mctx.req_uri_host = pclsMessage->m_clsReqUri.m_strHost;
-            // 라우팅 규칙의 착신 번호 = 번역된 착신(tel: URI 는 user 가 비어 있어 종전엔 prefix 규칙에 걸리지 않았다)
-            mctx.req_uri_user = strTo.empty() ? pclsMessage->m_clsReqUri.m_strUser : strTo;
-            mctx.src_ip = pclsMessage->m_strClientIp;
-            mctx.user_agent = pclsMessage->m_strUserAgent;
-            mctx.method = pclsMessage->m_strSipMethod;
-            std::string hashKey = mctx.from_uri_user + "@" + mctx.from_uri_host;
-            RoutingDecision rd = gclsRoutingPolicyEngine.Decide( mctx, hashKey );
-            if ( rd.type == ROUTING_REJECT ) {
-                CLog::Print( LOG_INFO, "RoutingPolicyEngine: reject policy='%s' reason='%s'", rd.matched_policy.c_str(),
-                             rd.reason.c_str() );
+            const int iRoute = DecideOutboundRoute( pclsMessage, strTo, strCallId );
+            if ( iRoute == 403 ) {
                 SendResponse( pclsMessage, 403 );
                 return true;
-            }
-            if ( rd.type == ROUTING_ROUTE_SET && !m_clsIbcf.IsEnabled() ) {
-                // 역할 격리(Setup.Roles.IBCF=false) — 피어(트렁크) 라우팅은 IBCF 역할의 것이다. 정책이 RouteSet 을
-                // 골라도 이 노드는 피어로
-                //   내보내지 않는다(403). 종전엔 가드가 없어 역할을 끈 노드가 트렁크 발신을 했다(test_instrument.md
-                //   §12).
-                CLog::Print(
-                    LOG_INFO,
-                    "RoutingPolicyEngine: policy='%s' route_set='%s' picked but Roles.IBCF=false → 403 [callId=%s]",
-                    rd.matched_policy.c_str(), rd.target_name.c_str(), strCallId.c_str() );
-                SendResponse( pclsMessage, 403 );
-                return true;
-            }
-            if ( rd.type == ROUTING_ROUTE_SET ) {
-                // G1 (2026-04-23): picked_route → RouteConfig → RemoteNode 정보를 PendingRouteMap 에
-                //   Call-ID 로 저장. CSipUserAgent 가 dialog 를 만들어 EventIncomingCall 을 호출하면
-                //   거기서 Take() 로 꺼내 B2BUA B-leg peer 로 사용한다.
-                //   (직전 구현의 AddRoute()→return false 경로는 B-leg 메시지에 carry-over 되지 않아 무효였음.)
-                RouteConfig rc = gclsRouteMap.GetByName( rd.picked_route );
-                if ( rc.IsValid() ) {
-                    RemoteNodeInfo rn = gclsRemoteNodeMap.GetByName( rc.remote_node_ref );
-                    // 등록형 트렁크 — 다음 홉은 RemoteNode 설정 주소가 아니라 등록 바인딩(REGISTER 소스, SIPconnect 2.0
-                    // §8)
-                    TrunkBinding tb;
-                    const bool bTrunk = rc.IsTrunkAccount() && gclsTrunkRegistrar.Get( rc.name, tb );
-                    if ( bTrunk ) {
-                        rn.name = rc.remote_node_ref;
-                        rn.ip = tb.ip;
-                        rn.port = tb.port;
-                        rn.protocol = tb.transport;
-                    }
-                    if ( rn.IsValid() && !rn.ip.empty() && rn.port > 0 ) {
-                        PendingRouteEntry pe;
-                        pe.remote_ip = rn.ip;
-                        pe.remote_port = rn.port;
-                        pe.protocol = rn.protocol;
-                        pe.route_name = rd.picked_route;
-                        pe.route_set = rd.target_name;
-                        pe.policy_name = rd.matched_policy;
-                        pe.local_node_ref = rc.local_node_ref;  // outbound leg 자기 주소 결정용
-                        pe.hash_key = hashKey;                  // 재라우팅 재선택(hash_by_caller)에 같은 키
-                        gclsPendingRouteMap.Insert( strCallId, pe );
-                        CLog::Print( LOG_SYSTEM,
-                                     "RoutingPolicyEngine: policy='%s' route_set='%s' picked_route='%s' → RemoteNode "
-                                     "%s (%s:%d %s) [pending callId=%s]",
-                                     rd.matched_policy.c_str(), rd.target_name.c_str(), rd.picked_route.c_str(),
-                                     rn.name.c_str(), rn.ip.c_str(), rn.port, rn.protocol.c_str(), strCallId.c_str() );
-                    } else {
-                        CLog::Print(
-                            LOG_ERROR,
-                            "RoutingPolicyEngine: picked_route='%s' remote_node_ref='%s' 조회 실패 — legacy fallback",
-                            rd.picked_route.c_str(), rc.remote_node_ref.c_str() );
-                    }
-                } else {
-                    CLog::Print( LOG_ERROR, "RoutingPolicyEngine: picked_route='%s' Route 조회 실패 — legacy fallback",
-                                 rd.picked_route.c_str() );
-                }
-            } else if ( rd.type == ROUTING_ACCESS_SERVICE ) {
-                // ACCESS_SERVICE target 은 UE 에게 라우팅 (TAS/B2BUA 레거시 경로가 처리).
-                //   명시적 분기 없이 legacy TAS 판단 로직(DND/reject)으로 진행 → 로그만.
-                CLog::Print( LOG_INFO, "RoutingPolicyEngine: match policy='%s' access_service='%s' (legacy TAS path)",
-                             rd.matched_policy.c_str(), rd.target_name.c_str() );
             }
         }
 
@@ -984,6 +998,33 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         return StopCall( pszCallId, iCode );
     };
 
+    // 착신전환(TS 24.604 CDIV — 서버측 전환, volte_supplementary_services.md §6A · announcements.md §3.5): 착신
+    // 가입자에
+    //   forward_id(CFU) 가 있으면 B-leg 를 전환 대상으로 낸다(연쇄·상한은 TAS 가 판정). 발신자에게 181, B-leg INVITE 에
+    //   History-Info(RFC 7044, cause=302), 전환 안내(프로파일 `forwarded`)는 relay 를 잡은 뒤 B-leg 를 내기 직전에
+    //   붙인다. 원착신이 피어로 갈 호(RecvRequest 가 PendingRoute 를 넣었다)·그룹·대표번호는 가입자가 아니라 대상이
+    //   아니다. 전환 대상의 라우팅(피어 RouteSet/403)은 여기서 다시 판정한다 — 원착신 판정은 원착신 번호로 한 것이다.
+    CTasModule::CdivResult clsDiv;
+    bool bDiverted = false;
+    std::string strDivertTarget;
+    if ( m_clsTas.IsEnabled() && !gclsPendingRouteMap.Has( pszCallId ? pszCallId : "" ) ) {
+        const int iDiv = m_clsTas.ResolveDiversion( pszFrom, pszTo, pclsMessage, clsDiv );
+        if ( iDiv < 0 ) return RejectVoice( -iDiv );
+        if ( iDiv > 0 ) {
+            bDiverted = true;
+            strDivertTarget = clsDiv.strTarget;
+            pszTo = strDivertTarget.c_str();
+            CLog::Print( LOG_SYSTEM, "EventIncomingCall: CDIV %s (hops=%zu%s) → B-leg to %s CallId=%s",
+                         CspDiversion::ChainLabel( clsDiv.strServed, clsDiv.vecHops ).c_str(), clsDiv.vecHops.size(),
+                         clsDiv.iHopsBefore ? ( " +" + std::to_string( clsDiv.iHopsBefore ) + " inbound" ).c_str() : "",
+                         pszTo, pszCallId );
+            // 발신자 통지 — 181 Call Is Being Forwarded (TS 24.604 §4.5.2.6.1, SDP 없음·비신뢰 1xx)
+            if ( gclsSetup.m_bCdivNotify181 ) gclsUserAgent.RingCall( pszCallId, SIP_CALL_IS_BEING_FORWARDED, NULL );
+            if ( pclsMessage && DecideOutboundRoute( pclsMessage, strDivertTarget, pszCallId ) == 403 )
+                return RejectVoice( SIP_FORBIDDEN );
+        }
+    }
+
     // G1 (2026-04-23): Routing policy 결정 (RecvRequest 에서 PendingRouteMap 에 넣어둔 것) 을 먼저 소비.
     //   있으면 callee 가 내부 가입자여도 외부 peer 로 B2BUA forward (Routing policy 가 우선).
     //   없으면 아래 내부 가입자 경로 (PTT 그룹 / legacy IBCF / TAS) 로 진행.
@@ -1063,10 +1104,10 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
 
     if ( GetCallOwner( pszCallId ) == NULL ) SetCallOwner( pszCallId, &m_clsTas );
 
-    // TAS: DND/착신거부 603, 착신전환 302
+    // TAS: DND/착신거부 603 (전환된 호면 전환 대상 가입자의 것 — TS 24.604 diverted-to user 의 종단 서비스 적용)
     //   거절은 모듈 안에서 응답하므로 시도 기록도 **모듈 안에서** 남긴다(여기서 `RejectVoice`
     //   를 쓰면 응답을 두 번 보낸다). 착신 식별자를 넘기는 이유가 그것이다 — 장부의 callee 가
-    //   표·이력의 다른 자리와 같은 문자열이어야 한다. 착신전환 302 는 남기지 않는다(TasModule).
+    //   표·이력의 다른 자리와 같은 문자열이어야 한다.
     if ( m_clsTas.IsEnabled() &&
          m_clsTas.ApplyTerminationServices( pszCallId, pszFrom, pszTo, clsUser, pclsRtp, pclsMessage ) )
         return;
@@ -1346,7 +1387,26 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         CLog::Print( LOG_INFO, "EventIncomingCall: callee(%s) busy → call waiting (Alert-Info) CallId=%s", pszTo,
                      pszCallId );
     }
+    if ( bDiverted ) {
+        // 재타게팅 이력 — History-Info(RFC 7044): 원착신 index=1, 전환 대상 <…;cause=302>;index=1.1;mp=1 (수신 INVITE
+        // 에 이미 있던
+        //   항목은 보존하고 이어 붙인다). From/PAI 는 원발신자 그대로(TS 24.604 §4.5.2.6.2 — 전환자 신원은 History-Info
+        //   가 나른다).
+        std::string strDomain = pclsMessage ? pclsMessage->m_clsReqUri.m_strHost : "";
+        if ( strDomain.empty() && pclsMessage ) strDomain = pclsMessage->m_clsTo.m_clsUri.m_strHost;
+        if ( strDomain.empty() ) strDomain = gclsSetup.m_strLocalIp;
+        CSipHeader *pclsHiIn = pclsMessage ? pclsMessage->GetHeader( "History-Info" ) : NULL;
+        const std::string strHi = CspDiversion::BuildHistoryInfo( pclsHiIn ? pclsHiIn->m_strValue : "", strDomain,
+                                                                  clsDiv.strServed, clsDiv.vecHops );
+        pclsInvite->AddHeader( "History-Info", strHi.c_str() );
+        pclsInvite->AddHeader( "Supported", "histinfo" );
+        // 전환 안내(announcements.md §3.5) — B-leg 를 내기 전에 A 에 183+SDP 와 재생기를 붙여 두면 B 의 첫 18x 가 같은
+        // SDP 로
+        //   나간다(단말이 로컬 링백으로 갈아타지 않는다). 정책 none·CMP 미지원이면 181 만.
+        gclsAnnouncement.OnForwarded( pszCallId, strCallId.c_str() );
+    }
     if ( gclsUserAgent.StartCall( strCallId.c_str(), pclsInvite ) == false ) {
+        gclsAnnouncement.OnCallEnd( pszCallId );  // 전환 안내 재생기가 붙었으면 걷는다
         gclsCallMap.Delete( pszCallId );
         return RejectVoice( SIP_INTERNAL_SERVER_ERROR );
     }
@@ -1361,6 +1421,12 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         gclsCallDir.VoipCallStart( pszCallId, pszFrom, pszTo, bVideo, strMediaNode );
         gclsCallDir.VoipAddParticipant( pszCallId, pszFrom, "caller" );
         gclsCallDir.VoipAddParticipant( pszCallId, pszTo, "callee" );
+        // 전환 기록 — call.json diversion{served, target, cause, hops}. 시도·세션 정의는 그대로(시도 1 = 다이얼 1회,
+        //   sip_statistics.md §2 — 착신전환은 leg 를 늘리지 시도를 늘리지 않는다)
+        if ( bDiverted )
+            gclsCallDir.VoipCallDiverted( pszCallId, pszFrom, pszTo, clsDiv.strServed,
+                                          CspDiversion::CAUSE_UNCONDITIONAL,
+                                          (int)clsDiv.vecHops.size() + clsDiv.iHopsBefore );
     }
 }
 

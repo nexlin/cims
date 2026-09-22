@@ -13,6 +13,8 @@ struct ICsimObserver {
     virtual void OnRegister(SimSession* /*s*/, int /*iStatus*/, long long /*rrdMs*/) {}
     /** INVITE 수신(착신) — 응답 전. deferred 모드면 AnswerCall/RejectCall 은 관측자 측 스케줄러가 부른다. */
     virtual void OnIncomingCall(SimSession* /*s*/, const std::string& /*callId*/, const std::string& /*from*/) {}
+    /** 착신 INVITE 가 History-Info(RFC 7044 — 착신전환 이력, TS 24.604)를 실었다. OnIncomingCall 직후. value = 헤더 값 */
+    virtual void OnIncomingDiverted(SimSession* /*s*/, const std::string& /*callId*/, const std::string& /*historyInfo*/) {}
     /** 발신 INVITE 의 2xx(확립) — srdMs = StartCall → 200. */
     virtual void OnCallStart(SimSession* /*s*/, const std::string& /*callId*/, long long /*srdMs*/) {}
     /** 다이얼로그 종료 — 발신 실패 최종 응답(4xx/5xx/6xx)·상대 BYE(200)·CANCEL(487)·타이머 만료.

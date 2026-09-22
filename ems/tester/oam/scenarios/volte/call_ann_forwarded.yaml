@@ -1,0 +1,22 @@
+# 착신전환 안내(announcements.md §3.5, TS 24.604 CDIV — 서버측 전환, volte_supplementary_services.md §6A) — served 회선에 forward_id(=target 번호, CFU)를 두면
+#   caller → served INVITE 를 CSP 가 target 으로 전환한다: caller 에 181 Call Is Being Forwarded(cdiv_181_pct) → 183+SDP + 전환 안내("전화가 다른 번호로 연결됩니다")
+#   → 안내 뒤 링백음(내장 default 프로파일 forwarded = announce_then_tone) → target 의 INVITE 에 History-Info <served>;index=1, <target;cause=302>;index=1.1;mp=1(cdiv_hi_pct)
+#   → target 응답에 안내 정지·앵커링. served 는 INVITE 를 받지 않는다. 판정 = early_media_pct/early_rtp_pct(안내 RTP 도달)·cdiv_181_pct·cdiv_hi_pct.
+#   fixtures: served 회선 forward_id = target 신원(끝나면 원복). 픽스처는 역할의 첫 신원에만 적용되므로 --instances 1 로 돈다.
+id: VOLTE-ANN-FORWARDED
+title: 착신전환(CFU) → 181 → 183 전환 안내 + 링백 → History-Info → 200
+tags: [volte, announcement, media, cdiv]
+roles:
+  caller: { pool: volte_ue }
+  served: { pool: volte_ue, disjoint_from: caller }
+  target: { pool: volte_ue, disjoint_from: served }
+flow:
+  - { step: register,   who: [caller, served, target], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: served, media: { audio: amr-wb, rtp: explicit },
+      expect: { code: 200, cdiv_181_pct: 100, cdiv_hi_pct: 100, early_media_pct: 100, early_rtp_pct: 100 } }
+  - { step: answer,     who: [target], after_ms: 7000, expect: { code: 200, srd_ms: { p95: 9000 } } }
+  - { step: media_send, who: [caller, target] }
+  - { step: media_hold, seconds: 2, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }
+fixtures:
+  fwd: { kind: subscriber, roles: [served], forward_to: target }

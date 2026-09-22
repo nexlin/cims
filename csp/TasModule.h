@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "CspDiversion.h"
 #include "IModule.h"
 #include "MediaSdes.h"
 #include "SipUserAgentCallBack.h"  // CSipCallRtp (포크 집합의 B-leg 공통 offer 보관)
@@ -77,7 +78,8 @@ struct PilotDialogSnapshot {
  * 순서 의존 삽입점 (디스패처 라우팅 골격의 정해진 위치에서 호출):
  *  - ScreenInvite               RecvRequest INVITE 조기 스크린 — DND/착신거부·ptt 전용 모드
  *  - TryPickupDial              미등록 착신의 픽업 피처코드 소비 (§5.2)
- *  - ApplyTerminationServices   착신 가입자 DND/착신거부 603·착신전환 302
+ *  - ApplyTerminationServices   착신 가입자 DND/착신거부 603
+ *  - ResolveDiversion           착신전환(TS 24.604 CDIV — 서버측 전환) 대상·이력 판정 (§6A)
  */
 class CTasModule : public IModule {
 public:
@@ -116,11 +118,25 @@ public:
     /** 1초 주기 — 포크 집합 무응답(no_answer_sec) 판정 → overflow 또는 480 (§4.4). */
     void Tick();
 
-    /** 착신 가입자 종단 서비스 — DND/착신거부 603, 착신전환 302 (수신 listener 주소로 Contact).
-     *  true=응답 발신·소비, false=일반 B2BUA 진행. */
+    /** 착신 가입자 종단 서비스 — DND/착신거부 603(거절 안내는 announcements.md §3.2).
+     *  true=응답 발신·소비, false=일반 B2BUA 진행. 착신전환은 여기가 아니라 ResolveDiversion(디스패처가 라우팅 앞에서).
+     */
     bool ApplyTerminationServices( const char *pszCallId, const char *pszFrom, const char *pszTo,
                                    const CspUser &clsUser, CSipCallRtp *pclsRtp = NULL,
                                    CSipMessage *pclsMessage = NULL );
+
+    /** 착신전환 판정 결과 — 서버측 전환(TS 24.604 CDIV, volte_supplementary_services.md §6A) */
+    struct CdivResult {
+        std::string strServed;                   // 다이얼된 착신(첫 diverting user)
+        std::string strTarget;                   // 최종 전환 대상 — B-leg 착신
+        std::vector<CspDiversion::Hop> vecHops;  // 전환 열(대상·cause) — History-Info 항목
+        int iHopsBefore = 0;                     // 수신 INVITE 의 History-Info 가 이미 담은 전환 수
+    };
+    /** 착신전환 판정 — 착신 가입자(등록 여부 무관, DB 폴백)에 forward_id(CFU) 가 있으면 전환 대상을 좇는다(연쇄 허용,
+     *  대상의 forward_id 도 따른다). 대상 번호는 그 가입자 접속서비스의 다이얼 플랜으로 +E.164 번역(§2-10).
+     *  DND·착신거부 가입자는 전환하지 않는다(603 이 우선). 피어·그룹·대표번호 착신은 가입자가 아니라 0.
+     *  반환 0 = 전환 없음, 1 = 전환(out 채움), <0 = -SIP 코드(전환 상한·루프 → 486, TS 24.604 §4.5.2.6). */
+    int ResolveDiversion( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage, CdivResult &clsOut );
 
 private:
     /** 당겨받기 (volte_supplementary_services.md §5). pszTarget: 지정 픽업 대상 내선

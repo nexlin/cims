@@ -271,6 +271,7 @@ public:
     // ICsimObserver — 스택 스레드: 큐에만 넣는다
     void OnRegister(SimSession* s, int iStatus, long long rrdMs) override;
     void OnIncomingCall(SimSession* s, const std::string& callId, const std::string& from) override;
+    void OnIncomingDiverted(SimSession* s, const std::string& callId, const std::string& historyInfo) override;
     void OnCallStart(SimSession* s, const std::string& callId, long long srdMs) override;
     void OnCallEnd(SimSession* s, const std::string& callId, int iSipStatus, int iQ850) override;
     void OnByeResponse(SimSession* s, const std::string& callId, int iSipStatus, long long sddMs) override;
@@ -309,7 +310,7 @@ public:
 
 private:
     struct Event {
-        enum Kind { REGISTER, INCOMING, CALLSTART, CALLEND, BYERESP, RING, PRACK, REINVITE, REINVITE_RESP, REFER_RESP,
+        enum Kind { REGISTER, INCOMING, DIVERTED, CALLSTART, CALLEND, BYERESP, RING, PRACK, REINVITE, REINVITE_RESP, REFER_RESP,   // DIVERTED = 착신 INVITE 에 History-Info(착신전환 이력, event = 헤더 값)
                     AFFILIATE, ANSWERED, FLOOR, SUBSCRIBE_RESP, DLG_NOTIFY, FAULT_REJECT, WIRE_DROP, INVITE_RETRANS, THIG,
                     SDS_RESP, SDS_RECV, SDS_NOTIF,   // MCData SDS — user = msgId · SDS_RECV: callId = 발신자, event = 그룹 id, status = disposition 요청, hasPai = media plane(MSRP) 도착 · SDS_NOTIF: status = notifType
                     FD_UPLOAD, FD_RECV, FD_DOWNLOAD,   // MCData FD — user = msgId · FD_UPLOAD: status = HTTP(201 정상), ms, bytes · FD_RECV: callId = 발신자, event = 그룹, url, bytes = 크기 · FD_DOWNLOAD: status = HTTP, bytes, ms

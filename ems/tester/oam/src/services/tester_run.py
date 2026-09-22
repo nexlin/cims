@@ -823,6 +823,8 @@ class RunDriver(threading.Thread):
                   'rtp_tx', 'rtp_silent_legs', 'media_send', 'media_stop', 'skipped_rtp_cap', 'early_rtp_ok', 'early_rtp_rx',
                   # 보류 음악(announcements.md §3.3) — hold/resume 송신 · 피보류 단말 RTP 증분 도달/패킷 수
                   'hold_tx', 'resume_tx', 'remote_hold', 'remote_resume', 'moh_rtp_ok', 'moh_rtp_rx',
+                  # 착신전환(TS 24.604) — 발신자의 181 · 전환 대상 착신 INVITE 의 History-Info
+                  'cdiv_181_rx', 'cdiv_hi_rx',
                   # 전달·합류·구독(volte_supplementary_services §5·§6 · dispatch_center §5 · RFC 6665)
                   'consult_tx', 'consult_ok', 'refer_attended_tx', 'pickup_tx', 'pickup_ok', 'replaces_tx', 'replaces_ok',
                   'join_tx', 'join_ok', 'join_ssrc2', 'ringing_leg_cancelled', 'subscribe_tx', 'notify_rx', 'publish_tx',

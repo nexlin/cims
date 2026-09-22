@@ -75,6 +75,8 @@ export function ratiosFrom(c: Record<string, number>): Record<string, number | n
     listen_pct: r(c.listen_ok ?? 0, c.listen_tx ?? 0),
     early_rtp_pct: r(c.early_rtp_ok ?? 0, c.progress_tx ?? 0),
     moh_rtp_pct: r(c.moh_rtp_ok ?? 0, c.hold_tx ?? 0),
+    cdiv_181_pct: r(c.cdiv_181_rx ?? 0, c.invite_tx ?? 0),
+    cdiv_hi_pct: r(c.cdiv_hi_rx ?? 0, c.invite_tx ?? 0),
     floor_grant_pct: r(c.floor_granted ?? 0, c.floor_request_tx ?? 0),
     rtp_loss_pct: lossTot ? (100 * (c.rtp_lost ?? 0)) / lossTot : null,
     dtmf_rx_pct: r(c.dtmf_rx ?? 0, c.dtmf_tx ?? 0),

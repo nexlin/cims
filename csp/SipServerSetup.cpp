@@ -297,6 +297,13 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                     if ( m_iDispatchMaxForkTargets < 1 ) m_iDispatchMaxForkTargets = 1;
                     if ( m_iDispatchForkRingTimeoutSec < 5 ) m_iDispatchForkRingTimeoutSec = 5;
                 }
+                // 착신전환 — 전환 상한·발신자 181 통지 (TS 24.604)
+                if ( sip.Has( "Cdiv" ) ) {
+                    SimpleJson::JsonNode cd = sip.Get( "Cdiv" );
+                    if ( cd.Has( "MaxDiversions" ) ) m_iCdivMaxDiversions = (int)cd.GetInt( "MaxDiversions" );
+                    if ( cd.Has( "Notify181" ) ) m_bCdivNotify181 = ( cd.Get( "Notify181" ).AsString() == "true" );
+                    if ( m_iCdivMaxDiversions < 1 ) m_iCdivMaxDiversions = 1;
+                }
             }
 
             // 미디어서버 연동 설정 (2026-04-23 rename: RtpRelay → MediaServer).

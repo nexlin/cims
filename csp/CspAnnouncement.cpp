@@ -58,7 +58,7 @@ static const struct {
     { ANN_SIT_NOT_FOUND, "not_found" },       { ANN_SIT_INVALID, "invalid" },
     { ANN_SIT_DECLINED, "declined" },         { ANN_SIT_CONGESTION, "congestion" },
     { ANN_SIT_FORBIDDEN, "forbidden" },       { ANN_SIT_HOLD, "hold" },
-    { ANN_SIT_CALL_WAITING, "call_waiting" },
+    { ANN_SIT_CALL_WAITING, "call_waiting" }, { ANN_SIT_FORWARDED, "forwarded" },
 };
 
 const char *CCspAnnouncementService::SituationName( EAnnSituation e ) {
@@ -88,6 +88,10 @@ static const char *kDefaultRules =
     "{\"profile\":\"default\",\"situation\":\"forbidden\",\"mode\":\"none\"},"
     "{\"profile\":\"default\",\"situation\":\"hold\",\"mode\":\"media\",\"media\":\"sys:moh_simple\",\"loop\":true},"
     "{\"profile\":\"default\",\"situation\":\"call_waiting\",\"mode\":\"none\"},"
+    // 착신전환(TS 24.604) — 전환 안내 1회 뒤 전환 대상이 응답할 때까지 링백음(발신 단말은 183+SDP 뒤 로컬 링백을 내지
+    // 않는다)
+    "{\"profile\":\"default\",\"situation\":\"forwarded\",\"mode\":\"announce_then_tone\",\"media\":\"sys:ann_"
+    "forwarded\",\"tone\":\"sys:ringback_kr\"},"
     "{\"profile\":\"trunk\",\"situation\":\"busy\",\"mode\":\"none\"},"
     "{\"profile\":\"trunk\",\"situation\":\"no_answer\",\"mode\":\"none\"},"
     "{\"profile\":\"trunk\",\"situation\":\"unreachable\",\"mode\":\"none\"},"
@@ -96,6 +100,7 @@ static const char *kDefaultRules =
     "{\"profile\":\"trunk\",\"situation\":\"declined\",\"mode\":\"none\"},"
     "{\"profile\":\"trunk\",\"situation\":\"congestion\",\"mode\":\"none\"},"
     "{\"profile\":\"trunk\",\"situation\":\"hold\",\"mode\":\"none\"},"
+    "{\"profile\":\"trunk\",\"situation\":\"forwarded\",\"mode\":\"none\"},"
     // `ringback` = 서버 링백 스위치(§3.4) — ringback 행 하나만 두고 나머지 상황은 default 로 떨어진다. 접속서비스
     // announcement_profile 로 고른다
     "{\"profile\":\"ringback\",\"situation\":\"ringback\",\"mode\":\"media\",\"media\":\"sys:ringback_kr\",\"loop\":"
@@ -131,7 +136,7 @@ void CCspAnnouncementService::Init() {
             a.iRepeat = (int)row.GetInt( "repeat", 1 );
             a.bLoop = row.GetString( "loop" ) == "true";
             if ( a.strMode != "none" && a.strMode != "tone" && a.strMode != "announce" &&
-                 a.strMode != "tone_then_announce" && a.strMode != "media" ) {
+                 a.strMode != "tone_then_announce" && a.strMode != "announce_then_tone" && a.strMode != "media" ) {
                 CLog::Print( LOG_ERROR, "Announcement: rule %s/%s unknown mode '%s' → none", strProfile.c_str(),
                              SituationName( eSit ), a.strMode.c_str() );
                 a.strMode = "none";
@@ -139,9 +144,11 @@ void CCspAnnouncementService::Init() {
             // 검증 — 톤 모드에 톤 id, 안내 모드에 음원 id 가 없으면 none 으로 낮추고 로그(설정 오류가 통화 장애로
             // 번지지 않게)
             if ( ( a.strMode == "tone" || a.strMode == "tone_then_announce" ) && a.strTone.empty() ) a.strMode = "none";
-            if ( ( a.strMode == "announce" || a.strMode == "tone_then_announce" || a.strMode == "media" ) &&
+            if ( ( a.strMode == "announce" || a.strMode == "tone_then_announce" || a.strMode == "media" ||
+                   a.strMode == "announce_then_tone" ) &&
                  a.strMedia.empty() )
                 a.strMode = "none";
+            // announce_then_tone 의 신호음이 비면 안내만(2 단계는 ringback 규칙으로)
             mapRules[strProfile][(int)eSit] = a;
             ++n;
         }
@@ -291,7 +298,8 @@ std::vector<CCmpClient::AnnItem> CCspAnnouncementService::ItemsOf( const CAnnAct
         t.iRepeat = 0;
         t.iMaxMs = a.iToneMs > 0 ? a.iToneMs : 4000;
         v.push_back( t );
-    } else if ( a.strMode == "announce" ) {
+    } else if ( a.strMode == "announce" || a.strMode == "announce_then_tone" ) {
+        // announce_then_tone 의 신호음(2 단계)은 안내가 끝난 뒤 서비스가 새 RELAY_PLAY(loop)로 잇는다(OnPlayDone)
         CCmpClient::AnnItem m;
         m.strId = a.strMedia;
         m.iRepeat = a.iRepeat > 0 ? a.iRepeat : 1;
@@ -365,18 +373,11 @@ bool CCspAnnouncementService::StartFailurePlay( CAnnCall &c, const CAnnAction &a
     if ( !bEarlyAlready ) {
         if ( pclsAns == NULL ) return false;
         // CMP 에 A leg 의 재생 코덱을 알린다 — 주소 미변경(remote_port 0), remote_pt/remote_codec 만 (재생 파일 선택
-        // 근거)
+        // 근거). 183 은 RELAY_PLAY 가 받아들여진 뒤에 낸다 — 재생기가 거절(음원 없음·슬롯 소진)하면 A 에 answer 를
+        // 남기지 않아야 폴백이 깨끗하다(SDP 만 받은 단말은 로컬 링백을 내지 않고 무음을 듣는다).
         gclsCmpClient.ModifySession( c.strRelaySessionId, "", 0, 0, c.iPeerIdx, c.strCaller, c.strCallee, c.strSesId, 0,
                                      "", clsCodec.pt, clsCodec.pt, iTePt > 0 ? iTePt : 0, iTePt > 0 ? iTePt : 0,
                                      clsCodec.Label() );
-        std::vector<std::pair<std::string, std::string>> vecHdr;
-        vecHdr.push_back( std::make_pair( "P-Early-Media", "sendonly" ) );  // RFC 5009 — 망→단말 early media 인가
-        CSipCallRtp clsCopy = *pclsAns;
-        if ( !gclsUserAgent.RingCall( c.strACallId.c_str(), SIP_SESSION_PROGRESS, &clsCopy, vecHdr ) ) {
-            CLog::Print( LOG_ERROR, "Announcement: 183 send failed (CallId=%s)", c.strACallId.c_str() );
-            return false;
-        }
-        c.bEarlySent = true;
     }
     int iRepeat = 1, iMaxMs = m_iMaxPlayMs;
     std::vector<CCmpClient::AnnItem> vecItems = ItemsOf( a, iRepeat, iMaxMs );
@@ -393,6 +394,17 @@ bool CCspAnnouncementService::StartFailurePlay( CAnnCall &c, const CAnnAction &a
                      strErr.c_str(), c.iFinalStatus, c.strACallId.c_str(), c.strMedia.c_str() );
         ++m_lFallback;
         return false;
+    }
+    if ( !bEarlyAlready ) {
+        std::vector<std::pair<std::string, std::string>> vecHdr;
+        vecHdr.push_back( std::make_pair( "P-Early-Media", "sendonly" ) );  // RFC 5009 — 망→단말 early media 인가
+        CSipCallRtp clsCopy = *pclsAns;
+        if ( !gclsUserAgent.RingCall( c.strACallId.c_str(), SIP_SESSION_PROGRESS, &clsCopy, vecHdr ) ) {
+            CLog::Print( LOG_ERROR, "Announcement: 183 send failed (CallId=%s)", c.strACallId.c_str() );
+            gclsCmpClient.StopAnnouncement( c.strRelaySessionId, c.iPeerIdx, c.strPlayId, c.strSesId, c.strService );
+            return false;
+        }
+        c.bEarlySent = true;
     }
     ++m_lStarted;
     time( &c.tStart );
@@ -621,10 +633,14 @@ void CCspAnnouncementService::OnPlayDone( const std::string &strSessionId, int i
             if ( itC != m_mapCalls.end() && itC->second.strPlayId == strPlayId ) {
                 c = itC->second;
                 bFound = true;
-                if ( c.iFinalStatus > 0 )
+                if ( c.iFinalStatus > 0 ) {
                     m_mapCalls.erase( itC );  // 링백(finalStatus 0)은 entry 를 남긴다(bEarlySent 표식)
-                else
+                } else {
                     itC->second.strPlayId.clear();
+                    // 전환 안내 1 단계 완료 — 2 단계를 붙이는 동안의 표식(락 밖 RELAY_PLAY 와 B 응답의 경합 방어)
+                    if ( c.eSit == ANN_SIT_FORWARDED && ( strReason == "completed" || strReason == "max" ) )
+                        itC->second.bPhase2 = true;
+                }
             }
         }
         if ( !bFound ) {
@@ -636,11 +652,63 @@ void CCspAnnouncementService::OnPlayDone( const std::string &strSessionId, int i
         }
     }
     if ( !bFound ) return;
-    if ( c.iFinalStatus > 0 )
+    if ( c.iFinalStatus > 0 ) {
         FinishEarly( strACallId, c, strReason == "stopped" ? "stopped" : strReason.c_str(), iPlayedMs );
-    else
-        CLog::Print( LOG_INFO, "Announcement: ringback play %s ended (%s) CallId=%s", strPlayId.c_str(),
-                     strReason.c_str(), strACallId.c_str() );
+        return;
+    }
+    if ( c.eSit == ANN_SIT_FORWARDED && ( strReason == "completed" || strReason == "max" ) ) {
+        // 전환 안내(1 단계)가 끝났다 — CDR 에 남기고 2 단계: announce_then_tone 의 신호음, 없으면 ringback 규칙(media
+        // 면 loop).
+        //   B 가 아직 응답하지 않았을 때만(entry 가 남아 있다 = OnRingbackEnd/OnLegFailed/OnCallEnd 가 지우지 않았다).
+        if ( gclsCallDir.IsEnabled() )
+            gclsCallDir.VoipCallAnnouncement( strACallId, c.strCaller, c.strCallee, SituationName( c.eSit ), c.strMedia,
+                                              iPlayedMs, strReason );
+        CAnnAction next;
+        if ( !c.strNextTone.empty() ) {
+            next.strMode = "media";
+            next.strMedia = c.strNextTone;
+        } else {
+            next = Resolve( ANN_SIT_RINGBACK, c.strProfile );
+            if ( next.strMode != "media" && next.strMode != "announce" ) next.strMode = "none";
+        }
+        if ( next.IsNone() || next.strMedia.empty() ) {
+            CLog::Print( LOG_INFO, "Announcement: forwarded play %s ended (%s) — no ringback phase CallId=%s",
+                         strPlayId.c_str(), strReason.c_str(), strACallId.c_str() );
+            std::lock_guard<std::mutex> lock( m_mtx );
+            auto itC = m_mapCalls.find( strACallId );
+            if ( itC != m_mapCalls.end() ) itC->second.bPhase2 = false;
+            return;
+        }
+        next.bLoop = true;
+        CAnnCall c2 = c;
+        c2.eSit = ANN_SIT_RINGBACK;
+        c2.strNextTone.clear();
+        c2.bPhase2 = false;
+        RelayCodec::CodecDesc clsUnused;
+        if ( !StartFailurePlay( c2, next, NULL, clsUnused, -1, true ) ) return;
+        bool bStale = false;
+        {
+            std::lock_guard<std::mutex> lock( m_mtx );
+            auto itC = m_mapCalls.find( strACallId );
+            // 사이에 B 가 응답했거나(OnRingbackEnd 가 bPhase2 를 지웠다) 호가 끝났거나(entry 삭제) B 실패 안내로
+            // 바뀌었으면(entry 교체) 방금 붙인 링백은 걷는다 — 확립 통화에 신호음이 섞이지 않게
+            if ( itC == m_mapCalls.end() || !itC->second.bPhase2 ) {
+                bStale = true;
+            } else {
+                itC->second = c2;
+                m_mapPlayToCall[c2.strPlayId] = strACallId;
+            }
+        }
+        if ( bStale ) {
+            gclsCmpClient.StopAnnouncement( c2.strRelaySessionId, c2.iPeerIdx, c2.strPlayId, c2.strSesId,
+                                            c2.strService );
+            CLog::Print( LOG_INFO, "Announcement: forwarded ringback phase dropped — call moved on (CallId=%s)",
+                         strACallId.c_str() );
+        }
+        return;
+    }
+    CLog::Print( LOG_INFO, "Announcement: %s play %s ended (%s) CallId=%s", SituationName( c.eSit ), strPlayId.c_str(),
+                 strReason.c_str(), strACallId.c_str() );
 }
 
 void CCspAnnouncementService::Tick() {
@@ -801,6 +869,13 @@ bool CCspAnnouncementService::OnRingback( const char *pszBCallId, const CCallInf
     if ( !IsEnabled() || clsB.m_bRecv || clsB.m_strPeerCallId.empty() || clsB.m_strRelaySessionId.empty() )
         return false;
     const std::string strACallId = clsB.m_strPeerCallId;
+    {
+        // 이미 A 에 CSP answer 를 냈다(링백 중·두 번째 18x·전환 안내 §3.5) — 프로파일과 무관하게 18x 는 같은 SDP 로
+        // 나간다
+        std::lock_guard<std::mutex> lock( m_mtx );
+        auto it = m_mapCalls.find( strACallId );
+        if ( it != m_mapCalls.end() && it->second.bEarlySent ) return true;
+    }
     CCallInfo clsA;
     if ( !gclsCallMap.Select( strACallId.c_str(), clsA ) ) return false;
     CAnnAction a = Resolve( eSit, clsA.m_strAnnProfile );
@@ -816,10 +891,6 @@ bool CCspAnnouncementService::OnRingback( const char *pszBCallId, const CCallInf
              !clsCallee.m_strRingbackMedia.empty() )
             a.strMedia = clsCallee.m_strRingbackMedia;
     }
-    {
-        std::lock_guard<std::mutex> lock( m_mtx );
-        if ( m_mapCalls.count( strACallId ) ) return true;  // 이미 링백 중(두 번째 18x) — A 에 SDP 를 낸 상태
-    }
     CAnnCall c;
     c.strACallId = strACallId;
     c.strRelaySessionId = clsB.m_strRelaySessionId;
@@ -829,6 +900,7 @@ bool CCspAnnouncementService::OnRingback( const char *pszBCallId, const CCallInf
     c.iFinalStatus = 0;
     c.strCaller = clsB.m_strRelayCaller;
     c.strCallee = clsB.m_strRelayCallee;
+    c.strProfile = clsA.m_strAnnProfile;
     const std::string strRelayIp =
         clsA.m_strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress() : clsA.m_strRelayLocalIp;
     CSipCallRtp clsAns;
@@ -849,6 +921,56 @@ bool CCspAnnouncementService::OnRingback( const char *pszBCallId, const CCallInf
     return true;
 }
 
+// ──────────────────────────────────────────────────────────────
+//  착신전환 안내 (§3.5, TS 24.604) — B-leg 를 내기 직전, A 에 183+SDP + 전환 안내
+// ──────────────────────────────────────────────────────────────
+
+bool CCspAnnouncementService::OnForwarded( const char *pszACallId, const char *pszBCallId ) {
+    if ( !IsEnabled() || pszACallId == NULL || pszBCallId == NULL ) return false;
+    CCallInfo clsB, clsA;
+    if ( !gclsCallMap.Select( pszBCallId, clsB ) || clsB.m_bRecv || clsB.m_strRelaySessionId.empty() ) return false;
+    if ( !gclsCallMap.Select( pszACallId, clsA ) ) return false;
+    const std::string strACallId = pszACallId;
+    {
+        std::lock_guard<std::mutex> lock( m_mtx );
+        if ( m_mapCalls.count( strACallId ) ) return true;  // 이미 early 상태(있을 수 없지만 멱등)
+    }
+    CAnnAction a = Resolve( ANN_SIT_FORWARDED, clsA.m_strAnnProfile );
+    if ( a.IsNone() ) return false;
+    if ( a.strMode == "media" && a.bLoop ) a.bLoop = false;  // 전환 안내는 1 회 — loop 는 2 단계(신호음/링백)가 한다
+    CAnnCall c;
+    c.strACallId = strACallId;
+    c.strRelaySessionId = clsB.m_strRelaySessionId;
+    c.strSesId = clsB.m_strRelaySesId;
+    c.iPeerIdx = clsA.m_bRecv ? 0 : 1;
+    c.eSit = ANN_SIT_FORWARDED;
+    c.iFinalStatus = 0;
+    c.strCaller = clsB.m_strRelayCaller;
+    c.strCallee = clsB.m_strRelayCallee;
+    c.strProfile = clsA.m_strAnnProfile;
+    if ( a.strMode == "announce_then_tone" ) c.strNextTone = a.strTone;
+    const std::string strRelayIp =
+        clsA.m_strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress() : clsA.m_strRelayLocalIp;
+    CSipCallRtp clsAns;
+    RelayCodec::CodecDesc clsCodec;
+    int iTePt = -1;
+    if ( clsB.m_iPeerRtpPort <= 0 ||
+         !BuildEarlyAnswer( strACallId.c_str(), clsA.m_clsSdesLeg[c.iPeerIdx], clsA.m_clsCodecLeg[c.iPeerIdx],
+                            strRelayIp, clsB.m_iPeerRtpPort, clsAns, clsCodec, iTePt ) ) {
+        CLog::Print( LOG_INFO, "Announcement: cannot build early answer for forwarded call %s — 181 only",
+                     strACallId.c_str() );
+        ++m_lFallback;
+        return false;
+    }
+    if ( !StartFailurePlay( c, a, &clsAns, clsCodec, iTePt, false ) ) return false;
+    {
+        std::lock_guard<std::mutex> lock( m_mtx );
+        m_mapCalls[strACallId] = c;
+        m_mapPlayToCall[c.strPlayId] = strACallId;
+    }
+    return true;
+}
+
 void CCspAnnouncementService::OnRingbackEnd( const char *pszBCallId, const CCallInfo &clsB ) {
     (void)pszBCallId;
     if ( clsB.m_strPeerCallId.empty() ) return;
@@ -857,17 +979,20 @@ void CCspAnnouncementService::OnRingbackEnd( const char *pszBCallId, const CCall
     {
         std::lock_guard<std::mutex> lock( m_mtx );
         auto it = m_mapCalls.find( clsB.m_strPeerCallId );
-        if ( it != m_mapCalls.end() && it->second.iFinalStatus == 0 && !it->second.strPlayId.empty() ) {
-            c = it->second;
-            bFound = true;
-            m_mapPlayToCall.erase( c.strPlayId );
-            it->second.strPlayId.clear();  // bEarlySent 표식은 남긴다 — 뒤따르는 실패 안내가 183 을 다시 내지 않게
+        if ( it != m_mapCalls.end() && it->second.iFinalStatus == 0 ) {
+            it->second.bPhase2 = false;  // 전환 안내 2 단계가 붙는 중이었다면 그쪽이 곧바로 걷는다
+            if ( !it->second.strPlayId.empty() ) {
+                c = it->second;
+                bFound = true;
+                m_mapPlayToCall.erase( c.strPlayId );
+                it->second.strPlayId.clear();  // bEarlySent 표식은 남긴다 — 뒤따르는 실패 안내가 183 을 다시 내지 않게
+            }
         }
     }
     if ( !bFound ) return;
     gclsCmpClient.StopAnnouncement( c.strRelaySessionId, c.iPeerIdx, c.strPlayId, c.strSesId, c.strService );
-    CLog::Print( LOG_INFO, "Announcement: ringback stopped (answer/early media from B) play=%s CallId=%s",
-                 c.strPlayId.c_str(), c.strACallId.c_str() );
+    CLog::Print( LOG_INFO, "Announcement: %s stopped (answer/early media from B) play=%s CallId=%s",
+                 SituationName( c.eSit ), c.strPlayId.c_str(), c.strACallId.c_str() );
 }
 
 void CCspAnnouncementService::GetString( CMonitorString &strBuf ) const {

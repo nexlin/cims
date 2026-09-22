@@ -342,5 +342,20 @@
    "total": 2250
   },
   "dtx_channel_activity_pct": 49.3
+ },
+ "ann_forwarded": {
+  "kind": "announcement",
+  "description": "착신전환 안내 — \"전화가 다른 번호로 연결됩니다. 잠시만 기다려 주십시오.\" (ko-KR-SunHiNeural)",
+  "master": "pcm/ann_forwarded.wav",
+  "duration_s": 5.54,
+  "p56_active_level_dbov": -26.2,
+  "p56_activity_pct": 71.1,
+  "rms_dbov": -27.7,
+  "files": {
+   "pcmu": "ann_forwarded.pcmu",
+   "pcma": "ann_forwarded.pcma",
+   "g722": "ann_forwarded.g722",
+   "amr-wb": "ann_forwarded.amrwb"
+  }
  }
 }

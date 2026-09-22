@@ -304,6 +304,30 @@ public:
             ann.size() );
     }
 
+    /** 착신전환 기록(TS 24.604 — volte_supplementary_services.md §6A) — call.json 에
+     * `diversion{served,target,cause,hops}`. callee 는 전환 대상(B-leg)이고 served 가 다이얼된 착신이다. 시도·세션 정의
+     * 불변(전환은 leg 를 늘리지 시도를 늘리지 않는다). */
+    void VoipCallDiverted( const std::string &strCallId, const std::string &strCaller, const std::string &strCallee,
+                           const std::string &strServed, int iCause, int iHops ) {
+        std::string dir = GetVoipDir( strCallId, strCaller, strCallee );
+        std::lock_guard<std::mutex> lock( m_mtx );
+        if ( dir.empty() ) return;
+        std::string path = dir + "/call.json";
+        std::string div = "\"diversion\":{\"served\":\"" + Esc( strServed ) + "\",\"target\":\"" + Esc( strCallee ) +
+                          "\",\"cause\":" + std::to_string( iCause ) + ",\"hops\":" + std::to_string( iHops ) + "}";
+        m_worker.Enqueue(
+            [path, div]() {
+                std::string c = _readFile( path );
+                if ( c.empty() ) return false;
+                if ( c.find( "\"diversion\":" ) != std::string::npos ) return true;
+                size_t lb = c.rfind( '}' );
+                if ( lb == std::string::npos ) return false;
+                c.insert( lb, "," + div );
+                return _writeFileS( path, c );
+            },
+            div.size() );
+    }
+
     void VoipCallAnswer( const std::string &strCallId ) {
         std::lock_guard<std::mutex> lock( m_mtx );
         std::string dir = _dir( strCallId );

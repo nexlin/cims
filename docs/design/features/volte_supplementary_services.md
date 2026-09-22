@@ -201,6 +201,60 @@ REFER 는 403. 기본 true(기존 동작 보존).
 
 ---
 
+## 6A. 착신전환 (Communication Diversion — TS 24.604)
+
+착신전환은 **서버측 전환**이다: 착신 가입자에 `forward_id`(CFU — 무조건 전환) 가 있으면 CSP(TAS) 가 B2BUA 로서 B-leg 를 **전환 대상**으로
+낸다. 302 리다이렉트(단말이 Contact 로 다시 INVITE)는 쓰지 않는다 — TS 24.604 는 전환을 AS 의 재타게팅으로 정의하고, 302 모델에는
+발신자 통지(181)·재타게팅 이력(History-Info)·전환 안내([announcements.md §3.5](announcements.md))·"시도 1건" 통계의 삽입 지점이 없다.
+
+### 6A.1 판정 (`CTasModule::ResolveDiversion` — 디스패처가 라우팅 판정 앞에서 부른다)
+
+| 규칙 | 동작 |
+|---|---|
+| 대상 | 착신이 **가입자**일 때만(`CspUserMap::Select` — 등록 여부 무관, DB 폴백). 피어로 갈 착신(RecvRequest 가 PendingRoute 를 넣은 호)·PTT 그룹·대표번호는 대상이 아니다 |
+| 조건 | `forward_id` 가 비지 않음. **DND·착신거부 가입자는 전환하지 않는다**(종단 서비스 603 이 우선 — `ScreenInvite`/`ApplyTerminationServices` 그대로) |
+| 대상 번호 | 그 가입자 접속서비스의 다이얼 플랜으로 +E.164 번역([sip_service_model.md §2-10](sip_service_model.md)). 번역 불가(484 감)면 ERROR 로그 + 전환하지 않고 원착신으로 진행(가입자 설정 오류가 발신자를 막지 않는다) |
+| 연쇄 | 전환 대상도 가입자이고 `forward_id` 가 있으면 계속 좇는다(B→C→D). 대상이 가입자가 아니면(피어·대표번호) 거기서 끝 |
+| 상한·루프 | 전환 수(수신 INVITE 의 History-Info 가 이미 담은 `cause` 항목 수 + 이번 연쇄)가 `Setup.Sip.Cdiv.MaxDiversions`(기본 5) 를 넘거나 대상이 연쇄 안에 다시 나오면 **486 Busy Here**(TS 24.604 §4.5.2.6 전환 루프 방어) — `RejectVoice` 로 시도 장부에 남고 `declined`… 아닌 `busy` 상황의 실패 안내 대상 |
+| 전환 대상의 서비스 | 전환 뒤 착신은 전환 대상 가입자다 — 그 가입자의 DND/착신거부(603)·미등록(404/480)·대표번호 포크·통화중대기(Alert-Info)·피어 라우팅 재판정(`DecideOutboundRoute` — REJECT 정책이면 403)이 그대로 적용된다 |
+
+### 6A.2 시그널링 (`CModuleDispatcher::EventIncomingCall`)
+
+```
+UE-A ── INVITE sip:B ──► CSP                                  UE-C
+                          [ResolveDiversion: B.forward_id = C]
+UE-A ◄── 181 Call Is Being Forwarded ── (Setup.Sip.Cdiv.Notify181, SDP 없음)
+                          RELAY_ADD · CallMap(A, B-leg)
+UE-A ◄── 183+SDP + 전환 안내 ─────────── (announcements.md §3.5 — 프로파일 forwarded)
+                          INVITE sip:C ────────────────────────────► UE-C
+                            From: A(원발신자 그대로) · P-Asserted-Identity: A
+                            History-Info: <sip:B@dom>;index=1, <sip:C@dom;cause=302>;index=1.1;mp=1
+                            Supported: histinfo
+UE-A ◄── 180(같은 SDP) · 200 ◄────────── 180 · 200 ◄─────────────── UE-C
+```
+
+- **History-Info(RFC 7044)** — 원착신 `index=1`, 전환 대상 `<…;cause=302>;index=1.1;mp=1`(RFC 4458 cause: 302 CFU · 486 CFB · 408 CFNR · 404 CFNL · 503 CFNRc).
+  수신 INVITE 에 이미 있던 항목은 보존하고 마지막 index 뒤에 이어 붙인다. 연쇄는 `1.1.1;mp=1.1` 처럼 깊어진다. 조립·판정은 `csp/CspDiversion.{h,cpp}`(순수 —
+  `S1-UNIT-CSP` `tests/csp_diversion_test.cpp`). 전환자(B)의 신원은 History-Info 가 나르고 From/PAI 는 원발신자다(TS 24.604 §4.5.2.6.2). URI 도메인 = 수신 Request-URI 호스트(없으면 To 호스트).
+- **181** 은 비신뢰 1xx(RSeq 없음)로 B-leg 를 내기 전에 나간다(TS 24.604 §4.5.2.6.1 originating user notification, `Notify181=false` 면 생략).
+- **CDR** — `call.json` 의 callee 는 전환 대상, `diversion{served, target, cause, hops}` 가 덧붙는다(`VoipCallDiverted`). **시도는 1건**(다이얼 1회) — 전환은 leg 를 늘릴 뿐
+  시도를 늘리지 않는다([sip_statistics.md §2](sip_statistics.md)). DB `call_log`·participants 의 callee 도 전환 대상.
+- 302 응답 코드는 어디서도 만들지 않는다(피어가 3xx 를 주면 `RelayEndStatus` 가 480 으로 바꾸는 종전 규칙 그대로 — B2BUA 는 재귀하지 않는다).
+
+### 6A.3 설정·데이터
+
+| 항목 | 값 |
+|---|---|
+| 가입 필드 | `volte_subscriptions`/`voip_subscriptions`(/`ptt_subscriptions`) `forward_id` — CSC `POST/PUT /users/{pid}/{call|voip}/{msisdn}` 의 `forward_id`(번호 — 숫자열, 선행 `+` 허용, 빈 값 = 전환 없음; 형식 위반 400). PUT 은 **부분 업데이트**(키가 있을 때만 바꾼다 — `dnd` 도 같다) |
+| csp.json | `Setup.Sip.Cdiv.MaxDiversions`(5) · `Setup.Sip.Cdiv.Notify181`(true) — 템플릿 섹션 `tas`, SIGUSR1 재로드 |
+| 안내 | 프로파일 상황 `forwarded`(기본 `announce_then_tone` — 안내 1회 뒤 링백음을 응답까지) — [announcements.md §3.5](announcements.md) |
+| 검증 | 계측기 `VOLTE-ANN-FORWARDED`(subscriber 픽스처 `forward_to: <역할>`, 지표 `cdiv_181_pct`·`cdiv_hi_pct`·`early_media_pct`·`early_rtp_pct`) |
+
+**후속(범위 밖)** — 조건부 전환 CFB(486)/CFNR(무응답 타이머)/CFNL(미등록)은 가입 필드 `forward_busy_id`·`forward_no_reply_id`·`no_reply_sec` 를 두고 B-leg 실패 지점(`EventCallEnd`·`Tick`)에서
+같은 재타게팅 경로(새 B-leg + History-Info cause 486/408/404)를 타면 된다. 전환자 통지(TS 24.604 `comm-div-info` 이벤트 패키지)·`Privacy: history`·전환 대상이 원발신자 자신인 경우의 처리도 남는다.
+
+---
+
 ## 7. CSP↔CMP 계약 — 재고정은 RELAY_MODIFY 하나로
 
 [cmp_media_api.md](../../api/cmp_media_api.md) §6.2 가 이미 정의한 계약을 그대로 쓴다. 신규
@@ -235,7 +289,8 @@ P2(표준형 — 수신 INVITE-Replaces·dialog 이벤트 패키지·489)·P3(�
 | `OnTransfer` / `OnBlindTransfer` | attended / blind transfer (§6) |
 | `ScreenInvite` | RecvRequest INVITE 조기 스크린 — DND/착신거부 603 (다이얼로그 생성 전) |
 | `TryPickupDial` | 미등록 착신의 픽업 피처코드 판정·수행 (§5.2) |
-| `ApplyTerminationServices` | 착신 가입자 DND/착신거부 603·착신전환 302 |
+| `ApplyTerminationServices` | 착신 가입자 DND/착신거부 603 |
+| `ResolveDiversion` | 착신전환(TS 24.604 CFU) 대상·연쇄·상한 판정 — 디스패처가 라우팅 앞에서 부르고 B-leg 를 전환 대상으로 낸다 (§6A) |
 
 relay leg SDES 평가/재작성 헬퍼(`EvalRelayOfferSdes`/`ApplyRelayLegOffer`/`EvalRelayAnswerSdes`/
 `ReadReinviteSdes`/`RewriteRelaySdpForLeg`)는 `MediaSdes` 네임스페이스에 있고 디스패처(B2BUA
@@ -381,7 +436,7 @@ ALTER TABLE ptt_subscriptions   ADD COLUMN pickup_group VARCHAR(64) NULL DEFAULT
   "service_ref": "voip",
   "sip_transport": "TLS",     // 권장 기본값 — UDP/TCP/TLS/ANY(null) 중 선택 가능
   "auth_scheme": "digest",    // 기본값 — 생략 가능. k/opc 없음
-  "dnd": false, "forward_id": "" }
+  "dnd": false, "forward_id": "" }   // forward_id = 착신전환(CFU) 대상 번호 — 서버측 전환 §6A
 ```
 
 `service_ref` 는 kind=voip 접속서비스여야 한다(다른 kind → 400 `service_kind_mismatch`, 비면 400). 번호는 volte·voip·ptt 테이블과

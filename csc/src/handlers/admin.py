@@ -639,6 +639,20 @@ def _ringback_select_extra(cur, table: str) -> str:
     return ", ringback_media" if _has_ringback_column(cur, table) else ""
 
 
+_FORWARD_RE = re.compile(r'^\+?[0-9*#]{1,32}$')
+
+
+def _parse_forward_id(body):
+    """body.forward_id → str. 빈 값 = ''(전환 없음). 형식 = 번호(선행 + 허용, 다이얼 플랜 번역은 CSP — TS 24.604 CFU 대상)."""
+    v = body.get('forward_id')
+    if v in (None, '', 0):
+        return ''
+    v = str(v).strip()
+    if not _FORWARD_RE.match(v):
+        raise ValueError('forward_id')
+    return v
+
+
 def _parse_ringback_media(body):
     """body.ringback_media → str|None. 빈 값 = None(서비스 프로파일 그대로). 형식 = <sys|op|sub>:<name>."""
     v = body.get('ringback_media')
@@ -729,7 +743,10 @@ async def _add_subscription(person_id: str, svc: str, body, config):
     except ValueError:
         return HandlerResult(status=400, body={'error': 'sip_transport must be one of UDP/TCP/TLS/ANY'})
     dnd        = _coerce_dnd(body.get('dnd', False))
-    forward_id = body.get('forward_id', '')
+    try:
+        forward_id = _parse_forward_id(body)
+    except ValueError:
+        return HandlerResult(status=400, body={'error': 'forward_id must be a number (digits, optional leading +)'})
     table      = _sub_table(svc)
     kind       = _service_kind(svc)
     try:
@@ -810,8 +827,11 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
         return HandlerResult(status=400, body={'error': 'JSON body required'})
 
     passwd     = body.get('passwd') or ''
-    dnd        = _coerce_dnd(body.get('dnd', False))
-    forward_id = body.get('forward_id', '')
+    # 부분 업데이트 — dnd/forward_id 도 키가 있을 때만 바꾼다(종전엔 항상 써서 ringback_media 만 보낸 PUT 이 착신전환·DND 를 지웠다)
+    try:
+        forward_id = _parse_forward_id(body) if 'forward_id' in body else None
+    except ValueError:
+        return HandlerResult(status=400, body={'error': 'forward_id must be a number (digits, optional leading +)'})
     table      = _sub_table(svc)
     kind       = _service_kind(svc)
     try:
@@ -841,8 +861,11 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
             # 부분 업데이트 — service_ref/imsi 는 키가 있을 때만, passwd 는 값이 있을 때만 반영 (P1-d)
             new_imsi = cur_row['imsi']
             new_ref  = cur_row['service_ref']
-            fields = ["dnd=%s", "forward_id=%s"]
-            values = [dnd, forward_id]
+            fields, values = [], []
+            if 'dnd' in body:
+                fields.append("dnd=%s"); values.append(_coerce_dnd(body.get('dnd')))
+            if forward_id is not None:
+                fields.append("forward_id=%s"); values.append(forward_id)
             if 'service_ref' in body:
                 sid = body.get('service_ref')
                 new_ref = None if sid in (None, '', 0, '0') else str(sid).strip()
@@ -903,6 +926,8 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
                     return HandlerResult(status=503, body=_HA1_SCHEMA_ERROR)
                 fields.append("ha1=%s"); values.append(_digest_ha1(new_imsi, realm[0], realm[1], passwd))
             fields += aka[0]; values += aka[1]
+            if not fields:
+                return HandlerResult(status=200, body={'id': msisdn})   # 바꿀 필드 없음 — 멱등
             values.extend([msisdn, person_id])
 
             cur.execute(

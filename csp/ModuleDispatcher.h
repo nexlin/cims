@@ -41,6 +41,9 @@ public:
 
     // 공유 헬퍼
     bool SendResponse( CSipMessage *pclsMessage, int iStatusCode );
+    /** routing_policies 평가 → 피어 RouteSet 이면 PendingRouteMap 에 B-leg 목적지 등록. 403 = 거절, 1 = 피어 경로, 0 =
+     * 내부. RecvRequest(원착신)와 착신전환(EventIncomingCall — 전환 대상으로 재판정)이 공용. */
+    int DecideOutboundRoute( CSipMessage *pclsMessage, const std::string &strTo, const std::string &strCallId );
     /** 피어 B-leg 의 5xx·타임아웃 재라우팅(RouteSet 다음 멤버, sip_service_model.md §2-4). true = 새 B-leg 로 이어
      * 감(이 leg 종료 처리 끝). */
     bool TryRerouteLeg( const char *pszCallId, const CCallInfo &clsB, int iSipStatus );

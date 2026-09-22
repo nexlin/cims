@@ -16,7 +16,7 @@
 - S1-UNIT-OAM-STATS      : python3 tests/test_oam_stats_classify.py · test_stats_probe.py · test_stats_rollup_range.py · test_stats_store.py (SIP 통계 서비스축 · 미디어 프로브 · 구간 조회 계층 선택 · 집계 저장소 단일 writer)
 - S1-UNIT-PSIP           : g++ tests/psip_leg_dest_test.cpp ← build/csp/psip_build/*.a → 127.0.0.1 루프백 실행 (서버 발신 in-dialog 요청 목적지 재해석; 라이브러리 없으면 SKIP)
 - S1-UNIT-CMP            : g++ tests/cmp_transcoder_test.cpp·cmp_ann_player_test.cpp + cmp/PTranscoder·PAnnCatalog·PAnnPlayer.cpp ← pkg/ AMR-WB 정적 라이브러리 (피어 leg 트랜스코더 프레이밍·변환·왕복 + 안내 재생기 페이싱·시퀀스·페이로드; 라이브러리 없으면 SKIP)
-- S1-UNIT-CSP            : g++ tests/csp_dial_plan_test.cpp + csp/CspDialPlan.cpp ← build/csp/psip_build/libSipParser.a (착신 번호 번역·다이얼 플랜 — 국내형→+E.164·phone-context·484·피처코드/그룹 id 비번역; 라이브러리 없으면 SKIP)
+- S1-UNIT-CSP            : g++ tests/csp_dial_plan_test.cpp + csp/CspDialPlan.cpp ← build/csp/psip_build/libSipParser.a (착신 번호 번역·다이얼 플랜 — 국내형→+E.164·phone-context·484·피처코드/그룹 id 비번역; 라이브러리 없으면 SKIP) · tests/csp_diversion_test.cpp + csp/CspDiversion.cpp (착신전환 History-Info·cause·전환 수 — 라이브러리 불필요)
 
 단말 SDK(`sdk/`·`android/`) — 정본 [docs/design/features/ue_sdk.md](../../../../docs/design/features/ue_sdk.md),
 [android_dispatch_tablet.md](../../../../docs/design/features/android_dispatch_tablet.md) §9.

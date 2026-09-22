@@ -3,8 +3,8 @@
 > CSP(제어)·CMP(재생)가 통화 상황에 맞는 안내음성·신호음·보류 음악을 단말에 **내보내는** 기능의 정본 설계.
 > 규격 = TS 24.628(공통 기본 통신 절차 — early media·안내), TS 24.229 §5.7(AS)·TS 23.228 §4.7(MRFC/MRFP),
 > RFC 3960(early media·링백 모델), RFC 5009(P-Early-Media), RFC 4240(netann 의미론), RFC 3326(Reason),
-> TS 24.610(HOLD — 피보류자 안내), TS 24.615(통화중대기), RFC 7462(Alert-Info URN), ITU-T E.182(톤·안내 적용 원칙),
-> E.180 Sup.2(한국 신호음). P1(§12 ①~⑦)은 구현·실측 반영, P2(§11)는 로드맵이다.
+> TS 24.610(HOLD — 피보류자 안내), TS 24.615(통화중대기), TS 24.604(착신전환 CDIV — 181·History-Info RFC 7044·cause RFC 4458),
+> RFC 7462(Alert-Info URN), ITU-T E.182(톤·안내 적용 원칙), E.180 Sup.2(한국 신호음). P1(§12 ①~⑦)과 착신전환 안내(§3.5·§12 ⑪)는 구현 반영, 나머지 P2(§11)는 로드맵이다.
 >
 > 관련: [../modules/cmp.md](../modules/cmp.md) · [../modules/csp.md](../modules/csp.md) · [../../api/cmp_media_api.md](../../api/cmp_media_api.md)
 > · [volte_flows.md](volte_flows.md) C1a · [sip_service_model.md](sip_service_model.md) §2-9 · [media_security.md](media_security.md)
@@ -18,7 +18,7 @@
 
 **범위(P1).** 1:1 전화 호(VoLTE·유선 VoIP·피어 트렁크)의 ① 실패 안내(통화중·무응답·없는 번호·거절·혼잡) ② 보류 음악(MOH)
 ③ 정책 모델(전역 프로파일 + 접속서비스별 override, 가입자 링백 확장 자리) ④ 서비스 음원 라이브러리(OAM 등록·CMP 배포).
-**P2** = 통화중대기(TS 24.615)·서버 링백(컬러링) 켜기·착신전환 안내(TS 24.604)·믹스 모드·관제 큐/ACD 대기열 안내.
+**P2** = 통화중대기(TS 24.615)·서버 링백(컬러링) 켜기·착신전환 안내(TS 24.604 — 서버측 전환과 함께 구현, §3.5)·믹스 모드·관제 큐/ACD 대기열 안내.
 
 **범위 밖.** PTT 그룹콜(TS 24.379/24.380 은 서버 안내음을 정의하지 않고 floor 톤은 단말 몫), MCData, 영상 안내, 런타임 TTS,
 SIP-I 트렁크의 ISUP 안내 인디케이터.
@@ -50,7 +50,7 @@ SIP-I 트렁크의 ISUP 안내 인디케이터.
 | `hold` 보류 | 한 leg 의 re-INVITE offer `a=sendonly`/`a=inactive` | TS 24.610 §4.5.2.4 | 피보류 leg 에 보류 음악 loop, resume(sendrecv) 에 정지 |
 | `ringback` 링백 | B-leg 첫 18x(SDP 없음) 수신 | RFC 3960 §3, TS 24.628 | **off**(단말 로컬 링백). 접속서비스 스위치로 서버 링백 — §6 |
 | `call_waiting` 통화중대기 | 통화 중 가입자에게 두 번째 INVITE | TS 24.615, RFC 7462 | **P2** — §11 |
-| `forwarded` 전환 안내 | 착신전환 실행 | TS 24.604 §4.5.2.x | **P2** — 현행 302 모델에는 삽입 지점이 없다(§11) |
+| `forwarded` 전환 안내 | 착신 가입자 `forward_id`(CFU) 로 B-leg 를 전환 대상으로 낼 때(서버측 전환, [volte_supplementary_services.md §6A](volte_supplementary_services.md)) | TS 24.604 §4.5.2.6, RFC 7044 | 발신자에 181 → 전환 안내 1회 → **링백음을 전환 대상 응답까지**(`announce_then_tone`) — §3.5 |
 
 **상황 판정 우선순위.** B-leg 최종 응답에 `Reason: Q.850;cause=N` 이 있으면 cause 로 먼저 판정하고(RFC 3326 — 피어·MGCF 가
 PSTN 원인을 실어 준다), 없으면 SIP 코드로 판정한다. 판정 표는 `CspAnnouncement::Classify(status, reason)` 하나에 둔다.
@@ -63,6 +63,7 @@ PSTN 원인을 실어 준다), 없으면 SIP 코드로 판정한다. 판정 표�
 | `tone` | 신호음만 `tone_ms` 동안(loop) |
 | `announce` | 안내음 1회(`repeat` 회) |
 | `tone_then_announce` | 신호음 `tone_ms` → 안내음 |
+| `announce_then_tone` | 안내음(`repeat` 회) → 신호음 `tone` 을 **STOP 까지** loop — 전환 안내 뒤 링백(§3.5). 신호음이 비면 안내 뒤 `ringback` 규칙으로 |
 | `media` | 임의 음원(`media`, `loop`) — hold·ringback 용 |
 
 ## 3. 시그널링 절차
@@ -91,6 +92,8 @@ UE-A                     CSP                          CMP                       
 - **방향은 `a=sendrecv`** — `a=sendonly` 로 답하면 단말이 RTP 를 보내지 않아 NAT leg 의 목적지 latch([ue_nat_traversal.md §5](ue_nat_traversal.md))가
   일어나지 않고 안내음이 선언 주소로 나가 유실된다. sendrecv 로 답하고 ingress 는 CMP 가 폐기한다(RFC 3960 §3.1 이 허용). 방향 지시는
   헤더 `P-Early-Media: sendonly`(RFC 5009 — 망→단말 방향만 인가)로 준다. psip 에 18x 부가 헤더 API 를 더한다(§5.3).
+- **순서는 `RELAY_MODIFY`(A leg 재생 코덱) → `RELAY_PLAY` → 183+SDP** — 재생기가 거절하면(음원 없음·슬롯 소진) A 에 answer 를 남기지 않고 원코드/원경로로
+  폴백한다(SDP 만 받은 단말은 로컬 링백 없이 무음을 듣게 되므로). 183 송신이 실패하면 재생을 STOP 한다. 위 그림의 183·RELAY_PLAY 는 같은 ms 안이다.
 - 이미 B 의 18x+SDP 로 early media 가 앵커링된 뒤 실패하면([volte_flows.md](volte_flows.md) C1a) 183 을 다시 내지 않고 RELAY_PLAY 만 한다
   — peer0 의 answer 는 그대로다(B 가 준 SDP 를 CSP 가 A 에게 이미 냈으므로 코덱도 그것이다).
 - **최종 응답은 재생 뒤** `RELAY_PLAY_DONE` 또는 `MaxPlayMs` 타이머에서 `StopCall(A, 원코드, Reason)` — `RelayEndStatus` 매핑·Reason 투과 규칙은
@@ -137,6 +140,38 @@ UE-A (보류 주체)         CSP                          CMP                   
 접속서비스 프로파일의 `ringback.mode=media` 일 때만: B-leg 첫 18x(SDP 없음) 수신 시 3.1 과 같은 183+SDP(A) 를 내고 `RELAY_PLAY peer0 [ringback 음원, repeat 0]`,
 B 의 18x+SDP·200 이 오면 STOP 뒤 현행 앵커링(C1a) — B 의 SDP 없는 180 은 **180+SDP(relay A측)** 로 바꿔 전달해 단말이 로컬 링백으로 갈아타지 않게 한다
 (RFC 3960 §3.2). 대표번호 포크 중에는 하지 않는다(C1a 와 같은 이유). 음원 결정 = §6.3 가입자(피착신자) → 접속서비스 → 전역.
+
+### 3.5 착신전환 안내 (TS 24.604 CDIV)
+
+착신전환은 **서버측 전환**이다 — 착신 가입자에 `forward_id`(CFU) 가 있으면 CSP 가 B-leg 를 전환 대상으로 낸다(302 리다이렉트를 쓰지 않는다:
+안내·History-Info·시도 1건 통계의 삽입 지점이 없다). 전환 판정·연쇄·상한·History-Info 는 [volte_supplementary_services.md §6A](volte_supplementary_services.md) 가 정본이고,
+여기는 발신자가 듣는 것만 적는다.
+
+```
+UE-A                     CSP                          CMP                       UE-C (전환 대상)
+  │ ── INVITE (to B) ───► │ [B.forward_id=C → CDIV]                               │
+  │ ◄── 181 Call Is Being Forwarded ── │  (Setup.Sip.Cdiv.Notify181)              │
+  │                      │ ── RELAY_ADD peer0=a ─────► │                          │
+  │ ◄── 183 (SDP relay A측, P-Early-Media: sendonly) ── │                          │
+  │                      │ ── RELAY_PLAY peer0 [ann_forwarded ×1] ─────────────► │
+  │                      │ ── INVITE (History-Info: <B>;index=1, <C;cause=302>;index=1.1;mp=1) ─────► │
+  │ ◄══ "다른 번호로 연결됩니다" ══ │                             │                          │
+  │                      │ ◄── RELAY_PLAY_DONE(completed) ── │  ◄── 180 Ringing ──────────── │
+  │ ◄── 180 (같은 SDP) ── │ ── RELAY_PLAY peer0 [ringback_kr, repeat 0] ─────────► │
+  │ ◄══ 링백음 ═══════════ │                             │  ◄── 200 OK (SDP c) ───────── │
+  │                      │ ── RELAY_PLAY_STOP · RELAY_MODIFY peer1 ────────────► │
+  │ ◄── 200 OK ────────── │                                                          │
+```
+
+- 순서 = 181(SDP 없음·비신뢰 1xx) → relay·CallMap 을 만든 뒤 **B-leg INVITE 를 내기 직전**에 `OnForwarded(A, B)`: 3.1 과 같은 CSP answer(183+SDP, `a=sendrecv`,
+  `P-Early-Media: sendonly`)를 A 에 내고 프로파일 `forwarded` 의 1 단계(안내)를 붙인다. 그래서 C 의 첫 SDP 없는 18x 도 같은 SDP 로 나간다(`OnRingback` 은
+  A 에 이미 answer 를 낸 호면 프로파일과 무관하게 true — 단말이 로컬 링백으로 갈아타지 않는다, RFC 3960 §3.2).
+- **2 단계** = 1 단계 `RELAY_PLAY_DONE(completed|max)` 에서 `announce_then_tone` 의 `tone` 을 repeat 0 으로(기본 `sys:ringback_kr`), 신호음이 없으면 `ringback` 규칙이
+  media 일 때 그 음원으로. 둘 다 없으면 안내 뒤 무음(단말은 SDP 를 받은 상태라 로컬 링백을 내지 않는다 — 배치가 `tone` 을 두는 것이 원칙). 1 단계 완료는 CDR
+  `announcement{situation: forwarded}` 로 남는다.
+- 정지·교체 = C 의 SDP 있는 18x·200(`OnRingbackEnd`), C 실패(`OnLegFailed` — 같은 SDP 위에서 실패 안내로 교체, 183 재송 없음), A 의 CANCEL(`OnCallEnd`).
+- 프로파일 `none`·CMP 미지원·answer 조립 실패면 **181 만** 나가고 호는 그대로 진행한다(안내가 전환을 막지 않는다). `trunk` 프로파일은 none(NNI 는 코드·헤더만).
+- 기본 세트에 `sys:ann_forwarded`("전화가 다른 번호로 연결됩니다. 잠시만 기다려 주십시오.")가 추가된다(§7.2).
 
 ## 4. CMP — 재생기(ANN function)
 
@@ -217,8 +252,9 @@ TAS(hold·전달·픽업·포크)와 IBCF(피어 실패)는 이 서비스를 **�
 | `bool OnLegFailed(bCallId, clsB, status, reason)` | `EventCallEnd`(B 실패, 재라우팅 소진 뒤) | true = 인수(호출자는 B entry 만 지운다). 3.1 절차 — A 가 이미 SDP 를 받았으면(B 18x+SDP·링백) 183 생략 |
 | `bool Reject(callId, rtp, from, to, status, reason, msg)` | `EventIncomingCall` 거절 지점·TAS 603 | 3.2 절차 — 인수 못 하면 false(호출자가 원코드) |
 | `bool OnHold(holderCallId, clsHolder)` / `OnResume(...)` | `EventReInvite` 방향 감지(roles.TAS) | 3.3 — 반환 true 면 inactive 를 sendonly 로 재작성 |
-| `bool OnRingback(bCallId, clsB, …)` / `OnRingbackEnd(bCallId, clsB)` | `EventCallRing`(SDP 없는 18x) / 18x+SDP·`EventCallStart` | 3.4 (프로파일 `ringback=media` 일 때만) |
-| `void OnPlayDone(sessionId, peer, playId, reason, playedMs)` | `CCmpClient` 이벤트 dispatch 스레드 | 대기 중 최종 응답 발사(`FinishEarly`) |
+| `bool OnRingback(bCallId, clsB, …)` / `OnRingbackEnd(bCallId, clsB)` | `EventCallRing`(SDP 없는 18x) / 18x+SDP·`EventCallStart` | 3.4 (프로파일 `ringback=media` 일 때만). A 에 이미 CSP answer 를 낸 호(링백·전환 안내)면 프로파일과 무관하게 true |
+| `bool OnForwarded(aCallId, bCallId)` | `EventIncomingCall` — 전환 B-leg `StartCall` 직전 | 3.5 — 프로파일 `forwarded` 의 1 단계(안내) + 183+SDP. `OnPlayDone` 이 2 단계(신호음/ringback loop)로 잇는다 |
+| `void OnPlayDone(sessionId, peer, playId, reason, playedMs)` | `CCmpClient` 이벤트 dispatch 스레드 | 대기 중 최종 응답 발사(`FinishEarly`) · `forwarded` 1 단계 완료 → CDR + 2 단계 재생(`announce_then_tone` 의 tone 또는 `ringback` 규칙) |
 | `void OnCallEnd(callId)` / `OnLegReplaced(relaySessionId)` | `EventCallEnd` 진입부 / TAS 전달·픽업 RELAY_MODIFY 앞 | 재생 회수(STOP) — CANCEL 은 CDR `cancelled` |
 | `void Tick()` | CspServer 1 s 루프 | `MaxPlayMs`+3 s 지난 대기 → `timeout` 최종 응답 |
 
@@ -237,6 +273,7 @@ CallMap 은 relay 서술자와 `m_strAnnProfile` 만 갖는다. 링백 entry(최
 | TasModule 전달·픽업의 `RELAY_MODIFY`(4곳) | 앞에 `OnLegReplaced(relay)` — 교체되는 leg 의 보류 음악 정지 |
 | TAS `ApplyTerminationServices` 603 | `Reject` 를 먼저(rtp·message 인자 추가) |
 | `EventCallRing`: 18x 브릿징 | 프로파일 ringback on 이면 `OnRingback`; SDP 있는 18x·200 은 `OnRingbackEnd` 뒤 현행 C1a |
+| `EventIncomingCall`: 착신전환(TAS `ResolveDiversion` → B-leg 를 전환 대상으로) | 181 → relay·CallMap → History-Info 삽입 → `OnForwarded(A, B)` → `StartCall` (§3.5) |
 | `CCmpClient` 이벤트 dispatch | `RELAY_PLAY_DONE` → `OnPlayDone` |
 
 ### 5.3 psip 변경
@@ -258,6 +295,7 @@ CallMap 은 relay 서술자와 `m_strAnnProfile` 만 갖는다. 링백 entry(최
     { "profile": "default", "situation": "busy",       "mode": "tone_then_announce", "tone": "sys:busy_kr", "tone_ms": 4000, "media": "sys:ann_busy" },
     { "profile": "default", "situation": "no_answer",  "mode": "announce", "media": "sys:ann_no_answer" },
     { "profile": "default", "situation": "hold",       "mode": "media",    "media": "sys:moh_simple", "loop": true },
+    { "profile": "default", "situation": "forwarded",  "mode": "announce_then_tone", "media": "sys:ann_forwarded", "tone": "sys:ringback_kr" },
     { "profile": "trunk",   "situation": "busy",       "mode": "none" }
   ]
 }
@@ -266,7 +304,7 @@ CallMap 은 relay 서술자와 `m_strAnnProfile` 만 갖는다. 링백 entry(최
 - **프로파일 표 = `Rules` 행의 집합** — 행 하나가 프로파일 하나의 상황 하나(`{profile, situation, mode, tone, tone_ms, media, repeat, loop}`). 콘솔은 `object_list` 로 편집한다
   (맵-오브-맵은 콘솔 필드 형식에 없다). 같은 프로파일에 없는 상황은 `DefaultProfile` 의 값, 그것도 없으면 `none`.
 - `Rules` 가 비면(키 없음·빈 배열) **내장 기본 표** — `default`(§2 표의 기본 동작 그대로 — busy 화중음 4 s→안내, no_answer/unreachable 안내, not_found/invalid 없는번호 안내,
-  declined 화중음 6 s, congestion 혼잡음 6 s, hold moh_simple loop, ringback/forbidden/call_waiting none) + `trunk`(전부 none — NNI 관례) +
+  declined 화중음 6 s, congestion 혼잡음 6 s, hold moh_simple loop, **forwarded = announce_then_tone ann_forwarded → ringback_kr**(§3.5), ringback/forbidden/call_waiting none) + `trunk`(전부 none — NNI 관례) +
   `ringback`(서버 링백 스위치 — `ringback: media sys:ringback_kr loop` 한 행, 나머지 상황은 `default` 로 떨어진다. 접속서비스 `announcement_profile: ringback` 이
   §3.4 를 켜는 가장 짧은 길이고, 음원은 §6.3 가입자 값이 덮는다).
 - `tone_ms` 는 신호음 loop 길이(신호음 파일은 주기 1~2회 분량이라 CMP 가 항목 `repeat 0 + max_ms` 로 돈다). `media` 의 `repeat` 기본 1, hold/ringback 은 `loop`.
@@ -323,7 +361,7 @@ CMake `dist` 가 `dist/cmp/announcements/sys/` 에 복사하고, OAM 패키지�
 | id | kind | 내용 |
 |---|---|---|
 | `sys:dial_kr`·`ringback_kr`·`busy_kr`·`congestion_kr`·`call_waiting_kr` | tone | 한국 신호음(E.180 Sup.2·전기통신설비 기술기준) |
-| `sys:ann_connecting`·`ann_hold`·`ann_call_waiting`·`ann_busy`·`ann_no_answer`·`ann_invalid_number` | announcement | TTS 한국어 안내 6종 |
+| `sys:ann_connecting`·`ann_hold`·`ann_call_waiting`·`ann_busy`·`ann_no_answer`·`ann_invalid_number`·`ann_forwarded` | announcement | TTS 한국어 안내 7종(`ann_forwarded` = "전화가 다른 번호로 연결됩니다. 잠시만 기다려 주십시오." — 착신전환 §3.5) |
 | `sys:moh_simple` | music | 합성 보류 음악 |
 
 ### 7.3 OAM — 등록·삭제·배포 (base OAM 소유)
@@ -370,6 +408,8 @@ CMake `dist` 가 `dist/cmp/announcements/sys/` 에 복사하고, OAM 패키지�
   `moh_rtp_pct` = `moh_rtp_ok`/`hold_tx`(보류 주체가 송출 중이면 그 RTP 도 섞이므로 시나리오는 `rtp: explicit` 로 둔다) — `VOLTE-ANN-HOLD-MOH`.
   **서버 링백·가입자 링백** = 픽스처로 발신자 서비스 복제본에 `announcement_profile: ringback`(내장 프로파일)을 주고, 착신자 회선의 `ringback_media`(subscriber 픽스처)로
   음원을 바꾼다 → `VOLTE-ANN-RINGBACK`·`VOLTE-ANN-RINGBACK-SUB`(200 전 `early_media_pct`/`early_rtp_pct`, 음원 선택은 CSP 로그·CDR 로 확인).
+  **착신전환 안내** = subscriber 픽스처 `forward_to: <역할>`(served 회선 `forward_id` = 그 역할의 신원) → `VOLTE-ANN-FORWARDED`: 발신자의 181(`cdiv_181_pct` = `cdiv_181_rx`/`invite_tx`)·
+  전환 대상 착신 INVITE 의 History-Info(`cdiv_hi_pct` = `cdiv_hi_rx`/`invite_tx` — libcsim `OnIncomingDiverted`)·안내+링백 RTP(`early_media_pct`/`early_rtp_pct`). CDR `diversion{served,target,cause,hops}`.
 - 검증 게이트: `S1-UNIT-CMP`(`tests/cmp_ann_player_test.cpp`) · `S3-SCN-ANN`(cspsim 없는 번호 → `=> RTP(` 뒤 ≥ 5 s → `status=404`) · `tests/cmp_smoke_announcement.py`(라이브 CMP).
 
 ## 10. 알람 ([../alarm_catalog.csv](../alarm_catalog.csv) 정본)
@@ -388,7 +428,8 @@ CMake `dist` 가 `dist/cmp/announcements/sys/` 에 복사하고, OAM 패키지�
   `OnRingback(…, ANN_SIT_CALL_WAITING)` — 프로파일 `call_waiting`(`mode: media|announce`, 예 `sys:ann_call_waiting` loop) 규칙이 있으면 그것으로, 없으면 `ringback` 규칙으로
   183+SDP 안내/링백을 들려준다(기본 표는 둘 다 none — 배치가 켠다). 피어 착신·PTT 는 대상이 아니다.
   **남은 것** = 단말이 대기음을 못 내는 배치를 위한 **망 in-band 대기음**(활성 통화에 톤을 섞는 `mode=mix` — 디코드·믹스·재인코딩, 변환 슬롯 소비)과 실단말 실측.
-- **착신전환 안내(TS 24.604)**: 현행 302 리다이렉트 모델은 안내 삽입 지점이 없다. 서버측 전환(B2BUA 가 새 B leg 를 낸다)으로 바꿀 때 `forwarded` 상황을 넣는다.
+- **착신전환(TS 24.604) 후속**: CFU 서버측 전환·`forwarded` 안내는 구현(§3.5·§12 ⑪). 남은 것 = 조건부 전환 CFB/CFNR/CFNL(가입 필드 `forward_busy_id`·`forward_no_reply_id`·`no_reply_sec`,
+  B-leg 486/무응답/미등록 때 같은 재타게팅 경로 — History-Info cause 486/408/404) · 전환자(diverting user) 통지(TS 24.604 comm-div-info 이벤트 패키지) · `Privacy: history`.
 - **다이얼로그 이전 거절**(3.2)의 판정 지점 이동 · **가입자 링백 WAV 업로드**(`sub:` 등록 — 6.3 은 라이브러리 id 선택까지 구현) · **다국어 세트**(프로파일을 언어별로 두면 된다 — 모델 변경 없음).
 - **관제 큐/ACD**([dispatch_center.md §10](dispatch_center.md)): 대표번호 대기열의 "잠시만 기다려 주십시오"·순번 안내는 3.4 의 링백 재생기(repeat 0)에
   시퀀스 교체(RELAY_PLAY 교체 = `replaced`)를 얹는 것이다.
@@ -411,5 +452,7 @@ CMake `dist` 가 `dist/cmp/announcements/sys/` 에 복사하고, OAM 패키지�
 
 | ⑩ 보류 음악·링백 실측 (.48 관리평면, 2026-09-22) | csp 0.2.144 · csc 0.2.121 · cmp 0.2.94 · oam-cims-tester 0.1.23 · cims-tester-worker 0.1.19 — 실측이 드러낸 결함 수정 포함: psip 세션 갱신 판정에 방향 속성 추가(hold re-INVITE 가 "미디어 무변경" 으로 건너뛰어졌다) · psip media-list SDP 에 다이얼로그 방향 재작성(`HoldCall` 의 a=sendonly 가 와이어에 없었다) · CSC `/users` 목록 500(ptt 테이블 `ringback_media` SELECT) · CSC PUT 회선의 같은 realm 서비스 이관 passwd 요구 완화 · CSC PUT `ringback_media` 저장 누락 | `VOLTE-ANN-HOLD-MOH` 4/4(`moh_rtp_pct` 100 %, CSP `hold music sys:moh_simple → peer1` → resume 에 stopped 3.98 s) · `TRUNK-PBX-HOLD-RESUME` 4/4(PBX 보류 → 발신 UE 에 MOH 4/4) · `VOLTE-ANN-RINGBACK` pass(발신자 서비스 `announcement_profile: ringback` → 18x+SDP·early RTP 149 패킷 → 200 에 stopped) · `VOLTE-ANN-RINGBACK-SUB` pass(피착신 `ringback_media=sys:ann_connecting` 이 음원을 덮음 — CSP 로그 확인) · 회귀 NOTFOUND·NO-ANSWER·XFER-DENIED·CALL-BASIC pass · cmp 0.2.93→0.2.94 업그레이드 때 `announcements/op/*`·`config/announcements.jsonl` 이어받기 확인(STATS `op:` 포함 13 media → 시험 등록물 undeploy 뒤 12) |
 
-**남은 것(P1 실측)** = 실단말 hold/링백 청취 확인, `S3-SCN-ANN` 게이트 실행(dev 스택은 배포 모드). CSP 안내 카운터는 모니터 `MC_SIP_STATS`(ann_started/ann_fallback/ann_active_*)로 본다 — OAM 은 모니터를 수집하지 않으므로 콘솔 노출은 통계 파이프라인 과제로 남긴다.
+| ⑪ 착신전환 안내 (TS 24.604 CDIV) | 서버측 전환 — TAS `ResolveDiversion`(CFU 연쇄·상한 `Setup.Sip.Cdiv.MaxDiversions`·루프 486·DB 폴백·다이얼 플랜 번역) · 디스패처 재타게팅(181 `Setup.Sip.Cdiv.Notify181`·전환 대상 라우팅 재판정 `DecideOutboundRoute`·B-leg `History-Info`/`Supported: histinfo`·CDR `diversion`) · `CspDiversion`(RFC 7044/4458 순수 헬퍼) · 상황 `forwarded`·모드 `announce_then_tone`·`OnForwarded`·2 단계 링백 · 음원 `sys:ann_forwarded` · 302 경로 제거 · 계측기 `VOLTE-ANN-FORWARDED`(픽스처 `forward_to`, 지표 `cdiv_181_pct`·`cdiv_hi_pct`, libcsim `OnIncomingDiverted`) · CSC PUT 부분 업데이트(dnd/forward_id 키 있을 때만)·`forward_id` 형식 검사 (cmp 0.2.95(`sys:ann_forwarded` 동봉) · csp 0.2.146 · csc 0.2.122 · tester 0.1.24 · worker 0.1.20) | `S1-UNIT-CSP` `tests/csp_diversion_test.cpp` 16 checks · tester 단위시험 52 pass · 콘솔 tsc pass · **tb48 실측(2026-09-22)** `VOLTE-ANN-FORWARDED` 10/10 pass — CSP `CDIV +8213…26 → +8213…39 (hops=1)` → 181(`cdiv_181_pct` 100) → 183+SDP · `sys:ann_forwarded` 5540 ms completed → `ringback sys:ringback_kr(loop)` → 전환 대상 200 에 stopped(early RTP 350 패킷, `early_rtp_pct` 100) · 전환 대상 INVITE 의 `History-Info: <sip:+8213…26@…>;index=1, <sip:+8213…39@…;cause=302>;index=1.1;mp=1`(`cdiv_hi_pct` 100) · CDR `diversion{served,target,cause:302,hops:1}`+`announcement{forwarded, completed}` · 회귀 CALL-BASIC·ANN-NOTFOUND·ANN-RINGBACK·ANN-HOLD-MOH pass. 첫 실측이 드러낸 것 = 구 CMP 에 음원이 없으면 183 을 낸 뒤 RELAY_PLAY 가 거절돼 A 가 무음 → **RELAY_PLAY 수락 뒤 183** 으로 순서 고정(§3.1) |
+
+**남은 것(P1 실측)** = 실단말 hold/링백 청취 확인, `S3-SCN-ANN` 게이트 실행(dev 스택은 배포 모드), 착신전환 라이브 실측(`VOLTE-ANN-FORWARDED`). CSP 안내 카운터는 모니터 `MC_SIP_STATS`(ann_started/ann_fallback/ann_active_*)로 본다 — OAM 은 모니터를 수집하지 않으므로 콘솔 노출은 통계 파이프라인 과제로 남긴다.
 안내 없는 구 CMP 와 새 CSP 의 혼용은 `resource.ann` 미광고로 안전하게 폴백한다.

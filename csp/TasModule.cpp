@@ -30,7 +30,6 @@
 #include "RtpMap.h"  // SOCKET_COUNT_PER_MEDIA
 #include "SipMessageLogger.h"
 #include "SipServerSetup.h"
-#include "SipStackThread.h"  // GetCurrentInboundListenerId()
 #include "UserMap.h"
 
 extern void SendDialogEventNotify( const std::string &strWatchedAor, const std::string &strDlgCallId,
@@ -127,31 +126,73 @@ bool CTasModule::ApplyTerminationServices( const char *pszCallId, const char *ps
         return true;
     }
 
-    // **착신전환 302 는 시도로 남기지 않는다.** 발신 단말이 Contact 로 다시 INVITE 를 보내고
-    //   그것이 제 시도로 기록되므로, 여기서도 세면 사용자 한 번의 통화 의도가 시도 2건이 되어
-    //   성공률이 절반으로 깎인다. 3xx 는 망이 정상 응답한 것이기도 하다(ITU-T E.425 — NER 은
-    //   상대 사정을 분자에 넣는다). 전환 뒤 통화의 성패는 그 새 시도가 말한다.
-    if ( clsUser.isCallForward() ) {
-        CSipMessage *pclsInvite = gclsUserAgent.DeleteIncomingCall( pszCallId );
-        if ( pclsInvite ) {
-            CSipMessage *pclsResponse = pclsInvite->CreateResponseWithToTag( SIP_MOVED_TEMPORARILY );
-            if ( pclsResponse ) {
-                CSipFrom clsContact;
-                clsContact.m_clsUri.m_strProtocol = SIP_PROTOCOL;
-                clsContact.m_clsUri.m_strUser = clsUser.m_strForward;
-                // T4: 302 Moved Temporarily 는 수신 listener 의 bind_ip:bind_port 로 Contact 생성.
-                const int iListenerId = GetCurrentInboundListenerId();
-                clsContact.m_clsUri.m_strHost = CspAddressing::GetLocalSipAddress( iListenerId );
-                clsContact.m_clsUri.m_iPort = CspAddressing::GetLocalSipPort( iListenerId, gclsSetup.m_iUdpPort );
-                pclsResponse->m_clsContactList.push_back( clsContact );
-                gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
-                return true;
+    // 착신전환은 여기서 하지 않는다 — 디스패처가 라우팅 앞에서 ResolveDiversion 으로 전환 대상을 정하고 B-leg 를
+    //   그쪽으로 낸다(서버측 전환, TS 24.604). 302 리다이렉트는 쓰지 않는다: 안내·History-Info·시도 1건 통계의
+    //   삽입 지점이 없다.
+    return false;
+}
+
+// ──────────────────────────────────────────────────────────────
+//  착신전환 (TS 24.604 CDIV — 서버측 전환, volte_supplementary_services.md §6A)
+// ──────────────────────────────────────────────────────────────
+
+int CTasModule::ResolveDiversion( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage,
+                                  CdivResult &clsOut ) {
+    clsOut = CdivResult();
+    if ( pszTo == NULL || pszTo[0] == '\0' ) return 0;
+    const std::string strFrom = pszFrom ? pszFrom : "";
+    clsOut.strServed = pszTo;
+    // 수신 INVITE 가 이미 담은 전환(피어·앞선 AS) — 상한 판정에 누적 (RFC 7044 History-Info 의 cause 항목)
+    if ( pclsMessage ) {
+        CSipHeader *pclsHi = pclsMessage->GetHeader( "History-Info" );
+        if ( pclsHi ) clsOut.iHopsBefore = CspDiversion::CountDiversions( pclsHi->m_strValue );
+    }
+    int iHops = clsOut.iHopsBefore;
+    std::string strCur = clsOut.strServed;
+    for ( ;; ) {
+        CspUser clsUser;
+        // 등록 여부와 무관 — CFU 는 미등록 가입자에도 적용(DB 폴백 조회). 가입자가 아니면(피어·그룹·대표번호) 끝
+        if ( !gclsCspUserMap.Select( strCur.c_str(), clsUser ) ) break;
+        if ( !clsUser.isCallForward() ) break;
+        if ( clsUser.isDnd() || clsUser.isReject( strFrom ) ) break;  // 종단 서비스 603 이 우선 — 종전 경로가 처리
+        // 전환 대상 번호 → +E.164 (그 가입자 접속서비스의 다이얼 플랜, sip_service_model.md §2-10)
+        std::string strTarget = clsUser.m_strForward;
+        {
+            ServiceInfo clsSvc = gclsServiceMap.GetForUser( strCur, "volte" );
+            std::string strOut;
+            EDialPlanResult eRes = CspDialPlan::Normalize( strTarget, "", clsSvc.dial_plan, strOut );
+            if ( eRes == DIAL_PLAN_TRANSLATED ) strTarget = strOut;
+            if ( eRes == DIAL_PLAN_INCOMPLETE ) {
+                CLog::Print( LOG_ERROR, "CDIV: %s forward_id='%s' 번역 불가(plan=%s) — 전환하지 않고 원착신으로 진행",
+                             strCur.c_str(), clsUser.m_strForward.c_str(), clsSvc.name.c_str() );
+                break;
             }
         }
-        gclsDispatcher.StopCall( pszCallId, SIP_MOVED_TEMPORARILY );
-        return true;
+        if ( strTarget.empty() || strTarget == strCur ) break;
+        if ( iHops >= gclsSetup.m_iCdivMaxDiversions ) {
+            CLog::Print( LOG_INFO, "CDIV: %s → %s 전환 상한(%d) 초과 (chain %s) → 486", strCur.c_str(),
+                         strTarget.c_str(), gclsSetup.m_iCdivMaxDiversions,
+                         CspDiversion::ChainLabel( clsOut.strServed, clsOut.vecHops ).c_str() );
+            return -SIP_BUSY_HERE;
+        }
+        bool bLoop = ( strTarget == clsOut.strServed );
+        for ( const auto &h : clsOut.vecHops )
+            if ( h.strUser == strTarget ) bLoop = true;
+        if ( bLoop ) {
+            CLog::Print( LOG_INFO, "CDIV: 전환 루프 %s ↺ %s (chain %s) → 486", strCur.c_str(), strTarget.c_str(),
+                         CspDiversion::ChainLabel( clsOut.strServed, clsOut.vecHops ).c_str() );
+            return -SIP_BUSY_HERE;
+        }
+        CspDiversion::Hop h;
+        h.strUser = strTarget;
+        h.iCause = CspDiversion::CAUSE_UNCONDITIONAL;
+        clsOut.vecHops.push_back( h );
+        ++iHops;
+        strCur = strTarget;
     }
-    return false;
+    if ( clsOut.vecHops.empty() ) return 0;
+    clsOut.strTarget = strCur;
+    return 1;
 }
 
 bool CTasModule::TryPickupDial( const char *pszCallId, const char *pszFrom, const char *pszTo, CSipCallRtp *pclsRtp ) {

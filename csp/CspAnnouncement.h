@@ -43,11 +43,13 @@ enum EAnnSituation {
     ANN_SIT_FORBIDDEN,
     ANN_SIT_HOLD,
     ANN_SIT_CALL_WAITING,
+    ANN_SIT_FORWARDED,  // 착신전환 실행 — 발신자에게 전환 안내(TS 24.604, §3.5). 최종 코드 없음(링백처럼 B 의 answer 로
+                        // 끝난다)
 };
 
 /** 프로파일 표의 한 행 — 상황 하나의 동작 */
 struct CAnnAction {
-    std::string strMode = "none";  // none | tone | announce | tone_then_announce | media
+    std::string strMode = "none";  // none | tone | announce | tone_then_announce | announce_then_tone | media
     std::string strTone;           // 신호음 id (sys:busy_kr …)
     int iToneMs = 4000;
     std::string strMedia;  // 안내/음원 id
@@ -99,6 +101,12 @@ public:
      * 이 아닐 때 그 음원으로 바꾼다 */
     bool OnRingback( const char *pszBCallId, const CCallInfo &clsB, CSipCallRtp **ppclsAnswerForA,
                      EAnnSituation eSit = ANN_SIT_RINGBACK );
+    /** 착신전환 안내(§3.5) — 디스패처가 전환 대상으로 B-leg 를 만든 뒤(StartCall 직전) 부른다. 프로파일 `forwarded` 가
+     * none 이 아니면 A 에 183+SDP(CSP answer) + 안내 재생. `announce_then_tone` 이면 안내가 끝난 뒤 신호음(링백)을 B 의
+     * answer/early media 까지 loop, 그 밖의 모드는 안내가 끝나면 `ringback` 규칙(media 면 loop)으로 이어 간다. B 의 SDP
+     * 있는 18x·200 은 OnRingbackEnd 가, B 실패는 OnLegFailed 가(같은 SDP 위에서 실패 안내로 교체), CANCEL 은 OnCallEnd
+     * 가 걷는다. 반환 true = A 에 SDP 를 냈다 */
+    bool OnForwarded( const char *pszACallId, const char *pszBCallId );
     /** 모니터(MC_SIP_STATS 뒤) — ann_started / ann_fallback / ann_active */
     void GetString( class CMonitorString &strBuf ) const;
     /** B 의 SDP 있는 18x·200 — 링백 정지 */
@@ -137,6 +145,10 @@ private:
         int iMaxMs = 0;
         bool bEarlySent = false;  // CSP 가 만든 183 answer 를 냈다
         std::string strCaller, strCallee;
+        std::string strProfile;   // 발신자 프로파일 — 2 단계(전환 안내 뒤 링백) 해석
+        std::string strNextTone;  // announce_then_tone 의 2 단계 신호음 id(비면 ringback 규칙)
+        bool bPhase2 = false;     // 전환 안내 1 단계가 끝나 2 단계 RELAY_PLAY 를 보내는 중 — 그 사이 B 가 응답하면
+                                  // OnRingbackEnd 가 이 표식을 지워 늦게 붙은 재생을 곧바로 걷게 한다
     };
     struct CHoldPlay {
         std::string strRelaySessionId;

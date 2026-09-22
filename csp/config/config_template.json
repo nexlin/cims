@@ -149,7 +149,7 @@
     {
       "key": "tas",
       "title": "TAS (VoLTE 서비스)",
-      "description": "VoLTE B2BUA 및 부가 서비스(당겨받기/착신거부/DND) 정책. 역할 토글은 Roles.TAS.",
+      "description": "VoLTE B2BUA 및 부가 서비스(당겨받기/착신거부/DND/착신전환) 정책. 역할 토글은 Roles.TAS.",
       "fields": [
         {
           "key": "Setup.Sip.StaleCallTimeout",
@@ -190,6 +190,26 @@
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드. 다음 Join INVITE 부터 적용.",
           "help": "한 통화 세션에 동시에 붙는 합법감청(tap) leg 상한 — 초과 Join 은 486 (dispatch_center.md §5.5). 0 = 감청 비활성."
+        },
+        {
+          "key": "Setup.Sip.Cdiv.MaxDiversions",
+          "label": "착신전환 상한(홉)",
+          "type": "int",
+          "default": 5,
+          "min": 1,
+          "max": 10,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 착신부터 적용.",
+          "help": "한 호가 거칠 수 있는 착신전환(forward_id) 횟수 — 수신 INVITE 의 History-Info 가 담은 전환을 포함해 넘으면 486 Busy Here (TS 24.604 §4.5.2.6 전환 루프 방어). 서버측 전환(B2BUA 가 전환 대상으로 B-leg) — volte_supplementary_services.md §6A."
+        },
+        {
+          "key": "Setup.Sip.Cdiv.Notify181",
+          "label": "착신전환 181 통지",
+          "type": "bool",
+          "default": true,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "전환을 수행할 때 발신자에게 181 Call Is Being Forwarded 를 낸다(TS 24.604 §4.5.2.6.1). 전환 안내음은 별도 — 안내 정책 상황 forwarded."
         },
         {
           "key": "Setup.Sip.SessionTimer.Enable",
@@ -298,7 +318,8 @@
                   "congestion",
                   "forbidden",
                   "hold",
-                  "call_waiting"
+                  "call_waiting",
+                  "forwarded"
                 ],
                 "required": true
               },
@@ -311,11 +332,12 @@
                   "tone",
                   "announce",
                   "tone_then_announce",
+                  "announce_then_tone",
                   "media"
                 ],
                 "default": "none",
                 "required": true,
-                "help": "none=응답만 / tone=신호음 tone_ms / announce=안내음 repeat 회 / tone_then_announce=신호음 뒤 안내 / media=임의 음원(hold·ringback — loop)"
+                "help": "none=응답만 / tone=신호음 tone_ms / announce=안내음 repeat 회 / tone_then_announce=신호음 뒤 안내 / announce_then_tone=안내 뒤 신호음을 STOP(응답)까지(forwarded — 전환 안내 뒤 링백) / media=임의 음원(hold·ringback — loop)"
               },
               {
                 "key": "tone",
