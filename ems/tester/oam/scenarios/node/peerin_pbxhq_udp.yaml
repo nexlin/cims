@@ -1,0 +1,13 @@
+# 노드별 착신 — 피어 pbx_hq(pbx) → 접속점 udp 가입자. 피어링 접속점 수신 → B2BUA → 가입자 착신, 피어가 종료.
+id: NODE-PEERIN-PBXHQ-UDP
+title: 피어 착신 pbx_hq → udp
+tags: [node, trunk, pbx, udp]
+roles:
+  peer:   { pool: pbx_hq }
+  callee: { pool: volte_ue }
+flow:
+  - { step: register,   who: [callee], expect: { code: 200 } }
+  - { step: invite,     from: peer, to: callee, media: { audio: pcma } }
+  - { step: answer,     who: [callee], after_ms: 1000, expect: { code: 200, srd_ms: { p95: 2000 } } }
+  - { step: media_hold, seconds: 3, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: peer, expect: { sdd_ms: { p95: 300 } } }

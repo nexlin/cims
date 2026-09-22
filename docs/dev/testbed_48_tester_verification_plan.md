@@ -65,7 +65,7 @@ TRUNK-PBX-REGISTER(동봉본)는 고정 IP 풀 `pbx_hq` 를 참조해 tb48 에�
 2. **creds 보강**(`cims-tester creds-from-db`, DataDir `scenarios/creds/`): ptt.jsonl 에 g001 밖 신원 추가(청취자·비멤버 후보 — `--ptt-group` 없이 뽑아 `group` 비움 또는 다른 그룹), inband/real_ue 용 volte 신원 구간(offset 겹침 금지), g004 멤버(항목 5 뒤).
 3. **tb48 v3 토폴로지**: D 표의 풀 8개 + `hosts.h48.ssh`(키 배치 뒤) 를 소스 관리본에 넣고 `PUT /tester/topologies/2` → `compile-check` 66종 전부 ok 확인(REGISTER 동봉본 1건은 예상 fail). `docs/dev/testbed_48_tester_topology.yaml` 은 소스 동봉본과 같은 내용이므로 **동봉본만 남기고 삭제**(중복 정본 방지).
 4. **대상 측 설정**(dep34 overlay·collection, runbook 절차): TLS 피어 `remote_nodes.tls_verify` 는 시드가 넣는다 — CSP 가 워커 피어 인증서를 검증하려면 사이트 CA 가 `tls_ca_path` 에 있어야 하므로 워커 피어 인증서는 **같은 사이트 CA 로 발급**(`service-cert.sh`). CMP RTP 대역은 §5 결정 2(20000~29999) 대로 overlay.
-5. **환경변수**: agent#13 env 에 `TESTER_SSH_KEY`(+ 기존 `PBX_HA1`·`TESTER_DB_*`) — agent 가 자식에 `os.environ` 을 그대로 물리므로 agent 재기동 뒤 dep35 restart.
+5. **비밀 등록**: dep35 배포 설정 `Tester.Secrets` 에 `PBX_HA1`(CSP routes `tb48-r-pbx_reg.auth_ha1` 과 같은 값)·`TESTER_DB_USER/PASS`·`TESTER_SSH_KEY`(PEM 본문) 를 `PUT /deployments/35/config` 로 등록 → restart(또는 SIGUSR1). 환경변수는 폴백일 뿐 agent 재기동에 의존하지 않는다.
 
 ### 1단계 — 기능 회귀, 현 풀 (하루)
 
@@ -74,6 +74,7 @@ TRUNK-PBX-REGISTER(동봉본)는 고정 IP 풀 `pbx_hq` 를 참조해 tb48 에�
 | 묶음 | 시나리오 | 비고 |
 |---|---|---|
 | 1-1 등록·기본 호 | A 재실측(VOLTE-CALL-BASIC·NATIONAL·INTL·TLS-REGISTER·VOIP-REGISTER) + VOLTE-REGISTER·CALL-SIGNALING·ONEWAY-MEDIA·VIDEO·UE-EARLY-MEDIA·SUBSCRIBE-BAD-EVENT | VIDEO 는 UE 간 m=video 협상(`video_pct`) |
+| 1-1a 노드별 착/발신 | `NODE-CALL-{udp,tcp,tls}-{udp,tcp,tls}` 9종(접속점 access-udp/tcp/tls 3×3 매트릭스) · `NODE-CALL-VOIP-VOIP/VOIP-UDP/UDP-VOIP` · `NODE-PEERIN-<peer>-UDP`/`NODE-PEEROUT-UDP-<peer>`(pbx_hq·pbx_reg·mgcf_pstn·peer_kt 착/발신) · `NODE-PEERIN-PBXHQ-{TCP,TLS}`/`NODE-PEEROUT-{TCP,TLS}-PBXHQ` — 동봉 `scenarios/node/` 24종 | tcp 축 = 토폴로지 풀 `volte_ue_tcp`(listener tcp, volte.jsonl offset 30~33 — `volte_ue` 는 count 30). pbx_reg 2종은 dep35 배포 설정 `Tester.Secrets` 의 `PBX_HA1` 필요. 시나리오 끝에 `deregister` 를 두지 말 것 — 워커 `endRun` 이 풀 단말 전부를 `Stop(5)` 로 동기 해제하는 동안 제어 HTTP 가 막혀(`m_mtx`) 컨트롤러 조회 시간초과 → verdict error(워커 과제) |
 | 1-2 피어 | A 재실측(PBX·MGCF·IBCF 8종) + TRUNK-IBCF-OUTBOUND·INBOUND·ACL-DENY·MGCF-OUTBOUND·INBOUND·EARLY-MEDIA·PBX-INBOUND·DTMF·HOLD-RESUME·TRANSFER | `q850_rx_pct`·`codes.503`·`early_rtp_pct`·`prack` 이 §12 재실측 지표 |
 | 1-3 PTT·MCData | PTT-GROUP-CALL-BASIC·FLOOR-HANDOVER·AFFILIATION-CHURN · MCDATA-SDS-1TO1·GROUP·GROUP-MEDIA·FD-GROUP·FD-1TO1 | GROUP-MEDIA 는 dep34 `Setup.McDataMedia.Enable` 확인 |
 | 1-4 대표번호 | VOLTE-FA-PARALLEL·OVERFLOW·SEQUENTIAL·DIALOG-FORK·PICKUP | 전화 그룹 픽스처 필요 → 3단계 verify 다리로 돌리는 편이 정확(픽스처 자동·복원). 단독은 수동 시드 |

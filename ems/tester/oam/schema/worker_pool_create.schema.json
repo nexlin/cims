@@ -444,7 +444,7 @@
     },
     "TrunkRegister": {
       "additionalProperties": false,
-      "description": "워커에 내려가는 트렁크 REGISTER 계정 — 컨트롤러가 환경변수(ha1_env/password_env)를 풀어 값으로 채운다.",
+      "description": "워커에 내려가는 트렁크 REGISTER 계정 — 컨트롤러가 비밀 이름(ha1_env/password_env)을 Tester.Secrets → 환경변수 순으로 풀어 값으로 채운다.",
       "properties": {
         "expires": {
           "default": 3600,

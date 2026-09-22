@@ -84,10 +84,10 @@ def db_identities(pool_name: str, src: dict, topology: Topology, transport: str)
     table = str(src.get('table') or '')
     if table not in DB_TABLES:
         raise CompileError(f'pool {pool_name}: source.table 은 {list(DB_TABLES)} 중 하나')
-    user = os.environ.get(node.db.user_env or '', '').strip() if node.db.user_env else ''
-    pw = os.environ.get(node.db.password_env or '', '') if node.db.password_env else ''
+    user = store.secret(node.db.user_env)
+    pw = store.secret(node.db.password_env)
     if not user:
-        raise CompileError(f'pool {pool_name}: DB 자격이 없다 — 노드 {nid} 의 db.user_env/password_env 가 가리키는 환경변수를 컨트롤러에 준다')
+        raise CompileError(f'pool {pool_name}: DB 자격이 없다 — 노드 {nid} 의 db.user_env/password_env 이름을 배포 설정 Tester.Secrets(또는 환경변수)에 둔다')
     try:
         import pymysql
     except ImportError:
@@ -301,15 +301,15 @@ def phases(scenario: Scenario) -> Dict[str, List[int]]:
 
 
 def trunk_register_for(pool_name: str, peer, realm_default: Optional[str]) -> Optional[TrunkRegister]:
-    """피어 풀의 register(트렁크 계정) → 워커용 값 — 비밀은 환경변수에서 푼다(없으면 컴파일 오류, 조용히 빈 값으로 보내지 않는다)."""
+    """피어 풀의 register(트렁크 계정) → 워커용 값 — 비밀은 store.secret(배포 설정 Tester.Secrets → 환경변수)로 푼다(없으면 컴파일 오류, 조용히 빈 값으로 보내지 않는다)."""
     reg = getattr(peer, 'trunk_register', None)
     if reg is None:
         return None
-    ha1 = os.environ.get(reg.ha1_env, '').strip() if reg.ha1_env else ''
-    pw = os.environ.get(reg.password_env, '').strip() if reg.password_env else ''
+    ha1 = store.secret(reg.ha1_env)
+    pw = store.secret(reg.password_env)
     if not ha1 and not pw:
         env = reg.ha1_env or reg.password_env
-        raise CompileError(f'pool {pool_name}: 트렁크 REGISTER 비밀이 없다 — 환경변수 {env} 에 H(A1)/비밀번호를 둔다')
+        raise CompileError(f'pool {pool_name}: 트렁크 REGISTER 비밀이 없다 — 배포 설정 Tester.Secrets 에 이름 {env} 로 H(A1)/비밀번호를 등록한다(또는 같은 이름의 환경변수)')
     return TrunkRegister(user=reg.user, realm=reg.realm or realm_default, ha1=ha1 or None, password=pw or None, expires=reg.expires)
 
 

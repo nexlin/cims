@@ -7,6 +7,7 @@ epilogue), 절차표, 대상 시드 예정 컬렉션, 필요한 환경변수, �
 from __future__ import annotations
 
 import math
+import os
 from typing import Dict, List, Optional
 
 from services import tester_compile, tester_fixtures, tester_target, tester_workers
@@ -287,6 +288,12 @@ def build_plan(scenario: Scenario, topology: Topology, topology_doc: dict, profi
             reg = topology.pools[pn].trunk_register
             if reg is not None:
                 env.append({'env': reg.ha1_env or reg.password_env, 'for': f'{pn}: 트렁크 REGISTER {reg.user} 비밀'})
+    # 비밀 이름의 출처 — 배포 설정 Tester.Secrets(정본) / 환경변수(폴백) / 없음
+    from services import tester_store as _ts
+    known = set(_ts.secret_names())
+    for row in env:
+        names = [n.strip() for n in str(row.get('env') or '').split('·') if n.strip() and not n.strip().startswith('(')]
+        row['source'] = ', '.join(('secrets' if n in known else 'env' if os.environ.get(n) else 'missing') for n in names) or 'missing'
     # Little 검산 — 역할(UE·피어 모두)마다 rate × SDT ≤ 신원. 단발은 동시 인스턴스가 instances 를 넘지 않는다
     #   그룹 세션(group_call)은 인스턴스 하나가 MCPTT 그룹 하나를 잡는다 — 자원은 신원이 아니라 쓸 수 있는 그룹 수
     gs = plan.get('group_session')

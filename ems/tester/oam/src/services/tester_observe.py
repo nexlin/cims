@@ -21,6 +21,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 from services import tester_target
+from services import tester_store
 from services.tester_bus import publish
 from services.tester_models import Host, Scenario, Topology
 
@@ -270,8 +271,9 @@ _LOG_ERR_RE = r'\bERROR\b|\bFATAL\b|\[ERROR\]|\[FATAL\]|\bLOG_ERROR\b'
 
 
 def ssh_argv(host: Host, remote_cmd: str) -> List[str]:
-    """`ssh -i <key_env 파일> -p <port> -o BatchMode=yes … user@ip <cmd>` — 개인키 경로는 환경변수에서(레코드에 비밀 없음)."""
-    key = os.environ.get(host.ssh.key_env or '', '').strip() if host.ssh else ''
+    """`ssh -i <key_env 파일> -p <port> -o BatchMode=yes … user@ip <cmd>` — 개인키는 tester_store.secret_file(key_env)(배포 설정
+    Tester.Secrets 의 PEM 본문 또는 경로 → 환경변수 경로 폴백; 레코드에 비밀 없음)."""
+    key = tester_store.secret_file(host.ssh.key_env) if host.ssh else ''
     argv = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'LogLevel=ERROR',
             '-p', str(host.ssh.port)]
     if key:
@@ -282,8 +284,8 @@ def ssh_argv(host: Host, remote_cmd: str) -> List[str]:
 
 def ssh_run(host: Host, remote_cmd: str, timeout: float = 12) -> str:
     """기본 실행기 — 실패는 예외(호출자가 note 로 남긴다)."""
-    if host.ssh and host.ssh.key_env and not os.environ.get(host.ssh.key_env, '').strip():
-        raise RuntimeError(f'환경변수 {host.ssh.key_env} 에 SSH 개인키 경로가 없다')
+    if host.ssh and host.ssh.key_env and not tester_store.secret(host.ssh.key_env):
+        raise RuntimeError(f'SSH 개인키가 없다 — 배포 설정 Tester.Secrets 에 이름 {host.ssh.key_env} 로 PEM 본문/경로를 두거나 같은 이름의 환경변수에 경로를 둔다')
     p = subprocess.run(ssh_argv(host, remote_cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
     if p.returncode != 0:
         raise RuntimeError(f'ssh {host.ssh.user}@{host.ip} rc={p.returncode}: {(p.stderr or p.stdout).strip()[-200:]}')

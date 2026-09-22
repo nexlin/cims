@@ -160,7 +160,7 @@
       "additionalProperties": false,
       "properties": {
         "key_env": {
-          "description": "SSH 개인키 경로를 담은 환경변수 이름 — 비밀은 레코드에 두지 않는다",
+          "description": "SSH 개인키의 비밀 이름 — 배포 설정 Tester.Secrets 의 항목(PEM 본문 또는 경로), 없으면 같은 이름의 환경변수(경로). 비밀은 레코드에 두지 않는다",
           "title": "Key Env",
           "type": "string"
         },
@@ -288,6 +288,7 @@
             }
           ],
           "default": null,
+          "description": "DB 비밀번호의 비밀 이름 — 같은 규칙",
           "title": "Password Env"
         },
         "port": {
@@ -307,6 +308,7 @@
             }
           ],
           "default": null,
+          "description": "DB 사용자의 비밀 이름 — 배포 설정 Tester.Secrets, 없으면 같은 이름의 환경변수",
           "title": "User Env"
         }
       },
@@ -405,7 +407,7 @@
             }
           ],
           "default": null,
-          "description": "토큰을 담은 환경변수 이름(기본 TESTER_OAM_TOKEN)",
+          "description": "대상 OAM 토큰의 비밀 이름(기본 TESTER_OAM_TOKEN) — 배포 설정 Tester.Secrets, 없으면 같은 이름의 환경변수",
           "title": "Token Env"
         }
       },
@@ -844,7 +846,7 @@
             }
           ],
           "default": null,
-          "description": "H(A1) 을 담은 환경변수 — 비밀은 YAML 에 두지 않는다",
+          "description": "H(A1) 의 비밀 이름 — 배포 설정 Tester.Secrets 의 항목, 없으면 같은 이름의 환경변수. 비밀은 YAML 에 두지 않는다",
           "title": "Ha1 Env"
         },
         "password_env": {
@@ -857,7 +859,7 @@
             }
           ],
           "default": null,
-          "description": "평문 비밀번호 환경변수 — ha1_env 가 없을 때",
+          "description": "평문 비밀번호의 비밀 이름 — ha1_env 가 없을 때, 같은 규칙",
           "title": "Password Env"
         },
         "realm": {

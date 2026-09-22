@@ -747,3 +747,52 @@ class DriverPeer(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class SecretsResolutionTest(unittest.TestCase):
+    """비밀 이름 → 값: 배포 설정 Tester.Secrets 가 정본, 없으면 같은 이름의 환경변수."""
+
+    def test_secret_prefers_config_then_env(self):
+        from services import tester_store as TS
+        saved = dict(TS._config)
+        TS._config = {'Tester': {'Secrets': [{'name': 'UT_SEC_A', 'value': ' from-config '}]}}
+        os.environ['UT_SEC_A'] = 'from-env'
+        os.environ['UT_SEC_B'] = 'env-only'
+        try:
+            self.assertEqual(TS.secret('UT_SEC_A'), 'from-config')
+            self.assertEqual(TS.secret('UT_SEC_B'), 'env-only')
+            self.assertEqual(TS.secret('UT_SEC_NONE'), '')
+            self.assertEqual(TS.secret(None), '')
+            self.assertEqual(TS.secret_names(), ['UT_SEC_A'])
+        finally:
+            TS._config = saved
+            os.environ.pop('UT_SEC_A', None); os.environ.pop('UT_SEC_B', None)
+
+    def test_resolve_token_uses_secrets(self):
+        from services import tester_store as TS, tester_target as TT
+        saved = dict(TS._config)
+        TS._config = {'Tester': {'Secrets': [{'name': 'UT_TOK_S', 'value': 'secret-token'}]}}
+        class O:
+            token_env = 'UT_TOK_S'
+        try:
+            self.assertEqual(TT.resolve_token(O(), 'req-token'), 'secret-token')
+        finally:
+            TS._config = saved
+
+    def test_secret_file_materializes_pem(self):
+        from services import tester_store as TS
+        saved = dict(TS._config); saved_root = TS._data_dir_cache
+        d = tempfile.mkdtemp()
+        TS._config = {'Tester': {'DataDir': d, 'Secrets': [{'name': 'UT_KEY', 'value': '-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----'},
+                                                            {'name': 'UT_KEY_PATH', 'value': '/tmp/some/key'}]}}
+        TS._data_dir_cache = None
+        try:
+            p = TS.secret_file('UT_KEY')
+            self.assertEqual(p, os.path.join(d, 'secrets', 'UT_KEY'))
+            self.assertEqual(oct(os.stat(p).st_mode & 0o777), '0o600')
+            self.assertTrue(open(p).read().endswith('KEY-----\n'))
+            self.assertEqual(TS.secret_file('UT_KEY'), p)          # 같은 내용이면 다시 쓰지 않는다
+            self.assertEqual(TS.secret_file('UT_KEY_PATH'), '/tmp/some/key')
+        finally:
+            TS._config = saved; TS._data_dir_cache = saved_root
+            shutil.rmtree(d, ignore_errors=True)

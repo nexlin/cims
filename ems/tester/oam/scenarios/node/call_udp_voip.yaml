@@ -1,0 +1,13 @@
+# 노드별 착/발신 — 발신 udp(volte_ue) → 착신 voip(voip_ue). 접속점(local_node)별 등록·INVITE·미디어·BYE 정상 경로.
+id: NODE-CALL-UDP-VOIP
+title: 노드별 호 udp → voip
+tags: [node, volte, udp, voip]
+roles:
+  caller: { pool: volte_ue }
+  callee: { pool: voip_ue }
+flow:
+  - { step: register,   who: [caller, callee], expect: { code: 200, rrd_ms: { p95: 1500 } } }
+  - { step: invite,     from: caller, to: callee, media: { audio: amr-wb } }
+  - { step: answer,     who: [callee], after_ms: 1000, expect: { code: 200, srd_ms: { p95: 2000 } } }
+  - { step: media_hold, seconds: 3, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }

@@ -56,7 +56,7 @@ _ID_RE = r'^[a-z][a-z0-9_]*$'
 
 class HostSsh(_Strict):
     user: str
-    key_env: str = Field(description='SSH 개인키 경로를 담은 환경변수 이름 — 비밀은 레코드에 두지 않는다')
+    key_env: str = Field(description='SSH 개인키의 비밀 이름 — 배포 설정 Tester.Secrets 의 항목(PEM 본문 또는 경로), 없으면 같은 이름의 환경변수(경로). 비밀은 레코드에 두지 않는다')
     port: int = Field(default=22, ge=1, le=65535)
 
 
@@ -193,7 +193,7 @@ class NodeOam(_Strict):
     """CIMS 전용 — 통계·알람 관측 + 컬렉션 시드. url = https://<host.ip>:<port>."""
     port: int = Field(default=4419, ge=1, le=65535)
     tls: bool = True
-    token_env: Optional[str] = Field(default=None, description='토큰을 담은 환경변수 이름(기본 TESTER_OAM_TOKEN)')
+    token_env: Optional[str] = Field(default=None, description='대상 OAM 토큰의 비밀 이름(기본 TESTER_OAM_TOKEN) — 배포 설정 Tester.Secrets, 없으면 같은 이름의 환경변수')
     csp_deployment_id: Optional[int] = Field(default=None, ge=1, description='대상 CSP 의 배포 id — 비면 배포 목록에서 패키지 csp 를 찾는다')
     observe: List[ObserveSource] = Field(default_factory=list)
 
@@ -201,8 +201,8 @@ class NodeOam(_Strict):
 class NodeDb(_Strict):
     port: int = Field(default=3306, ge=1, le=65535)
     name: str = 'cims'
-    user_env: Optional[str] = None
-    password_env: Optional[str] = None
+    user_env: Optional[str] = Field(default=None, description='DB 사용자의 비밀 이름 — 배포 설정 Tester.Secrets, 없으면 같은 이름의 환경변수')
+    password_env: Optional[str] = Field(default=None, description='DB 비밀번호의 비밀 이름 — 같은 규칙')
 
 
 class TargetNode(_Strict):
@@ -344,8 +344,8 @@ class PeerRegister(_Strict):
     """pbx 트렁크 REGISTER(SIPconnect 2.0 §8 등록 모드) — 계정 하나가 DID 범위를 대표. 피어가 가리킨 수신점(같은 주소의 같은
     transport access 수신점)으로 Digest 등록."""
     user: str
-    ha1_env: Optional[str] = Field(default=None, description='H(A1) 을 담은 환경변수 — 비밀은 YAML 에 두지 않는다')
-    password_env: Optional[str] = Field(default=None, description='평문 비밀번호 환경변수 — ha1_env 가 없을 때')
+    ha1_env: Optional[str] = Field(default=None, description='H(A1) 의 비밀 이름 — 배포 설정 Tester.Secrets 의 항목, 없으면 같은 이름의 환경변수. 비밀은 YAML 에 두지 않는다')
+    password_env: Optional[str] = Field(default=None, description='평문 비밀번호의 비밀 이름 — ha1_env 가 없을 때, 같은 규칙')
     realm: Optional[str] = Field(default=None, description='Digest realm·To/From host — 비면 접속점 기본 도메인')
     expires: int = Field(default=3600, ge=60)
 
@@ -1512,7 +1512,7 @@ class TargetCsc(_Strict):
 
 
 class TrunkRegister(_Strict):
-    """워커에 내려가는 트렁크 REGISTER 계정 — 컨트롤러가 환경변수(ha1_env/password_env)를 풀어 값으로 채운다."""
+    """워커에 내려가는 트렁크 REGISTER 계정 — 컨트롤러가 비밀 이름(ha1_env/password_env)을 Tester.Secrets → 환경변수 순으로 풀어 값으로 채운다."""
     user: str
     realm: Optional[str] = None
     ha1: Optional[str] = None

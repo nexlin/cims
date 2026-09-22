@@ -13,6 +13,7 @@ run 색인(관리 store) + run 본체(Tester.DataDir).
 from __future__ import annotations
 
 import glob
+import re
 import os
 import shutil
 import time
@@ -40,6 +41,43 @@ def init(component_root: str, config: dict) -> None:
     os.makedirs(runs_dir(), exist_ok=True)
     os.makedirs(user_scenarios_dir(), exist_ok=True)
     _migrate_topologies()
+
+
+def secret(name: Optional[str]) -> str:
+    """비밀 이름 → 값. 정본은 배포 설정 `Tester.Secrets`(object_list [{name, value}] — 콘솔 배포설정/`PUT /deployments/{id}/config`,
+    SIGUSR1 재적재), 없으면 같은 이름의 컨트롤러 환경변수(전환기·소스 트리 실행). 토폴로지에는 이름만 있고 값은 없다."""
+    if not name:
+        return ''
+    for row in ((_config.get('Tester') or {}).get('Secrets') or []):
+        if isinstance(row, dict) and str(row.get('name') or '') == name:
+            return str(row.get('value') or '').strip()
+    return os.environ.get(name, '').strip()
+
+
+def secret_names() -> List[str]:
+    return [str(r.get('name')) for r in ((_config.get('Tester') or {}).get('Secrets') or []) if isinstance(r, dict) and r.get('name')]
+
+
+def secret_file(name: Optional[str]) -> str:
+    """파일 경로가 필요한 비밀(SSH 개인키) — 값이 PEM 본문이면 `DataDir/secrets/<name>`(0600) 에 실체화한 경로, 아니면 값을 경로로 본다."""
+    v = secret(name)
+    if not v:
+        return ''
+    if not v.startswith('-----BEGIN'):
+        return v
+    d = os.path.join(data_dir(), 'secrets')
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    path = os.path.join(d, re.sub(r'[^A-Za-z0-9_.-]', '_', str(name)))
+    body = v if v.endswith('\n') else v + '\n'
+    try:
+        if os.path.isfile(path) and open(path).read() == body:
+            return path
+    except OSError:
+        pass
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w') as f:
+        f.write(body)
+    return path
 
 
 def _mtime(p: str) -> float:

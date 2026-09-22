@@ -103,6 +103,39 @@
           "type": "string",
           "default": "",
           "help": "미디어 샘플 등록(콘솔 시험>미디어 샘플)이 부르는 cims-sample-conv. 비면 패키지 native/cims-sample-conv → 개발 트리 build/bin → PATH 순서(test_instrument.md §4)."
+        },
+        {
+          "key": "Tester.Secrets",
+          "label": "비밀 등록 (토폴로지가 이름으로 참조)",
+          "type": "object_list",
+          "group": "secrets",
+          "default": [],
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재적재 — 다음 run 컴파일부터 반영.",
+          "help": "토폴로지에는 비밀 값 대신 이름만 둔다(피어 register.ha1_env/password_env · db.user_env/password_env · oam.token_env · hosts.*.ssh.key_env). 여기 같은 이름으로 값을 등록하면 컨트롤러가 run 컴파일 때 푼다. 없으면 같은 이름의 컨트롤러 환경변수를 본다(전환기). SSH 개인키는 PEM 본문 그대로(DataDir/secrets/<이름> 0600 으로 실체화) 또는 경로. 시뮬레이터 자격이라 관리 store 평문 보관·콘솔 평문 표시를 허용한다(가리지 않는다).",
+          "item_schema": {
+            "fields": [
+              {
+                "key": "name",
+                "label": "이름",
+                "type": "string",
+                "required": true,
+                "help": "예: PBX_HA1, TESTER_DB_USER, TESTER_DB_PASS, TESTER_OAM_TOKEN, TESTER_SSH_KEY"
+              },
+              {
+                "key": "value",
+                "label": "값",
+                "type": "string",
+                "required": true,
+                "help": "평문으로 표시·저장 — 시뮬레이터 자격(가림 없음)"
+              },
+              {
+                "key": "note",
+                "label": "메모",
+                "type": "string"
+              }
+            ]
+          }
         }
       ],
       "scope": "service"

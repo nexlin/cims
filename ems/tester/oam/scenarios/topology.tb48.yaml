@@ -112,7 +112,7 @@ pools:
     source:
       creds: creds/volte.jsonl
       offset: 0
-      count: 34                 # 35~40 번째 신원은 volte_ue_cw(통화중대기 단말) 풀
+      count: 30                 # 31~34 번째 신원은 volte_ue_tcp, 35~40 번째는 volte_ue_cw(통화중대기 단말) 풀
     transport: udp
     srtp: 'off'
     register_expires: 3600
@@ -121,6 +121,20 @@ pools:
     tls_verify: false
     tls_client_cert: false
     msrp: false
+  volte_ue_tcp:                # TCP 접속점(access-tcp) 가입자 — 노드별 착/발신 매트릭스(NODE-CALL-*)의 tcp 축
+    worker: w1
+    kind: ue
+    access: csp
+    listener: tcp
+    source:
+      creds: creds/volte.jsonl
+      offset: 30
+      count: 4
+    transport: tcp
+    srtp: 'off'
+    register_expires: 3600
+    prack: false
+    dtmf: rfc4733
   volte_ue_cw:                 # 통화중대기 단말(TS 24.615) — 통화 중 두 번째 착신을 180 으로 보류(VOLTE-ANN-CALL-WAITING 의 착신)
     worker: w1
     kind: ue

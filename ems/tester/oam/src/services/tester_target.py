@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+from services import tester_store
 import ssl
 import urllib.error
 import urllib.request
@@ -94,13 +95,13 @@ class OamClient:
 
 
 def resolve_token(oam, requester_token: Optional[str] = None) -> str:
-    """대상 OAM 토큰 — ① 환경변수(`oam.token_env`, 기본 TESTER_OAM_TOKEN: 독립 형태처럼 대상 OAM 이 남의 것일 때)
+    """대상 OAM 토큰 — ① 비밀 이름 `oam.token_env`(기본 TESTER_OAM_TOKEN)를 배포 설정 Tester.Secrets → 환경변수 순으로 풀어(독립 형태처럼 대상 OAM 이 남의 것일 때)
     ② 없으면 **이 요청을 낸 운영자의 토큰**(동거 형태 — 대상 OAM 이 자기 base 라 그 토큰이 그대로 통한다. 시드·복원이 그 운영자의
     권한·감사 신원으로 수행된다). 요청자 토큰은 메모리에서만 쓰고 run 기록에 남기지 않는다."""
     env = getattr(oam, 'token_env', None) or 'TESTER_OAM_TOKEN'
-    tok = (os.environ.get(env) or '').strip() or (requester_token or '').strip()
+    tok = tester_store.secret(env) or (requester_token or '').strip()
     if not tok:
-        raise TargetError(f'target.oam 토큰이 없다 — 환경변수 {env} 에 대상 OAM 로그인 토큰을 두거나(독립 형태), '
+        raise TargetError(f'target.oam 토큰이 없다 — 배포 설정 Tester.Secrets(또는 환경변수) 이름 {env} 에 대상 OAM 로그인 토큰을 두거나(독립 형태), '
                           f'콘솔/CLI 로그인 토큰으로 요청한다(동거 형태)')
     return tok
 
