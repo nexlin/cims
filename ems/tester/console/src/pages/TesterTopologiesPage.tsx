@@ -1,6 +1,6 @@
 // 시험 > 토폴로지 — 왼쪽 레일 한 열에 탭 둘([토폴로지] 레코드 목록: 검색·kind 칩·행 = 이름/대상/워커/갱신, [새 토폴로지…] 프리셋 선택 /
 // [팔레트]: 캔버스가 포털로 그린다 — 레코드를 고르면 팔레트 탭으로 넘어간다) + 툴바(이름 · 대상 배지 · 검증 배지(누르면 속성 패널의 검증 목록) ·
-// 마지막 연결 검사 배지(누르면 드로어) · 실행취소/다시실행 · [⋯] 자동 배치/되돌리기/레코드 JSON/삭제 · 연결 검사 · 저장/생성) + 캔버스 편집기(TopologyCanvas,
+// 마지막 연결 검사 배지(누르면 드로어) · 삭제 · 실행취소/다시실행 · [⋯] 자동 배치/되돌리기/레코드 JSON · 연결 검사 · 저장/생성) + 캔버스 편집기(TopologyCanvas,
 // 레코드마다 key 로 다시 만들어 열 때 화면 맞춤). 레코드 JSON 은 Modal(940×76vh) 안의 TopologyJsonEditor.
 // 레코드는 컨트롤러 `topology` 스키마(호스트›워커·대상 노드›풀)로 저장 전 검증하고, 카드 위치·영역 크기는 레코드 layout 에 같이 저장한다.
 // 문서 이력은 useDocHistory(Ctrl+Z/Y) — 레코드 전환·저장 뒤 비운다. 변경이 있으면 전환·새로 만들기 전에 묻고, 탭 닫기도 경고한다.
@@ -10,7 +10,7 @@ import { Button } from '@core/components/ui/button'
 import { Badge } from '@core/components/ui/badge'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@core/components/ui/select'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@core/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@core/components/ui/dropdown-menu'
 import Modal from '@core/components/Modal'
 import { EmptyState } from '@core/components/custom/empty-state'
 import { useToast } from '@core/components/Toast'
@@ -138,6 +138,7 @@ export default function TesterTopologiesPage() {
         {error && <span className="text-sm text-destructive">{error}</span>}
         {serverErrs.map((e, i) => <span key={i} className="text-xs text-destructive">{e}</span>)}
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          {current && canDelete && <Button variant="outline" size="sm" className="text-destructive" onClick={del} title="이 토폴로지를 지웁니다(확인 창) — 이 토폴로지로 돌린 run 색인은 남습니다"><Trash2 size={13} /> 삭제</Button>}
           <Button variant="ghost" size="iconSm" onClick={H.undo} disabled={!canWrite || !H.canUndo} title="실행취소 (Ctrl+Z)"><Undo2 size={13} /></Button>
           <Button variant="ghost" size="iconSm" onClick={H.redo} disabled={!canWrite || !H.canRedo} title="다시실행 (Ctrl+Y)"><Redo2 size={13} /></Button>
           <DropdownMenu>
@@ -146,7 +147,6 @@ export default function TesterTopologiesPage() {
               <DropdownMenuItem disabled={!doc || !canWrite} onSelect={auto}><LayoutGrid size={13} /> 자동 배치</DropdownMenuItem>
               <DropdownMenuItem disabled={!dirty} onSelect={revert}><RotateCcw size={13} /> 저장 시점으로 되돌리기</DropdownMenuItem>
               <DropdownMenuItem disabled={!doc} onSelect={() => setJsonOpen(true)}><Braces size={13} /> 레코드 JSON…</DropdownMenuItem>
-              {current && canDelete && <><DropdownMenuSeparator /><DropdownMenuItem className="text-destructive" onSelect={del}><Trash2 size={13} /> 토폴로지 삭제</DropdownMenuItem></>}
             </DropdownMenuContent>
           </DropdownMenu>
           <Button variant="outline" size="sm" onClick={runCheck} disabled={!!checkReason || checking || !canWrite} title={checkReason ?? '저장된 레코드를 수신점 단위로 확인합니다'}><PlugZap size={13} /> {checking ? '검사 중…' : '연결 검사'}</Button>

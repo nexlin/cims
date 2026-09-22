@@ -476,13 +476,14 @@ const TopologyCanvas = forwardRef<TopologyCanvasHandle, {
             {discovered === null ? <div className="text-[10px] text-muted-foreground">읽는 중…</div>
               : discovered.items.length === 0 ? <div className="text-[10px] leading-relaxed text-muted-foreground">{discovered.note ?? 'base OAM 에 배포된 cims-tester-worker 가 없습니다'}</div>
               : discovered.items.map(w => {
-                const has = !!w.ip && doc.workers.some(x => doc.hosts[x.host]?.ip === w.ip && (x.port ?? 7100) === w.port)
+                const ips = [...new Set([...(w.ips ?? []), ...(w.ip ? [w.ip] : [])])]
+                const has = ips.length > 0 && doc.workers.some(x => ips.includes(doc.hosts[x.host]?.ip ?? '') && (x.port ?? 7100) === w.port)
                 return (
-                  <button key={`${w.deployment_id}`} disabled={!canWrite || has || !w.ip} onClick={() => addDiscovered(w)}
-                          title={has ? '이미 토폴로지에 있습니다' : !w.ip ? 'agent 주소를 모릅니다' : '누르면 호스트(없으면 생성)와 워커를 넣습니다'}
+                  <button key={`${w.deployment_id}`} disabled={!canWrite || has || !ips.length} onClick={() => addDiscovered(w)}
+                          title={has ? '이미 토폴로지에 있습니다' : !ips.length ? 'agent 주소를 모릅니다' : `누르면 호스트(주소 ${ips.join(' / ')} 중 하나를 쓰는 호스트, 없으면 생성)와 워커를 넣습니다`}
                           className="mb-1 flex w-full items-center gap-2 rounded-sm border border-border bg-muted px-2 py-1.5 text-left enabled:hover:border-primary disabled:opacity-60">
                     <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${w.live_state === 'up' ? 'bg-success' : 'bg-muted-foreground'}`} />
-                    <span className="min-w-0"><b className="block truncate">{w.name}</b><span className="block truncate font-mono text-[10px] text-muted-foreground">{w.ip ?? '?'}:{w.port} · v{w.version ?? '?'}{has ? ' · 있음' : ''}</span></span>
+                    <span className="min-w-0"><b className="block truncate">{w.name}</b><span className="block truncate font-mono text-[10px] text-muted-foreground" title={ips.join(' / ')}>{ips.join(' / ') || '?'} :{w.port} · v{w.version ?? '?'}{has ? ' · 있음' : ''}</span></span>
                   </button>
                 )
               })}

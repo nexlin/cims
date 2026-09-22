@@ -208,14 +208,19 @@ export function newWorker(d: TopologyDoc, host: string, pos: Pos): string {
   d.workers.push({ name, host, port: 7100 + d.workers.filter(w => w.host === host).length, cpus: 8 }); ensureLayout(d).items[name] = relPos(d, host, pos); return name
 }
 /** 발견된 워커(base OAM 배포 목록) 넣기 — 같은 ip 의 호스트가 있으면 그 위에, 없으면 호스트를 만든다. 이미 있는 워커(같은 호스트·포트)면 그 이름 */
-export function addDiscoveredWorker(d: TopologyDoc, w: { name: string; hostname?: string | null; ip?: string | null; port: number; cpus?: number | null }): { worker: string; madeHost: string | null; existed: boolean } | null {
-  if (!w.ip) return null
+/** 발견된 워커 → 호스트(+워커). agent 는 주소를 여럿 보고한다(`ips` — 관리망·서비스망) — 그중 하나라도 쓰는 호스트가 있으면 그 호스트에 넣고,
+ *  없으면 새 호스트를 만든다. 새 호스트 주소 = 기존 호스트들과 같은 /24 에 있는 것 > agent 의 첫 주소(`ip`). 10.0.2.x 관리망 주소로 잘못 만들지 않게 */
+export function addDiscoveredWorker(d: TopologyDoc, w: { name: string; hostname?: string | null; ip?: string | null; ips?: string[] | null; port: number; cpus?: number | null }): { worker: string; madeHost: string | null; existed: boolean } | null {
+  const ips = [...new Set([...(w.ips ?? []), ...(w.ip ? [w.ip] : [])])]
+  if (!ips.length) return null
   const L = ensureLayout(d)
-  let host = Object.keys(d.hosts).find(h => d.hosts[h].ip === w.ip) ?? null
+  let host = Object.keys(d.hosts).find(h => ips.includes(d.hosts[h].ip)) ?? null
   let madeHost: string | null = null
   if (!host) {
+    const used = Object.values(d.hosts).map(h => h.ip.split('.').slice(0, 3).join('.'))
+    const ip = ips.find(a => used.includes(a.split('.').slice(0, 3).join('.'))) ?? w.ip ?? ips[0]
     host = uniq(d, (w.hostname || w.name || 'host').toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^-+|-+$/g, '') || 'host')
-    d.hosts[host] = { name: w.hostname || w.name, ip: w.ip }
+    d.hosts[host] = { name: w.hostname || w.name, ip }
     const maxY = Math.max(20, ...Object.values(L.regions).map(r => r.y + r.h + 20))
     L.regions[host] = { x: 30, y: maxY, w: 300, h: 140 }
     madeHost = host
