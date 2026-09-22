@@ -323,9 +323,8 @@ probableCause(rule 속성), 영향은 effect 로 간다. 새 감지 조건은 �
   바꾸고 `severity` 를 확정값으로 채우며(정의 행 severity 정합 — §3 severity 규약),
   fm_catalog/rule 에 정의 코드를 탑재한다. 카탈로그 선언(`fm_catalog.json`)과 CSV 의
   `구현` 감지 행은 항상 일치해야 한다. 현행 유일 예외: CSC `config_change` — 카탈로그에
-  선언됐으나 CSC 가 소유한 CUD 지점이 배선되지 않아 CSV 는 `후보`(행에 예외 명시, §10.4).
-  (관제 앱 경로 `handlers/dispatch.py`·`dispatch_directory.py` 는 이미 이 헬퍼를 부른다 —
-  "호출자 0건" 은 낡은 기술이었다.)
+  선언됐고 관제 앱 경로와 콘솔 회선 CUD 는 부르지만, CSC 가 소유한 나머지 CUD 지점
+  (가입자·조직)이 남아 CSV 는 `후보`(행에 예외 명시, §10.4).
 
 ## 9. 기능별 설계 메모 — 정의 행
 
@@ -572,15 +571,19 @@ MsrpWorkerCount 사실상 무효(`:589,593,789` — 리액터 사망 판정은 �
 ### 10.4 CSC
 
 **현행**: 알람 1종(connection_lost — DB probe) + 이벤트 3종. `config_change`(E-AUD-006) 는
-관제 앱 경로(`handlers/dispatch.py _audit`·`dispatch_directory.py`)만 발화하고, **콘솔
-관리 API(`handlers/admin.py`)의 가입자·회선·조직 CUD 는 배선되지 않았다** — 같은 값을 쓰는
-문이 둘인데 한쪽만 감사돼, 어느 문으로 바꿨느냐에 따라 "누가 언제 착신전환을 걸었나" 에
-답할 수 있는지가 갈린다. `_CONFIG_EVENT_BY_ENTITY` 어휘와 mo
-(`<서버명>/csc/config/<entity>`)는 교정 완료.
+관제 앱 경로(`handlers/dispatch.py _audit`·`dispatch_directory.py`)와 **콘솔 관리 API 의
+회선 CUD**(`handlers/admin.py _audit_sub` — `_add`/`_update`/`_delete_subscription`,
+entity `subscription`, actor `console:<login_id>`, reason `console`)가 발화한다. 부가서비스를
+어느 문으로 바꾸든 같은 감사가 남는다. 감사에 싣는 값은 부가서비스 축뿐이다 — DND(`dnd`),
+무조건·조건부 착신전환(`forward_id`·`forward_busy_id`·`forward_no_reply_id`·
+`forward_no_reply_sec`·`forward_not_logged_in_id` — TS 24.604 CFU/CFB/CFNR/CFNL),
+가입자 링백(`ringback_media`), 접속서비스·transport(`service_ref`·`sip_transport`).
+자격(`passwd`/`ha1`/`k`/`opc`)은 싣지 않고, 감사 실패가 회선 쓰기를 막지 않는다.
+**남은 것은 같은 파일의 가입자(user)·조직(org) CUD** — 회선과 달리 아직 배선되지 않았다.
+`_CONFIG_EVENT_BY_ENTITY` 어휘와 mo(`<서버명>/csc/config/<entity>`)는 교정 완료.
 
-부가서비스 설정 변경 정의(`E-AUD-008`, TAS)는 별도 코드로 남아 있다 — 착신전환·DND 는 회선
-속성(`dnd`·`forward_id`)이라 회선 CUD 감사와 같은 사실을 가리키므로, 구현 시 §5 수렴 규칙에
-따라 대표 코드를 먼저 정한다.
+부가서비스 설정 변경 정의(`E-AUD-008`, TAS)는 이 회선 CUD 감사로 수렴한다(§5 수렴 규칙) —
+착신전환·DND 는 회선 속성이라 같은 사실을 가리킨다.
 
 **자기보고 대상이 아닌 것**: 통화이력/flow API(CSC 미서빙 — OAM 소관), FM 채널 자기장애,
 요청 단위 4xx/5xx(PKCE/토큰/XCAP 인가 실패 등), 소켓 backlog/메모리(호스트 소관),
@@ -852,8 +855,8 @@ endpoint 단위 `cmp/<ep>` 만 후보로 남았다.
   통으로 감사할지 / `enabled` 전이만 집어낼지" 를 먼저 정해야 한다 — 전자는 `E-AUD-003`
   service_control 이 선례(actor·actor_ip 동반).
 - **`E-AUD-008` 부가서비스 설정 변경** — 착신전환·DND 는 회선 속성이라 `E-AUD-006`
-  subscriber_config_changed 와 같은 사실을 가리킨다. 대표 코드를 먼저 정하고(§5), 그 다음
-  CSC 콘솔 관리 API(`handlers/admin.py`)의 CUD 지점에 배선한다.
+  subscriber_config_changed 와 같은 사실을 가리킨다. 회선 CUD 는 `E-AUD-006` 으로 수렴해
+  배선됐고(§10.4), 남은 배선 지점은 같은 파일의 가입자·조직 CUD 다.
 
 ## 관련
 

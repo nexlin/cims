@@ -145,13 +145,16 @@ async def handle_users(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
                 if method == 'GET':
                     return await _list_subscriptions(person_id, sub, config)
                 elif method == 'POST':
-                    return await _add_subscription(person_id, sub, handler_args.body, config)
+                    return await _add_subscription(person_id, sub, handler_args.body, config, payload,
+                                                   getattr(handler_args, 'client_ip', '') or '')
                 return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
             else:
                 if method == 'PUT':
-                    return await _update_subscription(person_id, sub, sub_id, handler_args.body, config)
+                    return await _update_subscription(person_id, sub, sub_id, handler_args.body, config, payload,
+                                                      getattr(handler_args, 'client_ip', '') or '')
                 elif method == 'DELETE':
-                    return await _delete_subscription(person_id, sub, sub_id, config)
+                    return await _delete_subscription(person_id, sub, sub_id, config, payload,
+                                                      getattr(handler_args, 'client_ip', '') or '')
                 return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
 
         return HandlerResult(status=404, body={'error': 'Not Found'})
@@ -764,7 +767,39 @@ def _parse_sip_transport(body):
     return _subs.parse_sip_transport(body.get('sip_transport'))
 
 
-async def _add_subscription(person_id: str, svc: str, body, config):
+def _audit_sub(config, payload, ip: str, svc: str, msisdn: str, action: str, after=None):
+    """회선(가입) 변경 감사 — E-AUD-006 config_change.
+
+    `dnd`·`forward_id` 는 부가서비스(착신전환·DND) 설정이다. 같은 값을 관제 앱 경로
+    (dispatch.py `_audit`)는 이미 감사로 남기는데 콘솔 경로만 안 남겨, **어느 문으로
+    바꿨느냐에 따라 추적 가능 여부가 갈렸다.** 두 문을 같은 코드로 통일한다
+    (alarm_catalog.md §5 — 부가서비스 설정 변경 정의 E-AUD-008 은 이 코드로 수렴).
+    actor 표기는 §2.5 규약 그대로 `console:<login_id>`. 실패는 쓰기를 막지 않는다."""
+    try:
+        from services import mcptt as _m
+        actor = f"console:{(payload or {}).get('login_id') or '?'}"
+        _m.audit_config_change((config or {}).get('CimsDatabase', {}), actor, ip or '',
+                               'subscription', f'{svc}:{msisdn}', action, after=after,
+                               reason='console')
+    except Exception:
+        pass
+
+
+def _sub_audit_after(body) -> dict:
+    """감사에 싣는 변경 후 값 — 부가서비스 축만. 자격(passwd/ha1/k/opc)은 절대 싣지 않는다.
+
+    조건부 착신전환(CFB/CFNR/CFNL, TS 24.604)도 무조건 전환과 같은 사실을 가리키므로
+    함께 싣는다 — 하나라도 빠지면 "누가 언제 전환을 걸었나" 에 구멍이 생긴다."""
+    out = {}
+    for k in ('dnd', 'forward_id', 'forward_busy_id', 'forward_no_reply_id',
+              'forward_no_reply_sec', 'forward_not_logged_in_id', 'ringback_media',
+              'service_ref', 'sip_transport'):
+        if isinstance(body, dict) and k in body:
+            out[k] = body[k]
+    return out
+
+
+async def _add_subscription(person_id: str, svc: str, body, config, payload=None, ip: str = ''):
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
     msisdn = body.get('id', '').strip()
@@ -872,10 +907,11 @@ async def _add_subscription(person_id: str, svc: str, body, config):
             )
     notify_csp("USER_CHANGED", f"tel:{msisdn}", "POST")
     refresh_login_accounts()  # IdMS 로그인 캐시 — login_id/passwd·MCPTT ID 파생 변경 즉시 반영
+    _audit_sub(config, payload, ip, svc, msisdn, 'create', after=_sub_audit_after(body))
     return HandlerResult(status=201, body={'id': msisdn})
 
 
-async def _update_subscription(person_id: str, svc: str, msisdn: str, body, config):
+async def _update_subscription(person_id: str, svc: str, msisdn: str, body, config, payload=None, ip: str = ''):
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
 
@@ -997,10 +1033,11 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
                 values
             )
     notify_csp("USER_CHANGED", f"tel:{msisdn}", "PUT")
+    _audit_sub(config, payload, ip, svc, msisdn, 'update', after=_sub_audit_after(body))
     return HandlerResult(status=200, body={'id': msisdn})
 
 
-async def _delete_subscription(person_id: str, svc: str, msisdn: str, config):
+async def _delete_subscription(person_id: str, svc: str, msisdn: str, config, payload=None, ip: str = ''):
     table = _sub_table(svc)
     with _get_db(config) as conn:
         with conn.cursor() as cur:
@@ -1017,6 +1054,7 @@ async def _delete_subscription(person_id: str, svc: str, msisdn: str, config):
         update_user_profile_cache(msisdn, None)  # 프로파일 행은 FK CASCADE 로 함께 삭제됨
     notify_csp("USER_CHANGED", f"tel:{msisdn}", "DELETE")
     refresh_login_accounts()  # IdMS 로그인 캐시 — login_id/passwd·MCPTT ID 파생 변경 즉시 반영
+    _audit_sub(config, payload, ip, svc, msisdn, 'delete')
     return HandlerResult(status=200, body={'id': msisdn})
 
 
