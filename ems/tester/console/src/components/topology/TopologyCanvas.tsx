@@ -1,7 +1,6 @@
 // 토폴로지 캔버스 편집기 — 캔버스(호스트 영역 안에 워커·대상 노드 카드, 워커 안에 풀, 선은 모델에서 파생) · 속성 패널(오른쪽, 폭 조절) ·
-// 하단 드로어(연결 검사 — 검사 결과가 오면 열리고 Esc 로 닫는다). 팔레트는 페이지의 왼쪽 레일 [팔레트] 탭에 포털로 그린다(`paletteHost`) —
-// 끌어 놓기·클릭 추가는 그대로. 워커 카드·호스트 영역 머리의 [+] 메뉴로도 추가한다. 검증 목록은 속성 패널의 '선택 없음' 화면, 레코드 JSON 은
-// 페이지의 Dialog(`TopologyJsonEditor`). 빈 곳에 놓으면 상자 자동 생성, 카드 위치·영역 크기는 레코드 layout 에 저장
+// 하단 패널([레코드 JSON | 연결 검사] — 툴바 버튼이 토글, 검사 결과가 오면 check 탭, Esc 로 닫는다). 팔레트는 페이지의 왼쪽 레일 [팔레트] 탭에 포털로 그린다(`paletteHost`) —
+// 끌어 놓기·클릭 추가는 그대로. 워커 카드·호스트 영역 머리의 [+] 메뉴로도 추가한다. 검증 목록·토폴로지 이름은 속성 패널의 '선택 없음' 화면. 빈 곳에 놓으면 상자 자동 생성, 카드 위치·영역 크기는 레코드 layout 에 저장
 // (test_instrument.md §7 토폴로지 캔버스 사양 ①~⑥). 문서는 부모(페이지)가 소유 — 이 컴포넌트는 doc 을 받아 바뀐 사본을 onChange 로 준다
 // (끌기 중 연속 변경은 transient=true, 놓으면 onCommit — 페이지 이력이 한 걸음으로 묶는다; 영역 자동 확장은 onLayout — 이력에 안 쌓는다).
 // 줌(Ctrl+휠·버튼·화면 맞춤)은 스테이지 transform 하나 — 좌표 계산은 전부 zoom 으로 나눈다. 열 때 화면 맞춤을 한 번 한다. 팔레트 클릭 = 선택한 상자 위에 추가.
@@ -51,7 +50,9 @@ const EDGE_COLOR: Record<Edge['cls'], string> = { udp: 'var(--chart-1)', tcp: 'v
 const snap = (v: number) => Math.round(v / 10) * 10
 
 /** 페이지 툴바가 부르는 손잡이 — 검증 배지 → 속성 패널의 검증 목록, 검사 배지 → 드로어 */
-export interface TopologyCanvasHandle { showIssues(): void; showCheck(): void }
+export type DrawerTab = 'json' | 'check'
+/** 페이지 툴바가 부르는 손잡이 — 검증 배지 → 속성 패널의 검증 목록, [레코드]/[연결 검사] 버튼 → 하단 패널 탭 토글 */
+export interface TopologyCanvasHandle { showIssues(): void; openDrawer(tab: DrawerTab): void; toggleDrawer(tab: DrawerTab): void }
 
 const TopologyCanvas = forwardRef<TopologyCanvasHandle, {
   doc: TopologyDoc
@@ -68,11 +69,13 @@ const TopologyCanvas = forwardRef<TopologyCanvasHandle, {
   onFocusCheck?: () => void
   /** 왼쪽 레일 [팔레트] 탭의 상자 — 있으면 팔레트를 거기에 포털로 그린다 */
   paletteHost?: HTMLElement | null
-}>(function TopologyCanvas({ doc, onChange, onLayout, onCommit, check, checkStale, workers, canWrite, onFocusCheck, paletteHost }, ref) {
+  /** 하단 패널 상태 — 툴바 버튼의 눌림 표시용 */
+  onDrawerState?: (tab: DrawerTab | null) => void
+}>(function TopologyCanvas({ doc, onChange, onLayout, onCommit, check, checkStale, workers, canWrite, onFocusCheck, paletteHost, onDrawerState }, ref) {
   const { show } = useToast()
   const confirm = useConfirm()
   const [sel, setSel] = useState<Focus | null>(null)
-  const [drawerOpen, setDrawerOpen] = useState(false)   // 연결 검사 드로어 — 결과가 오면 열리고 Esc 로 닫는다
+  const [drawer, setDrawer] = useState<DrawerTab | null>(null)   // 하단 패널 — 기본 닫힘. [레코드]/[연결 검사] 버튼 토글, 검사 결과가 오면 check 탭, Esc·✕ 닫기
   const [drag, setDrag] = useState<Drag | null>(null)
   type Hot = Focus | { kind: 'port'; id: string }
   const [hot, setHot] = useState<Hot | null>(null)
@@ -82,13 +85,18 @@ const TopologyCanvas = forwardRef<TopologyCanvasHandle, {
   const [drawerH, onDrawerHandle] = useDrawerHeight('tester-topo-drawer', 220)
   const [inspW, onInspHandle] = usePanelWidth('tester-topo-insp-w', 320)
   const inspRef = useRef<HTMLElement>(null)
-  useImperativeHandle(ref, () => ({ showIssues: () => { setSel(null); inspRef.current?.scrollTo({ top: 0 }) }, showCheck: () => setDrawerOpen(true) }), [])
-  useEffect(() => { if (check) setDrawerOpen(true) }, [check])
+  useImperativeHandle(ref, () => ({
+    showIssues: () => { setSel(null); inspRef.current?.scrollTo({ top: 0 }) },
+    openDrawer: t => setDrawer(t),
+    toggleDrawer: t => setDrawer(d => (d === t ? null : t)),
+  }), [])
+  useEffect(() => { if (check) setDrawer('check') }, [check])
+  useEffect(() => { onDrawerState?.(drawer) }, [drawer, onDrawerState])
   useEffect(() => {
-    if (!drawerOpen) return
-    const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target as HTMLElement)?.closest('input,textarea,select,[role=dialog],[role=menu]')) setDrawerOpen(false) }
+    if (!drawer) return
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target as HTMLElement)?.closest('input,textarea,select,[role=dialog],[role=menu]')) setDrawer(null) }
     window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k)
-  }, [drawerOpen])
+  }, [drawer])
   const stageRef = useRef<HTMLDivElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<Drag | null>(null)
@@ -575,19 +583,23 @@ const TopologyCanvas = forwardRef<TopologyCanvasHandle, {
         </aside>
       </div>
 
-      {/* 드로어 — 연결 검사 결과. 결과가 오면 열리고 Esc·✕ 로 닫는다. 결과는 카드의 같은 행에도 붙는다 */}
-      {drawerOpen && (
+      {/* 하단 패널 — [레코드 JSON | 연결 검사] 두 탭. 툴바 버튼이 열고 닫고, 검사 결과가 오면 check 탭, Esc·✕ 닫기. 검사 결과는 카드의 같은 행에도 붙는다 */}
+      {drawer && (
         <div className="border-t border-border bg-card">
           <div onPointerDown={onDrawerHandle} className="group flex h-2 cursor-row-resize items-center justify-center hover:bg-accent" title="끌어서 높이 조절"><span className="h-0.5 w-10 rounded-full bg-border group-hover:bg-muted-foreground" /></div>
-          <div className="flex items-center gap-2 px-3 py-1 text-xs">
-            <b>연결 검사</b>
-            {check ? <Badge variant={check.items.every(i => i.ok || i.info) ? 'successSoft' : 'dangerSoft'}>{check.items.filter(i => i.ok || i.info).length}/{check.items.length}</Badge> : <Badge variant="neutralSoft">아직 없음</Badge>}
-            {check && <span className="text-muted-foreground">{new Date(check.at).toLocaleTimeString()}</span>}
-            {checkStale && <Badge variant="warningSoft">검사 뒤 문서가 바뀜 — 저장 시점의 결과</Badge>}
-            <Button variant="ghost" size="iconSm" className="ml-auto" onClick={() => setDrawerOpen(false)} title="닫기 (Esc)"><X size={14} /></Button>
+          <div className="flex items-center gap-1 px-3 py-1 text-xs">
+            {(['json', 'check'] as const).map(t => (
+              <button key={t} onClick={() => setDrawer(t)} className={`h-6 rounded-sm px-2 ${drawer === t ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}>
+                {t === 'json' ? '레코드 JSON' : <>연결 검사 {check ? <Badge variant={check.items.every(i => i.ok || i.info) ? 'successSoft' : 'dangerSoft'} className="ml-1">{check.items.filter(i => i.ok || i.info).length}/{check.items.length}</Badge> : null}</>}
+              </button>
+            ))}
+            {drawer === 'check' && check && <span className="ml-1 text-muted-foreground">{new Date(check.at).toLocaleTimeString()}</span>}
+            {drawer === 'check' && checkStale && <Badge variant="warningSoft">검사 뒤 문서가 바뀜 — 저장 시점의 결과</Badge>}
+            <Button variant="ghost" size="iconSm" className="ml-auto" onClick={() => setDrawer(null)} title="닫기 (Esc)"><X size={14} /></Button>
           </div>
           <div className="overflow-auto border-t border-border px-3 py-2 text-xs" style={{ height: drawerH }}>
-            {check ? (
+            {drawer === 'json' && <TopologyJsonEditor doc={doc} height={drawerH - 16} onApply={d => { onChange(d); setSel(null); show('JSON 적용 — 캔버스 재구성', 'ok') }} canWrite={canWrite} />}
+            {drawer === 'check' && (check ? (
               <DataTable>
                 <thead><tr><Th>항목</Th><Th width={70}>결과</Th><Th>상세</Th><Th align="right">ms</Th></tr></thead>
                 <tbody>{check.items.map(i => (
@@ -595,7 +607,7 @@ const TopologyCanvas = forwardRef<TopologyCanvasHandle, {
                     <Td mono>{i.name}</Td><Td>{i.ok ? <Badge variant="successSoft">OK</Badge> : i.info ? <Badge variant="neutralSoft">참고</Badge> : <Badge variant="dangerSoft">실패</Badge>}</Td><Td className="break-all text-xs">{i.detail}</Td><Td align="right" mono>{i.ms}</Td>
                   </tr>))}</tbody>
               </DataTable>
-            ) : <div className="text-muted-foreground">[연결 검사] 는 저장된 레코드에 대해 수신점 단위로 확인합니다 — SIP 접속점 OPTIONS/TCP/TLS · 피어링(참고) · 가입자 API · OAM 토큰 · DB 접속 · 호스트 SSH · 워커 health. 결과는 카드의 같은 행에 붙습니다{onFocusCheck ? <> — <button className="underline" onClick={onFocusCheck}>지금 검사</button></> : null}</div>}
+            ) : <div className="text-muted-foreground">[연결 검사] 는 저장된 레코드에 대해 수신점 단위로 확인합니다 — SIP 접속점 OPTIONS/TCP/TLS · 피어링(참고) · 가입자 API · OAM 토큰 · DB 접속 · 호스트 SSH · 워커 health. 결과는 카드의 같은 행에 붙습니다{onFocusCheck ? <> — <button className="underline" onClick={onFocusCheck}>지금 검사</button></> : null}</div>)}
           </div>
         </div>
       )}
@@ -605,17 +617,17 @@ const TopologyCanvas = forwardRef<TopologyCanvasHandle, {
 export default TopologyCanvas
 
 // ── 레코드 JSON 편집기 — 페이지의 Dialog 안에 ─────────────────────────────────
-export function TopologyJsonEditor({ doc, onApply, canWrite }: { doc: TopologyDoc; onApply: (d: TopologyDoc) => void; canWrite: boolean }) {
+function TopologyJsonEditor({ doc, onApply, canWrite, height }: { doc: TopologyDoc; onApply: (d: TopologyDoc) => void; canWrite: boolean; height: number }) {
   const text = useMemo(() => JSON.stringify(doc, null, 2), [doc])
   const [edit, setEdit] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const apply = () => { try { const d = JSON.parse(edit ?? text) as TopologyDoc; onApply(d); setEdit(null); setErr(null) } catch (e) { setErr(String(e)) } }
   return (
-    <div className="flex h-full min-h-[360px] gap-3">
+    <div className="flex gap-3" style={{ height }}>
       <textarea value={edit ?? text} onChange={e => setEdit(e.target.value)} readOnly={!canWrite} spellCheck={false}
                 className="min-w-0 flex-1 resize-none rounded-sm border border-border bg-muted p-2 font-mono text-[11px]" />
       <div className="flex w-[160px] flex-col gap-1 text-[11px] text-muted-foreground">
-        <b>레코드 = 이 JSON</b><span>캔버스 편집이 곧 이 문서다. 여기서 고치고 [적용]하면 캔버스가 다시 그려진다. 저장은 툴바.</span>
+        <b>레코드 = 이 JSON</b><span>캔버스 편집이 곧 이 문서다. 여기서 고치고 [적용]하면 캔버스가 바로 다시 그려진다. 저장은 툴바 [저장].</span>
         <Button variant="outline" size="sm" disabled={!canWrite || edit == null} onClick={apply}>적용</Button>
         <Button variant="ghost" size="sm" disabled={edit == null} onClick={() => { setEdit(null); setErr(null) }}>취소</Button>
         {err && <span className="text-destructive">{err}</span>}
@@ -708,6 +720,9 @@ function Inspector({ doc, sel, setSel, mutate, issues, allIssues, canWrite, onDe
               <span>{i.msg}</span>
             </button>))}</div>
         )}
+      </Sec>
+      <Sec title="토폴로지">
+        <F label="이름" help="레코드 이름 — 레일·실행 창·보고서에 보인다"><Txt value={doc.name} disabled={ro} placeholder="이름" onCommit={v => mutate(d => { d.name = v })} /></F>
       </Sec>
       <Sec title="대상">
         <F label="대상 이름"><Txt value={doc.target.name} disabled={ro} onCommit={v => mutate(d => { d.target.name = v })} /></F>

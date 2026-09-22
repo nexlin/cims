@@ -6,7 +6,7 @@
 // 부하 프로파일 탭은 YAML 편집기 + 검증된 문서의 시간축 율 곡선(ProfileCurve).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { RefreshCw, Plus, Save, Trash2, Play, RotateCcw, Undo2, Redo2, Gauge, List, Shapes } from 'lucide-react'
+import { RefreshCw, Plus, Save, Trash2, Play, RotateCcw, Undo2, Redo2, Gauge, List, Shapes, FileCode2, ClipboardCheck, TableProperties } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { Button } from '@core/components/ui/button'
 import { Badge } from '@core/components/ui/badge'
@@ -22,7 +22,7 @@ import { useSearchParams } from 'react-router-dom'
 import { testerApi, type ScenarioRow, type ProfileRow, type TopologyRow, type ScenarioVocab } from '@tester/api/tester'
 import YamlEditor from '@tester/components/YamlEditor'
 import RunStartDialog from '@tester/components/RunStartDialog'
-import ScenarioCanvas from '@tester/components/scenario/ScenarioCanvas'
+import ScenarioCanvas, { type ScenarioCanvasHandle, type ScnDrawerTab } from '@tester/components/scenario/ScenarioCanvas'
 import ListRail, { RailRow, RailGroup } from '@tester/components/ListRail'
 import ProfileCurve from '@tester/components/ProfileCurve'
 import * as S from '@tester/lib/scenario-model'
@@ -75,6 +75,8 @@ function ScenarioEditor({ scenarioId, rows, onSaved, onDeleted, onDirty, autoRun
   const canDelete = hasRole(user, 'manager')
   const H = useDocHistory<Doc>()
   const doc = H.doc; const setDoc = H.set
+  const canvasRef = useRef<ScenarioCanvasHandle>(null)
+  const [drawerTab, setDrawerTab] = useState<ScnDrawerTab | null>(null)   // 캔버스 하단 패널 상태 — 툴바 버튼 눌림 표시
   const [orig, setOrig] = useState('')
   const [source, setSource] = useState<'bundled' | 'user' | null>(null)
   const [serverErrs, setServerErrs] = useState<string[]>([])
@@ -154,7 +156,7 @@ function ScenarioEditor({ scenarioId, rows, onSaved, onDeleted, onDirty, autoRun
         <span className="font-mono text-sm font-semibold">{doc.id}</span>
         {source && <Badge variant={source === 'user' ? 'brandSoft' : 'neutralSoft'}>{source === 'user' ? '운영자본' : '패키지 동봉'}</Badge>}
         {!scenarioId && <Badge variant="infoSoft">새 문서</Badge>}
-        {errN ? <Badge variant="dangerSoft" title="문서 자체의 오류 — 저장이 잠깁니다. 기준 토폴로지와의 적합성은 캔버스 아래 [검증] 드로어">문서 오류 {errN}</Badge> : <Badge variant="successSoft" title="문서 자체는 유효합니다. 기준 토폴로지와의 적합성은 캔버스 아래 [검증] 드로어에 따로 보입니다">문서 검증 통과</Badge>}
+        <button onClick={() => canvasRef.current?.showIssues()} className="rounded-md" title="누르면 속성 패널에 검증 목록">{errN ? <Badge variant="dangerSoft">문서 오류 {errN}</Badge> : <Badge variant="successSoft">문서 검증 통과</Badge>}</button>
         {dirty && <Badge variant="warningSoft">변경됨</Badge>}
         {source === 'bundled' && <span className="text-muted-foreground">저장하면 같은 id 의 운영자본이 생겨 동봉본을 덮습니다</span>}
         {serverErrs.map((e, i) => <span key={i} className="text-destructive">{e}</span>)}
@@ -167,18 +169,17 @@ function ScenarioEditor({ scenarioId, rows, onSaved, onDeleted, onDirty, autoRun
           <Button variant="ghost" size="iconSm" onClick={H.undo} disabled={!canWrite || !H.canUndo} title="실행취소 (Ctrl+Z)"><Undo2 size={13} /></Button>
           <Button variant="ghost" size="iconSm" onClick={H.redo} disabled={!canWrite || !H.canRedo} title="다시실행 (Ctrl+Y)"><Redo2 size={13} /></Button>
           <Button variant="outline" size="sm" onClick={() => setDoc(JSON.parse(orig))} disabled={!dirty} title="저장 시점으로 전부 되돌리기"><RotateCcw size={13} /> 되돌리기</Button>
-          <span className="inline-flex items-center gap-1">
-            <Button variant="default" size="sm" onClick={() => save()} disabled={!canWrite || saving || !!saveReason}><Save size={13} /> {source === 'bundled' ? '저장 (override)' : '저장'}</Button>
-            {saveReason && canWrite && <span className="text-muted-foreground">{saveReason}</span>}
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <Button variant="outline" size="sm" onClick={() => runAfterSave('single')} disabled={!canWrite || saving || !!runReason} title="인스턴스 몇 개로 기능 확인 — 변경이 있으면 먼저 저장합니다"><Play size={13} /> {dirty || !scenarioId ? '저장하고 단발 실행' : '단발 실행'}</Button>
-            <Button variant="outline" size="sm" onClick={() => runAfterSave('profile')} disabled={!canWrite || saving || !!runReason} title="부하 프로파일(미리보기 프로파일이 기본값)로 실행 창 열기 — 변경이 있으면 먼저 저장합니다"><Gauge size={13} /> {dirty || !scenarioId ? '저장하고 부하 실행…' : '부하 실행…'}</Button>
-            {runReason && <span className="text-muted-foreground">{runReason}</span>}
-          </span>
+          <span className="mx-0.5 h-4 w-px bg-border" />
+          <Button variant={drawerTab === 'yaml' ? 'default' : 'outline'} size="sm" onClick={() => canvasRef.current?.toggleDrawer('yaml')} aria-pressed={drawerTab === 'yaml'} title="YAML 을 아래 패널에 열고 닫습니다 — 고치고 [적용]하면 캔버스가 바로 바뀝니다"><FileCode2 size={13} /> YAML</Button>
+          <Button variant={drawerTab === 'fit' ? 'default' : 'outline'} size="sm" onClick={() => canvasRef.current?.toggleDrawer('fit')} aria-pressed={drawerTab === 'fit'} title="기준 토폴로지 적합성(compile-check 드라이런)을 아래 패널에 열고 닫습니다"><ClipboardCheck size={13} /> 적합성</Button>
+          <Button variant={drawerTab === 'table' ? 'default' : 'outline'} size="sm" onClick={() => canvasRef.current?.toggleDrawer('table')} aria-pressed={drawerTab === 'table'} title="절차표(보고서와 같은 절차·예상 결과·확인 방법)를 아래 패널에 열고 닫습니다"><TableProperties size={13} /> 절차표</Button>
+          <span className="mx-0.5 h-4 w-px bg-border" />
+          <Button variant="default" size="sm" onClick={() => save()} disabled={!canWrite || saving || !!saveReason} title={saveReason ?? undefined}><Save size={13} /> {source === 'bundled' ? '저장 (override)' : '저장'}</Button>
+          <Button variant="outline" size="sm" onClick={() => runAfterSave('single')} disabled={!canWrite || saving || !!runReason} title={runReason ?? '인스턴스 몇 개로 기능 확인 — 변경이 있으면 먼저 저장합니다'}><Play size={13} /> {dirty ? '저장하고 단발 실행' : '단발 실행'}</Button>
+          <Button variant="outline" size="sm" onClick={() => runAfterSave('profile')} disabled={!canWrite || saving || !!runReason} title={runReason ?? '부하 프로파일(미리보기 프로파일이 기본값)로 실행 창 열기 — 변경이 있으면 먼저 저장합니다'}><Gauge size={13} /> {dirty ? '저장하고 부하 실행…' : '부하 실행…'}</Button>
         </div>
       </div>
-      <ScenarioCanvas doc={doc} onChange={setDoc} onCommit={H.commit} topologies={topologies} topoId={topoId} setTopoId={setTopoId} profiles={profiles} profileId={profileId} setProfileId={setProfileId} vocab={vocab} canWrite={canWrite} source={source} paletteHost={paletteHost} />
+      <ScenarioCanvas ref={canvasRef} onDrawerState={setDrawerTab} doc={doc} onChange={setDoc} onCommit={H.commit} topologies={topologies} topoId={topoId} setTopoId={setTopoId} profiles={profiles} profileId={profileId} setProfileId={setProfileId} vocab={vocab} canWrite={canWrite} source={source} paletteHost={paletteHost} />
       {runOpen && scenarioId && (
         <RunStartDialog scenarioId={scenarioId} lastTopologyId={topoId} initial={runOpen === 'profile' && profileId !== '__none__' ? { scenario_id: scenarioId, profile: profileId } : undefined}
                         onClose={() => setRunOpen(null)} onStarted={() => { setRunOpen(null); nav('/test/runs') }} />

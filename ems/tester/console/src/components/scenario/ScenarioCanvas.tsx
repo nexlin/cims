@@ -1,10 +1,11 @@
 // 시나리오 캔버스 편집기 — 팔레트(역할·단계 축별, vocab 이 정본 — 페이지 왼쪽 레일 [팔레트] 탭에 포털로 그린다 `paletteHost`) · 시퀀스 캔버스(레인 = 역할, 행 = 단계,
-// 구간 띠 자동, 세션 열, during 마커) · 속성 패널(시나리오/역할/단계/during — 왼쪽 가장자리를 끌어 폭 조절) · 하단 드로어(YAML 양방향 · 검증 · 토폴로지 적합성 = compile-check · 절차표) (test_instrument.md §7).
+// 구간 띠 자동, 세션 열, during 마커) · 속성 패널(시나리오/역할/단계/during — 왼쪽 가장자리를 끌어 폭 조절, 시나리오 화면에 검증 목록) · 하단 패널(YAML 양방향 ·
+// 토폴로지 적합성 = compile-check · 절차표 — 툴바 버튼이 토글, 기본 닫힘, Esc 닫기) (test_instrument.md §7).
 // 문서는 부모(페이지)가 소유하고 저장한다. 기준 토폴로지는 편집 문맥이지 시나리오 속성이 아니다(저장 안 함) — 그래서 검증 배지는
 // 문서 오류(저장 게이트)와 토폴로지 적합 오류(문맥)를 따로 센다. YAML 드로어는 YamlEditor(타이핑 중 컨트롤러 검증) + [적용]. 드로어 높이는 손잡이로.
 // 키: ↑↓ 행 이동 · Alt+↑↓ 순서 바꾸기 · Del · Ctrl+D 복제 · Esc.
 // during ↔ 행: in-dialog 행을 통화 유지 바 위에 놓으면 during 이 되고, during 마커를 바 밖(행 사이)으로 끌어 놓으면 행이 된다 — 속성 패널 버튼도 같은 일.
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, ChevronRight, Trash2, Copy, Plus, X } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
@@ -29,20 +30,37 @@ const PH: Record<string, [string, string]> = { prelude: ['PRELUDE', 'run 시작 
 
 type Drag = { type: 'newstep'; step: string } | { type: 'newrole'; role: 'ue' | 'peer' } | { type: 'move'; idx: number } | { type: 'lane'; id: string }
 
-export default function ScenarioCanvas({ doc, onChange, onCommit, topologies, topoId, setTopoId, profiles, profileId, setProfileId, vocab, canWrite, source, paletteHost }: {
+export type ScnDrawerTab = 'yaml' | 'fit' | 'table'
+/** 페이지 툴바가 부르는 손잡이 — 검증 배지 → 속성 패널(시나리오)의 검증 목록, [YAML]/[적합성]/[절차표] 버튼 → 하단 패널 탭 토글 */
+export interface ScenarioCanvasHandle { showIssues(): void; openDrawer(tab: ScnDrawerTab): void; toggleDrawer(tab: ScnDrawerTab): void }
+
+const ScenarioCanvas = forwardRef<ScenarioCanvasHandle, {
   doc: Doc; onChange: (d: Doc, transient?: boolean) => void; onCommit?: () => void
   /** 왼쪽 레일 [팔레트] 탭의 상자 — 있으면 팔레트를 거기에 포털로 그린다 */
   paletteHost?: HTMLElement | null
+  /** 하단 패널 상태 — 툴바 버튼의 눌림 표시용 */
+  onDrawerState?: (tab: ScnDrawerTab | null) => void
   topologies: { id: number; name: string; doc: TopologyDoc }[]; topoId: number | null; setTopoId: (id: number | null) => void
   profiles: ProfileRow[]; profileId: string; setProfileId: (p: string) => void
   vocab: ScenarioVocab | null; canWrite: boolean; source: 'bundled' | 'user' | null
-}) {
+}>(function ScenarioCanvas({ doc, onChange, onCommit, topologies, topoId, setTopoId, profiles, profileId, setProfileId, vocab, canWrite, source, paletteHost, onDrawerState }, ref) {
   const { show } = useToast()
   const confirm = useConfirm()
   const topo = useMemo(() => topologies.find(t => t.id === topoId)?.doc ?? null, [topologies, topoId])
   const [sel, setSel] = useState<Sel>({ kind: 'scenario' })
-  const [tab, setTab] = useState<'yaml' | 'issues' | 'fit' | 'table'>('yaml')
-  const [drawerOpen, setDrawerOpen] = useState(true)
+  const [drawer, setDrawer] = useState<ScnDrawerTab | null>(null)   // 하단 패널 — 기본 닫힘. 툴바 [YAML]/[적합성]/[절차표] 토글, Esc·✕ 닫기
+  const inspRef = useRef<HTMLElement>(null)
+  useImperativeHandle(ref, () => ({
+    showIssues: () => { setSel({ kind: 'scenario' }); inspRef.current?.scrollTo({ top: 0 }) },
+    openDrawer: t => setDrawer(t),
+    toggleDrawer: t => setDrawer(d => (d === t ? null : t)),
+  }), [])
+  useEffect(() => { onDrawerState?.(drawer) }, [drawer, onDrawerState])
+  useEffect(() => {
+    if (!drawer) return
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target as HTMLElement)?.closest('input,textarea,select,[role=dialog],[role=menu]')) setDrawer(null) }
+    window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k)
+  }, [drawer])
   const [drawerH, onDrawerHandle] = useDrawerHeight('tester-scn-drawer', 240)
   const [inspW, onInspHandle] = usePanelWidth('tester-scn-insp-w', 320)
   const [bind, setBind] = useState<S.Bind>({ ht: 20 })
@@ -64,7 +82,7 @@ export default function ScenarioCanvas({ doc, onChange, onCommit, topologies, to
   // 문서 자체(토폴로지 없이) 오류 = 저장 게이트 · 나머지 = 기준 토폴로지 적합 오류(문맥)
   const docKeys = useMemo(() => new Set(S.validate(doc, null, vocab, bind).map(i => `${i.lv}|${i.who}|${i.msg}`)), [doc, vocab, bind])
   const isTopoIssue = (i: S.Issue) => !docKeys.has(`${i.lv}|${i.who}|${i.msg}`)
-  const errN = issues.filter(i => i.lv === 'error').length, warnN = issues.filter(i => i.lv === 'warning').length
+  const errN = issues.filter(i => i.lv === 'error').length
   const docErrN = issues.filter(i => i.lv === 'error' && !isTopoIssue(i)).length, topoErrN = errN - docErrN
   const LV = { error: 0, warning: 1, info: 2 }
   const sortedIssues = useMemo(() => [...issues].sort((a, b) => LV[a.lv] - LV[b.lv] || a.who.localeCompare(b.who)), [issues])   // eslint-disable-line react-hooks/exhaustive-deps
@@ -75,14 +93,14 @@ export default function ScenarioCanvas({ doc, onChange, onCommit, topologies, to
 
   // 적합성 — compile-check(500 ms 디바운스)
   useEffect(() => {
-    if (tab !== 'fit' || !topoId || errN) { return }
+    if (drawer !== 'fit' || !topoId || errN) { return }
     let alive = true; setPlanning(true)
     const id = window.setTimeout(async () => {
       try { const p = await testerApi.compileCheck({ doc: { ...doc, comment: undefined }, topology_id: topoId, profile: profileId && profileId !== NONE ? profileId : undefined, bindings: bind, probe: false }); if (alive) setPlan(p) }
       catch (e) { if (alive) setPlan({ ok: false, errors: [String(e)], warnings: [], notes: [] }) } finally { if (alive) setPlanning(false) }
     }, 500)
     return () => { alive = false; window.clearTimeout(id) }
-  }, [doc, topoId, profileId, bind, tab, errN])
+  }, [doc, topoId, profileId, bind, drawer, errN])
 
   // ── 편집 ────────────────────────────────────────────────────────────────
   const insertStep = (kind: string, at: number) => mutate(d => { d.flow.splice(at, 0, S.newStep(kind, d, topo, vocab)); setSel({ kind: 'step', idx: at }) })
@@ -323,9 +341,9 @@ export default function ScenarioCanvas({ doc, onChange, onCommit, topologies, to
         </div>
 
         {/* 속성 — 왼쪽 가장자리를 끌어 폭 조절 */}
-        <aside className="relative min-h-0 overflow-auto border-l border-border bg-card p-3 text-xs">
+        <aside ref={inspRef} className="relative min-h-0 overflow-auto border-l border-border bg-card p-3 text-xs">
           <div onPointerDown={onInspHandle} className="absolute bottom-0 left-0 top-0 z-[2] w-1.5 cursor-col-resize hover:bg-accent" title="끌어서 폭 조절" />
-          <Inspector doc={doc} sel={sel} setSel={setSel} mutate={mutate} topo={topo} vocab={vocab} issues={issues} canWrite={canWrite} source={source} bind={bind} plan={plan}
+          <Inspector doc={doc} sel={sel} setSel={setSel} mutate={mutate} topo={topo} allIssues={sortedIssues} isTopoIssue={isTopoIssue} docErrN={docErrN} topoErrN={topoErrN} vocab={vocab} issues={issues} canWrite={canWrite} source={source} bind={bind} plan={plan}
                      onRemoveRole={async n => { const refs = doc.flow.filter(s => (s.who ?? []).includes(n) || s.from === n || s.to === n).length; if (refs && !await confirm({ title: `역할 ${n} 삭제`, body: `${refs} 개 단계가 참조합니다. 참조는 비워집니다.`, confirmLabel: '삭제', tone: 'danger' })) return; mutate(d => S.removeRole(d, n)); setSel({ kind: 'scenario' }) }}
                      onRemoveStep={removeStep} onDupStep={dupStep}
                      onDuringToStep={(i, k) => mutate(x => { const n = S.duringToStep(x, i, k, i + 1); if (n >= 0) setSel({ kind: 'step', idx: n }) })}
@@ -333,33 +351,29 @@ export default function ScenarioCanvas({ doc, onChange, onCommit, topologies, to
         </aside>
       </div>
 
-      {/* 드로어 */}
-      <div className="border-t border-border bg-card">
-        {drawerOpen && <div onPointerDown={onDrawerHandle} className="group flex h-2 cursor-row-resize items-center justify-center hover:bg-accent" title="끌어서 높이 조절"><span className="h-0.5 w-10 rounded-full bg-border group-hover:bg-muted-foreground" /></div>}
-        <div className="flex items-center gap-1 px-3 py-1 text-xs">
-          {(['yaml', 'issues', 'fit', 'table'] as const).map(t => (
-            <button key={t} onClick={() => { setTab(t); setDrawerOpen(true) }} className={`h-6 rounded-sm px-2 ${tab === t && drawerOpen ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}>
-              {t === 'yaml' ? 'YAML' : t === 'issues' ? <>검증 {docErrN ? <Badge variant="dangerSoft" className="ml-1" title="문서 오류 — 저장이 잠깁니다">문서 {docErrN}</Badge> : null}{topoErrN ? <Badge variant="warningSoft" className="ml-1" title={`기준 토폴로지 ${topo?.name ?? ''} 와의 적합 오류 — 저장은 되지만 이 토폴로지로는 실행할 수 없습니다`}>토폴로지 {topoErrN}</Badge> : null}{!errN && <Badge variant={warnN ? 'warningSoft' : 'successSoft'} className="ml-1">{issues.length}</Badge>}</> : t === 'fit' ? <>토폴로지 적합성 {plan && <Badge variant={plan.ok ? (plan.warnings.length ? 'warningSoft' : 'successSoft') : 'dangerSoft'} className="ml-1">{plan.ok ? (plan.warnings.length ? `경고 ${plan.warnings.length}` : 'OK') : `오류 ${plan.errors.length}`}</Badge>}</> : '절차표'}
-            </button>))}
-          <span className="ml-2 text-muted-foreground">{doc.flow.length} 단계 · {R.length} 역할 · {source === 'user' ? '운영자본' : source === 'bundled' ? '동봉' : '새 문서'}</span>
-          <button className="ml-auto text-muted-foreground" onClick={() => setDrawerOpen(o => !o)}>{drawerOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</button>
-        </div>
-        {drawerOpen && (
-          <div className="overflow-auto border-t border-border px-3 py-2 text-xs" style={{ height: drawerH }}>
-            {tab === 'yaml' && <YamlTab doc={doc} height={drawerH - 20} onApply={d => { onChange(d); setSel({ kind: 'scenario' }); show('YAML 적용 — 캔버스 재구성', 'ok') }} canWrite={canWrite} />}
-            {tab === 'issues' && (issues.length === 0 ? <div className="text-success">검증 통과 — 스키마·행위자·구간·kind 게이트 모두 정상{topo ? ` · 기준 토폴로지 ${topo.name} 적합` : ''}</div> : <div className="flex flex-col gap-1">
-              {topoErrN > 0 && docErrN === 0 && <div className="text-muted-foreground">문서는 유효합니다(저장 가능). 아래 오류는 기준 토폴로지 <b>{topo?.name}</b> 와의 적합 문제 — 토폴로지를 바꾸거나 역할의 pool 을 고치십시오</div>}
-              {sortedIssues.map((it, k) => (
-              <button key={k} onClick={() => it.ref && setSel(it.ref)} className={`flex items-center gap-2 rounded-sm border-l-2 px-2 py-1 text-left hover:bg-accent ${it.lv === 'error' ? 'border-destructive' : it.lv === 'warning' ? 'border-warning' : 'border-info'}`}>
-                <Badge variant={it.lv === 'error' ? 'dangerSoft' : it.lv === 'warning' ? 'warningSoft' : 'infoSoft'}>{it.lv === 'error' ? '오류' : it.lv === 'warning' ? '경고' : '참고'}</Badge>{isTopoIssue(it) && <Badge variant="neutralSoft" title="기준 토폴로지 문맥의 문제">토폴로지</Badge>}<span className="font-mono text-muted-foreground">{it.who}</span><span>{it.msg}</span></button>))}</div>)}
-            {tab === 'fit' && (!topoId ? <div className="text-muted-foreground">기준 토폴로지를 고르면 compile_run 드라이런(역할→풀→워커 창·용량·시드·Little 검산)을 보입니다</div> : errN ? <div className="text-muted-foreground">검증 오류를 먼저 해결하십시오 — 오류가 있는 문서는 컴파일하지 않습니다</div> : <PlanPreview plan={plan} loading={planning} compact />)}
-            {tab === 'table' && <ProcedureTable doc={doc} vocab={vocab} plan={plan} />}
+      {/* 하단 패널 — [YAML | 토폴로지 적합성 | 절차표]. 툴바 버튼이 열고 닫고 Esc·✕ 닫기. 검증 목록은 속성 패널(시나리오) */}
+      {drawer && (
+        <div className="border-t border-border bg-card">
+          <div onPointerDown={onDrawerHandle} className="group flex h-2 cursor-row-resize items-center justify-center hover:bg-accent" title="끌어서 높이 조절"><span className="h-0.5 w-10 rounded-full bg-border group-hover:bg-muted-foreground" /></div>
+          <div className="flex items-center gap-1 px-3 py-1 text-xs">
+            {(['yaml', 'fit', 'table'] as const).map(t => (
+              <button key={t} onClick={() => setDrawer(t)} className={`h-6 rounded-sm px-2 ${drawer === t ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}>
+                {t === 'yaml' ? 'YAML' : t === 'fit' ? <>토폴로지 적합성 {plan ? <Badge variant={plan.ok ? 'successSoft' : 'dangerSoft'} className="ml-1">{plan.ok ? 'OK' : `오류 ${plan.errors.length}`}</Badge> : null}</> : '절차표'}
+              </button>))}
+            <span className="ml-2 text-muted-foreground">{doc.flow.length} 단계 · {R.length} 역할 · {source === 'user' ? '운영자본' : source === 'bundled' ? '동봉' : '새 문서'}</span>
+            <Button variant="ghost" size="iconSm" className="ml-auto" onClick={() => setDrawer(null)} title="닫기 (Esc)"><X size={14} /></Button>
           </div>
-        )}
-      </div>
+          <div className="overflow-auto border-t border-border px-3 py-2 text-xs" style={{ height: drawerH }}>
+            {drawer === 'yaml' && <YamlTab doc={doc} height={drawerH - 20} onApply={d => { onChange(d); setSel({ kind: 'scenario' }); show('YAML 적용 — 캔버스 재구성', 'ok') }} canWrite={canWrite} />}
+            {drawer === 'fit' && (!topoId ? <div className="text-muted-foreground">기준 토폴로지를 고르면 compile_run 드라이런(역할→풀→워커 창·용량·시드·Little 검산)을 보입니다</div> : errN ? <div className="text-muted-foreground">검증 오류를 먼저 해결하십시오 — 오류가 있는 문서는 컴파일하지 않습니다</div> : <PlanPreview plan={plan} loading={planning} compact />)}
+            {drawer === 'table' && <ProcedureTable doc={doc} vocab={vocab} plan={plan} />}
+          </div>
+        </div>
+      )}
     </div>
   )
-}
+})
+export default ScenarioCanvas
 
 function YamlTab({ doc, height, onApply, canWrite }: { doc: Doc; height: number; onApply: (d: Doc) => void; canWrite: boolean }) {
   const text = useMemo(() => S.toYaml(doc), [doc])
@@ -452,8 +466,9 @@ function Chips({ roles, selected, multi, gate, onToggle, disabled, kindOf }: { r
     return <button key={r} disabled={disabled || (off && !on)} onClick={() => onToggle(r)} title={off ? `'${r}' 는 이 단계의 행위자가 될 수 없습니다 (풀 kind ${k ?? '없음'})` : (k ?? '풀 없음')} className={`inline-flex h-6 items-center gap-1 rounded-sm border px-1.5 text-[11px] ${on ? 'border-primary bg-primary text-primary-foreground' : 'border-border'} ${off ? 'border-dashed text-muted-foreground line-through' : ''}`}><span className="inline-block h-2 w-2 rounded-full" style={{ background: k === 'peer' ? 'var(--chart-2)' : k ? 'var(--chart-1)' : 'var(--destructive)' }} />{r}</button> })}{!multi && <button disabled={disabled} onClick={() => onToggle('')} className={`h-6 rounded-sm border px-1.5 text-[11px] ${!selected.length ? 'border-primary bg-primary text-primary-foreground' : 'border-border'}`}>없음</button>}</div>
 }
 
-function Inspector({ doc, sel, setSel, mutate, topo, vocab, issues, canWrite, source, bind, plan, onRemoveRole, onRemoveStep, onDupStep, onDuringToStep, onStepToDuring }: {
+function Inspector({ doc, sel, setSel, mutate, topo, vocab, issues, allIssues, isTopoIssue, docErrN, topoErrN, canWrite, source, bind, plan, onRemoveRole, onRemoveStep, onDupStep, onDuringToStep, onStepToDuring }: {
   doc: Doc; sel: Sel; setSel: (s: Sel) => void; mutate: (fn: (d: Doc) => void) => void; topo: TopologyDoc | null; vocab: ScenarioVocab | null; issues: S.Issue[]; canWrite: boolean; source: 'bundled' | 'user' | null; bind: S.Bind; plan: PlanResult | null
+  allIssues: S.Issue[]; isTopoIssue: (i: S.Issue) => boolean; docErrN: number; topoErrN: number
   onRemoveRole: (n: string) => void; onRemoveStep: (i: number) => void; onDupStep: (i: number) => void
   onDuringToStep: (i: number, k: number) => void; onStepToDuring: (i: number) => void
 }) {
@@ -469,6 +484,21 @@ function Inspector({ doc, sel, setSel, mutate, topo, vocab, issues, canWrite, so
     const { pre, epi } = S.phases(doc)
     return <div>
       {head('시나리오', <Badge variant={source === 'user' ? 'brandSoft' : 'neutralSoft'}>{source === 'user' ? '운영자본' : source === 'bundled' ? '동봉' : '새 문서'}</Badge>)}{issueBlock}
+      <div className="mb-3 flex flex-col gap-1.5 border-b border-border pb-2">
+        <div className="flex items-center gap-2 text-[11px] font-semibold text-muted-foreground">검증
+          {docErrN ? <Badge variant="dangerSoft" title="문서 오류 — 저장이 잠깁니다">문서 {docErrN}</Badge> : null}
+          {topoErrN ? <Badge variant="warningSoft" title={`기준 토폴로지 ${topo?.name ?? ''} 와의 적합 오류 — 저장은 되고 그 토폴로지로는 실행 못 함`}>토폴로지 {topoErrN}</Badge> : null}
+          {!allIssues.length && <Badge variant="successSoft">통과</Badge>}
+        </div>
+        {allIssues.length === 0 ? <div className="text-success">스키마·행위자·구간·kind 게이트 모두 정상{topo ? ` · 기준 토폴로지 ${topo.name} 적합` : ''}</div> : <>
+          {topoErrN > 0 && docErrN === 0 && <div className="text-muted-foreground">문서는 유효합니다(저장 가능). 토폴로지 표시 오류는 기준 토폴로지 <b>{topo?.name}</b> 와의 적합 문제 — 토폴로지를 바꾸거나 역할의 pool 을 고치십시오</div>}
+          {allIssues.map((it, k) => (
+            <button key={k} onClick={() => it.ref && setSel(it.ref)} className={`flex flex-col gap-0.5 rounded-sm border-l-2 px-2 py-1 text-left hover:bg-accent ${it.lv === 'error' ? 'border-destructive' : it.lv === 'warning' ? 'border-warning' : 'border-info'}`}>
+              <span className="flex items-center gap-1.5"><Badge variant={it.lv === 'error' ? 'dangerSoft' : it.lv === 'warning' ? 'warningSoft' : 'infoSoft'}>{it.lv === 'error' ? '오류' : it.lv === 'warning' ? '경고' : '참고'}</Badge>{isTopoIssue(it) && <Badge variant="neutralSoft" title="기준 토폴로지 문맥의 문제">토폴로지</Badge>}<span className="font-mono text-muted-foreground">{it.who}</span></span>
+              <span>{it.msg}</span>
+            </button>))}
+        </>}
+      </div>
       <F label="id" help="대문자·숫자·하이픈 3~64. 보고서·run 색인의 키 — 저장 경로 id 와 같아야 한다"><Txt value={doc.id} mono disabled={ro} onCommit={v => mutate(d => { d.id = v.trim() })} /></F>
       <F label="title"><Txt value={doc.title} disabled={ro} onCommit={v => mutate(d => { d.title = v.trim() || undefined })} /></F>
       <F label="tags (쉼표)" help="목록 필터 — volte · ptt · trunk · …"><Txt value={(doc.tags ?? []).join(', ')} mono disabled={ro} onCommit={v => mutate(d => { d.tags = v.split(',').map(x => x.trim()).filter(Boolean) })} /></F>

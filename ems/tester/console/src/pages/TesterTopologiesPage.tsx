@@ -1,24 +1,21 @@
 // 시험 > 토폴로지 — 왼쪽 레일 한 열에 탭 둘([토폴로지] 레코드 목록: 검색·kind 칩·행 = 이름/대상/워커/갱신, [새 토폴로지…] 프리셋 선택 /
-// [팔레트]: 캔버스가 포털로 그린다 — 레코드를 고르면 팔레트 탭으로 넘어간다) + 툴바(이름 · 대상 배지 · 검증 배지(누르면 속성 패널의 검증 목록) ·
-// 마지막 연결 검사 배지(누르면 드로어) · 삭제 · 실행취소/다시실행 · [⋯] 자동 배치/되돌리기/레코드 JSON · 연결 검사 · 저장/생성) + 캔버스 편집기(TopologyCanvas,
-// 레코드마다 key 로 다시 만들어 열 때 화면 맞춤). 레코드 JSON 은 Modal(940×76vh) 안의 TopologyJsonEditor.
+// [팔레트]: 캔버스가 포털로 그린다 — 레코드를 고르면 팔레트 탭으로 넘어간다) + 툴바(#id · 이름(텍스트 — 편집은 속성 패널) · 대상 배지 · 검증 배지(누르면
+// 속성 패널의 검증 목록) · 마지막 연결 검사 배지 · 실행취소/다시실행 · 자동 배치 · 되돌리기 · [레코드]/[연결 검사](하단 패널 탭 토글, 눌림 표시) · 삭제 · 저장/생성)
+// + 캔버스 편집기(TopologyCanvas, 레코드마다 key 로 다시 만들어 열 때 화면 맞춤).
 // 레코드는 컨트롤러 `topology` 스키마(호스트›워커·대상 노드›풀)로 저장 전 검증하고, 카드 위치·영역 크기는 레코드 layout 에 같이 저장한다.
 // 문서 이력은 useDocHistory(Ctrl+Z/Y) — 레코드 전환·저장 뒤 비운다. 변경이 있으면 전환·새로 만들기 전에 묻고, 탭 닫기도 경고한다.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { RefreshCw, Plus, Save, Trash2, RotateCcw, PlugZap, LayoutGrid, Undo2, Redo2, MoreHorizontal, Braces, List, Shapes } from 'lucide-react'
+import { RefreshCw, Plus, Save, Trash2, RotateCcw, PlugZap, LayoutGrid, Undo2, Redo2, Braces, List, Shapes } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
 import { Badge } from '@core/components/ui/badge'
-import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@core/components/ui/select'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@core/components/ui/dropdown-menu'
-import Modal from '@core/components/Modal'
 import { EmptyState } from '@core/components/custom/empty-state'
 import { useToast } from '@core/components/Toast'
 import { useConfirm } from '@core/components/custom/confirm'
 import { useAuth } from '@core/contexts/AuthContext'
 import { hasRole } from '@core/utils/permissions'
 import { testerApi, type TopologyRow, type TopologyDoc, type WorkerRow, type CheckItem } from '@tester/api/tester'
-import TopologyCanvas, { TopologyJsonEditor, type TopologyCanvasHandle } from '@tester/components/topology/TopologyCanvas'
+import TopologyCanvas, { type TopologyCanvasHandle, type DrawerTab } from '@tester/components/topology/TopologyCanvas'
 import ListRail, { RailRow } from '@tester/components/ListRail'
 import * as M from '@tester/lib/topology-model'
 import { fmtTime } from '@tester/lib/fmt'
@@ -60,7 +57,7 @@ export default function TesterTopologiesPage() {
   const [serverErrs, setServerErrs] = useState<string[]>([])
   const [leftTab, setLeftTab] = useState<'rec' | 'pal'>('rec')
   const [palHost, setPalHost] = useState<HTMLDivElement | null>(null)   // 레일 [팔레트] 탭의 상자 — 캔버스가 여기에 포털
-  const [jsonOpen, setJsonOpen] = useState(false)
+  const [drawerTab, setDrawerTab] = useState<DrawerTab | null>(null)   // 캔버스 하단 패널 상태 — 툴바 버튼 눌림 표시
   const canvasRef = useRef<TopologyCanvasHandle>(null)
 
   const load = useCallback(async () => {
@@ -129,27 +126,24 @@ export default function TesterTopologiesPage() {
       <div className="toolbar flex flex-wrap items-center gap-2.5 border-b border-border bg-muted px-4 py-2">
         <span className="whitespace-nowrap text-md font-semibold text-foreground">토폴로지</span>
         {sel === NEW ? <Badge variant="infoSoft">새 레코드 — 프리셋 {M.PRESETS[preset].name}</Badge> : current && <span className="font-mono text-sm text-muted-foreground">#{current.id}</span>}
-        {doc && <Input value={doc.name} onChange={e => H.set({ ...doc, name: e.target.value })} disabled={!canWrite} placeholder="이름" className="h-[28px] w-[160px] text-sm" />}
+        {doc && <span className="max-w-[240px] truncate text-sm font-semibold" title="이름은 속성 패널(캔버스 빈 곳을 누른 상태)에서 고칩니다">{doc.name || <span className="font-normal text-muted-foreground">(이름 없음 — 속성 패널에서)</span>}</span>}
         {doc && <Badge variant="neutralSoft" title="대상 이름·종류 — 캔버스 빈 곳을 누르면 속성 패널에서 고칩니다. kind 는 시드·검증 규칙을 정합니다">대상 {doc.target?.name || '—'} · {doc.target?.kind ?? 'cims'}</Badge>}
         {doc && <button onClick={() => canvasRef.current?.showIssues()} title="누르면 속성 패널에 검증 목록" className="rounded-md"><Badge variant={errN ? 'dangerSoft' : warnN ? 'warningSoft' : 'successSoft'}>{errN ? `오류 ${errN}` : warnN ? `경고 ${warnN}` : '검증 통과'}</Badge></button>}
         {dirty && <Badge variant="warningSoft">변경됨</Badge>}
-        {check && <button onClick={() => canvasRef.current?.showCheck()} title="마지막 연결 검사 — 누르면 결과 드로어" className="rounded-md"><Badge variant={check.items.every(i => i.ok || i.info) ? 'successSoft' : 'dangerSoft'}>검사 {fmtTime(check.at)} · {check.items.filter(i => i.ok || i.info).length}/{check.items.length}</Badge></button>}
+        {check && <button onClick={() => canvasRef.current?.openDrawer('check')} title="마지막 연결 검사 — 누르면 결과 패널" className="rounded-md"><Badge variant={check.items.every(i => i.ok || i.info) ? 'successSoft' : 'dangerSoft'}>검사 {fmtTime(check.at)} · {check.items.filter(i => i.ok || i.info).length}/{check.items.length}</Badge></button>}
         {current?.doc && (current as { migrated_from?: string }).migrated_from && <Badge variant="infoSoft" title="이전 꼴(target.csp/workers[].url) 레코드를 v2 로 승계했다">v1 승계</Badge>}
         {error && <span className="text-sm text-destructive">{error}</span>}
         {serverErrs.map((e, i) => <span key={i} className="text-xs text-destructive">{e}</span>)}
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
-          {current && canDelete && <Button variant="outline" size="sm" className="text-destructive" onClick={del} title="이 토폴로지를 지웁니다(확인 창) — 이 토폴로지로 돌린 run 색인은 남습니다"><Trash2 size={13} /> 삭제</Button>}
           <Button variant="ghost" size="iconSm" onClick={H.undo} disabled={!canWrite || !H.canUndo} title="실행취소 (Ctrl+Z)"><Undo2 size={13} /></Button>
           <Button variant="ghost" size="iconSm" onClick={H.redo} disabled={!canWrite || !H.canRedo} title="다시실행 (Ctrl+Y)"><Redo2 size={13} /></Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild><Button variant="outline" size="iconSm" disabled={!doc} title="더 보기"><MoreHorizontal size={14} /></Button></DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56 text-xs">
-              <DropdownMenuItem disabled={!doc || !canWrite} onSelect={auto}><LayoutGrid size={13} /> 자동 배치</DropdownMenuItem>
-              <DropdownMenuItem disabled={!dirty} onSelect={revert}><RotateCcw size={13} /> 저장 시점으로 되돌리기</DropdownMenuItem>
-              <DropdownMenuItem disabled={!doc} onSelect={() => setJsonOpen(true)}><Braces size={13} /> 레코드 JSON…</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button variant="outline" size="sm" onClick={runCheck} disabled={!!checkReason || checking || !canWrite} title={checkReason ?? '저장된 레코드를 수신점 단위로 확인합니다'}><PlugZap size={13} /> {checking ? '검사 중…' : '연결 검사'}</Button>
+          <Button variant="outline" size="sm" onClick={auto} disabled={!doc || !canWrite} title="호스트 영역·카드를 자동으로 배치합니다"><LayoutGrid size={13} /> 자동 배치</Button>
+          <Button variant="outline" size="sm" onClick={revert} disabled={!dirty} title="저장 시점으로 전부 되돌리기"><RotateCcw size={13} /> 되돌리기</Button>
+          <span className="mx-0.5 h-4 w-px bg-border" />
+          <Button variant={drawerTab === 'json' ? 'default' : 'outline'} size="sm" onClick={() => canvasRef.current?.toggleDrawer('json')} disabled={!doc} aria-pressed={drawerTab === 'json'} title="레코드 JSON 을 아래 패널에 열고 닫습니다 — 고치고 [적용]하면 캔버스가 바로 바뀝니다"><Braces size={13} /> 레코드</Button>
+          <Button variant={drawerTab === 'check' ? 'default' : 'outline'} size="sm" onClick={runCheck} disabled={!!checkReason || checking || !canWrite} aria-pressed={drawerTab === 'check'} title={checkReason ?? '저장된 레코드를 수신점 단위로 확인하고 결과를 아래 패널에 엽니다'}><PlugZap size={13} /> {checking ? '검사 중…' : '연결 검사'}</Button>
+          <span className="mx-0.5 h-4 w-px bg-border" />
+          {current && canDelete && <Button variant="outline" size="sm" className="text-destructive" onClick={del} title="이 토폴로지를 지웁니다(확인 창) — 이 토폴로지로 돌린 run 색인은 남습니다"><Trash2 size={13} /> 삭제</Button>}
           <Button variant="default" size="sm" onClick={save} disabled={!canWrite || saving || !doc || !!saveReason} title={saveReason ?? undefined}><Save size={13} /> {sel === NEW ? '생성' : '저장'}</Button>
         </div>
       </div>
@@ -177,18 +171,13 @@ export default function TesterTopologiesPage() {
         </ListRail>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {doc ? (
-            <TopologyCanvas key={sel === NEW ? 'new' : String(sel)} ref={canvasRef} doc={doc} onChange={H.set} onLayout={H.replace} onCommit={H.commit} check={check} checkStale={dirty} workers={workers} canWrite={canWrite} onFocusCheck={current && !dirty ? runCheck : undefined} paletteHost={leftTab === 'pal' ? palHost : null} />
+            <TopologyCanvas key={sel === NEW ? 'new' : String(sel)} ref={canvasRef} doc={doc} onChange={H.set} onLayout={H.replace} onCommit={H.commit} check={check} checkStale={dirty} workers={workers} canWrite={canWrite} onFocusCheck={current && !dirty ? runCheck : undefined} paletteHost={leftTab === 'pal' ? palHost : null} onDrawerState={setDrawerTab} />
           ) : (
             <div className="p-4"><EmptyState title={rows.length ? '왼쪽에서 토폴로지를 고르십시오' : '토폴로지가 없습니다'} description="[새 토폴로지…] 에서 프리셋(CIMS 한 호스트 / 일반 IMS / IP-PBX)을 골라 시작합니다 — 호스트 주소를 고치고 워커·대상 노드·풀을 끌어 놓으십시오. 예시 = 패키지 scenarios/topology.sample.yaml"
                                          action={<Button variant="default" size="sm" onClick={() => startNew('cims')} disabled={!canWrite}><Plus size={13} /> 새 토폴로지 (CIMS)</Button>} /></div>
           )}
         </div>
       </div>
-      {jsonOpen && doc && (
-        <Modal title={`레코드 JSON — ${doc.name || '(이름 없음)'}${current ? ` (#${current.id})` : ''}`} onClose={() => setJsonOpen(false)} width={940} height="min(76vh, calc(100vh - 80px))">
-          <TopologyJsonEditor doc={doc} onApply={d => { H.set(d); setJsonOpen(false) }} canWrite={canWrite} />
-        </Modal>
-      )}
     </div>
   )
 }
