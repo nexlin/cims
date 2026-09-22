@@ -818,7 +818,7 @@ function renderInput(f: ConfigTemplateField, value: FieldValue, onChange: (v: Fi
     // ip/port 등 구조화 항목 리스트. 값이 비면 빈 1행 표시 + [추가] 로 추가(최소 1행 유지).
  return (
       <ObjectListEditor field={f} value={value}
- onChange={(v) => onChange(v as FieldValue)} ensureOne />
+ onChange={(v) => onChange(v as FieldValue)} ensureOne={f.default === undefined} />
     )
   }
   // string / path

@@ -304,7 +304,7 @@
           "default": [],
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드.",
-          "help": "행 = 프로파일 하나의 상황 하나. 비면 내장 기본 표(default 프로파일: busy 화중음 4 s→안내, no_answer/unreachable 안내, not_found/invalid 없는번호 안내, declined 화중음 6 s, congestion 혼잡음 6 s, hold moh_simple loop, ringback none). 같은 프로파일에 없는 상황은 DefaultProfile 의 값, 그것도 없으면 none.",
+          "help": "행 = 프로파일 하나의 상황 하나. 내장 기본 표(default: busy 화중음 4 s→안내, no_answer/unreachable 안내, not_found/invalid 없는번호 안내, declined 화중음 6 s, congestion 혼잡음 6 s, hold moh_simple loop, forwarded 안내→링백, ringback none · trunk: 전부 none · ringback: 서버 링백 스위치 · cw_inband: in-band 통화중대기음)가 항상 깔리고, 여기 둔 행이 같은 (프로파일, 상황) 키의 내장 행을 덮어쓴다 — 바꿀 행만 두면 된다. 내장 행을 끄려면 같은 키에 none. 같은 프로파일에 없는 상황은 DefaultProfile 의 값, 그것도 없으면 none.",
           "item_schema": {
             "fields": [
               {

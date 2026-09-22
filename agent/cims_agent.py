@@ -671,8 +671,15 @@ def _pgrep_module(name: str):
        'networkd-dispatcher' 에 오매칭되므로 반드시 -x.
     2) `<stem>_app.py` cmdline 매칭(-f) — python 데몬(csc/oam/oam-svc). comm 이 python3 라 1)로
        안 잡힘. 패키지명(예: oam-svc)은 하이픈을 포함할 수 있으나 python 엔트리포인트 파일명은
-       언더스코어(oam_svc_app.py)이므로 stem 은 하이픈→언더스코어로 정규화한다."""
+       언더스코어(oam_svc_app.py)이므로 stem 은 하이픈→언더스코어로 정규화한다.
+    3) **설치 트리 소유 검사** — 이름이 맞아도 그 모듈의 설치 루트(supervised.json 의 install_path
+       가 가리키는 `…/<module>/` 또는 `DEFAULT_INSTALL_ROOT/<module>`) 밖에서 도는 프로세스는 이 모듈이
+       아니다(exe·cwd·스크립트 경로 중 하나가 루트 아래여야 한다). 같은 호스트에 소스 트리의
+       dev OAM(`oam_app.py`)이 동거하면 배포본 oam 이 내려가도 "실행 중"으로 보여 업그레이드가
+       module_running 409 로 막혔다(2026-09-18·09-22 실측). 설치 루트를 모르는 모듈(legacy)은
+       종전대로 이름만으로 판정한다."""
     script_stem = name.replace("-", "_")
+    roots = _module_roots(name)
     # comm(-x 매칭 대상)은 커널에서 **15자로 잘린다**(TASK_COMM_LEN=16, NUL 포함) — 이름이 15자를
     # 넘는 C++ 모듈(예: cims-tester-worker=18자 → comm 'cims-tester-wor')은 전체 이름으로 -x 하면
     # "0 matches" 경고와 함께 못 잡는다(false module_down). -x 는 잘린 comm 에 맞춰 15자로 자른다
@@ -692,8 +699,59 @@ def _pgrep_module(name: str):
                 # 매칭 프로세스의 명령이 pgrep 이면 모듈이 아니다 — 제외.
                 if os.path.basename(cmd.split()[0] if cmd else "") == "pgrep":
                     continue
+                if roots and not _proc_under_roots(int(parts[0]), cmd, roots):
+                    continue
                 return int(parts[0]), cmd
     return None
+
+
+def _module_roots(name: str) -> list:
+    """모듈의 설치 루트(실경로) 목록 — supervised.json install_path(`…/<module>/current` 또는 버전
+    디렉토리) 로부터 `_module_root_of` 로 정규화한 `…/<module>` + `DEFAULT_INSTALL_ROOT/<module>`.
+    둘 다 없으면 [] (legacy 평탄 설치 — 호출자는 이름만으로 판정)."""
+    roots = []
+    try:
+        ip = _load_supervised().get(name)
+        if isinstance(ip, str) and ip:
+            # current 심볼릭은 realpath 로 버전 디렉토리를 얻은 뒤 모듈 루트로 올린다
+            roots.append(_module_root_of(os.path.realpath(ip), name))
+    except Exception:
+        pass
+    d = os.path.join(DEFAULT_INSTALL_ROOT, name)
+    if os.path.isdir(d):
+        roots.append(d)
+    out = []
+    for r in roots:
+        rp = os.path.realpath(r)
+        if rp not in out:
+            out.append(rp)
+    return out
+
+
+def _proc_under_roots(pid: int, cmd: str, roots: list) -> bool:
+    """pid 가 roots 중 하나의 트리 안에서 도는가 — exe(C++ 바이너리) · cwd(python 데몬은 자기 src 에서
+    기동) · cmdline 의 스크립트 경로(절대 또는 cwd 상대) 중 하나가 루트 아래면 참."""
+    paths = []
+    cwd = ""
+    for link in ("exe", "cwd"):
+        try:
+            v = os.readlink(f"/proc/{pid}/{link}")
+        except OSError:
+            continue
+        if v.endswith(" (deleted)"):
+            v = v[:-len(" (deleted)")]
+        if link == "cwd":
+            cwd = v
+        paths.append(v)
+    for tok in (cmd or "").split():
+        if tok.endswith(".py"):
+            paths.append(tok if os.path.isabs(tok) else os.path.join(cwd, tok))
+    for pth in paths:
+        rp = os.path.realpath(pth)
+        for root in roots:
+            if rp == root or rp.startswith(root + os.sep):
+                return True
+    return False
 
 
 _HA_NOTIFY_LOG_DIR = os.environ.get("HA_LOG_DIR", "/var/log/cims-ha")

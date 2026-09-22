@@ -27,6 +27,24 @@ Monitor/Administer, Huawei U2000 Topo/Fault/Perf/Config, TM Forum eTOM Assurance
 - `services/registry.ts` — `SERVICE_MANIFESTS = [cimsManifest]`. 새 서비스는 매니페스트에 `area` 지정 섹션 추가.
 - 메뉴 override(순서/라벨/표시)는 `console_menu`(OAM 영속), 코드 SECTIONS 가 SoT.
 
+### 2.1 구성 › 가입자 (`/subscribers/workbench`) — 한 표 + 드로어
+
+가입자(person)와 회선(VoLTE·VoIP·PTT 가입 = 접속환경 kind)을 **한 화면**에서 다룬다(`ems/service/console/src/pages/ProvisioningWorkbenchPage.tsx`).
+조직 구조 편집은 구성 › 조직, 그룹 멤버십은 구성 › 전화 그룹/PTT 그룹, 역할 배정은 관리 › 역할이 맡고 이 화면은 그쪽으로 링크만 낸다.
+
+- **좌: 조직 트리 = 범위 필터**(`OrgTreePanel`, `code_path` 접두 매칭). 구조는 여기서 고치지 않는다.
+- **중: 한 표를 두 뷰로** — `가입자`(사람 행 · 회선 칩(종류 배지 + 등록 점, 칩 클릭 = 그 회선 카드로) · 부가서비스 요약 DND/착신전환/링백 · 등록 n/m) /
+  `회선`(번호 행 — 종류 필터 `전체·VoLTE·VoIP·PTT` 에 따라 **열이 바뀐다**: VoLTE = IMSI·인증·채널·DND·착신전환·링백, VoIP = 내선·전화 그룹(픽업)·채널·DND·착신전환·링백,
+  PTT = 소속 그룹·인증·채널). 검색은 이름·번호·내선·로그인ID. 가입자 뷰의 체크 선택 → 일괄 바(조직 이동 · 삭제).
+- **우: 드로어**(행 클릭) — 시트 2 에 Drawer 가 없어 알람 드로어와 같은 패턴(차단층 + 우측 고정 패널, Esc·바깥 클릭 닫기).
+  차단층은 Radix 팝오버(z-50)보다 아래(z-40)라 드로어 안 Select 가 열린 채로 동작한다. 헤더 = 이름·직함·조직·로그인ID; [기본정보] 를 누르면 **헤더 자리가
+  폼으로 바뀌고 아래 회선 카드는 그대로**(소속 조직 변경도 여기서). [가입자] 추가도 같은 자리에서 시작해 만들면 회선 추가로 이어진다.
+  탭 = `회선` / `역할 · 그룹`(읽기 전용 — 역할은 역할별 배정 목록에서 이 사람을 찾는다).
+- **회선 카드**(종류별) — 보기 = 종류에 맞는 항목만. [편집] = 접속서비스·IMSI·비밀번호(변경 시)·인증(Digest/AKA + K/OPc)·채널 정책(유선 = TLS 고정, AKA = TLS 강제) +
+  전화 회선은 **착신 처리**(DND · CFU · CFB · CFNR+시한 · CFNL — 응답에 컬럼이 없으면 조건부 항목이 숨는다)·**링백**(음원 라이브러리 select, WAV 업로드는 서비스 › 안내음성) +
+  PTT 회선은 **소속 그룹**(읽기)·**긴급(SOS)**(MCPTT 사용자 프로파일 — 긴급 그룹콜 대상은 소속 그룹 중 하나 또는 `현재 선택 그룹(단말)`, 개시 인가 3종, 긴급 사설콜 모드·수신자;
+  회선 PUT 뒤 프로파일 PUT). 카드 단위 저장·취소·삭제. **회선 추가**는 드로어 안 `+ VoLTE / + VoIP / + PTT` — 종류에 필요한 항목만 묻는다(누구의 회선인지 먼저 정해진 상태).
+
 ## 3. 위젯 합성 (page = 레이아웃)
 
 page 는 고정 화면이 아니라 **위젯 배치(PageLayout)**. `App.tsx` 의 `EditablePageHost` 가 **모든 route**

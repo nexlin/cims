@@ -333,7 +333,7 @@ UE 가 직접 REGISTER 하는 서비스 도메인. **`kind` 는 접속환경 클
 > `Provisioning.Services.<kind>` 는 단말 도달 정보(host·포트·transport·sms_gateway)만 보탠다(미러 미도달 시 폴백·도메인이 어긋나면
 > 드리프트 경고). 관제 앱 번호 개설 후보·IdMS 도메인 유도도 같은 경로다. 회선 `sip_transport` 는 kind 무관한 채널 정책 필드
 > (`TLS`=서버 집행, `UDP`/`TCP`=단말 힌트, NULL=ANY 단말 선택)이며 유선은 `TLS` 가 권장 기본값이다. 콘솔은 템플릿 enum·상태 화면
-> 라벨 `VoIP`·가입자 화면의 VoIP 번호 탭, 관제 앱의 전화 회선은 voip 우선([android_ue_provisioning.md §3](android_ue_provisioning.md)).
+> 라벨 `VoIP`·가입자 화면의 회선 뷰 VoIP 필터·VoIP 회선 카드, 관제 앱의 전화 회선은 voip 우선([android_ue_provisioning.md §3](android_ue_provisioning.md)).
 > 이동 서비스로 만들어진 기존 회선의 이관은 [volte_supplementary_services.md §10.3a](volte_supplementary_services.md).
 
 | 필드 | 의미 |

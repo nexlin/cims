@@ -293,9 +293,10 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
 
 - **그룹 편집(PttGroupsWorkbenchPage)**: capability 체크박스 — 긴급콜(condition 공통 게이트),
   긴급경보. (임박위험·ad-hoc 은 별도 축을 두지 않는다 — §2.)
-- **사용자(ProvisioningWorkbench)**: 사용자 상세에 PTT 번호별 **MCPTT 프로파일 행** — SOS 대상
-  모드(`전용 긴급그룹`/`선택 그룹(주채널)`)·전용 긴급그룹 선택·인가 4종(긴급콜/경보/애드혹/
-  긴급 사설콜) 편집. 긴급 사설콜 인가 시 **사설 대상**(`단말 선택 상대`/`사전지정 수신자`)과
+- **가입자(ProvisioningWorkbench)**: 드로어의 **PTT 회선 카드 › 긴급(SOS) 섹션**(PTT 번호 = MCPTT ID 단위 프로파일을
+  카드 안에 품는다 — 별도 프로파일 행 없음) — 긴급 그룹콜 대상 select(`현재 선택 그룹(단말)` = `UseCurrentlySelectedGroup`,
+  소속 그룹 하나 = `DedicatedGroup` — 후보는 그 PTT 번호가 멤버인 그룹만, 미소속 값은 `(미소속)` 으로 표시)·인가 4종(긴급콜/경보/애드혹/
+  긴급 사설콜) 편집. 회선 항목과 함께 저장(회선 PUT 뒤 프로파일 PUT). 긴급 사설콜 인가 시 **사설 대상**(`단말 선택 상대`/`사전지정 수신자`)과
   `UsePreConfigured` 의 지정 수신자(PTT 번호 — 저장 시 서버 존재검증 400)까지 편집.
   `DedicatedGroup` 저장 시 긴급그룹 지정 필수화(미지정은 "SOS 불발" 경고 배지),
   `UsePreConfigured` 저장 시 수신자 필수화(미지정은 "긴급 사설콜 불발" 배지).
@@ -346,7 +347,7 @@ UE(권한자) ──re-INVITE(emergency-ind=false)──▶ CSP → PTT_FLOOR_TI
 - psip: `ext/psip/SipUserAgent`(2단계 API — `CreateReInvite`·`AcceptCall(…, CSipMessage**)`: 생성/전송 분리로 mcptt-info multipart 부가 지점 제공)
 - CSC: `csc/src/services/mcptt.py`(XCAP DB연동), `csc/src/handlers/admin.py`(CRUD·user 프로파일)
 - 콘솔: `ems/core/console/src/api/{groups,users}.ts`, `.../pages/PttGroupsWorkbenchPage.tsx`,
-  `ems/service/console/src/pages/ProvisioningWorkbenchPage.tsx`(MCPTT 프로파일 행)
+  `ems/service/console/src/pages/ProvisioningWorkbenchPage.tsx`(PTT 회선 카드 긴급 섹션)
 - 단말: `android/ptt-client/.../PttController.kt`(SOS 대상 결정·403 폴백·user-profile 파싱·
   세션 긴급 latch), `ChannelStore.kt`(lastPrimary),
   `android/core/.../sip/{SipController,CimsCall}.kt`(emergencyDenied·sessionEmergency 관측)

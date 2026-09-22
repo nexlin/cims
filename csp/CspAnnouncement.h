@@ -68,7 +68,7 @@ class CCspAnnouncementService {
 public:
     CCspAnnouncementService();
 
-    /** Setup.Announcement 해석 — 기동·SIGUSR1 재로드에서 부른다. Rules 가 비면 내장 기본 표(§6.1). */
+    /** Setup.Announcement 해석 — 기동·SIGUSR1 재로드에서 부른다. 내장 기본 표 위에 Rules 행을 (profile, situation) 키로 덮어쓴다(§6.1). */
     void Init();
     bool IsEnabled() const;
 

@@ -189,6 +189,7 @@ ssh-free 운영을 위한 두 축 — **raw metric 시계열**(통계/알람)과
 
 1. `pgrep -ax <name>` — C++ 데몬(csp/cmp/isp, comm 정확 매칭).
 2. `pgrep -af <stem>_app.py` — python 데몬(csc/oam/oam-svc, comm 이 `python3` 라 1)로 안 잡힘). 패키지명은 하이픈을 가질 수 있으나(`oam-svc`) python 엔트리포인트 파일명은 언더스코어(`oam_svc_app.py`)이므로 `<stem>` 은 모듈명의 하이픈을 언더스코어로 정규화한 값이다. `-f` 매칭 결과 중 명령이 `pgrep` 자신인 프로세스는 제외한다 — 같은 호스트의 다른 agent 가 동시에 돌린 같은 패턴의 pgrep 을 잡으면 유령 "실행 중"→다음 tick 소멸로 `process_died` 오탐이 나기 때문.
+3. **설치 트리 소유 검사** — 1)·2) 로 잡힌 프로세스라도 그 모듈의 설치 루트(`supervised.json` 의 install_path → `…/<module>/`, 또는 `DEFAULT_INSTALL_ROOT/<module>`) 밖에서 돌면 이 모듈로 세지 않는다. 판정 근거는 `/proc/<pid>/exe`(C++ 바이너리)·`/proc/<pid>/cwd`(python 데몬은 자기 `src` 에서 기동)·cmdline 의 `.py` 경로 중 하나가 루트 아래인지다. 같은 호스트에 소스 트리의 dev OAM(`oam_app.py`)이 동거하면 배포본 `oam` 이 내려가도 `live_state=up` 으로 남아 업그레이드가 `module_running` 409 로 막혔던 것을 막는다. 설치 루트를 모르는 모듈(legacy 평탄 설치)은 이름만으로 판정한다(종전 동작).
 
 탐지 대상 = **agent 가 설치한 모듈만**(설치 루트 enumerate ∪ `supervised.json`) − 비데몬(`agent`/`console`). 고정 기본 집합은 두지 않는다 — pgrep 은 호스트 전역이라 미설치 모듈까지 감시하면 동거 프로세스 오귀속·유령 전이(`process_died` 오탐)의 원천이 된다. 설치 모듈을 동적 enumerate 하므로 isp 등 변종 모듈도 누락 없이 보고 → OAM 의 `module_down` alert 오탐 방지.
 

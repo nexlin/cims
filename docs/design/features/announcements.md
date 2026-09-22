@@ -329,14 +329,15 @@ CallMap 은 relay 서술자와 `m_strAnnProfile` 만 갖는다. 링백 entry(최
 
 - **프로파일 표 = `Rules` 행의 집합** — 행 하나가 프로파일 하나의 상황 하나(`{profile, situation, mode, tone, tone_ms, media, repeat, loop}`). 콘솔은 `object_list` 로 편집한다
   (맵-오브-맵은 콘솔 필드 형식에 없다). 같은 프로파일에 없는 상황은 `DefaultProfile` 의 값, 그것도 없으면 `none`.
-- `Rules` 가 비면(키 없음·빈 배열) **내장 기본 표** — `default`(§2 표의 기본 동작 그대로 — busy 화중음 4 s→안내, no_answer/unreachable 안내, not_found/invalid 없는번호 안내,
+- **내장 기본 표가 항상 깔리고 `Rules` 행이 같은 `(profile, situation)` 키의 내장 행을 덮어쓴다** — 운영자는 바꿀 행만 두면 되고, 접속서비스가
+  이름으로 참조하는 내장 프로파일이 행 하나를 추가해도 사라지지 않는다. 내장 행을 끄려면 같은 키에 `mode: none`. 내장 표 = `default`(§2 표의 기본 동작 그대로 — busy 화중음 4 s→안내, no_answer/unreachable 안내, not_found/invalid 없는번호 안내,
   declined 화중음 6 s, congestion 혼잡음 6 s, hold moh_simple loop, **forwarded = announce_then_tone ann_forwarded → ringback_kr**(§3.5), ringback/forbidden/call_waiting none) + `trunk`(전부 none — NNI 관례) +
   `cw_inband`(착신자 `hold_profile` 로 고르는 망 in-band 통화중대기음 — `call_waiting_alert: tone sys:call_waiting_kr` 한 행, §3.6) +
   `ringback`(서버 링백 스위치 — `ringback: media sys:ringback_kr loop` 한 행, 나머지 상황은 `default` 로 떨어진다. 접속서비스 `announcement_profile: ringback` 이
   §3.4 를 켜는 가장 짧은 길이고, 음원은 §6.3 가입자 값이 덮는다).
 - `tone_ms` 는 신호음 loop 길이(신호음 파일은 주기 1~2회 분량이라 CMP 가 항목 `repeat 0 + max_ms` 로 돈다). `media` 의 `repeat` 기본 1, hold/ringback 은 `loop`.
 - 검증: 모르는 상황·mode 는 건너뛰거나 `none` 으로 낮추고 ERROR 로그(설정 오류가 통화 장애로 번지지 않게). `Enable=false` 또는 CMP `resource.ann` 미광고 = 전 상황 `none`.
-- 콘솔 편집 = `config_template.json` 섹션 `announcement`(scope service). SIGUSR1 재로드(`CCspAnnouncementService::Init`).
+- 콘솔 편집 = `config_template.json` 섹션 `announcement`(scope service) — `Rules` 표는 비워 둘 수 있다(기본값 `[]` 인 object_list 는 마지막 행도 지운다). SIGUSR1 재로드(`CCspAnnouncementService::Init` — 내장 표 로드 → 운영자 행 덮어쓰기, 기동 로그 `built-in N + operator M rule(s)`).
 
 ### 6.2 접속서비스 override (`access_services`)
 
@@ -360,7 +361,8 @@ TS 29.165) 를 본다. 어느 것도 없으면 `DefaultProfile`.
 - `CCspAnnouncementService::OnRingback` 이 프로파일 동작을 고른 뒤 피착신 `CspUser` 의 값이 있으면 `media` 만 바꾼다.
 - **가입자 WAV 업로드(`sub:`)** — 라이브러리 API `POST /api/v1/announcements?scope=sub&id=<가입 번호 숫자열>`(§7.3)이 `sub:<숫자열>`(E.164 의 `+` 를 뗀 것 — CSC
   `ringback_media` 형식 `[a-z0-9_]`)로 등록하고 `<store>/announcements/sub/` 에 두며 CMP 배포는 op 와 같다. 콘솔 `/service/announcements` [가입자 링백…] 이 WAV 를 올린 뒤
-  그 번호의 전화 회선(call|voip)을 찾아 `ringback_media=sub:<숫자열>` 을 PUT 한다(음원과 회선 지정을 한 번에). 삭제는 op 와 같고 회선 값은 그대로 남는다(음원이 없으면 CMP
+  그 번호의 전화 회선(call|voip)을 찾아 `ringback_media=sub:<숫자열>` 을 PUT 한다(음원과 회선 지정을 한 번에). 기존 음원(`sys:`/`op:`/`sub:`)을 고르거나 비우는 것은
+  가입자 화면 드로어의 회선 카드 [편집] › 링백(라이브러리 목록 select — 컬럼 미적용 DB 는 항목이 숨는다). 삭제는 op 와 같고 회선 값은 그대로 남는다(음원이 없으면 CMP
   `MEDIA_NOT_FOUND` → 프로파일 폴백 없이 링백 없음 — 삭제 뒤 회선 값을 비우는 것은 운영 절차).
 
 ## 7. 서비스 음원 라이브러리

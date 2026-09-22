@@ -309,7 +309,7 @@ public:
     bool m_bAnnEnable = true;
     int m_iAnnMaxPlayMs = 30000;
     std::string m_strAnnDefaultProfile = "default";
-    std::string m_strAnnRulesJson;  // Setup.Announcement.Rules 배열 원문(비면 내장 기본 표)
+    std::string m_strAnnRulesJson;  // Setup.Announcement.Rules 배열 원문(내장 기본 표 위에 덮어쓰는 운영자 행)
 
     // ================================================================
     // CMDP(MCData Media Plane, MSRP) 연동 설정 — Setup.McDataMedia.*

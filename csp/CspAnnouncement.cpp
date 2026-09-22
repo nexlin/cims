@@ -80,7 +80,8 @@ EAnnSituation CCspAnnouncementService::SituationOf( const std::string &strName )
     return ANN_SIT_NONE;
 }
 
-// 내장 기본 표 (announcements.md §6.1 `default`·`trunk`·`ringback` 프로파일) — Rules 가 비었을 때
+// 내장 기본 표 (announcements.md §6.1 `default`·`trunk`·`ringback`·`cw_inband` 프로파일) — 항상 깔리고, 운영자 Rules 가
+// (profile, situation) 키로 덮어쓴다
 static const char *kDefaultRules =
     "[{\"profile\":\"default\",\"situation\":\"ringback\",\"mode\":\"none\"},"
     "{\"profile\":\"default\",\"situation\":\"busy\",\"mode\":\"tone_then_announce\",\"tone\":\"sys:busy_kr\",\"tone_"
@@ -122,21 +123,20 @@ CCspAnnouncementService::CCspAnnouncementService() {
 
 void CCspAnnouncementService::Init() {
     std::map<std::string, std::map<int, CAnnAction>> mapRules;
-    // Rules 가 비어 있으면(키 없음 또는 빈 배열) 내장 기본 표
-    std::string strRules = gclsSetup.m_strAnnRulesJson;
-    if ( strRules.find_first_not_of( " []\t\r\n" ) == std::string::npos ) strRules.clear();
-    const std::string strJson = strRules.empty() ? std::string( kDefaultRules ) : strRules;
-    SimpleJson::JsonNode arr = SimpleJson::JsonNode::Parse( strJson );
-    int n = 0;
-    if ( arr.type == SimpleJson::JSON_ARRAY ) {
+    // 내장 기본 표를 먼저 깔고, 운영자 Rules 행을 (profile, situation) 키로 그 위에 덮어쓴다(announcements.md §6.1).
+    //   운영자는 바꿀 행만 두면 되고, 내장 프로파일(default·trunk·ringback·cw_inband)은 이름 참조가 끊기지 않는다.
+    //   내장 행을 끄려면 같은 키에 mode none 을 둔다.
+    int nBuiltin = 0, nOperator = 0;
+    auto loadRows = [&]( const SimpleJson::JsonNode &arr, bool bOperator, int &nCount ) {
         for ( size_t i = 0; i < arr.Size(); ++i ) {
             SimpleJson::JsonNode row = arr.At( i );
             if ( row.type != SimpleJson::JSON_OBJECT ) continue;
             std::string strProfile = row.GetString( "profile", "default" );
             EAnnSituation eSit = SituationOf( row.GetString( "situation" ) );
             if ( eSit == ANN_SIT_NONE ) {
-                CLog::Print( LOG_ERROR, "Announcement: rule #%zu unknown situation '%s' — skipped", i,
-                             row.GetString( "situation" ).c_str() );
+                if ( bOperator )
+                    CLog::Print( LOG_ERROR, "Announcement: rule #%zu unknown situation '%s' — skipped", i,
+                                 row.GetString( "situation" ).c_str() );
                 continue;
             }
             CAnnAction a;
@@ -161,32 +161,28 @@ void CCspAnnouncementService::Init() {
                 a.strMode = "none";
             // announce_then_tone 의 신호음이 비면 안내만(2 단계는 ringback 규칙으로)
             mapRules[strProfile][(int)eSit] = a;
-            ++n;
+            ++nCount;
         }
-    } else {
-        CLog::Print( LOG_ERROR, "Announcement: Setup.Announcement.Rules is not an array — using built-in defaults" );
-        SimpleJson::JsonNode def = SimpleJson::JsonNode::Parse( kDefaultRules );
-        for ( size_t i = 0; i < def.Size(); ++i ) {
-            SimpleJson::JsonNode row = def.At( i );
-            CAnnAction a;
-            a.strMode = row.GetString( "mode", "none" );
-            a.strTone = row.GetString( "tone" );
-            a.iToneMs = (int)row.GetInt( "tone_ms", 4000 );
-            a.strMedia = row.GetString( "media" );
-            a.iRepeat = (int)row.GetInt( "repeat", 1 );
-            a.bLoop = row.GetString( "loop" ) == "true";
-            mapRules[row.GetString( "profile", "default" )][(int)SituationOf( row.GetString( "situation" ) )] = a;
-            ++n;
-        }
+    };
+    loadRows( SimpleJson::JsonNode::Parse( kDefaultRules ), false, nBuiltin );
+    std::string strRules = gclsSetup.m_strAnnRulesJson;
+    if ( strRules.find_first_not_of( " []\t\r\n" ) == std::string::npos ) strRules.clear();
+    if ( !strRules.empty() ) {
+        SimpleJson::JsonNode arr = SimpleJson::JsonNode::Parse( strRules );
+        if ( arr.type == SimpleJson::JSON_ARRAY )
+            loadRows( arr, true, nOperator );
+        else
+            CLog::Print( LOG_ERROR, "Announcement: Setup.Announcement.Rules is not an array — built-in table only" );
     }
     std::lock_guard<std::mutex> lock( m_mtx );
     m_mapRules = mapRules;
     m_bEnabled = gclsSetup.m_bAnnEnable;
     m_iMaxPlayMs = gclsSetup.m_iAnnMaxPlayMs > 0 ? gclsSetup.m_iAnnMaxPlayMs : 30000;
     m_strDefaultProfile = gclsSetup.m_strAnnDefaultProfile.empty() ? "default" : gclsSetup.m_strAnnDefaultProfile;
-    CLog::Print( LOG_SYSTEM, "Announcement: %s — %d rule(s), %zu profile(s), default='%s', max=%dms (%s)",
-                 m_bEnabled ? "enabled" : "disabled", n, m_mapRules.size(), m_strDefaultProfile.c_str(), m_iMaxPlayMs,
-                 strRules.empty() ? "built-in table" : "Setup.Announcement.Rules" );
+    CLog::Print( LOG_SYSTEM,
+                 "Announcement: %s — built-in %d + operator %d rule(s), %zu profile(s), default='%s', max=%dms",
+                 m_bEnabled ? "enabled" : "disabled", nBuiltin, nOperator, m_mapRules.size(),
+                 m_strDefaultProfile.c_str(), m_iMaxPlayMs );
 }
 
 bool CCspAnnouncementService::IsEnabled() const {

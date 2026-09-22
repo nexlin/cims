@@ -263,6 +263,7 @@ UE-A ◄── 180(같은 SDP) · 200 ◄────────── 180 · 2
 - **대상 제한** = 등록 가입자만(`gclsUserMap.Select`). 피어·미등록 대상은 원코드로 끝낸다(후속). 대상의 DND·착신거부는 종단 서비스가 우선(전환하지 않음). 루프(대상이 History-Info 에 이미 있음·자기 자신·원발신자)는 원코드.
 - **CFNR 시한** = `CCallInfo::m_iNoReplyDeadline`(B-leg entry) — `Tick`(CspServer 1 s 루프)이 만료 leg 를 `TryDivertLeg(bNoReplyTimer)` 로 전환한 뒤 원착신 leg 를 CANCEL 한다(CallMap 에서 먼저 뺐으므로 그 487 은 아무 것도 하지 않는다). B 가 응답(확립)하면 시한은 무시된다.
 - CSC: `POST/PUT /users/{pid}/{call|voip}/{msisdn}` 의 `forward_busy_id`·`forward_no_reply_id`·`forward_no_reply_sec`(0~120)·`forward_not_logged_in_id` — 키가 있을 때만 바꾸고(부분 업데이트), 컬럼 없는 DB 는 400 `schema_not_migrated`. 목록·단건 응답에 실린다(컬럼 있을 때).
+- 콘솔: 가입자 화면(`/subscribers/workbench`) 드로어의 VoLTE/VoIP 회선 카드 [편집] › **착신 처리**(DND · CFU · CFB · CFNR+시한 · CFNL — 번호 형식·시한 0~120 검사, 응답에 컬럼이 없으면 조건부 항목이 숨는다) — 회선 뷰 표의 착신전환 열은 네 가지를 요약한다.
 - 계측기: subscriber 픽스처 `forward_busy_to`·`forward_no_reply_to`(+`no_reply_sec`)·`forward_not_logged_in_to`, 단계 `no_answer`(링잉만 — 망의 CANCEL 이 정상), reject 뒤 다른 역할 착신 = 전환으로 인식(`cdiv_after_reject`), prelude `deregister`(register 뒤 곧바로 내려 미등록 착신 역할 — 앞선 run 의 바인딩이 3600 s 남기 때문) → `VOLTE-ANN-FORWARD-BUSY`·`-NOREPLY`·`-NOTLOGGEDIN`. CFNL 의 등록 판정은 등록 바인딩(`CUserMap::Select`) — `CspUserMap::isAlive` 는 REGISTER 시각 + `UserTimeout` 이라 해제 뒤에도 한동안 참이다.
 
 **후속(범위 밖)** — 피어·미등록 대상으로의 조건부 전환(재라우팅 판정을 B-leg 실패 지점에서 다시 해야 한다 — 원 INVITE 컨텍스트 보존), 전환자 통지(TS 24.604 `comm-div-info` 이벤트 패키지), `Privacy: history`.
@@ -456,7 +457,7 @@ ALTER TABLE ptt_subscriptions   ADD COLUMN pickup_group VARCHAR(64) NULL DEFAULT
 `service_ref` 는 kind=voip 접속서비스여야 한다(다른 kind → 400 `service_kind_mismatch`, 비면 400). 번호는 volte·voip·ptt 테이블과
 대표번호에 걸쳐 유일하다(409 `number_exists`). `pickup_group` 은 payload 에 두지 않는다 — 전화 그룹 멤버십
 (`/api/v1/phone-groups/{id}/members`)에서 파생되며 직접 지정은 409 다([dispatch_center.md §3.2](dispatch_center.md)). 반영은 기존
-`USER_CHANGED` UDP 통지 경로. 표시 이름은 `users.name`, 내선 라벨은 프로비저닝 `extension`. 콘솔 가입자 화면의 VoIP 번호 탭·
+`USER_CHANGED` UDP 통지 경로. 표시 이름은 `users.name`, 내선 라벨은 프로비저닝 `extension`. 콘솔 가입자 화면의 VoIP 회선 카드·
 관제 앱 [관리] 의 VoIP 회선 폼이 이 API 를 쓴다([admin_api.md §4a](../../api/admin_api.md)).
 
 ### 10.3a 기존 회선의 `voip` 이관
