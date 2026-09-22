@@ -218,6 +218,10 @@ public:
     /** RFC 3262 100rel — 발신 INVITE 에 Supported/Require: 100rel 을 싣고 RSeq 있는 1xx 에 PRACK 을 낸다. */
     void SetPrack(bool b) { m_bPrack = b; }
     bool m_bPrack = false;
+    /** 통화중대기(TS 24.615) — 통화 중 두 번째 착신을 486 대신 180 으로 받아 보류(deferred)한다. 워커 `call_waiting` 풀 옵션.
+     *  RejectCall 로 거절할 수 있고, 응답(AnswerCall)은 첫 통화의 보류가 필요해 지원하지 않는다 */
+    void SetCallWaiting(bool b) { m_bCallWaiting = b; }
+    bool m_bCallWaiting = false;
     /** RFC 4733 telephone-event — 오퍼에 싣고(PT 101, 코덱 클록) answer 는 오퍼 것을 echo. SendDtmf 의 전제. */
     void SetDtmf(bool b) { m_bDtmf = b; }
     bool m_bDtmf = false;

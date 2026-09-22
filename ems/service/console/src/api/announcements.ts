@@ -9,9 +9,9 @@ export type AnnCodec = 'pcmu' | 'pcma' | 'g722' | 'amr-wb'
 export type NodePresence = 'ok' | 'partial' | 'missing' | 'unreachable'
 
 export interface AnnRow {
-  id: string                 // sys:<name> | op:<name>
+  id: string                 // sys:<name> | op:<name> | sub:<가입 번호 숫자열>
   name: string
-  source: 'bundled' | 'operator'
+  source: 'bundled' | 'operator' | 'subscriber'
   kind: AnnKind
   description: string
   duration_ms: number
@@ -36,7 +36,7 @@ export interface AnnNode {
   error?: string
 }
 export interface AnnListResult { media: AnnRow[]; converter: boolean; store_dir: string; bundled_catalog?: string | null; nodes?: AnnNode[] }
-export interface AnnRegisterOpts { id: string; kind: AnnKind; description?: string; loop?: boolean; normalize?: number | null; replace?: boolean }
+export interface AnnRegisterOpts { id: string; kind: AnnKind; description?: string; loop?: boolean; normalize?: number | null; replace?: boolean; scope?: 'op' | 'sub' }
 export type DeployResult = Record<string, { pushed: string[]; errors: string[]; signaled?: unknown; error?: string }>
 
 /** 마스터 청취 — 인증 헤더가 필요하므로 <audio src> 대신 fetch → Blob URL */
@@ -54,6 +54,7 @@ export const announcementsApi = {
     if (o.loop) q.set('loop', '1')
     if (o.normalize != null) q.set('normalize', String(o.normalize))
     if (o.replace) q.set('replace', '1')
+    if (o.scope) q.set('scope', o.scope)
     const res = await fetch(`/api/v1/announcements?${q.toString()}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', ...authHeaders() }, body: file })
     const data = await res.json().catch(() => ({}))
     if (!res.ok) throw new Error((data as { detail?: string; error?: string }).detail || (data as { error?: string }).error || `HTTP ${res.status}`)

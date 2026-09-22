@@ -12,7 +12,13 @@ export interface Subscription {
   auth_id?: string    // legacy — P8 에서 제거됨(백엔드 미반환). imsi 로 대체.
   passwd?: string
   dnd: boolean
-  forward_id: string
+  forward_id: string                 // 착신전환 CFU 대상(TS 24.604 — 서버측 전환, volte_supplementary_services.md §6A)
+  // 조건부 전환(§6A.4, migrate_subscription_cdiv.sql — 미적용 DB 는 응답에 없다): 통화중 / 무응답(시한 초, 0 = 서버 기본) / 미등록
+  forward_busy_id?: string
+  forward_no_reply_id?: string
+  forward_no_reply_sec?: number
+  forward_not_logged_in_id?: string
+  ringback_media?: string | null      // 가입자 링백 음원 id sys:|op:|sub: (announcements.md §6.3)
   service_ref?: string | null   // 소속 서비스(access_services.name, 예: volte/mcptt) — 도메인 결정
   service_id?: number | null    // (구) 숫자 service_id 호환
   imsi?: string | null          // SIM IMSI — 인증 username 의 user 파트. 번호 add 시 필수.

@@ -21,8 +21,8 @@ from ...context import VerifyContext
 
 _ID = "S1-UNIT-CMP"
 _NAME = "CMP 미디어 유닛 단위시험 (tests/cmp_transcoder_test.cpp 트랜스코더 · tests/cmp_ann_player_test.cpp 안내 재생기)"
-_TESTS = ["tests/cmp_transcoder_test.cpp", "tests/cmp_ann_player_test.cpp"]
-_SRCS = ["cmp/PTranscoder.cpp", "cmp/PAnnCatalog.cpp", "cmp/PAnnPlayer.cpp"]
+_TESTS = ["tests/cmp_transcoder_test.cpp", "tests/cmp_ann_player_test.cpp", "tests/cmp_ann_mixer_test.cpp"]
+_SRCS = ["cmp/PTranscoder.cpp", "cmp/PAnnCatalog.cpp", "cmp/PAnnPlayer.cpp", "cmp/PAnnMixer.cpp"]
 _INCS = ["cmp", "include", "pkg/opencore-amr/include/opencore-amrwb", "pkg/vo-amrwbenc-0.1.3/include/vo-amrwbenc"]
 _LIBS = ["pkg/opencore-amr/lib/libopencore-amrwb.a", "pkg/vo-amrwbenc-0.1.3/lib/libvo-amrwbenc.a"]
 

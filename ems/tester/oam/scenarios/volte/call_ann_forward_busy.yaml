@@ -1,0 +1,21 @@
+# 통화중 착신전환 CFB(TS 24.604, volte_supplementary_services.md §6A.4) — served 회선에 forward_busy_id(=target)를 두고 served 가 486 으로 거절하면
+#   CSP 가 같은 A-leg·relay 위에 target 으로 새 B-leg 를 낸다(181, History-Info <served>;index=1, <target;cause=486>;index=1.1;mp=1, 전환 안내 → 링백).
+#   워커는 reject 뒤 발신자 최종 응답 대신 target 착신이 오면 전환으로 보고 다음 단계로 간다(cdiv_after_reject). 픽스처 시나리오 — --instances 1.
+id: VOLTE-ANN-FORWARD-BUSY
+title: 통화중 전환(CFB) → 486 거절 → 181 → 전환 안내 → target 200
+tags: [volte, announcement, cdiv]
+roles:
+  caller: { pool: volte_ue }
+  served: { pool: volte_ue, disjoint_from: caller }
+  target: { pool: volte_ue, disjoint_from: served }
+flow:
+  - { step: register,   who: [caller, served, target], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: served, media: { audio: amr-wb, rtp: explicit },
+      expect: { code: 200, cdiv_181_pct: 100, cdiv_hi_pct: 100, early_media_pct: 100, early_rtp_pct: 100 } }
+  - { step: reject,     who: [served], after_ms: 1000, payload: "486" }
+  - { step: answer,     who: [target], after_ms: 7000, expect: { code: 200, srd_ms: { p95: 12000 } } }
+  - { step: media_send, who: [caller, target] }
+  - { step: media_hold, seconds: 2, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }
+fixtures:
+  cfb: { kind: subscriber, roles: [served], forward_busy_to: target }

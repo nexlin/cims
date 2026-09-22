@@ -1357,11 +1357,12 @@ void CCmpClient::HandleEvent( const SimpleJson::JsonNode &event ) {
 bool CCmpClient::PlayAnnouncement( const std::string &strSessionId, int iPeerIdx, const std::string &strPlayId,
                                    const std::vector<AnnItem> &vecItems, int iRepeat, int iDelayMs, int iMaxMs,
                                    const std::string &strSesId, const std::string &strService, int &iDurationMs,
-                                   std::string &strErrCode ) {
+                                   std::string &strErrCode, const std::string &strMode ) {
     strErrCode.clear();
     iDurationMs = 0;
     SimpleJson::JsonNode req;
     req.Set( "cmd", "RELAY_PLAY" );
+    if ( !strMode.empty() && strMode != "replace" ) req.Set( "mode", strMode );
     req.Set( "session_id", strSessionId );
     req.Set( "peer_index", iPeerIdx );
     req.Set( "play_id", strPlayId );

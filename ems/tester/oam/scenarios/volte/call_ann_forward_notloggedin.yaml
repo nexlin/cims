@@ -1,0 +1,21 @@
+# 미등록 착신전환 CFNL(TS 24.604, volte_supplementary_services.md §6A.4) — served 는 등록한 뒤 곧바로 해제(prelude deregister — 앞선 run 의 등록 바인딩(3600 s)을
+#   지우기 위해서다)하고 forward_not_logged_in_id(=target)를 둔다. INVITE 시점에 served 가 미등록이므로 CSP 가 곧바로 target 으로 B-leg(181·History-Info cause=404·
+#   전환 안내 → 링백). 픽스처 시나리오 — --instances 1.
+id: VOLTE-ANN-FORWARD-NOTLOGGEDIN
+title: 미등록 전환(CFNL) → 181 → 전환 안내 → target 200
+tags: [volte, announcement, cdiv]
+roles:
+  caller: { pool: volte_ue }
+  served: { pool: volte_ue, disjoint_from: caller }
+  target: { pool: volte_ue, disjoint_from: served }
+flow:
+  - { step: register,   who: [caller, served, target], expect: { code: 200 } }
+  - { step: deregister, who: [served] }
+  - { step: invite,     from: caller, to: served, media: { audio: amr-wb, rtp: explicit },
+      expect: { code: 200, cdiv_181_pct: 100, cdiv_hi_pct: 100, early_media_pct: 100, early_rtp_pct: 100 } }
+  - { step: answer,     who: [target], after_ms: 7000, expect: { code: 200, srd_ms: { p95: 9000 } } }
+  - { step: media_send, who: [caller, target] }
+  - { step: media_hold, seconds: 2, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }
+fixtures:
+  cfnl: { kind: subscriber, roles: [served], forward_not_logged_in_to: target }

@@ -312,6 +312,54 @@ void CCallMap::SetAnnProfile( const char *pszCallId, const std::string &strProfi
     m_clsMutex.release();
 }
 
+void CCallMap::SetCdivInfo( const char *pszCallId, const std::string &strHistoryInfo, int iHops,
+                            const std::string &strServed ) {
+    m_clsMutex.acquire();
+    auto apply = [&]( CALL_MAP::iterator it ) {
+        if ( it == m_clsMap.end() ) return;
+        it->second.m_strHistoryInfo = strHistoryInfo;
+        it->second.m_iCdivHops = iHops;
+        it->second.m_strCdivServed = strServed;
+    };
+    auto it = m_clsMap.find( pszCallId );
+    std::string strPeer;
+    if ( it != m_clsMap.end() ) {
+        strPeer = it->second.m_strPeerCallId;
+        apply( it );
+    }
+    if ( !strPeer.empty() ) apply( m_clsMap.find( strPeer ) );
+    m_clsMutex.release();
+}
+
+void CCallMap::SetNoReplyDeadline( const char *pszCallId, time_t tDeadline ) {
+    m_clsMutex.acquire();
+    auto it = m_clsMap.find( pszCallId );
+    if ( it != m_clsMap.end() ) it->second.m_iNoReplyDeadline = tDeadline;
+    m_clsMutex.release();
+}
+
+bool CCallMap::FindEstablishedLegFor( const std::string &strUser, std::string &strCallId, CCallInfo &clsInfo,
+                                      int &iPeerIdx ) {
+    if ( strUser.empty() ) return false;
+    bool bRes = false;
+    m_clsMutex.acquire();
+    for ( auto it = m_clsMap.begin(); it != m_clsMap.end(); ++it ) {
+        const CCallInfo &c = it->second;
+        if ( !c.m_bEstablished || c.m_strRelaySessionId.empty() ) continue;
+        // 그 가입자 쪽 leg = 수신 leg(m_bRecv) 이면 relay caller, 발신 leg 이면 relay callee
+        const bool bUserIsCaller = ( c.m_strRelayCaller == strUser && c.m_bRecv );
+        const bool bUserIsCallee = ( c.m_strRelayCallee == strUser && !c.m_bRecv );
+        if ( !bUserIsCaller && !bUserIsCallee ) continue;
+        strCallId = it->first;
+        clsInfo = c;
+        iPeerIdx = bUserIsCaller ? 0 : 1;
+        bRes = true;
+        break;
+    }
+    m_clsMutex.release();
+    return bRes;
+}
+
 void CCallMap::SetCallWaiting( const char *pszCallId, bool bCw ) {
     m_clsMutex.acquire();
     auto apply = [&]( CALL_MAP::iterator it ) {

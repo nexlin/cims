@@ -147,6 +147,25 @@ bool PAnnPlayer::_advance() {
     return true;
 }
 
+bool PAnnPlayer::nextPayload(std::string& payload) {
+    payload.clear();
+    if (_done || _items.empty()) return false;
+    _started = true;
+    const int step = PAnnCatalog::TsStep(_codec);
+    if (_delayFramesLeft > 0) {
+        --_delayFramesLeft;
+        _ts += (uint32_t)step;
+        ++_elapsedFrames;
+        if (_maxMs > 0 && _elapsedFrames * kFrameMs >= _maxMs) { _done = true; _reason = "max"; }
+        return !_done;
+    }
+    const std::vector<std::string>& frames = _items[_item].media->frames.at(_codec);
+    payload = frames[_frame];
+    if (!payload.empty()) ++_sent;
+    _advance();
+    return true;
+}
+
 void PAnnPlayer::tick(int64_t nowUs, std::vector<std::string>& pkts) {
     if (_done || _items.empty()) return;
     if (!_ticked) { _ticked = true; _firstTickUs = nowUs; }

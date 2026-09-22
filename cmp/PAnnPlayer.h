@@ -43,6 +43,11 @@ public:
     void onIngress() { _natOpen = true; }
     /** client 정지(STOP) / 교체(replaced) */
     void stop(const char* reason) { if (!_done) { _done = true; _reason = reason; } }
+    /** mode=mix — 틱이 아니라 relay 패킷이 프레임을 당긴다(PAnnMixer). 다음 프레임 페이로드(저장 형식; 무음 구간은 빈 문자열).
+     *  반환 false = 끝(done — completed/max). 재생 위치·played_ms 는 tick 과 같은 규칙으로 진행한다 */
+    bool nextPayload(std::string& payload);
+    void setMix(bool b) { _mix = b; }
+    bool isMix() const { return _mix; }
 
     bool done() const { return _done; }
     const std::string& reason() const { return _reason; }
@@ -82,6 +87,7 @@ private:
     bool _markerNext = true;
     bool _done = false;
     std::string _reason;
+    bool _mix = false;
 
     // 시간
     bool _ticked = false;         // 첫 tick 을 받았는가(게이트 대기 시작)

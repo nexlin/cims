@@ -483,6 +483,7 @@ bool Worker::buildUePool(Pool* pool, const Json& d, std::string& err) {
     pool->service = d["service"].asString("volte");
     const bool ptt = pool->service == "ptt";
     pool->msrp = d["msrp"].asBool(false);
+    pool->callWaiting = d["call_waiting"].asBool(false);
     // 대상 CSC(subscriber 노드 api) — MCData FD 의 IdMS 토큰·콘텐츠 서버. 없으면 fd_send/fd_recv 단계가 인스턴스 실패로 닫힌다(컨트롤러가 컴파일 때 막는다)
     if (d["target_csc"].isObject()) {
         pool->cscHost = d["target_csc"]["ip"].asString();
@@ -548,6 +549,7 @@ bool Worker::buildUePool(Pool* pool, const Json& d, std::string& err) {
         if (!ep->id.login.empty()) ep->s->SetIdmsLogin(ep->id.login, ep->id.loginPw);
         if (!pool->cscHost.empty()) ep->s->SetFdServer(pool->cscHost, pool->cscPort, pool->cscTls);
         ep->s->SetPrack(d["prack"].asBool(false));
+        ep->s->SetCallWaiting(pool->callWaiting);
         { std::string dm = dtmfModeOf(d["dtmf"]); ep->s->SetDtmf(dm != "off"); ep->s->SetDtmfInband(dm == "inband"); }
         if (pool->transport == "tls" && (tlsVerify || tlsClientCert))
             ep->s->SetTls(tlsVerify, m_cfg.tlsCaFile, tlsClientCert ? m_cfg.tlsClientCertFile : "", tlsClientCert ? m_cfg.tlsClientKeyFile : "");
@@ -818,7 +820,7 @@ HttpResponse Worker::poolDelete(const std::string& name) {
     return jsonResp(200, j);
 }
 
-static const char* kSupported[] = { "register", "deregister", "invite", "answer", "reject", "bye",
+static const char* kSupported[] = { "register", "deregister", "invite", "answer", "reject", "no_answer", "bye",
                                     "media_hold", "wait", "expect", "progress", "hold", "resume", "dtmf", "refer",
                                     "media_send", "media_stop", "group_call", "floor_request", "floor_release",
                                     "pickup", "subscribe", "replaces", "join", "publish", "sds_send", "sds_recv", "fd_send", "fd_recv", "check" };
@@ -970,7 +972,9 @@ HttpResponse Worker::runStart(const Json& d) {
     // 단계 분할 — prelude(앞쪽 register/wait) · body · epilogue(끝 deregister)
     m_prelude.clear(); m_body.clear(); m_epilogue.clear();
     size_t b = 0, e = spec->steps.size();
-    while (b < e && (spec->steps[b].step == "register" || spec->steps[b].step == "wait")) m_prelude.push_back(spec->steps[b++]);
+    // prelude 의 deregister = 등록 뒤 곧바로 내리는 단말(미등록 착신 — CFNL 착신전환 등). 단계 순서 register → deregister
+    while (b < e && (spec->steps[b].step == "register" || spec->steps[b].step == "wait" || spec->steps[b].step == "deregister"))
+        m_prelude.push_back(spec->steps[b++]);
     while (e > b && spec->steps[e - 1].step == "deregister") { m_epilogue.insert(m_epilogue.begin(), spec->steps[e - 1]); --e; }
     for (size_t i = b; i < e; ++i) m_body.push_back(spec->steps[i]);
     for (auto& st : m_body)
@@ -1021,10 +1025,21 @@ HttpResponse Worker::runStart(const Json& d) {
 
     // prelude 대상 단말 목록 + body 역할별 free 목록
     m_preludeList.clear();
+    m_preludeDereg.clear();
     m_free.clear();
     m_instances.clear();
     std::map<Endpoint*, bool> seen;
     for (auto& st : m_prelude) {
+        if (st.step == "deregister") {
+            for (auto& role : st.who) {
+                auto rit = spec->roles.find(role);
+                if (rit == spec->roles.end()) return errResp(400, "unknown_role", role);
+                Pool* pool = m_pools[rit->second].get();
+                auto sl = spec->slices[role];
+                for (int i = sl.first; i < sl.second && i < (int)pool->eps.size(); ++i) m_preludeDereg.push_back(pool->eps[i].get());
+            }
+            continue;
+        }
         if (st.step != "register") continue;
         for (auto& role : st.who) {
             auto rit = spec->roles.find(role);
@@ -1397,10 +1412,16 @@ void Worker::onEvent(const Event& e) {
         }
         // 피어 착신 호는 엔진이 INVITE 수신 때 만든다 — Progress/Answer 전에 인스턴스의 RTP 모드를 입힌다
         if (in && ep->isPeer()) ep->poolRef->peer->SetMediaMode(e.callId, in->rtpMode);
+        if (ep->noAnswer && ep->tStartCallMs == 0) ep->cancelExpected = true;   // no_answer 단계의 착신 — 망의 CANCEL 이 정상
         if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind == "incoming:" + roleOf(in, ep)) {
             // answer/reject 단계가 착신을 기다리고 있었다 — after_ms(와 피어 보류 시한 중 늦은 쪽) 뒤 응답
             in->phase = Instance::WAIT_TIME;
             in->waitUntilMs = std::max(now + m_body[in->stepIdx].afterMs, ep->holdUntilMs);
+        } else if (in && in->phase == Instance::WAIT_EVENT && in->awaitKind.rfind("callend:", 0) == 0) {
+            // reject 뒤 발신자의 최종 응답을 기다리던 중 인스턴스의 다른 역할에 착신이 왔다 — 망이 전환했다(CFB, TS 24.604 §6A.4):
+            //   최종 응답은 오지 않으므로 다음 단계(전환 대상의 answer 등)로
+            m_metrics.counter("cdiv_after_reject");
+            advance(*in, now);
         }
         if (!in) {
             // 인스턴스 밖의 착신(예: 시나리오에 없는 상대) — 486 로 거절해 스택을 비운다
@@ -2384,6 +2405,13 @@ void Worker::tickPrelude(long long now) {
     logf("info", "run %s prelude done — ready=%zu/%zu%s → running", m_run->runId.c_str(), reg, m_preludeList.size(),
          timeout ? " (timeout)" : "");
     if (m_stopRequested) { endRun("stopped"); return; }
+    if (!m_preludeDereg.empty()) {
+        // prelude 의 deregister — 등록을 마친 단말을 곧바로 내린다(REGISTER expires 0). 그 역할은 미등록 상태로 인스턴스에 잡힌다
+        //   (착신 번호로만 쓰인다 — CFNL 착신전환의 served). 서버 처리 여유로 다음 틱까지 기다린다
+        for (auto* ep : m_preludeDereg) epUnregister(ep);
+        logf("info", "run %s prelude: %zu endpoint(s) deregistered (미등록 착신 역할)", m_run->runId.c_str(), m_preludeDereg.size());
+        m_preludeDereg.clear();
+    }
     m_runState = "running";
     m_credit = 0;
     m_metrics.gauge("rate_saps", m_rate.load());
@@ -3129,6 +3157,18 @@ void Worker::execStep(Instance& in, long long now) {
             in.deadlineMs = now + std::max(st.afterMs, 0) + m_cfg.inviteTimeoutMs;
             return;
         }
+        if (st.step == "no_answer") {
+            // 응답하지 않는 착신(링잉만) — 망이 이 leg 를 CANCEL 하는 것이 정상(무응답 착신전환 CFNR — TS 24.604 §6A.4, 대표번호 무응답). 착신이
+            //   이미 왔으면 지금, 아니면 도착 때(INCOMING) cancelExpected 를 붙인다 → 487 은 ringing_leg_cancelled 로 센다
+            for (const std::string& r : st.who) {
+                Endpoint* ep = in.actors[r];
+                if (!ep) continue;
+                ep->noAnswer = true;
+                if (ep->pendingInvite && ep->tStartCallMs == 0) ep->cancelExpected = true;
+            }
+            in.stepIdx++;
+            continue;
+        }
         if (st.step == "check") {
             // 관측 정합 판정 — after_ms 뒤(NOTIFY 도착 여유) who 전원을 판정. payload = conference_roster_visible|conference_roster_hidden(to = 찾을 역할)
             //   | conference_warning_138 | dialog_consistent(RFC 4235 NOTIFY 열 정합 — S3-SCN-FA F7)
@@ -3269,6 +3309,7 @@ void Worker::releaseEndpoint(Endpoint* ep) {
     ep->consultTo.clear();
     ep->inConsult = false;
     ep->cancelExpected = false;
+    ep->noAnswer = false;
     ep->joined = false;
     ep->floor = Endpoint::F_IDLE;
     ep->tReleasedMs = nowMs();

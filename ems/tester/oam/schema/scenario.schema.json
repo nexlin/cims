@@ -404,6 +404,48 @@
       "additionalProperties": false,
       "description": "가입 회선 속성 — 역할 신원의 회선 service_ref(가입 서비스 소속)·ringback_media(개인 링백 음원, announcements.md §6.3)·\nforward_to(착신전환 대상 — 역할 이름, TS 24.604 CFU, volte_supplementary_services.md §6A)를 바꾼다\n(CSC PUT /users/{person}/{kind}/{msisdn}). run 뒤 종전 값으로. 셋 중 하나는 있어야 한다.",
       "properties": {
+        "forward_busy_to": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CFB — 이 회선이 통화중(486/600) 응답이면 그 역할로 전환(forward_busy_id, §6A.4)",
+          "title": "Forward Busy To"
+        },
+        "forward_no_reply_to": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CFNR — 이 회선이 no_reply_sec 안에 응답하지 않으면(또는 480/408) 그 역할로 전환(forward_no_reply_id)",
+          "title": "Forward No Reply To"
+        },
+        "forward_not_logged_in_to": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CFNL — 이 회선이 미등록이면 그 역할로 전환(forward_not_logged_in_id)",
+          "title": "Forward Not Logged In To"
+        },
         "forward_to": {
           "anyOf": [
             {
@@ -422,6 +464,21 @@
           "const": "subscriber",
           "title": "Kind",
           "type": "string"
+        },
+        "no_reply_sec": {
+          "anyOf": [
+            {
+              "maximum": 120,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CFNR 무응답 시한(초, forward_no_reply_sec) — 없으면 대상 CSP 의 Setup.Sip.Cdiv.NoReplySec",
+          "title": "No Reply Sec"
         },
         "ringback_media": {
           "anyOf": [
@@ -841,6 +898,7 @@
             "progress",
             "answer",
             "reject",
+            "no_answer",
             "bye",
             "hold",
             "resume",

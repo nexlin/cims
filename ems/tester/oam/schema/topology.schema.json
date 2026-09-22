@@ -1354,6 +1354,12 @@
           "title": "Access",
           "type": "string"
         },
+        "call_waiting": {
+          "default": false,
+          "description": "통화중대기 단말(TS 24.615) — 통화 중 두 번째 착신을 486 대신 180 으로 받아 보류한다(reject 단계로 거절, 응답은 미지원). 통화중대기 시나리오(VOLTE-ANN-CALL-WAITING)의 착신 풀",
+          "title": "Call Waiting",
+          "type": "boolean"
+        },
         "dtmf": {
           "default": "rfc4733",
           "description": "DTMF 방식 — rfc4733(telephone-event 오퍼/echo) · inband(G.711 톤 — 협상 코덱이 pcmu/pcma 일 때만) · off. 옛 bool 도 받는다",

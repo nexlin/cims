@@ -1381,25 +1381,36 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     // urn:alert:service:call-waiting
     //   (RFC 7462)을 실어 단말이 대기음을 내게 하고, 발신자에게는 프로파일 `call_waiting` 의 안내/링백(EventCallRing) —
     //   announcements.md §11. 피어(트렁크) 착신·PTT 는 대상이 아니다(가입자 B-leg 만).
+    bool bCallWaiting = false;
     if ( !bRoutePrefix && m_clsTas.IsEnabled() && gclsCallMap.HasEstablishedCallFor( pszTo ? pszTo : "" ) ) {
+        bCallWaiting = true;
         pclsInvite->AddHeader( "Alert-Info", "<urn:alert:service:call-waiting>" );
         gclsCallMap.SetCallWaiting( pszCallId, true );
         CLog::Print( LOG_INFO, "EventIncomingCall: callee(%s) busy → call waiting (Alert-Info) CallId=%s", pszTo,
                      pszCallId );
     }
-    if ( bDiverted ) {
+    {
         // 재타게팅 이력 — History-Info(RFC 7044): 원착신 index=1, 전환 대상 <…;cause=302>;index=1.1;mp=1 (수신 INVITE
-        // 에 이미 있던
-        //   항목은 보존하고 이어 붙인다). From/PAI 는 원발신자 그대로(TS 24.604 §4.5.2.6.2 — 전환자 신원은 History-Info
-        //   가 나른다).
-        std::string strDomain = pclsMessage ? pclsMessage->m_clsReqUri.m_strHost : "";
-        if ( strDomain.empty() && pclsMessage ) strDomain = pclsMessage->m_clsTo.m_clsUri.m_strHost;
-        if ( strDomain.empty() ) strDomain = gclsSetup.m_strLocalIp;
+        // 에
+        //   이미 있던 항목은 보존하고 이어 붙인다). From/PAI 는 원발신자 그대로(TS 24.604 §4.5.2.6.2 — 전환자 신원은
+        //   History-Info 가 나른다). 전환이 없어도 수신 값·전환 수를 CallMap 에 둔다 — 조건부 전환(CFB/CFNR,
+        //   TryDivertLeg)이 그 위에 이어 붙인다.
         CSipHeader *pclsHiIn = pclsMessage ? pclsMessage->GetHeader( "History-Info" ) : NULL;
-        const std::string strHi = CspDiversion::BuildHistoryInfo( pclsHiIn ? pclsHiIn->m_strValue : "", strDomain,
-                                                                  clsDiv.strServed, clsDiv.vecHops );
-        pclsInvite->AddHeader( "History-Info", strHi.c_str() );
-        pclsInvite->AddHeader( "Supported", "histinfo" );
+        const std::string strHiIn = pclsHiIn ? pclsHiIn->m_strValue : "";
+        std::string strHi = strHiIn;
+        int iHops = CspDiversion::CountDiversions( strHiIn );
+        if ( bDiverted ) {
+            std::string strDomain = pclsMessage ? pclsMessage->m_clsReqUri.m_strHost : "";
+            if ( strDomain.empty() && pclsMessage ) strDomain = pclsMessage->m_clsTo.m_clsUri.m_strHost;
+            if ( strDomain.empty() ) strDomain = gclsSetup.m_strLocalIp;
+            strHi = CspDiversion::BuildHistoryInfo( strHiIn, strDomain, clsDiv.strServed, clsDiv.vecHops );
+            iHops += (int)clsDiv.vecHops.size();
+            pclsInvite->AddHeader( "History-Info", strHi.c_str() );
+            pclsInvite->AddHeader( "Supported", "histinfo" );
+        }
+        gclsCallMap.SetCdivInfo( pszCallId, strHi, iHops, bDiverted ? clsDiv.strServed : std::string() );
+    }
+    if ( bDiverted ) {
         // 전환 안내(announcements.md §3.5) — B-leg 를 내기 전에 A 에 183+SDP 와 재생기를 붙여 두면 B 의 첫 18x 가 같은
         // SDP 로
         //   나간다(단말이 로컬 링백으로 갈아타지 않는다). 정책 none·CMP 미지원이면 181 만.
@@ -1410,6 +1421,9 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         gclsCallMap.Delete( pszCallId );
         return RejectVoice( SIP_INTERNAL_SERVER_ERROR );
     }
+    // 통화중대기 in-band 대기음(announcements.md §3.6) — 착신자 서비스 프로파일이 켰을 때만(기본 none — 단말 Alert-Info
+    // 가 1차)
+    if ( bCallWaiting ) gclsAnnouncement.OnCallWaitingAlert( pszTo ? pszTo : "", pszCallId, strCallId.c_str() );
 
     if ( gclsDbManager.IsConnected() ) {
         gclsDbManager.InsertCallLog( pszCallId, false, "", pszFrom, pszTo );
@@ -1587,6 +1601,25 @@ void CModuleDispatcher::EventCallRing( const char *pszCallId, int iSipStatus, CS
     if ( m_clsTas.IsEnabled() && m_clsTas.OnCallRing( pszCallId, iSipStatus, pclsRtp ) ) return;
 
     if ( gclsCallMap.Select( pszCallId, clsCallInfo ) ) {
+        // CFNR 무응답 시한(volte_supplementary_services.md §6A.4) — 가입자 B-leg 의 첫 18x 에 착신 가입자
+        // forward_no_reply_id 가
+        //   있으면 시한을 잡는다(가입자 forward_no_reply_sec, 0 이면 Setup.Sip.Cdiv.NoReplySec). 만료는 Tick 이 CANCEL
+        //   + 전환.
+        if ( m_clsTas.IsEnabled() && !clsCallInfo.m_bRecv && !clsCallInfo.m_bEstablished &&
+             clsCallInfo.m_strRouteSet.empty() && clsCallInfo.m_iNoReplyDeadline == 0 &&
+             !clsCallInfo.m_strRelayCallee.empty() ) {
+            CspUser clsCallee;
+            if ( gclsCspUserMap.Select( clsCallInfo.m_strRelayCallee.c_str(), clsCallee ) &&
+                 !clsCallee.m_strForwardNoReply.empty() ) {
+                const int iSec =
+                    clsCallee.m_iForwardNoReplySec > 0 ? clsCallee.m_iForwardNoReplySec : gclsSetup.m_iCdivNoReplySec;
+                gclsCallMap.SetNoReplyDeadline( pszCallId, time( NULL ) + iSec );
+                clsCallInfo.m_iNoReplyDeadline = time( NULL ) + iSec;
+                CLog::Print( LOG_INFO, "CDIV: %s ringing — CFNR timer %ds → %s (CallId=%s)",
+                             clsCallInfo.m_strRelayCallee.c_str(), iSec, clsCallee.m_strForwardNoReply.c_str(),
+                             pszCallId );
+            }
+        }
         if ( pclsRtp && clsCallInfo.m_iPeerRtpPort > 0 ) {
             // 18x 의 SDP(early media) = 미디어 앵커링 대상 — 확정 answer 와 같은 절차로 answer leg 를 relay 에 반영한
             // 뒤
@@ -1650,8 +1683,9 @@ void CModuleDispatcher::EventCallStart( const char *pszCallId, CSipCallRtp *pcls
     if ( m_clsTas.IsEnabled() && m_clsTas.OnCallStart( pszCallId, pclsRtp ) ) return;
 
     if ( gclsCallMap.Select( pszCallId, clsCallInfo ) ) {
-        // 서버 링백 정지(§3.4) — B 가 answer 했다
+        // 서버 링백 정지(§3.4) — B 가 answer 했다 · 대기 호였으면 착신자 leg 의 in-band 대기음도 정지(§3.6)
         gclsAnnouncement.OnRingbackEnd( pszCallId, clsCallInfo );
+        gclsAnnouncement.OnCallWaitingEnd( pszCallId );
         // Service log: VoipCallAnswer
         if ( gclsCallDir.IsEnabled() ) {
             std::string strOrigCallId = pszCallId;
@@ -1758,6 +1792,168 @@ static int _CallDurationSec( const char *pszCallId ) {
  * 로 교체(relay·SDES·코덱 상태 복사, 실패 Route 를 tried 에 누적) → 세션 로그·sesid 승계 → 전송. 후보가 없으면 false 를
  * 돌려 종전 종료 경로로.
  */
+// ──────────────────────────────────────────────────────────────
+//  조건부 착신전환 (TS 24.604 CFB/CFNR — volte_supplementary_services.md §6A.4)
+// ──────────────────────────────────────────────────────────────
+
+bool CModuleDispatcher::TryDivertLeg( const char *pszCallId, const CCallInfo &clsB, int iSipStatus,
+                                      const char *pszReason, bool bNoReplyTimer ) {
+    if ( !m_clsTas.IsEnabled() ) return false;
+    if ( clsB.m_bRecv || clsB.m_bEstablished || !clsB.m_strRouteSet.empty() || clsB.m_strPeerCallId.empty() ||
+         clsB.m_strRelaySessionId.empty() )
+        return false;
+    const std::string strACallId = clsB.m_strPeerCallId;
+    const std::string strCallee = clsB.m_strRelayCallee;
+    if ( strCallee.empty() || gclsUserAgent.IsConnected( strACallId.c_str() ) ) return false;
+    CspUser clsUser;
+    if ( !gclsCspUserMap.Select( strCallee.c_str(), clsUser ) ) return false;
+
+    // 조건 → 대상·cause (RFC 4458): 통화중 486/600·Q.850 17 → CFB(486), 무응답 시한·480/408 → CFNR(408)
+    std::string strRaw;
+    int iCause = 0;
+    const char *pszKind = "";
+    if ( bNoReplyTimer ) {
+        strRaw = clsUser.m_strForwardNoReply;
+        iCause = CspDiversion::CAUSE_NO_ANSWER;
+        pszKind = "CFNR(timer)";
+    } else {
+        const EAnnSituation eSit = CCspAnnouncementService::Classify( iSipStatus, pszReason );
+        if ( eSit == ANN_SIT_BUSY ) {
+            strRaw = clsUser.m_strForwardBusy;
+            iCause = CspDiversion::CAUSE_BUSY;
+            pszKind = "CFB";
+        } else if ( eSit == ANN_SIT_NO_ANSWER || eSit == ANN_SIT_UNREACHABLE ) {
+            strRaw = clsUser.m_strForwardNoReply;
+            iCause = CspDiversion::CAUSE_NO_ANSWER;
+            pszKind = "CFNR";
+        }
+    }
+    if ( strRaw.empty() ) return false;
+    if ( clsB.m_iCdivHops >= gclsSetup.m_iCdivMaxDiversions ) {
+        CLog::Print( LOG_INFO, "CDIV: %s %s → 전환 상한(%d) 도달 — 원코드 %d 로 (CallId=%s)", pszKind,
+                     strCallee.c_str(), gclsSetup.m_iCdivMaxDiversions, iSipStatus, pszCallId );
+        return false;
+    }
+    std::string strTarget;
+    if ( !CTasModule::NormalizeForwardTarget( strCallee, strRaw, strTarget ) ) return false;
+    if ( strTarget == strCallee || strTarget == clsB.m_strRelayCaller ||
+         clsB.m_strHistoryInfo.find( ":" + strTarget + "@" ) != std::string::npos ) {
+        CLog::Print( LOG_INFO, "CDIV: %s %s → %s 루프/자기 전환 — 원코드 %d 로 (CallId=%s)", pszKind, strCallee.c_str(),
+                     strTarget.c_str(), iSipStatus, pszCallId );
+        return false;
+    }
+    // 대상 = 등록 가입자(피어·미등록 대상은 후속 — 원코드로 끝낸다). 대상의 DND·착신거부는 종단 서비스가 우선
+    CUserInfo clsTargetInfo;
+    if ( !gclsUserMap.Select( strTarget.c_str(), clsTargetInfo ) ) {
+        CLog::Print( LOG_INFO, "CDIV: %s %s → %s 미등록/비가입 — 원코드 %d 로 (CallId=%s)", pszKind, strCallee.c_str(),
+                     strTarget.c_str(), iSipStatus, pszCallId );
+        return false;
+    }
+    CspUser clsTargetUser;
+    if ( gclsCspUserMap.Select( strTarget.c_str(), clsTargetUser ) &&
+         ( clsTargetUser.isDnd() || clsTargetUser.isReject( clsB.m_strRelayCaller ) ) )
+        return false;
+
+    // 실패/취소할 B-leg 가 냈던 오퍼·신원 그대로
+    CSipCallRtp clsRtp;
+    std::string strFrom;
+    if ( !gclsUserAgent.GetLocalCallRtp( pszCallId, &clsRtp ) || !gclsUserAgent.GetFromId( pszCallId, strFrom ) ) {
+        CLog::Print( LOG_ERROR, "CDIV: %s 실패 leg 의 오퍼/신원을 읽지 못함 (CallId=%s)", pszKind, pszCallId );
+        return false;
+    }
+    CSipCallRoute clsRoute;
+    clsTargetInfo.GetCallRoute( clsRoute );
+    clsRoute.m_b100rel = gclsUserAgent.Is100rel( strACallId.c_str() );
+    std::string strNewCallId;
+    CSipMessage *pclsInvite = NULL;
+    if ( !gclsUserAgent.CreateCall( strFrom.c_str(), strTarget.c_str(), &clsRtp, &clsRoute, strNewCallId,
+                                    &pclsInvite ) ) {
+        CLog::Print( LOG_ERROR, "CDIV: %s CreateCall 실패 → %s (CallId=%s)", pszKind, strTarget.c_str(), pszCallId );
+        return false;
+    }
+    // History-Info 이어 붙임 — 원착신(이 B-leg 의 착신) 뒤에 <target;cause=N>
+    std::string strDomain = gclsServiceMap.GetForUser( strCallee, "volte" ).domain;
+    if ( strDomain.empty() ) strDomain = gclsSetup.m_strLocalIp;
+    std::vector<CspDiversion::Hop> vecHops( 1 );
+    vecHops[0].strUser = strTarget;
+    vecHops[0].iCause = iCause;
+    const std::string strHi = CspDiversion::BuildHistoryInfo( clsB.m_strHistoryInfo, strDomain, strCallee, vecHops );
+    pclsInvite->AddHeader( "History-Info", strHi.c_str() );
+    pclsInvite->AddHeader( "Supported", "histinfo" );
+    const bool bTargetBusy = gclsCallMap.HasEstablishedCallFor( strTarget );
+    if ( bTargetBusy ) pclsInvite->AddHeader( "Alert-Info", "<urn:alert:service:call-waiting>" );  // TS 24.615
+
+    // CallMap: A ↔ 새 B. relay 세션·SDES·코덱은 그대로(같은 peer1 포트), 착신만 전환 대상으로
+    CCallInfo clsNew = clsB;
+    clsNew.m_strRelayCallee = strTarget;
+    clsNew.m_iNoReplyDeadline = 0;
+    time( &clsNew.m_iLastActivityTime );
+    gclsCallMap.Insert( strNewCallId.c_str(), clsNew );
+    gclsCallMap.Update( strACallId.c_str(), strNewCallId.c_str() );
+    gclsCallMap.DeleteOne( pszCallId );  // 실패 leg 만 — relay 세션 유지
+    gclsCallMap.SetRelayInfo( strACallId.c_str(), clsB.m_strRelaySessionId, clsB.m_strRelaySesId,
+                              clsB.m_strRelayLocalIp, clsB.m_strRelayCaller, strTarget );
+    const std::string strServed = clsB.m_strCdivServed.empty() ? strCallee : clsB.m_strCdivServed;
+    gclsCallMap.SetCdivInfo( strACallId.c_str(), strHi, clsB.m_iCdivHops + 1, strServed );
+    gclsCallMap.SetCallWaiting( strACallId.c_str(), bTargetBusy );
+    SetCallOwner( strNewCallId.c_str(), GetCallOwner( pszCallId ) ? GetCallOwner( pszCallId ) : &m_clsTas );
+
+    // 세션 로그·sesid·CDR 승계 — 새 B-leg 도 같은 세션의 착신 leg
+    std::string strLegASesId = gclsSipLogger.GetSesIdByCallId( strACallId );
+    if ( !strLegASesId.empty() ) gclsSipLogger.SetCallSesId( strNewCallId, strLegASesId );
+    if ( gclsCallDir.IsEnabled() ) {
+        std::string strSessionId = gclsCallDir.GetSessionId( strACallId );
+        if ( !strSessionId.empty() ) {
+            gclsCallDir.MapCallToSession( strNewCallId, strSessionId );
+            gclsCallDir.WriteSessionMapping( strSessionId, strACallId, strNewCallId, strLegASesId );
+        }
+        gclsCallDir.VoipCallDiverted( strACallId, clsB.m_strRelayCaller, strTarget, strCallee, iCause,
+                                      clsB.m_iCdivHops + 1 );
+    }
+    CLog::Print( LOG_SYSTEM, "EventCallEnd: CDIV %s %s → %s (status=%d cause=%d hops=%d) [A=%s old=%s new=%s]", pszKind,
+                 strCallee.c_str(), strTarget.c_str(), iSipStatus, iCause, clsB.m_iCdivHops + 1, strACallId.c_str(),
+                 pszCallId, strNewCallId.c_str() );
+
+    // 발신자 통지 181(TS 24.604 §4.5.2.6.1) + 전환 안내(announcements.md §3.5) — A 가 이미 SDP 를 받았으면(원착신
+    // 18x+SDP·링백)
+    //   같은 SDP 위에서 재생만
+    if ( gclsSetup.m_bCdivNotify181 ) gclsUserAgent.RingCall( strACallId.c_str(), SIP_CALL_IS_BEING_FORWARDED, NULL );
+    gclsAnnouncement.OnForwarded( strACallId.c_str(), strNewCallId.c_str() );
+    if ( !gclsUserAgent.StartCall( strNewCallId.c_str(), pclsInvite ) ) {
+        const int iFinal = RelayEndStatus( iSipStatus ? iSipStatus : SIP_TEMPORARILY_UNAVAILABLE );
+        CLog::Print( LOG_ERROR, "CDIV: %s StartCall 실패 → A 종료 %d (CallId=%s)", pszKind, iFinal,
+                     strNewCallId.c_str() );
+        gclsAnnouncement.OnCallEnd( strACallId.c_str() );
+        gclsCallMap.Delete( strNewCallId.c_str() );
+        gclsUserAgent.StopCall( strACallId.c_str(), iFinal );
+        RemoveCallOwner( strNewCallId.c_str() );
+        RemoveCallOwner( strACallId.c_str() );
+        return true;
+    }
+    if ( bTargetBusy ) gclsAnnouncement.OnCallWaitingAlert( strTarget, strACallId.c_str(), strNewCallId.c_str() );
+    return true;
+}
+
+void CModuleDispatcher::Tick() {
+    if ( !m_clsTas.IsEnabled() ) return;
+    const time_t now = time( NULL );
+    std::vector<std::string> vecDue;
+    gclsCallMap.Iterate( [&]( const std::string &strId, const CCallInfo &c ) {
+        if ( c.m_iNoReplyDeadline > 0 && !c.m_bEstablished && !c.m_bRecv && now >= c.m_iNoReplyDeadline )
+            vecDue.push_back( strId );
+    } );
+    for ( const std::string &strB : vecDue ) {
+        CCallInfo clsB;
+        if ( !gclsCallMap.Select( strB.c_str(), clsB ) ) continue;
+        gclsCallMap.SetNoReplyDeadline( strB.c_str(), 0 );
+        if ( TryDivertLeg( strB.c_str(), clsB, SIP_REQUEST_TIME_OUT, NULL, true ) ) {
+            // 링잉 중인 원착신 leg 는 CANCEL — CallMap 에서 이미 뺐으므로 그 EventCallEnd 는 아무 것도 하지 않는다
+            gclsUserAgent.StopCall( strB.c_str(), SIP_REQUEST_TIME_OUT );
+            RemoveCallOwner( strB.c_str() );
+        }
+    }
+}
+
 bool CModuleDispatcher::TryRerouteLeg( const char *pszCallId, const CCallInfo &clsB, int iSipStatus ) {
     if ( clsB.m_bRecv || clsB.m_bEstablished || clsB.m_strRouteSet.empty() ) return false;
     const bool bRetriable = ( iSipStatus == SIP_REQUEST_TIME_OUT || iSipStatus == SIP_GONE ||
@@ -1909,6 +2105,12 @@ void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus, con
     }
     // 실패 안내(announcements.md §3.1) — B 의 최종 실패를 A 에 early media 안내로 들려준 뒤 같은 코드로 끝낸다.
     //   인수되면 B entry 만 지운다(relay 는 A 가 끝날 때 회수). A 의 최종 응답은 서비스가 낸다.
+    // 조건부 착신전환(TS 24.604 CFB/CFNR — §6A.4): 가입자 B-leg 의 통화중·무응답 실패를 전환 대상으로 이어 간다(A·relay
+    // 유지).
+    if ( bSelHit && TryDivertLeg( pszCallId, clsCallInfo, iSipStatus, pszReason, false ) ) {
+        RemoveCallOwner( pszCallId );
+        return;
+    }
     if ( bSelHit && gclsAnnouncement.OnLegFailed( pszCallId, clsCallInfo, iSipStatus, pszReason ) ) {
         gclsCallMap.DeleteOne( pszCallId );
         RemoveCallOwner( pszCallId );

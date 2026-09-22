@@ -19,6 +19,7 @@ import { useConfirm } from '@core/components/custom/confirm'
 import { useAuth } from '@core/contexts/AuthContext'
 import { hasRole } from '@core/utils/permissions'
 import { authHeaders } from '@core/api/client'
+import { usersApi, type LineSvc } from '@core/api/users'
 import { announcementsApi, annMasterPath, type AnnRow, type AnnKind, type AnnListResult, type AnnNode, type NodePresence } from '../api/announcements'
 
 const KIND_LABEL: Record<AnnKind, string> = { tone: '신호음', announcement: '안내음', music: '음악' }
@@ -135,6 +136,72 @@ function RegisterDialog({ onClose, onDone, existing }: { onClose: () => void; on
   )
 }
 
+/** 가입자 링백(컬러링) 등록 — WAV 를 sub:<가입 번호> 로 올린 뒤 그 회선의 ringback_media 를 가리키게 한다(announcements.md §6.3).
+ *  스위치는 발신자 서비스 프로파일의 ringback(내장 `ringback` 프로파일)이고, 음원은 이 가입자 값이다. */
+function SubscriberRingbackDialog({ onClose, onDone, existing }: { onClose: () => void; onDone: (row: AnnRow) => void; existing: Set<string> }) {
+  const toast = useToast()
+  const [file, setFile] = useState<File | null>(null)
+  const [msisdn, setMsisdn] = useState('')
+  const [desc, setDesc] = useState('')
+  const [norm, setNorm] = useState<string>('-20')
+  const [busy, setBusy] = useState(false)
+  const digits = msisdn.replace(/^\+/, '')
+  const idErr = !msisdn ? '' : !/^\+?[0-9]{3,20}$/.test(msisdn) ? '가입 번호(E.164, 예: +821012345678)' : ''
+  const replace = existing.has(`sub:${digits}`)
+  const submit = async () => {
+    if (!file || !msisdn || idErr) return
+    setBusy(true)
+    try {
+      const row = await announcementsApi.register(file, { id: digits, kind: 'music', description: desc || `가입자 링백 ${msisdn}`, loop: true, normalize: norm.trim() === '' ? null : Number(norm), replace, scope: 'sub' })
+      // 회선의 ringback_media 를 이 음원으로 — 번호로 사람·회선 종류(call|voip)를 찾는다
+      const users = await usersApi.list()
+      let bound = false
+      for (const u of users) {
+        for (const svc of ['call', 'voip'] as LineSvc[]) {
+          const subs = (svc === 'call' ? u.call_subscriptions : (u.voip_subscriptions || [])) || []
+          if (subs.some(s => s.id === msisdn || s.id.replace(/^\+/, '') === digits)) {
+            await usersApi.updateSub(u.id, svc, subs.find(s => s.id === msisdn || s.id.replace(/^\+/, '') === digits)!.id, { ringback_media: row.id })
+            bound = true
+          }
+        }
+      }
+      toast.show(bound ? `${row.id} 등록 — 회선 ${msisdn} 의 링백 음원으로 지정. [CMP 배포]로 노드에 내린다` : `${row.id} 등록 — 번호 ${msisdn} 의 전화 회선을 찾지 못해 ringback_media 는 지정하지 않았다`, bound ? 'ok' : 'err')
+      onDone(row)
+    } catch (e) {
+      toast.show(`등록 실패: ${(e as Error).message}`, 'err')
+    } finally { setBusy(false) }
+  }
+  return (
+    <Modal title="가입자 링백 음원 등록" onClose={onClose}>
+      <div className="flex w-[520px] max-w-full flex-col gap-3 p-4">
+        <div className="text-xs text-muted-foreground">
+          가입자가 고른 WAV 를 <span className="font-mono">sub:&lt;가입 번호&gt;</span> 로 등록하고 그 회선의 <span className="font-mono">ringback_media</span> 를 가리키게 한다.
+          발신자가 이 음원을 들으려면 발신자 접속서비스의 announcement_profile 이 서버 링백(<span className="font-mono">ringback</span>)이어야 한다.
+        </div>
+        <FormField label="WAV 파일" required>
+          <label className="flex cursor-pointer items-center gap-2 rounded-sm border border-border px-2 py-1.5 text-sm hover:bg-accent">
+            <Upload size={14} /><span className="truncate">{file ? `${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)` : '파일 선택…'}</span>
+            <input className="hidden" type="file" accept=".wav,audio/wav,audio/x-wav" onChange={e => setFile(e.target.files?.[0] ?? null)} />
+          </label>
+        </FormField>
+        <div className="grid grid-cols-2 gap-3">
+          <FormField label="가입 번호" required error={idErr || undefined} help={replace ? '같은 번호의 음원이 있어 교체한다' : 'E.164 — 회선 id'}>
+            <Input value={msisdn} onChange={e => setMsisdn(e.target.value.trim())} className="font-mono" placeholder="+821012345678" />
+          </FormField>
+          <FormField label="P.56 활성 레벨 정규화 (dBov)" help="음악 -20 권장 · 비우면 원음">
+            <Input value={norm} onChange={e => setNorm(e.target.value)} className="font-mono" />
+          </FormField>
+        </div>
+        <FormField label="설명"><Input value={desc} onChange={e => setDesc(e.target.value)} placeholder="비우면 '가입자 링백 <번호>'" /></FormField>
+        <div className="flex justify-end gap-2 border-t border-border pt-3">
+          <Button variant="outline" onClick={onClose} disabled={busy}>취소</Button>
+          <Button onClick={submit} disabled={busy || !file || !msisdn || !!idErr}>{busy ? '변환 중…' : '등록'}</Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 export default function AnnouncementsPage() {
   const toast = useToast()
   const confirm = useConfirm()
@@ -147,6 +214,7 @@ export default function AnnouncementsPage() {
   const [kindF, setKindF] = useState<AnnKind | 'all'>('all')
   const [sel, setSel] = useState<string | null>(null)
   const [reg, setReg] = useState(false)
+  const [regSub, setRegSub] = useState(false)
   const [deploying, setDeploying] = useState(false)
   const player = usePlayer()
 
@@ -165,7 +233,7 @@ export default function AnnouncementsPage() {
   }, [data, q, kindF])
   const selected = useMemo(() => rows.find(r => r.id === sel) ?? null, [rows, sel])
   const nodes: AnnNode[] = data?.nodes ?? []
-  const operatorCount = (data?.media ?? []).filter(r => r.source === 'operator').length
+  const operatorCount = (data?.media ?? []).filter(r => r.source !== 'bundled').length
 
   const del = async (r: AnnRow) => {
     if (!(await confirm({ title: '음원 삭제', body: `${r.id} 를 라이브러리에서 지우고 CMP 노드의 파일도 걷습니다. 이 음원을 참조하는 안내 프로파일은 응답 코드만 내게 됩니다.`, confirmLabel: '삭제', tone: 'danger' }))) return
@@ -199,6 +267,7 @@ export default function AnnouncementsPage() {
           {data && !data.converter && <Badge variant="warningSoft" title="OAM 패키지 native/cims-sample-conv 또는 Announcements.SampleConv">변환기 없음 — 등록 불가</Badge>}
           <Button variant="outline" size="sm" onClick={() => void deploy()} disabled={!canWrite || deploying || operatorCount === 0} title="CMP 노드 전부에 운영자 음원·카탈로그를 맞추고 재적재(SIGUSR1)"><Send size={14} /> {deploying ? '배포 중…' : 'CMP 배포'}</Button>
           <Button size="sm" onClick={() => setReg(true)} disabled={!canWrite || !data?.converter}><Upload size={14} /> 음원 등록…</Button>
+          <Button variant="outline" size="sm" onClick={() => setRegSub(true)} disabled={!canWrite || !data?.converter} title="가입자 링백(컬러링) WAV — sub:<번호> 로 등록하고 그 회선 ringback_media 를 지정"><Upload size={14} /> 가입자 링백…</Button>
         </span>
       </div>
       {nodes.length > 0 && (
@@ -231,13 +300,13 @@ export default function AnnouncementsPage() {
                       {isPlaying ? <Square size={12} /> : <Play size={12} className={isLoading ? 'animate-pulse' : ''} />}</Button></Td>
                     <Td mono>{r.id}</Td>
                     <Td><Badge variant="neutralSoft">{KIND_LABEL[r.kind] ?? r.kind}</Badge></Td>
-                    <Td><span className={r.source === 'operator' ? 'text-info' : 'text-muted-foreground'}>{r.source === 'operator' ? '운영자' : '동봉'}</span></Td>
+                    <Td><span className={r.source === 'bundled' ? 'text-muted-foreground' : 'text-info'}>{r.source === 'operator' ? '운영자' : r.source === 'subscriber' ? '가입자' : '동봉'}</span></Td>
                     <Td className="max-w-[420px] truncate" title={r.description}>{orDash(r.description)}</Td>
                     <Td align="right" mono>{fmtS(r.duration_ms)}</Td>
                     <Td align="right" mono>{fmtDb(r.level_dbov)}</Td>
                     <Td>{r.loop ? <Badge variant="infoSoft">loop</Badge> : '—'}</Td>
                     <Td><span className="flex flex-wrap gap-1">{CODECS.filter(c => r.files[c]).map(c => <Badge key={c} variant="neutralSoft" className="font-mono">{c}</Badge>)}</span></Td>
-                    <Td>{r.source === 'operator' && <Button variant="ghost" size="sm" className="h-6 w-6 p-0" disabled={!canDelete} title={canDelete ? '삭제' : 'manager 이상'} onClick={e => { e.stopPropagation(); void del(r) }}><Trash2 size={12} /></Button>}</Td>
+                    <Td>{r.source !== 'bundled' && <Button variant="ghost" size="sm" className="h-6 w-6 p-0" disabled={!canDelete} title={canDelete ? '삭제' : 'manager 이상'} onClick={e => { e.stopPropagation(); void del(r) }}><Trash2 size={12} /></Button>}</Td>
                   </TrLink>
                 )
               })}
@@ -257,6 +326,7 @@ export default function AnnouncementsPage() {
         </div>
       )}
       {reg && data && <RegisterDialog onClose={() => setReg(false)} existing={new Set(data.media.map(m => m.id))} onDone={() => { setReg(false); void load() }} />}
+      {regSub && data && <SubscriberRingbackDialog onClose={() => setRegSub(false)} existing={new Set(data.media.map(m => m.id))} onDone={() => { setRegSub(false); void load() }} />}
     </div>
   )
 }

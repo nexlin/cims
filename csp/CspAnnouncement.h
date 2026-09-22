@@ -45,6 +45,8 @@ enum EAnnSituation {
     ANN_SIT_CALL_WAITING,
     ANN_SIT_FORWARDED,  // 착신전환 실행 — 발신자에게 전환 안내(TS 24.604, §3.5). 최종 코드 없음(링백처럼 B 의 answer 로
                         // 끝난다)
+    ANN_SIT_CALL_WAITING_ALERT,  // 통화중대기 — 통화 중인 착신자의 활성 leg 에 섞는 in-band 대기음(TS 24.615, mode=mix,
+                                 // §3.6)
 };
 
 /** 프로파일 표의 한 행 — 상황 하나의 동작 */
@@ -107,6 +109,13 @@ public:
      * 있는 18x·200 은 OnRingbackEnd 가, B 실패는 OnLegFailed 가(같은 SDP 위에서 실패 안내로 교체), CANCEL 은 OnCallEnd
      * 가 걷는다. 반환 true = A 에 SDP 를 냈다 */
     bool OnForwarded( const char *pszACallId, const char *pszBCallId );
+    /** 통화중대기 in-band 대기음(§3.6, TS 24.615) — 통화 중인 착신자(strCallee)의 활성 통화 leg 에 mode=mix 로 신호음을
+     * 섞는다. 프로파일 = 착신자 접속서비스 hold_profile → announcement_profile → 기본, 상황 call_waiting_alert(내장
+     * default 는 none — 단말 Alert-Info 가 1차; 단말이 못 내는 배치가 `cw_inband` 프로파일로 켠다). 대기
+     * 호(pszCwACallId/pszCwBCallId)가 끝나거나 응답되면 OnCallWaitingEnd 가 걷는다. 반환 true = 재생 시작 */
+    bool OnCallWaitingAlert( const std::string &strCallee, const char *pszCwACallId, const char *pszCwBCallId );
+    /** 대기 호의 어느 leg 든 종료·응답 — 그 대기음 정지(없으면 무해) */
+    void OnCallWaitingEnd( const char *pszCallId );
     /** 모니터(MC_SIP_STATS 뒤) — ann_started / ann_fallback / ann_active */
     void GetString( class CMonitorString &strBuf ) const;
     /** B 의 SDP 있는 18x·200 — 링백 정지 */
@@ -180,6 +189,7 @@ private:
     std::map<std::string, CAnnCall> m_mapCalls;          // A Call-ID → early 안내 상태
     std::map<std::string, std::string> m_mapPlayToCall;  // play_id → A Call-ID
     std::map<std::string, CHoldPlay> m_mapHold;          // holder Call-ID → 보류 재생
+    std::map<std::string, CHoldPlay> m_mapCw;            // 대기 호 A·B Call-ID(두 키) → 착신자 활성 leg 의 mix 대기음
     long m_lStarted = 0;
     long m_lFallback = 0;
 };

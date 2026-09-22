@@ -53,6 +53,10 @@ void CspUser::clear() {
     m_strPickupGroup.clear();
     m_vecReject.clear();
     m_strForward.clear();
+    m_strForwardBusy.clear();
+    m_strForwardNoReply.clear();
+    m_iForwardNoReplySec = 0;
+    m_strForwardNotLoggedIn.clear();
     m_iCreateTime = 0;
     m_iUpdateTime = 0;
     m_iRegisterTime = 0;
@@ -112,6 +116,13 @@ bool CspUserMap::_loadUserFromFile( std::string strUserId, CspUser &clsUser ) {
     clsUser.m_bDnd = ( dnd == "true" );
 
     if ( jsonUser.Has( "forward_id" ) ) clsUser.m_strForward = jsonUser.GetString( "forward_id" );
+    if ( jsonUser.Has( "forward_busy_id" ) ) clsUser.m_strForwardBusy = jsonUser.GetString( "forward_busy_id" );
+    if ( jsonUser.Has( "forward_no_reply_id" ) )
+        clsUser.m_strForwardNoReply = jsonUser.GetString( "forward_no_reply_id" );
+    if ( jsonUser.Has( "forward_no_reply_sec" ) )
+        clsUser.m_iForwardNoReplySec = (int)jsonUser.GetInt( "forward_no_reply_sec" );
+    if ( jsonUser.Has( "forward_not_logged_in_id" ) )
+        clsUser.m_strForwardNotLoggedIn = jsonUser.GetString( "forward_not_logged_in_id" );
 
     if ( jsonUser.Has( "reject_id" ) ) {
         SimpleJson::JsonNode rejectNode = jsonUser.Get( "reject_id" );

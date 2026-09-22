@@ -190,6 +190,7 @@ B2BUA 골격(라우팅·relay 수명)은 ModuleDispatcher 가 유지하고, 보�
 | DND (착신거부) | `CspUser::m_bDnd == true` | 603 Decline (`ScreenInvite`/`ApplyTerminationServices`) |
 | 개별 착신거부 | `CspUser::m_vecReject`에 발신자 포함 | 603 Decline |
 | 착신전환 | `CspUser::m_strForward` 설정됨(등록 여부 무관) | 서버측 전환(TS 24.604) — `ResolveDiversion` 이 대상(연쇄·상한 `Setup.Sip.Cdiv`)을 정하면 발신자 181, B-leg 를 전환 대상으로 + `History-Info`(RFC 7044 cause=302) + 전환 안내(`forwarded`) — [volte_supplementary_services.md §6A](../features/volte_supplementary_services.md) |
+| 조건부 착신전환 | `m_strForwardBusy`(CFB 486/600) / `m_strForwardNoReply`(+`m_iForwardNoReplySec`, CFNR 시한·480/408) / `m_strForwardNotLoggedIn`(CFNL 미등록) | 디스패처 `TryDivertLeg`(`EventCallEnd`·`Tick`) — 같은 relay·A-leg 위에 전환 대상으로 새 B-leg, History-Info cause 486/408, 181·전환 안내 · CFNL 은 `ResolveDiversion`(cause 404) — §6A.4 |
 | 당겨받기 | 피처코드 다이얼(`TryPickupDial`) / INVITE-Replaces(`OnIncomingCall`) | 링잉 leg 재키잉 + `RELAY_MODIFY` |
 | 호 전달 | REFER blind/attended (`OnBlindTransfer`/`OnTransfer`, 게이트=`OnSipRequest`) | 원 relay 유지·교체 leg `RELAY_MODIFY` |
 | dialog 이벤트 (RFC 4235) | 호 상태 변화 (`OnCallRing/OnCallStart/OnCallEnd`) | BLF dialog-info NOTIFY — 인가는 `CCspRoleMap::CanWatch`(규칙 1 같은 전화 그룹(`CCspPhoneGroupMap`) / 규칙 2 역할 `monitor_call` — dispatch_center.md §5.2) |
@@ -848,7 +849,8 @@ CSP 가 CSC 보다 먼저 기동하면 첫 조회는 실패하고, 이후 `CSC_R
 | 실패 안내 | `OnLegFailed`(B 최종 실패) / `Reject`(B leg 이전 거절 — relay 를 A 만으로 잡고 CallMap 에 A 단독 entry) → `BuildEarlyAnswer`(A offer 의 재생 가능 첫 코덱, 오디오만, SDES 재광고, relay 주소, `a=sendrecv`) → `RELAY_MODIFY`(A leg remote_pt/remote_codec) → `RELAY_PLAY`(거절이면 answer 를 내지 않고 폴백) → `RingCall(183, P-Early-Media: sendonly)` → `OnPlayDone`/`Tick` 상한 → `FinishEarly`: CDR(`announcement{…}`)·`VoipCallEnd`·DB 종료·`StopCall(원코드, Reason)`·`CallMap.Delete`(RELAY_REMOVE) — 자체 거절한 UAS 다이얼로그는 psip 가 EventCallEnd 를 올리지 않아 마감을 직접 한다. A 가 이미 SDP 를 받았으면(B 18x+SDP·링백) 183 을 다시 내지 않는다. CMP 미지원·거절·조립 실패 = 안내 없이 즉시 원코드(`m_lFallback`) |
 | 보류 음악 | `OnHold(holder)` → 피보류 leg 에 `RELAY_PLAY repeat 0`(프로파일 = 피보류자 접속서비스 `hold_profile` → `announcement_profile` → 기본), 같은 보류의 재-INVITE 는 멱등. `OnResume`·양 leg 종료·`OnLegReplaced`(전달·픽업 재키잉 — TasModule 의 RELAY_MODIFY 앞) 에 STOP |
 | 서버 링백 | 프로파일 `ringback.mode=media` 일 때만 `OnRingback` — 183+SDP + loop 재생, B 의 SDP 있는 18x·200 에 `OnRingbackEnd`. 링백 뒤 실패 안내는 같은 SDP 위에서 재생만 교체. A 에 이미 answer 를 낸 호면 프로파일과 무관하게 true(18x 가 같은 SDP 로) |
-| 전환 안내 | `OnForwarded(A, B)` — 착신전환 B-leg `StartCall` 직전, 프로파일 `forwarded`(기본 `announce_then_tone`) 1 단계 안내 + 183+SDP; `OnPlayDone` 이 2 단계(신호음 또는 `ringback` 규칙 loop)로 잇고 CDR `announcement{forwarded}` 기록 — [announcements.md §3.5](../features/announcements.md) |
+| 전환 안내 | `OnForwarded(A, B)` — 착신전환 B-leg `StartCall` 직전, 프로파일 `forwarded`(기본 `announce_then_tone`) 1 단계 안내 + 183+SDP(A 가 이미 answer 를 받았으면 재생만); `OnPlayDone` 이 2 단계(신호음 또는 `ringback` 규칙 loop)로 잇고 CDR `announcement{forwarded}` 기록 — [announcements.md §3.5](../features/announcements.md) |
+| 통화중대기 대기음 | `OnCallWaitingAlert(callee, CW A, CW B)` — 착신자 `hold_profile` 의 `call_waiting_alert`(내장 `cw_inband`) 가 있으면 착신자 활성 leg(`FindEstablishedLegFor`)에 `RELAY_PLAY mode=mix` loop, 대기 호 종료·응답에 `OnCallWaitingEnd` — [announcements.md §3.6](../features/announcements.md) |
 | 스레드 | 상태 맵(`m_mapCalls`·`m_mapPlayToCall`·`m_mapHold`)은 `m_mtx`, SIP·CMP 호출은 락 밖(StopCall → EventCallEnd → OnCallEnd 재진입). `OnPlayDone` 은 CmpClient EventDispatchLoop 스레드, `Tick` 은 CspServer 1초 루프, `Init` 은 기동·SIGUSR1 |
 
 ## 4. 데이터 관리
@@ -1050,8 +1052,9 @@ relay bookkeeping 의 키는 **session_id**(`csp_{yyyymmddHHMMSSmmm}_{n}`, 재�
 |---|---|---|
 | `MaxDiversions` | 5 | 한 호의 전환 상한(수신 INVITE 의 History-Info 전환 포함) — 넘거나 루프면 486 (TS 24.604 §4.5.2.6) |
 | `Notify181` | true | 전환 때 발신자에게 181 Call Is Being Forwarded |
+| `NoReplySec` | 20 | CFNR 기본 무응답 시한(초) — 가입자 `forward_no_reply_sec` 가 0 일 때 |
 
-템플릿 섹션 `tas`, SIGUSR1 재로드. 절차는 [volte_supplementary_services.md §6A](../features/volte_supplementary_services.md).
+템플릿 섹션 `tas`, SIGUSR1 재로드. 절차는 [volte_supplementary_services.md §6A](../features/volte_supplementary_services.md). CFB/CFNR 은 디스패처 `TryDivertLeg`(B-leg 실패·`Tick` 시한), CFNL 은 TAS `ResolveDiversion`.
 
 ### 6.1 SDP 코덱 테이블 (`Setup.Media.Codecs`)
 

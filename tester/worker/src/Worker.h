@@ -111,6 +111,7 @@ struct Endpoint {
     bool registered = false;
     Instance* inst = nullptr;       // 지금 이 단말을 쓰는 인스턴스
     bool pendingInvite = false;     // deferred 착신 대기 중
+    bool noAnswer = false;          // no_answer 단계 — 착신에 응답하지 않는다(망의 CANCEL 이 정상: CFNR 등)
     long long holdUntilMs = 0;      // 피어 answer=delay — 이 시각 전엔 응답하지 않는다(오류 주입)
     bool inCall = false;
     long long tStartCallMs = 0;     // 발신 시각(SRD 기점 — SimSession 도 갖지만 인스턴스 판정용)
@@ -164,6 +165,7 @@ struct Pool {
     std::string profile;            // peer 프로파일
     std::string service = "volte";  // ue: 접속환경 클래스 volte|voip|ptt — ptt 면 MCPTT 단말(feature tag·기동 절차·floor)
     bool msrp = false;              // ue: MCData media plane 능력 — REGISTER Contact 에 mcdata.sds ICSI(서버가 MSRP 배포 대상으로 고른다)
+    bool callWaiting = false;       // ue: 통화중대기 — 통화 중 두 번째 착신을 486 대신 180 으로 받아 보류(reject 단계로 거절)
     std::string cscHost;            // ue: 대상 CSC(subscriber 노드 api — IdMS /idms/* + FD 콘텐츠 서버 /mcdata/fd). 비면 fd_send/fd_recv 불가
     int cscPort = 0;
     bool cscTls = true;
@@ -417,6 +419,7 @@ private:
     long long m_preludeDeadlineMs = 0;
     size_t m_preludeCursor = 0;
     std::vector<Endpoint*> m_preludeList;
+    std::vector<Endpoint*> m_preludeDereg;   // prelude 의 deregister 단계 — 등록이 끝난 뒤 내리는 단말(미등록 착신 시나리오: CFNL)
     long long m_lastFlushS = 0;
     long long m_runStartedMs = 0;
 

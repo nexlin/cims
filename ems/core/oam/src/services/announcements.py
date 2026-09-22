@@ -4,16 +4,16 @@
 서로 독립이다. 여기 음원은 CSP 정책(Setup.Announcement.Rules)이 참조하고 CMP 재생기가 낸다.
 
   저장소(관리 store — file_store 도메인 이웃, oam_ha 공유 마운트 규칙 그대로)
-    <store>/announcements/catalog.jsonl        운영자 등록 카탈로그(행 = 음원 하나, id = op:<name>)
-    <store>/announcements/op/<name>.wav        16 kHz PCM 마스터(청취·재변환)
-    <store>/announcements/op/<name>.{pcmu,pcma,g722,amrwb}   코덱 파일(DTX 끔 — CMP 가 그대로 낸다)
+    <store>/announcements/catalog.jsonl        운영자 등록 카탈로그(행 = 음원 하나, id = op:<name> | sub:<가입 번호 숫자열>)
+    <store>/announcements/<scope>/<name>.wav   16 kHz PCM 마스터(청취·재변환) — scope = op(운영자) | sub(가입자 링백, announcements.md §6.3)
+    <store>/announcements/<scope>/<name>.{pcmu,pcma,g722,amrwb}   코덱 파일(DTX 끔 — CMP 가 그대로 낸다)
   동봉(패키지)
     <oam>/announcements/sys_catalog.jsonl      기본 세트(sys:) 카탈로그 — 표시·프로파일 선택기용(파일은 CMP 패키지가 가진다)
     <oam>/announcements/sys/<name>.wav         기본 세트 마스터 — 콘솔 청취
     <oam>/native/cims-sample-conv              변환기(계측기와 같은 바이너리)
 
   배포 = OAM → agent sync REST → CMP install_path
-    PUT /module-file?install_path&path=announcements/op/<file>   (바이너리, atomic)
+    PUT /module-file?install_path&path=announcements/<scope>/<file>   (바이너리, atomic)
     PUT /collection?install_path&name=announcements               (config/announcements.jsonl = op 행) + SIGUSR1 → CMP 재적재
 """
 from __future__ import annotations
@@ -40,8 +40,18 @@ FILE_EXT = {'pcmu': 'pcmu', 'pcma': 'pcma', 'g722': 'g722', 'amr-wb': 'amrwb'}
 KINDS = ('tone', 'announcement', 'music')
 MAX_WAV_BYTES = 64 * 1024 * 1024
 _NAME_RE = re.compile(r'^[a-z0-9_]{1,40}$')
+_SUB_NAME_RE = re.compile(r'^[0-9]{1,20}$')   # sub:<가입 번호 숫자열> — E.164 의 '+' 를 뗀 것(CSC ringback_media 규칙 [a-z0-9_])
+SCOPES = ('op', 'sub')
 _CATALOG_COLLECTION = 'announcements'
-_DEPLOY_SUBDIR = 'announcements/op'
+_DEPLOY_ROOT = 'announcements'
+
+
+def _scope_of(mid: str) -> str:
+    return mid.split(':', 1)[0] if ':' in mid else ''
+
+
+def scope_dir(scope: str) -> str:
+    return os.path.join(store_dir(), scope)
 
 _config: dict = {}
 
@@ -61,7 +71,8 @@ def init(config: dict) -> None:
 
 def store_dir() -> str:
     d = os.path.join(paths.runtime_store_dir(_config), 'announcements')
-    os.makedirs(os.path.join(d, 'op'), exist_ok=True)
+    for sc in SCOPES:
+        os.makedirs(os.path.join(d, sc), exist_ok=True)
     return d
 
 
@@ -135,7 +146,7 @@ def bundled_rows() -> List[dict]:
 
 def _row_out(r: dict, source: str) -> dict:
     o = dict(r)
-    o['source'] = source
+    o['source'] = 'subscriber' if _scope_of(r['id']) == 'sub' else source
     o['name'] = r['id'].split(':', 1)[1] if ':' in r['id'] else r['id']
     o['has_master'] = master_path(r['id']) is not None
     return o
@@ -157,8 +168,8 @@ def get_media(mid: str) -> Optional[dict]:
 
 def master_path(mid: str) -> Optional[str]:
     scope, _, name = mid.partition(':')
-    if scope == 'op':
-        p = os.path.join(store_dir(), 'op', f'{name}.wav')
+    if scope in SCOPES:
+        p = os.path.join(scope_dir(scope), f'{name}.wav')
         return p if os.path.isfile(p) else None
     if scope == 'sys':
         d = bundled_master_dir()
@@ -228,8 +239,15 @@ def _run_converter(wav_bytes: bytes, name: str, out_dir: str, normalize: Optiona
 
 
 def register(name: str, wav_bytes: bytes, kind: str = 'announcement', description: str = '', loop: bool = False,
-             normalize: Optional[float] = None, replace: bool = False, actor: str = '') -> dict:
-    if not _NAME_RE.match(name or ''):
+             normalize: Optional[float] = None, replace: bool = False, actor: str = '', scope: str = 'op') -> dict:
+    """scope = op(운영자 — id [a-z0-9_]) | sub(가입자 링백 — id 는 가입 번호 숫자열; CSC 회선의 ringback_media=sub:<숫자열> 이 가리킨다)."""
+    if scope not in SCOPES:
+        raise AnnError('bad_scope', f'scope 는 {list(SCOPES)} 중 하나')
+    if scope == 'sub':
+        name = (name or '').lstrip('+')
+        if not _SUB_NAME_RE.match(name):
+            raise AnnError('bad_id', 'sub 음원 id 는 가입 번호 숫자열(선행 + 는 뗀다, 20자리 이내) — sub:<숫자열> 로 저장')
+    elif not _NAME_RE.match(name or ''):
         raise AnnError('bad_id', 'id 는 소문자·숫자·_ 40자 이내 (op:<id> 로 저장)')
     if kind not in KINDS:
         raise AnnError('bad_kind', f'kind 는 {list(KINDS)} 중 하나')
@@ -239,11 +257,12 @@ def register(name: str, wav_bytes: bytes, kind: str = 'announcement', descriptio
         raise AnnError('too_large', f'WAV 는 {MAX_WAV_BYTES // (1024 * 1024)} MB 이하', 413)
     if len(wav_bytes) < 44 or wav_bytes[:4] != b'RIFF' or wav_bytes[8:12] != b'WAVE':
         raise AnnError('bad_wav', 'RIFF/WAVE 파일이 아니다')
-    mid = f'op:{name}'
+    mid = f'{scope}:{name}'
     rows = operator_rows()
     if any(r['id'] == mid for r in rows) and not replace:
         raise AnnError('exists', f'{mid} 가 이미 있다(replace=1 로 교체)', 409)
-    op_dir = os.path.join(store_dir(), 'op')
+    op_dir = scope_dir(scope)
+    os.makedirs(op_dir, exist_ok=True)
     tmp_dir = tempfile.mkdtemp(prefix='ann-conv-', dir=store_dir())
     try:
         out = _run_converter(wav_bytes, name, tmp_dir, normalize)
@@ -256,7 +275,7 @@ def register(name: str, wav_bytes: bytes, kind: str = 'announcement', descriptio
             if not os.path.isfile(src):
                 raise AnnError('convert_failed', f'변환 결과에 {fn} 이 없다', 500)
             os.replace(src, os.path.join(op_dir, fn))
-            files[codec] = f'op/{fn}'
+            files[codec] = f'{scope}/{fn}'
             sha[codec] = _sha256(os.path.join(op_dir, fn))
         if os.path.isfile(os.path.join(tmp_dir, master)):
             os.replace(os.path.join(tmp_dir, master), os.path.join(op_dir, f'{name}.wav'))
@@ -281,10 +300,10 @@ def delete(mid: str) -> None:
     row = next((r for r in rows if r['id'] == mid), None)
     if row is None:
         raise AnnError('not_found', mid, 404)
-    name = mid.split(':', 1)[1]
+    scope, _, name = mid.partition(':')
     for fn in [f'{name}.wav'] + [f'{name}.{FILE_EXT[c]}' for c in CODECS]:
         try:
-            os.unlink(os.path.join(store_dir(), 'op', fn))
+            os.unlink(os.path.join(scope_dir(scope if scope in SCOPES else 'op'), fn))
         except OSError:
             pass
     _write_catalog([r for r in rows if r['id'] != mid])
@@ -317,30 +336,41 @@ def _node_label(dep: dict) -> str:
 
 
 def _expected_files() -> Dict[str, str]:
-    """운영자 파일 → sha256 (배포 대조 기준)."""
+    """운영자·가입자 파일(상대 경로 <scope>/<file>) → sha256 (배포 대조 기준)."""
     exp: Dict[str, str] = {}
     for r in operator_rows():
         for codec, rel in (r.get('files') or {}).items():
-            fn = os.path.basename(rel)
-            exp[fn] = (r.get('sha256') or {}).get(codec, '')
+            exp[rel] = (r.get('sha256') or {}).get(codec, '')
     return exp
+
+
+def _node_files(dep: dict, config: dict):
+    """노드의 announcements/<scope>/ 파일 → {<scope>/<file>: sha256}. 반환 (ok, have|error)."""
+    from handlers.agents import _agent_proxy_call
+    have: Dict[str, str] = {}
+    for sc in SCOPES:
+        st, resp = _agent_proxy_call('GET', dep, '/module-files',
+                                     {'install_path': dep['install_path'], 'dir': f'{_DEPLOY_ROOT}/{sc}'}, None, 10, config)
+        if st != 200 or not isinstance(resp, dict):
+            return False, ((resp or {}).get('error') if isinstance(resp, dict) else f'HTTP {st}')
+        for f in (resp.get('files') or []):
+            if isinstance(f, dict) and f.get('name'):
+                have[f'{sc}/{f.get("name")}'] = f.get('sha256')
+    return True, have
 
 
 def node_status(config: dict) -> List[dict]:
     """CMP 노드별 운영자 음원 보유 상태 — GET /module-files 로 sha256 대조."""
-    from handlers.agents import _agent_proxy_call
     exp = _expected_files()
     nodes = []
     for dep in _cmp_deployments(config):
-        st, resp = _agent_proxy_call('GET', dep, '/module-files',
-                                     {'install_path': dep['install_path'], 'dir': _DEPLOY_SUBDIR}, None, 10, config)
+        ok, have = _node_files(dep, config)
         n = {'deployment_id': dep.get('id'), 'node': _node_label(dep), 'agent_id': dep.get('agent_id'),
              'install_path': dep.get('install_path'), 'status': dep.get('status')}
-        if st != 200 or not isinstance(resp, dict):
-            n.update({'presence': 'unreachable', 'error': (resp or {}).get('error') if isinstance(resp, dict) else str(resp)})
+        if not ok:
+            n.update({'presence': 'unreachable', 'error': str(have)})
             nodes.append(n)
             continue
-        have = {f.get('name'): f.get('sha256') for f in (resp.get('files') or []) if isinstance(f, dict)}
         missing = [fn for fn, sha in exp.items() if have.get(fn) != sha]
         n.update({'presence': 'ok' if not missing else ('missing' if len(missing) == len(exp) and exp else 'partial'),
                   'missing': missing, 'have': len(have), 'expected': len(exp)})
@@ -362,15 +392,13 @@ def deploy(config: dict, ids: Optional[List[str]] = None) -> dict:
         label = _node_label(dep)
         pushed: List[str] = []
         errors: List[str] = []
-        st, resp = _agent_proxy_call('GET', dep, '/module-files',
-                                     {'install_path': dep['install_path'], 'dir': _DEPLOY_SUBDIR}, None, 10, config)
-        if st != 200 or not isinstance(resp, dict):
-            result[label] = {'error': (resp or {}).get('error') if isinstance(resp, dict) else f'HTTP {st}', 'pushed': [], 'errors': []}
+        ok, have = _node_files(dep, config)
+        if not ok:
+            result[label] = {'error': str(have), 'pushed': [], 'errors': []}
             continue
-        have = {f.get('name'): f.get('sha256') for f in (resp.get('files') or []) if isinstance(f, dict)}
         for r in rows_sel:
             for codec, rel in (r.get('files') or {}).items():
-                fn = os.path.basename(rel)
+                fn = rel   # <scope>/<file>
                 sha = (r.get('sha256') or {}).get(codec, '')
                 if have.get(fn) == sha:
                     continue
@@ -382,7 +410,7 @@ def deploy(config: dict, ids: Optional[List[str]] = None) -> dict:
                     errors.append(f'{fn}: {e}')
                     continue
                 st2, resp2 = _agent_proxy_call('PUT', dep, '/module-file',
-                                               {'install_path': dep['install_path'], 'path': f'{_DEPLOY_SUBDIR}/{fn}'},
+                                               {'install_path': dep['install_path'], 'path': f'{_DEPLOY_ROOT}/{fn}'},
                                                None, 60, config, raw=data, content_type='application/octet-stream')
                 if st2 == 200:
                     pushed.append(fn)
@@ -401,7 +429,9 @@ def deploy(config: dict, ids: Optional[List[str]] = None) -> dict:
 def undeploy_file(config: dict, mid: str) -> dict:
     """삭제된 운영자 음원의 파일을 노드에서도 걷고 카탈로그를 다시 내린다(선택 — 남겨도 무해)."""
     from handlers.agents import _agent_proxy_call
-    name = mid.split(':', 1)[1] if ':' in mid else mid
+    scope, _, name = mid.partition(':')
+    if scope not in SCOPES:
+        scope = 'op'
     rows = operator_rows()
     result: Dict[str, dict] = {}
     for dep in _cmp_deployments(config):
@@ -409,7 +439,7 @@ def undeploy_file(config: dict, mid: str) -> dict:
         for codec in CODECS:
             fn = f'{name}.{FILE_EXT[codec]}'
             st, resp = _agent_proxy_call('DELETE', dep, '/module-file',
-                                         {'install_path': dep['install_path'], 'path': f'{_DEPLOY_SUBDIR}/{fn}'}, None, 10, config)
+                                         {'install_path': dep['install_path'], 'path': f'{_DEPLOY_ROOT}/{scope}/{fn}'}, None, 10, config)
             if st not in (200, 404):
                 errs.append(f'{fn}: HTTP {st}')
         st3, _ = _agent_proxy_call('PUT', dep, '/collection', {'install_path': dep['install_path'], 'name': _CATALOG_COLLECTION},

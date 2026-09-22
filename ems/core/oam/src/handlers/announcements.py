@@ -81,7 +81,8 @@ async def handle_announcements(handler_args: HandlerArgs, kwargs: dict) -> Handl
                 row = ann.register(q.get('id') or '', bytes(data), kind=q.get('kind') or 'announcement',
                                    description=q.get('description') or '', loop=(q.get('loop') or '') in ('1', 'true', 'yes'),
                                    normalize=(float(norm) if norm not in (None, '') else None),
-                                   replace=(q.get('replace') or '') in ('1', 'true', 'yes'), actor=actor)
+                                   replace=(q.get('replace') or '') in ('1', 'true', 'yes'), actor=actor,
+                                   scope=q.get('scope') or 'op')
                 _audit(config, payload, 'registered', row['id'], {'kind': row.get('kind'), 'duration_ms': row.get('duration_ms')})
                 return _json(201, row)
         elif parts[0] == 'nodes' and len(parts) == 1 and method == 'GET':
@@ -138,9 +139,10 @@ CIMS_ANNOUNCEMENTS_API_DOCS = [
      'response': '{media[]: {id, name, source(bundled|operator), kind, description, duration_ms, loop, files{codec: path}, sha256{}, level_dbov, has_master}, converter, nodes?[]}',
      'auth': _AUTH_MON},
     {'id': 'announcements.register', 'module': _MOD, 'method': 'POST', 'path': _BASE,
-     'summary': '음원 등록 — WAV(PCM 8~48 kHz mono/stereo) 본문. 16 kHz 마스터 + pcmu/pcma/g722/amrwb(DTX 끔) 를 만든다. id 는 op:<id> 로 저장',
+     'summary': '음원 등록 — WAV(PCM 8~48 kHz mono/stereo) 본문. 16 kHz 마스터 + pcmu/pcma/g722/amrwb(DTX 끔) 를 만든다. id 는 op:<id>(scope=op) 또는 sub:<가입 번호 숫자열>(scope=sub — 가입자 링백, CSC 회선 ringback_media 가 가리킨다) 로 저장',
      'params': [{'name': 'body', 'in': 'body', 'type': 'bytes', 'required': True, 'desc': 'WAV 바이트(Content-Type: application/octet-stream)'},
-                {'name': 'id', 'in': 'query', 'type': 'string', 'required': True, 'desc': '[a-z0-9_]{1,40}'},
+                {'name': 'id', 'in': 'query', 'type': 'string', 'required': True, 'desc': 'op: [a-z0-9_]{1,40} · sub: 가입 번호 숫자열(선행 + 는 뗀다)'},
+                {'name': 'scope', 'in': 'query', 'type': 'string', 'enum': ['op', 'sub'], 'desc': '기본 op'},
                 {'name': 'kind', 'in': 'query', 'type': 'string', 'enum': list(ann.KINDS)},
                 {'name': 'description', 'in': 'query', 'type': 'string'}, {'name': 'loop', 'in': 'query', 'type': 'bool', 'desc': '반복 힌트(보류 음악)'},
                 {'name': 'normalize', 'in': 'query', 'type': 'number', 'desc': 'P.56 활성 레벨을 이 dBov 로(안내 -26 · 신호음 -16 · 음악 -20 권장)'},

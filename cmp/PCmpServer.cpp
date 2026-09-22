@@ -550,7 +550,7 @@ int PCmpServer::countAnnPlayers() const {
 
 int PCmpServer::countTranscoding() const {
     int n = 0;
-    for (auto const& kv : _sessions) if (kv.second && kv.second->transcoding()) ++n;
+    for (auto const& kv : _sessions) if (kv.second && (kv.second->transcoding() || kv.second->mixingAmr())) ++n;
     return n;
 }
 
@@ -1404,7 +1404,8 @@ void PCmpServer::processPlay(const SimpleJson::JsonNode& payload, const std::str
     if (sessionId.empty() || playId.empty() || peerIdx < 0 || peerIdx > 1)
         return reject("BAD_REQUEST", "session_id, play_id, peer_index required");
     if (_annPlayers <= 0) return reject("BAD_REQUEST", "announcements not supported (AnnPlayers=0)");
-    if (mode != "replace") return reject("BAD_REQUEST", "mode not supported: " + mode);
+    const bool mixMode = (mode == "mix");
+    if (mode != "replace" && !mixMode) return reject("BAD_REQUEST", "mode not supported: " + mode);
     if (reqs.empty()) return reject("BAD_REQUEST", "media required");
     auto itS = _sessions.find(sessionId);
     if (itS == _sessions.end()) return reject("NOT_FOUND", "session not found");   // 부활 금지
@@ -1413,6 +1414,13 @@ void PCmpServer::processPlay(const SimpleJson::JsonNode& payload, const std::str
     const std::string codec = rtp->legCodecName(peerIdx);
     const int pt = rtp->legPtOut(peerIdx);
     if (codec.empty() || pt < 0) return reject("BAD_REQUEST", "leg codec undetermined — media_codec/remote_codec required");
+    if (mixMode) {
+        // mix(announcements.md §3.6) — G.711/AMR-WB 만(디코드·합산·인코드). AMR-WB 는 트랜스코딩과 같은 급이라 변환 슬롯을 센다
+        if (!PAnnMixer::supports(codec)) return reject("BAD_REQUEST", "mode mix needs PCMU/PCMA/AMR-WB leg (" + codec + ")");
+        if (codec == "AMR-WB" && !rtp->transcoding() && !rtp->mixingAmr() && _transcodeSlots > 0 &&
+            countTranscoding() >= _transcodeSlots)
+            return reject("TRANSCODE_CAPACITY", "no transcode slot for AMR-WB mix");
+    }
 
     std::vector<PAnnPlayer::Item> items;
     for (const Req& r : reqs) {
@@ -1447,9 +1455,10 @@ void PCmpServer::processPlay(const SimpleJson::JsonNode& payload, const std::str
                                                       repeat, delayMs, maxMs, natLeg ? _annNatWaitMs : 0));
     std::string err;
     if (!player->ok(err)) return reject("BAD_REQUEST", err);
+    player->setMix(mixMode);
     const int durationMs = player->durationMs();
     std::string replaced;
-    if (!rtp->startAnn(peerIdx, std::move(player), replaced)) return reject("BAD_REQUEST", "leg not active");
+    if (!rtp->startAnn(peerIdx, std::move(player), replaced)) return reject("BAD_REQUEST", "leg not active (or mixer init failed)");
     if (!replaced.empty()) {
         // 교체된 재생기 — client 명령의 결과지만 통일을 위해 항상 DONE 을 낸다(§4.1)
         PAnnTicker::Done d;
@@ -1462,15 +1471,15 @@ void PCmpServer::processPlay(const SimpleJson::JsonNode& payload, const std::str
     const int widx = rtp->workerIdx();
     if (widx >= 0 && widx < (int)_annTickers.size() && _annTickers[widx]) _annTickers[widx]->add(rtp);
 
-    logFlow(sessionId, "cmp", "cmp", "INT", "ANN_PLAY", (detail + " " + codec).c_str(), "", svc.c_str(), sesid.c_str());
+    logFlow(sessionId, "cmp", "cmp", "INT", "ANN_PLAY", (detail + " " + codec + (mixMode ? " mix" : "")).c_str(), "", svc.c_str(), sesid.c_str());
     SimpleJson::JsonNode respBody;
     respBody.Set("codec", codec + "/" + std::to_string(PAnnCatalog::TsStep(codec) * 50));
     respBody.Set("duration_ms", durationMs);
     int txSeq = sendOk(ip, port, transId, cmdName, sesid, svc, &respBody);
     logFlow(sessionId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
-    LOG_INFO("PCmpServer", "%s session=%s peer=%d play=%s media=[%s] codec=%s pt=%d repeat=%d max=%dms nat_wait=%d (%d/%d)",
+    LOG_INFO("PCmpServer", "%s session=%s peer=%d play=%s media=[%s] codec=%s pt=%d repeat=%d max=%dms nat_wait=%d mode=%s (%d/%d)",
              cmdName.c_str(), sessionId.c_str(), peerIdx, playId.c_str(), detail.c_str(), codec.c_str(), pt, repeat, maxMs,
-             natLeg ? _annNatWaitMs : 0, countAnnPlayers(), _annPlayers);
+             natLeg ? _annNatWaitMs : 0, mode.c_str(), countAnnPlayers(), _annPlayers);
 }
 
 // RELAY_PLAY_STOP {session_id, play_id[, peer_index]} — 없으면 OK(자연 멱등)

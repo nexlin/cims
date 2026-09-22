@@ -553,6 +553,8 @@ int ServiceMain() {
         gclsUserAgent.CheckSessionTimer();
         // 관제 — 대표번호 포크 집합 무응답 판정 (dispatch_center.md §4.4)
         gclsDispatcher.GetTas()->Tick();
+        // 착신전환 — CFNR 무응답 시한 만료 leg CANCEL + 전환 (volte_supplementary_services.md §6A.4)
+        gclsDispatcher.Tick();
         // 안내음성 — 상한 지난 early 대기 회수 (announcements.md §5.1)
         gclsAnnouncement.Tick();
         // 관제 — 적재 실패로 못 한 인가 회수를 갚는다 (§5.10). 빚이 없으면 즉시 반환한다.

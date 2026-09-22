@@ -76,6 +76,8 @@ void PRtpRelay::reset() {
     _xcode[1].reset();
     _ann[0].reset();   // 안내 재생기 — 세션 종속 수명(RELAY_REMOVE/회수 = 정지, 이벤트 없음)
     _ann[1].reset();
+    _mixer[0].reset();
+    _mixer[1].reset();
     _taps.clear();  // 객체 회수는 PCmpServer(freeResource → collectTaps) 몫 — 여기서는 참조만 끊는다
 }
 
@@ -441,8 +443,9 @@ bool PRtpRelay::proc() {
             touchActivity();
             if (_ann[i]) _ann[i]->onIngress();   // NAT 게이트 해제 — 이 leg 로 나가는 안내를 latch 된 주소로 낼 수 있다
 
-            // replace 모드 — 안내 재생 중인 leg 로는 반대 peer 의 오디오를 보내지 않는다(tap·녹취는 ingress 복사라 그대로)
-            const bool dstMuted = (_ann[dst] != nullptr);
+            // replace 모드 — 안내 재생 중인 leg 로는 반대 peer 의 오디오를 보내지 않는다(tap·녹취는 ingress 복사라 그대로).
+            //   mix 모드(_mixer) 는 relay 위에 신호음을 섞어 낸다(_mixOut) — 끊지 않는다
+            const bool dstMuted = (_ann[dst] != nullptr) && !_ann[dst]->isMix();
 
             bool isTe = false;
             if (len >= 12) {
@@ -480,6 +483,10 @@ bool PRtpRelay::proc() {
                         if (_recorder) _recorder->writePacket(i == 0 ? "a" : "b", o.data(), (int)o.size());
                     }
                     if (dstMuted) continue;
+                    if (!isTe && _mixer[dst]) {
+                        std::string mixed;
+                        if (_mixOut(dst, (const unsigned char*)o.data(), (int)o.size(), mixed)) o.swap(mixed);
+                    }
                     if (dstSec) {
                         char outb[2048];
                         int outLen = (int)o.size();
@@ -516,11 +523,14 @@ bool PRtpRelay::proc() {
                 if (len >= 12) stampPt = isTe ? _legs[dst].tePtOut : _legs[dst].ptOut;
                 Leg& d = _legs[dst];
                 bool dstSec = d.crypto && d.crypto->enabled();
-                if (stampPt > 0 || dstSec) {
+                std::string mixed;   // mix 재생기 — 신호음을 섞은 egress 사본(녹취는 아래에서 원본 pkt 를 쓴다)
+                const bool useMixed = (!isTe && _mixer[dst] && _mixOut(dst, (const unsigned char*)pkt, len, mixed));
+                if (stampPt > 0 || dstSec || useMixed) {
                     // egress 사본 — 녹취용 평문(pkt)을 보존한 채 스탬프/protect
                     char out[2048];
-                    int outLen = len;
-                    memcpy(out, pkt, len);
+                    int outLen = useMixed ? (int)mixed.size() : len;
+                    if (outLen > (int)sizeof(out)) outLen = (int)sizeof(out);
+                    memcpy(out, useMixed ? mixed.data() : pkt, (size_t)outLen);
                     if (stampPt > 0)
                         out[1] = (char)((out[1] & 0x80) | (stampPt & 0x7F));
                     if (dstSec && !d.crypto->protectRtp(out, outLen, sizeof(out)))
@@ -698,7 +708,23 @@ bool PRtpRelay::startAnn(int peerIdx, std::unique_ptr<PAnnPlayer> player, std::s
     const int i = peerIdx & 1;
     if (!_legs[i].active) return false;
     if (_ann[i]) replacedPlayId = _ann[i]->playId();
+    _mixer[i].reset();
+    if (player && player->isMix()) {
+        // mix — leg 코덱의 믹서(AMR-WB 는 인코더 모드 = leg fmtp 상한, 없으면 8)
+        const int mode = _legs[i].codecDesc.valid() && _legs[i].codecDesc.isAmrWb() ? _legs[i].codecDesc.amrMaxMode() : 8;
+        std::unique_ptr<PAnnMixer> mx(new PAnnMixer(player->codec(), legAmrOctetAlign(i), mode));
+        if (!mx->ok()) return false;
+        _mixer[i] = std::move(mx);
+    }
     _ann[i] = std::move(player);
+    touchActivity();
+    return true;
+}
+
+bool PRtpRelay::_mixOut(int dst, const unsigned char* pkt, int len, std::string& out) {
+    const int i = dst & 1;
+    if (!_mixer[i] || !_ann[i] || _ann[i]->done()) return false;
+    if (!_mixer[i]->mix(pkt, len, *_ann[i], out)) return false;
     touchActivity();
     return true;
 }
@@ -715,6 +741,7 @@ bool PRtpRelay::stopAnn(int peerIdx, const std::string& playId, const char* reas
     out.playedMs = _ann[i]->playedMs(0);
     out.media = _ann[i]->mediaLabel();
     _ann[i].reset();
+    _mixer[i].reset();
     return true;
 }
 
@@ -766,7 +793,9 @@ bool PRtpRelay::annTick(int64_t nowUs, std::vector<PAnnTicker::Done>& done) {
     for (int i = 0; i < 2; ++i) {
         if (!_ann[i]) continue;
         pkts.clear();
-        _ann[i]->tick(nowUs, pkts);
+        if (!_ann[i]->isMix()) {
+            _ann[i]->tick(nowUs, pkts);   // mix 재생기는 relay 패킷이 당긴다(_mixOut) — 틱은 종료 판정만
+        }
         if (!pkts.empty()) {
             _sendAnn(i, pkts);
             touchActivity();   // 재생 중에는 orphan/hold 회수 대상이 아니다(§4.2)
@@ -781,6 +810,7 @@ bool PRtpRelay::annTick(int64_t nowUs, std::vector<PAnnTicker::Done>& done) {
             d.media = _ann[i]->mediaLabel();
             done.push_back(d);
             _ann[i].reset();
+            _mixer[i].reset();
         } else {
             any = true;
         }

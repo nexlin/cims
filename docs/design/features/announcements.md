@@ -49,7 +49,8 @@ SIP-I 트렁크의 ISUP 안내 인디케이터.
 | `forbidden` 차단 | 403(ACL·채널 정책) | — | **안내 없음**(보안 — 응답만) |
 | `hold` 보류 | 한 leg 의 re-INVITE offer `a=sendonly`/`a=inactive` | TS 24.610 §4.5.2.4 | 피보류 leg 에 보류 음악 loop, resume(sendrecv) 에 정지 |
 | `ringback` 링백 | B-leg 첫 18x(SDP 없음) 수신 | RFC 3960 §3, TS 24.628 | **off**(단말 로컬 링백). 접속서비스 스위치로 서버 링백 — §6 |
-| `call_waiting` 통화중대기 | 통화 중 가입자에게 두 번째 INVITE | TS 24.615, RFC 7462 | **P2** — §11 |
+| `call_waiting` 통화중대기(발신자) | 통화 중 가입자에게 두 번째 INVITE — 발신자가 듣는 것 | TS 24.615, RFC 7462 | **none**(단말 로컬 링백). 규칙이 media/announce 면 B 의 SDP 없는 18x 에 183+SDP 안내/링백 — §11 |
+| `call_waiting_alert` 통화중대기(착신자) | 같은 상황 — 통화 중인 **착신자의 활성 통화 leg** 에 섞는 in-band 대기음 | TS 24.615 §4.5.2.1 | **none**(단말이 `Alert-Info: <urn:alert:service:call-waiting>` 로 낸다). 내장 프로파일 `cw_inband`(착신자 서비스 `hold_profile`)이 `mode=mix` 로 켠다 — §3.6 |
 | `forwarded` 전환 안내 | 착신 가입자 `forward_id`(CFU) 로 B-leg 를 전환 대상으로 낼 때(서버측 전환, [volte_supplementary_services.md §6A](volte_supplementary_services.md)) | TS 24.604 §4.5.2.6, RFC 7044 | 발신자에 181 → 전환 안내 1회 → **링백음을 전환 대상 응답까지**(`announce_then_tone`) — §3.5 |
 
 **상황 판정 우선순위.** B-leg 최종 응답에 `Reason: Q.850;cause=N` 이 있으면 cause 로 먼저 판정하고(RFC 3326 — 피어·MGCF 가
@@ -173,6 +174,29 @@ UE-A                     CSP                          CMP                       
 - 프로파일 `none`·CMP 미지원·answer 조립 실패면 **181 만** 나가고 호는 그대로 진행한다(안내가 전환을 막지 않는다). `trunk` 프로파일은 none(NNI 는 코드·헤더만).
 - 기본 세트에 `sys:ann_forwarded`("전화가 다른 번호로 연결됩니다. 잠시만 기다려 주십시오.")가 추가된다(§7.2).
 
+### 3.6 통화중대기 in-band 대기음 (TS 24.615, mode=mix)
+
+통화 중인 B 에게 C 의 INVITE 가 오면 CSP 는 B-leg INVITE 에 `Alert-Info: <urn:alert:service:call-waiting>`(RFC 7462)을 싣는다 — 대기음은 **단말이** 낸다(1차).
+단말이 못 내는 배치(구형 단말·유선 데스크폰)를 위해 망이 B 의 **활성 통화 leg 위에 대기음을 섞어** 낼 수 있다:
+
+```
+A ══ RTP ══► CMP ──(relay + 대기음 mix)──► B          C ── INVITE(B) ─► CSP ── INVITE(Alert-Info: call-waiting) ─► B
+                                                        │ [B 확립 호 있음 → call_waiting_alert 규칙(B 의 hold_profile)]
+                    CSP ── RELAY_PLAY(B 활성 세션, B 쪽 peer, mode=mix, [call_waiting_kr] repeat 0) ─► CMP
+              B 가 486 거절 / C 가 CANCEL / B 가 응답 ──► RELAY_PLAY_STOP
+```
+
+- 판정 = `EventIncomingCall` 의 통화중대기 분기(`HasEstablishedCallFor`)·조건부 전환의 전환 대상이 통화 중일 때 — `OnCallWaitingAlert(callee, CW A, CW B)`.
+  프로파일 = 착신자 접속서비스 `hold_profile` → `announcement_profile` → 기본(피보류자 안내와 같은 해석 — "자기 leg 에 들어오는 안내"). 상황 `call_waiting_alert`,
+  모드 `tone`(신호음 id) — 내장 `cw_inband` 프로파일 = `tone sys:call_waiting_kr`. 재생 leg = `CCallMap::FindEstablishedLegFor(callee)` 의 relay 세션·착신자 쪽 peer.
+- **CMP `mode=mix`**(`PAnnMixer`) — replace 처럼 relay 를 끊지 않고, 상대에서 오는(트랜스코딩 뒤) 오디오 패킷마다 디코드 → 재생기 프레임(같은 코덱, `nextPayload` pull)의
+  PCM 을 샘플 수만큼 더해(포화) → 인코드 → 원 RTP 헤더(seq·ts·SSRC) 그대로 페이로드만 교체. G.711 은 표 변환, AMR-WB 는 디코더 2개+인코더 1개(트랜스코딩과 같은 급 —
+  **변환 슬롯을 센다**, 소진이면 `TRANSCODE_CAPACITY`), G.722 는 미지원(`BAD_REQUEST`). 다중 프레임 AMR-WB 패킷은 섞지 않고 그대로. 상대가 조용하면(DTX·보류) 대기음도
+  멈춘다 — relay 위에 얹는 것이 이 모드의 정의다. 녹취·tap 은 ingress 복사라 대기음이 실리지 않는다.
+- 정지 = 대기 호의 어느 leg 든 종료(`OnCallEnd` → `OnCallWaitingEnd`) 또는 B 의 대기 호 응답(`EventCallStart`). 발신자 C 가 듣는 것은 별개(§2 `call_waiting`).
+- 계측기 `VOLTE-ANN-CALL-WAITING`: 착신 풀 `call_waiting: true`(libcsim 이 통화 중 두 번째 INVITE 를 180 으로 보류 — `reject` 로 거절) + 착신자 서비스 변종
+  `hold_profile: cw_inband`. 판정 = C 의 486 뒤 통화중 안내(`early_media_pct`/`early_rtp_pct`)·A↔B 손실 없음, 대기음 삽입은 CSP `call_waiting_alert → mix`·CMP `ANN_PLAY … mix`.
+
 ## 4. CMP — 재생기(ANN function)
 
 ### 4.1 계약 (cmp_media_api.md §6.7 예정)
@@ -191,7 +215,7 @@ leg 당 동시 재생기 1개 — 같은 leg 에 새 RELAY_PLAY 는 이전 재�
 | `repeat` | - | 전체 시퀀스 반복 수. 기본 1, **0 = STOP 까지 무한**(hold·ringback) |
 | `delay_ms` | - | 반복 사이 무음(RFC 4240 `delay`). 기본 0 |
 | `max_ms` | - | 총 재생 상한 — 넘으면 `reason=max`. 기본 = CMP `AnnMaxPlayMs` |
-| `mode` | - | `replace`(기본 — 재생 중 반대 peer 의 relay 를 이 leg 로 보내지 않음) / `mix`(**예약** — §11 통화중대기 톤 삽입) |
+| `mode` | - | `replace`(기본 — 재생 중 반대 peer 의 relay 를 이 leg 로 보내지 않음) / `mix`(relay 위에 섞는다 — 통화중대기 대기음 §3.6; PCMU/PCMA/AMR-WB leg 만, AMR-WB 는 변환 슬롯 1개) |
 
 응답 payload: `{ "codec": "AMR-WB/16000", "duration_ms": 9000 }`(시퀀스 1회 길이. repeat 0 이면 `duration_ms: 0`). 같은 `play_id` 재요청(멱등)은 `{codec, played_ms}`.
 
@@ -221,6 +245,8 @@ leg 당 동시 재생기 1개 — 같은 leg 에 새 RELAY_PLAY 는 이전 재�
   그 워커의 활성 재생기를 순회해 프레임을 낸다(재생기 수와 무관하게 타이머 1개, 재생기 0 이면 disarm). 별도 스레드를 두지 않는 이유 = `PMediaCrypto`·`Leg` 는
   같은 리액터에서만 만진다는 규약. 틱 지터는 timerfd `TFD_TIMER_ABSTIME` 절대 시각 누적으로 흡수(드리프트 없음).
 - **replace 모드** — 재생 중인 leg 로는 반대 peer 의 오디오 RTP 를 relay 하지 않는다(RTCP 는 통과, 영상 무관). 트랜스코더가 붙어 있어도 그 방향 출력은 버린다.
+- **mix 모드**(`PAnnMixer`, §3.6) — 재생기는 틱으로 내지 않고(`PAnnPlayer::nextPayload`) relay 패킷이 프레임을 당긴다: 패킷 디코드 + 신호음 PCM 합산(포화) → 재인코드
+  → 같은 헤더로 송신(`_mixOut` — 트랜스코딩 출력·평문 경로 둘 다). 믹서는 재생기와 수명이 같고(startAnn/stopAnn/DONE/reset), AMR-WB 믹서는 `countTranscoding` 에 든다.
   ingress(재생 leg 가 보내는 RTP)는 현행대로 NAT latch·활동 갱신에 쓰고 상대 leg 로 relay 한다(hold 의 A 는 sendonly 라 실제로는 오지 않는다).
 - **녹취·tap 에 안내는 실리지 않는다** — 둘 다 ingress 복사라는 현행 원칙 그대로다. 안내 재생은 세그먼트 메타에도 남기지 않는다(CDR 이 갖는다 §9).
 - **활동 갱신** — 재생 틱마다 `touchActivity()` → `orphan_no_rtp`(120 s)·`hold_timeout` 회수가 재생 중에는 일어나지 않는다.
@@ -305,6 +331,7 @@ CallMap 은 relay 서술자와 `m_strAnnProfile` 만 갖는다. 링백 entry(최
   (맵-오브-맵은 콘솔 필드 형식에 없다). 같은 프로파일에 없는 상황은 `DefaultProfile` 의 값, 그것도 없으면 `none`.
 - `Rules` 가 비면(키 없음·빈 배열) **내장 기본 표** — `default`(§2 표의 기본 동작 그대로 — busy 화중음 4 s→안내, no_answer/unreachable 안내, not_found/invalid 없는번호 안내,
   declined 화중음 6 s, congestion 혼잡음 6 s, hold moh_simple loop, **forwarded = announce_then_tone ann_forwarded → ringback_kr**(§3.5), ringback/forbidden/call_waiting none) + `trunk`(전부 none — NNI 관례) +
+  `cw_inband`(착신자 `hold_profile` 로 고르는 망 in-band 통화중대기음 — `call_waiting_alert: tone sys:call_waiting_kr` 한 행, §3.6) +
   `ringback`(서버 링백 스위치 — `ringback: media sys:ringback_kr loop` 한 행, 나머지 상황은 `default` 로 떨어진다. 접속서비스 `announcement_profile: ringback` 이
   §3.4 를 켜는 가장 짧은 길이고, 음원은 §6.3 가입자 값이 덮는다).
 - `tone_ms` 는 신호음 loop 길이(신호음 파일은 주기 1~2회 분량이라 CMP 가 항목 `repeat 0 + max_ms` 로 돈다). `media` 의 `repeat` 기본 1, hold/ringback 은 `loop`.
@@ -330,7 +357,11 @@ TS 29.165) 를 본다. 어느 것도 없으면 `DefaultProfile`.
 - 자료 = 가입 테이블(`volte_subscriptions`/`voip_subscriptions`) `ringback_media VARCHAR(64) NULL`(`sql/migrate_subscription_ringback.sql`, 재실행 안전). 값 = 라이브러리 음원 id
   `sys:<name>`·`op:<name>`(·`sub:<name>` 예약). CSC `POST/PUT /users/{pid}/{volte|voip}` 의 `ringback_media`(형식 검사, 컬럼 없으면 400 `schema_not_migrated`)가 쓰고
   목록·단건 응답에 실린다. CSP 는 `DbManager` 가 컬럼 존재를 기동 때 확인해 `LoadAllUsers`/`SelectUser` 로 `CspUser::m_strRingbackMedia` 에 읽는다(USER_CHANGED 반영).
-- `CCspAnnouncementService::OnRingback` 이 프로파일 동작을 고른 뒤 피착신 `CspUser` 의 값이 있으면 `media` 만 바꾼다. 가입자별 WAV 업로드(`sub:` 등록)는 후속 — 지금은 라이브러리 id 선택.
+- `CCspAnnouncementService::OnRingback` 이 프로파일 동작을 고른 뒤 피착신 `CspUser` 의 값이 있으면 `media` 만 바꾼다.
+- **가입자 WAV 업로드(`sub:`)** — 라이브러리 API `POST /api/v1/announcements?scope=sub&id=<가입 번호 숫자열>`(§7.3)이 `sub:<숫자열>`(E.164 의 `+` 를 뗀 것 — CSC
+  `ringback_media` 형식 `[a-z0-9_]`)로 등록하고 `<store>/announcements/sub/` 에 두며 CMP 배포는 op 와 같다. 콘솔 `/service/announcements` [가입자 링백…] 이 WAV 를 올린 뒤
+  그 번호의 전화 회선(call|voip)을 찾아 `ringback_media=sub:<숫자열>` 을 PUT 한다(음원과 회선 지정을 한 번에). 삭제는 op 와 같고 회선 값은 그대로 남는다(음원이 없으면 CMP
+  `MEDIA_NOT_FOUND` → 프로파일 폴백 없이 링백 없음 — 삭제 뒤 회선 값을 비우는 것은 운영 절차).
 
 ## 7. 서비스 음원 라이브러리
 
@@ -368,7 +399,7 @@ CMake `dist` 가 `dist/cmp/announcements/sys/` 에 복사하고, OAM 패키지�
 
 배포 자산 분배(패키지·컬렉션과 같은 평면)라 **base OAM**(`ems/core/oam`)이 소유한다 — agent 토큰·배포 레코드가 base 에 있다. 서비스 모듈(oam-svc)이 아니다.
 
-- **저장소** = 관리 store `<store>/announcements/` : `catalog.jsonl`(op 행) + `op/<name>.wav`(마스터, 청취) + `op/<name>.{pcmu,pcma,g722,amrwb}`. 동봉 세트 표시용 카탈로그·마스터는 OAM 패키지 `announcements/`.
+- **저장소** = 관리 store `<store>/announcements/` : `catalog.jsonl`(op·sub 행) + `<scope>/<name>.wav`(마스터, 청취) + `<scope>/<name>.{pcmu,pcma,g722,amrwb}`(scope = `op` 운영자 · `sub` 가입자 링백 §6.3 — 배포·대조·삭제는 `<scope>/<file>` 상대 경로 단위, 노드는 `announcements/<scope>/`). 동봉 세트 표시용 카탈로그·마스터는 OAM 패키지 `announcements/`.
 - **API**(`ems/core/oam/src/handlers/announcements.py`, `/api/v1/announcements`) : `GET`(목록 `media[]`, `?nodes=1` 이면 CMP 노드별 보유 상태) · `POST ?id=&kind=&description=&loop=&normalize=&replace=`
   (본문 octet-stream WAV — 게이트웨이가 multipart 를 JSON 으로 환원하므로 계측기와 같은 규약; `services/announcements.register` 가 변환기로 4 코덱 생성, DTX 끔) · `GET /nodes` ·
   `POST /deploy {ids?}` · `GET /{id}` · `GET /{id}/master.wav` · `GET /{id}/files/{codec}` · `DELETE /{id}[?undeploy=1]`. 권한 GET=monitor·POST=operator·DELETE=manager.
@@ -427,13 +458,13 @@ CMake `dist` 가 `dist/cmp/announcements/sys/` 에 복사하고, OAM 패키지�
   `Alert-Info: <urn:alert:service:call-waiting>`(RFC 7462 — 단말이 대기음을 낸다)을 싣고 `CCallInfo::m_bCallWaiting` 을 켠다. 발신자에게는 B 의 SDP 없는 18x 에서
   `OnRingback(…, ANN_SIT_CALL_WAITING)` — 프로파일 `call_waiting`(`mode: media|announce`, 예 `sys:ann_call_waiting` loop) 규칙이 있으면 그것으로, 없으면 `ringback` 규칙으로
   183+SDP 안내/링백을 들려준다(기본 표는 둘 다 none — 배치가 켠다). 피어 착신·PTT 는 대상이 아니다.
-  **남은 것** = 단말이 대기음을 못 내는 배치를 위한 **망 in-band 대기음**(활성 통화에 톤을 섞는 `mode=mix` — 디코드·믹스·재인코딩, 변환 슬롯 소비)과 실단말 실측.
-- **착신전환(TS 24.604) 후속**: CFU 서버측 전환·`forwarded` 안내는 구현(§3.5·§12 ⑪). 남은 것 = 조건부 전환 CFB/CFNR/CFNL(가입 필드 `forward_busy_id`·`forward_no_reply_id`·`no_reply_sec`,
-  B-leg 486/무응답/미등록 때 같은 재타게팅 경로 — History-Info cause 486/408/404) · 전환자(diverting user) 통지(TS 24.604 comm-div-info 이벤트 패키지) · `Privacy: history`.
-- **다이얼로그 이전 거절**(3.2)의 판정 지점 이동 · **가입자 링백 WAV 업로드**(`sub:` 등록 — 6.3 은 라이브러리 id 선택까지 구현) · **다국어 세트**(프로파일을 언어별로 두면 된다 — 모델 변경 없음).
+  **망 in-band 대기음**(`mode=mix`)은 §3.6 으로 구현 — 남은 것은 실단말(Alert-Info 대기음·in-band 청취) 실측.
+- **착신전환(TS 24.604)**: CFU·CFB·CFNR·CFNL 서버측 전환과 `forwarded` 안내는 구현(§3.5·§12 ⑪⑫, [volte_supplementary_services.md §6A](volte_supplementary_services.md)). 남은 것 =
+  피어·미등록 대상으로의 조건부 전환(지금은 등록 가입자만) · 전환자(diverting user) 통지(TS 24.604 comm-div-info 이벤트 패키지) · `Privacy: history`.
+- **다이얼로그 이전 거절**(3.2)의 판정 지점 이동 · **다국어 세트**(프로파일을 언어별로 두면 된다 — 모델 변경 없음). 가입자 링백 WAV 업로드는 §6.3 `sub:` 로 구현.
 - **관제 큐/ACD**([dispatch_center.md §10](dispatch_center.md)): 대표번호 대기열의 "잠시만 기다려 주십시오"·순번 안내는 3.4 의 링백 재생기(repeat 0)에
   시퀀스 교체(RELAY_PLAY 교체 = `replaced`)를 얹는 것이다.
-- `mix` 모드·런타임 인코딩(PCM 마스터 → leg 코덱, 변환 슬롯 사용)·영상 안내.
+- 런타임 인코딩(PCM 마스터 → leg 코덱, 변환 슬롯 사용)·영상 안내 · mix 의 독립 송출(상대가 조용할 때 대기음만 내기 — 지금은 relay 위에만 얹는다).
 
 ## 12. 구현 상태 (P1)
 
@@ -454,5 +485,7 @@ CMake `dist` 가 `dist/cmp/announcements/sys/` 에 복사하고, OAM 패키지�
 
 | ⑪ 착신전환 안내 (TS 24.604 CDIV) | 서버측 전환 — TAS `ResolveDiversion`(CFU 연쇄·상한 `Setup.Sip.Cdiv.MaxDiversions`·루프 486·DB 폴백·다이얼 플랜 번역) · 디스패처 재타게팅(181 `Setup.Sip.Cdiv.Notify181`·전환 대상 라우팅 재판정 `DecideOutboundRoute`·B-leg `History-Info`/`Supported: histinfo`·CDR `diversion`) · `CspDiversion`(RFC 7044/4458 순수 헬퍼) · 상황 `forwarded`·모드 `announce_then_tone`·`OnForwarded`·2 단계 링백 · 음원 `sys:ann_forwarded` · 302 경로 제거 · 계측기 `VOLTE-ANN-FORWARDED`(픽스처 `forward_to`, 지표 `cdiv_181_pct`·`cdiv_hi_pct`, libcsim `OnIncomingDiverted`) · CSC PUT 부분 업데이트(dnd/forward_id 키 있을 때만)·`forward_id` 형식 검사 (cmp 0.2.95(`sys:ann_forwarded` 동봉) · csp 0.2.146 · csc 0.2.122 · tester 0.1.24 · worker 0.1.20) | `S1-UNIT-CSP` `tests/csp_diversion_test.cpp` 16 checks · tester 단위시험 52 pass · 콘솔 tsc pass · **tb48 실측(2026-09-22)** `VOLTE-ANN-FORWARDED` 10/10 pass — CSP `CDIV +8213…26 → +8213…39 (hops=1)` → 181(`cdiv_181_pct` 100) → 183+SDP · `sys:ann_forwarded` 5540 ms completed → `ringback sys:ringback_kr(loop)` → 전환 대상 200 에 stopped(early RTP 350 패킷, `early_rtp_pct` 100) · 전환 대상 INVITE 의 `History-Info: <sip:+8213…26@…>;index=1, <sip:+8213…39@…;cause=302>;index=1.1;mp=1`(`cdiv_hi_pct` 100) · CDR `diversion{served,target,cause:302,hops:1}`+`announcement{forwarded, completed}` · 회귀 CALL-BASIC·ANN-NOTFOUND·ANN-RINGBACK·ANN-HOLD-MOH pass. 첫 실측이 드러낸 것 = 구 CMP 에 음원이 없으면 183 을 낸 뒤 RELAY_PLAY 가 거절돼 A 가 무음 → **RELAY_PLAY 수락 뒤 183** 으로 순서 고정(§3.1) |
 
-**남은 것(P1 실측)** = 실단말 hold/링백 청취 확인, `S3-SCN-ANN` 게이트 실행(dev 스택은 배포 모드), 착신전환 라이브 실측(`VOLTE-ANN-FORWARDED`). CSP 안내 카운터는 모니터 `MC_SIP_STATS`(ann_started/ann_fallback/ann_active_*)로 본다 — OAM 은 모니터를 수집하지 않으므로 콘솔 노출은 통계 파이프라인 과제로 남긴다.
+| ⑫ P2 잔여 — 조건부 전환·가입자 링백 업로드·in-band 대기음 | **CFB/CFNR/CFNL**(§6A.4 — 가입 컬럼 `forward_busy_id`/`forward_no_reply_id`/`forward_no_reply_sec`/`forward_not_logged_in_id`, `migrate_subscription_cdiv.sql`, CSC POST/PUT/GET, CSP `TryDivertLeg`(B 486/600·480/408 → 같은 relay 위 새 B-leg + History-Info cause 486/408, 181, 전환 안내 — A 가 SDP 를 받았으면 재생만)·CFNR 시한(`Setup.Sip.Cdiv.NoReplySec`, `EventCallRing` → `Tick` CANCEL+전환)·CFNL(`ResolveDiversion` 미등록 → cause 404)) · **`sub:` 업로드**(OAM 라이브러리 scope op/sub, 콘솔 [가입자 링백…] = 등록 + 회선 `ringback_media` PUT) · **mode=mix**(CMP `PAnnMixer`·`PAnnPlayer::nextPayload`·`_mixOut`, 상황 `call_waiting_alert`·프로파일 `cw_inband`·`OnCallWaitingAlert/End`) · 계측기(`no_answer` 단계·reject 뒤 전환 감지·풀 `call_waiting`·픽스처 `forward_busy_to/forward_no_reply_to/no_reply_sec/forward_not_logged_in_to`·시나리오 `VOLTE-ANN-FORWARD-BUSY/-NOREPLY/-NOTLOGGEDIN`·`VOLTE-ANN-CALL-WAITING`) (cmp 0.2.96 · csp 0.2.148 · csc 0.2.123 · tester 0.1.25 · worker 0.1.22) | `S1-UNIT-CMP` `tests/cmp_ann_mixer_test.cpp` 19 checks · 빌드·tester 단위시험 pass · **tb48 실측(2026-09-22)** `VOLTE-ANN-FORWARD-BUSY` 10/10(CSP `CDIV CFB … status=486 cause=486 hops=1`) · `VOLTE-ANN-FORWARD-NOREPLY` 10/10(`CDIV CFNR(timer) … cause=408`, 5 s 시한 CANCEL → target 200, served 487 = ringing_leg_cancelled) · `VOLTE-ANN-FORWARD-NOTLOGGEDIN` 10/10(prelude deregister 뒤 `cause=404` History-Info — 등록 판정은 등록 바인딩 `CUserMap` 으로: `CspUserMap::isAlive` 는 해제 뒤에도 UserTimeout 동안 참이라 첫 실측이 404 로 끝났다) · `VOLTE-ANN-CALL-WAITING` 9/9(CSP `call_waiting_alert → mix sys:call_waiting_kr on … peer1` → B 486 에 stopped, C 통화중 안내 early media) · `sub:` 업로드 = API 등록 `sub:821300000026` → CMP 배포(`sub/*.pcmu…` pushed, 노드 ok) → 회선 `ringback_media` → `VOLTE-ANN-RINGBACK` 변형 pass, CSP `ringback → media sub:821300000026(loop)` → 삭제·undeploy 확인 · 회귀 FORWARDED·CALL-BASIC pass |
+
+**남은 것** = 실단말 hold/링백/대기음 청취 확인, `S3-SCN-ANN` 게이트 실행(dev 스택은 배포 모드), 피어·미등록 대상 조건부 전환, mix 의 독립 송출. CSP 안내 카운터는 모니터 `MC_SIP_STATS`(ann_started/ann_fallback/ann_active_*)로 본다 — OAM 은 모니터를 수집하지 않으므로 콘솔 노출은 통계 파이프라인 과제로 남긴다.
 안내 없는 구 CMP 와 새 CSP 의 혼용은 `resource.ann` 미광고로 안전하게 폴백한다.

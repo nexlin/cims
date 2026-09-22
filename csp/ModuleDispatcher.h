@@ -47,6 +47,14 @@ public:
     /** 피어 B-leg 의 5xx·타임아웃 재라우팅(RouteSet 다음 멤버, sip_service_model.md §2-4). true = 새 B-leg 로 이어
      * 감(이 leg 종료 처리 끝). */
     bool TryRerouteLeg( const char *pszCallId, const CCallInfo &clsB, int iSipStatus );
+    /** 조건부 착신전환(TS 24.604 CFB/CFNR — volte_supplementary_services.md §6A.4): 가입자 B-leg 가
+     * 통화중(486/600·Q.850 17)· 무응답(480/408 또는 bNoReplyTimer)으로 끝났고 착신 가입자에
+     * forward_busy_id/forward_no_reply_id 가 있으면 같은 relay·A-leg 위에 전환 대상(등록 가입자)으로 새 B-leg 를
+     * 낸다(History-Info 이어 붙임·전환 안내). true = 이 leg 의 종료 처리 끝(CallMap 에서 뺐다). */
+    bool TryDivertLeg( const char *pszCallId, const CCallInfo &clsB, int iSipStatus, const char *pszReason,
+                       bool bNoReplyTimer );
+    /** 1초 주기 — CFNR 무응답 시한 만료 leg 를 CANCEL 하고 전환 (CspServer 루프) */
+    void Tick();
     void StopCall( const char *pszCallId, int iResponseCode );
     void OnCallEnded( const char *pszCallId, int iSipStatus );
 

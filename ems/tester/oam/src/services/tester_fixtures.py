@@ -115,6 +115,14 @@ def resolve(scenario: Scenario, role_first: Dict[str, dict], bindings: Dict[str,
                 fields['ringback_media'] = f.ringback_media
             if f.forward_to is not None:
                 fields['forward_id'] = user_of(f.forward_to)   # 착신전환 대상 = 역할의 첫 신원(CSP 가 다이얼 플랜으로 번역)
+            if f.forward_busy_to is not None:
+                fields['forward_busy_id'] = user_of(f.forward_busy_to)
+            if f.forward_no_reply_to is not None:
+                fields['forward_no_reply_id'] = user_of(f.forward_no_reply_to)
+            if f.no_reply_sec is not None:
+                fields['forward_no_reply_sec'] = f.no_reply_sec
+            if f.forward_not_logged_in_to is not None:
+                fields['forward_not_logged_in_id'] = user_of(f.forward_not_logged_in_to)
             out.append({'key': key, 'kind': f.kind, 'fields': fields, 'service_ref': fields.get('service_ref'),
                         'lines': [{'role': r, 'user': user_of(r)} for r in f.roles]})
     return out
@@ -195,7 +203,10 @@ class FixtureApplier:
                         num = str(sub.get('id') or '')
                         if num:
                             m[num] = {'person': u.get('id'), 'kind': kind, 'service_ref': sub.get('service_ref'),
-                                      'ringback_media': sub.get('ringback_media'), 'forward_id': sub.get('forward_id')}
+                                      'ringback_media': sub.get('ringback_media'), 'forward_id': sub.get('forward_id'),
+                                      'forward_busy_id': sub.get('forward_busy_id'), 'forward_no_reply_id': sub.get('forward_no_reply_id'),
+                                      'forward_no_reply_sec': sub.get('forward_no_reply_sec'),
+                                      'forward_not_logged_in_id': sub.get('forward_not_logged_in_id')}
                             m[re.sub(r'\D', '', num)] = m[num]
             self._users = m
         return self._users
@@ -283,7 +294,7 @@ class FixtureApplier:
             path = f"/api/v1/users/{u['person']}/{u['kind']}/{self._q(ln['user'])}"
             self._call('PUT', path, dict(r['fields']))
             # 복원값 = 바꾼 필드의 종전 값(없던 값은 빈 문자열 — CSC 가 NULL/프로파일 기본으로 되돌린다)
-            self.undo.append(('subscriber', path, {k: (u.get(k) or '') for k in r['fields']}))
+            self.undo.append(('subscriber', path, {k: (u.get(k) if u.get(k) is not None else (0 if k == 'forward_no_reply_sec' else '')) for k in r['fields']}))
 
     # ── 확인 ──
     def verify(self) -> List[str]:

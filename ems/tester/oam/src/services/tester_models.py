@@ -306,6 +306,8 @@ class UePool(_PoolBase):
     nat: Optional[UeNat] = Field(default=None, description='NAT 뒤 단말 — 워커 호스트 netns 안에서 소켓을 만든다(대상은 변환된 주소만 본다). 워커 health nat 과 대조')
     media_worker: Optional[str] = Field(default=None, description='미디어 전담 워커(§4 미디어 평면 후속) — 이 풀의 RTP 소켓·송수신을 그 워커(에이전트 /media/*)에 둔다. '
                                                                      'SDP c=/m= 는 그 호스트를 가리키고 시그널링은 worker 에 남는다. 자기 워커와 다른 이름, PTT(floor) 풀은 불가')
+    call_waiting: bool = Field(default=False, description='통화중대기 단말(TS 24.615) — 통화 중 두 번째 착신을 486 대신 180 으로 받아 보류한다(reject 단계로 거절, 응답은 미지원). '
+                                                          '통화중대기 시나리오(VOLTE-ANN-CALL-WAITING)의 착신 풀')
     msrp: bool = Field(default=False, description='MCData media plane 능력(TS 24.282 §9.2.3) — REGISTER Contact 의 +g.3gpp.icsi-ref 에 mcdata.sds 를 더해 서버가 '
                                                   '대용량 SDS 를 MSRP(INVITE m=message)로 배포하는 대상이 된다. 끄면 FD SIGNALLING(FILEURL) MESSAGE 폴백으로 받는다. '
                                                   'sds_send plane: media 의 발신 쪽은 이 플래그와 무관')
@@ -765,7 +767,7 @@ class Topology(_Strict):
 # ──────────────────────────────────────────────────────────────────────────
 
 StepKind = Literal[
-    'register', 'deregister', 'invite', 'progress', 'answer', 'reject', 'bye',
+    'register', 'deregister', 'invite', 'progress', 'answer', 'reject', 'no_answer', 'bye',
     'hold', 'resume', 'dtmf',
     'refer', 'replaces', 'join', 'pickup', 'subscribe', 'publish',
     'group_call', 'floor_request', 'floor_release', 'sds_send', 'sds_recv', 'fd_send', 'fd_recv',
@@ -774,7 +776,7 @@ StepKind = Literal[
 
 # 워커가 실행할 수 있는 단계(§4) — 나머지는 모델에는 있지만 컴파일 시 거절한다(콘솔 팔레트는 회색).
 WORKER_STEPS = frozenset((
-    'register', 'deregister', 'invite', 'progress', 'answer', 'reject', 'bye',
+    'register', 'deregister', 'invite', 'progress', 'answer', 'reject', 'no_answer', 'bye',
     'hold', 'resume', 'dtmf', 'refer', 'media_hold', 'media_send', 'media_stop', 'wait', 'expect',
     'group_call', 'floor_request', 'floor_release',
     'pickup', 'subscribe', 'replaces', 'join', 'publish',
@@ -827,12 +829,13 @@ RTP_MODES = ('auto', 'none', 'explicit')
 #   metrics : 이 단계에 우선 제안하는 expect 지표
 STEP_VOCAB = {
     'register':      {'group': 'reg',   'actor': 'who',     'kind': 'ue|trunk', 'metrics': ['code', 'rrd_ms'], 'desc': '역할 단말 전부 등록 (prelude)'},
-    'deregister':    {'group': 'reg',   'actor': 'who',     'kind': 'ue|trunk', 'metrics': ['code'], 'desc': 'run 종료 시 등록 해제 (epilogue)'},
+    'deregister':    {'group': 'reg',   'actor': 'who',     'kind': 'ue|trunk', 'metrics': ['code'], 'desc': '등록 해제 — 흐름 끝(epilogue: run 종료 시) 또는 앞(prelude: register 뒤 곧바로 내려 미등록 착신 역할을 만든다 — CFNL 전환 시나리오)'},
     'wait':          {'group': 'reg',   'actor': 'seconds', 'kind': None,       'metrics': [], 'desc': '대기 (seconds)'},
     'invite':        {'group': 'call',  'actor': 'fromto',  'kind': None,       'metrics': ['code', 'srd_ms', 'ser_pct', 'seer_pct', 'video_pct', 'fork_alert_pct', 'retrans_rx_pct', 'thig_pct', 'early_media_pct', 'early_rtp_pct', 'cdiv_181_pct', 'cdiv_hi_pct'], 'desc': 'INVITE from → to (비동기). to 는 역할 또는 다이얼 번호 리터럴(대표번호 — 인스턴스의 다른 UE 역할이 포크 착신, ${var} 바인딩 가능). from 이 통화 중이면 상담 통화(두 번째 다이얼로그 — attended 전달의 전제). dial: national|international 이면 착신 역할의 E.164 를 그 꼴로 다이얼한다(대상 다이얼 플랜 번역 시험 — 노드 sip.dial_plan 필요)'},
     'progress':      {'group': 'peer',  'actor': 'who',     'kind': None,       'metrics': ['early_media_pct', 'early_rtp_pct', 'prack_pct'], 'desc': '183 Session Progress + SDP(early media) · 신뢰 1xx 면 PRACK — 피어(pbx/mgcf 링백) 또는 착신 UE(실 단말 안내음 모사; 그 뒤 answer 는 같은 answer 로 200)'},
     'answer':        {'group': 'call',  'actor': 'who',     'kind': None,       'metrics': ['code', 'srd_ms', 'ser_pct'], 'desc': '착신 대기 → after_ms 뒤 200'},
     'reject':        {'group': 'call',  'actor': 'who',     'kind': None,       'metrics': ['code', 'q850_rx_pct'], 'desc': '착신 대기 → payload 코드로 거절'},
+    'no_answer':     {'group': 'call',  'actor': 'who',     'kind': None,       'metrics': [], 'desc': '착신에 응답하지 않는다(링잉만) — 망이 CANCEL 하는 것이 정상(무응답 착신전환 CFNR·대표번호 무응답 등, ringing_leg_cancelled)'},
     'bye':           {'group': 'call',  'actor': 'from',    'kind': None,       'metrics': ['sdd_ms', 'code', 'scr_pct', 'q850_rx_pct', 'dtmf_rx_pct'], 'desc': 'BYE → 최종 응답 (SDD)'},
     'media_hold':    {'group': 'media', 'actor': 'seconds', 'kind': None,       'metrics': ['rtp_loss_pct', 'jitter_ms', 'mos'], 'desc': '확립 뒤 seconds 유지, 끝에 RTP 표본 (during 로 통화 중 동작)'},
     'hold':          {'group': 'media', 'actor': 'from',    'kind': None,       'metrics': ['code', 'moh_rtp_pct'], 'desc': 're-INVITE sendonly — 피보류 단말의 수신 누계를 기준점으로 잡는다(보류 음악 판정 시작)'},
@@ -1065,7 +1068,7 @@ class Step(_Strict):
                 raise ValueError(f'check 의 payload 는 {list(CHECK_KINDS)} 중 하나(또는 ${{var}} 바인딩 — 컴파일 때 검사)')
             if self.payload.startswith('conference_roster_') and not self.to:
                 raise ValueError('check conference_roster_* 는 to(로스터에서 찾을 역할)가 필요하다')
-        if self.step in ('register', 'deregister', 'answer', 'reject', 'progress', 'subscribe', 'publish',
+        if self.step in ('register', 'deregister', 'answer', 'reject', 'no_answer', 'progress', 'subscribe', 'publish',
                          'floor_request', 'floor_release', 'sds_recv', 'fd_recv', 'media_send', 'media_stop', 'check') and not self.who:
             raise ValueError(f'{self.step} 단계는 who 가 필요하다')
         if self.step in ('media_hold', 'wait') and self.seconds is None:
@@ -1216,13 +1219,19 @@ class FixtureSubscriber(_Strict):
                                           description='피착신 가입자의 링백 음원 id(sys:|op:|sub:) — 발신자 프로파일의 ringback 이 켜져 있어야 들린다')
     forward_to: Optional[str] = Field(default=None, min_length=1,
                                       description='착신전환(CFU) 대상 역할 — 그 역할의 첫 신원 번호가 forward_id 로 들어간다. 이 회선으로 온 호는 서버가 그 역할로 전환한다(181·History-Info·전환 안내)')
+    forward_busy_to: Optional[str] = Field(default=None, min_length=1, description='CFB — 이 회선이 통화중(486/600) 응답이면 그 역할로 전환(forward_busy_id, §6A.4)')
+    forward_no_reply_to: Optional[str] = Field(default=None, min_length=1, description='CFNR — 이 회선이 no_reply_sec 안에 응답하지 않으면(또는 480/408) 그 역할로 전환(forward_no_reply_id)')
+    no_reply_sec: Optional[int] = Field(default=None, ge=1, le=120, description='CFNR 무응답 시한(초, forward_no_reply_sec) — 없으면 대상 CSP 의 Setup.Sip.Cdiv.NoReplySec')
+    forward_not_logged_in_to: Optional[str] = Field(default=None, min_length=1, description='CFNL — 이 회선이 미등록이면 그 역할로 전환(forward_not_logged_in_id)')
 
     @model_validator(mode='after')
     def _any(self):
-        if self.service_ref is None and self.ringback_media is None and self.forward_to is None:
-            raise ValueError('subscriber 픽스처는 service_ref·ringback_media·forward_to 중 하나는 있어야 한다')
-        if self.forward_to is not None and self.forward_to in self.roles:
-            raise ValueError('subscriber 픽스처 forward_to 는 roles 자신이 아니어야 한다(자기 전환)')
+        targets = [self.forward_to, self.forward_busy_to, self.forward_no_reply_to, self.forward_not_logged_in_to]
+        if self.service_ref is None and self.ringback_media is None and all(t is None for t in targets) and self.no_reply_sec is None:
+            raise ValueError('subscriber 픽스처는 service_ref·ringback_media·forward_*_to 중 하나는 있어야 한다')
+        for t in targets:
+            if t is not None and t in self.roles:
+                raise ValueError('subscriber 픽스처 forward_*_to 는 roles 자신이 아니어야 한다(자기 전환)')
         return self
 
 

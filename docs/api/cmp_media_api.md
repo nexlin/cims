@@ -480,7 +480,7 @@ RELAY_PLAY (멱등 — 같은 `play_id` 재요청은 진행 상태 `{codec, play
 | `repeat` | - | 시퀀스 전체 반복 수. 기본 1, **0 = STOP 까지**(보류 음악·링백) |
 | `delay_ms` | - | 반복 사이 무음(RFC 4240 `delay` — 패킷 없이 timestamp 만 진행). 기본 0 |
 | `max_ms` | - | 총 재생 상한 — 넘으면 `reason=max`. 생략 = cmp.json `AnnMaxPlayMs`(repeat 0 은 예외 — STOP 까지) |
-| `mode` | - | `replace`(기본). `mix`(활성 통화에 톤 삽입)는 예약 |
+| `mode` | - | `replace`(기본 — 그 leg 로 가는 relay 를 끊고 재생) · `mix`(relay 오디오 위에 신호음을 섞는다 — 통화중대기 in-band 대기음, announcements.md §3.6. PCMU/PCMA/AMR-WB leg 만(`BAD_REQUEST`), AMR-WB 는 변환 슬롯 1개(`TRANSCODE_CAPACITY`)) |
 
 응답 payload `{ "codec": "PCMU/8000", "duration_ms": 9000 }`(시퀀스 1회 길이, repeat 0 이면 0).
 RELAY_PLAY_STOP: `session_id` + `play_id`(+`peer_index` 선택) — 없거나 이미 끝났으면 `OK`(자연 멱등), 응답 `{ "played_ms": N }`.

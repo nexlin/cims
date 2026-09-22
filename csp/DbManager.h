@@ -203,6 +203,11 @@ private:
     bool m_bHasRingbackColumn =
         false;  // subscriptions.ringback_media (migrate_subscription_ringback.sql — announcements.md §6.3)
     std::string RingbackCol( const char *pszAlias ) const;
+    /** 조건부 착신전환 컬럼(forward_busy_id·forward_no_reply_id·forward_no_reply_sec·forward_not_logged_in_id —
+     *  migrate_subscription_cdiv.sql, volte_supplementary_services.md §6A.4) 존재 여부. 없으면 SELECT 식이 빈 값 4열을
+     * 낸다 */
+    bool m_bHasCdivColumns = false;
+    std::string CdivCols( const char *pszAlias ) const;
     /** 전화 그룹 테이블(phone_groups — migrate_phone_groups_roles.sql) 존재 여부 */
     bool m_bHasPhoneGroupTables = false;
     /** 역할 테이블(roles·role_assignments — migrate_phone_groups_roles.sql) 존재 여부 */

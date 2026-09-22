@@ -53,12 +53,19 @@ static const struct {
     EAnnSituation e;
     const char *name;
 } kSituations[] = {
-    { ANN_SIT_RINGBACK, "ringback" },         { ANN_SIT_BUSY, "busy" },
-    { ANN_SIT_NO_ANSWER, "no_answer" },       { ANN_SIT_UNREACHABLE, "unreachable" },
-    { ANN_SIT_NOT_FOUND, "not_found" },       { ANN_SIT_INVALID, "invalid" },
-    { ANN_SIT_DECLINED, "declined" },         { ANN_SIT_CONGESTION, "congestion" },
-    { ANN_SIT_FORBIDDEN, "forbidden" },       { ANN_SIT_HOLD, "hold" },
-    { ANN_SIT_CALL_WAITING, "call_waiting" }, { ANN_SIT_FORWARDED, "forwarded" },
+    { ANN_SIT_RINGBACK, "ringback" },
+    { ANN_SIT_BUSY, "busy" },
+    { ANN_SIT_NO_ANSWER, "no_answer" },
+    { ANN_SIT_UNREACHABLE, "unreachable" },
+    { ANN_SIT_NOT_FOUND, "not_found" },
+    { ANN_SIT_INVALID, "invalid" },
+    { ANN_SIT_DECLINED, "declined" },
+    { ANN_SIT_CONGESTION, "congestion" },
+    { ANN_SIT_FORBIDDEN, "forbidden" },
+    { ANN_SIT_HOLD, "hold" },
+    { ANN_SIT_CALL_WAITING, "call_waiting" },
+    { ANN_SIT_FORWARDED, "forwarded" },
+    { ANN_SIT_CALL_WAITING_ALERT, "call_waiting_alert" },
 };
 
 const char *CCspAnnouncementService::SituationName( EAnnSituation e ) {
@@ -101,6 +108,10 @@ static const char *kDefaultRules =
     "{\"profile\":\"trunk\",\"situation\":\"congestion\",\"mode\":\"none\"},"
     "{\"profile\":\"trunk\",\"situation\":\"hold\",\"mode\":\"none\"},"
     "{\"profile\":\"trunk\",\"situation\":\"forwarded\",\"mode\":\"none\"},"
+    // `cw_inband` = 망 in-band 통화중대기음(TS 24.615 — 단말이 Alert-Info 대기음을 못 내는 배치) 스위치: 착신자
+    // 서비스의 hold_profile 로 고른다. 나머지 상황은 default 로
+    "{\"profile\":\"cw_inband\",\"situation\":\"call_waiting_alert\",\"mode\":\"tone\",\"tone\":\"sys:call_waiting_"
+    "kr\"},"
     // `ringback` = 서버 링백 스위치(§3.4) — ringback 행 하나만 두고 나머지 상황은 default 로 떨어진다. 접속서비스
     // announcement_profile 로 고른다
     "{\"profile\":\"ringback\",\"situation\":\"ringback\",\"mode\":\"media\",\"media\":\"sys:ringback_kr\",\"loop\":"
@@ -740,6 +751,7 @@ void CCspAnnouncementService::Tick() {
 
 void CCspAnnouncementService::OnCallEnd( const char *pszCallId ) {
     if ( pszCallId == NULL ) return;
+    OnCallWaitingEnd( pszCallId );  // 이 leg 가 대기 호였다면 착신자 leg 의 대기음을 걷는다
     CAnnCall c;
     bool bEarly = false;
     std::vector<CHoldPlay> vecHold;
@@ -931,12 +943,26 @@ bool CCspAnnouncementService::OnForwarded( const char *pszACallId, const char *p
     if ( !gclsCallMap.Select( pszBCallId, clsB ) || clsB.m_bRecv || clsB.m_strRelaySessionId.empty() ) return false;
     if ( !gclsCallMap.Select( pszACallId, clsA ) ) return false;
     const std::string strACallId = pszACallId;
+    // A 에 이미 CSP answer 를 냈는가 — 원착신 B 의 링백(entry) 또는 B 의 18x+SDP(early media 앵커링). 그러면 183 을
+    // 다시 내지
+    //   않고 재생만 교체한다(조건부 전환 CFB/CFNR 이 이 경로다). 진행 중 재생은 교체(RELAY_PLAY replaced).
+    bool bEarly = false;
     {
         std::lock_guard<std::mutex> lock( m_mtx );
-        if ( m_mapCalls.count( strACallId ) ) return true;  // 이미 early 상태(있을 수 없지만 멱등)
+        auto it = m_mapCalls.find( strACallId );
+        if ( it != m_mapCalls.end() ) {
+            if ( it->second.iFinalStatus > 0 ) return false;  // 실패 안내 진행 중 — 있을 수 없다
+            bEarly = it->second.bEarlySent;
+            if ( !it->second.strPlayId.empty() ) m_mapPlayToCall.erase( it->second.strPlayId );
+            m_mapCalls.erase( it );
+        }
+    }
+    if ( !bEarly ) {
+        CSipCallRtp clsLocal;
+        if ( gclsUserAgent.GetLocalCallRtp( strACallId.c_str(), &clsLocal ) && clsLocal.m_iPort > 0 ) bEarly = true;
     }
     CAnnAction a = Resolve( ANN_SIT_FORWARDED, clsA.m_strAnnProfile );
-    if ( a.IsNone() ) return false;
+    if ( a.IsNone() ) return bEarly;
     if ( a.strMode == "media" && a.bLoop ) a.bLoop = false;  // 전환 안내는 1 회 — loop 는 2 단계(신호음/링백)가 한다
     CAnnCall c;
     c.strACallId = strACallId;
@@ -949,20 +975,22 @@ bool CCspAnnouncementService::OnForwarded( const char *pszACallId, const char *p
     c.strCallee = clsB.m_strRelayCallee;
     c.strProfile = clsA.m_strAnnProfile;
     if ( a.strMode == "announce_then_tone" ) c.strNextTone = a.strTone;
+    c.bEarlySent = bEarly;
     const std::string strRelayIp =
         clsA.m_strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress() : clsA.m_strRelayLocalIp;
     CSipCallRtp clsAns;
     RelayCodec::CodecDesc clsCodec;
     int iTePt = -1;
-    if ( clsB.m_iPeerRtpPort <= 0 ||
-         !BuildEarlyAnswer( strACallId.c_str(), clsA.m_clsSdesLeg[c.iPeerIdx], clsA.m_clsCodecLeg[c.iPeerIdx],
-                            strRelayIp, clsB.m_iPeerRtpPort, clsAns, clsCodec, iTePt ) ) {
+    if ( !bEarly &&
+         ( clsB.m_iPeerRtpPort <= 0 ||
+           !BuildEarlyAnswer( strACallId.c_str(), clsA.m_clsSdesLeg[c.iPeerIdx], clsA.m_clsCodecLeg[c.iPeerIdx],
+                              strRelayIp, clsB.m_iPeerRtpPort, clsAns, clsCodec, iTePt ) ) ) {
         CLog::Print( LOG_INFO, "Announcement: cannot build early answer for forwarded call %s — 181 only",
                      strACallId.c_str() );
         ++m_lFallback;
         return false;
     }
-    if ( !StartFailurePlay( c, a, &clsAns, clsCodec, iTePt, false ) ) return false;
+    if ( !StartFailurePlay( c, a, bEarly ? NULL : &clsAns, clsCodec, iTePt, bEarly ) ) return bEarly;
     {
         std::lock_guard<std::mutex> lock( m_mtx );
         m_mapCalls[strACallId] = c;
@@ -995,12 +1023,80 @@ void CCspAnnouncementService::OnRingbackEnd( const char *pszBCallId, const CCall
                  SituationName( c.eSit ), c.strPlayId.c_str(), c.strACallId.c_str() );
 }
 
+// ──────────────────────────────────────────────────────────────
+//  통화중대기 in-band 대기음 (§3.6, TS 24.615) — 착신자 활성 leg 에 mode=mix
+// ──────────────────────────────────────────────────────────────
+
+bool CCspAnnouncementService::OnCallWaitingAlert( const std::string &strCallee, const char *pszCwACallId,
+                                                  const char *pszCwBCallId ) {
+    if ( !IsEnabled() || strCallee.empty() || pszCwACallId == NULL ) return false;
+    CAnnAction a = Resolve( ANN_SIT_CALL_WAITING_ALERT, HoldProfileFor( strCallee ) );
+    if ( a.IsNone() ) return false;
+    const std::string strMedia = ( a.strMode == "tone" || a.strMode == "tone_then_announce" ) ? a.strTone : a.strMedia;
+    if ( strMedia.empty() ) return false;
+    std::string strLegCallId;
+    CCallInfo clsLeg;
+    int iPeerIdx = 0;
+    if ( !gclsCallMap.FindEstablishedLegFor( strCallee, strLegCallId, clsLeg, iPeerIdx ) ) return false;
+    {
+        std::lock_guard<std::mutex> lock( m_mtx );
+        if ( m_mapCw.count( pszCwACallId ) ) return true;  // 멱등
+    }
+    CHoldPlay h;
+    h.strRelaySessionId = clsLeg.m_strRelaySessionId;
+    h.strSesId = clsLeg.m_strRelaySesId;
+    h.iPeerIdx = iPeerIdx;
+    h.strHeldCallId = strLegCallId;
+    h.strPlayId = NewPlayId( pszCwACallId ) + "-cw";
+    std::vector<CCmpClient::AnnItem> vecItems( 1 );
+    vecItems[0].strId = strMedia;
+    vecItems[0].iRepeat = 1;
+    int iDurationMs = 0;
+    std::string strErr;
+    if ( !gclsCmpClient.PlayAnnouncement( h.strRelaySessionId, h.iPeerIdx, h.strPlayId, vecItems, 0, 0, 0, h.strSesId,
+                                          h.strService, iDurationMs, strErr, "mix" ) ) {
+        CLog::Print( LOG_ERROR, "Announcement: call_waiting_alert RELAY_PLAY(mix) rejected (%s) callee=%s (CallId=%s)",
+                     strErr.c_str(), strCallee.c_str(), pszCwACallId );
+        ++m_lFallback;
+        return false;
+    }
+    ++m_lStarted;
+    {
+        std::lock_guard<std::mutex> lock( m_mtx );
+        m_mapCw[pszCwACallId] = h;
+        if ( pszCwBCallId && pszCwBCallId[0] ) m_mapCw[pszCwBCallId] = h;
+    }
+    CLog::Print( LOG_SYSTEM, "Announcement: call_waiting_alert → mix %s on %s peer%d (callee=%s, waiting CallId=%s)",
+                 strMedia.c_str(), h.strRelaySessionId.c_str(), h.iPeerIdx, strCallee.c_str(), pszCwACallId );
+    return true;
+}
+
+void CCspAnnouncementService::OnCallWaitingEnd( const char *pszCallId ) {
+    if ( pszCallId == NULL ) return;
+    CHoldPlay h;
+    {
+        std::lock_guard<std::mutex> lock( m_mtx );
+        auto it = m_mapCw.find( pszCallId );
+        if ( it == m_mapCw.end() ) return;
+        h = it->second;
+        for ( auto i2 = m_mapCw.begin(); i2 != m_mapCw.end(); )
+            if ( i2->second.strPlayId == h.strPlayId )
+                i2 = m_mapCw.erase( i2 );
+            else
+                ++i2;
+    }
+    gclsCmpClient.StopAnnouncement( h.strRelaySessionId, h.iPeerIdx, h.strPlayId, h.strSesId, h.strService );
+    CLog::Print( LOG_INFO, "Announcement: call_waiting_alert stopped play=%s (waiting CallId=%s)", h.strPlayId.c_str(),
+                 pszCallId );
+}
+
 void CCspAnnouncementService::GetString( CMonitorString &strBuf ) const {
-    size_t active = 0, hold = 0;
+    size_t active = 0, hold = 0, cw = 0;
     {
         std::lock_guard<std::mutex> lock( m_mtx );
         active = m_mapCalls.size();
         hold = m_mapHold.size();
+        cw = m_mapCw.size() / 2;
     }
     strBuf.AddCol( "ann_started" );
     strBuf.AddRow( (uint32_t)m_lStarted );
@@ -1010,4 +1106,6 @@ void CCspAnnouncementService::GetString( CMonitorString &strBuf ) const {
     strBuf.AddRow( (uint32_t)active );
     strBuf.AddCol( "ann_active_hold" );
     strBuf.AddRow( (uint32_t)hold );
+    strBuf.AddCol( "ann_active_cw" );
+    strBuf.AddRow( (uint32_t)cw );
 }

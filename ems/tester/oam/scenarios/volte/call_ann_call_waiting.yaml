@@ -1,0 +1,24 @@
+# 통화중대기(TS 24.615, announcements.md §3.6·§11) — a↔b 통화 중 c 가 b 에게 전화하면 CSP 가 b 의 INVITE 에 Alert-Info urn:alert:service:call-waiting 을 싣고,
+#   b 의 서비스 hold_profile 이 `cw_inband`(내장) 이면 b 의 활성 통화 leg 에 CMP mode=mix 로 대기음(sys:call_waiting_kr)을 섞는다 — a↔b RTP 는 끊기지 않는다(rtp_loss_pct).
+#   b(통화중대기 단말 풀 volte_ue_cw)가 4 s 뒤 486 으로 거절하면 c 는 통화중 안내(default busy: 화중음 → 안내, early media)를 듣고 486 으로 끝난다.
+#   판정 = c 의 486·early_media_pct/early_rtp_pct(통화중 안내 도달), a↔b 손실 없음. 대기음 삽입은 CSP 로그 `call_waiting_alert → mix`·CMP ANN_PLAY mix 로 확인. --instances 1.
+id: VOLTE-ANN-CALL-WAITING
+title: 통화중대기 — Alert-Info + 망 in-band 대기음(mix) → 거절 486 → 발신자 통화중 안내
+tags: [volte, announcement, call_waiting]
+roles:
+  a: { pool: volte_ue }
+  b: { pool: volte_ue_cw }
+  c: { pool: volte_ue, disjoint_from: a }
+flow:
+  - { step: register,   who: [a, b, c], expect: { code: 200 } }
+  - { step: invite,     from: a, to: b, media: { audio: amr-wb, rtp: explicit }, expect: { code: 200 } }
+  - { step: answer,     who: [b], after_ms: 1000, expect: { code: 200 } }
+  - { step: media_send, who: [a, b] }
+  - { step: media_hold, seconds: 2, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: invite,     from: c, to: b, media: { audio: amr-wb, rtp: explicit }, expect: { code: 486, early_media_pct: 100, early_rtp_pct: 100 } }
+  - { step: reject,     who: [b], after_ms: 4000, payload: "486" }
+  - { step: media_hold, seconds: 2, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: a, expect: { sdd_ms: { p95: 300 } } }
+fixtures:
+  cw:   { kind: access_service, from_role: b, set: { hold_profile: cw_inband } }
+  line: { kind: subscriber, roles: [b], service_ref: cw }

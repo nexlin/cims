@@ -302,7 +302,9 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                     SimpleJson::JsonNode cd = sip.Get( "Cdiv" );
                     if ( cd.Has( "MaxDiversions" ) ) m_iCdivMaxDiversions = (int)cd.GetInt( "MaxDiversions" );
                     if ( cd.Has( "Notify181" ) ) m_bCdivNotify181 = ( cd.Get( "Notify181" ).AsString() == "true" );
+                    if ( cd.Has( "NoReplySec" ) ) m_iCdivNoReplySec = (int)cd.GetInt( "NoReplySec" );
                     if ( m_iCdivMaxDiversions < 1 ) m_iCdivMaxDiversions = 1;
+                    if ( m_iCdivNoReplySec < 5 ) m_iCdivNoReplySec = 5;
                 }
             }
 

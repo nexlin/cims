@@ -102,6 +102,8 @@ public:
     int m_iCdivMaxDiversions = 5;
     /** 전환 때 발신자에게 181 Call Is Being Forwarded 를 낸다(TS 24.604 §4.5.2.6.1 originating user notification) */
     bool m_bCdivNotify181 = true;
+    /** CFNR 기본 무응답 시한(초) — 가입자 forward_no_reply_sec 가 0 일 때 (TS 24.604 no-reply timer 기본 20 s) */
+    int m_iCdivNoReplySec = 20;
 
     /** SIP stack 실행 주기 (ms 단위) */
     int m_iStackExecutePeriod;

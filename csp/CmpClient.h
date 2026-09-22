@@ -108,10 +108,11 @@ public:
         int iRepeat = 1;
         int iMaxMs = 0;
     };
+    /** strMode = ""(replace 기본) | "mix"(relay 위에 섞는다 — 통화중대기 대기음, announcements.md §3.6) */
     bool PlayAnnouncement( const std::string &strSessionId, int iPeerIdx, const std::string &strPlayId,
                            const std::vector<AnnItem> &vecItems, int iRepeat, int iDelayMs, int iMaxMs,
                            const std::string &strSesId, const std::string &strService, int &iDurationMs,
-                           std::string &strErrCode );
+                           std::string &strErrCode, const std::string &strMode = std::string() );
     bool StopAnnouncement( const std::string &strSessionId, int iPeerIdx, const std::string &strPlayId,
                            const std::string &strSesId, const std::string &strService, int *piPlayedMs = NULL );
     /** CMP 가 안내 재생기(HEARTBEAT resource.ann)를 광고했는가 — 없으면 CSP 는 안내 없이 응답 코드만 낸다. */

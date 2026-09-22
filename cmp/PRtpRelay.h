@@ -11,6 +11,7 @@
 #include "PMediaCrypto.h"
 #include "PRtpTap.h"
 #include "PTranscoder.h"
+#include "PAnnMixer.h"
 #include "PAnnPlayer.h"
 #include "PAnnTicker.h"
 
@@ -110,6 +111,8 @@ public:
     void setWorkerIdx(int idx) { _workerIdx = idx; }
     int workerIdx() const { return _workerIdx; }
     bool startAnn(int peerIdx, std::unique_ptr<PAnnPlayer> player, std::string& replacedPlayId);
+    /** AMR-WB leg 에 mix 재생기가 붙어 있다(디코드·인코드 — 변환 슬롯 1개로 센다, PCmpServer::countTranscoding) */
+    bool mixingAmr() const { return (_mixer[0] && _mixer[0]->isAmrWb()) || (_mixer[1] && _mixer[1]->isAmrWb()); }
     bool stopAnn(int peerIdx, const std::string& playId, const char* reason, PAnnTicker::Done& out);
     bool annActive(int peerIdx) const;
     bool annTick(int64_t nowUs, std::vector<PAnnTicker::Done>& done);
@@ -208,7 +211,10 @@ private:
     std::unique_ptr<PTranscoder> _xcode[2];
     // 안내 재생기 — [i] = peer i leg 로 송출 (호출자가 _mutex 보유; 리액터 스레드 안)
     std::unique_ptr<PAnnPlayer> _ann[2];
+    std::unique_ptr<PAnnMixer> _mixer[2];   // mode=mix 재생기의 믹서(같은 index) — 재생기와 수명이 같다
     int _workerIdx = 0;
+    /** dst leg 로 나갈 오디오 패킷에 mix 재생기 신호음을 섞는다(호출자가 _mutex 보유). 반환 false = 원본 그대로 */
+    bool _mixOut(int dst, const unsigned char* pkt, int len, std::string& out);
     void _sendAnn(int legIdx, std::vector<std::string>& pkts);
     long        _xcodeDrop = 0;    // 변환 실패(페이로드 형식) 폐기 누적
     void _applyTranscodeRecorderMeta();   // 녹취 트랙 메타 — G.711 leg 트랙은 변환 뒤의 AMR-WB 로 기록된다

@@ -2520,14 +2520,16 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
             if (m.m_strMedia == "message" && m.m_strProtocol.find("MSRP") != std::string::npos) { AnswerMsrp(pszCallId, pclsRtp, pclsMessage); return; }
     }
 
-    // TS 24.379: 이미 통화 중이면 486 Busy Here (실 단말과 동일)
-    if (m_pOwner->m_bInCall) {
+    // TS 24.379: 이미 통화 중이면 486 Busy Here (실 단말과 동일) — call_waiting 단말(deferred)은 두 번째 착신을 180 으로 받아 보류한다(TS 24.615)
+    const bool bCallWaiting = m_pOwner->m_bInCall && m_pOwner->m_bCallWaiting &&
+                              m_pOwner->m_eAnswerMode == SimSession::E_ANSWER_DEFERRED && !m_pOwner->m_bPttMode;
+    if (m_pOwner->m_bInCall && !bCallWaiting) {
         printf("[%d] [PTT] Already in call — reject INVITE with 486 Busy\n", m_pOwner->m_iId);
         m_pUserAgent->StopCall(pszCallId, 486);
         return;
     }
 
-    if (m_pInviteId) *m_pInviteId = pszCallId;
+    if (m_pInviteId && !bCallWaiting) *m_pInviteId = pszCallId;   // 대기 착신은 활성 통화 id 를 덮지 않는다
 
     // 당겨받기 대상(ring-hold): 180 만 보내고 200 은 보류한다 — 다른 단말이 당겨받기 코드로 이
     //   링잉 호를 가져간다(서버 PickUp 이 이 leg 를 StopCall→회수, volte_supplementary_services.md §5).

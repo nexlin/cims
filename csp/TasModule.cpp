@@ -136,6 +136,21 @@ bool CTasModule::ApplyTerminationServices( const char *pszCallId, const char *ps
 //  착신전환 (TS 24.604 CDIV — 서버측 전환, volte_supplementary_services.md §6A)
 // ──────────────────────────────────────────────────────────────
 
+bool CTasModule::NormalizeForwardTarget( const std::string &strUser, const std::string &strRaw, std::string &strOut ) {
+    strOut = strRaw;
+    if ( strRaw.empty() ) return false;
+    ServiceInfo clsSvc = gclsServiceMap.GetForUser( strUser, "volte" );
+    std::string strNorm;
+    EDialPlanResult eRes = CspDialPlan::Normalize( strRaw, "", clsSvc.dial_plan, strNorm );
+    if ( eRes == DIAL_PLAN_TRANSLATED ) strOut = strNorm;
+    if ( eRes == DIAL_PLAN_INCOMPLETE ) {
+        CLog::Print( LOG_ERROR, "CDIV: %s forward target '%s' 번역 불가(plan=%s) — 전환하지 않는다", strUser.c_str(),
+                     strRaw.c_str(), clsSvc.name.c_str() );
+        return false;
+    }
+    return !strOut.empty();
+}
+
 int CTasModule::ResolveDiversion( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage,
                                   CdivResult &clsOut ) {
     clsOut = CdivResult();
@@ -153,22 +168,27 @@ int CTasModule::ResolveDiversion( const char *pszFrom, const char *pszTo, CSipMe
         CspUser clsUser;
         // 등록 여부와 무관 — CFU 는 미등록 가입자에도 적용(DB 폴백 조회). 가입자가 아니면(피어·그룹·대표번호) 끝
         if ( !gclsCspUserMap.Select( strCur.c_str(), clsUser ) ) break;
-        if ( !clsUser.isCallForward() ) break;
         if ( clsUser.isDnd() || clsUser.isReject( strFrom ) ) break;  // 종단 서비스 603 이 우선 — 종전 경로가 처리
-        // 전환 대상 번호 → +E.164 (그 가입자 접속서비스의 다이얼 플랜, sip_service_model.md §2-10)
-        std::string strTarget = clsUser.m_strForward;
-        {
-            ServiceInfo clsSvc = gclsServiceMap.GetForUser( strCur, "volte" );
-            std::string strOut;
-            EDialPlanResult eRes = CspDialPlan::Normalize( strTarget, "", clsSvc.dial_plan, strOut );
-            if ( eRes == DIAL_PLAN_TRANSLATED ) strTarget = strOut;
-            if ( eRes == DIAL_PLAN_INCOMPLETE ) {
-                CLog::Print( LOG_ERROR, "CDIV: %s forward_id='%s' 번역 불가(plan=%s) — 전환하지 않고 원착신으로 진행",
-                             strCur.c_str(), clsUser.m_strForward.c_str(), clsSvc.name.c_str() );
-                break;
-            }
+        // 조건 판정 — CFU(forward_id) 가 있으면 무조건, 없고 미등록이면 CFNL(forward_not_logged_in_id, RFC 4458 cause
+        // 404)
+        std::string strRaw;
+        int iCause = CspDiversion::CAUSE_UNCONDITIONAL;
+        if ( clsUser.isCallForward() ) {
+            strRaw = clsUser.m_strForward;
+        } else if ( !clsUser.m_strForwardNotLoggedIn.empty() ) {
+            // 등록 판정 = 등록 바인딩(CUserMap) — CspUserMap::isAlive 는 REGISTER 시각 + UserTimeout 이라 해제 뒤에도
+            // 한동안 참이다
+            if ( gclsUserMap.Select( strCur.c_str() ) ) break;  // 등록 중 — CFNL 아님(CFB/CFNR 은 B-leg 결과가 정한다)
+            strRaw = clsUser.m_strForwardNotLoggedIn;
+            iCause = CspDiversion::CAUSE_NOT_REGISTERED;
+        } else {
+            break;
         }
-        if ( strTarget.empty() || strTarget == strCur ) break;
+        // 전환 대상 번호 → +E.164 (그 가입자 접속서비스의 다이얼 플랜, sip_service_model.md §2-10). 번역 불가면
+        // 원착신으로 진행
+        std::string strTarget;
+        if ( !NormalizeForwardTarget( strCur, strRaw, strTarget ) ) break;
+        if ( strTarget == strCur ) break;
         if ( iHops >= gclsSetup.m_iCdivMaxDiversions ) {
             CLog::Print( LOG_INFO, "CDIV: %s → %s 전환 상한(%d) 초과 (chain %s) → 486", strCur.c_str(),
                          strTarget.c_str(), gclsSetup.m_iCdivMaxDiversions,
@@ -185,7 +205,7 @@ int CTasModule::ResolveDiversion( const char *pszFrom, const char *pszTo, CSipMe
         }
         CspDiversion::Hop h;
         h.strUser = strTarget;
-        h.iCause = CspDiversion::CAUSE_UNCONDITIONAL;
+        h.iCause = iCause;
         clsOut.vecHops.push_back( h );
         ++iHops;
         strCur = strTarget;

@@ -137,6 +137,8 @@ public:
      *  DND·착신거부 가입자는 전환하지 않는다(603 이 우선). 피어·그룹·대표번호 착신은 가입자가 아니라 0.
      *  반환 0 = 전환 없음, 1 = 전환(out 채움), <0 = -SIP 코드(전환 상한·루프 → 486, TS 24.604 §4.5.2.6). */
     int ResolveDiversion( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage, CdivResult &clsOut );
+    /** 전환 대상 번호 → +E.164 (그 가입자 접속서비스 다이얼 플랜). 반환 false = 번역 불가(설정 오류 — ERROR 로그) */
+    static bool NormalizeForwardTarget( const std::string &strUser, const std::string &strRaw, std::string &strOut );
 
 private:
     /** 당겨받기 (volte_supplementary_services.md §5). pszTarget: 지정 픽업 대상 내선

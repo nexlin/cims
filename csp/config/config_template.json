@@ -212,6 +212,17 @@
           "help": "전환을 수행할 때 발신자에게 181 Call Is Being Forwarded 를 낸다(TS 24.604 §4.5.2.6.1). 전환 안내음은 별도 — 안내 정책 상황 forwarded."
         },
         {
+          "key": "Setup.Sip.Cdiv.NoReplySec",
+          "label": "무응답 전환 기본 시한 (s)",
+          "type": "int",
+          "default": 20,
+          "min": 5,
+          "max": 120,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 착신부터 적용.",
+          "help": "CFNR(forward_no_reply_id) 의 무응답 시한 — 가입자 forward_no_reply_sec 가 0 일 때 쓴다. 착신 단말이 이 시간 안에 응답하지 않으면 CANCEL 하고 전환 대상으로 새 B-leg (TS 24.604, volte_supplementary_services.md §6A.4)."
+        },
+        {
           "key": "Setup.Sip.SessionTimer.Enable",
           "label": "세션 타이머 (RFC 4028)",
           "type": "bool",
@@ -319,7 +330,8 @@
                   "forbidden",
                   "hold",
                   "call_waiting",
-                  "forwarded"
+                  "forwarded",
+                  "call_waiting_alert"
                 ],
                 "required": true
               },

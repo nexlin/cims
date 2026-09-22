@@ -100,6 +100,16 @@ public:
      * → P1 후속 구현). 양 leg entry 동일 */
     bool m_bCallWaiting = false;
 
+    /** 착신전환 상태(TS 24.604, volte_supplementary_services.md §6A) — 양 leg entry 동일. m_strHistoryInfo = B-leg
+     * INVITE 에 실은 History-Info 값(수신 INVITE 의 것 + 이번 전환들; 조건부 전환이 이어 붙인다), m_iCdivHops = 그 안의
+     * 전환 수(상한 판정), m_strCdivServed = 이 B-leg 착신이 전환된 원착신(비면 전환 없음). */
+    std::string m_strHistoryInfo;
+    int m_iCdivHops = 0;
+    std::string m_strCdivServed;
+    /** CFNR 무응답 시한(epoch 초, 0 = 없음) — 가입자 B-leg 의 첫 18x 에 착신 가입자 forward_no_reply_id 가 있으면
+     * 잡는다. 디스패처 Tick 이 만료를 보고 CANCEL + 전환 대상으로 새 B-leg (§6A.4). B-leg entry 에만 */
+    time_t m_iNoReplyDeadline = 0;
+
     /** 마지막 SIP activity 시간 (통화 생성/갱신 시 기록) */
     time_t m_iLastActivityTime;
 
@@ -143,6 +153,14 @@ public:
     void SetCallWaiting( const char *pszCallId, bool bCw );
     /** 이 가입자가 당사자(발/착)인 확립 호가 있는가 — 통화중대기 판정(TS 24.615 §4.5.2.1) */
     bool HasEstablishedCallFor( const std::string &strUser );
+    /** 이 가입자의 확립 호 leg — 그 가입자 쪽 leg 의 Call-ID·entry 와 relay peer index(0 = relay caller 쪽, 1 = callee
+     * 쪽). 통화중대기 in-band 대기음(announcements.md §3.6)이 붙을 leg. 없으면 false */
+    bool FindEstablishedLegFor( const std::string &strUser, std::string &strCallId, CCallInfo &clsInfo, int &iPeerIdx );
+    /** 착신전환 상태를 양 leg entry 에 기록 (§6A) */
+    void SetCdivInfo( const char *pszCallId, const std::string &strHistoryInfo, int iHops,
+                      const std::string &strServed );
+    /** CFNR 시한 — 그 leg entry 에만 */
+    void SetNoReplyDeadline( const char *pszCallId, time_t tDeadline );
     /** 피어 B-leg 의 라우팅 상태(RouteSet·Route·정책·해시키·실패 Route 목록)를 양 leg entry 에 기록 — 재라우팅의 근거.
      */
     void SetRouteInfo( const char *pszCallId, const std::string &strRouteSet, const std::string &strRoute,

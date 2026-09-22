@@ -214,7 +214,7 @@ async def _list_users(config):
             for kind, table in _subs.tables(cur):
                 cur.execute(
                     "SELECT id, user_id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
-                    f"{aka_cols}{pickup_cols}{_ringback_select_extra(cur, table)} FROM {table} ORDER BY user_id, id"
+                    f"{aka_cols}{pickup_cols}{_ringback_select_extra(cur, table)}{_cdiv_select_extra(cur, table)} FROM {table} ORDER BY user_id, id"
                 )
                 by_user = subs_by_kind.setdefault(kind, {})
                 for s in cur.fetchall():
@@ -271,7 +271,7 @@ async def _get_user(person_id: str, config):
             def _load_subs(table):
                 cur.execute(
                     "SELECT id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
-                    f"{aka_cols}{pickup_cols}{_ringback_select_extra(cur, table)} FROM {table} WHERE user_id=%s ORDER BY id",
+                    f"{aka_cols}{pickup_cols}{_ringback_select_extra(cur, table)}{_cdiv_select_extra(cur, table)} FROM {table} WHERE user_id=%s ORDER BY id",
                     (person_id,)
                 )
                 return [_fill_sub_row(s) for s in cur.fetchall()]
@@ -480,7 +480,7 @@ async def _list_subscriptions(person_id: str, svc: str, config):
                 return HandlerResult(status=404, body={'error': 'User not found'})
             cur.execute(
                 f"SELECT id, service_ref, imsi, sip_transport, dnd, forward_id, "
-                f"       register_time, logout_time {_aka_select_extra(cur)}{_pickup_select_extra(cur)}{_ringback_select_extra(cur, table)} "
+                f"       register_time, logout_time {_aka_select_extra(cur)}{_pickup_select_extra(cur)}{_ringback_select_extra(cur, table)}{_cdiv_select_extra(cur, table)} "
                 f"FROM {table} WHERE user_id=%s ORDER BY id",
                 (person_id,)
             )
@@ -639,6 +639,50 @@ def _ringback_select_extra(cur, table: str) -> str:
     return ", ringback_media" if _has_ringback_column(cur, table) else ""
 
 
+# ── 조건부 착신전환 (TS 24.604 CFB/CFNR/CFNL — volte_supplementary_services.md §6A.4, migrate_subscription_cdiv.sql)
+_CDIV_NUMBER_KEYS = ('forward_busy_id', 'forward_no_reply_id', 'forward_not_logged_in_id')
+_CDIV_KEYS = _CDIV_NUMBER_KEYS + ('forward_no_reply_sec',)
+_CDIV_SCHEMA_ERROR = {'error': 'schema_not_migrated',
+                      'detail': 'subscriptions.forward_busy_id 없음 — sql/migrate_subscription_cdiv.sql'}
+
+
+def _has_cdiv_columns(cur, table: str) -> bool:
+    try:
+        cur.execute(f"SHOW COLUMNS FROM {table} LIKE 'forward_busy_id'")
+        return cur.fetchone() is not None
+    except Exception:
+        return False
+
+
+def _cdiv_select_extra(cur, table: str) -> str:
+    return ", forward_busy_id, forward_no_reply_id, forward_no_reply_sec, forward_not_logged_in_id" if _has_cdiv_columns(cur, table) else ""
+
+
+def _cdiv_fields(cur, table: str, body: dict):
+    """body 의 조건부 전환 키 → [(컬럼, 값)] (키가 있을 때만 — 부분 업데이트). 컬럼 없으면 400, 형식 위반 ValueError(key)."""
+    out = []
+    if not any(k in body for k in _CDIV_KEYS):
+        return out
+    if not _has_cdiv_columns(cur, table):
+        return HandlerResult(status=400, body=_CDIV_SCHEMA_ERROR)
+    for k in _CDIV_NUMBER_KEYS:
+        if k in body:
+            try:
+                out.append((k, _parse_forward_id({'forward_id': body.get(k)})))
+            except ValueError:
+                raise ValueError(k)
+    if 'forward_no_reply_sec' in body:
+        v = body.get('forward_no_reply_sec')
+        try:
+            sec = int(v) if v not in (None, '') else 0
+        except (TypeError, ValueError):
+            raise ValueError('forward_no_reply_sec')
+        if sec < 0 or sec > 120:
+            raise ValueError('forward_no_reply_sec')
+        out.append(('forward_no_reply_sec', sec))
+    return out
+
+
 _FORWARD_RE = re.compile(r'^\+?[0-9*#]{1,32}$')
 
 
@@ -786,6 +830,7 @@ async def _add_subscription(person_id: str, svc: str, body, config):
             aka_cols = ''.join(', ' + f.split('=')[0] for f in aka[0])
             aka_ph = ',%s' * len(aka[1])
             pickup_col, pickup_vals = '', []
+            extra_cols, extra_vals = '', []   # 선택 컬럼(마이그레이션 의존) — ringback_media·조건부 전환
             if 'ringback_media' in body:
                 # 가입자 링백 음원(announcements.md §6.3) — 안내 라이브러리 id. 컬럼 없으면 400(마이그레이션 안내 — ptt 회선은 대상 아님)
                 if not _has_ringback_column(cur, table):
@@ -795,7 +840,15 @@ async def _add_subscription(person_id: str, svc: str, body, config):
                     rb = _parse_ringback_media(body)
                 except ValueError:
                     return HandlerResult(status=400, body={'error': 'ringback_media must be <sys|op|sub>:<name>'})
-                fields.append("ringback_media=%s"); values.append(rb)
+                extra_cols += ', ringback_media'; extra_vals.append(rb)
+            try:
+                cdiv = _cdiv_fields(cur, table, body)
+            except ValueError as e:
+                return HandlerResult(status=400, body={'error': f'{e} must be a number (digits, optional leading +) / forward_no_reply_sec 0..120'})
+            if isinstance(cdiv, HandlerResult):
+                return cdiv
+            for col, val in cdiv:
+                extra_cols += f', {col}'; extra_vals.append(val)
             if 'pickup_group' in body:
                 if not _has_pickup_column(cur):
                     return HandlerResult(status=400, body=_PICKUP_SCHEMA_ERROR)
@@ -813,9 +866,9 @@ async def _add_subscription(person_id: str, svc: str, body, config):
                 return HandlerResult(status=503, body=_HA1_SCHEMA_ERROR)
             cur.execute(
                 f"INSERT INTO {table} (id, user_id, service_ref, imsi, ha1, sip_transport, dnd, forward_id"
-                f"{pickup_col}{aka_cols}) "
-                f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s{',%s' * len(pickup_vals)}{aka_ph})",
-                (msisdn, person_id, service_ref, imsi, ha1, sip_transport, dnd, forward_id, *pickup_vals, *aka[1])
+                f"{pickup_col}{extra_cols}{aka_cols}) "
+                f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s{',%s' * len(pickup_vals)}{',%s' * len(extra_vals)}{aka_ph})",
+                (msisdn, person_id, service_ref, imsi, ha1, sip_transport, dnd, forward_id, *pickup_vals, *extra_vals, *aka[1])
             )
     notify_csp("USER_CHANGED", f"tel:{msisdn}", "POST")
     refresh_login_accounts()  # IdMS 로그인 캐시 — login_id/passwd·MCPTT ID 파생 변경 즉시 반영
@@ -900,6 +953,14 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
                 except ValueError:
                     return HandlerResult(status=400, body={'error': 'ringback_media must be <sys|op|sub>:<name>'})
                 fields.append("ringback_media=%s"); values.append(rb)
+            try:
+                cdiv = _cdiv_fields(cur, table, body)
+            except ValueError as e:
+                return HandlerResult(status=400, body={'error': f'{e} must be a number (digits, optional leading +) / forward_no_reply_sec 0..120'})
+            if isinstance(cdiv, HandlerResult):
+                return cdiv
+            for col, val in cdiv:
+                fields.append(f"{col}=%s"); values.append(val)
 
             # H(A1) 결박 — H(A1)=MD5(imsi@domain:realm:passwd) 이므로 imsi 또는 서비스의 (domain, realm) 이 바뀔 때만
             #   기존 ha1 이 무효다(§4.3). 같은 결박 재료를 가진 다른 서비스로의 이관(같은 domain·realm 의 변종 서비스)은

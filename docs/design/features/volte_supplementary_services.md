@@ -250,8 +250,22 @@ UE-A ◄── 180(같은 SDP) · 200 ◄────────── 180 · 2
 | 안내 | 프로파일 상황 `forwarded`(기본 `announce_then_tone` — 안내 1회 뒤 링백음을 응답까지) — [announcements.md §3.5](announcements.md) |
 | 검증 | 계측기 `VOLTE-ANN-FORWARDED`(subscriber 픽스처 `forward_to: <역할>`, 지표 `cdiv_181_pct`·`cdiv_hi_pct`·`early_media_pct`·`early_rtp_pct`) |
 
-**후속(범위 밖)** — 조건부 전환 CFB(486)/CFNR(무응답 타이머)/CFNL(미등록)은 가입 필드 `forward_busy_id`·`forward_no_reply_id`·`no_reply_sec` 를 두고 B-leg 실패 지점(`EventCallEnd`·`Tick`)에서
-같은 재타게팅 경로(새 B-leg + History-Info cause 486/408/404)를 타면 된다. 전환자 통지(TS 24.604 `comm-div-info` 이벤트 패키지)·`Privacy: history`·전환 대상이 원발신자 자신인 경우의 처리도 남는다.
+### 6A.4 조건부 전환 — CFB · CFNR · CFNL
+
+| 서비스 | 가입 필드(`volte_subscriptions`/`voip_subscriptions`, `sql/migrate_subscription_cdiv.sql`) | 조건 | cause(RFC 4458) | 판정 지점 |
+|---|---|---|---|---|
+| CFU | `forward_id` | 무조건 | 302 | `ResolveDiversion`(INVITE) |
+| CFNL | `forward_not_logged_in_id` | INVITE 시점에 착신 가입자가 **미등록**(`isAlive` 아님, CFU 없을 때) | 404 | `ResolveDiversion`(INVITE) — CFU 와 같은 연쇄·상한·181·History-Info·안내 |
+| CFB | `forward_busy_id` | 가입자 B-leg 최종 486/600 또는 Reason Q.850 cause 17(`Classify` = busy) | 486 | `EventCallEnd` → `TryDivertLeg` |
+| CFNR | `forward_no_reply_id` (+ `forward_no_reply_sec`, 0 = `Setup.Sip.Cdiv.NoReplySec` 기본 20) | B-leg 첫 18x 뒤 시한 안에 응답 없음(`EventCallRing` 이 시한을 잡고 디스패처 `Tick` 이 CANCEL) · 단말 480/408(`Classify` = no_answer/unreachable) | 408 | `Tick` / `EventCallEnd` → `TryDivertLeg` |
+
+- **재타게팅**(`CModuleDispatcher::TryDivertLeg`) = RouteSet 재라우팅(§2-4 `TryRerouteLeg`)과 같은 골격 — 실패/취소할 B-leg 의 오퍼·From 그대로 전환 대상에 새 INVITE, 같은 relay 세션·peer1 포트·SDES·코덱 상태를 물려받고(`CCallInfo` 복사) CallMap 의 A↔B 짝만 바꾼다. History-Info 는 그 호가 이미 실은 값(`CCallInfo::m_strHistoryInfo`) 뒤에 `<target;cause=486|408>;index=…;mp=…` 를 이어 붙이고 전환 수(`m_iCdivHops`)가 상한이면 원코드로 끝낸다. 발신자에겐 181, 전환 안내(§3.5 — A 가 이미 SDP 를 받았으면(원착신 18x+SDP·링백) 183 재송 없이 재생만), CDR `diversion`. 전환 대상이 통화 중이면 `Alert-Info` 통화중대기 + in-band 대기음(announcements.md §3.6).
+- **대상 제한** = 등록 가입자만(`gclsUserMap.Select`). 피어·미등록 대상은 원코드로 끝낸다(후속). 대상의 DND·착신거부는 종단 서비스가 우선(전환하지 않음). 루프(대상이 History-Info 에 이미 있음·자기 자신·원발신자)는 원코드.
+- **CFNR 시한** = `CCallInfo::m_iNoReplyDeadline`(B-leg entry) — `Tick`(CspServer 1 s 루프)이 만료 leg 를 `TryDivertLeg(bNoReplyTimer)` 로 전환한 뒤 원착신 leg 를 CANCEL 한다(CallMap 에서 먼저 뺐으므로 그 487 은 아무 것도 하지 않는다). B 가 응답(확립)하면 시한은 무시된다.
+- CSC: `POST/PUT /users/{pid}/{call|voip}/{msisdn}` 의 `forward_busy_id`·`forward_no_reply_id`·`forward_no_reply_sec`(0~120)·`forward_not_logged_in_id` — 키가 있을 때만 바꾸고(부분 업데이트), 컬럼 없는 DB 는 400 `schema_not_migrated`. 목록·단건 응답에 실린다(컬럼 있을 때).
+- 계측기: subscriber 픽스처 `forward_busy_to`·`forward_no_reply_to`(+`no_reply_sec`)·`forward_not_logged_in_to`, 단계 `no_answer`(링잉만 — 망의 CANCEL 이 정상), reject 뒤 다른 역할 착신 = 전환으로 인식(`cdiv_after_reject`), prelude `deregister`(register 뒤 곧바로 내려 미등록 착신 역할 — 앞선 run 의 바인딩이 3600 s 남기 때문) → `VOLTE-ANN-FORWARD-BUSY`·`-NOREPLY`·`-NOTLOGGEDIN`. CFNL 의 등록 판정은 등록 바인딩(`CUserMap::Select`) — `CspUserMap::isAlive` 는 REGISTER 시각 + `UserTimeout` 이라 해제 뒤에도 한동안 참이다.
+
+**후속(범위 밖)** — 피어·미등록 대상으로의 조건부 전환(재라우팅 판정을 B-leg 실패 지점에서 다시 해야 한다 — 원 INVITE 컨텍스트 보존), 전환자 통지(TS 24.604 `comm-div-info` 이벤트 패키지), `Privacy: history`.
 
 ---
 
