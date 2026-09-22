@@ -237,8 +237,20 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage, bool bKeepSdpVersion )
 
 		for( itList = m_clsLocalMediaList.begin(); itList != m_clsLocalMediaList.end(); ++itList )
 		{
+			// 방향 속성은 다이얼로그 상태(m_eLocalDirection)가 정본 — HoldCall/ResumeCall(RFC 3264 §8.4) 과 응용의
+			//   SetDirection 재작성(TS 24.610 inactive→sendonly)이 media-list passthrough SDP 에도 실리게 audio/video
+			//   미디어의 기존 방향 속성을 지우고 다시 쓴다. 다른 미디어(application 등)는 그대로.
+			CSdpMedia clsMedia = *itList;
+			if( !strcasecmp( clsMedia.m_strMedia.c_str(), "audio" ) || !strcasecmp( clsMedia.m_strMedia.c_str(), "video" ) )
+			{
+				clsMedia.DeleteAttribute( "sendrecv" );
+				clsMedia.DeleteAttribute( "sendonly" );
+				clsMedia.DeleteAttribute( "recvonly" );
+				clsMedia.DeleteAttribute( "inactive" );
+				clsMedia.AddAttribute( GetRtpDirectionString( m_eLocalDirection ), NULL );
+			}
 			iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=" );
-			iLen += itList->ToString( szSdp + iLen, sizeof(szSdp)-iLen );
+			iLen += clsMedia.ToString( szSdp + iLen, sizeof(szSdp)-iLen );
 		}
 	}
 	else

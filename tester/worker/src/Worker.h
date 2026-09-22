@@ -243,6 +243,9 @@ struct Instance {
     int rtpMode = 0;                           // CRtpThread::EMediaMode — invite 단계의 media.rtp (auto|none|explicit)
     bool mediaHeld = false;                    // media_hold 를 지났다 — bye 진입 시 RTP 표본
     bool progressTx = false;                   // 피어가 183+SDP 를 냈다 — 발신자 확립(200) 시점에 early media RTP 도달을 표본
+    // 보류 음악(announcements.md §3.3) — hold 단계가 피보류 단말들의 RTP 수신 누계를 적어 두고 resume/bye/종료에서 증분(≥ 5 패킷)을 moh_rtp_ok 로 센다
+    std::map<Endpoint*, unsigned long long> mohBase;
+    bool mohPending = false;
     int expectCode = 0;                        // invite 단계 expect.code — 200 이 아니면 그 최종 응답이 성공 조건(ACL 403 등)
     bool failed = false;
     // MCData SDS — 마지막 sds_send 의 message ID·송신 시각(sds_delay_ms 기점)·수신을 기다리는 단말(sds_recv)·disposition 요청 여부
@@ -405,6 +408,8 @@ private:
     void finishInstance(Instance& in, bool failed, const std::string& why, long long nowMs);
     void releaseEndpoint(Endpoint* ep);
     void sampleRtp(Endpoint* ep);
+    unsigned long long rtpRxOf(Endpoint* ep);                                  // 단말 종류 무관 RTP 수신 누계(UE 스택·피어 엔진·실단말 통계)
+    void evalMoh(Instance& in);                                                 // hold 뒤 피보류 단말의 RTP 증분 판정 → moh_rtp_ok(한 번)
     void endRun(const std::string& state);
     void emitEvent(const std::string& detail, Endpoint* ep, const std::string& step, int code, const std::string& callId = "");
     void sampleCpu();

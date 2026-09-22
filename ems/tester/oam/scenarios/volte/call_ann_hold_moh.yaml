@@ -1,0 +1,20 @@
+# 보류 음악(announcements.md §3.3, TS 24.610) — 발신자가 re-INVITE(a=sendonly) 로 보류하면 CSP 가 피보류 leg(착신자)에 RELAY_PLAY 로 `sys:moh_simple` 을 넣고,
+#   sendrecv 로 재개하면 STOP 한다. 판정 = moh_rtp_pct(보류 구간에 피보류 단말이 받은 RTP ≥ 5 패킷 / hold 송신). rtp: explicit 로 두 단말 모두 송출하지 않으므로
+#   보류 중 착신자에 닿는 RTP 는 서버 MOH 뿐이다(발신자 RTP 와 섞이지 않는다). 재개 뒤 media_send 로 양방향 미디어가 정상 복귀하는지도 본다.
+id: VOLTE-ANN-HOLD-MOH
+title: 보류 → 서버 보류 음악(MOH) → 재개
+tags: [volte, announcement, media, hold]
+roles:
+  caller: { pool: volte_ue }
+  callee: { pool: volte_ue, disjoint_from: caller }
+flow:
+  - { step: register,   who: [caller, callee], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: callee, media: { audio: amr-wb, rtp: explicit } }
+  - { step: answer,     who: [callee], after_ms: 500, expect: { code: 200 } }
+  - { step: media_hold, seconds: 1 }
+  - { step: hold,       who: [caller], expect: { code: 200 } }
+  - { step: wait,       seconds: 4 }
+  - { step: resume,     who: [caller], expect: { code: 200, moh_rtp_pct: 100 } }
+  - { step: media_send, who: [caller, callee] }
+  - { step: media_hold, seconds: 3, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }

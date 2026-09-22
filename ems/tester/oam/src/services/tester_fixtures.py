@@ -108,8 +108,12 @@ def resolve(scenario: Scenario, role_first: Dict[str, dict], bindings: Dict[str,
                         'ptt_listen': f.ptt_listen, 'ptt_targets': targets,
                         'listen_visibility': vis, 'history_read': f.history_read})
         elif f.kind == 'subscriber':
-            ref = svc_name(f.service_ref) if (f.service_ref in scenario.fixtures) else f.service_ref
-            out.append({'key': key, 'kind': f.kind, 'service_ref': ref,
+            fields = {}
+            if f.service_ref is not None:
+                fields['service_ref'] = svc_name(f.service_ref) if (f.service_ref in scenario.fixtures) else f.service_ref
+            if f.ringback_media is not None:
+                fields['ringback_media'] = f.ringback_media
+            out.append({'key': key, 'kind': f.kind, 'fields': fields, 'service_ref': fields.get('service_ref'),
                         'lines': [{'role': r, 'user': user_of(r)} for r in f.roles]})
     return out
 
@@ -126,7 +130,7 @@ def summarize(resolved: List[dict]) -> List[str]:
             rows.append(f"{r['id']}: monitor_call={r['monitor_call']} ptt_listen={r['ptt_listen']}({','.join(r['ptt_targets']) or '-'}) "
                         f"visibility={r['listen_visibility']} → {[a['user'] for a in r['assign']]}")
         elif r['kind'] == 'subscriber':
-            rows.append(f"service_ref={r['service_ref']} ← {[x['user'] for x in r['lines']]}")
+            rows.append(' '.join(f'{k}={v}' for k, v in r['fields'].items()) + f" ← {[x['user'] for x in r['lines']]}")
         elif r['kind'] == 'access_service':
             rows.append(f"access_service {r['name']} = {r['from_user']} 의 서비스 복제 + {r['set']}")
     return rows
@@ -188,7 +192,8 @@ class FixtureApplier:
                     for sub in u.get(f'{kind}_subscriptions') or []:
                         num = str(sub.get('id') or '')
                         if num:
-                            m[num] = {'person': u.get('id'), 'kind': kind, 'service_ref': sub.get('service_ref')}
+                            m[num] = {'person': u.get('id'), 'kind': kind, 'service_ref': sub.get('service_ref'),
+                                      'ringback_media': sub.get('ringback_media')}
                             m[re.sub(r'\D', '', num)] = m[num]
             self._users = m
         return self._users
@@ -274,8 +279,9 @@ class FixtureApplier:
         for ln in r['lines']:
             u = self.line(ln['user'])
             path = f"/api/v1/users/{u['person']}/{u['kind']}/{self._q(ln['user'])}"
-            self._call('PUT', path, {'service_ref': r['service_ref']})
-            self.undo.append(('subscriber', path, u.get('service_ref')))
+            self._call('PUT', path, dict(r['fields']))
+            # 복원값 = 바꾼 필드의 종전 값(없던 값은 빈 문자열 — CSC 가 NULL/프로파일 기본으로 되돌린다)
+            self.undo.append(('subscriber', path, {k: (u.get(k) or '') for k in r['fields']}))
 
     # ── 확인 ──
     def verify(self) -> List[str]:
@@ -302,7 +308,7 @@ class FixtureApplier:
                 kind = entry[0]
                 if kind == 'subscriber':
                     _, path, orig = entry
-                    self._call('PUT', path, {'service_ref': orig or ''})
+                    self._call('PUT', path, dict(orig))
                 elif kind == 'role':
                     _, rid, moved = entry
                     path = f'/api/v1/roles/{self._q(rid)}'

@@ -2829,8 +2829,15 @@ void Worker::execStep(Instance& in, long long now) {
                 }
                 finishInstance(in, true, st.step + ": not in call", now); return;
             }
+            if (st.step == "resume") evalMoh(in);   // 보류 구간이 끝난다 — 재개 re-INVITE 전에 피보류 단말의 RTP 증분을 판정
             if (!epHold(ep, st.step == "hold")) { finishInstance(in, true, st.step + ": re-INVITE not sent", now); return; }
             m_metrics.counter(st.step == "hold" ? "hold_tx" : "resume_tx");
+            if (st.step == "hold") {
+                // 보류 음악(announcements.md §3.3) — 서버가 피보류 leg 에 MOH 를 넣는지: 보류 주체를 뺀 통화 중 단말의 수신 누계를 기준점으로
+                in.mohBase.clear();
+                for (auto* other : endpointsOf(in)) if (other != ep && other->inCall) in.mohBase[other] = rtpRxOf(other);
+                in.mohPending = !in.mohBase.empty();
+            }
             in.phase = Instance::WAIT_EVENT;
             in.awaitKind = "reinviteresp:" + role;
             in.deadlineMs = now + m_cfg.inviteTimeoutMs;
@@ -2888,6 +2895,7 @@ void Worker::execStep(Instance& in, long long now) {
         }
         if (st.step == "bye") {
             // media_hold 직후라면 RTP 품질 표본. DTMF 수신 수는 항상 표본(단계 dtmf 가 있었을 때만 값이 있다)
+            evalMoh(in);                                       // resume 없이 끝나는 보류 — RTP 표본의 리셋보다 먼저 증분을 판정
             for (auto* ep : endpointsOf(in)) sampleDtmf(ep);   // RTP 표본이 카운터를 리셋하므로 먼저
             if (in.mediaHeld && in.rtpMode != CRtpThread::E_MEDIA_NONE) {
                 for (auto* ep : endpointsOf(in)) sampleRtp(ep);
@@ -3141,6 +3149,34 @@ void Worker::markCancelExpected(Instance& in) {
         if (ep->pendingInvite && ep->tStartCallMs == 0) ep->cancelExpected = true;
 }
 
+unsigned long long Worker::rtpRxOf(Endpoint* ep) {
+    unsigned long long rx = 0, lost = 0;
+    long long jit = 0;
+    if (ep->isPeer()) { if (!ep->callId.empty()) ep->poolRef->peer->RtpStats(ep->callId, rx, lost, jit); }
+    else if (ep->isReal()) rx = ep->realStats.rx;
+    else if (ep->s) rx = ep->s->m_clsRtpThread.m_ullRecvTotal.load();
+    return rx;
+}
+
+void Worker::evalMoh(Instance& in) {
+    // 보류 음악 도달(announcements.md §3.3 — CSP 가 피보류 leg 에 RELAY_PLAY 로 MOH 를 넣는다): hold 뒤 피보류 단말이 받은 RTP 증분.
+    //   보류 주체가 송출 중이면 그 RTP 도 섞이므로 시나리오는 invite.media.rtp=explicit(송출 없음)으로 두는 것이 정확하다. 5 패킷(100 ms) 이상 = 도달.
+    if (!in.mohPending) return;
+    in.mohPending = false;
+    unsigned long long best = 0;
+    Endpoint* who = nullptr;
+    for (auto& kv : in.mohBase) {
+        unsigned long long rx = rtpRxOf(kv.first);
+        unsigned long long d = rx >= kv.second ? rx - kv.second : rx;   // 표본 리셋 뒤면 누계 자체가 증분
+        if (!who || d > best) { best = d; who = kv.first; }
+    }
+    in.mohBase.clear();
+    if (!who) return;
+    m_metrics.counter("moh_rtp_rx", (long long)best);
+    if (best >= 5) m_metrics.counter("moh_rtp_ok");
+    else emitEvent("no RTP at held party during hold (rx=" + std::to_string(best) + ")", who, "hold", 0, who->isPeer() ? who->callId : std::string());
+}
+
 void Worker::sampleRtp(Endpoint* ep) {
     unsigned long long rx = 0, lost = 0;
     long long jitterUs = 0;
@@ -3237,6 +3273,7 @@ void Worker::releaseEndpoint(Endpoint* ep) {
 void Worker::finishInstance(Instance& in, bool failed, const std::string& why, long long now) {
     if (in.phase == Instance::DONE) return;
     in.phase = Instance::DONE;
+    evalMoh(in);   // 보류 중 끝난 인스턴스(실패·상대 종료)도 판정은 남긴다
     in.failed = failed;
     if (failed) { m_metrics.counter("failed"); if (!why.empty()) logf("debug", "instance %lld failed: %s", in.id, why.c_str()); }
     else m_metrics.counter("instances_ok");

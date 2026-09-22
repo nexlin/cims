@@ -53,13 +53,16 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 		if( bSessionTooSmall == false )
 		{
 			// 미디어 무변경(순수 세션 갱신) 판정 — 반드시 SetRemoteRtp 로 덮어쓰기 전에 한다.
+			//   방향 속성(a=sendonly/recvonly/inactive/sendrecv)만 바뀐 re-INVITE 도 미디어 변경이다
+			//   (RFC 3264 §8.4 hold/resume) — 주소·포트만 비교하면 보류가 세션 갱신으로 오판된다.
 			CSipCallRtp clsPrevRtp;
 			itMap->second.SelectRemoteRtp( &clsPrevRtp );
 			itMap->second.m_bLastReInviteMediaSame = ( clsPrevRtp.m_strIp == clsRtp.m_strIp &&
 				clsPrevRtp.m_iPort == clsRtp.m_iPort &&
 				clsPrevRtp.GetAudioPort() == clsRtp.GetAudioPort() &&
 				clsPrevRtp.GetVideoPort() == clsRtp.GetVideoPort() &&
-				clsPrevRtp.GetApplicationPort() == clsRtp.GetApplicationPort() );
+				clsPrevRtp.GetApplicationPort() == clsRtp.GetApplicationPort() &&
+				clsPrevRtp.m_eDirection == clsRtp.m_eDirection );
 
 			// 세션 갱신 (RFC 4028 §7.2) — 목적과 무관하게 in-dialog re-INVITE 는 갱신 효과를 갖는다.
 			SessionTimerOnRequest( itMap->second, pclsMessage );

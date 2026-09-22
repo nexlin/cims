@@ -192,6 +192,16 @@ class WriteGateTests(unittest.TestCase):
               {"name": "voip", "kind": "voip", "domain": "voip.sot"},
               {"name": "mcptt", "kind": "ptt", "domain": "ptt.sot"}]
 
+    def test_realm_same_for_variant_service(self):
+        # H(A1) 재결박 규칙(admin PUT) — service_ref 가 같은 domain·realm 의 변종 서비스로 바뀌면 결박 재료 (domain, realm) 이 같아
+        #   passwd 를 요구하지 않는다. realm 이 다르거나 해석이 안 되는 서비스는 바뀐 것으로 본다.
+        cfg = self._cfg(mirror=self.MIRROR + [{"name": "tester-svc-rb", "kind": "volte", "domain": "volte.sot"},
+                                              {"name": "volte-realm2", "kind": "volte", "domain": "volte.sot", "auth_realm": "r2"}])
+        r = self.a._service_realm
+        self.assertEqual(r(cfg, "volte", "volte"), r(cfg, "tester-svc-rb", "volte"))
+        self.assertNotEqual(r(cfg, "volte", "volte"), r(cfg, "volte-realm2", "volte"))
+        self.assertIsNone(r(cfg, "nope", "volte"))
+
     def test_gate_mirror(self):
         cfg = self._cfg(mirror=self.MIRROR)
         g = self.a._service_kind_gate

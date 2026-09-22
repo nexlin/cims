@@ -256,7 +256,7 @@ CSP 의 정상 호처리량 대비 무시할 수준이다.
 |---|---|---|
 | psip | `SipUserAgent/SipUserAgentSessionTimer.hpp` | 세션 타이머 절차 일체 — 헤더 파싱(`Session-Expires`·compact `x`·`Min-SE`·옵션 태그 `timer`), 협상(요청/응답), `SetSessionTimer()`, `CheckSessionTimer()`, `IsSessionRefreshReInvite()` |
 | psip | `SipUserAgent/SipDialog` | [§4](#4-상태-모델) 상태 필드 + `CreateInvite(bKeepSdpVersion)` / `AddSdp(msg, bKeepSdpVersion)` — 갱신 시 `o=` 세션 버전 유지 |
-| psip | `SipUserAgentInvite.hpp` `RecvInviteRequest` | 초기 INVITE 협상 입력 보관 / re-INVITE = 갱신 인지(+미디어 무변경 판정) + 자동 200 OK 에 `Session-Expires` echo / SE < 최소치면 422 + `Min-SE` |
+| psip | `SipUserAgentInvite.hpp` `RecvInviteRequest` | 초기 INVITE 협상 입력 보관 / re-INVITE = 갱신 인지(+미디어 무변경 판정 — 주소·포트(audio/video/application)·**방향 속성**이 전부 같을 때만. `a=sendonly`/`inactive` 로 바뀐 hold re-INVITE 는 미디어 변경(RFC 3264 §8.4)이라 CSP `EventReInvite` 가 보류 음악을 처리한다) + 자동 200 OK 에 `Session-Expires` echo / SE < 최소치면 422 + `Min-SE` |
 | psip | `SipUserAgentCall.hpp` `AcceptCall`·`CreateCall`, `SipUserAgent.cpp` `SendInvite` | 2xx 에 협상 결과, 송신 INVITE 에 `Supported: timer`·`Session-Expires`·`Min-SE` |
 | psip | `SipUserAgent.cpp` `SetInviteResponse` | 2xx 수신 시 타이머 확정 / 422 는 `Min-SE` 반영 1회 재시도(§7.3) / 갱신의 408·481 은 세션 사망 표시(§10) |
 | psip | `SipUserAgentSipStack.hpp` `SendTimeout` | 현행 유지 — 갱신 무응답이 곧 `EventCallEnd(SIP_GONE)` |

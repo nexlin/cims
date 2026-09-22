@@ -835,8 +835,8 @@ STEP_VOCAB = {
     'reject':        {'group': 'call',  'actor': 'who',     'kind': None,       'metrics': ['code', 'q850_rx_pct'], 'desc': '착신 대기 → payload 코드로 거절'},
     'bye':           {'group': 'call',  'actor': 'from',    'kind': None,       'metrics': ['sdd_ms', 'code', 'scr_pct', 'q850_rx_pct', 'dtmf_rx_pct'], 'desc': 'BYE → 최종 응답 (SDD)'},
     'media_hold':    {'group': 'media', 'actor': 'seconds', 'kind': None,       'metrics': ['rtp_loss_pct', 'jitter_ms', 'mos'], 'desc': '확립 뒤 seconds 유지, 끝에 RTP 표본 (during 로 통화 중 동작)'},
-    'hold':          {'group': 'media', 'actor': 'from',    'kind': None,       'metrics': ['code'], 'desc': 're-INVITE sendonly'},
-    'resume':        {'group': 'media', 'actor': 'from',    'kind': None,       'metrics': ['code'], 'desc': 're-INVITE sendrecv'},
+    'hold':          {'group': 'media', 'actor': 'from',    'kind': None,       'metrics': ['code', 'moh_rtp_pct'], 'desc': 're-INVITE sendonly — 피보류 단말의 수신 누계를 기준점으로 잡는다(보류 음악 판정 시작)'},
+    'resume':        {'group': 'media', 'actor': 'from',    'kind': None,       'metrics': ['code', 'moh_rtp_pct'], 'desc': 're-INVITE sendrecv — 보류 구간의 피보류 단말 RTP 증분(≥ 5 패킷)을 moh_rtp_pct 로 판정한 뒤 재개'},
     'dtmf':          {'group': 'media', 'actor': 'from',    'kind': None,       'metrics': ['dtmf_rx_pct'], 'desc': '숫자열 송신 (payload) — 풀 dtmf 방식대로 RFC 4733 telephone-event 또는 in-band G.711 톤'},
     'media_send':    {'group': 'media', 'actor': 'who',     'kind': None,       'metrics': [], 'desc': 'RTP 송출 시작 — sample(생략 = 기본 원천)·loop·after_ms. SDP 교환 뒤에만'},
     'media_stop':    {'group': 'media', 'actor': 'who',     'kind': None,       'metrics': [], 'desc': 'RTP 송출 정지 (수신은 계속)'},
@@ -874,7 +874,7 @@ METRIC_LABELS = {
     'sds_delay_ms': 'SDS 지연', 'sds_disposition_pct': 'SDS disposition 률', 'sds_media_pct': 'SDS media plane(MSRP) 도착률', 'dtmf_rx_pct': 'DTMF 수신률',
     'fd_upload_ms': 'FD 업로드(토큰 포함)', 'fd_delay_ms': 'FD SIGNALLING 지연', 'fd_download_ms': 'FD 다운로드', 'fd_download_pct': 'FD 다운로드 성공률',
     'q850_rx_pct': 'Q.850 Reason 수신률', 'early_media_pct': '183 early media 률', 'prack_pct': 'PRACK 률',
-    'early_rtp_pct': 'early media RTP 도달률', 'join_tap_pct': 'Join 청취 leg SSRC 2개 도달률', 'video_pct': '영상 협상률(m=video 활성 answer)',
+    'early_rtp_pct': 'early media RTP 도달률', 'moh_rtp_pct': '보류 음악 RTP 도달률(피보류 단말, hold 당)', 'join_tap_pct': 'Join 청취 leg SSRC 2개 도달률', 'video_pct': '영상 협상률(m=video 활성 answer)',
     'fork_alert_pct': '대표번호 포크 alert 률(그룹원 착신/기대)', 'listen_pct': 'PTT 청취 합류율(recvonly 200)',
     'retrans_rx_pct': 'INVITE 재전송 도달률(유실 주입 뒤)', 'thig_pct': 'THIG 토큰화 Via 보존률', 'check_pct': '관측 정합 판정 통과율(check)',
 }
@@ -906,6 +906,8 @@ METRIC_NAMES = (
     'dtmf_rx_pct', 'q850_rx_pct', 'early_media_pct', 'prack_pct',
     # 미디어 평면 — 183+SDP 뒤 200 전에 발신자가 실제 RTP 를 받았는가(시그널링 early_media_pct 와 별개)
     'early_rtp_pct',
+    # 보류 음악(announcements.md §3.3) — hold 단계 뒤 피보류 단말이 RTP(≥ 5 패킷)를 받은 보류 / hold 송신
+    'moh_rtp_pct',
     # 합법감청 청취 leg(RFC 3911 Join) — 서버가 양 화자를 SSRC 2개로 분리 인도했는가
     'join_tap_pct',
     # 영상 — m=video 를 실은 발신 중 answer 에 활성 video m-line(포트>0)이 온 비율
@@ -936,6 +938,7 @@ RATIO_METRICS = {
     'early_media_pct': ('early_media', 'progress_tx'),   # 발신자에 도달한 183+SDP / 피어가 낸 183
     'prack_pct': ('prack_rx', 'progress_tx'),       # 피어 UAS 가 받은 PRACK / 낸 신뢰 183
     'early_rtp_pct': ('early_rtp_ok', 'progress_tx'),   # 200 전에 RTP(≥ 5 패킷)를 받은 발신자 / 피어가 낸 183
+    'moh_rtp_pct': ('moh_rtp_ok', 'hold_tx'),           # 보류 중 피보류 단말에 RTP(≥ 5 패킷)가 닿은 보류 / hold re-INVITE 송신 — 서버 MOH(RELAY_PLAY) 도달
     'floor_grant_pct': ('floor_granted', 'floor_request_tx'),   # Granted 수신 / Floor Request 송신
     'join_tap_pct': ('join_ssrc2', 'join_ok'),      # 표본 때 SSRC 2개를 받은 청취 leg / 확립된 Join
     'video_pct': ('video_ok', 'video_offered'),     # answer 에 활성 m=video / m=video 를 실은 INVITE(워커 Media.VideoFile 필요)
@@ -1198,10 +1201,19 @@ class FixtureRole(_Strict):
 
 
 class FixtureSubscriber(_Strict):
-    """가입 서비스 소속 — 역할 신원의 회선 service_ref 를 바꾼다(CSC PUT /users/{person}/{kind}/{msisdn}). run 뒤 종전 값으로."""
+    """가입 회선 속성 — 역할 신원의 회선 service_ref(가입 서비스 소속)·ringback_media(개인 링백 음원, announcements.md §6.3)를 바꾼다
+    (CSC PUT /users/{person}/{kind}/{msisdn}). run 뒤 종전 값으로. 둘 중 하나는 있어야 한다."""
     kind: Literal['subscriber']
     roles: List[str] = Field(min_length=1)
-    service_ref: str = Field(min_length=1, description='접속서비스 이름 — access_service 픽스처 키 또는 대상에 이미 있는 서비스명')
+    service_ref: Optional[str] = Field(default=None, min_length=1, description='접속서비스 이름 — access_service 픽스처 키 또는 대상에 이미 있는 서비스명')
+    ringback_media: Optional[str] = Field(default=None, pattern=r'^(sys|op|sub):[A-Za-z0-9_.-]+$',
+                                          description='피착신 가입자의 링백 음원 id(sys:|op:|sub:) — 발신자 프로파일의 ringback 이 켜져 있어야 들린다')
+
+    @model_validator(mode='after')
+    def _any(self):
+        if self.service_ref is None and self.ringback_media is None:
+            raise ValueError('subscriber 픽스처는 service_ref 또는 ringback_media 중 하나는 있어야 한다')
+        return self
 
 
 class FixtureAccessService(_Strict):
@@ -1299,7 +1311,7 @@ class Scenario(_Strict):
                             raise ValueError(f'fixtures.{k}.ptt_targets=${{group}} 은 group_call 이 있는 시나리오에서만')
             elif f.kind == 'subscriber':
                 refs = list(f.roles)
-                if f.service_ref in self.fixtures and f.service_ref not in svc_keys:
+                if f.service_ref is not None and f.service_ref in self.fixtures and f.service_ref not in svc_keys:
                     raise ValueError(f'fixtures.{k}.service_ref={f.service_ref!r} 는 access_service 픽스처가 아니다')
             elif f.kind == 'access_service':
                 refs = [f.from_role]

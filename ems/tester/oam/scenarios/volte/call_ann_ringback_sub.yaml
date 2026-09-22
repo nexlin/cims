@@ -1,0 +1,21 @@
+# 가입자 링백 음원(announcements.md §6.3) — 스위치는 발신자 서비스 프로파일(`ringback`), 음원은 피착신 가입자의 ringback_media 가 정한다.
+#   VOLTE-ANN-RINGBACK 과 같은 흐름에 착신자 회선의 ringback_media 를 `sys:ann_connecting`("연결 중입니다" 안내)으로 바꿔 둔다 — 계측기는 RTP 도달만 판정하고
+#   음원 선택은 대상 CSP 로그 `Announcement: ringback` 줄과 CDR announcement.media 로 확인한다(fixtures 가 끝나면 종전 값으로 원복).
+id: VOLTE-ANN-RINGBACK-SUB
+title: 가입자 링백 음원 (피착신 ringback_media) → 183 early media → 200
+tags: [volte, announcement, media, ringback]
+roles:
+  caller: { pool: volte_ue }
+  callee: { pool: volte_ue, disjoint_from: caller }
+flow:
+  - { step: register,   who: [caller, callee], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: callee, media: { audio: amr-wb, rtp: explicit },
+      expect: { code: 200, early_media_pct: 100, early_rtp_pct: 100 } }
+  - { step: answer,     who: [callee], after_ms: 3000, expect: { code: 200, srd_ms: { p95: 4000 } } }
+  - { step: media_send, who: [caller, callee] }
+  - { step: media_hold, seconds: 2, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }
+fixtures:
+  rb:     { kind: access_service, from_role: caller, set: { announcement_profile: ringback } }
+  line:   { kind: subscriber, roles: [caller], service_ref: rb }
+  color:  { kind: subscriber, roles: [callee], ringback_media: "sys:ann_connecting" }

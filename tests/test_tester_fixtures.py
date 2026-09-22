@@ -317,7 +317,8 @@ class Applier(unittest.TestCase):
              'members': [{'role': 'memberB', 'user': '+821300000001'}, {'role': 'memberC', 'user': '+821300000002'}], 'overflow': None},
             {'key': 'mon', 'kind': 'role', 'id': 'role-tester-mon', 'assign': [{'role': 'monitor', 'user': '+821300000002'}],
              'monitor_call': 'listed', 'monitor_targets': ['pg-tester-pg'], 'ptt_listen': 'none', 'ptt_targets': [], 'listen_visibility': 'hidden', 'history_read': 'scope'},
-            {'key': 'line', 'kind': 'subscriber', 'service_ref': 'tester-svc-nox', 'lines': [{'role': 'caller', 'user': '+821300000000'}]},
+            {'key': 'line', 'kind': 'subscriber', 'service_ref': 'tester-svc-nox', 'fields': {'service_ref': 'tester-svc-nox'},
+             'lines': [{'role': 'caller', 'user': '+821300000000'}]},
         ]
 
     def test_apply_verify_revert(self):

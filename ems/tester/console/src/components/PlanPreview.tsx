@@ -17,7 +17,7 @@ function fixtureLabel(f: { key: string; kind: string } & Record<string, unknown>
   const users = (k: string) => ((f[k] as { user: string }[] | undefined) ?? []).map(x => x.user).join(',')
   if (f.kind === 'phone_group') return `${f.id}[${users('members')}]${f.pilot ? ` 대표번호 ${f.pilot}` : ''}${f.overflow ? ` overflow ${(f.overflow as { user: string }).user}` : ''}`
   if (f.kind === 'role') return `${f.id}(monitor_call=${f.monitor_call}, ptt_listen=${f.ptt_listen}) → ${users('assign')}`
-  if (f.kind === 'subscriber') return `service_ref=${f.service_ref} ← ${users('lines')}`
+  if (f.kind === 'subscriber') return `${Object.entries(f.fields ?? { service_ref: f.service_ref }).map(([k, v]) => `${k}=${v}`).join(' ')} ← ${users('lines')}`
   if (f.kind === 'access_service') return `${f.name} = ${f.from_user} 서비스 복제 + ${JSON.stringify(f.set)}`
   return `${f.key}:${f.kind}`
 }

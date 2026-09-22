@@ -490,8 +490,9 @@ Content-Type: application/json
 | `forward_id` | string | N | "" | 착신전환 번호 (E.164 형식) |
 
 > 변경(PUT) 시 `passwd` 는 바꿀 때만 보낸다 — 미전송/빈값이면 기존 `ha1` 이 유지된다. `ha1` 은
-> (imsi, 서비스 domain/realm) 에 결박되므로 **`imsi` 나 `service_ref` 를 바꾸는 요청은 `passwd` 를
-> 함께 보내야 한다**(400 `passwd required when imsi or service_ref changes (ha1 rebinding)`).
+> (imsi, 서비스 domain/realm) 에 결박되므로 **`imsi` 를 바꾸거나, `service_ref` 를 (domain, realm) 이 다른 서비스로
+> 바꾸는 요청은 `passwd` 를 함께 보내야 한다**(400 `passwd required when imsi or service_ref changes (ha1 rebinding)`).
+> 같은 domain·realm 의 다른 서비스로 옮기는 것(변종 서비스·같은 realm 의 voip 이관)은 결박 재료가 같아 `passwd` 없이 된다.
 > 서비스의 `domain`/`auth_realm` 변경은 그 서비스 전 가입자의 `ha1` 을 무효화한다 — 전 가입자
 > 비밀번호 재설정 없이는 바꾸지 않는다([sip_access_security.md §4.3](../design/features/sip_access_security.md)).
 > `auth_scheme=aka` 로 바꾸는 PUT 은 보관된 키가 없으면 `k`/`opc`(또는 `op`)를 함께 보내야 한다(400).
@@ -655,7 +656,7 @@ Content-Type: application/json
 PUT /api/v1/users/{pid}/voip/{msisdn}
 ```
 
-§4.2 와 같다 — `imsi`/`service_ref` 가 바뀌면 `passwd` 동반(H(A1) 재결박), `service_ref` 는 kind=voip 서비스만.
+§4.2 와 같다 — `imsi` 또는 (domain, realm) 이 다른 `service_ref` 로 바뀌면 `passwd` 동반(H(A1) 재결박), `service_ref` 는 kind=voip 서비스만.
 
 ### 4a.3 VoIP 번호 삭제
 

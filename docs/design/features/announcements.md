@@ -124,7 +124,7 @@ UE-A (보류 주체)         CSP                          CMP                   
   │                      │ ── re-INVITE ─────────────────────────────────────────► │
 ```
 
-- 감지는 `EventReInvite` 의 offer 방향(psip `ERtpDirection`) — `sendonly`/`inactive` = hold, `sendrecv` = resume. re-INVITE 자체는 현행대로 통과시킨다
+- 감지는 `EventReInvite` 의 offer 방향(psip `ERtpDirection`) — `sendonly`/`inactive` = hold, `sendrecv` = resume(psip 의 세션 갱신 판정은 방향 속성도 비교하므로 주소·포트가 같은 hold re-INVITE 가 "미디어 무변경" 으로 건너뛰어지지 않고, media-list passthrough SDP 를 낼 때도 다이얼로그 방향(`m_eLocalDirection`)으로 audio/video 의 방향 속성을 다시 쓰므로 `HoldCall`·`SetDirection` 재작성이 와이어에 실린다). re-INVITE 자체는 현행대로 통과시킨다
   (B 는 RFC 3264 대로 보류 상태를 안다). SDP 가 relay 에 고정돼 있어 **재협상 없이** CMP 가 원천만 바꾼다.
 - `a=inactive` offer 는 프로파일 `hold.mode≠none` 이면 B 로 가는 offer 를 `a=sendonly` 로 재작성한다(TS 24.610 §4.5.2.4 — 안내를 위해 AS 가 방향을 고칠 수 있다).
   `none` 이면 그대로 통과.
@@ -266,7 +266,9 @@ CallMap 은 relay 서술자와 `m_strAnnProfile` 만 갖는다. 링백 entry(최
 - **프로파일 표 = `Rules` 행의 집합** — 행 하나가 프로파일 하나의 상황 하나(`{profile, situation, mode, tone, tone_ms, media, repeat, loop}`). 콘솔은 `object_list` 로 편집한다
   (맵-오브-맵은 콘솔 필드 형식에 없다). 같은 프로파일에 없는 상황은 `DefaultProfile` 의 값, 그것도 없으면 `none`.
 - `Rules` 가 비면(키 없음·빈 배열) **내장 기본 표** — `default`(§2 표의 기본 동작 그대로 — busy 화중음 4 s→안내, no_answer/unreachable 안내, not_found/invalid 없는번호 안내,
-  declined 화중음 6 s, congestion 혼잡음 6 s, hold moh_simple loop, ringback/forbidden/call_waiting none) + `trunk`(전부 none — NNI 관례).
+  declined 화중음 6 s, congestion 혼잡음 6 s, hold moh_simple loop, ringback/forbidden/call_waiting none) + `trunk`(전부 none — NNI 관례) +
+  `ringback`(서버 링백 스위치 — `ringback: media sys:ringback_kr loop` 한 행, 나머지 상황은 `default` 로 떨어진다. 접속서비스 `announcement_profile: ringback` 이
+  §3.4 를 켜는 가장 짧은 길이고, 음원은 §6.3 가입자 값이 덮는다).
 - `tone_ms` 는 신호음 loop 길이(신호음 파일은 주기 1~2회 분량이라 CMP 가 항목 `repeat 0 + max_ms` 로 돈다). `media` 의 `repeat` 기본 1, hold/ringback 은 `loop`.
 - 검증: 모르는 상황·mode 는 건너뛰거나 `none` 으로 낮추고 ERROR 로그(설정 오류가 통화 장애로 번지지 않게). `Enable=false` 또는 CMP `resource.ann` 미광고 = 전 상황 `none`.
 - 콘솔 편집 = `config_template.json` 섹션 `announcement`(scope service). SIGUSR1 재로드(`CCspAnnouncementService::Init`).
@@ -363,7 +365,11 @@ CMake `dist` 가 `dist/cmp/announcements/sys/` 에 복사하고, OAM 패키지�
   서비스 카운터 `m_lStarted`/`m_lFallback`(SipStats·콘솔 노출은 후속).
 - CMP STATS: `resource.ann{total,used,media}`, `detail.ann[]`, `detail.ann_catalog{ids, missing}`. Flow 로그 `INT ANN_PLAY`/`ANN_DONE`.
 - 계측기: 워커가 **망이 낸 183+SDP** 도 `progressTx` 로 잡아 200·실패 최종 응답 때 수신 RTP(≥ 5 패킷)를 판정한다 → `early_media_pct`·`early_rtp_pct` 가 안내 도달률이 된다
-  (`invite` 단계 expect 에 허용). 동봉 시나리오 `VOLTE-ANN-NOTFOUND`(없는 번호 → 404)·`VOLTE-ANN-NO-ANSWER`(무응답 → 408). 별도 `ann_pct` 지표는 두지 않는다.
+  (`invite` 단계 expect 에 허용). 동봉 시나리오 `VOLTE-ANN-NOTFOUND`(없는 번호 → 404)·`VOLTE-ANN-NO-ANSWER`(착신 480 → 안내 → 480). 별도 `ann_pct` 지표는 두지 않는다.
+  **보류 음악** = `hold` 단계가 피보류 단말의 RTP 수신 누계를 기준점으로 적고 `resume`(없으면 `bye`·인스턴스 종료)에서 증분 ≥ 5 패킷을 `moh_rtp_ok` 로 센다 →
+  `moh_rtp_pct` = `moh_rtp_ok`/`hold_tx`(보류 주체가 송출 중이면 그 RTP 도 섞이므로 시나리오는 `rtp: explicit` 로 둔다) — `VOLTE-ANN-HOLD-MOH`.
+  **서버 링백·가입자 링백** = 픽스처로 발신자 서비스 복제본에 `announcement_profile: ringback`(내장 프로파일)을 주고, 착신자 회선의 `ringback_media`(subscriber 픽스처)로
+  음원을 바꾼다 → `VOLTE-ANN-RINGBACK`·`VOLTE-ANN-RINGBACK-SUB`(200 전 `early_media_pct`/`early_rtp_pct`, 음원 선택은 CSP 로그·CDR 로 확인).
 - 검증 게이트: `S1-UNIT-CMP`(`tests/cmp_ann_player_test.cpp`) · `S3-SCN-ANN`(cspsim 없는 번호 → `=> RTP(` 뒤 ≥ 5 s → `status=404`) · `tests/cmp_smoke_announcement.py`(라이브 CMP).
 
 ## 10. 알람 ([../alarm_catalog.csv](../alarm_catalog.csv) 정본)
@@ -396,12 +402,14 @@ CMake `dist` 가 `dist/cmp/announcements/sys/` 에 복사하고, OAM 패키지�
 | ② CMP 재생기 | `PAnnCatalog`·`PAnnPlayer`·`PAnnTicker`·`PRtpRelay::annTick`·`RELAY_PLAY/_STOP`·`RELAY_PLAY_DONE`·`ANN_RELOAD`·SIGUSR1·`resource.ann`·STATS·A-PRC-034·`ann_pool`·cmp.json 4 키·template 섹션+collection | `S1-UNIT-CMP` 40 항목 pass · `tests/cmp_smoke_announcement.py` pass(150 pkt/3 s·20 ms 페이싱·DONE max/stopped/replaced·AMR-WB octet-aligned·재적재) |
 | ③ CSP | `CspAnnouncement`·`Setup.Announcement`(Rules)·접속서비스 2 필드·RemoteNode `announcement_profile`·`CCallInfo::m_strAnnProfile`·발화 지점(EventCallEnd/EventIncomingCall/TAS 603/EventReInvite/EventCallRing/EventCallStart/TAS RELAY_MODIFY 4곳)·psip `RingCall` 헤더 오버로드·CDR `announcement` | 스크래치 CSP+CMP+cspsim 실측(2026-09-21): 없는 번호 → 183+SDP → 6.16 s 안내 → **404**, CANCEL 중 → STOP → 487, 무응답(Timer B) → 안내 6 s → **408**, relay 즉시 회수, CDR `announcement` 기록 |
 | ④ 스모크 | `S3-SCN-ANN`(`verify/lib/items/stage3/scn_announcement.py`) | 게이트 등록(dev 스택 실행은 배포 정지창) |
-| ⑤ 계측기 | 워커 RING 183+SDP → `progressTx`, 실패 최종 응답에 early RTP 판정, `invite` expect 에 `early_media_pct/early_rtp_pct`, 시나리오 `VOLTE-ANN-NOTFOUND`·`VOLTE-ANN-NO-ANSWER` | tb48 실측은 배포 뒤 |
+| ⑤ 계측기 | 워커 RING 183+SDP → `progressTx`, 실패 최종 응답에 early RTP 판정, `invite` expect 에 `early_media_pct/early_rtp_pct`, 시나리오 `VOLTE-ANN-NOTFOUND`·`VOLTE-ANN-NO-ANSWER` · 보류 음악 지표 `moh_rtp_pct`(워커 `evalMoh`, `hold`/`resume` expect) + `VOLTE-ANN-HOLD-MOH` · 서버/가입자 링백 `VOLTE-ANN-RINGBACK`·`-RINGBACK-SUB`(subscriber 픽스처 `ringback_media`, 내장 프로파일 `ringback`) | tb48 실측 §9 ⑨·⑩ |
 | ⑥ OAM 라이브러리 | base OAM `services/announcements.py`·`handlers/announcements.py`(`/api/v1/announcements`)·agent `/module-files`·`/module-file`(GET/PUT/DELETE)·`_agent_proxy_call raw`·콘솔 `/service/announcements`(`AnnouncementsPage`)·`Announcements.SampleConv` | 서비스 오프라인 시험(등록·중복 409·삭제·sys 보호) pass · 콘솔 tsc pass · 노드 배포는 agent 0.2.103 배포 뒤 실측 |
 | ⑦ 문서 | 본 문서 · cmp_media_api §1.1/§5.1/§5.4/§6.7/§8/§9 · cmp.md §1.1/§9/§12 · csp.md §1.1/§3.1/§3.12/§6.0 · volte_flows C9/C10 · sip_service_model §2-2/§2-9 · agent_api Sync REST · alarm_catalog A-PRC-034·A-QOS-002 ann_pool · VERIFICATION_PROCESS S3-SCN-ANN · CLAUDE.md | — |
 
 | ⑧ P2 선반영 | 통화중대기 시그널링(Alert-Info + 발신자 `call_waiting` 안내/링백) · 가입자 링백(`ringback_media` 컬럼·CSC API·CSP 해석) · 감사 이벤트 E-AUD-017(등록·삭제·배포) · CSP 모니터 `MC_SIP_STATS` 에 `ann_started/ann_fallback/ann_active_*` | 빌드·단위시험 pass · 라이브 CSP 로그에 통화중 착신의 `call waiting (Alert-Info)` 판정 확인 |
 | ⑨ 라이브 배포 실측 (.48 관리평면, 2026-09-21) | cmp 0.2.93 · csp 0.2.141 · csc 0.2.118 · oam 0.2.152 · agent 0.2.104 · oam-cims-tester 0.1.22 · cims-tester-worker 0.1.17 | 없는 번호 → 183+SDP → 6.16 s 안내 → 404(cspsim) · 계측기 `VOLTE-ANN-NOTFOUND` 4/4 pass · `VOLTE-ANN-NO-ANSWER`(착신 480 → 안내 → 480, early_media/early_rtp 100 %) 4/4 pass · 라이브러리 등록 → `/deploy`(파일 4 + 카탈로그 + SIGUSR1) → CMP STATS `ann_catalog.ids` 에 `op:` 포함(13 media) → `/nodes` presence ok → 재배포 idempotent(pushed []) → `DELETE ?undeploy=1` 로 노드 파일 회수·12 media · 감사 E-AUD-017 3건 |
 
-**남은 것(P1 실측)** = 보류 음악·서버 링백·가입자 링백의 단말 실측(cspsim 에 hold 트리거가 없다 — 실단말 또는 계측기 `hold`/`resume` 단계), `S3-SCN-ANN` 게이트 실행(dev 스택은 배포 모드), 업그레이드 때 `announcements/` 이어받기 실측, CSP SipStats 에 `ann_started/ann_fallback` 노출.
+| ⑩ 보류 음악·링백 실측 (.48 관리평면, 2026-09-22) | csp 0.2.144 · csc 0.2.121 · cmp 0.2.94 · oam-cims-tester 0.1.23 · cims-tester-worker 0.1.19 — 실측이 드러낸 결함 수정 포함: psip 세션 갱신 판정에 방향 속성 추가(hold re-INVITE 가 "미디어 무변경" 으로 건너뛰어졌다) · psip media-list SDP 에 다이얼로그 방향 재작성(`HoldCall` 의 a=sendonly 가 와이어에 없었다) · CSC `/users` 목록 500(ptt 테이블 `ringback_media` SELECT) · CSC PUT 회선의 같은 realm 서비스 이관 passwd 요구 완화 · CSC PUT `ringback_media` 저장 누락 | `VOLTE-ANN-HOLD-MOH` 4/4(`moh_rtp_pct` 100 %, CSP `hold music sys:moh_simple → peer1` → resume 에 stopped 3.98 s) · `TRUNK-PBX-HOLD-RESUME` 4/4(PBX 보류 → 발신 UE 에 MOH 4/4) · `VOLTE-ANN-RINGBACK` pass(발신자 서비스 `announcement_profile: ringback` → 18x+SDP·early RTP 149 패킷 → 200 에 stopped) · `VOLTE-ANN-RINGBACK-SUB` pass(피착신 `ringback_media=sys:ann_connecting` 이 음원을 덮음 — CSP 로그 확인) · 회귀 NOTFOUND·NO-ANSWER·XFER-DENIED·CALL-BASIC pass · cmp 0.2.93→0.2.94 업그레이드 때 `announcements/op/*`·`config/announcements.jsonl` 이어받기 확인(STATS `op:` 포함 13 media → 시험 등록물 undeploy 뒤 12) |
+
+**남은 것(P1 실측)** = 실단말 hold/링백 청취 확인, `S3-SCN-ANN` 게이트 실행(dev 스택은 배포 모드). CSP 안내 카운터는 모니터 `MC_SIP_STATS`(ann_started/ann_fallback/ann_active_*)로 본다 — OAM 은 모니터를 수집하지 않으므로 콘솔 노출은 통계 파이프라인 과제로 남긴다.
 안내 없는 구 CMP 와 새 CSP 의 혼용은 `resource.ann` 미광고로 안전하게 폴백한다.

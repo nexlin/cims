@@ -1,0 +1,21 @@
+# 서버 링백(announcements.md §3.4, RFC 3960 §3.2) — 발신자 접속서비스의 announcement_profile 이 `ringback`(내장 프로파일: ringback = media sys:ringback_kr loop)이면
+#   착신 UE 의 SDP 없는 180 에 CSP 가 183/180+SDP(relay A측) 를 내고 RELAY_PLAY 로 링백음을 넣은 뒤, 200 이 오면 STOP 하고 앵커링한다.
+#   판정 = early_media_pct(발신자에 SDP 실린 18x 도달) · early_rtp_pct(200 전 발신자가 RTP ≥ 5 패킷 수신). 착신자는 3 s 뒤 응답한다.
+#   fixtures: 발신자 서비스 복제본(announcement_profile=ringback)을 대상 CSP 컬렉션에 넣고 발신자 회선을 그 서비스로(끝나면 원복).
+id: VOLTE-ANN-RINGBACK
+title: 서버 링백 (접속서비스 announcement_profile=ringback) → 183 early media 링백음 → 200
+tags: [volte, announcement, media, ringback]
+roles:
+  caller: { pool: volte_ue }
+  callee: { pool: volte_ue, disjoint_from: caller }
+flow:
+  - { step: register,   who: [caller, callee], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: callee, media: { audio: amr-wb, rtp: explicit },
+      expect: { code: 200, early_media_pct: 100, early_rtp_pct: 100 } }
+  - { step: answer,     who: [callee], after_ms: 3000, expect: { code: 200, srd_ms: { p95: 4000 } } }
+  - { step: media_send, who: [caller, callee] }
+  - { step: media_hold, seconds: 2, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 300 } } }
+fixtures:
+  rb:   { kind: access_service, from_role: caller, set: { announcement_profile: ringback } }
+  line: { kind: subscriber, roles: [caller], service_ref: rb }

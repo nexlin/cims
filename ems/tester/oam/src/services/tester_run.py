@@ -821,6 +821,8 @@ class RunDriver(threading.Thread):
         for k in ('progress_tx', 'early_media', 'prack_tx', 'prack_rx', 'reinvite_ok', 'reinvite_fail', 'reinvite_rx',
                   'dtmf_tx', 'dtmf_sent', 'dtmf_rx', 'q850_tx', 'q850_rx', 'refer_tx',
                   'rtp_tx', 'rtp_silent_legs', 'media_send', 'media_stop', 'skipped_rtp_cap', 'early_rtp_ok', 'early_rtp_rx',
+                  # 보류 음악(announcements.md §3.3) — hold/resume 송신 · 피보류 단말 RTP 증분 도달/패킷 수
+                  'hold_tx', 'resume_tx', 'remote_hold', 'remote_resume', 'moh_rtp_ok', 'moh_rtp_rx',
                   # 전달·합류·구독(volte_supplementary_services §5·§6 · dispatch_center §5 · RFC 6665)
                   'consult_tx', 'consult_ok', 'refer_attended_tx', 'pickup_tx', 'pickup_ok', 'replaces_tx', 'replaces_ok',
                   'join_tx', 'join_ok', 'join_ssrc2', 'ringing_leg_cancelled', 'subscribe_tx', 'notify_rx', 'publish_tx',

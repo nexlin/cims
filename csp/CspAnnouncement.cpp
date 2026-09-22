@@ -73,7 +73,7 @@ EAnnSituation CCspAnnouncementService::SituationOf( const std::string &strName )
     return ANN_SIT_NONE;
 }
 
-// 내장 기본 표 (announcements.md §6.1 `default` 프로파일) — Rules 가 비었을 때
+// 내장 기본 표 (announcements.md §6.1 `default`·`trunk`·`ringback` 프로파일) — Rules 가 비었을 때
 static const char *kDefaultRules =
     "[{\"profile\":\"default\",\"situation\":\"ringback\",\"mode\":\"none\"},"
     "{\"profile\":\"default\",\"situation\":\"busy\",\"mode\":\"tone_then_announce\",\"tone\":\"sys:busy_kr\",\"tone_"
@@ -95,7 +95,11 @@ static const char *kDefaultRules =
     "{\"profile\":\"trunk\",\"situation\":\"invalid\",\"mode\":\"none\"},"
     "{\"profile\":\"trunk\",\"situation\":\"declined\",\"mode\":\"none\"},"
     "{\"profile\":\"trunk\",\"situation\":\"congestion\",\"mode\":\"none\"},"
-    "{\"profile\":\"trunk\",\"situation\":\"hold\",\"mode\":\"none\"}]";
+    "{\"profile\":\"trunk\",\"situation\":\"hold\",\"mode\":\"none\"},"
+    // `ringback` = 서버 링백 스위치(§3.4) — ringback 행 하나만 두고 나머지 상황은 default 로 떨어진다. 접속서비스
+    // announcement_profile 로 고른다
+    "{\"profile\":\"ringback\",\"situation\":\"ringback\",\"mode\":\"media\",\"media\":\"sys:ringback_kr\",\"loop\":"
+    "true}]";
 
 CCspAnnouncementService::CCspAnnouncementService() {
 }

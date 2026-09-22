@@ -214,7 +214,7 @@ async def _list_users(config):
             for kind, table in _subs.tables(cur):
                 cur.execute(
                     "SELECT id, user_id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
-                    f"{aka_cols}{pickup_cols}{_ringback_select_extra(cur)} FROM {table} ORDER BY user_id, id"
+                    f"{aka_cols}{pickup_cols}{_ringback_select_extra(cur, table)} FROM {table} ORDER BY user_id, id"
                 )
                 by_user = subs_by_kind.setdefault(kind, {})
                 for s in cur.fetchall():
@@ -271,7 +271,7 @@ async def _get_user(person_id: str, config):
             def _load_subs(table):
                 cur.execute(
                     "SELECT id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
-                    f"{aka_cols}{pickup_cols}{_ringback_select_extra(cur)} FROM {table} WHERE user_id=%s ORDER BY id",
+                    f"{aka_cols}{pickup_cols}{_ringback_select_extra(cur, table)} FROM {table} WHERE user_id=%s ORDER BY id",
                     (person_id,)
                 )
                 return [_fill_sub_row(s) for s in cur.fetchall()]
@@ -480,7 +480,7 @@ async def _list_subscriptions(person_id: str, svc: str, config):
                 return HandlerResult(status=404, body={'error': 'User not found'})
             cur.execute(
                 f"SELECT id, service_ref, imsi, sip_transport, dnd, forward_id, "
-                f"       register_time, logout_time {_aka_select_extra(cur)}{_pickup_select_extra(cur)}{_ringback_select_extra(cur)} "
+                f"       register_time, logout_time {_aka_select_extra(cur)}{_pickup_select_extra(cur)}{_ringback_select_extra(cur, table)} "
                 f"FROM {table} WHERE user_id=%s ORDER BY id",
                 (person_id,)
             )
@@ -622,21 +622,21 @@ def _pickup_select_extra(cur) -> str:
     return ", COALESCE(pickup_group,'') AS pickup_group" if _has_pickup_column(cur) else ""
 
 
-_HAS_RINGBACK_COL = None
+_HAS_RINGBACK_COL: dict = {}   # table → bool
 _RINGBACK_RE = re.compile(r'^(sys|op|sub):[a-z0-9_]{1,40}$')
 
 
-def _has_ringback_column(cur) -> bool:
-    """subscriptions.ringback_media 존재 여부 — migrate_subscription_ringback.sql (announcements.md §6.3). 한 번 확인 후 캐시."""
-    global _HAS_RINGBACK_COL
-    if _HAS_RINGBACK_COL is None:
-        cur.execute("SHOW COLUMNS FROM volte_subscriptions LIKE 'ringback_media'")
-        _HAS_RINGBACK_COL = cur.fetchone() is not None
-    return _HAS_RINGBACK_COL
+def _has_ringback_column(cur, table: str) -> bool:
+    """<table>.ringback_media 존재 여부 — migrate_subscription_ringback.sql (announcements.md §6.3) 은 전화 가족(volte·voip)에만 컬럼을 더한다.
+    테이블별로 한 번 확인 후 캐시(ptt_subscriptions 는 없음 — 같은 SELECT 꼴을 가입 테이블 전부에 돌리므로 테이블 단위여야 한다)."""
+    if table not in _HAS_RINGBACK_COL:
+        cur.execute(f"SHOW COLUMNS FROM {table} LIKE 'ringback_media'")
+        _HAS_RINGBACK_COL[table] = cur.fetchone() is not None
+    return _HAS_RINGBACK_COL[table]
 
 
-def _ringback_select_extra(cur) -> str:
-    return ", ringback_media" if _has_ringback_column(cur) else ""
+def _ringback_select_extra(cur, table: str) -> str:
+    return ", ringback_media" if _has_ringback_column(cur, table) else ""
 
 
 def _parse_ringback_media(body):
@@ -770,8 +770,8 @@ async def _add_subscription(person_id: str, svc: str, body, config):
             aka_ph = ',%s' * len(aka[1])
             pickup_col, pickup_vals = '', []
             if 'ringback_media' in body:
-                # 가입자 링백 음원(announcements.md §6.3) — 안내 라이브러리 id. 컬럼 없으면 400(마이그레이션 안내)
-                if not _has_ringback_column(cur):
+                # 가입자 링백 음원(announcements.md §6.3) — 안내 라이브러리 id. 컬럼 없으면 400(마이그레이션 안내 — ptt 회선은 대상 아님)
+                if not _has_ringback_column(cur, table):
                     return HandlerResult(status=400, body={'error': 'schema_not_migrated',
                                                            'detail': 'subscriptions.ringback_media 없음 — sql/migrate_subscription_ringback.sql'})
                 try:
@@ -867,10 +867,25 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
                     return HandlerResult(status=409, body={'error': 'derived_from_phone_group', 'group_id': dg,
                                                            'detail': 'pickup_group 은 전화 그룹 멤버십(/api/v1/phone-groups)에서 파생된다'})
                 fields.append("pickup_group=%s"); values.append(_parse_pickup_group(body))
+            if 'ringback_media' in body:
+                # 가입자 링백 음원(announcements.md §6.3) — 빈 값 = NULL(서비스 프로파일 그대로). 컬럼 없는 테이블(ptt·미마이그레이션)은 400
+                if not _has_ringback_column(cur, table):
+                    return HandlerResult(status=400, body={'error': 'schema_not_migrated',
+                                                           'detail': 'subscriptions.ringback_media 없음 — sql/migrate_subscription_ringback.sql'})
+                try:
+                    rb = _parse_ringback_media(body)
+                except ValueError:
+                    return HandlerResult(status=400, body={'error': 'ringback_media must be <sys|op|sub>:<name>'})
+                fields.append("ringback_media=%s"); values.append(rb)
 
-            # H(A1) 결박 — imsi/service_ref 가 바뀌면 기존 ha1 은 무효다. 서버는 원문을 모르므로
-            #   passwd 동시 입력을 요구한다 (§4.3).
-            binding_changed = (new_imsi != cur_row['imsi']) or (new_ref != cur_row['service_ref'])
+            # H(A1) 결박 — H(A1)=MD5(imsi@domain:realm:passwd) 이므로 imsi 또는 서비스의 (domain, realm) 이 바뀔 때만
+            #   기존 ha1 이 무효다(§4.3). 같은 결박 재료를 가진 다른 서비스로의 이관(같은 domain·realm 의 변종 서비스)은
+            #   ha1 을 그대로 쓴다. 어느 쪽 서비스든 해석이 안 되면(None) 바뀐 것으로 본다.
+            binding_changed = new_imsi != cur_row['imsi']
+            if not binding_changed and new_ref != cur_row['service_ref']:
+                old_realm = _service_realm(config, cur_row['service_ref'], kind)
+                new_realm = _service_realm(config, new_ref, kind)
+                binding_changed = old_realm is None or new_realm is None or old_realm != new_realm
             if binding_changed and not passwd:
                 return HandlerResult(status=400, body={'error': 'passwd required when imsi or service_ref changes (ha1 rebinding)'})
             # 체계 전환 검증 — aka→digest 는 Digest 자격(H(A1))이 있어야 한다 (§8.2). AKA 가입자는
