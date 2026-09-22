@@ -92,7 +92,7 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
       "capabilities": { "smsGateway": false },
       "sip":     { "host": "<PSP host>", "port": 15061, "transport": "TLS",
                    "transports": [ { "transport": "TLS", "port": 15061 } ],
-                   "default": "TLS", "enforced": true, "mediaSecurity": "optional",
+                   "default": "TLS", "enforced": true, "mediaSecurity": "optional", "udpNoTcpSwitch": false,
                    "domain": "ptt.cims.example.kr" },
       "account": { "msisdn": "+821300000001", "imsi": "450330000000002",
                    "authId": "", "sipHa1": null, "sipPassword": null, "mcpttId": "tel:+821300000001" }
@@ -148,6 +148,9 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
   동기). 단말은 TLS 접속일 때만 pjsua `srtpUse` 로 반영하고 REGISTER `Security-Client` 에
   `sdes-srtp;mediasec` 능력을 병기한다([media_security.md §7.2](media_security.md)). 구 서버
   응답에 없으면 `off`.
+- `sip.udpNoTcpSwitch`: 단말 pjsip 의 UDP→TCP 자동 승격(RFC 3261 §18.1.1, 요청 ≥1300 B) 비활성 — `true` 면 PTT 그룹콜
+  INVITE·SDS 도 등록 UDP flow 로 나간다(IP 프래그먼트 의존, 통제된 망 전용 사이트 옵션). 서버 `Provisioning.Services.<kind>.udp_no_tcp_switch`,
+  기본 `false`. 구 서버 응답이면 `false`. 프로세스 전역(`CimsPjCfg.setDisableTcpSwitch`). sip_tls_signaling.md §3.2a
 - `account.imsi`: Digest username = `imsi@sip.domain`(서버 CscfModule 강제). 서비스별로 다를 수 있음.
 - `account.msisdn`: 공개 ID(AOR user part). `authId`: 전체 IMPI 직접지정(보통 빈값 → imsi@domain 합성).
 - `account.sipHa1`: **서비스 가입(subscription) 의 SIP Digest H(A1)**(`*_subscriptions.ha1` =

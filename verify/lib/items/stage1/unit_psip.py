@@ -5,6 +5,7 @@
                                   A UDP 등록+승격 TCP 닫힘 → UDP 바인딩 도달 · B 콜백 false → 기존 경로 · C Record-Route 제외 ·
                                   D re-INVITE 동일 · E TCP 등록(연결 유지) 무변경 · F TLS 등록(연결 유지) 무변경(자가서명 인증서, openssl CLI)
   · tests/psip_keepalive_test.cpp  UDP keepalive 수신 — 종전에 소켓 계층에서 조용히 버리던 CRLF 를 응용까지 올린다
+  · tests/psip_contact_transport_test.cpp  승격 flow 취급 — 응답 Contact transport 를 등록 바인딩으로, CANCEL 무챌린지·같은 트랜잭션 매칭·481
                                   (registration_binding_set.md §4.1/§4.3). A CRLF 1개 통지·pong 없음 ·
                                   B CRLF 2개 ping→pong(RFC 5626 §4.4.1) · C STUN Binding Request →
                                   XOR-MAPPED-ADDRESS(RFC 5626 §4.4.2) · D 짧은 이진 쓰레기 폐기 · E 정상 SIP 회귀
@@ -27,7 +28,8 @@ from ...context import VerifyContext
 
 _ID = "S1-UNIT-PSIP"
 _NAME = "psip 루프백 단위시험 (tests/psip_leg_dest_test.cpp — in-dialog 목적지 재해석)"
-_TESTS = ["tests/psip_leg_dest_test.cpp", "tests/psip_keepalive_test.cpp", "tests/psip_reason_video_test.cpp"]
+_TESTS = ["tests/psip_leg_dest_test.cpp", "tests/psip_keepalive_test.cpp", "tests/psip_reason_video_test.cpp",
+          "tests/psip_contact_transport_test.cpp"]
 _PSIP_INC = ["SipUserAgent", "SipStack", "SipParser", "SdpParser", "StunParser", "XmlParser",
              "SipPlatform", "ServerPlatform"]
 _PSIP_LIBS = ["libSipUserAgent.a", "libSipStack.a", "libSdpParser.a", "libSipParser.a", "libStunParser.a",

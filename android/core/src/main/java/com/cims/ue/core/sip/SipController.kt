@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.pjsip.pjsua2.AccountConfig
 import org.pjsip.pjsua2.AuthCredInfo
 import org.pjsip.pjsua2.CallOpParam
+import org.pjsip.pjsua2.CimsPjCfg
 import org.pjsip.pjsua2.SdpSession
 import org.pjsip.pjsua2.SendRequestParam
 import org.pjsip.pjsua2.SipHeader
@@ -733,6 +734,13 @@ class SipController(private val config: SipAccountConfig) {
             },
         )
         Log.i(TAG, "auth cred: ${if (isAka) "aka(K/OPc)" else if (hasHa1) "ha1(digest)" else "plain-passwd"} user=${c.digestUsername}")
+
+        // UDP→TCP 자동 승격(RFC 3261 §18.1.1, 요청 ≥1300 B) 스위치 — 프로비저닝 sip.udpNoTcpSwitch. pjsip 전역이라 계정과
+        //   무관하게 프로세스에 적용된다. 기본 false(규격대로 승격). 서버는 승격 flow 를 일회성으로 다루므로(응답 Contact =
+        //   등록 바인딩 transport, CANCEL 무챌린지) 승격이 있어도 무해하고, 이 스위치는 프래그먼트가 통하는 통제된 망에서
+        //   승격 자체를 없애는 사이트 옵션이다(sip_tls_signaling.md §3).
+        CimsPjCfg.setDisableTcpSwitch(c.udpNoTcpSwitch)
+        Log.i(TAG, "udp→tcp switch: ${if (c.udpNoTcpSwitch) "disabled (large requests stay on UDP)" else "enabled (RFC 3261 §18.1.1)"}")
 
         // 미디어 SRTP(SDES, media_security.md §7.2) — 프로비저닝 mediaSecurity 를 pjsua srtpUse 로.
         // TLS 접속일 때만 켠다: SDES 키가 SDP 에 실리므로 기밀 채널 전제(TS 33.328)이고, 비-TLS 에서

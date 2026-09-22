@@ -25,7 +25,7 @@
 #include "MemoryDebug.h"
 
 // 생성자
-CSipDialog::CSipDialog( CSipStack * pclsSipStack ) : m_iSeq(0), m_iNextSeq(0), m_iInviteSeq(0), m_iContactPort(-1), m_eTransport(E_SIP_UDP)
+CSipDialog::CSipDialog( CSipStack * pclsSipStack ) : m_iSeq(0), m_iNextSeq(0), m_iInviteSeq(0), m_iContactPort(-1), m_eTransport(E_SIP_UDP), m_iContactTransport(-1)
 	, m_iOutboundLocalPort(-1)
 	, m_iLocalRtpPort(-1), m_iLocalApplicationPort(-1), m_iLocalVideoPort(-1), m_eLocalDirection(E_RTP_SEND_RECV), m_iRemoteRtpPort(-1), m_eRemoteDirection(E_RTP_SEND_RECV), m_iCodec(-1), m_iRSeq(-1), m_b100rel(false)
 	, m_pclsInvite(NULL), m_pclsSipStack( pclsSipStack )
@@ -649,6 +649,7 @@ CSipMessage * CSipDialog::CreateMessage( const char * pszSipMethod )
 	}
 
 	pclsMessage->m_eTransport = m_eTransport;
+	pclsMessage->m_iContactTransport = m_iContactTransport;
 	pclsMessage->m_strSipMethod = pszSipMethod;
 
 	if( m_strContactUri.empty() == false )

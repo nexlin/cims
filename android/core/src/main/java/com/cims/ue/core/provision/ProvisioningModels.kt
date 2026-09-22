@@ -65,6 +65,8 @@ data class ServiceProfile(
     /** 미디어 SRTP(SDES) 정책(`sip.mediaSecurity`) — "off"|"optional"|"required".
      *  서버 접속서비스 media_srtp 와 같은 값(media_security.md §7.2). 구 서버 응답이면 "off". */
     val mediaSecurity: String = "off",
+    /** UDP→TCP 승격 비활성(`sip.udpNoTcpSwitch`) — 통제된 망 전용 사이트 옵션. 구 서버 응답이면 false. */
+    val udpNoTcpSwitch: Boolean = false,
     val mcpttId: String? = null,      // PTT 전용
     /** MCData C-plane SDS payload 상한(byte) — 초과 시 MSRP 미디어평면 발신(TS 24.282 §9.2.1.1).
      *  0/미수신 = 무제한(항상 C-plane MESSAGE). 서버 `services[].mcdata.maxPayloadSdsCplaneBytes`. */
@@ -102,6 +104,7 @@ data class ServiceProfile(
             akaAmf = akaAmf,
             secMechanisms = secMechanisms,
             mediaSecurity = mediaSecurity,
+            udpNoTcpSwitch = udpNoTcpSwitch,
             countryCode = countryCode,
             maxPayloadSdsCplaneBytes = maxPayloadSdsCplaneBytes,
         )

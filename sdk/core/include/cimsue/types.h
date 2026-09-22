@@ -40,6 +40,9 @@ struct EngineConfig {
     bool nullAudioDevice = false;
     /** VAD(무음 억제) 비활성 — 침묵 중에도 RTP 연속 송신(NAT flow 상태 유지). */
     bool noVad = true;
+    /** RFC 3261 §18.1.1 UDP→TCP 자동 승격(요청 ≥1300 B 면 TCP 로 송신) 비활성 — true 면 큰 요청도 UDP 로 보낸다(IP 프래그먼트).
+     *  통제된 망(프래그먼트 통과) 전용 사이트 옵션(sip_tls_signaling.md §3). 프로세스 전역(pjsip_cfg). */
+    bool udpNoTcpSwitch = false;
     int udpPort = 0;                  // 0 = 임의 포트
     int tcpPort = 0;
     int tlsPort = 0;

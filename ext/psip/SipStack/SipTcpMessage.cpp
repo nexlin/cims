@@ -54,7 +54,10 @@ bool SipTcpSend( Socket hSocket, const char * pszIp, int iPort, CSipMessage * pc
 				bVia = pclsMessage->SetTopViaIpPort( strTcpIp.c_str(), iTcpPort, E_SIP_TCP );
 			}
 
-			bContact = pclsMessage->SetTopContactIpPort( strTcpIp.c_str(), iTcpPort, E_SIP_TCP );
+			// 응용이 Contact 에 다른 transport 를 광고하기로 했으면(m_iContactTransport ≠ TCP) 소켓 주소로 덮어쓰지 않는다 —
+			//   UDP 등록 단말의 승격 TCP flow 응답에 등록 바인딩(UDP) 주소를 남기기 위해 (SipStackComm.hpp Contact 생성 참조).
+			if( pclsMessage->m_iContactTransport < 0 || pclsMessage->m_iContactTransport == E_SIP_TCP )
+				bContact = pclsMessage->SetTopContactIpPort( strTcpIp.c_str(), iTcpPort, E_SIP_TCP );
 
 			if( bVia || bContact )
 			{

@@ -231,6 +231,14 @@
           "help": "단말 프로파일 mediaSecurity 로 내리는 미디어 SRTP(SDES) 정책. 정본은 CSP access_services.media_srtp(관리 store 미러) — 이 값은 미러 미도달 시 폴백. docs/design/features/media_security.md §7.2"
         },
         {
+          "key": "Provisioning.Services.volte.udp_no_tcp_switch",
+          "label": "VoLTE UDP→TCP 승격 비활성",
+          "type": "bool",
+          "default": false,
+          "restart": true,
+          "help": "단말 프로파일 sip.udpNoTcpSwitch 로 내리는 사이트 옵션. true 면 단말 pjsip 이 1300 B 넘는 요청(PTT 그룹콜 INVITE·SDS)도 RFC 3261 §18.1.1 승격 없이 UDP 로 보낸다(IP 프래그먼트 의존 — 프래그먼트가 통하는 통제된 망에서만). 기본 false = 규격대로 승격. 서버는 승격 flow 를 일회성으로 다루므로(응답 Contact=등록 바인딩 transport·CANCEL 무챌린지) 끄지 않아도 동작한다. docs/design/features/sip_tls_signaling.md §3"
+        },
+        {
           "key": "Provisioning.Services.voip.name",
           "label": "유선 VoIP 접속서비스 이름",
           "type": "string",
@@ -316,6 +324,14 @@
           "default": "off",
           "restart": true,
           "help": "단말 프로파일 mediaSecurity 로 내리는 미디어 SRTP(SDES) 정책. 정본은 CSP access_services.media_srtp(관리 store 미러) — 이 값은 미러 미도달 시 폴백. 유선(사내망·TLS)은 required 를 권장한다. docs/design/features/media_security.md §7.2"
+        },
+        {
+          "key": "Provisioning.Services.voip.udp_no_tcp_switch",
+          "label": "유선 VoIP UDP→TCP 승격 비활성",
+          "type": "bool",
+          "default": false,
+          "restart": true,
+          "help": "단말 프로파일 sip.udpNoTcpSwitch 로 내리는 사이트 옵션. true 면 단말 pjsip 이 1300 B 넘는 요청(PTT 그룹콜 INVITE·SDS)도 RFC 3261 §18.1.1 승격 없이 UDP 로 보낸다(IP 프래그먼트 의존 — 프래그먼트가 통하는 통제된 망에서만). 기본 false = 규격대로 승격. 서버는 승격 flow 를 일회성으로 다루므로(응답 Contact=등록 바인딩 transport·CANCEL 무챌린지) 끄지 않아도 동작한다. docs/design/features/sip_tls_signaling.md §3"
         },
         {
           "key": "Provisioning.Services.ptt.name",
@@ -405,6 +421,14 @@
           "default": "off",
           "restart": true,
           "help": "단말 프로파일 mediaSecurity 로 내리는 미디어 SRTP(SDES) 정책. 정본은 CSP access_services.media_srtp(관리 store 미러) — 이 값은 미러 미도달 시 폴백. docs/design/features/media_security.md §7.2"
+        },
+        {
+          "key": "Provisioning.Services.ptt.udp_no_tcp_switch",
+          "label": "PTT UDP→TCP 승격 비활성",
+          "type": "bool",
+          "default": false,
+          "restart": true,
+          "help": "단말 프로파일 sip.udpNoTcpSwitch 로 내리는 사이트 옵션. true 면 단말 pjsip 이 1300 B 넘는 요청(PTT 그룹콜 INVITE·SDS)도 RFC 3261 §18.1.1 승격 없이 UDP 로 보낸다(IP 프래그먼트 의존 — 프래그먼트가 통하는 통제된 망에서만). 기본 false = 규격대로 승격. 서버는 승격 flow 를 일회성으로 다루므로(응답 Contact=등록 바인딩 transport·CANCEL 무챌린지) 끄지 않아도 동작한다. docs/design/features/sip_tls_signaling.md §3"
         }
       ],
       "scope": "service"

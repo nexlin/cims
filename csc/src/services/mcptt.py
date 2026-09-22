@@ -2890,6 +2890,10 @@ def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: st
     #   (IBCF→SMSC TS 24.341 / SMPP) 연결 여부(dispatch_desktop_ui.md §4.3 — 외부 번호 [문자] 활성 조건). CIMS 는 게이트웨이를
     #   내장하지 않으므로 기본 false; 등록 가입자 간 MESSAGE 전달은 이 값과 무관하다.
     sms_gw = svc.get('sms_gateway', False)
+    # UDP→TCP 승격 비활성(sip.udpNoTcpSwitch) — 단말 pjsip 의 RFC 3261 §18.1.1 승격을 끄는 사이트 옵션(통제된 망,
+    #   IP 프래그먼트 통과 전제). csc.json Provisioning.Services.<kind>.udp_no_tcp_switch, 기본 false(규격대로).
+    udp_no_tcp = svc.get('udp_no_tcp_switch', False)
+    udp_no_tcp = udp_no_tcp is True or str(udp_no_tcp).lower() == 'true'
     capabilities = {"smsGateway": sms_gw is True or str(sms_gw).lower() == 'true'}
     profile = {
         "kind": kind,
@@ -2905,6 +2909,7 @@ def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: st
             "domain": svc.get('domain') or IDMS_DOMAIN,
             "security": security,   # RFC 3329 제시 목록 — ["tls"] | ["tls","ipsec-3gpp"]
             "mediaSecurity": media_security,   # off|optional|required — 단말 srtp_use 정책
+            "udpNoTcpSwitch": udp_no_tcp,      # true = 단말이 큰 요청도 UDP 로(승격 없음) — 사이트 옵션
             **({"ipsec": ipsec} if ipsec else {}),
         },
         "account": account,

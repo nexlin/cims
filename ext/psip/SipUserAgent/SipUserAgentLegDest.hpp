@@ -120,3 +120,23 @@ bool CSipUserAgent::RefreshLegDest( const char * pszCallId )
 
 	return bRes;
 }
+
+// 다이얼로그가 응답·in-dialog 요청의 Contact 에 광고할 transport 를 정한다 — 응용(CSP)이 EventIncomingCall 에서
+//   발신자의 등록 바인딩 transport 를 넣는다. 저장된 INVITE 에도 심어 이후 CreateResponse(18x/2xx/4xx·487)가 계승하고,
+//   서버 발신 in-dialog 요청은 CSipDialog::CreateMessage 가 다이얼로그 값을 복사한다 (registration_binding_set.md §3).
+bool CSipUserAgent::SetContactTransport( const char * pszCallId, ESipTransport eTransport )
+{
+	bool bRes = false;
+
+	m_clsDialogMutex.acquire();
+	SIP_DIALOG_MAP::iterator itMap = m_clsDialogMap.find( pszCallId );
+	if( itMap != m_clsDialogMap.end() )
+	{
+		itMap->second.m_iContactTransport = eTransport;
+		if( itMap->second.m_pclsInvite ) itMap->second.m_pclsInvite->m_iContactTransport = eTransport;
+		bRes = true;
+	}
+	m_clsDialogMutex.release();
+
+	return bRes;
+}

@@ -269,6 +269,7 @@ using namespace pj;
 %include "pjsua2/presence.hpp"
 %include "pjsua2/account.hpp"
 %include "pjsua2/call.hpp"
+%include "pjsua2/cims_cfg.hpp"
 
 %ignore pj::JsonDocument::allocElement;
 %ignore pj::JsonDocument::getPool;

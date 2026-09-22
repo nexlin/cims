@@ -137,3 +137,19 @@ class TestServiceEntry(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestUdpNoTcpSwitch(unittest.TestCase):
+    """sip.udpNoTcpSwitch — Provisioning.Services.<kind>.udp_no_tcp_switch 를 bool 로 내린다. 기본 false(규격대로 승격)."""
+
+    def test_default_false(self):
+        self.assertIs(_profile({})["sip"]["udpNoTcpSwitch"], False)
+
+    def test_true_bool_and_string(self):
+        self.assertIs(_profile({"udp_no_tcp_switch": True})["sip"]["udpNoTcpSwitch"], True)
+        self.assertIs(_profile({"udp_no_tcp_switch": "true"})["sip"]["udpNoTcpSwitch"], True)
+
+    def test_garbage_is_false(self):
+        self.assertIs(_profile({"udp_no_tcp_switch": "yes"})["sip"]["udpNoTcpSwitch"], False)
+        self.assertIs(_profile({"udp_no_tcp_switch": 0})["sip"]["udpNoTcpSwitch"], False)
+

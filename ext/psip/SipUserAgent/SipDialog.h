@@ -70,6 +70,13 @@ public:
 	// SIP 요청 메시지를 전송할 transport
 	ESipTransport	m_eTransport;
 
+	/** 이 다이얼로그가 Contact 에 광고할 transport (-1 = 미설정 → 송신 transport 그대로, 그 외 ESipTransport 값).
+	 *  UDP 등록 단말이 RFC 3261 §18.1.1 로 TCP 승격해 보낸 INVITE 에 답할 때 응용이 등록 바인딩의 transport 를
+	 *  넣는다 — 일회성 승격 flow 에 다이얼로그를 묶지 않기 위해(registration_binding_set.md §3). 응답은 저장된
+	 *  INVITE(m_pclsInvite) 의 CreateResponse 계승으로, in-dialog 요청은 CreateMessage 로
+	 *  CSipMessage::m_iContactTransport 에 전파된다. */
+	int					m_iContactTransport;
+
 	/** Per-dialog override domain for From/To/Request-URI.
 	 *  Empty → 전역 CSipStackSetup::m_strDomain fallback.
 	 *  예) MCPTT 그룹 콜에서 mcptt 도메인으로 강제 사용. */

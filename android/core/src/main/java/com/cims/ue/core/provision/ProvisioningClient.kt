@@ -199,6 +199,7 @@ class ProvisioningClient(
                     (0 until sec.length()).map { k -> sec.optString(k) }.filter { it.isNotBlank() }
                 },
                 mediaSecurity = sip.optString("mediaSecurity", "off").ifBlank { "off" },
+                udpNoTcpSwitch = sip.optBoolean("udpNoTcpSwitch", false),
                 mcpttId = acc.stringOrNull("mcpttId"),
                 maxPayloadSdsCplaneBytes = s.optJSONObject("mcdata")
                     ?.optInt("maxPayloadSdsCplaneBytes", 0) ?: 0,

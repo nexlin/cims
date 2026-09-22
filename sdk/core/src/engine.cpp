@@ -808,6 +808,8 @@ Result Engine::start(const EngineConfig& cfg, Listener* listener) {
             epc.logConfig.writer = writer.get();
             epc.medConfig.noVad = o->cfg.noVad;
             epc.medConfig.clockRate = o->cfg.clockRate;
+            // UDP→TCP 승격 스위치 — pjsip 전역, 송신 시점에 읽히므로 libInit 전 설정으로 충분하다.
+            pjsip_cfg()->endpt.disable_tcp_switch = o->cfg.udpNoTcpSwitch ? PJ_TRUE : PJ_FALSE;
             o->ep->libInit(epc);
             o->logWriter = writer.release();                 // 이제 pjsua2 소유
             {

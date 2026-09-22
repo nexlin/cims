@@ -73,6 +73,8 @@ data class EngineConfig(
     val tlsCaPem: String = "",
     val tlsVerifyServer: Boolean = true,
     val nullAudioDevice: Boolean = false,
+    /** UDP→TCP 승격(RFC 3261 §18.1.1) 비활성 — 통제된 망 전용 사이트 옵션(libcimsue EngineConfig.udpNoTcpSwitch). */
+    val udpNoTcpSwitch: Boolean = false,
     val noVad: Boolean = false,
     val udpPort: Int = 0,
     val tcpPort: Int = 0,
@@ -82,7 +84,7 @@ data class EngineConfig(
     internal fun toJni(): JniEngineConfig = JniEngineConfig().also {
         it.userAgent = userAgent; it.logLevel = logLevel
         it.tlsCaPem = tlsCaPem; it.tlsVerifyServer = tlsVerifyServer
-        it.nullAudioDevice = nullAudioDevice; it.noVad = noVad
+        it.nullAudioDevice = nullAudioDevice; it.noVad = noVad; it.udpNoTcpSwitch = udpNoTcpSwitch
         it.udpPort = udpPort; it.tcpPort = tcpPort; it.tlsPort = tlsPort
         it.clockRate = clockRate
     }

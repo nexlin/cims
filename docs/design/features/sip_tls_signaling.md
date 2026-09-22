@@ -148,6 +148,24 @@ if ( … && tdata->dest_info.addr.entry[0].type == PJSIP_TRANSPORT_UDP)   // 진
 flow 가 UDP 하나뿐이라 대리 표현으로 정확히 일치하기 때문이다. TLS 배치에서는 그 대리 표현이
 어긋난다.
 
+### 3.2a 서버가 승격 flow 를 다루는 규칙 — UDP 단말이 주력일 때의 필수 조건
+
+승격은 막을 수 없는 규격 동작이므로 서버가 **무해하게** 다룬다. 실측(PTT 그룹콜 개시 INVITE ≈2.07 KB 27/27 승격,
+VoLTE 오디오 INVITE ≈1.46 KB 6/6 승격)에서 문제였던 것은 승격 자체가 아니라 서버가 그 일회성 flow 에 다이얼로그를 묶은 것이다.
+
+| 규칙 | 내용 |
+|---|---|
+| 응답 Contact | 승격 flow 로 받은 INVITE 의 18x/2xx Contact 에 `;transport=tcp` 대신 **발신자 등록 바인딩의 transport** 를 적는다. 단말의 후속 BYE·PRACK 가 등록 UDP flow 로 오고 Via 가 바인딩과 일치 → 401 재챌린지·TCP 재연결 없음 ([registration_binding_set.md](registration_binding_set.md) §4.1b) |
+| CANCEL | 인증 챌린지 금지(RFC 3261 §22.1). 대응 INVITE 트랜잭션(최상위 Via sent-by+branch)과 맞으면 200 + 487, 아니면 481 |
+| 서버 발신 in-dialog | 등록 바인딩으로([leg_liveness.md](leg_liveness.md) §6.3) |
+
+**단말 스위치 `sip.udpNoTcpSwitch`** — pjsip `pjsip_cfg()->endpt.disable_tcp_switch` 를 켜 승격 자체를 없애는 사이트 옵션.
+프로비저닝 `Provisioning.Services.<kind>.udp_no_tcp_switch`(CSC) → `/provisioning/me` `sip.udpNoTcpSwitch` → 단말
+`CimsPjCfg.setDisableTcpSwitch` / libcimsue `EngineConfig.udpNoTcpSwitch`. 켜면 2 KB INVITE 가 UDP IP 프래그먼트로 나간다 —
+**RFC 3261 §18.1.1 MUST 이탈**이고 프래그먼트를 버리는 망(통신사 NAT·일부 방화벽)에서는 INVITE 가 소리 없이 사라지므로
+기본 false. 서버→단말 fan-out INVITE(≈3.9 KB)는 NAT 뒤 단말로 TCP 를 열 수 없어 어차피 UDP 프래그먼트다 — 그 방향이
+통하는 망이라는 실측이 있을 때만 켠다. 위 서버 규칙은 스위치와 무관하게 항상 적용된다(협력업체 단말은 승격한다).
+
 ### 3.3 TLS 를 고른 단말에서 소멸하는 문제군
 
 | 문제 | TLS 를 고른 단말 |

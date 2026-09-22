@@ -676,6 +676,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\src\pjsua2\account.cpp" />
+    <ClCompile Include="..\src\pjsua2\cims_cfg.cpp" />
     <ClCompile Include="..\src\pjsua2\call.cpp" />
     <ClCompile Include="..\src\pjsua2\endpoint.cpp" />
     <ClCompile Include="..\src\pjsua2\json.cpp" />

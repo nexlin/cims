@@ -259,6 +259,9 @@ private:
 	 *  자기 주소 결정에 사용. 매칭 실패 시 false 반환 → 호출자가 primary fallback. */
 	bool _GetListenerBind( int iListenerId, ESipTransport eTransport,
 	                       std::string& outIp, int& outPort );
+	/** bind ip 가 같은(또는 wildcard 인) eTransport listener 의 포트. Contact 에 송신 transport 와 다른
+	 *  transport 를 광고할 때(CSipMessage::m_iContactTransport) 수신 listener 의 짝을 찾는 용도. */
+	bool _FindListenerBindByIp( ESipTransport eTransport, const std::string& strBindIp, int& outPort );
 
 	// TCP 다중 리스너 (R3: hot-reload)
 	std::vector<CSipStackTcpListener*> m_vecTcpListeners;

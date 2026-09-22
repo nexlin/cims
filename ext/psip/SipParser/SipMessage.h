@@ -139,6 +139,10 @@ public:
 	// 네트워크로 전송/수신된 SIP 메시지의 transport
 	ESipTransport		m_eTransport;
 
+	/** Contact 자동 생성(CSipStack::Send) 시 광고할 transport. -1 = 미지정(송신 transport 그대로), 그 외 ESipTransport.
+	 *  CSipDialog::m_iContactTransport 가 응답(CreateResponse 계승)·in-dialog 요청(CreateMessage)으로 전파한다. */
+	int							m_iContactTransport;
+
 	// SIP 메시지를 전송한 클라이언트의 IP 주소
 	std::string			m_strClientIp;
 

@@ -777,6 +777,38 @@ bool CSipStack::_GetListenerBind( int iListenerId, ESipTransport eTransport,
 	return false;
 }
 
+bool CSipStack::_FindListenerBindByIp( ESipTransport eTransport, const std::string& strBindIp, int& outPort )
+{
+	const bool bWild = strBindIp.empty() || strBindIp == "0.0.0.0";
+	int iExact = 0, iWild = 0;
+	auto pick = [&]( const std::string& strIp, int iPort ) {
+		if( strIp == strBindIp || ( bWild && ( strIp.empty() || strIp == "0.0.0.0" ) ) ) { if( !iExact ) iExact = iPort; }
+		else if( strIp.empty() || strIp == "0.0.0.0" ) { if( !iWild ) iWild = iPort; }
+	};
+	if( eTransport == E_SIP_UDP )
+	{
+		m_clsUdpListenerMutex.acquire();
+		for( auto * pL : m_vecUdpListeners ) if( pL ) pick( pL->m_strBindIp, pL->m_iPort );
+		m_clsUdpListenerMutex.release();
+	}
+	else if( eTransport == E_SIP_TCP )
+	{
+		m_clsTcpListenerMutex.acquire();
+		for( auto * pL : m_vecTcpListeners ) if( pL ) pick( pL->m_strBindIp, pL->m_iPort );
+		m_clsTcpListenerMutex.release();
+	}
+#ifdef USE_TLS
+	else if( eTransport == E_SIP_TLS )
+	{
+		m_clsTlsListenerMutex.acquire();
+		for( auto * pL : m_vecTlsListeners ) if( pL ) pick( pL->m_strBindIp, pL->m_iPort );
+		m_clsTlsListenerMutex.release();
+	}
+#endif
+	outPort = iExact ? iExact : iWild;
+	return outPort != 0;
+}
+
 bool CSipStack::AddUdpListener( int iExtId, const char* pszBindIp, int iPort,
                                  int iThreadCount, int& outId )
 {

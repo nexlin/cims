@@ -185,6 +185,8 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
 `http::ITransport{request(method, url, headers, body) → Response}` 로 추상한다. 구현은 OpenSSL 하나
 (`OpenSslTransport` — pjproject 가 이미 OpenSSL 을 링크하므로 추가 의존이 없다). TLS 트러스트(사설 CA)는
 `EngineConfig.trustAnchors`·`CscEndpoint.caPem` 으로 코어에 넘기고 SIP TLS 와 HTTPS 가 같은 앵커를 쓴다.
+`EngineConfig.udpNoTcpSwitch`(기본 false)는 pjsip 의 UDP→TCP 승격(RFC 3261 §18.1.1)을 끄는 사이트 옵션 — libInit 전에
+`pjsip_cfg()->endpt.disable_tcp_switch` 로 반영한다(sip_tls_signaling.md §3.2a). Kotlin 파사드 `EngineConfig.udpNoTcpSwitch` 동일. C API·.NET 파사드는 미노출(기본값).
 
 **주입은 아직 열려 있지 않다.** 인터페이스가 내부 헤더(`sdk/core/src/http/https_client.h`)에 있고 C API 에도
 진입점이 없어(`cimsue_csc_create` 는 endpoint 만 받는다) Windows `.NET`·Android SWIG 어느 쪽도 구현체를

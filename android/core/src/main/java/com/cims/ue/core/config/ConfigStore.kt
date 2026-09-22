@@ -35,6 +35,7 @@ class ConfigStore(context: Context) {
         secMechanisms = prefs.getString(K_SEC_MECH, "").orEmpty()
             .split(',').map { it.trim() }.filter { it.isNotBlank() },
         mediaSecurity = prefs.getString(K_MEDIA_SEC, "off").orEmpty().ifBlank { "off" },
+        udpNoTcpSwitch = prefs.getBoolean(K_UDP_NO_TCP_SWITCH, false),
         expiresSec = prefs.getInt(K_EXPIRES, 3600),
         countryCode = prefs.getString(K_CC, "").orEmpty(),
         maxPayloadSdsCplaneBytes = prefs.getInt(K_SDS_CPLANE_MAX, 0),
@@ -60,6 +61,7 @@ class ConfigStore(context: Context) {
             putString(K_AKA_AMF, c.akaAmf)
             putString(K_SEC_MECH, c.secMechanisms.joinToString(","))
             putString(K_MEDIA_SEC, c.mediaSecurity)
+            putBoolean(K_UDP_NO_TCP_SWITCH, c.udpNoTcpSwitch)
             putInt(K_EXPIRES, c.expiresSec)
             putString(K_CC, c.countryCode)
             putInt(K_SDS_CPLANE_MAX, c.maxPayloadSdsCplaneBytes)
@@ -152,6 +154,7 @@ class ConfigStore(context: Context) {
         const val K_AKA_AMF = "aka_amf"
         const val K_SEC_MECH = "sec_mech"              // 서버 제시 sec-agree 목록 CSV
         const val K_MEDIA_SEC = "media_sec"            // 미디어 SRTP 정책 off|optional|required
+        const val K_UDP_NO_TCP_SWITCH = "udp_no_tcp_switch"   // UDP→TCP 승격 비활성(사이트 옵션)
         const val K_EXPIRES = "expires"
         const val K_CC = "cc"
         const val K_SDS_CPLANE_MAX = "sds_cplane_max"

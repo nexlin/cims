@@ -135,6 +135,12 @@ else:
   의 psip 확장 항목이다.
 - 오류 응답(4xx~6xx)은 게이트 대상이 아니다 — Annex O 의 오류 메시지 예외에 상응한다.
 
+**CANCEL 은 이 판정을 거치지 않는다** — RFC 3261 §22.1 "servers MUST NOT attempt to challenge CANCEL requests since
+these requests cannot be resubmitted". psip `RecvCancelRequest` 가 인증 훅을 부르지 않고, 취소 대상 INVITE 트랜잭션
+(최상위 Via sent-by+branch)과 맞을 때만 받아 200 + 487, 아니면 481(§9.2). `EventIncomingRequestAuth` 도 CANCEL 을 통과시킨다(방어).
+승격 TCP flow 에서 온 INVITE 의 CANCEL 이 "주소 변경" 으로 401 을 받던 것이 이 규칙으로 사라진다
+([registration_binding_set.md](registration_binding_set.md) §4.1b).
+
 ### 3.3 관측
 
 - 로그: `channel policy violation user=<id> transport=<t> src=<ip>:<port>` — 기존 바인딩

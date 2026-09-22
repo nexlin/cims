@@ -24,5 +24,6 @@
 #include <pjsua2/presence.hpp>
 #include <pjsua2/media.hpp>
 #include <pjsua2/json.hpp>
+#include <pjsua2/cims_cfg.hpp>
 
 #endif

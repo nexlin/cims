@@ -522,6 +522,17 @@ void CSipStack::CheckSipMessage( CSipMessage * pclsMessage )
 			}
 		}
 
+		// 응용이 지정한 Contact transport 가 우선한다 (CSipMessage::m_iContactTransport ≥ 0) —
+		//   UDP 등록 단말이 승격 TCP flow 로 보낸 INVITE 의 응답에 "받은 transport" 대신 등록 바인딩의
+		//   transport 를 광고해, 단말의 후속 in-dialog 요청이 일회성 승격 flow 가 아니라 등록 flow 로 오게 한다
+		//   (registration_binding_set.md §3, leg_liveness.md §6.3 의 대칭). 송신 transport 와 다르면 자기 주소는
+		//   수신 listener 와 같은 bind ip 의 그 transport listener 로 잡는다(없으면 primary 폴백).
+		const ESipTransport eSendTransport = eTransport;
+		if( pclsMessage->m_iContactTransport >= E_SIP_UDP && pclsMessage->m_iContactTransport <= E_SIP_TLS )
+		{
+			eTransport = (ESipTransport)pclsMessage->m_iContactTransport;
+		}
+
 		CSipFrom clsContact;
 
 		clsContact.m_clsUri.m_strProtocol = SipGetProtocol( eTransport );
@@ -540,8 +551,26 @@ void CSipStack::CheckSipMessage( CSipMessage * pclsMessage )
 		//   응답이 그 listener 자기 주소로 박힘. 매칭 실패 또는 listener id 없으면 primary fallback.
 		std::string strBindIp;
 		int iBindPort = 0;
-		if( pclsMessage->m_iListenerId > 0 &&
-		    _GetListenerBind( pclsMessage->m_iListenerId, eTransport, strBindIp, iBindPort ) )
+		bool bBound = false;
+		if( pclsMessage->m_iListenerId > 0 )
+		{
+			if( eTransport == eSendTransport )
+			{
+				bBound = _GetListenerBind( pclsMessage->m_iListenerId, eTransport, strBindIp, iBindPort );
+			}
+			else
+			{
+				// 광고 transport ≠ 송신 transport: 수신 listener 의 bind ip 에서 광고 transport 의 listener 를 찾는다.
+				std::string strArrivalIp; int iArrivalPort = 0;
+				if( _GetListenerBind( pclsMessage->m_iListenerId, eSendTransport, strArrivalIp, iArrivalPort ) &&
+				    _FindListenerBindByIp( eTransport, strArrivalIp, iBindPort ) )
+				{
+					strBindIp = strArrivalIp;
+					bBound = true;
+				}
+			}
+		}
+		if( bBound )
 		{
 			clsContact.m_clsUri.m_strHost = ( strBindIp.empty() || strBindIp == "0.0.0.0" )
 			                                    ? m_clsSetup.m_strLocalIp

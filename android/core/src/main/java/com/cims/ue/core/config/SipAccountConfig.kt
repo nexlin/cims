@@ -51,6 +51,10 @@ data class SipAccountConfig(
      *  서버 접속서비스 media_srtp 와 같은 값(한 SoT, media_security.md §7.2). TLS 접속일 때만
      *  pjsua srtpUse 로 반영한다 — SDES 키가 SDP 에 실리므로 기밀 시그널링 채널 전제. */
     val mediaSecurity: String = "off",
+    /** UDP→TCP 자동 승격(RFC 3261 §18.1.1, 요청 ≥1300 B) 비활성(프로비저닝 `sip.udpNoTcpSwitch`). true 면 PTT 그룹콜
+     *  INVITE(≈2 KB)·SDS 도 등록 UDP flow 로 나가 승격 flow 가 생기지 않는다(IP 프래그먼트 의존 — 통제된 망 전용).
+     *  pjsip 전역(CimsPjCfg.setDisableTcpSwitch). sip_tls_signaling.md §3. */
+    val udpNoTcpSwitch: Boolean = false,
     val expiresSec: Int = 3600,         // 희망 등록 주기(서버는 200 OK 에서 3600 하드코딩으로 덮어씀)
     val countryCode: String = "",       // 홈 국가코드(digits, 예 "82") — 프로비저닝 수신, 번호 로컬 표기용(표시 전용)
     /** MCData C-plane SDS payload 상한(byte, 프로비저닝 수신) — 초과 시 MSRP 미디어평면 발신.

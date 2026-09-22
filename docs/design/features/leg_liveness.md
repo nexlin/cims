@@ -176,6 +176,7 @@ CSP 는 아무것도 보내지 않고 in-dialog re-INVITE(또는 향후 UPDATE) 
 
 | 규율 | 이유 |
 |---|---|
+| 단말 발신 다이얼로그의 **응답 Contact 도 등록 바인딩의 transport** 로 광고한다 — 승격 TCP 로 온 INVITE 의 18x/2xx 에 `;transport=tcp` 를 적지 않음(`SetContactTransport`, registration_binding_set.md §4.1b) | 단말의 BYE·PRACK 가 33초 뒤 죽는 승격 flow 를 다시 열지 않고 keepalive 로 유지되는 등록 flow 로 온다 — 아래 서버 발신 규율의 대칭 |
 | 서버 발신 in-dialog 요청은 **등록 바인딩(latch) 주소**로 보낸다 — 갱신 re-INVITE 뿐 아니라 BYE·NOTIFY·REFER·INFO 전부 | 다이얼로그가 기억한 주소는 요청 **수신 당시의 소스**다. 단말은 큰 INVITE(multipart mcptt-info+SDP, VoLTE 도 SDP 크기에 따라)를 TCP 로 승격해 보내는데, 그 연결은 단말 스택 유휴 타이머(pjsip 33초)로 곧 닫히고 NAT 뒤라 서버가 다시 열 수 없다 — 그 주소로 보내면 갱신은 단말이 규격대로 세션을 끊고(§10, `cause=408`), **상대 종료 BYE 는 유실돼 남은 단말이 통화 중으로 남는다**(만료 148초까지). psip 은 서버 발신 in-dialog 요청을 만드는 API 진입부(`StopCall`·`SendReInvite`/`CreateReInvite`·`HoldCall`/`ResumeCall`·`SendNotify`/`SendNotifyWithBody`·`SendDtmf`·`TransferCall*`)에서 `RefreshLegDest` 로, 세션 갱신 주기(`CheckSessionTimer`)에서는 배치로 `EventGetLegDest` 에 현재 도달 주소를 묻고, 응답이 있으면 다이얼로그의 목적지·transport 를 그 값으로 갱신한다(`SipUserAgentLegDest.hpp`). 확립된 다이얼로그만 대상이고, Record-Route 가 있는(프록시 경유) 다이얼로그는 손대지 않는다 |
 | SDP offer 는 직전과 **동일한 `o=` 세션 버전**으로 만든다 | RFC 4028 §7.4 의 "변경 없음" 표시. 현재 `CSipDialog::AddSdp()` 는 호출마다 `++m_iSessionVersion` 하므로 갱신 경로에서는 증가를 억제해야 한다 |
 | 갱신 2xx 에는 `Session-Expires` 를 **항상 echo** 한다 | 빠지면 상대가 타이머 해제로 해석한다(§7.2). psip 의 re-INVITE 자동 200 OK 생성 지점(`SipUserAgentInvite.hpp` `RecvInviteRequest`)이 싣는다 |

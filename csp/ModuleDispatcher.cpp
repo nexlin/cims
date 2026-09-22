@@ -678,6 +678,10 @@ bool CModuleDispatcher::EventIncomingRequestAuth( CSipMessage *pclsMessage ) {
     int iPort;
     CUserInfo clsUserInfo;
 
+    // CANCEL 은 챌린지하지 않는다(RFC 3261 §22.1 — 재제출이 불가능한 요청). psip 이 이 훅을 CANCEL 에 더는 부르지
+    //   않지만(같은 트랜잭션 매칭·481 은 RecvCancelRequest 가 한다) 다른 경로가 생겨도 규격이 지켜지도록 여기서도 막는다.
+    if ( pclsMessage->IsMethod( SIP_METHOD_CANCEL ) ) return true;
+
     if ( pclsMessage->GetTopViaIpPort( strIp, iPort ) == false ) {
         CLog::Print( LOG_ERROR, "EventIncomingRequestAuth - GetTopViaIpPort error" );
         SendResponse( pclsMessage, SIP_BAD_REQUEST );
@@ -771,6 +775,28 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     std::string strBRouteName;  // B-leg 이 피어(RoutingPolicy 가 고른 Route)면 그 Route 이름 — RemoteNode
                                 // transcode_codecs(cmp.md §11.2)
     std::string strTo;
+
+    // 응답 Contact 의 transport = 발신자의 **등록 바인딩** transport (registration_binding_set.md §3,
+    //   leg_liveness.md §6.3 서버 발신 방향의 대칭). UDP 등록 단말이 RFC 3261 §18.1.1 로 TCP 승격해 보낸 INVITE 는
+    //   일회성 flow 로 오고 pjsip 은 ACK 뒤 33초에 그 연결을 닫는다. psip 기본은 "받은 transport 로 Contact 를 적는다"라
+    //   단말의 BYE/PRACK 가 죽은 종류의 경로(TCP)를 새로 열어 왔고, 그 flow 는 바인딩과 달라 401 재챌린지를 받았다.
+    //   도착 flow 가 등록 바인딩이 아니고 transport 도 다르면 살아 있는 바인딩의 transport 를 광고한다 — 그러면 후속
+    //   in-dialog 요청이 keepalive 로 유지되는 등록 flow 로 온다. TCP/TLS 등록 단말(도착 flow = 바인딩)은 변화 없음.
+    if ( pclsMessage && pszFrom && *pszFrom ) {
+        std::string strViaIp;
+        int iViaPort = 0;
+        if ( gclsUserMap.Select( pszFrom, clsUserInfo ) && pclsMessage->GetTopViaIpPort( strViaIp, iViaPort ) ) {
+            const bool bSameFlow = clsUserInfo.m_eTransport == pclsMessage->m_eTransport &&
+                                   clsUserInfo.m_iPort == iViaPort && clsUserInfo.m_strIp == strViaIp;
+            if ( !bSameFlow && clsUserInfo.m_eTransport != pclsMessage->m_eTransport ) {
+                gclsUserAgent.SetContactTransport( pszCallId, clsUserInfo.m_eTransport );
+                CLog::Print( LOG_DEBUG, "EventIncomingCall: Contact transport %s→%s — 도착 flow %s:%d(%s) ≠ 등록 바인딩 %s:%d",
+                             SipGetTransport( pclsMessage->m_eTransport ), SipGetTransport( clsUserInfo.m_eTransport ),
+                             strViaIp.c_str(), iViaPort, SipGetTransport( pclsMessage->m_eTransport ),
+                             clsUserInfo.m_strIp.c_str(), clsUserInfo.m_iPort );
+            }
+        }
+    }
 
     // 수신 INVITE 의 Replaces(RFC 3891) → TAS — 관제 BLF 당겨받기·표준 attended 완결. 헤더가 있으면
     //   대상 다이얼로그를 pszCallId 로 교체하고 여기서 종결한다(정상 라우팅 미진입).

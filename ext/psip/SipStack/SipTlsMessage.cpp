@@ -57,7 +57,8 @@ bool SipTlsSend( Socket hSocket, SSL * psttSsl, const char * pszIp, int iPort, C
 				bVia = pclsMessage->SetTopViaIpPort( strTcpIp.c_str(), iTcpPort, E_SIP_TLS );
 			}
 
-			bContact = pclsMessage->SetTopContactIpPort( strTcpIp.c_str(), iTcpPort, E_SIP_TLS );
+			if( pclsMessage->m_iContactTransport < 0 || pclsMessage->m_iContactTransport == E_SIP_TLS )
+				bContact = pclsMessage->SetTopContactIpPort( strTcpIp.c_str(), iTcpPort, E_SIP_TLS );
 
 			if( bVia || bContact )
 			{

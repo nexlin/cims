@@ -142,6 +142,9 @@ public:
 	 *  주로 MCPTT 그룹콜에서 mcptt realm 강제 용도.
 	 *  @returns Dialog 존재 시 true, 없으면 false */
 	bool SetCallDomain( const char * pszCallId, const char * pszDomain );
+	/** 다이얼로그가 응답·in-dialog 요청의 Contact 에 광고할 transport — 응용이 EventIncomingCall 에서 발신자의
+	 *  등록 바인딩 transport 를 넣는다(승격 TCP flow 에 다이얼로그를 묶지 않기 위해). */
+	bool SetContactTransport( const char * pszCallId, ESipTransport eTransport );
 
 	// SipUserAgentSessionTimer.hpp : 세션 타이머 (RFC 4028)
 	void SetSessionTimer( bool bEnable, int iSessionExpires, int iMinSE, int iRefresher );

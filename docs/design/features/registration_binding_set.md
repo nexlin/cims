@@ -152,6 +152,21 @@ ping(CRLF 2개)에는 규격대로 pong(CRLF 1개)으로 답한다.
 매핑이 매시간 새 포트로 옮겨 가는 것이 실측됐다. 위의 서버 판정·수명 상한·STUN 은 그래도 매핑이 죽는 경우
 (공유기 재부팅·테이블 축출·Wi-Fi 순단)를 위한 두 번째 층이다.
 
+### 4.1b 승격 TCP flow 는 일회성이다 — 응답 Contact 와 CANCEL
+
+UDP 등록 단말이 RFC 3261 §18.1.1 로 TCP 승격해 보낸 INVITE 는 **바인딩이 아니다**(§3 `SetIpPort` 는 그 transport 의
+기존 바인딩만 옮기므로 생기지도 않는다). pjsip 은 ACK 뒤 33초(`PJSIP_TRANSPORT_IDLE_TIME`)에 그 연결을 닫는다. 그래서
+다이얼로그를 그 flow 에 묶으면 안 된다 — 양방향 모두.
+
+| 방향 | 규칙 | 구현 |
+|---|---|---|
+| 서버 → 단말 in-dialog 요청 | 등록 바인딩으로 보낸다 ([leg_liveness.md](leg_liveness.md) §6.3) | `RefreshLegDest`/`EventGetLegDest` |
+| 단말 → 서버 in-dialog 요청 | 서버가 광고하는 **응답 Contact 의 transport = 발신자의 등록 바인딩 transport**. 도착 flow 가 등록 바인딩이 아니고 transport 도 다르면(승격) `Select` 가 고른 살아있는 바인딩의 transport 를 적는다. 그러면 단말의 BYE·PRACK·소형 re-INVITE 가 등록 flow 로 오고 Via 가 바인딩과 일치해 재챌린지·TCP 재연결이 없다 | `CModuleDispatcher::EventIncomingCall` → `CSipUserAgent::SetContactTransport` → `CSipDialog::m_iContactTransport` → 응답(`CreateResponse` 계승)·in-dialog 요청(`CreateMessage`) 의 `CSipMessage::m_iContactTransport` → `CSipStack::Send` Contact 생성(같은 bind ip 의 그 transport listener) · TCP/TLS 송신 시 소켓 주소 덮어쓰기 생략 |
+| CANCEL | **챌린지하지 않는다**(RFC 3261 §22.1 MUST NOT — 재제출 불가). 취소 대상 INVITE 와 같은 트랜잭션(최상위 Via sent-by+branch)일 때만 200 + 487, 아니면 481(§9.2) | psip `RecvCancelRequest` — 인증 훅 미호출. CSP `EventIncomingRequestAuth` 도 CANCEL 통과(방어) |
+
+TCP/TLS 등록 단말은 도착 flow = 등록 바인딩이라 이 규칙에 걸리지 않는다. 단말 쪽 스위치(승격 자체를 끄는 `sip.udpNoTcpSwitch`)는
+[sip_tls_signaling.md](sip_tls_signaling.md) §3.2a — 규격 이탈이라 기본 off, 서버 규칙은 그것과 무관하게 항상 적용된다.
+
 ### 4.2 죽은 바인딩을 통지에 실으면 안 되는 이유
 
 RFC 3680 의 contact state 는 `active`(등록 유효) / `terminated`(등록 종료) 뿐이고 **"flow 가
@@ -196,7 +211,7 @@ reg-event NOTIFY 를 contact 목록으로 확장하는 것([§5](#5-reg-eventrfc
 |---|---|---|
 | 1 | UDP 등록 후 같은 계정 TLS 등록 | 바인딩 2개, 발신은 최근(TLS) |
 | 2 | TLS 연결을 강제 종료 | 그 바인딩이 생존 판정에서 탈락, 발신이 UDP 로 폴백 |
-| 3 | 대형 INVITE 로 TCP 승격 유발 | 승격 flow 가 별개 바인딩으로 들어오고 **등록 flow 를 덮지 않음** |
+| 3 | 대형 INVITE 로 TCP 승격 유발 | 승격 flow 가 바인딩을 만들지 않고 **등록 flow 를 덮지 않음**. 응답 Contact 는 등록 바인딩 transport(UDP) — 단말 BYE 가 등록 flow 로 옴(§4.1b, `tests/psip_contact_transport_test.cpp`) |
 | 4 | 모든 바인딩 만료 | 등록 해제 통지 1회 |
 | 5 | 실기기 회귀 (그룹콜·NOTIFY·세션 갱신) | 오늘과 동일 동작 |
 | 6 | UDP 등록 후 keepalive 중단 | 임계 경과 뒤 그 바인딩이 선택에서 빠짐 — 1:1 문자는 480, 바인딩은 유지 |
