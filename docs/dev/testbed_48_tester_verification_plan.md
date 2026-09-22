@@ -63,6 +63,9 @@ TRUNK-PBX-REGISTER(동봉본)는 고정 IP 풀 `pbx_hq` 를 참조해 tb48 에�
 
 1. **회귀 스크립트** `scripts/tester-regress.sh`(신규): 시나리오 목록 파일을 읽어 `cims-tester --url --token run <id> --topology tb48 --json` 을 순차 실행(run 당 timeout 240 s, 풀 교체 시간 포함), 결과를 `id | verdict | run_id | 요약` 표(md)로. 워커 풀 교체가 겹치지 않게 **순차만**. 실패는 계속 진행(fail-fast 아님).
 2. **creds 보강**(`cims-tester creds-from-db`, DataDir `scenarios/creds/`): ptt.jsonl 에 g001 밖 신원 추가(청취자·비멤버 후보 — `--ptt-group` 없이 뽑아 `group` 비움 또는 다른 그룹), inband/real_ue 용 volte 신원 구간(offset 겹침 금지), g004 멤버(항목 5 뒤).
+   **적용(2026-09-22)**: `ptt.jsonl` = 그룹 없는 +82500000023~025 **앞에** + g001 8명(11줄, 백업 `creds/bak-20260922/`) · `ptt_video.jsonl` = g004 5명(`--ptt-group g004`).
+   순서가 중요하다 — 단일 역할은 창의 **끝** 신원을 먼저 쓰므로(`role_identity_lists` reversed) 그룹 없는 신원이 뒤에 있으면 PTT-AFFILIATION-CHURN 의 `member` 가
+   그 신원으로 PUBLISH 를 보내 무응답(timeout waiting pubresp) fail. 계측기 과제: 그룹이 필요한 단계의 역할은 `ptt_group` 없는 신원을 건너뛰어야 한다.
 3. **tb48 v3 토폴로지**: D 표의 풀 8개 + `hosts.h48.ssh`(키 배치 뒤) 를 소스 관리본에 넣고 `PUT /tester/topologies/2` → `compile-check` 66종 전부 ok 확인(REGISTER 동봉본 1건은 예상 fail). `docs/dev/testbed_48_tester_topology.yaml` 은 소스 동봉본과 같은 내용이므로 **동봉본만 남기고 삭제**(중복 정본 방지).
 4. **대상 측 설정**(dep34 overlay·collection, runbook 절차): TLS 피어 `remote_nodes.tls_verify` 는 시드가 넣는다 — CSP 가 워커 피어 인증서를 검증하려면 사이트 CA 가 `tls_ca_path` 에 있어야 하므로 워커 피어 인증서는 **같은 사이트 CA 로 발급**(`service-cert.sh`). CMP RTP 대역은 §5 결정 2(20000~29999) 대로 overlay.
 5. **비밀 등록**: dep35 배포 설정 `Tester.Secrets` 에 `PBX_HA1`(CSP routes `tb48-r-pbx_reg.auth_ha1` 과 같은 값)·`TESTER_DB_USER/PASS`·`TESTER_SSH_KEY`(PEM 본문) 를 `PUT /deployments/35/config` 로 등록 → restart(또는 SIGUSR1). 환경변수는 폴백일 뿐 agent 재기동에 의존하지 않는다.
@@ -78,7 +81,7 @@ TRUNK-PBX-REGISTER(동봉본)는 고정 IP 풀 `pbx_hq` 를 참조해 tb48 에�
 | 1-2 피어 | A 재실측(PBX·MGCF·IBCF 8종) + TRUNK-IBCF-OUTBOUND·INBOUND·ACL-DENY·MGCF-OUTBOUND·INBOUND·EARLY-MEDIA·PBX-INBOUND·DTMF·HOLD-RESUME·TRANSFER | `q850_rx_pct`·`codes.503`·`early_rtp_pct`·`prack` 이 §12 재실측 지표 |
 | 1-3 PTT·MCData | PTT-GROUP-CALL-BASIC·FLOOR-HANDOVER·AFFILIATION-CHURN · MCDATA-SDS-1TO1·GROUP·GROUP-MEDIA·FD-GROUP·FD-1TO1 | GROUP-MEDIA 는 dep34 `Setup.McDataMedia.Enable` 확인 |
 | 1-4 대표번호 | VOLTE-FA-PARALLEL·OVERFLOW·SEQUENTIAL·DIALOG-FORK·PICKUP | 전화 그룹 픽스처 필요 → 3단계 verify 다리로 돌리는 편이 정확(픽스처 자동·복원). 단독은 수동 시드 |
-| 1-5 청취·비멤버 | PTT-GROUP-LISTEN·LISTEN-DENIED·LISTEN-ROSTER·LISTEN-CONF-DENIED·NONMEMBER-DENIED | 0-2 의 g001 밖 신원 + `ptt_listen` 역할 배정(CSC roles API) |
+| 1-5 청취·비멤버 | PTT-GROUP-LISTEN·LISTEN-DENIED·LISTEN-ROSTER·LISTEN-CONF-DENIED·NONMEMBER-DENIED | 0-2 의 g001 밖 신원 + `ptt_listen` 역할 배정(CSC roles API). **2026-09-22 전부 pass(2회)** — ROSTER 는 `--bind visibility=visible --bind roster=conference_roster_visible` / `hidden`·`conference_roster_hidden` 두 번 |
 
 ### 2단계 — 확장 시나리오 (하루)
 
@@ -90,7 +93,12 @@ D 표 9종. 실패 예상 지점을 미리 적어 둔다.
 - NAT: 워커 setcap·netns 는 호스트 권한 작업 — 운영자 실행.
 - REAL-UE: 실스택 `real_*` 지표(MOS 포함). dev 에서 pass 했으니 환경 문제 위주.
 - SOAK-LEAK: 30 분 돌려 `rss_growth_mb/fd_growth` — 4단계 소크와 합쳐도 된다.
-- PTT VIDEO: g004 멤버 뒤. 규격상 `video_enabled` 그룹만 100 %.
+- PTT VIDEO: g004 멤버 뒤. 규격상 `video_enabled` 그룹만 100 %. **2026-09-22 pass(video_pct 100·fan-out 239 ms·recording_created 1)** — 실행 방법 = tb48 `pools.ptt_ue.source.creds` 를
+  `creds/ptt_video.jsonl` 로 바꿔(`PUT /tester/topologies/2`, body = doc 자체) 돌리고 되돌린다. 그룹 세션은 `usable_groups` 정렬 첫 그룹(g001)을 잡으므로 같은 creds 에 g004 를
+  섞어도 영상 그룹이 선택되지 않는다 — 계측기 과제: `group_call.media.video` 면 video 그룹 우선(또는 `group` 핀 + 그 그룹 멤버로 역할 창 한정).
+- PTT 기본·floor·affiliation(PTT-GROUP-CALL-BASIC·FLOOR-HANDOVER·AFFILIATION-CHURN): **2026-09-22 pass(2회)**. 실측 grant 0.8~7 ms·fan-out 239~250 ms.
+- 4419 dev OAM 의 `recordings` 500(`[Errno 2]`) = `cims.sh pkg` sync 가 프로세스 cwd(`build/dist/oam/src`)를 지워 `os.path.relpath`→`getcwd` 실패 — `cims.sh tb restart oam`
+  으로 해소(스크립트가 "기동 실패" 라고 찍어도 4419 는 정상 기동 — 준비 확인 시한 오탐). `target_evidence recording_created` 는 그 뒤 판정된다.
 
 ### 3단계 — cims-verify 계측기 게이트 모드 (반나절)
 
