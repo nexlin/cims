@@ -189,6 +189,9 @@ public:
     enum EAnswerMode { E_ANSWER_AUTO = 0, E_ANSWER_DEFERRED = 1 };
     void SetAnswerMode(EAnswerMode e) { m_eAnswerMode = e; }
     EAnswerMode m_eAnswerMode = E_ANSWER_AUTO;
+    /** 착신 INVITE 를 18x 없이 이 코드로 즉시 거절(0 = 끔) — 계측기 `unreachable` 단계(CFNRc 시험, TS 24.604): 망이
+     *  도달 불가로 판정하는 단말은 링잉을 내지 못하므로 480 을 링잉 없이 낸다. 통화 상태·관측자 이벤트를 건드리지 않는다 */
+    int m_iAutoRejectCode = 0;
     /** deferred 모드 — 보관한 착신 오퍼에 200 OK / 오류 응답. 대기 착신이 없으면 false. */
     bool AnswerCall();
     bool RejectCall(int iSipCode);

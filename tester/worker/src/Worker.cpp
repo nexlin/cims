@@ -820,7 +820,7 @@ HttpResponse Worker::poolDelete(const std::string& name) {
     return jsonResp(200, j);
 }
 
-static const char* kSupported[] = { "register", "deregister", "invite", "answer", "reject", "no_answer", "bye",
+static const char* kSupported[] = { "register", "deregister", "invite", "answer", "reject", "no_answer", "unreachable", "bye",
                                     "media_hold", "wait", "expect", "progress", "hold", "resume", "dtmf", "refer",
                                     "media_send", "media_stop", "group_call", "floor_request", "floor_release",
                                     "pickup", "subscribe", "replaces", "join", "publish", "sds_send", "sds_recv", "fd_send", "fd_recv", "check" };
@@ -3157,6 +3157,19 @@ void Worker::execStep(Instance& in, long long now) {
             in.deadlineMs = now + std::max(st.afterMs, 0) + m_cfg.inviteTimeoutMs;
             return;
         }
+        if (st.step == "unreachable") {
+            // 도달 불가 착신(TS 24.604 CFNRc) — 가상 단말이 이후 착신 INVITE 를 18x 없이 payload 코드(기본 480)로 즉시 거절한다.
+            //   망이 링잉 없는 480/408 을 도달 불가로 판정해 forward_not_reachable_id 로 전환(§6A.4). 실스택(real-ue)은 지원하지 않는다.
+            for (const std::string& r : st.who) {
+                Endpoint* ep = in.actors[r];
+                if (!ep) continue;
+                if (!ep->isSim()) { finishInstance(in, true, "unreachable: sim ue only", now); break; }
+                ep->s->m_iAutoRejectCode = st.payload.size() ? atoi(st.payload.c_str()) : 480;
+            }
+            if (in.phase == Instance::DONE) continue;
+            in.stepIdx++;
+            continue;
+        }
         if (st.step == "no_answer") {
             // 응답하지 않는 착신(링잉만) — 망이 이 leg 를 CANCEL 하는 것이 정상(무응답 착신전환 CFNR — TS 24.604 §6A.4, 대표번호 무응답). 착신이
             //   이미 왔으면 지금, 아니면 도착 때(INCOMING) cancelExpected 를 붙인다 → 487 은 ringing_leg_cancelled 로 센다
@@ -3310,6 +3323,7 @@ void Worker::releaseEndpoint(Endpoint* ep) {
     ep->inConsult = false;
     ep->cancelExpected = false;
     ep->noAnswer = false;
+    if (ep->isSim() && ep->s) ep->s->m_iAutoRejectCode = 0;   // unreachable 단계의 즉시 거절 해제
     ep->joined = false;
     ep->floor = Endpoint::F_IDLE;
     ep->tReleasedMs = nowMs();

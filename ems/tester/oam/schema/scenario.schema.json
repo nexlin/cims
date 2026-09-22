@@ -429,7 +429,7 @@
             }
           ],
           "default": null,
-          "description": "CFNR — 이 회선이 no_reply_sec 안에 응답하지 않으면(또는 480/408) 그 역할로 전환(forward_no_reply_id)",
+          "description": "CFNR — 이 회선이 링잉 뒤 no_reply_sec 안에 응답하지 않으면(링잉 뒤 480/408 포함) 그 역할로 전환(forward_no_reply_id)",
           "title": "Forward No Reply To"
         },
         "forward_not_logged_in_to": {
@@ -445,6 +445,20 @@
           "default": null,
           "description": "CFNL — 이 회선이 미등록이면 그 역할로 전환(forward_not_logged_in_id)",
           "title": "Forward Not Logged In To"
+        },
+        "forward_not_reachable_to": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CFNRc — 이 회선이 도달 불가(Q.850 20 · 링잉 없이 480/408)면 그 역할로 전환(forward_not_reachable_id)",
+          "title": "Forward Not Reachable To"
         },
         "forward_to": {
           "anyOf": [
@@ -899,6 +913,7 @@
             "answer",
             "reject",
             "no_answer",
+            "unreachable",
             "bye",
             "hold",
             "resume",

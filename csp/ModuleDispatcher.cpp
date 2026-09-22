@@ -1601,6 +1601,11 @@ void CModuleDispatcher::EventCallRing( const char *pszCallId, int iSipStatus, CS
     if ( m_clsTas.IsEnabled() && m_clsTas.OnCallRing( pszCallId, iSipStatus, pclsRtp ) ) return;
 
     if ( gclsCallMap.Select( pszCallId, clsCallInfo ) ) {
+        // B-leg 가 울렸다 — 이 뒤의 480/408 은 CFNR(무응답), 울리기 전이면 CFNRc(도달 불가) (§6A.4)
+        if ( !clsCallInfo.m_bRecv && !clsCallInfo.m_bRang ) {
+            gclsCallMap.SetRang( pszCallId );
+            clsCallInfo.m_bRang = true;
+        }
         // CFNR 무응답 시한(volte_supplementary_services.md §6A.4) — 가입자 B-leg 의 첫 18x 에 착신 가입자
         // forward_no_reply_id 가
         //   있으면 시한을 잡는다(가입자 forward_no_reply_sec, 0 이면 Setup.Sip.Cdiv.NoReplySec). 만료는 Tick 이 CANCEL
@@ -1808,7 +1813,9 @@ bool CModuleDispatcher::TryDivertLeg( const char *pszCallId, const CCallInfo &cl
     CspUser clsUser;
     if ( !gclsCspUserMap.Select( strCallee.c_str(), clsUser ) ) return false;
 
-    // 조건 → 대상·cause (RFC 4458): 통화중 486/600·Q.850 17 → CFB(486), 무응답 시한·480/408 → CFNR(408)
+    // 조건 → 대상·cause (RFC 4458, TS 24.604): 통화중 486/600·Q.850 17 → CFB(486) / 링잉 뒤 무응답 시한·480/408 →
+    // CFNR(408) / Q.850 20(subscriber absent)·링잉 없이 480/408(무선 이탈·NAT 바인딩 소실 = 망이 도달 불가로 판정) →
+    // CFNRc(503). 서비스가 별개이므로 서로 폴백하지 않는다(콘솔은 번호 하나에 조건을 다중 선택해 같은 번호를 쓴다).
     std::string strRaw;
     int iCause = 0;
     const char *pszKind = "";
@@ -1822,7 +1829,11 @@ bool CModuleDispatcher::TryDivertLeg( const char *pszCallId, const CCallInfo &cl
             strRaw = clsUser.m_strForwardBusy;
             iCause = CspDiversion::CAUSE_BUSY;
             pszKind = "CFB";
-        } else if ( eSit == ANN_SIT_NO_ANSWER || eSit == ANN_SIT_UNREACHABLE ) {
+        } else if ( eSit == ANN_SIT_UNREACHABLE || ( eSit == ANN_SIT_NO_ANSWER && !clsB.m_bRang ) ) {
+            strRaw = clsUser.m_strForwardNotReachable;
+            iCause = CspDiversion::CAUSE_NOT_REACHABLE;
+            pszKind = "CFNRc";
+        } else if ( eSit == ANN_SIT_NO_ANSWER ) {
             strRaw = clsUser.m_strForwardNoReply;
             iCause = CspDiversion::CAUSE_NO_ANSWER;
             pszKind = "CFNR";

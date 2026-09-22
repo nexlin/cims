@@ -181,6 +181,7 @@
             "answer",
             "reject",
             "no_answer",
+            "unreachable",
             "bye",
             "hold",
             "resume",

@@ -123,6 +123,8 @@ bool CspUserMap::_loadUserFromFile( std::string strUserId, CspUser &clsUser ) {
         clsUser.m_iForwardNoReplySec = (int)jsonUser.GetInt( "forward_no_reply_sec" );
     if ( jsonUser.Has( "forward_not_logged_in_id" ) )
         clsUser.m_strForwardNotLoggedIn = jsonUser.GetString( "forward_not_logged_in_id" );
+    if ( jsonUser.Has( "forward_not_reachable_id" ) )
+        clsUser.m_strForwardNotReachable = jsonUser.GetString( "forward_not_reachable_id" );
 
     if ( jsonUser.Has( "reject_id" ) ) {
         SimpleJson::JsonNode rejectNode = jsonUser.Get( "reject_id" );

@@ -121,9 +121,14 @@ function forwardSummary(s: Subscription): string {
   if (s.forward_busy_id) p.push(`통화중→${s.forward_busy_id.slice(-4)}`)
   if (s.forward_no_reply_id) p.push(`무응답→${s.forward_no_reply_id.slice(-4)}${s.forward_no_reply_sec ? ` ${s.forward_no_reply_sec}s` : ''}`)
   if (s.forward_not_logged_in_id) p.push(`미등록→${s.forward_not_logged_in_id.slice(-4)}`)
+  if (s.forward_not_reachable_id) p.push(`도달불가→${s.forward_not_reachable_id.slice(-4)}`)
   return p.join(' · ')
 }
-const hasForward = (s: Subscription) => !!(s.forward_id || s.forward_busy_id || s.forward_no_reply_id || s.forward_not_logged_in_id)
+const hasForward = (s: Subscription) => !!(s.forward_id || s.forward_busy_id || s.forward_no_reply_id || s.forward_not_logged_in_id || s.forward_not_reachable_id)
+// 조건부 전환 컬럼 키 — 판정 컬럼은 마지막에 더해진 forward_not_reachable_id(CSC 와 같은 규칙: 부분 적용 DB 는 미적용)
+const COND_KEYS = ['forward_busy_id', 'forward_no_reply_id', 'forward_not_logged_in_id', 'forward_not_reachable_id'] as const
+type CondKey = typeof COND_KEYS[number]
+const COND_LABEL: Record<CondKey, string> = { forward_busy_id: '통화중 (CFB)', forward_no_reply_id: '무응답 (CFNR)', forward_not_logged_in_id: '미등록 (CFNL)', forward_not_reachable_id: '도달불가 (CFNRc)' }
 
 // PTT 그룹 멤버십 — 멤버 user_id 는 PTT 회선 번호(MSISDN), mcptt_id 는 tel:URI 파생
 function pttGroupsOf(groups: Group[], msisdn: string): Group[] {
@@ -565,8 +570,16 @@ function KV({ rows }: { rows: Array<[string, React.ReactNode]> }) {
 type LineRow = { svc: LineSvc; sub: Subscription }
 interface EditLine {
   service_ref: string; imsi: string; passwd: string; sip_transport: SipTransport | ''; auth_scheme: AuthScheme; k: string; opc: string
-  dnd: boolean; forward_id: string; forward_busy_id: string; forward_no_reply_id: string; forward_no_reply_sec: string; forward_not_logged_in_id: string
+  dnd: boolean; forward_id: string; forward_busy_id: string; forward_no_reply_id: string; forward_no_reply_sec: string; forward_not_logged_in_id: string; forward_not_reachable_id: string
+  // 착신전환 서비스 폼 — 번호 하나 + 조건 선택(TS 22.082 `004` all-conditional 과 같은 표현). perCond = 조건별 번호 따로(규격이 허용하는 rule 별 target)
+  fwdNumber: string; fwdCfu: boolean; fwdCond: Record<CondKey, boolean>; perCond: boolean
   ringback_media: string
+}
+// 저장값 → 착신전환 서비스 폼. 비어 있지 않은 번호가 하나(또는 없음)면 '번호 하나 + 조건' 모드, 둘 이상이면 조건별 모드.
+function forwardFormOf(sub: Subscription): Pick<EditLine, 'fwdNumber' | 'fwdCfu' | 'fwdCond' | 'perCond'> {
+  const cond = Object.fromEntries(COND_KEYS.map(k => [k, !!(sub[k] || '').trim()])) as Record<CondKey, boolean>
+  const nums = new Set([sub.forward_id, ...COND_KEYS.map(k => sub[k])].map(v => (v || '').trim()).filter(Boolean))
+  return { fwdNumber: nums.size ? [...nums][0] : '', fwdCfu: !!(sub.forward_id || '').trim(), fwdCond: cond, perCond: nums.size > 1 }
 }
 const PRIV_LABEL: Record<McpttProfile['private_emergency_mode'], string> = { LocallyDetermined: '허용 — 단말이 고른 상대', UsePreConfigured: '허용 — 사전 지정 수신자' }
 
@@ -582,7 +595,7 @@ function LineCard({ user, row, catalog, pttGroups, phoneGroups, canWrite, highli
   const memberGroups = svc === 'ptt' ? pttGroupsOf(pttGroups, sub.id) : []
   const phoneGroup = svc === 'voip' ? phoneGroupOf(phoneGroups, sub.id) : undefined
   // 선택 컬럼(마이그레이션 의존) — 응답에 키가 없으면 그 DB 에 컬럼이 없다(보내면 400 schema_not_migrated)
-  const hasCdiv = sub.forward_busy_id !== undefined
+  const hasCdiv = sub.forward_not_reachable_id !== undefined
   const hasRingback = sub.ringback_media !== undefined
 
   // PTT 프로파일 — 카드가 열릴 때 읽는다(목록 API 에는 없다)
@@ -599,7 +612,8 @@ function LineCard({ user, row, catalog, pttGroups, phoneGroups, canWrite, highli
     if (!editing) { setForm(null); setPform(null); return }
     setForm({ service_ref: sub.service_ref || '', imsi: sub.imsi || '', passwd: '', sip_transport: sub.sip_transport || '', auth_scheme: sub.auth_scheme || 'digest', k: '', opc: '',
       dnd: !!sub.dnd, forward_id: sub.forward_id || '', forward_busy_id: sub.forward_busy_id || '', forward_no_reply_id: sub.forward_no_reply_id || '',
-      forward_no_reply_sec: sub.forward_no_reply_sec ? String(sub.forward_no_reply_sec) : '', forward_not_logged_in_id: sub.forward_not_logged_in_id || '', ringback_media: sub.ringback_media || '' })
+      forward_no_reply_sec: sub.forward_no_reply_sec ? String(sub.forward_no_reply_sec) : '', forward_not_logged_in_id: sub.forward_not_logged_in_id || '', forward_not_reachable_id: sub.forward_not_reachable_id || '',
+      ringback_media: sub.ringback_media || '', ...forwardFormOf(sub) })
     if (svc === 'ptt' && prof) setPform({ allow_emergency_call: prof.allow_emergency_call, allow_emergency_alert: prof.allow_emergency_alert, allow_adhoc_call: prof.allow_adhoc_call,
       emergency_group_mode: prof.emergency_group_mode, emergency_group_id: prof.emergency_group_id, allow_emergency_private_call: prof.allow_emergency_private_call,
       private_emergency_mode: prof.private_emergency_mode, emergency_private_recipient: prof.emergency_private_recipient })
@@ -620,13 +634,27 @@ function LineCard({ user, row, catalog, pttGroups, phoneGroups, canWrite, highli
     if ((sub.auth_scheme || 'digest') === 'aka' && (aka.fields.auth_scheme || 'digest') === 'digest' && !d.passwd) { show('AKA→Digest 전환 시 비밀번호를 함께 입력해야 합니다 (H(A1) 생성)', 'err'); return }
     if ((aka.fields.auth_scheme || 'digest') !== (sub.auth_scheme || 'digest') || aka.fields.k) Object.assign(d, aka.fields)
     if (spec.showDnd) {
-      const nums: Array<[keyof EditLine, string]> = [['forward_id', 'CFU'], ['forward_busy_id', 'CFB'], ['forward_no_reply_id', 'CFNR'], ['forward_not_logged_in_id', 'CFNL']]
-      for (const [key, label] of nums) { const v = (form[key] as string).trim(); if (v && !FORWARD_RE.test(v)) { show(`${label} 대상은 번호(숫자열, 선행 + 허용)여야 합니다`, 'err'); return } }
-      d.dnd = form.dnd; d.forward_id = form.forward_id.trim()
+      // 착신전환 서비스 — 번호 하나 모드: CFU 면 forward_id 만(조건부 컬럼은 비운다 — CFU 가 평가 순서상 앞이라 조건부는 의미가 없다),
+      //   아니면 고른 조건 컬럼에 같은 번호. 조건별 모드: 입력한 그대로.
+      let cols: Record<'forward_id' | CondKey, string>
+      if (form.perCond) {
+        cols = { forward_id: form.forward_id, forward_busy_id: form.forward_busy_id, forward_no_reply_id: form.forward_no_reply_id, forward_not_logged_in_id: form.forward_not_logged_in_id, forward_not_reachable_id: form.forward_not_reachable_id }
+      } else {
+        const n = form.fwdNumber.trim()
+        const anyCond = COND_KEYS.some(k => form.fwdCond[k])
+        if (n && !form.fwdCfu && !anyCond) { show('전환 조건을 하나 이상 고르세요 (무조건 또는 통화중·무응답·미등록·도달불가)', 'err'); return }
+        if (!n && (form.fwdCfu || anyCond)) { show('전환 번호를 입력하세요', 'err'); return }
+        cols = { forward_id: form.fwdCfu ? n : '', forward_busy_id: '', forward_no_reply_id: '', forward_not_logged_in_id: '', forward_not_reachable_id: '' }
+        if (!form.fwdCfu) for (const k of COND_KEYS) cols[k] = form.fwdCond[k] ? n : ''
+      }
+      const labels: Record<'forward_id' | CondKey, string> = { forward_id: '무조건 (CFU)', ...COND_LABEL }
+      for (const key of ['forward_id', ...COND_KEYS] as const) { const v = cols[key].trim(); if (v && !FORWARD_RE.test(v)) { show(`${labels[key]} 대상은 번호(숫자열, 선행 + 허용)여야 합니다`, 'err'); return } }
+      d.dnd = form.dnd; d.forward_id = cols.forward_id.trim()
       if (hasCdiv) {
         const sec = Number(form.forward_no_reply_sec || 0)
         if (!Number.isInteger(sec) || sec < 0 || sec > 120) { show('무응답 시한은 0~120초 (0 = 서버 기본)', 'err'); return }
-        d.forward_busy_id = form.forward_busy_id.trim(); d.forward_no_reply_id = form.forward_no_reply_id.trim(); d.forward_no_reply_sec = sec; d.forward_not_logged_in_id = form.forward_not_logged_in_id.trim()
+        for (const k of COND_KEYS) d[k] = cols[k].trim()
+        d.forward_no_reply_sec = sec
       }
       if (hasRingback) d.ringback_media = form.ringback_media.trim() || null
     }
@@ -732,19 +760,39 @@ function LineCard({ user, row, catalog, pttGroups, phoneGroups, canWrite, highli
 
           {spec.showDnd && (
             <>
-              <Section title="착신 처리" aside={<label className="flex items-center gap-2 text-sm"><Checkbox checked={form.dnd} onCheckedChange={c => setForm({ ...form, dnd: c === true })} /> DND (착신 거부)</label>}>
-                <div className="grid grid-cols-2 gap-2.5">
-                  <Field label="무조건 전환 (CFU)"><Input className="font-mono" placeholder="번호 · 비우면 없음" value={form.forward_id} onChange={e => setForm({ ...form, forward_id: e.target.value })} /></Field>
-                  {hasCdiv ? <>
-                    <Field label="통화중 전환 (CFB)"><Input className="font-mono" placeholder="번호" value={form.forward_busy_id} onChange={e => setForm({ ...form, forward_busy_id: e.target.value })} /></Field>
+              <Section title="착신전환 서비스" aside={hasCdiv ? <button type="button" className="text-xs text-primary hover:underline" onClick={() => setForm({ ...form, perCond: !form.perCond })}>{form.perCond ? '번호 하나로 묶기' : '조건별 번호 따로…'}</button> : undefined}>
+                {!form.perCond ? (
+                  <>
+                    <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-2.5">
+                      <Field label="전환 번호"><Input className="font-mono" placeholder="번호 · 비우면 전환 없음" value={form.fwdNumber} onChange={e => setForm({ ...form, fwdNumber: e.target.value })} /></Field>
+                      <Field label="무응답 시한 (s)" title="CFNR 무응답 시한 — 비우면 CSP 기본(Setup.Sip.Cdiv.NoReplySec)"><Input type="number" min={0} max={120} placeholder="기본" disabled={!hasCdiv || form.fwdCfu || !form.fwdCond.forward_no_reply_id} value={form.forward_no_reply_sec} onChange={e => setForm({ ...form, forward_no_reply_sec: e.target.value })} /></Field>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm">
+                      <label className="flex items-center gap-2 font-medium"><Checkbox checked={form.fwdCfu} onCheckedChange={c => setForm({ ...form, fwdCfu: c === true })} /> 무조건 (CFU)</label>
+                      <span className="text-muted-foreground">|</span>
+                      {COND_KEYS.map(k => (
+                        <label key={k} className={`flex items-center gap-2 ${form.fwdCfu || !hasCdiv ? 'opacity-50' : ''}`} title={!hasCdiv ? '조건부 전환은 DB 마이그레이션(migrate_subscription_cdiv.sql) 뒤에 열린다' : form.fwdCfu ? '무조건 전환이 우선이라 조건부는 평가되지 않는다' : undefined}>
+                          <Checkbox disabled={form.fwdCfu || !hasCdiv} checked={form.fwdCond[k]} onCheckedChange={c => setForm({ ...form, fwdCond: { ...form.fwdCond, [k]: c === true } })} /> {COND_LABEL[k]}
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <Field label="무조건 (CFU)"><Input className="font-mono" placeholder="번호 · 비우면 없음" value={form.forward_id} onChange={e => setForm({ ...form, forward_id: e.target.value })} /></Field>
+                    <Field label="통화중 (CFB)"><Input className="font-mono" placeholder="번호" value={form.forward_busy_id} onChange={e => setForm({ ...form, forward_busy_id: e.target.value })} /></Field>
                     <div className="grid grid-cols-[minmax(0,1fr)_84px] gap-2">
-                      <Field label="무응답 전환 (CFNR)"><Input className="font-mono" placeholder="번호" value={form.forward_no_reply_id} onChange={e => setForm({ ...form, forward_no_reply_id: e.target.value })} /></Field>
+                      <Field label="무응답 (CFNR)"><Input className="font-mono" placeholder="번호" value={form.forward_no_reply_id} onChange={e => setForm({ ...form, forward_no_reply_id: e.target.value })} /></Field>
                       <Field label="시한 (s)"><Input type="number" min={0} max={120} placeholder="기본" value={form.forward_no_reply_sec} onChange={e => setForm({ ...form, forward_no_reply_sec: e.target.value })} /></Field>
                     </div>
-                    <Field label="미등록 전환 (CFNL)"><Input className="font-mono" placeholder="번호" value={form.forward_not_logged_in_id} onChange={e => setForm({ ...form, forward_not_logged_in_id: e.target.value })} /></Field>
-                  </> : <div className="col-span-1 pt-4 text-xs text-muted-foreground">조건부 전환(CFB/CFNR/CFNL)은 DB 마이그레이션(migrate_subscription_cdiv.sql) 뒤에 열린다</div>}
-                </div>
-                <div className="text-xs text-muted-foreground">번호는 숫자열(선행 + 허용). 전환 대상은 등록 가입자만 — 피어·미등록 대상은 원 응답 코드로 끝난다. 전환 상한·기본 시한은 CSP 설정 [착신전환].</div>
+                    <Field label="미등록 (CFNL)"><Input className="font-mono" placeholder="번호" value={form.forward_not_logged_in_id} onChange={e => setForm({ ...form, forward_not_logged_in_id: e.target.value })} /></Field>
+                    <Field label="도달불가 (CFNRc)"><Input className="font-mono" placeholder="번호" value={form.forward_not_reachable_id} onChange={e => setForm({ ...form, forward_not_reachable_id: e.target.value })} /></Field>
+                  </div>
+                )}
+                <div className="text-xs text-muted-foreground">번호는 숫자열(선행 + 허용). 무조건(CFU)을 고르면 조건부는 평가되지 않으며 저장 시 비워진다. 조건부는 다중 선택 — 통화중 486 · 링잉 뒤 무응답(시한) · 미등록 · 도달불가(링잉 없는 480/408). 전환 대상은 등록 가입자만, 전환 상한·기본 시한은 CSP 설정 [착신전환].</div>
+              </Section>
+              <Section title="착신 거부">
+                <label className="flex items-center gap-2 text-sm"><Checkbox checked={form.dnd} onCheckedChange={c => setForm({ ...form, dnd: c === true })} /> DND — 모든 착신을 603 으로 거절 (착신전환보다 우선)</label>
               </Section>
               {hasRingback && (
                 <Section title="링백 (컬러링)">

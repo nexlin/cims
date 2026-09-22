@@ -338,6 +338,13 @@ void CCallMap::SetNoReplyDeadline( const char *pszCallId, time_t tDeadline ) {
     m_clsMutex.release();
 }
 
+void CCallMap::SetRang( const char *pszCallId ) {
+    m_clsMutex.acquire();
+    auto it = m_clsMap.find( pszCallId );
+    if ( it != m_clsMap.end() ) it->second.m_bRang = true;
+    m_clsMutex.release();
+}
+
 bool CCallMap::FindEstablishedLegFor( const std::string &strUser, std::string &strCallId, CCallInfo &clsInfo,
                                       int &iPeerIdx ) {
     if ( strUser.empty() ) return false;

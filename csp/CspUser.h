@@ -113,11 +113,12 @@ public:
 
     // 착신전환 (TS 24.604 CDIV — volte_supplementary_services.md §6A) — CFU / CFB / CFNR(+시한) / CFNL. 값 =
     // 번호(다이얼 플랜 번역 전)
-    std::string m_strForward;             // CFU  forward_id
-    std::string m_strForwardBusy;         // CFB  forward_busy_id (486/600·Q.850 17)
-    std::string m_strForwardNoReply;      // CFNR forward_no_reply_id (무응답 시한·480/408)
-    int m_iForwardNoReplySec = 0;         // CFNR 시한(초, 0 = Setup.Sip.Cdiv.NoReplySec)
-    std::string m_strForwardNotLoggedIn;  // CFNL forward_not_logged_in_id (INVITE 때 미등록)
+    std::string m_strForward;              // CFU  forward_id
+    std::string m_strForwardBusy;          // CFB  forward_busy_id (486/600·Q.850 17)
+    std::string m_strForwardNoReply;       // CFNR forward_no_reply_id (링잉 뒤 무응답 시한·480/408)
+    int m_iForwardNoReplySec = 0;          // CFNR 시한(초, 0 = Setup.Sip.Cdiv.NoReplySec)
+    std::string m_strForwardNotLoggedIn;   // CFNL forward_not_logged_in_id (INVITE 때 미등록)
+    std::string m_strForwardNotReachable;  // CFNRc forward_not_reachable_id (Q.850 20 · 링잉 없이 480/408)
 
     // 서비스 타입: "volte" | "ptt" | "both"
     std::string m_strServiceType;
@@ -154,7 +155,8 @@ public:
         return m_strForward.empty() == false;
     };
     bool hasConditionalForward() const {
-        return !m_strForwardBusy.empty() || !m_strForwardNoReply.empty() || !m_strForwardNotLoggedIn.empty();
+        return !m_strForwardBusy.empty() || !m_strForwardNoReply.empty() || !m_strForwardNotLoggedIn.empty() ||
+               !m_strForwardNotReachable.empty();
     }
     bool isReject( std::string strFromId ) {
         return std::find( m_vecReject.begin(), m_vecReject.end(), strFromId ) != m_vecReject.end();

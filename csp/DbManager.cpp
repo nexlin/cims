@@ -107,13 +107,15 @@ void CDbManager::ProbeSchema() {
     pRes = ExecuteSelect( "SHOW COLUMNS FROM volte_subscriptions LIKE 'pickup_group'" );
     m_bHasPickupColumn = pRes && mysql_num_rows( pRes ) > 0;
     if ( pRes ) mysql_free_result( pRes );
-    pRes = ExecuteSelect( "SHOW COLUMNS FROM volte_subscriptions LIKE 'forward_busy_id'" );
+    // 컬럼 5종은 한 마이그레이션이 만든다 — 마지막에 더해진 forward_not_reachable_id 로 판정(부분 적용 DB 는 미적용
+    // 취급)
+    pRes = ExecuteSelect( "SHOW COLUMNS FROM volte_subscriptions LIKE 'forward_not_reachable_id'" );
     m_bHasCdivColumns = pRes && mysql_num_rows( pRes ) > 0;
     if ( pRes ) mysql_free_result( pRes );
     if ( !m_bHasCdivColumns )
         CLog::Print( LOG_INFO,
-                     "[DB] subscriptions.forward_busy_id 없음 — 조건부 착신전환(CFB/CFNR/CFNL) 비활성 "
-                     "(migrate_subscription_cdiv.sql)" );
+                     "[DB] subscriptions.forward_not_reachable_id 없음 — 조건부 착신전환(CFB/CFNR/CFNL/CFNRc) 비활성 "
+                     "(migrate_subscription_cdiv.sql 재실행)" );
     pRes = ExecuteSelect( "SHOW COLUMNS FROM volte_subscriptions LIKE 'ringback_media'" );
     m_bHasRingbackColumn = pRes && mysql_num_rows( pRes ) > 0;
     if ( !m_bHasRingbackColumn )
@@ -176,16 +178,18 @@ std::string CDbManager::PickupGroupCol( const char *pszAlias ) const {
     return std::string( "COALESCE(" ) + pszAlias + ".pickup_group,'')";
 }
 
-std::string CDbManager::RingbackCol( const char *pszAlias ) const {
-    if ( !m_bHasRingbackColumn ) return "''";
+// 링백·조건부 전환 컬럼은 전화 가족(volte·voip) 테이블에만 있다(마이그레이션 범위) — ptt 테이블은 리터럴로 채운다
+std::string CDbManager::RingbackCol( const char *pszAlias, bool bPhone ) const {
+    if ( !m_bHasRingbackColumn || !bPhone ) return "''";
     return std::string( "COALESCE(" ) + pszAlias + ".ringback_media,'')";
 }
 
-std::string CDbManager::CdivCols( const char *pszAlias ) const {
-    if ( !m_bHasCdivColumns ) return "'', '', 0, ''";
+std::string CDbManager::CdivCols( const char *pszAlias, bool bPhone ) const {
+    if ( !m_bHasCdivColumns || !bPhone ) return "'', '', 0, '', ''";
     const std::string a = pszAlias;
     return "COALESCE(" + a + ".forward_busy_id,''), COALESCE(" + a + ".forward_no_reply_id,''), COALESCE(" + a +
-           ".forward_no_reply_sec,0), COALESCE(" + a + ".forward_not_logged_in_id,'')";
+           ".forward_no_reply_sec,0), COALESCE(" + a + ".forward_not_logged_in_id,''), COALESCE(" + a +
+           ".forward_not_reachable_id,'')";
 }
 
 std::vector<CDbManager::SubTable> CDbManager::SubTables() const {
@@ -362,8 +366,8 @@ bool CDbManager::SelectUser( const std::string &strUserId, CspUser &clsUser ) {
                                  "SELECT s.id, u.name, u.org_id, s.dnd, s.forward_id, u.id AS person_id, "
                                  "       COALESCE(s.service_ref,''), COALESCE(s.imsi,''), " ) +
                              Ha1Col( "s" ) + ", COALESCE(s.sip_transport,''), " + AuthSchemeCol( "s" ) + ", " +
-                             PickupGroupCol( "s" ) + ", " + RingbackCol( "s" ) + ", " + CdivCols( "s" ) + " FROM " +
-                             t.pszTable +
+                             PickupGroupCol( "s" ) + ", " + RingbackCol( "s", strcmp( t.pszType, "ptt" ) != 0 ) + ", " +
+                             CdivCols( "s", strcmp( t.pszType, "ptt" ) != 0 ) + " FROM " + t.pszTable +
                              " s JOIN users u ON s.user_id = u.id "
                              "WHERE s.id='" +
                              Escape( strUserId ) + "'";
@@ -400,6 +404,7 @@ bool CDbManager::SelectUser( const std::string &strUserId, CspUser &clsUser ) {
     clsUser.m_strForwardNoReply = row[14] ? row[14] : "";
     clsUser.m_iForwardNoReplySec = row[15] ? atoi( row[15] ) : 0;
     clsUser.m_strForwardNotLoggedIn = row[16] ? row[16] : "";
+    clsUser.m_strForwardNotReachable = row[17] ? row[17] : "";
     clsUser._loadTime = time( nullptr );
 
     mysql_free_result( pRes );
@@ -589,8 +594,9 @@ bool CDbManager::LoadAllUsers( CspUserMap &clsMap, bool *pbUnavailable ) {
                                  "       COALESCE(s.service_ref, ''), COALESCE(s.imsi, ''), "
                                  "       " ) +
                              Ha1Col( "s" ) + ", COALESCE(s.sip_transport, ''), " + AuthSchemeCol( "s" ) + ", " +
-                             PickupGroupCol( "s" ) + ", " + RingbackCol( "s" ) + ", " + CdivCols( "s" ) + " FROM " +
-                             t.pszTable + " s JOIN users u ON s.user_id = u.id";
+                             PickupGroupCol( "s" ) + ", " + RingbackCol( "s", strcmp( t.pszType, "ptt" ) != 0 ) + ", " +
+                             CdivCols( "s", strcmp( t.pszType, "ptt" ) != 0 ) + " FROM " + t.pszTable +
+                             " s JOIN users u ON s.user_id = u.id";
 
         MYSQL_RES *pRes = ExecuteSelect( strSql );
         if ( !pRes ) {
@@ -622,6 +628,7 @@ bool CDbManager::LoadAllUsers( CspUserMap &clsMap, bool *pbUnavailable ) {
             clsUser.m_strForwardNoReply = row[14] ? row[14] : "";
             clsUser.m_iForwardNoReplySec = row[15] ? atoi( row[15] ) : 0;
             clsUser.m_strForwardNotLoggedIn = row[16] ? row[16] : "";
+            clsUser.m_strForwardNotReachable = row[17] ? row[17] : "";
             clsUser._loadTime = time( nullptr );
             if ( !clsUser.m_strId.empty() ) {
                 clsMap.Insert( clsUser );

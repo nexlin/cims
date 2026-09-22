@@ -250,21 +250,22 @@ UE-A ◄── 180(같은 SDP) · 200 ◄────────── 180 · 2
 | 안내 | 프로파일 상황 `forwarded`(기본 `announce_then_tone` — 안내 1회 뒤 링백음을 응답까지) — [announcements.md §3.5](announcements.md) |
 | 검증 | 계측기 `VOLTE-ANN-FORWARDED`(subscriber 픽스처 `forward_to: <역할>`, 지표 `cdiv_181_pct`·`cdiv_hi_pct`·`early_media_pct`·`early_rtp_pct`) |
 
-### 6A.4 조건부 전환 — CFB · CFNR · CFNL
+### 6A.4 조건부 전환 — CFB · CFNR · CFNL · CFNRc
 
 | 서비스 | 가입 필드(`volte_subscriptions`/`voip_subscriptions`, `sql/migrate_subscription_cdiv.sql`) | 조건 | cause(RFC 4458) | 판정 지점 |
 |---|---|---|---|---|
 | CFU | `forward_id` | 무조건 | 302 | `ResolveDiversion`(INVITE) |
 | CFNL | `forward_not_logged_in_id` | INVITE 시점에 착신 가입자가 **미등록**(`isAlive` 아님, CFU 없을 때) | 404 | `ResolveDiversion`(INVITE) — CFU 와 같은 연쇄·상한·181·History-Info·안내 |
 | CFB | `forward_busy_id` | 가입자 B-leg 최종 486/600 또는 Reason Q.850 cause 17(`Classify` = busy) | 486 | `EventCallEnd` → `TryDivertLeg` |
-| CFNR | `forward_no_reply_id` (+ `forward_no_reply_sec`, 0 = `Setup.Sip.Cdiv.NoReplySec` 기본 20) | B-leg 첫 18x 뒤 시한 안에 응답 없음(`EventCallRing` 이 시한을 잡고 디스패처 `Tick` 이 CANCEL) · 단말 480/408(`Classify` = no_answer/unreachable) | 408 | `Tick` / `EventCallEnd` → `TryDivertLeg` |
+| CFNR | `forward_no_reply_id` (+ `forward_no_reply_sec`, 0 = `Setup.Sip.Cdiv.NoReplySec` 기본 20) | B-leg 첫 18x 뒤 시한 안에 응답 없음(`EventCallRing` 이 시한을 잡고 디스패처 `Tick` 이 CANCEL) · **링잉 뒤** 480/408(`Classify` = no_answer, `CCallInfo::m_bRang`) | 408 | `Tick` / `EventCallEnd` → `TryDivertLeg` |
+| CFNRc | `forward_not_reachable_id` | 망이 도달 불가로 판정 — Reason Q.850 cause 20(subscriber absent) 또는 **링잉 없이** 480/408(무선 이탈·NAT 바인딩 소실 단말은 18x 를 내지 못한다; psip 무응답 시간초과 408 포함). 서비스가 별개라 CFNR 로 폴백하지 않는다 | 503 | `EventCallEnd` → `TryDivertLeg` |
 
 - **재타게팅**(`CModuleDispatcher::TryDivertLeg`) = RouteSet 재라우팅(§2-4 `TryRerouteLeg`)과 같은 골격 — 실패/취소할 B-leg 의 오퍼·From 그대로 전환 대상에 새 INVITE, 같은 relay 세션·peer1 포트·SDES·코덱 상태를 물려받고(`CCallInfo` 복사) CallMap 의 A↔B 짝만 바꾼다. History-Info 는 그 호가 이미 실은 값(`CCallInfo::m_strHistoryInfo`) 뒤에 `<target;cause=486|408>;index=…;mp=…` 를 이어 붙이고 전환 수(`m_iCdivHops`)가 상한이면 원코드로 끝낸다. 발신자에겐 181, 전환 안내(§3.5 — A 가 이미 SDP 를 받았으면(원착신 18x+SDP·링백) 183 재송 없이 재생만), CDR `diversion`. 전환 대상이 통화 중이면 `Alert-Info` 통화중대기 + in-band 대기음(announcements.md §3.6).
 - **대상 제한** = 등록 가입자만(`gclsUserMap.Select`). 피어·미등록 대상은 원코드로 끝낸다(후속). 대상의 DND·착신거부는 종단 서비스가 우선(전환하지 않음). 루프(대상이 History-Info 에 이미 있음·자기 자신·원발신자)는 원코드.
 - **CFNR 시한** = `CCallInfo::m_iNoReplyDeadline`(B-leg entry) — `Tick`(CspServer 1 s 루프)이 만료 leg 를 `TryDivertLeg(bNoReplyTimer)` 로 전환한 뒤 원착신 leg 를 CANCEL 한다(CallMap 에서 먼저 뺐으므로 그 487 은 아무 것도 하지 않는다). B 가 응답(확립)하면 시한은 무시된다.
-- CSC: `POST/PUT /users/{pid}/{call|voip}/{msisdn}` 의 `forward_busy_id`·`forward_no_reply_id`·`forward_no_reply_sec`(0~120)·`forward_not_logged_in_id` — 키가 있을 때만 바꾸고(부분 업데이트), 컬럼 없는 DB 는 400 `schema_not_migrated`. 목록·단건 응답에 실린다(컬럼 있을 때).
-- 콘솔: 가입자 화면(`/subscribers/workbench`) 드로어의 VoLTE/VoIP 회선 카드 [편집] › **착신 처리**(DND · CFU · CFB · CFNR+시한 · CFNL — 번호 형식·시한 0~120 검사, 응답에 컬럼이 없으면 조건부 항목이 숨는다) — 회선 뷰 표의 착신전환 열은 네 가지를 요약한다.
-- 계측기: subscriber 픽스처 `forward_busy_to`·`forward_no_reply_to`(+`no_reply_sec`)·`forward_not_logged_in_to`, 단계 `no_answer`(링잉만 — 망의 CANCEL 이 정상), reject 뒤 다른 역할 착신 = 전환으로 인식(`cdiv_after_reject`), prelude `deregister`(register 뒤 곧바로 내려 미등록 착신 역할 — 앞선 run 의 바인딩이 3600 s 남기 때문) → `VOLTE-ANN-FORWARD-BUSY`·`-NOREPLY`·`-NOTLOGGEDIN`. CFNL 의 등록 판정은 등록 바인딩(`CUserMap::Select`) — `CspUserMap::isAlive` 는 REGISTER 시각 + `UserTimeout` 이라 해제 뒤에도 한동안 참이다.
+- CSC: `POST/PUT /users/{pid}/{call|voip}/{msisdn}` 의 `forward_busy_id`·`forward_no_reply_id`·`forward_no_reply_sec`(0~120)·`forward_not_logged_in_id`·`forward_not_reachable_id` — 키가 있을 때만 바꾸고(부분 업데이트), 컬럼 없는 DB 는 400 `schema_not_migrated`(판정 컬럼 = 마지막에 더해진 `forward_not_reachable_id` — `migrate_subscription_cdiv.sql` 재실행으로 채운다). 목록·단건 응답에 실린다(컬럼 있을 때).
+- 콘솔: 가입자 화면(`/subscribers/workbench`) 드로어의 VoLTE/VoIP 회선 카드 [편집] › **착신전환 서비스** = **전환 번호 하나 + 조건 선택**(TS 22.082 의 `004` all-conditional 등록과 같은 표현 — 규격은 rule 마다 target 을 허용할 뿐 개별 등록을 요구하지 않는다): `무조건(CFU)` 은 단독 선택(고르면 조건부 비활성, 저장 시 조건부 컬럼을 비운다), `통화중(CFB)`·`무응답(CFNR, 시한)`·`미등록(CFNL)`·`도달불가(CFNRc)` 는 다중 선택 — 고른 조건 컬럼에 같은 번호를 쓴다. 조건별로 번호가 다른 회선(계측기 픽스처 등)은 `조건별 번호 따로` 펼침으로 그대로 편집한다. 번호 형식·시한 0~120 검사, 응답에 컬럼이 없으면 조건부 항목이 숨는다. `착신 거부(DND)` 는 별개 행. 회선 뷰 표의 착신전환 열은 다섯 가지를 요약한다.
+- 계측기: subscriber 픽스처 `forward_busy_to`·`forward_no_reply_to`(+`no_reply_sec`)·`forward_not_logged_in_to`·`forward_not_reachable_to`, 단계 `no_answer`(링잉만 — 망의 CANCEL 이 정상)·`unreachable`(가상 단말이 이후 착신 INVITE 를 18x 없이 480 으로 즉시 거절 — 도달 불가 흉내, `VOLTE-ANN-FORWARD-NOTREACHABLE`), reject 뒤 다른 역할 착신 = 전환으로 인식(`cdiv_after_reject`), prelude `deregister`(register 뒤 곧바로 내려 미등록 착신 역할 — 앞선 run 의 바인딩이 3600 s 남기 때문) → `VOLTE-ANN-FORWARD-BUSY`·`-NOREPLY`·`-NOTLOGGEDIN`. CFNL 의 등록 판정은 등록 바인딩(`CUserMap::Select`) — `CspUserMap::isAlive` 는 REGISTER 시각 + `UserTimeout` 이라 해제 뒤에도 한동안 참이다.
 
 **후속(범위 밖)** — 피어·미등록 대상으로의 조건부 전환(재라우팅 판정을 B-leg 실패 지점에서 다시 해야 한다 — 원 INVITE 컨텍스트 보존), 전환자 통지(TS 24.604 `comm-div-info` 이벤트 패키지), `Privacy: history`.
 

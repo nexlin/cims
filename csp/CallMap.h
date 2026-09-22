@@ -109,6 +109,9 @@ public:
     /** CFNR 무응답 시한(epoch 초, 0 = 없음) — 가입자 B-leg 의 첫 18x 에 착신 가입자 forward_no_reply_id 가 있으면
      * 잡는다. 디스패처 Tick 이 만료를 보고 CANCEL + 전환 대상으로 새 B-leg (§6A.4). B-leg entry 에만 */
     time_t m_iNoReplyDeadline = 0;
+    /** B-leg 가 18x 를 냈는가 — 조건부 전환의 CFNR(링잉 뒤 무응답) / CFNRc(링잉 없이 480/408 = 도달 불가) 구분 근거
+     * (TS 24.604, §6A.4). B-leg entry 에만 */
+    bool m_bRang = false;
 
     /** 마지막 SIP activity 시간 (통화 생성/갱신 시 기록) */
     time_t m_iLastActivityTime;
@@ -161,6 +164,7 @@ public:
                       const std::string &strServed );
     /** CFNR 시한 — 그 leg entry 에만 */
     void SetNoReplyDeadline( const char *pszCallId, time_t tDeadline );
+    void SetRang( const char *pszCallId );
     /** 피어 B-leg 의 라우팅 상태(RouteSet·Route·정책·해시키·실패 Route 목록)를 양 leg entry 에 기록 — 재라우팅의 근거.
      */
     void SetRouteInfo( const char *pszCallId, const std::string &strRouteSet, const std::string &strRoute,

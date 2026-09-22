@@ -642,23 +642,24 @@ def _ringback_select_extra(cur, table: str) -> str:
     return ", ringback_media" if _has_ringback_column(cur, table) else ""
 
 
-# ── 조건부 착신전환 (TS 24.604 CFB/CFNR/CFNL — volte_supplementary_services.md §6A.4, migrate_subscription_cdiv.sql)
-_CDIV_NUMBER_KEYS = ('forward_busy_id', 'forward_no_reply_id', 'forward_not_logged_in_id')
+# ── 조건부 착신전환 (TS 24.604 CFB/CFNR/CFNL/CFNRc — volte_supplementary_services.md §6A.4, migrate_subscription_cdiv.sql)
+#    컬럼 5종은 한 마이그레이션이 만든다 — 마지막에 더해진 forward_not_reachable_id 로 적용 여부를 판정한다(부분 적용 DB 는 미적용 취급).
+_CDIV_NUMBER_KEYS = ('forward_busy_id', 'forward_no_reply_id', 'forward_not_logged_in_id', 'forward_not_reachable_id')
 _CDIV_KEYS = _CDIV_NUMBER_KEYS + ('forward_no_reply_sec',)
 _CDIV_SCHEMA_ERROR = {'error': 'schema_not_migrated',
-                      'detail': 'subscriptions.forward_busy_id 없음 — sql/migrate_subscription_cdiv.sql'}
+                      'detail': 'subscriptions.forward_not_reachable_id 없음 — sql/migrate_subscription_cdiv.sql (재실행 안전)'}
 
 
 def _has_cdiv_columns(cur, table: str) -> bool:
     try:
-        cur.execute(f"SHOW COLUMNS FROM {table} LIKE 'forward_busy_id'")
+        cur.execute(f"SHOW COLUMNS FROM {table} LIKE 'forward_not_reachable_id'")
         return cur.fetchone() is not None
     except Exception:
         return False
 
 
 def _cdiv_select_extra(cur, table: str) -> str:
-    return ", forward_busy_id, forward_no_reply_id, forward_no_reply_sec, forward_not_logged_in_id" if _has_cdiv_columns(cur, table) else ""
+    return ", forward_busy_id, forward_no_reply_id, forward_no_reply_sec, forward_not_logged_in_id, forward_not_reachable_id" if _has_cdiv_columns(cur, table) else ""
 
 
 def _cdiv_fields(cur, table: str, body: dict):
@@ -788,11 +789,11 @@ def _audit_sub(config, payload, ip: str, svc: str, msisdn: str, action: str, aft
 def _sub_audit_after(body) -> dict:
     """감사에 싣는 변경 후 값 — 부가서비스 축만. 자격(passwd/ha1/k/opc)은 절대 싣지 않는다.
 
-    조건부 착신전환(CFB/CFNR/CFNL, TS 24.604)도 무조건 전환과 같은 사실을 가리키므로
+    조건부 착신전환(CFB/CFNR/CFNL/CFNRc, TS 24.604)도 무조건 전환과 같은 사실을 가리키므로
     함께 싣는다 — 하나라도 빠지면 "누가 언제 전환을 걸었나" 에 구멍이 생긴다."""
     out = {}
     for k in ('dnd', 'forward_id', 'forward_busy_id', 'forward_no_reply_id',
-              'forward_no_reply_sec', 'forward_not_logged_in_id', 'ringback_media',
+              'forward_no_reply_sec', 'forward_not_logged_in_id', 'forward_not_reachable_id', 'ringback_media',
               'service_ref', 'sip_transport'):
         if isinstance(body, dict) and k in body:
             out[k] = body[k]

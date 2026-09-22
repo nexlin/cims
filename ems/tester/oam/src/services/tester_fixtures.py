@@ -123,6 +123,8 @@ def resolve(scenario: Scenario, role_first: Dict[str, dict], bindings: Dict[str,
                 fields['forward_no_reply_sec'] = f.no_reply_sec
             if f.forward_not_logged_in_to is not None:
                 fields['forward_not_logged_in_id'] = user_of(f.forward_not_logged_in_to)
+            if f.forward_not_reachable_to is not None:
+                fields['forward_not_reachable_id'] = user_of(f.forward_not_reachable_to)
             out.append({'key': key, 'kind': f.kind, 'fields': fields, 'service_ref': fields.get('service_ref'),
                         'lines': [{'role': r, 'user': user_of(r)} for r in f.roles]})
     return out
@@ -206,7 +208,8 @@ class FixtureApplier:
                                       'ringback_media': sub.get('ringback_media'), 'forward_id': sub.get('forward_id'),
                                       'forward_busy_id': sub.get('forward_busy_id'), 'forward_no_reply_id': sub.get('forward_no_reply_id'),
                                       'forward_no_reply_sec': sub.get('forward_no_reply_sec'),
-                                      'forward_not_logged_in_id': sub.get('forward_not_logged_in_id')}
+                                      'forward_not_logged_in_id': sub.get('forward_not_logged_in_id'),
+                                      'forward_not_reachable_id': sub.get('forward_not_reachable_id')}
                             m[re.sub(r'\D', '', num)] = m[num]
             self._users = m
         return self._users

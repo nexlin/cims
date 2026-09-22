@@ -13,11 +13,12 @@ export interface Subscription {
   passwd?: string
   dnd: boolean
   forward_id: string                 // 착신전환 CFU 대상(TS 24.604 — 서버측 전환, volte_supplementary_services.md §6A)
-  // 조건부 전환(§6A.4, migrate_subscription_cdiv.sql — 미적용 DB 는 응답에 없다): 통화중 / 무응답(시한 초, 0 = 서버 기본) / 미등록
+  // 조건부 전환(§6A.4, migrate_subscription_cdiv.sql — 미적용 DB 는 응답에 없다): 통화중 / 무응답(시한 초, 0 = 서버 기본) / 미등록 / 도달불가
   forward_busy_id?: string
   forward_no_reply_id?: string
   forward_no_reply_sec?: number
   forward_not_logged_in_id?: string
+  forward_not_reachable_id?: string   // CFNRc 도달 불가(Q.850 20 · 링잉 없는 480/408)
   ringback_media?: string | null      // 가입자 링백 음원 id sys:|op:|sub: (announcements.md §6.3)
   service_ref?: string | null   // 소속 서비스(access_services.name, 예: volte/mcptt) — 도메인 결정
   service_id?: number | null    // (구) 숫자 service_id 호환

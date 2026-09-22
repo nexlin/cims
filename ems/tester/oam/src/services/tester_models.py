@@ -767,7 +767,7 @@ class Topology(_Strict):
 # ──────────────────────────────────────────────────────────────────────────
 
 StepKind = Literal[
-    'register', 'deregister', 'invite', 'progress', 'answer', 'reject', 'no_answer', 'bye',
+    'register', 'deregister', 'invite', 'progress', 'answer', 'reject', 'no_answer', 'unreachable', 'bye',
     'hold', 'resume', 'dtmf',
     'refer', 'replaces', 'join', 'pickup', 'subscribe', 'publish',
     'group_call', 'floor_request', 'floor_release', 'sds_send', 'sds_recv', 'fd_send', 'fd_recv',
@@ -776,7 +776,7 @@ StepKind = Literal[
 
 # 워커가 실행할 수 있는 단계(§4) — 나머지는 모델에는 있지만 컴파일 시 거절한다(콘솔 팔레트는 회색).
 WORKER_STEPS = frozenset((
-    'register', 'deregister', 'invite', 'progress', 'answer', 'reject', 'no_answer', 'bye',
+    'register', 'deregister', 'invite', 'progress', 'answer', 'reject', 'no_answer', 'unreachable', 'bye',
     'hold', 'resume', 'dtmf', 'refer', 'media_hold', 'media_send', 'media_stop', 'wait', 'expect',
     'group_call', 'floor_request', 'floor_release',
     'pickup', 'subscribe', 'replaces', 'join', 'publish',
@@ -836,6 +836,7 @@ STEP_VOCAB = {
     'answer':        {'group': 'call',  'actor': 'who',     'kind': None,       'metrics': ['code', 'srd_ms', 'ser_pct'], 'desc': '착신 대기 → after_ms 뒤 200'},
     'reject':        {'group': 'call',  'actor': 'who',     'kind': None,       'metrics': ['code', 'q850_rx_pct'], 'desc': '착신 대기 → payload 코드로 거절'},
     'no_answer':     {'group': 'call',  'actor': 'who',     'kind': None,       'metrics': [], 'desc': '착신에 응답하지 않는다(링잉만) — 망이 CANCEL 하는 것이 정상(무응답 착신전환 CFNR·대표번호 무응답 등, ringing_leg_cancelled)'},
+    'unreachable':   {'group': 'call',  'actor': 'who',     'kind': None,       'metrics': [], 'desc': '도달 불가 단말 흉내(TS 24.604 CFNRc) — 이후 착신 INVITE 를 18x 없이 payload 코드(기본 480)로 즉시 거절한다. 망이 링잉 없는 480/408 을 도달 불가로 판정해 forward_not_reachable_id 로 전환(cause=503). 가상 단말만'},
     'bye':           {'group': 'call',  'actor': 'from',    'kind': None,       'metrics': ['sdd_ms', 'code', 'scr_pct', 'q850_rx_pct', 'dtmf_rx_pct'], 'desc': 'BYE → 최종 응답 (SDD)'},
     'media_hold':    {'group': 'media', 'actor': 'seconds', 'kind': None,       'metrics': ['rtp_loss_pct', 'jitter_ms', 'mos'], 'desc': '확립 뒤 seconds 유지, 끝에 RTP 표본 (during 로 통화 중 동작)'},
     'hold':          {'group': 'media', 'actor': 'from',    'kind': None,       'metrics': ['code', 'moh_rtp_pct'], 'desc': 're-INVITE sendonly — 피보류 단말의 수신 누계를 기준점으로 잡는다(보류 음악 판정 시작)'},
@@ -1068,7 +1069,7 @@ class Step(_Strict):
                 raise ValueError(f'check 의 payload 는 {list(CHECK_KINDS)} 중 하나(또는 ${{var}} 바인딩 — 컴파일 때 검사)')
             if self.payload.startswith('conference_roster_') and not self.to:
                 raise ValueError('check conference_roster_* 는 to(로스터에서 찾을 역할)가 필요하다')
-        if self.step in ('register', 'deregister', 'answer', 'reject', 'no_answer', 'progress', 'subscribe', 'publish',
+        if self.step in ('register', 'deregister', 'answer', 'reject', 'no_answer', 'unreachable', 'progress', 'subscribe', 'publish',
                          'floor_request', 'floor_release', 'sds_recv', 'fd_recv', 'media_send', 'media_stop', 'check') and not self.who:
             raise ValueError(f'{self.step} 단계는 who 가 필요하다')
         if self.step in ('media_hold', 'wait') and self.seconds is None:
@@ -1220,13 +1221,14 @@ class FixtureSubscriber(_Strict):
     forward_to: Optional[str] = Field(default=None, min_length=1,
                                       description='착신전환(CFU) 대상 역할 — 그 역할의 첫 신원 번호가 forward_id 로 들어간다. 이 회선으로 온 호는 서버가 그 역할로 전환한다(181·History-Info·전환 안내)')
     forward_busy_to: Optional[str] = Field(default=None, min_length=1, description='CFB — 이 회선이 통화중(486/600) 응답이면 그 역할로 전환(forward_busy_id, §6A.4)')
-    forward_no_reply_to: Optional[str] = Field(default=None, min_length=1, description='CFNR — 이 회선이 no_reply_sec 안에 응답하지 않으면(또는 480/408) 그 역할로 전환(forward_no_reply_id)')
+    forward_no_reply_to: Optional[str] = Field(default=None, min_length=1, description='CFNR — 이 회선이 링잉 뒤 no_reply_sec 안에 응답하지 않으면(링잉 뒤 480/408 포함) 그 역할로 전환(forward_no_reply_id)')
     no_reply_sec: Optional[int] = Field(default=None, ge=1, le=120, description='CFNR 무응답 시한(초, forward_no_reply_sec) — 없으면 대상 CSP 의 Setup.Sip.Cdiv.NoReplySec')
     forward_not_logged_in_to: Optional[str] = Field(default=None, min_length=1, description='CFNL — 이 회선이 미등록이면 그 역할로 전환(forward_not_logged_in_id)')
+    forward_not_reachable_to: Optional[str] = Field(default=None, min_length=1, description='CFNRc — 이 회선이 도달 불가(Q.850 20 · 링잉 없이 480/408)면 그 역할로 전환(forward_not_reachable_id)')
 
     @model_validator(mode='after')
     def _any(self):
-        targets = [self.forward_to, self.forward_busy_to, self.forward_no_reply_to, self.forward_not_logged_in_to]
+        targets = [self.forward_to, self.forward_busy_to, self.forward_no_reply_to, self.forward_not_logged_in_to, self.forward_not_reachable_to]
         if self.service_ref is None and self.ringback_media is None and all(t is None for t in targets) and self.no_reply_sec is None:
             raise ValueError('subscriber 픽스처는 service_ref·ringback_media·forward_*_to 중 하나는 있어야 한다')
         for t in targets:

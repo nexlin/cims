@@ -2529,6 +2529,13 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
         return;
     }
 
+    // 도달 불가 흉내(계측기 unreachable 단계) — 18x 없이 즉시 거절. 링잉 전 480/408 = CSP 가 CFNRc 로 판정(§6A.4)
+    if (m_pOwner->m_iAutoRejectCode > 0) {
+        printf("[%d] [UNREACHABLE] reject INVITE with %d (no ringing)\n", m_pOwner->m_iId, m_pOwner->m_iAutoRejectCode);
+        m_pUserAgent->StopCall(pszCallId, m_pOwner->m_iAutoRejectCode);
+        return;
+    }
+
     if (m_pInviteId && !bCallWaiting) *m_pInviteId = pszCallId;   // 대기 착신은 활성 통화 id 를 덮지 않는다
 
     // 당겨받기 대상(ring-hold): 180 만 보내고 200 은 보류한다 — 다른 단말이 당겨받기 코드로 이
