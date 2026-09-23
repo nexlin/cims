@@ -18,8 +18,8 @@
   test48/                         ← .48 사이트 디렉터리 (다른 서버의 runtime/·service_log/·tester45/ 와 분리)
     runtime/                      ← 관리 store  = CimsRuntimeDir (control/ collections/ pkg_files/ …)
       pkg_files/                  ← 패키지 저장소 (유도)
-    service_log/                  ← 서비스 로그·녹취·알람·mcdata_fd = ServiceLogging.Dir (옛 /mnt/cims/log48 를 통째로 이동)
-    tester/                       ← 계측기 DataDir = Tester.DataDir (옛 /mnt/cims/tester/data 를 이동)
+    log/                          ← 서비스 로그·녹취·알람·mcdata_fd = ServiceLogging.Dir (새 설치 — 옛 log48 은 이어받지 않음)
+    tester/                       ← 계측기 DataDir = Tester.DataDir (topologies/·scenarios/creds/ 재생성, run 색인은 새로)
     _migration/                   ← 이 전환의 이식 자료(overlay·컬렉션·인증서) — 비밀 포함, git 밖
 /opt/cims-agent/                  ← 설치 루트: agent + modules/<모듈>/<버전>, modules/oam/runtime(노드 로컬 비밀·인증서)
 ```
@@ -37,7 +37,7 @@ mount guard 를 켜는 선택값이다(비우면 검사 없음). 부트스트랩
 1. 이식 자료 추출(4419 API): `deployments.json`, 배포별 overlay `config_dep{29..36}.json`, CSP 컬렉션 8종
    (`local_nodes access_services routes remote_nodes route_sets rules rule_sets routing_policies`), 단말 대면 인증서
    (`csp/cert/csp.pem`, `csc/cert/server.crt|key`). → `/mnt/cims/test48/_migration/`
-2. 새 사이트용 overlay 생성 `new_<모듈>.json` — 경로 치환 `/mnt/cims/log48 → /mnt/cims/test48/service_log`,
+2. 새 사이트용 overlay 생성 `new_<모듈>.json` — 경로 치환 `/mnt/cims/log48 → /mnt/cims/test48/log`,
    `/mnt/cims/tester/data → /mnt/cims/test48/tester`, 주입·유도 키(`CimsAuth.JwtSecret`·`CimsRuntimeDir`·`Packages.Dir`) 제거.
 3. `cd build && make && make dist` → `./cims.sh pkg csp cmp cmdp csc oam-svc oam-cims-tester cims-tester-worker cspsim agent oam`
    → `build/dist/packages/*.tar.gz` + `cims-bootstrap-<oam>.tar.gz`(oam + console + agent 동봉).
@@ -54,12 +54,8 @@ kill <소스 agent pid>                   # build/dist/agent/cims_agent.py --nam
 ss -ltn | grep -E ':(4419|4445|4480|4490|4430|4421|7100|7110|9000|9001|15060|15061|2855|16000|9900) '   # 전부 비어야 한다
 ```
 
-데이터 이동(서비스가 다 내려간 뒤, 설치 전 — 같은 NFS export 안이라 mv 는 즉시 끝난다):
-
-```bash
-mv /mnt/cims/log48        /mnt/cims/test48/service_log
-mv /mnt/cims/tester/data/* /mnt/cims/test48/tester/     # topologies/ scenarios/ runs/ samples/
-```
+옛 데이터(`/mnt/cims/log48` 22 GB·`/mnt/cims/tester/data`)는 **이어받지 않았다** — 새 설치라는 사용자 결정. 새 사이트는 빈 `log/`·`tester/` 로 시작하고
+토폴로지·creds 는 §4.1 대로 다시 만든다.
 
 ## 3. 부트스트랩 설치 (**사용자 실행 — sudo**)
 
@@ -80,11 +76,11 @@ rm -rf /mnt/cims/test48/runtime                                 # 첫 설치가 
 mkdir -p ~/bootstrap && rm -rf ~/bootstrap/cims-bootstrap && tar xzf build/dist/packages/cims-bootstrap-<oam버전>.tar.gz -C ~/bootstrap
 sudo ~/bootstrap/cims-bootstrap/install.sh --batch --user cims --port 4419 --server-name media01 \
      --mgmt-ip 121.161.164.48 --admin-pass 1234 \
-     --runtime-dir /mnt/cims/test48/runtime --log-dir /mnt/cims/test48/service_log
+     --runtime-dir /mnt/cims/test48/runtime --log-dir /mnt/cims/test48/log
 ```
 
 - 마운트 옵션 없음 — `/mnt/cims` 는 시스템 fstab 으로 이미 붙어 있다. store 는 경로 설정으로 `/mnt/cims/test48/runtime`,
-  서비스 로그는 `/mnt/cims/test48/service_log`(이미 이동해 둔 데이터 위에 그대로 이어 쓴다).
+  서비스 로그는 `/mnt/cims/test48/log`.
 - `--batch` 라 문답 없음. admin 비밀번호는 지금과 같은 값(개발 서버).
 - `~/.config/systemd/user/cims-agent.service`·`/etc/sudoers.d/cims`·linger 는 설치가 다시 맞춘다.
 
