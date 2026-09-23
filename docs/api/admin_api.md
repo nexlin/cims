@@ -1713,7 +1713,8 @@ Agent OAM 주소 재지정 (이중화 전환: 노드 IP → VIP):
 > **400 `shared_store_not_group_scoped`** — `PUT /api/v1/ha-groups/{id}` 에 `shared_store` 를
 > 실으면 거부된다. 공유 store 는 그룹이 저장하는 값이 아니라 **base `oam` 배포설정**
 > (`CimsRuntimeMount`)이고, GET 응답의 `shared_store` 는 그것을 읽은 읽기 전용 유도값이다.
-> 최초 지정은 부트스트랩 설치(`--runtime-mount` / 대화식 `[6/7]`), 이후 변경은 위 이관
+> store 위치는 경로 설정 `CimsRuntimeDir`(NAS·로컬 무관, `[패키지 설정] > oam > 관리 store`)이고 `CimsRuntimeMount` 는 선택 mount guard 값이다.
+> 최초 지정은 부트스트랩 설치(`--runtime-dir`/`--log-dir`, 공유 스토리지 사이트는 `--runtime-mount` / 대화식 `[6/7]`), 이후 변경은 위 이관
 > 엔드포인트(콘솔 `이 경로로 이관`) — 경로 변경은 데이터 이동을 수반하기 때문이다.
 > oam-svc 배포설정에는 store 경로 선언 자체가 없어(overlay 쓰기 마스크가 거른다) 두 모듈이
 > 다른 store 를 가리키는 상태는 생기지 않는다.

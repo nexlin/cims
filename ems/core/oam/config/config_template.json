@@ -80,16 +80,24 @@
     {
       "key": "store",
       "title": "관리 store",
-      "description": "관리 데이터(서버·그룹·배포·계정)·패키지 파일이 놓이는 위치. 지정하는 값은 마운트 지점 하나이고 store·패키지 경로는 그 하위로 유도된다. 공유 스토리지(NAS)에 두면 절체해도 같은 데이터를 본다. 경로 변경은 데이터 이동을 수반하므로 저장이 아니라 이관으로 한다 (docs/design/features/oam_ha.md §4·§9.4).",
+      "description": "관리 데이터(서버·그룹·배포·계정)·패키지 파일이 놓이는 위치. 경로 설정(관리 store 경로)이 정본이고 NAS 든 로컬 디스크든 운영 상황이 정한다 — 마운트는 [시스템/인프라] 에서 한다. 마운트 지점은 공유 스토리지 이중화 사이트가 mount guard 용으로 적는 선택값이며, 경로를 비우면 그 하위 `runtime/` 으로 유도된다. 그룹 멤버 간 동일해야 한다.",
       "scope": "service",
       "fields": [
         {
-          "key": "CimsRuntimeMount",
-          "label": "런타임 마운트 지점",
+          "key": "CimsRuntimeDir",
+          "label": "관리 store 경로",
           "type": "path",
           "default": "",
           "restart": true,
-          "help": "관리 store 를 둘 공유 스토리지(NAS)의 마운트 지점. store 는 `<마운트>/runtime`, 패키지 저장소는 `<마운트>/runtime/pkg_files` 로 자동 유도된다. 설정 시 OAM 은 기동 전 이 경로가 실제 마운트인지 확인하고, 아니면 기동을 거부한다(마운트 없이 떠서 로컬 디스크에 두 번째 store 를 만드는 것 방지). 비우면 노드 로컬(`modules/oam/runtime`)에 저장한다 — 단일 노드·부트스트랩 직후의 정상 상태다."
+          "help": "관리 데이터(서버·그룹·배포·계정·컬렉션)와 패키지 저장소(`<경로>/pkg_files`)가 놓이는 디렉터리. NAS 든 로컬 디스크든 운영 상황이 정한다 — 마운트는 [시스템/인프라] 에서 하고 여기는 경로만. 비우면 아래 마운트 지점의 `runtime/`(마운트도 없으면 노드 로컬 `modules/oam/runtime`). 그룹 멤버 간 동일해야 한다."
+        },
+        {
+          "key": "CimsRuntimeMount",
+          "label": "런타임 마운트 지점 (선택)",
+          "type": "path",
+          "default": "",
+          "restart": true,
+          "help": "선택. 관리 store 를 공유 스토리지(NAS)에 두는 이중화 사이트에서 그 마운트 지점을 적으면 OAM 이 기동 전에 실제 마운트인지 확인한다(mount guard — 마운트가 빠진 채 로컬에 두 번째 store 를 만드는 사고 방지). 비우면 검사하지 않는다. store 경로가 비어 있으면 `<마운트>/runtime` 으로 유도된다."
         }
       ]
     },

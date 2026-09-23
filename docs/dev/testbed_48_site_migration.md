@@ -1,4 +1,4 @@
-# .48 정식 배치 전환 — build/dist 실행 → 부트스트랩 설치(/opt/cims-agent) + NAS `/mnt/cims/test48`
+# .48 정식 배치 전환 — build/dist 실행 → 부트스트랩 설치(/opt/cims-agent) + NAS `/mnt/cims/test48/`
 
 개발 서버 .48(media01)을 S5 검증 때 만든 **소스 트리 배치**(dev OAM 4419 = `build/dist/oam/src`, 소스 agent,
 모듈은 `build/dist/mgmt-server/`)에서 **정식 배포 절차**([initial_install.md](../user-manual/initial_install.md) —
@@ -8,27 +8,29 @@
 
 | 항목 | 결정 |
 |---|---|
-| (a) 관리 store | NAS. 다른 서버와 섞이지 않게 `/mnt/cims/test48` 를 **.48 전용 마운트 지점**으로 두고 그 아래 데이터 종류별 디렉터리 |
+| (a) 관리 store | NAS. 마운트는 지금처럼 `/mnt/cims` 하나이고, 다른 서버와 섞이지 않게 그 안에 `test48/` 디렉터리를 만들어 데이터 종류별로 나눈다. store·로그 위치는 **경로 설정**(NAS 든 로컬 디스크든 운영 상황이 정한다) — OAM 이 마운트 여부를 따로 판단하지 않는다 |
 | (b) 기존 배포 | dep29~36 전부 폐기, 모듈 전부 재패키징·재설치 |
 
-**최종 레이아웃** (`install.sh --runtime-mount /mnt/cims/test48` 의 유도 규칙 = `services/paths.py`):
+**최종 레이아웃** (`install.sh --runtime-dir … --log-dir …` — 경로 설정, `services/paths.py`):
 
 ```
-/mnt/cims/test48/                 ← NFS 마운트 지점 (121.161.164.105:/home/cbm/NAS/cims/test48, fstab)
-  runtime/                        ← 관리 store (CimsRuntimeMount 유도: control/ collections/ pkg_files/ …)
-    pkg_files/                    ← 패키지 저장소
-  service_log/                    ← 서비스 로그·녹취·알람·mcdata_fd  (옛 /mnt/cims/log48 를 통째로 이동)
-  tester/                         ← 계측기 DataDir (옛 /mnt/cims/tester/data 를 이동 — topologies·creds·runs)
-  _migration/                     ← 이 전환의 이식 자료(overlay·컬렉션·인증서) — 비밀 포함, git 밖
+/mnt/cims/                        ← NFS 마운트 (121.161.164.105:/home/cbm/NAS/cims, 기존 fstab) — 마운트는 이것 하나
+  test48/                         ← .48 사이트 디렉터리 (다른 서버의 runtime/·service_log/·tester45/ 와 분리)
+    runtime/                      ← 관리 store  = CimsRuntimeDir (control/ collections/ pkg_files/ …)
+      pkg_files/                  ← 패키지 저장소 (유도)
+    service_log/                  ← 서비스 로그·녹취·알람·mcdata_fd = ServiceLogging.Dir (옛 /mnt/cims/log48 를 통째로 이동)
+    tester/                       ← 계측기 DataDir = Tester.DataDir (옛 /mnt/cims/tester/data 를 이동)
+    _migration/                   ← 이 전환의 이식 자료(overlay·컬렉션·인증서) — 비밀 포함, git 밖
 /opt/cims-agent/                  ← 설치 루트: agent + modules/<모듈>/<버전>, modules/oam/runtime(노드 로컬 비밀·인증서)
 ```
 
 `/mnt/cims/runtime`·`/mnt/cims/service_log`(다른 서버 것)·`/mnt/cims/tester45` 는 건드리지 않는다.
 DB(.45 `cims`)·가입자·PTT 그룹·역할은 DB 에 있어 그대로다.
 
-OAM 의 mount guard(`oam_app._assert_runtime_mount`)는 `CimsRuntimeMount` 가 `/proc/mounts` 에 **그 경로로** 있어야
-기동하므로 `/mnt/cims` 의 하위 디렉터리를 그냥 쓰면 안 되고, export 의 하위 경로를 `/mnt/cims/test48` 에 **따로 마운트**한다
-(`install.sh --mount … --mount-src …`, cims-priv mount-add 가 fstab `_netdev,nofail` 로 영속화).
+이 전환에서 제품 규칙을 바꿨다([oam_ha.md](../design/features/oam_ha.md) §4.1): store 위치는 `CimsRuntimeDir`(템플릿 선언,
+콘솔 편집 가능)·로그는 `ServiceLogging.Dir` 의 **경로 설정**이 정본이고, `CimsRuntimeMount` 는 공유 스토리지 이중화 사이트가
+mount guard 를 켜는 선택값이다(비우면 검사 없음). 부트스트랩은 `--runtime-dir`/`--log-dir` 로 받는다. .48 은 마운트 지점을
+적지 않는다.
 
 ## 1. 준비 (전환 전, 서비스 살아 있는 상태에서 — 완료)
 
@@ -41,22 +43,18 @@ OAM 의 mount guard(`oam_app._assert_runtime_mount`)는 `CimsRuntimeMount` 가 `
    → `build/dist/packages/*.tar.gz` + `cims-bootstrap-<oam>.tar.gz`(oam + console + agent 동봉).
 4. `scripts/oam-deploy.py` 에 `install`(생성→install job→overlay→start)·`config`(overlay PUT) 서브커맨드 추가.
 
-## 2. 철거 (Claude 실행 — sudo 불필요)
+## 2. 철거 (Claude 실행 — sudo 불필요, 완료)
 
 순서가 중요하다. 모듈 → base → dev OAM → 소스 agent. 옛 트리는 지우지 않는다(검증 뒤 §6).
 
 ```bash
-export OAM_URL=https://127.0.0.1:4419 OAM_LOGIN=admin OAM_PASSWORD=…
-for d in 36 35 34 33 32 31 30; do scripts/oam-deploy.py … stop $d; done   # POST /deployments/{id}/job {stop} → live down
-# dep29(4445 base oam) stop → 4445 내려감
+# POST /deployments/{id}/job {stop} 를 36→29 순으로 → live down 확인
 ./cims.sh tb stop                       # dev OAM 4419 (+ vite 3000)
-kill <소스 agent pid>                   # build/dist/agent/cims_agent.py --name mgmt-server (ppid 1, nohup)
-pgrep -af 'bin/csp|bin/cmp|bin/cmdp|cims-tester-worker|oam_app.py|oam_svc_app.py|csc_pihttp' # 잔존 확인 → kill
+kill <소스 agent pid>                   # build/dist/agent/cims_agent.py --name mgmt-server (ppid 1, nohup) — pgrep -f 는 자기 bash 도 잡는다
 ss -ltn | grep -E ':(4419|4445|4480|4490|4430|4421|7100|7110|9000|9001|15060|15061|2855|16000|9900) '   # 전부 비어야 한다
 ```
 
-데이터 이동(서비스가 다 내려간 뒤, **설치 전에** — `install.sh` 가 `<마운트>/service_log` 를 만들기 전에 옮겨 둬야 mv 가 된다.
-같은 NFS export 안이라 mv 는 즉시 끝난다):
+데이터 이동(서비스가 다 내려간 뒤, 설치 전 — 같은 NFS export 안이라 mv 는 즉시 끝난다):
 
 ```bash
 mv /mnt/cims/log48        /mnt/cims/test48/service_log
@@ -65,30 +63,38 @@ mv /mnt/cims/tester/data/* /mnt/cims/test48/tester/     # topologies/ scenarios/
 
 ## 3. 부트스트랩 설치 (**사용자 실행 — sudo**)
 
-`install.sh` 는 sudo 가 필요하고 이 세션의 Claude 는 sudo 가 없다(`sudo: interactive authentication is required`).
-프롬프트에 `! ` 를 앞에 붙여 실행하면 출력이 세션에 들어온다.
+`install.sh` 는 sudo 가 필요하고 이 세션의 Claude 는 sudo 가 없다. `! sudo …` 는 비밀번호 프롬프트를 못 열므로 실제 터미널에서
+실행한다(또는 터미널에서 `sudo -v` 로 자격을 캐시한 직후 `! sudo …`).
+
+첫 시도(2026-09-23 오전)는 `/mnt/cims/test48` 를 따로 nfs4 마운트하는 방식으로 설치됐다 — 되돌린 뒤 다시 한다:
+
+```bash
+sudo /opt/cims-agent/uninstall-base.sh --yes                    # agent·OAM·/opt/cims-agent 제거 (공유 store·마운트는 안 건드림)
+sudo umount /mnt/cims/test48 && sudo sed -i '\#/mnt/cims/test48 nfs4#d' /etc/fstab   # 하위 마운트·fstab 줄 제거
+rm -rf /mnt/cims/test48/runtime                                 # 첫 설치가 만든 빈 store (cims 소유 — sudo 불필요)
+```
+
+그 다음 새 부트스트랩(oam 0.2.165 — `--runtime-dir`/`--log-dir` 지원)으로:
 
 ```bash
 mkdir -p ~/bootstrap && rm -rf ~/bootstrap/cims-bootstrap && tar xzf build/dist/packages/cims-bootstrap-<oam버전>.tar.gz -C ~/bootstrap
 sudo ~/bootstrap/cims-bootstrap/install.sh --batch --user cims --port 4419 --server-name media01 \
      --mgmt-ip 121.161.164.48 --admin-pass 1234 \
-     --mount /mnt/cims/test48 --mount-src 121.161.164.105:/home/cbm/NAS/cims/test48 --runtime-mount /mnt/cims/test48
+     --runtime-dir /mnt/cims/test48/runtime --log-dir /mnt/cims/test48/service_log
 ```
 
-- `--mount` + `--mount-src` = export 하위 `cims/test48` 를 `/mnt/cims/test48` 에 nfs4 로 붙이고 fstab 에 남긴다.
-  `--runtime-mount` = 관리 store 를 그 마운트 아래 `runtime/` 으로. 서비스 로그는 `MNT_TARGET/service_log` 로 유도된다.
+- 마운트 옵션 없음 — `/mnt/cims` 는 시스템 fstab 으로 이미 붙어 있다. store 는 경로 설정으로 `/mnt/cims/test48/runtime`,
+  서비스 로그는 `/mnt/cims/test48/service_log`(이미 이동해 둔 데이터 위에 그대로 이어 쓴다).
 - `--batch` 라 문답 없음. admin 비밀번호는 지금과 같은 값(개발 서버).
-- 옛 잔재 `~/.config/systemd/user/cims-agent.service`(`/opt/cims-agent`·`Media-Server-01`·10.0.2.45 를 가리키는 activating 상태 unit)는
-  설치가 덮어쓴다. `/etc/sudoers.d/cims`·linger 도 설치가 다시 맞춘다.
-- 하위 경로 nfs4 마운트가 거부되면(서버 export 옵션) 대안 = `sudo mount --bind /mnt/cims/test48 /mnt/cims/test48` + fstab 한 줄,
-  그 뒤 `--mount /mnt/cims/test48 --runtime-mount /mnt/cims/test48` 만으로 재실행(이미 마운트됨 → 그대로 사용).
+- `~/.config/systemd/user/cims-agent.service`·`/etc/sudoers.d/cims`·linger 는 설치가 다시 맞춘다.
 
 확인:
 
 ```bash
 curl -sk -o /dev/null -w 'OAM %{http_code}\n' https://127.0.0.1:4419/
-ps -eo user,pid,args | grep -E 'oam_app|cims_agent' | grep -v grep     # cims 소유 oam_app.py --role base · /opt/cims-agent/agent/cims_agent.py
-findmnt /mnt/cims/test48 ; ls /mnt/cims/test48/runtime
+ps -eo user,pid,args | grep -E 'oam_app|cims_agent' | grep -v grep     # cims 소유 oam_app.py --role base · /opt/cims-agent/agent/current/cims_agent.py
+ls /mnt/cims/test48/runtime          # control/ pkg_files/ … (마운트는 /mnt/cims 하나)
+cat /opt/cims-agent/modules/oam/current/oam/config.json | grep -E 'CimsRuntimeDir|Packages.Dir|"Dir"'
 ```
 
 ## 4. 모듈 재설치 (Claude 실행 — API)

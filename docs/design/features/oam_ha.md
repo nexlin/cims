@@ -181,17 +181,22 @@ HA 판정이 노드 로컬이어야 한다는 원칙(ha_service_model.md §5·§
 
 #### 공유 store 는 **oam 모듈 설정이다** — 그룹은 읽기만 한다
 
-정본은 **base `oam` 배포설정의 `CimsRuntimeMount`** 하나다. 그룹 레코드에도, oam-svc
-배포설정에도 별도 선언을 두지 않는다 — 같은 사실을 두 곳에서 입력받으면 어긋나고,
-어긋남을 막는 코드를 또 써야 한다.
+정본은 **base `oam` 배포설정**이다. 그룹 레코드에도, oam-svc 배포설정에도 별도 선언을 두지
+않는다 — 같은 사실을 두 곳에서 입력받으면 어긋나고, 어긋남을 막는 코드를 또 써야 한다.
+
+위치는 **경로 설정**이다. 운영 상황에 따라 NAS 일 수도, 로컬 디스크일 수도 있으므로 마운트는
+[시스템/인프라] 의 일이고 store 위치는 그냥 경로다. 마운트 지점은 공유 스토리지 사이트가
+mount guard 용으로 적는 **선택** 값이다.
 
 ```text
-입력:  oam 배포설정 CimsRuntimeMount   ← 부트스트랩(설치 시) 또는 이관. **이 값 하나뿐**
-          │
-          ├── 유도(services.paths.runtime_store_dir) → CimsRuntimeDir  = <마운트>/runtime
-          │                                          → Packages.Dir    = <store>/pkg_files
-          │        둘 다 config_template 에 **선언이 없다** = 저장할 수 없다(편집권 없음).
+입력:  oam 배포설정 CimsRuntimeDir     ← 관리 store 경로 (부트스트랩 --runtime-dir / 콘솔 [패키지 설정] > oam > 관리 store)
+       oam 배포설정 CimsRuntimeMount   ← (선택) 공유 스토리지 마운트 지점 — mount guard(§4.3) 기준.
+          │                               CimsRuntimeDir 이 비어 있으면 <마운트>/runtime 으로 유도.
+          │                               둘 다 비면 노드 로컬 modules/oam/runtime.
+          ├── 유도(services.paths.runtime_store_dir) → 실효 store 경로
+          │                                          → Packages.Dir    = <store>/pkg_files (선언 없음 = 편집 불가)
           │        실체화(agents._materialize_deploy_config)가 매 디스패치마다 채운다.
+          │        (서비스 로그 `ServiceLogging.Dir` 도 같은 방식 — 경로 설정, 부트스트랩 --log-dir)
           │
           ├── 유도(agents._store_source) → oam-svc config.json (같은 store 를 읽는다)
           │
@@ -231,8 +236,8 @@ HA 판정이 노드 로컬이어야 한다는 원칙(ha_service_model.md §5·§
 
   | 키 | 출처 | 빠뜨리면 |
   |---|---|---|
-  | `CimsRuntimeMount` | 입력(overlay 우선, 없으면 base 주입) | **그 노드의 mount guard 가 꺼진다** — 키가 없으면 검사를 건너뛰므로, 마운트 없이 떠서 마운트 지점 하부 로컬 디스크에 두 번째 store 를 만든다 |
-  | `CimsRuntimeDir` | 유도 `<마운트>/runtime` (마운트 없으면 노드 로컬 실효 루트) | 패키지 기본값으로 기동 (설치 시 409 로 차단) |
+  | `CimsRuntimeDir` | 입력(경로 설정 — overlay 우선, 둘 다 없으면 base 주입) | 마운트에서 유도(`<마운트>/runtime`), 마운트도 없으면 노드 로컬 실효 루트 |
+  | `CimsRuntimeMount` | (선택) 입력(overlay 우선, 없으면 base 주입) | **그 노드의 mount guard 가 꺼진다** — 키가 없으면 검사를 건너뛰므로, 마운트 없이 떠서 마운트 지점 하부 로컬 디스크에 두 번째 store 를 만든다 |
   | `Packages.Dir` | 유도 `<store>/pkg_files` | 패키지 `oam.json` 의 상대경로로 폴백해 **버전 디렉터리**를 본다 → 그 노드가 Active 가 되는 순간 `/agent-bundle.tar.gz` 404 (agent·모듈 설치/업그레이드 전면 불가) |
 
   `Packages.Dir` 은 **oam 에만** 준다 — 패키지 서빙은 base oam 만의 일이다. base oam 의
@@ -244,9 +249,9 @@ HA 판정이 노드 로컬이어야 한다는 원칙(ha_service_model.md §5·§
   마운트는 운영자가 정한 값이라 주입이 덮으면 안 되고, oam-svc 에서 overlay 에 남은 값은
   선언을 걷어내기 전의 잔재라 이기면 두 프로세스가 다른 store 를 본다. 잔재는 OAM 기동 시
   `sweep_overlay_schema` 가 렌더 동치를 확인하고 무중단으로 치운다.
-- **전환기 호환** — 옛 사이트가 마운트 하위의 **다른** 경로(`<마운트>/<사이트>/store`)를
-  store 로 쓰고 있으면 그 명시값을 존중한다(`runtime_store_dir`). 유도값으로 덮으면 빈
-  `<마운트>/runtime` 을 store 로 잡아 관리 데이터를 통째로 잃은 것처럼 보이기 때문이다.
+- **여러 사이트가 NAS 하나를 나눠 쓰는 구성**(예 `/mnt/cims/test48/runtime`) — 경로 설정이
+  정본이므로 마운트 하위 어느 경로든 그대로 store 다(`runtime_store_dir`). 유도값
+  `<마운트>/runtime` 은 경로를 비웠을 때의 기본값일 뿐이다.
   이때 `sweep_overlay_schema` 는 렌더가 달라지므로 그 키를 지우지 않고 경고만 남긴다 —
   정규화는 이관(§9.4)이 하고, 이관은 옛 파생 키를 overlay 에서 걷어낸다.
   반대로 마운트 **밖**을 가리키는 옛 값은 무시한다(이미 유효하지 않은 유도 결과이고,

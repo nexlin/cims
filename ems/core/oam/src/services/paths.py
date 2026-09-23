@@ -69,37 +69,26 @@ def service_log_dir(config: dict = None) -> str:
 
 
 def runtime_store_dir(config: dict = None) -> str:
-    """관리 store 루트 — **마운트 지점 하나에서 유도**한다 (oam_ha.md §4.1).
+    """관리 store 루트 — **경로 설정값이 정본**이다 (oam_ha.md §4.1).
 
-    운영자가 정하는 값은 `CimsRuntimeMount` 하나다:
+      · `CimsRuntimeDir` 지정 → 그 경로. NAS 든 로컬 디스크든 운영 상황이 정한다 — 마운트는
+        시스템/인프라의 일이고 store 위치는 그냥 설정이다. 패키지 = `{store}/pkg_files`.
+      · 비었고 `CimsRuntimeMount` 지정 → `{마운트}/runtime` 로 유도(마운트만 적은 사이트의 기본값).
+      · 둘 다 비움 → **노드 로컬**(`modules/oam/runtime`) — 부트스트랩 직후의 정상 상태.
 
-      · 지정 → store = `{마운트}/runtime`, 패키지 = `{store}/pkg_files`
-      · 비움 → **노드 로컬**(`modules/oam/runtime`) — 부트스트랩 직후의 정상 상태다
-        (공유 스토리지를 붙이는 수단이 이 OAM 이 서빙하는 콘솔이므로, 설치 시점에는
-        마운트가 없는 것이 당연하다)
-
-    `CimsRuntimeDir` 은 그 **유도 결과**다. 실체화(`agents._materialize_deploy_config`)가
-    계산해 `config.json` 에 적어 넣으므로 모듈들은 종전대로 그 키를 읽으면 되고, 여기서는
-    두 경우에만 명시값을 존중한다:
-
-      · 마운트가 없는 구성 — 노드 로컬 경로를 실체화가 채워 준 값(또는 dev/시험 override)
-      · 마운트 하위의 **다른** 경로를 store 로 쓰던 전환기 사이트 — 유도값으로 덮으면
-        OAM 이 빈 경로를 store 로 잡아 관리 데이터를 통째로 잃은 것처럼 보인다.
-        (정규화는 이관(`POST /ha-groups/{id}/shared-store/migrate`)이 한다)
-
-    마운트 밖을 가리키는 명시값은 **무시**한다 — 마운트를 바꾼 뒤 옛 경로가 남아 있으면
-    mount guard 가 기동을 거부하는데(store 가 마운트 하위가 아님), 그 값은 이미 유효하지
-    않은 유도 결과이지 운영자의 선택이 아니다."""
+    `CimsRuntimeMount` 는 **선택** 항목이다: 공유 스토리지(NAS) 에 store 를 두는 이중화 사이트가
+    "마운트가 빠진 채 기동해 로컬에 두 번째 store 를 만드는" 사고를 막으려고 mount guard
+    (`oam_app._assert_runtime_mount`)에 알려 주는 값이지 위치 입력이 아니다. 비우면 검사도 없다.
+    실체화(`agents._materialize_deploy_config`)는 여기서 계산한 값을 `config.json` 에 적어
+    모듈들이 같은 경로를 보게 한다."""
     cfg = config or {}
     mnt = str(cfg.get('CimsRuntimeMount') or '').strip().rstrip('/')
     explicit = str(cfg.get('CimsRuntimeDir') or '').strip().rstrip('/')
+    if explicit:
+        return explicit
     if mnt:
-        derived = f'{mnt}/runtime'
-        if explicit and explicit != derived and \
-                (explicit == mnt or explicit.startswith(mnt + '/')):
-            return explicit
-        return derived
-    return explicit or local_runtime_dir(cfg)
+        return f'{mnt}/runtime'
+    return local_runtime_dir(cfg)
 
 
 def packages_dir(config: dict = None) -> str:

@@ -364,16 +364,23 @@ def _materialize_deploy_config(config, pkg_file, overlay):
                 # OAM 의 실효 store 루트**를 준다 — 노드 로컬 폴백과 같은 값이고, 콘솔·agent·
                 # oam-svc 가 실제 경로를 알 수 있게 config.json 에 구체값으로 남긴다.
                 from services import paths as _paths
-                if "CimsRuntimeMount" in _template_key_set(tmpl) \
-                        and not str(out.get("CimsRuntimeMount") or "").strip():
+                # store 위치 = **경로 설정값**(`CimsRuntimeDir`, 템플릿 선언 — NAS 든 로컬이든)이 정본이고,
+                # `CimsRuntimeMount` 는 공유 스토리지 사이트의 선택 guard 값(비어 있으면 `<마운트>/runtime` 유도 폴백).
+                # overlay 에 둘 다 없으면 base(돌고 있는 OAM)의 값을 전파한다 — 아직 정하지 않은 노드에 그룹 값 주입.
+                _tk = _template_key_set(tmpl)
+                if "CimsRuntimeMount" in _tk and not str(out.get("CimsRuntimeMount") or "").strip():
                     _mp = str(config.get("CimsRuntimeMount") or "").strip()
                     if _mp:
                         out["CimsRuntimeMount"] = _mp
-                if str(out.get("CimsRuntimeMount") or "").strip():
+                if "CimsRuntimeDir" in _tk and not str(out.get("CimsRuntimeDir") or "").strip() \
+                        and not str(out.get("CimsRuntimeMount") or "").strip():
+                    _rd = str(config.get("CimsRuntimeDir") or "").strip()
+                    if _rd:
+                        out["CimsRuntimeDir"] = _rd
+                if str(out.get("CimsRuntimeMount") or "").strip() or str(out.get("CimsRuntimeDir") or "").strip():
                     _store = _paths.runtime_store_dir(out)
                 else:
-                    _store = str(out.get("CimsRuntimeDir") or "").strip() \
-                        or file_store.runtime_root(config)
+                    _store = file_store.runtime_root(config)
                 out["CimsRuntimeDir"] = _store
                 if not str(out.get("Packages.Dir") or "").strip():
                     out["Packages.Dir"] = os.path.join(_store, _STORE_PKG_DIR)

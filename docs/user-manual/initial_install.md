@@ -90,6 +90,11 @@ sudo ~/bootstrap/cims-bootstrap/install.sh --mgmt-ip <관리IP> --user <서비�
 - `--admin-pass` 는 명령행에 쓰면 shell history 에 남는다. 생략하면 아래 `[5/7]` 에서
   가려진 입력으로 두 번 묻는다.
 - `--batch` 를 주면 문답을 생략하고 옵션·기본값만 쓴다(자동화용).
+- **store·로그 위치는 경로 설정이다** — `--runtime-dir <관리 store 경로>` `--log-dir <서비스 로그 루트>`.
+  NAS 든 로컬 디스크든 운영 상황이 정하고, 마운트는 [시스템/인프라](또는 아래 `--mount-src`)로 따로 한다.
+  NAS 하나를 여러 사이트가 나눠 쓰면 `--runtime-dir /mnt/cims/<사이트>/runtime --log-dir /mnt/cims/<사이트>/service_log`
+  처럼 사이트 디렉터리 아래에 둔다. 생략 = `--runtime-mount` 의 `<마운트>/runtime`·`<마운트>/service_log`, 그것도
+  없으면 노드 로컬. `--runtime-mount` 는 공유 스토리지 이중화 사이트에서 mount guard 를 켜는 선택 항목이다.
 
 ### 대화식 문답 7개
 
@@ -146,11 +151,11 @@ ls /var/lib/systemd/linger/               # 서비스 계정
 ls /etc/sudoers.d/                        # cims-priv
 ```
 
-노드 `config.json` 의 `CimsRuntimeDir` 은 `<prefix>/modules/oam/runtime`, `Packages.Dir` 은
-그 하위 `pkg_files` 여야 한다. 공유 스토리지에 두었다면 각각 `<마운트>/runtime`,
-`<마운트>/runtime/pkg_files` 다. **둘 다 유도값이다** — 배포 레코드에는 `CimsRuntimeMount`
-(공유 스토리지를 쓸 때만) 하나만 저장되고, 나머지는 OAM 이 job 을 보낼 때마다 계산해
-`config.json` 에 적는다(oam_ha.md §4.1). 이후 설치되는 oam-svc 도 그 값을 유도해 받는다.
+노드 `config.json` 의 `CimsRuntimeDir` 은 `--runtime-dir` 로 준 경로(생략 시 `<마운트>/runtime`,
+마운트도 없으면 `<prefix>/modules/oam/runtime`), `Packages.Dir` 은 그 하위 `pkg_files` 여야 한다.
+배포 레코드에는 `CimsRuntimeDir`(경로 설정)과 `CimsRuntimeMount`(선택, mount guard) 가 저장되고
+`Packages.Dir` 은 OAM 이 job 을 보낼 때마다 유도해 `config.json` 에 적는다(oam_ha.md §4.1).
+이후 설치되는 oam-svc·csc 도 같은 store 경로를 유도해 받는다.
 
 ### 인증서
 
