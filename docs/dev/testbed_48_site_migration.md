@@ -118,12 +118,34 @@ scripts/oam-deploy.py install oam-cims-tester cims-tester-worker --agent media01
 - 계측기 `Tester.Secrets`(PBX_HA1)·`Tester.BaseOamUrl`·`Tester.DataDir=/mnt/cims/test48/tester` 는 overlay 로 들어간다.
   토폴로지·creds·run 색인은 DataDir 이동으로 그대로.
 
-## 5. 검증
+### 4.1 실측에서 드러난 함정 (2026-09-23)
+
+- **API 로 뽑은 overlay 의 password 는 마스크다** — `GET /deployments/{id}/config` 는 `type=password` 필드를 `••••••••` 로 돌려준다.
+  그 파일을 `POST /deployments {config}` 에 그대로 넣으면 마스크 문자열이 **비밀번호로 저장**돼 CSP `DB Connect failed`·REGISTER 403(unknown user),
+  CSC/oam-svc DB 실패가 난다. 실값은 소스 설정(`build/dist/csp/config/csp.json` `Setup.Database.Password`, 옛 `csc.json` `IdMs.JwtSecret`)에서
+  채워 넣는다(`_migration/new_*.json` 은 채워진 상태).
+- **overlay PUT 만으로는 노드 파일이 안 바뀐다** — `PUT /deployments/{id}/config` 는 `queue_update: true` 로 update_config job 을 큐잉해야
+  실체화가 `config.json` 을 다시 쓴다. restart job 은 파일을 안 쓴다. `oam-deploy.py config` 가 그렇게 한다(update → 8 초 → restart).
+- **oam-svc `FmIngest.Port` 는 9010** — 옛 overlay 의 9011 은 dev OAM 이 9010 을 쓰던 시절 값. 모듈(csp/cmp/cmdp) `Fm.OamPort` 기본 9010 과
+  맞춰야 FM_REGISTER ack 가 온다.
+- **capability 바이너리의 live 판정** — csp(`cap_net_admin`)·cims-tester-worker(`cap_sys_admin`)는 같은 uid 라도 `/proc/<pid>/exe` 를 못 읽어
+  agent 의 설치 트리 소유 검사가 실패 → live=down + watchdog 재시작 반복. agent 0.2.107 이 `cims-priv proc-exe`(sudo)로 폴백한다.
+- csc 4430 인증서는 OAM-CA 자동발급본을 쓴다 — 옛 `cert/server.*` 복사는 효과 없음(.48 은 실단말 대상이 아니라 무관). csp `cert/csp.pem` 은 복사가 필요하다.
+- 새 사이트의 dep 번호: oam 1 · oam-svc 2 · csc 3 · cmp 4 · cmdp 5 · csp 6 · oam-cims-tester 7 · cims-tester-worker 8, agent 1(media01).
+  계측기 토폴로지 tb48 = id **1**(`csp_deployment_id: 6`, `nodes.csp.logs` = `/opt/cims-agent/modules/csp/current/csp/log/csp_*.log`).
+- 계측기 creds 는 DB 에서 다시 뽑았다(`/mnt/cims/test48/tester/scenarios/creds/` — volte 40 · volte_tls 20 · voip 3(`--transport TLS`) · ptt 11 ·
+  ptt_video 5). 옛 run 색인·서비스 로그는 새 설치라 이어받지 않았다(사용자 결정).
+
+## 5. 검증 — 2026-09-23 pass
+
+`VOLTE-CALL-BASIC`(등록 30/30, RRD p95 5 ms)·`PTT-GROUP-CALL-BASIC`(11/11) pass. 전 모듈 running/up, 4419 콘솔·게이트웨이 정상.
+
+## 5a. 검증 절차
 
 ```bash
 scripts/oam-deploy.py status                                   # 전부 running/up
 curl -sk https://127.0.0.1:4419/api/v1/tester/health -H "Authorization: Bearer $TOK"   # data_dir=/mnt/cims/test48/tester · topologies 2
-cims-tester run VOLTE-CALL-BASIC --topology 2 --ht 3 --instances 1 ; cims-tester run PTT-GROUP-CALL-BASIC --topology 2 …
+cims-tester run VOLTE-CALL-BASIC --topology 1 --ht 3 --instances 1 ; cims-tester run PTT-GROUP-CALL-BASIC --topology 1 …
 ```
 
 콘솔: `/deploy/servers` 서버 1·모듈 8, `/service/history/ptt` 이력·녹취 재생(service_log 이동 확인), `/test/topologies` tb48.

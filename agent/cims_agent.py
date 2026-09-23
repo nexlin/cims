@@ -728,6 +728,18 @@ def _module_roots(name: str) -> list:
     return out
 
 
+def _proc_exe_priv(pid: int) -> str:
+    """`/proc/<pid>/exe` 를 sudo 헬퍼(cims-priv proc-exe)로 읽는다 — capability 바이너리(dumpable=0) 대비. 실패 = ''."""
+    priv = _resolve_cims_priv()
+    if not priv:
+        return ""
+    try:
+        r = subprocess.run(["sudo", "-n", priv, "proc-exe", str(pid)], capture_output=True, text=True, timeout=3)
+        return (r.stdout or "").strip() if r.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
 def _proc_under_roots(pid: int, cmd: str, roots: list) -> bool:
     """pid 가 roots 중 하나의 트리 안에서 도는가 — exe(C++ 바이너리) · cwd(python 데몬은 자기 src 에서
     기동) · cmdline 의 스크립트 경로(절대 또는 cwd 상대) 중 하나가 루트 아래면 참."""
@@ -736,6 +748,16 @@ def _proc_under_roots(pid: int, cmd: str, roots: list) -> bool:
     for link in ("exe", "cwd"):
         try:
             v = os.readlink(f"/proc/{pid}/{link}")
+        except PermissionError:
+            # 파일 capability 가 걸린 바이너리(csp cap_net_admin · cims-tester-worker cap_sys_admin)는 같은 uid 라도
+            # dumpable=0 이라 /proc/<pid>/exe·cwd 를 못 읽는다 — 그대로 두면 설치 트리 소유 검사가 실패해 멀쩡히
+            # 도는 모듈을 down 으로 보고하고 watchdog 이 재시작을 반복한다(2026-09-23 실측). exe 는 sudo 헬퍼
+            # (cims-priv proc-exe — cims-svc 의 상태 판정과 같은 경로)로 읽는다. cwd 는 exe 로 충분해 생략.
+            if link != "exe":
+                continue
+            v = _proc_exe_priv(pid)
+            if not v:
+                continue
         except OSError:
             continue
         if v.endswith(" (deleted)"):

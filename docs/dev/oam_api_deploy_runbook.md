@@ -8,7 +8,8 @@ CLI 로 부르는 절차다. 개발 테스트베드(.48, 관리평면 OAM 4419, 
 
 - 대상 OAM(4419)이 살아 있고 관리자 계정으로 로그인할 수 있다(`POST /api/v1/auth/login {login_id, password}` → `token`).
 - 패키지 tarball 은 **OAM 프로세스가 읽을 수 있는 경로**에 있어야 한다(`POST /packages` 는 업로드가 아니라 `file_path` 등록이다).
-  개발 TB 의 store 는 `build/dist/oam/packages_tb/`.
+  .48 정식 배치(2026-09-23, [testbed_48_site_migration.md](testbed_48_site_migration.md))의 저장소는 `/mnt/cims/test48/runtime/pkg_files` —
+  `OAM_PACKAGE_STORE` 환경변수(또는 `packages --store`)로 준다. 배포 id = oam 1 · oam-svc 2 · csc 3 · cmp 4 · cmdp 5 · csp 6 · tester 7 · worker 8.
 - 배포 모듈은 agent 가 감독한다. 같은 호스트에 dev OAM(4419)이 떠 있으면 **base oam 배포(dep29, 4445)는 `live_state` 가 늘 up** 이라
   stop 이 409 로 막힌다(agent heartbeat 가 프로세스 이름으로 판정) — 그 모듈은 이 절차로 올리지 않는다.
 - `make dist` 뒤 `./cims.sh pkg <module…>` 로 tarball 을 만든다. pkg 는 patch 버전을 자동 bump 하고 source→dist 를 sync 한다
@@ -29,7 +30,12 @@ scripts/oam-deploy.py upgrade 34=61 31=62                                   # 5)
 scripts/oam-deploy.py upgrade --latest oam-cims-tester cims-tester-worker   #    (모듈 이름으로 — 그 모듈의 최신 등록 패키지)
 
 scripts/oam-deploy.py collection 34 access_services --set country_code=82 --signal   # 6) 설정 컬렉션 주입(선택) + SIGUSR1
+scripts/oam-deploy.py install csp cmp --agent media01 --config csp=csp.json           # 새 배포(생성 → install job → overlay → start)
+scripts/oam-deploy.py config 6 --file csp.json --restart                              # overlay 저장(update_config job 큐잉) → 재기동
 ```
+
+`config` 는 `PUT /config` 에 `queue_update: true` 를 준다 — overlay 저장만으로는 노드 `config.json` 이 바뀌지 않고 update_config job 이
+실체화해 쓴다(restart job 은 파일을 안 쓴다). `GET /config` 의 password 필드는 `••••••••` 로 마스크되므로 그대로 되돌려 넣지 않는다.
 
 한 모듈 업그레이드는 stop(≈10 s) → upgrade job(설치·심볼릭 current 전환, 30~60 s) → start(≈10 s) 로 **1~2 분**이다. 네 모듈이면 5~8 분.
 API 는 job 을 큐에 넣고 바로 돌아오므로 스크립트가 `GET /deployments/{id}` 의 `live_state`·`package_id` 를 3 초 간격으로 폴링한다.

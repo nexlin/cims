@@ -239,9 +239,12 @@ def cmd_install(oam: Oam, args) -> int:
 def cmd_config(oam: Oam, args) -> int:
     """배포 overlay 저장 — PUT /deployments/{id}/config {config} (변경분 병합). --file 의 JSON 을 그대로 보낸다. --restart 면 restart job."""
     cfg = json.load(open(args.file, encoding='utf-8'))
-    r = oam.call('PUT', f'/deployments/{args.dep}/config', {'config': cfg, 'queue_update': False})
+    # queue_update=True — overlay 저장만으로는 노드 config.json 이 안 바뀐다(update_config job 이 실체화해 쓴다). restart job 은
+    # 파일을 다시 쓰지 않으므로 update 를 먼저 큐잉하고 잠깐 기다린 뒤 재기동한다.
+    r = oam.call('PUT', f'/deployments/{args.dep}/config', {'config': cfg, 'queue_update': True})
     pruned = r.get('pruned_keys') or []
-    print(f"dep{args.dep} config 저장 — 키 {len(cfg)}개{' (템플릿 밖 제외: ' + ','.join(pruned) + ')' if pruned else ''}")
+    print(f"dep{args.dep} config 저장 — 키 {len(cfg)}개{' (템플릿 밖 제외: ' + ','.join(pruned) + ')' if pruned else ''} update job {r.get('job_id') or r.get('update_job_id') or '?'}")
+    time.sleep(8)
     if args.restart:
         j = oam.call('POST', f'/deployments/{args.dep}/job', {'job_type': 'restart'})
         print(f"  restart job {j.get('job_id')}")
