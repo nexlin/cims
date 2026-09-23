@@ -165,29 +165,30 @@ class TestReadRangeFiltersOldGeneration(unittest.TestCase):
     센 적이 없는 것이다."""
 
     def setUp(self):
-        self.root = tempfile.mkdtemp(prefix='statsiface')
+        self.site = tempfile.mkdtemp(prefix='statsiface')
+        self.roots = R.roots_of({'CimsSiteDir': self.site})
         S.reset_cache() if hasattr(S, 'reset_cache') else None
 
     def tearDown(self):
-        shutil.rmtree(self.root, ignore_errors=True)
+        shutil.rmtree(self.site, ignore_errors=True)
 
     def _seed(self, v):
         rows = [_rec(f'{DAY} {h:02d}:{m:02d}', v=v, sip={'INVITE': 1},
                      iface=({'cmp': {'RELAY_ADD': 1}} if v == 2 else None))
                 for h in range(24) for m in range(60)]
-        S.for_root(self.root).replace_day('1m', DAY, rows)
+        S.for_root(self.roots.stats).replace_day('1m', DAY, rows)
 
     def test_옛_세대는_sip_에는_쓰이고_cmp_에는_안_쓰인다(self):
         self._seed(v=1)
         # 원본 날 디렉터리를 두지 않는다 — 즉석 집계로 채울 수 없으니 '모름' 이 되어야 한다
         f, t = f'{DAY} 00:00:00', f'{DAY} 23:59:59'
 
-        rows, cov = R.read_range_filled(self.root, f, t, {}, gran='1h')
+        rows, cov = R.read_range_filled(self.roots, f, t, {}, gran='1h')
         self.assertTrue(rows, 'sip 조회는 옛 세대도 그대로 쓴다')
         self.assertEqual(cov['missing'], 0)
 
         rows, cov = R.read_range_filled(
-            self.root, f, t, {}, gran='1h',
+            self.roots, f, t, {}, gran='1h',
             row_ok=lambda r: R.covers_iface(r, 'cmp'))
         self.assertEqual(rows, [], 'cmp 조회는 세대가 모자란 행을 안 쓴다')
         self.assertEqual(cov['missing_days'], [DAY],
@@ -196,7 +197,7 @@ class TestReadRangeFiltersOldGeneration(unittest.TestCase):
     def test_새_세대는_cmp_에도_쓰인다(self):
         self._seed(v=2)
         rows, cov = R.read_range_filled(
-            self.root, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {}, gran='1h',
+            self.roots, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {}, gran='1h',
             row_ok=lambda r: R.covers_iface(r, 'cmp'))
         self.assertEqual(len(rows), 1440)
         self.assertEqual(cov['missing'], 0)
@@ -209,7 +210,7 @@ class TestHttpsScan(unittest.TestCase):
     """HTTPS 는 자기 원문 로그가 없어 flow 로그에서 센다."""
 
     def setUp(self):
-        self.root = tempfile.mkdtemp(prefix='statshttps')
+        self.root = tempfile.mkdtemp(prefix='statshttps')     # SIP/Flow 5분 버킷 루트(<log>/sip) 자리
         self.hdir = os.path.join(self.root, '2026', '09', '20', '10')
         os.makedirs(self.hdir)
 

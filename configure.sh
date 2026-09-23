@@ -33,7 +33,7 @@ source "$SCRIPT_DIR/scripts/lib/common.sh" || {
 _INIT_CFG="${SRC_DIR:-$SCRIPT_DIR}/.cims/server.local.json"
 _CFG_SAVED_KEYS="csp_ip psp_ip isp_ip cmp_ip pmp_ip imp_ip cmdp_ip cwrtc_ip csc_host \
 db_host db_user volte_domain ptt_domain volte_service ptt_service country_code plmn \
-msg_log_dir service_log_dir record_dir"
+site_dir service_log_dir record_dir"
 eval "$(cims_local_cfg_eval "$_INIT_CFG" $_CFG_SAVED_KEYS)"
 
 # ── 기본값 ─────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ COUNTRY_CODE="${_init_country_code:-}"
 PLMN="${_init_plmn:-}"                      # HPLMN MCC+MNC — csc UeInitConfig.Hplmn.Plmn (ue-init-config)
 IDMS_JWT_SECRET=""
 CIMS_JWT_SECRET=""
-MSG_LOG_DIR="${_init_msg_log_dir:-}"
+SITE_DIR="${_init_site_dir:-}"
 SERVICE_LOG_DIR="${_init_service_log_dir:-}"
 RECORD_DIR="${_init_record_dir:-}"
 INTERACTIVE="auto"   # auto: 인수 없음 + TTY 일 때만 대화형
@@ -105,10 +105,10 @@ ${BOLD}도메인:${NC}
   --country-code CC   홈 국가코드(E.164 digits, 단말 번호 로컬 표기용. 기본: 82)
   --plmn         PLMN HPLMN MCC+MNC — csc.json UeInitConfig.Hplmn.Plmn (ue-init-config, 기본: 45033)
 
-${BOLD}로그/녹취:${NC}
-  --msg-log-dir      DIR  메시지 통계 로그 디렉터리 (기본: DIST_DIR/ext_mnt/msg_log)
-  --service-log-dir  DIR  서비스 이력/Flow 로그 디렉터리 (기본: DIST_DIR/ext_mnt/service_log)
-  --record-dir       DIR  녹취 파일 디렉터리 (기본: DIST_DIR/ext_mnt/recordings)
+${BOLD}사이트 디렉터리 (docs/design/features/site_directory_layout.md):${NC}
+  --site-dir         DIR  사이트 루트 — runtime/ log/ recordings/ stats/ state/ content/ 가 그 아래 (기본: DIST_DIR/ext_mnt)
+  --service-log-dir  DIR  서비스 로그(log/ 영역) override
+  --record-dir       DIR  녹취(recordings/ 영역) override
 
 ${BOLD}보안:${NC}
   --idms-secret  SEC  IdMS JWT 시크릿 (기본: 랜덤 생성)
@@ -149,7 +149,7 @@ while [[ $# -gt 0 ]]; do
         --ptt-service)   PTT_SERVICE="$2";   shift 2 ;;
         --country-code) COUNTRY_CODE="$2";  shift 2 ;;
         --plmn)         PLMN="$2";          shift 2 ;;
-        --msg-log-dir)      MSG_LOG_DIR="$2";       shift 2 ;;
+        --site-dir)         SITE_DIR="$2";          shift 2 ;;
         --service-log-dir)  SERVICE_LOG_DIR="$2";   shift 2 ;;
         --record-dir)       RECORD_DIR="$2";        shift 2 ;;
         --idms-secret)      IDMS_JWT_SECRET="$2";   shift 2 ;;
@@ -222,13 +222,10 @@ if [[ $INTERACTIVE == "yes" ]]; then
     ask COUNTRY_CODE "COUNTRY_CODE (홈 국가코드, E.164 digits)" "${COUNTRY_CODE:-82}"
     ask PLMN "PLMN (HPLMN MCC+MNC, ue-init-config)" "${PLMN:-45033}"
 
-    read -rp "  로그/녹취 디렉터리 변경? [y/N]: " _yn
+    read -rp "  사이트 디렉터리 변경? [y/N]: " _yn
     if [[ $_yn =~ ^[yY] ]]; then
-        ask SERVICE_LOG_DIR "SERVICE_LOG_DIR (서비스 이력/Flow 로그)" \
-            "${SERVICE_LOG_DIR:-$DIST_DIR/ext_mnt/service_log}"
-        ask MSG_LOG_DIR "MSG_LOG_DIR (메시지 통계, 기본=SERVICE_LOG_DIR)" \
-            "${MSG_LOG_DIR:-${SERVICE_LOG_DIR:-$DIST_DIR/ext_mnt/service_log}}"
-        ask RECORD_DIR "RECORD_DIR (녹취 파일)" "${RECORD_DIR:-$DIST_DIR/ext_mnt/recordings}"
+        ask SITE_DIR "SITE_DIR (사이트 루트 — log/ recordings/ stats/ state/ content/)" \
+            "${SITE_DIR:-$DIST_DIR/ext_mnt}"
     fi
     info "JWT 시크릿(IdMS/CIMS)은 매 실행 랜덤 생성 — 고정하려면 --idms-secret/--cims-secret"
 
@@ -258,7 +255,7 @@ _raw_db_host="$DB_HOST"; _raw_db_user="$DB_USER"
 _raw_volte_domain="$VOLTE_DOMAIN"; _raw_ptt_domain="$PTT_DOMAIN"
 _raw_volte_service="$VOLTE_SERVICE"; _raw_ptt_service="$PTT_SERVICE"
 _raw_country_code="$COUNTRY_CODE"; _raw_plmn="$PLMN"
-_raw_msg_log_dir="$MSG_LOG_DIR"; _raw_service_log_dir="$SERVICE_LOG_DIR"
+_raw_site_dir="$SITE_DIR"; _raw_service_log_dir="$SERVICE_LOG_DIR"
 _raw_record_dir="$RECORD_DIR"
 
 # 미설정 값은 기본값으로
@@ -285,11 +282,16 @@ COUNTRY_CODE="${COUNTRY_CODE:-82}"
 # HPLMN PLMN — 도메인이 3GPP 표기(ptt.mncXXX.mccYYY…)가 아니라 유도할 수 없으므로 명시 (IMSI 접두 45033 규약과 일치)
 PLMN="${PLMN:-45033}"
 
-# 로그/녹취 디렉터리 기본값
-SERVICE_LOG_DIR="${SERVICE_LOG_DIR:-$DIST_DIR/ext_mnt/service_log}"
-MSG_LOG_DIR="${MSG_LOG_DIR:-$SERVICE_LOG_DIR}"
-RECORD_DIR="${RECORD_DIR:-$DIST_DIR/ext_mnt/recordings}"
-mkdir -p "$SERVICE_LOG_DIR" "$RECORD_DIR"
+# 사이트 영역 — 개발 트리도 배포본과 같은 레이아웃(site_directory_layout.md). OAM 과 모듈이 **같은 값**을
+#   받도록 영역 경로를 여기서 한 번 정해 템플릿(@SERVICE_LOG_DIR@ 등)과 oam overlay 에 똑같이 넣는다.
+SITE_DIR="${SITE_DIR:-$DIST_DIR/ext_mnt}"
+SERVICE_LOG_DIR="${SERVICE_LOG_DIR:-$SITE_DIR/log}"
+RECORD_DIR="${RECORD_DIR:-$SITE_DIR/recordings}"
+STATS_DIR="$SITE_DIR/stats"
+STATE_DIR="$SITE_DIR/state"
+CONTENT_DIR="$SITE_DIR/content"
+MSG_LOG_DIR="$SERVICE_LOG_DIR"    # cwrtc 템플릿(@MSG_LOG_DIR@) 전용 — 보존 소스
+mkdir -p "$SERVICE_LOG_DIR" "$RECORD_DIR" "$STATS_DIR" "$STATE_DIR" "$CONTENT_DIR"
 
 # JWT 시크릿 랜덤 생성 (미설정 시)
 if [[ -z "$IDMS_JWT_SECRET" ]]; then
@@ -326,7 +328,7 @@ echo "  VOLTE_SERVICE = $VOLTE_SERVICE"
 echo "  PTT_SERVICE   = $PTT_SERVICE"
 echo "  COUNTRY_CODE = +$COUNTRY_CODE"
 echo "  PLMN         = $PLMN"
-echo "  MSG_LOG_DIR     = $MSG_LOG_DIR"
+echo "  SITE_DIR        = $SITE_DIR"
 echo "  SERVICE_LOG_DIR = $SERVICE_LOG_DIR"
 echo "  RECORD_DIR      = $RECORD_DIR"
 echo "  DIST_DIR        = $DIST_DIR"
@@ -353,7 +355,7 @@ if [[ $INTERACTIVE == "yes" ]]; then
     RAW_volte_domain="$_raw_volte_domain" RAW_ptt_domain="$_raw_ptt_domain" \
     RAW_volte_service="$_raw_volte_service" RAW_ptt_service="$_raw_ptt_service" \
     RAW_country_code="$_raw_country_code" RAW_plmn="$_raw_plmn" \
-    RAW_msg_log_dir="$_raw_msg_log_dir" RAW_service_log_dir="$_raw_service_log_dir" \
+    RAW_site_dir="$_raw_site_dir" RAW_service_log_dir="$_raw_service_log_dir" \
     RAW_record_dir="$_raw_record_dir" \
     KEYS="$_CFG_SAVED_KEYS" python3 - <<'PY'
 import json, os
@@ -403,6 +405,9 @@ apply_template() {
         -e "s|@MSG_LOG_DIR@|${MSG_LOG_DIR}|g" \
         -e "s|@SERVICE_LOG_DIR@|${SERVICE_LOG_DIR}|g" \
         -e "s|@RECORD_DIR@|${RECORD_DIR}|g" \
+        -e "s|@STATS_DIR@|${STATS_DIR}|g" \
+        -e "s|@STATE_DIR@|${STATE_DIR}|g" \
+        -e "s|@CONTENT_DIR@|${CONTENT_DIR}|g" \
         -e "s|@DIST_DIR@|${DIST_DIR}|g" \
         "$src" > "$dst"
     ok "생성: $dst"
@@ -426,7 +431,8 @@ apply_config_template() {
     IDMS_JWT_SECRET="$IDMS_JWT_SECRET" CIMS_JWT_SECRET="$CIMS_JWT_SECRET" \
     INTERNAL_TOKEN="$INTERNAL_TOKEN" AUC_KEK="$AUC_KEK" \
     MSG_LOG_DIR="$MSG_LOG_DIR" SERVICE_LOG_DIR="$SERVICE_LOG_DIR" \
-    RECORD_DIR="$RECORD_DIR" DIST_DIR="$DIST_DIR" \
+    RECORD_DIR="$RECORD_DIR" STATS_DIR="$STATS_DIR" STATE_DIR="$STATE_DIR" CONTENT_DIR="$CONTENT_DIR" \
+    DIST_DIR="$DIST_DIR" \
     python3 - "$src" "$dst" <<'PY'
 import json, os, re, sys
 
@@ -489,7 +495,7 @@ if [[ -d "$DIST_DIR/oam/config" ]]; then
         cp -f "$SCRIPT_DIR/ems/core/oam/config/oam-tb.json" "$DIST_DIR/oam/config/oam-tb.json" 2>/dev/null || true
     fi
     OAM_OVL="$DIST_DIR/oam/config.json" SECRET="$CIMS_JWT_SECRET" \
-        SVC_LOG_DIR="$SERVICE_LOG_DIR" RUNTIME_DIR="$DIST_DIR/ext_mnt/runtime" \
+        SITE_DIR="$SITE_DIR" SVC_LOG_DIR="$SERVICE_LOG_DIR" REC_DIR="$RECORD_DIR" \
         DBH="$DB_HOST" DBP="${DB_PORT:-3306}" DBU="$DB_USER" DBW="$DB_PASSWORD" DBN="${DB_NAME:-cims}" \
         CSPIP="$CSP_IP" CMPIP="$CMP_IP" \
         python3 - <<'PY'
@@ -503,11 +509,12 @@ try:
 except Exception:
     ovl = {}
 ovl["CimsAuth.JwtSecret"] = os.environ["SECRET"]
+# 사이트 디렉터리 — 관리 store(runtime/)·통계·상태·콘텐츠는 그 아래로 유도된다(services/paths.py).
+#   로그·녹취는 모듈 템플릿에 넣은 값(override 포함)과 같아야 하므로 구체값으로 적는다.
+ovl["CimsSiteDir"] = os.environ["SITE_DIR"]
 ovl["ServiceLogging.Dir"] = os.environ["SVC_LOG_DIR"]
-# 개발 트리 전용 store override — 상용에서 store 위치를 정하는 값은 `CimsRuntimeMount`
-# 하나이고 나머지는 유도된다(oam_ha.md §4.1). dev 는 마운트가 없으므로 유도 폴백이
-# 모듈 트리를 가리키는데, 배포본(dist) 레이아웃에는 그 트리가 없어 여기서 못박는다.
-ovl["CimsRuntimeDir"] = os.environ["RUNTIME_DIR"]
+ovl["Recording.Dir"] = os.environ["REC_DIR"]
+ovl.pop("CimsRuntimeDir", None)
 # stats 핸들러(_get_db)가 읽는 CimsDatabase — 미주입 시 기본 127.0.0.1 로 접속을 시도해
 # 외부 DB 구성에서 통계 API 가 MySQL 에러(500)를 반환한다.
 ovl["CimsDatabase"] = {
@@ -523,8 +530,8 @@ with open(p, "w") as f:
     json.dump(ovl, f, indent=4, ensure_ascii=False)
     f.write("\n")
 print("  oam overlay(config.json) CimsAuth.JwtSecret ← csc 와 동일 값 정렬")
-print("  oam overlay ServiceLogging.Dir ← " + os.environ["SVC_LOG_DIR"])
-print("  oam overlay CimsRuntimeDir ← " + os.environ["RUNTIME_DIR"])
+print("  oam overlay CimsSiteDir ← " + os.environ["SITE_DIR"])
+print("  oam overlay ServiceLogging.Dir ← " + os.environ["SVC_LOG_DIR"] + " · Recording.Dir ← " + os.environ["REC_DIR"])
 print("  oam overlay CimsDatabase ← %s@%s" % (os.environ["DBU"], os.environ["DBH"]))
 PY
 fi

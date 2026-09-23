@@ -248,7 +248,7 @@ def test_fullduplex_private_call():
 
 
 def main():
-    rec.init(service_log_dir='/tmp', ffmpeg_bin=FF, transcode_workers=2)
+    rec.init(recordings_dir='/tmp', ffmpeg_bin=FF, transcode_workers=2)
     print("=== OAM 녹취 슬롯 트랙 변환 E2E ===")
     test_multitalker_mix_and_slots()
     test_legacy_flat_recording()

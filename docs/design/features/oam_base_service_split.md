@@ -158,7 +158,7 @@
   설정이므로. `--role all` 에서는 base 가 대행 평가(`detected_by='oam'`).
 - **agent 계열**(disk/`process_down`(module_down — 전 모듈, csp/cmp 포함), scope=`agent`,
   heartbeat 메트릭 기반) = **base** 잔류.
-- 저장(`alert_log` → `ServiceLogging.Dir`)·조회 API(`/api/v1/alerts`)는 base 소유 불변 — 동거
+- 저장(`alert_log` → 로그 영역 `ServiceLogging.Dir`)·조회 API(`/api/v1/alerts`)는 base 소유 불변 — 동거
   노드 전제로 양쪽이 같은 디렉토리에 기록하고, 기동 시 open-state 복원은 소유 계열만
   (`restore_open_state` scope: 서비스=`cims/*` mo, agent=그 외).
 
@@ -295,7 +295,7 @@ config/
   `CimsAuth.JwtSecret`)까지 그 파일에서 채워야 한다(`oam-svc.json.sample` 참조).
 
 ### 서비스 관측 설정의 소유 — oam-svc (콘솔 관리)
-`CimsDatabase`/`CspNotify`/`MediaServer.Endpoints`/`ServiceLogging` 은 **서비스 관측 설정으로
+`CimsDatabase`/`CspNotify`/`MediaServer.Endpoints`/`ServiceLogging`(스풀·보존 설정 — 경로는 사이트 영역) 은 **서비스 관측 설정으로
 oam-svc 소유**다. 정규 관리 경로는 콘솔 배포설정 — oam-svc `config_template.json` 의
 `db`/`probe`/`logging` 섹션(csp/csc 와 동일 관례) → `PUT /deployments/<id>/config` →
 `update_config` job → 배포 overlay(`config.json`). 우선순위:
@@ -308,10 +308,11 @@ oam-svc 소유**다. 정규 관리 경로는 콘솔 배포설정 — oam-svc `co
 주체는 콘솔 UI 가 아니라 **백엔드 실체화**(`agents._materialize_deploy_config`)다: OAM 이
 install/upgrade/update_config job 을 디스패치할 때 ① `config_template` 전 필드의 `default`
 를 base 로 깔고 ② deployment 레코드의 overlay(사용자 변경분)를 병합하고 ③ 게이트웨이 서비스
-모듈(meta.gateway.routes 보유)에는 base 소유 공유값(`CimsAuth.JwtSecret`/`Mgmt.Cidr`,
-비어있으면 `ServiceLogging.Dir`)을 주입해 완전한 config 를 agent 에 전달한다. store 경로
-(`CimsRuntimeDir`)는 그 store 를 다루는 모듈(oam/oam-svc)에만 주는데, **입력은 base oam 의
-`CimsRuntimeMount` 하나**이고 store 루트·패키지 저장소는 거기서 유도된다(oam_ha.md §4.1).
+모듈(meta.gateway.routes 보유)에는 base 소유 공유값(`CimsAuth.JwtSecret`/`Mgmt.Cidr`)을 주입하고, ④ 템플릿이
+`site_area` 로 선언한 경로 키(`ServiceLogging.Dir`·`Recording.Dir`·`Stats.Dir`·`State.Dir`·`Content.Dir` 등)에는 base oam
+사이트 디렉터리에서 유도한 영역 경로를 넣어(`_site_source`, [site_directory_layout.md](site_directory_layout.md) §3) 완전한
+config 를 agent 에 전달한다. store 경로(`CimsRuntimeDir`)는 그 store 를 다루는 모듈(oam/oam-svc/csc)에만 주는데, **입력은
+base oam 의 사이트 디렉터리(`CimsSiteDir`)** 이고 store 루트·패키지 저장소는 거기서 유도된다(oam_ha.md §4.1).
 oam-svc 쪽 출처는 살아있는 OAM 의 현재 설정이 아니라 **`oam` 배포설정**(desired state)이다
 (`agents._store_source`) — 이관 job 을 디스패치하는 시점의 현재 설정은 아직 옛 경로라
 그것을 주면 oam-svc 만 옛 store 에 남는다. 상세: [oam_ha.md](oam_ha.md) §4.1·§9.4.
@@ -327,8 +328,8 @@ base conf 생성(`gen_default_config`) 대상이 아니다 — `config.json` 에
 **base `oam.json` 은 base 전용 설정만 갖는다** — 서비스 관측 키(`CimsDatabase`/`CspNotify`/
 `CmpIp`·`CmpPort`/`MediaServer`)를 두지 않으며, **`--role base` 는 이 키들을 읽지 않는다**
 (base 프로세스는 DB 미접속). 예외는 `ServiceLogging` — base 도 agent 계열 알람(alert_log)
-저장·조회와 콘솔 flow 기록에 쓰는 공유 키라 `oam.json` 에 남으며, oam-svc 콘솔 설정이 비어
-있으면 배포 실체화가 base 값을 주입한다. `--role all`(단일 프로세스 dev/TB)에서 서비스 관측이 필요하면 키를
+저장·조회와 콘솔 flow 기록에 쓰는 공유 키라 `oam.json` 에 남는다. 그 경로(로그 영역)는 base 사이트 디렉터리에서
+유도되고, oam-svc 는 배포 실체화가 같은 값을 받는다(템플릿 `site_area`). `--role all`(단일 프로세스 dev/TB)에서 서비스 관측이 필요하면 키를
 배포 overlay(`config.json`) 또는 로컬/TB 설정(`oam-tb.json` 등)으로 제공한다 — 레포 `oam.json`
 에는 두지 않는다.
 
@@ -683,8 +684,8 @@ _put_group_pkg_config`, operator):
   선언은 곧 편집권이므로, 다른 모듈에서 유도되는 파생값에 선언을 주면 두 번째 입력점이
   생기고 그때부터 "두 값이 같은가" 를 검사하는 코드가 따라붙는다. 그런 값은 선언을 두지
   않아 이 마스크가 저장을 막게 하고, 실체화가 유일한 출처에서 유도해 채운다. 예:
-  oam-svc 의 `CimsRuntimeDir`/`CimsRuntimeMount`(oam 배포설정에서 유도), `Mgmt.Cidr`,
-  그리고 **base oam 자신의 `CimsRuntimeDir`·`Packages.Dir`**(마운트 지점 하나에서 유도 —
-  같은 사실을 세 칸에 나눠 입력받던 구조를 걷어냈다, oam_ha.md §4.1).
+  oam-svc 의 `CimsRuntimeDir`/`CimsRuntimeMount`(oam 배포설정에서 유도), `Mgmt.Cidr`.
+  서비스 모듈의 영역 경로 키(`site_area`)는 선언은 있지만 실체화가 base oam 사이트 디렉터리 값으로 **무조건** 다시 채우므로
+  (콘솔 `자동 채움`) 두 번째 입력점이 되지 않는다([site_directory_layout.md](site_directory_layout.md) §3.2).
   이 값들은 `_prune_to_template` 이 걸러 overlay 에 앉지 못하므로 §14.7 의 세 가지 폐해
   ((a) 안 보이는 필드 (b) 자동교정 방치 (c) 남의 필드 오독)도 발생하지 않는다.

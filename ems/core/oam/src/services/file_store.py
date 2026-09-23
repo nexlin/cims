@@ -70,11 +70,11 @@ def _writable_dir(path: str) -> bool:
 def runtime_root(config: dict) -> str:
     """runtime store 의 base 디렉토리 — `services.paths.runtime_store_dir` 이 정본.
 
-    해석 순서:
-      1. `CimsRuntimeMount` → `{마운트}/runtime` (관리 store 를 정하는 **유일한 입력**)
-      2. `CimsRuntimeDir` — 실체화가 채워 준 유도 결과(마운트 없는 구성의 노드 로컬 경로)
-         또는 전환기·dev override
-      3. 노드 로컬 `modules/oam/runtime` (설정이 아예 없는 부트스트랩 직후)
+    해석 순서(`paths.runtime_store_dir`):
+      1. `CimsRuntimeDir` — 경로 설정(명시값) 또는 실체화가 채워 준 유도 결과
+      2. `CimsSiteDir` → `{사이트}/runtime`
+      3. `CimsRuntimeMount` → `{마운트}/runtime` (사이트 디렉터리 없는 옛 이중화 구성)
+      4. 노드 로컬 `modules/oam/runtime` (설정이 아예 없는 부트스트랩 직후)
 
     옛 폴백(로그 디렉터리 sibling → cwd/runtime)은 폐기했다. 로그를 공유 스토리지(NAS)에
     두는 구성에서 **관리 데이터(배포/그룹/에이전트)까지 공유 스토리지로 끌려가고**, 노드를
@@ -87,7 +87,7 @@ def runtime_root(config: dict) -> str:
     존중하고(리스가 보호), **유도된 폴백이 공유 마운트로 끌려가는 사고**만 기동 실패로 막는다.
     """
     from services import paths as _p
-    explicit = config.get('CimsRuntimeDir') or config.get('CimsRuntimeMount')
+    explicit = config.get('CimsRuntimeDir') or config.get('CimsSiteDir') or config.get('CimsRuntimeMount')
     if explicit:
         explicit = _p.runtime_store_dir(config)
         # **쓸 수 있는 경로인지 확인한다.** 패키지 기본값이나 옛 배포 overlay 에 다른 머신의

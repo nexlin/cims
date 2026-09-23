@@ -82,7 +82,7 @@ void McDataArchiveMessage( const char *pszGroup, const char *pszFrom, const char
               pszVia ? pszVia : "", pszVia && pszVia[0] ? "\"" : "" );
     gclsCallDir.PttLogEvent( pszGroup, "message_sent", szEvt );
 
-    // 메시지 보관 — {ServiceLogDir}/message/{gid}/{시간버킷}/messages.jsonl (콘솔 모니터링 SoT)
+    // 메시지 보관 — <recordings>/message/{gid}/{시간버킷}/messages.jsonl (콘솔 모니터링 SoT)
     std::string strRec = std::string( "{\"group\":\"" ) + _jesc( pszGroup ) + "\",\"from\":\"" + _jesc( pszFrom ) +
                          "\",\"msg_type\":\"" + pszMsgType + "\",\"conv_id\":\"" + clsInfo.m_strConvId +
                          "\",\"msg_id\":\"" + clsInfo.m_strMsgId + "\",\"text\":\"" + _jesc( clsInfo.m_strText ) +

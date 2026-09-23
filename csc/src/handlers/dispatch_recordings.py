@@ -10,7 +10,8 @@ android_ue_provisioning.md §3-2.
   fetch_ptt_sessions(...)                                              `/provisioning/history?kind=ptt&until=` 창 조회가 쓰는 OAM 세션 인덱스
                                                                        (`/api/v1/ptt/sessions`) 프록시 — 호출자 mcptt.handle_provisioning_history
 
-`id` = 세션 디렉터리의 ServiceLogDir 상대 경로(`/provisioning/history` 항목의 `recordingId`, OAM 녹취 API 와 같은 키).
+`id` = 세션 디렉터리의 녹취 영역(Recording.Dir) 상대 경로(`/provisioning/history` 항목의 `recordingId`, OAM 녹취 API 와 같은 키).
+녹취 영역에 닿지 않으면 503 `service_log_unavailable`(앱 와이어 계약의 오류 코드 — 관제 앱 ResponseText 가 매핑).
 CSC 는 **범위 게이트 + 프록시**만 한다 — 원시 RTP → MP4 변환·캐시·다중 버킷 결합은 oam-svc `handlers/recording.py` 하나가
 소유하고(변환 상태·워커 풀·failed 마커) CSC 가 재구현하지 않는다(통합 이력의 "얇은 구독자 뷰" 원칙). 범위 판정은
 `/provisioning/history` 와 같은 집합 — 관제사의 **역할**(mcptt_authorization.md §2: monitor_call + role_monitor_targets →
@@ -120,8 +121,8 @@ def _scope_sets(config: dict, token: dict):
         conn.close()
 
 
-def in_scope(sl_dir: str, rec_id: str, scope: dict, group_key_of: dict) -> bool:
-    """녹취 id 가 역할 범위 안인가. 파일 SoT(session.json/call.json)로 당사자를 대조한다."""
+def in_scope(rec_dir: str, rec_id: str, scope: dict, group_key_of: dict) -> bool:
+    """녹취 id 가 역할 범위 안인가. 파일 SoT(녹취 영역의 session.json/call.json)로 당사자를 대조한다."""
     top = rec_id.split('/', 1)[0]
     if top == 'ptt':
         segs = rec_id.split('/')
@@ -131,10 +132,10 @@ def in_scope(sl_dir: str, rec_id: str, scope: dict, group_key_of: dict) -> bool:
         gid = group_key_of.get(key, key)                       # surrogate id → mcptt id, priv-/mcptt id 는 그대로
         if gid in scope.get('ptt_groups', set()):
             return True
-        sj = _dh._read_json(os.path.join(sl_dir, rec_id, 'session.json'))
+        sj = _dh._read_json(os.path.join(rec_dir, rec_id, 'session.json'))
         return bool(sj) and (sj.get('mcptt_group_id') or sj.get('group_id')) in scope.get('ptt_groups', set())
     if top == 'volte':
-        cj = _dh._read_json(os.path.join(sl_dir, rec_id, 'call.json'))
+        cj = _dh._read_json(os.path.join(rec_dir, rec_id, 'call.json'))
         return bool(cj) and _dh._call_in_scope(cj, scope.get('members', set()))
     return False
 
@@ -155,10 +156,10 @@ async def handle_recordings(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
     rec_id, seq, action = _parts(handler_args.full_path)
     if rec_id is None or not _safe_id(rec_id):
         return _json(400, {'error': 'invalid_recording_id'})
-    sl_dir = _m._SERVICE_LOG_DIR
-    if not sl_dir or not os.path.isdir(sl_dir):
+    rec_dir = _m._RECORDINGS_DIR
+    if not rec_dir or not os.path.isdir(rec_dir):
         return _json(503, {'error': 'service_log_unavailable'})
-    if not os.path.isdir(os.path.join(sl_dir, rec_id)):
+    if not os.path.isdir(os.path.join(rec_dir, rec_id)):
         return _json(404, {'error': 'not_found'})
     try:
         msisdn, scope, group_key_of = _scope_sets(config, token)
@@ -167,7 +168,7 @@ async def handle_recordings(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
         return _json(503, {"error": "db_error", "detail": str(e)})
     if not scope:
         return _json(403, {"error": "no_monitor_scope"})
-    if not in_scope(sl_dir, rec_id, scope, group_key_of):
+    if not in_scope(rec_dir, rec_id, scope, group_key_of):
         return _json(403, {"error": "out_of_scope"})
 
     # 프록시 — OAM 녹취 API(handlers/recording.py). id 는 세그먼트별 percent-encoding(슬래시 유지).
@@ -284,10 +285,10 @@ async def handle_ptt_session_detail(handler_args: HandlerArgs, kwargs: dict) -> 
     group_key, ses_dir = _ptt_session_ref(rec_id)
     if not group_key:
         return _json(400, {'error': 'invalid_recording_id'})
-    sl_dir = _m._SERVICE_LOG_DIR
-    if not sl_dir or not os.path.isdir(sl_dir):
+    rec_dir = _m._RECORDINGS_DIR
+    if not rec_dir or not os.path.isdir(rec_dir):
         return _json(503, {'error': 'service_log_unavailable'})
-    if not os.path.isdir(os.path.join(sl_dir, rec_id)):
+    if not os.path.isdir(os.path.join(rec_dir, rec_id)):
         return _json(404, {'error': 'not_found'})
     try:
         msisdn, scope, group_key_of = _scope_sets(config, token)
@@ -296,7 +297,7 @@ async def handle_ptt_session_detail(handler_args: HandlerArgs, kwargs: dict) -> 
         return _json(503, {"error": "db_error", "detail": str(e)})
     if not scope:
         return _json(403, {"error": "no_monitor_scope"})
-    if not in_scope(sl_dir, rec_id, scope, group_key_of):
+    if not in_scope(rec_dir, rec_id, scope, group_key_of):
         return _json(403, {"error": "out_of_scope"})
 
     base = _oam_base(config) + f"/api/v1/ptt/history/{quote(group_key, safe='')}/{quote(ses_dir, safe='')}"

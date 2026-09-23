@@ -79,7 +79,7 @@ drift_sweeper 의 "동일해야 정상인 컬렉션" 판정에만 쓰인다.
     │   ├── current -> <ver>              # 활성 버전 심볼릭 (CIMS_DIST_DIR 통로)
     │   └── runtime/                      # ── OAM 자기 데이터 (버전 무관) ──
     │       ├── _secrets/                 #    .jwt_secret 등 — 0700, 동기화/백업 제외
-    │       ├── control/                  #    agents/ deployments/ jobs/ metrics/ packages/ pkg_files/ ha_groups/ sync_txn/
+    │       ├── control/                  #    agents/ deployments/ jobs/ metrics/ packages/ ha_groups/ sync_txn/
     │       └── console/                  #    accounts/ layouts/ menu/
     │
     ├── csp/

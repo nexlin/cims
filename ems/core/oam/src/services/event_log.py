@@ -1,7 +1,7 @@
 """이벤트(정상 동작 통지) 이력 — 파일 기반 (JSONL, 일별 회전)
 
 알람(alert_log)과 스트림 분리 (alarm_self_reporting.md §6, alarm_standardization.md §3.6 —
-X.730/731 stateChange · X.740 audit). 저장 경로: {ServiceLogDir}/events/YYYY/MM/DD.jsonl
+X.730/731 stateChange · X.740 audit). 저장 경로: {ServiceLogging.Dir}/events/YYYY/MM/DD.jsonl
 
 레코드: { ts, type, kind(stateChange|audit), source{mo_class, mo_instance, detected_by},
          message, params }

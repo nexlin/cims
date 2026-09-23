@@ -28,9 +28,10 @@
 ## 2. 디렉토리 레이아웃
 
 ```
-{관리 store}/                        # `CimsRuntimeMount` 지정 시 `<마운트>/runtime`,
-                                     #   비우면 노드 로컬 `modules/oam/runtime`
-                                     #   (services/paths.py: runtime_store_dir)
+{관리 store}/                        # 사이트 디렉터리의 `runtime/` (`<CimsSiteDir>/runtime`,
+                                     #   site_directory_layout.md). 사이트 디렉터리가 없으면
+                                     #   `CimsRuntimeDir` > `<CimsRuntimeMount>/runtime` > 노드 로컬
+                                     #   `modules/oam/runtime` (services/paths.py: runtime_store_dir)
   packages/
     <name>__<version>.json           # 한 패키지 = 1 파일. 파일명 = uk(name,version)
     .seq                             # 다음 ID (단조 증가, 파일 lock 으로 보호)

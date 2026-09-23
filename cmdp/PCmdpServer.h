@@ -148,7 +148,9 @@ private:
     void timeoutLoop();
 
     // ── 서비스 로그 (cmp 와 동일 패턴: 5분 버킷 jsonl + 비동기 배치 writer) ──
-    std::string _serviceLogDir;
+    //   flow·msg 버킷 = <log>/sip/YYYY/MM/DD/HH/cmdp_01{.flow|_csp.msg}.{mm5}.jsonl (site_directory_layout.md)
+    std::string _serviceLogDir;     // 서비스 로그 영역 루트 (ServiceLogging.Dir — 비면 서비스 로그 비활성)
+    std::string _sipLogDir;         // <log>/sip
     std::string _systemId = "cmdp_01";
     std::string _nodeName = "cmdp";
 

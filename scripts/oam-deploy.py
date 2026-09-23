@@ -93,10 +93,23 @@ def cmd_status(oam: Oam, args) -> int:
     return 0
 
 
+def _oam_package_dir(oam: Oam) -> str:
+    """base oam 배포의 실효 `Packages.Dir` — 사이트 디렉터리에서 유도된 패키지 저장소(site_directory_layout.md)."""
+    for d in oam.deployments():
+        if (d.get('process_name') or '').lower() == 'oam' and d.get('status') != 'removed':
+            eff = (oam.call('GET', f"/deployments/{d['id']}/config").get('effective') or {})
+            v = (eff.get('Packages.Dir') or {}).get('v')
+            if v:
+                return v
+    return ''
+
+
 def cmd_packages(oam: Oam, args) -> int:
-    """tarball 을 OAM 패키지 store(기본 build/dist/oam/packages_tb — 4419 개발 TB 의 store)로 복사한 뒤 POST /packages 로 등록한다.
-    파일 경로는 OAM 프로세스가 읽을 수 있는 절대 경로여야 한다(같은 호스트 전제)."""
-    store = args.store or os.environ.get('OAM_PACKAGE_STORE', os.path.join(_ROOT, 'build', 'dist', 'oam', 'packages_tb'))
+    """tarball 을 OAM 패키지 저장소로 복사한 뒤 POST /packages 로 등록한다. 저장소 = --store > OAM_PACKAGE_STORE >
+    base oam 배포의 실효 `Packages.Dir`. 파일 경로는 OAM 프로세스가 읽을 수 있는 절대 경로여야 한다(같은 호스트 전제)."""
+    store = args.store or os.environ.get('OAM_PACKAGE_STORE') or _oam_package_dir(oam)
+    if not store:
+        raise SystemExit('패키지 저장소를 알 수 없다 — --store 또는 OAM_PACKAGE_STORE 로 준다')
     os.makedirs(store, exist_ok=True)
     for src in args.files:
         if not os.path.isfile(src):

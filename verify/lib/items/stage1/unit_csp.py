@@ -5,6 +5,8 @@
                                    플랜 비활성 · phone-context · sip/tel URI 추출·재작성 (psip SipParser 정적 라이브러리에 링크)
   · tests/csp_diversion_test.cpp   착신전환(csp/CspDiversion.cpp — TS 24.604 §4.5.2.6, RFC 7044 History-Info · RFC 4458 cause):
                                    첫 전환 index=1/1.1 mp=1 cause=302 · 연쇄 · 수신 값 이어 붙이기 · 전환 수(cause 항목) · 항목 분리 · URI 조립
+  · tests/csp_call_dir_test.cpp    통화·세션 기록 경로(csp/CallDir.h — site_directory_layout.md): 녹취·상태·통계 영역 분리 ·
+                                   영역 키가 비었을 때 단일 루트 규칙(include/SiteLayout.h)
 
 psip 정적 라이브러리(build/csp/psip_build/*.a)가 없으면 SKIP — S2 빌드 뒤 pre-package 프리셋에서 의미가 있다.
 """
@@ -18,15 +20,17 @@ from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 
 _ID = "S1-UNIT-CSP"
-_NAME = "CSP 로직 단위시험 (tests/csp_dial_plan_test.cpp 다이얼 플랜 · csp_diversion_test.cpp 착신전환 History-Info)"
+_NAME = "CSP 로직 단위시험 (tests/csp_dial_plan_test.cpp 다이얼 플랜 · csp_diversion_test.cpp 착신전환 History-Info · csp_call_dir_test.cpp 사이트 영역 경로)"
 _LIB_DIR = "build/csp/psip_build"
 # 시험 → (추가 소스, 링크할 psip 정적 라이브러리)
 _TESTS = {
     "tests/csp_dial_plan_test.cpp": (["csp/CspDialPlan.cpp"], ["libSipParser.a", "libSipPlatform.a"]),
     # 착신전환 History-Info(RFC 7044)·cause(RFC 4458) 조립·전환 수 판정 — 순수 문자열(라이브러리 불필요)
     "tests/csp_diversion_test.cpp": (["csp/CspDiversion.cpp"], []),
+    # CallDir 영역 경로 — header-only(StoreOpWriter 스레드), SipPlatform 의 스레드·시간 유틸
+    "tests/csp_call_dir_test.cpp": ([], ["libSipPlatform.a"]),
 }
-_INCS = ["csp", "ext/psip/SipParser", "ext/psip/SipPlatform"]
+_INCS = ["csp", "include", "ext/psip/SipParser", "ext/psip/SipPlatform"]
 
 
 def _run(cmd: list, cwd: str, timeout: int):

@@ -117,11 +117,15 @@ def build_tree(root, day):
 
 
 def main():
-    root = tempfile.mkdtemp(prefix="ptt-index-test-")
+    site = tempfile.mkdtemp(prefix="ptt-index-test-")
+    # 영역 = 녹취(정본 ptt/{그룹}/) · 통계(색인 ptt_index/) · 상태(진행 중 ptt/) — site_directory_layout.md
+    root = os.path.join(site, "recordings")
+    stats = os.path.join(site, "stats")
+    state = os.path.join(site, "state")
     try:
         day = (datetime.now() - timedelta(days=2)).strftime("%Y%m%d")   # '지난 날짜' 경로
         k1, k2, k3 = build_tree(root, day)
-        ptt_index.init(root, enabled=True)
+        ptt_index.init(root, stats, state, enabled=True)
 
         print("\n[1] 세션이 기록 단위인가")
         rows = ptt_index.scan_day(day)
@@ -144,10 +148,10 @@ def main():
         print("\n[2] 인덱스 = 스캔 (인덱스는 파생물이다)")
         scanned = ptt_index.scan_day(day)
         first = ptt_index.day(day)          # 파일 생성
-        path = os.path.join(root, "ptt", "index", f"{day}.jsonl")
-        check("인덱스 파일 생성", os.path.exists(path))
+        path = os.path.join(stats, "ptt_index", f"{day}.jsonl")
+        check("인덱스 파일 생성 (통계 영역)", os.path.exists(path))
         second = ptt_index.day(day)         # 파일에서 읽기 (캐시 비우고)
-        ptt_index.init(root, enabled=True)  # 캐시 초기화 — 파일 경로를 강제
+        ptt_index.init(root, stats, state, enabled=True)  # 캐시 초기화 — 파일 경로를 강제
         third = ptt_index.day(day)
         check("최초 조회 결과 == 스캔", first == scanned)
         check("재조회(캐시) 결과 == 스캔", second == scanned)
@@ -155,7 +159,7 @@ def main():
               "인덱스 파일 왕복에서 값이 변형됐다")
 
         print("\n[3] 그룹 요약 — 전 버킷 glob 없이")
-        check("그룹 키 목록에 index 디렉터리가 섞이지 않는다",
+        check("그룹 키 목록 = 녹취 영역의 그룹 디렉터리",
               ptt_index.group_keys() == ["1"], str(ptt_index.group_keys()))
         check("last_window = 가장 최근 버킷",
               ptt_index.last_window("1") == day + "14", ptt_index.last_window("1"))
@@ -174,7 +178,7 @@ def main():
         check("빈 날짜는 빈 목록", ptt_index.day("19990101") == [])
 
     finally:
-        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(site, ignore_errors=True)
 
     print(f"\n{'=' * 52}\n  PASS {_pass} / FAIL {_fail}\n{'=' * 52}")
     return 1 if _fail else 0

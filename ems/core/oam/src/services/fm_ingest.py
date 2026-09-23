@@ -35,7 +35,7 @@ _MAX_DGRAM = 65535         # FM 채널 상한 — FM_REGISTER 가 카탈로그 �
 _DEDUP_MAX = 1024          # (node, trans_id) 응답 캐시 크기
 _STALE_SYNC_MISSES = 3     # sync 연속 누락 임계 — 초과 시 판정 불가 종결 (표준화 §3.4(d))
 
-# 카탈로그 보존 — {ServiceLogDir}/fm_catalog/<node>.json. alert/event 스트림과 같은
+# 카탈로그 보존 — {ServiceLogging.Dir}/fm_catalog/<node>.json. alert/event 스트림과 같은
 # 서비스 로그 영역(공유 스토리지)에 둔다: 관리 store(file_store)는 소유권 리스가 있는
 # base 단일 writer 라 oam-svc(FM ingest 소유자)가 쓸 수 없고, 여기는 oam-svc 가
 # 이미 쓰기 소유자다. 모듈 다운/OAM 절체 중에도 카탈로그 조회·판정이 유지된다.
@@ -423,7 +423,7 @@ class FmIngest:
 
 
 def module_catalogs(service_log_dir: str) -> list:
-    """등록된 모듈 카탈로그 목록 ({ServiceLogDir}/fm_catalog/ 보존본) — /alerts/catalog 병합
+    """등록된 모듈 카탈로그 목록 ({ServiceLogging.Dir}/fm_catalog/ 보존본) — /alerts/catalog 병합
     + ingest 재기동 복원용. 구 모듈이 남긴 보존본의 구 코드/클래스명은 read 시 현행으로
     정규화한다 (모듈 재등록 시 파일도 현행으로 교체됨)."""
     import glob

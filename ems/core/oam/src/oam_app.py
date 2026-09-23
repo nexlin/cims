@@ -519,12 +519,13 @@ if __name__ == '__main__':
         except Exception as _e:
             logger.log_warning(f"[store] 위치 회수 skip: {_e}")
 
-        # ── 잘못된 위치의 패키지 파일 1회 회수 (컴포넌트 상대경로 → store 하위) ──
+        # ── 잘못된 위치의 패키지 파일 1회 회수 (컴포넌트 상대경로 → 패키지 저장소) ──
         # `Packages.Dir` 이 비어 있던 노드는 옛 기본값(상대경로 `packages`)때문에 업로드
         # 파일이 **버전 디렉터리 안**(`<ver>/oam/packages`)에 쌓였다 — 업그레이드하면
         # 사라지고, 절체하면 그 노드에 없어 `/agent-bundle.tar.gz` 가 404 다(agent·모듈
-        # 설치/업그레이드 전면 불가). 지금은 store 하위(`<store>/pkg_files`)로 유도하므로,
-        # 옛 위치에 남은 파일을 한 번 옮겨 준다. 목적지에 같은 이름이 있으면 건드리지 않는다.
+        # 설치/업그레이드 전면 불가). 지금은 사이트 디렉터리의 패키지 영역(단일 루트면
+        # `<store>/pkg_files`)으로 유도하므로, 옛 위치에 남은 파일을 한 번 옮겨 준다.
+        # 목적지에 같은 이름이 있으면 건드리지 않는다.
         try:
             from handlers.agents import _resolve_pkg_paths as _rpp
             import shutil as _sh2
@@ -598,10 +599,14 @@ if __name__ == '__main__':
         # config 에 정규화된 mgmt_net 캐시 (handlers 가 사용 가능).
         config['_mgmt_net'] = _mgmt_net        # `_` 접두 = 리로드 보존(config_reload)
 
+        # 사이트 영역 경로 — services/paths 가 유일한 유도 규칙이다(site_directory_layout.md).
         # 비어 있으면 **노드 로컬**로 해석 — 부트스트랩 직후엔 공유 마운트가 없는 것이
-        # 정상이다(붙이는 수단이 이 OAM 이 서빙하는 콘솔이다). services/paths 참조.
+        # 정상이다(붙이는 수단이 이 OAM 이 서빙하는 콘솔이다).
         from services import paths as _paths
-        _service_log_dir = _paths.service_log_dir(config)
+        _sip_log_dir = _paths.sip_log_dir(config)
+        _rec_dir = _paths.recordings_dir(config)
+        _state_dir = _paths.state_dir(config)
+        _stats_dir = _paths.stats_dir(config)
         _system_id = config.get("SystemId", "oam_01")
 
         # 신뢰망(trusted_nets): 비정상 세션 탐지에서 '외부' 제외 대상.
@@ -625,7 +630,9 @@ if __name__ == '__main__':
         except Exception:
             pass
         flow_logger.init(
-            service_log_dir=_service_log_dir,
+            sip_log_dir=_sip_log_dir,
+            recordings_dir=_rec_dir,
+            state_dir=_state_dir,
             system_id=_system_id,
             db_config=config.get('CimsDatabase'),
             trusted_nets=_trusted,
@@ -636,7 +643,7 @@ if __name__ == '__main__':
         _ptt_idx_cfg = config.get('PttIndex') or {}
         _ptt_index_enabled = bool(_ptt_idx_cfg.get('Enabled', True))
         PTT_INDEX_INTERVAL = int(_ptt_idx_cfg.get('Interval', 30))
-        ptt_index.init(_service_log_dir, enabled=_ptt_index_enabled)
+        ptt_index.init(_rec_dir, _stats_dir, _state_dir, enabled=_ptt_index_enabled)
 
         tests_dir = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'tests'))
         if not os.path.isdir(tests_dir):
@@ -658,7 +665,7 @@ if __name__ == '__main__':
 
         # system_id 명시 — OAM 콘솔/admin flow 는 oam_01 로 기록(같은 호스트의 CSC xcap flow=csc_01 와 파일 분리).
         #   (미지정 시 둘 다 csc_01.flow 로 써서 seq·라인 충돌)
-        csc_logger.init(service_log_dir=_service_log_dir, system_id=_system_id)
+        csc_logger.init(sip_log_dir=_sip_log_dir, system_id=_system_id)
 
         # 녹취 변환툴(ffmpeg) — air-gapped(private) 환경 대응으로 OAM 패키지에 번들된
         # vendor 바이너리를 우선 사용. (패키지화 시 oam/vendor/bin/ffmpeg 또는
@@ -675,7 +682,7 @@ if __name__ == '__main__':
             _tx_workers = max(1, int(config.get('RecordingTranscodeWorkers', 2) or 2))
         except (TypeError, ValueError):
             _tx_workers = 2
-        recording.init(service_log_dir=_service_log_dir, ffmpeg_bin=_ffmpeg_bin,
+        recording.init(recordings_dir=_rec_dir, ffmpeg_bin=_ffmpeg_bin,
                        transcode_workers=_tx_workers)
 
         # ── pi_http 요청 로깅 훅 등록 (admin/console 자동 로깅) ──
@@ -1705,7 +1712,7 @@ if __name__ == '__main__':
                         f"interval={CERT_SWEEP_INTERVAL}s")
         logger.log_info(f"[alert-sweep] interval={ALERT_SWEEP_INTERVAL}s, "
                         f"rtp_threshold={ALERT_RTP_THRESHOLD}%, "
-                        f"dir={_service_log or '(disabled — no ServiceLogDir)'}")
+                        f"dir={_service_log or '(disabled — no ServiceLogging.Dir)'}")
         logger.log_info(f"[sync-txn-sweep] interval={SYNC_TXN_SWEEP_INTERVAL}s")
         logger.log_info(f"[drift-sweep] interval={DRIFT_SWEEP_INTERVAL}s "
                         f"auto_resync={DRIFT_AUTO_RESYNC}")

@@ -3,16 +3,16 @@
 계측기 샘플 라이브러리(ems/tester — `oam-cims-tester`)와는 **형식·변환기만 같고 실체는 별개**다: 카탈로그·저장소·API·화면·삭제가
 서로 독립이다. 여기 음원은 CSP 정책(Setup.Announcement.Rules)이 참조하고 CMP 재생기가 낸다.
 
-  저장소(관리 store — file_store 도메인 이웃, oam_ha 공유 마운트 규칙 그대로)
-    <store>/announcements/catalog.jsonl        운영자 등록 카탈로그(행 = 음원 하나, id = op:<name> | sub:<가입 번호 숫자열>)
-    <store>/announcements/<scope>/<name>.wav   16 kHz PCM 마스터(청취·재변환) — scope = op(운영자) | sub(가입자 링백, announcements.md §6.3)
-    <store>/announcements/<scope>/<name>.{pcmu,pcma,g722,amrwb}   코덱 파일(DTX 끔 — CMP 가 그대로 낸다)
+  저장소(서비스 콘텐츠 영역 — Content.Dir, site_directory_layout.md)
+    <content>/announcements/catalog.jsonl        운영자 등록 카탈로그(행 = 음원 하나, id = op:<name> | sub:<가입 번호 숫자열>)
+    <content>/announcements/<scope>/<name>.wav   16 kHz PCM 마스터(청취·재변환) — scope = op(운영자) | sub(가입자 링백, announcements.md §6.3)
+    <content>/announcements/<scope>/<name>.{pcmu,pcma,g722,amrwb}   코덱 파일(DTX 끔 — CMP 가 그대로 낸다)
   동봉(패키지)
     <oam>/announcements/sys_catalog.jsonl      기본 세트(sys:) 카탈로그 — 표시·프로파일 선택기용(파일은 CMP 패키지가 가진다)
     <oam>/announcements/sys/<name>.wav         기본 세트 마스터 — 콘솔 청취
     <oam>/native/cims-sample-conv              변환기(계측기와 같은 바이너리)
 
-  배포 = OAM → agent sync REST → CMP install_path
+  배포 = OAM → agent sync REST → CMP 노드 (agent 가 그 CMP 의 콘텐츠 영역 announcements/ 에 둔다)
     PUT /module-file?install_path&path=announcements/<scope>/<file>   (바이너리, atomic)
     PUT /collection?install_path&name=announcements               (config/announcements.jsonl = op 행) + SIGUSR1 → CMP 재적재
 """
@@ -70,7 +70,7 @@ def init(config: dict) -> None:
 # ── 경로 ─────────────────────────────────────────────────────────────────────
 
 def store_dir() -> str:
-    d = os.path.join(paths.runtime_store_dir(_config), 'announcements')
+    d = os.path.join(paths.content_dir(_config), 'announcements')
     for sc in SCOPES:
         os.makedirs(os.path.join(d, sc), exist_ok=True)
     return d

@@ -324,7 +324,7 @@ UE 가 직접 REGISTER 하는 서비스 도메인. **`kind` 는 접속환경 클
 > `voip_subscriptions`·`ptt_subscriptions` 행의 `service_ref` 는 그 테이블 kind 의 접속서비스만 가리킨다(CSC 쓰기 게이트 400
 > `service_kind_mismatch`, `voip` 회선은 `service_ref` 필수, 번호는 세 테이블과 대표번호에 걸쳐 유일 — 409 `number_exists`). CSC 의 서비스
 > 해석(`services/access_services.find`)·H(A1) 결박(`_service_realm`)·csc.json 폴백 키도 exact kind 다(`ptt`≡`mcptt`). 가족(`volte`∪`voip`
-> = 전화)은 CSP 전화 경로·로그/통계 **서비스축**(`LogServiceOf` 가 전화 계열을 `volte` 에 합산 — `{ServiceLogging.Dir}/volte/…`, flow
+> = 전화)은 CSP 전화 경로·로그/통계 **서비스축**(`LogServiceOf` 가 전화 계열을 `volte` 에 합산 — `{Recording.Dir}/volte/…`, flow
 > `service`, [sip_statistics.md §3.1](sip_statistics.md))·전화번호부 합산(`/provisioning/directory?service=volte` = 전화 가족)에만 남는다.
 > `GetForUser(user, kind)` 는 가입 행 `service_ref` 를 먼저 보고, 없으면 그 테이블 kind 의 대표 서비스로 폴백한다. CSC
 > `service_entry(kind, service_ref)` = `service_ref` ↔ 미러 레코드 `name` 매칭(와이어 `services[].kind` = 고른 서비스의 kind), 템플릿

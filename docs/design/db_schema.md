@@ -81,7 +81,7 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 
 | 테이블 | DROP 한 마이그레이션 | 대체 |
 |---|---|---|
-| `voip_call_logs` / `volte_call_logs` | migrate_drop_call_logs.sql | **파일 기반** — `service_log/volte/.../*.d/call.json`. `/api/v1/call/logs` 가 디렉토리 스캔 |
+| `voip_call_logs` / `volte_call_logs` | migrate_drop_call_logs.sql | **파일 기반** — 녹취 영역 `volte/.../*.d/call.json`. `/api/v1/call/logs` 가 디렉토리 스캔 |
 | `ptt_call_logs` | migrate_drop_call_logs.sql | 위와 동일 |
 | `voip_call_participants` / `volte_call_participants` | migrate_drop_call_logs.sql | 파일 — `participants.jsonl` |
 | `ptt_call_participants` | migrate_drop_call_logs.sql | 위와 동일 |
@@ -94,19 +94,20 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 
 ## 4. 파일 기반 SOT (DB 미적재)
 
-다음은 파일 시스템이 SoT 이며 DB 테이블이 **없음** — 이중화 DB 와 무관:
+다음은 파일 시스템이 SoT 이며 DB 테이블이 **없음** — 이중화 DB 와 무관. 경로의 영역 루트(`Recording.Dir`·`ServiceLogging.Dir` …)는
+사이트 디렉터리에서 유도된다([site_directory_layout.md](features/site_directory_layout.md)):
 
 | 항목 | 경로 | 처리 |
 |---|---|---|
-| 통화 이력(VoLTE) | `{ServiceLogDir}/volte/YYYY/MM/DD/HH/.../*.d/call.json` | 디렉토리 스캔 (csc/handlers/call.py) |
-| PTT 그룹 이력/녹취 | `{ServiceLogDir}/ptt/{id}/{YYYY}/{MM}/{DD}/{HH}/` (id=ptt_groups.id surrogate, 시간버킷) — `group.json`(base) + `events/floor/segments.jsonl` + `seg/{NNN}/seg_NNNN_*`(100세그 shard) | 시간창 스캔. [recording.md](features/recording.md) |
+| 통화 이력(VoLTE) | `{Recording.Dir}/volte/YYYY/MM/DD/HH/.../*.d/call.json` | 디렉토리 스캔 (OAM `flow_logger`, CSC 관제 이력 `dispatch_history`) |
+| PTT 그룹 이력/녹취 | `{Recording.Dir}/ptt/{id}/{YYYY}/{MM}/{DD}/{HH}/` (id=ptt_groups.id surrogate, 시간버킷) — `group.json`(base) + `events/floor/segments.jsonl` + `seg/{NNN}/seg_NNNN_*`(100세그 shard) | 시간창 스캔. [recording.md](features/recording.md) |
 | 참여자 | `.d/participants.jsonl` | call.json 와 동봉 |
 | Session ↔ Call-ID 매핑 | `.d/session.json` | flow 재구성 |
-| 그룹 SDS 메시지 | `{ServiceLogDir}/message/{gid}/YYYY/MM/DD/HH/messages.jsonl` | 콘솔 oam-svc + 관제 `GET /provisioning/history?kind=message`(범위 게이트) |
-| 1:1 SDS/SMS (관제 이력) | `{ServiceLogDir}/message_direct/YYYY/MM/DD/HH/messages.jsonl` — `Setup.McData.StoreOneToOneSds` 시에만 | 관제 이력 조회 시 역할 `monitor_call` 게이트([mcdata_messaging.md §4.3](features/mcdata_messaging.md)) |
-| SIP 메시지 | `{MsgLogDir}/csp/sip/YYYY/MM/DD/HH/sip.jsonl` | call_id 별 grep |
+| 그룹 SDS 메시지 | `{Recording.Dir}/message/{gid}/YYYY/MM/DD/HH/messages.jsonl` | 콘솔 oam-svc + 관제 `GET /provisioning/history?kind=message`(범위 게이트) |
+| 1:1 SDS/SMS (관제 이력) | `{Recording.Dir}/message_direct/YYYY/MM/DD/HH/messages.jsonl` — `Setup.McData.StoreOneToOneSds` 시에만 | 관제 이력 조회 시 역할 `monitor_call` 게이트([mcdata_messaging.md §4.3](features/mcdata_messaging.md)) |
+| SIP 메시지 | `{ServiceLogging.Dir}/sip/YYYY/MM/DD/HH/<sysid>_sip.msg.<mm5>.jsonl` (flow·타 인터페이스 msg 도 같은 시간 디렉터리) | call_id 별 grep, [flow_logging.md](features/flow_logging.md) |
 | 검증 회차 | `verify_runs/YYYY/MM/<id>.json` | `verify.lib.run_store` |
-| Alert 이력 | `{ServiceLogDir}/alerts/YYYY/MM/DD.jsonl` | `csc/services/alert_log.py` |
+| Alert 이력 | `{ServiceLogging.Dir}/alerts/YYYY/MM/DD.jsonl` | OAM `services/alert_log.py` |
 | 녹취 데이터 | `.d/raw_*.rtp` / `seg_*.rtp` | recordings 테이블이 메타만 |
 
 ## 5. 알려진 정합성 이슈

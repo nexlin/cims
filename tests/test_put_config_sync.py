@@ -1098,10 +1098,12 @@ class TestDerivedSharedStore(_R4Case):
     def _running_mount(self, name: str = "nas") -> str:
         """돌고 있는 OAM 자신의 마운트를 tmp 안에 잡는다 — **seed 보다 먼저** 부른다.
 
-        마운트가 store 위치를 정하므로(§4.1) 나중에 바꾸면 앞서 seed 한 레코드가 다른
-        store 에 남는다. 실제 노드에서도 마찬가지라 이관이 복사를 함께 하는 것이다."""
+        돌고 있는 OAM 의 config.json 에는 실체화가 유도한 store 경로가 구체값으로 들어 있다
+        (`<마운트>/runtime`). 나중에 바꾸면 앞서 seed 한 레코드가 다른 store 에 남는다 —
+        실제 노드에서도 마찬가지라 이관이 복사를 함께 하는 것이다."""
         mnt = os.path.join(self._td.name, name)
         self.config["CimsRuntimeMount"] = mnt
+        self.config["CimsRuntimeDir"] = f"{mnt}/runtime"
         return mnt
 
     # ── 유도 ────────────────────────────────────────────────────────────────
@@ -1273,14 +1275,15 @@ class TestDerivedSharedStore(_R4Case):
                                      "CimsRuntimeDir": "/mnt/cims/site/store"})
         self.assertEqual(eff.get("CimsRuntimeDir"), "/mnt/cims/site/store")
 
-    def test_stale_store_dir_outside_mount_is_normalized(self):
-        """마운트 밖을 가리키는 옛 값은 무시한다 — 두면 mount guard 가 기동을 거부한다
-        (store 가 마운트 하위가 아님). 그 값은 이미 유효하지 않은 유도 결과다."""
+    def test_explicit_store_dir_wins_over_mount(self):
+        """store 경로는 경로 설정(`CimsRuntimeDir`)이 정본이다 — 마운트 지점은 mount guard 용
+        선택값이라 명시값을 덮지 않는다(site_directory_layout.md §3). 옛 값을 걷어내는 것은
+        이관(`_migrate_shared_store`)의 일이다."""
         self._seed_lease_descriptor()
         self._seed_store_dep(5, 10, "oam", "/mnt/cims")
         eff = self._materialize(21, {"CimsRuntimeMount": "/mnt/cims",
                                      "CimsRuntimeDir": "/old/local/runtime"})
-        self.assertEqual(eff.get("CimsRuntimeDir"), "/mnt/cims/runtime")
+        self.assertEqual(eff.get("CimsRuntimeDir"), "/old/local/runtime")
 
     def test_oam_store_derived_keys_cannot_be_saved(self):
         """선언이 없으면 overlay 쓰기 마스크가 저장을 막는다 — oam 에서도 입력은 마운트뿐."""
@@ -1397,6 +1400,102 @@ class TestDerivedSharedStore(_R4Case):
         self.assertNotIn("Packages.Dir", eff)
 
 
+class TestSiteAreaInjection(_FsCase):
+    """사이트 영역 경로 주입 — 템플릿이 `site_area` 로 선언한 경로 키에 base `oam` 배포설정에서 유도한
+    영역 경로를 넣는다(site_directory_layout.md §3). 기본은 무조건(모듈마다 경로를 따로 적으면 CSP 가 쓰는
+    녹취 위치와 OAM 이 읽는 위치가 갈라진다), `site_area_mode: default` 는 비어 있을 때만."""
+
+    TPL_OAM = {"version": 1, "sections": [{"key": "store", "scope": "service", "fields": [
+        {"key": "CimsSiteDir", "type": "path", "default": ""},
+        {"key": "ServiceLogging.Dir", "type": "path", "default": ""},
+        {"key": "CimsRuntimeMount", "type": "path", "default": ""},
+    ]}]}
+    TPL_CSP = {"version": 1, "sections": [{"key": "service_log", "scope": "service", "fields": [
+        {"key": "Setup.ServiceLogging.Dir", "type": "path", "default": "service_log", "site_area": "log"},
+        {"key": "Setup.Recording.Dir", "type": "path", "default": "", "site_area": "recordings"},
+        {"key": "Setup.State.Dir", "type": "path", "default": "", "site_area": "state"},
+        {"key": "Setup.Stats.Dir", "type": "path", "default": "", "site_area": "stats"},
+    ]}]}
+    TPL_TESTER = {"version": 1, "sections": [{"key": "tester", "scope": "service", "fields": [
+        {"key": "Tester.DataDir", "type": "path", "default": "", "site_area": "tester",
+         "site_area_mode": "default"},
+    ]}]}
+
+    def _seed(self, oam_overlays):
+        from services import file_store
+        pk = file_store.domain_dir(self.config, "packages")
+        file_store.save(pk, 1, {"id": 1, "name": "oam", "version": "0.1.0",
+                                "config_template": self.TPL_OAM, "meta": {"shared_identity": True}})
+        file_store.save(pk, 2, {"id": 2, "name": "csp", "version": "0.1.0", "config_template": self.TPL_CSP})
+        file_store.save(pk, 3, {"id": 3, "name": "oam-cims-tester", "version": "0.1.0",
+                                "config_template": self.TPL_TESTER})
+        dp = file_store.domain_dir(self.config, "deployments")
+        for i, ov in enumerate(oam_overlays):
+            file_store.save(dp, 10 + i, {"id": 10 + i, "agent_id": 10 + i, "package_id": 1,
+                                         "process_name": "oam", "install_path": "/opt/x", "config": ov})
+
+    def _mat(self, pid, overlay):
+        from handlers.agents import _materialize_deploy_config, _pkg_load
+        return _materialize_deploy_config(self.config, _pkg_load(self.config, pid), overlay)
+
+    def test_site_dir_derives_module_areas(self):
+        self._seed([{"CimsSiteDir": "/mnt/s"}])
+        eff = self._mat(2, {})
+        self.assertEqual(eff["Setup.ServiceLogging.Dir"], "/mnt/s/log")
+        self.assertEqual(eff["Setup.Recording.Dir"], "/mnt/s/recordings")
+        self.assertEqual(eff["Setup.State.Dir"], "/mnt/s/state")
+        self.assertEqual(eff["Setup.Stats.Dir"], "/mnt/s/stats")
+
+    def test_derived_area_overrides_module_overlay(self):
+        """모듈 overlay 에 남은 옛 경로가 이기면 CSP 와 OAM 이 다른 녹취 위치를 본다 — 주입이 이긴다."""
+        self._seed([{"CimsSiteDir": "/mnt/s"}])
+        eff = self._mat(2, {"Setup.ServiceLogging.Dir": "/old/log", "Setup.Recording.Dir": "/old/rec"})
+        self.assertEqual(eff["Setup.ServiceLogging.Dir"], "/mnt/s/log")
+        self.assertEqual(eff["Setup.Recording.Dir"], "/mnt/s/recordings")
+
+    def test_base_area_override_propagates(self):
+        """base 에 적은 영역 명시값(녹취만 다른 볼륨)이 모듈에도 그대로 간다."""
+        self._seed([{"CimsSiteDir": "/mnt/s", "Recording.Dir": "/vol2/rec"}])
+        eff = self._mat(2, {})
+        self.assertEqual(eff["Setup.Recording.Dir"], "/vol2/rec")
+        self.assertEqual(eff["Setup.ServiceLogging.Dir"], "/mnt/s/log")
+
+    def test_single_root_layout(self):
+        """사이트 디렉터리가 없으면 단일 루트 — 옛 사이트의 경로가 그대로 유도된다."""
+        self._seed([{"ServiceLogging.Dir": "/nas/service_log"}])
+        eff = self._mat(2, {})
+        self.assertEqual(eff["Setup.ServiceLogging.Dir"], "/nas/service_log")
+        self.assertEqual(eff["Setup.Recording.Dir"], "/nas/service_log")
+        self.assertEqual(eff["Setup.State.Dir"], "/nas/service_log/state")
+        self.assertEqual(eff["Setup.Stats.Dir"], "/nas/service_log/stats")
+
+    def test_tester_default_mode(self):
+        """계측기 DataDir 은 운영자 입력이 이긴다 — 비었을 때만 `<사이트>/tester`."""
+        self._seed([{"CimsSiteDir": "/mnt/s"}])
+        self.assertEqual(self._mat(3, {})["Tester.DataDir"], "/mnt/s/tester")
+        self.assertEqual(self._mat(3, {"Tester.DataDir": "/data/t"})["Tester.DataDir"], "/data/t")
+
+    def test_tester_not_injected_in_single_root(self):
+        self._seed([{"ServiceLogging.Dir": "/nas/service_log"}])
+        self.assertNotIn("Tester.DataDir", self._mat(3, {}))
+
+    def test_members_disagree_falls_back_to_running_config(self):
+        self.config["ServiceLogging"] = {"Dir": "/live/log"}
+        self._seed([{"CimsSiteDir": "/mnt/a"}, {"CimsSiteDir": "/mnt/b"}])
+        eff = self._mat(2, {})
+        self.assertEqual(eff["Setup.ServiceLogging.Dir"], "/live/log")
+        self.assertEqual(eff["Setup.Recording.Dir"], "/live/log")
+
+    def test_oam_writes_all_areas(self):
+        """base oam config.json 에는 유도 경로 전부가 구체값으로 들어간다(콘솔·agent 가 실제 경로를 본다)."""
+        self._seed([{"CimsSiteDir": "/mnt/s"}])
+        eff = self._mat(1, {"CimsSiteDir": "/mnt/s"})
+        self.assertEqual(eff["CimsRuntimeDir"], "/mnt/s/runtime")
+        self.assertEqual(eff["Packages.Dir"], "/mnt/s/packages")
+        self.assertEqual(eff["ServiceLogging.Dir"], "/mnt/s/log")
+        self.assertEqual(eff["Content.Dir"], "/mnt/s/content")
+
+
 class TestBootstrapConfigShape(_FsCase):
     """부트스트랩이 쓰는 `config.json` 형태 == agent 가 쓰는 실체화본.
 
@@ -1415,16 +1514,19 @@ class TestBootstrapConfigShape(_FsCase):
     BOOTSTRAP_KEYS = {
         "Server.Ip", "Server.Port",
         "CimsAuth.JwtSecret", "CimsAuth.BuiltinAccounts", "Server.Role",
-        "Server.CertSans", "CimsRuntimeMount", "Server.AgentOamUrl",
-        "Mgmt.Cidr", "ServiceLogging.Dir",
+        "Server.CertSans", "CimsSiteDir", "CimsRuntimeMount", "CimsRuntimeDir",
+        "Server.AgentOamUrl", "Mgmt.Cidr", "ServiceLogging.Dir",
     }
-    # overlay 에는 없고 config.json 에만 들어가는 **유도값** — install.sh 가 실체화와
-    # 같은 규칙으로 채운다(`<마운트>/runtime`, `<store>/pkg_files`).
-    BOOTSTRAP_DERIVED = {"CimsRuntimeDir", "Packages.Dir"}
+    # overlay 에는 없고 config.json 에만 들어가는 **유도값** — install.sh 가 실체화와 같은 코드
+    # (services/paths.py `layout_values`)로 채운다.
+    BOOTSTRAP_DERIVED = {"CimsRuntimeDir", "Packages.Dir", "Packages.BackupDir", "Content.Dir",
+                         "Recording.Dir", "ServiceLogging.Dir", "Stats.Dir", "State.Dir"}
 
-    def _bootstrap_shape(self, tpl, overlay, store):
+    def _bootstrap_shape(self, tpl, overlay, runtime_dir):
         """install.sh 의 병합 규칙 — 템플릿 기본값(빈 default 제외) + overlay + 유도값.
-        overlay 의 빈 값은 default 를 지우지 않는다."""
+        overlay 의 빈 값은 default 를 지우지 않는다. 유도값은 install.sh 처럼 패키지의 paths.py 로 —
+        레이아웃 입력이 store 를 정하지 않으면 노드 로컬 store(`runtime_dir`)."""
+        from services import paths as _paths
         out = {}
         for sec in tpl.get("sections") or []:
             for f in sec.get("fields") or []:
@@ -1435,39 +1537,66 @@ class TestBootstrapConfigShape(_FsCase):
             if v is None or v == "":
                 continue
             out[k] = v
-        out["CimsRuntimeDir"] = store
-        out["Packages.Dir"] = os.path.join(store, "pkg_files")
+        src = dict(overlay)
+        if not any(_paths.cfg_get(src, k) for k in ("CimsSiteDir", "CimsRuntimeDir", "CimsRuntimeMount")):
+            src["CimsRuntimeDir"] = runtime_dir
+        out.update(_paths.layout_values(src))
         return out
 
-    def test_bootstrap_shape_equals_materialized(self):
+    def _check(self, overlay):
         import json as _json
         from services import file_store
         from handlers.agents import _materialize_deploy_config
         with open(self.OAM_TPL) as f:
             tpl = _json.load(f)
-        # 부트스트랩이 쓰는 overlay (값은 형태 비교용 — 실제 사이트 값과 무관)
-        overlay = {
-            "Server.Ip": "0.0.0.0", "Server.Port": 4419, "Server.Role": "base",
-            "CimsRuntimeMount": "/mnt/cims",
-            "ServiceLogging.Dir": "/mnt/cims/service_log",
-            "CimsAuth.JwtSecret": "s3cr3t",
-            "CimsAuth.BuiltinAccounts": [{"login_id": "admin"}],
-            "Server.AgentOamUrl": "https://10.0.0.1:4419",
-            "Mgmt.Cidr": "10.0.0.0/24", "Server.CertSans": [],
-        }
         pkg = {"id": 1, "name": "oam", "version": "0.1.0",
                "config_template": tpl, "meta": {"shared_identity": True}}
         file_store.save(file_store.domain_dir(self.config, "packages"), 1, pkg)
         # 주입원(살아있는 OAM 의 값) — overlay 가 이미 갖고 있으므로 no-op 이어야 한다.
         self.config["Mgmt"] = {"Cidr": "10.0.0.0/24"}
-
-        want = self._bootstrap_shape(tpl, overlay, "/mnt/cims/runtime")
-        got = _materialize_deploy_config(self.config, pkg, overlay)
+        base = {
+            "Server.Ip": "0.0.0.0", "Server.Port": 4419, "Server.Role": "base",
+            "CimsAuth.JwtSecret": "s3cr3t",
+            "CimsAuth.BuiltinAccounts": [{"login_id": "admin"}],
+            "Server.AgentOamUrl": "https://10.0.0.1:4419",
+            "Mgmt.Cidr": "10.0.0.0/24", "Server.CertSans": [],
+        }
+        base.update(overlay)
+        want = self._bootstrap_shape(tpl, base, file_store.runtime_root(self.config))
+        got = _materialize_deploy_config(self.config, pkg, base)
         # 키 집합이 같아야 한다 — 다르면 부트스트랩이 그 키를 안 써서 드리프트가 난다.
         self.assertEqual(sorted(got), sorted(want),
                          "부트스트랩 config.json 형태가 실체화본과 다르다 — "
                          "install.sh 의 config.json 기록에 누락된 키가 있다")
         self.assertEqual(got, want)
+        return got
+
+    def test_bootstrap_shape_equals_materialized(self):
+        """단일 루트 레이아웃(마운트 + 로그 경로) — 옛 사이트·마운트만 준 설치."""
+        got = self._check({"CimsRuntimeMount": "/mnt/cims",
+                           "ServiceLogging.Dir": "/mnt/cims/service_log"})
+        self.assertEqual(got["CimsRuntimeDir"], "/mnt/cims/runtime")
+        self.assertEqual(got["Packages.Dir"], "/mnt/cims/runtime/pkg_files")
+        self.assertEqual(got["Recording.Dir"], "/mnt/cims/service_log")
+        self.assertEqual(got["Stats.Dir"], "/mnt/cims/service_log/stats")
+
+    def test_bootstrap_shape_site_dir(self):
+        """사이트 디렉터리 — 입력 하나에서 여덟 영역이 유도된다(site_directory_layout.md §2)."""
+        got = self._check({"CimsSiteDir": "/mnt/cims/site01"})
+        self.assertEqual(got["CimsRuntimeDir"], "/mnt/cims/site01/runtime")
+        self.assertEqual(got["Packages.Dir"], "/mnt/cims/site01/packages")
+        self.assertEqual(got["Packages.BackupDir"], "/mnt/cims/site01/packages/.trash")
+        self.assertEqual(got["ServiceLogging.Dir"], "/mnt/cims/site01/log")
+        self.assertEqual(got["Recording.Dir"], "/mnt/cims/site01/recordings")
+        self.assertEqual(got["Stats.Dir"], "/mnt/cims/site01/stats")
+        self.assertEqual(got["State.Dir"], "/mnt/cims/site01/state")
+        self.assertEqual(got["Content.Dir"], "/mnt/cims/site01/content")
+
+    def test_bootstrap_shape_site_dir_with_override(self):
+        """영역 키 명시값이 이긴다 — 녹취만 다른 볼륨."""
+        got = self._check({"CimsSiteDir": "/mnt/cims/site01", "Recording.Dir": "/vol2/rec"})
+        self.assertEqual(got["Recording.Dir"], "/vol2/rec")
+        self.assertEqual(got["ServiceLogging.Dir"], "/mnt/cims/site01/log")
 
     def test_bootstrap_keys_cover_injected_keys(self):
         """주입 대상 키는 전부 부트스트랩 overlay 에도 있어야 한다.
@@ -1475,9 +1604,9 @@ class TestBootstrapConfigShape(_FsCase):
         주입은 '살아있는 OAM 의 값' 을 넣는 것이라, 부트스트랩 노드(자기 자신이 원본)가
         그 키를 안 쓰면 실체화본에만 생겨 형태가 갈라진다.
         """
-        injected = {"CimsAuth.JwtSecret", "CimsRuntimeDir", "CimsRuntimeMount",
-                    "Packages.Dir", "Mgmt.Cidr", "ServiceLogging.Dir",
-                    "CimsAuth.BuiltinAccounts"}
+        from services import paths as _paths
+        injected = {"CimsAuth.JwtSecret", "CimsSiteDir", "CimsRuntimeMount", "Mgmt.Cidr",
+                    "CimsAuth.BuiltinAccounts", "Packages.BackupDir"} | set(_paths.AREA_KEYS.values())
         self.assertEqual(injected - (self.BOOTSTRAP_KEYS | self.BOOTSTRAP_DERIVED), set(),
                          "주입 키가 부트스트랩 기록에 없다 — install.sh 의 ov(입력) 또는 "
                          "eff(유도값)에 추가하라")

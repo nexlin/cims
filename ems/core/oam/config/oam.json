@@ -33,16 +33,29 @@
         "Enabled": true,
         "Interval": 30
     },
-    "_packages_comment": "패키지 저장소 — **패키지 기본값은 비운다**. 비면 관리 store 하위(`<store>/pkg_files`, `<store>/pkg_files_trash`)로 유도한다(oam_ha.md §4.1). 옛 기본값은 상대경로('packages')라 **버전 디렉터리** 안을 가리켰고, 업그레이드로 사라지거나 절체한 노드에서 `/agent-bundle.tar.gz` 404 가 됐다.",
+    "_packages_comment": "패키지 저장소 — **패키지 기본값은 비운다**. 비면 사이트 디렉터리의 `packages/`(`.trash/` 보관소), 사이트 디렉터리가 없으면 관리 store 하위(`<store>/pkg_files`, `<store>/pkg_files_trash`)로 유도한다(site_directory_layout.md). 상대경로는 **버전 디렉터리** 안을 가리켜 업그레이드로 사라지거나 절체한 노드에서 `/agent-bundle.tar.gz` 404 가 된다.",
     "Packages": {
         "Dir": "",
         "BackupDir": ""
     },
+    "CimsSiteDir": "",
     "CimsRuntimeMount": "",
     "CimsRuntimeDir": "",
-    "_runtime_comment": "관리 데이터(file_store) SoT. 위치를 정하는 값은 `CimsRuntimeMount`(관리 store 마운트 지점) **하나**이고, store 루트(CimsRuntimeDir)·패키지 저장소는 그 하위로 유도된다(oam_ha.md §4.1). 비우면 노드 로컬 `modules/oam/runtime` — 단일 노드·부트스트랩 직후의 정상 상태다. 이중화는 소유권 리스(flock+epoch) 하에 양 노드 공용 마운트를 쓴다(oam_ha.md §4). 금지 대상은 공유 스토리지가 아니라 펜싱 없는 다중 writer 이므로, ServiceLogging.Dir 을 NAS 로 두었다고 runtime store 가 자동으로 따라가는 일만 막는다(유도 폴백 차단).",
+    "_runtime_comment": "사이트 디렉터리(site_directory_layout.md) — 운영자가 적는 값은 `CimsSiteDir` 하나이고 관리 store(runtime/)·패키지(packages/)·콘텐츠(content/)·녹취(recordings/)·로그(log/)·통계(stats/)·상태(state/)·계측기(tester/)는 그 아래로 유도된다(영역 키 명시값 우선, services/paths.py). **패키지 기본값은 비운다** — 노드 종속 값이다. 비우면 단일 루트 레이아웃: 관리 store = `CimsRuntimeDir` > `<CimsRuntimeMount>/runtime` > 노드 로컬 `modules/oam/runtime`(단일 노드·부트스트랩 직후의 정상 상태), 녹취·통계·상태·콘텐츠 = 서비스 로그 아래. `CimsRuntimeMount` 는 공유 스토리지 이중화 사이트의 mount guard(선택). 이중화는 소유권 리스(flock+epoch) 하에 양 노드 공용 경로를 쓴다(oam_ha.md §4).",
+    "Content": {
+        "Dir": ""
+    },
+    "Recording": {
+        "Dir": ""
+    },
+    "Stats": {
+        "Dir": ""
+    },
+    "State": {
+        "Dir": ""
+    },
     "ServiceLogging": {
-        "_comment": "base 도 사용하는 공유 키 — agent 계열 알람(alert_log) 저장·조회 API 와 콘솔 flow 기록 위치. **패키지 기본값은 비운다**: 노드 종속 값이고, 공유 스토리지를 가리키면 부트스트랩 직후(마운트 전) 반드시 없는 경로가 된다 — 붙이는 수단이 이 OAM 이 서빙하는 콘솔이다(관리 store 와 같은 규칙, oam_ha.md §5). 비면 노드 로컬 runtime/service_log 로 해석하고, 공유 경로는 마운트 후 배포 overlay 가 정한다. oam-svc 는 콘솔 배포설정으로 관리하고 미설정 시 이 값을 fallback 상속.",
+        "_comment": "관측 로그 영역(log/ — sip/·alerts/·events/·fm_catalog/). **패키지 기본값은 비운다**: 노드 종속 값이다. 비면 `<CimsSiteDir>/log`, 사이트 디렉터리도 없으면 노드 로컬 runtime/service_log. 서비스 모듈(oam-svc·csp·cmp·cmdp·csc)은 배포 때 여기서 유도한 경로를 받는다(템플릿 `site_area`).",
         "Dir": "",
         "Enable": [
             "csp",

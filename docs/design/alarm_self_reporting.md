@@ -118,7 +118,7 @@ hdr 는 `{ver:2, trans_id, node, cmd, type:"event", service:"cims"}`. 호 문맥
 
 [api_docs.md](features/api_docs.md)("모듈이 코드 옆에 자기 API 선언") 패턴과 동형. 각 모듈이
 `fm_catalog.json` 을 소스 옆에 두고(예: `csp/config/fm_catalog.json` — dist 의 `config/` 로
-설치), 기동 시 FM_REGISTER 로 등록한다. OAM 은 `{ServiceLogDir}/fm_catalog/<node>.json` 에
+설치), 기동 시 FM_REGISTER 로 등록한다. OAM 은 로그 영역 `{ServiceLogging.Dir}/fm_catalog/<node>.json` 에
 마지막 카탈로그를 보존해(모듈 다운/절체 중에도) `GET /alerts/catalog` 에 origin=module 로
 병합한다. 보존소가 관리 store(file_store)가 아닌 이유: 관리 store 는 소유권 리스(oam_ha §4.4)를
 가진 base 단일 writer 라 oam-svc(FM ingest 소유자)가 쓸 수 없다 — alert/event 스트림과 같은
@@ -195,7 +195,7 @@ graceful stop 핸들러가 이때 신설됨) · `service_control`(audit — OAM 
 
 - **알람**: 기존 alert_log JSONL 스트림에 합류 — 레코드 스키마 동일(표준화 §3.2),
   detected_by 만 `self`. AlertsPage/활성 위젯/ack 이 무변경으로 동작한다.
-- **이벤트**: 신규 event_log `{ServiceLogDir}/events/YYYY/MM/DD.jsonl` — alert_log 의 일별
+- **이벤트**: 신규 event_log `{ServiceLogging.Dir}/events/YYYY/MM/DD.jsonl` — alert_log 의 일별
   JSONL 헬퍼를 공용화해 재사용. 레코드:
   `{ts, type, kind, source{mo_class, mo_instance, detected_by}, message, params}`.
 - **API**: `GET /events`(days/type/kind 필터) · `GET /events/types` 신설.

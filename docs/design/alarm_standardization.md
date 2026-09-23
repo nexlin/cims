@@ -39,7 +39,7 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
   에서만 base 가 대행 `detected_by='oam'`), **agent 계열**(disk/module)은 base(`oam_app.py`
   `_sweep_alerts`→`_eval_agent_rule`) 잔류. 기동 시 open-state 복원도 소유 계열별
   (`restore_open_state` — 파티션 판정은 detected_by, §3.4(b)).
-- **이벤트 레코드** (`ems/core/oam/src/services/alert_log.py`, `{ServiceLogDir}/alerts/YYYY/MM/DD.jsonl`):
+- **이벤트 레코드** (`ems/core/oam/src/services/alert_log.py`, `{ServiceLogging.Dir}/alerts/YYYY/MM/DD.jsonl`):
   `{ ts, type, severity, action(open|close), message }`
 - **API** (`ems/core/oam/src/handlers/alerts.py`): `GET /alerts`, `/types`, `/summary`, `/rules`.
 - **UI**: `AlertsPage.tsx`(이력/통계/규칙) · `AlertBannerWidget`(활성 배너). 색은 critical/warning 2색.
@@ -322,7 +322,7 @@ change 를 활성 행의 현재값 갱신으로 처리한다 (새 행 ❌, close
 - **정상 기동/실행 중인 프로세스는 알람이 아니다.** "프로세스 start/stop", "config 변경", "배포", "로그인" 등은 **이벤트**(stateChange/audit) → 이벤트 로그에만, 알람 카탈로그/배너엔 미포함.
 - 프로세스 복구는 새 알람이 아니라 기존 `process_down` 의 **Cleared(close)** 통지.
 - 단, **실행 중이어도** 다른 클래스 알람은 발생(threshold_crossed/connection_lost/처리오류 등) — "프로세스 생존 ≠ 정상".
-- CIMS 현황: 알람 스트림은 fault-only(정상 통지를 알람화하지 않음). 정상 라이프사이클/감사는 별도 **이벤트 스트림**(`event_log` — `{ServiceLogDir}/events/`, `GET /events`, 모듈 자기보고 FM_EVENT 가 공급 — [alarm_self_reporting.md](alarm_self_reporting.md) §6)으로 흐른다. 콘솔 표시도 알람/이벤트 탭으로 스트림을 구분 — **모델 분리 유지**.
+- CIMS 현황: 알람 스트림은 fault-only(정상 통지를 알람화하지 않음). 정상 라이프사이클/감사는 별도 **이벤트 스트림**(`event_log` — `{ServiceLogging.Dir}/events/`, `GET /events`, 모듈 자기보고 FM_EVENT 가 공급 — [alarm_self_reporting.md](alarm_self_reporting.md) §6)으로 흐른다. 콘솔 표시도 알람/이벤트 탭으로 스트림을 구분 — **모델 분리 유지**.
 
 **이벤트 분류·코드 체계 — 알람과 대칭 (확정)**. 이벤트도 알람과 마찬가지로 **성격별 조건
 클래스**를 갖는다 — X.730/X.731/X.740 이 통지를 objectCreation·stateChange·

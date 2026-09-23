@@ -42,10 +42,8 @@ def _audit_service_action(config: dict, actor: str, actor_ip: str,
     (alarm_self_reporting.md §6 — 구 {CimsRuntimeDir}/service_control_audit JSONL 흡수).
     콘솔 '알람·이벤트 이력 > 이벤트' 탭과 GET /events 로 조회된다."""
     try:
-        from services import event_log
-        sl = (config or {}).get('ServiceLogging', {})
-        base = sl.get('Dir', '') or (config or {}).get(
-            'ServiceLogDir', (config or {}).get('MsgLogDir', ''))
+        from services import event_log, paths
+        base = paths.service_log_dir(config)
         # mo 루트 = 제어 대상 모듈이 도는 노드 신원 — 이 핸들러는 OAM 동거 노드의
         # 서비스를 제어하므로 OAM SystemId 를 쓴다 (표준화 §3.4(b) 소유 주체 루트).
         event_log.record_event(base, {

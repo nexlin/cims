@@ -44,13 +44,13 @@ public:
     CSipMessageLogger();
     ~CSipMessageLogger();
 
-    /** Initialize with separate base directories for flow/message logs.
+    /** 서비스 로그 영역(log) 루트로 기동 — flow·msg 5분 버킷은 그 아래 sip/<연>/<월>/<일>/<시>/ 에 쌓인다.
+     *  strLogDir 가 비면 비활성.
      *  strSpoolDir: 저장 경로 무응답 시 로컬 스풀 루트 (로컬 디스크 경로여야 한다).
      *  iStallSec: NAS flusher in-flight 가 이 시간을 넘으면 저장소 무응답으로 판정.
      *  iSpoolMaxMb: 스풀 용량 상한 — 초과 시 오래된 스풀 파일부터 폐기(계수). */
-    void Init( const std::string &strFlowBaseDir, const std::string &strMsgBaseDir, const std::string &strSystemId,
-               bool bRawLogEnabled = true, const std::string &strSpoolDir = "spool", int iStallSec = 5,
-               int iSpoolMaxMb = 1024 );
+    void Init( const std::string &strLogDir, const std::string &strSystemId, bool bRawLogEnabled = true,
+               const std::string &strSpoolDir = "spool", int iStallSec = 5, int iSpoolMaxMb = 1024 );
 
     /** Config 의 "Realm" 배열에서 빌드된 domain→service 매핑을 주입 */
     void SetDomainServiceMap( const std::map<std::string, std::string> &mapDomainToService );
@@ -126,15 +126,12 @@ private:
 
     /** 현재 5분 버킷 접미사 "00".."55" (분/5*5). 파일명에 부여하여 1시간 1파일→5분 1파일. */
     std::string BucketSuffix();
-    /** flow 파일 경로: {flowHourDir}/{systemId}.flow.{mm5}.jsonl */
+    /** flow 파일 경로: {hourDir}/{systemId}.flow.{mm5}.jsonl */
     std::string FlowFilePath();
-    /** iface msg 파일 경로: {msgHourDir}/{systemId}_{iface}.msg.{mm5}.jsonl */
+    /** iface msg 파일 경로: {hourDir}/{systemId}_{iface}.msg.{mm5}.jsonl */
     std::string MsgFilePath( const char *pszIface );
-    /** Get current hourly directory path for flow logs */
-    std::string GetFlowHourDir();
-
-    /** Get current hourly directory path for message logs */
-    std::string GetMsgHourDir();
+    /** 현재 시각의 시간 버킷 디렉터리 — <log>/sip/{YYYY}/{MM}/{DD}/{HH} (flow·msg 공용) */
+    std::string GetHourDir();
 
     /** Get sequence counter for a given interface */
     int &GetIfaceSeq( const char *pszIface );
@@ -161,10 +158,9 @@ private:
         m_clsWriter.Enqueue( strPath, std::move( strLine ) );
     }
 
-    std::string m_strFlowBaseDir;  // service_log base
-    std::string m_strMsgBaseDir;   // msg_log base
-    std::string m_strSystemId;     // e.g. "csp_01" (파일명용)
-    std::string m_strNodeName;     // e.g. "csp" (flow node 필드용)
+    std::string m_strBaseDir;   // <log>/sip — flow·msg 5분 버킷 루트
+    std::string m_strSystemId;  // e.g. "csp_01" (파일명용)
+    std::string m_strNodeName;  // e.g. "csp" (flow node 필드용)
     bool m_bEnabled;
     bool m_bRawLogEnabled;
     std::mutex m_mtx;

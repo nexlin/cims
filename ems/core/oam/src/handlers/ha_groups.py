@@ -1575,6 +1575,10 @@ async def _migrate_shared_store(gid: int, body_raw, config: dict) -> HandlerResu
          → agent 가 정지 → 복사 → config.json 기록 → 기동 을 수행
       4. 나머지 멤버는 `update_config` 만 (그 노드는 같은 공유 store 를 읽게 된다)
 
+    사이트 디렉터리 구성(`CimsSiteDir`)이면 사이트 전체를 마운트 지점으로 옮긴다 — `CimsSiteDir` 를 마운트
+    지점으로 바꾸고, 패키지·콘텐츠 영역은 3단계 정지창에 복사(`site_copies`), 로그·녹취·통계 영역은 기동 뒤
+    백그라운드로 합친다(`site_merges`). 명시 경로로 따로 둔 영역은 옮기지 않는다(site_directory_layout.md §5).
+
     응답은 202 다 — 3단계에서 OAM 이 재기동되므로 **콘솔이 잠깐 끊긴다**(정상).
     """
     from handlers.agents import (_deploy_load_all, _deploy_update, _pkg_load, _job_create,
@@ -1624,6 +1628,30 @@ async def _migrate_shared_store(gid: int, body_raw, config: dict) -> HandlerResu
             'detail': ('이 그룹에 base `oam` 배포가 없습니다 — store 위치의 정본이 oam '
                        '배포설정이라 적을 곳이 없습니다(oam-svc 는 그 값을 유도해 받습니다). '
                        '관리평면을 호스팅하는 그룹을 지정하거나 먼저 oam 을 설치하세요.')})
+
+    # 사이트 디렉터리 구성(`CimsSiteDir`) — 이관 = **사이트를 마운트 지점으로 옮긴다**(site_directory_layout.md §5).
+    #   store 는 아래 복사로, 백업 대상 영역(패키지·콘텐츠)은 같은 정지창에 복사하고, 관측·녹취·통계는 기동 뒤
+    #   백그라운드로 합친다(시간축 분할 구조라 나중에 합쳐도 안전). 상태 영역은 휘발성이라 옮기지 않는다.
+    #   운영자가 영역 경로를 따로 적었으면(명시값) 그 영역은 이관 대상이 아니다 — 위치가 사이트를 따라가지 않는다.
+    from services import paths as _paths
+    _base_ov = next((d.get('config') for d in targets
+                     if (d.get('process_name') or '').lower().strip() == 'oam'
+                     and isinstance(d.get('config'), dict)), {}) or {}
+    _site_mode = bool(_paths.site_dir(_base_ov))
+    _site_copies: list = []
+    _site_merges: list = []
+    if _site_mode:
+        _new_ov = {k: v for k, v in _base_ov.items() if k not in ('CimsRuntimeDir', 'Packages.Dir')}
+        _new_ov['CimsSiteDir'] = mnt
+        _old = _paths.area_dirs(_base_ov)
+        _new = _paths.area_dirs(_new_ov)
+        for _area in ('packages', 'content', 'log', 'recordings', 'stats'):
+            _key = _paths.AREA_KEYS[_area]
+            if _area != 'packages' and _paths.cfg_get(_base_ov, _key):
+                continue
+            if _old.get(_area) and _new.get(_area) and _old[_area] != _new[_area]:
+                (_site_copies if _area in ('packages', 'content') else _site_merges).append(
+                    {'area': _area, 'src': _old[_area], 'dst': _new[_area]})
 
     # 그룹 레코드에는 쓰지 않는다 — 공유 store 는 아래 2)에서 배포 overlay 에 들어가고
     # 그룹은 그것을 읽는다(`_derived_shared_store`). 두 곳에 적으면 어긋난다.
@@ -1694,13 +1722,15 @@ async def _migrate_shared_store(gid: int, body_raw, config: dict) -> HandlerResu
         overlay.pop('Packages.Dir', None)
         if _is_base:
             overlay['CimsRuntimeMount'] = mnt
+            if _site_mode:
+                overlay['CimsSiteDir'] = mnt      # 영역은 새 사이트 아래로 유도된다
         else:
             # oam-svc 는 store 위치를 **저장하지 않는다** — 정본은 oam 배포설정 하나이고
             # 실체화가 거기서 유도해 config.json 에 넣는다. 옛 배포에 남아 있는 마운트 값도
             # 여기서 걷어낸다: 두면 템플릿 밖 유령 키로 굳고(선언을 뺐다), 이관 때마다
             # "oam 과 같은지" 를 검사해야 하는 두 번째 입력점이 된다.
             overlay.pop('CimsRuntimeMount', None)
-        if _log_dir_follows_mount(str(cur.get('ServiceLogging.Dir') or ''), mnt):
+        if not _site_mode and _log_dir_follows_mount(str(cur.get('ServiceLogging.Dir') or ''), mnt):
             overlay['ServiceLogging.Dir'] = f'{mnt}/service_log'
         updated = _deploy_update(config, dep['id'], {'config': overlay}) or dep
         _enrich_deploy([updated], config)
@@ -1727,6 +1757,9 @@ async def _migrate_shared_store(gid: int, body_raw, config: dict) -> HandlerResu
             params['source_dir'] = file_store.runtime_root(config)
             params['target_dir'] = target_dir
             params['target_mount'] = mnt
+            if _site_mode:
+                params['site_copies'] = _site_copies
+                params['site_merges'] = _site_merges
             jt = 'migrate_oam_store'
         else:
             jt = 'update_config'
@@ -1741,10 +1774,10 @@ async def _migrate_shared_store(gid: int, body_raw, config: dict) -> HandlerResu
     return HandlerResult(status=202, body={
         'shared_store': store, 'runtime_dir': target_dir, 'jobs': jobs,
         # 함께 옮겨간 store 파생 경로 — 운영자가 "로그가 어디로 갔나" 를 응답만 보고 알 수 있게.
-        'derived_paths': {
+        'derived_paths': (_paths.layout_values(_new_ov) if _site_mode else {
             'Packages.Dir': f'{target_dir}/pkg_files',
             'ServiceLogging.Dir': f'{mnt}/service_log',
-        },
+        }),
         'already_migrated': _already_migrated,
         'detail': ('store 가 이미 이 위치에 있어 복사 없이 설정만 재적용합니다 '
                    '(모듈 정지 없음). 패키지 저장소·서비스 로그 경로가 현재 store/마운트 '

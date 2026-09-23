@@ -225,7 +225,8 @@ Enter(수락) 또는 직접 입력으로 진행합니다:
   부재 시 기동을 중단하므로, configure 가 UDP 5060(primary)/TCP 25061/TLS 5061 을 최초 1회
   시드한다 (**non-clobber** — 파일이 있으면 UI/운영 편집을 보존하고 건드리지 않음).
 - 주요 플래그: `--csp-ip/--cmp-ip/--cmdp-ip/--csc-host`, `--db-host/--db-user/--db-password`,
-  `--volte-domain/--ptt-domain`, `--service-log-dir/--msg-log-dir/--record-dir`, `--cims-secret/--idms-secret`
+  `--volte-domain/--ptt-domain`, `--site-dir`(사이트 디렉터리 — 기본 `<dist>/ext_mnt`, 그 아래 log/ recordings/ stats/ state/ content/ —
+  [site_directory_layout.md](design/features/site_directory_layout.md)) · 영역 override `--service-log-dir/--record-dir`, `--cims-secret/--idms-secret`
 - 재실행 멱등성: 명시 옵션 > 환경변수(`CIMS_LOCAL_IP` 등) > `.cims/server.local.json` 저장값 > 내장 기본값.
   비대화 실행의 명시 옵션은 저장값을 덮어쓰지 않음(일회성).
 - 편의 래퍼: `./cims.sh configure [동일 옵션]`

@@ -1451,10 +1451,12 @@ GET /api/v1/ptt/sessions?date=2026-08-06&kind=private,adhoc&limit=50
   (이어지는 버킷은 서버가 `seq` 로 찾아 붙인다 — 콘솔은 버킷을 몰라도 된다).
 
 > **읽기 모델.** 이 엔드포인트의 출처는 세션 인덱스
-> (`{ServiceLogDir}/ptt/index/YYYYMMDD.jsonl`, OAM `services/ptt_index`)다. 녹취
+> (통계 영역 `{Stats.Dir}/ptt_index/YYYYMMDD.jsonl`, OAM `services/ptt_index` —
+> [site_directory_layout.md](../design/features/site_directory_layout.md))다. 녹취
 > 디렉터리가 정본이고 인덱스는 파생물이라 지우면 다시 만들어진다. `oam.json` 의
-> `PttIndex.Enabled=false` 면 종전처럼 녹취를 직접 스캔한다(되돌리기 경로).
-> 진행중 세션은 인덱스에 없다 — 종료돼야 확정되므로 `state/ptt/*.json` 에서 실시간 도출한다.
+> `PttIndex.Enabled=false` 면 녹취를 직접 스캔한다(되돌리기 경로).
+> 진행중 세션은 인덱스에 없다 — 종료돼야 확정되므로 상태 영역 `{State.Dir}/ptt/*.json` 에서 실시간 도출한다.
+> 녹취 id 는 녹취 영역(`Recording.Dir`) 루트 기준 상대 경로다.
 
 ### 11.2 호별 메시지 Flow 조회
 
@@ -1496,8 +1498,9 @@ GET /api/v1/flow/body?date=YYYY-MM-DD&hour=HH&seq=42&iface=cmp&node=csp&ts=14:30
 
 - `seq` 줄을 읽되 `sesid` 로 검증하고, 불일치 시 같은 5분 버킷에서
   `sesid`+`mid`(trans_id)+`dir`(TX/RX)+`ts` 로 재검색해 복원한다
-  ([flow_logging.md](../design/features/flow_logging.md) 원문 역조회 규칙).
-- legacy: `ts`+`dir`(+`proto`) 만으로도 조회 가능.
+  ([flow_logging.md](../design/features/flow_logging.md) 원문 역조회 규칙). 파일은 로그 영역
+  `sip/YYYY/MM/DD/HH/` 의 msg 5분 버킷이다.
+- `seq` 가 없는 항목은 원문 줄을 특정할 수 없어 빈 본문(`{"body": ""}`, 200)이다.
 
 **응답 200:** `{"body": "<원문 전체>"}`
 
@@ -1693,8 +1696,11 @@ Agent OAM 주소 재지정 (이중화 전환: 노드 IP → VIP):
 > **`POST /api/v1/ha-groups/{id}/shared-store/migrate`** (admin) — 관리 store 를 공유
 > 마운트로 이관. body `{mount_point}`. 멤버 **oam** 배포설정에 `CimsRuntimeMount` 를 넣고
 > (옛 파생 키 `CimsRuntimeDir`·`Packages.Dir` 은 걷어낸다 — 실체화가 새 마운트에서 다시
-> 유도한다) 파생 `ServiceLogging.Dir` 갱신 + store 보유 노드에 `migrate_oam_store` job
-> (정지→복사→config→기동) 까지 한 번에 수행하고 **202** 를 반환한다. 진행 중 OAM 이
+> 유도한다) 사이트 디렉터리 구성이면 `CimsSiteDir` 를 마운트 지점으로 바꿔 **사이트 전체**를 옮기고
+> (패키지·콘텐츠 영역은 정지창 복사, 로그·녹취·통계 영역은 기동 뒤 합류 —
+> [site_directory_layout.md](../design/features/site_directory_layout.md) §5), 단일 루트 구성이면 파생
+> `ServiceLogging.Dir` 을 갱신한다. store 보유 노드에 `migrate_oam_store` job
+> (정지→복사→config→기동) 까지 한 번에 수행하고 **202** 를 반환한다. 응답 `derived_paths` = 새 영역 경로. 진행 중 OAM 이
 > 재기동되므로 콘솔이 잠깐 끊긴다. 복사는 멱등이고, 실패 시 구 설정으로 되돌려 기동한다.
 > 시크릿·인증서는 이관 대상이 아니다(노드 로컬 유지). 대상 경로에 이전 데이터가 있으면
 > **확인 없이 덮는다** — 이관의 source 는 지금 도는 OAM 의 store 이므로 정의상 정본이다.
@@ -1713,8 +1719,9 @@ Agent OAM 주소 재지정 (이중화 전환: 노드 IP → VIP):
 > **400 `shared_store_not_group_scoped`** — `PUT /api/v1/ha-groups/{id}` 에 `shared_store` 를
 > 실으면 거부된다. 공유 store 는 그룹이 저장하는 값이 아니라 **base `oam` 배포설정**
 > (`CimsRuntimeMount`)이고, GET 응답의 `shared_store` 는 그것을 읽은 읽기 전용 유도값이다.
-> store 위치는 경로 설정 `CimsRuntimeDir`(NAS·로컬 무관, `[패키지 설정] > oam > 관리 store`)이고 `CimsRuntimeMount` 는 선택 mount guard 값이다.
-> 최초 지정은 부트스트랩 설치(`--runtime-dir`/`--log-dir`, 공유 스토리지 사이트는 `--runtime-mount` / 대화식 `[6/7]`), 이후 변경은 위 이관
+> store 위치는 사이트 디렉터리 `CimsSiteDir` 의 `runtime/`(NAS·로컬 무관, `[패키지 설정] > oam > 사이트 디렉터리` — override `CimsRuntimeDir`)이고
+> `CimsRuntimeMount` 는 선택 mount guard 값이다. 최초 지정은 부트스트랩 설치(`--site-dir`, 공유 스토리지 사이트는 `--runtime-mount` /
+> 대화식 `[6/7]`), 이후 변경은 위 이관
 > 엔드포인트(콘솔 `이 경로로 이관`) — 경로 변경은 데이터 이동을 수반하기 때문이다.
 > oam-svc 배포설정에는 store 경로 선언 자체가 없어(overlay 쓰기 마스크가 거른다) 두 모듈이
 > 다른 store 를 가리키는 상태는 생기지 않는다.

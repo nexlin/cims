@@ -2,6 +2,7 @@
 #include "FmReporter.h"
 #include "PLog.h"
 #include "McDataCodec.h"
+#include "SiteLayout.h"
 #include <algorithm>
 #include <arpa/inet.h>
 #include <cctype>
@@ -1000,14 +1001,23 @@ void PCmdpServer::loadConfig() {
         else PLog::Instance().SetLevel(CMP_LOG_INFO);
     }
 
-    // 서비스 로그 (flow/msg jsonl)
+    // 사이트 영역 경로(site_directory_layout.md) — 서비스 로그(log: flow/msg jsonl 은 <log>/sip/)·서비스 콘텐츠
+    //   (content: FD 스토어 기본 위치). OAM 실체화가 base oam 사이트 디렉터리에서 유도해 채운다. 콘텐츠 영역이 비면
+    //   단일 루트 레이아웃(= 서비스 로그 루트).
+    std::string contentDir;
     if (root.Has("ServiceLogging")) {
         SimpleJson::JsonNode sl = root.Get("ServiceLogging");
-        if (sl.Has("Dir")) _serviceLogDir = sl.GetString("Dir");
+        if (sl.Has("Dir")) _serviceLogDir = SiteLayout::Norm(sl.GetString("Dir"));
         if (sl.Has("SpoolDir")) _logSpoolDir = sl.GetString("SpoolDir");
         if (sl.Has("StallSec")) _logStallSec = (int)sl.GetInt("StallSec", 5);
         if (sl.Has("SpoolMaxMb")) _logSpoolMaxMb = (int)sl.GetInt("SpoolMaxMb", 1024);
     }
+    if (root.Has("Content")) {
+        SimpleJson::JsonNode ct = root.Get("Content");
+        if (ct.Has("Dir")) contentDir = ct.GetString("Dir");
+    }
+    _sipLogDir = SiteLayout::SipLogDir(_serviceLogDir);
+    contentDir = SiteLayout::ContentDir(contentDir, _serviceLogDir);
     if (root.Has("SystemId")) _systemId = root.GetString("SystemId");
     _nodeName = _systemId;
     auto upos = _nodeName.find('_');
@@ -1023,9 +1033,9 @@ void PCmdpServer::loadConfig() {
     }
     _fmStoreMo = _systemId + "/" + _nodeName + "/fd_store";   // <서버명>/<모듈>/<component> (표준화 §3.4(b))
 
-    // 스토어 미설정 시 ServiceLogging.Dir 기반 기본 경로 (csc 기본값과 동일 규칙)
-    if (!_fdStore.IsEnabled() && !_serviceLogDir.empty())
-        _fdStore.Init(_serviceLogDir + "/mcdata_fd");
+    // 스토어 미설정 시 서비스 콘텐츠 영역의 mcdata_fd/ (CSC 기본값과 같은 규칙 — 두 모듈이 같은 스토어를 본다)
+    if (!_fdStore.IsEnabled() && !contentDir.empty())
+        _fdStore.Init(contentDir + "/mcdata_fd");
 
     LOG_INFO("PCmdpServer",
              "Config: control=%s:%d msrp=%s:%d max=%lld timeout=%d orphan=%d workers=%d systemId=%s",
@@ -1070,12 +1080,12 @@ std::string PCmdpServer::msgFilePath() {
 // 5분 버킷 회전 — 순수 북키핑 (파일시스템 무접촉: 디렉터리 생성은 flusher 가 기록 직전에,
 //   기존 줄 계수(시딩)는 flusher 가 기동 시 1회 수행).
 void PCmdpServer::ensureBucket() {
-    if (_serviceLogDir.empty()) return;
+    if (_sipLogDir.empty()) return;
     time_t now = time(nullptr);
     struct tm t;
     localtime_r(&now, &t);
     char hourDir[512];
-    snprintf(hourDir, sizeof(hourDir), "%s/%04d/%02d/%02d/%02d", _serviceLogDir.c_str(),
+    snprintf(hourDir, sizeof(hourDir), "%s/%04d/%02d/%02d/%02d", _sipLogDir.c_str(),
              t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour);
     std::string bucketKey = std::string(hourDir) + "/" + bucketSuffix();
     if (bucketKey == _currentBucketKey) return;
@@ -1171,18 +1181,18 @@ void PCmdpServer::logFlow(const std::string& key, const char* from, const char* 
 //   include/ServiceLogWriter.h). 시딩 대상: 기동 시점 버킷의 msg 파일 (flusher 가 기존
 //   줄 수를 비동기 계수, writeMsgLine 첫 write 가 합류해 재기동 seq 연속성 유지).
 void PCmdpServer::startServiceLogWriter() {
-    if (_serviceLogDir.empty()) return;
+    if (_sipLogDir.empty()) return;
     time_t now = time(nullptr);
     struct tm t;
     localtime_r(&now, &t);
     char hourDir[512];
-    snprintf(hourDir, sizeof(hourDir), "%s/%04d/%02d/%02d/%02d", _serviceLogDir.c_str(),
+    snprintf(hourDir, sizeof(hourDir), "%s/%04d/%02d/%02d/%02d", _sipLogDir.c_str(),
              t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour);
     std::string mm5 = bucketSuffix();
     _seedBucketKey = std::string(hourDir) + "/" + mm5;
     std::string seedPath = std::string(hourDir) + "/" + _systemId + "_csp.msg." + mm5 + ".jsonl";
     _logWriter.Init(
-        _logSpoolDir, _logStallSec, _logSpoolMaxMb, {_serviceLogDir}, {seedPath},
+        _logSpoolDir, _logStallSec, _logSpoolMaxMb, {_sipLogDir}, {seedPath},
         [](EnumSlwLogLevel level, const std::string& msg) {
             if (level == SLW_LOG_ERROR) { LOG_ERROR("ServiceLog", "%s", msg.c_str()); }
             else if (level == SLW_LOG_DEBUG) { LOG_DEBUG("ServiceLog", "%s", msg.c_str()); }

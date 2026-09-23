@@ -658,8 +658,9 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
 
 저장: run 마다 `<DataDir>/runs/<id>/run.json`(정의·verdict·요약), `metrics.sqlite`(1초 버킷 × 지표, 히스토그램은 로그 버킷),
 `events.jsonl`(실패 개별 건 — Call-ID·코드·시각·워커), `sip/<call_id>.log`(워커 SIP 덤프 — 블록 머리 `>>> `송신/`<<< `수신 + 요청·상태 줄 · 시각 · transport · 상대 · 워커, 이어서 메시지 원문. 같은 Call-ID 를 두 워커가 올리면 한 파일에 이어 적는다).
-`DataDir` 은 모듈 설정(`Tester.DataDir`, §8) — oam-svc 의 `ServiceLogging.Dir` 과 같은 지위. file_store 에는 run 색인 레코드만 둔다.
-비우면 배포본은 **버전과 무관한 `<모듈>/runtime/data`**(agent 가 만드는 `runtime/` — 인증서와 같은 자리라 업그레이드에 살아남는다. 처음 옮겨 갈 때
+`DataDir` 은 모듈 설정(`Tester.DataDir`, §8) — 사이트 디렉터리의 계측기 영역이다([site_directory_layout.md](site_directory_layout.md)). file_store 에는 run 색인 레코드만 둔다.
+비우면 배포 때 base oam 사이트 디렉터리에서 **`<사이트>/tester`** 가 채워진다(템플릿 `site_area: tester`, `default` 모드 — 운영자 입력이 이긴다). 사이트 디렉터리가
+없는(단일 루트) 사이트의 배포본은 **버전과 무관한 `<모듈>/runtime/data`**(agent 가 만드는 `runtime/` — 인증서와 같은 자리라 업그레이드에 살아남는다. 처음 옮겨 갈 때
 그 버전 디렉터리의 `data/` 를 이어받는다), 소스 트리·단독 실행은 컴포넌트 아래 `data/`. 운영자 시나리오·creds(`scenarios/`)와 **토폴로지**(`topologies/`)도 여기 있다 —
 계측기 정의 전부가 DataDir 하나를 따라간다(NAS 로 옮기거나 다른 계측기 호스트로 들고 갈 때 디렉터리 하나). 토폴로지가 관리 store 도메인
 `modules/oam-cims-tester/runtime/topologies` 에 남아 있고 `topologies/` 가 비어 있으면 기동 때 한 번 복사해 잇는다(원본은 두고, 그 뒤로는 DataDir 이 정본).

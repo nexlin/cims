@@ -400,7 +400,7 @@ VoLTE 표에는 `rejected`(거절)·`no_answer`(무응답) 두 열이 없어, DN
 두 화면이 다른 숫자를 내는 것은 정상이므로, 콘솔은 제목으로 축을 갈라 표시한다 —
 `성능 > PTT/VoLTE 통계` = **시도 결말**, `성능 > 인터페이스 통계` = **응답 메시지 수**.
 
-**PTT 시도 장부 레코드** (`ptt/attempts/YYYYMMDD.jsonl`, CSP 가 결말마다 1줄):
+**PTT 시도 장부 레코드** (통계 영역 `ptt_attempts/YYYYMMDD.jsonl`, CSP 가 결말마다 1줄):
 
 | 키 | 뜻 |
 |---|---|
@@ -626,14 +626,16 @@ CANCEL 은 한 자리) 표 전체를 기준으로 정규화하면 작은 열이 
 
 ## 3. 원천
 
+영역 루트(`Recording.Dir`·`Stats.Dir`·`ServiceLogging.Dir`)는 사이트 디렉터리에서 유도된다([site_directory_layout.md](site_directory_layout.md)).
+
 | 통계 | 원천 | 위치 |
 |---|---|---|
-| 호 (VoLTE) | `call.json` | `{ServiceLogging.Dir}/volte/YYYY/MM/DD/HH/…/{key}.d/call.json` (`end_status` 포함) |
-| 호 (PTT) — 시도 | **시도 장부** | `{ServiceLogging.Dir}/ptt/attempts/YYYYMMDD.jsonl` (CSP 가 결말마다 1줄) |
-| 호 (PTT) — 내용 | 세션 디스크립터 | `ptt/{gid}/YYYY/MM/DD/HH/{sessKey}/session.json` (`services.ptt_index` 경유) |
+| 호 (VoLTE) | `call.json` | `{Recording.Dir}/volte/YYYY/MM/DD/HH/…/{key}.d/call.json` (`end_status` 포함) |
+| 호 (PTT) — 시도 | **시도 장부** | `{Stats.Dir}/ptt_attempts/YYYYMMDD.jsonl` (CSP 가 결말마다 1줄) |
+| 호 (PTT) — 내용 | 세션 디스크립터 | `{Recording.Dir}/ptt/{gid}/YYYY/MM/DD/HH/{sessKey}/session.json` (`services.ptt_index` 경유) |
 | leg 묶음 | `session.json` | `{"session_id":…, "sesid":…, "call_ids":[…]}` |
-| 메시지 (sip·cmp·csc) | 원문 JSONL | `{ServiceLogging.Dir}/YYYY/MM/DD/HH/{sys}_{iface}.msg.{5분버킷}.jsonl` |
-| 메시지 (https) | **flow 로그** | `{ServiceLogging.Dir}/YYYY/MM/DD/HH/{sys}.flow.{5분버킷}.jsonl` 의 `proto=HTTPS` 엔트리 |
+| 메시지 (sip·cmp·csc) | 원문 JSONL | `{ServiceLogging.Dir}/sip/YYYY/MM/DD/HH/{sys}_{iface}.msg.{5분버킷}.jsonl` |
+| 메시지 (https) | **flow 로그** | `{ServiceLogging.Dir}/sip/YYYY/MM/DD/HH/{sys}.flow.{5분버킷}.jsonl` 의 `proto=HTTPS` 엔트리 |
 
 **SIP 원문으로 호를 재구성하지 않는다.** `sesid` 로 묶어 상태기계를 다시 돌리면 같은 사실을
 두 번 계산하는 구조가 되고, 콘솔 `호 이력` 화면과 숫자가 어긋난다. PTT 집계가 디렉터리를
@@ -671,7 +673,7 @@ flow 로그에는 SIP·CMP 의 흐름이 함께 들어 있고 그중 HTTPS 는 �
 Request-URI → To → From, 첫 매치. 응답은 Request-URI 가 없으므로 To/From 만 본다.
 
 판정 결과는 **서비스축** `volte | ptt` 다 — 접속환경 kind 가 `voip`(유선) 여도 전화 계열로 `volte` 에 합산한다
-(`services/access_services.service_axis`). CSP 도 같은 규칙(`CCspServiceMap::LogServiceOf`)으로 `{ServiceLogging.Dir}/volte/…`
+(`services/access_services.service_axis`). CSP 도 같은 규칙(`CCspServiceMap::LogServiceOf`)으로 `{Recording.Dir}/volte/…`
 디렉터리와 flow `service` 키를 만들므로 원문 스캔 경로와 판정이 같은 축을 본다([sip_service_model.md §2-9](sip_service_model.md)).
 
 이 판정이 서비스축(요구 ⑤) 전체의 근거다. 접속 서비스 정의를 읽는 경로는 관리평면 소비자
@@ -834,9 +836,10 @@ SIP 외 인터페이스 조회는 세대가 모자란 행을 **쓰지 않는다*
 아래 배치는 **파일 어댑터의 사정**이다 — 계약은 §5.4 의 포트이고, 최종 목표는 DB 적재다.
 
 ```
-{ServiceLogging.Dir}/stats/{1m,1h,1d}/YYYY/MM/DD.jsonl   # 날짜별
-{ServiceLogging.Dir}/stats/1M/YYYY.jsonl                 # 연도별 (그 해 12줄 × 서비스 수)
-{ServiceLogging.Dir}/stats/.rollup_state.json            # watermark + 미결 호 목록 (§6.1)
+{Stats.Dir}/{1m,1h,1d}/YYYY/MM/DD.jsonl   # 날짜별
+{Stats.Dir}/1M/YYYY.jsonl                 # 연도별 (그 해 12줄 × 서비스 수)
+{Stats.Dir}/.rollup_state.json            # watermark + 미결 호 목록 (§6.1)
+{State.Dir}/stats_rollup.lock             # 집계 writer 잠금 (§6.2)
 ```
 
 **월만 연도별 파일이다.** 월 버킷은 여러 날에 걸쳐 있어 어느 날짜 파일에도 속하지 않는다.
@@ -1000,9 +1003,10 @@ oam-svc 에 주기 작업으로 둔다(통계는 oam-svc 귀속 — `oam_base_se
 
 **집계는 writer 권한을 쥔 하나만 한다.** `run_once()`·`rebuild_range()` 는 저장소의
 `acquire_writer()`(§5.4)를 먼저 잡고, 못 잡으면 건너뛴다(사유가 바뀔 때만 로그). 파일
-어댑터는 **집계 트리 `{ServiceLogging.Dir}/stats` 에 flock** 을 건다 — 런타임 store 의
-소유권 리스와는 **다른 축**이다. 런타임 store 는 배포본마다 따로라 배포본 경계를 넘어
-중재하지 못한다: 두 배포본이 `ServiceLogging.Dir` 만 공유하는 구성에서 양쪽이 같은 일별
+어댑터는 **상태 영역의 `{State.Dir}/stats_rollup.lock` 에 flock** 을 건다 — 런타임 store 의
+소유권 리스와는 **다른 축**이다. 같은 사이트 디렉터리를 쓰는 배포본은 통계·상태 영역을 함께 공유하므로
+잠금이 성립한다(영역 경로를 따로 적을 때는 통계와 상태를 같이 공유해야 한다). 런타임 store 는 배포본마다
+따로일 수 있어 배포본 경계를 넘어 중재하지 못한다: 두 배포본이 통계 트리만 공유하는 구성에서 양쪽이 같은 일별
 파일을 60초마다 tmp+rename 으로 갈아끼우다 NFSv4 위임 회수가 고착해, 그 디렉터리를 이름으로
 여는 모든 요청이 멈췄다(2026-09-11 실측 — oam-svc 가 2시간 20분 동안 실제 요청 4건만 처리,
 `/health` 는 루프 위 한 줄이라 계속 200 이어서 절체도 알람도 없었다).
@@ -1100,8 +1104,8 @@ GET /api/v1/stats/messages/{iface}?from=&to=&granularity=&svc=
   즉석 집계하는데, 원본마저 지워졌으면 그 훑기는 **조용히 빈손으로 돌아온다** — 그대로 두면
   "그 시간엔 아무 일도 없었다"(0)와 "확인할 수 없다"(모름)가 같은 값이 되고, 조회는 성공한
   얼굴로 작은 값을 낸다. 구간 양 끝의 반쪽 날이 거친 계층에 덮이지 않을 때 늘 이 경로다.
-  판정은 **그 날 원본 디렉터리의 존재**다(`<root>/YYYY/MM/DD` 원문 로그 또는
-  `<root>/volte/YYYY/MM/DD` 호 기록 — 서버가 그 날 기록을 남겼다는 증거). 디렉터리가 있는데
+  판정은 **그 날 원본 디렉터리의 존재**다(로그 영역 `sip/YYYY/MM/DD` 원문 로그 또는
+  녹취 영역 `volte/YYYY/MM/DD` 호 기록 — 서버가 그 날 기록을 남겼다는 증거). 디렉터리가 있는데
   대상 구간이 비어 있는 것은 **진짜 0** 이다.
 - **아직 오지 않은 날은 빠진 날이 아니다** — `coverage.future_days` 로 따로 낸다. 자료가 없는
   것은 같지만 성질이 다르다: 못 본 날은 조치가 있고(보존기간을 늘려 재집계) 미래는 없다.

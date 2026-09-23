@@ -266,8 +266,7 @@ class EnsureSvcWiring(unittest.TestCase):
             seen['ensure'] = ensure_svc
             return [], {}
 
-        with unittest.mock.patch.object(stats, '_service_log_dir', lambda c: '/tmp/x'), \
-             unittest.mock.patch.object(stats.stats_rollup, 'read_range_filled',
+        with unittest.mock.patch.object(stats.stats_rollup, 'read_range_filled',
                                         lambda *a, **k: ([], cov)), \
              unittest.mock.patch.object(stats.stats_rollup, 'aggregate', _agg), \
              unittest.mock.patch.object(stats.stats_rollup, 'fill_buckets',

@@ -13,8 +13,11 @@
 
 ## 2. 로그 파일 배치
 
+전 모듈의 flow·msg 버킷은 사이트 디렉터리 로그 영역(`ServiceLogging.Dir`)의 `sip/` 아래 한 트리에 모인다
+([site_directory_layout.md](site_directory_layout.md) — 영역 경로는 base oam 사이트 디렉터리에서 유도, CSP 는 `Setup.ServiceLogging.Dir`).
+
 ```
-{ServiceLogDir}/{YYYY}/{MM}/{DD}/{HH}/
+{ServiceLogging.Dir}/sip/{YYYY}/{MM}/{DD}/{HH}/
     # 전 노드 공통: open-per-write + 5분 버킷 (mm5 = (분/5)*5 = 00/05/.../55)
     csp_01.flow.{mm5}.jsonl         ← CSP flow 이벤트 (SIP/JSON/CSC, compact, body 없음)
     csp_01_sip.msg.{mm5}.jsonl      ← CSP-UE SIP 원문
@@ -25,6 +28,9 @@
     csc_01.flow.{mm5}.jsonl         ← CSC flow (MCPTT/console/system)
     csc_01_csp.msg.{mm5}.jsonl      ← CSC→CSP notify 원문
     csc_01_ue.msg.{mm5}.jsonl       ← UE↔CSC HTTPS(IdMS/GMS/CMS) 원문
+    cmdp_01_csp.msg.{mm5}.jsonl     ← CMDP↔CSP JSON 원문
+    oam_01.flow.{mm5}.jsonl · oam_01_ue.msg.{mm5}.jsonl ← OAM 콘솔/admin HTTPS
+    csp_01.security.{mm5}.jsonl     ← CSP 보안 관측 (같은 시간 디렉터리)
 ```
 
 `{node}.flow.{mm5}.jsonl` — 경량 flow 이벤트 인덱스. `{node}_{iface}.msg.{mm5}.jsonl` — 원문 메시지.
@@ -107,9 +113,9 @@ csp 는 `CSipMessageLogger` 가 포맷/seq 를 맡고 writer 를 위임, csc 는
 서비스 스레드는 순수 계산+op 적재만, worker 하나가 FIFO 실행. 실패/정체(StallSec)/큐 포화
 시 op 드롭(장애 구간 유실 수용) + 자기보고, 회복 시 자연 재개.
 
-- **CSP CallDir**(`csp/CallDir.h` — call.json/session.json/events/state 파일): SIP 스레드
+- **CSP CallDir**(`csp/CallDir.h` — 녹취 영역의 call.json/session.json/events, 상태 영역의 state 파일, 통계 영역의 PTT 시도 장부): SIP 스레드
   파일시스템 무접촉. 폴백 시 **A-PRC-013**(mo `<node>/csp/call_dir`). 무호 유휴 구간도
-  60s **write probe**(state/.probe 실쓰기)가 같은 판정에 합류 — 마운트 소실을 트래픽 없이
+  60s **write probe**(녹취 영역 `Recording.Dir`·상태 영역 `State.Dir` 각각의 `.probe` 실쓰기)가 같은 판정에 합류 — 마운트 소실을 트래픽 없이
   선제 감지하고, 회복도 probe 성공으로 자동 close.
 - **CMP 녹취**(`PSyncRtpRecorder` + floor.jsonl): RTP 리액터 저장 경로 무접촉. 폴백 시
   **A-PRC-017**(mo `<시스템ID>/cmp/record`). 상세: [recording.md](recording.md) §3.1.
@@ -321,6 +327,7 @@ GET /api/v1/ptt/history/{group_id}/{session}/flow?date=YYYY-MM-DD
 GET /api/v1/flow/body?date=&hour=&seq=&iface=&node=
 ```
 - `node` 파라미터 중요: 여러 노드가 같은 iface에 msg 파일을 쓸 때(`*_csp.msg.jsonl` 는 cmp/csc 둘 다 생성) 정확히 매칭
+- `seq` 가 없는 항목은 원문 줄을 특정할 수 없어 빈 본문(`{"body": ""}`, 200)을 돌려준다
 
 ## 11. Console UI 표시
 

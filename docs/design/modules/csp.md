@@ -552,12 +552,15 @@ Disconnected 로 전환해 과민 teardown 을 방지한다.
 
 **파일:** `CallDir.h`
 
-Session-ID 기반 서비스 로깅 디렉토리 관리.
+Session-ID 기반 서비스 로깅 디렉토리 관리. `Init(recordings, state, stats, component, stallSec)` — 사이트 디렉터리의
+녹취·상태·통계 영역(`Setup.Recording.Dir`·`Setup.State.Dir`·`Setup.Stats.Dir`, 배포 때 base oam 사이트 디렉터리에서 유도 —
+[site_directory_layout.md](../features/site_directory_layout.md))에 나눠 쓴다. 영역 키가 비면 단일 루트 규칙(`include/SiteLayout.h`)
+— 녹취 = 서비스 로그 루트, 상태·통계 = 그 아래 `state/`·`stats/`.
 
 **디렉토리 구조:**
 
 ```
-{ServiceLogDir}/
+{Recording.Dir}/
   ├─ volte/YYYY/MM/DD/HH/{prefix}/{caller}/*.d/
   │   ├─ call.json           (통화 메타데이터)
   │   ├─ participants.jsonl   (참가자 목록)
@@ -571,6 +574,10 @@ Session-ID 기반 서비스 로깅 디렉토리 관리.
           ├─ floor.jsonl                (floor GRANT/REVOKE/REJECT/RELEASE/IDLE)
           ├─ segments.jsonl
           └─ seg/{NNN}/seg_NNNN_*.rtp + seg_NNNN.json   (100세그 shard)
+  (+ message/{gid}/YYYY/MM/DD/HH/messages.jsonl · message_direct/YYYY/MM/DD/HH/messages.jsonl — SDS 보관)
+
+{State.Dir}/  volte/ ptt/ (진행 중 세션 — 가입자별 1파일) · .probe (유휴 write probe)
+{Stats.Dir}/  ptt_attempts/YYYYMMDD.jsonl (PTT 시도 장부)
 ```
 > 상세 [recording.md](../features/recording.md).
 
@@ -631,7 +638,7 @@ psip SIP 스택의 ILogCallBack 구현. 모든 SIP TX/RX와 CMP/CSC JSON 메시�
 **출력 파일** (open-per-write · 5분 버킷):
 
 ```
-{ServiceLogDir}/YYYY/MM/DD/HH/
+{ServiceLogging.Dir}/sip/YYYY/MM/DD/HH/     (로그 영역 — Setup.ServiceLogging.Dir, 전 모듈 공통 트리)
   ├─ {systemId}.flow.{mm5}.jsonl         (통합 Flow 요약; mm5=5분 버킷 00/05/.../55)
   └─ {systemId}_{iface}.msg.{mm5}.jsonl  (원문 저장; iface = sip/cmp/csc)
 ```
@@ -935,7 +942,7 @@ relay bookkeeping 의 키는 **session_id**(`csp_{yyyymmddHHMMSSmmm}_{n}`, 재�
 | ptt_group_members | 그룹 멤버십 |
 | recordings / recording_segments | 녹취 메타데이터 |
 
-통화 이력은 DB 미적재. 파일 기반 — `service_log/{volte|ptt}/.../<call_id>.d/call.json`. 전체 인벤토리는 [docs/design/db_schema.md](../db_schema.md).
+통화 이력은 DB 미적재. 파일 기반 — 녹취 영역 `{Recording.Dir}/volte/.../<call_id>.d/call.json`(PTT = `ptt/<그룹>/…/session.json`). 전체 인벤토리는 [docs/design/db_schema.md](../db_schema.md).
 
 ---
 
@@ -1010,25 +1017,31 @@ relay bookkeeping 의 키는 **session_id**(`csp_{yyyymmddHHMMSSmmm}_{n}`, 재�
     },
     "Log": {
       "LogFolder": "log",
-      "MsgLogDir": "msg_log",
-      "ServiceLogDir": "service_log",
       "LogMaxSizeMB": 10,
       "LogDebug": false
     },
+    "ServiceLogging": {
+      "Dir": "/mnt/cims/site01/log",
+      "Recording": true,
+      "SpoolDir": "spool"
+    },
+    "Recording": { "Dir": "/mnt/cims/site01/recordings" },
+    "State": { "Dir": "/mnt/cims/site01/state" },
+    "Stats": { "Dir": "/mnt/cims/site01/stats" },
     "DataFolder": {
       "UserDataFolder": "User",
       "GroupDataFolder": "Group",
       "SipServerFolder": "SipServerXml"
     },
     "ServiceMode": "both",
-    "Cdr": {
-      "CdrFolder": "cdr"
-    },
-    "SessionTimeout": 600,
-    "RecordEnable": true
+    "SessionTimeout": 600
   }
 }
 ```
+
+> **사이트 영역 경로**: `Setup.ServiceLogging.Dir`(로그 — flow·msg 는 `sip/`)·`Setup.Recording.Dir`(녹취·통화 기록)·
+> `Setup.State.Dir`(진행 중 세션)·`Setup.Stats.Dir`(PTT 시도 장부)는 배포 때 base oam 사이트 디렉터리에서 유도해 채워진다
+> (템플릿 `site_area` — [site_directory_layout.md](../features/site_directory_layout.md)). 녹취 on/off 는 `Setup.ServiceLogging.Recording`.
 
 > **미디어서버 주소**: `Setup.MediaServer.Endpoints` = `[{ip,port}, ..]` 가 정본(첫 행=primary, 2개 이상이면
 > All-Active 분배). `LocalPort` 는 CSP 가 CMP 응답을 받는 로컬 bind 포트(단수). 구 배포 호환을 위해

@@ -101,10 +101,11 @@ def _identity_bundle(config: dict) -> dict:
             'CertSans': srv.get('CertSans') or [],
         },
         'mgmt': {'Cidr': (config.get('Mgmt') or {}).get('Cidr') or ''},
-        # 합류 노드가 계승하는 것은 **마운트 지점**이다 — store 경로는 양쪽이 같은 규칙으로
-        # 유도한다(oam_ha.md §4.1). `CimsRuntimeDir` 은 해석된 현재 store 를 참고용으로
-        # 함께 준다(구 installer 하위호환 + 진단).
+        # 합류 노드가 계승하는 것은 **사이트 디렉터리·마운트 지점**이다 — 영역 경로는 양쪽이 같은
+        # 규칙으로 유도한다(site_directory_layout.md §3). `CimsRuntimeDir` 은 해석된 현재 store 를
+        # 참고용으로 함께 준다(진단 + 사이트 디렉터리 없는 구성의 store 경로).
         'runtime': {
+            'CimsSiteDir': config.get('CimsSiteDir') or '',
             'CimsRuntimeDir': _store_root(config),
             'CimsRuntimeMount': config.get('CimsRuntimeMount') or '',
         },

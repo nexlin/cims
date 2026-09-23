@@ -912,17 +912,48 @@
     },
     {
       "key": "service_log",
-      "title": "서비스 로그",
-      "description": "녹취·msg·flow 로그의 공통 저장 루트. CSP·CMP·CSC 가 같은 경로를 쓰고 OAM 이 조회하므로 그룹 공통(service)으로 관리한다.",
+      "title": "사이트 경로 · 서비스 로그",
+      "description": "CSC 가 쓰는 사이트 영역 — 관측 로그(log/sip), 관제 앱 이력 원천(recordings·state), MCData FD 스토어(content/mcdata_fd). base oam 사이트 디렉터리에서 유도된다(site_directory_layout.md).",
       "fields": [
         {
           "key": "ServiceLogging.Dir",
-          "label": "서비스 로그 루트",
+          "label": "서비스 로그 (log)",
           "type": "path",
           "default": "service_log",
           "deploy_value": "@SERVICE_LOG_DIR@",
           "restart": true,
-          "help": "CSP·CMP 와 동일 경로여야 함 (CSC msg.jsonl 등 기록)."
+          "help": "CSC msg·flow 5분 버킷(sip/<연/월/일/시>/). 사이트 디렉터리에서 유도된다 — 배포 때 base oam [사이트 디렉터리] 값으로 채워지고, 여기서 바꿔도 다시 채워진다.",
+          "site_area": "log"
+        },
+        {
+          "key": "Recording.Dir",
+          "label": "녹취 (recordings)",
+          "type": "path",
+          "default": "",
+          "site_area": "recordings",
+          "deploy_value": "@RECORD_DIR@",
+          "restart": true,
+          "help": "관제 앱 이력(/provisioning/history)이 읽는 통화·세션 기록(volte/ ptt/ message/). 사이트 디렉터리에서 유도된다 — 배포 때 base oam [사이트 디렉터리] 값으로 채워지고, 여기서 바꿔도 다시 채워진다."
+        },
+        {
+          "key": "State.Dir",
+          "label": "상태 (state)",
+          "type": "path",
+          "default": "",
+          "site_area": "state",
+          "deploy_value": "@STATE_DIR@",
+          "restart": true,
+          "help": "관제 앱 이력의 진행 중 세션(volte/ ptt/). 사이트 디렉터리에서 유도된다 — 배포 때 base oam [사이트 디렉터리] 값으로 채워지고, 여기서 바꿔도 다시 채워진다."
+        },
+        {
+          "key": "Content.Dir",
+          "label": "서비스 콘텐츠 (content)",
+          "type": "path",
+          "default": "",
+          "site_area": "content",
+          "deploy_value": "@CONTENT_DIR@",
+          "restart": true,
+          "help": "MCData FD 스토어 기본 위치(content/mcdata_fd/ — CMDP 와 같은 경로). 사이트 디렉터리에서 유도된다 — 배포 때 base oam [사이트 디렉터리] 값으로 채워지고, 여기서 바꿔도 다시 채워진다."
         },
         {
           "key": "ServiceLogging.SpoolDir",
@@ -1153,7 +1184,7 @@
           "type": "path",
           "default": "",
           "restart": true,
-          "help": "그룹 파일전송(FD) 원본 저장 경로. 비우면 {ServiceLogging.Dir}/mcdata_fd."
+          "help": "그룹 파일전송(FD) 원본 저장 경로. CMDP McDataFd.Dir 와 같아야 한다. 비우면 <Content.Dir>/mcdata_fd."
         },
         {
           "key": "McDataFd.MaxBytes",

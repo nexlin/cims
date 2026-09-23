@@ -244,8 +244,8 @@ cat build/dist/.deployed-manifest.json    # manifest_sha + ts
 어느 경로로 판정했는지 흐려지지 않게). 이전된 항목: `S6-SCN-VOLTE-VOICE` → `VOLTE-CALL-BASIC`.
 
 ```bash
-# 합격 후 녹취 갯수
-find ext_mnt/service_log -name 'seg_*.rtp' -newer verify_reports -mmin -10 | wc -l
+# 합격 후 녹취 갯수 (개발 트리 녹취 영역 = <dist>/ext_mnt/recordings — configure --site-dir/--record-dir)
+find ext_mnt/recordings -name 'seg_*.rtp' -newer verify_reports -mmin -10 | wc -l
 # 기대: 28 이상 (4 + 4 + 10 + 10)
 ```
 
@@ -335,8 +335,8 @@ grep LocalIp build/dist/csp/config/csp.json
 |---|---|
 | S2/S3 모듈 로그 | `build/dist/log/<module>.log` |
 | S5 배포본 로그 | `build/dist/{csc,csp,cmp}-server/<module>/log/` |
-| Service log (호 단위) | `ext_mnt/service_log/<type>/YYYY/MM/DD/HH/.../*.d/` |
-| SIP msg log | `ext_mnt/msg_log/csp/sip/YYYY/MM/DD/HH/sip.jsonl` |
+| 통화·세션 기록 (호 단위) | `ext_mnt/recordings/volte/YYYY/MM/DD/HH/.../*.d/` · `ext_mnt/recordings/ptt/<그룹>/YYYY/MM/DD/HH/S…_N/` |
+| SIP msg·flow log | `ext_mnt/log/sip/YYYY/MM/DD/HH/<sysid>*.{msg,flow}.<mm5>.jsonl` |
 | Verify reports | `verify_reports/<ts>_stage<N>.md` |
 | TB-Console (검증) | `http://<ens160>:3000/release/verify` |
 | 회차 이력 | `http://<ens160>:3000/release/verify-history` |

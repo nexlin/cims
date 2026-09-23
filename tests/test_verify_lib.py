@@ -3423,13 +3423,14 @@ class TestPickStartWindow(unittest.TestCase):
 
 
 class TestServiceLogRoots(unittest.TestCase):
-    """녹취/flow 카운터는 설정된 ServiceLogDir 을 봐야 한다 —
-    기본 경로(<dist>/ext_mnt/service_log)만 보면 경로를 옮긴 환경에서 '파일 없음' 오판."""
+    """녹취/flow 카운터는 설정된 로그·녹취 영역을 봐야 한다 —
+    기본 경로(<dist>/ext_mnt/log·recordings)만 보면 경로를 옮긴 환경에서 '파일 없음' 오판."""
 
     def setUp(self) -> None:
         import tempfile
-        from verify.lib.common.service_log import service_log_roots
+        from verify.lib.common.service_log import service_log_roots, recording_roots
         self.roots = service_log_roots
+        self.rec_roots = recording_roots
         self.tmp = tempfile.mkdtemp(prefix="cims_svclog_")
 
     def tearDown(self) -> None:
@@ -3458,9 +3459,24 @@ class TestServiceLogRoots(unittest.TestCase):
         self.assertIn(ext, self.roots(self.tmp))
 
     def test_default_path_included(self) -> None:
-        default = os.path.join(self.tmp, "ext_mnt", "service_log")
+        default = os.path.join(self.tmp, "ext_mnt", "log")
         os.makedirs(default)
         self.assertIn(default, self.roots(self.tmp))
+
+    def test_recording_roots_read_recording_dir(self) -> None:
+        rec = os.path.join(self.tmp, "rec_elsewhere")
+        os.makedirs(rec)
+        self._write_cfg(("csp", "config", "csp.json"),
+                        {"Setup": {"Recording": {"Dir": rec}}})
+        self.assertIn(rec, self.rec_roots(self.tmp))
+
+    def test_recording_roots_include_single_root_log(self) -> None:
+        # 단일 루트 레이아웃 — 녹취가 로그 루트 아래
+        log = os.path.join(self.tmp, "svc")
+        os.makedirs(log)
+        self._write_cfg(("cmp", "config", "cmp.json"),
+                        {"ServiceLogging": {"Dir": log}})
+        self.assertIn(log, self.rec_roots(self.tmp))
 
     def test_missing_dirs_excluded(self) -> None:
         # 설정에만 있고 실제로 없는 경로는 제외 (glob 대상이 아니다)

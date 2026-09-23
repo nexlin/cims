@@ -461,15 +461,12 @@ regroup_changed). fm_catalog.json 선언과 구현이 일치한다.
     스텁(`DbManager.cpp:658-660`)인데 `CscInterface.cpp:226-231` 이 DB 연결 시 이 값을 사용
     (미연결 시에만 `CallMap::GetCount()`). OAM 은 call.json 스캔으로 덮어써(`stats.py:642-646`)
     콘솔에선 안 보이는 결함 — 세션 사용률 알람(정의 행 CSCF `sessions`)의 선수정.
-10. **CMsgLogger 는 CSP 내 죽은 코드** — `gclsMsgLogger` 호출자가 csp/ 안에 0건(인스턴스
-    정의만, 실사용은 재설계 예정인 cwrtc 뿐). msg_log 쓰기 실패는 이 사유로 감지 행
-    비대상(발생 불가 조건).
-11. `LogSecurity()`/security.jsonl 이 dead code(`SipMessageLogger.cpp:81-103` — 호출처 0) +
+10. `LogSecurity()`/security.jsonl 이 dead code(`SipMessageLogger.cpp:81-103` — 호출처 0) +
     toll-fraud 603 은 `SuppressNetworkSource` 로 flow/msg 의도적 억제(`ModuleDispatcher.cpp:
     284-301`) — 보안 관측이 텍스트 로그 요약 1줄뿐(security_violation 정의의 관측 공백).
-12. **Max-Forwards 검사 부재** — 수신 검사·483 응답 없음(`SIP_TOO_MANY_HOPS` 사용처 0) +
+11. **Max-Forwards 검사 부재** — 수신 검사·483 응답 없음(`SIP_TOO_MANY_HOPS` 사용처 0) +
     송신 시 부재면 무조건 70 세팅(`SipStackComm.hpp:581-583`) — 루프 방지 무력화(규격 결함).
-13. **로컬 합성 응답(트랜잭션 타임아웃 408)은 flow 에 절대 남지 않는다** — Timer B/C 만료 시
+12. **로컬 합성 응답(트랜잭션 타임아웃 408)은 flow 에 절대 남지 않는다** — Timer B/C 만료 시
     psip 이 합성해 자기주입(`SipICTList.cpp:190-231`), 와이어 미송신. 호 카운터는 포함
     완료(`CSipStackCounter` — `RecvResponse` 팬아웃 계측이 합성 408/660 을 통과시킴,
     A-QOS-006 행). flow `detail` 사유 코드화는 잔여(표준화 §7.2.2 채용 1).
@@ -502,30 +499,25 @@ PT 는 헤더 1바이트 스탬프), HA 역할 전이(All-Active — keepalived/
 핸들러 없음, 전 필드 restart 요구).
 
 **동반 발견 결함**:
-1. **배포 overlay 부분 적용** — `loadConfig` 가 overlay 를 첫 파싱 패스에만 적용
-   (`PCmpServer.cpp:1587-1613`)하고 `RecordEnable`/`RecordDir`/`SegmentIntervalSec`/
-   `ServiceLogging.*`/`SystemId`/`Fm.*` 는 원본을 재파싱(`:1692-1697` `root2`) — 배포본
-   config.json 의 해당 키가 **전부 무시**된다. `Fm.Enable/OamIp` 무시 시 자기보고 자체가
-   켜지지 않는다(카탈로그 전체의 전제 붕괴 — 최우선 수정).
-2. resource_exhausted 의 relay 분모가 설정값(`_rtpPoolSize`, `:168`)이라 실측 풀과 불일치 —
+1. resource_exhausted 의 relay 분모가 설정값(`_rtpPoolSize`, `:168`)이라 실측 풀과 불일치 —
    전량 bind 실패에도 rtp_pool 은 resource_exhausted 가 열린다(capacity_degraded 상황의 오분류). `total<=0`
    판정 제외(`:180`) 사각은 실측 크기를 쓰는 **ptt 2풀 한정**. params 는 항상
    `used=total`(`:184-185`)로 렌더.
-3. `writeMsgLine` 에만 `_serviceLogDir` 빈값 가드 누락(`:2171` — `logFlow` `:2206` 은 있음)
+2. `writeMsgLine` 에만 `_serviceLogDir` 빈값 가드 누락(`:2171` — `logFlow` `:2206` 은 있음)
    → 빈 dir 시 루트 절대경로 생성 시도·영구 실패 루프.
-4. 로그 큐 포화 시 **가장 오래된 줄** 폐기(`:2322-2326`) — msg seq(줄번호 기반)와의 상관이
+3. 로그 큐 포화 시 **가장 오래된 줄** 폐기(`:2322-2326`) — msg seq(줄번호 기반)와의 상관이
    전 구간 파괴(남은 로그도 오독). `_logDropped` 는 선언·증가뿐 노출 전무.
-5. 녹취 인덱스 read 실패와 파일 부재를 구분 못 해 seq 재시작 → 기존 세그먼트 덮어쓰기
+4. 녹취 인덱스 read 실패와 파일 부재를 구분 못 해 seq 재시작 → 기존 세그먼트 덮어쓰기
    (`PSyncRtpRecorder.cpp:142-158`). 트랙 fp=NULL 시 `writePacket` 조용히 return(`:241`).
-6. `_rtpStartPort` 등 5개 멤버 미초기화 / 설정 `CspIp/CspPort` 파싱 안 됨(통지 대상은
+5. `_rtpStartPort` 등 5개 멤버 미초기화 / 설정 `CspIp/CspPort` 파싱 안 됨(통지 대상은
    학습값 전용) / 제어 recvfrom 오류 무처리(무로그 tight loop `:214-229`) /
    mkdir·rename·fclose 반환값 전면 미검사 / 녹취 루트 `system("mkdir -p")` 반환 미검사
    (`:1738-1741`).
-7. SIGINT/SIGQUIT 미처리 + SIGTERM 등록이 `startServer()` 이후(`PMain.cpp:32→:39`) —
+6. SIGINT/SIGQUIT 미처리 + SIGTERM 등록이 `startServer()` 이후(`PMain.cpp:32→:39`) —
    기동 중 SIGTERM 도 process_stopping 유실.
-8. epoll 등록 실패 소켓이 풀에 잔류(`:1757-1768` vs `:1808-1856`) — 배정 시 해당 호 무음.
+7. epoll 등록 실패 소켓이 풀에 잔류(`:1757-1768` vs `:1808-1856`) — 배정 시 해당 호 무음.
 
-**우선순위**: ⓪결함 1(overlay — 자기보고 전제) ①`SessionTimeout<=0` 판정
+**우선순위**: ①`SessionTimeout<=0` 판정
 (config_invalid `config/timers` — floor·sweeper·재전송 전체 정지) ②풀 부분 bind 실패
 (capacity_degraded) + epoll 잔류 ③flow/msg 쓰기 실패 + log_queue 분리(storage_failure·resource_exhausted)
 ④녹취 쓰기/인덱스 실패(storage_failure — self_reporting §9 후보 그대로) ⑤리액터·제어 스레드 사망

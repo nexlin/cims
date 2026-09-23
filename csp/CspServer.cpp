@@ -105,11 +105,13 @@ int ServiceMain() {
     CLog::SetDirectory( gclsSetup.m_strLogFolder.c_str() );
     // Read() 는 위에서 로그 초기화 전에 돌았다 — 그때 관찰한 폐기 키를 이제 보고한다.
     gclsSetup.WarnDeprecatedKeys();
-    gclsCallDir.Init( gclsSetup.m_strServiceLogDir, "csp", gclsSetup.m_iServiceLogStallSec );
+    // 사이트 영역(site_directory_layout.md) — 통화·세션 기록은 녹취(recordings)·상태(state)·통계(stats) 영역,
+    //   SIP/flow 로그는 서비스 로그(log) 영역의 sip/ 아래.
+    gclsCallDir.Init( gclsSetup.m_strRecordDir, gclsSetup.m_strStateDir, gclsSetup.m_strStatsDir, "csp",
+                      gclsSetup.m_iServiceLogStallSec );
     std::string sysId = gclsSetup.m_strSystemId.empty() ? "csp_01" : gclsSetup.m_strSystemId;
-    gclsSipLogger.Init( gclsSetup.m_strServiceLogDir, gclsSetup.m_strMsgLogDir, sysId, true,
-                        gclsSetup.m_strServiceLogSpoolDir, gclsSetup.m_iServiceLogStallSec,
-                        gclsSetup.m_iServiceLogSpoolMaxMb );
+    gclsSipLogger.Init( gclsSetup.m_strServiceLogDir, sysId, true, gclsSetup.m_strServiceLogSpoolDir,
+                        gclsSetup.m_iServiceLogStallSec, gclsSetup.m_iServiceLogSpoolMaxMb );
     // v3 (2026-04-22): domain→kind 매핑은 AccessServiceMap 이 SOT.
     //   Sync 는 아래 clsSetup 설정 블록에서 수행.
     //   초기 SipLogger 는 빈 맵으로 시작 — AccessServiceMap.Sync() 후 재설정됨.

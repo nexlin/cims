@@ -84,7 +84,7 @@ public:
     std::string GetDomainByKind( const std::string &kind ) const;
 
     /** 로그·통계 서비스축 — 전화 계열 kind(volte·voip)는 `volte`, ptt 는 `ptt`.
-     *  service_log 디렉터리(`{dir}/volte|ptt/…`)·flow `service` 키·OAM 통계 svc 축의 이름이라 접속환경 클래스보다
+     *  녹취 영역 디렉터리(`<recordings>/volte|ptt/…`)·flow `service` 키·OAM 통계 svc 축의 이름이라 접속환경 클래스보다
      *  거칠다(유선/이동은 같은 전화 경로 — sip_statistics.md §3.1). OAM `access_services.service_axis` 와 같은 규칙. */
     static std::string LogServiceOf( const std::string &kind );
 

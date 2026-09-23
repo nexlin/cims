@@ -2,7 +2,7 @@
 
 > CSC 는 자족 독립 모듈이다([features/csc_standalone_module.md](../features/csc_standalone_module.md)). OAM(`ems/core/oam/src`)을 마운트하지 않으며, 결합은 계약(게이트웨이 HTTP + 공유 JwtSecret JWT verify + DB)만이다.
 > - 통화 이력/Flow API(`services/flow_logger.py`)는 **oam-svc 소유**다(콘솔 토큰·조직 전체·날짜 탐색). HA fan-out 인프라(sync_dispatch·sync_txn·drift_sweeper·service_registry·collection_schema·alert_log)도 oam 이 보유한다.
-> - 관제 데스크 **통합 이력** `GET /provisioning/history`(`services/dispatch_history.py`)는 CSC 소유지만 별개 realm 이다 — 관제사(가입자) PKCE 토큰 + 역할 범위 게이트(`monitor_call`/`ptt_listen` — 현 코드는 관제 그룹 필드) + 커서(`until` 로 창 조회, 항목 `recordingId`). flow_logger 를 재구현하지 않고 같은 공유 NAS 파일(`ServiceLogging.Dir`)을 범위로만 걸러 읽는 얇은 구독자 뷰다. 같은 realm 의 **관제 앱 관리 평면** = `handlers/dispatch_directory.py`(`/provisioning/directory/{admin,orgs,members,groups}` — 관제 그룹 `directory_admin` 범위 게이트 + admin/org 핸들러의 같은 쓰기 코드 호출)·`handlers/dispatch_recordings.py`(`/provisioning/recordings/{id}…` — 범위 게이트 + oam-svc 녹취 API 프록시, csc.json `Recording.OamUrl`), [dispatch_center.md §3.4·§5.7b](../features/dispatch_center.md). 현행 `csc/src/services/` = **mcptt · dispatch_history · idms_storage · config_cache · file_store · ha_lookup · logger · admin_auth · fm_reporter · mcdata_fd · auc** 등.
+> - 관제 데스크 **통합 이력** `GET /provisioning/history`(`services/dispatch_history.py`)는 CSC 소유지만 별개 realm 이다 — 관제사(가입자) PKCE 토큰 + 역할 범위 게이트(`monitor_call`/`ptt_listen` — 현 코드는 관제 그룹 필드) + 커서(`until` 로 창 조회, 항목 `recordingId`). flow_logger 를 재구현하지 않고 같은 공유 NAS 파일(사이트 디렉터리의 녹취·상태 영역 `Recording.Dir`·`State.Dir` — `services/site_paths.py`)을 범위로만 걸러 읽는 얇은 구독자 뷰다. 같은 realm 의 **관제 앱 관리 평면** = `handlers/dispatch_directory.py`(`/provisioning/directory/{admin,orgs,members,groups}` — 관제 그룹 `directory_admin` 범위 게이트 + admin/org 핸들러의 같은 쓰기 코드 호출)·`handlers/dispatch_recordings.py`(`/provisioning/recordings/{id}…` — 범위 게이트 + oam-svc 녹취 API 프록시, csc.json `Recording.OamUrl`), [dispatch_center.md §3.4·§5.7b](../features/dispatch_center.md). 현행 `csc/src/services/` = **mcptt · dispatch_history · idms_storage · config_cache · file_store · ha_lookup · logger · admin_auth · fm_reporter · mcdata_fd · auc** 등.
 > - 현행 `csc/src/services/` = **mcptt · idms_storage · config_cache · file_store · ha_lookup · logger · admin_auth** (7개) + `__init__.py`.
 
 ## 1. 개요
@@ -323,16 +323,17 @@ notify_csp("GROUP_CHANGED", uri=group_id, action="PUT", etag=new_etag)
 | GET | `/flow/{session_id}` | SIP 메시지 Flow 재구성 |
 | GET | `/ptt/history?group_id=X` | PTT 그룹 세션 목록 |
 | GET | `/ptt/history/{gid}/{session}` | PTT 세션 이벤트 (has_recording 포함) |
-| GET | `/ptt/history/{gid}/{session}/flow` | PTT 세션 SIP+CMP Flow (msg_log fallback) |
+| GET | `/ptt/history/{gid}/{session}/flow` | PTT 세션 SIP+CMP Flow |
 | GET | `/ptt/history/{gid}/{session}/audio` | PTT 세션 녹취 재생 (raw_audio.rtp → WAV) |
 | GET | `/recordings` | 녹취 목록 (파일시스템 기반, .d 디렉토리 스캔) |
 | GET | `/recordings/{call_id}/audio` | VoIP 녹취 오디오 (raw_a/b.rtp → WAV 믹싱) |
 | GET | `/recordings/{call_id}/video` | VoIP 녹취 영상 (raw_va/vb.rtp → MP4) |
 
-**PTT Flow 검색 로직:**
-1. `{ServiceLogDir}/YYYY/MM/DD/HH/{system_id}/{system_id}_ptt_flow.jsonl`에서 SIP 메시지 검색
-2. SIP 메시지가 없으면 `{MsgLogDir}/YYYY/MM/DD/HH/{system_id}/{system_id}_sip.jsonl`에서 group_id 기반 fallback 검색
-3. 세션 디렉토리의 `cmp.jsonl`에서 Floor/JOIN/LEAVE 이벤트 병합
+**PTT Flow 검색 로직** ([flow_logging.md](../features/flow_logging.md) §10.2):
+1. 로그 영역 `{ServiceLogging.Dir}/sip/YYYY/MM/DD/HH/` 의 flow·msg 5분 버킷에서 세션 시간 범위(세션 디렉터리 `events.jsonl`)의
+   그룹 매칭 메시지로 sesid 를 모은다(매칭 토큰 = `group.json` 의 mcptt_group_id)
+2. sesid 로 전체 메시지를 거른다 — 0 건이면 substring 폴백. HEARTBEAT 는 제외
+3. floor 타임라인은 세션 디렉터리 `floor.jsonl`(CMP 기록, 녹취 영역) — 별도 endpoint
 
 **PTT 녹취 트랜스코딩:**
 - VoIP: `raw_a.rtp` + `raw_b.rtp` → PCM 변환 → amix → `recording_mixed.wav`
@@ -480,7 +481,7 @@ UE                    IdMS (CSC:4430)      UE                              IdMS 
   미설정(빈 값)이면 csc_app 이 인증서(runtime/cert)와 같은 규칙으로 설치 트리의
   `modules/csc/runtime` 을 유도한다(oam/oam-svc 와 동일). 유도값은 **runtime override
   (`config_reload.runtime_set`)로 등록**한다 — 평대입하면 SIGUSR1 리로드가 파일에 없는 키를
-  지우고 `file_store.runtime_root()` 폴백(ServiceLogging.Dir sibling `../runtime` — 공유 마운트면
+  지우고 `file_store.runtime_root()` 폴백(서비스 로그 루트 sibling `../runtime` — 공유 마운트면
   **관리평면 NAS 스토어**)으로 표류해, 기존 refresh 토큰 전멸("not found" — 전 단말 자동갱신
   불가)과 펜싱 없는 두 번째 writer 를 만든다(08-26 실측). 만료·회수 토큰은 기동 60초 후 + 6시간
   주기로 삭제한다.
@@ -762,8 +763,10 @@ DB 는 가입자(person/VoLTE/PTT) 도메인과 조직 트리 등 **관계형이
     "Ip": "121.161.164.45",
     "Port": 4421
   },
-  "MsgLogDir": "/data/msg_log",
-  "ServiceLogDir": "/data/service_log",
+  "ServiceLogging": { "Dir": "/mnt/cims/site01/log" },
+  "Recording": { "Dir": "/mnt/cims/site01/recordings" },
+  "State": { "Dir": "/mnt/cims/site01/state" },
+  "Content": { "Dir": "/mnt/cims/site01/content" },
   "Data": {
     "User": "User",
     "Group": "Group"

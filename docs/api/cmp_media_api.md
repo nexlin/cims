@@ -256,7 +256,8 @@ diff 한다. push(이벤트)로는 절체 후 새 active 가 옛 세션을 기�
 
 ### 5.4 ANN_RELOAD — 안내 카탈로그 재적재
 
-CORE 명령(hdr 만, sesid/service 생략). `<install>/<AnnouncementDir>/sys/catalog.jsonl` + `config/announcements.jsonl` 을 다시 읽어 메모리에 올린다
+CORE 명령(hdr 만, sesid/service 생략). `<install>/<AnnouncementDir>/sys/catalog.jsonl` + `config/announcements.jsonl`(운영자·가입자 카탈로그 — 음원 파일은
+콘텐츠 영역 `<Content.Dir>/announcements/{op,sub}/`)을 다시 읽어 메모리에 올린다
 (진행 중 재생은 스냅샷을 들고 있어 끊기지 않는다). SIGUSR1 과 같은 동작 — agent 가 음원·카탈로그를 배포한 뒤 보낸다([announcements.md §7.3](../design/features/announcements.md)).
 응답 payload `{ "media": 12, "missing": 0 }`. `AnnPlayers=0` 이면 `BAD_REQUEST`.
 

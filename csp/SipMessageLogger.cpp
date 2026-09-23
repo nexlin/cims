@@ -17,6 +17,7 @@
 
 #include "FmReporter.h"
 #include "SimpleJson.h"
+#include "SiteLayout.h"
 
 CSipMessageLogger gclsSipLogger;
 
@@ -31,12 +32,11 @@ CSipMessageLogger::~CSipMessageLogger() {
     m_clsWriter.Stop();  // 잔여 큐 스풀 회수 후 dispatch 조인 (flusher 는 갇혀 있으면 detach)
 }
 
-void CSipMessageLogger::Init( const std::string &strFlowBaseDir, const std::string &strMsgBaseDir,
-                              const std::string &strSystemId, bool bRawLogEnabled, const std::string &strSpoolDir,
-                              int iStallSec, int iSpoolMaxMb ) {
-    if ( strFlowBaseDir.empty() && strMsgBaseDir.empty() ) return;
-    m_strFlowBaseDir = strFlowBaseDir;
-    m_strMsgBaseDir = strMsgBaseDir;
+void CSipMessageLogger::Init( const std::string &strLogDir, const std::string &strSystemId, bool bRawLogEnabled,
+                              const std::string &strSpoolDir, int iStallSec, int iSpoolMaxMb ) {
+    // 서비스 로그 영역(log) 아래 sip/ 가 flow·msg 5분 버킷 루트다 (site_directory_layout.md)
+    m_strBaseDir = SiteLayout::SipLogDir( strLogDir );
+    if ( m_strBaseDir.empty() ) return;
     m_strSystemId = strSystemId.empty() ? "csp_01" : strSystemId;
     // node 필드용: "csp_01" → "csp" (언더스코어+숫자 제거)
     m_strNodeName = m_strSystemId;
@@ -47,12 +47,11 @@ void CSipMessageLogger::Init( const std::string &strFlowBaseDir, const std::stri
     // 시딩 대상: 기동 시점 버킷의 iface msg 파일 (재기동 seq 연속성 — flusher 가 비동기
     //   계수, WriteInterfaceLine 첫 write 가 합류). 저장 경로 I/O·스풀 폴백은 공용
     //   CServiceLogWriter 가 수행한다 (계약: flow_logging.md §2).
-    m_strSeedBucketKey = GetMsgHourDir() + "/" + BucketSuffix();
+    m_strSeedBucketKey = GetHourDir() + "/" + BucketSuffix();
     static const char *arrIfaces[3] = { "sip", "cmp", "csc" };
     std::vector<std::string> vecSeedPaths;
     for ( int i = 0; i < 3; i++ ) vecSeedPaths.push_back( MsgFilePath( arrIfaces[i] ) );
-    std::vector<std::string> vecBaseDirs = { m_strFlowBaseDir };
-    if ( !m_strMsgBaseDir.empty() && m_strMsgBaseDir != m_strFlowBaseDir ) vecBaseDirs.push_back( m_strMsgBaseDir );
+    std::vector<std::string> vecBaseDirs = { m_strBaseDir };
 
     m_clsWriter.Init(
         strSpoolDir, iStallSec, iSpoolMaxMb, vecBaseDirs, vecSeedPaths,
@@ -65,7 +64,7 @@ void CSipMessageLogger::Init( const std::string &strFlowBaseDir, const std::stri
             const std::string strMo = gclsFmReporter.Node() + "/csp/service_log";
             if ( clsInfo.bDegraded ) {
                 SimpleJson::JsonNode nodeParams;
-                nodeParams.Set( "path", m_strMsgBaseDir.c_str() );
+                nodeParams.Set( "path", m_strBaseDir.c_str() );
                 nodeParams.Set( "reason", clsInfo.strReason.empty() ? "spool backlog" : clsInfo.strReason.c_str() );
                 nodeParams.Set( "spooled", (int)clsInfo.ulSpooledLines );
                 nodeParams.Set( "dropped", (int)clsInfo.ulDroppedLines );
@@ -83,7 +82,7 @@ void CSipMessageLogger::LogSecurity( const char *pszPeer, const char *pszMethod,
                                      const char *pszReasons, bool bRegisteredCaller ) {
     if ( !m_bEnabled ) return;
     std::string strTs = GetTimestamp();
-    std::string strMsgHourDir = GetMsgHourDir();
+    std::string strMsgHourDir = GetHourDir();
     std::lock_guard<std::mutex> lock( m_mtx );
     RotateBucket( strMsgHourDir );
     std::string strPath = strMsgHourDir + "/" + m_strSystemId + ".security." + BucketSuffix() + ".jsonl";
@@ -389,7 +388,7 @@ void CSipMessageLogger::Print( EnumLogLevel eLevel, const char *fmt, ... ) {
     std::string strCSeq = ExtractHeader( pszSipMsg, "CSeq:", NULL );
 
     std::string strTs = GetTimestamp();
-    std::string strMsgHourDir = GetMsgHourDir();
+    std::string strMsgHourDir = GetHourDir();
 
     std::lock_guard<std::mutex> lock( m_mtx );
     RotateBucket( strMsgHourDir );
@@ -472,7 +471,7 @@ void CSipMessageLogger::LogMessage( const char *pszFrom, const char *pszTo, cons
     const char *proto = ( pszProto && *pszProto ) ? pszProto : "JSON";
     const char *pszDir = ( pszFrom && strcmp( pszFrom, "csp" ) == 0 ) ? "TX" : "RX";
     const char *service = ( pszService && *pszService ) ? pszService : "";
-    std::string strMsgHourDir = GetMsgHourDir();
+    std::string strMsgHourDir = GetHourDir();
 
     // Determine interface from proto
     const char *iface = "cmp";
@@ -524,13 +523,13 @@ std::string CSipMessageLogger::BucketSuffix() {
 }
 
 std::string CSipMessageLogger::FlowFilePath() {
-    std::string dir = GetFlowHourDir();
+    std::string dir = GetHourDir();
     if ( dir.empty() ) return "";
     return dir + "/" + m_strSystemId + ".flow." + BucketSuffix() + ".jsonl";
 }
 
 std::string CSipMessageLogger::MsgFilePath( const char *pszIface ) {
-    std::string dir = GetMsgHourDir();
+    std::string dir = GetHourDir();
     if ( dir.empty() ) return "";
     return dir + "/" + m_strSystemId + "_" + ( pszIface ? pszIface : "sip" ) + ".msg." + BucketSuffix() + ".jsonl";
 }
@@ -648,24 +647,13 @@ int CSipMessageLogger::WriteInterfaceLine( const char *pszIface, const char *psz
     return iSeq;
 }
 
-std::string CSipMessageLogger::GetFlowHourDir() {
-    if ( m_strFlowBaseDir.empty() ) return "";
+std::string CSipMessageLogger::GetHourDir() {
+    if ( m_strBaseDir.empty() ) return "";
     time_t now = time( NULL );
     struct tm t;
     localtime_r( &now, &t );
-    char buf[256];
-    snprintf( buf, sizeof( buf ), "%s/%04d/%02d/%02d/%02d", m_strFlowBaseDir.c_str(), t.tm_year + 1900, t.tm_mon + 1,
-              t.tm_mday, t.tm_hour );
-    return buf;
-}
-
-std::string CSipMessageLogger::GetMsgHourDir() {
-    if ( m_strMsgBaseDir.empty() ) return "";
-    time_t now = time( NULL );
-    struct tm t;
-    localtime_r( &now, &t );
-    char buf[256];
-    snprintf( buf, sizeof( buf ), "%s/%04d/%02d/%02d/%02d", m_strMsgBaseDir.c_str(), t.tm_year + 1900, t.tm_mon + 1,
+    char buf[512];
+    snprintf( buf, sizeof( buf ), "%s/%04d/%02d/%02d/%02d", m_strBaseDir.c_str(), t.tm_year + 1900, t.tm_mon + 1,
               t.tm_mday, t.tm_hour );
     return buf;
 }

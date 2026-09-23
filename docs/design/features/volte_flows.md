@@ -423,7 +423,7 @@ INVITE 수신
 
 ### VoLTE 통화 상태 (call.json 파일)
 
-SoT 는 `service_log/volte/YYYY/MM/DD/HH/.../<call_id>.d/call.json` (CSP `CCallDir` 가 작성).
+SoT 는 녹취 영역 `{Recording.Dir}/volte/YYYY/MM/DD/HH/.../<call_id>.d/call.json` (CSP `CCallDir` 가 작성 — [site_directory_layout.md](site_directory_layout.md)).
 
 | 상태 | 시점 | 갱신 필드 |
 |------|------|---------|

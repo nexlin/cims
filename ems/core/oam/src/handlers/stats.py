@@ -30,7 +30,7 @@ import pymysql.cursors
 
 from httpsrv.handler import HandlerArgs, HandlerResult
 
-from services import access_services, stats_rollup
+from services import access_services, paths, ptt_index, stats_rollup
 from services.stats_rollup import _pdd_ms, _rate
 
 logger = logging.getLogger(__name__)
@@ -196,24 +196,15 @@ def _get_csp_stats(config: dict) -> dict:
     return _cached('csp', probe)
 
 
-def _service_log_dir(config: dict) -> str:
-    """ServiceLogDir 를 config 에서 조회. csc_app.py 와 동일 로직."""
-    sl = config.get('ServiceLogging', {})
-    d = sl.get('Dir', '')
-    if not d:
-        d = config.get('ServiceLogDir', config.get('MsgLogDir', ''))
-    return d
-
-
 def _load_active_states(config: dict, kind: str) -> list:
-    """{ServiceLogDir}/state/{kind}/*.json 을 읽어 가입자별 활성 상태 리스트 반환.
+    """{State.Dir}/{kind}/*.json 을 읽어 가입자별 활성 상태 리스트 반환.
        CSP 가 원자 쓰기(.tmp+rename)로 관리하므로 부분 쓰기 읽음은 없음.
        .tmp 잔여 파일은 무시.
     """
-    base = _service_log_dir(config)
+    base = paths.state_dir(config)
     if not base:
         return []
-    pattern = os.path.join(base, 'state', kind, '*.json')
+    pattern = os.path.join(base, kind, '*.json')
     items = []
     for fpath in glob.glob(pattern):
         if fpath.endswith('.tmp'):
@@ -747,14 +738,8 @@ def _calls_stats(config: dict, from_dt: str, to_dt: str, gran: str, svc: str) ->
     집계와 조회가 같은 `build_minutes`/`aggregate` 를 쓴다. 응답의 `source` 로 어느
     경로였는지 알린다.
     """
-    root = _service_log_dir(config)
-    if not root:
-        return HandlerResult(status=200, body={
-            'from': from_dt, 'to': to_dt, 'granularity': gran, 'svc': svc,
-            'source': 'none', 'totals': {}, 'buckets': [],
-            'hint': 'ServiceLogging.Dir 미설정'})
-
-    rows, cov = stats_rollup.read_range_filled(root, from_dt, to_dt, config, gran=gran)
+    rows, cov = stats_rollup.read_range_filled(stats_rollup.roots_of(config), from_dt, to_dt,
+                                               config, gran=gran)
     # **읽은 구간의 0 건은 0 으로 낸다.** 요청한 서비스의 호가 한 건도 없으면 집계는 그
     #   서비스 칸을 만들지 않고, 화면은 없는 경로를 `—`(자료 없음)으로 그린다 — 조용한
     #   주말·PTT 만 쓰는 현장처럼 **정상적으로 0 건인 날이 통계 고장과 구분되지 않는다**
@@ -952,7 +937,7 @@ async def _health(config: dict) -> HandlerResult:
     }
 
     # v3 (2026-04-22): 가입자별 state 파일 기반 실시간 활성 통화 조회.
-    #   CSP 가 {ServiceLogDir}/state/{volte,ptt}/{subscriber}.json 에 원자 쓰기로 관리.
+    #   CSP 가 {State.Dir}/{volte,ptt}/{subscriber}.json 에 원자 쓰기로 관리.
     #   VoLTE: 한 통화당 caller+callee 2개 파일 → call_id 로 dedup 해서 통화 목록.
     #   PTT: 가입자별 참여 상태 → group_id 별 집계.
     volte_states = _load_active_states(config, 'volte')
@@ -1126,13 +1111,13 @@ def _cseq_method(msg: str) -> str:
 @_offload
 def _leak_reclaims(config, date=None) -> HandlerResult:
     """CMP sweeper 가 회수한 누수 세션 상세.
-       {ServiceLogDir}/leak_reclaim/YYYY/MM/DD/reclaim.jsonl 을 읽어 목록 + reason/node 별 집계 반환.
+       {ServiceLogging.Dir}/leak_reclaim/YYYY/MM/DD/reclaim.jsonl 을 읽어 목록 + reason/node 별 집계 반환.
        RtpMap fix 후 정상 환경에서는 빈 목록이 기대값 — 항목이 있으면 CSP crash/teardown 누락 등 누수 신호."""
     if not date:
         date = datetime.now().strftime('%Y-%m-%d')
     d = date.replace('-', '')
     yyyy, mm, dd = d[:4], d[4:6], d[6:8]
-    base = _service_log_dir(config)
+    base = paths.service_log_dir(config)
     items = []
     counts = {'total': 0, 'orphan_no_rtp': 0, 'hold_timeout': 0}
     by_node: dict = {}
@@ -1264,13 +1249,10 @@ def _messages_stats_rollup(config, from_dt: str, to_dt: str, gran: str,
     없는 것과 0 건은 다르다(§2.1a). 걸러진 구간은 원본에서 다시 세거나 `missing_days` 로
     신고된다.
     """
-    root = _service_log_dir(config)
-    if not root:
-        return HandlerResult(status=204, body=None)      # 폴백 신호 (호출측에서만 소비)
     row_ok = None if iface == 'sip' else \
         (lambda r: stats_rollup.covers_iface(r, iface))
-    rows, cov = stats_rollup.read_range_filled(root, from_dt, to_dt, config, gran=gran,
-                                               row_ok=row_ok)
+    rows, cov = stats_rollup.read_range_filled(stats_rollup.roots_of(config), from_dt, to_dt,
+                                               config, gran=gran, row_ok=row_ok)
     if not rows:
         return HandlerResult(status=204, body=None)
 
@@ -1348,9 +1330,8 @@ def _messages_stats_rollup(config, from_dt: str, to_dt: str, gran: str,
 def _messages_stats_v2(config, iface, date, from_dt=None, to_dt=None, gran='1h') -> HandlerResult:
     """service_log JSONL 기반 인터페이스별 메시지 통계.
 
-    실제 레이아웃: {ServiceLogDir}/YYYY/MM/DD/HH/csp_01_{sip|cmp|csc}.msg.jsonl
+    레이아웃: {ServiceLogging.Dir}/sip/YYYY/MM/DD/HH/{sysid}_{sip|cmp|csc}.msg.{mm5}.jsonl
     각 라인 = {ts,dir,peer,caller,callee,sesid,proto,msg}. method 는 msg 본문에서 파싱.
-    (옛 MsgLogDir/{comp}/.../{iface}.jsonl 레이아웃 + entry['method'] 가정은 폐기됨.)
 
     조회 구간은 [from,to] — `date` 는 "그 날 하루" 축약형(하위 호환). 버킷은 `gran`
     단위로 끊고, 단위별 최대 범위(_GRAN_MAX_DAYS)를 넘으면 끝에서부터 잘라낸다.
@@ -1366,7 +1347,7 @@ def _messages_stats_v2(config, iface, date, from_dt=None, to_dt=None, gran='1h')
     from_dt, to_dt = _norm_dt(from_dt), _norm_dt(to_dt, end=True)
     from_dt, to_dt, truncated = _clamp_range(from_dt, to_dt, gran)
 
-    base = _service_log_dir(config)
+    base = paths.sip_log_dir(config)
     empty = {'from': from_dt, 'to': to_dt, 'granularity': gran, 'truncated': truncated,
              'date': (date or from_dt[:10]), 'interface': iface,
              'total': 0, 'buckets': [], 'method_counts': {}, 'method_service': {},
@@ -1531,20 +1512,18 @@ def _messages_stats_v2(config, iface, date, from_dt=None, to_dt=None, gran='1h')
 
 
 # ──────────────────────────────────────────────────────────────
-#  Service stats (Part 3.2) — 파일 기반 (call.json / call.jsonl 스캔)
+#  Service stats (Part 3.2) — 파일 기반
 #
-#  v3 (2026-04-22) 이후 call_logs DB 테이블 DROP. service_log/{volte|ptt}/
-#  YYYY/MM/DD/HH/.../*.d/call.json 이 SoT. 옛 _messages_stats / DB 기반
-#  _calc_*_stats 는 모두 제거됨 (msg_log JSONL 기반 _messages_stats_v2 가
-#  /api/v1/stats/messages 를 처리).
+#  VoLTE = {Recording.Dir}/volte/YYYY/MM/DD/HH/.../*.d/call.json, PTT = 세션 읽기 모델
+#  (services/ptt_index). 메시지 통계는 _messages_stats_v2 가 /api/v1/stats/messages 를 처리.
 # ──────────────────────────────────────────────────────────────
 
-def _iter_call_jsons(config: dict, call_type: str, from_dt: str, to_dt: str):
-    """[from_dt, to_dt] 범위 내 .d/call.json (volte) 또는 .d/call.jsonl (ptt) 파싱 결과 yield.
+def _iter_call_jsons(config: dict, from_dt: str, to_dt: str):
+    """[from_dt, to_dt] 범위 내 VoLTE 호 기록({Recording.Dir}/volte/…/*.d/call.json) 파싱 결과 yield.
 
     날짜 단위로만 디렉토리 스캔 → from/to 의 분/초는 결과 객체 ts 비교로 필터.
     """
-    base = _service_log_dir(config)
+    base = paths.recordings_dir(config)
     if not base:
         return
     try:
@@ -1557,7 +1536,7 @@ def _iter_call_jsons(config: dict, call_type: str, from_dt: str, to_dt: str):
         yyyy = f"{day.year:04d}"
         mm = f"{day.month:02d}"
         dd = f"{day.day:02d}"
-        date_base = os.path.join(base, call_type, yyyy, mm, dd)
+        date_base = os.path.join(base, 'volte', yyyy, mm, dd)
         if os.path.isdir(date_base):
             for cj_path in glob.glob(os.path.join(date_base, '**', '*.d', 'call.json'), recursive=True):
                 try:
@@ -1565,37 +1544,17 @@ def _iter_call_jsons(config: dict, call_type: str, from_dt: str, to_dt: str):
                         yield json.load(f)
                 except Exception:
                     continue
-            # PTT 는 call.jsonl (세션별 누적) — 마지막 세션만 사용
-            for cjl_path in glob.glob(os.path.join(date_base, '**', '*.d', 'call.jsonl'), recursive=True):
-                try:
-                    last = None
-                    with open(cjl_path, 'r', encoding='utf-8', errors='replace') as f:
-                        for line in f:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                last = json.loads(line)
-                            except Exception:
-                                continue
-                    if last:
-                        yield last
-                except Exception:
-                    continue
         day += timedelta(days=1)
 
 
-def _ts_of(record: dict, call_type: str) -> str:
-    """call_type 별 시작 시각 필드 추출 (volte=invite_time, ptt=start_time).
+def _ts_of(record: dict) -> str:
+    """호 기록의 시작 시각(invite_time).
 
     call.json 은 ISO 'T' 구분자("2026-06-01T15:52:37"), from/to 파라미터는 공백
     구분자("2026-06-01 00:00:00"). 문자열 비교 시 'T'(0x54) > ' '(0x20) 라 전 레코드가
-    to_dt 초과로 배제되는 버그가 있었음 → 여기서 ' ' 로 정규화해 비교/버킷 모두 일치시킴.
+    to_dt 초과로 배제된다 → 여기서 ' ' 로 정규화해 비교/버킷 모두 일치시킨다.
     """
-    if call_type == 'ptt':
-        ts = record.get('start_time', '') or record.get('invite_time', '')
-    else:
-        ts = record.get('invite_time', '')
+    ts = record.get('invite_time', '')
     return ts.replace('T', ' ', 1) if ts else ts
 
 
@@ -1739,8 +1698,8 @@ def _calc_voip_stats(config, from_dt, to_dt, gran):
     bk_talked: dict = {}
     bk_completed: dict = {}
 
-    for rec in _iter_call_jsons(config, 'volte', from_dt, to_dt):
-        ts = _ts_of(rec, 'volte')
+    for rec in _iter_call_jsons(config, from_dt, to_dt):
+        ts = _ts_of(rec)
         if not ts or ts < from_dt or ts > to_dt:
             continue
         attempts += 1
@@ -1821,19 +1780,22 @@ def _calc_voip_stats(config, from_dt, to_dt, gran):
 
 
 def _calc_ptt_stats(config, from_dt, to_dt, gran):
+    """PTT 세션 통계 — 원천은 세션 읽기 모델(services/ptt_index, 녹취 영역의 `ptt/{그룹}/` 세션)."""
     total = 0
     durations = []
     by_group: dict = {}
     by_bucket: dict = {}
 
-    for rec in _iter_call_jsons(config, 'ptt', from_dt, to_dt):
-        ts = _ts_of(rec, 'ptt')
+    rows = ptt_index.range_days(from_dt[:10].replace('-', ''), to_dt[:10].replace('-', ''))
+    for r in rows:
+        ts = (r.get('start') or '').replace('T', ' ', 1)
         if not ts or ts < from_dt or ts > to_dt:
             continue
         total += 1
-        gid = rec.get('group_id', '') or 'unknown'
+        gid = r.get('mcptt_group_id') or r.get('group_key') or 'unknown'
         by_group[gid] = by_group.get(gid, 0) + 1
-        dur = int(rec.get('duration', 0) or 0)
+        s_dt, e_dt = _parse_iso(r.get('start')), _parse_iso(r.get('end'))
+        dur = int((e_dt - s_dt).total_seconds()) if (s_dt and e_dt) else 0
         if dur > 0:
             durations.append(dur)
         bk = _bucket_key(ts, gran)
@@ -1875,7 +1837,7 @@ def _subscribers_status(config: dict, status: str = 'active',
        - status='all': 전체 가입자 (이름/번호 검색·페이지로 조회 = B 뷰).
 
        v3: call_logs 테이블 DROP 후 state 파일이 SOT — CSP 가
-       {ServiceLogDir}/state/{volte|ptt}/{subscriber}.json 에 원자 쓰기로 관리한다.
+       {State.Dir}/{volte|ptt}/{subscriber}.json 에 원자 쓰기로 관리한다.
        state 의 subscriber_id 는 canonical id(=MSISDN, volte/ptt_subscriptions.id)."""
 
     status = (status or 'active').lower()
@@ -2161,8 +2123,8 @@ def _trend_record(now: datetime, volte: int, ringing: int, ptt: int, talking: in
 
 def _floor_held_secs(config: dict, surrogate_id, holder: str, now: datetime):
     """그룹의 현재 시간버킷 floor.jsonl 에서 holder 에게 마지막 GRANT 된 시각 → 점유 경과(초).
-       경로: {ServiceLogDir}/ptt/{surrogate_id}/{YYYY}/{MM}/{DD}/{HH}/floor.jsonl"""
-    base = _service_log_dir(config)
+       경로: {Recording.Dir}/ptt/{surrogate_id}/{YYYY}/{MM}/{DD}/{HH}/floor.jsonl"""
+    base = paths.recordings_dir(config)
     if not base or surrogate_id is None or not holder:
         return None
     fpath = os.path.join(base, 'ptt', str(surrogate_id),
@@ -2194,7 +2156,7 @@ def _ptt_floor_activity(config: dict, window_min: int = 5) -> dict:
     """최근 window_min 분간 그룹별 floor GRANT(발언) 활동 집계.
        {mcptt_group_id: {'count': N, 'last_ts': iso}}. floor.jsonl 스캔(현재+직전 시간버킷).
        상시활성·대규모(그룹 다수) 환경에서 '발언 활동' 기준 랭킹/필터용."""
-    base = _service_log_dir(config)
+    base = paths.recordings_dir(config)
     if not base:
         return {}
     now = datetime.now()
@@ -2478,7 +2440,7 @@ def _trend_backfill(config: dict, from_min: int, to_min: int) -> dict:
        PTT: events.jsonl member_join/leave → 활성(멤버>0) 구간."""
     if _BACKFILL_CACHE['min'] == to_min and _BACKFILL_CACHE['window'] == (to_min - from_min):
         return _BACKFILL_CACHE['data']
-    base = _service_log_dir(config)
+    base = paths.recordings_dir(config)
     per_min: dict = {}
     if not base:
         _BACKFILL_CACHE.update({'min': to_min, 'window': to_min - from_min, 'data': per_min})
@@ -2622,7 +2584,7 @@ def _service_trend(config: dict, window='8h') -> HandlerResult:
 
     buckets = [{'volte_active': 0, 'volte_calls': 0, 'ptt_grants': 0,
                 'ptt_speakers': set(), 'ptt_groups': set()} for _ in range(NB)]
-    base = _service_log_dir(config)
+    base = paths.recordings_dir(config)
     if base:
         now_ts = now.timestamp()
         hbs = _hour_buckets(now - timedelta(minutes=wmin) - timedelta(hours=2), now)
@@ -2709,7 +2671,7 @@ def _service_trend(config: dict, window='8h') -> HandlerResult:
 # ──────────────────────────────────────────────────────────────
 
 def _build_service_events(config: dict) -> list:
-    base = _service_log_dir(config)
+    base = paths.recordings_dir(config)
     if not base:
         return []
     now = datetime.now()

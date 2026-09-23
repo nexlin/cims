@@ -100,7 +100,8 @@ MCDATA-AS 게이트 (모두 controlling function 검사, TS 24.282 §9.2.2):
 ### 4.1 메시지 보관·콘솔 모니터링
 
 - **보관 SoT**: fan-out 성공 시 CSP 가
-  `{ServiceLogDir}/message/{gid}/{YYYY}/{MM}/{DD}/{HH}/messages.jsonl` 에 1줄 append
+  녹취 영역 `{Recording.Dir}/message/{gid}/{YYYY}/{MM}/{DD}/{HH}/messages.jsonl` 에 1줄 append
+  ([site_directory_layout.md](site_directory_layout.md))
   (`CCallDir::McDataMessageLog` — PTT 세션 여부와 무관). 레코드:
   `ts·group·from·msg_type(sds|fd|text)·conv_id·msg_id·text·size·disposition_req·fanout`
   (+FD: `file_name·file_url·file_size·file_type`). NAS 공유라 oam-svc 가 직접 스캔한다.
@@ -117,7 +118,7 @@ MCDATA-AS 게이트 (모두 controlling function 검사, TS 24.282 §9.2.2):
 `Setup.McData.StoreOneToOneSds`(기본 off)를 켠다:
 
 - **보관 SoT**: CSP 가 1:1 MESSAGE 릴레이 시점(`CModuleDispatcher::EventMessage` 의 1:1 분기, SendSms 앞)에
-  `{ServiceLogDir}/message_direct/{YYYY}/{MM}/{DD}/{HH}/messages.jsonl` 에 1줄 append(`CCallDir::McData1to1Log`).
+  `{Recording.Dir}/message_direct/{YYYY}/{MM}/{DD}/{HH}/messages.jsonl` 에 1줄 append(`CCallDir::McData1to1Log`).
   레코드: `ts·from·to·msg_type(sds|text|fd)·conv_id·msg_id·text·size·disposition_req`. disposition 통지
   (`SDS NOTIFICATION`)는 이력이 아니라 제외한다.
 - **전량 보관, 조회 시 게이트**: 범위 한정 보관은 역할 배정 변동 시 이력 결손·정책 불투명을 낳으므로
@@ -139,7 +140,7 @@ MCDATA-AS 게이트 (모두 controlling function 검사, TS 24.282 §9.2.2):
   업로더 신원 = 토큰 `mcdata_id`(= `mcptt_id`, 단일 MC service ID — [mcx_identity_scope.md](mcx_identity_scope.md) §1).
   업로드 시 서버가 게이트: 토큰 401 / scope 부족 403 `insufficient_scope` / 그룹 `allow_fd` 403 /
   업로더 멤버십 403 / `McDataFd.MaxBytes`(기본 50MB) 413.
-- 저장: `{McDataFd.Dir | {ServiceLogging.Dir}/mcdata_fd}/{YYYY}/{MM}/{DD}/{id}.bin` +
+- 저장: `{McDataFd.Dir | {Content.Dir}/mcdata_fd}/{YYYY}/{MM}/{DD}/{id}.bin` +
   `index/{id}.json`(메타). 다운로드는 `GET /mcdata/fd/{id}` FileResponse 스트리밍.
 - **FD SIGNALLING PAYLOAD** (TS 24.282 §15.1.3): Payload IE(0x78)=FILEURL(0x04, URL 문자열),
   Metadata IE(0x79)=RFC 5547 file-selector 부분집합 `name:"…" size:N type:MIME`.
@@ -216,7 +217,8 @@ CSP fan-out (하이브리드):
     (`FdUrlBase` 비면 CSC 가 알려주는 단말용 서비스 URL = `McpttServer.PublicUrl`) —
     `mcdata_media` 섹션. Enable=false 면 기존 C-plane 만 동작(현행 무영향).
   - cmdp.json `ServerIp/ServerPort(9100)/MsrpIp/MsrpPort(2855)/MaxMessageBytes(10MB)/
-    SessionTimeout/OrphanReclaimSec/McDataFd.Dir(CSC 와 공유)/ServiceLogging.Dir/SystemId`.
+    SessionTimeout/OrphanReclaimSec/McDataFd.Dir(CSC 와 공유 — 비면 `<Content.Dir>/mcdata_fd`)/ServiceLogging.Dir/Content.Dir/SystemId`
+    (영역 경로 `ServiceLogging.Dir`·`Content.Dir` 은 배포 때 사이트 디렉터리에서 유도).
   - csc.json `Provisioning.McData.MaxPayloadSdsCplaneBytes` → `/provisioning/me` 의 ptt
     프로파일 `mcdata.maxPayloadSdsCplaneBytes` 로 단말에 전달. **CSP 값과 운영자 동기 유지.**
 - **시험**: `tests/cmdp_msrp_parser_test.cpp`(프레이머 단위, 단독 g++),
@@ -271,7 +273,7 @@ CSP fan-out (하이브리드):
 1. DB: `sql/migrate_mcdata_sds.sql` (csp 보다 먼저 — SelectGroup 이 새 컬럼 참조)
 2. csc 0.2.7 (그룹문서·admin API·FD 콘텐츠 서버) → 3. csp 0.2.6 (MCDATA-AS·메시지 보관)
    → 4. oam-svc 0.2.13 (/messages API) + 콘솔 dist → 5. 앱 APK 배포
-- **media plane(§4.7) 추가 배포**: cmdp 0.1.0 을 먼저 기동(McDataFd.Dir=CSC 와 동일 NAS 경로)
+- **media plane(§4.7) 추가 배포**: cmdp 0.1.0 을 먼저 기동(FD 스토어 = CSC 와 동일 NAS 경로 — 둘 다 비워 두면 콘텐츠 영역 `mcdata_fd/`)
   → csp 에 `Setup.McDataMedia.Enable=true` + 재기동. Enable=false 상태에서는 무영향이므로
   cmdp 없이도 기존 기능 정상. C-plane 임계는 csp `MaxPayloadSizeSdsCplaneBytes` 와 csc
   provisioning 값을 함께 설정(앱 MSRP 지원 배포 전에는 0=무제한 유지 권장).

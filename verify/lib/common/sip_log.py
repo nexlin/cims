@@ -1,6 +1,6 @@
 """SIP msg.jsonl / flow.jsonl 파싱 helper.
 
-dist 빌드의 service log 는 `<dist>/ext_mnt/service_log/YYYY/MM/DD/HH/`
+서비스 로그 영역(`ServiceLogging.Dir`, 개발 기본 `<dist>/ext_mnt/log`)의 `sip/YYYY/MM/DD/HH/`
 아래 두 종류 jsonl 파일을 둔다.
 
 - `*_sip.msg.jsonl`: 원본 SIP 메시지 단위 라인.
@@ -24,7 +24,7 @@ from .service_log import service_log_roots
 
 
 def _msg_roots(dist_dir: str) -> list:
-    # 설정된 ServiceLogDir(기본 <dist>/ext_mnt/service_log, configure 로 변경 가능) + 옛 경로
+    # 설정된 로그 영역(기본 <dist>/ext_mnt/log, configure 로 변경 가능) + 옛 경로
     legacy = os.path.join(os.path.dirname(dist_dir), "ext_mnt",
                           "msg_log", "csp", "sip")
     roots = service_log_roots(dist_dir)

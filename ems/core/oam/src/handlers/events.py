@@ -30,8 +30,9 @@ def _path_parts(full_path: str):
 
 
 def _service_log_dir(config: dict) -> str:
-    sl = config.get('ServiceLogging', {})
-    return sl.get('Dir', '') or config.get('ServiceLogDir', config.get('MsgLogDir', ''))
+    """관측 로그 영역(events/) — services/paths."""
+    from services import paths
+    return paths.service_log_dir(config)
 
 
 async def handle_events(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:

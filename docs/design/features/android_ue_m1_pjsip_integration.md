@@ -740,7 +740,7 @@ UI        SipController(pj-ctl)     pjsua2/Account          CSP(15060/UDP)
 | 레이어 | 도구 | 본다 |
 |---|---|---|
 | 단말 SIP | PJSIP log level 4~5 + logcat | REGISTER/INVITE 원문, 계산 `response=`, 응답코드, 코덱협상 |
-| 서버 CSP flow | `{ServiceLogDir}/…/{systemId}.flow.{mm5}.jsonl` + `*.msg.{mm5}.jsonl`(iface=sip), Call-ID→sesid 양 leg | 401 사유(nonce vs username mismatch), 403 지점(`username mismatch (got/expected)`), CMP relay add/remove |
+| 서버 CSP flow | `{ServiceLogging.Dir}/sip/…/{systemId}.flow.{mm5}.jsonl` + `*.msg.{mm5}.jsonl`(iface=sip), Call-ID→sesid 양 leg | 401 사유(nonce vs username mismatch), 403 지점(`username mismatch (got/expected)`), CMP relay add/remove |
 | Wireshark | 단말(WiFi/tcpdump)+서버 동시, `udp.port==15060 || sip || rtp` | SDP pt/fmtp/octet-align, RTP 방향·CMP 주소 도달, 180/200 누락 |
 
 증상→1차 의심:

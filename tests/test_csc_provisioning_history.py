@@ -1,4 +1,4 @@
-"""csc — 관제 데스크 통합 이력 조회 단위 시험 (오프라인, 임시 ServiceLogDir 트리).
+"""csc — 관제 데스크 통합 이력 조회 단위 시험 (오프라인, 임시 사이트 디렉터리 — recordings/·state/ 영역).
 
 dispatch_center.md §5.6/§8.4 · mcdata_messaging.md §4.3: `GET /provisioning/history?kind=call|ptt|message`
 = 관제사 역할 범위(monitor_call→members / ptt_listen→ptt_groups) 안의 지난 이력만 커서(since)로 준다.
@@ -44,10 +44,13 @@ def _now_parts(dt):
 
 
 class _Tree:
-    """임시 ServiceLogDir 에 call.json/session.json/messages.jsonl 을 심는다. 'now' 시각 버킷 사용."""
+    """임시 사이트 디렉터리의 녹취 영역(recordings/)에 call.json/session.json/messages.jsonl 을, 상태 영역(state/)에
+    진행 중 세션을 심는다(site_directory_layout.md). 'now' 시각 버킷 사용."""
 
     def __init__(self):
-        self.sl = tempfile.mkdtemp(prefix="cims_hist_")
+        self.site = tempfile.mkdtemp(prefix="cims_site_")
+        self.rec = _bucket(self.site, "recordings")
+        self.state = _bucket(self.site, "state")
         self.now = datetime.now().replace(microsecond=0)
         self._ptt_seq = 0
 
@@ -56,8 +59,8 @@ class _Tree:
 
     def call(self, call_id, initiator, callee, minutes_ago=5, state="ended"):
         y, mo, d, h = _now_parts(self.now - timedelta(minutes=minutes_ago))
-        # 실서버 레이아웃: {sl}/volte/{Y}/{M}/{D}/{H}/{prefix}/{caller}/{cid}.d/call.json
-        dd = _bucket(self.sl, "volte", y, mo, d, h, initiator[:10], initiator, call_id + ".d")
+        # 실서버 레이아웃: {rec}/volte/{Y}/{M}/{D}/{H}/{prefix}/{caller}/{cid}.d/call.json
+        dd = _bucket(self.rec, "volte", y, mo, d, h, initiator[:10], initiator, call_id + ".d")
         rec = {"call_id": call_id, "call_type": "volte", "initiator": initiator, "callee": callee,
                "state": state, "invite_time": self.ts(minutes_ago + 1), "answer_time": self.ts(minutes_ago),
                "end_time": self.ts(minutes_ago) if state == "ended" else None,
@@ -68,7 +71,7 @@ class _Tree:
     def ptt(self, gid, sesid, initiator, minutes_ago=5):
         y, mo, d, h = _now_parts(self.now - timedelta(minutes=minutes_ago))
         self._ptt_seq += 1
-        dd = _bucket(self.sl, "ptt", str(self._ptt_seq), y, mo, d, h, "S" + str(self._ptt_seq))
+        dd = _bucket(self.rec, "ptt", str(self._ptt_seq), y, mo, d, h, "S" + str(self._ptt_seq))
         rec = {"mcptt_group_id": gid, "name": gid, "sesid": sesid, "initiator": initiator,
                "call_id": "cid_" + sesid, "state": "ended", "start_time": self.ts(minutes_ago + 1),
                "end_time": self.ts(minutes_ago), "member_count": 3}
@@ -77,7 +80,7 @@ class _Tree:
 
     def group_msg(self, gid, frm, text, minutes_ago=5, msg_id=None):
         y, mo, d, h = _now_parts(self.now - timedelta(minutes=minutes_ago))
-        dd = _bucket(self.sl, "message", gid, y, mo, d, h)
+        dd = _bucket(self.rec, "message", gid, y, mo, d, h)
         rec = {"ts": self.ts(minutes_ago), "group": gid, "from": frm, "msg_type": "sds",
                "conv_id": "c1", "msg_id": msg_id or ("m_" + gid + str(minutes_ago)), "text": text,
                "size": len(text), "disposition_req": 0, "fanout": 2}
@@ -86,7 +89,7 @@ class _Tree:
 
     def direct_msg(self, frm, to, text, minutes_ago=5, msg_id=None):
         y, mo, d, h = _now_parts(self.now - timedelta(minutes=minutes_ago))
-        dd = _bucket(self.sl, "message_direct", y, mo, d, h)
+        dd = _bucket(self.rec, "message_direct", y, mo, d, h)
         rec = {"ts": self.ts(minutes_ago), "from": frm, "to": to, "msg_type": "text",
                "conv_id": "", "msg_id": msg_id or ("d_" + str(minutes_ago)), "text": text,
                "size": len(text), "disposition_req": 0}
@@ -105,7 +108,7 @@ class ReaderTests(unittest.TestCase):
     def test_call_scope_filter(self):
         self.t.call("call-A", "+821310002001", "+821310009999")   # 감시 멤버 발신
         self.t.call("call-B", "+821310007777", "+821310008888")   # 범위 밖
-        items, nxt = dh.query(self.t.sl, "call", self._scope(members=["tel:+821310002001"]), None, 100)
+        items, nxt = dh.query(self.t.rec, self.t.state, "call", self._scope(members=["tel:+821310002001"]), None, 100)
         ids = [x["id"] for x in items]
         self.assertIn("call-A", ids)
         self.assertNotIn("call-B", ids)
@@ -114,20 +117,20 @@ class ReaderTests(unittest.TestCase):
 
     def test_call_matches_callee_too(self):
         self.t.call("call-C", "+821310007777", "+821310002002")   # 감시 멤버 수신
-        items, _ = dh.query(self.t.sl, "call", self._scope(members=["+821310002002"]), None, 100)
+        items, _ = dh.query(self.t.rec, self.t.state, "call", self._scope(members=["+821310002002"]), None, 100)
         self.assertEqual([x["id"] for x in items], ["call-C"])
 
     def test_ptt_scope_filter(self):
         self.t.ptt("g002", "ses-1", "+82510002001")
         self.t.ptt("g009", "ses-2", "+82510009999")
-        items, _ = dh.query(self.t.sl, "ptt", self._scope(ptt=["g002"]), None, 100)
+        items, _ = dh.query(self.t.rec, self.t.state, "ptt", self._scope(ptt=["g002"]), None, 100)
         self.assertEqual([x["id"] for x in items], ["ses-1"])
         self.assertEqual(items[0]["groupId"], "g002")
 
     def test_message_group_scope(self):
         self.t.group_msg("g002", "+82510002001", "hi team")
         self.t.group_msg("g009", "+82510009999", "other group")
-        items, _ = dh.query(self.t.sl, "message", self._scope(ptt=["g002"]), None, 100)
+        items, _ = dh.query(self.t.rec, self.t.state, "message", self._scope(ptt=["g002"]), None, 100)
         self.assertEqual([x["text"] for x in items], ["hi team"])
         self.assertEqual(items[0]["scope"], "group")
 
@@ -135,7 +138,7 @@ class ReaderTests(unittest.TestCase):
         self.t.direct_msg("+821310002001", "+821310009999", "member sent")     # 멤버 발신
         self.t.direct_msg("+821310009999", "+821310002002", "member recv")     # 멤버 수신
         self.t.direct_msg("+821310007777", "+821310008888", "outsiders")       # 범위 밖
-        items, _ = dh.query(self.t.sl, "message",
+        items, _ = dh.query(self.t.rec, self.t.state, "message",
                             self._scope(members=["+821310002001", "+821310002002"]), None, 100)
         texts = sorted(x["text"] for x in items)
         self.assertEqual(texts, ["member recv", "member sent"])
@@ -145,26 +148,26 @@ class ReaderTests(unittest.TestCase):
         self.t.group_msg("g002", "+82510002001", "old", minutes_ago=30, msg_id="old1")
         self.t.group_msg("g002", "+82510002001", "new", minutes_ago=2, msg_id="new1")
         cursor = (self.t.now - timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S")
-        items, nxt = dh.query(self.t.sl, "message", self._scope(ptt=["g002"]),
+        items, nxt = dh.query(self.t.rec, self.t.state, "message", self._scope(ptt=["g002"]),
                               dh.parse_ts(cursor), 100)
         self.assertEqual([x["text"] for x in items], ["new"])
         # nextSince 로 다시 조회하면 빈 목록(그 이후 없음)
-        items2, _ = dh.query(self.t.sl, "message", self._scope(ptt=["g002"]), dh.parse_ts(nxt), 100)
+        items2, _ = dh.query(self.t.rec, self.t.state, "message", self._scope(ptt=["g002"]), dh.parse_ts(nxt), 100)
         self.assertEqual(items2, [])
 
     def test_limit_returns_most_recent(self):
         for i in range(5):
             self.t.group_msg("g002", "+82510002001", f"msg{i}", minutes_ago=20 - i * 2, msg_id=f"m{i}")
-        items, _ = dh.query(self.t.sl, "message", self._scope(ptt=["g002"]), None, 3)
+        items, _ = dh.query(self.t.rec, self.t.state, "message", self._scope(ptt=["g002"]), None, 3)
         self.assertEqual(len(items), 3)
         self.assertEqual([x["text"] for x in items], ["msg2", "msg3", "msg4"])   # 최근 3, 오름차순
 
     def test_empty_scope_returns_nothing(self):
         self.t.call("call-A", "+821310002001", "+821310009999")
-        self.assertEqual(dh.query(self.t.sl, "call", self._scope(), None, 100)[0], [])
+        self.assertEqual(dh.query(self.t.rec, self.t.state, "call", self._scope(), None, 100)[0], [])
 
     def test_missing_service_log_dir(self):
-        items, nxt = dh.query("/nonexistent/xyz", "call", self._scope(members=["+8213"]), None, 100)
+        items, nxt = dh.query("/nonexistent/xyz", "/nonexistent/xyz-state", "call", self._scope(members=["+8213"]), None, 100)
         self.assertEqual(items, [])
 
     def test_parse_ts_forms(self):
@@ -225,10 +228,10 @@ class HandlerTests(unittest.TestCase):
 
     def setUp(self):
         self.t = _Tree()
-        self._saved = (m._DB_CONFIG, m.extract_token, m._SERVICE_LOG_DIR, m.dispatch_discovery,
+        self._saved = (m._DB_CONFIG, m.extract_token, m._RECORDINGS_DIR, m._STATE_DIR, m.dispatch_discovery,
                        sys.modules.get("pymysql"), sys.modules.get("services.fm_reporter"))
         m._DB_CONFIG = {"Host": "127.0.0.1", "Port": 3306, "User": "cims", "Password": "", "Db": "cims"}
-        m._SERVICE_LOG_DIR = self.t.sl
+        m._RECORDINGS_DIR, m._STATE_DIR = self.t.rec, self.t.state
         self.token = {"sub": "disp01", "mcptt_id": "tel:+821310001001", "scope": [m.SCOPE_PROVISIONING]}
         m.extract_token = lambda hdr: self.token if hdr else None
         # DB: user_id 조회만 흉내
@@ -255,7 +258,7 @@ class HandlerTests(unittest.TestCase):
         sys.modules["services.fm_reporter"] = types.SimpleNamespace(get=lambda: fake_r)
 
     def tearDown(self):
-        (m._DB_CONFIG, m.extract_token, m._SERVICE_LOG_DIR, m.dispatch_discovery, pm, fm) = self._saved
+        (m._DB_CONFIG, m.extract_token, m._RECORDINGS_DIR, m._STATE_DIR, m.dispatch_discovery, pm, fm) = self._saved
         if pm is None:
             sys.modules.pop("pymysql", None)
         else:
@@ -386,10 +389,10 @@ class ExtendedWireTests(unittest.TestCase):
         t.call("c1", "+821310002001", "+821310009999", minutes_ago=3)
         t.call("c2", "+821310002001", "+821310009998", minutes_ago=2)
         scope = {"members": {"+821310002001"}, "ptt_groups": set()}
-        items, nxt, hours = dh.query_ex(t.sl, "call", scope, None, 1)
+        items, nxt, hours = dh.query_ex(t.rec, t.state, "call", scope, None, 1)
         self.assertEqual(len(items), 1)                          # limit 절삭
         self.assertEqual(sum(hours.values()), 2)                 # 분포는 절삭 전 전체
-        self.assertEqual(dh.query(t.sl, "call", scope, None, 1)[0], items)
+        self.assertEqual(dh.query(t.rec, t.state, "call", scope, None, 1)[0], items)
 
 
 class OamIndexRowTests(unittest.TestCase):
@@ -430,17 +433,17 @@ class OamIndexRowTests(unittest.TestCase):
     def test_has_recording_prefers_file(self):
         t = _Tree()
         t.ptt("g002", "ses-1", "+82510002001")
-        row = dh.query(t.sl, "ptt", {"members": set(), "ptt_groups": {"g002"}, "groupId": "dg1"}, None, 10)[0][0]
+        row = dh.query(t.rec, t.state, "ptt", {"members": set(), "ptt_groups": {"g002"}, "groupId": "dg1"}, None, 10)[0][0]
         parts = row["recordingId"].split("/")
         # 구 녹취형(세션키 아님) — 시간창 디렉터리가 곧 녹취 id. 세션키형은 test_recording_id_rules.
         it = {"dir": "".join(parts[2:6]), "windows": ["".join(parts[2:6])], "group_key": "1", "mcptt_group_id": "g002",
               "start_time": t.ts(6), "segment_count": 0}
-        r = dh.ptt_row_from_oam(it, t.sl)
+        r = dh.ptt_row_from_oam(it, t.rec)
         self.assertEqual(r["recordingId"], "/".join(parts[:6]))
         self.assertFalse(r["hasRecording"])
-        with open(os.path.join(t.sl, r["recordingId"], "segments.jsonl"), "w") as f:
+        with open(os.path.join(t.rec, r["recordingId"], "segments.jsonl"), "w") as f:
             f.write("{}\n")
-        self.assertTrue(dh.ptt_row_from_oam(it, t.sl)["hasRecording"])
+        self.assertTrue(dh.ptt_row_from_oam(it, t.rec)["hasRecording"])
 
 
 class PttWindowHandlerTests(HandlerTests):
@@ -512,7 +515,7 @@ class PttLivenessTests(unittest.TestCase):
     def _session(self, t, gid, sesid, minutes_ago, with_state=False, end_event=True):
         y, mo, d, h = _now_parts(t.now - timedelta(minutes=minutes_ago))
         t._ptt_seq += 1
-        dd = _bucket(t.sl, "ptt", str(t._ptt_seq), y, mo, d, h, "S" + str(t._ptt_seq))
+        dd = _bucket(t.rec, "ptt", str(t._ptt_seq), y, mo, d, h, "S" + str(t._ptt_seq))
         with open(os.path.join(dd, "session.json"), "w") as f:
             json.dump({"mcptt_group_id": gid, "name": gid, "sesid": sesid, "initiator": "+8250001", "call_id": "cid_" + sesid,
                        "start_time": t.ts(minutes_ago)}, f)                       # state/end_time 없음 = 시작 스냅샷
@@ -522,7 +525,7 @@ class PttLivenessTests(unittest.TestCase):
             if end_event:
                 f.write(json.dumps({"ts": t.ts(minutes_ago - 3), "type": "session_end"}) + "\n")
         if with_state:
-            sd = _bucket(t.sl, "state", "ptt")
+            sd = _bucket(t.state, "ptt")
             with open(os.path.join(sd, "+8250001.json"), "w") as f:
                 json.dump({"kind": "ptt", "subscriber_id": "+8250001", "session_id": sesid, "call_id": "cid_" + sesid,
                            "group_id": gid, "role": "initiator", "state": "active", "started_at": t.ts(minutes_ago)}, f)
@@ -530,7 +533,7 @@ class PttLivenessTests(unittest.TestCase):
     def test_snapshot_without_end_is_ended_with_end_from_events(self):
         t = _Tree()
         self._session(t, "g002", "ses-old", 20)
-        items, _ = dh.query(t.sl, "ptt", {"members": set(), "ptt_groups": {"g002"}}, None, 10)
+        items, _ = dh.query(t.rec, t.state, "ptt", {"members": set(), "ptt_groups": {"g002"}}, None, 10)
         r = items[0]
         self.assertEqual((r["id"], r["state"]), ("ses-old", "ended"))
         self.assertEqual(r["endTime"], t.ts(17))                                  # session_end 시각
@@ -540,12 +543,12 @@ class PttLivenessTests(unittest.TestCase):
     def test_snapshot_with_live_state_file_is_active(self):
         t = _Tree()
         self._session(t, "g002", "ses-live", 5, with_state=True, end_event=False)
-        items, _ = dh.query(t.sl, "ptt", {"members": set(), "ptt_groups": {"g002"}}, None, 10)
+        items, _ = dh.query(t.rec, t.state, "ptt", {"members": set(), "ptt_groups": {"g002"}}, None, 10)
         self.assertEqual([(x["id"], x["state"]) for x in items], [("ses-live", "active")])   # 라이브 스냅샷과 버킷 행이 한 건으로
         self.assertEqual(dh.format_item(items[0])["event"], "ptt.session.start")
 
     def test_no_end_event_falls_back_to_last_event(self):
         t = _Tree()
         self._session(t, "g002", "ses-x", 30, end_event=False)
-        r = dh.query(t.sl, "ptt", {"members": set(), "ptt_groups": {"g002"}}, None, 10)[0][0]
+        r = dh.query(t.rec, t.state, "ptt", {"members": set(), "ptt_groups": {"g002"}}, None, 10)[0][0]
         self.assertEqual((r["state"], r["endTime"]), ("ended", t.ts(29)))

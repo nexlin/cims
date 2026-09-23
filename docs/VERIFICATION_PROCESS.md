@@ -316,11 +316,13 @@ Build/Configure/Pkg 는 S2/S3/S4 가 담당하므로 S5 step 에서 제외.
 
 - `csc_http.py` — TB-CSC API client. urllib + TLS skip. `admin_login` / `get_json` / `post_json` / `delete` / `post_multipart` / `list_agents` / `find_agent_id_by_name`.
 - `db.py` — `csp_db_config(dist_dir)` + `connect(cfg)` (pymysql).
-- `service_log.py` — `service_log_roots(dist_dir)`. 녹취·flow 카운터의 탐색 루트. dist 설정
-  (`cmp.json`/`csp.json` 의 `ServiceLogging.Dir`)을 읽어 **설정된 경로**를 쓰고 기본
-  `<dist>/ext_mnt/service_log` 는 폴백으로 둔다 — `configure --service-log-dir` 로 공유 NAS
-  경로를 쓰는 환경에서 기본 경로만 보면 서비스가 정상인데도 "녹취 파일 없음" 으로 오판한다.
-- `recordings.py` — `count_recordings` / `count_ptt_events`. 위 루트 기준 delta 카운트.
+- `service_log.py` — 사이트 영역 탐색 루트([site_directory_layout.md](design/features/site_directory_layout.md)).
+  `service_log_roots(dist_dir)` = 로그 영역(SIP msg·flow 는 그 아래 `sip/`), `recording_roots(dist_dir)` = 녹취 영역.
+  dist 설정(`cmp.json`/`csp.json` 의 `ServiceLogging.Dir`·`Recording.Dir`)을 읽어 **설정된 경로**를 쓰고 기본
+  `<dist>/ext_mnt/log`·`<dist>/ext_mnt/recordings` 는 폴백으로 둔다(녹취 루트에는 단일 루트 레이아웃의 로그 루트도 포함) —
+  `configure --site-dir/--service-log-dir/--record-dir` 로 공유 NAS 경로를 쓰는 환경에서 기본 경로만 보면 서비스가
+  정상인데도 "녹취 파일 없음" 으로 오판한다.
+- `recordings.py` — `count_recordings` / `count_ptt_events`. 녹취 루트 기준 delta 카운트.
 - `subscribers.py` — `select_subscribers(db_cfg, voip_count, ptt_count)`. **cspsim 은 시작
   가입자의 비밀번호 하나로 `-count` 명을 시뮬레이션**하므로(번호만 +1, auth_id 는 계정별 파생)
   "번호 연속 + 비밀번호 동일" 구간의 첫 가입자를 고른다(`pick_start_subscriber`). 일부 계정만

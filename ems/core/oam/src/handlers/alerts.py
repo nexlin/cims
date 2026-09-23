@@ -82,11 +82,9 @@ def _alert_rules(config: dict) -> dict:
 
 
 def _service_log_dir(config: dict) -> str:
-    sl = config.get('ServiceLogging', {})
-    d = sl.get('Dir', '')
-    if not d:
-        d = config.get('ServiceLogDir', config.get('MsgLogDir', ''))
-    return d
+    """관측 로그 영역(alerts/·events/·fm_catalog/) — services/paths."""
+    from services import paths
+    return paths.service_log_dir(config)
 
 
 def _parse_body(handler_args):

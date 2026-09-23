@@ -32,10 +32,6 @@ logger = Logger()
 
 _AGENT_BASE = "/api/agent"
 
-# PKG 파일 저장 루트 (admin API 에서도 공유)
-_PKG_STORE = os.environ.get("CIMS_PKG_STORE",
-                            "/home/nex/work/cims/build/dist/csc/packages")
-
 # Agent server cert 유효기간 — 1 년. CA (ca.crt) 는 10 년 유지.
 # 짧게 두어야 rotation 로직이 실제로 의미를 가짐.
 _AGENT_CERT_VALIDITY_DAYS = 365
@@ -933,10 +929,8 @@ async def _metric(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
     module_events = body.get("module_events") or []
     if isinstance(module_events, list) and module_events:
         def _record_module_events():
-            from services import event_log
-            sl = (config or {}).get('ServiceLogging', {})
-            base = sl.get('Dir', '') or (config or {}).get(
-                'ServiceLogDir', (config or {}).get('MsgLogDir', ''))
+            from services import event_log, paths
+            base = paths.service_log_dir(config)
             # mo_instance 는 활성 알람/이벤트 식별키다 — 불변 id 루트 (표준화 §3.4(b)).
             # 사람이 읽는 message 에는 그 시점의 이름을 함께 남긴다.
             from services import alarm_sweeper as _asw

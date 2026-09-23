@@ -213,7 +213,9 @@ CSC 는 결과에 따라 다음을 자동 처리:
 ### Sync REST — 모듈 자원 파일 (`/module-files`, `/module-file`)
 
 collection(jsonl)과 나란한 **바이너리 자원** 통로 — OAM 안내음성 라이브러리가 CMP 노드에 운영자 음원을 내린다([announcements.md §7.3](../design/features/announcements.md)).
-경로는 `install_path` 아래 `announcements/` 로 고정(그 밖·`..` 은 400).
+경로는 그 모듈의 서비스 콘텐츠 영역(`install_path` 의 모듈 `config.json` 에 있는 `Content.Dir` — 사이트 디렉터리에서 유도,
+[site_directory_layout.md](../design/features/site_directory_layout.md)) 아래 `announcements/` 로 고정(그 밖·`..` 은 400). `Content.Dir` 이 없는
+이전 버전 모듈은 `install_path` 아래다.
 
 | 메서드 | 경로 | 동작 |
 |---|---|---|
@@ -222,7 +224,7 @@ collection(jsonl)과 나란한 **바이너리 자원** 통로 — OAM 안내음�
 | DELETE | `/module-file?install_path=&path=…` | 파일 제거(없으면 404) |
 
 배포 순서 = 파일 PUT(없거나 지문 다른 것만) → `PUT /collection?name=announcements`(`signal:true` → SIGUSR1) → CMP 가 카탈로그·파일을 재적재한다.
-모듈 버전 업그레이드(`install` 의 이전 버전 이관)는 collection jsonl 과 함께 `<install_path>/announcements/` 도 새 버전으로 복사한다 — 카탈로그와 파일이 짝이라 한쪽만 옮기면 CMP 가 `MEDIA_NOT_FOUND` 를 낸다.
+음원 파일은 버전 디렉터리 밖(콘텐츠 영역)이라 모듈 업그레이드에 영향받지 않고, 카탈로그(collection jsonl)는 다른 컬렉션과 함께 새 버전으로 이관된다.
 
 ### `update_ha` 의 `ha_intent`
 

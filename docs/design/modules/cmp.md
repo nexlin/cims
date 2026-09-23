@@ -138,7 +138,7 @@ wire 규격 정본은 [../../api/cmp_media_api.md](../../api/cmp_media_api.md) �
   "hdr": { "ver": 2, "trans_id": 1001, "node": "csp_01", "cmd": "RELAY_ADD",
            "type": "request", "sesid": "caller::csp::...", "service": "volte" },
   "payload": { "session_id": "sess_001", "remote_ip": "192.168.1.100",
-               "remote_port": 30000, "record_dir": "/data/service_log/voip/.../sess.d" }
+               "remote_port": 30000, "record_dir": "/mnt/cims/site01/recordings/volte/.../sess.d" }
 }
 ```
 ```json
@@ -177,7 +177,7 @@ wire 규격 정본은 [../../api/cmp_media_api.md](../../api/cmp_media_api.md) �
 1. `_freeResources`에서 PRtpRelay(8포트 블록) 할당
 2. 원격 피어 주소·NAT 정책 설정 (`setRemote`)
 3. record_dir 있으면 녹취 시작
-4. SESSION_START flow 로그 기록 (통합 ServiceLogDir)
+4. SESSION_START flow 로그 기록 (로그 영역 `sip/` 5분 버킷)
 
 #### RELAY_REMOVE — VoIP 세션 해제
 
@@ -715,7 +715,7 @@ CallMap(relay descriptor)이 소실되어 relay 가 REMOVE 를 영영 못 받고
    if idle >= to:
      reason = everReceivedRtp ? "hold_timeout" : "orphan_no_rtp"
      → SESSION_TIMEOUT 로그(detail=reason) → 카운터(_leakReclaim{Total,Orphan,Hold})++
-     → writeLeakReclaim()  ({ServiceLogDir}/leak_reclaim/YYYY/MM/DD/reclaim.jsonl 한 줄)
+     → writeLeakReclaim()  ({ServiceLogging.Dir}/leak_reclaim/YYYY/MM/DD/reclaim.jsonl 한 줄)
      → reset() → freeResource() → 삭제
 
 2. 그룹 세션 (PTT):
@@ -770,13 +770,14 @@ setRecording(enable, dir)
 ### 7.1 출력 레이아웃
 
 ```
-{MsgLogDir}/cmp/{service}/YYYY/MM/DD/HH/
-  ├─ {systemId}.flow.jsonl            (Flow 요약)
-  └─ {systemId}_{node}.msg.jsonl      (원문 — node = csp/ue/...)
+{ServiceLogging.Dir}/sip/YYYY/MM/DD/HH/        (로그 영역 — 전 모듈 공통 트리, flow_logging.md §2)
+  ├─ {systemId}.flow.{mm5}.jsonl        (Flow 요약)
+  └─ {systemId}_{node}.msg.{mm5}.jsonl  (원문 — node = csp)
 ```
 
-- `service` : CSP 가 payload 에 넣은 값 (volte/mcptt/system/console)
+- `service` (flow 엔트리 필드) : CSP 가 payload 에 넣은 값 (volte/mcptt/system/console)
 - `node`    : 상대 모듈 약식 이름
+- 경로 `ServiceLogging.Dir` 는 배포 때 base oam 사이트 디렉터리에서 유도된다([site_directory_layout.md](../features/site_directory_layout.md)).
 
 ### 7.2 Flow 엔트리 형식
 
@@ -805,7 +806,7 @@ setRecording(enable, dir)
 
 ```json
 "ServiceLogging": {
-  "Dir": "/data/msg_log",
+  "Dir": "/mnt/cims/site01/log",
   "Enable": ["csp"],
   "MediaTypes": ["floor","dtmf"],
   "Flow": {
@@ -857,7 +858,7 @@ CmpServer (PModule)
   "RtpStartPort": 50000,         // VoIP Audio RTP 시작 포트
   "RtpPoolSize": 20,             // VoIP 4포트 블록 수
   "TranscodeSlots": 8,           // 피어 leg G.711↔AMR-WB 변환 동시 세션 수 (§11.4, 0=비활성)
-  "AnnouncementDir": "announcements", // 안내 음원 루트(install_path 기준 상대/절대 — sys/ 동봉 · op/ 운영자 등록, §12)
+  "AnnouncementDir": "announcements", // 동봉 기본 세트(sys/) 루트(install_path 기준 상대/절대 — 운영자·가입자 음원은 Content.Dir/announcements, §12)
   "AnnPlayers": 32,              // 동시 안내 재생기 상한 (0=비활성 → resource.ann 미광고)
   "AnnMaxPlayMs": 60000,         // RELAY_PLAY max_ms 생략 시 상한 (repeat 0 은 STOP 까지)
   "AnnNatWaitMs": 500,           // NAT leg 는 latch(첫 ingress)까지 재생 시작을 미룸 — 그 상한
@@ -871,8 +872,10 @@ CmpServer (PModule)
   "EnableDtmfPtt": true,         // DTMF Floor Control 활성화
   "DtmfPushDigit": "*",          // Floor REQUEST 숫자
   "DtmfReleaseDigit": "#",       // Floor RELEASE 숫자
+  "Recording": { "Dir": "/mnt/cims/site01/recordings" }, // 녹취 영역 — A-PRC-017 대상 경로(세션 디렉터리는 CSP 가 record_dir 로 준다)
+  "Content":   { "Dir": "/mnt/cims/site01/content" },    // 콘텐츠 영역 — 운영자·가입자 안내 음원 announcements/{op,sub}/
   "ServiceLogging": {
-    "Dir": "/data/msg_log",
+    "Dir": "/mnt/cims/site01/log", // 로그 영역 — flow·msg 는 sip/, 누수 회수 leak_reclaim/ (영역 경로 3종은 배포 때 사이트 디렉터리에서 유도)
     "Enable": ["csp"],           // 원문 저장 대상 노드
     "MediaTypes": ["floor","dtmf"],
     "Flow": {
@@ -986,7 +989,7 @@ CSP(MRFC)가 `RELAY_PLAY` 로 지시하면 relay 세션의 peer leg 하나에 �
 ([../../api/cmp_media_api.md](../../api/cmp_media_api.md) §6.7). 실패 안내(early media 뒤 원코드)·보류 음악·서버 링백이 전부 이 하나로 나간다.
 
 - **`PAnnCatalog`** — `<AnnouncementDir>/sys/catalog.jsonl`(패키지 동봉 12종: 한국 신호음 5·TTS 안내 6·보류 음악) + `<install_path>/config/announcements.jsonl`
-  (운영자 등록 — OAM 라이브러리가 agent `/collection` 으로 내린다)을 읽어 코덱별 20 ms 프레임 열로 **전량 메모리 상주**(재생 경로 디스크 I/O 없음).
+  (운영자·가입자 등록 카탈로그 — OAM 라이브러리가 agent `/collection` 으로 내린다, 음원 파일은 콘텐츠 영역 `<Content.Dir>/announcements/{op,sub}/` — agent `/module-file`)을 읽어 코덱별 20 ms 프레임 열로 **전량 메모리 상주**(재생 경로 디스크 I/O 없음).
   PCMU/PCMA/G722 = 160 B, AMR-WB = RFC 4867 저장 형식 프레임(NO_DATA 는 빈 프레임 — 무송신). 재적재 = SIGUSR1·`ANN_RELOAD`, 진행 중 재생은 shared_ptr
   스냅샷을 들고 있어 끊기지 않는다. 누락·형식 오류 항목은 빼고 적재하며 A-PRC-034 를 연다(STATS `detail.ann_catalog.missing`).
 - **`PAnnPlayer`** — 시퀀스(항목 = 음원·repeat·max_ms)·전체 repeat(0 = STOP 까지)·delay 무음·max 상한. 자기 SSRC·seq, 코덱 클록 timestamp, marker(시작·무음 뒤),

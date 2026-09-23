@@ -2,6 +2,7 @@
 #include "FmReporter.h"
 #include "PLog.h"
 #include "SimpleJson.h"
+#include "SiteLayout.h"
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -1260,8 +1261,8 @@ std::string PCmpServer::annRootPath() const {
     return dir + "/../" + _annDir;
 }
 
-// 운영자 음원 자리 — 배포본은 install_path(= <config dir>/../..) 아래 `config/announcements.jsonl`(agent /collection) +
-//   `announcements/op/`(agent /module-file). 그 층이 없으면(개발·스크래치 배치) 모듈 자기 config/·announcements/ 를 쓴다.
+// 운영자 카탈로그 자리 — 배포본은 install_path(= <config dir>/../..) 아래 `config/announcements.jsonl`(agent /collection).
+//   그 층이 없으면(개발·스크래치 배치) 모듈 자기 config/ 를 쓴다. 음원 파일은 서비스 콘텐츠 영역(annOpRootPath).
 static bool _dirExists(const std::string& p) {
     struct stat st;
     return stat(p.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
@@ -1272,14 +1273,15 @@ std::string PCmpServer::annInstallRoot() const {
     size_t sl = dir.find_last_of('/');
     dir = (sl == std::string::npos) ? "." : dir.substr(0, sl);
     const std::string inst = dir + "/../..";
-    if (_dirExists(inst + "/config") && (_dirExists(inst + "/announcements") || _dirExists(inst + "/agent") || _dirExists(inst + "/cmp")))
-        return inst;   // 배포 레이아웃(<ver>/config + <ver>/<module>) — agent 가 여기 쓴다
+    if (_dirExists(inst + "/config") && (_dirExists(inst + "/agent") || _dirExists(inst + "/cmp")))
+        return inst;   // 배포 레이아웃(<ver>/config + <ver>/<module>) — agent 가 카탈로그를 여기 쓴다
     return "";
 }
 
+// 운영자·가입자 음원 루트 — 서비스 콘텐츠 영역의 announcements/ (op/·sub/ — agent /module-file 이 내려준다).
+//   콘텐츠 영역이 없으면(서비스 로그 미설정 개발 배치) 동봉 루트와 같은 자리.
 std::string PCmpServer::annOpRootPath() const {
-    const std::string inst = annInstallRoot();
-    return inst.empty() ? annRootPath() : inst + "/announcements";
+    return _contentDir.empty() ? annRootPath() : _contentDir + "/announcements";
 }
 
 std::string PCmpServer::annOpCatalogPath() const {
@@ -2431,6 +2433,53 @@ void PCmpServer::loadConfig() {
             else PLog::Instance().SetLevel(CMP_LOG_INFO);
         }
 
+        if (root.Has("SegmentIntervalSec")) _segmentIntervalSec = root.Get("SegmentIntervalSec").AsInt();
+
+        // 사이트 영역 경로(site_directory_layout.md) — 서비스 로그(log)·녹취(recordings)·서비스 콘텐츠(content).
+        //   OAM 실체화가 base oam 사이트 디렉터리에서 유도해 overlay 로 채운다. 영역 키가 비면 단일 루트 레이아웃
+        //   (녹취·콘텐츠 = 서비스 로그 루트). 녹취 세션 디렉터리 자체는 CSP 가 record_dir 로 정해 준다.
+        std::string recordDir, contentDir;
+        if (root.Has("ServiceLogging")) {
+            SimpleJson::JsonNode sl = root.Get("ServiceLogging");
+            if (sl.Has("Dir")) _serviceLogDir = SiteLayout::Norm(sl.GetString("Dir"));
+            if (sl.Has("SpoolDir")) _logSpoolDir = sl.GetString("SpoolDir");
+            if (sl.Has("StallSec")) _logStallSec = (int)sl.GetInt("StallSec", 5);
+            if (sl.Has("SpoolMaxMb")) _logSpoolMaxMb = (int)sl.GetInt("SpoolMaxMb", 1024);
+            // Flow 로깅 세부 flag: { "Flow": { "Floor": true, "Dtmf": true, "Rtcp": false } }
+            if (sl.Has("Flow")) {
+                SimpleJson::JsonNode fl = sl.Get("Flow");
+                if (fl.Has("Floor")) _logFlowFloor = (fl.GetString("Floor") == "true" || fl.GetString("Floor") == "1");
+                if (fl.Has("Dtmf"))  _logFlowDtmf  = (fl.GetString("Dtmf")  == "true" || fl.GetString("Dtmf")  == "1");
+                if (fl.Has("Rtcp"))  _logFlowRtcp  = (fl.GetString("Rtcp")  == "true" || fl.GetString("Rtcp")  == "1");
+            }
+        }
+        if (root.Has("Recording")) {
+            SimpleJson::JsonNode rec = root.Get("Recording");
+            if (rec.Has("Dir")) recordDir = rec.GetString("Dir");
+        }
+        if (root.Has("Content")) {
+            SimpleJson::JsonNode ct = root.Get("Content");
+            if (ct.Has("Dir")) contentDir = ct.GetString("Dir");
+        }
+        _sipLogDir = SiteLayout::SipLogDir(_serviceLogDir);
+        _recordDir = SiteLayout::RecordingsDir(recordDir, _serviceLogDir);
+        _contentDir = SiteLayout::ContentDir(contentDir, _serviceLogDir);
+
+        _systemId = root.Has("SystemId") ? root.GetString("SystemId") : "cmp_01";
+        // node 필드용: "cmp_01" → "cmp"
+        _nodeName = _systemId;
+        auto upos = _nodeName.find('_');
+        if (upos != std::string::npos) _nodeName = _nodeName.substr(0, upos);
+
+        // FM 자기보고 (alarm_self_reporting.md)
+        if (root.Has("Fm")) {
+            SimpleJson::JsonNode fm = root.Get("Fm");
+            if (fm.Has("Enable")) _fmEnable = (fm.GetString("Enable") == "true");
+            if (fm.Has("OamIp")) _fmOamIp = fm.GetString("OamIp");
+            if (fm.Has("OamPort")) _fmOamPort = (int)fm.GetInt("OamPort", 9010);
+            if (fm.Has("SyncSec")) _fmSyncSec = (int)fm.GetInt("SyncSec", 60);
+        }
+
     } else {
         // Legacy .conf loader
         FILE* fp = fopen(_configFile.c_str(), "r");
@@ -2451,58 +2500,6 @@ void PCmpServer::loadConfig() {
                 }
             }
             fclose(fp);
-        }
-    }
-
-    // Recording config
-    _recordEnable = false;
-    _recordDir = "recordings/raw";
-    if (_configFile.substr(_configFile.find_last_of(".") + 1) == "json") {
-        std::ifstream t2(_configFile);
-        if (t2.is_open()) {
-            std::stringstream buf2;
-            buf2 << t2.rdbuf();
-            SimpleJson::JsonNode root2 = SimpleJson::JsonNode::Parse(buf2.str());
-            if (root2.Has("RecordEnable")) {
-                std::string rv = root2.GetString("RecordEnable");
-                _recordEnable = (rv == "true");
-            }
-            if (root2.Has("RecordDir")) _recordDir = root2.GetString("RecordDir");
-            if (root2.Has("SegmentIntervalSec")) _segmentIntervalSec = root2.Get("SegmentIntervalSec").AsInt();
-            // ServiceLogging 설정 (신규)
-            if (root2.Has("ServiceLogging")) {
-                SimpleJson::JsonNode sl = root2.Get("ServiceLogging");
-                if (sl.Has("Dir")) _serviceLogDir = sl.GetString("Dir");
-                if (sl.Has("SpoolDir")) _logSpoolDir = sl.GetString("SpoolDir");
-                if (sl.Has("StallSec")) _logStallSec = (int)sl.GetInt("StallSec", 5);
-                if (sl.Has("SpoolMaxMb")) _logSpoolMaxMb = (int)sl.GetInt("SpoolMaxMb", 1024);
-                // Flow 로깅 세부 flag: { "Flow": { "Floor": true, "Dtmf": true, "Rtcp": false } }
-                if (sl.Has("Flow")) {
-                    SimpleJson::JsonNode fl = sl.Get("Flow");
-                    if (fl.Has("Floor")) _logFlowFloor = (fl.GetString("Floor") == "true" || fl.GetString("Floor") == "1");
-                    if (fl.Has("Dtmf"))  _logFlowDtmf  = (fl.GetString("Dtmf")  == "true" || fl.GetString("Dtmf")  == "1");
-                    if (fl.Has("Rtcp"))  _logFlowRtcp  = (fl.GetString("Rtcp")  == "true" || fl.GetString("Rtcp")  == "1");
-                }
-            }
-            // 레거시 호환
-            if (_serviceLogDir.empty() && root2.Has("ServiceLogDir"))
-                _serviceLogDir = root2.GetString("ServiceLogDir");
-            _msgLogDir = _serviceLogDir; // 통합 디렉토리
-            if (root2.Has("SystemId")) _systemId = root2.GetString("SystemId");
-            else _systemId = "cmp_01";
-            // node 필드용: "cmp_01" → "cmp"
-            _nodeName = _systemId;
-            auto upos = _nodeName.find('_');
-            if (upos != std::string::npos) _nodeName = _nodeName.substr(0, upos);
-
-            // FM 자기보고 (alarm_self_reporting.md)
-            if (root2.Has("Fm")) {
-                SimpleJson::JsonNode fm = root2.Get("Fm");
-                if (fm.Has("Enable")) _fmEnable = (fm.GetString("Enable") == "true");
-                if (fm.Has("OamIp")) _fmOamIp = fm.GetString("OamIp");
-                if (fm.Has("OamPort")) _fmOamPort = (int)fm.GetInt("OamPort", 9010);
-                if (fm.Has("SyncSec")) _fmSyncSec = (int)fm.GetInt("SyncSec", 60);
-            }
         }
     }
 
@@ -2879,7 +2876,7 @@ std::string PCmpServer::getFlowHourDir() {
     localtime_r(&now, &t);
     char buf[512];
     snprintf(buf, sizeof(buf), "%s/%04d/%02d/%02d/%02d",
-             _serviceLogDir.c_str(),
+             _sipLogDir.c_str(),
              t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour);
     return buf;
 }
@@ -3041,7 +3038,7 @@ void PCmpServer::logFlow(const std::string& key, const char* from, const char* t
     _logWriter.Enqueue(flowPath, std::move(line));  // 파일 I/O 없이 즉시 반환
 }
 
-// 누수 회수 세션 상세를 {ServiceLogDir}/leak_reclaim/YYYY/MM/DD/reclaim.jsonl 에 한 줄 기록(open-append-close).
+// 누수 회수 세션 상세를 <log>/leak_reclaim/YYYY/MM/DD/reclaim.jsonl 에 한 줄 기록(open-append-close).
 //   발동 빈도가 낮아(정상 환경 0) 매 회수마다 open/close 비용은 무시 가능. 콘솔/OAM 이 이 파일을 조회.
 void PCmpServer::writeLeakReclaim(const std::string& sessionId, const std::string& sesid, const std::string& service,
                                   const char* reason, int heldSec) {
@@ -3062,18 +3059,6 @@ void PCmpServer::writeLeakReclaim(const std::string& sessionId, const std::strin
     _logWriter.Enqueue(path, std::string(buf));
 }
 
-std::string PCmpServer::getMsgHourDir() {
-    if (_msgLogDir.empty()) return "";
-    time_t now = time(nullptr);
-    struct tm t;
-    localtime_r(&now, &t);
-    char buf[512];
-    snprintf(buf, sizeof(buf), "%s/%04d/%02d/%02d/%02d",
-             _msgLogDir.c_str(),
-             t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour);
-    return buf;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 서비스 로그 writer 기동 — 공용 CServiceLogWriter (dispatch + NAS flusher + 스풀 폴백,
 //   include/ServiceLogWriter.h). 생산자는 포맷+enqueue 만 하고 저장 경로(NAS 가능)는
@@ -3088,7 +3073,7 @@ void PCmpServer::startServiceLogWriter() {
     _seedBucketKey = hourDir + "/" + mm5;
     std::string seedPath = hourDir + "/" + _systemId + "_csp.msg." + mm5 + ".jsonl";
     _logWriter.Init(
-        _logSpoolDir, _logStallSec, _logSpoolMaxMb, {_serviceLogDir}, {seedPath},
+        _logSpoolDir, _logStallSec, _logSpoolMaxMb, {_sipLogDir}, {seedPath},
         [](EnumSlwLogLevel level, const std::string& msg) {
             if (level == SLW_LOG_ERROR) { LOG_ERROR("ServiceLog", "%s", msg.c_str()); }
             else if (level == SLW_LOG_DEBUG) { LOG_DEBUG("ServiceLog", "%s", msg.c_str()); }
@@ -3115,7 +3100,7 @@ void PCmpServer::startServiceLogWriter() {
 //   않고 op 만 적재한다 (PSyncRtpRecorder/_logFloorLocal). 실패/정체/포화 시 패킷 op 드롭
 //   (장애 구간 녹취 유실 수용) + A-PRC-017 record storage_failure 자기보고.
 void PCmpServer::startRecStoreWriter() {
-    std::string recPath = _recordDir.empty() ? _serviceLogDir : _recordDir;
+    std::string recPath = _recordDir;
     gclsRecStoreWriter.Init(
         _logStallSec, 20000, 64LL * 1024 * 1024,
         [](EnumSowLogLevel level, const std::string& msg) {

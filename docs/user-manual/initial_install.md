@@ -90,11 +90,13 @@ sudo ~/bootstrap/cims-bootstrap/install.sh --mgmt-ip <관리IP> --user <서비�
 - `--admin-pass` 는 명령행에 쓰면 shell history 에 남는다. 생략하면 아래 `[5/7]` 에서
   가려진 입력으로 두 번 묻는다.
 - `--batch` 를 주면 문답을 생략하고 옵션·기본값만 쓴다(자동화용).
-- **store·로그 위치는 경로 설정이다** — `--runtime-dir <관리 store 경로>` `--log-dir <서비스 로그 루트>`.
-  NAS 든 로컬 디스크든 운영 상황이 정하고, 마운트는 [시스템/인프라](또는 아래 `--mount-src`)로 따로 한다.
-  NAS 하나를 여러 사이트가 나눠 쓰면 `--runtime-dir /mnt/cims/<사이트>/runtime --log-dir /mnt/cims/<사이트>/service_log`
-  처럼 사이트 디렉터리 아래에 둔다. 생략 = `--runtime-mount` 의 `<마운트>/runtime`·`<마운트>/service_log`, 그것도
-  없으면 노드 로컬. `--runtime-mount` 는 공유 스토리지 이중화 사이트에서 mount guard 를 켜는 선택 항목이다.
+- **사이트 데이터 위치는 경로 설정 하나다** — `--site-dir <사이트 디렉터리>`. 관리 store(`runtime/`)·패키지(`packages/`)·
+  콘텐츠(`content/`)·녹취(`recordings/`)·로그(`log/`)·통계(`stats/`)·상태(`state/`)·계측기(`tester/`)가 그 아래로 유도된다
+  ([site_directory_layout.md](../design/features/site_directory_layout.md)). NAS 든 로컬 디스크든 운영 상황이 정하고, 마운트는
+  [시스템/인프라](또는 아래 `--mount-src`)로 따로 한다. NAS 하나를 여러 사이트가 나눠 쓰면 `--site-dir /mnt/cims/<사이트>` 처럼
+  사이트마다 디렉터리를 둔다. `--runtime-dir`·`--log-dir` 는 영역 override 다. 생략 = `--runtime-mount`/`--mount-src` 의 마운트
+  지점이 사이트 디렉터리, 그것도 없으면 노드 로컬 단일 루트. `--runtime-mount` 는 공유 스토리지 이중화 사이트에서 mount guard 를
+  켜는 선택 항목이다.
 
 ### 대화식 문답 7개
 
@@ -105,13 +107,13 @@ sudo ~/bootstrap/cims-bootstrap/install.sh --mgmt-ip <관리IP> --user <서비�
 | 3/7 | 서버 명 | hostname |
 | 4/7 | 관리(mgmt) IP | 후보 IP 목록 제시. `--mgmt-ip` 를 줬으면 건너뜀 |
 | 5/7 | admin 비밀번호 | 4자 이상, 확인까지 2회 (필수) |
-| 6/7 | 공유 스토리지 | Enter = **노드 로컬**. NAS 를 쓰면 `host:/export` 형식으로 입력 |
+| 6/7 | 사이트 디렉터리 | Enter = **노드 로컬**. 경로를 주면 이어서 새로 붙일 공유 스토리지 원본(`host:/export`)을 묻는다(Enter = 이미 붙어 있음·로컬 디스크) |
 | 7/7 | 이 서버 agent 자동 설치 | `Y` |
 
-**6/7 을 Enter 로 두면** 관리 store 가 `<prefix>/modules/oam/runtime`, 서비스 로그가 그
-하위 `service_log` 로 잡힌다. 관리평면 이중화를 계획하면 여기서 공유 마운트를 지정해야
-나중에 store 이관이 불필요하다 — 로컬로 두고 나중에 옮기는 정규 경로는 콘솔의
-`[패키지 설정] > oam > 관리 store` 이며, **마운트 지점 하위로만** 옮길 수 있다
+**6/7 을 Enter 로 두면** 노드 로컬 단일 루트 — 관리 store 가 `<prefix>/modules/oam/runtime`, 서비스 로그가 그
+하위 `service_log`, 녹취·통계·상태도 그 아래로 잡힌다. 관리평면 이중화를 계획하면 여기서 공유 스토리지 위의
+사이트 디렉터리를 지정해야 나중에 이관이 불필요하다 — 로컬로 두고 나중에 옮기는 정규 경로는 콘솔의
+`[패키지 설정] > oam > 사이트 디렉터리` 이며, **마운트 지점 하위로만** 옮길 수 있다
 (로컬→로컬 이관 경로는 없다).
 
 ### install.sh 가 하는 일
@@ -145,17 +147,17 @@ ps -eo user,pid,args | grep -E 'oam_app|cims_agent' | grep -v grep
 추가로 확인할 것:
 
 ```bash
-ls <prefix>/modules/oam/runtime/          # control/ pkg_files/ cert/ _secrets/ service_log/
-cat <prefix>/modules/oam/current/oam/config.json   # CimsRuntimeDir · Packages.Dir · JwtSecret
+ls <사이트>/                                # runtime/ packages/ log/ … (노드 로컬이면 <prefix>/modules/oam/runtime/)
+cat <prefix>/modules/oam/current/oam/config.json   # CimsSiteDir · CimsRuntimeDir · Packages.Dir · Recording.Dir … · JwtSecret
 ls /var/lib/systemd/linger/               # 서비스 계정
 ls /etc/sudoers.d/                        # cims-priv
 ```
 
-노드 `config.json` 의 `CimsRuntimeDir` 은 `--runtime-dir` 로 준 경로(생략 시 `<마운트>/runtime`,
-마운트도 없으면 `<prefix>/modules/oam/runtime`), `Packages.Dir` 은 그 하위 `pkg_files` 여야 한다.
-배포 레코드에는 `CimsRuntimeDir`(경로 설정)과 `CimsRuntimeMount`(선택, mount guard) 가 저장되고
-`Packages.Dir` 은 OAM 이 job 을 보낼 때마다 유도해 `config.json` 에 적는다(oam_ha.md §4.1).
-이후 설치되는 oam-svc·csc 도 같은 store 경로를 유도해 받는다.
+노드 `config.json` 에는 사이트 디렉터리에서 유도한 영역 경로가 구체값으로 들어 있다 — `CimsRuntimeDir` =
+`<사이트>/runtime`, `Packages.Dir` = `<사이트>/packages`, `ServiceLogging.Dir` = `<사이트>/log` …(노드 로컬 단일 루트면
+`<prefix>/modules/oam/runtime`, 패키지는 그 하위 `pkg_files`). 배포 레코드에는 입력(`CimsSiteDir`, 선택 `CimsRuntimeMount`·
+영역 override)만 저장되고 영역 경로는 OAM 이 job 을 보낼 때마다 유도해 `config.json` 에 적는다(site_directory_layout.md §3).
+이후 설치되는 서비스 모듈도 같은 영역 경로를 유도해 받는다.
 
 ### 인증서
 
@@ -186,10 +188,10 @@ SAN 에 들어간다. 외부망 IP 로 브라우저 접속해도 SAN 불일치�
 - 게이트웨이 라우트는 서비스 모듈이 설치 시 **self-register** 한다 — 수동 시드 불필요.
 - `CimsAuth.JwtSecret` 은 **입력하지 않는다** — 설정 실체화가 게이트웨이 서비스 모듈
   (csc·oam-svc)에 그룹 공통 신원으로 주입한다.
-- **관리 store 경로는 입력하지 않는다.** oam-svc(리스 보유)와 csc(store 를 읽음) 둘 다
-  base `oam` 배포설정의 **마운트 지점 하나**에서 유도받는다(`_store_source`). 위치를 정하는
-  창구는 oam 하나여야 한다 — 두 곳에서 받으면 값이 갈리고, csc 가 어긋나면 빈 컬렉션을 보고
-  번호 추가가 `400 service_ref required to derive ha1` 로 실패한다.
+- **관리 store·서비스 로그·녹취 경로는 입력하지 않는다.** 서비스 모듈은 base `oam` 배포설정의 **사이트
+  디렉터리**에서 유도한 영역 경로를 받는다(`_store_source`·`_site_source`, 콘솔에는 `자동 채움` 으로 보인다). 위치를
+  정하는 창구는 oam 하나여야 한다 — 두 곳에서 받으면 값이 갈리고, csc 가 어긋나면 빈 컬렉션을 보고 번호 추가가
+  `400 service_ref required to derive ha1` 로 실패하며, CSP 가 쓴 녹취를 OAM 이 못 찾는다.
 - 설정 항목은 대부분 재기동이 필요하다. 값을 다 넣고 패널 하단 **`저장 + 재기동`** 을 쓴다
   (`저장` 만 누르면 파일에만 반영되고 프로세스는 옛 값으로 계속 돈다).
 - 템플릿에 선언되지 않은 키는 저장 시 버려지고 `미저장(템플릿에 없는 키)` 로 보고된다.
@@ -467,8 +469,8 @@ ss -lntup | grep -E ':4419|:4421|:4430|:4480|:5060|:9000|:9001|:9010'
 
 - **게이트웨이 경유 조회** — `/api/v1/users` · `/api/v1/organizations` · `/api/v1/ptt/groups`
   가 200 이면 OAM↔CSC 프록시가 정상이다.
-- **FM 경로** — `<store>/service_log/fm_catalog` 와 `state` 의 mtime 이 갱신되면
-  모듈 → oam-svc(FM ingest) → store 경로가 돌고 있다는 뜻이다.
+- **FM 경로** — `<로그 영역>/fm_catalog`(사이트면 `<사이트>/log/fm_catalog`)의 mtime 이 갱신되면
+  모듈 → oam-svc(FM ingest) → 로그 영역 경로가 돌고 있다는 뜻이다.
 - **활성 알람 0건**.
 - CSP 는 기동 직후 pid 가 유지되는지 한 번 더 본다 (fail-fast 항목이 남아 있으면
   watchdog 재기동 루프로 보인다).
@@ -598,7 +600,8 @@ curl -sk https://<관리IP>:4419/api/v1/deployments -H "Authorization: Bearer <�
 | TLS 리스너가 안 열림 (`A-PRC-012`) | §4.1 — TLS 행의 `tls_cert_path` 미지정. 로그: `AddTlsListener: no certificate` |
 | 설정을 저장했는데 반영되지 않음 | 모듈 설정 파일은 기동 시점에 써진다. `저장 + 재기동` 을 쓴다 |
 | 저장 후 `미저장(템플릿에 없는 키)` | 그 키는 `config_template.json` 에 선언이 없어 overlay 에 저장되지 않는다. 템플릿 선언이 필요한 항목 |
-| csc/oam-svc 가 관리 store 를 못 찾음 | base `oam` 배포설정의 `CimsRuntimeMount` (유도의 근거다). 노드 `config.json` 의 `CimsRuntimeDir` 이 oam 것과 같은지도 대조 — 다르면 descriptor 의 `safety.reads_shared_store`/`requires_leader_lease` 선언이 그 모듈에 없는 것이다 |
+| csc/oam-svc 가 관리 store 를 못 찾음 | base `oam` 배포설정의 `CimsSiteDir`(유도의 근거다 — 없으면 `CimsRuntimeDir`·`CimsRuntimeMount`). 노드 `config.json` 의 `CimsRuntimeDir` 이 oam 것과 같은지도 대조 — 다르면 descriptor 의 `safety.reads_shared_store`/`requires_leader_lease` 선언이 그 모듈에 없는 것이다 |
+| 녹취·이력이 콘솔에 안 보임 | 모듈 `config.json` 의 영역 경로(csp `Setup.Recording.Dir`, cmp `Recording.Dir`)가 oam `Recording.Dir` 과 같은지 — 다르면 그 모듈이 옛 패키지(템플릿에 `site_area` 없음)이거나 update_config 전이다. 모듈이 다른 노드면 사이트 디렉터리가 그 노드에도 같은 경로로 붙어 있어야 한다 |
 | 로그·시크릿을 읽을 수 없음 | 서비스 계정 소유(`0600`/`0660`)다. `sudo` 로 읽거나 실행 계정을 서비스 계정 그룹에 넣는다(재로그인 필요) |
 | 철거 후에도 포트가 잡혀 있음 | §7 — C++ 모듈 잔존. `pgrep` 로 확인 후 종료 |
 

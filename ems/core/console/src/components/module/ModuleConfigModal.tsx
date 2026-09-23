@@ -367,7 +367,8 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
  footer={sec.key === 'store'
                         ? <StoreMigrateFooter groupId={ha?.group_id ?? null}
  mountPoint={String(values['CimsRuntimeMount'] ?? '')}
- dirty={changed.has('CimsRuntimeMount')}
+ siteDir={String(initial['CimsSiteDir'] ?? '')}
+ dirty={changed.has('CimsRuntimeMount') || changed.has('CimsSiteDir')}
  onDone={onDone} />
                         : undefined} />
                   ))}
@@ -619,20 +620,24 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
  * 유도되므로 화면에 입력칸을 두지 않고 **결과만 보여준다** — 같은 사실을 세 칸에 나눠
  * 입력받으면 하나만 어긋나도 조용히 깨진다(절체한 노드에서 패키지 404 등).
  *
- * `CimsRuntimeMount` 는 **저장으로 적용되는 키가 아니다.** 저장하면 `update_config` 만
+ * 사이트 디렉터리·마운트 지점은 **저장으로 데이터가 옮겨지는 키가 아니다.** 저장하면 `update_config` 만
  * 돌아 경로만 바뀌고 데이터는 따라가지 않는다 → 새 경로에 빈 store 가 생기거나(마운트
  * 없으면) mount guard 가 기동을 거부한다. 데이터를 옮기는 것은 이관(`migrate_oam_store`
- * job: 정지 → 복사 → 기록 → 기동)뿐이므로 그 버튼을 여기 둔다.
+ * job: 정지 → 복사 → 기록 → 기동)뿐이므로 그 버튼을 여기 둔다. 사이트 디렉터리 구성이면 이관이
+ * 사이트 전체를 마운트 지점으로 옮긴다(관리 store·패키지·콘텐츠 복사, 로그·녹취·통계는 기동 뒤 합류 —
+ * site_directory_layout.md §5).
  * 최초 지정은 부트스트랩 설치가 담당하므로(oam_ha.md §9.4) 보통 이 버튼은 쓰지 않는다.
  *
- * 이 footer 는 결과적으로 **oam 에만** 붙는다 — store 섹션을 가진 템플릿이 oam 하나이기
- * 때문이다. oam-svc 도 store 를 읽지만 위치는 oam 에서 유도되는 파생값이라 입력 창구를
- * 두지 않는다(oam_ha.md §4.1). 창구가 둘이면 서로 다른 값이 저장될 수 있고, 그때부터
+ * 이 footer 는 결과적으로 **oam 에만** 붙는다 — 사이트 디렉터리 섹션을 가진 템플릿이 oam 하나이기
+ * 때문이다. 서비스 모듈도 사이트 경로를 쓰지만 oam 에서 유도되는 파생값이라 입력 창구를
+ * 두지 않는다. 창구가 둘이면 서로 다른 값이 저장될 수 있고, 그때부터
  * "두 값이 같은가" 를 검사하는 코드가 따라붙는다.
  */
-export function StoreMigrateFooter({ groupId, mountPoint, dirty, onDone }: {
+export function StoreMigrateFooter({ groupId, mountPoint, siteDir, dirty, onDone }: {
  groupId: number | null
  mountPoint: string
+  /** 저장된 사이트 디렉터리 — 있으면 이관이 사이트 전체를 마운트 지점으로 옮긴다 */
+ siteDir?: string
  dirty: boolean
  onDone?: () => void | Promise<void>
 }) {
@@ -643,9 +648,12 @@ export function StoreMigrateFooter({ groupId, mountPoint, dirty, onDone }: {
 
  async function migrate() {
  if (!groupId) return
- if (!await confirm({ title: '관리 store 이관', tone: 'danger', confirmLabel: '이관', body: <>
-      관리 데이터를 이 경로로 이관합니다.
-      <div className="mt-1 font-mono text-xs">{mp}/runtime</div>
+ const siteMode = !!(siteDir || '').trim()
+ if (!await confirm({ title: siteMode ? '사이트 이관' : '관리 store 이관', tone: 'danger', confirmLabel: '이관', body: <>
+      {siteMode
+        ? <>사이트를 이 경로로 옮깁니다 — 관리 store·패키지·콘텐츠는 복사하고, 로그·녹취·통계는 기동 뒤 합칩니다.</>
+        : <>관리 데이터를 이 경로로 이관합니다.</>}
+      <div className="mt-1 font-mono text-xs">{siteMode ? mp : `${mp}/runtime`}</div>
       <div className="mt-2">OAM 이 정지 → 복사 → 재기동되므로 콘솔이 30초 내외 끊깁니다.</div>
       <div className="mt-1">대상에 이전 데이터가 있으면 .stale-&lt;시각&gt; 으로 보관하고 덮어씁니다.</div>
       <div className="mt-2">진행할까요?</div>

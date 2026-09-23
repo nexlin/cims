@@ -31,19 +31,25 @@ from services import stats_store as S  # noqa: E402
 DAY = '2026-09-11'
 
 
-def _write(root, unit, day, buckets):
+def _site(prefix):
+    """사이트 디렉터리 하나 → (경로, 집계 영역) — 영역 유도는 services/paths 그대로."""
+    site = tempfile.mkdtemp(prefix=prefix)
+    return site, R.roots_of({'CimsSiteDir': site})
+
+
+def _write(roots, unit, day, buckets):
     """그 날의 버킷 레코드를 심는다. **저장소 API 로** 넣는다 — 시험이 파일 배치를 알면
     백엔드를 바꿀 때 같이 깨진다(최종 목표는 DB 적재다)."""
-    S.for_root(root).replace_day(
+    S.for_root(roots.stats).replace_day(
         unit, day,
         [{'bucket': b, 'svc': 'volte', 'call': {'attempts': 1}} for b in buckets])
 
 
-def _raw_day(root, day):
+def _raw_day(roots, day):
     """그 날의 **원본 날 디렉터리**를 심는다 — 즉석 집계가 0 을 낸 것이 사실인지 가르는
     근거(`_raw_day_exists`). 원본이 없는 날은 훑어도 빈손이고, 그 빈손은 0 이 아니라
     모름이라 조회에서 제외된다."""
-    os.makedirs(os.path.join(root, day[0:4], day[5:7], day[8:10]), exist_ok=True)
+    os.makedirs(os.path.join(roots.sip, day[0:4], day[5:7], day[8:10]), exist_ok=True)
 
 
 def _hours(day, n=24):
@@ -62,10 +68,10 @@ def _minutes(day, h0, m0, h1, m1):
 
 class ReadRangeBucketCoverageTest(unittest.TestCase):
     def setUp(self):
-        self.root = tempfile.mkdtemp(prefix='rollup_test_')
+        self.site, self.roots = _site('rollup_test_')
 
     def tearDown(self):
-        shutil.rmtree(self.root, ignore_errors=True)
+        shutil.rmtree(self.site, ignore_errors=True)
 
     def _buckets_of(self, rows):
         return sorted(r['bucket'] for r in rows)
@@ -73,9 +79,9 @@ class ReadRangeBucketCoverageTest(unittest.TestCase):
     # ── 핵심 회귀 ────────────────────────────────────────────────
     def test_진행중인_날도_1시간_롤업을_쓴다(self):
         """to 가 하루 중간이어도 그때까지의 온전한 시간 버킷은 롤업에서 나와야 한다."""
-        _write(self.root, '1h', DAY, _hours(DAY))
+        _write(self.roots, '1h', DAY, _hours(DAY))
         rows, cov = R.read_range_filled(
-            self.root, f'{DAY} 00:00:00', f'{DAY} 12:42:59', {}, gran='1h')
+            self.roots, f'{DAY} 00:00:00', f'{DAY} 12:42:59', {}, gran='1h')
 
         self.assertEqual(cov['by_unit'].get('1h'), 1, '1시간 계층을 써야 한다')
         self.assertEqual(cov['rollup'], 1)
@@ -84,17 +90,17 @@ class ReadRangeBucketCoverageTest(unittest.TestCase):
 
     def test_경계에_걸친_버킷은_거친_계층에서_빠진다(self):
         """12:00 버킷은 12:59 까지라 12:42 를 넘는다 — 통째로 세면 총계가 부푼다."""
-        _write(self.root, '1h', DAY, _hours(DAY))
+        _write(self.roots, '1h', DAY, _hours(DAY))
         rows, _ = R.read_range_filled(
-            self.root, f'{DAY} 00:00:00', f'{DAY} 12:42:59', {}, gran='1h')
+            self.roots, f'{DAY} 00:00:00', f'{DAY} 12:42:59', {}, gran='1h')
         self.assertNotIn(f'{DAY} 12:00', self._buckets_of(rows))
 
     def test_경계_구간은_잔_계층이_채운다(self):
         """1분 계층이 있으면 12:00~12:42 는 거기서 나온다 — 즉석 집계로 내려가지 않는다."""
-        _write(self.root, '1h', DAY, _hours(DAY))
-        _write(self.root, '1m', DAY, _minutes(DAY, 0, 0, 23, 59))
+        _write(self.roots, '1h', DAY, _hours(DAY))
+        _write(self.roots, '1m', DAY, _minutes(DAY, 0, 0, 23, 59))
         rows, cov = R.read_range_filled(
-            self.root, f'{DAY} 00:00:00', f'{DAY} 12:42:59', {}, gran='1h')
+            self.roots, f'{DAY} 00:00:00', f'{DAY} 12:42:59', {}, gran='1h')
 
         self.assertEqual(cov['scanned'], 0, '원본 즉석 집계로 떨어지면 안 된다')
         self.assertEqual(cov['missing'], 0)
@@ -107,10 +113,10 @@ class ReadRangeBucketCoverageTest(unittest.TestCase):
 
     def test_계층이_섞여도_총계가_부풀지_않는다(self):
         """1h + 1m 을 함께 읽어도 같은 분이 두 번 세어지면 안 된다 — 합산까지 확인한다."""
-        _write(self.root, '1h', DAY, _hours(DAY))
-        _write(self.root, '1m', DAY, _minutes(DAY, 0, 0, 23, 59))
+        _write(self.roots, '1h', DAY, _hours(DAY))
+        _write(self.roots, '1m', DAY, _minutes(DAY, 0, 0, 23, 59))
         rows, _ = R.read_range_filled(
-            self.root, f'{DAY} 00:00:00', f'{DAY} 12:42:59', {}, gran='1h')
+            self.roots, f'{DAY} 00:00:00', f'{DAY} 12:42:59', {}, gran='1h')
         buckets, totals = R.aggregate(rows, '1h', 'volte')
         # 레코드 1건 = attempts 1. 12:42 까지면 1h 12건 + 1m 43건 = 55.
         self.assertEqual(totals['volte']['attempts'], 55)
@@ -119,37 +125,37 @@ class ReadRangeBucketCoverageTest(unittest.TestCase):
         self.assertEqual(cell['volte']['attempts'], 43)
 
     def test_온전히_덮인_날은_가장_거친_계층(self):
-        _write(self.root, '1h', DAY, _hours(DAY))
-        _write(self.root, '1m', DAY, _minutes(DAY, 0, 0, 23, 59))
+        _write(self.roots, '1h', DAY, _hours(DAY))
+        _write(self.roots, '1m', DAY, _minutes(DAY, 0, 0, 23, 59))
         rows, cov = R.read_range_filled(
-            self.root, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {}, gran='1h')
+            self.roots, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {}, gran='1h')
         self.assertEqual(cov['by_unit'].get('1h'), 1)
         self.assertIsNone(cov['by_unit'].get('1m'), '1분까지 내려갈 이유가 없다')
         self.assertEqual(len(rows), 24)
 
     def test_롤업이_없으면_그_구간만_즉석_집계_대상(self):
         """1h 가 덮은 뒤 남은 구간만 원본으로 간다 — 하루 전체가 아니라."""
-        _write(self.root, '1h', DAY, _hours(DAY))
-        _raw_day(self.root, DAY)
+        _write(self.roots, '1h', DAY, _hours(DAY))
+        _raw_day(self.roots, DAY)
         rows, cov = R.read_range_filled(
-            self.root, f'{DAY} 00:00:00', f'{DAY} 12:42:59', {}, gran='1h')
+            self.roots, f'{DAY} 00:00:00', f'{DAY} 12:42:59', {}, gran='1h')
         # 그 날 원본은 남아 있다 — 호가 없어 결과는 비지만 '훑었다' 는 사실이 남는다.
         self.assertEqual(cov['scanned'], 1)
         self.assertEqual(cov['by_unit'].get('1h'), 1, '롤업은 그대로 쓰였어야 한다')
 
     def test_구간_밖_버킷은_들어오지_않는다(self):
-        _write(self.root, '1h', DAY, _hours(DAY))
+        _write(self.roots, '1h', DAY, _hours(DAY))
         rows, _ = R.read_range_filled(
-            self.root, f'{DAY} 03:00:00', f'{DAY} 06:59:59', {}, gran='1h')
+            self.roots, f'{DAY} 03:00:00', f'{DAY} 06:59:59', {}, gran='1h')
         self.assertEqual(self._buckets_of(rows),
                          [f'{DAY} 03:00', f'{DAY} 04:00', f'{DAY} 05:00', f'{DAY} 06:00'])
 
     def test_여러_날_양끝만_부분_덮임(self):
         d0, d1, d2 = '2026-09-09', '2026-09-10', '2026-09-11'
         for d in (d0, d1, d2):
-            _write(self.root, '1h', d, _hours(d))
+            _write(self.roots, '1h', d, _hours(d))
         rows, cov = R.read_range_filled(
-            self.root, f'{d0} 10:00:00', f'{d2} 05:30:59', {}, gran='1h')
+            self.roots, f'{d0} 10:00:00', f'{d2} 05:30:59', {}, gran='1h')
         got = self._buckets_of(rows)
         self.assertEqual(cov['by_unit'].get('1h'), 3, '세 날 모두 1시간 계층')
         self.assertIn(f'{d0} 10:00', got)
@@ -168,7 +174,7 @@ class ReadRangeBucketCoverageTest(unittest.TestCase):
         clock = iter([0.0] + [1e9] * 10000)
         with unittest.mock.patch.object(R.time, 'monotonic', lambda: next(clock)):
             rows, cov = R.read_range_filled(
-                self.root, '2026-09-01 00:00:00', '2026-09-11 23:59:59', {},
+                self.roots, '2026-09-01 00:00:00', '2026-09-11 23:59:59', {},
                 gran='1h', deadline_sec=3.5)
         self.assertTrue(cov['deadline_hit'])
         self.assertGreater(cov['missing'], 0)
@@ -182,39 +188,39 @@ class ReadRangeBucketCoverageTest(unittest.TestCase):
         "빠진 것 없음" 이라 하고 조회는 **모자란 값**을 정답처럼 낸다 — 운영자는 그
         감소를 실제 트래픽 변화로 읽는다.
         """
-        _raw_day(self.root, DAY)
+        _raw_day(self.roots, DAY)
         # 첫 두 호출(기준시각·첫 날 진입 판정)은 통과시키고 그 뒤로 지난 것으로 본다 —
         #   그래야 build_minutes 가 들어갔다가 시간 경계에서 끊긴 모양이 된다.
         clock = iter([0.0, 0.0, 0.0] + [1e9] * 10000)
         with unittest.mock.patch.object(R.time, 'monotonic', lambda: next(clock)):
             _rows, cov = R.read_range_filled(
-                self.root, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {},
+                self.roots, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {},
                 gran='1h', deadline_sec=3.5)
         self.assertTrue(cov['deadline_hit'])
         self.assertEqual(cov['partial_days'], [DAY])
         self.assertEqual(cov['missing'], 0, '아예 못 본 날은 아니다 — 훑기는 했다')
 
     def test_온전히_채운_날은_훑다_만_날이_아니다(self):
-        _raw_day(self.root, DAY)
+        _raw_day(self.roots, DAY)
         _rows, cov = R.read_range_filled(
-            self.root, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {},
+            self.roots, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {},
             gran='1h', deadline_sec=0)
         self.assertEqual(cov['partial'], 0)
         self.assertEqual(cov['partial_days'], [])
 
     def test_음수_상한은_상한_없음(self):
         """0 과 음수는 모두 '상한 없음' — 재집계·검증 경로가 쓴다."""
-        _raw_day(self.root, DAY)
+        _raw_day(self.roots, DAY)
         rows, cov = R.read_range_filled(
-            self.root, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {},
+            self.roots, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {},
             gran='1h', deadline_sec=-1)
         self.assertFalse(cov['deadline_hit'])
         self.assertEqual(cov['scanned'], 1)
 
     def test_데드라인_없으면_상한_없이_채운다(self):
-        _raw_day(self.root, DAY)
+        _raw_day(self.roots, DAY)
         rows, cov = R.read_range_filled(
-            self.root, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {},
+            self.roots, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {},
             gran='1h', deadline_sec=0)           # 0 = 상한 없음
         self.assertFalse(cov['deadline_hit'])
         self.assertEqual(cov['scanned'], 1)
@@ -245,40 +251,40 @@ class RawSourceGoneTest(unittest.TestCase):
     """
 
     def setUp(self):
-        self.root = tempfile.mkdtemp(prefix='rollup_raw_')
+        self.site, self.roots = _site('rollup_raw_')
 
     def tearDown(self):
-        shutil.rmtree(self.root, ignore_errors=True)
+        shutil.rmtree(self.site, ignore_errors=True)
 
     def test_원본이_없는_날은_빠진_날로_신고한다(self):
         rows, cov = R.read_range_filled(
-            self.root, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {}, gran='1h')
+            self.roots, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {}, gran='1h')
         self.assertEqual(cov['scanned'], 0, '훑을 원본이 없다')
         self.assertEqual(cov['missing'], 1)
         self.assertIn(DAY, cov['missing_days'])
 
     def test_원본이_있으면_빈_결과도_0_으로_받는다(self):
         """디렉터리는 있는데 호가 없던 날 — 이건 **진짜 0** 이라 신고 대상이 아니다."""
-        _raw_day(self.root, DAY)
+        _raw_day(self.roots, DAY)
         rows, cov = R.read_range_filled(
-            self.root, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {}, gran='1h')
+            self.roots, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {}, gran='1h')
         self.assertEqual(cov['missing'], 0)
         self.assertEqual(cov['scanned'], 1)
 
     def test_호_기록만_남은_날도_원본으로_친다(self):
         """원문 로그가 지워져도 호 기록(volte/)이 남아 있으면 되짚을 수 있다."""
-        os.makedirs(os.path.join(self.root, 'volte', DAY[0:4], DAY[5:7], DAY[8:10]))
+        os.makedirs(os.path.join(self.roots.recordings, 'volte', DAY[0:4], DAY[5:7], DAY[8:10]))
         _, cov = R.read_range_filled(
-            self.root, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {}, gran='1h')
+            self.roots, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {}, gran='1h')
         self.assertEqual(cov['missing'], 0)
 
     def test_반쪽_날만_원본이_없어도_그_날이_신고된다(self):
         """가운데 날은 1시간 계층이 온전히 덮고, 양 끝 반쪽만 원본이 필요하다."""
         d0, d1 = '2026-09-10', '2026-09-11'
-        _write(self.root, '1h', d1, _hours(d1))
-        _raw_day(self.root, d1)
+        _write(self.roots, '1h', d1, _hours(d1))
+        _raw_day(self.roots, d1)
         _, cov = R.read_range_filled(
-            self.root, f'{d0} 10:30:00', f'{d1} 23:59:59', {}, gran='1h')
+            self.roots, f'{d0} 10:30:00', f'{d1} 23:59:59', {}, gran='1h')
         self.assertIn(d0, cov['missing_days'], '원본이 없는 반쪽 날')
         self.assertNotIn(d1, cov['missing_days'], '계층으로 덮인 날')
 
@@ -331,15 +337,15 @@ class MarkMissingBucketsTest(unittest.TestCase):
 
     def test_구간_조회가_빠진_날_목록을_자르지_않는다(self):
         """40개로 자르면 41번째 날부터 다시 0 으로 그려진다(표가 이 목록으로 판정한다)."""
-        root = tempfile.mkdtemp(prefix='rollup_miss_')
+        site, roots = _site('rollup_miss_')
         try:
-            _, cov = R.read_range_filled(root, '2026-06-01 00:00:00',
+            _, cov = R.read_range_filled(roots, '2026-06-01 00:00:00',
                                          '2026-09-01 23:59:59', {}, gran='1d')
             self.assertEqual(cov['missing'], len(cov['missing_days']),
                              '신고한 수와 목록 길이가 같아야 한다')
             self.assertGreater(cov['missing'], 40)
         finally:
-            shutil.rmtree(root, ignore_errors=True)
+            shutil.rmtree(site, ignore_errors=True)
 
 
 class FutureDaysTest(unittest.TestCase):
@@ -352,16 +358,16 @@ class FutureDaysTest(unittest.TestCase):
     """
 
     def setUp(self):
-        self.root = tempfile.mkdtemp(prefix='rollup_future_')
+        self.site, self.roots = _site('rollup_future_')
         self.today = datetime.now().strftime('%Y-%m-%d')
         self.tomorrow = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
         self.next_week = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
 
     def tearDown(self):
-        shutil.rmtree(self.root, ignore_errors=True)
+        shutil.rmtree(self.site, ignore_errors=True)
 
     def test_미래_날은_빠진_날로_세지_않는다(self):
-        _, cov = R.read_range_filled(self.root, f'{self.tomorrow} 00:00:00',
+        _, cov = R.read_range_filled(self.roots, f'{self.tomorrow} 00:00:00',
                                      f'{self.next_week} 23:59:59', {}, gran='1d')
         self.assertEqual(cov['missing'], 0, '경고 대상이 아니다')
         self.assertEqual(cov['missing_days'], [])
@@ -371,14 +377,14 @@ class FutureDaysTest(unittest.TestCase):
     def test_과거의_결손은_그대로_신고한다(self):
         """미래를 가른다고 진짜 구멍까지 조용해지면 안 된다."""
         past = '2026-01-02'
-        _, cov = R.read_range_filled(self.root, f'{past} 00:00:00',
+        _, cov = R.read_range_filled(self.roots, f'{past} 00:00:00',
                                      f'{past} 23:59:59', {}, gran='1d')
         self.assertEqual(cov['missing'], 1)
         self.assertEqual(cov['future'], 0)
 
     def test_섞이면_각자의_칸으로_간다(self):
-        _raw_day(self.root, self.today)
-        _, cov = R.read_range_filled(self.root, '2026-01-02 00:00:00',
+        _raw_day(self.roots, self.today)
+        _, cov = R.read_range_filled(self.roots, '2026-01-02 00:00:00',
                                      f'{self.tomorrow} 23:59:59', {}, gran='1d')
         self.assertIn('2026-01-02', cov['missing_days'])
         self.assertNotIn(self.tomorrow, cov['missing_days'])
@@ -386,8 +392,8 @@ class FutureDaysTest(unittest.TestCase):
 
     def test_오늘은_미래가_아니다(self):
         """진행 중인 날은 남은 시간이 비어 있어도 '읽은 날' 이다(원본이 있다)."""
-        _raw_day(self.root, self.today)
-        _, cov = R.read_range_filled(self.root, f'{self.today} 00:00:00',
+        _raw_day(self.roots, self.today)
+        _, cov = R.read_range_filled(self.roots, f'{self.today} 00:00:00',
                                      f'{self.today} 23:59:59', {}, gran='1d')
         self.assertEqual(cov['future'], 0)
         self.assertEqual(cov['missing'], 0)

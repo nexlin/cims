@@ -50,7 +50,9 @@
           "type": "path",
           "default": "",
           "restart": true,
-          "help": "runs/<id>/{run.json,metrics.sqlite,events.jsonl,sip/} 가 쌓이는 곳. 토폴로지(topologies/)·운영자 시나리오·creds(scenarios/)도 여기 — 계측기 정의 전부가 이 디렉터리 하나를 따라간다. 옮긴 뒤 첫 기동 때 옛 관리 store 의 토폴로지는 자동으로 이어받고, scenarios/·runs/ 는 운영자가 복사한다. 비우면 배포본은 버전과 무관한 <모듈>/runtime/data(업그레이드에 살아남는다), 소스 트리 실행은 모듈 로컬 data/. 1초 버킷 지표라 관리 store(jsonl 레코드)가 아니라 별도 디렉터리다."
+          "help": "runs/<id>/{run.json,metrics.sqlite,events.jsonl,sip/} 가 쌓이는 곳. 토폴로지(topologies/)·운영자 시나리오·creds(scenarios/)도 여기 — 계측기 정의 전부가 이 디렉터리 하나를 따라간다. 옮긴 뒤 첫 기동 때 옛 관리 store 의 토폴로지는 자동으로 이어받고, scenarios/·runs/ 는 운영자가 복사한다. 비우면 사이트 디렉터리의 tester/(배포 때 base oam [사이트 디렉터리] 에서 채워진다). 사이트 디렉터리가 없는 사이트는 버전과 무관한 <모듈>/runtime/data(업그레이드에 살아남는다), 소스 트리 실행은 모듈 로컬 data/. 1초 버킷 지표라 관리 store(jsonl 레코드)가 아니라 별도 디렉터리다.",
+          "site_area": "tester",
+          "site_area_mode": "default"
         },
         {
           "key": "Tester.BaseOamUrl",

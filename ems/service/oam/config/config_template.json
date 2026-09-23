@@ -213,17 +213,58 @@
     },
     {
       "key": "logging",
-      "title": "서비스 로그",
-      "description": "CSP/CMP/CSC 와 공유하는 서비스 로그 루트 — stats(messages/leak)·flow·녹취 조회 + 알람(alert_log) 기록 위치. SIP 통계 1분 기저 집계도 이 아래 stats/1m/ 에 쌓인다.",
+      "title": "사이트 경로 · 통계",
+      "description": "oam-svc 가 쓰는 사이트 영역 — 관측 로그(log: SIP·flow 조회, 알람·이벤트 기록), 녹취 조회(recordings), 통계·색인(stats: 1분 기저 집계·PTT 색인), 진행 중 세션(state). base oam 사이트 디렉터리에서 유도된다(site_directory_layout.md).",
       "fields": [
         {
           "key": "ServiceLogging.Dir",
-          "label": "서비스 로그 루트",
+          "label": "서비스 로그 (log)",
           "type": "path",
           "default": "",
           "deploy_value": "@SERVICE_LOG_DIR@",
           "restart": true,
-          "help": "비우면 base oam.json 상속값 사용."
+          "help": "SIP·flow 5분 버킷(sip/)·알람(alerts/)·이벤트(events/)·FM 카탈로그(fm_catalog/). 사이트 디렉터리에서 유도된다 — 배포 때 base oam [사이트 디렉터리] 값으로 채워지고, 여기서 바꿔도 다시 채워진다.",
+          "site_area": "log"
+        },
+        {
+          "key": "Recording.Dir",
+          "label": "녹취 (recordings)",
+          "type": "path",
+          "default": "",
+          "site_area": "recordings",
+          "deploy_value": "@RECORD_DIR@",
+          "restart": true,
+          "help": "녹취·통화 기록 조회(volte/ ptt/ message/) — 이력·통계 원천. 사이트 디렉터리에서 유도된다 — 배포 때 base oam [사이트 디렉터리] 값으로 채워지고, 여기서 바꿔도 다시 채워진다."
+        },
+        {
+          "key": "Stats.Dir",
+          "label": "통계 (stats)",
+          "type": "path",
+          "default": "",
+          "site_area": "stats",
+          "deploy_value": "@STATS_DIR@",
+          "restart": true,
+          "help": "SIP 통계 1분 기저 집계(1m/ 1h/ 1d/ 1M/)·PTT 세션 색인(ptt_index/)·PTT 시도 장부(ptt_attempts/). 사이트 디렉터리에서 유도된다 — 배포 때 base oam [사이트 디렉터리] 값으로 채워지고, 여기서 바꿔도 다시 채워진다."
+        },
+        {
+          "key": "State.Dir",
+          "label": "상태 (state)",
+          "type": "path",
+          "default": "",
+          "site_area": "state",
+          "deploy_value": "@STATE_DIR@",
+          "restart": true,
+          "help": "진행 중 세션(volte/ ptt/)·집계 writer 잠금. 사이트 디렉터리에서 유도된다 — 배포 때 base oam [사이트 디렉터리] 값으로 채워지고, 여기서 바꿔도 다시 채워진다."
+        },
+        {
+          "key": "Content.Dir",
+          "label": "서비스 콘텐츠 (content)",
+          "type": "path",
+          "default": "",
+          "site_area": "content",
+          "deploy_value": "@CONTENT_DIR@",
+          "restart": true,
+          "help": "안내음성 라이브러리 등 콘텐츠 원본(announcements/). 사이트 디렉터리에서 유도된다 — 배포 때 base oam [사이트 디렉터리] 값으로 채워지고, 여기서 바꿔도 다시 채워진다."
         },
         {
           "key": "StatsRollup.Enabled",

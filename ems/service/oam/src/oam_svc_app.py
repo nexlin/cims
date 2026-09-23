@@ -208,9 +208,15 @@ if __name__ == '__main__':
             print('OAMSVC_PREFLIGHT_OK', flush=True)
             sys.exit(0)
 
-        # 비어 있으면 노드 로컬 (부트스트랩 직후 공유 마운트 부재는 정상) — paths 참조.
+        # 사이트 영역 경로 — services/paths 가 유일한 유도 규칙이다(site_directory_layout.md).
+        # 비어 있으면 노드 로컬 (부트스트랩 직후 공유 마운트 부재는 정상).
+        #   _service_log_dir = 관측 로그 영역(alerts/·events/·fm_catalog/ — 알람 sweeper·FM ingest)
         from services import paths as _paths
         _service_log_dir = _paths.service_log_dir(config)
+        _sip_log_dir = _paths.sip_log_dir(config)
+        _rec_dir = _paths.recordings_dir(config)
+        _state_dir = _paths.state_dir(config)
+        _stats_dir = _paths.stats_dir(config)
         _system_id = config.get("SystemId", "oam_svc_01")
 
         # 신뢰망(비정상 세션 탐지에서 '외부' 제외) — mgmt CIDR + config 공인 IP /24 + override.
@@ -231,18 +237,19 @@ if __name__ == '__main__':
             _trusted += list((config.get('Security') or {}).get('TrustedNets') or [])
         except Exception:
             pass
-        flow_logger.init(service_log_dir=_service_log_dir, system_id=_system_id,
+        flow_logger.init(sip_log_dir=_sip_log_dir, recordings_dir=_rec_dir, state_dir=_state_dir,
+                         system_id=_system_id,
                          db_config=config.get('CimsDatabase'), trusted_nets=_trusted)
-        csc_logger.init(service_log_dir=_service_log_dir, system_id=_system_id)
+        csc_logger.init(sip_log_dir=_sip_log_dir, system_id=_system_id)
         # PTT 세션 읽기 모델 — flow_logger 의 /ptt/history 가 ptt_index 를 소비하므로
         # oam-svc 도 base(oam_app)와 동일하게 초기화해야 한다. 미초기화면 빈 목록이 나온다.
         _ptt_idx_cfg = config.get('PttIndex') or {}
-        ptt_index.init(_service_log_dir, enabled=bool(_ptt_idx_cfg.get('Enabled', True)))
+        ptt_index.init(_rec_dir, _stats_dir, _state_dir, enabled=bool(_ptt_idx_cfg.get('Enabled', True)))
 
         # SIP 호·메시지 1분 기저 집계 — ptt_index 를 소비하므로 그 뒤에 초기화한다.
         # 끄면 조회가 원본 스캔으로 폴백한다(PttIndex 와 같은 되돌리기 규약).
         _rollup_cfg = config.get('StatsRollup') or {}
-        stats_rollup.init(_service_log_dir, config,
+        stats_rollup.init(stats_rollup.roots_of(config), config,
                           enabled=bool(_rollup_cfg.get('Enabled', True)))
 
         # verification (S1~S6) — tests 디렉토리 탐색
@@ -262,7 +269,7 @@ if __name__ == '__main__':
             _tx_workers = max(1, int(config.get('RecordingTranscodeWorkers', 2) or 2))
         except (TypeError, ValueError):
             _tx_workers = 2
-        recording.init(service_log_dir=_service_log_dir, ffmpeg_bin=_ffmpeg_bin,
+        recording.init(recordings_dir=_rec_dir, ffmpeg_bin=_ffmpeg_bin,
                        transcode_workers=_tx_workers)
 
         # SSL — 버전무관 runtime cert(modules/oam/runtime/cert) 우선(업그레이드 생존; oam_app
@@ -317,8 +324,8 @@ if __name__ == '__main__':
         # ── 서비스 알람 sweeper (alarm_standardization) ──────────────────
         # 서비스 계열 규칙(csp_down/cmp_down/db_down/rtp_high)의 평가·발화는 oam-svc 소유
         # (oam_base_service_split §4) — probe 대상·DB 가 이 모듈 설정이므로. base 는
-        # agent 계열(disk/module)만 평가. 저장(alert_log→ServiceLogging.Dir)·조회 API 는
-        # base 유지 — 같은 노드 동거 전제라 동일 디렉토리에 기록한다.
+        # agent 계열(disk/module)만 평가. 저장(alert_log→관측 로그 영역 alerts/)·조회 API 는
+        # base 유지 — 같은 사이트 디렉터리라 동일 디렉토리에 기록한다.
         from services import alarm_sweeper
         ALERT_SWEEP_INTERVAL = int(config.get('AlertSweepSec', 30))
         ALERT_RTP_THRESHOLD = int(config.get('AlertRtpThresholdPct', 80))

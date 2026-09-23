@@ -997,8 +997,8 @@ static std::string TimeToSql( time_t t ) {
     return buf;
 }
 
-// v3 (2026-04-22): Call/PTT log 는 파일 기반 (service_log/{type}/YYYY/MM/DD/HH/.../*.d/call.json) 이 SOT.
-//   CspServer 의 CCallDir 가 파일 작성, CSC 의 /api/v1/call/logs 가 파일 스캔.
+// Call/PTT log 는 파일 기반(녹취 영역 <recordings>/{volte|ptt}/…/call.json·session.json)이 SOT.
+//   CspServer 의 CCallDir 가 파일 작성, OAM 이력·통계가 파일 스캔.
 //   아래 DbManager 함수들은 레거시 호환 no-op (빌드/링크 유지용).
 
 bool CDbManager::InsertCallLog( const std::string &, bool, const std::string &, const std::string &,

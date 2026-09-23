@@ -1,9 +1,9 @@
 """
-csc_logger.py — CSC 서비스 로그 + 메시지 로그 유틸리티 (통합 포맷)
+logger.py — OAM 서비스 로그 + 메시지 로그 유틸리티 (통합 포맷)
 
-신 포맷 (5분 버킷·open-per-write — CSP/CMP 와 동일; mm5=00/05/.../55):
-  Flow: {ServiceLogDir}/YYYY/MM/DD/HH/csc_01.flow.{mm5}.jsonl
-  Msg : {ServiceLogDir}/YYYY/MM/DD/HH/csc_01_{iface}.msg.{mm5}.jsonl
+5분 버킷·open-per-write — CSP/CMP/CSC 와 동일; mm5=00/05/.../55, 루트 = {ServiceLogging.Dir}/sip:
+  Flow: {ServiceLogging.Dir}/sip/YYYY/MM/DD/HH/{system_id}.flow.{mm5}.jsonl
+  Msg : {ServiceLogging.Dir}/sip/YYYY/MM/DD/HH/{system_id}_{iface}.msg.{mm5}.jsonl
 
 공통 키: ts, node, service, from, to, proto, method, detail, mid, sesid, subid, seq, iface
 
@@ -18,7 +18,7 @@ import threading
 import collections
 from datetime import datetime
 
-_service_log_dir: str = ""
+_sip_dir: str = ""        # {ServiceLogging.Dir}/sip (services/paths.sip_log_dir)
 _system_id: str = "csc_01"
 _lock = threading.Lock()
 
@@ -118,9 +118,9 @@ _sesid_counter: int = 0
 _sesid_cache: dict = {}
 
 
-def init(service_log_dir: str = "", system_id: str = "csc_01"):
-    global _service_log_dir, _system_id, _seq_map
-    _service_log_dir = service_log_dir or ""
+def init(sip_log_dir: str = "", system_id: str = "csc_01"):
+    global _sip_dir, _system_id, _seq_map
+    _sip_dir = sip_log_dir or ""
     _system_id = system_id or "csc_01"
     _seq_map = {}
     _start_writer()  # 비동기 배치 writer 기동 (1회)
@@ -179,7 +179,7 @@ def _ensure_dir(path: str):
 
 
 # 로그 목적지 미가용(부트스트랩 직후 NAS 미마운트 등) 억제 상태.
-#   `ServiceLogging.Dir` 은 보통 공유 스토리지를 가리키는데, **콘솔에서 마운트를 붙이기
+#   사이트 디렉터리는 보통 공유 스토리지를 가리키는데, **콘솔에서 마운트를 붙이기
 #   전까지는 그 경로가 없는 것이 정상**이다(마운트 추가 기능 자체가 콘솔에 있다).
 #   그런데 기록 실패를 요청마다 예외로 올리면 호출부가 매 요청 ERROR 를 찍어 로그가
 #   분당 수백 건으로 덮인다(실측: 17분간 분당 ~400건). 진짜 문제를 찾을 통로가 그걸로
@@ -225,10 +225,10 @@ def _ymdh():
 
 
 def _hour_dir() -> str:
-    if not _service_log_dir:
+    if not _sip_dir:
         return ""
     yyyy, mm, dd, hh = _ymdh()
-    d = os.path.join(_service_log_dir, yyyy, mm, dd, hh)
+    d = os.path.join(_sip_dir, yyyy, mm, dd, hh)
     if not _dest_ready(d):
         return ""            # 호출부는 빈 문자열이면 기록을 건너뛴다
     return d
@@ -270,12 +270,12 @@ def log_flow(service: str,
               callee: str = ""):
     """CSC의 flow + msg 이중 기록.
 
-    - Flow: csc_01.flow.jsonl (경량, body 없음)
-    - Msg : csc_01_{iface}.msg.jsonl (원문 포함) — seq로 flow와 상관
+    - Flow: {system_id}.flow.{mm5}.jsonl (경량, body 없음)
+    - Msg : {system_id}_{iface}.msg.{mm5}.jsonl (원문 포함) — seq로 flow와 상관
     - 모든 값이 빈 문자열이면 해당 key 생략
     - sesid 없으면 자동 발행 (caller 파라미터로 발신 MSISDN 전달 권장)
     """
-    if not _service_log_dir:
+    if not _sip_dir:
         return
 
     hour_dir = _hour_dir()
@@ -367,26 +367,3 @@ def log_console(method: str, caller: str = "", peer: str = "",
              proto=proto, method=method,
              detail=detail, peer=peer, iface="ue",
              caller=caller, body=body)
-
-
-def log_ptt_participant(group_id: str, user_id: str, action: str):
-    """레거시: PTT participants.jsonl 기록. 유지 (필요 시 호출부에서 제거)."""
-    if not _service_log_dir or not group_id:
-        return
-    yyyy, mm, dd, hh = _ymdh()
-
-    def _sanitize(s: str, max_len: int = 20) -> str:
-        r = ''.join('_' if c in '/\\:*?"<>| ' else c for c in s)
-        return r[:max_len]
-
-    sg = _sanitize(group_id)
-    dir_path = os.path.join(_service_log_dir, "ptt", yyyy, mm, dd, hh,
-                             sg[:-2] if len(sg) > 2 else sg, sg + ".d")
-    _ensure_dir(dir_path)
-    entry = {
-        "msisdn": user_id,
-        "action": action,
-        "time": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
-    }
-    with open(os.path.join(dir_path, "participants.jsonl"), "a") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")

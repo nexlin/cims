@@ -137,11 +137,12 @@ public:
     void Stop() {
         if ( !m_ctx ) return;
         Ctx &ctx = *m_ctx;
+        // 드레인은 worker 가 도는 동안 기다린다 — bRun 을 먼저 내리면 worker 가 남은 op 를 두고 루프를 빠진다.
+        if ( ctx.bRun.load() && !ctx.bDegraded.load() ) Flush( kSowStopWaitMs );
         if ( !ctx.bRun.exchange( false ) ) {
             if ( m_thread.joinable() ) m_thread.join();
             return;
         }
-        if ( !ctx.bDegraded.load() ) Flush( kSowStopWaitMs );
         ctx.cv.notify_all();
         for ( int i = 0; i < kSowStopWaitMs / 100 && !ctx.bExited.load(); i++ ) {
             std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );

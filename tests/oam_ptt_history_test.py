@@ -17,6 +17,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, 'ems/core/oam/src'))
 
 import services.flow_logger as fl  # noqa: E402
+import services.ptt_index as ptt_index  # noqa: E402
 
 PASS = FAIL = 0
 
@@ -72,7 +73,9 @@ def main():
     global PASS, FAIL
     tmp = tempfile.mkdtemp(prefix='cims_ptt_hist_')
     try:
-        fl._calls_dir = tmp
+        # 녹취 영역 = tmp (ptt/{그룹}/), 색인·상태는 형제 영역 — site_directory_layout.md
+        fl.init(recordings_dir=tmp)
+        ptt_index.init(tmp, os.path.join(tmp, '_stats'), os.path.join(tmp, '_state'))
 
         _mk(tmp, '7', {
             'id': 7, 'mcptt_group_id': 'g001', 'name': '1소대 지휘망',

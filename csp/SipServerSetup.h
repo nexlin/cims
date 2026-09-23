@@ -241,10 +241,7 @@ public:
     /** 로그 폴더 */
     std::string m_strLogFolder;
 
-    /** 메시지 로그 디렉터리 — 인터페이스별 통계용 (빈 값이면 비활성화) */
-    std::string m_strMsgLogDir;
-
-    /** 서비스 로그 디렉터리 — 통화 이력/Flow/녹취용 (빈 값이면 비활성화) */
+    /** 서비스 로그 영역(log) 루트 — SIP/Flow 5분 버킷은 그 아래 sip/ (빈 값이면 비활성화) */
     std::string m_strServiceLogDir;
 
     /** 서비스 로그 로컬 스풀 디렉터리 — Dir(NAS 가능) 무응답 시 폴백 저장소.
@@ -410,9 +407,11 @@ public:
     int m_iOverlayKeys = 0;        // 적용된 키 개수
 
     // ================================================================
-    // 녹취 설정
+    // 녹취·통화 기록 (사이트 영역 — site_directory_layout.md)
     bool m_bRecordEnable;
-    std::string m_strRecordDir;  // NAS 마운트 경로 (raw + converted 공유)
+    std::string m_strRecordDir;  // 녹취·통신 기록 영역(recordings) — volte/ ptt/<그룹>/ message/ message_direct/
+    std::string m_strStateDir;   // 휘발성 상태 영역(state) — volte/ ptt/ 가입자별 진행 중 세션 + write probe
+    std::string m_strStatsDir;   // 통계 영역(stats) — ptt_attempts/<일>.jsonl (PTT 시도 장부)
 
     // ================================================================
     // 보안 기능

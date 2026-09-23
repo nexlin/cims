@@ -83,7 +83,7 @@ RTP 패킷 수신 (리액터 스레드)
 
 CMP는 트랜스코딩을 **절대 하지 않음**. raw 파일만 저장하고 서비스 루프에 영향 없음.
 
-**저장 경로(NAS) 무의존 계약** — RecordDir 가 NFS hard mount 여도 미디어 평면은 막히지
+**저장 경로(NAS) 무의존 계약** — 녹취 영역(`Recording.Dir`)이 NFS hard mount 여도 미디어 평면은 막히지
 않는다 (flow_logging.md §2 와 같은 원리, 단 재생 불가 연산이라 스풀이 없다):
 
 - RTP 리액터/제어 스레드는 트랙 상태·메타를 메모리에서만 관리하고 저장 연산을 op 로
@@ -123,7 +123,7 @@ PTT 녹취는 세션 단위 단일 파일로 기록 (화자 변경과 무관하�
 
 **파일 구조 (시간버킷 → 세션):** 기록 단위는 **세션**이다. 시간버킷은 그 위의 시간 축이다.
 ```
-{ServiceLogDir}/ptt/{id}/                       # id = ptt_groups.id (surrogate, mcptt_group_id 아님)
+{Recording.Dir}/ptt/{id}/                       # id = ptt_groups.id (surrogate, mcptt_group_id 아님)
   ├── group.json                                # 그룹 디스크립터 (CSP, base 1개) — 최신 편성 스냅샷
   └── {YYYY}/{MM}/{DD}/{HH}/                     # 시간버킷 (시간검색) — VoLTE 관례와 통일
       └── S{yyyymmddHHMMSSuuuuuu}_{n}/           # 세션 디렉터리 — 이름은 sesid 에서 유도
@@ -242,7 +242,8 @@ CMP는 보통 **원격 미디어 노드**(media01/02)에서 동작하고, 조회
 양쪽이 **동일한 공유 스토리지(NFS)** 를 같은 절대경로로 마운트해야 녹취가 한 곳에 모인다.
 
 - 마운트: `NAS:/export → /mnt/cims` (4서버 공통, 동일 절대경로 필수)
-- `ServiceLogDir = /mnt/cims/service_log` (csp/cmp/oam 공통). CSP가 `RELAY_ADD`/`PTT_GROUP_ADD` JSON에
+- 녹취 영역 `Recording.Dir` = `<CimsSiteDir>/recordings` — base oam 사이트 디렉터리에서 유도되고 csp/cmp/oam/csc 가
+  같은 값을 받는다([site_directory_layout.md](site_directory_layout.md)). CSP가 `RELAY_ADD`/`PTT_GROUP_ADD` JSON에
   **절대경로 record_dir**(세션 `.d`)을 실어 보내고, 원격 CMP가 그 경로(=NAS)에 seg를 기록 →
   OAM이 같은 NAS 경로를 스캔해 조회·변환.
 - 녹취 파일은 한 세션 `.d` 디렉토리에 공존:
@@ -360,7 +361,7 @@ leg 마다 다르므로(UE 동적 96, cspsim 99, 이종 단말 혼재) 변환기
 ## 4. 파일 저장 구조
 
 > **실제 on-disk 구조는 §3.3 참조**:
-> VoLTE=`volte/YYYY/MM/DD/HH/.../*.d/`, PTT=`ptt/{id}/{YYYY}/{MM}/{DD}/{HH}/seg/{NNN}/` (시간버킷+shard).
+> 녹취 영역(`Recording.Dir`) 아래 VoLTE=`volte/YYYY/MM/DD/HH/.../*.d/`, PTT=`ptt/{id}/{YYYY}/{MM}/{DD}/{HH}/seg/{NNN}/` (시간버킷+shard).
 > 변환 mp4(`seg_NNNN.mp4`)는 원본 옆(.d/window 디렉터리)에 캐시된다. 아래는 raw/converted 분리의 개념 레이아웃이다.
 
 ```
@@ -629,7 +630,7 @@ PTT 세션 행에는 세션 당시 floor 축(`floor_control`/`floor_policy`/`max
 목록의 출처는 녹취를 직접 훑은 결과가 아니라 **일자별 인덱스**다.
 
 ```
-{ServiceLogDir}/ptt/index/YYYYMMDD.jsonl      세션 1건 = 1줄 (세션 시작일 기준)
+{Stats.Dir}/ptt_index/YYYYMMDD.jsonl      세션 1건 = 1줄 (세션 시작일 기준)
 ```
 
 | | |
@@ -637,7 +638,7 @@ PTT 세션 행에는 세션 당시 floor 축(`floor_control`/`floor_policy`/`max
 | 소유 | OAM `services/ptt_index` — 지표(발언 턴·발화)가 CMP 의 `segments.jsonl` 에 있어 CSP 는 쓸 수 없다. 읽는 쪽이 읽기 모델을 소유하면 writer 가 하나다 |
 | 지난 날짜 | 파일이 없으면 그 날짜 버킷만 스캔해 1회 생성, 이후 불변 |
 | 오늘 | 스위퍼가 주기적으로 오늘 버킷만 재스캔해 원자적 교체 (`PttIndex.Interval`, 기본 30초) |
-| 진행중 | 인덱스에 넣지 않는다 — 종료돼야 확정된다. `state/ptt/*.json` 의 `record_dir` 로 실시간 도출 |
+| 진행중 | 인덱스에 넣지 않는다 — 종료돼야 확정된다. 상태 영역 `ptt/*.json`(`State.Dir`)의 `record_dir` 로 실시간 도출 |
 | 되돌리기 | `oam.json` 의 `PttIndex.Enabled=false` → 종전처럼 녹취 직접 스캔 |
 
 **녹취가 정본이고 인덱스는 파생물이다** — 지우면 다음 조회에서 다시 만들어진다. 종전에는

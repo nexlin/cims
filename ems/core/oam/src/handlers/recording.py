@@ -1,11 +1,12 @@
 """
 CIMS Recording REST API  (파일시스템 기반 — DB 미사용)
 
-녹취 메타/파일 구조:
-  VoIP: {ServiceLogDir}/voip/YYYY/MM/DD/HH/{prefix}/{caller}/{session}.d/
-        call.json, segments.jsonl, seg_NNNN.json, seg_NNNN_a.rtp, seg_NNNN_b.rtp
-  PTT:  {ServiceLogDir}/ptt/{groupId}/sessions/{key}.d/
-        session.json, events.jsonl, recordings/ (segments.jsonl, seg_NNNN.json, seg_NNNN_audio.rtp)
+녹취 메타/파일 구조 (녹취 영역 = Recording.Dir — services/paths, site_directory_layout.md):
+  VoLTE: {Recording.Dir}/volte/YYYY/MM/DD/HH/{prefix}/{caller}/{session}.d/
+         call.json, segments.jsonl, seg_NNNN.json, seg_NNNN_a.rtp, seg_NNNN_b.rtp
+  PTT:   {Recording.Dir}/ptt/{groupKey}/YYYY/MM/DD/HH/{S…_N}/
+         session.json, events.jsonl, floor.jsonl, segments.jsonl, seg_NNNN.json, seg_NNNN_*.rtp
+  녹취 id = 녹취 영역 기준 상대경로 (volte/… · ptt/…)
 
 변환 상태 판별 (파일 존재 기반):
   .rtp.recording  → recording (녹취 중)
@@ -48,8 +49,8 @@ _transcoding_mutex = threading.Lock()
 _transcode_executor = None
 _transcode_workers = 2
 
-# ServiceLogDir — init()에서 설정
-_service_log_dir = ''
+# 녹취 영역(Recording.Dir) — init()에서 설정
+_rec_dir = ''
 
 # 변환툴(ffmpeg) 경로 — init()에서 결정.
 # raw RTP → mp4/wav 변환에 필요. air-gapped(private) 환경에서는 시스템 PATH 에
@@ -74,9 +75,9 @@ def _resolve_ffmpeg(ffmpeg_bin: str = '') -> str:
     return 'ffmpeg'
 
 
-def init(service_log_dir: str = '', ffmpeg_bin: str = '', transcode_workers: int = 2):
-    global _service_log_dir, _FFMPEG, _transcode_executor, _transcode_workers
-    _service_log_dir = service_log_dir
+def init(recordings_dir: str = '', ffmpeg_bin: str = '', transcode_workers: int = 2):
+    global _rec_dir, _FFMPEG, _transcode_executor, _transcode_workers
+    _rec_dir = recordings_dir
     _FFMPEG = _resolve_ffmpeg(ffmpeg_bin)
     if _FFMPEG == 'ffmpeg' and not shutil.which('ffmpeg'):
         logger.warning("ffmpeg 변환툴을 찾지 못함 — 녹취 재생(raw RTP→mp4 변환) 불가. "
@@ -341,8 +342,8 @@ def _read_jsonl(path: str) -> list:
 
 def _scan_voip_sessions(base: str, caller: str = '', from_dt: str = '', to_dt: str = '',
                         limit: int = 200, offset: int = 0):
-    """VoIP 세션 디렉터리를 스캔하여 녹취 목록 반환.
-    디렉터리: {base}/voip/YYYY/MM/DD/HH/{prefix}/{caller}/{session}.d/
+    """VoLTE 세션 디렉터리를 스캔하여 녹취 목록 반환.
+    디렉터리: {base}/volte/YYYY/MM/DD/HH/{prefix}/{caller}/{session}.d/
     """
     voip_root = os.path.join(base, 'volte')
     if not os.path.isdir(voip_root):
@@ -1352,8 +1353,7 @@ def _parse_rec_route(parts: tuple):
 
 
 async def handle_recordings(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
-    config = kwargs.get('config', {})
-    base = config.get('ServiceLogDir', _service_log_dir)
+    base = _rec_dir
     # query string 은 full_path 가 아니라 query_params dict 로 전달된다 (이미 URL-decode).
     qs = handler_args.query_params or {}
     parts = _path_parts(handler_args.full_path, _REC_BASE)

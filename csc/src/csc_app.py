@@ -157,19 +157,13 @@ if __name__ == '__main__':
 
         _signal.signal(_signal.SIGUSR1, _on_usr1)
 
-        # ServiceLogging 설정 (신규 통합)
-        #   비어 있으면 **노드 로컬**로 해석한다 — 공유 마운트를 붙이기 전(부트스트랩
-        #   직후)에는 그 경로가 없는 것이 정상이라, 없는 공유 경로를 붙들고 기록 실패를
-        #   반복하는 대신 로컬에라도 남긴다. 공유 경로는 배포 overlay 가 정한다.
+        # 사이트 영역 경로 — 배포본은 OAM 실체화가 base oam 사이트 디렉터리에서 유도한 값을 준다
+        #   (services/site_paths — 비어 있으면 단일 루트 레이아웃, 로그는 **노드 로컬**: 공유 마운트를
+        #   붙이기 전(부트스트랩 직후)에는 그 경로가 없는 것이 정상이라, 없는 공유 경로를 붙들고
+        #   기록 실패를 반복하는 대신 로컬에라도 남긴다).
+        from services import site_paths as _site
         sl = config.get("ServiceLogging", {})
-        _service_log_dir = str(sl.get("Dir", "") or "").strip()
-        # 레거시 호환
-        if not _service_log_dir:
-            _service_log_dir = str(config.get("ServiceLogDir",
-                                              config.get("MsgLogDir", "")) or "").strip()
-        if not _service_log_dir:
-            _service_log_dir = os.path.normpath(
-                os.path.join(_COMPONENT_ROOT, '..', '..', 'runtime', 'service_log'))
+        _service_log_dir = _site.log_dir(config)
         _system_id = config.get("SystemId", "csc_01")
 
         # flow_logger(통화이력/flow API)는 oam-svc 책임 — csc 는 미서빙(FLOW_HANDLER_LIST

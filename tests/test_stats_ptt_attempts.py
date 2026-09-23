@@ -31,9 +31,9 @@ from services import stats_rollup as R  # noqa: E402
 DAY = '2026-09-15'
 
 
-def _ledger(root, rows):
-    """CSP 가 쓰는 장부를 흉내낸다 — 경로 규약은 sip_statistics.md §3."""
-    d = os.path.join(root, 'ptt', 'attempts')
+def _ledger(stats, rows):
+    """CSP 가 쓰는 장부를 흉내낸다 — `{Stats.Dir}/ptt_attempts/YYYYMMDD.jsonl` (sip_statistics.md §3)."""
+    d = os.path.join(stats, 'ptt_attempts')
     os.makedirs(d, exist_ok=True)
     with open(os.path.join(d, DAY.replace('-', '') + '.jsonl'), 'w', encoding='utf-8') as f:
         for r in rows:
@@ -47,8 +47,8 @@ def _att(ts, outcome, reason='', status=0, caller='u1'):
 
 class PttAttemptLedgerTest(unittest.TestCase):
     def setUp(self):
-        self.root = tempfile.mkdtemp(prefix='ptt-att-')
-        # 스캐너는 **root 를 인자로** 받는다 — 모듈 전역은 집계 주체(oam-svc)만 설정하므로
+        self.root = tempfile.mkdtemp(prefix='ptt-att-')      # 통계 영역(Stats.Dir) 자리
+        # 스캐너는 **통계 영역을 인자로** 받는다 — 모듈 전역은 집계 주체(oam-svc)만 설정하므로
         # 조회 프로세스(oam base)에서는 비어 있다. 그 회귀를 이 시험이 막는다.
 
     def tearDown(self):
@@ -118,7 +118,7 @@ class PttAttemptLedgerTest(unittest.TestCase):
 
     def test_반쪽_줄은_건너뛴다(self):
         """CSP 가 쓰는 중인 줄을 만나도 그 구간 전체를 버리지 않는다."""
-        d = os.path.join(self.root, 'ptt', 'attempts')
+        d = os.path.join(self.root, 'ptt_attempts')
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, DAY.replace('-', '') + '.jsonl'), 'w', encoding='utf-8') as f:
             f.write(json.dumps(_att(f'{DAY}T09:00:01', 'established')) + '\n')

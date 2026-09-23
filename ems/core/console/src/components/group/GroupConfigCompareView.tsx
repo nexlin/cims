@@ -567,7 +567,8 @@ export function GroupConfigCompareView({ group, members: liveMembers,
  footer={sec.key === 'store'
                     ? <StoreMigrateFooter groupId={group.id}
  mountPoint={String(formValues['CimsRuntimeMount'] ?? '')}
- dirty={changed.has('CimsRuntimeMount')}
+ siteDir={String(formInitial['CimsSiteDir'] ?? '')}
+ dirty={changed.has('CimsRuntimeMount') || changed.has('CimsSiteDir')}
  onDone={load} />
                     : undefined} />
               ))}

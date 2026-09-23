@@ -28,7 +28,6 @@
 #include "CspPttGroup.h"
 #include "CspRole.h"
 #include "FmReporter.h"
-#include "RecordPath.h"
 #include "RtpMap.h"
 #include "SipCodecTable.h"
 #include "SipMessage.h"

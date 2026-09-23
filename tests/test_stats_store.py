@@ -36,12 +36,18 @@ def _rows(*buckets):
 class StoreBase(unittest.TestCase):
     def setUp(self):
         S._reset_for_test()
-        self.root = tempfile.mkdtemp(prefix='stats_store_')
-        self.st = S.for_root(self.root)
+        self.site = tempfile.mkdtemp(prefix='stats_store_')
+        # 사이트 디렉터리 하나에서 영역을 유도한다(services/paths) — 통계·상태·녹취·로그가 형제다.
+        self.roots = R.roots_of({'CimsSiteDir': self.site})
+        self.st = S.for_root(self.roots.stats, lock_dir=self.roots.state)
 
     def tearDown(self):
         S._reset_for_test()
-        shutil.rmtree(self.root, ignore_errors=True)
+        shutil.rmtree(self.site, ignore_errors=True)
+
+    def _other(self):
+        """다른 프로세스를 흉내낸 별도 인스턴스 — 같은 사이트(같은 통계·상태 영역)."""
+        return S.FileStatsStore(self.roots.stats, self.roots.state)
 
 
 class SingleWriterTest(StoreBase):
@@ -50,7 +56,7 @@ class SingleWriterTest(StoreBase):
         self.assertTrue(ok1)
         self.assertEqual(why1, 'ok', 'tmpfs 에서 flock 이 강제되어야 한다')
 
-        other = S.FileStatsStore(self.root)      # 다른 프로세스를 흉내낸 별도 인스턴스
+        other = self._other()
         ok2, why2 = other.acquire_writer()
         self.assertFalse(ok2)
         self.assertEqual(why2, 'held_by_other')
@@ -58,13 +64,24 @@ class SingleWriterTest(StoreBase):
     def test_놓으면_다음이_잡는다(self):
         self.assertTrue(self.st.acquire_writer()[0])
         self.st.release_writer()
-        other = S.FileStatsStore(self.root)
+        other = self._other()
         self.assertTrue(other.acquire_writer()[0], '놓았는데 못 잡으면 죽은 보유자가 영구 점유')
         other.release_writer()
 
     def test_같은_루트는_같은_인스턴스(self):
-        self.assertIs(S.for_root(self.root), S.for_root(self.root),
+        self.assertIs(S.for_root(self.roots.stats), S.for_root(self.roots.stats),
                       '루트마다 하나로 묶지 않으면 자기 자신과 잠금을 다툰다')
+
+    def test_잠금은_상태_영역에_있다(self):
+        self.assertTrue(self.st.acquire_writer()[0])
+        self.assertTrue(os.path.isfile(os.path.join(self.roots.state, 'stats_rollup.lock')))
+        self.assertFalse(os.path.exists(os.path.join(self.roots.stats, 'stats_rollup.lock')),
+                         '통계 영역에는 집계만 둔다')
+
+    def test_잠금_위치가_없으면_writer_가_아니다(self):
+        """조회용 인스턴스(lock_dir 없음)는 집계를 쓰지 않는다."""
+        reader = S.FileStatsStore(self.roots.stats)
+        self.assertEqual(reader.acquire_writer(), (False, 'no_lock_dir'))
 
     def test_두_번_잡아도_된다(self):
         self.assertTrue(self.st.acquire_writer()[0])
@@ -73,37 +90,37 @@ class SingleWriterTest(StoreBase):
 
 class RollupWriterGateTest(StoreBase):
     def test_권한_없으면_집계를_건너뛴다(self):
-        holder = S.FileStatsStore(self.root)     # 다른 배포본이 먼저 쥔 상황
+        holder = self._other()                   # 다른 배포본이 먼저 쥔 상황
         self.assertTrue(holder.acquire_writer()[0])
         try:
             R._WRITER_NOTED['reason'] = None
-            R.init(self.root, {}, enabled=True)
+            R.init(self.roots, {}, enabled=True)
             out = R.run_once()
             self.assertIn('skipped', out)
             self.assertTrue(out['skipped'].startswith('not_writer'), out)
         finally:
             holder.release_writer()
-            R.init('', {}, enabled=False)
+            R.init(None, {}, enabled=False)
 
     def test_권한_없으면_수동_재생성도_안_한다(self):
-        holder = S.FileStatsStore(self.root)
+        holder = self._other()
         self.assertTrue(holder.acquire_writer()[0])
         try:
             R._WRITER_NOTED['reason'] = None
-            R.init(self.root, {}, enabled=True)
+            R.init(self.roots, {}, enabled=True)
             self.assertEqual(R.rebuild_range(DAY, DAY), 0)
         finally:
             holder.release_writer()
-            R.init('', {}, enabled=False)
+            R.init(None, {}, enabled=False)
 
     def test_권한이_없어도_조회는_된다(self):
         """집계를 안 쓰는 쪽도 상대가 만든 값을 그대로 읽어야 한다."""
         self.st.replace_day('1h', DAY, _rows(f'{DAY} 00:00', f'{DAY} 01:00'))
-        holder = S.FileStatsStore(self.root)
+        holder = self._other()
         self.assertTrue(holder.acquire_writer()[0])
         try:
             rows, cov = R.read_range_filled(
-                self.root, f'{DAY} 00:00:00', f'{DAY} 01:59:59', {}, gran='1h')
+                self.roots, f'{DAY} 00:00:00', f'{DAY} 01:59:59', {}, gran='1h')
             self.assertEqual(len(rows), 2)
             self.assertEqual(cov['by_unit'].get('1h'), 1)
         finally:
@@ -179,7 +196,7 @@ class EndToEndTest(StoreBase):
     단위 시험은 다 통과해도 운영에서 통계가 빈다."""
 
     def _seed_call(self, day, hour, minute):
-        d = os.path.join(self.root, 'volte', day[0:4], day[5:7], day[8:10],
+        d = os.path.join(self.roots.recordings, 'volte', day[0:4], day[5:7], day[8:10],
                          f'{hour:02d}', 'p', 'caller', 'c1.d')
         os.makedirs(d, exist_ok=True)
         import json as _j
@@ -192,7 +209,7 @@ class EndToEndTest(StoreBase):
     def test_원본에서_집계가_저장소까지_들어간다(self):
         self._seed_call(DAY, 10, 5)
         R._WRITER_NOTED['reason'] = None
-        R.init(self.root, {}, enabled=True)
+        R.init(self.roots, {}, enabled=True)
         try:
             n = R.rebuild_range(DAY, DAY)
             self.assertGreater(n, 0, '버킷이 하나도 안 만들어졌다')
@@ -211,11 +228,11 @@ class EndToEndTest(StoreBase):
 
             # 조회가 그 값을 돌려주는가
             got, cov = R.read_range_filled(
-                self.root, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {}, gran='1h')
+                self.roots, f'{DAY} 00:00:00', f'{DAY} 23:59:59', {}, gran='1h')
             _b, totals = R.aggregate(got, '1h', 'volte')
             self.assertEqual(totals['volte']['attempts'], 1)
         finally:
-            R.init('', {}, enabled=False)
+            R.init(None, {}, enabled=False)
 
 
 class NoRootTest(unittest.TestCase):

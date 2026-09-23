@@ -356,25 +356,25 @@ class HistoryWindowTests(unittest.TestCase):
         self.t.group_msg("g002", "+82510002001", "new", minutes_ago=2, msg_id="n")
         since = self.t.now - timedelta(minutes=30)
         until = self.t.now - timedelta(minutes=10)
-        items, _ = dh.query(self.t.sl, "message", self._scope(ptt=["g002"]), since, 100, until)
+        items, _ = dh.query(self.t.rec, self.t.state, "message", self._scope(ptt=["g002"]), since, 100, until)
         self.assertEqual([x["text"] for x in items], ["mid"])
 
     def test_recording_id_and_flag(self):
         self.t.ptt("g002", "ses-1", "+82510002001")
         self.t.call("call-A", "+821310002001", "+821310009999")
-        items, _ = dh.query(self.t.sl, "ptt", self._scope(ptt=["g002"]), None, 10)
+        items, _ = dh.query(self.t.rec, self.t.state, "ptt", self._scope(ptt=["g002"]), None, 10)
         p = items[0]
         self.assertTrue(p["recordingId"].startswith("ptt/1/"))
         self.assertRegex(p["recordingId"], r'^ptt/1/\d{4}/\d{2}/\d{2}/\d{2}/S1$')
         self.assertFalse(p["hasRecording"])
         # segments.jsonl 이 생기면 녹취 있음
-        with open(os.path.join(self.t.sl, p["recordingId"], "segments.jsonl"), "w") as f:
+        with open(os.path.join(self.t.rec, p["recordingId"], "segments.jsonl"), "w") as f:
             f.write("{}\n")
-        items, _ = dh.query(self.t.sl, "ptt", self._scope(ptt=["g002"]), None, 10)
+        items, _ = dh.query(self.t.rec, self.t.state, "ptt", self._scope(ptt=["g002"]), None, 10)
         self.assertTrue(items[0]["hasRecording"])
         w = dh.format_item(items[0])
         self.assertEqual(w["recordingId"], p["recordingId"]); self.assertTrue(w["hasRecording"])
-        c = dh.query(self.t.sl, "call", self._scope(members=["+821310002001"]), None, 10)[0][0]
+        c = dh.query(self.t.rec, self.t.state, "call", self._scope(members=["+821310002001"]), None, 10)[0][0]
         self.assertRegex(c["recordingId"], r'^volte/\d{4}/\d{2}/\d{2}/\d{2}/.+/call-A\.d$')
         self.assertEqual(dh.format_item({"kind": "call", "ts": "t", "id": "x"})["recordingId"], "")
 
@@ -473,21 +473,21 @@ class RecordingsTests(unittest.TestCase):
         t.ptt("g002", "ses-1", "+82510002001")
         t.call("call-A", "+821310002001", "+821310009999")
         scope = {"members": {"+821310002001"}, "ptt_groups": {"g002"}}
-        rec_ptt = dh.query(t.sl, "ptt", dict(scope, roleId="role-1"), None, 10)[0][0]["recordingId"]
-        rec_call = dh.query(t.sl, "call", dict(scope, roleId="role-1"), None, 10)[0][0]["recordingId"]
-        self.assertTrue(dr.in_scope(t.sl, rec_ptt, scope, {"1": "g002"}))       # surrogate → mcptt id
-        self.assertTrue(dr.in_scope(t.sl, rec_ptt, scope, {}))                   # session.json 대조 폴백
-        self.assertFalse(dr.in_scope(t.sl, rec_ptt, {"members": set(), "ptt_groups": {"g009"}}, {"1": "g002"}))
-        self.assertTrue(dr.in_scope(t.sl, rec_call, scope, {}))
-        self.assertFalse(dr.in_scope(t.sl, rec_call, {"members": {"+8213107777"}, "ptt_groups": set()}, {}))
-        self.assertFalse(dr.in_scope(t.sl, "message/x", scope, {}))
+        rec_ptt = dh.query(t.rec, t.state, "ptt", dict(scope, roleId="role-1"), None, 10)[0][0]["recordingId"]
+        rec_call = dh.query(t.rec, t.state, "call", dict(scope, roleId="role-1"), None, 10)[0][0]["recordingId"]
+        self.assertTrue(dr.in_scope(t.rec, rec_ptt, scope, {"1": "g002"}))       # surrogate → mcptt id
+        self.assertTrue(dr.in_scope(t.rec, rec_ptt, scope, {}))                   # session.json 대조 폴백
+        self.assertFalse(dr.in_scope(t.rec, rec_ptt, {"members": set(), "ptt_groups": {"g009"}}, {"1": "g002"}))
+        self.assertTrue(dr.in_scope(t.rec, rec_call, scope, {}))
+        self.assertFalse(dr.in_scope(t.rec, rec_call, {"members": {"+8213107777"}, "ptt_groups": set()}, {}))
+        self.assertFalse(dr.in_scope(t.rec, "message/x", scope, {}))
 
     def test_handler_gate_and_proxy(self):
         t = _Tree()
         t.ptt("g002", "ses-1", "+82510002001")
-        rec = dh.query(t.sl, "ptt", {"members": set(), "ptt_groups": {"g002"}, "roleId": "role-1"}, None, 10)[0][0]["recordingId"]
+        rec = dh.query(t.rec, t.state, "ptt", {"members": set(), "ptt_groups": {"g002"}, "roleId": "role-1"}, None, 10)[0][0]["recordingId"]
         import services as _svc_pkg
-        saved = (m.extract_token, m._SERVICE_LOG_DIR, dr._scope_sets, dr._http,
+        saved = (m.extract_token, m._RECORDINGS_DIR, dr._scope_sets, dr._http,
                  sys.modules.get("services.fm_reporter"), getattr(_svc_pkg, "fm_reporter", None))
         # 감사 발신 스텁 — 실제 fm_reporter 를 적재하면 다른 시험의 sys.modules 스텁이 무력화된다(패키지 속성 우선).
         audits = []
@@ -497,7 +497,7 @@ class RecordingsTests(unittest.TestCase):
         try:
             token = {"sub": "disp01", "mcptt_id": "tel:+821310001001", "scope": [m.SCOPE_PROVISIONING]}
             m.extract_token = lambda hdr: token if hdr else None
-            m._SERVICE_LOG_DIR = t.sl
+            m._RECORDINGS_DIR = t.rec
             dr._scope_sets = lambda cfg, tok: ("+821310001001", {"roleId": "role-1", "groupId": "pg1", "members": set(), "ptt_groups": {"g002"}}, {"1": "g002"})
             calls = []
 
@@ -536,7 +536,7 @@ class RecordingsTests(unittest.TestCase):
             # 감사 E-AUD-016 tap_mode=recording — 오디오 200 한 번
             self.assertEqual([a["params"]["tap_mode"] for a in audits], ["recording"])
         finally:
-            m.extract_token, m._SERVICE_LOG_DIR, dr._scope_sets, dr._http, fm_mod, fm_attr = saved
+            m.extract_token, m._RECORDINGS_DIR, dr._scope_sets, dr._http, fm_mod, fm_attr = saved
             if fm_mod is None:
                 sys.modules.pop("services.fm_reporter", None)
             else:
@@ -849,12 +849,12 @@ class PttSessionDetailTests(unittest.TestCase):
         # 세션키형 디렉터리(콘솔/OAM 세션 인덱스 키) — 구 녹취형은 _Tree.ptt 가 만든다
         y, mo, d, h = _now_parts(t.now)
         ses = "S20260906190102000000_1"
-        os.makedirs(os.path.join(t.sl, "ptt", "1", y, mo, d, h, ses), exist_ok=True)
-        with open(os.path.join(t.sl, "ptt", "1", y, mo, d, h, ses, "session.json"), "w") as f:
+        os.makedirs(os.path.join(t.rec, "ptt", "1", y, mo, d, h, ses), exist_ok=True)
+        with open(os.path.join(t.rec, "ptt", "1", y, mo, d, h, ses, "session.json"), "w") as f:
             json.dump({"mcptt_group_id": "g002", "sesid": "ses-9", "start_time": t.ts(5)}, f)
         rec = f"ptt/1/{y}/{mo}/{d}/{h}/{ses}"
         import services as _svc_pkg
-        saved = (m.extract_token, m._SERVICE_LOG_DIR, dr._scope_sets, dr._http,
+        saved = (m.extract_token, m._RECORDINGS_DIR, dr._scope_sets, dr._http,
                  sys.modules.get("services.fm_reporter"), getattr(_svc_pkg, "fm_reporter", None))
         audits = []
         fake_fm = types.SimpleNamespace(get=lambda: types.SimpleNamespace(node="n1", send_event=lambda *a, **k: audits.append(k)))
@@ -863,7 +863,7 @@ class PttSessionDetailTests(unittest.TestCase):
         try:
             token = {"sub": "disp01", "mcptt_id": "tel:+821310001001", "scope": [m.SCOPE_PROVISIONING]}
             m.extract_token = lambda hdr: token if hdr else None
-            m._SERVICE_LOG_DIR = t.sl
+            m._RECORDINGS_DIR = t.rec
             dr._scope_sets = lambda cfg, tok: ("+821310001001", {"roleId": "role-1", "groupId": "pg1", "members": set(), "ptt_groups": {"g002"}}, {"1": "g002"})
             calls = []
 
@@ -907,7 +907,7 @@ class PttSessionDetailTests(unittest.TestCase):
             dr._scope_sets = lambda cfg, tok: ("+821310001001", None, {})
             self.assertEqual(call("/provisioning/history/ptt/" + rec).body["error"], "no_monitor_scope")
         finally:
-            m.extract_token, m._SERVICE_LOG_DIR, dr._scope_sets, dr._http, fm_mod, fm_attr = saved
+            m.extract_token, m._RECORDINGS_DIR, dr._scope_sets, dr._http, fm_mod, fm_attr = saved
             if fm_mod is None:
                 sys.modules.pop("services.fm_reporter", None)
             else:

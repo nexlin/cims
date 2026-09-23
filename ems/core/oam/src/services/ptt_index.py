@@ -15,13 +15,15 @@
 인덱스를 쓰면 지표가 빠지거나 CMP 까지 두 번째 writer 로 끌어들여야 한다. 읽는 쪽이
 읽기 모델을 소유하면 writer 가 하나고, C++ 변경이 없어 CSP/CMP 재배포 위험도 없다.
 
-저장
+저장 (영역 경로는 services/paths — site_directory_layout.md)
 ----
-    {ServiceLogDir}/ptt/index/YYYYMMDD.jsonl      세션 1건 = 1줄 (세션 **시작일** 기준)
+    {Recording.Dir}/ptt/{그룹}/…              정본 — 녹취·세션 디렉터리 (CSP·CMP 가 쓴다)
+    {Stats.Dir}/ptt_index/YYYYMMDD.jsonl      인덱스 — 세션 1건 = 1줄 (세션 **시작일** 기준)
+    {State.Dir}/ptt/*.json                    진행 중 세션 상태 (CSP 가 쓴다)
 
     지난 날짜 — 파일이 없으면 그 날짜 버킷만 스캔해 1회 생성, 이후 불변.
     오늘      — 스위퍼가 주기적으로 오늘 버킷만 재스캔해 전체 재작성.
-    진행중    — 인덱스에 넣지 않는다. state/ptt/*.json (CSP 가 쓴다) 로 실시간 도출.
+    진행중    — 인덱스에 넣지 않는다. 상태 파일로 실시간 도출.
 
 자정을 넘긴 세션은 **시작일** 파일에 들어간다. 세션키에 시작 시각이 박혀 있어 판정이
 자명하고, 다음 날 버킷으로 이어진 부분은 session_dirs() 가 따라가므로 한 줄로 온전하다.
@@ -36,7 +38,9 @@ import glob as _glob
 from datetime import datetime, timedelta
 
 # ── 설정 ──────────────────────────────────────────────────────
-_calls_dir: str = ""
+_rec_dir: str = ""       # 녹취 영역 — ptt/{그룹}/ 이 정본
+_index_dir: str = ""     # 통계 영역의 ptt_index/
+_state_dir: str = ""     # 상태 영역 — ptt/*.json
 _enabled: bool = True
 
 # 일자별 캐시 — {'YYYYMMDD': (stamp, rows)}. 지난 날짜는 불변이라 stamp 를 보지 않는다.
@@ -47,16 +51,19 @@ _lock = threading.Lock()
 _SES_RE = re.compile(r'^S(\d{14,20})_(\d+)$')
 
 
-def init(service_log_dir: str, enabled: bool = True) -> None:
-    global _calls_dir, _enabled
-    _calls_dir = service_log_dir or ""
+def init(recordings_dir: str, stats_dir: str = "", state_dir: str = "", enabled: bool = True) -> None:
+    """영역 경로 주입 — 녹취(정본)·통계(인덱스 `ptt_index/`)·상태(진행 중 `ptt/`)."""
+    global _rec_dir, _index_dir, _state_dir, _enabled
+    _rec_dir = recordings_dir or ""
+    _index_dir = os.path.join(stats_dir, "ptt_index") if stats_dir else ""
+    _state_dir = state_dir or ""
     _enabled = bool(enabled)
     with _lock:
         _cache.clear()
 
 
 def enabled() -> bool:
-    return _enabled and bool(_calls_dir)
+    return _enabled and bool(_rec_dir) and bool(_index_dir)
 
 
 # ── 파일 유틸 (모듈 자립 — flow_logger 와 순환 import 를 만들지 않는다) ──
@@ -94,11 +101,13 @@ def _read_jsonl(path: str) -> list:
 # ═══════════════════════════════════════════════════════════════
 
 def ptt_root() -> str:
-    return os.path.join(_calls_dir, "ptt") if _calls_dir else ""
+    """PTT 녹취 루트 `{Recording.Dir}/ptt` — 그 아래는 그룹 디렉터리뿐이다."""
+    return os.path.join(_rec_dir, "ptt") if _rec_dir else ""
 
 
 def index_dir() -> str:
-    return os.path.join(ptt_root(), "index") if _calls_dir else ""
+    """인덱스 디렉터리 `{Stats.Dir}/ptt_index`."""
+    return _index_dir
 
 
 def _sanitize(s: str) -> str:
@@ -107,7 +116,7 @@ def _sanitize(s: str) -> str:
 
 def group_base(group_key: str) -> str:
     """PTT 그룹 base 디렉터리 ptt/{key} (없으면 '+' prefix 보정 시도)"""
-    if not _calls_dir:
+    if not _rec_dir:
         return ""
     safe = _sanitize(group_key)
     base = os.path.join(ptt_root(), safe)
@@ -416,7 +425,7 @@ def scan_day(day: str) -> list:
     rows = []
     for gpath in sorted(_glob.glob(os.path.join(root, "*"))):
         gkey = os.path.basename(gpath)
-        if gkey == "index" or not os.path.isdir(gpath):
+        if not os.path.isdir(gpath):
             continue
         day_dir = os.path.join(gpath, yyyy, mm, dd)
         if not os.path.isdir(day_dir):
@@ -438,17 +447,11 @@ def scan_day(day: str) -> list:
 
 
 def group_keys() -> list:
-    """녹취가 있는 그룹 저장 키 목록 (ptt/* 디렉터리, index 제외)."""
+    """녹취가 있는 그룹 저장 키 목록 (ptt/* 디렉터리)."""
     root = ptt_root()
     if not root or not os.path.isdir(root):
         return []
-    out = []
-    for name in sorted(os.listdir(root)):
-        if name == "index":
-            continue
-        if os.path.isdir(os.path.join(root, name)):
-            out.append(name)
-    return out
+    return [name for name in sorted(os.listdir(root)) if os.path.isdir(os.path.join(root, name))]
 
 
 def last_window(group_key: str) -> str:
@@ -478,7 +481,8 @@ def count_on_day(group_key: str, day_str: str) -> int:
 
 
 def _day_path(day: str) -> str:
-    return os.path.join(index_dir(), f"{day}.jsonl")
+    d = index_dir()
+    return os.path.join(d, f"{day}.jsonl") if d else ""
 
 
 def _write_day(day: str, rows: list) -> None:
@@ -499,7 +503,7 @@ def _write_day(day: str, rows: list) -> None:
 def day(day_str: str, force: bool = False) -> list:
     """그 날짜의 세션 목록. 지난 날짜는 파일이 정답이고, 오늘은 스캔이 정답이다."""
     if not enabled() or len(day_str) < 8:
-        return scan_day(day_str) if _calls_dir else []
+        return scan_day(day_str) if _rec_dir else []
     today = datetime.now().strftime("%Y%m%d")
     is_today = (day_str >= today)
 
@@ -551,17 +555,18 @@ def range_days(from_day: str, to_day: str) -> list:
 
 
 # ═══════════════════════════════════════════════════════════════
-#  진행중 세션 — state/ptt/*.json (CSP 가 쓴다)
+#  진행중 세션 — {State.Dir}/ptt/*.json (CSP 가 쓴다)
 # ═══════════════════════════════════════════════════════════════
 
 def live() -> list:
     """지금 열려 있는 세션. 인덱스에 넣지 않고 매번 상태 파일에서 도출한다
-    (파일 수 = 통화 중 가입자 수라 저렴하고, 종료 즉시 사라져 stale 이 없다)."""
-    if not _calls_dir:
+    (파일 수 = 통화 중 가입자 수라 저렴하고, 종료 즉시 사라져 stale 이 없다).
+    상태 파일의 `record_dir` 은 녹취 영역 안의 세션 디렉터리 절대경로다."""
+    if not _rec_dir or not _state_dir:
         return []
     root = ptt_root()
     keys = {}   # (group_key, session key) → True
-    for p in _glob.glob(os.path.join(_calls_dir, "state", "ptt", "*.json")):
+    for p in _glob.glob(os.path.join(_state_dir, "ptt", "*.json")):
         st = _read_json(p)
         rec = st.get("record_dir") or ""
         if not rec:

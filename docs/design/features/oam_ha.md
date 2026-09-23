@@ -19,7 +19,7 @@ CSP/CMP/CSC 는 상태를 외부(DB·UE 재등록)에 두므로 VIP 이관 = 서
 |---|---|---|
 | agent 목록 + `agent_token`·enrollment | `control/agents` | 전 agent 인증 실패(401) — 관리 전면 불능 |
 | 배포 목록 + config overlay | `control/deployments` | 설정 SoT 상실, 재배포 불가 |
-| 패키지 메타 + 타르볼 | `control/packages`, `pkg_files` | 설치·업그레이드·`/install-agent.sh` 불가 |
+| 패키지 메타 + 타르볼 | `control/packages` + 패키지 저장소(사이트 `packages/` — 단일 루트면 store 의 `pkg_files`) | 설치·업그레이드·`/install-agent.sh` 불가 |
 | HA 그룹 정의 | `control/ha_groups` | **자기 절체 근거 상실** (ha.json 재렌더 불가) |
 | 게이트웨이 라우트 | `control/gateway_routes` | csc/oam-svc 프록시 전면 503 |
 | job 큐 + 결과 | `control/jobs` | in-flight 작업 유실 |
@@ -139,7 +139,7 @@ HA 판정이 노드 로컬이어야 한다는 원칙(ha_service_model.md §5·§
 |---|---|
 | `run/ha/{verdict,role,health,promotion,recovery,operations}` | `control/*` (agents·deployments·jobs·metrics·packages·ha_groups·gateway_routes·csp_sync_txn·**ha_operations**) |
 | `state/ha/{latch,maintenance,planned_release}`, `run/ha/desired.json` | `console/*` (계정·레이아웃·메뉴) |
-| `run/keepalived/ha.json`, `run/managed_ips.json`, `run/supervised.json` | `auth_codes`, `refresh_tokens`, `pkg_files`, `verify_runs` (카테고리 없이 store 루트 직하) |
+| `run/keepalived/ha.json`, `run/managed_ips.json`, `run/supervised.json` | `auth_codes`, `refresh_tokens`, `verify_runs` (카테고리 없이 store 루트 직하) + 패키지 저장소(사이트 `packages/`, 단일 루트면 store 직하 `pkg_files`) |
 | `modules/<mod>/service.json`, 모듈 `config.json` | |
 | **시크릿·TLS·CA** (`runtime/_secrets/`, §5) | |
 
@@ -185,27 +185,30 @@ HA 판정이 노드 로컬이어야 한다는 원칙(ha_service_model.md §5·§
 않는다 — 같은 사실을 두 곳에서 입력받으면 어긋나고, 어긋남을 막는 코드를 또 써야 한다.
 
 위치는 **경로 설정**이다. 운영 상황에 따라 NAS 일 수도, 로컬 디스크일 수도 있으므로 마운트는
-[시스템/인프라] 의 일이고 store 위치는 그냥 경로다. 마운트 지점은 공유 스토리지 사이트가
-mount guard 용으로 적는 **선택** 값이다.
+[시스템/인프라] 의 일이고 store 위치는 그냥 경로다 — 사이트 디렉터리(`CimsSiteDir`)의 `runtime/` 영역
+([site_directory_layout.md](site_directory_layout.md)). 마운트 지점은 공유 스토리지 사이트가 mount guard 용으로
+적는 **선택** 값이다.
 
 ```text
-입력:  oam 배포설정 CimsRuntimeDir     ← 관리 store 경로 (부트스트랩 --runtime-dir / 콘솔 [패키지 설정] > oam > 관리 store)
+입력:  oam 배포설정 CimsSiteDir        ← 사이트 디렉터리 (부트스트랩 --site-dir / 콘솔 [패키지 설정] > oam > 사이트 디렉터리)
+       oam 배포설정 CimsRuntimeDir     ← (선택) 관리 store override
        oam 배포설정 CimsRuntimeMount   ← (선택) 공유 스토리지 마운트 지점 — mount guard(§4.3) 기준.
-          │                               CimsRuntimeDir 이 비어 있으면 <마운트>/runtime 으로 유도.
-          │                               둘 다 비면 노드 로컬 modules/oam/runtime.
-          ├── 유도(services.paths.runtime_store_dir) → 실효 store 경로
-          │                                          → Packages.Dir    = <store>/pkg_files (선언 없음 = 편집 불가)
+          │                               사이트 디렉터리도 store 경로도 없으면 store = <마운트>/runtime.
+          │                               셋 다 비면 노드 로컬 modules/oam/runtime (단일 루트 레이아웃).
+          ├── 유도(services.paths) → 실효 store 경로 = <사이트>/runtime
+          │                        → Packages.Dir = <사이트>/packages (단일 루트면 <store>/pkg_files)
+          │                        → 콘텐츠·녹취·로그·통계·상태 영역 (site_directory_layout.md §3)
           │        실체화(agents._materialize_deploy_config)가 매 디스패치마다 채운다.
-          │        (서비스 로그 `ServiceLogging.Dir` 도 같은 방식 — 경로 설정, 부트스트랩 --log-dir)
           │
-          ├── 유도(agents._store_source) → oam-svc config.json (같은 store 를 읽는다)
+          ├── 유도(agents._store_source) → oam-svc·csc config.json (같은 store 를 읽는다)
+          ├── 유도(agents._site_source)  → 서비스 모듈 config.json 의 영역 경로(템플릿 site_area)
           │
           └── 유도(_derived_shared_store)
                    ↓
           판정: 그룹의 "이 모듈이 절체 대상인가" (requires_leader_lease 전제)
                 + ha.json services.<svc>.shared_store (agent 승격 preflight)
 
-마운트를 비우면 = **노드 로컬**(`modules/oam/runtime`). 단일 노드·부트스트랩 직후의
+사이트 디렉터리·마운트를 비우면 = **노드 로컬**(`modules/oam/runtime`). 단일 노드·부트스트랩 직후의
 정상 상태이고, 이때 store 경로는 돌고 있는 OAM 의 실효 루트를 실체화가 적어 준다.
 ```
 
@@ -222,23 +225,24 @@ mount guard 용으로 적는 **선택** 값이다.
   이유는 §9.4 를 본다.
 - **`scope=service`(공통 설정)** 이다 — 멤버 간 반드시 동일해야 하는 값이므로 서버별 개별
   설정으로 두면 안 된다(개별로 두면 한쪽만 바뀌어도 경고가 없고, 절체하면 다른 store 를 본다).
-  편집 창구는 **그룹 > 패키지 설정 > oam > 관리 store** 하나이고, 거기 입력칸도 **마운트 지점
-  하나**다(store·패키지 경로는 유도 결과를 그 아래에 표시만 한다). R4 자동 교정이 ACTIVE 기준으로
-  STANDBY 를 맞춘다. `ServiceLogging.Dir`(마운트 파생)도 같은 이유로 공통이다.
+  편집 창구는 **그룹 > 패키지 설정 > oam > 사이트 디렉터리** 하나이고, 입력은 사이트 디렉터리 하나다
+  (영역 경로는 비워 두면 유도되고, 따로 적으면 그 값이 이긴다). R4 자동 교정이 ACTIVE 기준으로
+  STANDBY 를 맞춘다. 영역 경로(`ServiceLogging.Dir` 등)도 같은 이유로 공통이다.
   **서버 그룹 탭(시스템/서버 구성)에는 공유 store 화면이 없다** — 그 탭은 마운트·IP 처럼
   노드별 자원만 다룬다.
 - **그룹 API 는 `shared_store` 를 저장하지 않는다.** GET 응답의 `shared_store` 는 읽기 전용
   유도값이고, PUT 으로 보내면 400 `shared_store_not_group_scoped` 다. 경로 변경은 데이터
   이동을 수반하므로 이관(§9.4)이 유일한 경로다.
-- **주입** — 두 번째 노드에 oam 을 설치하면 살아있는 OAM 의 마운트가 배포설정에 주입된다
-  (`_materialize_deploy_config`, overlay 에 값이 없을 때만 — 이관이 넣은 값을 되돌리지
-  않기 위해). 그리고 실체화가 store 경로 3종을 **함께** 렌더한다(하나만 빠지면 반쪽 설정이다):
+- **주입** — 두 번째 노드에 oam 을 설치하면 살아있는 OAM 의 레이아웃(사이트 디렉터리·마운트)이 배포설정에
+  주입된다(`_materialize_deploy_config`, overlay 가 레이아웃을 정하지 않았을 때만 — 이관이 넣은 값을 되돌리지
+  않기 위해). 그리고 실체화가 영역 경로를 **함께** 렌더한다(하나만 빠지면 반쪽 설정이다):
 
   | 키 | 출처 | 빠뜨리면 |
   |---|---|---|
-  | `CimsRuntimeDir` | 입력(경로 설정 — overlay 우선, 둘 다 없으면 base 주입) | 마운트에서 유도(`<마운트>/runtime`), 마운트도 없으면 노드 로컬 실효 루트 |
+  | `CimsSiteDir` | 입력(overlay 우선, 없으면 base 주입) | 단일 루트 레이아웃으로 유도 — 다른 노드와 영역 경로가 갈린다 |
+  | `CimsRuntimeDir` | 유도 `<사이트>/runtime`(override 입력 가능) | 마운트에서 유도(`<마운트>/runtime`), 마운트도 없으면 노드 로컬 실효 루트 |
   | `CimsRuntimeMount` | (선택) 입력(overlay 우선, 없으면 base 주입) | **그 노드의 mount guard 가 꺼진다** — 키가 없으면 검사를 건너뛰므로, 마운트 없이 떠서 마운트 지점 하부 로컬 디스크에 두 번째 store 를 만든다 |
-  | `Packages.Dir` | 유도 `<store>/pkg_files` | 패키지 `oam.json` 의 상대경로로 폴백해 **버전 디렉터리**를 본다 → 그 노드가 Active 가 되는 순간 `/agent-bundle.tar.gz` 404 (agent·모듈 설치/업그레이드 전면 불가) |
+  | `Packages.Dir` | 유도 `<사이트>/packages`(단일 루트면 `<store>/pkg_files`) | 패키지 `oam.json` 의 상대경로로 폴백해 **버전 디렉터리**를 본다 → 그 노드가 Active 가 되는 순간 `/agent-bundle.tar.gz` 404 (agent·모듈 설치/업그레이드 전면 불가) |
 
   `Packages.Dir` 은 **oam 에만** 준다 — 패키지 서빙은 base oam 만의 일이다. base oam 의
   유도는 descriptor(`requires_leader_lease`) 판정에 걸지 않는다 — 자기 store 이고, 판정
@@ -249,35 +253,28 @@ mount guard 용으로 적는 **선택** 값이다.
   마운트는 운영자가 정한 값이라 주입이 덮으면 안 되고, oam-svc 에서 overlay 에 남은 값은
   선언을 걷어내기 전의 잔재라 이기면 두 프로세스가 다른 store 를 본다. 잔재는 OAM 기동 시
   `sweep_overlay_schema` 가 렌더 동치를 확인하고 무중단으로 치운다.
-- **여러 사이트가 NAS 하나를 나눠 쓰는 구성**(예 `/mnt/cims/test48/runtime`) — 경로 설정이
-  정본이므로 마운트 하위 어느 경로든 그대로 store 다(`runtime_store_dir`). 유도값
-  `<마운트>/runtime` 은 경로를 비웠을 때의 기본값일 뿐이다.
-  이때 `sweep_overlay_schema` 는 렌더가 달라지므로 그 키를 지우지 않고 경고만 남긴다 —
-  정규화는 이관(§9.4)이 하고, 이관은 옛 파생 키를 overlay 에서 걷어낸다.
-  반대로 마운트 **밖**을 가리키는 옛 값은 무시한다(이미 유효하지 않은 유도 결과이고,
-  두면 mount guard 가 "store 가 마운트 하위가 아님" 으로 기동을 거부한다).
+- **여러 사이트가 NAS 하나를 나눠 쓰는 구성**(예 사이트 디렉터리 `/mnt/cims/test48`) — 경로 설정이
+  정본이므로 마운트 하위 어느 경로든 그대로 사이트다. 명시한 store 경로(`CimsRuntimeDir`)도 마운트와
+  상관없이 그대로 쓴다 — 마운트 하위가 아니면 mount guard 가 기동을 거부하므로 둘을 맞추는 것은 운영자의
+  몫이고, 옛 값을 걷어내는 것은 이관(§9.4)의 일이다. `sweep_overlay_schema` 는 렌더가 달라지므로 그 키를
+  지우지 않고 경고만 남긴다.
 
-#### 경로 파생 규칙 — 무엇이 store 를 따라가고 무엇이 마운트에 붙는가
+#### 경로 파생 규칙 — 사이트 디렉터리 영역
 
-경로 설정은 **하나도 독립 값이 아니다.** 전부 마운트 지점 하나에서 유도되며, 유도 기준이
-서로 다르다. 기준을 섞으면 이관 후 한쪽만 옛 위치에 남는다.
+경로는 사이트 디렉터리 하나에서 영역별로 유도된다(정본 [site_directory_layout.md](site_directory_layout.md) §3,
+구현 `services/paths.py`). 기준을 섞으면 이관 후 한쪽만 옛 위치에 남는다.
 
-| 키 | 파생 기준 | 마운트 있음 | 마운트 없음(부트스트랩 직후) |
+| 키 | 사이트 디렉터리 있음 | 없음 — 마운트만 | 없음 — 부트스트랩 직후(노드 로컬) |
 |---|---|---|---|
-| `CimsRuntimeDir` | **마운트** — 관리 store 는 그 하위에 둔다 | `{마운트}/runtime` | `{노드 로컬 modules/oam/runtime}` |
-| `Packages.Dir` | **store** — 패키지는 store 의 일부(§4.0) | `{CimsRuntimeDir}/pkg_files` | `{노드 로컬 store}/pkg_files` |
-| `ServiceLogging.Dir` | **마운트** — store 가 아님(위 항목) | `{마운트}/service_log` | `{노드 로컬 runtime}/service_log` |
+| `CimsRuntimeDir` | `{사이트}/runtime` | `{마운트}/runtime` | `{노드 로컬 modules/oam/runtime}` |
+| `Packages.Dir` | `{사이트}/packages` | `{CimsRuntimeDir}/pkg_files` | `{노드 로컬 store}/pkg_files` |
+| `ServiceLogging.Dir` | `{사이트}/log` | 명시값(부트스트랩이 `{마운트}/service_log` 로 적는다) | `{노드 로컬 runtime}/service_log` |
+| 녹취·콘텐츠·통계·상태 | `{사이트}/recordings` · `content` · `stats` · `state` | 로그 루트 아래(단일 루트) | 로그 루트 아래(단일 루트) |
 
-앞 두 줄은 **입력이 아니다** — `config_template` 에 선언이 없어 콘솔·API 로 저장할 수 없고
-(`_prune_to_template`), 실체화가 계산해 `config.json` 에 넣는다. 모듈 쪽에도 같은 규칙이
-있어(`services.paths.runtime_store_dir` → `file_store.runtime_root`) 설정이 비어도 같은
-경로로 수렴한다. `ServiceLogging.Dir` 만 선언된 입력이다 — 로그를 다른 볼륨에 두는 선택이
-실제로 있기 때문이고, 비우면 위 규칙으로 유도된다.
-
-`ServiceLogging.Dir` 의 기준은 **실제 마운트**이지 store 의 마운트가 아니다 — 마운트만 붙이고
-관리 store 는 노드 로컬로 둔 구성(부트스트랩 `--mount` 만 지정)에서도 로그는 마운트를 따라간다.
-부트스트랩은 그래서 `CimsRuntimeMount`(= store 의 마운트, 없을 수 있음)가 아니라 붙인 마운트를
-기준으로 이 값을 정한다.
+영역 키는 전부 선언된 **override 입력**이고, 비우면 위 규칙으로 유도된다. 모듈 쪽에도 같은 규칙이 있어
+(`services.paths.runtime_store_dir` → `file_store.runtime_root`) 설정이 비어도 같은 경로로 수렴한다.
+단일 루트 레이아웃에서 `ServiceLogging.Dir` 의 기준은 **실제 마운트**이지 store 의 마운트가 아니다 — 마운트만
+붙이고 관리 store 는 노드 로컬로 둔 구성(부트스트랩 `--mount` 만 지정)에서도 로그는 마운트를 따라간다.
 
 - 파생값은 **배포 overlay 에 저장하지 않고** 노드 `config.json` 에만 렌더한다 — 콘솔이
   실제 적용값을 그려야 하지만(폴백은 화면에 안 보인다), 저장하면 마운트를 바꿔도 뒤에
@@ -285,7 +282,8 @@ mount guard 용으로 적는 **선택** 값이다.
 - 그래서 **store 복사에서 `service_log` 는 제외**한다. 포함하면 (a) 마운트 파생인 로그가
   store 스냅샷에 딸려가 `<store>/service_log` 사본이 이관마다 쌓이고, (b) 대용량 로그가
   모듈 정지 창을 로그 크기에 비례해 늘린다. 이관 전 노드 로컬 로그는 **기동 후 백그라운드로**
-  새 위치에 합친다(정지 창 무영향, 시간축 분할이라 나중에 합쳐도 안전).
+  새 위치에 합친다(정지 창 무영향, 시간축 분할이라 나중에 합쳐도 안전). 사이트 디렉터리 구성은
+  패키지·콘텐츠 영역을 store 와 같은 정지창에 복사하고, 로그·녹취·통계 영역을 기동 뒤 합친다(§9.4).
 - 패키지 **레코드**는 절대경로를 정본으로 두지 않는다 — 파일명을 정본으로 보고 현재
   `Packages.Dir` 에서 찾는다(`resolve_pkg_file`). 레코드에 이관 시점 절대경로가 박히면
   절체한 노드에서 그 경로가 없어 "패키지 미등록"(= `/agent-bundle.tar.gz` 404, agent·모듈
@@ -371,8 +369,9 @@ store 확인 + OAM 콜드스타트(python·마이그레이션·cert·bind, `CIMS
 <shared>/control/{agents,deployments,jobs,metrics,packages,ha_groups,
                  gateway_routes,csp_sync_txn}/
 <shared>/console/{console_accounts,console_layouts,console_menu,console_user_layouts}/
-<shared>/{ha_operations,auth_codes,refresh_tokens,pkg_files,verify_runs}/
+<shared>/{ha_operations,auth_codes,refresh_tokens,verify_runs}/
 <shared>/.owner.json                     ← 소유권 리스
+(패키지 저장소는 사이트의 packages/ 영역 — 단일 루트 레이아웃이면 <shared>/pkg_files/)
 ```
 
 - `ha_operations`·`auth_codes`·`refresh_tokens`·`verify_runs` 는 현재 `_OAM_CATEGORY` 에
@@ -1027,7 +1026,7 @@ sudo ./install.sh --join \
 따라가지 않아 빈 콘솔이 되므로 **이관**이 필요하다. 이 작업은 콘솔 한 번의 조작으로 끝난다:
 
 ```text
-시스템 > 시스템/인프라 > (그룹 선택) > 패키지 설정 > oam > 관리 store > [이 경로로 이관]
+시스템 > 시스템/인프라 > (그룹 선택) > 패키지 설정 > oam > 사이트 디렉터리 > [이 경로로 이관]
   → POST /api/v1/ha-groups/{id}/shared-store/migrate  {mount_point}
 ```
 
@@ -1040,6 +1039,7 @@ sudo ./install.sh --join \
 | 2' | **oam 을 먼저 처리한다.** oam-svc 의 store 경로는 실체화가 oam 배포설정에서 유도해 넣는 파생값이므로(§4.1), 순서가 뒤집히면 oam-svc 가 아직 갱신되지 않은 옛 경로로 실체화돼 혼자 옛 store 에 남는다. 같은 이유로 유도 출처는 **배포 overlay**(desired state)다 — 이 시점의 돌고 있는 OAM 설정(actual state)은 아직 옛 경로다 |
 | 3 | store 를 들고 있는 노드(`status=running`)에 `migrate_oam_store` job |
 | 4 | 나머지 멤버는 `update_config` 만 — 그 노드는 같은 공유 store 를 읽게 된다 |
+| 5 | **사이트 디렉터리 구성**(base oam overlay 에 `CimsSiteDir`)이면 사이트 전체를 옮긴다 — 2 에서 `CimsSiteDir` 를 마운트 지점으로 바꾸고(로그 경로는 건드리지 않는다 — 사이트에서 유도된다), 3 의 job 에 영역 이동을 싣는다: 패키지·콘텐츠 영역은 `site_copies`(정지창 복사), 로그·녹취·통계 영역은 `site_merges`(기동 뒤 합류). 영역 경로를 따로 적은 영역은 옮기지 않는다([site_directory_layout.md](site_directory_layout.md) §5) |
 | — | **store 가 이미 target 에 있으면**(같은 mount_point 로 재호출 = 설정 재적용) 복사 없이 **전 멤버 `update_config`** — 모듈 정지가 없어 무중단이다. 이 분기가 없으면 agent 가 "source 와 target 이 같습니다"로 거부하면서 config.json 재기록(아래 5)까지 건너뛰어, 파생 경로를 정정하려고 재호출했는데 정작 store 를 든 노드만 안 고쳐진다. 파생 규칙(§4.1)을 뒤늦게 도입한 기존 사이트의 **정규 교정 경로**가 이것이다 |
 
 agent 가 하는 일 (`job_migrate_oam_store`) — **OAM 은 자기 store 를 자기가 옮길 수 없다**
@@ -1050,8 +1050,10 @@ OAM 수명과 무관하고 이미 그 모듈의 lifecycle 을 소유하므로 �
 1. 전제 확인 — target_mount 가 실제 마운트인지 + write 가능한지
    (실패하면 모듈을 건드리지 않고 즉시 실패 — 가용성 손실 없음)
 2. op grace 표시 — watchdog·reconcile 이 복사 중 끼어들지 않게
-3. 모듈 정지 → 4. 복사(_secrets·cert·service_log 제외) → 5. config.json 기록 → 6. 모듈 기동
-7. (기동 후, 백그라운드) 이관 전 노드 로컬 service_log 를 새 로그 루트로 합류
+3. 모듈 정지 → 4. 복사(_secrets·cert·service_log 제외) → 4-b. site_copies(패키지·콘텐츠 영역)
+   → 5. config.json 기록 → 6. 모듈 기동
+7. (기동 후, 백그라운드) site_merges(로그·녹취·통계 영역) — 단일 루트 구성이면 이관 전 노드 로컬
+   service_log 를 새 로그 루트로 합류
 ```
 
 - **source 가 항상 이긴다 — 묻지 않는다.** 이관은 "지금 도는 OAM 의 store 를 이 위치로
@@ -1075,25 +1077,25 @@ OAM 수명과 무관하고 이미 그 모듈의 lifecycle 을 소유하므로 �
 때문이다: 그룹 `shared_store` 는 PUT 으로 보내면 400 `shared_store_not_group_scoped`(§4.1),
 oam-svc 는 템플릿에 선언이 없어 overlay 쓰기 마스크가 거른다. 남는 것은 oam 배포설정이고,
 거기서 경로만 바꿔 저장하면 데이터가 따라가지 않으므로 콘솔이 그 자리에서 이관을 권한다
-(관리 store 섹션의 안내 + `[이 경로로 이관]` 버튼). 그대로 두면 HA 편입은 되는데 데이터는
+(사이트 디렉터리 섹션의 안내 + `[이 경로로 이관]` 버튼). 그대로 두면 HA 편입은 되는데 데이터는
 노드별 로컬이라 절체 시 빈 콘솔이 되고, 이는 정확히 과거 사고 상태다.
 
 **store 위치를 정하는 경로는 둘이고, 이관은 그중 하나다.**
 
 | | 언제 | 어떻게 | 결과 |
 |---|---|---|---|
-| **설치 시점** | 신규 설치 (마운트가 이미 있어도, 아직 없어도) | 부트스트랩이 두 가지를 순서대로 묻는다 (아래), 또는 `--mount*`/`--runtime-mount` | store·패키지·서비스 로그가 **처음부터** 그 하위. 이관 불필요 |
+| **설치 시점** | 신규 설치 (마운트가 이미 있어도, 아직 없어도) | 부트스트랩이 사이트 디렉터리와 (필요하면) 공유 스토리지를 묻는다 (아래), 또는 `--site-dir`/`--mount*`/`--runtime-mount` | 사이트 영역 전부가 **처음부터** 그 하위. 이관 불필요 |
 | **이관** | 단일 노드로 운영 중이거나, NAS 를 나중에 붙였다 | 콘솔 `[이 경로로 이관]`(위 표) | 정지 → 복사 → 기동 (콘솔 30초 단절) |
 
-**설치 시점에 묻는 것은 두 줄이다** — 서버의 export 경로와, 이 노드에 붙일 위치.
-파일시스템·옵션·store 경로·로그 경로는 거기서 유도한다.
+**설치 시점에 묻는 것은 사이트 디렉터리 하나다** — 공유 스토리지를 새로 붙여야 하면 이어서 서버의
+export 경로와 이 노드에 붙일 위치를 묻는다. 파일시스템·옵션·영역 경로는 거기서 유도한다.
 
 ```text
-[6/7] 공유 스토리지 (예: nas.example:/export/cims) [Enter=노드 로컬]:
-        이 서버에 붙일 위치 [/mnt/cims]:                          ← 보통 Enter
+[6/7] 사이트 디렉터리 (예: /mnt/cims/site01) [Enter=노드 로컬]:   /mnt/cims/site01
+        공유 스토리지를 새로 붙일 원본 (예: nas.example:/export/cims) [Enter=이미 붙어 있음·로컬 디스크]:
+        이 서버에 붙일 위치 [/mnt/cims]:                          ← 보통 Enter (사이트 디렉터리가 그 하위여야 한다)
         파일시스템 [nfs4] (nfs4/nfs/cifs/ext4/ext3/xfs/btrfs):    ← 유도값이 기본, 고를 수 있다
-        → … 를 /mnt/cims 에 nfs4 로 붙이고, 관리 store 를 /mnt/cims/runtime,
-          서비스 로그를 /mnt/cims/service_log 에 둡니다.
+        → … 를 /mnt/cims 에 nfs4 로 붙이고 사이트를 /mnt/cims/site01 에 둡니다.
 ```
 
 파일시스템 허용 목록은 `cims-priv valid_fstype` 과 같고 프롬프트에서 검증한다 — 오타가
@@ -1103,9 +1105,9 @@ oam-svc 는 템플릿에 선언이 없어 overlay 쓰기 마스크가 거른다.
 |---|---|
 | 파일시스템 **기본값** | `host:/path` → `nfs4`, `//host/share` → `cifs` (변경 가능) |
 | 마운트 옵션 | 항상 `defaults` + `_netdev,nofail`(cims-priv 가 강제) |
-| `CimsRuntimeDir` | `{붙일 위치}/runtime` |
-| `Packages.Dir` | `{store}/pkg_files` |
-| `ServiceLogging.Dir` | `{붙일 위치}/service_log` |
+| `CimsSiteDir` | 입력값 (`--mount-src` 만 주면 `{붙일 위치}`) |
+| `CimsRuntimeMount` | `{붙일 위치}` (mount guard) |
+| 영역 경로 | `{사이트}/runtime` · `packages` · `content` · `recordings` · `log` · `stats` · `state` ([site_directory_layout.md](site_directory_layout.md) §3) |
 
 **붙일 위치를 export 경로에서 유도하지 않는다.** 서버가 어디에 두고 export 하는지와 이 노드의
 어디에 붙일지는 무관하다 — 실측에서 export 가 `/export/cims` 처럼 임의 경로였고, 그것을 지점으로 쓰면

@@ -1,8 +1,8 @@
 """csc_logger.py — CSC 서비스 로그 + 메시지 로그 유틸리티 (통합 포맷)
 
-포맷 (5분 버킷 — CSP/CMP 와 동일; mm5=00/05/.../55):
-  Flow: {ServiceLogDir}/YYYY/MM/DD/HH/csc_01.flow.{mm5}.jsonl
-  Msg : {ServiceLogDir}/YYYY/MM/DD/HH/csc_01_{iface}.msg.{mm5}.jsonl
+포맷 (5분 버킷 — CSP/CMP 와 동일; mm5=00/05/.../55). 루트 = 관측 로그 영역(ServiceLogging.Dir)의 `sip/`:
+  Flow: {ServiceLogging.Dir}/sip/YYYY/MM/DD/HH/csc_01.flow.{mm5}.jsonl
+  Msg : {ServiceLogging.Dir}/sip/YYYY/MM/DD/HH/csc_01_{iface}.msg.{mm5}.jsonl
 
 공통 키: ts, node, service, from, to, proto, method, detail, mid, sesid, subid, seq, iface
 sesid 포맷: {caller}::{module}::{yyyymmddHHMMSSuuuuuu}::{counter}
@@ -28,7 +28,10 @@ import collections
 from datetime import datetime
 from glob import glob
 
-_service_log_dir: str = ""
+from services.site_paths import SIP_LOG_SUBDIR
+
+_service_log_dir: str = ""     # 관측 로그 영역(ServiceLogging.Dir) — 알람 대상 경로
+_sip_dir: str = ""             # 5분 버킷 루트 = <log>/sip
 _system_id: str = "csc_01"
 _lock = threading.Lock()
 
@@ -536,18 +539,20 @@ _sesid_cache: dict = {}
 
 def init(service_log_dir: str = "", system_id: str = "csc_01",
          spool_dir: str = "spool", stall_sec: int = 5, spool_max_mb: int = 1024):
-    """spool_dir 은 저장 경로 무응답 시 폴백 저장소 — 반드시 로컬 디스크 경로."""
-    global _service_log_dir, _system_id, _seq_map
+    """service_log_dir = 관측 로그 영역 루트(버킷은 그 아래 `sip/`).
+    spool_dir 은 저장 경로 무응답 시 폴백 저장소 — 반드시 로컬 디스크 경로."""
+    global _service_log_dir, _sip_dir, _system_id, _seq_map
     _service_log_dir = service_log_dir or ""
+    _sip_dir = os.path.join(_service_log_dir, SIP_LOG_SUBDIR) if _service_log_dir else ""
     _system_id = system_id or "csc_01"
     _seq_map = {}
     _store['spool_dir'] = spool_dir or "spool"
     _store['stall_sec'] = stall_sec if stall_sec > 0 else 5
     _store['spool_max_bytes'] = (spool_max_mb if spool_max_mb > 0 else 1024) * 1024 * 1024
-    _store['base_dir'] = _service_log_dir
-    if _service_log_dir:
+    _store['base_dir'] = _sip_dir
+    if _sip_dir:
         yyyy, mm, dd, hh = _ymdh()
-        _store['seed_hour_dir'] = os.path.join(_service_log_dir, yyyy, mm, dd, hh)
+        _store['seed_hour_dir'] = os.path.join(_sip_dir, yyyy, mm, dd, hh)
         _store['seed_mm5'] = _bucket()
     _start_writer()  # dispatch + NAS flusher 기동 (1회)
 
@@ -605,11 +610,11 @@ def _ymdh():
 
 
 def _hour_dir() -> str:
-    """시간 디렉터리 경로 — 순수 문자열 조립 (파일시스템 무접촉, 생성은 flusher 몫)."""
-    if not _service_log_dir:
+    """시간 디렉터리 경로 `<log>/sip/YYYY/MM/DD/HH` — 순수 문자열 조립 (파일시스템 무접촉, 생성은 flusher 몫)."""
+    if not _sip_dir:
         return ""
     yyyy, mm, dd, hh = _ymdh()
-    return os.path.join(_service_log_dir, yyyy, mm, dd, hh)
+    return os.path.join(_sip_dir, yyyy, mm, dd, hh)
 
 
 def _bucket() -> str:
@@ -737,25 +742,3 @@ def log_console(method: str, caller: str = "", peer: str = "",
              proto=proto, method=method,
              detail=detail, peer=peer, iface="ue",
              caller=caller, body=body)
-
-
-def log_ptt_participant(group_id: str, user_id: str, action: str):
-    """레거시: PTT participants.jsonl 기록. 비동기 writer 경유 (생산자 파일시스템 무접촉)."""
-    if not _service_log_dir or not group_id:
-        return
-    yyyy, mm, dd, hh = _ymdh()
-
-    def _sanitize(s: str, max_len: int = 20) -> str:
-        r = ''.join('_' if c in '/\\:*?"<>| ' else c for c in s)
-        return r[:max_len]
-
-    sg = _sanitize(group_id)
-    dir_path = os.path.join(_service_log_dir, "ptt", yyyy, mm, dd, hh,
-                             sg[:-2] if len(sg) > 2 else sg, sg + ".d")
-    entry = {
-        "msisdn": user_id,
-        "action": action,
-        "time": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
-    }
-    _enqueue(os.path.join(dir_path, "participants.jsonl"),
-             json.dumps(entry, ensure_ascii=False) + "\n")

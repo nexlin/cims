@@ -1022,17 +1022,48 @@
     },
     {
       "key": "service_log",
-      "title": "서비스 로그 (녹취·flow)",
-      "description": "녹취·SIP/미디어/CSC msg·flow 로그의 공통 저장 루트. CSP·CMP·CSC 가 같은 경로를 쓰고 OAM 이 조회하므로 그룹 공통(service)으로 관리한다.",
+      "title": "사이트 경로 (녹취·로그·상태·통계)",
+      "description": "CSP 가 쓰는 사이트 영역 — 관측 로그(log/sip), 통화·세션 기록(recordings), 진행 중 세션 상태(state), PTT 시도 장부(stats). OAM 이 같은 경로를 읽으므로 base oam 사이트 디렉터리에서 유도된다(site_directory_layout.md).",
       "fields": [
         {
           "key": "Setup.ServiceLogging.Dir",
-          "label": "서비스 로그 루트",
+          "label": "서비스 로그 (log)",
           "type": "path",
           "default": "service_log",
           "deploy_value": "@SERVICE_LOG_DIR@",
           "restart": true,
-          "help": "녹취(call.d/*.rtp) + SIP/미디어서버/CSC msg.jsonl + flow.jsonl 저장 루트. CMP·CSC 와 동일 경로여야 함."
+          "help": "SIP·CMP·CSC 제어 msg·flow 5분 버킷(sip/<연/월/일/시>/). 사이트 디렉터리에서 유도된다 — 배포 때 base oam [사이트 디렉터리] 값으로 채워지고, 여기서 바꿔도 다시 채워진다.",
+          "site_area": "log"
+        },
+        {
+          "key": "Setup.Recording.Dir",
+          "label": "녹취 (recordings)",
+          "type": "path",
+          "default": "",
+          "site_area": "recordings",
+          "deploy_value": "@RECORD_DIR@",
+          "restart": true,
+          "help": "통화·세션 기록(volte/ ptt/<그룹>/ — call.json·session.json·group.json, CMP 가 같은 세션 디렉터리에 녹취) + SDS 메시지(message/ message_direct/). 사이트 디렉터리에서 유도된다 — 배포 때 base oam [사이트 디렉터리] 값으로 채워지고, 여기서 바꿔도 다시 채워진다."
+        },
+        {
+          "key": "Setup.State.Dir",
+          "label": "상태 (state)",
+          "type": "path",
+          "default": "",
+          "site_area": "state",
+          "deploy_value": "@STATE_DIR@",
+          "restart": true,
+          "help": "진행 중 세션 상태(volte/ ptt/ — 가입자별 1파일)와 저장 경로 write probe(.probe). 사이트 디렉터리에서 유도된다 — 배포 때 base oam [사이트 디렉터리] 값으로 채워지고, 여기서 바꿔도 다시 채워진다."
+        },
+        {
+          "key": "Setup.Stats.Dir",
+          "label": "통계 (stats)",
+          "type": "path",
+          "default": "",
+          "site_area": "stats",
+          "deploy_value": "@STATS_DIR@",
+          "restart": true,
+          "help": "PTT 시도 장부(ptt_attempts/<일>.jsonl — OAM 통계 집계의 원천). 사이트 디렉터리에서 유도된다 — 배포 때 base oam [사이트 디렉터리] 값으로 채워지고, 여기서 바꿔도 다시 채워진다."
         }
       ],
       "scope": "service"

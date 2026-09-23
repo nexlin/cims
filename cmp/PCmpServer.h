@@ -145,8 +145,11 @@ private:
     // sesid 발행 유틸: {caller}::cmp::{us_ts}::{counter}
     static std::string issueSesid(const std::string& caller);
 
-    // CMP flow 로그 (통합 디렉터리: {ServiceLogDir}/YYYY/MM/DD/HH/cmp_01_{service}.flow.jsonl)
-    std::string _serviceLogDir;
+    // 사이트 영역(site_directory_layout.md) — 서비스 로그(log)·녹취(recordings)·서비스 콘텐츠(content).
+    //   flow·msg 5분 버킷 = <log>/sip/YYYY/MM/DD/HH/cmp_01{.flow|_csp.msg}.{mm5}.jsonl, 누수 회수 = <log>/leak_reclaim/
+    std::string _serviceLogDir;     // 서비스 로그 영역 루트 (ServiceLogging.Dir — 비면 서비스 로그 비활성)
+    std::string _sipLogDir;         // <log>/sip — flow·msg 버킷 루트
+    std::string _contentDir;        // 서비스 콘텐츠 영역 (Content.Dir, 비면 <log>) — 안내음성 운영자 음원 announcements/
     std::string _systemId;      // 파일명용 (cmp_01)
     std::string _nodeName;      // flow node 필드용 (cmp)
 
@@ -182,8 +185,7 @@ private:
     std::string bucketSuffix();      // (tm_min/5)*5 → "00".."55"
     std::string flowFilePath();      // {hourDir}/{systemId}.flow.{mm5}.jsonl
     std::string msgFilePath();       // {hourDir}/{systemId}_csp.msg.{mm5}.jsonl
-    std::string getFlowHourDir();
-    std::string getMsgHourDir();
+    std::string getFlowHourDir();    // <log>/sip/YYYY/MM/DD/HH
     static std::string getTimestamp();
 
     // ── 서비스 로그 writer — 공용 2단(dispatch + NAS flusher + 로컬 스풀 폴백) ────
@@ -200,9 +202,6 @@ private:
     std::string _seedBucketKey;          // 기동 시점 버킷 — 시딩(재기동 seq 연속성) 합류 판정
     void startServiceLogWriter();        // startServer 에서 기동
     void startRecStoreWriter();          // 녹취 op worker(gclsRecStoreWriter) 기동 — A-PRC-017 콜백 구성
-
-    // msg_log body
-    std::string _msgLogDir;
 
     // VoIP Resource Pool
     int _rtpStartPort;
@@ -225,7 +224,7 @@ private:
     std::string annRootPath() const;        // <config dir>/../<AnnouncementDir>
     std::string annOpCatalogPath() const;   // 배포본 <install>/config/announcements.jsonl, 아니면 <config dir>/announcements.jsonl
     std::string annInstallRoot() const;     // 배포 레이아웃이면 <config dir>/../.. (= install_path), 아니면 빈 문자열
-    std::string annOpRootPath() const;      // 운영자 음원 루트 — <install>/announcements 또는 sys 와 같은 루트
+    std::string annOpRootPath() const;      // 운영자·가입자 음원 루트 — <content>/announcements (op/ sub/)
     void onAnnDone(const PAnnTicker::Done& d);   // 재생 완료 → RELAY_PLAY_DONE 이벤트 (리액터 스레드, relay 락 없음)
     void updateAnnMissingAlarm(const std::vector<std::string>& missing);
     bool _annMissingAlarm = false;
@@ -285,8 +284,8 @@ private:
     void reactorLoop(int widx);
     void epollAddHandler(int widx, PHandler* h, const std::vector<int>& fds);
 
-    // Recording config
-    bool _recordEnable;
+    // 녹취 — 세션별 디렉터리는 CSP 가 record_dir 로 지정한다. 이 값은 녹취 영역 루트(Recording.Dir, 비면 <log>)로
+    //   녹취 저장 장애 알람(A-PRC-017)의 대상 경로다.
     std::string _recordDir;
     int _segmentIntervalSec;  // VoLTE 세그먼트 회전 간격 (초, 기본 60)
 
@@ -306,7 +305,7 @@ private:
     int _floorGrantRetxSec;   // T20(Floor Granted) — 큐 승급 화자에게 Granted 재송신 간격. 기본 1초
 
     // 누수 회수(leak reclaim) 관측 — sweeper 가 고아 relay 를 회수한 누적 카운터(STATS 노출) +
-    //   회수 세션 상세를 {ServiceLogDir}/leak_reclaim/YYYY/MM/DD/reclaim.jsonl 에 기록(콘솔 조회용).
+    //   회수 세션 상세를 <log>/leak_reclaim/YYYY/MM/DD/reclaim.jsonl 에 기록(콘솔 조회용).
     //   reason=orphan_no_rtp(setup 실패/무RTP, _orphanReclaimSec 회수) | hold_timeout(RTP 받았으나 owner 가
     //   REMOVE 미발행 = CSP crash/BYE 누락, _sessionTimeout 회수). RtpMap fix 후 이 카운터 증가=새 버그 신호.
     long _leakReclaimTotal;

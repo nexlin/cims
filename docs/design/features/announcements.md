@@ -256,7 +256,8 @@ leg 당 동시 재생기 1개 — 같은 leg 에 새 RELAY_PLAY 는 이전 재�
 
 | 키 | 기본 | 뜻 |
 |---|---|---|
-| `AnnouncementDir` | `announcements` | 음원 루트(`sys/`·`op/`·`sub/` 하위) — 상대 경로는 install_path 기준 |
+| `AnnouncementDir` | `announcements` | 동봉 기본 세트(`sys/`) 루트 — 상대 경로는 install_path 기준 |
+| `Content.Dir` | (사이트에서 유도) | 서비스 콘텐츠 영역 — 운영자·가입자 음원은 `<Content.Dir>/announcements/{op,sub}/`([site_directory_layout.md](site_directory_layout.md)) |
 | `AnnPlayers` | 32 | 동시 재생기 상한. **0 = 기능 비활성**(`resource.ann` 미광고) |
 | `AnnMaxPlayMs` | 60000 | `max_ms` 생략 시 상한(repeat 0 은 예외 — STOP 까지) |
 | `AnnNatWaitMs` | 500 | NAT leg 의 재생 시작 지연 상한(latch 전 선언 주소 오송신 방지, §8) |
@@ -360,7 +361,7 @@ TS 29.165) 를 본다. 어느 것도 없으면 `DefaultProfile`.
   목록·단건 응답에 실린다. CSP 는 `DbManager` 가 컬럼 존재를 기동 때 확인해 `LoadAllUsers`/`SelectUser` 로 `CspUser::m_strRingbackMedia` 에 읽는다(USER_CHANGED 반영).
 - `CCspAnnouncementService::OnRingback` 이 프로파일 동작을 고른 뒤 피착신 `CspUser` 의 값이 있으면 `media` 만 바꾼다.
 - **가입자 WAV 업로드(`sub:`)** — 라이브러리 API `POST /api/v1/announcements?scope=sub&id=<가입 번호 숫자열>`(§7.3)이 `sub:<숫자열>`(E.164 의 `+` 를 뗀 것 — CSC
-  `ringback_media` 형식 `[a-z0-9_]`)로 등록하고 `<store>/announcements/sub/` 에 두며 CMP 배포는 op 와 같다. 콘솔 `/service/announcements` [가입자 링백…] 이 WAV 를 올린 뒤
+  `ringback_media` 형식 `[a-z0-9_]`)로 등록하고 `<content>/announcements/sub/` 에 두며 CMP 배포는 op 와 같다. 콘솔 `/service/announcements` [가입자 링백…] 이 WAV 를 올린 뒤
   그 번호의 전화 회선(call|voip)을 찾아 `ringback_media=sub:<숫자열>` 을 PUT 한다(음원과 회선 지정을 한 번에). 기존 음원(`sys:`/`op:`/`sub:`)을 고르거나 비우는 것은
   가입자 화면 드로어의 회선 카드 [편집] › 링백(라이브러리 목록 select — 컬럼 미적용 DB 는 항목이 숨는다). 삭제는 op 와 같고 회선 값은 그대로 남는다(음원이 없으면 CMP
   `MEDIA_NOT_FOUND` → 프로파일 폴백 없이 링백 없음 — 삭제 뒤 회선 값을 비우는 것은 운영 절차).
@@ -401,19 +402,19 @@ CMake `dist` 가 `dist/cmp/announcements/sys/` 에 복사하고, OAM 패키지�
 
 배포 자산 분배(패키지·컬렉션과 같은 평면)라 **base OAM**(`ems/core/oam`)이 소유한다 — agent 토큰·배포 레코드가 base 에 있다. 서비스 모듈(oam-svc)이 아니다.
 
-- **저장소** = 관리 store `<store>/announcements/` : `catalog.jsonl`(op·sub 행) + `<scope>/<name>.wav`(마스터, 청취) + `<scope>/<name>.{pcmu,pcma,g722,amrwb}`(scope = `op` 운영자 · `sub` 가입자 링백 §6.3 — 배포·대조·삭제는 `<scope>/<file>` 상대 경로 단위, 노드는 `announcements/<scope>/`). 동봉 세트 표시용 카탈로그·마스터는 OAM 패키지 `announcements/`.
+- **저장소** = 서비스 콘텐츠 영역 `<content>/announcements/`(사이트 디렉터리의 `content/` — site_directory_layout.md) : `catalog.jsonl`(op·sub 행) + `<scope>/<name>.wav`(마스터, 청취) + `<scope>/<name>.{pcmu,pcma,g722,amrwb}`(scope = `op` 운영자 · `sub` 가입자 링백 §6.3 — 배포·대조·삭제는 `<scope>/<file>` 상대 경로 단위, 노드는 `announcements/<scope>/`). 동봉 세트 표시용 카탈로그·마스터는 OAM 패키지 `announcements/`.
 - **API**(`ems/core/oam/src/handlers/announcements.py`, `/api/v1/announcements`) : `GET`(목록 `media[]`, `?nodes=1` 이면 CMP 노드별 보유 상태) · `POST ?id=&kind=&description=&loop=&normalize=&replace=`
   (본문 octet-stream WAV — 게이트웨이가 multipart 를 JSON 으로 환원하므로 계측기와 같은 규약; `services/announcements.register` 가 변환기로 4 코덱 생성, DTX 끔) · `GET /nodes` ·
   `POST /deploy {ids?}` · `GET /{id}` · `GET /{id}/master.wav` · `GET /{id}/files/{codec}` · `DELETE /{id}[?undeploy=1]`. 권한 GET=monitor·POST=operator·DELETE=manager.
   삭제는 참조 검사를 하지 않는다 — 참조 중이던 프로파일의 안내는 `MEDIA_NOT_FOUND` 폴백(응답 코드만)으로 드러난다.
-- **배포** = OAM → agent(sync REST) → CMP install_path : 음원 파일은 신설 `PUT /module-file?install_path=&path=announcements/op/<file>`(바이너리 ≤ 64 MB, atomic, `announcements/` 밖·`..` 거부),
+- **배포** = OAM → agent(sync REST) → CMP 노드의 콘텐츠 영역 : 음원 파일은 `PUT /module-file?install_path=&path=announcements/op/<file>`(바이너리 ≤ 64 MB, atomic, `announcements/` 밖·`..` 거부 —
+  agent 는 그 모듈 `config.json` 의 `Content.Dir` 아래에 둔다, 키가 없는 이전 버전 모듈은 install_path 아래),
   대조는 `GET /module-files?install_path=&dir=announcements/op`(name·size·sha256 — 라이브러리 지문과 비교해 **없거나 다른 파일만** 올린다), 카탈로그는 기존
   `PUT /collection?name=announcements`(`signal:true` → SIGUSR1 → CMP 재적재). CMP 배포 레코드 = package name `cmp`(없으면 process_name `CMP`·설치 경로 `/cmp/`).
   `DELETE /module-file` 로 걷는다(`?undeploy=1`). 노드 상태 = `ok|partial|missing|unreachable`.
-- **CMP 쪽 자리** = 배포 레이아웃 `<install_path>/`(버전 디렉토리) 아래 `config/announcements.jsonl`(카탈로그 컬렉션) + `announcements/op/*`(파일). CMP 는 자기 설정 파일
-  위치(`<install_path>/cmp/config/cmp.json`)에서 두 층 위를 install_path 로 보고 그 둘을 읽는다(`PCmpServer::annInstallRoot` — `config/`·`cmp/` 가 있는 배포 레이아웃일 때만,
-  스크래치 실행은 모듈 자기 `config/announcements.jsonl`·`announcements/` 폴백). 카탈로그 행의 `files` 경로는 `op/<file>`(운영자 루트 기준). agent 는 모듈 **버전 업그레이드 때
-  collection jsonl 과 함께 `announcements/` 를 새 버전으로 이어받는다**(둘 중 하나만 옮기면 `MEDIA_NOT_FOUND`).
+- **CMP 쪽 자리** = 카탈로그는 배포 레이아웃 `<install_path>/config/announcements.jsonl`(컬렉션 — 업그레이드 때 다른 컬렉션과 함께 이어받는다), 음원 파일은
+  콘텐츠 영역 `<Content.Dir>/announcements/{op,sub}/*`(버전 디렉터리 밖이라 이어받을 것이 없다). 스크래치 실행(배포 레이아웃 아님)은 모듈 자기 `config/announcements.jsonl` 을 읽고,
+  `Content.Dir` 이 비면 단일 루트 규칙대로 서비스 로그 루트를 콘텐츠 영역으로 본다. 카탈로그 행의 `files` 경로는 `op/<file>`(운영자·가입자 루트 기준).
 - **콘솔** `/service/announcements`(CIMS 서비스 팩, 서비스 섹션) : 목록·청취(마스터 WAV 를 인증 fetch → Blob)·WAV 등록(P.56 정규화 권장값 안내 -26·신호음 -16·음악 -20)·
   삭제(노드 파일도 걷음)·[CMP 배포] + 노드별 보유 띠. `Setup.Announcement.Rules` 의 tone/media 는 이 id 를 쓴다.
 - 설정 `Announcements.SampleConv`(변환기 경로 — 기본 패키지 `native/`, 개발 트리 `build/bin`).
@@ -483,7 +484,7 @@ CMake `dist` 가 `dist/cmp/announcements/sys/` 에 복사하고, OAM 패키지�
 | ⑧ P2 선반영 | 통화중대기 시그널링(Alert-Info + 발신자 `call_waiting` 안내/링백) · 가입자 링백(`ringback_media` 컬럼·CSC API·CSP 해석) · 감사 이벤트 E-AUD-017(등록·삭제·배포) · CSP 모니터 `MC_SIP_STATS` 에 `ann_started/ann_fallback/ann_active_*` | 빌드·단위시험 pass · 라이브 CSP 로그에 통화중 착신의 `call waiting (Alert-Info)` 판정 확인 |
 | ⑨ 라이브 배포 실측 (.48 관리평면, 2026-09-21) | cmp 0.2.93 · csp 0.2.141 · csc 0.2.118 · oam 0.2.152 · agent 0.2.104 · oam-cims-tester 0.1.22 · cims-tester-worker 0.1.17 | 없는 번호 → 183+SDP → 6.16 s 안내 → 404(cspsim) · 계측기 `VOLTE-ANN-NOTFOUND` 4/4 pass · `VOLTE-ANN-NO-ANSWER`(착신 480 → 안내 → 480, early_media/early_rtp 100 %) 4/4 pass · 라이브러리 등록 → `/deploy`(파일 4 + 카탈로그 + SIGUSR1) → CMP STATS `ann_catalog.ids` 에 `op:` 포함(13 media) → `/nodes` presence ok → 재배포 idempotent(pushed []) → `DELETE ?undeploy=1` 로 노드 파일 회수·12 media · 감사 E-AUD-017 3건 |
 
-| ⑩ 보류 음악·링백 실측 (.48 관리평면, 2026-09-22) | csp 0.2.144 · csc 0.2.121 · cmp 0.2.94 · oam-cims-tester 0.1.23 · cims-tester-worker 0.1.19 — 실측이 드러낸 결함 수정 포함: psip 세션 갱신 판정에 방향 속성 추가(hold re-INVITE 가 "미디어 무변경" 으로 건너뛰어졌다) · psip media-list SDP 에 다이얼로그 방향 재작성(`HoldCall` 의 a=sendonly 가 와이어에 없었다) · CSC `/users` 목록 500(ptt 테이블 `ringback_media` SELECT) · CSC PUT 회선의 같은 realm 서비스 이관 passwd 요구 완화 · CSC PUT `ringback_media` 저장 누락 | `VOLTE-ANN-HOLD-MOH` 4/4(`moh_rtp_pct` 100 %, CSP `hold music sys:moh_simple → peer1` → resume 에 stopped 3.98 s) · `TRUNK-PBX-HOLD-RESUME` 4/4(PBX 보류 → 발신 UE 에 MOH 4/4) · `VOLTE-ANN-RINGBACK` pass(발신자 서비스 `announcement_profile: ringback` → 18x+SDP·early RTP 149 패킷 → 200 에 stopped) · `VOLTE-ANN-RINGBACK-SUB` pass(피착신 `ringback_media=sys:ann_connecting` 이 음원을 덮음 — CSP 로그 확인) · 회귀 NOTFOUND·NO-ANSWER·XFER-DENIED·CALL-BASIC pass · cmp 0.2.93→0.2.94 업그레이드 때 `announcements/op/*`·`config/announcements.jsonl` 이어받기 확인(STATS `op:` 포함 13 media → 시험 등록물 undeploy 뒤 12) |
+| ⑩ 보류 음악·링백 실측 (.48 관리평면, 2026-09-22) | csp 0.2.144 · csc 0.2.121 · cmp 0.2.94 · oam-cims-tester 0.1.23 · cims-tester-worker 0.1.19 — 실측이 드러낸 결함 수정 포함: psip 세션 갱신 판정에 방향 속성 추가(hold re-INVITE 가 "미디어 무변경" 으로 건너뛰어졌다) · psip media-list SDP 에 다이얼로그 방향 재작성(`HoldCall` 의 a=sendonly 가 와이어에 없었다) · CSC `/users` 목록 500(ptt 테이블 `ringback_media` SELECT) · CSC PUT 회선의 같은 realm 서비스 이관 passwd 요구 완화 · CSC PUT `ringback_media` 저장 누락 | `VOLTE-ANN-HOLD-MOH` 4/4(`moh_rtp_pct` 100 %, CSP `hold music sys:moh_simple → peer1` → resume 에 stopped 3.98 s) · `TRUNK-PBX-HOLD-RESUME` 4/4(PBX 보류 → 발신 UE 에 MOH 4/4) · `VOLTE-ANN-RINGBACK` pass(발신자 서비스 `announcement_profile: ringback` → 18x+SDP·early RTP 149 패킷 → 200 에 stopped) · `VOLTE-ANN-RINGBACK-SUB` pass(피착신 `ringback_media=sys:ann_connecting` 이 음원을 덮음 — CSP 로그 확인) · 회귀 NOTFOUND·NO-ANSWER·XFER-DENIED·CALL-BASIC pass |
 
 | ⑪ 착신전환 안내 (TS 24.604 CDIV) | 서버측 전환 — TAS `ResolveDiversion`(CFU 연쇄·상한 `Setup.Sip.Cdiv.MaxDiversions`·루프 486·DB 폴백·다이얼 플랜 번역) · 디스패처 재타게팅(181 `Setup.Sip.Cdiv.Notify181`·전환 대상 라우팅 재판정 `DecideOutboundRoute`·B-leg `History-Info`/`Supported: histinfo`·CDR `diversion`) · `CspDiversion`(RFC 7044/4458 순수 헬퍼) · 상황 `forwarded`·모드 `announce_then_tone`·`OnForwarded`·2 단계 링백 · 음원 `sys:ann_forwarded` · 302 경로 제거 · 계측기 `VOLTE-ANN-FORWARDED`(픽스처 `forward_to`, 지표 `cdiv_181_pct`·`cdiv_hi_pct`, libcsim `OnIncomingDiverted`) · CSC PUT 부분 업데이트(dnd/forward_id 키 있을 때만)·`forward_id` 형식 검사 (cmp 0.2.95(`sys:ann_forwarded` 동봉) · csp 0.2.146 · csc 0.2.122 · tester 0.1.24 · worker 0.1.20) | `S1-UNIT-CSP` `tests/csp_diversion_test.cpp` 16 checks · tester 단위시험 52 pass · 콘솔 tsc pass · **tb48 실측(2026-09-22)** `VOLTE-ANN-FORWARDED` 10/10 pass — CSP `CDIV +8213…26 → +8213…39 (hops=1)` → 181(`cdiv_181_pct` 100) → 183+SDP · `sys:ann_forwarded` 5540 ms completed → `ringback sys:ringback_kr(loop)` → 전환 대상 200 에 stopped(early RTP 350 패킷, `early_rtp_pct` 100) · 전환 대상 INVITE 의 `History-Info: <sip:+8213…26@…>;index=1, <sip:+8213…39@…;cause=302>;index=1.1;mp=1`(`cdiv_hi_pct` 100) · CDR `diversion{served,target,cause:302,hops:1}`+`announcement{forwarded, completed}` · 회귀 CALL-BASIC·ANN-NOTFOUND·ANN-RINGBACK·ANN-HOLD-MOH pass. 첫 실측이 드러낸 것 = 구 CMP 에 음원이 없으면 183 을 낸 뒤 RELAY_PLAY 가 거절돼 A 가 무음 → **RELAY_PLAY 수락 뒤 183** 으로 순서 고정(§3.1) |
 

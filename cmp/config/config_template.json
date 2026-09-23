@@ -162,7 +162,7 @@
           "default": "announcements",
           "restart": false,
           "reload_hint": "SIGUSR1/ANN_RELOAD 로 재적재.",
-          "help": "음원 파일 루트(install_path 기준 상대 또는 절대). sys/ = 패키지 동봉 기본 세트, op/ = 운영자 등록(콘솔 안내음성 라이브러리 [배포]가 agent 로 내려준다)."
+          "help": "패키지 동봉 기본 세트(sys/) 루트 — install_path 기준 상대 또는 절대. 운영자·가입자 음원(op/ sub/)은 Content.Dir/announcements 에서 읽는다."
         }
       ],
       "scope": "service"
@@ -404,17 +404,38 @@
     },
     {
       "key": "service_log",
-      "title": "서비스 로그 (녹취·flow)",
-      "description": "녹취·flow 로그의 공통 저장 루트. CSP·CMP·CSC 가 같은 경로를 쓰고 OAM 이 조회하므로 그룹 공통(service)으로 관리한다.",
+      "title": "사이트 경로 · 서비스 로그",
+      "description": "CMP 가 쓰는 사이트 영역 — 관측 로그(log/sip·leak_reclaim), 녹취(recordings — 세션 디렉터리는 CSP 가 정해 준다), 안내음성 운영자 음원(content/announcements). base oam 사이트 디렉터리에서 유도된다(site_directory_layout.md).",
       "fields": [
         {
           "key": "ServiceLogging.Dir",
-          "label": "서비스 로그 루트",
+          "label": "서비스 로그 (log)",
           "type": "path",
           "default": "service_log",
           "deploy_value": "@SERVICE_LOG_DIR@",
           "restart": true,
-          "help": "녹취(raw_*.rtp, seg_*.rtp) + flow.jsonl 저장 루트. CSP·CSC 와 동일 경로여야 함."
+          "help": "CMP msg·flow 5분 버킷(sip/<연/월/일/시>/)·누수 회수 기록(leak_reclaim/). 사이트 디렉터리에서 유도된다 — 배포 때 base oam [사이트 디렉터리] 값으로 채워지고, 여기서 바꿔도 다시 채워진다.",
+          "site_area": "log"
+        },
+        {
+          "key": "Recording.Dir",
+          "label": "녹취 (recordings)",
+          "type": "path",
+          "default": "",
+          "site_area": "recordings",
+          "deploy_value": "@RECORD_DIR@",
+          "restart": true,
+          "help": "녹취 루트 — 세션별 디렉터리는 CSP 가 record_dir 로 지정하고, 이 값은 녹취 저장 장애 알람(A-PRC-017)의 대상 경로다. 사이트 디렉터리에서 유도된다 — 배포 때 base oam [사이트 디렉터리] 값으로 채워지고, 여기서 바꿔도 다시 채워진다."
+        },
+        {
+          "key": "Content.Dir",
+          "label": "서비스 콘텐츠 (content)",
+          "type": "path",
+          "default": "",
+          "site_area": "content",
+          "deploy_value": "@CONTENT_DIR@",
+          "restart": true,
+          "help": "안내음성 운영자·가입자 음원 루트(announcements/{op,sub}/ — 콘솔 안내음성 라이브러리 [배포]가 agent 로 내려준다). 사이트 디렉터리에서 유도된다 — 배포 때 base oam [사이트 디렉터리] 값으로 채워지고, 여기서 바꿔도 다시 채워진다."
         },
         {
           "key": "ServiceLogging.SpoolDir",

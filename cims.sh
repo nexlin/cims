@@ -260,6 +260,28 @@ EOF
     ok "up 완료 — 콘솔: https://<서버IP>:4419 (configure 재실행으로 시크릿 갱신 → 재로그인 필요)"
 }
 
+# ── 개발 사이트 영역 — configure 가 정한 사이트 디렉터리(.cims configure.site_dir, 기본 <dist>/ext_mnt)와
+#    영역 override(service_log_dir·record_dir). 규칙은 configure.sh 와 같다(site_directory_layout.md).
+_dev_site_area() {
+    local _c="$SCRIPT_DIR/.cims/server.local.json" site
+    eval "$(cims_local_cfg_eval "$_c" site_dir service_log_dir record_dir)"
+    site="${_init_site_dir:-$DIST_DIR/ext_mnt}"
+    case "$1" in
+        log)        echo "${_init_service_log_dir:-$site/log}" ;;
+        recordings) echo "${_init_record_dir:-$site/recordings}" ;;
+        *)          echo "$site/$1" ;;
+    esac
+}
+_dev_site_areas_reset() {
+    local a d
+    for a in log recordings stats state; do
+        d="$(_dev_site_area "$a")"
+        [[ -n "$d" ]] || continue
+        rm -rf "$d" 2>/dev/null || true
+        mkdir -p "$d"
+    done
+}
+
 # ── 데이터 정리 ───────────────────────────────────────────────
 cmd_clean() {
     local target="${1:-all}"
@@ -275,10 +297,8 @@ cmd_clean() {
     fi
 
     if [[ $target == "all" || $target == "data" ]]; then
-        info "서비스 이력/녹취/메시지 로그 정리..."
-        rm -rf "$DIST_DIR/ext_mnt/service_log"
-        rm -rf "$DIST_DIR/ext_mnt/msg_log"
-        mkdir -p "$DIST_DIR/ext_mnt/service_log" "$DIST_DIR/ext_mnt/msg_log"
+        info "서비스 로그/녹취/통계/상태 정리 (사이트 영역)..."
+        _dev_site_areas_reset
         ok "서비스 데이터 정리 완료"
     fi
 
@@ -351,9 +371,8 @@ cmd_reset() {
         info "로그 정리..."
         rm -f "$LOG_DIR"/*.log "$LOG_DIR"/*_*.log 2>/dev/null || true
 
-        info "서비스이력/메시지 로그 정리..."
-        rm -rf "$DIST_DIR/ext_mnt/service_log" "$DIST_DIR/ext_mnt/msg_log" 2>/dev/null || true
-        mkdir -p "$DIST_DIR/ext_mnt/service_log" "$DIST_DIR/ext_mnt/msg_log"
+        info "서비스 로그/녹취/통계/상태 정리 (사이트 영역)..."
+        _dev_site_areas_reset
 
         info "Agent 설치 경로 정리 (/tmp/cims-agent-*)..."
         rm -rf /tmp/cims-agent-* 2>/dev/null || true
@@ -826,12 +845,8 @@ print(best.get('domain','') if best else '')
     echo ""
     header "=== 검증 결과 ==="
 
-    # 녹취 파일 확인 — 기록 위치는 설정된 service_log_dir 이다. dist 안의 기본 경로만
-    #   보면 로그 경로를 옮긴 환경(.cims service_log_dir)에서 늘 '파일 없음' 으로 뜬다.
-    local rec_root=""
-    eval "$(cims_local_cfg_eval "$SCRIPT_DIR/.cims/server.local.json" service_log_dir)"
-    rec_root="${_init_service_log_dir:-}"
-    [[ -n "$rec_root" && -d "$rec_root" ]] || rec_root="$DIST_DIR/ext_mnt/service_log"
+    # 녹취 파일 확인 — 기록 위치는 사이트 디렉터리의 녹취 영역이다(configure 의 --site-dir/--record-dir).
+    local rec_root; rec_root="$(_dev_site_area recordings)"
     local rec_files; rec_files=$(find "$rec_root" -name "seg_*.rtp" -size +0 2>/dev/null | wc -l)
     local rec_zero;  rec_zero=$(find "$rec_root" -name "seg_*.rtp" -size 0 2>/dev/null | wc -l)
     if [[ $rec_files -gt 0 ]]; then

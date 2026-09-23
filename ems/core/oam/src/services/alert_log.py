@@ -1,7 +1,7 @@
 """
 Alert 이력 — 파일 기반 (JSONL, 일별 회전)
 
-저장 경로: {ServiceLogDir}/alerts/YYYY/MM/DD.jsonl
+저장 경로: {ServiceLogging.Dir}/alerts/YYYY/MM/DD.jsonl
 (append/조회 코어는 daily_jsonl 공용 — event_log 와 공유)
 
 각 라인은 알람 이벤트 — 발생(open)·해제(close)·승인(ack) 1건.

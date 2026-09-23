@@ -127,12 +127,12 @@ L1 수신부(`handlers/agent_api.py _metric`)는 `module_events` 를 event_log �
 
 | 저장물 | 경로 | 내용 | SoT 성격 |
 |---|---|---|---|
-| 알람 스트림 | `{ServiceLogDir}/alerts/YYYY/MM/DD.jsonl` | action=open/close/change/ack/comment 레코드(스키마 = 표준화 §3.2) | **알람 이력의 SoT.** 활성 알람 상태는 스트림 replay 의 파생물 |
-| 이벤트 스트림 | `{ServiceLogDir}/events/YYYY/MM/DD.jsonl` | `{ts,type,kind,source,message,params}` | 이벤트 이력의 SoT |
-| 모듈 카탈로그 보존 | `{ServiceLogDir}/fm_catalog/<node>.json` | 노드별 마지막 FM_REGISTER 카탈로그(원자적 교체) | 모듈 다운 중에도 `/alerts/catalog` 병합·복원용 |
+| 알람 스트림 | `{ServiceLogging.Dir}/alerts/YYYY/MM/DD.jsonl` | action=open/close/change/ack/comment 레코드(스키마 = 표준화 §3.2) | **알람 이력의 SoT.** 활성 알람 상태는 스트림 replay 의 파생물 |
+| 이벤트 스트림 | `{ServiceLogging.Dir}/events/YYYY/MM/DD.jsonl` | `{ts,type,kind,source,message,params}` | 이벤트 이력의 SoT |
+| 모듈 카탈로그 보존 | `{ServiceLogging.Dir}/fm_catalog/<node>.json` | 노드별 마지막 FM_REGISTER 카탈로그(원자적 교체) | 모듈 다운 중에도 `/alerts/catalog` 병합·복원용 |
 
-- DB 테이블은 두지 않는다(현행 유지) — 스트림은 공유 서비스 로그 영역(`ServiceLogDir`,
-  그룹 공유 스토리지 — oam_ha)에 있어 OAM 절체 후에도 연속된다. 관리 store(file_store)를
+- DB 테이블은 두지 않는다(현행 유지) — 스트림은 사이트 디렉터리의 로그 영역(`ServiceLogging.Dir`,
+  그룹 공유 스토리지 — oam_ha, [site_directory_layout.md](features/site_directory_layout.md))에 있어 OAM 절체 후에도 연속된다. 관리 store(file_store)를
   쓰지 않는 이유는 self_reporting §4(단일 writer 리스와 쓰기 소유 충돌).
 - 일별 파일 분리가 회전 단위다.
 

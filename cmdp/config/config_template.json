@@ -106,9 +106,8 @@
           "label": "FD 스토어 디렉터리",
           "type": "string",
           "default": "",
-          "deploy_value": "@SERVICE_LOG_DIR@/mcdata_fd",
           "restart": false,
-          "help": "csc McDataFd.Dir 와 같은 경로 (NAS 공유). 비면 ServiceLogging.Dir/mcdata_fd."
+          "help": "CSC McDataFd.Dir 와 같은 경로여야 한다(NAS 공유). 비우면 <Content.Dir>/mcdata_fd."
         }
       ],
       "scope": "system"
@@ -152,12 +151,23 @@
         },
         {
           "key": "ServiceLogging.Dir",
-          "label": "서비스 로그 디렉터리",
-          "type": "string",
+          "label": "서비스 로그 (log)",
+          "type": "path",
           "default": "",
           "deploy_value": "@SERVICE_LOG_DIR@",
           "restart": false,
-          "help": "flow/msg jsonl 루트 (csp/cmp 와 통합 디렉터리)."
+          "help": "CMDP msg·flow 5분 버킷(sip/<연/월/일/시>/). 사이트 디렉터리에서 유도된다 — 배포 때 base oam [사이트 디렉터리] 값으로 채워지고, 여기서 바꿔도 다시 채워진다.",
+          "site_area": "log"
+        },
+        {
+          "key": "Content.Dir",
+          "label": "서비스 콘텐츠 (content)",
+          "type": "path",
+          "default": "",
+          "site_area": "content",
+          "deploy_value": "@CONTENT_DIR@",
+          "restart": true,
+          "help": "MCData FD 스토어 기본 위치(content/mcdata_fd/ — CSC 와 같은 경로). 사이트 디렉터리에서 유도된다 — 배포 때 base oam [사이트 디렉터리] 값으로 채워지고, 여기서 바꿔도 다시 채워진다."
         },
         {
           "key": "ServiceLogging.SpoolDir",

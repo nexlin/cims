@@ -5,17 +5,17 @@ android_ue_provisioning.md §3-2 · mcdata_messaging.md §4.1.
 
 `GET /provisioning/history?kind=call|ptt|message&since=&until=&limit=`(mcptt.handle_provisioning_history)의
 데이터 계층. `until` 이 있으면 [since, until] 창 조회(관제 앱 이력 화면 — 하루 단위 페이지), 없으면 폴링 커서.
-종료분 항목에는 녹취 식별자(`recordingId` = 세션 디렉터리의 ServiceLogDir 상대 경로, OAM `/api/v1/recordings/{id}` 와
+종료분 항목에는 녹취 식별자(`recordingId` = 세션 디렉터리의 녹취 영역(Recording.Dir) 상대 경로, OAM `/api/v1/recordings/{id}` 와
 같은 키)와 `hasRecording`(segments.jsonl 존재)을 싣는다 — 재생은 `/provisioning/recordings/{id}`(dispatch_recordings.py). 진행 중(live) 상태는 표준 구독(RFC 4235 dialog · RFC 4575 conference)이 담당하고 —
 이 API 는 그 구독을 대체하지 않는다 — 여기서는 **관제 범위 안의 지난 이력**만 커서(`since`)로 준다.
 
-백엔드 = CSP/CSC 가 공유 NAS(`ServiceLogging.Dir`)에 남기는 파일 SoT (flow_logger.py 가 콘솔용으로
-읽는 것과 같은 파일. 이쪽은 관제사(가입자) PKCE 토큰으로 **역할 범위**만 걸러 주는 얇은 구독자
-뷰다 — 콘솔 이력 API 를 재구현하지 않는다):
-  - kind=call    VoLTE 통화     `{sl}/{Y}/{M}/{D}/{H}/**/call.json`      (+ live `{sl}/state/volte/*.json`)
-  - kind=ptt     PTT 그룹 세션  `{sl}/ptt/*/{Y}/{M}/{D}/{H}/**/session.json` (+ live `{sl}/state/ptt/*.json`)
-  - kind=message SDS            그룹 `{sl}/message/*/{Y}/{M}/{D}/{H}/messages.jsonl`
-                                1:1  `{sl}/message_direct/{Y}/{M}/{D}/{H}/messages.jsonl`
+백엔드 = CSP 가 사이트 디렉터리(site_directory_layout.md)에 남기는 파일 SoT — 녹취 영역 `{rec}`(Recording.Dir)와
+상태 영역 `{state}`(State.Dir). flow_logger.py 가 콘솔용으로 읽는 것과 같은 파일이다. 이쪽은 관제사(가입자) PKCE 토큰으로
+**역할 범위**만 걸러 주는 얇은 구독자 뷰다 — 콘솔 이력 API 를 재구현하지 않는다:
+  - kind=call    VoLTE 통화     `{rec}/volte/{Y}/{M}/{D}/{H}/{prefix}/{caller}/{cid}.d/call.json` (+ live `{state}/volte/*.json`)
+  - kind=ptt     PTT 그룹 세션  `{rec}/ptt/*/{Y}/{M}/{D}/{H}/**/session.json`                  (+ live `{state}/ptt/*.json`)
+  - kind=message SDS            그룹 `{rec}/message/*/{Y}/{M}/{D}/{H}/messages.jsonl`
+                                1:1  `{rec}/message_direct/{Y}/{M}/{D}/{H}/messages.jsonl`
 
 범위(scope)는 호출자(mcptt `_dispatch_scope_sets`)가 관제사의 **역할**(roles 행 + role_monitor_targets/role_ptt_targets,
 mcptt_authorization.md §2)에서 유도한다 — CSP `CanWatch` 규칙 2/`CanListenPtt` 와 같은 규칙:
@@ -141,14 +141,14 @@ def _read_jsonl(path: str):
 
 # ── kind=call ──────────────────────────────────────────────────────────────
 
-def _rec_info(sl_dir: str, path: Optional[str]) -> Tuple[str, bool]:
-    """(recordingId, hasRecording) — path = call.json/session.json 경로. 세션 디렉터리의 sl_dir 상대 경로('/' 구분)가
+def _rec_info(rec_dir: str, path: Optional[str]) -> Tuple[str, bool]:
+    """(recordingId, hasRecording) — path = call.json/session.json 경로. 세션 디렉터리의 녹취 영역(rec_dir) 상대 경로('/' 구분)가
     녹취 식별자(OAM handlers/recording.py `id` 와 같은 키). segments.jsonl(또는 recordings/segments.jsonl) 이 있으면 녹취 있음."""
-    if not path or not sl_dir:
+    if not path or not rec_dir:
         return "", False
     d = os.path.dirname(path)
     try:
-        rel = os.path.relpath(d, sl_dir).replace(os.sep, '/')
+        rel = os.path.relpath(d, rec_dir).replace(os.sep, '/')
     except ValueError:
         return "", False
     if rel.startswith('..'):
@@ -157,11 +157,11 @@ def _rec_info(sl_dir: str, path: Optional[str]) -> Tuple[str, bool]:
     return rel, has
 
 
-def _call_row(cj: dict, sl_dir: str = "", path: Optional[str] = None) -> Optional[dict]:
+def _call_row(cj: dict, rec_dir: str = "", path: Optional[str] = None) -> Optional[dict]:
     if not isinstance(cj, dict) or not cj.get('call_id'):
         return None
     ts = cj.get('end_time') or cj.get('invite_time') or cj.get('start_time')
-    rec_id, has_rec = _rec_info(sl_dir, path)
+    rec_id, has_rec = _rec_info(rec_dir, path)
     return {
         "kind": "call", "ts": ts, "id": cj.get('call_id'), "recordingId": rec_id, "hasRecording": has_rec,
         "callType": cj.get('call_type') or 'volte',
@@ -177,28 +177,27 @@ def _call_in_scope(cj: dict, members: set) -> bool:
     return userpart(cj.get('initiator')) in members or userpart(cj.get('callee')) in members
 
 
-def scan_calls(sl_dir: str, members: set, since_dt: datetime, until_dt: datetime) -> List[dict]:
+def scan_calls(rec_dir: str, state_dir: str, members: set, since_dt: datetime, until_dt: datetime) -> List[dict]:
     if not members:
         return []
     rows = []
     seen = set()
-    # live (진행 중) — state/volte 스냅샷. 참여자 필드는 call.json 과 동형(CSP 기록).
-    for fp in _glob.glob(os.path.join(sl_dir, "state", "volte", "*.json")):
-        cj = _read_json(fp)
-        if cj and _call_in_scope(cj, members):
-            r = _call_row(cj)
-            if r and r["id"] not in seen:
-                seen.add(r["id"]); rows.append(r)
-    # 종료분 — 시간 버킷의 call.json. 실서버 레이아웃 = {sl}/volte/{Y}/{M}/{D}/{H}/{prefix}/{caller}/{cid}.d/call.json
-    #   (flow_logger _find_all_d_dirs 와 동형). 구/올인원 레이아웃({sl}/{Y}/...)도 함께 훑는다(버킷 한정이라 저비용).
-    for (y, m, d, h) in _hour_buckets(since_dt, until_dt):
-        pats = (os.path.join(sl_dir, "volte", y, m, d, h, "**", "call.json"),
-                os.path.join(sl_dir, y, m, d, h, "**", "call.json"))
-        for pat in pats:
-            for fp in _glob.glob(pat, recursive=True):
+    # live (진행 중) — {state}/volte 스냅샷. 참여자 필드는 call.json 과 동형(CSP 기록).
+    if state_dir:
+        for fp in _glob.glob(os.path.join(state_dir, "volte", "*.json")):
+            cj = _read_json(fp)
+            if cj and _call_in_scope(cj, members):
+                r = _call_row(cj)
+                if r and r["id"] not in seen:
+                    seen.add(r["id"]); rows.append(r)
+    # 종료분 — 시간 버킷의 call.json = {rec}/volte/{Y}/{M}/{D}/{H}/{prefix}/{caller}/{cid}.d/call.json
+    #   (flow_logger _find_all_d_dirs 와 동형).
+    if rec_dir:
+        for (y, m, d, h) in _hour_buckets(since_dt, until_dt):
+            for fp in _glob.glob(os.path.join(rec_dir, "volte", y, m, d, h, "**", "call.json"), recursive=True):
                 cj = _read_json(fp)
                 if cj and (cj.get('call_type') in (None, '', 'volte')) and _call_in_scope(cj, members):
-                    r = _call_row(cj, sl_dir, fp)
+                    r = _call_row(cj, rec_dir, fp)
                     if r and r["id"] not in seen:
                         seen.add(r["id"]); rows.append(r)
     return rows
@@ -206,7 +205,7 @@ def scan_calls(sl_dir: str, members: set, since_dt: datetime, until_dt: datetime
 
 # ── kind=ptt ────────────────────────────────────────────────────────────────
 
-def _ptt_row(sj: dict, sl_dir: str = "", path: Optional[str] = None) -> Optional[dict]:
+def _ptt_row(sj: dict, rec_dir: str = "", path: Optional[str] = None) -> Optional[dict]:
     gid = sj.get('mcptt_group_id') or sj.get('group_id')
     if not isinstance(sj, dict) or not gid:
         return None
@@ -214,7 +213,7 @@ def _ptt_row(sj: dict, sl_dir: str = "", path: Optional[str] = None) -> Optional
     start = sj.get('start_time') or sj.get('started_at')
     ses = sj.get('sesid') or sj.get('session_id')
     ts = sj.get('end_time') or start or sj.get('updated_at')
-    rec_id, has_rec = _rec_info(sl_dir, path)
+    rec_id, has_rec = _rec_info(rec_dir, path)
     return {
         "kind": "ptt", "ts": ts, "id": ses or sj.get('call_id') or gid, "recordingId": rec_id, "hasRecording": has_rec,
         "groupId": gid, "groupName": sj.get('name', ''), "sessionKind": "group",
@@ -244,7 +243,7 @@ def ptt_recording_id(group_key: str, ses_dir: str, windows=None) -> str:
     return f"{base}/{ses_dir}" if _SES_KEY_RE.match(ses_dir or '') else base
 
 
-def ptt_row_from_oam(it: dict, sl_dir: str = "") -> Optional[dict]:
+def ptt_row_from_oam(it: dict, rec_dir: str = "") -> Optional[dict]:
     """OAM `/api/v1/ptt/sessions` 항목(콘솔 PTT 이력의 읽기 모델 — ptt_index) → 내부 row.
     파일 스캔(_ptt_row)과 같은 키에 발언 지표·종류·참여자를 더한다. id 는 스캔 경로와 같은 우선순위(sesid → call_id → dir)라
     폴링 커서(스캔)와 창 조회(OAM)가 같은 세션을 같은 키로 낸다."""
@@ -257,8 +256,8 @@ def ptt_row_from_oam(it: dict, sl_dir: str = "") -> Optional[dict]:
         return None
     rec_id = ptt_recording_id(gk, key, it.get('windows'))
     has_rec = False
-    if rec_id and sl_dir:
-        d = os.path.join(sl_dir, rec_id)
+    if rec_id and rec_dir:
+        d = os.path.join(rec_dir, rec_id)
         has_rec = os.path.isfile(os.path.join(d, 'segments.jsonl')) or os.path.isfile(os.path.join(d, 'recordings', 'segments.jsonl'))
     if not has_rec:
         has_rec = int(it.get('segment_count') or 0) > 0
@@ -297,15 +296,15 @@ def _session_end_from_dir(ses_dir: str) -> Optional[str]:
     return last_seg or last_ev
 
 
-def scan_ptt(sl_dir: str, group_ids: set, since_dt: datetime, until_dt: datetime) -> List[dict]:
+def scan_ptt(rec_dir: str, state_dir: str, group_ids: set, since_dt: datetime, until_dt: datetime) -> List[dict]:
     if not group_ids:
         return []
     rows = []
     seen = set()
-    # 진행 중 = state/ptt/*.json (CSP 가 참가자마다 쓰고 떠나면 지운다) 에 세션이 있는 것. 이것이 라이브 판정의 정본이다 —
+    # 진행 중 = {state}/ptt/*.json (CSP 가 참가자마다 쓰고 떠나면 지운다) 에 세션이 있는 것. 이것이 라이브 판정의 정본이다 —
     #   시간 버킷의 session.json 은 시작 스냅샷이라 state/end_time 이 없어도 '진행 중' 이 아니다(콘솔 ptt_index 와 같은 기준).
     live_ids = set()
-    for fp in _glob.glob(os.path.join(sl_dir, "state", "ptt", "*.json")):
+    for fp in (_glob.glob(os.path.join(state_dir, "ptt", "*.json")) if state_dir else []):
         sj = _read_json(fp)
         if not sj:
             continue
@@ -316,11 +315,11 @@ def scan_ptt(sl_dir: str, group_ids: set, since_dt: datetime, until_dt: datetime
             r = _ptt_row(sj)
             if r and r["id"] not in seen:
                 seen.add(r["id"]); rows.append(r)
-    for (y, m, d, h) in _hour_buckets(since_dt, until_dt):
-        for fp in _glob.glob(os.path.join(sl_dir, "ptt", "*", y, m, d, h, "**", "session.json"), recursive=True):
+    for (y, m, d, h) in (_hour_buckets(since_dt, until_dt) if rec_dir else []):
+        for fp in _glob.glob(os.path.join(rec_dir, "ptt", "*", y, m, d, h, "**", "session.json"), recursive=True):
             sj = _read_json(fp)
             if sj and (sj.get('mcptt_group_id') or sj.get('group_id')) in group_ids:
-                r = _ptt_row(sj, sl_dir, fp)
+                r = _ptt_row(sj, rec_dir, fp)
                 if not r or r["id"] in seen:
                     continue
                 live = r["id"] in live_ids or (r.get("callId") and r["callId"] in live_ids)
@@ -349,14 +348,16 @@ def _msg_row(rec: dict, scope: str) -> dict:
     }
 
 
-def scan_messages(sl_dir: str, group_ids: set, members: set,
+def scan_messages(rec_dir: str, group_ids: set, members: set,
                   since_dt: datetime, until_dt: datetime) -> List[dict]:
     rows = []
+    if not rec_dir:
+        return rows
     buckets = _hour_buckets(since_dt, until_dt)
     # 그룹 SDS — 범위 = ptt_listen(group_ids). 그룹 디렉터리 전체를 훑고 레코드 group 으로 대조.
     if group_ids:
         for (y, m, d, h) in buckets:
-            for fp in _glob.glob(os.path.join(sl_dir, "message", "*", y, m, d, h, "messages.jsonl")):
+            for fp in _glob.glob(os.path.join(rec_dir, "message", "*", y, m, d, h, "messages.jsonl")):
                 for rec in _read_jsonl(fp):
                     if rec.get('group') in group_ids:
                         rows.append(_msg_row(rec, "group"))
@@ -364,7 +365,7 @@ def scan_messages(sl_dir: str, group_ids: set, members: set,
     #   CSP 가 Setup.McData.StoreOneToOneSds 로 보관을 켰을 때만 파일이 존재한다.
     if members:
         for (y, m, d, h) in buckets:
-            fp = os.path.join(sl_dir, "message_direct", y, m, d, h, "messages.jsonl")
+            fp = os.path.join(rec_dir, "message_direct", y, m, d, h, "messages.jsonl")
             for rec in _read_jsonl(fp):
                 if userpart(rec.get('from')) in members or userpart(rec.get('to')) in members:
                     rows.append(_msg_row(rec, "direct"))
@@ -497,32 +498,38 @@ def finish_rows(rows: List[dict], since_dt: datetime, until_dt: datetime, limit:
     return items, next_since, hours
 
 
-def scan(sl_dir: str, kind: str, scope: dict, since_dt: datetime, until_dt: datetime) -> List[dict]:
-    """kind 별 파일 스캔(범위 대조 포함). 미지 kind 는 빈 목록."""
+def scan(rec_dir: str, state_dir: str, kind: str, scope: dict, since_dt: datetime, until_dt: datetime) -> List[dict]:
+    """kind 별 파일 스캔(범위 대조 포함). rec_dir = 녹취 영역, state_dir = 상태 영역. 미지 kind 는 빈 목록."""
     members = scope.get('members') or set()
     ptt_groups = scope.get('ptt_groups') or set()
     if kind == "call":
-        return scan_calls(sl_dir, members, since_dt, until_dt)
+        return scan_calls(rec_dir, state_dir, members, since_dt, until_dt)
     if kind == "ptt":
-        return scan_ptt(sl_dir, ptt_groups, since_dt, until_dt)
+        return scan_ptt(rec_dir, state_dir, ptt_groups, since_dt, until_dt)
     if kind == "message":
-        return scan_messages(sl_dir, ptt_groups, members, since_dt, until_dt)
+        return scan_messages(rec_dir, ptt_groups, members, since_dt, until_dt)
     return []
 
 
-def query_ex(sl_dir: str, kind: str, scope: dict, since_dt: Optional[datetime],
+def _usable(d: str) -> bool:
+    return bool(d) and os.path.isdir(d)
+
+
+def query_ex(rec_dir: str, state_dir: str, kind: str, scope: dict, since_dt: Optional[datetime],
              limit: int, until_dt: Optional[datetime] = None) -> Tuple[List[dict], str, dict]:
     """(items, next_since, hours) — 파일 스캔 경로. scope = {'members': set, 'ptt_groups': set}.
     until_dt 가 있으면 창 조회(이력 화면) — 스캔 버킷 상한(_MAX_BUCKETS)은 그대로라 앱은 하루 단위로 나눠 묻는다."""
     since_dt, until_dt = window(since_dt, until_dt)
-    if not sl_dir or not os.path.isdir(sl_dir):
+    rec_dir = rec_dir if _usable(rec_dir) else ""
+    state_dir = state_dir if _usable(state_dir) else ""
+    if not (rec_dir or state_dir):
         return [], _iso(since_dt), {}
-    return finish_rows(scan(sl_dir, kind, scope, since_dt, until_dt), since_dt, until_dt, limit)
+    return finish_rows(scan(rec_dir, state_dir, kind, scope, since_dt, until_dt), since_dt, until_dt, limit)
 
 
-def query(sl_dir: str, kind: str, scope: dict, since_dt: Optional[datetime],
+def query(rec_dir: str, state_dir: str, kind: str, scope: dict, since_dt: Optional[datetime],
           limit: int, until_dt: Optional[datetime] = None) -> Tuple[List[dict], str]:
     """(items, next_since) — items 는 ts 오름차순 최근 limit 개(> since, ≤ until). next_since = 마지막 항목 ts
     (다음 폴링에 그대로 넣으면 그 이후만 받는다)."""
-    items, next_since, _hours = query_ex(sl_dir, kind, scope, since_dt, limit, until_dt)
+    items, next_since, _hours = query_ex(rec_dir, state_dir, kind, scope, since_dt, limit, until_dt)
     return items, next_since

@@ -1611,16 +1611,6 @@ def job_install(params: dict, oam_url: str, session_token: str) -> tuple:
                         if os.path.isfile(s) and not os.path.exists(d):
                             shutil.copy2(s, d)
                             migrated += f" +{fn}"
-                # ①-b 모듈 자원 파일(운영자 안내음성 announcements/ — agent /module-file 가 둔 것, announcements.md §7.3)
-                #    → 신규 버전으로 이어받는다. 카탈로그(config/announcements.jsonl)와 짝이라 둘 중 하나만 옮기면 MEDIA_NOT_FOUND 가 난다.
-                src_ann = os.path.join(src, "announcements")
-                dst_ann = os.path.join(install_path, "announcements")
-                if os.path.isdir(src_ann) and not os.path.isdir(dst_ann):
-                    try:
-                        shutil.copytree(src_ann, dst_ann)
-                        migrated += " +announcements"
-                    except OSError as e:
-                        print(f"[agent] announcements carry-over failed: {e}", flush=True)
                 # ② deployment overlay (<pkg>/config.json; legacy 는 root config.json)
                 #    params.config 가 오면 그 값이 SoT — 이관 생략.
                 if not params.get("config"):
@@ -1711,6 +1701,25 @@ def _resolve_pkg_subdir(install_path: str, params: dict) -> str:
     return ""
 
 
+def _module_content_dir(install_path: str) -> str:
+    """모듈 배포 config.json(flat 키)의 `Content.Dir` — 없으면 빈 문자열."""
+    pkg = _resolve_pkg_subdir(install_path, {})
+    for d in ((os.path.join(install_path, pkg) if pkg else ""), install_path):
+        if not d:
+            continue
+        try:
+            with open(os.path.join(d, "config.json"), encoding="utf-8") as f:
+                cfg = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(cfg, dict):
+            v = cfg.get("Content.Dir")
+            if v is None and isinstance(cfg.get("Content"), dict):
+                v = cfg["Content"].get("Dir")
+            return str(v or "").strip()
+    return ""
+
+
 def _count_dir(root: str, rel: str) -> int:
     """store 하위 디렉터리의 레코드 수 — 어느 store 가 정본인지 판단 근거 제시용."""
     try:
@@ -1727,8 +1736,11 @@ def job_migrate_oam_store(params: dict) -> tuple:
     떠 있으면 write 가 섞이고, 자기를 멈추면 콘솔이 사라져 이어서 지시할 통로가 없다).
     agent 는 OAM 의 수명과 무관하고 이미 그 모듈의 lifecycle 을 소유하므로 적절한 주체다.
 
-    params: {module, install_path, source_dir, target_dir, target_mount, config}
+    params: {module, install_path, source_dir, target_dir, target_mount, config,
+             site_copies?, site_merges?}
       - config: OAM 이 실체화한 신규 유효설정 (CimsRuntimeDir/CimsRuntimeMount 포함)
+      - site_copies: 사이트 디렉터리 구성의 백업 대상 영역(패키지·콘텐츠) [{area, src, dst}] — 4) 정지창에 복사
+      - site_merges: 관측·녹취·통계 영역 [{area, src, dst}] — 7) 기동 뒤 백그라운드 합류
 
     순서 — 실패 시 **구 설정으로 되돌려 기동**한다(데이터 유실 없음):
       1. target_mount 가 실제 마운트인지 + target 이 write 가능한지 확인 (아니면 즉시 실패,
@@ -1821,6 +1833,18 @@ def job_migrate_oam_store(params: dict) -> tuple:
     except Exception as e:
         return _restart_with_old(f"store 복사 실패: {e}")
 
+    # ── 4-b) 사이트 디렉터리 구성 — 백업 대상 영역(패키지·콘텐츠)도 같은 정지창에 옮긴다.
+    #   기동 직후 필요하다(패키지 = agent 번들·모듈 설치, 콘텐츠 = 안내음성 원본). source 가 이긴다(위와 같은 이유).
+    for mv in params.get("site_copies") or []:
+        s_dir, d_dir = str(mv.get("src") or "").rstrip("/"), str(mv.get("dst") or "").rstrip("/")
+        if not (s_dir and d_dir) or os.path.abspath(s_dir) == os.path.abspath(d_dir) or not os.path.isdir(s_dir):
+            continue
+        try:
+            shutil.copytree(s_dir, d_dir, symlinks=True, dirs_exist_ok=True)
+            log.append(f"site {mv.get('area')}: {s_dir} → {d_dir}")
+        except Exception as e:
+            return _restart_with_old(f"{mv.get('area')} 영역 복사 실패: {e}")
+
     # ── 5) config.json 기록 — 여기서부터 새 경로가 유효
     try:
         pkg_subdir = _resolve_pkg_subdir(install_path, params)
@@ -1843,20 +1867,24 @@ def job_migrate_oam_store(params: dict) -> tuple:
     #   범위 밖에 남으므로 새 위치로 옮겨 연속성을 살린다. 정지 창을 늘리지 않도록 기동
     #   **뒤에**, 그리고 job 을 붙들지 않도록 전용 스레드에서 수행한다 (로그는 시간축 분할
     #   구조라 나중에 합쳐도 안전).
-    new_log_dir = str((params.get("config") or {}).get("ServiceLogging.Dir") or "").rstrip("/")
-    old_log_dir = os.path.join(src, "service_log")
-    if new_log_dir and os.path.isdir(old_log_dir) \
-            and os.path.abspath(new_log_dir) != os.path.abspath(old_log_dir):
-        threading.Thread(target=_merge_service_logs, args=(old_log_dir, new_log_dir),
-                         daemon=True, name="agent-logmerge").start()
-        log.append(f"service_log 합류 시작(백그라운드): {old_log_dir} → {new_log_dir}")
+    merges = [(str(m.get("src") or "").rstrip("/"), str(m.get("dst") or "").rstrip("/"))
+              for m in (params.get("site_merges") or [])]
+    if not params.get("site_merges"):
+        # 단일 루트 레이아웃 — 부트스트랩 노드 로컬 로그(<store>/service_log)를 새 로그 루트로
+        new_log_dir = str((params.get("config") or {}).get("ServiceLogging.Dir") or "").rstrip("/")
+        merges = [(os.path.join(src, "service_log"), new_log_dir)]
+    for old_dir, new_dir in merges:
+        if new_dir and os.path.isdir(old_dir) and os.path.abspath(new_dir) != os.path.abspath(old_dir):
+            threading.Thread(target=_merge_service_logs, args=(old_dir, new_dir),
+                             daemon=True, name="agent-logmerge").start()
+            log.append(f"합류 시작(백그라운드): {old_dir} → {new_dir}")
     return 0, "\n".join(log), ""
 
 
 def _merge_service_logs(src_dir: str, dst_dir: str) -> None:
-    """이관 전 로컬 서비스 로그를 새 로그 루트로 합친다 (백그라운드, best-effort).
+    """이관 전 영역(서비스 로그·녹취·통계)을 새 위치로 합친다 (백그라운드, best-effort).
 
-    로그는 `YYYY/MM/DD/HH/<...>.jsonl` 로 시간축 분할돼 있어 상대경로 그대로 옮기면 겹치지
+    내용이 `…/YYYY/MM/DD/HH/<...>` 로 시간축 분할돼 있어 상대경로 그대로 옮기면 겹치지
     않는다. 예외는 **이관 시각이 걸친 5분 버킷** 하나뿐인데, 그 파일은 신 위치에서 이미
     쓰이고 있으므로 **목적지가 있으면 건너뛴다**(신 파일이 정본 — 구 파일의 그 5분치는 남는다).
     원본은 지우지 않는다 — 합류가 부분 실패해도 원본에서 다시 시도할 수 있어야 한다.
@@ -1877,10 +1905,10 @@ def _merge_service_logs(src_dir: str, dst_dir: str) -> None:
                     moved += 1
                 except Exception:
                     failed += 1
-        print(f"[agent][store] service_log 합류 완료: {src_dir} → {dst_dir} "
+        print(f"[agent][store] 합류 완료: {src_dir} → {dst_dir} "
               f"(복사 {moved} / 기존유지 {skipped} / 실패 {failed})", flush=True)
     except Exception as e:
-        print(f"[agent][store] service_log 합류 실패(무시): {e}", flush=True)
+        print(f"[agent][store] 합류 실패(무시): {src_dir} → {dst_dir}: {e}", flush=True)
 
 
 def job_update_config(params: dict, oam_url: str = "", session_token: str = "") -> tuple:
@@ -5335,11 +5363,16 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     @staticmethod
     def _module_file_target(install_path: str, rel: str) -> str:
-        """모듈 자원 파일 경로 — install_path 아래 `announcements/` 만 허용(announcements.md §7.3). 빈 문자열 = 거부."""
+        """모듈 자원 파일 경로 — 그 모듈의 서비스 콘텐츠 영역(`Content.Dir`, site_directory_layout.md) 아래
+        `announcements/` 만 허용(announcements.md §7.3). 빈 문자열 = 거부.
+
+        콘텐츠 영역은 모듈 `config.json` 의 `Content.Dir`(OAM 실체화가 사이트 디렉터리에서 유도해 넣는다)이다 —
+        버전 디렉터리 밖이라 업그레이드에 이어받을 것이 없다. 그 키가 없는 모듈(콘텐츠 영역을 모르는 이전
+        버전)은 설치 트리(install_path)를 쓴다."""
         if not install_path or not rel: return ""
         rel = rel.replace("\\", "/").lstrip("/")
         if ".." in rel.split("/") or not rel.startswith("announcements/"): return ""
-        root = os.path.realpath(install_path)
+        root = os.path.realpath(_module_content_dir(install_path) or install_path)
         full = os.path.realpath(os.path.join(root, rel))
         if not full.startswith(root + os.sep): return ""
         return full
@@ -5412,7 +5445,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             rel = (q.get("path") or [""])[0]
             target = self._module_file_target(install_path, rel)
             if not target:
-                return self._respond(400, {"error": "bad_path", "detail": "install_path 아래 announcements/ 만 허용"})
+                return self._respond(400, {"error": "bad_path", "detail": "콘텐츠 영역(Content.Dir) 아래 announcements/ 만 허용"})
             data = self._read_body_raw()
             if not data:
                 return self._respond(400, {"error": "empty_body_or_too_large"})

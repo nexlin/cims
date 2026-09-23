@@ -8,7 +8,7 @@ MCPTT 서버(4430)에 동봉 — 단말은 이미 이 포트로 IdMS/GMS 를 쓴
   GET  /mcdata/fd/{id}                                    → 파일 스트리밍
 
 저장: {FdDir}/{YYYY}/{MM}/{DD}/{id}.bin + {id}.json (메타: name/size/type/group/uploader/ts)
-FdDir 기본 = {ServiceLogging.Dir}/mcdata_fd (NAS 공유 — oam-svc 도 접근 가능).
+FdDir = McDataFd.Dir(명시) > 서비스 콘텐츠 영역 `{Content.Dir}/mcdata_fd` (site_paths — CMDP 와 같은 경로, NAS 공유).
 """
 import os
 import json
@@ -29,13 +29,9 @@ _ID_RE = re.compile(r"^[0-9a-f]{32}$")
 def init(config: dict):
     """csc_app 기동 시 호출 — 저장 루트/상한 결정."""
     global _FD_DIR, _MAX_BYTES
-    fd_conf = config.get('McDataFd', {})
-    base = fd_conf.get('Dir', '')
-    if not base:
-        sl = config.get('ServiceLogging', {})
-        sl_dir = sl.get('Dir', '') or config.get('ServiceLogDir', config.get('MsgLogDir', ''))
-        base = os.path.join(sl_dir or '.', 'mcdata_fd')
-    _FD_DIR = base
+    from services import site_paths
+    fd_conf = config.get('McDataFd', {}) or {}
+    _FD_DIR = site_paths.mcdata_fd_dir(config)
     try:
         _MAX_BYTES = int(fd_conf.get('MaxBytes', _MAX_BYTES))
     except (TypeError, ValueError):

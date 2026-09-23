@@ -126,7 +126,8 @@ PSP_NOTIFY_PORT = 4421
 #   서비스 kind 별 시그널링 서버/도메인. host 빈값이면 요청 Host(=UE 가 접속한 IP) 사용(올인원 기본).
 #   다중 노드면 host 를 CSP/PSP 대표(VIP) 주소로 지정.
 PROVISIONING = {}            # config Provisioning: {"Services":{"volte":{name,host,port,tcp_port,tls_port,transport,domain,…}, "voip":{…}, "ptt":{...}}}
-_SERVICE_LOG_DIR = ''        # ServiceLogging.Dir (NAS 공유) — 통합 이력 조회(/provisioning/history) 백엔드
+_RECORDINGS_DIR = ''         # 녹취 영역(Recording.Dir) — 통합 이력 조회(/provisioning/history)·녹취 범위 판정 원천
+_STATE_DIR = ''              # 상태 영역(State.Dir) — 통합 이력의 진행 중 세션
 _DB_CONFIG = None            # CimsDatabase (가입자 라이브 조회용)
 _OAM_CONFIG: dict = {}       # Recording.OamUrl / Fm.OamIp — 통합 이력 PTT 창 조회의 OAM 세션 인덱스 프록시용
 _MCPTT_PORT = 4430           # csc McpttServer.Port (응답 csc.port)
@@ -310,13 +311,15 @@ def apply_config(config):
                     f"PSP={PSP_NOTIFY_IP or '(unset)'}:{PSP_NOTIFY_PORT}")
 
     # 자동 프로비저닝(/provisioning/me) — DB 핸들 + 서비스별 시그널링/도메인 매핑 보관.
-    global _DB_CONFIG, PROVISIONING, _MCPTT_PORT, _MCPTT_PUBLIC_URL, _SERVICE_LOG_DIR, _OAM_CONFIG
+    global _DB_CONFIG, PROVISIONING, _MCPTT_PORT, _MCPTT_PUBLIC_URL, _RECORDINGS_DIR, _STATE_DIR, _OAM_CONFIG
     _DB_CONFIG = db_config
     # 통합 이력 PTT 창 조회가 OAM 세션 인덱스를 프록시할 때의 접속 설정(dispatch_recordings._oam_base/_http 와 같은 키).
     _OAM_CONFIG = {k: config.get(k) for k in ('Recording', 'Fm') if config.get(k) is not None}
     PROVISIONING = config.get('Provisioning', {}) or {}
-    _sl = config.get('ServiceLogging', {}) or {}
-    _SERVICE_LOG_DIR = str(_sl.get('Dir', '') or config.get('ServiceLogDir', config.get('MsgLogDir', '')) or '').strip()
+    # 사이트 영역 — 배포본은 OAM 이 base oam 사이트 디렉터리에서 유도해 준다(services/site_paths, 비면 단일 루트).
+    from services import site_paths as _site
+    _RECORDINGS_DIR = _site.recordings_dir(config)
+    _STATE_DIR = _site.state_dir(config)
     _mcptt_conf = config.get('McpttServer', {}) or {}
     _MCPTT_PORT = int(_mcptt_conf.get('Port', 4430))
     # 공개 base URL — 스킴 없으면 https 보정, 후행 '/' 제거. 비면 요청 Host 유도(올인원).
@@ -3322,11 +3325,11 @@ async def handle_provisioning_history(args: HandlerArgs, kwargs: dict) -> Handle
         keys = {k for k, g in group_key_of.items() if g in scope["ptt_groups"]}
         oam_items = _dr.fetch_ptt_sessions(_OAM_CONFIG, w_since, w_until, keys)
         if oam_items is not None:
-            rows = [r for r in (_dh.ptt_row_from_oam(it, _SERVICE_LOG_DIR) for it in oam_items)
+            rows = [r for r in (_dh.ptt_row_from_oam(it, _RECORDINGS_DIR) for it in oam_items)
                     if r and r["groupId"] in scope["ptt_groups"]]
             items, next_since, hours = _dh.finish_rows(rows, w_since, w_until, limit)
     if items is None:
-        items, next_since, hours = _dh.query_ex(_SERVICE_LOG_DIR, kind, scope, since_dt, limit, until_dt)
+        items, next_since, hours = _dh.query_ex(_RECORDINGS_DIR, _STATE_DIR, kind, scope, since_dt, limit, until_dt)
     # 앱(HistoryClient) 와이어 계약 — dispatch_desktop_ui.md §13 / android_ue_provisioning.md §3-2.
     #   items[]{id,time,kind,event,from,to,group,duration,emergency,text,recordingId,hasRecording + 종류별 확장 필드}
     #   + 최상위 next·hours(시간대 분포) + 응답 ETag/304.

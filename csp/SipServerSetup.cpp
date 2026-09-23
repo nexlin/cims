@@ -37,6 +37,7 @@
 #include "MemoryDebug.h"
 #include "SimpleJson.h"
 #include "SipStackDefine.h"
+#include "SiteLayout.h"
 
 CSipServerSetup gclsSetup;
 
@@ -154,7 +155,6 @@ CSipServerSetup::CSipServerSetup()
       m_bRoleIbcf( true ),
       m_bRoleMcData( true ),
       m_bRecordEnable( false ),
-      m_strRecordDir( "/mnt/nas/cims/recordings" ),
       m_iFileSize( 0 ) {
 }
 
@@ -575,44 +575,37 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if ( roles.Has( "MCDATA" ) ) m_bRoleMcData = ( roles.GetString( "MCDATA" ) == "true" );
             }
 
-            // 녹취 설정
-            if ( setup.Has( "Recording" ) ) {
-                SimpleJson::JsonNode rec = setup.Get( "Recording" );
-                if ( rec.Has( "Enable" ) ) m_bRecordEnable = ( rec.GetString( "Enable" ) == "true" );
-                if ( rec.Has( "Dir" ) ) m_strRecordDir = rec.GetString( "Dir" );
-            }
-
-            // G10+ (2026-04-23): Setup.Cdr.Folder 제거. service_log 의 call.json / participants.jsonl
-            //   + DB call_logs 테이블이 CDR 역할을 대체.
-
-            // ServiceLogging 설정 (신규 — Dir 통합)
+            // 사이트 영역 경로 (site_directory_layout.md) — 서비스 로그(log)·녹취(recordings)·상태(state)·
+            //   통계(stats). OAM 실체화가 base oam 사이트 디렉터리에서 유도해 채운다. 영역 키가 비면 단일 루트
+            //   레이아웃(녹취 = 로그 루트, 상태·통계 = 그 아래 state/·stats/)으로 유도한다 — 재적재 때마다 다시 계산.
+            std::string strRecordDir, strStateDir, strStatsDir;
             if ( setup.Has( "ServiceLogging" ) ) {
                 SimpleJson::JsonNode sl = setup.Get( "ServiceLogging" );
-                if ( sl.Has( "Dir" ) ) {
-                    m_strServiceLogDir = sl.GetString( "Dir" );
-                    m_strMsgLogDir = m_strServiceLogDir;  // 통합 디렉토리
-                }
+                if ( sl.Has( "Dir" ) ) m_strServiceLogDir = SiteLayout::Norm( sl.GetString( "Dir" ) );
                 if ( sl.Has( "Recording" ) ) {
                     std::string rv = sl.GetString( "Recording" );
                     m_bRecordEnable = ( rv == "true" || rv == "1" );
-                    // record_dir = ServiceLogDir (통합)
-                    if ( m_bRecordEnable && m_strRecordDir.empty() ) m_strRecordDir = m_strServiceLogDir;
                 }
                 // 스풀 폴백 (Dir 가 NAS 일 때 무응답 격리 — SipMessageLogger 참조)
                 if ( sl.Has( "SpoolDir" ) ) m_strServiceLogSpoolDir = sl.GetString( "SpoolDir" );
                 if ( sl.Has( "StallSec" ) ) m_iServiceLogStallSec = (int)sl.GetInt( "StallSec" );
                 if ( sl.Has( "SpoolMaxMb" ) ) m_iServiceLogSpoolMaxMb = (int)sl.GetInt( "SpoolMaxMb" );
             }
-            // 레거시 호환
-            if ( m_strServiceLogDir.empty() && setup.Has( "ServiceLog" ) ) {
-                SimpleJson::JsonNode svclog = setup.Get( "ServiceLog" );
-                if ( svclog.Has( "Dir" ) ) m_strServiceLogDir = svclog.GetString( "Dir" );
+            if ( setup.Has( "Recording" ) ) {
+                SimpleJson::JsonNode rec = setup.Get( "Recording" );
+                if ( rec.Has( "Dir" ) ) strRecordDir = rec.GetString( "Dir" );
             }
-            if ( m_strMsgLogDir.empty() && setup.Has( "MsgLog" ) ) {
-                SimpleJson::JsonNode msglog = setup.Get( "MsgLog" );
-                if ( msglog.Has( "Dir" ) ) m_strMsgLogDir = msglog.GetString( "Dir" );
+            if ( setup.Has( "State" ) ) {
+                SimpleJson::JsonNode st = setup.Get( "State" );
+                if ( st.Has( "Dir" ) ) strStateDir = st.GetString( "Dir" );
             }
-            if ( m_strMsgLogDir.empty() ) m_strMsgLogDir = m_strServiceLogDir;
+            if ( setup.Has( "Stats" ) ) {
+                SimpleJson::JsonNode sts = setup.Get( "Stats" );
+                if ( sts.Has( "Dir" ) ) strStatsDir = sts.GetString( "Dir" );
+            }
+            m_strRecordDir = SiteLayout::RecordingsDir( strRecordDir, m_strServiceLogDir );
+            m_strStateDir = SiteLayout::StateDir( strStateDir, m_strServiceLogDir );
+            m_strStatsDir = SiteLayout::StatsDir( strStatsDir, m_strServiceLogDir );
 
             if ( setup.Has( "SystemId" ) ) {
                 m_strSystemId = setup.GetString( "SystemId" );

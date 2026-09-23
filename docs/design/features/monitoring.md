@@ -12,42 +12,36 @@ Console UI에서 제공하는 운영 기능을 3개 파트로 구분한다.
 
 ### 데이터 저장 원칙
 
-- **NAS 우선**: 모든 raw 데이터(메시지 로그, 녹취)는 공유 NAS(`ext_mnt/`)에 비동기 기록
+- **NAS 우선**: 모든 raw 데이터(메시지 로그, 녹취)는 사이트 디렉터리(공유 NAS 권장)의 영역에 비동기 기록
 - **DB 최소화**: DB에는 raw 데이터 접근을 위한 인덱스 정보만 저장 (call_id, 시간, 파일 경로)
 - **on-demand 처리**: 트랜스코딩, 통계 집계는 조회 시점에 수행하거나 백그라운드 배치
 
 ### NAS 디렉터리 구조
 
+사이트 디렉터리의 영역별 배치 — 정본은 [site_directory_layout.md](site_directory_layout.md)(영역 경로는 base oam
+`CimsSiteDir` 에서 유도, 사이트 디렉터리가 없으면 녹취·통계·상태가 서비스 로그 루트 아래인 단일 루트 레이아웃).
+
 ```
-ext_mnt/                                ← 공유 스토리지 마운트 포인트
-  ├─ msg_log/                            ← SIP/인터페이스 메시지 로그 (full message body 포함)
-  │   └─ csp/sip/                        ← CSP SIP 메시지 (SipMessageLogger)
-  │       └─ {YYYY}/{MM}/{DD}/{HH}/
-  │           └─ sip.jsonl               ← Call-ID, method, from/to, direction, full SIP text
+<CimsSiteDir>/
+  ├─ log/                                ← 관측 로그 (ServiceLogging.Dir)
+  │   ├─ sip/{YYYY}/{MM}/{DD}/{HH}/      ← 전 모듈 SIP·제어 메시지(full body)·flow 5분 버킷
+  │   │   ├─ {sysid}_{sip|cmp|csc|ue}.msg.{mm5}.jsonl
+  │   │   └─ {sysid}.flow.{mm5}.jsonl
+  │   └─ alerts/ · events/ · fm_catalog/ · leak_reclaim/
   │
-  ├─ service_log/                        ← 서비스 이력 + Flow + 녹취 (body 포함)
-  │   ├─ voip/{YYYY}/{MM}/{DD}/{HH}/     ← VoIP 통화 이력
-  │   │   └─ {prefix}/{caller}/{session_id}.d/
-  │   │       ├─ call.json               ← 통화 메타 (state, times, reason)
-  │   │       ├─ participants.jsonl      ← 참여자
-  │   │       ├─ session.json            ← Session-ID ↔ Call-ID 매핑 {session_id, call_ids: [leg_a, leg_b]}
-  │   │       ├─ raw_a.rtp              ← 녹취 raw RTP (발신측)
-  │   │       └─ raw_b.rtp              ← 녹취 raw RTP (착신측)
+  ├─ recordings/                         ← 녹취·통화 기록 (Recording.Dir)
+  │   ├─ volte/{YYYY}/{MM}/{DD}/{HH}/    ← VoLTE·VoIP 통화 이력
+  │   │   ├─ {prefix}/{caller}/{session_id}.d/
+  │   │   │   ├─ call.json               ← 통화 메타 (state, times, reason)
+  │   │   │   ├─ participants.jsonl      ← 참여자
+  │   │   │   ├─ session.json            ← Session-ID ↔ Call-ID 매핑 {session_id, call_ids: [leg_a, leg_b]}
+  │   │   │   └─ seg_*.rtp · segments.jsonl ← 녹취 세그먼트 (recording.md)
+  │   │   └─ index.json                  ← 시간 단위 인덱스 (JSONL)
   │   │
-  │   ├─ ptt/{YYYY}/{MM}/{DD}/{HH}/      ← PTT 그룹통화 이력
-  │   │   └─ {prefix}/{group_id}.d/
-  │   │       ├─ call.jsonl              ← 세션별 누적 JSONL
-  │   │       ├─ participants.jsonl      ← 참여자
-  │   │       └─ seg_*.rtp              ← 발언 단위 녹취 raw
-  │   │
-  │   └─ {type}/{YYYY}/{MM}/{DD}/{HH}/
-  │       └─ index.json                  ← 시간 단위 인덱스 (JSONL)
+  │   └─ ptt/{group}/                    ← PTT 그룹통화 이력 (group.json + {YYYY}/{MM}/{DD}/{HH}/S…_N/ 세션)
   │
-  └─ stats/                              ← 통계 집계 결과 캐시
-      └─ {YYYYMMDD}/
-          ├─ 5m.json                     ← 5분 단위 (7일 보관)
-          ├─ 10m.json                    ← 10분 단위 (14일 보관)
-          └─ 1h.json                     ← 1시간 단위 (90일 보관)
+  ├─ stats/                              ← 통계 집계 (Stats.Dir) — 1m/ 1h/ 1d/ 1M/ · ptt_index/ · ptt_attempts/
+  └─ state/                              ← 진행 중 세션 (State.Dir) — volte/ ptt/
 ```
 
 #### Session-ID 기반 통합 로깅
@@ -63,7 +57,7 @@ B2BUA 모드에서는 하나의 통화가 두 개의 Call-ID로 분리된다. Se
 ### DB 역할 (최소화)
 
 통화 이력은 **파일 기반**(call.json / call.jsonl)으로 저장하며, DB는 사용하지 않는다.
-통화 이력 조회는 `service_log/` 디렉터리를 직접 스캔하거나 `index.json`을 참조한다.
+통화 이력 조회는 녹취 영역(`Recording.Dir`) 디렉터리를 직접 스캔하거나 `index.json`을 참조한다.
 
 DB에 저장하는 데이터:
 ```
@@ -232,19 +226,18 @@ CIMS agent/HA 모델 밖의 **외부 시스템**(외부 DB / 모니터링 / 스�
 
 ```
 통화 시작:
-  CSP → service_log/{type}/.../session.d/call.json    (통화 메타 생성, state=ringing)
-  CSP → service_log/.../session.d/session.json         (Session-ID ↔ Call-ID 매핑)
-  CSP → CMP: add/addgroup + record_dir 파라미터 전달
-  SipMessageLogger → msg_log/csp/sip/.../sip.jsonl    (SIP TX/RX 기록 시작)
+  CSP → recordings/volte/.../session.d/call.json      (통화 메타 생성, state=ringing)
+  CSP → recordings/volte/.../session.d/session.json   (Session-ID ↔ Call-ID 매핑)
+  CSP → CMP: add/addgroup + record_dir 파라미터 전달 (녹취 영역 아래 절대경로)
+  SipMessageLogger → log/sip/.../csp_01_sip.msg.{mm5}.jsonl  (SIP TX/RX 기록 시작)
 
 통화 중:
-  SipMessageLogger → msg_log/csp/sip/.../sip.jsonl    (모든 SIP 메시지 + CMP JSON, Call-ID 포함)
-  CMP → service_log/.../session.d/raw_a.rtp           (발신측 RTP 녹취, record_dir)
-  CMP → service_log/.../session.d/raw_b.rtp           (착신측 RTP 녹취, record_dir)
+  SipMessageLogger → log/sip/.../*.msg.{mm5}.jsonl   (모든 SIP 메시지 + CMP JSON, Call-ID 포함)
+  CMP → recordings/volte/.../session.d/seg_*.rtp      (양측 RTP 녹취 세그먼트, record_dir)
 
 통화 종료:
-  CSP → service_log/.../session.d/call.json 업데이트  (state=ended, end_time, reason)
-  CSP → service_log/.../index.json 추가               (시간 단위 인덱스)
+  CSP → recordings/volte/.../session.d/call.json 업데이트  (state=ended, end_time, reason)
+  CSP → recordings/volte/{YYYY}/{MM}/{DD}/{HH}/index.json 추가  (시간 단위 인덱스)
 ```
 
 ### 2.2 VoIP 통화 이력
@@ -305,10 +298,10 @@ CIMS agent/HA 모델 밖의 **외부 시스템**(외부 DB / 모니터링 / 스�
 
 #### 메시지 Flow 데이터 소스
 
-`msg_log/csp/sip/YYYY/MM/DD/HH/sip.jsonl`에서 Call-ID로 검색하여 B2BUA 양 leg 메시지를 시간순 재구성:
+로그 영역 `sip/YYYY/MM/DD/HH/` 의 msg 5분 버킷(`*_sip.msg.{mm5}.jsonl`)에서 Call-ID로 검색하여 B2BUA 양 leg 메시지를 시간순 재구성:
 
 1. `session.json`에서 `call_ids: [leg_a, leg_b]` 읽음
-2. `sip.jsonl`에서 양 Call-ID로 검색 → 시간순 병합
+2. msg 버킷에서 양 Call-ID로 검색 → 시간순 병합
 3. ACK 포함 완전한 B2BUA Flow 표시
 
 ```jsonl
@@ -397,7 +390,7 @@ GET /api/v1/recordings/{call_id}/video?date=YYYY-MM-DD
 GET /api/v1/recordings?date=YYYY-MM-DD&call_type=voip|ptt
 ```
 
-모든 API는 `service_log/` 디렉터리를 직접 스캔하여 데이터 반환 (DB 미사용).
+모든 API는 녹취 영역(`Recording.Dir`) 디렉터리를 직접 스캔하여 데이터 반환 (DB 미사용).
 
 ### 2.5 녹취 파일 형식 및 트랜스코딩
 
@@ -434,7 +427,7 @@ VolteHistoryPage 상세 모달에서 오디오 플레이어 + 비디오 플레�
 
 ## Part 3. 통계
 
-NAS의 raw 데이터(`msg_log/` 인터페이스 통계, `service_log/` 서비스 이력)를 기반으로 통계를 집계한다.
+NAS의 raw 데이터(로그 영역 `sip/` 인터페이스 메시지, 녹취 영역 통화 기록)를 기반으로 통계를 집계한다.
 UI에서 **5분 / 10분 / 1시간 / 1일 / 1월 / 1년** 단위를 선택하여 조회 가능.
 
 ### 3.0 시간 단위 (Granularity)
@@ -461,7 +454,7 @@ GET /api/v1/stats/...?granularity=5m&from=...&to=...
 한 화면이며, 인터페이스(SIP/CMP/CSC/HTTPS)는 대상 선택으로, 서비스(VoLTE/PTT)는 계열로 가른다.
 
 #### 데이터 소스
-`{ServiceLogging.Dir}/{YYYY}/{MM}/{DD}/{HH}/{node}_{sip|cmp|csc}.msg.jsonl` 각 줄을 집계한다.
+`{ServiceLogging.Dir}/sip/{YYYY}/{MM}/{DD}/{HH}/{node}_{sip|cmp|csc}.msg.{mm5}.jsonl` 각 줄을 집계한다.
 읽는 필드는 `ts` 와 `msg` 둘뿐이다.
 
 - **시각** — 로그의 `ts` 는 **시각만** 담는다(`"21:00:00.102885"`). 날짜는 경로(`YYYY/MM/DD`)가
@@ -542,7 +535,7 @@ HTTPS 는 관리 트래픽이다. 없는 구분을 네 인터페이스에 똑같
 
 ### 3.2 서비스 통계
 
-`service_log/` 디렉터리의 `call.json`/`call.jsonl` + 녹취 정보를 기반으로 서비스 품질 지표를 산출.
+녹취 영역(`Recording.Dir`)의 `call.json` + 녹취 정보(PTT 는 세션 색인)를 기반으로 서비스 품질 지표를 산출.
 시간 단위 선택에 따라 집계 범위가 변경됨.
 
 #### VoIP 서비스 통계
@@ -627,13 +620,13 @@ HTTPS 는 관리 트래픽이다. 없는 구분을 네 인터페이스에 똑같
 
 | 단위 | 저장 | 집계 시점 | 보관 |
 |------|------|----------|------|
-| **1분** | `{ServiceLogging.Dir}/stats/1m/YYYY/MM/DD.jsonl` | 1분 주기 (완결된 분만) | 14일 |
+| **1분** | `{Stats.Dir}/1m/YYYY/MM/DD.jsonl` | 1분 주기 (완결된 분만) | 14일 |
 | 5분 | 저장 안 함 | 조회 시 1분 계층 합산 | (1분 계층에 종속) |
 | 10분 | 저장 안 함 | 조회 시 1분 계층 합산 | (1분 계층에 종속) |
-| **1시간** | `stats/1h/YYYY/MM/DD.jsonl` | 1분 계층에서 파생 | 90일 |
-| **1일** | `stats/1d/YYYY/MM/DD.jsonl` | 1분 계층에서 파생 | 730일 (2년) |
+| **1시간** | `{Stats.Dir}/1h/YYYY/MM/DD.jsonl` | 1분 계층에서 파생 | 90일 |
+| **1일** | `{Stats.Dir}/1d/YYYY/MM/DD.jsonl` | 1분 계층에서 파생 | 730일 (2년) |
 | 1주 | 저장 안 함 | 조회 시 일 계층 합산 | (일 계층에 종속) |
-| **1월** | `stats/1M/YYYY.jsonl` (그 해 12줄) | 일 계층에서 파생 | 영구 |
+| **1월** | `{Stats.Dir}/1M/YYYY.jsonl` (그 해 12줄) | 일 계층에서 파생 | 영구 |
 | 1년 | 저장 안 함 | 조회 시 월 계층 합산 | 영구 (월이 영구이므로) |
 
 **계층마다 파일이 따로라 보존기간이 서로 묶이지 않는다.** 1분 집계가 14일 뒤 지워져도 그것을
@@ -794,7 +787,7 @@ GET /api/v1/stats/service/summary?granularity=1d&date=2026-04-03
 
 | 컴포넌트 | 기록 (NAS) | DB | Console 제공 |
 |----------|-----------|-----|-------------|
-| **CSP** | msg_log/csp/sip/.../sip.jsonl (SipMessageLogger) + service_log/.../call.json, session.json, participants.jsonl | - | - |
-| **CMP** | service_log/.../*.rtp (녹취 raw, record_dir) | - | - |
+| **CSP** | log/sip/.../*.msg.{mm5}.jsonl (SipMessageLogger) + recordings/.../call.json, session.json, participants.jsonl + state/ + stats/ptt_attempts/ | - | - |
+| **CMP** | recordings/.../seg_*.rtp (녹취, record_dir) + log/sip/ | - | - |
 | **CSC** | - | - | REST API: 이력조회, Flow(sip.jsonl 검색), 녹취 on-demand 변환, 통계 집계 |
 | **Console** | - | - | UI: 대시보드, 이력+Flow+녹취, 통계 차트 |

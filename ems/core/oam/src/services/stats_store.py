@@ -33,23 +33,25 @@ UNITS = ('1m', '1h', '1d', '1M')
 PERIOD_UNITS = ('1M',)
 
 _STATE_NAME = '.rollup_state.json'
-_LOCK_NAME = '.writer.lock'
+_LOCK_NAME = 'stats_rollup.lock'
 
 
 def subdir(unit: str) -> str:
     """{root} 아래 그 계층의 상대 경로. 파일 어댑터 전용이지만 보존 스위퍼가 공유한다."""
-    return os.path.join('stats', unit if unit in UNITS else '1m')
+    return unit if unit in UNITS else '1m'
 
 
 class FileStatsStore:
     """일별/연도별 JSONL 파일 어댑터.
 
-    `root` 는 `ServiceLogging.Dir` 이고, 집계는 그 아래 `stats/{unit}/...` 에 놓인다.
+    `root` 는 통계 영역(`Stats.Dir` — site_directory_layout.md)이고, 집계는 그 바로 아래
+    `{unit}/...` 에 놓인다. writer 잠금은 상태 영역(`State.Dir`)의 `stats_rollup.lock` 이다.
     쓰기는 전부 원자적 교체(tmp + rename)다 — 읽는 쪽이 반쪽 파일을 보지 않게.
     """
 
-    def __init__(self, root: str):
+    def __init__(self, root: str, lock_dir: str = ''):
         self._root = root or ''
+        self._lock_dir = lock_dir or ''
         self._lock_fh = None
         self._writer = False
         self._reason = 'not_acquired'
@@ -59,8 +61,17 @@ class FileStatsStore:
     def root(self) -> str:
         return self._root
 
+    @property
+    def lock_dir(self) -> str:
+        return self._lock_dir
+
+    def set_lock_dir(self, lock_dir: str) -> None:
+        """writer 잠금 위치를 뒤늦게 정한다 — 조회용으로 먼저 만들어진 인스턴스를 집계 주체가 이어받을 때."""
+        if lock_dir and not self._writer:
+            self._lock_dir = lock_dir
+
     def stats_root(self) -> str:
-        return os.path.join(self._root, 'stats') if self._root else ''
+        return self._root
 
     def _day_path(self, unit: str, day: str) -> str:
         if not self._root or len(day) < 10:
@@ -80,10 +91,11 @@ class FileStatsStore:
     def acquire_writer(self) -> tuple:
         """집계를 쓸 권한을 잡는다 → (획득 여부, 사유).
 
-        **집계 트리(`{root}/stats`)에** 건다 — 런타임 store 의 소유권 리스와는 다른 축이다.
+        **사이트의 상태 영역(`State.Dir`)에** 건다 — 런타임 store 의 소유권 리스와는 다른 축이다.
         런타임 store 는 배포본마다 따로라 배포본 경계를 넘어 중재하지 못한다. 실제로 두
-        배포본이 `ServiceLogging.Dir` 만 공유하는 구성에서 양쪽이 같은 일별 파일을 갈아끼우다
-        사고가 났다 — 잠금은 **집계 대상 트리 자체**에 걸어야 누가 붙든 한 명만 쓴다.
+        배포본이 로그 디렉터리만 공유하는 구성에서 양쪽이 같은 일별 파일을 갈아끼우다
+        사고가 났다 — 잠금은 **집계 대상과 같은 사이트**에 걸어야 누가 붙든 한 명만 쓴다
+        (같은 사이트 디렉터리를 쓰는 배포본은 통계·상태 영역을 함께 공유한다).
 
         flock 은 프로세스가 죽으면 커널이 풀어 준다. 죽은 보유자 때문에 영영 못 잡는 일이
         없어서, 별도의 시한·하트비트가 필요 없다.
@@ -93,13 +105,15 @@ class FileStatsStore:
         """
         if self._writer:
             return True, 'ok'
-        r = self.stats_root()
-        if not r:
+        if not self._root:
             self._reason = 'no_root'
             return False, self._reason
+        if not self._lock_dir:
+            self._reason = 'no_lock_dir'
+            return False, self._reason
         try:
-            os.makedirs(r, exist_ok=True)
-            p = os.path.join(r, _LOCK_NAME)
+            os.makedirs(self._lock_dir, exist_ok=True)
+            p = os.path.join(self._lock_dir, _LOCK_NAME)
             fh = open(p, 'a+')
             try:
                 fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -278,13 +292,16 @@ _INSTANCES: dict = {}
 _INST_LOCK = threading.Lock()
 
 
-def for_root(root: str) -> FileStatsStore:
+def for_root(root: str, lock_dir: str = '') -> FileStatsStore:
+    """통계 영역 루트의 저장소. `lock_dir`(상태 영역)은 집계 주체만 준다 — 조회만 하는 쪽은 비운다."""
     key = os.path.normpath(root) if root else ''
     with _INST_LOCK:
         st = _INSTANCES.get(key)
         if st is None:
-            st = FileStatsStore(root)
+            st = FileStatsStore(root, lock_dir)
             _INSTANCES[key] = st
+        elif lock_dir and not st.lock_dir:
+            st.set_lock_dir(lock_dir)
         return st
 
 

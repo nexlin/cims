@@ -281,7 +281,7 @@ RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②P
 - `event` 이름표(앱 switch 와 1:1): call = `call.answered`(응답됨)/`call.missed`(무응답) · ptt = `ptt.session.start`(진행 중)/
   `ptt.session.end`(종료) · message = `message.sds`(그룹 SDS → ② 패널)/`message.sms`(1:1 → ④ 패널). `group`·`duration`·`text`
   는 종류에 따라 채워진다(call `group=""`·`duration`=통화초, ptt `group=tel:<gid>`·`duration`=세션초, message `text`=본문).
-- `recordingId`(종료분 call·ptt): 녹취 식별자 = 세션 디렉터리의 `ServiceLogging.Dir` 상대 경로(OAM `/api/v1/recordings/{id}`
+- `recordingId`(종료분 call·ptt): 녹취 식별자 = 세션 디렉터리의 녹취 영역(`Recording.Dir`) 상대 경로(OAM `/api/v1/recordings/{id}`
   와 같은 키, `/` 구분 — 세그먼트별 percent-encoding). live 항목·message 는 `""`. `hasRecording` = `segments.jsonl` 존재.
   재생은 §3-4.
 - **종류별 확장 필드**(관제 앱 [이력] 화면이 콘솔 VoLTE/PTT 이력과 같은 열·카드를 그리는 데 쓴다. 폴링 병합은 읽지 않는다.
@@ -297,7 +297,7 @@ RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②P
   읽기 모델)에만 있으므로, CSC 가 OAM `GET /api/v1/ptt/sessions?date|from,to&group_key=<청취 그룹의 ptt_groups.id 목록>` 을 프록시해
   같은 항목 형태로 바꾼다(`services/dispatch_history.ptt_row_from_oam`, `recordingId` 는 콘솔 `recIdOf` 와 같은 규칙, `id` 는 스캔 경로와
   같은 우선순위 sesid→call_id→dir). OAM 에 닿지 않으면 파일 스캔으로 폴백한다(지표 0). 폴링(until 없음)은 파일 스캔이다.
-  파일 스캔의 **진행 중 판정**은 `state/ptt/*.json`(CSP 가 참가자마다 쓰고 떠나면 지운다)에 세션이 있는지로 한다 — 시간 버킷의
+  파일 스캔의 **진행 중 판정**은 상태 영역 `ptt/*.json`(`State.Dir` — CSP 가 참가자마다 쓰고 떠나면 지운다)에 세션이 있는지로 한다 — 시간 버킷의
   `session.json` 은 세션 시작 스냅샷이라 `state`/`end_time` 이 비어 있어도 진행 중이 아니다(콘솔 ptt_index 와 같은 기준). 종료 시각은
   `events.jsonl` 의 `session_end`(없으면 마지막 이벤트) 또는 `segments.jsonl` 의 마지막 `end_time`.
   OAM 주소 = csc.json `Recording.OamUrl`(비면 `https://{Fm.OamIp}:4419`) — 녹취 프록시(§3-4)와 같은 설정.
@@ -311,7 +311,7 @@ RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②P
 - **역할이 없거나 두 범위가 모두 `none` = `403 no_monitor_scope`**. 열람은 감사(`E-AUD-016 call_monitored`, `tap_mode=history`) —
   당사자 모르게 이력을 여는 동작이라 감사 대상(manager 열람, [dispatch_center.md §5.7](dispatch_center.md)).
 
-> 백엔드는 CSP/CSC 가 공유 NAS(`ServiceLogging.Dir`)에 남기는 파일 SoT(콘솔 `flow_logger` 가 읽는 것과 같은
+> 백엔드는 CSP/CSC 가 사이트 디렉터리의 녹취·상태 영역(`Recording.Dir`·`State.Dir`, [site_directory_layout.md](site_directory_layout.md))에 남기는 파일 SoT(콘솔 `flow_logger` 가 읽는 것과 같은
 > 파일)를 역할 범위로만 걸러 주는 얇은 구독자 뷰다 — 콘솔 이력 API(oam-svc)를 재구현하지 않는다(집계가 필요한 PTT
 > 창 조회·세션 상세는 그 API 를 범위 게이트 뒤에서 **프록시**한다).
 > 1:1 SDS/SMS 는 CSP `Setup.McData.StoreOneToOneSds` 를 켜야 보관된다([mcdata_messaging.md §4.3](mcdata_messaging.md)).
