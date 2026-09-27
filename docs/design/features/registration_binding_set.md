@@ -155,13 +155,15 @@ ping(CRLF 2개)에는 규격대로 pong(CRLF 1개)으로 답한다.
 ### 4.1b 승격 TCP flow 는 일회성이다 — 응답 Contact 와 CANCEL
 
 UDP 등록 단말이 RFC 3261 §18.1.1 로 TCP 승격해 보낸 INVITE 는 **바인딩이 아니다**(§3 `SetIpPort` 는 그 transport 의
-기존 바인딩만 옮기므로 생기지도 않는다). pjsip 은 ACK 뒤 33초(`PJSIP_TRANSPORT_IDLE_TIME`)에 그 연결을 닫는다. 그래서
-다이얼로그를 그 flow 에 묶으면 안 된다 — 양방향 모두.
+기존 바인딩만 옮기므로 생기지도 않는다). pjsip 은 **그 연결에 마지막 SIP 메시지가 흐른 뒤** 33초
+(`PJSIP_TRANSPORT_IDLE_TIME`)에 닫는다 — 트랜잭션이 걸려 있는 동안은 참조가 남아 닫히지 않으므로, 오래 울린 호의
+CANCEL 도 언제나 그 INVITE 와 같은 연결로 온다. 그래서 다이얼로그를 그 flow 에 묶으면 안 된다 — 양방향 모두.
 
 | 방향 | 규칙 | 구현 |
 |---|---|---|
 | 서버 → 단말 in-dialog 요청 | 등록 바인딩으로 보낸다 ([leg_liveness.md](leg_liveness.md) §6.3) | `RefreshLegDest`/`EventGetLegDest` |
-| 단말 → 서버 in-dialog 요청 | 서버가 광고하는 **응답 Contact 의 transport = 발신자의 등록 바인딩 transport**. 도착 flow 가 등록 바인딩이 아니고 transport 도 다르면(승격) `Select` 가 고른 살아있는 바인딩의 transport 를 적는다. 그러면 단말의 BYE·PRACK·소형 re-INVITE 가 등록 flow 로 오고 Via 가 바인딩과 일치해 재챌린지·TCP 재연결이 없다 | `CModuleDispatcher::EventIncomingCall` → `CSipUserAgent::SetContactTransport` → `CSipDialog::m_iContactTransport` → 응답(`CreateResponse` 계승)·in-dialog 요청(`CreateMessage`) 의 `CSipMessage::m_iContactTransport` → `CSipStack::Send` Contact 생성(같은 bind ip 의 그 transport listener) · TCP/TLS 송신 시 소켓 주소 덮어쓰기 생략 |
+| 단말 → 서버 in-dialog 요청 | 서버가 광고하는 **응답 Contact 의 transport = 발신자의 등록 바인딩 transport**. 도착 flow 가 등록 바인딩이 아니고 transport 도 다르면(승격) `Select` 가 고른 살아있는 바인딩의 transport 를 적는다. 그러면 단말의 BYE·PRACK·소형 re-INVITE 가 등록 flow 로 오고 Via 가 바인딩과 일치해 재챌린지·TCP 재연결이 없다. 전송 선택은 연결 생존 여부가 아니라 다이얼로그 remote target URI 로 정해지므로 승격 연결이 아직 열려 있어도 등록 flow 로 온다 | `CModuleDispatcher::EventIncomingCall` → `CSipUserAgent::SetContactTransport` → `CSipDialog::m_iContactTransport` → 응답(`CreateResponse` 계승)·in-dialog 요청(`CreateMessage`) 의 `CSipMessage::m_iContactTransport` → `CSipStack::Send` Contact 생성(같은 bind ip 의 그 transport listener) · TCP/TLS 송신 시 소켓 주소 덮어쓰기 생략 |
+| 단말 → 서버 다이얼로그 밖 요청 | **규칙 밖이다.** MESSAGE 처럼 1300 B 를 넘는 다이얼로그 밖 요청은 Contact 가 개입할 자리가 없어 승격 flow 로 온다. 도착 flow 가 바인딩과 다르므로 신원을 Digest 로 확인하고(왕복 1회) 통과시킨다 — CANCEL 과 달리 규격이 챌린지를 금지하지 않고 재제출도 가능하다. 바인딩은 옮기지 않는다(§3) | `EventIncomingRequestAuth` 주소 변경 판정 |
 | CANCEL | **챌린지하지 않는다**(RFC 3261 §22.1 MUST NOT — 재제출 불가). 취소 대상 INVITE 와 같은 트랜잭션(최상위 Via sent-by+branch)일 때만 200 + 487, 아니면 481(§9.2) | psip `RecvCancelRequest` — 인증 훅 미호출. CSP `EventIncomingRequestAuth` 도 CANCEL 통과(방어) |
 
 TCP/TLS 등록 단말은 도착 flow = 등록 바인딩이라 이 규칙에 걸리지 않는다. 단말 쪽 스위치(승격 자체를 끄는 `sip.udpNoTcpSwitch`)는

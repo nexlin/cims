@@ -155,9 +155,10 @@ VoLTE 오디오 INVITE ≈1.46 KB 6/6 승격)에서 문제였던 것은 승격 �
 
 | 규칙 | 내용 |
 |---|---|
-| 응답 Contact | 승격 flow 로 받은 INVITE 의 18x/2xx Contact 에 `;transport=tcp` 대신 **발신자 등록 바인딩의 transport** 를 적는다. 단말의 후속 BYE·PRACK 가 등록 UDP flow 로 오고 Via 가 바인딩과 일치 → 401 재챌린지·TCP 재연결 없음 ([registration_binding_set.md](registration_binding_set.md) §4.1b) |
+| 응답 Contact | 승격 flow 로 받은 INVITE 의 18x/2xx Contact 에 `;transport=tcp` 대신 **발신자 등록 바인딩의 transport** 를 적는다. 단말의 후속 BYE·PRACK 가 등록 UDP flow 로 오고 Via 가 바인딩과 일치 → 401 재챌린지·TCP 재연결 없음. 전송 선택은 remote target URI 가 정하므로 승격 연결의 생존 여부와 무관하다 ([registration_binding_set.md](registration_binding_set.md) §4.1b) |
 | CANCEL | 인증 챌린지 금지(RFC 3261 §22.1). 대응 INVITE 트랜잭션(최상위 Via sent-by+branch)과 맞으면 200 + 487, 아니면 481 |
 | 서버 발신 in-dialog | 등록 바인딩으로([leg_liveness.md](leg_liveness.md) §6.3) |
+| 다이얼로그 밖 대형 요청 | MESSAGE 등은 Contact 규칙 밖이다 — 승격 flow 로 오고 Digest 확인 왕복 1회 뒤 통과한다. 배달과 등록 바인딩에는 영향이 없다 |
 
 **단말 스위치 `sip.udpNoTcpSwitch`** — pjsip `pjsip_cfg()->endpt.disable_tcp_switch` 를 켜 승격 자체를 없애는 사이트 옵션.
 프로비저닝 `Provisioning.Services.<kind>.udp_no_tcp_switch`(CSC) → `/provisioning/me` `sip.udpNoTcpSwitch` → 단말

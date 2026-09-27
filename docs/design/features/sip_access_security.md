@@ -141,6 +141,10 @@ these requests cannot be resubmitted". psip `RecvCancelRequest` 가 인증 훅�
 승격 TCP flow 에서 온 INVITE 의 CANCEL 이 "주소 변경" 으로 401 을 받던 것이 이 규칙으로 사라진다
 ([registration_binding_set.md](registration_binding_set.md) §4.1b).
 
+**다이얼로그 밖 대형 요청은 반대로 판정을 거친다** — 1300 B 를 넘어 승격 flow 로 온 MESSAGE 는 도착 주소가 등록
+바인딩과 달라 Digest 재인증 1회를 받는다. 규격이 챌린지를 금지하지 않고 재제출도 가능하므로 정상 동작이며, 단말이
+자격을 붙여 재전송하면 통과한다. 바인딩은 옮기지 않으므로 이후 요청·배달은 등록 flow 그대로다.
+
 ### 3.3 관측
 
 - 로그: `channel policy violation user=<id> transport=<t> src=<ip>:<port>` — 기존 바인딩
