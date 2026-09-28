@@ -567,46 +567,69 @@ public:
         m_worker.Enqueue( [path, line]() { return _appendLineS( path, line ); } );
     }
 
-    /** 단말 속성 관측 — REGISTER 의 `+sip.instance`(RFC 5626·7254)·`User-Agent`(RFC 3261 §20.41)와 도달 경로
-     *  (mcptt_management_views.md §4.1). `stats/ue_devices/<일>.jsonl` 에 한 줄 — OAM(oam-svc)이 file-store
-     *  `ue_devices` 로 접는다.
+    /** 단말 속성 관측 (mcptt_management_views.md §4.1) — `stats/ue_devices/<일>.jsonl` 에 한 줄. OAM(oam-svc)이
+     *  file-store `ue_devices` 로 접는다. 세 종류:
+     *    - `register`/`unregister` (DeviceSeen) — REGISTER 의 `+sip.instance`(RFC 5626·7254)·`User-Agent`(RFC 3261
+     *      §20.41)·Contact feature tag(RFC 3840)·도달 경로
+     *    - `subscribe` (DeviceSubscription) — 문서 구독(GMS·CMS xcap-diff, TS 24.481/24.484) 수락·해지
+     *    - `media` (DeviceMedia) — 그 단말이 낸 INVITE 오퍼의 코덱(SDP rtpmap, RFC 4566)
      *
-     *  REGISTER 경로에서 저장소를 건드리지 않는다: 줄 조립만 하고 worker 에 넘긴다. 갱신 REGISTER 마다 쓰지 않고
-     *  **달라졌을 때**(단말·앱·경로) 또는 같은 값이 `kDeviceSeenRefreshSec` 을 넘겼을 때만 쓴다 — last_seen 해상도는
-     *  그 간격이다. 해제(`strEvent`="unregister")는 늘 쓴다.
-     *
-     *  @param strEvent  "register" | "unregister"
-     *  @param strKind   가입 종류(`ptt`·`volte`·`voip`) — 그 번호가 속한 회선 */
+     *  SIP 경로에서 저장소를 건드리지 않는다: 줄 조립만 하고 worker 에 넘긴다. 같은 값의 반복(갱신 REGISTER·SUBSCRIBE,
+     *  같은 코덱의 호)은 쓰지 않는다 — **달라졌을 때** 또는 같은 값이 간격(`kDeviceSeenRefreshSec`, 구독은 만료의
+     * 절반)을 넘겼을 때만 쓴다. 해제·해지는 늘 쓴다. */
     static const int kDeviceSeenRefreshSec = 3600;
+
+    /** @param strEvent "register" | "unregister"  @param strKind 가입 종류(`ptt`·`volte`·`voip`)
+     *  @param strFeatures Contact feature tag(`;` 구분 — icsi-ref 값 안에 쉼표가 있다: `audio;+g.3gpp.icsi-ref=…,…`) */
     void DeviceSeen( const std::string &strEvent, const std::string &strUser, const std::string &strKind,
                      const std::string &strInstance, const std::string &strUserAgent, const std::string &strTransport,
-                     const std::string &strAddr, int iExpires, const std::string &strNode ) {
+                     const std::string &strAddr, int iExpires, const std::string &strNode,
+                     const std::string &strFeatures = "" ) {
         if ( m_strStatsDir.empty() || strUser.empty() ) return;
-        const time_t tNow = time( NULL );
-        const std::string strSig = strInstance + "\x1f" + strUserAgent + "\x1f" + strTransport + "\x1f" + strAddr;
-        {
-            std::lock_guard<std::mutex> lock( m_mtxDevSeen );
-            auto it = m_mapDevSeen.find( strUser );
-            if ( strEvent == "unregister" ) {
-                if ( it != m_mapDevSeen.end() ) m_mapDevSeen.erase( it );
-            } else if ( it != m_mapDevSeen.end() && it->second.first == strSig &&
-                        tNow - it->second.second < kDeviceSeenRefreshSec ) {
-                return;
-            } else {
-                m_mapDevSeen[strUser] = std::make_pair( strSig, tNow );
-            }
+        if ( strEvent == "unregister" ) {
+            _devSeenForget( strUser );
+        } else if ( !_devSeenDue( strUser,
+                                  strInstance + "\x1f" + strUserAgent + "\x1f" + strTransport + "\x1f" + strAddr +
+                                      "\x1f" + strFeatures,
+                                  kDeviceSeenRefreshSec ) ) {
+            return;
         }
-        char ts[32];
-        IsoNow( ts, sizeof( ts ) );
-        char day[16];
-        snprintf( day, sizeof( day ), "%c%c%c%c%c%c%c%c", ts[0], ts[1], ts[2], ts[3], ts[5], ts[6], ts[8], ts[9] );
-        std::string line = std::string( "{\"ts\":\"" ) + ts + "\",\"event\":\"" + Esc( strEvent ) + "\",\"user\":\"" +
-                           Esc( strUser ) + "\",\"kind\":\"" + Esc( strKind ) + "\",\"instance\":\"" +
-                           Esc( strInstance ) + "\",\"user_agent\":\"" + Esc( strUserAgent ) + "\",\"transport\":\"" +
-                           Esc( strTransport ) + "\",\"addr\":\"" + Esc( strAddr ) +
-                           "\",\"expires\":" + std::to_string( iExpires ) + ",\"node\":\"" + Esc( strNode ) + "\"}\n";
-        std::string path = m_strStatsDir + "/ue_devices/" + day + ".jsonl";
-        m_worker.Enqueue( [path, line]() { return _appendLineS( path, line ); }, line.size() );
+        _devSeenLine( "\"event\":\"" + Esc( strEvent ) + "\",\"user\":\"" + Esc( strUser ) + "\",\"kind\":\"" +
+                      Esc( strKind ) + "\",\"instance\":\"" + Esc( strInstance ) + "\",\"user_agent\":\"" +
+                      Esc( strUserAgent ) + "\",\"transport\":\"" + Esc( strTransport ) + "\",\"addr\":\"" +
+                      Esc( strAddr ) + "\",\"expires\":" + std::to_string( iExpires ) + ",\"node\":\"" +
+                      Esc( strNode ) + "\",\"features\":\"" + Esc( strFeatures ) + "\"" );
+    }
+
+    /** @param strPackage "gms" | "cms"  @param iExpires 부여 만료(0 = 해지) */
+    void DeviceSubscription( const std::string &strUser, const std::string &strPackage, int iExpires ) {
+        if ( m_strStatsDir.empty() || strUser.empty() ) return;
+        const std::string strKey = strUser +
+                                   "\x1f"
+                                   "sub:" +
+                                   strPackage;
+        if ( iExpires <= 0 ) {
+            _devSeenForget( strKey );
+        } else {
+            // 만료의 절반 간격 — 그보다 드물게 쓰면 OAM 이 ts+expires 로 본 구독이 갱신 사이에 끝난 것처럼 보인다
+            int iEvery = iExpires / 2;
+            if ( iEvery < 60 ) iEvery = 60;
+            if ( iEvery > kDeviceSeenRefreshSec ) iEvery = kDeviceSeenRefreshSec;
+            if ( !_devSeenDue( strKey, "on", iEvery ) ) return;
+        }
+        _devSeenLine( "\"event\":\"subscribe\",\"user\":\"" + Esc( strUser ) + "\",\"package\":\"" + Esc( strPackage ) +
+                      "\",\"expires\":" + std::to_string( iExpires > 0 ? iExpires : 0 ) );
+    }
+
+    /** @param strAudio 오디오 코덱(선호 순, 쉼표 — `AMR-WB/16000,PCMU/8000`)  @param strVideo 영상 코덱 */
+    void DeviceMedia( const std::string &strUser, const std::string &strAudio, const std::string &strVideo ) {
+        if ( m_strStatsDir.empty() || strUser.empty() || ( strAudio.empty() && strVideo.empty() ) ) return;
+        if ( !_devSeenDue( strUser + "\x1f"
+                                     "media",
+                           strAudio + "\x1f" + strVideo, kDeviceSeenRefreshSec ) )
+            return;
+        _devSeenLine( "\"event\":\"media\",\"user\":\"" + Esc( strUser ) + "\",\"audio\":\"" + Esc( strAudio ) +
+                      "\",\"video\":\"" + Esc( strVideo ) + "\"" );
     }
 
     /** 세션 종료.
@@ -756,9 +779,33 @@ private:
     std::string m_strRecordingsDir;  // 녹취·통신 기록 영역 — 비면 기록 전체 비활성
     std::string m_strStateDir;       // 휘발성 상태 영역 — 비면 가입자 상태 파일 생략
     std::string m_strStatsDir;       // 통계 영역 — 비면 PTT 시도 장부 생략
+    /** 관측 중복 억제 — 키의 값이 같고 간격 안이면 false(쓰지 않는다), 아니면 기록 시각을 갱신하고 true. */
+    bool _devSeenDue( const std::string &strKey, const std::string &strSig, int iEverySec ) {
+        const time_t tNow = time( NULL );
+        std::lock_guard<std::mutex> lock( m_mtxDevSeen );
+        auto it = m_mapDevSeen.find( strKey );
+        if ( it != m_mapDevSeen.end() && it->second.first == strSig && tNow - it->second.second < iEverySec )
+            return false;
+        m_mapDevSeen[strKey] = std::make_pair( strSig, tNow );
+        return true;
+    }
+    void _devSeenForget( const std::string &strKey ) {
+        std::lock_guard<std::mutex> lock( m_mtxDevSeen );
+        m_mapDevSeen.erase( strKey );
+    }
+    void _devSeenLine( const std::string &strFields ) {
+        char ts[32];
+        IsoNow( ts, sizeof( ts ) );
+        char day[16];
+        snprintf( day, sizeof( day ), "%c%c%c%c%c%c%c%c", ts[0], ts[1], ts[2], ts[3], ts[5], ts[6], ts[8], ts[9] );
+        std::string line = std::string( "{\"ts\":\"" ) + ts + "\"," + strFields + "}\n";
+        std::string path = m_strStatsDir + "/ue_devices/" + day + ".jsonl";
+        m_worker.Enqueue( [path, line]() { return _appendLineS( path, line ); }, line.size() );
+    }
+
     std::string m_strComponent;
     std::mutex m_mtxDevSeen;                                             // DeviceSeen 중복 억제
-    std::map<std::string, std::pair<std::string, time_t>> m_mapDevSeen;  // user → (단말·경로 서명, 마지막 기록)
+    std::map<std::string, std::pair<std::string, time_t>> m_mapDevSeen;  // 관측 키 → (값 서명, 마지막 기록)
     std::mutex m_mtx;
     CStoreOpWriter m_worker;                                 // 저장 경로 연산 전담 (SIP 스레드 무접촉)
     std::map<std::string, std::string> m_mapDir;             // key(sessionId or callId) → dir path

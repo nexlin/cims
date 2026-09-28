@@ -45,6 +45,12 @@ def parse_user_agent(ua: str) -> dict:
     return {'app': '', 'app_version': '', 'os': '', 'model': ''}
 
 
+def _features(raw: str) -> list:
+    """Contact feature tag 줄(`;` 구분) → 목록. 값의 퍼센트 인코딩(`urn%3Aurn-7%3A…`)은 표시용으로 푼다."""
+    from urllib.parse import unquote
+    return [unquote(f) for f in raw.split(';') if f]
+
+
 def imei_of(instance: str) -> str:
     """`urn:gsma:imei:<TAC 8>-<SNR 6>-<spare>` (RFC 7254) → 15 자리 숫자. 그 밖의 URN 은 빈 문자열."""
     s = (instance or '').strip().lower()
@@ -87,12 +93,45 @@ def _save_cursor(ddir: str, cur: dict) -> None:
     file_store._atomic_write_json(os.path.join(ddir, _CURSOR), {k: cur[k] for k in keep})
 
 
+def _current_key(recs: dict, user: str) -> str:
+    """그 번호의 지금 단말 — 등록 중인 레코드, 없으면 최근 관측, 레코드가 아예 없으면 `<번호>__-` 를 만든다."""
+    mine = [(k, r) for k, r in recs.items() if r.get('subscription_id') == user]
+    live = [kr for kr in mine if kr[1].get('registered')]
+    pick = max(live or mine, key=lambda kr: kr[1].get('last_seen') or '', default=None)
+    if pick:
+        return pick[0]
+    k = device_key(user, '')
+    recs[k] = {'subscription_id': user, 'instance_id': '', 'registered': False}
+    return k
+
+
 def _apply(row: dict, recs: dict, dirty: set) -> None:
     user = row.get('user') or ''
     if not user:
         return
     ts = row.get('ts') or ''
-    if row.get('event') == 'unregister':
+    ev = row.get('event')
+    if ev == 'subscribe':
+        # 문서 구독(GMS·CMS xcap-diff) — 지금 단말에 붙인다. expires 0 = 해지
+        k = _current_key(recs, user)
+        subs = recs[k].setdefault('subscriptions', {})
+        pkg = row.get('package') or ''
+        exp = int(row.get('expires') or 0)
+        cur = subs.get(pkg) or {}
+        if exp > 0:
+            subs[pkg] = {'since': cur.get('since') if cur.get('expires') else ts, 'last': ts, 'expires': exp}
+        else:
+            subs[pkg] = {'since': cur.get('since'), 'last': ts, 'expires': 0, 'ended': ts}
+        dirty.add(k)
+        return
+    if ev == 'media':
+        # 코덱 능력 — 그 단말이 낸 INVITE 오퍼(SDP rtpmap). 선호 순
+        k = _current_key(recs, user)
+        recs[k]['codecs'] = {'audio': [c for c in (row.get('audio') or '').split(',') if c],
+                             'video': [c for c in (row.get('video') or '').split(',') if c], 'seen': ts}
+        dirty.add(k)
+        return
+    if ev == 'unregister':
         # 해제 줄에는 단말 식별이 없다 — 그 번호의 등록 중 레코드를 모두 내린다(등록은 번호 단위, CSP UserMap)
         for k, rec in recs.items():
             if rec.get('subscription_id') == user and rec.get('registered'):
@@ -113,6 +152,7 @@ def _apply(row: dict, recs: dict, dirty: set) -> None:
         'kind': row.get('kind') or rec.get('kind') or '', 'imei': imei_of(inst), 'user_agent': ua,
         'transport': row.get('transport') or '', 'addr': row.get('addr') or '', 'node': row.get('node') or '',
         'expires': int(row.get('expires') or 0), 'registered': True, 'last_seen': ts, 'last_register': ts,
+        'features': _features(row.get('features') or ''),
     })
     dirty.add(k)
 
@@ -180,7 +220,32 @@ def by_user(records: list) -> dict:
     return out
 
 
-def view(rec: Optional[dict], raw_imei: bool = False) -> Optional[dict]:
+_SUB_PACKAGES = ('gms', 'cms')
+
+
+def subscription_view(rec: dict, now: Optional[float] = None) -> dict:
+    """{gms|cms: {active, since, expires_at, ended}} — 활성 = 마지막 수락 + 부여 만료가 지금보다 뒤이고 해지되지 않음.
+    CSP 는 만료의 절반 간격으로 갱신을 남기므로 살아 있는 구독은 이 판정에서 끊기지 않는다."""
+    from datetime import datetime, timedelta
+    now_dt = datetime.fromtimestamp(now) if now else datetime.now()
+    out = {}
+    for pkg in _SUB_PACKAGES:
+        s = ((rec or {}).get('subscriptions') or {}).get(pkg)
+        if not s:
+            out[pkg] = {'active': False, 'since': None, 'expires_at': None, 'ended': None}
+            continue
+        exp_at = None
+        try:
+            if s.get('expires'):
+                exp_at = datetime.fromisoformat(s['last']) + timedelta(seconds=int(s['expires']))
+        except (KeyError, ValueError, TypeError):
+            exp_at = None
+        out[pkg] = {'active': bool(exp_at and exp_at > now_dt), 'since': s.get('since'),
+                    'expires_at': exp_at.isoformat(timespec='seconds') if exp_at else None, 'ended': s.get('ended')}
+    return out
+
+
+def view(rec: Optional[dict], raw_imei: bool = False, now: Optional[float] = None) -> Optional[dict]:
     """화면용 — IMEI 는 관리자만 원문(`raw_imei`), 그 밖에는 가운데를 가린다."""
     if not rec:
         return None
@@ -193,4 +258,7 @@ def view(rec: Optional[dict], raw_imei: bool = False) -> Optional[dict]:
         'expires': rec.get('expires') or 0, 'registered': bool(rec.get('registered')),
         'first_seen': rec.get('first_seen') or '', 'last_seen': rec.get('last_seen') or '',
         'last_register': rec.get('last_register') or '', 'last_unregister': rec.get('last_unregister') or '',
+        'features': rec.get('features') or [],
+        'codecs': rec.get('codecs') or {'audio': [], 'video': [], 'seen': ''},
+        'subscriptions': subscription_view(rec, now),
     }

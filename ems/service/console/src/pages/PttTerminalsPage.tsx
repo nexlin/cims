@@ -14,6 +14,7 @@ import { EmptyState } from '@core/components/custom/empty-state'
 import { StatusDot } from '@core/components/custom/status-dot'
 import {
   statsApi, type PttTerminalStateFilter, type PttTerminalsResponse, type PttTerminalResponse, type PttTerminalDevice,
+  type PttDocSubscription,
 } from '@core/api/stats'
 
 const POLL_MS = 10000
@@ -28,6 +29,14 @@ const TYPE_LABEL: Record<string, string> = { dispatch: '관제조작반', handhe
 const when = (v: string | null | undefined) => (v ? v.replace('T', ' ').slice(0, 19) : '—')
 const secText = (s: number) => (s >= 60 ? `${Math.floor(s / 60)}분 ${s % 60}초` : `${s}초`)
 const appText = (d: { app: string; app_version: string }) => (d.app ? `${d.app}${d.app_version ? ` ${d.app_version}` : ''}` : '')
+const SUB_LABEL: Record<string, string> = { gms: '그룹 문서(GMS)', cms: '설정 문서(CMS)' }
+const EMG_MODE: Record<string, string> = { DedicatedGroup: '전용 긴급 그룹', UseCurrentlySelectedGroup: '선택 중인 그룹' }
+function SubState({ s }: { s: PttDocSubscription }) {
+  if (s.active) return <StatusDot tone="success" label={`구독 중 · ${when(s.expires_at)} 만료`} title={s.since ? `${when(s.since)} 부터` : undefined} />
+  if (s.ended) return <StatusDot tone="neutral" label={`해지 · ${when(s.ended)}`} />
+  if (s.expires_at) return <StatusDot tone="warning" label={`만료 · ${when(s.expires_at)}`} />
+  return <span className="text-muted-foreground">구독 없음</span>
+}
 
 export default function PttTerminalsPage() {
   const [filter, setFilter] = useState<PttTerminalStateFilter>('all')
@@ -76,6 +85,7 @@ export default function PttTerminalsPage() {
                 <Th>이름</Th><Th width={100}>유형</Th><Th>모델 · 앱</Th>
                 <Th width={80} title="IdMS 로그인(유효한 refresh token)">로그인</Th>
                 <Th width={90} title="SIP 등록(접속)">등록</Th><Th width={60}>전송</Th>
+                <Th width={90} title="문서 구독(xcap-diff) — GMS 그룹 문서 · CMS 설정 문서">문서 구독</Th>
                 <Th align="right" width={70} title="참여(affiliation, TS 24.379 §9) 중인 그룹 수">참여</Th>
                 <Th width={150} title="최근 단말 관측 — 해상도 1 시간">최근 관측</Th>
               </tr></thead>
@@ -91,6 +101,7 @@ export default function PttTerminalsPage() {
                     <Td>{r.logged_in ? <Badge variant="successSoft">로그인</Badge> : <span className="text-muted-foreground">—</span>}</Td>
                     <Td><StatusDot tone={r.registered ? 'success' : 'neutral'} label={r.registered ? '접속 중' : '미접속'} title={r.register_time || undefined} /></Td>
                     <Td mono>{orDash(r.transport || null)}</Td>
+                    <Td>{r.subscribed.length ? <span className="flex gap-1">{r.subscribed.map(p => <Badge key={p} variant="neutralSoft">{p.toUpperCase()}</Badge>)}</span> : <span className="text-muted-foreground">—</span>}</Td>
                     <Td align="right">{r.affiliated_count}</Td>
                     <Td mono>{when(r.last_seen)}</Td>
                   </TrLink>
@@ -160,6 +171,9 @@ function TerminalDetail({ msisdn, onClose }: { msisdn: string; onClose: () => vo
               <span className="text-muted-foreground">등록</span>
               <span><StatusDot tone={reg.registered ? 'success' : 'neutral'} label={reg.registered ? `접속 중 · ${when(reg.register_time)}` : `미접속${reg.logout_time ? ` · ${when(reg.logout_time)} 해제` : ''}`} /></span>
               {reg.node ? <><span className="text-muted-foreground">접속 경로</span><span className="font-mono">{reg.node} · {reg.transport} · {reg.addr}{reg.expires ? ` · 만료 ${reg.expires}초` : ''}</span></> : null}
+              {(['gms', 'cms'] as const).map(p => (
+                <span key={p} className="contents"><span className="text-muted-foreground">{SUB_LABEL[p]}</span><span><SubState s={d.subscriptions[p]} /></span></span>
+              ))}
               <span className="text-muted-foreground">보안 · 인증</span>
               <span className="flex flex-wrap gap-1">
                 <Badge variant="neutralSoft">채널 {d.security.sip_transport}</Badge>
@@ -169,13 +183,26 @@ function TerminalDetail({ msisdn, onClose }: { msisdn: string; onClose: () => vo
             </div>
           </Section>
           <Section title={`그룹 참여 ${d.groups.filter(g => g.affiliated).length} / 멤버 ${d.groups.length}`}>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-muted-foreground">긴급 그룹</span>
+              {!d.emergency.profile ? <span className="text-muted-foreground">프로파일 없음(기본값)</span>
+                : d.emergency.mode !== 'DedicatedGroup' ? <span>{EMG_MODE[d.emergency.mode] || d.emergency.mode}</span>
+                : !d.emergency.group_id ? <span className="text-muted-foreground">미지정 — 긴급 호출 불가</span>
+                : <>
+                    <span className="font-medium">{d.emergency.group_name || d.emergency.group_id}</span>
+                    {d.emergency.affiliated ? <Badge variant="successSoft">상시 참여</Badge>
+                      : d.emergency.member ? <Badge variant="warningSoft">미참여</Badge> : <Badge variant="dangerSoft">멤버 아님</Badge>}
+                  </>}
+              {d.emergency.profile && !d.emergency.allow_call && <Badge variant="neutralSoft">긴급 호출 불허</Badge>}
+              {d.emergency.profile && !d.emergency.allow_alert && <Badge variant="neutralSoft">긴급 경보 불허</Badge>}
+            </div>
             {d.groups.length === 0 ? <div className="text-sm text-muted-foreground">—</div> : (
               <DataTable>
                 <thead><tr><Th>그룹</Th><Th width={70}>역할</Th><Th width={80}>참여</Th><Th width={150}>참여 시각</Th></tr></thead>
                 <tbody>
                   {d.groups.map(g => (
                     <tr key={g.id}>
-                      <Td><span className="font-medium">{g.name}</span> <span className="font-mono text-xs text-muted-foreground">{g.id}</span></Td>
+                      <Td><span className="font-medium">{g.name}</span> <span className="font-mono text-xs text-muted-foreground">{g.id}</span>{g.emergency_group && <Badge variant="dangerSoft" className="ml-1">긴급</Badge>}</Td>
                       <Td>{g.role === 'chair' ? <Badge variant="brandSoft">chair</Badge> : '참가자'}</Td>
                       <Td>{g.affiliated ? <Badge variant="successSoft">참여</Badge> : <span className="text-muted-foreground">—</span>}</Td>
                       <Td mono>{when(g.affiliated_at)}</Td>
@@ -209,6 +236,12 @@ function DeviceGrid({ dev, type }: { dev: PttTerminalDevice; type: string }) {
       <span className="text-muted-foreground">모델 · OS</span><span>{orDash(dev.model || null)}{dev.os ? ` · ${dev.os}` : ''}</span>
       <span className="text-muted-foreground">앱</span><span>{orDash(appText(dev) || null)}</span>
       <span className="text-muted-foreground">User-Agent</span><span className="break-all font-mono text-xs">{orDash(dev.user_agent || null)}</span>
+      <span className="text-muted-foreground" title="그 단말이 낸 INVITE 오퍼의 코덱(선호 순)">코덱</span>
+      <span className="font-mono text-xs">{dev.codecs.audio.length || dev.codecs.video.length
+        ? <>{dev.codecs.audio.join(', ')}{dev.codecs.video.length ? ` · 영상 ${dev.codecs.video.join(', ')}` : ''}</>
+        : <span className="font-sans text-muted-foreground">호 발신 전 — 첫 오퍼에서 채워집니다</span>}</span>
+      <span className="text-muted-foreground" title="REGISTER Contact feature tag(RFC 3840)">능력 태그</span>
+      <span className="break-all font-mono text-xs">{dev.features.length ? dev.features.join(', ') : '—'}</span>
       <span className="text-muted-foreground">처음 · 최근</span><span className="font-mono">{when(dev.first_seen)} · {when(dev.last_seen)}</span>
     </div>
   )

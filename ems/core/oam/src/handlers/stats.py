@@ -3262,6 +3262,7 @@ def _ptt_terminals(config: dict, state: str = 'all', q: str = '', ttype: str = '
             'model': (dev or {}).get('model') or '', 'os': (dev or {}).get('os') or '',
             'app': (dev or {}).get('app') or '', 'app_version': (dev or {}).get('app_version') or '',
             'transport': (dev or {}).get('transport') or '', 'devices': len(devs.get(msisdn) or []),
+            'subscribed': [p for p, v in ue_devices.subscription_view(dev).items() if v['active']] if dev else [],
             'register_time': r['register_time'].isoformat() if r.get('register_time') else None,
             'last_seen': (dev or {}).get('last_seen') or None,
         })
@@ -3291,6 +3292,15 @@ def _ptt_terminal(config: dict, msisdn: str, raw_imei: bool = False) -> HandlerR
                     f"   AND {_AFF_ACTIVE}) AS affiliated_at "
                     "FROM ptt_group_members m JOIN ptt_groups g ON g.id=m.group_id WHERE m.user_id=%s ORDER BY g.name", (msisdn,))
                 groups = cur.fetchall()
+                # 긴급 그룹(TS 24.484 MCPTT 사용자 프로파일 — DedicatedGroup 이면 전용 긴급 그룹). 상시 참여 = 그 그룹 affiliation
+                prof = None
+                try:
+                    cur.execute("SELECT p.allow_emergency_call, p.allow_emergency_alert, p.emergency_group_mode, "
+                                " p.emergency_group_id, g.name AS emergency_group_name FROM ptt_user_profile p "
+                                "LEFT JOIN ptt_groups g ON g.mcptt_group_id=p.emergency_group_id WHERE p.ptt_id=%s", (msisdn,))
+                    prof = cur.fetchone()
+                except Exception as e:   # 마이그레이션 전(테이블 부재) — 긴급 칸만 비운다
+                    logger.warning('ptt user profile skip: %s', e)
     except Exception as e:
         logger.exception('ptt terminal error: %s', e)
         return HandlerResult(status=500, body=_ERR_INTERNAL)
@@ -3305,6 +3315,16 @@ def _ptt_terminal(config: dict, msisdn: str, raw_imei: bool = False) -> HandlerR
         reg.update({'node': cur_dev.get('node') or '', 'transport': cur_dev.get('transport') or '',
                     'addr': cur_dev.get('addr') or '', 'expires': cur_dev.get('expires') or 0})
     td = _ptt_today_by_user(config).get(msisdn) or {}
+    eg_id = (prof or {}).get('emergency_group_id') or ''
+    eg_row = next((g for g in groups if g['id'] == eg_id), None) if eg_id else None
+    emergency = {
+        'profile': prof is not None,
+        'allow_call': bool((prof or {}).get('allow_emergency_call', 1)),
+        'allow_alert': bool((prof or {}).get('allow_emergency_alert', 1)),
+        'mode': (prof or {}).get('emergency_group_mode') or 'DedicatedGroup',
+        'group_id': eg_id, 'group_name': (prof or {}).get('emergency_group_name') or '',
+        'member': eg_row is not None, 'affiliated': bool(eg_row and eg_row.get('affiliated')),
+    }
     return HandlerResult(status=200, body={
         'msisdn': msisdn, 'name': sub.get('name') or '', 'org': sub.get('org_name') or '', 'type': _terminal_type(cur_dev),
         'device': ue_devices.view(cur_dev, raw_imei),
@@ -3313,8 +3333,10 @@ def _ptt_terminal(config: dict, msisdn: str, raw_imei: bool = False) -> HandlerR
         'registration': reg,
         'security': {'sip_transport': sub.get('sip_transport') or 'ANY', 'auth_scheme': sub.get('auth_scheme') or 'digest',
                      'service_ref': sub.get('service_ref') or ''},
+        'emergency': emergency,
+        'subscriptions': ue_devices.subscription_view(cur_dev),
         'groups': [{'id': g['id'], 'name': g.get('name') or g['id'], 'role': g.get('role') or 'participant',
-                    'affiliated': bool(g.get('affiliated')),
+                    'affiliated': bool(g.get('affiliated')), 'emergency_group': g['id'] == eg_id,
                     'affiliated_at': g['affiliated_at'].isoformat() if g.get('affiliated_at') else None} for g in groups],
         'today': {k: int(td.get(k, 0) or 0) for k in ('sessions', 'turns', 'talk_sum_sec', 'emergency')},
         'raw_imei': raw_imei,
@@ -3975,6 +3997,7 @@ CIMS_STATS_API_DOCS = [
          {'name': 'terminals[].logged_in', 'type': 'boolean', 'desc': 'IdMS 로그인 유효(폐기·회전 안 된 refresh token)'},
          {'name': 'terminals[].affiliated_count', 'type': 'integer', 'unit': '개', 'desc': '참여(affiliation) 중인 그룹 수'},
          {'name': 'terminals[].devices', 'type': 'integer', 'unit': '대', 'desc': '이 번호로 관측된 단말(+sip.instance) 수'},
+         {'name': 'terminals[].subscribed[]', 'type': 'string', 'desc': '활성 문서 구독 — gms | cms (xcap-diff)'},
          {'name': 'terminals[].last_seen', 'type': 'string', 'desc': '최근 단말 관측 시각(ISO) — 해상도 1 시간(CSP 는 변경·1 시간 간격으로만 남긴다)'},
      ],
      'example': {'counts': {'all': 11, 'online': 8, 'offline': 3}, 'types': {'handheld': 6, 'sim': 4, 'none': 1},
@@ -3989,7 +4012,7 @@ CIMS_STATS_API_DOCS = [
      'path': '/api/v1/stats/service/ptt-terminals/{msisdn}',
      'summary': '단말 상세 — 단말 정보·로그인·등록·보안·그룹 참여·오늘 이용',
      'params': [{'name': 'msisdn', 'in': 'path', 'type': 'string', 'required': True, 'desc': 'PTT 가입 번호(E.164, + 는 %2B)'}],
-     'response': '{msisdn, name, org, type, device, devices[], login, registration, security, groups[], today, raw_imei}',
+     'response': '{msisdn, name, org, type, device, devices[], login, registration, security, emergency, subscriptions, groups[], today, raw_imei}',
      'response_fields': [
          {'name': 'device', 'type': 'object', 'desc': '최근 단말 — instance_id·imei·모델·OS·앱·버전·User-Agent·transport·주소·노드·first/last_seen'},
          {'name': 'device.imei', 'type': 'string', 'desc': 'IMEI(urn:gsma:imei 일 때만) — 관리자가 아니면 가운데를 가린다(3512…7890)'},
@@ -3997,7 +4020,11 @@ CIMS_STATS_API_DOCS = [
          {'name': 'login', 'type': 'object', 'desc': '{logged_in, client_id, login_id, issued_at, expires_at} — IdMS refresh token'},
          {'name': 'registration', 'type': 'object', 'desc': '{registered, register_time, logout_time, node, transport, addr, expires}'},
          {'name': 'security', 'type': 'object', 'desc': '{sip_transport(UDP|TCP|TLS|ANY), auth_scheme(digest|aka), service_ref}'},
-         {'name': 'groups[]', 'type': 'object', 'desc': '{id, name, role, affiliated, affiliated_at} — 멤버인 그룹'},
+         {'name': 'device.features[]', 'type': 'string', 'desc': 'REGISTER Contact feature tag(RFC 3840) — audio·video·+g.3gpp.mcptt·+g.3gpp.icsi-ref=… 등'},
+         {'name': 'device.codecs', 'type': 'object', 'desc': '{audio[], video[], seen} — 그 단말이 낸 INVITE 오퍼의 코덱(선호 순)'},
+         {'name': 'subscriptions', 'type': 'object', 'desc': '{gms|cms: {active, since, expires_at, ended}} — 문서 구독(xcap-diff, TS 24.481/24.484)'},
+         {'name': 'emergency', 'type': 'object', 'desc': '{profile, allow_call, allow_alert, mode, group_id, group_name, member, affiliated} — 긴급 그룹과 상시 참여(affiliation)'},
+         {'name': 'groups[]', 'type': 'object', 'desc': '{id, name, role, affiliated, affiliated_at, emergency_group} — 멤버인 그룹'},
          {'name': 'today', 'type': 'object', 'desc': '{sessions, turns, talk_sum_sec, emergency} — 1분 롤업 by_user'},
          {'name': 'raw_imei', 'type': 'boolean', 'desc': 'IMEI 원문 여부(admin 역할)'},
      ],

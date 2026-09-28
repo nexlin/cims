@@ -6,6 +6,7 @@
   ③ 같은 단말의 재등록은 같은 레코드(first_seen 유지·last_seen 갱신), 다른 단말이 오면 이전 단말은 등록 해제
   ④ 해제 줄(단말 식별 없음)은 그 번호의 등록 중 레코드를 모두 내린다
   ⑤ 커서 — 두 번째 fold 는 새 줄만 읽고, 쓰는 중인 마지막 줄(개행 없음)은 다음 차례로 미룬다
+  ⑥ 문서 구독(subscribe)·코덱(media) 줄은 그 번호의 지금 단말에 붙고, 구독 활성 = 마지막 수락 + 만료 > 지금 · 해지 전
 
 sys.path 는 ems/core/oam/{src,vendor} — test_stats_ptt_attempts.py 와 동일.
 """
@@ -108,6 +109,35 @@ class FoldTests(unittest.TestCase):
         rec = self._recs()[U.device_key('+8250003', IMEI)]
         self.assertEqual(U.view(rec)['imei'], '3512…0120')
         self.assertEqual(U.view(rec, raw_imei=True)['imei'], '351234567890120')
+
+    def test_features_subscriptions_codecs(self):
+        reg = dict(_row('+8250004', instance=UUID, ts='2026-09-29T09:00:00'),
+                   features='audio;+g.3gpp.icsi-ref=urn%3Aa,urn%3Ab;+g.3gpp.mcptt')
+        self._write([reg,
+                     {'ts': '2026-09-29T09:00:01', 'event': 'subscribe', 'user': '+8250004', 'package': 'gms', 'expires': 3600},
+                     {'ts': '2026-09-29T09:00:02', 'event': 'subscribe', 'user': '+8250004', 'package': 'cms', 'expires': 600},
+                     {'ts': '2026-09-29T09:05:00', 'event': 'media', 'user': '+8250004', 'audio': 'AMR-WB/16000,PCMU/8000', 'video': ''},
+                     {'ts': '2026-09-29T09:06:00', 'event': 'subscribe', 'user': '+8250004', 'package': 'cms', 'expires': 0}])
+        U.fold(self.cfg, self.stats)
+        rec = self._recs()[U.device_key('+8250004', UUID)]
+        self.assertEqual(rec['features'], ['audio', '+g.3gpp.icsi-ref=urn:a,urn:b', '+g.3gpp.mcptt'])
+        self.assertEqual(rec['codecs']['audio'], ['AMR-WB/16000', 'PCMU/8000'])
+        from datetime import datetime
+        now = datetime(2026, 9, 29, 9, 30).timestamp()
+        sv = U.subscription_view(rec, now)
+        self.assertTrue(sv['gms']['active'])                           # 09:00:01 + 3600 > 09:30
+        self.assertFalse(sv['cms']['active'])                          # 해지
+        self.assertEqual(sv['cms']['ended'], '2026-09-29T09:06:00')
+        self.assertFalse(U.subscription_view(rec, datetime(2026, 9, 29, 10, 1).timestamp())['gms']['active'])   # 만료
+        # 재등록(같은 단말)은 구독·코덱을 지우지 않는다
+        self._write([dict(reg, ts='2026-09-29T10:00:00')])
+        U.fold(self.cfg, self.stats)
+        self.assertIn('codecs', self._recs()[U.device_key('+8250004', UUID)])
+
+    def test_subscribe_without_device_record(self):
+        self._write([{'ts': '2026-09-29T09:00:01', 'event': 'subscribe', 'user': '+8250005', 'package': 'gms', 'expires': 3600}])
+        U.fold(self.cfg, self.stats)
+        self.assertIn(U.device_key('+8250005', ''), self._recs())
 
 
 if __name__ == '__main__':

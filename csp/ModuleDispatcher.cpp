@@ -777,9 +777,36 @@ bool CModuleDispatcher::EventIncomingRequestAuth( CSipMessage *pclsMessage ) {
 //   (EvalRelayOfferSdes/ApplyRelayLegOffer/EvalRelayAnswerSdes/ReadReinviteSdes/RewriteRelaySdpForLeg
 //    — media_security.md §5.2. TasModule 의 픽업·전달 재고정과 공용).
 
+// 오퍼 코덱 → 단말 속성 관측(CCallDir::DeviceMedia). 오디오 = 첫 활성 audio m= 의 선호 순(telephone-event·CN 제외),
+//   영상 = 활성 video m= 의 rtpmap 이름.
+static void NoteOfferCodecs( const char *pszFrom, const SDP_MEDIA_LIST &clsList ) {
+    std::string strAudio, strVideo;
+    for ( const RelayCodec::CodecDesc &c : RelayCodec::AudioCodecs( clsList ) ) {
+        if ( !strAudio.empty() ) strAudio += ",";
+        strAudio += c.Label();
+    }
+    for ( const CSdpMedia &m : clsList ) {
+        if ( m.m_strMedia != "video" || m.m_iPort <= 0 ) continue;
+        for ( const CSdpAttribute &a : m.m_clsAttributeList ) {
+            if ( strcasecmp( a.m_strName.c_str(), "rtpmap" ) != 0 ) continue;
+            const size_t sp = a.m_strValue.find( ' ' );
+            if ( sp == std::string::npos ) continue;
+            const std::string strName = a.m_strValue.substr( sp + 1 );
+            if ( strVideo.find( strName ) != std::string::npos ) continue;
+            if ( !strVideo.empty() ) strVideo += ",";
+            strVideo += strName;
+        }
+        break;
+    }
+    gclsCallDir.DeviceMedia( pszFrom, strAudio, strVideo );
+}
+
 void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *pszFrom, const char *pszTo,
                                            CSipCallRtp *pclsRtp, CSipMessage *pclsMessage ) {
     CLog::Print( LOG_DEBUG, "EventIncomingCall: CallId=%s From=%s To=%s", pszCallId, pszFrom, pszTo );
+    // 단말 코덱 능력(mcptt_management_views.md §4.1) — 등록 가입자가 낸 오퍼의 rtpmap. 피어 발신은 단말이 아니다
+    if ( pclsRtp && pszFrom && *pszFrom && gclsCallDir.IsEnabled() && gclsUserMap.Select( pszFrom ) )
+        NoteOfferCodecs( pszFrom, pclsRtp->m_clsMediaList );
     CspUser clsUser;
     CUserInfo clsUserInfo;
     bool bRoutePrefix = false;

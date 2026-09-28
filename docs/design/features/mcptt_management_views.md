@@ -72,11 +72,12 @@ MCPTT 서비스가 필요로 하는 단말 정보 — 누가 어떤 단말로 �
 
 | 영역 | 표시 | 원천 |
 |---|---|---|
-| 단말 정보 | 단말 유형 · 단말 ID(IMEI — 가림) · instance · 모델 · OS · 앱 · `User-Agent` · 처음/최근 관측, 이 번호로 관측된 단말이 여럿이면 목록 | file-store `ue_devices`(§4.1) |
+| 단말 정보 | 단말 유형 · 단말 ID(IMEI — 가림) · instance · 모델 · OS · 앱 · `User-Agent` · 코덱(오퍼 선호 순) · 능력 태그(Contact feature tag) · 처음/최근 관측, 이 번호로 관측된 단말이 여럿이면 목록 | file-store `ue_devices`(§4.1) |
 | MCPTT 서비스 상태 | 로그인(IdMS client_id · 발급 · 만료) | IdMS refresh token(`refresh_tokens` — 폐기·회전 안 됐고 만료 전인 최신) |
 | | 등록(접속 여부 · 등록/해제 시각 · 접속 노드 · transport · 단말 주소 · 부여 만료) | DB `register_time`/`logout_time` + 최근 단말 레코드 |
+| | 문서 구독(GMS 그룹 문서 · CMS 설정 문서 xcap-diff — 구독 중·만료 시각 / 해지 / 만료) | `ue_devices` 의 `subscriptions`(§4.1) |
 | | 보안 · 인증(`sip_transport`(없으면 ANY) · `auth_scheme` · 접속서비스) | DB `ptt_subscriptions` |
-| 그룹 참여 | 멤버인 그룹별 역할 · affiliation · 참여 시각 | DB `ptt_group_members`·`ptt_affiliations`(V1 과 같은 활성 조건) |
+| 그룹 참여 | 긴급 그룹(TS 24.484 사용자 프로파일 — 전용 긴급 그룹이면 그 그룹과 상시 참여 = affiliation 여부, 긴급 호출·경보 인가) · 멤버인 그룹별 역할 · affiliation · 참여 시각 | DB `ptt_user_profile`·`ptt_group_members`·`ptt_affiliations`(V1 과 같은 활성 조건) |
 | 오늘 이용 | 세션 · 발언 수 · 발언 시간 · 긴급 | 1분 롤업 `by_user` (§5.2) |
 
 단말 유형은 입력 필드가 아니라 로그인한 앱에서 파생한다. 지금 단말 앱은 모두 IdMS `client_id` `MCPTT_UE` 를 쓰므로 가를 수
@@ -93,6 +94,9 @@ product 이름이 정해지면 같은 표(`stats.py` `_TERMINAL_TYPES`)에 한 �
 | 단말 ID (IMEI) | REGISTER Contact `+sip.instance="<urn:gsma:imei:…>"` (TS 24.229 §5.1.1.2 · RFC 7254) | CSP `CscfModule` REGISTER 200 뒤 |
 | 모델 · OS · 앱 버전 | REGISTER `User-Agent` (RFC 3261 §20.41) — 형식 `CIMS-PTT/<앱 버전> (<OS>; <모델>)` | 같은 지점 |
 | 도달 경로 | 수신 transport · 소스 주소 · 부여 Expires · 접속 노드 | 같은 지점 |
+| 능력 태그 | REGISTER Contact feature tag (RFC 3840 — `audio`·`video`·`+g.3gpp.mcptt`·`+g.3gpp.icsi-ref=…`) | 같은 지점 |
+| 코덱 능력 | 그 단말이 낸 INVITE 오퍼의 rtpmap (RFC 4566 — 오디오 선호 순·영상) | CSP `EventIncomingCall`(등록 가입자 발신만) |
+| 문서 구독 | GMS·CMS SUBSCRIBE `Event: xcap-diff` 수락·해지 (TS 24.481·24.484, RFC 5875) | CSP `RecvRequestSubscribe` |
 
 ```
 REGISTER ─► CSP CscfModule  200 OK 뒤 _NoteDeviceSeen ─► CCallDir::DeviceSeen
@@ -107,15 +111,19 @@ REGISTER ─► CSP CscfModule  200 OK 뒤 _NoteDeviceSeen ─► CCallDir::Devi
 ```
 
 - **CSP 관측 줄** (`stats/ue_devices/<일>.jsonl`, [site_directory_layout.md](site_directory_layout.md) 통계 영역) —
-  `{ts, event: register|unregister, user, kind, instance, user_agent, transport, addr, expires, node}`. REGISTER 경로는
+  `register|unregister {user, kind, instance, user_agent, transport, addr, expires, node, features}`(features 는 `;` 구분 — icsi-ref 값 안에 쉼표가 있다) ·
+  `subscribe {user, package: gms|cms, expires(0 = 해지)}` · `media {user, audio, video}`. REGISTER 경로는
   줄 조립만 하고 기록은 호 이력과 같은 worker 가 한다(호 처리 경로 저장소 무조회 원칙,
   [volte_supplementary_services.md](volte_supplementary_services.md) §2). 갱신 REGISTER 마다 쓰지 않고 **단말·앱·경로가
   달라졌을 때** 또는 같은 값이 1 시간(`kDeviceSeenRefreshSec`)을 넘겼을 때만 쓴다 — 줄 수가 갱신 주기가 아니라 등록 수에
-  비례하고, 대신 `last_seen` 해상도가 1 시간이다. 명시적 해제(Expires 0)는 늘 쓴다.
+  비례하고, 대신 `last_seen` 해상도가 1 시간이다. 구독 갱신은 **부여 만료의 절반**(60 s~1 시간) 간격으로만 쓴다 — 그래야
+  OAM 이 `마지막 수락 + 만료` 로 본 구독이 갱신 사이에 끊긴 것처럼 보이지 않는다. 코덱은 값이 바뀔 때·1 시간 간격. 명시적 해제·해지는 늘 쓴다.
 - **레코드** (`ue_devices`) — 키 = 불변 id `<가입 번호>__<instance>`([../identifier_model.md](../identifier_model.md)), instance 가
   없는 단말은 `<번호>__-`. 필드 `subscription_id` · `kind` · `instance_id` · `imei` · `app` · `app_version` · `os` · `model` ·
   `user_agent` · `transport` · `addr` · `node` · `expires` · `registered` · `first_seen` · `last_seen` · `last_register` ·
-  `last_unregister`. 같은 단말의 재등록은 `last_seen` 만 밀고, 같은 번호에 다른 단말이 등록하면 이전 레코드는 `registered=false`
+  `last_unregister` · `features` · `codecs{audio, video, seen}` · `subscriptions{gms|cms: {since, last, expires, ended}}`.
+  구독·코덱 줄은 그 번호의 지금 단말(등록 중 → 최근 관측 → 없으면 `<번호>__-`)에 붙는다. 구독 활성 = `last + expires` 가 지금보다 뒤이고 해지 전.
+  같은 단말의 재등록은 `last_seen` 만 밀고, 같은 번호에 다른 단말이 등록하면 이전 레코드는 `registered=false`
   (바인딩은 번호당 하나 — [registration_binding_set.md](registration_binding_set.md) §8), 해제 줄은 그 번호의 등록 중 레코드를 모두 내린다.
 - **저장 위치** — oam-svc 소유 공간 `modules/oam-svc/runtime/`([../runtime_store_v2_module_namespacing.md](../runtime_store_v2_module_namespacing.md)).
   관리 store 는 단일 writer 라 oam-svc 가 기동 때 이 서브트리에 소유권 리스를 잡는다(계측기와 같은 규약, [oam_ha.md](oam_ha.md) §4.4).
@@ -131,8 +139,7 @@ REGISTER ─► CSP CscfModule  200 OK 뒤 _NoteDeviceSeen ─► CCallDir::Devi
   수집 쪽은 URN 종류로 IMEI 칸을 채운다(`urn:gsma:imei:` 만 IMEI, `urn:uuid:` 는 빈 칸).
 - IMEI 는 개인 식별 정보다 — 서버가 가운데를 가려 보내고(`3512…7890`, `imei_masked`), 원문은 콘솔 `admin` 역할에만 준다(`raw_imei`).
 
-남은 것 = 문서 구독 상태(GMS·CMS xcap-diff — CSP 구독 관리 상태가 oam-svc 에 노출되지 않는다) · 철도 긴급 그룹 상시 참여 표시 ·
-코덱 능력(REGISTER Contact feature tag) · 차상 단말 product 이름.
+남은 것 = 차상 단말 product 이름(정해지면 `_TERMINAL_TYPES` 한 줄).
 
 ## 5. MCPTT 이용 정보 화면
 

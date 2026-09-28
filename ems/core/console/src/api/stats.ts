@@ -320,7 +320,7 @@ export type PttTerminalType = 'dispatch' | 'handheld' | 'sim' | 'unknown' | ''
 export interface PttTerminalRow {
   msisdn: string; name: string; type: PttTerminalType; registered: boolean; logged_in: boolean
   affiliated_count: number; model: string; os: string; app: string; app_version: string; transport: string
-  devices: number; register_time: string | null; last_seen: string | null
+  devices: number; subscribed: string[]; register_time: string | null; last_seen: string | null
 }
 export interface PttTerminalsResponse {
   counts: Record<PttTerminalStateFilter, number>
@@ -331,7 +331,9 @@ export interface PttTerminalDevice {
   instance_id: string; imei: string; imei_masked: boolean; app: string; app_version: string; os: string; model: string
   user_agent: string; transport: string; addr: string; node: string; expires: number; registered: boolean
   first_seen: string; last_seen: string; last_register: string; last_unregister: string
+  features: string[]; codecs: { audio: string[]; video: string[]; seen: string }
 }
+export interface PttDocSubscription { active: boolean; since: string | null; expires_at: string | null; ended: string | null }
 export interface PttTerminalResponse {
   msisdn: string; name: string; org: string; type: PttTerminalType
   device: PttTerminalDevice | null; devices: PttTerminalDevice[]
@@ -341,7 +343,12 @@ export interface PttTerminalResponse {
     node?: string; transport?: string; addr?: string; expires?: number
   }
   security: { sip_transport: string; auth_scheme: string; service_ref: string }
-  groups: { id: string; name: string; role: string; affiliated: boolean; affiliated_at: string | null }[]
+  emergency: {
+    profile: boolean; allow_call: boolean; allow_alert: boolean; mode: string
+    group_id: string; group_name: string; member: boolean; affiliated: boolean
+  }
+  subscriptions: { gms: PttDocSubscription; cms: PttDocSubscription }
+  groups: { id: string; name: string; role: string; affiliated: boolean; affiliated_at: string | null; emergency_group: boolean }[]
   today: { sessions: number; turns: number; talk_sum_sec: number; emergency: number }
   raw_imei: boolean
 }

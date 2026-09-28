@@ -697,20 +697,38 @@ static SecAgreeIpsecOffer EvaluateIpsecOffer( CSipMessage *pclsMessage, const st
 static void _NoteDeviceSeen( CSipMessage *pclsMessage, const std::string &strUser, const std::string &strKind,
                              int iExpires ) {
     if ( !gclsCallDir.IsEnabled() ) return;
-    std::string strInstance;
+    std::string strInstance, strFeatures;
+    auto Unquote = []( const std::string &v ) {
+        std::string o;
+        for ( char c : v )
+            if ( c != '"' && c != '<' && c != '>' ) o += c;
+        return o;
+    };
     if ( !pclsMessage->m_clsContactList.empty() ) {
-        pclsMessage->m_clsContactList.front().SelectParam( "+sip.instance", strInstance );
-        std::string strOut;
-        for ( char c : strInstance )
-            if ( c != '"' && c != '<' && c != '>' ) strOut += c;
-        strInstance = strOut;
+        CSipFrom &clsContact = pclsMessage->m_clsContactList.front();
+        clsContact.SelectParam( "+sip.instance", strInstance );
+        strInstance = Unquote( strInstance );
+        // Contact feature tag(RFC 3840 §9 — 단말 능력): 기본 태그(audio·video·text…)와 `+` 확장 태그. 값은 서비스
+        // 식별자
+        //   (icsi-ref·iari-ref)만 싣는다 — 나머지는 존재가 곧 능력이다. 등록 파라미터(instance·reg-id·expires·q)는
+        //   뺀다.
+        for ( const CSipParameter &p : clsContact.m_clsParamList ) {
+            const std::string &n = p.m_strName;
+            const bool bBase = n == "audio" || n == "video" || n == "text" || n == "data" || n == "application" ||
+                               n == "control" || n == "automata" || n == "isfocus";
+            if ( !bBase && ( n.empty() || n[0] != '+' || n == "+sip.instance" ) ) continue;
+            if ( !strFeatures.empty() ) strFeatures += ";";  // 값(icsi-ref 목록)에 쉼표가 있다
+            strFeatures += n;
+            if ( ( n == "+g.3gpp.icsi-ref" || n == "+g.3gpp.iari-ref" ) && !p.m_strValue.empty() )
+                strFeatures += "=" + Unquote( p.m_strValue );
+        }
     }
     const char *pszTransport = ( pclsMessage->m_eTransport == E_SIP_TLS )   ? "TLS"
                                : ( pclsMessage->m_eTransport == E_SIP_TCP ) ? "TCP"
                                                                             : "UDP";
     gclsCallDir.DeviceSeen( "register", strUser, strKind, strInstance, pclsMessage->m_strUserAgent, pszTransport,
                             pclsMessage->m_strClientIp + ":" + std::to_string( pclsMessage->m_iClientPort ), iExpires,
-                            gclsFmReporter.Node() );
+                            gclsFmReporter.Node(), strFeatures );
 }
 
 bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage ) {
@@ -1262,6 +1280,8 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
         }
 
         gclsSubscriptionManager.RemoveSubscription( strSubCallId );
+        if ( ( strEventType == "gms" || strEventType == "cms" ) && gclsCallDir.IsEnabled() )
+            gclsCallDir.DeviceSubscription( strFromId, strEventType, 0 );
 
         // conference 구독 해지는 제휴와 무관하다 — 아래 참조.
         if ( bAffiliation && strEventType == "affiliation" && gclsDbManager.IsConnected() ) {
@@ -1457,6 +1477,9 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
         }
     }
 
+    // 단말 현황의 문서 구독 상태(mcptt_management_views.md §4) — GMS·CMS xcap-diff 만
+    if ( ( strEventType == "gms" || strEventType == "cms" ) && gclsCallDir.IsEnabled() )
+        gclsCallDir.DeviceSubscription( strFromId, strEventType, info.iExpires );
     CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( 200 );
     if ( pclsResponse ) {
         // dialog 식별용 To tag 를 구독에 저장한 szToTag 로 교체
