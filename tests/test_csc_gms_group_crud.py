@@ -102,6 +102,7 @@ class ParseTests(unittest.TestCase):
             "emergency_call": True, "emergency_alert": False, "allow_conference_state": False, "allow_sds": True,
             "allow_fd": True, "max_sds_size": 2000, "max_auto_recv": 4096, "org_code": "TEAM01", "group_type": "chat",
             "max_members": 7, "require_affiliation": False, "authorized_user": "tel:+82510001001",
+            "hang_timer_sec": 5, "max_duration_sec": 600,
             "members": [{"uri": "tel:+82510001001", "name": "관제1석", "role": "chair", "priority": 1, "title": "팀장"},
                         {"uri": "tel:+82500000001", "name": "테스트001", "role": "participant", "priority": 5}],
         }
@@ -119,8 +120,39 @@ class ParseTests(unittest.TestCase):
         self.assertIn("<mcpttgi:on-network-allow-conference-state>false</mcpttgi:on-network-allow-conference-state>", xml)
         self.assertEqual((d["allow_sds"], d["allow_fd"], d["max_sds_size"], d["max_auto_recv"]), (True, True, 2000, 4096))
         self.assertEqual((d["max_members"], d["require_affiliation"], d["org_code"]), (7, False, "TEAM01"))
+        # 그룹 종류 = on-network-invite-members (TS 24.481 §7.2.2 a), 호 타이머 = xs:duration 규격 요소명
+        self.assertIn("<mcpttgi:on-network-invite-members>false</mcpttgi:on-network-invite-members>", xml)
+        self.assertIn("<mcpttgi:on-network-hang-timer>PT5S</mcpttgi:on-network-hang-timer>", xml)
+        self.assertIn("<mcpttgi:on-network-maximum-duration>PT600S</mcpttgi:on-network-maximum-duration>", xml)
+        self.assertNotIn("on-network-hang-time>", xml)
+        self.assertEqual((d["hang_timer_sec"], d["max_duration_sec"]), (5, 600))
         self.assertEqual([(x["user_id"], x["role"], x["priority"]) for x in d["members"]],
                          [("+82510001001", "chair", 1), ("+82500000001", "participant", 5)])
+
+    def test_group_type_from_invite_members_over_session_type(self):
+        inv = "<mcpttgi:on-network-invite-members>{}</mcpttgi:on-network-invite-members>"
+        d = m.parse_group_document_xml(_doc("tel:g-00000001", "n", [], session_type="chat",
+                                            extra=inv.format("true")))
+        self.assertEqual(d["group_type"], "prearranged")   # invite-members 가 정본, session-type 은 전환기 폴백
+        d = m.parse_group_document_xml(_doc("tel:g-00000001", "n", [], extra=inv.format("false")))
+        self.assertEqual(d["group_type"], "chat")
+        d = m.parse_group_document_xml(_doc("tel:g-00000001", "n", [], session_type="chat"))
+        self.assertEqual(d["group_type"], "chat")
+
+    def test_broadcast_is_not_a_group_type(self):
+        with self.assertRaises(ValueError):
+            m.parse_group_document_xml(_doc("tel:g-00000001", "n", [], session_type="broadcast"))
+
+    def test_hang_timer_xs_duration(self):
+        for text, want in (("PT30S", 30), ("PT1M", 60), ("PT1M30S", 90), ("PT2.5S", 2), ("45", 45), ("P0D", 0)):
+            self.assertEqual(m.parse_xs_duration(text), want, text)
+        for text in ("P", "PT", "30s", "-PT1S", "PTXS"):
+            self.assertIsNone(m.parse_xs_duration(text), text)
+        tag = "<mcpttgi:on-network-hang-timer>{}</mcpttgi:on-network-hang-timer>"
+        with self.assertRaises(ValueError):
+            m.parse_group_document_xml(_doc("tel:g-00000001", "n", [], extra=tag.format("soon")))
+        with self.assertRaises(ValueError):
+            m.parse_group_document_xml(_doc("tel:g-00000001", "n", [], extra=tag.format("PT3601S")))
 
     def test_missing_elements_are_none_and_members_absent(self):
         d = m.parse_group_document_xml(

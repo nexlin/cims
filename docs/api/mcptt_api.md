@@ -46,8 +46,14 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
   CSP `GROUP_CHANGED` 통지(CSP 가 xcap-diff NOTIFY 로 단말에 전파). 관리 API(4421, 콘솔 토큰)의 그룹 CRUD 와
   같은 정본·같은 동기화를 쓴다.
 - PUT 본문 = **GET 이 돌려주는 문서와 같은 포맷**(아래). 없는 요소는 갱신 시 기존값 유지, 생성 시 기본값
-  (session-type prearranged, priority 5, SDS 허용, FD 불허, 긴급통화 불허, 긴급경보 허용). `<list>` 가 있으면
+  (prearranged, priority 5, SDS 허용, FD 불허, 긴급통화 불허, 긴급경보 허용, hang-timer 30초, maximum-duration 3600초). `<list>` 가 있으면
   멤버 전체 교체(없으면 유지) — entry uri 는 PTT 가입 번호(`tel:+E.164`, `sip:` 형 가능), 미가입 번호는 400.
+  **그룹 종류 = `<mcpttgi:on-network-invite-members>`**(TS 24.481 §7.2.2 a — `true`=prearranged, `false`=chat). 이 요소가
+  없을 때만 `<mcpttgi:session-type>`(규격 밖 전환기 요소 — 구 단말)을 읽고, `broadcast` 는 400(일제 통화는 호 속성 —
+  [mcptt_broadcast_group_call.md](../design/features/mcptt_broadcast_group_call.md)). 그룹 호 타이머 =
+  `<mcpttgi:on-network-hang-timer>`(T4 Inactivity, 0~3600초) · `<mcpttgi:on-network-maximum-duration>`(TNG3, 0~86400초) —
+  xs:duration(`PT30S`), 범위 밖·형식 오류는 400. GET 은 `<session-type>`(prearranged/chat)을 단말이 invite-members 로
+  그룹 종류를 읽게 될 때까지 함께 싣는다.
   `<mcpttgi:authorized-user>` 는 서버가 정한다(본문의 값 무시). floor 정책(`floor_policy`/`max_talkers`)은 관리 API 전용.
   entry 의 `<mcpttgi:participant-type>` 를 생략하면 **`participant` 로 저장**된다 — 그룹 소유(chair 권한)는 member role 이
   아니라 `authorized_user_id`(= 생성자)로 판정하므로, 생성자를 chair 로 표기하려면 자기 entry 에 `chair` 를 명시한다(앱 기본 동작).
@@ -78,8 +84,11 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
     <mcpttgi:mcdata-allow-short-data-service>true</mcpttgi:mcdata-allow-short-data-service>
     <mcpttgi:mcdata-allow-file-distribution>false</mcpttgi:mcdata-allow-file-distribution>
     <mcpttgi:mcptt-video>false</mcpttgi:mcptt-video>
+    <mcpttgi:on-network-invite-members>true</mcpttgi:on-network-invite-members>
     <mcpttgi:on-network-max-participant-count>10</mcpttgi:on-network-max-participant-count>
     <mcpttgi:on-network-require-affiliation>true</mcpttgi:on-network-require-affiliation>
+    <mcpttgi:on-network-hang-timer>PT30S</mcpttgi:on-network-hang-timer>
+    <mcpttgi:on-network-maximum-duration>PT3600S</mcpttgi:on-network-maximum-duration>
     <mcpttgi:on-network-group-priority>5</mcpttgi:on-network-group-priority>
     <mcpttgi:on-network-encryption>false</mcpttgi:on-network-encryption>
     <cp:ruleset><cp:rule id="a7c"><cp:actions>

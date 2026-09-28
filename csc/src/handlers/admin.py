@@ -31,7 +31,8 @@ from services.mcptt import (notify_csp, refresh_group_members, refresh_login_acc
                             DEFAULT_USER_PROFILE,
                             update_user_profile_cache, SERVICE_CONFIG_DEFAULTS,
                             get_service_config, update_service_config_cache,
-                            get_service_config_xml)
+                            get_service_config_xml, GROUP_TYPES, GROUP_HANG_TIMER_DEFAULT,
+                            GROUP_HANG_TIMER_MAX, GROUP_MAX_DURATION_DEFAULT, GROUP_MAX_DURATION_MAX)
 from handlers import dispatch as _dispatch  # 전화 그룹 파생(pickup_group 409 게이트)
 from services import admin_auth
 from services.auc import auc as _auc
@@ -1370,7 +1371,8 @@ _GROUP_COLS = (
     "emergency_alert, allow_conference_state, "
     "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
     "org_code, session_start, session_end, group_type, on_network, max_members, "
-    "require_affiliation, alias, authorized_user_id, floor_policy, max_talkers, created_at"
+    "require_affiliation, alias, authorized_user_id, floor_policy, max_talkers, "
+    "hang_timer_sec, max_duration_sec, created_at"
 )
 
 # floor 동시 발언 정책 (mcptt_csp_cmp_roadmap_contract.md §B.1) — CSP 가 CMP 로 발행한다.
@@ -1396,6 +1398,26 @@ def _norm_floor(policy, talkers, cur_policy='single', cur_talkers=2):
     return p, n, None
 
 
+def _norm_group_timer(body: dict, field: str, default: int, hi: int):
+    """그룹 호 타이머(hang_timer_sec=T4 · max_duration_sec=TNG3, 초) 검증 → (값, 오류). 범위 밖은 거절 —
+    CMP 가 floor_timers 범위 밖을 BAD_REQUEST 로 거부해 통화 불가가 되므로 저장 단계에서 막는다."""
+    try:
+        n = int(body.get(field, default))
+    except (TypeError, ValueError):
+        return None, f'{field} must be an integer'
+    if not (0 <= n <= hi):
+        return None, f'{field} must be 0..{hi}'
+    return n, None
+
+
+def _norm_group_type(val):
+    """그룹 종류 검증 → (값, 오류). broadcast 는 그룹 종류가 아니다(일제 통화 = 호 속성, TS 24.379 §4.12)."""
+    if val not in GROUP_TYPES:
+        return None, (f"group_type must be one of {'|'.join(GROUP_TYPES)} "
+                      "(broadcast is a call attribute — mcptt_broadcast_group_call.md)")
+    return val, None
+
+
 def _shape_group(g: dict, members: list, owner: dict = None):
     """DB row → API 형태. id(응답)=mcptt_group_id, db_id=surrogate.
 
@@ -1416,6 +1438,8 @@ def _shape_group(g: dict, members: list, owner: dict = None):
     g['require_affiliation'] = bool(g.get('require_affiliation', 1))
     g['floor_policy'] = g.get('floor_policy') or 'single'
     g['max_talkers'] = int(g.get('max_talkers', 2) or 2)
+    g['hang_timer_sec'] = int(g.get('hang_timer_sec', GROUP_HANG_TIMER_DEFAULT))
+    g['max_duration_sec'] = int(g.get('max_duration_sec', GROUP_MAX_DURATION_DEFAULT))
     if g.get('session_start'): g['session_start'] = g['session_start'].isoformat()
     if g.get('session_end'): g['session_end'] = g['session_end'].isoformat()
     if g.get('created_at'): g['created_at'] = g['created_at'].isoformat()
@@ -1576,9 +1600,16 @@ async def _create_group(body, config, payload=None):
     org_code       = body.get('org_code', '') or None
     session_start  = body.get('session_start') or None
     session_end    = body.get('session_end') or None
-    group_type     = body.get('group_type', 'prearranged')
-    if group_type not in ('prearranged', 'chat', 'broadcast'):
-        group_type = 'prearranged'
+    group_type, type_err = _norm_group_type(body.get('group_type', 'prearranged'))
+    if type_err:
+        return HandlerResult(status=400, body={'error': type_err})
+    hang_timer_sec, err = _norm_group_timer(body, 'hang_timer_sec', GROUP_HANG_TIMER_DEFAULT, GROUP_HANG_TIMER_MAX)
+    if err:
+        return HandlerResult(status=400, body={'error': err})
+    max_duration_sec, err = _norm_group_timer(body, 'max_duration_sec', GROUP_MAX_DURATION_DEFAULT,
+                                              GROUP_MAX_DURATION_MAX)
+    if err:
+        return HandlerResult(status=400, body={'error': err})
     on_network     = 1 if body.get('on_network', True) else 0
     max_members    = int(body.get('max_members', 0))
     require_affiliation = 1 if body.get('require_affiliation', True) else 0
@@ -1620,14 +1651,14 @@ async def _create_group(body, config, payload=None):
                 "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
                 "org_code, session_start, session_end, group_type, on_network, "
                 "max_members, require_affiliation, alias, authorized_user_id, "
-                "floor_policy, max_talkers) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                "floor_policy, max_talkers, hang_timer_sec, max_duration_sec) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (group_id, name, video_enabled, priority, encryption,
                  emergency_call, emergency_alert, allow_conference_state,
                  allow_sds, allow_fd, max_sds_size, max_auto_recv,
                  org_code, session_start, session_end, group_type,
                  on_network, max_members, require_affiliation, alias, authorized_user_id,
-                 floor_policy, max_talkers)
+                 floor_policy, max_talkers, hang_timer_sec, max_duration_sec)
             )
             gpk = cur.lastrowid
             for m in members:
@@ -1679,9 +1710,20 @@ async def _update_group(group_id: str, body, config, payload=None):
                 if fld in body:
                     update_fields.append(f'{fld}=%s')
                     update_vals.append(1 if body[fld] else 0)
-            if 'group_type' in body and body['group_type'] in ('prearranged', 'chat', 'broadcast'):
+            if 'group_type' in body:
+                gt, err = _norm_group_type(body['group_type'])
+                if err:
+                    return HandlerResult(status=400, body={'error': err})
                 update_fields.append('group_type=%s')
-                update_vals.append(body['group_type'])
+                update_vals.append(gt)
+            for fld, dflt, hi in (('hang_timer_sec', GROUP_HANG_TIMER_DEFAULT, GROUP_HANG_TIMER_MAX),
+                                  ('max_duration_sec', GROUP_MAX_DURATION_DEFAULT, GROUP_MAX_DURATION_MAX)):
+                if fld in body:
+                    n, err = _norm_group_timer(body, fld, dflt, hi)
+                    if err:
+                        return HandlerResult(status=400, body={'error': err})
+                    update_fields.append(f'{fld}=%s')
+                    update_vals.append(n)
             # floor 동시 발언 정책 — 한 축만 보내도 나머지는 현재 값을 기준으로 검증한다.
             if 'floor_policy' in body or 'max_talkers' in body:
                 cur.execute("SELECT floor_policy, max_talkers FROM ptt_groups WHERE id=%s", (gpk,))
@@ -1866,7 +1908,8 @@ _GROUP_FIELDS = [
     {'name': 'name', 'type': 'string', 'desc': '그룹명'},
     {'name': 'alias', 'type': 'string', 'desc': '별칭'},
     {'name': 'org_code', 'type': 'string', 'desc': '소속 조직 코드'},
-    {'name': 'group_type', 'type': 'string', 'desc': '그룹 종류'},
+    {'name': 'group_type', 'type': 'string', 'enum': ['prearranged', 'chat'],
+     'desc': '그룹 종류 — 그룹 문서 on-network-invite-members (prearranged=true, chat=false). 일제 통화는 그룹 종류가 아니라 호 속성'},
     {'name': 'priority', 'type': 'integer', 'desc': '그룹 우선순위'},
     {'name': 'video_enabled', 'type': 'boolean', 'desc': '영상 허용'},
     {'name': 'encryption', 'type': 'boolean', 'desc': '암호화 사용'},
@@ -1885,6 +1928,10 @@ _GROUP_FIELDS = [
      'desc': '동시 발언 정책'},
     {'name': 'max_talkers', 'type': 'integer', 'unit': '명',
      'desc': 'multi 정원 (2~8). dual 은 2 고정이라 값 무시'},
+    {'name': 'hang_timer_sec', 'type': 'integer', 'unit': '초',
+     'desc': 'on-network-hang-timer — 그룹 호 T4 Inactivity (발언 없는 채로 이 시간이 지나면 세션 해제, 0=미사용, 0~3600, 기본 30)'},
+    {'name': 'max_duration_sec', 'type': 'integer', 'unit': '초',
+     'desc': 'on-network-maximum-duration — 그룹 호 최대 시간 TNG3 (0=무제한, 0~86400, 기본 3600)'},
     {'name': 'session_start', 'type': 'string', 'desc': '세션 허용 시작 시각'},
     {'name': 'session_end', 'type': 'string', 'desc': '세션 허용 종료 시각'},
     {'name': 'created_at', 'type': 'string', 'desc': 'ISO8601 생성'},
@@ -1892,11 +1939,11 @@ _GROUP_FIELDS = [
 
 _GROUP_EXAMPLE = {
     'id': 'g-ops-1', 'name': '운영1팀', 'alias': 'OPS1', 'org_code': 'D110',
-    'group_type': 'normal', 'priority': 5, 'video_enabled': False, 'encryption': True,
+    'group_type': 'prearranged', 'priority': 5, 'video_enabled': False, 'encryption': True,
     'emergency_call': True, 'emergency_alert': True, 'allow_conference_state': True, 'allow_sds': True, 'allow_fd': True,
     'max_sds_size': 4096, 'max_auto_recv': 1048576, 'on_network': True, 'max_members': 50,
     'require_affiliation': False, 'authorized_user_id': '01000000003',
-    'floor_policy': 'single', 'max_talkers': 0,
+    'floor_policy': 'single', 'max_talkers': 0, 'hang_timer_sec': 30, 'max_duration_sec': 3600,
     'session_start': None, 'session_end': None, 'created_at': '2026-05-10T09:00:00',
 }
 
@@ -2154,6 +2201,7 @@ CIMS_ADMIN_API_DOCS = [
          {'status': 400, 'when': 'id 누락', 'body': {'error': 'id (mcptt_group_id) is required'}},
          {'status': 400, 'when': "id 가 'adhoc-'/'priv-' 로 시작 (즉석 세션 예약어)"},
          {'status': 400, 'when': 'floor 정책/정원 조합 무효 (multi 는 2~8)'},
+         {'status': 400, 'when': 'group_type 이 prearranged|chat 가 아님 / hang_timer_sec·max_duration_sec 범위 밖'},
          {'status': 400, 'when': 'authorized_user_id 가 PTT 가입자가 아님'},
      ],
      'errors_note': '',
@@ -2173,11 +2221,11 @@ CIMS_ADMIN_API_DOCS = [
      'response_fields': [{'name': 'id', 'type': 'string', 'desc': '수정된 그룹 ID'}],
      'example': {'id': 'g-ops-1'},
      'errors': _ERR_COMMON + [
-         {'status': 400, 'when': 'JSON 본문 없음 / floor 조합 무효 / authorized_user 부적격'},
+         {'status': 400, 'when': 'JSON 본문 없음 / floor 조합 무효 / group_type·그룹 호 타이머 무효 / authorized_user 부적격'},
          {'status': 403, 'when': 'operator 가 남의 소유 그룹을 수정 시도'},
          {'status': 404, 'when': '없는 그룹', 'body': {'error': 'Group not found'}},
      ],
-     'notes': ['floor_policy·max_talkers 변경은 CSP→CMP 로 전파된다.'],
+     'notes': ['floor_policy·max_talkers·hang_timer_sec 변경은 CSP→CMP 로 전파된다.'],
      'auth': {'scheme': 'bearer', 'role': 'operator', 'token_from': 'POST /api/v1/auth/login',
               'note': '기존 그룹 변경은 소유자 검사 — manager+ 는 전체 허용'}},
 

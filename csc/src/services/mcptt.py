@@ -1,4 +1,5 @@
 import os
+import re
 import socket
 import select
 import json
@@ -596,12 +597,42 @@ def refresh_login_accounts() -> bool:
 #   기동 적재(load_shared_data)와 CRUD 후 단일 그룹 동기화(sync_group_from_db)가 같은 함수를 쓴다.
 #   admin API(콘솔) 와 GMS XCAP(가입자) 두 쓰기 경로 모두 DB 를 정본으로 쓰고 이 동기화로 캐시를
 #   맞춘다 — 어느 경로도 GROUPS 를 직접 조립하지 않는다.
+# 그룹 호 타이머 (TS 24.481 §7.2.2 o·§7.2.7) — 그룹 문서 <on-network-hang-timer>(T4 Inactivity,
+#   TS 24.380 §6.3.4.3.5 · Table 11.1.3-1 기본 30초) · <on-network-maximum-duration>(TNG3, TS 24.379 §6.3.8.1).
+#   범위 상한은 CMP floor_timers.t4_inactivity 계약(0..3600)과 같다. 0 = 미사용/무제한.
+GROUP_HANG_TIMER_DEFAULT = 30
+GROUP_HANG_TIMER_MAX = 3600
+GROUP_MAX_DURATION_DEFAULT = 3600
+GROUP_MAX_DURATION_MAX = 86400
+GROUP_TYPES = ('prearranged', 'chat')   # 일제 통화는 그룹 종류가 아니라 호 속성(<broadcast-ind>)
+
+
+def xs_duration(sec: int) -> str:
+    """초 → xs:duration (PT{n}S)."""
+    return f"PT{int(sec)}S"
+
+
+def parse_xs_duration(text: Optional[str]) -> Optional[int]:
+    """xs:duration(PnDTnHnMnS, 소수 초 절사) → 초. 형식이 아니면 None — 순수 정수(초)도 받는다(관대한 수신)."""
+    if text is None:
+        return None
+    t = text.strip()
+    if t.isdigit():
+        return int(t)
+    m = re.fullmatch(r'P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)(?:\.\d+)?S)?)?', t)
+    if not m or t in ('P', 'PT'):
+        return None
+    d, h, mi, se = (int(x) if x else 0 for x in m.groups())
+    return ((d * 24 + h) * 60 + mi) * 60 + se
+
+
 _GROUP_SELECT = (
     "SELECT id, mcptt_group_id, name, video_enabled, priority, encryption, "
     "emergency_call, emergency_alert, allow_conference_state, "
     "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
     "org_code, session_start, session_end, "
     "group_type, on_network, max_members, require_affiliation, alias, "
+    "hang_timer_sec, max_duration_sec, "
     "authorized_user_id, "
     "(SELECT id FROM ptt_subscriptions WHERE user_id=ptt_groups.authorized_user_id "
     " ORDER BY id LIMIT 1) AS authorized_user_msisdn "
@@ -641,6 +672,8 @@ def _group_row_to_dict(row: dict) -> dict:
         "on_network": bool(row.get('on_network', 1)),
         "max_members": row.get('max_members', 0),
         "require_affiliation": bool(row.get('require_affiliation', 1)),
+        "hang_timer_sec": int(row.get('hang_timer_sec', GROUP_HANG_TIMER_DEFAULT)),
+        "max_duration_sec": int(row.get('max_duration_sec', GROUP_MAX_DURATION_DEFAULT)),
         "alias": row.get('alias', ''),
         "session_start": row['session_start'].isoformat() if row.get('session_start') else None,
         "session_end": row['session_end'].isoformat() if row.get('session_end') else None,
@@ -1277,6 +1310,12 @@ def get_group_xml(group_uri):
     sds_val = 'true' if group.get('allow_sds', True) else 'false'
     fd_val = 'true' if group.get('allow_fd', False) else 'false'
     max_sds = int(group.get('max_sds_size') or 0)
+    # 그룹 종류 = <on-network-invite-members> (TS 24.481 §7.2.2 a — true=prearranged, false=chat).
+    #   <mcpttgi:session-type> 은 규격 요소가 아니다 — 단말(SDK·Android)이 invite-members 로 그룹 종류를 읽게 될 때
+    #   (mcptt_broadcast_group_call.md WP5 U5)까지만 prearranged/chat 값으로 싣는 전환기 요소.
+    invite_members = 'true' if group_type != 'chat' else 'false'
+    hang_timer = int(group.get('hang_timer_sec', GROUP_HANG_TIMER_DEFAULT))
+    max_duration = int(group.get('max_duration_sec', GROUP_MAX_DURATION_DEFAULT))
     xml += f"""
     </list>
     <mcpttgi:session-type>{group_type}</mcpttgi:session-type>
@@ -1291,11 +1330,11 @@ def get_group_xml(group_uri):
     <mcpttgi:mcdata-on-network-max-data-size-auto-recv>{max_auto}</mcpttgi:mcdata-on-network-max-data-size-auto-recv>"""
     xml += f"""
     <mcpttgi:mcptt-video>{video_val}</mcpttgi:mcptt-video>
-    <mcpttgi:on-network-invite-members>true</mcpttgi:on-network-invite-members>
+    <mcpttgi:on-network-invite-members>{invite_members}</mcpttgi:on-network-invite-members>
     <mcpttgi:on-network-max-participant-count>{max_count}</mcpttgi:on-network-max-participant-count>
     <mcpttgi:on-network-require-affiliation>{affil_required}</mcpttgi:on-network-require-affiliation>
-    <mcpttgi:on-network-hang-time>3</mcpttgi:on-network-hang-time>
-    <mcpttgi:on-network-max-duration>3600</mcpttgi:on-network-max-duration>
+    <mcpttgi:on-network-hang-timer>{xs_duration(hang_timer)}</mcpttgi:on-network-hang-timer>
+    <mcpttgi:on-network-maximum-duration>{xs_duration(max_duration)}</mcpttgi:on-network-maximum-duration>
     <mcpttgi:on-network-require-talker-id>false</mcpttgi:on-network-require-talker-id>
     <mcpttgi:on-network-group-priority>{grp_priority}</mcpttgi:on-network-group-priority>
     <mcpttgi:on-network-encryption>{encryption_val}</mcpttgi:on-network-encryption>
@@ -2277,7 +2316,9 @@ def parse_group_document_xml(xml_text: str) -> dict:
         raise ValueError('list-service element missing')
     out = {
         'display_name': _xtext(ls, 'poc:display-name'),
-        'group_type': _xtext(ls, 'gi:session-type'),
+        'group_type': None,
+        'hang_timer_sec': parse_xs_duration(_xtext(ls, 'gi:on-network-hang-timer')),
+        'max_duration_sec': parse_xs_duration(_xtext(ls, 'gi:on-network-maximum-duration')),
         'allow_sds': _xbool(ls, 'gi:mcdata-allow-short-data-service'),
         'allow_fd': _xbool(ls, 'gi:mcdata-allow-file-distribution'),
         'max_sds_size': _xint(ls, 'gi:mcdata-on-network-max-data-size-for-SDS'),
@@ -2293,8 +2334,23 @@ def parse_group_document_xml(xml_text: str) -> dict:
         'org_code': _xtext(ls, 'gi:org-code'),
         'members': None,
     }
-    if out['group_type'] is not None and out['group_type'] not in ('prearranged', 'chat', 'broadcast'):
-        raise ValueError(f"session-type '{out['group_type']}' not one of prearranged/chat/broadcast")
+    # 그룹 종류 = <on-network-invite-members> (TS 24.481 §7.2.2 a). 없으면 전환기 폴백 <session-type>
+    #   (규격 밖 요소 — 구 단말). broadcast 는 그룹 종류가 아니다(일제 통화 = 호 속성, TS 24.379 §4.12).
+    inv = _xbool(ls, 'gi:on-network-invite-members')
+    if inv is not None:
+        out['group_type'] = 'prearranged' if inv else 'chat'
+    else:
+        st = _xtext(ls, 'gi:session-type')
+        if st is not None and st not in GROUP_TYPES:
+            raise ValueError(f"session-type '{st}' not one of prearranged/chat "
+                             "(broadcast is a call attribute, not a group type)")
+        out['group_type'] = st
+    for k, hi in (('hang_timer_sec', GROUP_HANG_TIMER_MAX), ('max_duration_sec', GROUP_MAX_DURATION_MAX)):
+        tag = 'on-network-hang-timer' if k == 'hang_timer_sec' else 'on-network-maximum-duration'
+        if _xtext(ls, f'gi:{tag}') is not None and out[k] is None:
+            raise ValueError(f'{tag} is not an xs:duration')
+        if out[k] is not None and not (0 <= out[k] <= hi):
+            raise ValueError(f'{tag} out of range (0..{hi} s)')
     lst = ls.find('poc:list', _NS)
     if lst is not None:
         members = []
@@ -2320,12 +2376,13 @@ _GMS_CREATE_DEFAULTS = {
     'emergency_alert': True, 'allow_conference_state': True, 'allow_sds': True, 'allow_fd': False,
     'max_sds_size': 10000, 'max_auto_recv': 1048576, 'org_code': None, 'group_type': 'prearranged',
     'max_members': 0, 'require_affiliation': True,
+    'hang_timer_sec': GROUP_HANG_TIMER_DEFAULT, 'max_duration_sec': GROUP_MAX_DURATION_DEFAULT,
 }
 _GMS_BOOL_COLS = ('video_enabled', 'encryption', 'emergency_call', 'emergency_alert', 'allow_conference_state',
                   'allow_sds', 'allow_fd', 'require_affiliation')
 _GMS_ATTR_COLS = ('video_enabled', 'priority', 'encryption', 'emergency_call', 'emergency_alert',
                   'allow_conference_state', 'allow_sds', 'allow_fd', 'max_sds_size', 'max_auto_recv', 'org_code',
-                  'group_type', 'max_members', 'require_affiliation')
+                  'group_type', 'max_members', 'require_affiliation', 'hang_timer_sec', 'max_duration_sec')
 
 
 def _gms_unknown_members(cur, members: list) -> list:

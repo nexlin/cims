@@ -53,7 +53,9 @@ def _load_admin():
           refresh_login_accounts=lambda *a, **k: True,
           DEFAULT_USER_PROFILE={}, update_user_profile_cache=lambda *a, **k: None, SERVICE_CONFIG_DEFAULTS={},
           get_service_config=lambda *a, **k: {}, update_service_config_cache=lambda *a, **k: None,
-          get_service_config_xml=lambda *a, **k: "", logger=_Log())
+          get_service_config_xml=lambda *a, **k: "", logger=_Log(),
+          GROUP_TYPES=("prearranged", "chat"), GROUP_HANG_TIMER_DEFAULT=30, GROUP_HANG_TIMER_MAX=3600,
+          GROUP_MAX_DURATION_DEFAULT=3600, GROUP_MAX_DURATION_MAX=86400)
     _stub("services.auc", auc=types.SimpleNamespace())
     _stub("handlers.dispatch", phone_group_of_user=lambda *a, **k: None,
           effective_phone_group=lambda *a, **k: None, phone_group_of_person=lambda *a, **k: None)
