@@ -271,6 +271,97 @@ UE-A ◄── 180(같은 SDP) · 200 ◄────────── 180 · 2
 
 ---
 
+## 6B. 착신 차단 (Communication Barring — TS 24.611)
+
+> 3GPP 부가서비스(TS 22.173)에 "방해 금지(DND)" 는 없다. CIMS 의 두 착신 거절 — 회선 `dnd`(모든 착신)와
+> 사람 `user_rejects`(지정 발신 번호) — 는 TS 24.611 **착신 차단(ICB, Incoming Communication Barring)** 의 두
+> 규칙이다. 이 절은 규격 대응과, 이름·식별자를 규격 명칭으로 맞추는 작업(DB·CSP·CSC·OAM·콘솔·문서)의 정본이다.
+> 근거 규격 판본: TS 24.611 V18.0.0.
+
+### 6B.1 규격
+
+| 요구 | 근거 |
+|---|---|
+| ICB = 제공(provisioned)되거나 사용자가 설정한 조건을 만족하는 착신을 착신 사용자 대신 거절. 규칙 = 조건부 + 동작, 규칙 집합은 common-policy(RFC 4745) `cp:ruleset` — 조건 예 `cp:identity`(발신 신원 일치)·`anonymous`, 동작 `allow="false"` | TS 24.611 §4.1, §4.2.1, §4.9 |
+| 거절 = **603 (Decline)**. 음성·영상 호면 거절 전 안내 가능(TS 24.628) | §4.5.2.6.1 |
+| ACR(익명 착신 거부) = ICB 의 특수 규칙(조건 `anonymous`) | §4.1, §4.5.2.6.2 |
+| 사용자 설정 경로 = XCAP simservs `<incoming-communication-barring>` (Ut, TS 24.623) | §4.9.1 |
+
+### 6B.2 현재 구현 ↔ 규격
+
+| CIMS 현재 | 동작 | 규격 대응 |
+|---|---|---|
+| 회선 `dnd` — `volte_subscriptions`·`voip_subscriptions` (`ptt_subscriptions` 는 컬럼만 있고 CSP 가 읽지만 PTT 경로에서 쓰지 않음, 콘솔도 PTT 회선엔 숨김) | 모든 착신 603 | ICB 무조건 규칙(조건 없음, `allow=false`) |
+| 사람 `user_rejects(user_id → reject_id)` — 그 사람의 모든 전화 회선에 적용 | 지정 발신 번호 603 | ICB `cp:identity` 규칙 |
+| 판정 — TAS `ScreenInvite`·`ApplyTerminationServices`(`csp/TasModule.cpp:70`, `:116`), 착신전환보다 우선(`:171`, `csp/ModuleDispatcher.cpp:1904`), 거절 안내 `declined`([announcements.md §3.2](announcements.md)) | — | §4.5.2.6.1 정합 |
+| 설정 — 콘솔 회선 편집 "DND" 체크박스(전체), 지정 번호 목록은 관리 API `reject_id` 만(콘솔 편집 없음) | — | 운영자 제공 방식은 규격 허용. Ut/XCAP 사용자 설정·ACR 은 미구현(§9) |
+
+**동작은 규격과 같다.** 이름(DND·착신거부·수신거부 혼용)과 식별자가 규격과 다르고, 같은 서비스의 두 규칙이
+서로 다른 이름으로 흩어져 있다 — 아래 §6B.3 으로 맞춘다.
+
+### 6B.3 목표 명칭 · 식별자
+
+서비스 이름 = **착신 차단**(ICB), 규칙 = **전체** / **지정 번호**. 층은 현행 유지 — 전체는 회선, 지정 번호는
+사람(한 사람이 막은 발신자는 그 사람의 모든 전화 회선에 적용).
+
+| 층 | 현재 | 목표 |
+|---|---|---|
+| 화면·문서 표기 | DND(방해금지)·착신거부·수신거부 | 착신 차단 — 전체 / 지정 번호 |
+| DB 회선 | `volte_subscriptions.dnd`·`voip_subscriptions.dnd` (COMMENT '착신거부') | `icb_all TINYINT(1) NOT NULL DEFAULT 0 COMMENT '착신 차단 — 전체 (TS 24.611 ICB)'` |
+| DB PTT | `ptt_subscriptions.dnd` | 제거 — MMTel ICB 는 MCPTT 대상이 아니다(현재도 미사용) |
+| DB 지정 번호 | `user_rejects(user_id, reject_id)`, FK `fk_reject_user` | `icb_identities(user_id, identity)`, FK `fk_icb_user` |
+| 관리 API(CSC) | 회선 `dnd`, 사람 `reject_id[]` | 회선 `icb_all`, 사람 `icb_identities[]`. **전환기 1 릴리스**: 요청의 구 키(`dnd`·`reject_id`)도 받아들이고 WARN 로그, 응답은 새 키만 |
+| CSP | `CspUser::m_bDnd`/`isDnd()`, `m_vecReject`/`isReject(from)` | `m_bIcbAll`·`m_vecIcbIdentities`, 판정 하나 `IsIncomingBarred(from)`(= 전체 ∨ 지정 번호 일치) — 호출 4곳을 이것으로 |
+| CSP 파일 폴백 `csp/User/*.json` | `"dnd"`·`"reject_id"` | `"icb_all"`·`"icb_identities"` (구 키 읽기는 전환기) |
+| CSP 로그 | `TAS: Rejected (DND/Reject)` | `TAS: Rejected (ICB all)` / `(ICB identity)` |
+| OAM | `handlers/users.py` 조회, `handlers/subscriber_import.py` Excel 열 `dnd` | `icb_all` (가져오기는 구 헤더 `dnd` 도 수용) |
+| 콘솔 | `api/users.ts` `dnd`·`reject_id`, `ProvisioningWorkbenchPage.tsx` `showDnd`·열 "DND"·배지 "DND"·체크박스 "DND — 모든 착신을 603 으로 거절 …" | `icb_all`·`icb_identities`, `showIcb`, 열·배지 "착신 차단", 체크박스 "착신 차단 — 전체 (모든 착신을 603 으로 거절, 착신 전환보다 우선)" |
+| 통계 표기 | `service_descriptors_seed/cims.json` "603 거절(DND·착신거부)" | "603 거절(착신 차단)" |
+| 감사 | E-AUD-006/008 값 키 `dnd` | `icb_all` |
+
+### 6B.4 구현 순서 (개발 서버)
+
+**컬럼·테이블 이름 변경은 호환이 깨진다** — DB 마이그레이션과 CSP·CSC·OAM·콘솔 반영을 **같은 정지창**에서 한다
+(운영 사이트도 같은 릴리스·같은 정지창). 커밋은 WP 단위, 건드린 모듈 `pkg.json` patch 를 올린다.
+
+| WP | 대상 | 변경 |
+|---|---|---|
+| B1 DB | 신규 `sql/migrate_icb_naming.sql` | 멱등(information_schema 확인 + PREPARE/EXECUTE — `migrate_ptt_allow_create_group.sql` 관례): `volte_subscriptions`·`voip_subscriptions` `CHANGE dnd icb_all …`, `ptt_subscriptions DROP COLUMN dnd`, `RENAME TABLE user_rejects TO icb_identities` + `CHANGE reject_id identity VARCHAR(64) NOT NULL COMMENT '차단할 발신 번호'` + FK 재명명. `sql/cims_schema.sql`(83·114·144·161)·[db_schema.md](../db_schema.md) 최종 스키마. 과거 마이그레이션(`migrate_voip_subscriptions.sql` 등)은 옛 DB 를 순서대로 올리는 경로라 고치지 않는다 |
+| B2 CSP | `csp/CspUser.h/.cpp`, `csp/DbManager.cpp`(~366, ~393-418, ~593-616), `csp/TasModule.cpp/.h`, `csp/ModuleDispatcher.cpp`(~399, ~580, ~1146, ~1895-1904), `csp/config/config_template.json`(~152 설명), `csp/tools/migrate_users.py`, `User/00/00/00/10/0000001000.json` | §6B.3 식별자. DbManager 는 `ptt` 테이블에서 `icb_all` 을 읽지 않는다(`RingbackCol`·`CdivCols` 처럼 kind 로 가른 리터럴 0), 지정 번호는 `icb_identities` 조회 |
+| B3 CSC | `csc/src/handlers/admin.py`(`_coerce_dnd` ~59 → `_coerce_bool`, 조회 ~181·219·276·485, 쓰기 ~795·825·904·955, 지정 번호 ~208·265·356·387-422, API 선언 문자열 ~1839·1853-1859·2022-2096), `sql/import_data.py` | 새 키 + 전환기 구 키 수용. 감사 값 키 `icb_all`. ptt 회선 조회에서 컬럼 제외 |
+| B4 OAM | `ems/core/oam/src/handlers/users.py`(~132·149), `ems/core/oam/src/handlers/subscriber_import.py`(~143-149 템플릿, ~250 파싱), `ems/core/oam/src/services/service_descriptors_seed/cims.json`(~607) | `icb_all`, Excel 구 헤더 수용, 통계 표기 "603 거절(착신 차단)" + `tests/frontend/stats_no_value.test.mjs`(~222) |
+| B5 콘솔 | `ems/core/console/src/api/users.ts`(~14, ~70, ~82), `ems/service/console/src/pages/ProvisioningWorkbenchPage.tsx`(~55-67, ~263, ~279-305, ~573-652, ~708-795, ~892) | §6B.3 표기. (선택) 사람 드로어에 "지정 번호 착신 차단" 목록 편집 — 현재 API 전용 |
+| B6 검증 | 계측기 `FixtureSubscriber`(`ems/tester/oam/src/services/tester_models.py` ~1212) | 픽스처 키 `icb_all`·`icb_identities` + 시나리오 `VOLTE-ICB-ALL`·`VOLTE-ICB-IDENTITY`(603 + `declined` 안내, `icb_all`+착신전환 설정 시 603 우선) |
+| B7 문서 | 아래 목록 | 현재 동작 서술을 §6B.3 명칭으로 |
+
+B7 문서 목록 — [volte_flows.md](volte_flows.md)(A2·C2·D1·케이스 표·판정 트리·종료 사유 표), 이 문서 §6A·§8·§10,
+[announcements.md](announcements.md)(§1 표·§3.2), [sip_statistics.md](sip_statistics.md), [monitoring.md](monitoring.md)
+(DND 처리율 행 — 종료 사유는 `dnd` 가 아니라 `declined` 다: 현재도 사실과 다름), [csp.md](../modules/csp.md),
+[csc.md](../modules/csc.md), [01_overview.md](../01_overview.md), [console_platform.md](../console_platform.md),
+[alarm_catalog.md](../alarm_catalog.md), [db_schema.md](../db_schema.md), [admin_api.md](../../api/admin_api.md),
+[volte_ue.md](../../user-manual/volte_ue.md) §4.1, [ue_interface.md](../../user-manual/ue_interface.md) §2.3(현재 "486 Busy"
+는 사실과 다름 — 603, 지정 번호 목록의 "콘솔" 설정도 사실과 다름 — API), 공개 문서 사본
+`ems/core/console/public/docs/01·02·03_*.md`·`cims-phone/public/docs/01·02·03_*.md`, `USAGE.md`,
+`android/volte-client/README.md`, `ptt-test.sh`. `cims-phone/src`(재설계 예정, 빌드 제외)는 손대지 않는다.
+
+```bash
+# 빌드·반영 (레포 루트) — C++ + dist + 콘솔 prod 빌드
+./cims.sh build -j$(nproc)
+sudo mysql cims < sql/migrate_icb_naming.sql          # ALTER 는 root
+./cims.sh restart cmp csp && ./cims.sh restart oam csc console
+
+# 검사
+python3 -m unittest tests.test_csc_subscriptions tests.test_csc_gms_group_crud   # 또는 ./cims-verify run --items S1-UNIT-CSC
+./cims-verify run --items S1-UNIT-CONSOLE-STATS                                 # stats_no_value.test.mjs
+(cd ems/core/console && npm run lint && npx tsc -b --noEmit)
+git grep -n -i "\bdnd\b\|방해 *금지" -- . ':!ext' ':!cims-phone/src' ':!sql/migrate_voip_subscriptions.sql'   # 잔여 0 확인
+```
+
+수동 확인 — 관리 API 로 회선 `icb_all: true` 후 발신(`./cims.sh sim` 또는 `cimsue-cli`) → 603 + 거절 안내,
+지정 번호 규칙 → 그 번호만 603, `icb_all` + 착신전환 동시 설정 → 603(차단 우선), `csp` 로그 `TAS: Rejected (ICB …)`.
+
+---
+
 ## 7. CSP↔CMP 계약 — 재고정은 RELAY_MODIFY 하나로
 
 [cmp_media_api.md](../../api/cmp_media_api.md) §6.2 가 이미 정의한 계약을 그대로 쓴다. 신규
@@ -382,6 +473,8 @@ D1~D4 `VOLTE-BLF-PICKUP`/`VOLTE-BLF-DENIED`/`VOLTE-SUBSCRIBE-BAD-EVENT`(D5 는 c
 - 전화 B-leg(From/To/P-Asserted-Identity) 신원 도메인 — CSP 가 만드는 착신 leg 헤더가 스택 기본(`volte`) 도메인으로
   고정돼 유선 `voip` 회선이 `volte` 로 표기된다(동작 지장 없음, 표기 어긋남). 정리 범위·선행 과제(psip From/To 분리 훅)·검증은
   [sip_service_model.md §9.1](sip_service_model.md).
+- 착신 차단(ICB)의 사용자 설정 경로 — XCAP simservs `<incoming-communication-barring>`(Ut, TS 24.623)와
+  ACR(익명 착신 거부, TS 24.611 §4.5.2.6.2). 현재는 운영자 제공(콘솔·관리 API)만이다(§6B).
 
 ---
 
