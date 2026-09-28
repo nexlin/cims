@@ -467,6 +467,7 @@ function UserDrawer({ user, orgs, orgOpts, catalog, pttGroups, phoneGroups, canW
                   onEdit={() => { setEditKey(k); setAddSvc(null) }} onDone={() => { setEditKey(null); onReload() }} onCancel={() => setEditKey(null)} />
               })}
               {rows.length === 0 && !addSvc && <EmptyState title="아직 회선이 없습니다" description="아래에서 종류를 골라 추가하세요" />}
+              {rows.some(r => r.svc !== 'ptt') && <IcbIdentitiesCard user={user!} canWrite={canWrite} onSaved={onReload} />}
               {canWrite && (addSvc
                 ? <AddLineCard user={user!} svc={addSvc} catalog={catalog} onCancel={() => setAddSvc(null)} onAdded={() => { setAddSvc(null); onReload() }} />
                 : <div className="flex flex-wrap items-center gap-2 pt-1">
@@ -479,6 +480,52 @@ function UserDrawer({ user, orgs, orgOpts, catalog, pttGroups, phoneGroups, canW
         </div>
       </aside>
     </>
+  )
+}
+
+// ── 착신 차단 — 지정 번호 (TS 24.611 ICB cp:identity, volte_supplementary_services.md §6B) ──
+//   사람 단위 — 이 사람의 모든 전화 회선(VoLTE·VoIP)에 적용된다. 목록 편집은 즉시 저장(PUT /users/{id} icb_identities).
+function IcbIdentitiesCard({ user, canWrite, onSaved }: { user: UserSummary; canWrite: boolean; onSaved: () => void }) {
+  const { show } = useToast()
+  const [draft, setDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+  const list = user.icb_identities || []
+
+  async function put(next: string[], msg: string) {
+    setBusy(true)
+    try { await usersApi.update(user.id, { icb_identities: next }); show(msg, 'ok'); setDraft(''); onSaved() }
+    catch (e: unknown) { show(String(e), 'err') } finally { setBusy(false) }
+  }
+  function add() {
+    const v = draft.trim()
+    if (!FORWARD_RE.test(v)) { show('차단할 발신 번호는 숫자열(선행 + 허용)이어야 합니다', 'err'); return }
+    if (list.includes(v)) { show('이미 목록에 있습니다', 'err'); return }
+    put([...list, v], `착신 차단 — ${v} 추가`)
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-border p-3.5">
+      <Section title="착신 차단 — 지정 번호">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {list.length === 0 && <span className="text-sm text-muted-foreground">—</span>}
+          {list.map(n => (
+            <Badge key={n} variant="dangerSoft" className="gap-1 font-mono">
+              {n}
+              {canWrite && <button type="button" aria-label={`${n} 차단 해제`} disabled={busy}
+                className="text-muted-foreground hover:text-foreground" onClick={() => put(list.filter(x => x !== n), `착신 차단 — ${n} 해제`)}><X size={12} /></button>}
+            </Badge>
+          ))}
+        </div>
+        {canWrite && (
+          <div className="flex items-center gap-2">
+            <Input className="w-56 font-mono" placeholder="+8210…" value={draft} onChange={e => setDraft(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') add() }} />
+            <Button disabled={busy || !draft.trim()} onClick={add}><Plus size={13} /> 추가</Button>
+          </div>
+        )}
+        <div className="text-xs text-muted-foreground">이 번호에서 오는 착신을 603 으로 거절합니다(거절 안내 뒤, 착신 전환보다 우선). 이 사람의 모든 전화 회선(VoLTE·VoIP)에 적용 — PTT 는 대상이 아닙니다.</div>
+      </Section>
+    </div>
   )
 }
 

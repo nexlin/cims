@@ -293,7 +293,7 @@ UE-A ◄── 180(같은 SDP) · 200 ◄────────── 180 · 2
 | 회선 `icb_all` — `volte_subscriptions`·`voip_subscriptions`. `ptt_subscriptions` 에는 없다(MMTel ICB 는 MCPTT 대상이 아니다) | 이 회선으로 오는 모든 착신 603 | ICB 무조건 규칙(조건 없음, `allow=false`) |
 | 사람 `icb_identities(user_id, identity)` — 그 사람의 모든 전화 회선에 적용 | 지정 발신 번호 603 | ICB `cp:identity` 규칙 |
 | 판정 — `CspUser::IncomingBarredBy(from)`(전체 ∨ 지정 번호 일치, 맞은 규칙 `all`/`identity` 를 돌려준다)·`IsIncomingBarred(from)`. 호출 = TAS `ScreenInvite`(다이얼로그 생성 전 조기 스크린 — 응답만)·`ApplyTerminationServices`(거절 안내 `declined` early media 뒤 603 — [announcements.md §3.2](announcements.md))·`ResolveDiversion`(착신 차단 가입자는 전환하지 않는다)·`TryDivertLeg`(조건부 전환 대상의 착신 차단 검사). 로그 `TAS: Rejected (ICB all)` / `TAS: Rejected (ICB identity)` | 착신전환(§6A)보다 우선 | §4.5.2.6.1 정합 |
-| 설정 — 콘솔 회선 편집 체크박스 "착신 차단 — 전체 (모든 착신을 603 으로 거절, 착신 전환보다 우선)", 지정 번호 목록은 관리 API `icb_identities` 만(콘솔 편집 없음) | — | 운영자 제공 방식은 규격 허용. Ut/XCAP 사용자 설정·ACR 은 미구현(§9) |
+| 설정 — 콘솔 회선 편집 체크박스 "착신 차단 — 전체 (모든 착신을 603 으로 거절, 착신 전환보다 우선)", 지정 번호 목록은 사람 드로어의 "착신 차단 — 지정 번호" 카드(관리 API `icb_identities`, 즉시 저장) | — | 운영자 제공 방식은 규격 허용. Ut/XCAP 사용자 설정·ACR 은 미구현(§9) |
 
 종료 사유는 `declined`(603 — 단말 거절과 같은 사유, 착신 차단 전용 사유는 없다)이고 시도 장부에는 거절 시도로 남는다(`VoipCallRejected`)
 ([sip_statistics.md §2.1](sip_statistics.md)).
@@ -443,7 +443,7 @@ D1~D4 `VOLTE-BLF-PICKUP`/`VOLTE-BLF-DENIED`/`VOLTE-SUBSCRIBE-BAD-EVENT`(D5 는 c
   고정돼 유선 `voip` 회선이 `volte` 로 표기된다(동작 지장 없음, 표기 어긋남). 정리 범위·선행 과제(psip From/To 분리 훅)·검증은
   [sip_service_model.md §9.1](sip_service_model.md).
 - 착신 차단(ICB)의 사용자 설정 경로 — XCAP simservs `<incoming-communication-barring>`(Ut, TS 24.623)와
-  ACR(익명 착신 거부, TS 24.611 §4.5.2.6.2). 현재는 운영자 제공(콘솔 = 전체, 관리 API = 전체·지정 번호)만이다(§6B). 콘솔의 지정 번호 목록 편집도 없다(관리 API 전용).
+  ACR(익명 착신 거부, TS 24.611 §4.5.2.6.2). 현재는 운영자 제공(콘솔·관리 API — 전체·지정 번호)만이다(§6B).
 
 ---
 

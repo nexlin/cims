@@ -1196,7 +1196,7 @@ users (1) ──┬───── (N) volte_subscriptions   (이동 VoLTE — k
 ### 가입자 관리 (관리자 전용 — `/subscribers/workbench`)
 - 상단 탭 **사용자 / VoLTE 번호 / VoIP 번호 / PTT 번호** — 번호 탭은 가입 테이블(kind) 하나씩. 좌측 조직 트리가 공유 스코프
 - **검색**: 이름/로그인 ID/조직/번호(세 종류 전부)로 필터링
-- **가입자 추가/편집**: 행 펼침 상세 — 이름·직함·로그인 ID·조직·비고 + 번호 서브테이블(세 종류 통합). 착신 차단 지정 번호(`icb_identities`)는 관리 API 로만 설정한다
+- **가입자 추가/편집**: 행 펼침 상세 — 이름·직함·로그인 ID·조직·비고 + 번호 서브테이블(세 종류 통합). 착신 차단 지정 번호(`icb_identities`)는 사람 드로어의 "착신 차단 — 지정 번호" 카드에서 추가·해제한다
 - **번호 폼은 kind 별로 다르다**(필드 스펙 선언 하나로 렌더): VoLTE = IMSI 입력·인증 digest/aka(K·OPc)·채널 기본 ANY·착신 차단(전체)/착신전환 /
   VoIP = kind=voip 접속서비스만 선택·IMSI 는 번호 숫자 기본값(편집 가능)·인증 digest 고정·채널 기본 TLS(UDP/TCP/TLS/ANY 선택 —
   서비스 `media_srtp=required` 인데 비-TLS 면 경고)·착신 차단(전체)/착신전환·내선 라벨(끝 4자리) 표시 / PTT = 인증 digest/aka·채널 기본 TLS·
