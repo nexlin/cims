@@ -284,6 +284,36 @@ export interface CallsQuery {
   svc?: StatService
 }
 
+// ── MCPTT 그룹 정보 (GET /stats/service/ptt-groups[/{id}]) ──
+export type PttGroupStateFilter = 'all' | 'active' | 'talking' | 'emergency'
+export type PttGroupLiveState = 'idle' | 'active' | 'talking'
+export interface PttGroupStatusRow {
+  id: string; name: string; group_type: string; org_code: string; priority: number | null
+  floor_policy: string; emergency_call: boolean; video_enabled: boolean; encryption: boolean
+  member_count: number; registered_count: number; affiliated_count: number
+  state: PttGroupLiveState; participants: number; floor_holders: string[]
+  today_sessions: number; today_talked: number
+}
+export interface PttGroupsStatusResponse {
+  counts: Record<PttGroupStateFilter, number>
+  groups: PttGroupStatusRow[]
+}
+export interface PttGroupMemberStatus {
+  msisdn: string; name: string; role: string; priority: number | null
+  registered: boolean; register_time: string | null; affiliated: boolean; in_session: boolean; talking: boolean
+}
+export interface PttGroupStatusResponse {
+  group: {
+    id: string; name: string; group_type: string; org_code: string; priority: number | null; floor_policy: string
+    max_talkers: number | null; emergency_call: boolean; emergency_alert: boolean; video_enabled: boolean; encryption: boolean
+    require_affiliation: boolean; hang_timer_sec: number | null; max_duration_sec: number | null; owner: string
+  }
+  state: PttGroupLiveState; participants: number; floor_holders: string[]
+  today: { sessions: number; talked: number }
+  members: PttGroupMemberStatus[]
+  counts: { members: number; registered: number; affiliated: number }
+}
+
 export const statsApi = {
   health: () => api.get<HealthResponse>('/stats/health'),
 
@@ -315,6 +345,10 @@ export const statsApi = {
   serviceEvents: (limit = 60) => api.get<{ events: ServiceEvent[] }>(`/stats/service/events?limit=${limit}`),
   serviceOrg: () => api.get<{ orgs: OrgStat[]; db_degraded?: boolean }>('/stats/service/org'),
   pttMembers: (group: string, page = 1, limit = 50) => api.get<PttMembersResponse>(`/stats/service/ptt-members?group=${encodeURIComponent(group)}&page=${page}&limit=${limit}`),
+  // MCPTT 그룹 정보 (mcptt_management_views.md §3) — 조회 전용
+  pttGroupsStatus: (state: PttGroupStateFilter = 'all', q = '') =>
+    api.get<PttGroupsStatusResponse>(`/stats/service/ptt-groups?state=${state}${q ? `&q=${encodeURIComponent(q)}` : ''}`),
+  pttGroupStatus: (id: string) => api.get<PttGroupStatusResponse>(`/stats/service/ptt-groups/${encodeURIComponent(id)}`),
 
   messages: (params: { date?: string; granularity?: string; proto?: string }) => {
     const p = new URLSearchParams()

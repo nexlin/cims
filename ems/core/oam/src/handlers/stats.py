@@ -810,6 +810,11 @@ async def handle_stats_service(handler_args: HandlerArgs, kwargs: dict) -> Handl
             return await _service_org(config)
         if svc == 'ptt-members':
             return await _ptt_members(config, qp('group', ''), qp('page', '1'), qp('limit', '50'))
+        if svc == 'ptt-groups':
+            # MCPTT 그룹 정보(mcptt_management_views.md §3) — 목록 / {id} 상세. 조회 전용.
+            if len(parts) > 1:
+                return await _ptt_group_status(config, parts[1])
+            return await _ptt_groups_status(config, qp('state', 'all'), qp('q', ''))
         gran = qp('granularity', '1d')
         from_dt = qp('from')
         to_dt = qp('to')
@@ -2984,6 +2989,160 @@ def _ptt_members(config: dict, group: str, page='1', limit='50') -> HandlerResul
     })
 
 
+# ── MCPTT 그룹 정보 (mcptt_management_views.md §3) ─────────────────────────────────────────
+#   원천 = DB(그룹·멤버·등록·affiliation) + CSP 상태 파일(진행 중 세션) + CMP STATS(발언자) + 1분 롤업 by_group(오늘).
+#   affiliation 활성 = CSP DbManager::IsAffiliated 와 같은 조건(status='affiliated' · 만료 전).
+_AFF_ACTIVE = "a.status='affiliated' AND (a.expires_at IS NULL OR a.expires_at > NOW())"
+_PTT_ON = ("(ps.register_time IS NOT NULL AND (ps.logout_time IS NULL OR ps.register_time > ps.logout_time))")
+
+
+def _ptt_live_index(config: dict) -> dict:
+    """그룹별 실시간 상태 — {gid: {'participants': set, 'holders': [..]}} (진행 중 세션만)."""
+    out: dict = {}
+    for st in _load_active_states(config, 'ptt'):
+        gid = st.get('group_id')
+        if gid:
+            e = out.setdefault(gid, {'participants': set(), 'holders': []})
+            if st.get('subscriber_id'):
+                e['participants'].add(st['subscriber_id'])
+    for nd in _all_media_stats(config):
+        for gd in (nd['stats'].get('group_details') or []):
+            gid = gd.get('group_id')
+            hs = _floor_holders(gd)
+            if gid and hs:
+                e = out.setdefault(gid, {'participants': set(), 'holders': []})
+                e['holders'] = sorted(set(e['holders']) | set(hs))
+    return out
+
+
+def _ptt_today_by_group(config: dict) -> dict:
+    """오늘 1분 롤업의 by_group — {gid: {sessions, talked}}. 롤업이 없으면 빈 dict."""
+    try:
+        today = datetime.now().strftime('%Y-%m-%d')
+        f, t = _norm_dt(today), _norm_dt(today, end=True)
+        rows, _cov = stats_rollup.read_range_filled(stats_rollup.roots_of(config), f, t, config, gran='1d')
+        _b, totals = stats_rollup.aggregate(rows, '1d', 'ptt', ensure_svc=False)
+        return ((totals or {}).get('ptt') or {}).get('by_group') or {}
+    except Exception as e:
+        logger.warning('ptt today by_group skip: %s', e)
+        return {}
+
+
+def _ptt_state_of(live: dict) -> str:
+    if not live:
+        return 'idle'
+    return 'talking' if live.get('holders') else 'active'
+
+
+@_offload
+def _ptt_groups_status(config: dict, state: str = 'all', q: str = '') -> HandlerResult:
+    """그룹 목록 + 상태 · 오늘 요약. state = all | active(진행 중 세션) | talking(발언 중) | emergency(긴급 허용)."""
+    state = (state or 'all').lower()
+    if state not in ('all', 'active', 'talking', 'emergency'):
+        return HandlerResult(status=400, body={'error': 'state must be all|active|talking|emergency'})
+    q = (q or '').strip()
+    live = _ptt_live_index(config)
+    today = _ptt_today_by_group(config)
+    groups = []
+    try:
+        with _get_db(config) as conn:
+            with conn.cursor() as cur:
+                where, args = '', []
+                if q:
+                    like = f'%{q}%'
+                    where = ("WHERE g.mcptt_group_id LIKE %s OR g.name LIKE %s OR EXISTS (SELECT 1 FROM ptt_group_members m2 "
+                             "LEFT JOIN ptt_subscriptions p2 ON p2.id=m2.user_id LEFT JOIN users u2 ON u2.id=p2.user_id "
+                             "WHERE m2.group_id=g.id AND (m2.user_id LIKE %s OR u2.name LIKE %s))")
+                    args = [like, like, like, like]
+                cur.execute(
+                    "SELECT g.*, "
+                    " (SELECT COUNT(*) FROM ptt_group_members m WHERE m.group_id=g.id) AS member_count, "
+                    " (SELECT COUNT(*) FROM ptt_group_members m JOIN ptt_subscriptions ps ON ps.id=m.user_id "
+                    f"   WHERE m.group_id=g.id AND {_PTT_ON}) AS registered_count, "
+                    " (SELECT COUNT(DISTINCT a.user_id) FROM ptt_affiliations a "
+                    f"   WHERE a.group_id=g.id AND {_AFF_ACTIVE}) AS affiliated_count "
+                    f"FROM ptt_groups g {where} ORDER BY g.name, g.mcptt_group_id", args)
+                rows = cur.fetchall()
+    except Exception as e:
+        logger.exception('ptt groups status error: %s', e)
+        return HandlerResult(status=500, body=_ERR_INTERNAL)
+    counts = {'all': 0, 'active': 0, 'talking': 0, 'emergency': 0}
+    for r in rows:
+        gid = r.get('mcptt_group_id') or ''
+        lv = live.get(gid)
+        st = _ptt_state_of(lv)
+        emergency = bool(r.get('emergency_call'))
+        counts['all'] += 1
+        counts['active'] += 1 if st != 'idle' else 0
+        counts['talking'] += 1 if st == 'talking' else 0
+        counts['emergency'] += 1 if emergency else 0
+        if (state == 'active' and st == 'idle') or (state == 'talking' and st != 'talking') or (state == 'emergency' and not emergency):
+            continue
+        td = today.get(gid) or {}
+        groups.append({
+            'id': gid, 'name': r.get('name') or gid, 'group_type': r.get('group_type') or 'prearranged',
+            'org_code': r.get('org_code') or '', 'priority': r.get('priority'),
+            'floor_policy': r.get('floor_policy') or 'single', 'emergency_call': emergency,
+            'video_enabled': bool(r.get('video_enabled')), 'encryption': bool(r.get('encryption')),
+            'member_count': int(r.get('member_count') or 0), 'registered_count': int(r.get('registered_count') or 0),
+            'affiliated_count': int(r.get('affiliated_count') or 0),
+            'state': st, 'participants': len(lv['participants']) if lv else 0, 'floor_holders': lv['holders'] if lv else [],
+            'today_sessions': int(td.get('sessions') or 0), 'today_talked': int(td.get('talked') or 0),
+        })
+    return HandlerResult(status=200, body={'counts': counts, 'groups': groups})
+
+
+@_offload
+def _ptt_group_status(config: dict, gid: str) -> HandlerResult:
+    """그룹 상세 — 속성 · 멤버별 역할/등록/참여(affiliation)/세션 참가/발언 · 실시간 상태 · 오늘 요약."""
+    gid = (gid or '').strip()
+    live = _ptt_live_index(config).get(gid)
+    td = _ptt_today_by_group(config).get(gid) or {}
+    try:
+        with _get_db(config) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT g.*, u.name AS owner_name FROM ptt_groups g LEFT JOIN users u ON u.id=g.authorized_user_id "
+                            "WHERE g.mcptt_group_id=%s", (gid,))
+                g = cur.fetchone()
+                if not g:
+                    return HandlerResult(status=404, body={'error': 'group not found'})
+                cur.execute(
+                    "SELECT m.user_id AS msisdn, m.role, m.priority, u.name, ps.register_time, ps.logout_time, "
+                    f" {_PTT_ON} AS registered, "
+                    f" EXISTS (SELECT 1 FROM ptt_affiliations a WHERE a.group_id=m.group_id AND a.user_id=m.user_id AND {_AFF_ACTIVE}) AS affiliated "
+                    "FROM ptt_group_members m LEFT JOIN ptt_subscriptions ps ON ps.id=m.user_id "
+                    "LEFT JOIN users u ON u.id=ps.user_id WHERE m.group_id=%s ORDER BY m.priority, m.user_id LIMIT 1000",
+                    (g['id'],))
+                mrows = cur.fetchall()
+    except Exception as e:
+        logger.exception('ptt group status error: %s', e)
+        return HandlerResult(status=500, body=_ERR_INTERNAL)
+    parts = live['participants'] if live else set()
+    holders = set(live['holders']) if live else set()
+    members = [{
+        'msisdn': r['msisdn'], 'name': r.get('name') or '', 'role': r.get('role') or 'participant',
+        'priority': r.get('priority'), 'registered': bool(r.get('registered')),
+        'register_time': r['register_time'].isoformat() if r.get('register_time') else None,
+        'affiliated': bool(r.get('affiliated')), 'in_session': r['msisdn'] in parts, 'talking': r['msisdn'] in holders,
+    } for r in mrows]
+    group = {
+        'id': g.get('mcptt_group_id'), 'name': g.get('name') or gid, 'group_type': g.get('group_type') or 'prearranged',
+        'org_code': g.get('org_code') or '', 'priority': g.get('priority'), 'floor_policy': g.get('floor_policy') or 'single',
+        'max_talkers': g.get('max_talkers'), 'emergency_call': bool(g.get('emergency_call')),
+        'emergency_alert': bool(g.get('emergency_alert', 1)), 'video_enabled': bool(g.get('video_enabled')),
+        'encryption': bool(g.get('encryption')), 'require_affiliation': bool(g.get('require_affiliation', 1)),
+        'hang_timer_sec': g.get('hang_timer_sec'), 'max_duration_sec': g.get('max_duration_sec'),
+        'owner': g.get('owner_name') or '',
+    }
+    return HandlerResult(status=200, body={
+        'group': group, 'state': _ptt_state_of(live), 'participants': len(parts), 'floor_holders': sorted(holders),
+        'today': {'sessions': int(td.get('sessions') or 0), 'talked': int(td.get('talked') or 0)},
+        'members': members,
+        'counts': {'members': len(members), 'registered': sum(m['registered'] for m in members),
+                   'affiliated': sum(m['affiliated'] for m in members)},
+    })
+
+
 # base(노드 health/messages/leak/subscribers) — base OAM 귀속.
 CIMS_STATS_HANDLER_LIST = [
     (_STATS_BASE, handle_stats, {}),
@@ -3509,5 +3668,53 @@ CIMS_STATS_API_DOCS = [
      ],
      'notes': ['members 는 priority 오름차순이다.',
                'floor_holder 는 floor_holders 의 첫 번째 — 단일 발언 정책이면 둘이 같다.'],
+     'auth': dict(_AUTH_MONITOR)},
+    {'id': 'stats.service.ptt-groups', 'module': 'oam-svc', 'method': 'GET',
+     'path': '/api/v1/stats/service/ptt-groups',
+     'summary': 'MCPTT 그룹 정보 — 전체 그룹 목록 + 상태·등록/참여 인원·오늘 이용 (mcptt_management_views.md §3)',
+     'params': [
+         {'name': 'state', 'in': 'query', 'type': 'string', 'required': False,
+          'desc': 'all(기본) | active(진행 중 세션) | talking(발언 중) | emergency(긴급 호출 허용 그룹)'},
+         {'name': 'q', 'in': 'query', 'type': 'string', 'required': False, 'desc': '그룹 ID·이름·멤버 번호·멤버 이름 부분 일치'},
+     ],
+     'response': '{counts{all,active,talking,emergency}, groups[]}',
+     'response_fields': [
+         {'name': 'counts', 'type': 'object', 'desc': '필터별 그룹 수 — 검색어(q) 적용 뒤, state 적용 전'},
+         {'name': 'groups[].id', 'type': 'string', 'desc': 'MCPTT 그룹 ID'},
+         {'name': 'groups[].state', 'type': 'string', 'desc': 'idle | active(세션 진행 중) | talking(발언 중)'},
+         {'name': 'groups[].member_count', 'type': 'integer', 'unit': '명', 'desc': '멤버 수'},
+         {'name': 'groups[].registered_count', 'type': 'integer', 'unit': '명', 'desc': '등록(접속) 중인 멤버 — register_time 유효·미로그아웃'},
+         {'name': 'groups[].affiliated_count', 'type': 'integer', 'unit': '명', 'desc': '그룹에 참여(affiliation, TS 24.379 §9) 중인 멤버'},
+         {'name': 'groups[].participants', 'type': 'integer', 'unit': '명', 'desc': '진행 중 세션의 참가자 수'},
+         {'name': 'groups[].floor_holders[]', 'type': 'string', 'desc': '현재 발언자'},
+         {'name': 'groups[].today_sessions', 'type': 'integer', 'unit': '건', 'desc': '오늘 그룹 세션 수(1분 롤업 by_group)'},
+         {'name': 'groups[].today_talked', 'type': 'integer', 'unit': '건', 'desc': '오늘 발언이 있었던 세션 수'},
+     ],
+     'example': {'counts': {'all': 5, 'active': 1, 'talking': 1, 'emergency': 2},
+                 'groups': [{'id': 'g001', 'name': '관제1', 'group_type': 'prearranged', 'state': 'talking', 'member_count': 9,
+                             'registered_count': 6, 'affiliated_count': 5, 'participants': 5, 'floor_holders': ['+82500000001'],
+                             'today_sessions': 12, 'today_talked': 11, 'emergency_call': True}]},
+     'errors': _ERR_COMMON + [{'status': 400, 'when': 'state 값 무효'}],
+     'notes': ['조회 전용 — 편집은 구성 › PTT 그룹(CSC 관리 API).'],
+     'auth': dict(_AUTH_MONITOR)},
+    {'id': 'stats.service.ptt-group', 'module': 'oam-svc', 'method': 'GET',
+     'path': '/api/v1/stats/service/ptt-groups/{group_id}',
+     'summary': 'MCPTT 그룹 상세 — 속성·멤버별 등록/참여/세션 참가/발언·오늘 이용',
+     'params': [{'name': 'group_id', 'in': 'path', 'type': 'string', 'required': True, 'desc': 'MCPTT 그룹 ID'}],
+     'response': '{group{...}, state, participants, floor_holders[], today{sessions,talked}, members[], counts}',
+     'response_fields': [
+         {'name': 'group', 'type': 'object', 'desc': '그룹 속성 — 유형·우선순위·동시 발언·긴급/영상/보안·affiliation 요구·유지 시간(T4)·최대 통화 시간·소유자'},
+         {'name': 'members[].registered', 'type': 'boolean', 'desc': '등록(접속) 중'},
+         {'name': 'members[].affiliated', 'type': 'boolean', 'desc': '그룹 참여(affiliation) 중'},
+         {'name': 'members[].in_session', 'type': 'boolean', 'desc': '진행 중 세션 참가'},
+         {'name': 'members[].talking', 'type': 'boolean', 'desc': '발언 중'},
+     ],
+     'example': {'group': {'id': 'g001', 'name': '관제1', 'group_type': 'prearranged', 'hang_timer_sec': 30},
+                 'state': 'idle', 'participants': 0, 'floor_holders': [], 'today': {'sessions': 12, 'talked': 11},
+                 'members': [{'msisdn': '+82500000001', 'name': '홍길동', 'role': 'chair', 'priority': 1,
+                              'registered': True, 'affiliated': True, 'in_session': False, 'talking': False}],
+                 'counts': {'members': 9, 'registered': 6, 'affiliated': 5}},
+     'errors': _ERR_COMMON + [{'status': 404, 'when': '없는 그룹', 'body': {'error': 'group not found'}}],
+     'notes': ['멤버는 priority 오름차순, 최대 1000명.'],
      'auth': dict(_AUTH_MONITOR)},
 ]

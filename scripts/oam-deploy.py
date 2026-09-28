@@ -165,6 +165,8 @@ def cmd_upgrade(oam: Oam, args) -> int:
             did, pid = (int(x) for x in t.split('=', 1))
             pkg = next((p for p in oam.packages() if int(p['id']) == pid), {})
             plan.append((did, pid, f"{pkg.get('module') or pkg.get('name') or '?'} {pkg.get('version') or '?'}"))
+    # base oam 을 먼저 — oam-svc 는 base oam 설치본의 핸들러 코드를 읽는다. oam-svc 가 먼저 재기동되면 옛 코드를 올린다(실측).
+    plan.sort(key=lambda x: 0 if _module_of(rows.get(x[0]) or {}) == 'oam' else 1)
     rc = 0
     for did, pid, label in plan:
         cur = rows.get(did) or oam.deployment(did)

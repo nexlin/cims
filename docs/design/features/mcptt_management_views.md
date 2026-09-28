@@ -1,7 +1,7 @@
 # MCPTT 관리 조회 화면 — 그룹 정보 · 단말 현황 · 이용 정보
 
-> **설계 정본 — 화면 3종·단말 속성 수집·이용 집계 확장은 미구현.** 그룹 편집과 실시간 반영(§2)·PTT 세션
-> 이력은 구현돼 있다. 요구 = "MCPTT 그룹 정보 · 단말기 정보 · MCPTT 이용 정보를 저장하며, 필요시 저장 내용을
+> **MCPTT 그룹 정보 화면(§3)은 구현, 단말 현황(§4)·이용 정보(§5)·단말 속성 수집·이용 집계 확장은 설계 정본(미구현).** 그룹 편집과
+> 실시간 반영(§2)·PTT 세션 이력은 구현돼 있다. 요구 = "MCPTT 그룹 정보 · 단말기 정보 · MCPTT 이용 정보를 저장하며, 필요시 저장 내용을
 > 확인할 수 있다" + "MCPTT 웹 기반 관리 도구에서 그룹 등록/수정/삭제 시 실시간으로 업데이트한다".
 >
 > 관련: [monitoring.md](monitoring.md)(실시간 상태·이력), [sip_statistics.md](sip_statistics.md)(1분 롤업 — 이용
@@ -18,7 +18,7 @@
 | 그룹 등록 · 수정 · 삭제 | 콘솔 `구성 > PTT 그룹`, 관제 앱 [PTT 그룹] | 구현 |
 | 그룹 변경 실시간 반영 | — (§2) | 구현 |
 | MCPTT 이용 이력 (세션 단위) | 콘솔 `서비스 > PTT 세션 이력` (`/service/history/ptt`) | 구현 |
-| **MCPTT 그룹 정보** (조회 · 상태) | `서비스 > MCPTT 그룹 정보` (`/service/ptt-groups`) | 미구현 (§3) |
+| **MCPTT 그룹 정보** (조회 · 상태) | `서비스 > MCPTT 그룹 정보` (`/service/ptt-groups`) | 구현 (§3) |
 | **단말 현황** (MCPTT 관점 단말 정보) | `서비스 > 단말 현황` (`/service/ptt-terminals`) | 미구현 (§4) — 단말 속성 수집 신규 |
 | **MCPTT 이용 정보** (기간 집계) | `서비스 > MCPTT 이용 정보` (`/service/ptt-usage`) | 미구현 (§5) — 롤업 확장 |
 
@@ -48,17 +48,19 @@
 
 ## 3. MCPTT 그룹 정보 화면
 
-**구성** — ① 필터(전체 · 활동 중 · 긴급 허용) + 그룹명·ID·멤버 검색 ② 그룹 목록 ③ 선택 그룹 상세(그룹 속성 ·
-멤버·참여 상태 · 오늘 이용 요약).
+**구성** — ① 필터(전체 · 활동 중 · 발언 중 · 긴급 허용, 각 개수) + 그룹명·ID·멤버 번호/이름 검색 ② 그룹 목록(상태 ·
+발언자 · 멤버/등록/참여 수 · 오늘 세션 · 허용 배지) ③ 선택 그룹 상세 패널(그룹 속성 · 멤버별 등록/참여/세션 참가/발언 ·
+오늘 이용 요약, [편집]→구성 › PTT 그룹 · [세션 이력]). 진행 중 세션·발언자는 5 초 주기로 다시 읽는다
+(`PttGroupInfoPage.tsx`).
 
 | 표시 | 원천 | 비고 |
 |---|---|---|
 | 그룹 속성 (유형 · 우선순위 · 동시 발언 · 소유자 · 조직 · 긴급/영상/보안 플래그) | DB `ptt_groups` | 편집 화면과 같은 필드, 읽기 전용 |
 | 멤버 · 역할(chair/participant) | DB `ptt_group_members` | |
-| 멤버 참여(affiliation) | PSP affiliation 상태 probe | TS 24.379 §9 — `affiliated` / 미참여 |
+| 멤버 참여(affiliation) | DB `ptt_affiliations` (CSP 가 쓴다) | TS 24.379 §9 — 활성 = `status='affiliated'` · 만료 전(CSP `IsAffiliated` 와 같은 조건) |
 | 멤버 접속 | `ptt_subscriptions.register_time/logout_time` | [monitoring.md](monitoring.md) §1.2 등록 조건 |
-| 상태(발언 중 · 대기 · 유휴) · 현재 화자 | CMP 그룹 상태 | [monitoring.md](monitoring.md) §1.4 |
-| 오늘 세션 · 최근 활동 · 이용 요약 | 1분 롤업 `by_group` (§5.2) | |
+| 상태(발언 중 · 세션 진행 · 유휴) · 현재 화자 | CSP 상태 파일(진행 중 세션·참가자) + CMP STATS `floor_holders` | [monitoring.md](monitoring.md) §1.4 |
+| 오늘 세션 · 발언 있던 세션 | 1분 롤업 `by_group` `{sessions, talked}` | 발언 수·시간 등은 §5.2 확장 뒤 |
 
 ## 4. 단말 현황 화면 (MCPTT 관점)
 
@@ -142,17 +144,19 @@ MCPTT 서비스가 필요로 하는 단말 정보 — 누가 어떤 단말로 �
 
 같은 조회 API 에 `format=xlsx` 를 붙인다(화면과 같은 숫자). 시트 = 요약 · 시간대 · 그룹별 · 사용자별.
 
-## 6. API (제안)
+## 6. API
 
-oam-svc 가 소유한다 — 통계 롤업(`services/stats_rollup`)·세션 인덱스와 같은 곳이다.
+oam-svc 가 소유한다 — 통계 롤업(`services/stats_rollup`)·세션 인덱스와 같은 곳이다. 경로는 oam-svc 가 이미 가진 게이트웨이
+세그먼트(`/api/v1/stats/service`) 아래에 둔다 — `/api/v1/ptt/groups/*` 는 CSC 관리 API 세그먼트라 그 아래에 두면
+`{id}` 와 겹치고(그룹 id `status`), 그룹 상세는 oam-svc 로 라우팅할 수 없다.
 
-| 메서드 · 경로 | 용도 |
-|---|---|
-| `GET /api/v1/ptt/groups/status?state=&q=` | 그룹 목록 + 상태 · 오늘 요약 |
-| `GET /api/v1/ptt/groups/{id}/status` | 그룹 상세 — 멤버별 참여 · 접속 |
-| `GET /api/v1/ptt/terminals?state=&type=&q=` | 단말 목록 |
-| `GET /api/v1/ptt/terminals/{mcptt_id}` | 단말 상세 4영역 |
-| `GET /api/v1/stats/ptt/usage?from=&to=&unit=&format=json\|xlsx` | 이용 정보 |
+| 메서드 · 경로 | 용도 | 상태 |
+|---|---|---|
+| `GET /api/v1/stats/service/ptt-groups?state=all\|active\|talking\|emergency&q=` | 그룹 목록 + 상태 · 등록/참여 인원 · 오늘 요약 (`counts` = 필터별 수) | 구현 (`stats.service.ptt-groups`) |
+| `GET /api/v1/stats/service/ptt-groups/{id}` | 그룹 상세 — 속성 · 멤버별 등록/참여/세션 참가/발언 | 구현 (`stats.service.ptt-group`) |
+| `GET /api/v1/stats/service/ptt-terminals?state=&type=&q=` | 단말 목록 | 제안 |
+| `GET /api/v1/stats/service/ptt-terminals/{mcptt_id}` | 단말 상세 4영역 | 제안 |
+| `GET /api/v1/stats/ptt/usage?from=&to=&unit=&format=json\|xlsx` | 이용 정보 | 제안 |
 
 ## 7. 구현 순서
 

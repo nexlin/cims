@@ -28,6 +28,7 @@ import PhoneGroupsPage from './pages/PhoneGroupsPage'
 import McpttPolicyPage from './pages/McpttPolicyPage'
 import RegisterFlowPage from './pages/RegisterFlowPage'
 import AnnouncementsPage from './pages/AnnouncementsPage'
+import PttGroupInfoPage from './pages/PttGroupInfoPage'
 import SipPeeringPage from './pages/SipPeeringPage'
 import { SERVICE_DEFS_LAYOUT } from '@core/widgets/layouts'  // 코어 레이아웃 — '구성' 그룹에 배치
 
@@ -68,6 +69,9 @@ export const cimsManifest: ServiceManifest = {
       order: 30,
       routes: [
         { path: '/service/status',         title: '서비스 현황',    layout: SERVICE_STATUS_LAYOUT,        layoutId: 'service.status',        requiredRole: 'monitor' },
+        // MCPTT 그룹 정보(mcptt_management_views.md §3) — 조회 전용. 편집은 구성 › PTT 그룹
+        { path: '/service/ptt-groups',      title: 'MCPTT 그룹 정보', component: PttGroupInfoPage, requiredRole: 'monitor',
+          apis: ['stats.service.ptt-groups', 'stats.service.ptt-group'] },
         { path: '/service/history/volte',  title: 'VoLTE 호 이력',  layout: SERVICE_HISTORY_VOLTE_LAYOUT, layoutId: 'service.history-volte', requiredRole: 'monitor' },
         { path: '/service/history/ptt',    title: 'PTT 세션 이력',  layout: SERVICE_HISTORY_PTT_LAYOUT,   layoutId: 'service.history-ptt',   requiredRole: 'monitor' },
         { path: '/service/abnormal-sessions', title: '비정상 세션 이력', requiredRole: 'monitor',
