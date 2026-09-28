@@ -1046,6 +1046,25 @@ public:
     AudioMedia &getPlaybackDevMedia() PJSUA2_THROW(Error);
 
     /**
+     * CIMS: automatic level control (AGC) of the capture (microphone) signal.
+     * Brings the active speech level (ITU-T P.56) to targetDbov. Enabled by
+     * default (PJMEDIA_CONF_CIMS_MIC_AGC, -26 dBov) and kept across sound
+     * device reopen. See docs/design/features/ue_audio_level.md.
+     *
+     * Direction note: capture and playback device media are the SAME slot 0,
+     * and AudioMedia directions are seen from the media port. On slot 0,
+     * adjustRxLevel() scales bridge-to-device (the SPEAKER) and
+     * adjustTxLevel() scales device-to-bridge (the MICROPHONE). Set the
+     * microphone loudness with this AGC target and the speaker loudness with
+     * getPlaybackDevMedia().adjustRxLevel().
+     *
+     * @param enable            true to enable.
+     * @param targetDbov        Target active level in dBov, clamped to
+     *                          -40..-10.
+     */
+    void setCaptureAgc(bool enable, float targetDbov) PJSUA2_THROW(Error);
+
+    /**
      * Select or change capture sound device. Application may call this
      * function at any time to replace current sound device. Calling this 
      * method will not change the state of the sound device (opened/closed).

@@ -13,6 +13,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.cims.ue.core.config.ConfigStore
 import com.cims.ue.core.power.PartialWakeLock
+import com.cims.ue.core.sip.PjLib
 import com.cims.ue.ptt.csc.CscConfig
 import com.cims.ue.ptt.mcdata.McDataCodec
 import kotlinx.coroutines.CoroutineScope
@@ -403,10 +404,11 @@ class PttService : Service() {
         c.volumeStore = com.cims.ue.ptt.audio.GroupVolumeStore(this)
         c.channelStore = ChannelStore(this)         // 참여 채널 영속 — 재시작 자동 재조인
         c.audioRouter = audioRouter
+        c.proximityLock = com.cims.ue.core.power.ProximityScreenLock(this, "cims:ptt-call")
         val rp = com.cims.ue.ptt.audio.AudioRoutePrefs(this)
         c.routePrefs = rp
         c.setAudioRoute(rp.route, rp.headsetId)     // 저장된 라우팅 복원(기본=스피커폰)
-        c.setAudioGain(rp.spkGain, rp.micGain)      // 저장된 무전 게인 복원(기본=×1.5)
+        c.setAudioGain(rp.spkGain, rp.micGain)      // 저장된 무전 음량 복원(기본 스피커 ×1.5·마이크 ×1.0)
         c.micHandoff = { talk -> sendMicHandoff(talk) }
         observeHeadsets(c)
         observe(c)
@@ -491,6 +493,8 @@ class PttService : Service() {
         c.onEvent = { e -> history.add(e.groupId, e.kind.name, e.peer, e.durationMs) }
         job = scope.launch {
             c.status.onEach { update("CIMS PTT", it) }.launchIn(this)
+            // 하드웨어 PTT 키 유무는 첫 키 입력·학습으로 실행 중에 확정될 수 있다 — 그때 화면 꺼짐 조건을 다시 본다.
+            HwPtt.present.onEach { c.applyProximity() }.launchIn(this)
             // 전역 상태 아이콘 배지 — 등록됨=초록/연결 중=황색/해제=회색/실패=적색 (CIMS-Phone 과 동일 색).
             c.regState.onEach { reg ->
                 val color = when (reg) {
@@ -590,6 +594,7 @@ class PttService : Service() {
     override fun onDestroy() {
         instance = null
         wakeLock.release()
+        controller?.proximityLock?.release()
         runCatching { unregisterReceiver(vendorKeyReceiver) }
         runCatching { unregisterReceiver(routeHandoffReceiver) }
         mainHandler.removeCallbacks(routeResumeWatchdog)

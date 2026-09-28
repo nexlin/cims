@@ -815,6 +815,26 @@ PJ_DECL(pj_status_t) pjmedia_conf_adjust_rx_level( pjmedia_conf *conf,
 
 
 /**
+ * CIMS: 포트에서 bridge 로 들어오는 신호(rx)의 자동 레벨 조정(AGC)을 켜거나 끈다. 활성 음성
+ * 레벨(ITU-T P.56)을 @a target_dbov 로 맞추며, 음성 프레임에서만 학습하고 slot 0 이면 스피커
+ * 재생 중에는 학습을 멈춘다. AGC 뒤에 pjmedia_conf_adjust_rx_level() 배율이 곱해지고, 마지막에
+ * 리미터(PJMEDIA_CONF_CIMS_LIMITER)가 풀스케일 초과를 막는다. slot 0(마이크)은
+ * PJMEDIA_CONF_CIMS_MIC_AGC 에 따라 기본으로 켜져 있다. 학습 상태는 끄고 켜도 유지된다.
+ *
+ * @param conf          The conference bridge.
+ * @param slot          Slot number of the port.
+ * @param enable        PJ_TRUE 면 켠다.
+ * @param target_dbov   목표 활성 레벨(dBov, -40..-10 로 제한).
+ *
+ * @return              PJ_SUCCESS on success.
+ */
+PJ_DECL(pj_status_t) pjmedia_conf_set_rx_agc( pjmedia_conf *conf,
+                                              unsigned slot,
+                                              pj_bool_t enable,
+                                              float target_dbov );
+
+
+/**
  * Adjust the level of signal to be transmitted to the specified port.
  * Application may adjust the level to make signal transmitted to the port
  * either louder or more quiet. The level adjustment is calculated with this

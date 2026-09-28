@@ -30,4 +30,10 @@
    assert (media_security.md §7). SIP 패킷 상한(PJSIP_MAX_PKT_LEN 4000)과 정렬. */
 #define PJSUA2_MAX_SDP_BUF_LEN    4000
 
+/* 음성 레벨: 마이크 AGC 는 conference bridge 하나(PJMEDIA_CONF_CIMS_MIC_AGC, 목표 -26 dBov)로 통일한다
+   (ue_audio_level.md). Speex AEC 전처리의 AGC(기본 켬, 목표 ≈ -12 dBov)가 앞단에서 또 돌면 두 AGC 가
+   서로 다른 목표로 싸운다 — Speex AEC 를 쓰는 플랫폼(Windows·Linux)에서 끈다. Android 는 Speex AEC 가
+   빠져 있고(config_site_sample) WebRTC AEC 경로에는 AGC 가 없다. */
+#define PJMEDIA_SPEEX_AEC_USE_AGC 0
+
 #endif /* CIMS_CONFIG_SITE_COMMON_H */

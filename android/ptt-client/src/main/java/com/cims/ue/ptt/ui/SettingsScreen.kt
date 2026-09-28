@@ -95,7 +95,7 @@ fun SettingsScreen(
                 st.ctl?.setAudioGain(it, st.micGain)
             }
             Divider()
-            GainRow("마이크 게인", "무전 송신 음량 보강 (상대가 듣는 크기)", st.micGain) {
+            GainRow("마이크 게인", "상대가 듣는 크기 — 자동 레벨 맞춤 기준(×1.0 = 표준) 보정", st.micGain) {
                 st.ctl?.setAudioGain(st.spkGain, it)
             }
             TransportRow(svc)

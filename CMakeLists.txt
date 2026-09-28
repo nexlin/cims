@@ -341,6 +341,7 @@ option(CIMS_TESTER "계측기 워커(cims-tester-worker) 빌드 — test_instrum
 if(CIMS_TESTER)
 add_subdirectory(tester/worker)
 add_subdirectory(tester/sampleconv)
+add_subdirectory(tester/reclevel)
 endif()
 # cwrtc — 재설계 예정. 빌드/dist/패키징 제외 (cims-phone 웹 UI 도 함께 제외).
 #add_subdirectory(cwrtc)

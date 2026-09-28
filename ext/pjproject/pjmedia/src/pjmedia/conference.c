@@ -30,6 +30,7 @@
 #include <pj/log.h>
 #include <pj/pool.h>
 #include <pj/string.h>
+#include "cims_level.h"         /* CIMS: 송신 AGC + 피크 리미터 */
 
 #if PJMEDIA_CONF_BACKEND == PJMEDIA_CONF_SERIAL_BRIDGE_BACKEND
 
@@ -225,6 +226,12 @@ struct conf_port
 
     pj_bool_t            is_new;        /**< Newly added port, avoid read/write
                                              data from/to.                  */
+
+    /* CIMS: 레벨 처리(cims_level.h). rx = 포트→bridge(slot 0 이면 마이크), tx = bridge→포트. */
+    cims_agc             agc;           /**< rx 자동 레벨 조정.             */
+    cims_limiter         rx_lim;        /**< rx 레벨 조정 뒤 리미터.        */
+    cims_limiter         tx_lim;        /**< tx 레벨 조정 뒤 리미터.        */
+    float               *lvl_buf;       /**< 게인 적용 중간값(프레임 1개).  */
 };
 
 
@@ -255,6 +262,11 @@ struct pjmedia_conf
     op_entry             *op_queue;     /**< Queue of operations.           */
     op_entry             *op_queue_free;/**< Queue of free entries.         */
     pjmedia_conf_op_cb    cb;           /**< OP callback.                   */
+
+    /* CIMS: 레벨 처리 공통 상수(cims_level.h). */
+    float                 frame_s;      /**< 프레임 길이(초).               */
+    float                 lim_ceil;     /**< 리미터 한계(선형).             */
+    float                 lim_rel;      /**< 리미터 프레임당 release 계수.  */
 };
 
 
@@ -473,6 +485,17 @@ static pj_status_t create_conf_port( pj_pool_t *parent_pool,
                                conf->samples_per_frame * sizeof(pj_int16_t));
     PJ_ASSERT_ON_FAIL(conf_port->adj_level_buf,
                       {status = PJ_ENOMEM; goto on_return;});
+
+    /* CIMS: 레벨 처리 상태 — AGC 는 꺼진 채로(slot 0 만 bridge 생성 때 켠다). */
+    conf_port->lvl_buf = (float*) pj_pool_zalloc(pool,
+                               conf->samples_per_frame * sizeof(float));
+    PJ_ASSERT_ON_FAIL(conf_port->lvl_buf,
+                      {status = PJ_ENOMEM; goto on_return;});
+    cims_agc_init(&conf_port->agc, PJ_FALSE, PJMEDIA_CONF_CIMS_AGC_TARGET_DBOV,
+                  PJMEDIA_CONF_CIMS_AGC_MAX_GAIN_DB,
+                  PJMEDIA_CONF_CIMS_AGC_MIN_GAIN_DB);
+    cims_limiter_init(&conf_port->rx_lim);
+    cims_limiter_init(&conf_port->tx_lim);
 
     /* If port's clock rate is different than conference's clock rate,
      * create a resample sessions.
@@ -809,12 +832,25 @@ PJ_DEF(pj_status_t) pjmedia_conf_create( pj_pool_t *pool_,
     conf->master_port->on_destroy = &destroy_port;
 
 
+    /* CIMS: 레벨 처리 공통 상수. */
+    conf->frame_s = (float)conf->samples_per_frame /
+                    (float)(conf->clock_rate * conf->channel_count);
+    conf->lim_ceil = CIMS_LVL_FULL *
+                     (float)pow(10.0, PJMEDIA_CONF_CIMS_LIMIT_DBFS / 20.0);
+    conf->lim_rel = (float)exp(-conf->frame_s * 1000.0 /
+                               PJMEDIA_CONF_CIMS_LIMIT_RELEASE_MS);
+
     /* Create port zero for sound device. */
     status = create_sound_port(pool, conf);
     if (status != PJ_SUCCESS) {
         pjmedia_conf_destroy(conf);
         return status;
     }
+
+#if PJMEDIA_CONF_CIMS_MIC_AGC
+    /* CIMS: 마이크(slot 0 rx) 자동 레벨 조정 기본 켬. */
+    conf->ports[0]->agc.enabled = PJ_TRUE;
+#endif
 
     /* Create mutex. */
     status = pj_mutex_create_recursive(pool, "conf", &conf->mutex);
@@ -2120,6 +2156,42 @@ PJ_DEF(pj_status_t) pjmedia_conf_adjust_rx_level( pjmedia_conf *conf,
 
 
 /*
+ * CIMS: rx 자동 레벨 조정(AGC) 켜기/끄기·목표 레벨.
+ */
+PJ_DEF(pj_status_t) pjmedia_conf_set_rx_agc( pjmedia_conf *conf,
+                                             unsigned slot,
+                                             pj_bool_t enable,
+                                             float target_dbov )
+{
+    struct conf_port *conf_port;
+
+    PJ_ASSERT_RETURN(conf && slot<conf->max_ports, PJ_EINVAL);
+
+    if (target_dbov < -40.0f) target_dbov = -40.0f;
+    if (target_dbov > -10.0f) target_dbov = -10.0f;
+
+    pj_mutex_lock(conf->mutex);
+
+    conf_port = conf->ports[slot];
+    if (conf_port == NULL) {
+        pj_mutex_unlock(conf->mutex);
+        return PJ_EINVAL;
+    }
+
+    /* 학습 상태(레벨·게인·잡음 바닥)는 유지한다 — 끄고 켜도 다시 수렴할 필요가 없다. 끌 때는
+     * 다음 프레임부터 원래 배율 경로로 돌아가므로 AGC 게인도 1 로 되돌린다. */
+    conf_port->agc.target_db = target_dbov;
+    if (!enable)
+        conf_port->agc.gain_lin = 1.0f;
+    conf_port->agc.enabled = enable;
+
+    pj_mutex_unlock(conf->mutex);
+
+    return PJ_SUCCESS;
+}
+
+
+/*
  * Adjust TX level of individual port.
  */
 PJ_DEF(pj_status_t) pjmedia_conf_adjust_tx_level( pjmedia_conf *conf,
@@ -2453,6 +2525,21 @@ static pj_status_t write_port(pjmedia_conf *conf, struct conf_port *cport,
 
     tx_level = 0;
 
+#if PJMEDIA_CONF_CIMS_LIMITER
+    /* CIMS: tx 배율(사용자·믹스 정규화) 뒤 하드 클립 대신 리미터. buf 는 mix_buf 와 겹치므로
+     * 먼저 float 중간 버퍼로 옮긴 뒤 쓴다. 배율이 1 로 돌아와도 리미터가 풀릴 때까지는 거친다. */
+    if (adj_level != NORMAL_LEVEL || cport->tx_lim.g < 1.0f) {
+        float *y = cport->lvl_buf;
+        float k = (float)adj_level / NORMAL_LEVEL;
+
+        for (j=0; j<conf->samples_per_frame; ++j)
+            y[j] = (float)cport->mix_buf[j] * k;
+        cims_limiter_run(&cport->tx_lim, y, buf, conf->samples_per_frame,
+                         conf->lim_ceil, conf->lim_rel);
+        for (j=0; j<conf->samples_per_frame; ++j)
+            tx_level += (buf[j]>=0? buf[j] : -buf[j]);
+    } else
+#endif
     if (adj_level != NORMAL_LEVEL) {
         for (j=0; j<conf->samples_per_frame; ++j) {
             pj_int32_t itemp = cport->mix_buf[j];
@@ -2478,6 +2565,11 @@ static pj_status_t write_port(pjmedia_conf *conf, struct conf_port *cport,
     }
 
     tx_level /= conf->samples_per_frame;
+
+    /* CIMS: AGC 포트(slot 0)면 스피커로 나간 레벨을 알린다 — 재생 중 에코 오학습 방지. */
+    if (cport->agc.enabled && cport == conf->ports[0])
+        cims_agc_note_far(&cport->agc, cims_frame_db(buf, conf->samples_per_frame),
+                          conf->frame_s);
 
     /* Convert level to 8bit complement ulaw */
     tx_level = pjmedia_linear2ulaw(tx_level) ^ 0xff;
@@ -2739,6 +2831,39 @@ static pj_status_t get_frame(pjmedia_port *this_port,
         /* Adjust the RX level from this port
          * and calculate the average level at the same time.
          */
+#if PJMEDIA_CONF_CIMS_LIMITER || PJMEDIA_CONF_CIMS_MIC_AGC
+        /* CIMS: AGC(켜진 포트) → 사용자 배율 → 리미터. 하드 클립 대신 리미터가 한계를 지킨다. */
+        if (conf_port->agc.enabled || conf_port->rx_adj_level != NORMAL_LEVEL ||
+            conf_port->rx_lim.g < 1.0f)
+        {
+            float post = (float)conf_port->rx_adj_level / NORMAL_LEVEL;
+            float *y = conf_port->lvl_buf;
+
+            if (conf_port->agc.enabled) {
+                cims_agc_run(&conf_port->agc, p_in, y, conf->samples_per_frame,
+                             conf->frame_s, post);
+                /* CIMS: AGC 상태 1 초 주기 기록(레벨 5) — 단말 실측 판정용(ue_audio_level.md §4). */
+                if (++conf_port->agc.log_tick >= (unsigned)(1.0f / conf->frame_s)) {
+                    conf_port->agc.log_tick = 0;
+                    PJ_LOG(5,(THIS_FILE, "CIMS-AGC slot%u frame=%.1f noise=%.1f level=%.1f "
+                              "gain=%.1f far_hang=%u post=%.2f", i,
+                              cims_frame_db(p_in, conf->samples_per_frame),
+                              conf_port->agc.noise_db,
+                              10.0 * log10(conf_port->agc.level_pow > 1e-12f ?
+                                           conf_port->agc.level_pow : 1e-12f),
+                              conf_port->agc.gain_db, conf_port->agc.far_hang,
+                              post));
+                }
+            } else {
+                for (j=0; j<conf->samples_per_frame; ++j)
+                    y[j] = (float)p_in[j] * post;
+            }
+            cims_limiter_run(&conf_port->rx_lim, y, p_in, conf->samples_per_frame,
+                             conf->lim_ceil, conf->lim_rel);
+            for (j=0; j<conf->samples_per_frame; ++j)
+                level += (p_in[j]>=0? p_in[j] : -p_in[j]);
+        } else
+#endif
         if (conf_port->rx_adj_level != NORMAL_LEVEL) {
             for (j=0; j<conf->samples_per_frame; ++j) {
                 /* For the level adjustment, we need to store the sample to

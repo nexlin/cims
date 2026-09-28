@@ -1042,7 +1042,10 @@ Result Engine::setRxLevel(int callId, float level) {
     return withCall(o, callId, [o, callId, level](PjCall& c) {
         pj::AudioMedia* aud = o->activeAudio(&c);
         if (!aud) throw pj::Error(PJ_EINVALIDOP, "setRxLevel", "no active audio", __FILE__, __LINE__);
-        aud->adjustRxLevel(level);
+        // 듣는 크기 = 통화 포트→bridge 유입. pjsua2 AudioMedia 방향은 미디어 관점이라 유입은
+        // adjustTxLevel 이다 — adjustRxLevel 은 bridge→통화(= 상대에게 보내는 내 음성)를 바꾼다
+        // (docs/design/features/ue_audio_level.md §2).
+        aud->adjustTxLevel(level);
         emitMediaSnapshot(o, callId);
     });
 }

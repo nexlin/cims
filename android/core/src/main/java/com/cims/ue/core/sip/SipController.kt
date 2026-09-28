@@ -352,13 +352,25 @@ class SipController(private val config: SipAccountConfig) {
         // 부팅 전/종료 후(libDestroy) native 호출 금지 — 로그아웃→재로그인처럼 프로세스가 산 채
         // 재부팅되는 경로에서 파괴된 endpoint 호출은 abort. register() 후 재적용이 라우팅을 확보.
         if (!PjLib.booted) return@onCtl
-        PjLib.ep.audDevManager().setOutputRoute(
+        val adm = PjLib.ep.audDevManager()
+        adm.setOutputRoute(
             when (route) {
                 AUDIO_ROUTE_SPEAKER -> org.pjsip.pjsua2.pjmedia_aud_dev_route.PJMEDIA_AUD_DEV_ROUTE_LOUDSPEAKER
                 AUDIO_ROUTE_EARPIECE -> org.pjsip.pjsua2.pjmedia_aud_dev_route.PJMEDIA_AUD_DEV_ROUTE_EARPIECE
                 else -> org.pjsip.pjsua2.pjmedia_aud_dev_route.PJMEDIA_AUD_DEV_ROUTE_DEFAULT
             },
         )
+        // 송화 마이크 — 단말 스피커·수화기로 들을 때는 내장 기본(하단) 마이크에 고정한다. 통화 입력은 출력이
+        // 스피커면 정책이 후면 마이크를 고르는데(탁자 위 스피커폰 설계), 입에 대고 말하는 무전은 반대쪽
+        // 마이크로 받아 ~20 dB 작아진다(MF52 실측, ue_audio_level.md §3). 헤드셋·이어폰이면 고정을 풀어
+        // 그 기기 마이크를 쓰게 한다. keep=true — 발언마다 캡처 장치가 다시 열려도 유지된다.
+        runCatching {
+            adm.setInputRoute(
+                if (route == AUDIO_ROUTE_SPEAKER || route == AUDIO_ROUTE_EARPIECE)
+                    org.pjsip.pjsua2.pjmedia_aud_dev_route.PJMEDIA_AUD_DEV_ROUTE_EARPIECE
+                else org.pjsip.pjsua2.pjmedia_aud_dev_route.PJMEDIA_AUD_DEV_ROUTE_DEFAULT,
+            )
+        }.onFailure { Log.w(TAG, "setInputRoute 실패: ${it.message}") }
     }
 
     /** 진단용 — pj-ctl 스레드에 지연 실행 예약 (pjsua2 호출 직렬화 규약 준수). */
@@ -377,43 +389,48 @@ class SipController(private val config: SipAccountConfig) {
     /** 통화별 청취(수신 오디오 → 스피커) 토글 — 멀티그룹 듣기 정책용. */
     fun setCallListen(callId: Int, on: Boolean) = onCtl { calls[callId]?.setListen(on) }
 
-    /** 통화별 수신 음량(1.0=원음, 0=무음) — 채널별 볼륨 슬라이더용. */
+    /** 통화별 수신 음량(그 통화에서 **듣는** 크기, 1.0=원음, 0=무음) — 채널별 볼륨 슬라이더용. */
     fun setCallRxLevel(callId: Int, level: Float) = onCtl { calls[callId]?.setRxLevel(level) }
 
     /**
-     * 장치단(conference bridge slot0) 오디오 gain — 무전(PTT) 체감 음량 보강용.
-     * [spk]=bridge→스피커 출력 gain, [mic]=마이크→bridge 입력 gain (1.0=원음).
-     * 시스템 스트림 음량·라우팅과 무관하게 디지털 레벨 자체가 낮은 단말(캡처 게인 약함)을
-     * 보정한다. 통화별 RxLevel(슬라이더)과 곱으로 적용되므로 과도값은 클리핑 유발 — 2.0 권장.
+     * 장치단(conference bridge slot0) 음량 — 무전(PTT) 체감 음량 조정용 (ue_audio_level.md §4).
+     * [spk] = 스피커로 나가는 배율(1.0=원음). [mic] = 마이크 자동 레벨(AGC)의 **목표 보정** —
+     * 배율이 아니라 목표 활성 레벨을 `MIC_AGC_TARGET_DBOV + 20·log10(mic)` 로 옮긴다(1.0 = -26 dBov).
+     * 마이크 크기는 단말마다 34 dB 넘게 달라 고정 배율로는 맞출 수 없다 — 크기 맞추기는 엔진 AGC 가
+     * 하고, 사용자는 "상대가 듣는 크기" 만 조금 옮긴다. 풀스케일 초과는 엔진 리미터가 막는다.
      */
     fun setDeviceAudioBoost(spk: Float, mic: Float) = onCtl {
         boostSpk = spk; boostMic = mic
         applyDeviceAudioBoost()
     }
 
-    /** 저장된 boost 재적용. 두 축을 **개별** runCatching 으로 적용한다 — 캡처 게이트로 마이크가
-     *  닫힌 동안은 captureDevMedia 가 없어 실패하는데, 한 블록에 묶으면 뒤 축이 조용히 유실된다
-     *  (실측: 발언 녹취 RMS 가 mic 게인과 무관 — 미적용). 또 snd dev (재)오픈마다 bridge slot0
-     *  포트가 재생성돼 레벨이 초기화되므로, 캡처 게이트 전환([setCaptureEnabled])·재오픈
-     *  ([bounceSndDev]) 직후 재적용이 필수.
+    /** 저장된 장치단 음량 재적용 — 캡처 게이트 전환([setCaptureEnabled])·재오픈([bounceSndDev]) 직후에도
+     *  부른다. 두 축을 **개별** runCatching 으로 적용한다(한 축 실패가 다른 축을 지우지 않게).
      *
-     *  ⚠ 캡처 장치는 `PJSUA_SND_DEV_NO_IMMEDIATE_OPEN` 으로 **지연 개방**된다 — 게이트를 연
-     *  직후엔 captureDevMedia 가 아직 없어 mic 축이 실패하고, 재시도가 없으면 그 발언 내내
-     *  게인이 빠진 원음이 나간다(서버 녹취 RMS 비교로 실측). 게이트가 열린 상태에서 mic 축이
-     *  실패하면 장치가 열릴 때까지 짧게 재시도한다. */
+     *  ⚠ 방향 — capture/playback 장치 미디어는 **같은 slot 0** 이고 pjsua2 AudioMedia 의 방향은 미디어
+     *  관점이다: `adjustRxLevel` = bridge→장치 = **스피커**, `adjustTxLevel` = 장치→bridge = **마이크**.
+     *  (이름만 보고 playback.adjustTxLevel=스피커·capture.adjustRxLevel=마이크 로 걸면 두 축이 서로
+     *  바뀐다 — 서버 녹취 P.56 실측으로 확인된 과거 결함, ue_audio_level.md §2.)
+     *  마이크 배율(adjustTxLevel)은 1 로 고정한다 — AGC 뒤에 곱해져 목표를 흔들기 때문이다.
+     *
+     *  mic 축이 실패하면(캡처 장치 지연 개방 `PJSUA_SND_DEV_NO_IMMEDIATE_OPEN` 중 등) 게이트가 열린 동안
+     *  짧게 재시도한다. */
     private fun applyDeviceAudioBoost(retriesLeft: Int = MIC_BOOST_RETRY_MAX) {
         if (!PjLib.booted) return
         val adm = runCatching { PjLib.ep.audDevManager() }.getOrNull() ?: return
-        runCatching { adm.playbackDevMedia.adjustTxLevel(boostSpk) }
-        val micOk = runCatching { adm.captureDevMedia.adjustRxLevel(boostMic) }.isSuccess
+        runCatching { adm.playbackDevMedia.adjustRxLevel(boostSpk) }
+        val micOk = runCatching {
+            adm.captureDevMedia.adjustTxLevel(1f)
+            adm.setCaptureAgc(true, micAgcTargetDbov(boostMic))
+        }.isSuccess
         if (micOk) {
             if (retriesLeft < MIC_BOOST_RETRY_MAX)
-                Log.i(TAG, "mic boost=$boostMic 적용 (지연 개방 재시도 ${MIC_BOOST_RETRY_MAX - retriesLeft}회)")
+                Log.i(TAG, "mic agc target=${micAgcTargetDbov(boostMic)}dBov 적용 (재시도 ${MIC_BOOST_RETRY_MAX - retriesLeft}회)")
             return
         }
         if (!captureEnabled) return          // 게이트가 닫힌 상태 — 열릴 때 setCaptureEnabled 가 다시 건다
         if (retriesLeft <= 0) {
-            Log.w(TAG, "mic boost=$boostMic 미적용 — 캡처 장치 개방 대기 초과")
+            Log.w(TAG, "mic agc target 미적용 — 캡처 장치 개방 대기 초과")
             return
         }
         h.postDelayed({
@@ -822,6 +839,11 @@ class SipController(private val config: SipAccountConfig) {
 
         /** 캡처 장치 지연 개방(PJSUA_SND_DEV_NO_IMMEDIATE_OPEN) 대기 — mic boost 재시도 간격/횟수. */
         private const val MIC_BOOST_RETRY_MS = 120L
+        /** 마이크 AGC 기본 목표(ITU-T P.56 활성 레벨, dBov) — 엔진 기본값(PJMEDIA_CONF_CIMS_AGC_TARGET_DBOV)과 같다. */
+        const val MIC_AGC_TARGET_DBOV = -26f
+        /** 마이크 음량 설정(배율 표기) → AGC 목표. 1.0 = 기본 목표, ×2 = +6 dB. */
+        fun micAgcTargetDbov(mic: Float): Float =
+            MIC_AGC_TARGET_DBOV + 20f * kotlin.math.log10(mic.coerceAtLeast(0.1f))
         private const val MIC_BOOST_RETRY_MAX = 8
 
         /** 오디오 출력 라우팅 상수 — [setAudioRoute]. */

@@ -19,7 +19,7 @@ Android `.so` 는 WSL2 에서 `sdk/android/build-native.sh` 로 빌드해 투입
 
 앱이 미디어 평면에서 하는 일은 패킷 처리가 아니라 **파이프라인 제어**다 — 코덱 협상(`CodecConfig`),
 발언권에 따른 mic 슬롯 connect/disconnect(`setMicEnabled`), 캡처 게이트, 채널별 수신 음량
-(`adjustRxLevel`), 출력 라우팅, RTP keepalive.
+(통화 `AudioMedia.adjustTxLevel` — 방향 규약 [ue_audio_level.md §2](ue_audio_level.md)), 출력 라우팅, RTP keepalive.
 
 ## 2. 문제 — 믹싱이 아니라 **디먹스**다
 
@@ -121,7 +121,7 @@ pjsua 는 통화당 오디오 스트림을 여러 개 지원한다 — 각 스�
   코덱 인스턴스를 동시 화자 수만큼만 연다.
 - **믹싱** — `get_frame`(오디오 스레드). primary PCM 을 만든 뒤 활성 서브스트림을 각각 디코드해
   PCM 을 **포화 합산**한다. 스트림은 **이미 믹싱된 PCM 한 포트**를 conference bridge 에 내므로
-  브리지 포트·AudioTrack·`adjustRxLevel` 대상이 1개로 유지되고, 채널별 수신 음량은 합산 결과
+  브리지 포트·AudioTrack·수신 음량 대상이 1개로 유지되고, 채널별 수신 음량은 합산 결과
   전체에 같은 값이 적용된다. 활성 서브스트림이 없으면 no-op — **단일 화자 동작이 바뀌지 않는다.**
 - **정리(회수)** — **RTP 무활동** 기준. 어떤 secondary SSRC 로 `CIMS_MT_IDLE_FRAMES`(100 프레임,
   20ms 기준 ≈2s) 동안 재생할 프레임이 없으면 슬롯을 반납한다(코덱·지터버퍼는 재사용 위해 파괴하지

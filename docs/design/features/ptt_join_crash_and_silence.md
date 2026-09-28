@@ -213,9 +213,9 @@ UE 쪽 pjproject 패치는 엔진 소스 정본 `ext/pjproject`(`pjsip/src/pjsua
 - 크래시 수정 3겹(위) + **오디오 라우팅/음량**: `AudioRouter.setInCall()` — 통화 시
   `MODE_IN_COMMUNICATION` + voice-call 스트림 최대, 수화기 아이콘 귀 모양(`ic_earpiece`).
   스피커폰은 pjsua `setOutputRoute` + **AudioManager 직접 제어 병행**(`setSpeakerphone` — 일부
-  단말(MF52)은 pjsua 라우팅 무시 실측). **무전 게인 설정화**: 장치단 bridge gain
-  (`SipController.setDeviceAudioBoost`, 스피커/마이크 ×1.0~×3.0, 기본 ×1.5) — 설정 탭 슬라이더,
-  영속+통화 중 즉시 반영. 상세는 [android_ue_client.md](android_ue_client.md) §5 설정 탭.
+  단말(MF52)은 pjsua 라우팅 무시 실측). **무전 음량**: 스피커 배율 + 엔진 마이크 AGC(-26 dBov
+  목표) + 리미터 — 정본 [ue_audio_level.md](ue_audio_level.md), 설정 화면은
+  [android_ue_client.md](android_ue_client.md) §5 설정 탭.
 - `config_site.h` **KA=1**(RTP keepalive, 청취 전용 구간 NAT 매핑 유지) + floor Ack 주기송신
   (`FloorClient` 15s).
 
@@ -223,12 +223,13 @@ UE 쪽 pjproject 패치는 엔진 소스 정본 `ext/pjproject`(`pjsip/src/pjsua
 - **조인 크래시 해소 확정**: 개시자(W999 참여→chair 조인) + 응답자(MF52 fan-out
   `OnCallStarted: Joined Group`) 양 경로 crash-free, 크래시 버퍼 0. floor
   REQUEST→GRANT→RELEASE→IDLE 회전 + 상태 브로드캐스트 2명 도달 + Floor ACK keepalive 양 단말
-  15s 주기 확인. 양방향 음성 흐름 확인(체감 음량 이슈는 게인 설정화로 해소 — 기본 ×1.5).
+  15s 주기 확인. 양방향 음성 흐름 확인.
 - 시스템 오디오 실측: 양 단말 `MODE_IN_COMMUNICATION`+voice-call 스트림 최대+스피커 라우팅에서도
-  체감 음량 부족 → 디지털 레벨 보정(장치단 gain)이 올바른 레버임을 확인.
+  체감 음량 부족 → 디지털 레벨 보정이 올바른 레버. 단말별 마이크 레벨 편차는 엔진 AGC 가 맞춘다
+  ([ue_audio_level.md](ue_audio_level.md)).
 
 ### 잔여 — 사람 확인(귀 테스트)
-①게인 기본 ×1.5 적정성(슬라이더로 미세조정) ②MF52 스피커폰 실동작(AudioManager 병행 제어 후)
+①무전 음량 귀 판정([ue_audio_level.md §8](ue_audio_level.md) 실기 검증) ②MF52 스피커폰 실동작(AudioManager 병행 제어 후)
 ③이어폰 3택 라우팅·그룹 음량 영속. 확인 완료되면 본 문서는 제거하고 확정 사실을
 [ue_nat_traversal.md](ue_nat_traversal.md)·[android_ue_client.md](android_ue_client.md)·
 [android_ue_m1_pjsip_integration.md](android_ue_m1_pjsip_integration.md) 로 흡수한다

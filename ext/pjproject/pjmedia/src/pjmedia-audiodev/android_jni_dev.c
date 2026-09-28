@@ -106,6 +106,11 @@ static pj_status_t android_create_stream(pjmedia_aud_dev_factory *f,
                                          void *user_data,
                                          pjmedia_aud_stream **p_aud_strm);
 
+/* CIMS: AudioTrack/AudioRecord 단위 장치 고정 (정의는 아래). */
+static pj_bool_t set_preferred_device(JNIEnv *env, jobject obj, int dev_flags,
+                                      int want_type, const char *skip_addr,
+                                      pj_bool_t check_routed);
+
 /* Stream prototypes */
 static pj_status_t strm_get_param(pjmedia_aud_stream *strm,
                                   pjmedia_aud_param *param);
@@ -411,6 +416,7 @@ static pj_status_t android_get_dev_info(pjmedia_aud_dev_factory *f,
     info->default_samples_per_sec = 8000;
     info->caps = PJMEDIA_AUD_DEV_CAP_OUTPUT_VOLUME_SETTING |
                  PJMEDIA_AUD_DEV_CAP_OUTPUT_ROUTE |
+                 PJMEDIA_AUD_DEV_CAP_INPUT_ROUTE |
                  PJMEDIA_AUD_DEV_CAP_INPUT_SOURCE;
     info->input_count = 1;
     info->output_count = 1;
@@ -700,6 +706,25 @@ static pj_status_t android_create_stream(pjmedia_aud_dev_factory *f,
             goto on_error;
         }
 
+        /* CIMS: 입력 라우트 EARPIECE = 단말 기본(하단·송화구) 마이크 고정. 통화 입력(VOICE_COMMUNICATION)은
+         * 출력이 스피커면 정책이 후면 마이크(AUDIO_DEVICE_IN_BACK_MIC)를 고른다 — 탁자 위 스피커폰용 설계라,
+         * 입에 대고 말하는 무전(PTT)은 반대쪽 마이크로 받아 레벨이 ~20 dB 낮다(MF52 실측). 후면 마이크도
+         * TYPE_BUILTIN_MIC(주소 "back")로 보이므로 주소로 건너뛴다. DEFAULT 는 고정하지 않는다(정책 추종 —
+         * 이어폰·헤드셋 마이크). ue_audio_level.md §3.
+         * ⚠ INPUT_ROUTE 와 INPUT_SOURCE 는 같은 캡 비트(128)다 — 입력 소스는 값에 ROUTE_CUSTOM 비트를
+         * 섞어 구분하므로(위 mic_source), 라우트 값은 CUSTOM 비트가 없을 때만 라우트로 읽는다. */
+        if ((param->flags & PJMEDIA_AUD_DEV_CAP_INPUT_ROUTE) &&
+            !(param->input_route & PJMEDIA_AUD_DEV_ROUTE_CUSTOM) &&
+            param->input_route == PJMEDIA_AUD_DEV_ROUTE_EARPIECE)
+        {
+            pj_bool_t ok = set_preferred_device(jni_env, stream->record,
+                                                1 /* GET_DEVICES_INPUTS */,
+                                                15 /* TYPE_BUILTIN_MIC */,
+                                                "back", PJ_FALSE);
+            PJ_LOG(4, (THIS_FILE, "Input route EARPIECE -> record preferred "
+                       "device builtin mic: %s", ok ? "OK" : "FAILED"));
+        }
+
         status = pj_sem_create(stream->pool, NULL, 0, 1, &stream->rec_sem);
         if (status != PJ_SUCCESS)
             goto on_error;
@@ -863,6 +888,13 @@ static pj_status_t strm_get_cap(pjmedia_aud_stream *s,
         *(pjmedia_aud_dev_route*)pval = strm->param.output_route;
         return PJ_SUCCESS;
     }
+    /* CIMS: 입력 라우트도 같은 이유(keep 저장 유지)로 조회를 구현한다. */
+    if (cap==PJMEDIA_AUD_DEV_CAP_INPUT_ROUTE &&
+        (strm->param.flags & PJMEDIA_AUD_DEV_CAP_INPUT_ROUTE))
+    {
+        *(pjmedia_aud_dev_route*)pval = strm->param.input_route;
+        return PJ_SUCCESS;
+    }
 
     if (cap==PJMEDIA_AUD_DEV_CAP_OUTPUT_VOLUME_SETTING &&
         (strm->param.dir & PJMEDIA_DIR_PLAYBACK))
@@ -872,13 +904,17 @@ static pj_status_t strm_get_cap(pjmedia_aud_stream *s,
     return status;
 }
 
-/* CIMS: 재생 AudioTrack 단위 출력 장치 강제 (AudioTrack.setPreferredDevice).
- * 전역 통신 라우트(AudioManager communication device)와 독립적으로 이 스트림의
- * 출력만 지정한다 — VoLTE 통화(수화기)와 PTT 무전(스피커) 동시 분리 라우팅용.
- * want_type: AudioDeviceInfo.TYPE_*(1=수화기, 2=스피커), 0=해제(전역 정책 추종).
+/* CIMS: AudioTrack/AudioRecord 단위 장치 강제 (setPreferredDevice).
+ * 전역 통신 라우트(AudioManager communication device)와 독립적으로 이 스트림만 지정한다 —
+ * VoLTE 통화(수화기)와 PTT 무전(스피커) 동시 분리 라우팅, PTT 송화 마이크 고정용.
+ * dev_flags: AudioManager.GET_DEVICES_OUTPUTS(2) / GET_DEVICES_INPUTS(1).
+ * want_type: AudioDeviceInfo.TYPE_*(출력 1=수화기·2=스피커, 입력 15=내장 마이크), 0=해제(정책 추종).
+ * skip_addr: 같은 type 중 이 주소(getAddress)인 장치는 건너뜀(후면 마이크 "back"), NULL=없음.
+ * check_routed: 이미 그 type 으로 라우팅 중이면 no-op(재생 트랙 — 주기 재적용 플래핑 방지).
  * 컨텍스트는 ActivityThread.currentApplication() 으로 획득(디바이스 열거용). */
-static pj_bool_t set_track_preferred_device(JNIEnv *env, jobject track,
-                                            int want_type)
+static pj_bool_t set_preferred_device(JNIEnv *env, jobject track, int dev_flags,
+                                      int want_type, const char *skip_addr,
+                                      pj_bool_t check_routed)
 {
     jclass track_cls = NULL, at_cls = NULL, app_cls = NULL, am_cls = NULL;
     jobject app = NULL, am = NULL, dev = NULL;
@@ -895,7 +931,7 @@ static pj_bool_t set_track_preferred_device(JNIEnv *env, jobject track,
     /* 이미 원하는 장치로 라우팅 중이면 no-op — 주기 재적용(앱 ticker)이 라우트
      * 플래핑(재생 끊김)을 만들지 않게 한다. 이탈 시에만 아래에서 해제→재설정
      * 바운스로 재평가를 강제한다(같은 값 재설정은 정책이 무시). */
-    if (want_type != 0) {
+    if (want_type != 0 && check_routed) {
         jmethodID get_routed = (*env)->GetMethodID(env, track_cls,
             "getRoutedDevice", "()Landroid/media/AudioDeviceInfo;");
         if (get_routed) {
@@ -944,8 +980,7 @@ static pj_bool_t set_track_preferred_device(JNIEnv *env, jobject track,
         get_devs = (*env)->GetMethodID(env, am_cls, "getDevices",
                                        "(I)[Landroid/media/AudioDeviceInfo;");
         if (!get_devs) goto on_return;
-        /* 2 = AudioManager.GET_DEVICES_OUTPUTS */
-        devs = (jobjectArray)(*env)->CallObjectMethod(env, am, get_devs, 2);
+        devs = (jobjectArray)(*env)->CallObjectMethod(env, am, get_devs, dev_flags);
         if (!devs) goto on_return;
 
         n = (*env)->GetArrayLength(env, devs);
@@ -955,8 +990,23 @@ static pj_bool_t set_track_preferred_device(JNIEnv *env, jobject track,
             jmethodID get_type = (*env)->GetMethodID(env, d_cls, "getType",
                                                      "()I");
             jint t = get_type ? (*env)->CallIntMethod(env, d, get_type) : -1;
+            pj_bool_t skip = PJ_FALSE;
+            if (t == want_type && skip_addr) {
+                jmethodID get_addr = (*env)->GetMethodID(env, d_cls, "getAddress",
+                                                         "()Ljava/lang/String;");
+                jstring js = get_addr ? (jstring)(*env)->CallObjectMethod(env, d, get_addr) : NULL;
+                if (js) {
+                    const char *a = (*env)->GetStringUTFChars(env, js, NULL);
+                    if (a) {
+                        skip = pj_ansi_strcmp(a, skip_addr) == 0;
+                        (*env)->ReleaseStringUTFChars(env, js, a);
+                    }
+                    (*env)->DeleteLocalRef(env, js);
+                }
+                if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+            }
             (*env)->DeleteLocalRef(env, d_cls);
-            if (t == want_type) {
+            if (t == want_type && !skip) {
                 dev = d;
                 break;
             }
@@ -1020,13 +1070,43 @@ static pj_status_t strm_set_cap(pjmedia_aud_stream *s,
         }
 
         attached = attach_jvm(&jni_env);
-        ok = set_track_preferred_device(jni_env, stream->track, want_type);
+        ok = set_preferred_device(jni_env, stream->track, 2 /* GET_DEVICES_OUTPUTS */,
+                                  want_type, NULL, PJ_TRUE);
         detach_jvm(attached);
 
         PJ_LOG(4, (THIS_FILE, "Output route %d -> track preferred device "
                    "type %d: %s", route, want_type, ok ? "OK" : "FAILED"));
         if (ok) {
             stream->param.output_route = route;
+            return PJ_SUCCESS;
+        }
+        return PJMEDIA_EAUD_SYSERR;
+    }
+
+    /* CIMS: 입력 라우트 — 이 스트림의 AudioRecord 에만 마이크를 못박는다. EARPIECE=내장 기본(하단)
+     * 마이크, 그 밖=해제(정책 추종). 생성 시 적용 규칙과 같다(android_create_stream). */
+    if (cap==PJMEDIA_AUD_DEV_CAP_INPUT_ROUTE) {
+        pjmedia_aud_dev_route route = *(const pjmedia_aud_dev_route *)value;
+        pj_bool_t ok;
+
+        /* 캡처가 닫힌 스트림(PTT 캡처 게이트 — 발언 중에만 마이크를 연다, 평소 재생 전용)이면 값만 둔다.
+         * 거부하면 pjsua 가 keep 저장도 하지 않아 다음 캡처 개방에 적용되지 않는다. 생성 시 규칙이 적용한다. */
+        if (!(stream->param.dir & PJMEDIA_DIR_CAPTURE) || !stream->record) {
+            stream->param.flags |= PJMEDIA_AUD_DEV_CAP_INPUT_ROUTE;
+            stream->param.input_route = route;
+            return PJ_SUCCESS;
+        }
+
+        attached = attach_jvm(&jni_env);
+        ok = set_preferred_device(jni_env, stream->record, 1 /* GET_DEVICES_INPUTS */,
+                                  route == PJMEDIA_AUD_DEV_ROUTE_EARPIECE ? 15 : 0,
+                                  "back", PJ_FALSE);
+        detach_jvm(attached);
+
+        PJ_LOG(4, (THIS_FILE, "Input route %d -> record preferred device: %s",
+                   route, ok ? "OK" : "FAILED"));
+        if (ok) {
+            stream->param.input_route = route;
             return PJ_SUCCESS;
         }
         return PJMEDIA_EAUD_SYSERR;

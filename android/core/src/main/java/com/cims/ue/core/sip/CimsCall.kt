@@ -360,9 +360,11 @@ class CimsCall : Call {
         if (on) aud.startTransmit(spk) else aud.stopTransmit(spk)
     }
 
-    /** 수신 음량(채널별) — conference bridge 유입 레벨(1.0=원음, 0=무음). 미디어 재협상 시 리셋되므로 재적용 필요. */
+    /** 수신 음량(채널별 — 이 통화에서 **듣는** 크기) — 통화 포트→bridge 유입 레벨(1.0=원음, 0=무음).
+     *  pjsua2 방향은 미디어 관점이라 유입은 `adjustTxLevel` 이다(`adjustRxLevel` 은 bridge→통화 = **상대에게
+     *  보내는 내 음성** — ue_audio_level.md §2). 미디어 재협상 시 리셋되므로 재적용 필요. */
     fun setRxLevel(level: Float) {
-        audioMedia()?.adjustRxLevel(level)
+        audioMedia()?.adjustTxLevel(level)
     }
 
     private fun parseApplication(sdp: String): Pair<String, Int>? {

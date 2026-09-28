@@ -51,7 +51,8 @@ public:
     Result setMuted(int callId, bool muted);
     /** 호 → 스피커 청취 on/off (멀티 채널 듣기 정책). */
     Result setListen(int callId, bool listen);
-    /** 수신 음량(1.0=원음, 0=무음). */
+    /** 수신 음량 — 이 호에서 **듣는** 크기(1.0=원음, 0=무음). 보내는 크기는 바꾸지 않는다(마이크 레벨은
+     *  엔진 AGC 가 맞춘다 — ue_audio_level.md). */
     Result setRxLevel(int callId, float level);
     Result sendDtmf(int callId, const std::string& digits);
     CallInfo callInfo(int callId) const;

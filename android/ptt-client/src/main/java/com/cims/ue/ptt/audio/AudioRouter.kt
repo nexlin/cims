@@ -1,6 +1,7 @@
 package com.cims.ue.ptt.audio
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
@@ -228,21 +229,34 @@ class AudioRoutePrefs(context: Context) {
         get() = prefs.getInt("headset_id", -1)
         set(v) = prefs.edit().putInt("headset_id", v).apply()
 
-    /** 무전 스피커 출력 게인(장치단, ×1.0~×3.0) — 설정 화면에서 조절, 통화 진입 시 적용. */
+    /** 무전 스피커 출력 배율(장치단, ×1.0~×3.0) — 설정 화면에서 조절, 통화 진입 시 적용. */
     var spkGain: Float
-        get() = prefs.getFloat("spk_gain", DEFAULT_SPK_GAIN)
+        get() = migrated().getFloat("spk_gain", DEFAULT_SPK_GAIN)
         set(v) = prefs.edit().putFloat("spk_gain", v).apply()
 
-    /** 무전 마이크 송신 게인(장치단, ×1.0~×3.0). */
+    /** 무전 마이크 크기(×1.0~×3.0) — 배율이 아니라 엔진 AGC 목표 보정(×1.0 = -26 dBov, ×2 = +6 dB).
+     *  [SipController.micAgcTargetDbov]. */
     var micGain: Float
-        get() = prefs.getFloat("mic_gain", DEFAULT_MIC_GAIN)
+        get() = migrated().getFloat("mic_gain", DEFAULT_MIC_GAIN)
         set(v) = prefs.edit().putFloat("mic_gain", v).apply()
 
+    /** 저장값 한 번 초기화 — 배선 v1 은 두 축이 서로 바뀌어 걸려 있었다(스피커 슬라이더 → 마이크,
+     *  마이크 슬라이더 → 스피커, ue_audio_level.md §2). 그 위에서 사용자가 맞춘 값은 의미가 뒤집혀
+     *  있으므로 새 배선에 그대로 쓰지 않고 기본값에서 다시 시작한다. */
+    private fun migrated(): SharedPreferences {
+        if (prefs.getInt("gain_wiring", 1) < GAIN_WIRING) {
+            prefs.edit().remove("spk_gain").remove("mic_gain").putInt("gain_wiring", GAIN_WIRING).apply()
+        }
+        return prefs
+    }
+
     companion object {
-        /** 게인 기본값 — 실측상 ×2 는 과대, ×1.5 가 무전 체감 적정 출발점. */
+        /** 스피커 기본 ×1.5 — 무전은 통화보다 크게 들어야 한다는 운용 요구. 마이크 기본 ×1.0 — AGC 표준 목표. */
         const val DEFAULT_SPK_GAIN = 1.5f
-        const val DEFAULT_MIC_GAIN = 1.5f
+        const val DEFAULT_MIC_GAIN = 1.0f
         const val GAIN_MIN = 1f
         const val GAIN_MAX = 3f
+        /** 게인 배선 판 — 2 = 스피커/마이크/채널 음량 방향 정정 + 마이크 AGC. */
+        private const val GAIN_WIRING = 2
     }
 }

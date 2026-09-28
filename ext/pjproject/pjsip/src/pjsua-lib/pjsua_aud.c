@@ -1178,6 +1178,18 @@ PJ_DEF(pj_status_t) pjsua_conf_adjust_rx_level(pjsua_conf_port_id slot,
                                         (int)((level-1) * 128));
 }
 
+/*
+ * CIMS: rx 자동 레벨 조정(AGC).
+ */
+PJ_DEF(pj_status_t) pjsua_conf_set_rx_agc(pjsua_conf_port_id slot,
+                                          pj_bool_t enable,
+                                          float target_dbov)
+{
+    PJ_ASSERT_RETURN(slot >= 0, PJ_EINVAL);
+
+    return pjmedia_conf_set_rx_agc(pjsua_var.mconf, slot, enable, target_dbov);
+}
+
 
 /*
  * Get last signal level transmitted to or received from the specified port.

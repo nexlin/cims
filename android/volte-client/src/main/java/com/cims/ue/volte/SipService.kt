@@ -29,6 +29,7 @@ import com.cims.ue.core.message.MessageStore
 import com.cims.ue.core.message.MsgDirection
 import com.cims.ue.core.message.SendState
 import com.cims.ue.core.power.PartialWakeLock
+import com.cims.ue.core.power.ProximityScreenLock
 import com.cims.ue.core.sip.CallState
 import com.cims.ue.core.sip.PjLib
 import com.cims.ue.core.sip.RegState
@@ -82,6 +83,9 @@ class SipService : Service() {
 
     /** 로그인 중 CPU 를 재우지 않는다 — keepalive 가 멈추면 NAT 포트가 유실된다(core/power/PartialWakeLock). */
     private val wakeLock by lazy { PartialWakeLock(this, "cims:volte") }
+
+    /** 통화 중 귀에 대면 화면을 끈다 — 얼굴 터치 오조작 방지(core/power/ProximityScreenLock). */
+    private val proximityLock by lazy { ProximityScreenLock(this, "cims:volte-call") }
 
     override fun onCreate() {
         super.onCreate()
@@ -560,6 +564,8 @@ class SipService : Service() {
                 elevateForCall(call is CallState.Active || call is CallState.Outgoing)
                 // 통화 오디오 세션 소유(MODE_IN_COMMUNICATION) — 미소유 시 일부 단말 완전 무음(setInCallAudio 참조)
                 setInCallAudio(call is CallState.Active || call is CallState.Outgoing)
+                // 발신·통화 중 근접 센서 화면 꺼짐(전화 앱과 같은 동작). 착신 벨 울림 중에는 잡지 않는다 — 받기 조작이 필요하다.
+                if (call is CallState.Active || call is CallState.Outgoing) proximityLock.acquire() else proximityLock.release()
                 // 착신 — 기본 전화앱처럼 벨소리 + 풀스크린/헤드업 착신 알림(받기/거절).
                 if (call is CallState.Incoming) {
                     showIncomingCallNotification(call)
@@ -603,6 +609,7 @@ class SipService : Service() {
     override fun onDestroy() {
         instance = null
         wakeLock.release()
+        proximityLock.release()
         stopRinging()
         runCatching { unregisterReceiver(micHandoffReceiver) }
         mainHandler.removeCallbacks(micResumeWatchdog)

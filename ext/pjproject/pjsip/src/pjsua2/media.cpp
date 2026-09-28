@@ -876,6 +876,13 @@ AudioMedia &AudDevManager::getPlaybackDevMedia() PJSUA2_THROW(Error)
     return *devMedia;
 }
 
+void AudDevManager::setCaptureAgc(bool enable, float targetDbov)
+                                  PJSUA2_THROW(Error)
+{
+    PJSUA2_CHECK_EXPR( pjsua_conf_set_rx_agc(0, enable ? PJ_TRUE : PJ_FALSE,
+                                             targetDbov) );
+}
+
 void AudDevManager::setCaptureDev(int capture_dev) const PJSUA2_THROW(Error)
 {    
     pjsua_snd_dev_param param;

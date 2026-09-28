@@ -63,6 +63,7 @@ ems/tester/oam/           oam-cims-tester — pkg.json · config/config_template
 ems/tester/console/       콘솔 팩 — manifest.tsx · pages/ · widgets/  (core console 이 @tester 로 참조)
 tester/worker/            cims-tester-worker — C++17, pkg.json, libcsim 위 (루트 CMake 대상) · samples/ 동봉 샘플(pcm/ 16 kHz 마스터 + gen_samples.py)
 tester/sampleconv/        cims-sample-conv — 샘플 변환기(WAV → 16 kHz 마스터·pcmu/pcma/g722/amrwb(+DTX)·P.56 측정), oam-cims-tester native/ 에 동봉
+tester/reclevel/          cims-rec-level — CMP 녹취 트랙 P.56 활성 레벨·포화 측정기(단말 송신 레벨 판정, 정본 ue_audio_level.md §7). 패키지 미동봉(개발·검증용)
 cspsim/                   libcsim(SimSession·RtpThread 추출) + cspsim CLI(전환기)
 ```
 

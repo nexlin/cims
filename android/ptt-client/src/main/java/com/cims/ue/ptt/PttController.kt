@@ -134,6 +134,17 @@ class PttController(
     /** 이어폰(유선/BT) 장치 열거·지정 — 서비스가 주입. */
     var audioRouter: com.cims.ue.ptt.audio.AudioRouter? = null
 
+    /** 그룹콜 중 근접 센서 화면 꺼짐 — [applyProximity]. */
+    var proximityLock: com.cims.ue.core.power.ProximityScreenLock? = null
+
+    /** 근접 센서 화면 꺼짐 적용 — 그룹콜 참여 중(활성 세션 하나 이상)이고 **하드웨어 PTT 키 단말**일 때만 잡는다.
+     *  측면 키로 발언하며 귀에 대면 얼굴이 화면을 눌러 오조작된다(채널 음량 슬라이더 끌림 실측). 화면 PTT
+     *  단말은 화면이 꺼지면 누르고 있던 PTT 버튼 터치가 취소되어 발언이 끊기므로 잡지 않는다. */
+    fun applyProximity() {
+        val want = HwPtt.present.value && synchronized(lock) { sessionMap.values.any { it.active } }
+        if (want) proximityLock?.acquire() else proximityLock?.release()
+    }
+
     /** 라우팅 선택 영속화 — 서비스가 주입(리부팅/재기동 복원). */
     var routePrefs: com.cims.ue.ptt.audio.AudioRoutePrefs? = null
 
@@ -436,6 +447,7 @@ class PttController(
                         sip.setDeviceAudioBoost(_spkGain.value, _micGain.value) // 무전 체감 음량 보강
                         applyAudioRoute()                           // 통화별 라우팅 재적용
                         applyListenPolicy()
+                        applyProximity()                            // 귀에 대면 화면 꺼짐(하드웨어 PTT 단말)
                     }
                     is CallState.Disconnected -> {
                         releasePendingFloor(st.id)   // 수락 전 종료(취소·거절) — 선바인드 소켓 회수
@@ -841,6 +853,7 @@ class PttController(
             audioRouter?.setInCall(false)
             sip.setDeviceAudioBoost(1f, 1f)
         }
+        applyProximity()
         // 이탈 시 로스터에서 본인 제거 — 미참여 채널의 접속 인원은 "나 외의" 참여자다.
         //   나가는 순간의 마지막 이탈 NOTIFY 는 통화 다이얼로그 teardown 과 겹쳐 앱까지 못
         //   오는 경우가 있어(특히 마지막 이탈자 — 08-11 W999 실측), 그 NOTIFY 에 의존하면
@@ -951,7 +964,7 @@ class PttController(
      *  해제하지 않아 무전이 무음이 되는 상태의 유일한 앱측 해제 수단(상세: [SipController.bounceSndDev]). */
     fun recoverFromDeviceLoss() = sip.bounceSndDev()
 
-    /** 무전 장치 게인(스피커 출력/마이크 송신, ×1.0~×3.0) — 영속 + 통화 중이면 즉시 적용. */
+    /** 무전 장치 음량(스피커 출력 배율 / 마이크 AGC 목표 보정, ×1.0~×3.0) — 영속 + 통화 중이면 즉시 적용. */
     fun setAudioGain(spk: Float, mic: Float) {
         val s = spk.coerceIn(com.cims.ue.ptt.audio.AudioRoutePrefs.GAIN_MIN, com.cims.ue.ptt.audio.AudioRoutePrefs.GAIN_MAX)
         val m = mic.coerceIn(com.cims.ue.ptt.audio.AudioRoutePrefs.GAIN_MIN, com.cims.ue.ptt.audio.AudioRoutePrefs.GAIN_MAX)

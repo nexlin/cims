@@ -121,6 +121,43 @@
 #endif
 
 /**
+ * CIMS: conference bridge 피크 리미터 — 게인을 곱하는 지점(포트 rx 레벨 조정·tx 레벨 조정/믹스)의
+ * 하드 클립을 프레임 look-ahead 리미터로 바꾼다. 한계 = PJMEDIA_CONF_CIMS_LIMIT_DBFS,
+ * 풀림 시간상수 = PJMEDIA_CONF_CIMS_LIMIT_RELEASE_MS. 설계: cims_level.h.
+ *
+ * Default: 1 (enabled)
+ */
+#ifndef PJMEDIA_CONF_CIMS_LIMITER
+#   define PJMEDIA_CONF_CIMS_LIMITER        1
+#endif
+#ifndef PJMEDIA_CONF_CIMS_LIMIT_DBFS
+#   define PJMEDIA_CONF_CIMS_LIMIT_DBFS     (-1.0f)
+#endif
+#ifndef PJMEDIA_CONF_CIMS_LIMIT_RELEASE_MS
+#   define PJMEDIA_CONF_CIMS_LIMIT_RELEASE_MS 200
+#endif
+
+/**
+ * CIMS: 마이크(slot 0 수신) 자동 레벨 조정 — 활성 음성 레벨(ITU-T P.56)을 목표 dBov 로 맞춘다.
+ * 단말마다 다른 마이크 디지털 레벨을 서버·상대 단말에 같은 크기로 보낸다. 런타임 조정 =
+ * pjmedia_conf_set_rx_agc(). 게인 범위 = [MIN_GAIN_DB, MAX_GAIN_DB].
+ *
+ * Default: 1 (enabled), 목표 -26 dBov, 게인 -20..+30 dB (마이크 레벨이 -56 dBov 까지 낮은 단말 포함)
+ */
+#ifndef PJMEDIA_CONF_CIMS_MIC_AGC
+#   define PJMEDIA_CONF_CIMS_MIC_AGC        1
+#endif
+#ifndef PJMEDIA_CONF_CIMS_AGC_TARGET_DBOV
+#   define PJMEDIA_CONF_CIMS_AGC_TARGET_DBOV (-26.0f)
+#endif
+#ifndef PJMEDIA_CONF_CIMS_AGC_MAX_GAIN_DB
+#   define PJMEDIA_CONF_CIMS_AGC_MAX_GAIN_DB (30.0f)
+#endif
+#ifndef PJMEDIA_CONF_CIMS_AGC_MIN_GAIN_DB
+#   define PJMEDIA_CONF_CIMS_AGC_MIN_GAIN_DB (-20.0f)
+#endif
+
+/**
  * Conference switch/bridge backend implementations.
  * Select one of these implementations in PJMEDIA_CONF_BACKEND.
  */

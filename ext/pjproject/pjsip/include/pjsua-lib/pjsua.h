@@ -8382,6 +8382,21 @@ PJ_DECL(pj_status_t) pjsua_conf_adjust_rx_level(pjsua_conf_port_id slot,
                                                 float level);
 
 /**
+ * CIMS: 포트에서 bridge 로 들어오는 신호(rx)의 자동 레벨 조정(AGC) — 활성 음성 레벨(ITU-T P.56)을
+ * @a target_dbov 로 맞춘다. slot 0(마이크)은 PJMEDIA_CONF_CIMS_MIC_AGC 로 기본 켜져 있다.
+ * 순서 = AGC → pjsua_conf_adjust_rx_level() 배율 → 리미터. 상세 = pjmedia_conf_set_rx_agc().
+ *
+ * @param slot          The conference bridge slot number.
+ * @param enable        PJ_TRUE 면 켠다.
+ * @param target_dbov   목표 활성 레벨(dBov, -40..-10 로 제한).
+ *
+ * @return              PJ_SUCCESS on success, or the appropriate error code.
+ */
+PJ_DECL(pj_status_t) pjsua_conf_set_rx_agc(pjsua_conf_port_id slot,
+                                           pj_bool_t enable,
+                                           float target_dbov);
+
+/**
  * Get last signal level transmitted to or received from the specified port.
  * The signal level is an integer value in zero to 255, with zero indicates
  * no signal, and 255 indicates the loudest signal level.
