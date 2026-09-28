@@ -201,6 +201,7 @@ S2 FAIL → S3~S6 BLOCKED.
   AKA 제안이 504 로 떨어지는 콜드스타트 흡수)
 - **S3-SCN-VOIP-SMOKE**: cspsim VoIP 1콜 (B2BUA, RTP relay, seg_*.rtp +1)
 - **S3-SCN-PTT-SMOKE**: cspsim PTT 그룹콜 1회 (5인, multipart INVITE, floor) — `-media_dir tests/media`
+- **S3-SCN-PTT-BROADCAST**: 일제 통화(TS 24.379 §4.12, [mcptt_broadcast_group_call.md](design/features/mcptt_broadcast_group_call.md) §6) — cspsim `-broadcast` 4인: 개시자만 GRANT·나머지 DENY #5(BC1/BC2), 같은 그룹 표식 없이 전원 GRANT(BC6). 계측기 경로 = `PTT-GROUP-CALL-BROADCAST`(+ BC3 재합류자 Deny·BC5 구독 480/105) + `PTT-FLOOR-HANDOVER`(BC6)
   로 AMR-WB 를 offer 한다(없으면 PTT-AS 488), `-no-db -creds -users_from_creds` 로 시드 창을 그대로 전개
 - **S3-SCN-SRTP**: 미디어 SRTP 회귀 ([media_security.md §9](design/features/media_security.md)) —
   접속서비스 `media_srtp` 를 required/optional/off 로 플립(SIGUSR1)하며 cspsim `-srtp` 군을 돌린다.

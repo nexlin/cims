@@ -2021,9 +2021,9 @@ bool Worker::runCheck(Instance& in, const CompiledStep& st, long long now) {
                 bool has = ep->s->ConfRosterHas(subj->id.user);
                 ok = (st.payload == "conference_roster_visible") == has;
                 d = role + ": roster " + (has ? "has " : "lacks ") + subj->id.user;
-            } else if (st.payload == "conference_warning_138") {
+            } else if (st.payload == "conference_warning_138" || st.payload == "conference_warning_105") {
                 int wc = ep->s->m_iConfSubWarningCode.load();
-                ok = wc == 138;
+                ok = wc == (st.payload == "conference_warning_105" ? 105 : 138);
                 d = role + ": conference SUBSCRIBE " + std::to_string(ep->s->m_iConfSubStatus.load()) + " Warning " + std::to_string(wc);
             } else if (st.payload == "dialog_consistent") {
                 ok = dialogConsistent(ep->s, d);
@@ -2306,8 +2306,9 @@ bool Worker::epBye(Endpoint* ep, int cause) {
     return true;
 }
 
-bool Worker::epGroupCall(Endpoint* from, const std::string& group, bool listen, const Json& media) {
+bool Worker::epGroupCall(Endpoint* from, const std::string& group, bool listen, bool broadcast, const Json& media) {
     if (from->isReal()) {
+        if (broadcast) return false;   // cimsue-cli 는 아직 <broadcast-ind> 를 내지 않는다 — 컴파일러가 먼저 막는다
         if (from->realCall >= 0) return false;
         Json r = realRequest(from, "group_call " + group + (listen ? " listen" : ""));
         if (!r["ok"].asBool(false)) return false;
@@ -2316,6 +2317,7 @@ bool Worker::epGroupCall(Endpoint* from, const std::string& group, bool listen, 
     }
     from->s->SetOfferCodec(codecPtOf(media["audio"].asString("")));   // 시나리오 오퍼 코덱(PTT 표준 = amr-wb). 없으면 풀 기본
     from->s->SetListenOnly(listen);
+    from->s->SetBroadcast(broadcast);   // 일제 통화 개시 — mcptt-info <broadcast-ind>true (TS 24.379 §4.12)
     from->s->StartGroupCall(group);
     return !from->s->m_strInviteId.empty();
 }
@@ -2726,6 +2728,7 @@ void Worker::execStep(Instance& in, long long now) {
             // 세션이 이미 서 있으면(앞선 group_call) 이 발신은 합류 — 청취(payload listen = a=recvonly, dispatch_center.md §5.6 비멤버 관제사) 또는
             //   비멤버 일반 INVITE(거절 403 기대). 완료 = 이 발신자 자기 200(또는 expect.code) — fan-out 을 다시 기다리지 않는다
             bool listen = st.payload == "listen";
+            bool broadcast = st.payload == "broadcast";   // 진행 중 세션에 보내면 서버가 합류로 다룬다(개시자 불변)
             bool sessionUp = false;
             for (auto* ep : endpointsOf(in)) if (ep != from && ep->inCall) { sessionUp = true; break; }
             if (listen && !sessionUp) { finishInstance(in, true, "group_call listen: 진행 중인 그룹 세션이 없다", now); return; }
@@ -2735,7 +2738,7 @@ void Worker::execStep(Instance& in, long long now) {
             if (!sessionUp) { in.rtpMode = rtpModeOf(st.media); for (auto* ep : endpointsOf(in)) epSetMediaMode(ep, in.rtpMode); }
             else epSetMediaMode(from, in.rtpMode);
             epSetVideo(in, from, st.media["video"].asString("") == "h264");
-            if (!epGroupCall(from, group, listen, st.media)) { finishInstance(in, true, "group_call: StartGroupCall refused (busy/stack?)", now); return; }
+            if (!epGroupCall(from, group, listen, broadcast, st.media)) { finishInstance(in, true, "group_call: StartGroupCall refused (busy/stack?)", now); return; }
             if (from->isSim()) noteCallId(&in, from->s->m_strInviteId);
             m_metrics.counter("legs");
             if (!sessionUp) m_metrics.counter("group_calls");
@@ -3184,7 +3187,7 @@ void Worker::execStep(Instance& in, long long now) {
         }
         if (st.step == "check") {
             // 관측 정합 판정 — after_ms 뒤(NOTIFY 도착 여유) who 전원을 판정. payload = conference_roster_visible|conference_roster_hidden(to = 찾을 역할)
-            //   | conference_warning_138 | dialog_consistent(RFC 4235 NOTIFY 열 정합 — S3-SCN-FA F7)
+            //   | conference_warning_138 | conference_warning_105(일제 통화 480) | dialog_consistent(RFC 4235 NOTIFY 열 정합 — S3-SCN-FA F7)
             if (st.afterMs > 0 && in.pending != Instance::CHECK) {
                 in.pending = Instance::CHECK;
                 in.phase = Instance::WAIT_TIME;

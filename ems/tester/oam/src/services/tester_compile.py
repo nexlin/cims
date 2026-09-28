@@ -359,6 +359,9 @@ def check_kind_gates(scenario: Scenario, topology: Topology, role_pool: Dict[str
             for role in ([d.from_] if d.from_ else list(d.who or [])):
                 if role in real_roles and d.step not in REAL_UE_STEPS:
                     raise CompileError(f'flow[{i}].during {d.step}: 실단말(real-ue) 역할 {role!r} 은 이 동작의 행위자가 될 수 없다')
+        if st.step == 'group_call' and st.payload == 'broadcast' and st.from_ in real_roles:
+            raise CompileError(f'flow[{i}] group_call payload broadcast: 실단말(real-ue) 역할 {st.from_!r} — cimsue-cli 가 아직 일제 통화 '
+                               f'개시(<broadcast-ind>)를 내지 않는다(mcptt_broadcast_group_call.md U1)')
         if real_roles and st.step in ('invite', 'group_call') and st.media is not None and st.media.rtp != 'auto':
             raise CompileError(f'flow[{i}] {st.step}: media.rtp={st.media.rtp!r} — 실단말(real-ue) 역할이 있는 시나리오의 호는 auto 만(실스택의 미디어 평면)')
         gate = (STEP_VOCAB.get(st.step) or {}).get('kind')

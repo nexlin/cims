@@ -63,6 +63,19 @@ class Strictness(unittest.TestCase):
         doc.update(over)
         return doc
 
+    def test_group_call_broadcast_payload(self):
+        # 일제 통화(mcptt_broadcast_group_call.md §6) — 멤버 개시만, 그룹 밖 역할의 broadcast 개시는 컴파일 오류
+        base = {'id': 'T-BC', 'roles': {'t': {'pool': 'p'}, 'm': {'pool': 'p', 'multi': True}, 'g': {'pool': 'p', 'member': False}}}
+        ok = dict(base, flow=[{'step': 'group_call', 'from': 't', 'to': 'm', 'payload': 'broadcast'},
+                              {'step': 'check', 'who': ['g'], 'payload': 'conference_warning_105'},
+                              {'step': 'bye', 'from': 't'}])
+        _, errs = validate('scenario', ok)
+        self.assertEqual(errs, [])
+        bad = dict(base, flow=[{'step': 'group_call', 'from': 't', 'to': 'm'},
+                               {'step': 'group_call', 'from': 'g', 'payload': 'broadcast'}])
+        _, errs = validate('scenario', bad)
+        self.assertTrue(any('broadcast' in e for e in errs))
+
     def test_typo_key_rejected(self):
         _, errs = validate('scenario', self._scn(flows=[]))
         self.assertTrue(any('flows' in e for e in errs))
@@ -396,7 +409,7 @@ class TopologyV2(unittest.TestCase):
             self.assertTrue(any(word in e for e in validate('scenario', bad)[1]), (word, validate('scenario', bad)[1]))
         self.assertIn('check', STEP_VOCAB)
         self.assertIn('check_pct', RATIO_METRICS)
-        self.assertEqual(len(CHECK_KINDS), 4)
+        self.assertEqual(len(CHECK_KINDS), 5)
 
     def test_ptt_group_session_rules(self):
         """그룹 세션(group_call) 시나리오 규칙 — multi 역할 하나·같은 풀·group_call.from 단일/to multi·floor 는 group_call 뒤·1:1 단계 금지."""

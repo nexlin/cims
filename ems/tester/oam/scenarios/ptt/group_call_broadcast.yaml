@@ -1,0 +1,29 @@
+# PTT 일제 통화(broadcast group call) — 멤버가 편성 그룹을 <broadcast-ind>true 로 개시한다(TS 24.379 §4.12, mcptt_broadcast_group_call.md §6).
+#   BC1 개시 → 멤버 전원 합류 · 개시자 Granted
+#   BC2 비개시자 floor 요청 → Deny #5(Receive only, TS 24.380 §6.3.5.3.4)
+#   BC5 일제 통화 중 conference SUBSCRIBE → 480 + Warning 105(TS 24.379 §10.1.3.4.1) — 그룹 밖 역할이 새로 구독한다
+#   BC3 멤버가 나갔다가 <broadcast-ind> 를 실어 다시 들어와도 합류일 뿐 — 개시자는 그대로(그 멤버 Deny, 개시자 Granted)
+#   BC6(표식 없으면 일반 그룹 통화)은 PTT-GROUP-CALL-BASIC·PTT-FLOOR-HANDOVER 가 같은 그룹으로 본다. BC4(T4 해제)는 그룹 hang-timer 를 기다린다.
+id: PTT-GROUP-CALL-BROADCAST
+title: PTT 일제 통화 — 개시자 floor 독점·개시자 고정·구독 480
+tags: [ptt, floor, broadcast]
+roles:
+  talker:    { pool: ptt_ue }
+  second:    { pool: ptt_ue }
+  listeners: { pool: ptt_ue, multi: true }
+  monitor:   { pool: ptt_ue, member: false }
+flow:
+  - { step: register,      who: [talker, second, listeners, monitor], expect: { code: 200 } }
+  - { step: group_call,    from: talker, to: listeners, payload: broadcast, media: { audio: amr-wb }, expect: { code: 200, group_fanout_ms: { p95: 3000 } } }
+  - { step: floor_request, who: [talker], expect: { floor_grant_ms: { p95: 300 } } }
+  - { step: media_hold,    seconds: "${ht}", expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: floor_request, who: [second], payload: denied }
+  - { step: floor_release, who: [talker] }
+  - { step: subscribe,     who: [monitor], payload: conference, expect: { code: 480 } }
+  - { step: check,         who: [monitor], payload: conference_warning_105, expect: { check_pct: 100 } }
+  - { step: bye,           from: second }
+  - { step: group_call,    from: second, payload: broadcast, media: { audio: amr-wb }, expect: { code: 200 } }
+  - { step: floor_request, who: [second], payload: denied }
+  - { step: floor_request, who: [talker], expect: { floor_grant_ms: { p95: 300 } } }
+  - { step: floor_release, who: [talker] }
+  - { step: bye,           from: talker }

@@ -546,7 +546,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
   워커 지원 = `register/invite/progress/answer/reject/bye/hold/resume/dtmf/refer/media_hold/media_send/media_stop/wait/expect/deregister/group_call/floor_request/floor_release/
   pickup/subscribe/replaces/join/publish/sds_send/sds_recv/fd_send/fd_recv/check`. `subscribe` 의 `to` 는 역할 또는 대표번호 리터럴(`${pilot}` — 그룹원 BLF 감시), `payload: conference` 는 그룹 AoR(`group` 또는
   인스턴스 그룹 — TS 24.379 §10.1.3.4.1 인가 판정 200/403 Warning 138). **`check`**(who·payload·after_ms) = 관측 정합 판정 — `conference_roster_visible|hidden`(who 의 conference NOTIFY
-  로스터에 `to` 역할 신원이 있는가/없는가 = listen_visibility) · `conference_warning_138`(who 의 conference SUBSCRIBE 거절 Warning warn-code) · `dialog_consistent`(who 가 받은 dialog
+  로스터에 `to` 역할 신원이 있는가/없는가 = listen_visibility) · `conference_warning_138`·`conference_warning_105`(who 의 conference SUBSCRIBE 거절 Warning warn-code — 138 범위 밖 / 105 일제 통화 480) · `dialog_consistent`(who 가 받은 dialog
   NOTIFY 열 — entity 별 dialog 하나·local/remote/direction 불변·상태 전진·terminated 1회·version 단조, cims-verify F7 cspsim 판정과 같은 규칙). 카운터 `check_tx/ok/fail`, 비율 `check_pct`;
   틀리면 인스턴스 실패 + event(사유). 동봉 `VOLTE-FA-DIALOG-FORK`(F7)·`PTT-GROUP-LISTEN-ROSTER`(L1b/L5, `${roster}` 바인딩)·`PTT-GROUP-LISTEN-CONF-DENIED`(L2b/L3b). 실단말(`real-ue`) 역할은 그중 `REAL_UE_STEPS`(§3.3)만 행위자가 된다.
 - **실행 의미(워커)** — 흐름을 셋으로 나눈다. **prelude** = 앞쪽의 `register`(+`wait`) 단계: 역할 슬라이스의 단말 **전부**를 run 시작 때 한 번
@@ -574,7 +574,10 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
   `listen_ok`/`listen_tx`, floor 요청은 `payload: denied` 기대, talker 발언 동안 수신만) · payload 없이 `expect.code: 403` = TS 24.379 비멤버 일반 INVITE
   거절. 세션이 이미 선 뒤의 `group_call` 은 fan-out 을 다시 기다리지 않는다(`group_join`). 계획 드라이런 `group_session.first_group`(단발 첫 인스턴스가 잡는
   그룹 = usable 정렬 첫째)·`identities_by_role.<guest>`(그 그룹의 비멤버 후보, 배정 순) — 시나리오 `fixtures:` 의 role 이 `${group}` 으로 그 그룹을 대상으로 잡고 guest 첫 신원의 person 에 배정된다. 동봉 `ptt/group_listen`·
-  `group_listen_denied`·`group_nonmember_denied`(S3-SCN-PTT-LISTEN L1~L4).
+  `group_listen_denied`·`group_nonmember_denied`(S3-SCN-PTT-LISTEN L1~L4). **일제 통화** — `group_call payload: broadcast`(멤버 역할만) = 개시
+  INVITE 의 mcptt-info 에 `<broadcast-ind>true`([mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) — 개시자만 발언, 타 멤버 floor 는
+  `payload: denied` 기대). 진행 중 세션 뒤에 보내면 서버가 합류로 다룬다(개시자 불변). 실단말(`real-ue`) 개시자는 컴파일 오류(cimsue-cli 미지원 — U1).
+  동봉 `ptt/group_call_broadcast`(PTT-GROUP-CALL-BROADCAST — BC1·BC2·BC3 재합류·BC5 구독 480/105, S3-SCN-PTT-BROADCAST).
 - **역할의 풀** — `roles.X.pool` 은 토폴로지 풀 **이름 또는 `group`**(논리 풀 이름, §4). 워커마다 그 워커의 로컬 풀 하나로 해석된다
   (`tester_compile.resolve_roles`). 워커가 지원하지 않는 단계(`WORKER_STEPS` 밖)와 행위자 kind 게이트 위반(`STEP_VOCAB.kind` — progress/refer 는
   피어, PTT 단계는 UE)은 컴파일 오류다.

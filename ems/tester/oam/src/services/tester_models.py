@@ -790,8 +790,10 @@ _FD_FILE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._\-/]{0,127}$')
 # check.payload — 관측 정합 판정 종류(cspsim 검사의 계측기 이전 — S3-SCN-PTT-LISTEN L1b/L5 · S3-SCN-FA F7):
 #   conference_roster_visible|hidden = who 의 conference NOTIFY 로스터에 to 역할 신원이 있는가/없는가(listen_visibility)
 #   conference_warning_138 = who 의 conference SUBSCRIBE 거절 Warning warn-code 138(TS 24.379 §10.1.3.4.1 범위 밖)
+#   conference_warning_105 = 같은 거절의 warn-code 105(일제 통화로 개시된 호 — 480, TS 24.379 §10.1.3.4.1)
 #   dialog_consistent = who 가 받은 dialog NOTIFY 열(RFC 4235) 정합 — entity 별 dialog 하나·local/remote/direction 불변·상태 전진·terminated 1회·version 단조
-CHECK_KINDS = ('conference_roster_visible', 'conference_roster_hidden', 'conference_warning_138', 'dialog_consistent')
+CHECK_KINDS = ('conference_roster_visible', 'conference_roster_hidden', 'conference_warning_138', 'conference_warning_105',
+               'dialog_consistent')
 # 실단말(real-ue) 역할이 행위자(from/who)가 될 수 있는 단계 — cimsue-cli drive 명령이 있는 것만(§3.3). 나머지는 컴파일 오류.
 #   빠진 것: progress(피어) · refer(실스택이 REFER 최종 응답을 이벤트로 내지 않음) · replaces/join/subscribe(dialog 학습은 실스택 앱 몫) ·
 #   publish(affiliation 은 기동 절차가 한다) · media_send/media_stop(송출은 실스택 것) · sds_*
@@ -806,8 +808,9 @@ _BIND_REF = re.compile(r'^\$\{(\w+)\}$')
 
 # floor_request.payload — 기대 결과(TS 24.380 Granted / Deny / Queue Position Info). any = 결과가 나오기만 하면 된다
 FLOOR_OUTCOMES = ('granted', 'denied', 'queued', 'any')
-# group_call 의 payload — listen = a=recvonly 청취 합류(dispatch_center.md §5.6, 비멤버 관제사). 비면 일반 멤버 개시
-GROUP_CALL_MODES = ('listen',)
+# group_call 의 payload — listen = a=recvonly 청취 합류(dispatch_center.md §5.6, 비멤버 관제사) ·
+#   broadcast = 일제 통화 개시(mcptt-info <broadcast-ind>true — TS 24.379 §4.12, 개시자 외 floor Deny #5). 비면 일반 멤버 개시
+GROUP_CALL_MODES = ('listen', 'broadcast')
 # invite/pickup 의 to 가 역할이 아니라 다이얼 번호일 때(대표번호·피처코드 대상) — E.164/내선/피처코드 문자
 _DIAL_LITERAL = re.compile(r'^[0-9*#+]{1,32}$')
 
@@ -850,7 +853,7 @@ STEP_VOCAB = {
     'pickup':        {'group': 'xfer',  'actor': 'fromto',  'kind': 'ue',       'metrics': ['code', 'srd_ms'], 'desc': '당겨받기 — payload 피처코드를 다이얼(<code> 그룹 픽업 · to 가 있으면 <code><번호> 지정 픽업 — to 는 역할 또는 번호 리터럴(링잉 대표번호))'},
     'subscribe':     {'group': 'ctl',   'actor': 'who',     'kind': 'ue',       'metrics': ['code'], 'desc': 'SUBSCRIBE (RFC 6665) — payload 이벤트 패키지(기본 dialog), to = 감시 대상 역할(생략 = 자기 AoR). 최종 응답까지'},
     'publish':       {'group': 'ctl',   'actor': 'who',     'kind': 'ptt',      'metrics': ['code', 'affiliate_ms'], 'desc': 'PUBLISH — MCPTT affiliation 명령(TS 24.379 §9): payload affiliate|deaffiliate, group 생략 = 신원의 그룹'},
-    'group_call':    {'group': 'ptt',   'actor': 'fromto',  'kind': 'ptt',      'metrics': ['code', 'srd_ms', 'group_fanout_ms', 'video_pct', 'listen_pct'], 'desc': 'PTT 그룹콜 — from 이 자기 그룹으로 INVITE, to(multi 역할) 멤버 전원 합류까지. payload listen = 그룹 밖 역할(member: false)의 a=recvonly 청취 합류(진행 중 세션에)'},
+    'group_call':    {'group': 'ptt',   'actor': 'fromto',  'kind': 'ptt',      'metrics': ['code', 'srd_ms', 'group_fanout_ms', 'video_pct', 'listen_pct'], 'desc': 'PTT 그룹콜 — from 이 자기 그룹으로 INVITE, to(multi 역할) 멤버 전원 합류까지. payload listen = 그룹 밖 역할(member: false)의 a=recvonly 청취 합류(진행 중 세션에) · broadcast = 일제 통화 개시(<broadcast-ind> — 개시자만 발언, 진행 중 세션에 보내면 합류일 뿐)'},
     'floor_request': {'group': 'ptt',   'actor': 'who',     'kind': 'ptt',      'metrics': ['floor_grant_ms', 'floor_taken_ms', 'floor_queue_ms', 'floor_grant_pct'], 'desc': 'Floor Request → 결과(payload: granted|denied|queued|any)'},
     'floor_release': {'group': 'ptt',   'actor': 'who',     'kind': 'ptt',      'metrics': ['floor_idle_ms'], 'desc': 'Floor Release → Idle 도달'},
     'sds_send':      {'group': 'ptt',   'actor': 'fromto',  'kind': 'ue',       'metrics': ['code', 'sds_delay_ms', 'sds_disposition_pct', 'sds_media_pct'], 'desc': 'MCData SDS 송신(TS 24.282) — payload 본문, to 역할 = 1:1 · to 없음 = 그룹 SDS(인스턴스 그룹 또는 group, 수신자는 multi 역할), disposition = delivery 회신 요청. plane: control(기본) = SIP MESSAGE(완료 = 최종 응답) · media = MSRP media plane(INVITE m=message → cmdp, 완료 = MSRP SEND 200/REPORT — 대상 CSP 는 그룹 SDS 만)'},
@@ -858,7 +861,7 @@ STEP_VOCAB = {
     'fd_recv':       {'group': 'ptt',   'actor': 'who',     'kind': 'ue',       'metrics': ['fd_delay_ms', 'fd_download_ms', 'fd_download_pct'], 'desc': 'who 전원이 앞선 fd_send 의 FD SIGNALLING 을 받을 때까지(단계 진입 전 도착도 인정) → payload download(기본)이면 각자 FILEURL 을 내려받아 크기 대조(fd_download_pct) · signal = 도착만. fd_delay_ms = MESSAGE 송신 → 도착'},
     'sds_recv':      {'group': 'ptt',   'actor': 'who',     'kind': 'ue',       'metrics': ['sds_delay_ms', 'sds_media_pct'], 'desc': 'who 전원이 앞선 sds_send 의 SDS 를 받을 때까지(단계 진입 전 도착도 인정) — sds_delay_ms = 송신 → 도착. media plane 배포(풀 msrp)·FILEURL 폴백 둘 다 도착으로 센다'},
     'expect':        {'group': 'ctl',   'actor': 'none',    'kind': None,       'metrics': ['ser_pct', 'scr_pct', 'isa_pct'], 'desc': '누계 지표 게이트'},
-    'check':         {'group': 'ctl',   'actor': 'who',     'kind': 'ue',       'metrics': ['check_pct'], 'desc': '관측 정합 판정 — payload: conference_roster_visible|hidden(to = 로스터에서 찾을 역할) · conference_warning_138 · dialog_consistent(RFC 4235 NOTIFY 열). after_ms 뒤 판정, 틀리면 인스턴스 실패'},
+    'check':         {'group': 'ctl',   'actor': 'who',     'kind': 'ue',       'metrics': ['check_pct'], 'desc': '관측 정합 판정 — payload: conference_roster_visible|hidden(to = 로스터에서 찾을 역할) · conference_warning_138 · conference_warning_105(일제 통화 구독 480) · dialog_consistent(RFC 4235 NOTIFY 열). after_ms 뒤 판정, 틀리면 인스턴스 실패'},
 }
 for _k, _v in STEP_VOCAB.items():
     _v['real'] = _k in REAL_UE_STEPS   # 실단말(real-ue) 역할이 행위자가 될 수 있는가 — 편집기 행위자 칩 게이트
@@ -1098,7 +1101,8 @@ class Step(_Strict):
         if self.step == 'group_call' and not self.from_:
             raise ValueError('group_call 단계는 from(발신 멤버 역할)이 필요하다 — to 는 합류를 기다릴 multi 역할(선택)')
         if self.step == 'group_call' and self.payload is not None and self.payload not in GROUP_CALL_MODES:
-            raise ValueError(f'group_call 의 payload 는 {list(GROUP_CALL_MODES)} 중 하나(listen = recvonly 청취 합류) 또는 생략')
+            raise ValueError(f'group_call 의 payload 는 {list(GROUP_CALL_MODES)} 중 하나(listen = recvonly 청취 합류, '
+                             f'broadcast = 일제 통화 개시) 또는 생략')
         if self.step == 'invite' and not self.to:
             raise ValueError('invite 단계는 to(상대 역할 또는 다이얼 번호 리터럴)가 필요하다')
         if self.step == 'floor_request' and self.payload is not None and self.payload not in FLOOR_OUTCOMES:
@@ -1419,6 +1423,9 @@ class Scenario(_Strict):
                                      f'청취 합류는 비멤버 관제사의 recvonly INVITE (TS 24.379 비멤버 · dispatch_center.md §5.6)')
                 if s.payload == 'listen' and not in_session:
                     raise ValueError(f'flow[{i}] group_call payload listen 은 진행 중인 그룹 세션(앞선 group_call) 뒤에만 둔다')
+                if s.payload == 'broadcast' and s.from_ in guests:
+                    raise ValueError(f'flow[{i}] group_call payload broadcast 의 from={s.from_!r} 은 그룹 멤버 역할이어야 한다 — '
+                                     f'일제 통화는 멤버가 개시한다(TS 24.379 §4.12)')
                 if s.payload == 'listen' and s.to:
                     raise ValueError(f'flow[{i}] group_call payload listen 은 to 를 두지 않는다(합류 대기는 청취자 자기 200 만)')
                 first_call = False

@@ -443,7 +443,7 @@ private:
     void epSetVideo(Instance& in, Endpoint* from, bool want);   // invite/group_call 의 media.video — 오퍼 m=video 유무(워커 Media.VideoFile 전제)
     bool epMediaSend(Endpoint* ep, const CompiledStep& st);   // false = SDP 교환 전(RTP 미기동)
     bool epMediaStop(Endpoint* ep);
-    bool epGroupCall(Endpoint* from, const std::string& group, bool listen, const Json& media);   // MCPTT 그룹 INVITE(발신자) — false = 스택 거절
+    bool epGroupCall(Endpoint* from, const std::string& group, bool listen, bool broadcast, const Json& media);   // MCPTT 그룹 INVITE(발신자) — false = 스택 거절
     bool epFloorRequest(Endpoint* ep);
     void epFloorRelease(Endpoint* ep, bool held);
     bool epPickup(Endpoint* from, const std::string& code, const std::string& number);   // real-ue 픽업(피처코드 다이얼)
