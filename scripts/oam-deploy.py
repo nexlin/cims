@@ -146,8 +146,8 @@ def _latest_package(oam: Oam, module: str) -> dict:
 
 def cmd_upgrade(oam: Oam, args) -> int:
     """dep=pkg 쌍(또는 --latest 모듈명)을 순서대로: stop job → live down 대기 → POST /upgrade {package_id} → 버전 반영 대기 →
-    up 이 아니면 start job → up 대기. 콘솔이 하는 것과 같은 job 들이다. 같은 호스트에 dev OAM 이 있어 live_state 가 늘 up 인
-    base oam(dep29) 은 stop 이 409 로 막힌다 — 그 모듈은 콘솔·별도 절차."""
+    up 이 아니면 start job → up 대기. 콘솔이 하는 것과 같은 job 들이다. base oam 은 정지하면 API 가 사라지므로
+    자기 교체 경로(_self_upgrade_oam)로 간다."""
     plan = []
     rows = {int(r['id']): r for r in oam.deployments()}
     if args.latest:
@@ -172,6 +172,9 @@ def cmd_upgrade(oam: Oam, args) -> int:
         if str(cur.get('package_id')) == str(pid) and not args.force:
             print('  이미 그 패키지 — 건너뜀(--force 로 재적용)')
             continue
+        if _module_of(cur) == 'oam':
+            rc |= _self_upgrade_oam(oam, did, pid, args.timeout)
+            continue
         r = oam.call('POST', f'/deployments/{did}/job', {'job_type': 'stop'})
         print(f"  stop job {r.get('job_id')}")
         _wait(oam, did, lambda d: d.get('live_state') == 'down', args.timeout, 'down')
@@ -193,6 +196,32 @@ def cmd_upgrade(oam: Oam, args) -> int:
         rc = rc if ok else 1
         print(f"  → {'OK' if ok else 'FAIL'} ver={d.get('package_version')} status={d.get('status')} live={d.get('live_state')} path={d.get('install_path')}")
     return rc
+
+
+def _self_upgrade_oam(oam: Oam, did: int, pid: int, timeout: int) -> int:
+    """base oam = 이 API 를 서빙하는 관리평면 자신. 정지하면 업그레이드를 부를 API 가 사라지므로 `/upgrade`(정지 전제)를
+    쓰지 않고 자기 교체 경로를 탄다(docs/design/features/oam_self_upgrade.md §2): 패키지 전환(PUT) → upgrade job.
+    job 은 agent 가 실행한다 — 설치 뒤 pre-flight 를 거쳐 새 버전으로 재기동하고, health 가 안 서면 직전 버전으로
+    되돌린다(D3·D4). 그 사이 API 가 잠깐 끊기므로 대기는 오류를 삼킨다."""
+    oam.call('PUT', f'/deployments/{did}', {'package_id': pid})
+    r = oam.call('POST', f'/deployments/{did}/job', {'job_type': 'upgrade'})
+    print(f"  self-upgrade: package 전환 + upgrade job {r.get('job_id')} (agent 가 설치·재기동)")
+    end = time.time() + timeout
+    d = {}
+    while time.time() < end:
+        time.sleep(5)
+        try:
+            d = oam.deployment(did)
+        except Exception:
+            continue   # 재기동 중
+        if d.get('status') == 'failed':
+            break
+        if d.get('status') == 'running' and d.get('live_state') == 'up' and str(d.get('install_path', '')).endswith(
+                '/' + str(d.get('package_version'))):
+            break
+    ok = d.get('status') == 'running' and d.get('live_state') == 'up' and str(d.get('package_id')) == str(pid)
+    print(f"  → {'OK' if ok else 'FAIL'} ver={d.get('package_version')} status={d.get('status')} live={d.get('live_state')} path={d.get('install_path')}")
+    return 0 if ok else 1
 
 
 def _agent_id(oam: Oam, ref: str) -> int:

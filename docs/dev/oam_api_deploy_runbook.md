@@ -11,8 +11,11 @@ CLI 로 부르는 절차다. 개발 테스트베드(.48, 관리평면 OAM 4419, 
   저장소는 base oam 배포의 실효 `Packages.Dir`(사이트 디렉터리의 `packages/` — [site_directory_layout.md](../design/features/site_directory_layout.md))이고
   스크립트가 OAM 에서 읽는다(`packages --store`·`OAM_PACKAGE_STORE` 로 덮을 수 있다). .48([testbed_48_site_migration.md](testbed_48_site_migration.md))은
   `/mnt/cims/test48/packages`, 배포 id = oam 1 · oam-svc 2 · csc 3 · cmp 4 · cmdp 5 · csp 6 · tester 7 · worker 8.
-- 배포 모듈은 agent 가 감독한다. 같은 호스트에 dev OAM(4419)이 떠 있으면 **base oam 배포(dep29, 4445)는 `live_state` 가 늘 up** 이라
-  stop 이 409 로 막힌다(agent heartbeat 가 프로세스 이름으로 판정) — 그 모듈은 이 절차로 올리지 않는다.
+- 배포 모듈은 agent 가 감독한다. **base oam**(이 API 를 서빙하는 관리평면 자신)은 정지하면 업그레이드를 부를 API 가 사라지므로
+  `/upgrade`(정지 전제 409 `module_running`)를 쓰지 않는다 — 스크립트가 모듈 `oam` 을 보면 자기 교체 경로로 간다:
+  `PUT /deployments/{id} {package_id}` → `POST /deployments/{id}/job {job_type: upgrade}`. agent 가 설치 뒤 pre-flight 를 거쳐
+  새 버전으로 재기동하고 health 가 안 서면 직전 버전으로 되돌린다([oam_self_upgrade.md](../design/features/oam_self_upgrade.md) §2·D3·D4).
+  재기동 동안 API 가 수 초 끊긴다(개발 서버 .45·.48 에서만 — 운영은 계획 정지창).
 - `make dist` 뒤 `./cims.sh pkg <module…>` 로 tarball 을 만든다. pkg 는 patch 버전을 자동 bump 하고 source→dist 를 sync 한다
   (콘솔 번들이 바뀌었으면 `oam` 도 함께). 바이너리(csp/cmp/worker)는 `make` 가 최신이어야 한다 — pkg 는 mtime 만 경고한다.
 
