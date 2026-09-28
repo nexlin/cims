@@ -232,7 +232,11 @@ CSP fan-out (하이브리드):
 
 - 발신: `PttService.sendMessage(peer)` 가 msgId 를 발급해 `MessageStore`(OUT, PENDING) 에 먼저
   저장하고 `PttController.sendSds(peer, text, msgId)` 로 발신 — peer 가 프로비저닝 그룹이면
-  group-sds, 아니면 one-to-one-sds(항상 C-plane). 그룹 SDS 의 payload(UTF-8 텍스트 바이트, 서버
+  group-sds, 아니면 one-to-one-sds(항상 C-plane).
+  **SDK 경로도 같은 갈림**이다 — `libcimsue` 의 `Engine::sendGroupSds` / `Engine::sendSds`(1:1)로
+  나뉘고, 갈림 판정은 앱이 «받아 둔 편성 그룹 목록에 그 키가 있는가» 로 한다(번호 모양으로 추측하면
+  숫자 그룹 id 에서 틀린다). 관제 앱은 이 판정을 세션 한 곳에 둔다
+  (`DispatchSession.sendSdsTo`, [android_dispatch_tablet.md](android_dispatch_tablet.md) §6.9a). 그룹 SDS 의 payload(UTF-8 텍스트 바이트, 서버
   게이트와 동일 기준)가
   프로비저닝 임계 `mcdata.maxPayloadSdsCplaneBytes`(0=무제한)를 초과하면 C-plane MESSAGE
   대신 **MSRP 미디어평면 발신**(§4.7) — `SipController.makeMsrpInvite`(더미 m=audio +

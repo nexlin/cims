@@ -802,6 +802,17 @@ cimsue_status_t CIMSUE_CALL cimsue_engine_send_group_sds(cimsue_engine_t* e, int
     return CIMSUE_OK;
 }
 
+cimsue_status_t CIMSUE_CALL cimsue_engine_send_sds(cimsue_engine_t* e, int32_t account_id, const char* peer,
+                                                    const char* text, int32_t request_delivery, char* msg_id_out,
+                                                    int32_t msg_id_cap, int64_t* token_out) {
+    if (!e) { g_lastError = "no engine"; return -1; }
+    SdsSend r = e->eng.sendSds(account_id, S(peer), S(text), request_delivery != 0);
+    if (token_out) *token_out = r.token;
+    if (!r.ok) { g_lastError = r.reason.empty() ? "sendSds failed" : r.reason; return -1; }
+    copyOut(r.msgId, msg_id_out, msg_id_cap);
+    return CIMSUE_OK;
+}
+
 cimsue_status_t CIMSUE_CALL cimsue_engine_send_sds_notification(cimsue_engine_t* e, int32_t account_id,
                                                                 const char* peer, const char* conv_id,
                                                                 const char* msg_id, int32_t notif_type, int64_t* token_out) {

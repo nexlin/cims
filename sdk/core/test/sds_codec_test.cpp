@@ -70,6 +70,34 @@ TEST(SdsCodec, GroupSdsRoundTrip) {
     EXPECT_FALSE(mcdata::parse("text/plain", "hello", none));
 }
 
+TEST(SdsCodec, OneToOneConversationIdIsPairSorted) {
+    // 쌍을 정렬하므로 **양쪽 단말이 같은 값**을 만든다 — 그러지 않으면 같은 대화가 둘로 갈라진다.
+    EXPECT_EQ(mcdata::conversationIdOneToOne("1001", "1002"),
+              mcdata::conversationIdOneToOne("1002", "1001"));
+    EXPECT_NE(mcdata::conversationIdOneToOne("1001", "1002"),
+              mcdata::conversationIdOneToOne("1001", "1003"));
+    // 그룹 축과도 겹치지 않는다(접두어가 다르다).
+    EXPECT_NE(mcdata::conversationIdOneToOne("1001", "1002"), mcdata::conversationIdOf("1002"));
+    // cspsim `conversationIdOneToOne` · Kotlin `McDataCodec.conversationIdOf(a,b)` 와 **같은 값**이어야
+    //   상대 단말이 만든 대화와 하나가 된다. 세 구현이 같은 name-UUID 규칙을 쓰는지 값으로 못 박는다.
+    EXPECT_EQ(mcdata::conversationIdOneToOne("1001", "1002"), "0b03318bcafc3c6997000599d3549ecc");
+}
+
+TEST(SdsCodec, OneToOneSdsRoundTrip) {
+    std::string conv = mcdata::conversationIdOneToOne("1001", "1002"), msg = mcdata::newMessageId();
+    mcdata::Body b = mcdata::buildOneToOneSds("tel:1002", "안녕 1:1", conv, msg, true, 1700000000L);
+    SdsMessage out;
+    ASSERT_TRUE(mcdata::parse(b.contentType, b.body, out));
+    EXPECT_EQ(out.convId, conv);
+    EXPECT_EQ(out.msgId, msg);
+    EXPECT_EQ(out.text, "안녕 1:1");
+    EXPECT_FALSE(out.notification);
+    // 그룹과 갈리는 자리 — mcdata-info 의 request-type 과 request-uri(받는 사람).
+    EXPECT_NE(b.body.find("<request-type>one-to-one-sds</request-type>"), std::string::npos);
+    EXPECT_EQ(b.body.find("group-sds"), std::string::npos);
+    EXPECT_NE(b.body.find("<mcdataURI>tel:1002</mcdataURI>"), std::string::npos);
+}
+
 TEST(McpttXml, InfoBuildParseAndBareId) {
     std::string x = mcptt::mcpttInfo("prearranged", "tel:g001", "tel:+82500000001", "tel:g001", 1, 0);
     EXPECT_NE(x.find("<session-type>prearranged</session-type>"), std::string::npos);

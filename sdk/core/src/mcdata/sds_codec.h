@@ -26,13 +26,18 @@ constexpr const char* kCtPayload = "application/vnd.3gpp.mcdata-payload";
 
 /** 그룹 스레드 conversation ID — 그룹당 결정적 UUID(Java UUID.nameUUIDFromBytes("cims-mcdata:<groupId>") 호환). */
 std::string conversationIdOf(const std::string& groupId);
+/** 1:1 스레드 conversation ID — 사용자 쌍당 결정적("cims-mcdata:1to1:<a>:<b>", 쌍 정렬 — 양쪽 단말 동일). */
+std::string conversationIdOneToOne(const std::string& a, const std::string& b);
 /** 새 message ID — 랜덤 UUID hex32. */
 std::string newMessageId();
 
 struct Body { std::string contentType; std::string body; };
-/** 그룹 SDS 발신 본문. groupUri 예 "tel:g001". */
+/** 그룹 SDS 발신 본문(request-type group-sds). groupUri 예 "tel:g001". */
 Body buildGroupSds(const std::string& groupUri, const std::string& text, const std::string& convId,
                    const std::string& msgId, bool requestDelivery, int64_t timeSec);
+/** 1:1 SDS 발신 본문(request-type one-to-one-sds). peerUri 예 "tel:1002" — 받는 사람. */
+Body buildOneToOneSds(const std::string& peerUri, const std::string& text, const std::string& convId,
+                      const std::string& msgId, bool requestDelivery, int64_t timeSec);
 /** SDS NOTIFICATION(전달/읽음 통지) 본문 — 원 발신자 1:1 대상. */
 Body buildNotification(const std::string& convId, const std::string& msgId, int notifType, int64_t timeSec);
 

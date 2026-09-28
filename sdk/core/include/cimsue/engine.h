@@ -103,6 +103,12 @@ public:
      *  최종 응답은 onRequestResult(MESSAGE, token) 으로 오므로 앱은 이 token 으로 상관한다(disposition 통지 발신과 구분). */
     SdsSend sendGroupSds(int accountId, const std::string& groupId, const std::string& text,
                          bool requestDelivery = true);
+    /** 1:1 SDS 발신(MESSAGE multipart, request-type one-to-one-sds). peer 는 상대 bare 번호.
+     *  그룹과 다른 것은 셋 — request-type·request-uri(상대)·conversation ID(쌍 정렬). 서버는 등록
+     *  바인딩으로 본문 그대로 전달한다(그룹 게이트 없음, mcdata_messaging.md §4 표).
+     *  반환·상관 규약은 sendGroupSds 와 같다. */
+    SdsSend sendSds(int accountId, const std::string& peer, const std::string& text,
+                    bool requestDelivery = true);
     /** SDS disposition 통지(1:1 대상 peer bare 번호). notifType 1~4. 반환 SdsSend — msgId 는 입력이므로 비어 있고
      *  token 으로 최종 응답을 상관한다. */
     SdsSend sendSdsNotification(int accountId, const std::string& peer, const std::string& convId,

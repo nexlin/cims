@@ -410,6 +410,15 @@ class Account internal constructor(private val ue: CimsUe, val id: Int) {
     suspend fun sendGroupSds(groupId: String, text: String, requestDelivery: Boolean = true): CimsResult<SdsSend> =
         ue.command { SdsSend.of(ue.jni.sendGroupSds(id, groupId, text, requestDelivery)) }
 
+    /**
+     * 1:1 SDS 발신(request-type one-to-one-sds). peer 는 상대 bare 번호.
+     *
+     * 그룹 SDS 와 **갈라 두는 이유**: request-type·Request-URI·conversation ID 가 다르다. 1:1 을 그룹
+     * 경로로 보내면 서버가 그룹 게이트를 거쳐 받는 쪽 스레드 귀속도 틀어진다(mcdata_messaging.md §4).
+     */
+    suspend fun sendSds(peer: String, text: String, requestDelivery: Boolean = true): CimsResult<SdsSend> =
+        ue.command { SdsSend.of(ue.jni.sendSds(id, peer, text, requestDelivery)) }
+
     /** SDS disposition 통지(notifType 1~4). */
     suspend fun sendSdsNotification(peer: String, convId: String, msgId: String, notifType: Int): CimsResult<SdsSend> =
         ue.command { SdsSend.of(ue.jni.sendSdsNotification(id, peer, convId, msgId, notifType)) }

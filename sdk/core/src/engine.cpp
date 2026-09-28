@@ -1325,6 +1325,31 @@ SdsSend Engine::sendGroupSds(int accountId, const std::string& groupId, const st
     return out;
 }
 
+SdsSend Engine::sendSds(int accountId, const std::string& peer, const std::string& text, bool requestDelivery) {
+    SdsSend out;
+    if (!impl_->running) { out.code = -1; out.reason = "not running"; return out; }
+    if (text.empty())    { out.code = -2; out.reason = "empty text";  return out; }
+    std::string to = mcptt::bareId(peer);
+    if (to.empty())      { out.code = -2; out.reason = "empty peer";  return out; }
+    std::string msgId = mcdata::newMessageId();
+    int64_t token = impl_->nextToken++;
+    out.token = token;
+    bool ok = impl_->ctl.runSync([=]() -> bool {
+        Impl* o = impl_.get();
+        auto ic = o->accountCfgs.find(accountId);
+        if (ic == o->accountCfgs.end()) return false;
+        // conversation ID 는 **나와 상대의 쌍**으로 짓는다 — 상대가 답장할 때 같은 값이 나와야 한 대화다.
+        std::string me = mcptt::bareId(ic->second.effectiveMcpttId());
+        mcdata::Body b = mcdata::buildOneToOneSds("tel:" + to, text, mcdata::conversationIdOneToOne(me, to),
+                                                  msgId, requestDelivery, (int64_t)std::time(nullptr));
+        return o->doSendRequest(accountId, "MESSAGE", "sip:" + to + "@" + ic->second.domain, b.contentType, b.body, {}, token) >= 0;
+    });
+    if (!ok) { out.code = -3; out.reason = "send failed"; return out; }
+    out.ok = true;
+    out.msgId = msgId;
+    return out;
+}
+
 SdsSend Engine::sendSdsNotification(int accountId, const std::string& peer, const std::string& convId,
                                     const std::string& msgId, int notifType) {
     SdsSend out;

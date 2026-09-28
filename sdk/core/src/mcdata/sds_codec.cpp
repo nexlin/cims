@@ -72,6 +72,20 @@ std::string conversationIdOf(const std::string& groupId) {
     return hexEncode(std::string((const char*)md, 16));
 }
 
+std::string conversationIdOneToOne(const std::string& a, const std::string& b) {
+    // 쌍을 정렬해서 넣는다 — 그러지 않으면 보낸 쪽과 받은 쪽이 다른 conversation ID 를 만들어
+    //   같은 대화가 단말마다 둘로 갈라진다(mcdata_messaging.md §4).
+    const std::string& lo = a < b ? a : b;
+    const std::string& hi = a < b ? b : a;
+    std::string name = "cims-mcdata:1to1:" + lo + ":" + hi;
+    unsigned char md[EVP_MAX_MD_SIZE];
+    unsigned int len = 0;
+    EVP_Digest(name.data(), name.size(), md, &len, EVP_md5(), nullptr);
+    md[6] = (md[6] & 0x0f) | 0x30;
+    md[8] = (md[8] & 0x3f) | 0x80;
+    return hexEncode(std::string((const char*)md, 16));
+}
+
 std::string newMessageId() {
     static thread_local std::mt19937_64 rng{std::random_device{}()};
     unsigned char b[16];
@@ -113,12 +127,12 @@ std::string sdsPayloadTlv(const std::string& text) {
     return s;
 }
 
-static std::string infoXml(const std::string& groupUri) {
+static std::string infoXml(const std::string& requestType, const std::string& uri) {
     return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
            "<mcdatainfo xmlns=\"urn:3gpp:ns:mcdataInfo:1.0\">\n"
            "  <mcdata-Params>\n"
-           "    <request-type>group-sds</request-type>\n"
-           "    <mcdata-request-uri type=\"Normal\"><mcdataURI>" + groupUri + "</mcdataURI></mcdata-request-uri>\n"
+           "    <request-type>" + requestType + "</request-type>\n"
+           "    <mcdata-request-uri type=\"Normal\"><mcdataURI>" + uri + "</mcdataURI></mcdata-request-uri>\n"
            "  </mcdata-Params>\n"
            "</mcdatainfo>";
 }
@@ -133,15 +147,27 @@ static void appendPart(std::string& b, const std::string& boundary, const std::s
     b += "\r\n";
 }
 
-Body buildGroupSds(const std::string& groupUri, const std::string& text, const std::string& convId,
-                   const std::string& msgId, bool requestDelivery, int64_t timeSec) {
+// 그룹과 1:1 은 **mcdata-info 의 request-type·request-uri 만** 다르다(TS 24.282 Annex D) — 서명·payload
+//   파트는 같다. 그래서 한 함수로 짓고 둘은 그 앞에서 갈린다.
+static Body buildSds(const char* requestType, const std::string& uri, const std::string& text,
+                     const std::string& convId, const std::string& msgId, bool requestDelivery, int64_t timeSec) {
     std::string boundary = "mcdata-" + msgId.substr(0, 16);
     std::string body;
-    appendPart(body, boundary, kCtInfo, nullptr, infoXml(groupUri));
+    appendPart(body, boundary, kCtInfo, nullptr, infoXml(requestType, uri));
     appendPart(body, boundary, kCtSignalling, "base64", base64Encode(sdsSignallingTlv(convId, msgId, requestDelivery, timeSec)));
     appendPart(body, boundary, kCtPayload, "base64", base64Encode(sdsPayloadTlv(text)));
     body += "--" + boundary + "--\r\n";
     return Body{"multipart/mixed;boundary=" + boundary, body};
+}
+
+Body buildGroupSds(const std::string& groupUri, const std::string& text, const std::string& convId,
+                   const std::string& msgId, bool requestDelivery, int64_t timeSec) {
+    return buildSds("group-sds", groupUri, text, convId, msgId, requestDelivery, timeSec);
+}
+
+Body buildOneToOneSds(const std::string& peerUri, const std::string& text, const std::string& convId,
+                      const std::string& msgId, bool requestDelivery, int64_t timeSec) {
+    return buildSds("one-to-one-sds", peerUri, text, convId, msgId, requestDelivery, timeSec);
 }
 
 Body buildNotification(const std::string& convId, const std::string& msgId, int notifType, int64_t timeSec) {

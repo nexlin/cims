@@ -107,7 +107,9 @@ sdk/core/
                         floor_participant(§6.2.4 상태머신 + UDP 소켓 + Ack keepalive·Revoke Release 재전송·MSN 폐기·
                         요청 시한·Granted Duration 자체 종료·청취 전용) — 원천 android FloorClient.kt
     mcptt/              mcptt_xml — mcptt-info·resource-lists·affiliation-command 빌더, mcptt-info/conference-info 파서
-    mcdata/             sds_codec — TS 24.282 SDS SIGNALLING/DATA PAYLOAD/NOTIFICATION TLV + multipart(base64) 빌드·파싱,
+    mcdata/             sds_codec — TS 24.282 SDS SIGNALLING/DATA PAYLOAD/NOTIFICATION TLV + multipart(base64) 빌드·파싱
+                        (그룹/1:1 은 mcdata-info 의 request-type·request-uri 만 다르다 — `buildGroupSds`/`buildOneToOneSds`,
+                         conversation ID 는 그룹당(`conversationIdOf`)·쌍당(`conversationIdOneToOne`, 쌍 정렬)),
                         Java 호환 conversation id (확장: MSRP 미디어평면·FD 업/다운로드)
     csc/                csc_client — IdMS OAuth2 PKCE(S256) 로그인·refresh, `/provisioning/me`(services→AccountConfig,
                         dispatch 블록), GMS 그룹 목록, XCAP GET(ETag/304). 공개 헤더 `cimsue/csc.h` — Engine 과 독립, 동기 호출,
@@ -153,7 +155,7 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
 | `Call` | `dial(uri, {video, emergency})` · `answer({video})` · `reject()` · `hangup()` · `hold/resume` · `mute(on)` · `listen(on)` · `rxLevel(f)` · `sendDtmf` · **`join(targetDialog)`**(RFC 3911, `a=recvonly`) · **`pickup(number?)`**(피처코드·지정 픽업) · **`transfer(target, {attended})`**(REFER) · **`replace(dialog)`**(RFC 3891) | `CallState{outgoing, incoming(remote, calledParty, isPilot), active, held, disconnected(code)}` · `MediaSources[]{ssrc, label, active, level}` · `videoSources[]` | `onCallState` · `onMediaSource` · `onVideoFrame(source, frame)` · `onTransferProgress` |
 | `Group` (PTT) | `affiliate(on)` · `joinGroupCall({emergency, imminent})` · `leave()` · `startAdhoc(members)` · `startPrivate(peer, {duplex, emergency})` · **`listenGroupCall()`**(recvonly JOIN, §7) · `setPrimary` · `channelVolume(f)` · `emergency(on)` · `alert(on)` | `GroupCallState{idle, joining, active(listenOnly), ...}` · roster · affiliated | `onGroupCall` · `onRoster`(RFC 4575) · `onAlert` |
 | `Floor` (그룹콜당 1) | `request(prio)` · `release()` · `queueCancel()` · `mediaFlow(on)` | `FloorState{idle, requesting, granted(duration), taken(speaker, permissionToRequest), queued(pos), denied(cause), revoked}` · `speakers[]`(multi-talker) | `onFloor` |
-| `Sds` | `sendGroupText(group, text)` · `sendGroupFile(group, bytes, name, mime)` · `sendNotification(peer, conv, msg, type)` · `download(url)` | 발신 진행 | `onIncomingSds` · `onSendResult` · `onDisposition` |
+| `Sds` | `sendGroupText(group, text)` · **`sendText(peer, text)`**(1:1, `one-to-one-sds`) · `sendGroupFile(group, bytes, name, mime)` · `sendNotification(peer, conv, msg, type)` · `download(url)` | 발신 진행 | `onIncomingSds` · `onSendResult` · `onDisposition` |
 | `Subscriptions` | `dialogWatch(scope)`(RFC 4235 — 관제 범위) · `conference(group)` · `xcapDiff(psi)` · `presence(uri)` | 감시 dialog 목록 `{dialogId, parties, state, isPilotCall}` | `onDialogList` · `onXcapChanged` |
 
 규약:
