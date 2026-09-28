@@ -29,7 +29,9 @@ export interface Group {
   floor_policy?: 'single' | 'dual' | 'multi'   // single=한 명, dual=2명, multi=max_talkers 명
   max_talkers?: number                         // multi 일 때만 유효 (2~8, CMP 슬롯 상한)
   // 3GPP MCPTT
-  group_type?: 'prearranged' | 'chat' | 'broadcast'
+  group_type?: 'prearranged' | 'chat'          // on-network-invite-members (일제 통화는 그룹 종류가 아니라 호 속성)
+  hang_timer_sec?: number                      // on-network-hang-timer — 그룹 호 T4, 발언 없이 이 시간이 지나면 해제 (0=미사용)
+  max_duration_sec?: number                    // on-network-maximum-duration — 그룹 호 최대 시간 TNG3 (0=무제한)
   on_network?: boolean
   max_members?: number
   require_affiliation?: boolean

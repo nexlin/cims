@@ -28,6 +28,9 @@ type GroupExt = Group
 const ICON = 14
 /** CMP 화자 슬롯 상한(MCPTT_MAX_TALKER_SLOTS) — 초과 값은 CMP 가 BAD_REQUEST 로 거절한다. */
 const MAX_TALKERS_LIMIT = 8
+/** 그룹 호 타이머 상한 — CSC 관리 API 검증(TS 24.481 on-network-hang-timer / maximum-duration)과 같은 값. */
+const HANG_TIMER_MAX = 3600
+const MAX_DURATION_MAX = 86400
 
 function Caret({ open }: { open: boolean }) {
   return <span className="text-muted-foreground inline-flex">
@@ -205,8 +208,8 @@ function GroupDrawer(p: GroupDrawerProps) {
   const [tab, setTab] = useState<'config' | 'activity'>('config')
 
   const [form, setForm] = useState<Partial<GroupExt>>(() => existing
-    ? { name: existing.name, priority: existing.priority ?? 5, encryption: existing.encryption, emergency_call: existing.emergency_call, emergency_alert: existing.emergency_alert ?? true, allow_conference_state: existing.allow_conference_state ?? true, allow_sds: existing.allow_sds ?? true, allow_fd: existing.allow_fd ?? false, max_sds_size: existing.max_sds_size ?? 10000, max_auto_recv: existing.max_auto_recv ?? 1048576, video_enabled: existing.video_enabled, org_code: existing.org_code || '', authorized_user_id: existing.authorized_user_id ?? null, group_type: existing.group_type, floor_policy: existing.floor_policy || 'single', max_talkers: existing.max_talkers ?? 2 }
-    : { id: '', name: '', priority: 5, encryption: false, emergency_call: false, emergency_alert: true, allow_conference_state: true, allow_sds: true, allow_fd: false, max_sds_size: 10000, max_auto_recv: 1048576, video_enabled: false, org_code: '', group_type: 'prearranged', authorized_user_id: null, floor_policy: 'single', max_talkers: 2 })
+    ? { name: existing.name, priority: existing.priority ?? 5, encryption: existing.encryption, emergency_call: existing.emergency_call, emergency_alert: existing.emergency_alert ?? true, allow_conference_state: existing.allow_conference_state ?? true, allow_sds: existing.allow_sds ?? true, allow_fd: existing.allow_fd ?? false, max_sds_size: existing.max_sds_size ?? 10000, max_auto_recv: existing.max_auto_recv ?? 1048576, video_enabled: existing.video_enabled, org_code: existing.org_code || '', authorized_user_id: existing.authorized_user_id ?? null, group_type: existing.group_type, floor_policy: existing.floor_policy || 'single', max_talkers: existing.max_talkers ?? 2, hang_timer_sec: existing.hang_timer_sec ?? 30, max_duration_sec: existing.max_duration_sec ?? 3600 }
+    : { id: '', name: '', priority: 5, encryption: false, emergency_call: false, emergency_alert: true, allow_conference_state: true, allow_sds: true, allow_fd: false, max_sds_size: 10000, max_auto_recv: 1048576, video_enabled: false, org_code: '', group_type: 'prearranged', authorized_user_id: null, floor_policy: 'single', max_talkers: 2, hang_timer_sec: 30, max_duration_sec: 3600 })
   // 소유자 표시명 (피커 선택 결과 보존)
   const [ownerName, setOwnerName] = useState<string>(existing?.authorized_user_name || '')
 
@@ -218,9 +221,8 @@ function GroupDrawer(p: GroupDrawerProps) {
   useEffect(() => { reloadMembers() }, [reloadMembers])
 
   const groupTypeHint: Record<string, string> = {
-    prearranged: '미리 구성된 그룹콜 (키업 시 on-demand 개설)',
+    prearranged: '미리 구성된 그룹콜 (키업 시 on-demand 개설). 일제 통화(개시자만 발언)는 단말이 이 그룹에서 개시한다',
     chat: '상시 유지 채팅형 그룹',
-    broadcast: '개시자만 발언, 나머지는 수신 전용',
   }
   // 정책은 "동시 인원수" 가 아니라 "자리를 여는 조건" 이 다르다 — 인원만 적으면
   //   듀얼과 멀티(2명)가 같아 보인다. 의미 중심으로 설명한다.
@@ -314,7 +316,6 @@ function GroupDrawer(p: GroupDrawerProps) {
               <SelectContent>
                 <SelectItem value="prearranged">prearranged</SelectItem>
                 <SelectItem value="chat">chat</SelectItem>
-                <SelectItem value="broadcast">broadcast</SelectItem>
               </SelectContent>
             </Select>
           </Field>
@@ -342,6 +343,18 @@ function GroupDrawer(p: GroupDrawerProps) {
                 onChange={e => setForm({ ...form, max_talkers: Number(e.target.value) })} />
             </Field>
           )}
+          <Field label="유지 시간(T4, 초)" w={110}>
+            <Input  type="number" min={0} max={HANG_TIMER_MAX}
+              title="on-network-hang-timer — 발언 없이 이 시간이 지나면 그룹 호를 해제한다 (0=미사용, 편성 그룹만). 일제 통화에 쓰는 그룹은 짧게 준다"
+              value={form.hang_timer_sec ?? 30}
+              onChange={e => setForm({ ...form, hang_timer_sec: Number(e.target.value) })} />
+          </Field>
+          <Field label="최대 통화 시간(초)" w={120}>
+            <Input  type="number" min={0} max={MAX_DURATION_MAX}
+              title="on-network-maximum-duration — 그룹 호 최대 시간 (0=무제한, 편성 그룹만)"
+              value={form.max_duration_sec ?? 3600}
+              onChange={e => setForm({ ...form, max_duration_sec: Number(e.target.value) })} />
+          </Field>
           {allowOwner && <Field label="소유자 (가입자 검색)" w={230}>
             {form.authorized_user_id != null
               ? <div className="flex items-center gap-1.5">
@@ -384,6 +397,7 @@ function GroupDrawer(p: GroupDrawerProps) {
           <span className="text-sm text-muted-foreground">ID {existing.id}</span>
           <span className="text-sm text-muted-foreground">타입 {existing.group_type || 'prearranged'}</span>
           <span className="text-sm text-muted-foreground">우선순위 {existing.priority ?? 5}</span>
+          <span className="text-sm text-muted-foreground">유지 시간 {existing.hang_timer_sec ?? 30}초</span>
           <span className="text-sm text-muted-foreground">동시발언 {(existing.floor_policy || 'single') === 'single' ? '단일(한 명씩)'
             : (existing.floor_policy === 'dual' ? '듀얼(긴급 끼어들기)' : `멀티(${existing.max_talkers ?? 2}명 동시)`)}</span>
           <span className="text-sm text-muted-foreground">소유자 {existing.authorized_user_name || existing.authorized_user || '—'}</span>

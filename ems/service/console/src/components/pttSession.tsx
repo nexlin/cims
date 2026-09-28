@@ -96,8 +96,8 @@ export function getEventDisplay(type: string) {
  return EVENT_ICONS[type] || { icon: Dot, label: type, color: 'var(--muted-foreground)' }
 }
 
-// floor.jsonl op → 표시 스타일 (TS 24.380). CMP 가 기록하는 8종 전부를 다룬다 —
-// GRANT/RELEASE/IDLE/REVOKE/REVOKE_END/QUEUE/QUEUE_CANCEL/DENY.
+// floor.jsonl op → 표시 스타일 (TS 24.380). CMP 가 기록하는 9종 전부를 다룬다 —
+// GRANT/RELEASE/IDLE/REVOKE/REVOKE_END/QUEUE/QUEUE_CANCEL/DENY/INACTIVITY.
 export const FLOOR_OPS: Record<string, { label: string; color: string }> = {
   GRANT:        { label: '발언권 부여', color: 'var(--cims-success)' },
   RELEASE:      { label: '발언 종료', color: 'var(--muted-foreground)' },
@@ -107,13 +107,14 @@ export const FLOOR_OPS: Record<string, { label: string; color: string }> = {
   QUEUE:        { label: '대기열 등록', color: 'var(--cims-info)' },
   QUEUE_CANCEL: { label: '대기 취소', color: 'var(--muted-foreground)' },
   DENY:         { label: '거절', color: 'var(--destructive)' },
+  INACTIVITY:   { label: '무활동 만료(T4)', color: 'var(--cims-warning)' },
 }
 
 // DENY reason(CMP) → 한국어. 규격상 거절 사유가 이력에서 읽혀야 한다.
 export const DENY_REASON: Record<string, string> = {
  recv_only: '수신전용(ambient)',
  only_one:  '참가자 1인',
- broadcast: 'broadcast 비개시자',
+ broadcast: '일제 통화 비개시자',
 }
 
 // 발언자 색 팔레트 (히트맵 막대/타임바/발언자 헤더 공통)

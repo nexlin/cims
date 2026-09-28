@@ -122,10 +122,10 @@ export interface PttFlowResponse {
   messages?: FlowMessage[]
 }
 
-// CMP 가 floor.jsonl 에 기록하는 op 8종 (TS 24.380)
+// CMP 가 floor.jsonl 에 기록하는 op 9종 (TS 24.380) — INACTIVITY = T4 만료(세션 해제 계기)
 export type PttFloorOp =
   | 'GRANT' | 'RELEASE' | 'IDLE' | 'REVOKE' | 'REVOKE_END'
-  | 'QUEUE' | 'QUEUE_CANCEL' | 'DENY'
+  | 'QUEUE' | 'QUEUE_CANCEL' | 'DENY' | 'INACTIVITY'
 
 export interface PttFloorEvent {
   ts: string
