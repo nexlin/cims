@@ -11,7 +11,7 @@ export interface Subscription {
   id: string          // MSISDN of this line
   auth_id?: string    // legacy — P8 에서 제거됨(백엔드 미반환). imsi 로 대체.
   passwd?: string
-  dnd: boolean
+  icb_all?: boolean                  // 착신 차단 — 전체(TS 24.611 ICB, 모든 착신 603). 전화 회선만 — ptt 회선 응답에는 없다
   forward_id: string                 // 착신전환 CFU 대상(TS 24.604 — 서버측 전환, volte_supplementary_services.md §6A)
   // 조건부 전환(§6A.4, migrate_subscription_cdiv.sql — 미적용 DB 는 응답에 없다): 통화중 / 무응답(시한 초, 0 = 서버 기본) / 미등록 / 도달불가
   forward_busy_id?: string
@@ -67,7 +67,7 @@ export interface UserSummary {
   org_id: string
   email?: string
   details?: string | null
-  reject_id: string[]
+  icb_identities: string[]           // 착신 차단 — 지정 번호(ICB cp:identity) — 그 사람의 모든 전화 회선에 적용
   call_subscriptions: Subscription[]   // VoLTE(이동) 회선 — volte_subscriptions
   voip_subscriptions: Subscription[]   // 유선 VoIP 회선 — voip_subscriptions (구 서버 응답에는 없다 → 소비자는 `|| []`)
   ptt_subscriptions: Subscription[]
@@ -79,7 +79,7 @@ export interface UserSummary {
 export type UserDetail = UserSummary
 
 export type UserInput = {
-  name: string; org_id: string; title?: string; email?: string; details?: string; reject_id?: string[]
+  name: string; org_id: string; title?: string; email?: string; details?: string; icb_identities?: string[]
   login_id?: string; passwd?: string   // 단말 IdMS 로그인 자격 (passwd 는 변경 시에만 전송)
 }
 

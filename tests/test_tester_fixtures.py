@@ -128,8 +128,14 @@ class FakeCscOam:
                 if str(u['id']) == p[1]:
                     for sub in u.get(f'{p[2]}_subscriptions') or []:
                         if sub['id'] == p[3]:
-                            sub['service_ref'] = body.get('service_ref')
+                            sub.update(body)
                             return 200, {'id': p[3]}
+            return 404, {'error': 'not found'}
+        if len(p) == 2 and p[0] == 'users' and method == 'PUT':   # 사람 단위(착신 차단 지정 번호)
+            for u in self.users:
+                if str(u['id']) == p[1]:
+                    u.update(body)
+                    return 200, {'id': p[1]}
             return 404, {'error': 'not found'}
         if p and p[0] == 'phone-groups':
             if len(p) == 1 and method == 'POST':
@@ -353,6 +359,24 @@ class Applier(unittest.TestCase):
             self.assertEqual(oam.users[0]['call_subscriptions'][0]['service_ref'], 'volte')
             # 대상에 DB 직접 쓰기·CSP 통지 경로가 없다 — 전부 관리 API
             self.assertTrue(all(p.startswith('/api/v1/') for _m, p, _b in oam.log))
+        finally:
+            oam.srv.shutdown()
+
+    def test_subscriber_icb_apply_revert(self):
+        # 착신 차단(TS 24.611 ICB — volte_supplementary_services.md §6B): icb_all 은 회선 PUT, icb_identities 는 사람 PUT — 복원은 종전 값
+        oam = FakeCscOam()
+        oam.users[1]['icb_identities'] = ['+820000000001']
+        try:
+            client = T.OamClient(oam.url, 'tok')
+            resolved = [{'key': 'icb', 'kind': 'subscriber', 'service_ref': None, 'fields': {'icb_all': True},
+                         'icb_identities': ['+821300000003'], 'lines': [{'role': 'callee', 'user': '+821300000001'}]}]
+            ap = F.FixtureApplier(client, resolved, csp_dep_id=9)
+            ap.apply()
+            self.assertIs(oam.users[1]['call_subscriptions'][0]['icb_all'], True)
+            self.assertEqual(oam.users[1]['icb_identities'], ['+821300000003'])
+            self.assertEqual(ap.revert(), [])
+            self.assertIs(oam.users[1]['call_subscriptions'][0]['icb_all'], False)
+            self.assertEqual(oam.users[1]['icb_identities'], ['+820000000001'])
         finally:
             oam.srv.shutdown()
 

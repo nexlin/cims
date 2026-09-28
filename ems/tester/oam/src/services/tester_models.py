@@ -1215,8 +1215,9 @@ class FixtureRole(_Strict):
 
 class FixtureSubscriber(_Strict):
     """가입 회선 속성 — 역할 신원의 회선 service_ref(가입 서비스 소속)·ringback_media(개인 링백 음원, announcements.md §6.3)·
-    forward_to(착신전환 대상 — 역할 이름, TS 24.604 CFU, volte_supplementary_services.md §6A)를 바꾼다
-    (CSC PUT /users/{person}/{kind}/{msisdn}). run 뒤 종전 값으로. 셋 중 하나는 있어야 한다."""
+    forward_to(착신전환 대상 — 역할 이름, TS 24.604 CFU, volte_supplementary_services.md §6A)·착신 차단(TS 24.611 ICB §6B —
+    icb_all 회선 전체 / icb_identities 사람 단위 지정 번호)을 바꾼다 (CSC PUT /users/{person}/{kind}/{msisdn} · 지정 번호는
+    PUT /users/{person}). run 뒤 종전 값으로. 하나는 있어야 한다."""
     kind: Literal['subscriber']
     roles: List[str] = Field(min_length=1)
     service_ref: Optional[str] = Field(default=None, min_length=1, description='접속서비스 이름 — access_service 픽스처 키 또는 대상에 이미 있는 서비스명')
@@ -1229,12 +1230,18 @@ class FixtureSubscriber(_Strict):
     no_reply_sec: Optional[int] = Field(default=None, ge=1, le=120, description='CFNR 무응답 시한(초, forward_no_reply_sec) — 없으면 대상 CSP 의 Setup.Sip.Cdiv.NoReplySec')
     forward_not_logged_in_to: Optional[str] = Field(default=None, min_length=1, description='CFNL — 이 회선이 미등록이면 그 역할로 전환(forward_not_logged_in_id)')
     forward_not_reachable_to: Optional[str] = Field(default=None, min_length=1, description='CFNRc — 이 회선이 도달 불가(Q.850 20 · 링잉 없이 480/408)면 그 역할로 전환(forward_not_reachable_id)')
+    icb_all: Optional[bool] = Field(default=None, description='착신 차단 — 전체(TS 24.611 ICB): 이 회선으로 오는 모든 착신 603(착신전환보다 우선). 전화 회선만')
+    icb_identities: Optional[List[str]] = Field(default=None, min_length=1,
+                                                description='착신 차단 — 지정 번호(ICB cp:identity): 이 역할들의 첫 신원 번호에서 오는 착신만 603. 사람 단위(그 사람의 모든 전화 회선)')
 
     @model_validator(mode='after')
     def _any(self):
         targets = [self.forward_to, self.forward_busy_to, self.forward_no_reply_to, self.forward_not_logged_in_to, self.forward_not_reachable_to]
-        if self.service_ref is None and self.ringback_media is None and all(t is None for t in targets) and self.no_reply_sec is None:
-            raise ValueError('subscriber 픽스처는 service_ref·ringback_media·forward_*_to 중 하나는 있어야 한다')
+        if (self.service_ref is None and self.ringback_media is None and all(t is None for t in targets) and self.no_reply_sec is None
+                and self.icb_all is None and self.icb_identities is None):
+            raise ValueError('subscriber 픽스처는 service_ref·ringback_media·forward_*_to·icb_all·icb_identities 중 하나는 있어야 한다')
+        if self.icb_identities and any(r in self.roles for r in self.icb_identities):
+            raise ValueError('subscriber 픽스처 icb_identities 는 roles 자신이 아니어야 한다(자기 차단)')
         for t in targets:
             if t is not None and t in self.roles:
                 raise ValueError('subscriber 픽스처 forward_*_to 는 roles 자신이 아니어야 한다(자기 전환)')

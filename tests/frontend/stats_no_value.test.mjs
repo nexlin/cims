@@ -219,7 +219,7 @@ chk('사유 모름 칸에 상세가 없다', !(vrow.details ?? {}).r_unknown)
 
 const vd = vrow.details ?? {}
 chk('거절 툴팁 = 603 2건 · 404 1건 · 403 1건',
-    /603 거절\(DND·착신거부\) 2건/.test(vd.r_rejected ?? '')
+    /603 거절\(착신 차단\) 2건/.test(vd.r_rejected ?? '')
     && /404 없는 번호 1건/.test(vd.r_rejected ?? '')
     && /403 금지 1건/.test(vd.r_rejected ?? ''), vd.r_rejected)
 chk('오류 툴팁에 503 만 온다(486·480 은 다른 열)',

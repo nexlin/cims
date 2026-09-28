@@ -55,7 +55,7 @@ struct CspUserProfile {
  */
 class CspUser {
 public:
-    CspUser() : m_bDnd( false ) {
+    CspUser() : m_bIcbAll( false ) {
         m_iCreateTime = 0;
         m_iUpdateTime = 0;
         m_iRegisterTime = 0;
@@ -105,11 +105,10 @@ public:
     std::string m_strServiceRef;  // access_services.name 참조
     std::string m_strImsi;
 
-    // 착신거부 ( Do Not Disturb )
-    bool m_bDnd;
-
-    // 개별 착신 거부
-    std::vector<std::string> m_vecReject;
+    // 착신 차단 (ICB — TS 24.611, volte_supplementary_services.md §6B) — 규칙 둘.
+    //   전체 = 회선 icb_all(모든 착신) / 지정 번호 = 사람 icb_identities(cp:identity — 그 사람의 모든 전화 회선)
+    bool m_bIcbAll;
+    std::vector<std::string> m_vecIcbIdentities;
 
     // 착신전환 (TS 24.604 CDIV — volte_supplementary_services.md §6A) — CFU / CFB / CFNR(+시한) / CFNL. 값 =
     // 번호(다이얼 플랜 번역 전)
@@ -148,18 +147,22 @@ public:
     // 마지막 Logout 시간
     time_t m_iLogoutTime;
 
-    bool isDnd() {
-        return m_bDnd;
-    };
+    /** 착신 차단 판정 — 걸린 규칙 이름("all"|"identity"), 차단 아니면 nullptr (TS 24.611 §4.5.2.6.1 — 603). */
+    const char *IncomingBarredBy( const std::string &strFromId ) const {
+        if ( m_bIcbAll ) return "all";
+        if ( std::find( m_vecIcbIdentities.begin(), m_vecIcbIdentities.end(), strFromId ) != m_vecIcbIdentities.end() )
+            return "identity";
+        return nullptr;
+    }
+    bool IsIncomingBarred( const std::string &strFromId ) const {
+        return IncomingBarredBy( strFromId ) != nullptr;
+    }
     bool isCallForward() {
         return m_strForward.empty() == false;
     };
     bool hasConditionalForward() const {
         return !m_strForwardBusy.empty() || !m_strForwardNoReply.empty() || !m_strForwardNotLoggedIn.empty() ||
                !m_strForwardNotReachable.empty();
-    }
-    bool isReject( std::string strFromId ) {
-        return std::find( m_vecReject.begin(), m_vecReject.end(), strFromId ) != m_vecReject.end();
     }
 
     // bool Parse( const char *pszFileName );

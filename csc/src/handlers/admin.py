@@ -57,13 +57,54 @@ def _get_db(config: dict):
     )
 
 
-def _coerce_dnd(val) -> int:
-    """dnd 값을 0/1 로 정규화. bool/int/문자열 모두 처리.
+def _coerce_bool(val) -> int:
+    """불리언 설정값(icb_all 등)을 0/1 로 정규화. bool/int/문자열 모두 처리.
 
     ⚠ `1 if val else 0` 는 문자열 "false"/"0" 도 truthy 라 1 이 되는 버그가 있어
     (배치 import 경로와 동일하게) 명시적 참값 집합으로 판정한다.
     """
     return 1 if str(val).strip().upper() in ('Y', 'YES', '1', 'TRUE', 'ON') else 0
+
+
+# ── 착신 차단 (ICB, TS 24.611 — volte_supplementary_services.md §6B) ─────────────────────────────
+#   규칙 둘 = 전체(회선 icb_all) / 지정 번호(사람 icb_identities, cp:identity). MMTel ICB 는 MCPTT 대상이 아니다 — ptt 회선에는 없다.
+#   전환기(한 릴리스): 요청의 구 키 dnd·reject_id 도 받아 새 키로 옮기고 WARN, 응답은 새 키만.
+_ICB_LEGACY_KEYS = {'dnd': 'icb_all', 'reject_id': 'icb_identities'}
+
+
+def _icb_legacy_keys(body, where: str):
+    """요청 body 의 구 키(dnd·reject_id)를 새 키로 옮긴다(새 키가 이미 있으면 새 키 우선). body 를 바꿔 돌려준다."""
+    if not isinstance(body, dict):
+        return body
+    for old, new in _ICB_LEGACY_KEYS.items():
+        if old in body:
+            val = body.pop(old)
+            body.setdefault(new, val)
+            _logger.log_warning(f"[ADMIN] {where}: 구 키 '{old}' → '{new}' (착신 차단 TS 24.611 — 전환기, 다음 릴리스에서 거절)")
+    return body
+
+
+def _icb_select_extra(table: str) -> str:
+    """가입 행 SELECT 의 착신 차단 열 — 전화 가족(volte·voip) 테이블만."""
+    return ", icb_all" if table != _subs.table('ptt') else ""
+
+
+def _write_icb_identities(cur, person_id, identities) -> None:
+    cur.execute("DELETE FROM icb_identities WHERE user_id=%s", (person_id,))
+    for ident in identities or []:
+        ident = str(ident).strip()
+        if ident:
+            cur.execute("INSERT IGNORE INTO icb_identities (user_id, `identity`) VALUES (%s, %s)", (person_id, ident))
+
+
+def _person_phone_lines(cur, person_id) -> list:
+    """그 사람의 전화 회선 번호(volte·voip) — 사람 단위 설정(착신 차단 지정 번호)이 바뀌면 CSP 캐시를 이 회선들로 갱신한다."""
+    out = []
+    for kind in _subs.PHONE_KINDS:
+        if _subs.has_table(cur, kind):
+            cur.execute(f"SELECT id FROM {_subs.table(kind)} WHERE user_id=%s", (person_id,))
+            out.extend(r['id'] for r in cur.fetchall())
+    return out
 
 
 def _path_parts(full_path: str, base: str):
@@ -178,8 +219,9 @@ def _has_email_column(cur) -> bool:
 
 
 def _fill_sub_row(s: dict) -> dict:
-    """가입 행 응답 정규화 — dnd bool·시각 ISO8601."""
-    s['dnd'] = bool(s['dnd'])
+    """가입 행 응답 정규화 — icb_all bool(전화 회선만)·시각 ISO8601."""
+    if 'icb_all' in s:
+        s['icb_all'] = bool(s['icb_all'])
     s['register_time'] = _dt(s['register_time'])
     s['logout_time'] = _dt(s['logout_time'])
     return s
@@ -205,11 +247,11 @@ async def _list_users(config):
             if not rows:
                 return HandlerResult(status=200, body={'users': []})
 
-            # 1 query for all rejects (user_id grouping)
-            cur.execute("SELECT user_id, reject_id FROM user_rejects")
-            rejects_by_user: dict = {}
+            # 착신 차단 지정 번호 — 사람별 1 query (user_id grouping)
+            cur.execute("SELECT user_id, `identity` FROM icb_identities")
+            icb_by_user: dict = {}
             for r in cur.fetchall():
-                rejects_by_user.setdefault(r['user_id'], []).append(r['reject_id'])
+                icb_by_user.setdefault(r['user_id'], []).append(r['identity'])
 
             # 가입 테이블마다 1 query (volte·voip·ptt — services.subscriptions 레지스트리, 부재 테이블은 건너뛴다)
             aka_cols = _aka_select_extra(cur)
@@ -217,7 +259,7 @@ async def _list_users(config):
             subs_by_kind: dict = {}          # kind → {user_id: [행]}
             for kind, table in _subs.tables(cur):
                 cur.execute(
-                    "SELECT id, user_id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
+                    f"SELECT id, user_id, service_ref, imsi, sip_transport{_icb_select_extra(table)}, forward_id, register_time, logout_time "
                     f"{aka_cols}{pickup_cols}{_ringback_select_extra(cur, table)}{_cdiv_select_extra(cur, table)} FROM {table} ORDER BY user_id, id"
                 )
                 by_user = subs_by_kind.setdefault(kind, {})
@@ -233,7 +275,7 @@ async def _list_users(config):
                     row['title'] = ''
                 row['create_time'] = _dt(row['create_time'])
                 row['update_time'] = _dt(row['update_time'])
-                row['reject_id'] = rejects_by_user.get(row['id'], [])
+                row['icb_identities'] = icb_by_user.get(row['id'], [])
                 for kind in _subs.KINDS:
                     row[_subs.RESPONSE_KEYS[kind]] = subs_by_kind.get(kind, {}).get(row['id'], [])
     return HandlerResult(status=200, body={'users': rows})
@@ -261,12 +303,9 @@ async def _get_user(person_id: str, config):
             row['create_time'] = _dt(row['create_time'])
             row['update_time'] = _dt(row['update_time'])
 
-            # reject list
-            cur.execute(
-                "SELECT reject_id FROM user_rejects WHERE user_id=%s",
-                (person_id,)
-            )
-            row['reject_id'] = [r['reject_id'] for r in cur.fetchall()]
+            # 착신 차단 — 지정 번호 (사람 단위)
+            cur.execute("SELECT `identity` FROM icb_identities WHERE user_id=%s", (person_id,))
+            row['icb_identities'] = [r['identity'] for r in cur.fetchall()]
 
             # 가입 행 — kind 마다(volte·voip 전화 회선 + ptt). 부재 테이블(voip 미마이그레이션)은 빈 배열.
             aka_cols = _aka_select_extra(cur)
@@ -274,7 +313,7 @@ async def _get_user(person_id: str, config):
 
             def _load_subs(table):
                 cur.execute(
-                    "SELECT id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
+                    f"SELECT id, service_ref, imsi, sip_transport{_icb_select_extra(table)}, forward_id, register_time, logout_time "
                     f"{aka_cols}{pickup_cols}{_ringback_select_extra(cur, table)}{_cdiv_select_extra(cur, table)} FROM {table} WHERE user_id=%s ORDER BY id",
                     (person_id,)
                 )
@@ -332,7 +371,8 @@ async def _create_user(body, config, payload=None):
     details    = body.get('details') or None
     login_id   = (body.get('login_id') or '').strip() or None
     passwd     = body.get('passwd') or None
-    reject_ids = body.get('reject_id', [])
+    _icb_legacy_keys(body, 'create user')
+    icb_ids    = body.get('icb_identities', [])
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
@@ -351,12 +391,8 @@ async def _create_user(body, config, payload=None):
             )
             person_id = cur.lastrowid
 
-            if reject_ids:
-                for rid in reject_ids:
-                    cur.execute(
-                        "INSERT IGNORE INTO user_rejects (user_id, reject_id) VALUES (%s, %s)",
-                        (person_id, rid)
-                    )
+            if icb_ids:
+                _write_icb_identities(cur, person_id, icb_ids)
     refresh_login_accounts()  # IdMS 로그인 캐시 — login_id/passwd·MCPTT ID 파생 변경 즉시 반영
     return HandlerResult(status=201, body={'id': person_id})
 
@@ -365,8 +401,10 @@ async def _update_user(person_id: str, body, config, payload=None):
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
 
+    _icb_legacy_keys(body, f'update user {person_id}')
     fields = []
     values = []
+    icb_lines = []   # 착신 차단 지정 번호가 바뀌면 CSP 캐시를 갱신할 그 사람의 전화 회선
     # login_id/passwd = 단말(IdMS) 로그인 자격(가입자). 콘솔 admin 계정(OAM)과는 별개.
     for col in ('name', 'login_id', 'passwd', 'email', 'org_id', 'title', 'details'):
         if col in body:
@@ -384,27 +422,22 @@ async def _update_user(person_id: str, body, config, payload=None):
                 )
                 if cur.rowcount == 0:
                     return HandlerResult(status=404, body={'error': 'User not found'})
-                if 'reject_id' in body:
-                    cur.execute("DELETE FROM user_rejects WHERE user_id=%s", (person_id,))
-                    for rid in body['reject_id']:
-                        cur.execute(
-                            "INSERT IGNORE INTO user_rejects (user_id, reject_id) VALUES (%s, %s)",
-                            (person_id, rid)
-                        )
-    elif 'reject_id' in body:
+                if 'icb_identities' in body:
+                    _write_icb_identities(cur, person_id, body['icb_identities'])
+                    icb_lines = _person_phone_lines(cur, person_id)
+    elif 'icb_identities' in body:
         with _get_db(config) as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT id FROM users WHERE id=%s", (person_id,))
                 if cur.fetchone() is None:
                     return HandlerResult(status=404, body={'error': 'User not found'})
-                cur.execute("DELETE FROM user_rejects WHERE user_id=%s", (person_id,))
-                for rid in body['reject_id']:
-                    cur.execute(
-                        "INSERT IGNORE INTO user_rejects (user_id, reject_id) VALUES (%s, %s)",
-                        (person_id, rid)
-                    )
+                _write_icb_identities(cur, person_id, body['icb_identities'])
+                icb_lines = _person_phone_lines(cur, person_id)
     else:
         return HandlerResult(status=400, body={'error': 'No updatable fields provided'})
+    # 지정 번호 차단은 CSP 가입자 캐시에 실려 판정된다 — 그 사람의 전화 회선을 다시 읽게 한다
+    for sid in icb_lines:
+        notify_csp("USER_CHANGED", f"tel:{sid}", "PUT")
 
     refresh_login_accounts()  # IdMS 로그인 캐시 — login_id/passwd·MCPTT ID 파생 변경 즉시 반영
     return HandlerResult(status=200, body={'id': person_id})
@@ -420,7 +453,7 @@ async def _delete_user(person_id: str, config):
                 sub_ids.extend(r['id'] for r in cur.fetchall())
             for _kind, table in _subs.tables(cur):
                 cur.execute(f"DELETE FROM {table} WHERE user_id=%s", (person_id,))
-            cur.execute("DELETE FROM user_rejects WHERE user_id=%s", (person_id,))
+            cur.execute("DELETE FROM icb_identities WHERE user_id=%s", (person_id,))
             cur.execute("DELETE FROM users WHERE id=%s", (person_id,))
             if cur.rowcount == 0:
                 return HandlerResult(status=404, body={'error': 'User not found'})
@@ -483,16 +516,14 @@ async def _list_subscriptions(person_id: str, svc: str, config):
             if cur.fetchone() is None:
                 return HandlerResult(status=404, body={'error': 'User not found'})
             cur.execute(
-                f"SELECT id, service_ref, imsi, sip_transport, dnd, forward_id, "
+                f"SELECT id, service_ref, imsi, sip_transport{_icb_select_extra(table)}, forward_id, "
                 f"       register_time, logout_time {_aka_select_extra(cur)}{_pickup_select_extra(cur)}{_ringback_select_extra(cur, table)}{_cdiv_select_extra(cur, table)} "
                 f"FROM {table} WHERE user_id=%s ORDER BY id",
                 (person_id,)
             )
             subs = cur.fetchall()
             for s in subs:
-                s['dnd'] = bool(s['dnd'])
-                s['register_time'] = _dt(s['register_time'])
-                s['logout_time']   = _dt(s['logout_time'])
+                _fill_sub_row(s)
     return HandlerResult(status=200, body={'subscriptions': subs})
 
 
@@ -772,7 +803,7 @@ def _parse_sip_transport(body):
 def _audit_sub(config, payload, ip: str, svc: str, msisdn: str, action: str, after=None):
     """회선(가입) 변경 감사 — E-AUD-006 config_change.
 
-    `dnd`·`forward_id` 는 부가서비스(착신전환·DND) 설정이다. 같은 값을 관제 앱 경로
+    `icb_all`·`forward_id` 는 부가서비스(착신 차단·착신전환) 설정이다. 같은 값을 관제 앱 경로
     (dispatch.py `_audit`)는 이미 감사로 남기는데 콘솔 경로만 안 남겨, **어느 문으로
     바꿨느냐에 따라 추적 가능 여부가 갈렸다.** 두 문을 같은 코드로 통일한다
     (alarm_catalog.md §5 — 부가서비스 설정 변경 정의 E-AUD-008 은 이 코드로 수렴).
@@ -793,7 +824,7 @@ def _sub_audit_after(body) -> dict:
     조건부 착신전환(CFB/CFNR/CFNL/CFNRc, TS 24.604)도 무조건 전환과 같은 사실을 가리키므로
     함께 싣는다 — 하나라도 빠지면 "누가 언제 전환을 걸었나" 에 구멍이 생긴다."""
     out = {}
-    for k in ('dnd', 'forward_id', 'forward_busy_id', 'forward_no_reply_id',
+    for k in ('icb_all', 'forward_id', 'forward_busy_id', 'forward_no_reply_id',
               'forward_no_reply_sec', 'forward_not_logged_in_id', 'forward_not_reachable_id', 'ringback_media',
               'service_ref', 'sip_transport'):
         if isinstance(body, dict) and k in body:
@@ -804,6 +835,7 @@ def _sub_audit_after(body) -> dict:
 async def _add_subscription(person_id: str, svc: str, body, config, payload=None, ip: str = ''):
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
+    _icb_legacy_keys(body, f'create subscription {svc}')
     msisdn = body.get('id', '').strip()
     if not msisdn:
         return HandlerResult(status=400, body={'error': 'id (MSISDN) is required'})
@@ -823,13 +855,16 @@ async def _add_subscription(person_id: str, svc: str, body, config, payload=None
         sip_transport = _parse_sip_transport(body)
     except ValueError:
         return HandlerResult(status=400, body={'error': 'sip_transport must be one of UDP/TCP/TLS/ANY'})
-    dnd        = _coerce_dnd(body.get('dnd', False))
+    icb_all    = _coerce_bool(body.get('icb_all', False))
     try:
         forward_id = _parse_forward_id(body)
     except ValueError:
         return HandlerResult(status=400, body={'error': 'forward_id must be a number (digits, optional leading +)'})
     table      = _sub_table(svc)
     kind       = _service_kind(svc)
+    if kind == 'ptt' and 'icb_all' in body:
+        return HandlerResult(status=400, body={'error': 'icb_all not applicable to ptt',
+                                               'detail': '착신 차단(TS 24.611 MMTel ICB)은 전화 회선(volte·voip) 설정이다'})
     try:
         auth_scheme = _parse_auth_scheme(body)
     except ValueError:
@@ -901,11 +936,12 @@ async def _add_subscription(person_id: str, svc: str, body, config, payload=None
                     pickup_col, pickup_vals = ', pickup_group', [dg]
             if not _has_ha1_column(cur):
                 return HandlerResult(status=503, body=_HA1_SCHEMA_ERROR)
+            icb_cols, icb_vals = ('', []) if kind == 'ptt' else (', icb_all', [icb_all])
             cur.execute(
-                f"INSERT INTO {table} (id, user_id, service_ref, imsi, ha1, sip_transport, dnd, forward_id"
+                f"INSERT INTO {table} (id, user_id, service_ref, imsi, ha1, sip_transport{icb_cols}, forward_id"
                 f"{pickup_col}{extra_cols}{aka_cols}) "
-                f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s{',%s' * len(pickup_vals)}{',%s' * len(extra_vals)}{aka_ph})",
-                (msisdn, person_id, service_ref, imsi, ha1, sip_transport, dnd, forward_id, *pickup_vals, *extra_vals, *aka[1])
+                f"VALUES (%s,%s,%s,%s,%s,%s{',%s' * len(icb_vals)},%s{',%s' * len(pickup_vals)}{',%s' * len(extra_vals)}{aka_ph})",
+                (msisdn, person_id, service_ref, imsi, ha1, sip_transport, *icb_vals, forward_id, *pickup_vals, *extra_vals, *aka[1])
             )
     notify_csp("USER_CHANGED", f"tel:{msisdn}", "POST")
     refresh_login_accounts()  # IdMS 로그인 캐시 — login_id/passwd·MCPTT ID 파생 변경 즉시 반영
@@ -917,8 +953,9 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
 
+    _icb_legacy_keys(body, f'update subscription {svc}:{msisdn}')
     passwd     = body.get('passwd') or ''
-    # 부분 업데이트 — dnd/forward_id 도 키가 있을 때만 바꾼다(종전엔 항상 써서 ringback_media 만 보낸 PUT 이 착신전환·DND 를 지웠다)
+    # 부분 업데이트 — icb_all/forward_id 도 키가 있을 때만 바꾼다(ringback_media 만 보낸 PUT 이 착신전환·착신 차단을 지우지 않게)
     try:
         forward_id = _parse_forward_id(body) if 'forward_id' in body else None
     except ValueError:
@@ -953,8 +990,11 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
             new_imsi = cur_row['imsi']
             new_ref  = cur_row['service_ref']
             fields, values = [], []
-            if 'dnd' in body:
-                fields.append("dnd=%s"); values.append(_coerce_dnd(body.get('dnd')))
+            if 'icb_all' in body:
+                if kind == 'ptt':
+                    return HandlerResult(status=400, body={'error': 'icb_all not applicable to ptt',
+                                                           'detail': '착신 차단(TS 24.611 MMTel ICB)은 전화 회선(volte·voip) 설정이다'})
+                fields.append("icb_all=%s"); values.append(_coerce_bool(body.get('icb_all')))
             if forward_id is not None:
                 fields.append("forward_id=%s"); values.append(forward_id)
             if 'service_ref' in body:
@@ -1865,7 +1905,7 @@ _USER_FIELDS = [
     {'name': 'org_id', 'type': 'string', 'desc': '소속 조직 코드'},
     {'name': 'email', 'type': 'string', 'desc': '이메일 (스키마에 컬럼이 없으면 생략됨)'},
     {'name': 'details', 'type': 'string', 'desc': '비고'},
-    {'name': 'reject_id[]', 'type': 'string', 'desc': '착신 거부 번호 목록'},
+    {'name': 'icb_identities[]', 'type': 'string', 'desc': '착신 차단 — 지정 번호 (TS 24.611 ICB cp:identity, 그 사람의 모든 전화 회선)'},
     {'name': 'call_subscriptions[]', 'type': 'object', 'desc': '이동 VoLTE 번호 목록 (아래 가입 필드)'},
     {'name': 'voip_subscriptions[]', 'type': 'object', 'desc': '유선 VoIP 번호 목록 (아래 가입 필드 — voip 테이블 미마이그레이션 DB 는 빈 배열)'},
     {'name': 'ptt_subscriptions[]', 'type': 'object', 'desc': 'PTT 번호 목록 (아래 가입 필드)'},
@@ -1878,7 +1918,7 @@ _USER_FIELDS = [
     {'name': '*_subscriptions[].aka_provisioned', 'type': 'boolean',
      'desc': 'AKA K/OPc 보관 여부 (값 자체는 어떤 API 로도 나가지 않는다)'},
     {'name': '*_subscriptions[].service_ref', 'type': 'string', 'desc': '소속 서비스명 (도메인 결정)'},
-    {'name': '*_subscriptions[].dnd', 'type': 'boolean', 'desc': '방해금지'},
+    {'name': '*_subscriptions[].icb_all', 'type': 'boolean', 'desc': '착신 차단 — 전체 (전화 회선만, 모든 착신 603)'},
     {'name': '*_subscriptions[].forward_id', 'type': 'string', 'desc': '착신전환 대상'},
     {'name': '*_subscriptions[].pickup_group', 'type': 'string',
      'desc': '당겨받기 그룹 = 전화 그룹 id(멤버십에서 파생, 직접 편집 409). 빈 값=어떤 픽업·BLF 축에도 속하지 않음. 마이그레이션 전 DB 는 생략'},
@@ -1890,15 +1930,15 @@ _USER_FIELDS = [
 
 _USER_EXAMPLE = {
     'id': 11, 'name': '홍길동', 'title': '팀장', 'login_id': 'test001', 'org_id': 'D110',
-    'email': 'gildong@example.com', 'details': '', 'reject_id': [],
+    'email': 'gildong@example.com', 'details': '', 'icb_identities': [],
     'call_subscriptions': [{'id': '01000000001', 'imsi': '450050000000001',
-                            'service_ref': 'volte', 'sip_transport': None, 'dnd': False, 'forward_id': '',
+                            'service_ref': 'volte', 'sip_transport': None, 'icb_all': False, 'forward_id': '',
                             'register_time': '2026-07-30T08:40:11', 'logout_time': None}],
     'voip_subscriptions': [{'id': '+82210001001', 'imsi': '82210001001',
-                            'service_ref': 'voip', 'sip_transport': 'TLS', 'dnd': False, 'forward_id': '',
+                            'service_ref': 'voip', 'sip_transport': 'TLS', 'icb_all': False, 'forward_id': '',
                             'pickup_group': 'pg-7f3a91c2', 'register_time': '2026-07-30T08:40:11', 'logout_time': None}],
     'ptt_subscriptions': [{'id': '01000000001', 'imsi': '450050000000001',
-                           'service_ref': 'mcptt', 'sip_transport': 'TLS', 'dnd': False, 'forward_id': '',
+                           'service_ref': 'mcptt', 'sip_transport': 'TLS', 'forward_id': '',
                            'register_time': '2026-07-30T08:40:12', 'logout_time': None}],
     'create_time': '2026-05-02T10:00:00', 'update_time': '2026-07-29T17:20:00',
 }
@@ -1995,7 +2035,7 @@ CIMS_ADMIN_API_DOCS = [
     {'id': 'csc.users.create', 'module': 'csc', 'method': 'POST', 'path': '/api/v1/users',
      'summary': '가입자 생성 (번호는 별도 API 로 추가)',
      'params': [{'name': 'body', 'in': 'body', 'type': 'object', 'required': True,
-                 'desc': '{name(필수), org_id, title?, email?, details?, login_id?, passwd?, reject_id?[]}'}],
+                 'desc': '{name(필수), org_id, title?, email?, details?, login_id?, passwd?, icb_identities?[]}'}],
      'response': '{id}',
      'response_fields': [{'name': 'id', 'type': 'integer', 'desc': '생성된 가입자 id'}],
      'example': {'id': 12},
@@ -2066,13 +2106,13 @@ CIMS_ADMIN_API_DOCS = [
          {'name': 'subscriptions[].service_ref', 'type': 'string', 'desc': '소속 서비스명'},
          {'name': 'subscriptions[].sip_transport', 'type': 'string',
           'desc': '채널 정책 — TLS=서버 집행(비-TLS 채널 요청 403) / UDP·TCP=프로비저닝 힌트 / null=단말 선택'},
-         {'name': 'subscriptions[].dnd', 'type': 'boolean', 'desc': '방해금지'},
+         {'name': 'subscriptions[].icb_all', 'type': 'boolean', 'desc': '착신 차단 — 전체 (전화 회선만)'},
          {'name': 'subscriptions[].forward_id', 'type': 'string', 'desc': '착신전환 대상'},
          {'name': 'subscriptions[].register_time', 'type': 'string', 'desc': '최근 등록 시각'},
          {'name': 'subscriptions[].logout_time', 'type': 'string', 'desc': '최근 로그아웃 시각'},
      ],
      'example': {'subscriptions': [{'id': '01000000001', 'imsi': '450050000000001',
-                                    'service_ref': 'volte', 'sip_transport': None, 'dnd': False, 'forward_id': '',
+                                    'service_ref': 'volte', 'sip_transport': None, 'icb_all': False, 'forward_id': '',
                                     'register_time': '2026-07-30T08:40:11', 'logout_time': None}]},
      'errors': _ERR_COMMON + [{'status': 404, 'when': '없는 가입자', 'body': {'error': 'User not found'}}],
      'notes': ['**경로가 `/subscriptions` 가 아니라 `/call` · `/ptt` 다.**',
@@ -2088,7 +2128,7 @@ CIMS_ADMIN_API_DOCS = [
           'enum': ['call', 'voip', 'ptt'], 'desc': '가입 종류 — call = 이동 VoLTE, voip = 유선 VoIP, ptt = MCPTT'},
          {'name': 'body', 'in': 'body', 'type': 'object', 'required': True,
           'desc': '{id(MSISDN, 필수), imsi(필수), service_ref?, passwd?, sip_transport?(UDP|TCP|TLS), '
-                  'auth_scheme?(digest|aka), k?(hex32), opc?(hex32)|op?(hex32), amf?(hex4), dnd?, forward_id?, '
+                  'auth_scheme?(digest|aka), k?(hex32), opc?(hex32)|op?(hex32), amf?(hex4), icb_all?, forward_id?, '
                   'pickup_group?}'},
      ],
      'response': '{id}',
@@ -2140,7 +2180,7 @@ CIMS_ADMIN_API_DOCS = [
          {'status': 400, 'when': 'sip_transport 값 오류', 'body': {'error': 'sip_transport must be one of UDP/TCP/TLS/ANY'}},
          {'status': 404, 'when': '없는 가입자/번호'},
      ],
-     'notes': ['dnd 는 "Y"/"1"/"true"/"on" 같은 문자열도 참으로 해석된다 ("false"/"0" 은 거짓).',
+     'notes': ['icb_all 은 "Y"/"1"/"true"/"on" 같은 문자열도 참으로 해석된다 ("false"/"0" 은 거짓). ptt 회선에는 없다(400). 구 키 dnd 는 전환기 동안 받는다.',
                'passwd 는 변경할 때만 전송한다 — 미전송/빈값이면 기존 ha1 이 유지된다.',
                'H(A1) 은 (imsi, 서비스 domain/realm) 에 결박된다. imsi 나 service_ref 를 바꾸는 요청은 passwd 를 함께 보내야 한다.',
                'sip_transport 는 키가 있을 때만 반영 — null/빈값이면 정책 해제(단말 선택).',

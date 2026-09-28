@@ -255,6 +255,27 @@ class WriteGateTests(unittest.TestCase):
         r = self._add(cur, "call", {"id": "+82210001000", "imsi": "4500", "passwd": "x", "service_ref": "volte"}, cfg)
         self.assertEqual((r.status, r.body["where"]), (409, "phone_groups"))
 
+    def test_icb_all_phone_only_and_legacy_dnd(self):
+        # 착신 차단(TS 24.611 ICB — volte_supplementary_services.md §6B): 전화 회선은 icb_all 열, 구 키 dnd 는 전환기에 icb_all 로
+        cfg = self._cfg(mirror=self.MIRROR)
+        cur = _Cur()
+        r = self._add(cur, "voip", {"id": "+82210001009", "imsi": "82210001009", "passwd": "x", "service_ref": "voip",
+                                    "dnd": "true"}, cfg)
+        self.assertEqual(r.status, 201)
+        ins = [(q, prm) for q, prm in cur.executed if q.startswith("INSERT INTO voip_subscriptions")][0]
+        self.assertIn("icb_all", ins[0])
+        self.assertNotIn("dnd", ins[0])
+        self.assertEqual(ins[1][6], 1)                                              # icb_all 값 = 구 키 dnd "true"
+        # ptt 회선 — MMTel ICB 대상 아님: 열을 쓰지 않고, icb_all 을 주면 400
+        cur = _Cur()
+        r = self._add(cur, "ptt", {"id": "+821310001002", "imsi": "4500", "passwd": "x", "service_ref": "mcptt"}, cfg)
+        self.assertEqual(r.status, 201)
+        ins = [q for q, _ in cur.executed if q.startswith("INSERT INTO ptt_subscriptions")][0]
+        self.assertNotIn("icb_all", ins)
+        r = self._add(_Cur(), "ptt", {"id": "+821310001003", "imsi": "4500", "passwd": "x", "service_ref": "mcptt",
+                                      "icb_all": True}, cfg)
+        self.assertEqual((r.status, r.body["error"]), (400, "icb_all not applicable to ptt"))
+
     def test_voip_table_missing_is_503(self):
         cfg = self._cfg(mirror=self.MIRROR)
         cur = _Cur(voip_table=False)

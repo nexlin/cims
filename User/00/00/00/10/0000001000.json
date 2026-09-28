@@ -2,8 +2,8 @@
     "id": "1000",
     "password": "123",
     "organization": "1",
-    "dnd": false,
-    "reject": [],
+    "icb_all": false,
+    "icb_identities": [],
     "forward": "",
     "create_time": "2023-01-01 10:00:00",
     "update_time": "2023-01-01 10:00:00"

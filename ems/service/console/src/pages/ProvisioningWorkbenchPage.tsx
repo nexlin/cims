@@ -52,19 +52,19 @@ interface LineSpec {
   authSchemes: AuthScheme[]         // 고를 수 있는 인증 체계 — 하나뿐이면 선택 UI 를 숨기고 그 값으로 보낸다
   defaultTransport: SipTransport | ''   // 새 회선 기본 채널 정책 ('' = ANY 단말 선택)
   fixedTransport: boolean           // 채널 정책을 고정 표시(유선 = TLS 규약)
-  showDnd: boolean                  // DND·착신전환·링백은 전화 회선만
+  showIcb: boolean                  // 착신 차단·착신전환·링백은 전화 회선만
   showExtension: boolean            // 내선 라벨(끝 자리, 표시 전용 — 망 주소는 E.164)
   addHint: string                   // 회선 추가 폼 아래 안내
 }
 const LINE: Record<LineSvc, LineSpec> = {
   call: { label: 'VoLTE', short: 'VoLTE', badge: 'brandSoft', subsOf: u => u.call_subscriptions || [], defaultRef: 'volte', numLabel: 'MSISDN',
-          msisdnPlaceholder: '+8210…', imsiAuto: false, authSchemes: ['digest', 'aka'], defaultTransport: '', fixedTransport: false, showDnd: true, showExtension: false,
+          msisdnPlaceholder: '+8210…', imsiAuto: false, authSchemes: ['digest', 'aka'], defaultTransport: '', fixedTransport: false, showIcb: true, showExtension: false,
           addHint: 'USIM 가입자 — IMSI 가 Digest username 의 user 파트. AKA 를 고르면 K/OPc 를 함께 입력하고 채널은 TLS 로 강제된다.' },
   voip: { label: 'VoIP', short: 'VoIP', badge: 'infoSoft', subsOf: u => u.voip_subscriptions || [], defaultRef: 'voip', numLabel: '번호',
-          msisdnPlaceholder: '+8221…', imsiAuto: true, authSchemes: ['digest'], defaultTransport: 'TLS', fixedTransport: true, showDnd: true, showExtension: true,
+          msisdnPlaceholder: '+8221…', imsiAuto: true, authSchemes: ['digest'], defaultTransport: 'TLS', fixedTransport: true, showIcb: true, showExtension: true,
           addHint: 'USIM 없는 유선 가입자 — IMSI 는 비우면 번호 숫자열, Digest+TLS 규약. 픽업 그룹은 전화 그룹 멤버십에서 파생되므로 여기서 묻지 않는다.' },
   ptt:  { label: 'McPTT', short: 'PTT', badge: 'successSoft', subsOf: u => u.ptt_subscriptions || [], defaultRef: 'mcptt', numLabel: 'MCPTT ID',
-          msisdnPlaceholder: '+825…', imsiAuto: false, authSchemes: ['digest', 'aka'], defaultTransport: 'TLS', fixedTransport: false, showDnd: false, showExtension: false,
+          msisdnPlaceholder: '+825…', imsiAuto: false, authSchemes: ['digest', 'aka'], defaultTransport: 'TLS', fixedTransport: false, showIcb: false, showExtension: false,
           addHint: '만든 뒤 카드의 [편집]에서 소속 그룹 확인 · 긴급(SOS) 설정. 기본값 = 긴급 그룹콜·경보 허용, 대상은 단말이 선택한 그룹.' },
 }
 const LINE_SVCS: LineSvc[] = ['call', 'voip', 'ptt']
@@ -260,7 +260,7 @@ export default function ProvisioningWorkbenchPage() {
     { key: 'svc', header: '부가서비스', width: 190, render: u => {
       const phones = [...LINE.call.subsOf(u), ...LINE.voip.subsOf(u)]
       const p: string[] = []
-      if (phones.some(s => s.dnd)) p.push('DND')
+      if (phones.some(s => s.icb_all)) p.push('착신 차단')
       if (phones.some(hasForward)) p.push('착신전환')
       if (phones.some(s => s.ringback_media)) p.push('링백')
       return <span className="text-sm text-muted-foreground">{p.length ? p.join(' · ') : '—'}</span>
@@ -276,7 +276,7 @@ export default function ProvisioningWorkbenchPage() {
   const numCol: Column<NumberRow> = { key: 'msisdn', header: kind === 'all' ? '번호' : LINE[kind].numLabel, sortable: true, width: 160, render: r => <strong className="font-mono">{r.msisdn}</strong> }
   const userCol: Column<NumberRow> = { key: 'user', header: '가입자', sortable: true, width: 130, sortValue: r => r.user.name, render: r => r.user.name }
   const regCol: Column<NumberRow> = { key: 'reg', header: '등록', width: 80, sortValue: r => isRegistered(r.sub) ? 1 : 0, render: r => <StatusDot tone={isRegistered(r.sub) ? 'success' : 'neutral'} label={isRegistered(r.sub) ? '등록' : '미등록'} /> }
-  const dndCol: Column<NumberRow> = { key: 'dnd', header: 'DND', width: 64, align: 'center', render: r => r.sub.dnd ? <Badge variant="dangerSoft">ON</Badge> : <span className="text-sm text-muted-foreground">—</span> }
+  const icbCol: Column<NumberRow> = { key: 'icb', header: '착신 차단', width: 80, align: 'center', render: r => r.sub.icb_all ? <Badge variant="dangerSoft">ON</Badge> : <span className="text-sm text-muted-foreground">—</span> }
   const fwdCol: Column<NumberRow> = { key: 'fwd', header: '착신전환', render: r => <span className="text-sm text-muted-foreground">{forwardSummary(r.sub) || '—'}</span> }
   const rbCol: Column<NumberRow> = { key: 'rb', header: '링백', width: 150, render: r => <span className="font-mono text-xs text-muted-foreground">{r.sub.ringback_media || '—'}</span> }
   const transportCol: Column<NumberRow> = { key: 'tr', header: '채널', width: 96, render: r => <TransportBadge v={r.sub.sip_transport} aka={r.sub.auth_scheme === 'aka'} /> }
@@ -288,21 +288,21 @@ export default function ProvisioningWorkbenchPage() {
       { key: 'ch', header: '채널 · 인증', width: 130, render: r => <span className="text-sm text-muted-foreground">{r.sub.sip_transport || 'ANY'} · {r.sub.auth_scheme === 'aka' ? 'AKA' : 'Digest'}</span> },
       { key: 'sum', header: '요약', render: r => <span className="text-sm text-muted-foreground">{r.svc === 'ptt'
         ? `그룹 ${pttGroupsOf(pttGroups, r.msisdn).map(g => g.name || g.id).join(', ') || '—'}`
-        : [r.sub.dnd ? 'DND' : '', forwardSummary(r.sub), r.sub.ringback_media ? `링백 ${r.sub.ringback_media}` : ''].filter(Boolean).join(' · ') || '—'}</span> },
+        : [r.sub.icb_all ? '착신 차단' : '', forwardSummary(r.sub), r.sub.ringback_media ? `링백 ${r.sub.ringback_media}` : ''].filter(Boolean).join(' · ') || '—'}</span> },
       regCol,
     ],
     call: [
       numCol, userCol,
       { key: 'imsi', header: 'IMSI', width: 150, render: r => <span className="font-mono text-xs text-muted-foreground">{r.sub.imsi || '—'}</span> },
       { key: 'auth', header: '인증', width: 80, render: r => <AuthBadge sub={r.sub} /> },
-      transportCol, dndCol, fwdCol, rbCol, regCol,
+      transportCol, icbCol, fwdCol, rbCol, regCol,
     ],
     voip: [
       numCol,
       { key: 'ext', header: '내선', width: 64, render: r => <strong className="font-mono text-info-on">{extensionOf(r.msisdn)}</strong> },
       userCol,
       { key: 'pg', header: '전화 그룹 (픽업)', width: 170, render: r => { const g = phoneGroupOf(phoneGroups, r.msisdn); return <span className="text-sm text-muted-foreground" title={PICKUP_TITLE}>{g ? `${g.name} (${g.id})` : (r.sub.pickup_group || '—')}</span> } },
-      transportCol, dndCol, fwdCol, rbCol, regCol,
+      transportCol, icbCol, fwdCol, rbCol, regCol,
     ],
     ptt: [
       numCol, userCol,
@@ -570,7 +570,7 @@ function KV({ rows }: { rows: Array<[string, React.ReactNode]> }) {
 type LineRow = { svc: LineSvc; sub: Subscription }
 interface EditLine {
   service_ref: string; imsi: string; passwd: string; sip_transport: SipTransport | ''; auth_scheme: AuthScheme; k: string; opc: string
-  dnd: boolean; forward_id: string; forward_busy_id: string; forward_no_reply_id: string; forward_no_reply_sec: string; forward_not_logged_in_id: string; forward_not_reachable_id: string
+  icb_all: boolean; forward_id: string; forward_busy_id: string; forward_no_reply_id: string; forward_no_reply_sec: string; forward_not_logged_in_id: string; forward_not_reachable_id: string
   // 착신전환 서비스 폼 — 번호 하나 + 조건 선택(TS 22.082 `004` all-conditional 과 같은 표현). perCond = 조건별 번호 따로(규격이 허용하는 rule 별 target)
   fwdNumber: string; fwdCfu: boolean; fwdCond: Record<CondKey, boolean>; perCond: boolean
   ringback_media: string
@@ -611,15 +611,15 @@ function LineCard({ user, row, catalog, pttGroups, phoneGroups, canWrite, highli
   useEffect(() => {
     if (!editing) { setForm(null); setPform(null); return }
     setForm({ service_ref: sub.service_ref || '', imsi: sub.imsi || '', passwd: '', sip_transport: sub.sip_transport || '', auth_scheme: sub.auth_scheme || 'digest', k: '', opc: '',
-      dnd: !!sub.dnd, forward_id: sub.forward_id || '', forward_busy_id: sub.forward_busy_id || '', forward_no_reply_id: sub.forward_no_reply_id || '',
+      icb_all: !!sub.icb_all, forward_id: sub.forward_id || '', forward_busy_id: sub.forward_busy_id || '', forward_no_reply_id: sub.forward_no_reply_id || '',
       forward_no_reply_sec: sub.forward_no_reply_sec ? String(sub.forward_no_reply_sec) : '', forward_not_logged_in_id: sub.forward_not_logged_in_id || '', forward_not_reachable_id: sub.forward_not_reachable_id || '',
       ringback_media: sub.ringback_media || '', ...forwardFormOf(sub) })
     if (svc === 'ptt' && prof) setPform({ allow_emergency_call: prof.allow_emergency_call, allow_emergency_alert: prof.allow_emergency_alert, allow_adhoc_call: prof.allow_adhoc_call,
       emergency_group_mode: prof.emergency_group_mode, emergency_group_id: prof.emergency_group_id, allow_emergency_private_call: prof.allow_emergency_private_call,
       private_emergency_mode: prof.private_emergency_mode, emergency_private_recipient: prof.emergency_private_recipient })
     // 링백 음원 후보 — 서비스 음원 라이브러리(announcements.md §7). 못 읽으면 직접 입력만
-    if (spec.showDnd && hasRingback && media === null) announcementsApi.list().then(r => setMedia(r.media.map(m => m.id))).catch(() => setMedia([]))
-  }, [editing, sub, svc, prof, spec.showDnd, hasRingback, media])
+    if (spec.showIcb && hasRingback && media === null) announcementsApi.list().then(r => setMedia(r.media.map(m => m.id))).catch(() => setMedia([]))
+  }, [editing, sub, svc, prof, spec.showIcb, hasRingback, media])
 
   async function save() {
     if (!form) return
@@ -633,7 +633,7 @@ function LineCard({ user, row, catalog, pttGroups, phoneGroups, canWrite, highli
     if (aka.err) { show(aka.err, 'err'); return }
     if ((sub.auth_scheme || 'digest') === 'aka' && (aka.fields.auth_scheme || 'digest') === 'digest' && !d.passwd) { show('AKA→Digest 전환 시 비밀번호를 함께 입력해야 합니다 (H(A1) 생성)', 'err'); return }
     if ((aka.fields.auth_scheme || 'digest') !== (sub.auth_scheme || 'digest') || aka.fields.k) Object.assign(d, aka.fields)
-    if (spec.showDnd) {
+    if (spec.showIcb) {
       // 착신전환 서비스 — 번호 하나 모드: CFU 면 forward_id 만(조건부 컬럼은 비운다 — CFU 가 평가 순서상 앞이라 조건부는 의미가 없다),
       //   아니면 고른 조건 컬럼에 같은 번호. 조건별 모드: 입력한 그대로.
       let cols: Record<'forward_id' | CondKey, string>
@@ -649,7 +649,7 @@ function LineCard({ user, row, catalog, pttGroups, phoneGroups, canWrite, highli
       }
       const labels: Record<'forward_id' | CondKey, string> = { forward_id: '무조건 (CFU)', ...COND_LABEL }
       for (const key of ['forward_id', ...COND_KEYS] as const) { const v = cols[key].trim(); if (v && !FORWARD_RE.test(v)) { show(`${labels[key]} 대상은 번호(숫자열, 선행 + 허용)여야 합니다`, 'err'); return } }
-      d.dnd = form.dnd; d.forward_id = cols.forward_id.trim()
+      d.icb_all = form.icb_all; d.forward_id = cols.forward_id.trim()
       if (hasCdiv) {
         const sec = Number(form.forward_no_reply_sec || 0)
         if (!Number.isInteger(sec) || sec < 0 || sec > 120) { show('무응답 시한은 0~120초 (0 = 서버 기본)', 'err'); return }
@@ -705,8 +705,8 @@ function LineCard({ user, row, catalog, pttGroups, phoneGroups, canWrite, highli
                  ['서비스 · 채널', <span>{sub.service_ref || '—'} · <TransportBadge v={sub.sip_transport} aka={false} /> (Digest)</span>] as [string, React.ReactNode]]
               : [['IMSI', <span className="font-mono">{sub.imsi || '—'}</span>] as [string, React.ReactNode],
                  ['서비스 · 채널', <span>{sub.service_ref || '—'} · <TransportBadge v={sub.sip_transport} aka={sub.auth_scheme === 'aka'} /> · <AuthBadge sub={sub} /></span>] as [string, React.ReactNode]]),
-            ...(spec.showDnd ? [
-              ['착신 처리', <span>{sub.dnd && <Badge variant="dangerSoft" className="mr-1">DND</Badge>}{forwardSummary(sub) || (sub.dnd ? '' : '—')}</span>] as [string, React.ReactNode],
+            ...(spec.showIcb ? [
+              ['착신 처리', <span>{sub.icb_all && <Badge variant="dangerSoft" className="mr-1">착신 차단</Badge>}{forwardSummary(sub) || (sub.icb_all ? '' : '—')}</span>] as [string, React.ReactNode],
               ['링백', hasRingback ? <span className="font-mono">{sub.ringback_media || '서비스 프로파일 그대로'}</span> : <span className="text-muted-foreground">DB 마이그레이션 전</span>] as [string, React.ReactNode],
             ] : [
               ['소속 그룹', memberGroups.length ? <span className="flex flex-wrap gap-1">{memberGroups.map(g => <Badge key={g.id} variant="successSoft">{g.name || g.id}</Badge>)}</span> : '없음'] as [string, React.ReactNode],
@@ -758,7 +758,7 @@ function LineCard({ user, row, catalog, pttGroups, phoneGroups, canWrite, highli
             {svc === 'voip' && <Field label="전화 그룹 (픽업)" title={PICKUP_TITLE}><div className="pt-1.5 text-sm text-muted-foreground">{phoneGroup ? phoneGroup.name : '없음'} <span className="text-xs">— 구성 › 전화 그룹에서</span></div></Field>}
           </div>
 
-          {spec.showDnd && (
+          {spec.showIcb && (
             <>
               <Section title="착신전환 서비스" aside={hasCdiv ? <button type="button" className="text-xs text-primary hover:underline" onClick={() => setForm({ ...form, perCond: !form.perCond })}>{form.perCond ? '번호 하나로 묶기' : '조건별 번호 따로…'}</button> : undefined}>
                 {!form.perCond ? (
@@ -791,8 +791,8 @@ function LineCard({ user, row, catalog, pttGroups, phoneGroups, canWrite, highli
                 )}
                 <div className="text-xs text-muted-foreground">번호는 숫자열(선행 + 허용). 무조건(CFU)을 고르면 조건부는 평가되지 않으며 저장 시 비워진다. 조건부는 다중 선택 — 통화중 486 · 링잉 뒤 무응답(시한) · 미등록 · 도달불가(링잉 없는 480/408). 전환 대상은 등록 가입자만, 전환 상한·기본 시한은 CSP 설정 [착신전환].</div>
               </Section>
-              <Section title="착신 거부">
-                <label className="flex items-center gap-2 text-sm"><Checkbox checked={form.dnd} onCheckedChange={c => setForm({ ...form, dnd: c === true })} /> DND — 모든 착신을 603 으로 거절 (착신전환보다 우선)</label>
+              <Section title="착신 차단">
+                <label className="flex items-center gap-2 text-sm"><Checkbox checked={form.icb_all} onCheckedChange={c => setForm({ ...form, icb_all: c === true })} /> 착신 차단 — 전체 (모든 착신을 603 으로 거절, 착신 전환보다 우선)</label>
               </Section>
               {hasRingback && (
                 <Section title="링백 (컬러링)">
@@ -889,7 +889,7 @@ function AddLineCard({ user, svc, catalog, onCancel, onAdded }: { user: UserSumm
     if (!f.passwd && !isAka) { show('비밀번호 필수', 'err'); return }
     const aka = akaBody(scheme, f.k, f.opc, false)
     if (aka.err) { show(aka.err, 'err'); return }
-    const body: Partial<Subscription> = { id: f.id.trim(), imsi, service_ref: f.ref, sip_transport: isAka ? 'TLS' : (f.sip_transport || null), dnd: false, forward_id: '', ...aka.fields }
+    const body: Partial<Subscription> = { id: f.id.trim(), imsi, service_ref: f.ref, sip_transport: isAka ? 'TLS' : (f.sip_transport || null), forward_id: '', ...aka.fields }
     if (f.passwd) body.passwd = f.passwd
     setBusy(true)
     try { await usersApi.addSub(user.id, svc, body); show(`${spec.label} ${body.id} 추가 — 단말이 등록하면 '등록'으로 바뀝니다`, 'ok'); onAdded() }

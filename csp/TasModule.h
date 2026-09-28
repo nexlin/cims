@@ -62,7 +62,7 @@ struct PilotDialogSnapshot {
 /**
  * @brief TAS — VoLTE 보조 서비스 모듈 (volte_supplementary_services.md)
  *
- * DND/착신거부/착신전환·당겨받기(피처코드/INVITE-Replaces)·호 전달(REFER blind/attended)·
+ * 착신 차단(ICB)/착신전환·당겨받기(피처코드/INVITE-Replaces)·호 전달(REFER blind/attended)·
  * dialog 이벤트 패키지(RFC 4235 BLF 통지)를 소유한다. B2BUA 골격(라우팅·relay 수명)은
  * ModuleDispatcher 가 유지하고, 보조 서비스 판정·재고정은 이 모듈이 수행한다.
  *
@@ -76,9 +76,9 @@ struct PilotDialogSnapshot {
  *  - OnBlindTransfer   blind transfer — 지시자 leg index·포트 승계 INVITE (§6.1)
  *
  * 순서 의존 삽입점 (디스패처 라우팅 골격의 정해진 위치에서 호출):
- *  - ScreenInvite               RecvRequest INVITE 조기 스크린 — DND/착신거부·ptt 전용 모드
+ *  - ScreenInvite               RecvRequest INVITE 조기 스크린 — 착신 차단(ICB)·ptt 전용 모드
  *  - TryPickupDial              미등록 착신의 픽업 피처코드 소비 (§5.2)
- *  - ApplyTerminationServices   착신 가입자 DND/착신거부 603
+ *  - ApplyTerminationServices   착신 가입자 착신 차단(ICB, TS 24.611) 603
  *  - ResolveDiversion           착신전환(TS 24.604 CDIV — 서버측 전환) 대상·이력 판정 (§6A)
  */
 class CTasModule : public IModule {
@@ -97,7 +97,7 @@ public:
     bool OnTransfer( const char *pszCallId, const char *pszReferToCallId, bool bScreened ) override;
     bool OnBlindTransfer( const char *pszCallId, const char *pszReferToId ) override;
 
-    /** INVITE 조기 스크린 (RecvRequest — 다이얼로그 생성 전) — 착신 가입자 DND/착신거부 603,
+    /** INVITE 조기 스크린 (RecvRequest — 다이얼로그 생성 전) — 착신 가입자 착신 차단(ICB, TS 24.611) 603,
      *  ptt 전용 서비스 모드 403. true=응답 발신·소비. */
     bool ScreenInvite( CSipMessage *pclsMessage, const char *pszFrom, const char *pszTo );
 
@@ -118,7 +118,7 @@ public:
     /** 1초 주기 — 포크 집합 무응답(no_answer_sec) 판정 → overflow 또는 480 (§4.4). */
     void Tick();
 
-    /** 착신 가입자 종단 서비스 — DND/착신거부 603(거절 안내는 announcements.md §3.2).
+    /** 착신 가입자 종단 서비스 — 착신 차단(ICB, TS 24.611) 603(거절 안내는 announcements.md §3.2).
      *  true=응답 발신·소비, false=일반 B2BUA 진행. 착신전환은 여기가 아니라 ResolveDiversion(디스패처가 라우팅 앞에서).
      */
     bool ApplyTerminationServices( const char *pszCallId, const char *pszFrom, const char *pszTo,
@@ -134,7 +134,7 @@ public:
     };
     /** 착신전환 판정 — 착신 가입자(등록 여부 무관, DB 폴백)에 forward_id(CFU) 가 있으면 전환 대상을 좇는다(연쇄 허용,
      *  대상의 forward_id 도 따른다). 대상 번호는 그 가입자 접속서비스의 다이얼 플랜으로 +E.164 번역(§2-10).
-     *  DND·착신거부 가입자는 전환하지 않는다(603 이 우선). 피어·그룹·대표번호 착신은 가입자가 아니라 0.
+     *  착신 차단(ICB) 가입자는 전환하지 않는다(603 이 우선). 피어·그룹·대표번호 착신은 가입자가 아니라 0.
      *  반환 0 = 전환 없음, 1 = 전환(out 채움), <0 = -SIP 코드(전환 상한·루프 → 486, TS 24.604 §4.5.2.6). */
     int ResolveDiversion( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage, CdivResult &clsOut );
     /** 전환 대상 번호 → +E.164 (그 가입자 접속서비스 다이얼 플랜). 반환 false = 번역 불가(설정 오류 — ERROR 로그) */

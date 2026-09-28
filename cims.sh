@@ -308,7 +308,7 @@ cmd_clean() {
 # ── 검증용 초기화 (가입자 보존) ───────────────────────────────
 # docs/VERIFICATION_PROCESS.md §0.1 초기화 범위에 따름.
 # 보존: users, organizations, volte_subscriptions, ptt_subscriptions,
-#       ptt_groups, ptt_group_members, user_rejects
+#       ptt_groups, ptt_group_members, icb_identities
 # 초기화: 런타임 설정 / 배포 등록 / 세션·로그성 테이블 + 파일 + 프로세스
 cmd_reset() {
     local target="all"
@@ -479,7 +479,7 @@ PRESERVE = {
     'users', 'organizations',
     'volte_subscriptions', 'ptt_subscriptions',
     'ptt_groups', 'ptt_group_members',
-    'user_rejects',
+    'icb_identities',
 }
 TRUNCATE = [
     # 모듈 런타임 설정 (대부분 deprecated — 존재 시 제거)
@@ -917,7 +917,7 @@ ${BOLD}검증 (docs/VERIFICATION_PROCESS.md — 콘솔 진입: /testbed/verify-v
   reset  [--all|--files|--db] [--path <dir>] [--keep-processes] [--keep-deployed]
                        가입자 테이블 보존 상태로 설정/배포/세션 DB + 파일 + 프로세스 초기화
                        (보존: users, organizations, volte_subscriptions,
-                        ptt_subscriptions, ptt_groups, ptt_group_members, user_rejects)
+                        ptt_subscriptions, ptt_groups, ptt_group_members, icb_identities)
 
 ${BOLD}[3/3] 배포 패키지 (Console 업로드용):${NC}
   pkg [-v X.Y.Z] [--no-bump] [--no-sync] [-m <changelog>] [name...]

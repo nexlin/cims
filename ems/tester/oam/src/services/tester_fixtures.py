@@ -125,7 +125,11 @@ def resolve(scenario: Scenario, role_first: Dict[str, dict], bindings: Dict[str,
                 fields['forward_not_logged_in_id'] = user_of(f.forward_not_logged_in_to)
             if f.forward_not_reachable_to is not None:
                 fields['forward_not_reachable_id'] = user_of(f.forward_not_reachable_to)
+            if f.icb_all is not None:
+                fields['icb_all'] = f.icb_all   # 착신 차단 — 전체(회선)
             out.append({'key': key, 'kind': f.kind, 'fields': fields, 'service_ref': fields.get('service_ref'),
+                        # 착신 차단 — 지정 번호(사람 단위, cp:identity) = 그 역할들의 첫 신원 번호
+                        'icb_identities': [user_of(r) for r in f.icb_identities] if f.icb_identities else None,
                         'lines': [{'role': r, 'user': user_of(r)} for r in f.roles]})
     return out
 
@@ -142,7 +146,9 @@ def summarize(resolved: List[dict]) -> List[str]:
             rows.append(f"{r['id']}: monitor_call={r['monitor_call']} ptt_listen={r['ptt_listen']}({','.join(r['ptt_targets']) or '-'}) "
                         f"visibility={r['listen_visibility']} → {[a['user'] for a in r['assign']]}")
         elif r['kind'] == 'subscriber':
-            rows.append(' '.join(f'{k}={v}' for k, v in r['fields'].items()) + f" ← {[x['user'] for x in r['lines']]}")
+            rows.append(' '.join(f'{k}={v}' for k, v in r['fields'].items())
+                        + (f" icb_identities={r['icb_identities']}" if r.get('icb_identities') else '')
+                        + f" ← {[x['user'] for x in r['lines']]}")
         elif r['kind'] == 'access_service':
             rows.append(f"access_service {r['name']} = {r['from_user']} 의 서비스 복제 + {r['set']}")
     return rows
@@ -205,6 +211,7 @@ class FixtureApplier:
                         num = str(sub.get('id') or '')
                         if num:
                             m[num] = {'person': u.get('id'), 'kind': kind, 'service_ref': sub.get('service_ref'),
+                                      'icb_all': sub.get('icb_all'), 'icb_identities': u.get('icb_identities') or [],
                                       'ringback_media': sub.get('ringback_media'), 'forward_id': sub.get('forward_id'),
                                       'forward_busy_id': sub.get('forward_busy_id'), 'forward_no_reply_id': sub.get('forward_no_reply_id'),
                                       'forward_no_reply_sec': sub.get('forward_no_reply_sec'),
@@ -292,12 +299,25 @@ class FixtureApplier:
             moved.append((person, res.get('moved_from')))
 
     def _apply_subscriber(self, r: dict) -> None:
+        def orig(u: dict, k: str):
+            if u.get(k) is not None:
+                return u.get(k)
+            return 0 if k == 'forward_no_reply_sec' else (False if k == 'icb_all' else '')
+        people = {}
         for ln in r['lines']:
             u = self.line(ln['user'])
-            path = f"/api/v1/users/{u['person']}/{u['kind']}/{self._q(ln['user'])}"
-            self._call('PUT', path, dict(r['fields']))
-            # 복원값 = 바꾼 필드의 종전 값(없던 값은 빈 문자열 — CSC 가 NULL/프로파일 기본으로 되돌린다)
-            self.undo.append(('subscriber', path, {k: (u.get(k) if u.get(k) is not None else (0 if k == 'forward_no_reply_sec' else '')) for k in r['fields']}))
+            if r['fields']:
+                path = f"/api/v1/users/{u['person']}/{u['kind']}/{self._q(ln['user'])}"
+                self._call('PUT', path, dict(r['fields']))
+                # 복원값 = 바꾼 필드의 종전 값(없던 값은 빈 문자열 — CSC 가 NULL/프로파일 기본으로 되돌린다)
+                self.undo.append(('subscriber', path, {k: orig(u, k) for k in r['fields']}))
+            people.setdefault(u['person'], u.get('icb_identities') or [])
+        # 착신 차단 지정 번호는 사람 단위 — 회선이 여럿이어도 사람마다 한 번
+        if r.get('icb_identities'):
+            for person, prior in people.items():
+                path = f"/api/v1/users/{person}"
+                self._call('PUT', path, {'icb_identities': list(r['icb_identities'])})
+                self.undo.append(('subscriber', path, {'icb_identities': list(prior)}))
 
     # ── 확인 ──
     def verify(self) -> List[str]:

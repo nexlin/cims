@@ -1,7 +1,7 @@
 /**
  * CTasModule — VoLTE 보조 서비스 (volte_supplementary_services.md)
  *
- * DND/착신거부/착신전환·당겨받기(피처코드/INVITE-Replaces)·호 전달(REFER blind/attended)·
+ * 착신 차단(ICB)/착신전환·당겨받기(피처코드/INVITE-Replaces)·호 전달(REFER blind/attended)·
  * dialog 이벤트 패키지(RFC 4235). B2BUA 골격(라우팅·relay 수명)은 ModuleDispatcher 가 유지하고,
  * 이 모듈은 보조 서비스 판정과 leg 재고정(RELAY_MODIFY — cmp_media_api.md §6.2)을 수행한다.
  * INVITE 경로에 DB 질의를 넣지 않는다 — 모든 판정은 인메모리 맵에서 답한다.
@@ -67,10 +67,10 @@ bool CTasModule::OnSipRequest( int iThreadId, CSipMessage *pclsMessage ) {
 bool CTasModule::ScreenInvite( CSipMessage *pclsMessage, const char *pszFrom, const char *pszTo ) {
     CspUser clsToUser;
     if ( gclsCspUserMap.isAlive( pszTo, clsToUser ) ) {
-        if ( clsToUser.isDnd() || clsToUser.isReject( pszFrom ) ) {
-            CLog::Print( LOG_INFO, "TAS: Rejected (DND/Reject) From=%s To=%s", pszFrom, pszTo );
+        if ( const char *pszIcb = clsToUser.IncomingBarredBy( pszFrom ) ) {
+            CLog::Print( LOG_INFO, "TAS: Rejected (ICB %s) From=%s To=%s", pszIcb, pszFrom, pszTo );
             // 시도 장부 — 여기는 **다이얼로그 생성 전**이라 정상 경로(`VoipCallStart`)가 아직
-            //   돌지 않았다. 남기지 않으면 DND·착신거부로 튕긴 호가 성공률·NER 의 분모에서
+            //   돌지 않았다. 남기지 않으면 착신 차단(ICB)으로 튕긴 호가 성공률·NER 의 분모에서
             //   통째로 빠지고, 그래서 **거부가 늘수록 성공률이 좋아진다** — 지표가 나빠지는
             //   방향이 아니라 좋아지는 방향으로 틀려 스스로 드러나지 않는다 (F-54 잔여).
             //   **응답은 그대로 603 이다** — 와이어 동작은 바꾸지 않고 기록만 더한다.
@@ -97,7 +97,7 @@ bool CTasModule::ScreenInvite( CSipMessage *pclsMessage, const char *pszFrom, co
 }
 
 // ──────────────────────────────────────────────────────────────
-//  착신 서비스 — Replaces / DND·착신거부·착신전환 / 픽업 다이얼
+//  착신 서비스 — Replaces / 착신 차단(ICB)·착신전환 / 픽업 다이얼
 // ──────────────────────────────────────────────────────────────
 
 EModuleRouteResult CTasModule::OnIncomingCall( const char *pszCallId, const char *pszFrom, const char *pszTo,
@@ -113,7 +113,8 @@ EModuleRouteResult CTasModule::OnIncomingCall( const char *pszCallId, const char
 
 bool CTasModule::ApplyTerminationServices( const char *pszCallId, const char *pszFrom, const char *pszTo,
                                            const CspUser &clsUser, CSipCallRtp *pclsRtp, CSipMessage *pclsMessage ) {
-    if ( clsUser.isDnd() || clsUser.isReject( pszFrom ) ) {
+    if ( const char *pszIcb = clsUser.IncomingBarredBy( pszFrom ) ) {
+        CLog::Print( LOG_INFO, "TAS: Rejected (ICB %s) From=%s To=%s", pszIcb, pszFrom, pszTo );
         // 시도 장부 — `ScreenInvite` 를 지나온 호(그때는 착신이 등록 상태가 아니었던 경우)가
         //   여기서 603 으로 끝난다. 두 지점을 다 막지 않으면 같은 거절이 경로에 따라 세어지거나
         //   빠진다. `VoipCallRejected` 는 정상 경로가 이미 기록한 세션을 건드리지 않으므로
@@ -168,7 +169,7 @@ int CTasModule::ResolveDiversion( const char *pszFrom, const char *pszTo, CSipMe
         CspUser clsUser;
         // 등록 여부와 무관 — CFU 는 미등록 가입자에도 적용(DB 폴백 조회). 가입자가 아니면(피어·그룹·대표번호) 끝
         if ( !gclsCspUserMap.Select( strCur.c_str(), clsUser ) ) break;
-        if ( clsUser.isDnd() || clsUser.isReject( strFrom ) ) break;  // 종단 서비스 603 이 우선 — 종전 경로가 처리
+        if ( clsUser.IsIncomingBarred( strFrom ) ) break;  // 착신 차단(ICB) 603 이 전환보다 우선 — 종단 서비스가 처리
         // 조건 판정 — CFU(forward_id) 가 있으면 무조건, 없고 미등록이면 CFNL(forward_not_logged_in_id, RFC 4458 cause
         // 404)
         std::string strRaw;

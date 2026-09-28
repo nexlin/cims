@@ -396,7 +396,7 @@ int CModuleDispatcher::DecideOutboundRoute( CSipMessage *pclsMessage, const std:
         }
     } else if ( rd.type == ROUTING_ACCESS_SERVICE ) {
         // ACCESS_SERVICE target 은 UE 에게 라우팅 (TAS/B2BUA 레거시 경로가 처리).
-        //   명시적 분기 없이 legacy TAS 판단 로직(DND/reject)으로 진행 → 로그만.
+        //   명시적 분기 없이 legacy TAS 판단 로직(착신 차단 ICB)으로 진행 → 로그만.
         CLog::Print( LOG_INFO, "RoutingPolicyEngine: match policy='%s' access_service='%s' (legacy TAS path)",
                      rd.matched_policy.c_str(), rd.target_name.c_str() );
     }
@@ -577,7 +577,7 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
         // G1/G8/G10 (2026-04-23): 외부 peer routing 은 routing_policies 매칭 시 PendingRouteMap
         //   경유로 결정. 여기까지 도달한 INVITE 는 내부 B2BUA 처리 대상 (CSipUserAgent 위임).
 
-        // TAS 조기 스크린 — 착신 가입자 DND/착신거부 603, ptt 전용 모드 403 (다이얼로그 생성 전)
+        // TAS 조기 스크린 — 착신 가입자 착신 차단(ICB, TS 24.611) 603, ptt 전용 모드 403 (다이얼로그 생성 전)
         if ( m_clsTas.IsEnabled() && m_clsTas.ScreenInvite( pclsMessage, strFrom.c_str(), strTo.c_str() ) ) {
             return true;
         }
@@ -1146,7 +1146,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
 
     if ( GetCallOwner( pszCallId ) == NULL ) SetCallOwner( pszCallId, &m_clsTas );
 
-    // TAS: DND/착신거부 603 (전환된 호면 전환 대상 가입자의 것 — TS 24.604 diverted-to user 의 종단 서비스 적용)
+    // TAS: 착신 차단(ICB) 603 (전환된 호면 전환 대상 가입자의 것 — TS 24.604 diverted-to user 의 종단 서비스 적용)
     //   거절은 모듈 안에서 응답하므로 시도 기록도 **모듈 안에서** 남긴다(여기서 `RejectVoice`
     //   를 쓰면 응답을 두 번 보낸다). 착신 식별자를 넘기는 이유가 그것이다 — 장부의 callee 가
     //   표·이력의 다른 자리와 같은 문자열이어야 한다.
@@ -1895,7 +1895,7 @@ bool CModuleDispatcher::TryDivertLeg( const char *pszCallId, const CCallInfo &cl
                      strTarget.c_str(), iSipStatus, pszCallId );
         return false;
     }
-    // 대상 = 등록 가입자(피어·미등록 대상은 후속 — 원코드로 끝낸다). 대상의 DND·착신거부는 종단 서비스가 우선
+    // 대상 = 등록 가입자(피어·미등록 대상은 후속 — 원코드로 끝낸다). 대상의 착신 차단(ICB)은 종단 서비스가 우선
     CUserInfo clsTargetInfo;
     if ( !gclsUserMap.Select( strTarget.c_str(), clsTargetInfo ) ) {
         CLog::Print( LOG_INFO, "CDIV: %s %s → %s 미등록/비가입 — 원코드 %d 로 (CallId=%s)", pszKind, strCallee.c_str(),
@@ -1904,7 +1904,7 @@ bool CModuleDispatcher::TryDivertLeg( const char *pszCallId, const CCallInfo &cl
     }
     CspUser clsTargetUser;
     if ( gclsCspUserMap.Select( strTarget.c_str(), clsTargetUser ) &&
-         ( clsTargetUser.isDnd() || clsTargetUser.isReject( clsB.m_strRelayCaller ) ) )
+         clsTargetUser.IsIncomingBarred( clsB.m_strRelayCaller ) )
         return false;
 
     // 실패/취소할 B-leg 가 냈던 오퍼·신원 그대로

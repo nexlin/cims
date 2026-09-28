@@ -91,7 +91,8 @@ def import_users(conn, user_dir):
         org_id      = data.get("org_id", "")
         name        = data.get("name", "")
         details     = data.get("details") or None
-        dnd         = 1 if str(data.get("dnd", "false")).lower() == "true" else 0
+        # 착신 차단 — 전체 (TS 24.611 ICB). 옛 파일의 dnd 키도 읽는다
+        icb_all     = 1 if str(data.get("icb_all", data.get("dnd", "false"))).lower() == "true" else 0
         forward_id  = data.get("forward_id", "")
         create_time = data.get("create_time") or None
         update_time = data.get("update_time") or None
@@ -116,34 +117,36 @@ def import_users(conn, user_dir):
 
         # 2. Insert auth into voip_subscriptions or ptt_subscriptions based on auth_id domain
         if "@ptt." in auth_id:
-            sql_auth = (
-                "INSERT INTO ptt_subscriptions (id, user_id, auth_id, passwd, dnd, forward_id) "
-                "VALUES (%s, %s, %s, %s, %s, %s) "
+            sql_auth = (   # MMTel 착신 차단(icb_all)은 ptt 회선에 없다
+                "INSERT INTO ptt_subscriptions (id, user_id, auth_id, passwd, forward_id) "
+                "VALUES (%s, %s, %s, %s, %s) "
                 "ON DUPLICATE KEY UPDATE "
                 "auth_id=VALUES(auth_id), passwd=VALUES(passwd), "
-                "dnd=VALUES(dnd), forward_id=VALUES(forward_id)"
+                "forward_id=VALUES(forward_id)"
             )
+            auth_args = (user_id, person_id, auth_id, passwd, forward_id)
             auth_table = "ptt_subscriptions"
         else:
             sql_auth = (
-                "INSERT INTO voip_subscriptions (id, user_id, auth_id, passwd, dnd, forward_id) "
+                "INSERT INTO voip_subscriptions (id, user_id, auth_id, passwd, icb_all, forward_id) "
                 "VALUES (%s, %s, %s, %s, %s, %s) "
                 "ON DUPLICATE KEY UPDATE "
                 "auth_id=VALUES(auth_id), passwd=VALUES(passwd), "
-                "dnd=VALUES(dnd), forward_id=VALUES(forward_id)"
+                "icb_all=VALUES(icb_all), forward_id=VALUES(forward_id)"
             )
+            auth_args = (user_id, person_id, auth_id, passwd, icb_all, forward_id)
             auth_table = "voip_subscriptions"
 
-        cur.execute(sql_auth, (user_id, person_id, auth_id, passwd, dnd, forward_id))
+        cur.execute(sql_auth, auth_args)
 
-        # 3. 착신거부 목록
-        reject_ids = data.get("reject_id", [])
-        if reject_ids:
-            cur.execute("DELETE FROM user_rejects WHERE user_id=%s", (person_id,))
-            for rid in reject_ids:
+        # 3. 착신 차단 — 지정 번호 (사람 단위). 옛 파일의 reject_id 키도 읽는다
+        icb_ids = data.get("icb_identities", data.get("reject_id", []))
+        if icb_ids:
+            cur.execute("DELETE FROM icb_identities WHERE user_id=%s", (person_id,))
+            for ident in icb_ids:
                 cur.execute(
-                    "INSERT IGNORE INTO user_rejects (user_id, reject_id) VALUES (%s, %s)",
-                    (person_id, rid)
+                    "INSERT IGNORE INTO icb_identities (user_id, `identity`) VALUES (%s, %s)",
+                    (person_id, ident)
                 )
 
         count += 1

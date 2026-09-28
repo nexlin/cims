@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <map>
 
 #include "CspPhoneGroup.h"
 #include "CspPttGroup.h"
@@ -182,6 +183,24 @@ std::string CDbManager::PickupGroupCol( const char *pszAlias ) const {
 std::string CDbManager::RingbackCol( const char *pszAlias, bool bPhone ) const {
     if ( !m_bHasRingbackColumn || !bPhone ) return "''";
     return std::string( "COALESCE(" ) + pszAlias + ".ringback_media,'')";
+}
+
+std::string CDbManager::IcbAllCol( const char *pszAlias, bool bPhone ) const {
+    if ( !bPhone ) return "0";
+    return std::string( pszAlias ) + ".icb_all";
+}
+
+std::vector<std::string> CDbManager::SelectIcbIdentities( const std::string &strPersonId ) {
+    std::vector<std::string> vec;
+    // person_id 는 INT(users.id) — 따옴표 없이 쓴다. 숫자가 아니면 조회하지 않는다(파일 폴백 가입자 id).
+    if ( strPersonId.empty() || strPersonId.find_first_not_of( "0123456789" ) != std::string::npos ) return vec;
+    MYSQL_RES *pRes = ExecuteSelect( "SELECT `identity` FROM icb_identities WHERE user_id=" + strPersonId );
+    if ( !pRes ) return vec;
+    MYSQL_ROW row;
+    while ( ( row = mysql_fetch_row( pRes ) ) != nullptr )
+        if ( row[0] ) vec.push_back( row[0] );
+    mysql_free_result( pRes );
+    return vec;
 }
 
 std::string CDbManager::CdivCols( const char *pszAlias, bool bPhone ) const {
@@ -362,9 +381,10 @@ bool CDbManager::SelectUser( const std::string &strUserId, CspUser &clsUser ) {
     MYSQL_ROW row = nullptr;
     std::string strServiceType;
     for ( const SubTable &t : SubTables() ) {
-        std::string strSql = std::string(
-                                 "SELECT s.id, u.name, u.org_id, s.dnd, s.forward_id, u.id AS person_id, "
-                                 "       COALESCE(s.service_ref,''), COALESCE(s.imsi,''), " ) +
+        std::string strSql = std::string( "SELECT s.id, u.name, u.org_id, " ) +
+                             IcbAllCol( "s", strcmp( t.pszType, "ptt" ) != 0 ) +
+                             ", s.forward_id, u.id AS person_id, "
+                             "       COALESCE(s.service_ref,''), COALESCE(s.imsi,''), " +
                              Ha1Col( "s" ) + ", COALESCE(s.sip_transport,''), " + AuthSchemeCol( "s" ) + ", " +
                              PickupGroupCol( "s" ) + ", " + RingbackCol( "s", strcmp( t.pszType, "ptt" ) != 0 ) + ", " +
                              CdivCols( "s", strcmp( t.pszType, "ptt" ) != 0 ) + " FROM " + t.pszTable +
@@ -389,9 +409,9 @@ bool CDbManager::SelectUser( const std::string &strUserId, CspUser &clsUser ) {
     clsUser.m_strServiceType = strServiceType;
     clsUser.m_strName = row[1] ? row[1] : "";
     clsUser.m_strOrganizationId = row[2] ? row[2] : "";
-    clsUser.m_bDnd = row[3] ? ( atoi( row[3] ) != 0 ) : false;
+    clsUser.m_bIcbAll = row[3] ? ( atoi( row[3] ) != 0 ) : false;
     clsUser.m_strForward = row[4] ? row[4] : "";
-    // row[5] = person_id (users.id) used for reject list lookup
+    // row[5] = person_id (users.id) — 착신 차단 지정 번호(icb_identities) 조회 키
     std::string strPersonId = row[5] ? row[5] : strUserId;
     clsUser.m_strServiceRef = row[6] ? row[6] : "";
     clsUser.m_strImsi = row[7] ? row[7] : "";
@@ -409,16 +429,8 @@ bool CDbManager::SelectUser( const std::string &strUserId, CspUser &clsUser ) {
 
     mysql_free_result( pRes );
 
-    // 착신 거부 목록 로드 (person_id는 INT이므로 따옴표 없이 사용)
-    clsUser.m_vecReject.clear();
-    std::string strSql = "SELECT reject_id FROM user_rejects WHERE user_id=" + strPersonId;
-    pRes = ExecuteSelect( strSql );
-    if ( pRes ) {
-        while ( ( row = mysql_fetch_row( pRes ) ) != nullptr ) {
-            if ( row[0] ) clsUser.m_vecReject.push_back( row[0] );
-        }
-        mysql_free_result( pRes );
-    }
+    // 착신 차단 — 지정 번호(사람 단위, TS 24.611 ICB cp:identity)
+    clsUser.m_vecIcbIdentities = SelectIcbIdentities( strPersonId );
 
     return true;
 }
@@ -588,13 +600,22 @@ bool CDbManager::LoadAllUsers( CspUserMap &clsMap, bool *pbUnavailable ) {
     }
 
     int count = 0;
+    // 착신 차단 지정 번호(icb_identities) — 사람(users.id)별로 한 번에 읽는다(가입자마다 조회하지 않는다)
+    std::map<std::string, std::vector<std::string>> mapIcb;
+    if ( MYSQL_RES *pIcb = ExecuteSelect( "SELECT user_id, `identity` FROM icb_identities" ) ) {
+        MYSQL_ROW r;
+        while ( ( r = mysql_fetch_row( pIcb ) ) != nullptr )
+            if ( r[0] && r[1] ) mapIcb[r[0]].push_back( r[1] );
+        mysql_free_result( pIcb );
+    }
     // 가입 테이블 = 접속환경 kind (voip·volte·ptt) — 목록은 SubTables() 하나(voip 는 테이블이 있을 때만).
     for ( const SubTable &t : SubTables() ) {
         // v3 (2026-04-22): service_id INT → service_ref VARCHAR (access_services.name 참조)
-        std::string strSql = std::string(
-                                 "SELECT s.id, u.name, u.org_id, s.dnd, s.forward_id, u.id, "
-                                 "       COALESCE(s.service_ref, ''), COALESCE(s.imsi, ''), "
-                                 "       " ) +
+        std::string strSql = std::string( "SELECT s.id, u.name, u.org_id, " ) +
+                             IcbAllCol( "s", strcmp( t.pszType, "ptt" ) != 0 ) +
+                             ", s.forward_id, u.id, "
+                             "       COALESCE(s.service_ref, ''), COALESCE(s.imsi, ''), "
+                             "       " +
                              Ha1Col( "s" ) + ", COALESCE(s.sip_transport, ''), " + AuthSchemeCol( "s" ) + ", " +
                              PickupGroupCol( "s" ) + ", " + RingbackCol( "s", strcmp( t.pszType, "ptt" ) != 0 ) + ", " +
                              CdivCols( "s", strcmp( t.pszType, "ptt" ) != 0 ) + " FROM " + t.pszTable +
@@ -615,8 +636,14 @@ bool CDbManager::LoadAllUsers( CspUserMap &clsMap, bool *pbUnavailable ) {
             clsUser.m_strServiceType = t.pszType;
             clsUser.m_strName = row[1] ? row[1] : "";
             clsUser.m_strOrganizationId = row[2] ? row[2] : "";
-            clsUser.m_bDnd = row[3] ? ( atoi( row[3] ) != 0 ) : false;
+            clsUser.m_bIcbAll = row[3] ? ( atoi( row[3] ) != 0 ) : false;
             clsUser.m_strForward = row[4] ? row[4] : "";
+            // 착신 차단 지정 번호 — 단건 SelectUser 와 같은 값. 전량 적재가 빠뜨리면 부팅/CSC_RESTART 뒤 지정 번호
+            // 차단이 풀린다.
+            if ( row[5] ) {
+                auto itIcb = mapIcb.find( row[5] );
+                if ( itIcb != mapIcb.end() ) clsUser.m_vecIcbIdentities = itIcb->second;
+            }
             clsUser.m_strServiceRef = row[6] ? row[6] : "";
             clsUser.m_strImsi = row[7] ? row[7] : "";
             clsUser.m_strHa1 = row[8] ? row[8] : "";

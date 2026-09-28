@@ -14,7 +14,7 @@
 --      voip_subscriptions(유선 VoIP — 데스크폰·소프트폰·관제 앱) / ptt_subscriptions(MCPTT). 세 테이블은 컬럼이
 --      같고 행의 service_ref 는 자기 kind 의 access_services 레코드만 가리킨다(CSC 쓰기 게이트).
 --  최종 테이블: 9개 (organizations, users, volte_subscriptions,
---    voip_subscriptions, ptt_subscriptions, user_rejects, ptt_groups,
+--    voip_subscriptions, ptt_subscriptions, icb_identities, ptt_groups,
 --    ptt_group_members, ptt_affiliations).
 -- ============================================================
 
@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS volte_subscriptions (
     sqn           BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'AKA SQN_HE (48-bit, CSC 단일 발급자)',
     amf           CHAR(4)      NOT NULL DEFAULT '8000' COMMENT 'AKA AMF hex4',
     sip_transport ENUM('UDP','TCP','TLS')  DEFAULT NULL COMMENT '채널 정책: TLS=서버 집행(비-TLS 요청 403) / UDP·TCP=프로비저닝 힌트 / NULL=ANY(단말 선택)',
-    dnd           TINYINT(1)   NOT NULL DEFAULT 0  COMMENT '착신거부',
+    icb_all       TINYINT(1)   NOT NULL DEFAULT 0  COMMENT '착신 차단 — 전체 (TS 24.611 ICB)',
     forward_id    VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '착신전환 대상(CFU — TS 24.604, volte_supplementary_services.md §6A)',
     forward_busy_id          VARCHAR(64) NOT NULL DEFAULT '' COMMENT 'CFB 전환 대상',
     forward_no_reply_id      VARCHAR(64) NOT NULL DEFAULT '' COMMENT 'CFNR 전환 대상',
@@ -111,7 +111,7 @@ CREATE TABLE IF NOT EXISTS voip_subscriptions (
     sqn           BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'AKA SQN_HE (48-bit, CSC 단일 발급자)',
     amf           CHAR(4)      NOT NULL DEFAULT '8000' COMMENT 'AKA AMF hex4',
     sip_transport ENUM('UDP','TCP','TLS')  DEFAULT NULL COMMENT '채널 정책: TLS=서버 집행(비-TLS 요청 403) / UDP·TCP=프로비저닝 힌트 / NULL=ANY(단말 선택). 유선 권장 기본 TLS',
-    dnd           TINYINT(1)   NOT NULL DEFAULT 0  COMMENT '착신거부',
+    icb_all       TINYINT(1)   NOT NULL DEFAULT 0  COMMENT '착신 차단 — 전체 (TS 24.611 ICB)',
     forward_id    VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '착신전환 대상(CFU — TS 24.604, volte_supplementary_services.md §6A)',
     forward_busy_id          VARCHAR(64) NOT NULL DEFAULT '' COMMENT 'CFB 전환 대상',
     forward_no_reply_id      VARCHAR(64) NOT NULL DEFAULT '' COMMENT 'CFNR 전환 대상',
@@ -141,7 +141,6 @@ CREATE TABLE IF NOT EXISTS ptt_subscriptions (
     sqn           BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'AKA SQN_HE (48-bit, CSC 단일 발급자)',
     amf           CHAR(4)      NOT NULL DEFAULT '8000' COMMENT 'AKA AMF hex4',
     sip_transport ENUM('UDP','TCP','TLS')  DEFAULT NULL COMMENT '채널 정책: TLS=서버 집행(비-TLS 요청 403) / UDP·TCP=프로비저닝 힌트 / NULL=ANY(단말 선택)',
-    dnd           TINYINT(1)   NOT NULL DEFAULT 0  COMMENT '착신거부',
     forward_id    VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '착신전환 대상(CFU — TS 24.604, volte_supplementary_services.md §6A)',
     forward_busy_id          VARCHAR(64) NOT NULL DEFAULT '' COMMENT 'CFB 전환 대상',
     forward_no_reply_id      VARCHAR(64) NOT NULL DEFAULT '' COMMENT 'CFNR 전환 대상',
@@ -156,14 +155,14 @@ CREATE TABLE IF NOT EXISTS ptt_subscriptions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='PTT 가입자 인증 정보';
 
 -- ─────────────────────────────────────────────
---  가입자별 착신거부 목록 (User Rejects)
+--  착신 차단 — 지정 번호 (ICB cp:identity, TS 24.611) — 사람 단위: 그 사람의 모든 전화 회선에 적용
 -- ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS user_rejects (
-    user_id   INT         NOT NULL COMMENT '가입자 ID (users.id)',
-    reject_id VARCHAR(64) NOT NULL COMMENT '거부할 발신자 MSISDN',
-    PRIMARY KEY (user_id, reject_id),
-    CONSTRAINT fk_reject_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='가입자별 착신거부 목록';
+CREATE TABLE IF NOT EXISTS icb_identities (
+    user_id    INT         NOT NULL COMMENT '가입자 ID (users.id)',
+    `identity` VARCHAR(64) NOT NULL COMMENT '차단할 발신 번호 (ICB cp:identity)',
+    PRIMARY KEY (user_id, `identity`),
+    CONSTRAINT fk_icb_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='착신 차단 — 지정 번호 (TS 24.611 ICB cp:identity, 사람 단위)';
 
 -- ─────────────────────────────────────────────
 --  PTT 그룹 (PTT Groups) — 3GPP TS 24.379/24.380

@@ -44,7 +44,7 @@ def main():
                 elif tag == "PassWord":
                     user_data["passwd"] = val
                 elif tag == "DND":
-                    user_data["dnd"] = val # usually "true" or "false"
+                    user_data["icb_all"] = val  # 착신 차단 — 전체 (TS 24.611 ICB), "true"/"false"
                 elif tag == "CallForward":
                     user_data["call_forward"] = val
                 elif tag == "GroupId":

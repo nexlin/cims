@@ -134,20 +134,21 @@ def _users_template() -> HandlerResult:
     wb = openpyxl.Workbook()
     ws1 = wb.active
     ws1.title = 'users'
-    ws1.append(['name', 'org_code', 'details', 'reject_ids'])
+    # icb_identities = 착신 차단 지정 번호(TS 24.611 ICB — 그 사람의 모든 전화 회선), icb_all = 착신 차단 전체(전화 회선만)
+    ws1.append(['name', 'org_code', 'details', 'icb_identities'])
     ws1.append(['홍길동', 'DEV_01', '개발1팀', '+8210001,+8210002'])
     # 시트 = 가입 테이블 = 접속환경 kind (sip_service_model.md §2-9): volte(이동)·voip(유선)·ptt.
     # password 를 비우면 행별 난수 비밀번호를 생성해 결과(credentials)로만 돌려준다 — 고정 기본값은 없다.
     # sip_transport(선택) = UDP/TCP/TLS, 비우면 ANY(단말 선택). 유선 voip 는 imsi = 번호 숫자 규약·TLS 권장.
     ws2 = wb.create_sheet('volte_subscriptions')
-    ws2.append(['name', 'msisdn', 'service_ref', 'imsi', 'password', 'sip_transport', 'dnd', 'forward_id'])
+    ws2.append(['name', 'msisdn', 'service_ref', 'imsi', 'password', 'sip_transport', 'icb_all', 'forward_id'])
     ws2.append(['홍길동', '+821357007100', 'volte', '450033100000100', '', '', 'N', ''])
     ws3 = wb.create_sheet('voip_subscriptions')
-    ws3.append(['name', 'msisdn', 'service_ref', 'imsi', 'password', 'sip_transport', 'dnd', 'forward_id'])
+    ws3.append(['name', 'msisdn', 'service_ref', 'imsi', 'password', 'sip_transport', 'icb_all', 'forward_id'])
     ws3.append(['홍길동', '+82210001001', 'voip', '82210001001', '', 'TLS', 'N', ''])
     ws4 = wb.create_sheet('ptt_subscriptions')
-    ws4.append(['name', 'msisdn', 'service_ref', 'imsi', 'password', 'sip_transport', 'dnd'])
-    ws4.append(['홍길동', '+82571900100', 'mcptt', '450033100000100', '', '', 'N'])
+    ws4.append(['name', 'msisdn', 'service_ref', 'imsi', 'password', 'sip_transport'])
+    ws4.append(['홍길동', '+82571900100', 'mcptt', '450033100000100', '', ''])
     return _xlsx_result(wb, 'cims_import_template.xlsx')
 
 
@@ -211,9 +212,10 @@ def _do_users_import(file_bytes: bytes, token: str, base: str):
             if name in name_to_id:
                 continue
             payload = {'name': name, 'org_id': _cell_str(rd.get('org_code')), 'details': _cell_str(rd.get('details'))}
-            reject = _cell_str(rd.get('reject_ids'))
-            if reject:
-                payload['reject_id'] = [x.strip() for x in reject.split(',') if x.strip()]
+            # 구 템플릿 헤더 reject_ids 도 받는다
+            icb = _cell_str(rd.get('icb_identities') if 'icb_identities' in rd else rd.get('reject_ids'))
+            if icb:
+                payload['icb_identities'] = [x.strip() for x in icb.split(',') if x.strip()]
             rr = _post(base, '/api/v1/users', token, payload)
             if rr.status_code in (200, 201):
                 name_to_id[name] = rr.json().get('id')
@@ -247,8 +249,10 @@ def _do_users_import(file_bytes: bytes, token: str, base: str):
                 'id': msisdn,
                 'imsi': _cell_str(rd.get('imsi')) or msisdn.lstrip('+'),
                 'passwd': passwd,
-                'dnd': _cell_str(rd.get('dnd')).upper() in ('Y', 'YES', '1', 'TRUE'),
             }
+            if svc in ('call', 'voip'):
+                # 착신 차단 — 전체(전화 회선만). 구 템플릿 헤더 dnd 도 받는다
+                sub['icb_all'] = _cell_str(rd.get('icb_all') if 'icb_all' in rd else rd.get('dnd')).upper() in ('Y', 'YES', '1', 'TRUE')
             sref = _cell_str(rd.get('service_ref'))
             if sref:
                 sub['service_ref'] = sref

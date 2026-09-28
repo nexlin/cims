@@ -203,6 +203,11 @@ private:
     bool m_bHasRingbackColumn =
         false;  // subscriptions.ringback_media (migrate_subscription_ringback.sql — announcements.md §6.3)
     std::string RingbackCol( const char *pszAlias, bool bPhone = true ) const;
+    /** 착신 차단 — 전체(icb_all, volte_supplementary_services.md §6B). 전화 가족(volte·voip) 테이블에만 있다 — ptt 는
+     * 리터럴 0 (MMTel ICB 는 MCPTT 대상이 아니다) */
+    std::string IcbAllCol( const char *pszAlias, bool bPhone = true ) const;
+    /** 사람(users.id)의 착신 차단 지정 번호(icb_identities) — 없으면 빈 목록 */
+    std::vector<std::string> SelectIcbIdentities( const std::string &strPersonId );
     /** 조건부 착신전환
      * 컬럼(forward_busy_id·forward_no_reply_id·forward_no_reply_sec·forward_not_logged_in_id·forward_not_reachable_id —
      *  migrate_subscription_cdiv.sql, volte_supplementary_services.md §6A.4) 존재 여부. 없으면 SELECT 식이 빈 값 4열을

@@ -1,0 +1,20 @@
+# 착신 차단 — 지정 번호(ICB cp:identity, TS 24.611 §4.2.1 — volte_supplementary_services.md §6B): callee 사람의 icb_identities 에 blocked 의 번호를 두면
+#   blocked 가 건 호만 603(거절 안내 early media 뒤 603)이고, 다른 발신자(caller)의 호는 그대로 성립한다. 지정 번호는 사람 단위(그 사람의 모든 전화 회선).
+#   fixtures: callee 사람 icb_identities = [blocked 신원](끝나면 원복). --instances 1.
+id: VOLTE-ICB-IDENTITY
+title: 착신 차단(지정 번호) → 그 번호만 603, 다른 발신자는 성립
+tags: [volte, icb, announcement]
+roles:
+  blocked: { pool: volte_ue }
+  caller:  { pool: volte_ue, disjoint_from: blocked }
+  callee:  { pool: volte_ue, disjoint_from: caller }
+flow:
+  - { step: register, who: [blocked, caller, callee], expect: { code: 200 } }
+  - { step: invite,   from: blocked, to: callee, media: { audio: amr-wb, rtp: explicit },
+      expect: { code: 603, early_media_pct: 100, early_rtp_pct: 100 } }
+  - { step: invite,   from: caller, to: callee, media: { audio: amr-wb } }
+  - { step: answer,   who: [callee], expect: { code: 200, srd_ms: { p95: 2000 } } }
+  - { step: media_hold, seconds: 2, expect: { rtp_loss_pct: { max: 0.5 } } }
+  - { step: bye,      from: caller, expect: { sdd_ms: { p95: 300 } } }
+fixtures:
+  icb: { kind: subscriber, roles: [callee], icb_identities: [blocked] }

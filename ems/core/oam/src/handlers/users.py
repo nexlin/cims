@@ -129,7 +129,8 @@ async def _get_me_subscriptions(handler_args, config):
     domain_map = _access_service_domain_map(config)
 
     def _fill(s):
-        s['dnd'] = bool(s['dnd'])
+        if 'icb_all' in s:   # 착신 차단 — 전체(TS 24.611 ICB), 전화 회선만
+            s['icb_all'] = bool(s['icb_all'])
         s['register_time'] = _dt(s['register_time'])
         s['logout_time']   = _dt(s['logout_time'])
         domain = domain_map.get(s.get('service_ref') or '', '')
@@ -145,8 +146,9 @@ async def _get_me_subscriptions(handler_args, config):
                     if table == 'voip_subscriptions' and not _has_voip_table(cur):
                         body[key] = []
                         continue
+                    icb = ", icb_all" if table != 'ptt_subscriptions' else ""   # MMTel ICB 는 ptt 회선에 없다
                     cur.execute(
-                        "SELECT id, service_ref, imsi, sip_transport, dnd, forward_id, "
+                        f"SELECT id, service_ref, imsi, sip_transport{icb}, forward_id, "
                         "       register_time, logout_time "
                         f"FROM {table} WHERE user_id=%s ORDER BY id",
                         (uid,)

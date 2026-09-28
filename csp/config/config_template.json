@@ -149,7 +149,7 @@
     {
       "key": "tas",
       "title": "TAS (VoLTE 서비스)",
-      "description": "VoLTE B2BUA 및 부가 서비스(당겨받기/착신거부/DND/착신전환) 정책. 역할 토글은 Roles.TAS.",
+      "description": "VoLTE B2BUA 및 부가 서비스(당겨받기/착신 차단(ICB)/착신전환) 정책. 역할 토글은 Roles.TAS.",
       "fields": [
         {
           "key": "Setup.Sip.StaleCallTimeout",

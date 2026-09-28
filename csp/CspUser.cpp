@@ -48,10 +48,10 @@ void CspUser::clear() {
     m_strHa1.clear();
     m_strSipTransport.clear();
     m_strAuthScheme.clear();
-    m_bDnd = false;
+    m_bIcbAll = false;
     m_strOrganizationId.clear();
     m_strPickupGroup.clear();
-    m_vecReject.clear();
+    m_vecIcbIdentities.clear();
     m_strForward.clear();
     m_strForwardBusy.clear();
     m_strForwardNoReply.clear();
@@ -112,8 +112,8 @@ bool CspUserMap::_loadUserFromFile( std::string strUserId, CspUser &clsUser ) {
     if ( jsonUser.Has( "service_ref" ) ) clsUser.m_strServiceRef = jsonUser.GetString( "service_ref" );
     if ( jsonUser.Has( "imsi" ) ) clsUser.m_strImsi = jsonUser.GetString( "imsi" );
 
-    std::string dnd = jsonUser.GetString( "dnd" );
-    clsUser.m_bDnd = ( dnd == "true" );
+    // 착신 차단 — 전체(icb_all). 구 키 dnd 는 전환기(한 릴리스)에만 읽는다.
+    clsUser.m_bIcbAll = jsonUser.GetString( jsonUser.Has( "icb_all" ) ? "icb_all" : "dnd" ) == "true";
 
     if ( jsonUser.Has( "forward_id" ) ) clsUser.m_strForward = jsonUser.GetString( "forward_id" );
     if ( jsonUser.Has( "forward_busy_id" ) ) clsUser.m_strForwardBusy = jsonUser.GetString( "forward_busy_id" );
@@ -126,11 +126,13 @@ bool CspUserMap::_loadUserFromFile( std::string strUserId, CspUser &clsUser ) {
     if ( jsonUser.Has( "forward_not_reachable_id" ) )
         clsUser.m_strForwardNotReachable = jsonUser.GetString( "forward_not_reachable_id" );
 
-    if ( jsonUser.Has( "reject_id" ) ) {
-        SimpleJson::JsonNode rejectNode = jsonUser.Get( "reject_id" );
-        if ( rejectNode.type == SimpleJson::JSON_ARRAY ) {
-            for ( size_t i = 0; i < rejectNode.Size(); i++ ) {
-                clsUser.m_vecReject.push_back( rejectNode.At( i ).AsString() );
+    // 착신 차단 — 지정 번호(icb_identities). 구 키 reject_id 는 전환기(한 릴리스)에만 읽는다.
+    {
+        const char *pszKey = jsonUser.Has( "icb_identities" ) ? "icb_identities" : "reject_id";
+        SimpleJson::JsonNode idNode = jsonUser.Get( pszKey );
+        if ( idNode.type == SimpleJson::JSON_ARRAY ) {
+            for ( size_t i = 0; i < idNode.Size(); i++ ) {
+                clsUser.m_vecIcbIdentities.push_back( idNode.At( i ).AsString() );
             }
         }
     }

@@ -1,0 +1,17 @@
+# 착신 차단 — 전체(ICB, TS 24.611 §4.5.2.6.1 — volte_supplementary_services.md §6B): callee 회선의 icb_all 을 켜면 모든 착신이 603 Decline 이다.
+#   거절 안내(announcements.md §3.2 declined — 화중음 6 s)는 early media(183+SDP)로 들려준 뒤 원래 최종 코드 603 그대로 끝낸다.
+#   같은 회선에 착신전환(CFU)도 걸어 둔다 — 착신 차단이 전환보다 우선(603, 전환 대상은 INVITE 를 받지 않는다 · cdiv_181_pct 0).
+#   fixtures: callee 회선 icb_all=true + forward_id = target(끝나면 원복). 픽스처는 역할의 첫 신원에만 적용되므로 --instances 1 로 돈다.
+id: VOLTE-ICB-ALL
+title: 착신 차단(전체) → 603 거절 안내 — 착신전환보다 우선
+tags: [volte, icb, announcement]
+roles:
+  caller: { pool: volte_ue }
+  callee: { pool: volte_ue, disjoint_from: caller }
+  target: { pool: volte_ue, disjoint_from: callee }
+flow:
+  - { step: register, who: [caller, callee, target], expect: { code: 200 } }
+  - { step: invite,   from: caller, to: callee, media: { audio: amr-wb, rtp: explicit },
+      expect: { code: 603, early_media_pct: 100, early_rtp_pct: 100, cdiv_181_pct: { max: 0 } } }
+fixtures:
+  icb: { kind: subscriber, roles: [callee], icb_all: true, forward_to: target }
