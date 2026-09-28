@@ -577,7 +577,7 @@ stop_on: { target_cpu_pct: 85, csp_5xx_pct: 1.0 }
   그룹 = usable 정렬 첫째)·`identities_by_role.<guest>`(그 그룹의 비멤버 후보, 배정 순) — 시나리오 `fixtures:` 의 role 이 `${group}` 으로 그 그룹을 대상으로 잡고 guest 첫 신원의 person 에 배정된다. 동봉 `ptt/group_listen`·
   `group_listen_denied`·`group_nonmember_denied`(S3-SCN-PTT-LISTEN L1~L4). **일제 통화** — `group_call payload: broadcast`(멤버 역할만) = 개시
   INVITE 의 mcptt-info 에 `<broadcast-ind>true`([mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) — 개시자만 발언, 타 멤버 floor 는
-  `payload: denied` 기대). 진행 중 세션 뒤에 보내면 서버가 합류로 다룬다(개시자 불변). 실단말(`real-ue`) 개시자는 컴파일 오류(cimsue-cli 미지원 — U1).
+  `payload: denied` 기대). 진행 중 세션 뒤에 보내면 서버가 합류로 다룬다(개시자 불변). 실단말(`real-ue`) 개시자는 drive `group_call <g> broadcast` — 발언을 놓은 뒤 B-bit Floor Idle 이면 실스택이 호를 스스로 해제한다(U3).
   동봉 `ptt/group_call_broadcast`(PTT-GROUP-CALL-BROADCAST — BC1·BC2·BC3 재합류·BC5 구독 480/105, S3-SCN-PTT-BROADCAST).
 - **역할의 풀** — `roles.X.pool` 은 토폴로지 풀 **이름 또는 `group`**(논리 풀 이름, §4). 워커마다 그 워커의 로컬 풀 하나로 해석된다
   (`tester_compile.resolve_roles`). 워커가 지원하지 않는 단계(`WORKER_STEPS` 밖)와 행위자 kind 게이트 위반(`STEP_VOCAB.kind` — progress/refer 는

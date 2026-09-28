@@ -253,7 +253,7 @@ UE-A                    CSP                          UE-B (지정 번호 A)
 
 - 판정 = `CspUser::IncomingBarredBy(from)`(전체 ∨ 지정 번호 일치 — [volte_supplementary_services.md §6B](volte_supplementary_services.md), 로그 `TAS: Rejected (ICB all|identity)`).
   TAS `ApplyTerminationServices` 가 거절하면 거절 안내 `declined`(화중음)를 early media 로 들려준 뒤 603 그대로 끝낸다([announcements.md §3.2](announcements.md)).
-  다이얼로그 생성 전 조기 스크린(`ScreenInvite`)의 603 은 응답만 나간다. 착신전환(C4)이 걸린 회선이어도 착신 차단이 우선한다.
+  착신 차단은 가입 조건이라 착신자의 등록 여부와 무관하게 이 한 곳에서 판정한다. 착신전환(C4)이 걸린 회선이어도 착신 차단이 우선한다.
 - 검증: 계측기 `VOLTE-ICB-ALL`(603 + 안내, CFU 가 걸려도 603)·`VOLTE-ICB-IDENTITY`(지정 번호 발신자만 603).
 
 ### C4. 착신전환

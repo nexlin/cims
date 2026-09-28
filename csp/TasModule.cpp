@@ -65,22 +65,11 @@ bool CTasModule::OnSipRequest( int iThreadId, CSipMessage *pclsMessage ) {
 }
 
 bool CTasModule::ScreenInvite( CSipMessage *pclsMessage, const char *pszFrom, const char *pszTo ) {
+    (void)pszFrom;
+    // 착신 차단(ICB)은 여기서 하지 않는다 — 다이얼로그 생성 전이라 거절 안내(early media)를 붙일 수 없다.
+    //   종단 서비스(`ApplyTerminationServices`)가 등록 여부와 무관하게 603 + 안내로 판정한다.
     CspUser clsToUser;
     if ( gclsCspUserMap.isAlive( pszTo, clsToUser ) ) {
-        if ( const char *pszIcb = clsToUser.IncomingBarredBy( pszFrom ) ) {
-            CLog::Print( LOG_INFO, "TAS: Rejected (ICB %s) From=%s To=%s", pszIcb, pszFrom, pszTo );
-            // 시도 장부 — 여기는 **다이얼로그 생성 전**이라 정상 경로(`VoipCallStart`)가 아직
-            //   돌지 않았다. 남기지 않으면 착신 차단(ICB)으로 튕긴 호가 성공률·NER 의 분모에서
-            //   통째로 빠지고, 그래서 **거부가 늘수록 성공률이 좋아진다** — 지표가 나빠지는
-            //   방향이 아니라 좋아지는 방향으로 틀려 스스로 드러나지 않는다 (F-54 잔여).
-            //   **응답은 그대로 603 이다** — 와이어 동작은 바꾸지 않고 기록만 더한다.
-            std::string strCallId;
-            if ( gclsCallDir.IsEnabled() && pclsMessage->GetCallId( strCallId ) )
-                gclsCallDir.VoipCallRejected( strCallId, pszFrom, pszTo, SIP_DECLINE );
-            gclsDispatcher.SendResponse( pclsMessage, SIP_DECLINE );
-            return true;
-        }
-
         // 서비스 모드 체크
         if ( gclsSetup.m_strServiceMode == "ptt" ) {
             // ptt 전용 모드가 막은 1:1 발신 — 디스패처의 같은 판정(`EventIncomingCall` 의
@@ -115,10 +104,8 @@ bool CTasModule::ApplyTerminationServices( const char *pszCallId, const char *ps
                                            const CspUser &clsUser, CSipCallRtp *pclsRtp, CSipMessage *pclsMessage ) {
     if ( const char *pszIcb = clsUser.IncomingBarredBy( pszFrom ) ) {
         CLog::Print( LOG_INFO, "TAS: Rejected (ICB %s) From=%s To=%s", pszIcb, pszFrom, pszTo );
-        // 시도 장부 — `ScreenInvite` 를 지나온 호(그때는 착신이 등록 상태가 아니었던 경우)가
-        //   여기서 603 으로 끝난다. 두 지점을 다 막지 않으면 같은 거절이 경로에 따라 세어지거나
-        //   빠진다. `VoipCallRejected` 는 정상 경로가 이미 기록한 세션을 건드리지 않으므로
-        //   두 지점이 겹쳐도 중복으로 세지 않는다.
+        // 시도 장부 — 거절도 시도다. 남기지 않으면 착신 차단으로 튕긴 호가 성공률·NER 의 분모에서
+        //   빠져 거부가 늘수록 성공률이 좋아진다(F-54).
         if ( gclsCallDir.IsEnabled() ) gclsCallDir.VoipCallRejected( pszCallId, pszFrom, pszTo, SIP_DECLINE );
         // 거절 안내(announcements.md §3.2 declined) — 정책 none·CMP 미지원이면 종전대로 603 만
         if ( pclsRtp && gclsAnnouncement.Reject( pszCallId, pclsRtp, pszFrom, pszTo, SIP_DECLINE, NULL, pclsMessage ) )

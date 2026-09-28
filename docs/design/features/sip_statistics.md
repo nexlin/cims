@@ -85,11 +85,9 @@ INVITE 를 넘기기로 결정한 **뒤에야** 기록을 시작하므로, 그 �
 | 자리 | 응답 | 무엇을 막았나 |
 |---|---|---|
 | `CModuleDispatcher::EventIncomingCall` 의 `RejectVoice` | 404 등 | 라우팅·가입자 조회 실패 |
-| `CTasModule::ScreenInvite` | 603 | 착신 가입자 착신 차단(ICB 전체·지정 번호, TS 24.611) — **다이얼로그 생성 전** |
-| `CTasModule::ApplyTerminationServices` | 603 | 같은 판정, 조기 스크린을 지나온 경로 |
+| `CTasModule::ApplyTerminationServices` | 603 | 착신 가입자 착신 차단(ICB 전체·지정 번호, TS 24.611) — 등록 여부 무관 |
 
-두 603 지점이 겹쳐도 중복으로 세지 않는다 — `VoipCallRejected` 는 정상 경로가 이미 만든
-세션 기록이 있으면 아무것도 하지 않는다.
+`VoipCallRejected` 는 정상 경로가 이미 만든 세션 기록이 있으면 아무것도 하지 않는다(중복 없음).
 
 **착신전환은 시도를 늘리지 않는다.** 서버측 전환([volte_supplementary_services.md §6A](volte_supplementary_services.md))은 같은
 호 안에서 B-leg 의 착신만 전환 대상으로 바꾸므로 시도 1건(다이얼 1회)·세션 1건 그대로고, `call.json` 의 callee 는 전환 대상,

@@ -1311,14 +1311,11 @@ def get_group_xml(group_uri):
     fd_val = 'true' if group.get('allow_fd', False) else 'false'
     max_sds = int(group.get('max_sds_size') or 0)
     # 그룹 종류 = <on-network-invite-members> (TS 24.481 §7.2.2 a — true=prearranged, false=chat).
-    #   <mcpttgi:session-type> 은 규격 요소가 아니다 — 단말(SDK·Android)이 invite-members 로 그룹 종류를 읽게 될 때
-    #   (mcptt_broadcast_group_call.md WP5 U5)까지만 prearranged/chat 값으로 싣는 전환기 요소.
     invite_members = 'true' if group_type != 'chat' else 'false'
     hang_timer = int(group.get('hang_timer_sec', GROUP_HANG_TIMER_DEFAULT))
     max_duration = int(group.get('max_duration_sec', GROUP_MAX_DURATION_DEFAULT))
     xml += f"""
     </list>
-    <mcpttgi:session-type>{group_type}</mcpttgi:session-type>
     <mcpttgi:mcdata-allow-short-data-service>{sds_val}</mcpttgi:mcdata-allow-short-data-service>
     <mcpttgi:mcdata-allow-file-distribution>{fd_val}</mcpttgi:mcdata-allow-file-distribution>"""
     if max_sds > 0:
@@ -2334,17 +2331,11 @@ def parse_group_document_xml(xml_text: str) -> dict:
         'org_code': _xtext(ls, 'gi:org-code'),
         'members': None,
     }
-    # 그룹 종류 = <on-network-invite-members> (TS 24.481 §7.2.2 a). 없으면 전환기 폴백 <session-type>
-    #   (규격 밖 요소 — 구 단말). broadcast 는 그룹 종류가 아니다(일제 통화 = 호 속성, TS 24.379 §4.12).
+    # 그룹 종류 = <on-network-invite-members> (TS 24.481 §7.2.2 a). 없으면 그대로 둔다.
+    #   broadcast 는 그룹 종류가 아니다(일제 통화 = 호 속성, TS 24.379 §4.12).
     inv = _xbool(ls, 'gi:on-network-invite-members')
     if inv is not None:
         out['group_type'] = 'prearranged' if inv else 'chat'
-    else:
-        st = _xtext(ls, 'gi:session-type')
-        if st is not None and st not in GROUP_TYPES:
-            raise ValueError(f"session-type '{st}' not one of prearranged/chat "
-                             "(broadcast is a call attribute, not a group type)")
-        out['group_type'] = st
     for k, hi in (('hang_timer_sec', GROUP_HANG_TIMER_MAX), ('max_duration_sec', GROUP_MAX_DURATION_MAX)):
         tag = 'on-network-hang-timer' if k == 'hang_timer_sec' else 'on-network-maximum-duration'
         if _xtext(ls, f'gi:{tag}') is not None and out[k] is None:

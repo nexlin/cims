@@ -212,7 +212,7 @@ REFER 는 403. 기본 true(기존 동작 보존).
 | 규칙 | 동작 |
 |---|---|
 | 대상 | 착신이 **가입자**일 때만(`CspUserMap::Select` — 등록 여부 무관, DB 폴백). 피어로 갈 착신(RecvRequest 가 PendingRoute 를 넣은 호)·PTT 그룹·대표번호는 대상이 아니다 |
-| 조건 | `forward_id` 가 비지 않음. **착신 차단(ICB, §6B) 가입자는 전환하지 않는다**(종단 서비스 603 이 우선 — `ScreenInvite`/`ApplyTerminationServices` 그대로) |
+| 조건 | `forward_id` 가 비지 않음. **착신 차단(ICB, §6B) 가입자는 전환하지 않는다**(종단 서비스 603 이 우선 — `ApplyTerminationServices`) |
 | 대상 번호 | 그 가입자 접속서비스의 다이얼 플랜으로 +E.164 번역([sip_service_model.md §2-10](sip_service_model.md)). 번역 불가(484 감)면 ERROR 로그 + 전환하지 않고 원착신으로 진행(가입자 설정 오류가 발신자를 막지 않는다) |
 | 연쇄 | 전환 대상도 가입자이고 `forward_id` 가 있으면 계속 좇는다(B→C→D). 대상이 가입자가 아니면(피어·대표번호) 거기서 끝 |
 | 상한·루프 | 전환 수(수신 INVITE 의 History-Info 가 이미 담은 `cause` 항목 수 + 이번 연쇄)가 `Setup.Sip.Cdiv.MaxDiversions`(기본 5) 를 넘거나 대상이 연쇄 안에 다시 나오면 **486 Busy Here**(TS 24.604 §4.5.2.6 전환 루프 방어) — `RejectVoice` 로 시도 장부에 남고 `declined`… 아닌 `busy` 상황의 실패 안내 대상 |
@@ -292,7 +292,7 @@ UE-A ◄── 180(같은 SDP) · 200 ◄────────── 180 · 2
 |---|---|---|
 | 회선 `icb_all` — `volte_subscriptions`·`voip_subscriptions`. `ptt_subscriptions` 에는 없다(MMTel ICB 는 MCPTT 대상이 아니다) | 이 회선으로 오는 모든 착신 603 | ICB 무조건 규칙(조건 없음, `allow=false`) |
 | 사람 `icb_identities(user_id, identity)` — 그 사람의 모든 전화 회선에 적용 | 지정 발신 번호 603 | ICB `cp:identity` 규칙 |
-| 판정 — `CspUser::IncomingBarredBy(from)`(전체 ∨ 지정 번호 일치, 맞은 규칙 `all`/`identity` 를 돌려준다)·`IsIncomingBarred(from)`. 호출 = TAS `ScreenInvite`(다이얼로그 생성 전 조기 스크린 — 응답만)·`ApplyTerminationServices`(거절 안내 `declined` early media 뒤 603 — [announcements.md §3.2](announcements.md)). 등록 착신자는 `ScreenInvite` 가 먼저 603 으로 끝내 안내가 나가지 않는다(§6B.5 과제)·`ResolveDiversion`(착신 차단 가입자는 전환하지 않는다)·`TryDivertLeg`(조건부 전환 대상의 착신 차단 검사). 로그 `TAS: Rejected (ICB all)` / `TAS: Rejected (ICB identity)` | 착신전환(§6A)보다 우선 | §4.5.2.6.1 정합 |
+| 판정 — `CspUser::IncomingBarredBy(from)`(전체 ∨ 지정 번호 일치, 맞은 규칙 `all`/`identity` 를 돌려준다)·`IsIncomingBarred(from)`. 호출 = TAS `ApplyTerminationServices`(착신 가입자 한 곳 — 등록 여부와 무관(DB 폴백 조회, 가입 조건이다)·전환된 호면 전환 대상 가입자, 거절 안내 `declined` early media 뒤 603 — [announcements.md §3.2](announcements.md). 다이얼로그 생성 전 조기 스크린은 안내를 붙일 수 없어 쓰지 않는다)·`ResolveDiversion`(착신 차단 가입자는 전환하지 않는다)·`TryDivertLeg`(조건부 전환 대상의 착신 차단 검사). 로그 `TAS: Rejected (ICB all)` / `TAS: Rejected (ICB identity)` | 착신전환(§6A)보다 우선 | §4.5.2.6.1 정합 |
 | 설정 — 콘솔 회선 편집 체크박스 "착신 차단 — 전체 (모든 착신을 603 으로 거절, 착신 전환보다 우선)", 지정 번호 목록은 사람 드로어의 "착신 차단 — 지정 번호" 카드(관리 API `icb_identities`, 즉시 저장) | — | 운영자 제공 방식은 규격 허용. Ut/XCAP 사용자 설정·ACR 은 미구현(§9) |
 
 종료 사유는 `declined`(603 — 단말 거절과 같은 사유, 착신 차단 전용 사유는 없다)이고 시도 장부에는 거절 시도로 남는다(`VoipCallRejected`)
@@ -329,51 +329,6 @@ UE-A ◄── 180(같은 SDP) · 200 ◄────────── 180 · 2
    `cims-tester run VOLTE-ICB-ALL --topology <대상> --instances 1` · `cims-tester run VOLTE-ICB-IDENTITY --topology <대상> --instances 1`
    (픽스처는 역할의 첫 신원에만 적용된다).
 
-### 6B.5 남은 과제 — 등록 착신자에게 거절 안내가 나가지 않는다
-
-**현상**(.45 실측 2026-09-29, csp 0.2.158): `VOLTE-ICB-ALL`·`VOLTE-ICB-IDENTITY` 에서 603 과 "착신전환보다 우선"은 맞지만
-거절 안내(`declined` early media — 화중음 6 s)가 없다. 기대치 `early_media_pct`·`early_rtp_pct` 가 관측되지 않고, CSP 로그는
-`TAS: Rejected (ICB all)` 뒤에 `RELAY_PLAY` 가 없다(run `20260929-003937-b9e20d` · `20260929-003952-5c9186`). 안내 재생기 자체는
-정상이다(같은 대상에서 `VOLTE-ANN-NO-ANSWER` PASS, `Setup.Announcement.Enable=true`).
-
-**원인** — 착신 차단 판정 지점이 둘이고, 안내가 붙는 지점에 등록 착신자가 닿지 않는다.
-
-```
-INVITE ─► CModuleDispatcher::RecvRequest (다이얼로그 밖)
-            ├─ DecideOutboundRoute                       (정책 REJECT → 403)
-            ├─ CTasModule::ScreenInvite                  착신자 등록(isAlive) ∧ IncomingBarredBy
-            │     └─ SendResponse 603 ─ 끝                 ← 다이얼로그 없음 → 안내 불가
-            └─ return false → B2BUA (psip 다이얼로그 생성)
-                 └─ EventIncomingCall
-                      ├─ CTasModule::ResolveDiversion    착신 차단 가입자에서 전환 중단
-                      └─ CTasModule::ApplyTerminationServices
-                            └─ IncomingBarredBy → gclsAnnouncement.Reject  (183+SDP → 화중음 → 603)
-                                                  └─ 정책 none·CMP 불가 → StopCall(603)
-```
-
-안내는 A leg relay(`RELAY_ADD`)와 183 early answer 가 필요해 다이얼로그가 있어야 한다([announcements.md](announcements.md) §3.2 —
-"다이얼로그 이전 거절은 응답만", 판정 지점 이동은 §11 P2).
-`ScreenInvite`(`csp/TasModule.cpp`, 호출 = `csp/ModuleDispatcher.cpp` `RecvRequest`)는 등록 착신자면 늘 먼저 끝내므로
-`ApplyTerminationServices` 에는 **미등록 착신자만** 닿는다. 안내가 필요한 일반 호(등록 착신자)가 빠지는 거꾸로 된 구조다.
-
-**보완 방향 — 판정 한 곳**: `ScreenInvite` 의 착신 차단 분기를 없애고 착신 차단은 `ApplyTerminationServices` 한 곳에서 판정한다.
-`ScreenInvite` 에는 ptt 전용 모드 403 만 남긴다.
-
-| 확인할 동작 | 보완 뒤 |
-|---|---|
-| 착신전환과의 순서(§6A) | 그대로 — `ResolveDiversion` 이 착신 차단 가입자에서 전환을 멈추고(`IsIncomingBarred` → break) 종단 서비스가 그 가입자 규칙으로 603. 원 착신자 차단 = 전환 없이 603, 전환 대상의 차단 = 그 대상 기준 603 |
-| 안내 정책 none(발신 프로파일 `trunk` 등)·CMP 안내 불가 | `Reject` 가 false → `StopCall(603)` — 안내 없는 603(지금 `ScreenInvite` 결과와 같다) |
-| 시도 장부 | `ApplyTerminationServices` 는 같은 흐름에서 `VoipCallStart` 보다 먼저 돈다 — `VoipCallRejected` 가 603 종료 행(`end_reason` declined)을 만들고, 안내 결과는 그 행의 `announcement` 로 붙는다(지금 미등록 착신자 경로와 같은 기록). `ScreenInvite` 쪽 기록은 분기와 함께 빠진다. [announcements.md](announcements.md) §3.2·§11 이 걸림돌로 든 "시도 장부 기록 시점"은 이 경로에서는 이미 풀려 있다 |
-| 비용 | 차단된 호도 다이얼로그를 만들고, 안내가 있으면 relay 1개를 안내 시간(6 s)만큼 쓴다 — 거절 전 안내(TS 24.628)의 비용 |
-| 문서 | 이 절을 지우고 §6B.2 판정 행·§8 TAS 훅 표·[announcements.md](announcements.md) §2 표의 `declined` 비고·§3.2 다이얼로그 이전 거절 문단·§11 을 최종 동작으로 고친다 |
-
-**확인**
-
-- 계측기 `VOLTE-ICB-ALL`·`VOLTE-ICB-IDENTITY` 기대치 전부 PASS — 603 · `early_media_pct` 100 · `early_rtp_pct` 100 · `cdiv_181_pct` 0,
-  IDENTITY 의 비차단 발신자는 성립
-- 미등록 착신자 차단도 같은 결과(보완 전에도 이 경로를 탄다), 발신 프로파일 `trunk`(declined none) = 안내 없는 603
-- `S1-UNIT-CSP`, CSP 로그 `TAS: Rejected (ICB …)` 뒤 `Announcement: declined → … play=…` 와 `RELAY_PLAY`
-
 ---
 
 ## 7. CSP↔CMP 계약 — 재고정은 RELAY_MODIFY 하나로
@@ -408,9 +363,9 @@ P2(표준형 — 수신 INVITE-Replaces·dialog 이벤트 패키지·489)·P3(�
 | `OnIncomingCall` | 수신 INVITE-Replaces(RFC 3891) → `PickUpLeg` 교체 (§6.2) |
 | `OnCallRing` / `OnCallStart` / `OnCallEnd` | dialog-event early/confirmed/terminated 통지 (§6.2) + blind transfer 진행 NOTIFY·완결(재고정·재결합)·실패 정리 (§6.1) |
 | `OnTransfer` / `OnBlindTransfer` | attended / blind transfer (§6) |
-| `ScreenInvite` | RecvRequest INVITE 조기 스크린 — 착신 차단(ICB, §6B) 603 (다이얼로그 생성 전 — 등록 착신자는 여기서 끝나 거절 안내가 없다, §6B.5 과제) |
+| `ScreenInvite` | RecvRequest INVITE 조기 스크린 — ptt 전용 서비스 모드 403 (다이얼로그 생성 전) |
 | `TryPickupDial` | 미등록 착신의 픽업 피처코드 판정·수행 (§5.2) |
-| `ApplyTerminationServices` | 착신 가입자 착신 차단(ICB 전체·지정 번호, §6B) 603 + 거절 안내 `declined` |
+| `ApplyTerminationServices` | 착신 가입자 착신 차단(ICB 전체·지정 번호, §6B) 603 + 거절 안내 `declined` — 등록 여부 무관 |
 | `ResolveDiversion` | 착신전환(TS 24.604 CFU) 대상·연쇄·상한 판정 — 디스패처가 라우팅 앞에서 부르고 B-leg 를 전환 대상으로 낸다 (§6A) |
 
 relay leg SDES 평가/재작성 헬퍼(`EvalRelayOfferSdes`/`ApplyRelayLegOffer`/`EvalRelayAnswerSdes`/

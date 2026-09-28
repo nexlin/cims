@@ -76,9 +76,9 @@ struct PilotDialogSnapshot {
  *  - OnBlindTransfer   blind transfer — 지시자 leg index·포트 승계 INVITE (§6.1)
  *
  * 순서 의존 삽입점 (디스패처 라우팅 골격의 정해진 위치에서 호출):
- *  - ScreenInvite               RecvRequest INVITE 조기 스크린 — 착신 차단(ICB)·ptt 전용 모드
+ *  - ScreenInvite               RecvRequest INVITE 조기 스크린 — ptt 전용 모드
  *  - TryPickupDial              미등록 착신의 픽업 피처코드 소비 (§5.2)
- *  - ApplyTerminationServices   착신 가입자 착신 차단(ICB, TS 24.611) 603
+ *  - ApplyTerminationServices   착신 가입자 착신 차단(ICB, TS 24.611) 603 + 거절 안내 — 등록 여부 무관
  *  - ResolveDiversion           착신전환(TS 24.604 CDIV — 서버측 전환) 대상·이력 판정 (§6A)
  */
 class CTasModule : public IModule {
@@ -97,8 +97,8 @@ public:
     bool OnTransfer( const char *pszCallId, const char *pszReferToCallId, bool bScreened ) override;
     bool OnBlindTransfer( const char *pszCallId, const char *pszReferToId ) override;
 
-    /** INVITE 조기 스크린 (RecvRequest — 다이얼로그 생성 전) — 착신 가입자 착신 차단(ICB, TS 24.611) 603,
-     *  ptt 전용 서비스 모드 403. true=응답 발신·소비. */
+    /** INVITE 조기 스크린 (RecvRequest — 다이얼로그 생성 전) — ptt 전용 서비스 모드 403. true=응답 발신·소비.
+     *  착신 차단(ICB)은 거절 안내를 붙이려고 종단 서비스(ApplyTerminationServices)에서 판정한다. */
     bool ScreenInvite( CSipMessage *pclsMessage, const char *pszFrom, const char *pszTo );
 
     /** 픽업 다이얼(피처코드) 판정·수행 — 미등록 착신에서만 호출된다 (§5.2).

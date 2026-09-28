@@ -186,7 +186,7 @@ B2BUA 골격(라우팅·relay 수명)은 ModuleDispatcher 가 유지하고, 보�
 
 | 서비스 | 트리거 | 동작 |
 |--------|--------|------|
-| 착신 차단 — 전체 | `CspUser::m_bIcbAll == true` | 603 Decline (`ScreenInvite`/`ApplyTerminationServices` — 판정 `IncomingBarredBy(from)`, 로그 `TAS: Rejected (ICB all)`). 다이얼로그가 있으면 거절 안내 `declined` early media 뒤 603. 착신전환보다 우선 — [volte_supplementary_services.md §6B](../features/volte_supplementary_services.md) |
+| 착신 차단 — 전체 | `CspUser::m_bIcbAll == true` | 603 Decline (`ApplyTerminationServices` — 판정 `IncomingBarredBy(from)`, 등록 여부 무관, 로그 `TAS: Rejected (ICB all)`). 거절 안내 `declined` early media 뒤 603. 착신전환보다 우선 — [volte_supplementary_services.md §6B](../features/volte_supplementary_services.md) |
 | 착신 차단 — 지정 번호 | `CspUser::m_vecIcbIdentities` 에 발신자 포함 (사람 단위 — 그 사람의 모든 전화 회선) | 603 Decline (같은 판정, 로그 `TAS: Rejected (ICB identity)`) |
 | 착신전환 | `CspUser::m_strForward` 설정됨(등록 여부 무관) | 서버측 전환(TS 24.604) — `ResolveDiversion` 이 대상(연쇄·상한 `Setup.Sip.Cdiv`)을 정하면 발신자 181, B-leg 를 전환 대상으로 + `History-Info`(RFC 7044 cause=302) + 전환 안내(`forwarded`) — [volte_supplementary_services.md §6A](../features/volte_supplementary_services.md) |
 | 조건부 착신전환 | `m_strForwardBusy`(CFB 486/600) / `m_strForwardNoReply`(+`m_iForwardNoReplySec`, CFNR 시한·480/408) / `m_strForwardNotLoggedIn`(CFNL 미등록) | 디스패처 `TryDivertLeg`(`EventCallEnd`·`Tick`) — 같은 relay·A-leg 위에 전환 대상으로 새 B-leg, History-Info cause 486/408, 181·전환 안내 · CFNL 은 `ResolveDiversion`(cause 404) — §6A.4 |

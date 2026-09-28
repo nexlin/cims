@@ -1122,6 +1122,17 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         }
     }
 
+    // TAS 종단 서비스: 착신 차단(ICB) 603 + 거절 안내 — 가입 조건이라 등록 여부와 무관하다(TS 24.611, DB 폴백 조회).
+    //   전환된 호면 전환 대상 가입자의 것(TS 24.604 diverted-to user 의 종단 서비스). 피어로 갈 호는 대상이 아니다.
+    //   거절은 모듈 안에서 응답하므로 시도 기록도 **모듈 안에서** 남긴다(여기서 `RejectVoice` 를 쓰면 응답을 두 번
+    //   보낸다).
+    if ( !v3Routed && m_clsTas.IsEnabled() ) {
+        CspUser clsTermUser;
+        if ( gclsCspUserMap.Select( pszTo, clsTermUser ) &&
+             m_clsTas.ApplyTerminationServices( pszCallId, pszFrom, pszTo, clsTermUser, pclsRtp, pclsMessage ) )
+            return;
+    }
+
     if ( !v3Routed && gclsCspUserMap.isAlive( pszTo, clsUser ) == false ) {
         CspPttGroup clsGroup;
         if ( m_clsPttAs.IsEnabled() && gclsGroupMap.Select( pszTo, clsGroup ) ) {
@@ -1145,14 +1156,6 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     }
 
     if ( GetCallOwner( pszCallId ) == NULL ) SetCallOwner( pszCallId, &m_clsTas );
-
-    // TAS: 착신 차단(ICB) 603 (전환된 호면 전환 대상 가입자의 것 — TS 24.604 diverted-to user 의 종단 서비스 적용)
-    //   거절은 모듈 안에서 응답하므로 시도 기록도 **모듈 안에서** 남긴다(여기서 `RejectVoice`
-    //   를 쓰면 응답을 두 번 보낸다). 착신 식별자를 넘기는 이유가 그것이다 — 장부의 callee 가
-    //   표·이력의 다른 자리와 같은 문자열이어야 한다.
-    if ( m_clsTas.IsEnabled() &&
-         m_clsTas.ApplyTerminationServices( pszCallId, pszFrom, pszTo, clsUser, pclsRtp, pclsMessage ) )
-        return;
 
     // B2BUA 호 설정
     if ( bRoutePrefix == false ) {

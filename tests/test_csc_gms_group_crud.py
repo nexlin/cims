@@ -41,7 +41,7 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def _doc(uri, name, members, session_type="prearranged", extra=""):
+def _doc(uri, name, members, group_type="prearranged", extra=""):
     entries = "".join(
         f'<entry uri="{u}"><rl:display-name>{u}</rl:display-name>'
         f'<mcpttgi:participant-type>{r}</mcpttgi:participant-type>'
@@ -50,7 +50,8 @@ def _doc(uri, name, members, session_type="prearranged", extra=""):
             f'xmlns:rl="urn:ietf:params:xml:ns:resource-lists" xmlns:cp="urn:ietf:params:xml:ns:common-policy" '
             f'xmlns:mcpttgi="urn:3gpp:ns:mcpttGroupInfo:1.0"><list-service uri="{uri}">'
             f'<display-name>{name}</display-name><list>{entries}</list>'
-            f'<mcpttgi:session-type>{session_type}</mcpttgi:session-type>{extra}</list-service></group>')
+            f'<mcpttgi:on-network-invite-members>{"false" if group_type == "chat" else "true"}'
+            f'</mcpttgi:on-network-invite-members>{extra}</list-service></group>')
 
 
 class _Base(unittest.TestCase):
@@ -122,6 +123,7 @@ class ParseTests(unittest.TestCase):
         self.assertEqual((d["max_members"], d["require_affiliation"], d["org_code"]), (7, False, "TEAM01"))
         # 그룹 종류 = on-network-invite-members (TS 24.481 §7.2.2 a), 호 타이머 = xs:duration 규격 요소명
         self.assertIn("<mcpttgi:on-network-invite-members>false</mcpttgi:on-network-invite-members>", xml)
+        self.assertNotIn("session-type", xml)   # 규격 밖 요소 — 그룹 문서에 싣지 않는다
         self.assertIn("<mcpttgi:on-network-hang-timer>PT5S</mcpttgi:on-network-hang-timer>", xml)
         self.assertIn("<mcpttgi:on-network-maximum-duration>PT600S</mcpttgi:on-network-maximum-duration>", xml)
         self.assertNotIn("on-network-hang-time>", xml)
@@ -129,19 +131,17 @@ class ParseTests(unittest.TestCase):
         self.assertEqual([(x["user_id"], x["role"], x["priority"]) for x in d["members"]],
                          [("+82510001001", "chair", 1), ("+82500000001", "participant", 5)])
 
-    def test_group_type_from_invite_members_over_session_type(self):
-        inv = "<mcpttgi:on-network-invite-members>{}</mcpttgi:on-network-invite-members>"
-        d = m.parse_group_document_xml(_doc("tel:g-00000001", "n", [], session_type="chat",
-                                            extra=inv.format("true")))
-        self.assertEqual(d["group_type"], "prearranged")   # invite-members 가 정본, session-type 은 전환기 폴백
-        d = m.parse_group_document_xml(_doc("tel:g-00000001", "n", [], extra=inv.format("false")))
+    def test_group_type_from_invite_members_only(self):
+        d = m.parse_group_document_xml(_doc("tel:g-00000001", "n", []))
+        self.assertEqual(d["group_type"], "prearranged")
+        d = m.parse_group_document_xml(_doc("tel:g-00000001", "n", [], group_type="chat"))
         self.assertEqual(d["group_type"], "chat")
-        d = m.parse_group_document_xml(_doc("tel:g-00000001", "n", [], session_type="chat"))
-        self.assertEqual(d["group_type"], "chat")
-
-    def test_broadcast_is_not_a_group_type(self):
-        with self.assertRaises(ValueError):
-            m.parse_group_document_xml(_doc("tel:g-00000001", "n", [], session_type="broadcast"))
+        # 규격 밖 <session-type> 은 읽지 않는다 — invite-members 가 없으면 그룹 종류 불변(None)
+        d = m.parse_group_document_xml(
+            '<group xmlns="urn:oma:xml:poc:list-service" xmlns:mcpttgi="urn:3gpp:ns:mcpttGroupInfo:1.0">'
+            '<list-service uri="tel:g-00000001"><display-name>n</display-name>'
+            '<mcpttgi:session-type>chat</mcpttgi:session-type></list-service></group>')
+        self.assertIsNone(d["group_type"])
 
     def test_hang_timer_xs_duration(self):
         for text, want in (("PT30S", 30), ("PT1M", 60), ("PT1M30S", 90), ("PT2.5S", 2), ("45", 45), ("P0D", 0)):
@@ -170,8 +170,6 @@ class ParseTests(unittest.TestCase):
             m.parse_group_document_xml('<!DOCTYPE x [<!ENTITY a "b">]><group/>')
         with self.assertRaises(ValueError):
             m.parse_group_document_xml("<a>" + "x" * (m._GMS_MAX_BODY + 1) + "</a>")
-        with self.assertRaises(ValueError):
-            m.parse_group_document_xml(_doc("tel:g-00000001", "n", [], session_type="party"))
         with self.assertRaises(ValueError):
             m.parse_group_document_xml(_doc("tel:g-00000001", "n", [("tel:+82500000001", "boss", 1)]))
         with self.assertRaises(ValueError):

@@ -8,8 +8,7 @@
 > 근거 규격 판본: TS 24.379 V18.13.0 · TS 24.380 V18.7.0 · TS 24.481 V18.3.0 (Release 18).
 >
 > **구현 상태** — 서버(CSP·CMP·CSC·DB·콘솔)·검증(cspsim·계측기·S3)·단말 코어(SDK·Android PTT — §4.4 U1~U5)는 반영됐다(§2).
-> 남은 것은 관제 앱 동작(U6 — Windows 쪽)·GMS 문서의 전환기 `<session-type>` 제거(U5 가 들어갔으므로 가능)·최소 affiliation
-> 인원 해제(R10 ③)·계측기 real-ue 게이트 개방(cimsue-cli `--broadcast` 지원)이다.
+> 남은 것은 관제 앱 동작(U6 — Windows 쪽)·최소 affiliation 인원 해제(R10 ③)다.
 
 ---
 
@@ -37,7 +36,7 @@
 | R1 | CSP 가 개시 INVITE 의 `<broadcast-ind>` 로 세션 속성을 정한다(`CMcpttInfo::bBroadcast` → `ProcessGroupCall`). 단말은 `GroupCallOptions.broadcast`(SDK)·`joinGroupCall(broadcast=true)`(Android PTT)로 `prearranged` + `<broadcast-ind>true` 를 싣는다 | `csp/McpttInfo.h`, `csp/GroupCallService.cpp` `ProcessGroupCall` · `sdk/core/src/mcptt/mcptt_xml.cpp` · `android/ptt-client/.../McpttXml.kt` | ✅ |
 | R2 | 멤버는 어느 편성(prearranged) 그룹에서나 일제 통화를 개시한다 — 그룹 종류는 `prearranged`/`chat` 뿐이다 | `sql/migrate_ptt_groups_broadcast_call.sql`, `csc/src/handlers/admin.py` | ✅ |
 | R3 | fan-out mcptt-info = `session-type`(그룹 종류) + `<broadcast-ind>true` | `GroupCallService.cpp` `BuildGroupInfoXml` | ✅ |
-| R4 | 그룹 문서의 그룹 종류 = `<on-network-invite-members>`. 단말(SDK `GroupDoc`·Android `CscModels`/`McpttXml`)은 이 요소로 판정하고 없는 옛 문서만 `<mcpttgi:session-type>` 으로 읽으며, SDK 가 쓰는 PUT 본문에는 session-type 을 싣지 않는다. 서버 문서의 전환기 `<mcpttgi:session-type>` 은 아직 함께 실린다 | `csc/src/services/mcptt.py` · `sdk/core/src/csc/group_doc.cpp` | △ (서버 전환기 요소 — 제거 가능) |
+| R4 | 그룹 문서의 그룹 종류 = `<on-network-invite-members>`. 단말(SDK `GroupDoc`·Android `CscModels`/`McpttXml`)은 이 요소로 판정하고 없는 옛 문서만 `<mcpttgi:session-type>` 으로 읽으며, SDK 가 쓰는 PUT 본문에는 session-type 을 싣지 않는다. 서버 문서도 `<mcpttgi:session-type>` 을 싣지 않고, XCAP PUT 은 invite-members 만 읽는다(없으면 그룹 종류 불변) | `csc/src/services/mcptt.py` · `sdk/core/src/csc/group_doc.cpp` | ✅ |
 | R5 | CMP 가 개시자 외 Floor Request 를 Deny #5 — 긴급 tier 검사보다 먼저 | `cmp/PMcpttGroup.cpp` `handleFloorRequest` | ✅ |
 | R6 | Floor Indicator 0x4000·Permission 0 | `cmp/PMcpttGroup.cpp` `_indicatorFor`·`broadcastFloorStatus` | ✅ |
 | R7 | 세션 속성(개시자·broadcast)은 개시 INVITE 에서 한 번 정한다(CSP 세션 캐시). CMP 도 세션 개시 ADD 에서만 반영 | `GroupCallService.cpp` `m_mapGroupSession`, `cmp/PCmpServer.cpp` `processAddGroup` | ✅ |
@@ -200,8 +199,8 @@
 |---|---|
 | 신규 `sql/migrate_ptt_groups_broadcast_call.sql` | 멱등(information_schema 확인 + PREPARE/EXECUTE, `migrate_ptt_allow_create_group.sql` 관례). `ptt_groups` 에 `hang_timer_sec INT NOT NULL DEFAULT 30`(T4)·`max_duration_sec INT NOT NULL DEFAULT 3600`(TNG3) 추가 → `group_type='broadcast'` 행을 `prearranged` 로 바꾸고 `hang_timer_sec=3` → ENUM 을 `('prearranged','chat')` 로 축소. 머리 주석에 이 문서 링크 |
 | `sql/cims_schema.sql`(~183)·[db_schema.md](../db_schema.md) | 같은 최종 스키마 |
-| `csc/src/services/mcptt.py` 그룹 문서 생성(~1265-1300) | `<on-network-invite-members>` = `group_type=='prearranged'`, `<on-network-hang-timer>PT{n}S</...>`, `<on-network-maximum-duration>PT{n}S</...>`(규격 요소명). 비표준 `<mcpttgi:session-type>` 은 **WP5 단말(U5)이 들어갈 때까지 prearranged/chat 값으로만** 유지(전환기 — Android·SDK 가 아직 이 요소로 그룹 종류를 읽는다), WP5 에서 제거 |
-| 같은 파일 XCAP PUT 파싱(~2278-2297) | 그룹 종류를 `on-network-invite-members` 로(없으면 session-type 폴백 — 전환기), hang-timer·maximum-duration(xs:duration) 파싱 |
+| `csc/src/services/mcptt.py` 그룹 문서 생성(~1265-1300) | `<on-network-invite-members>` = `group_type=='prearranged'`, `<on-network-hang-timer>PT{n}S</...>`, `<on-network-maximum-duration>PT{n}S</...>`(규격 요소명). 비표준 `<mcpttgi:session-type>` 은 싣지 않는다 |
+| 같은 파일 XCAP PUT 파싱(~2278-2297) | 그룹 종류를 `on-network-invite-members` 로(없으면 그룹 종류 불변), hang-timer·maximum-duration(xs:duration) 파싱 |
 | `csc/src/handlers/admin.py`(~1580 `_create_group`, ~1682 `_update_group`) | `group_type` 허용값 `prearranged`/`chat`, `hang_timer_sec`·`max_duration_sec` 필드(범위 검사) — GROUP_CHANGED 통지는 기존 경로 |
 | 시험 | `tests/test_csc_gms_group_crud.py` 에 그룹 문서 요소·XCAP PUT 왕복 케이스 추가 |
 | 문서 | [mcptt_api.md](../../api/mcptt_api.md) 그룹 문서, [admin_api.md](../../api/admin_api.md) 그룹 API |

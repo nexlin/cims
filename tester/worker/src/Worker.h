@@ -376,6 +376,7 @@ private:
     HttpResponse runStop(const std::string& id, const Json& doc);
     HttpResponse runGet(const std::string& id);
     void destroyPool(Pool* pool);
+    static void stopSessions(const std::vector<SimSession*>& sessions, bool del);   // SimSession::Stop 병렬(단말당 1~2 s)
     bool buildUePool(Pool* pool, const Json& d, std::string& err);
     bool buildPeerPool(Pool* pool, const Json& d, std::string& err);
     bool buildRealUePool(Pool* pool, const Json& d, std::string& err);
@@ -448,6 +449,7 @@ private:
     void epFloorRelease(Endpoint* ep, bool held);
     bool epPickup(Endpoint* from, const std::string& code, const std::string& number);   // real-ue 픽업(피처코드 다이얼)
     bool epUnregister(Endpoint* ep);            // epilogue deregister — UE 스택 정지 / 실단말 unregister
+    void epUnregisterAll(const std::vector<Endpoint*>& eps);   // 여러 단말 deregister — UE 스택 정지는 병렬(stopSessions)
     Json realRequest(Endpoint* ep, const std::string& cmd);
     bool resolveSample(const std::string& file, std::string& out, std::string& err) const;
     bool tlsRequirements(bool needCa, bool needClientCert, std::string& err) const;   // 풀 TLS 옵션 ↔ 워커 Tls.* 파일

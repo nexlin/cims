@@ -44,7 +44,7 @@ SIP-I 트렁크의 ISUP 안내 인디케이터.
 | `unreachable` 부재 | CSP 판정 480(가입자는 알지만 도달 경로 없음 — 미등록) | TS 24.229 §5.4.3.3, RFC 3261 §21.4.18 | 안내 "전화를 받을 수 없습니다" → **480** |
 | `not_found` 없는 번호 | 404·410, cause 1 | TS 24.229 | 안내 "없는 번호입니다" → **404** |
 | `invalid` 번호 불완전 | 484(다이얼 플랜 번역 불가) | TS 24.229 §5.4.3.2 | 안내 "없는 번호입니다" → **484** |
-| `declined` 거절 | 603(단말 거절·착신 차단 ICB — TS 24.611 §4.5.2.6.1), cause 21. 착신 차단의 등록 착신자 호는 아직 안내 없이 603([volte_supplementary_services.md](volte_supplementary_services.md) §6B.5 과제) | TS 24.628 | 화중음 6 s → **603** |
+| `declined` 거절 | 603(단말 거절·착신 차단 ICB — TS 24.611 §4.5.2.6.1), cause 21. | TS 24.628 | 화중음 6 s → **603** |
 | `congestion` 혼잡 | 5xx(재라우팅 소진)·488(코덱 불일치·변환 슬롯 소진)·CMP 자원 없음, cause 34/42 | E.182 §4.5 | 혼잡음 6 s → **원코드** |
 | `forbidden` 차단 | 403(ACL·채널 정책) | — | **안내 없음**(보안 — 응답만) |
 | `hold` 보류 | 한 leg 의 re-INVITE offer `a=sendonly`/`a=inactive` | TS 24.610 §4.5.2.4 | 피보류 leg 에 보류 음악 loop, resume(sendrecv) 에 정지 |
@@ -111,9 +111,8 @@ UE-A                     CSP                          CMP                       
 를 먼저 부르고, 인수되지 않으면(정책 none·CMP 미지원·SDES 불일치·조립 실패) 종전처럼 `StopCall`. 시도 장부(`VoipCallRejected`)는 인수 여부와 무관하게 남는다.
 자체 거절한 UAS 다이얼로그에는 psip 가 `EventCallEnd` 를 올리지 않으므로 최종 응답 뒤의 마감(CDR·DB·`CallMap.Delete`→RELAY_REMOVE·소유권)은 서비스가 직접 한다.
 
-**다이얼로그 이전 거절**(`RecvRequest` 단계 — `ScreenInvite` 603, 다이얼 플랜 484 의 일부)은 early media 를 낼 다이얼로그가 없어 **응답만** 나간다(현행).
-판정 지점을 `EventIncomingCall` 로 옮기는 것은 P2(§11). 착신 차단 603 은 그 판정이 `ApplyTerminationServices` 에도 있으므로
-`ScreenInvite` 분기만 걷으면 된다 — 보완 방향·확인 항목은 [volte_supplementary_services.md](volte_supplementary_services.md) §6B.5.
+**다이얼로그 이전 거절**(`RecvRequest` 단계 — ptt 전용 모드 403·다이얼 플랜 484 의 일부)은 early media 를 낼 다이얼로그가 없어 **응답만** 나간다.
+착신 차단 603 은 그래서 다이얼로그 이전에 판정하지 않는다 — `EventIncomingCall` 의 종단 서비스 한 곳(등록 여부 무관)에서 안내와 함께 끝난다.
 
 ### 3.3 보류 음악 (TS 24.610)
 
@@ -465,7 +464,7 @@ CMake `dist` 가 `dist/cmp/announcements/sys/` 에 복사하고, OAM 패키지�
   **망 in-band 대기음**(`mode=mix`)은 §3.6 으로 구현 — 남은 것은 실단말(Alert-Info 대기음·in-band 청취) 실측.
 - **착신전환(TS 24.604)**: CFU·CFB·CFNR·CFNL 서버측 전환과 `forwarded` 안내는 구현(§3.5·§12 ⑪⑫, [volte_supplementary_services.md §6A](volte_supplementary_services.md)). 남은 것 =
   피어·미등록 대상으로의 조건부 전환(지금은 등록 가입자만) · 전환자(diverting user) 통지(TS 24.604 comm-div-info 이벤트 패키지) · `Privacy: history`.
-- **다이얼로그 이전 거절**(3.2)의 판정 지점 이동 — 착신 차단 603 이 먼저([volte_supplementary_services.md](volte_supplementary_services.md) §6B.5, `VOLTE-ICB-*` 안내 기대치가 이것을 본다) · **다국어 세트**(프로파일을 언어별로 두면 된다 — 모델 변경 없음). 가입자 링백 WAV 업로드는 §6.3 `sub:` 로 구현.
+- **다이얼로그 이전 거절**(3.2 — 다이얼 플랜 484 의 일부)의 판정 지점 이동 · **다국어 세트**(프로파일을 언어별로 두면 된다 — 모델 변경 없음). 가입자 링백 WAV 업로드는 §6.3 `sub:` 로 구현.
 - **관제 큐/ACD**([dispatch_center.md §10](dispatch_center.md)): 대표번호 대기열의 "잠시만 기다려 주십시오"·순번 안내는 3.4 의 링백 재생기(repeat 0)에
   시퀀스 교체(RELAY_PLAY 교체 = `replaced`)를 얹는 것이다.
 - 런타임 인코딩(PCM 마스터 → leg 코덱, 변환 슬롯 사용)·영상 안내 · mix 의 독립 송출(상대가 조용할 때 대기음만 내기 — 지금은 relay 위에만 얹는다).

@@ -433,6 +433,21 @@ long long Worker::realProcesses() const {
     return n;
 }
 
+void Worker::stopSessions(const std::vector<SimSession*>& sessions, bool del) {
+    const size_t nThreads = std::min<size_t>(8, std::max<size_t>(1, sessions.size()));
+    std::vector<std::thread> workers;
+    std::atomic<size_t> next{0};
+    for (size_t t = 0; t < nThreads; ++t)
+        workers.emplace_back([&]() {
+            for (size_t i = next++; i < sessions.size(); i = next++) {
+                if (!sessions[i]) continue;
+                sessions[i]->Stop(5);
+                if (del) delete sessions[i];
+            }
+        });
+    for (auto& w : workers) w.join();
+}
+
 void Worker::destroyPool(Pool* pool) {
     // UE 스택 정리는 병렬로 — SimSession::Stop(로그아웃 + 스택 정지)이 단말당 1~2 s 걸려 40 단말 풀 교체가 80 s 를 넘겼다
     //   (컨트롤러 POST /pools 60 s 시한 초과 → run error, tb48 실측). 맵 항목은 먼저 떼고 정지·해제만 스레드로 나눈다
@@ -440,18 +455,7 @@ void Worker::destroyPool(Pool* pool) {
     for (auto& ep : pool->eps) {
         if (ep->s) { m_bySession.erase(ep->s); sessions.push_back(ep->started ? ep->s : nullptr); if (!ep->started) delete ep->s; ep->s = nullptr; }
     }
-    {
-        const size_t nThreads = std::min<size_t>(8, std::max<size_t>(1, sessions.size()));
-        std::vector<std::thread> workers;
-        std::atomic<size_t> next{0};
-        for (size_t t = 0; t < nThreads; ++t)
-            workers.emplace_back([&]() {
-                for (size_t i = next++; i < sessions.size(); i = next++) {
-                    if (sessions[i]) { sessions[i]->Stop(5); delete sessions[i]; }
-                }
-            });
-        for (auto& w : workers) w.join();
-    }
+    stopSessions(sessions, true);
     if (pool->natFd >= 0) { close(pool->natFd); pool->natFd = -1; }
     if (pool->peer) { m_byPeer.erase(pool->peer.get()); pool->peer->Stop(); pool->peer.reset(); }
     if (!pool->reals.empty()) {
@@ -2308,9 +2312,9 @@ bool Worker::epBye(Endpoint* ep, int cause) {
 
 bool Worker::epGroupCall(Endpoint* from, const std::string& group, bool listen, bool broadcast, const Json& media) {
     if (from->isReal()) {
-        if (broadcast) return false;   // cimsue-cli 는 아직 <broadcast-ind> 를 내지 않는다 — 컴파일러가 먼저 막는다
         if (from->realCall >= 0) return false;
-        Json r = realRequest(from, "group_call " + group + (listen ? " listen" : ""));
+        // broadcast = 일제 통화 개시 — 코어가 <broadcast-ind> 를 싣고, 발언을 놓은 뒤 B-bit Floor Idle 이면 스스로 호를 해제한다
+        Json r = realRequest(from, "group_call " + group + (listen ? " listen" : "") + (broadcast ? " broadcast" : ""));
         if (!r["ok"].asBool(false)) return false;
         from->realCall = (int)r["call"].asInt(-1);
         return true;
@@ -2352,6 +2356,22 @@ bool Worker::epUnregister(Endpoint* ep) {
     ep->realCall = -1;
     ep->affStarted = ep->affiliated = ep->affFailed = false;
     return true;
+}
+
+void Worker::epUnregisterAll(const std::vector<Endpoint*>& eps) {
+    // SimSession::Stop(로그아웃 + 스택 정지)은 단말당 1~2 s — 순차로 부르면 10 단말에 18 s 동안 워커 루프가 막혀 컨트롤러
+    //   GET /runs 가 시한을 넘긴다(tb48 VOLTE-ANN-FORWARD-NOTLOGGEDIN 실측). UE 스택 정지만 모아 병렬로, 상태 정리는 epUnregister 와 같다
+    std::vector<SimSession*> sessions;
+    for (auto* ep : eps) {
+        if (ep->isReal()) { epUnregister(ep); continue; }
+        if (!ep->s || !ep->started) continue;
+        sessions.push_back(ep->s);
+        ep->started = false;
+        ep->registered = false;
+        ep->realCall = -1;
+        ep->affStarted = ep->affiliated = ep->affFailed = false;
+    }
+    stopSessions(sessions, false);
 }
 
 void Worker::epClearCall(Endpoint* ep) {
@@ -2410,7 +2430,7 @@ void Worker::tickPrelude(long long now) {
     if (!m_preludeDereg.empty()) {
         // prelude 의 deregister — 등록을 마친 단말을 곧바로 내린다(REGISTER expires 0). 그 역할은 미등록 상태로 인스턴스에 잡힌다
         //   (착신 번호로만 쓰인다 — CFNL 착신전환의 served). 서버 처리 여유로 다음 틱까지 기다린다
-        for (auto* ep : m_preludeDereg) epUnregister(ep);
+        epUnregisterAll(m_preludeDereg);
         logf("info", "run %s prelude: %zu endpoint(s) deregistered (미등록 착신 역할)", m_run->runId.c_str(), m_preludeDereg.size());
         m_preludeDereg.clear();
     }
@@ -3357,6 +3377,7 @@ void Worker::finishInstance(Instance& in, bool failed, const std::string& why, l
 void Worker::endRun(const std::string& state) {
     logf("info", "run %s ending → %s", m_run->runId.c_str(), state.c_str());
     // epilogue: deregister 단계가 있으면 그 역할의 단말을 내린다 (피어 신원은 해당 없음)
+    std::vector<Endpoint*> dereg;
     for (auto& st : m_epilogue) {
         if (st.step != "deregister") continue;
         for (auto& role : st.who) {
@@ -3364,9 +3385,10 @@ void Worker::endRun(const std::string& state) {
             if (rit == m_run->roles.end()) continue;
             Pool* pool = m_pools[rit->second].get();
             auto sl = m_run->slices[role];
-            for (int i = sl.first; i < sl.second && i < (int)pool->eps.size(); ++i) epUnregister(pool->eps[i].get());
+            for (int i = sl.first; i < sl.second && i < (int)pool->eps.size(); ++i) dereg.push_back(pool->eps[i].get());
         }
     }
+    epUnregisterAll(dereg);
     // 남은 SIP 덤프(마지막 인스턴스들) → 마지막 집계 + 종료 로그
     flushSipPending(nowMs(), true);
     long long nowS = nowMs() / 1000;
