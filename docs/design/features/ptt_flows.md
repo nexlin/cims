@@ -4,9 +4,9 @@
 >
 > | group_type | 모드 | 절차 |
 > |---|---|---|
-> | `prearranged` | **on-demand** | 발신 UE 의 키업(그룹 INVITE)→affiliate+등록 멤버 fan-out→무활동 해제 (TS 24.379 §10.1) |
+> | `prearranged` | **on-demand** | 발신 UE 의 키업(그룹 INVITE)→affiliate+등록 멤버 fan-out→마지막 확립 멤버 이탈 시 해제 (TS 24.379 §10.1). 규격 해제 정책(T4 무활동·참가자 1명 이하, §6.3.8.1)은 미구현 — [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §4.1 P6 |
 > | `chat` | **상시(persistent)** | 상시 세션, 멤버는 affiliation 시 합류, de-affiliate/dereg 시 이탈 (§10.2) |
-> | `broadcast` | on-demand + 발신자 floor 독점 | 개시자만 발언, 타 멤버 floor REQUEST 는 CMP 가 Deny #5(Receive only) (TS 24.380 §6.3.5.4.4) |
+> | `broadcast` | on-demand + 발신자 floor 독점 | 개시자만 발언, 타 멤버 floor REQUEST 는 CMP 가 Deny #5(Receive only) (TS 24.380 §6.3.5.4.4). 일제 통화를 **그룹 유형**으로 정하는 CIMS 방식 — 규격은 호 단위 `<broadcast-ind>`(TS 24.379 §4.12)이다. 규격 대비 판정·보완은 [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) |
 >
 > - **REGISTER 는 호에 무영향**. 발신 INVITE 키업이 on-demand 세션 개시 트리거 (`ProcessGroupCall`).
 > - **affiliation = SIP PUBLISH** (`application/vnd.3gpp.mcptt-affiliation-command+xml`, TS 24.379 §9 / RFC 3903) → `CCscfModule::RecvRequestPublish` → `ptt_affiliations`. SUBSCRIBE-presence affiliation 경로도 호환을 위해 동작한다.
@@ -521,6 +521,7 @@ UE-B (낮은 우선순위, 현재 화자)   CMP              UE-A (높은 우선
   │ ── RTP Audio ──────► │ ── RTP Forward ──────────► │  개시자 음성만 릴레이
 ```
 > `initiator_id` 는 `PTT_GROUP_ADD` 으로 CSP→CMP 전달(개시자 = `ProcessGroupCall` 의 caller). 개시자는 PTT_JOIN 으로 CMP floor 멤버 등록되어 GRANT 가능.
+> 규격 대비 공백 — 호 단위 일제 표식(`<broadcast-ind>`), 개시자 고정(진행 중 세션 합류가 개시자를 바꾸지 않음), 개시자 발언 종료 후 호 해제 — 은 [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §2·§4.
 
 ### C4. 멤버 퇴장 (정상 BYE)
 

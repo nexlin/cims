@@ -1,6 +1,6 @@
 # CIMS 문서
 
-CIMS (CIMS IMS) 는 PTT/VoLTE 통합 서비스 서버입니다. 이 디렉토리는 설계서·API 명세·사용자 매뉴얼을 담고 있습니다.
+CIMS (Compact IMS) 는 PTT/VoLTE 통합 서비스 서버입니다. 이 디렉토리는 설계서·API 명세·사용자 매뉴얼을 담고 있습니다.
 
 ## 디렉토리 구조
 
@@ -24,11 +24,13 @@ docs/
 │   └── features/                    기능별 설계
 │       ├── volte_flows.md           VoLTE 호처리 Flow
 │       ├── ptt_flows.md             PTT 그룹콜 Flow
+│       ├── mcptt_broadcast_group_call.md 일제 통화(broadcast group call) 규격 정합 — 판정·보완 항목 (설계 정본, 미구현)
 │       ├── ue_nat_traversal.md      단말 NAT traversal (leg 포트 · 목적지 latch · 정책)
 │       ├── leg_liveness.md          비정상 종료 leg 감지 (SIP 세션 타이머 RFC 4028 — 설계 정본)
 │       ├── dispatch_center.md       관제 센터 (전화 그룹·대표번호 병렬 호출 TS 24.239·역할 기반 통화 감청 RFC 3911 Join+CMP tap·PTT 그룹콜 청취 — 절차 구현 / 전화 그룹·역할 분해는 설계)
 │       ├── recording.md             녹취
 │       ├── monitoring.md            모니터링·이력·통계
+│       ├── mcptt_management_views.md MCPTT 관리 조회 화면 — 그룹 정보·단말 현황·이용 정보 (설계 정본, 미구현)
 │       ├── flow_logging.md          Flow 로깅/상관관계 (sesid)
 │       ├── sip_runtime_config.md    SIP 런타임 설정 (jsonl + SIGUSR1)
 │       ├── sip_service_model.md     SIP 서비스 모델 (Service/Trunk/Listener)

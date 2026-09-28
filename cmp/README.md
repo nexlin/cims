@@ -1,4 +1,4 @@
-# CMP (Component Media Provider)
+# CMP (Call Media Processor)
 
 RTP relay + MCPTT floor control 미디어 서버. UDP JSON 제어(envelope v2)로 서비스 AS
 (현재 CSP)가 사용한다.

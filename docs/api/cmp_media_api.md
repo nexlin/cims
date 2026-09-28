@@ -518,7 +518,7 @@ member 키 `(node, session_id)`.
 | `subid` | - | 그룹 세션 회차 (flow 로그 subid) |
 | `video_enabled` | - | 1 이면 video 포트 활성 |
 | `group_type` | - | `prearranged`/`chat`/`broadcast`/`private` — `broadcast` 는 개시자 floor 독점(TS 24.380 §6.3.5.4.4 — 타 멤버는 Deny #5, Floor Taken 의 Permission=0), `private` 은 1:1 private call(2인, TS 24.379 §11 — floor 절차는 TS 24.380 §6.3 공통) |
-| `initiator_id` | - | 개시자 sessionId — broadcast 는 유일 발언자. private 에서는 **초기 발언권을 주지 않는다**(초기 발언권의 정본은 PTT_JOIN `granted`) |
+| `initiator_id` | - | 개시자 sessionId — broadcast 는 유일 발언자. private 에서는 **초기 발언권을 주지 않는다**(초기 발언권의 정본은 PTT_JOIN `granted`). 기존 그룹에 대한 ADD 에 실려 오면 개시자를 교체한다 — 규격 정합 계약(`broadcast` 호 속성 분리·생성 시 1회 고정·T4 `PTT_FLOOR_INACTIVITY`)은 [mcptt_broadcast_group_call.md](../design/features/mcptt_broadcast_group_call.md) §4.5 |
 | `floor_control` | - | `on`(기본)/`off`. `off` = floor 중재 없음(full-duplex) — `floor_port` 미광고, floor RTCP 미처리 |
 | `floor_policy` | - | `single`(기본)/`dual`/`multi` — floor 有 **그룹**의 동시 발언 수([§7.7](#77-floor-정책--동시-발언과-private-call)). `private` 은 해석하지 않는다 |
 | `max_talkers` | `multi` 시 O | 동시 발언 상한(2..8). `multi` 인데 누락/1 이하, 또는 8 초과면 `BAD_REQUEST` |

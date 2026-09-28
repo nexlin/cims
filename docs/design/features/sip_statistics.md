@@ -829,7 +829,8 @@ SIP 외 인터페이스 조회는 세대가 모자란 행을 **쓰지 않는다*
 그룹만 담는다. 그래서 그룹이 수천 개여도 레코드는 동시 활성 그룹 수로 묶인다. 값이 카운터라
 상위 단위로 그대로 합산된다. 표시용 식별자는 `mcptt_group_id` 이고, 없으면 `group_key`
 (`ptt_groups.id`)로 폴백한다 — surrogate 키는 운영자가 보는 이름이 아니다
-([identifier_model.md](../identifier_model.md)).
+([identifier_model.md](../identifier_model.md)). PTT 발언 카운터(`turns`·`talk_sum_sec`·`emergency`·`video`)와
+사용자 축(`by_user`) 확장은 [mcptt_management_views.md](mcptt_management_views.md) §5.2 (미구현).
 
 ### 5.2 저장 위치
 

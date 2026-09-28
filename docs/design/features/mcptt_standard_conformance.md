@@ -32,6 +32,8 @@
 | C3 | Resource-Priority namespace 정규화(단일값) | CSP | RFC 4412 | ✅ 정합 |
 | C4 | floor SDP `m=application` + `mcptt-floor-request-uri` | CSP | TS 24.380 §12 | ✅ 정합 |
 | C6 | conference 이벤트 구독 인가 — 그룹 문서 `<on-network-allow-conference-state>` 판정, 불허 403 `Warning: 138` / 브로드캐스트 480 `Warning: 105` (비멤버 관제사 청취 범위는 CIMS 해석, [dispatch_center.md §5.6](dispatch_center.md)) | CSP/CSC | TS 24.379 §10.1.3.4.1 / TS 24.481 §7.2.4.2 | ✅ 정합 |
+| C7 | broadcast group call 발언권 — 개시자 외 Floor Request Deny #5(긴급 포함)·Floor Taken Permission 0·Floor Indicator B-bit | CMP | TS 24.380 §6.3.5.3.4·§6.3.5.4.4·§8.2.3.15 | ✅ 정합 |
+| C8 | broadcast group call 호 모델 — 호 단위 `<broadcast-ind>` 개시, 개시자 고정, 개시자 발언 종료 후 호 해제, 그룹 문서 그룹 종류(`on-network-invite-members`) | CSP/CSC/UE | TS 24.379 §4.12·§6.2.8.2 / TS 24.380 §6.2.4.6.4 / TS 24.481 §7.2.8 | ✗ 공백 — 그룹 유형(`group_type=broadcast`) 방식. 정본 [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) |
 | S1 | OIDC `/.well-known/openid-configuration` 디스커버리 | CSC | TS 33.180 / OIDC | ✅ 정합 |
 | S2 | access_token 클레임(`sub`/`iss`/`iat`/`client_id`/`scope` 문자열 + `mcptt_id`/`mcdata_id`) + nonce, scope 카탈로그 `3gpp:mc:*`(B.4.2.2) 요청∩카탈로그 발급, 리소스 서버 scope 검사(B.10, `IdMs.ScopeEnforcement`) — 구 `3gpp:mcptt:ptt_server` 전환기 별칭 | CSC | TS 33.180 Annex B | ✅ 정합 — 정본 [mcx_identity_scope.md](mcx_identity_scope.md) |
 | S3 | XCAP-diff SUBSCRIBE/NOTIFY(GMS/CMS 변경통지) | CSC/CSP | TS 24.481/484 §8 | ✅ 정합 |
@@ -57,6 +59,8 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 | 기능 | 규격 | 상태 |
 |---|---|---|
 | **Private call (1:1)** — on-demand | TS 24.379 §11.1 | ✓ 구현 — mcptt-info `session-type=private` INVITE(상대 MCPTT ID 직접, affiliation 불요) → CSP 가 2인 세션(`private:<from>-<to>`)을 CMP `PTT_GROUP_ADD group_type:"private"` + `floor_control`(on/off — fmtp `mc_no_floor_ctrl`)로 세운다([mcptt_csp_cmp_roadmap_contract.md](mcptt_csp_cmp_roadmap_contract.md) §A.1). 착신 미등록 480 |
+| **Broadcast group call** — 호 단위 개시(`<broadcast-ind>`)·개시자 고정·개시자 발언 종료 후 호 해제 | TS 24.379 §4.12·§6.2.8.2, TS 24.380 §6.2.4.6.4 | △ 발언권(C7)은 정합, 호 모델은 그룹 유형 기반(C8) — [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) |
+| **그룹 호 세션 해제 정책** — T4(Inactivity) 만료·참가자 1명 이하·TNG3 | TS 24.379 §6.3.8.1 / TS 24.380 §6.3.4.3.5 | ✗ (확립 leg 0 일 때만 해제 — [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §4.1 P6·§4.2 M2) |
 | **Private call — pre-established session** | TS 24.379 §11.2 | ✗ |
 | **Private call call-back** (요청/취소) | TS 24.379 §11.3 | ✗ |
 | **Private emergency call** / 통화 중 emergency upgrade | TS 24.379 §11 | ✓ 개시 인가 구현 — 사용자 프로파일 `allow-emergency-private-call` + `MCPTTPrivateRecipient`(UsePreConfigured 모드는 사전 지정 수신자 일치까지, `IsConditionInitAuthorized` private 분기). 그룹콜 emergency 는 [mcptt_emergency_modes.md](mcptt_emergency_modes.md) |
@@ -66,7 +70,7 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 | **User/Group regroup** (임시 그룹) | TS 24.379 + GMS(TS 24.481) | ✗ |
 | **Functional alias** 활성/비활성 | TS 24.379 / TS 24.484 | ✗ |
 
-> 구현됨: prearranged/chat/broadcast 그룹콜, affiliation(C1/C2), emergency/imminent 게이팅·선점, ad-hoc.
+> 구현됨: prearranged/chat 그룹콜, broadcast 그룹콜(그룹 유형 방식 — C8), private call(on-demand), affiliation(C1/C2), emergency/imminent 게이팅·선점, ad-hoc.
 
 ### R2. Floor Control (TS 24.380)
 
@@ -115,7 +119,7 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 | **E2E 미디어 암호화** (SRTP + MIKEY-SAKKE, PCK/GMK/CSK) | TS 33.180 | ⚠ 구조만 — opensrtp 링크·SRTP 플래그 존재하나 참 ECCSI/SAKKE(RFC 6507/6508) 미구현 (S5 placeholder). **floor control(RTCP) SRTCP 보호는 구현** — 키는 제어평면 inline 전달(`floor_crypto`), 미디어는 투명 relay |
 | **MBMS/멀티캐스트 베어러** 그룹 배포 | TS 23.379 | ✗ (unicast RTP relay 만) |
 | **Off-network (ProSe/PC5 직접통신)** | TS 24.379 off-network | ✗ (서버 기반 on-network 만) |
-| **PTT 비디오** | — | ✗ ([../modules/cmp.md](../modules/cmp.md) "향후 확장") |
+| **PTT 비디오** (그룹 세션 `m=video`) | — | ✅ floor 보유자 영상(H.264 — dual/multi-talker 면 화자 슬롯별)을 멤버별 영상 포트로 분배·SRTP·녹취 ([../modules/cmp.md](../modules/cmp.md)), 검증 S6-SCN-PTT-VIDEO. 규격형 영상 서비스(다중 송출·수신 선택)는 MCVideo — R6 |
 
 ### R4. 부가 서비스 / 인접 규격
 
@@ -124,7 +128,7 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 | **위치 정보 보고/관리** (Location management) | TS 23.280 / TS 24.379 | ✗ |
 | **MCData MSRP relay / MSRPS(TLS)** | TS 24.282 / RFC 4976 | ✗ 후속 ([mcdata_messaging.md](mcdata_messaging.md)) |
 | **MCData media plane 서비스 설정 문서** | TS 24.484 | ✗ (provisioning 채널 재사용) |
-| **MCVideo** | TS 24.281 | ✗ |
+| **MCVideo** | TS 24.281 | ✗ — 세부 R6 |
 
 ### R4-1. CMS 문서함 — UE 겹 2종 미서빙 (규격 순정 단말 interop 갭)
 
@@ -166,6 +170,23 @@ transport 목록/선택 등 규격 문서에 없는 요구 때문). 자체 단�
 - **Subscription-State reason 구분** — 현재 timeout 고정
 - **reg-event 다중 바인딩 / tel URI registration** — 미구현
 - **ICE** (RFC 8445) — symmetric NAT 미해소 ([ue_nat_traversal.md](ue_nat_traversal.md) §9)
+
+### R6. MCVideo (TS 22.281 / 23.281 / 24.281 / 24.581)
+
+MCVideo 는 MCPTT 에 영상을 얹은 것이 아니라 별도 MC 서비스다. 현행 PTT 비디오(R3)는 MCPTT floor
+정책(single/dual/multi-talker, 최대 8인)으로 송출자를 정하고 그룹원 전원이 자동 수신하므로, 여러 현장
+카메라를 관제가 스트림 단위로 골라 보고 제어하는 영상 관제 용도에는 MCVideo 가 필요하다. 재사용 = PMP 멤버별 영상 포트·SRTP·녹취, PSP 그룹 세션 처리, SPS 그룹·설정 관리.
+
+| 기능 | 규격 | 상태 |
+|---|---|---|
+| **MCVideo 서비스 신원 · 사용자 프로파일 · 서비스 설정 문서** | TS 23.281 / TS 24.484 | ✗ |
+| **전송 제어 (Transmission Control)** — 그룹 내 동시 다중 송출, 최대 동시 송출 수 | TS 24.581 | ✗ (현행은 floor 정책 — multi-talker 최대 8인 동시 송출, 스트림별 전송 요청 없음) |
+| **수신 제어 (Reception Control)** — 수신자가 스트림 선택 · 거절 | TS 24.581 | ✗ (현행은 전원 자동 수신) |
+| **그룹 · 1:1 · 방송 · 긴급 / 임박 위험 영상 호** | TS 24.281 | ✗ (1:1 영상은 현행 VoLTE 경로) |
+| **Video pull** (단말 · 저장소 영상 가져오기) / **Video push** (영상 보내기) | TS 24.281 | ✗ |
+| **Ambient viewing** (원격 카메라 개시) | TS 24.281 | ✗ |
+| **원격 카메라 제어 · 영상 메타데이터**(위치 · 시각) | TS 22.281 / TS 24.281 | ✗ |
+| **단말** — libcimsue MCVideo 클라이언트 · 관제 앱 다중 영상 수신 화면 | TS 24.281 | ✗ |
 
 ---
 

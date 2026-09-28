@@ -2,7 +2,7 @@
 
 ## 1. 시스템 구성
 
-CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
+CIMS (Compact IMS) 는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다. 규격 IMS 역할(CSCF/TAS/PTT-AS/IBCF)을 별도 장비가 아니라 모듈형 서버 안에 통합해 단일 사이트 규모로 구성한다는 뜻입니다.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -34,11 +34,26 @@ CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
+### 모듈 명칭
+
+| 약어 | Full Name | 구분 |
+|------|-----------|------|
+| CSP  | Call Signaling Processor | base |
+| CMP  | Call Media Processor | base |
+| CSC  | CIMS Service Controller | base |
+| PSP  | PTT Signaling Processor | CSP 변종 |
+| ISP  | Interconnection Signaling Processor | CSP 변종 |
+| PMP  | PTT Media Processor | CMP 변종 |
+| IMP  | Interconnection Media Processor | CMP 변종 |
+
+변종은 base 바이너리에 `Roles` 토글과 `LocalIp`/`Port` overlay 만 달리해 인스턴스화한
+별도 프로세스다.
+
 ---
 
 ## 2. 컴포넌트 설명
 
-### 2.1 CSP (Call Service Platform)
+### 2.1 CSP (Call Signaling Processor)
 
 **역할:** SIP 시그널링 서버. 등록, 1:1 통화, PTT 그룹 통화 제어.
 
@@ -95,7 +110,7 @@ CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
 - `CSubscriptionManager` — SIP SUBSCRIBE/NOTIFY 상태 관리 (GMS/CMS)
 - `CUserMap` / `CGroupMap` — 가입자/그룹 런타임 캐시 (DB에서 로딩)
 
-### 2.2 CMP (Component Media Provider)
+### 2.2 CMP (Call Media Processor)
 
 **역할:** RTP 미디어 릴레이 및 PTT Floor 제어.
 

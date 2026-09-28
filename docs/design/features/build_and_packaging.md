@@ -8,12 +8,12 @@
 ## 1. 컴포넌트 / 변종
 
 ```
-8 base 컴포넌트                               + 4 변종            = 12 tarball
-─────────────────────────────────             ───────────
-csp     CSP (VoLTE/PTT/IBCF SIP)              psp  PSP role (PTT)
-cmp     CMP (RTP relay)                       isp  ISP role (IBCF)
-cmdp    CMDP (MCData media plane, MSRP)       pmp  PMP role (PTT 미디어)
-csc     CSC (가입자/MCPTT API)                imp  IMP role (IBCF 미디어)
+8 base 컴포넌트                               + 4 변종                                  = 12 tarball
+─────────────────────────────────             ────────────────────────────────────────
+csp     CSP (Call Signaling Processor)        psp  PSP  PTT Signaling Processor
+cmp     CMP (Call Media Processor)            isp  ISP  Interconnection Signaling Processor
+cmdp    CMDP (MCData media plane, MSRP)       pmp  PMP  PTT Media Processor
+csc     CSC (CIMS Service Controller)         imp  IMP  Interconnection Media Processor
 oam     OAM base 게이트웨이 (base console 동봉)
 oam-svc OAM 서비스 모듈 (svc console 동봉)
 cspsim  SIP/RTP 시뮬레이터

@@ -1,4 +1,4 @@
-# 11. CMP (Component Media Provider) 모듈 상세 설계
+# 11. CMP (Call Media Processor) 모듈 상세 설계
 
 ## 1. 개요
 
@@ -65,7 +65,7 @@ VoIP와 PTT는 용도별로 핸들러를 분리한다:
 
 **분리 이유:**
 - PTT는 RTCP 불필요 (Floor를 m=application 전용 소켓으로 처리)
-- 비디오 포트 불필요 (PTT 비디오는 향후 확장)
+- 비디오는 멤버 포트 단위 — 그룹 세션의 `m=video` 를 floor 보유자(동시 발언이면 화자 슬롯별) 영상만 멤버에게 분배(음성과 같은 floor 게이트)
 - 포트 대역 분리로 방화벽/NAT 설정 단순화
 - 리소스 풀 독립 관리 (VoIP 고갈이 PTT에 영향 없음)
 
@@ -202,7 +202,7 @@ processAdd()로 위임 — 기존 세션의 피어 주소만 갱신한다. 세�
 | record_dir | - | 녹취 디렉토리 |
 | video_enabled | - | 1 이면 video 포트 활성 |
 | group_type | - | `prearranged`/`chat`/`broadcast`/`private` (broadcast=개시자 독점, private=2인 세션) |
-| initiator_id | - | 개시자 sessionId(=userId) — broadcast floor 독점. private 초기 발언권에는 쓰지 않는다(정본=PTT_JOIN `granted`) |
+| initiator_id | - | 개시자 sessionId(=userId) — broadcast floor 독점. private 초기 발언권에는 쓰지 않는다(정본=PTT_JOIN `granted`). 기존 그룹 ADD 에 실려 와도 교체한다(규격 대비 공백 — [mcptt_broadcast_group_call.md](../features/mcptt_broadcast_group_call.md) §4.2 M1) |
 | floor_control | - | `on`(기본)/`off` — floor 중재 유무 |
 | floor_policy | - | `single`(기본)/`dual`/`multi` — 그룹 동시 발언 수 |
 | max_talkers | multi 시 O | 동시 발언 상한(2..8) |
@@ -221,7 +221,7 @@ processAdd()로 위임 — 기존 세션의 피어 주소만 갱신한다. 세�
 6. members CSV 파싱 → 우선순위/role 설정 + 멤버별 전용 포트 유닛(PPttMemberPort) 선할당.
    멤버 pool 고갈 시 `NO_RESOURCE` — 이번 호출로 생성된 그룹이면 floor/유닛을 즉시 롤백
    (기존 그룹의 선할당 유닛은 유지 — 멱등 재시도 시 재사용)
-7. `group_type`/`initiator_id` → `setBroadcast()`. **broadcast** 그룹은 `handleFloorRequest` 가 개시자(`_initiatorSessionId`) 외 모든 floor REQUEST 를 Deny #5 Receive only(`floor.jsonl reason=broadcast`) — TS 24.380 §6.3.5.4.4. Floor Taken 의 Permission to Request the Floor 도 0 으로 나간다(§6.3.4.4.2-3d).
+7. `group_type`/`initiator_id` → `setBroadcast()`. **broadcast** 그룹은 `handleFloorRequest` 가 개시자(`_initiatorSessionId`) 외 모든 floor REQUEST 를 Deny #5 Receive only(`floor.jsonl reason=broadcast`) — TS 24.380 §6.3.5.4.4. Floor Taken 의 Permission to Request the Floor 도 0 으로 나간다(§6.3.4.4.2-3d). T4(Inactivity)는 없다 — 규격 정합 보완(호 단위 broadcast·T4)은 [mcptt_broadcast_group_call.md](../features/mcptt_broadcast_group_call.md) §4.2.
 8. `floor_control`/`floor_policy`/`max_talkers`/`group_type:"private"` → `setFloorPolicy()` (녹취 슬롯 트랙 수가 정원에 따라 정해지므로 녹취 초기화보다 먼저), `floor_crypto` → `setFloorCrypto()`.
    정책 필드의 미상 값·키 길이 오류는 `BAD_REQUEST` 로 거절한다.
 

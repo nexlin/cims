@@ -1,4 +1,4 @@
-# 10. CSP (Call Service Platform) 모듈 상세 설계
+# 10. CSP (Call Signaling Processor) 모듈 상세 설계
 
 ## 1. 개요
 
