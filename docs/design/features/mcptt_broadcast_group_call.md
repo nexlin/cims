@@ -6,6 +6,9 @@
 > [ptt_flows.md](ptt_flows.md) C1~C3, 긴급·임박 조건은 [mcptt_emergency_modes.md](mcptt_emergency_modes.md) 를 본다.
 >
 > 근거 규격 판본: TS 24.379 V18.13.0 · TS 24.380 V18.7.0 · TS 24.481 V18.3.0 (Release 18).
+>
+> **구현 상태** — 서버(CSP·CMP·CSC·DB·콘솔)·검증(cspsim·계측기·S3)은 반영됐다(§2). 남은 것은 단말(§4.4 U1~U6)과 GMS 문서의
+> 전환기 `<session-type>` 제거(U5 뒤)·최소 affiliation 인원 해제(R10 ③)다.
 
 ---
 

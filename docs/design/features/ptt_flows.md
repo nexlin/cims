@@ -51,7 +51,7 @@
 | B2 | 단말 SIP 등록 (+service authz) | REGISTER → Digest MD5 (호 무영향. 규격은 토큰 제시 service authz) |
 | B3 | 구성 취득 (GMS/CMS) | xcap-diff 구독 → NOTIFY → XCAP 문서 GET (Bearer) |
 | B4 | affiliation (PUBLISH) | 그룹 URI PUBLISH → `ptt_affiliations` (※규격 전제: B1·B3 선행) |
-| B5 | on-demand 그룹콜 개시 | 발신 UE 키업(그룹 INVITE) → fan-out (prearranged/broadcast) |
+| B5 | on-demand 그룹콜 개시 | 발신 UE 키업(그룹 INVITE) → fan-out (prearranged, 일제 통화 = `<broadcast-ind>`) |
 | B6 | 그룹 세션 수명 | on-demand(키업 시 생성/해제) vs chat(상시) |
 | B7 | 단말 등록 해제 | REGISTER Expires=0 → ClearUserCall + de-affiliation |
 

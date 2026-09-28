@@ -2,17 +2,17 @@
 
 3GPP MCPTT 규격(TS 22.179 / 23.379 / 24.379 / 24.380 / 24.481 / 24.483·24.484)에 따라
 **긴급(emergency)·임박위험(imminent peril)·긴급경보(emergency alert)·애드혹(ad hoc)** 그룹콜을
-기존 CIMS PTT(prearranged/chat/broadcast)에 추가하는 설계.
+기존 CIMS PTT(prearranged/chat 그룹 · 일제 통화)에 추가하는 설계.
 
 ---
 
 ## 1. 설계 원칙 (규격 정합)
 
-1. **조건(condition)은 group_type가 아니다.** emergency·imminent-peril은 prearranged/chat/broadcast
-   **위에 얹히는 런타임 상태**다. group_type enum을 늘리지 않는다.
+1. **조건(condition)은 group_type가 아니다.** emergency·imminent-peril은 prearranged/chat 그룹 호(일제 통화 포함)
+   **위에 얹히는 런타임 상태**다(일제 통화 `<broadcast-ind>` 도 같은 원칙의 호 속성 — [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md)). group_type enum을 늘리지 않는다.
    - 사용자 단위: **MCPTT emergency state**
    - 그룹/세션 단위: **in-progress emergency / in-progress imminent peril**
-2. **두 축은 직교**: `session-type ∈ {prearranged,chat,broadcast,adhoc}` × `condition ∈ {normal,imminent,emergency}` + `alert`(별도 신호). SIP `mcptt-info+xml`에서 `<session-type>`과 `<emergency-ind>/<imminentperil-ind>/<alert-ind>`가 별도 필드인 규격과 일치.
+2. **두 축은 직교**: `session-type ∈ {prearranged,chat,private,adhoc}` × `condition ∈ {normal,imminent,emergency}` + `alert`(별도 신호) · `broadcast-ind`(일제 통화). SIP `mcptt-info+xml`에서 `<session-type>`과 `<emergency-ind>/<imminentperil-ind>/<alert-ind>`가 별도 필드인 규격과 일치.
 3. **Floor 우선순위 서열(TS 24.380)**: `emergency > imminent-peril > (chair) > 수치 priority`. 기존 chair/priority 비교 **앞에** condition tier를 삽입.
 4. **능력 게이트(capability)와 런타임(state) 분리**: "이 그룹/사용자가 긴급을 *할 수 있는가*"(설정, TS 24.481/24.483)와 "지금 긴급 *상태인가*"(런타임)는 다른 레이어.
 5. **점진 적용·하위호환**: 신규 컬럼 기본값은 기존 동작 보존. 조건 미지정 호는 현재와 동일.
@@ -81,7 +81,7 @@ else if (requesterChair!=ownerChair) bPreempt = requesterChair; // 동tier면 ch
 else                              bPreempt = (reqPrio < ownPrio); // 동tier·동role 수치(기존)
 ```
 
-- broadcast 독점 검사는 **그대로 최우선**(기존). 단, **개시자의 emergency**는 그대로 통과(개시자만 floor).
+- 일제 통화 독점 검사는 **최우선**이다. 단, **개시자의 emergency**는 그대로 통과(개시자만 floor).
 - emergency 발언자는 **T2(최대 발언시간) 제한에서 제외**한다(긴급 중 장시간 발언 허용).
   imminent 발언자는 T2 를 일반 적용한다.
   T1(무RTP 발언 종료 판정)은 tier 와 무관하게 동일 적용된다 — 규격상 T1 은 징벌이 아니라
@@ -246,7 +246,7 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
   **편성 그룹 ID 예약어** — CSC admin 이 그룹 생성 시 400 거부해 즉석 세션 라우팅과의 충돌을
   차단한다.
 - **CSP 처리**: 영속 그룹 없이 **임시 CspPttGroup** 구성(in-memory, `_isAdhoc` — DB 레코드 없음),
-  멤버 fan-out, CMP `PTT_GROUP_ADD`. broadcast/emergency 조건도 ad-hoc 위에 얹힘.
+  멤버 fan-out, CMP `PTT_GROUP_ADD`. emergency 조건은 ad-hoc 위에 얹힌다(일제 통화 `<broadcast-ind>` 는 편성 그룹 호만 — ad hoc 에서는 무시).
 - **수명**: 마지막 멤버 이탈 시 즉시 teardown(on-demand와 동일) + GroupMap 에서 제거(ephemeral).
   단말도 대칭 — 애드혹 세션은 채널 영속(ChannelStore)·affiliation·로스터 구독 대상이 아니고
   (참가자는 in-dialog NOTIFY 폴백), 통화 중엔 전용 오버레이(`AdhocCallOverlay`)가 전면 표시되며

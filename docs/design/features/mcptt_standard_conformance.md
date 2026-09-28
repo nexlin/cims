@@ -31,9 +31,9 @@
 | C2 | affiliation-info SUBSCRIBE/NOTIFY (presence) | CSP | TS 24.379 §9.3 | ✅ 정합 |
 | C3 | Resource-Priority namespace 정규화(단일값) | CSP | RFC 4412 | ✅ 정합 |
 | C4 | floor SDP `m=application` + `mcptt-floor-request-uri` | CSP | TS 24.380 §12 | ✅ 정합 |
-| C6 | conference 이벤트 구독 인가 — 그룹 문서 `<on-network-allow-conference-state>` 판정, 불허 403 `Warning: 138` / 브로드캐스트 480 `Warning: 105` (비멤버 관제사 청취 범위는 CIMS 해석, [dispatch_center.md §5.6](dispatch_center.md)) | CSP/CSC | TS 24.379 §10.1.3.4.1 / TS 24.481 §7.2.4.2 | ✅ 정합 |
+| C6 | conference 이벤트 구독 인가 — 그룹 문서 `<on-network-allow-conference-state>` 판정, 불허 403 `Warning: 138` / 일제 통화 480 `Warning: 105` (비멤버 관제사 청취 범위는 CIMS 해석, [dispatch_center.md §5.6](dispatch_center.md)) | CSP/CSC | TS 24.379 §10.1.3.4.1 / TS 24.481 §7.2.4.2 | ✅ 정합 |
 | C7 | broadcast group call 발언권 — 개시자 외 Floor Request Deny #5(긴급 포함)·Floor Taken Permission 0·Floor Indicator B-bit | CMP | TS 24.380 §6.3.5.3.4·§6.3.5.4.4·§8.2.3.15 | ✅ 정합 |
-| C8 | broadcast group call 호 모델 — 호 단위 `<broadcast-ind>` 개시, 개시자 고정, 개시자 발언 종료 후 호 해제, 그룹 문서 그룹 종류(`on-network-invite-members`) | CSP/CSC/UE | TS 24.379 §4.12·§6.2.8.2 / TS 24.380 §6.2.4.6.4 / TS 24.481 §7.2.8 | ✗ 공백 — 그룹 유형(`group_type=broadcast`) 방식. 정본 [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) |
+| C8 | broadcast group call 호 모델 — 호 단위 `<broadcast-ind>` 개시, 개시자 고정, 그룹 문서 그룹 종류(`on-network-invite-members`), 해제 정책(T4·참가자 1명 이하·TNG3) | CSP/CSC | TS 24.379 §4.12·§6.2.8.2·§6.3.8.1 / TS 24.481 §7.2.8 | ✅ 정합(서버) — 개시 단말의 발언 종료 후 호 해제(TS 24.380 §6.2.4.6.4)·B-bit Floor Request 는 단말 몫(미구현). 정본 [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) |
 | S1 | OIDC `/.well-known/openid-configuration` 디스커버리 | CSC | TS 33.180 / OIDC | ✅ 정합 |
 | S2 | access_token 클레임(`sub`/`iss`/`iat`/`client_id`/`scope` 문자열 + `mcptt_id`/`mcdata_id`) + nonce, scope 카탈로그 `3gpp:mc:*`(B.4.2.2) 요청∩카탈로그 발급, 리소스 서버 scope 검사(B.10, `IdMs.ScopeEnforcement`) — 구 `3gpp:mcptt:ptt_server` 전환기 별칭 | CSC | TS 33.180 Annex B | ✅ 정합 — 정본 [mcx_identity_scope.md](mcx_identity_scope.md) |
 | S3 | XCAP-diff SUBSCRIBE/NOTIFY(GMS/CMS 변경통지) | CSC/CSP | TS 24.481/484 §8 | ✅ 정합 |
@@ -59,8 +59,8 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 | 기능 | 규격 | 상태 |
 |---|---|---|
 | **Private call (1:1)** — on-demand | TS 24.379 §11.1 | ✓ 구현 — mcptt-info `session-type=private` INVITE(상대 MCPTT ID 직접, affiliation 불요) → CSP 가 2인 세션(`private:<from>-<to>`)을 CMP `PTT_GROUP_ADD group_type:"private"` + `floor_control`(on/off — fmtp `mc_no_floor_ctrl`)로 세운다([mcptt_csp_cmp_roadmap_contract.md](mcptt_csp_cmp_roadmap_contract.md) §A.1). 착신 미등록 480 |
-| **Broadcast group call** — 호 단위 개시(`<broadcast-ind>`)·개시자 고정·개시자 발언 종료 후 호 해제 | TS 24.379 §4.12·§6.2.8.2, TS 24.380 §6.2.4.6.4 | △ 발언권(C7)은 정합, 호 모델은 그룹 유형 기반(C8) — [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) |
-| **그룹 호 세션 해제 정책** — T4(Inactivity) 만료·참가자 1명 이하·TNG3 | TS 24.379 §6.3.8.1 / TS 24.380 §6.3.4.3.5 | ✗ (확립 leg 0 일 때만 해제 — [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §4.1 P6·§4.2 M2) |
+| **Broadcast group call** — 호 단위 개시(`<broadcast-ind>`)·개시자 고정·개시자 발언 종료 후 호 해제 | TS 24.379 §4.12·§6.2.8.2, TS 24.380 §6.2.4.6.4 | ✓ 서버(C7·C8) — 단말의 일제 통화 발신·발언 종료 후 호 해제는 미구현([mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §4.4) |
+| **그룹 호 세션 해제 정책** — T4(Inactivity) 만료·참가자 1명 이하·TNG3 | TS 24.379 §6.3.8.1 / TS 24.380 §6.3.4.3.5 | ✓ 편성 그룹 호 — T4 = 그룹 `hang_timer_sec`(CMP `PTT_FLOOR_INACTIVITY`)·TNG3 = `max_duration_sec`. 최소 affiliation 인원 미달 해제는 미구현 |
 | **Private call — pre-established session** | TS 24.379 §11.2 | ✗ |
 | **Private call call-back** (요청/취소) | TS 24.379 §11.3 | ✗ |
 | **Private emergency call** / 통화 중 emergency upgrade | TS 24.379 §11 | ✓ 개시 인가 구현 — 사용자 프로파일 `allow-emergency-private-call` + `MCPTTPrivateRecipient`(UsePreConfigured 모드는 사전 지정 수신자 일치까지, `IsConditionInitAuthorized` private 분기). 그룹콜 emergency 는 [mcptt_emergency_modes.md](mcptt_emergency_modes.md) |
@@ -70,7 +70,7 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 | **User/Group regroup** (임시 그룹) | TS 24.379 + GMS(TS 24.481) | ✗ |
 | **Functional alias** 활성/비활성 | TS 24.379 / TS 24.484 | ✗ |
 
-> 구현됨: prearranged/chat 그룹콜, broadcast 그룹콜(그룹 유형 방식 — C8), private call(on-demand), affiliation(C1/C2), emergency/imminent 게이팅·선점, ad-hoc.
+> 구현됨: prearranged/chat 그룹콜, 일제 통화(호 단위 `<broadcast-ind>` — C8), private call(on-demand), affiliation(C1/C2), emergency/imminent 게이팅·선점, ad-hoc.
 
 ### R2. Floor Control (TS 24.380)
 
@@ -225,9 +225,9 @@ Floor 코덱은 `cmp/PFloorCodec.cpp` 에 분리되어 있고(단말 `ptt-client
 | Ack | Source(10)=controlling + Message Type(12)=확인 대상 subtype (`_sendFloorAck`) |
 
 - Floor Taken 은 **화자 본인을 제외한** 참가자에게 보내고, ambient 청취(`recv_only`) leg 에는
-  Permission to Request the Floor=0 변형을 보낸다. broadcast 그룹도 0 이다.
+  Permission to Request the Floor=0 변형을 보낸다. 일제 통화 세션도 0 이다.
 - Floor Indicator 는 owner tier 로 매핑: emergency→`0x1000`, imminent→`0x0800`, else normal `0x8000`
-  (`_indicatorFor`). broadcast 그룹은 `0x4000`, multi 정책은 `0x0080`, dual 은 화자 2명일 때 `0x0200`.
+  (`_indicatorFor`). 일제 통화 세션은 `0x4000`, multi 정책은 `0x0080`, dual 은 화자 2명일 때 `0x0200`.
   수신 REQUEST 의 Indicator emergency/imminent 비트는 tier 로 승격된다.
 
 ### F3. Floor Ack / Queue Position(큐잉) / 동시 발언 해제
@@ -392,7 +392,7 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
 
 ### 보존 — 정합/유지
 - Digest(username=`IMSI@domain`, MD5, qop=auth), emergency/imminent 게이팅·re-INVITE condition,
-  ad-hoc/chat/broadcast/prearranged, GMS/CMS xcap-diff NOTIFY.
+  ad-hoc/chat/prearranged·일제 통화, GMS/CMS xcap-diff NOTIFY.
 
 ---
 

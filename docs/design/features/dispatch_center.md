@@ -493,8 +493,9 @@ TS 24.379 **ambient listening**(`session-type=ambient-listening`, remote-init �
   focus(PTT-AS)이므로 RFC 4235 §4.1.6 그대로다. 앱은 같은 remote 를 가진 dialog 를 한 세션으로 묶는다(참가자 = 감시
   중인 회선 중 그 세션에 있는 사람).
 - dialog 안의 확장 요소(RFC 4235 §4.1 `xs:any ##other`)
-  `<mcptt xmlns="urn:cims:xml:ns:dialog-info:mcptt" session-type="private|adhoc|prearranged|chat|broadcast"
+  `<mcptt xmlns="urn:cims:xml:ns:dialog-info:mcptt" session-type="private|adhoc|prearranged|chat"
   session-id="priv-…" initiator="+82…" emergency="false" imminent-peril="false"/>` — 카드의 종류 배지·개시자·긴급 표시.
+  일제 통화 세션이면 `broadcast="true"` 가 더 붙는다(호 속성 — [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md)).
 - 상태: fan-out 18x `early` → 200/개시자 accept `confirmed` → BYE·세션 해제·등록 해제·미디어 노드 다운 `terminated`
   (`OnCallStarted`/`OnCallTerminated`/`ClearUserCall`/`TerminateGroupLocal`/pending 취소 전부). **청취 leg(recvonly)는
   내지 않는다** — 참가가 아니고, 은닉 정책과 무관하게 일관되게 뺀다. TAS 의 `NotifyDialogState` 는 PTT 세션 leg

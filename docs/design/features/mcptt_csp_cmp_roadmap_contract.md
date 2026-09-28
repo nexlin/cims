@@ -52,7 +52,7 @@ MCPTT 세션은 `PTT_GROUP_ADD` 하나를 파라미터로 구분한다(§A.1) �
 > **명명 규약 (의식적 tradeoff)**: 이 통일로 `PTT_GROUP_*` 명령이 1:1 private call 도 다루게 되어
 > 이름의 "GROUP" 이 부정합해진다. 명령 rename 은 기존 구현·API 계약 비용이 크므로 채택하지
 > 않고, **`PTT_GROUP_*` 를 "PTT 미디어 세션(멤버 1..N)" 으로 재정의**하며 `group_type` 이 실제
-> 형태(private=2인 1:1 / prearranged·chat·broadcast=그룹)를 구분한다. 원칙 ②(일관성)와 최소
+> 형태(private=2인 1:1 / prearranged·chat=그룹)를 구분한다(일제 통화는 형태가 아니라 호 속성 `broadcast`). 원칙 ②(일관성)와 최소
 > 변경 사이의 명시적 선택임을 남긴다 — 숨은 band-aid 가 아니다.
 
 ### A.1 Private call (1:1) — PTT_GROUP_ADD 파라미터화
@@ -79,7 +79,7 @@ TS 24.379 §11(call control) + TS 24.380 §6.3(floor control 공통). private ca
 
 | payload 필드 | 필수 | 설명 |
 |---|---|---|
-| `group_type` | O | 신규 값 **`private`** 추가 (기존 `prearranged`/`chat`/`broadcast`) |
+| `group_type` | O | 신규 값 **`private`** 추가 (기존 `prearranged`/`chat` — 일제 통화는 별도 필드 `broadcast`, [cmp_media_api.md](../../api/cmp_media_api.md)) |
 | `floor_control` | - | `on`(기본)=floor 제어 有(private-call floor), `off`=full-duplex. 값 정의는 §B.1 |
 | `members` | O | 정확히 2 (`caller_sid:prio:role`, `callee_sid:prio:role`) |
 | `initiator_id` | O | 발신자 sessionId (floor 초기 부여 후보; `floor_control:"off"` 시 무의미) |

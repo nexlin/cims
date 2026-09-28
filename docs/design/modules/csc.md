@@ -692,7 +692,7 @@ DB 는 가입자(person/VoLTE/PTT) 도메인과 조직 트리 등 **관계형이
 | `voip_subscriptions` | `id VARCHAR PK`(MSISDN) | 유선 VoIP 회선 — 컬럼은 volte 와 동일, `service_ref` 는 kind=voip 서비스 필수(**가입 테이블 = 접속환경 kind**, 레지스트리 `services/subscriptions.py`). `sql/migrate_voip_subscriptions.sql` 로 생성 — 없는 DB 에서는 CSC 가 프로브해 그 테이블만 건너뛴다(`/users/{pid}/voip` 503) |
 | `user_rejects` | (`user_id`, `reject_id`) PK | person 착신거부 목록. `user_id` → users(CASCADE) |
 | `ptt_subscriptions` | `id VARCHAR PK`(MCPTT ID) | MCPTT 회선: IMPI 인증. `user_id` → users(CASCADE). `service_ref` 는 kind=ptt 서비스만 |
-| `ptt_groups` | **`id BIGINT AI PK`**(surrogate) | PTT 그룹. `mcptt_group_id` 는 UNIQUE 식별자(키 아님). group_type(prearranged/chat/broadcast)/priority/emergency/video_enabled/require_affiliation 등 |
+| `ptt_groups` | **`id BIGINT AI PK`**(surrogate) | PTT 그룹. `mcptt_group_id` 는 UNIQUE 식별자(키 아님). group_type(prearranged/chat — on-network-invite-members)/hang_timer_sec·max_duration_sec(그룹 호 T4·TNG3)/priority/emergency/video_enabled/require_affiliation 등 |
 | `ptt_group_members` | `id INT AI PK` | 멤버. `group_id` → **ptt_groups.id(surrogate BIGINT FK)**, role(chair/participant), mcptt_id |
 | `ptt_affiliations` | (group_id, user_id, client_id) | MCPTT affiliation(TS 24.379 §9). `group_id` → ptt_groups.id(CASCADE) |
 | `organizations` | `id INT AI PK` | code/name/parent_id 트리. users.org_id FK 대상 |
