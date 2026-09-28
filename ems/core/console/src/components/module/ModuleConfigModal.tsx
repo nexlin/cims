@@ -42,6 +42,8 @@ interface Props {
  onOpenGroupConfig?: (groupId: number) => void
   // true 면 Modal 오버레이 없이 패널만 렌더 (시스템/인프라 [패키지 설정] 탭의 페이지 임베드).
  inline?: boolean
+  /** 처음 열 세그먼트 — 'scalar' 또는 컬렉션 key (주소 ?col= 바로가기, 예: 서비스 설정 › SIP 연동의 Local Node) */
+ initialTab?: string
 }
 
 /**
@@ -56,7 +58,7 @@ interface Props {
  * build/dist/{name}/config/*.jsonl (collection) + 로컬 PID SIGUSR1.
  */
 export default function ModuleConfigModal({ source: sourceProp, onClose, onDone, inline,
- onOpenGroupConfig }: Props) {
+ onOpenGroupConfig, initialTab }: Props) {
   // 부모(ServersPage 등)가 주기 폴링으로 재렌더하며 source 객체를 매번 새로 만들면
   // fetch/editor 의 useEffect 가 재실행돼 편집값이 서버 값으로 덮어써진다 —
   // mount 시점 스냅샷으로 identity 고정 (모듈 전환은 caller 가 key 로 리마운트).
@@ -70,7 +72,7 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
   // 값의 출처 — 'injected' 는 배포 시 OAM 이 채운 값(운영자 입력 아님). 배지 표시용.
  const [srcMap, setSrcMap]       = useState<Record<string, ConfigValueSrc>>({})
  const [appliedAt, setAppliedAt] = useState<string | null>(null)
- const [tab, setTab]             = useState<Tab>('scalar')
+ const [tab, setTab]             = useState<Tab>(initialTab || 'scalar')
   // HA 그룹 컨텍스트 (deployment 모드 + 그룹 멤버일 때만) — 있으면 공통/개별 탭 분리.
  const [ha, setHa]               = useState<DeploymentConfigHa | null>(null)
 

@@ -4,7 +4,7 @@
 //   가입자관리(조직/구성원/번호/PTT그룹) · 서비스(상태/VoLTE·PTT 이력) · 성능(VoLTE/PTT/메시지 통계).
 // 다른 서비스를 붙이려면 같은 형태의 manifest 를 만들어 services/registry.ts 에 등록.
 
-import { Users, TrendingUp, FileText } from 'lucide-react'
+import { Users, TrendingUp, FileText, SlidersHorizontal } from 'lucide-react'
 import type { ServiceManifest } from '@core/nav-types'
 
 import { healthDotsWidget } from './widgets/HealthDotsWidget'
@@ -28,6 +28,7 @@ import PhoneGroupsPage from './pages/PhoneGroupsPage'
 import McpttPolicyPage from './pages/McpttPolicyPage'
 import RegisterFlowPage from './pages/RegisterFlowPage'
 import AnnouncementsPage from './pages/AnnouncementsPage'
+import SipPeeringPage from './pages/SipPeeringPage'
 import { SERVICE_DEFS_LAYOUT } from '@core/widgets/layouts'  // 코어 레이아웃 — '구성' 그룹에 배치
 
 import {
@@ -76,6 +77,20 @@ export const cimsManifest: ServiceManifest = {
         // 안내음성 라이브러리(announcements.md §7) — 등록·청취·CMP 노드 배포. API 는 base OAM 소유(/api/v1/announcements)
         { path: '/service/announcements',     title: '안내음성',   component: AnnouncementsPage,    requiredRole: 'monitor',
           apis: ['announcements.list', 'announcements.register', 'announcements.get', 'announcements.delete', 'announcements.deploy', 'announcements.nodes'] },
+      ],
+    },
+    // ── 서비스 설정 (ops) — CSP 연동·규칙(local/remote node · route · route set · rule · rule set · routing/acl policy).
+    //    API 는 base OAM 컬렉션(/deployments/{id}/collection/*) — 편집은 operator. ──
+    {
+      key: 'service-config',
+      label: '서비스 설정',
+      icon: SlidersHorizontal,
+      area: 'ops',
+      basePath: '/service-config',
+      defaultPath: '/service-config/sip',
+      order: 32,
+      routes: [
+        { path: '/service-config/sip', title: 'SIP 연동', component: SipPeeringPage, requiredRole: 'monitor' },
       ],
     },
     // ── 성능 (ops) — 통계(KPI/카운터). FCAPS Performance. ──

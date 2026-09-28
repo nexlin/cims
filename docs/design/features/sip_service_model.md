@@ -616,6 +616,8 @@ AccessServices:
 | 파일 | 역할 |
 |------|------|
 | `ems/core/console/src/components/module/ModuleConfigEditor.tsx` | 9개 탭 렌더, tag filter chip, ref 필드 dropdown |
+| `ems/service/console/src/pages/SipPeeringPage.tsx` | **운용 › 서비스 설정 › SIP 연동** (`/service-config/sip`, 편집 = operator) — 연동(Local Node → Remote Node → Route → Route Set)과 규칙(Rule → Rule Set → Routing Policy → ACL Policy)을 한 페이지 8단계로. Local Node 는 읽기만(시스템/인프라 설정 바로가기). Rule field 는 원천·부분·헤더 이름으로 고른다(§2-5). 호 따라가기 = 편집 중 설정으로 판정 순서를 화면에서 흉내 |
+| `ems/service/console/src/api/sipPeering.ts` | 컬렉션 9종 읽기 + 묶음 저장 — 쓰기 직전 재조회로 충돌 검사, 추가·변경은 참조되는 쪽 먼저 / 삭제는 참조하는 쪽 먼저(등록의 반대), CSP 재적재 신호는 마지막 쓰기 한 번 |
 
 ### 문서
 

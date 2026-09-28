@@ -48,6 +48,9 @@ interface Props {
  packages: SipPackage[]
   // 셀/헤더 클릭 → 해당 서버의 패키지 설정 화면으로 점프
  onSelectMember: (agentId: number, packageName?: string) => void
+  /** 바로가기 — 처음 열 패키지·세그먼트(컬렉션 key). 주소 ?pkg=&col= (예: 서비스 설정 › SIP 연동 → csp Local Node) */
+ initialPkg?: string
+ initialView?: string
 }
 
 type CellState = 'ok' | 'drift' | 'individual'
@@ -81,7 +84,7 @@ function itemText(f: ConfigTemplateField, x: unknown): string {
 }
 
 export function GroupConfigCompareView({ group, members: liveMembers,
- deployments: liveDeployments, packages: livePackages, onSelectMember }: Props) {
+ deployments: liveDeployments, packages: livePackages, onSelectMember, initialPkg, initialView }: Props) {
  const { show } = useToast()
   // 부모 폴링의 prop identity churn 차단 — 열린 시점 스냅샷 (새로고침 버튼으로 갱신).
   // group 은 스위치/ACTIVE 실시간 표시를 위해 live 사용 (필드 단위로만 참조).
@@ -91,7 +94,8 @@ export function GroupConfigCompareView({ group, members: liveMembers,
  const { members, deployments, packages } = frozen
  const isAS = group.mode === 'active_standby'
 
- const [selectedPkgName, setSelectedPkgName] = useState<string>('')
+ const [selectedPkgName, setSelectedPkgName] = useState<string>(initialPkg ?? '')
+ const linkRef = useRef({ pkg: initialPkg, view: initialView })   // 첫 패키지 초기화 한 번만 바로가기 세그먼트로
  const [view, setView] = useState<View>(isAS ? 'edit' : 'compare')
  const [loading, setLoading] = useState(false)
   // agent_id → config overlay (멤버별 GET /deployments/{id}/config 병렬 합성) +
@@ -225,7 +229,8 @@ export function GroupConfigCompareView({ group, members: liveMembers,
 
  useEffect(() => { void load() }, [load])
  useEffect(() => {   // 패키지 전환 시 뷰/선택/폼 초기화 (dirty 해제 → 새 기준으로 재초기화)
- setView(isAS ? 'edit' : 'compare')
+ setView(linkRef.current.view && effectivePkgName === linkRef.current.pkg ? linkRef.current.view : (isAS ? 'edit' : 'compare'))
+ linkRef.current = { pkg: undefined, view: undefined }
  setOffTarget(null)
  setFormValues({})
  setFormInitial({})

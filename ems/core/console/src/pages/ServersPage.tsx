@@ -753,6 +753,8 @@ export default function ServersPage() {
                     }))}
  deployments={deployments}
  packages={packages}
+ initialPkg={searchParams.get('pkg') ?? undefined}
+ initialView={searchParams.get('col') ?? undefined}
  onSelectMember={(aid) => setSelection({ kind: 'agent', id: aid })} />
                 </div>
               </div>
@@ -2151,7 +2153,10 @@ function AgentConfigTab({ deployments, packages, onDone, onOpenGroupConfig }: {
   // 폴링 identity churn 차단 — mount 시 스냅샷 (모듈 전환은 key 리마운트)
   // pending(설치 전) 도 포함 — DB/notify/시크릿을 설치 전에 미리 지정(overlay 저장→설치 시 반영).
  const [deps] = useState(() => deployments.filter(d => d.status !== 'removed'))
- const [selDep, setSelDep] = useState<number>(deps[0]?.id ?? 0)
+  // 바로가기 ?dep=<배포 id>&col=<컬렉션 key> — 그 모듈 칩·세그먼트를 연다 (예: 서비스 설정 › SIP 연동 → CSP Local Node)
+ const [searchParams] = useSearchParams()
+ const [link] = useState(() => { const d = Number(searchParams.get('dep')); return { dep: deps.some(x => x.id === d) ? d : 0, col: searchParams.get('col') ?? '' } })
+ const [selDep, setSelDep] = useState<number>(link.dep || (deps[0]?.id ?? 0))
  const dep = deps.find(d => d.id === selDep)
  const source = useMemo(
     () => dep ? ({ type: 'deployment' as const, deployment: dep }) : null,
@@ -2210,7 +2215,7 @@ function AgentConfigTab({ deployments, packages, onDone, onOpenGroupConfig }: {
       </div>
       <div className="min-h-0 flex-1">
         {source && (
-          <ModuleConfigModal key={selDep} inline source={source}
+          <ModuleConfigModal key={selDep} inline source={source} initialTab={selDep === link.dep ? link.col : undefined}
  onClose={() => { /* inline */ }} onDone={onDone}
  onOpenGroupConfig={onOpenGroupConfig} />
         )}
