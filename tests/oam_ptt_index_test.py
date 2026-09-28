@@ -127,6 +127,24 @@ def main():
         k1, k2, k3 = build_tree(root, day)
         ptt_index.init(root, stats, state, enabled=True)
 
+        print("\n[0] 이용 축 — 화자별 발언·긴급·영상 (mcptt_management_views.md §5.2)")
+        r1 = ptt_index.summarize("1", k1)
+        check("화자별 발언 수·시간", r1.get("by_speaker") == {"+82500000001": {"turns": 1, "talk_ms": 5000},
+                                                     "+82500000002": {"turns": 1, "talk_ms": 6000}}, str(r1.get("by_speaker")))
+        check("긴급·영상 없음", r1.get("emergency") is False and r1.get("video_sent") is False)
+        d2 = os.path.join(root, "ptt", "1", day[0:4], day[4:6], day[6:8], "13", k2)
+        with open(os.path.join(d2, "events.jsonl"), "w") as f:
+            f.write(json.dumps({"ts": "x", "type": "emergency_activated", "actor": "+82500000003"}) + "\n")
+        vs = seg(2, "x", "y", "+82500000003", 1000)
+        vs["tracks"].append({"prefix": "video", "kind": "video", "slot": 0, "file": "seg/000/seg_0002_video.rtp"})
+        with open(os.path.join(d2, "segments.jsonl"), "a") as f:
+            f.write(json.dumps(vs) + "\n")
+        r2 = ptt_index.summarize("1", k2)
+        check("긴급 개시 이벤트 → emergency", r2.get("emergency") is True)
+        check("영상 트랙 → video_sent", r2.get("video_sent") is True)
+        check("같은 화자 두 세그먼트 합산", r2.get("by_speaker", {}).get("+82500000003") == {"turns": 2, "talk_ms": 5000},
+              str(r2.get("by_speaker")))
+
         print("\n[1] 세션이 기록 단위인가")
         rows = ptt_index.scan_day(day)
         keys = [r["key"] for r in rows]

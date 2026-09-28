@@ -29,6 +29,7 @@ import McpttPolicyPage from './pages/McpttPolicyPage'
 import RegisterFlowPage from './pages/RegisterFlowPage'
 import AnnouncementsPage from './pages/AnnouncementsPage'
 import PttGroupInfoPage from './pages/PttGroupInfoPage'
+import PttUsagePage from './pages/PttUsagePage'
 import SipPeeringPage from './pages/SipPeeringPage'
 import { SERVICE_DEFS_LAYOUT } from '@core/widgets/layouts'  // 코어 레이아웃 — '구성' 그룹에 배치
 
@@ -72,6 +73,9 @@ export const cimsManifest: ServiceManifest = {
         // MCPTT 그룹 정보(mcptt_management_views.md §3) — 조회 전용. 편집은 구성 › PTT 그룹
         { path: '/service/ptt-groups',      title: 'MCPTT 그룹 정보', component: PttGroupInfoPage, requiredRole: 'monitor',
           apis: ['stats.service.ptt-groups', 'stats.service.ptt-group'] },
+        // MCPTT 이용 정보(mcptt_management_views.md §5) — 기간 집계·xlsx. 원천 = 1분 롤업
+        { path: '/service/ptt-usage',       title: 'MCPTT 이용 정보', component: PttUsagePage, requiredRole: 'monitor',
+          apis: ['stats.service.ptt-usage'] },
         { path: '/service/history/volte',  title: 'VoLTE 호 이력',  layout: SERVICE_HISTORY_VOLTE_LAYOUT, layoutId: 'service.history-volte', requiredRole: 'monitor' },
         { path: '/service/history/ptt',    title: 'PTT 세션 이력',  layout: SERVICE_HISTORY_PTT_LAYOUT,   layoutId: 'service.history-ptt',   requiredRole: 'monitor' },
         { path: '/service/abnormal-sessions', title: '비정상 세션 이력', requiredRole: 'monitor',

@@ -314,6 +314,27 @@ export interface PttGroupStatusResponse {
   counts: { members: number; registered: number; affiliated: number }
 }
 
+// ── MCPTT 이용 정보 (GET /stats/service/ptt-usage) ──
+export interface PttUsageSummary {
+  sessions: number; talked: number; turns: number; talk_sum_sec: number; emergency: number; video: number
+  pdd_avg_ms: number | null
+  talk_measured: number; talk_coverage_sessions: number   // 발언 축을 잰 세션 / 세션 기록 — 작으면 일부 미측정
+}
+export interface PttUsageResponse {
+  from: string; to: string; unit: '1h' | '1d'; source: string; warning?: string
+  summary: PttUsageSummary
+  trend: Array<{ bucket: string; bucket_start: string; missing: boolean; sessions: number; turns: number; talk_sum_sec: number }>
+  by_group: Array<{ id: string; name: string; sessions: number; talked: number; turns: number; talk_sum_sec: number; emergency: number; video: number; talk_measured: number }>
+  by_user: Array<{ id: string; name: string; sessions: number; turns: number; talk_sum_sec: number; emergency: number }>
+}
+/** 게이트웨이 기준 상대 경로(`/stats/…`) — api.get 과 인증 fetch(xlsx) 가 같이 쓴다 */
+export function pttUsagePath(from: string, to: string, unit?: '1h' | '1d', format?: 'xlsx') {
+  const p = new URLSearchParams({ from, to })
+  if (unit) p.set('unit', unit)
+  if (format) p.set('format', format)
+  return `/stats/service/ptt-usage?${p.toString()}`
+}
+
 export const statsApi = {
   health: () => api.get<HealthResponse>('/stats/health'),
 
@@ -349,6 +370,9 @@ export const statsApi = {
   pttGroupsStatus: (state: PttGroupStateFilter = 'all', q = '') =>
     api.get<PttGroupsStatusResponse>(`/stats/service/ptt-groups?state=${state}${q ? `&q=${encodeURIComponent(q)}` : ''}`),
   pttGroupStatus: (id: string) => api.get<PttGroupStatusResponse>(`/stats/service/ptt-groups/${encodeURIComponent(id)}`),
+  // MCPTT 이용 정보 (mcptt_management_views.md §5) — 기간 집계. xlsx 는 pttUsagePath(…, 'xlsx') 로 인증 fetch
+  pttUsage: (from: string, to: string, unit?: '1h' | '1d') =>
+    api.get<PttUsageResponse>(pttUsagePath(from, to, unit)),
 
   messages: (params: { date?: string; granularity?: string; proto?: string }) => {
     const p = new URLSearchParams()

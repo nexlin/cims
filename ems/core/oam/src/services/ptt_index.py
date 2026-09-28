@@ -317,6 +317,9 @@ def summarize(group_key: str, key: str, parts: list = None, gd: dict = None) -> 
         gd = group_descriptor(group_key)
 
     speakers, windows = set(), []
+    # 화자별 발언 — MCPTT 이용 정보(mcptt_management_views.md §5.2)의 사용자 축. {id: {turns, talk_ms}}
+    by_speaker: dict = {}
+    emergency = video_sent = False
     seg_count = turn_count = max_con = 0
     total_ms = talk_ms = 0
     st_min = en_max = ""
@@ -337,14 +340,27 @@ def summarize(group_key: str, key: str, parts: list = None, gd: dict = None) -> 
                 spans = t.get("speakers") or []
                 turn_count += len(spans) or 1
                 for sp in spans:
+                    d_ms = int(sp.get("dur_ms", 0) or 0)
                     if sp.get("id"):
                         speakers.add(sp["id"])
-                    talk_ms += int(sp.get("dur_ms", 0) or 0)
+                        b = by_speaker.setdefault(sp["id"], {"turns": 0, "talk_ms": 0})
+                        b["turns"] += 1
+                        b["talk_ms"] += d_ms
+                    talk_ms += d_ms
             if not tracks:
                 sp = s.get("speaker_id", "")
                 if sp:
                     speakers.add(sp)
+                    b = by_speaker.setdefault(sp, {"turns": 0, "talk_ms": 0})
+                    b["turns"] += 1
+                    b["talk_ms"] += int(s.get("duration_ms", 0) or 0)
                 turn_count += 1
+            # 영상 송출 세션 — 세그먼트에 영상 트랙 파일이 있다(CMP tracks[] kind=video)
+            raw = s.get("tracks")
+            if isinstance(raw, list) and any(isinstance(t, dict) and t.get("kind") == "video" and t.get("file") for t in raw):
+                video_sent = True
+            elif any(k.startswith("video") and k.endswith("_file") and v for k, v in s.items()):
+                video_sent = True
             stt, ent = s.get("start_time", ""), s.get("end_time", "")
             if stt and (not st_min or stt < st_min):
                 st_min = stt
@@ -352,6 +368,10 @@ def summarize(group_key: str, key: str, parts: list = None, gd: dict = None) -> 
                 en_max = ent
         if window_of(d) == now_window and has_active_recording(d):
             active = True
+        # 긴급·임박 위험 세션 — CSP 가 세션 이벤트로 남긴 개시·상향(emergency_modes §4)
+        if not emergency:
+            emergency = any((e.get("type") or "") in ("emergency_activated", "imminent_activated")
+                            for e in _read_jsonl(os.path.join(d, "events.jsonl")))
         if not sj:
             # 세션 디스크립터 — CSP 가 세션 시작 버킷에 남긴 당시 스냅샷. floor 축은
             #   이것이 정본(그룹 루트 group.json 은 최신이라 과거 세션에 소급되면 왜곡).
@@ -401,6 +421,10 @@ def summarize(group_key: str, key: str, parts: list = None, gd: dict = None) -> 
         "max_concurrent": max_con,
         "speech_ms": total_ms,
         "talk_ms": talk_ms,
+        # 이용 정보 축(mcptt_management_views.md §5.2) — 화자별 발언 · 긴급/임박 · 영상 송출
+        "by_speaker": by_speaker,
+        "emergency": emergency,
+        "video_sent": video_sent,
         # floor 축은 세션 스냅샷이 정본, 없으면(구 녹취) 그룹 레벨 폴백
         "floor_control": sj.get("floor_control", "") or gd.get("floor_control", ""),
         "floor_policy": sj.get("floor_policy", "") or gd.get("floor_policy", ""),

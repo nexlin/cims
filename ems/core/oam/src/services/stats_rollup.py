@@ -289,9 +289,16 @@ def _empty(bucket: str, svc: str) -> dict:
             'duration_sum_sec': 0,
             'pdd_sum_ms': 0, 'pdd_n': 0,
             'legs_invited': 0, 'legs_joined': 0,
+            # PTT 이용 축(mcptt_management_views.md §5.2) — 발언 수 · 발언 시간 합 · 긴급/임박 세션 · 영상 송출 세션.
+            #   `talk_measured` = 이 축을 **잰** 세션 수 — 축이 생기기 전 세션(인덱스에 화자별 발언이 없는 행)은
+            #   0 이 아니라 모름이다. 조회는 세션 수와 비교해 미측정 구간을 알린다(0 과 모름을 가른다).
+            'turns': 0, 'talk_sum_sec': 0, 'emergency': 0, 'video': 0, 'talk_measured': 0,
             # 그룹 축 — PTT 만. 분 단위라 키 수는 그 분에 활성이던 그룹 수로 묶인다
             # (전체 그룹 수와 무관). 값은 카운터라 상위 단위로 그대로 합산된다.
             'by_group': {},
+            # 사용자 축 — PTT 만, by_group 과 같은 원칙(그 분에 참여한 사용자만 — 키 수가 가입자 수와 무관).
+            #   {MCPTT 사용자 번호: {sessions, turns, talk_sum_sec, emergency}}
+            'by_user': {},
         },
         # 메시지 통계. 루트의 `in`/`out` 이 **SIP** 이고(이 축의 기저), 그 밖의
         # 인터페이스는 `iface.<이름>` 아래 같은 모양으로 붙는다 — 접근자 `msg_io`.
@@ -299,6 +306,20 @@ def _empty(bucket: str, svc: str) -> dict:
         'open': 0,
         'late_dropped': 0,
     }
+
+
+# PTT 이용 축의 합산 가능한 카운터 — 레코드 루트·by_group·by_user 에 같은 규칙으로 더한다
+_PTT_USE_KEYS = ('turns', 'talk_sum_sec', 'emergency', 'video', 'talk_measured')
+_GROUP_KEYS = ('sessions', 'talked') + _PTT_USE_KEYS
+_USER_KEYS = ('sessions', 'turns', 'talk_sum_sec', 'emergency')
+
+
+def _merge_axis(dst: dict, src: dict, keys: tuple) -> None:
+    """{키: {카운터}} 축(by_group·by_user)을 더한다 — 모든 계층이 같은 합산이라 한 곳에 둔다."""
+    for k, v in (src or {}).items():
+        tgt = dst.setdefault(k, {kk: 0 for kk in keys})
+        for kk in keys:
+            tgt[kk] = tgt.get(kk, 0) + int((v or {}).get(kk, 0) or 0)
 
 
 def _bump(d: dict, key: str, n: int = 1) -> None:
@@ -643,10 +664,30 @@ def _fold_ptt(row: dict, agg: dict, count_session: bool = False) -> None:
     # 표시용 그룹 식별자는 mcptt_group_id. group_key 는 ptt_groups.id(surrogate)라 저장 경로
     # 키일 뿐 운영자가 보는 이름이 아니다 — 없을 때만 폴백한다(_calc_ptt_stats 와 같은 규칙).
     gid = row.get('mcptt_group_id') or row.get('group_key') or 'unknown'
-    g = c['by_group'].setdefault(str(gid), {'sessions': 0, 'talked': 0})
+    g = c['by_group'].setdefault(str(gid), {k: 0 for k in _GROUP_KEYS})
     _bump(g, 'sessions')
     if turns > 0:
         _bump(g, 'talked')
+    # 이용 축 — 인덱스 행에 화자별 발언이 있을 때만 잰다(없는 행 = 축 이전 세션, 모름)
+    spk = row.get('by_speaker')
+    if isinstance(spk, dict):
+        talk_sec = int(round(int(row.get('talk_ms', 0) or 0) / 1000))
+        emer = 1 if row.get('emergency') else 0
+        vid = 1 if row.get('video_sent') else 0
+        for tgt in (c, g):
+            _bump(tgt, 'talk_measured')
+            _bump(tgt, 'turns', turns)
+            _bump(tgt, 'talk_sum_sec', talk_sec)
+            _bump(tgt, 'emergency', emer)
+            _bump(tgt, 'video', vid)
+        users = c.setdefault('by_user', {})
+        for pid in set(row.get('people') or []) | set(spk.keys()):
+            u = users.setdefault(str(pid), {k: 0 for k in _USER_KEYS})
+            _bump(u, 'sessions')
+            _bump(u, 'emergency', emer)
+            b = spk.get(pid) or {}
+            _bump(u, 'turns', int(b.get('turns', 0) or 0))
+            _bump(u, 'talk_sum_sec', int(round(int(b.get('talk_ms', 0) or 0) / 1000)))
     if row.get('state') != 'ended':
         _bump(agg, 'open')
 
@@ -888,7 +929,7 @@ def fold_records(rows: list, unit: str) -> list:
         src = r.get('call') or {}
         for k in ('attempts', 'sessions', 'talked', 'completed',
                   'attempts_unknown', 'sessions_unmeasured', 'talked_unmeasured',
-                  'duration_sum_sec', 'pdd_sum_ms', 'pdd_n', 'legs_invited', 'legs_joined'):
+                  'duration_sum_sec', 'pdd_sum_ms', 'pdd_n', 'legs_invited', 'legs_joined') + _PTT_USE_KEYS:
             c[k] = c.get(k, 0) + int(src.get(k, 0) or 0)
         for k, v in (src.get('reasons') or {}).items():
             c['reasons'][k] = c['reasons'].get(k, 0) + int(v or 0)
@@ -899,10 +940,8 @@ def fold_records(rows: list, unit: str) -> list:
         # 실패 원인 — 이게 빠지면 툴팁이 1분 단위에서만 나온다(조회는 1h·1d 가 기본이다)
         for k, v in (src.get('causes') or {}).items():
             c['causes'][k] = c['causes'].get(k, 0) + int(v or 0)
-        for gid, gv in (src.get('by_group') or {}).items():
-            g = c['by_group'].setdefault(gid, {'sessions': 0, 'talked': 0})
-            for k in ('sessions', 'talked'):
-                g[k] = g.get(k, 0) + int((gv or {}).get(k, 0) or 0)
+        _merge_axis(c['by_group'], src.get('by_group'), _GROUP_KEYS)
+        _merge_axis(c.setdefault('by_user', {}), src.get('by_user'), _USER_KEYS)
         src_msg = r.get('msg') or {}
         # 자료가 있는 칸만 만든다 — 없는 인터페이스까지 빈 칸을 찍으면 파일만 커진다.
         for ifc in ('sip',) + tuple((src_msg.get('iface') or {}).keys()):
@@ -1625,13 +1664,14 @@ def _zero_call() -> dict:
             'duration_sum_sec': 0, 'pdd_sum_ms': 0, 'pdd_n': 0,
             'legs_invited': 0, 'legs_joined': 0, 'open': 0, 'late_dropped': 0,
             'attempts_unknown': 0, 'sessions_unmeasured': 0, 'talked_unmeasured': 0,
-            'reasons': {}, 'end_reasons': {}, 'statuses': {}, 'causes': {}, 'by_group': {}}
+            'turns': 0, 'talk_sum_sec': 0, 'emergency': 0, 'video': 0, 'talk_measured': 0,
+            'reasons': {}, 'end_reasons': {}, 'statuses': {}, 'causes': {}, 'by_group': {}, 'by_user': {}}
 
 
 def _add_call(dst: dict, src: dict, open_n: int = 0, late_n: int = 0) -> None:
     for k in ('attempts', 'sessions', 'talked', 'completed',
               'attempts_unknown', 'sessions_unmeasured', 'talked_unmeasured',
-              'duration_sum_sec', 'pdd_sum_ms', 'pdd_n', 'legs_invited', 'legs_joined'):
+              'duration_sum_sec', 'pdd_sum_ms', 'pdd_n', 'legs_invited', 'legs_joined') + _PTT_USE_KEYS:
         dst[k] = dst.get(k, 0) + int(src.get(k, 0) or 0)
     for k, v in (src.get('reasons') or {}).items():
         dst['reasons'][k] = dst['reasons'].get(k, 0) + int(v or 0)
@@ -1644,10 +1684,8 @@ def _add_call(dst: dict, src: dict, open_n: int = 0, late_n: int = 0) -> None:
     czd = dst.setdefault('causes', {})
     for k, v in (src.get('causes') or {}).items():
         czd[k] = czd.get(k, 0) + int(v or 0)
-    for gid, gv in (src.get('by_group') or {}).items():
-        tgt = dst['by_group'].setdefault(gid, {'sessions': 0, 'talked': 0})
-        for k in ('sessions', 'talked'):
-            tgt[k] = tgt.get(k, 0) + int((gv or {}).get(k, 0) or 0)
+    _merge_axis(dst['by_group'], src.get('by_group'), _GROUP_KEYS)
+    _merge_axis(dst.setdefault('by_user', {}), src.get('by_user'), _USER_KEYS)
     dst['open'] = dst.get('open', 0) + int(open_n or 0)
     dst['late_dropped'] = dst.get('late_dropped', 0) + int(late_n or 0)
 
@@ -1720,6 +1758,8 @@ def with_rates(c: dict, no_attempt_svcs=()) -> dict:
     bg = {k: dict(v) for k, v in (c.get('by_group') or {}).items()}
     out['by_group'] = dict(sorted(bg.items(), key=lambda x: -x[1].get('sessions', 0)))
     out['by_group_sessions'] = {k: v.get('sessions', 0) for k, v in out['by_group'].items()}
+    bu = {k: dict(v) for k, v in (c.get('by_user') or {}).items()}
+    out['by_user'] = dict(sorted(bu.items(), key=lambda x: (-x[1].get('talk_sum_sec', 0), -x[1].get('turns', 0))))
     # **잰 것끼리 나눈다.** 시도가 기록되지 않은 구간의 성립은 분자에서 덜어낸다 — 그러지
     #   않으면 분자만 자라 성공률이 100% 를 넘는다(실측 350%). 개수 열(성립)은 사실이므로
     #   그대로 두고, 비율만 측정된 모집단으로 낸다. 못 잰 구간만 있는 칸은 분자·분모가 둘 다

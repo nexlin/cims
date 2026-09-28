@@ -771,8 +771,15 @@ SIP 원문 / 호 이력          ← 원본. 조회에 직접 쓰지 않는다
     "duration_sum_sec": 842,            // 평균은 조회 시 계산 (합산 가능성 유지)
     "pdd_sum_ms": 21400, "pdd_n": 11,   // answer_time - invite_time
     "legs_invited": 44, "legs_joined": 39,  // 참여율
+    "turns": 156, "talk_sum_sec": 860,  // PTT 발언 수 · 발언 시간 합
+    "emergency": 1, "video": 3,         // 긴급·임박 세션 · 영상 송출 세션
+    "talk_measured": 11,                // 발언 축을 잰 세션 수(축 이전 세션 = 모름)
     "by_group": {                       // 그룹 축 — PTT 만
-      "testgrp01": {"sessions": 9, "talked": 8}
+      "testgrp01": {"sessions": 9, "talked": 8, "turns": 156, "talk_sum_sec": 860,
+                    "emergency": 1, "video": 3, "talk_measured": 9}
+    },
+    "by_user": {                        // 사용자 축 — PTT 만(그 분의 참여자)
+      "+82500000001": {"sessions": 3, "turns": 42, "talk_sum_sec": 192, "emergency": 0}
     }
   },
   "msg": {                              // 메시지 통계 — 루트가 SIP, 그 밖은 iface 아래
@@ -829,8 +836,10 @@ SIP 외 인터페이스 조회는 세대가 모자란 행을 **쓰지 않는다*
 그룹만 담는다. 그래서 그룹이 수천 개여도 레코드는 동시 활성 그룹 수로 묶인다. 값이 카운터라
 상위 단위로 그대로 합산된다. 표시용 식별자는 `mcptt_group_id` 이고, 없으면 `group_key`
 (`ptt_groups.id`)로 폴백한다 — surrogate 키는 운영자가 보는 이름이 아니다
-([identifier_model.md](../identifier_model.md)). PTT 발언 카운터(`turns`·`talk_sum_sec`·`emergency`·`video`)와
-사용자 축(`by_user`) 확장은 [mcptt_management_views.md](mcptt_management_views.md) §5.2 (미구현).
+([identifier_model.md](../identifier_model.md)). PTT 발언 카운터(`turns`·`talk_sum_sec`·`emergency`·`video`)·사용자 축(`by_user` — 같은 원칙, 그 분의 참여자만)의
+원천은 세션 인덱스 행의 화자별 발언(`by_speaker`)·`emergency`·`video_sent` 다. 이 필드가 없는 행(축 이전 세션)은 세지 않고
+`talk_measured` 에도 넣지 않는다 — 조회가 세션 수와 비교해 미측정을 알린다(0 과 모름을 가른다). 재집계(`rebuild`)는
+인덱스를 원본에서 다시 만들어 채운다 — [mcptt_management_views.md](mcptt_management_views.md) §5.
 
 ### 5.2 저장 위치
 

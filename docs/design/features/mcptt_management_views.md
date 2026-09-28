@@ -1,6 +1,6 @@
 # MCPTT 관리 조회 화면 — 그룹 정보 · 단말 현황 · 이용 정보
 
-> **MCPTT 그룹 정보 화면(§3)은 구현, 단말 현황(§4)·이용 정보(§5)·단말 속성 수집·이용 집계 확장은 설계 정본(미구현).** 그룹 편집과
+> **MCPTT 그룹 정보(§3)·MCPTT 이용 정보(§5, 롤업 확장 포함)는 구현, 단말 현황(§4)·단말 속성 수집은 설계 정본(미구현).** 그룹 편집과
 > 실시간 반영(§2)·PTT 세션 이력은 구현돼 있다. 요구 = "MCPTT 그룹 정보 · 단말기 정보 · MCPTT 이용 정보를 저장하며, 필요시 저장 내용을
 > 확인할 수 있다" + "MCPTT 웹 기반 관리 도구에서 그룹 등록/수정/삭제 시 실시간으로 업데이트한다".
 >
@@ -20,7 +20,7 @@
 | MCPTT 이용 이력 (세션 단위) | 콘솔 `서비스 > PTT 세션 이력` (`/service/history/ptt`) | 구현 |
 | **MCPTT 그룹 정보** (조회 · 상태) | `서비스 > MCPTT 그룹 정보` (`/service/ptt-groups`) | 구현 (§3) |
 | **단말 현황** (MCPTT 관점 단말 정보) | `서비스 > 단말 현황` (`/service/ptt-terminals`) | 미구현 (§4) — 단말 속성 수집 신규 |
-| **MCPTT 이용 정보** (기간 집계) | `서비스 > MCPTT 이용 정보` (`/service/ptt-usage`) | 미구현 (§5) — 롤업 확장 |
+| **MCPTT 이용 정보** (기간 집계) | `서비스 > MCPTT 이용 정보` (`/service/ptt-usage`) | 구현 (§5) — 롤업 확장 포함 |
 
 콘솔 `서비스` 메뉴 순서 = 서비스 현황 · MCPTT 그룹 정보 · 단말 현황 · MCPTT 이용 정보 · PTT 세션 이력 · VoLTE 호
 이력. 세 화면 모두 `requiredRole: 'monitor'` 로 조회 전용이다 — 편집은 `구성` 메뉴와 관제 앱이 소유한다(조회와
@@ -103,8 +103,11 @@ MCPTT 서비스가 필요로 하는 단말 정보 — 누가 어떤 단말로 �
 
 ## 5. MCPTT 이용 정보 화면
 
-**구성** — ① 기간(오늘 · 최근 7일 · 최근 30일 · 직접 지정) ② 요약 타일(그룹 세션 · 발언 · 총 발언 시간 · 긴급
-호출 · 영상 송출 · 평균 개시 시간) ③ 시간대별 발언 추이 · 그룹별 이용 표 · 사용자별 발언 상위 ④ Excel 내려받기.
+**구성** — ① 기간(오늘 · 최근 7일 · 최근 30일 · 직접 지정, 최대 92일) ② 요약 타일(그룹 세션 · 발언 · 총 발언 시간 ·
+긴급·임박 세션 · 영상 송출 세션 · 평균 개시 시간) ③ 발언 추이 막대(하루 = 시간대별 `1h`, 여러 날 = 일별 `1d` — 막대 툴팁 ·
+[표로 보기] · 자료 없는 구간은 점선) · 그룹별 이용 표 · 사용자별 발언 상위(발언 시간순 50명) ④ Excel 내려받기.
+발언 축을 못 잰 세션이 섞이면(`talk_measured < 세션 기록`) 경고 띠로 알리고 해당 타일에 "측정 세션 n건 기준" 을 붙인다
+(`PttUsagePage.tsx`).
 
 ### 5.1 원천
 
@@ -135,14 +138,17 @@ MCPTT 서비스가 필요로 하는 단말 정보 — 누가 어떤 단말로 �
 }
 ```
 
-- 발언 원천 = 세션 디스크립터의 floor 이력(화자 구간) — 세션 종료 시 확정되므로 `invite_time` 버킷에 귀속한다
-  (sip_statistics §4.3 과 같은 규칙).
-- `by_user` 는 `by_group` 과 같은 원칙이다 — 그 분에 활성이던 사용자만 담아 키 수가 전체 가입자 수와 무관하다.
-  표시 식별자는 MCPTT ID.
+- 발언 원천 = 세션 인덱스(`services/ptt_index`) 행 — 녹취 세그먼트 슬롯 트랙의 화자 구간을 화자별로 모은 `by_speaker`
+  `{id: {turns, talk_ms}}`, 세션 이벤트의 긴급·임박 개시(`emergency_activated`·`imminent_activated`) → `emergency`, 세그먼트의
+  영상 트랙 → `video_sent`. 세션 시작 버킷에 귀속한다(sip_statistics §4.3 과 같은 규칙).
+- 이 필드가 없는 인덱스 행(축 이전 세션)은 이용 카운터를 세지 않고 `talk_measured`(축을 잰 세션 수)에도 넣지 않는다 —
+  조회가 그룹 축 세션 합과 비교해 미측정 구간을 알린다. 재집계(`POST /api/v1/stats/calls/rebuild`)가 인덱스를 다시 만들어 채운다.
+- `by_user` 는 `by_group` 과 같은 원칙이다 — 그 분에 활성이던 사용자(세션 참여자 ∪ 화자)만 담아 키 수가 전체 가입자
+  수와 무관하다. 키는 PTT 회선 번호, 표시명은 조회가 붙인다. 발언 없이 참여한 사용자는 `sessions` 만 는다.
 
 ### 5.3 내려받기
 
-같은 조회 API 에 `format=xlsx` 를 붙인다(화면과 같은 숫자). 시트 = 요약 · 시간대 · 그룹별 · 사용자별.
+같은 조회 API 에 `format=xlsx` 를 붙인다(화면과 같은 숫자). 시트 = 요약 · 시간대(또는 일별) · 그룹별 · 사용자별.
 
 ## 6. API
 
@@ -156,7 +162,7 @@ oam-svc 가 소유한다 — 통계 롤업(`services/stats_rollup`)·세션 인�
 | `GET /api/v1/stats/service/ptt-groups/{id}` | 그룹 상세 — 속성 · 멤버별 등록/참여/세션 참가/발언 | 구현 (`stats.service.ptt-group`) |
 | `GET /api/v1/stats/service/ptt-terminals?state=&type=&q=` | 단말 목록 | 제안 |
 | `GET /api/v1/stats/service/ptt-terminals/{mcptt_id}` | 단말 상세 4영역 | 제안 |
-| `GET /api/v1/stats/ptt/usage?from=&to=&unit=&format=json\|xlsx` | 이용 정보 | 제안 |
+| `GET /api/v1/stats/service/ptt-usage?from=&to=&unit=1h\|1d&format=json\|xlsx` | 이용 정보 — `summary`(+ `talk_measured`/`talk_coverage_sessions`) · `trend` · `by_group` · `by_user`(상위 50) | 구현 (`stats.service.ptt-usage`) |
 
 ## 7. 구현 순서
 

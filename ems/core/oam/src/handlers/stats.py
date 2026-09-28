@@ -810,6 +810,9 @@ async def handle_stats_service(handler_args: HandlerArgs, kwargs: dict) -> Handl
             return await _service_org(config)
         if svc == 'ptt-members':
             return await _ptt_members(config, qp('group', ''), qp('page', '1'), qp('limit', '50'))
+        if svc == 'ptt-usage':
+            # MCPTT 이용 정보(mcptt_management_views.md §5) — 기간 집계 · xlsx
+            return await _ptt_usage(config, qp('from', ''), qp('to', ''), qp('unit', ''), qp('format', 'json'))
         if svc == 'ptt-groups':
             # MCPTT 그룹 정보(mcptt_management_views.md §3) — 목록 / {id} 상세. 조회 전용.
             if len(parts) > 1:
@@ -3143,6 +3146,116 @@ def _ptt_group_status(config: dict, gid: str) -> HandlerResult:
     })
 
 
+# ── MCPTT 이용 정보 (mcptt_management_views.md §5) ─────────────────────────────────────────
+#   원천 = 1분 롤업 피라미드(sip_statistics.md) — 원본 세션을 기간마다 다시 훑지 않는다. 발언 축은 `talk_measured`
+#   (축을 잰 세션 수)로 미측정 구간을 알린다 — 축 이전 세션을 0 으로 말하지 않는다.
+_USAGE_UNITS = ('1h', '1d')
+_USAGE_MAX_DAYS = 92
+_USAGE_TOP_USERS = 50
+
+
+def _ptt_names(config: dict, group_ids, user_ids) -> tuple:
+    gnames, unames = {}, {}
+    try:
+        with _get_db(config) as conn:
+            with conn.cursor() as cur:
+                if group_ids:
+                    cur.execute("SELECT mcptt_group_id, name FROM ptt_groups WHERE mcptt_group_id IN ("
+                                + ",".join(["%s"] * len(group_ids)) + ")", list(group_ids))
+                    gnames = {r['mcptt_group_id']: r.get('name') or '' for r in cur.fetchall()}
+                if user_ids:
+                    cur.execute("SELECT ps.id, u.name FROM ptt_subscriptions ps LEFT JOIN users u ON u.id=ps.user_id "
+                                "WHERE ps.id IN (" + ",".join(["%s"] * len(user_ids)) + ")", list(user_ids))
+                    unames = {r['id']: r.get('name') or '' for r in cur.fetchall()}
+    except Exception as e:
+        logger.warning('ptt usage names skip: %s', e)
+    return gnames, unames
+
+
+@_offload
+def _ptt_usage(config: dict, from_day: str, to_day: str, unit: str, fmt: str) -> HandlerResult:
+    """기간 PTT 이용 — 요약 타일 · 시간대/일별 추이 · 그룹별 · 사용자별(발언 시간 상위). format=xlsx 면 같은 숫자를 시트로."""
+    today = datetime.now().strftime('%Y-%m-%d')
+    from_day, to_day = (from_day or today)[:10], (to_day or from_day or today)[:10]
+    try:
+        d0, d1 = datetime.strptime(from_day, '%Y-%m-%d'), datetime.strptime(to_day, '%Y-%m-%d')
+    except ValueError:
+        return HandlerResult(status=400, body={'error': 'from/to 는 YYYY-MM-DD'})
+    if d1 < d0:
+        return HandlerResult(status=400, body={'error': 'to 가 from 보다 앞선다'})
+    if (d1 - d0).days + 1 > _USAGE_MAX_DAYS:
+        return HandlerResult(status=400, body={'error': f'기간은 최대 {_USAGE_MAX_DAYS}일'})
+    unit = unit or ('1h' if d0 == d1 else '1d')
+    if unit not in _USAGE_UNITS:
+        return HandlerResult(status=400, body={'error': f"unit 은 {'|'.join(_USAGE_UNITS)}"})
+    f, t = _norm_dt(from_day), _norm_dt(to_day, end=True)
+    rows, cov = stats_rollup.read_range_filled(stats_rollup.roots_of(config), f, t, config, gran=unit)
+    looked = bool(cov.get('rollup') or cov.get('scanned')) and not cov.get('missing')
+    buckets, totals = stats_rollup.aggregate(rows, unit, 'ptt', ensure_svc=looked)
+    buckets = stats_rollup.fill_buckets(buckets, unit, f, t)
+    p = (totals or {}).get('ptt') or {}
+    by_group = p.get('by_group') or {}
+    group_sessions = sum(int(v.get('sessions', 0) or 0) for v in by_group.values())
+    measured = int(p.get('talk_measured', 0) or 0)
+    users = list((p.get('by_user') or {}).items())[:_USAGE_TOP_USERS]
+    gnames, unames = _ptt_names(config, list(by_group), [u for u, _ in users])
+    pdd_n = int(p.get('pdd_n', 0) or 0)
+    summary = {
+        'sessions': int(p.get('sessions', 0) or 0), 'talked': int(p.get('talked', 0) or 0),
+        'turns': int(p.get('turns', 0) or 0), 'talk_sum_sec': int(p.get('talk_sum_sec', 0) or 0),
+        'emergency': int(p.get('emergency', 0) or 0), 'video': int(p.get('video', 0) or 0),
+        'pdd_avg_ms': round(int(p.get('pdd_sum_ms', 0) or 0) / pdd_n) if pdd_n else None,
+        # 발언 축 커버리지 — 세션 기록 중 이 축을 잰 세션. 작으면 일부(축 이전·재집계 전) 구간이 미측정이다
+        'talk_measured': measured, 'talk_coverage_sessions': group_sessions,
+    }
+    trend = [{'bucket': b.get('bucket'), 'bucket_start': b.get('bucket_start'), 'missing': bool(b.get('missing')),
+              'sessions': int(((b.get('ptt') or {}).get('sessions')) or 0),
+              'turns': int(((b.get('ptt') or {}).get('turns')) or 0),
+              'talk_sum_sec': int(((b.get('ptt') or {}).get('talk_sum_sec')) or 0)} for b in buckets]
+    groups = [dict({'id': gid, 'name': gnames.get(gid, '')}, **{k: int(v.get(k, 0) or 0) for k in
+              ('sessions', 'talked', 'turns', 'talk_sum_sec', 'emergency', 'video', 'talk_measured')})
+              for gid, v in by_group.items()]
+    top = [dict({'id': uid, 'name': unames.get(uid, '')}, **{k: int(v.get(k, 0) or 0) for k in
+           ('sessions', 'turns', 'talk_sum_sec', 'emergency')}) for uid, v in users]
+    body = {'from': from_day, 'to': to_day, 'unit': unit, 'source': _source_of(cov),
+            'coverage': dict(cov, missing_days=(cov.get('missing_days') or [])[:40],
+                             future_days=(cov.get('future_days') or [])[:40],
+                             partial_days=(cov.get('partial_days') or [])[:40]),
+            'summary': summary, 'trend': trend, 'by_group': groups, 'by_user': top}
+    warn = _coverage_warning(cov)
+    if warn:
+        body['warning'] = warn
+    if (fmt or 'json').lower() != 'xlsx':
+        return HandlerResult(status=200, body=body)
+    import io
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = '요약'
+    ws.append(['기간', f'{from_day} ~ {to_day}'])
+    for k, lbl in (('sessions', '그룹 세션'), ('talked', '발언 있던 세션'), ('turns', '발언'), ('talk_sum_sec', '총 발언 시간(초)'),
+                   ('emergency', '긴급·임박 세션'), ('video', '영상 송출 세션'), ('pdd_avg_ms', '평균 개시 시간(ms)'),
+                   ('talk_measured', '발언 축 측정 세션'), ('talk_coverage_sessions', '세션 기록')):
+        ws.append([lbl, summary[k]])
+    ws = wb.create_sheet('시간대' if unit == '1h' else '일별')
+    ws.append(['구간', '세션', '발언', '발언 시간(초)', '자료 없음'])
+    for r in trend:
+        ws.append([r['bucket'], r['sessions'], r['turns'], r['talk_sum_sec'], 'Y' if r['missing'] else ''])
+    ws = wb.create_sheet('그룹별')
+    ws.append(['그룹 ID', '이름', '세션', '발언 있던 세션', '발언', '발언 시간(초)', '긴급·임박', '영상'])
+    for g in groups:
+        ws.append([g['id'], g['name'], g['sessions'], g['talked'], g['turns'], g['talk_sum_sec'], g['emergency'], g['video']])
+    ws = wb.create_sheet('사용자별')
+    ws.append(['번호', '이름', '참여 세션', '발언', '발언 시간(초)', '긴급·임박'])
+    for u in top:
+        ws.append([u['id'], u['name'], u['sessions'], u['turns'], u['talk_sum_sec'], u['emergency']])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return HandlerResult(status=200, body=buf.getvalue(), headers={
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': f'attachment; filename="mcptt_usage_{from_day}_{to_day}.xlsx"'})
+
+
 # base(노드 health/messages/leak/subscribers) — base OAM 귀속.
 CIMS_STATS_HANDLER_LIST = [
     (_STATS_BASE, handle_stats, {}),
@@ -3716,5 +3829,38 @@ CIMS_STATS_API_DOCS = [
                  'counts': {'members': 9, 'registered': 6, 'affiliated': 5}},
      'errors': _ERR_COMMON + [{'status': 404, 'when': '없는 그룹', 'body': {'error': 'group not found'}}],
      'notes': ['멤버는 priority 오름차순, 최대 1000명.'],
+     'auth': dict(_AUTH_MONITOR)},
+    {'id': 'stats.service.ptt-usage', 'module': 'oam-svc', 'method': 'GET',
+     'path': '/api/v1/stats/service/ptt-usage',
+     'summary': 'MCPTT 이용 정보 — 기간 집계(요약·추이·그룹별·사용자별) · Excel (mcptt_management_views.md §5)',
+     'params': [
+         {'name': 'from', 'in': 'query', 'type': 'string', 'required': False, 'desc': 'YYYY-MM-DD (기본 오늘)'},
+         {'name': 'to', 'in': 'query', 'type': 'string', 'required': False, 'desc': 'YYYY-MM-DD (기본 from) — 최대 92일'},
+         {'name': 'unit', 'in': 'query', 'type': 'string', 'required': False, 'desc': '1h | 1d (기본: 하루면 1h, 여러 날이면 1d)'},
+         {'name': 'format', 'in': 'query', 'type': 'string', 'required': False, 'desc': 'json(기본) | xlsx — 시트 요약·시간대/일별·그룹별·사용자별'},
+     ],
+     'response': '{from, to, unit, source, coverage, warning?, summary, trend[], by_group[], by_user[]}',
+     'response_fields': [
+         {'name': 'summary.sessions', 'type': 'integer', 'unit': '건', 'desc': '그룹 세션(성립)'},
+         {'name': 'summary.turns', 'type': 'integer', 'unit': '회', 'desc': '발언 수'},
+         {'name': 'summary.talk_sum_sec', 'type': 'integer', 'unit': '초', 'desc': '총 발언 시간'},
+         {'name': 'summary.emergency', 'type': 'integer', 'unit': '건', 'desc': '긴급·임박 위험 세션'},
+         {'name': 'summary.video', 'type': 'integer', 'unit': '건', 'desc': '영상 송출 세션'},
+         {'name': 'summary.pdd_avg_ms', 'type': 'integer', 'unit': 'ms', 'desc': '평균 개시 시간(없으면 null)'},
+         {'name': 'summary.talk_measured', 'type': 'integer', 'unit': '건', 'desc': '발언 축을 잰 세션 — talk_coverage_sessions 보다 작으면 일부 미측정'},
+         {'name': 'trend[]', 'type': 'object', 'desc': '{bucket, missing, sessions, turns, talk_sum_sec} — 구간 전체를 채운다'},
+         {'name': 'by_group[]', 'type': 'object', 'desc': '{id, name, sessions, talked, turns, talk_sum_sec, emergency, video}'},
+         {'name': 'by_user[]', 'type': 'object', 'desc': '{id, name, sessions, turns, talk_sum_sec, emergency} — 발언 시간순 상위 50'},
+     ],
+     'example': {'from': '2026-09-29', 'to': '2026-09-29', 'unit': '1h', 'source': 'rollup',
+                 'summary': {'sessions': 12, 'talked': 11, 'turns': 48, 'talk_sum_sec': 312, 'emergency': 1, 'video': 0,
+                             'pdd_avg_ms': 240, 'talk_measured': 12, 'talk_coverage_sessions': 12},
+                 'trend': [{'bucket': '2026-09-29 09:00', 'missing': False, 'sessions': 3, 'turns': 11, 'talk_sum_sec': 70}],
+                 'by_group': [{'id': 'g001', 'name': '관제1', 'sessions': 12, 'talked': 11, 'turns': 48, 'talk_sum_sec': 312,
+                               'emergency': 1, 'video': 0}],
+                 'by_user': [{'id': '+82500000001', 'name': '홍길동', 'sessions': 5, 'turns': 20, 'talk_sum_sec': 140, 'emergency': 1}]},
+     'errors': _ERR_COMMON + [{'status': 400, 'when': '날짜 형식·순서·기간(92일) 또는 unit 무효'}],
+     'notes': ['원천 = 1분 롤업 피라미드 — 원본 세션을 다시 훑지 않는다.',
+               '발언 축 이전에 집계된 구간은 재집계(POST /api/v1/stats/calls/rebuild)로 채운다.'],
      'auth': dict(_AUTH_MONITOR)},
 ]
