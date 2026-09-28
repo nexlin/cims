@@ -80,7 +80,7 @@ data class GroupCallState(
     val emergencyMine: Boolean = false,   // 내가 개시자(취소 권한 — 서버는 개시자 취소만 수용)
     val volume: Float = 1f,               // 채널별 수신 음량(0~2, 1=원음)
     /** 발언 요청 가능 여부 — Floor Taken 의 Permission to Request the Floor(TS 24.380 §8.2.3.7).
-     *  broadcast 그룹·ambient(recv_only) 청취 leg 는 0 이 와서 PTT 버튼을 비활성화한다. */
+     *  일제 통화·ambient(recv_only) 청취 leg 는 0 이 와서 PTT 버튼을 비활성화한다. */
     val canRequestFloor: Boolean = true,
     /** 내 발언 마감 시각(elapsedRealtime ms) — Granted Duration(T2) 기반 잔여시간 표시. 0=제한 없음. */
     val speakDeadlineMs: Long = 0,
@@ -215,7 +215,7 @@ class PttController(
         var otherSpeaker: String? = null      // 이력용 — 수신 중 발언자
         var otherSpeakStartMs: Long = 0
         // Floor Taken 의 Permission(§8.2.3.7)=0 이면 이 세션에서는 발언 요청이 불가하다
-        // (broadcast 그룹·ambient 청취 leg). 눌러도 Deny 만 받으므로 버튼을 미리 막는다.
+        // (일제 통화·ambient 청취 leg). 눌러도 Deny 만 받으므로 버튼을 미리 막는다.
         var canRequestFloor: Boolean = true
         var speakDeadlineMs: Long = 0         // Granted Duration(T2) 마감(elapsedRealtime), 0=무제한
         var talkLimit: Job? = null            // 마감 임박 알림 + 자체 종료 타이머
@@ -1048,11 +1048,14 @@ class PttController(
             (if (fullDuplex) "a=fmtp:MCPTT mc_queueing;mc_no_floor_ctrl" else "a=fmtp:MCPTT mc_queueing")
 
     /** 키업 그룹콜 참여(발신). 이미 참여 중이면 무시. 첫 세션은 주채널.
-     *  [emergency]=true 면 긴급 그룹콜로 개시(INVITE mcptt-info emergency-ind, TS 24.379). */
+     *  [emergency]=true 면 긴급 그룹콜로 개시(INVITE mcptt-info emergency-ind, TS 24.379).
+     *  [broadcast]=true 면 일제 통화로 개시(broadcast-ind, TS 24.379 §4.12) — 개시자만 발언하고, 발언을 놓은 뒤
+     *  서버 Floor Idle(B-bit)을 받으면 호를 해제한다(TS 24.380 §6.2.4.6.4). 진행 중 세션이면 서버는 합류로만 다룬다. */
     fun joinGroupCall(
         groupId: String,
         members: List<McpttXml.ResourceEntry> = emptyList(),
         emergency: Boolean = false,
+        broadcast: Boolean = false,
     ) {
         val s = synchronized(lock) {
             if (sessionMap.containsKey(groupId)) return
@@ -1061,6 +1064,7 @@ class PttController(
                 else ChannelRole.NONE
                 it.emergency = emergency
                 it.emergencyMine = emergency
+                it.floor.broadcastInitiator = broadcast
                 sessionMap[groupId] = it
             }
         }
@@ -1076,12 +1080,16 @@ class PttController(
         val parts = ArrayList<SipBodyPart>()
         parts.add(SipBodyPart("application", "vnd.3gpp.mcptt-info+xml",
             McpttXml.mcpttInfo(McpttXml.SessionType.PREARRANGED, "tel:$groupId", mcpttId, "tel:$groupId",
-                emergency = if (emergency) true else null)))
+                emergency = if (emergency) true else null, broadcast = broadcast)))
         if (members.isNotEmpty())
             parts.add(SipBodyPart("application", "resource-lists+xml", McpttXml.resourceLists(members)))
         sip.makeGroupCall(groupAor(groupId), parts, appSdp)
         if (!adhoc) subscribeRoster(groupId, true)
-        _status.value = if (emergency) "🚨 긴급 그룹콜 개시 $groupId" else "그룹콜 참여 $groupId"
+        _status.value = when {
+            emergency -> "🚨 긴급 그룹콜 개시 $groupId"
+            broadcast -> "일제 통화 개시 $groupId"
+            else -> "그룹콜 참여 $groupId"
+        }
         emit(PttEventKind.JOIN, groupId)
         if (emergency) emit(PttEventKind.EMERGENCY, groupId)
         publish()
@@ -2107,7 +2115,7 @@ class PttController(
         if (!svcAllows { it.allowTransmitRequest }) {
             feedback?.denyTone(); _status.value = "발언 요청: 시스템 정책으로 비활성"; return
         }
-        // Floor Taken 이 Permission=0 을 실어 온 세션(broadcast 그룹·ambient 청취 leg)은
+        // Floor Taken 이 Permission=0 을 실어 온 세션(일제 통화·ambient 청취 leg)은
         // 요청해봐야 Deny 뿐이다 — 요청 자체를 막고 이유를 알린다(TS 24.380 §6.3.4.4.2-3d).
         if (!s.canRequestFloor) { feedback?.denyTone(); _status.value = "이 채널은 청취 전용"; return }
         when (s.floorState) {
@@ -2313,7 +2321,7 @@ class PttController(
             }
             is FloorEvent.Taken -> {
                 // Permission to Request the Floor(§8.2.3.7) — 이 leg 의 발언 요청 가부. 서버가
-                // broadcast 그룹·ambient 청취 leg 에만 0 을 보내므로, 값이 올 때만 갱신한다.
+                // 일제 통화·ambient 청취 leg 에만 0 을 보내므로, 값이 올 때만 갱신한다.
                 ev.permission?.let { s.canRequestFloor = it != FloorPermission.DENIED }
                 s.floorIndicator = ev.indicator ?: 0
                 applyTalkers(s, ev.talkers)
@@ -2360,7 +2368,13 @@ class PttController(
                     s.otherSpeakStartMs = SystemClock.elapsedRealtime()
                 }
             }
-            FloorEvent.Idle -> {
+            is FloorEvent.Idle -> {
+                // 일제 통화 개시자가 발언을 놓았다 — 송출 완료 → 호 해제(TS 24.380 §6.2.4.6.4). 채널은 그대로 둔다
+                //   (leaveGroup 은 채널 영속까지 지운다) — teardown 뒤 onCallEnded 가 세션을 정리한다.
+                if (ev.broadcastEnd && s.callId >= 0) {
+                    _status.value = "일제 통화 종료 ${s.groupId}"
+                    sip.hangup(s.callId)
+                }
                 if (s.floorState != FloorState.SPEAKING) {
                     clearTalkLimit(s)
                     s.floorState = FloorState.IDLE

@@ -225,8 +225,11 @@ psip 계층(응용까지 올라오는가·pong·STUN 응답)은 `tests/psip_keep
 ## 8. 멀티 디바이스는 범위 밖 (B안)
 
 한 계정으로 여러 단말을 동시에 쓰려면 서버가 **기기를 구분**해야 한다. RFC 5626 은 그 수단으로
-`+sip.instance`(instance-id) + `reg-id` 를 규정하고, **우리 단말은 이미 그 파라미터를 보낸다**
-— 그러나 값이 기기 고유가 아니다.
+`+sip.instance`(instance-id) + `reg-id` 를 규정한다. 단말이 싣는 값:
+
+- Android PTT·VoLTE 앱은 **기기 고유 값**(`urn:uuid:` — ANDROID_ID 이름 기반 UUID, `android/core` `DeviceIdentity`)을
+  모든 transport 로 싣는다(UDP 는 REGISTER Contact 직접, TCP/TLS 는 RFC 5626 outbound 경로).
+- libcimsue 앱은 `AccountConfig.instanceId` 를 채울 때만 기기 고유다([ue_sdk.md](ue_sdk.md) §4.2). 비우면 pjsip 기본값이다.
 
 pjsip 은 instance-id 기본값을 **호스트명 해시**로 만든다
 (`pjsua_acc.c: init_outbound_setting` — `pj_hash_calc(hostname)` 4바이트를 UUID 꼬리에 넣는다).
@@ -238,6 +241,6 @@ Android 기기의 호스트명은 관례적으로 `localhost` 이므로 **모든
 ```
 
 따라서 `(AoR, instance-id, reg-id)` 를 바인딩 키로 쓰면 **서로 다른 기기가 하나로 합쳐진다.**
-멀티 디바이스를 지원하려면 앱이 `rfc5626_instance_id` 를 기기 고유값(ANDROID_ID·설치 UUID
-등)으로 명시하는 것이 **선행 조건**이고, 그 위에 PTT fan-out 정책(기기당 leg 를 만들 것인가 —
+멀티 디바이스를 지원하려면 모든 단말이 `rfc5626_instance_id` 를 기기 고유값(ANDROID_ID·설치 UUID
+등)으로 명시하는 것이 **선행 조건**이고(Android PTT·VoLTE 는 반영, libcimsue 앱은 앱 설정 몫), 그 위에 PTT fan-out 정책(기기당 leg 를 만들 것인가 —
 floor 정원·녹취 슬롯·CMP 멤버 포트에 영향)을 정해야 한다. 별도 과제로 둔다.

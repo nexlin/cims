@@ -7,8 +7,9 @@
 >
 > 근거 규격 판본: TS 24.379 V18.13.0 · TS 24.380 V18.7.0 · TS 24.481 V18.3.0 (Release 18).
 >
-> **구현 상태** — 서버(CSP·CMP·CSC·DB·콘솔)·검증(cspsim·계측기·S3)은 반영됐다(§2). 남은 것은 단말(§4.4 U1~U6)과 GMS 문서의
-> 전환기 `<session-type>` 제거(U5 뒤)·최소 affiliation 인원 해제(R10 ③)다.
+> **구현 상태** — 서버(CSP·CMP·CSC·DB·콘솔)·검증(cspsim·계측기·S3)·단말 코어(SDK·Android PTT — §4.4 U1~U5)는 반영됐다(§2).
+> 남은 것은 관제 앱 동작(U6 — Windows 쪽)·GMS 문서의 전환기 `<session-type>` 제거(U5 가 들어갔으므로 가능)·최소 affiliation
+> 인원 해제(R10 ③)·계측기 real-ue 게이트 개방(cimsue-cli `--broadcast` 지원)이다.
 
 ---
 
@@ -33,21 +34,21 @@
 
 | 요구 | CIMS 현재 동작 | 근거 | 판정 |
 |---|---|---|---|
-| R1 | CSP 가 개시 INVITE 의 `<broadcast-ind>` 로 세션 속성을 정한다(`CMcpttInfo::bBroadcast` → `ProcessGroupCall`). SDK·Android 는 아직 송신하지 않는다 | `csp/McpttInfo.h`, `csp/GroupCallService.cpp` `ProcessGroupCall` · `sdk/core/src/mcptt/mcptt_xml.cpp` | ✅ 서버 / ✗ 단말 (U1) |
+| R1 | CSP 가 개시 INVITE 의 `<broadcast-ind>` 로 세션 속성을 정한다(`CMcpttInfo::bBroadcast` → `ProcessGroupCall`). 단말은 `GroupCallOptions.broadcast`(SDK)·`joinGroupCall(broadcast=true)`(Android PTT)로 `prearranged` + `<broadcast-ind>true` 를 싣는다 | `csp/McpttInfo.h`, `csp/GroupCallService.cpp` `ProcessGroupCall` · `sdk/core/src/mcptt/mcptt_xml.cpp` · `android/ptt-client/.../McpttXml.kt` | ✅ |
 | R2 | 멤버는 어느 편성(prearranged) 그룹에서나 일제 통화를 개시한다 — 그룹 종류는 `prearranged`/`chat` 뿐이다 | `sql/migrate_ptt_groups_broadcast_call.sql`, `csc/src/handlers/admin.py` | ✅ |
 | R3 | fan-out mcptt-info = `session-type`(그룹 종류) + `<broadcast-ind>true` | `GroupCallService.cpp` `BuildGroupInfoXml` | ✅ |
-| R4 | 그룹 문서의 그룹 종류 = `<on-network-invite-members>`. 비표준 `<mcpttgi:session-type>` 은 단말이 invite-members 를 읽게 될 때(U5)까지 prearranged/chat 값으로 함께 싣는다 | `csc/src/services/mcptt.py` | △ (전환기 요소 — U5 뒤 제거) |
+| R4 | 그룹 문서의 그룹 종류 = `<on-network-invite-members>`. 단말(SDK `GroupDoc`·Android `CscModels`/`McpttXml`)은 이 요소로 판정하고 없는 옛 문서만 `<mcpttgi:session-type>` 으로 읽으며, SDK 가 쓰는 PUT 본문에는 session-type 을 싣지 않는다. 서버 문서의 전환기 `<mcpttgi:session-type>` 은 아직 함께 실린다 | `csc/src/services/mcptt.py` · `sdk/core/src/csc/group_doc.cpp` | △ (서버 전환기 요소 — 제거 가능) |
 | R5 | CMP 가 개시자 외 Floor Request 를 Deny #5 — 긴급 tier 검사보다 먼저 | `cmp/PMcpttGroup.cpp` `handleFloorRequest` | ✅ |
 | R6 | Floor Indicator 0x4000·Permission 0 | `cmp/PMcpttGroup.cpp` `_indicatorFor`·`broadcastFloorStatus` | ✅ |
 | R7 | 세션 속성(개시자·broadcast)은 개시 INVITE 에서 한 번 정한다(CSP 세션 캐시). CMP 도 세션 개시 ADD 에서만 반영 | `GroupCallService.cpp` `m_mapGroupSession`, `cmp/PCmpServer.cpp` `processAddGroup` | ✅ |
-| R8 | SDK 의 Floor Request 에 broadcast 비트 없음 | `sdk/core/src/floor/floor_participant.cpp` | ✗ (단말) |
-| R9 | 개시 단말의 발언 종료 후 호 해제 처리 없음 — 서버가 T4 로 세션을 거둔다 | SDK·Android 에 broadcast Floor Idle 처리 없음 | ✗ (단말) |
+| R8 | 개시 단말의 Floor Request = Floor Indicator B-bit(긴급 비트와 OR) — 개시자 표식은 세션을 연 쪽에만 둔다 | `sdk/core/src/floor/floor_participant.cpp` `setBroadcastInitiator` · Android `FloorClient.broadcastInitiator` | ✅ |
+| R9 | 개시 단말이 Floor Release 를 보낸 뒤(U: pending Release — 손으로 놓음·Granted Duration 자체 종료·Revoke 응답) B-bit Floor Idle 을 받으면 호를 해제한다(BYE). 서버 T4 는 나머지 참가자를 거둔다 | SDK `Participant::Callbacks::onBroadcastEnd` → 엔진 hangup · Android `FloorEvent.Idle.broadcastEnd` → `PttController` hangup | ✅ |
 | R10 | T4 만료(그룹 `hang_timer_sec` → CMP `PTT_FLOOR_INACTIVITY`)·참가자 1명 이하·TNG3(`max_duration_sec`) 해제. 최소 affiliation 인원 미달은 미구현 | `GroupCallService.cpp` `OnFloorInactivity`·`OnCallTerminated`·`CheckSessionLimits` | ✅ (최소 affiliation 인원 제외) |
 | R11 | 480 + Warning 105 — 판정 기준 = 세션 broadcast 속성 | `GroupCallService.cpp` `CheckConferenceSubscribe` | ✅ |
 | R12 | Floor Indicator = tier 비트 OR broadcast 비트, 비개시자 긴급 요청도 Deny #5 | `cmp/PMcpttGroup.cpp` | ✅ |
 
 **요약**: 서버(CSP·CMP·CSC)는 규격대로다 — 발언권 평면, 호 단위 일제 표식, 개시자 고정, 해제 정책(최소 affiliation 인원 제외).
-단말의 일제 통화 발신·B-bit Floor Request·발언 종료 후 호 해제(R1·R8·R9)와 그룹 종류 판정 전환(R4 짝 U5)이 남아 있다(§4.4).
+단말 코어도 일제 통화 발신·B-bit Floor Request·발언 종료 후 호 해제(R1·R8·R9)·그룹 종류 판정(R4 짝 U5)을 한다(§4.4). 관제 앱 동작(U6)이 남아 있다.
 
 ## 3. 규격 정합 동작 (목표)
 
@@ -129,14 +130,14 @@
 
 ### 4.4 단말 (libcimsue SDK · Android · 관제 앱)
 
-| # | 항목 | 대상 |
-|---|---|---|
-| U1 | 일제 통화 발신 API — 그룹 INVITE mcptt-info 에 `session-type=prearranged` + `<broadcast-ind>true` | `sdk/core/src/mcptt/mcptt_xml.cpp`, `android/ptt-client/.../mcptt/McpttXml.kt`(`SessionType.BROADCAST` 제거) |
-| U2 | 개시 단말 Floor Request 에 Floor Indicator B-bit (R8) | `sdk/core/src/floor/floor_participant.cpp`, Android `FloorControl.kt` |
-| U3 | 개시 단말: 발언 종료 뒤 B-bit Floor Idle 수신 → 호 해제(BYE) (R9) | 같은 파일 |
-| U4 | 수신 단말: B-bit → "일제 통화" 표시, Permission 0 → PTT 비활성 (Android 는 구현, SDK·관제 앱 확인) | `PttController.kt:207`, SDK FloorEvent |
-| U5 | 그룹 종류 판정을 `<on-network-invite-members>` 로 (G1 짝) | `sdk/core/src/csc/group_doc.cpp:127`, `:187`, Android `CscModels.kt:82` |
-| U6 | 관제 앱 "일제 통화" 동작 — 선택한 그룹에 U1 로 발신 | `windows/dispatch-desktop`, `android/dispatch-tablet` |
+| # | 항목 | 대상 | 상태 |
+|---|---|---|---|
+| U1 | 일제 통화 발신 — 그룹 INVITE mcptt-info 에 `session-type=prearranged` + `<broadcast-ind>true`. SDK `GroupCallOptions.broadcast`(C API `cimsue_group_call_options_t.broadcast` · Kotlin `GroupCallOptions(broadcast)` · .NET `GroupCallOptions.Broadcast`) · `cimsue-cli group-call --broadcast`/drive `group_call <g> broadcast` · Android `PttController.joinGroupCall(broadcast=true)`. `SessionType.BROADCAST` 는 없다. 착신 mcptt-info 의 `<broadcast-ind>` 는 `McpttInfo.broadcast` 로 올린다 | `sdk/core/src/mcptt/mcptt_xml.cpp`·`engine.cpp`·`cli/main.cpp`, `android/ptt-client/.../mcptt/McpttXml.kt`·`PttController.kt` | ✅ |
+| U2 | 개시 단말 Floor Request 에 Floor Indicator B-bit (R8) | `sdk/core/src/floor/floor_participant.cpp`, Android `floor/FloorClient.kt` | ✅ |
+| U3 | 개시 단말: Floor Release 뒤 B-bit Floor Idle → 호 해제(BYE) (R9) — 채널은 남긴다(Android 는 `leaveGroup` 이 아니라 hangup) | 같은 파일 · 엔진 `onBroadcastEnd` · `PttController` | ✅ |
+| U4 | 수신 단말: B-bit → "일제 통화" 표시, Permission 0 → PTT 비활성. SDK 는 `FloorEvent.indicator`·`permission`·`FloorInfo.canRequest`·`McpttInfo.broadcast` 로 앱에 준다(표시는 앱 몫) | Android `ui/MainChannelScreen.kt`(발언 줄 "일제 통화 ·")·`PttController` | ✅ |
+| U5 | 그룹 종류 판정을 `<on-network-invite-members>` 로 (G1 짝) — 없는 옛 문서만 session-type 폴백 | `sdk/core/src/csc/group_doc.cpp`, Android `csc/CscModels.kt`·`mcptt/McpttXml.kt` | ✅ |
+| U6 | 관제 앱 "일제 통화" 동작 — 선택한 그룹에 U1 로 발신 | `windows/dispatch-desktop`, `android/dispatch-tablet` | Windows 쪽 |
 
 ### 4.5 CSP↔CMP 계약 변경 ([cmp_media_api.md](../../api/cmp_media_api.md))
 

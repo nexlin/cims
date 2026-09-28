@@ -118,6 +118,19 @@ TEST(McpttXml, InfoBuildParseAndBareId) {
     EXPECT_EQ(mcptt::bareId("\"name\" <sip:+8210@d>"), "+8210");
     std::string aff = mcptt::affiliationCommand("tel:g001", false);
     EXPECT_NE(aff.find("<de-affiliate group=\"tel:g001\"/>"), std::string::npos);
+    EXPECT_FALSE(mi.broadcast);
+}
+
+// 일제 통화 = prearranged + <broadcast-ind>true (TS 24.379 §6.2.8.2 · Annex F.1) — session-type 에 broadcast 는 없다
+TEST(McpttXml, BroadcastIndicator) {
+    std::string x = mcptt::mcpttInfo("prearranged", "tel:g001", "tel:+82500000001", "tel:g001", 0, 0, true);
+    EXPECT_NE(x.find("<session-type>prearranged</session-type>"), std::string::npos);
+    EXPECT_NE(x.find("<broadcast-ind>true</broadcast-ind>"), std::string::npos);
+    EXPECT_EQ(mcptt::mcpttInfo("prearranged", "tel:g001", "u", "tel:g001").find("broadcast-ind"), std::string::npos);
+    McpttInfo mi = mcptt::parseMcpttInfo("INVITE sip:x SIP/2.0\r\n\r\n" + x);
+    EXPECT_TRUE(mi.present);
+    EXPECT_EQ(mi.sessionType, "prearranged");
+    EXPECT_TRUE(mi.broadcast);
 }
 
 TEST(McpttXml, ConferenceInfo) {

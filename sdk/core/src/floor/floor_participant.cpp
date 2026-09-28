@@ -92,8 +92,11 @@ void Participant::request(int priority, bool emergency) {
     }
     if (state_ == FloorState::Speaking || state_ == FloorState::Requesting || state_ == FloorState::Queued) return;
     releaseRetxLeft_ = 0;
+    pendingRelease_ = false;
     // 긴급 세션의 발언은 Floor Indicator emergency 비트 — CMP tier 상향/선점(TS 24.380).
-    send(floor::request(ssrc_, userId_, priority, emergency ? (int)indicator::EMERGENCY : -1));
+    //   일제 통화 개시자는 호 종류 B-bit 를 함께 싣는다(§6.2.4.3.5 1.b, 비트 OR — §8.2.3.15).
+    int ind = (emergency ? (int)indicator::EMERGENCY : 0) | (broadcastInitiator_ ? (int)indicator::BROADCAST_GROUP : 0);
+    send(floor::request(ssrc_, userId_, priority, ind ? ind : -1));
     state_ = FloorState::Requesting;
     requestDeadline_ = Clock::now() + std::chrono::milliseconds(kRequestTimeoutMs);
 }
@@ -106,8 +109,10 @@ void Participant::release() {
     // 대기 중이면 대기 요청부터 취소(§8.2.15) — 발언 중이 아닌 leg 의 Release 는 서버가 무시한다.
     if (state_ == FloorState::Queued) send(cancelQueuedRequest(ssrc_));
     // 요청/점유한 적이 있을 때만 Release — 그 외의 Release 는 고아 메시지.
-    if (state_ == FloorState::Speaking || state_ == FloorState::Requesting || state_ == FloorState::Queued)
+    if (state_ == FloorState::Speaking || state_ == FloorState::Requesting || state_ == FloorState::Queued) {
         send(floor::release(ssrc_, userId_));
+        pendingRelease_ = true;
+    }
     queuePos_ = -1;
     setMic(false);
     // 내 발언만 끝난다 — 동시 발언 중이면 남은 화자를 계속 듣는다.
@@ -185,6 +190,7 @@ void Participant::tick() {
             talkDeadline_ = {};
             if (state_ == FloorState::Speaking) {
                 send(floor::release(ssrc_, userId_));
+                pendingRelease_ = true;
                 setMic(false);
                 std::vector<Talker> rest;
                 for (auto& t : talkers_) if (!t.self) rest.push_back(t);
@@ -200,6 +206,7 @@ void Participant::tick() {
 
 void Participant::handle(const Message& m) {
     FloorEvent ev;
+    bool broadcastEnd = false;
     {
         std::lock_guard<std::mutex> lk(m_);
         // Ack 요구 변종(§8.2.2) — 상태 처리보다 먼저 회신(없으면 상대가 T100 재전송).
@@ -217,7 +224,7 @@ void Participant::handle(const Message& m) {
         switch ((Op)m.op) {
             case Op::GRANTED: {
                 ev.kind = FloorEvent::Kind::Granted;
-                revokePending_ = false; releaseRetxLeft_ = 0; requestDeadline_ = {};
+                revokePending_ = false; releaseRetxLeft_ = 0; requestDeadline_ = {}; pendingRelease_ = false;
                 grantedCount_++;
                 indicator_ = ev.indicator;
                 bool haveSelf = false;
@@ -239,12 +246,22 @@ void Participant::handle(const Message& m) {
                 if (const char* t = rejectCauseText(ev.cause)) ev.causeText = t;
                 setMic(false);
                 break;
-            case Op::IDLE:
+            case Op::IDLE: {
                 ev.kind = FloorEvent::Kind::Idle;
                 revokePending_ = false; releaseRetxLeft_ = 0;
                 talkers_.clear();
                 if (state_ != FloorState::Speaking) state_ = FloorState::Idle;
+                int perm = m.permission();                               // 일제 통화 Idle 은 Permission 0 일 수 있다(§6.3.4.3.2)
+                if (perm >= 0) canRequest_ = perm != (int)Permission::DENIED;
+                ev.permission = perm;
+                indicator_ = ev.indicator;
+                // U: pending Release 에서 받은 Idle — 일제 통화로 개시한 호면 송출 완료 → Releasing(= 호 해제, §6.2.4.6.4 6.)
+                if (pendingRelease_ && state_ != FloorState::Speaking) {
+                    pendingRelease_ = false;
+                    broadcastEnd = broadcastInitiator_ && (ev.indicator & indicator::BROADCAST_GROUP) != 0;
+                }
                 break;
+            }
             case Op::TAKEN: {
                 ev.kind = FloorEvent::Kind::Taken;
                 takenCount_++;
@@ -281,6 +298,7 @@ void Participant::handle(const Message& m) {
                 int g = ev.indicator & indicator::DUAL_FLOOR;
                 releaseRetxPkt_ = floor::release(ssrc_, userId_, g ? g : -1);
                 send(releaseRetxPkt_);
+                pendingRelease_ = true;
                 releaseRetxLeft_ = kReleaseRetxMax;
                 releaseRetxAt_ = Clock::now() + std::chrono::milliseconds(kReleaseRetxMs);
                 if (revokePending_) return;                              // 서버 T8 재전송 — 이벤트 1회
@@ -322,6 +340,7 @@ void Participant::handle(const Message& m) {
                                 " → " + toString(state_) + " (call " + std::to_string(callId_) + ")");
     }
     emit(ev);
+    if (broadcastEnd && cb_.onBroadcastEnd) cb_.onBroadcastEnd();
 }
 
 }  // namespace floor

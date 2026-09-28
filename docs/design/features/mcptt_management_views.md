@@ -97,8 +97,15 @@ MCPTT 서비스가 필요로 하는 단말 정보 — 누가 어떤 단말로 �
   `os` · `app_version` · `user_agent` · `first_seen` · `last_seen`. 키는 불변 id(`subscription_id` + `instance_id`) —
   [../identifier_model.md](../identifier_model.md). REGISTER 경로에서 동기 쓰기하지 않는다 — 변경분만 비동기
   upsert(호 처리 경로 저장소 무조회 원칙, [volte_supplementary_services.md](volte_supplementary_services.md) §2).
-- 단말(libcimsue)은 `+sip.instance` 를 이미 보낸다([registration_binding_set.md](registration_binding_set.md));
-  IMEI URN 형식과 `User-Agent` 형식을 SDK 에서 맞춘다([ue_sdk.md](ue_sdk.md)).
+- 단말이 싣는 값([ue_sdk.md](ue_sdk.md) §4.2 단말 속성):
+
+  | 단말 | `User-Agent` | `+sip.instance` |
+  |---|---|---|
+  | Android PTT·VoLTE(`android/core` `DeviceIdentity`) | `CIMS-PTT/<버전> (Android <판>; <모델>)` · `CIMS-VoLTE/…` | `urn:uuid:` — ANDROID_ID 이름 기반 UUID(RFC 4122 v3). 일반 앱은 Android 10 부터 IMEI 를 못 읽는다(READ_PRIVILEGED_PHONE_STATE). ANDROID_ID 는 서명 키·사용자·기기 단위라 같은 기기의 PTT·VoLTE 가 같은 값 |
+  | libcimsue 앱(관제 태블릿·Windows 관제·cimsue-cli) | 앱이 `EngineConfig.userAgent` 를 `userAgentOf()` 형식으로 채운다 | 앱이 `AccountConfig.instanceId` 를 채운다 — IMEI 를 알면 `imeiUrn()`, 모르면 설치 고유 UUID URN. 비우면 pjsip 기본값(호스트명 해시 — 기기마다 같을 수 있다) |
+
+  TCP/TLS 등록은 RFC 5626 outbound 경로가 `reg-id` 와 함께, UDP 등록은 REGISTER Contact 에 직접 싣는다.
+  수집 쪽은 URN 종류로 IMEI 칸을 채운다(`urn:gsma:imei:` 만 IMEI, `urn:uuid:` 는 빈 칸).
 - IMEI 는 개인 식별 정보다 — 화면은 가운데를 가려 표시하고(`3512…7890`), 원문 조회는 관리자 역할로 한정한다.
 
 ## 5. MCPTT 이용 정보 화면

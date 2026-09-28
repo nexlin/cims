@@ -94,6 +94,9 @@ public sealed class AccountConfig
     public string? McpttId { get; set; }
     /// <summary>MCPTT 착신 INVITE 자동 수락 — PTT 단말 기본 동작.</summary>
     public bool AutoAnswerMcptt { get; set; } = true;
+    /// <summary>REGISTER Contact +sip.instance(TS 24.229 §5.1.1.2) — 꺾쇠 없는 URN. IMEI 를 못 얻는 데스크톱은 설치별 고유
+    /// "urn:uuid:…"(RFC 4122)를 저장해 두고 쓴다. null 이면 pjsip 기본값(호스트명 해시 — 기기마다 같을 수 있다).</summary>
+    public string? InstanceId { get; set; }
 
     /// <summary>"sip:msisdn@domain".</summary>
     public string Aor() => Engine.AccountConfigString(this, Engine.AccountStringKind.Aor);
@@ -122,6 +125,9 @@ public sealed class GroupCallOptions
     public bool FullDuplex { get; set; }
     /// <summary>애드혹 임시 그룹 멤버(tel: URI). JoinGroupCall 전용.</summary>
     public IReadOnlyList<string>? Members { get; set; }
+    /// <summary>일제 통화 개시(mcptt-info broadcast-ind, TS 24.379 §4.12). 개시자만 발언하고, 발언을 놓은 뒤 서버의
+    /// Floor Idle(B-bit)을 받으면 코어가 호를 해제한다. JoinGroupCall 전용.</summary>
+    public bool Broadcast { get; set; }
 }
 
 public sealed record RegInfo(int AccountId, RegState State, int Code, string Reason, int ExpiresSec)
@@ -129,9 +135,9 @@ public sealed record RegInfo(int AccountId, RegState State, int Code, string Rea
     public static RegInfo Empty { get; } = new(-1, RegState.Unregistered, 0, "", 0);
 }
 
-/// <summary>착신 INVITE 의 mcptt-info(TS 24.379 §F.1) 요약.</summary>
+/// <summary>착신 INVITE 의 mcptt-info(TS 24.379 §F.1) 요약. Broadcast = broadcast-ind(일제 통화 — 그룹 종류가 아니라 호 속성).</summary>
 public sealed record McpttInfo(bool Present, string SessionType, string RequestUri, string CallingUserId, string CallingGroupId,
-                               bool Emergency, bool ImminentPeril, bool PrivateCall, bool NoFloorCtrl)
+                               bool Emergency, bool ImminentPeril, bool PrivateCall, bool NoFloorCtrl, bool Broadcast = false)
 {
     public static McpttInfo None { get; } = new(false, "", "", "", "", false, false, false, false);
 }

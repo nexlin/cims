@@ -71,4 +71,15 @@ class GroupDocTest {
         assertNull(d.priority)
         assertTrue(d.sessionType == null)
     }
+
+    /** 그룹 종류 = on-network-invite-members(TS 24.481 §7.2.2 a) — 전환기 session-type 과 함께 와도 규격 요소가 이긴다. */
+    @Test fun groupKindFromInviteMembers() {
+        fun doc(body: String) = GroupDoc.parse("tel:+g003",
+            """<group><list-service uri="tel:+g003"><list></list>$body</list-service></group>""", null)
+        assertEquals("chat", doc("<mcpttgi:on-network-invite-members>false</mcpttgi:on-network-invite-members>").sessionType)
+        assertEquals("prearranged", doc("<mcpttgi:on-network-invite-members>true</mcpttgi:on-network-invite-members>").sessionType)
+        assertEquals("chat", doc("<mcpttgi:session-type>prearranged</mcpttgi:session-type>" +
+            "<mcpttgi:on-network-invite-members>false</mcpttgi:on-network-invite-members>").sessionType)
+        assertEquals("chat", doc("<mcpttgi:session-type>chat</mcpttgi:session-type>").sessionType)   // 옛 문서 폴백
+    }
 }

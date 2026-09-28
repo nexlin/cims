@@ -139,7 +139,7 @@ API 는 **명령(즉시 `Result`/id 반환, 프로토콜 결과는 이벤트)** 
 플랫폼 SDK 는 이 셋을 각자의 관용구(Kotlin `StateFlow`/`SharedFlow`, C++ 콜백)로 옮기기만 한다.
 호 스냅샷(`CallInfo`)은 **첫 이벤트부터 호 종류가 확정**돼 있다 — MCPTT 발신(`joinGroupCall`/`startPrivateCall`)은
 `onCallState(outgoing)` 첫 스냅샷에 이미 `isMcptt`·`groupId`·`mcptt{sessionType, privateCall, noFloorCtrl,
-emergency, imminentPeril}`·`halfDuplex`·`listenOnly` 가 실린다(엔진이 makeCall 콜백 안에서 세션 신원을 투영).
+emergency, imminentPeril, broadcast}`·`halfDuplex`·`listenOnly` 가 실린다(엔진이 makeCall 콜백 안에서 세션 신원을 투영).
 앱은 그 값으로 세션 종류를 파생해도 되고, 이후 스냅샷에서 종류가 바뀌는 일은 없다.
 
 C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 **id 로** 다룬다(`addAccount → accountId`,
@@ -153,7 +153,7 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
 | `Provisioning` | `login(user, pw)` · `setAccessToken` · `fetchProfile()` · `fetchDirectory()` · `logout()` | `Profile{services[], dispatch?}` · `Directory` | `onProfile` · `onAuthFailed` |
 | `Account` (서비스 kind 당 1) | `register()` · `unregister()` · `refresh()` | `RegState{unregistered, registering, registered(code), failed(reason)}` | `onRegState` |
 | `Call` | `dial(uri, {video, emergency})` · `answer({video})` · `reject()` · `hangup()` · `hold/resume` · `mute(on)` · `listen(on)` · `rxLevel(f)` · `sendDtmf` · **`join(targetDialog)`**(RFC 3911, `a=recvonly`) · **`pickup(number?)`**(피처코드·지정 픽업) · **`transfer(target, {attended})`**(REFER) · **`replace(dialog)`**(RFC 3891) | `CallState{outgoing, incoming(remote, calledParty, isPilot), active, held, disconnected(code)}` · `MediaSources[]{ssrc, label, active, level}` · `videoSources[]` | `onCallState` · `onMediaSource` · `onVideoFrame(source, frame)` · `onTransferProgress` |
-| `Group` (PTT) | `affiliate(on)` · `joinGroupCall({emergency, imminent})` · `leave()` · `startAdhoc(members)` · `startPrivate(peer, {duplex, emergency})` · **`listenGroupCall()`**(recvonly JOIN, §7) · `setPrimary` · `channelVolume(f)` · `emergency(on)` · `alert(on)` | `GroupCallState{idle, joining, active(listenOnly), ...}` · roster · affiliated | `onGroupCall` · `onRoster`(RFC 4575) · `onAlert` |
+| `Group` (PTT) | `affiliate(on)` · `joinGroupCall({emergency, imminent, broadcast})` · `leave()` · `startAdhoc(members)` · `startPrivate(peer, {duplex, emergency})` · **`listenGroupCall()`**(recvonly JOIN, §7) · `setPrimary` · `channelVolume(f)` · `emergency(on)` · `alert(on)` | `GroupCallState{idle, joining, active(listenOnly), ...}` · roster · affiliated | `onGroupCall` · `onRoster`(RFC 4575) · `onAlert` |
 | `Floor` (그룹콜당 1) | `request(prio)` · `release()` · `queueCancel()` · `mediaFlow(on)` | `FloorState{idle, requesting, granted(duration), taken(speaker, permissionToRequest), queued(pos), denied(cause), revoked}` · `speakers[]`(multi-talker) | `onFloor` |
 | `Sds` | `sendGroupText(group, text)` · **`sendText(peer, text)`**(1:1, `one-to-one-sds`) · `sendGroupFile(group, bytes, name, mime)` · `sendNotification(peer, conv, msg, type)` · `download(url)` | 발신 진행 | `onIncomingSds` · `onSendResult` · `onDisposition` |
 | `Subscriptions` | `dialogWatch(scope)`(RFC 4235 — 관제 범위) · `conference(group)` · `xcapDiff(psi)` · `presence(uri)` | 감시 dialog 목록 `{dialogId, parties, state, isPilotCall}` | `onDialogList` · `onXcapChanged` |
@@ -167,6 +167,15 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   않는다(android_ue_client §7 과 동일).
 - **에러 모델.** 명령은 즉시 `Result{ok, reason}` 을 돌려주고(인자·상태 오류), 프로토콜 결과는 이벤트로 온다.
 - **ABI.** 공개 헤더는 pjsua2 타입을 include 하지 않는다. 구현체는 pImpl.
+- **일제 통화**(TS 24.379 §4.12, [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §4.4). `joinGroupCall({broadcast})` 는
+  `prearranged` + `<broadcast-ind>true` 로 개시하고 그 단말을 개시자로 둔다 — Floor Request 에 B-bit 를 싣고, Floor Release 뒤
+  B-bit Floor Idle 을 받으면 **코어가 호를 해제**한다(TS 24.380 §6.2.4.6.4, 앱 조작 없음). 수신 멤버의 표시는 앱 몫이다
+  (`McpttInfo.broadcast`·`FloorEvent.indicator` B-bit·Taken `permission` 0 → `FloorInfo.canRequest=false`).
+- **단말 속성**([mcptt_management_views.md](mcptt_management_views.md) §4.1). `EngineConfig.userAgent` 는
+  `userAgentOf(제품, 앱 버전, OS, 모델)` 형식(`CIMS-PTT/1.4.2 (Android 15; SM-S921N)`)으로 앱이 채운다.
+  `AccountConfig.instanceId` = REGISTER Contact `+sip.instance` URN — IMEI 를 아는 단말은 `imeiUrn(imei)`(RFC 7254, Luhn 검사),
+  모르면 기기(설치) 고유 `urn:uuid:…`. TCP/TLS 는 RFC 5626 outbound 경로(`reg-id` 와 함께), UDP 는 REGISTER Contact 에 직접
+  싣는다. 비우면 pjsip 기본값(호스트명 해시 — 기기마다 같을 수 있다, [registration_binding_set.md](registration_binding_set.md) §8).
 
 ### 4.3 스레딩·수명 규칙
 
@@ -226,7 +235,7 @@ SDS·Join·픽업으로 확장)를 명령행으로 구동한다. cspsim 은 서�
 cimsue-cli [계정] register [--hold S]            # 200 OK → (hold) → de-REGISTER
 cimsue-cli [계정] call <번호|sip:URI> [--duration S] [--video]
 cimsue-cli [계정] answer [--duration S]          # 착신 대기 → 200 → 상대 BYE 또는 duration (MCPTT 착신은 자동 수락)
-cimsue-cli [계정] group-call <groupId> [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency]
+cimsue-cli [계정] group-call <groupId> [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast]
 cimsue-cli [계정] sds <groupId> <text>           # MESSAGE 최종 응답까지
 cimsue-cli [계정] sds-recv [--duration S]        # 수신 SDS 를 JSON 줄로
 계정: --server IP --port N --transport udp|tcp|tls --domain D --msisdn M (--imsi I|--auth-id IMPI)
@@ -254,7 +263,7 @@ cimsue-cli --csc-host H --user U --pw P --from-profile volte|ptt [--server IP --
 ```
 cimsue-cli [계정] drive
   명령: register | unregister | dial <번호|URI> [video] | answer <call> [video] | reject <call> [code] | hangup <call> | hold <call> | resume <call>
-        dtmf <call> <digits> | transfer <call> <대상> | group_call <group> [listen] [emergency] | floor_request <call> | floor_release <call>
+        dtmf <call> <digits> | transfer <call> <대상> | group_call <group> [listen] [emergency] [broadcast] | floor_request <call> | floor_release <call>
         affiliate <group> on|off | pickup <code> [number] | stats [call] | quit
   이벤트: ready{version,aor} · reg{state,code,reason,expires,rrd_ms} · incoming{call,from,called,video,mcptt,group}
         · call{call,dir,state outgoing|incoming|active|held|disconnected,code,reason,media,mcptt,video,by_us,group,srd_ms|sdd_ms,rx_pkts,tx_pkts,rx_loss,rx_bytes,jitter_us}

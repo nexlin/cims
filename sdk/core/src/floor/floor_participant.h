@@ -28,6 +28,8 @@ public:
         std::function<void(const FloorEvent&)> onEvent;
         std::function<void(bool micOn)> onMic;              // 마이크 게이트 — Granted 에서만 true
         std::function<void(int level, const std::string&)> log;
+        /** 일제 통화 개시자가 발언을 놓은 뒤 B-bit Floor Idle 을 받았다 — 소유자가 호를 해제한다(TS 24.380 §6.2.4.6.4). */
+        std::function<void()> onBroadcastEnd;
     };
 
     Participant(int callId, uint32_t ssrc, const std::string& userId, Callbacks cb);
@@ -41,6 +43,9 @@ public:
     bool hasRemote() const { return remotePort_ > 0; }
     /** 청취 전용 leg(a=recvonly) — 요청을 보내지 않고 Denied 로 되돌린다. */
     void setListenOnly(bool on) { listenOnly_ = on; }
+    /** 일제 통화 개시자(TS 24.379 §4.12) — Floor Request 에 B-bit(TS 24.380 §6.2.4.3.5), 발언을 놓은 뒤
+     *  B-bit Floor Idle 이면 onBroadcastEnd(§6.2.4.6.4). 수신 멤버는 켜지 않는다(Taken 의 Permission 0 이 요청을 막는다). */
+    void setBroadcastInitiator(bool on) { broadcastInitiator_ = on; }
 
     void request(int priority = -1, bool emergency = false);
     void release();
@@ -69,6 +74,7 @@ private:
     std::string remoteIp_;
     int remotePort_ = 0;
     std::atomic<bool> listenOnly_{false};
+    std::atomic<bool> broadcastInitiator_{false};
     std::atomic<bool> running_{false};
     std::thread rx_;
 
@@ -80,6 +86,7 @@ private:
     int queuePos_ = -1;
     int lastMsgSeq_ = -1;
     bool revokePending_ = false;
+    bool pendingRelease_ = false;                 // U: pending Release — Floor Release 를 보낸 뒤 Idle 대기(§6.2.4.6)
     bool micOn_ = false;
     unsigned grantedCount_ = 0, takenCount_ = 0, denyCount_ = 0;
     // 타이머 (Clock::time_point, 0 = 비활성)

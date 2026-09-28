@@ -24,6 +24,7 @@ import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.app.Person
 import com.cims.ue.core.config.ConfigStore
+import com.cims.ue.core.device.DeviceIdentity
 import com.cims.ue.core.message.MessageEntry
 import com.cims.ue.core.message.MessageStore
 import com.cims.ue.core.message.MsgDirection
@@ -92,6 +93,7 @@ class SipService : Service() {
         instance = this
         // PJSIP boot 전(영상 캡처 디바이스 열거 전)에 CameraManager 주입 — 발신 영상/셀프뷰 카메라 열거의 전제.
         PjLib.cameraManager = getSystemService(Context.CAMERA_SERVICE) as? CameraManager
+        PjLib.userAgent = DeviceIdentity.userAgent(this, "CIMS-VoLTE")     // 단말 속성(mcptt_management_views.md §4.1)
         createChannel()
         startForegroundCompat(buildNotification("CIMS VoLTE", "시작 중…"))
         wakeLock.acquire()
@@ -226,6 +228,7 @@ class SipService : Service() {
             return
         }
         val c = SipController(cfg).also { controller = it; activeConfig = cfg }
+        DeviceIdentity.instanceUrn(this)?.let { c.instanceId = it }
         observe(c)
         c.register()
     }

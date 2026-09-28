@@ -87,7 +87,7 @@ object FloorSource {
 
 /** Permission to Request the Floor 값 (TS 24.380 §8.2.3.7) — Floor Taken 수신자의 발언 요청 가부. */
 object FloorPermission {
-    const val DENIED = 0              // broadcast 그룹·ambient(recv_only) 청취 leg
+    const val DENIED = 0              // 일제 통화·ambient(recv_only) 청취 leg
     const val ALLOWED = 1
 }
 

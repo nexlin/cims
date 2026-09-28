@@ -19,10 +19,11 @@ constexpr const char* kCtResourceLists = "application/resource-lists+xml";
 constexpr const char* kCtAffiliation = "application/vnd.3gpp.mcptt-affiliation-command+xml";
 constexpr const char* kCtConferenceInfo = "application/conference-info+xml";
 
-/** mcptt-info (TS 24.379 §F.1). emergency/imminent: 0=미기재, 1=true, -1=false(명시 하향). */
+/** mcptt-info (TS 24.379 §F.1). emergency/imminent: 0=미기재, 1=true, -1=false(명시 하향).
+ *  broadcast = 일제 통화 개시 `<broadcast-ind>true`(§6.2.8.2) — session-type 은 prearranged 그대로. */
 std::string mcpttInfo(const std::string& sessionType, const std::string& requestUri,
                       const std::string& callingUserId, const std::string& callingGroupId,
-                      int emergency = 0, int imminentPeril = 0);
+                      int emergency = 0, int imminentPeril = 0, bool broadcast = false);
 /** resource-lists (애드혹 멤버). uri 는 tel:/sip: URI. */
 std::string resourceLists(const std::vector<std::string>& memberUris);
 /** affiliation-command (TS 24.379 §F.3). */

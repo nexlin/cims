@@ -7,7 +7,8 @@
 //   cimsue-cli [계정 옵션] register [--hold S]
 //   cimsue-cli [계정 옵션] call <번호|sip:URI> [--duration S] [--video]
 //   cimsue-cli [계정 옵션] answer [--duration S] [--transfer-to X --transfer-after S]
-//   cimsue-cli [계정 옵션] group-call <groupId> [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency]
+//   cimsue-cli [계정 옵션] group-call <groupId> [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast]
+//              (--broadcast = 일제 통화 개시 — 발언을 놓은 뒤 서버 Floor Idle(B-bit)이면 코어가 호를 해제, outcome 에 broadcast_released)
 //   cimsue-cli [계정 옵션] sds <groupId> <text>            (MESSAGE 최종 응답까지 대기)
 //   cimsue-cli [계정 옵션] sds-recv [--duration S]        (수신 SDS 를 JSON 줄로 출력)
 //   cimsue-cli [계정 옵션] dialog-watch <aor> [--duration S]      (RFC 4235 NOTIFY 를 JSON 줄로)
@@ -21,7 +22,7 @@
 // 구동 모드(drive): 엔진을 띄운 채 stdin 에서 한 줄 = 명령 하나(공백 구분 토큰)를 읽고, 진행은 stdout 에 한 줄 = JSON 이벤트 하나로 낸다
 //   (test_instrument.md §3.3 — 워커가 프로세스를 가상 단말처럼 단계별로 구동한다). 등록은 자동으로 하지 않는다 — `register` 명령이 한다.
 //   명령: register | unregister | dial <번호|URI> [video] | answer <call> [video] | reject <call> [code] | hangup <call> | hold <call> | resume <call>
-//         dtmf <call> <digits> | transfer <call> <대상> | group_call <group> [listen] [emergency] | floor_request <call> | floor_release <call>
+//         dtmf <call> <digits> | transfer <call> <대상> | group_call <group> [listen] [emergency] [broadcast] | floor_request <call> | floor_release <call>
 //         affiliate <group> on|off | pickup <code> [number] | stats [call] | quit
 //   이벤트: {"event":"ready"} · reg{state,code,reason,rrd_ms} · incoming{call,from,called,video,mcptt,group} · call{call,dir,state,code,reason,media,
 //         mcptt,video,by_us,srd_ms|sdd_ms,rx_pkts,tx_pkts,rx_loss,jitter_us} · floor{call,kind,subtype,t_us,cause,queue_position} · request{op,method,code,ms,on}
@@ -82,6 +83,7 @@ struct Opts {
     int pttLen = 3;
     bool listenOnly = false;
     bool emergency = false;
+    bool broadcast = false;           // 일제 통화 개시(TS 24.379 §4.12)
     // 관제
     std::string code;                 // 픽업 피처코드
     std::string transferTo;
@@ -102,7 +104,7 @@ void usage() {
         "        [--tls-ca FILE] [--no-tls-verify] [--display-name N] [--log-level N] [--timeout S] [--json]\n"
         "        또는 --csc-host H [--csc-port N] --user U --pw P [--csc-ca FILE] --from-profile volte|ptt\n"
         "  register [--hold S] | call TARGET [--duration S] [--video] | answer [--duration S] [--transfer-to X]\n"
-        "  group-call GROUP [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency]\n"
+        "  group-call GROUP [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast]\n"
         "  sds GROUP TEXT | sds-recv [--duration S] | login\n"
         "  dialog-watch AOR [--duration S] | join AOR [--duration S] | pickup [NUMBER] --code CODE | transfer PEER --to X\n"
         "  drive   (구동 모드 — stdin 명령 / stdout JSON 이벤트; 소스 머리 주석의 명령표)\n"
@@ -160,6 +162,7 @@ bool parse(int argc, char** argv, Opts& o) {
         else if (a == "--video") o.video = true;
         else if (a == "--listen-only") o.listenOnly = true;
         else if (a == "--emergency") o.emergency = true;
+        else if (a == "--broadcast") o.broadcast = true;
         else if (a == "-h" || a == "--help") return false;
         else if (a.rfind("--", 0) == 0) { std::fprintf(stderr, "unknown arg: %s\n", a.c_str()); return false; }
         else pos.push_back(a);
@@ -508,7 +511,7 @@ int driveLoop(Engine& eng, DriveListener& ls, int acc, const Opts& o) {
         else if (op == "dtmf") { res(op, eng.sendDtmf(argi(1, -1), arg(2)), argi(1, -1)); }
         else if (op == "transfer") { res(op, eng.transfer(argi(1, -1), arg(2)), argi(1, -1)); }
         else if (op == "group_call") {
-            GroupCallOptions go; go.listenOnly = has("listen"); go.emergency = has("emergency");
+            GroupCallOptions go; go.listenOnly = has("listen"); go.emergency = has("emergency"); go.broadcast = has("broadcast");
             int id = eng.joinGroupCall(acc, arg(1), go);
             if (id >= 0) ls.markDial(id);
             result(op, id >= 0, id, 0, id >= 0 ? "" : "group call refused");
@@ -797,7 +800,7 @@ int main(int argc, char** argv) {
     }
 
     if (o.cmd == "group-call") {
-        GroupCallOptions go; go.listenOnly = o.listenOnly; go.emergency = o.emergency;
+        GroupCallOptions go; go.listenOnly = o.listenOnly; go.emergency = o.emergency; go.broadcast = o.broadcast;
         s.callId = eng.joinGroupCall(acc, o.target, go);
         if (s.callId < 0) { s.outcome = "invite_failed"; rc = 4; return finish(-1); }
         bool up = waitActive(ls, s.callId, o.timeoutSec);
@@ -828,6 +831,8 @@ int main(int argc, char** argv) {
         s.extra = ",\"floor_local_port\":" + std::to_string(fi.localPort) + ",\"floor_remote\":\"" + fi.remoteIp + ":" +
                   std::to_string(fi.remotePort) + "\",\"rosters\":" + std::to_string(ls.rosters);
         if (o.pttAt >= 0 && ls.granted == 0) { s.outcome = "floor_not_granted"; rc = 6; }
+        // 일제 통화 개시자: 발언을 놓은 뒤 코어가 호를 해제했으면(TS 24.380 §6.2.4.6.4) 시한 전에 끝난 것이 정상이다.
+        else if (o.broadcast && gone && o.pttAt >= 0) s.extra += ",\"broadcast_released\":true";
         return finish(s.callId);
     }
 

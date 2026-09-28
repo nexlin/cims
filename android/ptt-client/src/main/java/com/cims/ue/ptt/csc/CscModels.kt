@@ -40,7 +40,7 @@ data class GroupDoc(
     val priority: Int?,
     /** mcptt-video — 영상 그룹 여부. */
     val video: Boolean,
-    /** session-type — prearranged/chat. */
+    /** 그룹 종류 prearranged/chat — 문서의 on-network-invite-members(TS 24.481 §7.2.2 a). */
     val sessionType: String?,
     val maxParticipants: Int?,
     /** mcdata-on-network-max-data-size-auto-recv — 파일(FD) 자동 다운로드 임계 octets (TS 24.481). */
@@ -79,7 +79,10 @@ data class GroupDoc(
                 members = members,
                 priority = Regex("group-priority>\\s*(\\d+)").find(xml)?.groupValues?.get(1)?.toIntOrNull(),
                 video = Regex("mcptt-video>\\s*true").containsMatchIn(xml),
-                sessionType = Regex("session-type>\\s*(\\w+)").find(xml)?.groupValues?.get(1),
+                // 그룹 종류 = on-network-invite-members(TS 24.481 §7.2.2 a). 없는 옛 문서만 비규격 session-type.
+                sessionType = Regex("on-network-invite-members>\\s*(\\w+)").find(xml)?.groupValues?.get(1)
+                    ?.let { if (it.toBoolean()) "prearranged" else "chat" }
+                    ?: Regex("session-type>\\s*(\\w+)").find(xml)?.groupValues?.get(1),
                 maxParticipants = Regex("max-participant-count>\\s*(\\d+)").find(xml)?.groupValues?.get(1)?.toIntOrNull(),
                 autoRecvBytes = Regex("max-data-size-auto-recv>\\s*(\\d+)").find(xml)?.groupValues?.get(1)?.toIntOrNull(),
                 etag = etag,

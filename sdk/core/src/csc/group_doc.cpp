@@ -124,11 +124,11 @@ std::string GroupDoc::toXml() const {
         x += "      </entry>\n";
     }
     x += "    </list>\n";
-    x += "    <mcpttgi:session-type>" + esc(sessionType.empty() ? "prearranged" : sessionType) + "</mcpttgi:session-type>\n";
     x += std::string("    <mcpttgi:mcdata-allow-short-data-service>") + bs(allowSds) + "</mcpttgi:mcdata-allow-short-data-service>\n";
     x += std::string("    <mcpttgi:mcdata-allow-file-distribution>") + bs(allowFd) + "</mcpttgi:mcdata-allow-file-distribution>\n";
     x += std::string("    <mcpttgi:mcptt-video>") + bs(videoEnabled) + "</mcpttgi:mcptt-video>\n";
-    x += "    <mcpttgi:on-network-invite-members>true</mcpttgi:on-network-invite-members>\n";
+    // 그룹 종류 = on-network-invite-members(TS 24.481 §7.2.2 a — true=prearranged, false=chat). 그룹 문서에 session-type 요소는 없다.
+    x += std::string("    <mcpttgi:on-network-invite-members>") + bs(sessionType != "chat") + "</mcpttgi:on-network-invite-members>\n";
     if (maxParticipants > 0) x += "    <mcpttgi:on-network-max-participant-count>" + std::to_string(maxParticipants) + "</mcpttgi:on-network-max-participant-count>\n";
     x += std::string("    <mcpttgi:on-network-require-affiliation>") + bs(requireAffiliation) + "</mcpttgi:on-network-require-affiliation>\n";
     x += "    <mcpttgi:on-network-group-priority>" + std::to_string(priority) + "</mcpttgi:on-network-group-priority>\n";
@@ -184,7 +184,10 @@ bool GroupDoc::parse(const std::string& xml, GroupDoc& out, std::string* err) {
     size_t after = lend == std::string::npos ? gt : lend;
     bool f;
     std::string v;
-    v = elemText(xml, "session-type", &f, after); if (f && !v.empty()) d.sessionType = v;
+    // 그룹 종류 — on-network-invite-members(TS 24.481 §7.2.2 a). 없으면 옛 서버의 비규격 <mcpttgi:session-type> 폴백.
+    v = elemText(xml, "on-network-invite-members", &f, after);
+    if (f) d.sessionType = isTrue(v) ? "prearranged" : "chat";
+    else { v = elemText(xml, "session-type", &f, after); if (f && !v.empty()) d.sessionType = v == "chat" ? "chat" : "prearranged"; }
     v = elemText(xml, "mcdata-allow-short-data-service", &f, after); if (f) d.allowSds = isTrue(v);
     v = elemText(xml, "mcdata-allow-file-distribution", &f, after); if (f) d.allowFd = isTrue(v);
     v = elemText(xml, "mcptt-video", &f, after); if (f) d.videoEnabled = isTrue(v);

@@ -31,7 +31,8 @@ public sealed unsafe class Account
     }
 
     // ── MCPTT 그룹콜·사설콜 (TS 24.379) ──
-    /// <summary>그룹콜 참여. groupId 는 bare id. 이미 같은 그룹 세션이 있으면 그 호. ListenOnly = 청취 전용(관제 PTT 청취).</summary>
+    /// <summary>그룹콜 참여. groupId 는 bare id. 이미 같은 그룹 세션이 있으면 그 호. ListenOnly = 청취 전용(관제 PTT 청취).
+    /// Broadcast = 일제 통화 개시(개시자만 발언, 발언을 놓으면 코어가 호를 해제).</summary>
     public Result<Call> JoinGroupCall(string groupId, GroupCallOptions? opts = null)
     {
         using var s = new NativeStrings();
@@ -150,6 +151,7 @@ public sealed unsafe class Account
         n.listen_only = Engine.B(o.ListenOnly);
         n.full_duplex = Engine.B(o.FullDuplex);
         n.members = s.AddArray(o.Members, out n.member_count);
+        n.broadcast = Engine.B(o.Broadcast);
         return n;
     }
 

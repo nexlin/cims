@@ -79,12 +79,46 @@ pj::AccountConfig buildPjAccountConfig(const AccountConfig& c, std::string* note
         if (note) *note += "sec-agree ";
     }
     if (!c.contactParams.empty()) ac.sipConfig.contactParams = c.contactParams;
+    // 인스턴스 ID — TCP/TLS 는 pjsua outbound(RFC 5626) 경로가 reg-id 와 함께 싣고, 그 경로를 타지 않는 UDP 는
+    //   REGISTER Contact 에 직접 싣는다(두 경로가 겹치지 않게 transport 로 가른다 — 중복 파라미터 방지).
+    if (!c.instanceId.empty()) {
+        const std::string inst = "<" + c.instanceId + ">";
+        ac.natConfig.sipOutboundInstanceId = inst;
+        if (c.transport == Transport::UDP) ac.regConfig.contactParams = ";+sip.instance=\"" + inst + "\"";
+        if (note) *note += "instance ";
+    }
     ac.sipConfig.proxies.push_back("sip:" + c.serverHost + ":" + std::to_string(c.serverPort) +
                                    ";transport=" + tp + ";lr");
     ac.videoConfig.autoTransmitOutgoing = c.videoAutoTransmit;
     ac.videoConfig.autoShowIncoming = false;                // 수신 렌더는 앱이 프레임/Surface 로 결선
     return ac;
 }
+
+}  // namespace detail
+
+std::string imeiUrn(const std::string& imei) {
+    if (imei.size() != 15 || !std::all_of(imei.begin(), imei.end(), [](char ch) { return ch >= '0' && ch <= '9'; }))
+        return std::string();
+    int sum = 0;                                            // Luhn — 오른쪽에서 두 번째 자리부터 두 배
+    for (int i = 0; i < 14; ++i) {
+        int d = imei[13 - i] - '0';
+        if (i % 2 == 0) { d *= 2; if (d > 9) d -= 9; }
+        sum += d;
+    }
+    if ((10 - sum % 10) % 10 != imei[14] - '0') return std::string();
+    return "urn:gsma:imei:" + imei.substr(0, 8) + "-" + imei.substr(8, 6) + "-" + imei.substr(14, 1);
+}
+
+std::string userAgentOf(const std::string& product, const std::string& version, const std::string& os,
+                        const std::string& model) {
+    std::string ua = product + (version.empty() ? std::string() : "/" + version);
+    std::string cm = os;
+    if (!model.empty()) cm += (cm.empty() ? "" : "; ") + model;
+    if (!cm.empty()) ua += " (" + cm + ")";
+    return ua;
+}
+
+namespace detail {
 
 std::string normalizeTarget(const std::string& target, const std::string& domain) {
     auto starts = [&](const char* p) { return target.rfind(p, 0) == 0; };

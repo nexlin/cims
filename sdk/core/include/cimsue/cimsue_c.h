@@ -103,6 +103,7 @@ typedef struct {
     int32_t                 video_auto_transmit;
     const char*             mcptt_id;       /* 비면 "tel:"+msisdn */
     int32_t                 auto_answer_mcptt;
+    const char*             instance_id;    /* REGISTER +sip.instance URN(꺾쇠 없이) — NULL 이면 pjsip 기본값 */
 } cimsue_account_config_t;
 
 typedef struct {
@@ -117,6 +118,7 @@ typedef struct {
     int32_t            full_duplex;     /* mc_no_floor_ctrl — start_private_call 전용 */
     const char* const* members;         /* 애드혹 임시 그룹 멤버(tel: URI) — join_group_call 전용 */
     int32_t            member_count;
+    int32_t            broadcast;       /* 일제 통화 개시(<broadcast-ind>true, TS 24.379 §4.12) — join_group_call 전용 */
 } cimsue_group_call_options_t;
 
 /** send_request 의 부가 헤더. */
@@ -137,7 +139,7 @@ typedef struct {
 
 typedef struct {
     int32_t     present;
-    const char* session_type;           /* prearranged/chat/broadcast/private */
+    const char* session_type;           /* prearranged/chat/private/... (TS 24.379 Annex F.1) */
     const char* request_uri;
     const char* calling_user_id;
     const char* calling_group_id;
@@ -145,6 +147,7 @@ typedef struct {
     int32_t     imminent_peril;
     int32_t     private_call;
     int32_t     no_floor_ctrl;
+    int32_t     broadcast;              /* <broadcast-ind> — 일제 통화 */
 } cimsue_mcptt_info_t;
 
 /** 한 호 안의 RTP 소스(SSRC) — U10 디먹스 산출. */
@@ -582,7 +585,7 @@ typedef struct {
     const char*                  etag;                  /* 산출 전용(입력은 if_match 인자) */
     const cimsue_group_member_t* members;
     int32_t                      member_count;
-    const char*                  session_type;          /* prearranged | chat | broadcast (NULL = prearranged) */
+    const char*                  session_type;          /* 그룹 종류 prearranged | chat (NULL = prearranged) */
     int32_t                      video_enabled;
     int32_t                      encryption;
     int32_t                      emergency_call;

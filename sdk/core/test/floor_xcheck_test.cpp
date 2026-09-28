@@ -112,3 +112,143 @@ TEST(FloorXCheck, CmpServerMessagesDecodedByCore) {
     ASSERT_TRUE(core::decode((const uint8_t*)buf, n, m));
     EXPECT_EQ(m.queuePosition(), 2);
 }
+
+// ── 일제 통화(TS 24.379 §4.12) — 코어 participant ↔ CMP 가 만든 서버 메시지(루프백 UDP) ──
+//   개시자: Floor Request 에 B-bit(TS 24.380 §6.2.4.3.5) → Granted → 발언을 놓음(U: pending Release) →
+//   B-bit Floor Idle 이면 호 해제 콜백(§6.2.4.6.4). 일반 그룹 Idle·해제 전 Idle 은 호를 끝내지 않는다.
+#include <pjlib.h>
+
+#include <atomic>
+#include <chrono>
+#include <thread>
+
+#include "../src/floor/floor_participant.h"
+
+namespace {
+
+void pjReady() {
+    static bool inited = (pj_init() == PJ_SUCCESS);
+    (void)inited;
+    if (!pj_thread_is_registered()) {
+        static thread_local pj_thread_desc desc;
+        pj_thread_t* th = nullptr;
+        pj_bzero(desc, sizeof(desc));
+        pj_thread_register("xcheck", desc, &th);
+    }
+}
+
+/** CMP 자리 UDP 소켓 — participant 가 보낸 것을 받고 서버 메시지를 돌려준다. */
+struct FakeCmp {
+    pj_sock_t s = PJ_INVALID_SOCKET;
+    int port = 0;
+    FakeCmp() {
+        pj_sock_socket(pj_AF_INET(), pj_SOCK_DGRAM(), 0, &s);
+        pj_sockaddr_in a;
+        pj_sockaddr_in_init(&a, nullptr, 0);
+        pj_sock_bind(s, &a, sizeof(a));
+        int l = sizeof(a);
+        pj_sock_getsockname(s, &a, &l);
+        port = pj_ntohs(a.sin_port);
+    }
+    ~FakeCmp() { if (s != PJ_INVALID_SOCKET) pj_sock_close(s); }
+    /** subtype 이 맞는 메시지가 올 때까지(Ack keepalive 는 건너뜀) — 시한 안에 없으면 false. */
+    bool expect(int subtype, ParsedFloor& out, int ms = 2000) {
+        auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+        while (std::chrono::steady_clock::now() < end) {
+            pj_fd_set_t fds;
+            PJ_FD_ZERO(&fds);
+            PJ_FD_SET(s, &fds);
+            pj_time_val tv = {0, 50};
+            if (pj_sock_select((int)s + 1, &fds, nullptr, nullptr, &tv) <= 0) continue;
+            char buf[1500];
+            pj_ssize_t n = sizeof(buf);
+            if (pj_sock_recv(s, buf, &n, 0) != PJ_SUCCESS || n <= 0) continue;
+            ParsedFloor pf;
+            if (ParseFloorMessage(buf, (int)n, pf) && pf.subtype == subtype) { out = pf; return true; }
+        }
+        return false;
+    }
+    void sendTo(int toPort, unsigned char subtype, const std::vector<FloorTlv>& f) {
+        char buf[512];
+        int n = BuildFloorMessage(buf, sizeof buf, subtype, 0x01, f);
+        pj_sockaddr_in to;
+        pj_str_t ip = pj_str(const_cast<char*>("127.0.0.1"));
+        pj_sockaddr_in_init(&to, &ip, (pj_uint16_t)toPort);
+        pj_ssize_t len = n;
+        pj_sock_sendto(s, buf, &len, 0, &to, sizeof(to));
+    }
+};
+
+bool waitTrue(const std::atomic<int>& v, int want, int ms) {
+    auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+    while (std::chrono::steady_clock::now() < end) {
+        if (v.load() >= want) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return v.load() >= want;
+}
+
+}  // namespace
+
+TEST(FloorXCheck, BroadcastInitiatorReleasesCallOnIdle) {
+    pjReady();
+    FakeCmp cmp;
+    std::atomic<int> ends{0}, idles{0};
+    core::Participant::Callbacks cb;
+    cb.onEvent = [&](const cimsue::FloorEvent& ev) { if (ev.kind == cimsue::FloorEvent::Kind::Idle) idles++; };
+    cb.onBroadcastEnd = [&] { ends++; };
+    core::Participant p(1, 0x1234u, "tel:+82500000001", cb);
+    ASSERT_TRUE(p.open(0));
+    p.setBroadcastInitiator(true);
+    p.setRemote("127.0.0.1", cmp.port);
+
+    // 해제 전에 온 B-bit Idle(다른 참가자 관점의 상태 동기화)은 호를 끝내지 않는다
+    cmp.sendTo(p.localPort(), FLOOR_IDLE, {FloorTlv(FF_MSG_SEQ, FloorU16(1)), FloorTlv(FF_FLOOR_INDICATOR, FloorU16(0xC000))});
+    ASSERT_TRUE(waitTrue(idles, 1, 2000));
+    EXPECT_EQ(ends.load(), 0);
+
+    p.request();
+    ParsedFloor rq;
+    ASSERT_TRUE(cmp.expect(FLOOR_REQUEST, rq));
+    EXPECT_EQ(rq.indicator() & 0x4000, 0x4000);                      // B-bit (R8)
+    cmp.sendTo(p.localPort(), FLOOR_GRANT, {FloorTlv(FF_DURATION, FloorU16(30)), FloorTlv(FF_FLOOR_INDICATOR, FloorU16(0xC000))});
+    auto t0 = std::chrono::steady_clock::now();
+    while (p.info().state != cimsue::FloorState::Speaking && std::chrono::steady_clock::now() - t0 < std::chrono::seconds(2))
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    ASSERT_EQ(p.info().state, cimsue::FloorState::Speaking);
+
+    p.release();
+    ParsedFloor rl;
+    ASSERT_TRUE(cmp.expect(FLOOR_RELEASE, rl));
+    cmp.sendTo(p.localPort(), FLOOR_IDLE, {FloorTlv(FF_MSG_SEQ, FloorU16(2)), FloorTlv(FF_FLOOR_INDICATOR, FloorU16(0xC000))});
+    EXPECT_TRUE(waitTrue(ends, 1, 2000));                             // R9 — 개시 단말이 호를 해제한다
+    p.close();
+}
+
+TEST(FloorXCheck, NormalGroupIdleAfterReleaseKeepsCall) {
+    pjReady();
+    FakeCmp cmp;
+    std::atomic<int> ends{0}, idles{0};
+    core::Participant::Callbacks cb;
+    cb.onEvent = [&](const cimsue::FloorEvent& ev) { if (ev.kind == cimsue::FloorEvent::Kind::Idle) idles++; };
+    cb.onBroadcastEnd = [&] { ends++; };
+    core::Participant p(2, 0x5678u, "tel:+82500000002", cb);
+    ASSERT_TRUE(p.open(0));
+    p.setRemote("127.0.0.1", cmp.port);                               // 개시자 아님(일반 그룹 통화)
+
+    p.request();
+    ParsedFloor rq;
+    ASSERT_TRUE(cmp.expect(FLOOR_REQUEST, rq));
+    EXPECT_EQ(rq.indicator() < 0 ? 0 : rq.indicator() & 0x4000, 0);  // B-bit 없음
+    cmp.sendTo(p.localPort(), FLOOR_GRANT, {FloorTlv(FF_DURATION, FloorU16(30)), FloorTlv(FF_FLOOR_INDICATOR, FloorU16(0x8000))});
+    auto t0 = std::chrono::steady_clock::now();
+    while (p.info().state != cimsue::FloorState::Speaking && std::chrono::steady_clock::now() - t0 < std::chrono::seconds(2))
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    p.release();
+    ParsedFloor rl;
+    ASSERT_TRUE(cmp.expect(FLOOR_RELEASE, rl));
+    cmp.sendTo(p.localPort(), FLOOR_IDLE, {FloorTlv(FF_MSG_SEQ, FloorU16(3)), FloorTlv(FF_FLOOR_INDICATOR, FloorU16(0x8000))});
+    ASSERT_TRUE(waitTrue(idles, 1, 2000));
+    EXPECT_EQ(ends.load(), 0);
+    p.close();
+}

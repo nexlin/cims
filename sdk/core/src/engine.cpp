@@ -260,6 +260,7 @@ struct McpttSession {
     bool fullDuplex = false;             // mc_no_floor_ctrl — floor 없이 마이크 상시
     bool listenOnly = false;
     bool emergency = false, imminentPeril = false;   // 발신 옵션 — CallInfo 투영(projectMcptt) 의 원본
+    bool broadcast = false;              // 일제 통화 개시(<broadcast-ind>) — 이 단말이 개시자
     bool micOpen = false;                // floor Granted 로 열림
     std::string pendingAppSdp;           // 송신 SDP 에 주입할 m=application 섹션
     std::unique_ptr<floor::Participant> floor;
@@ -328,6 +329,7 @@ public:
         c.mcptt.present = true; c.mcptt.sessionType = mcptt->isPrivate ? "private" : "prearranged";
         c.mcptt.privateCall = mcptt->isPrivate; c.mcptt.noFloorCtrl = mcptt->fullDuplex;
         c.mcptt.emergency = mcptt->emergency; c.mcptt.imminentPeril = mcptt->imminentPeril;
+        c.mcptt.broadcast = mcptt->broadcast;
         c.halfDuplex = !mcptt->fullDuplex; c.listenOnly = mcptt->listenOnly;
     }
 
@@ -361,6 +363,17 @@ public:
             });
         };
         cb.log = [o](int level, const std::string& m) { o->log(level, m); };
+        // 일제 통화 개시자: 발언을 놓은 뒤 B-bit Floor Idle → 호 해제(BYE) — TS 24.380 §6.2.4.6.4, TS 24.379 §4.12.
+        //   세션은 서버가 T4 로도 거두지만, 개시 단말이 먼저 나가는 것이 규격 절차다.
+        cb.onBroadcastEnd = [o, idRef] {
+            int id = *idRef;
+            o->ctl.post([o, id] {
+                PjCall* c = o->findCall(id);
+                if (!c) return;
+                o->log(3, "broadcast call " + std::to_string(id) + ": floor idle after release → release call");
+                try { pj::CallOpParam prm; c->hangup(prm); } catch (pj::Error& e) { o->log(2, std::string("broadcast release: ") + e.info(false)); }
+            });
+        };
         mcptt->floor.reset(new floor::Participant(-1, ssrcOf(userId), userId, cb));
         if (!mcptt->floor->open(0)) { mcptt->floor.reset(); return false; }
         if (mcptt->listenOnly) mcptt->floor->setListenOnly(true);
@@ -1100,10 +1113,12 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
     call->mcptt->listenOnly = opts.listenOnly;
     call->mcptt->emergency = opts.emergency;
     call->mcptt->imminentPeril = opts.imminentPeril;
+    call->mcptt->broadcast = !isPrivate && opts.broadcast;               // 일제 통화는 그룹 호 속성(TS 24.379 §4.12)
     const std::string mcpttId = cfg.effectiveMcpttId();
     // floor 소켓은 makeCall 전에 — makeCall 이 동기적으로 onCallSdpCreated 를 부르며 로컬 offer 에 포트를 광고한다.
     if (!call->mcptt->fullDuplex) {
         if (!call->openFloor(mcpttId)) { o->log(1, "floor socket bind failed"); return -1; }
+        if (call->mcptt->broadcast) call->mcptt->floor->setBroadcastInitiator(true);
         call->mcptt->pendingAppSdp = floorSdp(call->mcptt->floor->localPort(), false);
     } else {
         call->mcptt->micOpen = true;
@@ -1117,7 +1132,7 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
         pj::SipMultipartPart p1;
         p1.contentType.type = "application"; p1.contentType.subType = "vnd.3gpp.mcptt-info+xml";
         p1.body = mcptt::mcpttInfo(isPrivate ? "private" : "prearranged", "tel:" + id, mcpttId, "tel:" + id,
-                                   opts.emergency ? 1 : 0, opts.imminentPeril ? 1 : 0);
+                                   opts.emergency ? 1 : 0, opts.imminentPeril ? 1 : 0, call->mcptt->broadcast);
         prm.txOption.multipartParts.push_back(p1);
         if (!opts.members.empty()) {
             pj::SipMultipartPart p2;
@@ -1137,8 +1152,10 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
         c.remoteUri = "sip:" + id + "@" + cfg.domain;
         call->projectMcptt(c);                                            // onCallState(CALLING) 가 먼저 투영했으면 no-op
     });
+    const bool broadcast = call->mcptt->broadcast;
     o->calls[callId] = std::move(call);
-    o->log(3, std::string(isPrivate ? "private call " : "group call ") + id + " → call " + std::to_string(callId));
+    o->log(3, std::string(isPrivate ? "private call " : broadcast ? "broadcast group call " : "group call ") + id + " → call " +
+                  std::to_string(callId));
     return callId;
 }
 

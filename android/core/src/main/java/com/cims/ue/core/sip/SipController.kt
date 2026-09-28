@@ -81,6 +81,9 @@ class SipController(private val config: SipAccountConfig) {
      *  예: `;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds"` */
     @Volatile var contactParams: String = ""
 
+    /** REGISTER Contact `+sip.instance`(TS 24.229 §5.1.1.2) — 꺾쇠 없는 URN, [register] 전에 설정. 비면 pjsip 기본값. */
+    @Volatile var instanceId: String = ""
+
     /**
      * MCPTT 착신 INVITE 의 응답 SDP 에 실을 floor(m=application) 섹션 공급자 — 앱이 등록한다.
      *
@@ -790,6 +793,12 @@ class SipController(private val config: SipAccountConfig) {
 
         // Contact 부가 파라미터(capability feature tag 등) — 서버가 MSRP 배포 대상 판정에 사용
         if (contactParams.isNotBlank()) ac.sipConfig.contactParams = contactParams
+        // 단말 인스턴스 ID — TCP/TLS 는 pjsua outbound(RFC 5626) 경로가 reg-id 와 함께 싣고, 그 경로를 타지 않는
+        //   UDP 는 REGISTER Contact 에 직접 싣는다(겹치지 않게 transport 로 가른다). SDK account_map 과 같은 규칙.
+        if (instanceId.isNotBlank()) {
+            ac.natConfig.sipOutboundInstanceId = "<$instanceId>"
+            if (tp == "udp") ac.regConfig.contactParams = ";+sip.instance=\"<$instanceId>\""
+        }
 
         // 도메인 DNS 미해석 회피: 실제 서버 IP:port 로 route 강제(;lr)
         ac.sipConfig.proxies.add("sip:${c.serverHost}:${c.serverPort};transport=$tp;lr")

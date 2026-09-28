@@ -77,6 +77,10 @@ struct AccountConfig {
     std::string mcpttId;
     /** MCPTT 착신 INVITE(mcptt-info: 그룹·private) 자동 수락 — PTT 단말 기본 동작(ptt_ue.md §12.3). */
     bool autoAnswerMcptt = true;
+    /** 단말 인스턴스 ID — REGISTER Contact `+sip.instance`(TS 24.229 §5.1.1.2 · RFC 5626 §4.1), 꺾쇠 없이 URN.
+     *  IMEI 를 아는 단말은 `imeiUrn()`(RFC 7254), 모르면 기기 고유 `urn:uuid:…`(RFC 4122). 비면 pjsip 기본값 —
+     *  호스트명 해시라 기기마다 같을 수 있다(registration_binding_set.md §8). */
+    std::string instanceId;
 
     std::string aor() const { return "sip:" + msisdn + "@" + domain; }
     std::string effectiveMcpttId() const { return mcpttId.empty() ? "tel:" + msisdn : mcpttId; }
@@ -92,6 +96,15 @@ struct AccountConfig {
                !msisdn.empty() && !digestUsername().empty() && cred;
     }
 };
+
+/** IMEI(15자리 — TAC 8 · SNR 6 · Luhn 검사 숫자 1) → RFC 7254 instance URN `urn:gsma:imei:TTTTTTTT-SSSSSS-C`.
+ *  자릿수·검사 숫자가 틀리면 빈 문자열(그 값은 기기 식별자가 아니다). */
+std::string imeiUrn(const std::string& imei);
+
+/** REGISTER `User-Agent`(RFC 3261 §20.41) 규약 — `<제품>/<앱 버전> (<OS>; <모델>)` (mcptt_management_views.md §4.1).
+ *  예: `CIMS-PTT/1.4.2 (Android 15; SM-S921N)`. 빈 os·model 은 괄호 안에서 빠진다. */
+std::string userAgentOf(const std::string& product, const std::string& version, const std::string& os,
+                        const std::string& model);
 
 struct RegInfo {
     int accountId = -1;
@@ -116,14 +129,19 @@ struct GroupCallOptions {
     bool fullDuplex = false;
     /** 애드혹 임시 그룹 멤버(tel: URI) — resource-lists 로 실린다. joinGroupCall 전용. */
     std::vector<std::string> members;
+    /** 일제 통화 개시(TS 24.379 §4.12·§6.2.8.2) — mcptt-info `<broadcast-ind>true`. 개시자의 Floor Request 는 B-bit 를
+     *  싣고(TS 24.380 §6.2.4.3.5), 개시자가 발언을 놓은 뒤 B-bit Floor Idle 을 받으면 코어가 호를 해제한다(§6.2.4.6.4).
+     *  joinGroupCall 전용 — 진행 중 세션에 합류하는 INVITE 면 서버는 합류로만 다룬다(개시자 불변). */
+    bool broadcast = false;
 };
 
 /** 착신 INVITE 의 mcptt-info(TS 24.379 §F.1) 요약. */
 struct McpttInfo {
     bool present = false;
-    std::string sessionType;          // prearranged/chat/broadcast/private
+    std::string sessionType;          // prearranged/chat/private/first-to-answer/ambient-listening/adhoc (TS 24.379 Annex F.1)
     std::string requestUri, callingUserId, callingGroupId;
     bool emergency = false, imminentPeril = false;
+    bool broadcast = false;           // <broadcast-ind> — 일제 통화(호 속성, 그룹 종류 아님)
     bool privateCall = false;
     bool noFloorCtrl = false;         // fmtp mc_no_floor_ctrl — 전이중 1:1
 };

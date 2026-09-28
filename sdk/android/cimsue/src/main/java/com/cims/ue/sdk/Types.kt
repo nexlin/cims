@@ -114,6 +114,8 @@ data class AccountConfig(
     val mcpttId: String = "",
     /** MCPTT 착신 자동 수락. 관제석은 그룹콜 자동 + 사설콜 수동이 맞지만 코어가 아직 공통이다(§11). */
     val autoAnswerMcptt: Boolean = true,
+    /** REGISTER Contact +sip.instance(TS 24.229 §5.1.1.2) — 꺾쇠 없는 URN. 빈 값이면 pjsip 기본값(호스트명 해시). */
+    val instanceId: String = "",
 ) {
     internal fun toJni(): JniAccountConfig = JniAccountConfig().also {
         it.serverHost = serverHost; it.serverPort = serverPort
@@ -126,7 +128,7 @@ data class AccountConfig(
         it.mediaSecurity = com.cims.ue.sdk.jni.MediaSecurity.swigToEnum(mediaSecurity.ordinal)
         it.expiresSec = expiresSec; it.contactParams = contactParams
         it.videoAutoTransmit = videoAutoTransmit; it.mcpttId = mcpttId
-        it.autoAnswerMcptt = autoAnswerMcptt
+        it.autoAnswerMcptt = autoAnswerMcptt; it.instanceId = instanceId
     }
 }
 
@@ -145,10 +147,12 @@ data class GroupCallOptions(
     val fullDuplex: Boolean = false,
     /** 애드혹 참가자 목록(resource-lists). */
     val members: List<String> = emptyList(),
+    /** 일제 통화 개시(mcptt-info broadcast-ind, TS 24.379 §4.12) — 개시자만 발언, 발언을 놓으면 코어가 호를 해제. */
+    val broadcast: Boolean = false,
 ) {
     internal fun toJni(): JniGroupCallOptions = JniGroupCallOptions().also {
         it.emergency = emergency; it.imminentPeril = imminentPeril
-        it.listenOnly = listenOnly; it.fullDuplex = fullDuplex
+        it.listenOnly = listenOnly; it.fullDuplex = fullDuplex; it.broadcast = broadcast
         it.members = StringVector().apply { members.forEach { m -> add(m) } }
     }
 }
@@ -177,10 +181,12 @@ data class McpttInfo(
     val callingUserId: String, val callingGroupId: String,
     val emergency: Boolean, val imminentPeril: Boolean,
     val privateCall: Boolean, val noFloorCtrl: Boolean,
+    /** broadcast-ind — 일제 통화(그룹 종류가 아니라 호 속성). */
+    val broadcast: Boolean = false,
 ) {
     internal companion object {
         fun of(m: JniMcpttInfo) = McpttInfo(m.present, m.sessionType, m.requestUri, m.callingUserId,
-            m.callingGroupId, m.emergency, m.imminentPeril, m.privateCall, m.noFloorCtrl)
+            m.callingGroupId, m.emergency, m.imminentPeril, m.privateCall, m.noFloorCtrl, m.broadcast)
     }
 }
 

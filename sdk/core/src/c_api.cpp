@@ -98,6 +98,7 @@ AccountConfig toCxx(const cimsue_account_config_t* c) {
     a.videoAutoTransmit = c->video_auto_transmit != 0;
     assignIf(a.mcpttId, c->mcptt_id);
     a.autoAnswerMcptt = c->auto_answer_mcptt != 0;
+    assignIf(a.instanceId, c->instance_id);
     return a;
 }
 
@@ -117,6 +118,7 @@ GroupCallOptions toCxx(const cimsue_group_call_options_t* c) {
     o.listenOnly = c->listen_only != 0;
     o.fullDuplex = c->full_duplex != 0;
     o.members = strList(c->members, c->member_count);
+    o.broadcast = c->broadcast != 0;
     return o;
 }
 
@@ -169,6 +171,7 @@ void fill(cimsue_mcptt_info_t& o, const McpttInfo& m) {
     o.imminent_peril = B(m.imminentPeril);
     o.private_call = B(m.privateCall);
     o.no_floor_ctrl = B(m.noFloorCtrl);
+    o.broadcast = B(m.broadcast);
 }
 
 /** sources 배열은 호출자가 준 벡터에 담는다(그 벡터가 소유자). */
@@ -299,6 +302,7 @@ void fill(cimsue_account_config_t& o, const AccountConfig& a, std::vector<const 
     o.video_auto_transmit = B(a.videoAutoTransmit);
     o.mcptt_id = C(a.mcpttId);
     o.auto_answer_mcptt = B(a.autoAnswerMcptt);
+    o.instance_id = C(a.instanceId);
 }
 
 /** Profile 한 벌의 소유자 — C++ 객체와 그것을 가리키는 POD 배열을 함께 들고 있는다. */
@@ -704,6 +708,7 @@ void CIMSUE_CALL cimsue_group_call_options_default(cimsue_group_call_options_t* 
     opts->imminent_peril = B(d.imminentPeril);
     opts->listen_only = B(d.listenOnly);
     opts->full_duplex = B(d.fullDuplex);
+    opts->broadcast = B(d.broadcast);
 }
 
 int32_t CIMSUE_CALL cimsue_engine_join_group_call(cimsue_engine_t* e, int32_t account_id, const char* group_id,

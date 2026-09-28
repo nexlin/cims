@@ -16,7 +16,9 @@ sealed interface FloorEvent {
     /** [durationSec]=이번 발언 허용 시간(T2, §8.2.3.3) — 초과 전 단말이 스스로 종료해야 회수를 면한다. */
     data class Granted(val durationSec: Int?, val indicator: Int? = null) : FloorEvent
     data class Denied(val cause: Int?, val text: String?) : FloorEvent
-    data object Idle : FloorEvent
+    /** [indicator]=Floor Indicator — B-bit([FloorIndicator.BROADCAST_GROUP])면 일제 통화 ·
+     *  [broadcastEnd]=일제 통화 개시자가 발언을 놓은 뒤 받은 Idle → 호를 해제한다(TS 24.380 §6.2.4.6.4). */
+    data class Idle(val indicator: Int? = null, val broadcastEnd: Boolean = false) : FloorEvent
     /** [permission]=Permission to Request the Floor(§8.2.3.7, 0=요청 불가) ·
      *  [speakerSsrc]=화자 RTP SSRC(§8.2.3.16 — 헤더 SSRC 는 서버 것이라 화자 식별에 못 쓴다) ·
      *  [talkers]=현재 발언자 전체(동시 발언이면 2명 이상) · [meSpeaking]=그 안에 내가 있다. */
@@ -128,14 +130,25 @@ class FloorClient(
      *  [priority] 는 명시 요청이 있을 때만 싣는다 — 근거는 [FloorCodec.request]. */
     fun requestFloor(priority: Int? = null, indicator: Int? = null) {
         cancelReleaseRetx()
-        send(FloorCodec.request(ssrc, userId, priority, indicator))
+        pendingRelease = false
+        // 일제 통화 개시자는 호 종류 B-bit 를 함께 싣는다(TS 24.380 §6.2.4.3.5 1.b, 비트 OR — §8.2.3.15).
+        val ind = ((indicator ?: 0) or (if (broadcastInitiator) FloorIndicator.BROADCAST_GROUP else 0)).takeIf { it != 0 }
+        send(FloorCodec.request(ssrc, userId, priority, ind))
         _state.value = FloorState.REQUESTING
     }
+
+    /** 일제 통화 개시자(TS 24.379 §4.12) — Floor Request 에 B-bit, 발언을 놓은 뒤 B-bit Floor Idle 이면
+     *  [FloorEvent.Idle.broadcastEnd]. 수신 멤버는 켜지 않는다(Taken 의 Permission 0 이 요청을 막는다). */
+    @Volatile var broadcastInitiator: Boolean = false
+
+    /** U: pending Release — Floor Release 를 보낸 뒤 Idle 대기(§6.2.4.6). */
+    @Volatile private var pendingRelease: Boolean = false
 
     /** PTT up → Floor Release. */
     fun releaseFloor() {
         cancelReleaseRetx()
         send(FloorCodec.release(ssrc, userId))
+        pendingRelease = true
         // 내 발언만 끝난다 — 동시 발언 중이면 남은 화자는 그대로 듣는다(서버 Idle 을 기다리지 않는다).
         val rest = _talkers.value.filterNot { it.self }
         _talkers.value = rest
@@ -208,6 +221,7 @@ class FloorClient(
         val ev: FloorEvent = when (msg.type) {
             FloorMsgType.GRANTED -> {
                 revokePending = false
+                pendingRelease = false
                 cancelReleaseRetx()
                 // 내 GRANT 는 나에게만 온다(다른 멤버는 Taken 을 받는다) — 집합에 나를 넣는다.
                 if (_talkers.value.none { it.self })
@@ -221,7 +235,11 @@ class FloorClient(
                 cancelReleaseRetx()
                 _talkers.value = emptyList()
                 if (_state.value != FloorState.SPEAKING) _state.value = FloorState.IDLE
-                FloorEvent.Idle
+                // U: pending Release 에서 받은 Idle — 일제 통화로 개시한 호면 송출 완료 → Releasing(= 호 해제, §6.2.4.6.4 6.)
+                val end = pendingRelease && _state.value != FloorState.SPEAKING && broadcastInitiator &&
+                    ((msg.floorIndicator ?: 0) and FloorIndicator.BROADCAST_GROUP) != 0
+                if (_state.value != FloorState.SPEAKING) pendingRelease = false
+                FloorEvent.Idle(msg.floorIndicator, end)
             }
             // Floor Taken 은 **화자 집합 전체**를 싣는다(동시 발언이면 리스트 필드). 서버는
             //   화자에게 자기 Taken 을 보내지 않지만, 동시 발언에서 **뒤에 승급한 화자의
@@ -306,6 +324,7 @@ class FloorClient(
         val g = (indicator ?: 0) and FloorIndicator.DUAL_FLOOR
         val pkt = FloorCodec.release(ssrc, userId, if (g != 0) g else null)
         send(pkt)
+        pendingRelease = true
         synchronized(this) {
             releaseRetx?.cancel(false)
             var left = RELEASE_RETX_MAX

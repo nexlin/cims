@@ -29,8 +29,10 @@ object McpttXml {
     const val CT_RESOURCE_LISTS = "application/resource-lists+xml"
     const val CT_AFFILIATION = "application/vnd.3gpp.mcptt-affiliation-command+xml"
 
+    /** mcptt-info session-type(TS 24.379 Annex F.1). 일제 통화는 session-type 이 아니라 호 속성
+     *  `<broadcast-ind>` 다([mcpttInfo] broadcast — §4.12·§6.2.8.2). */
     enum class SessionType(val v: String) {
-        PREARRANGED("prearranged"), CHAT("chat"), BROADCAST("broadcast"),
+        PREARRANGED("prearranged"), CHAT("chat"),
         /** 1:1 private call (TS 24.379 §11.1) — 서버가 합성 2인 세션으로 라우팅. */
         PRIVATE("private"),
     }
@@ -38,7 +40,8 @@ object McpttXml {
     // ── 빌더: 키업 그룹 INVITE multipart 본문 ──
 
     /** `application/vnd.3gpp.mcptt-info+xml` 본문 (TS 24.379 §F.1).
-     *  [emergency]/[imminentPeril] — null=미기재, true=상향, false=명시 하향(긴급 취소 re-INVITE). */
+     *  [emergency]/[imminentPeril] — null=미기재, true=상향, false=명시 하향(긴급 취소 re-INVITE).
+     *  [broadcast]=일제 통화 개시 `<broadcast-ind>true`(§6.2.8.2) — session-type 은 prearranged 그대로. */
     fun mcpttInfo(
         sessionType: SessionType,
         requestUri: String,
@@ -46,6 +49,7 @@ object McpttXml {
         callingGroupId: String,
         emergency: Boolean? = null,
         imminentPeril: Boolean? = null,
+        broadcast: Boolean = false,
     ): String = buildString {
         append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
         append("<mcpttinfo xmlns=\"$NS_MCPTT_INFO\">\n  <mcptt-Params>\n")
@@ -55,6 +59,7 @@ object McpttXml {
         append("    <mcptt-calling-group-id>${esc(callingGroupId)}</mcptt-calling-group-id>\n")
         emergency?.let { append("    <emergency-ind>$it</emergency-ind>\n") }
         imminentPeril?.let { append("    <imminentperil-ind>$it</imminentperil-ind>\n") }
+        if (broadcast) append("    <broadcast-ind>true</broadcast-ind>\n")
         append("  </mcptt-Params>\n</mcpttinfo>\n")
     }
 
@@ -130,7 +135,11 @@ object McpttXml {
         return GroupDoc(
             uri = ls?.getAttribute("uri"),
             displayName = ls?.let { firstText(it, "display-name") },
-            sessionType = firstTextNs(doc.documentElement, NS_GROUP_INFO, "session-type"),
+            // 그룹 종류 = on-network-invite-members(TS 24.481 §7.2.2 a — true=prearranged, false=chat).
+            //   없는 옛 문서만 비규격 <mcpttgi:session-type> 으로 읽는다.
+            sessionType = firstTextNs(doc.documentElement, NS_GROUP_INFO, "on-network-invite-members")
+                ?.let { if (it.toBoolean()) "prearranged" else "chat" }
+                ?: firstTextNs(doc.documentElement, NS_GROUP_INFO, "session-type"),
             maxParticipants = firstTextNs(doc.documentElement, NS_GROUP_INFO, "on-network-max-participant-count")?.toIntOrNull(),
             requireAffiliation = firstTextNs(doc.documentElement, NS_GROUP_INFO, "on-network-require-affiliation")?.toBoolean() ?: false,
             members = members,

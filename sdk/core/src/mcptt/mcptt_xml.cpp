@@ -23,7 +23,7 @@ std::string xmlEscape(const std::string& s) {
 
 std::string mcpttInfo(const std::string& sessionType, const std::string& requestUri,
                       const std::string& callingUserId, const std::string& callingGroupId,
-                      int emergency, int imminentPeril) {
+                      int emergency, int imminentPeril, bool broadcast) {
     std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
     s += std::string("<mcpttinfo xmlns=\"") + kNsMcpttInfo + "\">\n  <mcptt-Params>\n";
     s += "    <session-type>" + sessionType + "</session-type>\n";
@@ -32,6 +32,7 @@ std::string mcpttInfo(const std::string& sessionType, const std::string& request
     s += "    <mcptt-calling-group-id>" + xmlEscape(callingGroupId) + "</mcptt-calling-group-id>\n";
     if (emergency) s += std::string("    <emergency-ind>") + (emergency > 0 ? "true" : "false") + "</emergency-ind>\n";
     if (imminentPeril) s += std::string("    <imminentperil-ind>") + (imminentPeril > 0 ? "true" : "false") + "</imminentperil-ind>\n";
+    if (broadcast) s += "    <broadcast-ind>true</broadcast-ind>\n";
     s += "  </mcptt-Params>\n</mcpttinfo>\n";
     return s;
 }
@@ -85,6 +86,7 @@ McpttInfo parseMcpttInfo(const std::string& whole) {
     mi.callingGroupId = elemText(x, "mcptt-calling-group-id");
     mi.emergency = textIsTrue(elemText(x, "emergency-ind"));
     mi.imminentPeril = textIsTrue(elemText(x, "imminentperil-ind"));
+    mi.broadcast = textIsTrue(elemText(x, "broadcast-ind"));
     mi.privateCall = mi.sessionType == "private";
     mi.noFloorCtrl = whole.find("mc_no_floor_ctrl") != std::string::npos;
     return mi;

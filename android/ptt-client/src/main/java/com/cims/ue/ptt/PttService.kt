@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.cims.ue.core.config.ConfigStore
+import com.cims.ue.core.device.DeviceIdentity
 import com.cims.ue.core.power.PartialWakeLock
 import com.cims.ue.core.sip.PjLib
 import com.cims.ue.ptt.csc.CscConfig
@@ -394,7 +395,10 @@ class PttService : Service() {
         // msisdn 은 프로비저닝에 따라 "+8250..."/"8250..." 혼재 — tel: URI 로 정규화(+ 중복 방지)
         val mcpttId = "tel:" + cfg.msisdn.removePrefix("tel:").let { if (it.startsWith("+")) it else "+$it" }
         val csc = CscConfig(host = cfg.serverHost)               // IdMS/GMS/CMS 4430 (dev: 자체서명)
+        // 단말 속성(mcptt_management_views.md §4.1) — User-Agent 는 PJSIP 부팅 전에만 적용된다.
+        PjLib.userAgent = DeviceIdentity.userAgent(this, "CIMS-PTT")
         val c = PttController(cfg, mcpttId, csc).also { _controller.value = it; activeConfig = cfg }
+        DeviceIdentity.instanceUrn(this)?.let { c.sip.instanceId = it }
         // SSO 토큰 갱신 훅 — CSC 가 토큰을 거절(401)하면 컨트롤러가 이것으로 새 토큰을 받아 1회 재시도한다.
         c.tokenRefresher = { stale ->
             com.cims.ue.core.account.CimsAccounts.renewToken(

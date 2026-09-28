@@ -142,10 +142,10 @@ TEST(GroupDoc, ParseServerDocumentAndRoundTrip) {
     <mcpttgi:mcdata-allow-short-data-service>true</mcpttgi:mcdata-allow-short-data-service>
     <mcpttgi:mcdata-allow-file-distribution>false</mcpttgi:mcdata-allow-file-distribution>
     <mcpttgi:mcptt-video>true</mcpttgi:mcptt-video>
-    <mcpttgi:on-network-invite-members>true</mcpttgi:on-network-invite-members>
+    <mcpttgi:on-network-invite-members>false</mcpttgi:on-network-invite-members>
     <mcpttgi:on-network-max-participant-count>20</mcpttgi:on-network-max-participant-count>
     <mcpttgi:on-network-require-affiliation>false</mcpttgi:on-network-require-affiliation>
-    <mcpttgi:on-network-hang-time>3</mcpttgi:on-network-hang-time>
+    <mcpttgi:on-network-hang-timer>PT30S</mcpttgi:on-network-hang-timer>
     <mcpttgi:on-network-group-priority>3</mcpttgi:on-network-group-priority>
     <mcpttgi:on-network-encryption>false</mcpttgi:on-network-encryption>
     <cp:ruleset><cp:rule id="a7c"><cp:actions>
@@ -195,6 +195,17 @@ TEST(GroupDoc, ParseServerDocumentAndRoundTrip) {
     EXPECT_TRUE(parsed.requireAffiliation); EXPECT_TRUE(parsed.emergencyCall);
     EXPECT_FALSE(GroupDoc::parse("<other/>", parsed, &err));
     EXPECT_FALSE(err.empty());
+
+    // 그룹 종류 = on-network-invite-members(TS 24.481 §7.2.2 a) — 직렬화는 규격 요소만, session-type 은 싣지 않는다
+    EXPECT_EQ(back.toXml().find("session-type"), std::string::npos);
+    EXPECT_NE(back.toXml().find("<mcpttgi:on-network-invite-members>false</mcpttgi:on-network-invite-members>"), std::string::npos);
+    EXPECT_NE(fresh.toXml().find("<mcpttgi:on-network-invite-members>true</mcpttgi:on-network-invite-members>"), std::string::npos);
+    // invite-members 가 없는 옛 문서만 비규격 session-type 으로 판정(값 broadcast 같은 옛 유형은 prearranged)
+    GroupDoc legacy;
+    ASSERT_TRUE(GroupDoc::parse("<group><list-service uri=\"sip:g9@d\"><list></list><mcpttgi:session-type>chat</mcpttgi:session-type></list-service></group>", legacy));
+    EXPECT_EQ(legacy.sessionType, "chat");
+    ASSERT_TRUE(GroupDoc::parse("<group><list-service uri=\"sip:g9@d\"><list></list><mcpttgi:session-type>broadcast</mcpttgi:session-type></list-service></group>", legacy));
+    EXPECT_EQ(legacy.sessionType, "prearranged");
 }
 
 TEST(DialogInfo, ParseAndJoinHeader) {

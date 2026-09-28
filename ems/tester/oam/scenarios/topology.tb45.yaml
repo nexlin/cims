@@ -1,0 +1,263 @@
+# tb45 — ctrl01(.45) 라이브 스택을 대상으로 하는 토폴로지(소스 관리본). tb48 과 같은 모양, 값만 .45.
+# 계측기(oam-cims-tester)·워커는 대상과 동거(ctrl01). 1차는 UE 풀만 — 피어(트렁크) 풀은 CSP 0.2.139 업그레이드·
+# Setup.Roles.IBCF·피어링 접속점·시험 도메인 한정 라우팅(사이트 설정 영구 배치, tb48 방식) 뒤에 tb48 의 peer 풀을 옮겨 붙인다.
+# 비밀은 환경변수 이름만.
+name: tb45
+hosts:
+  h45:
+    name: ctrl01
+    ip: 121.161.164.45
+workers:
+- name: w1
+  host: h45
+  port: 7100
+  cpus: 8
+target:
+  name: tb45
+  kind: cims
+  nodes:
+    csp:
+      role: sip
+      host: h45
+      fn: CSP
+      procs:
+      - csp
+      logs:
+      - /opt/cims-agent/modules/csp/current/csp/log/csp_*.log
+      sip:
+        domains:
+        - volte.cims.example.kr
+        - ptt.cims.example.kr
+        - voip.cims.example.kr
+        listeners:            # 라이브 CSP dep2 local_nodes 와 1:1 (id 기준). 피어링 접속점은 없음 — 트렁크 축은 사이트 설정 배치 뒤 추가
+          udp:
+            edge: access
+            port: 15060
+            protocol: udp
+            local_node: udp-primary
+          tcp:
+            edge: access
+            port: 15060
+            protocol: tcp
+            local_node: 248c5b52104949db
+          tls:
+            edge: access
+            port: 15061
+            protocol: tls
+            local_node: tls-lab-0001
+          peering:              # 트렁크 축 — 사이트 설정으로 영구 배치(tb45-peering, UDP 15080 · .45 는 15070 이 IPsec). 풀 seed.enabled=false
+            edge: peering
+            port: 15080
+            protocol: udp
+            local_node: tb45-peering
+        dial_plan:
+          country_code: '82'
+          national_prefix: '0'
+          international_prefix: '00'
+    cmp:
+      role: media
+      host: h45
+      fn: CMP
+      procs:
+      - cmp
+      logs: []
+      media:
+        rtp_range:            # 라이브 CMP dep3 effective: RtpStartPort 50000 · RtpPoolSize 20 (relay 20 세션 = 포트 40개)
+        - 50000
+        - 50039
+        control: 9001
+    csc:
+      role: subscriber
+      host: h45
+      fn: CSC
+      procs:
+      - csc
+      logs: []
+      api:
+        port: 4430
+        tls: true
+    oam:
+      role: oam
+      host: h45
+      fn: OAM
+      procs:
+      - oam
+      logs: []
+      oam:
+        port: 4419
+        tls: true
+        token_env: TESTER_OAM_TOKEN
+        csp_deployment_id: 2
+        observe:
+        - oam_stats
+        - oam_alarms
+        - agent_heartbeat
+    db:
+      role: db
+      host: h45
+      fn: MariaDB
+      procs: []
+      logs: []
+      db:
+        port: 3306
+        name: cims
+        user_env: TESTER_DB_USER
+        password_env: TESTER_DB_PASS
+# .45 는 실단말·협력업체·관제석이 붙은 라이브 — 그 신원을 계측기 UE 로 등록하면 착신이 계측기로 포크된다(자동응답).
+#   volte.jsonl 001/002/007(사내 단말) · 003/005/006(협력업체) · 004/011/012(프로브·cspsim) 제외 → offset 12 = 013~040(28, 14쌍)
+#   volte_tls.jsonl(관제 1/2석 VoLTE) · voip.jsonl(관제 1~3 회선) · ptt.jsonl(g001 = 실단말+협력업체) 은 풀에서 뺀다.
+#   PTT 는 g003/g004 계측기 전용 신원(+82500000013~022)으로 creds 를 새로 뽑은 뒤 추가.
+pools:
+  volte_ue:
+    worker: w1
+    kind: ue
+    access: csp
+    source:
+      creds: creds/volte.jsonl
+      offset: 12
+    transport: udp
+    srtp: 'off'
+    register_expires: 3600
+    prack: false
+    dtmf: rfc4733
+    tls_verify: false
+    tls_client_cert: false
+    msrp: false
+  volte_ue_tls:                 # 같은 013~040 신원을 TLS 로 — volte_ue 와 같은 시나리오에 함께 쓰지 않는다(신원 겹침)
+    worker: w1
+    kind: ue
+    access: csp
+    listener: tls
+    source:
+      creds: creds/volte.jsonl
+      offset: 12
+    transport: tls
+    srtp: 'off'
+    register_expires: 3600
+    prack: false
+    dtmf: rfc4733
+    tls_verify: false
+    tls_client_cert: false
+    msrp: false
+  ptt_ue:                       # 계측기 전용 PTT 그룹 g005(계측기그룹, video) 멤버 013~022 — 실단말 그룹(g001~g004)은 쓰지 않는다(fan-out 이 실단말에 닿음)
+    worker: w1
+    kind: ue
+    access: csp
+    source:
+      creds: creds/ptt_g005.jsonl
+      offset: 0
+    service: ptt
+    transport: udp
+    srtp: 'off'
+    register_expires: 3600
+    prack: false
+    dtmf: rfc4733
+    tls_verify: false
+    tls_client_cert: false
+    msrp: true
+    subscriber: csc
+  # ── 피어(외부망 시뮬레이터) — tb48 과 같은 7개 중 pbx_reg(트렁크 REGISTER, PBX_HA1 env 필요)는 뒤로. 라우팅은 CSP 사이트 설정 tb45-* 가 담당
+  pbx_hq:                       # 기업 IP-PBX (SIPconnect, G.711) — DID +82210001010~014, 내선 4자리
+    worker: w1
+    kind: peer
+    peering: csp
+    profile: pbx
+    bind: { port: 5090, protocol: udp }
+    domain: pbx.hq.test
+    identities: { did_range: ['+82210001010', '+82210001014'], ext_len: 4 }
+    codecs: [PCMA, PCMU]
+    answer: normal
+    dtmf: rfc4733
+    thig: false
+    tls_client_auth: false
+    tls_verify: false
+    tls_client_cert: false
+    dial_plan: { country_code: '82', national_prefix: '0', international_prefix: '00' }
+    seed: { enabled: false, distribution: failover, priority: 100, weight: 1 }
+  mgcf_pstn:                    # PSTN 게이트웨이 (TS 29.163 Mg) — E.164 +82220001010~019
+    worker: w1
+    kind: peer
+    peering: csp
+    profile: mgcf
+    bind: { port: 5095, protocol: udp }
+    domain: mgcf.pstn.test
+    identities: { e164_range: ['+82220001010', '+82220001019'] }
+    answer: normal
+    dtmf: rfc4733
+    thig: false
+    tls_client_auth: false
+    tls_verify: false
+    tls_client_cert: false
+    seed: { enabled: false, distribution: failover, priority: 100, weight: 1 }
+  peer_kt:                      # 타 사업자 IMS (IBCF) — ims.kt.test, RouteSet rs-kt 우선 100
+    worker: w1
+    kind: peer
+    peering: csp
+    profile: ibcf
+    bind: { port: 5080, protocol: udp }
+    domain: ims.kt.test
+    identities: { e164_range: ['+821010001000', '+821010001009'] }
+    answer: normal
+    dtmf: rfc4733
+    thig: false
+    tls_client_auth: false
+    tls_verify: false
+    tls_client_cert: false
+    seed: { enabled: false, route_set: rs-kt, distribution: failover, priority: 100, weight: 1 }
+  peer_kt_dead:                 # 같은 RouteSet 의 무응답 피어 — failover 시험(우선 50)
+    worker: w1
+    kind: peer
+    peering: csp
+    profile: ibcf
+    bind: { port: 5081, protocol: udp }
+    domain: ims.kt.test
+    identities: { e164_range: ['+821010001000', '+821010001009'] }
+    answer: silent
+    dtmf: rfc4733
+    thig: false
+    tls_client_auth: false
+    tls_verify: false
+    tls_client_cert: false
+    seed: { enabled: false, route_set: rs-kt, distribution: failover, priority: 50, weight: 1 }
+  peer_kt_503:                  # 503 + Q.850 38 로 거절하는 피어 — 5xx 재라우팅 시험(우선 40)
+    worker: w1
+    kind: peer
+    peering: csp
+    profile: ibcf
+    bind: { port: 5083, protocol: udp }
+    domain: ims.kt.test
+    identities: { e164_range: ['+821010001000', '+821010001009'] }
+    answer: reject
+    fault: { code: 503, q850: 38, delay_ms: 0, drop_invite: 0, drop_pct: 0 }
+    dtmf: rfc4733
+    thig: false
+    tls_client_auth: false
+    tls_verify: false
+    tls_client_cert: false
+    seed: { enabled: false, route_set: rs-kt, distribution: failover, priority: 40, weight: 1 }
+  peer_blocked:                 # ACL deny 대상 피어 — 403 시험
+    worker: w1
+    kind: peer
+    peering: csp
+    profile: ibcf
+    bind: { port: 5082, protocol: udp }
+    domain: ims.blocked.test
+    identities: { e164_range: ['+821010001000', '+821010001009'] }
+    answer: normal
+    dtmf: rfc4733
+    thig: false
+    tls_client_auth: false
+    tls_verify: false
+    tls_client_cert: false
+    seed: { enabled: false, distribution: failover, priority: 100, weight: 1, acl: deny }
+media:
+  samples:
+    ringback:
+      pcmu: ringback_kr.pcmu
+      pcma: ringback_kr.pcma
+      amr-wb: synthetic
+    voice:
+      amr-wb: sample_voice.amrwb
+    tone_1k:
+      pcmu: tone_1k.pcmu
+      pcma: tone_1k.pcma

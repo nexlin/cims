@@ -46,6 +46,7 @@ internal unsafe struct cimsue_account_config_t
     public int video_auto_transmit;
     public byte* mcptt_id;
     public int auto_answer_mcptt;
+    public byte* instance_id;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -64,6 +65,7 @@ internal unsafe struct cimsue_group_call_options_t
     public int full_duplex;
     public byte** members;
     public int member_count;
+    public int broadcast;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -95,6 +97,7 @@ internal unsafe struct cimsue_mcptt_info_t
     public int imminent_peril;
     public int private_call;
     public int no_floor_ctrl;
+    public int broadcast;
 }
 
 [StructLayout(LayoutKind.Sequential)]

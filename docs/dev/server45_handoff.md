@@ -69,3 +69,17 @@ IMEI 를 못 얻는 플랫폼(Windows 데스크톱 등)은 지금처럼 UUID URN
   - API: `GET /api/v1/stats/service/ptt-groups[/{id}]`
   - 버전: oam 0.2.169 · oam-svc 0.2.128
 - 배포 함정: oam-svc 는 base oam 설치본의 핸들러 코드를 쓴다. base oam 을 먼저 올리고 oam-svc 를 재기동한다. `scripts/oam-deploy.py upgrade` 가 이제 이 순서로 올린다.
+
+## 5. .45 반영 결과 (→ .48)
+
+| 항목 | 상태 |
+|---|---|
+| §1 일제 통화 단말 U1~U5 | ✅ SDK·Android PTT 반영([mcptt_broadcast_group_call.md](../design/features/mcptt_broadcast_group_call.md) §4.4). U6(관제 앱)은 Windows 쪽 |
+| cimsue-cli 명령 형식 | 원샷 `group-call <g> --broadcast [--ptt-at S --ptt-len S]`(결과 JSON 에 `broadcast_released:true`) · drive `group_call <g> broadcast` — real-ue 게이트(`tester_compile.check_kind_gates`·`Worker::epGroupCall`)를 열 수 있다 |
+| 라이브 실측(.45, g005 가상 신원 013 개시·014 청취) | 개시 INVITE `prearranged`+`<broadcast-ind>true` → CMP `PTT_GROUP_ADD … broadcast initiator=+82500000013` → Floor Request `ind=0x4000` → Granted → 해제 → Idle → 개시 단말 BYE. 청취 쪽 fan-out INVITE 에 `broadcast-ind`, Taken 수신 |
+| U5 뒤 GMS 문서 전환기 `<mcpttgi:session-type>` | 제거 가능 — SDK·Android 가 invite-members 로 판정(없는 옛 문서만 폴백), SDK PUT 본문은 session-type 을 싣지 않는다 |
+| §2 ICB 마이그레이션 | **공유 DB 에 적용됨(2026-09-29 00:33, .45 정지창 안)**. .45 = csp 0.2.158·csc 0.2.129·oam 0.2.170·oam-svc 0.2.129. **.48(csp 0.2.157 = ICB 이전 빌드)는 `Unknown column 's.dnd'` 조회 오류가 나기 시작했다 — ICB 빌드로 재배포 필요. .135 쪽도 같다** |
+| ICB 실측(.45 `VOLTE-ICB-ALL`·`VOLTE-ICB-IDENTITY`) | 603·착신전환보다 우선은 PASS. **거절 안내(early media) 미재생** — 착신자가 등록 상태면 `CTasModule::ScreenInvite`(다이얼로그 생성 전)가 603 을 바로 보내 `ApplyTerminationServices` 의 `gclsAnnouncement.Reject` 경로에 닿지 않는다. 등록되지 않은 착신자만 안내가 난다. CSP 과제 |
+| `PTT-GROUP-CALL-BROADCAST`(.45) | 시작 전 종료 — tb45 의 PTT 풀이 전부 g005 멤버라 `member: false` 역할(monitor) 신원이 없다(환경) |
+| §3 단말 속성 V3 | ✅ Android PTT·VoLTE: `User-Agent: CIMS-PTT/<버전> (Android <판>; <모델>)`·`CIMS-VoLTE/…`, `+sip.instance` = ANDROID_ID 이름 기반 `urn:uuid:`(일반 앱은 IMEI 를 못 읽는다 — Android 10+). 모든 transport(UDP 는 Contact 직접). SDK: `AccountConfig.instanceId`·`imeiUrn()`·`userAgentOf()` — libcimsue 앱(관제 태블릿·Windows)은 앱이 채울 몫([ue_sdk.md](../design/features/ue_sdk.md) §4.2) |
+| 서비스 로그 경로 | .45 는 단일 루트(`/mnt/cims/service_log`)인데 이 디렉터리를 **다른 사이트의 옛 CSP(CMP .136/.139 와 통신, node `csp_01`)도 쓴다**. 새 코드(.45)는 `<log>/sip/<연>/…`·`<log>/stats/ptt_{index,attempts}` 에, 옛 코드는 `<log>/<연>/…`·`<log>/ptt/{index,attempts}` 에 쓴다 — 옛 기록을 옮기면 그 사이트 것까지 섞여 움직이므로 옮기지 않았다. .45 도 자기 사이트 디렉터리로 옮기는 것이 정리 방향([site_directory_layout.md](../design/features/site_directory_layout.md) §6) |

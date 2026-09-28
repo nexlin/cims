@@ -340,8 +340,10 @@ private fun SpeakerStatusStrip(st: PttUiState, s: GroupCallState) {
                         else " 동시 발언"
                 else if (sp.self) "내가 발언 중"
                 else "${PttController.fmtNumber(PttController.bareId(sp.id))} 발언 중"
+                // B-bit(TS 24.380 §8.2.3.15) = 일제 통화 — 개시자만 발언하고 나머지는 듣기만 한다(TS 24.379 §4.12)
+                val shown = if (s.floorIndicator and FloorIndicator.BROADCAST_GROUP != 0) "일제 통화 · $label" else label
                 Text(
-                    label,
+                    shown,
                     color = if (sp.self) Ct.Mint else Ct.Amber,
                     fontSize = if (s.talkers.size > 1) 13.sp else 15.sp, fontWeight = FontWeight.Bold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,

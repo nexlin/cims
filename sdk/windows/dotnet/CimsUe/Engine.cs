@@ -301,6 +301,7 @@ public sealed unsafe class Engine : IDisposable
         n.video_auto_transmit = B(a.VideoAutoTransmit);
         n.mcptt_id = s.Add(a.McpttId);
         n.auto_answer_mcptt = B(a.AutoAnswerMcptt);
+        n.instance_id = s.Add(a.InstanceId);
         return n;
     }
 
@@ -318,7 +319,7 @@ public sealed unsafe class Engine : IDisposable
             AuthScheme = (AuthScheme)n->auth_scheme, AkaK = Opt(n->aka_k), AkaOpc = Opt(n->aka_opc), AkaAmf = Opt(n->aka_amf),
             SecMechanisms = sec.Length == 0 ? null : sec, MediaSecurity = (MediaSecurity)n->media_security,
             ExpiresSec = n->expires_sec, ContactParams = Opt(n->contact_params), VideoAutoTransmit = n->video_auto_transmit != 0,
-            McpttId = Opt(n->mcptt_id), AutoAnswerMcptt = n->auto_answer_mcptt != 0,
+            McpttId = Opt(n->mcptt_id), AutoAnswerMcptt = n->auto_answer_mcptt != 0, InstanceId = Opt(n->instance_id),
         };
     }
 
@@ -336,7 +337,8 @@ public sealed unsafe class Engine : IDisposable
 
     internal static McpttInfo ToManaged(in cimsue_mcptt_info_t m) =>
         new(m.present != 0, Utf8.Str(m.session_type), Utf8.Str(m.request_uri), Utf8.Str(m.calling_user_id),
-            Utf8.Str(m.calling_group_id), m.emergency != 0, m.imminent_peril != 0, m.private_call != 0, m.no_floor_ctrl != 0);
+            Utf8.Str(m.calling_group_id), m.emergency != 0, m.imminent_peril != 0, m.private_call != 0, m.no_floor_ctrl != 0,
+            m.broadcast != 0);
 
     internal static CallInfo ToManaged(cimsue_call_info_t* c)
     {

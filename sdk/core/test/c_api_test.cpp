@@ -257,7 +257,8 @@ TEST(CApi, GroupDocRoundTripAndAbi) {
     std::string xml(need + 1, '\0');
     cimsue_group_doc_to_xml(&d, &xml[0], need + 1);
     xml.resize(need);
-    EXPECT_NE(xml.find("<mcpttgi:session-type>prearranged</mcpttgi:session-type>"), std::string::npos);
+    EXPECT_NE(xml.find("<mcpttgi:on-network-invite-members>true</mcpttgi:on-network-invite-members>"), std::string::npos);
+    EXPECT_EQ(xml.find("session-type"), std::string::npos);    // 그룹 종류는 규격 요소로만(TS 24.481 §7.2.2 a)
     EXPECT_NE(xml.find("<entry uri=\"tel:+82510001002\">"), std::string::npos);
 
     cimsue_group_doc_t out{};
@@ -268,6 +269,7 @@ TEST(CApi, GroupDocRoundTripAndAbi) {
     EXPECT_STREQ(out.members[0].role, "chair"); EXPECT_EQ(out.members[0].priority, 7);
     EXPECT_STREQ(out.members[1].role, "participant"); EXPECT_STREQ(out.members[1].display_name, "");
     EXPECT_EQ(out.max_participants, 12); EXPECT_EQ(out.allow_sds, 1); EXPECT_EQ(out.allow_fd, 0);
+    EXPECT_STREQ(out.session_type, "prearranged");
     EXPECT_NE(cimsue_group_doc_parse("<other/>", &out), CIMSUE_OK);
     EXPECT_EQ(out.member_count, 0);
 

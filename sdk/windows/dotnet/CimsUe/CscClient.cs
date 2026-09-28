@@ -89,7 +89,7 @@ public sealed class GroupDoc
     /// <summary>서버 산출(GET/PUT 응답 ETag). 수정 PUT 의 If-Match 로 쓴다.</summary>
     public string ETag { get; set; } = "";
     public List<GroupMember> Members { get; set; } = new();
-    /// <summary>prearranged | chat | broadcast</summary>
+    /// <summary>그룹 종류 prearranged | chat (문서의 on-network-invite-members)</summary>
     public string SessionType { get; set; } = "prearranged";
     public bool VideoEnabled { get; set; }
     public bool Encryption { get; set; }

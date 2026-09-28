@@ -80,6 +80,35 @@ TEST(AccountMap, SrtpOnlyOverTlsAndSecAgree) {
     EXPECT_EQ(ac.regConfig.headers[0].hValue, "tls");
 }
 
+// 단말 인스턴스 ID(TS 24.229 §5.1.1.2 · RFC 5626 §4.1) — TCP/TLS 는 outbound 경로, UDP 는 REGISTER Contact 직접(한 번만)
+TEST(AccountMap, InstanceIdPerTransport) {
+    AccountConfig c = base();
+    pj::AccountConfig ac = buildPjAccountConfig(c);                       // 비면 pjsip 기본값(건드리지 않음)
+    EXPECT_TRUE(ac.natConfig.sipOutboundInstanceId.empty());
+    EXPECT_TRUE(ac.regConfig.contactParams.empty());
+
+    c.instanceId = "urn:gsma:imei:49015420-323751-8";
+    ac = buildPjAccountConfig(c);                                         // UDP
+    EXPECT_EQ(ac.natConfig.sipOutboundInstanceId, "<urn:gsma:imei:49015420-323751-8>");
+    EXPECT_EQ(ac.regConfig.contactParams, ";+sip.instance=\"<urn:gsma:imei:49015420-323751-8>\"");
+
+    c.transport = Transport::TLS; c.serverPort = 5061;
+    ac = buildPjAccountConfig(c);                                         // TLS — outbound 가 reg-id 와 함께 싣는다
+    EXPECT_EQ(ac.natConfig.sipOutboundInstanceId, "<urn:gsma:imei:49015420-323751-8>");
+    EXPECT_TRUE(ac.regConfig.contactParams.empty());
+}
+
+// RFC 7254 IMEI URN — TAC 8 · SNR 6 · Luhn 검사 숫자. 형식이 틀리면 빈 값
+TEST(Helpers, ImeiUrnAndUserAgent) {
+    EXPECT_EQ(imeiUrn("490154203237518"), "urn:gsma:imei:49015420-323751-8");
+    EXPECT_EQ(imeiUrn("490154203237517"), "");                          // 검사 숫자 불일치
+    EXPECT_EQ(imeiUrn("49015420323751"), "");                           // 14자리
+    EXPECT_EQ(imeiUrn("49015420323751A"), "");
+    EXPECT_EQ(userAgentOf("CIMS-PTT", "1.4.2", "Android 15", "SM-S921N"), "CIMS-PTT/1.4.2 (Android 15; SM-S921N)");
+    EXPECT_EQ(userAgentOf("CIMS-Dispatch", "0.3", "Windows 11", ""), "CIMS-Dispatch/0.3 (Windows 11)");
+    EXPECT_EQ(userAgentOf("cimsue-cli", "", "", ""), "cimsue-cli");
+}
+
 TEST(Helpers, TargetAndHeaders) {
     EXPECT_EQ(normalizeTarget("+8210", "d.org"), "sip:+8210@d.org");
     EXPECT_EQ(normalizeTarget("sip:a@b", "d.org"), "sip:a@b");

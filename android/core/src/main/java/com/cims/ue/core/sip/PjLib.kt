@@ -41,6 +41,10 @@ object PjLib {
     @Volatile
     var cameraManager: CameraManager? = null
 
+    /** REGISTER·요청의 `User-Agent` — [boot] 전에 앱 서비스가 [com.cims.ue.core.device.DeviceIdentity.userAgent] 로 채운다. */
+    @Volatile
+    var userAgent: String = "CIMS-UE/M1 (pjsua2)"
+
     // 스레드별 PJSIP 등록 여부. libIsThreadRegistered() 는 미등록 스레드에서 호출 시 native abort 하므로
     // 쓰지 않고, ThreadLocal 로 스레드당 등록을 보장한다(설계서 §3.5 대안).
     // **부팅 세대(epoch)** 로 기록 — libDestroy 는 모든 스레드 등록을 소멸시키므로(로그아웃→재로그인의
@@ -75,7 +79,7 @@ object PjLib {
         endpoint.libCreate()
 
         val epc = EpConfig().apply {
-            uaConfig.userAgent = "CIMS-UE/M1 (pjsua2)"
+            uaConfig.userAgent = PjLib.userAgent
             logConfig.level = logLevel.toLong()
             logConfig.consoleLevel = logLevel.toLong()
             logConfig.writer = pjLogWriter
