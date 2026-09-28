@@ -31,7 +31,7 @@
  *     message/<gid>/…·message_direct/… (MCData 메시지 보관)
  *   - 휘발성 상태(state): volte/·ptt/ 가입자별 진행 중 세션 파일
  *   유휴 write probe(.probe)는 녹취·상태 영역 각각에 쓰고 곧바로 지운다
- *   - 통계(stats): ptt_attempts/<일>.jsonl (PTT 시도 장부 — OAM 집계의 원천)
+ *   - 통계(stats): ptt_attempts/<일>.jsonl (PTT 시도 장부 — OAM 집계의 원천)·ue_devices/<일>.jsonl (단말 속성 관측)
  * 원자 rewrite·rename·디렉터리 스캔이 섞여 있어 append 스풀(ServiceLogWriter) 재생이
  * 불가능하므로, StoreOpWriter 로 격리한다:
  *   - 생산자(SIP 스레드)는 m_mtx 아래 맵 북키핑 + 경로/내용 문자열 조립만 하고 op 를
@@ -567,6 +567,48 @@ public:
         m_worker.Enqueue( [path, line]() { return _appendLineS( path, line ); } );
     }
 
+    /** 단말 속성 관측 — REGISTER 의 `+sip.instance`(RFC 5626·7254)·`User-Agent`(RFC 3261 §20.41)와 도달 경로
+     *  (mcptt_management_views.md §4.1). `stats/ue_devices/<일>.jsonl` 에 한 줄 — OAM(oam-svc)이 file-store
+     *  `ue_devices` 로 접는다.
+     *
+     *  REGISTER 경로에서 저장소를 건드리지 않는다: 줄 조립만 하고 worker 에 넘긴다. 갱신 REGISTER 마다 쓰지 않고
+     *  **달라졌을 때**(단말·앱·경로) 또는 같은 값이 `kDeviceSeenRefreshSec` 을 넘겼을 때만 쓴다 — last_seen 해상도는
+     *  그 간격이다. 해제(`strEvent`="unregister")는 늘 쓴다.
+     *
+     *  @param strEvent  "register" | "unregister"
+     *  @param strKind   가입 종류(`ptt`·`volte`·`voip`) — 그 번호가 속한 회선 */
+    static const int kDeviceSeenRefreshSec = 3600;
+    void DeviceSeen( const std::string &strEvent, const std::string &strUser, const std::string &strKind,
+                     const std::string &strInstance, const std::string &strUserAgent, const std::string &strTransport,
+                     const std::string &strAddr, int iExpires, const std::string &strNode ) {
+        if ( m_strStatsDir.empty() || strUser.empty() ) return;
+        const time_t tNow = time( NULL );
+        const std::string strSig = strInstance + "\x1f" + strUserAgent + "\x1f" + strTransport + "\x1f" + strAddr;
+        {
+            std::lock_guard<std::mutex> lock( m_mtxDevSeen );
+            auto it = m_mapDevSeen.find( strUser );
+            if ( strEvent == "unregister" ) {
+                if ( it != m_mapDevSeen.end() ) m_mapDevSeen.erase( it );
+            } else if ( it != m_mapDevSeen.end() && it->second.first == strSig &&
+                        tNow - it->second.second < kDeviceSeenRefreshSec ) {
+                return;
+            } else {
+                m_mapDevSeen[strUser] = std::make_pair( strSig, tNow );
+            }
+        }
+        char ts[32];
+        IsoNow( ts, sizeof( ts ) );
+        char day[16];
+        snprintf( day, sizeof( day ), "%c%c%c%c%c%c%c%c", ts[0], ts[1], ts[2], ts[3], ts[5], ts[6], ts[8], ts[9] );
+        std::string line = std::string( "{\"ts\":\"" ) + ts + "\",\"event\":\"" + Esc( strEvent ) + "\",\"user\":\"" +
+                           Esc( strUser ) + "\",\"kind\":\"" + Esc( strKind ) + "\",\"instance\":\"" +
+                           Esc( strInstance ) + "\",\"user_agent\":\"" + Esc( strUserAgent ) + "\",\"transport\":\"" +
+                           Esc( strTransport ) + "\",\"addr\":\"" + Esc( strAddr ) +
+                           "\",\"expires\":" + std::to_string( iExpires ) + ",\"node\":\"" + Esc( strNode ) + "\"}\n";
+        std::string path = m_strStatsDir + "/ue_devices/" + day + ".jsonl";
+        m_worker.Enqueue( [path, line]() { return _appendLineS( path, line ); }, line.size() );
+    }
+
     /** 세션 종료.
      *
      *  @param strReason 종료 사유 — `normal`(마지막 멤버 퇴장으로 정상 종료) ·
@@ -715,6 +757,8 @@ private:
     std::string m_strStateDir;       // 휘발성 상태 영역 — 비면 가입자 상태 파일 생략
     std::string m_strStatsDir;       // 통계 영역 — 비면 PTT 시도 장부 생략
     std::string m_strComponent;
+    std::mutex m_mtxDevSeen;                                             // DeviceSeen 중복 억제
+    std::map<std::string, std::pair<std::string, time_t>> m_mapDevSeen;  // user → (단말·경로 서명, 마지막 기록)
     std::mutex m_mtx;
     CStoreOpWriter m_worker;                                 // 저장 경로 연산 전담 (SIP 스레드 무접촉)
     std::map<std::string, std::string> m_mapDir;             // key(sessionId or callId) → dir path

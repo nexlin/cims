@@ -30,6 +30,7 @@ import RegisterFlowPage from './pages/RegisterFlowPage'
 import AnnouncementsPage from './pages/AnnouncementsPage'
 import PttGroupInfoPage from './pages/PttGroupInfoPage'
 import PttUsagePage from './pages/PttUsagePage'
+import PttTerminalsPage from './pages/PttTerminalsPage'
 import SipPeeringPage from './pages/SipPeeringPage'
 import { SERVICE_DEFS_LAYOUT } from '@core/widgets/layouts'  // 코어 레이아웃 — '구성' 그룹에 배치
 
@@ -73,6 +74,9 @@ export const cimsManifest: ServiceManifest = {
         // MCPTT 그룹 정보(mcptt_management_views.md §3) — 조회 전용. 편집은 구성 › PTT 그룹
         { path: '/service/ptt-groups',      title: 'MCPTT 그룹 정보', component: PttGroupInfoPage, requiredRole: 'monitor',
           apis: ['stats.service.ptt-groups', 'stats.service.ptt-group'] },
+        // 단말 현황(mcptt_management_views.md §4) — 조회 전용. 단말 속성 = REGISTER 의 +sip.instance·User-Agent
+        { path: '/service/ptt-terminals',   title: '단말 현황', component: PttTerminalsPage, requiredRole: 'monitor',
+          apis: ['stats.service.ptt-terminals', 'stats.service.ptt-terminal'] },
         // MCPTT 이용 정보(mcptt_management_views.md §5) — 기간 집계·xlsx. 원천 = 1분 롤업
         { path: '/service/ptt-usage',       title: 'MCPTT 이용 정보', component: PttUsagePage, requiredRole: 'monitor',
           apis: ['stats.service.ptt-usage'] },

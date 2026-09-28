@@ -1,6 +1,6 @@
 # MCPTT 관리 조회 화면 — 그룹 정보 · 단말 현황 · 이용 정보
 
-> **MCPTT 그룹 정보(§3)·MCPTT 이용 정보(§5, 롤업 확장 포함)는 구현, 단말 현황(§4)·단말 속성 수집은 설계 정본(미구현).** 그룹 편집과
+> **MCPTT 그룹 정보(§3)·단말 현황(§4, 단말 속성 수집 포함)·MCPTT 이용 정보(§5, 롤업 확장 포함)는 구현.** 그룹 편집과
 > 실시간 반영(§2)·PTT 세션 이력은 구현돼 있다. 요구 = "MCPTT 그룹 정보 · 단말기 정보 · MCPTT 이용 정보를 저장하며, 필요시 저장 내용을
 > 확인할 수 있다" + "MCPTT 웹 기반 관리 도구에서 그룹 등록/수정/삭제 시 실시간으로 업데이트한다".
 >
@@ -19,7 +19,7 @@
 | 그룹 변경 실시간 반영 | — (§2) | 구현 |
 | MCPTT 이용 이력 (세션 단위) | 콘솔 `서비스 > PTT 세션 이력` (`/service/history/ptt`) | 구현 |
 | **MCPTT 그룹 정보** (조회 · 상태) | `서비스 > MCPTT 그룹 정보` (`/service/ptt-groups`) | 구현 (§3) |
-| **단말 현황** (MCPTT 관점 단말 정보) | `서비스 > 단말 현황` (`/service/ptt-terminals`) | 미구현 (§4) — 단말 속성 수집 신규 |
+| **단말 현황** (MCPTT 관점 단말 정보) | `서비스 > 단말 현황` (`/service/ptt-terminals`) | 구현 (§4) — 단말 속성 수집 포함 |
 | **MCPTT 이용 정보** (기간 집계) | `서비스 > MCPTT 이용 정보` (`/service/ptt-usage`) | 구현 (§5) — 롤업 확장 포함 |
 
 콘솔 `서비스` 메뉴 순서 = 서비스 현황 · MCPTT 그룹 정보 · 단말 현황 · MCPTT 이용 정보 · PTT 세션 이력 · VoLTE 호
@@ -64,39 +64,62 @@
 
 ## 4. 단말 현황 화면 (MCPTT 관점)
 
-MCPTT 서비스가 필요로 하는 단말 정보 — 누가 어떤 단말로 로그인·등록돼 어느 그룹에 참여 중인가 — 를 보여 준다.
+MCPTT 서비스가 필요로 하는 단말 정보 — 누가 어떤 단말로 로그인·등록돼 어느 그룹에 참여 중인가 — 를 보여 준다
+(콘솔 `PttTerminalsPage`, 10 초 재조회).
 
-**구성** — ① 필터(전체 · 접속 중 · 미접속, 단말 유형) + 이름·MCPTT ID 검색 ② 단말 목록(이름 · MCPTT ID · 단말
-유형 · 모델·앱 버전 · 로그인 · 등록 · 참여 그룹 수 · 최근 등록) ③ 선택 단말 상세 4영역.
+**구성** — ① 필터(전체 · 접속 중 · 미접속 / 단말 유형) + 이름·MCPTT 번호 검색 ② 단말 목록(이름 · 번호 · 단말 유형 ·
+모델·OS·앱 버전 · 로그인 · 등록 · transport · 참여 그룹 수 · 최근 관측) ③ 선택 단말 상세 4영역.
 
-| 영역 | 표시 | 원천 | 상태 |
-|---|---|---|---|
-| 단말 정보 | 단말 ID(IMEI) · 모델 · OS · 앱 버전 · 코덱 | **§4.1 단말 속성** | 신규 수집 |
-| MCPTT 서비스 상태 | 로그인(IdMS 토큰 발급·만료) | CSC `idms_storage` | 있음 |
-| | 등록(접속 PSP 노드 · transport · 단말 주소 · 등록 시각 · 만료) | CSP 등록 바인딩 + DB `register_time` | 있음 |
-| | 문서 구독(GMS · CMS xcap-diff) | CSP 구독 관리 | 있음 |
-| | 보안 · 인증(`sip_transport` · `media_srtp` · `auth_scheme`) | DB 가입 · 접속서비스 | 있음 |
-| 그룹 참여 | 그룹별 affiliation · 철도 긴급 그룹 상시 참여 | PSP affiliation 상태 | 있음 |
-| 최근 이용 | 오늘 세션 · 발언 · 최근 세션 · 긴급 · 영상 | 1분 롤업 `by_user` (§5.2) | 롤업 확장 |
+| 영역 | 표시 | 원천 |
+|---|---|---|
+| 단말 정보 | 단말 유형 · 단말 ID(IMEI — 가림) · instance · 모델 · OS · 앱 · `User-Agent` · 처음/최근 관측, 이 번호로 관측된 단말이 여럿이면 목록 | file-store `ue_devices`(§4.1) |
+| MCPTT 서비스 상태 | 로그인(IdMS client_id · 발급 · 만료) | IdMS refresh token(`refresh_tokens` — 폐기·회전 안 됐고 만료 전인 최신) |
+| | 등록(접속 여부 · 등록/해제 시각 · 접속 노드 · transport · 단말 주소 · 부여 만료) | DB `register_time`/`logout_time` + 최근 단말 레코드 |
+| | 보안 · 인증(`sip_transport`(없으면 ANY) · `auth_scheme` · 접속서비스) | DB `ptt_subscriptions` |
+| 그룹 참여 | 멤버인 그룹별 역할 · affiliation · 참여 시각 | DB `ptt_group_members`·`ptt_affiliations`(V1 과 같은 활성 조건) |
+| 오늘 이용 | 세션 · 발언 수 · 발언 시간 · 긴급 | 1분 롤업 `by_user` (§5.2) |
 
-단말 유형(관제조작반 · 차상 단말 · 휴대 단말)은 로그인 클라이언트(IdMS `client_id`)에서 파생한다 — 별도 입력
-필드를 두지 않는다.
+단말 유형은 입력 필드가 아니라 로그인한 앱에서 파생한다. 지금 단말 앱은 모두 IdMS `client_id` `MCPTT_UE` 를 쓰므로 가를 수
+있는 것은 `User-Agent` 의 product 토큰이다([ue_sdk.md](ue_sdk.md) §4.2 `userAgentOf`): `CIMS-Dispatch` = 관제조작반,
+`CIMS-PTT`·`CIMS-VoLTE` = 휴대 단말, `CIMS-UE`(cimsue-cli)·`csim`·`cspsim` = 시험 단말, 그 밖 = 기타. 차상 단말은 그 앱의
+product 이름이 정해지면 같은 표(`stats.py` `_TERMINAL_TYPES`)에 한 줄을 더한다.
 
 ### 4.1 단말 속성 수집
 
-규격 경로로 받는다 — 앱 전용 보고 API 를 새로 두지 않는다.
+규격 경로로 받는다 — 앱 전용 보고 API 를 두지 않는다.
 
 | 속성 | 규격 경로 | 수집 지점 |
 |---|---|---|
-| 단말 ID (IMEI) | REGISTER Contact `+sip.instance="<urn:gsma:imei:…>"` (TS 24.229 §5.1.1.2 · RFC 7254) | PSP · CSP REGISTER 처리 |
+| 단말 ID (IMEI) | REGISTER Contact `+sip.instance="<urn:gsma:imei:…>"` (TS 24.229 §5.1.1.2 · RFC 7254) | CSP `CscfModule` REGISTER 200 뒤 |
 | 모델 · OS · 앱 버전 | REGISTER `User-Agent` (RFC 3261 §20.41) — 형식 `CIMS-PTT/<앱 버전> (<OS>; <모델>)` | 같은 지점 |
-| 코덱 능력 | REGISTER · INVITE SDP / Contact feature tag | 같은 지점 |
+| 도달 경로 | 수신 transport · 소스 주소 · 부여 Expires · 접속 노드 | 같은 지점 |
 
-- 저장 = file-store collection `ue_devices`(설계안 — 신규 데이터는 DB 테이블이 아니라 file-store 로 시작,
-  [../runtime_store_design.md](../runtime_store_design.md)): `subscription_id` · `instance_id` · `imei` · `model` ·
-  `os` · `app_version` · `user_agent` · `first_seen` · `last_seen`. 키는 불변 id(`subscription_id` + `instance_id`) —
-  [../identifier_model.md](../identifier_model.md). REGISTER 경로에서 동기 쓰기하지 않는다 — 변경분만 비동기
-  upsert(호 처리 경로 저장소 무조회 원칙, [volte_supplementary_services.md](volte_supplementary_services.md) §2).
+```
+REGISTER ─► CSP CscfModule  200 OK 뒤 _NoteDeviceSeen ─► CCallDir::DeviceSeen
+               (줄 조립만 — 저장소 무접촉, 변경·1 시간 간격만)      │ StoreOpWriter worker (비동기 append)
+                                                                  ▼
+                                               {stats}/ue_devices/YYYYMMDD.jsonl
+                                                                  │ oam-svc 주기 루프(롤업과 같은 주기) — ue_devices.fold
+                                                                  ▼   파일별 바이트 오프셋 커서, 새 줄만
+                          file-store  modules/oam-svc/runtime/ue_devices/<번호>__<instance>.json
+                                                                  │
+                          GET /api/v1/stats/service/ptt-terminals[/{msisdn}] ─► 콘솔 서비스 › 단말 현황
+```
+
+- **CSP 관측 줄** (`stats/ue_devices/<일>.jsonl`, [site_directory_layout.md](site_directory_layout.md) 통계 영역) —
+  `{ts, event: register|unregister, user, kind, instance, user_agent, transport, addr, expires, node}`. REGISTER 경로는
+  줄 조립만 하고 기록은 호 이력과 같은 worker 가 한다(호 처리 경로 저장소 무조회 원칙,
+  [volte_supplementary_services.md](volte_supplementary_services.md) §2). 갱신 REGISTER 마다 쓰지 않고 **단말·앱·경로가
+  달라졌을 때** 또는 같은 값이 1 시간(`kDeviceSeenRefreshSec`)을 넘겼을 때만 쓴다 — 줄 수가 갱신 주기가 아니라 등록 수에
+  비례하고, 대신 `last_seen` 해상도가 1 시간이다. 명시적 해제(Expires 0)는 늘 쓴다.
+- **레코드** (`ue_devices`) — 키 = 불변 id `<가입 번호>__<instance>`([../identifier_model.md](../identifier_model.md)), instance 가
+  없는 단말은 `<번호>__-`. 필드 `subscription_id` · `kind` · `instance_id` · `imei` · `app` · `app_version` · `os` · `model` ·
+  `user_agent` · `transport` · `addr` · `node` · `expires` · `registered` · `first_seen` · `last_seen` · `last_register` ·
+  `last_unregister`. 같은 단말의 재등록은 `last_seen` 만 밀고, 같은 번호에 다른 단말이 등록하면 이전 레코드는 `registered=false`
+  (바인딩은 번호당 하나 — [registration_binding_set.md](registration_binding_set.md) §8), 해제 줄은 그 번호의 등록 중 레코드를 모두 내린다.
+- **저장 위치** — oam-svc 소유 공간 `modules/oam-svc/runtime/`([../runtime_store_v2_module_namespacing.md](../runtime_store_v2_module_namespacing.md)).
+  관리 store 는 단일 writer 라 oam-svc 가 기동 때 이 서브트리에 소유권 리스를 잡는다(계측기와 같은 규약, [oam_ha.md](oam_ha.md) §4.4).
+  못 잡으면 접기만 멈추고 조회는 된다. 레코드는 관측 줄에서 다시 만들 수 있는 파생 데이터다(커서 `.fold_cursor.json` 을 지우면 남은 줄로 재구성).
 - 단말이 싣는 값([ue_sdk.md](ue_sdk.md) §4.2 단말 속성):
 
   | 단말 | `User-Agent` | `+sip.instance` |
@@ -106,7 +129,10 @@ MCPTT 서비스가 필요로 하는 단말 정보 — 누가 어떤 단말로 �
 
   TCP/TLS 등록은 RFC 5626 outbound 경로가 `reg-id` 와 함께, UDP 등록은 REGISTER Contact 에 직접 싣는다.
   수집 쪽은 URN 종류로 IMEI 칸을 채운다(`urn:gsma:imei:` 만 IMEI, `urn:uuid:` 는 빈 칸).
-- IMEI 는 개인 식별 정보다 — 화면은 가운데를 가려 표시하고(`3512…7890`), 원문 조회는 관리자 역할로 한정한다.
+- IMEI 는 개인 식별 정보다 — 서버가 가운데를 가려 보내고(`3512…7890`, `imei_masked`), 원문은 콘솔 `admin` 역할에만 준다(`raw_imei`).
+
+남은 것 = 문서 구독 상태(GMS·CMS xcap-diff — CSP 구독 관리 상태가 oam-svc 에 노출되지 않는다) · 철도 긴급 그룹 상시 참여 표시 ·
+코덱 능력(REGISTER Contact feature tag) · 차상 단말 product 이름.
 
 ## 5. MCPTT 이용 정보 화면
 
@@ -167,8 +193,8 @@ oam-svc 가 소유한다 — 통계 롤업(`services/stats_rollup`)·세션 인�
 |---|---|---|
 | `GET /api/v1/stats/service/ptt-groups?state=all\|active\|talking\|emergency&q=` | 그룹 목록 + 상태 · 등록/참여 인원 · 오늘 요약 (`counts` = 필터별 수) | 구현 (`stats.service.ptt-groups`) |
 | `GET /api/v1/stats/service/ptt-groups/{id}` | 그룹 상세 — 속성 · 멤버별 등록/참여/세션 참가/발언 | 구현 (`stats.service.ptt-group`) |
-| `GET /api/v1/stats/service/ptt-terminals?state=&type=&q=` | 단말 목록 | 제안 |
-| `GET /api/v1/stats/service/ptt-terminals/{mcptt_id}` | 단말 상세 4영역 | 제안 |
+| `GET /api/v1/stats/service/ptt-terminals?state=all\|online\|offline&type=&q=` | 단말 목록 — `counts`(상태별) · `types`(유형별) · `terminals[]` | 구현 (`stats.service.ptt-terminals`) |
+| `GET /api/v1/stats/service/ptt-terminals/{msisdn}` | 단말 상세 4영역 — `device`·`devices[]`·`login`·`registration`·`security`·`groups[]`·`today` (IMEI 원문은 admin) | 구현 (`stats.service.ptt-terminal`) |
 | `GET /api/v1/stats/service/ptt-usage?from=&to=&unit=1h\|1d&format=json\|xlsx` | 이용 정보 — `summary`(+ `talk_measured`/`talk_coverage_sessions`) · `trend` · `by_group` · `by_user`(상위 50) | 구현 (`stats.service.ptt-usage`) |
 
 ## 7. 구현 순서
@@ -179,5 +205,5 @@ oam-svc 가 소유한다 — 통계 롤업(`services/stats_rollup`)·세션 인�
 | V2 | 롤업 확장(§5.2) + MCPTT 이용 정보 화면 + xlsx | sip_statistics 롤업 |
 | V3 | 단말 속성 수집(§4.1 — REGISTER 파싱 · `ue_devices` · SDK `User-Agent`/IMEI URN) + 단말 현황 화면 | SDK 반영 |
 
-검증 = 롤업 확장 단위시험(발언 · 그룹 · 사용자 합산이 상위 단위에서 보존) · REGISTER `User-Agent`/`+sip.instance`
-파싱 단위시험 · 계측기 PTT 시나리오 부하 뒤 이용 정보 숫자와 세션 이력 건수 대조(S3).
+검증 = 롤업 확장 단위시험(발언 · 그룹 · 사용자 합산이 상위 단위에서 보존) · 단말 속성 접기·`User-Agent` 파싱·IMEI 가림 단위시험
+(`tests/test_ue_devices.py`, S1 OAM 통계) · 계측기 PTT 시나리오 부하 뒤 이용 정보 숫자와 세션 이력 건수 대조(S3).

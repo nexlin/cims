@@ -14,6 +14,7 @@
 
 #include "AuthzRevoke.h"
 #include "Base64.h"
+#include "CallDir.h"
 #include "CscAvClient.h"
 #include "CspAddressing.h"
 #include "CspConfigCache.h"  // CspUuidToIntId
@@ -692,6 +693,26 @@ static SecAgreeIpsecOffer EvaluateIpsecOffer( CSipMessage *pclsMessage, const st
     return o;
 }
 
+// 단말 속성 관측(mcptt_management_views.md §4.1) — 첫 Contact 의 +sip.instance(따옴표·<> 제거)·User-Agent·도달 경로
+static void _NoteDeviceSeen( CSipMessage *pclsMessage, const std::string &strUser, const std::string &strKind,
+                             int iExpires ) {
+    if ( !gclsCallDir.IsEnabled() ) return;
+    std::string strInstance;
+    if ( !pclsMessage->m_clsContactList.empty() ) {
+        pclsMessage->m_clsContactList.front().SelectParam( "+sip.instance", strInstance );
+        std::string strOut;
+        for ( char c : strInstance )
+            if ( c != '"' && c != '<' && c != '>' ) strOut += c;
+        strInstance = strOut;
+    }
+    const char *pszTransport = ( pclsMessage->m_eTransport == E_SIP_TLS )   ? "TLS"
+                               : ( pclsMessage->m_eTransport == E_SIP_TCP ) ? "TCP"
+                                                                            : "UDP";
+    gclsCallDir.DeviceSeen( "register", strUser, strKind, strInstance, pclsMessage->m_strUserAgent, pszTransport,
+                            pclsMessage->m_strClientIp + ":" + std::to_string( pclsMessage->m_iClientPort ), iExpires,
+                            gclsFmReporter.Node() );
+}
+
 bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage ) {
     // 요청 수명 (RFC 3261 §10.2.1.1: Contact ;expires > Expires 헤더). 형식 오류 → 400 (§21.4.1).
     uint32_t uiReqExpires = 0;
@@ -885,6 +906,7 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
         gclsIpsecSaSetMap.ReleaseUser( strUserId, IPSEC_RELEASE_GRACE_SEC );  // 200 OK 가 SA 위로 나간 뒤 회수
         // DB logout_time 갱신 + CspUserMap 캐시 업데이트
         gclsCspUserMap.unregisterUser( strUserId );
+        if ( gclsCallDir.IsEnabled() ) gclsCallDir.DeviceSeen( "unregister", strUserId, "", "", "", "", "", 0, "" );
         // PTT 그룹콜 세션 정리 (활성 호 있으면 BYE + DB 갱신)
         gclsGroupCallService.ClearUserCall( strUserId );
         // 등록 해제 시 암묵적 de-affiliation (TS 24.379 — affiliation 은 등록에 묶임)
@@ -1013,6 +1035,7 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
         gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
 
         gclsCspUserMap.registerUser( clsUser.m_strId, "" );
+        _NoteDeviceSeen( pclsMessage, clsUser.m_strId, clsUser.m_strServiceType, iGrantedExpires );
 
         // reg-event 구독자에게 등록 갱신 통지 (partial — RFC 3680).
         //   최초 등록은 구독이 있을 수 없어 통상 no-op, 구독 잔존 상태의 재등록이면 created.

@@ -314,6 +314,38 @@ export interface PttGroupStatusResponse {
   counts: { members: number; registered: number; affiliated: number }
 }
 
+// ── 단말 현황 (GET /stats/service/ptt-terminals[/{msisdn}]) ──
+export type PttTerminalStateFilter = 'all' | 'online' | 'offline'
+export type PttTerminalType = 'dispatch' | 'handheld' | 'sim' | 'unknown' | ''
+export interface PttTerminalRow {
+  msisdn: string; name: string; type: PttTerminalType; registered: boolean; logged_in: boolean
+  affiliated_count: number; model: string; os: string; app: string; app_version: string; transport: string
+  devices: number; register_time: string | null; last_seen: string | null
+}
+export interface PttTerminalsResponse {
+  counts: Record<PttTerminalStateFilter, number>
+  types: Record<string, number>
+  terminals: PttTerminalRow[]
+}
+export interface PttTerminalDevice {
+  instance_id: string; imei: string; imei_masked: boolean; app: string; app_version: string; os: string; model: string
+  user_agent: string; transport: string; addr: string; node: string; expires: number; registered: boolean
+  first_seen: string; last_seen: string; last_register: string; last_unregister: string
+}
+export interface PttTerminalResponse {
+  msisdn: string; name: string; org: string; type: PttTerminalType
+  device: PttTerminalDevice | null; devices: PttTerminalDevice[]
+  login: { logged_in: boolean; client_id?: string; login_id?: string; issued_at?: string | null; expires_at?: string | null }
+  registration: {
+    registered: boolean; register_time: string | null; logout_time: string | null
+    node?: string; transport?: string; addr?: string; expires?: number
+  }
+  security: { sip_transport: string; auth_scheme: string; service_ref: string }
+  groups: { id: string; name: string; role: string; affiliated: boolean; affiliated_at: string | null }[]
+  today: { sessions: number; turns: number; talk_sum_sec: number; emergency: number }
+  raw_imei: boolean
+}
+
 // ── MCPTT 이용 정보 (GET /stats/service/ptt-usage) ──
 export interface PttUsageSummary {
   sessions: number; talked: number; turns: number; talk_sum_sec: number; emergency: number; video: number
@@ -370,6 +402,9 @@ export const statsApi = {
   pttGroupsStatus: (state: PttGroupStateFilter = 'all', q = '') =>
     api.get<PttGroupsStatusResponse>(`/stats/service/ptt-groups?state=${state}${q ? `&q=${encodeURIComponent(q)}` : ''}`),
   pttGroupStatus: (id: string) => api.get<PttGroupStatusResponse>(`/stats/service/ptt-groups/${encodeURIComponent(id)}`),
+  pttTerminals: (state: PttTerminalStateFilter = 'all', q = '', type = '') =>
+    api.get<PttTerminalsResponse>(`/stats/service/ptt-terminals?state=${state}${q ? `&q=${encodeURIComponent(q)}` : ''}${type ? `&type=${type}` : ''}`),
+  pttTerminal: (msisdn: string) => api.get<PttTerminalResponse>(`/stats/service/ptt-terminals/${encodeURIComponent(msisdn)}`),
   // MCPTT 이용 정보 (mcptt_management_views.md §5) — 기간 집계. xlsx 는 pttUsagePath(…, 'xlsx') 로 인증 fetch
   pttUsage: (from: string, to: string, unit?: '1h' | '1d') =>
     api.get<PttUsageResponse>(pttUsagePath(from, to, unit)),

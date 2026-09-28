@@ -30,7 +30,7 @@ import pymysql.cursors
 
 from httpsrv.handler import HandlerArgs, HandlerResult
 
-from services import access_services, paths, ptt_index, stats_rollup
+from services import access_services, admin_auth, paths, ptt_index, stats_rollup
 from services.stats_rollup import _pdd_ms, _rate
 
 logger = logging.getLogger(__name__)
@@ -813,6 +813,13 @@ async def handle_stats_service(handler_args: HandlerArgs, kwargs: dict) -> Handl
         if svc == 'ptt-usage':
             # MCPTT 이용 정보(mcptt_management_views.md §5) — 기간 집계 · xlsx
             return await _ptt_usage(config, qp('from', ''), qp('to', ''), qp('unit', ''), qp('format', 'json'))
+        if svc == 'ptt-terminals':
+            # 단말 현황(mcptt_management_views.md §4) — 목록 / {msisdn} 상세. IMEI 원문은 관리자만(개인 식별 정보)
+            if len(parts) > 1:
+                tok = admin_auth.extract_admin_jwt(handler_args.headers) or {}
+                raw = admin_auth.role_rank(tok.get('role')) >= admin_auth.role_rank('admin')
+                return await _ptt_terminal(config, unquote(parts[1]), raw)
+            return await _ptt_terminals(config, qp('state', 'all'), qp('q', ''), qp('type', ''))
         if svc == 'ptt-groups':
             # MCPTT 그룹 정보(mcptt_management_views.md §3) — 목록 / {id} 상세. 조회 전용.
             if len(parts) > 1:
@@ -3146,6 +3153,174 @@ def _ptt_group_status(config: dict, gid: str) -> HandlerResult:
     })
 
 
+# ── 단말 현황 (mcptt_management_views.md §4) ─────────────────────────────────────────────
+#   원천 = DB(PTT 가입·등록 시각·affiliation) + file-store ue_devices(REGISTER 의 +sip.instance·User-Agent — CSP 관측을
+#   oam-svc 가 접는다) + IdMS refresh token(로그인) + 1분 롤업 by_user(오늘 이용). 조회 전용.
+#   단말 유형은 입력 필드가 아니라 로그인한 앱에서 파생한다 — 지금 단말 앱은 모두 IdMS client_id `MCPTT_UE` 를 쓰므로
+#   가를 수 있는 것은 User-Agent 의 product 토큰(ue_sdk.md §4.2 userAgentOf)이다.
+_TERMINAL_TYPES = (('CIMS-Dispatch', 'dispatch'), ('CIMS-PTT', 'handheld'), ('CIMS-VoLTE', 'handheld'),
+                   ('CIMS-UE', 'sim'), ('CIMS_', 'sim'), ('csim', 'sim'), ('cspsim', 'sim'))
+_TERMINAL_STATES = ('all', 'online', 'offline')
+
+
+def _terminal_type(dev: dict) -> str:
+    app = (dev or {}).get('app') or ''
+    for prefix, kind in _TERMINAL_TYPES:
+        if app.lower().startswith(prefix.lower()):
+            return kind
+    return 'unknown' if app else ''
+
+
+def _idms_logins(config: dict) -> dict:
+    """{msisdn: 최근 유효 로그인} — 폐기·회전되지 않고 만료 전인 refresh token 중 최신(TS 33.180 — IdMS 로그인 세션)."""
+    from services import file_store
+    now = time.time()
+    out: dict = {}
+    try:
+        for t in file_store.load_all(file_store.domain_dir(config, 'refresh_tokens')):
+            if t.get('revoked') or t.get('rotated_to') or float(t.get('expires_at') or 0) <= now:
+                continue
+            mid = (t.get('mcptt_id') or '').strip()
+            msisdn = mid[4:] if mid.startswith('tel:') else mid.split('sip:', 1)[-1].split('@', 1)[0]
+            if not msisdn:
+                continue
+            cur = out.get(msisdn)
+            if cur is None or float(t.get('issued_at') or 0) > float(cur.get('issued_at') or 0):
+                out[msisdn] = t
+    except Exception as e:
+        logger.warning('idms logins skip: %s', e)
+    return out
+
+
+def _login_view(t: dict) -> dict:
+    if not t:
+        return {'logged_in': False}
+    iso = lambda v: datetime.fromtimestamp(float(v)).isoformat(timespec='seconds') if v else None  # noqa: E731
+    return {'logged_in': True, 'client_id': t.get('client_id') or '', 'login_id': t.get('user_id') or '',
+            'issued_at': iso(t.get('issued_at')), 'expires_at': iso(t.get('expires_at'))}
+
+
+def _ptt_today_by_user(config: dict) -> dict:
+    """오늘 1분 롤업의 by_user — {msisdn: {sessions, turns, talk_sum_sec, emergency}}."""
+    try:
+        today = datetime.now().strftime('%Y-%m-%d')
+        f, t = _norm_dt(today), _norm_dt(today, end=True)
+        rows, _cov = stats_rollup.read_range_filled(stats_rollup.roots_of(config), f, t, config, gran='1d')
+        _b, totals = stats_rollup.aggregate(rows, '1d', 'ptt', ensure_svc=False)
+        return ((totals or {}).get('ptt') or {}).get('by_user') or {}
+    except Exception as e:
+        logger.warning('ptt today by_user skip: %s', e)
+        return {}
+
+
+@_offload
+def _ptt_terminals(config: dict, state: str = 'all', q: str = '', ttype: str = '') -> HandlerResult:
+    """PTT 가입 번호별 단말 목록 — 이름·단말 유형·모델/앱·로그인·등록·참여 그룹 수·최근 등록.
+    state = all | online(등록 중) | offline. type = dispatch | handheld | sim | unknown(빈 값이면 전체)."""
+    from services import ue_devices
+    state = (state or 'all').lower()
+    if state not in _TERMINAL_STATES:
+        return HandlerResult(status=400, body={'error': 'state must be all|online|offline'})
+    q = (q or '').strip()
+    try:
+        with _get_db(config) as conn:
+            with conn.cursor() as cur:
+                where, args = '', []
+                if q:
+                    like = f'%{q}%'
+                    where, args = 'WHERE ps.id LIKE %s OR u.name LIKE %s', [like, like]
+                cur.execute(
+                    "SELECT ps.id AS msisdn, u.name, ps.register_time, ps.logout_time, "
+                    f" {_PTT_ON} AS registered, "
+                    " (SELECT COUNT(DISTINCT a.group_id) FROM ptt_affiliations a "
+                    f"   WHERE a.user_id=ps.id AND {_AFF_ACTIVE}) AS affiliated_count "
+                    f"FROM ptt_subscriptions ps LEFT JOIN users u ON u.id=ps.user_id {where} ORDER BY ps.id LIMIT 5000", args)
+                rows = cur.fetchall()
+    except Exception as e:
+        logger.exception('ptt terminals error: %s', e)
+        return HandlerResult(status=500, body=_ERR_INTERNAL)
+    devs = ue_devices.by_user(ue_devices.load_all(config))
+    logins = _idms_logins(config)
+    counts = {'all': 0, 'online': 0, 'offline': 0}
+    types: dict = {}
+    out = []
+    for r in rows:
+        msisdn = r['msisdn']
+        dev = (devs.get(msisdn) or [None])[0]
+        tt = _terminal_type(dev)
+        if ttype and tt != ttype:
+            continue
+        online = bool(r.get('registered'))
+        counts['all'] += 1
+        counts['online' if online else 'offline'] += 1
+        types[tt or 'none'] = types.get(tt or 'none', 0) + 1
+        if (state == 'online' and not online) or (state == 'offline' and online):
+            continue
+        out.append({
+            'msisdn': msisdn, 'name': r.get('name') or '', 'type': tt, 'registered': online,
+            'logged_in': msisdn in logins, 'affiliated_count': int(r.get('affiliated_count') or 0),
+            'model': (dev or {}).get('model') or '', 'os': (dev or {}).get('os') or '',
+            'app': (dev or {}).get('app') or '', 'app_version': (dev or {}).get('app_version') or '',
+            'transport': (dev or {}).get('transport') or '', 'devices': len(devs.get(msisdn) or []),
+            'register_time': r['register_time'].isoformat() if r.get('register_time') else None,
+            'last_seen': (dev or {}).get('last_seen') or None,
+        })
+    return HandlerResult(status=200, body={'counts': counts, 'types': types, 'terminals': out})
+
+
+@_offload
+def _ptt_terminal(config: dict, msisdn: str, raw_imei: bool = False) -> HandlerResult:
+    """단말 상세 — 단말 정보(관측된 단말 전부) · MCPTT 서비스 상태(로그인·등록·보안) · 그룹 참여 · 오늘 이용."""
+    from services import ue_devices
+    msisdn = (msisdn or '').strip()
+    try:
+        with _get_db(config) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT ps.id AS msisdn, ps.auth_scheme, ps.sip_transport, ps.service_ref, ps.register_time, "
+                    f" ps.logout_time, {_PTT_ON} AS registered, u.name, o.name AS org_name "
+                    "FROM ptt_subscriptions ps LEFT JOIN users u ON u.id=ps.user_id "
+                    "LEFT JOIN organizations o ON o.code=u.org_id WHERE ps.id=%s", (msisdn,))
+                sub = cur.fetchone()
+                if not sub:
+                    return HandlerResult(status=404, body={'error': 'terminal not found'})
+                cur.execute(
+                    "SELECT g.mcptt_group_id AS id, g.name, m.role, "
+                    f" EXISTS (SELECT 1 FROM ptt_affiliations a WHERE a.group_id=g.id AND a.user_id=m.user_id AND {_AFF_ACTIVE}) AS affiliated, "
+                    " (SELECT MAX(a.affiliated_at) FROM ptt_affiliations a WHERE a.group_id=g.id AND a.user_id=m.user_id "
+                    f"   AND {_AFF_ACTIVE}) AS affiliated_at "
+                    "FROM ptt_group_members m JOIN ptt_groups g ON g.id=m.group_id WHERE m.user_id=%s ORDER BY g.name", (msisdn,))
+                groups = cur.fetchall()
+    except Exception as e:
+        logger.exception('ptt terminal error: %s', e)
+        return HandlerResult(status=500, body=_ERR_INTERNAL)
+    devs = ue_devices.by_user(ue_devices.load_all(config)).get(msisdn) or []
+    cur_dev = devs[0] if devs else None
+    reg = {
+        'registered': bool(sub.get('registered')),
+        'register_time': sub['register_time'].isoformat() if sub.get('register_time') else None,
+        'logout_time': sub['logout_time'].isoformat() if sub.get('logout_time') else None,
+    }
+    if cur_dev:
+        reg.update({'node': cur_dev.get('node') or '', 'transport': cur_dev.get('transport') or '',
+                    'addr': cur_dev.get('addr') or '', 'expires': cur_dev.get('expires') or 0})
+    td = _ptt_today_by_user(config).get(msisdn) or {}
+    return HandlerResult(status=200, body={
+        'msisdn': msisdn, 'name': sub.get('name') or '', 'org': sub.get('org_name') or '', 'type': _terminal_type(cur_dev),
+        'device': ue_devices.view(cur_dev, raw_imei),
+        'devices': [ue_devices.view(d, raw_imei) for d in devs],
+        'login': _login_view(_idms_logins(config).get(msisdn)),
+        'registration': reg,
+        'security': {'sip_transport': sub.get('sip_transport') or 'ANY', 'auth_scheme': sub.get('auth_scheme') or 'digest',
+                     'service_ref': sub.get('service_ref') or ''},
+        'groups': [{'id': g['id'], 'name': g.get('name') or g['id'], 'role': g.get('role') or 'participant',
+                    'affiliated': bool(g.get('affiliated')),
+                    'affiliated_at': g['affiliated_at'].isoformat() if g.get('affiliated_at') else None} for g in groups],
+        'today': {k: int(td.get(k, 0) or 0) for k in ('sessions', 'turns', 'talk_sum_sec', 'emergency')},
+        'raw_imei': raw_imei,
+    })
+
+
 # ── MCPTT 이용 정보 (mcptt_management_views.md §5) ─────────────────────────────────────────
 #   원천 = 1분 롤업 피라미드(sip_statistics.md) — 원본 세션을 기간마다 다시 훑지 않는다. 발언 축은 `talk_measured`
 #   (축을 잰 세션 수)로 미측정 구간을 알린다 — 축 이전 세션을 0 으로 말하지 않는다.
@@ -3781,6 +3956,61 @@ CIMS_STATS_API_DOCS = [
      ],
      'notes': ['members 는 priority 오름차순이다.',
                'floor_holder 는 floor_holders 의 첫 번째 — 단일 발언 정책이면 둘이 같다.'],
+     'auth': dict(_AUTH_MONITOR)},
+    {'id': 'stats.service.ptt-terminals', 'module': 'oam-svc', 'method': 'GET',
+     'path': '/api/v1/stats/service/ptt-terminals',
+     'summary': '단말 현황 — PTT 가입 번호별 단말·로그인·등록·참여 그룹 (mcptt_management_views.md §4)',
+     'params': [
+         {'name': 'state', 'in': 'query', 'type': 'string', 'required': False, 'desc': 'all(기본) | online(등록 중) | offline'},
+         {'name': 'type', 'in': 'query', 'type': 'string', 'required': False,
+          'desc': '단말 유형 — dispatch(관제조작반) | handheld(휴대 단말) | sim(시험 단말) | unknown. 비우면 전체'},
+         {'name': 'q', 'in': 'query', 'type': 'string', 'required': False, 'desc': 'MCPTT 번호·이름 부분 일치'},
+     ],
+     'response': '{counts{all,online,offline}, types{}, terminals[]}',
+     'response_fields': [
+         {'name': 'counts', 'type': 'object', 'desc': '상태별 수 — q·type 적용 뒤, state 적용 전'},
+         {'name': 'types', 'type': 'object', 'desc': '단말 유형별 수(none = 관측된 단말 없음)'},
+         {'name': 'terminals[].type', 'type': 'string', 'desc': '단말 유형 — 최근 단말의 User-Agent product 에서 파생'},
+         {'name': 'terminals[].registered', 'type': 'boolean', 'desc': '등록(접속) 중 — register_time 유효·미로그아웃'},
+         {'name': 'terminals[].logged_in', 'type': 'boolean', 'desc': 'IdMS 로그인 유효(폐기·회전 안 된 refresh token)'},
+         {'name': 'terminals[].affiliated_count', 'type': 'integer', 'unit': '개', 'desc': '참여(affiliation) 중인 그룹 수'},
+         {'name': 'terminals[].devices', 'type': 'integer', 'unit': '대', 'desc': '이 번호로 관측된 단말(+sip.instance) 수'},
+         {'name': 'terminals[].last_seen', 'type': 'string', 'desc': '최근 단말 관측 시각(ISO) — 해상도 1 시간(CSP 는 변경·1 시간 간격으로만 남긴다)'},
+     ],
+     'example': {'counts': {'all': 11, 'online': 8, 'offline': 3}, 'types': {'handheld': 6, 'sim': 4, 'none': 1},
+                 'terminals': [{'msisdn': '+82500000001', 'name': '홍길동', 'type': 'handheld', 'registered': True,
+                                'logged_in': True, 'affiliated_count': 2, 'model': 'SM-G991N', 'os': 'Android 14',
+                                'app': 'CIMS-PTT', 'app_version': '1.4.2', 'transport': 'TLS', 'devices': 1,
+                                'register_time': '2026-09-29T09:12:03', 'last_seen': '2026-09-29T09:12:03'}]},
+     'errors': _ERR_COMMON + [{'status': 400, 'when': 'state 값 무효'}],
+     'notes': ['조회 전용. 단말 속성 원천 = REGISTER 의 +sip.instance·User-Agent(file-store ue_devices).'],
+     'auth': dict(_AUTH_MONITOR)},
+    {'id': 'stats.service.ptt-terminal', 'module': 'oam-svc', 'method': 'GET',
+     'path': '/api/v1/stats/service/ptt-terminals/{msisdn}',
+     'summary': '단말 상세 — 단말 정보·로그인·등록·보안·그룹 참여·오늘 이용',
+     'params': [{'name': 'msisdn', 'in': 'path', 'type': 'string', 'required': True, 'desc': 'PTT 가입 번호(E.164, + 는 %2B)'}],
+     'response': '{msisdn, name, org, type, device, devices[], login, registration, security, groups[], today, raw_imei}',
+     'response_fields': [
+         {'name': 'device', 'type': 'object', 'desc': '최근 단말 — instance_id·imei·모델·OS·앱·버전·User-Agent·transport·주소·노드·first/last_seen'},
+         {'name': 'device.imei', 'type': 'string', 'desc': 'IMEI(urn:gsma:imei 일 때만) — 관리자가 아니면 가운데를 가린다(3512…7890)'},
+         {'name': 'devices[]', 'type': 'object', 'desc': '이 번호로 관측된 단말 전부 — 등록 중 먼저, 최근순'},
+         {'name': 'login', 'type': 'object', 'desc': '{logged_in, client_id, login_id, issued_at, expires_at} — IdMS refresh token'},
+         {'name': 'registration', 'type': 'object', 'desc': '{registered, register_time, logout_time, node, transport, addr, expires}'},
+         {'name': 'security', 'type': 'object', 'desc': '{sip_transport(UDP|TCP|TLS|ANY), auth_scheme(digest|aka), service_ref}'},
+         {'name': 'groups[]', 'type': 'object', 'desc': '{id, name, role, affiliated, affiliated_at} — 멤버인 그룹'},
+         {'name': 'today', 'type': 'object', 'desc': '{sessions, turns, talk_sum_sec, emergency} — 1분 롤업 by_user'},
+         {'name': 'raw_imei', 'type': 'boolean', 'desc': 'IMEI 원문 여부(admin 역할)'},
+     ],
+     'example': {'msisdn': '+82500000001', 'name': '홍길동', 'type': 'handheld',
+                 'device': {'instance_id': 'urn:gsma:imei:35123456-789012-0', 'imei': '3512…9012', 'imei_masked': True,
+                            'model': 'SM-G991N', 'os': 'Android 14', 'app': 'CIMS-PTT', 'app_version': '1.4.2', 'registered': True},
+                 'login': {'logged_in': True, 'client_id': 'MCPTT_UE'},
+                 'registration': {'registered': True, 'node': 'csp_01', 'transport': 'TLS', 'addr': '10.0.0.5:40211', 'expires': 600},
+                 'security': {'sip_transport': 'TLS', 'auth_scheme': 'digest'},
+                 'groups': [{'id': 'g001', 'name': '관제1', 'role': 'participant', 'affiliated': True}],
+                 'today': {'sessions': 4, 'turns': 9, 'talk_sum_sec': 51, 'emergency': 0}},
+     'errors': _ERR_COMMON + [{'status': 404, 'when': 'PTT 가입이 없는 번호', 'body': {'error': 'terminal not found'}}],
+     'notes': ['IMEI 는 개인 식별 정보 — 원문은 admin 역할만.'],
      'auth': dict(_AUTH_MONITOR)},
     {'id': 'stats.service.ptt-groups', 'module': 'oam-svc', 'method': 'GET',
      'path': '/api/v1/stats/service/ptt-groups',

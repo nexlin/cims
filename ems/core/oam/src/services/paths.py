@@ -19,7 +19,7 @@ site_directory_layout.md).
     content/     서비스 콘텐츠          Content.Dir         announcements/ mcdata_fd/
     recordings/  녹취·통신 기록          Recording.Dir       volte/ ptt/<그룹>/ message/ message_direct/
     log/         관측 로그             ServiceLogging.Dir  sip/<연/월/일/시>/ alerts/ events/ fm_catalog/ leak_reclaim/
-    stats/       통계·색인             Stats.Dir           1m/ 1h/ 1d/ 1M/ ptt_index/ ptt_attempts/
+    stats/       통계·색인             Stats.Dir           1m/ 1h/ 1d/ 1M/ ptt_index/ ptt_attempts/ ue_devices/
     state/       휘발성 상태            State.Dir           volte/ ptt/ (진행 중 세션) · 잠금 · write probe
     tester/      계측기 DataDir        (Tester.DataDir)    topologies/ scenarios/ runs/ samples/
 

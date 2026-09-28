@@ -155,7 +155,7 @@ if __name__ == '__main__':
         return merged
 
     # 귀속 핸들러 import (공유 모듈) — preflight 가 여기 import 성공을 검증.
-    from services import flow_logger, ptt_index, stats_rollup, logger as csc_logger
+    from services import flow_logger, ptt_index, stats_rollup, ue_devices, logger as csc_logger
     from services.flow_logger    import FLOW_HANDLER_LIST
     from handlers                import recording, auth
     from handlers.recording      import CIMS_RECORDING_HANDLER_LIST
@@ -176,6 +176,17 @@ if __name__ == '__main__':
                 logger.log_warning(f"[config] '{_k}' 미설정 — 관련 관측/기능이 비활성 또는 "
                                    "오동작. 콘솔 배포설정(oam-svc) 확인 필요.")
         auth.init(config)   # 공유 JwtSecret 로 토큰 독립 검증(§5)
+
+        # 관리 store 의 자기 서브트리(modules/oam-svc/runtime — 단말 속성 ue_devices)에 소유권 리스를 잡는다. base oam 은
+        #   store 루트를, 서비스 모듈은 자기 서브트리를 각각 flock 한다(oam_ha.md §4.4 단일 writer — 계측기와 같은 규약).
+        #   못 잡으면 read-only — 단말 속성 접기(fold)가 not_lease_owner 로 멈추고 조회는 그대로 된다.
+        from services import file_store as _fs, lease as _lease
+        from services import ue_devices as _ued
+        _lst = _lease.acquire(_ued.owner_root(config))
+        if _lst.get('active'):
+            logger.log_info(f"[store] lease acquired: {_ued.owner_root(config)} (epoch {_lst.get('epoch')})")
+        else:
+            logger.log_warning(f"[store] lease NOT acquired: {_ued.owner_root(config)} — {_lst.get('reason')} (read-only)")
 
         # ── SIGUSR1 = 배포 config reload (agent job_update_config 규약) ──
         # 종전: 핸들러 부재 → 파이썬 기본 동작(종료)으로 update_config 가 oam-svc 를
@@ -410,6 +421,13 @@ if __name__ == '__main__':
                         logger.log_info(f"[stats-rollup] {r}")
                 except Exception as e:
                     logger.log_error(f"[stats-rollup] error: {e}")
+                # 단말 속성(mcptt_management_views.md §4.1) — CSP 관측 줄 → file-store ue_devices. 같은 주기로 충분하다
+                try:
+                    n = ue_devices.fold(config, stats_rollup.stats_root())
+                    if n:
+                        logger.log_info(f"[ue-devices] folded {n}")
+                except Exception as e:
+                    logger.log_error(f"[ue-devices] error: {e}")
                 _last_stats_rollup = time.time()
             # 보존 스위퍼는 하루 1회로 충분하다 — 지우는 단위가 일별 파일이다.
             if stats_rollup.enabled() and time.time() - _last_stats_purge >= 86400:

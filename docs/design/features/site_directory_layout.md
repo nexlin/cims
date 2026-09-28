@@ -30,7 +30,7 @@
   log/          관측 로그 — sip/<연>/<월>/<일>/<시>/<sysid>*.{msg,flow}.<mm5>.jsonl (전 모듈 SIP·제어 메시지·flow 5분 버킷)
                 · alerts/ · events/ · fm_catalog/ (FM 수집) · leak_reclaim/ (CMP 누수 회수)
   stats/        통계·색인 — 1m/ 1h/ 1d/ 1M/ + .rollup_state.json (SIP 통계 피라미드) · ptt_index/ (PTT 세션 색인)
-                · ptt_attempts/<연월일>.jsonl (PTT 시도 장부)
+                · ptt_attempts/<연월일>.jsonl (PTT 시도 장부) · ue_devices/<연월일>.jsonl (단말 속성 관측)
   state/        휘발성 — volte/ ptt/ (진행 중 세션, 가입자별 1파일) · stats_rollup.lock
                 (CSP 유휴 write probe `.probe` 는 recordings/·state/ 각각에 쓰고 곧바로 지운다)
   tester/       계측기 DataDir — topologies/ scenarios/ runs/ samples/
@@ -112,6 +112,7 @@ state)가 레이아웃을 정했으면 그것, 아니면 돌고 있는 OAM 의 �
 | stats | `1m/ 1h/ 1d/ 1M/` | oam-svc `stats_rollup` | OAM·oam-svc 통계 조회 |
 | stats | `ptt_index/` | OAM PTT 색인 스윕(`ptt_index`) | `/ptt/history`·`/ptt/sessions` |
 | stats | `ptt_attempts/` | CSP `CallDir` | oam-svc 집계 |
+| stats | `ue_devices/` | CSP `CallDir`(REGISTER 단말 속성) | oam-svc `ue_devices.fold` → file-store(단말 현황, [mcptt_management_views.md](mcptt_management_views.md) §4.1) |
 | state | `volte/` `ptt/` | CSP `CallDir` | OAM 활성 세션·PTT 색인, CSC 관제 앱 이력 |
 | recordings·state | `.probe` (쓰고 곧바로 지움) | CSP 유휴 write probe — 무호 구간의 볼륨 소실을 A-PRC-013 으로 | — |
 | state | `stats_rollup.lock` | oam-svc(집계 writer 잠금) | — |
