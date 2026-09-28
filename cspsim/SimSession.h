@@ -336,6 +336,7 @@ public:
 
     void StartGroupCall(const std::string& strGroupId = "");
     void SetEmergency(int iCond) { m_iEmergencyCond = iCond; }  // 0/1/2 (normal/imminent/emergency)
+    void SetBroadcast(bool b) { m_bBroadcast = b; }              // 일제 통화 개시 (<broadcast-ind>)
     void SetAdhocMembers(const std::vector<std::string>& v) { m_vecAdhoc = v; }  // ad hoc 멤버 MSISDN
     void SubscribeGms();
     void SubscribeCms();
@@ -452,6 +453,8 @@ public:
     // MCPTT condition (TS 24.379): 0=normal/1=imminent/2=emergency. >0 이면 그룹 INVITE 의
     // mcptt-info 에 emergency-ind/imminentperil-ind 를 실어 긴급 개시(키업)를 시뮬레이트.
     int          m_iEmergencyCond = 0;
+    // 일제 통화 (TS 24.379 §4.12·§6.2.8.2): 참이면 그룹 INVITE 의 mcptt-info 에 <broadcast-ind>true 를 싣는다.
+    bool         m_bBroadcast = false;
     // ad hoc 그룹콜 (Rel-18): 비면 일반. 비어있지 않으면 그룹 INVITE 에 resource-lists(멤버) 주입.
     std::vector<std::string> m_vecAdhoc;
 

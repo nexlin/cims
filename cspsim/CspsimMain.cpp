@@ -447,6 +447,7 @@ static void PrintUsage(const char* pszBin) {
     printf("  -floor_hold  <secs>      [ptt] 화자 순환 시 참여자별 발언(floor 보유) 시간 (default: 5)\n");
     printf("  -floor_loop              [ptt] 화자 순환을 종료(quit)까지 무한 반복 (장기 안정성 시험)\n");
     printf("  -floor_rounds <n>        [ptt] 화자 순환 반복 횟수 (전체 멤버 1바퀴=1round, default 1; -floor_loop 우선)\n");
+    printf("  -broadcast               [ptt] session[0] 이 일제 통화로 개시 (mcptt-info <broadcast-ind>true — 비개시자 floor 는 Deny #5)\n");
     printf("  -cps         <N>         [call] 호 도착률(초당 호수). >0 이면 지속 부하 모델\n");
     printf("                             (1/cps 간격 발신 + 각 호 HT 후 개별 종료). 정상상태 동시호≈cps×ht\n");
     printf("  -ht          <secs>      [call] per-call 보유시간 (cps 모델, 미지정 시 call_duration)\n");
@@ -1591,6 +1592,12 @@ int main(int argc, char* argv[])
         if (iEmergCond > 0 && !sessions.empty()) {
             sessions[0]->SetEmergency(iEmergCond);
             printf("[MCPTT] session[0] 긴급개시 모드: %s\n", iEmergCond >= 2 ? "emergency" : "imminent");
+        }
+        // 일제 통화 (TS 24.379 §4.12): -broadcast → session[0] 의 그룹 INVITE 에 <broadcast-ind>true.
+        //   개시자만 발언하고 나머지 참가자의 floor 요청은 Deny #5(Receive only)다.
+        if (HasFlag(argc, argv, "-broadcast") && !sessions.empty()) {
+            sessions[0]->SetBroadcast(true);
+            printf("[MCPTT] session[0] 일제 통화 개시 모드 (broadcast-ind)\n");
         }
         // ad hoc (Rel-18): -adhoc → session[0] 이 나머지 세션 사용자를 동적 멤버로 그룹 개시
         if (HasFlag(argc, argv, "-adhoc") && sessions.size() > 1) {
