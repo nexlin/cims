@@ -201,13 +201,14 @@ processAdd()로 위임 — 기존 세션의 피어 주소만 갱신한다. 세�
 | subid | - | 그룹 세션 회차 (Flow 로그 subid) |
 | record_dir | - | 녹취 디렉토리 |
 | video_enabled | - | 1 이면 video 포트 활성 |
-| group_type | - | `prearranged`/`chat`/`broadcast`/`private` (broadcast=개시자 독점, private=2인 세션) |
-| initiator_id | - | 개시자 sessionId(=userId) — broadcast floor 독점. private 초기 발언권에는 쓰지 않는다(정본=PTT_JOIN `granted`). 기존 그룹 ADD 에 실려 와도 교체한다(규격 대비 공백 — [mcptt_broadcast_group_call.md](../features/mcptt_broadcast_group_call.md) §4.2 M1) |
+| group_type | - | `prearranged`/`chat`/`private` (private=2인 세션). 전환기: 구 CSP 의 `broadcast` 는 `broadcast:1` 로 해석(WARN) |
+| broadcast | - | `0`/`1` — 일제 통화 호 속성(개시자 floor 독점, TS 24.379 §4.12) |
+| initiator_id | - | 세션 개시자 sessionId(=userId) — broadcast floor 독점. private 초기 발언권에는 쓰지 않는다(정본=PTT_JOIN `granted`). `broadcast` 와 함께 **세션 개시 ADD(그룹 생성 또는 다른 sesid)에서만** 반영 — 같은 세션 재ADD 는 무시 |
 | floor_control | - | `on`(기본)/`off` — floor 중재 유무 |
 | floor_policy | - | `single`(기본)/`dual`/`multi` — 그룹 동시 발언 수 |
 | max_talkers | multi 시 O | 동시 발언 상한(2..8) |
 | floor_crypto | - | floor RTCP SRTCP 보호 키 `{alg,key,salt[,mki]}` (TS 33.180) — 그룹 공통 키. 유니캐스트는 멤버별 키(PTT_JOIN)가 정본 |
-| floor_timers | - | floor 타이머 override `{t1_end_rtp,t2_stop_talk,t3_grace,t8_revoke,t7_idle_resend,t20_grant_retx}` (초) |
+| floor_timers | - | floor 타이머 override `{t1_end_rtp,t2_stop_talk,t3_grace,t8_revoke,t7_idle_resend,t20_grant_retx,t4_inactivity}` (초, `t4_inactivity` 0=미사용) |
 
 **응답:** `ip`, `floor_port` (그룹 공유 Floor Control — `floor_control:"off"` 면 생략),
 `member_ports` (멤버별 전용 RTP 포트 맵 — sid → `{port, video_port}`)
@@ -221,7 +222,7 @@ processAdd()로 위임 — 기존 세션의 피어 주소만 갱신한다. 세�
 6. members CSV 파싱 → 우선순위/role 설정 + 멤버별 전용 포트 유닛(PPttMemberPort) 선할당.
    멤버 pool 고갈 시 `NO_RESOURCE` — 이번 호출로 생성된 그룹이면 floor/유닛을 즉시 롤백
    (기존 그룹의 선할당 유닛은 유지 — 멱등 재시도 시 재사용)
-7. `group_type`/`initiator_id` → `setBroadcast()`. **broadcast** 그룹은 `handleFloorRequest` 가 개시자(`_initiatorSessionId`) 외 모든 floor REQUEST 를 Deny #5 Receive only(`floor.jsonl reason=broadcast`) — TS 24.380 §6.3.5.4.4. Floor Taken 의 Permission to Request the Floor 도 0 으로 나간다(§6.3.4.4.2-3d). T4(Inactivity)는 없다 — 규격 정합 보완(호 단위 broadcast·T4)은 [mcptt_broadcast_group_call.md](../features/mcptt_broadcast_group_call.md) §4.2.
+7. `broadcast`/`initiator_id` → `setBroadcastSession()` — **세션 개시 ADD 에서만**(새 그룹, 또는 남은 그룹에 다른 `sesid`). 같은 세션의 재ADD 는 개시자를 바꾸지 않는다(TS 24.380 §6.3.5.3.4). broadcast 세션은 `handleFloorRequest` 가 개시자(`_initiatorSessionId`) 외 모든 floor REQUEST 를 Deny #5 Receive only(`floor.jsonl reason=broadcast`) — TS 24.380 §6.3.5.4.4. Floor Taken 의 Permission to Request the Floor 도 0 으로 나가고(§6.3.4.4.2-3d), floor 메시지 Floor Indicator 에 B-bit. `floor_timers.t4_inactivity` 가 있으면 T4(Inactivity)를 'G: Floor Idle'(세션 시작·Idle 진입)에서 무장하고 Granted 에서 정지 — 만료 시 `PTT_FLOOR_INACTIVITY` 이벤트(`floor.jsonl op=INACTIVITY`) 후 재무장, 해제는 CSP 정책([mcptt_broadcast_group_call.md](../features/mcptt_broadcast_group_call.md) R10).
 8. `floor_control`/`floor_policy`/`max_talkers`/`group_type:"private"` → `setFloorPolicy()` (녹취 슬롯 트랙 수가 정원에 따라 정해지므로 녹취 초기화보다 먼저), `floor_crypto` → `setFloorCrypto()`.
    정책 필드의 미상 값·키 길이 오류는 `BAD_REQUEST` 로 거절한다.
 
@@ -514,7 +515,7 @@ handleFloorRequest(sessionId, ssrc, indicatorBits)
   ├─ floor_control=off → 무시 (중재 없음)
   ├─ Indicator(emergency/imminent) → tier 승격
   ├─ recv_only/floor_suppress 멤버 → DENY(receive only)
-  ├─ broadcast 그룹 비개시자 → DENY(receive only)
+  ├─ broadcast 세션 비개시자 → DENY(receive only)
   │
   ├─ 발언자 없음 → GRANT (슬롯 배정 + 녹취 세그먼트 시작)
   ├─ 이미 발언 중 → 무시

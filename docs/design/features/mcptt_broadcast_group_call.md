@@ -36,10 +36,10 @@
 | R4 | GMS 그룹 문서에 규격에 없는 `<mcpttgi:session-type>` 을 3GPP 네임스페이스로 싣고, `<on-network-invite-members>` 는 chat 그룹에도 항상 true | `csc/src/services/mcptt.py:1282`, `:1294` | ✗ |
 | R5 | CMP 가 개시자 외 Floor Request 를 Deny #5 — 긴급 tier 검사보다 먼저 | `cmp/PMcpttGroup.cpp:860-873` | ✅ |
 | R6 | Floor Indicator 0x4000·Permission 0 | `cmp/PMcpttGroup.cpp:1025-1035`, `:1798-1825` | ✅ |
-| R7 | **진행 중 세션에 합류하는 INVITE 가 개시자를 덮어쓴다** — `ProcessGroupCall` 이 기존 세션에도 합류자를 `initiator_id` 로 PTT_GROUP_ADD 재전송(녹취 경로 설정 시)하고, CMP `setBroadcast()` 가 그대로 교체한다. CSP 캐시 `strCallerId` 도 합류자·청취자로 바뀐다 | `csp/GroupCallService.cpp:444-461`, `cmp/PCmpServer.cpp:1952-1956`, `cmp/PMcpttGroup.h:294` | ✗ (결함) |
+| R7 | CMP 는 broadcast·개시자를 세션 개시 ADD 에서만 받는다(같은 세션 재ADD 는 무시). **CSP 는 진행 중 세션에 합류하는 INVITE 의 합류자를 `initiator_id` 로 PTT_GROUP_ADD 재전송(녹취 경로 설정 시)하고, 캐시 `strCallerId` 도 합류자·청취자로 바꾼다** | `csp/GroupCallService.cpp:444-461`, `cmp/PCmpServer.cpp` `processAddGroup` | △ (CSP 결함 — P2·P3) |
 | R8 | SDK 의 Floor Request 에 broadcast 비트 없음 | `sdk/core/src/floor/floor_participant.cpp` | ✗ (단말) |
 | R9 | 개시 단말의 발언 종료 후 호 해제 처리 없음 — 세션이 멤버가 끊을 때까지 남고, 개시자가 다시 눌러 이어서 말할 수 있다 | SDK·Android 에 broadcast Floor Idle 처리 없음 | ✗ (단말) |
-| R10 | T4 없음. on-demand 세션은 **확립 leg 이 0** 이 될 때만 해제(규격은 1명 이하). 그룹 문서의 `<mcpttgi:on-network-hang-time>3</...>`(요소명 불일치 — 규격은 `on-network-hang-timer`)은 고정값이며 어디서도 쓰지 않는다 | `csp/GroupCallService.cpp:996`, `:2063`, `csc/src/services/mcptt.py` 그룹 문서 | ✗ |
+| R10 | CMP 는 T4 를 갖췄다(`floor_timers.t4_inactivity` → `PTT_FLOOR_INACTIVITY`). CSP 는 T4 를 싣지 않고 이벤트를 소비하지 않으며, on-demand 세션은 **확립 leg 이 0** 이 될 때만 해제(규격은 1명 이하). 그룹 문서의 `<mcpttgi:on-network-hang-time>3</...>`(요소명 불일치 — 규격은 `on-network-hang-timer`)은 고정값이며 어디서도 쓰지 않는다 | `csp/GroupCallService.cpp:996`, `:2063`, `csc/src/services/mcptt.py` 그룹 문서 | ✗ (CSP·CSC) |
 | R11 | 480 + Warning 105 — 단 판정 기준이 호가 아니라 그룹 유형 | `csp/GroupCallService.cpp:2157-2160` | △ (R1 과 함께 기준 교체) |
 | R12 | Floor Indicator = tier 비트 OR broadcast 비트, 비개시자 긴급 요청도 Deny #5 | `cmp/PMcpttGroup.cpp:862`, `:1025-1035` | ✅ |
 

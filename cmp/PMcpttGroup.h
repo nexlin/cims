@@ -290,11 +290,17 @@ public:
     void updateTiers(const std::map<std::string, int>& tiers);
     void setTier(const std::string& sessionId, int tier);
     int  tierOf(const std::string& sessionId) const;
-    // broadcast 그룹(TS 24.380 §10.3): 개시자(initiator)만 floor 보유, 타 멤버 REQUEST REJECT.
-    void setBroadcast(const std::string& groupType, const std::string& initiator) {
-        _groupType = groupType;
+    // 세션 속성 — 일제 통화(broadcast group call, TS 24.379 §4.12) 여부와 개시자. **세션 생성 시 1회**
+    //   설정한다(PCmpServer 가 새 그룹·새 sesid 일 때만 호출) — 늦은 합류가 개시자를 바꾸지 않는다
+    //   (TS 24.380 §6.3.5.3.4 "the initiator of the broadcast group call").
+    void setBroadcastSession(bool broadcast, const std::string& initiator) {
+        PAutoLock lock(_mutex);
+        _broadcast = broadcast;
         _initiatorSessionId = initiator;
     }
+    bool isBroadcast() const { return _broadcast; }
+    const std::string& initiatorId() const { return _initiatorSessionId; }
+    const std::string& sessionSesid() const { return _sesid; }
     void setDtmfConfig(bool enable, const std::string& pushDigit, const std::string& releaseDigit);
 
     // Floor 이벤트 로그 콜백 (PCmpServer::logFlow 연결용)
@@ -312,6 +318,10 @@ public:
                                             const std::vector<std::string>& talkers,
                                             const std::string& sesid, const std::string& service)>;
     void setTalkersCallback(TalkersFunc fn) { _onTalkers = fn; }
+    // T4(Inactivity) 만료 통지 콜백 (PCmpServer → PTT_FLOOR_INACTIVITY 이벤트). 규약은 TalkersFunc 와 같다.
+    using InactivityFunc = std::function<void(const std::string& groupId, const std::string& sesid,
+                                               const std::string& service)>;
+    void setInactivityCallback(InactivityFunc fn) { _onInactivity = fn; }
     // 이 그룹의 세션 식별 메타 (CSP 발행 sesid / service) — 이벤트 hdr 용.
     void setSessionMeta(const std::string& sesid, const std::string& service);
 
@@ -338,7 +348,9 @@ public:
     //   t8: Floor Revoke       — 유예 중 Revoke 재전송 간격.
     //   t7: Floor Idle         — Floor Idle 재송신 간격(0=비활성, C7=3회까지).
     //   t20: Floor Granted     — 큐에서 승급한 화자에게 Granted 재송신 간격(첫 RTP 까지, C20=3회).
-    void setFloorTimers(int t1, int t2, int t3, int t8, int t7 = 0, int t20 = 1);
+    //   t4: Inactivity         — 'G: Floor Idle' 에 머문 시간 한도(0=미사용). 만료 시 inactivity 콜백 1회 후
+    //                            재무장한다 — 세션 해제 여부는 CSP 정책(§6.3.4.3.5).
+    void setFloorTimers(int t1, int t2, int t3, int t8, int t7 = 0, int t20 = 1, int t4 = 0);
 
     // Floor 타이머 점검 (T1/T2/T3/T8) — PCmpServer::timeoutLoop 가 1초마다 호출한다.
     //   발언자 집합이 바뀌었으면 true.
@@ -446,6 +458,8 @@ private:
     int  _t8RevokeSec   = 1;        // T8 Floor Revoke 재전송 간격
     int  _t7IdleSec     = 0;        // T7 Floor Idle 재송신 간격 (0=비활성)
     int  _t20GrantSec   = 1;        // T20 Floor Granted 재송신 간격 (큐 승급 화자 한정)
+    int  _t4InactSec    = 0;        // T4 Inactivity (0=미사용 — CSP 가 그룹 hang-timer 로 채움)
+    int64_t _t4SinceUsec = 0;       // T4 무장 시각 (0=정지 — 화자가 있다)
     // C7/C20 재송신 상한 (§6.3.4.3.4 / §6.3.4.4.9) — 도달 보장용이라 작게 잡는다.
     static const int kIdleResendMax  = 3;
     static const int kGrantResendMax = 3;
@@ -581,9 +595,9 @@ private:
 
     static int64_t _nowUsec();
 
-    // Broadcast 그룹 (TS 24.380 §10.3) — 비면 일반(prearranged/chat) floor 정책.
-    std::string _groupType;            // "broadcast" 면 개시자 외 floor REQUEST REJECT
-    std::string _initiatorSessionId;   // 개시자(broadcaster) sessionId(=userId)
+    // 일제 통화 세션 속성 (TS 24.379 §4.12 · TS 24.380 §6.3.5.3.4) — 그룹 종류와 직교하는 호 속성.
+    bool _broadcast = false;           // 참이면 개시자 외 floor REQUEST 는 Deny #5, 표식 B-bit·Permission 0
+    std::string _initiatorSessionId;   // 세션 개시자 sessionId(=userId) — 세션 수명 동안 고정
     static unsigned int _nextSsrc;  // SSRC 할당 카운터
 
     // 서버→단말 floor 메시지의 RTCP 헤더 SSRC = **floor control server 의 SSRC**
@@ -601,6 +615,7 @@ private:
     PMutex _mutex;
     LogFlowFunc _logFlow;  // floor event log callback
     TalkersFunc _onTalkers;  // 발언자 집합 변경 통지 (FLOOR_TALKERS)
+    InactivityFunc _onInactivity;  // T4 만료 통지 (PTT_FLOOR_INACTIVITY)
     std::string _sesid;      // CSP 발행 세션 ID (이벤트 hdr)
     std::string _service;    // 서비스 (mcptt) — 이벤트 hdr
     bool _rtcpLogEnable = false; // 일반 RTCP 로깅 활성화 플래그

@@ -1723,6 +1723,7 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
     int t1Sec = _floorIdleSec, t2Sec = _floorStopTalkSec;
     int t3Sec = _floorRevokeGraceSec, t8Sec = _floorRevokeRetxSec;
     int t7Sec = _floorIdleResendSec, t20Sec = _floorGrantRetxSec;
+    int t4Sec = 0;   // T4 Inactivity — CMP 기본값 없음(0=미사용). CSP 가 그룹 hang-timer 로 채운다.
     std::string timerErr;
     {
         SimpleJson::JsonNode ft = payload.Get("floor_timers");
@@ -1733,14 +1734,26 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
             t8Sec = (int)ft.GetInt("t8_revoke", t8Sec);
             t7Sec = (int)ft.GetInt("t7_idle_resend", t7Sec);
             t20Sec = (int)ft.GetInt("t20_grant_retx", t20Sec);
+            t4Sec = (int)ft.GetInt("t4_inactivity", t4Sec);
             if (t1Sec < 0 || t1Sec > 600)      timerErr = "floor_timers.t1_end_rtp out of range (0..600)";
             else if (t2Sec < 0 || t2Sec > 600) timerErr = "floor_timers.t2_stop_talk out of range (0..600)";
             else if (t3Sec < 0 || t3Sec > 30)  timerErr = "floor_timers.t3_grace out of range (0..30)";
             else if (t8Sec < 1 || t8Sec > 10)  timerErr = "floor_timers.t8_revoke out of range (1..10)";
             else if (t7Sec < 0 || t7Sec > 60)  timerErr = "floor_timers.t7_idle_resend out of range (0..60)";
             else if (t20Sec < 1 || t20Sec > 10) timerErr = "floor_timers.t20_grant_retx out of range (1..10)";
+            else if (t4Sec < 0 || t4Sec > 3600) timerErr = "floor_timers.t4_inactivity out of range (0..3600)";
         }
     }
+    // 일제 통화(broadcast group call) = 호 속성 `broadcast`(0/1) — 그룹 종류(group_type)와 직교한다
+    //   (TS 24.379 §4.12). 전환기(한 릴리스): 구 CSP 의 group_type:"broadcast" 도 broadcast=1 로 해석한다.
+    bool broadcast = payload.GetInt("broadcast", 0) != 0;
+    if (groupType == "broadcast") {
+        LOG_WARN("PCmpServer", "PTT_GROUP_ADD group=%s: group_type=broadcast is deprecated — use broadcast:1",
+                 payload.GetString("group_id").c_str());
+        broadcast = true;
+        groupType = "prearranged";
+    }
+    std::string initiator = payload.GetString("initiator_id");
     bool privateCall  = (groupType == "private");
     bool floorControl = (floorCtlStr != "off");
     int  floorPolicy  = ParseFloorPolicy(floorPolStr);
@@ -1859,14 +1872,21 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
                                           const std::string& gsesid, const std::string& gsvc) {
             onFloorTalkers(gid, policy, talkers, gsesid, gsvc);
         });
+        // T4(Inactivity) 만료 → PTT_FLOOR_INACTIVITY 이벤트 (cmp_media_api.md §8) — 해제는 CSP 정책.
+        group->setInactivityCallback([this](const std::string& gid, const std::string& gsesid,
+                                            const std::string& gsvc) {
+            SimpleJson::JsonNode p;
+            p.Set("group_id", gid);
+            emitEvent("PTT_FLOOR_INACTIVITY", p, gsesid, gsvc.empty() ? "mcptt" : gsvc);
+        });
         pttSession = allocPttResource(sharedIp, sharedFloorPort);
         if (pttSession) {
              pttSession->setGroup(group);
              group->setDtmfConfig(_dtmfPttEnable, _dtmfPushDigit, _dtmfReleaseDigit);
              group->setPttSession(pttSession);
              // floor 정책은 녹취 초기화(슬롯 트랙 수)·멤버 합류보다 먼저 확정한다.
-             group->setBroadcast(groupType, payload.GetString("initiator_id"));
-             group->setFloorTimers(t1Sec, t2Sec, t3Sec, t8Sec, t7Sec, t20Sec);
+             group->setBroadcastSession(broadcast, initiator);
+             group->setFloorTimers(t1Sec, t2Sec, t3Sec, t8Sec, t7Sec, t20Sec, t4Sec);
              group->setFloorPolicy(floorControl, floorPolicy, maxTalkers, privateCall);
 
              // CSP가 전달한 record_dir이 있으면 해당 경로에 녹취
@@ -1889,6 +1909,17 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
     } else {
         group = _groups[groupId];
         pttSession = group->getPttSession();
+        // 세션 속성(broadcast·개시자)은 세션 생성 시 1회 — 같은 세션의 재ADD(멤버 추가·녹취 경로·
+        //   MODIFY)는 바꾸지 않는다(TS 24.380 §6.3.5.3.4). CSP 가 REMOVE 없이 남은 그룹 컨텍스트를
+        //   **다른 sesid** 의 새 세션으로 이어 쓰면 그 세션의 개시 ADD 이므로 새로 정한다.
+        //   판정은 payload 에 실린 sesid 로만 한다(미전달이면 자체 발행값이라 비교 대상이 아니다).
+        const std::string rxSesid = payload.GetString("sesid");
+        if (!rxSesid.empty() && !group->sessionSesid().empty() && rxSesid != group->sessionSesid()) {
+            LOG_INFO("PCmpServer", "ADD_GROUP group=%s new session sesid '%s' -> '%s' (broadcast=%d initiator=%s)",
+                     groupId.c_str(), group->sessionSesid().c_str(), sesid.c_str(), broadcast ? 1 : 0,
+                     initiator.c_str());
+            group->setBroadcastSession(broadcast, initiator);
+        }
         if (pttSession) {
             sharedFloorPort = pttSession->getLocalFloorPort();
             sharedIp = _rtpIp;
@@ -1949,12 +1980,7 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
             group->updateTiers(tiers);
         }
 
-        // 세션 유형/개시자 — broadcast 는 개시자만 floor 보유(TS 24.380 §10.3),
-        //   private 은 개시자에게 초기 발언권. MODIFY 로 정책이 바뀌면 여기서 갱신된다.
-        std::string initiator = payload.GetString("initiator_id");
-        if (!groupType.empty() || !initiator.empty())
-            group->setBroadcast(groupType, initiator);
-        group->setFloorTimers(t1Sec, t2Sec, t3Sec, t8Sec, t7Sec, t20Sec);
+        group->setFloorTimers(t1Sec, t2Sec, t3Sec, t8Sec, t7Sec, t20Sec, t4Sec);
         group->setFloorPolicy(floorControl, floorPolicy, maxTalkers, privateCall);
         // floor SRTCP 키 — 재키잉(rekey)도 같은 필드의 MODIFY 로 반영된다.
         if (haveCrypto) {
@@ -1966,9 +1992,9 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
                 return;
             }
         }
-        if (groupType == "broadcast")
-            LOG_INFO("PCmpServer", "%s group=%s type=broadcast initiator=%s (floor 독점)",
-                     cmdName.c_str(), groupId.c_str(), initiator.c_str());
+        if (group->isBroadcast())
+            LOG_INFO("PCmpServer", "%s group=%s broadcast initiator=%s (floor 독점)",
+                     cmdName.c_str(), groupId.c_str(), group->initiatorId().c_str());
         else if (privateCall)
             LOG_INFO("PCmpServer", "%s group=%s type=private floor=%s initiator=%s",
                      cmdName.c_str(), groupId.c_str(), floorControl ? "on" : "off", initiator.c_str());

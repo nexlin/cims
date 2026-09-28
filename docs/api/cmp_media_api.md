@@ -517,12 +517,13 @@ member 키 `(node, session_id)`.
 | `members` | - | `"sid:prio[:role[:tier]],..."` CSV (role=`chair`/`participant`, tier=`emergency`/`imminent`/`normal`) |
 | `subid` | - | 그룹 세션 회차 (flow 로그 subid) |
 | `video_enabled` | - | 1 이면 video 포트 활성 |
-| `group_type` | - | `prearranged`/`chat`/`broadcast`/`private` — `broadcast` 는 개시자 floor 독점(TS 24.380 §6.3.5.4.4 — 타 멤버는 Deny #5, Floor Taken 의 Permission=0), `private` 은 1:1 private call(2인, TS 24.379 §11 — floor 절차는 TS 24.380 §6.3 공통) |
-| `initiator_id` | - | 개시자 sessionId — broadcast 는 유일 발언자. private 에서는 **초기 발언권을 주지 않는다**(초기 발언권의 정본은 PTT_JOIN `granted`). 기존 그룹에 대한 ADD 에 실려 오면 개시자를 교체한다 — 규격 정합 계약(`broadcast` 호 속성 분리·생성 시 1회 고정·T4 `PTT_FLOOR_INACTIVITY`)은 [mcptt_broadcast_group_call.md](../design/features/mcptt_broadcast_group_call.md) §4.5 |
+| `group_type` | - | 그룹 종류 `prearranged`/`chat`/`private` — `private` 은 1:1 private call(2인, TS 24.379 §11 — floor 절차는 TS 24.380 §6.3 공통). 전환기(한 릴리스): 구 CSP 의 `broadcast` 값은 `broadcast:1` + `prearranged` 로 해석하고 WARN 로그 |
+| `broadcast` | - | `0`/`1` — **일제 통화 호 속성**(TS 24.379 §4.12, 그룹 종류와 직교). `1` 이면 개시자 floor 독점(TS 24.380 §6.3.5.3.4 — 타 참가자 요청은 긴급이어도 Deny #5, Floor Taken/Idle 의 Permission=0, floor 메시지 Floor Indicator B-bit `0x4000`) |
+| `initiator_id` | - | 세션 개시자 sessionId — broadcast 면 유일 발언자. private 에서는 **초기 발언권을 주지 않는다**(초기 발언권의 정본은 PTT_JOIN `granted`). `initiator_id`·`broadcast` 는 **세션의 개시 ADD 에서만 유효**하다 — 그룹을 만드는 ADD, 또는 남은 그룹 컨텍스트에 **다른 `sesid`** 로 오는 ADD. 같은 세션의 재ADD(멤버 추가·녹취 경로·MODIFY)에 실려 와도 무시한다(늦은 합류가 개시자를 바꾸지 않는다 — [mcptt_broadcast_group_call.md](../design/features/mcptt_broadcast_group_call.md) R7) |
 | `floor_control` | - | `on`(기본)/`off`. `off` = floor 중재 없음(full-duplex) — `floor_port` 미광고, floor RTCP 미처리 |
 | `floor_policy` | - | `single`(기본)/`dual`/`multi` — floor 有 **그룹**의 동시 발언 수([§7.7](#77-floor-정책--동시-발언과-private-call)). `private` 은 해석하지 않는다 |
 | `max_talkers` | `multi` 시 O | 동시 발언 상한(2..8). `multi` 인데 누락/1 이하, 또는 8 초과면 `BAD_REQUEST` |
-| `floor_timers` | - | 그룹별 floor 타이머(초) `{t1_end_rtp, t2_stop_talk, t3_grace, t8_revoke, t7_idle_resend, t20_grant_retx}` — 미지정 필드는 CMP 설정값. 범위 밖이면 `BAD_REQUEST` ([§7.7](#77-floor-정책--동시-발언과-private-call)) |
+| `floor_timers` | - | 그룹별 floor 타이머(초) `{t1_end_rtp, t2_stop_talk, t3_grace, t8_revoke, t7_idle_resend, t20_grant_retx, t4_inactivity}` — 미지정 필드는 CMP 설정값. 범위 밖이면 `BAD_REQUEST` ([§7.7](#77-floor-정책--동시-발언과-private-call)) |
 | `floor_crypto` | - | floor RTCP 보호 키 `{alg,key,salt[,mki]}` ([§7.8](#78-floor_crypto--floor-rtcp-보호-ts-33180)) |
 | `record_dir` | - | 녹취 그룹 base 디렉토리 (있으면 녹취 시작) |
 | `session_dir` | - | 세션 디렉터리 이름 `S{yyyymmddHHMMSSuuuuuu}_{n}` — 기록 자리는 `record_dir/{YYYY}/{MM}/{DD}/{HH}/{session_dir}/`. 기록 단위가 세션이라 같은 시간대의 다음 통화가 앞 통화에 섞이지 않는다. 미전달 시 시간버킷 직행(구 동작). 기존 그룹에 **다른** 이름이 오면(CSP 가 REMOVE 없이 재기동해 남은 컨텍스트를 새 세션이 이어 쓰는 경우) 진행 중 세그먼트를 마감하고 기록 자리를 그 세션으로 옮긴다 — 같은 이름(멤버 추가 ADD)은 무동작. 세그먼트 `seq` 는 **세션 단위 단조증가** — 세션이 시간버킷을 넘어가도 리셋하지 않는다 ([recording.md §3.3](../design/features/recording.md)) |
@@ -664,6 +665,7 @@ in-band(RTCP APP "MCPT")로만 진행한다 — CSP 는 floor 루프에 들어�
 | T8 Floor Revoke | `t8_revoke` / `FloorRevokeRetxSec` | 1초 | 유예 중 Revoke 재전송 간격 |
 | T7 Floor Idle | `t7_idle_resend` / `FloorIdleResendSec` | 0(비활성) | 발언자 없는 동안 Floor Idle 재송신(최대 3회) |
 | T20 Floor Granted | `t20_grant_retx` / `FloorGrantRetxSec` | 1초 | **큐 승급** 화자에게 첫 RTP 까지 Granted 재송신(최대 3회) |
+| T4 Inactivity | `t4_inactivity` / — (0..3600) | 0(미사용) | 'G: Floor Idle' 에 머문 시간 한도(세션 시작·Floor Idle 진입 시 무장, Granted 시 정지). 만료 = `PTT_FLOOR_INACTIVITY` 이벤트 1회 후 재무장 — 세션을 해제할지는 CSP 정책(TS 24.380 §6.3.4.3.5, TS 24.379 §6.3.8.1). 값은 CSP 가 그룹 문서 `<on-network-hang-timer>` 로 채운다 |
 
 - **선점은 즉시 교체가 아니다**: 최약 화자에게 Revoke → 요청자는 **대기열 맨 앞**에서 대기
   (Queue Position Info 회신) → 그 화자의 Floor Release 또는 T3 만료 후 승급한다. 유예 중에도
@@ -763,6 +765,7 @@ CSP 는 `CCspAnnouncementService::OnPlayDone` 이 대기 중 최종 응답(486/4
 | cmd | 라우팅 | payload |
 |---|---|---|
 | `FLOOR_TALKERS` | 참여 node | `group_id`, `policy`(`single`/`dual`/`multi`/`private`/`off`), `talkers`(현재 발언자 배열 — 비면 무발언) |
+| `PTT_FLOOR_INACTIVITY` | 참여 node | `group_id` — T4(Inactivity) 만료([§7.7](#77-floor-정책--동시-발언과-private-call) 타이머 표). hdr `sesid` = 그룹 세션. `t4_inactivity` 를 준 그룹만 발행 |
 
 ```json
 {

@@ -859,7 +859,7 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
 
     // Broadcast 그룹 (TS 24.380 §10.3): 개시자(initiator)만 floor 보유.
     //   비개시자의 floor REQUEST 는 floor 점유 여부와 무관하게 항상 Deny(receive only).
-    if (_groupType == "broadcast" && !_initiatorSessionId.empty() && sessionId != _initiatorSessionId) {
+    if (_broadcast && !_initiatorSessionId.empty() && sessionId != _initiatorSessionId) {
         _sendDeny(sessionId, ssrc, CAUSE_DENY_RECEIVE_ONLY);
         LOG_INFO("PMcpttGroup", "[%s] Floor DENY (broadcast) session=%s — initiator=%s only",
                  _groupId.c_str(), sessionId.c_str(), _initiatorSessionId.c_str());
@@ -1027,7 +1027,7 @@ int PMcpttGroup::_indicatorFor(const std::string& sessionId) const {
     int bits = (t >= TIER_EMERGENCY) ? FI_EMERGENCY
              : (t == TIER_IMMINENT)  ? FI_IMMINENT_PERIL
                                      : FI_NORMAL;
-    if (_groupType == "broadcast") bits |= FI_BROADCAST_GROUP;   // 호 종류 표식 (§8.2.3.15)
+    if (_broadcast) bits |= FI_BROADCAST_GROUP;   // 호 종류 표식 (§8.2.3.15)
     // 동시 발언 표식 (TS 24.380 §8.2.3.15) — 단말이 여러 화자를 동시에 재생해야 함을 알린다.
     if (_floorPolicy == FLOOR_POLICY_MULTI) bits |= FI_MULTI_TALKER;
     else if (_floorPolicy == FLOOR_POLICY_DUAL && _talkers.size() > 1) bits |= FI_DUAL_FLOOR;
@@ -1045,7 +1045,7 @@ unsigned int PMcpttGroup::_uaSsrcOf(const std::string& sessionId) const {
 // 화자와 무관한 메시지(Floor Idle/Release Multi Talker)의 Indicator — 호 종류만 싣는다.
 int PMcpttGroup::_groupIndicator() const {
     int bits = FI_NORMAL;
-    if (_groupType == "broadcast") bits |= FI_BROADCAST_GROUP;
+    if (_broadcast) bits |= FI_BROADCAST_GROUP;
     if (_floorControl && _floorPolicy == FLOOR_POLICY_MULTI) bits |= FI_MULTI_TALKER;
     return bits;
 }
@@ -1124,7 +1124,7 @@ bool PMcpttGroup::setFloorCrypto(const std::string& alg, const std::string& key,
     return ok;
 }
 
-void PMcpttGroup::setFloorTimers(int t1, int t2, int t3, int t8, int t7, int t20) {
+void PMcpttGroup::setFloorTimers(int t1, int t2, int t3, int t8, int t7, int t20, int t4) {
     PAutoLock lock(_mutex);
     _t1EndRtpSec   = t1 >= 0 ? t1 : 0;
     _t2StopTalkSec = t2 >= 0 ? t2 : 0;
@@ -1132,8 +1132,13 @@ void PMcpttGroup::setFloorTimers(int t1, int t2, int t3, int t8, int t7, int t20
     _t8RevokeSec   = t8 > 0 ? t8 : 1;
     _t7IdleSec     = t7 >= 0 ? t7 : 0;
     _t20GrantSec   = t20 > 0 ? t20 : 1;
-    LOG_INFO("PMcpttGroup", "[%s] floor timers: T1=%ds T2=%ds T3=%ds T7=%ds T8=%ds T20=%ds",
-             _groupId.c_str(), _t1EndRtpSec, _t2StopTalkSec, _t3GraceSec,
+    _t4InactSec    = t4 >= 0 ? t4 : 0;
+    // 세션은 'G: Floor Idle' 로 시작한다 — 화자가 없고 아직 무장 전이면 T4 를 건다(§6.3.4.3.2).
+    //   멤버 추가 ADD/MODIFY 는 이미 무장된 T4 를 다시 시작하지 않는다.
+    if (_t4InactSec == 0) _t4SinceUsec = 0;
+    else if (_talkers.empty() && _t4SinceUsec == 0) _t4SinceUsec = _nowUsec();
+    LOG_INFO("PMcpttGroup", "[%s] floor timers: T1=%ds T2=%ds T3=%ds T4=%ds T7=%ds T8=%ds T20=%ds",
+             _groupId.c_str(), _t1EndRtpSec, _t2StopTalkSec, _t3GraceSec, _t4InactSec,
              _t7IdleSec, _t8RevokeSec, _t20GrantSec);
 }
 
@@ -1262,6 +1267,7 @@ void PMcpttGroup::_grantFloorTo(const std::string& sessionId, unsigned int ssrc,
     }
     _talkers.push_back(tk);
     _idleResendLeft = 0;   // 더 이상 Floor Idle 상태가 아니다 (T7 중단)
+    _t4SinceUsec = 0;      // 'G: Floor Taken' 진입 — T4 정지 (§6.3.4.3.3)
 
     // Floor Granted → 요청자 (§8.2.5: Duration + SSRC of granted floor participant +
     //   Floor Priority + Floor Indicator. 헤더 SSRC 는 floor control server 의 것).
@@ -1657,6 +1663,8 @@ void PMcpttGroup::_advanceFloorOrIdle() {
         // T7(Floor Idle) 무장 — 설정돼 있으면 C7 회까지 재송신해 도달을 보장한다(§6.3.4.3.4).
         _idleSinceUsec = _nowUsec();
         _idleResendLeft = (_t7IdleSec > 0) ? kIdleResendMax : 0;
+        // T4(Inactivity) 무장 — 'G: Floor Idle' 진입 (§6.3.4.3.2).
+        _t4SinceUsec = (_t4InactSec > 0) ? _idleSinceUsec : 0;
     }
 }
 
@@ -1703,6 +1711,16 @@ bool PMcpttGroup::tickFloorTimers() {
             --_idleResendLeft;
             broadcastFloorStatus(FLOOR_IDLE, 0, "");
             _idleSinceUsec = now;
+        }
+        // ── T4 (Inactivity): Floor Idle 이 한도를 넘으면 CSP 에 통지 (§6.3.4.3.5) ──
+        //   해제할지 T4 를 다시 걸지는 사업자 정책이라 CMP 는 통지 후 재무장만 한다 — CSP 가
+        //   해제하면 PTT_GROUP_REMOVE 로 그룹이 사라진다.
+        if (_t4InactSec > 0 && _t4SinceUsec > 0 &&
+            (now - _t4SinceUsec) >= (int64_t)_t4InactSec * 1000000LL) {
+            _t4SinceUsec = now;
+            _logFloorLocal("INACTIVITY", "", 0, 0, nullptr);
+            LOG_INFO("PMcpttGroup", "[%s] T4 inactivity expired (%ds)", _groupId.c_str(), _t4InactSec);
+            if (_onInactivity) _onInactivity(_groupId, _sesid, _service);
         }
         return false;
     }
@@ -1799,7 +1817,7 @@ void PMcpttGroup::broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, 
     bool useRo = false;
     if (opcode == FLOOR_TAKEN && !speakerId.empty()) {
         // broadcast 그룹은 수신자가 발언 요청을 할 수 없다(§6.3.4.4.2-3d).
-        int perm = (_groupType == "broadcast") ? FLOOR_PERM_DENIED : FLOOR_PERM_ALLOWED;
+        int perm = _broadcast ? FLOOR_PERM_DENIED : FLOOR_PERM_ALLOWED;
         fields.push_back(FloorTlv(FF_GRANTED_PARTY, _userIdOf(speakerId)));
         fields.push_back(FloorTlv(FF_PERMISSION, FloorU16(perm)));
         fields.push_back(FloorTlv(FF_MSG_SEQ, FloorU16(_nextMsgSeq())));

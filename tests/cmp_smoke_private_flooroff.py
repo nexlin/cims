@@ -7,7 +7,7 @@
 import json, os, socket, struct, sys, time
 
 CMP_IP = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("CMP_IP", "127.0.0.1")
-CMP = (CMP_IP, 9000)
+CMP = (CMP_IP, int(os.environ.get("CMP_PORT", "9000")))
 GROUP = "priv-smoketest-relay"
 A_ID, B_ID = "+82500000001", "+82500000002"
 MY_IP = CMP_IP   # 같은 호스트 → 목적지 주소가 소스 선택
