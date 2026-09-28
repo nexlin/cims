@@ -190,13 +190,14 @@ UE-A ── INVITE B ──► CSP ── 183 Session Progress (SDP, 거절 안�
 착신전환이 설정된 사용자에게 발신 시:
 
 ```
-UE-A ── INVITE B ──► CSP ── 302 Moved Temporarily ──► UE-A
-                              Contact: <sip:C@csp>
-
-UE-A ── INVITE C ──► CSP ── (정상 통화 흐름)
+UE-A ── INVITE B ──► CSP ── 181 Call Is Being Forwarded ──► UE-A
+                     CSP ── 183 + 전환 안내(early media) ──► UE-A
+                     CSP ── INVITE C (History-Info) ──► UE-C
+UE-A ◄── 200 OK ──── CSP ◄── 200 OK ──── UE-C   (정상 통화 흐름)
 ```
 
-단말은 302 응답의 Contact 헤더로 재발신해야 한다.
+전환은 서버가 같은 호 안에서 한다(TS 24.604) — 단말은 재발신하지 않는다. 181 을 받으면 "착신전환 중" 을 표시할 수 있다
+(선택). 조건부 전환(통화중·무응답·미등록·도달불가)도 같은 흐름이다.
 
 ### 4.3 착신 차단 — 지정 번호
 
@@ -243,7 +244,7 @@ UE-A ◄── 487 Request Terminated ── CSP
 | 100 | Trying | 대기 |
 | 180 | Ringing | 통화 연결음 재생 |
 | 200 | OK | 통화 시작, ACK 전송 |
-| 302 | Moved | Contact로 재발신 |
+| 181 | Call Is Being Forwarded | (선택) 착신전환 중 표시 — 재발신하지 않는다 |
 | 403 | Forbidden | 인증 실패 |
 | 404 | Not Found | 상대방 미등록 |
 | 486 | Busy | 상대방 통화 중 |

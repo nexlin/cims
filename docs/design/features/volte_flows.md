@@ -29,7 +29,7 @@
 | C1 | 기본 1:1 통화 (Proxy) | A→B 발신, 응답, 통화, 종료 |
 | C2 | 착신 차단 — 전체 | A→B, B 회선이 `icb_all` → 603 Decline |
 | C3 | 착신 차단 — 지정 번호 | A→B, B 의 지정 번호에 A → 603 Decline |
-| C4 | 착신전환 | A→B, B가 C로 전환 → 302 → A→C |
+| C4 | 착신전환 | A→B, B가 C로 전환 → 서버측 전환(181 + History-Info) → A↔C (TS 24.604) |
 | C5 | 부재 (미등록) | A→B, B 미등록 → 404 Not Found |
 | C6 | 발신자 취소 | A→B, A가 CANCEL → 487 |
 | C7 | 수신자 거절 | A→B, B가 BYE/603 → 종료 |
@@ -259,21 +259,21 @@ UE-A                    CSP                          UE-B (지정 번호 A)
 ### C4. 착신전환
 
 ```
-UE-A                    CSP (B2BUA)                  UE-C (전환 대상)
+UE-A                    CSP (B2BUA · TAS)            UE-C (전환 대상)
   │                      │                            │
   │ ── INVITE B ───────► │                            │
-  │                      │ [CspUser.isCallForward()]  │
-  │                      │ [B2BUA 모드 전환]           │
-  │ ◄── 302 Moved ────── │  Contact: <C@csp>         │
-  │                      │                            │
-  │ ── INVITE C ───────► │                            │
-  │                      │ [일반 Proxy 처리]           │
-  │                      │ ── INVITE C ─────────────► │
+  │                      │ [CTasModule::ResolveDiversion — B 의 forward_id(CFU)]
+  │ ◄── 181 Call Is Being Forwarded ──                │  (SDP 없음, Setup.Sip.Cdiv.Notify181)
+  │ ◄── 183 + SDP ────── │  전환 안내(announce_then_tone) │
+  │                      │ ── INVITE C ─────────────► │  History-Info: <B>;index=1, <C;cause=302>;index=1.1;mp=1
   │                      │ ◄── 200 OK ─────────────── │
   │ ◄── 200 OK ──────── │                            │
   │                      │                            │
-  │ ◄══ RTP ═══════════════════════════════════════► │
+  │ ◄══ RTP (CMP relay) ══════════════════════════► │
 ```
+- 302 리다이렉트를 쓰지 않는다 — 전환은 서버가 같은 호 안에서 한다(TS 24.604 CDIV, B 는 INVITE 를 받지 않는다).
+  조건부 전환(CFB/CFNR/CFNL/CFNRc)·상한·루프(486)·전환 안내는 [volte_supplementary_services.md §6A](volte_supplementary_services.md)·
+  [announcements.md §3.5](announcements.md).
 
 ### C5. 부재 (미등록)
 
@@ -409,7 +409,7 @@ Console            CSC              CSP
   │ ◄── 200 ─────── │                │ [CspUser.m_strForward 설정]
   │                 │                │
   │                 │                │ 기존 통화: 영향 없음 (유지)
-  │                 │                │ 이후 새 착신: 302 Moved → 전환 대상
+  │                 │                │ 이후 새 착신: 서버측 전환(C4) → 전환 대상
 ```
 
 ---
@@ -426,7 +426,7 @@ INVITE 수신
   ├─ To 사용자 등록 여부 확인
   │   └─ 미등록? ───────────────── 404 Not Found
   ├─ 착신 차단(전체·지정 번호)? ─ Yes → 603 Decline (착신전환보다 우선)
-  ├─ 착신전환 설정? ──────────── Yes → B2BUA + 302 Moved
+  ├─ 착신전환 설정? ──────────── Yes → B2BUA + 서버측 전환(181·History-Info, C4)
   └─ 위 모두 아님 ──────────── Proxy 모드 (Call-ID 유지)
 ```
 
