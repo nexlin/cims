@@ -173,15 +173,17 @@ a=sendrecv
 
 ## 4. 부가서비스
 
-### 4.1 DND (착신거부)
+### 4.1 착신 차단 — 전체 (TS 24.611 ICB)
 
-DND가 활성화된 사용자에게 발신 시:
+착신 차단(전체, 회선 `icb_all`)이 켜진 번호에게 발신 시:
 
 ```
-UE-A ── INVITE B ──► CSP ── 603 Decline ──► UE-A
+UE-A ── INVITE B ──► CSP ── 183 Session Progress (SDP, 거절 안내 early media) ──► UE-A
+                     CSP ── 603 Decline ──► UE-A
 ```
 
-단말 측 처리 불필요. CSP가 자동 거부.
+단말 측 처리 불필요. CSP 가 착신 사용자 대신 거절한다. 착신전환이 함께 설정돼 있어도 착신 차단이 우선한다
+(규격·식별자 정본 = [volte_supplementary_services.md §6B](../design/features/volte_supplementary_services.md)).
 
 ### 4.2 착신전환
 
@@ -196,9 +198,9 @@ UE-A ── INVITE C ──► CSP ── (정상 통화 흐름)
 
 단말은 302 응답의 Contact 헤더로 재발신해야 한다.
 
-### 4.3 개별 수신거부
+### 4.3 착신 차단 — 지정 번호
 
-특정 발신자가 수신거부 목록에 포함된 경우:
+발신자가 착신 사용자의 착신 차단 지정 번호(사람 `icb_identities` — 그 사람의 모든 전화 번호에 적용)에 포함된 경우:
 
 ```
 UE-A(차단됨) ── INVITE B ──► CSP ── 603 Decline ──► UE-A
@@ -246,7 +248,7 @@ UE-A ◄── 487 Request Terminated ── CSP
 | 404 | Not Found | 상대방 미등록 |
 | 486 | Busy | 상대방 통화 중 |
 | 487 | Request Terminated | CANCEL 처리됨 |
-| 603 | Decline | 수신 거부 (DND/개별) |
+| 603 | Decline | 착신 거절 (단말 거절·착신 차단 전체/지정 번호) |
 
 ---
 

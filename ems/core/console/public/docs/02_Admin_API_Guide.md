@@ -56,14 +56,13 @@ curl -k -X POST https://192.168.0.2:4421/api/v1/auth/login \
     "role": "admin",
     "org_id": "",
     "details": null,
-    "reject_id": [],
+    "icb_identities": [],
     "call_subscriptions": [],
     "ptt_subscriptions": [
       {
         "id": "+821030432632",
         "auth_id": "4503382103043263@ptt.cims.example.kr",
         "passwd": "1234",
-        "dnd": false,
         "forward_id": "",
         "register_time": "2026-03-31T19:35:38",
         "logout_time": null
@@ -128,7 +127,7 @@ curl -k -X POST https://192.168.0.2:4421/api/v1/auth/register \
     "role": "user",
     "org_id": "",
     "details": null,
-    "reject_id": [],
+    "icb_identities": [],
     "call_subscriptions": [],
     "ptt_subscriptions": [],
     "create_time": "2026-03-31T20:00:00",
@@ -174,13 +173,13 @@ curl -k -X GET https://192.168.0.2:4421/api/v1/auth/me \
   "role": "admin",
   "org_id": "",
   "details": null,
-  "reject_id": [],
+  "icb_identities": [],
   "call_subscriptions": [
     {
       "id": "+821012345678",
       "auth_id": "+821012345678",
       "passwd": "1234",
-      "dnd": false,
+      "icb_all": false,
       "forward_id": "",
       "register_time": "2026-03-31T10:00:00",
       "logout_time": null
@@ -191,7 +190,6 @@ curl -k -X GET https://192.168.0.2:4421/api/v1/auth/me \
       "id": "+821030432632",
       "auth_id": "4503382103043263@ptt.cims.example.kr",
       "passwd": "1234",
-      "dnd": false,
       "forward_id": "",
       "register_time": "2026-03-31T19:35:38",
       "logout_time": null
@@ -261,13 +259,13 @@ curl -k -X GET https://192.168.0.2:4421/api/v1/users \
     "role": "user",
     "org_id": "본부1팀",
     "details": "테스트 사용자",
-    "reject_id": ["+821099990001"],
+    "icb_identities": ["+821099990001"],
     "call_subscriptions": [
       {
         "id": "+821012345678",
         "auth_id": "+821012345678",
         "passwd": "1234",
-        "dnd": false,
+        "icb_all": false,
         "forward_id": "",
         "register_time": "2026-03-31T10:00:00",
         "logout_time": null
@@ -278,7 +276,6 @@ curl -k -X GET https://192.168.0.2:4421/api/v1/users \
         "id": "+82571900001",
         "auth_id": "4503382571900001@ptt.cims.example.kr",
         "passwd": "123456",
-        "dnd": false,
         "forward_id": "",
         "register_time": "2026-03-31T12:00:00",
         "logout_time": null
@@ -294,7 +291,7 @@ curl -k -X GET https://192.168.0.2:4421/api/v1/users \
     "role": "user",
     "org_id": "본부2팀",
     "details": null,
-    "reject_id": [],
+    "icb_identities": [],
     "call_subscriptions": [],
     "ptt_subscriptions": [],
     "create_time": "2026-03-26T09:00:00",
@@ -319,7 +316,7 @@ Content-Type: application/json
   "password": "initpwd1234",
   "org_id": "본부1팀",
   "details": "비고 내용",
-  "reject_id": ["+821099990001", "+821099990002"]
+  "icb_identities": ["+821099990001", "+821099990002"]
 }
 ```
 
@@ -330,7 +327,7 @@ Content-Type: application/json
 | `password` | string | Y | 초기 비밀번호 (4자 이상) |
 | `org_id` | string | N | 소속 조직 |
 | `details` | string | N | 비고 |
-| `reject_id` | string[] | N | 착신거부 번호 목록 (E.164 형식) |
+| `icb_identities` | string[] | N | 착신 차단 — 지정 번호 목록(E.164). 이 번호가 건 착신을 이 사람의 모든 전화 회선(VoLTE·VoIP)에서 603 Decline 으로 거절(TS 24.611 ICB `cp:identity`). 수정(PUT) 시 보내면 목록을 통째로 바꾸고 CSP 에 그 사람의 전화 회선 변경(`USER_CHANGED`)을 통지한다 |
 
 **curl 예시:**
 ```bash
@@ -354,7 +351,7 @@ curl -k -X POST https://192.168.0.2:4421/api/v1/users \
   "role": "user",
   "org_id": "본부1팀",
   "details": "비고 내용",
-  "reject_id": ["+821099990001", "+821099990002"],
+  "icb_identities": ["+821099990001", "+821099990002"],
   "call_subscriptions": [],
   "ptt_subscriptions": [],
   "create_time": "2026-03-31T20:30:00",
@@ -375,7 +372,7 @@ Content-Type: application/json
 {
   "name": "변경이름",
   "org_id": "본부2팀",
-  "reject_id": ["+821099990003"]
+  "icb_identities": ["+821099990003"]
 }
 ```
 
@@ -396,7 +393,7 @@ curl -k -X PUT https://192.168.0.2:4421/api/v1/users/35 \
   "role": "user",
   "org_id": "본부2팀",
   "details": "비고 내용",
-  "reject_id": ["+821099990003"],
+  "icb_identities": ["+821099990003"],
   "call_subscriptions": [],
   "ptt_subscriptions": [],
   "create_time": "2026-03-31T20:30:00",
@@ -453,7 +450,7 @@ Content-Type: application/json
   "id": "+821012345678",
   "auth_id": "+821012345678",
   "passwd": "1234",
-  "dnd": false,
+  "icb_all": false,
   "forward_id": ""
 }
 ```
@@ -463,7 +460,7 @@ Content-Type: application/json
 | `id` | string | Y | - | MSISDN (E.164 형식, `+` 국가코드 포함) |
 | `auth_id` | string | N | id와 동일 | SIP Digest 인증 ID |
 | `passwd` | string | Y | - | SIP Digest 비밀번호 |
-| `dnd` | boolean | N | false | 방해금지 모드 |
+| `icb_all` | boolean | N | false | 착신 차단 — 전체(TS 24.611 ICB). 켜면 이 회선으로 오는 모든 착신을 603 Decline 으로 거절(거절 안내 early media 뒤 603, 착신전환보다 우선). 전화 회선(call·voip)만 — PTT 회선에 보내면 `400 icb_all not applicable to ptt` |
 | `forward_id` | string | N | "" | 착신전환 번호 (E.164 형식) |
 
 **curl 예시:**
@@ -480,7 +477,7 @@ curl -k -X POST https://192.168.0.2:4421/api/v1/users/1/call \
   "id": "+821012345678",
   "auth_id": "+821012345678",
   "passwd": "1234",
-  "dnd": false,
+  "icb_all": false,
   "forward_id": "",
   "register_time": null,
   "logout_time": null
@@ -506,7 +503,7 @@ Content-Type: application/json
 ```json
 {
   "auth_id": "new_auth_id",
-  "dnd": true,
+  "icb_all": true,
   "forward_id": "+821099999999"
 }
 ```
@@ -516,7 +513,7 @@ Content-Type: application/json
 curl -k -X PUT "https://192.168.0.2:4421/api/v1/users/1/call/%2B821012345678" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
   -H "Content-Type: application/json" \
-  -d '{"dnd":true,"forward_id":"+821099999999"}'
+  -d '{"icb_all":true,"forward_id":"+821099999999"}'
 ```
 
 > 주의: URL의 `+` 문자는 `%2B`로 인코딩해야 합니다.
@@ -527,7 +524,7 @@ curl -k -X PUT "https://192.168.0.2:4421/api/v1/users/1/call/%2B821012345678" \
   "id": "+821012345678",
   "auth_id": "new_auth_id",
   "passwd": "1234",
-  "dnd": true,
+  "icb_all": true,
   "forward_id": "+821099999999",
   "register_time": "2026-03-31T10:00:00",
   "logout_time": null
@@ -574,7 +571,6 @@ Content-Type: application/json
   "id": "+82571900001",
   "auth_id": "4503382571900001@ptt.cims.example.kr",
   "passwd": "123456",
-  "dnd": false,
   "forward_id": ""
 }
 ```
@@ -610,7 +606,6 @@ curl -k -X POST https://192.168.0.2:4421/api/v1/users/1/ptt \
   "id": "+82571900001",
   "auth_id": "4503382571900001@ptt.cims.example.kr",
   "passwd": "123456",
-  "dnd": false,
   "forward_id": "",
   "register_time": null,
   "logout_time": null
@@ -628,8 +623,7 @@ Content-Type: application/json
 **요청:**
 ```json
 {
-  "passwd": "newpwd789",
-  "dnd": true
+  "passwd": "newpwd789"
 }
 ```
 
@@ -639,7 +633,6 @@ Content-Type: application/json
   "id": "+82571900001",
   "auth_id": "4503382571900001@ptt.cims.example.kr",
   "passwd": "newpwd789",
-  "dnd": true,
   "forward_id": "",
   "register_time": "2026-03-31T12:00:00",
   "logout_time": null
@@ -908,9 +901,15 @@ curl -k -X DELETE "https://192.168.0.2:4421/api/v1/ptt/groups/%2B82571910001/mem
 | role | ENUM('admin','user') | N | 'user' | - | 역할 |
 | org_id | VARCHAR(64) | Y | '' | - | 소속 조직 |
 | details | TEXT | Y | NULL | - | 비고 |
-| reject_id | TEXT | Y | NULL | - | 착신거부 번호 (JSON 배열 문자열) |
 | create_time | DATETIME | N | CURRENT_TIMESTAMP | - | 생성일 |
 | update_time | DATETIME | N | CURRENT_TIMESTAMP ON UPDATE | - | 수정일 |
+
+### icb_identities (착신 차단 — 지정 번호)
+
+| 컬럼 | 타입 | Nullable | 기본값 | 제약조건 | 설명 |
+|------|------|----------|--------|----------|------|
+| user_id | INT | N | - | PK (복합), FK → users.id ON DELETE CASCADE (`fk_icb_user`) | 차단하는 사람 — 그 사람의 모든 전화 회선에 적용 |
+| identity | VARCHAR(64) | N | - | PK (복합) | 차단할 발신 번호 (TS 24.611 ICB `cp:identity`) |
 
 ### voip_subscriptions (Call 번호)
 
@@ -920,7 +919,7 @@ curl -k -X DELETE "https://192.168.0.2:4421/api/v1/ptt/groups/%2B82571910001/mem
 | user_id | INT | N | - | FK → users.id ON DELETE CASCADE | 소유자 |
 | auth_id | VARCHAR(128) | Y | id와 동일 | - | SIP 인증 ID (IMPI) |
 | passwd | VARCHAR(64) | N | - | - | SIP Digest 비밀번호 |
-| dnd | TINYINT(1) | N | 0 | - | 방해금지 (0=off, 1=on) |
+| icb_all | TINYINT(1) | N | 0 | - | 착신 차단 — 전체 (TS 24.611 ICB, 0=off, 1=on) |
 | forward_id | VARCHAR(32) | Y | '' | - | 착신전환 번호 (E.164) |
 | register_time | DATETIME | Y | NULL | - | 최근 SIP REGISTER 시각 |
 | logout_time | DATETIME | Y | NULL | - | 최근 등록해제 시각 |
@@ -933,7 +932,6 @@ curl -k -X DELETE "https://192.168.0.2:4421/api/v1/ptt/groups/%2B82571910001/mem
 | user_id | INT | N | - | FK → users.id ON DELETE CASCADE | 소유자 |
 | auth_id | VARCHAR(128) | Y | - | - | IMPI (3GPP 형식) |
 | passwd | VARCHAR(64) | N | - | - | SIP Digest 비밀번호 |
-| dnd | TINYINT(1) | N | 0 | - | 방해금지 (0=off, 1=on) |
 | forward_id | VARCHAR(32) | Y | '' | - | 착신전환 번호 |
 | register_time | DATETIME | Y | NULL | - | 최근 SIP REGISTER 시각 |
 | logout_time | DATETIME | Y | NULL | - | 최근 등록해제 시각 |
@@ -974,7 +972,7 @@ users (1) ──────── (N) voip_subscriptions
 
 ### 가입자 관리 (관리자 전용)
 - **검색**: 이름/아이디/조직/번호로 필터링
-- **가입자 추가/편집**: 이름, 아이디, 조직, 세부사항, 착신거부 목록
+- **가입자 추가/편집**: 이름, 아이디, 조직, 세부사항 (착신 차단 지정 번호 `icb_identities` 는 관리 API 로 설정)
 - **Call 번호 관리**: 인라인 칩으로 표시, 클릭하여 편집, + 버튼으로 추가
 - **PTT 번호 관리**: Call과 동일 구조
 - 번호 표시: +82 제거 후 `XXX-XXXX-XXXX` 형태

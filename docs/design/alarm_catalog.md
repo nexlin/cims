@@ -566,7 +566,7 @@ MsrpWorkerCount 사실상 무효(`:589,593,789` — 리액터 사망 판정은 �
 관제 앱 경로(`handlers/dispatch.py _audit`·`dispatch_directory.py`)와 **콘솔 관리 API 의
 회선 CUD**(`handlers/admin.py _audit_sub` — `_add`/`_update`/`_delete_subscription`,
 entity `subscription`, actor `console:<login_id>`, reason `console`)가 발화한다. 부가서비스를
-어느 문으로 바꾸든 같은 감사가 남는다. 감사에 싣는 값은 부가서비스 축뿐이다 — DND(`dnd`),
+어느 문으로 바꾸든 같은 감사가 남는다. 감사에 싣는 값은 부가서비스 축뿐이다 — 착신 차단 전체(`icb_all` — TS 24.611 ICB),
 무조건·조건부 착신전환(`forward_id`·`forward_busy_id`·`forward_no_reply_id`·
 `forward_no_reply_sec`·`forward_not_logged_in_id` — TS 24.604 CFU/CFB/CFNR/CFNL),
 가입자 링백(`ringback_media`), 접속서비스·transport(`service_ref`·`sip_transport`).
@@ -575,7 +575,7 @@ entity `subscription`, actor `console:<login_id>`, reason `console`)가 발화�
 `_CONFIG_EVENT_BY_ENTITY` 어휘와 mo(`<서버명>/csc/config/<entity>`)는 교정 완료.
 
 부가서비스 설정 변경 정의(`E-AUD-008`, TAS)는 이 회선 CUD 감사로 수렴한다(§5 수렴 규칙) —
-착신전환·DND 는 회선 속성이라 같은 사실을 가리킨다.
+착신전환·착신 차단(전체)은 회선 속성이라 같은 사실을 가리킨다.
 
 **자기보고 대상이 아닌 것**: 통화이력/flow API(CSC 미서빙 — OAM 소관), FM 채널 자기장애,
 요청 단위 4xx/5xx(PKCE/토큰/XCAP 인가 실패 등), 소켓 backlog/메모리(호스트 소관),
@@ -846,7 +846,7 @@ endpoint 단위 `cmp/<ep>` 만 후보로 남았다.
   FindInbound·IsAlive 양쪽에서 존중). 없는 것은 **컬렉션 쓰기 경로의 감사**다. "컬렉션 변경을
   통으로 감사할지 / `enabled` 전이만 집어낼지" 를 먼저 정해야 한다 — 전자는 `E-AUD-003`
   service_control 이 선례(actor·actor_ip 동반).
-- **`E-AUD-008` 부가서비스 설정 변경** — 착신전환·DND 는 회선 속성이라 `E-AUD-006`
+- **`E-AUD-008` 부가서비스 설정 변경** — 착신전환·착신 차단(전체)은 회선 속성이라 `E-AUD-006`
   subscriber_config_changed 와 같은 사실을 가리킨다. 회선 CUD 는 `E-AUD-006` 으로 수렴해
   배선됐고(§10.4), 남은 배선 지점은 같은 파일의 가입자·조직 CUD 다.
 

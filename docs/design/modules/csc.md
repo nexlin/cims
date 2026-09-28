@@ -183,13 +183,13 @@ POST /api/v1/users
   "name": "홍길동",
   "email": "hong@example.com",
   "org_id": 1,
+  "icb_identities": ["+821005"],
   "call_subscriptions": [
     {
       "id": "+821001",
       "auth_id": "1001",
-      "dnd": false,
-      "forward_id": "",
-      "reject_ids": ["1005"]
+      "icb_all": false,
+      "forward_id": ""
     }
   ],
   "voip_subscriptions": [],
@@ -210,7 +210,7 @@ POST /api/v1/users
 |--------|------|------|
 | GET | `/call` | VoIP 구독 목록 |
 | POST | `/call` | VoIP 구독 추가 |
-| PUT | `/call/{msisdn}` | VoIP 구독 수정 (DND, 전환, 거부) |
+| PUT | `/call/{msisdn}` | VoIP 구독 수정 (착신 차단 전체, 착신전환) |
 | DELETE | `/call/{msisdn}` | VoIP 구독 삭제 |
 
 **VoIP 구독 추가:**
@@ -224,16 +224,20 @@ POST /api/v1/users/1/call
 }
 ```
 
-**VoIP 구독 수정 (DND, 착신전환):**
+**VoIP 구독 수정 (착신 차단 전체, 착신전환):**
 
 ```json
 PUT /api/v1/users/1/call/+821001
 {
-  "dnd": true,
-  "forward_id": "+821002",
-  "reject_ids": ["+821005"]
+  "icb_all": true,
+  "forward_id": "+821002"
 }
 ```
+
+착신 차단(TS 24.611 ICB — [volte_supplementary_services.md §6B](../features/volte_supplementary_services.md))은 규칙 둘이다 — 회선
+`icb_all`(전체, 전화 회선만 — PTT 회선에 보내면 400 `icb_all not applicable to ptt`)과 사람 `icb_identities[]`(지정 번호 — 사람
+`PUT /api/v1/users/{user_id}` 로 목록 교체, 그 사람의 전화 회선마다 CSP 에 `USER_CHANGED` 통지). 전환기(한 릴리스)에는 요청의 구 키
+`dnd`·`reject_id` 도 새 키로 옮겨 받아들이고 WARN 로그를 남긴다 — 응답은 새 키만. 감사(E-AUD-006) 값 키는 `icb_all`.
 
 ### 3.4 PTT 구독 관리
 
@@ -688,10 +692,10 @@ DB 는 가입자(person/VoLTE/PTT) 도메인과 조직 트리 등 **관계형이
 | 테이블 | 키 | 용도 |
 |--------|----|------|
 | `users` | `id INT AI PK` | 가입자(person) 개인정보(name/email/org_id/title/details) + **단말 IdMS 로그인 자격**(`login_id`/`passwd` — 콘솔 계정이 아니다, 콘솔 계정은 OAM `console_accounts`; role 컬럼 없음). IdMS 는 기동 시 `LOGIN_ACCOUNTS` 로 적재하고 admin API 의 가입자·가입 번호 변경 후 `refresh_login_accounts()` 로 재조회한다(재기동 없이 반영) |
-| `volte_subscriptions` | `id VARCHAR PK`(MSISDN) | 이동 VoLTE 회선: SIP 인증(ha1), dnd/forward, pickup_group. `user_id` → users(CASCADE). `service_ref` 는 kind=volte 서비스만 |
+| `volte_subscriptions` | `id VARCHAR PK`(MSISDN) | 이동 VoLTE 회선: SIP 인증(ha1), icb_all(착신 차단 전체)/forward, pickup_group. `user_id` → users(CASCADE). `service_ref` 는 kind=volte 서비스만 |
 | `voip_subscriptions` | `id VARCHAR PK`(MSISDN) | 유선 VoIP 회선 — 컬럼은 volte 와 동일, `service_ref` 는 kind=voip 서비스 필수(**가입 테이블 = 접속환경 kind**, 레지스트리 `services/subscriptions.py`). `sql/migrate_voip_subscriptions.sql` 로 생성 — 없는 DB 에서는 CSC 가 프로브해 그 테이블만 건너뛴다(`/users/{pid}/voip` 503) |
-| `user_rejects` | (`user_id`, `reject_id`) PK | person 착신거부 목록. `user_id` → users(CASCADE) |
-| `ptt_subscriptions` | `id VARCHAR PK`(MCPTT ID) | MCPTT 회선: IMPI 인증. `user_id` → users(CASCADE). `service_ref` 는 kind=ptt 서비스만 |
+| `icb_identities` | (`user_id`, `identity`) PK | person 착신 차단 지정 번호 목록(TS 24.611 ICB `cp:identity` — 그 사람의 모든 전화 회선). `user_id` → users(CASCADE, `fk_icb_user`) |
+| `ptt_subscriptions` | `id VARCHAR PK`(MCPTT ID) | MCPTT 회선: IMPI 인증(착신 차단 컬럼 없음). `user_id` → users(CASCADE). `service_ref` 는 kind=ptt 서비스만 |
 | `ptt_groups` | **`id BIGINT AI PK`**(surrogate) | PTT 그룹. `mcptt_group_id` 는 UNIQUE 식별자(키 아님). group_type(prearranged/chat — on-network-invite-members)/hang_timer_sec·max_duration_sec(그룹 호 T4·TNG3)/priority/emergency/video_enabled/require_affiliation 등 |
 | `ptt_group_members` | `id INT AI PK` | 멤버. `group_id` → **ptt_groups.id(surrogate BIGINT FK)**, role(chair/participant), mcptt_id |
 | `ptt_affiliations` | (group_id, user_id, client_id) | MCPTT affiliation(TS 24.379 §9). `group_id` → ptt_groups.id(CASCADE) |

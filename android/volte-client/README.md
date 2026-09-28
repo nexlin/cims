@@ -7,7 +7,7 @@ CSP에 SIP로 등록하고 1:1 음성/영상 통화를 수행하는 안드로이
 
 - REGISTER (Digest MD5 / qop=auth) · INVITE/SDP · BYE · 호 상태머신
 - AMR-WB (PT 99, `octet-align=1; mode-set=0,1,2`) 양방향 RTP, AEC/지터버퍼(PJSIP)
-- (후속) H.264 영상, 서버측 기능 연동(DND·착신전환 등)
+- (후속) H.264 영상, 서버측 기능 연동(착신 차단·착신전환 등)
 
 ## 내부 구성 (계획)
 

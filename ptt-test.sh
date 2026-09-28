@@ -276,12 +276,12 @@ SET @u2 = (SELECT id FROM users WHERE login_id='ptt1002' LIMIT 1);
 SET @u3 = (SELECT id FROM users WHERE login_id='ptt1003' LIMIT 1);
 SET @u4 = (SELECT id FROM users WHERE login_id='ptt1004' LIMIT 1);
 
-INSERT IGNORE INTO ptt_subscriptions (id, user_id, passwd, dnd, forward_id, service_ref, imsi)
+INSERT IGNORE INTO ptt_subscriptions (id, user_id, passwd, forward_id, service_ref, imsi)
 VALUES
-  ('${USERS[0]}', @u1, '$USER_PWD', 0, '', 'ptt', '45033821000000001'),
-  ('${USERS[1]}', @u2, '$USER_PWD', 0, '', 'ptt', '45033821000000002'),
-  ('${USERS[2]}', @u3, '$USER_PWD', 0, '', 'ptt', '45033821000000003'),
-  ('${USERS[3]}', @u4, '$USER_PWD', 0, '', 'ptt', '45033821000000004');
+  ('${USERS[0]}', @u1, '$USER_PWD', '', 'ptt', '45033821000000001'),
+  ('${USERS[1]}', @u2, '$USER_PWD', '', 'ptt', '45033821000000002'),
+  ('${USERS[2]}', @u3, '$USER_PWD', '', 'ptt', '45033821000000003'),
+  ('${USERS[3]}', @u4, '$USER_PWD', '', 'ptt', '45033821000000004');
 
 -- ── 테스트 그룹 삽입 ────────────────────────────────────────
 INSERT IGNORE INTO ptt_groups (mcptt_group_id, name, group_type, require_affiliation, created_at)
@@ -360,7 +360,7 @@ cmd_db_status() {
 
     echo ""
     echo "── PTT 가입자 ──"
-    $MYSQL -e "SELECT id, user_id, dnd FROM ptt_subscriptions WHERE id IN ('${USERS[0]}','${USERS[1]}','${USERS[2]}','${USERS[3]}');"
+    $MYSQL -e "SELECT id, user_id FROM ptt_subscriptions WHERE id IN ('${USERS[0]}','${USERS[1]}','${USERS[2]}','${USERS[3]}');"
 
     echo ""
     echo "── PTT 그룹 ──"

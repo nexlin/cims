@@ -11,7 +11,7 @@ CSP는 CIMS 시스템의 SIP 시그널링 서버로, IMS 기반 역할(CSCF, TAS
 | SIP 등록/인증 | Digest MD5 인증, 가입자 등록 관리 |
 | VoIP 1:1 통화 | B2BUA 기반 호 처리, CMP RTP relay 연동 |
 | PTT 그룹콜 | 다자 SIP INVITE, CMP 그룹 RTP/Floor 연동 |
-| 부가서비스 | DND, 착신전환, 착신거부, 콜픽업 |
+| 부가서비스 | 착신 차단(ICB — 전체/지정 번호), 착신전환, 콜픽업 |
 | 안내음성 | 실패 안내(early media 뒤 원코드)·보류 음악·서버 링백·착신전환 안내 — CMP 재생기 지시(§3.12, [announcements.md](../features/announcements.md)) |
 | IP-PBX 트렁크 | 외부 SIP 서버 라우팅 (IBCF) |
 | 가입자/그룹 관리 | DB primary, JSON fallback |
@@ -41,7 +41,7 @@ SIP Stack (psip)
 CModuleDispatcher ◄── ISipUserAgentCallBack ── CSipUserAgent (B2BUA)
   │
   ├── CCscfModule    ── REGISTER, SUBSCRIBE, Digest 인증
-  ├── CTasModule     ── VoIP 보조 서비스: DND·착신전환·착신거부, 당겨받기, 호 전달, dialog 이벤트
+  ├── CTasModule     ── VoIP 보조 서비스: 착신 차단·착신전환, 당겨받기, 호 전달, dialog 이벤트
   ├── CPttAsModule   ── PTT 그룹콜 (CGroupCallService 래핑)
   └── CIbcfModule    ── IP-PBX 트렁크 라우팅
 ```
@@ -110,8 +110,7 @@ SIP 스택에 `[CModuleDispatcher, CSipUserAgent]` 순서로 콜백 등록:
 RecvRequest(INVITE)
   ├─ PTT 그룹 대상? ──────────→ PTT-AS (SetCallOwner → CPttAsModule)
   ├─ 트렁크 prefix 매칭? ──→ IBCF (SetCallOwner → CIbcfModule)
-  ├─ DND 활성화? ──────────→ 603 Decline 응답
-  ├─ 착신거부 목록? ────────→ 603 Decline 응답
+  ├─ 착신 차단(ICB)? ───────→ 603 Decline 응답 (전체 ∨ 지정 번호 — 착신전환보다 우선)
   ├─ 착신전환 설정? ────────→ 181 + B-leg 를 전환 대상으로 (서버측 CDIV, History-Info — volte_supplementary_services.md §6A)
   └─ 기본 ─────────────────→ TAS B2BUA (SetCallOwner → CTasModule)
 ```
@@ -187,8 +186,8 @@ B2BUA 골격(라우팅·relay 수명)은 ModuleDispatcher 가 유지하고, 보�
 
 | 서비스 | 트리거 | 동작 |
 |--------|--------|------|
-| DND (착신거부) | `CspUser::m_bDnd == true` | 603 Decline (`ScreenInvite`/`ApplyTerminationServices`) |
-| 개별 착신거부 | `CspUser::m_vecReject`에 발신자 포함 | 603 Decline |
+| 착신 차단 — 전체 | `CspUser::m_bIcbAll == true` | 603 Decline (`ScreenInvite`/`ApplyTerminationServices` — 판정 `IncomingBarredBy(from)`, 로그 `TAS: Rejected (ICB all)`). 다이얼로그가 있으면 거절 안내 `declined` early media 뒤 603. 착신전환보다 우선 — [volte_supplementary_services.md §6B](../features/volte_supplementary_services.md) |
+| 착신 차단 — 지정 번호 | `CspUser::m_vecIcbIdentities` 에 발신자 포함 (사람 단위 — 그 사람의 모든 전화 회선) | 603 Decline (같은 판정, 로그 `TAS: Rejected (ICB identity)`) |
 | 착신전환 | `CspUser::m_strForward` 설정됨(등록 여부 무관) | 서버측 전환(TS 24.604) — `ResolveDiversion` 이 대상(연쇄·상한 `Setup.Sip.Cdiv`)을 정하면 발신자 181, B-leg 를 전환 대상으로 + `History-Info`(RFC 7044 cause=302) + 전환 안내(`forwarded`) — [volte_supplementary_services.md §6A](../features/volte_supplementary_services.md) |
 | 조건부 착신전환 | `m_strForwardBusy`(CFB 486/600) / `m_strForwardNoReply`(+`m_iForwardNoReplySec`, CFNR 시한·480/408) / `m_strForwardNotLoggedIn`(CFNL 미등록) | 디스패처 `TryDivertLeg`(`EventCallEnd`·`Tick`) — 같은 relay·A-leg 위에 전환 대상으로 새 B-leg, History-Info cause 486/408, 181·전환 안내 · CFNL 은 `ResolveDiversion`(cause 404) — §6A.4 |
 | 당겨받기 | 피처코드 다이얼(`TryPickupDial`) / INVITE-Replaces(`OnIncomingCall`) | 링잉 leg 재키잉 + `RELAY_MODIFY` |
@@ -898,9 +897,9 @@ CSP 가 CSC 보다 먼저 기동하면 첫 조회는 실패하고, 이후 `CSC_R
 | m_strPassWord | string | 평문 비밀번호 — `m_strHa1` 이 비었을 때만 종전 계산에 쓰는 과도기 fallback (peer outbound 인증에는 계속 사용) |
 | m_strSipTransport | string | 채널 정책 (DB `sip_transport`, JSON `sip_transport`). `TLS` 면 비-TLS 채널의 이 신원 요청은 403(RFC 3329 sec-agree 로 tls 를 결부한 등록도 같은 게이트, `Setup.SecAgree.Require` 로 정책 가입자에 협상 강제) — [sip_access_security.md §3](../features/sip_access_security.md) |
 | m_strAuthScheme | string | 인증 체계 (DB `auth_scheme`, JSON `auth_scheme`) — `digest`(기본) / `aka`(IMS AKA over TLS: REGISTER 챌린지를 CSC AV(`CscAvClient`)로 만들고 `AKAv1-MD5` 로 검증, TLS 채널 강제 대상) — [sip_access_security.md §8.2](../features/sip_access_security.md) |
-| m_bDnd | bool | 착신거부 (DND) |
+| m_bIcbAll | bool | 착신 차단 — 전체 (DB `icb_all` — 전화 회선만, PTT 는 항상 false; JSON `icb_all`) |
 | m_strForward | string | 착신전환(CFU) 대상 번호 — 서버측 전환의 근거(§3.3 `ResolveDiversion`, 접속서비스 다이얼 플랜으로 번역) |
-| m_vecReject | vector | 개별 착신거부 목록 |
+| m_vecIcbIdentities | vector | 착신 차단 — 지정 번호 (DB `icb_identities` — 사람 단위; JSON `icb_identities`) |
 | m_strServiceType | string | "voip", "ptt", "both" |
 | m_strOrganizationId | string | 소속 조직 |
 
@@ -956,9 +955,10 @@ relay bookkeeping 의 키는 **session_id**(`csp_{yyyymmddHHMMSSmmm}_{n}`, 재�
 | 테이블 | 용도 |
 |--------|------|
 | users | 가입자 기본 정보 |
-| volte_subscriptions | 이동 VoLTE 회선 (ID, imsi, ha1, service_ref, sip_transport, DND, Forward, pickup_group) — service type `volte` |
+| volte_subscriptions | 이동 VoLTE 회선 (ID, imsi, ha1, service_ref, sip_transport, icb_all, Forward, pickup_group) — service type `volte` |
 | voip_subscriptions | 유선 VoIP 회선 — 같은 열, service type `voip`(전화 경로는 volte 와 같음). 테이블 부재 DB 는 부팅 프로브로 건너뜀(INFO) |
 | ptt_subscriptions | PTT 회선 (ID, imsi, ha1, service_ref, sip_transport, pickup_group) — service type `ptt` |
+| icb_identities | 착신 차단 지정 번호 (사람 단위 — 그 사람의 전화 회선에 적용) |
 | ptt_groups | PTT 그룹 설정 |
 | ptt_group_members | 그룹 멤버십 |
 | recordings / recording_segments | 녹취 메타데이터 |

@@ -2161,7 +2161,7 @@ CIMS_ADMIN_API_DOCS = [
 
     {'id': 'csc.users.subs.update', 'module': 'csc', 'method': 'PUT',
      'path': '/api/v1/users/{person_id}/{kind}/{msisdn}',
-     'summary': '번호 설정 변경 (DND/착신전환/서비스 소속 등)',
+     'summary': '번호 설정 변경 (착신 차단/착신전환/서비스 소속 등)',
      'params': [
          {'name': 'person_id', 'in': 'path', 'type': 'integer', 'required': True, 'desc': '가입자 id'},
          {'name': 'kind', 'in': 'path', 'type': 'string', 'required': True,

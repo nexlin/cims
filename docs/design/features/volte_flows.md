@@ -9,9 +9,9 @@
 | # | 케이스 | 설명 |
 |---|--------|------|
 | A1 | VoIP 가입자 생성 및 구독 추가 | 사용자 생성 → VoIP 번호 할당 |
-| A2 | DND (방해금지) 설정 | 특정 사용자의 수신 거부 |
+| A2 | 착신 차단 — 전체 설정 | 회선의 모든 착신 거절 (TS 24.611 ICB) |
 | A3 | 착신전환 설정 | 다른 번호로 착신 전환 |
-| A4 | 개별 수신거부 설정 | 특정 발신자 수신 거부 |
+| A4 | 착신 차단 — 지정 번호 설정 | 사람 단위로 특정 발신 번호 거절 (ICB `cp:identity`) |
 | A5 | 가입자/구독 삭제 | 구독 해제 → 사용자 삭제 |
 
 ### Part B. 단말 등록
@@ -27,8 +27,8 @@
 | # | 케이스 | 설명 |
 |---|--------|------|
 | C1 | 기본 1:1 통화 (Proxy) | A→B 발신, 응답, 통화, 종료 |
-| C2 | DND 거부 | A→B, B가 DND → 603 Decline |
-| C3 | 개별 수신거부 | A→B, B가 A를 거부 → 603 Decline |
+| C2 | 착신 차단 — 전체 | A→B, B 회선이 `icb_all` → 603 Decline |
+| C3 | 착신 차단 — 지정 번호 | A→B, B 의 지정 번호에 A → 603 Decline |
 | C4 | 착신전환 | A→B, B가 C로 전환 → 302 → A→C |
 | C5 | 부재 (미등록) | A→B, B 미등록 → 404 Not Found |
 | C6 | 발신자 취소 | A→B, A가 CANCEL → 487 |
@@ -41,7 +41,7 @@
 
 | # | 케이스 | 설명 |
 |---|--------|------|
-| D1 | 통화 중 DND 설정 | 이후 새 착신만 거부, 기존 통화 유지 |
+| D1 | 통화 중 착신 차단 설정 | 이후 새 착신만 거절, 기존 통화 유지 |
 | D2 | 통화 중 착신전환 설정 | 이후 새 착신만 전환, 기존 통화 유지 |
 
 ---
@@ -68,17 +68,18 @@ Console            CSC                 CSP
   │                 │                   │ [CspUserMap 캐시 갱신]
 ```
 
-### A2. DND (방해금지) 설정
+### A2. 착신 차단 — 전체 설정
 
 ```
 Console            CSC                 CSP
   │ PUT /users/     │                   │
   │  {pid}/call/    │                   │
   │  {msisdn}       │                   │
-  │ {dnd: true}     │                   │
-  │ ──────────────► │ [DB] UPDATE dnd=1 │
+  │ {icb_all: true} │                   │
+  │ ──────────────► │ [DB] UPDATE       │
+  │                 │  icb_all=1        │
   │                 │ ── UDP ─────────► │ user_change (PUT)
-  │ ◄── 200 ─────── │                   │ [CspUser.m_bDnd = true]
+  │ ◄── 200 ─────── │                   │ [CspUser.m_bIcbAll = true]
 ```
 
 ### A3. 착신전환 설정
@@ -95,17 +96,17 @@ Console            CSC                 CSP
   │ ◄── 200 ─────── │                   │ [CspUser.m_strForward 설정]
 ```
 
-### A4. 개별 수신거부 설정
+### A4. 착신 차단 — 지정 번호 설정
 
 ```
 Console            CSC                 CSP
   │ PUT /users/     │                   │
   │  {pid}          │                   │
-  │ {reject_id:     │                   │
+  │ {icb_identities:│                   │
   │  ["+82A..."]}   │                   │
-  │ ──────────────► │ [DB] user_rejects INSERT
-  │                 │ ── UDP ─────────► │ user_change (PUT)
-  │ ◄── 200 ─────── │                   │ [CspUser.m_vecReject 갱신]
+  │ ──────────────► │ [DB] icb_identities 교체
+  │                 │ ── UDP ─────────► │ user_change (PUT) — 그 사람의 전화 회선마다
+  │ ◄── 200 ─────── │                   │ [CspUser.m_vecIcbIdentities 갱신]
 ```
 
 ### A5. 가입자/구독 삭제
@@ -225,27 +226,35 @@ UE-A                    CSP                    CMP                     B (UE / �
   relay 에 고정되므로 포크 중에는 early media 를 앵커링하지 않는다.
 - 검증: 계측기 `TRUNK-MGCF-EARLY-MEDIA` 의 `early_rtp_pct`(200 전에 발신자가 RTP 를 받았는가 — [test_instrument.md](test_instrument.md) §5).
 
-### C2. DND 거부
+### C2. 착신 차단 — 전체
 
 ```
-UE-A                    CSP                          UE-B (DND)
+UE-A                    CSP                          UE-B (icb_all)
   │                      │                            │
   │ ── INVITE B ───────► │                            │
-  │                      │ [CspUser.isDnd() == true]  │
+  │                      │ [IncomingBarredBy = all]   │
+  │ ◄── 183+SDP ──────── │ 거절 안내(declined) 재생   │
   │ ◄── 603 Decline ──── │                            │
   │                      │ [DB] end_reason=declined   │
 ```
 
-### C3. 개별 수신거부
+### C3. 착신 차단 — 지정 번호
 
 ```
-UE-A                    CSP                          UE-B (A를 거부)
+UE-A                    CSP                          UE-B (지정 번호 A)
   │                      │                            │
   │ ── INVITE B ───────► │                            │
-  │                      │ [CspUser.isReject(A)==true] │
+  │                      │ [IncomingBarredBy(A)       │
+  │                      │   = identity]              │
+  │ ◄── 183+SDP ──────── │ 거절 안내(declined) 재생   │
   │ ◄── 603 Decline ──── │                            │
   │                      │ [DB] end_reason=declined   │
 ```
+
+- 판정 = `CspUser::IncomingBarredBy(from)`(전체 ∨ 지정 번호 일치 — [volte_supplementary_services.md §6B](volte_supplementary_services.md), 로그 `TAS: Rejected (ICB all|identity)`).
+  TAS `ApplyTerminationServices` 가 거절하면 거절 안내 `declined`(화중음)를 early media 로 들려준 뒤 603 그대로 끝낸다([announcements.md §3.2](announcements.md)).
+  다이얼로그 생성 전 조기 스크린(`ScreenInvite`)의 603 은 응답만 나간다. 착신전환(C4)이 걸린 회선이어도 착신 차단이 우선한다.
+- 검증: 계측기 `VOLTE-ICB-ALL`(603 + 안내, CFU 가 걸려도 603)·`VOLTE-ICB-IDENTITY`(지정 번호 발신자만 603).
 
 ### C4. 착신전환
 
@@ -355,7 +364,7 @@ UE-A                    CSP                          CMP                       U
 ```
 
 - A 의 CANCEL 이 재생 중 오면 `RELAY_PLAY_STOP` 뒤 487(CDR `announcement.result=cancelled`). 재생 상한(`Setup.Announcement.MaxPlayMs`)이면 그때 최종 코드.
-- B 없는 거절(404·484·DND 603)은 RELAY_ADD 를 A 만으로 잡고 같은 절차 — CDR 은 거절 시도로 남고 `announcement{situation, media, played_ms, result}` 가 붙는다.
+- B 없는 거절(404·484·착신 차단 603)은 RELAY_ADD 를 A 만으로 잡고 같은 절차 — CDR 은 거절 시도로 남고 `announcement{situation, media, played_ms, result}` 가 붙는다.
 - 안내가 없는 조건(정책 none·CMP `resource.ann` 미광고·음원 없음·SDES 불일치)은 종전대로 응답 코드만.
 
 ### C10. 보류 음악 (TS 24.610 §4.5.2.4)
@@ -377,14 +386,14 @@ SDP 는 relay 에 고정돼 있어 재협상 없이 CMP 원천만 바뀐다. `a=
 
 ## Part D. 서비스 중 운용 변경
 
-### D1. 통화 중 DND 설정
+### D1. 통화 중 착신 차단 설정
 
 ```
 Console            CSC              CSP
-  │ PUT dnd:true    │                │
+  │ PUT icb_all:true│                │
   │ ──────────────► │ [DB UPDATE]    │
   │                 │ ── UDP ──────► │ user_change
-  │ ◄── 200 ─────── │                │ [CspUser.m_bDnd = true]
+  │ ◄── 200 ─────── │                │ [CspUser.m_bIcbAll = true]
   │                 │                │
   │                 │                │ 기존 통화: 영향 없음 (유지)
   │                 │                │ 이후 새 착신: 603 Decline
@@ -416,7 +425,7 @@ INVITE 수신
   ├─ To가 트렁크 프리픽스 매칭? ── Yes → B2BUA (IBCF)
   ├─ To 사용자 등록 여부 확인
   │   └─ 미등록? ───────────────── 404 Not Found
-  ├─ DND 또는 수신거부? ─────── Yes → 603 Decline
+  ├─ 착신 차단(전체·지정 번호)? ─ Yes → 603 Decline (착신전환보다 우선)
   ├─ 착신전환 설정? ──────────── Yes → B2BUA + 302 Moved
   └─ 위 모두 아님 ──────────── Proxy 모드 (Call-ID 유지)
 ```
@@ -436,7 +445,7 @@ SoT 는 녹취 영역 `{Recording.Dir}/volte/YYYY/MM/DD/HH/.../<call_id>.d/call.
 | SIP status | end_reason | 설명 |
 |------------|------------|------|
 | 200 | normal | 정상 통화 후 종료 |
-| 603 | declined | DND/수신거부 |
+| 603 | declined | 단말 거절·착신 차단(ICB 전체/지정 번호) |
 | 486 | busy | 통화 중 |
 | 400-599 | error | 기타 에러 |
 | 487 | normal | 발신자 취소 (CANCEL) |

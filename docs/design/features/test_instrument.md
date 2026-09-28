@@ -494,7 +494,7 @@ fixtures:                           # 시험 픽스처 (선택) — 시나리오
   `no_answer_sec`·`service_ref`(비면 첫 멤버의 현 서비스)) · `role`(`assign` 역할의 person 에 배정, `monitor_call`/`ptt_listen` none|own|listed|all,
   `monitor_targets` = phone_group 픽스처 키, `ptt_targets` = 그룹 id 또는 `${group}`(그룹 세션의 첫 그룹), `listen_visibility` hidden|visible|`${var}`,
   `history_read`; `ptt_listen≠none` 이면 CSC 가 배정자의 `allow_ambient_listening` 을 동기한다) · `subscriber`(`roles` 회선의 `service_ref`(access_service 픽스처 키
-  또는 대상에 있는 서비스명)·`ringback_media`(가입자 링백 음원 id `sys:|op:|sub:` — announcements.md §6.3) 를 바꾼다, 둘 중 하나 이상) · `access_service`(`from_role` 첫 신원의 현 서비스 레코드를 복제해 `set` 필드를 바꾼 변종을 대상
+  또는 대상에 있는 서비스명)·`ringback_media`(가입자 링백 음원 id `sys:|op:|sub:` — announcements.md §6.3)·착신전환 `forward_to`/`forward_busy_to`/`forward_no_reply_to`(+`no_reply_sec`)/`forward_not_logged_in_to`/`forward_not_reachable_to`(= 역할 이름 → 첫 신원의 번호, volte_supplementary_services.md §6A)·착신 차단 `icb_all`(회선 전체 — 전화 회선만)·`icb_identities`(역할 이름 목록 → 그 신원들의 번호를 `roles` 사람의 지정 번호로, 사람 PUT·자기 역할 불가 — volte_supplementary_services.md §6B) 를 바꾼다, 하나 이상; 동봉 `VOLTE-ICB-ALL`(603 + 거절 안내 early media, 같은 회선의 착신전환보다 우선 — `cdiv_181_pct` 0)·`VOLTE-ICB-IDENTITY`(지정 번호 발신자만 603, 다른 발신자는 성립)) · `access_service`(`from_role` 첫 신원의 현 서비스 레코드를 복제해 `set` 필드를 바꾼 변종을 대상
   CSP 컬렉션 `access_services` 에 태그 `cims-tester` 로 넣는다 — 피어 시드와 같은 OAM 컬렉션 API·SIGUSR1 reload). 적용 순서 = access_service →
   phone_group → role → subscriber. 규칙: 키 `[a-z][a-z0-9_]{0,31}` → id `pg-tester-<키>`·`role-tester-<키>`·`tester-svc-<키>`, 같은 키의 잔재(이전 run
   중단)는 적용 전에 지우고 노트에, 부분 실패는 그 자리에서 되돌리고 run 은 error, 한 역할은 전화 그룹 하나에만, 전화 그룹 멤버는 전화 회선(volte/voip)

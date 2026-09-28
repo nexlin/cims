@@ -85,7 +85,7 @@ INVITE 를 넘기기로 결정한 **뒤에야** 기록을 시작하므로, 그 �
 | 자리 | 응답 | 무엇을 막았나 |
 |---|---|---|
 | `CModuleDispatcher::EventIncomingCall` 의 `RejectVoice` | 404 등 | 라우팅·가입자 조회 실패 |
-| `CTasModule::ScreenInvite` | 603 | 착신 가입자 DND·착신거부 — **다이얼로그 생성 전** |
+| `CTasModule::ScreenInvite` | 603 | 착신 가입자 착신 차단(ICB 전체·지정 번호, TS 24.611) — **다이얼로그 생성 전** |
 | `CTasModule::ApplyTerminationServices` | 603 | 같은 판정, 조기 스크린을 지나온 경로 |
 
 두 603 지점이 겹쳐도 중복으로 세지 않는다 — `VoipCallRejected` 는 정상 경로가 이미 만든
@@ -383,7 +383,7 @@ VoLTE 에도 같은 분리를 넣은 계기가 실측이다(2026-09-17): `시도
 
 **사유 열은 종료 사유를 남김없이 덮어야 한다.** 열이 없는 사유로 끝난 호는 표 어디에도
 나타나지 않는다 — 빈칸조차 안 생기므로 어긋나도 아무 데서도 경고가 나지 않는다. 실제로
-VoLTE 표에는 `rejected`(거절)·`no_answer`(무응답) 두 열이 없어, DND·착신거부로 튕긴 호와
+VoLTE 표에는 `rejected`(거절)·`no_answer`(무응답) 두 열이 없어, 착신 차단(603)으로 튕긴 호와
 벨은 울렸으나 받지 않은 호가 사유 축에서 통째로 빠져 있었다. `tests/test_stats_descriptor_reasons.py`
 가 디스크립터의 열 집합과 `end_reason` 어휘를 대조하고, 코드가 열끼리 겹치지 않는지도 본다.
 

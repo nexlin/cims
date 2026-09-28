@@ -120,7 +120,7 @@
 - 가입자 추가/수정/삭제
 - VoLTE Call 번호 등록 (MSISDN, 인증ID, 비밀번호)
 - PTT 번호 등록
-- 착신 거부 목록 관리
+- 착신 차단(전체) 설정 — 지정 번호 목록(`icb_identities`)은 관리 API
 
 #### 📢 PTT 그룹 관리 (admin)
 - 그룹 생성/수정/삭제
@@ -474,7 +474,7 @@ Authorization: Bearer <token>
       "email": "test001@cims.co.kr",
       "org_id": "ORG001",
       "details": null,
-      "reject_id": [],
+      "icb_identities": [],
       "call_subscriptions": [...],
       "ptt_subscriptions": [...],
       "create_time": "2026-01-01T00:00:00",
@@ -497,7 +497,7 @@ Content-Type: application/json
   "email": "test011@cims.co.kr",
   "org_id": "ORG001",
   "details": null,
-  "reject_id": []
+  "icb_identities": []
 }
 ```
 **응답 (201):** `{ "id": 11 }`
@@ -520,7 +520,7 @@ Content-Type: application/json
 
 {
   "name": "수정된 이름",
-  "reject_id": ["+821357007005"]
+  "icb_identities": ["+821357007005"]
 }
 ```
 **응답 (200):** `{ "id": 1 }`
@@ -552,7 +552,7 @@ Authorization: Bearer <token>
     {
       "id": "+821357007001",
       "auth_id": "4503811357007001@ims.nex-cims.co.kr",
-      "dnd": false,
+      "icb_all": false,
       "forward_id": "",
       "register_time": "2026-03-24T10:00:00",
       "logout_time": null
@@ -573,7 +573,7 @@ Content-Type: application/json
   "id": "+821357007001",
   "auth_id": "4503811357007001@ims.nex-cims.co.kr",
   "passwd": "1234",
-  "dnd": false,
+  "icb_all": false,
   "forward_id": ""
 }
 ```
@@ -589,7 +589,7 @@ Content-Type: application/json
 
 {
   "passwd": "newpass",
-  "dnd": true,
+  "icb_all": true,
   "forward_id": "+821357007002"
 }
 ```

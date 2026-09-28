@@ -113,7 +113,7 @@ CIMS (Compact IMS) 는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스�
 **핵심 클래스 (모듈러 IMS — 단일 프로세스에 CSCF/TAS/PTT-AS/IBCF 역할을 설정 기반으로 활성화):**
 - `CModuleDispatcher` — 중앙 디스패처. 모든 SIP 이벤트를 콜 소유권 기반으로 모듈에 라우팅 (`ModuleDispatcher.h/.cpp`)
 - `CCscfModule` — REGISTER / SUBSCRIBE / 인증 (Digest MD5)
-- `CTasModule` — VoIP B2BUA: DND, 착신전환, 착신거부, 콜픽업
+- `CTasModule` — VoIP B2BUA: 착신 차단(ICB — 전체/지정 번호), 착신전환, 콜픽업
 - `CPttAsModule` — PTT 그룹콜 (`CGroupCallService` 래핑)
 - `CIbcfModule` — IP-PBX 트렁크 라우팅 (옵션)
 - `CGroupCallService` — PTT 그룹 통화 (멤버 초대, 공유 RTP, multipart INVITE: SDP + OMA POC XML)
@@ -1019,8 +1019,8 @@ a=sendrecv
 
 | 기능 | 설명 |
 |------|------|
-| 가입자 관리 | 추가/편집/삭제, 조직/착신거부 설정 |
-| Call 번호 관리 | MSISDN 등록, auth_id/passwd, DND/착신전환 |
+| 가입자 관리 | 추가/편집/삭제, 조직 설정 |
+| Call 번호 관리 | MSISDN 등록, auth_id/passwd, 착신 차단(전체)/착신전환 |
 | PTT 번호 관리 | MSISDN 등록, IMPI auth_id |
 | PTT 그룹 관리 | 그룹 생성/편집, 멤버 추가/삭제, 우선순위, 영상 지원 |
 | 통화현황 | 실시간 PTT 세션 상태, 통화 로그 |
