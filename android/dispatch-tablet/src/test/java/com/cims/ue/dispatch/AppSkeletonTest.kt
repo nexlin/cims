@@ -6,7 +6,9 @@ package com.cims.ue.dispatch
 
 import android.view.KeyEvent
 import com.cims.ue.dispatch.ui.AppScreen
+import com.cims.ue.dispatch.ui.CallPane
 import com.cims.ue.dispatch.ui.MoreItem
+import com.cims.ue.dispatch.ui.PttPane
 import com.cims.ue.sdk.AuthScheme
 import com.cims.ue.sdk.MediaSecurity
 import com.cims.ue.sdk.Profile
@@ -21,30 +23,57 @@ import org.junit.Test
 
 class AppSkeletonTest {
 
-    // ── 화면 배열 — 하단 내비는 «하는 일» 다섯이다(§6.3) ──
-    @Test fun `하단 내비는 무전·통화·메시지·감청·더보기 순이다`() {
-        assertEquals(listOf("무전", "통화", "메시지", "감청", "더보기"), AppScreen.entries.map { it.label })
-        assertEquals(listOf("F1", "F2", "F3", "F4", "F5"), AppScreen.entries.map { it.hotkey })
+    // ── 화면 배열 — 하단 내비는 «하는 일» 넷이다(§6.3) ──
+    @Test fun `하단 내비는 이력·무전·통화·더보기 순이다`() {
+        assertEquals(listOf("이력", "무전", "통화", "더보기"), AppScreen.entries.map { it.label })
+        assertEquals(listOf("F1", "F2", "F3", "F4"), AppScreen.entries.map { it.hotkey })
     }
 
-    @Test fun `첫 화면은 무전이다`() {
-        // «PTT 채널 중심» 은 UI 정본의 전제다(dispatch_desktop_ui.md §1) — 앱을 열면 채널이 먼저 보인다.
-        assertEquals(AppScreen.PTT, AppScreen.entries.first())
+    @Test fun `첫 화면은 이력이다`() {
+        // 관제에서 «무슨 일이 있었나» 를 보는 일이 가장 잦다(§6.3). 무전은 발언 바가 어디서나 받는다.
+        assertEquals(AppScreen.HISTORY, AppScreen.entries.first())
     }
 
-    @Test fun `F1~F5 가 같은 화면에 대응한다`() {
-        assertEquals(AppScreen.PTT, AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F1))
-        assertEquals(AppScreen.CALLS, AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F2))
-        assertEquals(AppScreen.MESSAGES, AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F3))
-        assertEquals(AppScreen.MONITOR, AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F4))
-        assertEquals(AppScreen.MORE, AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F5))
-        assertNull(AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F6))
+    @Test fun `F1~F4 가 같은 화면에 대응한다`() {
+        assertEquals(AppScreen.HISTORY, AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F1))
+        assertEquals(AppScreen.PTT, AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F2))
+        assertEquals(AppScreen.CALLS, AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F3))
+        assertEquals(AppScreen.MORE, AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F4))
+        assertNull(AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F5))
         assertNull(AppScreen.ofFunctionKey(KeyEvent.KEYCODE_A))
     }
 
-    @Test fun `더보기에는 데스크톱 F2~F4 가 들어간다`() {
-        // 화면 «내용» 은 그대로고 들어가는 문만 한 겹 깊어진다(§6.3).
-        assertEquals(listOf("이력", "PTT 그룹", "관리"), MoreItem.entries.map { it.label })
+    @Test fun `감청·청취·메시지는 최상위 축이 아니다`() {
+        // 감청은 통화 leg, 청취는 무전 leg, SDS 는 무전 채널의 대화다 — 축을 따로 세우면 한 일을
+        // 두 군데서 찾게 된다(§6.3).
+        assertTrue(AppScreen.entries.none { it.label in setOf("감청", "청취", "메시지") })
+    }
+
+    @Test fun `그룹원은 면이 아니라 띠다`() {
+        // 그룹원은 «거는 상대» 이자 «상태를 곁눈질하는 대상» 이라 «통화» 면의 띠로 족하다(§6.3).
+        // 거는 일은 «주소록» 면이 받는다.
+        assertTrue(CallPane.entries.none { it.label == "그룹원" })
+        assertTrue(CallPane.entries.any { it.label == "주소록" })
+    }
+
+    @Test fun `청취·감청은 면으로도 두지 않는다 — 목록에 드러낸다`() {
+        // 청취 중인 채널은 «채널» 면의 범위 채널 목록에 «청취 중» 으로 나오고 거기서 끈다.
+        // 감청은 «통화» 면의 한 구역으로 나오고 «내역» 면의 진행 중 행에서 켜고 끈다(§6.3).
+        assertTrue(PttPane.entries.none { it.label == "청취" })
+        assertTrue(CallPane.entries.none { it.label == "감청" })
+    }
+
+    @Test fun `무전 면은 채널이 먼저다`() {
+        assertEquals(listOf("채널", "메시지", "이벤트"), PttPane.entries.map { it.label })
+    }
+
+    @Test fun `통화 면은 통화가 먼저다`() {
+        assertEquals(listOf("통화", "주소록", "메시지", "통화내역"), CallPane.entries.map { it.label })
+    }
+
+    @Test fun `더보기에는 편성·관리만 남는다`() {
+        // 이력은 최상위로 올라갔다(§6.3).
+        assertEquals(listOf("PTT 그룹", "관리"), MoreItem.entries.map { it.label })
     }
 
     // ── 계정 선택 규칙 — 전화 계열은 하나만 올린다 ──

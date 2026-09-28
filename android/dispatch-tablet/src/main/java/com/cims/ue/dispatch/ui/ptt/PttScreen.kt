@@ -26,14 +26,19 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.cims.ue.dispatch.ui.Tag
 import com.cims.ue.dispatch.ui.Type
 
 /**
- * [무전] — 채널 목록.
+ * [무전] — 채널 목록. **VM 을 붙이는 껍데기**다.
+ *
+ * 그리는 일은 전부 [PttScreenContent] 가 한다 — 그쪽은 표시용 값([ChannelRowUi])만 받아 Preview 가 선다.
+ * 여기서 하는 일은 셋: 흐름 구독, 도메인 → 표시용 변환, 콜백 연결.
  *
  * @param onOpen 행 탭 — 채널 화면으로.
  */
@@ -52,36 +57,69 @@ fun PttScreen(
     val listenText by scoped.listenText.collectAsStateWithLifecycle()
 
     var sheet by remember { mutableStateOf(false) }
-    var searching by remember { mutableStateOf(false) }
     // 사람 메뉴의 «애드혹에 추가» 가 심어 둔 씨앗이 있으면 시트를 연다(§6.2f). 씨앗은 시트가 소비한다.
     val seed by channels.adhocSeed.collectAsStateWithLifecycle()
     LaunchedEffect(seed) { if (seed.isNotBlank()) sheet = true }
     if (sheet) OriginateSheet(channels) { sheet = false }
 
+    PttScreenContent(
+        mine = mine.map { it.toRowUi(targeted = it.id in targets) },
+        scoped = scopedCards.map { it.toRowUi() },
+        filter = filter,
+        query = query,
+        listenText = listenText,
+        listenFull = scoped.listenFull,
+        onOpen = onOpen,
+        onToggleTarget = channels::toggleTarget,
+        onToggleListen = { id -> scopedCards.firstOrNull { it.id == id }?.let(scoped::toggleListen) },
+        onFilter = scoped::setFilter,
+        onQuery = scoped::setQuery,
+        onOriginate = { sheet = true },
+        modifier = modifier)
+}
+
+/**
+ * [무전] 목록 본문 — **순수 컴포저블**. 상태를 받기만 하고 갖지 않는다(검색창 펼침만 예외).
+ *
+ * 세션도 VM 도 모르므로 Preview 와 단위시험에서 그대로 쓸 수 있다.
+ */
+@Composable
+fun PttScreenContent(
+    mine: List<ChannelRowUi>,
+    scoped: List<ChannelRowUi>,
+    filter: ScopeFilter,
+    query: String,
+    listenText: String,
+    listenFull: Boolean,
+    onOpen: (String) -> Unit = {},
+    onToggleTarget: (String) -> Unit = {},
+    onToggleListen: (String) -> Unit = {},
+    onFilter: (ScopeFilter) -> Unit = {},
+    onQuery: (String) -> Unit = {},
+    onOriginate: () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    var searching by remember { mutableStateOf(false) }
+
     LazyColumn(modifier.fillMaxSize()) {
         item(key = "h-mine") {
             SectionHeader("내 채널 ${mine.size}") {
-                TextButton(onClick = { sheet = true }) { Text("사설콜·애드혹", fontSize = Type.meta) }
+                TextButton(onClick = onOriginate) { Text("사설콜·애드혹", fontSize = Type.meta) }
             }
         }
         if (mine.isEmpty()) item(key = "e-mine") { EmptyLine("참여할 채널이 없습니다") }
-        items(mine, key = { "m-" + it.id }) { c ->
-            ChannelRow(
-                dotActive = c.hasSession, dotSpeaking = c.speaking, emergency = c.emergency,
-                title = "${c.index}. ${c.title}", subtitle = c.line2,
-                state = c.stateText, participants = c.participants, unread = c.unread,
-                onClick = { onOpen(c.id) },
-                trailing = {
-                    // 발언 대상은 **채널을 열지 않고** 지정한다 — 여러 채널을 잡아 두고 말하는 조작이라
-                    //   목록에 있어야 한다(포커스 ≠ 발언 대상, §6.3).
-                    if (c.canCheck) TargetToggle(on = c.id in targets) { channels.toggleTarget(c.id) }
-                })
+        items(mine, key = { "m-" + it.id }) { r ->
+            ChannelRow(r, onClick = { onOpen(r.id) }) {
+                // 발언 대상은 **채널을 열지 않고** 지정한다 — 여러 채널을 잡아 두고 말하는 조작이라
+                //   목록에 있어야 한다(포커스 ≠ 발언 대상, §6.3).
+                if (r.canTarget) TargetToggle(on = r.targeted) { onToggleTarget(r.id) }
+            }
         }
 
         item(key = "h-scoped") {
-            SectionHeader("범위 채널 ${scopedCards.size}") {
+            SectionHeader("범위 채널 ${scoped.size}") {
                 Text(listenText, fontSize = Type.meta,
-                    color = if (scoped.listenFull) MaterialTheme.colorScheme.error
+                    color = if (listenFull) MaterialTheme.colorScheme.error
                             else MaterialTheme.colorScheme.onSurfaceVariant)
                 IconButton(onClick = { searching = !searching }) {
                     Icon(Icons.Filled.Search, contentDescription = "검색")
@@ -93,32 +131,29 @@ fun PttScreen(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 ScopeFilter.entries.forEach { f ->
-                    FilterChip(selected = filter == f, onClick = { scoped.setFilter(f) },
+                    FilterChip(selected = filter == f, onClick = { onFilter(f) },
                         label = { Text(f.label, fontSize = Type.meta) })
                 }
             }
         }
         if (searching) item(key = "q-scoped") {
             OutlinedTextField(
-                value = query, onValueChange = scoped::setQuery,
+                value = query, onValueChange = onQuery,
                 placeholder = { Text("채널 검색", fontSize = Type.body) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search))
         }
-        if (scopedCards.isEmpty()) item(key = "e-scoped") { EmptyLine("청취 범위 채널이 없습니다") }
-        items(scopedCards, key = { "s-" + it.id }) { c ->
-            ChannelRow(
-                dotActive = c.hasSession, dotSpeaking = c.speaker.isNotEmpty(), emergency = c.emergency,
-                title = c.title, subtitle = c.line2,
-                state = c.stateText, participants = c.participants, unread = 0,
-                onClick = { onOpen(c.id) },
-                trailing = {
-                    TextButton(onClick = { scoped.toggleListen(c) },
-                        contentPadding = PaddingValues(horizontal = 8.dp)) {
-                        Text(if (c.listening) "청취 중" else "청취", fontSize = Type.meta)
-                    }
-                })
+        if (scoped.isEmpty()) item(key = "e-scoped") { EmptyLine("청취 범위 채널이 없습니다") }
+        // **듣고 있는 것이 먼저다.** 청취는 «켜 두고 잊는» 조작이라, 목록 아래에 묻히면 몇 개를 듣고 있는지
+        //   모른 채 상한에 걸린다. 따로 면을 두지 않는 대신 목록에서 위로 올린다(§6.3).
+        items(scoped.sortedBy { if (it.listening == true) 0 else 1 }, key = { "s-" + it.id }) { r ->
+            ChannelRow(r, onClick = { onOpen(r.id) }) {
+                TextButton(onClick = { onToggleListen(r.id) },
+                    contentPadding = PaddingValues(horizontal = 8.dp)) {
+                    Text(if (r.listening == true) "청취 중" else "청취", fontSize = Type.meta)
+                }
+            }
         }
     }
 }
@@ -139,42 +174,34 @@ private fun SectionHeader(title: String, actions: @Composable RowScope.() -> Uni
 /**
  * 채널 한 줄 — 두 줄 56dp.
  *
- * 1줄 = 상태 점 · 이름 · (오른쪽) 상태·참가·미읽음 · 조작 하나
+ * 1줄 = 상태 점 · 이름 · (오른쪽) 미읽음·참가·상태 · 조작 하나
  * 2줄 = 발언자·사유 등 «지금 무슨 일이 있는가»
  */
 @Composable
 private fun ChannelRow(
-    dotActive: Boolean,
-    dotSpeaking: Boolean,
-    emergency: Boolean,
-    title: String,
-    subtitle: String,
-    state: String,
-    participants: Int,
-    unread: Int,
+    r: ChannelRowUi,
     onClick: () -> Unit,
     trailing: @Composable () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()
-        .background(
-            if (emergency) MaterialTheme.colorScheme.errorContainer else androidx.compose.ui.graphics.Color.Transparent)
+        .background(if (r.emergency) MaterialTheme.colorScheme.errorContainer else Color.Transparent)
         .clickable(onClick = onClick)
         .padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            StateDot(active = dotActive, speaking = dotSpeaking, emergency = emergency)
+            StateDot(active = r.active, speaking = r.speaking, emergency = r.emergency)
             Spacer(Modifier.width(8.dp))
-            Text(title, fontSize = Type.strong, fontWeight = FontWeight.Bold,
+            Text(r.title, fontSize = Type.strong, fontWeight = FontWeight.Bold,
                 maxLines = 1, modifier = Modifier.weight(1f))
-            if (unread > 0) { Badge { Text("$unread") }; Spacer(Modifier.width(6.dp)) }
-            if (participants > 0) {
-                Text("참가 $participants", fontSize = Type.meta,
+            if (r.unread > 0) { Badge { Text("${r.unread}") }; Spacer(Modifier.width(6.dp)) }
+            if (r.participants > 0) {
+                Text("참가 ${r.participants}", fontSize = Type.meta,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.width(6.dp))
             }
-            Text(state, fontSize = Type.meta)
+            Text(r.state, fontSize = Type.meta)
             trailing()
         }
-        if (subtitle.isNotEmpty()) Text(subtitle, fontSize = Type.meta,
+        if (r.subtitle.isNotEmpty()) Text(r.subtitle, fontSize = Type.meta,
             color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
             modifier = Modifier.padding(start = 20.dp))
     }

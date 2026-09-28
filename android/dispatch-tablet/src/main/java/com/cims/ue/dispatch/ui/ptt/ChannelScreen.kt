@@ -14,8 +14,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
@@ -29,8 +27,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cims.ue.dispatch.ui.Tag
 import com.cims.ue.dispatch.ui.Type
 
-private val PAGES = listOf("로스터", "메시지", "이벤트")
-
 /**
  * @param id  [무전] 목록에서 연 채널 id — 내 채널(그룹·사설콜·애드혹) 또는 범위 채널.
  * @param onShowRoster 편성 전원 보기 — [PTT 그룹] 화면 상세로(§6.12).
@@ -40,10 +36,6 @@ fun ChannelScreen(
     id: String,
     channels: PttChannelsViewModel,
     scoped: ScopedChannelsViewModel,
-    messages: PttMessagesViewModel,
-    activity: PttActivityViewModel,
-    page: Int,
-    onPageChange: (Int) -> Unit,
     onBack: () -> Unit,
     onShowRoster: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -54,72 +46,135 @@ fun ChannelScreen(
     val mine = mineCards.firstOrNull { it.id == id }
     val range = scopedCards.firstOrNull { it.id == id }
 
-    // ④⑤ 는 포커스를 따라간다 — 배치가 바뀌어도 그대로인 불변(§6.3).
-    LaunchedEffect(id) {
-        messages.onFocusChanged(id)
-        activity.onFocusChanged(id)
-    }
+    ChannelScreenContent(
+        head = channelHead(id, mine, range, targeted = mine != null && mine.id in targets),
+        onBack = onBack,
+        onShowRoster = onShowRoster,
+        onJoin = { mine?.let(channels::join) },
+        onJoinEmergency = { mine?.let(channels::joinEmergency) },
+        onLeave = { mine?.let(channels::leave) },
+        onToggleTarget = { mine?.let { channels.toggleTarget(it.id) } },
+        onToggleListen = { range?.let(scoped::toggleListen) },
+        roster = (mine?.group ?: range?.group)?.roster.orEmpty(),
+        speaker = mine?.speaker ?: range?.speaker.orEmpty(),
+        me = channels.myPttNumber,
+        nameOf = channels::nameOf,
+        modifier = modifier)
+}
 
-    val pager = rememberPagerState(initialPage = page.coerceIn(0, PAGES.lastIndex)) { PAGES.size }
-    LaunchedEffect(pager.currentPage) { onPageChange(pager.currentPage) }
+/**
+ * 채널 화면 머리가 그리는 데 필요한 전부 — 도메인 카드에서 잘라낸 표시용 값.
+ *
+ * 내 채널과 범위 채널은 **조작이 다르다**(참여/긴급/나가기·발언 대상 vs 청취). 그 차이를 화면이 아니라
+ * 이 값이 들고 있게 해서, 화면은 «무엇을 그릴지» 만 보게 한다.
+ */
+data class ChannelHeadUi(
+    val id: String,
+    val title: String,
+    val badge: String = "",
+    val subtitle: String = "",
+    val emergency: Boolean = false,
+    val groupId: String? = null,
+    /** 내 채널 — 참여 중인가(나가기 vs 참여·긴급). null = 범위 채널. */
+    val joined: Boolean? = null,
+    val isMemberGroup: Boolean = false,
+    val canTarget: Boolean = false,
+    val targeted: Boolean = false,
+    val unread: Int = 0,
+    /** 범위 채널 — 청취 중인가. null = 내 채널. */
+    val listening: Boolean? = null,
+    /** 둘 다 없다 = 채널이 사라졌다(세션 종료·편성 제외). */
+    val gone: Boolean = false,
+)
 
+internal fun channelHead(
+    id: String,
+    mine: ChannelCard?,
+    range: ScopedCard?,
+    targeted: Boolean,
+): ChannelHeadUi = when {
+    mine != null -> ChannelHeadUi(
+        id = id, title = mine.title, badge = mine.badge,
+        subtitle = listOfNotNull(
+            mine.participants.takeIf { it > 0 }?.let { "참가 $it" },
+            mine.line2.takeIf { it.isNotEmpty() },
+            mine.stateText).joinToString(" · "),
+        emergency = mine.emergency, groupId = mine.group?.id,
+        joined = mine.joined, isMemberGroup = mine.kind == CardKind.MEMBER,
+        canTarget = mine.canCheck, targeted = targeted, unread = mine.unread)
+    range != null -> ChannelHeadUi(
+        id = id, title = range.title, badge = "범위",
+        subtitle = listOfNotNull(
+            range.participants.takeIf { it > 0 }?.let { "참가 $it" },
+            range.line2.takeIf { it.isNotEmpty() }).joinToString(" · "),
+        groupId = range.group.id, listening = range.listening)
+    else -> ChannelHeadUi(id = id, title = id, gone = true)
+}
+
+/** [채널] 본문 — **순수 컴포저블**. 아래 세 면은 호출자가 넘긴다(메시지·이벤트는 제 VM 을 쓴다). */
+@Composable
+fun ChannelScreenContent(
+    head: ChannelHeadUi,
+    onBack: () -> Unit = {},
+    onShowRoster: (String) -> Unit = {},
+    onJoin: () -> Unit = {},
+    onJoinEmergency: () -> Unit = {},
+    onLeave: () -> Unit = {},
+    onToggleTarget: () -> Unit = {},
+    onToggleListen: () -> Unit = {},
+    roster: List<com.cims.ue.sdk.RosterEntry> = emptyList(),
+    speaker: String = "",
+    me: String = "",
+    nameOf: (String) -> String = { "" },
+    modifier: Modifier = Modifier,
+) {
     Column(modifier.fillMaxSize()) {
-        // ── 머리 ──
-        Surface(color = if (mine?.emergency == true) MaterialTheme.colorScheme.errorContainer
+        // ── 머리 — 조작을 여기 모은다. 목록의 행이 얇을 수 있는 이유가 이것이다(§6.3a) ──
+        Surface(color = if (head.emergency) MaterialTheme.colorScheme.errorContainer
                         else MaterialTheme.colorScheme.surfaceVariant) {
             Column(Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
                     }
-                    Text(mine?.title ?: range?.title ?: id, fontSize = Type.title,
+                    Text(head.title, fontSize = Type.title,
                         fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.weight(1f))
-                    mine?.let { Tag(it.badge) }
-                    if (range != null) Tag("범위")
+                    if (head.badge.isNotEmpty()) Tag(head.badge)
                 }
-                val sub = mine?.let { c ->
-                    listOfNotNull(
-                        c.participants.takeIf { it > 0 }?.let { "참가 $it" },
-                        c.line2.takeIf { it.isNotEmpty() },
-                        c.stateText).joinToString(" · ")
-                } ?: range?.let { c ->
-                    listOfNotNull(
-                        c.participants.takeIf { it > 0 }?.let { "참가 $it" },
-                        c.line2.takeIf { it.isNotEmpty() }).joinToString(" · ")
-                }
-                if (!sub.isNullOrEmpty()) Text(sub, fontSize = Type.meta,
+                if (head.subtitle.isNotEmpty()) Text(head.subtitle, fontSize = Type.meta,
                     modifier = Modifier.padding(start = 12.dp))
 
-                // ── 조작 — 목록의 행이 얇을 수 있는 이유가 여기다 ──
                 Row(Modifier.padding(start = 8.dp, top = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    if (mine != null) {
-                        if (mine.joined) TextButton(onClick = { channels.leave(mine) }) { Text("나가기") }
-                        else if (mine.kind == CardKind.MEMBER) {
-                            Button(onClick = { channels.join(mine) }) { Text("참여") }
-                            TextButton(onClick = { channels.joinEmergency(mine) }) { Text("긴급") }
+                    when {
+                        head.joined == true -> TextButton(onClick = onLeave) { Text("나가기") }
+                        head.joined == false && head.isMemberGroup -> {
+                            Button(onClick = onJoin) { Text("참여") }
+                            TextButton(onClick = onJoinEmergency) { Text("긴급") }
                         }
-                        if (mine.canCheck) FilterChip(
-                            selected = mine.id in targets,
-                            onClick = { channels.toggleTarget(mine.id) },
-                            label = { Text(if (mine.id in targets) "발언 대상 ✓" else "발언 대상",
-                                fontSize = Type.meta) })
                     }
-                    if (range != null) TextButton(onClick = { scoped.toggleListen(range) }) {
-                        Text(if (range.listening) "청취 중지" else "청취")
+                    if (head.canTarget) FilterChip(
+                        selected = head.targeted,
+                        onClick = onToggleTarget,
+                        label = { Text(if (head.targeted) "발언 대상 ✓" else "발언 대상", fontSize = Type.meta) })
+                    if (head.listening != null) TextButton(onClick = onToggleListen) {
+                        Text(if (head.listening) "청취 중지" else "청취")
                     }
+                    // 청취는 `listenOnly` 합류라 서버가 Floor Taken 의 `permissionToRequest=0` 을 준다 —
+                    //   발언 버튼이 안 먹는 이유를 **누르기 전에** 적는다(dispatch_center.md §5.5).
+                    if (head.listening == true) Tag("청취 전용 — 발언 요청 불가",
+                        MaterialTheme.colorScheme.onSurfaceVariant, leading = 0)
                     Spacer(Modifier.weight(1f))
-                    val gid = mine?.group?.id ?: range?.group?.id
-                    if (gid != null) TextButton(onClick = { onShowRoster(gid) }) {
-                        Text("편성 전원", fontSize = Type.meta)
+                    head.groupId?.let { gid ->
+                        TextButton(onClick = { onShowRoster(gid) }) { Text("편성 전원", fontSize = Type.meta) }
                     }
                 }
             }
         }
 
-        if (mine == null && range == null) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        if (head.gone) {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 Text("채널이 사라졌습니다 — 세션이 끝났거나 편성에서 빠졌습니다",
                     fontSize = Type.body, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center)
@@ -127,34 +182,10 @@ fun ChannelScreen(
             return@Column
         }
 
-        // ── 세 면 — 좌우 스와이프 ──
-        TabRow(selectedTabIndex = pager.currentPage) {
-            PAGES.forEachIndexed { i, label ->
-                val unread = if (i == 1) mine?.unread ?: 0 else 0
-                Tab(selected = pager.currentPage == i,
-                    onClick = { onPageChange(i) },
-                    text = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(label, fontSize = Type.body)
-                            if (unread > 0) { Spacer(Modifier.width(4.dp)); Badge { Text("$unread") } }
-                        }
-                    })
-            }
-        }
-        // 탭을 누른 것도 스와이프와 같은 자리로 모은다 — 두 경로가 상태를 따로 들면 어긋난다.
-        LaunchedEffect(page) { if (page != pager.currentPage) pager.animateScrollToPage(page) }
-
-        HorizontalPager(state = pager, modifier = Modifier.weight(1f)) { i ->
-            when (i) {
-                0 -> RosterPage(
-                    roster = (mine?.group ?: range?.group)?.roster.orEmpty(),
-                    speaker = mine?.speaker ?: range?.speaker.orEmpty(),
-                    me = channels.myPttNumber,
-                    nameOf = channels::nameOf)
-                1 -> Box(Modifier.fillMaxSize().padding(8.dp)) { Messages(messages) }
-                else -> Box(Modifier.fillMaxSize().padding(8.dp)) { Activity(activity) }
-            }
-        }
+        // 로스터 한 장 — 메시지·이벤트는 [무전] 메뉴의 면이 되어 여기서 뺐다(§6.3).
+        //   두 곳에 두면 «어느 쪽이 지금 채널 것인가» 가 흐려진다.
+        RosterPage(roster = roster, speaker = speaker, me = me, nameOf = nameOf,
+            modifier = Modifier.weight(1f))
     }
 }
 
@@ -171,16 +202,17 @@ private fun RosterPage(
     speaker: String,
     me: String,
     nameOf: (String) -> String,
+    modifier: Modifier = Modifier,
 ) {
     val chips = rosterPreview(roster, speaker, me, nameOf, max = Int.MAX_VALUE).chips
     if (chips.isEmpty()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("접속한 사람이 없습니다", fontSize = Type.body,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }
-    LazyColumn(Modifier.fillMaxSize()) {
+    LazyColumn(modifier.fillMaxSize()) {
         items(chips, key = { it.number }) { c ->
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically) {

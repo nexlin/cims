@@ -105,6 +105,18 @@ internal const val DESK_ALL = "all"
  * 없으므로(데스크톱 `ListenStart`/`ListenEnd` → `MONITOR` 하나) 감청은 그 한 종류로 판정한다.
  * 당겨받기(`PICKUP`)는 «내가 받은 호» 라 집계에서 응대로 세는데(`addCallLog`), 필터에서도 같게 다룬다.
  */
+/**
+ * 사람 축 — 정규형으로 비교해 `010…` 과 `+8210…` 이 같게 걸린다(순수 함수, 시험 대상).
+ *
+ * 빈 값이면 거르지 않는다. 행의 번호가 비어 있으면(발신자 표시 제한) 사람 필터에 걸리지 않는다 —
+ * 어느 사람의 것인지 알 수 없는 행을 특정 사람의 기록이라고 말할 수는 없다.
+ */
+internal fun keepForPerson(row: CallLogRow, number: String): Boolean {
+    if (number.isBlank()) return true
+    val want = DirectoryBook.normalize(number)
+    return want.isNotEmpty() && DirectoryBook.normalize(row.number) == want
+}
+
 internal fun keepInDesk(row: CallLogRow, filter: String): Boolean = when (filter) {
     DESK_ALL -> true
     // 데스크톱 ⑥ 머리의 «대표번호» — `CallActivityViewModel.Refilter` 의 `pilot` 과 같은 값이다.
@@ -134,6 +146,14 @@ data class LiveCallRow(
     val mine: Boolean,
     val monitoring: Boolean,
     val inScope: Boolean,
+    /**
+     * 이 통화에 붙여 둔 **감청 leg**(없으면 null).
+     *
+     * 감청 상세(소스 귀속·라우트)를 이 행 안에서 펴기 위해 든다 — 따로 «감청» 면을 두면 같은 통화가 두
+     * 군데 나오고, 어느 쪽이 최신인지 흐려진다([dispatch_center.md](../../dispatch_center.md) §5.4 의
+     * «CC 분리 인도·귀속 보존» 은 **표시 요구**이므로 화면 어딘가에는 반드시 있어야 한다).
+     */
+    val tap: SessionItem? = null,
 ) {
     val primary: DialogRow get() = legs.first()
     val ringing: Boolean get() = legs.any { it.isEarly }
@@ -279,7 +299,7 @@ class CallDeskViewModel(private val s: DispatchSession) : ScreenViewModel() {
             val inScope = s.dispatch.monitorScope != "none"
             combineDialogs(dialogs).map { legs ->
                 val a = legs.first()
-                val monitoring = sessions.any { se ->
+                val tap = sessions.firstOrNull { se ->
                     se.kind == SessionKind.PHONE_MONITOR &&
                         legs.any { se.info.joinedDialog == it.info.callId }
                 }
@@ -289,8 +309,9 @@ class CallDeskViewModel(private val s: DispatchSession) : ScreenViewModel() {
                     bLabel = s.displayLabel(a.info.remoteIdentity),
                     viaPilot = legs.any { s.isPilot(it.watched) },
                     mine = legs.any { s.isMine(it.watched) },
-                    monitoring = monitoring,
-                    inScope = inScope)
+                    monitoring = tap != null,
+                    inScope = inScope,
+                    tap = tap)
             }
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
@@ -338,18 +359,19 @@ class CallDeskViewModel(private val s: DispatchSession) : ScreenViewModel() {
             }.sortedWith(compareBy({ it.established }, { it.number }))   // 안 잡힌 것이 위로
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
+    /**
+     * 감청이 상대에게 숨겨지는가 — 서버가 준 역할 속성이다(`listen_visibility`, dispatch_center.md §5.6).
+     * 화면이 정하지 않으므로 흐름이 아니라 값 하나로 든다.
+     */
+    val listenHidden: Boolean get() = s.dispatch.listenVisibility != "transparent"
+
     /** ⑥ 행의 [청취] — 확립된 leg 으로 Join 한다(RFC 3911 `a=recvonly`). */
     fun monitorLive(row: LiveCallRow) {
         val leg = row.legs.firstOrNull { it.isConfirmed } ?: return
         scope.launch { s.joinMonitor(leg) }
     }
 
-    /**
-     * ⑥ 행의 [청취 종료] — 그 통화에 붙여 둔 감청 leg 을 끊는다.
-     *
-     * 시트에도 같은 조작이 있지만 **켠 자리에서 끌 수 있어야 한다** — 켜는 버튼만 있고 끄는 버튼이
-     * 다른 화면에 있으면 «끊는 기능이 없다» 로 읽힌다.
-     */
+    /** ⑥ 행의 [청취 종료] — 그 통화에 붙여 둔 감청 leg 을 끊는다. 켠 자리가 곧 끄는 자리다. */
     fun stopMonitorLive(row: LiveCallRow) {
         val se = s.sessions.value.firstOrNull { x ->
             x.kind == SessionKind.PHONE_MONITOR && row.legs.any { x.info.joinedDialog == it.info.callId }
@@ -396,14 +418,35 @@ class CallDeskViewModel(private val s: DispatchSession) : ScreenViewModel() {
     private val _deskFilter = MutableStateFlow(DESK_ALL)
     val deskFilter: StateFlow<String> = _deskFilter.asStateFlow()
 
+    private val _personFilter = MutableStateFlow("")
+    /**
+     * 사람 축 — «이 사람과의 기록만». 종류 필터(`deskFilter`)와 **직교**하므로 따로 든다
+     * (사람 메뉴의 «통화 기록» 이 건다, §6.2f). 빈 값 = 전체.
+     */
+    val personFilter: StateFlow<String> = _personFilter.asStateFlow()
+
     /** ⑥ 에 실제로 그릴 행 — 필터 적용분. 원본은 세션이 갖는다. */
     val callLog: StateFlow<List<CallLogRow>> =
-        combine(s.callLog, _deskFilter) { rows, f -> rows.filter { keepInDesk(it, f) } }
+        combine(s.callLog, _deskFilter, _personFilter) { rows, f, who ->
+            rows.filter { keepInDesk(it, f) && keepForPerson(it, who) }
+        }
             .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     // ── 조작 ──
     /** 같은 칩을 다시 누르면 전체로 되돌린다 — 해제 수단이 칩 말고 없다. */
     fun setDeskFilter(f: String) { _deskFilter.value = if (_deskFilter.value == f) DESK_ALL else f }
+
+    /** 사람 메뉴의 «통화 기록» — 그 사람과의 기록만 남긴다. 같은 번호를 다시 걸면 해제. */
+    fun setPersonFilter(number: String) {
+        val n = userPart(number)
+        _personFilter.value = if (_personFilter.value == n) "" else n
+    }
+
+    /** 사람 필터의 표시 이름 — 칩에 «이름과의 기록» 으로 적는다. */
+    fun personFilterLabel(): String {
+        val n = _personFilter.value
+        return if (n.isEmpty()) "" else s.displayLabel(n)
+    }
 
     fun setDialNumber(v: String) { _dialNumber.value = v }
 

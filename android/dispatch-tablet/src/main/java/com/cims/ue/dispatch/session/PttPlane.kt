@@ -113,6 +113,37 @@ suspend fun DispatchSession.sendGroupSds(groupId: String, text: String): CimsRes
     return CimsResult.ok(Unit)
 }
 
+/**
+ * 1:1 SDS 발신 — 사람에게 직접(TS 24.282 `one-to-one-sds`).
+ *
+ * **그룹 경로로 보내면 안 된다.** request-type·Request-URI·conversation ID 가 다르고, 그룹으로 보내면
+ * 서버가 그룹 게이트를 거쳐 받는 쪽 스레드 귀속도 틀어진다([mcdata_messaging.md](…) §4 표).
+ * 스레드 키는 **상대 PTT 번호**다 — 수신 경로(`applySds`)가 `groupUri` 가 없을 때 쓰는 키와 같아야
+ * 보낸 말풍선과 받은 말풍선이 한 대화에 선다.
+ */
+suspend fun DispatchSession.sendSds(peer: String, text: String): CimsResult<Unit> {
+    val ptt = pttAccount ?: return CimsResult.fail(-1, "PTT 계정 없음")
+    val to = userPart(peer)
+    if (to.isEmpty() || text.isBlank()) return CimsResult.fail(-1, "받는 사람·내용 없음")
+    val r = ptt.sendSds(to, text)
+    if (!r.ok) return CimsResult.fail(r.code, r.reason)
+    addOutgoingMessage(to, text, r.value!!.msgId, r.value!!.token)
+    return CimsResult.ok(Unit)
+}
+
+/**
+ * 스레드 키 하나로 보낸다 — 키가 **편성 그룹이면 그룹 SDS**, 아니면 1:1.
+ *
+ * 화면이 «이 대화가 그룹인가» 를 다시 판정하지 않게 여기 한 곳에 둔다. 판정 근거는 받아 둔 그룹 목록이다
+ * (서버가 준 편성이 정본 — 번호 모양으로 추측하면 숫자 그룹 id 에서 틀린다).
+ */
+suspend fun DispatchSession.sendSdsTo(key: String, text: String): CimsResult<Unit> =
+    if (isPttGroup(key)) sendGroupSds(key, text) else sendSds(key, text)
+
+/** 이 키가 편성 그룹인가 — 그룹 목록에 있으면 그룹, 없으면 사람. */
+fun DispatchSession.isPttGroup(key: String): Boolean =
+    groups.value.any { it.id == key }
+
 // ── 이벤트 접기 ───────────────────────────────────────────────────────────────
 // 아래는 DispatchSession 이 코어 이벤트를 받아 부르는 것들이다. 화면이 읽는 모양으로 접기만 한다.
 

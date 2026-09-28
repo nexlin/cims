@@ -148,3 +148,6 @@ windows/**/obj/
 /sdk/android/cimsue/src/swig/java/
 /build-android/
 tester/worker/samples/.tts-cache/
+
+# 디자인 핸드오프 프로토타입 — 산출물이라 추적하지 않는다(코드에서 다시 뽑는다)
+cims-dispatch-prototype/

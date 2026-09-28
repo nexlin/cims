@@ -51,30 +51,84 @@ fun HistoryScreen(vm: HistoryViewModel, modifier: Modifier = Modifier) {
     val rows by vm.rows.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
+    val truncated by vm.truncated.collectAsStateWithLifecycle()
+    val hour by vm.hourFilter.collectAsStateWithLifecycle()
+    val date by vm.date.collectAsStateWithLifecycle()
+    val query by vm.query.collectAsStateWithLifecycle()
+    val band by vm.band.collectAsStateWithLifecycle()
+    val selected by vm.selected.collectAsStateWithLifecycle()
 
     // 화면에 처음 들어올 때 한 번 조회하고, 떠날 때 재생을 멈춘다(§4.6).
     LaunchedEffect(Unit) { if (rows.isEmpty()) vm.load() }
     DisposableEffect(Unit) { onDispose { vm.onLeave() } }
 
+    HistoryScreenContent(
+        ui = HistoryUi(kind = kind, rows = rows, loading = loading, error = error,
+            truncated = truncated, hourFilter = hour, date = date, query = query, band = band,
+            selected = selected),
+        act = HistoryActions(show = vm::show, load = { vm.load() }, search = vm::search,
+            shiftDay = vm::shiftDay, toggleHour = vm::toggleHour, clearHour = vm::clearHour,
+            select = vm::select, showDate = vm::showDate, today = vm::today),
+        // 재생기·세션 상세는 MediaPlayer·상세 조회를 들고 있어 통째로 넘긴다.
+        recordingStrip = { RecordingStrip(vm) },
+        sessionPane = { e -> SessionPane(vm, e) },
+        modifier = modifier)
+}
+
+/** [이력] 화면이 그리는 데 필요한 값 전부. */
+@Suppress("ArrayInDataClass")   // band 는 24칸 고정 배열 — 동등성 비교 대상이 아니다
+data class HistoryUi(
+    val kind: HistoryKind = HistoryKind.CALL,
+    val rows: List<HistoryEntry> = emptyList(),
+    val loading: Boolean = false,
+    val error: String = "",
+    /** 서버 상한에 걸려 잘렸는가 — 조용히 일부만 보여 주면 «없는 통화» 로 읽힌다. */
+    val truncated: Boolean = false,
+    val hourFilter: Int? = null,
+    val date: java.time.LocalDate = java.time.LocalDate.now(),
+    val query: String = "",
+    /** 시간대 밴드 — 24칸의 건수. */
+    val band: IntArray = IntArray(24),
+    val selected: HistoryEntry? = null,
+)
+
+data class HistoryActions(
+    val show: (HistoryKind) -> Unit = {},
+    val load: () -> Unit = {},
+    val search: (String) -> Unit = {},
+    val shiftDay: (Long) -> Unit = {},
+    val toggleHour: (Int) -> Unit = {},
+    val clearHour: () -> Unit = {},
+    val select: (HistoryEntry) -> Unit = {},
+    val showDate: (java.time.LocalDate) -> Unit = {},
+    val today: () -> Unit = {},
+)
+
+/** [이력] 본문 — **순수 컴포저블**. 녹취 재생·세션 상세만 호출자가 넘긴다. */
+@Composable
+fun HistoryScreenContent(
+    ui: HistoryUi,
+    act: HistoryActions = HistoryActions(),
+    recordingStrip: @Composable () -> Unit = {},
+    sessionPane: @Composable (HistoryEntry) -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
     Column(modifier.fillMaxSize()) {
-        Toolbar(vm)
-        HourBand(vm)
-        if (error.isNotBlank()) {
-            Text(error, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+        Toolbar(ui, act)
+        HourBand(ui, act)
+        if (ui.error.isNotBlank()) {
+            Text(ui.error, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                 color = MaterialTheme.colorScheme.error, fontSize = Type.strong)
         }
-        // 서버 상한에 걸려 잘렸으면 말한다 — 조용히 일부만 보여 주면 «없는 통화» 로 읽힌다.
-        val truncated by vm.truncated.collectAsStateWithLifecycle()
-        val hour by vm.hourFilter.collectAsStateWithLifecycle()
-        if (truncated) Text(
-            if (hour == null) "서버 상한 ${HistoryViewModel.QUERY_LIMIT}건에 걸려 **최근 것만** 보입니다 — 시간대 칸을 눌러 좁혀 보세요"
+        if (ui.truncated) Text(
+            if (ui.hourFilter == null) "서버 상한 ${HistoryViewModel.QUERY_LIMIT}건에 걸려 **최근 것만** 보입니다 — 시간대 칸을 눌러 좁혀 보세요"
             else "이 시간대도 상한에 걸렸습니다 — 더 좁은 범위는 콘솔 이력에서 봅니다",
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
             color = MaterialTheme.colorScheme.tertiary, fontSize = Type.body)
-        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-        when (kind) {
-            HistoryKind.PTT -> PttPane(vm, rows, Modifier.weight(1f))
-            else -> CallPane(vm, rows, Modifier.weight(1f))
+        if (ui.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+        when (ui.kind) {
+            HistoryKind.PTT -> PttPane(ui, act, sessionPane, Modifier.weight(1f))
+            else -> CallPane(ui, act, recordingStrip, Modifier.weight(1f))
         }
     }
 }
@@ -90,11 +144,11 @@ private fun Locked(text: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Toolbar(vm: HistoryViewModel) {
-    val kind by vm.kind.collectAsStateWithLifecycle()
-    val date by vm.date.collectAsStateWithLifecycle()
-    val query by vm.query.collectAsStateWithLifecycle()
-    val rows by vm.rows.collectAsStateWithLifecycle()
+private fun Toolbar(ui: HistoryUi, act: HistoryActions) {
+    val kind = ui.kind
+    val date = ui.date
+    val query = ui.query
+    val rows = ui.rows
     var pick by remember { mutableStateOf(false) }
 
     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
@@ -105,19 +159,19 @@ private fun Toolbar(vm: HistoryViewModel) {
             listOf(HistoryKind.CALL, HistoryKind.PTT).forEachIndexed { i, k ->
                 SegmentedButton(
                     selected = kind == k,
-                    onClick = { vm.show(k) },
+                    onClick = { act.show(k) },
                     shape = SegmentedButtonDefaults.itemShape(i, 2),
                 ) { Text(k.label) }
             }
         }
 
-        TextButton(onClick = { vm.shiftDay(-1) }) { Text("◀") }
+        TextButton(onClick = { act.shiftDay(-1) }) { Text("◀") }
         TextButton(onClick = { pick = true }) { Text(date.toString(), fontWeight = FontWeight.Bold) }
-        TextButton(onClick = { vm.shiftDay(1) }, enabled = date.isBefore(LocalDate.now())) { Text("▶") }
-        TextButton(onClick = { vm.today() }) { Text("오늘") }
+        TextButton(onClick = { act.shiftDay(1) }, enabled = date.isBefore(LocalDate.now())) { Text("▶") }
+        TextButton(onClick = act.today) { Text("오늘") }
 
         OutlinedTextField(
-            value = query, onValueChange = vm::search,
+            value = query, onValueChange = act.search,
             placeholder = { Text("상대·그룹·참여자", fontSize = Type.strong) },
             singleLine = true,
             modifier = Modifier.width(220.dp).height(52.dp),
@@ -125,7 +179,7 @@ private fun Toolbar(vm: HistoryViewModel) {
 
         Spacer(Modifier.weight(1f))
         Text(summaryOf(kind, rows), fontSize = Type.body, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        TextButton(onClick = { vm.load() }) { Text("조회") }
+        TextButton(onClick = { act.load() }) { Text("조회") }
     }
 
     if (pick) {
@@ -136,7 +190,7 @@ private fun Toolbar(vm: HistoryViewModel) {
             confirmButton = {
                 TextButton(onClick = {
                     state.selectedDateMillis?.let {
-                        vm.showDate(Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate())
+                        act.showDate(Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate())
                     }
                     pick = false
                 }) { Text("확인") }
@@ -159,9 +213,9 @@ private fun summaryOf(kind: HistoryKind, rows: List<HistoryEntry>): String {
 // ── 시간대 밴드 ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun HourBand(vm: HistoryViewModel) {
-    val band by vm.band.collectAsStateWithLifecycle()
-    val sel by vm.hourFilter.collectAsStateWithLifecycle()
+private fun HourBand(ui: HistoryUi, act: HistoryActions) {
+    val band = ui.band
+    val sel = ui.hourFilter
     val max = band.maxOrNull()?.coerceAtLeast(1) ?: 1
 
     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp).height(34.dp),
@@ -175,14 +229,14 @@ private fun HourBand(vm: HistoryViewModel) {
             Column(Modifier.weight(1f).fillMaxHeight()
                 .clip(RoundedCornerShape(3.dp))
                 .background(bg)
-                .clickable(enabled = n > 0) { vm.toggleHour(h) },
+                .clickable(enabled = n > 0) { act.toggleHour(h) },
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center) {
                 Text("%02d".format(h), fontSize = Type.micro)
                 if (n > 0) Text("$n", fontSize = Type.micro, fontWeight = FontWeight.Bold)
             }
         }
-        if (sel != null) TextButton(onClick = { vm.clearHour() },
+        if (sel != null) TextButton(onClick = { act.clearHour() },
             contentPadding = PaddingValues(horizontal = 6.dp)) { Text("전체", fontSize = Type.meta) }
     }
 }
@@ -190,16 +244,17 @@ private fun HourBand(vm: HistoryViewModel) {
 // ── 통화 ────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun CallPane(vm: HistoryViewModel, rows: List<HistoryEntry>, modifier: Modifier) {
-    val sel by vm.selected.collectAsStateWithLifecycle()
+private fun CallPane(ui: HistoryUi, act: HistoryActions, recordingStrip: @Composable () -> Unit, modifier: Modifier) {
+    val rows = ui.rows
+    val sel = ui.selected
     Column(modifier.fillMaxSize()) {
         CallHeader()
         HorizontalDivider()
         LazyColumn(Modifier.weight(1f)) {
-            items(rows, key = { it.id }) { e -> CallRow(e, e.id == sel?.id) { vm.select(e) } }
+            items(rows, key = { it.id }) { e -> CallRow(e, e.id == sel?.id) { act.select(e) } }
         }
         // 녹취 있는 행을 고르면 표 아래 띠만 나온다 — 통화는 한 줄이 곧 상세다.
-        sel?.takeIf { it.hasRecording }?.let { RecordingStrip(vm) }
+        sel?.takeIf { it.hasRecording }?.let { recordingStrip() }
     }
 }
 
@@ -240,15 +295,16 @@ private fun short(uri: String): String =
 // ── PTT ─────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun PttPane(vm: HistoryViewModel, rows: List<HistoryEntry>, modifier: Modifier) {
-    val sel by vm.selected.collectAsStateWithLifecycle()
+private fun PttPane(ui: HistoryUi, act: HistoryActions, sessionPane: @Composable (HistoryEntry) -> Unit, modifier: Modifier) {
+    val rows = ui.rows
+    val sel = ui.selected
     Row(modifier.fillMaxSize()) {
         LazyColumn(Modifier.weight(1f).fillMaxHeight()) {
-            items(rows, key = { it.id }) { e -> SessionCard(e, e.id == sel?.id) { vm.select(e) } }
+            items(rows, key = { it.id }) { e -> SessionCard(e, e.id == sel?.id) { act.select(e) } }
         }
         VerticalDivider()
         Box(Modifier.weight(3f).fillMaxHeight()) {
-            sel?.let { SessionPane(vm, it) }
+            sel?.let { sessionPane(it) }
                 ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("세션을 고르세요", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }

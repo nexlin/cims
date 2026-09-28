@@ -48,8 +48,30 @@ fun TalkBar(
     // 세션은 Service 수명이라 호는 살아 있으므로, Composable 이 떠날 때 반드시 해제한다.
     DisposableEffect(Unit) { onDispose { vm.releaseAll() } }
 
+    TalkBarContent(
+        targets = targets,
+        locked = locked,
+        anyJoined = cards.any { it.canCheck },
+        onDown = { vm.pttDown(lockEnabled) },
+        onUp = { vm.pttUp(lockEnabled) },
+        onFocus = vm::focus,
+        onClear = vm::clearTargets,
+        modifier = modifier)
+}
+
+/** 발언 바 본문 — **순수 컴포저블**. 전체 화면 Preview 가 이것을 쓴다. */
+@Composable
+fun TalkBarContent(
+    targets: List<TalkTargetChip>,
+    locked: Boolean = false,
+    anyJoined: Boolean = false,
+    onDown: () -> Unit = {},
+    onUp: () -> Unit = {},
+    onFocus: (String) -> Unit = {},
+    onClear: () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
     val canTalk = targets.isNotEmpty()
-    val anyJoined = cards.any { it.canCheck }
     val granted = targets.count { it.granted }
     val speaking = granted > 0
     val requesting = !speaking && targets.any { it.requesting || it.queued }
@@ -72,8 +94,8 @@ fun TalkBar(
                     locked -> "잠금"
                     else -> "PTT"
                 },
-                onDown = { vm.pttDown(lockEnabled) },
-                onUp = { vm.pttUp(lockEnabled) })
+                onDown = onDown,
+                onUp = onUp)
 
             if (!canTalk) {
                 // 못 누르는 이유를 화면에 쓴다 — 회색 버튼만 두면 «버튼이 없다» 로 읽힌다.
@@ -95,14 +117,14 @@ fun TalkBar(
                 ) {
                     targets.forEach { t ->
                         AssistChip(
-                            onClick = { vm.focus(t.card.id) },
+                            onClick = { onFocus(t.card.id) },
                             label = {
                                 Text(t.name + (if (t.stateText.isNotEmpty()) " · ${t.stateText}" else ""),
                                      fontSize = Type.body)
                             })
                     }
                 }
-                TextButton(onClick = vm::clearTargets) { Text("모두 해제", fontSize = Type.body) }
+                TextButton(onClick = onClear) { Text("모두 해제", fontSize = Type.body) }
             }
         }
     }

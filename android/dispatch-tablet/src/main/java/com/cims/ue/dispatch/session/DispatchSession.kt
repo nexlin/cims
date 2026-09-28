@@ -197,6 +197,15 @@ class DispatchSession(
     /** ④ PTT 메시지 — 그룹 id 별 스레드(시간 오름차순). */
     val messages: StateFlow<Map<String, List<Message>>> = _messages.asStateFlow()
 
+    /**
+     * 전화 축 문자(SMS/LMS) 스레드 — SDS 와 **맵을 나눈다**.
+     *
+     * 둘 다 스레드 키가 번호일 수 있어(PTT 1:1 SDS) 한 맵에 담으면 두 망의 글이 한 대화에 섞인다.
+     * 발신 상태 상관(`applyRequestResult`)·보관은 같은 길을 쓴다.
+     */
+    private val _sms = MutableStateFlow<Map<String, List<Message>>>(emptyMap())
+    val sms: StateFlow<Map<String, List<Message>>> = _sms.asStateFlow()
+
     private val _dialogs = MutableStateFlow<List<DialogRow>>(emptyList())
     /** 감시 중인 dialog(RFC 4235) — ③ 그룹원 띠·대표번호 대기열의 소스. */
     val dialogs: StateFlow<List<DialogRow>> = _dialogs.asStateFlow()
@@ -747,9 +756,10 @@ class DispatchSession(
             runCatching {
                 messageStore.failPending()
                 messageStore.prune()
-                messageStore.load()
+                messageStore.load(MessageKind.SDS)
             }.getOrElse { emptyMap() }
         }
+        loadStoredSms()
         if (loaded.isEmpty()) return
         // 기동 중 이미 들어온 것이 있으면 그것이 최신이다 — 보관분 위에 얹는다.
         val live = _messages.value
@@ -810,13 +820,56 @@ class DispatchSession(
     internal fun applyRequestResult(token: Long, code: Int) {
         if (token <= 0) return
         val st = if (code in 200..299) SendState.SENT else SendState.FAILED
-        _messages.value = _messages.value.mapValues { (_, list) ->
+        fun patch(m: Map<String, List<Message>>) = m.mapValues { (_, list) ->
             list.map {
                 if (it.token == token && it.outgoing && it.state == SendState.PENDING) it.copy(state = st)
                 else it
             }
         }
+        _messages.value = patch(_messages.value)
+        _sms.value = patch(_sms.value)          // 문자도 같은 token 으로 온다
         storeAsync { setStateByToken(token, st) }
+    }
+
+    // ── 전화 축 문자(SMS/LMS) ──────────────────────────────────────────────
+    private fun loadStoredSms() {
+        val loaded = runCatching { messageStore.load(MessageKind.SMS) }.getOrElse { emptyMap() }
+        if (loaded.isEmpty()) return
+        val live = _sms.value
+        _sms.value = loaded.toMutableMap().apply {
+            live.forEach { (k, msgs) ->
+                val ids = this[k].orEmpty().map { it.id }.toHashSet()
+                this[k] = this[k].orEmpty() + msgs.filter { it.id !in ids }
+            }
+        }
+    }
+
+    internal fun addOutgoingSms(peer: String, text: String, token: Long) {
+        val m = Message(
+            id = "sms-out-" + System.nanoTime(), groupId = peer,
+            fromUri = "", fromName = "나", text = text,
+            atMs = System.currentTimeMillis(), outgoing = true,
+            token = token, state = SendState.PENDING, kind = MessageKind.SMS)
+        _sms.value = _sms.value + (peer to ((_sms.value[peer] ?: emptyList()) + m))
+        storeAsync { insert(m) }
+    }
+
+    internal fun addIncomingSms(peer: String, fromUri: String, text: String) {
+        val m = Message(
+            id = "sms-in-" + System.nanoTime(), groupId = peer,
+            fromUri = fromUri, fromName = displayName(fromUri), text = text,
+            atMs = System.currentTimeMillis(), outgoing = false, read = false,
+            kind = MessageKind.SMS)
+        _sms.value = _sms.value + (peer to ((_sms.value[peer] ?: emptyList()) + m))
+        storeAsync { insert(m) }
+    }
+
+    /** 문자 스레드를 읽음 처리. */
+    fun markSmsRead(peer: String) {
+        _sms.value = _sms.value.mapValues { (k, list) ->
+            if (k == peer) list.map { if (!it.read) it.copy(read = true) else it } else list
+        }
+        storeAsync { markRead(peer, MessageKind.SMS) }
     }
 
     /** 그룹 스레드를 읽음 처리 — ① 카드의 ✉ 배지가 내려간다. */
@@ -866,6 +919,8 @@ class DispatchSession(
         scope.launch { engine.roster.collect { applyRoster(it) } }
         scope.launch { engine.sds.collect { applySds(it) } }
         scope.launch { engine.requestResult.collect { applyRequestResult(it) } }
+        // SIP MESSAGE text/plain — 전화 축 문자(volte_supplementary_services.md §4.3).
+        scope.launch { engine.message.collect { applySipMessage(it) } }
         scope.launch { engine.dialogInfo.collect { applyDialog(it) } }
     }
 

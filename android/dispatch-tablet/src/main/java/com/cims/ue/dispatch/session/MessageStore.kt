@@ -31,7 +31,8 @@ class MessageStore(context: Context) :
               msg_id    TEXT NOT NULL DEFAULT '',
               token     INTEGER NOT NULL DEFAULT 0,
               state     INTEGER NOT NULL DEFAULT 0,
-              read      INTEGER NOT NULL DEFAULT 1)
+              read      INTEGER NOT NULL DEFAULT 1,
+              kind      TEXT NOT NULL DEFAULT 'SDS')
             """.trimIndent())
         db.execSQL("CREATE INDEX IF NOT EXISTS ix_msg_thread ON messages(group_id, at_ms)")
         db.execSQL("CREATE INDEX IF NOT EXISTS ix_msg_msgid ON messages(msg_id)")
@@ -39,9 +40,18 @@ class MessageStore(context: Context) :
         db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS ux_msg_id ON messages(id)")
     }
 
+    /**
+     * **보관을 버리지 않는다.** 종전에는 판이 바뀌면 표를 지웠는데, SDS 스레드가 통째로 사라지면
+     * 관제사는 «아까 뭐라고 했더라» 를 찾을 데가 없다(서버에 SDS 이력 API 가 없다).
+     * 1 → 2 는 종류 열 추가뿐이라 기존 행은 SDS 로 남는다.
+     */
     override fun onUpgrade(db: SQLiteDatabase, old: Int, new: Int) {
-        db.execSQL("DROP TABLE IF EXISTS messages")
-        onCreate(db)
+        if (old < 2) runCatching {
+            db.execSQL("ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'SDS'")
+        }.onFailure {
+            db.execSQL("DROP TABLE IF EXISTS messages")
+            onCreate(db)
+        }
     }
 
     /**
@@ -83,16 +93,18 @@ class MessageStore(context: Context) :
             arrayOf<Any>(state.ordinal, token))
     }
 
-    fun markRead(groupId: String) = runCatching {
-        writableDatabase.execSQL("UPDATE messages SET read=1 WHERE group_id=?", arrayOf<Any>(groupId))
+    fun markRead(groupId: String, kind: MessageKind = MessageKind.SDS) = runCatching {
+        writableDatabase.execSQL("UPDATE messages SET read=1 WHERE group_id=? AND kind=?",
+            arrayOf<Any>(groupId, kind.name))
     }
 
-    /** 스레드별 최근 [limit] 건(오래된 것부터). 화면이 그리는 순서 그대로. */
-    fun load(limit: Int = LOAD_LIMIT): Map<String, List<Message>> = runCatching {
+    /** 종류별 스레드 — 최근 [limit] 건(오래된 것부터). 화면이 그리는 순서 그대로. */
+    fun load(kind: MessageKind = MessageKind.SDS, limit: Int = LOAD_LIMIT): Map<String, List<Message>> = runCatching {
         val out = LinkedHashMap<String, MutableList<Message>>()
         readableDatabase.rawQuery(
             "SELECT id, group_id, from_uri, from_name, text, at_ms, outgoing, msg_id, token, state, read " +
-                "FROM messages ORDER BY at_ms DESC LIMIT ?", arrayOf(limit.toString())).use { c ->
+                "FROM messages WHERE kind=? ORDER BY at_ms DESC LIMIT ?",
+            arrayOf(kind.name, limit.toString())).use { c ->
             while (c.moveToNext()) {
                 val m = Message(
                     id = c.getString(0), groupId = c.getString(1),
@@ -100,7 +112,7 @@ class MessageStore(context: Context) :
                     atMs = c.getLong(5), outgoing = c.getInt(6) != 0,
                     msgId = c.getString(7), token = c.getLong(8),
                     state = SendState.entries.getOrElse(c.getInt(9)) { SendState.NONE },
-                    read = c.getInt(10) != 0)
+                    read = c.getInt(10) != 0, kind = kind)
                 out.getOrPut(m.groupId) { ArrayList() }.add(m)
             }
         }
@@ -114,11 +126,12 @@ class MessageStore(context: Context) :
         put("outgoing", if (m.outgoing) 1 else 0)
         put("msg_id", m.msgId); put("token", m.token)
         put("state", m.state.ordinal); put("read", if (m.read) 1 else 0)
+        put("kind", m.kind.name)
     }
 
     companion object {
         private const val DB_NAME = "messages.db"
-        private const val DB_VERSION = 1
+        private const val DB_VERSION = 2
         /** 데스크톱과 같은 기본 보관 기간(§4.4). */
         const val RETENTION_DAYS = 30
         /** 기동 적재 상한 — 스레드 전부가 아니라 최근 것만 든다. */

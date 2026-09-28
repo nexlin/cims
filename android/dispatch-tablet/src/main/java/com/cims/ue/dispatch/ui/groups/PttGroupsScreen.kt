@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.cims.ue.dispatch.session.DirectoryBook
 import com.cims.ue.dispatch.session.ManagedGroup
 
 @Composable
@@ -32,20 +33,73 @@ fun PttGroupsScreen(vm: PttGroupsViewModel, onGoDispatch: () -> Unit, modifier: 
     val form by vm.form.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
+    val filter by vm.filter.collectAsStateWithLifecycle()
+    val query by vm.query.collectAsStateWithLifecycle()
+    val book by vm.book.collectAsStateWithLifecycle()
+    val detail by vm.detail.collectAsStateWithLifecycle()
+    val detailBusy by vm.detailBusy.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) { if (rows.isEmpty()) vm.load() }
 
+    PttGroupsScreenContent(
+        ui = GroupsUi(rows = rows, selected = sel, detail = detail, detailBusy = detailBusy,
+            book = book, filter = filter, query = query, loading = loading, error = error,
+            locked = vm.locked, editing = form != null),
+        act = GroupsActions(
+            reload = vm::load, newGroup = vm::newGroup, setFilter = vm::setFilter, search = vm::search,
+            select = vm::select, edit = vm::edit, delete = vm::delete,
+            openChannel = { g -> vm.openChannel(g, onGoDispatch) }),
+        // 편집 폼은 입력 상태가 VM 에 있어 통째로 넘긴다 — 판정 대상이 밀도가 아니라 폼 동작이다.
+        editPane = { form?.let { EditPane(vm, it) } },
+        modifier = modifier)
+}
+
+/** [PTT 그룹] 화면이 그리는 데 필요한 값 전부. */
+data class GroupsUi(
+    val rows: List<ManagedGroup> = emptyList(),
+    val selected: ManagedGroup? = null,
+    val detail: List<DetailMember> = emptyList(),
+    val detailBusy: Boolean = false,
+    val book: DirectoryBook = DirectoryBook(),
+    val filter: GroupFilter = GroupFilter.ALL,
+    val query: String = "",
+    val loading: Boolean = false,
+    val error: String = "",
+    /** 편집 중 — 목록·[↻]·[+ 새 그룹]이 잠긴다(§4.7). */
+    val locked: Boolean = false,
+    val editing: Boolean = false,
+)
+
+data class GroupsActions(
+    val reload: () -> Unit = {},
+    val newGroup: () -> Unit = {},
+    val setFilter: (GroupFilter) -> Unit = {},
+    val search: (String) -> Unit = {},
+    val select: (ManagedGroup) -> Unit = {},
+    val edit: (ManagedGroup) -> Unit = {},
+    val delete: (ManagedGroup) -> Unit = {},
+    val openChannel: (ManagedGroup) -> Unit = {},
+)
+
+/** [PTT 그룹] 본문 — **순수 컴포저블**. 편집 폼만 호출자가 넘긴다. */
+@Composable
+fun PttGroupsScreenContent(
+    ui: GroupsUi,
+    act: GroupsActions = GroupsActions(),
+    editPane: @Composable () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
     Column(modifier.fillMaxSize()) {
-        if (error.isNotBlank()) Text(error, Modifier.fillMaxWidth().padding(12.dp, 6.dp),
+        if (ui.error.isNotBlank()) Text(ui.error, Modifier.fillMaxWidth().padding(12.dp, 6.dp),
             color = MaterialTheme.colorScheme.error, fontSize = Type.strong)
-        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (ui.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         Row(Modifier.weight(1f)) {
-            GroupList(vm, rows, sel, Modifier.weight(1f))
+            GroupList(ui, act, Modifier.weight(1f))
             VerticalDivider()
             Box(Modifier.weight(3f).fillMaxHeight()) {
                 when {
-                    form != null -> EditPane(vm, form!!)
-                    sel != null -> DetailPane(vm, sel!!, onGoDispatch)
+                    ui.editing -> editPane()
+                    ui.selected != null -> DetailPane(ui, act, ui.selected)
                     else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text("그룹을 고르세요", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -58,36 +112,37 @@ fun PttGroupsScreen(vm: PttGroupsViewModel, onGoDispatch: () -> Unit, modifier: 
 // ── 목록 ────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun GroupList(vm: PttGroupsViewModel, rows: List<ManagedGroup>,
-                      sel: ManagedGroup?, modifier: Modifier) {
-    val filter by vm.filter.collectAsStateWithLifecycle()
-    val query by vm.query.collectAsStateWithLifecycle()
-    val locked = vm.locked
+private fun GroupList(ui: GroupsUi, act: GroupsActions, modifier: Modifier = Modifier) {
+    val rows = ui.rows
+    val sel = ui.selected
+    val filter = ui.filter
+    val query = ui.query
+    val locked = ui.locked
 
     Column(modifier.fillMaxHeight()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Text("그룹 ${rows.size}개", fontSize = Type.strong, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = { vm.load() }, enabled = !locked,
+            TextButton(onClick = { act.reload() }, enabled = !locked,
                 contentPadding = PaddingValues(horizontal = 8.dp)) { Text("↻") }
-            TextButton(onClick = { vm.newGroup() }, enabled = !locked,
+            TextButton(onClick = { act.newGroup() }, enabled = !locked,
                 contentPadding = PaddingValues(horizontal = 8.dp)) { Text("+ 새 그룹") }
         }
         Row(Modifier.padding(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             GroupFilter.entries.forEach { f ->
-                FilterChip(selected = filter == f, onClick = { vm.setFilter(f) },
+                FilterChip(selected = filter == f, onClick = { act.setFilter(f) },
                     enabled = !locked, label = { Text(f.label, fontSize = Type.meta) })
             }
         }
         OutlinedTextField(
-            value = query, onValueChange = vm::search, enabled = !locked,
+            value = query, onValueChange = act.search, enabled = !locked,
             placeholder = { Text("그룹명·id", fontSize = Type.body) }, singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
             textStyle = MaterialTheme.typography.bodySmall)
         HorizontalDivider()
         LazyColumn(Modifier.weight(1f)) {
-            items(rows, key = { it.id }) { g -> GroupRow(g, g.id == sel?.id, locked) { vm.select(g) } }
+            items(rows, key = { it.id }) { g -> GroupRow(g, g.id == sel?.id, locked) { act.select(g) } }
         }
     }
 }
@@ -136,10 +191,10 @@ private fun MemberLine(m: DetailMember) {
 // ── 상세 ────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun DetailPane(vm: PttGroupsViewModel, g: ManagedGroup, onGoDispatch: () -> Unit) {
-    val book by vm.book.collectAsStateWithLifecycle()
-    val members by vm.detail.collectAsStateWithLifecycle()
-    val membersBusy by vm.detailBusy.collectAsStateWithLifecycle()
+private fun DetailPane(ui: GroupsUi, act: GroupsActions, g: ManagedGroup) {
+    val book = ui.book
+    val members = ui.detail
+    val membersBusy = ui.detailBusy
     var confirmDelete by remember(g.id) { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().padding(14.dp)) {
@@ -151,7 +206,7 @@ private fun DetailPane(vm: PttGroupsViewModel, g: ManagedGroup, onGoDispatch: ()
             if (g.isMember) Tag("멤버")
             Spacer(Modifier.weight(1f))
             // 관리 판정은 서버가 한다 — 앱은 서버가 내려 준 canManage 로 버튼만 접는다(§4.7).
-            if (g.canManage) TextButton(onClick = { vm.edit(g) }) { Text("편집") }
+            if (g.canManage) TextButton(onClick = { act.edit(g) }) { Text("편집") }
         }
         Spacer(Modifier.height(10.dp))
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
@@ -195,7 +250,7 @@ private fun DetailPane(vm: PttGroupsViewModel, g: ManagedGroup, onGoDispatch: ()
                 Text("삭제", color = MaterialTheme.colorScheme.error)
             }
             Spacer(Modifier.weight(1f))
-            Button(onClick = { vm.openChannel(g, onGoDispatch) }) {
+            Button(onClick = { act.openChannel(g) }) {
                 Text(if (g.isMember) "채널로 (합류)" else "채널로")
             }
         }
@@ -206,7 +261,7 @@ private fun DetailPane(vm: PttGroupsViewModel, g: ManagedGroup, onGoDispatch: ()
         title = { Text("그룹 삭제") },
         text = { Text("«${g.name.ifBlank { g.id }}» 을(를) 지웁니다. 되돌릴 수 없습니다.") },
         confirmButton = {
-            TextButton(onClick = { confirmDelete = false; vm.delete(g) }) {
+            TextButton(onClick = { confirmDelete = false; act.delete(g) }) {
                 Text("삭제", color = MaterialTheme.colorScheme.error)
             }
         },

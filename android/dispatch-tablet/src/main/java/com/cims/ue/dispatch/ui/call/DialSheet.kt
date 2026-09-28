@@ -1,9 +1,10 @@
 @file:OptIn(ExperimentalFoundationApi::class)
-// 발신 시트 — 다이얼패드 · 주소록 · 최근 (docs/design/features/android_dispatch_tablet.md §6.2,
+// [통화] > «주소록» 면 — 전화번호부 (docs/design/features/android_dispatch_tablet.md §6.2b,
 // dispatch_desktop_ui.md §4.3 [▦▾] 팝오버 · §6.6 팝오버의 번역)
 //
-// 데스크톱의 [▦▾] 팝오버 셋을 태블릿에서는 **전면 시트 하나에 탭 셋**으로 접는다. 셋 다 하는 일이 같기
-// 때문이다 — 번호를 하나 골라 건다. 고르면 시트가 닫히고 바로 발신한다(한 번 더 누르게 하지 않는다).
+// **행을 누르면 사람 메뉴가 뜬다** — 휴대폰 연락처와 같다. 전에는 탭이 곧 발신이었는데, 한 사람에게 할 수
+// 있는 일이 다섯(통화·문자·사설콜·무전 메시지·기록)이라 탭 하나를 발신에 고정하면 나머지는 롱프레스를
+// 아는 사람만 쓰게 되고, 목록을 훑다 잘못 눌러 걸리는 사고도 난다. 바로 걸고 싶으면 행 오른쪽 [📞] 이다.
 package com.cims.ue.dispatch.ui.call
 
 import com.cims.ue.dispatch.ui.Type
@@ -29,69 +30,24 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cims.ue.dispatch.session.DirectoryBook
 import com.cims.ue.dispatch.session.DirectoryEntry
 
-private enum class DialTab(val label: String) { PAD("다이얼패드"), BOOK("주소록"), RECENT("최근") }
-
 private val hhmm = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.KOREA)
 
 @OptIn(ExperimentalMaterial3Api::class)
+/**
+ * [통화] > «주소록» 면 — 전화번호부에서 골라 건다.
+ *
+ * 전에는 시트 안의 탭 하나였다. 시트는 «잠깐 열고 닫는» 표면인데 주소록은 **거는 일의 주 경로**라
+ * 면으로 올렸다. 다이얼패드는 «통화» 면의 키패드가, 최근은 «통화내역» 이 대신한다 — 셋을 한 시트에
+ * 모아 둘 이유가 없어졌다.
+ */
 @Composable
-fun DialSheet(
+fun ContactsPane(
     vm: CallDeskViewModel,
-    onPerson: (PersonAction, String) -> Unit = { _, _ -> },
-    onDismiss: () -> Unit,
+    onPerson: (PersonAction, String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    var tab by remember { mutableStateOf(DialTab.BOOK) }
-
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().heightIn(min = 320.dp, max = 560.dp)) {
-            TabRow(selectedTabIndex = tab.ordinal) {
-                DialTab.entries.forEach { t ->
-                    Tab(selected = tab == t, onClick = { tab = t }, text = { Text(t.label) })
-                }
-            }
-            val place: (String) -> Unit = { n -> vm.dialTo(n); onDismiss() }
-            when (tab) {
-                DialTab.PAD -> Dialpad(vm, place)
-                DialTab.BOOK -> Contacts(vm, onPerson, place)
-                DialTab.RECENT -> Recent(vm, place)
-            }
-        }
-    }
-}
-
-// ── 다이얼패드 ──────────────────────────────────────────────────────────────
-
-@Composable
-private fun Dialpad(vm: CallDeskViewModel, onDial: (String) -> Unit) {
-    var n by remember { mutableStateOf("") }
-    val book by vm.book.collectAsStateWithLifecycle()
-    Column(Modifier.fillMaxWidth().padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(n.ifEmpty { "번호를 누르세요" }, fontSize = Type.huge, fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
-        // 이름이 잡히면 바로 보여 준다 — 잘못 누른 번호를 걸기 전에 안다.
-        val who = if (n.isBlank()) "" else book.nameOf(n)
-        Text(who.ifBlank { " " }, fontSize = Type.strong, color = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.height(8.dp))
-        listOf("123", "456", "789", "*0#").forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                row.forEach { d ->
-                    OutlinedButton(onClick = { n += d },
-                        modifier = Modifier.size(78.dp, 52.dp)) {
-                        Text(d.toString(), fontSize = Type.head, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(onClick = { n = n.dropLast(1) }, enabled = n.isNotEmpty()) { Text("←") }
-            Button(onClick = { onDial(n) }, enabled = n.isNotBlank(),
-                modifier = Modifier.height(48.dp).widthIn(min = 140.dp)) {
-                Text("발신", fontSize = Type.title, fontWeight = FontWeight.Bold)
-            }
-        }
+    Box(modifier.fillMaxSize()) {
+        Contacts(vm, onPerson, onDial = { n -> vm.dialTo(n) })
     }
 }
 
@@ -130,8 +86,8 @@ private fun Contacts(
             }
             return@Column
         }
-        // 탭 = 발신(종전대로), **롱프레스 = 사람 메뉴**(§6.2f). 주소록은 전화 축이라 탭이 통화인 것이 맞고,
-        //   같은 사람의 PTT 행동(사설콜·애드혹·SDS)은 메뉴로 연다.
+        // **탭 = 사람 메뉴**(§6.2f) · 오른쪽 [📞] = 바로 발신. 롱프레스도 메뉴를 연다 — 전에 그랬으므로
+        //   손에 익은 사람이 헤매지 않게 남겨 둔다(둘 다 같은 결과라 헷갈릴 일이 없다).
         var menuFor by remember { mutableStateOf<String?>(null) }
         LazyColumn(Modifier.fillMaxWidth()) {
             items(rows, key = { it.msisdn }) { e ->
@@ -139,18 +95,19 @@ private fun Contacts(
                     person = vm.personAt(e.msisdn), expanded = true,
                     onDismiss = { menuFor = null },
                     onPick = { a, n -> onPerson(a, n); menuFor = null })
-                Row(Modifier.fillMaxWidth()
-                        .combinedClickable(onClick = { onDial(e.msisdn) },
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)
+                        .combinedClickable(onClick = { menuFor = e.msisdn },
                                            onLongClick = { menuFor = e.msisdn })
-                        .padding(vertical = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
+                        .padding(vertical = 9.dp)) {
                         Text(e.name.ifBlank { e.msisdn }, fontSize = Type.title, fontWeight = FontWeight.Bold)
                         val path = book.orgPath(e.org)
                         Text(listOfNotNull(e.msisdn, path.takeIf { it.isNotBlank() }).joinToString(" · "),
                             fontSize = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Text("발신", fontSize = Type.strong, color = MaterialTheme.colorScheme.primary)
+                    IconButton(onClick = { onDial(e.msisdn) }) {
+                        Text("📞", fontSize = Type.title)
+                    }
                 }
                 HorizontalDivider()
             }
@@ -181,41 +138,4 @@ private fun subtreeOf(book: DirectoryBook, code: String): Set<String> {
         book.orgs.forEach { if (it.parent in out && out.add(it.code)) added = true }
     }
     return out
-}
-
-// ── 최근 ────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun Recent(vm: CallDeskViewModel, onDial: (String) -> Unit) {
-    val log by vm.callLog.collectAsStateWithLifecycle()
-    // 내 통화만, 같은 상대는 최근 한 줄로 접는다.
-    // 번호가 없는(구) 행은 다시 걸 수 없으므로 뺀다 — 눌러도 아무 일이 없는 줄을 두지 않는다.
-    val rows = remember(log) {
-        log.filterNot { it.others || it.number.isBlank() }.distinctBy { it.number }.take(50)
-    }
-    if (rows.isEmpty()) {
-        Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-            Text("최근 통화가 없습니다", fontSize = Type.strong, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        return
-    }
-    LazyColumn(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-        items(rows, key = { it.number }) { r ->
-            Row(Modifier.fillMaxWidth().clickable { onDial(r.number) }.padding(vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(r.label, fontSize = Type.title, fontWeight = FontWeight.Bold)
-                    Text(
-                        listOfNotNull(
-                            hhmm.format(java.util.Date(r.startedAtMs)),
-                            r.text.takeIf { it.isNotBlank() },
-                            if (r.answered) "통화 ${durText(r.durationSec)}" else null,
-                        ).joinToString(" · "),
-                        fontSize = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Text("발신", fontSize = Type.strong, color = MaterialTheme.colorScheme.primary)
-            }
-            HorizontalDivider()
-        }
-    }
 }

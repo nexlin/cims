@@ -4,8 +4,9 @@
 // 회선을 준다.** 같은 사람이 PTT 번호와 내선을 따로 갖고 두 축(`phoneBook`/`pttBook`)에 나뉘어 들어오므로,
 // 칩 하나를 눌렀을 때 «이 사람에게 사설콜도 통화도 걸 수 있다» 를 보이려면 먼저 사람 단위로 묶어야 한다.
 //
-// 데스크톱과 다른 것 하나 — **문자(SMS)가 없다.** 외부망 게이트웨이가 서버 과제라 태블릿에도 두지 않는다
-// (§11). 없는 기능을 버튼으로 만들지 않는다.
+// **이 메뉴가 주소록의 기본 동작이다.** 행을 누르면 바로 걸지 않고 이 메뉴가 뜬다 — 휴대폰 연락처와 같다.
+// 한 사람에게 할 수 있는 일이 다섯인데(통화·문자·사설콜·애드혹·기록) 탭 하나를 발신에 고정해 버리면
+// 나머지 넷은 롱프레스를 아는 사람만 쓰게 되고, 잘못 눌러 걸리는 사고도 난다.
 package com.cims.ue.dispatch.ui
 
 import com.cims.ue.dispatch.session.userPart
@@ -46,6 +47,13 @@ data class PersonEntry(
                        if (hasPtt) "PTT $pttNumber" else "",
                        if (hasLine) "내선 $extension" else "")
             .filter { it.isNotEmpty() }.joinToString(" · ")
+}
+
+/** 메뉴 항목 오른쪽의 흐린 보조 글 — 어느 번호로 가는지·어느 망인지. */
+@Composable
+private fun Hint(text: String) {
+    if (text.isBlank()) return
+    Text(text, fontSize = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 /**
@@ -125,7 +133,13 @@ internal fun resolvePerson(
 /** `sip:1001@d` · `tel:+8210…` · `1001` → 번호 부분. */
 
 /** 사람 메뉴가 낼 수 있는 행동 — 화면이 이어 붙인다. */
-enum class PersonAction { PRIVATE_CALL, ADHOC_ADD, SDS, CALL }
+/**
+ * 사람 하나에게 할 수 있는 일.
+ *
+ * [SDS] 와 [SMS] 는 **다른 망**이다 — 전자는 PTT 채널의 MCData SDS, 후자는 전화 축의 SIP MESSAGE 다.
+ * 한 항목으로 합치면 «어느 번호로 갔는지» 를 알 수 없다(§6.2e).
+ */
+enum class PersonAction { PRIVATE_CALL, ADHOC_ADD, SDS, CALL, SMS, HISTORY }
 
 /**
  * 드롭다운 본체. 가진 회선에 있는 행동만 그린다.
@@ -149,17 +163,37 @@ fun PersonMenu(
                      color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         HorizontalDivider()
-        if (person.hasPtt) {
-            DropdownMenuItem(text = { Text("사설콜") },
-                onClick = { onPick(PersonAction.PRIVATE_CALL, person.pttNumber); onDismiss() })
-            DropdownMenuItem(text = { Text("애드혹에 추가") },
-                onClick = { onPick(PersonAction.ADHOC_ADD, person.pttNumber); onDismiss() })
-            DropdownMenuItem(text = { Text("문자(SDS)") },
-                onClick = { onPick(PersonAction.SDS, person.pttNumber); onDismiss() })
-        }
+        // **전화 축을 먼저** 둔다 — 주소록에서 가장 잦은 것이 통화·문자다. 무전 축은 그 아래로 모은다.
         if (person.hasLine) {
-            DropdownMenuItem(text = { Text("통화") },
+            DropdownMenuItem(
+                text = { Text("통화") }, leadingIcon = { Text("📞") },
+                trailingIcon = { Hint(person.extension) },
                 onClick = { onPick(PersonAction.CALL, person.extension); onDismiss() })
+            DropdownMenuItem(
+                text = { Text("문자") }, leadingIcon = { Text("✉") },
+                trailingIcon = { Hint("SMS") },
+                onClick = { onPick(PersonAction.SMS, person.extension); onDismiss() })
+        }
+        if (person.hasPtt) {
+            if (person.hasLine) HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("사설콜") }, leadingIcon = { Text("🎙") },
+                trailingIcon = { Hint(person.pttNumber) },
+                onClick = { onPick(PersonAction.PRIVATE_CALL, person.pttNumber); onDismiss() })
+            DropdownMenuItem(
+                text = { Text("무전 메시지") }, leadingIcon = { Text("✉") },
+                trailingIcon = { Hint("SDS") },
+                onClick = { onPick(PersonAction.SDS, person.pttNumber); onDismiss() })
+            DropdownMenuItem(
+                text = { Text("애드혹에 추가") }, leadingIcon = { Text("＋") },
+                onClick = { onPick(PersonAction.ADHOC_ADD, person.pttNumber); onDismiss() })
+        }
+        // 기록은 **전화 회선이 있을 때만** — 통화 내역은 전화 축의 것이고, 무전 이력은 [이력] 메뉴가 받는다.
+        if (person.hasLine) {
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("통화 기록") }, leadingIcon = { Text("🕘") },
+                onClick = { onPick(PersonAction.HISTORY, person.extension); onDismiss() })
         }
         if (!person.hasPtt && !person.hasLine) {
             Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {

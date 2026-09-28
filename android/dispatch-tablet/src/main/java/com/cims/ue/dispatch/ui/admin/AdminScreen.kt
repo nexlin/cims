@@ -33,28 +33,84 @@ import com.cims.ue.dispatch.session.SIP_TRANSPORTS
 
 @Composable
 fun AdminScreen(vm: AdminViewModel, modifier: Modifier = Modifier) {
-    if (!vm.available) return Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("관리 범위 미배정 — 콘솔 «관리 > 역할» 에서 관리 범위(directory_write)를 받아야 합니다",
-            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = Type.strong)
-    }
+    if (!vm.available) return AdminNoScope(modifier)
 
     val view by vm.view.collectAsStateWithLifecycle()
     val members by vm.members.collectAsStateWithLifecycle()
     val form by vm.form.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
-    var discard by remember { mutableStateOf<MemberInfo?>(null) }
+    val org by vm.org.collectAsStateWithLifecycle()
+    val query by vm.query.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) { if (view.members.isEmpty()) vm.load() }
+
+    AdminScreenContent(
+        ui = AdminUi(view = view, members = members, org = org, query = query,
+            loading = loading, error = error, dirty = vm.dirty, editing = form != null,
+            editingUserId = form?.orig?.userId ?: 0),
+        act = AdminActions(
+            reload = { vm.load(force = true) }, selectOrg = vm::selectOrg, newOrg = vm::newOrg,
+            newMember = vm::newMember, search = vm::search, open = vm::open,
+            editOrg = vm::editOrg, deleteOrg = vm::deleteOrg),
+        // 폼·대화상자는 입력 상태가 VM 에 있어 통째로 넘긴다 — 판정 대상이 밀도가 아니라 폼 동작이다.
+        formPane = { form?.let { MemberForm(vm, view, it) } },
+        dialogs = { OrgDialog(vm, view) },
+        modifier = modifier)
+}
+
+@Composable
+private fun AdminNoScope(modifier: Modifier) =
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text("관리 범위 미배정 — 콘솔 «관리 > 역할» 에서 관리 범위(directory_write)를 받아야 합니다",
+            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = Type.strong)
+    }
+
+/** [관리] 화면이 그리는 데 필요한 값 전부. */
+data class AdminUi(
+    val view: AdminView,
+    val members: List<MemberInfo> = emptyList(),
+    val org: String = "",
+    val query: String = "",
+    val loading: Boolean = false,
+    val error: String = "",
+    /** 저장하지 않은 폼이 있는가 — 머리 배지·«변경 버림» 확인(§4.5). */
+    val dirty: Boolean = false,
+    val editing: Boolean = false,
+    /** 편집 중인 구성원 — 표에서 그 줄을 강조한다. 0 = 없음. */
+    val editingUserId: Long = 0,
+)
+
+data class AdminActions(
+    val reload: () -> Unit = {},
+    val selectOrg: (String) -> Unit = {},
+    val newOrg: () -> Unit = {},
+    val newMember: () -> Unit = {},
+    val search: (String) -> Unit = {},
+    val open: (MemberInfo) -> Unit = {},
+    val editOrg: (OrgNode) -> Unit = {},
+    val deleteOrg: (String) -> Unit = {},
+)
+
+/** [관리] 본문 — **순수 컴포저블**. 폼·대화상자만 호출자가 넘긴다. */
+@Composable
+fun AdminScreenContent(
+    ui: AdminUi,
+    act: AdminActions = AdminActions(),
+    formPane: @Composable () -> Unit = {},
+    dialogs: @Composable () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    var discard by remember { mutableStateOf<MemberInfo?>(null) }
 
     Column(modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Text("조직 · 구성원 · 번호", fontSize = Type.title, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(8.dp))
-            Text("관리 범위 ${view.scope.directoryWrite.ifBlank { "—" }}", fontSize = Type.meta,
+            Text("관리 범위 ${ui.view.scope.directoryWrite.ifBlank { "—" }}", fontSize = Type.meta,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (vm.dirty) {
+            if (ui.dirty) {
                 Spacer(Modifier.width(8.dp))
                 Surface(color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f),
                     shape = RoundedCornerShape(4.dp)) {
@@ -63,24 +119,24 @@ fun AdminScreen(vm: AdminViewModel, modifier: Modifier = Modifier) {
                 }
             }
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = { vm.load(force = true) }) { Text("새로고침") }
+            TextButton(onClick = act.reload) { Text("새로고침") }
         }
-        if (error.isNotBlank()) Text(error, Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        if (ui.error.isNotBlank()) Text(ui.error, Modifier.fillMaxWidth().padding(horizontal = 12.dp),
             color = MaterialTheme.colorScheme.error, fontSize = Type.body)
-        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (ui.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
 
         Row(Modifier.weight(1f)) {
-            OrgTree(vm, view, Modifier.width(210.dp))
+            OrgTree(ui, act, Modifier.width(210.dp))
             VerticalDivider()
-            MemberTable(vm, view, members, Modifier.weight(1f)) { m ->
-                if (vm.dirty) discard = m else vm.open(m)
+            MemberTable(ui, act, Modifier.weight(1f)) { m ->
+                if (ui.dirty) discard = m else act.open(m)
             }
             VerticalDivider()
             Box(Modifier.weight(1.3f).fillMaxHeight()) {
-                form?.let { MemberForm(vm, view, it) }
-                    ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("구성원을 고르세요", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                if (ui.editing) formPane()
+                else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("구성원을 고르세요", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
     }
@@ -91,24 +147,25 @@ fun AdminScreen(vm: AdminViewModel, modifier: Modifier = Modifier) {
             onDismissRequest = { discard = null },
             title = { Text("변경 버림") },
             text = { Text("저장하지 않은 변경이 있습니다. 버리고 «${target.name}» 을(를) 열까요?") },
-            confirmButton = { TextButton(onClick = { discard = null; vm.open(target) }) { Text("버리고 열기") } },
+            confirmButton = { TextButton(onClick = { discard = null; act.open(target) }) { Text("버리고 열기") } },
             dismissButton = { TextButton(onClick = { discard = null }) { Text("취소") } })
     }
 
-    OrgDialog(vm, view)
+    dialogs()
 }
 
 // ── 조직 트리 ───────────────────────────────────────────────────────────────
 
 @Composable
-private fun OrgTree(vm: AdminViewModel, view: AdminView, modifier: Modifier) {
-    val sel by vm.org.collectAsStateWithLifecycle()
+private fun OrgTree(ui: AdminUi, act: AdminActions, modifier: Modifier) {
+    val view = ui.view
+    val sel = ui.org
     Column(modifier.fillMaxHeight()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Text("조직", fontSize = Type.strong, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = { vm.newOrg() },
+            TextButton(onClick = { act.newOrg() },
                 contentPadding = PaddingValues(horizontal = 6.dp)) { Text("+ 새 조직", fontSize = Type.meta) }
         }
         HorizontalDivider()
@@ -117,7 +174,7 @@ private fun OrgTree(vm: AdminViewModel, view: AdminView, modifier: Modifier) {
                 val on = sel == o.code
                 Row(Modifier.fillMaxWidth()
                         .background(if (on) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
-                        .clickable { vm.selectOrg(o.code) }
+                        .clickable { act.selectOrg(o.code) }
                         .padding(start = (8 + depth * 12).dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Text(o.name.ifBlank { o.code }, Modifier.weight(1f), fontSize = Type.body, maxLines = 1)
@@ -129,9 +186,9 @@ private fun OrgTree(vm: AdminViewModel, view: AdminView, modifier: Modifier) {
         HorizontalDivider()
         Row(Modifier.padding(4.dp)) {
             val cur = view.orgs.firstOrNull { it.code == sel }
-            TextButton(onClick = { cur?.let { vm.editOrg(it) } }, enabled = cur != null,
+            TextButton(onClick = { cur?.let { act.editOrg(it) } }, enabled = cur != null,
                 contentPadding = PaddingValues(horizontal = 8.dp)) { Text("편집", fontSize = Type.meta) }
-            TextButton(onClick = { cur?.let { vm.deleteOrg(it.code) } }, enabled = cur != null,
+            TextButton(onClick = { cur?.let { act.deleteOrg(it.code) } }, enabled = cur != null,
                 contentPadding = PaddingValues(horizontal = 8.dp)) {
                 Text("삭제", fontSize = Type.meta, color = MaterialTheme.colorScheme.error)
             }
@@ -260,11 +317,12 @@ private fun OrgDialog(vm: AdminViewModel, view: AdminView) {
 // ── 구성원 표 ───────────────────────────────────────────────────────────────
 
 @Composable
-private fun MemberTable(vm: AdminViewModel, view: AdminView, members: List<MemberInfo>,
+private fun MemberTable(ui: AdminUi, act: AdminActions,
                         modifier: Modifier, onOpen: (MemberInfo) -> Unit) {
-    val query by vm.query.collectAsStateWithLifecycle()
-    val org by vm.org.collectAsStateWithLifecycle()
-    val form by vm.form.collectAsStateWithLifecycle()
+    val view = ui.view
+    val members = ui.members
+    val query = ui.query
+    val org = ui.org
 
     Column(modifier.fillMaxHeight()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
@@ -273,17 +331,17 @@ private fun MemberTable(vm: AdminViewModel, view: AdminView, members: List<Membe
                  (if (org.isNotBlank()) " · ${view.orgPath(org)} 하위 포함" else ""),
                 fontSize = Type.body, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = { vm.newMember() },
+            TextButton(onClick = { act.newMember() },
                 contentPadding = PaddingValues(horizontal = 8.dp)) { Text("+ 새 구성원", fontSize = Type.meta) }
         }
-        OutlinedTextField(value = query, onValueChange = vm::search,
+        OutlinedTextField(value = query, onValueChange = act.search,
             placeholder = { Text("이름·아이디·번호", fontSize = Type.body) }, singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp),
             textStyle = MaterialTheme.typography.bodySmall)
         HorizontalDivider(Modifier.padding(top = 6.dp))
         LazyColumn(Modifier.weight(1f)) {
             items(members, key = { it.userId }) { m ->
-                val on = form?.orig?.userId == m.userId
+                val on = ui.editingUserId == m.userId
                 Column(Modifier.fillMaxWidth()
                         .background(if (on) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
                         .clickable { onOpen(m) }

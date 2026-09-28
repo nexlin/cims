@@ -146,7 +146,16 @@ data class ActivityRow(
 
 enum class ActivityKind { TALK, JOIN, LEAVE, EMERGENCY, SDS, ERROR }
 
-/** ④ PTT 메시지 한 통(MCData SDS). */
+/**
+ * 메시지 종류 — 같은 표에 담되 **섞이지 않게** 가른다.
+ *
+ * 둘은 망도 규격도 다르다: [SDS] 는 PTT 채널의 MCData SDS(TS 24.282), [SMS] 는 전화 축의
+ * SIP MESSAGE text/plain 1:1(volte_supplementary_services.md §4.3). 스레드 키가 번호로 겹칠 수 있어
+ * (PTT 1:1 SDS 도 번호가 키다) 종류를 안 가르면 한 대화에 두 망의 글이 섞인다.
+ */
+enum class MessageKind { SDS, SMS }
+
+/** 메시지 한 통 — PTT 채널의 SDS 또는 전화 축의 SMS/LMS. */
 data class Message(
     val id: String,
     val groupId: String,
@@ -160,6 +169,7 @@ data class Message(
     val token: Long = 0,
     val state: SendState = SendState.NONE,
     val read: Boolean = true,
+    val kind: MessageKind = MessageKind.SDS,
 )
 
 enum class SendState { NONE, PENDING, SENT, DELIVERED, READ, FAILED }

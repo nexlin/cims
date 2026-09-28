@@ -35,13 +35,17 @@ import androidx.compose.material.icons.automirrored.filled.Message
 import com.cims.ue.dispatch.ui.ptt.ChannelScreen
 import com.cims.ue.dispatch.ui.ptt.Messages
 import com.cims.ue.dispatch.ui.ptt.PttScreen
+import com.cims.ue.dispatch.ui.ptt.PttTabRow
+import com.cims.ue.dispatch.ui.ptt.PttTabs
+import com.cims.ue.dispatch.ui.ptt.Activity
 import com.cims.ue.dispatch.ui.ptt.TalkBar
+import com.cims.ue.dispatch.ui.call.CallTabRow
 import com.cims.ue.dispatch.ui.call.CallsScreen
+import com.cims.ue.dispatch.ui.call.ContactsPane
+import com.cims.ue.dispatch.ui.call.SmsPane
 import com.cims.ue.dispatch.ui.admin.AdminScreen
 import com.cims.ue.dispatch.ui.groups.PttGroupsScreen
 import com.cims.ue.dispatch.ui.history.HistoryScreen
-import com.cims.ue.dispatch.ui.monitor.MonitorScreen
-import com.cims.ue.dispatch.ui.monitor.rememberMonitorSessions
 
 class MainActivity : ComponentActivity() {
 
@@ -133,113 +137,100 @@ private fun Shell(vm: MainViewModel, onShutdown: () -> Unit) {
     val screen by vm.screen.collectAsStateWithLifecycle()
     val channel by vm.channel.collectAsStateWithLifecycle()
     val more by vm.more.collectAsStateWithLifecycle()
-    val channelPage by vm.channelPage.collectAsStateWithLifecycle()
-    val callsPage by vm.callsPage.collectAsStateWithLifecycle()
+    val pttPane by vm.pttPane.collectAsStateWithLifecycle()
+    val callPane by vm.callPane.collectAsStateWithLifecycle()
     val session = DispatchService.session
 
     var searchOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
-    val monitors = session?.let { rememberMonitorSessions(it) }.orEmpty()
     // 미읽음 SDS — 요약 띠가 하던 «어디에 뭐가 쌓였나» 를 내비 배지가 받는다(§6.3).
     val unread = vm.ptt?.cards?.collectAsStateWithLifecycle()?.value?.sumOf { it.unread } ?: 0
 
     // 뒤로가기 = 연 순서의 역순으로 한 겹씩(§6.3). **되돌릴 것이 있을 때만 가로챈다** —
     //   첫 화면에서 가로채면 앱을 벗어날 방법이 없어진다(시스템 기본 동작에 맡긴다).
-    BackHandler(enabled = channel != null || more != null || screen != AppScreen.PTT) { vm.back() }
+    // 되돌릴 것 = 안쪽 화면(채널·더보기) · **보고 있는 메뉴**의 첫 면이 아닌 면 · 첫 화면이 아닌 메뉴.
+    //   셋 다 아니면 가로채지 않는다 — 가로채면 앱을 벗어날 방법이 없어진다(§6.3).
+    //
+    // 판정은 `vm.back()` 과 **정확히 같아야 한다.** 여기서만 참이면 뒤로가기를 먹고도 아무 일이
+    //   일어나지 않아 앱을 못 닫는다(예: [이력] 에 있는데 [무전] 의 면이 첫 면이 아닌 경우).
+    val canBack = channel != null || more != null || screen != AppScreen.HISTORY ||
+        (screen == AppScreen.PTT && pttPane != PttPane.CHANNELS) ||
+        (screen == AppScreen.CALLS && callPane != CallPane.CALLS)
+    BackHandler(enabled = canBack) { vm.back() }
 
-    Scaffold(
-        topBar = {
-            val profile = session?.profile?.collectAsStateWithLifecycle()?.value
-            val regs = session?.registrations?.collectAsStateWithLifecycle()?.value.orEmpty()
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text(profile?.displayName?.ifBlank { "관제" } ?: "관제", fontWeight = FontWeight.Bold)
-                        session?.dispatch?.takeIf { it.present }?.let {
-                            Text("${it.groupName} · 대표 ${it.pilotId}", fontSize = Type.strong)
-                        }
-                        // 등록 점등 — 권위는 코어 스냅샷이다
-                        Text(regs.values.joinToString(" ") { r ->
-                            if (r.registered) "●" else "○"
-                        }, fontSize = Type.strong)
-                    }
-                },
-                actions = {
-                    // 감청 칩은 없어졌다 — [감청]이 하단 내비의 한 자리이고 열린 수는 그 배지가 말한다(§6.3).
-                    // 통합 검색 — 데스크톱의 `Ctrl+K` 자리. 태블릿엔 그 입력이 없어 상단 바가 입구다(§6.2f).
-                    IconButton(onClick = { searchOpen = true }) {
-                        Icon(Icons.Filled.Search, contentDescription = "검색")
-                    }
-                    SessionMenu(vm, onShutdown)
-                })
-        },
-        bottomBar = {
-            Column {
-                // **발언 바는 내비 위에 상시로 둔다**(§6.3). 관제사는 전화를 받으면서도, 이력을 보면서도
-                //   무전한다 — 발언만은 «어느 화면을 보고 있는가» 와 무관한 조작이다.
-                vm.ptt?.let { TalkBar(it, lockEnabled = vm.lockTalk) }
-                NavigationBar {
-                    AppScreen.entries.forEach { s ->
-                        NavigationBarItem(
-                            selected = screen == s,
-                            onClick = { vm.show(s) },
-                            icon = {
-                                // [더보기]의 점 배지 = [관리]에 저장하지 않은 폼(§4.5). 전환은 막지 않는다.
-                                val dot = s == AppScreen.MORE && vm.adminDirty
-                                val n = when (s) {
-                                    AppScreen.MONITOR -> monitors.size
-                                    AppScreen.MESSAGES -> unread
-                                    else -> 0
-                                }
-                                if (dot) BadgedBox(badge = { Badge() }) { Icon(iconOf(s), contentDescription = s.label) }
-                                else if (n > 0) BadgedBox(badge = { Badge { Text("$n") } }) {
-                                    Icon(iconOf(s), contentDescription = s.label)
-                                }
-                                else Icon(iconOf(s), contentDescription = s.label)
-                            },
-                            label = { Text(s.label) })
-                    }
-                }
-            }
-        }
-    ) { pad ->
-        Column(Modifier.fillMaxSize().padding(pad)) {
-            // 착신 배너 — **화면과 무관하게** 상단 바 아래에 뜬다(§6.2). 이것이 유일한 전역 착신 표면이다.
+    val profile = session?.profile?.collectAsStateWithLifecycle()?.value
+    val regs = session?.registrations?.collectAsStateWithLifecycle()?.value.orEmpty()
+
+    AppShellContent(
+        screen = screen,
+        top = TopBarUi(
+            displayName = profile?.displayName.orEmpty(),
+            deskLine = session?.dispatch?.takeIf { it.present }
+                ?.let { "${it.groupName} · 대표 ${it.pilotId}" }.orEmpty(),
+            registrations = regs.values.map { it.registered }),
+        badges = NavBadges(unread = unread, adminDirty = vm.adminDirty),
+        onSelect = vm::show,
+        onSearch = { searchOpen = true },
+        menu = { SessionMenu(vm, onShutdown) },
+        talkBar = { vm.ptt?.let { TalkBar(it, lockEnabled = vm.lockTalk) } },
+        banners = {
+            // 착신 배너 — **화면과 무관하게** 상단 바 아래에 뜬다(§6.2a). 유일한 전역 착신 표면이다.
             if (session != null) IncomingBanners(session, onAnswered = vm::goToCalls)
             // 자격 갱신이 흔들리는 동안 미리 알린다 — 조회를 누른 그 순간에야 튕기지 않게(§6.1b).
             if (session != null) CredentialBanner(session)
-            when (screen) {
-                // [무전] — 채널을 열었으면 그 화면, 아니면 목록(§6.3).
-                AppScreen.PTT -> {
-                    val ptt = vm.ptt; val scoped = vm.scoped
-                    val msg = vm.messages; val act = vm.activity
-                    if (ptt == null || scoped == null || msg == null || act == null) Waiting()
-                    else if (channel != null) ChannelScreen(
-                        id = channel!!, channels = ptt, scoped = scoped, messages = msg, activity = act,
-                        page = channelPage, onPageChange = vm::setChannelPage,
-                        onBack = vm::closeChannel, onShowRoster = vm::showRoster,
-                        modifier = Modifier.weight(1f))
-                    else PttScreen(ptt, scoped, onOpen = vm::openChannel, modifier = Modifier.weight(1f))
+        },
+        pttPane = pttPane,
+        callPane = callPane,
+        onPage = vm::showPage,
+        // 탭줄은 면 pager **위에 고정**으로 놓인다 — 면을 밀 때 줄은 제자리, 본문만 미끄러진다(§6.3).
+        tabs = { page ->
+            when (page.screen) {
+                AppScreen.PTT -> PttTabRow(
+                    page.pttPane ?: PttPane.CHANNELS, vm::setPttPane, unread)
+                AppScreen.CALLS -> CallTabRow(page.callPane ?: CallPane.CALLS, vm::setCallPane)
+                else -> Unit
+            }
+        },
+    ) { page ->
+        // 한 장 = 메뉴 하나의 면 하나다. 옆으로 밀면 [APP_PAGES] 의 다음 장이 오고, 그 장이 다른
+        //   메뉴에 속하면 하단 내비도 따라 옮겨진다(§6.3).
+        when (page.screen) {
+            AppScreen.HISTORY -> vm.history?.let { HistoryScreen(it, Modifier.weight(1f)) } ?: Waiting()
+
+            // [무전] — 면 셋. 채널을 열었으면 그 화면이 «채널» 면을 대신한다(§6.3a).
+            AppScreen.PTT -> {
+                val ptt = vm.ptt; val scoped = vm.scoped
+                val msg = vm.messages; val act = vm.activity
+                if (ptt == null || scoped == null || msg == null || act == null) Waiting()
+                else Box(Modifier.weight(1f)) {
+                    when (page.pttPane ?: PttPane.CHANNELS) {
+                        PttPane.CHANNELS ->
+                            if (channel != null) ChannelScreen(
+                                id = channel!!, channels = ptt, scoped = scoped,
+                                onBack = vm::closeChannel, onShowRoster = vm::showRoster)
+                            else PttScreen(ptt, scoped, onOpen = vm::openChannel)
+                        PttPane.MESSAGES -> Box(Modifier.fillMaxSize().padding(8.dp)) { Messages(msg) }
+                        PttPane.EVENTS -> Box(Modifier.fillMaxSize().padding(8.dp)) { Activity(act) }
+                    }
                 }
-                AppScreen.CALLS -> vm.calls?.let {
-                    CallsScreen(it, page = callsPage, onPageChange = vm::setCallsPage,
-                        onPerson = vm::runPersonAction, modifier = Modifier.weight(1f))
+            }
+
+            AppScreen.CALLS -> vm.calls?.let {
+                CallsScreen(it, pane = page.callPane ?: CallPane.CALLS, onPane = vm::setCallPane,
+                    onPerson = vm::runPersonAction,
+                    bookPane = { ContactsPane(it, vm::runPersonAction) },
+                    smsPane = { vm.sms?.let { m -> SmsPane(m) } ?: Waiting() },
+                    showTabs = false,
+                    modifier = Modifier.weight(1f))
+            } ?: Waiting()
+
+            AppScreen.MORE -> when (more) {
+                MoreItem.PTT_GROUPS -> vm.pttGroups?.let {
+                    PttGroupsScreen(it, onGoDispatch = { vm.show(AppScreen.PTT) }, Modifier.weight(1f))
                 } ?: Waiting()
-                // [메시지] — 스레드 칩 + 대화. 채널 화면의 «메시지» 면과 같은 것을 전 채널로 펼친 것이다.
-                AppScreen.MESSAGES -> vm.messages?.let {
-                    Box(Modifier.weight(1f).padding(8.dp)) { Messages(it) }
-                } ?: Waiting()
-                AppScreen.MONITOR -> if (session != null) MonitorScreen(session, Modifier.weight(1f)) else Waiting()
-                AppScreen.MORE -> when (more) {
-                    MoreItem.HISTORY -> vm.history?.let { HistoryScreen(it, Modifier.weight(1f)) } ?: Waiting()
-                    MoreItem.PTT_GROUPS -> vm.pttGroups?.let {
-                        PttGroupsScreen(it, onGoDispatch = { vm.show(AppScreen.PTT) }, Modifier.weight(1f))
-                    } ?: Waiting()
-                    MoreItem.ADMIN -> vm.admin?.let { AdminScreen(it, Modifier.weight(1f)) } ?: Waiting()
-                    null -> MoreScreen(onOpen = vm::openMore, onSettings = { settingsOpen = true },
-                        dirty = vm.adminDirty, modifier = Modifier.weight(1f))
-                }
+                MoreItem.ADMIN -> vm.admin?.let { AdminScreen(it, Modifier.weight(1f)) } ?: Waiting()
+                null -> MoreScreen(onOpen = vm::openMore, onSettings = { settingsOpen = true },
+                    dirty = vm.adminDirty, modifier = Modifier.weight(1f))
             }
         }
     }
@@ -317,11 +308,10 @@ private fun SessionMenu(vm: MainViewModel, onShutdown: () -> Unit) {
     }
 }
 
-private fun iconOf(s: AppScreen) = when (s) {
+internal fun navIconOf(s: AppScreen) = when (s) {
+    AppScreen.HISTORY -> Icons.Filled.History
     AppScreen.PTT -> Icons.Filled.Headset
     AppScreen.CALLS -> Icons.Filled.Call
-    AppScreen.MESSAGES -> Icons.AutoMirrored.Filled.Message
-    AppScreen.MONITOR -> Icons.Filled.Hearing
     AppScreen.MORE -> Icons.Filled.MoreHoriz
 }
 

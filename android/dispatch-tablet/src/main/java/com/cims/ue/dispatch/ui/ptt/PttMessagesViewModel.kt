@@ -7,7 +7,8 @@ package com.cims.ue.dispatch.ui.ptt
 import com.cims.ue.dispatch.ui.ScreenViewModel
 import com.cims.ue.dispatch.session.DispatchSession
 import com.cims.ue.dispatch.session.Message
-import com.cims.ue.dispatch.session.sendGroupSds
+import com.cims.ue.dispatch.session.sendSdsTo
+import com.cims.ue.dispatch.ui.RecipientOption
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -105,9 +106,44 @@ class PttMessagesViewModel(private val s: DispatchSession) : ScreenViewModel() {
     /** 칩을 눌러 그 스레드로 — 따라가기를 끄고 고정한다(`openThread` 와 같다). */
     fun pickThread(key: String) = openThread(key)
 
+    /**
+     * «새 대화» 후보 — **편성 그룹 + PTT 주소록 사람**.
+     *
+     * 무전 메시지는 두 갈래다: 그룹으로 보내면 편성 전원이 받고(단톡방), 사람으로 보내면 그 사람만 받는다
+     * (1:1 SDS). 둘을 섞어 두면 잘못 골랐을 때 되돌릴 수 없으므로 후보에 그룹 표를 달아 구분한다.
+     *
+     * 직접 입력 칸은 두지 않는다 — 무전은 편성·주소록 밖으로 보낼 자리가 없다(있는 번호만 닿는다).
+     */
+    val candidates: StateFlow<List<RecipientOption>> =
+        combine(s.groups, s.pttBook) { groups, book ->
+            groups.map { g ->
+                RecipientOption(key = g.id, title = g.name.ifBlank { g.id },
+                    subtitle = "편성 ${g.memberCount}명", group = true)
+            } + book.entries.filter { it.msisdn.isNotBlank() }.map { e ->
+                RecipientOption(key = e.msisdn, title = e.name.ifBlank { e.msisdn },
+                    subtitle = listOf(e.msisdn, book.orgPath(e.org)).filter { it.isNotBlank() }
+                        .joinToString(" · "))
+            }
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    /** 고른 대화가 그룹인가 — 말풍선 머리(보낸 사람)를 그룹에서만 보이게 하는 데 쓴다. */
+    val isGroup: StateFlow<Boolean> =
+        combine(groupId, s.groups) { g, groups -> g != null && groups.any { it.id == g } }
+            .stateIn(scope, SharingStarted.Eagerly, false)
+
+    /**
+     * 보내기 — 키가 **그룹이면 그룹 SDS, 사람이면 1:1 SDS**.
+     *
+     * 판정은 세션이 한다(`sendSdsTo`). 전에는 무조건 그룹 경로로 보냈는데, 사람 스레드에서 답장하면
+     * request-type 이 `group-sds` 인 채로 나가 서버가 그룹 게이트를 거치고 받는 쪽 스레드 귀속도
+     * 틀어졌다(mcdata_messaging.md §4).
+     */
     fun send(text: String) {
         val g = groupId.value ?: return
         if (text.isBlank()) return
-        scope.launch { s.sendGroupSds(g, text.trim()) }
+        scope.launch { s.sendSdsTo(g, text.trim()) }
     }
+
+    /** «새 대화» 에서 고른 상대로 연다 — 그룹이든 사람이든 스레드 키 하나다. */
+    fun openTo(key: String) = openThread(key.trim())
 }
