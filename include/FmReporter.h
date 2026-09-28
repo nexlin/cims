@@ -182,6 +182,18 @@ public:
         Log( FM_LOG_INFO, "ALARM CLOSE %s", strAkey.c_str() );
     }
 
+    // 열린 알람 중 code 가 같고 mo 가 strMoPrefix 로 시작하는 것들의 mo — 대상이 설정에서 사라졌을 때 그 알람을
+    // 닫는 쪽(csp CCspRouteHealth)이 쓴다. 따로 목록을 들지 않고 active 목록(FM_SYNC 정본)을 그대로 본다.
+    std::vector<std::string> ActiveMos( const std::string &strCode, const std::string &strMoPrefix ) {
+        std::vector<std::string> vecMo;
+        std::lock_guard<std::mutex> lock( m_mutex );
+        for ( std::map<std::string, FmActiveAlarm>::const_iterator it = m_mapActive.begin(); it != m_mapActive.end(); ++it ) {
+            if ( it->second.strCode == strCode && it->second.strMo.compare( 0, strMoPrefix.size(), strMoPrefix ) == 0 )
+                vecMo.push_back( it->second.strMo );
+        }
+        return vecMo;
+    }
+
     // 정상 동작 이벤트 (stateChange/audit) — 활성 상태 없음, best-effort (재전송 1s×5).
     void SendEvent( const std::string &strType, const std::string &strKind, const std::string &strMo ) {
         SimpleJson::JsonNode nodeEmpty;

@@ -18,6 +18,9 @@ class CSipMessage;
  *     연속 실패 `dead_threshold` 회 → dead, dead 상태에서 연속 성공 `recovery_probes` 회 → alive
  *     (상태는 CCspRouteMap::RouteRuntime — SelectRoute 가 alive 만 고른다).
  *   - 알람: dead 전이에 A-COM-003 connection_lost(mo = <node>/csp/peer/<remote_node>) open, alive 전이에 close.
+ *     감시 대상에서 빠진 peer(Remote Node 삭제·이름 변경·disable, Route Set 에서 빠짐·disable·health_check_mode none —
+ *     설정 재적재 결과)의 열린 알람은 Tick 마다 닫는다 — 전이가 다시 오지 않으므로 그대로 두면 영영 열려 있다.
+ *     등록형 트렁크 Route(CCspTrunkRegistrar 가 같은 mo 로 여닫는다)의 peer 도 감시 대상으로 센다.
  *   - 같은 Route 가 여러 RouteSet 에 속하면 임계값은 프로브를 낸 RouteSet 의 것을 쓴다.
  *   - `invite_response` 모드는 미구현(§9) — 그 RouteSet 은 프로브를 내지 않는다.
  */
@@ -44,6 +47,7 @@ private:
                      int iRecoveryProbes, long now );
     void _onResult( const Probe &clsProbe, bool bOk, int iRttMs, const char *pszWhy );
     bool _takeProbe( CSipMessage *pclsMessage, Probe &out );
+    void _closeUnmonitoredAlarms();
 
     std::mutex m_mutex;
     std::map<std::string, Probe> m_mapPending;  // Call-ID → 프로브

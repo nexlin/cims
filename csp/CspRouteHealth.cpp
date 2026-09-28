@@ -2,6 +2,9 @@
 
 #include <sys/time.h>
 
+#include <set>
+#include <vector>
+
 #include "CspAddressing.h"
 #include "CspLocalNodeMap.h"
 #include "CspRemoteNodeMap.h"
@@ -56,6 +59,39 @@ void CCspRouteHealth::Tick( long now ) {
         }
     }
     for ( const Probe &p : vecExpired ) _onResult( p, false, -1, "no reply within interval" );
+    // 3) 감시 대상에서 빠진 peer 의 열린 A-COM-003 을 닫는다
+    _closeUnmonitoredAlarms();
+}
+
+void CCspRouteHealth::_closeUnmonitoredAlarms() {
+    if ( !gclsFmReporter.IsEnabled() ) return;
+    const std::string strPrefix = gclsFmReporter.Node() + "/csp/peer/";
+    const std::vector<std::string> vecOpen = gclsFmReporter.ActiveMos( "A-COM-003", strPrefix );
+    if ( vecOpen.empty() ) return;
+    // 감시 대상 peer = OPTIONS 프로브를 받는 Remote Node (enabled RouteSet · options_ping · enabled Route · enabled RN)
+    //                + 등록형 트렁크 Route 의 Remote Node (바인딩 유무로 CCspTrunkRegistrar 가 여닫는다)
+    std::set<std::string> setMonitored;
+    for ( const RouteSetConfig &rs : gclsRouteSetMap.GetAll() ) {
+        if ( !rs.enabled || rs.health_check_mode != "options_ping" ) continue;
+        for ( const RouteSetMember &m : rs.members ) {
+            RouteConfig rc = gclsRouteMap.GetByName( m.route_ref );
+            if ( !rc.IsValid() || !rc.enabled ) continue;
+            if ( !rc.IsTrunkAccount() ) {
+                RemoteNodeInfo rn = gclsRemoteNodeMap.GetByName( rc.remote_node_ref );
+                if ( !rn.IsValid() || !rn.enabled ) continue;
+            }
+            setMonitored.insert( rc.remote_node_ref );
+        }
+    }
+    for ( const RouteConfig &rc : gclsRouteMap.GetAll() )
+        if ( rc.enabled && rc.IsTrunkAccount() ) setMonitored.insert( rc.remote_node_ref );
+    for ( const std::string &strMo : vecOpen ) {
+        const std::string strPeer = strMo.substr( strPrefix.size() );
+        if ( setMonitored.count( strPeer ) ) continue;
+        CLog::Print( LOG_SYSTEM, "RouteHealth: peer='%s' no longer monitored (config change) → A-COM-003 close",
+                     strPeer.c_str() );
+        gclsFmReporter.AlarmClose( "A-COM-003", strMo );
+    }
 }
 
 bool CCspRouteHealth::_sendProbe( const std::string &routeName, const std::string &routeSetName, int iInterval,
