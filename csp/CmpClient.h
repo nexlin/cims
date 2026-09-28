@@ -37,6 +37,15 @@ struct McpttFmtp {
                            //   floor_control:"off"(full-duplex) 판정 입력 — PTT_JOIN 필드 아님
 };
 
+// PTT 그룹 세션 속성 (mcptt_broadcast_group_call.md §4.5) — 정본은 CSP 세션 캐시(CGroupCallService)이고
+//   PTT_GROUP_ADD 마다 같은 값을 싣는다. CMP 는 세션 개시 ADD(새 그룹·다른 sesid)에서만 반영하므로
+//   합류·녹취 경로·재수립 ADD 가 개시자를 바꾸지 않는다.
+struct CmpGroupSession {
+    std::string strInitiator;  // initiator_id — 세션 개시자
+    bool bBroadcast = false;   // broadcast:1 — 일제 통화 (TS 24.379 §4.12)
+    int iT4Sec = -1;           // floor_timers.t4_inactivity (초, 0=미사용, -1=미전송)
+};
+
 // Phase 1.E (HA — CMP All Active) — endpoint descriptor for multi-endpoint dispatch.
 // 단일 endpoint 운영 시에는 m_endpoints 가 1개 element (primary) 만 가짐 → 기존 동작과 동일.
 struct CmpEndpoint {
@@ -146,11 +155,13 @@ public:
                    std::string &strIp, int &iFloorPort, std::map<std::string, std::pair<int, int>> &mapMemberPorts,
                    const std::string &strRecordDir = "", bool bVideoEnabled = false, int iSessionSeq = 0,
                    const std::string &strSesId = "", const std::string &strGroupType = "",
-                   const std::string &strInitiator = "", const std::string &strFloorPolicy = "", int iMaxTalkers = 0,
-                   const std::string &strFloorControl = "", const std::string &strSessionDir = "" );
+                   const CmpGroupSession &clsSession = CmpGroupSession(), const std::string &strFloorPolicy = "",
+                   int iMaxTalkers = 0, const std::string &strFloorControl = "",
+                   const std::string &strSessionDir = "" );
     // 정책 변경도 MODIFY 로 전달한다 (생성=ADD 1회, 이후 모든 상태 변경=MODIFY — 계약 §A.0).
     bool ModifyGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
-                      const std::string &strSesId = "", const std::string &strFloorPolicy = "", int iMaxTalkers = 0 );
+                      const std::string &strSesId = "", const std::string &strFloorPolicy = "", int iMaxTalkers = 0,
+                      int iT4Sec = -1 );
     // 2단 멱등 (docs/api/cmp_media_api.md §7.4): strIp 가 비면 ① 선할당(멤버 포트만 확보),
     //   주소 동반이면 ② 멤버 등록/주소 갱신. piLocalPort/piLocalVideoPort 에 멤버 전용 포트 응답.
     //   iUserPt/iUserTePt: 이 leg 가 수신 선언한 audio/TE PT(CMP egress 스탬프),

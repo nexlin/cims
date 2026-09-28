@@ -231,7 +231,6 @@ struct GroupRtpInfo {
     std::string strIp;      // CMP RTP IP
     size_t nMemberHash;     // 멤버 구성 해시 (변경 감지용)
     std::string strSessionCallId;  // 세션 발신 Call-ID
-    std::string strCallerId;       // 발신자 ID
     bool bVideoEnabled;     // 영상 활성화 여부
     int iConfVersion;       // RFC 4575 conference-info version
 };
@@ -280,6 +279,25 @@ class CGroupCallService {
 - 그룹 해체(`PTT_GROUP_REMOVE` 완료) 시 매핑 제거
 - Console UI 의 PTT Flow 보기는 이 sesid 로 CSP/CMP 양쪽 로그를 하나의 세션으로 병합
 
+**그룹 세션 속성 · 해제 정책** ([mcptt_broadcast_group_call.md](../features/mcptt_broadcast_group_call.md)):
+
+```cpp
+struct GroupSession {            // m_mapGroupSession: group_id → 세션 속성
+    std::string strInitiator;    // 개시자 — mcptt-calling-user-id · dialog initiator · CMP initiator_id
+    bool bBroadcast;             // 일제 통화 (<broadcast-ind>, TS 24.379 §4.12)
+    time_t tStart;               // TNG3 판정
+};
+```
+
+- 세션을 **개시**하는 INVITE(그룹에 참가 leg 이 없을 때)에서만 정하고 `RemoveGroupSesId`(세션 종료)에서 지운다 —
+  늦은 합류·재참여·청취 leg 은 바꾸지 못한다(TS 24.380 §6.3.5.3.4). 일제 통화는 편성 그룹 호에만(chat·즉석 세션의
+  `<broadcast-ind>` 는 무시). CMP 로 가는 모든 `PTT_GROUP_ADD`(개시·녹취 경로·재수립)는 `CmpSessionOf()` 로 같은 값을 싣는다.
+- 해제 정책(TS 24.379 §6.3.8.1, on-demand 편성 그룹 호): CMP `PTT_FLOOR_INACTIVITY`(T4 = 그룹 `hang_timer_sec`) →
+  `OnFloorInactivity` / 참가 leg 1개 남음 → 그 leg BYE / `CheckSessionLimits`(TNG3 = `max_duration_sec`) — 모두
+  `ReleaseGroupSession`(참가 leg 전부 `StopCall` + `OnCallTerminated`, 마지막 leg 이 CMP REMOVE·세션 정리).
+- 일제 통화 세션의 conference 구독은 480 + `Warning: 105`(`CheckConferenceSubscribe`), fan-out mcptt-info 는
+  `session-type`=그룹 종류 + `<broadcast-ind>true`, dialog `<mcptt broadcast="true">`, 세션 디스크립터 `"broadcast":true`.
+
 **MCPTT 도메인 per-dialog override:**
 
 PTT INVITE 의 Request-URI / From / To / P-Asserted-Identity 도메인이 Digest realm(AuthRealm) 이나 VoLTE 도메인과 섞이지 않도록 psip `CSipDialog::m_strOverrideDomain` 를 설정. 두 가지 경로:
@@ -300,6 +318,9 @@ class CspPttGroup {
     int _priority;             // 기본 우선순위
     bool _encryption;          // SRTP 활성화
     bool _emergencyCall;       // 긴급호 허용
+    std::string _groupType;    // 그룹 종류 prearranged|chat (즉석 1:1 = private)
+    int _hangTimerSec;         // on-network-hang-timer — 그룹 호 T4 (0=미사용)
+    int _maxDurationSec;       // on-network-maximum-duration — TNG3 (0=무제한)
 };
 ```
 

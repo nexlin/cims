@@ -665,7 +665,7 @@ in-band(RTCP APP "MCPT")로만 진행한다 — CSP 는 floor 루프에 들어�
 | T8 Floor Revoke | `t8_revoke` / `FloorRevokeRetxSec` | 1초 | 유예 중 Revoke 재전송 간격 |
 | T7 Floor Idle | `t7_idle_resend` / `FloorIdleResendSec` | 0(비활성) | 발언자 없는 동안 Floor Idle 재송신(최대 3회) |
 | T20 Floor Granted | `t20_grant_retx` / `FloorGrantRetxSec` | 1초 | **큐 승급** 화자에게 첫 RTP 까지 Granted 재송신(최대 3회) |
-| T4 Inactivity | `t4_inactivity` / — (0..3600) | 0(미사용) | 'G: Floor Idle' 에 머문 시간 한도(세션 시작·Floor Idle 진입 시 무장, Granted 시 정지). 만료 = `PTT_FLOOR_INACTIVITY` 이벤트 1회 후 재무장 — 세션을 해제할지는 CSP 정책(TS 24.380 §6.3.4.3.5, TS 24.379 §6.3.8.1). 값은 CSP 가 그룹 문서 `<on-network-hang-timer>` 로 채운다 |
+| T4 Inactivity | `t4_inactivity` / — (0..3600) | 0(미사용) — 미지정 ADD/MODIFY 는 그룹의 현재 값 유지 | 'G: Floor Idle' 에 머문 시간 한도(세션 시작·Floor Idle 진입 시 무장, Granted 시 정지). 만료 = `PTT_FLOOR_INACTIVITY` 이벤트 1회 후 재무장 — 세션을 해제할지는 CSP 정책(TS 24.380 §6.3.4.3.5, TS 24.379 §6.3.8.1). 값은 CSP 가 그룹 문서 `<on-network-hang-timer>` 로 채운다(편성 그룹 호만 — chat·즉석 세션은 0) |
 
 - **선점은 즉시 교체가 아니다**: 최약 화자에게 Revoke → 요청자는 **대기열 맨 앞**에서 대기
   (Queue Position Info 회신) → 그 화자의 Floor Release 또는 T3 만료 후 승급한다. 유예 중에도

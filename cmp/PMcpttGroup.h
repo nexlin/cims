@@ -348,9 +348,9 @@ public:
     //   t8: Floor Revoke       — 유예 중 Revoke 재전송 간격.
     //   t7: Floor Idle         — Floor Idle 재송신 간격(0=비활성, C7=3회까지).
     //   t20: Floor Granted     — 큐에서 승급한 화자에게 Granted 재송신 간격(첫 RTP 까지, C20=3회).
-    //   t4: Inactivity         — 'G: Floor Idle' 에 머문 시간 한도(0=미사용). 만료 시 inactivity 콜백 1회 후
+    //   t4: Inactivity         — 'G: Floor Idle' 에 머문 시간 한도(0=미사용, 음수=현재 값 유지). 만료 시 inactivity 콜백 1회 후
     //                            재무장한다 — 세션 해제 여부는 CSP 정책(§6.3.4.3.5).
-    void setFloorTimers(int t1, int t2, int t3, int t8, int t7 = 0, int t20 = 1, int t4 = 0);
+    void setFloorTimers(int t1, int t2, int t3, int t8, int t7 = 0, int t20 = 1, int t4 = -1);
 
     // Floor 타이머 점검 (T1/T2/T3/T8) — PCmpServer::timeoutLoop 가 1초마다 호출한다.
     //   발언자 집합이 바뀌었으면 true.

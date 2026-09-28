@@ -26,6 +26,8 @@ CspPttGroup::CspPttGroup()
       _sessionEnd( 0 ),
       _sessionSeq( 0 ),
       _groupType( "prearranged" ),
+      _hangTimerSec( 30 ),
+      _maxDurationSec( 3600 ),
       _onNetwork( true ),
       _maxMembers( 0 ),
       _requireAffiliation( true ),
@@ -83,6 +85,9 @@ bool CspPttGroup::load( std::string groupId ) {
 
     // 3GPP MCPTT 그룹 속성 (JSON fallback)
     if ( root.Has( "group_type" ) ) _groupType = root.GetString( "group_type" );
+    if ( _groupType == "broadcast" ) _groupType = "prearranged";  // 일제 통화는 호 속성 — 옛 파일 값 흡수
+    if ( root.Has( "hang_timer_sec" ) ) _hangTimerSec = root.GetInt( "hang_timer_sec" );
+    if ( root.Has( "max_duration_sec" ) ) _maxDurationSec = root.GetInt( "max_duration_sec" );
     if ( root.Has( "on_network" ) ) _onNetwork = ( root.GetInt( "on_network" ) != 0 );
     if ( root.Has( "max_members" ) ) _maxMembers = root.GetInt( "max_members" );
     if ( root.Has( "require_affiliation" ) ) _requireAffiliation = ( root.GetInt( "require_affiliation" ) != 0 );
@@ -141,6 +146,8 @@ void CspPttGroup::Clear() {
     _sessionEnd = 0;
     _sessionSeq = 0;
     _groupType = "prearranged";
+    _hangTimerSec = 30;
+    _maxDurationSec = 3600;
     _onNetwork = true;
     _maxMembers = 0;
     _requireAffiliation = true;

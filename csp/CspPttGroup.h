@@ -96,8 +96,16 @@ public:
     int _sessionSeq;
 
     // ── 3GPP MCPTT (TS 24.379/24.481) ──
-    /** session-type: "prearranged" | "chat" | "broadcast" */
+    /** 그룹 종류 (그룹 문서 on-network-invite-members — TS 24.481 §7.2.2): "prearranged" | "chat".
+     *  즉석 세션은 내부값 "private"(1:1) — ad hoc 은 "prearranged" + _isAdhoc. 일제 통화는 그룹 종류가 아니라
+     *  호 속성이다(GroupCallService 세션 속성, mcptt_broadcast_group_call.md). */
     std::string _groupType;
+
+    /** 그룹 호 T4 Inactivity 초 (on-network-hang-timer, TS 24.481 §7.2.2 o — 0=미사용) */
+    int _hangTimerSec;
+
+    /** 그룹 호 최대 시간 TNG3 초 (on-network-maximum-duration, TS 24.481 §7.2.7 — 0=무제한) */
+    int _maxDurationSec;
 
     /** on-network 그룹 여부 */
     bool _onNetwork;

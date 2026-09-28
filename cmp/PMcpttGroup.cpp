@@ -1132,7 +1132,7 @@ void PMcpttGroup::setFloorTimers(int t1, int t2, int t3, int t8, int t7, int t20
     _t8RevokeSec   = t8 > 0 ? t8 : 1;
     _t7IdleSec     = t7 >= 0 ? t7 : 0;
     _t20GrantSec   = t20 > 0 ? t20 : 1;
-    _t4InactSec    = t4 >= 0 ? t4 : 0;
+    if (t4 >= 0) _t4InactSec = t4;   // 음수 = 미지정 — 현재 값 유지
     // 세션은 'G: Floor Idle' 로 시작한다 — 화자가 없고 아직 무장 전이면 T4 를 건다(§6.3.4.3.2).
     //   멤버 추가 ADD/MODIFY 는 이미 무장된 T4 를 다시 시작하지 않는다.
     if (_t4InactSec == 0) _t4SinceUsec = 0;

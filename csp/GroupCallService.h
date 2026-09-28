@@ -6,12 +6,15 @@
 #define _GROUP_CALL_SERVICE_H_
 
 #include <chrono>
+#include <ctime>
 #include <map>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <utility>
 #include <vector>
+
+#include "CmpClient.h"  // CmpGroupSession
 
 class CSipCallRtp;
 class CSipCallRoute;
@@ -43,10 +46,13 @@ public:
      * @param pszCallId Incoming Call-ID
      * @param pclsRtp RTP info of caller
      * @param pclsRoute Route info
+     * @param bBroadcastInd INVITE mcptt-info 의 <broadcast-ind>true (TS 24.379 §6.2.8.2) — 세션을 **개시**하는
+     *        INVITE 에서만 세션 속성이 된다. 진행 중 세션에 합류하는 INVITE 에서는 무시한다(§4.12, R7).
      * @return true if group call initiated, false if group not found or error
      */
     bool ProcessGroupCall( const char *pszGroupId, const char *pszCallerInfo, const char *pszCallId,
-                           CSipCallRtp *pclsRtp, CSipCallRoute *pclsRoute, int iCondition = 0 );
+                           CSipCallRtp *pclsRtp, CSipCallRoute *pclsRoute, int iCondition = 0,
+                           bool bBroadcastInd = false );
 
     /**
      * @brief Invite a member to a group call
@@ -110,6 +116,10 @@ public:
     /** CMP 가 유휴 그룹(멤버·활동 없음)을 자체 회수(PTT_GROUP_ABORTED)했을 때 CSP 캐시를 정리한다.
      *  다음 그룹 사용 시 SyncGroupsState/AddGroup 경로가 깨끗한 sesid 로 재수립한다. CmpClient 이벤트 핸들러가 호출. */
     void OnGroupAborted( const std::string &strGroupId );
+
+    /** CMP T4(Inactivity) 만료(PTT_FLOOR_INACTIVITY) — 그룹 호 해제 정책(TS 24.379 §6.3.8.1): on-demand 세션을
+     *  해제한다(chat·즉석 세션은 T4 를 걸지 않는다). strSesId 가 현재 세션과 다르면 지난 세션의 이벤트라 무시. */
+    void OnFloorInactivity( const std::string &strGroupId, const std::string &strSesId );
 
     /**
      * @brief Send RFC 4575 conference-info NOTIFY to all active participants in a group
@@ -224,9 +234,11 @@ private:
     /** bExplicitCondition=true 면 emergency-ind/imminentperil-ind 를 true/false 로 항상 명시 —
      *  in-call 조건 재광고 re-INVITE(하향=false 전파, TS 24.379 §6.3.3.1.15/16)용.
      *  false(기본)면 활성 지시자만 실어 초기 INVITE 의 기존 형태를 유지한다. */
+    /** bBroadcast = 세션이 일제 통화 — `<broadcast-ind>true` 를 싣는다(TS 24.379 §6.3.3.1 — session-type 은 그룹 종류).
+     */
     static std::string BuildGroupInfoXml( const class CspPttGroup &clsGroup, const std::string &strUserId,
                                           const std::string &strCallerId, int iCondition = 0,
-                                          bool bExplicitCondition = false );
+                                          bool bExplicitCondition = false, bool bBroadcast = false );
 
     /**
      * @brief Build group member roster (application/resource-lists+xml, RFC 5366 +
@@ -243,7 +255,7 @@ private:
      * @param clsGroup PTT group info
      * @return JSON object string
      */
-    static std::string BuildGroupDescriptor( const class CspPttGroup &clsGroup );
+    static std::string BuildGroupDescriptor( const class CspPttGroup &clsGroup, bool bBroadcast = false );
 
     /**
      * @brief Wrap SDP + MCPTT info XML + roster into multipart/mixed body, update INVITE message
@@ -275,7 +287,6 @@ private:
         std::string strIp;
         size_t nConfigHash;  // CMP 재전달이 필요한 설정(로스터·floor 정책)의 지문 — 변경 감지용
         std::string strSessionCallId;
-        std::string strCallerId;
         bool bVideoEnabled;
         int iConfVersion;  // RFC 4575 conference-info version counter
         // 멤버별 CMP 전용 RTP 포트 (sid → {audio, video}) — 각 멤버의 SDP 에 이 포트를 광고.
@@ -298,6 +309,28 @@ private:
      *  key = group_id, value = sesid (형식: `{group_id}::csp::{us_ts}::{counter}`).
      *  GetOrIssueGroupSesId() 로 조회/발행, RemoveGroupSesId() 로 세션 종료 시 정리. */
     std::map<std::string, std::string> m_mapGroupSesId;
+
+    /** 그룹 세션 속성 (mcptt_broadcast_group_call.md §3.1) — 세션을 **개시**한 INVITE 에서 한 번 정하고 세션 수명
+     *  동안 바꾸지 않는다. 합류·재참여·청취 leg 는 참가자일 뿐이다(TS 24.380 §6.3.5.3.4). 세션 종료
+     *  (RemoveGroupSesId)에서 지운다. CMP 재수립 ADD 도 이 값을 싣는다(CmpGroupSession). */
+    struct GroupSession {
+        std::string strInitiator;  ///< 개시자 — mcptt-calling-user-id·dialog initiator·CMP initiator_id
+        bool bBroadcast = false;   ///< 일제 통화 (TS 24.379 §4.12)
+        time_t tStart = 0;         ///< 세션 개시 시각 — TNG3(그룹 호 최대 시간) 판정
+    };
+    std::map<std::string, GroupSession> m_mapGroupSession;
+    /** 세션 속성 스냅샷 (없으면 기본값). m_mutex 를 잡는다. */
+    GroupSession SessionOf( const std::string &strGroupId );
+    /** CMP 로 싣는 세션 속성 — 개시자·일제 통화 + T4(on-demand 그룹 호만 그룹 hang-timer, 그 밖은 0). */
+    CmpGroupSession CmpSessionOf( const CspPttGroup &clsGroup );
+    /** T4 를 거는 세션인가 — on-demand 편성 그룹(prearranged)만. chat(상시)·즉석 세션(private·ad hoc)은 제외 —
+     *  개인 호·ad hoc 의 hang-time 은 service config 쪽 값이라(TS 24.484 §8.4.2.7) 그룹 문서 값을 쓰지 않는다. */
+    static bool IsOnDemandGroupCall( const CspPttGroup &clsGroup );
+    /** 그룹 호 해제 (TS 24.379 §6.3.8.1) — 참가 leg(확립·미확립·청취) 전부 BYE/CANCEL 후 마지막 leg 의 teardown 이
+     *  CMP REMOVE·세션 정리를 끝낸다. pszReason 은 로그용. */
+    void ReleaseGroupSession( const std::string &strGroupId, const char *pszReason );
+    /** TNG3(on-network-maximum-duration) 만료 세션 해제 — MonitorLoop 1초 주기. */
+    void CheckSessionLimits();
     /** 그룹 세션 sesid 조회. 없으면 새로 발행하여 저장. */
     std::string GetOrIssueGroupSesId( const std::string &strGroupId );
     /** 그룹 세션 종료 시 캐시 제거 (PTT_GROUP_REMOVE 호출 시점) */
@@ -336,7 +369,8 @@ private:
     }
     /** 락 밖에서 호출 — 청취 leg 는 무동작. */
     void EmitPttDialog( const PttDialogLeg &leg, const char *pszState );
-    /** dialog `<mcptt>` 확장 요소 — 세션 종류(private|adhoc|prearranged|chat|broadcast)·session-id·개시자·긴급/임박. */
+    /** dialog `<mcptt>` 확장 요소 — 세션 종류(private|adhoc|prearranged|chat)·session-id·개시자·일제
+     * 통화(broadcast)·긴급/임박. */
     std::string BuildPttDialogExt( const std::string &strGroupId );
     static std::string PttSessionUri( const std::string &strGroupId );
     /** 즉석 세션(priv-/adhoc-) 관측 인가 — 청취 leg 합류·conference 구독 공용 (dispatch_center.md §5.6a).

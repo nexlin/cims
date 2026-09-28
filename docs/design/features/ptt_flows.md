@@ -4,15 +4,18 @@
 >
 > | group_type | 모드 | 절차 |
 > |---|---|---|
-> | `prearranged` | **on-demand** | 발신 UE 의 키업(그룹 INVITE)→affiliate+등록 멤버 fan-out→마지막 확립 멤버 이탈 시 해제 (TS 24.379 §10.1). 규격 해제 정책(T4 무활동·참가자 1명 이하, §6.3.8.1)은 미구현 — [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §4.1 P6 |
+> | `prearranged` | **on-demand** | 발신 UE 의 키업(그룹 INVITE)→affiliate+등록 멤버 fan-out→해제 정책(TS 24.379 §6.3.8.1): T4 무활동 만료(그룹 `hang_timer_sec`)·참가자 1명 이하·TNG3 최대 시간(`max_duration_sec`) (B6) |
 > | `chat` | **상시(persistent)** | 상시 세션, 멤버는 affiliation 시 합류, de-affiliate/dereg 시 이탈 (§10.2) |
-> | `broadcast` | on-demand + 발신자 floor 독점 | 개시자만 발언, 타 멤버 floor REQUEST 는 CMP 가 Deny #5(Receive only) (TS 24.380 §6.3.5.4.4). 일제 통화를 **그룹 유형**으로 정하는 CIMS 방식 — 규격은 호 단위 `<broadcast-ind>`(TS 24.379 §4.12)이다. 규격 대비 판정·보완은 [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) |
+>
+> **일제 통화(broadcast group call)는 그룹 종류가 아니라 호 속성**이다(TS 24.379 §4.12) — 멤버가 `prearranged` 그룹 INVITE 의
+> mcptt-info 에 `<broadcast-ind>true` 를 실어 개시하면 그 세션만 개시자 floor 독점이 된다(C3b). 같은 그룹을 일반 그룹 통화로도 쓴다.
+> 정본 [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md).
 >
 > - **REGISTER 는 호에 무영향**. 발신 INVITE 키업이 on-demand 세션 개시 트리거 (`ProcessGroupCall`).
 > - **affiliation = SIP PUBLISH** (`application/vnd.3gpp.mcptt-affiliation-command+xml`, TS 24.379 §9 / RFC 3903) → `CCscfModule::RecvRequestPublish` → `ptt_affiliations`. SUBSCRIBE-presence affiliation 경로도 호환을 위해 동작한다.
 > - **개시자(originator) 도 CMP floor/RTP 멤버**: `ProcessGroupCall` 이 caller 를 `PTT_JOIN`(audio/floor=audio+1) → caller RTP 릴레이 + floor 참여. 200 OK 에 `m=application`(SharedFloorPort) 광고(psip `AddSdp` append, audio-only 호엔 무영향) → 개시자가 floor dest 학습.
 > - **영상 협상(RFC 3264 §6)**: 개시자가 `m=video` 를 오퍼하면 200 answer 는 같은 자리에 `m=video` 를 낸다 — 그룹 `video_enabled` 이고 CMP 가 그 멤버의 video 포트를 냈으면 그 포트(H.264 PT·fmtp 는 오퍼 echo), 아니면 **port 0 거절**(라인 생략 금지 — answer 의 m= 수·순서 = 오퍼). 멤버 fan-out INVITE 는 `video_enabled` 그룹에서만 `m=video`(멤버 전용 CMP video 포트, H.264/90000 PT 97)를 audio 와 application 사이에 싣고, 멤버 answer 의 video 포트가 `PTT_JOIN` 으로 간다(비협상 leg 는 video 0 — 유령 포트 없음). psip 합성 SDP(`CSipCallRtp::m_iVideoPort`)가 담당하며 SRTP(SAVP) leg 의 video 는 별도 키가 없어 아직 port 0 이다. `X-Video-Port` 헤더는 cwrtc 호환용으로만 남는다.
-> - **broadcast**: `PTT_GROUP_ADD` 에 `group_type`+`initiator_id` 전달 → CMP `handleFloorRequest` 가 개시자 외 floor REQUEST 를 REJECT(`floor.jsonl reason=broadcast`).
+> - **세션 속성**(개시자·일제 통화)은 세션을 **개시**한 INVITE 에서 한 번 정한다(`CGroupCallService::m_mapGroupSession`) — 늦은 합류·재참여·청취 leg 은 바꾸지 못한다. `PTT_GROUP_ADD` 는 늘 이 값(`initiator_id`·`broadcast:1`·`floor_timers.t4_inactivity`)을 싣고, CMP 는 세션 개시 ADD 에서만 반영한다. fan-out mcptt-info 의 `session-type` = 그룹 종류, `mcptt-calling-user-id` = 개시자.
 > - **신규 그룹 즉시 발신**: `EventIncomingCall` 이 그룹 캐시 미스 시 `LoadFromDb()` lazy-reload (notify 도달 무관 안전망). csc `notify_csp` GROUP_CHANGED 를 CSP+PSP 양쪽 broadcast.
 > - **UE↔CSC XCAP HTTP**: 그룹문서/user-profile/service-config 는 **CSC McpttServer(HTTPS :4430)** 가 서빙. xcap-diff NOTIFY 의 `xcap-root` 는 **CSC 정본**(`McpttServer.PublicUrl`, 비면 요청 Host 유도)이고 CSP 가 내부 API `GET /internal/mcptt/endpoint` 로 취득한다 — CSP 에는 이 주소 설정이 없다. ue-init-config 의 `GMS/CMS-XCAP-root-URI` 와 같은 값이 된다. UE 는 NOTIFY 수신 → CSC-1 토큰(OAuth2 PKCE) 취득 → 문서 GET(`If-None-Match` 304). [mcptt_api.md](../../api/mcptt_api.md)
 >
@@ -318,7 +321,7 @@ ptt_groups WHERE mcptt_group_id=..` 은 그룹을 못 찾으면 **에러 없이 
 > `Event` 헤더·본문 content-type 을 TS 24.379 §9.2.1 대조로 확정할 것(현재 값은 미검증).
 > SUBSCRIBE-presence affiliation 경로도 호환을 위해 동작한다(추가형).
 
-### B5. on-demand 그룹콜 개시 (prearranged / broadcast — TS 24.379 §10.1/§10.3)
+### B5. on-demand 그룹콜 개시 (prearranged — TS 24.379 §10.1, 일제 통화 §4.12)
 
 ```
 발신 UE(개시자)          CSP                          CMP
@@ -327,10 +330,11 @@ ptt_groups WHERE mcptt_group_id=..` 은 그룹을 못 찾으면 **에러 없이 
   │  (그룹 URI, SDP)     │ [EventIncomingCall]
   │                      │  그룹 캐시 미스면 LoadFromDb() (lazy-load 안전망)
   │                      │ [ProcessGroupCall]
+  │                      │  세션 속성 확정(개시 INVITE 만): 개시자, broadcast-ind → 일제 통화
   │                      │  ── PTT_GROUP_ADD ───────► │  공유 RTP/Floor 할당
-  │                      │     {group_id, members,    │  (group_type=broadcast 면
-  │                      │      group_type,           │   initiator_id 동봉)
-  │                      │      initiator_id}         │
+  │                      │     {group_id, members,    │  세션 속성은 세션 개시 ADD 에서만
+  │                      │      group_type, initiator_id,  반영(같은 세션 재ADD 는 무시)
+  │                      │      broadcast?, floor_timers.t4_inactivity}
   │                      │  ◄── {ip,port,floor_port} ─ │
   │ ◄── 200 OK ────────── │  SDP: m=audio {SharedPort} │
   │                      │       m=application {Floor} │  ← 개시자가 floor dest 학습
@@ -341,25 +345,32 @@ ptt_groups WHERE mcptt_group_id=..` 은 그룹을 못 찾으면 **에러 없이 
   │                      │  [fan-out] affiliate+등록 멤버에게 multipart INVITE
   │                      │  ── INVITE ──────────────► 멤버 UE … (B 흐름: 200→JOIN)
   │                      │                            │
-  │  ※ 마지막 확립 멤버 이탈 시 prearranged/broadcast 는 PTT_GROUP_REMOVE + 세션 종료.
-  │     chat 은 상시 유지.
+  │  ※ 해제는 B6 정책(T4·참가자 1명 이하·TNG3·마지막 이탈) — chat 은 상시 유지.
 ```
 
 ### B6. 그룹 세션 수명 (on-demand vs chat)
 
 ```
-prearranged / broadcast (on-demand):
-  세션 없음 ──(개시자 키업 INVITE: B5)──► PTT_GROUP_ADD + 세션 ──(마지막 확립 멤버 이탈)──► PTT_GROUP_REMOVE
+prearranged (on-demand, TS 24.379 §6.3.8.1 해제 정책):
+  세션 없음 ──(개시자 키업 INVITE: B5)──► PTT_GROUP_ADD + 세션 ──┬─(T4 만료: CMP PTT_FLOOR_INACTIVITY)──┐
+                                                                  ├─(참가자 1명 이하: 잔여 leg BYE)───────┤
+                                                                  ├─(TNG3 = max_duration_sec 경과)────────┤
+                                                                  └─(마지막 확립 멤버 이탈)───────────────┴─► 전 leg BYE/CANCEL + PTT_GROUP_REMOVE
 
 chat (상시):
   CheckGroupIntegrity(10s 스윕)가 active chat 세션 유지 — affiliate 멤버 합류(InviteMember),
   de-affiliate/dereg 시 이탈.
 ```
 
+- **T4(Inactivity)** = 그룹 문서 `<on-network-hang-timer>`(`ptt_groups.hang_timer_sec`, 기본 30초, 0=미사용). CMP 가
+  'G: Floor Idle'(세션 시작·발언 종료)에서 무장하고 Granted 에서 멈춘다(TS 24.380 §6.3.4.3). 만료하면 CSP 가 세션을 해제한다
+  (`OnFloorInactivity` → `ReleaseGroupSession`). chat·즉석 세션(private·ad hoc)에는 걸지 않는다.
+- **참가자 1명 이하** — leg 이 끊겨 남은 참가 leg(확립·미확립 초대, 청취 leg 제외)이 1개면 그 leg 에 BYE 한다(편성·ad hoc 공통).
+- **TNG3** = `<on-network-maximum-duration>`(`max_duration_sec`, 기본 3600초, 0=무제한) — `CheckSessionLimits`(1초 주기).
 - 세션 활성·마지막 이탈 판정은 **확립된 leg(200 OK 수신)만** 센다. 미응답 pending INVITE 는 세션을
   붙들지 못하며, 세션 해제 시 잔존 pending 초대는 CANCEL 된다 — 미응답 재초대 dialog 가 "활성 세션"을
   자가 재생산해 전원 이탈 후에도 REMOVE 가 밀리는 좀비 세션 방지.
-- **서버 주도 주기 재초대는 chat 전용.** prearranged/broadcast 의 late entry/복구는 UE 주도
+- **서버 주도 주기 재초대는 chat 전용.** prearranged 의 late entry/복구는 UE 주도
   (사용자 재참여 버튼·앱 자동 재조인, TS 24.379 모델) — 서버는 개시 시 fan-out(B5)만 수행한다.
 - **재조인 시 옛 leg 정리**: 멤버가 BYE 없이 죽은 뒤 새 INVITE 로 재참여하면 같은 `(사용자,그룹)`의
   옛 leg 가 세션 맵에 고아로 남아 참가자 명단에 **중복 표기**된다 → 개시자 경로가 옛 leg 의 SIP
@@ -503,14 +514,15 @@ UE-B (낮은 우선순위, 현재 화자)   CMP              UE-A (높은 우선
   │                                │ ── Floor Taken ► 화자 외 전원
 ```
 
-### C3b. broadcast 그룹 floor 독점 (TS 24.380 §6.3.5.4.4)
+### C3b. 일제 통화 floor 독점 (TS 24.380 §6.3.5.3.4)
 
-`group_type=broadcast` 그룹은 개시자(initiator)만 발언한다. CMP `handleFloorRequest` 가
-요청자 sessionId(=userId) ≠ `_initiatorSessionId` 이면 floor 점유 여부와 무관하게 REJECT.
+일제 통화로 개시된 세션(`broadcast:1`)은 개시자(initiator)만 발언한다. CMP `handleFloorRequest` 가
+요청자 sessionId(=userId) ≠ `_initiatorSessionId` 이면 floor 점유·긴급 여부와 무관하게 Deny #5(Receive only).
+floor 메시지 Floor Indicator 에 B-bit(0x4000), Floor Taken/Idle 의 Permission to Request the Floor = 0.
 
 ```
 개시자(initiator)         CMP (broadcast group)        비개시자 멤버
-  │                      │  (_groupType=broadcast,     │
+  │                      │  (_broadcast=true,          │
   │                      │   _initiatorSessionId=개시자)│
   │ ── FLOOR_REQUEST ──► │                            │
   │ ◄── FLOOR_GRANT ──── │  requester==initiator → GRANT
@@ -520,8 +532,9 @@ UE-B (낮은 우선순위, 현재 화자)   CMP              UE-A (높은 우선
   │                      │ ── FLOOR_REJECT ─────────► │  floor.jsonl reason=broadcast
   │ ── RTP Audio ──────► │ ── RTP Forward ──────────► │  개시자 음성만 릴레이
 ```
-> `initiator_id` 는 `PTT_GROUP_ADD` 으로 CSP→CMP 전달(개시자 = `ProcessGroupCall` 의 caller). 개시자는 PTT_JOIN 으로 CMP floor 멤버 등록되어 GRANT 가능.
-> 규격 대비 공백 — 호 단위 일제 표식(`<broadcast-ind>`), 개시자 고정(진행 중 세션 합류가 개시자를 바꾸지 않음), 개시자 발언 종료 후 호 해제 — 은 [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §2·§4.
+> 개시자 = 세션을 개시한 INVITE 의 caller(`ProcessGroupCall`) — 진행 중 세션에 합류한 멤버는 개시자가 아니다. 개시자는 PTT_JOIN 으로 CMP floor 멤버 등록되어 GRANT 가능.
+> 일제 통화 중 conference 구독은 480 + `Warning: 105`(TS 24.379 §10.1.3.4.1). 개시 단말의 발언 종료 뒤 호 해제(TS 24.380 §6.2.4.6.4)는
+> 단말 몫이고, 서버는 T4 로 세션을 거둔다(B6) — 단말 보완은 [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §4.4.
 
 ### C4. 멤버 퇴장 (정상 BYE)
 

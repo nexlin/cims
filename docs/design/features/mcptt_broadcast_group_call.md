@@ -30,21 +30,21 @@
 
 | 요구 | CIMS 현재 동작 | 근거 | 판정 |
 |---|---|---|---|
-| R1 | 일제 여부를 **그룹 속성** `ptt_groups.group_type='broadcast'` 로 정한다. CSP·SDK·Android 어디에도 `<broadcast-ind>` 파싱·송신이 없다 | `csp/McpttInfo.h:15`, `sql/cims_schema.sql:183`, `sdk/core/src/mcptt/mcptt_xml.cpp:29` | ✗ |
-| R2 | broadcast 유형 그룹에서만 일제 통화가 되고, 그 그룹은 일반 통화를 할 수 없다 | `csp/GroupCallService.cpp:436` (`clsGroup._groupType` 전달) | ✗ |
-| R3 | fan-out INVITE 의 mcptt-info 에 `session-type=broadcast`(규격 밖 값)를 싣는다 | `csp/GroupCallService.cpp:2648-2655` | ✗ |
-| R4 | GMS 그룹 문서에 규격에 없는 `<mcpttgi:session-type>` 을 3GPP 네임스페이스로 싣고, `<on-network-invite-members>` 는 chat 그룹에도 항상 true | `csc/src/services/mcptt.py:1282`, `:1294` | ✗ |
-| R5 | CMP 가 개시자 외 Floor Request 를 Deny #5 — 긴급 tier 검사보다 먼저 | `cmp/PMcpttGroup.cpp:860-873` | ✅ |
-| R6 | Floor Indicator 0x4000·Permission 0 | `cmp/PMcpttGroup.cpp:1025-1035`, `:1798-1825` | ✅ |
-| R7 | CMP 는 broadcast·개시자를 세션 개시 ADD 에서만 받는다(같은 세션 재ADD 는 무시). **CSP 는 진행 중 세션에 합류하는 INVITE 의 합류자를 `initiator_id` 로 PTT_GROUP_ADD 재전송(녹취 경로 설정 시)하고, 캐시 `strCallerId` 도 합류자·청취자로 바꾼다** | `csp/GroupCallService.cpp:444-461`, `cmp/PCmpServer.cpp` `processAddGroup` | △ (CSP 결함 — P2·P3) |
+| R1 | CSP 가 개시 INVITE 의 `<broadcast-ind>` 로 세션 속성을 정한다(`CMcpttInfo::bBroadcast` → `ProcessGroupCall`). SDK·Android 는 아직 송신하지 않는다 | `csp/McpttInfo.h`, `csp/GroupCallService.cpp` `ProcessGroupCall` · `sdk/core/src/mcptt/mcptt_xml.cpp` | ✅ 서버 / ✗ 단말 (U1) |
+| R2 | 멤버는 어느 편성(prearranged) 그룹에서나 일제 통화를 개시한다 — 그룹 종류는 `prearranged`/`chat` 뿐이다 | `sql/migrate_ptt_groups_broadcast_call.sql`, `csc/src/handlers/admin.py` | ✅ |
+| R3 | fan-out mcptt-info = `session-type`(그룹 종류) + `<broadcast-ind>true` | `GroupCallService.cpp` `BuildGroupInfoXml` | ✅ |
+| R4 | 그룹 문서의 그룹 종류 = `<on-network-invite-members>`. 비표준 `<mcpttgi:session-type>` 은 단말이 invite-members 를 읽게 될 때(U5)까지 prearranged/chat 값으로 함께 싣는다 | `csc/src/services/mcptt.py` | △ (전환기 요소 — U5 뒤 제거) |
+| R5 | CMP 가 개시자 외 Floor Request 를 Deny #5 — 긴급 tier 검사보다 먼저 | `cmp/PMcpttGroup.cpp` `handleFloorRequest` | ✅ |
+| R6 | Floor Indicator 0x4000·Permission 0 | `cmp/PMcpttGroup.cpp` `_indicatorFor`·`broadcastFloorStatus` | ✅ |
+| R7 | 세션 속성(개시자·broadcast)은 개시 INVITE 에서 한 번 정한다(CSP 세션 캐시). CMP 도 세션 개시 ADD 에서만 반영 | `GroupCallService.cpp` `m_mapGroupSession`, `cmp/PCmpServer.cpp` `processAddGroup` | ✅ |
 | R8 | SDK 의 Floor Request 에 broadcast 비트 없음 | `sdk/core/src/floor/floor_participant.cpp` | ✗ (단말) |
-| R9 | 개시 단말의 발언 종료 후 호 해제 처리 없음 — 세션이 멤버가 끊을 때까지 남고, 개시자가 다시 눌러 이어서 말할 수 있다 | SDK·Android 에 broadcast Floor Idle 처리 없음 | ✗ (단말) |
-| R10 | CMP 는 T4 를 갖췄다(`floor_timers.t4_inactivity` → `PTT_FLOOR_INACTIVITY`). CSP 는 T4 를 싣지 않고 이벤트를 소비하지 않으며, on-demand 세션은 **확립 leg 이 0** 이 될 때만 해제(규격은 1명 이하). 그룹 문서의 `<mcpttgi:on-network-hang-time>3</...>`(요소명 불일치 — 규격은 `on-network-hang-timer`)은 고정값이며 어디서도 쓰지 않는다 | `csp/GroupCallService.cpp:996`, `:2063`, `csc/src/services/mcptt.py` 그룹 문서 | ✗ (CSP·CSC) |
-| R11 | 480 + Warning 105 — 단 판정 기준이 호가 아니라 그룹 유형 | `csp/GroupCallService.cpp:2157-2160` | △ (R1 과 함께 기준 교체) |
-| R12 | Floor Indicator = tier 비트 OR broadcast 비트, 비개시자 긴급 요청도 Deny #5 | `cmp/PMcpttGroup.cpp:862`, `:1025-1035` | ✅ |
+| R9 | 개시 단말의 발언 종료 후 호 해제 처리 없음 — 서버가 T4 로 세션을 거둔다 | SDK·Android 에 broadcast Floor Idle 처리 없음 | ✗ (단말) |
+| R10 | T4 만료(그룹 `hang_timer_sec` → CMP `PTT_FLOOR_INACTIVITY`)·참가자 1명 이하·TNG3(`max_duration_sec`) 해제. 최소 affiliation 인원 미달은 미구현 | `GroupCallService.cpp` `OnFloorInactivity`·`OnCallTerminated`·`CheckSessionLimits` | ✅ (최소 affiliation 인원 제외) |
+| R11 | 480 + Warning 105 — 판정 기준 = 세션 broadcast 속성 | `GroupCallService.cpp` `CheckConferenceSubscribe` | ✅ |
+| R12 | Floor Indicator = tier 비트 OR broadcast 비트, 비개시자 긴급 요청도 Deny #5 | `cmp/PMcpttGroup.cpp` | ✅ |
 
-**요약**: 발언권 평면(R5·R6·R12)은 규격대로다. 호를 무엇으로 일제 통화라고 부르는가(R1~R4),
-개시자 고정(R7), 호 종료·세션 해제(R9·R10)가 규격과 다르다.
+**요약**: 서버(CSP·CMP·CSC)는 규격대로다 — 발언권 평면, 호 단위 일제 표식, 개시자 고정, 해제 정책(최소 affiliation 인원 제외).
+단말의 일제 통화 발신·B-bit Floor Request·발언 종료 후 호 해제(R1·R8·R9)와 그룹 종류 판정 전환(R4 짝 U5)이 남아 있다(§4.4).
 
 ## 3. 규격 정합 동작 (목표)
 
@@ -101,7 +101,7 @@
 |---|---|---|
 | P1 | mcptt-info 파서에 `<broadcast-ind>` 추가, `session-type` 허용값을 규격 6종으로 | `csp/McpttInfo.h` |
 | P2 | 세션 속성(`broadcast`, `initiator`)을 **새 세션일 때만** 확정 — `HasActiveLeg()` 가 거짓인 개시 INVITE. 합류·청취 leg 은 캐시 개시자(`strCallerId`)를 바꾸지 않는다 | `CGroupCallService::ProcessGroupCall` (`GroupCallService.cpp:404-461`) |
-| P3 | 기존 세션 재ADD(녹취 경로·재수립)에는 `initiator_id`/broadcast 를 싣지 않는다 — 세션 속성의 권한자는 CSP 이고 CMP 는 생성 시 1회만 받는다(§4.2 M1) | `GroupCallService.cpp:444-453`, `InviteMember` `:1167-1179`, `CCmpClient::AddGroup` |
+| P3 | CMP 로 가는 모든 PTT_GROUP_ADD(개시·녹취 경로·재수립)는 **세션 캐시의** 개시자·broadcast·T4 를 싣는다 — 합류자를 싣지 않는다. 세션 속성의 권한자는 CSP 이고 CMP 는 세션 개시 ADD 에서만 반영한다(§4.2 M1) | `GroupCallService.cpp` `CmpSessionOf`, `CCmpClient::AddGroup`(`CmpGroupSession`) |
 | P4 | fan-out mcptt-info: `session-type` 은 그룹 종류(`prearranged`/`chat`), 일제 통화면 `<broadcast-ind>true</broadcast-ind>` 추가 | `BuildGroupInfoXml` (`GroupCallService.cpp:2643`) |
 | P5 | conference 구독 480/Warning 105 판정을 그룹 유형 → **세션 broadcast 속성**으로 | `GroupCallService.cpp:2157` |
 | P6 | 세션 해제 정책 §6.3.8.1: CMP `PTT_FLOOR_INACTIVITY`(T4 만료) 수신 시 해제, 확립 참가자 **1명 이하**에서 해제(현재 0명). TNG3·최소 affiliation 인원은 같은 정책 훅에 둔다 | 세션 종료 판정 (`GroupCallService.cpp:996`, `:2063`) |

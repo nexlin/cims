@@ -9,13 +9,15 @@
 // ── MCPTT call-control info 경량 파서 (application/vnd.3gpp.mcptt-info+xml, TS 24.379) ──
 //  수신 INVITE/MESSAGE 의 multipart 바디에서 condition 지시자만 추출한다.
 //  namespace prefix(mcpttinfo:/mcpttgi: 등) 무관하게 태그 substring 으로 매칭 — 외부 XML 파서 의존 없음.
-//  emergency/imminent 는 prearranged/chat/broadcast(session-type)와 직교하는 런타임 조건.
+//  emergency/imminent·broadcast 는 session-type(그룹 종류)과 직교하는 호 단위 표식이다.
 
 struct CMcpttInfo {
-    std::string strSessionType;  // prearranged|chat|broadcast|private (선택)
-    bool bEmergency = false;     // <emergency-ind>true</emergency-ind>
-    bool bImminent = false;      // <imminentperil-ind>true</imminentperil-ind>
-    bool bAlert = false;         // <alert-ind>true</alert-ind>
+    // session-type (TS 24.379 Annex F.1 의미 2) — chat|prearranged|private|first-to-answer|ambient-listening|adhoc
+    std::string strSessionType;
+    bool bBroadcast = false;  // <broadcast-ind>true</broadcast-ind> — 일제 통화 (TS 24.379 §6.2.8.2, §4.12)
+    bool bEmergency = false;  // <emergency-ind>true</emergency-ind>
+    bool bImminent = false;   // <imminentperil-ind>true</imminentperil-ind>
+    bool bAlert = false;      // <alert-ind>true</alert-ind>
     // FloorTier 정합 condition: 2=emergency, 1=imminent, 0=normal
     int Condition() const {
         return bEmergency ? 2 : ( bImminent ? 1 : 0 );
@@ -44,6 +46,7 @@ inline CMcpttInfo ParseMcpttInfo( const std::string &body ) {
     info.bEmergency = _McpttIndTrue( body, "emergency-ind" );
     info.bImminent = _McpttIndTrue( body, "imminentperil-ind" );
     info.bAlert = _McpttIndTrue( body, "alert-ind" );
+    info.bBroadcast = _McpttIndTrue( body, "broadcast-ind" );
     size_t p = body.find( "session-type" );
     if ( p != std::string::npos ) {
         size_t gt = body.find( '>', p );

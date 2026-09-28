@@ -1723,7 +1723,8 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
     int t1Sec = _floorIdleSec, t2Sec = _floorStopTalkSec;
     int t3Sec = _floorRevokeGraceSec, t8Sec = _floorRevokeRetxSec;
     int t7Sec = _floorIdleResendSec, t20Sec = _floorGrantRetxSec;
-    int t4Sec = 0;   // T4 Inactivity — CMP 기본값 없음(0=미사용). CSP 가 그룹 hang-timer 로 채운다.
+    int t4Sec = -1;  // T4 Inactivity — CMP 기본값 없음. 미지정(-1)이면 그룹의 현재 값 유지(새 그룹은 0=미사용).
+                     //   CSP 가 그룹 hang-timer 로 채운다 — MODIFY 가 싣지 않아도 T4 가 꺼지지 않게 한다.
     std::string timerErr;
     {
         SimpleJson::JsonNode ft = payload.Get("floor_timers");
@@ -1741,7 +1742,8 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
             else if (t8Sec < 1 || t8Sec > 10)  timerErr = "floor_timers.t8_revoke out of range (1..10)";
             else if (t7Sec < 0 || t7Sec > 60)  timerErr = "floor_timers.t7_idle_resend out of range (0..60)";
             else if (t20Sec < 1 || t20Sec > 10) timerErr = "floor_timers.t20_grant_retx out of range (1..10)";
-            else if (t4Sec < 0 || t4Sec > 3600) timerErr = "floor_timers.t4_inactivity out of range (0..3600)";
+            else if (ft.Has("t4_inactivity") && (t4Sec < 0 || t4Sec > 3600))
+                timerErr = "floor_timers.t4_inactivity out of range (0..3600)";
         }
     }
     // 일제 통화(broadcast group call) = 호 속성 `broadcast`(0/1) — 그룹 종류(group_type)와 직교한다

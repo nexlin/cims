@@ -719,7 +719,7 @@ bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std:
                            std::string &strIp, int &iFloorPort,
                            std::map<std::string, std::pair<int, int>> &mapMemberPorts, const std::string &strRecordDir,
                            bool bVideoEnabled, int iSessionSeq, const std::string &strSesId,
-                           const std::string &strGroupType, const std::string &strInitiator,
+                           const std::string &strGroupType, const CmpGroupSession &clsSession,
                            const std::string &strFloorPolicy, int iMaxTalkers, const std::string &strFloorControl,
                            const std::string &strSessionDir ) {
     SimpleJson::JsonNode req;
@@ -741,10 +741,17 @@ bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std:
     // 기록 단위 = 세션. record_dir 하위 {시간버킷}/{session_dir}/ 이 이 세션의 산출물 자리다.
     if ( !strSessionDir.empty() ) req.Set( "session_dir", strSessionDir );
     if ( bVideoEnabled ) req.Set( "video_enabled", 1 );
-    // group_type / initiator — broadcast 그룹 floor 독점(TS 24.380 §10.3) 판정용.
-    //   broadcast: 개시자(initiator)만 floor 보유, 타 멤버 REQUEST 는 CMP 가 REJECT.
+    // group_type = 그룹 종류(prearranged/chat/private). 세션 속성(개시자·일제 통화·T4)은 세션 캐시 값 —
+    //   CMP 는 세션 개시 ADD 에서만 반영한다(cmp_media_api.md PTT_GROUP_ADD). 일제 통화면 개시자만
+    //   floor 를 가지며 타 참가자 요청은 Deny #5(TS 24.380 §6.3.5.3.4).
     if ( !strGroupType.empty() ) req.Set( "group_type", strGroupType );
-    if ( !strInitiator.empty() ) req.Set( "initiator_id", strInitiator );
+    if ( !clsSession.strInitiator.empty() ) req.Set( "initiator_id", clsSession.strInitiator );
+    if ( clsSession.bBroadcast ) req.Set( "broadcast", 1 );
+    if ( clsSession.iT4Sec >= 0 ) {
+        SimpleJson::JsonNode ft;
+        ft.Set( "t4_inactivity", clsSession.iT4Sec );
+        req.Set( "floor_timers", ft );
+    }
     // 동시 발언 정책 — floor 절차는 CMP↔UE in-band 라 세션 생성 시 1회 전달로 끝난다.
     //   private(2인 세션)은 동시성 축을 해석하지 않으므로(계약 §A.1) 미전송.
     if ( strGroupType != "private" ) SetFloorPolicy( req, strGroupId, strFloorPolicy, iMaxTalkers );
@@ -796,7 +803,8 @@ bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std:
 }
 
 bool CCmpClient::ModifyGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
-                              const std::string &strSesId, const std::string &strFloorPolicy, int iMaxTalkers ) {
+                              const std::string &strSesId, const std::string &strFloorPolicy, int iMaxTalkers,
+                              int iT4Sec ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "PTT_GROUP_MODIFY" );
     req.Set( "group_id", strGroupId );
@@ -814,6 +822,12 @@ bool CCmpClient::ModifyGroup( const std::string &strGroupId, const std::vector<s
     req.Set( "members", ssMembers.str() );
     // 정책 변경 반영 — 정원이 줄면 CMP 가 초과 화자를 Revoke 해 상태를 정책에 맞춘다.
     SetFloorPolicy( req, strGroupId, strFloorPolicy, iMaxTalkers );
+    // 그룹 hang-timer(T4) 변경 반영 — 미전송이면 CMP 가 현재 값을 유지한다.
+    if ( iT4Sec >= 0 ) {
+        SimpleJson::JsonNode ft;
+        ft.Set( "t4_inactivity", iT4Sec );
+        req.Set( "floor_timers", ft );
+    }
 
     std::string strResp;
     if ( !SendRequestAndWait( strGroupId, req, strResp ) ) return false;
@@ -1342,6 +1356,15 @@ void CCmpClient::HandleEvent( const SimpleJson::JsonNode &event ) {
         }
         CLog::Print( LOG_INFO, "PTT_GROUP_ABORTED handled: group=%s reason=%s (캐시 정리)", strGid.c_str(),
                      strReason.c_str() );
+    } else if ( strCmd == "PTT_FLOOR_INACTIVITY" ) {
+        // T4(Inactivity) 만료 (TS 24.380 §6.3.4.3.5) — 세션 해제 여부는 controlling function 정책
+        //   (TS 24.379 §6.3.8.1, mcptt_broadcast_group_call.md R10). standby 는 관측만 한다.
+        std::string strGid = payload.GetString( "group_id" );
+        if ( !m_bAuditActiveRole ) {
+            CLog::Print( LOG_INFO, "PTT_FLOOR_INACTIVITY observed (standby — no action): group=%s", strGid.c_str() );
+            return;
+        }
+        gclsGroupCallService.OnFloorInactivity( strGid, hdr.GetString( "sesid" ) );
     } else if ( strCmd == "RELAY_PLAY_DONE" ) {
         // 안내 재생 완료 (announcements.md §4.1) — 대기 중 최종 응답을 낼 차례. standby 도 상태만 정리하게 전달한다.
         if ( m_fnPlayDone )
