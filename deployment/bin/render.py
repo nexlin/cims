@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections import OrderedDict
 from pathlib import Path
@@ -502,7 +503,34 @@ _RULE_FIELDS = {
     "method", "p_asserted_identity", "via_host",
 }
 _RULE_OPS = {"exists", "not_exists", "eq", "ne", "prefix", "suffix",
-             "contains", "regex", "in_cidr", "in_list"}
+             "contains", "regex", "in_cidr", "in_list", "in_range"}
+# 새 field 문법 <원천>[.<부분>] — csp/CspRuleField.cpp _parse 와 같은 규칙 (sip_service_model.md §2-5)
+_RULE_ADDR_SRCS = {"request_uri", "from", "to", "contact"}
+_RULE_PARTS = {"", "user", "host", "port", "scheme", "display"}
+_RULE_HDR_RE = re.compile(r"^[A-Za-z0-9\-!%*_+`'~]+$")
+
+
+def _rule_field_ok(field: str) -> bool:
+    if field in _RULE_FIELDS:
+        return True
+    if field.startswith("header:"):
+        hdr, _, part = field[7:].partition(".")
+        if not hdr or not _RULE_HDR_RE.match(hdr):
+            return False
+        src = "header"
+    else:
+        src, _, part = field.partition(".")
+    if part.startswith("param:"):
+        part_ok = bool(part[6:])
+    else:
+        part_ok = part in _RULE_PARTS
+    if src == "callee":
+        return part == "e164"
+    if src == "src":
+        return part in ("ip", "port")
+    if src in ("local_node", "method"):
+        return part == ""
+    return (src in _RULE_ADDR_SRCS or src == "header") and part_ok
 
 
 def _build_rules(scn_csp: dict) -> list[dict]:
@@ -523,8 +551,10 @@ def _build_rules(scn_csp: dict) -> list[dict]:
         value = r.get("value", "")
         if not name or not field or not op:
             raise RenderError(f"rule 에 name/field/op 필수: {r}")
-        if field not in _RULE_FIELDS:
-            raise RenderError(f"rule '{name}' field='{field}' 미지원 (지원: {sorted(_RULE_FIELDS)})")
+        if not _rule_field_ok(field):
+            raise RenderError(f"rule '{name}' field='{field}' 문법 오류 — <원천>[.<부분>] "
+                              f"(원천 callee.e164·request_uri·from·to·contact·header:<이름>·src.ip/.port·local_node·method, "
+                              f"부분 user·host·port·scheme·display·param:<이름>) 또는 옛 이름 {sorted(_RULE_FIELDS)}")
         if op not in _RULE_OPS:
             raise RenderError(f"rule '{name}' op='{op}' 미지원 (지원: {sorted(_RULE_OPS)})")
         rows.append({

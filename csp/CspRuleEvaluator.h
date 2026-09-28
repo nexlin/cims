@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include "CspRuleField.h"  // MessageCtx · field 문법 <원천>.<부분>
+
 /**
  * CspRuleEvaluator — Rule / RuleSet 평가 공통 엔진 (v3 모델, 2026-04-22).
  *
@@ -22,23 +24,6 @@
 namespace SimpleJson {
     class JsonNode;
 }
-
-/** SIP 메시지에서 추출한 평가용 컨텍스트.
- *  빈 문자열 → exists 체크가 false. */
-struct MessageCtx {
-    std::string from_uri_host;
-    std::string from_uri_user;
-    std::string to_uri_host;
-    std::string to_uri_user;
-    std::string req_uri_host;
-    std::string req_uri_user;
-    std::string src_ip;
-    std::string dst_ip;
-    std::string user_agent;
-    std::string method;
-    std::string p_asserted_identity;
-    std::string via_host;
-};
 
 class CspRuleEvaluator {
 public:
@@ -65,7 +50,7 @@ public:
 private:
     struct Rule {
         std::string name;
-        std::string field;  // from_uri_host, to_uri_user, ...
+        std::string field;  // <원천>.<부분> (CspRuleField.h) 또는 옛 이름 from_uri_host …
         std::string op;     // eq, ne, prefix, suffix, contains, regex, in_cidr, in_list, exists, not_exists
         std::string value;  // op 에 따른 인자 (in_list 는 콤마 분리)
         bool enabled = true;
@@ -81,9 +66,6 @@ private:
         bool enabled = true;
     };
 
-    const std::string *_getFieldValue( const MessageCtx &ctx, const std::string &field ) const;
-    bool _applyOp( const std::string &fieldValue, const std::string &op, const std::string &value,
-                   bool fieldExists ) const;
     bool _evalRule( const Rule &r, const MessageCtx &ctx ) const;
 
     mutable std::mutex m_mutex;

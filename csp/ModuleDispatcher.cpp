@@ -296,6 +296,27 @@ static EDialPlanResult ResolveCallee( CSipMessage *pclsMessage, const RouteConfi
     return eRes;
 }
 
+/** Rule 평가 컨텍스트 — 옛 이름 값(종전 그대로) + 새 field 문법(sip_service_model.md §2-4)이 읽는 원본 메시지.
+ *  bTrusted = 들어온 Route 로 식별된 피어 → P-Asserted-Identity 를 믿는다(RFC 3325 §4). */
+static MessageCtx RuleCtxFor( const CSipMessage *pclsMessage, const std::string &strLocalNode, bool bTrusted ) {
+    MessageCtx mctx;
+    mctx.from_uri_host = pclsMessage->m_clsFrom.m_clsUri.m_strHost;
+    mctx.from_uri_user = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
+    mctx.to_uri_host = pclsMessage->m_clsTo.m_clsUri.m_strHost;
+    mctx.to_uri_user = pclsMessage->m_clsTo.m_clsUri.m_strUser;
+    mctx.req_uri_host = pclsMessage->m_clsReqUri.m_strHost;
+    mctx.req_uri_user = pclsMessage->m_clsReqUri.m_strUser;
+    mctx.src_ip = pclsMessage->m_strClientIp;
+    mctx.user_agent = pclsMessage->m_strUserAgent;
+    mctx.method = pclsMessage->m_strSipMethod;
+    mctx.p_asserted_identity = bTrusted ? RulePaiUser( pclsMessage ) : "";
+    if ( !pclsMessage->m_clsViaList.empty() ) mctx.via_host = pclsMessage->m_clsViaList.front().m_strHost;
+    mctx.msg = pclsMessage;
+    mctx.local_node = strLocalNode;
+    mctx.trusted_peer = bTrusted;
+    return mctx;
+}
+
 /** routing_policies 평가(CspRoutingPolicyEngine) → 피어 RouteSet 이면 PendingRouteMap 에 B-leg 목적지를 Call-ID 로
  * 넣는다 (EventIncomingCall 이 Take 로 꺼내 B2BUA B-leg peer 로 쓴다). RecvRequest(원착신)와 착신전환(EventIncomingCall
  * 이 전환 대상으로 다시 판정)이 같은 함수를 쓴다. 반환 403 = 거절(REJECT 정책 또는 Roles.IBCF=false 인 노드의
@@ -303,17 +324,15 @@ static EDialPlanResult ResolveCallee( CSipMessage *pclsMessage, const RouteConfi
 int CModuleDispatcher::DecideOutboundRoute( CSipMessage *pclsMessage, const std::string &strTo,
                                             const std::string &strCallId ) {
     bool bInserted = false;
-    MessageCtx mctx;
-    mctx.from_uri_host = pclsMessage->m_clsFrom.m_clsUri.m_strHost;
-    mctx.from_uri_user = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
-    mctx.to_uri_host = pclsMessage->m_clsTo.m_clsUri.m_strHost;
-    mctx.to_uri_user = pclsMessage->m_clsTo.m_clsUri.m_strUser;
-    mctx.req_uri_host = pclsMessage->m_clsReqUri.m_strHost;
+    std::string strLn;
+    if ( pclsMessage->m_iListenerId > 0 ) {
+        LocalNodeInfo ln = gclsLocalNodeMap.GetByIntId( pclsMessage->m_iListenerId );
+        if ( ln.IsValid() ) strLn = ln.name;
+    }
+    MessageCtx mctx = RuleCtxFor( pclsMessage, strLn, InboundRouteOf( pclsMessage, strLn ).IsValid() );
     // 라우팅 규칙의 착신 번호 = 번역된 착신(tel: URI 는 user 가 비어 있어 종전엔 prefix 규칙에 걸리지 않았다)
-    mctx.req_uri_user = strTo.empty() ? pclsMessage->m_clsReqUri.m_strUser : strTo;
-    mctx.src_ip = pclsMessage->m_strClientIp;
-    mctx.user_agent = pclsMessage->m_strUserAgent;
-    mctx.method = pclsMessage->m_strSipMethod;
+    if ( !strTo.empty() ) mctx.req_uri_user = strTo;
+    mctx.callee_e164 = strTo;
     std::string hashKey = mctx.from_uri_user + "@" + mctx.from_uri_host;
     RoutingDecision rd = gclsRoutingPolicyEngine.Decide( mctx, hashKey );
     if ( rd.type == ROUTING_REJECT ) {
@@ -418,16 +437,7 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
                      SipGetTransport( pclsMessage->m_eTransport ), clsInRoute.inbound_auth.c_str() );
     }
     {
-        MessageCtx mctx;
-        mctx.from_uri_host = pclsMessage->m_clsFrom.m_clsUri.m_strHost;
-        mctx.from_uri_user = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
-        mctx.to_uri_host = pclsMessage->m_clsTo.m_clsUri.m_strHost;
-        mctx.to_uri_user = pclsMessage->m_clsTo.m_clsUri.m_strUser;
-        mctx.req_uri_host = pclsMessage->m_clsReqUri.m_strHost;
-        mctx.req_uri_user = pclsMessage->m_clsReqUri.m_strUser;
-        mctx.src_ip = pclsMessage->m_strClientIp;
-        mctx.user_agent = pclsMessage->m_strUserAgent;
-        mctx.method = pclsMessage->m_strSipMethod;
+        const MessageCtx mctx = RuleCtxFor( pclsMessage, strLocalNodeName, clsInRoute.IsValid() );
         AclDecision d = gclsAclPolicyEngine.Check( mctx, strLocalNodeName, clsInRoute.IsValid() ? clsInRoute.name : "",
                                                    strInRouteSet );
         if ( !d.allowed ) {

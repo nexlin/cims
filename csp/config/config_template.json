@@ -1975,23 +1975,9 @@
           {
             "key": "field",
             "label": "대상 필드",
-            "type": "enum",
+            "type": "string",
             "required": true,
-            "options": [
-              "from_uri_host",
-              "from_uri_user",
-              "to_uri_host",
-              "to_uri_user",
-              "req_uri_host",
-              "req_uri_user",
-              "src_ip",
-              "dst_ip",
-              "user_agent",
-              "method",
-              "p_asserted_identity",
-              "via_host"
-            ],
-            "help": "dst_ip / p_asserted_identity / via_host 는 현재 런타임이 값을 채우지 않아 항상 빈 값으로 평가된다. 수신 인터페이스 구분은 ACL scope=local_node 를 사용."
+            "help": "<원천>[.<부분>] — 원천: callee(.e164 · 번호 변환 뒤 착신, Routing 만) · request_uri · from · to · contact · header:<헤더 이름>(대소문자 무시·compact form 포함) · src(.ip/.port) · local_node · method. 부분: user · host · port · scheme · display · param:<이름> (없으면 헤더 값 그대로). 값이 여럿이면 하나라도 맞으면 참(ne·not_exists 는 하나도 안 맞으면). P-Asserted-Identity 는 들어온 Route 로 식별된 피어가 보낸 것만 본다. 옛 이름(from_uri_user · req_uri_user · src_ip …)도 종전 뜻 그대로 쓸 수 있다(dst_ip 는 항상 빈 값). 예) header:P-Asserted-Identity.user, header:Diversion.param:reason, from.host"
           },
           {
             "key": "op",

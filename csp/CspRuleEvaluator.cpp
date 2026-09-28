@@ -18,50 +18,6 @@ CspRuleEvaluator gclsRuleEvaluator;
 
 namespace {
 
-    // 콤마 구분 문자열 → trimmed items
-    std::vector<std::string> _splitList( const std::string &s ) {
-        std::vector<std::string> out;
-        std::string cur;
-        for ( char c : s ) {
-            if ( c == ',' ) {
-                while ( !cur.empty() && ( cur.front() == ' ' || cur.front() == '\t' ) ) cur.erase( cur.begin() );
-                while ( !cur.empty() && ( cur.back() == ' ' || cur.back() == '\t' ) ) cur.pop_back();
-                if ( !cur.empty() ) out.push_back( cur );
-                cur.clear();
-            } else {
-                cur.push_back( c );
-            }
-        }
-        while ( !cur.empty() && ( cur.front() == ' ' || cur.front() == '\t' ) ) cur.erase( cur.begin() );
-        while ( !cur.empty() && ( cur.back() == ' ' || cur.back() == '\t' ) ) cur.pop_back();
-        if ( !cur.empty() ) out.push_back( cur );
-        return out;
-    }
-
-    // CIDR 매칭 (IPv4).  v6 는 향후.
-    bool _cidrMatch( const std::string &ip, const std::string &cidr ) {
-        auto slash = cidr.find( '/' );
-        std::string net = cidr;
-        int prefix = 32;
-        if ( slash != std::string::npos ) {
-            net = cidr.substr( 0, slash );
-            prefix = atoi( cidr.c_str() + slash + 1 );
-        }
-        auto toUint = []( const std::string &s ) -> uint32_t {
-            uint32_t r = 0;
-            int o[4] = { 0, 0, 0, 0 };
-            if ( sscanf( s.c_str(), "%d.%d.%d.%d", &o[0], &o[1], &o[2], &o[3] ) != 4 ) return 0;
-            for ( int i = 0; i < 4; ++i ) r = ( r << 8 ) | (uint8_t)o[i];
-            return r;
-        };
-        uint32_t ipN = toUint( ip );
-        uint32_t netN = toUint( net );
-        if ( prefix <= 0 ) return true;
-        if ( prefix >= 32 ) return ipN == netN;
-        uint32_t mask = 0xFFFFFFFFu << ( 32 - prefix );
-        return ( ipN & mask ) == ( netN & mask );
-    }
-
     bool _boolish( const std::string &v, bool defTrue = true ) {
         if ( v.empty() ) return defTrue;
         if ( v == "false" || v == "0" ) return false;
@@ -90,6 +46,10 @@ bool CspRuleEvaluator::LoadAll() {
             r.value = row.GetString( "value" );
             r.enabled = _boolish( row.GetString( "enabled" ), true );
             if ( r.name.empty() || r.field.empty() || r.op.empty() ) continue;
+            if ( !RuleFieldSyntaxOk( r.field ) )
+                CLog::Print( LOG_ERROR,
+                             "RuleEvaluator: rule '%s' field '%s' 를 해석할 수 없다 — 이 Rule 은 늘 불일치다",
+                             r.name.c_str(), r.field.c_str() );
             newRules[r.name] = r;
         }
     }
@@ -161,74 +121,39 @@ bool CspRuleEvaluator::HasRuleSet( const std::string &name ) const {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 필드 매핑
+// Rule 평가 — field 해석·비교는 CspRuleField (옛 이름은 종전 값 그대로)
 
-const std::string *CspRuleEvaluator::_getFieldValue( const MessageCtx &ctx, const std::string &field ) const {
-    if ( field == "from_uri_host" ) return &ctx.from_uri_host;
-    if ( field == "from_uri_user" ) return &ctx.from_uri_user;
-    if ( field == "to_uri_host" ) return &ctx.to_uri_host;
-    if ( field == "to_uri_user" ) return &ctx.to_uri_user;
-    if ( field == "req_uri_host" ) return &ctx.req_uri_host;
-    if ( field == "req_uri_user" ) return &ctx.req_uri_user;
-    if ( field == "src_ip" ) return &ctx.src_ip;
-    if ( field == "dst_ip" ) return &ctx.dst_ip;
-    if ( field == "user_agent" ) return &ctx.user_agent;
-    if ( field == "method" ) return &ctx.method;
-    if ( field == "p_asserted_identity" ) return &ctx.p_asserted_identity;
-    if ( field == "via_host" ) return &ctx.via_host;
-    return nullptr;
-}
-
-// ─────────────────────────────────────────────────────────────
-// 연산자
-
-bool CspRuleEvaluator::_applyOp( const std::string &fv, const std::string &op, const std::string &val,
-                                 bool fieldExists ) const {
-    if ( op == "exists" ) return fieldExists && !fv.empty();
-    if ( op == "not_exists" ) return !fieldExists || fv.empty();
-
-    // 다른 op 들은 fv 가 비어있으면 일반적으로 false (in_list 제외는 아래 처리)
-    if ( op == "eq" ) return fv == val;
-    if ( op == "ne" ) return fv != val;
-    if ( op == "prefix" ) return fv.size() >= val.size() && fv.compare( 0, val.size(), val ) == 0;
-    if ( op == "suffix" ) return fv.size() >= val.size() && fv.compare( fv.size() - val.size(), val.size(), val ) == 0;
-    if ( op == "contains" ) return !val.empty() && fv.find( val ) != std::string::npos;
-    if ( op == "regex" ) {
-        try {
-            std::regex re( val, std::regex::ECMAScript );
-            return std::regex_search( fv, re );
-        } catch ( const std::regex_error &e ) {
-            CLog::Print( LOG_ERROR, "RuleEvaluator: bad regex '%s': %s", val.c_str(), e.what() );
-            return false;
-        }
-    }
-    if ( op == "in_cidr" ) return _cidrMatch( fv, val );
-    // 번호 대역 "lo-hi" — 접두로 표현되지 않는 대역 라우팅(BGCF 식). 번역 뒤의 착신(+E.164)과 값의 `+` 는 무시하고 같은
-    // 자릿수의
-    //   digits 로 비교한다(CspDialPlan::InNumberRange, sip_service_model.md §2-5)
-    if ( op == "in_range" ) return CspDialPlan::InNumberRange( fv, val );
-    if ( op == "in_list" ) {
-        auto items = _splitList( val );
-        for ( const auto &it : items )
-            if ( it == fv ) return true;
+namespace {
+    const char *const OPS[] = { "eq",      "ne",      "prefix",   "suffix", "contains",  "regex",
+                                "in_cidr", "in_list", "in_range", "exists", "not_exists" };
+    bool _knownOp( const std::string &op ) {
+        for ( const char *o : OPS )
+            if ( op == o ) return true;
         return false;
     }
-
-    CLog::Print( LOG_ERROR, "RuleEvaluator: unknown op '%s'", op.c_str() );
-    return false;
-}
+}  // namespace
 
 bool CspRuleEvaluator::_evalRule( const Rule &r, const MessageCtx &ctx ) const {
     if ( !r.enabled ) return false;
-    const std::string *fv = _getFieldValue( ctx, r.field );
-    if ( !fv ) {
+    std::vector<std::string> vecValues;
+    bool bHost = false;
+    if ( !RuleFieldValues( ctx, r.field, vecValues, bHost ) ) {
         CLog::Print( LOG_ERROR, "RuleEvaluator: rule '%s' unknown field '%s'", r.name.c_str(), r.field.c_str() );
         return false;
     }
-    // fieldExists 는 "필드가 의미있게 존재" 를 표현. 현재 구조에서는 MessageCtx 의 멤버가
-    // 빈 문자열이면 "존재하지 않음" 으로 간주. 필요 시 향후 optional<string> 로 확장.
-    bool fieldExists = !fv->empty();
-    return _applyOp( *fv, r.op, r.value, fieldExists );
+    if ( !_knownOp( r.op ) ) {
+        CLog::Print( LOG_ERROR, "RuleEvaluator: unknown op '%s'", r.op.c_str() );
+        return false;
+    }
+    if ( r.op == "regex" ) {  // 잘못된 정규식은 적재 로그로 드러낸다 — 평가는 불일치
+        try {
+            std::regex re( r.value, std::regex::ECMAScript );
+        } catch ( const std::regex_error &e ) {
+            CLog::Print( LOG_ERROR, "RuleEvaluator: bad regex '%s': %s", r.value.c_str(), e.what() );
+            return false;
+        }
+    }
+    return RuleApplyOp( vecValues, r.op, r.value, bHost );
 }
 
 // ─────────────────────────────────────────────────────────────

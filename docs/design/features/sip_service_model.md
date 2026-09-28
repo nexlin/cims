@@ -156,7 +156,7 @@ Peering cluster (1:1:1, 1 active + N standby 등) 를 표현.
 | `members[].route_ref` | 포함할 Route |
 | `members[].priority` | failover 순서 (낮을수록 우선) |
 | `members[].weight` | weighted 분배 비율 |
-| `health_check_*` | `mode=options_ping` 이면 `CCspRouteHealth` 가 멤버 Route 마다 `interval_sec` 간격으로 OPTIONS 를 RemoteNode 로 보낸다(Via/From 은 Route 의 LocalNode). 응답 2xx~4xx·6xx = 성공, 5xx·전송 타임아웃·주기 내 무응답 = 실패. 연속 `dead_threshold` 실패 → dead(`RouteRuntime.alive=false`, A-COM-003 open), dead 에서 연속 `recovery_probes` 성공 → alive(close). `mode=none` 은 프로브 없음(항상 alive). `invite_response` 는 미구현(§9) |
+| `health_check_*` | `mode=options_ping` 이면 `CCspRouteHealth` 가 멤버 Route 마다 `interval_sec` 간격으로 OPTIONS 를 RemoteNode 로 보낸다(Via/From 은 Route 의 LocalNode). 응답 2xx~4xx·6xx = 성공, 5xx·전송 타임아웃·주기 내 무응답 = 실패. 연속 `dead_threshold` 실패 → dead(`RouteRuntime.alive=false`, A-COM-003 open), dead 에서 연속 `recovery_probes` 성공 → alive(close). 설정 재적재로 감시 대상에서 빠진 peer(RemoteNode 삭제·이름 변경·disable, RouteSet 에서 빠짐·disable·`mode=none`)의 열린 A-COM-003 은 1초 틱이 닫는다(전이가 다시 오지 않으므로) — 등록형 트렁크 Route 의 peer 는 계속 감시 대상이다. `mode=none` 은 프로브 없음(항상 alive). `invite_response` 는 미구현(§9) |
 | `fallback_policy` | 전체 dead 시 `reject` / `next_policy` |
 
 같은 Route 가 다른 RouteSet 에 다른 priority 로 속할 수 있다.
@@ -183,19 +183,43 @@ A 에 전달한다(`RelayEndStatus`). 헬스체크(OPTIONS)는 죽은 피어를 
 
 SIP 메시지의 한 필드 + 연산자 + 값.
 
-지원 필드:
+**field 문법 = `<원천>[.<부분>]`** (`csp/CspRuleField.cpp` — 해석·비교를 한 곳에서 한다). 헤더가 늘어도 코드에 필드를 추가하지 않고
+이름으로 지정한다.
+
+| 원천 | 뜻 | 부분 |
+|---|---|---|
+| `callee` | 다이얼 플랜 번역(§2-10) 뒤의 착신 `+E.164` — Routing 에서만 값이 있다(ACL 은 번역 전이라 빈 값) | `e164` (필수) |
+| `request_uri` | Request-URI, 받은 그대로 | 주소형 |
+| `from` · `to` · `contact` | 그 헤더 (compact form `f`·`t`·`m` 포함) | 주소형 |
+| `header:<이름>` | 그 밖의 헤더 — 이름은 대소문자 무시, compact form 은 정식 이름과 같다(RFC 3261 §7.3.1·§7.3.3). 이름은 token(§25.1) | 주소형 · 생략 |
+| `src` | 패킷을 보낸 곳 | `ip` · `port` (필수) |
+| `local_node` | 받은 Local Node 이름 | 없음 |
+| `method` | 요청 메서드 | 없음 |
+
+주소형 부분 = `user` · `host` · `port` · `scheme` · `display` · `param:<이름>`(URI 파라미터 → 헤더 파라미터 순, RFC 3261 §20.10 name-addr /
+§19.1 SIP·tel URI). 부분을 생략하면 헤더 값 그대로.
+예: `header:P-Asserted-Identity.user` · `header:Diversion.param:reason` · `from.host` · `header:User-Agent` · `src.ip`.
+
+비교 규칙:
+
+- **값이 여럿** — 같은 헤더가 여러 줄이거나 한 줄에 쉼표로 여러 값(따옴표·`<>` 안의 쉼표는 제외)이면 값마다 본다. 긍정 연산은 하나라도
+  맞으면 참, `ne` 는 어느 값도 같지 않을 때, `exists` 는 비지 않은 값이 하나라도 있을 때 참이다.
+- `host` 부분은 소문자로 맞춰 비교한다(RFC 3261 §19.1.4). `user` 부분은 `%xx` 를 풀어 비교한다(`%2B82…` = `+82…`).
+- **P-Asserted-Identity 는 신뢰하는 상대만** — 들어온 Route 로 식별된 피어(§2-3 FindInbound)가 보낸 것만 값으로 쓰고, 그 밖(단말 등)의
+  PAI 는 없는 것으로 본다(RFC 3325 §4·§5 Spec(T)).
+- 문법이 틀린 field 는 적재 때 ERROR 로그를 남기고 그 Rule 은 불일치로 평가된다. 스키마는 문자열, render 는 같은 문법으로 거절한다.
+
+**옛 이름 12종**은 종전 뜻 그대로 읽는다(값은 호출부 `ModuleDispatcher` 가 채운다 — 대소문자·`%xx` 처리도 종전대로):
 
 ```
-from_uri_host   from_uri_user
-to_uri_host     to_uri_user
-req_uri_host    req_uri_user
-src_ip          user_agent
-method
+from_uri_host   from_uri_user   to_uri_host     to_uri_user
+req_uri_host    req_uri_user    src_ip          user_agent
+method          p_asserted_identity             via_host        dst_ip
 ```
 
-스키마(`config_template.json`)에는 `dst_ip` / `p_asserted_identity` / `via_host` 도 열거되어 있으나
-`MessageCtx` 에 채워지지 않아 항상 빈 값으로 평가된다 (§9). `dst_ip` 로 수신 인터페이스를 구분하려면
-ACL `scope=local_node` 를 쓴다.
+- `req_uri_user` = 착신 번호 — Routing 은 번역 뒤 `+E.164`, ACL 은 받은 그대로. 두 판정에 다 맞는 착신 번호 field 는 이것이다.
+- `p_asserted_identity` = 첫 PAI 값의 user(신뢰하는 상대만), `via_host` = 맨 위 Via 의 호스트.
+- `dst_ip` 는 값을 채우지 않아 항상 빈 값이다 — 수신 인터페이스 구분은 `local_node` 원천이나 ACL `scope=local_node` 를 쓴다.
 
 지원 연산자:
 
@@ -609,7 +633,7 @@ AccessServices:
 | 항목 | 상태 |
 |------|------|
 | `routes.register_to_remote` | CSP 발신 트렁크 REGISTER 워커 미구현 — 값만 보관(수신 측 등록형 트렁크 계정은 §2-3 에 구현) |
-| Rule field `dst_ip` / `p_asserted_identity` / `via_host` | `MessageCtx` 에 채워지지 않아 항상 빈 값. 수신 인터페이스 구분은 ACL `scope=local_node` 로 대체 |
+| Rule field `dst_ip` (옛 이름) | 값을 채우지 않아 항상 빈 값. 수신 인터페이스 구분은 `local_node` 원천·ACL `scope=local_node` 로 대체 |
 | `routing_policies.target_type=access_service` | 매칭·로그까지만. 이후는 기존 TAS/B2BUA 경로가 처리 |
 | 인바운드 Route 식별의 RemoteNode 호스트명 | `FindInbound` 는 RemoteNode.ip 를 IP 리터럴로 비교한다 — 호스트명 RemoteNode 의 피어는 인바운드에서 식별되지 않는다(발신은 된다) |
 | `routing_policies.transform_rule_set_refs` (메시지 변환) | 예약 필드 |
