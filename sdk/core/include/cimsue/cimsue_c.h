@@ -628,6 +628,20 @@ typedef struct {
     int32_t                      max_participants;      /* 0 = 미기재 */
     const char*                  org_code;
     const char*                  authorized_user;       /* 산출 전용 */
+    /* 그룹 호 타이머·참가자 정보·MCData 크기 한도(TS 24.481). has_* = 0 이면 **미기재** — PUT 에 싣지 않아 서버가
+     * 기존값을 유지한다. 값과 존재를 나누는 이유: 0 이 뜻을 갖는 필드가 있고(hang 0 = 미사용, 크기 0 = 무제한),
+     * 0 으로 채워진 구조체(.NET 기본값)가 «미기재» 로 읽혀야 폼에서 이 칸을 다루지 않는 앱이 서버 값을 덮지 않는다.
+     * 구조체 끝에 덧붙였다 — 앞 필드의 오프셋은 그대로다. */
+    int32_t                      has_hang_timer;
+    int32_t                      hang_timer_sec;        /* on-network-hang-timer (T4) — 0 = 미사용 */
+    int32_t                      has_max_duration;
+    int32_t                      max_duration_sec;      /* on-network-maximum-duration (TNG3) — 0 = 무제한 */
+    int32_t                      has_conference_state;
+    int32_t                      allow_conference_state;/* on-network-allow-conference-state */
+    int32_t                      has_max_sds_size;
+    int32_t                      max_sds_size;          /* mcdata-on-network-max-data-size-for-SDS — 0 = 무제한 */
+    int32_t                      has_max_auto_recv;
+    int32_t                      max_auto_recv;         /* mcdata-on-network-max-data-size-auto-recv — 0 = 무제한 */
 } cimsue_group_doc_t;
 
 CIMSUE_API void CIMSUE_CALL cimsue_csc_endpoint_default(cimsue_csc_endpoint_t* ep);

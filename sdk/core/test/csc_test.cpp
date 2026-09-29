@@ -208,6 +208,89 @@ TEST(GroupDoc, ParseServerDocumentAndRoundTrip) {
     EXPECT_EQ(legacy.sessionType, "prearranged");
 }
 
+// 그룹 호 타이머 · 참가자 정보 · MCData 크기 한도(TS 24.481) — **미기재가 기본값**이고 미기재면 싣지 않는다.
+//   이 성질이 깨지면 폼에서 이 칸을 다루지 않는 앱이 저장할 때마다 콘솔이 정한 값을 기본값으로 덮어쓴다.
+TEST(GroupDoc, CallTimersConferenceStateAndSizeLimits) {
+    static const char* kXml = R"(<group><list-service uri="sip:g005@ptt.example.org">
+    <display-name>일제</display-name>
+    <list><entry uri="tel:+82510001001"><mcpttgi:participant-type>chair</mcpttgi:participant-type>
+      <mcpttgi:user-priority>9</mcpttgi:user-priority></entry>
+      <entry uri="tel:+82510001002"><mcpttgi:user-priority>2</mcpttgi:user-priority></entry></list>
+    <mcpttgi:mcdata-on-network-max-data-size-for-SDS>1000</mcpttgi:mcdata-on-network-max-data-size-for-SDS>
+    <mcpttgi:mcdata-on-network-max-data-size-auto-recv>5000</mcpttgi:mcdata-on-network-max-data-size-auto-recv>
+    <mcpttgi:on-network-hang-timer>PT5S</mcpttgi:on-network-hang-timer>
+    <mcpttgi:on-network-maximum-duration>PT3600S</mcpttgi:on-network-maximum-duration>
+    <cp:ruleset><cp:rule id="a7c"><cp:actions>
+      <mcpttgi:on-network-allow-conference-state>false</mcpttgi:on-network-allow-conference-state>
+    </cp:actions></cp:rule></cp:ruleset>
+  </list-service></group>)";
+    GroupDoc d;
+    ASSERT_TRUE(GroupDoc::parse(kXml, d));
+    EXPECT_EQ(d.hangTimerSec, 5);
+    EXPECT_EQ(d.maxDurationSec, 3600);
+    EXPECT_EQ(d.allowConferenceState, 0);
+    EXPECT_EQ(d.maxSdsSize, 1000);
+    EXPECT_EQ(d.maxAutoRecv, 5000);
+
+    // 왕복 — 값이 그대로 돌아온다. 멤버별 우선순위(9·2)도 보존된다(앱이 버리지 않는 한).
+    GroupDoc back;
+    ASSERT_TRUE(GroupDoc::parse(d.toXml(), back));
+    EXPECT_EQ(back.hangTimerSec, 5); EXPECT_EQ(back.maxDurationSec, 3600);
+    EXPECT_EQ(back.allowConferenceState, 0); EXPECT_EQ(back.maxSdsSize, 1000); EXPECT_EQ(back.maxAutoRecv, 5000);
+    ASSERT_EQ(back.members.size(), 2u);
+    EXPECT_EQ(back.members[0].priority, 9);
+    EXPECT_EQ(back.members[1].priority, 2);
+    // 참가자 정보 구독은 서버가 cp:actions 안에서 찾는다
+    const std::string x = d.toXml();
+    const size_t a = x.find("<cp:actions>"), e = x.find("</cp:actions>"), c = x.find("on-network-allow-conference-state");
+    ASSERT_NE(c, std::string::npos);
+    EXPECT_TRUE(a < c && c < e);
+    EXPECT_NE(x.find("<mcpttgi:on-network-hang-timer>PT5S</mcpttgi:on-network-hang-timer>"), std::string::npos);
+
+    // **미기재 → 싣지 않는다** — 새로 만든 문서(앱이 폼으로 짓는 경우)는 다섯 요소를 하나도 싣지 않는다
+    GroupDoc fresh;
+    fresh.uri = "sip:g-new@ptt.example.org";
+    EXPECT_EQ(fresh.hangTimerSec, GroupDoc::kUnset);
+    const std::string fx = fresh.toXml();
+    for (const char* tag : {"on-network-hang-timer", "on-network-maximum-duration", "on-network-allow-conference-state",
+                            "max-data-size-for-SDS", "max-data-size-auto-recv"})
+        EXPECT_EQ(fx.find(tag), std::string::npos) << tag << " 가 미기재인데 실렸다";
+    GroupDoc none;                                              // 문서에 없던 요소는 미기재로 읽는다(0 이 아니다)
+    ASSERT_TRUE(GroupDoc::parse(fx, none));
+    EXPECT_EQ(none.hangTimerSec, GroupDoc::kUnset); EXPECT_EQ(none.maxDurationSec, GroupDoc::kUnset);
+    EXPECT_EQ(none.allowConferenceState, GroupDoc::kUnset);
+    EXPECT_EQ(none.maxSdsSize, GroupDoc::kUnset); EXPECT_EQ(none.maxAutoRecv, GroupDoc::kUnset);
+
+    // **0 은 값이다** — 미사용·무제한을 뜻하므로 실어야 한다(미기재와 다르다)
+    GroupDoc zero;
+    zero.uri = "sip:g0@d"; zero.hangTimerSec = 0; zero.maxDurationSec = 0; zero.maxSdsSize = 0; zero.maxAutoRecv = 0;
+    zero.allowConferenceState = 1;
+    const std::string zx = zero.toXml();
+    EXPECT_NE(zx.find("<mcpttgi:on-network-hang-timer>PT0S</mcpttgi:on-network-hang-timer>"), std::string::npos);
+    EXPECT_NE(zx.find("<mcpttgi:on-network-maximum-duration>PT0S</mcpttgi:on-network-maximum-duration>"), std::string::npos);
+    EXPECT_NE(zx.find(">0</mcpttgi:mcdata-on-network-max-data-size-for-SDS>"), std::string::npos);
+    EXPECT_NE(zx.find("<mcpttgi:on-network-allow-conference-state>true"), std::string::npos);
+}
+
+// xs:duration — 서버 parse_xs_duration 과 같은 관대함. 모르는 형식은 미기재(0 으로 읽으면 «미사용» 이라는 다른 뜻).
+TEST(GroupDoc, HangTimerDurationForms) {
+    auto hang = [](const std::string& v) {
+        GroupDoc d;
+        GroupDoc::parse("<group><list-service uri=\"sip:g@d\"><list></list><mcpttgi:on-network-hang-timer>" + v +
+                        "</mcpttgi:on-network-hang-timer></list-service></group>", d);
+        return d.hangTimerSec;
+    };
+    EXPECT_EQ(hang("PT30S"), 30);
+    EXPECT_EQ(hang("PT1M"), 60);
+    EXPECT_EQ(hang("PT1H30M"), 5400);
+    EXPECT_EQ(hang("P1DT2H"), 93600);
+    EXPECT_EQ(hang("PT1.9S"), 1);                              // 소수 초는 절사
+    EXPECT_EQ(hang("45"), 45);                                 // 순수 정수(초)도 받는다
+    EXPECT_EQ(hang(" PT10S "), 10);
+    for (const char* bad : {"", "P", "PT", "abc", "PT1X", "1H", "PTS", "P1H", "PT1.5M"})
+        EXPECT_EQ(hang(bad), GroupDoc::kUnset) << "'" << bad << "'";
+}
+
 TEST(DialogInfo, ParseAndJoinHeader) {
     std::string xml = R"(<?xml version="1.0"?>
 <dialog-info xmlns="urn:ietf:params:xml:ns:dialog-info" version="2" state="full" entity="sip:+821300000002@ims.example.org">

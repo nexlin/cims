@@ -107,6 +107,20 @@ public sealed class GroupDoc
     /// <summary>서버 산출 — 그룹 소유자(authorized user).</summary>
     public string AuthorizedUser { get; set; } = "";
 
+    // 그룹 호 타이머·참가자 정보·MCData 크기 한도(TS 24.481) — **null = 미기재**. PUT 에 싣지 않아 서버가 기존값을
+    //   유지한다. 폼이 이 칸을 다루지 않은 채 새 문서를 지어 저장해도 콘솔이 정한 값을 덮지 않게 하려는 것이다.
+    //   0 은 값이다(hang 0 = 미사용, 크기 0 = 무제한).
+    /// <summary>on-network-hang-timer (T4, 초) — 0 = 미사용. null = 미기재.</summary>
+    public int? HangTimerSec { get; set; }
+    /// <summary>on-network-maximum-duration (TNG3, 초) — 0 = 무제한. null = 미기재.</summary>
+    public int? MaxDurationSec { get; set; }
+    /// <summary>on-network-allow-conference-state — 멤버의 참가자 정보(conference 이벤트) 구독 허용. null = 미기재.</summary>
+    public bool? AllowConferenceState { get; set; }
+    /// <summary>mcdata-on-network-max-data-size-for-SDS (octet) — 0 = 무제한. null = 미기재.</summary>
+    public int? MaxSdsSize { get; set; }
+    /// <summary>mcdata-on-network-max-data-size-auto-recv (octet) — 0 = 무제한. null = 미기재.</summary>
+    public int? MaxAutoRecv { get; set; }
+
     /// <summary>문서 → XML(PUT 본문) — 직렬화 규칙은 코어.</summary>
     public string ToXml() => CscClient.GroupDocToXml(this);
     /// <summary>XML → 문서(코어 파서). 실패면 Reason.</summary>
@@ -437,6 +451,11 @@ public sealed unsafe class CscClient : IDisposable
             AllowSds = d->allow_sds != 0, AllowFd = d->allow_fd != 0, RequireAffiliation = d->require_affiliation != 0,
             Priority = d->priority, MaxParticipants = d->max_participants,
             OrgCode = Utf8.Str(d->org_code), AuthorizedUser = Utf8.Str(d->authorized_user),
+            HangTimerSec = d->has_hang_timer != 0 ? d->hang_timer_sec : null,
+            MaxDurationSec = d->has_max_duration != 0 ? d->max_duration_sec : null,
+            AllowConferenceState = d->has_conference_state != 0 ? d->allow_conference_state != 0 : null,
+            MaxSdsSize = d->has_max_sds_size != 0 ? d->max_sds_size : null,
+            MaxAutoRecv = d->has_max_auto_recv != 0 ? d->max_auto_recv : null,
         };
         for (int i = 0; i < d->member_count; ++i)
             g.Members.Add(new GroupMember
@@ -468,6 +487,12 @@ public sealed unsafe class CscClient : IDisposable
         n.allow_sds = Engine.B(g.AllowSds); n.allow_fd = Engine.B(g.AllowFd); n.require_affiliation = Engine.B(g.RequireAffiliation);
         n.priority = g.Priority; n.max_participants = g.MaxParticipants;
         n.org_code = s.Add(g.OrgCode); n.authorized_user = s.Add(g.AuthorizedUser);
+        // null = 미기재 → has_* = 0(default). 음수는 받지 않는다 — 미기재로 둔다(서버도 범위 밖은 400).
+        if (g.HangTimerSec is int hang && hang >= 0) { n.has_hang_timer = 1; n.hang_timer_sec = hang; }
+        if (g.MaxDurationSec is int dur && dur >= 0) { n.has_max_duration = 1; n.max_duration_sec = dur; }
+        if (g.AllowConferenceState is bool conf) { n.has_conference_state = 1; n.allow_conference_state = Engine.B(conf); }
+        if (g.MaxSdsSize is int sds && sds >= 0) { n.has_max_sds_size = 1; n.max_sds_size = sds; }
+        if (g.MaxAutoRecv is int auto && auto >= 0) { n.has_max_auto_recv = 1; n.max_auto_recv = auto; }
         return n;
     }
 

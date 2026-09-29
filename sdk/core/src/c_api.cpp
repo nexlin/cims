@@ -325,6 +325,13 @@ struct GroupDocHolder {
         out.allow_sds = B(cxx.allowSds); out.allow_fd = B(cxx.allowFd); out.require_affiliation = B(cxx.requireAffiliation);
         out.priority = cxx.priority; out.max_participants = cxx.maxParticipants;
         out.org_code = C(cxx.orgCode); out.authorized_user = C(cxx.authorizedUser);
+        // C++ 의 kUnset(-1) ↔ has_* = 0. 값이 있으면 has_* = 1.
+        out.has_hang_timer = cxx.hangTimerSec >= 0;             out.hang_timer_sec = cxx.hangTimerSec >= 0 ? cxx.hangTimerSec : 0;
+        out.has_max_duration = cxx.maxDurationSec >= 0;         out.max_duration_sec = cxx.maxDurationSec >= 0 ? cxx.maxDurationSec : 0;
+        out.has_conference_state = cxx.allowConferenceState >= 0;
+        out.allow_conference_state = cxx.allowConferenceState > 0;
+        out.has_max_sds_size = cxx.maxSdsSize >= 0;             out.max_sds_size = cxx.maxSdsSize >= 0 ? cxx.maxSdsSize : 0;
+        out.has_max_auto_recv = cxx.maxAutoRecv >= 0;           out.max_auto_recv = cxx.maxAutoRecv >= 0 ? cxx.maxAutoRecv : 0;
     }
 };
 
@@ -345,6 +352,14 @@ GroupDoc toCxx(const cimsue_group_doc_t* d) {
     g.allowSds = d->allow_sds != 0; g.allowFd = d->allow_fd != 0; g.requireAffiliation = d->require_affiliation != 0;
     g.priority = d->priority; g.maxParticipants = d->max_participants;
     g.orgCode = S(d->org_code); g.authorizedUser = S(d->authorized_user);
+    // has_* = 0 이면 kUnset 으로 둔다 — 값이 0 이어도 «미기재» 다(0 초기화된 입력이 서버 값을 덮지 않게).
+    //   음수 값은 받지 않는다(서버도 범위 밖은 400) — 미기재로 떨어뜨린다.
+    auto opt = [](int32_t has, int32_t v) { return has && v >= 0 ? (int)v : GroupDoc::kUnset; };
+    g.hangTimerSec = opt(d->has_hang_timer, d->hang_timer_sec);
+    g.maxDurationSec = opt(d->has_max_duration, d->max_duration_sec);
+    g.allowConferenceState = d->has_conference_state ? (d->allow_conference_state != 0 ? 1 : 0) : GroupDoc::kUnset;
+    g.maxSdsSize = opt(d->has_max_sds_size, d->max_sds_size);
+    g.maxAutoRecv = opt(d->has_max_auto_recv, d->max_auto_recv);
     return g;
 }
 

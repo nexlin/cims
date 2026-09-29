@@ -461,6 +461,17 @@ internal unsafe struct cimsue_group_doc_t
     public int max_participants;
     public byte* org_code;
     public byte* authorized_user;
+    // 헤더(cimsue_c.h)와 같은 순서 — 구조체 끝에 덧붙였다. has_* = 0 이면 미기재(0 초기화 = 미기재).
+    public int has_hang_timer;
+    public int hang_timer_sec;
+    public int has_max_duration;
+    public int max_duration_sec;
+    public int has_conference_state;
+    public int allow_conference_state;
+    public int has_max_sds_size;
+    public int max_sds_size;
+    public int has_max_auto_recv;
+    public int max_auto_recv;
 }
 
 /// <summary>cimsue_struct_id_t — ABI 자기검사용 구조체 id (헤더와 같은 순서).</summary>

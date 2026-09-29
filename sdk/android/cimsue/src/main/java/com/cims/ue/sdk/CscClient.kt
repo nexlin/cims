@@ -114,7 +114,13 @@ data class GroupSummary(val uri: String, val displayName: String, val etag: Stri
 data class GroupMember(val uri: String, val name: String = "",
                        val role: String = "participant", val priority: Int = 5)
 
-/** GMS 그룹 문서(OMA list-service + TS 24.481 mcpttgi) — GET 응답·PUT 본문의 단일 모델. */
+/**
+ * GMS 그룹 문서(OMA list-service + TS 24.481 mcpttgi) — GET 응답·PUT 본문의 단일 모델.
+ *
+ * 끝의 다섯(그룹 호 타이머·참가자 정보·MCData 크기 한도)은 **`null` = 미기재**다 — PUT 에 싣지 않아 서버가 기존값을
+ * 유지한다. 폼에서 이 칸을 다루지 않는 앱이 새 문서를 지어 저장해도 콘솔이 정한 값을 덮지 않게 하려는 것이다.
+ * `0` 은 값이다(hang 0 = 미사용, 크기 0 = 무제한).
+ */
 data class GroupDoc(
     val uri: String, val displayName: String = "", val etag: String = "",
     val members: List<GroupMember> = emptyList(),
@@ -125,6 +131,16 @@ data class GroupDoc(
     val requireAffiliation: Boolean = true,
     val priority: Int = 5, val maxParticipants: Int = 0,
     val orgCode: String = "", val authorizedUser: String = "",
+    /** on-network-hang-timer (T4, 초) — 0 = 미사용. */
+    val hangTimerSec: Int? = null,
+    /** on-network-maximum-duration (TNG3, 초) — 0 = 무제한. */
+    val maxDurationSec: Int? = null,
+    /** on-network-allow-conference-state — 멤버의 참가자 정보(conference 이벤트) 구독 허용. */
+    val allowConferenceState: Boolean? = null,
+    /** mcdata-on-network-max-data-size-for-SDS (octet) — 0 = 무제한. */
+    val maxSdsSize: Int? = null,
+    /** mcdata-on-network-max-data-size-auto-recv (octet) — 0 = 무제한. */
+    val maxAutoRecv: Int? = null,
 ) {
     internal fun toJni(): JniGroupDoc = JniGroupDoc().also { d ->
         d.uri = uri; d.displayName = displayName; d.etag = etag
@@ -136,13 +152,25 @@ data class GroupDoc(
         d.allowSds = allowSds; d.allowFd = allowFd; d.requireAffiliation = requireAffiliation
         d.priority = priority; d.maxParticipants = maxParticipants
         d.orgCode = orgCode; d.authorizedUser = authorizedUser
+        // null → 코어의 kUnset(-1). 음수는 받지 않는다(서버도 범위 밖은 400) — 미기재로 떨어뜨린다.
+        d.hangTimerSec = hangTimerSec.orUnset(); d.maxDurationSec = maxDurationSec.orUnset()
+        d.allowConferenceState = when (allowConferenceState) { null -> UNSET; true -> 1; false -> 0 }
+        d.maxSdsSize = maxSdsSize.orUnset(); d.maxAutoRecv = maxAutoRecv.orUnset()
     }
     internal companion object {
+        /** 코어 `GroupDoc::kUnset`. */
+        private const val UNSET = -1
+        private fun Int?.orUnset(): Int = if (this == null || this < 0) UNSET else this
+        private fun Int.orNull(): Int? = if (this < 0) null else this
+
         fun of(d: JniGroupDoc) = GroupDoc(d.uri, d.displayName, d.etag,
             d.members.let { v -> List(v.size) { i -> v[i].let { GroupMember(it.uri, it.name, it.role, it.priority) } } },
             d.sessionType, d.videoEnabled, d.encryption, d.emergencyCall, d.emergencyAlert,
             d.allowSds, d.allowFd, d.requireAffiliation, d.priority, d.maxParticipants,
-            d.orgCode, d.authorizedUser)
+            d.orgCode, d.authorizedUser,
+            hangTimerSec = d.hangTimerSec.orNull(), maxDurationSec = d.maxDurationSec.orNull(),
+            allowConferenceState = d.allowConferenceState.let { if (it < 0) null else it != 0 },
+            maxSdsSize = d.maxSdsSize.orNull(), maxAutoRecv = d.maxAutoRecv.orNull())
     }
 }
 

@@ -107,6 +107,17 @@ struct GroupDoc {
     int priority = 5;                          // on-network-group-priority
     int maxParticipants = 0;                   // on-network-max-participant-count (0 = 미기재)
     std::string orgCode, authorizedUser;       // authorized-user 는 서버 산출(읽기 전용)
+
+    // ── 그룹 호 타이머 · 참가자 정보 · MCData 크기 한도 (TS 24.481) — **미기재(kUnset)가 기본값**이다.
+    //   미기재면 PUT 에 싣지 않고, 서버는 기존값을 유지한다(mcptt_api.md §2 «없는 요소는 갱신 시 기존값 유지»).
+    //   기본값을 실제 값으로 두면 폼에서 이 칸을 다루지 않는 앱이 저장할 때마다 콘솔이 정한 값을 그 기본값으로
+    //   덮어쓴다 — 그래서 «값이 없음» 을 표현할 수 있어야 한다. 0 은 뜻이 있는 값이다(아래 각 줄).
+    static constexpr int kUnset = -1;
+    int hangTimerSec = kUnset;                 // on-network-hang-timer (T4 Inactivity) — 0 = 미사용, 서버 상한 3600
+    int maxDurationSec = kUnset;               // on-network-maximum-duration (TNG3) — 0 = 무제한, 서버 상한 86400
+    int allowConferenceState = kUnset;         // on-network-allow-conference-state — 0 불허 / 1 허용 (§7.2.4.2)
+    int maxSdsSize = kUnset;                   // mcdata-on-network-max-data-size-for-SDS (octet) — 0 = 무제한
+    int maxAutoRecv = kUnset;                  // mcdata-on-network-max-data-size-auto-recv (octet) — 0 = 무제한
     /** 문서 → XML(PUT 본문). */
     CIMSUE_API std::string toXml() const;
     /** XML → 문서. 실패면 false(err 에 사유). */

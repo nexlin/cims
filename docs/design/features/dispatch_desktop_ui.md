@@ -413,6 +413,27 @@ SIP transport 콤보는 **ANY** 를 포함한 넷(콘솔 라벨과 같다) — A
 생성·편집·삭제 = GMS XCAP PUT/DELETE(`CscClient.PutGroup/DeleteGroup` — 관리 범위 안이면 소유자가 아니어도 서버가 허용). 관리 범위가 없으면 GMS 목록의 내 멤버 그룹만 보이고 내 소유만 편집한다.
 ② 카드의 [삭제]는 확인 후 같은 XCAP DELETE(빠른 경로). 서버 계약 [mcptt_api.md §2](../../api/mcptt_api.md).
 
+**편집 폼이 아직 다루지 않는 것 (남은 것)** — 콘솔(서비스 › PTT 그룹)은 고르는데 폼에 없는 TS 24.481 요소 다섯이다.
+서버는 XCAP PUT 으로 이미 받고, SDK `GroupDoc` 도 싣는다([ue_sdk.md](ue_sdk.md) §7).
+
+| 필드 | `GroupDoc` | 규격 요소 | 범위·기본값(콘솔과 같다) |
+|---|---|---|---|
+| 유지 시간 T4 | `HangTimerSec` | on-network-hang-timer | 0~3600초, 기본 30, 0 = 미사용(편성 그룹만) |
+| 최대 통화 시간 | `MaxDurationSec` | on-network-maximum-duration | 0~86400초, 기본 3600, 0 = 무제한 |
+| 참가자 정보 구독 | `AllowConferenceState` | on-network-allow-conference-state | 기본 허용 — 끄면 멤버의 conference 구독이 403 |
+| 메시지 최대 크기 | `MaxSdsSize` | mcdata-on-network-max-data-size-for-SDS | octet, 0 = 무제한 |
+| 자동수신 최대 | `MaxAutoRecv` | mcdata-on-network-max-data-size-auto-recv | octet, 0 = 무제한 |
+
+- 다섯 다 **`null` = 미기재**라 폼이 다루지 않아도 서버 값을 덮지 않는다. 붙일 때는 **GET 값으로 채우고 그대로 되돌려 보낸다** —
+  폼 값으로 `GroupDoc` 을 새로 지으면서 이 칸을 `null` 로 두면 «바꾸지 않음», 값을 넣으면 그 값으로 바뀐다.
+- **동시 발언**(`floor_policy`/`max_talkers`)은 폼에 두지 않는다 — 관리 API 전용이다(mcptt_api.md §2). 규격 그룹 문서 요소가 아니라 CMP 화자 슬롯
+  (서버 자원, 최대 8)을 잡는 운영 정책이고, 규격판(TS 24.581 Transmission Control)은 미구현이다.
+
+**멤버 우선순위를 덮어쓰는 결함 (남은 것)** — 저장할 때 멤버 우선순위를 **의장 7 · 참가자 5 로 고정**해 보낸다
+(`GroupEditViewModel` 저장 경로 `Priority = m.IsChair ? 7 : 5`). XCAP PUT 은 `<list>` 가 있으면 멤버 전체를 교체하므로, 콘솔에서 준 멤버별
+우선순위(`user-priority`)가 앱에서 **한 번 저장하면 말없이 초기화된다.** 멤버 행이 GET 의 `GroupMember.Priority` 를 들고 있다가 그대로 보내야
+한다(새로 더한 멤버만 기본값). SDK 는 이 값을 왕복 보존한다 — 버리는 곳은 앱이다.
+
 ## 5. 감청 창 (팝업)
 
 VoLTE 감청 하나 = 창 하나, PTT 청취는 ② 카드 토글이 기본이고 [창으로] 를 누른 것만 창. 주 창과 별개의 비모달 `Window`(기본 440×260, 크기 조절·이동 가능, 두 번째 모니터에 두는 것이 기본 사용례).

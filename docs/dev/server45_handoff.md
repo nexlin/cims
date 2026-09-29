@@ -130,3 +130,18 @@ IMEI 를 못 얻는 플랫폼(Windows 데스크톱 등)은 지금처럼 UUID URN
   현행 절차(TS 24.379 §6.3.5.5)는 그 그룹의 **affiliated 멤버**를 일반 편성 그룹 호처럼 초대한다 — 서버 fan-out 이 그렇다
   (`require_affiliation` 이 켜진 그룹 기준. DB 단절 시 affiliation 검사를 건너뛴다). 사용자/그룹 방송 그룹(전원·조직 단위 수신 집합)은
   TS 24.379 §4.12 가 현 릴리스에서 따르지 않는다고 적는다.
+
+## 7. PTT 그룹 편집 — 관제 앱 폼 (Windows 몫)
+
+SDK 반영은 끝났고(`GroupDoc` 이 TS 24.481 요소 다섯을 더 싣는다), **폼만 남았다**. 정본 [../design/features/dispatch_desktop_ui.md](../design/features/dispatch_desktop_ui.md) §4.7.
+서버는 XCAP PUT 으로 이미 받는다(바뀐 것 없음). 태블릿은 Windows 반영 뒤 같은 방식으로 옮긴다.
+
+| # | 할 일 | 대상 |
+|---|---|---|
+| G1 | 편집 폼에 다섯 필드 — 유지 시간 T4(`HangTimerSec`) · 최대 통화 시간(`MaxDurationSec`) · 참가자 정보 구독(`AllowConferenceState`) · 메시지 최대 크기(`MaxSdsSize`) · 자동수신 최대(`MaxAutoRecv`). GET 값으로 채우고 그대로 되돌려 보낸다 | `GroupEditViewModel`·`GroupEditView.xaml` |
+| G2 | **멤버 우선순위 보존** — 저장 때 `Priority = m.IsChair ? 7 : 5` 로 고정해 콘솔이 준 멤버별 우선순위를 초기화한다(XCAP `<list>` = 멤버 전체 교체). 멤버 행이 GET 의 `GroupMember.Priority` 를 들고 있다가 보낸다 | `GroupEditViewModel` 저장 경로 |
+
+- **다섯 필드는 `null` = 미기재**다(`int?`·`bool?`). 폼이 아직 다루지 않는 지금도 PUT 에 싣지 않으므로 서버 값을 덮지 않는다 — G1 전이라도 안전하다.
+- 범위·기본값은 콘솔과 같다(T4 0~3600초 기본 30 · 최대 시간 0~86400초 기본 3600 · 참가자 정보 구독 기본 허용 · 크기 0 = 무제한).
+- **동시 발언은 넣지 않는다** — 관리 API 전용(`docs/api/mcptt_api.md` §2).
+- **.NET 은 Windows 에서 빌드해 확인**할 것 — C API `cimsue_group_doc_t` 끝에 `has_*`/값 10개를 덧붙였고(`NativeStructs.cs` 같은 순서), `AbiLayoutTests` 가 크기를 대조한다. 새 시험 `CscTests.GroupDocCallTimersAreOptional`.

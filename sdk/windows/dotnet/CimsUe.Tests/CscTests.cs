@@ -128,6 +128,38 @@ public class CscTests
         Assert.False(GroupDoc.Parse("<other/>").Ok);
     }
 
+    /// <summary>
+    /// 그룹 호 타이머·참가자 정보·MCData 크기 한도 — <b>null = 미기재</b>면 싣지 않는다. 폼이 이 칸을 다루지 않고
+    /// 새 문서를 지어 저장해도 콘솔이 정한 값을 덮지 않아야 한다. 0 은 값이다(미사용·무제한).
+    /// </summary>
+    [Fact]
+    public void GroupDocCallTimersAreOptional()
+    {
+        var fresh = new GroupDoc { Uri = "sip:g1@ptt.example.org", DisplayName = "g1" };
+        string fx = fresh.ToXml();
+        foreach (var tag in new[] { "on-network-hang-timer", "on-network-maximum-duration", "on-network-allow-conference-state",
+                                    "max-data-size-for-SDS", "max-data-size-auto-recv" })
+            Assert.DoesNotContain(tag, fx);
+        var none = GroupDoc.Parse(fx).Value!;
+        Assert.Null(none.HangTimerSec); Assert.Null(none.MaxDurationSec); Assert.Null(none.AllowConferenceState);
+        Assert.Null(none.MaxSdsSize); Assert.Null(none.MaxAutoRecv);
+
+        var set = new GroupDoc
+        {
+            Uri = "sip:g2@ptt.example.org", DisplayName = "g2",
+            HangTimerSec = 0, MaxDurationSec = 3600, AllowConferenceState = false, MaxSdsSize = 1000, MaxAutoRecv = 0,
+            Members = { new GroupMember { Uri = "tel:+82510001001", Role = "chair", Priority = 9 },
+                        new GroupMember { Uri = "tel:+82510001002", Priority = 2 } },
+        };
+        string sx = set.ToXml();
+        Assert.Contains("<mcpttgi:on-network-hang-timer>PT0S</mcpttgi:on-network-hang-timer>", sx);
+        var b = GroupDoc.Parse(sx).Value!;
+        Assert.Equal(0, b.HangTimerSec); Assert.Equal(3600, b.MaxDurationSec); Assert.False(b.AllowConferenceState);
+        Assert.Equal(1000, b.MaxSdsSize); Assert.Equal(0, b.MaxAutoRecv);
+        // 멤버별 우선순위는 코어가 보존한다 — 앱이 폼으로 새로 지을 때 버리지 않아야 한다
+        Assert.Equal(9, b.Members[0].Priority); Assert.Equal(2, b.Members[1].Priority);
+    }
+
     [Fact]
     public void ParseProfileFailureCarriesReason()
     {

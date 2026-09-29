@@ -255,6 +255,39 @@ TEST(CApi, CscHandle) {
 }
 
 // ── 그룹 문서 평탄화 — C 입력(멤버 배열) → XML → C 산출 왕복, 새 구조체 id 등록 ──
+// 0 으로 채운 구조체 = .NET 이 넘기는 기본값. 새 다섯 필드는 has_* = 0 이라 **싣지 않아야** 한다 —
+//   그래야 폼에서 이 칸을 다루지 않는 Windows 관제 앱이 저장해도 콘솔이 정한 T4·최대 시간이 남는다.
+TEST(CApi, GroupDocZeroFilledLeavesServerValues) {
+    cimsue_group_doc_t d{};
+    d.uri = "sip:g1@ptt.example.org";
+    d.display_name = "g1";
+    char buf[8192];
+    ASSERT_GT(cimsue_group_doc_to_xml(&d, buf, sizeof buf), 0);
+    const std::string x = buf;
+    for (const char* tag : {"on-network-hang-timer", "on-network-maximum-duration", "on-network-allow-conference-state",
+                            "max-data-size-for-SDS", "max-data-size-auto-recv"})
+        EXPECT_EQ(x.find(tag), std::string::npos) << tag;
+
+    // has_* = 1 이면 값 0 도 싣는다(미사용·무제한)
+    d.has_hang_timer = 1; d.hang_timer_sec = 0;
+    d.has_conference_state = 1; d.allow_conference_state = 0;
+    d.has_max_sds_size = 1; d.max_sds_size = 2048;
+    ASSERT_GT(cimsue_group_doc_to_xml(&d, buf, sizeof buf), 0);
+    const std::string y = buf;
+    EXPECT_NE(y.find("<mcpttgi:on-network-hang-timer>PT0S</mcpttgi:on-network-hang-timer>"), std::string::npos);
+    EXPECT_NE(y.find("<mcpttgi:on-network-allow-conference-state>false"), std::string::npos);
+    EXPECT_NE(y.find(">2048</mcpttgi:mcdata-on-network-max-data-size-for-SDS>"), std::string::npos);
+
+    // 파싱 결과는 has_* 로 존재를 알린다
+    cimsue_group_doc_t out{};
+    ASSERT_EQ(cimsue_group_doc_parse(y.c_str(), &out), CIMSUE_OK);
+    EXPECT_EQ(out.has_hang_timer, 1); EXPECT_EQ(out.hang_timer_sec, 0);
+    EXPECT_EQ(out.has_conference_state, 1); EXPECT_EQ(out.allow_conference_state, 0);
+    EXPECT_EQ(out.has_max_sds_size, 1); EXPECT_EQ(out.max_sds_size, 2048);
+    EXPECT_EQ(out.has_max_duration, 0);                        // 싣지 않은 것은 없다고 알린다
+    EXPECT_EQ(out.has_max_auto_recv, 0);
+}
+
 TEST(CApi, GroupDocRoundTripAndAbi) {
     cimsue_group_member_t mem[2] = {{"tel:+82510001001", "관제1석", "chair", 7}, {"tel:+82510001002", nullptr, nullptr, 5}};
     cimsue_group_doc_t d{};
