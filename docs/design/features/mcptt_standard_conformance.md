@@ -466,6 +466,7 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
   secret 에서 가입자별로 파생(HKDF 유사, 재현 가능·사용자마다 상이).
 - ⚠ **후속**: 파생값은 구조적 placeholder 이며 참 ECCSI/SAKKE(RFC 6507/6508) 점이 아니다. 실제
   pairing 기반 키파생은 전용 암호 라이브러리가 필요하며 E2E 암호화 도입 시 진행한다.
+  남은 개발 항목(KMS 실구현·GMK·CSK·E2E 미디어·단말) 정본 = [mcx_e2e_security.md](mcx_e2e_security.md).
 
 ---
 

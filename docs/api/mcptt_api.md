@@ -136,12 +136,16 @@ ue-init-config 의 주소류(IdMS/CMS/GMS/KMS/XCAP 루트)의 base 는 CSC 설�
 
 ## 4. KMS (Key Management Server)
 
-미디어 암호화 키 배포.
+미디어 암호화 키 배포(TS 33.180 부속서 D). 현재 응답 키 material 은 구조만 맞춘 placeholder 다 —
+실구현·남은 항목은 [mcx_e2e_security.md](../design/features/mcx_e2e_security.md).
 
-| Method | Path |
-|---|---|
-| POST | `/keymanagement/identity/v1/init` |
-| GET  | `/keymanagement/identity/v1/certificate` |
+| Method | Path | 응답 |
+|---|---|---|
+| POST | `/keymanagement/identity/v1/init` | `KmsInit`(KmsCertificate) |
+| POST | `/keymanagement/identity/v1/keyprov` | `KmsKeyProv`(KmsKeySet) |
+
+핸들러는 메서드를 가리지 않는다(단말은 POST). Bearer access token + scope `3gpp:mc:ptt_key_management_service` 또는 `3gpp:mc:data_key_management_service`.
+KmsCert(인증서 캐시) 엔드포인트는 없다.
 
 ---
 

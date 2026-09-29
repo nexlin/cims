@@ -328,6 +328,7 @@ optional → 평문 비디오, answer 가 video 를 거절/생략 → 비디오 
 **로드맵 (범위 밖, 요구 발생 시)**
 - **E2E 미디어 암호화** — TS 33.180 KMS(ECCSI/SAKKE)·MIKEY-SAKKE, GMK/PCK. CMP 녹취·믹스·U10
   디먹스와 양립 불가 → 녹취 정책 재설계가 선행 조건. CSC KMS 는 구조만 존재(S5 placeholder).
+  개발 항목·결정 사항 정본 = [mcx_e2e_security.md](mcx_e2e_security.md).
 - **floor SRTCP 키 배포** — KMS CSK 연동(F6 의 잔여 반쪽).
 - **MCData MSRP 보안** — cmdp MSRPS(TLS) 종단.
 - **AEAD suite**(AES-GCM, RFC 7714) — 단말 fleet 이 지원 확정되면 suite 추가.
