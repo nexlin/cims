@@ -616,8 +616,11 @@ void CCspAnnouncementService::FinishEarly( const std::string &strACallId, CAnnCa
         if ( gclsCallDir.IsEnabled() )
             gclsCallDir.VoipCallEnd( strACallId, CCallDir::_ReasonOfStatus( c.iFinalStatus ), 0, c.iFinalStatus );
         gclsDispatcher.OnCallEnded( strACallId.c_str(), c.iFinalStatus );
-        gclsUserAgent.StopCall( strACallId.c_str(), c.iFinalStatus,
-                                c.strFinalReason.empty() ? NULL : c.strFinalReason.c_str() );
+        // early media 안내 뒤 최종 응답에는 Reason 을 싣는다(TS 24.628 §4.2.4) — 받은 원인(피어·MGCF 의 Q.850)이
+        //   없으면(자체 거절·CSP 판정) 최종 코드 자체를 원인으로(RFC 3326 protocol=SIP).
+        std::string strReason = c.strFinalReason;
+        if ( strReason.empty() ) strReason = "SIP;cause=" + std::to_string( c.iFinalStatus );
+        gclsUserAgent.StopCall( strACallId.c_str(), c.iFinalStatus, strReason.c_str() );
         gclsCallMap.Delete( strACallId.c_str(), true );
         gclsDispatcher.RemoveCallOwner( strACallId.c_str() );
     }

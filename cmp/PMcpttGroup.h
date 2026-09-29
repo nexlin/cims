@@ -389,6 +389,7 @@ private:
                          char* out, int outCap, int& outLen);
     // 미협상 소스/미등록 멤버 드롭 (호출자가 _mutex 보유) — 카운터 + rate-limited WARN
     void _dropSrc(const char* what, const std::string& memberId, const std::string& ip, int port);
+    std::vector<FloorTlv> _takenFields(const std::string& speakerId, bool recvOnlyRecipient);
     void broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, const std::string& speakerId);
 
     // ── Floor 송신 헬퍼 (TS 24.380 TLV) — 호출자는 _mutex 보유 ──

@@ -107,6 +107,21 @@ IMEI 를 못 얻는 플랫폼(Windows 데스크톱 등)은 지금처럼 UUID URN
 | S9 | 하 | CSP ICB 목록 적재(`DbManager.cpp` ~433·643) | 사람의 `icb_identities` 가 PTT 회선에도 실려 non-MCPTT 1:1 INVITE 를 막고, CSC 는 전화 회선만 갱신해 PTT 쪽 복사본이 낡는다 | TS 24.611 (MMTel 부가서비스 — MCPTT 대상 아님) | PTT 회선에는 싣지 않는다 |
 | S10 | 문서 | 정본 R6·`ptt_flows.md` | "Floor Idle 에 Permission 0" — Floor Idle 메시지에는 그 필드가 없다(코드는 맞다) | TS 24.380 §8.2.8 | **이번에 문서 정정함** |
 
+**.48 반영(코드 — 빌드·S1 통과, 배포·라이브 실측 전)**:
+
+| # | 반영 |
+|---|---|
+| S1 | `grantInitialFloor` — 일제 세션이면 개시자 외 초기 발언권 거부(요청 경로 Deny #5 와 같은 판정) |
+| S2 | 늦은 합류 Taken = `_takenFields` 공용(전원 통지와 같은 필드·헤더 서버 SSRC, 화자 여럿이면 목록 한 건). 일제·수신 전용 수신자 Permission 0 |
+| S3·S5 | 세션 캐시 **선점**(`GroupSession::bPending`) — 개시자 leg 확립에서 확정(`SettlePendingSession`), 그 전에 끝나는 모든 경로는 가드가 지운다. 선점 중 같은 그룹 INVITE 는 합류로 처리(선점 시한 32 s). 480/105 는 확정 세션만(`IsBroadcastInProgress`) |
+| S4 | `CheckConferenceSubscribe(…, bAuthzOnly)` — 권한 스윕·수락 직후 재검사는 일제 480/105 를 보지 않는다 |
+| S6 | `CTasModule::IncomingBarredBy` — 후보 PAI + From, 착신 가입자 다이얼 플랜으로 +E.164 정규화 대조(ICB 판정 3곳 공통) |
+| S7 | 안내 뒤 최종 응답은 항상 Reason — 받은 원인이 없으면 `SIP;cause=<코드>`(`FinishEarly`, ICB 외 자체 거절 전부) |
+| S8 | CSC `_icb_legacy_keys(…, ptt=True)` — PTT 회선의 구 키 `dnd` 는 WARN 후 버림 |
+| S9 | CSP `DbManager` 단건·전량 적재와 파일 폴백 모두 PTT 회선에 `icb_identities` 를 싣지 않음 |
+
+정본 반영: [mcptt_broadcast_group_call.md](../design/features/mcptt_broadcast_group_call.md) §2 R5·R6·R7·R11 ✅, [volte_supplementary_services.md](../design/features/volte_supplementary_services.md) §6B.2·§6B.3, [announcements.md](../design/features/announcements.md) §3.1(최종 응답 Reason).
+
 - **알려진 미구현(정본 §7)**: 최소 affiliation 인원 미달 해제(TS 24.379 §6.3.8.1 4)), ACR(익명 착신 거부 — 433, TS 24.611 §4.5.2.6.2).
 - **참고 — 일제 통화의 수신자**: 규격 정의(TS 22.179 §3.1)는 "개시자만 송신·응답 없음·송신 끝 = 호 끝"이고 "전원 참여"가 아니다.
   현행 절차(TS 24.379 §6.3.5.5)는 그 그룹의 **affiliated 멤버**를 일반 편성 그룹 호처럼 초대한다 — 서버 fan-out 이 그렇다

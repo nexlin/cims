@@ -1934,7 +1934,7 @@ bool CModuleDispatcher::TryDivertLeg( const char *pszCallId, const CCallInfo &cl
     }
     CspUser clsTargetUser;
     if ( gclsCspUserMap.Select( strTarget.c_str(), clsTargetUser ) &&
-         clsTargetUser.IsIncomingBarred( clsB.m_strRelayCaller ) )
+         CTasModule::IncomingBarredBy( clsTargetUser, clsB.m_strRelayCaller ) )
         return false;
 
     // 실패/취소할 B-leg 가 냈던 오퍼·신원 그대로

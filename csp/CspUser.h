@@ -147,15 +147,21 @@ public:
     // 마지막 Logout 시간
     time_t m_iLogoutTime;
 
-    /** 착신 차단 판정 — 걸린 규칙 이름("all"|"identity"), 차단 아니면 nullptr (TS 24.611 §4.5.2.6.1 — 603). */
-    const char *IncomingBarredBy( const std::string &strFromId ) const {
+    /** 착신 차단 판정 — 걸린 규칙 이름("all"|"identity"), 차단 아니면 nullptr (TS 24.611 §4.5.2.6.1 — 603).
+     *  vecCallerIds = 발신자 신원 후보(P-Asserted-Identity, From — 규격의 cp:identity 대조 대상), fnNorm = 비교 전
+     *  번호 정규화(+E.164). 후보 하나라도 목록과 같으면 차단이다 — 후보를 늘리는 쪽은 차단을 넓힐 뿐 우회가 되지
+     * 않는다. */
+    template <class FnNorm>
+    const char *IncomingBarredBy( const std::vector<std::string> &vecCallerIds, FnNorm fnNorm ) const {
         if ( m_bIcbAll ) return "all";
-        if ( std::find( m_vecIcbIdentities.begin(), m_vecIcbIdentities.end(), strFromId ) != m_vecIcbIdentities.end() )
-            return "identity";
+        if ( m_vecIcbIdentities.empty() ) return nullptr;
+        for ( const auto &strCaller : vecCallerIds ) {
+            if ( strCaller.empty() ) continue;
+            const std::string strNorm = fnNorm( strCaller );
+            for ( const auto &strBarred : m_vecIcbIdentities )
+                if ( strBarred == strCaller || fnNorm( strBarred ) == strNorm ) return "identity";
+        }
         return nullptr;
-    }
-    bool IsIncomingBarred( const std::string &strFromId ) const {
-        return IncomingBarredBy( strFromId ) != nullptr;
     }
     bool isCallForward() {
         return m_strForward.empty() == false;

@@ -93,6 +93,26 @@ CGroupCallService::GroupSession CGroupCallService::SessionOf( const std::string 
     return it != m_mapGroupSession.end() ? it->second : GroupSession();
 }
 
+void CGroupCallService::SettlePendingSession( const std::string &strGroupId, const std::string &strInitiator,
+                                              bool bEstablished ) {
+    std::unique_lock<std::recursive_mutex> lock( m_mutex );
+    auto it = m_mapGroupSession.find( strGroupId );
+    if ( it == m_mapGroupSession.end() || !it->second.bPending || it->second.strInitiator != strInitiator ) return;
+    if ( bEstablished ) {
+        it->second.bPending = false;
+        return;
+    }
+    CLog::Print( LOG_INFO, "GroupSession: group=%s initiator=%s 개시 실패 — 세션 속성 폐기%s", strGroupId.c_str(),
+                 strInitiator.c_str(), it->second.bBroadcast ? " (broadcast)" : "" );
+    m_mapGroupSession.erase( it );
+}
+
+bool CGroupCallService::IsBroadcastInProgress( const std::string &strGroupId ) {
+    std::unique_lock<std::recursive_mutex> lock( m_mutex );
+    auto it = m_mapGroupSession.find( strGroupId );
+    return it != m_mapGroupSession.end() && it->second.bBroadcast && !it->second.bPending;
+}
+
 bool CGroupCallService::IsOnDemandGroupCall( const CspPttGroup &clsGroup ) {
     return !clsGroup._isAdhoc && clsGroup._groupType != "chat" && clsGroup._groupType != "private";
 }
@@ -426,6 +446,19 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
     int iPrevCond = 0;
     bool bActiveSession = false;
     bool bNewSession = false;
+    // 이 INVITE 가 세션 속성을 선점했는가 — 개시자 leg 확립 전에 어느 경로로 끝나든(세션 창·AcceptCall 실패·
+    //   CMP 포트 부족) 선점을 지운다. 남기면 그 그룹의 conference 구독이 다음 세션까지 480/105 를 받는다
+    //   (TS 24.379 §10.1.3.4.1 — 일제 통화 진행 중에만).
+    bool bClaimedSession = false;
+    struct PendingGuard {
+        CGroupCallService *pSvc;
+        const char *pszGroup;
+        const char *pszCaller;
+        bool &bArmed;
+        ~PendingGuard() {
+            if ( bArmed ) pSvc->SettlePendingSession( pszGroup, pszCaller, false );
+        }
+    } clsPendingGuard{ this, pszGroupId, pszCallerInfo, bClaimedSession };
     {
         std::unique_lock<std::recursive_mutex> lock( m_mutex );
         auto itPrev = m_mapGroupCondition.find( pszGroupId );
@@ -439,17 +472,33 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         //   일제 통화는 편성 그룹 호(prearranged)의 속성이다 — chat·즉석 세션의 <broadcast-ind> 는 무시한다.
         //   «개시» = 이 그룹에 참가 leg(확립·미확립 초대)이 하나도 없다 — 확립 leg 만 보면 개시자의 200 OK 전에
         //   들어온 두 번째 INVITE 가 개시자를 덮는다.
+        //   개시자 leg 은 200 OK 뒤에야 m_mapCallSession 에 오르므로, 그 사이 들어온 INVITE 는 개시 선점(bPending)을
+        //   보고 합류로 처리한다 — 빈 그룹에 거의 동시에 온 두 INVITE 가 서로 개시자로 캐시를 덮어 CMP·CSP 판단이
+        //   갈리지 않게(TS 24.380 §6.3.5.3.4). 시한을 넘긴 선점은 버려진 것으로 본다.
         bNewSession = !bActiveSession;
         for ( const auto &kv : m_mapCallSession )
             if ( kv.second.strGroupId == pszGroupId && !kv.second.bListenOnly ) {
                 bNewSession = false;
                 break;
             }
+        if ( bNewSession ) {
+            auto itSes = m_mapGroupSession.find( pszGroupId );
+            if ( itSes != m_mapGroupSession.end() && itSes->second.bPending &&
+                 itSes->second.strInitiator != pszCallerInfo &&
+                 time( NULL ) - itSes->second.tStart < kPendingSessionSec ) {
+                CLog::Print( LOG_INFO,
+                             "ProcessGroupCall: Group(%s) Caller(%s) — 개시 진행 중(initiator=%s), 합류로 처리",
+                             pszGroupId, pszCallerInfo, itSes->second.strInitiator.c_str() );
+                bNewSession = false;
+            }
+        }
         if ( bNewSession && !bListen ) {
             GroupSession clsSes;
             clsSes.strInitiator = pszCallerInfo;
             clsSes.bBroadcast = bBroadcastInd && IsOnDemandGroupCall( clsGroup );
             clsSes.tStart = time( NULL );
+            clsSes.bPending = true;
+            bClaimedSession = true;
             if ( bBroadcastInd && !clsSes.bBroadcast )
                 CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) type=%s — broadcast-ind 무시(편성 그룹 호 아님)",
                              pszGroupId, clsGroup._groupType.c_str() );
@@ -665,6 +714,10 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
             clsSess.tListenStart = time( NULL );
             clsSess.bInitiator = true;
             m_mapCallSession[pszCallId] = clsSess;
+        }
+        if ( bClaimedSession ) {  // 개시자 leg 확립 — 세션 속성 확정 (이제 합류는 m_mapCallSession 으로 판정된다)
+            SettlePendingSession( pszGroupId, pszCallerInfo, true );
+            bClaimedSession = false;
         }
         // dialog-event(§5.6a): 개시자 leg 확립 — 개시자 회선 감시자에게 confirmed (remote = 세션 URI)
         {
@@ -2231,8 +2284,8 @@ bool CGroupCallService::HasActiveLeg( const std::string &strGroupId ) const {
 //   사전 모니터링 구독(진행 중·참가자 수)을 같은 축으로 허용한다. 프로파일 부재·DB 불가는 불허(fail-closed).
 //   즉석 세션(adhoc-/priv-)은 그룹 문서가 없고 참가자 = fan-out 대상이라 통과, 미지 자원은 기존 처리에 맡긴다.
 int CGroupCallService::CheckConferenceSubscribe( const std::string &strGroupId, const std::string &strUserId,
-                                                 std::string &strWarning, std::string &strReason,
-                                                 bool *pbUnavailable ) {
+                                                 std::string &strWarning, std::string &strReason, bool *pbUnavailable,
+                                                 bool bAuthzOnly ) {
     if ( pbUnavailable ) *pbUnavailable = false;
     CspPttGroup clsGroup;
     if ( !gclsGroupMap.Select( strGroupId.c_str(), clsGroup ) ) return 0;
@@ -2248,7 +2301,7 @@ int CGroupCallService::CheckConferenceSubscribe( const std::string &strGroupId, 
     }
     // 일제 통화로 개시된 호의 conference 구독 = 480 + Warning 105 (TS 24.379 §10.1.3.4.1) — 판정은 그룹 종류가
     //   아니라 진행 중 세션의 속성이다(같은 그룹의 일반 그룹 통화는 구독 가능).
-    if ( gclsGroupCallService.SessionOf( strGroupId ).bBroadcast ) {
+    if ( !bAuthzOnly && gclsGroupCallService.IsBroadcastInProgress( strGroupId ) ) {
         strWarning = "105 CIMS \"subscription not allowed in a broadcast group call\"";
         strReason = "broadcast group call";
         return SIP_TEMPORARILY_UNAVAILABLE;

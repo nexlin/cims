@@ -20,6 +20,7 @@
 #include "CspDialPlan.h"
 #include "CspPhoneGroup.h"
 #include "CspRole.h"
+#include "CspRuleField.h"
 #include "CspServiceMap.h"
 #include "CspUser.h"
 #include "FmReporter.h"
@@ -100,9 +101,25 @@ EModuleRouteResult CTasModule::OnIncomingCall( const char *pszCallId, const char
     return E_ROUTE_PASS;
 }
 
+const char *CTasModule::IncomingBarredBy( const CspUser &clsUser, const std::string &strFrom,
+                                          const CSipMessage *pclsMessage ) {
+    std::vector<std::string> vecIds;
+    if ( pclsMessage ) {
+        const std::string strPai = RulePaiUser( pclsMessage );
+        if ( !strPai.empty() ) vecIds.push_back( strPai );
+    }
+    if ( !strFrom.empty() ) vecIds.push_back( strFrom );
+    const DialPlan clsPlan = gclsServiceMap.GetForUser( clsUser.m_strId, "volte" ).dial_plan;
+    return clsUser.IncomingBarredBy( vecIds, [&clsPlan]( const std::string &strNum ) {
+        std::string strOut;
+        CspDialPlan::Normalize( strNum, "", clsPlan, strOut );
+        return strOut;
+    } );
+}
+
 bool CTasModule::ApplyTerminationServices( const char *pszCallId, const char *pszFrom, const char *pszTo,
                                            const CspUser &clsUser, CSipCallRtp *pclsRtp, CSipMessage *pclsMessage ) {
-    if ( const char *pszIcb = clsUser.IncomingBarredBy( pszFrom ) ) {
+    if ( const char *pszIcb = IncomingBarredBy( clsUser, pszFrom ? pszFrom : "", pclsMessage ) ) {
         CLog::Print( LOG_INFO, "TAS: Rejected (ICB %s) From=%s To=%s", pszIcb, pszFrom, pszTo );
         // 시도 장부 — 거절도 시도다. 남기지 않으면 착신 차단으로 튕긴 호가 성공률·NER 의 분모에서
         //   빠져 거부가 늘수록 성공률이 좋아진다(F-54).
@@ -156,7 +173,8 @@ int CTasModule::ResolveDiversion( const char *pszFrom, const char *pszTo, CSipMe
         CspUser clsUser;
         // 등록 여부와 무관 — CFU 는 미등록 가입자에도 적용(DB 폴백 조회). 가입자가 아니면(피어·그룹·대표번호) 끝
         if ( !gclsCspUserMap.Select( strCur.c_str(), clsUser ) ) break;
-        if ( clsUser.IsIncomingBarred( strFrom ) ) break;  // 착신 차단(ICB) 603 이 전환보다 우선 — 종단 서비스가 처리
+        if ( IncomingBarredBy( clsUser, strFrom, pclsMessage ) )
+            break;  // 착신 차단(ICB) 603 이 전환보다 우선 — 종단 서비스가 처리
         // 조건 판정 — CFU(forward_id) 가 있으면 무조건, 없고 미등록이면 CFNL(forward_not_logged_in_id, RFC 4458 cause
         // 404)
         std::string strRaw;

@@ -63,7 +63,8 @@ static int AuthzSweepDialogSubscriptions( const char *pszWhy ) {
     return iRevoked;
 }
 
-/** conference 구독 스윕 — 청취 인가를 잃은 구독을 걷는다. 판정은 SUBSCRIBE 경로와 같은 함수다. */
+/** conference 구독 스윕 — 청취 인가를 잃은 구독을 걷는다. 판정은 SUBSCRIBE 경로와 같은 함수의 인가 부분이다 —
+ *  일제 통화 중의 480/105 는 일시 상태라 걷지 않는다(TS 24.379 §10.1.3.4.1 · RFC 6665 §4.1.3). */
 static int AuthzSweepConferenceSubscriptions( const char *pszWhy ) {
     std::list<SubscriptionInfo> lstSubs;
     gclsSubscriptionManager.GetSubscriptionsByEvent( "conference", lstSubs );
@@ -73,7 +74,7 @@ static int AuthzSweepConferenceSubscriptions( const char *pszWhy ) {
         std::string strWarning, strReason;
         bool bUnavail = false;
         if ( CGroupCallService::CheckConferenceSubscribe( sub.strResourceId, sub.strUserId, strWarning, strReason,
-                                                          &bUnavail ) == 0 )
+                                                          &bUnavail, true ) == 0 )
             continue;
         if ( bUnavail ) {
             // **조회 불능은 권한 상실이 아니다** — 이미 선 구독은 걷지 않는다(fail open, §5.10). 다만

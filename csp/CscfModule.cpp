@@ -1454,7 +1454,7 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
         } else if ( strEventType == "conference" ) {
             std::string strWarn, strReason;
             bLost = CGroupCallService::CheckConferenceSubscribe( strReqUriUser, strFromId, strWarn, strReason,
-                                                                 &bUnavail ) != 0;
+                                                                 &bUnavail, true ) != 0;
             strWhy = strReason;
         }
         if ( bLost && bUnavail ) {

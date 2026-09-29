@@ -126,8 +126,9 @@ bool CspUserMap::_loadUserFromFile( std::string strUserId, CspUser &clsUser ) {
     if ( jsonUser.Has( "forward_not_reachable_id" ) )
         clsUser.m_strForwardNotReachable = jsonUser.GetString( "forward_not_reachable_id" );
 
-    // 착신 차단 — 지정 번호(icb_identities). 구 키 reject_id 는 전환기(한 릴리스)에만 읽는다.
-    {
+    // 착신 차단 — 지정 번호(icb_identities). 구 키 reject_id 는 전환기(한 릴리스)에만 읽는다. 전화 회선만 — ICB 는
+    //   MMTel 부가서비스라 PTT 회선에는 싣지 않는다(DB 적재와 같은 규칙).
+    if ( clsUser.m_strServiceType != "ptt" ) {
         const char *pszKey = jsonUser.Has( "icb_identities" ) ? "icb_identities" : "reject_id";
         SimpleJson::JsonNode idNode = jsonUser.Get( pszKey );
         if ( idNode.type == SimpleJson::JSON_ARRAY ) {

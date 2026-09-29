@@ -166,10 +166,11 @@ public:
      *  0=허용. 아니면 보낼 SIP 상태(403 = 그룹 문서 <on-network-allow-conference-state> 불허·Warning 138 /
      *  480 = 브로드캐스트 그룹·Warning 105)와 Warning 헤더 값·거절 사유(로그용). 멤버는 그룹 속성으로, 비멤버 관제사는
      *  청취 leg 와 같은 2단(allow_ambient_listening + ptt_listen 범위)으로 판정한다 — 즉석 세션(adhoc/priv)·미지 자원은
-     * 통과. */
+     * 통과. bAuthzOnly = 인가만 판정한다(일제 통화의 일시 480/105 는 인가 상실이 아니다 — 권한 재점검 스윕·수락 직후
+     * 재검사용. 기존 구독을 rejected 로 끊으면 단말은 재구독하지 않는다, RFC 6665 §4.1.3). */
     static int CheckConferenceSubscribe( const std::string &strGroupId, const std::string &strUserId,
-                                         std::string &strWarning, std::string &strReason,
-                                         bool *pbUnavailable = nullptr );
+                                         std::string &strWarning, std::string &strReason, bool *pbUnavailable = nullptr,
+                                         bool bAuthzOnly = false );
 
     /** PTT 청취 인가 판정 — **합류(§5.6)·합류 중 재확인·회수 스윕이 같은 식을 쓰게 하는 단일 지점.**
      *  셋이 갈라지면 허용된 것을 걷거나 잃은 것을 남긴다. 반환 = "" 허용, 그 외 거절 사유(로그·감사용).
@@ -317,8 +318,18 @@ private:
         std::string strInitiator;  ///< 개시자 — mcptt-calling-user-id·dialog initiator·CMP initiator_id
         bool bBroadcast = false;   ///< 일제 통화 (TS 24.379 §4.12)
         time_t tStart = 0;         ///< 세션 개시 시각 — TNG3(그룹 호 최대 시간) 판정
+        /** 개시 INVITE 처리 중(개시자 leg 확립 전) — 같은 그룹에 거의 동시에 온 INVITE 는 이 선점을 보고 합류로
+         *  처리한다(개시자 = 세션을 연 사용자, TS 24.380 §6.3.5.3.4). 개시자 leg 확립에서 풀고, 개시가 실패하면
+         *  속성째 지운다. 일제 통화 **진행 중** 판정(구독 480/105, TS 24.379 §10.1.3.4.1)은 확정된 세션만 본다. */
+        bool bPending = false;
     };
+    /** 개시 선점 유효 시간 — INVITE 트랜잭션 시한(64*T1)을 넘긴 선점은 버려진 것으로 본다. */
+    static constexpr time_t kPendingSessionSec = 32;
     std::map<std::string, GroupSession> m_mapGroupSession;
+    /** 개시 선점을 푼다(개시자 leg 확립) 또는 지운다(개시 실패). 이 호출자가 선점한 것일 때만. */
+    void SettlePendingSession( const std::string &strGroupId, const std::string &strInitiator, bool bEstablished );
+    /** 일제 통화가 진행 중인가 — 확정된(개시자 leg 확립) 세션만. m_mutex 를 잡는다. */
+    bool IsBroadcastInProgress( const std::string &strGroupId );
     /** 세션 속성 스냅샷 (없으면 기본값). m_mutex 를 잡는다. */
     GroupSession SessionOf( const std::string &strGroupId );
     /** CMP 로 싣는 세션 속성 — 개시자·일제 통화 + T4(on-demand 그룹 호만 그룹 hang-timer, 그 밖은 0). */

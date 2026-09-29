@@ -291,8 +291,8 @@ UE-A ◄── 180(같은 SDP) · 200 ◄────────── 180 · 2
 | CIMS | 동작 | 규격 대응 |
 |---|---|---|
 | 회선 `icb_all` — `volte_subscriptions`·`voip_subscriptions`. `ptt_subscriptions` 에는 없다(MMTel ICB 는 MCPTT 대상이 아니다) | 이 회선으로 오는 모든 착신 603 | ICB 무조건 규칙(조건 없음, `allow=false`) |
-| 사람 `icb_identities(user_id, identity)` — 그 사람의 모든 전화 회선에 적용 | 지정 발신 번호 603 | ICB `cp:identity` 규칙 |
-| 판정 — `CspUser::IncomingBarredBy(from)`(전체 ∨ 지정 번호 일치, 맞은 규칙 `all`/`identity` 를 돌려준다)·`IsIncomingBarred(from)`. 호출 = TAS `ApplyTerminationServices`(착신 가입자 한 곳 — 등록 여부와 무관(DB 폴백 조회, 가입 조건이다)·전환된 호면 전환 대상 가입자, 거절 안내 `declined` early media 뒤 603 — [announcements.md §3.2](announcements.md). 다이얼로그 생성 전 조기 스크린은 안내를 붙일 수 없어 쓰지 않는다)·`ResolveDiversion`(착신 차단 가입자는 전환하지 않는다)·`TryDivertLeg`(조건부 전환 대상의 착신 차단 검사). 로그 `TAS: Rejected (ICB all)` / `TAS: Rejected (ICB identity)` | 착신전환(§6A)보다 우선 | §4.5.2.6.1 정합 |
+| 사람 `icb_identities(user_id, identity)` — 그 사람의 모든 **전화** 회선에 적용(PTT 회선에는 싣지 않는다 — DB 적재·파일 폴백 모두) | 지정 발신 번호 603 | ICB `cp:identity` 규칙 |
+| 판정 — `CTasModule::IncomingBarredBy(user, from, msg)` → `CspUser::IncomingBarredBy(후보, 정규화)`(전체 ∨ 지정 번호 일치, 맞은 규칙 `all`/`identity` 를 돌려준다). 발신 신원 후보 = **P-Asserted-Identity**(요청에 있으면) + From user, 양쪽(후보·목록)을 착신 가입자 접속서비스의 다이얼 플랜으로 +E.164 정규화해 대조한다 — 트렁크의 `Privacy: id`(From anonymous)·국내 번호 형식도 걸린다. 후보 하나라도 맞으면 차단이라 후보를 늘려도 우회가 되지 않는다(조건부 전환 대상 검사 `TryDivertLeg` 는 요청이 없어 A-leg 발신자만). 호출 = TAS `ApplyTerminationServices`(착신 가입자 한 곳 — 등록 여부와 무관(DB 폴백 조회, 가입 조건이다)·전환된 호면 전환 대상 가입자, 거절 안내 `declined` early media 뒤 603 — [announcements.md §3.2](announcements.md). 다이얼로그 생성 전 조기 스크린은 안내를 붙일 수 없어 쓰지 않는다)·`ResolveDiversion`(착신 차단 가입자는 전환하지 않는다)·`TryDivertLeg`(조건부 전환 대상의 착신 차단 검사). 로그 `TAS: Rejected (ICB all)` / `TAS: Rejected (ICB identity)` | 착신전환(§6A)보다 우선 | §4.5.2.6.1 정합 (cp:identity ↔ PAI, 선택적으로 From) |
 | 설정 — 콘솔 회선 편집 체크박스 "착신 차단 — 전체 (모든 착신을 603 으로 거절, 착신 전환보다 우선)", 지정 번호 목록은 사람 드로어의 "착신 차단 — 지정 번호" 카드(관리 API `icb_identities`, 즉시 저장) | — | 운영자 제공 방식은 규격 허용. Ut/XCAP 사용자 설정·ACR 은 미구현(§9) |
 
 종료 사유는 `declined`(603 — 단말 거절과 같은 사유, 착신 차단 전용 사유는 없다)이고 시도 장부에는 거절 시도로 남는다(`VoipCallRejected`)
@@ -308,8 +308,8 @@ UE-A ◄── 180(같은 SDP) · 200 ◄────────── 180 · 2
 | 화면·문서 표기 | 착신 차단 — 전체 / 지정 번호 |
 | DB 회선 | `volte_subscriptions.icb_all`·`voip_subscriptions.icb_all` — `TINYINT(1) NOT NULL DEFAULT 0 COMMENT '착신 차단 — 전체 (TS 24.611 ICB)'` |
 | DB 지정 번호 | `icb_identities(user_id, identity)` PK, FK `fk_icb_user` → `users(id)` ON DELETE CASCADE |
-| 관리 API(CSC) | 회선 `icb_all`(전화 회선만 — PTT 회선에 보내면 400 `icb_all not applicable to ptt`, PUT 은 키가 있을 때만 바꾼다), 사람 `icb_identities[]`(보내면 목록 교체 + 그 사람의 전화 회선마다 CSP 에 `USER_CHANGED` 통지). **전환기 1 릴리스**: 요청의 구 키(`dnd`·`reject_id`)도 새 키로 옮겨 받아들이고 WARN 로그, 응답은 새 키만 — [admin_api.md](../../api/admin_api.md) §3.2·§4.1 |
-| CSP | `CspUser::m_bIcbAll`·`m_vecIcbIdentities`, 판정 `IncomingBarredBy`/`IsIncomingBarred`. `DbManager` 는 `ptt` 테이블에서 `icb_all` 을 읽지 않고(`IcbAllCol` — kind 로 가른 리터럴 0), 전량 적재(`LoadAllUsers`)는 지정 번호를 한 query 로 싣는다 |
+| 관리 API(CSC) | 회선 `icb_all`(전화 회선만 — PTT 회선에 보내면 400 `icb_all not applicable to ptt`, PUT 은 키가 있을 때만 바꾼다), 사람 `icb_identities[]`(보내면 목록 교체 + 그 사람의 전화 회선마다 CSP 에 `USER_CHANGED` 통지). **전환기 1 릴리스**: 요청의 구 키(`dnd`·`reject_id`)도 새 키로 옮겨 받아들이고 WARN 로그, 응답은 새 키만 — PTT 회선의 구 키 `dnd` 는 버린다(WARN, 옛 콘솔이 PTT 회선에도 `dnd:false` 를 보냈다) — [admin_api.md](../../api/admin_api.md) §3.2·§4.1 |
+| CSP | `CspUser::m_bIcbAll`·`m_vecIcbIdentities`, 판정 `CTasModule::IncomingBarredBy`(PAI·From 후보 + 다이얼 플랜 정규화) → `CspUser::IncomingBarredBy`. `DbManager` 는 `ptt` 테이블에서 `icb_all` 을 읽지 않고(`IcbAllCol` — kind 로 가른 리터럴 0) 지정 번호도 PTT 회선에는 싣지 않으며, 전량 적재(`LoadAllUsers`)는 지정 번호를 한 query 로 싣는다 |
 | CSP 파일 폴백 `csp/User/*.json` | `"icb_all"`·`"icb_identities"` (전환기에는 구 키 `"dnd"`·`"reject_id"` 도 읽는다) |
 | OAM | 사용자 조회 `icb_all`(전화 회선만), Excel 가져오기 템플릿 = users 시트 `icb_identities`(쉼표 구분)·전화 시트 `icb_all` (구 헤더 `reject_ids`·`dnd` 도 수용) |
 | 콘솔 | `api/users.ts` `icb_all`·`icb_identities`, `ProvisioningWorkbenchPage.tsx` 회선 표 열·배지 "착신 차단", 회선 편집 체크박스 "착신 차단 — 전체 (모든 착신을 603 으로 거절, 착신 전환보다 우선)" — 새 회선 body 에는 `icb_all` 을 싣지 않는다(PTT 400 회피) |

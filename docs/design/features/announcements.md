@@ -98,7 +98,8 @@ UE-A                     CSP                          CMP                       
 - 이미 B 의 18x+SDP 로 early media 가 앵커링된 뒤 실패하면([volte_flows.md](volte_flows.md) C1a) 183 을 다시 내지 않고 RELAY_PLAY 만 한다
   — peer0 의 answer 는 그대로다(B 가 준 SDP 를 CSP 가 A 에게 이미 냈으므로 코덱도 그것이다).
 - **최종 응답은 재생 뒤** `RELAY_PLAY_DONE` 또는 `MaxPlayMs` 타이머에서 `StopCall(A, 원코드, Reason)` — `RelayEndStatus` 매핑·Reason 투과 규칙은
-  현행 그대로다([csp.md §3.1](../modules/csp.md) `EventCallEnd`). A 의 **CANCEL** 이 재생 중 오면 `RELAY_PLAY_STOP` 뒤 487(psip 기본).
+  현행 그대로다([csp.md §3.1](../modules/csp.md) `EventCallEnd`). 최종 응답에는 **항상 Reason 을 싣는다**(TS 24.628 §4.2.4 — early media 방식) —
+  받은 원인(피어·MGCF 의 Q.850)이 없으면(자체 거절 — 착신 차단 603·484 등) `Reason: SIP;cause=<최종 코드>`(RFC 3326). A 의 **CANCEL** 이 재생 중 오면 `RELAY_PLAY_STOP` 뒤 487(psip 기본).
 - CMP 가 `resource.ann` 을 광고하지 않거나(`AnnPlayers=0`) RELAY_PLAY 가 `MEDIA_NOT_FOUND`/`ANN_CAPACITY` 로 거절되면 **즉시 원코드**
   — 안내가 실패를 가리지 않는다. 카운터 `ann_fallback` + LOG_ERROR(음원 누락은 알람 §10).
 - 통계 무영향: 최종 코드가 그대로라 시도/세션/leg 3계층·성공률 정의가 바뀌지 않는다. CDR(`call.json`)에 `announcement{situation, media[], played_ms}`

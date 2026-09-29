@@ -125,6 +125,12 @@ public:
                                    const CspUser &clsUser, CSipCallRtp *pclsRtp = NULL,
                                    CSipMessage *pclsMessage = NULL );
 
+    /** 착신 차단 판정 한 곳 — 발신자 신원 후보 = P-Asserted-Identity(pclsMessage 가 있으면) + From user, 착신 가입자
+     *  접속서비스의 다이얼 플랜으로 +E.164 정규화해 대조한다(TS 24.611 §4.5.2.6.1 — cp:identity ↔ PAI, 선택적으로
+     *  From). 트렁크의 `Privacy: id`(From anonymous)·국내 번호 형식 PAI 도 걸린다. 걸린 규칙 이름 또는 nullptr. */
+    static const char *IncomingBarredBy( const CspUser &clsUser, const std::string &strFrom,
+                                         const CSipMessage *pclsMessage = NULL );
+
     /** 착신전환 판정 결과 — 서버측 전환(TS 24.604 CDIV, volte_supplementary_services.md §6A) */
     struct CdivResult {
         std::string strServed;                   // 다이얼된 착신(첫 diverting user)

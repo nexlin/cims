@@ -72,13 +72,18 @@ def _coerce_bool(val) -> int:
 _ICB_LEGACY_KEYS = {'dnd': 'icb_all', 'reject_id': 'icb_identities'}
 
 
-def _icb_legacy_keys(body, where: str):
-    """요청 body 의 구 키(dnd·reject_id)를 새 키로 옮긴다(새 키가 이미 있으면 새 키 우선). body 를 바꿔 돌려준다."""
+def _icb_legacy_keys(body, where: str, ptt: bool = False):
+    """요청 body 의 구 키(dnd·reject_id)를 새 키로 옮긴다(새 키가 이미 있으면 새 키 우선). body 를 바꿔 돌려준다.
+    ptt 회선의 구 키 dnd 는 버린다(WARN) — 옛 콘솔은 PTT 회선에도 dnd:false 를 보냈다. 옮기면 icb_all 400 으로
+    거절돼 "전환기 동안 구 키 수용" 약속과 어긋난다."""
     if not isinstance(body, dict):
         return body
     for old, new in _ICB_LEGACY_KEYS.items():
         if old in body:
             val = body.pop(old)
+            if ptt and new == 'icb_all':
+                _logger.log_warning(f"[ADMIN] {where}: ptt 회선의 구 키 '{old}' 무시 (착신 차단은 전화 회선 설정 — 전환기)")
+                continue
             body.setdefault(new, val)
             _logger.log_warning(f"[ADMIN] {where}: 구 키 '{old}' → '{new}' (착신 차단 TS 24.611 — 전환기, 다음 릴리스에서 거절)")
     return body
@@ -835,7 +840,7 @@ def _sub_audit_after(body) -> dict:
 async def _add_subscription(person_id: str, svc: str, body, config, payload=None, ip: str = ''):
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
-    _icb_legacy_keys(body, f'create subscription {svc}')
+    _icb_legacy_keys(body, f'create subscription {svc}', ptt=_subs.API_SEGMENTS.get(svc) == 'ptt')
     msisdn = body.get('id', '').strip()
     if not msisdn:
         return HandlerResult(status=400, body={'error': 'id (MSISDN) is required'})
@@ -953,7 +958,7 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
 
-    _icb_legacy_keys(body, f'update subscription {svc}:{msisdn}')
+    _icb_legacy_keys(body, f'update subscription {svc}:{msisdn}', ptt=_subs.API_SEGMENTS.get(svc) == 'ptt')
     passwd     = body.get('passwd') or ''
     # 부분 업데이트 — icb_all/forward_id 도 키가 있을 때만 바꾼다(ringback_media 만 보낸 PUT 이 착신전환·착신 차단을 지우지 않게)
     try:

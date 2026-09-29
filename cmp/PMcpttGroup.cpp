@@ -283,19 +283,18 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
              _members.size(), recvOnly ? " recv_only" : "", floorSuppress ? " floor_suppress" : "");
     if (_logFlow) _logFlow(_groupId, "ue", "cmp", "MCPTT", "MEMBER_JOIN", sessionId.c_str());
 
-    // 발언 중인 화자가 있으면 신규 멤버에게 Floor Taken 통지 (화자 identity + Indicator).
-    //   동시 발언(dual/multi)이면 화자마다 1건. floor 억제(ambient) 멤버에겐 보내지 않는다.
-    if (!floorSuppress) {
-        for (const auto& t : _talkers) {
-            char pktBuf[256];
-            std::vector<FloorTlv> f{ FloorTlv(FF_GRANTED_PARTY, t.sessionId),
-                                     FloorTlv(FF_FLOOR_INDICATOR, FloorU16(_indicatorFor(t.sessionId))) };
-            int pktLen = BuildFloorMessage(pktBuf, sizeof(pktBuf), FLOOR_TAKEN, t.ssrc, f);
-            if (pktLen > 0)
-                sendToMember(sessionId, pktBuf, pktLen);
-            LOG_DEBUG("PMcpttGroup", "[%s] Notified new member %s about floor taken by %s",
-                      _groupId.c_str(), sessionId.c_str(), t.sessionId.c_str());
-        }
+    // 발언 중인 화자가 있으면 신규 멤버에게 Floor Taken 통지 — 전원 통지와 같은 형식
+    //   (Granted Party·Permission to Request the Floor·Message Sequence Number·Indicator·화자 SSRC,
+    //   헤더 = 서버 SSRC — §8.2.9). 일제 통화·ambient 청취 leg 는 Permission 0(§6.3.4.4.2-3d).
+    //   동시 발언이면 화자 목록이 전원을 싣는다. floor 억제(ambient) 멤버에겐 보내지 않는다.
+    if (!floorSuppress && !_talkers.empty()) {
+        std::vector<FloorTlv> f = _takenFields(_talkers.back().sessionId, recvOnly);
+        char pktBuf[512];
+        int pktLen = BuildFloorMessage(pktBuf, sizeof(pktBuf), FLOOR_TAKEN, _serverSsrc, f);
+        if (pktLen > 0)
+            sendToMember(sessionId, pktBuf, pktLen);
+        LOG_DEBUG("PMcpttGroup", "[%s] Notified new member %s about floor taken by %s (talkers=%zu)",
+                  _groupId.c_str(), sessionId.c_str(), _talkers.back().sessionId.c_str(), _talkers.size());
     }
 
     // ⚠️ private call 개시자에게 **무조건** 초기 발언권을 주지 않는다. 초기 발언권은 SDP fmtp
@@ -1234,6 +1233,13 @@ bool PMcpttGroup::grantInitialFloor(const std::string& sessionId) {
     if (!_floorControl || !_talkers.empty()) return false;
     auto it = _members.find(sessionId);
     if (it == _members.end() || it->second.recvOnly || it->second.floorSuppress) return false;
+    // 일제 통화는 개시자만 발언한다 — 개시자가 놓은 뒤 T4 사이에 다른 멤버가 mc_granted 로
+    //   재합류해도 초기 발언권을 주지 않는다(§6.3.5.3.4, 요청 경로의 Deny #5 와 같은 판정).
+    if (_broadcast && !_initiatorSessionId.empty() && sessionId != _initiatorSessionId) {
+        LOG_INFO("PMcpttGroup", "[%s] Initial floor refused (broadcast) session=%s — initiator=%s only",
+                 _groupId.c_str(), sessionId.c_str(), _initiatorSessionId.c_str());
+        return false;
+    }
     int prio = 0;
     auto itP = _priorities.find(sessionId);
     if (itP != _priorities.end()) prio = itP->second;
@@ -1805,6 +1811,29 @@ bool PMcpttGroup::tickFloorTimers() {
     return true;
 }
 
+// Floor Taken 필드 (TS 24.380 §8.2.9) — 전원 통지와 늦은 합류 통지가 같은 형식을 쓴다.
+//   broadcast 그룹 또는 수신 전용 수신자는 Permission to Request the Floor = 0(§6.3.4.4.2-3d).
+std::vector<FloorTlv> PMcpttGroup::_takenFields(const std::string& speakerId, bool recvOnlyRecipient) {
+    std::vector<FloorTlv> fields;
+    int perm = (_broadcast || recvOnlyRecipient) ? FLOOR_PERM_DENIED : FLOOR_PERM_ALLOWED;
+    fields.push_back(FloorTlv(FF_GRANTED_PARTY, _userIdOf(speakerId)));
+    fields.push_back(FloorTlv(FF_PERMISSION, FloorU16(perm)));
+    fields.push_back(FloorTlv(FF_MSG_SEQ, FloorU16(_nextMsgSeq())));
+    fields.push_back(FloorTlv(FF_FLOOR_INDICATOR, FloorU16(_indicatorFor(speakerId))));
+    if (_talkers.size() > 1) {
+        // 동시 발언 — 현재 화자 전원을 리스트로 싣는다(§6.3.4.4.7a-3c). 가변 길이라
+        //   고정 길이 필드 뒤에 둔다(구 파서 호환).
+        std::vector<std::string> users;
+        std::vector<unsigned int> ssrcs;
+        for (const auto& t : _talkers) { users.push_back(_userIdOf(t.sessionId)); ssrcs.push_back(_uaSsrcOf(t.sessionId)); }
+        fields.push_back(FloorTlv(FF_GRANTED_USERS, FloorUserList(users)));
+        fields.push_back(FloorTlv(FF_SSRC_LIST, FloorSsrcList(ssrcs)));
+    } else {
+        fields.push_back(FloorTlv(FF_SSRC, FloorSsrc(_uaSsrcOf(speakerId))));   // 학습한 단말 SSRC
+    }
+    return fields;
+}
+
 void PMcpttGroup::broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, const std::string& speakerId) {
     const char* opName = _floorOpName(opcode);
     LOG_INFO("PMcpttGroup", "[%s] broadcastFloorStatus subtype=%d(%s) speaker=%s ssrc=%u → %lu members",
@@ -1816,25 +1845,9 @@ void PMcpttGroup::broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, 
     std::vector<FloorTlv> roFields;   // recv_only(ambient 청취) 멤버용 변형 — Permission=0
     bool useRo = false;
     if (opcode == FLOOR_TAKEN && !speakerId.empty()) {
-        // broadcast 그룹은 수신자가 발언 요청을 할 수 없다(§6.3.4.4.2-3d).
-        int perm = _broadcast ? FLOOR_PERM_DENIED : FLOOR_PERM_ALLOWED;
-        fields.push_back(FloorTlv(FF_GRANTED_PARTY, _userIdOf(speakerId)));
-        fields.push_back(FloorTlv(FF_PERMISSION, FloorU16(perm)));
-        fields.push_back(FloorTlv(FF_MSG_SEQ, FloorU16(_nextMsgSeq())));
-        fields.push_back(FloorTlv(FF_FLOOR_INDICATOR, FloorU16(_indicatorFor(speakerId))));
-        if (_talkers.size() > 1) {
-            // 동시 발언 — 현재 화자 전원을 리스트로 싣는다(§6.3.4.4.7a-3c). 가변 길이라
-            //   고정 길이 필드 뒤에 둔다(구 파서 호환).
-            std::vector<std::string> users;
-            std::vector<unsigned int> ssrcs;
-            for (const auto& t : _talkers) { users.push_back(_userIdOf(t.sessionId)); ssrcs.push_back(_uaSsrcOf(t.sessionId)); }
-            fields.push_back(FloorTlv(FF_GRANTED_USERS, FloorUserList(users)));
-            fields.push_back(FloorTlv(FF_SSRC_LIST, FloorSsrcList(ssrcs)));
-        } else {
-            (void)ssrc;   // 화자 SSRC 는 학습한 단말 SSRC 를 싣는다
-            fields.push_back(FloorTlv(FF_SSRC, FloorSsrc(_uaSsrcOf(speakerId))));
-        }
-        if (perm == FLOOR_PERM_ALLOWED) {
+        fields = _takenFields(speakerId, false);
+        // broadcast 그룹은 이미 전원 Permission 0 — 아니면 ambient 청취 leg 용 변형을 따로 만든다.
+        if (!_broadcast) {
             for (auto const& [sid, peer] : _members)
                 if (peer.recvOnly) { useRo = true; break; }   // ambient 청취 leg 는 요청 불가
             if (useRo) {

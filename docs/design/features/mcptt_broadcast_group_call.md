@@ -37,17 +37,17 @@
 | R2 | 멤버는 어느 편성(prearranged) 그룹에서나 일제 통화를 개시한다 — 그룹 종류는 `prearranged`/`chat` 뿐이다 | `sql/migrate_ptt_groups_broadcast_call.sql`, `csc/src/handlers/admin.py` | ✅ |
 | R3 | fan-out mcptt-info = `session-type`(그룹 종류) + `<broadcast-ind>true` | `GroupCallService.cpp` `BuildGroupInfoXml` | ✅ |
 | R4 | 그룹 문서의 그룹 종류 = `<on-network-invite-members>`. 단말(SDK `GroupDoc`·Android `CscModels`/`McpttXml`)은 이 요소로 판정하고 없는 옛 문서만 `<mcpttgi:session-type>` 으로 읽으며, SDK 가 쓰는 PUT 본문에는 session-type 을 싣지 않는다. 서버 문서도 `<mcpttgi:session-type>` 을 싣지 않고, XCAP PUT 은 invite-members 만 읽는다(없으면 그룹 종류 불변) | `csc/src/services/mcptt.py` · `sdk/core/src/csc/group_doc.cpp` | ✅ |
-| R5 | CMP 가 개시자 외 Floor Request 를 Deny #5 — 긴급 tier 검사보다 먼저. 초기 발언권(SDP `mc_granted` → `grantInitialFloor`)에는 개시자 검사가 없어 비개시자가 재합류로 발언권을 받을 수 있다 | `cmp/PMcpttGroup.cpp` `handleFloorRequest`·`grantInitialFloor` | ⚠ 초기 발언권 경로(§7) |
-| R6 | Floor Indicator 0x4000·Taken Permission 0. 진행 중 합류한 멤버에게 보내는 Floor Taken(`addMember` 의 화자 통지)에는 Permission 필드가 없다 | `cmp/PMcpttGroup.cpp` `_indicatorFor`·`broadcastFloorStatus`·`addMember` | ⚠ 늦은 합류 Taken(§7) |
-| R7 | 세션 속성(개시자·broadcast)은 개시 INVITE 에서 한 번 정한다(CSP 세션 캐시). CMP 도 세션 개시 ADD 에서만 반영. 캐시는 개시가 실패해도 남고, 빈 그룹에 INVITE 두 개가 거의 동시에 오면 뒤의 것이 덮는다 | `GroupCallService.cpp` `m_mapGroupSession`, `cmp/PCmpServer.cpp` `processAddGroup` | ⚠ 실패·경합(§7) |
+| R5 | CMP 가 개시자 외 Floor Request 를 Deny #5 — 긴급 tier 검사보다 먼저. 초기 발언권(SDP `mc_granted` → `grantInitialFloor`)도 같은 판정 — 개시자가 놓은 뒤 T4 사이에 비개시자가 `mc_granted` 로 재합류해도 발언권을 받지 않는다 | `cmp/PMcpttGroup.cpp` `handleFloorRequest`·`grantInitialFloor` | ✅ |
+| R6 | Floor Indicator 0x4000·Taken Permission 0. 진행 중 합류한 멤버에게 보내는 Floor Taken(`addMember` 의 화자 통지)도 전원 통지와 같은 필드(`_takenFields` — Granted Party = MCPTT ID·Permission·Message Sequence Number·Indicator·화자 SSRC, 헤더 = 서버 SSRC)이고, 일제 통화·ambient 청취 leg 는 Permission 0 | `cmp/PMcpttGroup.cpp` `_indicatorFor`·`_takenFields`·`broadcastFloorStatus`·`addMember` | ✅ |
+| R7 | 세션 속성(개시자·broadcast)은 개시 INVITE 에서 한 번 정한다(CSP 세션 캐시). CMP 도 세션 개시 ADD 에서만 반영. 개시 INVITE 는 캐시를 **선점**(`bPending`)으로 적고 개시자 leg 확립에서 확정한다 — 개시가 실패하면(세션 창·`AcceptCall` 실패·CMP 포트 부족) 선점째 지우고, 선점 중에 같은 그룹에 온 INVITE 는 합류로 처리해 캐시를 덮지 않는다(선점 시한 32 s = INVITE 트랜잭션 64*T1). 일제 통화 **진행 중** 판정(R11)은 확정된 세션만 본다 | `GroupCallService.cpp` `m_mapGroupSession`·`SettlePendingSession`·`IsBroadcastInProgress`, `cmp/PCmpServer.cpp` `processAddGroup` | ✅ |
 | R8 | 개시 단말의 Floor Request = Floor Indicator B-bit(긴급 비트와 OR) — 개시자 표식은 세션을 연 쪽에만 둔다 | `sdk/core/src/floor/floor_participant.cpp` `setBroadcastInitiator` · Android `FloorClient.broadcastInitiator` | ✅ |
 | R9 | 개시 단말이 Floor Release 를 보낸 뒤(U: pending Release — 손으로 놓음·Granted Duration 자체 종료·Revoke 응답) B-bit Floor Idle 을 받으면 호를 해제한다(BYE). 서버 T4 는 나머지 참가자를 거둔다. pending Release 중에 늦게 온 Floor Granted(짧은 탭)는 Ack 만 하고 상태를 유지하며(§6.2.4.6.8), Release 는 T100 으로 재전송한다(§6.2.4.6.2·§6.2.4.6.3) | SDK `Participant::Callbacks::onBroadcastEnd` → 엔진 hangup · Android `FloorEvent.Idle.broadcastEnd` → `PttController` hangup | ✅ SDK (Android 짧은 탭 처리는 §7) |
 | R10 | T4 만료(그룹 `hang_timer_sec` → CMP `PTT_FLOOR_INACTIVITY`)·참가자 1명 이하·TNG3(`max_duration_sec`) 해제. 최소 affiliation 인원 미달은 미구현 | `GroupCallService.cpp` `OnFloorInactivity`·`OnCallTerminated`·`CheckSessionLimits` | ✅ (최소 affiliation 인원 제외) |
-| R11 | 480 + Warning 105 — 판정 기준 = 세션 broadcast 속성. 권한 재점검 스윕(`AuthzSweepConferenceSubscriptions`)이 이 480 을 인가 상실로 보고 기존 구독을 `rejected` 로 끊는다 | `GroupCallService.cpp` `CheckConferenceSubscribe` · `AuthzRevoke.cpp` | ⚠ 스윕(§7) |
+| R11 | 480 + Warning 105 — 판정 기준 = 확정된 세션의 broadcast 속성. 권한 재점검 스윕(`AuthzSweepConferenceSubscriptions`)·수락 직후 재검사는 인가만 판정한다(`bAuthzOnly`) — 일시 480 으로 기존 구독을 `rejected` 로 끊으면 단말이 재구독하지 않는다(RFC 6665 §4.1.3) | `GroupCallService.cpp` `CheckConferenceSubscribe` · `AuthzRevoke.cpp` · `CscfModule.cpp` | ✅ |
 | R12 | Floor Indicator = tier 비트 OR broadcast 비트, 비개시자 긴급 요청도 Deny #5 | `cmp/PMcpttGroup.cpp` | ✅ |
 
-**요약**: 서버(CSP·CMP·CSC)는 정상 경로에서 규격대로다 — 발언권 평면, 호 단위 일제 표식, 개시자 고정, 해제 정책(최소 affiliation 인원 제외).
-가장자리 경로 넷(R5 초기 발언권·R6 늦은 합류 Taken·R7 실패·경합·R11 스윕)이 규격과 어긋난다(§7).
+**요약**: 서버(CSP·CMP·CSC)는 규격대로다 — 발언권 평면(초기 발언권·늦은 합류 Taken 포함), 호 단위 일제 표식, 개시자 고정(개시 실패·동시 개시 포함),
+구독 480/105 와 권한 스윕의 분리, 해제 정책(최소 affiliation 인원 제외).
 단말 코어도 일제 통화 발신·B-bit Floor Request·발언 종료 후 호 해제(R1·R8·R9)·그룹 종류 판정(R4 짝 U5)을 한다(§4.4). 관제 앱 동작(U6)은
 Windows 데스크톱이 하고 Android 태블릿이 남아 있다.
 
@@ -171,14 +171,8 @@ S3 `S3-SCN-PTT-BROADCAST`(`verify/lib/items/stage3/scn_ptt_broadcast.py` — csp
 
 - **관제 앱 Android 태블릿(U6)** — 일제 통화 동작이 없고, PTT 그룹 편집 유형 선택지에 `broadcast` 가 남아 있다(선택해도 서버는
   invite-members 로만 그룹 종류를 읽으므로 편성 그룹이 된다). Windows 데스크톱과 같은 규약(§4.4 U6)으로 둔다. 두 앱은 Windows 개발 환경에서 빌드한다.
-- **서버 가장자리 경로(§2 ⚠)** — CMP·CSP 몫:
-  - R5: `grantInitialFloor`(SDP `mc_granted` 초기 발언권)에 일제 세션이면 개시자만 — 비개시자 재합류가 발언권을 받지 않게(TS 24.380 §6.3.5.3.4).
-  - R6: `addMember` 의 늦은 합류 Floor Taken 을 `broadcastFloorStatus` 와 같은 형식으로 — Permission 0(일제·ambient)·Message Sequence Number·
-    서버 SSRC·MCPTT ID(TS 24.380 §6.3.4.4.2 3d). 없으면 늦게 합류한 수신 멤버의 PTT 가 활성으로 보인다.
-  - R7: 세션 캐시를 개시가 성공한 뒤(자기 leg 추가 뒤) 확정하고 실패 경로에서 지운다. 빈 그룹의 동시 INVITE 는 그룹 단위로 직렬화한다.
-  - R11: 권한 재점검 스윕은 일제 통화의 일시 480(Warning 105)을 인가 상실로 보지 않는다.
 - **Android 코어의 짧은 탭 처리** — `FloorClient` 에 §6.2.4.6.8(pending Release 중 Granted 무시)·§6.2.4.6.2(T100 재전송)를 반영했다. Android 빌드·실기 확인은 Android 빌드 환경에서 한다.
-- **Android 수신 멤버의 일제 통화 판정** — 착신 mcptt-info `broadcast-ind` 를 파싱하지 않고 Permission 이 온 Taken 으로만 PTT 를 막는다(위 R6 과 짝).
+- **Android 수신 멤버의 일제 통화 판정** — 착신 mcptt-info `broadcast-ind` 를 파싱하지 않고 Permission 이 온 Taken 으로만 PTT 를 막는다(서버는 늦은 합류 Taken 에도 Permission 0 을 싣는다 — R6).
 - **최소 affiliation 인원 미달 해제**(R10 ③, TS 24.379 §6.3.8.1 4)) — 그룹 문서 `<on-network-minimum-number-of-affiliated-members>` 와 함께.
 - **전환기 종료** — CMP 의 `group_type:"broadcast"` 해석(§4.5)은 모든 사이트의 CSP 가 `broadcast` 필드를 싣는 판으로 올라간 뒤 제거한다.
   단말(SDK `GroupDoc`·Android `CscModels`)의 옛 문서 `<mcpttgi:session-type>` 폴백은 옛 서버와의 호환용이다.

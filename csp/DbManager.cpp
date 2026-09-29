@@ -429,8 +429,9 @@ bool CDbManager::SelectUser( const std::string &strUserId, CspUser &clsUser ) {
 
     mysql_free_result( pRes );
 
-    // 착신 차단 — 지정 번호(사람 단위, TS 24.611 ICB cp:identity)
-    clsUser.m_vecIcbIdentities = SelectIcbIdentities( strPersonId );
+    // 착신 차단 — 지정 번호(사람 단위, TS 24.611 ICB cp:identity). 전화 회선(volte·voip)만 — ICB 는 MMTel 부가서비스라
+    //   PTT 회선에는 싣지 않는다(CSC 도 전화 회선만 갱신한다).
+    if ( strServiceType != "ptt" ) clsUser.m_vecIcbIdentities = SelectIcbIdentities( strPersonId );
 
     return true;
 }
@@ -638,9 +639,9 @@ bool CDbManager::LoadAllUsers( CspUserMap &clsMap, bool *pbUnavailable ) {
             clsUser.m_strOrganizationId = row[2] ? row[2] : "";
             clsUser.m_bIcbAll = row[3] ? ( atoi( row[3] ) != 0 ) : false;
             clsUser.m_strForward = row[4] ? row[4] : "";
-            // 착신 차단 지정 번호 — 단건 SelectUser 와 같은 값. 전량 적재가 빠뜨리면 부팅/CSC_RESTART 뒤 지정 번호
-            // 차단이 풀린다.
-            if ( row[5] ) {
+            // 착신 차단 지정 번호 — 단건 SelectUser 와 같은 값(전화 회선만). 전량 적재가 빠뜨리면 부팅/CSC_RESTART 뒤
+            // 지정 번호 차단이 풀린다.
+            if ( row[5] && strcmp( t.pszType, "ptt" ) != 0 ) {
                 auto itIcb = mapIcb.find( row[5] );
                 if ( itIcb != mapIcb.end() ) clsUser.m_vecIcbIdentities = itIcb->second;
             }
