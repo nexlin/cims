@@ -49,10 +49,10 @@
 - 단말 절차: 호 성립 때 암묵 요청이면 T101 + 'U: pending Request'(§6.2.4.2.2 4.), answer 의 `mc_granted` 또는 Floor Granted 로 'U: has permission'(§6.2.4.4.2),
   그 뒤 Floor Granted 가 또 와도 머문다(§6.2.4.5.5). 이어지는 offer 에는 `mc_granted` 금지(§14.5).
 - **진행 중 그룹 호는 일제 통화로 바꿀 수 없다** — TS 24.379 §10.1.1.3.1.1 15)(진행 중)는 합류이고 broadcast 단계가 없다(긴급은 15)f) 로 격상 가능).
-- **애드혹(ad hoc) 일제 통화**는 규격에 있다(TS 24.379 §17.2.2.1.1 9)) — CIMS 미구현(CSP 가 ad hoc 의 broadcast-ind 무시).
+- **애드혹(ad hoc) 일제 통화**는 규격에 있다(TS 24.379 §17.2.2.1.1 9)) — CSP 반영(csp 0.2.165, .48): ad hoc 개시 INVITE 의 broadcast-ind 로 일제 세션, 개시자 이탈 시 해제.
 - 구현 상태: **SDK 반영**(`GroupCallOptions.implicitFloorRequest` — offer `mc_queueing;mc_implicit_request;mc_granted`, answer 판정, 호 성립 전 놓음 처리 —
-  정본 `mcptt_broadcast_group_call.md` R14·U7). **CSP 편차는 .48 로 넘김**([`server_todo_mcptt_floor_broadcast.md`](server_todo_mcptt_floor_broadcast.md) P1 — offer `mc_granted` 를 요청으로 읽음,
-  `mc_implicit_request` 미해석, answer 에 되돌리지 않음). SDK 가 두 속성을 함께 실어 지금 CSP 에서도 동작한다. CMP 는 바꿀 것 없음.
+  정본 `mcptt_broadcast_group_call.md` R14·U7). **CSP 반영**(csp 0.2.165, .48) — offer `mc_implicit_request` 를 새 세션 개시에서만 받아들이고 answer 에
+  `mc_implicit_request` 를 되돌린다(진행 중 세션 합류는 answer 에 없음 → 단말이 명시 Floor Request). CMP 는 바꿀 것 없음.
 - 발언 해제 뒤 호 종료는 이미 구현(개시 단말: pending Release 중 B-bit Floor Idle → BYE, §6.2.4.6.4 · 짧은 탭의 늦은 Granted 무시 §6.2.4.6.8 — bc2e499d).
 
 ## 3. 할 일(권장 순서)

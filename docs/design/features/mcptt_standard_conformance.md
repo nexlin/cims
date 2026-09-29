@@ -25,7 +25,7 @@
 | F2 | Reject/Revoke Cause·Floor Indicator·Duration·Queue TLV | CMP | TS 24.380 §8.2.3 | ✅ 정합 |
 | F3 | Floor Ack / Queue Position(큐잉) | CMP | TS 24.380 §8.2.12~8.2.13 | ✅ 정합 |
 | F4 | floor 상태머신(T1/T2/T3/T7/T8/T20, pending Floor Revoke, 재요청·큐 안정성) | CMP | TS 24.380 §6.3.4 | ✅ 정합 |
-| F5 | 멤버 프로파일(MCPTT ID·mc_queueing·mc_granted)·Unicast Media Flow Control·Queued Floor Requests | CMP | TS 24.380 §6.3.5, §8.2.15~8.2.16 | ✅ 정합 |
+| F5 | 멤버 프로파일(MCPTT ID·mc_queueing·초기 발언권)·Unicast Media Flow Control·Queued Floor Requests | CMP | TS 24.380 §6.3.5, §8.2.15~8.2.16 | ✅ 정합 |
 | F6 | floor SRTCP — 유니캐스트 leg 별 클라이언트 키(CSK) | CMP | TS 33.180 §9.4 / TS 24.380 §13.3.2 | ✅ 정합 (키 배포는 CSC KMS 연동 대기) |
 | C1 | affiliation PUBLISH — 규격형(Event: presence + pidf 집합 교체) + 구형(Event: mcptt + affiliation-command) 양립 | CSP | TS 24.379 §9.2.2.2.3, §9.3.1.2 | ✅ 정합 (구형은 전환기 한시) |
 | C2 | affiliation-info SUBSCRIBE/NOTIFY (presence) | CSP | TS 24.379 §9.3 | ✅ 정합 |
@@ -60,7 +60,7 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 |---|---|---|
 | **Private call (1:1)** — on-demand | TS 24.379 §11.1 | ✓ 구현 — mcptt-info `session-type=private` INVITE(상대 MCPTT ID 직접, affiliation 불요) → CSP 가 2인 세션(`private:<from>-<to>`)을 CMP `PTT_GROUP_ADD group_type:"private"` + `floor_control`(on/off — fmtp `mc_no_floor_ctrl`)로 세운다([mcptt_csp_cmp_roadmap_contract.md](mcptt_csp_cmp_roadmap_contract.md) §A.1). 착신 미등록 480 |
 | **Broadcast group call** — 호 단위 개시(`<broadcast-ind>`)·개시자 고정·개시자 발언 종료 후 호 해제 | TS 24.379 §4.12·§6.2.8.2, TS 24.380 §6.2.4.6.4 | ✓ 서버(C7·C8)·단말 코어(SDK·Android PTT — 일제 통화 발신·B-bit Floor Request·발언 종료 후 호 해제)·관제 앱 Windows(U6)·Android 태블릿(코드 반영, 빌드 미확인 — [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §7) |
-| **Broadcast adhoc group call** — 애드혹(ad hoc) 호에 `<broadcast-ind>` | TS 24.379 §17.2.2.1.1 9)·§17.1 | △ 단말(SDK)·관제 앱 반영 — CSP 는 ad hoc 그룹의 `<broadcast-ind>` 를 무시한다(`IsOnDemandGroupCall`, [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) R13, 서버 과제 [server_todo_mcptt_floor_broadcast.md](../../dev/server_todo_mcptt_floor_broadcast.md) P2) |
+| **Broadcast adhoc group call** — 애드혹(ad hoc) 호에 `<broadcast-ind>` | TS 24.379 §17.2.2.1.1 9)·§17.1 | ✓ 단말(SDK)·관제 앱·CSP(`IsBroadcastCapable` — 개시자 고정·Deny #5·B-bit·구독 480/105·개시자 이탈 해제, [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) R13). ad hoc 그룹 ID 서버 부여(§17.1)는 남음 |
 | **그룹 호 세션 해제 정책** — T4(Inactivity) 만료·참가자 1명 이하·TNG3 | TS 24.379 §6.3.8.1 / TS 24.380 §6.3.4.3.5 | ✓ 편성 그룹 호 — T4 = 그룹 `hang_timer_sec`(CMP `PTT_FLOOR_INACTIVITY`)·TNG3 = `max_duration_sec`. 최소 affiliation 인원 미달 해제는 미구현 |
 | **Private call — pre-established session** | TS 24.379 §11.2 | ✗ |
 | **Private call call-back** (요청/취소) | TS 24.379 §11.3 | ✗ |
@@ -280,8 +280,8 @@ Floor 코덱은 `cmp/PFloorCodec.cpp` 에 분리되어 있고(단말 `ptt-client
   `PTT_JOIN.max_priority`(= SDP `mc_priority` 협상값)가 있는 멤버만 요청에 실린 Floor Priority
   로 낮출 수 있고(둘 중 낮은 쪽), **미협상 멤버의 Floor Priority 필드는 무시**한다 — 관례적으로
   0 을 실어 보내는 단말의 요청을 우선순위 0 으로 해석하면 선점 서열이 무너진다.
-- **초기 발언권**(`PTT_JOIN.granted` = fmtp `mc_granted`): 참가 시점에 발언자가 없으면 그
-  멤버에게 Floor Granted+Taken 을 보낸다(§6.3.4.2.2-3b).
+- **초기 발언권**(`PTT_JOIN.granted` = CSP 가 개시 INVITE 의 암묵적 발언 요청 `mc_implicit_request` 를 받아들였다, §14.3.5):
+  참가 시점에 발언자가 없으면 그 멤버에게 Floor Granted+Taken 을 보낸다(§6.3.4.2.2 3)·§6.3.4.4.2 1.).
 - **1인 세션**: 참가자가 한 명뿐인 세션의 요청은 Deny **#3**(Only one participant).
 - **Unicast Media Flow Control**(0x0B): 멤버가 자기 하향 미디어 중단/재개를 요청한다 —
   중단 상태 멤버에게는 audio/video 를 보내지 않는다(§6.3.4.4.14~15).
@@ -365,15 +365,14 @@ affiliation-command 를 보낸다) → ③구형 제거.
 - `m=application {port} UDP MCPTT` + `c=IN IP4 ...` + `a=floorid:0 mstrm:audio` +
   `a=fmtp:MCPTT mc_queueing;mc_priority=3` + **`a=mcptt-floor-request-uri:sip:{group}@{domain}`**
   (`GroupCallService.cpp`). 단말은 floor 목적지를 이 `m=application` 포트에서 학습.
-  개시자 200 OK answer(psip `CSipDialog::AddSdp`)도 `a=fmtp:MCPTT mc_queueing` 을 광고한다.
-- ⚠ **규격 편차 — 암묵적 발언 요청**(TS 24.380 §14.2.4·§14.2.5·§14.3.1·§14.3.4·§14.3.5): CSP 는 offer 의 `mc_granted` 를 초기 발언 요청으로 읽어
-  `PTT_JOIN.granted` 로 넘긴다. 규격에서 offer 의 `mc_granted` 는 200 OK 승인 표시를 받을 수 있다는 능력이고("*does not indicate an actual request for
-  the floor*", §12.1.2.2 NOTE 2) 요청은 `mc_implicit_request` 다 — CSP 는 이것을 읽지 않고, 받아들였다는 응답(`mc_implicit_request`)·승인(`mc_granted`)을
-  answer 에 싣지 않으며, answer 의 `mc_priority=3` 은 offer 와 무관하다(§14.3.1). 규격대로 `mc_granted` 를 싣는 3rd-party 단말은 요청 없이 발언권을 받는다.
-  고칠 방향은 [../../dev/server_todo_mcptt_floor_broadcast.md](../../dev/server_todo_mcptt_floor_broadcast.md) P1, 단말(SDK)은 두 속성을 함께 실어 양쪽에서 동작한다
-  ([mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) R14).
+  위 `mc_priority=3` 은 서버 **offer**(fan-out INVITE)의 값이다.
+- **개시자 200 OK answer**(psip `CSipDialog::AddSdp`, CSP 가 `CSipCallRtp::m_strApplicationFmtp` 로 정한다) — offer 에 있던 파라미터만(§14.3.1): `mc_queueing`
+  은 offer 가 실었을 때(fmtp 없는 구단말 offer 에는 종전대로 광고), **암묵적 발언 요청**을 받아들였으면 `mc_implicit_request` 를 되돌린다(§14.3.5 — 승인 뜻은
+  아니다, §12.1.2.2 NOTE 4). 요청은 offer 의 `mc_implicit_request` 이고 `mc_granted` 는 200 OK 승인 표시를 받을 수 있다는 능력이라 요청으로 읽지 않는다
+  (§14.2.4·§14.2.5·§12.1.2.2 NOTE 2). 받아들이는 것은 새 세션 개시뿐 — chat·진행 중 세션 합류·청취 합류는 아니다. 승인은 Floor Granted 로만 알린다(answer
+  `mc_granted` 는 선택 "may", §14.3.4). 단말(SDK)은 두 속성을 함께 싣는다([mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) R14).
 - **역방향(멤버 SDP → CMP)**: 멤버가 광고한 `a=fmtp:MCPTT` 는 CSP 가 파싱해 `PTT_JOIN` 의
-  `queueing`/`max_priority`/`granted` 로 전달한다 (U14 서버 절반 —
+  `queueing`/`max_priority` 로, 개시자 offer 의 암묵적 발언 요청 수락은 `granted` 로 전달한다 (U14 서버 절반 —
   [../modules/csp.md](../modules/csp.md) 「멤버별 floor 협상 전달」).
 - 보존: multipart(mcptt-info+resource-lists+SDP), `urn:3gpp:ns:mcpttInfo:1.0` 등 namespace.
 

@@ -32,7 +32,12 @@ struct CmpSocket {
 struct McpttFmtp {
     int iQueueing = -1;    // -1=fmtp 부재(미전송) / 0=mc_queueing 미협상(비선점 요청 Deny #1) / 1=협상
     int iMaxPriority = 0;  // mc_priority=N — 요청 가능 최대 우선순위 (0=미전송: 요청의 우선순위 필드 무시)
-    int iGranted = 0;      // 1=mc_granted 협상 — 참가 시 발언자 없으면 초기 발언권 (0=미전송)
+    int iGranted = 0;   // PTT_JOIN granted — 참가 시 발언자 없으면 초기 발언권. SDP 에서 바로 오지 않고 CSP 가 정한다:
+                        //   새 세션 개시 INVITE 의 암묵적 발언 요청을 받아들였을 때만 1 (TS 24.380 §14.3.5)
+    int iImplicit = 0;  // 1=offer 의 mc_implicit_request — 이 INVITE 가 암묵적 발언 요청이다(§14.2.5, TS 24.379 §6.4)
+    int iGrantedCap =
+        0;  // 1=offer 의 mc_granted — 200 OK 로 승인 표시를 받을 수 있다는 **능력**(§14.2.4 · §12.1.2.2 NOTE 2 —
+            //   발언 요청이 아니다)
     int iNoFloorCtrl = 0;  // 1=mc_no_floor_ctrl 협상 — floor 없는 세션 제안(G17). private call 의
                            //   floor_control:"off"(full-duplex) 판정 입력 — PTT_JOIN 필드 아님
 };

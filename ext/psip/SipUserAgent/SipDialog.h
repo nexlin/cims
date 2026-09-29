@@ -101,6 +101,7 @@ public:
 
 	// local MCPTT floor control (m=application) 포트. -1 이면 SDP 에 floor media 미사용.
 	int					m_iLocalApplicationPort;
+	std::string			m_strLocalApplicationFmtp;	// m=application 의 a=fmtp:MCPTT 파라미터(빈 값 = 라인 없음) — CSipCallRtp 에서
 
 	// 합성 SDP 의 local video 포트. -1 이면 offer 에 m=video 를 싣지 않고, 상대 offer 의 m=video 는 port 0 거절.
 	int					m_iLocalVideoPort;

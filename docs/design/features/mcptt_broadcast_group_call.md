@@ -9,8 +9,8 @@
 >
 > **구현 상태** — 서버(CSP·CMP·CSC·DB·콘솔)·검증(cspsim·계측기·S3)·단말 코어(SDK·Android PTT — §4.4 U1~U5)·관제 앱 Windows 데스크톱(U6)은
 > 반영됐다(§2). 단말 코어는 암묵적 발언 요청(R14 — 개시 INVITE 로 발언까지)도 하고(U7), Windows 관제 앱의 [일제 통화] 는 그것을 쓰는 한 버튼이다(U6).
-> 관제 앱 Android 태블릿(U6)은 코드만 반영했고 Android 빌드·실기가 남았다. 애드혹(ad hoc) 일제 통화(R13)는 단말·관제 앱 두 벌이 반영했고 CSP 가 남았다.
-> 남은 것은 CSP 의 암묵적 발언 요청 해석(R14 편차)·CSP ad hoc 일제 통화(R13)·최소 affiliation 인원 해제(R10 ③)다(§7).
+> 관제 앱 Android 태블릿(U6)은 코드만 반영했고 Android 빌드·실기가 남았다. 애드혹(ad hoc) 일제 통화(R13)와 암묵적 발언 요청(R14)은 단말·관제 앱·CSP 가
+> 모두 반영했다. 남은 것은 최소 affiliation 인원 해제(R10 ③)·ad hoc 그룹 ID 서버 부여다(§7).
 
 ---
 
@@ -49,8 +49,8 @@
 | R10 | T4 만료(그룹 `hang_timer_sec` → CMP `PTT_FLOOR_INACTIVITY`)·참가자 1명 이하·TNG3(`max_duration_sec`) 해제. 최소 affiliation 인원 미달은 미구현 | `GroupCallService.cpp` `OnFloorInactivity`·`OnCallTerminated`·`CheckSessionLimits` | ✅ (최소 affiliation 인원 제외) |
 | R11 | 480 + Warning 105 — 판정 기준 = 확정된 세션의 broadcast 속성. 권한 재점검 스윕(`AuthzSweepConferenceSubscriptions`)·수락 직후 재검사는 인가만 판정한다(`bAuthzOnly`) — 일시 480 으로 기존 구독을 `rejected` 로 끊으면 단말이 재구독하지 않는다(RFC 6665 §4.1.3) | `GroupCallService.cpp` `CheckConferenceSubscribe` · `AuthzRevoke.cpp` · `CscfModule.cpp` | ✅ |
 | R12 | Floor Indicator = tier 비트 OR broadcast 비트, 비개시자 긴급 요청도 Deny #5 | `cmp/PMcpttGroup.cpp` | ✅ |
-| R13 | 편성 그룹 호만 일제 통화로 연다 — ad hoc 그룹의 `<broadcast-ind>` 는 무시(INFO 로그 "편성 그룹 호 아님"). 진행 중 세션에 온 `<broadcast-ind>` 는 합류로 처리(규격대로) | `GroupCallService.cpp` `IsOnDemandGroupCall`(`_isAdhoc` 제외)·`ProcessGroupCall` | 단말(SDK — ad hoc INVITE 에 broadcast-ind)·관제 앱(발신 [애드혹] 의 [일제 통화]) ✅ · CSP ❌(§7, 서버 과제 P2) |
-| R14 | **단말**: SDK `GroupCallOptions.implicitFloorRequest` 가 offer 에 `mc_implicit_request;mc_granted` 를 싣고(개시 offer 만 — 이어지는 offer 는 뺀다) answer 를 판정한다 — `mc_granted` = 승인, `mc_implicit_request` 만 = Floor Granted 대기, 둘 다 없음 = 명시 Floor Request 로 잇는다(§4.4 U7). **서버**: CSP 는 offer 의 `mc_granted` 를 초기 발언 요청으로 읽어 `PTT_JOIN.granted` 로 넘기고(CMP `grantInitialFloor` → Floor Granted), `mc_implicit_request` 는 읽지 않으며 answer 에 `mc_implicit_request`·`mc_granted` 를 싣지 않는다 — `mc_granted` 는 능력 표시라 요청으로 읽으면 규격대로 싣는 단말이 요청 없이 발언권을 받는다. SDK 는 두 속성을 함께 실어 지금 CSP 에서도 암묵 요청이 동작한다 | `sdk/core/src/floor/floor_participant.cpp`·`engine.cpp`·`mcptt/mcptt_xml.cpp` · `csp/GroupCallService.cpp` `ParseMcpttFmtp` | 단말 ✅ · CSP ⚠ 편차(§7) |
+| R13 | 편성 그룹 on-demand 호와 **ad hoc 그룹 호**의 개시 INVITE `<broadcast-ind>` 로 일제 통화를 연다(`IsBroadcastCapable` — chat·개별 호는 무시, INFO 로그). 개시자 고정·비개시자 Deny #5·B-bit 는 CMP 가 그룹 종류와 무관하게 한다. conference 구독의 480/105 검사는 즉석 세션 인가보다 먼저(ad hoc 참가자도 일제 통화 중 구독 불가). 일제 세션은 **개시자 이탈 시 해제**(TS 24.379 §6.3.8.1 3) 로컬 정책 — 편성·ad hoc 모두, 수신자는 T4·TNG3 를 기다리지 않는다). 진행 중 세션에 온 `<broadcast-ind>` 는 합류(규격대로). 개시 인가는 추가하지 않는다(멤버·참가자 누구나 — stage 3 에 인가 요소 없음) | `GroupCallService.cpp` `IsBroadcastCapable`·`ProcessGroupCall`·`CheckConferenceSubscribe`·`OnCallTerminated` | ✅ 단말·관제 앱(Windows)·CSP — .48 실측: ad hoc id `adhoc-…` 일제 통화 4/4 합류·개시자만 Granted·나머지 Deny·개시자 이탈에 잔여 leg 해제 |
+| R14 | **단말**: SDK `GroupCallOptions.implicitFloorRequest` 가 offer 에 `mc_implicit_request;mc_granted` 를 싣고(개시 offer 만 — 이어지는 offer 는 뺀다) answer 를 판정한다 — `mc_granted` = 승인, `mc_implicit_request` 만 = Floor Granted 대기, 둘 다 없음 = 명시 Floor Request 로 잇는다(§4.4 U7). **서버**: CSP 는 offer 의 `mc_implicit_request` 를 요청으로 읽고(`mc_granted` 는 능력 표시로만 — 요청으로 읽지 않는다), **새 세션 개시**(편성·ad hoc·개별 호)에서만 받아들여 `PTT_JOIN.granted`(CMP `grantInitialFloor` → Floor Granted)로 넘긴다 — chat·진행 중 세션 합류·청취 합류는 받지 않는다(§14.3.5). 받아들이면 200 OK answer 의 `a=fmtp:MCPTT` 에 `mc_implicit_request` 를 되돌리고, answer 에는 offer 에 있던 파라미터만 싣는다(§14.3.1 — `mc_queueing` 은 offer 가 실었을 때, fmtp 없는 구단말 offer 에는 종전대로 광고). 승인은 Floor Granted 로만 알린다(answer `mc_granted` 는 선택 "may" — 싣지 않는다). fan-out 멤버의 answer 는 요청이 아니다(초기 발언권 없음) | `sdk/core/src/floor/floor_participant.cpp`·`engine.cpp`·`mcptt/mcptt_xml.cpp` · `csp/GroupCallService.cpp` `ParseMcpttFmtp`·`AcceptsImplicitFloorRequest`·`AnswerFloorFmtp` · psip `CSipCallRtp::m_strApplicationFmtp` | ✅ 단말·CSP — .48 실측: 새 일제 세션 offer `mc_queueing;mc_implicit_request;mc_granted` → answer `mc_queueing;mc_implicit_request`·명시 Floor Request 없이 Granted, 진행 중 세션 합류 → answer `mc_queueing` 만·단말이 명시 Floor Request |
 
 **요약**: 서버(CSP·CMP·CSC)는 규격대로다 — 발언권 평면(초기 발언권·늦은 합류 Taken 포함), 호 단위 일제 표식, 개시자 고정(개시 실패·동시 개시 포함),
 구독 480/105 와 권한 스윕의 분리, 해제 정책(최소 affiliation 인원 제외).
@@ -146,7 +146,7 @@ Windows 데스크톱이 하고 Android 태블릿이 남아 있다.
 | U5 | 그룹 종류 판정을 `<on-network-invite-members>` 로 (G1 짝) — 없는 옛 문서만 session-type 폴백 | `sdk/core/src/csc/group_doc.cpp`, Android `csc/CscModels.kt`·`mcptt/McpttXml.kt` | ✅ |
 | U7 | 암묵적 발언 요청(R14) — `GroupCallOptions.implicitFloorRequest`(C API `implicit_floor_request` · .NET `ImplicitFloorRequest` · Kotlin `implicitFloorRequest`) · `cimsue-cli group-call --implicit`/drive `group_call <g> implicit`. floor 는 개시 전부터 `Requesting`('U: pending Request'), 호 성립 전·승인 전에 놓으면 answer 에서 Floor Release(그 사이 온 Floor Granted 는 §6.2.4.6.8 과 같이 무시), 일제 통화 개시자면 이어 오는 B-bit Floor Idle 로 호를 해제한다(U3) | `sdk/core/src/floor/floor_participant.cpp`(`armImplicitRequest`·`onInitialAnswer`)·`engine.cpp`(`startMcptt`·`onCallTsxState`)·`mcptt/mcptt_xml.cpp`(`floorSdp`·`parseFloorFmtp`), 시험 `floor_participant_test`·`csc_test` `FloorSdp.*` | ✅ SDK · Android 앱 미사용 |
 | U6 | 관제 앱 — "일제 통화" 동작(선택한 그룹에 U1 로 발신)과 PTT 그룹 편집의 유형 선택지 정리(`broadcast` 제거 — 서버는 이 유형을 받지 않는다). Windows: ① 포커스 카드 3줄 [일제 통화] — 멤버 편성 그룹에 진행 중 세션이 없을 때만(있으면 서버가 합류로만 받는다 §3.2, chat 은 broadcast-ind 무시라 제외 — TS 24.379 §6.2.8.2 는 broadcast-ind 를 prearranged 그룹 호에 싣는다. 그룹 종류는 관리 목록 `sessionType`, 모르면(관리 범위 없음) 개시 때 GMS 그룹 문서의 `on-network-invite-members` 로 확인) → **한 버튼** — 누르는 동안 `JoinGroupCall(Broadcast, ImplicitFloorRequest)`(U7)로 개시하고 말하며, 놓으면 호 성립 전 CANCEL / 성립 뒤 Floor Release(→ U3 호 해제), 잠금 발언이면 누를 때마다 켜고 끔 · 개시 카드 자동 포커스·단일 발언 대상. 일제 통화 판정 = 착신 mcptt-info broadcast-ind 또는 floor B-bit(.NET `FloorIndicator.BroadcastGroup` — 늦게 합류한 leg 은 B-bit 로만 안다, 코어는 Deny·Revoke 의 Floor Indicator 도 상태에 담는다), 수신 멤버(Permission 0)는 발언 대상 체크 불가, 서버가 일반 통화로 연 개시(첫 서버 floor 메시지의 Floor Indicator 에 B-bit 없음)는 경고 — 화면 규약 [dispatch_desktop_ui.md](dispatch_desktop_ui.md) §4 | `windows/dispatch-desktop`(`DispatchSession.BroadcastCallAsync`·`ReleaseBroadcast`·`SessionItem.IsBroadcast`·`ChannelCard.CanBroadcast`·`PttChannelsViewModel.BroadcastDown/Up`·`GroupEditViewModel.SessionTypes`), `android/dispatch-tablet`(`PttPlane.startBroadcast`·`releaseBroadcast`·`SessionItem.isBroadcast`·`ChannelCard.canBroadcast`·`PttChannelsViewModel.broadcast*`·`ChannelScreen.BroadcastHoldButton`·`PttGroupsViewModel.SESSION_TYPES`) — 태블릿은 채널 머리의 [일제 통화](android_dispatch_tablet.md §6.3a) | Windows ✅ · 태블릿 코드 반영(Android 빌드·실기 미확인) |
-| U8 | 애드혹 일제 통화(R13) — 관제 앱 발신 [애드혹] 의 [일제 통화](고른 사람들에게, U6 과 같은 한 버튼 — 누르는 동안 팝오버·시트를 닫지 않는다). SDK 는 ad hoc INVITE(resource-lists)에 `<broadcast-ind>` 를 싣는다(`GroupCallOptions{members, broadcast, implicitFloorRequest}`). CSP 가 받기 전에는 일반 애드혹 그룹 통화로 열리고 앱이 «일제 통화로 열리지 않았습니다» 를 알린다 | `windows/dispatch-desktop`(`DispatchSession.StartAdhocBroadcast`·`PttOriginateViewModel.BroadcastDown/Up`), `android/dispatch-tablet`(`PttPlane.startAdhocBroadcast`·`OriginateSheet`) | Windows ✅ · 태블릿 코드 반영(빌드 미확인) · 서버 ❌ |
+| U8 | 애드혹 일제 통화(R13) — 관제 앱 발신 [애드혹] 의 [일제 통화](고른 사람들에게, U6 과 같은 한 버튼 — 누르는 동안 팝오버·시트를 닫지 않는다). SDK 는 ad hoc INVITE(resource-lists)에 `<broadcast-ind>` 를 싣는다(`GroupCallOptions{members, broadcast, implicitFloorRequest}`). CSP 가 받기 전에는 일반 애드혹 그룹 통화로 열리고 앱이 «일제 통화로 열리지 않았습니다» 를 알린다 | `windows/dispatch-desktop`(`DispatchSession.StartAdhocBroadcast`·`PttOriginateViewModel.BroadcastDown/Up`), `android/dispatch-tablet`(`PttPlane.startAdhocBroadcast`·`OriginateSheet`) | Windows ✅ · 태블릿 코드 반영(빌드 미확인) · 서버 ✅(R13) |
 
 ### 4.5 CSP↔CMP 계약 ([cmp_media_api.md](../../api/cmp_media_api.md))
 
@@ -186,14 +186,11 @@ S3 `S3-SCN-PTT-BROADCAST`(`verify/lib/items/stage3/scn_ptt_broadcast.py` — csp
   반영했다. 이 Windows 개발 PC 는 Android 를 빌드하지 못해 컴파일·JVM 시험(`PttChannelTest` 일제 통화 3건)·실기는 Android 빌드 환경 몫이다.
 - **Android 코어의 짧은 탭 처리** — `FloorClient` 에 §6.2.4.6.8(pending Release 중 Granted 무시)·§6.2.4.6.2(T100 재전송)를 반영했다. Android 빌드·실기 확인은 Android 빌드 환경에서 한다.
 - **Android PTT 앱 수신 멤버의 일제 통화 판정** — `android/ptt-client` 는 착신 mcptt-info `broadcast-ind` 를 파싱하지 않고 Permission 이 온 Taken 으로만 PTT 를 막는다(서버는 늦은 합류 Taken 에도 Permission 0 을 싣는다 — R6). 관제 태블릿은 SDK `McpttInfo.broadcast`·B-bit 로 판정한다.
-- **CSP 암묵적 발언 요청(R14)** — offer `mc_implicit_request` 를 `PTT_JOIN.granted` 로(새 호 개시만 — chat 합류·진행 중 합류 제외, §14.3.5), 받아들이면
-  answer 에 `mc_implicit_request`, 200 OK 로 승인하면 `mc_granted`(offer 에 있을 때만 — §14.3.1, temporary group 제외). offer `mc_granted` 만으로는
-  발언권을 주지 않는다. 사내 시험 도구 중 offer `mc_granted` 로 초기 발언권을 기대하는 것(`scripts/mcptt_floor_policy_probe.py` [14])은 같은 변경에서
-  `mc_implicit_request` 로 옮긴다. 서버 몫(.48) — [docs/dev/server_todo_mcptt_floor_broadcast.md](../../dev/server_todo_mcptt_floor_broadcast.md) P1.
-- **CSP 애드혹(ad hoc) 일제 통화(R13)** — ad hoc 그룹 호에서도 `<broadcast-ind>` 로 세션 속성을 정하고(개시자 고정·Deny #5·B-bit 는 편성
-  그룹과 같다), 구독 480/105 검사를 ad hoc 가지 앞으로, 일제 세션은 개시자 이탈 시 해제(TS 24.379 §6.3.8.1 3) 로컬 정책). 개시 권한은 추가하지
-  않는다(멤버·참가자 누구나). 서버 몫(.48) — [docs/dev/server_todo_mcptt_floor_broadcast.md](../../dev/server_todo_mcptt_floor_broadcast.md) P2. 참고: ad hoc 그룹 ID 는
-  규격상 서버가 준다(§17.1 — CIMS 는 단말이 `adhoc-<번호>-<epoch>` 를 만든다, [mcptt_emergency_modes.md](mcptt_emergency_modes.md) §6).
+- **ad hoc 그룹 ID·session-type** — 규격은 ad hoc 그룹 ID 를 서버가 준다(TS 24.379 §17.1 "*provided by the MCPTT server*")·mcptt-info `session-type` 은 `adhoc`
+  (Annex F.1). CIMS 는 단말이 `adhoc-<번호>-<epoch>` 를 만들고([mcptt_emergency_modes.md](mcptt_emergency_modes.md) §6) `prearranged` + resource-lists 를 싣는다 —
+  단말·서버 동시 변경.
+- **계측기 ad hoc 그룹 통화** — 워커가 ad hoc INVITE 를 내지 않아 ad hoc 일제 통화 회귀는 S3 `S3-SCN-PTT-BROADCAST` BC7(cspsim `-adhoc -broadcast`)만 본다.
+  ad hoc 일제 통화 중 conference 구독 480/105 는 실측 도구가 없어 코드 판정만 했다.
 - **최소 affiliation 인원 미달 해제**(R10 ③, TS 24.379 §6.3.8.1 4)) — 그룹 문서 `<on-network-minimum-number-of-affiliated-members>` 와 함께.
 - **전환기 종료** — CMP 의 `group_type:"broadcast"` 해석(§4.5)은 모든 사이트의 CSP 가 `broadcast` 필드를 싣는 판으로 올라간 뒤 제거한다.
   단말(SDK `GroupDoc`·Android `CscModels`)의 옛 문서 `<mcpttgi:session-type>` 폴백은 옛 서버와의 호환용이다.

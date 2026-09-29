@@ -27,7 +27,7 @@
 // 생성자
 CSipDialog::CSipDialog( CSipStack * pclsSipStack ) : m_iSeq(0), m_iNextSeq(0), m_iInviteSeq(0), m_iContactPort(-1), m_eTransport(E_SIP_UDP), m_iContactTransport(-1)
 	, m_iOutboundLocalPort(-1)
-	, m_iLocalRtpPort(-1), m_iLocalApplicationPort(-1), m_iLocalVideoPort(-1), m_eLocalDirection(E_RTP_SEND_RECV), m_iRemoteRtpPort(-1), m_eRemoteDirection(E_RTP_SEND_RECV), m_iCodec(-1), m_iRSeq(-1), m_b100rel(false)
+	, m_iLocalRtpPort(-1), m_iLocalApplicationPort(-1), m_strLocalApplicationFmtp("mc_queueing"), m_iLocalVideoPort(-1), m_eLocalDirection(E_RTP_SEND_RECV), m_iRemoteRtpPort(-1), m_eRemoteDirection(E_RTP_SEND_RECV), m_iCodec(-1), m_iRSeq(-1), m_b100rel(false)
 	, m_pclsInvite(NULL), m_pclsSipStack( pclsSipStack )
 	, m_iSessionVersion(0)
 	, m_bSendCall(true)
@@ -387,12 +387,13 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage, bool bKeepSdpVersion )
 	//   광고해 UE 가 floor dest 를 학습하게 한다. (미설정(-1)이면 VoLTE/일반 호 SDP 무변경.)
 	if( m_iLocalApplicationPort > 0 )
 	{
-		// fmtp: floor 협상 파라미터 (TS 24.380 §12.1.2.3) — mc_queueing 을 광고해 큐잉을
-		//   협상한다 (미협상 멤버의 비선점 요청은 서버가 Deny #1). mc_priority/mc_granted 는
-		//   응용 정책이라 싣지 않는다.
+		// fmtp: floor 협상 파라미터 (TS 24.380 §12.1.2.3) — 기본 mc_queueing 광고(미협상 멤버의 비선점 요청은 서버가
+		//   Deny #1). answer 는 offer 에 있던 파라미터만(§14.3.1)·암묵 요청 수락이면 mc_implicit_request(§14.3.5) —
+		//   호출자가 CSipCallRtp::m_strApplicationFmtp 로 정한다(빈 값 = fmtp 라인 없음).
 		iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen,
-			"m=application %d UDP MCPTT\r\na=floorid:0 mstrm:audio\r\na=fmtp:MCPTT mc_queueing\r\n",
-			m_iLocalApplicationPort );
+			"m=application %d UDP MCPTT\r\na=floorid:0 mstrm:audio\r\n", m_iLocalApplicationPort );
+		if( !m_strLocalApplicationFmtp.empty() )
+			iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=fmtp:MCPTT %s\r\n", m_strLocalApplicationFmtp.c_str() );
 	}
 	else if( strstr( szSdp, "m=application" ) == NULL && HasRemoteApplicationMedia() )
 	{
@@ -422,6 +423,7 @@ bool CSipDialog::SetLocalRtp( CSipCallRtp * pclsRtp )
 	m_clsCodecList = pclsRtp->m_clsCodecList;
 	m_eLocalDirection = pclsRtp->m_eDirection;
 	m_iLocalApplicationPort = pclsRtp->GetApplicationPort();  // MCPTT floor 포트 (없으면 -1)
+	m_strLocalApplicationFmtp = pclsRtp->m_strApplicationFmtp;   // a=fmtp:MCPTT 파라미터 (기본 mc_queueing)
 	m_iLocalVideoPort = pclsRtp->m_iVideoPort;                 // 합성 SDP video 포트 (명시값만 — 리스트 경로는 m= 그대로)
 	// 미디어 SRTP — local a=crypto (AddSdp 가 방출). 빈 값 설정 = SRTP 미사용으로 해제.
 	m_strLocalCryptoTag = pclsRtp->m_strLocalCryptoTag;

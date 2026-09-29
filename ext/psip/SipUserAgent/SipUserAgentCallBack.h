@@ -34,7 +34,7 @@ typedef std::list< int > CODEC_LIST;
 class CSipCallRtp
 {
 public:
-	CSipCallRtp() : m_iPort(-1), m_iCodec(-1), m_eDirection( E_RTP_SEND_RECV ), m_iApplicationPort(-1), m_iVideoPort(-1)
+	CSipCallRtp() : m_iPort(-1), m_iCodec(-1), m_eDirection( E_RTP_SEND_RECV ), m_iApplicationPort(-1), m_strApplicationFmtp( "mc_queueing" ), m_iVideoPort(-1)
 	{}
 
 	void SetIpPort( const char * pszIp, int iPort, int iSocketCountPerMedia );
@@ -52,6 +52,10 @@ public:
 
 	// MCPTT floor control(m=application) 포트. >0 이면 GetApplicationPort 가 이 값을 반환.
 	int					m_iApplicationPort;
+
+	// m=application 에 싣는 `a=fmtp:MCPTT` 파라미터(TS 24.380 §12.1.2.3 · answer 는 §14.3.1 — offer 에 있던 것만). 기본 "mc_queueing",
+	//   빈 문자열이면 fmtp 라인을 싣지 않는다. 개시자 answer 의 mc_implicit_request 되돌림(§14.3.5)은 호출자가 넣는다.
+	std::string			m_strApplicationFmtp;
 
 	// 합성 SDP(미디어 리스트 없는 경로)에 실을 local video 포트. >0 이면 AddSdp 가 m=video 를 광고/수락하고
 	//   GetVideoPort 가 이 값을 반환한다. -1 이면 상대가 낸 m=video 는 port 0 으로 거절된다(RFC 3264 §6).

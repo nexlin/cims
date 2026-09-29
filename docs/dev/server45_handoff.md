@@ -148,4 +148,5 @@ SDK 반영은 끝났고(`GroupDoc` 이 TS 24.481 요소 다섯을 더 싣는다)
 
 ## 8. MCPTT 암묵적 발언 요청 · 애드혹 일제 통화 — 서버 과제 (.48 몫)
 
-별도 문서로 정리했다 — [server_todo_mcptt_floor_broadcast.md](server_todo_mcptt_floor_broadcast.md)(P1 암묵적 발언 요청 I1~I3 · P2 애드혹 일제 통화 B1~B5 · 검증 · 문서 판정 · 후속).
+.48 에서 반영·배포(csp 0.2.165)·실측했다 — 정본 [mcptt_broadcast_group_call.md](../design/features/mcptt_broadcast_group_call.md) R13·R14 판정 ✅.
+.45 스택에 올릴 때는 csp 0.2.165 이상. 단말 동작은 바뀌지 않는다(SDK 는 두 속성을 함께 싣는다).

@@ -796,18 +796,19 @@ def main():
     remove(g13)
     A.close(); B.close(); C.close()
 
-    print("\n[14] 멤버 프로파일 — MCPTT ID·큐잉 미협상·mc_granted·1인 세션")
+    print("\n[14] 멤버 프로파일 — MCPTT ID·큐잉 미협상·초기 발언권(granted)·1인 세션")
     g14 = f"{a.prefix}_profile"
     A = Member("A", bp + 134, 0xE001)
     B = Member("B", bp + 138, 0xE002)
     r = add_group(g14, members="A:5:participant,B:5:participant",
                   floor_timers={"t1_end_rtp": 30, "t2_stop_talk": 0})
     fp = payload(r).get("floor_port")
-    # A: MCPTT ID(URI) + mc_granted(초기 발언권), B: 큐잉 미협상
+    # A: MCPTT ID(URI) + PTT_JOIN granted(초기 발언권 — CSP 가 개시 INVITE 의 암묵적 발언 요청 mc_implicit_request 를
+    #   받아들였을 때 싣는다, TS 24.380 §14.3.5. offer 의 mc_granted 는 능력 표시라 이 값의 원천이 아니다), B: 큐잉 미협상
     join(g14, A, user_uri="sip:A@mcptt.example.org", granted=1)
     time.sleep(0.3)
     ga = A.drain_floor()
-    check("GRANT" in ops(ga), f"mc_granted 멤버는 참가 시 초기 발언권 (A={ops(ga)})")
+    check("GRANT" in ops(ga), f"granted 멤버(암묵적 발언 요청 수락)는 참가 시 초기 발언권 (A={ops(ga)})")
     join(g14, B, queueing=0)
     time.sleep(0.3)
     gb = B.drain_floor()

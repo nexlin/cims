@@ -479,9 +479,12 @@ floor 정책)가 담당하므로, 멤버가 그대로여도 정책만 바꾸면 
 **멤버별 floor 협상 전달 (SDP fmtp → PTT_JOIN)**
 
 멤버 SDP(개시자=INVITE offer, fan-out 수신자=200 OK answer)의 `a=fmtp:MCPTT
-mc_queueing[;mc_priority=N][;mc_granted]` 를 `CGroupCallService::ParseMcpttFmtp` 가 파싱해
-`PTT_JOIN` 의 `queueing`/`max_priority`/`granted` 로 전달한다(`McpttFmtp` 구조체,
-[../../api/cmp_media_api.md](../../api/cmp_media_api.md) §7.4). 규칙:
+mc_queueing[;mc_priority=N][;mc_implicit_request][;mc_granted]` 를 `CGroupCallService::ParseMcpttFmtp` 가 파싱해
+`PTT_JOIN` 의 `queueing`/`max_priority` 로 전달한다(`McpttFmtp` 구조체,
+[../../api/cmp_media_api.md](../../api/cmp_media_api.md) §7.4). `granted`(초기 발언권)는 SDP 에서 바로 오지 않는다 —
+개시자 offer 의 **암묵적 발언 요청**(`mc_implicit_request`, TS 24.380 §14.2.5)을 **새 세션 개시**(편성·ad hoc·개별 호)에서만
+받아들여(`AcceptsImplicitFloorRequest` — chat·진행 중 세션 합류·청취 합류 제외, §14.3.5) `granted:1` 로 싣는다. offer 의 `mc_granted` 는
+능력 표시라 요청으로 읽지 않고(§12.1.2.2 NOTE 2), fan-out 멤버의 answer 도 요청이 아니다. 규칙:
 
 - `fmtp:MCPTT` 부재(레거시 단말) → 세 필드 모두 미전송 — CMP 기본(queueing 1)이 유지되어
   구단말이 깨지지 않는다.
@@ -489,8 +492,14 @@ mc_queueing[;mc_priority=N][;mc_granted]` 를 `CGroupCallService::ParseMcpttFmtp
   CMP 가 Deny #1 (TS 24.380 §6.3.5.4.4).
 - 재협상(re-INVITE)도 같은 경로(`OnCallStarted` 멱등 JOIN)로 최신 협상값이 재전달된다.
 
-CSP 자신도 fan-out INVITE offer(`WrapMultipartBody`)와 psip `CSipDialog::AddSdp`(개시자 200 OK
-answer)에 `a=fmtp:MCPTT mc_queueing` 을 광고한다.
+CSP 자신은 fan-out INVITE offer(`WrapMultipartBody`)에 `a=fmtp:MCPTT mc_queueing;mc_priority=3` 을 광고한다. 개시자 200 OK
+answer(psip `CSipDialog::AddSdp`)의 fmtp 는 `AnswerFloorFmtp` 가 정해 `CSipCallRtp::m_strApplicationFmtp` 로 넘긴다 — offer 에 있던 파라미터만
+(§14.3.1: `mc_queueing` 은 offer 가 실었을 때, fmtp 없는 구단말 offer 에는 종전대로), 암묵 요청을 받아들였으면 `mc_implicit_request`(§14.3.5).
+승인은 CMP 의 Floor Granted 로만 알린다(answer `mc_granted` 는 싣지 않는다 — 선택 "may", §14.3.4).
+
+**일제 통화 세션 속성**(TS 24.379 §4.12) — 개시 INVITE 의 `<broadcast-ind>` 를 편성 그룹 on-demand 호와 ad hoc 그룹 호에서 받는다
+(`IsBroadcastCapable` — §17.2.2.1.1 9) broadcast adhoc group call, chat·개별 호 제외). conference 구독의 480/105 검사는 즉석 세션 인가보다 먼저,
+일제 세션은 개시자 이탈 시 잔여 leg 를 해제한다(§6.3.8.1 3) 로컬 정책) — [../features/mcptt_broadcast_group_call.md](../features/mcptt_broadcast_group_call.md) R13.
 
 > multipart body 의 SDP part 는 경계 탐색이 마지막 라인의 CRLF 를 소비하므로, psip
 > `GetSipCallRtp` 가 종결 CRLF 를 복원해 추출한다 — 복원하지 않으면 라인 단위 SDP 파서가

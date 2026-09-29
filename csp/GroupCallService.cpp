@@ -117,6 +117,22 @@ bool CGroupCallService::IsOnDemandGroupCall( const CspPttGroup &clsGroup ) {
     return !clsGroup._isAdhoc && clsGroup._groupType != "chat" && clsGroup._groupType != "private";
 }
 
+bool CGroupCallService::IsBroadcastCapable( const CspPttGroup &clsGroup ) {
+    return IsOnDemandGroupCall( clsGroup ) || ( clsGroup._isAdhoc && clsGroup._groupType != "private" );
+}
+
+bool CGroupCallService::AcceptsImplicitFloorRequest( const McpttFmtp &clsOffer, const CspPttGroup &clsGroup,
+                                                     bool bNewSession, bool bListen ) {
+    return clsOffer.iImplicit > 0 && bNewSession && !bListen && clsGroup._groupType != "chat";
+}
+
+std::string CGroupCallService::AnswerFloorFmtp( const McpttFmtp &clsOffer, bool bImplicitAccepted ) {
+    std::string str;
+    if ( clsOffer.iQueueing != 0 ) str = "mc_queueing";  // 1 = offer 가 실었다 · -1 = fmtp 없는 구단말(종전 광고 유지)
+    if ( bImplicitAccepted ) str += std::string( str.empty() ? "" : ";" ) + "mc_implicit_request";
+    return str;
+}
+
 CmpGroupSession CGroupCallService::CmpSessionOf( const CspPttGroup &clsGroup ) {
     const GroupSession clsSes = SessionOf( clsGroup._id );
     CmpGroupSession clsCmp;
@@ -255,7 +271,8 @@ void CGroupCallService::ParseMcpttFmtp( CSipCallRtp *pclsRtp, McpttFmtp &clsFmtp
     for ( const auto &clsMedia : pclsRtp->m_clsMediaList ) {
         if ( strcasecmp( clsMedia.m_strMedia.c_str(), "application" ) != 0 ) continue;
         for ( const auto &clsAttr : clsMedia.m_clsAttributeList ) {
-            // a=fmtp:MCPTT mc_queueing;mc_priority=4[;mc_granted] → name="fmtp", value="MCPTT mc_..."
+            // a=fmtp:MCPTT mc_queueing;mc_priority=4[;mc_implicit_request][;mc_granted] → name="fmtp", value="MCPTT
+            // mc_..."
             if ( strcasecmp( clsAttr.m_strName.c_str(), "fmtp" ) != 0 ) continue;
             if ( strncasecmp( clsAttr.m_strValue.c_str(), "MCPTT", 5 ) != 0 ) continue;
             clsFmtp.iQueueing = 0;  // fmtp:MCPTT 존재 — 이제부터 미포함 파라미터는 "미협상"
@@ -276,8 +293,10 @@ void CGroupCallService::ParseMcpttFmtp( CSipCallRtp *pclsRtp, McpttFmtp &clsFmtp
                 } else if ( strncasecmp( strTok.c_str(), "mc_priority=", 12 ) == 0 ) {
                     int iPrio = atoi( strTok.c_str() + 12 );
                     if ( iPrio > 0 ) clsFmtp.iMaxPriority = iPrio;
+                } else if ( strcasecmp( strTok.c_str(), "mc_implicit_request" ) == 0 ) {
+                    clsFmtp.iImplicit = 1;  // 발언 요청(§14.2.5) — 받아들일지는 호출자가 세션 상태로 정한다
                 } else if ( strcasecmp( strTok.c_str(), "mc_granted" ) == 0 ) {
-                    clsFmtp.iGranted = 1;
+                    clsFmtp.iGrantedCap = 1;  // 능력 표시(§14.2.4) — 요청으로 읽지 않는다(§12.1.2.2 NOTE 2)
                 } else if ( strcasecmp( strTok.c_str(), "mc_no_floor_ctrl" ) == 0 ) {
                     clsFmtp.iNoFloorCtrl = 1;
                 }
@@ -495,12 +514,13 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         if ( bNewSession && !bListen ) {
             GroupSession clsSes;
             clsSes.strInitiator = pszCallerInfo;
-            clsSes.bBroadcast = bBroadcastInd && IsOnDemandGroupCall( clsGroup );
+            clsSes.bBroadcast =
+                bBroadcastInd && IsBroadcastCapable( clsGroup );  // 편성 on-demand · ad hoc(§17.2.2.1.1 9))
             clsSes.tStart = time( NULL );
             clsSes.bPending = true;
             bClaimedSession = true;
             if ( bBroadcastInd && !clsSes.bBroadcast )
-                CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) type=%s — broadcast-ind 무시(편성 그룹 호 아님)",
+                CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) type=%s — broadcast-ind 무시(chat·개별 호)",
                              pszGroupId, clsGroup._groupType.c_str() );
             m_mapGroupSession[pszGroupId] = clsSes;
         } else if ( bBroadcastInd ) {
@@ -604,6 +624,17 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                                 clsGroup._floorPolicy, clsGroup._maxTalkers, clsGroup._floorControl, strSessionDir );
     }
 
+    // 개시자 offer 의 floor 협상(fmtp:MCPTT)과 암묵적 발언 요청 판정(TS 24.380 §14.3.5) — 200 OK answer 의 fmtp 와
+    //   PTT_JOIN 초기 발언권(granted)이 같은 판정을 쓴다. 진행 중 세션 합류·chat·청취는 받지 않는다(단말은 명시 Floor
+    //   Request).
+    McpttFmtp clsCallerOffer;
+    ParseMcpttFmtp( pclsRtp, clsCallerOffer );
+    const bool bImplicitAccepted = AcceptsImplicitFloorRequest( clsCallerOffer, clsGroup, bNewSession, bListen );
+    if ( clsCallerOffer.iImplicit > 0 )
+        CLog::Print(
+            LOG_INFO, "ProcessGroupCall: Group(%s) Caller(%s) implicit floor request %s", pszGroupId, pszCallerInfo,
+            bImplicitAccepted ? "accepted" : ( bNewSession ? "not accepted (chat/listen)" : "not accepted (join)" ) );
+
     // 2. 발신자(Caller)에게 caller 전용 CMP 포트로 200 OK 응답 (leg 별 포트셋)
     //   ⚠ floor 없는 세션(private 멀티, floor_control=off)은 floor_port 가 0 이다 — 종전
     //   `iSharedFloorPort > 0` 게이트는 이 경우 200 OK 응답 블록 전체를 건너뛰어 발신자가
@@ -626,6 +657,9 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         // MCPTT floor (TS 24.379/24.380): 200 OK 에 m=application(SharedFloorPort) 광고 →
         //   개시자가 floor dest 를 학습해 floor REQUEST 를 올바른 포트로 송신(명시적 GRANT).
         clsCallerRtp.m_iApplicationPort = iSharedFloorPort;
+        //   answer fmtp — offer 에 있던 파라미터만, 암묵적 발언 요청을 받아들였으면 mc_implicit_request 를
+        //   되돌린다(§14.3.1·§14.3.5)
+        clsCallerRtp.m_strApplicationFmtp = AnswerFloorFmtp( clsCallerOffer, bImplicitAccepted );
         // 영상 answer (RFC 3264 §6) — 개시자가 m=video 를 오퍼했고 그룹이 video 를 중계하면 이 멤버의 CMP video
         //   포트로 수락, 아니면 psip 이 m=video 0 으로 거절한다(라인 생략은 규격 위반 — answer 의 m= 수·순서 = offer).
         clsCallerRtp.m_iVideoPort =
@@ -787,9 +821,11 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                 int iCallerPt = 0, iCallerSrcPt = 0, iCallerTePt = 0, iCallerSrcTePt = 0;
                 std::string strCallerCodec;
                 GetLegPt( pszCallId, false, iCallerPt, iCallerSrcPt, iCallerTePt, iCallerSrcTePt, &strCallerCodec );
-                // 개시자 offer 의 fmtp:MCPTT 협상 결과 (queueing/max_priority/granted)
-                McpttFmtp clsCallerFmtp;
-                ParseMcpttFmtp( pclsRtp, clsCallerFmtp );
+                // 개시자 offer 의 fmtp:MCPTT 협상 결과 (queueing/max_priority) + 초기 발언권 = 암묵적 발언 요청을
+                // 받아들였는가
+                //   (TS 24.380 §14.3.5 — offer 의 mc_granted 는 능력 표시라 요청이 아니다, §12.1.2.2 NOTE 2)
+                McpttFmtp clsCallerFmtp = clsCallerOffer;
+                clsCallerFmtp.iGranted = bImplicitAccepted ? 1 : 0;
                 // 미디어 SRTP 키 (media_security.md §6.3) — rx=개시자 a=crypto, tx=서버 생성
                 CmpMediaCrypto clsCallerCrypto;
                 if ( !strCallerSrvKey.empty() &&
@@ -1933,9 +1969,13 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
     int iMemberPt = 0, iMemberSrcPt = 0, iMemberTePt = 0, iMemberSrcTePt = 0;
     std::string strMemberCodec;
     GetLegPt( strCallId, true, iMemberPt, iMemberSrcPt, iMemberTePt, iMemberSrcTePt, &strMemberCodec );
-    // 멤버 answer 의 fmtp:MCPTT 협상 결과 (queueing/max_priority/granted)
+    // 멤버 answer 의 fmtp:MCPTT 협상 결과 (queueing/max_priority). 초기 발언권은 주지 않는다 — 암묵적 발언 요청은
+    // 클라이언트가
+    //   낸 SIP 요청(개시 INVITE)만 뜻한다(TS 24.380 §14.2.5). 서버 offer 에 대한 멤버 answer 의 mc_granted 는 요청이
+    //   아니다
     McpttFmtp clsMemberFmtp;
     ParseMcpttFmtp( pclsRtp, clsMemberFmtp );
+    clsMemberFmtp.iGranted = 0;
     // 미디어 SRTP (media_security.md §5.2) — 서버 offer 에 crypto 를 실었는지는 다이얼로그
     //   local RTP 가 기억한다 (재협상 re-INVITE 합류 경로 포함 — 키 불변이면 CMP 가 세션 유지).
     CmpMediaCrypto clsMemberCrypto;
@@ -2163,10 +2203,20 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
                     if ( kv.second.strGroupId == strGroupId && !kv.second.bListenOnly )
                         vecRemainLegs.push_back( kv.first );
             }
+            const GroupSession clsSesNow = SessionOf( strGroupId );
             if ( clsPrivChk._groupType == "private" ) {
                 vecPrivPeerLegs = vecRemainLegs;
                 CLog::Print( LOG_INFO, "OnCallTerminated: private(%s) — 상대 leg %zu 개 종료(BYE)", strGroupId.c_str(),
                              vecPrivPeerLegs.size() );
+            } else if ( clsSesNow.bBroadcast && clsSesNow.strInitiator == strMemberId ) {
+                // 일제 통화 개시자 이탈 = 호 해제 (TS 24.379 §6.3.8.1 3) "the initiator of the group call leaves" —
+                // 로컬 정책).
+                //   일제 통화는 개시자 송출이 끝나면 호도 끝난다(§4.12) — 편성·ad hoc 모두, 수신자는 T4·TNG3 를
+                //   기다리지 않는다
+                vecPrivPeerLegs = vecRemainLegs;
+                CLog::Print( LOG_INFO,
+                             "OnCallTerminated: broadcast group(%s) — 개시자 %s 이탈, 잔여 leg %zu 개 종료(BYE)",
+                             strGroupId.c_str(), strMemberId.c_str(), vecPrivPeerLegs.size() );
             } else if ( ( clsPrivChk._isAdhoc || IsOnDemandGroupCall( clsPrivChk ) ) && vecRemainLegs.size() == 1 ) {
                 // 그룹 호 해제 정책 (TS 24.379 §6.3.8.1): 참가자 1명 이하 = 대화 상대가 없는 호 — 해제한다.
                 //   on-demand 그룹 호(편성·ad hoc)만 — chat 은 상시 채널이라 잔류를 허용한다. 미확립 fan-out
@@ -2289,6 +2339,14 @@ int CGroupCallService::CheckConferenceSubscribe( const std::string &strGroupId, 
     if ( pbUnavailable ) *pbUnavailable = false;
     CspPttGroup clsGroup;
     if ( !gclsGroupMap.Select( strGroupId.c_str(), clsGroup ) ) return 0;
+    // 일제 통화로 개시된 호의 conference 구독 = 480 + Warning 105 (TS 24.379 §10.1.3.4.1) — 판정은 그룹 종류가
+    //   아니라 진행 중 세션의 속성이다(같은 그룹의 일반 그룹 통화는 구독 가능). ad hoc 일제 통화(§17.2.2.1.1 9))도
+    //   같다 — 즉석 세션 인가보다 먼저 본다(참가자도 일제 통화 중에는 구독할 수 없다).
+    if ( !bAuthzOnly && gclsGroupCallService.IsBroadcastInProgress( strGroupId ) ) {
+        strWarning = "105 CIMS \"subscription not allowed in a broadcast group call\"";
+        strReason = "broadcast group call";
+        return SIP_TEMPORARILY_UNAVAILABLE;
+    }
     if ( clsGroup._isAdhoc ) {
         // 즉석 세션(priv-/adhoc-) — 그룹 문서가 없다. 참가자(fan-out 대상)는 허용, 그 외(관제사)는 청취 leg 와 같은
         //   즉석 세션 관측 인가(자격 + 참가자 monitor_scope). 세션 id 를 아는 것만으로 로스터가 열리지 않게
@@ -2298,13 +2356,6 @@ int CGroupCallService::CheckConferenceSubscribe( const std::string &strGroupId, 
         strWarning = "138 CIMS \"subscription of conference events not allowed\"";
         strReason = "ephemeral session, " + strWhy;
         return SIP_FORBIDDEN;
-    }
-    // 일제 통화로 개시된 호의 conference 구독 = 480 + Warning 105 (TS 24.379 §10.1.3.4.1) — 판정은 그룹 종류가
-    //   아니라 진행 중 세션의 속성이다(같은 그룹의 일반 그룹 통화는 구독 가능).
-    if ( !bAuthzOnly && gclsGroupCallService.IsBroadcastInProgress( strGroupId ) ) {
-        strWarning = "105 CIMS \"subscription not allowed in a broadcast group call\"";
-        strReason = "broadcast group call";
-        return SIP_TEMPORARILY_UNAVAILABLE;
     }
     bool bMember = false;
     for ( const auto &pUser : clsGroup._pusers ) {

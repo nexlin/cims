@@ -6,9 +6,11 @@
 검사:
   BC1/BC2 일제 통화 개시(cspsim `-broadcast`, 4인) — 전원 합류, 개시자만 GRANT, 나머지 3명 DENY
   BC6     같은 그룹을 표식 없이 개시 — 일반 그룹 통화, 4명 전원 GRANT (그룹 종류는 그대로 prearranged)
+  BC7     애드혹 일제 통화(cspsim `-adhoc -broadcast` — TS 24.379 §17.2.2.1.1 9)) — 참가자 목록 전원 합류, 개시자만 GRANT, 나머지 DENY
 
 계측기 경로(CIMS_TESTER_URL 설정 시): `PTT-GROUP-CALL-BROADCAST` 가 BC1·BC2·BC3(나갔다 broadcast-ind 로 재합류한 멤버는 개시자가
-아니다)·BC5(일제 통화 중 conference SUBSCRIBE 480 + Warning 105)를, `PTT-FLOOR-HANDOVER` 가 BC6 을 본다.
+아니다)·BC5(일제 통화 중 conference SUBSCRIBE 480 + Warning 105)를, `PTT-FLOOR-HANDOVER` 가 BC6 을 본다. 계측기 워커는 ad hoc 그룹 통화를
+내지 않아 BC7 은 cspsim 경로에서만 본다.
 BC4(T4 만료 → 서버 해제)는 그룹 hang-timer(기본 30초)를 기다려야 해서 이 항목에 넣지 않는다 — cspsim `-broadcast` 로 그룹
 `hang_timer_sec` 를 줄여 확인한다(§7.8 수동 절차).
 """
@@ -16,6 +18,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
@@ -66,15 +69,22 @@ def ptt_broadcast(ctx: VerifyContext) -> ItemResult:
         ctx.w("- [SKIP] S3-SEED PTT 자격·그룹 미확보")
         return done(ItemStatus.SKIP, "PTT 자격/그룹 미확보")
 
-    def run(broadcast: bool):
+    def _adhoc_id(user: str) -> str:
+        # ad hoc 세션 id — 단말(SDK)과 같은 꼴 adhoc-<번호>-<epoch>(mcptt_emergency_modes.md §6). 편성 그룹 id 에 참가자 목록만
+        #   얹으면 CSP 는 편성 그룹 호로 다룬다(ad hoc 경로가 아니다)
+        return f"adhoc-{''.join(c for c in user if c.isdigit())}-{int(time.time())}"
+
+    def run(broadcast: bool, adhoc: bool = False):
         args = [
             "-mode", "ptt", "-scenario", "group_call", "-count", str(_COUNT), "-duration", "10", "-floor_hold", "1",
             "-ip", ctx.sim_ip, "-user", s.get("PTT_USER", ""), "-domain", s.get("PTT_DOM", MCPTT_DOMAIN),
-            *cred_args(s, "PTT", _COUNT), "-group", group,
+            *cred_args(s, "PTT", _COUNT), "-group", _adhoc_id(s.get("PTT_USER", "")) if adhoc else group,
             "-media_dir", os.path.join(ctx.repo_root, "tests", "media"),
         ]
         if broadcast:
             args.append("-broadcast")
+        if adhoc:
+            args.append("-adhoc")
         rc, tail = run_cspsim(ctx.repo_root, args, timeout=240, tail_lines=400)
         m = _JOIN_RE.findall(tail)
         joined = int(m[-1][0]) if m else 0
@@ -89,5 +99,9 @@ def ptt_broadcast(ctx: VerifyContext) -> ItemResult:
     checks.append(("BC6 같은 그룹 표식 없이 — 일반 그룹 통화, 전원 GRANT",
                    rc == 0 and joined == _COUNT and grants == _COUNT and denies == 0,
                    f"rc={rc} joined={joined}/{_COUNT} grant={grants}(기대 {_COUNT}) deny={denies}(기대 0)"))
+    rc, joined, grants, denies = run(True, adhoc=True)
+    checks.append(("BC7 애드혹 일제 통화 — 참가자 전원 합류, 개시자만 GRANT, 나머지 DENY #5",
+                   rc == 0 and joined == _COUNT and grants == 1 and denies == _COUNT - 1,
+                   f"rc={rc} joined={joined}/{_COUNT} grant={grants}(기대 1) deny={denies}(기대 {_COUNT - 1})"))
     ok = emit_checks(ctx, checks)
     return done(ItemStatus.PASS if ok else ItemStatus.FAIL, fmt_checks(checks))

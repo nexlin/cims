@@ -337,6 +337,19 @@ private:
     /** T4 를 거는 세션인가 — on-demand 편성 그룹(prearranged)만. chat(상시)·즉석 세션(private·ad hoc)은 제외 —
      *  개인 호·ad hoc 의 hang-time 은 service config 쪽 값이라(TS 24.484 §8.4.2.7) 그룹 문서 값을 쓰지 않는다. */
     static bool IsOnDemandGroupCall( const CspPttGroup &clsGroup );
+    /** 일제 통화로 개시할 수 있는 세션인가 — 편성 그룹 on-demand 호 또는 ad hoc 그룹 호(TS 24.379 §4.12 · §17.2.2.1.1
+     * 9) — broadcast adhoc group call). chat(상시 채널 합류)·개별 호(private)는 아니다. */
+    static bool IsBroadcastCapable( const CspPttGroup &clsGroup );
+    /** 개시 INVITE 의 암묵적 발언 요청을 받아들이는가 — TS 24.380 §14.3.5: offer 의 `mc_implicit_request`(§14.2.5)를 새
+     * 세션 개시에서만 받고 chat 그룹 호 합류·진행 중 편성/ad hoc 호 합류·청취(recvonly) 합류는 제외한다. offer 의
+     * `mc_granted` 는 능력 표시라 여기서 보지 않는다(§12.1.2.2 NOTE 2). */
+    static bool AcceptsImplicitFloorRequest( const struct McpttFmtp &clsOffer, const CspPttGroup &clsGroup,
+                                             bool bNewSession, bool bListen );
+    /** 개시자 200 OK answer 의 `a=fmtp:MCPTT` 파라미터(§14.3.1 — offer 에 없던 파라미터는 싣지 않는다): mc_queueing 은
+     * offer 가 실었을 때(fmtp 없는 구단말 offer 는 종전대로 광고), mc_implicit_request 는 암묵 요청을 받아들였을
+     * 때(§14.3.5 — 승인 뜻은 아니다, §12.1.2.2 NOTE 4). 승인은 CMP 의 Floor Granted 로만 알린다(answer mc_granted 는
+     * 선택 "may" — §14.3.4). */
+    static std::string AnswerFloorFmtp( const struct McpttFmtp &clsOffer, bool bImplicitAccepted );
     /** 그룹 호 해제 (TS 24.379 §6.3.8.1) — 참가 leg(확립·미확립·청취) 전부 BYE/CANCEL 후 마지막 leg 의 teardown 이
      *  CMP REMOVE·세션 정리를 끝낸다. pszReason 은 로그용. */
     void ReleaseGroupSession( const std::string &strGroupId, const char *pszReason );
