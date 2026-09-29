@@ -245,6 +245,7 @@ add_library(pjsua2
   src/pjsua2/call.cpp
   src/pjsua2/presence.cpp
   src/pjsua2/media.cpp
+  src/pjsua2/cims_cfg.cpp
 )
 
 # headers
@@ -266,6 +267,7 @@ target_sources(pjsua2
         include/pjsua2/presence.hpp
         include/pjsua2/siptypes.hpp
         include/pjsua2/types.hpp
+        include/pjsua2/cims_cfg.hpp
 
 )
 

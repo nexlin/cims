@@ -113,7 +113,9 @@ public class CscTests
         string xml = doc.ToXml();
         Assert.Contains("<list-service uri=\"sip:g-1234abcd@ptt.example.org\">", xml);
         Assert.Contains("순찰 &amp; 지원", xml);
-        Assert.Contains("<mcpttgi:session-type>chat</mcpttgi:session-type>", xml);
+        // 그룹 종류는 규격 요소로만(TS 24.481 §7.2.2 a — chat = false) — session-type 은 싣지 않는다
+        Assert.Contains("<mcpttgi:on-network-invite-members>false</mcpttgi:on-network-invite-members>", xml);
+        Assert.DoesNotContain("session-type", xml);
         var back = GroupDoc.Parse(xml);
         Assert.True(back.Ok, back.Reason);
         var b = back.Value!;

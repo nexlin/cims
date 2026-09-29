@@ -286,8 +286,6 @@ public sealed class ManagementClient
     /// slot = 단독 발언자 트랙(null = 믹스). 진행 상황은 status 콜백("변환 중…").</summary>
     public async Task<Result<string>> FetchSegmentAudioAsync(string id, int seq, int? slot, bool retry, Action<string>? status, CancellationToken ct = default)
     {
-        string? token = _token();
-        if (token is null) return Result<string>.Fail(-1, "로그인 전");
         string path = RecPath(id) + $"/segments/{seq}/audio";
         var q = new List<string>();
         if (slot is not null) q.Add("slot=" + slot.Value);
@@ -307,7 +305,11 @@ public sealed class ManagementClient
         int delay = 700;
         while (true)
         {
+            // 토큰은 매 요청 받는다 — 변환 대기(최대 120초) 중에 만료가 걸려도 선제 갱신된 것을 쓴다. 401 은 SendAsync 와 같은 규약.
+            if (await _token(ct) is not { } token) return Result<string>.Fail(-1, "로그인 전");
             var r = await _csc.RequestAsync(token, "GET", full, null, null, "*/*", null, null, ct);
+            if (!r.Ok && r.Code == 401 && await _renew(token, ct) is { } fresh && fresh != token)
+                r = await _csc.RequestAsync(fresh, "GET", full, null, null, "*/*", null, null, ct);
             if (r.Ok && r.Value.Status == 200)
             {
                 try
