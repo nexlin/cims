@@ -10,6 +10,7 @@ import com.cims.ue.sdk.jni.DriveAccountVector
 import com.cims.ue.sdk.jni.MediaSourceVector
 import com.cims.ue.sdk.jni.RosterVector
 import com.cims.ue.sdk.jni.TalkerVector
+import com.cims.ue.sdk.jni.VideoDeviceVector
 import com.cims.ue.sdk.jni.AccountConfig as JniAccountConfig
 import com.cims.ue.sdk.jni.AudioDeviceInfo as JniAudioDeviceInfo
 import com.cims.ue.sdk.jni.CallInfo as JniCallInfo
@@ -20,6 +21,7 @@ import com.cims.ue.sdk.jni.DriveAccount as JniDriveAccount
 import com.cims.ue.sdk.jni.DriveOptions as JniDriveOptions
 import com.cims.ue.sdk.jni.LinkState as JniLinkState
 import com.cims.ue.sdk.jni.EngineConfig as JniEngineConfig
+import com.cims.ue.sdk.jni.FdFile as JniFdFile
 import com.cims.ue.sdk.jni.FloorEvent as JniFloorEvent
 import com.cims.ue.sdk.jni.FloorInfo as JniFloorInfo
 import com.cims.ue.sdk.jni.GroupCallOptions as JniGroupCallOptions
@@ -65,6 +67,17 @@ enum class RegState { UNREGISTERED, REGISTERING, REGISTERED, FAILED }
 enum class CallState { NULL, OUTGOING, INCOMING, ACTIVE, HELD, DISCONNECTED }
 enum class CallDir { OUTGOING, INCOMING }
 enum class FloorState { IDLE, REQUESTING, SPEAKING, LISTENING, QUEUED }
+/** floor 이벤트 종류 — 상태만으로는 Denied·Revoked·코어 시한(RequestTimeout·TalkLimit)을 가를 수 없다. 서수 = 코어 FloorEvent::Kind. */
+enum class FloorEventKind {
+    GRANTED, DENIED, IDLE, TAKEN, TALKER_LEFT, REVOKED, QUEUE_POSITION, QUEUE_CANCELLED,
+    /** 요청 후 응답 없음(코어 타이머) → Idle 복귀. */
+    REQUEST_TIMEOUT,
+    /** Granted Duration 마감 임박/도달 — 코어가 스스로 Release. */
+    TALK_LIMIT,
+    OTHER,
+}
+/** 오디오 라우트 — 입력의 EARPIECE = 내장 기본(하단) 마이크 고정, DEFAULT = 정책(고정 해제). 서수 = 코어 AudioRoute. */
+enum class AudioRoute { DEFAULT, EARPIECE, LOUDSPEAKER }
 /** 계측 링크 상태(cimsue/drive.h) — REFUSED(연결 키 거절·지문 불일치)는 다시 붙지 않는다. */
 enum class LinkState { IDLE, CONNECTING, CONNECTED, DISCONNECTED, REFUSED }
 
@@ -84,7 +97,8 @@ data class EngineConfig(
     val nullAudioDevice: Boolean = false,
     /** UDP→TCP 승격(RFC 3261 §18.1.1) 비활성 — 통제된 망 전용 사이트 옵션(libcimsue EngineConfig.udpNoTcpSwitch). */
     val udpNoTcpSwitch: Boolean = false,
-    val noVad: Boolean = false,
+    /** VAD(무음 억제) 비활성 — 침묵 중에도 RTP 를 연속 송신해 NAT flow 를 유지한다. 코어·.NET 기본값과 같다(true). */
+    val noVad: Boolean = true,
     val udpPort: Int = 0,
     val tcpPort: Int = 0,
     val tlsPort: Int = 0,
@@ -234,6 +248,7 @@ data class Talker(val id: String, val ssrc: Long, val self: Boolean) {
 }
 
 data class FloorEvent(
+    val kind: FloorEventKind,
     val callId: Int, val state: FloorState, val durationSec: Int,
     val cause: Int, val causeText: String, val indicator: Int,
     /** Floor Taken 의 Permission to Request the Floor — 0 이면 앱이 발언 버튼을 비활성한다. */
@@ -241,7 +256,7 @@ data class FloorEvent(
     val talkers: List<Talker>, val rawType: Int,
 ) {
     internal companion object {
-        fun of(e: JniFloorEvent) = FloorEvent(e.callId, ordinalOf(e.state.swigValue()), e.durationSec,
+        fun of(e: JniFloorEvent) = FloorEvent(ordinalOf(e.kind.swigValue()), e.callId, ordinalOf(e.state.swigValue()), e.durationSec,
             e.cause, e.causeText, e.indicator, e.permission, e.queuePosition, e.meSpeaking,
             Talker.list(e.talkers), e.rawType)
     }
@@ -299,6 +314,14 @@ data class SdsMessage(
             m.fd, m.fileUrl, m.fileName, m.fileType, m.fileSize)
     }
 }
+
+/** MCData FD 로 알릴 파일(TS 24.282 FD SIGNALLING — FILEURL·Metadata). url = [CscClient.uploadFd] 결과, type = MIME(빈 값 = application/octet-stream). */
+data class FdFile(val url: String, val name: String, val type: String = "", val size: Long = 0) {
+    internal fun toJni(): JniFdFile = JniFdFile().also { it.url = url; it.name = name; it.type = type; it.size = size }
+}
+
+/** FD 업로드 결과(POST /mcdata/fd 201) — url 을 [FdFile.url] 로 넘긴다. */
+data class FdUpload(val id: String, val url: String, val name: String, val size: Long)
 
 /** SDS 발신의 즉시 결과 — 최종 응답은 `requestResult` 에 같은 token 으로 온다. */
 data class SdsSend(val msgId: String, val token: Long) {
@@ -398,6 +421,15 @@ data class DeviceLinkConfig(
 data class LinkStatus(val state: LinkState, val detail: String = "") {
     internal companion object {
         fun of(s: JniLinkState, detail: String) = LinkStatus(ordinalOf(s.swigValue()), detail)
+    }
+}
+
+/** 영상 장치(pjmedia videodev) — Android 카메라 driver = "Android"(Camera2). */
+data class VideoDeviceInfo(val id: Int, val name: String, val driver: String, val capture: Boolean, val render: Boolean) {
+    internal companion object {
+        fun list(v: VideoDeviceVector): List<VideoDeviceInfo> = List(v.size) {
+            val d = v[it]; VideoDeviceInfo(d.id, d.name, d.driver, d.capture, d.render)
+        }
     }
 }
 

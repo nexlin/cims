@@ -27,7 +27,7 @@
 | UI | Jetpack Compose, Material 3 | 기존 `android/` 전부 Compose |
 | 화면 배치 | **모바일 앱으로 짠다** — 한 화면은 한 가지 일, 이동은 **면 전체를 꿴 한 줄의 좌우 스와이프**(하단 내비 넷·탭줄은 그 줄의 지름길), 분할 없음(§6.3) | 태블릿 본문은 데스크톱 면적의 38% 다. 같은 격자를 줄여 넣으면 어느 칸도 제 몫을 못 한다 |
 | 불변 규약 | **포커스(보는 채널) ≠ 발언 대상(말하는 채널)** · 응답 코드 문구 사전(§9) · 식별자는 코어가 준 id | 플랫폼이 달라도 같다 |
-| 기존 앱 | **엔진은 이번에 단일화한다** — `:core` 가 `:cimsue-engine` 의 pjsua2 를 쓰고 커밋된 산출물 22.5MB 를 지운다(§2.2). 앱 로직 전환(파사드 이전·`PttController` 분해)은 이식 완료 후 별도 과제다(§11) | 엔진이 두 벌이면 `ext/pjproject` 패치를 두 곳에 반영해야 하고 커밋본이 조용히 어긋난다. 반면 로직 전환은 동작하는 앱의 회귀 위험을 이식 일정에 싣는다 |
+| 기존 앱 | **엔진은 이번에 단일화한다** — 기존 앱의 래퍼(`:core-sip`)가 `:cimsue-engine` 의 pjsua2 를 쓰고 커밋된 산출물 22.5MB 를 지운다(§2.2). 앱 로직 전환(파사드 이전·`PttController` 분해)은 이식 완료 후 별도 과제다(§11) | 엔진이 두 벌이면 `ext/pjproject` 패치를 두 곳에 반영해야 하고 커밋본이 조용히 어긋난다. 반면 로직 전환은 동작하는 앱의 회귀 위험을 이식 일정에 싣는다 |
 
 ---
 
@@ -38,8 +38,11 @@ android/  (Gradle 루트 — settings.gradle.kts)
   :cimsue-engine    → ../sdk/android/cimsue-engine   org.pjsip.** 바인딩 + libpjsua2.so
   :cimsue           → ../sdk/android/cimsue          코어 파사드 + libcimsue.so
   :dispatch-tablet  관제 태블릿 앱   ──→ :cimsue
-  :core             기존 공용 모듈   ──→ :cimsue-engine   (커밋 산출물 제거, §2.2)
-  :ptt-client :volte-client :cims    기존 앱 — **로직은 건드리지 않는다**
+  :sdk-probe        SDK 엔진 기기 점검(개발 도구, 계정 없음) ──→ :cimsue
+  :core             공용 조각(계정·프로비저닝·저장소·전원…) — SIP·엔진 없음
+  :core-sip         기존 앱의 자체 pjsua2 래퍼(이행용) ──→ :core + :cimsue-engine
+  :ptt-client :volte-client          기존 앱 ──→ :core-sip   (SDK 이식 전 — ue_sdk.md §5.3)
+  :cims                              로그인 앱 ──→ :core      (엔진을 싣지 않는다)
 ```
 
 Gradle 루트가 `android/` 이므로 `:sdk:cimsue` 경로는 성립하지 않는다. 두 모듈 모두
@@ -76,11 +79,13 @@ sdk/android/
 새 AAR 이 빌드하는 것. 두 벌이면 엔진 패치가 두 곳에 반영돼야 하고 커밋본은 조용히 어긋난다.
 **이 이중화를 이번에 끊는다.**
 
-- `:cimsue-engine` 이 `org.pjsip.**` 를 독점 제공한다. `PjCamera2`·`PjCameraInfo2`(`org/pjsip/` 4개)를
-  `:core` 가 실제로 쓰므로(`SipController.kt`·`PjLib.kt`·`CimsCall.kt`) `org.pjsip.pjsua2` 만이 아니라
-  **`org.pjsip.**` 전체**를 싣는다.
-- `:core` 는 `src/pjsua2/` 소스셋을 버리고 `api(project(":cimsue-engine"))` 으로 바꾼다.
-  `SipController.kt` 등 **앱·코어 손코드는 한 줄도 바뀌지 않는다** — 같은 클래스가 소스셋 대신 AAR 에서 올 뿐이다.
+- `:cimsue-engine` 이 `org.pjsip.pjsua2` 바인딩을 독점 제공하고, 카메라 도우미 `PjCamera2`·`PjCameraInfo2`(`org/pjsip/`)도
+  싣는다 — 기존 앱의 래퍼가 실제로 쓴다(`SipController.kt`·`PjLib.kt`·`CimsCall.kt`).
+- 카메라 도우미는 pjmedia Android 영상 장치가 **자기 APK 안에서** FindClass 하는 앱 클래스라, pj 를 정적으로 품는 `:cimsue` 도
+  빌드 때 같은 원천에서 복사해 싣는다(커밋 안 함 — `S1-UE-ENGINE-SINGLE` 이 두 모듈만 허용). 코어 제어 스레드(네이티브)에서도
+  찾도록 pjlib 이 `JNI_OnLoad` 의 앱 클래스 로더를 쓴다(`pj_jni_find_class`, [ue_sdk.md](ue_sdk.md) §4.5).
+- 기존 앱의 래퍼(`sip/` 의 pjsua2 파일 6개)는 `:core-sip` 이 갖고 `api(project(":cimsue-engine"))` 로 엔진을 받는다 — 패키지명은
+  그대로(`com.cims.ue.core.sip`)라 앱 손코드는 바뀌지 않는다. `:core` 에는 SIP·엔진이 없다.
 - 커밋된 `android/core/src/pjsua2/` 를 지운다(312 파일). 이후 엔진 산출물은 커밋하지 않는다(`.gitignore`).
 - `build-native.sh` 가 엔진과 코어를 **한 번에** 짓고 두 모듈에 배치한다. 엔진만 필요하면 `--engine-only`.
 - 코어의 `cimsue-cli` 는 데스크톱 전용이다(`cli/main.cpp` 의 크래시 백트레이스가 glibc `execinfo` 를 쓰고
@@ -1281,12 +1286,10 @@ SCO 가 죽는다. A2DP 만이 통신 경로 밖이라 혼자 갈라질 수 있�
 
 ## 11. 미해결 / 향후 과제
 
-- **기존 앱 로직 전환** — `ptt-client`·`volte-client` 를 파사드로 옮기면 Kotlin 의 floor·mcdata·csc 사본
-  1,772줄이 걷힌다([ue_sdk.md](ue_sdk.md) §5.3). **이식 완료 후 별도 과제**다. 엔진 이중화와 커밋 산출물은
-  이 과제에서 이미 걷었고(§2.2), 공존 기간의 코드 중복은 floor(`gen_floor_defs.py --check`)·SDS·CSC 세
-  대조 검사가 막는다(§9). 남은 선결 조건은 **`ue_sdk.md` §5.3 이 `PttController` 의 이전 대상지로 지목한
-  코어 `domain/` 이 아직 없다**는 것이다 — `sdk/core/src` 에 해당 모듈이 없어, 전환 착수 전에 `domain` 을
-  만들지 아니면 그 로직을 앱 계층에 둘지 정해야 한다.
+- **기존 앱 로직 전환** — `volte-client` → `ptt-client` 순으로 파사드로 옮긴다([ue_sdk.md](ue_sdk.md) §5.3 이행 단계 P0a~P5).
+  옮기면 Kotlin 의 floor·mcdata·csc 사본 1,772줄이 걷힌다. 엔진 이중화와 커밋 산출물은 이미 걷었고(§2.2), 공존 기간의
+  코드 중복은 floor(`gen_floor_defs.py --check`)·SDS·CSC 세 대조 검사가 막는다(§9). `PttController` 의 정책 부분은 코어
+  `domain/` 이 아니라 **앱 세션 층**으로 간다 — 이 앱의 `DispatchSession` + 평면 확장 구성이 본보기다.
 - **다중 채널 동시 발언** — 코어는 세션마다 floor participant·마이크 결선(`micOpen` → `wireMedia`)을 따로 들어
   승인된 세션 전부로 같은 캡처를 보낸다 — 별도 코어 API 없이 앱이 대상마다 `floorRequest` 하면 된다(단말 팬아웃,
   서버 변경 없음 — 데스크톱 구현 [dispatch_desktop_ui.md](dispatch_desktop_ui.md) §4.1). 태블릿은 «요청한 것만 해제»

@@ -24,6 +24,10 @@
 #include <mutex>
 #include <thread>
 
+#if defined(__ANDROID__)
+#include <android/native_window.h>                        // setVideoWindow 의 창 참조(ANativeWindow)
+#endif
+
 #include "account_map.h"
 #include "floor/floor_participant.h"
 #include "mcdata/sds_codec.h"
@@ -196,6 +200,14 @@ struct Engine::Impl {
     Listener* listener = nullptr;     // = &fanout (start 가 연결) — emit 은 이것만 부른다
     FanoutListener fanout;
     std::atomic<bool> running{false};
+    std::atomic<bool> captureOn{true};  // 캡처 게이트(setCaptureEnabled) — 기동마다 전이중
+    // 장치 단 음량(setDeviceAudioLevels) — 앱이 한 번이라도 걸었을 때만 다시 건다(기본 = 엔진 기본값 그대로)
+    bool levelsSet = false;
+    float spkLevel = 1.f;
+    double micTarget = kMicAgcTargetDbov;
+    void* videoWindow = nullptr;        // setVideoWindow — 코어가 참조 하나를 소유(Android ANativeWindow). ue-ctl·콜백이 읽는다(videoM)
+    std::mutex videoM;
+    int camDev = -1;                    // 캡처 카메라 — -1 = 처음 쓸 때 전면 카메라로 정한다
 
     Worker ctl;                 // ue-ctl — pjsua2 전용
     Worker evt;                 // ue-evt — 리스너 전용
@@ -221,7 +233,15 @@ struct Engine::Impl {
     std::map<int, CallInfo> callInfos;                     // 종료된 호도 잠시 보존(조회·최종 통계) — pruneFinished
     std::map<int, StreamStats> finalStats;                 // onStreamDestroyed 시점의 최종 RTP 통계
     std::map<int, CallQuality> finalQuality;               // 소멸한 오디오 스트림들의 누적 품질(quality::merge)
-    std::map<int64_t, std::pair<int, std::string>> publishPending;   // token → (accountId, groupId)
+    /** 응답을 기다리는 affiliation PUBLISH — 내부 token 별. 412 초기 재발행은 새 내부 token 이고 앱에는 appToken 으로 알린다. */
+    struct PendingPublish {
+        int accountId = -1;
+        std::string groupId;
+        bool on = false;
+        bool conditional = false;                          // SIP-If-Match 를 실었다(ETag 조건부 갱신)
+        int64_t appToken = -1;                             // affiliate() 가 돌려준 token
+    };
+    std::map<int64_t, PendingPublish> publishPending;
     std::map<std::string, std::string> publishEtag;               // "accountId:group" → SIP-ETag
     static constexpr size_t kKeepFinished = 64;
     void pruneFinished() {                                 // snapM 잡은 상태에서 호출
@@ -329,6 +349,15 @@ struct Engine::Impl {
     int64_t doSendRequest(int accountId, const std::string& method, const std::string& targetUri,
                        const std::string& contentType, const std::string& body,
                        const std::map<std::string, std::string>& headers, int64_t token);
+    /** affiliation PUBLISH(TS 24.379 §9) — ue-ctl 에서. allowConditional 이면 저장된 ETag 로 SIP-If-Match(RFC 3903 §4.4). */
+    int64_t sendAffiliation(int accountId, const std::string& groupId, bool on, int64_t token, int64_t appToken, bool allowConditional);
+    /** 영상 미디어가 활성된 호 — 수신 창 결선 + (계정 videoAutoTransmit 면) 카메라 송신 개시. 영상 없는 빌드면 아무것도 안 한다. */
+    void attachVideo(PjCall* call, int accountId);
+    /** 기억한 장치 단 음량을 slot 0 에 다시 건다 — 게이트 전환·재오픈·미디어 결선 뒤(재오픈은 slot 0 레벨을 초기화한다). */
+    void applyDeviceLevels();
+    /** 캡처 카메라 목록(합성 장치 제외)과 전면 카메라. */
+    std::vector<int> cameras();
+    int frontCamera();
 };
 
 namespace {
@@ -599,6 +628,7 @@ public:
             else if (m.status == PJSUA_CALL_MEDIA_LOCAL_HOLD || m.status == PJSUA_CALL_MEDIA_REMOTE_HOLD) held = true;
         }
         try { if (active) o_->wireMedia(this, id); } catch (pj::Error& e) { o_->log(2, std::string("wireMedia: ") + e.info(false)); }
+        o_->attachVideo(this, accountId_);
         CallInfo snap;
         bool stateChanged = false;
         o_->updateCall(id, [&](CallInfo& c) {
@@ -715,14 +745,32 @@ public:
             r.code = ts.tsx.statusCode;
             r.reason = ts.tsx.statusText;
             if (ts.type == PJSIP_EVENT_RX_MSG) r.etag = detail::headerValue(ts.src.rdata.wholeMsg, "SIP-ETag");
+            Engine::Impl::PendingPublish retry;
+            int64_t retryToken = -1;
             {
                 std::lock_guard<std::mutex> lk(o_->snapM);
                 auto it = o_->publishPending.find(r.token);
                 if (it != o_->publishPending.end()) {
-                    if (!r.etag.empty() && r.code / 100 == 2)
-                        o_->publishEtag[std::to_string(it->second.first) + ":" + it->second.second] = r.etag;
+                    const Engine::Impl::PendingPublish p = it->second;
+                    const std::string key = std::to_string(p.accountId) + ":" + p.groupId;
+                    r.token = p.appToken;                  // 앱은 affiliate() 의 token 으로 상관한다
+                    if (r.code == PJSIP_SC_CONDITIONAL_REQUEST_FAILED) {
+                        // RFC 3903 §5 — 412 를 낸 entity-tag 는 버리고(MUST) 같은 요청을 다시 보내지 않는다(MUST NOT).
+                        // 상태는 SIP-If-Match 없는 초기 PUBLISH 로 다시 알린다(SHOULD, §4.2) — 한 번만, 결과는 그 응답으로.
+                        o_->publishEtag.erase(key);
+                        if (p.conditional) { retry = p; retryToken = o_->nextToken++; }
+                    } else if (!r.etag.empty() && r.code / 100 == 2) {
+                        o_->publishEtag[key] = r.etag;
+                    }
                     o_->publishPending.erase(it);
                 }
+            }
+            if (retryToken >= 0) {
+                o_->ctl.post([o = o_, retry, retryToken, r] {
+                    if (o->sendAffiliation(retry.accountId, retry.groupId, retry.on, retryToken, retry.appToken, false) < 0)
+                        o->emit([o, r] { o->listener->onRequestResult(r); });   // 재발행을 못 만들면 412 를 그대로
+                });
+                return;
             }
             o_->emit([o = o_, r] { o->listener->onRequestResult(r); });
         } catch (...) {}
@@ -836,6 +884,106 @@ void Engine::Impl::applyCodecPolicy() {
     std::string all;
     for (auto& id : ids) all += id + " ";
     log(3, "codecs: " + all + (amrwb.empty() ? "" : "(AMR-WB first)"));
+#if PJSUA_HAS_VIDEO
+    // 영상: H.264 최우선 + 인코딩 480x640(세로)·15 fps·평균 400 / 최대 500 kbit/s — 기존 VoLTE 앱(CodecConfig.kt)과 같은 값.
+    try {
+        for (auto& c : ep->videoCodecEnum2()) {
+            if (c.codecId.find("H264") == std::string::npos) continue;
+            ep->videoCodecSetPriority(c.codecId, 254);
+            pj::VidCodecParam vp = ep->getVideoCodecParam(c.codecId);
+            vp.encFmt.width = 480; vp.encFmt.height = 640;
+            vp.encFmt.fpsNum = 15; vp.encFmt.fpsDenum = 1;
+            vp.encFmt.avgBps = 400000; vp.encFmt.maxBps = 500000;
+            ep->setVideoCodecParam(c.codecId, vp);
+            log(3, "video codec " + c.codecId + " first, enc 480x640 15fps 400k/500k");
+            break;
+        }
+    } catch (pj::Error& e) { log(2, std::string("video codec: ") + e.info(false)); }
+#endif
+}
+
+// ── 영상 ──
+#if defined(__ANDROID__)
+static void windowAcquire(void* w) { if (w) ANativeWindow_acquire(static_cast<ANativeWindow*>(w)); }
+static void windowRelease(void* w) { if (w) ANativeWindow_release(static_cast<ANativeWindow*>(w)); }
+#else
+static void windowAcquire(void*) {}                     // 참조 수를 세지 않는 창(HWND 등)
+static void windowRelease(void*) {}
+#endif
+
+std::vector<int> Engine::Impl::cameras() {
+    std::vector<int> v;
+#if PJSUA_HAS_VIDEO
+    try {
+        pj::VideoDevInfoVector2 devs = ep->vidDevManager().enumDev2();
+        for (auto& d : devs) {
+            if (!(d.dir & PJMEDIA_DIR_CAPTURE)) continue;
+            if (d.driver == "Colorbar") continue;           // 합성 장치(시험용 색 막대)
+            v.push_back(d.id);
+        }
+    } catch (pj::Error& e) { log(2, std::string("camera enum: ") + e.info(false)); }
+#endif
+    return v;
+}
+
+int Engine::Impl::frontCamera() {
+#if PJSUA_HAS_VIDEO
+    int first = -1;
+    try {
+        for (auto& d : ep->vidDevManager().enumDev2()) {
+            if (!(d.dir & PJMEDIA_DIR_CAPTURE) || d.driver == "Colorbar") continue;
+            if (first < 0) first = d.id;
+            std::string n = d.name;
+            std::transform(n.begin(), n.end(), n.begin(), [](unsigned char ch) { return (char)std::tolower(ch); });
+            if (n.find("front") != std::string::npos) return d.id;
+        }
+    } catch (...) {}
+    return first >= 0 ? first : (int)PJMEDIA_VID_DEFAULT_CAPTURE_DEV;
+#else
+    return -1;
+#endif
+}
+
+void Engine::Impl::attachVideo(PjCall* call, int accountId) {
+#if PJSUA_HAS_VIDEO
+    bool autoTx = false;
+    { auto it = accountCfgs.find(accountId); if (it != accountCfgs.end()) autoTx = it->second.videoAutoTransmit; }
+    pj::CallInfo ci;
+    try { ci = call->getInfo(); } catch (...) { return; }
+    for (auto& m : ci.media) {
+        if (m.type != PJMEDIA_TYPE_VIDEO || m.status != PJSUA_CALL_MEDIA_ACTIVE) continue;
+        if (m.dir & PJMEDIA_DIR_DECODING) {
+            std::lock_guard<std::mutex> lk(videoM);
+            if (videoWindow) {
+                try {
+                    pj::VideoWindow vw = m.videoWindow;
+                    if (vw.getInfo().winHandle.handle.window != videoWindow) {
+                        pj::VideoWindowHandle h;
+#if defined(__ANDROID__)
+                        h.type = PJMEDIA_VID_DEV_HWND_TYPE_ANDROID;
+#endif
+                        h.handle.window = videoWindow;
+                        windowAcquire(videoWindow);             // 렌더러가 이 참조를 가진다(교체·스트림 소멸 때 푼다)
+                        vw.setWindow(h);
+                    }
+                    vw.Show(true);
+                } catch (pj::Error& e) { log(2, std::string("video window: ") + e.info(false)); }
+            }
+        }
+        if (autoTx) {
+            // 계정 autoTransmitOutgoing 만으로는 협상 방향에 따라 캡처가 열리지 않을 수 있다 — 송신 방향이 없으면 sendrecv 로, 있으면 송신 개시.
+            try {
+                pj::CallVidSetStreamParam p;
+                p.medIdx = (int)m.index;
+                pjsua_call_vid_strm_op op = PJSUA_CALL_VID_STRM_START_TRANSMIT;
+                if (!(m.dir & PJMEDIA_DIR_ENCODING)) { op = PJSUA_CALL_VID_STRM_CHANGE_DIR; p.dir = PJMEDIA_DIR_ENCODING_DECODING; }
+                call->vidSetStream(op, p);
+            } catch (pj::Error& e) { log(3, std::string("video transmit: ") + e.info(false)); }
+        }
+    }
+#else
+    (void)call; (void)accountId;
+#endif
 }
 
 void Engine::Impl::wireMedia(PjCall* call, int callId) {
@@ -862,6 +1010,20 @@ void Engine::Impl::wireMedia(PjCall* call, int callId) {
     if (call->mcptt) micOn = !call->mcptt->listenOnly && (call->mcptt->fullDuplex || call->mcptt->micOpen);
     else micOn = !snap.muted && !call->recvOnly;
     if (micOn) src.startTransmit(*aud); else src.stopTransmit(*aud);
+    applyDeviceLevels();                                   // 결선으로 장치가 막 열렸을 수 있다 — 장치 단 음량 재적용
+}
+
+void Engine::Impl::applyDeviceLevels() {
+    if (!levelsSet || cfg.nullAudioDevice) return;
+    pj::AudDevManager& adm = ep->audDevManager();
+    // ue_audio_level.md §2 — slot 0 은 캡처·재생 미디어가 같은 객체이고 pjsua2 방향은 미디어 관점이다:
+    // adjustRxLevel = bridge → 장치 = 스피커, adjustTxLevel = 장치 → bridge = 마이크. 두 축은 따로 건다(한 축 실패가 다른 축을 지우지 않게).
+    try { adm.getPlaybackDevMedia().adjustRxLevel(spkLevel); }
+    catch (pj::Error& e) { log(4, std::string("speaker level: ") + e.info(false)); }
+    try {
+        adm.getCaptureDevMedia().adjustTxLevel(1.f);
+        adm.setCaptureAgc(true, (float)micTarget);
+    } catch (pj::Error& e) { log(4, std::string("mic agc: ") + e.info(false)); }   // 장치 지연 개방 중 — 다음 결선에서 다시
 }
 
 int64_t Engine::Impl::doSendRequest(int accountId, const std::string& method, const std::string& targetUri,
@@ -943,6 +1105,7 @@ Result Engine::start(const EngineConfig& cfg, Listener* listener) {
             if (o->cfg.nullAudioDevice) o->ep->audDevManager().setNullDev();
             o->ep->libStart();
             o->applyCodecPolicy();
+            o->captureOn = true;
             o->running = true;
             o->log(3, std::string("libcimsue ") + version() + " started");
             return Result::success();
@@ -992,6 +1155,10 @@ int Engine::addAccount(const AccountConfig& cfg) {
         try {
             std::string note;
             pj::AccountConfig ac = detail::buildPjAccountConfig(cfg, &note);
+#if PJSUA_HAS_VIDEO
+            if (o->camDev < 0) o->camDev = o->frontCamera();
+            ac.videoConfig.defaultCaptureDevice = (pjmedia_vid_dev_index)o->camDev;   // 셀프뷰 = 전면 카메라
+#endif
             auto acc = std::make_unique<PjAccount>(o, id);
             o->accountCfgs[id] = cfg;                        // onIncomingCall 이 읽으므로 create 전에
             acc->create(ac, o->accounts.empty());
@@ -1365,25 +1532,31 @@ int64_t Engine::sendRequest(int accountId, const std::string& method, const std:
     return impl_->ctl.runSync([=] { return impl_->doSendRequest(accountId, method, targetUri, contentType, body, headers, token); });
 }
 
+int64_t Engine::Impl::sendAffiliation(int accountId, const std::string& groupId, bool on, int64_t token, int64_t appToken,
+                                      bool allowConditional) {
+    auto ic = accountCfgs.find(accountId);
+    if (ic == accountCfgs.end()) return -1;
+    std::map<std::string, std::string> h;
+    h["Event"] = "mcptt";                                              // TS 24.379 §9 — 없으면 CSP 489
+    h["Expires"] = on ? "3600" : "0";
+    {
+        std::lock_guard<std::mutex> lk(snapM);
+        PendingPublish p;
+        p.accountId = accountId; p.groupId = groupId; p.on = on; p.appToken = appToken;
+        auto et = publishEtag.find(std::to_string(accountId) + ":" + groupId);
+        if (allowConditional && et != publishEtag.end()) { h["SIP-If-Match"] = et->second; p.conditional = true; }
+        publishPending[token] = p;
+    }
+    int64_t r = doSendRequest(accountId, "PUBLISH", "sip:" + groupId + "@" + ic->second.domain, mcptt::kCtAffiliation,
+                              mcptt::affiliationCommand("tel:" + groupId, on), h, token);
+    if (r < 0) { std::lock_guard<std::mutex> lk(snapM); publishPending.erase(token); }
+    return r < 0 ? -1 : appToken;
+}
+
 int64_t Engine::affiliate(int accountId, const std::string& groupId, bool on) {
     if (!impl_->running) return -1;
     int64_t token = impl_->nextToken++;
-    return impl_->ctl.runSync([=]() -> int64_t {
-        Impl* o = impl_.get();
-        auto ic = o->accountCfgs.find(accountId);
-        if (ic == o->accountCfgs.end()) return -1;
-        std::map<std::string, std::string> h;
-        h["Event"] = "mcptt";                                              // TS 24.379 §9 — 없으면 CSP 489
-        h["Expires"] = on ? "3600" : "0";
-        {
-            std::lock_guard<std::mutex> lk(o->snapM);
-            auto et = o->publishEtag.find(std::to_string(accountId) + ":" + groupId);
-            if (et != o->publishEtag.end()) h["SIP-If-Match"] = et->second;
-            o->publishPending[token] = {accountId, groupId};
-        }
-        return o->doSendRequest(accountId, "PUBLISH", "sip:" + groupId + "@" + ic->second.domain, mcptt::kCtAffiliation,
-                                mcptt::affiliationCommand("tel:" + groupId, on), h, token);
-    });
+    return impl_->ctl.runSync([=]() -> int64_t { return impl_->sendAffiliation(accountId, groupId, on, token, token, true); });
 }
 
 Result Engine::subscribeConference(int accountId, const std::string& groupId, bool on) {
@@ -1625,6 +1798,174 @@ Result Engine::setAudioDevices(int captureDev, int playbackDev) {
             return Result::success();
         } catch (pj::Error& e) { return fromError(e); }
     });
+}
+
+Result Engine::setCaptureEnabled(bool on) {
+    if (!impl_->running) return Result::fail(-1, "not running");
+    return impl_->ctl.runSync([this, on]() -> Result {
+        Impl* o = impl_.get();
+        if (o->captureOn == on) return Result::success();
+        // null 장치는 모드를 받지 않고 다시 만들어질 뿐이다(pjsua_set_snd_dev2) — 상태만 둔다.
+        if (!o->cfg.nullAudioDevice) {
+            // 모드는 장치 선택을 넘어 유지된다(setCaptureDev·setPlaybackDev 가 pjsua_get_snd_dev2 로 현재 모드를 이어받는다).
+            // NO_IMMEDIATE_OPEN — 장치가 닫혀 있으면 열지 않고 모드만, 열려 있으면 곧바로 다시 연다(브리지 결선은 유지).
+            const unsigned mode = (on ? 0u : (unsigned)PJSUA_SND_DEV_SPEAKER_ONLY) | (unsigned)PJSUA_SND_DEV_NO_IMMEDIATE_OPEN;
+            try { o->ep->audDevManager().setSndDevMode(mode); }
+            catch (pj::Error& e) { return fromError(e); }
+        }
+        o->captureOn = on;
+        o->applyDeviceLevels();                              // 재오픈은 slot 0 레벨을 초기화한다
+        o->log(4, std::string("capture ") + (on ? "enabled (full duplex)" : "disabled (speaker only)"));
+        return Result::success();
+    });
+}
+
+Result Engine::setDeviceAudioLevels(float speaker, double micTargetDbov) {
+    if (!impl_->running) return Result::fail(-1, "not running");
+    if (!(speaker >= 0.f)) return Result::fail(-1, "speaker level");
+    return impl_->ctl.runSync([this, speaker, micTargetDbov]() -> Result {
+        Impl* o = impl_.get();
+        o->spkLevel = speaker;
+        o->micTarget = std::min(-10.0, std::max(-40.0, micTargetDbov));   // 엔진 목표 범위(§4)
+        o->levelsSet = true;
+        o->applyDeviceLevels();
+        o->log(4, "device levels speaker=" + std::to_string(speaker) + " mic_target=" + std::to_string(o->micTarget) + " dBov");
+        return Result::success();
+    });
+}
+
+static pjmedia_aud_dev_route pjRoute(AudioRoute r) {
+    switch (r) {
+        case AudioRoute::Earpiece: return PJMEDIA_AUD_DEV_ROUTE_EARPIECE;
+        case AudioRoute::Loudspeaker: return PJMEDIA_AUD_DEV_ROUTE_LOUDSPEAKER;
+        default: return PJMEDIA_AUD_DEV_ROUTE_DEFAULT;
+    }
+}
+
+Result Engine::setAudioRoute(AudioRoute output, AudioRoute input) {
+    if (!impl_->running) return Result::fail(-1, "not running");
+    return impl_->ctl.runSync([this, output, input]() -> Result {
+        Impl* o = impl_.get();
+        if (o->cfg.nullAudioDevice) return Result::success();   // null 장치는 라우트 능력이 없다
+        pj::AudDevManager& adm = o->ep->audDevManager();
+        try { adm.setOutputRoute(pjRoute(output), true); }
+        catch (pj::Error& e) { return fromError(e); }
+        // 입력 라우트를 모르는 백엔드도 있다 — 출력은 이미 걸렸으므로 실패는 기록만(keep = 발언마다 장치가 다시 열려도 유지)
+        try { adm.setInputRoute(pjRoute(input), true); }
+        catch (pj::Error& e) { o->log(3, std::string("input route: ") + e.info(false)); }
+        return Result::success();
+    });
+}
+
+Result Engine::reopenAudioDevice() {
+    if (!impl_->running) return Result::fail(-1, "not running");
+    return impl_->ctl.runSync([this]() -> Result {
+        Impl* o = impl_.get();
+        if (o->cfg.nullAudioDevice) return Result::success();
+        pj::AudDevManager& adm = o->ep->audDevManager();
+        if (!adm.sndIsActive()) return Result::success();       // 닫혀 있다 — 다음 개방이 새 트랙이다
+        // 같은 장치·같은 모드면 pjsua_set_snd_dev2 는 "No changes" 로 돌아간다(열려 있거나 NO_IMMEDIATE_OPEN 이면). 모드에서
+        // NO_IMMEDIATE_OPEN 만 빼 값이 달라지게 하면 장치를 닫고 곧바로 다시 연다 — 게이트(SPEAKER_ONLY)는 그대로 둔다.
+        const unsigned mode = o->captureOn ? 0u : (unsigned)PJSUA_SND_DEV_SPEAKER_ONLY;
+        try { adm.setSndDevMode(mode); }
+        catch (pj::Error& e) { return fromError(e); }
+        o->applyDeviceLevels();
+        o->log(3, "sound device reopened");
+        return Result::success();
+    });
+}
+
+bool Engine::captureEnabled() const { return impl_->captureOn; }
+
+Result Engine::setVideoWindow(void* nativeWindow) {
+#if PJSUA_HAS_VIDEO
+    if (!impl_->running) { windowRelease(nativeWindow); return Result::fail(-1, "not running"); }
+    return impl_->ctl.runSync([this, nativeWindow]() -> Result {
+        Impl* o = impl_.get();
+        void* old = nullptr;
+        {
+            std::lock_guard<std::mutex> lk(o->videoM);
+            old = o->videoWindow;
+            o->videoWindow = nativeWindow;
+        }
+        // 활성 영상 호에 곧바로 — 해제(nullptr)면 렌더러에서 창을 뗀다(렌더러가 자기 참조를 푼다).
+        for (auto& kv : o->calls) {
+            auto* call = static_cast<PjCall*>(kv.second.get());
+            if (nativeWindow) { o->attachVideo(call, -1); continue; }
+            try {
+                for (auto& m : call->getInfo().media) {
+                    if (m.type != PJMEDIA_TYPE_VIDEO || m.status != PJSUA_CALL_MEDIA_ACTIVE) continue;
+                    pj::VideoWindow vw = m.videoWindow;
+                    pj::VideoWindowHandle h;
+                    h.handle.window = nullptr;
+                    vw.setWindow(h);
+                }
+            } catch (...) {}
+        }
+        if (old && old != nativeWindow) windowRelease(old);
+        return Result::success();
+    });
+#else
+    windowRelease(nativeWindow);                         // 넘겨받은 참조 — 쓰지 않으니 바로 돌려준다
+    return Result::fail(-3, "video not built");
+#endif
+}
+
+Result Engine::switchCamera(int callId) {
+#if PJSUA_HAS_VIDEO
+    if (!impl_->running) return Result::fail(-1, "not running");
+    return impl_->ctl.runSync([this, callId]() -> Result {
+        Impl* o = impl_.get();
+        PjCall* call = o->findCall(callId);
+        if (!call) return Result::fail(-2, "no such call");
+        std::vector<int> cams = o->cameras();
+        if (cams.size() < 2) return Result::fail(-3, "single camera");
+        if (o->camDev < 0) o->camDev = o->frontCamera();
+        int next = cams[0];
+        for (size_t i = 0; i < cams.size(); ++i)
+            if (cams[i] == o->camDev) { next = cams[(i + 1) % cams.size()]; break; }
+        bool done = false;
+        try {
+            for (auto& m : call->getInfo().media) {
+                if (m.type != PJMEDIA_TYPE_VIDEO || m.status != PJSUA_CALL_MEDIA_ACTIVE) continue;
+                pj::CallVidSetStreamParam p;
+                p.medIdx = (int)m.index;
+                p.capDev = (pjmedia_vid_dev_index)next;
+                call->vidSetStream(PJSUA_CALL_VID_STRM_CHANGE_CAP_DEV, p);
+                done = true;
+            }
+        } catch (pj::Error& e) { return fromError(e); }
+        if (!done) return Result::fail(-4, "no active video");
+        o->camDev = next;
+        o->log(3, "camera -> " + std::to_string(next));
+        return Result::success();
+    });
+#else
+    (void)callId;
+    return Result::fail(-3, "video not built");
+#endif
+}
+
+std::vector<VideoDeviceInfo> Engine::videoDevices() const {
+    std::vector<VideoDeviceInfo> v;
+#if PJSUA_HAS_VIDEO
+    if (!impl_->running) return v;
+    return impl_->ctl.runSync([this]() {
+        std::vector<VideoDeviceInfo> out;
+        try {
+            for (auto& d : impl_->ep->vidDevManager().enumDev2()) {
+                VideoDeviceInfo i;
+                i.id = d.id; i.name = d.name; i.driver = d.driver;
+                i.capture = (d.dir & PJMEDIA_DIR_CAPTURE) != 0;
+                i.render = (d.dir & PJMEDIA_DIR_RENDER) != 0;
+                out.push_back(i);
+            }
+        } catch (...) {}
+        return out;
+    });
+#else
+    return v;
+#endif
 }
 
 int Engine::addPlaybackRoute(int playbackDev) {

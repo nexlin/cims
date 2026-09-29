@@ -125,7 +125,6 @@ sdk/core/
     util/               json_lite — 최소 JSON 파서(CSC 클라이언트·계측 링크)
     csc/                OAuth2 PKCE(IdMS) · XCAP(GMS 그룹·CMS user-profile/service-config, ETag) ·
                         `/provisioning/me` · `/provisioning/directory` · FD 스토어 — HTTP 전송은 인터페이스(§4.4)
-    domain/             UE 세션 모델(등록·호 목록·그룹/채널·affiliation·긴급/경보·데스크) → 상태 스냅샷 + 이벤트
     http/               IHttpTransport 기본 구현(libcurl+OpenSSL)
   cli/                  cimsue-cli — 헤드리스 UE (Linux; S3 시나리오·cspsim 보완, §9)
   test/                 googletest — floor/mcdata 코덱 교차 검증·SDP·상태머신
@@ -139,7 +138,7 @@ sdk/core/
 | floor | `ptt-client/floor/FloorClient.kt`·`FloorCodec.kt`·`FloorControl.kt` | opcode/field/cause 상수 → 단일 정의 테이블(§4.6) |
 | mcdata | `ptt-client/mcdata/McDataCodec.kt`·`msrp/MsrpSession.kt`·`MsrpCodec.kt` | SDS TLV·MSRP 프레이밍·FD |
 | csc | `ptt-client/csc/CscClient.kt`·`core/provision/ProvisioningClient.kt`·`Pkce.kt` | PKCE S256·XCAP 경로·If-None-Match 304 |
-| domain | `ptt-client/PttController.kt` 의 프로토콜 부분 | 세션 목록·listen policy·affiliation·긴급/경보·CMS AND 게이트(user-profile ∧ service-config)·N2 미강제 |
+| (코어 밖 — 앱 세션 층, §5.3) | `ptt-client/PttController.kt` 의 정책 부분 | 세션 목록·listen policy·affiliation 목표 집합과 재시도·채널 복원·긴급 대상 선택·N2 미강제. 규격 절차(긴급 re-INVITE·경보 메시지·CMS AND 게이트 판정 입력)는 코어로 |
 
 ### 4.2 공개 API 모델
 
@@ -175,6 +174,10 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   않는다(android_ue_client §7 과 동일).
 - **에러 모델.** 명령은 즉시 `Result{ok, reason}` 을 돌려주고(인자·상태 오류), 프로토콜 결과는 이벤트로 온다.
 - **ABI.** 공개 헤더는 pjsua2 타입을 include 하지 않는다. 구현체는 pImpl.
+- **affiliation PUBLISH 의 entity-tag**(RFC 3903). 코어가 EPA 다 — 2xx 의 `SIP-ETag` 를 그룹별로 기억해 다음 `affiliate` 에
+  `SIP-If-Match` 로 싣는다. 412 를 받으면 그 ETag 를 버리고(§5 MUST) 같은 요청을 다시 보내지 않으며, `SIP-If-Match` 없는 초기 PUBLISH
+  (§4.2)로 한 번 다시 알린다. 앱에는 412 가 올라가지 않고 재발행의 최종 응답이 `affiliate()` 가 돌려준 token 으로 온다(시험
+  `AffiliationPublish.StaleEtag412FallsBackToInitialPublish`).
 - **일제 통화**(TS 24.379 §4.12, [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §4.4). `joinGroupCall({broadcast})` 는
   `prearranged` + `<broadcast-ind>true` 로 개시하고 그 단말을 개시자로 둔다 — Floor Request 에 B-bit 를 싣고, Floor Release 뒤
   B-bit Floor Idle 을 받으면 **코어가 호를 해제**한다(TS 24.380 §6.2.4.6.4, 앱 조작 없음). 수신 멤버의 표시는 앱 몫이다
@@ -229,9 +232,25 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
 - **SSRC 소스.** U10 디먹스가 만든 서브스트림을 코어가 `MediaSources[]` 로 노출한다. 감청 leg 는 RFC 5576
   `a=ssrc … label` 을 파싱해 각 소스에 발신자/착신자 라벨을 붙인다. 믹싱은 pjmedia 안에서 끝나고(브리지 포트 1개)
   앱은 소스별 활성·레벨 표시만 한다(dispatch_center §5.4).
-- **영상.** 코어는 창을 열지 않는다. 디코드된 프레임을 `onVideoFrame(source, frame)` 으로 준다(Android 는
-  Surface 를 받아 pjmedia 가 직접 그리는 기존 경로를 유지할 수 있다 — 파사드 선택). 감청 영상 격자 합성은 UI 몫.
-- **캡처.** 카메라·마이크 권한과 장치 열기는 플랫폼 SDK 가 하고, 코어는 `setCaptureEnabled` 로 on/off 만 한다.
+- **영상.** 코어는 창을 열지 않는다. Android 는 Surface 를 받아 pjmedia 렌더러가 직접 그린다 — `Engine::setVideoWindow(void*)`
+  (파사드 `CimsUe.setVideoSurface(Surface?)`, SWIG typemap 이 `ANativeWindow_fromSurface` 로 참조 하나를 코어에 넘기고 코어가 결선마다
+  렌더러 몫을 따로 잡는다 — 렌더러는 교체·스트림 소멸 때 자기 참조를 푼다). 영상이 활성되는 호마다 수신 창을 결선하고, 계정
+  `videoAutoTransmit` 면 카메라 송신을 연다(START_TRANSMIT, 송신 방향이 없으면 sendrecv 로). 셀프뷰는 카메라를 두 번 열지 않고 엔진
+  캡처가 연 Camera2 세션에 출력 Surface 를 더한다(파사드 `setPreviewSurface` → CIMS 패치 `PjCamera2.SetPreviewSurface`). 카메라 전환
+  `switchCamera(callId)`(합성 장치 Colorbar 제외, 기본 = 이름에 front), H.264 최우선·인코딩 480x640·15 fps·400/500 kbit/s. 카메라 열거는
+  기동 때 한 번이라 `CimsUe.start(cfg, context)` 가 **기동 전에** `PjCameraInfo2.SetCameraManager` 를 넣는다. 코어 제어 스레드(`ue-ctl`)는
+  네이티브 스레드라 `FindClass` 가 APK 의 `org.pjsip.PjCamera2` 를 못 찾으므로, pjlib 이 `JNI_OnLoad` 에서 앱 클래스 로더를 기억하고
+  영상 장치가 `pj_jni_find_class` 로 찾는다(CIMS 패치). 카메라 도우미 두 파일은 pj 를 싣는 모듈마다 빌드 때 복사한다(S1-UE-ENGINE-SINGLE).
+  프레임 콜백(`onVideoFrame`)은 창 없는 렌더 장치 패치가 필요해 후속(§11). 감청 영상 격자 합성은 UI 몫.
+- **캡처.** 카메라·마이크 권한과 장치 열기는 플랫폼 SDK 가 하고, 코어는 `setCaptureEnabled` 로 on/off 만 한다 — false = pjsua
+  `SPEAKER_ONLY`(캡처 스트림을 열지 않고 재생만, OS 동시 캡처 중재에서 빠진다 — 앱 간 마이크 양보·PTT 유휴), `NO_IMMEDIATE_OPEN`
+  동반이라 장치가 닫혀 있으면 모드만 두고, 모드는 장치 선택을 넘어 유지된다. 헤드리스(null 장치)는 상태만 둔다.
+- **장치 단 음량·라우트**([ue_audio_level.md](ue_audio_level.md) §2·§6). `setDeviceAudioLevels(speaker, micTargetDbov)` = 스피커 배율
+  (slot 0 `adjustRxLevel`) + 마이크 AGC 목표(마이크 배율 1 고정) — 코어가 값을 기억해 게이트 전환·재오픈·호 결선 뒤 다시 건다.
+  `setAudioRoute(output, input)` = pjmedia OUTPUT_ROUTE + INPUT_ROUTE(keep, 입력 `Earpiece` = 내장 기본 마이크 고정 — 반이중 무전을
+  단말 스피커·수화기로 들을 때). `reopenAudioDevice()` = 장치가 열려 있으면 닫고 곧바로 다시 연다(같은 장치·모드면 pjsua 가 "No changes"
+  로 돌아가므로 모드에서 NO_IMMEDIATE_OPEN 만 빼 값이 달라지게 한다) — 출력 장치 소멸 뒤 재생 트랙 뮤트가 남는 단말 대응.
+  호별 듣는 크기는 `setRxLevel`(통화 포트 `adjustTxLevel`).
 
 ### 4.6 floor 코덱 단일 정의
 
@@ -339,25 +358,36 @@ android_ue_client §13 그대로.
 
 ### 5.3 기존 `android/` 와의 관계
 
-`android/core` 는 Android Library 이면서 pjsua2 SWIG·SipController·프로비저닝·계정·연락처 저장을 한 모듈에
-담고 있고, `ptt-client` 가 floor·mcdata·csc 를 따로 가진다. 최종 상태는 다음과 같다.
+`android/core` 는 Android Library 이면서 자체 pjsua2 래퍼(`sip/`)·프로비저닝·계정·연락처 저장을 한 모듈에 담고 있고,
+`ptt-client` 가 floor·mcdata·csc·mcptt 사본을 따로 가진다. 최종 상태는 다음과 같다.
 
 | 지금 | 최종 |
 |---|---|
-| `android/core` 의 pjsua2 SWIG + `.so` | `sdk/android/cimsue` 안으로 이동(엔진은 코어가 링크) |
-| `android/core/sip/*` (SipController 등) | 코어 `sip` 로 이식. Kotlin 은 `CimsUe` 파사드 |
-| `android/ptt-client/{floor,mcdata,csc}` | 코어 `floor/mcdata/csc` 로 이식 |
-| `android/ptt-client/PttController.kt` | 프로토콜 부분은 코어 `domain`, UI 상태 부분은 앱 ViewModel 로 분해 |
-| `android/core/{account,provision,contacts,calllog,message,config}` 저장·SSO | `sdk/android/platform` (Android 접점) 또는 앱 |
-| `android/cims` (SSO 로그인 앱) | 유지 — `sdk/android` 의 `SsoAccount` 를 사용 |
-| `volte-client`·`ptt-client` | `implementation(project(":sdk:cimsue"))` 로 전환 |
-| 신규 `android/dispatch-tablet` | 관제조작반 태블릿 앱 (§7) — **구현 완료**, 정본 [android_dispatch_tablet.md](android_dispatch_tablet.md) |
+| `android/core/sip/*` — 자체 pjsua2 래퍼(SipController·CimsCall·CimsAccount·CimsEndpoint·PjLib·CodecConfig) | 없어진다. 앱은 `:cimsue` 파사드(`CimsUe`·`Account`·`Call`)를 쓴다. 이행 기간에는 `:core-sip` 로 떼어 아직 옮기지 않은 앱만 쓴다 |
+| `android/core` 나머지(account·provision·config·contacts·calllog·message·device·net·power·boot·ui·`CimsSuite`) | `:core` 에 남는다 — SIP·엔진 의존 없음. 로그인 앱 `android/cims` 도 이것만 쓴다(`libpjsua2.so` 를 싣지 않는다) |
+| `android/ptt-client/{floor,mcdata,csc,mcptt}` | 없어진다 — 코어 `floor/mcdata/csc/mcptt`. 대조 검사 `S1-UE-SDS-XCHECK`·`S1-UE-CSC-XCHECK`·`S1-UE-FLOOR-CODEC` 의 Kotlin 쪽 대상도 함께 걷는다 |
+| `android/ptt-client/PttController.kt` | 규격 절차는 코어로, 앱 정책(affiliation 목표 집합·재시도·채널 복원·듣기 정책·긴급 대상 선택)은 **앱 세션 층**으로 — 관제 태블릿 `DispatchSession` + 평면 확장(`PttPlane` 등)과 같은 구성, 화면 상태는 ViewModel |
+| `volte-client`·`ptt-client` | `implementation(project(":cimsue"))` |
+| `android/dispatch-tablet` | 관제조작반 태블릿 앱 (§7) — **구현 완료**, 정본 [android_dispatch_tablet.md](android_dispatch_tablet.md) |
 
-**엔진 단일화는 이미 끝났다**(위 표의 첫 줄) — `:core` 가 `api(project(":cimsue-engine"))` 로 받고
-커밋 산출물 312파일을 지웠다. 나머지 행(앱 로직의 파사드 이전)은 **이식 완료 후 별도 과제**다.
-공존 기간의 코드 중복은 `S1-UE-SDS-XCHECK`·`S1-UE-CSC-XCHECK` 가 드리프트를 막는다.
-남은 선결 조건은 `PttController` 의 이전 대상지로 지목한 코어 `domain/` 이 아직 없다는 것 —
-만들지, 아니면 그 로직을 앱 계층에 둘지 정해야 한다.
+- **한 프로세스에 엔진 하나.** `:core`(동적 `libpjsua2.so`)와 `:cimsue`(pj 정적 링크 `libcimsue.so`)는 같은 pjsip 기호를 각자 내므로
+  한 앱이 둘을 같이 쓰지 않는다([android_dispatch_tablet.md](android_dispatch_tablet.md) §2.2). 옮기는 앱은 `:core-sip` 을 끊고 `:cimsue` 만 쓴다.
+  앱끼리는 프로세스가 달라 이행 기간에 엔진이 달라도 되고, 앱 간 마이크·라우트 양보(`CimsSuite` 브로드캐스트)는 엔진과 무관하다.
+- **코어 `domain/` 은 두지 않는다.** 관제 태블릿(Kotlin)·Windows(.NET) 앱이 이미 각자 세션 층을 가진다 — C++ 도메인 층을 두면 둘 다
+  다시 짜야 한다. 나누는 선은 **규격이 정한 절차(메시지·상태머신·응답 해석)는 코어, 무엇을 언제 다시 할지(정책)는 앱**이다.
+- **이행 단계** — 각 단계는 기존 앱이 그대로 동작하는 것을 완료 조건으로 한다. 공존 기간의 코드 중복은 대조 검사가 드리프트를 막는다.
+
+| 단계 | 내용 | 완료 조건 |
+|---|---|---|
+| P0a 코어·파사드 보강(VoLTE 몫) | 파사드 기본값 코어와 일치(`noVad`) · affiliation 412(§4.2) · FD·floor 이벤트 종류·`userAgentOf`/`imeiUrn` 파사드 · 프로파일 `udpNoTcpSwitch` · 마이크 게이트(§4.5 `setCaptureEnabled`) · 영상(수신 Surface·셀프뷰·카메라 전환·H.264 설정·`PjCamera` 클래스를 `:cimsue` 로) · 망 변경 재등록(Android 접점) | `S1-UE-*` PASS · 관제 태블릿 회귀 · `cimsue-cli` S3(등록·1:1·영상·SRTP) |
+| P1 `:core` 분리 | `:core`(비 SIP) / `:core-sip`(자체 래퍼, 이행용) — 앱 코드 무변경 | APK 빌드·동작 불변, 로그인 앱에서 `libpjsua2.so` 빠짐 |
+| P2 volte-client 전환 | 세션 어댑터 `VoltePhone` 이 기존 래퍼 계약(등록·호 상태 StateFlow·호 명령·영상·캡처 게이트·MESSAGE)을 SDK 로 낸다 — `SipService`(FGS·오디오 모드·라우팅 협조·알림)와 화면은 그대로, 호 상태는 기존과 같은 마지막 호 이벤트 투영, 망 변경은 `NetworkWatcher`. 모듈 `:cimsue` + `:core` | 사내 단말 실기: UDP/TCP/TLS 등록·음성·영상·SRTP·SMS·망 전환·PTT 양보 |
+| P0b 코어 보강(PTT 몫) | MSRP 미디어평면 SDS(TS 24.282, RFC 4975) · 긴급 re-INVITE 상향/하향·긴급 재광고 수신·403 긴급 거부·경보(alert-ind) 빌더/파서(TS 24.379) · 승인 톤 뒤 마이크 · 장치 게인·AGC 목표([ue_audio_level.md](ue_audio_level.md)) · CMS user-profile/service-config 해석 | 단위시험 + `cimsue-cli` S3(긴급·MSRP) |
+| P3 ptt-client 전환 | `PttController` → 세션 + 평면(floor·affiliation·로스터·SDS·FD·MSRP·긴급) + ViewModel, Kotlin 프로토콜 사본 제거·대조 검사 정리 | 사내 단말 실기(g002): 그룹콜·발언권 인계·긴급·일제 통화·SDS/FD/MSRP·Doze 착신·HW PTT·VoLTE 양보 |
+| P4 시험 모드(Q4) | `android/core` 공통 진입·설정·링크 서비스·오버레이 → 앱 3종([ue_voice_quality.md](ue_voice_quality.md) §4) | 계측기 실기기 링크·`VOLTE-CALL-DEVICE-*` |
+| P5 정리 | `:core-sip` 삭제 · `:cimsue-engine` 존치 결정 · 문서 | `S1` 전체 PASS |
+
+협력업체 단말도 이 앱을 받으므로 전환한 APK 의 협력업체 배포는 단계마다 따로 승인을 받는다.
 
 ---
 
@@ -487,6 +517,8 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 | S1 | `S1-UE-FLOOR-CODEC` | `scripts/gen_floor_defs.py --check`(정의 테이블 ↔ 생성물·CMP·Kotlin·.NET·probe 상수) + `cimsue_test` 의 `FloorXCheck`(코어 빌더 ↔ CMP `ParseFloorMessage`, CMP `BuildFloorMessage` ↔ 코어 decode) |
 | S1 | `S1-UE-UNIT` | `build/bin/cimsue_test`(googletest) — config→pjsua2 매핑(IMPI·realm `*`·H(A1)/AKA 우선·TLS 게이트 SRTP·sec-agree 헤더·proxies lr)·대상 정규화·헤더 파싱·재생 라우트 수명(null 장치 엔진 기동 → 라우트 추가/제거 → 종료 순서). 확장: SDP 협상·floor 상태머신·SDS TLV·MSRP·PKCE |
 | S3 | `S3-UE-CLI-*` | `cimsue-cli` 로 등록(UDP/TLS/AKA)·1:1(평문·TLS+SRTP)·그룹콜(affiliation PUBLISH ETag·multipart INVITE·로스터 NOTIFY·floor Request→Granted/Taken·발언 RTP 수신·Idle)·SDS 송수신·관제(dialog 구독 early→confirmed→terminated, Join 200 + 감청 RTP + caller/callee SSRC 라벨, 그룹 픽업 `**`, REFER blind 전달 후 전달 대상 RTP)·PTT 청취 — 기존 `S3-SCN-*` 의 cspsim 축과 같은 판정(누적 RTP delta·403/489). 수동 절차는 VERIFICATION_MANUAL 부록, cims-verify 항목 등록은 후속 |
+| S1 | `S1-UE-UNIT`(보강) | `AffiliationPublish`(루프백 가짜 ESC — 412 뒤 ETag 폐기·초기 PUBLISH 1회·앱에는 affiliate token 으로 최종 결과 하나) · `EngineCapture`(캡처 게이트 상태·재기동 전이중) · floor 시험의 pjlib 수명 짝(`test/pj_scope.h` — 한 프로세스 전체 실행) |
+| 실기기 | Android 코어 점검 | `android/sdk-probe`(개발 도구 — 로그인·계정 없이 `:cimsue` 엔진만 기동, 사내 단말에 깔아도 착신을 가로채지 않는다): 영상 장치 열거(네이티브 제어 스레드에서 `PjCamera2` — 앱 클래스 로더 패치)·H.264 정책·장치 단 음량·라우트·캡처 게이트·재오픈 호출. 결과 줄 `PASS`/`FAIL` 은 화면·logcat `SdkProbe` |
 | 실기기 | Android | 태블릿·UNIWA 에서 감청 SSRC 2개 귀속 표시·PTT 청취 버튼 비활성·대표번호 착신 — 와이어 실측 |
 | 실기기 | Windows | 재생 라우트 이중 출력(헤드셋+스피커, WMME)·핫플러그 재열거·핫키·감청 영상 격자(F3) |
 
@@ -507,6 +539,7 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 | F1. Windows 엔진·코어 | `sdk/windows` 슈퍼빌드로 pjproject(WMME)·AMR-WB·`cimsue.dll`·`cimsue-cli.exe` MSVC 빌드 — **빌드 확정**(§6.1 엔진 빌드 확정·CRT 행). 남은 것: WMME 장치 열거 실측 | Windows 에서 `cimsue-cli` 등록·1:1(TLS+SRTP)·그룹콜 floor·Join 이 Linux 와 같은 결과 (S3 실측 전) |
 | F2. Windows C API·.NET 파사드·관제 앱 | C API `cimsue_c.h`(§6.4) — **구현·단위시험 반영**(`cimsue.dll` 이 80 함수 export — `cimsue_struct_size` ABI 자기검사 포함, `cimsue_test` 가 슈퍼빌드의 googletest 로 Windows 에서도 돈다) → `sdk/windows/dotnet/CimsUe`(파사드 + 접점: 엔드포인트·핫플러그·핫키·DPAPI·단일 인스턴스 — **구현·단위시험 50건 통과**: ABI 레이아웃 27 구조체 대조·헤드리스 엔진 수명·컨텍스트 마샬링·프로파일 파싱·접점. 네이티브 `cimsue.dll` 은 관리 `CimsUe.dll` 과 이름이 겹치므로 출력·패키지 모두 `runtimes/win-x64/native/` 에 두고 로더가 그곳을 먼저 본다) → `windows/dispatch-desktop`(WPF, §6.1 — **구현·빌드 완료**, [dispatch_desktop_ui.md](dispatch_desktop_ui.md) §11 구조 그대로. 로그인·메인 창 기동 확인, `--ui-preview` 로 로그인 없이 화면 점검) | 파사드로 `cimsue-cli` 와 같은 S3 시나리오 재현, 재생 라우트 이중 출력·핫플러그 실측, 관제 시나리오(BLF→Join→픽업→전달→PTT 청취) 실기 — **앱 실기 시험은 서버(CSC/CSP) 연결 후 일괄** |
 | F3. Windows 영상 | `PJMEDIA_HAS_VIDEO 1` + OpenH264 + DSHOW + CIMS 콜백 렌더 장치 패치 → `onVideoFrame` | 감청 영상 격자 실측 |
+| G. 기존 앱 전환 | `volte-client` → `ptt-client` 를 파사드로 — §5.3 이행 단계 P0a~P5(VoLTE 먼저) | 단계별 완료 조건(§5.3) |
 
 ---
 

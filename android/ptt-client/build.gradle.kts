@@ -33,7 +33,7 @@ kotlin {
 }
 
 dependencies {
-    implementation(project(":core"))                 // PJSIP/SIP/미디어 공유 코어
+    implementation(project(":core-sip"))             // 자체 pjsua2 래퍼(이행용) + :core — SDK 이식 전(ue_sdk.md §5.3)
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.lifecycle.runtime.ktx)

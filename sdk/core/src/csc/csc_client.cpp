@@ -177,6 +177,7 @@ bool CscClient::parseProfile(const std::string& json, Profile& out, std::string*
         std::string ms = Json::str(sip, "mediaSecurity", "off");
         sp.mediaSecurity = ms == "required" ? MediaSecurity::Required : ms == "optional" ? MediaSecurity::Optional : MediaSecurity::Off;
         sp.domain = Json::str(sip, "domain");
+        sp.udpNoTcpSwitch = Json::boolean(sip, "udpNoTcpSwitch", false);
         Json::each(Json::child(sip, "security"), [&](const JVal* m) {
             if (m->t == JVal::Str) sp.secMechanisms.push_back(m->s);
         });

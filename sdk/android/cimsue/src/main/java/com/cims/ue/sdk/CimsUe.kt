@@ -13,6 +13,9 @@
 // 앱은 이 파일의 공개면만 쓴다. `com.cims.ue.sdk.jni.*` 와 `org.pjsip.*` 는 내부다(AGENTS.md §7).
 package com.cims.ue.sdk
 
+import android.content.Context
+import android.hardware.camera2.CameraManager
+import android.view.Surface
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
@@ -167,7 +170,14 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
     val callIds: StateFlow<List<Int>> = _callIds.asStateFlow()
 
     // ── 엔진 ──────────────────────────────────────────────────────────────────
-    suspend fun start(cfg: EngineConfig): CimsResult<Unit> = command {
+    /**
+     * 엔진 기동. [context] 를 주면 영상 캡처(카메라)를 쓸 수 있게 Camera2 `CameraManager` 를 엔진 영상 장치에 넘긴다 — 장치 열거가
+     * 기동 때 한 번이라 **기동 전에** 넣어야 한다(없으면 카메라가 목록에 없다 — 수신 영상은 된다).
+     */
+    suspend fun start(cfg: EngineConfig, context: Context? = null): CimsResult<Unit> = command {
+        context?.let { ctx ->
+            (ctx.getSystemService(Context.CAMERA_SERVICE) as? CameraManager)?.let { org.pjsip.PjCameraInfo2.SetCameraManager(it) }
+        }
         CimsResult.of(engine.start(cfg.toJni(), listener)).also { if (it.ok) _running.value = true }
     }
 
@@ -259,12 +269,53 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
         command { CimsResult.of(engine.setAudioDevices(captureDev, playbackDev)) }
 
     /**
+     * 캡처 게이트 — false 면 캡처 스트림(AudioRecord)을 열지 않고 재생만 한다. 다른 앱에 마이크를 양보하는 구간
+     * (`CimsSuite` 마이크 양보)이나 PTT 유휴·청취에서 OS 동시 캡처 중재에서 빠질 때. 호 음소거·floor 게이트와 별개, 기본 true.
+     */
+    suspend fun setCaptureEnabled(on: Boolean): CimsResult<Unit> = command { CimsResult.of(engine.setCaptureEnabled(on)) }
+    val captureEnabled: Boolean get() = guarded { engine.captureEnabled() } ?: true
+
+    /**
+     * 장치 단 음량(ue_audio_level.md §2·§6) — [speaker] = 스피커 배율(1 = 원음), [micTargetDbov] = 마이크 AGC 목표(-40..-10 dBov,
+     * 기본 [MIC_AGC_TARGET_DBOV]). 마이크는 배율이 아니라 AGC 목표로 옮긴다 — 단말마다 마이크 디지털 레벨이 34 dB 넘게 달라 크기는 AGC 가
+     * 맞춘다. 코어가 값을 기억해 게이트 전환·재오픈·호 결선 뒤 다시 건다. 호별 듣는 크기는 [Call.setRxLevel].
+     */
+    suspend fun setDeviceAudioLevels(speaker: Float, micTargetDbov: Double = MIC_AGC_TARGET_DBOV): CimsResult<Unit> =
+        command { CimsResult.of(engine.setDeviceAudioLevels(speaker, micTargetDbov)) }
+
+    /**
+     * 엔진 오디오 라우트 — [output] 스피커폰·수화기·기본, [input] 마이크(EARPIECE = 내장 기본 마이크 고정, 재오픈에도 유지).
+     * 무전(반이중)은 단말 스피커·수화기로 들을 때 입력을 EARPIECE 로 고정한다(스피커 출력이면 정책이 후면 마이크를 골라 ~20 dB 작다),
+     * 전이중 스피커폰은 에코 때문에 DEFAULT. 라우트를 무시하는 단말은 [com.cims.ue.sdk.platform.AudioRouter] 를 병행한다.
+     */
+    suspend fun setAudioRoute(output: AudioRoute, input: AudioRoute = AudioRoute.DEFAULT): CimsResult<Unit> = command {
+        CimsResult.of(engine.setAudioRoute(com.cims.ue.sdk.jni.AudioRoute.swigToEnum(output.ordinal),
+            com.cims.ue.sdk.jni.AudioRoute.swigToEnum(input.ordinal)))
+    }
+
+    /** 사운드 장치 재오픈 — 라우팅 중이던 출력 장치(BT·이어폰)가 사라진 뒤 재생 트랙에 시스템 뮤트가 남는 단말 대응. 닫혀 있으면 무동작. */
+    suspend fun reopenAudioDevice(): CimsResult<Unit> = command { CimsResult.of(engine.reopenAudioDevice()) }
+
+    // ── 영상 (ue_sdk.md §4.5 — 코어는 창을 열지 않는다) ──
+    /** 수신 영상을 그릴 Surface(null = 해제). 활성 영상 호에 곧바로, 뒤에 영상이 활성되는 호에도 쓴다. */
+    suspend fun setVideoSurface(surface: Surface?): CimsResult<Unit> = command { CimsResult.of(engine.setVideoWindow(surface)) }
+
+    /**
+     * 셀프뷰(내 카메라) Surface(null = 해제). 카메라를 두 번 열지 않는다 — 엔진 캡처가 연 카메라의 세션에 출력으로 더한다
+     * (Android 카메라 단일 개방 제약, CIMS PjCamera2 패치). 통화 전에 걸어 두면 캡처 시작 때 붙고, 통화 중이면 세션이 다시 구성된다.
+     */
+    fun setPreviewSurface(surface: Surface?) { runCatching { org.pjsip.PjCamera2.SetPreviewSurface(surface) } }
+
+    suspend fun videoDevices(): List<VideoDeviceInfo> =
+        withContext(io) { guarded { VideoDeviceInfo.list(engine.videoDevices()) } } ?: emptyList()
+
+    /**
      * 추가 재생 라우트(ue_sdk.md §6.3). 반환 routeId ≥ 1.
      *
      * **Android 에서는 이것만으로 물리 출력이 갈라지지 않는다** — pjmedia Android 백엔드는 장치를
      * 하나만 노출하므로(`android_jni_dev.c` `android_get_dev_count` = 1) 라우트를 더 열어도 같은 sink 로
-     * 나간다. 스트림별 분리는 백엔드의 `PJMEDIA_AUD_DEV_CAP_OUTPUT_ROUTE` 로만 되며 코어에 그 통로가
-     * 아직 없다(§11 미해결).
+     * 나간다. 스트림별 분리 통로는 코어에 아직 없다(§11 미해결) — 장치 전체의 출력 라우트는 [setAudioRoute]
+     * (백엔드 `PJMEDIA_AUD_DEV_CAP_OUTPUT_ROUTE`) 다.
      */
     suspend fun addPlaybackRoute(playbackDev: Int): CimsResult<Int> = command {
         engine.addPlaybackRoute(playbackDev).let {
@@ -352,8 +403,23 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
         }
     }
 
-    private companion object {
-        const val CLOSE_WAIT_MS = 2_000L
+    companion object {
+        private const val CLOSE_WAIT_MS = 2_000L
+
+        /** 마이크 AGC 기본 목표(ITU-T P.56 활성 레벨, ue_audio_level.md §4) — 코어 kMicAgcTargetDbov. */
+        const val MIC_AGC_TARGET_DBOV = -26.0
+
+        /** REGISTER `User-Agent`(RFC 3261 §20.41) 규약 `<제품>/<앱 버전> (<OS>; <모델>)` — 규칙은 코어 하나(ue_sdk.md §4.2). */
+        fun userAgentOf(product: String, version: String, os: String, model: String): String {
+            NativeLib.ensure()
+            return com.cims.ue.sdk.jni.cimsue.userAgentOf(product, version, os, model)
+        }
+
+        /** IMEI → `+sip.instance` URN `urn:gsma:imei:TTTTTTTT-SSSSSS-0`(RFC 7254). 자릿수·검사 숫자가 틀리면 빈 문자열. */
+        fun imeiUrn(imei: String): String {
+            NativeLib.ensure()
+            return com.cims.ue.sdk.jni.cimsue.imeiUrn(imei)
+        }
     }
 }
 
@@ -439,6 +505,15 @@ class Account internal constructor(private val ue: CimsUe, val id: Int) {
     suspend fun sendSds(peer: String, text: String, requestDelivery: Boolean = true): CimsResult<SdsSend> =
         ue.command { SdsSend.of(ue.jni.sendSds(id, peer, text, requestDelivery)) }
 
+    // ── MCData FD (TS 24.282 §10.2 — 파일은 먼저 CscClient.uploadFd 로 올린다) ──
+    /** 그룹 FD 알림 — file 은 `uploadFd(groupId 지정)` 결과. 최종 응답은 `requestResult` 에 같은 token 으로 온다. */
+    suspend fun sendGroupFd(groupId: String, file: FdFile): CimsResult<SdsSend> =
+        ue.command { SdsSend.of(ue.jni.sendGroupFd(id, groupId, file.toJni())) }
+
+    /** 1:1 FD 알림(request-type one-to-one-fd). peer 는 상대 bare 번호. */
+    suspend fun sendFd(peer: String, file: FdFile): CimsResult<SdsSend> =
+        ue.command { SdsSend.of(ue.jni.sendFd(id, peer, file.toJni())) }
+
     /** SDS disposition 통지(notifType 1~4). */
     suspend fun sendSdsNotification(peer: String, convId: String, msgId: String, notifType: Int): CimsResult<SdsSend> =
         ue.command { SdsSend.of(ue.jni.sendSdsNotification(id, peer, convId, msgId, notifType)) }
@@ -492,6 +567,9 @@ class Call internal constructor(private val ue: CimsUe, val id: Int, private val
     suspend fun transferAttended(consult: Call): CimsResult<Unit> =
         if (consult.isStale) CimsResult.fail(-98, "stale consult handle")
         else cmd { CimsResult.of(ue.jni.transferAttended(id, consult.id)) }
+
+    /** 캡처 카메라 전환(전면↔후면) — 이후 호의 기본 카메라로도 쓴다. */
+    suspend fun switchCamera(): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.switchCamera(id)) }
 
     /** 수신 음성을 재생할 라우트(0=기본). 활성 호면 즉시 재결선. */
     suspend fun setRoute(routeId: Int): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.setCallRoute(id, routeId)) }

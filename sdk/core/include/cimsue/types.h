@@ -190,6 +190,10 @@ struct CallInfo {
 
 // ── floor (TS 24.380 participant) ──
 enum class FloorState { Idle, Requesting, Speaking, Listening, Queued };
+/** 오디오 라우트(pjmedia OUTPUT_ROUTE·INPUT_ROUTE) — 입력의 Earpiece = 내장 기본(하단) 마이크 고정, Default = 정책(고정 해제). */
+enum class AudioRoute { Default, Earpiece, Loudspeaker };
+/** 마이크 AGC 기본 목표 — ITU-T P.56 활성 레벨 -26 dBov(ue_audio_level.md §4). */
+constexpr double kMicAgcTargetDbov = -26.0;
 
 struct Talker {
     std::string id;                   // MCPTT ID (서버 표기)
@@ -359,6 +363,15 @@ struct AudioDeviceInfo {
     std::string driver;
     unsigned inputCount = 0;
     unsigned outputCount = 0;
+};
+
+/** 영상 장치(pjmedia videodev) — 캡처(카메라)·렌더. Android 카메라 driver = "Android"(Camera2), 합성 장치(Colorbar)는 driver 로 가린다. */
+struct VideoDeviceInfo {
+    int id = -1;
+    std::string name;
+    std::string driver;
+    bool capture = false;
+    bool render = false;
 };
 
 CIMSUE_API const char* toString(RegState s);

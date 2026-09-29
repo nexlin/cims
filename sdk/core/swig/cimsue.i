@@ -102,6 +102,26 @@ using namespace cimsue;
 // 지원하지 않으므로, %apply 가 "그 뒤에 파싱되는 선언에만 걸린다"는 위치 의존성을 쓴다.
 %immutable cimsue::HttpResult::body;      // 코어가 채우는 산출 전용 — setter 를 내지 않는다
 
+// ── 영상 창 핸들 ─────────────────────────────────────────────────────────────────
+// Engine::setVideoWindow(void* nativeWindow) 는 Android 에서 Surface 를 받는다 — 여기서 ANativeWindow 로 바꿔 참조 하나를 코어에 넘긴다
+// (코어가 소유 — 교체·해제 때 돌려준다, 결선마다 렌더러 몫을 따로 잡는다). pjsua2.i 의 WindowHandle.setWindow(Surface) 와 같은 변환이다.
+%{
+#if defined(__ANDROID__)
+#include <android/native_window_jni.h>
+#endif
+%}
+%typemap(jni)    void* nativeWindow "jobject"
+%typemap(jtype)  void* nativeWindow "Object"
+%typemap(jstype) void* nativeWindow "Object"
+%typemap(javain) void* nativeWindow "$javainput"
+%typemap(in)     void* nativeWindow {
+#if defined(__ANDROID__)
+    $1 = $input ? (void*)ANativeWindow_fromSurface(jenv, $input) : NULL;
+#else
+    $1 = NULL;
+#endif
+}
+
 %include "cimsue/types.h"
 %include "cimsue/listener.h"
 // engine.h 를 먼저 — Engine::sendRequest 의 SIP 본문은 텍스트라 아래 이진 적용 전에 통과시킨다.
@@ -134,3 +154,4 @@ using namespace cimsue;
 %template(GroupSummaryVector)   std::vector<cimsue::GroupSummary>;
 %template(GroupMemberVector)    std::vector<cimsue::GroupMember>;
 %template(DriveAccountVector)   std::vector<cimsue::DriveAccount>;
+%template(VideoDeviceVector)    std::vector<cimsue::VideoDeviceInfo>;

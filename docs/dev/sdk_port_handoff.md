@@ -1,0 +1,87 @@
+# 단말 SDK 이식 — .45 진행분과 다른 환경에 넘길 것
+
+`volte-client`·`ptt-client` 를 SDK(`:cimsue`) 위로 옮기는 이행([../design/features/ue_sdk.md](../design/features/ue_sdk.md) §5.3 — VoLTE 먼저, 코어 `domain/` 없음,
+정책은 앱 세션 층)의 .45 진행분이다. 작업 분담은 기존 관례와 같다 — **단말 SDK·Android 단말 앱 = .45**, **관제 앱(Windows 데스크톱·Android 태블릿)·
+C API·.NET = Windows 개발 환경**.
+
+## 1. P0a 코어·파사드 보강 (.45 반영)
+
+| 항목 | 반영 | 확인 |
+|---|---|---|
+| 파사드 기본값 | Kotlin `EngineConfig.noVad` 기본 `true` — 코어·.NET 과 같게(침묵 중에도 RTP 연속 송신 — NAT flow 유지) | `FacadeMappingTest` |
+| affiliation 412 | RFC 3903 §5 — 412 를 낸 ETag 폐기(MUST)·같은 요청 재전송 없음(MUST NOT)·`SIP-If-Match` 없는 초기 PUBLISH 한 번(SHOULD). 앱에는 412 가 올라가지 않고 재발행의 최종 응답이 `affiliate()` token 으로 온다 | `AffiliationPublish`(루프백 ESC, 수정 전 코드로 실패 재현) · .45 실서버 `cimsue-cli --affiliate g005`(계측기 전용 신원 013) — 조건 없는 PUBLISH 200 + `SIP-ETag` → de-affiliate `SIP-If-Match` 200 |
+| 파사드 | `FloorEvent.kind`(`FloorEventKind`) · FD(`CscClient.uploadFd/downloadFd`, `Account.sendGroupFd/sendFd`) · `CimsUe.userAgentOf/imeiUrn` · `ServiceProfile.udpNoTcpSwitch`(코어 프로파일 해석 포함) | `FacadeMappingTest`·`Csc.ParseProfile` |
+| 캡처 게이트 | `Engine::setCaptureEnabled`(pjsua `SPEAKER_ONLY`+`NO_IMMEDIATE_OPEN`, 장치 선택을 넘어 유지) · 파사드 `CimsUe.setCaptureEnabled` | `EngineCapture` · MF52 점검 앱(모드 3↔2) |
+| 장치 단 음량·라우트·재오픈 | `setDeviceAudioLevels(speaker, micTargetDbov)`(코어가 기억해 게이트 전환·재오픈·호 결선 뒤 재적용) · `setAudioRoute(output, input)` · `reopenAudioDevice()`(열려 있으면 실제로 닫고 다시 연다) | MF52 점검 앱(호출) — 호 중 음량·라우트는 P2/P3 실기 |
+| 영상 | `setVideoWindow`(Android Surface → `ANativeWindow` 참조를 코어가 소유, 결선마다 렌더러 몫) · `switchCamera` · `videoDevices` · H.264 최우선 480x640·15 fps·400/500 k · 계정 기본 카메라 = 전면 · `videoAutoTransmit` 면 START_TRANSMIT · 파사드 `setVideoSurface`·`setPreviewSurface`(PjCamera2)·`start(cfg, context)`(CameraManager) | MF52 점검 앱 — 카메라 2대 열거·H.264 정책. 수신 렌더·송신은 P2 실기 |
+| 카메라 클래스 탐색 | 코어 제어 스레드는 네이티브 스레드라 `FindClass` 가 APK 의 `org.pjsip.PjCamera2` 를 못 찾는다 → pjlib CIMS 패치 `pj_jni_find_class`(`JNI_OnLoad` 에서 앱 클래스 로더를 기억, FindClass 실패 때 사용) · `android_dev.c` 가 사용. 기존 `libpjsua2` 경로는 FindClass 가 먼저 성공해 동작 불변 | MF52 — `android_dev.c: Android video capture initialized with 2 device(s)` |
+| 카메라 도우미 배치 | `build-native.sh` [7] 이 `PjCamera2.java`·`PjCameraInfo2.java` 를 `:cimsue` swig 소스셋에 복사(커밋 안 함) · `S1-UE-ENGINE-SINGLE` = `org.pjsip.pjsua2` 제공처 하나 + 카메라 도우미는 pj 를 싣는 두 모듈 | S1 PASS·음성 대조(엉뚱한 파일 FAIL) |
+| 망 변경 재등록 | Android 접점 `platform.NetworkWatcher`(기본 네트워크가 바뀌면 앱 동작 — 보통 `refreshRegistration`, 등록 직후 지금 망 통지는 넘김) | `PlatformTest`(판정 `NetworkChangeFilter`) |
+| 기기 점검 앱 | `android/sdk-probe` — 로그인·계정 없이 엔진만(사내 단말에 깔아도 착신을 가로채지 않는다) | MF52 전 항목 PASS |
+
+`cimsue_test` 75(한 프로세스) · `S1-UE-*` 6 + `S1-PY-SYNTAX` PASS · `:cimsue` 31·`:ptt-client` 53 단위시험 · APK 4종(태블릿·PTT·VoLTE·점검) 빌드.
+관제 태블릿 실기 회귀는 하지 않았다(관제 계정 로그인이 Windows 쪽 시험 계정 등록과 겹친다).
+
+### 1.1 기존 앱 음질 조작 → SDK 대응 ([ue_audio_level.md](../design/features/ue_audio_level.md))
+
+| 기존 앱(`android/core-sip` `SipController`) | SDK | 비고 |
+|---|---|---|
+| 엔진 slot 0 AGC(-26 dBov)·리미터·Speex AGC 끔 | 같음 | 같은 엔진 트리(`ext/pjproject` conference.c·`config_site/common.h`) — 코드 이전 없음 |
+| `setDeviceAudioBoost(spk, mic)` — slot 0 `adjustRxLevel(spk)`·`setCaptureAgc(true, -26 + 20·log10(mic))`·마이크 배율 1 | `CimsUe.setDeviceAudioLevels(spk, 목표)` | 슬라이더 → 목표 환산은 앱. 재오픈·게이트 전환 뒤 재적용은 코어가 한다 |
+| `setCaptureEnabled` | `CimsUe.setCaptureEnabled` | 같은 pjsua 모드 |
+| `setAudioRoute` — 출력 + 입력 EARPIECE 고정(스피커·수화기) | `CimsUe.setAudioRoute(output, input)` | 고정 규칙(무전만, 전이중은 DEFAULT)은 앱 |
+| `bounceSndDev` | `CimsUe.reopenAudioDevice` | §3 확인 필요 |
+| `setCallRxLevel` — 통화 `adjustTxLevel` | `Call.setRxLevel` | 방향 같다(§2) |
+| `EpConfig.medConfig.noVad = true` | `EngineConfig.noVad`(기본 true) | |
+| `ProximityScreenLock`·`AudioRouter`(AudioManager·`ensureRxVolume`)·`gain_wiring` 저장값 판 | 앱·`:core`(비 SIP)에 남는다 | P1 에서 `:core` 에 그대로 |
+
+## 1.2 P1 `:core` 분리 (.45 반영)
+
+- `:core` = SIP·엔진 없는 공용 조각, `:core-sip` = 기존 앱의 pjsua2 래퍼 6개(`SipController`·`CimsCall`·`CimsAccount`·`CimsEndpoint`·`PjLib`·`CodecConfig`,
+  패키지명 그대로 — 앱 손코드 무변경) + `api(:core)`·`api(:cimsue-engine)`. `volte-client`·`ptt-client` → `:core-sip`, 로그인 앱 `cims` → `:core`.
+  `CimsTrustStore` 는 `:core` 에 남고 모듈 경계를 넘으므로 `public`.
+- APK: `cims` 에 `libpjsua2.so` 없음, `volte-client`·`ptt-client` 는 `libpjsua2.so`, `dispatch-tablet`·`sdk-probe` 는 `libcimsue.so`.
+- **MF52 회귀(사내 단말, 분리 뒤 3종 재설치)** — VoLTE·PTT 기동·등록 200·PTT affiliation PUBLISH(g001~g003)·카메라 초기화(2대, 엔진 패치 뒤 기존 경로
+  그대로)·크래시/클래스 오류 없음. 이 설치로 09-29 커밋분 단말 변경(일제 통화 U1~U5·단말 속성 V3 — `User-Agent: CIMS-VoLTE/0.1.0-M0 (Android 15; MF52)`·
+  `+sip.instance` UUID URN·짧은 PTT 탭 floor 수정)도 MF52 에 들어갔다 — 통화·발언 실기는 아직.
+
+## 1.3 P2 `volte-client` 전환 (.45 반영)
+
+- `VoltePhone`(volte-client) — 기존 `SipController` 계약(등록·호 상태 StateFlow·발신/응답/거절/종료/음소거·영상 Surface/셀프뷰/카메라 전환·캡처 게이트·
+  MESSAGE 발신과 token 상관·수신)을 SDK 로 낸다. 호 상태는 기존과 같은 "마지막 호 이벤트" 투영(코어 매핑도 UAC 만 Outgoing·CONNECTING/CONFIRMED=Active 로
+  같다). `SipService`·`MainActivity` 는 계약 그대로(망 변경은 `NetworkWatcher`). 모듈 = `:cimsue` + `:core`(`:core-sip` 없음) — APK 에 `libcimsue.so` 하나.
+- **MF52 실기(사내 단말, 계측기 전용 신원 013 을 상대로 — `cimsue-cli`)**:
+
+  | 시험 | 결과 |
+  |---|---|
+  | 등록 | UDP 200 · `User-Agent: CIMS-VoLTE/0.1.0-M0 (Android 15; MF52)` · `+sip.instance` UUID URN · Contact 재작성 · 카메라 2대 · 코덱 AMR-WB 최우선 · H.264 정책 |
+  | 착신(013 → MF52, 화면 [받기]) | 200 · RTP 양방향 손실 0 · 013 측 E-model MOS-CQ 4.25(AMR-WB)·RTD 21 ms·지터 최대 4.6 ms · 통화 오디오 모드 확보·수화기 라우팅 · BYE 뒤 `MODE_NORMAL` 복귀 |
+  | 발신(MF52 키패드 `01300000013` → E.164 `+821300000013`) | 180/200 · 손실 0 · MOS-CQ 4.24·RTD 15 ms · BYE 정상 |
+  | 발신 취소 | CANCEL → 200 → 487 · 모드 복귀 |
+  | 문자 수신(013 → MF52 MESSAGE) | 200 · 스레드·미읽음 배지 |
+  | 문자 발신(MF52 → 013) | MESSAGE 200(CSP 캡처 = 013 Contact 로 중계·200) · 말풍선 ✓(token 상관) |
+  | TLS(설정에서 TLS · 15061 로 바꿔 시험 뒤 UDP 로 원복) | 동봉 CA 로 서버 인증서 검증 · sec-agree(`Security-Client: tls` → 401 `Security-Server` → `Security-Verify`) → 200 · TLS 착신 200·손실 0·MOS-CQ 4.25·BYE(TLS) |
+
+  MF52 송신은 `ptime=40`(프레임 2개/패킷 — Android MediaCodec AMR-WB 기본 `frm_per_pkt = 2`, 엔진 공통이라 기존 앱과 같다). 크래시 0.
+- **아직(실기 미확인)**: 영상 통화(상대 영상 단말 필요 — 렌더·송신·셀프뷰·카메라 전환), SRTP(이 계정은 미디어 SRTP 정책 off), 통화 중 PTT 마이크 양보(PTT 발언), 망 전환 재등록
+  (Wi-Fi 를 끄면 무선 디버깅이 끊긴다), 착신 알림 [받기](화면 꺼짐·잠금). 코덱 정책 차이 = SDK 는 PCMU 도 둔다(기존은 PCMA 만) — AMR-WB 가 먼저라 협상 결과 같음.
+
+## 2. Windows 개발 환경에 넘길 것
+
+- **C API·.NET 미노출 코어 API** — `setCaptureEnabled`/`captureEnabled` · `setDeviceAudioLevels` · `setAudioRoute`(`AudioRoute`) · `reopenAudioDevice` ·
+  `setVideoWindow`/`switchCamera`/`videoDevices`(`VideoDeviceInfo`) · `ServiceProfile.udpNoTcpSwitch` · `kMicAgcTargetDbov`. 구조체 id 는 `CIMSUE_STRUCT_COUNT_`
+  앞 끝에 덧붙인다(`AbiLayoutTests`). `setVideoWindow(void*)` 는 참조 수를 세지 않는 창(HWND)도 받는다 — 참조 처리는 Android 만.
+- **코어 동작 변화(Windows 앱에도 적용)** — affiliation 412 는 코어가 초기 PUBLISH 로 한 번 다시 알린다. 앱이 412 로 재시도하던 코드가 있으면 필요 없다.
+- **관제 태블릿(Android)** — ① 다음 빌드부터 VAD 꺼짐(파사드 기본값이 코어와 같아짐 — 침묵 중에도 RTP) ② 망 변경 재등록이 없다 → `NetworkWatcher` 로
+  계정마다 `refreshRegistration` ③ `FloorEvent.kind` 로 Denied/Revoked·코어 시한 구분(지금 `rawType` 판정 대체 가능) ④ FD 파사드가 생겼다.
+
+## 3. 확인 필요 — 기존 PTT 앱 `bounceSndDev`
+
+코드 읽기 결과(실기 미확인): `pjsua_set_snd_dev2` 는 장치·모드가 같으면 장치가 열려 있거나 `NO_IMMEDIATE_OPEN` 일 때 "No changes" 로 돌아간다.
+기존 `bounceSndDev` 는 매번 같은 모드(`NO_IMMEDIATE_OPEN` 포함)를 넘기므로 장치를 다시 열지 않고 장치 단 음량만 다시 걸었을 가능성이 있다.
+BT·이어폰 소멸 뒤 뮤트 고착 복구([android_ue_client.md](../design/features/android_ue_client.md))가 실제로 무엇으로 풀렸는지는 P3 실기에서
+(PTT 수신 중 BT·유선 이어폰 제거) SDK `reopenAudioDevice`(실제 재오픈)와 함께 확인한다.
+
+## 4. 다음 (.45)
+
+P0b(MSRP·긴급 re-INVITE·경보·승인 톤 뒤 마이크·CMS 해석) → P3 `ptt-client`.

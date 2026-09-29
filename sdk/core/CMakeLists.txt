@@ -155,7 +155,8 @@ if(DEFINED GTEST_DIR)
         test/engine_route_test.cpp
         test/c_api_test.cpp
         test/quality_test.cpp
-        test/drive_test.cpp)
+        test/drive_test.cpp
+        test/affiliation_publish_test.cpp)
     target_include_directories(cimsue_test PRIVATE ${GTEST_INC} ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_link_directories(cimsue_test PRIVATE ${GTEST_LIB_PATH} ${GTEST_DIR}/lib)   # 설치 산출물은 lib/ (루트 변수 lib64 는 구 경로)
     if(WIN32)

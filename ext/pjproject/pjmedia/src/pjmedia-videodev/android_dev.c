@@ -263,8 +263,9 @@ static pj_status_t jni_init_ids()
     pj_status_t status = PJ_SUCCESS;
     pj_bool_t with_attach = jni_get_env(&jni_env);
 
+/* CIMS: 네이티브 스레드(libcimsue ue-ctl)에서 불려도 APK 의 PjCamera2 를 찾는다 — pj_jni_find_class */
 #define GET_CLASS(class_path, class_name, cls) \
-    cls = (*jni_env)->FindClass(jni_env, class_path); \
+    cls = (jclass)pj_jni_find_class(jni_env, class_path); \
     if (cls == NULL || (*jni_env)->ExceptionCheck(jni_env)) { \
         (*jni_env)->ExceptionClear(jni_env); \
         PJ_LOG(3, (THIS_FILE, "[JNI] Unable to find class '" \

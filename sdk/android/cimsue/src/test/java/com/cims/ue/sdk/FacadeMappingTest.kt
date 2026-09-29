@@ -70,6 +70,24 @@ class FacadeMappingTest {
             "Speaking" to com.cims.ue.sdk.jni.FloorState.Speaking.swigValue(),
             "Listening" to com.cims.ue.sdk.jni.FloorState.Listening.swigValue(),
             "Queued" to com.cims.ue.sdk.jni.FloorState.Queued.swigValue()))
+        // floor 이벤트 종류 — Denied 와 Revoked 가 뒤바뀌면 발언 거절과 회수 표시가 반대가 된다
+        check(FloorEventKind.entries.map { it.name.replace("_", "") }, listOf(
+            "Granted" to com.cims.ue.sdk.jni.FloorEvent.Kind.Granted.swigValue(),
+            "Denied" to com.cims.ue.sdk.jni.FloorEvent.Kind.Denied.swigValue(),
+            "Idle" to com.cims.ue.sdk.jni.FloorEvent.Kind.Idle.swigValue(),
+            "Taken" to com.cims.ue.sdk.jni.FloorEvent.Kind.Taken.swigValue(),
+            "TalkerLeft" to com.cims.ue.sdk.jni.FloorEvent.Kind.TalkerLeft.swigValue(),
+            "Revoked" to com.cims.ue.sdk.jni.FloorEvent.Kind.Revoked.swigValue(),
+            "QueuePosition" to com.cims.ue.sdk.jni.FloorEvent.Kind.QueuePosition.swigValue(),
+            "QueueCancelled" to com.cims.ue.sdk.jni.FloorEvent.Kind.QueueCancelled.swigValue(),
+            "RequestTimeout" to com.cims.ue.sdk.jni.FloorEvent.Kind.RequestTimeout.swigValue(),
+            "TalkLimit" to com.cims.ue.sdk.jni.FloorEvent.Kind.TalkLimit.swigValue(),
+            "Other" to com.cims.ue.sdk.jni.FloorEvent.Kind.Other.swigValue()))
+        // 오디오 라우트 — EARPIECE·LOUDSPEAKER 가 뒤바뀌면 무전이 반대쪽으로 나가고 입력 마이크 고정이 풀린다
+        check(AudioRoute.entries.map { it.name }, listOf(
+            "Default" to com.cims.ue.sdk.jni.AudioRoute.Default.swigValue(),
+            "Earpiece" to com.cims.ue.sdk.jni.AudioRoute.Earpiece.swigValue(),
+            "Loudspeaker" to com.cims.ue.sdk.jni.AudioRoute.Loudspeaker.swigValue()))
         // 계측 링크 — REFUSED 가 DISCONNECTED 로 읽히면 앱이 거절된 링크를 재접속 대기로 보인다
         check(LinkState.entries.map { it.name }, listOf(
             "Idle" to com.cims.ue.sdk.jni.LinkState.Idle.swigValue(),

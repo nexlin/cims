@@ -18,7 +18,7 @@ static const char* kProfile = R"({
       "account": { "msisdn": "+821300000001", "imsi": "45033821300000001", "authId": "", "sipHa1": "0123456789abcdef0123456789abcdef", "sipPassword": null } },
     { "kind": "ptt",
       "sip": { "host": "121.161.164.48", "port": 5061, "transport": "TLS", "transports": [ { "transport": "TLS", "port": 5061 } ],
-               "default": "TLS", "enforced": true, "domain": "ptt.example.org" },
+               "default": "TLS", "enforced": true, "domain": "ptt.example.org", "udpNoTcpSwitch": true },
       "account": { "msisdn": "+82500000001", "imsi": "4503382500000001", "sipHa1": null, "mcpttId": "tel:+82500000001",
                    "authScheme": "aka", "aka": { "k": "00112233", "opc": "44556677", "amf": "8000" } } }
   ],
@@ -41,6 +41,7 @@ TEST(Csc, ParseProfile) {
     ASSERT_EQ(v->transports.size(), 2u);
     EXPECT_EQ(v->transports[1].transport, Transport::TLS);
     EXPECT_EQ(v->mediaSecurity, MediaSecurity::Optional);
+    EXPECT_FALSE(v->udpNoTcpSwitch);                                  // 없으면 false(규격대로 승격)
     ASSERT_EQ(v->secMechanisms.size(), 1u);
     EXPECT_EQ(v->sipHa1, "0123456789abcdef0123456789abcdef");
     AccountConfig a = v->toAccount();
@@ -48,6 +49,7 @@ TEST(Csc, ParseProfile) {
     EXPECT_TRUE(a.isComplete());
     const ServiceProfile* t = p.service("ptt");
     ASSERT_NE(t, nullptr);
+    EXPECT_TRUE(t->udpNoTcpSwitch);
     EXPECT_TRUE(t->enforced);
     EXPECT_EQ(t->transport, Transport::TLS);
     EXPECT_EQ(t->sipPort, 5061);

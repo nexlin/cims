@@ -36,3 +36,22 @@ TEST(EngineRoute, AddRemoveOnNullDevice) {
     eng.stop();                                        // routes → libDestroy 순서
     EXPECT_FALSE(eng.running());
 }
+
+// 캡처 게이트(ue_sdk.md §4.5) — 상태·미기동 오류·기동마다 전이중. 실장치 SPEAKER_ONLY 재오픈은 실기 항목(헤드리스는 상태만).
+TEST(EngineCapture, GateStateOnNullDevice) {
+    Engine eng;
+    QuietListener l;
+    EXPECT_FALSE(eng.setCaptureEnabled(false).ok);     // 미기동
+    EngineConfig cfg;
+    cfg.logLevel = 0;
+    cfg.nullAudioDevice = true;
+    ASSERT_TRUE(eng.start(cfg, &l).ok);
+    EXPECT_TRUE(eng.captureEnabled());                 // 기본 전이중
+    EXPECT_TRUE(eng.setCaptureEnabled(false).ok);
+    EXPECT_FALSE(eng.captureEnabled());
+    EXPECT_TRUE(eng.setCaptureEnabled(false).ok);      // 같은 값 — 멱등
+    eng.stop();
+    ASSERT_TRUE(eng.start(cfg, &l).ok);
+    EXPECT_TRUE(eng.captureEnabled());                 // 재기동 = 전이중
+    eng.stop();
+}

@@ -12,7 +12,7 @@ package com.cims.ue.core.sip
  * pjsip 은 caBuf 안의 PEM 을 **전부** 신뢰 저장소에 적재한다(`ssl_sock_ossl.c` 의
  * `PEM_X509_INFO_read_bio` + `X509_STORE_add_cert` 루프).
  */
-internal object CimsTrustStore {
+object CimsTrustStore {
 
     /** CIMS Service CA — 단말 대면(CSP SIP TLS). 자가서명 RSA4096, 만료 2036-08-15. */
     private val SERVICE_CA = """

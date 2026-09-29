@@ -562,17 +562,18 @@ PTT up(RELEASE): 🎤mic 슬롯 ──disconnect─ 통화 stream  (송신 중�
 ```
 cims/
   android/
-    core/           ← 공유 Android Library: PJSIP 래퍼·MediaCodec 코덱(AMR-WB/H264)
-                       ·SIP 등록/INVITE/RTP·미디어제어. PJSIP .so+SWIG Java 도 여기. (두 앱이 의존)
-    volte-client/   ← VoLTE 1:1 SIP 소프트폰 (전화 앱) — core 의존
-    ptt-client/     ← MCPTT 그룹 PTT 앱 — core 의존 + floor/affiliation/group/CSC
+    core/           ← 공유 Android Library: 계정·SSO·프로비저닝·설정·연락처·통화 기록·메시지·기기 신원·전원·앱 간 신호
+                       ·공통 모델(SipModels). SIP·엔진 없음
+    core-sip/       ← 기존 자체 pjsua2 래퍼(SipController 등) — SDK 이식 전 앱만(이행용, ue_sdk.md §5.3)
+    volte-client/   ← VoLTE 1:1 SIP 소프트폰 (전화 앱) — 단말 SDK(:cimsue) + core
+    ptt-client/     ← MCPTT 그룹 PTT 앱 — core-sip + floor/affiliation/group/CSC
 ```
 
-- **`core`**(공유): PJSIP 빌드 산출물(`.so`)+SWIG Java, `SipController`(등록/INVITE/RTP/SDP), MediaCodec 코덱 팩토리(AMR-WB/H.264), 미디어 제어(AEC/장치), 공통 모델.
-- **`volte-client`**: `app`(Compose UI/Service/ViewModel) — core 기반 1:1 음성·영상.
-- **`ptt-client`**: `app` + `floor`(MCPT RTCP-APP) + `csc`(OAuth2 PKCE+XCAP) + `group`/`affiliation` — core 기반.
+- **`core`**(공유): SIP 없는 공용 조각과 UI 모델(`SipModels` — `CallState`·`RegState`).
+- **`volte-client`**: `app`(Compose UI/Service) — 단말 SDK 위 1:1 음성·영상·문자. `VoltePhone` 이 기존 래퍼와 같은 계약(등록·호 상태 StateFlow·호 명령·영상·캡처 게이트·MESSAGE)을 SDK 로 내 `SipService`·화면은 그대로다. 엔진 음질 처리(AGC·리미터)는 같은 엔진 트리라 동일.
+- **`ptt-client`**: `app` + `floor`(MCPT RTCP-APP) + `csc`(OAuth2 PKCE+XCAP) + `group`/`affiliation` — core-sip 기반(SDK 이식 P3 전).
 
-> PTT = VoLTE(core) + affiliation/floor/group/CSC. 두 앱은 별도 APK로 배포하되 공유 `core`에 의존 → 중복·이중 유지보수 제거.
+> 한 앱은 엔진 하나만 싣는다(`:cimsue` 또는 `:core-sip`) — 두 앱은 별도 APK·프로세스라 이행 기간에 엔진이 달라도 된다.
 
 ### 9.2 PJSIP 빌드
 
@@ -627,7 +628,7 @@ cims/
 
 확정 사항:
 
-- **코드 위치**: 모노레포 `android/`, 공유 `core`(Android Library, PJSIP·코덱·SIP/미디어) + 클라이언트 2개(`android/volte-client`, `android/ptt-client`). 두 앱이 `project(':core')` 의존.
+- **코드 위치**: 모노레포 `android/`, 공유 `core`(SIP 없는 공용 조각) + 클라이언트 2개(`android/volte-client` = 단말 SDK `:cimsue`, `android/ptt-client` = 이행용 `:core-sip`).
 - **마일스톤 순서**: VoLTE 먼저(M1), 이후 PTT(M2).
 - **TLS 시점**: 초기 **UDP 5060**, TLS 5061은 **이후(M4)**.
 - **영상 범위**: 음성+영상 **함께**(M1부터).

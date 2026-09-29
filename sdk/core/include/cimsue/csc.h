@@ -43,6 +43,9 @@ struct ServiceProfile {
     AuthScheme authScheme = AuthScheme::Digest;
     std::string akaK, akaOpc, akaAmf = "8000";
     std::vector<std::string> secMechanisms;
+    /** UDP→TCP 승격 비활성(`sip.udpNoTcpSwitch`, RFC 3261 §18.1.1) — 통제된 망 전용 사이트 옵션. 엔진 전역 설정(EngineConfig.udpNoTcpSwitch)이라
+     *  여러 서비스에 걸칠 때 무엇을 넣을지는 앱이 정한다. 구 서버 응답이면 false. */
+    bool udpNoTcpSwitch = false;
     int maxPayloadSdsCplaneBytes = 0;
     /** 이 서비스로 등록할 AccountConfig — 프로파일 값 그대로(loginPw 는 sipHa1 부재 시 평문 폴백). */
     CIMSUE_API AccountConfig toAccount(const std::string& loginPw = std::string()) const;

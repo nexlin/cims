@@ -6,9 +6,12 @@ package com.cims.ue.sdk
 
 import android.view.KeyEvent
 import com.cims.ue.sdk.platform.HwPtt
+import com.cims.ue.sdk.platform.NetworkChangeFilter
 import com.cims.ue.sdk.platform.PttKey
 import com.cims.ue.sdk.platform.Route
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
@@ -75,5 +78,19 @@ class PlatformTest {
         // 기본값이 "아무것도 아님" 이어야 미분류 키가 발언을 걸지 않는다.
         assertEquals(PttKey.NONE, PttKey.entries.first())
         assertNotEquals(PttKey.NONE, PttKey.TALK)
+    }
+
+    // ── 망 변경 — 등록 직후 지금 망 통지로 재-REGISTER 하지 않고, 바뀐 망·재연결에서는 한다 ──
+    @Test fun `망 변경 판정`() {
+        val f = NetworkChangeFilter<String>()
+        assertFalse(f.onAvailable("wifi"))        // 등록 직후 지금 망 — 변화 아님
+        assertFalse(f.onAvailable("wifi"))        // 같은 망 재통지
+        assertTrue(f.onAvailable("lte"))          // Wi-Fi → 이동망
+        f.onLost("wifi")                          // 이미 떠난 망의 소실은 무시
+        assertFalse(f.onAvailable("lte"))
+        f.onLost("lte")
+        assertTrue(f.onAvailable("lte"))          // 끊겼다 같은 망으로 다시
+        f.reset()
+        assertFalse(f.onAvailable("wifi"))        // 다시 시작 — 첫 통지는 변화 아님
     }
 }

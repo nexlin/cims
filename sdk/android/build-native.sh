@@ -5,8 +5,8 @@
 #   단계 없음). 수정은 트리에서 직접 하고 커밋한다.
 #
 # 산출물은 **모듈 둘**로 갈라 배치한다(android_dispatch_tablet.md §2.2 엔진 단일화):
-#   sdk/android/cimsue-engine/  org.pjsip.**(SWIG) + libpjsua2.so   ← android/core 가 쓴다(기존 앱)
-#   sdk/android/cimsue/         com.cims.ue.sdk.jni.*(SWIG) + libcimsue.so ← 관제 태블릿이 쓴다
+#   sdk/android/cimsue-engine/  org.pjsip.**(SWIG) + libpjsua2.so   ← android/core-sip 가 쓴다(SDK 이식 전 기존 앱)
+#   sdk/android/cimsue/         com.cims.ue.sdk.jni.*(SWIG) + libcimsue.so + 카메라 도우미 ← SDK 앱(관제 태블릿·점검 앱)이 쓴다
 # 둘 다 libc++_shared.so 를 각자 싣는다 — 한 앱이 두 모듈을 같이 쓰지 않으므로 충돌하지 않는다.
 # 생성물은 커밋하지 않는다(.gitignore).
 #
@@ -144,6 +144,12 @@ else
     rm -rf "$CORE_MOD/src/main/jniLibs/$TARGET_ABI"
     mkdir -p "$CORE_MOD/src/main/jniLibs/$TARGET_ABI"
     cp -f "$CORE_BUILD/libcimsue.so" "$CORE_MOD/src/main/jniLibs/$TARGET_ABI/"
+    # 카메라 도우미(org.pjsip.PjCamera2·PjCameraInfo2) — pjmedia Android 영상 장치가 FindClass 하는 앱 클래스라 pj 를 싣는
+    #   .so 마다 자기 APK 에 있어야 한다(libcimsue 는 pj 를 정적으로 품는다). 원천은 [5] 와 같은 ext/pjproject 파일, 커밋하지 않는다
+    #   (swig 소스셋 = .gitignore). 제공처 규칙은 S1-UE-ENGINE-SINGLE.
+    mkdir -p "$CORE_MOD/src/swig/java/org/pjsip"
+    cp -f "$PJ_DIR/pjmedia/src/pjmedia-videodev/android/PjCamera2.java" \
+          "$PJ_DIR/pjmedia/src/pjmedia-videodev/android/PjCameraInfo2.java" "$CORE_MOD/src/swig/java/org/pjsip/"
     # libc++_shared 는 두 모듈이 각자 싣는다(한 앱이 둘을 같이 쓰지 않는다 — §2.2).
     cp -f "$JNIDIR/libc++_shared.so" "$CORE_MOD/src/main/jniLibs/$TARGET_ABI/"
     ls -la "$CORE_MOD/src/main/jniLibs/$TARGET_ABI/"

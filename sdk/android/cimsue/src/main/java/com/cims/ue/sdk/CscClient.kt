@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import com.cims.ue.sdk.jni.CscClient as JniCscClient
 import com.cims.ue.sdk.jni.CscEndpoint as JniCscEndpoint
+import com.cims.ue.sdk.jni.FdUpload as JniFdUpload
 import com.cims.ue.sdk.jni.GroupDoc as JniGroupDoc
 import com.cims.ue.sdk.jni.GroupMember as JniGroupMember
 import com.cims.ue.sdk.jni.GroupMemberVector
@@ -63,6 +64,8 @@ data class ServiceProfile(
     val sipHa1: String, val mcpttId: String,
     val authScheme: AuthScheme, val akaK: String, val akaOpc: String, val akaAmf: String,
     val secMechanisms: List<String>, val maxPayloadSdsCplaneBytes: Int,
+    /** UDP→TCP 승격 비활성(`sip.udpNoTcpSwitch`) — 엔진 전역(`EngineConfig.udpNoTcpSwitch`)이라 앱이 서비스들에서 골라 넣는다. */
+    val udpNoTcpSwitch: Boolean = false,
 ) {
     /** 이 서비스로 등록할 계정 설정 — 프로파일 값 그대로(loginPw 는 sipHa1 부재 시 평문 폴백). */
     fun toAccountConfig(loginPw: String = ""): AccountConfig = AccountConfig(
@@ -307,6 +310,25 @@ class CscClient(
         CimsResult.of(jni.getServiceConfig(accessToken, userUri, etag, out), xcapOf(out))
     }
 
+    // ── MCData FD 콘텐츠 서버(TS 24.282 §10.2, mcdata_messaging.md §4.5) ──
+    /**
+     * 파일 업로드(POST /mcdata/fd) — 결과 [FdUpload.url] 을 [FdFile.url] 로 넘겨 `Account.sendGroupFd`/`sendFd` 로 알린다.
+     * groupId 를 주면 서버가 그 그룹의 FD 게이트를 적용하고, 비우면 1:1. 413 = 서버 상한 초과. 실패 code = HTTP 상태(전송 실패 -1).
+     */
+    suspend fun uploadFd(accessToken: String, data: ByteArray, name: String, mime: String = "",
+                         groupId: String = ""): CimsResult<FdUpload> = call {
+        val out = JniFdUpload()
+        CimsResult.of(jni.uploadFd(accessToken, data, name, mime, groupId, out), FdUpload(out.id, out.url, out.name, out.size))
+    }
+
+    /** 받은 FD 의 FILEURL 다운로드 — 경로만 취해 자기 CSC 로 보낸다(Bearer 를 다른 호스트로 보내지 않는다). 본문 = 파일 바이트. */
+    suspend fun downloadFd(accessToken: String, url: String): CimsResult<HttpResponse> = call {
+        val out = JniHttpResult()
+        val r = jni.downloadFd(accessToken, url, out)
+        val v = HttpResponse(out.status, out.contentType, out.etag, out.body ?: ByteArray(0))
+        if (r.ok) CimsResult.ok(v) else CimsResult(false, r.code, r.reason, v)
+    }
+
     /**
      * 코어가 모델링하지 않은 CSC 엔드포인트용 범용 요청(Bearer) — 관제 관리 API
      * `/provisioning/directory/…`·녹취 `/provisioning/recordings/…`(이진)·이력 창 조회.
@@ -361,7 +383,8 @@ class CscClient(
                     authScheme = AuthScheme.entries[s.authScheme.swigValue()],
                     akaK = s.akaK, akaOpc = s.akaOpc, akaAmf = s.akaAmf,
                     secMechanisms = s.secMechanisms.let { mv -> List(mv.size) { j -> mv[j] } },
-                    maxPayloadSdsCplaneBytes = s.maxPayloadSdsCplaneBytes)
+                    maxPayloadSdsCplaneBytes = s.maxPayloadSdsCplaneBytes,
+                    udpNoTcpSwitch = s.udpNoTcpSwitch)
             }
             val d = p.dispatch
             val dispatch = DispatchProfile(

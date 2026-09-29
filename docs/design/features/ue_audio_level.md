@@ -37,7 +37,7 @@ pjsua2 `AudioMedia` 의 방향은 **미디어 포트 관점**이다. conference 
 
 | 조작 | 호출 | 위치 |
 |---|---|---|
-| 스피커 크기 | `playbackDevMedia.adjustRxLevel(spk)` | `SipController.applyDeviceAudioBoost` |
+| 스피커 크기 | `playbackDevMedia.adjustRxLevel(spk)` | `SipController.applyDeviceAudioBoost`, libcimsue `Engine::setDeviceAudioLevels` |
 | 마이크 크기 | `AudDevManager.setCaptureAgc(true, 목표)` (배율 `adjustTxLevel` 은 1 고정) | 〃 |
 | 호별 듣는 크기 | 통화 `AudioMedia.adjustTxLevel(level)` | `CimsCall.setRxLevel`, libcimsue `Engine::setRxLevel` |
 
@@ -134,6 +134,7 @@ pjsua2 `AudDevManager::setCaptureAgc(enable, targetDbov)`. 목표는 -40..-10 dB
 | PTT | 전 통화 종료 | 스피커 ×1.0 · 마이크 목표 -26 으로 원복 | — |
 | VoLTE | (조작 없음) | 마이크 AGC 기본 -26 dBov | — |
 | SDK `setRxLevel` | 관제 감청 창 음량 등 | 그 호의 듣는 크기 | 1 |
+| SDK `setDeviceAudioLevels` | 앱이 PTT 설정 슬라이더를 옮길 때 | 스피커 배율 · 마이크 AGC 목표(dBov — 슬라이더 값 → 목표 환산 `-26 + 20·log10(값)` 은 앱) | 부르기 전까지 엔진 기본(×1 · -26) |
 
 - 스피커 배율 × 채널 음량은 곱으로 적용되고(최대 ×6), 초과는 리미터가 막는다.
 - 저장값 판(`gain_wiring` = 2): PTT 의 `audio_route`(스피커·마이크 값)와 `group_volume`(채널 음량)은 판이

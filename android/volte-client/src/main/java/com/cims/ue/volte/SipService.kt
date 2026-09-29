@@ -6,7 +6,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
-import android.hardware.camera2.CameraManager
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
@@ -14,8 +13,6 @@ import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.Ringtone
 import android.media.RingtoneManager
-import android.net.ConnectivityManager
-import android.net.Network
 import android.os.Binder
 import android.os.Build
 import android.os.Handler
@@ -32,9 +29,7 @@ import com.cims.ue.core.message.SendState
 import com.cims.ue.core.power.PartialWakeLock
 import com.cims.ue.core.power.ProximityScreenLock
 import com.cims.ue.core.sip.CallState
-import com.cims.ue.core.sip.PjLib
 import com.cims.ue.core.sip.RegState
-import com.cims.ue.core.sip.SipController
 import com.cims.ue.core.sip.extractSipNumber
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -46,7 +41,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 
 /**
- * 등록 유지 Foreground Service (설계서 §8). SipController 를 소유하고, REGISTER 를 유지하며
+ * 등록 유지 Foreground Service (설계서 §8). 전화 세션([VoltePhone] — 단말 SDK 위)을 소유하고, REGISTER 를 유지하며
  * 통화/대기 상태를 알림으로 노출한다. Activity 는 [LocalBinder] 로 바인드해 컨트롤러 flow 를 관찰한다.
  *
  * 수명: START_STICKY — 시스템이 죽여도 재기동되어 재등록. 명시 종료는 [stopSip].
@@ -58,9 +53,12 @@ class SipService : Service() {
         kotlinx.coroutines.CoroutineExceptionHandler { _, e ->
             android.util.Log.e("SipService", "service scope 예외", e)
         })
-    private var controller: SipController? = null
+    private var controller: VoltePhone? = null
     private var stateJob: Job? = null
-    private var netCallback: ConnectivityManager.NetworkCallback? = null
+    /** 기본 네트워크가 바뀌면 재등록 — doze/슬립/와이파이↔LTE 전환 후 등록 끊김 자동 복구(SDK 접점 NetworkWatcher). */
+    private val netWatcher by lazy {
+        com.cims.ue.sdk.platform.NetworkWatcher(this) { if (controller?.hasAccount() == true) controller?.reregister() }
+    }
     private var ringtone: Ringtone? = null
 
     /** 화면 최상단 전역 상태 아이콘 배지(오버레이, 전화 아이콘=중앙 좌측) — main 스레드에서만 갱신. */
@@ -91,13 +89,10 @@ class SipService : Service() {
     override fun onCreate() {
         super.onCreate()
         instance = this
-        // PJSIP boot 전(영상 캡처 디바이스 열거 전)에 CameraManager 주입 — 발신 영상/셀프뷰 카메라 열거의 전제.
-        PjLib.cameraManager = getSystemService(Context.CAMERA_SERVICE) as? CameraManager
-        PjLib.userAgent = DeviceIdentity.userAgent(this, "CIMS-VoLTE")     // 단말 속성(mcptt_management_views.md §4.1)
         createChannel()
         startForegroundCompat(buildNotification("CIMS VoLTE", "시작 중…"))
         wakeLock.acquire()
-        registerNetworkCallback()
+        netWatcher.start()
         registerMicHandoffReceiver()
     }
 
@@ -168,17 +163,6 @@ class SipService : Service() {
         return START_STICKY
     }
 
-    /** 기본 네트워크 복귀 시 재등록 — doze/슬립/와이파이↔LTE 전환 후 등록 끊김 자동 복구. */
-    private fun registerNetworkCallback() {
-        val cm = getSystemService(ConnectivityManager::class.java) ?: return
-        val cb = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) {
-                if (controller?.hasAccount() == true) controller?.reregister()
-            }
-        }
-        runCatching { cm.registerDefaultNetworkCallback(cb); netCallback = cb }
-    }
-
     /** SSO(공유 계정) → /provisioning/me(kind=volte) → ConfigStore 저장 → 등록. 블로킹(IO).
      *  실패(owner 앱 bind failure 등)해도 던지지 않는다 — 캐시 설정으로 ensureRegistered 가 진행. */
     private fun ssoAutoConfigure() {
@@ -227,8 +211,9 @@ class SipService : Service() {
                 { android.os.Process.killProcess(android.os.Process.myPid()) }, 2000)
             return
         }
-        val c = SipController(cfg).also { controller = it; activeConfig = cfg }
-        DeviceIdentity.instanceUrn(this)?.let { c.instanceId = it }
+        // 단말 속성(mcptt_management_views.md §4.1) — User-Agent·+sip.instance. 카메라 열거는 세션이 엔진 기동 전에 넣는다.
+        val c = VoltePhone(this, cfg, DeviceIdentity.userAgent(this, "CIMS-VoLTE"), DeviceIdentity.instanceUrn(this))
+            .also { controller = it; activeConfig = cfg }
         observe(c)
         c.register()
     }
@@ -245,7 +230,7 @@ class SipService : Service() {
         return com.cims.ue.core.sip.toE164(dst, cc)
     }
 
-    /** [SipController.sendRequest] token 발급 + 문자 token→msgId 대응(최종 응답을 말풍선 상태로). */
+    /** [VoltePhone.sendRequest] token 발급 + 문자 token→msgId 대응(최종 응답을 말풍선 상태로). */
     private val reqSeq = java.util.concurrent.atomic.AtomicLong(1)
     private val msgPending = java.util.concurrent.ConcurrentHashMap<Long, String>()
 
@@ -535,7 +520,7 @@ class SipService : Service() {
         stopSelf()
     }
 
-    private fun observe(c: SipController) {
+    private fun observe(c: VoltePhone) {
         stateJob?.cancel()
         // 이전 프로세스의 미결 PENDING — 결과 이벤트 유실 상태이므로 실패로 마감(재전송 가능)
         if (MessageStore(this).failStalePending()) messagesVersion.value++
@@ -618,8 +603,7 @@ class SipService : Service() {
         mainHandler.removeCallbacks(micResumeWatchdog)
         mainHandler.post { overlay.hide() }
         stateJob?.cancel()
-        netCallback?.let { cb -> runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) } }
-        netCallback = null
+        netWatcher.close()
         controller?.shutdown()
         controller = null
         super.onDestroy()

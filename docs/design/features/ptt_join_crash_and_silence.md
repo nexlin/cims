@@ -94,11 +94,11 @@ CSP floor port 유도는 항상 >0 이다 (`GroupCallService.cpp:737`
 
 - pjsua 는 `m=application`(proto `UDP MCPTT`, 미지원 미디어)에 대해 네이티브 미디어 transport 를
   이해하지 못한다. UE 는 이를 우회하려고 **`onCallSdpCreated` 훅에서 `m=application` floor 섹션을
-  로컬 SDP 에 수동 주입**한다 ([CimsCall.kt:73-96](../../../android/core/src/main/java/com/cims/ue/core/sip/CimsCall.kt#L73) `appendMediaSection`, `pendingAppSdp`).
+  로컬 SDP 에 수동 주입**한다 ([CimsCall.kt:73-96](../../../android/core-sip/src/main/java/com/cims/ue/core/sip/CimsCall.kt#L73) `appendMediaSection`, `pendingAppSdp`).
 - 주입 조건은 `if (!whole.contains("m=application"))`. **pjsua 가 answer 에 `m=application` 을
   포함하지 않는 경우** 주입이 발동 → 로컬 SDP m= 라인 수가 `med_prov_cnt` 를 초과 → assert 실패.
 - `answerGroupCall`/`makeGroupCall` 은 `opt.audioCount=1, opt.videoCount=0` 로 pjsua 에 **미디어
-  1개만 provisioning** 지시 ([SipController.kt:207-219, 293-312](../../../android/core/src/main/java/com/cims/ue/core/sip/SipController.kt#L207)).
+  1개만 provisioning** 지시 ([SipController.kt:207-219, 293-312](../../../android/core-sip/src/main/java/com/cims/ue/core/sip/SipController.kt#L207)).
 - pjsua 는 answer 시 `med_prov_cnt` 를 원격 offer 의 `media_count` 로 올려주지만
   (`pjsua_media.c:2539-2541`), 이 주입/미러링 상호작용에서 최종 로컬 SDP media_count 가
   provisioning 수를 넘는 조합이 발생한다.
@@ -147,10 +147,10 @@ CSP floor port 유도는 항상 >0 이다 (`GroupCallService.cpp:737`
 
 | 위치 | 내용 |
 |---|---|
-| [CimsCall.kt:73-96](../../../android/core/src/main/java/com/cims/ue/core/sip/CimsCall.kt#L73) | `onCallSdpCreated` — `m=application` 주입(`appendMediaSection`), remote floor 파싱 |
-| [CimsCall.kt:165-173](../../../android/core/src/main/java/com/cims/ue/core/sip/CimsCall.kt#L165) | `onCallMediaState` — conference bridge 결선(halfDuplex spk만/mic는 GRANT시) |
-| [SipController.kt:207-233](../../../android/core/src/main/java/com/cims/ue/core/sip/SipController.kt#L207) | `answerGroupCall`/`answer` — `audioCount=1`, `pendingAppSdp` 설정 |
-| [SipController.kt:293-312](../../../android/core/src/main/java/com/cims/ue/core/sip/SipController.kt#L293) | `makeGroupCall` — offerer 경로, `audioCount=1`, `pendingAppSdp` |
+| [CimsCall.kt:73-96](../../../android/core-sip/src/main/java/com/cims/ue/core/sip/CimsCall.kt#L73) | `onCallSdpCreated` — `m=application` 주입(`appendMediaSection`), remote floor 파싱 |
+| [CimsCall.kt:165-173](../../../android/core-sip/src/main/java/com/cims/ue/core/sip/CimsCall.kt#L165) | `onCallMediaState` — conference bridge 결선(halfDuplex spk만/mic는 GRANT시) |
+| [SipController.kt:207-233](../../../android/core-sip/src/main/java/com/cims/ue/core/sip/SipController.kt#L207) | `answerGroupCall`/`answer` — `audioCount=1`, `pendingAppSdp` 설정 |
+| [SipController.kt:293-312](../../../android/core-sip/src/main/java/com/cims/ue/core/sip/SipController.kt#L293) | `makeGroupCall` — offerer 경로, `audioCount=1`, `pendingAppSdp` |
 | [PttController.kt:222](../../../android/ptt-client/src/main/java/com/cims/ue/ptt/PttController.kt#L222) | REGISTER Contact 에 MCData SDS ICSI 광고(`MCDATA_ICSI`) |
 | [PttService.kt:259](../../../android/ptt-client/src/main/java/com/cims/ue/ptt/PttService.kt#L259) | `injectSsoToken` — 로그인만으로 REGISTER+affiliation PUBLISH(크래시 루프 촉발) |
 | `csp/GroupCallService.cpp:737,1166,1502-1566` | fan-out INVITE SDP 빌더(`WrapMultipartBody`), floor port 유도 |

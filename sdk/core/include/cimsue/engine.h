@@ -139,6 +139,32 @@ public:
     Result refreshAudioDevices();
     /** 캡처/재생 장치 선택(pjmedia 장치 id). -1=기본 캡처, -2=기본 재생. */
     Result setAudioDevices(int captureDev, int playbackDev);
+    /** 캡처 게이트(§4.5) — false = 캡처 스트림을 열지 않는다(재생만 — pjsua SPEAKER_ONLY). 마이크를 다른 앱에 양보하는 구간
+     *  (VoLTE 통화 중 PTT 발언 — 앱 간 양보)이나 PTT 유휴·청취에서 OS 동시 캡처 중재에서 빠질 때 쓴다. true = 전이중 복귀(기본).
+     *  사운드 장치가 닫혀 있으면 모드만 두어 다음 결선에 적용된다(NO_IMMEDIATE_OPEN). 호 단위 음소거(setMuted)·floor 게이트와
+     *  별개인 장치 단위 스위치이고, 장치 선택(setAudioDevices)을 넘어 유지된다. 헤드리스(nullAudioDevice)면 상태만 둔다. */
+    Result setCaptureEnabled(bool on);
+    bool captureEnabled() const;
+    /** 장치 단 음량(ue_audio_level.md §2·§6) — speaker = 스피커 배율(bridge slot 0 → 장치 — pjsua2 slot 0 `adjustRxLevel`, 1 = 원음),
+     *  micTargetDbov = 마이크 AGC 목표(-40..-10, 기본 kMicAgcTargetDbov). AGC 는 늘 켜 두고 마이크 배율은 1 로 고정한다(AGC 뒤에 곱하면
+     *  목표를 흔든다). 코어가 값을 기억해 캡처 게이트 전환·장치 재오픈·호 미디어 결선 뒤 다시 건다(재오픈은 slot 0 레벨을 초기화한다). */
+    Result setDeviceAudioLevels(float speaker, double micTargetDbov);
+    /** 오디오 라우트 — output = 출력(스피커폰·수화기·기본), input = 입력 마이크(장치 재오픈에도 유지). PTT 는 단말 스피커·수화기로 들을 때
+     *  입력을 Earpiece(내장 기본 마이크)로 고정한다 — 통화 입력은 출력이 스피커면 정책이 후면 마이크를 골라 입에 대고 말하는 무전이
+     *  ~20 dB 작아진다(§3). 전이중 스피커폰(VoLTE)은 에코 때문에 Default 를 둔다. 라우트를 무시하는 단말은 플랫폼 AudioRouter 를 병행한다. */
+    Result setAudioRoute(AudioRoute output, AudioRoute input);
+    /** 사운드 장치 재오픈 — 열려 있으면 닫고 곧바로 다시 열어 재생·캡처 트랙을 새로 만든다(브리지 결선 유지, 짧은 공백). 게이트 모드·
+     *  라우트·장치 단 음량은 그대로 이어진다. 라우팅 중이던 출력 장치가 사라질 때 재생 트랙에 시스템 뮤트가 남는 단말 대응
+     *  (android_ue_client.md — 볼륨 변경으로 안 풀리고 트랙 재생성만 푼다). 닫혀 있으면 아무것도 하지 않는다(다음 개방이 새 트랙). */
+    Result reopenAudioDevice();
+
+    // ── 영상 (§4.5 — 코어는 창을 열지 않는다. Android 는 Surface 에서 얻은 창에 pjmedia 렌더러가 그린다) ──
+    /** 수신 영상 렌더 대상 — 플랫폼 창 핸들(Android = ANativeWindow*, 참조 하나를 코어가 넘겨받는다 — 파사드가 Surface 에서 얻는다).
+     *  nullptr = 해제. 활성 영상 호에 곧바로 결선하고 뒤에 영상이 활성되는 호에도 쓴다. 영상 없는 빌드면 실패. */
+    Result setVideoWindow(void* nativeWindow);
+    /** 캡처 카메라 전환(전면↔후면) — 활성 영상 호의 송신 장치를 다음 카메라로 바꾸고, 이후 호의 기본 장치로도 쓴다. */
+    Result switchCamera(int callId);
+    std::vector<VideoDeviceInfo> videoDevices() const;
     /** 추가 재생 라우트 — 두 번째 재생 장치를 재생 전용으로 브리지에 연다(관제석 헤드셋+스피커 분리 출력,
      *  ue_sdk.md §6). 마이크는 기본 캡처 장치 하나만 쓴다. 반환 routeId ≥ 1, 실패 -1. 기본 재생 장치 = 라우트 0. */
     int addPlaybackRoute(int playbackDev);

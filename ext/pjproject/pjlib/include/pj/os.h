@@ -490,6 +490,21 @@ PJ_DECL(pj_bool_t) pj_jni_attach_jvm(void **jni_env);
  */
 PJ_DECL(void) pj_jni_detach_jvm(pj_bool_t attached);
 
+/**
+ * CIMS: Find a Java class from any thread. FindClass() on a thread created
+ * by native code only sees system classes; when it fails, the class is
+ * loaded through the application class loader remembered in JNI_OnLoad
+ * (the library-loader thread). Use this for classes shipped in the APK
+ * (e.g. "org/pjsip/PjCamera2").
+ *
+ * @param jni_env       The JNI interface pointer (JNIEnv*) of this thread.
+ * @param class_path    Class path with '/' separators.
+ *
+ * @return              A local reference (jclass), or NULL with any pending
+ *                      exception cleared.
+ */
+PJ_DECL(void*) pj_jni_find_class(void *jni_env, const char *class_path);
+
 
 /**
  * @}

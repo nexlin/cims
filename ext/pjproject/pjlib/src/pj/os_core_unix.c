@@ -76,12 +76,67 @@
 
 JavaVM *pj_jni_jvm = NULL;
 
+/* CIMS: 앱 클래스 로더 — FindClass 는 호출 스택의 Java 프레임으로 로더를 정해, 네이티브가 만든
+ * 스레드(예: libcimsue 제어 스레드 ue-ctl)에서는 시스템 클래스만 찾는다. 그래서 APK 에 실린
+ * org/pjsip/PjCamera2 같은 앱 클래스를 영상 장치 초기화가 못 찾는다. 라이브러리를 적재한
+ * 스레드(JNI_OnLoad)의 로더를 기억해 두고 pj_jni_find_class() 가 FindClass 실패 때 쓴다. */
+static jobject   jni_app_loader;
+static jmethodID jni_load_class;
+
+static void jni_remember_app_loader(JNIEnv *env)
+{
+    jclass cls = NULL, cls_loader = NULL;
+    jobject loader = NULL;
+
+    /* 기준: 영상 장치가 찾을 pjsip 클래스(JNI_OnLoad 의 FindClass 는 loadLibrary 를 부른 쪽의
+     * 로더를 쓴다). 없으면 이 스레드의 컨텍스트 로더. */
+    cls = (*env)->FindClass(env, "org/pjsip/PjCameraInfo2");
+    if (cls && !(*env)->ExceptionCheck(env)) {
+        jclass cls_class = (*env)->FindClass(env, "java/lang/Class");
+        jmethodID m = (*env)->GetMethodID(env, cls_class, "getClassLoader",
+                                          "()Ljava/lang/ClassLoader;");
+        if (m) loader = (*env)->CallObjectMethod(env, cls, m);
+        (*env)->DeleteLocalRef(env, cls_class);
+    } else {
+        jclass cls_thread;
+        jmethodID m_cur, m_ccl;
+        jobject th = NULL;
+        (*env)->ExceptionClear(env);
+        cls_thread = (*env)->FindClass(env, "java/lang/Thread");
+        m_cur = (*env)->GetStaticMethodID(env, cls_thread, "currentThread",
+                                          "()Ljava/lang/Thread;");
+        m_ccl = (*env)->GetMethodID(env, cls_thread, "getContextClassLoader",
+                                    "()Ljava/lang/ClassLoader;");
+        if (m_cur && m_ccl)
+            th = (*env)->CallStaticObjectMethod(env, cls_thread, m_cur);
+        if (th) loader = (*env)->CallObjectMethod(env, th, m_ccl);
+        (*env)->DeleteLocalRef(env, th);
+        (*env)->DeleteLocalRef(env, cls_thread);
+    }
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (!loader) return;
+
+    cls_loader = (*env)->FindClass(env, "java/lang/ClassLoader");
+    jni_load_class = (*env)->GetMethodID(env, cls_loader, "loadClass",
+                                         "(Ljava/lang/String;)Ljava/lang/Class;");
+    if (jni_load_class)
+        jni_app_loader = (*env)->NewGlobalRef(env, loader);
+    (*env)->DeleteLocalRef(env, cls_loader);
+    (*env)->DeleteLocalRef(env, loader);
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+}
+
 #if defined(PJ_JNI_HAS_JNI_ONLOAD) && PJ_JNI_HAS_JNI_ONLOAD != 0
 
 JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved)
 {
+    JNIEnv *env = NULL;
+
     pj_jni_jvm = vm;
-    
+    if ((*vm)->GetEnv(vm, (void **)&env, JNI_VERSION_1_4) == JNI_OK && env)
+        jni_remember_app_loader(env);           /* CIMS */
+
     return JNI_VERSION_1_4;
 }
 
@@ -381,6 +436,33 @@ PJ_DEF(void) pj_jni_detach_jvm(pj_bool_t attached)
 
     if (attached)
         (*pj_jni_jvm)->DetachCurrentThread(pj_jni_jvm);
+}
+
+/* CIMS: 어느 스레드에서든 앱 클래스까지 찾는다 — FindClass 가 실패하면 기억한 앱 로더로. */
+PJ_DEF(void*) pj_jni_find_class(void *jni_env, const char *class_path)
+{
+    JNIEnv *env = (JNIEnv *)jni_env;
+    jclass cls;
+    jstring name;
+    char buf[256];
+    pj_size_t i, n;
+
+    if (!env || !class_path) return NULL;
+    cls = (*env)->FindClass(env, class_path);
+    if (cls && !(*env)->ExceptionCheck(env)) return cls;
+    (*env)->ExceptionClear(env);
+    if (!jni_app_loader || !jni_load_class) return NULL;
+
+    n = pj_ansi_strlen(class_path);         /* loadClass 는 점 표기 */
+    if (n >= sizeof(buf)) return NULL;
+    for (i = 0; i < n; ++i) buf[i] = (char)(class_path[i] == '/' ? '.' : class_path[i]);
+    buf[n] = '\0';
+    name = (*env)->NewStringUTF(env, buf);
+    if (!name) { (*env)->ExceptionClear(env); return NULL; }
+    cls = (jclass)(*env)->CallObjectMethod(env, jni_app_loader, jni_load_class, name);
+    (*env)->DeleteLocalRef(env, name);
+    if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); return NULL; }
+    return cls;
 }
 
 
