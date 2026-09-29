@@ -174,6 +174,17 @@ public sealed unsafe class Engine : IDisposable
         return new StreamStats(s.rx_packets, s.rx_bytes, s.rx_loss, s.rx_discard, s.tx_packets, s.tx_bytes, s.valid != 0);
     }
 
+    internal CallQuality CallQualityOf(int callId)
+    {
+        cimsue_call_quality_t q;
+        cimsue_engine_call_quality(Handle, callId, &q);
+        static QualityDirection Dir(in cimsue_quality_direction_t d) =>
+            new(d.valid != 0, d.packets, d.lost, d.discarded, d.loss_pct, d.discard_pct, d.jitter_ms, d.jitter_max_ms,
+                d.burst_density_pct, d.gap_density_pct, d.burst_ms, d.gap_ms, d.signal_dbm, d.noise_dbm);
+        return new CallQuality(q.valid != 0, Utf8.Str(q.codec), q.clock_rate, q.wideband != 0, Dir(q.rx), Dir(q.remote),
+                               q.rtd_ms, q.esd_ms, q.one_way_ms, q.r_lq, q.r_cq, q.mos_lq, q.mos_cq, q.start_epoch_ms, q.duration_ms);
+    }
+
     /// <summary>SIP TLS 서버 인증서 만료 관측 — 마지막 성공 핸드셰이크의 peer 인증서(관제 요약 띠 경고의 입력, §8.6.2). 관측 전엔 Valid=false.</summary>
     public TlsPeerExpiry TlsPeerExpiry
     {

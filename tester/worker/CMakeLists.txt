@@ -11,13 +11,15 @@ add_executable(cims-tester-worker
     src/MediaAgent.cpp
 )
 target_compile_features(cims-tester-worker PRIVATE cxx_std_17)
-target_include_directories(cims-tester-worker PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+# E-model 정본(단말 코어와 공용, 헤더 전용) — sdk/core/src/quality/emodel.h (ue_voice_quality.md §3.2)
+set(CIMS_QUALITY_INC ${CMAKE_CURRENT_SOURCE_DIR}/../../sdk/core/src)
+target_include_directories(cims-tester-worker PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CIMS_QUALITY_INC})
 target_link_libraries(cims-tester-worker PRIVATE csim)
 
 # E-model(MOS) 단위시험 — cims-verify S1-UNIT-TESTER 가 실행한다
 add_executable(tester_emodel_test src/EModelTest.cpp)
 target_compile_features(tester_emodel_test PRIVATE cxx_std_17)
-target_include_directories(tester_emodel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(tester_emodel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CIMS_QUALITY_INC})
 
 # 워커 SIP 캡처 단위시험 — cims-verify S1-UNIT-TESTER 가 실행한다
 add_executable(tester_sip_capture_test src/SipCaptureTest.cpp src/SipCapture.cpp)

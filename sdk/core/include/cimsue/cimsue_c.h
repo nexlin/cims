@@ -277,6 +277,29 @@ typedef struct {
     int32_t  valid;
 } cimsue_stream_stats_t;
 
+/* 호 품질 한 방향(types.h QualityDirection) — 비율 %, 값 없음 = -1, 레벨 127 = 없음 */
+typedef struct {
+    int32_t  valid;
+    uint32_t packets, lost, discarded;
+    double   loss_pct, discard_pct, jitter_ms, jitter_max_ms;
+    double   burst_density_pct, gap_density_pct;
+    int32_t  burst_ms, gap_ms;
+    int32_t  signal_dbm, noise_dbm;
+} cimsue_quality_direction_t;
+
+/* 호 품질(types.h CallQuality — ue_voice_quality.md §3). codec 은 같은 스레드의 다음 조회까지 유효 */
+typedef struct {
+    int32_t                    valid;
+    const char*                codec;
+    uint32_t                   clock_rate;
+    int32_t                    wideband;
+    cimsue_quality_direction_t rx;
+    cimsue_quality_direction_t remote;
+    double                     rtd_ms, esd_ms, one_way_ms;
+    double                     r_lq, r_cq, mos_lq, mos_cq;
+    int64_t                    start_epoch_ms, duration_ms;
+} cimsue_call_quality_t;
+
 typedef struct {
     int32_t     id;
     const char* name;
@@ -360,6 +383,9 @@ CIMSUE_API void CIMSUE_CALL cimsue_engine_call_info(const cimsue_engine_t* e, in
 CIMSUE_API int32_t CIMSUE_CALL cimsue_engine_calls(const cimsue_engine_t* e, const int32_t** out);
 CIMSUE_API void CIMSUE_CALL cimsue_engine_stream_stats(const cimsue_engine_t* e, int32_t call_id,
                                                        cimsue_stream_stats_t* out);
+/* 호 품질(Engine::callQuality) — 손실·폐기·지터·RTD·E-model MOS. 없는 호는 valid=0 */
+CIMSUE_API void CIMSUE_CALL cimsue_engine_call_quality(const cimsue_engine_t* e, int32_t call_id,
+                                                       cimsue_call_quality_t* out);
 /* SIP TLS 서버 인증서 만료 관측(Engine::tlsPeerExpiry) — 관제조작반 경고 입력(sip_tls_signaling.md §8.6.2) */
 CIMSUE_API void CIMSUE_CALL cimsue_engine_tls_peer_expiry(const cimsue_engine_t* e, cimsue_tls_peer_expiry_t* out);
 
@@ -729,6 +755,7 @@ typedef enum {
     CIMSUE_STRUCT_DISPATCH_PROFILE, CIMSUE_STRUCT_PROFILE, CIMSUE_STRUCT_GROUP_SUMMARY, CIMSUE_STRUCT_XCAP_DOC,
     CIMSUE_STRUCT_DISPATCH_MEMBER, CIMSUE_STRUCT_DISPATCH_TARGET, CIMSUE_STRUCT_GROUP_MEMBER, CIMSUE_STRUCT_GROUP_DOC,
     CIMSUE_STRUCT_HTTP_RESULT, CIMSUE_STRUCT_TLS_PEER_EXPIRY, CIMSUE_STRUCT_FD_FILE, CIMSUE_STRUCT_FD_UPLOAD,
+    CIMSUE_STRUCT_QUALITY_DIRECTION, CIMSUE_STRUCT_CALL_QUALITY,
     CIMSUE_STRUCT_COUNT_
 } cimsue_struct_id_t;
 /** 구조체의 sizeof(이 DLL 의 컴파일 결과). 모르는 id 는 -1. */

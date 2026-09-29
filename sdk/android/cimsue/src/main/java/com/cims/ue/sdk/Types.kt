@@ -26,6 +26,8 @@ import com.cims.ue.sdk.jni.Result as JniResult
 import com.cims.ue.sdk.jni.SdsMessage as JniSdsMessage
 import com.cims.ue.sdk.jni.SdsSend as JniSdsSend
 import com.cims.ue.sdk.jni.StreamStats as JniStreamStats
+import com.cims.ue.sdk.jni.CallQuality as JniCallQuality
+import com.cims.ue.sdk.jni.QualityDirection as JniQualityDirection
 import com.cims.ue.sdk.jni.StringVector
 import com.cims.ue.sdk.jni.TlsPeerExpiry as JniTlsPeerExpiry
 
@@ -312,6 +314,31 @@ data class StreamStats(val rxPackets: Long, val rxBytes: Long, val rxLoss: Long,
     internal companion object {
         fun of(s: JniStreamStats) = StreamStats(s.rxPackets, s.rxBytes, s.rxLoss, s.rxDiscard,
             s.txPackets, s.txBytes, s.valid)
+    }
+}
+
+/** 호 품질 한 방향 — rx = 내가 받은 스트림, remote = 상대가 받은 내 스트림(상대 RTCP RR·XR). 비율 %, 값 없음 = -1, 레벨 127 = 없음. */
+data class QualityDirection(val valid: Boolean, val packets: Long, val lost: Long, val discarded: Long,
+                            val lossPct: Double, val discardPct: Double, val jitterMs: Double, val jitterMaxMs: Double,
+                            val burstDensityPct: Double, val gapDensityPct: Double, val burstMs: Int, val gapMs: Int,
+                            val signalDbm: Int, val noiseDbm: Int) {
+    internal companion object {
+        fun of(d: JniQualityDirection) = QualityDirection(d.valid, d.packets, d.lost, d.discarded, d.lossPct, d.discardPct,
+            d.jitterMs, d.jitterMaxMs, d.burstDensityPct, d.gapDensityPct, d.burstMs, d.gapMs, d.signalDbm, d.noiseDbm)
+    }
+}
+
+/** 호 품질(ue_voice_quality.md §3) — 손실·폐기·지터·RTD(RTCP)·단말 지연과 ITU-T G.107/G.107.1 E-model 추정 R·MOS
+ *  (LQ = 지연 손상 제외, CQ = 지연 포함). 값 없음 = -1. 종료된 호는 마지막 값. */
+data class CallQuality(val valid: Boolean, val codec: String, val clockRate: Long, val wideband: Boolean,
+                       val rx: QualityDirection, val remote: QualityDirection,
+                       val rtdMs: Double, val esdMs: Double, val oneWayMs: Double,
+                       val rLq: Double, val rCq: Double, val mosLq: Double, val mosCq: Double,
+                       val startEpochMs: Long, val durationMs: Long) {
+    internal companion object {
+        fun of(q: JniCallQuality) = CallQuality(q.valid, q.codec, q.clockRate, q.wideband,
+            QualityDirection.of(q.rx), QualityDirection.of(q.remote), q.rtdMs, q.esdMs, q.oneWayMs,
+            q.rLq, q.rCq, q.mosLq, q.mosCq, q.startEpochMs, q.durationMs)
     }
 }
 

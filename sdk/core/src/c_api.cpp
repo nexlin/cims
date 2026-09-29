@@ -282,6 +282,27 @@ void fill(cimsue_stream_stats_t& o, const StreamStats& s) {
     o.valid = B(s.valid);
 }
 
+void fill(cimsue_quality_direction_t& o, const QualityDirection& d) {
+    o.valid = B(d.valid);
+    o.packets = d.packets; o.lost = d.lost; o.discarded = d.discarded;
+    o.loss_pct = d.lossPct; o.discard_pct = d.discardPct; o.jitter_ms = d.jitterMs; o.jitter_max_ms = d.jitterMaxMs;
+    o.burst_density_pct = d.burstDensityPct; o.gap_density_pct = d.gapDensityPct;
+    o.burst_ms = d.burstMs; o.gap_ms = d.gapMs;
+    o.signal_dbm = d.signalDbm; o.noise_dbm = d.noiseDbm;
+}
+
+void fill(cimsue_call_quality_t& o, const CallQuality& q) {
+    o.valid = B(q.valid);
+    o.codec = C(q.codec);
+    o.clock_rate = q.clockRate;
+    o.wideband = B(q.wideband);
+    fill(o.rx, q.rx);
+    fill(o.remote, q.remote);
+    o.rtd_ms = q.rtdMs; o.esd_ms = q.esdMs; o.one_way_ms = q.oneWayMs;
+    o.r_lq = q.rLq; o.r_cq = q.rCq; o.mos_lq = q.mosLq; o.mos_cq = q.mosCq;
+    o.start_epoch_ms = q.startEpochMs; o.duration_ms = q.durationMs;
+}
+
 /** AccountConfig 산출(to_account) — sec_mechanisms 포인터 배열은 함께 넘긴 버퍼가 소유한다. */
 void fill(cimsue_account_config_t& o, const AccountConfig& a, std::vector<const char*>& secBuf) {
     o.server_host = C(a.serverHost);
@@ -444,6 +465,7 @@ struct Scratch {
     GroupDocHolder                          groupDoc;
     TlsPeerExpiry                           tlsPeer;
     cimsue_tls_peer_expiry_t                tlsPeerC{};
+    CallQuality                             quality;
 };
 thread_local Scratch g_s;
 
@@ -712,6 +734,12 @@ int32_t CIMSUE_CALL cimsue_engine_calls(const cimsue_engine_t* e, const int32_t*
 void CIMSUE_CALL cimsue_engine_stream_stats(const cimsue_engine_t* e, int32_t call_id, cimsue_stream_stats_t* out) {
     if (!out) return;
     fill(*out, e ? e->eng.streamStats(call_id) : StreamStats());
+}
+
+void CIMSUE_CALL cimsue_engine_call_quality(const cimsue_engine_t* e, int32_t call_id, cimsue_call_quality_t* out) {
+    if (!out) return;
+    g_s.quality = e ? e->eng.callQuality(call_id) : CallQuality();
+    fill(*out, g_s.quality);
 }
 
 void CIMSUE_CALL cimsue_engine_tls_peer_expiry(const cimsue_engine_t* e, cimsue_tls_peer_expiry_t* out) {
@@ -1203,6 +1231,8 @@ int32_t CIMSUE_CALL cimsue_struct_size(cimsue_struct_id_t id) {
     case CIMSUE_STRUCT_GROUP_DOC:         return (int32_t)sizeof(cimsue_group_doc_t);
     case CIMSUE_STRUCT_FD_FILE:           return (int32_t)sizeof(cimsue_fd_file_t);
     case CIMSUE_STRUCT_FD_UPLOAD:         return (int32_t)sizeof(cimsue_fd_upload_t);
+    case CIMSUE_STRUCT_QUALITY_DIRECTION: return (int32_t)sizeof(cimsue_quality_direction_t);
+    case CIMSUE_STRUCT_CALL_QUALITY:      return (int32_t)sizeof(cimsue_call_quality_t);
     default:                              return -1;
     }
 }

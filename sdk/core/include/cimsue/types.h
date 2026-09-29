@@ -299,6 +299,41 @@ struct StreamStats {
     bool valid = false;
 };
 
+/** 호 품질의 한 방향(ue_voice_quality.md §3.1). rx = 내가 받은 스트림(자기 측정), remote = 상대가 받은 내 스트림
+ *  (상대 RTCP RR — RFC 3550 §6.4.2 — 에 XR VoIP Metrics(RFC 3611 §4.7)가 있으면 폐기율·버스트/갭까지). 비율은 %, 값이 없으면 -1. */
+struct QualityDirection {
+    bool valid = false;
+    unsigned packets = 0;             // rx = 받은 패킷 · remote = 내가 보낸 패킷
+    unsigned lost = 0;                // 망 손실(RFC 3550 A.3) — remote 는 상대 RR 의 누적 손실
+    unsigned discarded = 0;           // 지터버퍼 폐기(늦음·넘침) — remote 는 XR 폐기율에서 환산
+    double lossPct = -1;              // lost / (packets + lost)
+    double discardPct = -1;
+    double jitterMs = -1;             // 평균 지터(RFC 3550 A.8)
+    double jitterMaxMs = -1;
+    double burstDensityPct = -1;      // XR burst density(Gmin 16) — 손실이 몰린 구간의 손실·폐기 밀도
+    double gapDensityPct = -1;        // XR gap density
+    int burstMs = -1, gapMs = -1;     // XR 평균 버스트/갭 길이
+    int signalDbm = 127, noiseDbm = 127;   // XR 신호·잡음 레벨(dBm0), 127 = 없음
+};
+
+/** 호 품질 스냅샷(ue_voice_quality.md §3.3) — Engine::callQuality. MOS 는 ITU-T G.107/G.107.1 E-model 추정(POLQA/PESQ 아님).
+ *  종료된 호는 마지막 스트림 소멸 시점의 값이고, 전달·재협상으로 스트림이 바뀌면 패킷·손실·폐기를 누적한다. */
+struct CallQuality {
+    bool valid = false;               // 오디오 스트림을 한 번이라도 가졌다
+    std::string codec;                // 협상 코덱(rtpmap encoding name — "AMR-WB")
+    unsigned clockRate = 0;
+    bool wideband = false;            // G.107.1 광대역 척도(AMR-WB·G.722)
+    QualityDirection rx;
+    QualityDirection remote;
+    double rtdMs = -1;                // 왕복 지연(RTCP LSR/DLSR, RFC 3550 §6.4.1) — CMP relay 가 RTCP 를 중계하므로 종단 RTT
+    double esdMs = -1;                // 자기 단말 지연 = 지터버퍼 평균 지연 + 코덱 프레임·lookahead + 장치 추정
+    double oneWayMs = -1;             // E-model 단방향 입→귀 지연 Ta = RTD/2 + 자기 ESD + 상대 ESD 추정
+    double rLq = -1, rCq = -1;        // R — 코덱 대역의 원 척도(광대역 0~129). LQ = 지연 손상 제외, CQ = 지연 포함
+    double mosLq = -1, mosCq = -1;    // MOS 1.0~4.5 (광대역은 R/1.29 로 협대역 척도에 옮겨 계산)
+    int64_t startEpochMs = 0;         // 첫 스트림 시작(UTC epoch ms)
+    int64_t durationMs = 0;           // 스트림이 있던 누적 시간
+};
+
 /** 서버(peer) 인증서 만료 관측 — 마지막 성공 TLS 핸드셰이크에서 본 상대 인증서의 notAfter
  *  (sip_tls_signaling.md §8.6.2 관제조작반 경고). SIP TLS(Engine)·HTTPS(CscClient) 각각 관측한다.
  *  임계는 서버와 같다: 잔여 ≤ 30일 = 경고(자동 갱신 실패 신호), ≤ 7일 = 위험. */

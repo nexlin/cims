@@ -276,7 +276,9 @@ cimsue-cli [계정] drive
   이벤트: ready{version,aor} · reg{state,code,reason,expires,rrd_ms} · incoming{call,from,called,video,mcptt,group}
         · call{call,dir,state outgoing|incoming|active|held|disconnected,code,reason,media,mcptt,video,by_us,group,srd_ms|sdd_ms,rx_pkts,tx_pkts,rx_loss,rx_bytes,jitter_us}
         · floor{call,kind,subtype(TS 24.380 §8.2),t_us,cause,queue_position,duration} · request{method,op,on,code,reason,ms,token}(affiliate PUBLISH)
-        · stats{call,rx_pkts,tx_pkts,rx_loss,rx_bytes,jitter_us}(활성 호마다 1 초) · roster · dialog · sds · engine_stopped · exit
+        · stats{call,rx_pkts,tx_pkts,rx_loss,rx_bytes,jitter_us + 품질}(활성 호마다 1 초) · roster · dialog · sds · engine_stopped · exit
+  품질(call disconnected·stats·명령형 결과 JSON) = codec·discard·loss_pct·discard_pct·jitter_max_ms·remote_loss_pct·remote_jitter_ms·rtd_ms·esd_ms·
+        one_way_ms·r_lq·r_cq·mos_lq·mos_cq — Engine::callQuality(ue_voice_quality.md §3), 값 없음 = -1
 ```
 MCPTT 착신은 코어가 자동응답(`autoAnswerMcptt`)하므로 `incoming{mcptt:true}` 뒤 `call{dir:in,state:active}` 가 합류 신호다. `disconnected` 이벤트는 그 호의
 최종 통계를 함께 싣는다(우리가 끊었으면 `by_us` + `sdd_ms`). 1xx 는 이벤트로 내지 않는다(코어 `onCallState` 는 상태 전이만).
@@ -527,7 +529,7 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 - **호 전달 후 누적 통계** — 전달로 미디어 스트림이 재생성되면 마지막 소멸 스트림의 통계만 남는다(스트림별 누적 합산은 후속).
 - **remote-init ambient listening·barge-in** — 서버 §10 과제와 함께 코어 API 확장.
 - **음성 품질 측정·시험 모드 계측기 링크** — 코어 `quality/`(RTCP-XR·G.107/G.107.1 E-model·`callQuality`)·drive 루프의 코어 이전
-  (`drive/` `DriveSession` — stdin/stdout 과 TLS 계측 링크 공용)·`cimsue-cli --link` 는 [ue_voice_quality.md](ue_voice_quality.md) 가 정본(설계, 미구현).
+  (`drive/` `DriveSession` — stdin/stdout 과 TLS 계측 링크 공용)·`cimsue-cli --link` 는 [ue_voice_quality.md](ue_voice_quality.md) 가 정본(측정 Q1 구현 반영, 링크 Q2~ 미구현).
 - **cspsim 과 `cimsue-cli` 의 역할 분담 장기안** — 시뮬레이터 축(부하·다중 단말)과 실스택 축(정합)의 S3 항목 배분.
 
 ## 12. 문서 갱신 대상 (구현과 같은 변경에서)

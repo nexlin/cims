@@ -6774,6 +6774,21 @@ PJ_DECL(pj_status_t) pjsua_call_get_stream_stat(pjsua_call_id call_id,
                                                 pjsua_stream_stat *stat);
 
 /**
+ * CIMS: Get RTCP-XR statistic (RFC 3611 VoIP Metrics) of the audio stream
+ * for the specified media index. Returns PJ_ENOTSUP unless built with
+ * PJMEDIA_HAS_RTCP_XR (docs/design/features/ue_voice_quality.md §3).
+ *
+ * @param call_id       The call identification.
+ * @param med_idx       Media stream index (audio).
+ * @param stat          To be filled with the RTCP-XR statistic.
+ *
+ * @return              PJ_SUCCESS on success or the appropriate error.
+ */
+PJ_DECL(pj_status_t) pjsua_call_get_stream_stat_xr(pjsua_call_id call_id,
+                                                   unsigned med_idx,
+                                                   pjmedia_rtcp_xr_stat *stat);
+
+/**
  * Get media transport info for the specified media index.
  *
  * @param call_id       The call identification.

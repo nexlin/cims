@@ -242,6 +242,8 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
     /** 제어 스레드를 기다린다 — 메인 스레드에서 부르지 않는다. */
     suspend fun floorInfo(callId: Int): FloorInfo? = withContext(io) { guarded { FloorInfo.of(engine.floorInfo(callId)) } }
     suspend fun streamStats(callId: Int): StreamStats? = withContext(io) { guarded { StreamStats.of(engine.streamStats(callId)) } }
+    /** 호 품질(손실·폐기·지터·RTD·E-model MOS — ue_voice_quality.md §3). */
+    suspend fun callQuality(callId: Int): CallQuality? = withContext(io) { guarded { CallQuality.of(engine.callQuality(callId)) } }
 
     // ── 장치 ──────────────────────────────────────────────────────────────────
     suspend fun audioDevices(): List<AudioDeviceInfo> =
@@ -442,6 +444,7 @@ class Call internal constructor(private val ue: CimsUe, val id: Int, private val
 
     suspend fun floorInfo(): FloorInfo? = if (isStale) null else ue.floorInfo(id)
     suspend fun streamStats(): StreamStats? = if (isStale) null else ue.streamStats(id)
+    suspend fun quality(): CallQuality? = if (isStale) null else ue.callQuality(id)
 
     private suspend fun cmd(block: () -> CimsResult<Unit>): CimsResult<Unit> =
         if (isStale) CimsResult.fail(-98, "stale call handle") else ue.command(block)

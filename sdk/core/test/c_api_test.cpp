@@ -221,6 +221,11 @@ TEST(CApi, EngineLifecycleHeadless) {
     cimsue_stream_stats_t ss{};
     cimsue_engine_stream_stats(e, 7, &ss);
     EXPECT_EQ(ss.valid, 0);
+    cimsue_call_quality_t cq{};
+    cimsue_engine_call_quality(e, 7, &cq);
+    EXPECT_EQ(cq.valid, 0);
+    EXPECT_NE(cq.codec, nullptr);
+    EXPECT_EQ(cq.mos_cq, -1);
     EXPECT_EQ(cimsue_engine_set_call_route(e, 0, 99), -1);  // 없는 라우트 — C++ 시험과 같은 경로
     EXPECT_STREQ(cimsue_last_error(), "no such route");
 
@@ -322,6 +327,8 @@ TEST(CApi, GroupDocRoundTripAndAbi) {
     EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_DISPATCH_TARGET), (int32_t)sizeof(cimsue_dispatch_target_t));
     EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_FD_FILE), (int32_t)sizeof(cimsue_fd_file_t));
     EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_FD_UPLOAD), (int32_t)sizeof(cimsue_fd_upload_t));
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_QUALITY_DIRECTION), (int32_t)sizeof(cimsue_quality_direction_t));
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_CALL_QUALITY), (int32_t)sizeof(cimsue_call_quality_t));
     EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_COUNT_), -1);
 
     // 프로파일 dispatch 확장 평탄화

@@ -238,6 +238,31 @@ internal struct cimsue_stream_stats_t
 }
 
 [StructLayout(LayoutKind.Sequential)]
+internal struct cimsue_quality_direction_t
+{
+    public int valid;
+    public uint packets, lost, discarded;
+    public double loss_pct, discard_pct, jitter_ms, jitter_max_ms;
+    public double burst_density_pct, gap_density_pct;
+    public int burst_ms, gap_ms;
+    public int signal_dbm, noise_dbm;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_call_quality_t
+{
+    public int valid;
+    public byte* codec;
+    public uint clock_rate;
+    public int wideband;
+    public cimsue_quality_direction_t rx;
+    public cimsue_quality_direction_t remote;
+    public double rtd_ms, esd_ms, one_way_ms;
+    public double r_lq, r_cq, mos_lq, mos_cq;
+    public long start_epoch_ms, duration_ms;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 internal unsafe struct cimsue_tls_peer_expiry_t
 {
     public int valid;
@@ -481,5 +506,6 @@ internal enum cimsue_struct_id_t
     TALKER, FLOOR_EVENT, FLOOR_INFO, REQUEST_RESULT, DIALOG_INFO, ROSTER_ENTRY, SDS_MESSAGE, STREAM_STATS, AUDIO_DEVICE_INFO,
     LISTENER, CSC_ENDPOINT, TOKEN_SET, SERVICE_ENDPOINT, SERVICE_PROFILE, DISPATCH_PROFILE, PROFILE, GROUP_SUMMARY, XCAP_DOC,
     DISPATCH_MEMBER, DISPATCH_TARGET, GROUP_MEMBER, GROUP_DOC, HTTP_RESULT, TLS_PEER_EXPIRY, FD_FILE, FD_UPLOAD,
+    QUALITY_DIRECTION, CALL_QUALITY,
     COUNT_,
 }

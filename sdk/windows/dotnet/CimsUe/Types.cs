@@ -217,6 +217,17 @@ public sealed record SdsMessage(int AccountId, string FromUri, string GroupUri, 
 
 public sealed record StreamStats(uint RxPackets, uint RxBytes, uint RxLoss, uint RxDiscard, uint TxPackets, uint TxBytes, bool Valid);
 
+/// <summary>호 품질 한 방향 — Rx = 내가 받은 스트림, Remote = 상대가 받은 내 스트림(상대 RTCP RR·XR). 비율 %, 값 없음 = -1, 레벨 127 = 없음.</summary>
+public sealed record QualityDirection(bool Valid, uint Packets, uint Lost, uint Discarded, double LossPct, double DiscardPct,
+                                      double JitterMs, double JitterMaxMs, double BurstDensityPct, double GapDensityPct,
+                                      int BurstMs, int GapMs, int SignalDbm, int NoiseDbm);
+
+/// <summary>호 품질(ue_voice_quality.md §3) — 손실·폐기·지터·RTD(RTCP)·단말 지연과 ITU-T G.107/G.107.1 E-model 추정 R·MOS
+/// (LQ = 지연 손상 제외, CQ = 지연 포함). 값 없음 = -1. 종료된 호는 마지막 값.</summary>
+public sealed record CallQuality(bool Valid, string Codec, uint ClockRate, bool Wideband, QualityDirection Rx, QualityDirection Remote,
+                                 double RtdMs, double EsdMs, double OneWayMs, double RLq, double RCq, double MosLq, double MosCq,
+                                 long StartEpochMs, long DurationMs);
+
 /// <summary>서버 인증서 만료 관측 — 마지막 성공 TLS 핸드셰이크의 peer 인증서(SIP TLS = Engine, HTTPS = CscClient).
 /// 관측 전엔 Valid=false. DaysLeft 는 코어가 계산한 잔여 일수(음수 = 만료). 임계는 서버와 같다: ≤30일 경고(자동 갱신 실패 신호), ≤7일 위험
 /// (sip_tls_signaling.md §8.6.2).</summary>

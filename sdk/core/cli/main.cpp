@@ -26,7 +26,9 @@
 //         affiliate <group> on|off | pickup <code> [number] | stats [call] | quit
 //   이벤트: {"event":"ready"} · reg{state,code,reason,rrd_ms} · incoming{call,from,called,video,mcptt,group} · call{call,dir,state,code,reason,media,
 //         mcptt,video,by_us,srd_ms|sdd_ms,rx_pkts,tx_pkts,rx_loss,jitter_us} · floor{call,kind,subtype,t_us,cause,queue_position} · request{op,method,code,ms,on}
-//         · stats{call,rx_pkts,tx_pkts,rx_loss,rx_bytes,jitter_us} · result{op,ok,call,code,reason}(명령마다 하나) · dialog · sds · exit
+//         · stats{call,rx_pkts,tx_pkts,rx_loss,rx_bytes,jitter_us + 품질} · result{op,ok,call,code,reason}(명령마다 하나) · dialog · sds · exit
+//         품질(call disconnected·stats) = codec,discard,loss_pct,discard_pct,jitter_max_ms,remote_loss_pct,remote_jitter_ms,rtd_ms,esd_ms,
+//         one_way_ms,r_lq,r_cq,mos_lq,mos_cq — Engine::callQuality(ue_voice_quality.md §3), 값 없음 = -1
 //
 // 계정 옵션: --server IP --port N --transport udp|tcp|tls --domain D --msisdn M (--imsi I | --auth-id IMPI)
 //           (--ha1 HEX32 | --password P) [--mcptt-id tel:..] [--affiliate G[,G2]] [--srtp off|optional|required]
@@ -364,6 +366,16 @@ std::string statsJson(const StreamStats& st) {
     return ",\"rx_pkts\":" + std::to_string(st.rxPackets) + ",\"tx_pkts\":" + std::to_string(st.txPackets) + ",\"rx_loss\":" + std::to_string(st.rxLoss) +
            ",\"rx_bytes\":" + std::to_string(st.rxBytes) + ",\"jitter_us\":" + std::to_string(st.rxJitterUs) + ",\"stats_valid\":" + (st.valid ? "true" : "false");
 }
+/** 호 품질(ue_voice_quality.md §3 — Engine::callQuality) 필드. 값이 없으면 -1. 계측기 real-ue 가 rtd_ms·mos_cq 를 지표로 쓴다. */
+std::string qualityJson(const CallQuality& q) {
+    if (!q.valid) return "";
+    auto num = [](double v) { char b[32]; std::snprintf(b, sizeof(b), v < 0 ? "%.0f" : "%.2f", v < 0 ? -1.0 : v); return std::string(b); };
+    return ",\"codec\":\"" + jsonEsc(q.codec) + "\",\"discard\":" + std::to_string(q.rx.discarded) + ",\"loss_pct\":" + num(q.rx.lossPct) +
+           ",\"discard_pct\":" + num(q.rx.discardPct) + ",\"jitter_max_ms\":" + num(q.rx.jitterMaxMs) +
+           ",\"remote_loss_pct\":" + num(q.remote.valid ? q.remote.lossPct : -1) + ",\"remote_jitter_ms\":" + num(q.remote.valid ? q.remote.jitterMs : -1) +
+           ",\"rtd_ms\":" + num(q.rtdMs) + ",\"esd_ms\":" + num(q.esdMs) + ",\"one_way_ms\":" + num(q.oneWayMs) +
+           ",\"r_lq\":" + num(q.rLq) + ",\"r_cq\":" + num(q.rCq) + ",\"mos_lq\":" + num(q.mosLq) + ",\"mos_cq\":" + num(q.mosCq);
+}
 
 class DriveListener : public Listener {
 public:
@@ -398,7 +410,7 @@ public:
                 active_.erase(c.callId);
             }
         }
-        if (c.state == CallState::Disconnected && eng) extra += statsJson(eng->streamStats(c.callId));   // 소멸 시점의 최종 통계
+        if (c.state == CallState::Disconnected && eng) extra += statsJson(eng->streamStats(c.callId)) + qualityJson(eng->callQuality(c.callId));   // 소멸 시점의 최종 통계·품질
         outLine("{\"event\":\"call\",\"call\":" + std::to_string(c.callId) + ",\"dir\":\"" + (c.dir == CallDir::Outgoing ? "out" : "in") + "\",\"state\":\"" + st +
                 "\",\"code\":" + std::to_string(c.lastCode) + ",\"reason\":\"" + jsonEsc(c.lastReason) + "\",\"media\":" + (c.mediaActive ? "true" : "false") +
                 ",\"mcptt\":" + (c.isMcptt ? "true" : "false") + ",\"video\":" + (c.video ? "true" : "false") + ",\"by_us\":" + (byUs ? "true" : "false") +
@@ -475,7 +487,7 @@ int driveLoop(Engine& eng, DriveListener& ls, int acc, const Opts& o) {
             if (stop) break;
             for (int id : ls.activeCalls()) {
                 StreamStats st = eng.streamStats(id);
-                if (st.valid) outLine("{\"event\":\"stats\",\"call\":" + std::to_string(id) + statsJson(st) + "}");
+                if (st.valid) outLine("{\"event\":\"stats\",\"call\":" + std::to_string(id) + statsJson(st) + qualityJson(eng.callQuality(id)) + "}");
             }
         }
     });
@@ -528,7 +540,7 @@ int driveLoop(Engine& eng, DriveListener& ls, int acc, const Opts& o) {
             result(op, id >= 0, id, 0, id >= 0 ? "" : "pickup refused");
         } else if (op == "stats") {
             std::vector<int> ids = tk.size() > 1 ? std::vector<int>{ argi(1, -1) } : ls.activeCalls();
-            for (int id : ids) outLine("{\"event\":\"stats\",\"call\":" + std::to_string(id) + statsJson(eng.streamStats(id)) + "}");
+            for (int id : ids) outLine("{\"event\":\"stats\",\"call\":" + std::to_string(id) + statsJson(eng.streamStats(id)) + qualityJson(eng.callQuality(id)) + "}");
             result(op, true, -1, 0, "");
         } else result(op, false, -1, 0, "unknown command");
     }
@@ -719,6 +731,7 @@ int main(int argc, char** argv) {
     auto finish = [&](int callId) {
         if (callId >= 0) {
             s.st = eng.streamStats(callId);
+            s.extra += qualityJson(eng.callQuality(callId));
             CallInfo ci = ls.calls.count(callId) ? ls.calls[callId] : CallInfo{};
             s.code = ci.lastCode; s.reason = ci.lastReason;
             if (ci.state != CallState::Disconnected) {

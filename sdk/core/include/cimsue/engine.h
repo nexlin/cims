@@ -59,6 +59,8 @@ public:
     std::vector<int> calls() const;
     /** 오디오 스트림 RTP/RTCP 통계(동기 조회). 종료된 호는 소멸 시점의 최종 통계. */
     StreamStats streamStats(int callId) const;
+    /** 호 품질(손실·폐기·지터·RTD·E-model MOS — ue_voice_quality.md §3). 동기 조회, 종료된 호는 마지막 값. 오디오가 없으면 valid=false. */
+    CallQuality callQuality(int callId) const;
 
     // ── MCPTT 그룹콜·사설콜 (TS 24.379) ──
     /** 그룹콜 참여(발신 INVITE, multipart mcptt-info[+resource-lists], SDP m=application floor).

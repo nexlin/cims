@@ -74,47 +74,70 @@
 | 버스트/갭 밀도·길이 | XR `burst_den`·`gap_den`·`burst_dur`·`gap_dur`(Gmin 16) | 평균이 같아도 몰린 손실을 구분 |
 | 지터 | RFC 3550 A.8 | 평균·최대(ms) |
 | 왕복 지연 RTD | RTCP SR/RR LSR·DLSR(RFC 3550 §6.4.1), pjmedia `rtcp.stat.rtt` | CMP 가 1:1 relay 에서 RTCP 를 중계하므로 **단말↔상대 종단 RTT** |
-| 단말 지연 ESD | XR `end_sys_delay` | 지터버퍼 + 코덱 프레임·lookahead + 패킷화 |
-| 신호·잡음 레벨 | XR `signal_lvl`·`noise_lvl`(dBm0) | 기준 음원 시험(§4.2) 때 도달 레벨 확인 — 목표 -26 dBov(P.56) |
-| 무음 leg | 수신 0 이 일정 시간 지속 | 단방향 무음 판정. DTX(AMR-WB SID)와 floor 게이트는 무음으로 세지 않는다 |
+| 단말 지연 ESD | 지터버퍼 평균 지연(pjmedia jbuf `avg_delay`) + 코덱 프레임·lookahead + 장치 추정 30 ms | 자기 단말 안의 지연. pjmedia XR 의 `end_sys_delay` 는 RTD/2 를 포함해 계산하므로(자체 추정) 망 지연과 겹치지 않게 쓰지 않는다 |
+| 신호·잡음 레벨 | XR `signal_lvl`·`noise_lvl`(dBm0) | 필드는 싣지만 pjmedia 가 계산하지 않아 127(없음) — 기준 음원 도달 레벨 확인(목표 -26 dBov, P.56)은 §9 과제 |
+| 무음 leg | 받은 패킷 0 | `rx.valid=false`, MOS 는 -1(추정하지 않음). DTX(AMR-WB SID)·floor 게이트 구간의 무수신은 계측기가 따로 가린다 |
 | R · MOS-LQ · MOS-CQ | §3.2 E-model | LQ = 지연 손상(Id) 제외 청취 품질, CQ = 지연 포함 대화 품질 |
 | 코덱 | 협상 결과(PT·rtpmap·fmtp) | E-model 코덱 상수 선택 |
 | PTT floor | floor 참가자 상태머신 | 요청→허가 시간(TS 22.179 KPI 1 MCPTT access time). 그룹 미디어는 RTCP 가 없어 RTD·원격 지표 없음 |
 
 ### 3.2 E-model
 
-단일 정의는 코어 `sdk/core/src/quality/emodel.h`(헤더 전용·의존 없음)에 두고, 계측기 워커(`tester/worker/src/EModel.h`)도 이 헤더를 쓰도록
-옮긴다 — floor 정의 단일화([ue_sdk.md §4.6](ue_sdk.md))와 같은 방식이다.
+단일 정의는 코어 `sdk/core/src/quality/emodel.h`(헤더 전용·의존 없음, 네임스페이스 `cimsue::emodel`)이고, 계측기 워커의
+`tester/worker/src/EModel.h` 는 이 헤더 위의 얇은 층(워커 입력 손실·지터·망 지연 → Ta)이다 — floor 정의 단일화([ue_sdk.md §4.6](ue_sdk.md))와 같은 방식.
+품질 계산(pjmedia 통계 → `CallQuality`)은 pj 타입 없는 평문 입력을 받는 `sdk/core/src/quality/call_quality.{h,cpp}` 가 하고, 엔진은 pjsua2
+`StreamStat`·`pjsua_call_get_stream_stat_xr`(CIMS 패치) 결과를 그 입력으로 옮긴다.
 
-- **R = Ro − Is − Id − Ie,eff + A**(G.107 §7). 기본값 Ro − Is = 93.2, A = 0.
-- **Ie,eff = Ie + (95 − Ie) · Ppl / (Ppl / BurstR + Bpl)**. Ppl = 망 손실 + 지터버퍼 폐기(사용자가 겪는 손실은 둘의 합).
-  BurstR 은 XR 버스트/갭 지표에서 2 상태 마르코프 근사로 구하고, 없으면 1(무작위 손실)로 둔다.
-- **Id** 는 단방향 입→귀 지연 **Ta ≈ RTD/2 + ESD(자기) + ESD(상대)** 로 계산한다. 상대 XR 이 없으면 ESD(상대) = 코덱 프레임 + lookahead 고정값.
-  MOS-LQ 는 Id = 0 으로 계산한다.
-- **광대역**(AMR-WB·G.722)은 G.107.1 — Ro 는 129 척도, 코덱 상수 Ie,wb·Bpl 은 G.113 광대역 표에서 옮긴다. MOS 는 R_WB / 1.29 를
-  협대역 척도로 옮긴 뒤 G.107 Annex B 식으로 구한다. 그래야 협대역 호와 한 척도로 비교할 수 있다. R 원값은 따로 보존한다.
+- **R = Rmax − Id − Ie,eff**(G.107 §7 의 기본 입력 — Ro − Is 와 A = 0 을 접은 값). 협대역 Rmax = 93.2.
+- **Ie,eff = Ie + (95 − Ie) · Ppl / (Ppl / BurstR + Bpl)**. Ppl = 망 손실 + 지터버퍼 폐기(사용자가 겪는 손실은 둘의 합). BurstR = 1(무작위 손실) —
+  XR 버스트/갭 지표는 보고 필드로만 싣고 BurstR 에는 아직 넣지 않는다(§9).
+- **Id = 0.024·Ta + 0.11·(Ta − 177.3)·H(Ta − 177.3)**(G.107 Id 의 한 구간 근사). 단방향 입→귀 지연 **Ta = RTD/2 + ESD(자기) + ESD(상대 추정)**,
+  ESD(상대 추정) = 코덱 프레임·lookahead + 장치 30 ms. RTD 를 모르면(RTCP 없음) 망 지연 0. MOS-LQ 는 Ta = 0 으로 계산한다.
+- **광대역**(AMR-WB·G.722)은 G.107.1 — Rmax = 129, 코덱 상수는 Ie,wb. MOS 는 R_WB / 1.29 를 협대역 척도로 옮긴 뒤 G.107 Annex B 식으로 구한다.
+  그래야 협대역 호와 한 척도로 비교할 수 있다. R 은 원 척도 그대로 보존한다(`rLq`·`rCq`).
 - MOS = 1 + 0.035R + R(R − 60)(100 − R) · 7·10⁻⁶ (0 < R < 100), R ≤ 0 → 1, R ≥ 100 → 4.5.
+
+| 코덱(rtpmap) | 대역 | Ie(,wb) | Bpl | 프레임·lookahead | 출처 |
+|---|---|---|---|---|---|
+| PCMU·PCMA | 협대역 | 0 | 25.1 | 20 ms | G.113 App. I(G.711 + PLC) |
+| G729 | 협대역 | 11 | 19 | 25 ms | G.113 App. I |
+| AMR | 협대역 | 5 | 10 | 25 ms | G.113 App. I(12.2 kbit/s) |
+| AMR-WB | 광대역 | 13 | 13 | 25 ms | 대표 모드 12.65 kbit/s — G.113 광대역 표 대조 과제(§9) |
+| G722 | 광대역 | 13 | 10 | 20 ms | 64 kbit/s — 같은 대조 과제 |
+| 그 밖 | 협대역 | 0 | 25.1 | 20 ms | G.711 값 |
 
 ### 3.3 API
 
 ```cpp
-struct CallQuality {                          // quality.h — 스냅샷(동기 조회)
-    bool valid; std::string codec; int ptime;
-    struct Dir { unsigned pkts, lost, discarded; double lossPct, discardPct, jitterMs, jitterMaxMs;
-                 double burstDensity, gapDensity; double signalDbm, noiseDbm; bool silent; } rx, remote;  // remote = 상대 XR
-    double rtdMs, esdMs;                      // -1 = 없음
-    double rLq, rCq, mosLq, mosCq;            // -1 = 계산 불가
-    int64_t startEpochMs, stopEpochMs;
+struct QualityDirection {                     // types.h — rx = 내가 받은 스트림, remote = 상대가 받은 내 스트림(상대 RR + XR)
+    bool valid; unsigned packets, lost, discarded;
+    double lossPct, discardPct, jitterMs, jitterMaxMs;       // %, ms — 없으면 -1
+    double burstDensityPct, gapDensityPct; int burstMs, gapMs; // XR(RFC 3611 §4.7)
+    int signalDbm, noiseDbm;                                 // XR 레벨, 127 = 없음
+};
+struct CallQuality {
+    bool valid; std::string codec; unsigned clockRate; bool wideband;
+    QualityDirection rx, remote;
+    double rtdMs, esdMs, oneWayMs;            // -1 = 없음
+    double rLq, rCq, mosLq, mosCq;            // -1 = 계산 불가(받은 패킷 없음)
+    int64_t startEpochMs, durationMs;
 };
 class Engine { … CallQuality callQuality(int callId) const; … };
 ```
 
-- 호 종료 뒤에도 마지막 통계를 보존한다(현행 `onStreamDestroyed` 보존 규칙 승계). 전달·재협상으로 스트림이 재생성되면 **누적 합산**한다.
-- Android `:cimsue`(Kotlin 파사드)·C API `cimsue_call_quality`·.NET `Call.Quality` 로 같은 구조체를 낸다.
+- 원천: rx = RTCP rx stat(손실·폐기·지터) + 자기 XR 계산값, remote = RTCP tx stat(상대 RR 의 누적 손실·지터, `updateCount` > 0 일 때) + 상대 XR
+  (폐기율·버스트/갭), RTD = RTCP `rtt` 평균(없으면 XR DLRR 의 `rtt`).
+- 호 종료 뒤에도 마지막 값을 보존한다(`onStreamDestroyed` 에서 오디오 스트림을 측정). 전달·재협상으로 스트림이 재생성되면 패킷·손실·폐기를
+  **누적 합산**하고(`quality::merge`) 비율·MOS 를 다시 계산한다. 받은 패킷이 없으면 MOS 는 -1.
+- 바인딩: C API `cimsue_engine_call_quality`(`cimsue_call_quality_t`·`cimsue_quality_direction_t`, 구조체 id `CIMSUE_STRUCT_CALL_QUALITY`·
+  `CIMSUE_STRUCT_QUALITY_DIRECTION`) · .NET `Call.Quality`(`CallQuality`·`QualityDirection` record) · Android `CimsUe.callQuality(callId)`·`Call.quality()`.
+- `cimsue-cli` 는 결과 JSON·`drive` 의 `call(disconnected)`·`stats` 이벤트에 `codec`·`discard`·`loss_pct`·`discard_pct`·`jitter_max_ms`·
+  `remote_loss_pct`·`remote_jitter_ms`·`rtd_ms`·`esd_ms`·`one_way_ms`·`r_lq`·`r_cq`·`mos_lq`·`mos_cq` 를 싣는다(값 없음 = -1).
 
 ### 3.4 엔진 빌드
 
-`ext/pjproject` 의 플랫폼별 `config_site.h`(Linux·NDK·MSVC)에 `PJMEDIA_HAS_RTCP_XR 1`·`PJMEDIA_STREAM_ENABLE_XR 1` 을 켠다. RTCP-XR 은
+세 플랫폼 공통 `sdk/engine/config_site/common.h` 에 `PJMEDIA_HAS_RTCP_XR 1`·`PJMEDIA_STREAM_ENABLE_XR 1` 을 켠다. XR 통계는 pjsua API 에 없어
+CIMS 패치 `pjsua_call_get_stream_stat_xr`(`pjsip/src/pjsua-lib/pjsua_call.c`)로 읽는다. RTCP-XR 은
 RTCP compound 에 실려 나가므로 SRTP 호에서는 SRTCP 로 보호된다. CMP 는 relay leg 마다 SRTCP 를 풀고 다시 보호하므로 XR 도 그대로 건너간다.
 
 ## 4. 시험 모드 (앱)
@@ -231,9 +254,13 @@ pairKey, verify)` 한 번과 상태 콜백만 쓴다. 프로토콜 정의가 한
 | Q3 | 계측기 — `DeviceHub`·`K_DEVICE` · 컨트롤러 `DevicePool`·`GET /devices`·배치·게이트·`device_*`·KPI 요약 · libcsim RTCP 송신 · 동봉 시나리오 · 콘솔(연결된 단말 목록·풀 속성) | `tester/worker` · `cspsim` · `ems/tester` |
 | Q4 | 앱 시험 모드 — Android core 공통(진입·설정·링크 서비스·오버레이·요약·이력·내보내기) + 앱 3종 · Windows 관제 앱 | `android/core` · 앱 · `windows/dispatch-desktop` |
 
-Q1 만으로도 계측기 `real-ue` 가 RTT 실측 MOS 를 얻는다. Q2·Q3 뒤에는 앱 없이 링크 모드 `cimsue-cli` 로 `device` 풀을 끝까지 검증할 수 있다.
+Q1 은 구현 반영 — 계측기 `real-ue` 는 cli 가 낸 `mos_cq`(RTT 실측·지터버퍼 폐기 포함)를 그대로 쓰고 `rtd_ms`·`real_rtd_ms` 를 기록한다. Q2·Q3 뒤에는 앱 없이 링크 모드 `cimsue-cli` 로 `device` 풀을 끝까지 검증할 수 있다.
 
 ## 9. 미해결 / 향후
+
+- **E-model 입력 보강** — XR 버스트/갭에서 BurstR(G.107 §7.5, 2 상태 마르코프) 추정 · 광대역 코덱 상수(Ie,wb·Bpl)를 G.113 광대역 표와 대조하고
+  AMR-WB 모드(fmtp `mode-set`·실제 수신 모드)별 값으로 · 신호·잡음 레벨(XR `signal_lvl`/`noise_lvl`)은 pjmedia 가 채우지 않아 127 — 레벨 계측
+  (ue_audio_level.md 의 P.56 측정기)을 XR 에 넣을지 결정.
 
 - **대상 쪽 구간 관측** — 실단말 두 대의 보고만으로는 상향·하향 어느 구간이 나빴는지 가르기 어렵다. 계측기의 대상 관측(대상 OAM·SSH, test_instrument.md
   대상 관측)으로 CMP relay leg 별 수신 카운터를 읽는 경로를 둘지 결정한다 — 보고·제어 경로가 아니라 **관측 증거**로만.

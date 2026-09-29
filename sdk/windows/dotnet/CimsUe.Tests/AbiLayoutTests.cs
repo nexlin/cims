@@ -43,6 +43,8 @@ public unsafe class AbiLayoutTests
         new object[] { cimsue_struct_id_t.TLS_PEER_EXPIRY, sizeof(cimsue_tls_peer_expiry_t) },
         new object[] { cimsue_struct_id_t.FD_FILE, sizeof(cimsue_fd_file_t) },
         new object[] { cimsue_struct_id_t.FD_UPLOAD, sizeof(cimsue_fd_upload_t) },
+        new object[] { cimsue_struct_id_t.QUALITY_DIRECTION, sizeof(cimsue_quality_direction_t) },
+        new object[] { cimsue_struct_id_t.CALL_QUALITY, sizeof(cimsue_call_quality_t) },
     };
 
     [Theory]

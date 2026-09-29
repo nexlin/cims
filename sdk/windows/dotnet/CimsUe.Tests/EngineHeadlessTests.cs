@@ -71,6 +71,8 @@ public class EngineHeadlessTests
         Assert.Empty(e.Calls);
         Assert.Equal(FloorState.Idle, e.GetCall(7).FloorInfo.State);
         Assert.False(e.GetCall(7).StreamStats.Valid);
+        Assert.False(e.GetCall(7).Quality.Valid);
+        Assert.Equal(-1, e.GetCall(7).Quality.MosCq);
         // 서버 인증서 만료 관측(§8.6.2) — TLS 핸드셰이크가 없었으면 관측 없음(Valid=false·None)
         Assert.Same(TlsPeerExpiry.None, e.TlsPeerExpiry);
         Assert.Equal(0, e.TlsPeerExpiry.DaysLeft);

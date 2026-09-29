@@ -6991,4 +6991,39 @@ on_return:
     return status;
 }
 
+/*
+ * CIMS: 오디오 스트림의 RTCP-XR 통계(RFC 3611 VoIP Metrics — 손실/폐기율·버스트/갭·RTT·단말 지연)를 조회한다.
+ * pjsua 는 pjsua_dump 에서만 이 통계를 읽고 API 로는 내지 않는다. 코어 quality/ 가 호 품질(E-model)의 입력으로 쓴다
+ * (docs/design/features/ue_voice_quality.md §3). PJMEDIA_HAS_RTCP_XR 빌드가 아니면 PJ_ENOTSUP.
+ */
+PJ_DEF(pj_status_t) pjsua_call_get_stream_stat_xr(pjsua_call_id call_id,
+                                                  unsigned med_idx,
+                                                  pjmedia_rtcp_xr_stat *stat)
+{
+#if defined(PJMEDIA_HAS_RTCP_XR) && (PJMEDIA_HAS_RTCP_XR != 0)
+    pjsua_call *call;
+    pjsua_call_media *call_med;
+    pj_status_t status = PJ_EINVAL;
+
+    PJ_ASSERT_RETURN(call_id>=0 && call_id<(int)pjsua_var.ua_cfg.max_calls,
+                     PJ_EINVAL);
+    PJ_ASSERT_RETURN(stat, PJ_EINVAL);
+
+    PJSUA_LOCK();
+    call = &pjsua_var.calls[call_id];
+    if (med_idx < call->med_cnt) {
+        call_med = &call->media[med_idx];
+        if (call_med->type == PJMEDIA_TYPE_AUDIO && call_med->strm.a.stream)
+            status = pjmedia_stream_get_stat_xr(call_med->strm.a.stream, stat);
+    }
+    PJSUA_UNLOCK();
+    return status;
+#else
+    PJ_UNUSED_ARG(call_id);
+    PJ_UNUSED_ARG(med_idx);
+    PJ_UNUSED_ARG(stat);
+    return PJ_ENOTSUP;
+#endif
+}
+
 #endif

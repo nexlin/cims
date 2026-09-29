@@ -30,6 +30,11 @@
    assert (media_security.md §7). SIP 패킷 상한(PJSIP_MAX_PKT_LEN 4000)과 정렬. */
 #define PJSUA2_MAX_SDP_BUF_LEN    4000
 
+/* 호 품질 측정: RTCP-XR(RFC 3611 VoIP Metrics — 손실/폐기율·버스트/갭·RTT·단말 지연) 생성·수신 통계.
+   코어 quality/ 의 E-model 입력이자 상대에게 보내는 XR 보고 (ue_voice_quality.md §3.4). SRTP 호에서는 SRTCP 로 보호된다. */
+#define PJMEDIA_HAS_RTCP_XR       1
+#define PJMEDIA_STREAM_ENABLE_XR  1
+
 /* 음성 레벨: 마이크 AGC 는 conference bridge 하나(PJMEDIA_CONF_CIMS_MIC_AGC, 목표 -26 dBov)로 통일한다
    (ue_audio_level.md). Speex AEC 전처리의 AGC(기본 켬, 목표 ≈ -12 dBov)가 앞단에서 또 돌면 두 AGC 가
    서로 다른 목표로 싸운다 — Speex AEC 를 쓰는 플랫폼(Windows·Linux)에서 끈다. Android 는 Speex AEC 가

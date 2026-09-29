@@ -106,7 +106,7 @@ struct Endpoint {
     bool realReinviteWait = false;  // hold/resume 명령을 냈다 — held/active 전이 = re-INVITE 200
     bool realHeld = false;
     bool realVideo = false;
-    struct RealStats { unsigned long long rx = 0, tx = 0, lost = 0; long long jitterUs = 0; bool valid = false; } realStats;
+    struct RealStats { unsigned long long rx = 0, tx = 0, lost = 0; long long jitterUs = 0; double rtdMs = -1, mosCq = -1; bool valid = false; } realStats;
     bool started = false;           // Start() 호출됨(등록 진행/완료)
     bool registered = false;
     Instance* inst = nullptr;       // 지금 이 단말을 쓰는 인스턴스
@@ -332,6 +332,7 @@ private:
         int rcall = -1;           // real-ue: cli call id
         unsigned long long rx = 0, tx = 0, lost = 0;   // real-ue: RTP 통계(statsValid 일 때)
         long long jit = 0;
+        double rtdMs = -1, mosCq = -1;   // real-ue: 실스택 호 품질(Engine::callQuality — RTCP RTT·E-model), 값 없음 = -1
         bool statsValid = false;
         std::string url;          // FD_RECV: FILEURL
         long long bytes = 0;      // FD_UPLOAD/FD_RECV/FD_DOWNLOAD: 파일 크기

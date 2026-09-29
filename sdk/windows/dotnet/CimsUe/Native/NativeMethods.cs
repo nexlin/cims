@@ -48,6 +48,7 @@ internal static unsafe class NativeMethods
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern void cimsue_engine_call_info(IntPtr e, int call_id, cimsue_call_info_t* @out);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_calls(IntPtr e, int** @out);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern void cimsue_engine_stream_stats(IntPtr e, int call_id, cimsue_stream_stats_t* @out);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern void cimsue_engine_call_quality(IntPtr e, int call_id, cimsue_call_quality_t* @out);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern void cimsue_engine_tls_peer_expiry(IntPtr e, cimsue_tls_peer_expiry_t* @out);
 
     // MCPTT 그룹콜·사설콜

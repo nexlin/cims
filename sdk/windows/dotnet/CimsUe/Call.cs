@@ -17,6 +17,8 @@ public sealed class Call
     public FloorInfo FloorInfo => Engine.FloorInfoOf(Id);
     /// <summary>오디오 스트림 RTP/RTCP 통계. 종료된 호는 소멸 시점의 최종 통계.</summary>
     public StreamStats StreamStats => Engine.StreamStatsOf(Id);
+    /// <summary>호 품질 — 손실·폐기·지터·RTD·E-model MOS(ue_voice_quality.md §3). 종료된 호는 마지막 값.</summary>
+    public CallQuality Quality => Engine.CallQualityOf(Id);
 
     // ── 호 제어 ──
     public unsafe Result Answer(CallOptions? opts = null)

@@ -730,6 +730,8 @@ void Worker::onRealEvent(Endpoint* ep, const Json& ev) {
         x.tx = (unsigned long long)ev["tx_pkts"].asInt(0);
         x.lost = (unsigned long long)ev["rx_loss"].asInt(0);
         x.jit = ev["jitter_us"].asInt(0);
+        x.rtdMs = ev["rtd_ms"].asDouble(-1);
+        x.mosCq = ev["mos_cq"].asDouble(-1);
     };
     if (kind == "reg") {
         std::string st = ev["state"].asString();
@@ -1281,7 +1283,7 @@ void Worker::onEvent(const Event& e) {
     Pool* peerPool = nullptr;
     if (e.ep) {
         ep = e.ep;
-        if (e.statsValid) ep->realStats = { e.rx, e.tx, e.lost, e.jit, true };
+        if (e.statsValid) ep->realStats = { e.rx, e.tx, e.lost, e.jit, e.rtdMs, e.mosCq, true };
         if (e.kind == Event::REAL_STATS) return;
         if (e.kind == Event::REAL_EXIT) {
             // 프로세스가 죽었다 — 단말은 쓸 수 없다(등록 상태 내림). 인스턴스 중이면 실패
@@ -3281,7 +3283,12 @@ void Worker::sampleRtp(Endpoint* ep) {
         m_metrics.counter("real_rtp_lost", (long long)lost);
         if (rx + lost > 0) {
             double lossPct = 100.0 * (double)lost / (double)(rx + lost), jitterMs = (double)jitterUs / 1000.0;
-            double mos = emodelMos(emodelCodec(ep->isPtt() || ep->poolRef->service == "volte" ? "AMR-WB" : "PCMU"), lossPct, jitterMs);
+            // MOS = 실스택이 잰 호 품질(Engine::callQuality — 지터버퍼 폐기·RTCP RTT 포함, ue_voice_quality.md §3). 구 cli 는 값이 없어
+            //   워커가 손실·지터로 추정한다(코덱 = 접속환경 표준)
+            const double rtd = ep->realStats.rtdMs;
+            double mos = ep->realStats.mosCq >= 0 ? ep->realStats.mosCq
+                       : emodelMos(emodelCodec(ep->isPtt() || ep->poolRef->service == "volte" ? "AMR-WB" : "PCMU"), lossPct, jitterMs, rtd > 0 ? rtd / 2 : 0);
+            if (rtd >= 0) { m_metrics.timer("rtd_ms", rtd); m_metrics.timer("real_rtd_ms", rtd); }
             m_metrics.timer("rtp_loss_pct", lossPct);
             m_metrics.timer("jitter_ms", jitterMs);
             m_metrics.timer("mos", mos);

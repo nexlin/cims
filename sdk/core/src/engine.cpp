@@ -27,6 +27,7 @@
 #include "floor/floor_participant.h"
 #include "mcdata/sds_codec.h"
 #include "mcptt/mcptt_xml.h"
+#include "quality/call_quality.h"
 
 #define CIMSUE_VERSION "0.2.0"
 
@@ -182,6 +183,7 @@ struct Engine::Impl {
     std::map<int, RegInfo> regInfos;
     std::map<int, CallInfo> callInfos;                     // 종료된 호도 잠시 보존(조회·최종 통계) — pruneFinished
     std::map<int, StreamStats> finalStats;                 // onStreamDestroyed 시점의 최종 RTP 통계
+    std::map<int, CallQuality> finalQuality;               // 소멸한 오디오 스트림들의 누적 품질(quality::merge)
     std::map<int64_t, std::pair<int, std::string>> publishPending;   // token → (accountId, groupId)
     std::map<std::string, std::string> publishEtag;               // "accountId:group" → SIP-ETag
     static constexpr size_t kKeepFinished = 64;
@@ -191,6 +193,7 @@ struct Engine::Impl {
             for (; it != callInfos.end(); ++it) if (it->second.state == CallState::Disconnected) break;
             if (it == callInfos.end()) break;
             finalStats.erase(it->first);
+            finalQuality.erase(it->first);
             callInfos.erase(it);
         }
     }
@@ -202,6 +205,46 @@ struct Engine::Impl {
         s.rxJitterUs = (unsigned)st.rtcp.rxStat.jitterUsec.mean;
         s.valid = true;
         return s;
+    }
+
+    /** 오디오 스트림 idx 의 품질 — pjsua2 RTCP·지터버퍼 통계 + RTCP-XR(pjsua_call_get_stream_stat_xr) → quality::compute
+     *  (ue_voice_quality.md §3). pjsua 락 아래에서 부르는 것은 안전하다(재진입 락). 실패하면 valid=false. */
+    static CallQuality measure(pj::Call* c, unsigned idx) {
+        quality::QualityInput in;
+        pj::StreamStat st = c->getStreamStat(idx);
+        try {
+            pj::StreamInfo si = c->getStreamInfo(idx);
+            in.codec = si.codecName;
+            in.clockRate = si.codecClockRate;
+        } catch (...) {}
+        const pj::RtcpStreamStat& rx = st.rtcp.rxStat;
+        const pj::RtcpStreamStat& tx = st.rtcp.txStat;
+        in.rxPackets = rx.pkt; in.rxLost = rx.loss; in.rxDiscard = rx.discard;
+        if (rx.jitterUsec.n > 0) { in.rxJitterMeanUs = rx.jitterUsec.mean; in.rxJitterMaxUs = rx.jitterUsec.max; }
+        in.remoteReports = tx.updateCount;
+        in.txPackets = tx.pkt; in.remoteLost = tx.loss;
+        if (tx.jitterUsec.n > 0) { in.remoteJitterMeanUs = tx.jitterUsec.mean; in.remoteJitterMaxUs = tx.jitterUsec.max; }
+        if (st.rtcp.rttUsec.n > 0) in.rttMeanUs = st.rtcp.rttUsec.mean;
+        in.jbAvgDelayMs = st.jbuf.avgDelayMsec;
+        in.startEpochMs = (int64_t)st.rtcp.start.sec * 1000 + st.rtcp.start.msec;
+        pj_time_val now;
+        pj_gettimeofday(&now);
+        in.nowEpochMs = (int64_t)now.sec * 1000 + now.msec;
+        pjmedia_rtcp_xr_stat xr;
+        if (pjsua_call_get_stream_stat_xr(c->getId(), idx, &xr) == PJ_SUCCESS) {
+            auto take = [](quality::XrMetrics& m, const pjmedia_rtcp_xr_stream_stat& d) {
+                if (d.voip_mtc.update.sec == 0 && d.voip_mtc.update.msec == 0) return;   // 아직 계산·수신 전
+                m.valid = true;
+                m.lossRate = d.voip_mtc.loss_rate; m.discardRate = d.voip_mtc.discard_rate;
+                m.burstDensity = d.voip_mtc.burst_den; m.gapDensity = d.voip_mtc.gap_den;
+                m.burstMs = d.voip_mtc.burst_dur; m.gapMs = d.voip_mtc.gap_dur;
+                m.signalDbm = d.voip_mtc.signal_lvl; m.noiseDbm = d.voip_mtc.noise_lvl;
+            };
+            take(in.xrRx, xr.rx);         // 자기 수신 — XR 보고를 만들 때 계산된 값
+            take(in.xrRemote, xr.tx);     // 상대가 보낸 XR(내 스트림에 대한 보고)
+            if (in.rttMeanUs < 0 && xr.rtt.n > 0) in.rttMeanUs = xr.rtt.mean;   // DLRR 로만 RTT 가 잡힌 경우
+        }
+        return quality::compute(in);
     }
 
     void emit(std::function<void()> fn) {
@@ -485,8 +528,16 @@ public:
     void onStreamDestroyed(pj::OnStreamDestroyedParam& prm) override {
         try {
             StreamStats s = Engine::Impl::fromPj(getStreamStat(prm.streamIdx));
+            CallQuality q;
+            bool audio = false;
+            try {
+                pj::CallInfo ci = getInfo();
+                audio = prm.streamIdx < ci.media.size() && ci.media[prm.streamIdx].type == PJMEDIA_TYPE_AUDIO;
+                if (audio) q = Engine::Impl::measure(this, prm.streamIdx);
+            } catch (...) { audio = false; }
             std::lock_guard<std::mutex> lk(o_->snapM);
             o_->finalStats[getId()] = s;
+            if (audio && q.valid) o_->finalQuality[getId()] = quality::merge(o_->finalQuality[getId()], q);
         } catch (...) {}
     }
 
@@ -1091,6 +1142,25 @@ StreamStats Engine::streamStats(int callId) const {
             unsigned idx = 0;
             if (!o->activeAudio(c, &idx)) return finalOf();
             return Impl::fromPj(c->getStreamStat(idx));
+        } catch (...) { return finalOf(); }
+    });
+}
+
+CallQuality Engine::callQuality(int callId) const {
+    if (!impl_->running) return CallQuality{};
+    auto finalOf = [this, callId]() {
+        std::lock_guard<std::mutex> lk(impl_->snapM);
+        auto it = impl_->finalQuality.find(callId);
+        return it == impl_->finalQuality.end() ? CallQuality{} : it->second;
+    };
+    return impl_->ctl.runSync([this, callId, finalOf]() -> CallQuality {
+        Impl* o = impl_.get();
+        PjCall* c = o->findCall(callId);
+        if (!c) return finalOf();
+        try {
+            unsigned idx = 0;
+            if (!o->activeAudio(c, &idx)) return finalOf();
+            return quality::merge(finalOf(), Impl::measure(c, idx));   // 소멸한 앞 스트림 + 현재 스트림
         } catch (...) { return finalOf(); }
     });
 }
