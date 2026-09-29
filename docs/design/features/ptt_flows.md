@@ -533,8 +533,8 @@ floor 메시지 Floor Indicator 에 B-bit(0x4000), Floor Taken/Idle 의 Permissi
   │ ── RTP Audio ──────► │ ── RTP Forward ──────────► │  개시자 음성만 릴레이
 ```
 > 개시자 = 세션을 개시한 INVITE 의 caller(`ProcessGroupCall`) — 진행 중 세션에 합류한 멤버는 개시자가 아니다. 개시자는 PTT_JOIN 으로 CMP floor 멤버 등록되어 GRANT 가능.
-> 일제 통화 중 conference 구독은 480 + `Warning: 105`(TS 24.379 §10.1.3.4.1). 개시 단말의 발언 종료 뒤 호 해제(TS 24.380 §6.2.4.6.4)는
-> 단말 몫이고, 서버는 T4 로 세션을 거둔다(B6) — 단말 보완은 [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §4.4.
+> 일제 통화 중 conference 구독은 480 + `Warning: 105`(TS 24.379 §10.1.3.4.1). 개시 단말은 발언 종료 뒤 B-bit Floor Idle 을 받으면
+> 호를 해제하고(TS 24.380 §6.2.4.6.4 — SDK·Android PTT), 서버는 T4 로 나머지 참가자의 세션을 거둔다(B6) — [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §4.4.
 
 ### C4. 멤버 퇴장 (정상 BYE)
 
