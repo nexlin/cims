@@ -97,8 +97,9 @@ struct AccountConfig {
     }
 };
 
-/** IMEI(15자리 — TAC 8 · SNR 6 · Luhn 검사 숫자 1) → RFC 7254 instance URN `urn:gsma:imei:TTTTTTTT-SSSSSS-C`.
- *  자릿수·검사 숫자가 틀리면 빈 문자열(그 값은 기기 식별자가 아니다). */
+/** IMEI → RFC 7254 instance URN `urn:gsma:imei:TTTTTTTT-SSSSSS-0`(TS 23.003 §13.8). 셋째 칸은 검사 숫자가 아니라 spare 라
+ *  단말이 보낼 때는 항상 0 이다(RFC 7254 §4.2.3). 입력 = TAC 8 · SNR 6 에 Luhn 검사 숫자를 붙인 15자리(검증), 14자리, 또는
+ *  전송 형식 15자리(끝 0). 자릿수·검사 숫자가 틀리면 빈 문자열(그 값은 기기 식별자가 아니다). */
 std::string imeiUrn(const std::string& imei);
 
 /** REGISTER `User-Agent`(RFC 3261 §20.41) 규약 — `<제품>/<앱 버전> (<OS>; <모델>)` (mcptt_management_views.md §4.1).

@@ -150,7 +150,7 @@ public sealed partial class ChannelCard : ObservableObject
     [RelayCommand] private void ToggleRoute() { if (Session is not null) _s.ToggleRoute(Session); }
     [RelayCommand] private void ToggleMute() { if (Session is not null) _s.ToggleMute(Session); }
     [RelayCommand] private void Emergency() { if (Group is not null) _s.EmergencyCall(Group); }
-    [RelayCommand] private void Broadcast() { if (Group is not null && CanBroadcast) _s.BroadcastCall(Group); }
+    [RelayCommand] private async Task Broadcast() { if (Group is not null && CanBroadcast) await _s.BroadcastCallAsync(Group); }
     [RelayCommand] private void CancelQueue() { if (Session is not null) _s.FloorQueueCancel(Session); }
 }
 

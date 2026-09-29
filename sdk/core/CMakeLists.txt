@@ -145,6 +145,7 @@ if(DEFINED GTEST_DIR)
     add_executable(cimsue_test
         test/account_map_test.cpp
         test/floor_codec_test.cpp
+        test/floor_participant_test.cpp
         test/sds_codec_test.cpp
         test/csc_test.cpp
         test/engine_route_test.cpp

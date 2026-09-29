@@ -58,7 +58,7 @@
 
 | 속성 | 단말이 할 일 | 대상 |
 |---|---|---|
-| 단말 ID(IMEI) | REGISTER Contact `+sip.instance="<urn:gsma:imei:NNNNNNNN-SSSSSS-C>"` (RFC 7254) — 지금 보내는 `+sip.instance` 형식을 IMEI URN 으로 | `sdk/core` 등록 경로 · Android |
+| 단말 ID(IMEI) | REGISTER Contact `+sip.instance="<urn:gsma:imei:TTTTTTTT-SSSSSS-0>"` (RFC 7254 · TS 23.003 §13.8 — 셋째 칸은 spare, 단말이 보낼 때 항상 0) — 지금 보내는 `+sip.instance` 형식을 IMEI URN 으로 | `sdk/core` 등록 경로 · Android |
 | 모델·OS·앱 버전 | REGISTER `User-Agent: CIMS-PTT/<앱 버전> (<OS>; <모델>)` (RFC 3261 §20.41) | 같은 곳 · 관제 앱은 **Windows 쪽**(형식만 맞춤) |
 
 IMEI 를 못 얻는 플랫폼(Windows 데스크톱 등)은 지금처럼 UUID URN(`urn:uuid:`)을 그대로 두면 된다. .48 쪽 V3 구현은 URN 종류를 보고 IMEI 칸을 비우게 한다.
@@ -85,4 +85,30 @@ IMEI 를 못 얻는 플랫폼(Windows 데스크톱 등)은 지금처럼 UUID URN
 | §1 U6 관제 앱 — Windows 데스크톱 | ✅ ① 포커스 카드 3줄 [일제 통화] — 멤버 편성 그룹에 진행 중 세션이 없을 때만(chat·진행 중은 비활성 — 서버가 합류로만 받거나 broadcast-ind 를 무시) → `JoinGroupCall(Broadcast)`·개시 카드 자동 포커스·단일 발언 대상. 판정 = 착신 broadcast-ind 또는 floor B-bit(.NET `FloorIndicator.BroadcastGroup` — 늦은 합류 leg 포함), 수신 멤버(Permission 0)는 발언 대상 체크 불가, 서버가 일반 통화로 연 개시(첫 floor 메시지에 B-bit 없음)는 경고, ⑤ 개시·수신·종료 행. PTT 그룹 편집 유형에서 `broadcast` 제거. 빌드·단위시험·화면 렌더 확인, **서버 실측은 아직**. Android 태블릿은 이어서 |
 | §3 단말 속성 V3 — Windows 관제 | ✅ `User-Agent: CIMS-Dispatch/<앱 버전> (Windows 11 25H2; <BIOS 모델>)`(개발 PC 예 `CIMS-Dispatch/0.1.0 (Windows 11 25H2; 960QGK)`)·`+sip.instance` = `MachineGuid` 이름 기반 `urn:uuid:`(Android 와 같은 `cims-ue:` v3 규칙, PTT·전화 계정 같은 값). 코어 `userAgentOf` 가 괄호 안 값을 comment 규칙으로 정리한다(괄호·역슬래시·OS 의 `;` 제거 — `parse_user_agent` 가 `Standard PC (Q35 …)` 같은 모델을 자르지 않게). C API `cimsue_user_agent_of`·`cimsue_imei_urn`, .NET `Engine.UserAgentOf`·`Platform.DeviceIdentity` |
 | Windows 빌드 확인(→ .48) | Windows 컴파일 없이 들어간 곳 — pjsua2 CMake 목록·.NET 그룹 문서 시험·녹취 재생 토큰 세 건은 `f54a5968`, 표본 화면 스위치(`--ui-preview-shot`)가 청취 창 종료 확인에서 멈추던 것은 `App.IsExiting`(종료가 정해지면 창들이 다시 묻지 않는다). `cimsue_test` 39·.NET 60 통과 |
+| 규격 대조 점검 — 단말 몫 수정 | 인계 항목을 규격 원문과 대조해 단말 쪽 결함 넷을 고쳤다. ① **짧은 PTT 탭**(승인 전에 놓음) — pending Release 중 늦게 온 Floor Granted 가 마이크를 열고 Speaking 으로 가 이어 오는 Idle 을 무시했다(서버는 유휴인데 단말만 송출, 일제 통화 개시자는 호 해제 누락) → Ack 만 하고 상태 유지(TS 24.380 §6.2.4.6.8), 손으로 놓은 Release·Granted Duration 자체 종료 Release 도 T100 재전송(§6.2.4.6.2·§6.2.4.6.3), pending 중 Taken 이면 해제(§6.2.4.6.5). SDK `floor_participant.cpp`(시험 `floor_participant_test.cpp` 2건 — Windows·Linux 공통) · Android `FloorClient.kt`(**Android 빌드·실기 확인 필요**) ② **IMEI URN** 셋째 칸 = spare 0(RFC 7254 §4.2.3) — `imeiUrn` 이 Luhn 검사 숫자를 싣던 것 수정(입력 = CD 15자리 검증·14자리·끝 0 15자리) ③ **TCP/TLS 에서 `+sip.instance` 소실** — CSP 가 RFC 5626 outbound 를 모르니 pjsua 가 OUTBOUND_NA 로 두고 NAT 재작성(재연결) 때 outbound 경로의 instance 를 뺐다 → 모든 transport 에서 REGISTER Contact 파라미터로, pjsua outbound 끔(SDK `account_map.cpp` · Android `SipController.kt`) ④ **관제 앱** — 첫 서버 floor 메시지가 Deny(참가자 1명)여도 B-bit 를 메시지 Floor Indicator 로 봐 "일제 통화로 열리지 않음" 오경고 제거(코어도 Deny·Revoke 의 Indicator 를 상태에 담음), 관리 범위 없는 관제사는 그룹 종류를 모르는 채로 두고 [일제 통화] 때 GMS 문서 `on-network-invite-members` 로 확인. `cimsue_test` 46·.NET 63 통과 |
 | 서비스 로그 경로 | .45 는 단일 루트(`/mnt/cims/service_log`)인데 이 디렉터리를 **다른 사이트의 옛 CSP(CMP .136/.139 와 통신, node `csp_01`)도 쓴다**. 새 코드(.45)는 `<log>/sip/<연>/…`·`<log>/stats/ptt_{index,attempts}` 에, 옛 코드는 `<log>/<연>/…`·`<log>/ptt/{index,attempts}` 에 쓴다 — 옛 기록을 옮기면 그 사이트 것까지 섞여 움직이므로 옮기지 않았다. .45 도 자기 사이트 디렉터리로 옮기는 것이 정리 방향([site_directory_layout.md](../design/features/site_directory_layout.md) §6) |
+
+## 6. .48 에 넘기는 서버 과제 — 규격 대조 점검 결과
+
+인계 항목(§1 일제 통화·§2 ICB·§3 단말 속성)을 규격 원문(TS 24.379 V18.14·24.380 V18.8·24.611 V18.0·24.628·23.003·RFC 7254/5626)과
+코드로 대조했다. 정상 경로는 규격대로이고, 아래는 **서버(CMP·CSP·CSC) 몫**으로 남은 어긋남이다. 정본 반영 위치는
+[mcptt_broadcast_group_call.md](../design/features/mcptt_broadcast_group_call.md) §2 ⚠·§7.
+
+| # | 심각도 | 위치 | 어긋남 | 규격 | 고칠 방향 |
+|---|---|---|---|---|---|
+| S1 | 중상 | CMP `PMcpttGroup::grantInitialFloor`(`PMcpttGroup.cpp` ~1232, `PCmpServer.cpp` ~2174) | 초기 발언권(SDP `mc_granted` → PTT_JOIN `granted`)에 일제 개시자 검사가 없다 — 개시자가 놓은 뒤 T4 사이에 멤버가 `mc_granted` 로 재합류하면 발언권을 받고 전원에게 Taken | TS 24.380 §6.3.5.3.4 (비개시자 = Deny #5) | `_broadcast && sessionId != _initiatorSessionId` 이면 부여하지 않는다 |
+| S2 | 중하 | CMP `addMember` 늦은 합류 Floor Taken(`PMcpttGroup.cpp` ~286) | Permission to Request the Floor 가 없다(Message Sequence Number·서버 SSRC·MCPTT ID 도 `broadcastFloorStatus` 와 다름) — 늦게 합류한 일제 통화 수신 멤버의 PTT 가 활성으로 보이고 누르면 Deny #5 | TS 24.380 §6.3.4.4.2 3d (일제·ambient 는 Permission 0) | `broadcastFloorStatus` 와 같은 형식으로 |
+| S3 | 중 | CSP `GroupCallService::ProcessGroupCall` 세션 캐시(~448) | 일제 속성을 개시 성공 전에 적고 실패 경로(세션 창·`AcceptCall` 실패·CMP 포트 부족)에서 지우지 않는다 → 그 그룹의 conference SUBSCRIBE 가 다음 세션까지 480/105 | TS 24.379 §10.1.3.4.1 (일제 통화 **진행 중**에만) | 자기 leg 추가 뒤 확정, 실패 경로에서 제거 |
+| S4 | 중 | CSP `AuthzSweepConferenceSubscriptions`(`AuthzRevoke.cpp` ~67) | 권한 재점검 스윕이 일제 통화의 일시 480(Warning 105)을 인가 상실로 보고 기존 구독을 `rejected` 로 끊는다(역할 변경·CSC 재기동·회선 개설 때) — RFC 6665 상 단말은 재구독하지 않아 일제 통화 뒤 로스터가 멈춘다 | TS 24.379 §10.1.3.4.1 · RFC 6665 §4.1.3(reason=rejected → 재구독하지 않음) | 스윕은 480/105 를 제외 |
+| S5 | 하 | CSP `ProcessGroupCall` | 빈 그룹에 INVITE 두 개가 거의 동시에 오면(psip UDP 스레드 10) 뒤 INVITE 가 캐시(개시자·broadcast)를 덮어 CMP·CSP 판단이 갈린다 | TS 24.380 §6.3.5.3.4 (개시자 = 세션을 연 사용자) | 그룹 단위 직렬화 |
+| S6 | 중 | CSP ICB 지정 번호 판정(`CspUser::IncomingBarredBy`, `SipUserAgentInvite.hpp` ~211) | From user part 정확 일치 — 규격은 **P-Asserted-Identity** 대조. 트렁크의 `Privacy: id`(From anonymous)·국내 번호 형식이면 차단되지 않는다 | TS 24.611 §4.5.2.6.1 (cp:identity ↔ PAI, 선택적으로 From) | PAI 우선 + E.164 정규화 비교 |
+| S7 | 하 | CSP ICB 거절 안내 뒤 603(`TasModule.cpp` ~111 `Reject(…, NULL, …)`) | 안내(early media) 뒤 최종 응답에 Reason 헤더가 없다 | TS 24.628 §4.2.4 (early media 방식은 최종 응답에 Reason) | `Reason: SIP;cause=603` 또는 Q.850 21 |
+| S8 | 하 | CSC `admin.py` 구 키 전환기(~838 → ~865) | 구 키 `dnd` 를 PTT 회선에 보내면 `icb_all` 로 바뀐 뒤 400 — 옛 콘솔은 PTT 회선에도 `dnd:false` 를 보냈다("한 릴리스 동안 구 키 수용"과 어긋남) | (전환기 약속) | PTT 회선의 구 키 `dnd` 는 무시(WARN) |
+| S9 | 하 | CSP ICB 목록 적재(`DbManager.cpp` ~433·643) | 사람의 `icb_identities` 가 PTT 회선에도 실려 non-MCPTT 1:1 INVITE 를 막고, CSC 는 전화 회선만 갱신해 PTT 쪽 복사본이 낡는다 | TS 24.611 (MMTel 부가서비스 — MCPTT 대상 아님) | PTT 회선에는 싣지 않는다 |
+| S10 | 문서 | 정본 R6·`ptt_flows.md` | "Floor Idle 에 Permission 0" — Floor Idle 메시지에는 그 필드가 없다(코드는 맞다) | TS 24.380 §8.2.8 | **이번에 문서 정정함** |
+
+- **알려진 미구현(정본 §7)**: 최소 affiliation 인원 미달 해제(TS 24.379 §6.3.8.1 4)), ACR(익명 착신 거부 — 433, TS 24.611 §4.5.2.6.2).
+- **참고 — 일제 통화의 수신자**: 규격 정의(TS 22.179 §3.1)는 "개시자만 송신·응답 없음·송신 끝 = 호 끝"이고 "전원 참여"가 아니다.
+  현행 절차(TS 24.379 §6.3.5.5)는 그 그룹의 **affiliated 멤버**를 일반 편성 그룹 호처럼 초대한다 — 서버 fan-out 이 그렇다
+  (`require_affiliation` 이 켜진 그룹 기준. DB 단절 시 affiliation 검사를 건너뛴다). 사용자/그룹 방송 그룹(전원·조직 단위 수신 집합)은
+  TS 24.379 §4.12 가 현 릴리스에서 따르지 않는다고 적는다.

@@ -1016,9 +1016,10 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         if (s is null) return;
         s.Floor = Engine.GetCall(ev.CallId).FloorInfo;
         s.LastFloor = ev;
-        // 일제 통화로 연 호의 첫 서버 floor 메시지에 B-bit 가 없다 = 서버가 일반 통화로 열었다(진행 중 통화 합류 — §3.2). 로컬 이벤트(시간 초과 등)는 보지 않는다
+        // 일제 통화로 연 호의 첫 서버 floor 메시지에 B-bit 가 없다 = 서버가 일반 통화로 열었다(진행 중 통화 합류 — §3.2). 로컬 이벤트(시간 초과 등)는 보지 않는다.
+        //   B-bit 는 그 메시지의 Floor Indicator 로 본다 — 서버의 Deny(참가자 1명 등)도 B-bit 를 싣는다(TS 24.380 §8.2.3.15).
         if ((ev.Kind is FloorEventKind.Granted or FloorEventKind.Taken or FloorEventKind.Idle or FloorEventKind.Denied or FloorEventKind.Revoked)
-            && _broadcastPending.Remove(ev.CallId) && !s.IsBroadcast)
+            && _broadcastPending.Remove(ev.CallId) && !s.IsBroadcast && (ev.Indicator & FloorIndicator.BroadcastGroup) == 0)
             Notify.Warn($"{s.Title} — 일제 통화로 열리지 않았습니다", "진행 중인 그룹 통화에 합류했거나 편성 그룹이 아닙니다. 일반 그룹 통화로 이어집니다.");
         var now = DateTime.Now;
         switch (ev.Kind)
@@ -1273,12 +1274,20 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
 
     /// <summary>일제 통화 개시(TS 24.379 §4.12, mcptt_broadcast_group_call.md §3) — 편성 그룹에 prearranged + broadcast-ind 로 새 세션을 연다.
     /// 개시자(나)만 발언하고, 발언을 놓은 뒤 서버의 Floor Idle(B-bit)을 받으면 코어가 호를 해제한다. 진행 중 세션이 있으면 서버는 합류로만
-    /// 받으므로(§3.2) 여기서 막고, chat 그룹은 서버가 broadcast-ind 를 무시하므로 막는다.</summary>
-    public Result BroadcastCall(GroupInfo g)
+    /// 받으므로(§3.2) 여기서 막고, chat 그룹은 서버가 broadcast-ind 를 무시하므로 막는다(TS 24.379 §6.2.8.2 — broadcast-ind 는 prearranged 그룹 호).
+    /// 그룹 종류를 모르면(관리 범위가 없어 관리 목록이 없음) GMS 그룹 문서의 `on-network-invite-members`(TS 24.481 §7.2.2 a)로 먼저 확인한다.</summary>
+    public async Task<Result> BroadcastCallAsync(GroupInfo g)
     {
         if (Ptt is null) return Fail("PTT 계정 없음");
         if (SessionOfGroup(g.Id) is not null || g.HasSession) return Fail($"{g.Name} — 진행 중인 그룹 통화가 있어 일제 통화를 열 수 없습니다");
+        if (g.SessionType.Length == 0)
+        {
+            var d = await GetGroupAsync(g);
+            if (d.Ok) { _groupTypes[g.Id] = d.Value.SessionType; g.SessionType = d.Value.SessionType; }
+            else Log.Warn($"broadcast {g.Id}: group type unknown ({d}) — 서버 판정에 맡긴다");
+        }
         if (g.IsChat) return Fail($"{g.Name} — 채팅 그룹은 일제 통화를 열 수 없습니다(편성 그룹만)");
+        if (Ptt is null || SessionOfGroup(g.Id) is not null) return Fail($"{g.Name} — 일제 통화를 열 수 없습니다");   // 조회하는 사이 바뀜
         var r = Ptt.JoinGroupCall(g.Id, new GroupCallOptions { Broadcast = true });
         if (r.Ok) _broadcastPending.Add(r.Value.Id);
         return Track(r, Operation.Broadcast);

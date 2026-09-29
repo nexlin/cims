@@ -177,9 +177,11 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
 - **단말 속성**([mcptt_management_views.md](mcptt_management_views.md) §4.1). `EngineConfig.userAgent` 는
   `userAgentOf(제품, 앱 버전, OS, 모델)` 형식(`CIMS-PTT/1.4.2 (Android 15; SM-S921N)`)으로 앱이 채운다. `userAgentOf` 는 OS·모델을
   comment 규칙(RFC 3261 §25.1)으로 정리한다 — 괄호·역슬래시 제거, 공백·제어 문자 접기, OS 의 `;`(OS·모델 구분자) 제거.
-  `AccountConfig.instanceId` = REGISTER Contact `+sip.instance` URN — IMEI 를 아는 단말은 `imeiUrn(imei)`(RFC 7254, Luhn 검사),
-  모르면 기기(설치) 고유 `urn:uuid:…`. TCP/TLS 는 RFC 5626 outbound 경로(`reg-id` 와 함께), UDP 는 REGISTER Contact 에 직접
-  싣는다. 비우면 pjsip 기본값(호스트명 해시 — 기기마다 같을 수 있다, [registration_binding_set.md](registration_binding_set.md) §8).
+  `AccountConfig.instanceId` = REGISTER Contact `+sip.instance` URN(TS 24.229 §5.1.1.2.1 c) — IMEI 를 아는 단말은 `imeiUrn(imei)`
+  (`urn:gsma:imei:TAC-SNR-0` — 셋째 칸은 검사 숫자가 아니라 spare 라 항상 0, RFC 7254 §4.2.3·TS 23.003 §13.8. 입력의 Luhn 은 검증),
+  모르면 기기(설치) 고유 `urn:uuid:…`. 모든 transport 에서 REGISTER Contact 파라미터(`regConfig.contactParams`)로 싣고 pjsua outbound
+  (RFC 5626)는 끈다 — CSP 는 outbound 를 지원하지 않아 pjsua 가 OUTBOUND_NA 로 두고, 그러면 NAT 로 Contact 를 다시 쓸 때(TCP/TLS
+  재연결) outbound 경로의 instance 가 빠진다. 비우면 pjsip 기본값(호스트명 해시 — 기기마다 같을 수 있다, [registration_binding_set.md](registration_binding_set.md) §8).
   두 헬퍼는 C API `cimsue_user_agent_of`·`cimsue_imei_urn`, .NET `Engine.UserAgentOf`·`ImeiUrn` 으로도 노출된다(규칙은 코어 하나).
   Windows 기기 값(OS 판·BIOS 모델·`MachineGuid` 이름 기반 `urn:uuid:` — Android 와 같은 `cims-ue:` 규칙)은 .NET `Platform.DeviceIdentity` 가 모은다.
 

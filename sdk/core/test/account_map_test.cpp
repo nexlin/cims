@@ -87,22 +87,25 @@ TEST(AccountMap, InstanceIdPerTransport) {
     EXPECT_TRUE(ac.natConfig.sipOutboundInstanceId.empty());
     EXPECT_TRUE(ac.regConfig.contactParams.empty());
 
-    c.instanceId = "urn:gsma:imei:49015420-323751-8";
+    c.instanceId = "urn:gsma:imei:49015420-323751-0";
     ac = buildPjAccountConfig(c);                                         // UDP
-    EXPECT_EQ(ac.natConfig.sipOutboundInstanceId, "<urn:gsma:imei:49015420-323751-8>");
-    EXPECT_EQ(ac.regConfig.contactParams, ";+sip.instance=\"<urn:gsma:imei:49015420-323751-8>\"");
+    EXPECT_EQ(ac.regConfig.contactParams, ";+sip.instance=\"<urn:gsma:imei:49015420-323751-0>\"");
+    EXPECT_EQ(ac.natConfig.sipOutboundUse, 0);
 
+    // TCP/TLS 도 Contact 파라미터로 — pjsua outbound 경로는 서버가 outbound 를 모르면(OUTBOUND_NA) NAT 재작성 때 instance 를 뺀다
     c.transport = Transport::TLS; c.serverPort = 5061;
-    ac = buildPjAccountConfig(c);                                         // TLS — outbound 가 reg-id 와 함께 싣는다
-    EXPECT_EQ(ac.natConfig.sipOutboundInstanceId, "<urn:gsma:imei:49015420-323751-8>");
-    EXPECT_TRUE(ac.regConfig.contactParams.empty());
+    ac = buildPjAccountConfig(c);
+    EXPECT_EQ(ac.regConfig.contactParams, ";+sip.instance=\"<urn:gsma:imei:49015420-323751-0>\"");
+    EXPECT_EQ(ac.natConfig.sipOutboundUse, 0);
 }
 
-// RFC 7254 IMEI URN — TAC 8 · SNR 6 · Luhn 검사 숫자. 형식이 틀리면 빈 값
+// RFC 7254 IMEI URN — TAC 8 · SNR 6 · spare. 셋째 칸은 검사 숫자가 아니라 spare 라 항상 0(RFC 7254 §4.2.3 예 90420156-025763-0)
 TEST(Helpers, ImeiUrnAndUserAgent) {
-    EXPECT_EQ(imeiUrn("490154203237518"), "urn:gsma:imei:49015420-323751-8");
+    EXPECT_EQ(imeiUrn("490154203237518"), "urn:gsma:imei:49015420-323751-0");   // 검사 숫자 형식(Luhn 8) → spare 0
+    EXPECT_EQ(imeiUrn("49015420323751"), "urn:gsma:imei:49015420-323751-0");    // 14자리(TAC+SNR)
+    EXPECT_EQ(imeiUrn("490154203237510"), "urn:gsma:imei:49015420-323751-0");   // 전송 형식(끝 0)
     EXPECT_EQ(imeiUrn("490154203237517"), "");                          // 검사 숫자 불일치
-    EXPECT_EQ(imeiUrn("49015420323751"), "");                           // 14자리
+    EXPECT_EQ(imeiUrn("4901542032375"), "");                            // 13자리
     EXPECT_EQ(imeiUrn("49015420323751A"), "");
     EXPECT_EQ(userAgentOf("CIMS-PTT", "1.4.2", "Android 15", "SM-S921N"), "CIMS-PTT/1.4.2 (Android 15; SM-S921N)");
     EXPECT_EQ(userAgentOf("CIMS-Dispatch", "0.3", "Windows 11", ""), "CIMS-Dispatch/0.3 (Windows 11)");

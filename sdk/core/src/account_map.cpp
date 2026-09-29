@@ -79,12 +79,13 @@ pj::AccountConfig buildPjAccountConfig(const AccountConfig& c, std::string* note
         if (note) *note += "sec-agree ";
     }
     if (!c.contactParams.empty()) ac.sipConfig.contactParams = c.contactParams;
-    // 인스턴스 ID — TCP/TLS 는 pjsua outbound(RFC 5626) 경로가 reg-id 와 함께 싣고, 그 경로를 타지 않는 UDP 는
-    //   REGISTER Contact 에 직접 싣는다(두 경로가 겹치지 않게 transport 로 가른다 — 중복 파라미터 방지).
+    // 인스턴스 ID(TS 24.229 §5.1.1.2.1 c) — 모든 transport 에서 REGISTER Contact 파라미터로 직접 싣고 pjsua outbound(RFC 5626)는 끈다.
+    //   CSP 는 outbound 를 지원하지 않아 REGISTER 200 에 `Require: outbound` 가 없고, 그러면 pjsua 가 OUTBOUND_NA 로 두어
+    //   NAT 로 Contact 를 다시 쓸 때(rport 변화 — TCP/TLS 재연결) outbound 경로의 +sip.instance 를 빼 버린다. reg_contact_params 는
+    //   재작성에도 항상 붙는다(pjsua_acc.c update_regc_contact). reg-id 는 서버가 쓰지 않는다(registration_binding_set.md §8).
     if (!c.instanceId.empty()) {
-        const std::string inst = "<" + c.instanceId + ">";
-        ac.natConfig.sipOutboundInstanceId = inst;
-        if (c.transport == Transport::UDP) ac.regConfig.contactParams = ";+sip.instance=\"" + inst + "\"";
+        ac.natConfig.sipOutboundUse = 0;
+        ac.regConfig.contactParams = ";+sip.instance=\"<" + c.instanceId + ">\"";
         if (note) *note += "instance ";
     }
     ac.sipConfig.proxies.push_back("sip:" + c.serverHost + ":" + std::to_string(c.serverPort) +
@@ -97,16 +98,20 @@ pj::AccountConfig buildPjAccountConfig(const AccountConfig& c, std::string* note
 }  // namespace detail
 
 std::string imeiUrn(const std::string& imei) {
-    if (imei.size() != 15 || !std::all_of(imei.begin(), imei.end(), [](char ch) { return ch >= '0' && ch <= '9'; }))
+    if ((imei.size() != 14 && imei.size() != 15) ||
+        !std::all_of(imei.begin(), imei.end(), [](char ch) { return ch >= '0' && ch <= '9'; }))
         return std::string();
-    int sum = 0;                                            // Luhn — 오른쪽에서 두 번째 자리부터 두 배
-    for (int i = 0; i < 14; ++i) {
-        int d = imei[13 - i] - '0';
-        if (i % 2 == 0) { d *= 2; if (d > 9) d -= 9; }
-        sum += d;
+    if (imei.size() == 15 && imei[14] != '0') {             // 검사 숫자(CD) 형식 — Luhn 검증(TS 23.003 Annex B)
+        int sum = 0;                                        //   오른쪽에서 두 번째 자리부터 두 배
+        for (int i = 0; i < 14; ++i) {
+            int d = imei[13 - i] - '0';
+            if (i % 2 == 0) { d *= 2; if (d > 9) d -= 9; }
+            sum += d;
+        }
+        if ((10 - sum % 10) % 10 != imei[14] - '0') return std::string();
     }
-    if ((10 - sum % 10) % 10 != imei[14] - '0') return std::string();
-    return "urn:gsma:imei:" + imei.substr(0, 8) + "-" + imei.substr(8, 6) + "-" + imei.substr(14, 1);
+    // 셋째 칸은 검사 숫자가 아니라 spare — 단말이 보낼 때는 항상 0(RFC 7254 §4.2.3, TS 23.003 §6.2.1·§13.8).
+    return "urn:gsma:imei:" + imei.substr(0, 8) + "-" + imei.substr(8, 6) + "-0";
 }
 
 // User-Agent comment 에 넣을 값 정리(RFC 3261 §25.1 — comment 안 ctext 는 괄호·역슬래시·제어 문자를 못 쓴다). 괄호·역슬래시는 빼고,

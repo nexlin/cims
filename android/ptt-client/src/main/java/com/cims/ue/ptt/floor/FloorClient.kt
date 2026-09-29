@@ -96,7 +96,7 @@ class FloorClient(
     private val tx = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "floor-tx") }
     private var ackTask: java.util.concurrent.ScheduledFuture<*>? = null
 
-    // Floor Revoke 응답(Floor Release)의 T100 재전송 태스크와 회수 진행 플래그.
+    // Floor Release 의 T100 재전송 태스크(손으로 놓음·Revoke 응답)와 회수 진행 플래그.
     //   서버가 T8 로 Revoke 를 재전송하는 동안 이벤트를 여러 번 올리지 않기 위한 가드다.
     private var releaseRetx: java.util.concurrent.ScheduledFuture<*>? = null
     @Volatile private var revokePending = false
@@ -144,10 +144,11 @@ class FloorClient(
     /** U: pending Release — Floor Release 를 보낸 뒤 Idle 대기(§6.2.4.6). */
     @Volatile private var pendingRelease: Boolean = false
 
-    /** PTT up → Floor Release. */
+    /** PTT up → Floor Release. 요청·발언·대기 중이었으면 T100 으로 재전송한다(§6.2.4.6.2) — 유실되면 서버가 발언권을 계속 쥔다. */
     fun releaseFloor() {
-        cancelReleaseRetx()
-        send(FloorCodec.release(ssrc, userId))
+        val active = _state.value == FloorState.SPEAKING || _state.value == FloorState.REQUESTING || _state.value == FloorState.QUEUED
+        val pkt = FloorCodec.release(ssrc, userId)
+        if (active) sendReleaseRetx(pkt) else { cancelReleaseRetx(); send(pkt) }
         pendingRelease = true
         // 내 발언만 끝난다 — 동시 발언 중이면 남은 화자는 그대로 듣는다(서버 Idle 을 기다리지 않는다).
         val rest = _talkers.value.filterNot { it.self }
@@ -220,8 +221,14 @@ class FloorClient(
 
         val ev: FloorEvent = when (msg.type) {
             FloorMsgType.GRANTED -> {
+                // U: pending Release 에서 받은 Granted(§6.2.4.6.8) — 놓은 뒤 늦게 온 승인이다(짧은 탭). Ack(위에서 회신)만 하고
+                //   상태를 유지한다: SPEAKING 으로 가면 이어 오는 Idle 을 무시해 서버는 유휴인데 단말만 송출하고, 일제 통화
+                //   개시자는 호 해제(§6.2.4.6.4)를 놓친다. 재전송 중인 Release 가 서버를 정리한다.
+                if (pendingRelease) {
+                    Log.i(TAG, "floor recv GRANTED in pending Release — ignored")
+                    return
+                }
                 revokePending = false
-                pendingRelease = false
                 cancelReleaseRetx()
                 // 내 GRANT 는 나에게만 온다(다른 멤버는 Taken 을 받는다) — 집합에 나를 넣는다.
                 if (_talkers.value.none { it.self })
@@ -252,6 +259,7 @@ class FloorClient(
                 if (!meSpeaking) {
                     revokePending = false
                     cancelReleaseRetx()
+                    pendingRelease = false                 // U: pending Release 에서 받은 Taken(§6.2.4.6.5) → U: has no permission
                     _state.value = FloorState.LISTENING
                 } else {
                     _state.value = FloorState.SPEAKING
@@ -322,14 +330,19 @@ class FloorClient(
      */
     private fun sendRevokeRelease(indicator: Int?) {
         val g = (indicator ?: 0) and FloorIndicator.DUAL_FLOOR
-        val pkt = FloorCodec.release(ssrc, userId, if (g != 0) g else null)
+        sendReleaseRetx(FloorCodec.release(ssrc, userId, if (g != 0) g else null))
+    }
+
+    /** Floor Release 송신 + T100 재전송(§6.2.4.6.2) — Idle·Taken 이 오거나 새 요청을 하면 멈추고,
+     *  N회 만료되면 U: has no permission(§6.2.4.6.3 — pending Release 해제). */
+    private fun sendReleaseRetx(pkt: ByteArray) {
         send(pkt)
         pendingRelease = true
         synchronized(this) {
             releaseRetx?.cancel(false)
             var left = RELEASE_RETX_MAX
             releaseRetx = tx.scheduleWithFixedDelay({
-                if (left-- <= 0) { cancelReleaseRetx(); return@scheduleWithFixedDelay }
+                if (left-- <= 0) { cancelReleaseRetx(); pendingRelease = false; return@scheduleWithFixedDelay }
                 runCatching { sendNow(pkt) }
             }, RELEASE_RETX_MS, RELEASE_RETX_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
         }
@@ -364,7 +377,7 @@ class FloorClient(
         /** floor Ack keepalive 주기(초) — NAT UDP 매핑 유지 요건 ≤20s 에 여유를 둔 값. */
         const val ACK_PERIOD_SEC = 15L
 
-        // Floor Revoke 응답 Release 의 재전송(T100). 서버는 Revoke 후 유예 T3(기본 3초) 동안
+        // Floor Release 재전송(T100, §6.2.4.6.2 — 손으로 놓음·Revoke 응답 공통). 서버는 Revoke 후 유예 T3(기본 3초) 동안
         //   Release 를 기다리며 T8(1초)로 Revoke 를 재전송하므로, 그 창 안에서 끝나야 의미가
         //   있다 — 800ms 간격 2회면 유실 1~2회를 3초 안에 흡수한다.
         const val RELEASE_RETX_MS = 800L

@@ -17,7 +17,7 @@ public sealed partial class GroupAdminRow : ObservableObject
     public GroupAdminRow(ManagedGroup g, string orgPath, string ownerText) { G = g; OrgPath = orgPath; _ownerText = ownerText; }
     public string Name => G.Name;
     public string Id => G.Id;
-    public string Meta => $"{G.MemberCount}명 · {SessionTypeText}{(G.IsOwner ? " · 내 그룹" : "")}{(G.IsMember ? " · 멤버" : "")}{(!G.CanManage && G.InListenScope ? " · 청취 범위" : "")}";
+    public string Meta => $"{G.MemberCount}명{(SessionTypeText.Length > 0 ? " · " + SessionTypeText : "")}{(G.IsOwner ? " · 내 그룹" : "")}{(G.IsMember ? " · 멤버" : "")}{(!G.CanManage && G.InListenScope ? " · 청취 범위" : "")}";
     /// <summary>편집·삭제 버튼 — 관리 범위 밖(청취·멤버로만 보이는) 행은 숨긴다(서버 GMS 게이트가 어차피 403).</summary>
     public bool CanManage => G.CanManage;
     public int MemberCount => G.MemberCount;
@@ -26,7 +26,8 @@ public sealed partial class GroupAdminRow : ObservableObject
     public bool IsMemberRelation => G.IsMember;
     /// <summary>소유자 열 — 목록엔 소유 여부만 있어 내 것은 "이름(나)", 나머지는 상세(문서 GET)가 채운다.</summary>
     [ObservableProperty] private string _ownerText = "";
-    public string SessionTypeText => G.SessionType == "chat" ? "채팅" : "사전편성";
+    /// <summary>그룹 종류 — 모르면(관리 범위 없이 GMS 목록만) 빈 값.</summary>
+    public string SessionTypeText => G.SessionType switch { "chat" => "채팅", "" => "", _ => "사전편성" };
     /// <summary>GroupEditViewModel 이 받는 항목 — 목록 ETag 는 편집 폼이 문서 GET 으로 다시 받는다.</summary>
     public GroupInfo ToGroupInfo() => new(G.Id, G.Uri, G.Name, G.MemberCount) { IsOwner = G.IsOwner, Etag = G.ETag };
 }
@@ -76,7 +77,7 @@ public sealed partial class GroupAdminViewModel : ObservableObject
     public bool ShowPlaceholder => !HasDetail && !IsEditing;
     public string DetailOwner => DetailDoc is null ? "" : OwnerLabel(DetailDoc.AuthorizedUser);
     public string DetailOrg => Selected is null ? "" : (Selected.OrgPath.Length > 0 ? Selected.OrgPath : "—");
-    public string DetailPolicy => DetailDoc is null ? "" : $"우선순위 {DetailDoc.Priority} · 긴급 {(DetailDoc.EmergencyCall ? "허용" : "불가")} · {(DetailDoc.SessionType switch { "chat" => "채팅", "broadcast" => "방송", _ => "사전편성" })}";
+    public string DetailPolicy => DetailDoc is null ? "" : $"우선순위 {DetailDoc.Priority} · 긴급 {(DetailDoc.EmergencyCall ? "허용" : "불가")} · {(DetailDoc.SessionType == "chat" ? "채팅" : "사전편성")}";
     public string DetailCapability => DetailDoc is null ? "" : string.Join(" · ", new[] { DetailDoc.AllowSds ? "SDS" : "", DetailDoc.AllowFd ? "FD" : "", DetailDoc.VideoEnabled ? "영상" : "", DetailDoc.Encryption ? "암호화" : "", DetailDoc.RequireAffiliation ? "affiliation 필요" : "" }.Where(x => x.Length > 0));
     public string DetailListenVisibility => _s.ListenHidden ? "은닉" : "투명";
     public bool DetailHasSession => Selected is not null && _s.Groups.FirstOrDefault(g => g.Id == Selected.Id)?.HasSession == true;
@@ -206,7 +207,8 @@ public sealed partial class GroupAdminViewModel : ObservableObject
 
     private void FromSession()
     {
-        _all = _s.Groups.Where(g => g.IsMember).Select(g => new ManagedGroup(g.Id, g.Uri, g.Name, g.MemberCount, g.IsOwner, "", "prearranged", g.Etag, CanManage: g.IsOwner, IsMember: true)).ToList();
+        // 그룹 종류는 GMS 목록에 없다 — 모르는 채("")로 둔다(일제 통화 개시 때 그룹 문서로 확인, DispatchSession.BroadcastCallAsync)
+        _all = _s.Groups.Where(g => g.IsMember).Select(g => new ManagedGroup(g.Id, g.Uri, g.Name, g.MemberCount, g.IsOwner, "", g.SessionType, g.Etag, CanManage: g.IsOwner, IsMember: true)).ToList();
         Filter();
         Loaded?.Invoke(this, EventArgs.Empty);
     }

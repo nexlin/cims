@@ -90,7 +90,7 @@ public class PlatformTests
     {
         // 형식 규칙은 코어 하나(userAgentOf·imeiUrn) — 파사드는 Windows 기기 값만 채운다(mcptt_management_views.md §4.1)
         Assert.Equal("CIMS-Dispatch/0.1.0 (Windows 11 25H2; Standard PC Q35)", Engine.UserAgentOf("CIMS-Dispatch", "0.1.0", "Windows 11 25H2", "Standard PC (Q35)"));
-        Assert.Equal("urn:gsma:imei:49015420-323751-8", Engine.ImeiUrn("490154203237518"));
+        Assert.Equal("urn:gsma:imei:49015420-323751-0", Engine.ImeiUrn("490154203237518"));   // 셋째 칸 = spare 0(RFC 7254 §4.2.3)
         Assert.Equal("", Engine.ImeiUrn("490154203237517"));
         string ua = DeviceIdentity.UserAgent("CIMS-Dispatch", "0.1.0");
         Assert.StartsWith("CIMS-Dispatch/0.1.0 (Windows 1", ua);

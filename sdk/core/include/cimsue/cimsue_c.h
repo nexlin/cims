@@ -470,7 +470,7 @@ CIMSUE_API int32_t CIMSUE_CALL cimsue_dialog_info_join_header(const cimsue_dialo
 /** REGISTER User-Agent 규약 `<제품>/<앱 버전> (<OS>; <모델>)` — userAgentOf(types.h, comment 정리 포함). NULL 인자 = 빈 값. */
 CIMSUE_API int32_t CIMSUE_CALL cimsue_user_agent_of(const char* product, const char* version, const char* os,
                                                     const char* model, char* out, int32_t cap);
-/** IMEI(15자리) → RFC 7254 instance URN — imeiUrn(types.h). 자릿수·검사 숫자가 틀리면 빈 문자열(반환 0). */
+/** IMEI(15자리 CD 형식·14자리·끝 0 전송 형식) → RFC 7254 instance URN(spare 0) — imeiUrn(types.h). 자릿수·검사 숫자가 틀리면 빈 문자열(반환 0). */
 CIMSUE_API int32_t CIMSUE_CALL cimsue_imei_urn(const char* imei, char* out, int32_t cap);
 
 /* ── CSC 설정 평면 (csc.h) ──

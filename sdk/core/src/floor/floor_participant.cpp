@@ -109,9 +109,13 @@ void Participant::release() {
     // 대기 중이면 대기 요청부터 취소(§8.2.15) — 발언 중이 아닌 leg 의 Release 는 서버가 무시한다.
     if (state_ == FloorState::Queued) send(cancelQueuedRequest(ssrc_));
     // 요청/점유한 적이 있을 때만 Release — 그 외의 Release 는 고아 메시지.
+    //   U: pending Release — T100 으로 재전송(§6.2.4.6.2), Idle·Taken 이 오면 멈춘다. 유실되면 서버가 발언권을 계속 쥔다.
     if (state_ == FloorState::Speaking || state_ == FloorState::Requesting || state_ == FloorState::Queued) {
-        send(floor::release(ssrc_, userId_));
+        releaseRetxPkt_ = floor::release(ssrc_, userId_);
+        send(releaseRetxPkt_);
         pendingRelease_ = true;
+        releaseRetxLeft_ = kReleaseRetxMax;
+        releaseRetxAt_ = Clock::now() + std::chrono::milliseconds(kReleaseRetxMs);
     }
     queuePos_ = -1;
     setMic(false);
@@ -173,9 +177,10 @@ void Participant::tick() {
             send(ack(ssrc_, userId_));                                    // NAT keepalive(≤20s)
             nextAck_ = now + std::chrono::seconds(kAckPeriodSec);
         }
-        if (releaseRetxLeft_ > 0 && now >= releaseRetxAt_) {              // Revoke 응답 Release 재전송(T100)
+        if (releaseRetxLeft_ > 0 && now >= releaseRetxAt_) {              // Release 재전송(T100, §6.2.4.6.2)
             send(releaseRetxPkt_);
             if (--releaseRetxLeft_ > 0) releaseRetxAt_ = now + std::chrono::milliseconds(kReleaseRetxMs);
+            else pendingRelease_ = false;                                 // T100 N회 만료 → U: has no permission(§6.2.4.6.3)
         }
         if (requestDeadline_ != Clock::time_point{} && now >= requestDeadline_) {
             requestDeadline_ = {};
@@ -189,8 +194,11 @@ void Participant::tick() {
         if (talkDeadline_ != Clock::time_point{} && now >= talkDeadline_) {   // Granted Duration(T2) 자체 종료
             talkDeadline_ = {};
             if (state_ == FloorState::Speaking) {
-                send(floor::release(ssrc_, userId_));
+                releaseRetxPkt_ = floor::release(ssrc_, userId_);
+                send(releaseRetxPkt_);
                 pendingRelease_ = true;
+                releaseRetxLeft_ = kReleaseRetxMax;
+                releaseRetxAt_ = now + std::chrono::milliseconds(kReleaseRetxMs);
                 setMic(false);
                 std::vector<Talker> rest;
                 for (auto& t : talkers_) if (!t.self) rest.push_back(t);
@@ -223,6 +231,13 @@ void Participant::handle(const Message& m) {
         ev.indicator = m.indicator() < 0 ? 0 : m.indicator();
         switch ((Op)m.op) {
             case Op::GRANTED: {
+                // U: pending Release 에서 받은 Granted(§6.2.4.6.8) — 놓은 뒤 늦게 온 승인이다. Ack(위에서 회신)만 하고
+                //   상태를 유지한다: 마이크를 열거나 Speaking 으로 가면 이어 오는 Idle 을 무시해 서버는 유휴인데 단말만
+                //   발언 중이 되고, 일제 통화 개시자는 호 해제(§6.2.4.6.4)를 놓친다. 재전송 중인 Release 가 서버를 정리한다.
+                if (pendingRelease_) {
+                    if (cb_.log) cb_.log(3, "floor recv GRANTED in pending Release — ignored (call " + std::to_string(callId_) + ")");
+                    return;
+                }
                 ev.kind = FloorEvent::Kind::Granted;
                 revokePending_ = false; releaseRetxLeft_ = 0; requestDeadline_ = {}; pendingRelease_ = false;
                 grantedCount_++;
@@ -240,6 +255,7 @@ void Participant::handle(const Message& m) {
             case Op::DENY:
                 ev.kind = FloorEvent::Kind::Denied;
                 denyCount_++;
+                if (ev.indicator) indicator_ = ev.indicator;             // 호 종류(B-bit 등, §8.2.3.15) — 첫 서버 메시지가 Deny 여도 안다
                 requestDeadline_ = {};
                 state_ = talkers_.empty() ? FloorState::Idle : FloorState::Listening;
                 ev.cause = m.cause();
@@ -273,7 +289,8 @@ void Participant::handle(const Message& m) {
                 bool me = false;
                 for (auto& t : talkers_) if (t.self) me = true;
                 // 동시 발언에서 뒤에 승급한 화자의 Taken 은 먼저 말하던 나에게도 온다 — 강등하지 않는다.
-                if (!me) { revokePending_ = false; releaseRetxLeft_ = 0; talkDeadline_ = {}; state_ = FloorState::Listening; setMic(false); }
+                // U: pending Release 에서 받은 Taken(§6.2.4.6.5) — T100 정지, U: has no permission.
+                if (!me) { revokePending_ = false; releaseRetxLeft_ = 0; pendingRelease_ = false; talkDeadline_ = {}; state_ = FloorState::Listening; setMic(false); }
                 else state_ = FloorState::Speaking;
                 ev.meSpeaking = me;
                 break;
@@ -295,6 +312,7 @@ void Participant::handle(const Message& m) {
                 break;
             }
             case Op::REVOKE: {                                           // §6.2.4.5.4 — Release 로 응답(재전송)
+                if (ev.indicator) indicator_ = ev.indicator;
                 int g = ev.indicator & indicator::DUAL_FLOOR;
                 releaseRetxPkt_ = floor::release(ssrc_, userId_, g ? g : -1);
                 send(releaseRetxPkt_);

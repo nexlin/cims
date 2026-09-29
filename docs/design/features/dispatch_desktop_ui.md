@@ -195,11 +195,14 @@
 - **긴급**: `mcptt.emergency`/`imminentPeril` 세션은 카드 테두리 빨강/주황 + 전역 배너. 관제사 긴급 개시는 3줄 [긴급 호출](확인) —
   `GroupCallOptions.emergency`, 자격 없으면 403 사전 문구.
 - **일제 통화**(TS 24.379 §4.12 — 그룹 종류가 아니라 호 속성, [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §4.4 U6): 관제사 개시는 3줄 [일제 통화] —
-  멤버 편성 그룹에 진행 중 세션이 없을 때만 활성(진행 중이면 서버가 합류로만 받는다 — 그 문서 §3.2. chat 그룹은 서버가 broadcast-ind 를 무시해 비활성 — 그룹 종류는
-  관리 목록 `sessionType`). `GroupCallOptions.broadcast` → 개시 카드 자동 포커스 + 단일 발언 대상(애드혹 우선과 같은 규칙). 개시자만 발언하고 PTT 를 놓으면 코어가
-  호를 해제한다(발언 바 안내 "발언을 놓으면 통화가 끝납니다"). 일제 통화 카드는 1줄 배지 "일제"(①②) · ① 2줄 보조 "일제 통화 · 발언을 놓으면 종료 / 수신 전용".
-  판정은 서버가 알린 값 — 착신 mcptt-info `broadcast-ind` 또는 floor 메시지 B-bit(진행 중 일제 통화에 늦게 합류한 leg 은 B-bit 로만 안다). 수신 멤버(Taken·Idle
-  Permission 0)는 발언 대상 체크 불가. 서버가 일반 통화로 연 개시(첫 floor 메시지에 B-bit 없음)는 경고 토스트. ⑤ 에 개시·수신·종료 행.
+  멤버 편성 그룹에 진행 중 세션이 없을 때만 활성(진행 중이면 서버가 합류로만 받는다 — 그 문서 §3.2. chat 그룹은 서버가 broadcast-ind 를 무시해 비활성 — TS 24.379
+  §6.2.8.2 는 broadcast-ind 를 prearranged 그룹 호에 싣는다. 그룹 종류는 관리 목록 `sessionType`, 관리 범위가 없어 모르면 누를 때 GMS 그룹 문서의
+  `on-network-invite-members`(TS 24.481 §7.2.2 a)로 확인). `GroupCallOptions.broadcast` → 개시 카드 자동 포커스 + 단일 발언 대상(애드혹 우선과 같은 규칙).
+  개시자만 발언하고 PTT 를 놓으면 코어가 호를 해제한다(발언 바 안내 "발언을 놓으면 통화가 끝납니다" — 짧게 눌러 승인 전에 놓아도 늦은 Granted 는 무시하고
+  Idle 에서 해제, TS 24.380 §6.2.4.6.8). 일제 통화 카드는 1줄 배지 "일제"(①②) · ① 2줄 보조 "일제 통화 · 발언을 놓으면 종료 / 수신 전용".
+  판정은 서버가 알린 값 — 착신 mcptt-info `broadcast-ind` 또는 floor 메시지 B-bit(진행 중 일제 통화에 늦게 합류한 leg 은 B-bit 로만 안다). 수신 멤버(Taken
+  Permission 0 — Floor Idle 에는 Permission 필드가 없다)는 발언 대상 체크 불가. 서버가 일반 통화로 연 개시(첫 서버 floor 메시지 — Deny 포함 — 의 Floor Indicator 에
+  B-bit 없음)는 경고 토스트. ⑤ 에 개시·수신·종료 행.
 
 ### 4.1 ① 내 채널 (상단 왼쪽)
 
@@ -609,8 +612,8 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
     SessionHistoryViewModel     [이력] 화면(§4.6) — 하루 창 조회(`ShiftDate`)·녹취 세그먼트·재생 상태
     LoginViewModel · SettingsViewModel(잠금 발언 설정 포함)
   Models/  SessionKind: isMcptt&&listenOnly→PTT 청취(② 카드 토글/창) · isMcptt&&privateCall→사설콜(①) · groupId adhoc-→애드혹(①) · isMcptt→멤버 채널(①) ·
-           listenOnly&&joinedDialog→VoLTE 감청(창) · 그 외 VoLTE 통화(③). SessionItem(일제 통화 `IsBroadcast` = 착신 broadcast-ind·floor B-bit)·GroupInfo(그룹 종류 `SessionType` — 관리 목록)·DialogRow·Message/MessageThread·ActivityRow·Contact
-  Services/ DispatchSession(코어 투영 + 관제 동작 진입점 — Engine·CscClient 소유, Sessions/Groups/Dialogs, 등록 백오프, 오디오 적용, 일제 통화 개시 `BroadcastCall`.
+           listenOnly&&joinedDialog→VoLTE 감청(창) · 그 외 VoLTE 통화(③). SessionItem(일제 통화 `IsBroadcast` = 착신 broadcast-ind·floor B-bit)·GroupInfo(그룹 종류 `SessionType` — 관리 목록, 모르면 빈 값 → 일제 통화 개시 때 GMS 문서)·DialogRow·Message/MessageThread·ActivityRow·Contact
+  Services/ DispatchSession(코어 투영 + 관제 동작 진입점 — Engine·CscClient 소유, Sessions/Groups/Dialogs, 등록 백오프, 오디오 적용, 일제 통화 개시 `BroadcastCallAsync`.
                             등록 단말 속성 = User-Agent `CIMS-Dispatch/<앱 버전> (<OS>; <모델>)` · Contact `+sip.instance` 기기 고유 `urn:uuid:`(파사드 `DeviceIdentity` — mcptt_management_views.md §4.1)
                             계정 = PTT 서비스 전부 + **전화 계열은 SDK 가 고른 `Profile.PhoneService` 하나**(유선 voip 우선·이동 volte 폴백) — volte·voip 를 둘 다 등록하면 이동 번호까지 관제석에 포크되고 전화 계정 참조를 마지막 계정이 덮어쓴다) ·
             Notifications(토스트·배너) · SettingsStore(json — FollowChannelThread/FollowChannelEvents/LockTalk/ScopedManageExpanded 등) · LayoutStore(프리셋, 패널 집합 버전) ·

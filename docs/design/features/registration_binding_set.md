@@ -228,7 +228,8 @@ psip 계층(응용까지 올라오는가·pong·STUN 응답)은 `tests/psip_keep
 `+sip.instance`(instance-id) + `reg-id` 를 규정한다. 단말이 싣는 값:
 
 - Android PTT·VoLTE 앱은 **기기 고유 값**(`urn:uuid:` — ANDROID_ID 이름 기반 UUID, `android/core` `DeviceIdentity`)을
-  모든 transport 로 싣는다(UDP 는 REGISTER Contact 직접, TCP/TLS 는 RFC 5626 outbound 경로).
+  모든 transport 에서 REGISTER Contact 파라미터로 직접 싣는다(pjsua outbound 는 끔 — CSP 는 RFC 5626 outbound·`reg-id` 를 쓰지 않고,
+  outbound 경로의 instance 는 NAT Contact 재작성 때 빠진다. libcimsue 도 같은 규칙 — [ue_sdk.md](ue_sdk.md) §4.2).
 - libcimsue 앱은 `AccountConfig.instanceId` 를 채울 때만 기기 고유다([ue_sdk.md](ue_sdk.md) §4.2). 비우면 pjsip 기본값이다.
 
 pjsip 은 instance-id 기본값을 **호스트명 해시**로 만든다

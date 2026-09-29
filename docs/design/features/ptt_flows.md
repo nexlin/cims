@@ -518,7 +518,8 @@ UE-B (낮은 우선순위, 현재 화자)   CMP              UE-A (높은 우선
 
 일제 통화로 개시된 세션(`broadcast:1`)은 개시자(initiator)만 발언한다. CMP `handleFloorRequest` 가
 요청자 sessionId(=userId) ≠ `_initiatorSessionId` 이면 floor 점유·긴급 여부와 무관하게 Deny #5(Receive only).
-floor 메시지 Floor Indicator 에 B-bit(0x4000), Floor Taken/Idle 의 Permission to Request the Floor = 0.
+floor 메시지 Floor Indicator 에 B-bit(0x4000), Floor Taken 의 Permission to Request the Floor = 0(TS 24.380 §6.3.4.4.2 3d —
+Floor Idle 에는 그 필드가 없다, §8.2.8).
 
 ```
 개시자(initiator)         CMP (broadcast group)        비개시자 멤버

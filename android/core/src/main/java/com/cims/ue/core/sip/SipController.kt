@@ -793,11 +793,12 @@ class SipController(private val config: SipAccountConfig) {
 
         // Contact 부가 파라미터(capability feature tag 등) — 서버가 MSRP 배포 대상 판정에 사용
         if (contactParams.isNotBlank()) ac.sipConfig.contactParams = contactParams
-        // 단말 인스턴스 ID — TCP/TLS 는 pjsua outbound(RFC 5626) 경로가 reg-id 와 함께 싣고, 그 경로를 타지 않는
-        //   UDP 는 REGISTER Contact 에 직접 싣는다(겹치지 않게 transport 로 가른다). SDK account_map 과 같은 규칙.
+        // 단말 인스턴스 ID — 모든 transport 에서 REGISTER Contact 파라미터로 직접 싣고 pjsua outbound(RFC 5626)는 끈다.
+        //   CSP 는 outbound 를 지원하지 않아(200 에 Require: outbound 없음) pjsua 가 OUTBOUND_NA 로 두고, NAT 로 Contact 를
+        //   다시 쓸 때(TCP/TLS 재연결) outbound 경로의 +sip.instance 를 뺀다. SDK account_map 과 같은 규칙.
         if (instanceId.isNotBlank()) {
-            ac.natConfig.sipOutboundInstanceId = "<$instanceId>"
-            if (tp == "udp") ac.regConfig.contactParams = ";+sip.instance=\"<$instanceId>\""
+            ac.natConfig.sipOutboundUse = 0
+            ac.regConfig.contactParams = ";+sip.instance=\"<$instanceId>\""
         }
 
         // 도메인 DNS 미해석 회피: 실제 서버 IP:port 로 route 강제(;lr)

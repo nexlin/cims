@@ -103,7 +103,7 @@ TEST(CApi, ConfigDefaultsFollowCxx) {
     EXPECT_EQ(cimsue_user_agent_of("P", nullptr, nullptr, nullptr, buf, sizeof buf), 1);   // NULL = 빈 값
     EXPECT_EQ(std::string(buf), "P");
     cimsue_imei_urn("490154203237518", buf, sizeof buf);
-    EXPECT_EQ(std::string(buf), "urn:gsma:imei:49015420-323751-8");
+    EXPECT_EQ(std::string(buf), "urn:gsma:imei:49015420-323751-0");   // 셋째 칸 = spare 0(RFC 7254 §4.2.3)
     EXPECT_EQ(cimsue_imei_urn("490154203237517", buf, sizeof buf), 0);
 }
 

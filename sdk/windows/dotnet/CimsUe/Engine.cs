@@ -273,7 +273,7 @@ public sealed unsafe class Engine : IDisposable
     /// (괄호·역슬래시·제어 문자 정리 포함). Windows 기기 값을 채운 결과는 <see cref="Platform.DeviceIdentity.UserAgent"/>.</summary>
     public static string UserAgentOf(string product, string version, string os, string model) =>
         CopyOutString((p, cap) => cimsue_user_agent_of(product, version, os, model, p, cap));
-    /// <summary>IMEI(15자리) → RFC 7254 instance URN(`urn:gsma:imei:…`) — 자릿수·Luhn 검사 숫자가 틀리면 빈 문자열.</summary>
+    /// <summary>IMEI → RFC 7254 instance URN(`urn:gsma:imei:TTTTTTTT-SSSSSS-0` — 셋째 칸은 spare 0) — 자릿수·Luhn 검사 숫자가 틀리면 빈 문자열.</summary>
     public static string ImeiUrn(string imei) => CopyOutString((p, cap) => cimsue_imei_urn(imei, p, cap));
 
     private delegate int CopyOutFn(byte* buf, int cap);
