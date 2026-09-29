@@ -21,6 +21,7 @@ using namespace cimsue;
 %include "stdint.i"
 
 %feature("director") cimsue::Listener;
+%feature("director") cimsue::DeviceLinkListener;   // 계측 링크 상태 — 링크 스레드에서 불린다(ue_voice_quality.md §5.3)
 
 // ── 불투명 타입이 될 인자를 먼저 걷어낸다 ──────────────────────────────────────
 // 기본인자 포인터는 SWIG 이 오버로드를 하나 더 만들고 그 인자가 SWIGTYPE_p_* 로 떨어진다.
@@ -37,6 +38,15 @@ using namespace cimsue;
 // pImpl — 바인딩에 내부 타입을 내지 않는다
 %ignore cimsue::Engine::Impl;
 %ignore cimsue::CscClient::Impl;
+%ignore cimsue::DeviceLink::Impl;
+
+// 구동 세션(drive.h)은 앱이 **DeviceLink 하나와 상태 콜백만** 쓴다 — DriveSession·LineSink 는 링크 안에서
+// 쓰이고(cimsue-cli drive 는 C++ 로 직접 쓴다), drive:: 는 이벤트 줄 직렬화 조각이다(ue_voice_quality_handoff §2).
+%ignore cimsue::DriveSession;
+%ignore cimsue::LineSink;
+%ignore cimsue::drive::statsFields;
+%ignore cimsue::drive::qualityFields;
+%ignore cimsue::drive::jsonEscape;
 
 // export.h 의 DLL 가시성 매크로 — SWIG 는 헤더의 #if 를 평가하지 않으므로 빈 매크로로 선언
 #define CIMSUE_API
@@ -96,6 +106,8 @@ using namespace cimsue;
 %include "cimsue/listener.h"
 // engine.h 를 먼저 — Engine::sendRequest 의 SIP 본문은 텍스트라 아래 이진 적용 전에 통과시킨다.
 %include "cimsue/engine.h"
+// 계측 링크(DeviceLink·DeviceLinkConfig·DriveOptions·DriveAccount·LinkState) — 본문 인자가 없어 이진 적용과 무관하다.
+%include "cimsue/drive.h"
 
 // 여기부터 csc.h 끝까지 `const std::string& body`·`data` 는 이진(byte[])이다 — HttpResult.body 와
 // CscClient::request 의 요청 본문, CscClient::uploadFd 의 파일 바이트가 대상. XcapDoc.body 만 XML 텍스트라 멤버 한정으로 되돌린다
@@ -121,3 +133,4 @@ using namespace cimsue;
 %template(DispatchTargetVector) std::vector<cimsue::DispatchTarget>;
 %template(GroupSummaryVector)   std::vector<cimsue::GroupSummary>;
 %template(GroupMemberVector)    std::vector<cimsue::GroupMember>;
+%template(DriveAccountVector)   std::vector<cimsue::DriveAccount>;

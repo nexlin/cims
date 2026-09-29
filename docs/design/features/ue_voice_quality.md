@@ -227,7 +227,12 @@ Foreground Service 가 세션과 함께 든다(화면이 꺼져도 유지). Wind
 - `cimsue-cli drive` 는 `DriveSession` + stdout(`ready` 이벤트 포함, stop 때 모든 호 정리), `cimsue-cli link HOST[:PORT] [--pair-key K] [--link-ca PEM |
   --link-pin FILE] [--sample-file WAV] [--service S] [--duration S]` 는 등록 뒤 `DeviceLink`(stdout = `link{state,detail}` 줄) — 앱 시험 모드와 같은 경로라
   앱 없이 워커 쪽(Q3)을 끝까지 검증한다.
-- 앱 바인딩(C API·.NET·SWIG 의 `DeviceLink`)은 앱 시험 모드(Q4)와 함께 낸다.
+- 앱 바인딩 — 앱은 **`DeviceLink` 하나와 상태**만 쓴다(`DriveSession`·`LineSink`·`drive::` 는 바인딩에 내지 않는다).
+  - **Android(SWIG·Kotlin)** — `cimsue.i` 가 `drive.h` 를 싣고 `DeviceLinkListener` 는 director. 파사드 `CimsUe.deviceLink(): CimsResult<DeviceLink>` →
+    `DeviceLink.start(DeviceLinkConfig, List<DriveAccount>)`(suspend)·`stop()`(suspend — 구동 호 정리·링크 스레드 대기)·`status: StateFlow<LinkStatus>`
+    (`LinkState` IDLE·CONNECTING·CONNECTED·DISCONNECTED·REFUSED + detail = 워커 이름/사유)·`close()`, 기준 음원 `CimsUe.setTxSource(wav)`.
+    Kotlin `DeviceLinkConfig` 는 코어 설정에 `sampleFile`(= `DriveOptions.sampleFile`)을 더한 한 묶음이다. `CimsUe.close()` 가 열린 링크를 엔진보다 먼저 해제한다.
+  - **C API·.NET(Windows)** — 인계 [../../dev/ue_voice_quality_handoff.md](../../dev/ue_voice_quality_handoff.md) §2 의 제안 모양(`cimsue_device_link_*`·`DeviceLink : IDisposable`).
 
 ## 6. 계측기 — `device` 풀
 
@@ -301,7 +306,7 @@ SRTCP 보호/해제(RFC 3711 §3.4 — 수신 보고 블록도 해제해서 읽�
 | Q3 | 계측기 — `DeviceHub`·`DriveLink` · 컨트롤러 `DevicePool`·`GET /devices`·계획 미리보기 연결 확인·게이트·`device_*` · libcsim RTCP SR/RR·RTT·SRTCP · 동봉 시나리오 3종 · 콘솔(실기기 풀·연결된 단말) | `tester/worker` · `cspsim` · `ems/tester` |
 | Q4 | 앱 시험 모드 — Android core 공통(진입·설정·링크 서비스·오버레이·요약·이력·내보내기) + 앱 3종 · Windows 관제 앱 | `android/core` · 앱 · `windows/dispatch-desktop` |
 
-플랫폼 빌드 확인(Android·Windows)과 Q4 는 다른 개발 환경 몫 — 인계 [../../dev/ue_voice_quality_handoff.md](../../dev/ue_voice_quality_handoff.md).
+Android 빌드 확인과 SWIG·Kotlin `DeviceLink` 바인딩은 반영됐다(§5.3). Windows 빌드 확인·C API·.NET 바인딩과 Q4 는 다른 개발 환경 몫 — 인계 [../../dev/ue_voice_quality_handoff.md](../../dev/ue_voice_quality_handoff.md).
 Q1·Q2·Q3 는 구현 반영 — 계측기 `real-ue` 는 cli 가 낸 `mos_cq`(RTT 실측·지터버퍼 폐기 포함)를 그대로 쓰고 `rtd_ms`·`real_rtd_ms` 를 기록한다. 링크는 워커 대역(파이썬 TLS 서버)으로 hello·welcome·`app_owned`·`media sample`·.48 경유 발신·ping·`callTerm`·quit·재접속·연결 키 거절·지문 불일치·CA 검증까지 확인했다.
 
 ## 9. 미해결 / 향후

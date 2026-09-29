@@ -46,9 +46,8 @@
 | W5 | **.NET 단위시험** — `AbiLayoutTests` 에 `QUALITY_DIRECTION`·`CALL_QUALITY` 구조체 크기 항목, `EngineHeadlessTests` 에 `Quality.Valid == false`·`MosCq == -1` 이 추가됐다. C 구조체와 `NativeStructs.cs` 배치(`double` 정렬 포함)가 같은지 이 시험이 잡는다 | `sdk/windows/dotnet/CimsUe.Tests/*`, `CimsUe/Native/NativeStructs.cs` |
 | W6 | `cimsue_test`(googletest) — `quality_test.cpp`·`drive_test.cpp` 가 Windows 에서도 통과한다 | `sdk/core/test/*` |
 
-**이미 알려진 것** — `cimsue_test` 를 한 프로세스로 전부 돌리면 `FloorParticipant` 시험 뒤의 `EngineRoute`·`CApi.EngineLifecycleHeadless` 가 pjlib
-"unknown thread" assert 로 죽는다. 이번 변경 전부터 있던 순서 문제이고, 각각 단독으로 돌리면 통과한다. S1-UE-UNIT 이 전체를 한 번에 돌리므로
-별건으로 고쳐야 한다(`floor_participant_test.cpp` 의 `pjReady` 가 pjlib 스레드 등록을 남긴 채 엔진이 재기동되는 문제).
+**`cimsue_test` 한 프로세스 실행** — `FloorParticipant`·`FloorXCheck` 시험이 `pj_init` 만 하고 남겨 두면 뒤의 `EngineRoute`·`CApi.EngineLifecycleHeadless`
+가 pjlib "unknown thread" assert 로 죽던 순서 문제는 **고쳤다**(§6). 시험마다 `pj_init`/`pj_shutdown` 을 짝짓는 `sdk/core/test/pj_scope.h` — Windows 도 같은 시험 파일이다.
 
 ---
 
@@ -171,3 +170,22 @@ void cimsue_device_link_destroy(cimsue_device_link_t*);
 - **run 중 재접속** — 링크가 끊겼다가 다시 붙어도 그 run 의 풀에는 다시 묶이지 않는다(설계 §9 향후 과제).
 - **PTT 그룹 세션** — 실기기 하나와 가상 멤버를 한 그룹 세션에 섞지 못한다(멤버 역할 = 같은 풀). 실기기 PTT 는 멤버 전원이 `device` 풀이어야 한다.
 - **포트** — 7110 은 컨트롤러의 워커 관측 수신이다. 단말에는 7120(워커 `Device.Port`)을 넣는다.
+
+---
+
+## 6. .45 반영 결과 (→ .48)
+
+| 항목 | 결과 |
+|---|---|
+| §1.1 A1 엔진 재빌드 | ✅ `build-native.sh` 가 매번 `make clean` 뒤 전체 빌드 — 펼친 `config_site.h` 에 `PJMEDIA_HAS_RTCP_XR 1`·`PJMEDIA_STREAM_ENABLE_XR 1`, `libcimsue.so` 에 `pjmedia_rtcp_xr_*` 링크 |
+| A2 `pjsua_call_get_stream_stat_xr` | ✅ NDK 링크(`libcimsue.so` T 기호) |
+| A3 SWIG 게터 | ✅ `CallQuality.getRLq()`·`getRCq()`·`getMosCq()` — Kotlin `q.rLq`·`q.rCq` 로 풀린다(파사드 컴파일 통과). `SWIGTYPE_p_*` 0(S1-UE-ANDROID-BIND PASS) |
+| A4 `addObserver`·`removeObserver`·`setTxSource` | ✅ SWIG 재생성(`Engine.java`). 파사드 노출은 `setTxSource` 만(관찰자는 링크 내부) |
+| A5 코어 새 소스 NDK 컴파일 | ✅ `quality/*`·`net/tls_stream.cpp`·`drive/*` 컴파일, `DeviceLink` 바인딩 뒤 `.so` 에 링크(JNI 진입점 38) |
+| §2 SWIG·Kotlin `DeviceLink` | ✅ `cimsue.i` — `%include "cimsue/drive.h"`, `DeviceLinkListener` director, `DriveSession`·`LineSink`·`drive::` `%ignore`, `DriveAccountVector`. 파사드(`sdk/android/cimsue/.../DeviceLink.kt`·`Types.kt`·`CimsUe.kt`) — 이름은 설계 [§5.3](../design/features/ue_voice_quality.md) 에 반영 |
+| Kotlin API | `CimsUe.deviceLink(): CimsResult<DeviceLink>` · `DeviceLink.start(DeviceLinkConfig, List<DriveAccount>)`(suspend) · `stop()`(suspend) · `status: StateFlow<LinkStatus>`(`LinkState` IDLE/CONNECTING/CONNECTED/DISCONNECTED/REFUSED + `detail`) · `state` · `close()` · `CimsUe.setTxSource(wav)`. `DeviceLinkConfig` = 코어 설정 + `sampleFile`. `CimsUe.close()` 가 열린 링크를 엔진보다 먼저 해제 |
+| `:cimsue` AAR ↔ 관제 태블릿 | ✅ 태블릿은 `project(":cimsue")` — `dispatch-tablet`·`ptt-client`·`volte-client` debug APK 빌드 통과. 단독 AAR 패키징(`:cimsue:assemble*`)은 이 서버에 lint 도구 jar 캐시가 없어 오프라인에서 멈춘다(환경) |
+| 단위시험 | `:cimsue` 30(`FacadeMappingTest` 16 — `LinkState` 서수·이름 대조 추가) · `:ptt-client` 53(`FloorClient.kt` 짧은 PTT 탭 수정분 포함 빌드) · `cimsue_test` **73 한 프로세스 PASS**(고치기 전 = 같은 바이너리에서 assert 134 재현) · S1-UE-UNIT·FLOOR-CODEC·ANDROID-BIND·ENGINE-SINGLE·SDS-XCHECK·CSC-XCHECK PASS |
+| 실기기 링크 | 미실측 — 앱 시험 모드(Q4, §3) 전이라 앱에서 링크를 켜는 곳이 없다 |
+| §3.0 `volte-client`·`ptt-client` SDK 이식 | 미착수 — `android/core` 자체 pjsua2 래퍼·`PttController` 이전 범위(ue_sdk.md §5.3 의 `domain/` 결정 포함)를 정한 뒤 |
+

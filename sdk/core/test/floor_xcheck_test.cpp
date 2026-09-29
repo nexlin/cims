@@ -123,19 +123,9 @@ TEST(FloorXCheck, CmpServerMessagesDecodedByCore) {
 #include <thread>
 
 #include "../src/floor/floor_participant.h"
+#include "pj_scope.h"
 
 namespace {
-
-void pjReady() {
-    static bool inited = (pj_init() == PJ_SUCCESS);
-    (void)inited;
-    if (!pj_thread_is_registered()) {
-        static thread_local pj_thread_desc desc;
-        pj_thread_t* th = nullptr;
-        pj_bzero(desc, sizeof(desc));
-        pj_thread_register("xcheck", desc, &th);
-    }
-}
 
 /** CMP 자리 UDP 소켓 — participant 가 보낸 것을 받고 서버 메시지를 돌려준다. */
 struct FakeCmp {
@@ -191,7 +181,7 @@ bool waitTrue(const std::atomic<int>& v, int want, int ms) {
 }  // namespace
 
 TEST(FloorXCheck, BroadcastInitiatorReleasesCallOnIdle) {
-    pjReady();
+    cimsue_test::PjScope pj("xcheck");
     FakeCmp cmp;
     std::atomic<int> ends{0}, idles{0};
     core::Participant::Callbacks cb;
@@ -226,7 +216,7 @@ TEST(FloorXCheck, BroadcastInitiatorReleasesCallOnIdle) {
 }
 
 TEST(FloorXCheck, NormalGroupIdleAfterReleaseKeepsCall) {
-    pjReady();
+    cimsue_test::PjScope pj("xcheck");
     FakeCmp cmp;
     std::atomic<int> ends{0}, idles{0};
     core::Participant::Callbacks cb;

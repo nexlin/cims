@@ -23,6 +23,7 @@ class FacadeMappingTest {
         assertEquals(listOf("OUTGOING", "INCOMING"), CallDir.entries.map { it.name })
         // FloorState 는 TS 24.380 §6.2.4 상태머신 — Speaking/Listening 이 뒤바뀌면 발언 표시가 반대가 된다
         assertEquals(listOf("IDLE", "REQUESTING", "SPEAKING", "LISTENING", "QUEUED"), FloorState.entries.map { it.name })
+        assertEquals(listOf("IDLE", "CONNECTING", "CONNECTED", "DISCONNECTED", "REFUSED"), LinkState.entries.map { it.name })
     }
 
     // ── ①-b 코어 enum 과의 실제 대조 ──
@@ -69,6 +70,13 @@ class FacadeMappingTest {
             "Speaking" to com.cims.ue.sdk.jni.FloorState.Speaking.swigValue(),
             "Listening" to com.cims.ue.sdk.jni.FloorState.Listening.swigValue(),
             "Queued" to com.cims.ue.sdk.jni.FloorState.Queued.swigValue()))
+        // 계측 링크 — REFUSED 가 DISCONNECTED 로 읽히면 앱이 거절된 링크를 재접속 대기로 보인다
+        check(LinkState.entries.map { it.name }, listOf(
+            "Idle" to com.cims.ue.sdk.jni.LinkState.Idle.swigValue(),
+            "Connecting" to com.cims.ue.sdk.jni.LinkState.Connecting.swigValue(),
+            "Connected" to com.cims.ue.sdk.jni.LinkState.Connected.swigValue(),
+            "Disconnected" to com.cims.ue.sdk.jni.LinkState.Disconnected.swigValue(),
+            "Refused" to com.cims.ue.sdk.jni.LinkState.Refused.swigValue()))
     }
 
     // ── ② 결과 래핑 ──

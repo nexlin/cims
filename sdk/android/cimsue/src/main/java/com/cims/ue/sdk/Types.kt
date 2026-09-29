@@ -6,6 +6,7 @@
 package com.cims.ue.sdk
 
 import com.cims.ue.sdk.jni.AudioDeviceVector
+import com.cims.ue.sdk.jni.DriveAccountVector
 import com.cims.ue.sdk.jni.MediaSourceVector
 import com.cims.ue.sdk.jni.RosterVector
 import com.cims.ue.sdk.jni.TalkerVector
@@ -13,7 +14,11 @@ import com.cims.ue.sdk.jni.AccountConfig as JniAccountConfig
 import com.cims.ue.sdk.jni.AudioDeviceInfo as JniAudioDeviceInfo
 import com.cims.ue.sdk.jni.CallInfo as JniCallInfo
 import com.cims.ue.sdk.jni.CallOptions as JniCallOptions
+import com.cims.ue.sdk.jni.DeviceLinkConfig as JniDeviceLinkConfig
 import com.cims.ue.sdk.jni.DialogInfo as JniDialogInfo
+import com.cims.ue.sdk.jni.DriveAccount as JniDriveAccount
+import com.cims.ue.sdk.jni.DriveOptions as JniDriveOptions
+import com.cims.ue.sdk.jni.LinkState as JniLinkState
 import com.cims.ue.sdk.jni.EngineConfig as JniEngineConfig
 import com.cims.ue.sdk.jni.FloorEvent as JniFloorEvent
 import com.cims.ue.sdk.jni.FloorInfo as JniFloorInfo
@@ -60,6 +65,8 @@ enum class RegState { UNREGISTERED, REGISTERING, REGISTERED, FAILED }
 enum class CallState { NULL, OUTGOING, INCOMING, ACTIVE, HELD, DISCONNECTED }
 enum class CallDir { OUTGOING, INCOMING }
 enum class FloorState { IDLE, REQUESTING, SPEAKING, LISTENING, QUEUED }
+/** 계측 링크 상태(cimsue/drive.h) — REFUSED(연결 키 거절·지문 불일치)는 다시 붙지 않는다. */
+enum class LinkState { IDLE, CONNECTING, CONNECTED, DISCONNECTED, REFUSED }
 
 private inline fun <reified E : Enum<E>> ordinalOf(v: Int): E {
     val vs = enumValues<E>()
@@ -342,6 +349,55 @@ data class CallQuality(val valid: Boolean, val codec: String, val clockRate: Lon
         fun of(q: JniCallQuality) = CallQuality(q.valid, q.codec, q.clockRate, q.wideband,
             QualityDirection.of(q.rx), QualityDirection.of(q.remote), q.rtdMs, q.esdMs, q.oneWayMs,
             q.rLq, q.rCq, q.mosLq, q.mosCq, q.startEpochMs, q.durationMs)
+    }
+}
+
+// ── 시험 모드 계측 링크 (ue_voice_quality.md §5) ─────────────────────────────
+/** 링크로 내보낼 회선 — 계측기는 풀의 service(volte·voip·ptt)로 `use` 한다. 첫 항목이 기본 회선. */
+data class DriveAccount(val service: String, val accountId: Int, val aor: String, val msisdn: String) {
+    internal fun toJni(): JniDriveAccount = JniDriveAccount().also {
+        it.service = service; it.accountId = accountId; it.aor = aor; it.msisdn = msisdn
+    }
+}
+
+/**
+ * 계측기 워커 링크 설정(시험 모드 메뉴 — ue_voice_quality.md §4.1). 워커가 서버, 단말이 먼저 연결한다.
+ * [verifyServer] 를 끄면 [pinFile] 에 최초 지문을 고정한다(TOFU). [sampleFile] = `media sample` 의 기본 WAV(PCM16).
+ */
+data class DeviceLinkConfig(
+    val host: String,
+    val port: Int = 7120,
+    val pairKey: String = "",
+    val verifyServer: Boolean = false,
+    val caPem: String = "",
+    val pinFile: String = "",
+    /** 설치 고유 id — `+sip.instance` 와 같은 원천. 같은 id 로 두 번 붙으면 워커가 옛 연결을 닫는다. */
+    val deviceId: String,
+    val app: String,
+    val appVersion: String,
+    val platform: String,
+    val model: String,
+    val reconnectMaxSec: Int = 30,
+    val sampleFile: String = "",
+) {
+    internal fun toJni(): JniDeviceLinkConfig = JniDeviceLinkConfig().also {
+        it.host = host; it.port = port; it.pairKey = pairKey
+        it.verifyServer = verifyServer; it.caPem = caPem; it.pinFile = pinFile
+        it.deviceId = deviceId; it.app = app; it.appVersion = appVersion; it.platform = platform; it.model = model
+        it.reconnectMaxSec = reconnectMaxSec
+    }
+
+    /** 등록 소유·호 정리 범위는 코어 링크가 고정한다(appOwnedRegistration=true·Driven) — 여기서는 회선과 기준 음원만. */
+    internal fun driveOptions(accounts: List<DriveAccount>): JniDriveOptions = JniDriveOptions().also {
+        it.accounts = DriveAccountVector().apply { accounts.forEach { a -> add(a.toJni()) } }
+        it.sampleFile = sampleFile
+    }
+}
+
+/** 링크 상태 + 사유 — detail = 워커 이름(CONNECTED) 또는 끊김·거절 사유(DISCONNECTED·REFUSED). */
+data class LinkStatus(val state: LinkState, val detail: String = "") {
+    internal companion object {
+        fun of(s: JniLinkState, detail: String) = LinkStatus(ordinalOf(s.swigValue()), detail)
     }
 }
 

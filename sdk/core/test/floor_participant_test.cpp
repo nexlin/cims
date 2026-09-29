@@ -10,22 +10,12 @@
 
 #include "../src/floor/floor_codec.h"
 #include "../src/floor/floor_participant.h"
+#include "pj_scope.h"
 
 using namespace cimsue;
 using namespace cimsue::floor;
 
 namespace {
-
-void pjReady() {
-    static bool inited = (pj_init() == PJ_SUCCESS);
-    (void)inited;
-    if (!pj_thread_is_registered()) {
-        static thread_local pj_thread_desc desc;
-        pj_thread_t* th = nullptr;
-        pj_bzero(desc, sizeof(desc));
-        pj_thread_register("floor-test", desc, &th);
-    }
-}
 
 /** floor control server 자리 — participant 가 보낸 것을 받고 서버 메시지를 돌려준다. */
 struct FakeServer {
@@ -88,7 +78,7 @@ bool waitFor(F cond, int ms) {
 //   예전에는 늦은 Granted 가 마이크를 열고 Speaking 으로 가 뒤이은 Idle 을 무시했다 — 서버는 유휴인데 단말만 송출하고,
 //   일제 통화 개시자는 호 해제(§6.2.4.6.4)를 놓쳤다.
 TEST(FloorParticipant, GrantedAfterReleaseIsIgnoredAndBroadcastStillEnds) {
-    pjReady();
+    cimsue_test::PjScope pj("floor-test");
     FakeServer srv;
     std::atomic<int> micOn{0}, granted{0}, ends{0};
     Participant::Callbacks cb;
@@ -118,7 +108,7 @@ TEST(FloorParticipant, GrantedAfterReleaseIsIgnoredAndBroadcastStillEnds) {
 
 // §6.2.4.6.2 — Floor Release 는 T100 으로 재전송하고 Idle 이 오면 멈춘다(유실되면 서버가 발언권을 계속 쥔다).
 TEST(FloorParticipant, ReleaseRetransmittedUntilIdle) {
-    pjReady();
+    cimsue_test::PjScope pj("floor-test");
     FakeServer srv;
     Participant::Callbacks cb;
     Participant p(2, 0x5678u, "tel:+82500000002", cb);
@@ -156,7 +146,7 @@ struct Counters {
 
 // §14.3.4 — answer 의 mc_granted = 200 OK 로 승인: Floor Request 없이 'U: has permission', 뒤따르는 Floor Granted 에도 머문다(§6.2.4.5.5).
 TEST(FloorParticipant, ImplicitRequestGrantedInAnswer) {
-    pjReady();
+    cimsue_test::PjScope pj("floor-test");
     FakeServer srv;
     Counters k;
     Participant p(3, 0x1111u, "tel:+82500000003", k.cb());
@@ -177,7 +167,7 @@ TEST(FloorParticipant, ImplicitRequestGrantedInAnswer) {
 
 // §14.3.5 — answer 의 mc_implicit_request = 받아들임(승인 아님, §12.1.2.2 NOTE 4): 요청 중에 머물다 Floor Granted 로 발언.
 TEST(FloorParticipant, ImplicitRequestAcceptedWaitsForFloorGranted) {
-    pjReady();
+    cimsue_test::PjScope pj("floor-test");
     FakeServer srv;
     Counters k;
     Participant p(4, 0x2222u, "tel:+82500000004", k.cb());
@@ -196,7 +186,7 @@ TEST(FloorParticipant, ImplicitRequestAcceptedWaitsForFloorGranted) {
 
 // §14.3.5 — 서버가 암묵 요청으로 받지 않았다(진행 중 호 합류 등): 누르고 있으니 명시 Floor Request 로 잇는다.
 TEST(FloorParticipant, ImplicitRequestNotAcceptedFallsBackToExplicit) {
-    pjReady();
+    cimsue_test::PjScope pj("floor-test");
     FakeServer srv;
     Counters k;
     Participant p(5, 0x3333u, "tel:+82500000005", k.cb());
@@ -212,7 +202,7 @@ TEST(FloorParticipant, ImplicitRequestNotAcceptedFallsBackToExplicit) {
 // 호 성립 전에 놓았다(짧은 탭) — 그 사이 온 Floor Granted 는 무시하고, answer 에서 Release 로 돌려준다. 일제 통화 개시자는 이어 오는
 //   B-bit Floor Idle 로 호를 해제한다(§6.2.4.6.4).
 TEST(FloorParticipant, ImplicitRequestReleasedBeforeAnswerReturnsFloor) {
-    pjReady();
+    cimsue_test::PjScope pj("floor-test");
     FakeServer srv;
     Counters k;
     Participant p(6, 0x4444u, "tel:+82500000006", k.cb());
@@ -236,7 +226,7 @@ TEST(FloorParticipant, ImplicitRequestReleasedBeforeAnswerReturnsFloor) {
 
 // Floor Granted 가 answer 보다 먼저 왔다(서버는 PTT_JOIN 처리 중에 보낸다) — answer 는 아무것도 바꾸지 않는다.
 TEST(FloorParticipant, ImplicitRequestGrantedBeforeAnswer) {
-    pjReady();
+    cimsue_test::PjScope pj("floor-test");
     FakeServer srv;
     Counters k;
     Participant p(7, 0x5555u, "tel:+82500000007", k.cb());

@@ -194,6 +194,9 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
                 runCatching { (gate as Object).wait(CLOSE_WAIT_MS) }.getOrElse { return@synchronized }
             }
         }
+        // 계측 링크는 엔진을 참조한다 — 엔진을 멈추기 전에 멈추고 해제한다(구동 호 정리도 엔진이 살아 있어야 한다).
+        links.forEach { it.release() }
+        links.clear()
         runCatching { engine.stop() }          // 콜백을 멈춘다 — director 가 살아 있는 동안
         _running.value = false
         accountCache.clear()
@@ -274,6 +277,21 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
 
     /** SIP TLS 서버 인증서 만료 관측 — 아직 TLS 연결이 없으면 valid=false. */
     fun tlsPeerExpiry(): TlsPeerExpiry? = guarded { TlsPeerExpiry.of(engine.tlsPeerExpiry()) }
+
+    // ── 시험 모드 (ue_voice_quality.md §4·§5) ────────────────────────────────
+    /**
+     * 송출 원천 — 빈 문자열 = 마이크, 경로 = WAV(PCM16, 16 kHz mono 권장) 반복 재생을 마이크 대신 모든 호로(기준 음원).
+     * 진행 중 호에도 즉시 적용된다. 음소거·floor 게이트는 원천과 무관하게 그대로다. 계측기의 `media` 명령도 같은 곳을 바꾼다.
+     */
+    suspend fun setTxSource(wavPath: String): CimsResult<Unit> = command { CimsResult.of(engine.setTxSource(wavPath)) }
+
+    private val links: MutableSet<DeviceLink> = ConcurrentHashMap.newKeySet()
+
+    /** 계측기 워커 링크 핸들을 만든다(아직 연결하지 않는다 — [DeviceLink.start]). 엔진이 닫혔으면 실패. */
+    fun deviceLink(): CimsResult<DeviceLink> =
+        guarded { DeviceLink(this).also { links.add(it) } }?.let { CimsResult.ok(it) } ?: closedResult()
+
+    internal fun forgetLink(link: DeviceLink) { links.remove(link) }
 
     // ── 내부 — Account/Call 이 쓴다 ──────────────────────────────────────────
     internal val jni: JniEngine get() = engine
