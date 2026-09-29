@@ -173,7 +173,7 @@ public partial class MainWindow : Window
         // Ctrl+K 통합 검색 · Ctrl+M 문자 팝오버
         if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.K && !e.IsRepeat) { _vm.People.SearchOpen = !_vm.People.SearchOpen; if (_vm.People.SearchOpen && !IsActive) Activate(); e.Handled = true; return; }
         if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.M && !e.IsRepeat) { _vm.SmsOpen = !_vm.SmsOpen; if (_vm.SmsOpen) _vm.Screen = AppScreen.Dispatch; e.Handled = true; return; }
-        // Esc = 팝오버·메뉴 닫기(애드혹 구성 중인 발신 팝오버는 [취소]로만)
+        // Esc = 팝오버·메뉴 닫기(임시 그룹 구성 중인 발신 팝오버는 [취소]로만)
         if (Keyboard.Modifiers == ModifierKeys.None && e.Key == Key.Escape && CloseTransients()) { e.Handled = true; return; }
         foreach (var name in HotKeyMap.LocalNames)
             if (map.TryGetValue(name, out var t) && CimsUe.Platform.HotKey.TryParse(t, out var hk) && Matches(hk, e)) { _vm.OnHotKey(name, true); e.Handled = true; return; }

@@ -94,7 +94,7 @@
                     <ItemsControl ItemsSource="{Binding Listen}" ItemTemplate="{StaticResource ScopedCardTemplate}" />
                     <TextBlock Style="{StaticResource Hint}" Margin="4,0,4,8" Text="청취 범위 그룹 없음" Visibility="{Binding Listen.Count, Converter={StaticResource ZeroToVis}}" />
                     <!-- 타인 세션(서버 과제) -->
-                    <TextBlock Style="{StaticResource SectionLabel}"><Run Text="타인 세션 · " /><Run Text="{Binding OthersCount, Mode=OneWay}" /><Run Text=" · 사설콜·애드혹" /></TextBlock>
+                    <TextBlock Style="{StaticResource SectionLabel}"><Run Text="타인 세션 · " /><Run Text="{Binding OthersCount, Mode=OneWay}" /><Run Text=" · 개인·임시 통화" /></TextBlock>
                     <ItemsControl ItemsSource="{Binding Others}" ItemTemplate="{StaticResource ScopedCardTemplate}" />
                     <TextBlock Style="{StaticResource Hint}" Margin="4,0,4,8" Text="{Binding OthersHint}" Visibility="{Binding Others.Count, Converter={StaticResource ZeroToVis}}" />
                     <!-- 관리 범위(기본 접힘) -->

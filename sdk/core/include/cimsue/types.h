@@ -135,6 +135,12 @@ struct GroupCallOptions {
      *  싣고(TS 24.380 §6.2.4.3.5), 개시자가 발언을 놓은 뒤 B-bit Floor Idle 을 받으면 코어가 호를 해제한다(§6.2.4.6.4).
      *  joinGroupCall 전용 — 진행 중 세션에 합류하는 INVITE 면 서버는 합류로만 다룬다(개시자 불변). */
     bool broadcast = false;
+    /** 암묵적 발언 요청(TS 24.380 §14.2.5) — 개시 INVITE 의 floor SDP 에 `mc_implicit_request` 와 200 OK 승인 표시 수용
+     *  `mc_granted`(§14.2.4)를 싣고, floor 는 호 성립 전부터 요청 중(`Requesting` = 'U: pending Request', §6.2.4.2.2)이다.
+     *  answer 의 `mc_granted`(§14.3.4) 또는 이어 오는 Floor Granted 로 `Speaking`, 서버가 받지 않으면(진행 중 호 합류·chat — §14.3.5)
+     *  코어가 명시 Floor Request 로 잇는다. 승인 전·호 성립 전에 floorRelease 하면 발언권을 돌려준다(Release 는 answer 에서).
+     *  누르는 동안 개시하고 말하는 한 버튼 발신(일제 통화 등)용. listenOnly·fullDuplex 에는 뜻이 없어 무시한다. */
+    bool implicitFloorRequest = false;
 };
 
 /** 착신 INVITE 의 mcptt-info(TS 24.379 §F.1) 요약. */

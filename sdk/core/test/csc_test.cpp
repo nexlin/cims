@@ -324,6 +324,31 @@ TEST(SsrcLabels, ParseFromSdp) {
     EXPECT_TRUE(mcptt::sdpSsrcLabels("v=0\r\nm=audio 1 RTP/AVP 0\r\n").empty());
 }
 
+// TS 24.380 §14.2 — 개시 offer 의 암묵 요청은 mc_implicit_request 와 200 OK 승인 수용 mc_granted 를 함께, 이어지는 offer 엔 둘 다 없이(§14.5).
+TEST(FloorSdp, OfferFmtp) {
+    EXPECT_NE(mcptt::floorSdp(5000, false, true).find("a=fmtp:MCPTT mc_queueing;mc_implicit_request;mc_granted"), std::string::npos);
+    std::string plain = mcptt::floorSdp(5000, false);
+    EXPECT_NE(plain.find("m=application 5000 UDP MCPTT"), std::string::npos);
+    EXPECT_EQ(plain.find("mc_implicit_request"), std::string::npos);
+    EXPECT_EQ(plain.find("mc_granted"), std::string::npos);
+    std::string full = mcptt::floorSdp(5000, true, true);                    // 전이중엔 floor 가 없다 — 암묵 요청 무시
+    EXPECT_NE(full.find("mc_no_floor_ctrl"), std::string::npos);
+    EXPECT_EQ(full.find("mc_implicit_request"), std::string::npos);
+}
+
+// §14.3.4·§14.3.5 — answer 의 fmtp:MCPTT(m=application 섹션만) → 승인·받아들임 판정.
+TEST(FloorSdp, ParseAnswerFmtp) {
+    std::string a = "v=0\r\nm=audio 4000 RTP/AVP 96\r\na=fmtp:96 mode-set=2\r\nm=application 4002 UDP MCPTT\r\n"
+                    "a=fmtp:MCPTT mc_queueing;mc_priority=3;mc_implicit_request; MC_GRANTED\r\n";
+    auto f = mcptt::parseFloorFmtp(a);
+    EXPECT_TRUE(f.present); EXPECT_TRUE(f.queueing); EXPECT_TRUE(f.implicitRequest); EXPECT_TRUE(f.granted); EXPECT_FALSE(f.noFloorCtrl);
+    auto g = mcptt::parseFloorFmtp("v=0\r\nm=application 4002 UDP MCPTT\r\na=fmtp:MCPTT mc_queueing;mc_priority=3\r\n");
+    EXPECT_TRUE(g.present); EXPECT_FALSE(g.implicitRequest); EXPECT_FALSE(g.granted);
+    EXPECT_FALSE(mcptt::parseFloorFmtp("v=0\r\nm=audio 4000 RTP/AVP 96\r\n").present);
+    auto h = mcptt::parseFloorFmtp("v=0\r\nm=application 4002 UDP MCPTT\r\na=floorid:0 mstrm:audio\r\nm=video 0 RTP/AVP 97\r\na=fmtp:MCPTT mc_granted\r\n");
+    EXPECT_FALSE(h.present);                                                  // 다른 m= 섹션의 fmtp 는 floor 협상이 아니다
+}
+
 // ── 범용 요청(request) — 헤더 조립·이진 본문 왕복·상태 매핑(2xx/304 = ok, 4xx = fail + 산출 유지, 전송 실패 = -1) ──
 #include "../src/http/https_client.h"
 

@@ -178,6 +178,43 @@ std::vector<MediaSource> sdpSsrcLabels(const std::string& sdp) {
     return out;
 }
 
+std::string floorSdp(int localPort, bool fullDuplex, bool implicitRequest) {
+    std::string fmtp = "a=fmtp:MCPTT mc_queueing";
+    if (fullDuplex) fmtp += ";mc_no_floor_ctrl";
+    else if (implicitRequest) fmtp += ";mc_implicit_request;mc_granted";
+    return "m=application " + std::to_string(localPort) + " UDP MCPTT\r\n"
+           "a=floorid:0 mstrm:audio\r\n" + fmtp;
+}
+
+FloorFmtp parseFloorFmtp(const std::string& sdp) {
+    FloorFmtp f;
+    size_t m = sdp.find("m=application ");
+    if (m == std::string::npos) return f;
+    size_t next = sdp.find("\nm=", m + 1);
+    std::string section = sdp.substr(m, next == std::string::npos ? std::string::npos : next - m);
+    size_t a = section.find("a=fmtp:MCPTT");
+    if (a == std::string::npos) return f;
+    f.present = true;
+    size_t eol = section.find_first_of("\r\n", a);
+    std::string params = section.substr(a + 12, eol == std::string::npos ? std::string::npos : eol - a - 12);
+    size_t pos = 0;
+    while (pos <= params.size()) {
+        size_t end = params.find(';', pos);
+        if (end == std::string::npos) end = params.size();
+        std::string tok = params.substr(pos, end - pos);
+        pos = end + 1;
+        size_t b = tok.find_first_not_of(" \t");
+        if (b == std::string::npos) continue;
+        tok = tok.substr(b, tok.find_last_not_of(" \t") - b + 1);
+        for (auto& c : tok) c = (char)std::tolower((unsigned char)c);
+        if (tok == "mc_queueing") f.queueing = true;
+        else if (tok == "mc_implicit_request") f.implicitRequest = true;
+        else if (tok == "mc_granted") f.granted = true;
+        else if (tok == "mc_no_floor_ctrl") f.noFloorCtrl = true;
+    }
+    return f;
+}
+
 std::string bareId(const std::string& uri) {
     std::string s = uri;
     size_t lt = s.find('<');

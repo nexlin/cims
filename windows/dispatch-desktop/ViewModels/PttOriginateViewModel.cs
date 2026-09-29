@@ -1,4 +1,6 @@
-// ① 오른쪽 위 — PTT 발신 [사설콜|애드혹] + PTT 주소록 [사용자|그룹] (§4.1).
+// ① 오른쪽 위 — PTT 발신 [개인|임시] + PTT 주소록 [사용자|그룹|다이얼패드] (§4.1).
+// 모드는 명시 조작(세그먼트·① [개인 ▾]/[임시 ▾]·사람 메뉴 [임시 그룹에 추가])으로만 바뀐다 — 행 조작(발신·체크·패드)은 모드를 바꾸지 않는다.
+//   개인 = 개인 통화(TS 24.379 private call) 1명 · 임시 = 임시 그룹 통화(ad hoc group call) N명.
 // 사용자 목록 = 서버 회사 전화번호부(service=ptt, 조직 범위·섹션 — Android PTT 연락처 탭과 같은 동선) + CSV ptt 항목.
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -39,7 +41,7 @@ public sealed partial class PttOriginateViewModel : ObservableObject
     public ObservableCollection<PttUserRow> Users { get; } = new();
     public ObservableCollection<PttUserRow> AdhocSelection { get; } = new();
     public ObservableCollection<GroupInfo> Groups { get; } = new();
-    /// <summary>사설콜 대상 입력과 일치하는 PTT 사용자(이름·번호 부분 일치, 최대 8).</summary>
+    /// <summary>개인 통화 대상 입력과 일치하는 PTT 사용자(이름·번호 부분 일치, 최대 8).</summary>
     public ObservableCollection<PttUserRow> Suggestions { get; } = new();
     public bool HasSuggestions => Suggestions.Count > 0;
 
@@ -74,12 +76,17 @@ public sealed partial class PttOriginateViewModel : ObservableObject
     public bool IsUsers => Book == "users";
     public bool IsGroups => Book == "groups";
     public bool IsPadBook => Book == "pad";
-    public string StartText => IsPrivate ? "사설콜 발신" : $"애드혹 발신 ({AdhocSelection.Count}명)";
+    public string StartText => IsPrivate ? "개인 통화 발신" : $"임시 그룹 발신 ({AdhocSelection.Count}명)";
     public bool CanStart => IsPrivate ? Target.Trim().Length > 0 : AdhocSelection.Count > 0;
     public string UserCount => $"{Users.Count}명";
     public string GroupCount => $"{Groups.Count}개";
 
-    partial void OnModeChanged(string value) { OnPropertyChanged(nameof(IsPrivate)); OnPropertyChanged(nameof(IsAdhoc)); OnPropertyChanged(nameof(StartText)); OnPropertyChanged(nameof(CanStart)); }
+    partial void OnModeChanged(string value)
+    {
+        if (value == "adhoc" && IsPadBook) Book = "users";         // 다이얼패드는 개인 통화 대상 입력 — 임시 모드엔 없다
+        OnPropertyChanged(nameof(IsPrivate)); OnPropertyChanged(nameof(IsAdhoc)); OnPropertyChanged(nameof(StartText)); OnPropertyChanged(nameof(CanStart));
+        UpdateSuggestions();
+    }
     partial void OnBookChanged(string value) { OnPropertyChanged(nameof(IsUsers)); OnPropertyChanged(nameof(IsGroups)); OnPropertyChanged(nameof(IsPadBook)); }
     partial void OnTargetChanged(string value) { OnPropertyChanged(nameof(CanStart)); UpdateSuggestions(); }
 
@@ -160,14 +167,7 @@ public sealed partial class PttOriginateViewModel : ObservableObject
     [RelayCommand]
     private void Start()
     {
-        if (IsPrivate)
-        {
-            string t = Target.Trim();
-            var row = _allUsers.FirstOrDefault(u => u.Name.Equals(t, StringComparison.OrdinalIgnoreCase))
-                      ?? _allUsers.FirstOrDefault(u => DirectoryService.Normalize(u.DisplayNumber) == DirectoryService.Normalize(t));
-            var r = _s.StartPrivateCall(row?.Number ?? t, FullDuplex, Emergency);
-            if (r.Ok) { Target = ""; Emergency = false; }
-        }
+        if (IsPrivate) StartPrivate(Target, FullDuplex);
         else
         {
             var r = _s.StartAdhoc(AdhocSelection.Select(u => u.Number).ToList(), Emergency);
@@ -175,10 +175,26 @@ public sealed partial class PttOriginateViewModel : ObservableObject
         }
     }
 
-    [RelayCommand] private void Pad(string key) { Mode = "private"; Target += key; }
+    /// <summary>개인 통화 발신 — 대상은 이름·표시 번호·번호 어느 것이든 주소록으로 풀어 번호로(같은 표시명이 둘이면 이름 해석이 다른 사람을
+    /// 고를 수 있어 행 버튼은 번호를 넘긴다). 반이중/전이중은 누른 조작이 정한다 — 행 [전이중] 이 팝오버의 선택을 바꾸지 않는다.</summary>
+    private void StartPrivate(string target, bool fullDuplex)
+    {
+        string t = target.Trim();
+        if (t.Length == 0) return;
+        string tn = DirectoryService.Normalize(t);
+        var row = _allUsers.FirstOrDefault(u => u.Name.Equals(t, StringComparison.OrdinalIgnoreCase))
+                  ?? _allUsers.FirstOrDefault(u => DirectoryService.Normalize(u.DisplayNumber) == tn || DirectoryService.Normalize(u.Number) == tn);
+        var r = _s.StartPrivateCall(row?.Number ?? t, fullDuplex, Emergency);
+        if (r.Ok) { Target = ""; Emergency = false; }
+    }
+
+    /// <summary>① 빠른 발신 줄 Enter — 입력 대상으로 반이중 개인 통화(팝오버 모드와 무관).</summary>
+    public void StartPrivateFromTarget() => StartPrivate(Target, false);
+
+    [RelayCommand] private void Pad(string key) => Target += key;
     /// <summary>입력란이 포커스를 잃으면 제안 목록을 접는다.</summary>
     public void ClearSuggestions() { Suggestions.Clear(); OnPropertyChanged(nameof(HasSuggestions)); }
-    /// <summary>팝오버 [취소] — 애드혹 구성 중엔 바깥 클릭으로 닫히지 않으므로 여기서만 닫는다. 선택은 비운다.</summary>
+    /// <summary>팝오버 [취소] — 임시 그룹 구성 중엔 바깥 클릭으로 닫히지 않으므로 여기서만 닫는다. 선택은 비운다.</summary>
     [RelayCommand] private void Close()
     {
         foreach (var u in AdhocSelection.ToList()) u.Checked = false;
@@ -186,18 +202,18 @@ public sealed partial class PttOriginateViewModel : ObservableObject
         CloseRequested?.Invoke(this, EventArgs.Empty);
     }
     public event EventHandler? CloseRequested;
-    /// <summary>애드혹 구성 중(대상이 하나라도 있음) — 바깥 클릭에 닫히지 않는다.</summary>
+    /// <summary>임시 그룹 구성 중(대상이 하나라도 있음) — 바깥 클릭에 닫히지 않는다.</summary>
     public bool IsComposingAdhoc => IsAdhoc && AdhocSelection.Count > 0;
     [RelayCommand] private void Backspace() { if (Target.Length > 0) Target = Target[..^1]; }
     [RelayCommand] private void Clear() => Target = "";
     [RelayCommand] private void Pick(PttUserRow u) { Target = u.DisplayNumber; Suggestions.Clear(); OnPropertyChanged(nameof(HasSuggestions)); }
-    // 대상은 번호로 — 같은 표시명이 둘이면 이름 해석이 다른 사람을 고를 수 있다
-    [RelayCommand] private void PrivateTo(PttUserRow u) { Mode = "private"; Target = u.DisplayNumber; Start(); }
-    [RelayCommand] private void PrivateFullTo(PttUserRow u) { Mode = "private"; FullDuplex = true; Target = u.DisplayNumber; Start(); }
+    [RelayCommand] private void PrivateTo(PttUserRow u) => StartPrivate(u.Number, false);
+    [RelayCommand] private void PrivateFullTo(PttUserRow u) => StartPrivate(u.Number, true);
+    /// <summary>주소록 행 클릭 — 개인 모드 = 대상 선택(입력란에 채움), 임시 모드 = 체크 토글.</summary>
+    [RelayCommand] private void Row(PttUserRow u) { if (IsAdhoc) ToggleAdhoc(u); else Pick(u); }
     [RelayCommand]
     private void ToggleAdhoc(PttUserRow u)
     {
-        Mode = "adhoc";
         if (AdhocSelection.Contains(u)) { AdhocSelection.Remove(u); u.Checked = false; }
         else { AdhocSelection.Add(u); u.Checked = true; }
         OnPropertyChanged(nameof(StartText)); OnPropertyChanged(nameof(CanStart));
@@ -207,7 +223,7 @@ public sealed partial class PttOriginateViewModel : ObservableObject
     [RelayCommand] private void MessageGroup(GroupInfo g) => MessageGroupRequested?.Invoke(this, g);
     [RelayCommand] private void Channel(GroupInfo g) => ChannelRequested?.Invoke(this, g);
 
-    /// <summary>사람 메뉴 [애드혹에 추가] — 번호로 주소록 행을 찾아 체크(없으면 안내).</summary>
+    /// <summary>사람 메뉴 [임시 그룹에 추가] — 명시 조작이라 임시 모드로 연다. 번호로 주소록 행을 찾아 체크(없으면 안내).</summary>
     public void AddAdhoc(string number)
     {
         string n = DirectoryService.Normalize(number);
@@ -216,8 +232,8 @@ public sealed partial class PttOriginateViewModel : ObservableObject
         Mode = "adhoc";
         if (!AdhocSelection.Contains(u)) { AdhocSelection.Add(u); u.Checked = true; OnPropertyChanged(nameof(StartText)); OnPropertyChanged(nameof(CanStart)); }
     }
-    /// <summary>사람 메뉴 [사설콜] — 대상 번호로 즉시 반이중 발신.</summary>
-    public void PrivateCallTo(string number) { Mode = "private"; FullDuplex = false; Target = _s.Directory.DisplayNumber(number); Start(); }
+    /// <summary>사람 메뉴 [개인 통화] — 대상 번호로 즉시 반이중 발신(팝오버 모드·입력란은 건드리지 않는다).</summary>
+    public void PrivateCallTo(string number) => StartPrivate(number, false);
 
     // 그룹 관리(§4.1 [그룹] 탭) — 창·삭제 확인은 MainWindow
     [RelayCommand] private void NewGroup() => NewGroupRequested?.Invoke(this, EventArgs.Empty);

@@ -151,10 +151,13 @@ data class GroupCallOptions(
     val members: List<String> = emptyList(),
     /** 일제 통화 개시(mcptt-info broadcast-ind, TS 24.379 §4.12) — 개시자만 발언, 발언을 놓으면 코어가 호를 해제. */
     val broadcast: Boolean = false,
+    /** 암묵적 발언 요청(TS 24.380 §14.2.5 mc_implicit_request + §14.2.4 mc_granted) — 개시 INVITE 가 발언 요청을 싣는다. */
+    val implicitFloorRequest: Boolean = false,
 ) {
     internal fun toJni(): JniGroupCallOptions = JniGroupCallOptions().also {
         it.emergency = emergency; it.imminentPeril = imminentPeril
         it.listenOnly = listenOnly; it.fullDuplex = fullDuplex; it.broadcast = broadcast
+        it.implicitFloorRequest = implicitFloorRequest
         it.members = StringVector().apply { members.forEach { m -> add(m) } }
     }
 }

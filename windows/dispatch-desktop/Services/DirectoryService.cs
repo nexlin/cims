@@ -112,6 +112,9 @@ public sealed class DirectoryService
         return true;
     }
 
+    /// <summary>--ui-preview 표본 — 서버 전화번호부 자리만 채운다(캐시·ETag 에 쓰지 않는다).</summary>
+    public void SeedPreview(string service, string json) { if (Parse(service, json)) Rebuild(); }
+
     /// <summary>304 — 내용 유지, 동기화 시각만.</summary>
     public void TouchServer() => ServerSyncedAt = DateTime.Now;
 

@@ -119,6 +119,7 @@ GroupCallOptions toCxx(const cimsue_group_call_options_t* c) {
     o.fullDuplex = c->full_duplex != 0;
     o.members = strList(c->members, c->member_count);
     o.broadcast = c->broadcast != 0;
+    o.implicitFloorRequest = c->implicit_floor_request != 0;
     return o;
 }
 

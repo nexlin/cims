@@ -145,3 +145,27 @@ SDK 반영은 끝났고(`GroupDoc` 이 TS 24.481 요소 다섯을 더 싣는다)
 - 범위·기본값은 콘솔과 같다(T4 0~3600초 기본 30 · 최대 시간 0~86400초 기본 3600 · 참가자 정보 구독 기본 허용 · 크기 0 = 무제한).
 - **동시 발언은 넣지 않는다** — 관리 API 전용(`docs/api/mcptt_api.md` §2).
 - **.NET 은 Windows 에서 빌드해 확인**할 것 — C API `cimsue_group_doc_t` 끝에 `has_*`/값 10개를 덧붙였고(`NativeStructs.cs` 같은 순서), `AbiLayoutTests` 가 크기를 대조한다. 새 시험 `CscTests.GroupDocCallTimersAreOptional`.
+
+## 8. 암묵적 발언 요청(개시 INVITE 로 발언) — CSP 해석 (.48 몫)
+
+Windows 관제 앱의 일제 통화 한 버튼(누르는 동안 개시하고 말하며 놓으면 끝)이 쓰는 절차다. 단말은 반영했다 — SDK
+`GroupCallOptions.implicitFloorRequest` 가 개시 offer 에 `a=fmtp:MCPTT mc_queueing;mc_implicit_request;mc_granted` 를 싣고 answer 를 판정한다
+(정본 [mcptt_broadcast_group_call.md](../design/features/mcptt_broadcast_group_call.md) R14·U7). 원문 대조 = TS 24.380 V18.8.0 §14.2.4·§14.2.5·§14.3.1·§14.3.4·
+§14.3.5·§14.5·§12.1.2.2, §6.3.4.2.2 3)·§6.3.4.4.2, TS 24.379 V18.14.0 §6.4.
+
+| # | 위치 | 지금 | 규격 | 고칠 방향 |
+|---|---|---|---|---|
+| I1 | CSP `ParseMcpttFmtp`(`GroupCallService.cpp` ~258) → `PTT_JOIN.granted` | offer 의 `mc_granted` 를 초기 발언 요청으로 읽는다. `mc_implicit_request` 는 읽지 않는다 | offer 의 `mc_granted` = "200 OK 로 승인 표시를 받을 수 있다"는 **능력**(§14.2.4 "shall include … when it is acceptable…"), "*does not indicate an actual request for the floor*"(§12.1.2.2 NOTE 2). 요청 = `mc_implicit_request`(§14.2.5, TS 24.379 §6.4) | `McpttFmtp` 에 `iImplicit` — offer `mc_implicit_request` 가 `PTT_JOIN.granted`, `mc_granted` 는 answer 조립용 능력으로만 |
+| I2 | CSP `ProcessGroupCall` 합류 경로 | 합류 INVITE 의 fmtp 도 그대로 `granted` 로 간다 | "*…unless the MCPTT client is joining a chat group call or an ongoing pre-arranged call or adhoc group call*"(§14.3.5) | 새 세션 개시(편성·ad hoc·개인 호)일 때만 `granted` |
+| I3 | CSP 개시자 answer(`GroupCallService.cpp` ~2945 `sdpFloor`, psip `CSipDialog::AddSdp`) | `mc_queueing;mc_priority=3` 고정 | 받아들이면 응답에 `mc_implicit_request`(§14.3.5, 승인 뜻은 아님 — §12.1.2.2 NOTE 4). 200 OK 로 승인을 알리면 `mc_granted`, temporary group 세션은 금지(§14.3.4). offer 에 없던 파라미터는 싣지 않는다(§14.3.1 — 지금 `mc_priority=3` 은 offer 와 무관) | 받아들임 → `mc_implicit_request` 되돌림. `mc_granted` 는 선택("may") — (a) 싣지 않고 CMP 의 Floor Granted 로만 알림(CMP 무변경) 또는 (b) `PTT_JOIN` 응답에 초기 발언권 결과를 받아 승인이면 `mc_granted`. 파라미터는 offer 에 있던 것만 |
+| I4 | 사내 시험 도구 | `scripts/mcptt_floor_policy_probe.py` [14] 가 offer `mc_granted` 로 초기 발언권을 기대한다 | — | `mc_implicit_request` 로 옮긴다(cspsim·libcsim·Android `PttController` 는 offer 에 `mc_granted` 를 싣지 않음 — grep 확인) |
+| I5 | 문서 | `cmp_media_api.md` §7.4 `granted`·`mcptt_standard_conformance.md` F5·C4·`csp.md` 「멤버별 floor 협상 전달」이 `granted` = "fmtp `mc_granted` 협상" | — | "암묵적 발언 요청(offer `mc_implicit_request`)을 받아들임" 으로. 정본 R14 판정 ⚠ → ✅ |
+
+- **CMP 는 바꿀 것 없다**(I3 (b) 를 고르면 응답 필드 하나) — `grantInitialFloor` 가 Floor Granted 를 보내는 것은 §6.3.4.4.2 1. 그대로이고(`mc_granted` 로
+  승인해도 Floor Granted 는 보낸다), 일제 세션의 개시자 검사(S1)도 그대로 쓴다.
+- **호환**: SDK 는 두 속성을 함께 실어 지금 CSP(offer `mc_granted` → `granted`)에서도 동작하고, I1 뒤에도 `mc_implicit_request` 로 동작한다.
+  Android `PttController` 는 둘 다 싣지 않는다(채널 참여는 발언 요청이 아니다) — I1 로 바뀌는 단말 동작은 없다.
+- **확인**: `cimsue-cli [계정] group-call <g> --broadcast --implicit --ptt-at 0 --ptt-len 3` → 명시 Floor Request 없이 Granted(단말 로그 `floor implicit request not accepted` 가 없어야 함),
+  answer 에 `mc_implicit_request`, 놓은 뒤 `broadcast_released:true`. 진행 중 세션에 같은 명령 → answer 에 `mc_implicit_request` 없음 → 단말이 명시 Floor Request.
+- **참고 — 임시 그룹(ad hoc) 일제 통화**(TS 24.379 §17.2.2.1.1 9), 정본 R13): CSP 는 ad hoc 그룹의 `<broadcast-ind>` 를 무시한다(`IsOnDemandGroupCall`). 규격에 있는
+  기능이라 할지는 사용자 결정 뒤 따로 넘긴다.

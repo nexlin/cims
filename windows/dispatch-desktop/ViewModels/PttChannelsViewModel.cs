@@ -1,4 +1,4 @@
-// ① 내 채널 — 멤버 그룹 전부 + 내가 건 사설콜·애드혹의 채널 카드(§4.1). 카드 = 코어 세션·그룹 로스터의 투영.
+// ① 내 채널 — 멤버 그룹 전부 + 내가 건 개인 통화·임시 그룹 통화의 채널 카드(§4.1). 카드 = 코어 세션·그룹 로스터의 투영.
 // 포커스(보는 채널, 카드 하나·테두리 Primary) ≠ 발언 대상(말하는 채널, 카드 왼쪽 체크 집합 — 발언 바 TalkBarViewModel 이 투영).
 // 정렬은 핀 순서 고정(Ctrl+n 근육 기억) — 진행 중이라고 위로 올리지 않는다. 필터·검색 없음(항상 전부).
 using System.Collections.ObjectModel;
@@ -58,8 +58,8 @@ public sealed partial class ChannelCard : ObservableObject
     }
 
     public string Id => Group?.Id ?? Session?.Info.GroupId ?? Session?.CallId.ToString() ?? "";
-    public string Title => Kind == CardKind.Member ? Group!.Name : Kind == CardKind.Adhoc ? "애드혹 · " + string.Join(", ", AdhocChips.Take(3)) + (AdhocChips.Count > 3 ? $" +{AdhocChips.Count - 3}" : "") : Session?.Title ?? "";
-    public string Badge => Kind switch { CardKind.Member => "멤버", CardKind.Private => "사설콜", _ => "임시" };
+    public string Title => Kind == CardKind.Member ? Group!.Name : Kind == CardKind.Adhoc ? "임시 · " + string.Join(", ", AdhocChips.Take(3)) + (AdhocChips.Count > 3 ? $" +{AdhocChips.Count - 3}" : "") : Session?.Title ?? "";
+    public string Badge => Kind switch { CardKind.Member => "멤버", CardKind.Private => "개인", _ => "임시" };
     public string Duplex => Kind == CardKind.Private ? (Session?.IsFullDuplex == true ? "전이중" : "반이중") : "";
     public bool IsMember => Kind == CardKind.Member;
     public bool IsPrivate => Kind == CardKind.Private;
@@ -72,11 +72,19 @@ public sealed partial class ChannelCard : ObservableObject
     /// <summary>일제 통화(TS 24.379 §4.12) — 서버가 알린 호 속성(SessionItem.IsBroadcast).</summary>
     public bool IsBroadcast => Session?.IsBroadcast == true;
     public bool IsBroadcastInitiator => Session?.IsBroadcastInitiator == true;
-    /// <summary>3줄 [일제 통화] — 멤버 편성 그룹에 진행 중 세션이 없을 때만(있으면 서버가 합류로만 받는다 — mcptt_broadcast_group_call.md §3.2).</summary>
+    /// <summary>3줄 [일제 통화] — 멤버 편성 그룹에 진행 중 세션이 없을 때만. 일제 통화는 새 호를 여는 INVITE 로만 정해지고 진행 중 호는 일제로
+    /// 바꿀 수 없다(TS 24.379 §10.1.1.3.1.1 15) — 진행 중 호의 INVITE 는 합류, mcptt_broadcast_group_call.md R13·§3.2). chat 그룹은 서버가 broadcast-ind 를 무시.</summary>
     public bool CanBroadcast => IsMember && !IsJoined && Group?.HasSession != true && Group?.IsChat != true;
+    /// <summary>[일제 통화] 를 누르고 있다(잠금 발언이면 켜 두었다) — 개시되면 CanBroadcast 가 거짓이 되므로 버튼은 이것으로 활성을 유지한다.</summary>
+    [ObservableProperty] private bool _isBroadcastHeld;
+    public bool CanPressBroadcast => CanBroadcast || IsBroadcastHeld;
+    public string BroadcastText => IsBroadcastHeld ? "일제 통화 중" : "일제 통화";
+    partial void OnIsBroadcastHeldChanged(bool value) { OnPropertyChanged(nameof(CanPressBroadcast)); OnPropertyChanged(nameof(BroadcastText)); OnPropertyChanged(nameof(BroadcastTip)); }
     public string BroadcastTip => Group?.IsChat == true ? "채팅 그룹 — 일제 통화는 편성 그룹만"
-                                : IsJoined || Group?.HasSession == true ? "진행 중인 그룹 통화가 있습니다 — 끝난 뒤 개시"
-                                : "일제 통화 개시 — 개시자(나)만 발언하고, 발언을 놓으면 통화가 끝납니다";
+                                : IsBroadcastHeld ? (_s.Settings.Current.LockTalk ? "일제 통화 중 — 다시 누르면 끝납니다" : "일제 통화 중 — 놓으면 끝납니다")
+                                : IsJoined || Group?.HasSession == true ? "진행 중인 그룹 통화가 있습니다 — 끝난 뒤 개시(진행 중인 통화는 일제 통화로 바꿀 수 없습니다)"
+                                : _s.Settings.Current.LockTalk ? "일제 통화 — 누르면 개시하고 바로 말합니다(개시자만 발언). 다시 누르면 끝납니다"
+                                : "일제 통화 — 누르고 있는 동안 개시하고 말합니다(개시자만 발언). 놓으면 끝납니다";
     public string MemberText => Kind == CardKind.Member ? $"멤버 {Group!.MemberCount}" : "";
     public bool IsJoined => Session is not null && Session.IsLive;
     public bool IsActive => Session?.IsActive == true;
@@ -100,7 +108,7 @@ public sealed partial class ChannelCard : ObservableObject
     public bool CanToggleRoute => Session is not null && _s.Audio.HasSpeaker;
     public bool IsMuted => Session?.Info.Muted == true;
     public bool HasUnread => Unread > 0;
-    /// <summary>2줄 — 진행 중: [발언 없음 ·] 보조(① 마지막 발언·시각 / 애드혹 응답 n/m / 사설콜 라우트·번호·발신 시각). 대기: 마지막 세션.</summary>
+    /// <summary>2줄 — 진행 중: [발언 없음 ·] 보조(① 마지막 발언·시각 / 임시 그룹 응답 n/m / 개인 통화 라우트·번호·발신 시각). 대기: 마지막 세션.</summary>
     public string Line2 => IsJoined ? string.Join(" · ", new[] { HasSpeaker ? "" : "발언 없음", Aux() }.Where(x => x.Length > 0)) : Group is null ? "" : LastSessionText;
     private string Aux() => Kind switch
     {
@@ -110,7 +118,7 @@ public sealed partial class ChannelCard : ObservableObject
         _ => LastSpeaker.Length > 0 && LastSpeakerAt is DateTime t ? $"마지막 발언 {LastSpeaker} {t:HH:mm}" : $"참가 {Participants}",
     };
     private static string ShortNumber(string n) => n.Length > 4 ? "…" + n[^4..] : n;
-    /// <summary>애드혹 응답 수 — 로스터가 없어 세션 상대(connected) 대신 그룹 로스터를 못 쓴다; 참여자 수는 코어 CallInfo 가 주지 않아 멤버 수로 상한.</summary>
+    /// <summary>임시 그룹 응답 수 — 로스터가 없어 세션 상대(connected) 대신 그룹 로스터를 못 쓴다; 참여자 수는 코어 CallInfo 가 주지 않아 멤버 수로 상한.</summary>
     private int AdhocAnswered => Session is null ? 0 : Math.Min(Session.AdhocMembers.Count, _s.Groups.FirstOrDefault(g => g.Id == Session.Info.GroupId)?.ConnectedCount ?? 0);
     public string LastSessionText => LastSessionEnd is DateTime e ? $"마지막 세션 {e:HH:mm} · {DispatchSession.Fmt(LastSessionLength)} · 참가 {LastParticipants}"
                                      : Group?.HasSession == true ? $"세션 진행 중 · 참가 {Participants} · 미참여" : "세션 없음";
@@ -132,7 +140,8 @@ public sealed partial class ChannelCard : ObservableObject
                                   nameof(IsRequesting), nameof(IsQueued), nameof(TalkGauge), nameof(TalkLimitNear), nameof(FloorNote), nameof(RouteIsSpeaker),
                                   nameof(CanToggleRoute), nameof(IsMuted), nameof(Roster), nameof(AdhocChips), nameof(MemberText), nameof(IsFullDuplex), nameof(Duplex),
                                   nameof(Line2), nameof(LastSessionText), nameof(RosterPreview), nameof(RosterMore), nameof(HasRosterMore), nameof(CanEdit),
-                                  nameof(CheckTip), nameof(IsBroadcast), nameof(IsBroadcastInitiator), nameof(CanBroadcast), nameof(BroadcastTip) })
+                                  nameof(CheckTip), nameof(IsBroadcast), nameof(IsBroadcastInitiator), nameof(CanBroadcast), nameof(BroadcastTip),
+                                  nameof(CanPressBroadcast) })
             OnPropertyChanged(p);
         if (HasSpeaker && Speaker != LastSpeaker) { LastSpeaker = Speaker; LastSpeakerAt = DateTime.Now; }
         else if (HasSpeaker) LastSpeakerAt ??= DateTime.Now;
@@ -150,7 +159,6 @@ public sealed partial class ChannelCard : ObservableObject
     [RelayCommand] private void ToggleRoute() { if (Session is not null) _s.ToggleRoute(Session); }
     [RelayCommand] private void ToggleMute() { if (Session is not null) _s.ToggleMute(Session); }
     [RelayCommand] private void Emergency() { if (Group is not null) _s.EmergencyCall(Group); }
-    [RelayCommand] private async Task Broadcast() { if (Group is not null && CanBroadcast) await _s.BroadcastCallAsync(Group); }
     [RelayCommand] private void CancelQueue() { if (Session is not null) _s.FloorQueueCancel(Session); }
 }
 
@@ -174,7 +182,7 @@ public sealed partial class PttChannelsViewModel : ObservableObject
     public IEnumerable<ChannelCard> Targets => Cards.Where(c => c.IsChecked);
 
     /// <summary>floor 를 요청해 둔 세션 — 발언 대상(체크)과 따로 든다. 해제를 «현재 대상» 으로 하면 누른 채 대상이 바뀌었을 때
-    /// (Ctrl+n·애드혹 우선·칩 ✕·세션 종료) 옛 채널에 floorRelease 가 가지 않아 그 채널로 마이크가 계속 나간다(마이크 차단은 코어
+    /// (Ctrl+n·내가 건 호 우선·칩 ✕·세션 종료) 옛 채널에 floorRelease 가 가지 않아 그 채널로 마이크가 계속 나간다(마이크 차단은 코어
     /// floor participant 의 release 가 한다). 불변: 대상에서 빠진 세션은 반드시 floorRelease 를 받고 여기서 빠진다(OnTargetsChanged).</summary>
     private readonly HashSet<SessionItem> _talking = new();
     /// <summary>요청해 둔 세션 중 아직 발언·요청·대기 중인 것이 있는가 — 잠금 발언 해제 판정.</summary>
@@ -234,8 +242,9 @@ public sealed partial class PttChannelsViewModel : ObservableObject
                 if (card is not null)
                 {
                     if (!added) { card.RecordSessionEnd(item.Elapsed, Math.Max(card.Participants, card.LastParticipants)); if (card.IsChecked) SetChecked(card, false); }
+                    if (!added && _bcHold is { } h && h.Card == card && h.CallId == item.CallId) ClearHold(h);    // 서버·코어가 먼저 끝냈다
                     card.Session = added ? item : null;
-                    // 일제 통화 개시 — 곧 말하려는 채널: 포커스 + 단일 발언 대상("애드혹 우선"과 같은 규칙)
+                    // 일제 통화 개시 — 곧 말하려는 채널: 포커스 + 단일 발언 대상("내가 건 호 우선"과 같은 규칙)
                     if (added && item.Operation == Operation.Broadcast) { Select(card, collapseSame: false); SetSingleTarget(card); }
                 }
                 break;
@@ -246,7 +255,7 @@ public sealed partial class PttChannelsViewModel : ObservableObject
                     var c = new ChannelCard(_s, item);
                     Cards.Add(c);
                     Renumber();
-                    // "애드혹 우선" 규칙 — 내가 건 애드혹·반이중 사설콜은 자동 포커스 + 단일 발언 대상(발신자가 곧 말하려는 채널)
+                    // "내가 건 호 우선" 규칙 — 내가 건 임시 그룹 통화·반이중 개인 통화는 자동 포커스 + 단일 발언 대상(발신자가 곧 말하려는 채널)
                     if (c.IsAdhoc || !c.IsFullDuplex)
                     {
                         _previousSelection = Selected; Select(c, collapseSame: false);
@@ -362,6 +371,42 @@ public sealed partial class PttChannelsViewModel : ObservableObject
     /// <summary>PTT 뗌 — 요청해 둔 세션 전부 해제. 상태를 보지 않는다(요청 직후 Granted 전에 떼도 반드시 놓는다 — 코어 release 는 유휴에서 no-op).</summary>
     public void PttRelease() { foreach (var x in _talking.ToList()) Release(x); }
     private void Release(SessionItem x) { _talking.Remove(x); if (x.IsLive) _s.FloorRelease(x); }
+
+    // ── 일제 통화 한 버튼(§4.1) — 누르는 동안 개시하고 말하며 놓으면 끝(잠금 발언이면 누를 때마다 켜고 끈다). 개시 INVITE 가 암묵적 발언 요청이라
+    //   (TS 24.380 §14.2.5) PTT 를 따로 누르지 않는다. 한 번에 하나. 개시 전(그룹 종류 조회 중)에 놓으면 개시 직후 끝낸다.
+    private sealed class BroadcastHold { public required ChannelCard Card; public int CallId = -1; public bool Released; }
+    private BroadcastHold? _bcHold;
+
+    public async void BroadcastDown(ChannelCard c)
+    {
+        if (_bcHold is not null) { if (_s.Settings.Current.LockTalk && _bcHold.Card == c) BroadcastEnd(); return; }
+        if (c.Group is null || !c.CanBroadcast) return;
+        var h = _bcHold = new BroadcastHold { Card = c };
+        c.IsBroadcastHeld = true;
+        int id;
+        try { id = await _s.BroadcastCallAsync(c.Group); }
+        catch (Exception ex) { _s.Log.Error("broadcast start", ex); ClearHold(h); return; }     // async void — 예외를 흘리면 앱이 죽는다
+        if (_bcHold != h) return;
+        if (id < 0) { ClearHold(h); return; }
+        h.CallId = id;
+        if (h.Released) FinishHold(h);
+    }
+    public void BroadcastUp() { if (!_s.Settings.Current.LockTalk) BroadcastEnd(); }
+    private void BroadcastEnd()
+    {
+        var h = _bcHold;
+        if (h is null) return;
+        h.Released = true;
+        if (h.CallId >= 0) FinishHold(h);
+    }
+    private void FinishHold(BroadcastHold h)
+    {
+        ClearHold(h);
+        if (_talking.FirstOrDefault(x => x.CallId == h.CallId) is { } t) _talking.Remove(t);
+        _s.ReleaseBroadcast(h.CallId);
+    }
+    private void ClearHold(BroadcastHold h) { if (_bcHold == h) _bcHold = null; h.Card.IsBroadcastHeld = false; }
+
     [RelayCommand] private void PersonMenu(RosterRow r) => PersonMenuRequested?.Invoke(this, r.Uri);
     [RelayCommand] private void OpenThread(ChannelCard c) { if (c.Group is not null) ThreadRequested?.Invoke(this, c.Group); }
     [RelayCommand] private void EditGroup(ChannelCard c) { if (c.Group is not null) EditRequested?.Invoke(this, c.Group); }

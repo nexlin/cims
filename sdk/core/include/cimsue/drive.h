@@ -6,7 +6,7 @@
 // 시험 대상 서버(CSP·CSC·CMP)를 거치지 않는다 — 단말 ↔ 계측기 워커 직접(ue_voice_quality.md §1).
 //
 //   명령: register | unregister | use <service> | dial <번호|URI> [video] | answer <call> [video] | reject <call> [code] | hangup <call>
-//         hold <call> | resume <call> | dtmf <call> <digits> | transfer <call> <대상> | group_call <group> [listen] [emergency] [broadcast]
+//         hold <call> | resume <call> | dtmf <call> <digits> | transfer <call> <대상> | group_call <group> [listen] [emergency] [broadcast] [implicit]
 //         floor_request <call> | floor_release <call> | affiliate <group> on|off | pickup <code> [number] | media mic|sample [<wav>]
 //         stats [call] | quality <call> | quit
 //   이벤트: ready{version,aor} · reg{service,state,code,reason,expires,rrd_ms} · incoming{call,from,called,video,mcptt,group}

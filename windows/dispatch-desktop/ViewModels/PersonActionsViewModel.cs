@@ -1,4 +1,4 @@
-// 사람 메뉴 + 통합 검색 Ctrl+K (§4.1) — 서버 전화번호부(VoLTE·PTT 번호 동시)를 사람 단위로 묶어, 회선별 행동(사설콜·애드혹에 추가·SDS / 통화·문자)을 한 곳에서.
+// 사람 메뉴 + 통합 검색 Ctrl+K (§4.1) — 서버 전화번호부(VoLTE·PTT 번호 동시)를 사람 단위로 묶어, 회선별 행동(개인 통화·임시 그룹에 추가·SDS / 통화·문자)을 한 곳에서.
 // 사람 행 = 이름 · 소속 · PTT 상태(로스터 파생) · 내선 상태(dialog) + 행동 버튼. 그룹 행 = [채널로][멤버 추가]. 행동은 이벤트로 MainViewModel 이 잇는다.
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -162,7 +162,7 @@ public sealed partial class PersonActionsViewModel : ObservableObject
     [RelayCommand] private void AddMember(GroupEntry g) { AddMemberRequested?.Invoke(this, g.Group); Close(); }
     private void Close() { MenuOpen = false; SearchOpen = false; }
 
-    /// <summary>Ctrl+K 목록 — ↑↓ 이동, Enter = 첫 행동(사람: 사설콜 있으면 사설콜, 없으면 통화 / 그룹: 채널로).</summary>
+    /// <summary>Ctrl+K 목록 — ↑↓ 이동, Enter = 첫 행동(사람: PTT 번호 있으면 개인 통화, 없으면 통화 / 그룹: 채널로).</summary>
     public void Move(int delta) { if (Results.Count == 0) return; SelectedIndex = Math.Clamp(SelectedIndex + delta, 0, Results.Count - 1); }
     public void Enter()
     {

@@ -98,6 +98,15 @@ public partial class App : Application
             if (e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-zoom=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] is { Length: > 0 } zoomArg && _mainVm is not null
                 && double.TryParse(zoomArg, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double z))
                 _mainVm.HistoryScreen.TalkZoom = Math.Clamp(z, 1, ViewModels.SessionHistoryViewModel.TalkZoomMax);
+            // --ui-preview-popover=private|adhoc: ① 발신 팝오버를 그 모드로 채워(임시 = 주소록 두 명 체크) --ui-preview-shot 옆 <png>.popover.png 로도 그린다 —
+            //   Popup 은 별도 창이라 주 창 렌더에 찍히지 않는다. 주소록은 --ui-preview-canvas 표본.
+            string? popoverMode = e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-popover=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1];
+            if (popoverMode is "private" or "adhoc" && _mainVm is not null)
+            {
+                var po = _mainVm.PttOriginate;
+                po.Mode = popoverMode;
+                if (popoverMode == "adhoc") foreach (var u in po.Users.Take(2).ToList()) po.ToggleAdhocCommand.Execute(u);
+            }
             // --ui-preview-shot=<png>: 주 창을 그려 PNG 로 저장하고 종료 — 화면 잠금·원격 세션에서도 XAML 점검이 되게(화면 캡처가 아니라 WPF 렌더).
             if (e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-shot=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] is { Length: > 0 } shot && _main is not null)
             {
@@ -115,6 +124,18 @@ public partial class App : Application
                         using var fs = System.IO.File.Create(shot);
                         enc.Save(fs);
                         _log?.Info($"preview shot {pw}x{ph} → {shot}");
+                        if (popoverMode is "private" or "adhoc" && _mainVm is not null)
+                        {
+                            var host = new System.Windows.Controls.Border { Width = 520, Height = 540, Style = (Style)FindResource("PopPanel"),
+                                                                            Child = new Views.PttOriginateView { DataContext = _mainVm.PttOriginate } };
+                            host.Measure(new Size(520, 540)); host.Arrange(new Rect(0, 0, 520, 540)); host.UpdateLayout();
+                            var prt = new System.Windows.Media.Imaging.RenderTargetBitmap(520, 540, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+                            prt.Render(host);
+                            var penc = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                            penc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(prt));
+                            using var pfs = System.IO.File.Create(shot + ".popover.png");
+                            penc.Save(pfs);
+                        }
                     }
                     catch (Exception ex) { _log?.Error("preview shot", ex); }
                     IsExiting = true;                       // 표본 세션·감청 창의 종료 확인을 띄우지 않는다. ExitApp(Logout)은 저장된 로그인을 지우므로 쓰지 않는다

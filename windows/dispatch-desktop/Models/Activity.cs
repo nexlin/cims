@@ -16,7 +16,7 @@ public sealed record ActivityRow(DateTime Time, ActivityPanel Panel, ActivityKin
     public string KindText => Kind switch
     {
         ActivityKind.Talk => "발언", ActivityKind.Emergency => "긴급", ActivityKind.SessionStart => "시작", ActivityKind.SessionEnd => "종료",
-        ActivityKind.Member => "멤버", ActivityKind.Sds => "메시지", ActivityKind.Private => "사설콜", ActivityKind.Adhoc => "애드혹",
+        ActivityKind.Member => "멤버", ActivityKind.Sds => "메시지", ActivityKind.Private => "개인", ActivityKind.Adhoc => "임시",
         ActivityKind.ListenStart => "청취", ActivityKind.ListenEnd => "청취 종료", ActivityKind.Incoming => "착신", ActivityKind.Outgoing => "발신",
         ActivityKind.Missed => "부재", ActivityKind.Transfer => "전달", ActivityKind.Pickup => "픽업", ActivityKind.Sms => "SMS", _ => "",
     };

@@ -39,6 +39,21 @@ bool parseDialogInfo(const std::string& xml, std::vector<DialogInfo>& out);
 /** SDP 의 a=ssrc:<ssrc> label:<name> (RFC 5576) → MediaSource 목록(active=true). */
 std::vector<MediaSource> sdpSsrcLabels(const std::string& sdp);
 
+/** floor 평면 SDP m=application 섹션(ptt_ue.md) — `a=fmtp:MCPTT`(TS 24.380 §14.2).
+ *  implicitRequest = 이 offer 를 싣는 개시 INVITE 가 암묵적 발언 요청이다 — `mc_implicit_request`(§14.2.5) 와 200 OK 승인 표시
+ *  수용 `mc_granted`(§14.2.4)를 함께 싣는다. `mc_granted` 는 암묵 요청과만 싣는다: 200 OK 승인은 암묵 요청에만 있는 절차라 요청 없는
+ *  offer 에선 뜻이 없고, 이어지는 offer(re-INVITE)에는 둘 다 싣지 않는다(§14.5·§14.2.5). */
+std::string floorSdp(int localPort, bool fullDuplex, bool implicitRequest = false);
+
+/** 상대 SDP 의 m=application `a=fmtp:MCPTT` 협상 결과(TS 24.380 §12.1.2.2·§14.3). present=false = fmtp:MCPTT 없음.
+ *  answer 의 implicitRequest = 서버가 암묵 요청을 받아들였다(§14.3.5 — 승인은 아님, §12.1.2.2 NOTE 4),
+ *  granted = 200 OK 로 발언권을 승인했다(§14.3.4). */
+struct FloorFmtp {
+    bool present = false;
+    bool queueing = false, implicitRequest = false, granted = false, noFloorCtrl = false;
+};
+FloorFmtp parseFloorFmtp(const std::string& sdp);
+
 /** URI → bare id ("tel:+82..@d" / "sip:x@d" / "<...>" → "+82.."). */
 std::string bareId(const std::string& uri);
 std::string xmlEscape(const std::string& s);

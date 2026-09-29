@@ -84,13 +84,7 @@ bool Participant::isStaleSeq(int seq) const {
 
 // ── 명령 ──
 
-void Participant::request(int priority, bool emergency) {
-    std::lock_guard<std::mutex> lk(m_);
-    if (listenOnly_ || !canRequest_) {
-        FloorEvent ev; ev.kind = FloorEvent::Kind::Denied; ev.state = state_; ev.cause = 5;
-        ev.causeText = "Receive only"; emit(ev); return;
-    }
-    if (state_ == FloorState::Speaking || state_ == FloorState::Requesting || state_ == FloorState::Queued) return;
+void Participant::sendRequest(int priority, bool emergency) {
     releaseRetxLeft_ = 0;
     pendingRelease_ = false;
     // 긴급 세션의 발언은 Floor Indicator emergency 비트 — CMP tier 상향/선점(TS 24.380).
@@ -101,22 +95,97 @@ void Participant::request(int priority, bool emergency) {
     requestDeadline_ = Clock::now() + std::chrono::milliseconds(kRequestTimeoutMs);
 }
 
+void Participant::sendRelease() {
+    releaseRetxPkt_ = floor::release(ssrc_, userId_);
+    send(releaseRetxPkt_);
+    pendingRelease_ = true;
+    releaseRetxLeft_ = kReleaseRetxMax;
+    releaseRetxAt_ = Clock::now() + std::chrono::milliseconds(kReleaseRetxMs);
+}
+
+void Participant::grantSelf(int durationSec) {
+    revokePending_ = false; releaseRetxLeft_ = 0; requestDeadline_ = {}; pendingRelease_ = false;
+    bool haveSelf = false;
+    for (auto& t : talkers_) if (t.self) haveSelf = true;
+    if (!haveSelf) talkers_.insert(talkers_.begin(), Talker{userId_, ssrc_, true});
+    state_ = FloorState::Speaking;
+    long d = durationSec > 0 ? durationSec * 1000L : 0;
+    talkDeadline_ = d > kTalkEndMarginMs ? Clock::now() + std::chrono::milliseconds(d - kTalkEndMarginMs) : Clock::time_point{};
+    setMic(true);
+}
+
+void Participant::armImplicitRequest(bool emergency) {
+    std::lock_guard<std::mutex> lk(m_);
+    if (listenOnly_) return;
+    implicitPending_ = true;
+    implicitEmergency_ = emergency;
+    releaseOnAnswer_ = false;
+    state_ = FloorState::Requesting;             // 'U: pending Request' — 시한(T101)은 answer 에서 건다(목적지를 그때 안다)
+}
+
+void Participant::onInitialAnswer(bool granted, bool accepted) {
+    FloorEvent ev;
+    bool notify = false;
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        if (!implicitPending_) return;
+        implicitPending_ = false;
+        if (releaseOnAnswer_) {
+            // 호 성립 전에 놓았다 — 받아들여졌거나 승인됐을 발언권을 돌려준다(받아들여지지 않은 요청의 Release 는 서버가 무시한다).
+            releaseOnAnswer_ = false;
+            sendRelease();
+            return;
+        }
+        if (state_ == FloorState::Speaking) return;                   // Floor Granted 가 answer 보다 먼저 왔다
+        if (state_ != FloorState::Requesting) return;                 // Deny·Taken 등으로 이미 결정됐다
+        if (granted) {
+            grantSelf(-1);                                            // §6.2.4.4.2 — 200 OK 의 floor granted 표시, 시한은 Floor Granted 의 Duration 이 준다
+            grantedCount_++;
+            ev.kind = FloorEvent::Kind::Granted;
+            notify = true;
+        } else if (accepted) {
+            requestDeadline_ = Clock::now() + std::chrono::milliseconds(kRequestTimeoutMs);   // Floor Granted 대기(T101)
+        } else {
+            if (cb_.log) cb_.log(3, "floor implicit request not accepted — explicit Floor Request (call " + std::to_string(callId_) + ")");
+            sendRequest(-1, implicitEmergency_);
+        }
+        if (notify) { ev.state = state_; ev.talkers = talkers_; ev.indicator = indicator_; }
+    }
+    if (notify) emit(ev);
+}
+
+void Participant::request(int priority, bool emergency) {
+    std::lock_guard<std::mutex> lk(m_);
+    if (listenOnly_ || !canRequest_) {
+        FloorEvent ev; ev.kind = FloorEvent::Kind::Denied; ev.state = state_; ev.cause = 5;
+        ev.causeText = "Receive only"; emit(ev); return;
+    }
+    if (state_ == FloorState::Speaking || state_ == FloorState::Requesting || state_ == FloorState::Queued) return;
+    if (implicitPending_) {                                           // answer 전에 놓았다가 다시 눌렀다 — 암묵 요청이 아직 유효하다
+        releaseOnAnswer_ = false;
+        state_ = FloorState::Requesting;
+        return;
+    }
+    sendRequest(priority, emergency);
+}
+
 void Participant::release() {
     std::lock_guard<std::mutex> lk(m_);
     releaseRetxLeft_ = 0;
     talkDeadline_ = {};
     requestDeadline_ = {};
+    if (implicitPending_) {
+        // 개시 INVITE 의 answer 전 — 목적지를 몰라 Release 를 보낼 수 없다. answer 에서 보낸다(onInitialAnswer).
+        releaseOnAnswer_ = true;
+        state_ = FloorState::Idle;
+        setMic(false);
+        return;
+    }
     // 대기 중이면 대기 요청부터 취소(§8.2.15) — 발언 중이 아닌 leg 의 Release 는 서버가 무시한다.
     if (state_ == FloorState::Queued) send(cancelQueuedRequest(ssrc_));
     // 요청/점유한 적이 있을 때만 Release — 그 외의 Release 는 고아 메시지.
     //   U: pending Release — T100 으로 재전송(§6.2.4.6.2), Idle·Taken 이 오면 멈춘다. 유실되면 서버가 발언권을 계속 쥔다.
-    if (state_ == FloorState::Speaking || state_ == FloorState::Requesting || state_ == FloorState::Queued) {
-        releaseRetxPkt_ = floor::release(ssrc_, userId_);
-        send(releaseRetxPkt_);
-        pendingRelease_ = true;
-        releaseRetxLeft_ = kReleaseRetxMax;
-        releaseRetxAt_ = Clock::now() + std::chrono::milliseconds(kReleaseRetxMs);
-    }
+    if (state_ == FloorState::Speaking || state_ == FloorState::Requesting || state_ == FloorState::Queued) sendRelease();
     queuePos_ = -1;
     setMic(false);
     // 내 발언만 끝난다 — 동시 발언 중이면 남은 화자를 계속 듣는다.
@@ -234,22 +303,16 @@ void Participant::handle(const Message& m) {
                 // U: pending Release 에서 받은 Granted(§6.2.4.6.8) — 놓은 뒤 늦게 온 승인이다. Ack(위에서 회신)만 하고
                 //   상태를 유지한다: 마이크를 열거나 Speaking 으로 가면 이어 오는 Idle 을 무시해 서버는 유휴인데 단말만
                 //   발언 중이 되고, 일제 통화 개시자는 호 해제(§6.2.4.6.4)를 놓친다. 재전송 중인 Release 가 서버를 정리한다.
-                if (pendingRelease_) {
+                //   개시 INVITE 의 answer 전에 놓은 경우(releaseOnAnswer_)도 같다 — Release 는 answer 에서 나간다.
+                if (pendingRelease_ || releaseOnAnswer_) {
                     if (cb_.log) cb_.log(3, "floor recv GRANTED in pending Release — ignored (call " + std::to_string(callId_) + ")");
                     return;
                 }
                 ev.kind = FloorEvent::Kind::Granted;
-                revokePending_ = false; releaseRetxLeft_ = 0; requestDeadline_ = {}; pendingRelease_ = false;
                 grantedCount_++;
                 indicator_ = ev.indicator;
-                bool haveSelf = false;
-                for (auto& t : talkers_) if (t.self) haveSelf = true;
-                if (!haveSelf) talkers_.insert(talkers_.begin(), Talker{userId_, ssrc_, true});
-                state_ = FloorState::Speaking;
                 ev.durationSec = m.durationSec();
-                long d = ev.durationSec > 0 ? ev.durationSec * 1000L : 0;
-                talkDeadline_ = d > kTalkEndMarginMs ? Clock::now() + std::chrono::milliseconds(d - kTalkEndMarginMs) : Clock::time_point{};
-                setMic(true);
+                grantSelf(ev.durationSec);     // 200 OK 로 이미 승인됐으면 'U: has permission' 에 머물며 시한만 받는다(§6.2.4.5.5)
                 break;
             }
             case Op::DENY:

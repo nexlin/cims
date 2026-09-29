@@ -144,6 +144,10 @@ public sealed class GroupCallOptions
     /// <summary>일제 통화 개시(mcptt-info broadcast-ind, TS 24.379 §4.12). 개시자만 발언하고, 발언을 놓은 뒤 서버의
     /// Floor Idle(B-bit)을 받으면 코어가 호를 해제한다. JoinGroupCall 전용.</summary>
     public bool Broadcast { get; set; }
+    /// <summary>암묵적 발언 요청(TS 24.380 §14.2.5 mc_implicit_request + §14.2.4 mc_granted) — 개시 INVITE 가 발언 요청을 싣는다.
+    /// floor 는 호 성립 전부터 Requesting, 200 OK 의 mc_granted 나 Floor Granted 로 Speaking. 승인·성립 전에 FloorRelease 하면
+    /// 발언권을 돌려준다. 누르는 동안 개시하고 말하는 한 버튼 발신(일제 통화)용.</summary>
+    public bool ImplicitFloorRequest { get; set; }
 }
 
 public sealed record RegInfo(int AccountId, RegState State, int Code, string Reason, int ExpiresSec)

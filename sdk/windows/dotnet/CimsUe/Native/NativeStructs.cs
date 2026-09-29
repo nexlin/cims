@@ -66,6 +66,7 @@ internal unsafe struct cimsue_group_call_options_t
     public byte** members;
     public int member_count;
     public int broadcast;
+    public int implicit_floor_request;
 }
 
 [StructLayout(LayoutKind.Sequential)]

@@ -84,13 +84,6 @@ private:
 
 Result fromError(const pj::Error& e) { return Result::fail((int)e.status, e.info(false)); }
 
-/** SDP m=application 섹션 텍스트 (floor 평면, ptt_ue.md). */
-std::string floorSdp(int localPort, bool fullDuplex) {
-    return "m=application " + std::to_string(localPort) + " UDP MCPTT\r\n"
-           "a=floorid:0 mstrm:audio\r\n" +
-           std::string(fullDuplex ? "a=fmtp:MCPTT mc_queueing;mc_no_floor_ctrl" : "a=fmtp:MCPTT mc_queueing");
-}
-
 /** SDP 에서 m=application 의 (ip, port). 섹션 c= 우선, 없으면 세션 c=. */
 bool parseApplication(const std::string& sdp, std::string& ip, int& port) {
     size_t m = sdp.find("m=application ");
@@ -349,6 +342,7 @@ struct McpttSession {
     bool emergency = false, imminentPeril = false;   // 발신 옵션 — CallInfo 투영(projectMcptt) 의 원본
     bool broadcast = false;              // 일제 통화 개시(<broadcast-ind>) — 이 단말이 개시자
     bool micOpen = false;                // floor Granted 로 열림
+    bool implicitAwaitAnswer = false;    // 개시 INVITE 가 암묵적 발언 요청 — 200 OK answer 의 fmtp 로 판정(TS 24.380 §14.3.4·§14.3.5)
     std::string pendingAppSdp;           // 송신 SDP 에 주입할 m=application 섹션
     std::unique_ptr<floor::Participant> floor;
     bool remoteLearned = false;
@@ -506,8 +500,16 @@ public:
             if (prm.e.body.tsxState.type != PJSIP_EVENT_RX_MSG) return;
             const std::string& msg = prm.e.body.tsxState.src.rdata.wholeMsg;
             if (msg.empty()) return;
-            if (mcptt && msg.rfind("SIP/2.0 2", 0) == 0 && msg.find("m=application") != std::string::npos)
-                learnFloorRemote(sipBody(msg));                                               // UAC: 200 OK answer
+            if (mcptt && msg.rfind("SIP/2.0 2", 0) == 0 && msg.find("m=application") != std::string::npos) {
+                const std::string body = sipBody(msg);
+                learnFloorRemote(body);                                                       // UAC: 200 OK answer
+                // 암묵적 발언 요청의 결과(§14.3.4 mc_granted = 승인 · §14.3.5 mc_implicit_request = 받아들임) — 목적지를 안 뒤에
+                if (mcptt->implicitAwaitAnswer && mcptt->floor && prm.e.body.tsxState.tsx.method == "INVITE") {
+                    mcptt->implicitAwaitAnswer = false;
+                    const mcptt::FloorFmtp f = mcptt::parseFloorFmtp(body);
+                    mcptt->floor->onInitialAnswer(f.granted, f.implicitRequest);
+                }
+            }
             if (msg.rfind("SIP/2.0 2", 0) == 0 && msg.find("a=ssrc:") != std::string::npos) {
                 // 감청 leg 200 OK — a=ssrc label:caller/callee (RFC 5576) → 소스 귀속(U10 디먹스 라벨)
                 std::vector<MediaSource> src = mcptt::sdpSsrcLabels(sipBody(msg));
@@ -659,7 +661,7 @@ public:
             call->mcptt->groupId = mi.privateCall ? mcptt::bareId(mi.callingUserId) : mcptt::bareId(remote);
             if (!mi.noFloorCtrl) {
                 if (call->openFloor(cfg.effectiveMcpttId()))
-                    call->mcptt->pendingAppSdp = floorSdp(call->mcptt->floor->localPort(), false);
+                    call->mcptt->pendingAppSdp = mcptt::floorSdp(call->mcptt->floor->localPort(), false);
             } else {
                 call->mcptt->micOpen = true;                                                 // 전이중 — 마이크 상시
             }
@@ -1271,7 +1273,10 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
     if (!call->mcptt->fullDuplex) {
         if (!call->openFloor(mcpttId)) { o->log(1, "floor socket bind failed"); return -1; }
         if (call->mcptt->broadcast) call->mcptt->floor->setBroadcastInitiator(true);
-        call->mcptt->pendingAppSdp = floorSdp(call->mcptt->floor->localPort(), false);
+        // 암묵적 발언 요청(TS 24.380 §14.2.5) — 개시 INVITE 가 요청을 싣고 floor 는 'U: pending Request'(§6.2.4.2.2 4.)
+        const bool implicitReq = opts.implicitFloorRequest && !opts.listenOnly;
+        if (implicitReq) { call->mcptt->floor->armImplicitRequest(opts.emergency); call->mcptt->implicitAwaitAnswer = true; }
+        call->mcptt->pendingAppSdp = mcptt::floorSdp(call->mcptt->floor->localPort(), false, implicitReq);
     } else {
         call->mcptt->micOpen = true;
     }
@@ -1293,6 +1298,8 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
             prm.txOption.multipartParts.push_back(p2);
         }
         call->makeCall("sip:" + id + "@" + cfg.domain, prm);
+        // makeCall 이 개시 offer 를 동기적으로 만들었다 — 이어지는 offer(re-INVITE)·answer 는 암묵 요청·mc_granted 없이(§14.5)
+        if (call->mcptt->floor) call->mcptt->pendingAppSdp = mcptt::floorSdp(call->mcptt->floor->localPort(), false);
     } catch (pj::Error& e) {
         o->log(1, std::string("mcptt invite ") + id + ": " + e.info(false));
         return -1;

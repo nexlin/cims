@@ -179,6 +179,11 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   `prearranged` + `<broadcast-ind>true` 로 개시하고 그 단말을 개시자로 둔다 — Floor Request 에 B-bit 를 싣고, Floor Release 뒤
   B-bit Floor Idle 을 받으면 **코어가 호를 해제**한다(TS 24.380 §6.2.4.6.4, 앱 조작 없음). 수신 멤버의 표시는 앱 몫이다
   (`McpttInfo.broadcast`·`FloorEvent.indicator` B-bit·Taken `permission` 0 → `FloorInfo.canRequest=false`).
+- **암묵적 발언 요청**(TS 24.380 §14.2.5, [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) R14·U7). `GroupCallOptions.implicitFloorRequest`
+  는 개시 INVITE 의 floor SDP 에 `mc_implicit_request`(요청)와 `mc_granted`(200 OK 승인 표시 수용 — 능력, §14.2.4)를 함께 싣고 floor 를 호 성립 전부터
+  `Requesting`('U: pending Request', §6.2.4.2.2)으로 둔다. answer 의 `mc_granted` = 승인 → `Speaking`, `mc_implicit_request` 만 = Floor Granted 대기,
+  둘 다 없음(진행 중 호 합류 등 — §14.3.5) = 코어가 명시 Floor Request 로 잇는다. 호 성립 전에 `floorRelease` 하면 answer 에서 Floor Release 로
+  돌려준다(그 사이 Floor Granted 는 무시). 이어지는 offer(re-INVITE)에는 둘 다 싣지 않는다(§14.5). 누르는 동안 개시하고 말하는 한 버튼 발신용.
 - **단말 속성**([mcptt_management_views.md](mcptt_management_views.md) §4.1). `EngineConfig.userAgent` 는
   `userAgentOf(제품, 앱 버전, OS, 모델)` 형식(`CIMS-PTT/1.4.2 (Android 15; SM-S921N)`)으로 앱이 채운다. `userAgentOf` 는 OS·모델을
   comment 규칙(RFC 3261 §25.1)으로 정리한다 — 괄호·역슬래시 제거, 공백·제어 문자 접기, OS 의 `;`(OS·모델 구분자) 제거.
@@ -248,7 +253,7 @@ SDS·Join·픽업으로 확장)를 명령행으로 구동한다. cspsim 은 서�
 cimsue-cli [계정] register [--hold S]            # 200 OK → (hold) → de-REGISTER
 cimsue-cli [계정] call <번호|sip:URI> [--duration S] [--video]
 cimsue-cli [계정] answer [--duration S]          # 착신 대기 → 200 → 상대 BYE 또는 duration (MCPTT 착신은 자동 수락)
-cimsue-cli [계정] group-call <groupId> [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast]
+cimsue-cli [계정] group-call <groupId> [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit]
 cimsue-cli [계정] sds <groupId> <text>           # MESSAGE 최종 응답까지
 cimsue-cli [계정] sds-recv [--duration S]        # 수신 SDS 를 JSON 줄로
 계정: --server IP --port N --transport udp|tcp|tls --domain D --msisdn M (--imsi I|--auth-id IMPI)
@@ -278,7 +283,7 @@ cimsue-cli --csc-host H --user U --pw P --from-profile volte|ptt [--server IP --
 ```
 cimsue-cli [계정] drive [--sample-file WAV] [--service volte|voip|ptt]
   명령: register | unregister | use <service> | dial <번호|URI> [video] | answer <call> [video] | reject <call> [code] | hangup <call> | hold <call>
-        resume <call> | dtmf <call> <digits> | transfer <call> <대상> | group_call <group> [listen] [emergency] [broadcast] | floor_request <call>
+        resume <call> | dtmf <call> <digits> | transfer <call> <대상> | group_call <group> [listen] [emergency] [broadcast] [implicit] | floor_request <call>
         floor_release <call> | affiliate <group> on|off | pickup <code> [number] | media mic|sample [<wav>] | stats [call] | quality <call> | quit
   이벤트: ready{version,aor} · reg{service,state,code,reason,expires,rrd_ms} · incoming{call,from,called,video,mcptt,group}
         · call{call,dir,state outgoing|incoming|active|held|disconnected,code,reason,media,mcptt,video,by_us,group,srd_ms|sdd_ms,(disconnected: 통계 + 품질)}

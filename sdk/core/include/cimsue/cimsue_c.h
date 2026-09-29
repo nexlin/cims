@@ -119,6 +119,7 @@ typedef struct {
     const char* const* members;         /* 애드혹 임시 그룹 멤버(tel: URI) — join_group_call 전용 */
     int32_t            member_count;
     int32_t            broadcast;       /* 일제 통화 개시(<broadcast-ind>true, TS 24.379 §4.12) — join_group_call 전용 */
+    int32_t            implicit_floor_request; /* 암묵적 발언 요청(mc_implicit_request+mc_granted, TS 24.380 §14.2.4·§14.2.5) */
 } cimsue_group_call_options_t;
 
 /** send_request 의 부가 헤더. */

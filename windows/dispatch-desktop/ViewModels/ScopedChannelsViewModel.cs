@@ -1,4 +1,4 @@
-// ② 범위 채널(§4.2) — 내 멤버 그룹이 아닌 채널 카드: 청취 범위 그룹(프로비저닝 pttTargets → conference 구독) · 타인 간 사설콜·애드혹(서버 과제, §13 — 빈 섹션) ·
+// ② 범위 채널(§4.2) — 내 멤버 그룹이 아닌 채널 카드: 청취 범위 그룹(프로비저닝 pttTargets → conference 구독) · 타인 간 개인·임시 통화(서버 과제, §13 — 빈 섹션) ·
 // 관리 범위·내 소유 그룹(멤버·청취 범위가 아니면 세션 상태 없음, 기본 접힘). 필터·검색은 이 패널에만. 청취는 카드 안 토글([🔊 청취 중]) + [창으로].
 // [편집]·[+ 새 채널] 은 채널 편집 드로어(GroupEditViewModel — [PTT 그룹] 화면과 같은 VM).
 using System.Collections.ObjectModel;
@@ -116,7 +116,7 @@ public sealed partial class ScopedChannelsViewModel : ObservableObject
     public string ListeningText => $"동시 청취 {ListeningCount}/{ListenLimit}";
     public bool CanCreate => _s.CanCreateGroups;
     public bool HasNoScope => !_s.CanListenPtt && ManageCount == 0;
-    public string OthersHint => "타인 간 사설콜·애드혹 세션 가시성은 서버 과제(§13) — 서버가 세션 목록을 주면 여기 보입니다";
+    public string OthersHint => "타인 간 개인·임시 통화 세션 가시성은 서버 과제(§13) — 서버가 세션 목록을 주면 여기 보입니다";
 
     partial void OnFilterChanged(string value) => Rebuild();
     partial void OnSearchChanged(string value) => Rebuild();

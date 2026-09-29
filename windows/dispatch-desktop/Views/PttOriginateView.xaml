@@ -5,8 +5,10 @@
              xmlns:m="clr-namespace:DispatchDesktop.Models"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
              d:DataContext="{d:DesignInstance vm:PttOriginateViewModel}">
-    <!-- ① [사설콜 ▾]/[애드혹 ▾] 팝오버 본문(§4.1) — 모드 세그먼트 [사설콜|애드혹] + 대상 줄 + 옵션 + PTT 주소록 [사용자|그룹|다이얼패드].
-         사용자 = 서버 전화번호부(service=ptt) 조직별 섹션 · 그룹 행 = [채널로][메시지](내 소유는 [편집][삭제]). 애드혹 구성 중엔 바깥 클릭에 닫히지 않고 [취소]로만 -->
+    <!-- ① [개인 ▾]/[임시 ▾] 팝오버 본문(§4.1) — 모드 세그먼트 [개인|임시] + 대상 줄 + 옵션 + PTT 주소록 [사용자|그룹|다이얼패드].
+         모드는 세그먼트·① 버튼·사람 메뉴로만 바뀐다(행 조작은 모드를 바꾸지 않는다). 사용자 행 = 개인: [반이중][전이중][문자] · 행 클릭 = 대상 선택 /
+         임시: ☐ + [문자] · 행 클릭 = 체크. 사용자 = 서버 전화번호부(service=ptt) 조직별 섹션 · 그룹 행 = [채널로][메시지](내 소유는 [편집][삭제]).
+         임시 그룹 구성 중엔 바깥 클릭에 닫히지 않고 [취소]로만 -->
     <UserControl.Resources>
         <CollectionViewSource x:Key="UsersView" Source="{Binding Users}">
             <CollectionViewSource.GroupDescriptions>
@@ -18,12 +20,12 @@
         <DockPanel>
             <Border DockPanel.Dock="Top" Style="{StaticResource SubHeader}">
                 <DockPanel>
-                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="취소" Command="{Binding CloseCommand}" Margin="8,0,0,0" ToolTip="팝오버 닫기(애드혹 선택은 비운다)" />
+                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="취소" Command="{Binding CloseCommand}" Margin="8,0,0,0" ToolTip="팝오버 닫기(임시 그룹 선택은 비운다)" />
                     <TextBlock Style="{StaticResource SectionHeader}" Text="PTT 발신" />
                     <Border Style="{StaticResource SegGroup}" HorizontalAlignment="Right">
                         <StackPanel Orientation="Horizontal">
-                            <RadioButton Style="{StaticResource Seg}" Content="사설콜" IsChecked="{Binding Mode, Converter={StaticResource Eq}, ConverterParameter=private}" Command="{Binding SetModeCommand}" CommandParameter="private" />
-                            <RadioButton Style="{StaticResource Seg}" Content="애드혹" IsChecked="{Binding Mode, Converter={StaticResource Eq}, ConverterParameter=adhoc}" Command="{Binding SetModeCommand}" CommandParameter="adhoc" />
+                            <RadioButton Style="{StaticResource Seg}" Content="개인" ToolTip="개인 통화 — PTT 사용자 1명(반이중 floor / 전이중)" IsChecked="{Binding Mode, Converter={StaticResource Eq}, ConverterParameter=private}" Command="{Binding SetModeCommand}" CommandParameter="private" />
+                            <RadioButton Style="{StaticResource Seg}" Content="임시" ToolTip="임시 그룹 통화 — PTT 사용자 N명(주소록 체크)" IsChecked="{Binding Mode, Converter={StaticResource Eq}, ConverterParameter=adhoc}" Command="{Binding SetModeCommand}" CommandParameter="adhoc" />
                         </StackPanel>
                     </Border>
                 </DockPanel>
@@ -31,7 +33,9 @@
             <!-- 발신 줄 -->
             <StackPanel DockPanel.Dock="Top" Margin="10,8,10,4">
                 <DockPanel Visibility="{Binding IsPrivate, Converter={StaticResource BoolToVis}}">
-                    <TextBox Style="{StaticResource Field}" Text="{Binding Target, UpdateSourceTrigger=PropertyChanged}" KeyDown="Target_KeyDown" ToolTip="PTT 사용자 이름 또는 번호 (Enter = 사설콜 발신)" />
+                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Pri}" Content="{Binding StartText}" Command="{Binding StartCommand}" IsEnabled="{Binding CanStart}" Margin="6,0,0,0"
+                            ToolTip="아래 반이중/전이중 선택으로 발신" />
+                    <TextBox Style="{StaticResource Field}" Text="{Binding Target, UpdateSourceTrigger=PropertyChanged}" KeyDown="Target_KeyDown" ToolTip="PTT 사용자 이름 또는 번호 (Enter = 개인 통화 발신)" />
                 </DockPanel>
                 <DockPanel Visibility="{Binding IsAdhoc, Converter={StaticResource BoolToVis}}">
                     <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Pri}" Content="{Binding StartText}" Command="{Binding StartCommand}" IsEnabled="{Binding CanStart}" Margin="6,0,0,0" />
@@ -53,7 +57,7 @@
                 <!-- 입력 중 PTT 주소록 제안 -->
                 <Border Margin="0,4,0,0" Style="{StaticResource Sub}" Background="{DynamicResource Brush.BgSoft}" Height="132" Visibility="{Binding IsPrivate, Converter={StaticResource BoolToVis}}">
                     <Grid>
-                    <TextBlock Style="{StaticResource Hint}" Margin="10,8" Text="이름·번호를 입력하면 PTT 주소록에서 찾아 여기 보입니다 (Enter = 사설콜 발신)" Visibility="{Binding HasSuggestions, Converter={StaticResource NotToVis}}" />
+                    <TextBlock Style="{StaticResource Hint}" Margin="10,8" Text="이름·번호를 입력하면 PTT 주소록에서 찾아 여기 보입니다 (Enter = 개인 통화 발신)" Visibility="{Binding HasSuggestions, Converter={StaticResource NotToVis}}" />
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <ItemsControl ItemsSource="{Binding Suggestions}" Margin="2">
                         <ItemsControl.ItemTemplate>
@@ -62,8 +66,8 @@
                                         Command="{Binding DataContext.PickCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">
                                     <DockPanel>
                                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                            <Button Style="{StaticResource Btn.Xs.Pri}" Content="싱글" Command="{Binding DataContext.PrivateToCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Margin="0,0,4,0" />
-                                            <Button Style="{StaticResource Btn.Xs}" Content="멀티" Command="{Binding DataContext.PrivateFullToCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" />
+                                            <Button Style="{StaticResource Btn.Xs.Pri}" Content="반이중" ToolTip="반이중 개인 통화(floor)" Command="{Binding DataContext.PrivateToCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Margin="0,0,4,0" />
+                                            <Button Style="{StaticResource Btn.Xs}" Content="전이중" ToolTip="전이중 개인 통화(floor 없음)" Command="{Binding DataContext.PrivateFullToCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" />
                                         </StackPanel>
                                         <TextBlock VerticalAlignment="Center">
                                             <Run Text="{Binding Name, Mode=OneWay}" FontWeight="Medium" /><Run Text="  " />
@@ -93,7 +97,8 @@
                         <StackPanel Orientation="Horizontal">
                             <RadioButton Style="{StaticResource Seg}" Content="사용자" IsChecked="{Binding Book, Converter={StaticResource Eq}, ConverterParameter=users}" Command="{Binding SetBookCommand}" CommandParameter="users" />
                             <RadioButton Style="{StaticResource Seg}" Content="그룹" IsChecked="{Binding Book, Converter={StaticResource Eq}, ConverterParameter=groups}" Command="{Binding SetBookCommand}" CommandParameter="groups" />
-                            <RadioButton Style="{StaticResource Seg}" Content="다이얼패드" IsChecked="{Binding Book, Converter={StaticResource Eq}, ConverterParameter=pad}" Command="{Binding SetBookCommand}" CommandParameter="pad" />
+                            <RadioButton Style="{StaticResource Seg}" Content="다이얼패드" IsChecked="{Binding Book, Converter={StaticResource Eq}, ConverterParameter=pad}" Command="{Binding SetBookCommand}" CommandParameter="pad"
+                                         Visibility="{Binding IsPrivate, Converter={StaticResource BoolToVis}}" ToolTip="개인 통화 대상 번호 입력" />
                         </StackPanel>
                     </Border>
                 </DockPanel>
@@ -127,13 +132,17 @@
                     </ListBox.GroupStyle>
                     <ListBox.ItemTemplate>
                         <DataTemplate DataType="{x:Type vm:PttUserRow}">
-                            <Border Style="{StaticResource LogRow}">
+                            <!-- 행 클릭 = 개인: 대상 선택 / 임시: 체크 토글(버튼·체크 위 클릭은 그 컨트롤 몫) -->
+                            <Border Style="{StaticResource LogRow}" Background="Transparent" Cursor="Hand" MouseLeftButtonDown="UserRow_MouseLeftButtonDown">
                                 <DockPanel>
                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                                        <Button Style="{StaticResource Btn.Xs}" Content="싱글" ToolTip="반이중 사설콜" Command="{Binding DataContext.PrivateToCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Margin="0,0,4,0" />
-                                        <Button Style="{StaticResource Btn.Xs}" Content="멀티" ToolTip="전이중 사설콜" Command="{Binding DataContext.PrivateFullToCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Margin="0,0,4,0" />
-                                        <Button Style="{StaticResource Btn.Xs}" Content="문자" Command="{Binding DataContext.MessageUserCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Margin="0,0,6,0" />
-                                        <CheckBox IsChecked="{Binding Checked, Mode=OneWay}" Command="{Binding DataContext.ToggleAdhocCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" VerticalAlignment="Center" ToolTip="애드혹 대상" />
+                                        <StackPanel Orientation="Horizontal" Visibility="{Binding DataContext.IsPrivate, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolToVis}}">
+                                            <Button Style="{StaticResource Btn.Xs}" Content="반이중" ToolTip="반이중 개인 통화(floor)" Command="{Binding DataContext.PrivateToCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Margin="0,0,4,0" />
+                                            <Button Style="{StaticResource Btn.Xs}" Content="전이중" ToolTip="전이중 개인 통화(floor 없음)" Command="{Binding DataContext.PrivateFullToCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Margin="0,0,4,0" />
+                                        </StackPanel>
+                                        <Button Style="{StaticResource Btn.Xs}" Content="문자" Command="{Binding DataContext.MessageUserCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" />
+                                        <CheckBox IsChecked="{Binding Checked, Mode=OneWay}" Command="{Binding DataContext.ToggleAdhocCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" VerticalAlignment="Center" Margin="8,0,0,0" ToolTip="임시 그룹 대상"
+                                                  Visibility="{Binding DataContext.IsAdhoc, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolToVis}}" />
                                     </StackPanel>
                                     <Border Width="28" Height="28" CornerRadius="14" Background="{DynamicResource Brush.ListenSoft}" Margin="0,0,8,0" VerticalAlignment="Center">
                                         <TextBlock Text="{Binding Initial}" Foreground="{DynamicResource Brush.Listen}" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12" />
@@ -150,9 +159,9 @@
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
-                <!-- 다이얼패드 — 사설콜 대상 번호 입력 -->
+                <!-- 다이얼패드 — 개인 통화 대상 번호 입력(개인 모드만) -->
                 <DockPanel Visibility="{Binding IsPadBook, Converter={StaticResource BoolToVis}}" Margin="10,0,10,8">
-                    <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Text="사설콜 대상 PTT 번호 입력" Margin="0,0,0,6" />
+                    <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Text="개인 통화 대상 PTT 번호 입력" Margin="0,0,0,6" />
                     <UniformGrid Columns="3" Rows="5">
                         <UniformGrid.Resources>
                             <Style TargetType="Button" BasedOn="{StaticResource Btn}">
@@ -176,7 +185,7 @@
                         <Button Content="#" Command="{Binding PadCommand}" CommandParameter="#" />
                         <Button Content="⌫" Command="{Binding BackspaceCommand}" ToolTip="한 글자 지움" />
                         <Button Content="C" Command="{Binding ClearCommand}" ToolTip="전체 지움" />
-                        <Button Content="📞" Command="{Binding StartCommand}" ToolTip="사설콜 발신" Foreground="{DynamicResource Brush.Talk}" />
+                        <Button Content="📞" Command="{Binding StartCommand}" ToolTip="개인 통화 발신(반이중/전이중 선택)" Foreground="{DynamicResource Brush.Talk}" />
                     </UniformGrid>
                 </DockPanel>
                 <ListBox Style="{StaticResource PlainList}" ItemsSource="{Binding Groups}" Visibility="{Binding IsGroups, Converter={StaticResource BoolToVis}}">
