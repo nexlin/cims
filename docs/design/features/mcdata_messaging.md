@@ -226,6 +226,10 @@ CSP fan-out (하이브리드):
     (영역 경로 `ServiceLogging.Dir`·`Content.Dir` 은 배포 때 사이트 디렉터리에서 유도).
   - csc.json `Provisioning.McData.MaxPayloadSdsCplaneBytes` → `/provisioning/me` 의 ptt
     프로파일 `mcdata.maxPayloadSdsCplaneBytes` 로 단말에 전달. **CSP 값과 운영자 동기 유지.**
+- **단말 SDK 코어**(`libcimsue` `mcdata/msrp`, [ue_sdk.md](ue_sdk.md) §4.2 «media plane SDS»): 그룹 SDS 가 `AccountConfig.maxSdsCplaneBytes`
+  (= 프로비저닝 `mcdata.maxPayloadSdsCplaneBytes`)를 넘으면 `sendGroupSds` 가 위 발신 절차로 보내고(16 KB 청크 stop-and-wait, 최종 결과
+  = `onRequestResult` method `MSRP`), `AccountConfig.mcdataMsrp` 면 REGISTER Contact `+g.3gpp.icsi-ref` 에 mcdata.sds 를 합쳐 서버발 배포를
+  받는다(`onSds` `mediaPlane`). 1:1 은 시그널링 평면 그대로.
 - **시험**: `tests/cmdp_msrp_parser_test.cpp`(프레이머 단위, 단독 g++),
   `tests/msrp_sds_client.py`(sender/receiver/fallback/negative — 라이브 CSP+cmdp 대상 E2E),
   계측기 = libcsim `cspsim/McDataMsrp.{h,cpp}` + `SimSession::SendSdsMedia`(발신)·`AnswerMsrp`(수신, UE 풀 `msrp`) — 단계 `sds_send plane: media`,

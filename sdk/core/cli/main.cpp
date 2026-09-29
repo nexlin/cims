@@ -10,7 +10,9 @@
 //   cimsue-cli [계정 옵션] group-call <groupId> [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit]
 //              (--broadcast = 일제 통화 개시 — 발언을 놓은 뒤 서버 Floor Idle(B-bit)이면 코어가 호를 해제, outcome 에 broadcast_released)
 //              (--implicit = 개시 INVITE 가 암묵적 발언 요청 — mc_implicit_request+mc_granted, TS 24.380 §14.2.4·§14.2.5. --ptt-at 0 과 함께)
-//   cimsue-cli [계정 옵션] sds <groupId> <text>            (MESSAGE 최종 응답까지 대기)
+//              [--upgrade-at S] [--cancel-at S]  (진행 중 긴급 상향·하향 re-INVITE, TS 24.379 §10.1.1.2.1.3·§10.1.1.2.1.4 — outcome 에 conditions)
+//   cimsue-cli [계정 옵션] alert <groupId> [--cancel] [--originated-by ID] [--cancel-group-emergency]   (긴급 경보 MESSAGE, §12.1.1.1·§12.1.1.2)
+//   cimsue-cli [계정 옵션] sds <groupId> <text>            (MESSAGE 최종 응답까지 대기 — --cplane-max N 을 넘으면 MSRP, 결과 plane=media)
 //   cimsue-cli [계정 옵션] sds-recv [--duration S]        (수신 SDS 를 JSON 줄로 출력)
 //   cimsue-cli [계정 옵션] dialog-watch <aor> [--duration S]      (RFC 4235 NOTIFY 를 JSON 줄로)
 //   cimsue-cli [계정 옵션] join <aor> [--duration S]              (감시 → confirmed dialog 에 INVITE-Join recvonly)
@@ -31,6 +33,7 @@
 // 계정 옵션: --server IP --port N --transport udp|tcp|tls --domain D --msisdn M (--imsi I | --auth-id IMPI)
 //           (--ha1 HEX32 | --password P) [--mcptt-id tel:..] [--affiliate G[,G2]] [--srtp off|optional|required]
 //           [--sec tls] [--tls-ca FILE] [--no-tls-verify] [--display-name NAME] [--log-level N] [--timeout S] [--json]
+//           [--cplane-max N] (그룹 SDS 시그널링 평면 상한 — 넘으면 MSRP, TS 24.282 §9.2.3) [--msrp] (서버발 MSRP 배포 수신 광고)
 // 종료 코드: 0 성공 / 2 인자 / 3 등록·로그인 실패 / 4 호 실패·시한 / 5 미디어 없음 / 6 floor 미획득 / 7 SDS 실패 / 8 관제 실패
 #include <chrono>
 #include <csignal>
@@ -86,6 +89,9 @@ struct Opts {
     bool emergency = false;
     bool broadcast = false;           // 일제 통화 개시(TS 24.379 §4.12)
     bool implicit = false;            // 암묵적 발언 요청(TS 24.380 §14.2.5)
+    int upgradeAt = -1, cancelAt = -1;  // 진행 중 긴급 상향·하향 시각(TS 24.379 §10.1.1.2.1.3·§10.1.1.2.1.4)
+    bool alertCancel = false, cancelGroupEmergency = false;
+    std::string originatedBy;
     // 관제
     std::string code;                 // 픽업 피처코드
     std::string transferTo;
@@ -109,9 +115,12 @@ void usage() {
         "  계정: --server IP [--port N] [--transport udp|tcp|tls] --domain D --msisdn M (--imsi I | --auth-id IMPI)\n"
         "        (--ha1 HEX | --password P) [--mcptt-id tel:..] [--affiliate G,..] [--srtp off|optional|required] [--sec tls]\n"
         "        [--tls-ca FILE] [--no-tls-verify] [--display-name N] [--log-level N] [--timeout S] [--json]\n"
+        "        [--cplane-max N] [--msrp]   (MCData media plane — 큰 그룹 SDS 발신·서버발 배포 수신)\n"
         "        또는 --csc-host H [--csc-port N] --user U --pw P [--csc-ca FILE] --from-profile volte|ptt\n"
         "  register [--hold S] | call TARGET [--duration S] [--video] | answer [--duration S] [--transfer-to X]\n"
         "  group-call GROUP [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit]\n"
+        "             [--upgrade-at S] [--cancel-at S]\n"
+        "  alert GROUP [--cancel] [--originated-by ID] [--cancel-group-emergency]\n"
         "  sds GROUP TEXT | sds-recv [--duration S] | login\n"
         "  dialog-watch AOR [--duration S] | join AOR [--duration S] | pickup [NUMBER] --code CODE | transfer PEER --to X\n"
         "  drive [--sample-file WAV] [--service volte|voip|ptt]   (구동 모드 — stdin 명령 / stdout JSON 이벤트; cimsue/drive.h 명령표)\n"
@@ -170,6 +179,10 @@ bool parse(int argc, char** argv, Opts& o) {
             if (opt("--csc-ca", [&](const std::string& v) { o.cscCaFile = v; })) continue;
             if (opt("--from-profile", [&](const std::string& v) { o.fromProfile = v; })) continue;
             if (opt("--name", [&](const std::string& v) { o.groupName = v; })) continue;
+            if (opt("--upgrade-at", [&](const std::string& v) { o.upgradeAt = std::stoi(v); })) continue;
+            if (opt("--cplane-max", [&](const std::string& v) { o.acc.maxSdsCplaneBytes = std::stoi(v); })) continue;
+            if (opt("--cancel-at", [&](const std::string& v) { o.cancelAt = std::stoi(v); })) continue;
+            if (opt("--originated-by", [&](const std::string& v) { o.originatedBy = v; })) continue;
             if (opt("--members", [&](const std::string& v) { std::stringstream ss(v); std::string m; while (std::getline(ss, m, ',')) if (!m.empty()) o.groupMembers.push_back(m); })) continue;
         } catch (std::exception& e) { std::fprintf(stderr, "%s\n", e.what()); return false; }
         if (a == "--no-tls-verify") o.tlsVerify = false;
@@ -179,19 +192,22 @@ bool parse(int argc, char** argv, Opts& o) {
         else if (a == "--emergency") o.emergency = true;
         else if (a == "--broadcast") o.broadcast = true;
         else if (a == "--implicit") o.implicit = true;
+        else if (a == "--cancel") o.alertCancel = true;
+        else if (a == "--msrp") o.acc.mcdataMsrp = true;
+        else if (a == "--cancel-group-emergency") o.cancelGroupEmergency = true;
         else if (a == "-h" || a == "--help") return false;
         else if (a.rfind("--", 0) == 0) { std::fprintf(stderr, "unknown arg: %s\n", a.c_str()); return false; }
         else pos.push_back(a);
     }
     if (pos.empty()) return false;
     o.cmd = pos[0];
-    static const char* needTarget[] = {"call", "group-call", "dialog-watch", "join", "transfer", "group-get", "group-put", "group-delete", "link"};
+    static const char* needTarget[] = {"call", "group-call", "alert", "dialog-watch", "join", "transfer", "group-get", "group-put", "group-delete", "link"};
     for (auto n : needTarget) if (o.cmd == n) { if (pos.size() < 2) return false; o.target = pos[1]; }
     if (o.cmd == "sds") { if (pos.size() < 3) return false; o.target = pos[1]; for (size_t i = 2; i < pos.size(); ++i) o.text += (i > 2 ? " " : "") + pos[i]; }
     if (o.cmd == "pickup") { if (pos.size() >= 2) o.target = pos[1]; if (o.code.empty()) return false; }
     if (o.cmd == "drive" || o.cmd == "link") o.json = true;   // 구동·링크 모드는 언제나 JSON 이벤트
     if (o.cmd == "transfer" && o.transferTo.empty()) return false;
-    static const char* known[] = {"register", "call", "answer", "group-call", "sds", "sds-recv", "login", "dialog-watch", "join", "pickup", "transfer",
+    static const char* known[] = {"register", "call", "answer", "group-call", "alert", "sds", "sds-recv", "login", "dialog-watch", "join", "pickup", "transfer",
                                   "groups", "group-get", "group-put", "group-delete", "drive", "link"};
     bool ok = false;
     for (auto k : known) if (o.cmd == k) ok = true;
@@ -253,13 +269,33 @@ public:
         set([&] { dialogs.push_back(d); });
     }
     void onSds(const SdsMessage& m) override {
-        std::fprintf(stderr, "[cimsue-cli] sds from=%s group=%s msg=%s notif=%d/%d text=%s\n", m.fromUri.c_str(),
-                     m.groupUri.c_str(), m.msgId.c_str(), m.notification, m.notifType, m.text.c_str());
+        std::fprintf(stderr, "[cimsue-cli] sds from=%s group=%s msg=%s notif=%d/%d media=%d bytes=%zu text=%.80s\n", m.fromUri.c_str(),
+                     m.groupUri.c_str(), m.msgId.c_str(), m.notification, m.notifType, m.mediaPlane, m.text.size(), m.text.c_str());
         if (json_)
             std::printf("{\"event\":\"sds\",\"from\":\"%s\",\"group\":\"%s\",\"conv_id\":\"%s\",\"msg_id\":\"%s\",\"notification\":%s,"
-                        "\"notif_type\":%d,\"text\":\"%s\"}\n", m.fromUri.c_str(), m.groupUri.c_str(), m.convId.c_str(),
-                        m.msgId.c_str(), m.notification ? "true" : "false", m.notifType, m.text.c_str());
+                        "\"notif_type\":%d,\"plane\":\"%s\",\"bytes\":%zu,\"text\":\"%s\"}\n", m.fromUri.c_str(), m.groupUri.c_str(),
+                        m.convId.c_str(), m.msgId.c_str(), m.notification ? "true" : "false", m.notifType,
+                        m.mediaPlane ? "media" : "signalling", m.text.size(), m.text.size() > 200 ? "(long)" : m.text.c_str());
         set([&] { sds.push_back(m); });
+    }
+    void onMcpttCondition(const CallInfo& c, ConditionCause cause) override {
+        std::fprintf(stderr, "[cimsue-cli] condition call=%d %s emergency=%d imminent=%d mine=%d pending=%d code=%d\n", c.callId,
+                     toString(cause), c.condition.emergency, c.condition.imminentPeril, c.condition.mine, c.condition.pending,
+                     c.condition.lastCode);
+        if (json_)
+            std::printf("{\"event\":\"condition\",\"call_id\":%d,\"cause\":\"%s\",\"emergency\":%s,\"imminent_peril\":%s,\"code\":%d}\n",
+                        c.callId, toString(cause), c.condition.emergency ? "true" : "false",
+                        c.condition.imminentPeril ? "true" : "false", c.condition.lastCode);
+        set([&] { conditions.emplace_back(c, cause); calls[c.callId] = c; });
+    }
+    void onEmergencyAlert(const EmergencyAlert& a) override {
+        std::fprintf(stderr, "[cimsue-cli] alert group=%s user=%s alert=%d emergency=%d imminent=%d originated-by=%s self=%d\n",
+                     a.groupId.c_str(), a.userId.c_str(), a.alertInd, a.emergencyInd, a.imminentPerilInd, a.originatedBy.c_str(), a.self);
+        if (json_)
+            std::printf("{\"event\":\"alert\",\"group\":\"%s\",\"user\":\"%s\",\"alert\":%d,\"emergency\":%d,\"imminent_peril\":%d,"
+                        "\"originated_by\":\"%s\"}\n", a.groupId.c_str(), a.userId.c_str(), a.alertInd, a.emergencyInd,
+                        a.imminentPerilInd, a.originatedBy.c_str());
+        set([&] { alerts.push_back(a); });
     }
     void onRequestResult(const RequestResult& r) override {
         std::fprintf(stderr, "[cimsue-cli] %s token=%lld → %d %s etag=%s\n", r.method.c_str(), (long long)r.token, r.code, r.reason.c_str(), r.etag.c_str());
@@ -283,6 +319,8 @@ public:
     int granted = 0, taken = 0, denied = 0, rosters = 0;
     std::vector<SdsMessage> sds;
     std::map<int64_t, RequestResult> results;
+    std::vector<std::pair<CallInfo, ConditionCause>> conditions;
+    std::vector<EmergencyAlert> alerts;
 
 private:
     template <typename F> void set(F f) { { std::lock_guard<std::mutex> lk(m_); f(); } cv_.notify_all(); }
@@ -598,6 +636,8 @@ int main(int argc, char** argv) {
         if (o.portSet) a.serverPort = o.acc.serverPort;
         if (o.transportSet) a.transport = o.acc.transport;
         if (o.acc.mediaSecurity != MediaSecurity::Off) a.mediaSecurity = o.acc.mediaSecurity;
+        if (o.acc.maxSdsCplaneBytes > 0) a.maxSdsCplaneBytes = o.acc.maxSdsCplaneBytes;
+        a.mcdataMsrp = o.acc.mcdataMsrp;
         o.acc = a;
         std::fprintf(stderr, "[cimsue-cli] provisioned %s: %s via %s:%d/%s ha1=%d dispatch=%s\n", sp->kind.c_str(), a.aor().c_str(),
                      a.serverHost.c_str(), a.serverPort, toString(a.transport), !a.ha1.empty(), prof.dispatch.groupId.c_str());
@@ -751,8 +791,24 @@ int main(int argc, char** argv) {
         auto t0 = std::chrono::steady_clock::now();
         auto elapsed = [&] { return (int)std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - t0).count(); };
         bool pttDone = o.pttAt < 0;
+        bool upDone = o.upgradeAt < 0, cancelDone = o.cancelAt < 0;
         bool gone = false;
+        // 조건 re-INVITE 의 최종 결과(Confirmed·Denied)를 기다린다 — 서버 판정이 시험의 관측 대상이다.
+        auto conditionStep = [&](bool emergency) {
+            if (eng.callInfo(s.callId).condition.emergency == emergency) return;   // 바뀐 것 없음 — 코어가 보내지 않는다
+            size_t before;
+            { before = ls.conditions.size(); }
+            r = eng.setCallCondition(s.callId, emergency, false);
+            if (!r.ok) { std::fprintf(stderr, "[cimsue-cli] setCallCondition: %s\n", r.reason.c_str()); return; }
+            ls.waitFor([&] {
+                for (size_t k = before; k < ls.conditions.size(); ++k)
+                    if (ls.conditions[k].second == ConditionCause::Confirmed || ls.conditions[k].second == ConditionCause::Denied) return true;
+                return false;
+            }, o.timeoutSec);
+        };
         while (elapsed() < o.durationSec && !gone) {
+            if (!upDone && elapsed() >= o.upgradeAt) { upDone = true; conditionStep(true); }
+            if (!cancelDone && upDone && elapsed() >= o.cancelAt) { cancelDone = true; conditionStep(false); }
             if (!pttDone && elapsed() >= o.pttAt) {
                 pttDone = true;
                 r = eng.floorRequest(s.callId);
@@ -772,28 +828,49 @@ int main(int argc, char** argv) {
         s.st = eng.streamStats(s.callId);
         s.extra = ",\"floor_local_port\":" + std::to_string(fi.localPort) + ",\"floor_remote\":\"" + fi.remoteIp + ":" +
                   std::to_string(fi.remotePort) + "\",\"rosters\":" + std::to_string(ls.rosters);
+        {
+            std::string cs;
+            for (auto& c : ls.conditions)
+                if (c.first.callId == s.callId)
+                    cs += std::string(cs.empty() ? "" : ",") + "{\"cause\":\"" + toString(c.second) + "\",\"emergency\":" +
+                          (c.first.condition.emergency ? "true" : "false") + ",\"code\":" + std::to_string(c.first.condition.lastCode) + "}";
+            s.extra += ",\"conditions\":[" + cs + "],\"alerts\":" + std::to_string(ls.alerts.size());
+        }
         if (o.pttAt >= 0 && ls.granted == 0) { s.outcome = "floor_not_granted"; rc = 6; }
         // 일제 통화 개시자: 발언을 놓은 뒤 코어가 호를 해제했으면(TS 24.380 §6.2.4.6.4) 시한 전에 끝난 것이 정상이다.
         else if (o.broadcast && gone && o.pttAt >= 0) s.extra += ",\"broadcast_released\":true";
         return finish(s.callId);
     }
 
+    if (o.cmd == "alert") {
+        int64_t tok = eng.sendEmergencyAlert(acc, o.target, !o.alertCancel, o.originatedBy, o.cancelGroupEmergency);
+        if (tok < 0) { s.outcome = "alert_send_failed"; rc = 7; return finish(-1); }
+        bool got = ls.waitFor([&] { return ls.results.count(tok) > 0; }, o.timeoutSec);
+        if (got) { s.code = ls.results[tok].code; s.reason = ls.results[tok].reason; }
+        if (!got || s.code / 100 != 2) { s.outcome = got ? "alert_rejected" : "alert_timeout"; rc = 7; }
+        return finish(-1);
+    }
+
     if (o.cmd == "sds") {
         SdsSend sds = eng.sendGroupSds(acc, o.target, o.text);
         if (!sds.ok) { s.outcome = "sds_send_failed"; rc = 7; return finish(-1); }
-        bool got = ls.waitFor([&] { for (auto& kv : ls.results) if (kv.second.method == "MESSAGE") return true; return false; }, o.timeoutSec);
+        // 최종 결과는 발신 token 으로 — 시그널링 평면 = MESSAGE 응답, media plane = MSRP(저장소 200/REPORT)
+        bool got = ls.waitFor([&] { return ls.results.count(sds.token) > 0; }, o.timeoutSec);
         int code = 0;
-        for (auto& kv : ls.results) if (kv.second.method == "MESSAGE") { code = kv.second.code; s.reason = kv.second.reason; }
+        std::string plane = "signalling";
+        if (got) { const RequestResult& rr = ls.results[sds.token]; code = rr.code; s.reason = rr.reason; if (rr.method == "MSRP") plane = "media"; }
+        // media plane 은 서버가 저장·배포 뒤 발신 leg 를 BYE 한다 — 그 전에 엔진을 내리면 배포가 끊긴다. 코어의 자체 해제(5 s)까지 기다린다.
+        if (plane == "media") std::this_thread::sleep_for(std::chrono::seconds(6));
         s.code = code;
-        s.extra = ",\"msg_id\":\"" + sds.msgId + "\"";
+        s.extra = ",\"msg_id\":\"" + sds.msgId + "\",\"plane\":\"" + plane + "\",\"bytes\":" + std::to_string(o.text.size());
         if (!got || code / 100 != 2) { s.outcome = got ? "sds_rejected" : "sds_timeout"; rc = 7; }
         return finish(-1);
     }
 
     if (o.cmd == "sds-recv") {
         ls.waitFor([&] { return false; }, o.durationSec);
-        s.extra = ",\"sds_received\":" + std::to_string(ls.sds.size());
-        if (ls.sds.empty()) { s.outcome = "no_sds"; rc = 7; }
+        s.extra = ",\"sds_received\":" + std::to_string(ls.sds.size()) + ",\"alerts\":" + std::to_string(ls.alerts.size());
+        if (ls.sds.empty() && ls.alerts.empty()) { s.outcome = "no_sds"; rc = 7; }   // 경보만 받은 경우도 수신이다
         return finish(-1);
     }
 

@@ -28,6 +28,8 @@ using namespace cimsue;
 // 어느 것도 Java 에서 쓸 수 없고 값을 얻는 경로도 아니므로(오류 사유는 Result.reason 으로 온다)
 // 포인터를 받는 오버로드만 지운다 — 기본인자 쪽(err 생략)은 그대로 생성된다.
 %ignore cimsue::GroupDoc::parse(const std::string&, GroupDoc&, std::string*);
+%ignore cimsue::UserProfileDoc::parse(const std::string&, UserProfileDoc&, std::string*);
+%ignore cimsue::ServiceConfigDoc::parse(const std::string&, ServiceConfigDoc&, std::string*);
 %ignore cimsue::CscClient::parseProfile(const std::string&, Profile&, std::string*);
 // 전송 주입(http::ITransport)은 **아직 어느 플랫폼 SDK 에서도 열려 있지 않다** — 인터페이스가 내부 헤더
 // (src/http/https_client.h, "libcimsue 내부")에 있고 C API 에도 진입점이 없다(cimsue_csc_create 는 endpoint

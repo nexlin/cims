@@ -18,6 +18,7 @@ constexpr const char* kCtMcpttInfo = "application/vnd.3gpp.mcptt-info+xml";
 constexpr const char* kCtResourceLists = "application/resource-lists+xml";
 constexpr const char* kCtAffiliation = "application/vnd.3gpp.mcptt-affiliation-command+xml";
 constexpr const char* kCtConferenceInfo = "application/conference-info+xml";
+constexpr const char* kIcsiMcptt = "urn:urn-7:3gpp-service.ims.icsi.mcptt";
 
 /** mcptt-info (TS 24.379 §F.1). emergency/imminent: 0=미기재, 1=true, -1=false(명시 하향).
  *  broadcast = 일제 통화 개시 `<broadcast-ind>true`(§6.2.8.2) — session-type 은 prearranged 그대로. */
@@ -28,6 +29,17 @@ std::string mcpttInfo(const std::string& sessionType, const std::string& request
 std::string resourceLists(const std::vector<std::string>& memberUris);
 /** affiliation-command (TS 24.379 §F.3). */
 std::string affiliationCommand(const std::string& groupUri, bool affiliate);
+
+/** 긴급 경보 MESSAGE 본문(TS 24.379 §12.1.1.1·§12.1.1.2, 요소 순서 = §F.1 mcptt-ParamsType). callingUserId 는 규격상 서버가
+ *  채우는 값이지만 이 CSP 는 원본 본문을 그대로 팬아웃하므로 수신자가 발신자를 알 수 있게 싣는다. clientId 가 비면 요소를 뺀다.
+ *  emergency = 1/-1 이면 `emergency-ind` 를 싣는다(취소와 함께 그룹 긴급 해제 = -1, §12.1.1.2 5)). */
+std::string alertInfo(const std::string& groupUri, const std::string& callingUserId, const std::string& clientId,
+                      bool activate, const std::string& originatedBy = std::string(), int emergency = 0);
+/** mcptt-info 불리언 지시자 — 1 true / -1 false / 0 요소 없음(접두사 무관). */
+int indicator(const std::string& xml, const std::string& local);
+/** 긴급 경보·통지 MESSAGE 본문 해석(§12.1.1.3) — alert-ind·emergency-ind·imminentperil-ind 가 하나도 없으면 false.
+ *  accountId·self 와 userId 폴백(From)은 호출자가 채운다. */
+bool parseEmergencyAlert(const std::string& body, EmergencyAlert& out);
 
 /** 수신 SIP 원문(INVITE 등)에서 mcptt-info 요약 추출 — 없으면 present=false. */
 McpttInfo parseMcpttInfo(const std::string& wholeMsg);

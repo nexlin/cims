@@ -37,6 +37,20 @@ std::string mcpttInfo(const std::string& sessionType, const std::string& request
     return s;
 }
 
+std::string alertInfo(const std::string& groupUri, const std::string& callingUserId, const std::string& clientId,
+                      bool activate, const std::string& originatedBy, int emergency) {
+    std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+    s += std::string("<mcpttinfo xmlns=\"") + kNsMcpttInfo + "\">\n  <mcptt-Params>\n";
+    s += "    <mcptt-request-uri>" + xmlEscape(groupUri) + "</mcptt-request-uri>\n";
+    if (!callingUserId.empty()) s += "    <mcptt-calling-user-id>" + xmlEscape(callingUserId) + "</mcptt-calling-user-id>\n";
+    if (emergency) s += std::string("    <emergency-ind>") + (emergency > 0 ? "true" : "false") + "</emergency-ind>\n";
+    s += std::string("    <alert-ind>") + (activate ? "true" : "false") + "</alert-ind>\n";
+    if (!originatedBy.empty()) s += "    <originated-by>" + xmlEscape(originatedBy) + "</originated-by>\n";
+    if (!clientId.empty()) s += "    <mcptt-client-id>" + xmlEscape(clientId) + "</mcptt-client-id>\n";
+    s += "  </mcptt-Params>\n</mcpttinfo>\n";
+    return s;
+}
+
 std::string resourceLists(const std::vector<std::string>& members) {
     std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
     s += std::string("<resource-lists xmlns=\"") + kNsResourceLists + "\" xmlns:mcpttgi=\"" + kNsGroupInfo + "\">\n  <list>\n";
@@ -72,6 +86,58 @@ static std::string elemText(const std::string& s, const std::string& name) {
 
 static bool textIsTrue(const std::string& v) {
     return v == "true" || v == "1" || v == "TRUE" || v == "True";
+}
+
+/** 접두사 무관 요소 텍스트 — "<[p:]local" 첫 매치. 없으면 found=false. */
+static std::string localText(const std::string& s, const std::string& local, bool* found) {
+    *found = false;
+    size_t p = 0;
+    while ((p = s.find('<', p)) != std::string::npos) {
+        size_t q = p + 1, n = q;
+        while (n < s.size() && s[n] != '>' && s[n] != ' ' && s[n] != '/' && s[n] != '\t' && s[n] != '\r' && s[n] != '\n') ++n;
+        std::string tag = s.substr(q, n - q);
+        size_t colon = tag.find(':');
+        if (colon != std::string::npos) tag = tag.substr(colon + 1);
+        if (tag != local) { p = n; continue; }
+        size_t gt = s.find('>', p);
+        if (gt == std::string::npos) return std::string();
+        *found = true;
+        if (s[gt - 1] == '/') return std::string();
+        size_t e = s.find("</", gt);
+        if (e == std::string::npos) return std::string();
+        std::string v = s.substr(gt + 1, e - gt - 1);
+        size_t b = v.find_first_not_of(" \t\r\n"), t = v.find_last_not_of(" \t\r\n");
+        return b == std::string::npos ? std::string() : v.substr(b, t - b + 1);
+    }
+    return std::string();
+}
+
+int indicator(const std::string& xml, const std::string& local) {
+    bool f = false;
+    std::string v = localText(xml, local, &f);
+    if (!f) return 0;
+    return textIsTrue(v) ? 1 : -1;
+}
+
+bool parseEmergencyAlert(const std::string& body, EmergencyAlert& out) {
+    size_t p = body.find("mcpttinfo");
+    if (p == std::string::npos) return false;
+    std::string x = body.substr(p == 0 ? 0 : p - 1);
+    EmergencyAlert a;
+    a.accountId = out.accountId;
+    a.alertInd = indicator(x, "alert-ind");
+    a.emergencyInd = indicator(x, "emergency-ind");
+    a.imminentPerilInd = indicator(x, "imminentperil-ind");
+    if (!a.alertInd && !a.emergencyInd && !a.imminentPerilInd) return false;
+    bool f = false;
+    std::string g = localText(x, "mcptt-calling-group-id", &f);
+    if (g.empty()) g = localText(x, "mcptt-request-uri", &f);
+    a.groupId = bareId(g);
+    a.userId = bareId(localText(x, "mcptt-calling-user-id", &f));
+    a.originatedBy = bareId(localText(x, "originated-by", &f));
+    a.mcOrg = localText(x, "mc-org", &f);
+    out = a;
+    return true;
 }
 
 McpttInfo parseMcpttInfo(const std::string& whole) {

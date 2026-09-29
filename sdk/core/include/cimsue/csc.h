@@ -128,6 +128,65 @@ struct GroupDoc {
 };
 constexpr const char* kCtGroupDoc = "application/vnd.oma.poc.groups+xml";
 
+/** CMS 문서의 대상 항목 — EntryType(TS 24.484 §8.3.2.7): uri = `<uri-entry>`, mode = `entry-info` 속성
+ *  (그룹 = DedicatedGroup | UseCurrentlySelectedGroup, 사설 수신자 = UsePreConfigured | LocallyDetermined).
+ *  서버는 미결정 모드에도 폴백 uri 를 채운다(mcptt_emergency_modes.md) — 대상 선택 정책은 앱 몫이다. */
+struct CmsEntry { std::string uri, mode; };
+
+/** MCPTT user profile(TS 24.484 §8.3.2, CMS XCAP `application/vnd.3gpp.mcptt-user-profile+xml`) — 코어가 해석하는 요소만.
+ *  인가는 `<cp:ruleset>` 의 allow-*(RFC 4745 actions)이고 **요소가 없으면 허용**으로 읽는다 — 서버가 최종 판정(403·Floor Deny)하므로
+ *  앱은 UX 선차단만 한다(ue_sdk.md §4.2, android_ue_client.md §7). */
+struct UserProfileDoc {
+    std::string etag;                          // 호출자가 XcapDoc.etag 로 채운다(parse 는 유지)
+    bool notModified = false;                  // fetchUserProfile 이 304 를 받았다 — 나머지 필드는 호출자 사본 그대로
+    std::string userUri;                       // 루트 XUI-URI
+    CmsEntry emergencyGroup;                   // MCPTT-group-call/EmergencyCall/MCPTTGroupInitiation/entry (§8.3.2.1 8e)
+    CmsEntry imminentPerilGroup;               // MCPTT-group-call/ImminentPerilCall/MCPTTGroupInitiation/entry
+    CmsEntry emergencyAlertGroup;              // MCPTT-group-call/EmergencyAlert/entry
+    CmsEntry emergencyPrivateRecipient;        // PrivateCall/EmergencyCall/MCPTTPrivateRecipient/entry (§8.3.2.1 8d)
+    std::vector<std::string> groups;           // OnNetwork/MCPTTGroupInfo — 제휴 가능 그룹 URI
+    std::vector<std::string> implicitAffiliations;   // OnNetwork/ImplicitAffiliations
+    int maxAffiliationsN2 = -1;                // OnNetwork/MaxAffiliationsN2 (-1 = 미기재)
+    bool allowEmergencyGroupCall = true;       // allow-emergency-group-call
+    bool allowImminentPerilCall = true;        // allow-imminent-peril-call
+    bool allowActivateEmergencyAlert = true;   // allow-activate-emergency-alert
+    bool allowCancelEmergencyAlert = true;     // allow-cancel-emergency-alert
+    bool allowEmergencyPrivateCall = true;     // allow-emergency-private-call
+    bool allowAdhocGroupCall = true;           // cims:allow-adhoc-group-call (사이트 확장)
+    /** XML → 문서. 루트가 mcptt-user-profile 이 아니면 false. */
+    CIMSUE_API static bool parse(const std::string& xml, UserProfileDoc& out, std::string* err = nullptr);
+};
+
+/** MCPTT service configuration(TS 24.484 §8.2, `application/vnd.3gpp.mcptt-service-config+xml`) — 시스템 전역 정책.
+ *  사용자 인가(user profile)를 넓히지 못하므로 두 문서는 AND 로 쓴다(Capabilities). 요소가 없으면 허용. */
+struct ServiceConfigDoc {
+    std::string etag;
+    bool notModified = false;                  // fetchServiceConfig 이 304 를 받았다
+    bool allowPrivateCall = true;              // allow-private-call
+    bool allowEmergencyCall = true;            // allow-emergency-call
+    bool allowAlert = true;                    // allow-alert
+    bool allowTransmitRequest = true;          // on-network/allow-transmit-request
+    int maxAffiliationsN2 = -1;                // on-network/max-on-network-affiliations-N2 > max-affiliations-N2 (-1 = 미기재)
+    CIMSUE_API static bool parse(const std::string& xml, ServiceConfigDoc& out, std::string* err = nullptr);
+};
+
+/** 정책 게이트 스냅샷(ue_sdk.md §4.2) — user profile ∧ service config. **받지 못한 문서는 허용**으로 둔다(게이트를 걸지 않는다).
+ *  UX 선차단(버튼 숨김·안내)용이며 최종 판정은 서버다. */
+struct Capabilities {
+    bool userProfileKnown = false, serviceConfigKnown = false;
+    bool privateCall = true;                   // sc.allow-private-call
+    bool emergencyGroupCall = true;            // up.allow-emergency-group-call ∧ sc.allow-emergency-call
+    bool imminentPerilCall = true;             // up.allow-imminent-peril-call ∧ sc.allow-emergency-call
+    bool emergencyPrivateCall = true;          // sc.allow-private-call ∧ up.allow-emergency-private-call
+    bool emergencyAlert = true;                // up.allow-activate-emergency-alert ∧ sc.allow-alert
+    bool cancelEmergencyAlert = true;          // up.allow-cancel-emergency-alert ∧ sc.allow-alert
+    bool adhocGroupCall = true;                // up.cims:allow-adhoc-group-call
+    bool transmitRequest = true;               // sc.allow-transmit-request (on-network)
+    int maxAffiliationsN2 = 0;                 // sc > up, 0 = 미지정(N2 는 앱이 경고만 — 강제하지 않는다)
+    /** nullptr = 그 문서를 아직 못 받음. */
+    CIMSUE_API static Capabilities of(const UserProfileDoc* userProfile, const ServiceConfigDoc* serviceConfig);
+};
+
 class CIMSUE_API CscClient {
 public:
     explicit CscClient(const CscEndpoint& ep, std::shared_ptr<http::ITransport> transport = nullptr);
@@ -171,6 +230,13 @@ public:
         return xcapGet(accessToken, "/org.3gpp.mcptt.service-config/users/" + enc(userUri) + "/service-config",
                        "application/vnd.3gpp.mcptt-service-config+xml", etag, out);
     }
+    /** user-profile GET + 해석(If-None-Match = etag). 304 면 out.notModified=true 만 세우고 나머지는 건드리지 않는다(앱이 가진
+     *  사본 유지 — XcapDoc 과 같은 규약). 해석 실패는 fail(-2) — getGroup 과 같다. */
+    Result fetchUserProfile(const std::string& accessToken, const std::string& userUri, const std::string& etag,
+                            UserProfileDoc& out);
+    /** service-config GET + 해석 — fetchUserProfile 과 같은 규약. */
+    Result fetchServiceConfig(const std::string& accessToken, const std::string& userUri, const std::string& etag,
+                              ServiceConfigDoc& out);
 
     // ── GMS 그룹 관리(TS 24.481 — 그룹 생성·수정·삭제 주체 = authorized user, XCAP PUT/DELETE, PKCE 토큰) ──
     /** 그룹 문서 GET → GroupDoc(etag 포함). userUri 는 자기 XCAP 트리(토큰 mcptt_id). */

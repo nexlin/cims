@@ -47,12 +47,14 @@ public:
     Result hangup(int callId);
     Result hold(int callId);
     Result resume(int callId);
-    /** 마이크 → 호 송신 차단/복구. MCPTT 세션에서는 floor 가 마이크를 게이트하므로 무시된다. */
+    /** 마이크 → 호 송신 차단/복구. 반이중 MCPTT 세션에서는 floor 가 마이크를 게이트하므로 무시되고, 전이중 사설콜
+     *  (mc_no_floor_ctrl)에서는 앱의 PTT 로컬 게이트로 쓴다(누르면 승인 톤 뒤 false, 떼면 true). */
     Result setMuted(int callId, bool muted);
     /** 호 → 스피커 청취 on/off (멀티 채널 듣기 정책). */
     Result setListen(int callId, bool listen);
     /** 수신 음량 — 이 호에서 **듣는** 크기(1.0=원음, 0=무음). 보내는 크기는 바꾸지 않는다(마이크 레벨은
-     *  엔진 AGC 가 맞춘다 — ue_audio_level.md). */
+     *  엔진 AGC 가 맞춘다 — ue_audio_level.md). 값은 호에 기억되어 오디오가 아직 없거나(성립 전·보류) 재협상으로 스트림이
+     *  바뀌어도 다음 결선에 걸린다(채널 음량 — 앱이 매번 다시 걸 필요가 없다). 음수는 실패. */
     Result setRxLevel(int callId, float level);
     Result sendDtmf(int callId, const std::string& digits);
     CallInfo callInfo(int callId) const;
@@ -86,6 +88,18 @@ public:
     Result floorQueueCancel(int callId);
     FloorInfo floorInfo(int callId) const;
 
+    /** 진행 중 그룹콜의 조건 상향·하향(TS 24.379 §10.1.1.2.1.3~5) — in-dialog re-INVITE: multipart mcptt-info(바뀐 지시자를
+     *  `emergency-ind`/`imminentperil-ind` true·false 로 명시) + Resource-Priority(§6.2.8.1.2·§6.2.8.1.12 — AccountConfig.rp*), SDP 는
+     *  협상된 그대로(floor 섹션 재주입). 조건은 보내면서 반영하고(onMcpttCondition Local), 2xx = Confirmed, 4xx~6xx = 이전 값으로
+     *  되돌려 Denied — 재-INVITE 거절은 호를 끊지 않는다. emergency·imminentPeril 을 함께 true 로 줄 수 없다(긴급이 임박을 대체).
+     *  바뀐 것이 없으면 보내지 않는다. 사설콜·응답 대기 중·성립 전 호는 실패. */
+    Result setCallCondition(int callId, bool emergency, bool imminentPeril);
+    /** 긴급 경보 발신·취소(TS 24.379 §12.1.1.1·§12.1.1.2) — SIP MESSAGE, mcptt-info `alert-ind`(+ `mcptt-client-id`) + ICSI mcptt
+     *  (P-Preferred-Service·Accept-Contact). groupId bare. originatedBy = 다른 사용자의 경보를 취소할 때 그 사용자 MCPTT ID
+     *  (§12.1.1.2 4)e)), cancelGroupEmergency = 취소와 함께 그룹의 진행 중 긴급 상태도 해제(§12.1.1.2 5) — `emergency-ind` false).
+     *  반환 token(onRequestResult MESSAGE 상관), 실패 -1. 경보 인가는 서버가 판정한다(미인가 = 전파 없음). */
+    int64_t sendEmergencyAlert(int accountId, const std::string& groupId, bool activate,
+                               const std::string& originatedBy = std::string(), bool cancelGroupEmergency = false);
     /** affiliation PUBLISH(TS 24.379 §9, Event: mcptt). on=false 면 Expires:0. 반환 token(onRequestResult 상관). */
     int64_t affiliate(int accountId, const std::string& groupId, bool on);
     /** 그룹 로스터 구독(RFC 4575 conference, 엔진 패치 evsub) — 확인 신호는 onRoster NOTIFY. */

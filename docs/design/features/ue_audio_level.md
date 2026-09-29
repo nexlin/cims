@@ -133,7 +133,8 @@ pjsua2 `AudDevManager::setCaptureAgc(enable, targetDbov)`. 목표는 -40..-10 dB
 | PTT 채널 상세 | 수신 음량 0~2 | 그 그룹 통화의 듣는 크기 | 신규 그룹 2 |
 | PTT | 전 통화 종료 | 스피커 ×1.0 · 마이크 목표 -26 으로 원복 | — |
 | VoLTE | (조작 없음) | 마이크 AGC 기본 -26 dBov | — |
-| SDK `setRxLevel` | 관제 감청 창 음량 등 | 그 호의 듣는 크기 | 1 |
+| SDK `setRxLevel` | 관제 감청 창 음량·PTT 채널 음량 | 그 호의 듣는 크기 — 호에 기억되어 재결선(재협상·보류 해제)마다 다시 걸린다 | 1 |
+| SDK `EngineConfig.grantMicDelayMs` | 승인 톤 길이 | Floor Granted 뒤 마이크 개방 지연(그 사이 발언을 잃으면 열지 않음) | 0 |
 | SDK `setDeviceAudioLevels` | 앱이 PTT 설정 슬라이더를 옮길 때 | 스피커 배율 · 마이크 AGC 목표(dBov — 슬라이더 값 → 목표 환산 `-26 + 20·log10(값)` 은 앱) | 부르기 전까지 엔진 기본(×1 · -26) |
 
 - 스피커 배율 × 채널 음량은 곱으로 적용되고(최대 ×6), 초과는 리미터가 막는다.

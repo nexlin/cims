@@ -150,3 +150,19 @@ SDK 반영은 끝났고(`GroupDoc` 이 TS 24.481 요소 다섯을 더 싣는다)
 
 .48 에서 반영·배포(csp 0.2.165)·실측했다 — 정본 [mcptt_broadcast_group_call.md](../design/features/mcptt_broadcast_group_call.md) R13·R14 판정 ✅.
 .45 스택에 올릴 때는 csp 0.2.165 이상. 단말 동작은 바뀌지 않는다(SDK 는 두 속성을 함께 싣는다).
+
+## 9. 단말 SDK P0b 실측에서 드러난 서버 과제 (.48 몫)
+
+.45 에서 SDK 코어(긴급·경보·MSRP)를 실서버로 시험하며 본 것이다([sdk_port_handoff.md](sdk_port_handoff.md) §4). 단말은 현 동작에 맞춰 보낸다.
+
+| # | 영향 | 위치 | 문제 | 규격 | 방향 |
+|---|---|---|---|---|---|
+| M1 | 중 | CSP `McDataMediaService::OnCmdpEvent` | 발신 leg 가 cmdp 의 `MSRP_MSG_RECEIVED` 보다 먼저 끝나면(단말이 REPORT 뒤 BYE) 수신 통지를 `unknown session — dup/late` 로 버려 **배포가 사라진다**(발신자는 200·REPORT 를 받았다) | RFC 4975 §7.1.2(Success-Report 뒤 세션 종료는 발신자 재량) · TS 24.282 §9.2.3 | 세션 제거를 이벤트 처리 뒤로(또는 file_id 로 배포) |
+| M2 | 하 | CSP 긴급 경보(`ModuleDispatcher.cpp` ~2489) | Request-URI 를 그룹으로 받아 To 로 게이트·팬아웃한다 — 규격은 참여 기능 PSI + 본문 `mcptt-request-uri` | TS 24.379 §12.1.1.1 8) | PSI 수신 + 본문 그룹 해석(그룹 URI 수신은 전환기 병행) |
+| M3 | 하 | 같은 곳 | 팬아웃이 발신 원본 본문 그대로다 — 규격은 제어 기능이 `mcptt-calling-group-id`·`mcptt-calling-user-id` 를 채워 새로 만든다 | TS 24.379 §12.1.3 | 팬아웃 본문 재작성 |
+| M4 | 하 | CSC `get_user_profile_xml` | ad hoc 인가를 `<cims:allow-adhoc-group-call>` 로 낸다 — 규격 요소는 `<allow-adhoc-group-call>` | TS 24.484 §8.3.2.1 | 규격 요소로(단말 코어는 둘 다 읽는다) |
+| M5 | 하 | CSC `get_service_config_xml` | OnNetwork `emergency-resource-priority`·`imminent-peril-resource-priority`·`normal-resource-priority` 가 없다 — 단말이 Resource-Priority 값을 모른다(코어 기본값 = CSP 의 mcpttp.15/.8/.0) | TS 24.379 §6.2.8.1.15 · TS 24.484 | 서비스 설정에 세 요소(값 = CSP fan-out 과 같게) |
+
+- 참고(설정): 계측기 그룹 g005 는 그룹 능력 `emergency_call` 이 꺼져 있어 긴급 상향이 403(`denied (group capability)`)이다 — 긴급 확정 경로 실측에는
+  능력이 켜진 그룹이 필요하다.
+

@@ -77,9 +77,11 @@ add_library(cimsue_objs OBJECT
     src/floor/floor_participant.cpp
     src/mcptt/mcptt_xml.cpp
     src/mcdata/sds_codec.cpp
+    src/mcdata/msrp.cpp
     src/http/https_client.cpp
     src/csc/csc_client.cpp
     src/csc/group_doc.cpp
+    src/csc/cms_doc.cpp
     src/c_api.cpp
     src/quality/call_quality.cpp
     src/net/tls_stream.cpp
@@ -156,7 +158,9 @@ if(DEFINED GTEST_DIR)
         test/c_api_test.cpp
         test/quality_test.cpp
         test/drive_test.cpp
-        test/affiliation_publish_test.cpp)
+        test/affiliation_publish_test.cpp
+        test/mcptt_condition_test.cpp
+        test/msrp_test.cpp)
     target_include_directories(cimsue_test PRIVATE ${GTEST_INC} ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_link_directories(cimsue_test PRIVATE ${GTEST_LIB_PATH} ${GTEST_DIR}/lib)   # 설치 산출물은 lib/ (루트 변수 lib64 는 구 경로)
     if(WIN32)

@@ -204,6 +204,19 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
   빨강 깜빡임·🚨·그룹 표기 "긴급 통화")로 시각 구분. 비개시자 배너에는 로컬 [닫기](표시
   latch 만 해제)를 둔다 — 취소 신호 유실 대비 탈출구.
 
+- **단말 SDK 코어**(`libcimsue`, [ue_sdk.md](ue_sdk.md) §4.2 «긴급·임박 세션 조건»): 위 단말 절차 중 **규격 절차**를 코어가 가진다 —
+  상향·하향 re-INVITE(`Engine::setCallCondition` — 바뀐 지시자만 true/false 명시 + `Resource-Priority`, 4xx~6xx 면 이전 값 복원),
+  서버 재광고 해석(수신 re-INVITE·조인 200 OK, emergency-ind true 는 임박을 내린다 §10.1.1.2.1.6), 경보 MESSAGE 빌드·해석
+  (`sendEmergencyAlert`·`onEmergencyAlert` — `mcptt-client-id`·ICSI mcptt P-Preferred-Service/Accept-Contact, 수신 그룹은
+  `mcptt-calling-group-id` 우선). SOS 대상 결정·403 뒤 normal 재발신·경보 정합(`reconcileAlertAfterDenied`)·배너는 앱 정책으로 남는다.
+- **규격 대비 편차(서버)** — 단말은 현 CSP 에 맞춰 보낸다:
+
+  | 항목 | 규격(TS 24.379) | CSP 현행 | 단말 대응 |
+  |---|---|---|---|
+  | 경보 MESSAGE Request-URI | 참여 기능 PSI, 그룹은 본문 `mcptt-request-uri`(§12.1.1.1 8)) | To(그룹 URI)로 게이트·팬아웃 | 그룹 URI 로 보낸다 |
+  | 경보 팬아웃 본문 | 제어 기능이 `mcptt-calling-group-id`·`mcptt-calling-user-id` 를 채워 새로 만든다(§12.1.3) | 발신 원본 본문 그대로 | 발신 본문에 `mcptt-calling-user-id` 를 싣고, 수신은 calling-group-id 가 없으면 request-uri 를 그룹으로 |
+  | Resource-Priority 값 | service-config OnNetwork `*-resource-priority`(§6.2.8.1.15) | service-config 에 없음 | 코어 기본값 = CSP fan-out 의 mcpttp.15/.8/.0 |
+
 ### 4.4 상태/로깅
 
 `CallDir::PttLogEvent` 신규 type: `emergency_activated|emergency_cancelled|imminent_activated|imminent_cancelled|alert_sent|alert_cancelled` (+ actor, reason). `BuildGroupDescriptor`(group.json)에 `inprogress_emergency` 등 반영.

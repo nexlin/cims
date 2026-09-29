@@ -54,6 +54,7 @@ AccountConfig ServiceProfile::toAccount(const std::string& loginPw) const {
     a.authScheme = authScheme; a.akaK = akaK; a.akaOpc = akaOpc; a.akaAmf = akaAmf;
     a.secMechanisms = secMechanisms; a.mediaSecurity = mediaSecurity;
     a.mcpttId = mcpttId;
+    a.maxSdsCplaneBytes = maxPayloadSdsCplaneBytes;                       // 넘는 그룹 SDS 는 media plane(TS 24.282 §9.2.3)
     return a;
 }
 
@@ -256,6 +257,32 @@ Result CscClient::getGroup(const std::string& accessToken, const std::string& us
     std::string err;
     GroupDoc d; d.etag = doc.etag;
     if (!GroupDoc::parse(doc.body, d, &err)) return Result::fail(-2, "group doc: " + err);
+    out = d;
+    return Result::success();
+}
+
+Result CscClient::fetchUserProfile(const std::string& accessToken, const std::string& userUri, const std::string& etag,
+                                   UserProfileDoc& out) {
+    XcapDoc doc;
+    Result r = getUserProfile(accessToken, userUri, etag, doc);
+    if (!r.ok) return r;
+    if (doc.notModified) { out.notModified = true; return Result::success(); }
+    std::string err;
+    UserProfileDoc d; d.etag = doc.etag;
+    if (!UserProfileDoc::parse(doc.body, d, &err)) return Result::fail(-2, "user-profile: " + err);
+    out = d;
+    return Result::success();
+}
+
+Result CscClient::fetchServiceConfig(const std::string& accessToken, const std::string& userUri, const std::string& etag,
+                                     ServiceConfigDoc& out) {
+    XcapDoc doc;
+    Result r = getServiceConfig(accessToken, userUri, etag, doc);
+    if (!r.ok) return r;
+    if (doc.notModified) { out.notModified = true; return Result::success(); }
+    std::string err;
+    ServiceConfigDoc d; d.etag = doc.etag;
+    if (!ServiceConfigDoc::parse(doc.body, d, &err)) return Result::fail(-2, "service-config: " + err);
     out = d;
     return Result::success();
 }

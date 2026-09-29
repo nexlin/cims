@@ -1,0 +1,303 @@
+// libcimsue 단위시험 — MCPTT 세션 조건(긴급·임박)과 긴급 경보 (S1-UE-UNIT)
+//   헤드리스 엔진 + 루프백 가짜 서버(UDP). 그룹콜을 세운 뒤
+//   ① 상향 re-INVITE 403 → Denied(이전 값 복원, 호 유지 — TS 24.379 §6.2.8.1.5·§6.3.3.1.14)
+//   ② 상향 re-INVITE 200 → Confirmed(+ Resource-Priority·mcptt-info emergency-ind — §10.1.1.2.1.3)
+//   ③ 서버 하향 재광고 re-INVITE → Advertised(§10.1.1.2.1.6)
+//   ④ 경보 MESSAGE 발신 본문·헤더(§12.1.1.1)와 수신 → onEmergencyAlert(§12.1.1.3)
+#include <gtest/gtest.h>
+
+#include <pjlib.h>
+
+#include <chrono>
+#include <condition_variable>
+#include <cstdio>
+#include <cstdlib>
+#include <mutex>
+#include <string>
+#include <vector>
+
+#include "../src/mcptt/mcptt_xml.h"
+#include "cimsue/cimsue.h"
+#include "pj_scope.h"
+
+using namespace cimsue;
+
+namespace {
+
+struct CondListener : Listener {
+    void onLog(int lv, const std::string& m) override { if (std::getenv("COND_LOG")) std::fprintf(stderr, "[%d] %s\n", lv, m.c_str()); }
+    std::mutex m;
+    std::condition_variable cv;
+    std::vector<std::pair<CallInfo, ConditionCause>> conds;
+    std::vector<EmergencyAlert> alerts;
+    std::vector<RequestResult> results;
+    CallInfo lastState;
+    void onCallState(const CallInfo& i) override { { std::lock_guard<std::mutex> lk(m); lastState = i; } cv.notify_all(); }
+    void onMcpttCondition(const CallInfo& i, ConditionCause c) override {
+        { std::lock_guard<std::mutex> lk(m); conds.emplace_back(i, c); }
+        cv.notify_all();
+    }
+    void onEmergencyAlert(const EmergencyAlert& a) override { { std::lock_guard<std::mutex> lk(m); alerts.push_back(a); } cv.notify_all(); }
+    void onRequestResult(const RequestResult& r) override { { std::lock_guard<std::mutex> lk(m); results.push_back(r); } cv.notify_all(); }
+    template <class P> bool wait(P pred, int ms = 3000) {
+        std::unique_lock<std::mutex> lk(m);
+        return cv.wait_for(lk, std::chrono::milliseconds(ms), [&] { return pred(); });
+    }
+};
+
+std::string headerOf(const std::string& msg, const std::string& name) {
+    size_t p = 0;
+    while ((p = msg.find("\r\n", p)) != std::string::npos) {
+        p += 2;
+        if (msg.compare(p, name.size() + 1, name + ":") == 0) {
+            size_t v = p + name.size() + 1, e = msg.find("\r\n", v);
+            while (v < e && msg[v] == ' ') ++v;
+            return msg.substr(v, e - v);
+        }
+    }
+    return "";
+}
+
+std::string uriIn(const std::string& h) {                  // "<sip:…>;tag=x" → sip:…
+    size_t a = h.find('<'), b = h.find('>');
+    return a == std::string::npos || b == std::string::npos ? h : h.substr(a + 1, b - a - 1);
+}
+
+std::string sdp(int version) {
+    return "v=0\r\no=- 1 " + std::to_string(version) + " IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"
+           "m=audio 40000 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\na=sendrecv\r\n"
+           "m=application 40002 udp MCPTT\r\na=fmtp:MCPTT mc_queueing\r\n";
+}
+
+/** 그룹콜 서버 자리 — INVITE 에 답하고, in-dialog 요청을 보낸다. */
+struct FakeServer {
+    pj_sock_t s = PJ_INVALID_SOCKET;
+    int port = 0;
+    pj_sockaddr_in peer;
+    std::string callId, ueFrom, ueContact;                 // 첫 INVITE 에서 배운 dialog
+    int cseq = 100;
+    FakeServer() {
+        pj_sock_socket(pj_AF_INET(), pj_SOCK_DGRAM(), 0, &s);
+        pj_sockaddr_in a;
+        pj_str_t ip = pj_str(const_cast<char*>("127.0.0.1"));
+        pj_sockaddr_in_init(&a, &ip, 0);
+        pj_sock_bind(s, &a, sizeof(a));
+        int l = sizeof(a);
+        pj_sock_getsockname(s, &a, &l);
+        port = pj_ntohs(a.sin_port);
+    }
+    ~FakeServer() { if (s != PJ_INVALID_SOCKET) pj_sock_close(s); }
+
+    /** prefix 로 시작하는 메시지 한 건(다른 것은 건너뛴다). */
+    std::string recv(const std::string& prefix, int ms = 3000) {
+        auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+        while (std::chrono::steady_clock::now() < end) {
+            pj_fd_set_t fds;
+            PJ_FD_ZERO(&fds);
+            PJ_FD_SET(s, &fds);
+            pj_time_val tv = {0, 50};
+            if (pj_sock_select((int)s + 1, &fds, nullptr, nullptr, &tv) <= 0) continue;
+            char buf[16384];
+            pj_ssize_t n = sizeof(buf) - 1;
+            int al = sizeof(peer);
+            if (pj_sock_recvfrom(s, buf, &n, 0, &peer, &al) != PJ_SUCCESS || n <= 0) continue;
+            std::string msg(buf, (size_t)n);
+            if (msg.compare(0, prefix.size(), prefix) == 0) return msg;
+        }
+        return "";
+    }
+    void send(const std::string& m) {
+        pj_ssize_t len = (pj_ssize_t)m.size();
+        pj_sock_sendto(s, m.data(), &len, 0, &peer, sizeof(peer));
+    }
+    void reply(const std::string& req, int code, const char* reason, const std::string& ct = "", const std::string& body = "") {
+        std::string r = "SIP/2.0 " + std::to_string(code) + " " + reason + "\r\n";
+        size_t p = 0;
+        while ((p = req.find("\r\nVia:", p)) != std::string::npos) {
+            size_t e = req.find("\r\n", p + 2);
+            r += req.substr(p + 2, e - p - 2) + "\r\n";
+            p = e;
+        }
+        std::string to = headerOf(req, "To");
+        if (to.find(";tag=") == std::string::npos) to += ";tag=srv";
+        r += "From: " + headerOf(req, "From") + "\r\nTo: " + to + "\r\nCall-ID: " + headerOf(req, "Call-ID") + "\r\n" +
+             "CSeq: " + headerOf(req, "CSeq") + "\r\nContact: <sip:srv@127.0.0.1:" + std::to_string(port) + ">\r\n";
+        if (!ct.empty()) r += "Content-Type: " + ct + "\r\n";
+        r += "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
+        send(r);
+    }
+    /** 서버발 in-dialog re-INVITE — multipart(SDP + mcptt-info). */
+    void reinvite(const std::string& mcpttInfo, int sdpVersion) {
+        const std::string b = "b1";
+        std::string body = "--" + b + "\r\nContent-Type: application/sdp\r\n\r\n" + sdp(sdpVersion) +
+                           "--" + b + "\r\nContent-Type: application/vnd.3gpp.mcptt-info+xml\r\n\r\n" + mcpttInfo + "\r\n--" + b + "--\r\n";
+        std::string r = "INVITE " + ueContact + " SIP/2.0\r\n" +
+                        "Via: SIP/2.0/UDP 127.0.0.1:" + std::to_string(port) + ";branch=z9hG4bKsrv" + std::to_string(cseq) + "\r\n" +
+                        "Max-Forwards: 70\r\nFrom: <sip:g001@ptt.test>;tag=srv\r\nTo: " + ueFrom + "\r\nCall-ID: " + callId + "\r\n" +
+                        "CSeq: " + std::to_string(++cseq) + " INVITE\r\nContact: <sip:srv@127.0.0.1:" + std::to_string(port) + ">\r\n" +
+                        "Content-Type: multipart/mixed;boundary=" + b + "\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
+        send(r);
+    }
+    void ackFor(const std::string& resp) {                 // 2xx 에 대한 ACK(새 트랜잭션)
+        std::string r = "ACK " + ueContact + " SIP/2.0\r\nVia: SIP/2.0/UDP 127.0.0.1:" + std::to_string(port) +
+                        ";branch=z9hG4bKack" + std::to_string(cseq) + "\r\nMax-Forwards: 70\r\n" +
+                        "From: " + headerOf(resp, "From") + "\r\nTo: " + headerOf(resp, "To") + "\r\nCall-ID: " + callId +
+                        "\r\nCSeq: " + std::to_string(cseq) + " ACK\r\nContent-Length: 0\r\n\r\n";
+        send(r);
+    }
+};
+
+}  // namespace
+
+TEST(McpttCondition, UpgradeDeniedConfirmedAndAdvertised) {
+    Engine eng;
+    CondListener l;
+    EngineConfig cfg;
+    cfg.logLevel = std::getenv("COND_LOG") ? 5 : 0;
+    cfg.nullAudioDevice = true;
+    ASSERT_TRUE(eng.start(cfg, &l).ok);
+    {
+        cimsue_test::PjScope pj("cond-test");
+        FakeServer srv;
+        AccountConfig ac;
+        ac.serverHost = "127.0.0.1"; ac.serverPort = srv.port; ac.transport = Transport::UDP;
+        ac.domain = "ptt.test"; ac.msisdn = "+82500000001"; ac.authId = "450000000000001@ptt.test"; ac.password = "x";
+        ac.instanceId = "urn:uuid:00000000-0000-4000-8000-000000000001";
+        int acc = eng.addAccount(ac);
+        ASSERT_GE(acc, 0);
+
+        int callId = eng.joinGroupCall(acc, "g001");
+        ASSERT_GE(callId, 0);
+        std::string inv = srv.recv("INVITE ");
+        ASSERT_FALSE(inv.empty());
+        EXPECT_EQ(headerOf(inv, "Resource-Priority"), "");                 // 일반 그룹콜은 싣지 않는다
+        srv.callId = headerOf(inv, "Call-ID");
+        srv.ueFrom = headerOf(inv, "From");
+        srv.ueContact = uriIn(headerOf(inv, "Contact"));
+        srv.reply(inv, 200, "OK", "application/sdp", sdp(1));
+        ASSERT_FALSE(srv.recv("ACK ").empty());
+        ASSERT_TRUE(l.wait([&] { return l.lastState.state == CallState::Active; }));
+        EXPECT_FALSE(eng.callInfo(callId).condition.emergency);
+
+        // ① 상향 → 403 + mcptt-info(emergency-ind false) — Local 뒤 Denied, 호는 그대로
+        ASSERT_TRUE(eng.setCallCondition(callId, true, false).ok);
+        EXPECT_FALSE(eng.setCallCondition(callId, false, false).ok);        // 응답 대기 중
+        std::string up1 = srv.recv("INVITE ");
+        ASSERT_FALSE(up1.empty());
+        EXPECT_NE(up1.find("<emergency-ind>true</emergency-ind>"), std::string::npos);
+        EXPECT_EQ(headerOf(up1, "Resource-Priority"), "mcpttp.15");
+        EXPECT_NE(up1.find("m=application"), std::string::npos);            // floor 섹션 재주입
+        srv.reply(up1, 403, "Forbidden", "application/vnd.3gpp.mcptt-info+xml",
+                  "<mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\"><mcptt-Params><emergency-ind>false</emergency-ind>"
+                  "</mcptt-Params></mcpttinfo>");
+        ASSERT_TRUE(l.wait([&] { return l.conds.size() >= 2; }));
+        EXPECT_EQ(l.conds[0].second, ConditionCause::Local);
+        EXPECT_TRUE(l.conds[0].first.condition.emergency);
+        EXPECT_TRUE(l.conds[0].first.condition.pending);
+        EXPECT_EQ(l.conds[1].second, ConditionCause::Denied);
+        EXPECT_FALSE(l.conds[1].first.condition.emergency);
+        EXPECT_FALSE(l.conds[1].first.condition.mine);
+        EXPECT_EQ(l.conds[1].first.condition.lastCode, 403);
+        EXPECT_EQ(eng.callInfo(callId).state, CallState::Active);
+
+        // ② 다시 상향 → 200 — Confirmed, mine
+        ASSERT_TRUE(eng.setCallCondition(callId, true, false).ok);
+        std::string up2 = srv.recv("INVITE ");
+        ASSERT_FALSE(up2.empty());
+        srv.reply(up2, 200, "OK", "application/sdp", sdp(2));
+        ASSERT_TRUE(l.wait([&] { return l.conds.size() >= 4; }));
+        EXPECT_EQ(l.conds[3].second, ConditionCause::Confirmed);
+        EXPECT_TRUE(l.conds[3].first.condition.emergency);
+        EXPECT_TRUE(l.conds[3].first.condition.mine);
+        EXPECT_FALSE(l.conds[3].first.condition.pending);
+        EXPECT_TRUE(eng.setCallCondition(callId, true, false).ok);          // 바뀐 것 없음 — 보내지 않는다
+        EXPECT_FALSE(eng.setCallCondition(callId, true, true).ok);          // 긴급·임박 동시 불가
+
+        // ③ 서버 하향 재광고(권한자 취소 전파) — Advertised, 조건 해제
+        srv.reinvite("<mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\"><mcptt-Params><session-type>prearranged</session-type>"
+                     "<emergency-ind>false</emergency-ind></mcptt-Params></mcpttinfo>", 3);
+        std::string ok = srv.recv("SIP/2.0 200");
+        ASSERT_FALSE(ok.empty());
+        srv.ackFor(ok);
+        ASSERT_TRUE(l.wait([&] { return l.conds.size() >= 5; }));
+        EXPECT_EQ(l.conds[4].second, ConditionCause::Advertised);
+        EXPECT_FALSE(l.conds[4].first.condition.emergency);
+        EXPECT_FALSE(l.conds[4].first.condition.mine);
+        EXPECT_FALSE(eng.callInfo(callId).condition.emergency);
+
+        // ④ 경보 발신 — ICSI 헤더·mcptt-client-id(instanceId 가 urn:uuid:)·Request-URI = 그룹
+        int64_t tok = eng.sendEmergencyAlert(acc, "g001", true);
+        ASSERT_GE(tok, 0);
+        std::string msg = srv.recv("MESSAGE ");
+        ASSERT_FALSE(msg.empty());
+        EXPECT_EQ(msg.rfind("MESSAGE sip:g001@ptt.test ", 0), 0u);
+        EXPECT_EQ(headerOf(msg, "P-Preferred-Service"), "urn:urn-7:3gpp-service.ims.icsi.mcptt");
+        EXPECT_NE(headerOf(msg, "Accept-Contact").find("require;explicit"), std::string::npos);
+        EXPECT_NE(headerOf(msg, "Content-Type").find("vnd.3gpp.mcptt-info+xml"), std::string::npos);
+        EXPECT_NE(msg.find("<alert-ind>true</alert-ind>"), std::string::npos);
+        EXPECT_NE(msg.find("<mcptt-client-id>urn:uuid:00000000-0000-4000-8000-000000000001</mcptt-client-id>"), std::string::npos);
+        srv.reply(msg, 200, "OK");
+        ASSERT_TRUE(l.wait([&] { return !l.results.empty(); }));
+        EXPECT_EQ(l.results[0].token, tok);
+        EXPECT_EQ(l.results[0].code, 200);
+
+        // ⑤ 경보 수신(서버 팬아웃 = 원본 본문 — calling-group-id 없음) → onEmergencyAlert
+        std::string abody = "<?xml version=\"1.0\"?><mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\"><mcptt-Params>"
+                            "<mcptt-request-uri>tel:g001</mcptt-request-uri><mcptt-calling-user-id>tel:+82500000014</mcptt-calling-user-id>"
+                            "<alert-ind>true</alert-ind></mcptt-Params></mcpttinfo>";
+        std::string in = "MESSAGE " + srv.ueContact + " SIP/2.0\r\nVia: SIP/2.0/UDP 127.0.0.1:" + std::to_string(srv.port) +
+                         ";branch=z9hG4bKmsg1\r\nMax-Forwards: 70\r\nFrom: <sip:+82500000014@ptt.test>;tag=m1\r\n"
+                         "To: <sip:+82500000001@ptt.test>\r\nCall-ID: alert-1\r\nCSeq: 1 MESSAGE\r\n"
+                         "Content-Type: application/vnd.3gpp.mcptt-info+xml\r\nContent-Length: " + std::to_string(abody.size()) +
+                         "\r\n\r\n" + abody;
+        srv.send(in);
+        ASSERT_FALSE(srv.recv("SIP/2.0 200").empty());
+        ASSERT_TRUE(l.wait([&] { return !l.alerts.empty(); }));
+        EXPECT_EQ(l.alerts[0].groupId, "g001");
+        EXPECT_EQ(l.alerts[0].userId, "+82500000014");
+        EXPECT_EQ(l.alerts[0].alertInd, 1);
+        EXPECT_FALSE(l.alerts[0].self);
+
+        eng.hangup(callId);
+        std::string bye = srv.recv("BYE ");
+        if (!bye.empty()) srv.reply(bye, 200, "OK");
+    }
+    eng.stop();
+}
+
+TEST(McpttXml, AlertBuildAndParse) {
+    std::string b = mcptt::alertInfo("tel:g002", "tel:+82500000002", "urn:uuid:abc", false, "tel:+82500000013", -1);
+    // 요소 순서 = TS 24.379 §F.1 mcptt-ParamsType(request-uri → calling-user-id → emergency-ind → alert-ind → originated-by → client-id)
+    size_t ru = b.find("mcptt-request-uri"), cu = b.find("mcptt-calling-user-id"), em = b.find("<emergency-ind>false"),
+           al = b.find("<alert-ind>false"), ob = b.find("<originated-by>tel:+82500000013"), ci = b.find("<mcptt-client-id>urn:uuid:abc");
+    ASSERT_NE(ci, std::string::npos);
+    EXPECT_TRUE(ru < cu && cu < em && em < al && al < ob && ob < ci);
+    EXPECT_EQ(mcptt::alertInfo("tel:g002", "tel:+1", "", true).find("mcptt-client-id"), std::string::npos);
+
+    EmergencyAlert a;
+    ASSERT_TRUE(mcptt::parseEmergencyAlert(b, a));
+    EXPECT_EQ(a.groupId, "g002");                                             // calling-group-id 없으면 request-uri
+    EXPECT_EQ(a.userId, "+82500000002");
+    EXPECT_EQ(a.originatedBy, "+82500000013");
+    EXPECT_EQ(a.alertInd, -1);
+    EXPECT_EQ(a.emergencyInd, -1);
+    EXPECT_EQ(a.imminentPerilInd, 0);
+
+    // 규격 서버 형식 — 접두사·calling-group-id 우선, 경보 없는 그룹 긴급 통지(§12.1.1.3 3))
+    EmergencyAlert n;
+    ASSERT_TRUE(mcptt::parseEmergencyAlert("<mi:mcpttinfo xmlns:mi=\"urn:3gpp:ns:mcpttInfo:1.0\"><mi:mcptt-Params>"
+                                           "<mi:mcptt-request-uri>sip:psi@d</mi:mcptt-request-uri>"
+                                           "<mi:mcptt-calling-group-id>tel:g003</mi:mcptt-calling-group-id>"
+                                           "<mi:emergency-ind>true</mi:emergency-ind><mi:mc-org>소방</mi:mc-org>"
+                                           "</mi:mcptt-Params></mi:mcpttinfo>", n));
+    EXPECT_EQ(n.groupId, "g003");
+    EXPECT_EQ(n.alertInd, 0);
+    EXPECT_EQ(n.emergencyInd, 1);
+    EXPECT_EQ(n.mcOrg, "소방");
+    EXPECT_FALSE(mcptt::parseEmergencyAlert("<mcpttinfo><mcptt-Params><session-type>prearranged</session-type>"
+                                            "</mcptt-Params></mcpttinfo>", n));      // 지시자 없음 = 경보·통지 아님
+
+    EXPECT_EQ(mcptt::indicator("<a><emergency-ind> TRUE </emergency-ind></a>", "emergency-ind"), 1);
+    EXPECT_EQ(mcptt::indicator("<a><x:imminentperil-ind>false</x:imminentperil-ind></a>", "imminentperil-ind"), -1);
+    EXPECT_EQ(mcptt::indicator("<a/>", "emergency-ind"), 0);
+}

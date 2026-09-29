@@ -13,6 +13,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import com.cims.ue.sdk.jni.Capabilities as JniCapabilities
+import com.cims.ue.sdk.jni.CmsEntry as JniCmsEntry
 import com.cims.ue.sdk.jni.CscClient as JniCscClient
 import com.cims.ue.sdk.jni.CscEndpoint as JniCscEndpoint
 import com.cims.ue.sdk.jni.FdUpload as JniFdUpload
@@ -22,7 +24,10 @@ import com.cims.ue.sdk.jni.GroupMemberVector
 import com.cims.ue.sdk.jni.GroupSummaryVector
 import com.cims.ue.sdk.jni.HttpResult as JniHttpResult
 import com.cims.ue.sdk.jni.Profile as JniProfile
+import com.cims.ue.sdk.jni.ServiceConfigDoc as JniServiceConfigDoc
+import com.cims.ue.sdk.jni.StringVector
 import com.cims.ue.sdk.jni.TokenSet as JniTokenSet
+import com.cims.ue.sdk.jni.UserProfileDoc as JniUserProfileDoc
 import com.cims.ue.sdk.jni.XcapDoc as JniXcapDoc
 
 // ── 값 타입 ──────────────────────────────────────────────────────────────────
@@ -73,7 +78,8 @@ data class ServiceProfile(
         msisdn = msisdn, imsi = imsi, authId = authId, ha1 = sipHa1,
         password = if (sipHa1.isEmpty()) loginPw else "",
         authScheme = authScheme, akaK = akaK, akaOpc = akaOpc, akaAmf = akaAmf,
-        secMechanisms = secMechanisms, mediaSecurity = mediaSecurity, mcpttId = mcpttId)
+        secMechanisms = secMechanisms, mediaSecurity = mediaSecurity, mcpttId = mcpttId,
+        maxSdsCplaneBytes = maxPayloadSdsCplaneBytes)
 }
 
 /** 관제 그룹원·감시 대상(dispatch members[]) — groupId 가 내 그룹이면 그룹원 띠, 그 밖은 감시 전용. */
@@ -178,6 +184,94 @@ data class GroupDoc(
 }
 
 data class XcapDoc(val body: String, val etag: String, val notModified: Boolean)
+
+/** CMS 문서의 대상 항목 — EntryType(TS 24.484 §8.3.2.7): uri = `<uri-entry>`, mode = `entry-info`
+ *  (그룹 = DedicatedGroup | UseCurrentlySelectedGroup, 사설 수신자 = UsePreConfigured | LocallyDetermined). 대상 선택 정책은 앱 몫. */
+data class CmsEntry(val uri: String = "", val mode: String = "") {
+    internal fun toJni(): JniCmsEntry = JniCmsEntry().also { it.uri = uri; it.mode = mode }
+    internal companion object { fun of(e: JniCmsEntry) = CmsEntry(e.uri, e.mode) }
+}
+
+/**
+ * MCPTT user profile(TS 24.484 §8.3.2) — 코어가 해석한 요소. 인가(allow-*)는 요소가 없으면 허용으로 읽는다
+ * (서버가 최종 판정 — UX 선차단용, ue_sdk.md §4.2). 판정은 [Capabilities.of] 로 service-config 와 AND 한다.
+ */
+data class UserProfileDoc(
+    val etag: String = "", val userUri: String = "",
+    val emergencyGroup: CmsEntry = CmsEntry(), val imminentPerilGroup: CmsEntry = CmsEntry(),
+    val emergencyAlertGroup: CmsEntry = CmsEntry(), val emergencyPrivateRecipient: CmsEntry = CmsEntry(),
+    /** OnNetwork/MCPTTGroupInfo — 제휴 가능 그룹 URI. */
+    val groups: List<String> = emptyList(),
+    val implicitAffiliations: List<String> = emptyList(),
+    /** OnNetwork/MaxAffiliationsN2 — null = 미기재. */
+    val maxAffiliationsN2: Int? = null,
+    val allowEmergencyGroupCall: Boolean = true, val allowImminentPerilCall: Boolean = true,
+    val allowActivateEmergencyAlert: Boolean = true, val allowCancelEmergencyAlert: Boolean = true,
+    val allowEmergencyPrivateCall: Boolean = true, val allowAdhocGroupCall: Boolean = true,
+) {
+    internal fun toJni(): JniUserProfileDoc = JniUserProfileDoc().also { d ->
+        d.etag = etag; d.userUri = userUri
+        d.emergencyGroup = emergencyGroup.toJni(); d.imminentPerilGroup = imminentPerilGroup.toJni()
+        d.emergencyAlertGroup = emergencyAlertGroup.toJni(); d.emergencyPrivateRecipient = emergencyPrivateRecipient.toJni()
+        d.groups = StringVector().apply { groups.forEach { add(it) } }
+        d.implicitAffiliations = StringVector().apply { implicitAffiliations.forEach { add(it) } }
+        d.maxAffiliationsN2 = maxAffiliationsN2 ?: -1
+        d.allowEmergencyGroupCall = allowEmergencyGroupCall; d.allowImminentPerilCall = allowImminentPerilCall
+        d.allowActivateEmergencyAlert = allowActivateEmergencyAlert; d.allowCancelEmergencyAlert = allowCancelEmergencyAlert
+        d.allowEmergencyPrivateCall = allowEmergencyPrivateCall; d.allowAdhocGroupCall = allowAdhocGroupCall
+    }
+    internal companion object {
+        fun of(d: JniUserProfileDoc) = UserProfileDoc(d.etag, d.userUri,
+            CmsEntry.of(d.emergencyGroup), CmsEntry.of(d.imminentPerilGroup),
+            CmsEntry.of(d.emergencyAlertGroup), CmsEntry.of(d.emergencyPrivateRecipient),
+            d.groups.let { v -> List(v.size) { v[it] } }, d.implicitAffiliations.let { v -> List(v.size) { v[it] } },
+            d.maxAffiliationsN2.takeIf { it >= 0 },
+            d.allowEmergencyGroupCall, d.allowImminentPerilCall, d.allowActivateEmergencyAlert,
+            d.allowCancelEmergencyAlert, d.allowEmergencyPrivateCall, d.allowAdhocGroupCall)
+    }
+}
+
+/** MCPTT service configuration(TS 24.484 §8.2) — 시스템 전역 정책. 요소가 없으면 허용. */
+data class ServiceConfigDoc(
+    val etag: String = "",
+    val allowPrivateCall: Boolean = true, val allowEmergencyCall: Boolean = true,
+    val allowAlert: Boolean = true, val allowTransmitRequest: Boolean = true,
+    /** on-network N2 상한(없으면 max-affiliations-N2) — null = 미기재. */
+    val maxAffiliationsN2: Int? = null,
+) {
+    internal fun toJni(): JniServiceConfigDoc = JniServiceConfigDoc().also { d ->
+        d.etag = etag; d.allowPrivateCall = allowPrivateCall; d.allowEmergencyCall = allowEmergencyCall
+        d.allowAlert = allowAlert; d.allowTransmitRequest = allowTransmitRequest; d.maxAffiliationsN2 = maxAffiliationsN2 ?: -1
+    }
+    internal companion object {
+        fun of(d: JniServiceConfigDoc) = ServiceConfigDoc(d.etag, d.allowPrivateCall, d.allowEmergencyCall,
+            d.allowAlert, d.allowTransmitRequest, d.maxAffiliationsN2.takeIf { it >= 0 })
+    }
+}
+
+/**
+ * 정책 게이트 스냅샷(ue_sdk.md §4.2) — user profile ∧ service config, **받지 못한 문서는 허용**. UX 선차단(버튼 숨김)용이고
+ * 최종 판정은 서버(403·Floor Deny)다. AND 규칙은 코어 한 곳(`Capabilities::of`)이다.
+ */
+data class Capabilities(
+    val userProfileKnown: Boolean = false, val serviceConfigKnown: Boolean = false,
+    val privateCall: Boolean = true, val emergencyGroupCall: Boolean = true, val imminentPerilCall: Boolean = true,
+    val emergencyPrivateCall: Boolean = true, val emergencyAlert: Boolean = true, val cancelEmergencyAlert: Boolean = true,
+    val adhocGroupCall: Boolean = true, val transmitRequest: Boolean = true,
+    /** 0 = 미지정. N2 는 경고만 한다(강제하지 않는다). */
+    val maxAffiliationsN2: Int = 0,
+) {
+    companion object {
+        /** null = 그 문서를 아직 못 받음. */
+        fun of(userProfile: UserProfileDoc?, serviceConfig: ServiceConfigDoc?): Capabilities {
+            NativeLib.ensure()
+            val c = JniCapabilities.of(userProfile?.toJni(), serviceConfig?.toJni())
+            return Capabilities(c.userProfileKnown, c.serviceConfigKnown, c.privateCall, c.emergencyGroupCall,
+                c.imminentPerilCall, c.emergencyPrivateCall, c.emergencyAlert, c.cancelEmergencyAlert,
+                c.adhocGroupCall, c.transmitRequest, c.maxAffiliationsN2)
+        }
+    }
+}
 
 /** 임의 HTTP 요청 산출. body 는 **바이트 그대로** — 녹취 오디오(MP4/AAC)가 이 경로로 온다. */
 data class HttpResponse(val status: Int, val contentType: String, val etag: String, val body: ByteArray) {
@@ -308,6 +402,18 @@ class CscClient(
     suspend fun getServiceConfig(accessToken: String, userUri: String, etag: String = ""): CimsResult<XcapDoc> = call {
         val out = JniXcapDoc()
         CimsResult.of(jni.getServiceConfig(accessToken, userUri, etag, out), xcapOf(out))
+    }
+
+    /** CMS user-profile 조회 + 해석(코어). etag 를 주면 If-None-Match — **값 null = 304**(가진 사본 유지). 해석 실패 code -2. */
+    suspend fun fetchUserProfile(accessToken: String, userUri: String, etag: String = ""): CimsResult<UserProfileDoc?> = call {
+        val out = JniUserProfileDoc()
+        CimsResult.of(jni.fetchUserProfile(accessToken, userUri, etag, out), if (out.notModified) null else UserProfileDoc.of(out))
+    }
+
+    /** CMS service-config 조회 + 해석 — [fetchUserProfile] 과 같은 규약. */
+    suspend fun fetchServiceConfig(accessToken: String, userUri: String, etag: String = ""): CimsResult<ServiceConfigDoc?> = call {
+        val out = JniServiceConfigDoc()
+        CimsResult.of(jni.fetchServiceConfig(accessToken, userUri, etag, out), if (out.notModified) null else ServiceConfigDoc.of(out))
     }
 
     // ── MCData FD 콘텐츠 서버(TS 24.282 §10.2, mcdata_messaging.md §4.5) ──

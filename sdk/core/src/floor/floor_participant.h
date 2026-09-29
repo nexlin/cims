@@ -46,6 +46,9 @@ public:
     /** 일제 통화 개시자(TS 24.379 §4.12) — Floor Request 에 B-bit(TS 24.380 §6.2.4.3.5), 발언을 놓은 뒤
      *  B-bit Floor Idle 이면 onBroadcastEnd(§6.2.4.6.4). 수신 멤버는 켜지 않는다(Taken 의 Permission 0 이 요청을 막는다). */
     void setBroadcastInitiator(bool on) { broadcastInitiator_ = on; }
+    /** 승인 뒤 마이크 개방 지연(ms, 0 = 즉시) — 앱이 승인 톤을 재생하는 동안 톤이 그룹으로 나가지 않게(android_ue_client.md
+     *  «삑 후 말하기»). 그 사이 놓거나·회수·시한으로 발언을 잃으면 열지 않는다. EngineConfig.grantMicDelayMs. */
+    void setMicOpenDelay(int ms) { micDelayMs_ = ms > 0 ? ms : 0; }
 
     /** 개시 INVITE 가 암묵적 발언 요청이다(`mc_implicit_request`, TS 24.380 §14.2.5) — 호 성립 전부터 'U: pending Request'
      *  (§6.2.4.2.2 4.)로 둔다. Floor Request 는 보내지 않는다(요청은 INVITE 가 싣는다). emergency = 대체 명시 요청의 긴급 비트. */
@@ -87,6 +90,7 @@ private:
     int remotePort_ = 0;
     std::atomic<bool> listenOnly_{false};
     std::atomic<bool> broadcastInitiator_{false};
+    std::atomic<int> micDelayMs_{0};
     std::atomic<bool> running_{false};
     std::thread rx_;
 
@@ -106,6 +110,7 @@ private:
     unsigned grantedCount_ = 0, takenCount_ = 0, denyCount_ = 0;
     // 타이머 (Clock::time_point, 0 = 비활성)
     Clock::time_point nextAck_{}, requestDeadline_{}, talkDeadline_{}, releaseRetxAt_{};
+    Clock::time_point micOpenAt_{};               // 승인 뒤 지연 개방 예정(setMicOpenDelay)
     int releaseRetxLeft_ = 0;
     std::string releaseRetxPkt_;
 

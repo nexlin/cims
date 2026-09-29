@@ -21,6 +21,9 @@ namespace detail {
  *    미디어 SRTP 정책이 켜져 있으면 sdes-srtp;mediasec 병기 */
 pj::AccountConfig buildPjAccountConfig(const AccountConfig& c, std::string* note = nullptr);
 
+/** Contact 파라미터에 ICSI(퍼센트 인코딩 값) 하나를 더한다 — 기존 `+g.3gpp.icsi-ref` 목록에 합치거나 새 파라미터로(RFC 3840). */
+std::string withIcsi(const std::string& params, const std::string& icsi);
+
 /** SIP transport 이름(udp/tcp/tls). */
 const char* transportParam(Transport t);
 

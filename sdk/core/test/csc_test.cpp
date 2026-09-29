@@ -293,6 +293,119 @@ TEST(GroupDoc, HangTimerDurationForms) {
         EXPECT_EQ(hang(bad), GroupDoc::kUnset) << "'" << bad << "'";
 }
 
+// 서버(csc get_user_profile_xml) 산출 모양 — PrivateCall 의 EmergencyCall 이 그룹콜 쪽보다 먼저 나온다.
+static const char* kUserProfileXml = R"(<?xml version="1.0" encoding="UTF-8"?>
+<mcptt-user-profile xmlns="urn:3gpp:mcptt:user-profile:1.0"
+  xmlns:cp="urn:ietf:params:xml:ns:common-policy" xmlns:cims="urn:cims:mcptt:ext:1.0"
+  XUI-URI="tel:+82500000002" user-profile-index="1">
+  <Name xml:lang="ko">테스트002</Name>
+  <Status>true</Status>
+  <Common index="1"><UserAlias><alias-entry index="1" xml:lang="ko">테스트002</alias-entry></UserAlias><MCPTTUserID><uri-entry>tel:+82500000002</uri-entry></MCPTTUserID><PrivateCall><PrivateCallList><PrivateCallURI><uri-entry>tel:+82500000001</uri-entry><display-name>테스트001</display-name></PrivateCallURI></PrivateCallList><EmergencyCall><MCPTTPrivateRecipient><entry entry-info="UsePreConfigured"><uri-entry>tel:+82500000001</uri-entry></entry><ProSeUserID-entry><User-Info-ID>000000000000</User-Info-ID></ProSeUserID-entry></MCPTTPrivateRecipient></EmergencyCall></PrivateCall><MCPTT-group-call><MaxSimultaneousCallsN6>5</MaxSimultaneousCallsN6><EmergencyCall><MCPTTGroupInitiation><entry entry-info="DedicatedGroup"><uri-entry>sip:g002@ptt.example.org</uri-entry><display-name>음성그룹2</display-name></entry></MCPTTGroupInitiation></EmergencyCall><ImminentPerilCall><MCPTTGroupInitiation><entry entry-info="DedicatedGroup"><uri-entry>sip:g002@ptt.example.org</uri-entry></entry></MCPTTGroupInitiation></ImminentPerilCall><EmergencyAlert><entry entry-info="DedicatedGroup"><uri-entry>sip:g002@ptt.example.org</uri-entry></entry></EmergencyAlert><Priority>5</Priority></MCPTT-group-call><ParticipantType>normal</ParticipantType></Common>
+  <cp:ruleset>
+    <cp:rule id="mcptt-user-authorisation">
+      <cp:actions>
+        <allow-emergency-group-call>true</allow-emergency-group-call>
+        <allow-activate-emergency-alert>false</allow-activate-emergency-alert>
+        <allow-cancel-emergency-alert>false</allow-cancel-emergency-alert>
+        <allow-emergency-private-call>true</allow-emergency-private-call>
+        <allow-ambient-listening>false</allow-ambient-listening>
+        <cims:allow-adhoc-group-call>false</cims:allow-adhoc-group-call>
+      </cp:actions>
+    </cp:rule>
+  </cp:ruleset>
+  <OnNetwork index="1"><MCPTTGroupInfo><entry><uri-entry>sip:g002@ptt.example.org</uri-entry><display-name>음성그룹2</display-name><anyExt><cims:authorized-user>true</cims:authorized-user></anyExt></entry><entry><uri-entry>sip:g005@ptt.example.org</uri-entry></entry></MCPTTGroupInfo><MaxAffiliationsN2>8</MaxAffiliationsN2><ImplicitAffiliations><entry><uri-entry>sip:g002@ptt.example.org</uri-entry></entry></ImplicitAffiliations><PrivateEmergencyAlert><entry entry-info="UsePreConfigured"><uri-entry>tel:+82500000001</uri-entry></entry></PrivateEmergencyAlert></OnNetwork>
+</mcptt-user-profile>)";
+
+static const char* kServiceConfigXml = R"(<?xml version="1.0" encoding="UTF-8"?>
+<mcptt-service-config xmlns="urn:3gpp:ns:mcpttServiceConfig:1.0">
+  <num-levels-group-hierarchy>3</num-levels-group-hierarchy>
+  <max-affiliations-N2>16</max-affiliations-N2>
+  <allow-private-call>true</allow-private-call>
+  <allow-emergency-call>false</allow-emergency-call>
+  <allow-alert>true</allow-alert>
+  <on-network>
+    <allow-transmit-request>true</allow-transmit-request>
+    <max-on-network-affiliations-N2>12</max-on-network-affiliations-N2>
+  </on-network>
+</mcptt-service-config>)";
+
+TEST(CmsDoc, ParseUserProfile) {
+    UserProfileDoc d; d.etag = "\"up1\"";
+    std::string err;
+    ASSERT_TRUE(UserProfileDoc::parse(kUserProfileXml, d, &err)) << err;
+    EXPECT_EQ(d.etag, "\"up1\"");                              // 호출자가 채운 값 유지
+    EXPECT_EQ(d.userUri, "tel:+82500000002");
+    // 그룹 긴급 대상은 MCPTT-group-call 쪽 — 앞선 PrivateCall/EmergencyCall 을 잡지 않는다
+    EXPECT_EQ(d.emergencyGroup.uri, "sip:g002@ptt.example.org");
+    EXPECT_EQ(d.emergencyGroup.mode, "DedicatedGroup");
+    EXPECT_EQ(d.imminentPerilGroup.uri, "sip:g002@ptt.example.org");
+    EXPECT_EQ(d.emergencyAlertGroup.uri, "sip:g002@ptt.example.org");
+    EXPECT_EQ(d.emergencyPrivateRecipient.uri, "tel:+82500000001");
+    EXPECT_EQ(d.emergencyPrivateRecipient.mode, "UsePreConfigured");
+    ASSERT_EQ(d.groups.size(), 2u);
+    EXPECT_EQ(d.groups[1], "sip:g005@ptt.example.org");
+    ASSERT_EQ(d.implicitAffiliations.size(), 1u);
+    EXPECT_EQ(d.maxAffiliationsN2, 8);
+    EXPECT_TRUE(d.allowEmergencyGroupCall);
+    EXPECT_TRUE(d.allowImminentPerilCall);                     // 요소 없음 = 허용
+    EXPECT_FALSE(d.allowActivateEmergencyAlert);
+    EXPECT_FALSE(d.allowCancelEmergencyAlert);
+    EXPECT_TRUE(d.allowEmergencyPrivateCall);
+    EXPECT_FALSE(d.allowAdhocGroupCall);                       // cims: 확장도 로컬 이름으로 읽힌다
+
+    // 규격 요소 <allow-adhoc-group-call>(TS 24.484 §8.3.2.1) 도 같은 필드로
+    UserProfileDoc s;
+    ASSERT_TRUE(UserProfileDoc::parse("<mcptt-user-profile><ruleset><actions><allow-adhoc-group-call>false</allow-adhoc-group-call>"
+                                      "</actions></ruleset></mcptt-user-profile>", s));
+    EXPECT_FALSE(s.allowAdhocGroupCall);
+    EXPECT_TRUE(s.emergencyGroup.uri.empty());
+    EXPECT_EQ(s.maxAffiliationsN2, -1);
+    EXPECT_FALSE(UserProfileDoc::parse("<group/>", s, &err));
+}
+
+TEST(CmsDoc, ParseServiceConfig) {
+    ServiceConfigDoc d;
+    std::string err;
+    ASSERT_TRUE(ServiceConfigDoc::parse(kServiceConfigXml, d, &err)) << err;
+    EXPECT_TRUE(d.allowPrivateCall);
+    EXPECT_FALSE(d.allowEmergencyCall);
+    EXPECT_TRUE(d.allowAlert);
+    EXPECT_TRUE(d.allowTransmitRequest);
+    EXPECT_EQ(d.maxAffiliationsN2, 12);                        // on-network 값 우선
+    ServiceConfigDoc m;
+    ASSERT_TRUE(ServiceConfigDoc::parse("<mcptt-service-config><max-affiliations-N2>4</max-affiliations-N2></mcptt-service-config>", m));
+    EXPECT_EQ(m.maxAffiliationsN2, 4);                         // 폴백
+    EXPECT_TRUE(m.allowTransmitRequest);
+    EXPECT_FALSE(ServiceConfigDoc::parse("<mcptt-user-profile/>", m, &err));
+}
+
+TEST(CmsDoc, CapabilitiesAndGate) {
+    // 둘 다 미수신 — 게이트 없음
+    Capabilities none = Capabilities::of(nullptr, nullptr);
+    EXPECT_FALSE(none.userProfileKnown);
+    EXPECT_TRUE(none.emergencyGroupCall && none.emergencyAlert && none.privateCall && none.adhocGroupCall && none.transmitRequest);
+    EXPECT_EQ(none.maxAffiliationsN2, 0);
+
+    UserProfileDoc up; ServiceConfigDoc sc;
+    ASSERT_TRUE(UserProfileDoc::parse(kUserProfileXml, up));
+    ASSERT_TRUE(ServiceConfigDoc::parse(kServiceConfigXml, sc));
+    Capabilities c = Capabilities::of(&up, &sc);
+    EXPECT_TRUE(c.userProfileKnown && c.serviceConfigKnown);
+    EXPECT_FALSE(c.emergencyGroupCall);                        // 사용자 허용 ∧ 시스템 불허
+    EXPECT_FALSE(c.imminentPerilCall);
+    EXPECT_TRUE(c.emergencyPrivateCall);                       // 사설 긴급은 allow-private-call ∧ 사용자 인가(원천 앱과 같다)
+    EXPECT_FALSE(c.emergencyAlert);                            // 사용자 불허
+    EXPECT_FALSE(c.adhocGroupCall);
+    EXPECT_TRUE(c.transmitRequest);
+    EXPECT_EQ(c.maxAffiliationsN2, 12);                        // 시스템 > 사용자
+
+    // service-config 만 미수신 — 사용자 축만 게이트
+    Capabilities u = Capabilities::of(&up, nullptr);
+    EXPECT_TRUE(u.emergencyGroupCall);
+    EXPECT_FALSE(u.emergencyAlert);
+    EXPECT_EQ(u.maxAffiliationsN2, 8);
+}
+
 TEST(DialogInfo, ParseAndJoinHeader) {
     std::string xml = R"(<?xml version="1.0"?>
 <dialog-info xmlns="urn:ietf:params:xml:ns:dialog-info" version="2" state="full" entity="sip:+821300000002@ims.example.org">
@@ -459,4 +572,35 @@ TEST(Csc, GenericRequestHeadersBinaryAndStatusMapping) {
     tp->next = http::Response(); tp->next.status = 0; tp->next.error = "connect refused";
     r = c.request("tok", "GET", "/x", "", "", "", "", "", out);
     EXPECT_FALSE(r.ok); EXPECT_EQ(r.code, -1); EXPECT_EQ(out.status, 0);
+}
+
+TEST(Csc, FetchCmsDocsParseAndNotModified) {
+    auto tp = std::make_shared<FakeTransport>();
+    CscEndpoint ep; ep.host = "csc.example";
+    CscClient c(ep, tp);
+
+    tp->next.status = 200; tp->next.body = kUserProfileXml; tp->next.headers = {{"etag", "\"up1\""}};
+    UserProfileDoc up;
+    ASSERT_TRUE(c.fetchUserProfile("tok", "tel:+82500000002", "", up).ok);
+    EXPECT_EQ(tp->lastUrl, ep.baseUrl() + "/org.3gpp.mcptt.user-profile/users/tel%3A%2B82500000002/user-profile");
+    EXPECT_EQ(tp->lastHeaders.count("If-None-Match"), 0u);
+    EXPECT_FALSE(up.notModified);
+    EXPECT_EQ(up.etag, "\"up1\"");
+    EXPECT_EQ(up.emergencyGroup.uri, "sip:g002@ptt.example.org");
+
+    // 304 — 사본 그대로, notModified 만
+    tp->next = http::Response(); tp->next.status = 304;
+    ASSERT_TRUE(c.fetchUserProfile("tok", "tel:+82500000002", up.etag, up).ok);
+    EXPECT_EQ(tp->lastHeaders.at("If-None-Match"), "\"up1\"");
+    EXPECT_TRUE(up.notModified);
+    EXPECT_EQ(up.emergencyGroup.uri, "sip:g002@ptt.example.org");
+
+    // 본문이 문서가 아니면 해석 실패(-2)
+    tp->next = http::Response(); tp->next.status = 200; tp->next.body = "<html/>";
+    ServiceConfigDoc sc;
+    Result r = c.fetchServiceConfig("tok", "tel:+82500000002", "", sc);
+    EXPECT_FALSE(r.ok); EXPECT_EQ(r.code, -2);
+    tp->next.body = kServiceConfigXml;
+    ASSERT_TRUE(c.fetchServiceConfig("tok", "tel:+82500000002", "", sc).ok);
+    EXPECT_FALSE(sc.allowEmergencyCall);
 }

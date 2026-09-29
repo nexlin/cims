@@ -106,17 +106,22 @@ sdk/core/
     floor/              floor_defs.h(생성) · floor_codec(TS 24.380 §8 RTCP-APP TLV, CMP 코덱과 바이트 호환) ·
                         floor_participant(§6.2.4 상태머신 + UDP 소켓 + Ack keepalive·Revoke Release 재전송·MSN 폐기·
                         요청 시한·Granted Duration 자체 종료·청취 전용) — 원천 android FloorClient.kt
-    mcptt/              mcptt_xml — mcptt-info·resource-lists·affiliation-command 빌더, mcptt-info/conference-info 파서
+    mcptt/              mcptt_xml — mcptt-info·resource-lists·affiliation-command·긴급 경보(alert-ind, §F.1 요소 순서) 빌더,
+                        mcptt-info/conference-info/경보 파서, 지시자 삼중값(`indicator` — true/false/없음)
     mcdata/             sds_codec — TS 24.282 SDS SIGNALLING/DATA PAYLOAD/NOTIFICATION·FD SIGNALLING TLV + multipart(base64) 빌드·파싱
                         (그룹/1:1 은 mcdata-info 의 request-type·request-uri 만 다르다 — `buildGroupSds`/`buildOneToOneSds`,
                          FD = `buildGroupFd`/`buildOneToOneFd`(mcdata-info + FD SIGNALLING 두 파트, FILEURL·Metadata — cspsim·Android 와 같은 바이트),
                          conversation ID 는 그룹당(`conversationIdOf`)·쌍당(`conversationIdOneToOne`, 쌍 정렬)),
                         파싱은 request-type 이 `one-to-one-*` 이면 `groupUri` 를 비운다(1:1 의 request-uri = 받는 사람), FD 선택 IE(0x9x·0xAx·0x21·0x22)는 건너뛴다.
-                        Java 호환 conversation id (확장: MSRP 미디어평면)
+                        Java 호환 conversation id
+                        msrp — media plane SDS(TS 24.282 §9.2.3, RFC 4975): 프레이밍(청크 Byte-Range·end-line)·SDP m=message 섹션·
+                        발신(signalling·payload SEND 2건, 16 KB 청크 stop-and-wait, Success-Report)·수신(바인딩 SEND → 청크 조립, 파트별 SEND 합성).
+                        서버(cmdp)가 passive 라 늘 out-connect, 전송 = net/tls_stream 평문 TCP — 원천 android msrp/·cspsim McDataMsrp
     csc/                csc_client — IdMS OAuth2 PKCE(S256) 로그인·refresh, `/provisioning/me`(services→AccountConfig,
                         dispatch 블록), GMS 그룹 목록, XCAP GET(ETag/304), MCData FD 콘텐츠 서버(`uploadFd` = POST /mcdata/fd
                         octet-stream·group 지정 시 서버 게이트, `downloadFd` = FILEURL 의 경로만 취해 자기 CSC 로 — Bearer 를 다른 호스트로
                         보내지 않음). 공개 헤더 `cimsue/csc.h` — Engine 과 독립, 동기 호출, 자체 JSON 파서(pjlib 비의존)
+                        group_doc(GMS 그룹 문서) · cms_doc(CMS user-profile·service-config 해석 + `Capabilities::of`) — 스캔 도구 xml_scan.h 공유
     http/               https_client — ITransport(주입 가능) + OpenSSL 기본 구현(HTTP/1.1, chunked, 신뢰 앵커 PEM)
     net/                tls_stream — TCP(+TLS) 클라이언트 스트림(소켓·핸드셰이크·IP/DNS SAN 검증·leaf 지문) — https_client·계측 링크 공용
     quality/            emodel.h(G.107/G.107.1 단일 정의 — 계측기 워커와 공용) · call_quality(pjmedia RTCP·XR → CallQuality) — ue_voice_quality.md §3
@@ -160,9 +165,9 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
 | `Provisioning` | `login(user, pw)` · `setAccessToken` · `fetchProfile()` · `fetchDirectory()` · `logout()` | `Profile{services[], dispatch?}` · `Directory` | `onProfile` · `onAuthFailed` |
 | `Account` (서비스 kind 당 1) | `register()` · `unregister()` · `refresh()` | `RegState{unregistered, registering, registered(code), failed(reason)}` | `onRegState` |
 | `Call` | `dial(uri, {video, emergency})` · `answer({video})` · `reject()` · `hangup()` · `hold/resume` · `mute(on)` · `listen(on)` · `rxLevel(f)` · `sendDtmf` · **`join(targetDialog)`**(RFC 3911, `a=recvonly`) · **`pickup(number?)`**(피처코드·지정 픽업) · **`transfer(target, {attended})`**(REFER) · **`replace(dialog)`**(RFC 3891) | `CallState{outgoing, incoming(remote, calledParty, isPilot), active, held, disconnected(code)}` · `MediaSources[]{ssrc, label, active, level}` · `videoSources[]` | `onCallState` · `onMediaSource` · `onVideoFrame(source, frame)` · `onTransferProgress` |
-| `Group` (PTT) | `affiliate(on)` · `joinGroupCall({emergency, imminent, broadcast})` · `leave()` · `startAdhoc(members)` · `startPrivate(peer, {duplex, emergency})` · **`listenGroupCall()`**(recvonly JOIN, §7) · `setPrimary` · `channelVolume(f)` · `emergency(on)` · `alert(on)` | `GroupCallState{idle, joining, active(listenOnly), ...}` · roster · affiliated | `onGroupCall` · `onRoster`(RFC 4575) · `onAlert` |
+| `Group` (PTT) | `affiliate(on)` · `joinGroupCall({emergency, imminent, broadcast})` · `leave()` · `startAdhoc(members)` · `startPrivate(peer, {duplex, emergency})` · **`listenGroupCall()`**(recvonly JOIN, §7) · `setPrimary` · `channelVolume(f)`(= `setRxLevel`) · **`setCallCondition(emergency, imminent)`**(진행 중 상향·하향 re-INVITE) · **`sendEmergencyAlert(group, on)`** | `GroupCallState{idle, joining, active(listenOnly), ...}` · roster · affiliated · `CallInfo.condition`(긴급·임박 현재값) | `onGroupCall` · `onRoster`(RFC 4575) · **`onMcpttCondition`** · **`onEmergencyAlert`** |
 | `Floor` (그룹콜당 1) | `request(prio)` · `release()` · `queueCancel()` · `mediaFlow(on)` | `FloorState{idle, requesting, granted(duration), taken(speaker, permissionToRequest), queued(pos), denied(cause), revoked}` · `speakers[]`(multi-talker) | `onFloor` |
-| `Sds` | `sendGroupText(group, text)` · **`sendText(peer, text)`**(1:1, `one-to-one-sds`) · `sendGroupFile(group, bytes, name, mime)` · `sendNotification(peer, conv, msg, type)` · `download(url)` | 발신 진행 | `onIncomingSds` · `onSendResult` · `onDisposition` |
+| `Sds` | `sendGroupText(group, text)`(상한 초과 = MSRP) · **`sendText(peer, text)`**(1:1, `one-to-one-sds`) · `sendGroupFile(group, bytes, name, mime)` · `sendNotification(peer, conv, msg, type)` · `download(url)` | 발신 진행 | `onIncomingSds`(`mediaPlane`) · `onSendResult`(MESSAGE·MSRP) · `onDisposition` |
 | `Subscriptions` | `dialogWatch(scope)`(RFC 4235 — 관제 범위) · `conference(group)` · `xcapDiff(psi)` · `presence(uri)` | 감시 dialog 목록 `{dialogId, parties, state, isPilotCall}` | `onDialogList` · `onXcapChanged` |
 
 규약:
@@ -171,7 +176,32 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   id 만 되돌려 쓰고 앱이 URI 문자열을 조립하지 않는다([../identifier_model.md](../identifier_model.md)).
 - **정책 게이트는 UX 선차단.** CMS user-profile ∧ service-config 판정을 코어가 `Capabilities` 스냅샷으로
   노출하고 앱은 버튼을 숨길 뿐이다. 최종 판정은 서버(403/Floor Deny). 문서를 아직 못 받았으면 게이트를 걸지
-  않는다(android_ue_client §7 과 동일).
+  않는다(android_ue_client §7 과 동일). 해석 = `CscClient::fetchUserProfile`·`fetchServiceConfig`(ETag·304 = `notModified`) →
+  `UserProfileDoc`·`ServiceConfigDoc`(TS 24.484 §8.3.2·§8.2 — 긴급 대상 EntryType(`entry-info` 모드 + `uri-entry`)·제휴 그룹·N2·ruleset
+  allow-*, **요소가 없으면 허용**) → `Capabilities::of(up, sc)`(nullptr = 미수신). AND 규칙은 코어 한 곳이다(원천 앱과 같다 —
+  긴급 사설콜 = 시스템 allow-private-call ∧ 사용자 allow-emergency-private-call). ad hoc 인가는 규격 `<allow-adhoc-group-call>` 과
+  서버 확장 `<cims:allow-adhoc-group-call>` 을 로컬 이름으로 함께 읽는다.
+- **긴급·임박 세션 조건**(TS 24.379 §10.1.1.2.1.3~6, [mcptt_emergency_modes.md](mcptt_emergency_modes.md) §4.2·§4.3). `CallInfo.condition` 이
+  그룹의 진행 중 긴급·임박을 이 호에서 본 현재값이다(`mcptt` 는 개시·착신 INVITE 의 값으로 불변). `setCallCondition` = in-dialog
+  re-INVITE(multipart mcptt-info 에 **바뀐 지시자만** true/false 명시 + `Resource-Priority` — `AccountConfig.rp*`, 값 정본 = service-config
+  OnNetwork *-resource-priority §6.2.8.1.15, 기본 = CSP 의 mcpttp 서열), 보내면서 반영(`Local`) → 2xx `Confirmed` / 4xx~6xx 이전 값 복원
+  `Denied`(§6.2.8.1.5 — 미인가 상향 403, 재-INVITE 거절은 호를 끊지 않는다). 서버 재광고(수신 re-INVITE·조인 200 OK 의 mcptt-info) =
+  `Advertised` — emergency-ind true 는 임박을 내린다(§10.1.1.2.1.6 1)d)). Floor Request 의 긴급 비트는 현재값을 따른다. 대상 선택·403 뒤
+  normal 재발신·경보 정합은 앱 정책이다. 경보 = `sendEmergencyAlert`(MESSAGE mcptt-info `alert-ind`·`mcptt-client-id`(`AccountConfig.mcpttClientId`,
+  비면 `urn:uuid:` instanceId)·ICSI 헤더, 제3자 취소 `originated-by`·그룹 긴급 해제 동봉 §12.1.1.2) · 수신 `onEmergencyAlert`(§12.1.1.3 —
+  `mcptt-calling-group-id` 없으면 `mcptt-request-uri`, 경보 없는 그룹 긴급 통지도 `alertInd 0` 으로).
+- **media plane SDS**(TS 24.282 §9.2.3, [mcdata_messaging.md](mcdata_messaging.md) §4.7). `AccountConfig.maxSdsCplaneBytes`(프로비저닝
+  `mcdata.maxPayloadSdsCplaneBytes` — `ServiceProfile::toAccount` 가 채운다)를 넘는 **그룹** SDS 는 `sendGroupSds` 가 MSRP 로 보낸다(INVITE
+  더미 audio + m=message sendonly actpass → 200 의 cmdp a=path → SEND 2건) — 반환·상관은 C-plane 과 같고 최종 결과가 `onRequestResult`
+  method `MSRP` 로 온다. 1:1 은 늘 시그널링 평면(서버 media plane 이 그룹만 받는다). 수신 = `AccountConfig.mcdataMsrp` 가 REGISTER Contact
+  `+g.3gpp.icsi-ref` 에 ICSI mcdata.sds 를 합치고(기존 목록에 쉼표로), 서버발 배포 INVITE 는 코어가 받아(m=message active recvonly,
+  더미 오디오 inactive) `onSds`(`mediaPlane=true`, 발신자·그룹 = 배포 INVITE 의 mcdata-info)로 낸다. MSRP 호는 앱 호 목록·호 이벤트에
+  나오지 않고, 서버 BYE 가 없으면 5 s 뒤 코어가 끊는다. m=message 는 pjsua 가 만든 m=text 슬롯(발신)·포트 0 섹션(수신) 자리에 넣는다
+  (미디어 수가 늘면 pjsua `med_prov_cnt` assert).
+- **승인 톤 뒤 마이크**(android_ue_client.md «삑 후 말하기»). `EngineConfig.grantMicDelayMs` 만큼 Floor Granted(200 OK 승인 포함) 뒤 마이크
+  개방을 미루고, 그 사이 놓거나·회수·시한으로 발언을 잃으면 열지 않는다(톤은 앱이 재생한다). 전이중 사설콜(`mc_no_floor_ctrl`)은 floor 가
+  없으므로 `setMuted` 가 앱의 PTT 로컬 게이트다. 호 수신 음량(`setRxLevel`)은 호에 기억되어(`CallInfo.rxLevel`) 오디오가 없거나 재협상으로
+  스트림이 바뀌어도 다음 결선에 다시 걸린다.
 - **에러 모델.** 명령은 즉시 `Result{ok, reason}` 을 돌려주고(인자·상태 오류), 프로토콜 결과는 이벤트로 온다.
 - **ABI.** 공개 헤더는 pjsua2 타입을 include 하지 않는다. 구현체는 pImpl.
 - **affiliation PUBLISH 의 entity-tag**(RFC 3903). 코어가 EPA 다 — 2xx 의 `SIP-ETag` 를 그룹별로 기억해 다음 `affiliate` 에
@@ -273,7 +303,10 @@ cimsue-cli [계정] register [--hold S]            # 200 OK → (hold) → de-RE
 cimsue-cli [계정] call <번호|sip:URI> [--duration S] [--video]
 cimsue-cli [계정] answer [--duration S]          # 착신 대기 → 200 → 상대 BYE 또는 duration (MCPTT 착신은 자동 수락)
 cimsue-cli [계정] group-call <groupId> [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit]
-cimsue-cli [계정] sds <groupId> <text>           # MESSAGE 최종 응답까지
+                  [--upgrade-at S] [--cancel-at S]   # 진행 중 긴급 상향·하향 re-INVITE — outcome conditions[{cause,emergency,code}]
+cimsue-cli [계정] alert <groupId> [--cancel] [--originated-by ID] [--cancel-group-emergency]   # 긴급 경보 MESSAGE
+cimsue-cli [계정] sds <groupId> <text>           # 최종 응답까지 — [계정] --cplane-max N 을 넘으면 MSRP(outcome plane=media)
+                                                 #   ([계정] --msrp = 서버발 MSRP 배포 수신 광고 — sds-recv 가 plane=media 로 받는다)
 cimsue-cli [계정] sds-recv [--duration S]        # 수신 SDS 를 JSON 줄로
 계정: --server IP --port N --transport udp|tcp|tls --domain D --msisdn M (--imsi I|--auth-id IMPI)
       (--ha1 HEX32|--password P) [--mcptt-id tel:..] [--affiliate G,..] [--srtp off|optional|required] [--sec tls]
@@ -382,7 +415,7 @@ android_ue_client §13 그대로.
 | P0a 코어·파사드 보강(VoLTE 몫) | 파사드 기본값 코어와 일치(`noVad`) · affiliation 412(§4.2) · FD·floor 이벤트 종류·`userAgentOf`/`imeiUrn` 파사드 · 프로파일 `udpNoTcpSwitch` · 마이크 게이트(§4.5 `setCaptureEnabled`) · 영상(수신 Surface·셀프뷰·카메라 전환·H.264 설정·`PjCamera` 클래스를 `:cimsue` 로) · 망 변경 재등록(Android 접점) | `S1-UE-*` PASS · 관제 태블릿 회귀 · `cimsue-cli` S3(등록·1:1·영상·SRTP) |
 | P1 `:core` 분리 | `:core`(비 SIP) / `:core-sip`(자체 래퍼, 이행용) — 앱 코드 무변경 | APK 빌드·동작 불변, 로그인 앱에서 `libpjsua2.so` 빠짐 |
 | P2 volte-client 전환 | 세션 어댑터 `VoltePhone` 이 기존 래퍼 계약(등록·호 상태 StateFlow·호 명령·영상·캡처 게이트·MESSAGE)을 SDK 로 낸다 — `SipService`(FGS·오디오 모드·라우팅 협조·알림)와 화면은 그대로, 호 상태는 기존과 같은 마지막 호 이벤트 투영, 망 변경은 `NetworkWatcher`. 모듈 `:cimsue` + `:core` | 사내 단말 실기: UDP/TCP/TLS 등록·음성·영상·SRTP·SMS·망 전환·PTT 양보 |
-| P0b 코어 보강(PTT 몫) | MSRP 미디어평면 SDS(TS 24.282, RFC 4975) · 긴급 re-INVITE 상향/하향·긴급 재광고 수신·403 긴급 거부·경보(alert-ind) 빌더/파서(TS 24.379) · 승인 톤 뒤 마이크 · 장치 게인·AGC 목표([ue_audio_level.md](ue_audio_level.md)) · CMS user-profile/service-config 해석 | 단위시험 + `cimsue-cli` S3(긴급·MSRP) |
+| P0b 코어 보강(PTT 몫) | MSRP 미디어평면 SDS(TS 24.282, RFC 4975) · 긴급 re-INVITE 상향/하향·긴급 재광고 수신·403 긴급 거부·경보(alert-ind) 빌더/파서(TS 24.379) · 승인 톤 뒤 마이크 · 장치 게인(호 수신 음량 기억 — AGC 목표 환산은 앱, [ue_audio_level.md](ue_audio_level.md) §6) · CMS user-profile/service-config 해석 — 코어·Android 파사드 반영(§4.2 규약), C API·.NET 은 Windows 몫 | 단위시험(`mcptt_condition_test`·`msrp_test`·`csc_test` CmsDoc·`floor_participant_test`) + `cimsue-cli` S3(긴급·MSRP) |
 | P3 ptt-client 전환 | `PttController` → 세션 + 평면(floor·affiliation·로스터·SDS·FD·MSRP·긴급) + ViewModel, Kotlin 프로토콜 사본 제거·대조 검사 정리 | 사내 단말 실기(g002): 그룹콜·발언권 인계·긴급·일제 통화·SDS/FD/MSRP·Doze 착신·HW PTT·VoLTE 양보 |
 | P4 시험 모드(Q4) | `android/core` 공통 진입·설정·링크 서비스·오버레이 → 앱 3종([ue_voice_quality.md](ue_voice_quality.md) §4) | 계측기 실기기 링크·`VOLTE-CALL-DEVICE-*` |
 | P5 정리 | `:core-sip` 삭제 · `:cimsue-engine` 존치 결정 · 문서 | `S1` 전체 PASS |
@@ -579,6 +612,10 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 - **음성 품질 측정·시험 모드 계측기 링크** — 코어 `quality/`(RTCP-XR·G.107/G.107.1 E-model·`callQuality`)·drive 루프의 코어 이전
   (`drive/` `DriveSession` — stdin/stdout 과 TLS 계측 링크 공용)·`cimsue-cli --link` 는 [ue_voice_quality.md](ue_voice_quality.md) 가 정본(측정 Q1·코어 링크 Q2 구현 반영, Android `DeviceLink` 바인딩 반영 — C API·.NET 바인딩과 앱 시험 모드 Q4 미구현).
 - **cspsim 과 `cimsue-cli` 의 역할 분담 장기안** — 시뮬레이터 축(부하·다중 단말)과 실스택 축(정합)의 S3 항목 배분.
+- **긴급 상태 머신 전체** — 코어는 세션 단위 조건(현재값·내가 올렸나·응답 대기)만 둔다. TS 24.379 §6.2.8.1 의 경보 상태(MEA 1~4)·
+  긴급 그룹콜 상태(MEGC)·Warning 149(경보 미인가 수용) 판정·긴급 사설콜 조건 변경(§11)·ad hoc 긴급(§6.2.8.1.19~)은 후속. 구동 세션
+  (`drive/`)의 긴급·경보·MSRP 명령(계측기 real-ue·device 풀)도 후속.
+- **1:1 media plane SDS** — 서버 McDataMediaService 가 그룹만 받는다(phase 1). 서버가 1:1 을 받으면 `sendSds` 도 같은 상한으로 가른다.
 
 ## 12. 문서 갱신 대상 (구현과 같은 변경에서)
 

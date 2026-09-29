@@ -139,7 +139,9 @@ pools:
     tls_verify: false
     tls_client_cert: false
     msrp: false
-  ptt_ue:                       # 계측기 전용 PTT 그룹 g005(계측기그룹, video) 멤버 013~022 — 실단말 그룹(g001~g004)은 쓰지 않는다(fan-out 이 실단말에 닿음)
+  ptt_ue:                       # PTT 그룹 g005(계측기그룹, video) 의 계측기 신원 013~022 — 실단말 그룹(g001~g004)은 쓰지 않는다(fan-out 이 실단말에 닿음).
+                                # g005 에는 SDK 이식 P3 실기 단말 W999(+82500000001)·MF52(+82500000002)도 멤버다 — g005 그룹콜은 affiliate 한 두 단말에도 간다.
+                                # creds 는 013~022 만 담는다. `creds-from-db --ptt-group g005` 로 다시 뽑으면 두 실단말 줄이 섞이므로 지우고 쓴다.
     worker: w1
     kind: ue
     access: csp

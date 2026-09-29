@@ -35,6 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import com.cims.ue.sdk.jni.CallInfo as JniCallInfo
 import com.cims.ue.sdk.jni.DialogInfo as JniDialogInfo
+import com.cims.ue.sdk.jni.EmergencyAlert as JniEmergencyAlert
 import com.cims.ue.sdk.jni.Engine as JniEngine
 import com.cims.ue.sdk.jni.FloorEvent as JniFloorEvent
 import com.cims.ue.sdk.jni.Listener as JniListener
@@ -130,12 +131,14 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
     private val _floor = lossy<FloorEvent>()
     private val _roster = lossy<RosterUpdate>()
     private val _dialogInfo = lossy<DialogInfo>()
+    private val _condition = lossy<ConditionChange>()
     private val _stopped = lossy<Unit>()
 
     // ③ 유실 불가 — 무제한 버퍼. 소비는 한 번뿐이라 수집자를 하나만 둔다(Service 의 세션).
     private val _sds = Channel<SdsMessage>(Channel.UNLIMITED)
     private val _requestResult = Channel<RequestResult>(Channel.UNLIMITED)
     private val _message = Channel<SipMessage>(Channel.UNLIMITED)
+    private val _emergencyAlert = Channel<EmergencyAlert>(Channel.UNLIMITED)
 
     val log: SharedFlow<LogLine> = _log.asSharedFlow()
     val regState: SharedFlow<RegInfo> = _regState.asSharedFlow()
@@ -148,6 +151,8 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
     val roster: SharedFlow<RosterUpdate> = _roster.asSharedFlow()
     /** 감시 대상 dialog(RFC 4235) — Join 대상 선택의 입력. */
     val dialogInfo: SharedFlow<DialogInfo> = _dialogInfo.asSharedFlow()
+    /** MCPTT 세션 조건 변화(긴급·임박, TS 24.379 §10.1.1.2.1.3~6) — 권위는 `callInfo().condition` 스냅샷(② 정책). */
+    val condition: SharedFlow<ConditionChange> = _condition.asSharedFlow()
     val stopped: SharedFlow<Unit> = _stopped.asSharedFlow()
 
     /** MCData SDS 수신. **유실되지 않는다** — 수집자가 붙기 전 것도 쌓인다. 수집자는 하나만 둔다. */
@@ -156,6 +161,8 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
     val requestResult: Flow<RequestResult> = _requestResult.receiveAsFlow()
     /** MCData 가 아닌 MESSAGE/NOTIFY 본문(xcap-diff 등). **유실되지 않는다**. */
     val message: Flow<SipMessage> = _message.receiveAsFlow()
+    /** 긴급 경보·취소·그룹 긴급 통지 수신(TS 24.379 §12.1.1.3). **유실되지 않는다** — 경보는 스냅샷이 없다. */
+    val emergencyAlert: Flow<EmergencyAlert> = _emergencyAlert.receiveAsFlow()
 
     // ── 상태(권위) ────────────────────────────────────────────────────────────
     private val _running = MutableStateFlow(false)
@@ -389,6 +396,10 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
         }
 
         override fun onDialogInfo(d: JniDialogInfo) { _dialogInfo.emitLossy(DialogInfo.of(d)) }
+        override fun onMcpttCondition(info: JniCallInfo, cause: com.cims.ue.sdk.jni.ConditionCause) {
+            _condition.emitLossy(ConditionChange(CallInfo.of(info), ConditionCause.entries.getOrElse(cause.swigValue()) { ConditionCause.LOCAL }))
+        }
+        override fun onEmergencyAlert(alert: JniEmergencyAlert) { _emergencyAlert.trySend(EmergencyAlert.of(alert)) }
 
         // ③ 유실 불가 — trySend 는 UNLIMITED 채널이라 닫히지 않은 한 실패하지 않는다.
         override fun onSds(msg: JniSdsMessage) { _sds.trySend(SdsMessage.of(msg)) }
@@ -491,6 +502,18 @@ class Account internal constructor(private val ue: CimsUe, val id: Int) {
     suspend fun pickup(featureCode: String, number: String = ""): CimsResult<Call> =
         ue.command { callOrFail(ue.jni.pickup(id, featureCode, number), "pickup") }
 
+    // ── 긴급 경보 (TS 24.379 §12) ──
+    /**
+     * 긴급 경보 발신·취소 — SIP MESSAGE(mcptt-info alert-ind). originatedBy = 다른 사용자의 경보를 취소할 때 그 사용자 MCPTT ID,
+     * cancelGroupEmergency = 취소와 함께 그룹의 진행 중 긴급 상태도 해제. 최종 응답은 `requestResult` 에 같은 token 으로 온다.
+     * 인가는 서버가 판정한다(미인가 경보는 전파되지 않는다) — 앱은 `Capabilities.emergencyAlert` 로 선차단한다.
+     */
+    suspend fun sendEmergencyAlert(groupId: String, activate: Boolean, originatedBy: String = "",
+                                   cancelGroupEmergency: Boolean = false): CimsResult<Long> = ue.command {
+        ue.jni.sendEmergencyAlert(id, groupId, activate, originatedBy, cancelGroupEmergency)
+            .let { if (it < 0) CimsResult.fail(-1, "sendEmergencyAlert failed") else CimsResult.ok(it) }
+    }
+
     // ── MCData SDS (TS 24.282) ──
     /** 그룹 SDS 발신. 최종 응답은 `requestResult` 에 같은 token 으로 온다. */
     suspend fun sendGroupSds(groupId: String, text: String, requestDelivery: Boolean = true): CimsResult<SdsSend> =
@@ -547,7 +570,8 @@ class Call internal constructor(private val ue: CimsUe, val id: Int, private val
     suspend fun hangup(): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.hangup(id)) }
     suspend fun hold(): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.hold(id)) }
     suspend fun resume(): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.resume(id)) }
-    /** 마이크 차단/복구. MCPTT 세션에서는 floor 가 마이크를 게이트하므로 무시된다. */
+    /** 마이크 차단/복구. 반이중 MCPTT 세션에서는 floor 가 게이트하므로 무시되고, 전이중 사설콜(mc_no_floor_ctrl)에서는
+     *  앱의 PTT 로컬 게이트다(누르면 승인 톤 뒤 false, 떼면 true). */
     suspend fun setMuted(muted: Boolean): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.setMuted(id, muted)) }
     /** 호 → 스피커 청취 on/off (여러 채널 듣기 정책). */
     suspend fun setListen(listen: Boolean): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.setListen(id, listen)) }
@@ -560,6 +584,14 @@ class Call internal constructor(private val ue: CimsUe, val id: Int, private val
     /** PTT 뗌 — Floor Release(대기 중이면 Queued Cancel 선행). */
     suspend fun floorRelease(): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.floorRelease(id)) }
     suspend fun floorQueueCancel(): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.floorQueueCancel(id)) }
+
+    /**
+     * 진행 중 그룹콜의 조건 상향·하향(TS 24.379 §10.1.1.2.1.3~5) — re-INVITE(mcptt-info + Resource-Priority). 결과는 `condition`
+     * 이벤트: LOCAL(곧바로 반영) → CONFIRMED(2xx) 또는 DENIED(이전 값 복원 — 미인가 상향 403, 호는 유지). 둘을 함께 true 로 줄 수 없다.
+     * 대상 선택·403 뒤 정책(경보 정합 등)은 앱 몫이다.
+     */
+    suspend fun setCondition(emergency: Boolean, imminentPeril: Boolean = false): CimsResult<Unit> =
+        cmd { CimsResult.of(ue.jni.setCallCondition(id, emergency, imminentPeril)) }
 
     /** 호 전달 blind — REFER(RFC 3515). */
     suspend fun transfer(target: String): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.transfer(id, target)) }

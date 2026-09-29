@@ -241,3 +241,46 @@ TEST(FloorParticipant, ImplicitRequestGrantedBeforeAnswer) {
     EXPECT_EQ(k.micOn.load(), 1);
     p.close();
 }
+
+// 승인 톤 뒤 마이크(android_ue_client.md «삑 후 말하기») — Granted 에서 곧바로 열지 않고 지연 뒤 연다. 그 사이 놓으면 열지 않는다.
+TEST(FloorParticipant, MicOpensAfterGrantDelayAndNotAfterEarlyRelease) {
+    cimsue_test::PjScope pj("floor-test");
+    FakeServer srv;
+    std::atomic<int> micOn{0}, granted{0};
+    std::atomic<long long> grantedAtMs{0}, micAtMs{0};
+    auto nowMs = [] { return (long long)std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now().time_since_epoch()).count(); };
+    Participant::Callbacks cb;
+    cb.onEvent = [&](const FloorEvent& ev) { if (ev.kind == FloorEvent::Kind::Granted) { granted++; grantedAtMs = nowMs(); } };
+    cb.onMic = [&](bool on) { if (on) { micOn++; micAtMs = nowMs(); } };
+    Participant p(1, 0x1234u, "tel:+82500000001", cb);
+    ASSERT_TRUE(p.open(0));
+    p.setMicOpenDelay(300);
+    p.setRemote("127.0.0.1", srv.port);
+
+    // ① 누르고 있는 동안 승인 — 이벤트는 곧바로, 마이크는 ~300 ms 뒤
+    p.request();
+    ASSERT_TRUE(srv.expect(Op::REQUEST));
+    srv.send(p.localPort(), Op::GRANTED, {u16Field((uint8_t)Field::DURATION, 30)});
+    ASSERT_TRUE(waitFor([&] { return granted.load() == 1; }, 2000));
+    EXPECT_EQ(micOn.load(), 0);
+    ASSERT_TRUE(waitFor([&] { return micOn.load() == 1; }, 2000));
+    long long gap = micAtMs.load() - grantedAtMs.load();
+    EXPECT_GE(gap, 250);
+    EXPECT_LE(gap, 500);
+    p.release();
+    ASSERT_TRUE(srv.expect(Op::RELEASE));
+    srv.send(p.localPort(), Op::IDLE, {u16Field((uint8_t)Field::MSG_SEQ, 1)});
+    ASSERT_TRUE(waitFor([&] { return p.info().state == FloorState::Idle; }, 2000));
+
+    // ② 승인 뒤 지연 안에 놓음 — 마이크를 열지 않는다
+    p.request();
+    ASSERT_TRUE(srv.expect(Op::REQUEST));
+    srv.send(p.localPort(), Op::GRANTED, {u16Field((uint8_t)Field::DURATION, 30), u16Field((uint8_t)Field::MSG_SEQ, 2)});
+    ASSERT_TRUE(waitFor([&] { return granted.load() == 2; }, 2000));
+    p.release();
+    ASSERT_TRUE(srv.expect(Op::RELEASE));
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    EXPECT_EQ(micOn.load(), 1);                                      // ①의 한 번뿐
+    p.close();
+}

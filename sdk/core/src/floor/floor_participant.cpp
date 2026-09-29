@@ -55,6 +55,7 @@ void Participant::emit(FloorEvent ev) {
 }
 
 void Participant::setMic(bool on) {
+    if (!on) micOpenAt_ = {};                               // 지연 개방 대기 중에 발언을 잃었다 — 열지 않는다
     if (micOn_ == on) return;
     micOn_ = on;
     if (cb_.onMic) cb_.onMic(on);
@@ -111,7 +112,8 @@ void Participant::grantSelf(int durationSec) {
     state_ = FloorState::Speaking;
     long d = durationSec > 0 ? durationSec * 1000L : 0;
     talkDeadline_ = d > kTalkEndMarginMs ? Clock::now() + std::chrono::milliseconds(d - kTalkEndMarginMs) : Clock::time_point{};
-    setMic(true);
+    if (micDelayMs_ > 0 && !micOn_) micOpenAt_ = Clock::now() + std::chrono::milliseconds(micDelayMs_.load());   // 승인 톤 뒤(tick)
+    else setMic(true);
 }
 
 void Participant::armImplicitRequest(bool emergency) {
@@ -223,7 +225,14 @@ void Participant::rxLoop() {
         pj_fd_set_t fds;
         PJ_FD_ZERO(&fds);
         PJ_FD_SET((pj_sock_t)sock_, &fds);
-        pj_time_val tv = {0, 100};
+        pj_time_val tv = {0, 100};                          // 틱 ≤100 ms — 지연 개방이 그보다 가까우면 그때 깬다
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            if (micOpenAt_ != Clock::time_point{}) {
+                long ms = (long)std::chrono::duration_cast<std::chrono::milliseconds>(micOpenAt_ - Clock::now()).count();
+                if (ms < tv.msec) tv.msec = ms > 0 ? ms : 0;
+            }
+        }
         int n = pj_sock_select((int)sock_ + 1, &fds, nullptr, nullptr, &tv);
         if (n > 0 && PJ_FD_ISSET((pj_sock_t)sock_, &fds)) {
             pj_ssize_t len = sizeof(buf);
@@ -245,6 +254,10 @@ void Participant::tick() {
         if (nextAck_ != Clock::time_point{} && now >= nextAck_ && remotePort_ > 0) {
             send(ack(ssrc_, userId_));                                    // NAT keepalive(≤20s)
             nextAck_ = now + std::chrono::seconds(kAckPeriodSec);
+        }
+        if (micOpenAt_ != Clock::time_point{} && now >= micOpenAt_) {    // 승인 톤 뒤 마이크 개방
+            micOpenAt_ = {};
+            if (state_ == FloorState::Speaking) setMic(true);
         }
         if (releaseRetxLeft_ > 0 && now >= releaseRetxAt_) {              // Release 재전송(T100, §6.2.4.6.2)
             send(releaseRetxPkt_);

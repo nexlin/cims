@@ -82,6 +82,38 @@ C API·.NET = Windows 개발 환경**.
 BT·이어폰 소멸 뒤 뮤트 고착 복구([android_ue_client.md](../design/features/android_ue_client.md))가 실제로 무엇으로 풀렸는지는 P3 실기에서
 (PTT 수신 중 BT·유선 이어폰 제거) SDK `reopenAudioDevice`(실제 재오픈)와 함께 확인한다.
 
-## 4. 다음 (.45)
+## 4. P0b 코어 보강 — PTT 몫 (.45 반영)
 
-P0b(MSRP·긴급 re-INVITE·경보·승인 톤 뒤 마이크·CMS 해석) → P3 `ptt-client`.
+규약은 [ue_sdk.md](../design/features/ue_sdk.md) §4.2(«정책 게이트»·«긴급·임박 세션 조건»·«media plane SDS»·«승인 톤 뒤 마이크»)가 정본이다.
+
+| 항목 | 반영 | 확인 |
+|---|---|---|
+| CMS 해석 | `UserProfileDoc`·`ServiceConfigDoc`(TS 24.484 — 긴급 대상 EntryType·제휴 그룹·N2·ruleset allow-*, 요소 없음 = 허용) · `Capabilities::of`(AND 규칙 한 곳) · `CscClient::fetchUserProfile/fetchServiceConfig`(304 = `notModified`) · Kotlin `CscClient.fetch*`·`Capabilities.of` | `CmsDoc.*` 3건 · `Csc.FetchCmsDocsParseAndNotModified` |
+| 긴급 상향·하향 | `Engine::setCallCondition` — re-INVITE(바뀐 지시자만 명시 + Resource-Priority) · `CallInfo.condition` · `onMcpttCondition(Local→Confirmed/Denied, Advertised)` · Floor Request 긴급 비트 = 현재값 · Kotlin `Call.setCondition`·`condition` flow | `McpttCondition.UpgradeDeniedConfirmedAndAdvertised`(루프백 서버 — 403 복원·200 확정·서버 하향 재광고) · .45 실서버 `cimsue-cli group-call g005 --upgrade-at 4` → **403 → Denied, 호 유지·이어 발언권 획득**(g005 그룹 능력 `emergency_call` off — CSP `denied (group capability)`) |
+| 긴급 경보 | `sendEmergencyAlert`(mcptt-client-id·ICSI 헤더·제3자 취소·그룹 긴급 해제 동봉) · `onEmergencyAlert` · `AccountConfig.mcpttClientId` · Kotlin `Account.sendEmergencyAlert`·`emergencyAlert` flow(유실 없음) | `McpttXml.AlertBuildAndParse` · .45 `cimsue-cli alert g005` 200 → CSP `alert_sent fanout=2` → 014 `onEmergencyAlert` 수신 · 취소 200(`alert_cancelled`) |
+| 승인 톤 뒤 마이크 | `EngineConfig.grantMicDelayMs`(floor participant 가 지연 개방, 발언을 잃으면 열지 않음) · 전이중 사설콜은 `setMuted` = PTT 로컬 게이트 | `FloorParticipant.MicOpensAfterGrantDelayAndNotAfterEarlyRelease` |
+| 게인 | 호 수신 음량 `CallInfo.rxLevel` 기억·재결선마다 적용(오디오 없어도 성공). AGC 목표 환산은 앱(ue_audio_level.md §6 결정 그대로) | 전체 회귀 |
+| MSRP | `mcdata/msrp`(프레이밍·청크·발신·수신) · `sendGroupSds` 상한 초과 → MSRP(`onRequestResult` method `MSRP`) · 서버발 배포 수신 → `onSds(mediaPlane)` · `AccountConfig.maxSdsCplaneBytes`(`toAccount` 가 채움)·`mcdataMsrp`(REGISTER Contact ICSI 합치기) · MSRP 호는 앱 호 목록 밖 · Kotlin 필드 | `Msrp.*` 3건(40 KB 3청크 발신·2청크 배포 수신) · .45 실서버 013 `sds g005 <2408 B> --cplane-max 1500` → **media 200**, CSP `SDS via MSRP fanout=2`(014·MF52, 둘 다 `closed ok=1`) → 014 `onSds media=1` 2408 B |
+| cimsue-cli | `group-call --upgrade-at/--cancel-at`(outcome `conditions`) · `alert` · `--cplane-max`·`--msrp` · `sds` outcome `plane` | 위 실측 |
+
+- 검증: `cimsue_test` 85/85 한 프로세스, S1-UE 6항목 PASS(`UNIT`·`FLOOR-CODEC`·`ANDROID-BIND`·`ENGINE-SINGLE`·`SDS-XCHECK`·`CSC-XCHECK`),
+  `build-native.sh` + gradle(`volte-client`·`sdk-probe`·`dispatch-tablet` APK, `:cimsue` 단위 31건) 성공.
+- **실측 함정** — MSRP 발신 뒤 엔진을 곧바로 내리면 발신 leg BYE 가 cmdp 의 수신 통지보다 먼저 CSP 에 닿아 배포가 버려진다
+  (`MSRP_MSG_RECEIVED for unknown session — dup/late, ignore`). 코어는 서버 BYE 를 5 s 기다리고, cli `sds` 는 media 면 6 s 기다린다.
+  서버 쪽 보완은 [server45_handoff.md](server45_handoff.md) §9.
+- **긴급 확정 경로의 실서버 실측은 남았다** — 계측기 그룹 g005 의 그룹 능력 `emergency_call` 이 꺼져 있어 상향이 403 으로 끝난다.
+  Confirmed·서버 재광고(Advertised)는 루프백 시험으로만 확인했다.
+
+### 4.1 Windows 개발 환경에 넘길 것 (P0b)
+
+- **C API·.NET 미노출** — `setCallCondition` · `sendEmergencyAlert` · `onMcpttCondition`/`onEmergencyAlert`(+ `McpttCondition`·`ConditionCause`·
+  `EmergencyAlert`) · `CallInfo.condition`·`rxLevel` · `SdsMessage.mediaPlane` · `AccountConfig.mcpttClientId`·`rp*`·`maxSdsCplaneBytes`·`mcdataMsrp` ·
+  `EngineConfig.grantMicDelayMs` · CMS `UserProfileDoc`·`ServiceConfigDoc`·`Capabilities`·`fetchUserProfile/fetchServiceConfig`. 구조체 필드는 끝에
+  덧붙이고 `AbiLayoutTests` 로 크기 대조.
+- **코어 동작 변화(Windows 앱에도 적용)** — ① `sendGroupSds` 가 `AccountConfig.maxSdsCplaneBytes` 를 넘으면 MSRP 로 가고 최종 결과가
+  `onRequestResult` method `MSRP` 로 온다(token 상관은 그대로 — method 로 MESSAGE 를 거르는 앱은 고쳐야 한다) ② `setRxLevel` 이 오디오가 없어도
+  성공하고 값을 기억한다(앱의 재적용 루프는 필요 없다) ③ 전이중 사설콜에서 `setMuted` 가 적용된다(예전에는 무시).
+
+## 5. 다음 (.45)
+
+W999 설치·영상 실측(§1.3 미실측 잔여) → P3 `ptt-client`(실기 그룹 = g005 — W999 +82500000001·MF52 +82500000002 추가됨, 상대 = 계측기 013~022).

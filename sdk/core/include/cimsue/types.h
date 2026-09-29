@@ -48,6 +48,9 @@ struct EngineConfig {
     int tlsPort = 0;
     /** 미디어 클럭·프레임 — pjsua 기본(16kHz/20ms). AMR-WB 정합. */
     unsigned clockRate = 16000;
+    /** Floor Granted 뒤 마이크를 여는 지연(ms, 0 = 즉시) — 앱이 승인 톤을 재생하는 길이(android_ue_client.md «삑 후 말하기»,
+     *  원천 앱 350 ms). 그 사이 놓거나(Release)·회수(Revoke)·시한으로 발언을 잃으면 열지 않는다. 200 OK 승인(암묵 요청)에도 같다. */
+    int grantMicDelayMs = 0;
 };
 
 /** 계정(접속서비스 kind 당 1개) 설정 — 프로비저닝 프로파일에서 채운다 (android_ue_provisioning.md). */
@@ -81,9 +84,28 @@ struct AccountConfig {
      *  IMEI 를 아는 단말은 `imeiUrn()`(RFC 7254), 모르면 기기 고유 `urn:uuid:…`(RFC 4122). 비면 pjsip 기본값 —
      *  호스트명 해시라 기기마다 같을 수 있다(registration_binding_set.md §8). */
     std::string instanceId;
+    /** MCPTT client ID(TS 24.379 §4.10) — 단말이 처음 쓸 때 만든 UUID URN(RFC 9562 §4.2)을 보존해 넘긴다. 긴급 경보 mcptt-info 의
+     *  `<mcptt-client-id>`(§12.1.1.1 4)c). 비면 instanceId 가 `urn:uuid:` 일 때 그것을 쓰고, 아니면 싣지 않는다. */
+    std::string mcpttClientId;
+    /** Resource-Priority(RFC 8101 "namespace.priority") — 긴급·임박·일반 그룹콜(TS 24.379 §6.2.8.1.2·§6.2.8.1.12·§6.2.8.1.15). 값의 정본은
+     *  service-config OnNetwork 의 *-resource-priority(ServiceConfigDoc) — 문서에 없으면 기본값(CSP fan-out 과 같은 mcpttp 서열)을 둔다. */
+    std::string rpEmergency = "mcpttp.15";
+    std::string rpImminentPeril = "mcpttp.8";
+    std::string rpNormal = "mcpttp.0";
+    /** 그룹 SDS 의 시그널링 평면 상한(octet) — TS 24.484 `max-payload-size-sds-cplane-bytes`(프로비저닝 `mcdata.maxPayloadSdsCplaneBytes`).
+     *  본문이 넘으면 sendGroupSds 가 media plane(MSRP, TS 24.282 §9.2.3)으로 보낸다 — 서버는 초과 MESSAGE 를 403 으로 거절한다(§9.2.2 8)).
+     *  0 = 제한 없음. 1:1 SDS 는 늘 시그널링 평면이다(서버 media plane 이 그룹만 받는다 — mcdata_messaging.md §4.7). */
+    int maxSdsCplaneBytes = 0;
+    /** 서버발 MSRP 배포를 받는다 — REGISTER Contact 의 `+g.3gpp.icsi-ref` 에 ICSI mcdata.sds 를 싣는다(코어가 contactParams 의
+     *  기존 icsi-ref 목록에 합친다). false 면 서버가 큰 그룹 SDS 를 FILEURL(FD)로 폴백해 보낸다. */
+    bool mcdataMsrp = false;
 
     std::string aor() const { return "sip:" + msisdn + "@" + domain; }
     std::string effectiveMcpttId() const { return mcpttId.empty() ? "tel:" + msisdn : mcpttId; }
+    std::string effectiveMcpttClientId() const {
+        if (!mcpttClientId.empty()) return mcpttClientId;
+        return instanceId.rfind("urn:uuid:", 0) == 0 ? instanceId : std::string();
+    }
     /** Digest username = 전체 IMPI. msisdn 폴백 없음(서버는 불일치 시 즉시 403). */
     std::string digestUsername() const {
         if (!authId.empty()) return authId;
@@ -154,6 +176,37 @@ struct McpttInfo {
     bool noFloorCtrl = false;         // fmtp mc_no_floor_ctrl — 전이중 1:1
 };
 
+/** MCPTT 세션 조건 — 그룹의 긴급·임박 상태(TS 24.379 §6.2.8.1 MEG/MIG)를 이 호에서 본 값. 개시 mcptt-info 로 시작해
+ *  Engine::setCallCondition(상향·하향 re-INVITE, §10.1.1.2.1.3~5)과 서버 재광고(수신 re-INVITE §10.1.1.2.1.6 · 조인 200 OK 동봉)로 바뀐다.
+ *  긴급이 임박을 대체한다(둘이 함께 true 가 되지 않는다). */
+struct McpttCondition {
+    bool emergency = false;
+    bool imminentPeril = false;
+    bool mine = false;                // 이 단말이 올린 조건(개시 옵션·상향) — 하향·서버 해제로 내려간다
+    bool pending = false;             // 상향·하향 re-INVITE 응답 대기
+    int lastCode = 0;                 // 마지막 상향·하향 re-INVITE 의 최종 응답(Confirmed·Denied — 로컬 송신 실패 = 0)
+};
+/** onMcpttCondition 의 계기. */
+enum class ConditionCause {
+    Local,                            // setCallCondition — 보내면서 곧바로 반영(응답 전)
+    Confirmed,                        // 그 re-INVITE 의 2xx
+    Denied,                           // 그 re-INVITE 의 4xx~6xx — 이전 값으로 되돌렸다(§6.2.8.1.5, 미인가 상향 = 403 §6.3.3.1.14)
+    Advertised                        // 서버 재광고(수신 re-INVITE·200 OK 의 mcptt-info, §6.3.3.1.15·§6.3.3.1.16)
+};
+
+/** 긴급 경보·긴급 통지 수신(TS 24.379 §12.1.1.3 — SIP MESSAGE, mcptt-info). 지시자는 1 = true, -1 = false, 0 = 요소 없음. */
+struct EmergencyAlert {
+    int accountId = -1;
+    std::string groupId;              // bare — <mcptt-calling-group-id>, 없으면 <mcptt-request-uri>(서버가 원본 본문을 중계하는 경우)
+    std::string userId;               // bare 발신자 — <mcptt-calling-user-id>, 없으면 From
+    std::string originatedBy;         // bare — 제3자 취소가 가리키는 원 경보 발신자(<originated-by>)
+    std::string mcOrg;                // 발신자 조직(<mc-org>)
+    int alertInd = 0;                 // 1 경보 · -1 경보 취소 · 0 경보 요소 없는 그룹 상태 통지
+    int emergencyInd = 0;             // 그룹의 진행 중 긴급 상태(§12.1.1.3 3)·4))
+    int imminentPerilInd = 0;         // 그룹의 진행 중 임박 상태(§12.1.1.3 5)·6))
+    bool self = false;                // 발신자가 이 계정 — 에코(앱은 보통 무시)
+};
+
 /** 한 호 안의 RTP 소스(SSRC) — U10 디먹스 산출. 감청 leg 는 RFC 5576 label 로 화자 귀속. */
 struct MediaSource {
     uint32_t ssrc = 0;
@@ -176,13 +229,16 @@ struct CallInfo {
     bool listen = true;
     /** 수신 음성 재생 라우트 — 0=기본 재생 장치, 그 외 Engine::addPlaybackRoute 가 준 id(관제석 스피커 등). */
     int playbackRoute = 0;
+    /** 이 호에서 듣는 크기(setRxLevel, 1 = 원음) — 코어가 기억해 미디어 결선(재협상·보류 해제)마다 다시 건다. */
+    float rxLevel = 1.f;
     int lastCode = 0;
     std::string lastReason;
     std::vector<MediaSource> sources;
     // ── MCPTT ──
     bool isMcptt = false;             // 그룹콜/사설콜 세션(floor 평면 있음 또는 mc_no_floor_ctrl)
     std::string groupId;              // 그룹 id(bare) 또는 사설콜 상대(bare)
-    McpttInfo mcptt;
+    McpttInfo mcptt;                  // 개시·착신 INVITE 의 mcptt-info(호 종류 — 이후 불변)
+    McpttCondition condition;         // 세션 조건의 현재값(긴급·임박 — 바뀌면 onMcpttCondition)
     bool halfDuplex = false;          // floor 로 마이크를 게이트한다(Granted 에서만 송신)
     bool listenOnly = false;          // a=recvonly 청취 leg (PTT 청취·감청 Join)
     std::string joinedDialog;         // INVITE-Join 으로 합류한 대상 dialog 의 Call-ID
@@ -281,6 +337,7 @@ struct SdsMessage {
     bool notification = false;        // SDS NOTIFICATION
     int notifType = 0;                // 1 undelivered / 2 delivered / 3 read / 4 delivered+read
     bool fd = false;                  // FD SIGNALLING (파일 URL)
+    bool mediaPlane = false;          // media plane(MSRP) 배포로 받았다(TS 24.282 §9.2.3)
     std::string fileUrl, fileName, fileType;
     int64_t fileSize = 0;
 };
@@ -379,5 +436,6 @@ CIMSUE_API const char* toString(CallState s);
 CIMSUE_API const char* toString(Transport t);
 CIMSUE_API const char* toString(FloorState s);
 CIMSUE_API const char* toString(FloorEvent::Kind k);
+CIMSUE_API const char* toString(ConditionCause c);
 
 }  // namespace cimsue

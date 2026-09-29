@@ -19,12 +19,14 @@ import com.cims.ue.sdk.jni.DeviceLinkConfig as JniDeviceLinkConfig
 import com.cims.ue.sdk.jni.DialogInfo as JniDialogInfo
 import com.cims.ue.sdk.jni.DriveAccount as JniDriveAccount
 import com.cims.ue.sdk.jni.DriveOptions as JniDriveOptions
+import com.cims.ue.sdk.jni.EmergencyAlert as JniEmergencyAlert
 import com.cims.ue.sdk.jni.LinkState as JniLinkState
 import com.cims.ue.sdk.jni.EngineConfig as JniEngineConfig
 import com.cims.ue.sdk.jni.FdFile as JniFdFile
 import com.cims.ue.sdk.jni.FloorEvent as JniFloorEvent
 import com.cims.ue.sdk.jni.FloorInfo as JniFloorInfo
 import com.cims.ue.sdk.jni.GroupCallOptions as JniGroupCallOptions
+import com.cims.ue.sdk.jni.McpttCondition as JniMcpttCondition
 import com.cims.ue.sdk.jni.McpttInfo as JniMcpttInfo
 import com.cims.ue.sdk.jni.MediaSource as JniMediaSource
 import com.cims.ue.sdk.jni.RegInfo as JniRegInfo
@@ -76,6 +78,9 @@ enum class FloorEventKind {
     TALK_LIMIT,
     OTHER,
 }
+/** MCPTT 세션 조건 변화의 계기(서수 = 코어 ConditionCause) — LOCAL = setCondition 을 보내며 반영, CONFIRMED = 그 re-INVITE 2xx,
+ *  DENIED = 4xx~6xx(이전 값 복원, 미인가 상향 403), ADVERTISED = 서버 재광고(TS 24.379 §6.3.3.1.15·§6.3.3.1.16). */
+enum class ConditionCause { LOCAL, CONFIRMED, DENIED, ADVERTISED }
 /** 오디오 라우트 — 입력의 EARPIECE = 내장 기본(하단) 마이크 고정, DEFAULT = 정책(고정 해제). 서수 = 코어 AudioRoute. */
 enum class AudioRoute { DEFAULT, EARPIECE, LOUDSPEAKER }
 /** 계측 링크 상태(cimsue/drive.h) — REFUSED(연결 키 거절·지문 불일치)는 다시 붙지 않는다. */
@@ -103,6 +108,8 @@ data class EngineConfig(
     val tcpPort: Int = 0,
     val tlsPort: Int = 0,
     val clockRate: Long = 16000L,
+    /** Floor Granted 뒤 마이크 개방 지연(ms) — 앱의 승인 톤 길이(«삑 후 말하기»). 그 사이 발언을 잃으면 열지 않는다. 0 = 즉시. */
+    val grantMicDelayMs: Int = 0,
 ) {
     internal fun toJni(): JniEngineConfig = JniEngineConfig().also {
         it.userAgent = userAgent; it.logLevel = logLevel
@@ -110,6 +117,7 @@ data class EngineConfig(
         it.nullAudioDevice = nullAudioDevice; it.noVad = noVad; it.udpNoTcpSwitch = udpNoTcpSwitch
         it.udpPort = udpPort; it.tcpPort = tcpPort; it.tlsPort = tlsPort
         it.clockRate = clockRate
+        it.grantMicDelayMs = grantMicDelayMs
     }
 }
 
@@ -139,6 +147,17 @@ data class AccountConfig(
     val autoAnswerMcptt: Boolean = true,
     /** REGISTER Contact +sip.instance(TS 24.229 §5.1.1.2) — 꺾쇠 없는 URN. 빈 값이면 pjsip 기본값(호스트명 해시). */
     val instanceId: String = "",
+    /** MCPTT client ID(TS 24.379 §4.10) — 처음 쓸 때 만든 UUID URN 을 보존해 넘긴다. 비면 instanceId 가 urn:uuid: 일 때 그것. */
+    val mcpttClientId: String = "",
+    /** Resource-Priority(RFC 8101) — service-config OnNetwork 의 *-resource-priority(TS 24.379 §6.2.8.1.15). 기본 = CSP 와 같은 mcpttp 서열. */
+    val rpEmergency: String = "mcpttp.15",
+    val rpImminentPeril: String = "mcpttp.8",
+    val rpNormal: String = "mcpttp.0",
+    /** 그룹 SDS 의 시그널링 평면 상한(octet, 프로비저닝 mcdata.maxPayloadSdsCplaneBytes) — 넘으면 `sendGroupSds` 가 MSRP(TS 24.282 §9.2.3)로
+     *  보내고 최종 결과는 `requestResult` 의 method "MSRP" 로 온다. 0 = 제한 없음. */
+    val maxSdsCplaneBytes: Int = 0,
+    /** 서버발 MSRP 배포 수신 — REGISTER Contact 에 ICSI mcdata.sds 를 싣는다(코어가 contactParams 에 합친다). 끄면 서버가 FILEURL 로 폴백. */
+    val mcdataMsrp: Boolean = false,
 ) {
     internal fun toJni(): JniAccountConfig = JniAccountConfig().also {
         it.serverHost = serverHost; it.serverPort = serverPort
@@ -152,6 +171,9 @@ data class AccountConfig(
         it.expiresSec = expiresSec; it.contactParams = contactParams
         it.videoAutoTransmit = videoAutoTransmit; it.mcpttId = mcpttId
         it.autoAnswerMcptt = autoAnswerMcptt; it.instanceId = instanceId
+        it.mcpttClientId = mcpttClientId
+        it.rpEmergency = rpEmergency; it.rpImminentPeril = rpImminentPeril; it.rpNormal = rpNormal
+        it.maxSdsCplaneBytes = maxSdsCplaneBytes; it.mcdataMsrp = mcdataMsrp
     }
 }
 
@@ -226,6 +248,10 @@ data class CallInfo(
     val halfDuplex: Boolean, val listenOnly: Boolean,
     /** Join(RFC 3911)으로 합류한 감청 leg 이면 대상 dialog id. */
     val joinedDialog: String,
+    /** 세션 조건 현재값(긴급·임박) — 바뀌면 `condition` 이벤트. [mcptt] 는 개시·착신 INVITE 의 값(불변)이다. */
+    val condition: McpttCondition = McpttCondition(),
+    /** 이 호에서 듣는 크기(setRxLevel) — 코어가 기억해 재결선마다 다시 건다. */
+    val rxLevel: Float = 1f,
 ) {
     val active: Boolean get() = state == CallState.ACTIVE
     val ended: Boolean get() = state == CallState.DISCONNECTED
@@ -234,7 +260,37 @@ data class CallInfo(
             c.callId, c.accountId, ordinalOf(c.dir.swigValue()), ordinalOf(c.state.swigValue()),
             c.remoteUri, c.calledParty, c.video, c.mediaActive, c.muted, c.listen,
             c.playbackRoute, c.lastCode, c.lastReason, MediaSource.list(c.sources),
-            c.isMcptt, c.groupId, McpttInfo.of(c.mcptt), c.halfDuplex, c.listenOnly, c.joinedDialog)
+            c.isMcptt, c.groupId, McpttInfo.of(c.mcptt), c.halfDuplex, c.listenOnly, c.joinedDialog,
+            McpttCondition.of(c.condition), c.rxLevel)
+    }
+}
+
+/** MCPTT 세션 조건 — 그룹의 긴급·임박 상태를 이 호에서 본 값(TS 24.379 §6.2.8.1). mine = 이 단말이 올린 조건. */
+data class McpttCondition(
+    val emergency: Boolean = false, val imminentPeril: Boolean = false,
+    val mine: Boolean = false, val pending: Boolean = false,
+    /** 마지막 상향·하향 re-INVITE 최종 응답(CONFIRMED·DENIED). */
+    val lastCode: Int = 0,
+) {
+    internal companion object {
+        fun of(c: JniMcpttCondition) = McpttCondition(c.emergency, c.imminentPeril, c.mine, c.pending, c.lastCode)
+    }
+}
+
+/** 조건 변화 이벤트 — call.condition 이 새 값. */
+data class ConditionChange(val call: CallInfo, val cause: ConditionCause)
+
+/**
+ * 긴급 경보·취소·그룹 긴급 통지 수신(TS 24.379 §12.1.1.3). 지시자는 1 = true, -1 = false, 0 = 요소 없음.
+ * alertInd 0 은 경보 없는 그룹 상태 통지다. self = 발신자가 이 계정(에코).
+ */
+data class EmergencyAlert(
+    val accountId: Int, val groupId: String, val userId: String, val originatedBy: String, val mcOrg: String,
+    val alertInd: Int, val emergencyInd: Int, val imminentPerilInd: Int, val self: Boolean,
+) {
+    internal companion object {
+        fun of(a: JniEmergencyAlert) = EmergencyAlert(a.accountId, a.groupId, a.userId, a.originatedBy, a.mcOrg,
+            a.alertInd, a.emergencyInd, a.imminentPerilInd, a.self)
     }
 }
 
@@ -307,11 +363,13 @@ data class SdsMessage(
     val dispositionReq: Int, val text: String,
     val notification: Boolean, val notifType: Int,
     val fd: Boolean, val fileUrl: String, val fileName: String, val fileType: String, val fileSize: Long,
+    /** media plane(MSRP) 배포로 받았다(TS 24.282 §9.2.3). */
+    val mediaPlane: Boolean = false,
 ) {
     internal companion object {
         fun of(m: JniSdsMessage) = SdsMessage(m.accountId, m.fromUri, m.groupUri, m.convId, m.msgId,
             m.timeSec, m.dispositionReq, m.text, m.notification, m.notifType,
-            m.fd, m.fileUrl, m.fileName, m.fileType, m.fileSize)
+            m.fd, m.fileUrl, m.fileName, m.fileType, m.fileSize, m.mediaPlane)
     }
 }
 

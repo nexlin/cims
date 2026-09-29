@@ -61,4 +61,14 @@ const char* toString(FloorEvent::Kind k) {
     return "?";
 }
 
+const char* toString(ConditionCause c) {
+    switch (c) {
+        case ConditionCause::Local: return "local";
+        case ConditionCause::Confirmed: return "confirmed";
+        case ConditionCause::Denied: return "denied";
+        case ConditionCause::Advertised: return "advertised";
+    }
+    return "?";
+}
+
 }  // namespace cimsue

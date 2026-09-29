@@ -27,6 +27,10 @@ public:
                           bool full) { (void)accountId; (void)groupId; (void)users; (void)full; }
     /** 감시 대상 dialog 상태(RFC 4235 NOTIFY) — dialog 하나당 1회. Join 대상 선택의 입력. */
     virtual void onDialogInfo(const DialogInfo& d) { (void)d; }
+    /** MCPTT 세션 조건 변화(긴급·임박, TS 24.379 §10.1.1.2.1.3~6) — info.condition 이 새 값, cause 가 계기. */
+    virtual void onMcpttCondition(const CallInfo& info, ConditionCause cause) { (void)info; (void)cause; }
+    /** 긴급 경보·취소·긴급 통지 수신(TS 24.379 §12.1.1.3). 200 OK 는 코어가 이미 보냈다. */
+    virtual void onEmergencyAlert(const EmergencyAlert& alert) { (void)alert; }
     /** MCData SDS 수신(메시지·disposition 통지·FD). */
     virtual void onSds(const SdsMessage& msg) { (void)msg; }
     /** 임의 요청(PUBLISH/SUBSCRIBE 등)의 최종 응답 — affiliation 확인·ETag. */

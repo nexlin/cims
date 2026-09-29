@@ -22,6 +22,19 @@ static bool ieq(const std::string& a, const char* b) {
     return true;
 }
 
+/** Contact 파라미터에 ICSI 하나를 더한다 — `+g.3gpp.icsi-ref` 가 이미 있으면 그 목록(쉼표)에 합치고, 없으면 새 파라미터로
+ *  (RFC 3840 — 한 feature tag 는 한 번만). 이미 들어 있으면 그대로. icsi 는 퍼센트 인코딩 값. */
+std::string withIcsi(const std::string& params, const std::string& icsi) {
+    const std::string tag = "+g.3gpp.icsi-ref=\"";
+    size_t p = params.find(tag);
+    if (p == std::string::npos) return params + ";" + tag + icsi + "\"";
+    size_t e = params.find('"', p + tag.size());
+    if (e == std::string::npos) return params;
+    std::string list = params.substr(p + tag.size(), e - p - tag.size());
+    if (list.find(icsi) != std::string::npos) return params;
+    return params.substr(0, e) + (list.empty() ? "" : ",") + icsi + params.substr(e);
+}
+
 pj::AccountConfig buildPjAccountConfig(const AccountConfig& c, std::string* note) {
     pj::AccountConfig ac;
     const std::string tp = transportParam(c.transport);
@@ -78,7 +91,9 @@ pj::AccountConfig buildPjAccountConfig(const AccountConfig& c, std::string* note
         ac.regConfig.headers.push_back(h3);
         if (note) *note += "sec-agree ";
     }
-    if (!c.contactParams.empty()) ac.sipConfig.contactParams = c.contactParams;
+    std::string cp = c.contactParams;
+    if (c.mcdataMsrp) cp = withIcsi(cp, "urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds");   // TS 24.282 §9.2.3 수신 능력
+    if (!cp.empty()) ac.sipConfig.contactParams = cp;
     // 인스턴스 ID(TS 24.229 §5.1.1.2.1 c) — 모든 transport 에서 REGISTER Contact 파라미터로 직접 싣고 pjsua outbound(RFC 5626)는 끈다.
     //   CSP 는 outbound 를 지원하지 않아 REGISTER 200 에 `Require: outbound` 가 없고, 그러면 pjsua 가 OUTBOUND_NA 로 두어
     //   NAT 로 Contact 를 다시 쓸 때(rport 변화 — TCP/TLS 재연결) outbound 경로의 +sip.instance 를 빼 버린다. reg_contact_params 는

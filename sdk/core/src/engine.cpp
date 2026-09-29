@@ -30,6 +30,7 @@
 
 #include "account_map.h"
 #include "floor/floor_participant.h"
+#include "mcdata/msrp.h"
 #include "mcdata/sds_codec.h"
 #include "mcptt/mcptt_xml.h"
 #include "quality/call_quality.h"
@@ -149,6 +150,7 @@ std::string sipBody(const std::string& whole) {
 class PjAccount;
 class PjCall;
 class PjLog;
+struct MsrpLeg;
 
 /** 이벤트 fan-out — 주 리스너(start 인자) 뒤에 관찰자들(addObserver — 구동 세션·계측 링크, ue_voice_quality.md §5.3)에게 같은
  *  이벤트를 같은 이벤트 스레드에서 차례로 준다. 재진입 락이라 콜백 안에서 관찰자를 빼도 된다. removeObserver 는 진행 중 전달이
@@ -171,6 +173,8 @@ public:
         each([&](Listener* l) { l->onRoster(a, g, u, f); });
     }
     void onDialogInfo(const DialogInfo& d) override { each([&](Listener* l) { l->onDialogInfo(d); }); }
+    void onMcpttCondition(const CallInfo& i, ConditionCause c) override { each([&](Listener* l) { l->onMcpttCondition(i, c); }); }
+    void onEmergencyAlert(const EmergencyAlert& a) override { each([&](Listener* l) { l->onEmergencyAlert(a); }); }
     void onSds(const SdsMessage& m) override { each([&](Listener* l) { l->onSds(m); }); }
     void onRequestResult(const RequestResult& r) override { each([&](Listener* l) { l->onRequestResult(r); }); }
     void onMessage(int a, const std::string& f, const std::string& ct, const std::string& b) override {
@@ -242,6 +246,11 @@ struct Engine::Impl {
         int64_t appToken = -1;                             // affiliate() 가 돌려준 token
     };
     std::map<int64_t, PendingPublish> publishPending;
+    // media plane SDS(MSRP) 입출력 스레드 — 분리 실행, stop() 이 취소하고 모두 끝날 때까지 기다린다.
+    std::mutex msrpM;
+    std::condition_variable msrpCv;
+    int msrpActive = 0;
+    std::vector<std::weak_ptr<std::atomic<bool>>> msrpCancels;
     std::map<std::string, std::string> publishEtag;               // "accountId:group" → SIP-ETag
     static constexpr size_t kKeepFinished = 64;
     void pruneFinished() {                                 // snapM 잡은 상태에서 호출
@@ -355,6 +364,12 @@ struct Engine::Impl {
     void attachVideo(PjCall* call, int accountId);
     /** 기억한 장치 단 음량을 slot 0 에 다시 건다 — 게이트 전환·재오픈·미디어 결선 뒤(재오픈은 slot 0 레벨을 초기화한다). */
     void applyDeviceLevels();
+    /** media plane SDS 입출력 스레드(분리 실행) — 결과는 onRequestResult(MSRP)·onSds 로, 끝나면 호를 정리한다. */
+    void startMsrpSend(int callId, int accountId, const MsrpLeg& leg);
+    void startMsrpRecv(int callId, int accountId, const MsrpLeg& leg);
+    void runMsrpThread(std::shared_ptr<std::atomic<bool>> cancel, std::function<void()> body);
+    /** 큰 그룹 SDS — MSRP 발신 INVITE(ue-ctl). */
+    bool startMsrpInvite(int accountId, const std::string& groupId, int64_t token, const std::string& sigTlv, const std::string& payTlv);
     /** 캡처 카메라 목록(합성 장치 제외)과 전면 카메라. */
     std::vector<int> cameras();
     int frontCamera();
@@ -368,13 +383,32 @@ struct McpttSession {
     bool isPrivate = false;
     bool fullDuplex = false;             // mc_no_floor_ctrl — floor 없이 마이크 상시
     bool listenOnly = false;
-    bool emergency = false, imminentPeril = false;   // 발신 옵션 — CallInfo 투영(projectMcptt) 의 원본
+    bool emergency = false, imminentPeril = false;   // 세션 조건 현재값 — 개시 옵션·착신 mcptt-info 로 시작(CallInfo.condition 의 원본)
+    bool condMine = false;               // 이 단말이 올린 조건
+    bool condPending = false;            // 상향·하향 re-INVITE 응답 대기 — 끝나면 prev* 로 되돌리거나(Denied) 확정(Confirmed)
+    bool prevEmergency = false, prevImminent = false, prevMine = false;
+    int condLastCode = 0;
     bool broadcast = false;              // 일제 통화 개시(<broadcast-ind>) — 이 단말이 개시자
     bool micOpen = false;                // floor Granted 로 열림
     bool implicitAwaitAnswer = false;    // 개시 INVITE 가 암묵적 발언 요청 — 200 OK answer 의 fmtp 로 판정(TS 24.380 §14.3.4·§14.3.5)
     std::string pendingAppSdp;           // 송신 SDP 에 주입할 m=application 섹션
     std::unique_ptr<floor::Participant> floor;
     bool remoteLearned = false;
+};
+
+/** media plane SDS(MSRP, TS 24.282 §9.2.3) 호 — 앱 호 목록에 나오지 않는다(CallInfo 없음). 발신 = 큰 그룹 SDS, 수신 = 서버발 배포. */
+struct MsrpLeg {
+    bool outgoing = true;
+    std::string sessionId = msrp::newSessionId();
+    std::string localPath;                 // 첫 SDP 를 만들 때 c= 주소로 정한다 — 주입 섹션·MSRP From-Path 가 같은 값
+    std::string serverPath;                // cmdp a=path — 발신 = 200 OK answer, 수신 = offer
+    bool started = false;                  // 입출력 스레드를 띄웠다
+    std::shared_ptr<std::atomic<bool>> cancel = std::make_shared<std::atomic<bool>>(false);
+    // 발신
+    int64_t token = -1;
+    std::string signallingTlv, payloadTlv;
+    // 수신
+    std::string fromUri, groupUri;
 };
 
 /** Endpoint — transport 상태 콜백으로 TLS 서버 인증서 만료를 관측한다(sip_tls_signaling.md §8.6.2). */
@@ -416,6 +450,7 @@ public:
         : pj::Call(acc, callId), o_(o), accountId_(accountId) {}
 
     std::unique_ptr<McpttSession> mcptt;
+    std::unique_ptr<MsrpLeg> msrp;       // media plane SDS 호 — 앱에 나오지 않는다
     bool recvOnly = false;               // 감청 Join 등 청취 전용 평문 leg (a=recvonly, 마이크 없음)
 
     /**
@@ -441,6 +476,35 @@ public:
         c.mcptt.emergency = mcptt->emergency; c.mcptt.imminentPeril = mcptt->imminentPeril;
         c.mcptt.broadcast = mcptt->broadcast;
         c.halfDuplex = !mcptt->fullDuplex; c.listenOnly = mcptt->listenOnly;
+        c.condition.emergency = mcptt->emergency; c.condition.imminentPeril = mcptt->imminentPeril;
+        c.condition.mine = mcptt->condMine;
+    }
+
+    /** 세션 조건을 스냅샷에 옮기고 onMcpttCondition 을 낸다. */
+    void publishCondition(ConditionCause cause) {
+        if (!mcptt) return;
+        CallInfo snap;
+        o_->updateCall(getId(), [&](CallInfo& c) {
+            c.condition.emergency = mcptt->emergency; c.condition.imminentPeril = mcptt->imminentPeril;
+            c.condition.mine = mcptt->condMine; c.condition.pending = mcptt->condPending;
+            c.condition.lastCode = mcptt->condLastCode;
+        }, &snap);
+        o_->emit([o = o_, snap, cause] { o->listener->onMcpttCondition(snap, cause); });
+    }
+
+    /** 서버 재광고(TS 24.379 §10.1.1.2.1.6) — emergency-ind true 는 임박을 내린다(1)d)), false 는 긴급만, imminentperil-ind 는 임박만.
+     *  둘 다 내려가면 이 단말이 올린 조건도 끝이다. 바뀌었으면 true. */
+    bool applyAdvertised(int e, int i) {
+        if (!mcptt || (!e && !i)) return false;
+        bool ne = mcptt->emergency, ni = mcptt->imminentPeril;
+        if (e > 0) { ne = true; ni = false; }
+        else if (e < 0) ne = false;
+        if (i > 0 && e <= 0) ni = true;
+        else if (i < 0) ni = false;
+        if (ne == mcptt->emergency && ni == mcptt->imminentPeril) return false;
+        mcptt->emergency = ne; mcptt->imminentPeril = ni;
+        if (!ne && !ni) mcptt->condMine = false;
+        return true;
     }
 
     /** 청취 전용 leg — 로컬 SDP 의 audio 방향을 recvonly 로 (서버가 PTT_JOIN recv_only / tap 으로 해석). */
@@ -486,6 +550,7 @@ public:
         };
         mcptt->floor.reset(new floor::Participant(-1, ssrcOf(userId), userId, cb));
         if (!mcptt->floor->open(0)) { mcptt->floor.reset(); return false; }
+        mcptt->floor->setMicOpenDelay(o_->cfg.grantMicDelayMs);
         if (mcptt->listenOnly) mcptt->floor->setListenOnly(true);
         return true;
     }
@@ -501,6 +566,26 @@ public:
     }
 
     void onCallSdpCreated(pj::OnCallSdpCreatedParam& prm) override {
+        if (msrp) {
+            // m=message 섹션 — 발신 offer 는 pjsua 의 m=text 슬롯 자리에, 수신 answer 는 pjsua 가 포트 0 으로 만든 섹션을 교체한다
+            //   (media_count 불변). 수신의 더미 오디오는 inactive(서버 계약 — 포트 9 inactive 와 짝).
+            try {
+                std::string whole = prm.sdp.wholeSdp;
+                if (whole.empty()) { o_->log(1, "msrp: empty wholeSdp — skip inject"); return; }
+                if (msrp->localPath.empty()) {
+                    std::string ip = msrp::connAddrOf(whole);
+                    msrp->localPath = msrp::localPath(ip.empty() ? "127.0.0.1" : ip, msrp->sessionId);
+                }
+                // 미디어 수 불변(pjsua med_prov_cnt ≥ SDP media_count) — floor 주입과 같이 m=text 슬롯을 쓴다. 덧붙이면 assert.
+                const char* slot = whole.find("m=message") != std::string::npos ? "m=message"
+                                 : whole.find("m=text") != std::string::npos ? "m=text" : "\x01";
+                whole = replaceMediaSection(whole, slot, msrp->outgoing ? msrp::sdpSection(msrp->localPath, "actpass", "sendonly")
+                                                                        : msrp::sdpSection(msrp->localPath, "active", "recvonly"));
+                if (!msrp->outgoing) whole = msrp::audioInactive(whole);
+                prm.sdp.wholeSdp = whole;
+            } catch (...) {}
+            return;
+        }
         if (!mcptt && !recvOnly) return;
         try {
             if (recvOnly && !prm.sdp.wholeSdp.empty()) prm.sdp.wholeSdp = forceRecvOnly(prm.sdp.wholeSdp);
@@ -526,9 +611,29 @@ public:
     void onCallTsxState(pj::OnCallTsxStateParam& prm) override {
         try {
             if (prm.e.type != PJSIP_EVENT_TSX_STATE) return;
+            const pj::SipTransaction& tsx = prm.e.body.tsxState.tsx;
+            // 상향·하향 re-INVITE 의 최종 응답(§10.1.1.2.1.3~5) — 수신 응답·타이머(408) 모두. 2xx = 확정, 그 밖 = 이전 값(§6.2.8.1.5).
+            //   성립 전 호에는 보내지 않으므로(setCallCondition) 대기 중인 UAC INVITE 최종 응답은 그 re-INVITE 의 것이다.
+            if (mcptt && mcptt->condPending && tsx.role == PJSIP_ROLE_UAC && tsx.method == "INVITE" && tsx.statusCode >= 200) {
+                mcptt->condPending = false;
+                mcptt->condLastCode = tsx.statusCode;
+                const bool ok = tsx.statusCode / 100 == 2;
+                if (!ok) { mcptt->emergency = mcptt->prevEmergency; mcptt->imminentPeril = mcptt->prevImminent; mcptt->condMine = mcptt->prevMine; }
+                o_->log(3, "call " + std::to_string(getId()) + " condition re-INVITE → " + std::to_string(tsx.statusCode));
+                publishCondition(ok ? ConditionCause::Confirmed : ConditionCause::Denied);
+            }
             if (prm.e.body.tsxState.type != PJSIP_EVENT_RX_MSG) return;
             const std::string& msg = prm.e.body.tsxState.src.rdata.wholeMsg;
             if (msg.empty()) return;
+            if (msrp) {
+                // 발신 200 OK answer 의 cmdp a=path → 입출력 스레드(TS 24.282 §9.2.3)
+                if (msrp->outgoing && !msrp->started && tsx.role == PJSIP_ROLE_UAC && tsx.method == "INVITE" && msg.rfind("SIP/2.0 2", 0) == 0) {
+                    msrp->serverPath = msrp::pathOfSdp(sipBody(msg));
+                    msrp->started = true;
+                    o_->startMsrpSend(getId(), accountId_, *msrp);
+                }
+                return;
+            }
             if (mcptt && msg.rfind("SIP/2.0 2", 0) == 0 && msg.find("m=application") != std::string::npos) {
                 const std::string body = sipBody(msg);
                 learnFloorRemote(body);                                                       // UAC: 200 OK answer
@@ -548,6 +653,13 @@ public:
                     o_->emit([o = o_, snap] { o->listener->onCallMedia(snap); });
                 }
             }
+            // 세션 조건 재광고(TS 24.379 §6.3.3.1.15·§6.3.3.1.16) — 서버가 멤버 leg 에 보내는 re-INVITE, 조인 200 OK 동봉.
+            //   rdata 는 수신 원문만이므로 "INVITE " = 수신 (re-)INVITE, "SIP/2.0 200" = 내 INVITE 의 응답. 바뀐 경우만 이벤트.
+            if (mcptt && (msg.rfind("INVITE ", 0) == 0 || (msg.rfind("SIP/2.0 200", 0) == 0 && tsx.method == "INVITE")) &&
+                msg.find("mcpttinfo") != std::string::npos) {
+                if (applyAdvertised(mcptt::indicator(msg, "emergency-ind"), mcptt::indicator(msg, "imminentperil-ind")))
+                    publishCondition(ConditionCause::Advertised);
+            }
             if (msg.rfind("NOTIFY ", 0) == 0 && msg.find("conference-info") != std::string::npos) {
                 std::vector<RosterEntry> users; bool full = false;
                 if (mcptt::parseConferenceInfo(sipBody(msg), users, full)) {
@@ -562,6 +674,18 @@ public:
     void onCallState(pj::OnCallStateParam&) override {
         pj::CallInfo ci = getInfo();
         const int id = getId();
+        if (msrp) {                                                       // 앱 호 목록 밖 — 끝나면 정리만
+            if (ci.state != PJSIP_INV_STATE_DISCONNECTED) return;
+            msrp->cancel->store(true);
+            if (msrp->outgoing && !msrp->started) {                        // INVITE 가 거절됐다(403 게이트·488 등) — 발신 결과로 알린다
+                RequestResult r;
+                r.accountId = accountId_; r.token = msrp->token; r.method = "MSRP";
+                r.code = ci.lastStatusCode ? ci.lastStatusCode : 500; r.reason = ci.lastReason;
+                o_->emit([o = o_, r] { o->listener->onRequestResult(r); });
+            }
+            o_->ctl.post([o = o_, id] { o->calls.erase(id); });
+            return;
+        }
         claimFresh(id);                  // 재사용된 call id 의 낡은 상태를 물려받지 않는다
         CallInfo snap;
         bool changed = false;
@@ -601,6 +725,7 @@ public:
     }
 
     void onStreamDestroyed(pj::OnStreamDestroyedParam& prm) override {
+        if (msrp) return;
         try {
             StreamStats s = Engine::Impl::fromPj(getStreamStat(prm.streamIdx));
             CallQuality q;
@@ -617,6 +742,7 @@ public:
     }
 
     void onCallMediaState(pj::OnCallMediaStateParam&) override {
+        if (msrp) return;                                                 // 더미 오디오 — 결선하지 않는다
         const int id = getId();
         pj::CallInfo ci = getInfo();
         bool held = false, active = false;
@@ -680,6 +806,31 @@ public:
         std::string remote;
         try { remote = call->getInfo().remoteUri; } catch (...) {}
         const AccountConfig& cfg = o_->accountCfgs[accountId_];
+        // MCData media plane 배포 INVITE(TS 24.282 §9.2.3 — m=message TCP/MSRP + a=path) — 통화가 아니다: 앱에 알리지 않고 받아
+        //   cmdp 에 붙어 본문을 받는다(onSds, mediaPlane). 발신자·그룹은 mcdata-info(1:1 이면 request-uri 가 나 자신).
+        if (whole.find("TCP/MSRP") != std::string::npos && whole.find("a=path:") != std::string::npos) {
+            { std::lock_guard<std::mutex> lk(o_->snapM); o_->callInfos.erase(prm.callId); }   // claimFresh 가 만든 빈 항목 — 앱 호가 아니다
+            call->msrp.reset(new MsrpLeg);
+            call->msrp->outgoing = false;
+            call->msrp->serverPath = msrp::pathOfSdp(whole);
+            call->msrp->fromUri = msrp::mcdataInfoUri(whole, "mcdata-calling-user-id");
+            if (call->msrp->fromUri.empty()) call->msrp->fromUri = remote;
+            std::string req = msrp::mcdataInfoUri(whole, "mcdata-request-uri");
+            if (mcptt::bareId(req) != mcptt::bareId(cfg.effectiveMcpttId()) && mcptt::bareId(req) != cfg.msisdn) call->msrp->groupUri = req;
+            o_->ctl.post([o = o_, call, id = prm.callId] {
+                o->calls[id].reset(call);
+                try {
+                    pj::CallOpParam p(true);
+                    p.statusCode = PJSIP_SC_OK;
+                    p.opt.audioCount = 1;
+                    p.opt.videoCount = 0;
+                    call->answer(p);                                     // answer SDP 는 여기서 만든다(onCallSdpCreated 주입)
+                } catch (pj::Error& e) { o->log(1, std::string("msrp answer: ") + e.info(false)); return; }
+                call->msrp->started = true;
+                o->startMsrpRecv(id, call->accountId(), *call->msrp);
+            });
+            return;
+        }
         McpttInfo mi = mcptt::parseMcpttInfo(whole);
         bool autoAnswer = false;
         if (mi.present) {
@@ -689,6 +840,8 @@ public:
             call->mcptt->isPrivate = mi.privateCall;
             call->mcptt->fullDuplex = mi.noFloorCtrl;
             call->mcptt->groupId = mi.privateCall ? mcptt::bareId(mi.callingUserId) : mcptt::bareId(remote);
+            call->mcptt->emergency = mi.emergency;
+            call->mcptt->imminentPeril = mi.imminentPeril && !mi.emergency;
             if (!mi.noFloorCtrl) {
                 if (call->openFloor(cfg.effectiveMcpttId()))
                     call->mcptt->pendingAppSdp = mcptt::floorSdp(call->mcptt->floor->localPort(), false);
@@ -708,6 +861,7 @@ public:
             if (mi.present) {
                 c.isMcptt = true; c.mcptt = mi; c.groupId = call->mcptt->groupId;
                 c.halfDuplex = !mi.noFloorCtrl;
+                c.condition.emergency = call->mcptt->emergency; c.condition.imminentPeril = call->mcptt->imminentPeril;
             }
         }, &snap);
         o_->ctl.post([o = o_, call, id = prm.callId] { o->calls[id].reset(call); });
@@ -791,6 +945,17 @@ public:
             }
         }
         int acc = accountId_;
+        if (body.find("mcdata-signalling") == std::string::npos && body.find("mcpttinfo") != std::string::npos) {
+            // 긴급 경보·취소·그룹 긴급 통지(TS 24.379 §12.1.1.3) — 200 OK 는 pjsua 가 이미 보냈다(7)·8)).
+            EmergencyAlert a; a.accountId = acc;
+            if (mcptt::parseEmergencyAlert(body, a)) {
+                if (a.userId.empty()) a.userId = mcptt::bareId(from);
+                auto ic = o_->accountCfgs.find(acc);
+                a.self = ic != o_->accountCfgs.end() && a.userId == mcptt::bareId(ic->second.effectiveMcpttId());
+                o_->emit([o = o_, a] { o->listener->onEmergencyAlert(a); });
+                return;
+            }
+        }
         if (body.find("mcdata-signalling") != std::string::npos) {
             SdsMessage m;
             if (mcdata::parse(ct, body, m)) {
@@ -1006,8 +1171,12 @@ void Engine::Impl::wireMedia(PjCall* call, int callId) {
     if (sink != &spk) aud->stopTransmit(spk);
     for (auto& kv : routes) if (kv.second.get() != sink) aud->stopTransmit(*kv.second);
     if (snap.listen) aud->startTransmit(*sink); else aud->stopTransmit(*sink);
+    // 듣는 크기 = 통화 포트→bridge 유입. pjsua2 AudioMedia 방향은 미디어 관점이라 유입은 adjustTxLevel 이다 — adjustRxLevel 은
+    //   bridge→통화(= 상대에게 보내는 내 음성)를 바꾼다(ue_audio_level.md §2). 재협상으로 포트가 새로 생기면 1 로 돌아가므로 매 결선.
+    aud->adjustTxLevel(snap.rxLevel);
     bool micOn;
-    if (call->mcptt) micOn = !call->mcptt->listenOnly && (call->mcptt->fullDuplex || call->mcptt->micOpen);
+    // 반이중 = floor 가 게이트(Granted), 전이중(mc_no_floor_ctrl) = 앱의 음소거(setMuted — PTT 로컬 게이트, 원천 앱 동작)
+    if (call->mcptt) micOn = !call->mcptt->listenOnly && (call->mcptt->fullDuplex ? !snap.muted : call->mcptt->micOpen);
     else micOn = !snap.muted && !call->recvOnly;
     if (micOn) src.startTransmit(*aud); else src.stopTransmit(*aud);
     applyDeviceLevels();                                   // 결선으로 장치가 막 열렸을 수 있다 — 장치 단 음량 재적용
@@ -1122,6 +1291,10 @@ Result Engine::start(const EngineConfig& cfg, Listener* listener) {
 
 void Engine::stop() {
     if (!impl_->running) return;
+    {
+        std::lock_guard<std::mutex> lk(impl_->msrpM);                   // media plane 입출력 취소(소켓 대기는 ≤200 ms 안에 본다)
+        for (auto& w : impl_->msrpCancels) if (auto c = w.lock()) c->store(true);
+    }
     impl_->ctl.runSync([this] {
         Impl* o = impl_.get();
         o->calls.clear();                        // ~Call → hangup, floor participant close
@@ -1134,6 +1307,11 @@ void Engine::stop() {
         o->running = false;
         return 0;
     });
+    {
+        std::unique_lock<std::mutex> lk(impl_->msrpM);                  // 분리 실행한 입출력 스레드가 Impl 을 더 쓰지 않게
+        impl_->msrpCv.wait_for(lk, std::chrono::seconds(10), [&] { return impl_->msrpActive == 0; });
+        impl_->msrpCancels.clear();
+    }
     impl_->emit([o = impl_.get()] { o->listener->onEngineStopped(); });
     impl_->ctl.stop();
     impl_->evt.stop();
@@ -1321,14 +1499,12 @@ Result Engine::setListen(int callId, bool listen) {
     });
 }
 Result Engine::setRxLevel(int callId, float level) {
+    if (level < 0) return Result::fail(-2, "negative level");
     Impl* o = impl_.get();
     return withCall(o, callId, [o, callId, level](PjCall& c) {
-        pj::AudioMedia* aud = o->activeAudio(&c);
-        if (!aud) throw pj::Error(PJ_EINVALIDOP, "setRxLevel", "no active audio", __FILE__, __LINE__);
-        // 듣는 크기 = 통화 포트→bridge 유입. pjsua2 AudioMedia 방향은 미디어 관점이라 유입은
-        // adjustTxLevel 이다 — adjustRxLevel 은 bridge→통화(= 상대에게 보내는 내 음성)를 바꾼다
-        // (docs/design/features/ue_audio_level.md §2).
-        aud->adjustTxLevel(level);
+        o->updateCall(callId, [&](CallInfo& ci) { ci.rxLevel = level; });
+        // 오디오가 있으면 곧바로, 없으면(성립 전·보류) 다음 결선(wireMedia)에서 건다.
+        if (pj::AudioMedia* aud = o->activeAudio(&c)) aud->adjustTxLevel(level);
         emitMediaSnapshot(o, callId);
     });
 }
@@ -1433,7 +1609,8 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
     call->mcptt->fullDuplex = isPrivate && opts.fullDuplex;
     call->mcptt->listenOnly = opts.listenOnly;
     call->mcptt->emergency = opts.emergency;
-    call->mcptt->imminentPeril = opts.imminentPeril;
+    call->mcptt->imminentPeril = opts.imminentPeril && !opts.emergency;       // 긴급이 임박을 대체
+    call->mcptt->condMine = opts.emergency || opts.imminentPeril;
     call->mcptt->broadcast = !isPrivate && opts.broadcast;               // 일제 통화는 그룹 호 속성(TS 24.379 §4.12)
     const std::string mcpttId = cfg.effectiveMcpttId();
     // floor 소켓은 makeCall 전에 — makeCall 이 동기적으로 onCallSdpCreated 를 부르며 로컬 offer 에 포트를 광고한다.
@@ -1458,6 +1635,12 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
         p1.body = mcptt::mcpttInfo(isPrivate ? "private" : "prearranged", "tel:" + id, mcpttId, "tel:" + id,
                                    opts.emergency ? 1 : 0, opts.imminentPeril ? 1 : 0, call->mcptt->broadcast);
         prm.txOption.multipartParts.push_back(p1);
+        // 우선 그룹콜의 Resource-Priority(TS 24.379 §6.2.8.1.2·§6.2.8.1.12) — 값 = service-config(§6.2.8.1.15, AccountConfig.rp*)
+        if (call->mcptt->emergency || call->mcptt->imminentPeril) {
+            pj::SipHeader rp; rp.hName = "Resource-Priority";
+            rp.hValue = call->mcptt->emergency ? cfg.rpEmergency : cfg.rpImminentPeril;
+            if (!rp.hValue.empty()) prm.txOption.headers.push_back(rp);
+        }
         if (!opts.members.empty()) {
             pj::SipMultipartPart p2;
             p2.contentType.type = "application"; p2.contentType.subType = "resource-lists+xml";
@@ -1500,8 +1683,7 @@ Result Engine::floorRequest(int callId, int priority) {
         if (!c.mcptt) throw pj::Error(PJ_EINVALIDOP, "floorRequest", "not an MCPTT session", __FILE__, __LINE__);
         if (c.mcptt->fullDuplex) return;                                     // 전이중 — 마이크 상시, floor 없음
         if (!c.mcptt->floor) throw pj::Error(PJ_EINVALIDOP, "floorRequest", "no floor participant", __FILE__, __LINE__);
-        bool emergency = o->snapshotCall(callId).mcptt.emergency;
-        c.mcptt->floor->request(priority, emergency);
+        c.mcptt->floor->request(priority, c.mcptt->emergency);             // 세션 조건 현재값(상향·재광고 반영)
     });
 }
 Result Engine::floorRelease(int callId) {
@@ -1521,6 +1703,75 @@ FloorInfo Engine::floorInfo(int callId) const {
         PjCall* c = impl_->findCall(callId);
         if (c && c->mcptt && c->mcptt->floor) fi = c->mcptt->floor->info();
         return fi;
+    });
+}
+
+Result Engine::setCallCondition(int callId, bool emergency, bool imminentPeril) {
+    if (emergency && imminentPeril) return Result::fail(-2, "emergency and imminent peril are exclusive");
+    Impl* o = impl_.get();
+    return withCall(o, callId, [o, callId, emergency, imminentPeril](PjCall& c) {
+        if (!c.mcptt || c.mcptt->isPrivate)
+            throw pj::Error(PJ_EINVALIDOP, "setCallCondition", "not a group call", __FILE__, __LINE__);
+        McpttSession& m = *c.mcptt;
+        if (m.condPending) throw pj::Error(PJ_EBUSY, "setCallCondition", "condition change pending", __FILE__, __LINE__);
+        if (o->snapshotCall(callId).state != CallState::Active)
+            throw pj::Error(PJ_EINVALIDOP, "setCallCondition", "call not active", __FILE__, __LINE__);
+        if (m.emergency == emergency && m.imminentPeril == imminentPeril) return;           // 바뀐 것 없음 — 보내지 않는다
+        // 바뀐 지시자만 true/false 로 명시(§6.2.8.1.1·§6.2.8.1.3·§6.2.8.1.9·§6.2.8.1.11)
+        const int e = m.emergency == emergency ? 0 : (emergency ? 1 : -1);
+        const int i = m.imminentPeril == imminentPeril ? 0 : (imminentPeril ? 1 : -1);
+        const AccountConfig& cfg = o->accountCfgs[c.accountId()];
+        m.prevEmergency = m.emergency; m.prevImminent = m.imminentPeril; m.prevMine = m.condMine;
+        m.emergency = emergency; m.imminentPeril = imminentPeril;
+        m.condMine = emergency || imminentPeril;
+        m.condPending = true;
+        m.condLastCode = 0;
+        c.publishCondition(ConditionCause::Local);
+        try {
+            pj::CallOpParam prm(true);
+            prm.opt.audioCount = 1;
+            prm.opt.videoCount = 0;
+            prm.txOption.multipartContentType.type = "multipart";
+            prm.txOption.multipartContentType.subType = "mixed";
+            pj::SipMultipartPart p1;
+            p1.contentType.type = "application"; p1.contentType.subType = "vnd.3gpp.mcptt-info+xml";
+            p1.body = mcptt::mcpttInfo("prearranged", "tel:" + m.groupId, cfg.effectiveMcpttId(), "tel:" + m.groupId, e, i);
+            prm.txOption.multipartParts.push_back(p1);
+            pj::SipHeader rp; rp.hName = "Resource-Priority";                           // §6.2.8.1.2 — 하향은 normal 값(§6.2.8.1.15)
+            rp.hValue = emergency ? cfg.rpEmergency : imminentPeril ? cfg.rpImminentPeril : cfg.rpNormal;
+            if (!rp.hValue.empty()) prm.txOption.headers.push_back(rp);
+            c.reinvite(prm);                                                             // SDP = 협상 그대로 + floor 섹션 재주입
+        } catch (pj::Error&) {
+            m.emergency = m.prevEmergency; m.imminentPeril = m.prevImminent; m.condMine = m.prevMine;
+            m.condPending = false;
+            c.publishCondition(ConditionCause::Denied);
+            throw;
+        }
+        o->log(3, "call " + std::to_string(callId) + " condition → emergency=" + (emergency ? "1" : "0") +
+                      " imminent=" + (imminentPeril ? "1" : "0"));
+    });
+}
+
+int64_t Engine::sendEmergencyAlert(int accountId, const std::string& groupId, bool activate,
+                                   const std::string& originatedBy, bool cancelGroupEmergency) {
+    if (!impl_->running) return -1;
+    int64_t token = impl_->nextToken++;
+    return impl_->ctl.runSync([=]() -> int64_t {
+        Impl* o = impl_.get();
+        auto ic = o->accountCfgs.find(accountId);
+        if (ic == o->accountCfgs.end()) return -1;
+        const AccountConfig& cfg = ic->second;
+        const std::string gid = mcptt::bareId(groupId);
+        // ICSI mcptt(§12.1.1.1 1)·2)). Request-URI 는 그룹 — 이 CSP 는 To(그룹)로 경보를 게이트·팬아웃한다
+        //   (규격 = 참여 기능 PSI + 본문 mcptt-request-uri — 편차는 mcptt_emergency_modes.md §4.3).
+        std::map<std::string, std::string> h;
+        h["P-Preferred-Service"] = mcptt::kIcsiMcptt;
+        h["Accept-Contact"] = std::string("*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\";require;explicit");
+        std::string ob = originatedBy.empty() ? std::string()
+                       : (originatedBy.find(':') == std::string::npos ? "tel:" + originatedBy : originatedBy);
+        std::string body = mcptt::alertInfo("tel:" + gid, cfg.effectiveMcpttId(), cfg.effectiveMcpttClientId(), activate, ob,
+                                            (!activate && cancelGroupEmergency) ? -1 : 0);
+        return o->doSendRequest(accountId, "MESSAGE", "sip:" + gid + "@" + cfg.domain, mcptt::kCtMcpttInfo, body, h, token);
     });
 }
 
@@ -1656,6 +1907,106 @@ Result Engine::transferAttended(int callId, int consultCallId) {
     });
 }
 
+// ── MCData media plane SDS (MSRP, TS 24.282 §9.2.3 — mcdata/msrp.h) ──
+
+void Engine::Impl::runMsrpThread(std::shared_ptr<std::atomic<bool>> cancel, std::function<void()> body) {
+    {
+        std::lock_guard<std::mutex> lk(msrpM);
+        msrpActive++;
+        msrpCancels.erase(std::remove_if(msrpCancels.begin(), msrpCancels.end(),
+                                         [](const std::weak_ptr<std::atomic<bool>>& w) { return w.expired(); }), msrpCancels.end());
+        msrpCancels.push_back(cancel);
+    }
+    std::thread([this, body] {
+        try { body(); } catch (...) {}
+        std::lock_guard<std::mutex> lk(msrpM);
+        msrpActive--;
+        msrpCv.notify_all();
+    }).detach();
+}
+
+/** 입출력이 끝난 MSRP 호 — 서버가 저장·전달 뒤 BYE 한다(mcdata_messaging.md §4.7). 5 s 안에 끊기지 않으면 우리가 끊는다. */
+static void finishMsrpCall(Engine::Impl* o, int callId, const std::atomic<bool>& cancel) {
+    for (int i = 0; i < 25 && !cancel; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    if (cancel) return;
+    o->ctl.post([o, callId] {
+        PjCall* c = o->findCall(callId);
+        if (!c) return;
+        try { pj::CallOpParam p; c->hangup(p); } catch (pj::Error&) {}
+    });
+}
+
+void Engine::Impl::startMsrpSend(int callId, int accountId, const MsrpLeg& leg) {
+    auto cancel = leg.cancel;
+    const std::string sp = leg.serverPath, lp = leg.localPath, sig = leg.signallingTlv, pay = leg.payloadTlv;
+    const int64_t token = leg.token;
+    runMsrpThread(cancel, [this, callId, accountId, cancel, sp, lp, sig, pay, token] {
+        std::string err;
+        const int code = sp.empty() ? 488 : msrp::sendSds(sp, lp, sig, pay, 10, *cancel, nullptr, err);
+        log(3, "msrp send call " + std::to_string(callId) + " " + sp + " → " + std::to_string(code) + (err.empty() ? "" : " (" + err + ")"));
+        RequestResult r;
+        r.accountId = accountId; r.token = token; r.method = "MSRP"; r.code = code;
+        r.reason = !err.empty() ? err : code == 200 ? "OK" : sp.empty() ? "no a=path in answer" : "";
+        emit([this, r] { listener->onRequestResult(r); });
+        finishMsrpCall(this, callId, *cancel);
+    });
+}
+
+void Engine::Impl::startMsrpRecv(int callId, int accountId, const MsrpLeg& leg) {
+    auto cancel = leg.cancel;
+    const std::string sp = leg.serverPath, lp = leg.localPath, from = leg.fromUri, group = leg.groupUri;
+    runMsrpThread(cancel, [this, callId, accountId, cancel, sp, lp, from, group] {
+        std::string ct, body, err;
+        if (!sp.empty() && msrp::receiveSds(sp, lp, 15, *cancel, ct, body, err)) {
+            SdsMessage m;
+            if (mcdata::parse(ct, body, m)) {
+                m.accountId = accountId;
+                m.fromUri = from;
+                if (m.groupUri.empty()) m.groupUri = group;       // 본문에 mcdata-info 가 없다 — 배포 INVITE 의 것
+                m.mediaPlane = true;
+                log(3, "msrp recv call " + std::to_string(callId) + " msg=" + m.msgId + " bytes=" + std::to_string(m.text.size()));
+                emit([this, m] { listener->onSds(m); });
+            } else {
+                log(2, "msrp recv call " + std::to_string(callId) + ": body is not MCData SDS (" + ct + ")");
+            }
+        } else {
+            log(2, "msrp recv call " + std::to_string(callId) + " " + sp + ": " + (sp.empty() ? "no a=path" : err));
+        }
+        finishMsrpCall(this, callId, *cancel);
+    });
+}
+
+bool Engine::Impl::startMsrpInvite(int accountId, const std::string& groupId, int64_t token, const std::string& sigTlv,
+                                   const std::string& payTlv) {
+    auto it = accounts.find(accountId);
+    auto ic = accountCfgs.find(accountId);
+    if (it == accounts.end() || ic == accountCfgs.end()) return false;
+    const AccountConfig& cfg = ic->second;
+    auto call = std::make_unique<PjCall>(this, *it->second, accountId);
+    call->msrp.reset(new MsrpLeg);
+    call->msrp->outgoing = true;
+    call->msrp->token = token;
+    call->msrp->signallingTlv = sigTlv;
+    call->msrp->payloadTlv = payTlv;
+    try {
+        pj::CallOpParam prm(true);
+        prm.opt.audioCount = 1;                                          // 더미 오디오(서버는 포트 9 inactive 로 답한다)
+        prm.opt.videoCount = 0;
+        auto hdr = [&](const char* n, const std::string& v) { pj::SipHeader h; h.hName = n; h.hValue = v; prm.txOption.headers.push_back(h); };
+        hdr("Accept-Contact", std::string("*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds\";require;explicit"));
+        hdr("P-Preferred-Service", msrp::kIcsiMcDataSds);
+        hdr("P-Preferred-Identity", "<" + cfg.aor() + ">");
+        call->makeCall("sip:" + groupId + "@" + cfg.domain, prm);        // offer = pjsua audio + m=message(onCallSdpCreated)
+    } catch (pj::Error& e) {
+        log(1, "msrp invite " + groupId + ": " + e.info(false));
+        return false;
+    }
+    const int callId = call->getId();
+    log(3, "msrp sds " + groupId + " (" + std::to_string(payTlv.size()) + " bytes) → call " + std::to_string(callId));
+    calls[callId] = std::move(call);
+    return true;
+}
+
 SdsSend Engine::sendGroupSds(int accountId, const std::string& groupId, const std::string& text, bool requestDelivery) {
     SdsSend out;
     if (!impl_->running) { out.code = -1; out.reason = "not running"; return out; }
@@ -1667,8 +2018,14 @@ SdsSend Engine::sendGroupSds(int accountId, const std::string& groupId, const st
         Impl* o = impl_.get();
         auto ic = o->accountCfgs.find(accountId);
         if (ic == o->accountCfgs.end()) return false;
-        mcdata::Body b = mcdata::buildGroupSds("tel:" + groupId, text, mcdata::conversationIdOf(groupId), msgId,
-                                               requestDelivery, (int64_t)std::time(nullptr));
+        const int64_t now = (int64_t)std::time(nullptr);
+        // 시그널링 평면 상한을 넘으면 media plane(MSRP) — 서버는 초과 MESSAGE 를 403 Warning 203 으로 거절한다(TS 24.282 §9.2.2 8)).
+        const int cap = ic->second.maxSdsCplaneBytes;
+        if (cap > 0 && (int)text.size() > cap)
+            return o->startMsrpInvite(accountId, groupId, token,
+                                      mcdata::sdsSignallingTlv(mcdata::conversationIdOf(groupId), msgId, requestDelivery, now),
+                                      mcdata::sdsPayloadTlv(text));
+        mcdata::Body b = mcdata::buildGroupSds("tel:" + groupId, text, mcdata::conversationIdOf(groupId), msgId, requestDelivery, now);
         return o->doSendRequest(accountId, "MESSAGE", "sip:" + groupId + "@" + ic->second.domain, b.contentType, b.body, {}, token) >= 0;
     });
     if (!ok) { out.code = -3; out.reason = "send failed"; return out; }
