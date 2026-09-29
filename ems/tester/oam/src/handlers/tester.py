@@ -22,6 +22,7 @@
   POST /runs/<id>/hold              {hold: bool} 단계 고정/재개 — 프로파일 시계 정지, 율 유지
   GET  /runs/<id>/hist?timer=       지연 지표 버킷 분포(로그 상한) + p50/p95/p99 — 행 펼침 히스토그램
   GET  /workers/discovered          자기 base OAM 배포 목록의 cims-tester-worker (Tester.BaseOamUrl 필요)
+  GET  /devices[?topology=<id>]     토폴로지 워커들에 계측 링크로 붙어 있는 시험 모드 실기기(워커 GET /devices 합산 — device 풀 편집기)
   GET  /runs/<id>/target-series     대상 자원 시계열(호스트 cpu_pct·mem_pct + SSH 프로세스별 cpu_pct·rss_mb — 대상 관측 §5)
   GET  /runs/<id>/sip               SIP 덤프 목록(call_id·bytes·messages)
   GET  /runs/<id>/sip/<call_id>     그 Call-ID 의 실패 이벤트 + SIP 덤프(runs/<id>/sip/<call_id>.log 가 있을 때)
@@ -522,6 +523,24 @@ async def handle_tester(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
         except Exception as e:
             return _json(200, {'items': [], 'note': f'base OAM 조회 실패 — {e}'})
         return _json(200, {'items': items, 'note': None})
+    if head == 'devices' and len(parts) == 1 and method == 'GET':
+        # 시험 모드 실기기(ue_voice_quality.md §6) — 토폴로지 워커마다 GET /devices. 편집기 device 풀의 '연결된 단말' 목록
+        q = handler_args.query_params or {}
+        topos = store.list_topologies()
+        if q.get('topology'):
+            topos = [t for t in topos if str(t.get('id')) == str(q.get('topology'))]
+        loop = asyncio.get_running_loop()
+        out, seen = [], set()
+        for t in topos:
+            for w in tester_workers.discover(t.get('doc') or {}):
+                if w.url in seen:
+                    continue
+                seen.add(w.url)
+                doc = await loop.run_in_executor(None, w.devices)
+                out.append({'worker': w.name, 'url': w.url, 'topology_id': t.get('id'), 'reachable': doc is not None,
+                            'listening': bool((doc or {}).get('listening')), 'port': (doc or {}).get('port'),
+                            'fingerprint': (doc or {}).get('fingerprint'), 'devices': (doc or {}).get('devices') or []})
+        return _json(200, {'workers': out})
     if head == 'workers' and method == 'GET':
         q = handler_args.query_params or {}
         topos = store.list_topologies()
@@ -560,7 +579,7 @@ def scenario_vocab() -> dict:
         'fixture_kinds': list(FIXTURE_KINDS),
         'fixture_scopes': ['none', 'own', 'listed', 'all'], 'listen_visibility': ['hidden', 'visible'],
         'profile_models': ['constant', 'step', 'ramp', 'soak', 'burst'],
-        'pool_kinds': ['ue', 'peer', 'real-ue'], 'peer_profiles': ['ibcf', 'pbx', 'mgcf'],
+        'pool_kinds': ['ue', 'peer', 'real-ue', 'device'], 'peer_profiles': ['ibcf', 'pbx', 'mgcf'], 'device_media': ['sample', 'mic'],
         'transports': ['udp', 'tcp', 'tls'], 'srtp': ['off', 'optional', 'required'],
         'node_roles': ['sip', 'tas', 'media', 'subscriber', 'oam', 'db'], 'target_kinds': ['cims', 'ims', 'pbx'],
         'phases': {'prelude': '앞쪽 register/wait — run 시작 때 역할 단말 전부 등록', 'body': '시나리오 인스턴스 단위',
@@ -701,7 +720,10 @@ def report_markdown(doc: dict) -> str:
                         ('rtp_loss_pct', 'RTP 손실 %(호별)'), ('affiliate_ms', 'Affiliation ms'), ('group_fanout_ms', '그룹 fan-out ms'),
                         ('floor_grant_ms', 'Floor grant ms'), ('floor_taken_ms', 'Floor taken ms'), ('floor_queue_ms', 'Floor 큐 대기 ms'),
                         ('floor_idle_ms', 'Floor idle ms'), ('real_srd_ms', '실단말 SRD ms'), ('real_jitter_ms', '실단말 지터 ms'),
-                        ('real_rtp_loss_pct', '실단말 RTP 손실 %(호별)'), ('real_mos', '실단말 MOS 추정')):
+                        ('real_rtp_loss_pct', '실단말 RTP 손실 %(호별)'), ('real_mos', '실단말 MOS 추정'), ('rtd_ms', 'RTD ms(RTCP)'),
+                        ('real_rtd_ms', '실단말 RTD ms'), ('device_srd_ms', '실기기 SRD ms — Telephony Setup Time(E.804)'),
+                        ('device_jitter_ms', '실기기 지터 ms'), ('device_rtd_ms', '실기기 RTD ms'), ('device_rtp_loss_pct', '실기기 RTP 손실 %(호별)'),
+                        ('device_mos', '실기기 MOS-CQ(E-model) — Speech Quality on Call Basis(E.804, 추정)')):
         h = t.get(name)
         if h:
             lines.append(f"| {label} | {h.get('count')} | {fmt(h.get('p50'))} | {fmt(h.get('p95'))} | {fmt(h.get('p99'))} | {fmt(h.get('max'))} |")
@@ -911,6 +933,11 @@ TESTER_API_DOCS = [
     {'id': 'tester.run.sip', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/runs/{{id}}/sip/{{call_id}}',
      'summary': 'Call-ID 하나의 실패 이벤트 + SIP 덤프(계측기 호스트 runs/<id>/sip/<call_id>.log 가 있을 때)',
      'response': '{id, call_id, events[], dump|null, note}', 'auth': _AUTH_MON},
+    {'id': 'tester.devices', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/devices',
+     'summary': '토폴로지 워커들에 계측 링크(워커 Device.Port)로 붙어 있는 시험 모드 실기기 — device 풀 편집기의 "연결된 단말"(ue_voice_quality.md §6)',
+     'params': [{'name': 'topology', 'in': 'query', 'type': 'string', 'desc': '토폴로지 id — 비면 전부'}],
+     'response': '{workers: [{worker, url, topology_id, reachable, listening, port, fingerprint, devices: [{device_id, app, version, platform, model, addr, '
+                 'connected_ms, alive, pool, accounts: [{service, aor, msisdn, registered}]}]}]}', 'auth': _AUTH_MON},
     {'id': 'tester.workers.discovered', 'module': _MOD, 'method': 'GET', 'path': f'{_P}/workers/discovered',
      'summary': '자기 base OAM 의 배포 목록에서 찾은 cims-tester-worker — 토폴로지 편집기의 "발견된 워커"(주소 = agent ip, 포트 = 배포 설정 Server.Port)',
      'response': '{items: [{name, agent_id, hostname, ip, port, cpus, version, live_state, deployment_id}], note}', 'auth': _AUTH_MON},

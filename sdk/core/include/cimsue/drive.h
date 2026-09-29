@@ -86,7 +86,7 @@ enum class LinkState { Idle, Connecting, Connected, Disconnected, Refused };
 
 struct DeviceLinkConfig {
     std::string host;                     // 계측기 워커 호스트(IP 또는 이름)
-    int port = 7110;                      // 워커 Device.Listen
+    int port = 7120;                      // 워커 Device.Port (컨트롤러 관측 수신 7110 과 겹치지 않게)
     std::string pairKey;                  // 연결 키(워커 Device.PairKey 와 같아야 한다, 선택)
     bool verifyServer = false;            // 워커 인증서 검증(caPem 앵커) — 끄면 최초 지문 고정(pinFile)
     std::string caPem;

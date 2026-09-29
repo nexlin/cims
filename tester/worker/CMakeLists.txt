@@ -9,6 +9,7 @@ add_executable(cims-tester-worker
     src/SipCapture.cpp
     src/RealUe.cpp
     src/MediaAgent.cpp
+    src/DeviceHub.cpp
 )
 target_compile_features(cims-tester-worker PRIVATE cxx_std_17)
 # E-model 정본(단말 코어와 공용, 헤더 전용) — sdk/core/src/quality/emodel.h (ue_voice_quality.md §3.2)
@@ -39,3 +40,9 @@ add_executable(tester_media_agent_test src/MediaAgentTest.cpp src/MediaAgent.cpp
 target_compile_features(tester_media_agent_test PRIVATE cxx_std_17)
 target_include_directories(tester_media_agent_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(tester_media_agent_test PRIVATE csim pthread)
+
+# 실기기 계측 링크 수신점 단위시험 — OpenSSL 클라이언트가 단말 흉내(hello·연결 키·명령·reg·bind·재접속). cims-verify S1-UNIT-TESTER 가 실행한다
+add_executable(tester_device_hub_test src/DeviceHubTest.cpp src/DeviceHub.cpp src/Json.cpp)
+target_compile_features(tester_device_hub_test PRIVATE cxx_std_17)
+target_include_directories(tester_device_hub_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(tester_device_hub_test PRIVATE ssl crypto pthread)

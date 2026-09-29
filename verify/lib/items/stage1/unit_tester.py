@@ -8,7 +8,7 @@
 ④ tester_target — 피어 풀 시드 파생(도메인·번호 접두 규칙)·트렁크 REGISTER 비밀 해석·CspSeeder apply/restore.
 ④′ tester_samples — 샘플 라이브러리(동봉·운영자 등록, cims-sample-conv 변환이 빌드돼 있을 때, 워커 보유 판정·run 전 배포)·핸들러 /samples.
 ⑤ 네이티브 `build/bin/csim_rtp_dtmf_test` — libcsim RTP 의 RFC 4733 telephone-event 송수신 + in-band DTMF(G.711 톤·Goertzel) + G.722 원천 루프백(빌드돼 있을 때만).
-⑥ 네이티브 `build/bin/csim_rtp_media_test` — 미디어 평면(RTP 모드 none/explicit·샘플 송출·정지·hold 정지) 루프백.
+⑥ 네이티브 `build/bin/csim_rtp_media_test` — 미디어 평면(RTP 모드 none/explicit·샘플 송출·정지·hold 정지) 루프백 + RTCP SR/RR 송신·LSR/DLSR RTT(RFC 3550 §6.4).
 ⑦ 네이티브 `build/bin/tester_sip_capture_test` — 워커 SIP 캡처(psip 네트워크 로그 줄 파싱·Call-ID 묶음).
 ⑧ 네이티브 `build/bin/tester_real_ue_test` — 실단말(real-ue) 프로세스 관리(cimsue-cli drive 프로토콜 스텁 — 스폰·ready·동기 결과·이벤트·종료).
 ⑨ 네이티브 `build/bin/csim_peer_fault_test` — 피어 오류 주입 후속(재전송 유실 → Timer A 재전송 도달·THIG 토큰화 Via 보존)·G.722 협상(UDP 루프백 피어 둘).
@@ -16,6 +16,7 @@
 ⑪ 네이티브 `build/bin/csim_sds_test` — MCData SDS 코덱 왕복(TS 24.282 §15 TLV·conversation ID 단말 호환).
 ⑪′ 네이티브 `build/bin/csim_msrp_test` — MCData SDS media plane(MSRP RFC 4975) 프레이밍 왕복 + 루프백 cmdp 흉내 상대 송신(SEND 200/REPORT)·수신(청크 조립·200) 절차.
 ⑫ 네이티브 `build/bin/tester_media_agent_test` — 미디어 전담 워커(에이전트 HTTP·클라이언트·CRtpThread 원격 모드 루프백).
+⑬ 네이티브 `build/bin/tester_device_hub_test` — 시험 모드 실기기 계측 링크 수신점(TLS hello/welcome·연결 키 거절·명령 result·reg 추적·풀 bind·재접속 교체·자체 서명 지문 유지).
 """
 from __future__ import annotations
 
@@ -30,7 +31,7 @@ _NAME = "계측기 계약/핸들러/오케스트레이터/피어 시드/게이�
 _MODULES = ("tests.test_tester_models", "tests.test_tester_handler", "tests.test_tester_run", "tests.test_tester_target",
             "tests.test_tester_fixtures", "tests.test_tester_samples", "tests.test_gateway_stream")
 _NATIVES = ("csim_rtp_dtmf_test", "csim_rtp_media_test", "csim_peer_fault_test", "csim_tls_mutual_test", "csim_sds_test", "csim_msrp_test", "tester_sip_capture_test",
-            "tester_emodel_test", "tester_real_ue_test", "tester_media_agent_test")
+            "tester_emodel_test", "tester_real_ue_test", "tester_media_agent_test", "tester_device_hub_test")
 
 
 @verify_item(

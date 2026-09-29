@@ -184,6 +184,7 @@ bool CRtpThread::RemoteSync() {
   if (!m_pRemote->Stats(m_strRemoteId, st)) return false;
   m_ullSentTotal = st.tx; m_ullRecvTotal = st.rx; m_ullRecvLost = st.lost; m_llRecvJitterUs = st.jitterUs;
   m_iRecvPt = st.recvPt; m_iRtcpRecv = st.rtcpRx; m_iRtcpRrBlocks = st.rtcpRrBlocks; m_iRtcpRrFractionLost = st.rrFractionLost;
+  m_llRtcpRttUs = st.rttUs;
   m_iDtmfSent = st.dtmfSent; m_iDtmfRecv = st.dtmfRecv;
   { std::lock_guard<std::mutex> lk(m_mtxDtmf); m_strDtmfRecv = st.dtmfDigits; }
   { std::lock_guard<std::mutex> lk(m_mtxSsrc); m_setRecvSsrc.clear(); for (unsigned i = 0; i < st.ssrcCount && i < 16; ++i) m_setRecvSsrc.insert(i + 1); }
@@ -193,6 +194,21 @@ bool CRtpThread::RemoteSync() {
 
 bool CRtpThread::SrtpProtect(char *pszBuf, int &iLen, int iCap) { return Protect(m_clsSrtpAudio, pszBuf, iLen, iCap); }
 bool CRtpThread::SrtpUnprotect(char *pszBuf, int &iLen) { return Unprotect(m_clsSrtpAudio, pszBuf, iLen); }
+bool CRtpThread::SrtpProtectRtcp(char *pszBuf, int &iLen, int iCap) {
+  // SRTCP(RFC 3711 §3.4) — E 비트·SRTCP index(4 B) + 인증 태그가 붙는다. 컨텍스트는 RTP 와 같은 세션(policy.rtcp)
+  if (m_clsSrtpAudio.pTx == NULL || iLen < 8 || iLen + 4 + 16 > iCap) return false;
+  int n = iLen;
+  if (srtp_protect_rtcp((srtp_t)m_clsSrtpAudio.pTx, pszBuf, &n) != srtp_err_status_ok) return false;
+  iLen = n;
+  return true;
+}
+bool CRtpThread::SrtpUnprotectRtcp(char *pszBuf, int &iLen) {
+  if (m_clsSrtpAudio.pRx == NULL || iLen < 8) return false;
+  int n = iLen;
+  if (srtp_unprotect_rtcp((srtp_t)m_clsSrtpAudio.pRx, pszBuf, &n) != srtp_err_status_ok) return false;
+  iLen = n;
+  return true;
+}
 bool CRtpThread::SrtpVideoProtect(char *pszBuf, int &iLen, int iCap) { return Protect(m_clsSrtpVideo, pszBuf, iLen, iCap); }
 bool CRtpThread::SrtpVideoUnprotect(char *pszBuf, int &iLen) { return Unprotect(m_clsSrtpVideo, pszBuf, iLen); }
 

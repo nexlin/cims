@@ -691,10 +691,28 @@
       "enum": [
         "ue",
         "peer",
-        "real-ue"
+        "real-ue",
+        "device"
       ],
       "title": "Kind",
       "type": "string"
+    },
+    "media": {
+      "anyOf": [
+        {
+          "enum": [
+            "sample",
+            "mic"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "kind=device — 송출 원천(링크 media 명령)",
+      "title": "Media"
     },
     "media_agent": {
       "anyOf": [

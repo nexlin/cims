@@ -153,7 +153,23 @@ export interface RealUePoolDoc extends TopoPoolBase {
   /** 서버 TLS 인증서 검증(워커 RealUe.TlsCaFile 앵커) — 기본 끔(개발 스택 자체 서명) */
   tls_verify?: boolean
 }
-export type PoolDoc = UePoolDoc | PeerPoolDoc | RealUePoolDoc
+/** 실기기 풀(ue_voice_quality.md §6) — 시험 모드 앱이 워커 Device.Port 로 먼저 붙어 있는 실단말을 번호로 고른다. 등록·미디어는 앱 것,
+ *  단계는 vocab.real_ue_steps 만(register = 앱 등록 확인), 지표 device_* */
+export interface DevicePoolDoc extends TopoPoolBase {
+  kind: 'device'; access: string; listener?: string; transport?: Transport
+  service?: 'volte' | 'voip' | 'ptt'
+  identities: { user: string; domain?: string; ptt_group?: string }[]
+  /** 송출 원천 — sample = 단말 동봉 기준 음원(P.59), mic = 사람이 말한다 */
+  media?: 'sample' | 'mic'
+}
+export type PoolDoc = UePoolDoc | PeerPoolDoc | RealUePoolDoc | DevicePoolDoc
+/** GET /tester/devices — 토폴로지 워커들에 계측 링크로 붙어 있는 시험 모드 실기기 */
+export interface DeviceAccount { service: string; aor?: string; msisdn: string; registered: boolean }
+export interface ConnectedDevice {
+  device_id: string; app?: string; version?: string; platform?: string; model?: string; engine?: string; addr?: string
+  connected_ms?: number; alive: boolean; pool?: string; accounts: DeviceAccount[]
+}
+export interface DeviceWorkerRow { worker: string; url: string; topology_id?: number; reachable: boolean; listening: boolean; port?: number; fingerprint?: string; devices: ConnectedDevice[] }
 export interface TopoLayout { regions: Record<string, { x: number; y: number; w: number; h: number }>; items: Record<string, { x: number; y: number }> }
 
 export interface TopologyDoc {
@@ -492,6 +508,7 @@ export const testerApi = {
   holdRun: (id: string, hold: boolean) => api.post<{ id: string; hold: boolean }>(`/tester/runs/${enc(id)}/hold`, { hold }),
   hist: (id: string, timer: string) => api.get<HistResult>(`/tester/runs/${enc(id)}/hist?timer=${enc(timer)}`),
   discoveredWorkers: () => api.get<{ items: DiscoveredWorker[]; note?: string | null }>('/tester/workers/discovered'),
+  devices: (topologyId?: number) => api.get<{ workers: DeviceWorkerRow[] }>(`/tester/devices${topologyId ? `?topology=${topologyId}` : ''}`),
   targetSeries: (id: string) => api.get<TargetSeries>(`/tester/runs/${enc(id)}/target-series`),
   sipDumps: (id: string) => api.get<{ id: string; dumps: SipDumpRow[] }>(`/tester/runs/${enc(id)}/sip`),
   callDump: (id: string, callId: string) => api.get<CallDump>(`/tester/runs/${enc(id)}/sip/${enc(callId)}`),

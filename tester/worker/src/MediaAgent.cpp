@@ -82,7 +82,7 @@ HttpResponse MediaAgent::handle(const HttpRequest& req, const Json& body) {
         Json j = Json::Object();
         j["tx"] = Json((long long)rt->m_ullSentTotal.load()); j["rx"] = Json((long long)rt->m_ullRecvTotal.load()); j["lost"] = Json((long long)rt->m_ullRecvLost.load());
         j["jitter_us"] = Json((long long)rt->m_llRecvJitterUs.load()); j["recv_pt"] = Json((long long)rt->m_iRecvPt.load());
-        j["rtcp_rx"] = Json((long long)rt->m_iRtcpRecv.load()); j["rtcp_rr_blocks"] = Json((long long)rt->m_iRtcpRrBlocks.load()); j["rr_fraction_lost"] = Json((long long)rt->m_iRtcpRrFractionLost.load());
+        j["rtcp_rx"] = Json((long long)rt->m_iRtcpRecv.load()); j["rtcp_rr_blocks"] = Json((long long)rt->m_iRtcpRrBlocks.load()); j["rr_fraction_lost"] = Json((long long)rt->m_iRtcpRrFractionLost.load()); j["rtt_us"] = Json((long long)rt->m_llRtcpRttUs.load());
         j["dtmf_sent"] = Json((long long)rt->m_iDtmfSent.load()); j["dtmf_recv"] = Json((long long)rt->m_iDtmfRecv.load()); j["dtmf_digits"] = Json(rt->DtmfRecv());
         j["ssrc_count"] = Json((long long)rt->RecvSsrcCount()); j["send_running"] = Json(rt->MediaRunning()); j["source_ended"] = Json(rt->SourceEnded());
         return jres(200, j);
@@ -191,7 +191,7 @@ bool MediaAgentClient::Stats(const std::string& id, RtpRemoteStats& o) {
     if (!request("GET", "/media/" + id + "/stats", nullptr, out, st) || st != 200) return false;
     o.tx = (unsigned long long)out["tx"].asInt(0); o.rx = (unsigned long long)out["rx"].asInt(0); o.lost = (unsigned long long)out["lost"].asInt(0);
     o.jitterUs = out["jitter_us"].asInt(0); o.recvPt = (int)out["recv_pt"].asInt(-1); o.rtcpRx = (int)out["rtcp_rx"].asInt(0);
-    o.rtcpRrBlocks = (int)out["rtcp_rr_blocks"].asInt(0); o.rrFractionLost = (int)out["rr_fraction_lost"].asInt(-1);
+    o.rtcpRrBlocks = (int)out["rtcp_rr_blocks"].asInt(0); o.rrFractionLost = (int)out["rr_fraction_lost"].asInt(-1); o.rttUs = out["rtt_us"].asInt(-1);
     o.dtmfSent = (int)out["dtmf_sent"].asInt(0); o.dtmfRecv = (int)out["dtmf_recv"].asInt(0); o.dtmfDigits = out["dtmf_digits"].asString();
     o.ssrcCount = (unsigned long long)out["ssrc_count"].asInt(0); o.sendRunning = out["send_running"].asBool(false); o.sourceEnded = out["source_ended"].asBool(false);
     return true;

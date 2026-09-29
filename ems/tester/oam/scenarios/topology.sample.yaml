@@ -115,6 +115,15 @@ pools:                                   # 풀 하나 = 워커 하나. 워커 �
     transport: tls
     srtp: optional
     tls_verify: false                    # true 면 워커 RealUe.TlsCaFile 로 서버 인증서 검증
+  device:                                # 실기기 풀(ue_voice_quality.md §6) — 시험 모드 앱이 워커 Device.Port(7120)에 먼저 붙어 있는 실단말을 번호로 고른다.
+    kind: device                         # 등록·코덱·미디어는 앱 것(register = 앱 등록 확인). 계획 미리보기가 워커 GET /devices 로 연결을 확인한다
+    worker: w1
+    access: csp                          # 단말 앱이 등록한 접속점(도메인 파생용)
+    service: volte
+    media: sample                        # 송출 = 단말 동봉 기준 음원(P.59). mic 면 사람이 말한다
+    identities:
+      - { user: "+821355500001" }
+      - { user: "+821355500002" }
   peer_kt:                               # 타 IMS 코어 — w2 호스트에 수신점(ip 파생). 시드 = remote_node/route/rule/routing_policy(자동)
     kind: peer
     worker: w2

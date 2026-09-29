@@ -397,6 +397,7 @@ SimSession::SimSession(int id,
     m_pSipClient = new SessionSipClient(this);
     m_pSipClient->m_bPttMode    = m_bPttMode;
     m_pSipClient->m_pRtpThread  = &m_clsRtpThread;
+    m_clsRtpThread.m_bRtcpSend  = !m_bPttMode;   // PTT 그룹 미디어는 RTCP 미사용(floor 는 m=application — 관례상 audio+1 인 경우도 있다)
     m_pSipClient->m_pInviteId   = &m_strInviteId;
     m_pSipClient->m_pUserAgent  = &m_clsUserAgent;
     m_clsRtpThread.SetFloorSink(this);

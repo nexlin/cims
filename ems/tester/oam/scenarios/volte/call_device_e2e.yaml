@@ -1,0 +1,14 @@
+# 실기기 ↔ 실기기 E2E — 시험 모드 단말 둘(같은 device 풀의 번호 둘)이 계측기 명령으로 서로 호를 맺고 양쪽이 잰 품질을 모은다
+# (ue_voice_quality.md §6). RTD 는 CMP 가 중계하는 RTCP 의 LSR/DLSR 로 잰 단말↔단말 종단 왕복 지연, MOS 는 각 단말의 E-model 추정.
+id: VOLTE-CALL-DEVICE-E2E
+title: 실기기 ↔ 실기기 1:1 호 (단말 간 E2E 품질)
+tags: [volte, device, e2e]
+roles:
+  dev_a: { pool: device, count: 1 }
+  dev_b: { pool: device, count: 1, disjoint_from: dev_a }   # 같은 풀의 다른 번호
+flow:
+  - { step: register,   who: [dev_a, dev_b], expect: { code: 200 } }
+  - { step: invite,     from: dev_a, to: dev_b }
+  - { step: answer,     who: [dev_b], after_ms: 1000, expect: { device_srd_ms: { p95: 3000 } } }
+  - { step: media_hold, seconds: "${ht}", expect: { device_rtp_loss_pct: { max: 1 }, device_jitter_ms: { p95: 40 }, device_rtd_ms: { p95: 300 }, device_mos: { min: 3.5 } } }
+  - { step: bye,        from: dev_a, expect: { sdd_ms: { p95: 1000 } } }

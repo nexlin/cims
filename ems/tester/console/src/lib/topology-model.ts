@@ -1,6 +1,6 @@
 // 토폴로지 캔버스 모델 — 검증(컨트롤러 Topology 모델과 같은 규칙 + 편집 힌트)·파생 조회·팔레트 생성·이름 바꾸기·프리셋·자동 배치.
 // 레코드 정본은 컨트롤러(`tester_models.Topology`); 여기서는 저장 전에 같은 오류를 미리 보이고 캔버스에 카드로 붙일 focus 를 만든다.
-import type { TopologyDoc, TopoNode, PoolDoc, UePoolDoc, PeerPoolDoc, TopoLayout, NodeRole, Transport, SipListener } from '@tester/api/tester'
+import type { TopologyDoc, TopoNode, PoolDoc, UePoolDoc, PeerPoolDoc, DevicePoolDoc, TopoLayout, NodeRole, Transport, SipListener } from '@tester/api/tester'
 
 export type Level = 'err' | 'warn' | 'info'
 export interface Focus { kind: 'host' | 'worker' | 'node' | 'pool'; id: string }
@@ -16,8 +16,8 @@ export const ROLE: Record<NodeRole, { label: string; fns: string[] }> = {
   db: { label: '가입자 DB', fns: ['MariaDB', 'MySQL', 'PostgreSQL'] },
 }
 export const HOST_LABEL: Record<string, string> = { tester: '계측기', target: '대상', mixed: '동거', empty: '빈 호스트' }
-export type PaletteKind = 'host' | 'obs_ssh' | 'worker' | 'ue' | 'real-ue' | 'ibcf' | 'pbx' | 'mgcf' | 'n_sip' | 'n_tas' | 'n_media' | 'n_subscriber' | 'n_oam' | 'n_db'
-export const POOL_KINDS: PaletteKind[] = ['ue', 'real-ue', 'ibcf', 'pbx', 'mgcf']
+export type PaletteKind = 'host' | 'obs_ssh' | 'worker' | 'ue' | 'real-ue' | 'device' | 'ibcf' | 'pbx' | 'mgcf' | 'n_sip' | 'n_tas' | 'n_media' | 'n_subscriber' | 'n_oam' | 'n_db'
+export const POOL_KINDS: PaletteKind[] = ['ue', 'real-ue', 'device', 'ibcf', 'pbx', 'mgcf']
 
 export const deep = <T,>(o: T): T => JSON.parse(JSON.stringify(o))
 
@@ -56,7 +56,7 @@ export function poolListener(d: TopologyDoc, p: PoolDoc): string | null {
   return accessListeners(n).find(([, l]) => (l.protocol ?? 'udp') === (p.transport ?? 'udp'))?.[0] ?? null
 }
 /** UE 풀의 실효 transport — listener 가 있으면 그 protocol */
-export function poolTransport(d: TopologyDoc, p: UePoolDoc | { kind: 'real-ue'; access: string; listener?: string; transport?: Transport }): Transport {
+export function poolTransport(d: TopologyDoc, p: UePoolDoc | { kind: 'real-ue' | 'device'; access: string; listener?: string; transport?: Transport }): Transport {
   const l = p.listener ? d.target?.nodes?.[p.access]?.sip?.listeners?.[p.listener] : undefined
   return (l?.protocol ?? p.transport ?? 'udp') as Transport
 }
@@ -81,9 +81,13 @@ export const poolSubscriber = (d: TopologyDoc, p: PoolDoc): string | null => {
 }
 export const isPeer = (p: PoolDoc): p is PeerPoolDoc => p.kind === 'peer'
 export const isUe = (p: PoolDoc): p is UePoolDoc => p.kind === 'ue'
+/** 실기기 풀(ue_voice_quality.md §6) — 신원 원천(source) 없이 번호 목록만 */
+export const isDevice = (p: PoolDoc): p is DevicePoolDoc => p.kind === 'device'
 /** UE 풀의 접속환경 클래스 — service, 비면 source.table 이 ptt_subscriptions 일 때 ptt, 그 외 volte (컨트롤러 Topology.pool_service 와 같은 규칙) */
-export const poolService = (p: PoolDoc): 'volte' | 'voip' | 'ptt' => (p.kind === 'peer' ? 'volte' : p.service ?? (('table' in p.source && p.source.table === 'ptt_subscriptions') ? 'ptt' : 'volte'))
+export const poolService = (p: PoolDoc): 'volte' | 'voip' | 'ptt' => (p.kind === 'peer' ? 'volte' : p.kind === 'device' ? (p.service ?? 'volte')
+  : p.service ?? (('table' in p.source && p.source.table === 'ptt_subscriptions') ? 'ptt' : 'volte'))
 export function poolSize(p: PoolDoc): number {
+  if (isDevice(p)) return (p.identities ?? []).length
   if (isPeer(p)) { const rg = p.identities?.e164_range ?? p.identities?.did_range; if (!rg) return 0; const n = parseInt(rg[1].replace(/\D/g, ''), 10) - parseInt(rg[0].replace(/\D/g, ''), 10) + 1; return p.identities.count ? Math.min(n, p.identities.count) : n }
   return ('count' in p.source ? p.source.count : undefined) ?? 0
 }
@@ -147,9 +151,14 @@ export function validate(d: TopologyDoc): Issue[] {
       else if (p.listener && !a.sip?.listeners?.[p.listener]) add('err', `pools.${pn}`, `수신점 ${p.listener} 이 ${p.access} 에 없습니다`, { kind: 'pool', id: pn })
       else if (p.listener && (a.sip!.listeners![p.listener].edge ?? 'access') !== 'access') add('err', `pools.${pn}`, `수신점 ${p.listener} 은 access 가 아닙니다 — UE 는 access 수신점으로 등록합니다`, { kind: 'pool', id: pn })
       else if (!poolListener(d, p)) add('err', `pools.${pn}`, `transport ${p.transport ?? 'udp'} 인데 ${p.access} 에 ${p.transport ?? 'udp'} access 수신점이 없습니다`, { kind: 'pool', id: pn })
-      if ('db' in p.source) { if (!dbNodes(d).includes(p.source.db)) add('err', `pools.${pn}`, `원천 노드 ${p.source.db || '(없음)'} 가 없거나 DB/API 가 아닙니다`, { kind: 'pool', id: pn }); if (!p.source.count) add('err', `pools.${pn}`, 'DB 원천은 count 가 필수입니다', { kind: 'pool', id: pn }) }
-      if ('creds' in p.source && !p.source.creds) add('err', `pools.${pn}`, 'creds 경로가 비었습니다', { kind: 'pool', id: pn })
-      if (p.srtp === 'required' && p.transport !== 'tls') add('warn', `pools.${pn}`, 'srtp required 는 TLS 접속에서만 협상됩니다', { kind: 'pool', id: pn })
+      if (isDevice(p)) {
+        const ids = (p.identities ?? []).map(x => (x.user ?? '').trim())
+        if (!ids.length) add('err', `pools.${pn}`, '실기기 번호가 없습니다 — 시험 모드 단말의 회선 번호(+E.164)를 넣거나 연결된 단말에서 고르십시오', { kind: 'pool', id: pn })
+        if (ids.some(x => !x)) add('err', `pools.${pn}`, '빈 번호가 있습니다', { kind: 'pool', id: pn })
+        if (new Set(ids).size !== ids.length) add('err', `pools.${pn}`, '같은 번호가 둘 — 번호 하나 = 단말 하나', { kind: 'pool', id: pn })
+      } else if ('db' in p.source) { if (!dbNodes(d).includes(p.source.db)) add('err', `pools.${pn}`, `원천 노드 ${p.source.db || '(없음)'} 가 없거나 DB/API 가 아닙니다`, { kind: 'pool', id: pn }); if (!p.source.count) add('err', `pools.${pn}`, 'DB 원천은 count 가 필수입니다', { kind: 'pool', id: pn }) }
+      if (!isDevice(p) && 'creds' in p.source && !p.source.creds) add('err', `pools.${pn}`, 'creds 경로가 비었습니다', { kind: 'pool', id: pn })
+      if (!isDevice(p) && p.srtp === 'required' && p.transport !== 'tls') add('warn', `pools.${pn}`, 'srtp required 는 TLS 접속에서만 협상됩니다', { kind: 'pool', id: pn })
     } else {
       const ip = w ? ipOfBind(d, p) : '?'; const k = `${ip}:${p.bind?.port}/${p.bind?.protocol ?? 'udp'}`
       if (p.bind?.ip !== undefined && !p.bind.ip) add('err', `pools.${pn}`, 'bind.ip 가 비었습니다 — 지우면 워커 호스트 ip 를 씁니다', { kind: 'pool', id: pn })
@@ -253,6 +262,12 @@ export function createFromPalette(d: TopologyDoc, kind: PaletteKind, pos: Pos, c
     if (role === 'tas') base.tas = { port: 5060 }
     d.target.nodes[id] = base; ensureLayout(d).items[id] = relPos(d, host!, pos); return { sel: { kind: 'node', id }, made }
   }
+  if (kind === 'device') {
+    const name = uniq(d, 'device'); const acc = accessNodes(d)[0] ?? ''
+    const p: DevicePoolDoc = { kind: 'device', worker: wname!, access: acc, transport: 'tls', service: 'volte', media: 'sample', identities: [] }
+    const al = accessListeners(d.target.nodes[acc]); if (al.length && !al.some(([, l]) => (l.protocol ?? 'udp') === p.transport)) p.transport = (al[0][1].protocol ?? 'udp') as Transport
+    d.pools[name] = p; return { sel: { kind: 'pool', id: name }, made }
+  }
   if (kind === 'ue' || kind === 'real-ue') {
     const name = uniq(d, kind === 'ue' ? 'ue_pool' : 'real_ue'); const acc = accessNodes(d)[0] ?? ''
     const p: PoolDoc = kind === 'ue' ? { kind: 'ue', worker: wname!, access: acc, source: { creds: `creds/${name}.jsonl` }, transport: 'udp', srtp: 'off' }
@@ -275,7 +290,8 @@ export function duplicateFocus(d: TopologyDoc, f: Focus): string | null {
     const p = d.pools[f.id]; if (!p) return null
     const n = uniq(d, f.id.replace(/_\d+$/, '')); const c = deep(p)
     if (isPeer(c)) { const used = Object.values(d.pools).filter(q => isPeer(q) && q.worker === c.worker).map(q => (q as PeerPoolDoc).bind.port); while (used.includes(c.bind.port)) c.bind.port++; if (c.register) c.register.user = n }
-    else if ('creds' in c.source) c.source.creds = `creds/${n}.jsonl`
+    else if (!isDevice(c) && 'creds' in c.source) c.source.creds = `creds/${n}.jsonl`
+    else if (isDevice(c)) c.identities = []                                  // 번호 하나 = 단말 하나 — 복제본은 비운다
     d.pools[n] = c; return n
   }
   if (f.kind === 'node') {

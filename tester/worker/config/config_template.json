@@ -229,6 +229,63 @@
       "scope": "service"
     },
     {
+      "key": "device",
+      "title": "실기기 계측 링크(device 풀)",
+      "description": "시험 모드 실단말(앱)이 먼저 TLS 로 붙는 수신점 — 시험 대상 서버를 거치지 않는다(ue_voice_quality.md §5·§6). 단말 설정의 계측기 주소 = 이 호스트:포트.",
+      "scope": "service",
+      "fields": [
+        {
+          "key": "Device.Ip",
+          "label": "수신 IP",
+          "type": "string",
+          "default": "0.0.0.0",
+          "restart": true
+        },
+        {
+          "key": "Device.Port",
+          "label": "수신 포트",
+          "type": "int",
+          "default": 7120,
+          "min": 0,
+          "max": 65535,
+          "restart": true,
+          "help": "기본 7120(7110 은 컨트롤러 관측 수신 Tester.WorkerStreamPort — 동거 호스트에서 겹치지 않게). 0 이면 끈다(device 풀 생성이 400 device_link_off). 포트를 못 열어도 워커는 뜨고 health devices.listening=false 로 알린다."
+        },
+        {
+          "key": "Device.CertFile",
+          "label": "수신점 인증서(PEM)",
+          "type": "path",
+          "default": "",
+          "restart": true,
+          "help": "비면 config/device.crt — 없으면 기동 때 자체 서명(EC P-256, 10년)을 만들어 두고 재기동에도 같은 지문을 쓴다(단말은 최초 지문 고정). 단말이 CA 검증을 켜려면 접속 주소의 IP/DNS SAN 이 있는 인증서를 넣는다."
+        },
+        {
+          "key": "Device.KeyFile",
+          "label": "그 개인키(PEM)",
+          "type": "path",
+          "default": "",
+          "restart": true
+        },
+        {
+          "key": "Device.PairKey",
+          "label": "연결 키",
+          "type": "string",
+          "default": "",
+          "restart": true,
+          "help": "비면 검사하지 않는다. 설정하면 단말 시험 모드의 연결 키가 같아야 붙는다(다르면 bye pair_key — 단말은 재접속하지 않음)."
+        },
+        {
+          "key": "Device.MaxDevices",
+          "label": "동시 연결 상한",
+          "type": "int",
+          "default": 32,
+          "min": 1,
+          "max": 1024,
+          "restart": true
+        }
+      ]
+    },
+    {
       "key": "limits",
       "title": "용량 선언·타이머",
       "fields": [

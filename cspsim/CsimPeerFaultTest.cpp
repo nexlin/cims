@@ -72,8 +72,8 @@ int main() {
     std::this_thread::sleep_for(std::chrono::milliseconds(800));
     unsigned long long rxA = 0, lostA = 0, rxB = 0, lostB = 0; long long jA = 0, jB = 0;
     a.RtpStats(inId, rxA, lostA, jA); b.RtpStats(callId, rxB, lostB, jB);
-    int ptA = -1, ptB = -1, rr = 0, fl = 0;
-    a.RtpQuality(inId, ptA, rr, fl); b.RtpQuality(callId, ptB, rr, fl);
+    int ptA = -1, ptB = -1, rr = 0, fl = 0; long long rtt = -1;
+    a.RtpQuality(inId, ptA, rr, fl, rtt); b.RtpQuality(callId, ptB, rr, fl, rtt);
     printf("     rtp A rx=%llu lost=%llu pt=%d · B rx=%llu lost=%llu pt=%d\n", rxA, lostA, ptA, rxB, lostB, ptB);
     check(rxA >= 20 && rxB >= 20 && lostA == 0 && lostB == 0, "RTP flows both ways");
     check(ptA == 9 && ptB == 9, "negotiated wire PT = 9 (G.722)");

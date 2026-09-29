@@ -26,7 +26,7 @@ export const DURING_OK = new Set([...INDIALOG, ...MEDIA_CTL])
 export const thrOp = (q: string) => (q === 'min' ? '≥' : '≤')
 export const roles = (sc: Doc) => Object.keys(sc.roles ?? {})
 
-export interface Resolved { pools: Record<string, PoolDoc>; kind: 'ue' | 'peer' | 'real-ue'; logical: string; byName: boolean; service: 'volte' | 'voip' | 'ptt' }
+export interface Resolved { pools: Record<string, PoolDoc>; kind: 'ue' | 'peer' | 'real-ue' | 'device'; logical: string; byName: boolean; service: 'volte' | 'voip' | 'ptt' }
 /** 그룹 세션 시나리오 — group_call 이 있으면 인스턴스 = MCPTT 그룹 하나(단일 역할 = 멤버 하나씩, multi 역할 = 나머지 전부) */
 export const isGroupSession = (sc: Doc) => (sc.flow ?? []).some(s => s.step === 'group_call')
 export const multiRoles = (sc: Doc) => Object.entries(sc.roles ?? {}).filter(([, r]) => r.multi).map(([n]) => n)
@@ -164,13 +164,13 @@ export function validate(sc: Doc, topo: TopologyDoc | null, vocab: ScenarioVocab
       const rp = resolvePool(sc, topo, a); if (!rp) continue
       if (D?.kind === 'peer' && rp.kind !== 'peer') E(who, `${s.step} 의 행위자 '${a}' 는 피어 풀이어야 한다 (${rp.logical} = ${rp.kind})`, ref)
       if (D?.kind === 'ue' && rp.kind === 'peer') E(who, `${s.step} 의 행위자 '${a}' 는 UE 풀이어야 한다`, ref)
-      if (D?.kind === 'ptt' && !((rp.kind === 'ue' || rp.kind === 'real-ue') && rp.service === 'ptt')) E(who, `${s.step} 의 행위자 '${a}' 는 service=ptt UE 풀이어야 한다 (${rp.logical} = ${rp.kind}${rp.kind !== 'peer' ? ' · ' + rp.service : ''})`, ref)
-      if (rp.kind === 'real-ue' && D && D.real === false) E(who, `${s.step} 의 행위자 '${a}' 는 실단말(real-ue) 풀이 될 수 없다 — 실단말 단계: ${(vocab?.real_ue_steps ?? []).join(', ')}`, ref)
+      if (D?.kind === 'ptt' && !((rp.kind === 'ue' || rp.kind === 'real-ue' || rp.kind === 'device') && rp.service === 'ptt')) E(who, `${s.step} 의 행위자 '${a}' 는 service=ptt UE 풀이어야 한다 (${rp.logical} = ${rp.kind}${rp.kind !== 'peer' ? ' · ' + rp.service : ''})`, ref)
+      if ((rp.kind === 'real-ue' || rp.kind === 'device') && D && D.real === false) E(who, `${s.step} 의 행위자 '${a}' 는 실스택(${rp.kind}) 풀이 될 수 없다 — 실스택 단계: ${(vocab?.real_ue_steps ?? []).join(', ')}`, ref)
       if (D?.kind === 'ue|trunk' && rp.kind === 'peer' && !(Object.values(rp.pools)[0] as { register?: unknown }).register) E(who, `역할 '${a}' 의 피어 풀에는 register(트렁크 계정)가 없다 — 고정 IP 피어는 등록하지 않는다`, ref)
     }
     if (s.cause != null) { const a = s.from ?? (s.who ?? [])[0]; const rp = a ? resolvePool(sc, topo, a) : null; if (rp && rp.kind !== 'peer') E(who, 'cause(Reason Q.850) 는 피어 역할만 보낸다', ref) }
     if (s.step === 'invite' && s.to) { const rp = resolvePool(sc, topo, s.to); const p0 = rp && Object.values(rp.pools)[0]; if (p0 && (p0 as { answer?: string }).answer === 'silent') I(who, `to '${s.to}' 는 answer=silent 풀 — 무응답 상대(failover 시험)`, ref) }
-    if ((s.step === 'invite' || s.step === 'group_call') && s.media?.rtp && s.media.rtp !== 'auto' && Object.keys(sc.roles).some(r => resolvePool(sc, topo, r)?.kind === 'real-ue')) E(who, `media.rtp=${s.media.rtp} — 실단말(real-ue) 역할이 있는 시나리오의 호는 auto 만(실스택의 미디어 평면)`, ref)
+    if ((s.step === 'invite' || s.step === 'group_call') && s.media?.rtp && s.media.rtp !== 'auto' && Object.keys(sc.roles).some(r => { const k = resolvePool(sc, topo, r)?.kind; return k === 'real-ue' || k === 'device' })) E(who, `media.rtp=${s.media.rtp} — 실스택(real-ue·device) 역할이 있는 시나리오의 호는 auto 만(실스택의 미디어 평면)`, ref)
     if (INDIALOG.has(s.step) && !inSession(sc, i)) E(who, `${s.step} 는 확립된 세션 안에서만 — answer/progress 뒤·bye 앞에 두거나 media_hold 의 during 으로`, ref)
     const ctl = [...(MEDIA_CTL.has(s.step) ? [s as Step | During] : []), ...(s.during ?? []).filter(d => MEDIA_CTL.has(d.step))]
     if (ctl.length) {

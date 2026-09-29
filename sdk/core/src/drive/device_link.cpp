@@ -1,5 +1,5 @@
 // DeviceLink — 시험 모드 계측 링크 (cimsue/drive.h, ue_voice_quality.md §5).
-//   단말이 계측기 워커(Device.Listen)에 TLS 로 먼저 연결 → hello → welcome 이면 DriveSession 으로 워커 명령을 실행한다.
+//   단말이 계측기 워커(Device.Port)에 TLS 로 먼저 연결 → hello → welcome 이면 DriveSession 으로 워커 명령을 실행한다.
 //   시험 대상 서버를 거치지 않는다. 입출력은 링크 스레드 하나가 한다 — OpenSSL SSL 객체는 동시 읽기·쓰기에 안전하지 않으므로,
 //   다른 스레드(이벤트·통계)가 낸 줄은 큐에 넣고 링크 스레드가 읽기 사이사이 비운다.
 #include "cimsue/drive.h"

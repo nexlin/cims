@@ -184,11 +184,27 @@ public:
     std::atomic<int>                m_iRtcpRrBlocks{0};      // 보고 블록 수
     std::atomic<int>                m_iRtcpRrFractionLost{-1};   // 마지막 보고 블록의 fraction lost(0~255, -1 = 없음)
     std::atomic<unsigned int>       m_uRtcpRrJitter{0};      // 마지막 보고 블록의 interarrival jitter(클록 틱)
+    // ── RTCP 송신 (RFC 3550 §6.4 — 5 초마다 SR(보낸 게 없으면 RR)+보고 블록+SDES CNAME compound) · RTT(§6.4.1) ──
+    //   상대가 우리 SR 에 대한 RR 블록(LSR/DLSR)을 돌려주면 왕복 지연을 잰다 — 계측기 rtd_ms·E-model 망 지연(ue_voice_quality.md §6).
+    //   SRTP 세션이면 같은 libsrtp 컨텍스트로 SRTCP 보호/해제(RFC 3711 §3.4). PTT 는 끈다(그룹 미디어 RTCP 미사용).
+    std::atomic<bool>               m_bRtcpSend{true};
+    std::atomic<int>                m_iRtcpIntervalMs{5000};  // 보고 주기(RFC 3550 §6.2 최소 5 s — 단위시험만 줄인다)
+    std::atomic<int>                m_iRtcpSent{0};
+    std::atomic<long long>          m_llRtcpRttUs{-1};       // 마지막 RTT(µs), -1 = 없음
+    std::atomic<unsigned int>       m_uLastSrNtpMid{0};      // 상대 마지막 SR 의 NTP 가운데 32 비트(우리 RR 의 LSR)
+    std::atomic<long long>          m_llLastSrArrivalUs{0};  // 그 SR 도착 시각(DLSR 계산)
+    // 수신 스레드 → 송신 스레드(RR 블록 재료) — 수신 스레드 전용 필드의 사본
+    std::atomic<unsigned int>       m_aRecvSsrc{0};
+    std::atomic<unsigned int>       m_aRecvExtSeq{0};
+    std::atomic<unsigned int>       m_aRecvJitterTicks{0};
+    bool SrtpProtectRtcp( char * pszBuf, int & iLen, int iCap );
+    bool SrtpUnprotectRtcp( char * pszBuf, int & iLen );
     /** 새 호마다 초기화 — 시퀀스 기준·지터 누적을 버린다(SSRC 도). */
     void ResetRecvStats() {
         if (m_pRemote && !m_strRemoteId.empty()) m_pRemote->Control(m_strRemoteId, "reset");
         m_ullRecvLost = 0; m_llRecvJitterUs = 0; m_ullRecvTotal = 0;
         m_iRecvPt = -1; m_iRtcpRecv = 0; m_iRtcpRrBlocks = 0; m_iRtcpRrFractionLost = -1; m_uRtcpRrJitter = 0;
+        m_iRtcpSent = 0; m_llRtcpRttUs = -1; m_uLastSrNtpMid = 0; m_llLastSrArrivalUs = 0; m_aRecvSsrc = 0; m_aRecvExtSeq = 0; m_aRecvJitterTicks = 0;
         std::lock_guard<std::mutex> lk(m_mtxSsrc); m_setRecvSsrc.clear();
         m_bRecvSeqInit = false;
     }

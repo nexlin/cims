@@ -23,7 +23,7 @@
 // 구동 모드(drive): 엔진을 띄운 채 stdin 에서 한 줄 = 명령 하나를 읽고, 진행은 stdout 에 한 줄 = JSON 이벤트 하나로 낸다
 //   (test_instrument.md §3.3 — 워커가 프로세스를 가상 단말처럼 단계별로 구동한다). 등록은 자동으로 하지 않는다 — `register` 명령이 한다.
 //   명령·이벤트 정의는 코어 cimsue/drive.h(DriveSession) 하나다 — 계측 링크(link)와 같다.
-// 계측 링크(link HOST[:PORT]): 등록한 뒤 계측기 워커(Device.Listen)에 TLS 로 먼저 붙어 hello 를 보내고, 워커가 보낸 명령을 같은
+// 계측 링크(link HOST[:PORT]): 등록한 뒤 계측기 워커(Device.Port)에 TLS 로 먼저 붙어 hello 를 보내고, 워커가 보낸 명령을 같은
 //   DriveSession 으로 실행한다(ue_voice_quality.md §5 — 앱 시험 모드와 같은 경로, 등록은 cli 소유라 register 명령은 app_owned 로 거절).
 //   stdout = link{state,detail} 줄. --duration 이 없으면 SIGINT/SIGTERM 까지.
 //

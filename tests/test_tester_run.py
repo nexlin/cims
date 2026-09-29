@@ -85,7 +85,13 @@ class FakeWorker:
                         h['tls'] = outer.behaviour['tls']
                     if outer.behaviour.get('nat') is not None:
                         h['nat'] = outer.behaviour['nat']
+                    if outer.behaviour.get('devices') is not None:
+                        d = outer.behaviour['devices']
+                        h['devices'] = {'listening': d.get('listening', True), 'port': 7120, 'connected': len(d.get('list') or []), 'max': 32}
                     self._send(200, h)
+                elif self.path == '/devices' and outer.behaviour.get('devices') is not None:
+                    d = outer.behaviour['devices']
+                    self._send(200, {'worker': outer.name, 'listening': d.get('listening', True), 'port': 7120, 'devices': d.get('list') or []})
                 elif self.path.startswith('/runs/'):
                     self._send(200, {'state': outer.state, 'counters': {}})
                 else:
@@ -565,6 +571,75 @@ class Compile(unittest.TestCase):
         # STEP_VOCAB.real — 실단말 행위자 가능 단계 표시(편집기 게이트) · 지표 이름
         self.assertTrue(M.STEP_VOCAB['invite']['real'] and not M.STEP_VOCAB['refer']['real'] and not M.STEP_VOCAB['media_send']['real'])
         for n in ('real_srd_ms', 'real_rtp_loss_pct', 'real_jitter_ms', 'real_mos'):
+            self.assertIn(n, M.METRIC_NAMES)
+
+
+class DevicePool(unittest.TestCase):
+    def test_device_pool(self):
+        """실기기(device) 풀(ue_voice_quality.md §6) — PoolCreate kind=device(번호·service·media, 도메인 파생), 실스택 단계 게이트(REAL_UE_STEPS),
+        계획 미리보기의 연결 확인(없음·다른 워커·미등록·다른 풀 사용), 지표 이름."""
+        from services import tester_workers as TW, tester_plan as P
+        dev = {'device_id': 'and-1', 'app': 'volte', 'alive': True, 'pool': '',
+               'accounts': [{'service': 'volte', 'msisdn': '+821355500001', 'registered': True},
+                            {'service': 'ptt', 'msisdn': '+821355500001', 'registered': False}]}
+        w1 = FakeWorker('w1', behaviour={'devices': {'list': [dev]}})
+        w2 = FakeWorker('w2', behaviour={'devices': {'list': [dict(dev, device_id='and-2',
+                                                                    accounts=[{'service': 'volte', 'msisdn': '+821355500002', 'registered': False}])]}})
+        topo_doc = _topology([w1, w2])
+        topo_doc['pools']['dev_w1'] = {'kind': 'device', 'worker': 'w1', 'access': 'csp', 'transport': 'udp', 'service': 'volte',
+                                       'identities': [{'user': '+821355500001'}], 'media': 'sample'}
+        topo = M.Topology.model_validate(topo_doc)
+        self.assertEqual(topo.pool_service('dev_w1'), 'volte')
+        ws = TW.discover(topo_doc)
+        for w in ws:
+            w.probe()
+        sc = M.Scenario.model_validate({'id': 'UT-DEV', 'roles': {'dev': {'pool': 'dev_w1'}, 'callee': {'pool': 'volte_ue', 'count': 2}},
+                                        'flow': [{'step': 'register', 'who': ['dev', 'callee']}, {'step': 'invite', 'from': 'callee', 'to': 'dev'},
+                                                 {'step': 'answer', 'who': ['dev']},
+                                                 {'step': 'media_hold', 'seconds': 3, 'expect': {'device_mos': {'min': 3.5}, 'device_rtd_ms': {'p95': 300}}},
+                                                 {'step': 'bye', 'from': 'callee'}]})
+        plan = C.compile_run('dv', sc, topo, topo_doc, None, {}, ws, lambda w: 'x:1', 1, None)
+        pools = {p['pool']: p for p in plan['workers']['w1']['pools']}
+        self.assertEqual(pools['dev_w1']['kind'], 'device')
+        self.assertEqual(pools['dev_w1']['media'], 'sample')
+        self.assertEqual(pools['dev_w1']['service'], 'volte')
+        self.assertEqual([(i['user'], bool(i['domain'])) for i in pools['dev_w1']['identities']], [('+821355500001', True)])
+        self.assertNotIn('ha1', pools['dev_w1']['identities'][0])                  # 자격은 단말 앱 것
+        self.assertEqual(plan['roles']['dev']['kind'], 'device')
+        # 실스택 단계 게이트 — refer·media_send 는 실기기 행위자 불가, 호의 media.rtp 는 auto 만
+        for bad in ([{'step': 'register', 'who': ['dev', 'callee']}, {'step': 'invite', 'from': 'dev', 'to': 'callee'}, {'step': 'answer', 'who': ['callee']},
+                     {'step': 'refer', 'from': 'dev', 'to': 'callee'}],
+                    [{'step': 'register', 'who': ['dev', 'callee']}, {'step': 'invite', 'from': 'callee', 'to': 'dev', 'media': {'rtp': 'explicit'}},
+                     {'step': 'answer', 'who': ['dev']}, {'step': 'bye', 'from': 'callee'}]):
+            sc_bad = M.Scenario.model_validate({'id': 'UT-DEV-BAD', 'roles': {'dev': {'pool': 'dev_w1'}, 'callee': {'pool': 'volte_ue', 'count': 2}}, 'flow': bad})
+            with self.assertRaises(C.CompileError):
+                C.compile_run('db', sc_bad, topo, topo_doc, None, {}, ws, lambda w: 'x:1', 1, None)
+        # 계획 미리보기 — 연결돼 있고 등록됨 → 실기기 관련 오류 없음
+        plan_doc = P.build_plan(sc, topo, topo_doc, None, {}, 1, None, probe=True, stream_port=1)
+        self.assertFalse(any('실기기' in e for e in plan_doc['errors']), plan_doc['errors'])
+        row = next(r for r in plan_doc['workers'] if r['name'] == 'w1')
+        self.assertEqual(row['capacity']['devices']['need'], 1)
+        # 다른 워커에 붙은 번호 → 그 워커 이름을 알려 준다
+        topo_doc2 = json.loads(json.dumps(topo_doc))
+        topo_doc2['pools']['dev_w1']['identities'] = [{'user': '+821355500002'}]
+        plan_doc = P.build_plan(sc, M.Topology.model_validate(topo_doc2), topo_doc2, None, {}, 1, None, probe=True, stream_port=1)
+        self.assertTrue(any('+821355500002' in e and 'w2' in e for e in plan_doc['errors']), plan_doc['errors'])
+        # 서비스가 ptt 인데 앱 PTT 회선이 미등록 → 경고
+        topo_doc3 = json.loads(json.dumps(topo_doc))
+        topo_doc3['pools']['dev_w1']['service'] = 'ptt'
+        plan_doc = P.build_plan(sc, M.Topology.model_validate(topo_doc3), topo_doc3, None, {}, 1, None, probe=True, stream_port=1)
+        self.assertTrue(any('등록돼 있지 않다' in x for x in plan_doc['warnings']), plan_doc['warnings'])
+        # 모르는 번호 → 오류(단말 계측기 주소 안내)
+        topo_doc4 = json.loads(json.dumps(topo_doc))
+        topo_doc4['pools']['dev_w1']['identities'] = [{'user': '+821399999999'}]
+        plan_doc = P.build_plan(sc, M.Topology.model_validate(topo_doc4), topo_doc4, None, {}, 1, None, probe=True, stream_port=1)
+        self.assertTrue(any('+821399999999' in e and '계측기 주소' in e for e in plan_doc['errors']), plan_doc['errors'])
+        # 모델 — media 는 sample|mic, identities 는 하나 이상
+        bad_doc = json.loads(json.dumps(topo_doc))
+        bad_doc['pools']['dev_w1']['media'] = 'speaker'
+        with self.assertRaises(Exception):
+            M.Topology.model_validate(bad_doc)
+        for n in ('device_srd_ms', 'device_rtp_loss_pct', 'device_jitter_ms', 'device_rtd_ms', 'device_mos', 'rtd_ms', 'real_rtd_ms'):
             self.assertIn(n, M.METRIC_NAMES)
 
 

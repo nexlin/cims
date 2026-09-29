@@ -16,7 +16,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { useToast } from '@core/components/Toast'
 import { useConfirm } from '@core/components/custom/confirm'
-import { testerApi, type DiscoveredWorker, type SampleRow } from '@tester/api/tester'
+import { testerApi, type DiscoveredWorker, type SampleRow, type DeviceWorkerRow, type DevicePoolDoc } from '@tester/api/tester'
 import type { TopologyDoc, TopoNode, PoolDoc, PeerPoolDoc, UePoolDoc, RealUePoolDoc, CheckItem, NodeRole, Transport, WorkerRow, SipListener, DtmfMode } from '@tester/api/tester'
 import * as M from '@tester/lib/topology-model'
 import type { Focus, Issue, PaletteKind, Pos } from '@tester/lib/topology-model'
@@ -29,6 +29,7 @@ const PALETTE: { group: string; items: { kind: PaletteKind; label: string; hint:
   { group: '계측기 워커 (호스트 위에)', items: [{ kind: 'worker', label: '워커', hint: 'cims-tester-worker 프로세스', icon: <Cpu size={13} /> }] },
   { group: '풀 (워커 위에)', items: [
     { kind: 'ue', label: 'UE 풀', hint: '가상 단말 · DB/creds', icon: <Smartphone size={13} /> }, { kind: 'real-ue', label: '실단말 풀', hint: 'cimsue-cli', icon: <Smartphone size={13} /> },
+    { kind: 'device', label: '실기기 풀', hint: '시험 모드 앱 · 계측 링크', icon: <Smartphone size={13} /> },
     { kind: 'ibcf', label: 'IBCF 피어', hint: '타 사업자 IMS', icon: <Globe size={13} /> }, { kind: 'pbx', label: 'PBX 트렁크', hint: 'REGISTER · DID', icon: <Phone size={13} /> }, { kind: 'mgcf', label: 'MGCF', hint: 'PSTN 게이트웨이', icon: <Router size={13} /> }] },
   { group: '시험 대상 노드 (호스트 위에)', items: [
     { kind: 'n_sip', label: 'SIP 서버', hint: 'CSP · P/I/S-CSCF · SBC · IBCF', icon: ROLE_ICON.sip }, { kind: 'n_tas', label: 'TAS', hint: '보조 서비스 · 그룹콜 AS', icon: ROLE_ICON.tas },
@@ -145,8 +146,8 @@ const TopologyCanvas = forwardRef<TopologyCanvasHandle, {
           edge({ x: a.x, y: a.y + 6 }, portA(`${p.peering}:${reg ?? lid}`), 'reg', `REGISTER ${p.register.user}`, hi, false)
         }
       } else {
-        const tr = M.poolTransport(doc, p); const pid = `${p.access}:${lid}`
-        edge(a, portA(pid), tr, `${tr}${p.srtp && p.srtp !== 'off' ? ` · srtp ${p.srtp}` : ''}`, hi, failing(pid), pid)
+        const tr = M.poolTransport(doc, p); const pid = `${p.access}:${lid}`; const srtp = M.isDevice(p) ? undefined : p.srtp
+        edge(a, portA(pid), tr, `${tr}${srtp && srtp !== 'off' ? ` · srtp ${srtp}` : ''}${M.isDevice(p) ? ' · 앱 등록' : ''}`, hi, failing(pid), pid)
         for (const m of M.mediaNodes(doc)) edge({ x: a.x, y: a.y + 6 }, portA(`${m}:rtp`), 'rtp', hi ? 'RTP' : null, hi, false)
         if (M.isUe(p) && 'db' in p.source) { const d = doc.target.nodes[p.source.db]; edge({ x: a.x, y: a.y + 10 }, portA(`${p.source.db}:${d?.role === 'db' ? 'db' : 'api'}`), 'db', `${p.source.table} ×${p.source.count}`, hi, false, `${p.source.db}:db`) }
         // CSC(IdMS 토큰·MCData FD) — 컨트롤러가 target_csc 로 파생하는 연결. 라벨은 선택한 풀만(RTP 와 같은 규칙)
@@ -421,6 +422,7 @@ const TopologyCanvas = forwardRef<TopologyCanvasHandle, {
     let body: ReactNode
     if (M.isPeer(p)) { const idn = p.identities ?? {}; const rng = idn.e164_range ? `${idn.e164_range[0]}…${idn.e164_range[1].slice(-4)}` : idn.did_range ? `${idn.did_range[0]}…${idn.did_range[1].slice(-3)}` : '신원 없음'
       body = <><Badge variant={p.answer && p.answer !== 'normal' ? 'dangerSoft' : 'warningSoft'}>{p.profile}{p.answer === 'silent' ? ' · silent' : p.answer === 'reject' ? ` · reject ${p.fault?.code ?? 503}` : p.answer === 'delay' ? ` · delay ${p.fault?.delay_ms ?? 0} ms` : ''}</Badge><b className="truncate">{pn}</b><span className="truncate font-mono text-[10px] text-muted-foreground">{p.bind.ip ? p.bind.ip : ''}:{p.bind.port}/{p.bind.protocol ?? 'udp'} → {p.peering || '?'}{p.listener ? `:${p.listener}` : ''} · {rng}</span></> }
+    else if (M.isDevice(p)) body = <><Badge variant="warningSoft">device</Badge>{group}<b className="truncate">{pn}</b><span className="truncate font-mono text-[10px] text-muted-foreground">→ {p.access || '?'} · {M.poolService(p)} · 번호 {(p.identities ?? []).length} · {p.media ?? 'sample'}</span></>
     else { const src = 'db' in p.source ? `${p.source.table.replace('_subscriptions', '')} ${p.source.offset ?? 0}+${p.source.count}` : `creds${p.source.offset ? ` ${p.source.offset}+` : ' '}${p.source.count ?? '전체'}`
       body = <><Badge variant={p.kind === 'ue' ? 'infoSoft' : 'successSoft'}>{p.kind}</Badge>{group}<b className="truncate">{pn}</b><span className="truncate font-mono text-[10px] text-muted-foreground">→ {p.access || '?'}{p.listener ? `:${p.listener}` : ''} {M.poolTransport(doc, p)}{p.srtp && p.srtp !== 'off' ? '+srtp' : ''} · {src}</span></> }
     return (
@@ -689,6 +691,69 @@ function SampleLibrary({ doc, ro, mutate }: { doc: TopologyDoc; ro: boolean; mut
     </div>)}
   </Sec>
 }
+/** 실기기 풀 속성(ue_voice_quality.md §6) — 접속점(도메인 파생용)·회선·송출 원천·번호 목록 + 토폴로지 워커들에 계측 링크로 붙어 있는 단말(GET /tester/devices).
+ *  등록·코덱·미디어는 단말 앱 것 — 이 풀은 번호로 단말을 고를 뿐이다. */
+function DevicePoolInspector({ doc, pn, p, ro, head, issueBlock, wsel, gsel, delBtn, P, mutate, setSel }: {
+  doc: TopologyDoc; pn: string; p: DevicePoolDoc; ro: boolean; head: ReactNode; issueBlock: ReactNode; wsel: ReactNode; gsel: ReactNode; delBtn: ReactNode
+  P: (fn: (x: PoolDoc, d: TopologyDoc) => void) => void; mutate: (fn: (d: TopologyDoc) => void) => void; setSel: (f: Focus | null) => void
+}) {
+  const [rows, setRows] = useState<DeviceWorkerRow[] | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const load = useCallback(() => { setRows(null); setErr(null); testerApi.devices().then(r => setRows(r.workers)).catch(e => { setErr(String(e)); setRows([]) }) }, [])
+  useEffect(() => { load() }, [load])
+  const PD = (fn: (x: DevicePoolDoc) => void) => P(x => fn(x as DevicePoolDoc))
+  const acc = doc.target.nodes[p.access]
+  const svc = M.poolService(p)
+  const mine = new Set((p.identities ?? []).map(i => i.user))
+  const names = new Set(doc.workers.map(w => w.name))
+  const connected = (rows ?? []).filter(r => names.has(r.worker))
+  return <div>
+    {head}{issueBlock}
+    <F label="풀 이름" help="시나리오 roles.pool 이 참조 (이름 또는 group)"><Txt value={pn} mono disabled={ro} onCommit={v => mutate(d => { if (M.renamePool(d, pn, v)) setSel({ kind: 'pool', id: v }) })} /></F>
+    <div className="grid grid-cols-2 gap-2">{wsel}{gsel}</div>
+    <Sec title="접속점 — 단말 앱이 등록한 SIP 수신점(도메인·번호계획 파생용)">
+      <div className="grid grid-cols-3 gap-2">
+        <F label="노드"><Sel value={p.access} disabled={ro} options={M.accessNodes(doc).map(v => ({ v }))} empty="(선택)" onChange={v => PD(x => { x.access = v; delete x.listener })} /></F>
+        <F label="수신점" help="비면 transport 와 같은 첫 access 항목"><Sel value={p.listener ?? ''} disabled={ro} options={M.accessListeners(acc).map(([lid, l]) => ({ v: lid, l: `${lid} — ${l.port}/${l.protocol ?? 'udp'}` }))} empty="(기본)" onChange={v => PD(x => { if (v) { x.listener = v; x.transport = (acc?.sip?.listeners?.[v]?.protocol ?? 'udp') as Transport } else delete x.listener })} /></F>
+        <F label="transport" help="단말 앱의 접속 transport — 계측기는 단말 설정을 바꾸지 않는다"><Sel value={M.poolTransport(doc, p)} disabled={ro || !!p.listener} options={(['udp', 'tcp', 'tls'] as Transport[]).map(v => ({ v }))} onChange={v => PD(x => { x.transport = v as Transport })} /></F>
+      </div>
+    </Sec>
+    <Sec title="회선·송출">
+      <div className="grid grid-cols-2 gap-2">
+        <F label="service" help="구동할 회선 — 링크 명령 use <service>. 단말 앱이 그 회선에 등록돼 있어야 한다"><Sel value={svc} disabled={ro} options={[{ v: 'volte', l: 'volte — 이동 VoLTE' }, { v: 'voip', l: 'voip — 유선 VoIP' }, { v: 'ptt', l: 'ptt — MCPTT' }]} onChange={v => PD(x => { x.service = v as 'volte' | 'voip' | 'ptt' })} /></F>
+        <F label="송출 원천 (media)" help="sample = 단말 동봉 기준 음원(P.59 두 화자 대화, -26 dBov) · mic = 마이크(사람이 말한다)"><Sel value={p.media ?? 'sample'} disabled={ro} options={[{ v: 'sample', l: 'sample — 기준 음원' }, { v: 'mic', l: 'mic — 마이크' }]} onChange={v => PD(x => { x.media = v as 'sample' | 'mic' })} /></F>
+      </div>
+      <span className="text-muted-foreground">등록·코덱·미디어는 단말 앱 것 — register 단계는 앱 등록 확인, deregister 는 아무것도 하지 않는다. 단계는 실단말 지원 단계만, 지표는 device_*</span>
+    </Sec>
+    <Sec title={`번호 (${(p.identities ?? []).length}) — 번호 하나 = 시험 모드 단말 하나`}>
+      {(p.identities ?? []).map((it, i) => <div key={i} className="flex items-center gap-1">
+        <Txt value={it.user} mono placeholder="+821012345678" disabled={ro} onCommit={v => PD(x => { x.identities[i] = { ...x.identities[i], user: v.trim() } })} />
+        {svc === 'ptt' && <Txt value={it.ptt_group} mono placeholder="ptt_group" disabled={ro} onCommit={v => PD(x => { if (v.trim()) x.identities[i].ptt_group = v.trim(); else delete x.identities[i].ptt_group })} />}
+        <button disabled={ro} title="번호 빼기" className="text-muted-foreground hover:text-destructive disabled:opacity-40" onClick={() => PD(x => { x.identities.splice(i, 1) })}><Trash2 size={12} /></button>
+      </div>)}
+      <Button size="sm" variant="outline" disabled={ro} onClick={() => PD(x => { x.identities = [...(x.identities ?? []), { user: '' }] })}><Plus size={12} /> 번호</Button>
+    </Sec>
+    <Sec title="연결된 단말 — 이 토폴로지 워커의 계측 링크(Device.Port)" right={<Button size="sm" variant="ghost" onClick={load}><RefreshCw size={12} /></Button>}>
+      {rows === null ? <span className="text-muted-foreground">불러오는 중…</span> : err ? <span className="text-destructive">{err}</span> : !connected.length ? <span className="text-muted-foreground">토폴로지 워커를 찾지 못했습니다(저장 전이면 저장 뒤 새로 고침)</span> :
+        connected.map(r => <div key={r.url} className="mb-1">
+          <div className="flex justify-between"><b>{r.worker}</b><span className="font-mono text-[10px] text-muted-foreground">{!r.reachable ? '미응답' : r.listening ? `:${r.port} · 단말 ${r.devices.length}` : '수신점 꺼짐'}</span></div>
+          {r.fingerprint && <div className="truncate font-mono text-[10px] text-muted-foreground" title="단말 시험 모드에서 처음 연결할 때 이 지문이 고정된다(TOFU)">지문 {r.fingerprint.slice(0, 16)}…</div>}
+          {r.devices.filter(dv => dv.alive).map(dv => <div key={dv.device_id} className="ml-2">
+            <div className="truncate text-muted-foreground">{dv.app} {dv.version} · {dv.model || dv.platform} · {dv.addr}{dv.pool ? ` · 풀 ${dv.pool} 사용 중` : ''}</div>
+            {dv.accounts.map(a => <div key={a.service + a.msisdn} className="flex items-center gap-1 font-mono text-[11px]">
+              <span className={a.registered ? '' : 'text-muted-foreground'}>{a.msisdn}</span><span className="text-muted-foreground">{a.service}{a.registered ? '' : ' · 미등록'}</span>
+              {a.service === svc && (mine.has(a.msisdn) ? <Badge variant="neutralSoft">선택됨</Badge>
+                : <Button size="sm" variant="ghost" disabled={ro} onClick={() => PD(x => { x.identities = [...(x.identities ?? []).filter(i => i.user), { user: a.msisdn }]; if (x.worker !== r.worker) x.worker = r.worker })}><Plus size={11} /> 추가</Button>)}
+            </div>)}
+          </div>)}
+          {mine.size > 0 && r.worker === p.worker && [...mine].filter(u => u && !r.devices.some(dv => dv.alive && dv.accounts.some(a => a.msisdn === u && a.service === svc))).map(u =>
+            <div key={u} className="ml-2 font-mono text-[11px] text-warning">{u} — 이 워커에 붙어 있지 않다(단말 시험 모드의 계측기 주소 = {M.ipOfWorker(doc, r.worker)}:{r.port ?? 7120})</div>)}
+        </div>)}
+    </Sec>
+    {delBtn}
+  </div>
+}
+
 function Sec({ title, right, children }: { title: string; right?: ReactNode; children: ReactNode }) {
   // 머리는 sticky — 긴 풀 폼을 내려도 지금 어느 구획인지 보인다(-top-3 = 패널 padding 만큼 올려 패널 위 가장자리에 붙는다)
   return <div className="mt-3 flex flex-col gap-1.5 border-t border-border pt-2"><div className="sticky -top-3 z-[1] flex items-center gap-2 bg-card py-0.5 text-[11px] font-semibold text-muted-foreground">{title}<span className="ml-auto">{right}</span></div>{children}</div>
@@ -897,6 +962,8 @@ function Inspector({ doc, sel, setSel, mutate, issues, allIssues, canWrite, onDe
       {delBtn}
     </div>
   }
+  if (M.isDevice(p)) return <DevicePoolInspector doc={doc} pn={pn} p={p} ro={ro} head={head(pn, <Badge variant="warningSoft">실기기 풀</Badge>)} issueBlock={issueBlock}
+    wsel={wsel} gsel={gsel} delBtn={delBtn} P={P} mutate={mutate} setSel={setSel} />
   const u = p as UePoolDoc; const isDb = 'db' in u.source; const acc = doc.target.nodes[u.access]
   const PU = (fn: (x: UePoolDoc) => void) => P(x => fn(x as UePoolDoc))
   return <div>

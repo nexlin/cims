@@ -100,6 +100,16 @@ bool Worker::start(std::string& err) {
     CsimPeer::EnsureCodecTable();   // G.722(PT 9) — psip 기본 테이블에 없다(시나리오 media.audio: g722·피어 codecs G722)
     m_mediaAgent = std::make_unique<MediaAgent>(m_cfg.localIp, m_cfg.mediaFile, m_cfg.videoFile);   // 모든 워커가 에이전트가 될 수 있다(풀 media_worker 가 고른다)
     if (!m_http.start(m_cfg.bindIp, m_cfg.port, [this](const HttpRequest& r) { return handle(r); }, err)) return false;
+    if (m_cfg.devicePort > 0) {
+        // 시험 모드 실기기 계측 링크 수신점 — 못 열어도(포트 사용 중 등) 워커는 뜬다. health devices.listening 이 알린다
+        DeviceHubConfig dc;
+        dc.ip = m_cfg.deviceIp; dc.port = m_cfg.devicePort; dc.certFile = m_cfg.deviceCertFile; dc.keyFile = m_cfg.deviceKeyFile;
+        dc.pairKey = m_cfg.devicePairKey; dc.maxDevices = m_cfg.deviceMax; dc.workerName = m_cfg.name;
+        m_devices = std::make_unique<DeviceHub>(dc);
+        std::string derr;
+        if (m_devices->start(derr)) logf("info", "device link listening %s:%d (fingerprint %s)", dc.ip.c_str(), dc.port, m_devices->fingerprint().c_str());
+        else logf("warn", "device link not listening: %s", derr.c_str());
+    }
     m_stop = false;
     m_sipCapture.install(SipCapture::ParseMode(m_cfg.sipCapture));
     m_sched = std::thread([this] { schedLoop(); });
@@ -121,7 +131,9 @@ void Worker::stop() {
             if (ep->s && ep->started) { ep->s->Stop(5); ep->started = false; }
         if (kv.second->peer) kv.second->peer->Stop();
         for (auto& r : kv.second->reals) r->stop();
+        for (auto& d : kv.second->devices) d->unbind();
     }
+    if (m_devices) m_devices->stop();
 }
 
 // ── ICsimObserver / ICsimPeerObserver (스택 스레드) ───────────────────────────
@@ -290,6 +302,7 @@ HttpResponse Worker::handle(const HttpRequest& req) {
         if (!Json::parse(req.body, body, perr)) return errResp(400, "bad_json", perr);
     }
     if (req.method == "GET" && p == "/health") return health();
+    if (req.method == "GET" && p == "/devices") return devicesList();
     if (p.rfind("/media/", 0) == 0) return m_mediaAgent ? m_mediaAgent->handle(req, body) : errResp(503, "media_agent_unavailable");   // 미디어 전담 워커 얼굴
     if (req.method == "POST" && p == "/pools") return poolCreate(body);
     if (req.method == "DELETE" && p.rfind("/pools/", 0) == 0) return poolDelete(p.substr(7));
@@ -405,6 +418,15 @@ HttpResponse Worker::health() {
     real["max"] = Json((long long)m_cfg.realUeMax);
     real["cli"] = Json(m_cfg.realUeCli);
     j["real_ue"] = real;
+    // device 풀(ue_voice_quality.md §6) — 계측 링크 수신점·연결 수(계획 미리보기가 풀 신원의 연결 여부를 GET /devices 로 대조)
+    Json dev = Json::Object();
+    dev["listening"] = Json(m_devices && m_devices->listening());
+    dev["port"] = Json((long long)m_cfg.devicePort);
+    dev["connected"] = Json((long long)(m_devices ? m_devices->connected() : 0));
+    dev["max"] = Json((long long)m_cfg.deviceMax);
+    dev["pair_key"] = Json(!m_cfg.devicePairKey.empty());
+    if (m_devices) dev["fingerprint"] = Json(m_devices->fingerprint());
+    j["devices"] = dev;
     // TLS 파일 보유(§3.1·§3.2) — 컨트롤러 계획 미리보기가 풀의 tls_verify/tls_client_cert/tls_client_auth·TLS 피어 bind 와 대조한다
     Json tls = Json::Object();
     tls["ca"] = Json(!m_cfg.tlsCaFile.empty() && access(m_cfg.tlsCaFile.c_str(), R_OK) == 0);
@@ -462,6 +484,14 @@ void Worker::destroyPool(Pool* pool) {
         for (auto& r : pool->reals) r->stop();
         pool->reals.clear();
         // 리더 스레드가 남긴 이 풀 단말의 이벤트(process_exit 등)는 버린다 — Endpoint 가 곧 사라진다
+        std::lock_guard<std::mutex> lk(m_evMtx);
+        m_events.erase(std::remove_if(m_events.begin(), m_events.end(), [pool](const Event& e) { return e.ep && e.ep->poolRef == pool; }), m_events.end());
+        for (auto& ep : pool->eps) ep->real = nullptr;
+    }
+    if (!pool->devices.empty()) {
+        // 실기기를 놓는다 — quit 이면 단말은 링크를 유지한 채 이 풀이 구동한 호를 정리하고 새 세션으로 대기(ue_voice_quality.md §5.2)
+        for (auto& d : pool->devices) { d->unbind(); d->send("quit"); }
+        pool->devices.clear();
         std::lock_guard<std::mutex> lk(m_evMtx);
         m_events.erase(std::remove_if(m_events.begin(), m_events.end(), [pool](const Event& e) { return e.ep && e.ep->poolRef == pool; }), m_events.end());
         for (auto& ep : pool->eps) ep->real = nullptr;
@@ -707,13 +737,82 @@ bool Worker::buildRealUePool(Pool* pool, const Json& d, std::string& err) {
         pool->eps.push_back(std::move(ep));
     }
     // 전부 ready(엔진 기동) 까지 — 하나라도 못 뜨면 풀 생성 실패(프로세스는 destroyPool 이 내린다)
-    for (auto& ep : pool->eps) {
-        if (!ep->real->waitReady(m_cfg.realUeStartTimeoutS * 1000)) {
-            err = "real_ue_start_timeout: " + ep->id.user + (ep->real->alive() ? " (ready 없음)" : " (프로세스 종료 — log/real-ue 의 로그 확인)");
+    for (auto& proc : pool->reals) {
+        if (!proc->waitReady(m_cfg.realUeStartTimeoutS * 1000)) {
+            err = "real_ue_start_timeout: " + proc->tag() + (proc->alive() ? " (ready 없음)" : " (프로세스 종료 — log/real-ue 의 로그 확인)");
             return false;
         }
     }
     return true;
+}
+
+/** device 풀(ue_voice_quality.md §6) — 시험 모드 실기기(계측 링크로 붙어 있는 단말)를 번호로 골라 잡는다. 등록·미디어는 실기기 것.
+ *  신원마다 링크에 `use <service>`·`media mic|sample` 을 보내고 이벤트를 onRealEvent 로 받는다(real-ue 와 같은 경로). 붙어 있지 않거나
+ *  다른 풀이 쓰는 단말이면 거절. */
+bool Worker::buildDevicePool(Pool* pool, const Json& d, std::string& err) {
+    if (!m_devices || !m_devices->listening()) { err = "device_link_off: Device.Port 수신점 없음"; return false; }
+    pool->service = d["service"].asString("volte");
+    pool->media = d["media"].asString("sample");
+    if (pool->media != "sample" && pool->media != "mic") { err = "device_media: sample|mic"; return false; }
+    const Json& ids = d["identities"];
+    for (size_t i = 0; i < ids.size(); ++i) {
+        const Json& x = ids.at(i);
+        auto ep = std::make_unique<Endpoint>();
+        ep->kind = Endpoint::K_REAL;
+        ep->device = true;
+        ep->idx = (int)i;
+        ep->pool = pool->name;
+        ep->poolRef = pool;
+        ep->id.user = x["user"].asString();
+        ep->id.domain = x["domain"].asString();
+        ep->id.display = x["display"].asString();
+        ep->id.pttGroup = x["ptt_group"].asString();
+        if (ep->id.user.empty()) { err = "identity_user_required"; return false; }
+        std::shared_ptr<DeviceConn> conn = m_devices->find(ep->id.user, pool->service);
+        if (!conn) { err = "device_not_connected: " + ep->id.user + " (" + pool->service + ")"; return false; }
+        DeviceInfo info = conn->info();
+        if (!info.boundPool.empty()) { err = "device_busy: " + ep->id.user + " — 풀 " + info.boundPool; return false; }
+        Endpoint* raw = ep.get();
+        conn->bind([this, raw](const Json& ev) { onRealEvent(raw, ev); }, pool->name);
+        pool->devices.push_back(conn);               // destroyPool 이 unbind — 아래 실패도 풀 파기로 정리된다
+        ep->real = conn.get();
+        Json r = conn->request("use " + pool->service, m_cfg.realUeCmdTimeoutMs);
+        if (!r["ok"].asBool(false)) { err = "device_use_failed: " + ep->id.user + " — " + r["reason"].asString(); return false; }
+        r = conn->request("media " + pool->media, m_cfg.realUeCmdTimeoutMs);
+        if (!r["ok"].asBool(false)) { err = "device_media_failed: " + ep->id.user + " — " + r["reason"].asString(); return false; }
+        logf("info", "device %s bound — %s %s/%s at %s", ep->id.user.c_str(), info.deviceId.c_str(), info.app.c_str(), info.version.c_str(), info.addr.c_str());
+        if (pool->service == "ptt" && !ep->id.pttGroup.empty()) pool->groups[ep->id.pttGroup].push_back(ep.get());
+        pool->eps.push_back(std::move(ep));
+    }
+    return true;
+}
+
+HttpResponse Worker::devicesList() {
+    Json arr = Json::Array();
+    if (m_devices) {
+        for (auto& i : m_devices->list()) {
+            Json o = Json::Object();
+            o["device_id"] = Json(i.deviceId); o["app"] = Json(i.app); o["version"] = Json(i.version);
+            o["platform"] = Json(i.platform); o["model"] = Json(i.model); o["engine"] = Json(i.engine);
+            o["addr"] = Json(i.addr); o["connected_ms"] = Json(i.connectedMs); o["alive"] = Json(i.alive);
+            o["pool"] = Json(i.boundPool);
+            Json accs = Json::Array();
+            for (auto& a : i.accounts) {
+                Json ao = Json::Object();
+                ao["service"] = Json(a.service); ao["aor"] = Json(a.aor); ao["msisdn"] = Json(a.msisdn); ao["registered"] = Json(a.registered);
+                accs.push(ao);
+            }
+            o["accounts"] = accs;
+            arr.push(o);
+        }
+    }
+    Json j = Json::Object();
+    j["worker"] = Json(m_cfg.name);
+    j["listening"] = Json(m_devices && m_devices->listening());
+    j["port"] = Json((long long)m_cfg.devicePort);
+    if (m_devices) j["fingerprint"] = Json(m_devices->fingerprint());
+    j["devices"] = arr;
+    return jsonResp(200, j);
 }
 
 /** 실단말 프로세스 이벤트(리더 스레드) → Event. 큐에만 넣는다 — onEvent 가 스케줄러 스레드에서 가상 단말과 같은 종류로 다시 푼다. */
@@ -789,7 +888,7 @@ HttpResponse Worker::poolCreate(const Json& d) {
     std::string name = d["pool"].asString();
     std::string kind = d["kind"].asString("ue");
     if (name.empty()) return errResp(400, "pool_required");
-    if (kind != "ue" && kind != "peer" && kind != "real-ue") return errResp(400, "unsupported_kind", kind);
+    if (kind != "ue" && kind != "peer" && kind != "real-ue" && kind != "device") return errResp(400, "unsupported_kind", kind);
     std::lock_guard<std::mutex> lk(m_mtx);
     if (m_run && m_runState != "stopped" && m_runState != "idle") return errResp(409, "run_active");
     auto it = m_pools.find(name);
@@ -800,7 +899,8 @@ HttpResponse Worker::poolCreate(const Json& d) {
     pool->transport = d["transport"].asString("udp");
     pool->srtp = d["srtp"].asString("off");
     std::string err;
-    bool ok = kind == "ue" ? buildUePool(pool.get(), d, err) : kind == "peer" ? buildPeerPool(pool.get(), d, err) : buildRealUePool(pool.get(), d, err);
+    bool ok = kind == "ue" ? buildUePool(pool.get(), d, err) : kind == "peer" ? buildPeerPool(pool.get(), d, err)
+            : kind == "device" ? buildDevicePool(pool.get(), d, err) : buildRealUePool(pool.get(), d, err);
     if (!ok) { destroyPool(pool.get()); return errResp(400, err); }
     logf("info", "pool %s created — kind=%s endpoints=%zu transport=%s srtp=%s target=%s:%d%s",
          name.c_str(), kind.c_str(), pool->eps.size(), pool->transport.c_str(), pool->srtp.c_str(),
@@ -810,6 +910,7 @@ HttpResponse Worker::poolCreate(const Json& d) {
     j["endpoints"] = Json((long long)pool->eps.size());
     if (pool->peer) j["bind"] = Json(pool->peer->Config().bindIp + ":" + std::to_string(pool->peer->Config().port));
     if (!pool->reals.empty()) j["processes"] = Json((long long)pool->reals.size());
+    if (!pool->devices.empty()) j["devices"] = Json((long long)pool->devices.size());
     m_pools[name] = std::move(pool);
     return jsonResp(201, j);
 }
@@ -1290,8 +1391,9 @@ void Worker::onEvent(const Event& e) {
             bool wasUp = ep->started || ep->registered;
             ep->started = false; ep->registered = false; ep->realRegFailed = true; ep->realCall = -1;
             ep->affStarted = ep->affiliated = false;
-            if (wasUp) { m_metrics.counter("real_ue_exit"); emitEvent("real-ue process exited" + (e.event.empty() ? "" : " — " + e.event), ep, "", e.status); }
-            if (ep->inst && ep->inst->phase != Instance::DONE) finishInstance(*ep->inst, true, "real-ue process exited", nowMs());
+            const char* what = ep->device ? "device link lost" : "real-ue process exited";
+            if (wasUp) { m_metrics.counter(ep->device ? "device_link_lost" : "real_ue_exit"); emitEvent(std::string(what) + (e.event.empty() || ep->device ? "" : " — " + e.event), ep, "", e.status); }
+            if (ep->inst && ep->inst->phase != Instance::DONE) finishInstance(*ep->inst, true, what, nowMs());
             return;
         }
         if (e.kind == Event::INCOMING) ep->realCall = e.rcall;
@@ -1393,8 +1495,9 @@ void Worker::onEvent(const Event& e) {
     switch (e.kind) {
     case Event::REGISTER:
         ep->registered = (e.status == 200);
-        if (e.status == 200) { m_metrics.counter("registered_ok"); m_metrics.timer("rrd_ms", (double)e.ms); startPtt(ep); }
-        else { m_metrics.counter("registered_fail"); m_metrics.counter("codes." + std::to_string(e.status)); emitEvent("REGISTER failed", ep, "register", e.status); }
+        if (e.status == 200) { m_metrics.counter("registered_ok"); if (e.ms >= 0) m_metrics.timer("rrd_ms", (double)e.ms); startPtt(ep); }   // ms<0 = 실기기(앱이 이미 등록)
+        else { m_metrics.counter("registered_fail"); m_metrics.counter("codes." + std::to_string(e.status));
+               emitEvent(ep->device ? "device not registered (app)" : "REGISTER failed", ep, "register", e.status); }
         break;
     case Event::INCOMING:
         if (ep->isPtt()) break;   // 그룹 fan-out INVITE — libcsim 이 자동응답(automatic commencement)하고 ANSWERED 로 알린다
@@ -1447,7 +1550,7 @@ void Worker::onEvent(const Event& e) {
         m_metrics.counter("seer_ok");   // RFC 6076 §4.4 SEER 분자 — 200 (거절 480/486/600/603 은 CALLEND 에서)
         if (ep->isSim() && ep->s->m_clsRtpThread.m_bVideoOffer && ep->s->m_clsRtpThread.m_iDestVideoPort > 0) m_metrics.counter("video_ok");   // answer 의 활성 m=video
         m_metrics.timer("srd_ms", (double)e.ms);
-        if (ep->isReal()) { m_metrics.counter("real_legs"); m_metrics.timer("real_srd_ms", (double)e.ms); }   // 실단말 표본은 따로도 남긴다(§3.3)
+        if (ep->isReal()) { m_metrics.counter(rp(ep) + "legs"); m_metrics.timer(rp(ep) + "srd_ms", (double)e.ms); }   // 실단말 표본은 따로도 남긴다(§3.3)
         if (in && in->progressTx && in->rtpMode != CRtpThread::E_MEDIA_NONE) {
             // early media 의 미디어 평면 — 183+SDP 뒤 200 전까지 발신자가 실제로 RTP 를 받았는가(시그널링 early_media 와 별개).
             //   이벤트 처리 지연(≤ 스케줄러 틱) 동안 200 뒤 패킷이 한둘 섞일 수 있어 5 패킷(100 ms) 이상을 도달로 본다.
@@ -1474,7 +1577,7 @@ void Worker::onEvent(const Event& e) {
         if (ep->isReal()) ep->realCall = e.rcall;
         m_metrics.counter("legs");
         m_metrics.counter("group_joined");
-        if (ep->isReal()) m_metrics.counter("real_legs");
+        if (ep->isReal()) m_metrics.counter(rp(ep) + "legs");
         if (!in) {
             // 인스턴스 밖의 그룹 세션(이 워커가 연 것이 아니다) — 자리를 비운다
             epBye(ep);
@@ -1792,9 +1895,25 @@ void Worker::onEvent(const Event& e) {
     }
 }
 
+/** 실스택 단말 지표 접두 — device 풀(시험 모드 실기기) = device_, real-ue 풀(cimsue-cli) = real_ (ue_voice_quality.md §6). */
+std::string Worker::rp(const Endpoint* ep) { return ep->device ? "device_" : "real_"; }
+
 // ── 단말 동작 (UE 세션 / 피어 신원) ────────────────────────────────────────
 bool Worker::startEndpoint(Endpoint* ep) {
     if (ep->isPeer() || ep->started) return true;
+    if (ep->isReal() && ep->device) {
+        // 실기기 — 등록은 앱 소유(링크 register 명령은 app_owned). 앱의 등록 상태를 그대로 받아 REGISTER 결과로 올린다(rrd 는 재지 않는다)
+        DeviceConn* dc = static_cast<DeviceConn*>(ep->real);
+        ep->realStats.valid = false;
+        ep->started = true;
+        Event x{};
+        x.kind = Event::REGISTER; x.ep = ep; x.s = nullptr; x.peer = nullptr;
+        x.status = dc && dc->alive() && dc->registered(ep->poolRef->service) ? 200 : 480;
+        x.ms = -1;
+        std::lock_guard<std::mutex> lk(m_evMtx);
+        m_events.push_back(x);
+        return true;
+    }
     if (ep->isReal()) {
         // 실단말 — 프로세스에 register 명령. 결과(REGISTER 200/실패)는 reg 이벤트로 온다
         ep->realRegFailed = false;
@@ -2350,7 +2469,7 @@ bool Worker::epPickup(Endpoint* from, const std::string& code, const std::string
 }
 
 bool Worker::epUnregister(Endpoint* ep) {
-    if (ep->isReal()) { if (ep->started) realRequest(ep, "unregister"); }
+    if (ep->isReal()) { if (ep->started && !ep->device) realRequest(ep, "unregister"); }   // 실기기의 등록은 앱 소유 — 그대로 둔다
     else if (ep->s && ep->started) ep->s->Stop(5);
     else return false;
     ep->started = false;
@@ -3272,15 +3391,15 @@ void Worker::sampleRtp(Endpoint* ep) {
     if (ep->isReal()) {
         // 실단말 표본 — 프로세스가 1 초마다 올린 RTP/RTCP 통계(pjmedia). leg 하나이므로 전체 지표(rtp_*·jitter_ms·mos)에 다른 단말과 같이 들어가고,
         //   부하 아래 실단말 품질만 따로 보려는 real_* 시리즈에도 같은 표본을 남긴다(§3.3). 코덱 = 접속환경 표준(수신 PT 는 실스택이 내지 않는다)
-        if (!ep->realStats.valid) { m_metrics.counter("real_rtp_nosample"); return; }
+        if (!ep->realStats.valid) { m_metrics.counter(rp(ep) + "rtp_nosample"); return; }
         rx = ep->realStats.rx; lost = ep->realStats.lost; jitterUs = ep->realStats.jitterUs;
         logf("debug", "real-ue rtp sample %s(%s): tx=%llu rx=%llu lost=%llu jitter_us=%lld", roleOf(ep->inst, ep).c_str(), ep->id.user.c_str(), ep->realStats.tx, rx, lost, jitterUs);
         m_metrics.counter("rtp_tx", (long long)ep->realStats.tx);
         m_metrics.counter("rtp_rx", (long long)rx);
         m_metrics.counter("rtp_lost", (long long)lost);
-        m_metrics.counter("real_rtp_tx", (long long)ep->realStats.tx);
-        m_metrics.counter("real_rtp_rx", (long long)rx);
-        m_metrics.counter("real_rtp_lost", (long long)lost);
+        m_metrics.counter(rp(ep) + "rtp_tx", (long long)ep->realStats.tx);
+        m_metrics.counter(rp(ep) + "rtp_rx", (long long)rx);
+        m_metrics.counter(rp(ep) + "rtp_lost", (long long)lost);
         if (rx + lost > 0) {
             double lossPct = 100.0 * (double)lost / (double)(rx + lost), jitterMs = (double)jitterUs / 1000.0;
             // MOS = 실스택이 잰 호 품질(Engine::callQuality — 지터버퍼 폐기·RTCP RTT 포함, ue_voice_quality.md §3). 구 cli 는 값이 없어
@@ -3288,16 +3407,16 @@ void Worker::sampleRtp(Endpoint* ep) {
             const double rtd = ep->realStats.rtdMs;
             double mos = ep->realStats.mosCq >= 0 ? ep->realStats.mosCq
                        : emodelMos(emodelCodec(ep->isPtt() || ep->poolRef->service == "volte" ? "AMR-WB" : "PCMU"), lossPct, jitterMs, rtd > 0 ? rtd / 2 : 0);
-            if (rtd >= 0) { m_metrics.timer("rtd_ms", rtd); m_metrics.timer("real_rtd_ms", rtd); }
+            if (rtd >= 0) { m_metrics.timer("rtd_ms", rtd); m_metrics.timer(rp(ep) + "rtd_ms", rtd); }
             m_metrics.timer("rtp_loss_pct", lossPct);
             m_metrics.timer("jitter_ms", jitterMs);
             m_metrics.timer("mos", mos);
-            m_metrics.timer("real_rtp_loss_pct", lossPct);
-            m_metrics.timer("real_jitter_ms", jitterMs);
-            m_metrics.timer("real_mos", mos);
+            m_metrics.timer(rp(ep) + "rtp_loss_pct", lossPct);
+            m_metrics.timer(rp(ep) + "jitter_ms", jitterMs);
+            m_metrics.timer(rp(ep) + "mos", mos);
         } else if (!(ep->isPtt() && ep->talked)) {
             m_metrics.counter("rtp_silent_legs");
-            m_metrics.counter("real_rtp_silent_legs");
+            m_metrics.counter(rp(ep) + "rtp_silent_legs");
         }
         ep->talked = ep->floor == Endpoint::F_GRANTED;
         ep->realStats.valid = false;
@@ -3313,8 +3432,10 @@ void Worker::sampleRtp(Endpoint* ep) {
     unsigned long long tx = ep->isPeer() ? ep->poolRef->peer->RtpSent(ep->callId) : ep->s->m_clsRtpThread.m_ullSentTotal.load();
     // 수신 품질 부가 — wire PT(MOS 코덱)·RTCP SR/RR 수신 통계(상대가 본 우리 스트림의 fraction lost)
     int pt = -1, rtcpRx = 0, rrFrac = -1;
-    if (ep->isPeer()) ep->poolRef->peer->RtpQuality(ep->callId, pt, rtcpRx, rrFrac);
-    else { CRtpThread& rt = ep->s->m_clsRtpThread; pt = rt.m_iRecvPt.load(); rtcpRx = rt.m_iRtcpRecv.load(); rrFrac = rt.m_iRtcpRrFractionLost.load(); }
+    long long rttUs = -1;   // RTCP RTT(우리 SR 에 상대가 돌려준 RR 의 LSR/DLSR — RFC 3550 §6.4.1)
+    if (ep->isPeer()) ep->poolRef->peer->RtpQuality(ep->callId, pt, rtcpRx, rrFrac, rttUs);
+    else { CRtpThread& rt = ep->s->m_clsRtpThread; pt = rt.m_iRecvPt.load(); rtcpRx = rt.m_iRtcpRecv.load(); rrFrac = rt.m_iRtcpRrFractionLost.load(); rttUs = rt.m_llRtcpRttUs.load(); }
+    if (rttUs >= 0) m_metrics.timer("rtd_ms", (double)rttUs / 1000.0);
     logf("debug", "rtp sample %s(%s): tx=%llu rx=%llu lost=%llu jitter_us=%lld pt=%d rtcp_rx=%d rr_frac=%d", roleOf(ep->inst, ep).c_str(), ep->id.user.c_str(), tx, rx, lost, jitterUs, pt, rtcpRx, rrFrac);
     m_metrics.counter("rtp_tx", (long long)tx);
     m_metrics.counter("rtp_rx", (long long)rx);
@@ -3330,8 +3451,8 @@ void Worker::sampleRtp(Endpoint* ep) {
         double lossPct = 100.0 * (double)lost / (double)(rx + lost), jitterMs = (double)jitterUs / 1000.0;
         m_metrics.timer("rtp_loss_pct", lossPct);
         m_metrics.timer("jitter_ms", jitterMs);
-        // MOS 추정(G.107 E-model, 코덱 = 수신 wire PT) — 손실·지터에서, 단방향 망 지연은 0 으로 둔다(RTCP RTT 미측정)
-        m_metrics.timer("mos", emodelMos(emodelCodec(codecNameOf(pt)), lossPct, jitterMs));
+        // MOS 추정(G.107 E-model, 코덱 = 수신 wire PT) — 손실·지터·망 단방향 지연(RTCP RTT/2, 상대가 RR 을 돌려주지 않으면 0)
+        m_metrics.timer("mos", emodelMos(emodelCodec(codecNameOf(pt)), lossPct, jitterMs, rttUs > 0 ? (double)rttUs / 2000.0 : 0));
     } else if (!(ep->isPtt() && ep->talked)) {
         m_metrics.counter("rtp_silent_legs");   // PTT 발언자는 자기 발언 동안 수신이 없는 것이 정상
     }

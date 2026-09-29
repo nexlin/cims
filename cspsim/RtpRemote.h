@@ -26,6 +26,7 @@ struct RtpRemoteStats {
     long long jitterUs = 0;
     int recvPt = -1;
     int rtcpRx = 0, rtcpRrBlocks = 0, rrFractionLost = -1;
+    long long rttUs = -1;             // RTCP RTT(RFC 3550 §6.4.1)
     int dtmfSent = 0, dtmfRecv = 0;
     std::string dtmfDigits;
     unsigned long long ssrcCount = 0;

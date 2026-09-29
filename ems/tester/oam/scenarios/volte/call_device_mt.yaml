@@ -1,0 +1,14 @@
+# 실기기(device) 착신 — 가상 단말이 시험 모드 단말(앱)에 발신하고, 워커 명령으로 단말이 받는다(ue_voice_quality.md §6).
+# 단말 앱은 착신을 사람에게도 알리지만 계측기가 answer 를 보내면 그 호를 받는다. 품질 = 단말 쪽 device_* 와 가상 단말 쪽 rtp_*·mos·rtd_ms.
+id: VOLTE-CALL-DEVICE-MT
+title: 가상 단말 → 실기기 1:1 호 (device 착신)
+tags: [volte, device]
+roles:
+  caller: { pool: volte_ue }
+  dev: { pool: device }
+flow:
+  - { step: register,   who: [caller, dev], expect: { code: 200 } }
+  - { step: invite,     from: caller, to: dev }
+  - { step: answer,     who: [dev], after_ms: 1000, expect: { srd_ms: { p95: 3000 } } }
+  - { step: media_hold, seconds: "${ht}", expect: { device_rtp_loss_pct: { max: 1 }, device_mos: { min: 3.5 }, rtp_loss_pct: { max: 1 }, rtd_ms: { p95: 300 } } }
+  - { step: bye,        from: caller, expect: { sdd_ms: { p95: 1000 } } }

@@ -248,6 +248,75 @@ static void ResolveTxSource(CRtpThread* pRtpThread, RtpTxSource& src) {
     src = clsNew;
 }
 
+/** RTCP 송신 상태 — 송신 스레드 전용(호마다 새로). fraction lost 는 앞 보고 뒤 구간(RFC 3550 §6.4.1 A.3). */
+struct RtcpTxState {
+    long long llLastMs = 0;
+    unsigned long long ullPrevExpected = 0, ullPrevLost = 0;
+    unsigned long long ullOctets = 0;        // 보낸 RTP payload 바이트(SR octet count)
+};
+
+static void Put32(unsigned char* p, unsigned int v) { p[0] = (unsigned char)(v >> 24); p[1] = (unsigned char)(v >> 16); p[2] = (unsigned char)(v >> 8); p[3] = (unsigned char)v; }
+
+/** SR(보낸 RTP 가 있으면) 또는 RR + 수신 보고 블록(받은 RTP 가 있으면) + SDES CNAME compound 를 RTP 포트+1 로 보낸다(RFC 3550 §6.1·§6.4).
+ *  상대가 이 SR 에 대한 RR 을 돌려주면 수신 스레드가 RTT 를 잰다(§6.4.1). */
+static void RtcpSendReport(CRtpThread* pRtpThread, RtcpTxState& st, unsigned int uTxSsrc, unsigned int uRtpTs) {
+  unsigned char buf[512];
+  int n = 0;
+  long long llNowUs = 0;
+  NtpMidNow(&llNowUs);
+  const unsigned long long ullSent = pRtpThread->m_ullSentTotal.load();
+  const unsigned long long ullRecv = pRtpThread->m_ullRecvTotal.load();
+  const bool bSr = ullSent > 0;
+  const bool bBlock = ullRecv > 0 && pRtpThread->m_aRecvSsrc.load() != 0;
+  const int iLenWords = (bSr ? 6 : 1) + (bBlock ? 6 : 0);
+  buf[n++] = (unsigned char)(0x80 | (bBlock ? 1 : 0));
+  buf[n++] = bSr ? 200 : 201;
+  buf[n++] = 0; buf[n++] = (unsigned char)iLenWords;
+  Put32(buf + n, uTxSsrc); n += 4;
+  if (bSr) {
+    struct timeval tv; gettimeofday(&tv, NULL);
+    Put32(buf + n, (unsigned int)((unsigned long long)tv.tv_sec + 2208988800ULL)); n += 4;
+    Put32(buf + n, (unsigned int)(((unsigned long long)tv.tv_usec << 32) / 1000000ULL)); n += 4;
+    Put32(buf + n, uRtpTs); n += 4;
+    Put32(buf + n, (unsigned int)ullSent); n += 4;
+    Put32(buf + n, (unsigned int)st.ullOctets); n += 4;
+  }
+  if (bBlock) {
+    const unsigned long long ullLost = pRtpThread->m_ullRecvLost.load();
+    const unsigned long long ullExpected = ullRecv + ullLost;
+    unsigned long long ullExpI = ullExpected - st.ullPrevExpected, ullLostI = ullLost - st.ullPrevLost;
+    st.ullPrevExpected = ullExpected; st.ullPrevLost = ullLost;
+    unsigned int uFrac = (ullExpI > 0 && ullLostI > 0) ? (unsigned int)((ullLostI << 8) / ullExpI) : 0;
+    if (uFrac > 255) uFrac = 255;
+    unsigned int uCum = ullLost > 0x7FFFFF ? 0x7FFFFF : (unsigned int)ullLost;
+    Put32(buf + n, pRtpThread->m_aRecvSsrc.load()); n += 4;
+    Put32(buf + n, (uFrac << 24) | uCum); n += 4;
+    Put32(buf + n, pRtpThread->m_aRecvExtSeq.load()); n += 4;
+    Put32(buf + n, pRtpThread->m_aRecvJitterTicks.load()); n += 4;
+    const unsigned int uLsr = pRtpThread->m_uLastSrNtpMid.load();
+    const long long llArr = pRtpThread->m_llLastSrArrivalUs.load();
+    Put32(buf + n, uLsr); n += 4;
+    Put32(buf + n, uLsr && llArr ? (unsigned int)((llNowUs - llArr) * 65536LL / 1000000LL) : 0); n += 4;
+  }
+  // SDES CNAME(§6.5.1 — compound 필수)
+  std::string strCname = "csim@" + pRtpThread->m_strDestIp;
+  if (strCname.size() > 200) strCname.resize(200);
+  int iItem = 2 + (int)strCname.size();                  // type + len + text
+  int iChunk = 4 + iItem + 1;                             // SSRC + 항목 + 끝(0)
+  int iPad = (4 - iChunk % 4) % 4;
+  int iSdesWords = (iChunk + iPad) / 4;
+  buf[n++] = 0x81; buf[n++] = 202; buf[n++] = 0; buf[n++] = (unsigned char)iSdesWords;
+  Put32(buf + n, uTxSsrc); n += 4;
+  buf[n++] = 1; buf[n++] = (unsigned char)strCname.size();
+  memcpy(buf + n, strCname.data(), strCname.size()); n += (int)strCname.size();
+  for (int k = 0; k < 1 + iPad; ++k) buf[n++] = 0;
+  int iSendLen = n;
+  if (pRtpThread->SrtpEnabled() && !pRtpThread->SrtpProtectRtcp((char*)buf, iSendLen, (int)sizeof(buf))) return;
+  if (pRtpThread->m_hRtcpSocket == INVALID_SOCKET) return;
+  UdpSend(pRtpThread->m_hRtcpSocket, (char*)buf, iSendLen, pRtpThread->m_strDestIp.c_str(), pRtpThread->m_iDestPort + 1);
+  pRtpThread->m_iRtcpSent.fetch_add(1, std::memory_order_relaxed);
+}
+
 THREAD_API RtpThreadSend(LPVOID lpParameter) {
   CRtpThread *pRtpThread = (CRtpThread *)lpParameter;
   char szPacket[1500];
@@ -277,8 +346,19 @@ THREAD_API RtpThreadSend(LPVOID lpParameter) {
       }
   };
 
+  RtcpTxState sttRtcp;
   while (pRtpThread->m_bStopEvent == false) {
       MiliSleep(20);
+      if (pRtpThread->m_bRtcpSend.load()) {
+          // RTCP 보고 주기 5 s(RFC 3550 §6.2 최소값) — 보류·정지 중에도 RR 은 나간다
+          struct timeval tvNow; gettimeofday(&tvNow, NULL);
+          const long long llNowMs = (long long)tvNow.tv_sec * 1000 + tvNow.tv_usec / 1000;
+          if (sttRtcp.llLastMs == 0) sttRtcp.llLastMs = llNowMs;
+          else if (llNowMs - sttRtcp.llLastMs >= pRtpThread->m_iRtcpIntervalMs.load()) {
+              sttRtcp.llLastMs = llNowMs;
+              RtcpSendReport(pRtpThread, sttRtcp, ntohl(psttRtpHeader->ssrc), iTimeStamp);
+          }
+      }
 
       // 정지 플래그를 먼저, 원천 세대를 나중에 읽는다 — MediaSend 는 세대++ 뒤에 정지를 푼다. 순서가 반대면 정지가 풀린 것만 보고
       //   이전 원천으로 한 패킷을 흘린다.
@@ -357,6 +437,7 @@ THREAD_API RtpThreadSend(LPVOID lpParameter) {
       {
           // 미디어 SRTP — 협상된 세션이면 protect 후 송신 (media_security.md §8.2)
           int iSendLen = (int)sizeof(RtpHeader) + payloadLen;
+          sttRtcp.ullOctets += (unsigned long long)payloadLen;
           if (!pRtpThread->SrtpEnabled() ||
               pRtpThread->SrtpProtect(szPacket, iSendLen, (int)sizeof(szPacket)))
               UdpSend(pRtpThread->m_hSocket, szPacket, iSendLen,

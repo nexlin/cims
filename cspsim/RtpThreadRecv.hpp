@@ -21,7 +21,18 @@
 
 /** RTCP compound(RFC 3550 §6.4) 수신 통계 — SR(200)/RR(201) 의 보고 블록에서 상대가 본 우리 스트림의 fraction lost·jitter 를 기록한다.
  *  SDES/BYE/APP 등 다른 패킷은 세지 않는다(floor APP 은 별도 소켓). 상대가 RTCP 를 내지 않으면 값이 없다(-1). */
+/** NTP 시각의 가운데 32 비트(RFC 3550 §4 — SR 의 LSR·RR 의 RTT 계산 단위 1/65536 s). */
+static unsigned int NtpMidNow(long long* pllUs = NULL) {
+  struct timeval tv; gettimeofday(&tv, NULL);
+  if (pllUs) *pllUs = (long long)tv.tv_sec * 1000000LL + tv.tv_usec;
+  unsigned int uSec = (unsigned int)((unsigned long long)tv.tv_sec + 2208988800ULL);
+  unsigned int uFrac = (unsigned int)(((unsigned long long)tv.tv_usec << 32) / 1000000ULL);
+  return (uSec << 16) | (uFrac >> 16);
+}
+
 static void RtcpRecvStats(CRtpThread* pRtpThread, const unsigned char* p, int iLen) {
+  long long llNowUs = 0;
+  const unsigned int uNowMid = NtpMidNow(&llNowUs);
   while (iLen >= 8) {
     int iPt = p[1];
     int iLenWords = ((int)p[2] << 8 | p[3]) + 1;
@@ -31,11 +42,26 @@ static void RtcpRecvStats(CRtpThread* pRtpThread, const unsigned char* p, int iL
       pRtpThread->m_iRtcpRecv.fetch_add(1, std::memory_order_relaxed);
       int iRc = p[0] & 0x1F;
       int iOff = iPt == 200 ? 28 : 8;   // SR: 헤더4 + SSRC4 + sender info 20 · RR: 헤더4 + SSRC4
+      if (iPt == 200 && iBytes >= 28) {
+        // 상대 SR — 우리 다음 RR 의 LSR(NTP 가운데 32 비트)·DLSR 기점
+        unsigned int uMsw = ((unsigned)p[8] << 24) | ((unsigned)p[9] << 16) | ((unsigned)p[10] << 8) | p[11];
+        unsigned int uLsw = ((unsigned)p[12] << 24) | ((unsigned)p[13] << 16) | ((unsigned)p[14] << 8) | p[15];
+        pRtpThread->m_uLastSrNtpMid.store((uMsw << 16) | (uLsw >> 16), std::memory_order_relaxed);
+        pRtpThread->m_llLastSrArrivalUs.store(llNowUs, std::memory_order_relaxed);
+      }
       for (int k = 0; k < iRc && iOff + 24 <= iBytes; ++k, iOff += 24) {
         const unsigned char* b = p + iOff;
         pRtpThread->m_iRtcpRrBlocks.fetch_add(1, std::memory_order_relaxed);
         pRtpThread->m_iRtcpRrFractionLost.store(b[4], std::memory_order_relaxed);
         pRtpThread->m_uRtcpRrJitter.store(((unsigned)b[12] << 24) | ((unsigned)b[13] << 16) | ((unsigned)b[14] << 8) | b[15], std::memory_order_relaxed);
+        // RTT(RFC 3550 §6.4.1) = A − LSR − DLSR (1/65536 s) — 우리 SR 에 대한 보고일 때만(LSR ≠ 0)
+        unsigned int uLsr = ((unsigned)b[16] << 24) | ((unsigned)b[17] << 16) | ((unsigned)b[18] << 8) | b[19];
+        unsigned int uDlsr = ((unsigned)b[20] << 24) | ((unsigned)b[21] << 16) | ((unsigned)b[22] << 8) | b[23];
+        if (uLsr != 0) {
+          unsigned int uRtt = uNowMid - uLsr - uDlsr;
+          if ((int)uRtt >= 0 && uRtt < 10u * 65536u)
+            pRtpThread->m_llRtcpRttUs.store((long long)uRtt * 1000000LL / 65536LL, std::memory_order_relaxed);
+        }
       }
     }
     p += iBytes;
@@ -113,7 +139,8 @@ THREAD_API RtpThreadRecv(LPVOID lpParameter) {
       int iRtcpLen = sizeof(szRtcp);
       char szRtcpIp[21];
       unsigned short sRtcpPort;
-      if (UdpRecv(pRtpThread->m_hRtcpSocket, szRtcp, &iRtcpLen, szRtcpIp, sizeof(szRtcpIp), &sRtcpPort))
+      if (UdpRecv(pRtpThread->m_hRtcpSocket, szRtcp, &iRtcpLen, szRtcpIp, sizeof(szRtcpIp), &sRtcpPort) &&
+          (!pRtpThread->SrtpEnabled() || pRtpThread->SrtpUnprotectRtcp(szRtcp, iRtcpLen)))   // SRTP 호는 SRTCP — 풀어야 보고 블록을 읽는다
         RtcpRecvStats(pRtpThread, (const unsigned char*)szRtcp, iRtcpLen);
       if (!(sttPoll[0].revents & POLLIN)) continue;
     }
@@ -217,6 +244,9 @@ THREAD_API RtpThreadRecv(LPVOID lpParameter) {
         }
         pRtpThread->m_uRecvLastTs = uTs;
         pRtpThread->m_llRecvLastArrivalUs = llArrivalUs;
+        pRtpThread->m_aRecvSsrc.store(pRtpThread->m_uRecvSsrc, std::memory_order_relaxed);        // 송신 스레드의 RR 블록 재료
+        pRtpThread->m_aRecvExtSeq.store(pRtpThread->m_uRecvExtSeq, std::memory_order_relaxed);
+        pRtpThread->m_aRecvJitterTicks.store((unsigned int)pRtpThread->m_dRecvJitter, std::memory_order_relaxed);
     }
     tCurrentTime = time(NULL);
     if( tCurrentTime - tLastTime >= 10 )

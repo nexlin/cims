@@ -86,6 +86,14 @@ class WorkerClient:
             self.health, self.health_error = None, str(e)
             return None
 
+    def devices(self) -> Optional[dict]:
+        """GET /devices — 이 워커에 계측 링크로 붙어 있는 시험 모드 실기기(ue_voice_quality.md §6). 구버전·미응답이면 None."""
+        try:
+            st, doc = self._req('GET', '/devices', timeout=5)
+        except WorkerError:
+            return None
+        return doc if st == 200 and isinstance(doc, dict) else None
+
     def pool_create(self, doc: dict) -> dict:
         st, out = self._req('POST', '/pools', doc, timeout=60)
         if st not in (200, 201):

@@ -288,7 +288,7 @@ cimsue-cli [계정] drive [--sample-file WAV] [--service volte|voip|ptt]
   품질(call disconnected·stats·quality·명령형 결과 JSON) = codec·discard·loss_pct·discard_pct·jitter_max_ms·remote_loss_pct·remote_jitter_ms·rtd_ms·esd_ms·
         one_way_ms·r_lq·r_cq·mos_lq·mos_cq — Engine::callQuality(ue_voice_quality.md §3), 값 없음 = -1
 cimsue-cli [계정] link HOST[:PORT] [--pair-key K] [--link-ca PEM | --link-pin FILE] [--sample-file WAV] [--service S] [--duration S]
-  등록 뒤 계측기 워커(Device.Listen)에 TLS 로 붙어 hello → 워커 명령을 같은 해석기로 실행(register 는 app_owned 거절). stdout = link{state,detail}
+  등록 뒤 계측기 워커(Device.Port 7120)에 TLS 로 붙어 hello → 워커 명령을 같은 해석기로 실행(register 는 app_owned 거절). stdout = link{state,detail}
 ```
 MCPTT 착신은 코어가 자동응답(`autoAnswerMcptt`)하므로 `incoming{mcptt:true}` 뒤 `call{dir:in,state:active}` 가 합류 신호다. `disconnected` 이벤트는 그 호의
 최종 통계를 함께 싣는다(우리가 끊었으면 `by_us` + `sdd_ms`). 1xx 는 이벤트로 내지 않는다(코어 `onCallState` 는 상태 전이만).

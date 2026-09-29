@@ -112,6 +112,18 @@ def procedure(scenario: Scenario, phases: Dict[str, List[int]]) -> List[dict]:
     return rows
 
 
+def _device_elsewhere(workers, skip: str, key) -> Optional[str]:
+    """번호·서비스의 실기기가 다른 워커에 붙어 있으면 그 워커 이름."""
+    for c in workers:
+        if c.name == skip or c.health is None:
+            continue
+        doc = c.devices() or {}
+        for d in doc.get('devices') or []:
+            if d.get('alive') and any((a.get('msisdn'), a.get('service')) == key for a in d.get('accounts') or []):
+                return c.name
+    return None
+
+
 def build_plan(scenario: Scenario, topology: Topology, topology_doc: dict, profile: Optional[LoadProfile],
                bindings: Dict[str, object], instances: Optional[int], rate_saps: Optional[float],
                probe: bool = True, stream_port: int = 7110) -> dict:
@@ -197,6 +209,35 @@ def build_plan(scenario: Scenario, topology: Topology, topology_doc: dict, profi
                     if int(hr.get('max') or 0) and real_need + int(hr.get('processes') or 0) > int(hr.get('max')):
                         out['errors'].append(f'{w.name}: 실단말 {real_need} + 진행 중 {hr.get("processes")} > RealUe.MaxProcesses {hr.get("max")}')
                 row['capacity']['real_ue'] = {'need': real_need, 'processes': (h.get('real_ue') or {}).get('processes'), 'max': (h.get('real_ue') or {}).get('max')}
+            # 실기기(device, ue_voice_quality.md §6) — 풀 신원이 이 워커에 계측 링크로 붙어 있고 앱이 등록돼 있는가. 풀 생성이 400
+            #   device_not_connected/device_busy 로 거절되기 전에 본다. 다른 워커에 붙어 있으면 그 이름을 알려 준다(풀 worker 를 옮길 곳)
+            dev_pools = [p for p in pw['pools'] if p['kind'] == 'device']
+            if dev_pools and c is not None and probe:
+                hd = h.get('devices') if h else None
+                if h and hd is None:
+                    out['errors'].append(f'{w.name}: 워커가 devices 상태를 보고하지 않는다(구버전) — 실기기 풀을 만들 수 없다')
+                elif hd is not None and not hd.get('listening'):
+                    out['errors'].append(f'{w.name}: 계측 링크 수신점이 열려 있지 않다(Device.Port {hd.get("port")}) — 실기기 풀 불가')
+                else:
+                    doc = c.devices() or {}
+                    here = {(a.get('msisdn'), a.get('service')): (d, a) for d in doc.get('devices') or [] if d.get('alive')
+                            for a in d.get('accounts') or []}
+                    for p in dev_pools:
+                        for it in p['identities']:
+                            key = (it['user'], p.get('service') or 'volte')
+                            if key not in here:
+                                elsewhere = _device_elsewhere(workers, w.name, key)
+                                out['errors'].append(f'{w.name}: 실기기 {key[0]}({key[1]}) 가 계측 링크로 붙어 있지 않다'
+                                                     + (f' — 워커 {elsewhere} 에 붙어 있다(풀 {p["pool"]} 의 worker 를 옮긴다)' if elsewhere else
+                                                        f' — 단말 시험 모드의 계측기 주소 = {topology.worker_host(w.name)}:{hd.get("port") if hd else 7120}'))
+                                continue
+                            d, a = here[key]
+                            if not a.get('registered'):
+                                out['warnings'].append(f'{w.name}: 실기기 {key[0]}({key[1]}) 앱이 등록돼 있지 않다 — register 단계가 실패한다')
+                            if d.get('pool') and d.get('pool') != p['pool']:
+                                out['warnings'].append(f'{w.name}: 실기기 {key[0]} 을 풀 {d.get("pool")} 이 쓰고 있다 — 그 풀을 내려야 한다')
+                    row['capacity']['devices'] = {'need': sum(len(p['identities']) for p in dev_pools), 'connected': (hd or {}).get('connected'),
+                                                  'port': (hd or {}).get('port'), 'fingerprint': (hd or {}).get('fingerprint')}
             # TLS 파일(§3.1·§3.2) — 풀이 켠 tls_verify/tls_client_cert/tls_client_auth·TLS 피어 bind 는 워커 Tls.CaFile/ClientCertFile/PeerCertFile 이 있어야 풀 생성이 된다
             ht = h.get('tls') if h else None
             need_ca = [p['pool'] for p in pw['pools'] if p.get('tls_verify') or (p.get('peer') or {}).get('tls_client_auth')]

@@ -515,13 +515,14 @@ bool CsimPeer::RtpStats(const std::string& callId, unsigned long long& rx, unsig
     return true;
 }
 
-bool CsimPeer::RtpQuality(const std::string& callId, int& pt, int& rtcpRx, int& rrFractionLost) {
+bool CsimPeer::RtpQuality(const std::string& callId, int& pt, int& rtcpRx, int& rrFractionLost, long long& rttUs) {
     std::lock_guard<std::mutex> lk(m_mtx);
     auto it = m_calls.find(callId);
     if (it == m_calls.end() || !it->second.rtp) return false;
     pt = it->second.rtp->m_iRecvPt.load();
     rtcpRx = it->second.rtp->m_iRtcpRecv.load();
     rrFractionLost = it->second.rtp->m_iRtcpRrFractionLost.load();
+    rttUs = it->second.rtp->m_llRtcpRttUs.load();
     return true;
 }
 

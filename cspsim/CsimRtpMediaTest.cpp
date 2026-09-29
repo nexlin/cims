@@ -121,6 +121,22 @@ int main() {
         a.Stop(); b.Stop();
         unlink(szDtx);
     }
+    {   // ⑧ RTCP SR/RR·RTT(RFC 3550 §6.4) — 서로 보고를 주고받으면 양쪽이 RTT 를 잰다(루프백 ≈ 0). PTT 처럼 끄면 보내지 않는다
+        CRtpThread a, b, c;
+        if (!a.Create() || !b.Create() || !c.Create()) { printf("create failed\n"); return 2; }
+        a.m_iAudioPt = 0; b.m_iAudioPt = 0; c.m_iAudioPt = 0;
+        a.m_iRtcpIntervalMs = 300; b.m_iRtcpIntervalMs = 300;
+        c.m_bRtcpSend = false;
+        if (!a.Start("127.0.0.1", b.m_iPort) || !b.Start("127.0.0.1", a.m_iPort) || !c.Start("127.0.0.1", 9)) { printf("start failed\n"); return 2; }
+        sleepMs(1500);
+        printf("     rtcp: a sent=%d rx=%d rtt=%lldus · b sent=%d rx=%d rtt=%lldus\n", a.m_iRtcpSent.load(), a.m_iRtcpRecv.load(), a.m_llRtcpRttUs.load(),
+               b.m_iRtcpSent.load(), b.m_iRtcpRecv.load(), b.m_llRtcpRttUs.load());
+        check(a.m_iRtcpSent.load() >= 2 && b.m_iRtcpRecv.load() >= 2, "rtcp: SR 이 상대 RTP+1 로 간다");
+        check(a.m_iRtcpRrBlocks.load() >= 1 && a.m_iRtcpRrFractionLost.load() == 0, "rtcp: 상대 보고 블록 — 루프백 손실 0");
+        check(a.m_llRtcpRttUs.load() >= 0 && a.m_llRtcpRttUs.load() < 50000 && b.m_llRtcpRttUs.load() >= 0, "rtcp: LSR/DLSR 로 RTT 측정(루프백 < 50 ms)");
+        check(c.m_iRtcpSent.load() == 0, "rtcp: m_bRtcpSend=false 면 보내지 않는다(PTT)");
+        a.Stop(); b.Stop(); c.Stop();
+    }
     unlink(szPath);
     printf(g_fail == 0 ? "PASS\n" : "FAIL\n");
     return g_fail == 0 ? 0 : 1;

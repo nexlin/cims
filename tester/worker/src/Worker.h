@@ -32,6 +32,7 @@
 
 #include "CsimObserver.h"
 #include "CsimPeer.h"
+#include "DeviceHub.h"
 #include "HttpServer.h"
 #include "Json.h"
 #include "MediaAgent.h"
@@ -78,6 +79,13 @@ struct WorkerConfig {
     std::string realUeLogDir;       // 프로세스 stderr(pjsip 로그) — <모듈>/log/real-ue
     int realUeStartTimeoutS = 15;
     std::string realUeTlsCaFile;    // 풀 tls_verify 일 때 서버 인증서 앵커(PEM) — 비면 검증 없이 접속
+    // device 풀(ue_voice_quality.md §6) — 시험 모드 실기기의 계측 링크 수신점(Device.*)
+    std::string deviceIp = "0.0.0.0";
+    int devicePort = 7120;          // 0 = 끔 (7110 은 컨트롤러 관측 수신 — 동거 호스트에서 겹치지 않게)
+    std::string deviceCertFile;     // 비면 <모듈>/config/device.crt — 없으면 기동 때 자체 서명 생성
+    std::string deviceKeyFile;
+    std::string devicePairKey;      // 연결 키(비면 검사 안 함)
+    int deviceMax = 32;
     int realUeCmdTimeoutMs = 5000;  // 명령 동기 결과 대기
     std::string version = "0.1.0";
 };
@@ -100,7 +108,8 @@ struct Endpoint {
     SimSession* s = nullptr;        // kind=ue — 가상 단말 스택
     std::string callId;             // kind=peer — 이 신원이 지금 붙어 있는 엔진 호(Call-ID)
     // kind=real-ue — 프로세스(풀이 소유)·현재 호(cli call id)·마지막 RTP 통계(프로세스가 1 초마다 올린다 — media_hold 표본 원천)
-    RealUeProcess* real = nullptr;
+    DriveLink* real = nullptr;      // 구동 링크 — real-ue = cimsue-cli 프로세스, device = 실기기 TLS 링크(DeviceHub)
+    bool device = false;            // device 풀(시험 모드 실기기) — 등록은 앱 소유, 지표 접두 device_ (real-ue 는 real_)
     int realCall = -1;
     bool realRegFailed = false;     // register 명령 거절 또는 REGISTER 실패 응답
     bool realReinviteWait = false;  // hold/resume 명령을 냈다 — held/active 전이 = re-INVITE 200
@@ -177,6 +186,8 @@ struct Pool {
     std::map<std::string, Endpoint*> byUser;   // peer: 신원 user → Endpoint (착신 귀속)
     std::map<std::string, Endpoint*> byCall;   // peer: 활성 Call-ID → Endpoint
     std::vector<std::unique_ptr<RealUeProcess>> reals;   // real-ue: 신원 순 프로세스(Endpoint::real 이 가리킨다)
+    std::vector<std::shared_ptr<DeviceConn>> devices;     // device: 신원 순 실기기 링크(DeviceHub 소유 연결을 bind — Endpoint::real 이 가리킨다)
+    std::string media;              // device: 송출 원천 mic|sample
     // NAT 풀(§3.1) — UE 스택·RTP 소켓을 이 network namespace 안에서 만든다(SimSession::Start 를 setns 한 스레드에서). 대상은 변환된 주소만 본다
     std::string natNs;              // netns 이름(비면 NAT 없음)
     std::string natLocalIp;         // netns 안 단말 주소(SDP·Via·Contact 의 로컬 IP)
@@ -340,6 +351,7 @@ private:
 
     WorkerConfig m_cfg;
     HttpServer m_http;
+    std::unique_ptr<DeviceHub> m_devices;       // 시험 모드 실기기 계측 링크 수신점(Device.Port — 0 이면 없음)
     std::unique_ptr<MediaAgent> m_mediaAgent;   // 이 워커의 에이전트 얼굴(/media/*) — 다른 워커 풀의 RTP 를 굴린다
     Metrics m_metrics;
     StreamClient m_stream;
@@ -381,6 +393,9 @@ private:
     bool buildUePool(Pool* pool, const Json& d, std::string& err);
     bool buildPeerPool(Pool* pool, const Json& d, std::string& err);
     bool buildRealUePool(Pool* pool, const Json& d, std::string& err);
+    bool buildDevicePool(Pool* pool, const Json& d, std::string& err);
+    HttpResponse devicesList();
+    static std::string rp(const Endpoint* ep);
     void onRealEvent(Endpoint* ep, const Json& ev);   // 리더 스레드 — Event 로 바꿔 큐에만 넣는다
     long long realProcesses() const;
 

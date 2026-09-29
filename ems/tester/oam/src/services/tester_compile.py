@@ -154,6 +154,10 @@ def load_identities(pool_name: str, pool_doc: dict, topology: Optional[Topology]
     kind = pool_doc.get('kind')
     if kind == 'peer':
         return peer_identities(pool_name, pool_doc)
+    if kind == 'device':
+        # 실기기 — 번호만(자격은 단말 앱이 가진다). 도메인이 비면 ids_of 가 access 노드 도메인으로 채운다
+        return [{k: v for k, v in (('user', str(d.get('user') or '')), ('domain', d.get('domain')), ('ptt_group', d.get('ptt_group'))) if v}
+                for d in (pool_doc.get('identities') or [])]
     if kind not in ('ue', 'real-ue'):
         raise CompileError(f'pool {pool_name}: kind={kind} 는 워커가 지원하지 않는다')
     src = pool_doc.get('source') or {}
@@ -346,21 +350,22 @@ def check_register_roles(scenario: Scenario, topology: Topology, role_pool: Dict
 
 def check_kind_gates(scenario: Scenario, topology: Topology, role_pool: Dict[str, str]) -> None:
     """단계의 행위자 kind 게이트(STEP_VOCAB.kind) — progress 는 피어, 전달·합류·구독은 UE, PTT 단계는 service=ptt UE.
-    실단말(real-ue) 역할은 REAL_UE_STEPS 의 단계만 행위자가 될 수 있고, 실단말이 든 시나리오의 호는 미디어 평면 auto 만(§3.3)."""
+    실스택 역할(real-ue·device)은 REAL_UE_STEPS 의 단계만 행위자가 될 수 있고, 그런 역할이 든 시나리오의 호는 미디어 평면 auto 만
+    (§3.3, ue_voice_quality.md §6 — 송출·코덱은 실스택 것)."""
     from services.tester_models import STEP_VOCAB, REAL_UE_STEPS
-    real_roles = {r for r, pn in role_pool.items() if topology.pools.get(pn) is not None and topology.pools[pn].kind == 'real-ue'}
+    real_roles = {r for r, pn in role_pool.items() if topology.pools.get(pn) is not None and topology.pools[pn].kind in ('real-ue', 'device')}
     for i, st in enumerate(scenario.flow):
         actors = [st.from_] if st.from_ else list(st.who or [])
         for role in actors:
             if role in real_roles and st.step not in REAL_UE_STEPS:
-                raise CompileError(f'flow[{i}] {st.step}: 실단말(real-ue) 역할 {role!r} 은 이 단계의 행위자가 될 수 없다 — '
+                raise CompileError(f'flow[{i}] {st.step}: 실스택(real-ue·device) 역할 {role!r} 은 이 단계의 행위자가 될 수 없다 — '
                                    f'지원 단계 {sorted(REAL_UE_STEPS)}')
         for d in (st.during or []):
             for role in ([d.from_] if d.from_ else list(d.who or [])):
                 if role in real_roles and d.step not in REAL_UE_STEPS:
-                    raise CompileError(f'flow[{i}].during {d.step}: 실단말(real-ue) 역할 {role!r} 은 이 동작의 행위자가 될 수 없다')
+                    raise CompileError(f'flow[{i}].during {d.step}: 실스택(real-ue·device) 역할 {role!r} 은 이 동작의 행위자가 될 수 없다')
         if real_roles and st.step in ('invite', 'group_call') and st.media is not None and st.media.rtp != 'auto':
-            raise CompileError(f'flow[{i}] {st.step}: media.rtp={st.media.rtp!r} — 실단말(real-ue) 역할이 있는 시나리오의 호는 auto 만(실스택의 미디어 평면)')
+            raise CompileError(f'flow[{i}] {st.step}: media.rtp={st.media.rtp!r} — 실스택(real-ue·device) 역할이 있는 시나리오의 호는 auto 만(실스택의 미디어 평면)')
         gate = (STEP_VOCAB.get(st.step) or {}).get('kind')
         if not gate:
             continue
@@ -373,7 +378,7 @@ def check_kind_gates(scenario: Scenario, topology: Topology, role_pool: Dict[str
             if gate == 'ue' and pool.kind == 'peer':
                 raise CompileError(f'flow[{i}] {st.step}: 역할 {role!r} 은 UE 풀이어야 한다')
             pname = role_pool.get(role, '')
-            if gate == 'ptt' and (pool.kind not in ('ue', 'real-ue') or topology.pool_service(pname) != 'ptt'):
+            if gate == 'ptt' and (pool.kind not in ('ue', 'real-ue', 'device') or topology.pool_service(pname) != 'ptt'):
                 raise CompileError(f'flow[{i}] {st.step}: 역할 {role!r} 은 service=ptt UE 풀이어야 한다(풀 {pname})')
 
 
@@ -518,7 +523,7 @@ def check_fixture_gates(scenario: Scenario, topology: Topology, role_pool: Dict[
             if pn is None:
                 continue
             kind = topology.pools[pn].kind
-            if kind not in ('ue', 'real-ue'):
+            if kind not in ('ue', 'real-ue', 'device'):
                 raise CompileError(f'fixtures.{key}: 역할 {r!r} 의 풀 {pn} 은 {kind} — 픽스처 대상은 가입자(UE 풀)여야 한다')
             if f.kind == 'phone_group' and topology.pool_service(pn) == 'ptt':
                 raise CompileError(f'fixtures.{key}: 전화 그룹 멤버 {r!r} 의 풀 {pn} 은 service=ptt — 전화 회선(volte/voip)이어야 한다')
@@ -687,6 +692,10 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
                     raise CompileError(f'pool {pname}: 실단말(real-ue)은 AKA 신원을 받지 않는다(cimsue-cli Digest 만) — {aka[:3]}')
                 pc = PoolCreate(pool=pname, kind='real-ue', identities=ids, transport=p.transport, srtp=p.srtp,
                                 service=topology.pool_service(pname), tls_verify=bool(p.tls_verify), target_csp=tc)
+            elif p.kind == 'device':
+                # 실기기(ue_voice_quality.md §6) — 워커가 연결된 단말을 번호로 잡는다. target_csp 는 다이얼 꼴·도메인 파생용(단말 등록은 앱 것)
+                pc = PoolCreate(pool=pname, kind='device', identities=ids_of(pname), transport=p.transport,
+                                service=topology.pool_service(pname), media=p.media, target_csp=tc)
             else:
                 pc = PoolCreate(pool=pname, kind='ue', identities=ids_of(pname), transport=p.transport, srtp=p.srtp,
                                 service=topology.pool_service(pname), prack=bool(p.prack), dtmf=p.dtmf, target_csp=tc,
@@ -710,7 +719,7 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
     # 같은 신원을 두 풀(= 두 워커)이 쓰면 등록 바인딩이 서로를 덮는다 — 워커마다 다른 신원(creds 파일을 나누거나 source.offset/count)
     owner: Dict[str, str] = {}
     for pn, ids in identities.items():
-        if topology.pools[pn].kind not in ('ue', 'real-ue'):
+        if topology.pools[pn].kind not in ('ue', 'real-ue', 'device'):
             continue
         for it in ids:
             k = f"{it['user']}@{it['domain']}"
@@ -722,7 +731,7 @@ def compile_run(run_id: str, scenario: Scenario, topology: Topology, topology_do
         pname0 = next(iter(per.values()))[0]
         p0 = topology.pools[pname0]
         roles_out[role] = {'pool': r.pool, 'kind': p0.kind, 'profile': getattr(p0, 'profile', None),
-                           'service': topology.pool_service(pname0) if p0.kind in ('ue', 'real-ue') else None,
+                           'service': topology.pool_service(pname0) if p0.kind in ('ue', 'real-ue', 'device') else None,
                            'disjoint_from': r.disjoint_from, 'count': r.count, 'multi': bool(r.multi), 'member': bool(r.member),
                            'workers': per, 'total': sum(e - b for (_p, b, e) in per.values())}
     return {'workers': plan_workers, 'rate_total': rate_total, 'roles': roles_out, 'steps': steps, 'phases': phases(scenario),

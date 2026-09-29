@@ -1,5 +1,53 @@
 {
   "$defs": {
+    "WorkerHealthDevices": {
+      "additionalProperties": false,
+      "properties": {
+        "connected": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Connected",
+          "type": "integer"
+        },
+        "fingerprint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "수신점 인증서 SHA-256 — 단말 TOFU 대조",
+          "title": "Fingerprint"
+        },
+        "listening": {
+          "default": false,
+          "description": "Device.Port 수신 중",
+          "title": "Listening",
+          "type": "boolean"
+        },
+        "max": {
+          "default": 0,
+          "title": "Max",
+          "type": "integer"
+        },
+        "pair_key": {
+          "default": false,
+          "description": "연결 키 설정됨",
+          "title": "Pair Key",
+          "type": "boolean"
+        },
+        "port": {
+          "default": 0,
+          "title": "Port",
+          "type": "integer"
+        }
+      },
+      "title": "WorkerHealthDevices",
+      "type": "object"
+    },
     "WorkerHealthMedia": {
       "additionalProperties": false,
       "properties": {
@@ -98,7 +146,8 @@
           "enum": [
             "ue",
             "peer",
-            "real-ue"
+            "real-ue",
+            "device"
           ],
           "title": "Kind",
           "type": "string"
@@ -168,6 +217,17 @@
       "minimum": 0,
       "title": "Cpu Pct",
       "type": "number"
+    },
+    "devices": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkerHealthDevices"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "local_ip": {
       "anyOf": [

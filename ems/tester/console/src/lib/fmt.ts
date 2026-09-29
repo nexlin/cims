@@ -76,6 +76,9 @@ export const SUMMARY_ROWS: [string, string, 'int' | 'pct' | 'num' | 'str'][] = [
   ['hold_resume_pct', 'hold/resume 성공 비율', 'pct'], ['refer_pct', 'REFER 성공 비율', 'pct'],
   ['q850_causes', 'Q.850 cause', 'str'], ['refer_codes', 'REFER 응답 코드', 'str'], ['codes', '응답 코드', 'str'],
   ['real_legs', '실단말(real-ue) leg', 'int'], ['real_rtp_loss_pct', '실단말 RTP 손실 %', 'pct'], ['real_mos_mean', '실단말 MOS 추정 평균', 'num'], ['real_mos_min', '실단말 MOS 추정 최솟값', 'num'],
+  ['device_legs', '실기기(device) leg', 'int'], ['device_rtp_loss_pct', '실기기 RTP 손실 %', 'pct'], ['device_mos_mean', '실기기 MOS-CQ 평균(E-model)', 'num'],
+  ['device_mos_min', '실기기 MOS-CQ 최솟값 — Speech Quality on Call Basis(E.804, 추정)', 'num'], ['device_rtd_ms_p95', '실기기 RTD p95 ms', 'num'],
+  ['device_srd_ms_p95', '실기기 SRD p95 ms — Telephony Setup Time(E.804)', 'num'], ['device_link_lost', '실기기 계측 링크 끊김', 'int'], ['rtd_ms_p95', 'RTD p95 ms(RTCP)', 'num'],
 ]
 
 export const TIMER_ROWS: [string, string][] = [

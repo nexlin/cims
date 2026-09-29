@@ -20,7 +20,20 @@
 
 #include "Json.h"
 
-class RealUeProcess {
+/** 구동 링크 — 실스택 단말 하나에 명령 줄을 보내고 result 를 기다린다(ue_voice_quality.md §5, cimsue/drive.h 줄 프로토콜).
+ *  구현 둘: RealUeProcess(cimsue-cli drive 자식 프로세스 — real-ue 풀) · DeviceConn(시험 모드 실기기의 TLS 계측 링크 — device 풀, DeviceHub.h).
+ *  워커의 실단말 분기(ep* 헬퍼·onRealEvent)는 이 인터페이스만 본다. */
+class DriveLink {
+public:
+    virtual ~DriveLink() = default;
+    /** 명령 한 줄 → 그 result 이벤트. 시한·끊김이면 ok=false + reason. */
+    virtual Json request(const std::string& cmd, int timeoutMs) = 0;
+    /** 결과를 기다리지 않는 송신. */
+    virtual bool send(const std::string& cmd) = 0;
+    virtual bool alive() const = 0;
+};
+
+class RealUeProcess : public DriveLink {
 public:
     using EventFn = std::function<void(const Json&)>;
     RealUeProcess(const std::string& tag, EventFn onEvent);
@@ -31,12 +44,12 @@ public:
     /** `ready` 이벤트 대기(엔진 기동 완료). */
     bool waitReady(int timeoutMs);
     /** 명령 한 줄 → 그 `result` 이벤트. 시한·프로세스 종료면 ok=false + reason. 명령은 호출 순서대로 직렬(FIFO). */
-    Json request(const std::string& cmd, int timeoutMs);
+    Json request(const std::string& cmd, int timeoutMs) override;
     /** 결과를 기다리지 않는 송신(quit 등). */
-    bool send(const std::string& cmd);
+    bool send(const std::string& cmd) override;
     /** quit → graceMs 대기 → SIGTERM → SIGKILL. 리더 스레드 join. */
     void stop(int graceMs = 2000);
-    bool alive() const { return m_alive.load(); }
+    bool alive() const override { return m_alive.load(); }
     pid_t pid() const { return m_pid; }
     const std::string& tag() const { return m_tag; }
 

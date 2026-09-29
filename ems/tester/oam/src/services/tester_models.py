@@ -449,7 +449,26 @@ class RealUePool(_PoolBase):
     tls_verify: bool = Field(default=False, description='서버 TLS 인증서 검증 — 워커 RealUe.TlsCaFile 을 앵커로(없으면 검증 없이 접속). 기본은 개발 스택(자체 서명) 전제로 끔')
 
 
-Pool = Union[UePool, PeerPool, RealUePool]
+class DeviceIdentity(_Strict):
+    user: str = Field(min_length=1, description='실기기 앱이 등록한 회선 번호(+E.164 — hello.accounts[].msisdn 과 같은 값)')
+    domain: Optional[str] = Field(default=None, description='비면 access 노드의 도메인(service=ptt 면 PTT 도메인)')
+    ptt_group: Optional[str] = Field(default=None, description='service=ptt — 그룹 세션에서 이 단말이 속한 MCPTT 그룹 id')
+
+
+class DevicePool(_PoolBase):
+    """실기기 풀(ue_voice_quality.md §6) — 시험 모드 앱(또는 `cimsue-cli link`)이 워커 Device.Port 로 먼저 붙어 있는 실단말을 번호로 골라
+    real-ue 와 같은 단계로 구동한다. 보고·제어는 시험 대상 서버를 거치지 않는다(단말 ↔ 워커 TLS 계측 링크). 등록·코덱·미디어는 단말 앱 것 —
+    register 단계는 앱 등록 확인, deregister 는 아무것도 하지 않는다. 지원 단계 = REAL_UE_STEPS, 지표 device_*."""
+    kind: Literal['device']
+    access: str = Field(description='단말 앱이 등록한 접속점 노드 id — 도메인·번호계획 파생용(계측기는 단말 등록을 바꾸지 않는다)')
+    listener: Optional[str] = None
+    transport: Transport = Field(default='tls', description='단말 앱의 접속 transport(수신점 선택용 — 단말 설정을 바꾸지 않는다)')
+    service: ServiceKind = Field(default='volte', description='구동할 회선 — 링크 `use <service>`')
+    identities: List[DeviceIdentity] = Field(min_length=1)
+    media: Literal['sample', 'mic'] = Field(default='sample', description='송출 원천 — sample = 단말 동봉 기준 음원(P.59 두 화자 대화), mic = 마이크(사람이 말한다)')
+
+
+Pool = Union[UePool, PeerPool, RealUePool, DevicePool]
 
 
 class LayoutRegion(_Strict):
@@ -586,7 +605,7 @@ class Topology(_Strict):
                 if key in seen_group_worker:
                     raise ValueError(f'워커 {p.worker} 에 group {p.group!r} 풀이 둘 — 워커마다 논리 풀 하나만')
                 seen_group_worker.add(key)
-            if p.kind in ('ue', 'real-ue'):
+            if p.kind in ('ue', 'real-ue', 'device'):
                 node = self.target.nodes.get(p.access)
                 if node is None or node.sip is None or not node.sip.by_edge('access'):
                     raise ValueError(f'pools.{pname}.access={p.access!r} 는 access 수신점(sip.listeners edge=access)이 있는 노드가 아니다')
@@ -599,7 +618,7 @@ class Topology(_Strict):
                     p.transport = l.protocol
                 elif not any(l.protocol == p.transport for l in node.sip.by_edge('access').values()):
                     raise ValueError(f'pools.{pname}: transport {p.transport} 인데 {p.access} 에 {p.transport} access 수신점이 없다')
-                if isinstance(p.source, DbSource):
+                if isinstance(getattr(p, 'source', None), DbSource):
                     src = self.target.nodes.get(p.source.db)
                     if src is None or not (src.role == 'db' or (src.role == 'subscriber' and src.api is not None)):
                         raise ValueError(f'pools.{pname}.source.db={p.source.db!r} 는 db 노드 또는 api 있는 subscriber 노드가 아니다')
@@ -661,7 +680,7 @@ class Topology(_Strict):
     def pool_service(self, pname: str) -> str:
         """UE 풀의 접속환경 클래스 — service, 비면 source.table 이 ptt_subscriptions 일 때 ptt, 그 외 volte."""
         p = self.pools[pname]
-        if p.kind not in ('ue', 'real-ue'):
+        if p.kind not in ('ue', 'real-ue', 'device'):
             return 'volte'
         if p.service:
             return p.service
@@ -864,7 +883,7 @@ STEP_VOCAB = {
     'check':         {'group': 'ctl',   'actor': 'who',     'kind': 'ue',       'metrics': ['check_pct'], 'desc': '관측 정합 판정 — payload: conference_roster_visible|hidden(to = 로스터에서 찾을 역할) · conference_warning_138 · conference_warning_105(일제 통화 구독 480) · dialog_consistent(RFC 4235 NOTIFY 열). after_ms 뒤 판정, 틀리면 인스턴스 실패'},
 }
 for _k, _v in STEP_VOCAB.items():
-    _v['real'] = _k in REAL_UE_STEPS   # 실단말(real-ue) 역할이 행위자가 될 수 있는가 — 편집기 행위자 칩 게이트
+    _v['real'] = _k in REAL_UE_STEPS   # 실단말(real-ue)·실기기(device) 역할이 행위자가 될 수 있는가 — 편집기 행위자 칩 게이트
 STEP_GROUPS = [
     {'id': 'reg', 'label': '등록'}, {'id': 'call', 'label': '호'}, {'id': 'media', 'label': '미디어'},
     {'id': 'peer', 'label': '피어 축'}, {'id': 'xfer', 'label': '전달·합류'}, {'id': 'ptt', 'label': 'PTT · MCData'},
@@ -885,6 +904,10 @@ METRIC_LABELS = {
     'early_rtp_pct': 'early media RTP 도달률', 'moh_rtp_pct': '보류 음악 RTP 도달률(피보류 단말, hold 당)', 'join_tap_pct': 'Join 청취 leg SSRC 2개 도달률', 'video_pct': '영상 협상률(m=video 활성 answer)',
     'fork_alert_pct': '대표번호 포크 alert 률(그룹원 착신/기대)', 'listen_pct': 'PTT 청취 합류율(recvonly 200)',
     'retrans_rx_pct': 'INVITE 재전송 도달률(유실 주입 뒤)', 'thig_pct': 'THIG 토큰화 Via 보존률', 'check_pct': '관측 정합 판정 통과율(check)',
+    'rtd_ms': 'RTD — RTCP 왕복 지연', 'real_srd_ms': '실단말 SRD', 'real_rtp_loss_pct': '실단말 RTP 손실률', 'real_jitter_ms': '실단말 지터',
+    'real_mos': '실단말 MOS-CQ', 'real_rtd_ms': '실단말 RTD',
+    'device_srd_ms': '실기기 SRD — Telephony Setup Time(E.804)', 'device_rtp_loss_pct': '실기기 RTP 손실률', 'device_jitter_ms': '실기기 지터',
+    'device_rtd_ms': '실기기 RTD', 'device_mos': '실기기 MOS-CQ(E-model) — Speech Quality on Call Basis(E.804, 추정)',
 }
 
 # Reason: Q.850 cause (ITU-T Q.850) — 편집기 목록
@@ -931,7 +954,11 @@ METRIC_NAMES = (
     # PTT 청취(dispatch_center.md §5.6) — group_call payload listen 의 recvonly INVITE 가 200 으로 확립된 비율
     'listen_pct',
     # 실단말(real-ue) 표본(§3.3) — 실스택 단말 leg 만 따로: 발신 SRD · RTP 손실/지터(pjmedia 통계) · MOS(min 이 판정)
-    'real_srd_ms', 'real_rtp_loss_pct', 'real_jitter_ms', 'real_mos',
+    'real_srd_ms', 'real_rtp_loss_pct', 'real_jitter_ms', 'real_mos', 'real_rtd_ms',
+    # 실기기(device, ue_voice_quality.md §6) 표본 — 시험 모드 단말 leg 만 따로: SRD · RTP 손실/지터 · RTD(RTCP) · MOS(단말이 잰 E-model, min 이 판정)
+    'device_srd_ms', 'device_rtp_loss_pct', 'device_jitter_ms', 'device_rtd_ms', 'device_mos',
+    # 망 왕복 지연(RTCP LSR/DLSR, RFC 3550 §6.4.1) — 가상 단말·피어는 상대가 RR 을 돌려줄 때
+    'rtd_ms',
 )
 
 
@@ -1560,8 +1587,9 @@ class WorkerPeer(_Strict):
 class PoolCreate(_Strict):
     """POST /pools — 풀 생성·신원 적재. 멱등(pool 이름 기준)."""
     pool: str
-    kind: Literal['ue', 'peer', 'real-ue']
+    kind: Literal['ue', 'peer', 'real-ue', 'device']
     identities: List[Identity] = Field(default_factory=list)
+    media: Optional[Literal['sample', 'mic']] = Field(default=None, description='kind=device — 송출 원천(링크 media 명령)')
     transport: Transport = 'udp'
     srtp: SrtpMode = 'off'
     service: ServiceKind = Field(default='volte', description='kind=ue — ptt 면 MCPTT 단말(기동 절차·자동응답·floor)')
@@ -1630,7 +1658,7 @@ class RunStop(_Strict):
 
 class WorkerPoolState(_Strict):
     pool: str
-    kind: Literal['ue', 'peer', 'real-ue']
+    kind: Literal['ue', 'peer', 'real-ue', 'device']
     endpoints: int
     registered: int = 0
     service: Optional[ServiceKind] = None
@@ -1651,6 +1679,15 @@ class WorkerHealthRealUe(_Strict):
     cli: str = Field(default='', description='RealUe.CliPath 해석 결과')
 
 
+class WorkerHealthDevices(_Strict):
+    listening: bool = Field(default=False, description='Device.Port 수신 중')
+    port: int = 0
+    connected: int = Field(default=0, ge=0)
+    max: int = 0
+    pair_key: bool = Field(default=False, description='연결 키 설정됨')
+    fingerprint: Optional[str] = Field(default=None, description='수신점 인증서 SHA-256 — 단말 TOFU 대조')
+
+
 class WorkerHealth(_Strict):
     """GET /health 응답 — 용량 선언 + 시계 확인(§6.1)."""
     worker: str
@@ -1665,6 +1702,7 @@ class WorkerHealth(_Strict):
     local_ip: Optional[str] = None
     media: Optional[WorkerHealthMedia] = None
     real_ue: Optional[WorkerHealthRealUe] = None
+    devices: Optional[WorkerHealthDevices] = None
 
 
 # ──────────────────────────────────────────────────────────────────────────

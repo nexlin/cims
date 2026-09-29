@@ -2,7 +2,7 @@
 //   cims-tester-worker [config/cims-tester-worker.json] [--preflight] [--verbose]
 // 설정 키(config_template.json 선언): Worker.Name · Server.Ip/Port · Sip.LocalIp/PortBase/Capture/DumpMax · Media.AudioFile/VideoFile/SampleDir/MaxRtpStreams
 //   · Tls.CaFile/ClientCertFile/ClientKeyFile/PeerCertFile/PeerKeyFile(구 Media.PeerCertFile 승계) · Nat.NetnsDir(NAT 풀 netns 디렉터리)
-//   · RealUe.CliPath/MaxProcesses/LogLevel/StartTimeoutS/TlsCaFile · Limits.EndpointsPerCore/SapsPerCore · Timers.RegisterIntervalMs/RegisterTimeoutS/InviteTimeoutMs/ByeTimeoutMs
+//   · RealUe.CliPath/MaxProcesses/LogLevel/StartTimeoutS/TlsCaFile · Device.Ip/Port/CertFile/KeyFile/PairKey/MaxDevices · Limits.EndpointsPerCore/SapsPerCore · Timers.RegisterIntervalMs/RegisterTimeoutS/InviteTimeoutMs/ByeTimeoutMs
 // libcsim(SimSession) 의 printf 진단은 부하 중 초당 수천 줄이라 stdout 을 /dev/null 로 돌린다(--verbose 면 유지).
 // 워커 자기 로그는 stderr — agent lifecycle 이 로그 파일로 모은다.
 #include <csignal>
@@ -100,6 +100,12 @@ int main(int argc, char** argv) {
         cfg.realUeLogLevel = (int)c["RealUe"]["LogLevel"].asInt(cfg.realUeLogLevel);
         cfg.realUeStartTimeoutS = (int)c["RealUe"]["StartTimeoutS"].asInt(cfg.realUeStartTimeoutS);
         cfg.realUeTlsCaFile = c["RealUe"]["TlsCaFile"].asString("");
+        cfg.deviceIp = c["Device"]["Ip"].asString(cfg.deviceIp);
+        cfg.devicePort = (int)c["Device"]["Port"].asInt(cfg.devicePort);
+        cfg.deviceCertFile = c["Device"]["CertFile"].asString("");
+        cfg.deviceKeyFile = c["Device"]["KeyFile"].asString("");
+        cfg.devicePairKey = c["Device"]["PairKey"].asString("");
+        cfg.deviceMax = (int)c["Device"]["MaxDevices"].asInt(cfg.deviceMax);
         {
             char exe[4096] = { 0 };
             ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
@@ -117,6 +123,12 @@ int main(int argc, char** argv) {
                 if (access(cand.c_str(), R_OK) == 0) *p = cand;
             }
             if (cfg.realUeTlsCaFile.empty()) cfg.realUeTlsCaFile = cfg.tlsCaFile;   // 실단말 앵커 기본 = 같은 CA
+            // 계측 링크 수신점 인증서 — 기본 <모듈>/config/device.{crt,key}(없으면 워커가 자체 서명을 만든다). 상대 경로는 모듈 기준
+            const std::string base = moduleDir.empty() ? std::string(".") : moduleDir;
+            if (cfg.deviceCertFile.empty()) cfg.deviceCertFile = base + "/config/device.crt";
+            else if (cfg.deviceCertFile[0] != '/') cfg.deviceCertFile = base + "/" + cfg.deviceCertFile;
+            if (cfg.deviceKeyFile.empty()) cfg.deviceKeyFile = base + "/config/device.key";
+            else if (cfg.deviceKeyFile[0] != '/') cfg.deviceKeyFile = base + "/" + cfg.deviceKeyFile;
             cfg.realUeLogDir = c["RealUe"]["LogDir"].asString("");
             if (cfg.realUeLogDir.empty()) cfg.realUeLogDir = (moduleDir.empty() ? std::string("log") : moduleDir + "/log") + "/real-ue";
             else if (cfg.realUeLogDir[0] != '/' && !moduleDir.empty()) cfg.realUeLogDir = moduleDir + "/" + cfg.realUeLogDir;

@@ -1,0 +1,15 @@
+# 실기기(device) 발신 — 시험 모드 단말(앱)이 계측 링크로 워커에 붙어 있고, 워커 명령으로 가상 단말에 발신한다(ue_voice_quality.md §6).
+# 보고·제어는 시험 대상 서버를 거치지 않는다(단말 ↔ 워커 TLS). 등록은 앱 소유 — register 는 앱 등록 확인이다.
+# 품질 = 단말이 잰 호 품질(pjmedia RTCP·RTCP-XR·E-model — device_* 지표), 송출 = 단말 동봉 기준 음원(풀 media: sample).
+id: VOLTE-CALL-DEVICE-MO
+title: 실기기 → 가상 단말 1:1 호 (device 발신)
+tags: [volte, device]
+roles:
+  dev: { pool: device }                  # kind: device 풀 — 시험 모드 실기기(번호로 고른다)
+  callee: { pool: volte_ue }
+flow:
+  - { step: register,   who: [dev, callee], expect: { code: 200 } }
+  - { step: invite,     from: dev, to: callee }
+  - { step: answer,     who: [callee], after_ms: 1000, expect: { device_srd_ms: { p95: 3000 } } }
+  - { step: media_hold, seconds: "${ht}", expect: { device_rtp_loss_pct: { max: 1 }, device_jitter_ms: { p95: 40 }, device_rtd_ms: { p95: 300 }, device_mos: { min: 3.5 } } }
+  - { step: bye,        from: dev, expect: { sdd_ms: { p95: 1000 } } }

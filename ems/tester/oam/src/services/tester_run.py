@@ -834,6 +834,8 @@ class RunDriver(threading.Thread):
                   'sds_tx', 'sds_group_tx', 'sds_rx', 'sds_disposition_req', 'sds_disposition_rx', 'sds_notif_rx',
                   # 실단말(real-ue, §3.3) — 실스택 leg 수·RTP 카운터·표본 없음·프로세스 종료
                   'real_legs', 'real_rtp_tx', 'real_rtp_rx', 'real_rtp_lost', 'real_rtp_silent_legs', 'real_rtp_nosample', 'real_ue_exit',
+                  # 실기기(device, ue_voice_quality.md §6) — 시험 모드 단말 leg 수·RTP 카운터·표본 없음·계측 링크 끊김
+                  'device_legs', 'device_rtp_tx', 'device_rtp_rx', 'device_rtp_lost', 'device_rtp_silent_legs', 'device_rtp_nosample', 'device_link_lost',
                   # 영상(invite.media.video) — 오퍼에 m=video 를 실은 수·활성 answer·워커에 비디오 파일이 없어 오디오만 나간 수
                   'video_offered', 'video_ok', 'video_unavailable',
                   # PTT — affiliation·그룹 세션·floor(TS 24.380)
@@ -853,18 +855,20 @@ class RunDriver(threading.Thread):
         q850 = ','.join(f'{k[5:]}:{v}' for k, v in sorted(c.items()) if k.startswith('q850.'))
         if q850:
             out['q850_causes'] = q850
-        if c.get('real_rtp_rx', 0) + c.get('real_rtp_lost', 0):
-            out['real_rtp_loss_pct'] = 100.0 * c.get('real_rtp_lost', 0) / (c.get('real_rtp_rx', 0) + c.get('real_rtp_lost', 0))
+        for pre in ('real_', 'device_'):
+            if c.get(f'{pre}rtp_rx', 0) + c.get(f'{pre}rtp_lost', 0):
+                out[f'{pre}rtp_loss_pct'] = 100.0 * c.get(f'{pre}rtp_lost', 0) / (c.get(f'{pre}rtp_rx', 0) + c.get(f'{pre}rtp_lost', 0))
         for name in ('rrd_ms', 'srd_ms', 'sdd_ms', 'jitter_ms', 'sdt_s',
                      'group_fanout_ms', 'floor_grant_ms', 'floor_taken_ms', 'floor_queue_ms', 'floor_idle_ms', 'affiliate_ms',
-                     'real_srd_ms', 'real_jitter_ms', 'sds_delay_ms', 'fd_upload_ms', 'fd_delay_ms', 'fd_download_ms'):
+                     'real_srd_ms', 'real_jitter_ms', 'sds_delay_ms', 'fd_upload_ms', 'fd_delay_ms', 'fd_download_ms',
+                     'rtd_ms', 'real_rtd_ms', 'device_srd_ms', 'device_jitter_ms', 'device_rtd_ms'):
             h = t.get(name)
             if h:
                 out[f'{name}_p50'] = h.get('p50')
                 out[f'{name}_p95'] = h.get('p95')
                 out[f'{name}_max'] = h.get('max')
         # MOS(G.107 추정, 1~4.5)는 로그 버킷 백분위가 거칠어 평균·최솟값(최악 leg)으로 요약한다 — 기대치도 min
-        for name in ('mos', 'rtcp_remote_loss_pct', 'real_mos'):
+        for name in ('mos', 'rtcp_remote_loss_pct', 'real_mos', 'device_mos'):
             h = t.get(name)
             if h:
                 out[f'{name}_mean'] = h.get('mean')

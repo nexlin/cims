@@ -24,7 +24,7 @@
 | 측정 위치 | 코어 `libcimsue` `quality/` 모듈. 앱은 표시만 | 앱 4종 + `cimsue-cli` 가 같은 값을 낸다. 계측기 `real_*`·`device_*` 지표가 같은 식 |
 | 측정 원천 | pjmedia RTCP 통계 + **RTCP-XR**(RFC 3611, 빌드에서 켬) | pjmedia 가 손실·폐기·버스트/갭·RTT·단말 지연을 이미 계산한다. R/MOS 칸만 비어 있다(`rtcp_xr.c` 127 = 없음) |
 | 품질 추정 | ITU-T **G.107** E-model(협대역) · **G.107.1**(광대역, AMR-WB·G.722) | 전송 지표만으로 추정. 기준 음원 비교(POLQA/PESQ)는 제외 |
-| 보고·제어 경로 | **단말 → 계측기 워커 직접 TLS 링크**(`Device.Listen`). CSP·CSC·CMP 를 거치지 않는다 | 계측 경로를 시험 대상에서 분리 |
+| 보고·제어 경로 | **단말 → 계측기 워커 직접 TLS 링크**(`Device.Port`). CSP·CSC·CMP 를 거치지 않는다 | 계측 경로를 시험 대상에서 분리 |
 | 링크 프로토콜 | `drive` 구동 모드(명령 줄 / JSON 이벤트 줄) + 링크 전용 `hello`·`use`·`quality`·`media` | `real-ue` 와 한 프로토콜 — 워커는 전송(파이프 / 소켓)만 다르다 |
 | 접속 방향 | **단말이 먼저** 워커에 연결(아웃바운드), 끊기면 재접속 | NAT·방화벽 뒤 단말도 붙는다. 워커가 단말 주소를 알 필요가 없다 |
 | 시험 모드 진입 | 앱 **정보 화면의 버전 줄 7회 연속 탭**(Windows 는 클릭) → 시험 모드 메뉴 → 계측기 주소·연결 | 안드로이드 시스템 설정의 개발자 옵션을 쓰지 않는다. 일반 사용자에게 숨긴다 |
@@ -52,8 +52,8 @@
        │ SIP · RTP/RTCP(+XR)  — 평소 그대로          │ 계측 링크 TLS (drive 줄 프로토콜)
        ▼                                           ▼
 ┌──── 시험 대상 ────┐                  ┌──── 계측기 워커 (대상 밖 호스트) ────┐      ┌── 컨트롤러 ──┐
-│ CSP · CMP · CSC   │  (계측 경로 없음)  │ DeviceHub(Device.Listen)            │─────►│ device 풀   │
-└───────────────────┘                  │  └ 연결 단말 = K_DEVICE Endpoint      │ 스트림 │ 지표·판정    │
+│ CSP · CMP · CSC   │  (계측 경로 없음)  │ DeviceHub(Device.Port 7120)         │─────►│ device 풀   │
+└───────────────────┘                  │  └ 연결 단말 = 실스택 Endpoint(device)│ 스트림 │ 지표·판정    │
                                        │ ue / peer / real-ue 풀 (상대 역할)    │      │ 콘솔         │
                                        └──────────────────────────────────────┘      └─────────────┘
 ```
@@ -151,7 +151,7 @@ RTCP compound 에 실려 나가므로 SRTP 호에서는 SRTCP 로 보호된다. 
   | 항목 | 내용 |
   |---|---|
   | 시험 모드 | 켜기/끄기. 켜면 오버레이·요약·이력이 보이고 계측기 연결을 쓸 수 있다 |
-  | 계측기 주소 | 워커 호스트(IP 또는 이름)·포트(기본 7110) |
+  | 계측기 주소 | 워커 호스트(IP 또는 이름)·포트(기본 7120) |
   | 연결 키 | 선택. 워커 `Device.PairKey` 와 같아야 한다(비우면 워커가 검사하지 않을 때만 붙는다) |
   | 인증서 확인 | 켜면 워커 인증서를 검증(앵커 = 앱 동봉 루트 또는 사용자가 넣은 PEM), 끄면 최초 지문 고정(TOFU) |
   | 연결 | 켜기/끄기 + 상태(연결 중 / 연결됨 워커 이름 / 끊김 사유) |
@@ -184,7 +184,7 @@ Foreground Service 가 세션과 함께 든다(화면이 꺼져도 유지). Wind
 
 ### 5.1 전송
 
-- TCP + **TLS 1.2 이상**, 워커가 서버(`Device.Listen`, 기본 `0.0.0.0:7110`), 단말이 클라이언트(먼저 연결).
+- TCP + **TLS 1.2 이상**, 워커가 서버(`Device.Ip:Port`, 기본 `0.0.0.0:7120` — 7110 은 컨트롤러 관측 수신 `Tester.WorkerStreamPort`), 단말이 클라이언트(먼저 연결).
 - 워커 인증서 = `Device.CertFile/KeyFile`(비면 기동 때 자체 서명을 만들어 `DataDir` 에 둔다). 단말은 두 방식 중 하나로 확인한다 —
   **검증**(`verifyServer` + 앵커 PEM — 체인과 접속 주소의 IP/DNS SAN) 또는 **최초 지문 고정**(TOFU — 첫 연결의 leaf SHA-256 을 `pinFile` 에
   적고 이후 다르면 `Refused(pin_mismatch)`). 둘 다 끄면 암호화만 한다.
@@ -231,34 +231,66 @@ Foreground Service 가 세션과 함께 든다(화면이 꺼져도 유지). Wind
 
 ## 6. 계측기 — `device` 풀
 
-[test_instrument.md](test_instrument.md) 에 풀 종류 `device` 를 더한다.
+[test_instrument.md](test_instrument.md) 의 풀 종류 `device`. 시험 모드 단말을 **번호로 골라** `real-ue` 와 같은 단계로 구동한다.
 
-- **워커 `DeviceHub`** — `Device.Listen`·`CertFile`·`KeyFile`·`PairKey`·`MaxDevices`(기본 32). 연결된 단말 목록 = `hello` 요약 + 연결 시각·주소.
-  `GET /devices`(워커 API) · health `devices{connected, max}`. 링크 추상은 `RealUeProcess` 와 같은 모양(`request`·`send`·이벤트 콜백 — 리더 스레드는 큐에만)
-  으로 두고, 전송만 파이프 대신 소켓이다.
-- **컨트롤러** — `GET /devices`(모든 워커 합산 — 편집기 '연결된 단말' 목록, 서비스·번호·앱·워커). 풀 정의 `RealUePool` 과 같은 층의
-  `DevicePool{service, identities(번호 목록), media: sample|mic}`. 계획 미리보기가 연결 여부를 검산하고, 풀은 **그 단말이 붙어 있는 워커**에
-  배치된다(없으면 400 `device_not_connected`). 신원은 다른 풀과 겹치면 안 된다.
-- **Endpoint** — 워커 `Endpoint::Kind` 에 `K_DEVICE` 를 더한다. 이벤트를 가상 단말과 같은 Event 종류로 다시 풀어 처리하는 것은 `K_REAL` 과 같은
-  경로(ep* 헬퍼의 실단말 분기를 공유)라 단계 실행기·지표·판정은 Endpoint 종류를 모른다.
-- **단계 게이트** — `REAL_UE_STEPS` 에서 `register`/`deregister` 를 뺀 것(앱 소유). 콘솔 편집기 행위자 칩·`vocab.steps[*].device`.
-- **지표** — `device_*` 시리즈(`device_legs`·`device_srd_ms`·`device_rtp_loss_pct`·`device_jitter_ms`·`device_rtd_ms`·`device_mos`(min)·
-  `device_mos_lq`·`device_link_lost`) + 전체 지표 동시 기록(`real_*` 와 같은 규칙). 원천 = `quality{callTerm}`. 링크가 끊기면 진행 중 인스턴스는 실패
-  (`device_link_lost` + event).
-- **KPI 요약** — 결과 보고서에 ETSI TS 102 250-2 / ITU-T E.804 이름으로: Telephony Service Accessibility(= 확립 성공률)·Setup Time(= SRD)·
-  Cut-off Call Ratio(확립 뒤 비정상 종료)·Speech Quality on Call Basis(= 호별 MOS-CQ, E-model 추정임을 표기).
-- **가상 단말 RTCP** — libcsim `CRtpThread` 가 RTCP SR/RR 을 **보낸다**(RFC 3550 §6.4, 5 초 간격 — 지금은 받기만 함). 그래야 실단말이 가상 단말
-  상대로도 RTD 를 재고, 워커도 RTT 를 실측해 E-model 망 지연을 0 대신 실측값으로 넣는다.
-- **동봉 시나리오** — `VOLTE-CALL-DEVICE-MO`(실단말 발신 → 가상 착신) · `VOLTE-CALL-DEVICE-MT`(가상 발신 → 실단말 응답) ·
-  `VOLTE-CALL-DEVICE-E2E`(실단말 ↔ 실단말 — 두 `device` 역할) · `PTT-GROUP-DEVICE-FLOOR`.
+### 6.1 워커
+
+- **`DeviceHub`**(`tester/worker/src/DeviceHub.{h,cpp}`) — 설정 `Device.Ip`(기본 `0.0.0.0`)·`Device.Port`(기본 **7120**, 0 = 끔)·`CertFile`/`KeyFile`
+  (비면 `<모듈>/config/device.{crt,key}` — 없으면 기동 때 자체 서명 EC P-256 을 만들어 두고 재기동에도 같은 지문)·`PairKey`·`MaxDevices`(32).
+  포트를 못 열어도 워커는 뜨고 health 가 알린다. 연결마다 입출력 스레드 하나(읽기·쓰기 큐·15 s ping·45 s 끊김), 핸드셰이크·hello 는 연결마다
+  스레드라 느린 단말이 다른 단말의 수락을 막지 않는다. hello 검사 = `proto`·`pair_key`(틀리면 `bye{pair_key}`)·상한(`bye{full}`). **같은
+  `device_id` 가 다시 붙으면 옛 연결을 닫고** 그 연결을 쓰던 풀에는 링크 끊김을 알린다.
+- **링크 추상 `DriveLink`**(`RealUe.h`) — `request`·`send`·`alive`. 구현 = `RealUeProcess`(cimsue-cli 파이프, `real-ue`) · `DeviceConn`(TLS 소켓,
+  `device`). 워커의 실스택 분기(`K_REAL` Endpoint·`onRealEvent`·ep* 헬퍼)는 이 인터페이스만 본다 — `device` 는 `K_REAL` + `device` 표지.
+- **풀 생성** `POST /pools {kind: device, service, media, identities[{user, domain, ptt_group}]}` — 번호·서비스로 연결을 찾아 bind(없으면 400
+  `device_not_connected`, 다른 풀이 쓰면 `device_busy`, 수신점 없음 `device_link_off`), 링크에 `use <service>`·`media <sample|mic>`. 풀을 내리면
+  bind 를 풀고 `quit`(단말은 링크를 유지한 채 이 풀이 구동한 호를 정리하고 새 세션으로 대기).
+- **등록 의미** — 등록은 앱 소유라 `register` 단계는 **앱의 등록 상태 확인**(hello·`reg` 이벤트로 추적 — 미등록이면 480 `device not registered
+  (app)`, `rrd_ms` 는 재지 않는다), `deregister` 는 아무것도 하지 않는다.
+- **API** — `GET /devices`(연결 목록: `device_id`·앱·버전·모델·주소·연결 시각·`pool`·`accounts[{service, aor, msisdn, registered}]` + 수신점 지문) ·
+  health `devices{listening, port, connected, max, pair_key, fingerprint}`.
+
+### 6.2 컨트롤러
+
+- **모델** `DevicePool{worker, group?, access, listener?, transport, service, identities[{user, domain?, ptt_group?}], media: sample|mic}` — `access` 는
+  단말 앱이 등록한 접속점(도메인·번호계획 파생용 — 계측기는 단말 등록을 바꾸지 않는다). 신원은 다른 풀과 겹치면 컴파일 오류.
+- **단계 게이트** — `real-ue` 와 같은 `REAL_UE_STEPS`(콘솔 행위자 칩·`vocab.steps[*].real`), 실스택 역할이 든 시나리오의 호는 `media.rtp: auto` 만.
+- **배치** — 풀의 `worker` 는 토폴로지가 정한다. 계획 미리보기가 그 워커의 `GET /devices` 로 번호·서비스 연결을 확인한다 — 없으면 오류(다른 워커에
+  붙어 있으면 그 이름, 아니면 단말에 넣을 계측기 주소 `<워커 호스트>:<Device.Port>`), 앱 미등록·다른 풀 사용은 경고, 용량 행 `devices{need, connected,
+  port, fingerprint}`.
+- **API** `GET /api/v1/tester/devices[?topology=]` — 토폴로지 워커들의 `GET /devices` 합산(편집기 '연결된 단말').
+- **지표** — `device_*` 시리즈(`device_legs`·`device_srd_ms`·`device_rtp_tx/rx/lost`·`device_rtp_loss_pct`·`device_jitter_ms`·`device_rtd_ms`·
+  `device_mos`(단말이 잰 MOS-CQ — min 이 판정)·`device_rtp_silent_legs`·`device_rtp_nosample`·`device_link_lost`) + 전체 지표 동시 기록(`real_*` 와 같은
+  규칙). 링크가 끊기면 진행 중 인스턴스는 실패. 공통 `rtd_ms`(가상 단말·피어가 상대 RR 로 잰 RTT).
+- **보고서 용어** — ETSI TS 102 250-2 / ITU-T E.804 이름을 지표 라벨에 붙인다: `device_srd_ms` = Telephony Setup Time, `device_mos` = Speech Quality on
+  Call Basis(E-model 추정임을 표기), `ser_pct` = 확립 성공률(Telephony Service Accessibility 에 대응).
+
+### 6.3 콘솔
+
+토폴로지 편집기 팔레트 **실기기 풀**(워커 위에) — 카드 = 접속점·회선·번호 수·송출. 속성 = 접속점(노드·수신점·transport)·service·송출 원천·번호 목록
+(PTT 면 번호마다 `ptt_group`)·**연결된 단말**(워커별 수신점 포트·지문·단말(앱·모델·주소·사용 중인 풀)·회선별 등록 상태, [추가] 로 번호를 넣고 그
+워커로 풀을 옮긴다, 선택한 번호가 이 워커에 없으면 단말에 넣을 계측기 주소를 보여 준다). 시나리오 편집기는 `device` 역할을 `real-ue` 와 같은 행위자
+게이트로 막는다. 결과 요약에 `device_*` 행.
+
+### 6.4 가상 단말 RTCP
+
+libcsim `CRtpThread` 가 RTCP compound(SR — 보낸 RTP 가 없으면 RR — + 수신 보고 블록 + SDES CNAME, RFC 3550 §6.1·§6.4)를 5 초마다 RTP 포트+1 로
+보내고, 상대 RR 의 LSR/DLSR 로 RTT(§6.4.1)를 잰다(`m_llRtcpRttUs` — 워커 `rtd_ms` 표본·E-model 망 지연 RTT/2). SRTP 세션이면 같은 libsrtp 컨텍스트로
+SRTCP 보호/해제(RFC 3711 §3.4 — 수신 보고 블록도 해제해서 읽는다). PTT 는 보내지 않는다(그룹 미디어 RTCP 미사용). 피어 엔진(CsimPeer)·미디어 전담
+워커(에이전트 `rtt_us`)도 같은 값을 낸다.
+
+### 6.5 동봉 시나리오
+
+`VOLTE-CALL-DEVICE-MO`(실기기 발신 → 가상 착신) · `VOLTE-CALL-DEVICE-MT`(가상 발신 → 실기기 응답) · `VOLTE-CALL-DEVICE-E2E`(실기기 ↔ 실기기 — 같은
+`device` 풀의 번호 둘, 두 역할은 `disjoint_from`).
 
 ## 7. 검증
 
 | 항목 | 내용 |
 |---|---|
-| `S1-UNIT-UE`(코어) | E-model 기준값(기본값 R 93.2 → MOS 4.41, 손실·지연 표 벡터) · 광대역 척도 변환 · `DriveSession` 명령/결과 줄·`app_owned`·`use`·`media`·`quality` · `DeviceLink` 설정 거절 |
-| `S1-UNIT` 계측기 | `tester_emodel_test` 가 공용 헤더로 · libcsim RTCP 송신 · `DeviceHub`(파이썬 스텁 단말이 TLS 로 붙어 hello·명령·이벤트·끊김) · 컨트롤러 `test_device_pool`(컴파일·배치·게이트) |
-| 계측기 | `VOLTE-CALL-DEVICE-*` 를 링크 모드 `cimsue-cli link`(앱과 같은 TLS 링크)로 먼저, 이어 실단말로 |
+| `S1-UE-UNIT`(코어) | E-model 기준값(기본값 R 93.2 → MOS 4.41, 손실·지연 벡터)·광대역 척도 · `CallQuality` 계산·누적 · `DriveSession` 명령/결과 줄·`app_owned`·`use`·`media`·`quality` · `DeviceLink` 설정 거절 |
+| `S1-UNIT-TESTER` | `tester_emodel_test`(공용 헤더) · `csim_rtp_media_test`(RTCP SR/RR·RTT 루프백·PTT 끔) · `tester_device_hub_test`(TLS hello/welcome·연결 키 거절·명령 result·reg 추적·bind 이벤트·재접속 교체·지문 유지) · 컨트롤러 `test_device_pool`(PoolCreate·게이트·계획 미리보기의 연결 확인) |
+| 계측기 실측 | 실제 워커 + `cimsue-cli link`(앱과 같은 TLS 링크) + 컨트롤러 run 드라이버, .48 CSP 경유: `VOLTE-CALL-DEVICE-MO`·`-MT`·`-E2E` pass — SRD ≈ 1.08 s, 손실 0, RTD(RTCP 종단) 0.6~1.2 ms, MOS-CQ 4.27. 다음은 실기기 앱(Q4) |
 
 ## 8. 이행
 
@@ -266,10 +298,10 @@ Foreground Service 가 세션과 함께 든다(화면이 꺼져도 유지). Wind
 |---|---|---|
 | Q1 | 코어 측정 — RTCP-XR 빌드 켬(3 플랫폼) · `quality/` · 공용 E-model · `callQuality` · `cimsue-cli` stats 확장 · 바인딩 | `ext/pjproject` config_site · `sdk/core` · `sdk/android` · `sdk/windows` · `tester/worker`(EModel 공용화) |
 | Q2 | 코어 `drive/` — `DriveSession`(관찰자)·`LineSink` 로 drive 루프 이전 · `DeviceLink` TLS 링크(TOFU·ping·재접속) · `hello`/`use`/`media`/`quality` · `cimsue-cli link` · `Engine::setTxSource` 기준 음원 | `sdk/core` |
-| Q3 | 계측기 — `DeviceHub`·`K_DEVICE` · 컨트롤러 `DevicePool`·`GET /devices`·배치·게이트·`device_*`·KPI 요약 · libcsim RTCP 송신 · 동봉 시나리오 · 콘솔(연결된 단말 목록·풀 속성) | `tester/worker` · `cspsim` · `ems/tester` |
+| Q3 | 계측기 — `DeviceHub`·`DriveLink` · 컨트롤러 `DevicePool`·`GET /devices`·계획 미리보기 연결 확인·게이트·`device_*` · libcsim RTCP SR/RR·RTT·SRTCP · 동봉 시나리오 3종 · 콘솔(실기기 풀·연결된 단말) | `tester/worker` · `cspsim` · `ems/tester` |
 | Q4 | 앱 시험 모드 — Android core 공통(진입·설정·링크 서비스·오버레이·요약·이력·내보내기) + 앱 3종 · Windows 관제 앱 | `android/core` · 앱 · `windows/dispatch-desktop` |
 
-Q1·Q2 는 구현 반영 — 계측기 `real-ue` 는 cli 가 낸 `mos_cq`(RTT 실측·지터버퍼 폐기 포함)를 그대로 쓰고 `rtd_ms`·`real_rtd_ms` 를 기록한다. 링크는 워커 대역(파이썬 TLS 서버)으로 hello·welcome·`app_owned`·`media sample`·.48 경유 발신·ping·`callTerm`·quit·재접속·연결 키 거절·지문 불일치·CA 검증까지 확인했다. Q2·Q3 뒤에는 앱 없이 링크 모드 `cimsue-cli` 로 `device` 풀을 끝까지 검증할 수 있다.
+Q1·Q2·Q3 는 구현 반영 — 계측기 `real-ue` 는 cli 가 낸 `mos_cq`(RTT 실측·지터버퍼 폐기 포함)를 그대로 쓰고 `rtd_ms`·`real_rtd_ms` 를 기록한다. 링크는 워커 대역(파이썬 TLS 서버)으로 hello·welcome·`app_owned`·`media sample`·.48 경유 발신·ping·`callTerm`·quit·재접속·연결 키 거절·지문 불일치·CA 검증까지 확인했다.
 
 ## 9. 미해결 / 향후
 
@@ -281,6 +313,10 @@ Q1·Q2 는 구현 반영 — 계측기 `real-ue` 는 cli 가 낸 `mos_cq`(RTT �
   대상 관측)으로 CMP relay leg 별 수신 카운터를 읽는 경로를 둘지 결정한다 — 보고·제어 경로가 아니라 **관측 증거**로만.
 - **PTT 입→귀 지연**(TS 22.179 KPI 3) — 발언자 첫 RTP 송출 시각·수신자 재생 시각을 단말이 NTP 시각으로 `quality` 에 싣고 워커가 맞춘다.
   단말 시각 동기 품질이 전제라 별건.
+- **실기기 PTT 그룹 세션** — 그룹 세션은 멤버 역할이 같은 풀이어야 해서 실기기 하나와 가상 멤버를 한 그룹에 섞지 못한다. 실기기 talker + 가상
+  listener 시나리오(`PTT-GROUP-DEVICE-FLOOR`)는 그룹 세션의 풀 규칙을 넓힐 때.
+- **링크 재접속 뒤 재바인딩** — run 중 단말이 다시 붙으면 새 연결은 풀에 묶이지 않는다(그 run 에서 그 단말은 끊김으로 끝난다). 같은 `device_id` 의
+  재접속을 진행 중 풀에 다시 묶을지 결정.
 - **RFC 6849 미디어 루프백** — 한쪽 단말만으로 왕복 품질을 재는 시험. 객관 음질 비교 없이도 왕복 손실·지연 확인에 쓸 수 있다.
 - **영상 품질** — RTCP-XR 에 영상 지표가 없어 손실·지터·프레임률만 별도 필드로.
 - **운영 상시 품질 관측** — 시험이 아닌 운영 중 전 단말의 품질 수집(RFC 6035 `vq-rtcpxr` 또는 TS 26.114 §16 MTSI QoE)은 계측과 목적이 달라 이 문서
