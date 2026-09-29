@@ -157,11 +157,8 @@ class MainViewModel : ViewModel() {
     val state: StateFlow<SessionState>? get() = session?.state
     val error: StateFlow<String?>? get() = session?.error
 
-    fun show(s: AppScreen) {
-        // 같은 항목을 다시 누르면 **그 축의 처음으로** 돌아간다(모바일 관례) — 열어 둔 채널·더보기를 닫는다.
-        if (_screen.value == s) { _channel.value = null; _more.value = null; return }
-        _screen.value = s
-    }
+    /** 하단 내비 — 규칙은 [onNav] 가 갖는다(두 칸 이상 떨어져 있어도 한 번에 간다). */
+    fun show(s: AppScreen) = applyNav(nav().onNav(s))
 
     /**
      * 스와이프가 다른 장으로 넘어갔다 — 메뉴와 면을 **함께** 옮긴다([APP_PAGES], §6.3).
@@ -195,30 +192,24 @@ class MainViewModel : ViewModel() {
 
     fun openMore(item: MoreItem) { _more.value = item }
 
-    /**
-     * 뒤로가기 한 단계. 되돌릴 것이 있으면 true — 없으면 호출자가 기본 동작(앱 종료)을 한다.
-     *
-     * 순서는 **연 순서의 역순**이다: 채널·더보기의 안쪽 → 메뉴 안의 면 → 첫 화면([이력]).
-     * 첫 화면에서 더 누르면 앱이 닫히는 것이 관례이므로 거기서 false 를 돌린다.
-     *
-     * **면을 한 겹으로 세는 이유**: 스와이프로 «통화›통화내역» 까지 갔는데 뒤로가기가 곧바로 [이력] 로
-     * 튕기면 온 길을 잃는다. 면이 첫 면이 아닐 때는 그 메뉴의 첫 면으로 먼저 돌아간다
-     * (좌우로 민 것을 한 번에 되감지는 않는다 — 그건 스와이프로 되돌린다).
-     */
+    /** 뒤로가기 한 단계 — 규칙은 [onBack] 이 갖는다(가로채기 판정도 같은 함수를 쓴다). */
     fun back(): Boolean {
-        if (_channel.value != null) { _channel.value = null; return true }
-        if (_more.value != null) { _more.value = null; return true }
-        when (_screen.value) {
-            AppScreen.PTT -> if (_pttPane.value != PttPane.CHANNELS) {
-                _pttPane.value = PttPane.CHANNELS; return true
-            }
-            AppScreen.CALLS -> if (_callPane.value != CallPane.CALLS) {
-                _callPane.value = CallPane.CALLS; return true
-            }
-            else -> Unit
-        }
-        if (_screen.value != AppScreen.HISTORY) { _screen.value = AppScreen.HISTORY; return true }
-        return false
+        val next = nav().onBack() ?: return false
+        applyNav(next)
+        return true
+    }
+
+    /** 지금 좌표 — 이동 규칙([onNav]·[onBack])에 넘길 값. */
+    private fun nav() = NavState(
+        screen = _screen.value, channel = _channel.value, more = _more.value,
+        pttPane = _pttPane.value, callPane = _callPane.value)
+
+    private fun applyNav(n: NavState) {
+        _screen.value = n.screen
+        _channel.value = n.channel
+        _more.value = n.more
+        _pttPane.value = n.pttPane
+        _callPane.value = n.callPane
     }
 
     /**

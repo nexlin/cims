@@ -132,3 +132,54 @@ fun paneIndexOf(menu: AppScreen, pttPane: PttPane, callPane: CallPane): Int = wh
  */
 fun entryPane(menu: AppScreen, from: AppScreen): Int =
     if (menu.ordinal > from.ordinal) 0 else menu.paneCount - 1
+
+// ── 이동 규칙 ────────────────────────────────────────────────────────────────
+
+/**
+ * 화면 좌표 하나 — 이동 규칙이 다루는 전부.
+ *
+ * 규칙을 [MainViewModel] 안이 아니라 **값 위의 순수 함수**로 두는 이유: 뒤로가기는 «가로챌 것인가»
+ * 와 «무엇을 되돌릴 것인가» 두 곳에서 같은 판정을 해야 하는데, 손으로 두 번 적으면 반드시 어긋난다.
+ * 어긋나면 뒤로가기를 먹고도 화면이 그대로여서 관제사는 앱이 멈춘 줄 안다. 함수 하나를 양쪽이 쓴다.
+ */
+data class NavState(
+    val screen: AppScreen,
+    /** [무전] 이 열어 둔 채널 상세 — 메뉴를 옮겨도 기억된다. */
+    val channel: String? = null,
+    /** [더보기] 가 열어 둔 안쪽 화면. */
+    val more: MoreItem? = null,
+    val pttPane: PttPane = PttPane.CHANNELS,
+    val callPane: CallPane = CallPane.CALLS,
+)
+
+/**
+ * 하단 내비를 눌렀다 — **두 칸 이상 떨어져 있어도 한 번에** 그 메뉴로 간다.
+ *
+ * 같은 항목을 다시 누르면 **그 메뉴의** 안쪽 화면만 닫는다(모바일 관례). 다른 메뉴가 기억해 둔
+ * 안쪽 화면은 건드리지 않는다 — 그쪽으로 돌아가면 보던 자리가 있어야 한다.
+ */
+fun NavState.onNav(target: AppScreen): NavState = when {
+    screen != target -> copy(screen = target)
+    target == AppScreen.PTT -> copy(channel = null)
+    target == AppScreen.MORE -> copy(more = null)
+    else -> this
+}
+
+/**
+ * 뒤로가기 한 겹 — 되돌릴 것이 없으면 null(그때는 가로채지 않는다).
+ *
+ * 순서는 연 순서의 역순이다: ① **보고 있는 메뉴의** 안쪽 화면 → ② 그 메뉴의 첫 면 → ③ 첫 화면.
+ *
+ * ①이 «보고 있는 메뉴» 로 한정되는 것이 요점이다. 안쪽 화면은 메뉴마다 기억되므로, 다른 메뉴에서
+ * 그걸 닫으면 **화면은 그대로인데 뒤로가기만 한 번 먹힌다.**
+ *
+ * 돌려주는 값은 **반드시 지금과 다르다** — 같으면 «되돌릴 것이 없다» 는 뜻이므로 null 이다.
+ */
+fun NavState.onBack(): NavState? = when {
+    screen == AppScreen.PTT && channel != null -> copy(channel = null)
+    screen == AppScreen.MORE && more != null -> copy(more = null)
+    screen == AppScreen.PTT && pttPane != PttPane.CHANNELS -> copy(pttPane = PttPane.CHANNELS)
+    screen == AppScreen.CALLS && callPane != CallPane.CALLS -> copy(callPane = CallPane.CALLS)
+    screen != AppScreen.HISTORY -> copy(screen = AppScreen.HISTORY)
+    else -> null
+}

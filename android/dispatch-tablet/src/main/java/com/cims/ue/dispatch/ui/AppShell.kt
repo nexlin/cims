@@ -29,6 +29,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.foundation.LocalOverscrollFactory
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -37,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlin.math.abs
 
 /** 상단 바가 쓰는 값 — 내가 누구이고 어디에 붙어 있는가. */
 data class TopBarUi(
@@ -154,9 +156,7 @@ fun AppShellContent(
             // 끝 면에서 계속 밀면 안쪽이 더 갈 곳이 없어 **남은 끌기가 바깥으로 넘어간다**(중첩 스크롤) —
             //   그래서 통화›«통화내역» → [더보기] 가 한 동작으로 이어진다.
             val outer = rememberPagerState(initialPage = screen.ordinal) { AppScreen.entries.size }
-            LaunchedEffect(screen) {
-                if (screen.ordinal != outer.currentPage) outer.animateScrollToPage(screen.ordinal)
-            }
+            LaunchedEffect(screen) { outer.goTo(screen.ordinal) }
             HorizontalPager(
                 state = outer,
                 // **손가락을 같은 거리만 움직여도 넘어가게** 한다. 안쪽에서 넘어온 끌기에는 속도가 거의
@@ -167,7 +167,12 @@ fun AppShellContent(
                 modifier = Modifier.weight(1f)) { mi ->
                 val menu = AppScreen.entries[mi]
                 MenuPage(
-                    menu = menu, settled = outer.currentPage == mi, screen = screen,
+                    // **목적지까지 같아야 «정착»** 이다. `currentPage` 만 보면 건너뛰는 도중 지나가는
+                    //   장이 절반을 넘는 순간 자기를 정착으로 알리고, 그 알림이 목적지를 덮어써 이동이
+                    //   중간에 선다(내비로 두 칸 이상 건너뛸 때의 그 증상).
+                    menu = menu,
+                    settled = outer.currentPage == mi && outer.targetPage == mi,
+                    screen = screen,
                     wantPane = paneIndexOf(menu, pttPane, callPane),
                     onPage = onPage, tabs = tabs, content = content)
             }
@@ -203,13 +208,23 @@ private fun MenuPage(
     val initial = if (menu == screen) wantPane else entryPane(menu, from = screen)
     val inner = rememberPagerState(initialPage = initial) { menu.paneCount }
 
-    // 자리가 잡힌 장만 좌표를 알린다 — 미리 그려 둔 옆 장이 알리면 보지도 않은 면으로 상태가 끌려간다.
-    LaunchedEffect(settled, inner.currentPage) {
-        if (settled) onPage(AppPage(menu, inner.currentPage))
+    // **자리가 잡힌 장의, 자리가 잡힌 면만** 좌표를 알린다.
+    //
+    //   · 바깥이 아직 가는 중이면(`settled` 거짓) 미리 그려 둔 옆 장이 보지도 않은 면으로 상태를 끈다.
+    //   · 안쪽이 가는 중이면 지나가는 면이 곧 `wantPane` 이 되어 아래 효과가 다시 시작되고, 가던
+    //     애니메이션이 취소돼 중간에 선다 — 탭을 두 칸 이상 건너뛸 때의 그 증상이다.
+    val innerSettled = inner.currentPage == inner.targetPage
+    LaunchedEffect(settled, innerSettled, inner.currentPage) {
+        if (settled && innerSettled) onPage(AppPage(menu, inner.currentPage))
     }
-    // 탭·내비가 면을 바꿨을 때 따라간다(스와이프로 바뀐 것은 이미 같은 값이라 no-op).
+    // 탭·내비·사람 메뉴가 면을 **바꿨을 때만** 따라간다.
+    //
+    // `settled` 를 열쇠에 넣으면 안 된다 — 밀어서 이 메뉴에 막 들어온 순간 `settled` 가 참이 되면서
+    //   이 효과와 위의 알림이 **동시에** 깨어난다. 알림은 «가장자리 면에 섰다» 고 말하는데 이 효과는
+    //   아직 옛 기억값(`wantPane`)으로 되돌려 버린다. 밀어서 들어간 면이 곧바로 튕겨 나오던 이유다.
+    //   밀어서 바뀐 것은 알림이 정본이고, 눌러서 바뀐 것만 여기가 따라간다.
     LaunchedEffect(wantPane) {
-        if (settled && wantPane != inner.currentPage) inner.animateScrollToPage(wantPane)
+        if (settled) inner.goTo(wantPane)
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -235,10 +250,23 @@ private fun MenuPage(
 }
 
 /**
+ * 한 칸이면 미끄러지듯, 멀면 곧바로.
+ *
+ * 멀리 갈 때 `animateScrollToPage` 로 쓸고 가면 두 가지가 나빠진다 — 지나치는 장이 한 번씩 그려졌다
+ * 사라져 느리고, 무엇보다 **그 장들이 자기를 «지금 화면» 으로 알린다.** 내비에서 [이력] → [더보기] 를
+ * 누르면 [무전]·[통화] 를 거치는데, 거치는 순간 상태가 그쪽으로 바뀌어 이동이 거기서 멈춘다.
+ * 내비·사람 메뉴처럼 **한 번에 닿아야 하는** 이동은 중간을 거치지 않는다.
+ */
+private suspend fun PagerState.goTo(page: Int) {
+    val to = page.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
+    if (to == currentPage) return
+    if (abs(to - currentPage) == 1) animateScrollToPage(to) else scrollToPage(to)
+}
+
+/**
  * 메뉴가 바뀌는 문턱 — 한 장의 이 비율만큼 끌면 넘어간다(기본값은 0.5).
  *
  * 면을 넘길 때는 속도만으로도 넘어가는데 메뉴는 거리로만 판정되므로, 손끝의 느낌을 맞추려면 이쪽을
  * 낮춰야 한다. 면 끝에서 더 미는 동작은 «옆 메뉴로 가겠다» 말고 다른 뜻이 없어 낮춰도 오조작이 아니다.
  */
 private const val MENU_SNAP_THRESHOLD = 0.15f
-

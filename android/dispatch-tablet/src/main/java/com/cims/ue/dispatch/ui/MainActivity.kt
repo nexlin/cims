@@ -148,14 +148,9 @@ private fun Shell(vm: MainViewModel, onShutdown: () -> Unit) {
 
     // 뒤로가기 = 연 순서의 역순으로 한 겹씩(§6.3). **되돌릴 것이 있을 때만 가로챈다** —
     //   첫 화면에서 가로채면 앱을 벗어날 방법이 없어진다(시스템 기본 동작에 맡긴다).
-    // 되돌릴 것 = 안쪽 화면(채널·더보기) · **보고 있는 메뉴**의 첫 면이 아닌 면 · 첫 화면이 아닌 메뉴.
-    //   셋 다 아니면 가로채지 않는다 — 가로채면 앱을 벗어날 방법이 없어진다(§6.3).
-    //
-    // 판정은 `vm.back()` 과 **정확히 같아야 한다.** 여기서만 참이면 뒤로가기를 먹고도 아무 일이
-    //   일어나지 않아 앱을 못 닫는다(예: [이력] 에 있는데 [무전] 의 면이 첫 면이 아닌 경우).
-    val canBack = channel != null || more != null || screen != AppScreen.HISTORY ||
-        (screen == AppScreen.PTT && pttPane != PttPane.CHANNELS) ||
-        (screen == AppScreen.CALLS && callPane != CallPane.CALLS)
+    // 가로채기 판정은 **되돌릴 동작 그 자체**에 묻는다(`onBack() != null`). 조건을 따로 적으면
+    //   `back()` 과 어긋나고, 어긋나는 순간 뒤로가기를 먹고도 화면이 그대로여서 앱을 못 닫는다.
+    val canBack = NavState(screen, channel, more, pttPane, callPane).onBack() != null
     BackHandler(enabled = canBack) { vm.back() }
 
     val profile = session?.profile?.collectAsStateWithLifecycle()?.value
