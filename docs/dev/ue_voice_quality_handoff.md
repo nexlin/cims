@@ -1,7 +1,8 @@
 # 단말 음성 품질·계측 링크 — 다른 개발 환경에서 할 일
 
-.48(소스 서버)에서 Q1~Q3 를 구현·실측했다(정본 [../design/features/ue_voice_quality.md](../design/features/ue_voice_quality.md)).
+.48(소스 서버)에서 Q1~Q3 를 구현·실측했고 계측기를 배포했다(정본 [../design/features/ue_voice_quality.md](../design/features/ue_voice_quality.md)).
 이 서버에는 Android(NDK·SWIG) 빌드 환경과 Windows(MSVC·dotnet)가 없다. 그래서 **플랫폼 빌드 확인과 Q4(앱 시험 모드)** 를 여기 모았다.
+작업 분담은 기존 관례와 같다 — **단말 SDK·Android 단말 앱 = .45 서버**, **관제 앱(Windows 데스크톱·Android 태블릿) = Windows 개발 환경**.
 
 | 커밋 | 내용 |
 |---|---|
@@ -10,11 +11,11 @@
 | `ef4f345e` | Q2 코어 계측 링크 — 공개 `cimsue/drive.h`(`DriveSession`·`DeviceLink`)·`Engine::setTxSource`·`net/tls_stream`·`cimsue-cli link` |
 | `917cafa2` | Q3 계측기 `device` 풀 — 워커 `DeviceHub`(Device.Port **7120**)·컨트롤러·콘솔·libcsim RTCP |
 
-| 환경 | 할 일 |
-|---|---|
-| **Android 빌드 머신(WSL2 — `sdk/android/build-native.sh`)** | §1.1 선행 확인 · §2 바인딩(SWIG·Kotlin) · §3.1 관제 태블릿 시험 모드 |
-| **Windows 머신(`sdk/windows` 슈퍼빌드 · dotnet)** | §1.2 선행 확인 · §2 바인딩(C API·.NET) · §3.2 관제 데스크톱 시험 모드 |
-| **.48(이 서버)** | §4.1 계측기 배포(워커 새 버전) — 요청이 오면 여기서 한다 |
+| 환경 | 할 일 | 순서 |
+|---|---|---|
+| **.45 서버 — 단말 SDK·Android 단말** | §1.1 Android 빌드 확인(A1~A5) · §2 SWIG·Kotlin 파사드(`DeviceLink`) · `:cimsue` AAR 을 관제 태블릿이 쓸 수 있게 · §3.0 `volte-client`·`ptt-client` 의 SDK 이식(시험 모드 선행 조건) | 먼저 — 관제 태블릿이 이 AAR 을 쓴다 |
+| **Windows 개발 환경 — 관제 앱** | §1.2 Windows 빌드 확인(W1~W6) · §2 C API·.NET(`DeviceLink`) · §3.2 관제 데스크톱 시험 모드 · §3.1 관제 태블릿 시험 모드(.45 의 Kotlin 파사드 위) | .45 의 §2 Kotlin 파사드 뒤에 태블릿 |
+| **.48(이 서버)** | §4.1 계측기 배포 — **완료** · 결과 회신(§4.3)을 받아 설계 문서 반영 | — |
 
 시험 대상 = .48 배포본(CSP SIP UDP `121.161.164.48:15060`, VoLTE 도메인 `volte.cims.example.kr`, PTT 도메인 `ptt.cims.example.kr`).
 
@@ -24,7 +25,7 @@
 
 아래는 코드가 들어가 있지만 **이 서버에서 컴파일해 보지 못한** 부분이다. Q4 전에 빌드부터 통과시킨다.
 
-### 1.1 Android (WSL2)
+### 1.1 Android — .45 서버
 
 | # | 확인 | 파일 |
 |---|---|---|
@@ -34,7 +35,7 @@
 | A4 | `Engine::addObserver`·`removeObserver`·`setTxSource` 가 `engine.h` 에 추가돼 SWIG 이 다시 생성한다 — 파사드 노출은 §2 에서 | `sdk/core/include/cimsue/engine.h` |
 | A5 | 코어 새 소스(`src/quality/*`·`src/net/tls_stream.cpp`·`src/drive/*`·`src/util/json_lite.h`)가 NDK 로 컴파일된다. `tls_stream.cpp` 는 POSIX `poll` 을 쓴다 | `sdk/core/CMakeLists.txt` |
 
-### 1.2 Windows
+### 1.2 Windows — Windows 개발 환경
 
 | # | 확인 | 파일 |
 |---|---|---|
@@ -77,9 +78,9 @@ void cimsue_device_link_destroy(cimsue_device_link_t*);
 /* 구조체 id 는 CIMSUE_STRUCT_COUNT_ 앞 끝에 덧붙인다 — 기존 번호를 바꾸지 않는다(AbiLayoutTests) */
 ```
 
-- **.NET** — `DeviceLink : IDisposable`(`Start(config, accounts)`·`Stop()`·`State`·`event StateChanged(LinkState, string)`). 콜백은 코어 링크
+- **C API·.NET — Windows** — `DeviceLink : IDisposable`(`Start(config, accounts)`·`Stop()`·`State`·`event StateChanged(LinkState, string)`). 콜백은 코어 링크
   스레드에서 오므로 UI 스레드로 마샬링한다(기존 Listener 규약과 같다).
-- **SWIG(Android)** — `cimsue.i` 에 `%include "cimsue/drive.h"` 를 넣고 `%feature("director") cimsue::DeviceLinkListener;` 를 준다.
+- **SWIG(Android) — .45** — `cimsue.i` 에 `%include "cimsue/drive.h"` 를 넣고 `%feature("director") cimsue::DeviceLinkListener;` 를 준다.
   `DriveSession`·`LineSink` 는 `%ignore` 해도 된다. Kotlin 파사드는 `DeviceLink` 래퍼 + `StateFlow<LinkState>` 로.
 - **계정 목록** — 앱이 가진 회선(`volte`·`voip`·`ptt`)마다 `{service, accountId, aor, msisdn}` 를 넘긴다. 계측기는 풀의 `service` 로 `use` 한다.
 - **수명** — `DeviceLink::start` 는 스레드만 띄우고 곧 돌아온다. `stop` 은 링크를 닫고, 이 링크가 구동한 호만 끊는다. Engine 보다 먼저 멈춘다.
@@ -95,11 +96,11 @@ void cimsue_device_link_destroy(cimsue_device_link_t*);
 
 | 앱 | 엔진 | 시험 모드 |
 |---|---|---|
-| `android/dispatch-tablet` | libcimsue(`:cimsue`) | **지금 가능** — §3.1 |
-| `windows/dispatch-desktop` | libcimsue(.NET) | **지금 가능** — §3.2 |
-| `android/volte-client`·`android/ptt-client` | `android/core` 의 자체 pjsua2 래퍼(`SipController`) — libcimsue 아님 | **SDK 이식이 선행**(ue_sdk.md §5.3). 한 프로세스에 pjsua 는 하나라 두 엔진을 같이 띄울 수 없다. 이식 전에는 이 두 앱에 시험 모드를 넣지 않는다 |
+| `android/dispatch-tablet` | libcimsue(`:cimsue`) | **가능** — §3.1 · Windows 개발 환경(.45 의 Kotlin 파사드 위) |
+| `windows/dispatch-desktop` | libcimsue(.NET) | **가능** — §3.2 · Windows 개발 환경 |
+| `android/volte-client`·`android/ptt-client` | `android/core` 의 자체 pjsua2 래퍼(`SipController`) — libcimsue 아님 | **SDK 이식이 선행**(ue_sdk.md §5.3) · .45. 한 프로세스에 pjsua 는 하나라 두 엔진을 같이 띄울 수 없다. 이식 뒤 시험 모드는 §3.1 과 같은 구성(`android/core` 공통 조각으로 두면 세 앱이 같이 쓴다) |
 
-### 3.1 Android 관제 태블릿 (`android/dispatch-tablet`)
+### 3.1 Android 관제 태블릿 (`android/dispatch-tablet`) — Windows 개발 환경
 
 | 항목 | 위치·방법 |
 |---|---|
@@ -112,7 +113,7 @@ void cimsue_device_link_destroy(cimsue_device_link_t*);
 | 화면 | 통화 중 오버레이(`CimsUe.callQuality` 1 초) · 호 종료 요약 · 최근 50 호 이력 · 내보내기(JSON — 공유 시트) · [지문 초기화] 버튼(pinFile 삭제) |
 | 착신 | 링크가 붙어 있어도 착신은 평소처럼 알린다. 계측기가 `answer` 를 보내면 코어가 받는다 — 앱은 그 호를 평소 호처럼 보여 주면 된다 |
 
-### 3.2 Windows 관제 데스크톱 (`windows/dispatch-desktop`)
+### 3.2 Windows 관제 데스크톱 (`windows/dispatch-desktop`) — Windows 개발 환경
 
 | 항목 | 위치·방법 |
 |---|---|
@@ -127,13 +128,19 @@ void cimsue_device_link_destroy(cimsue_device_link_t*);
 
 ## 4. 시험 절차
 
-### 4.1 계측기 준비 — .48 몫
+### 4.1 계측기 — .48 배포 완료
 
-- **워커 배포** — 배포된 워커는 아직 Q3 이전 버전이라 `Device.Port` 수신점이 없다. .48 에서 `make dist` → 워커 패키지를 올리고 배포한다
-  (`scripts/oam-deploy.py`, [oam_api_deploy_runbook.md](oam_api_deploy_runbook.md)). 컨트롤러(oam-cims-tester)와 콘솔도 같이 올린다.
-- **워커 설정** — `Device.Port` 7120, 연결 키 `Device.PairKey`(시험에 쓸 값). 첫 기동 때 자체 서명 인증서를 `config/device.{crt,key}` 에
-  만든다. 지문은 health `devices.fingerprint` 로 확인한다.
-- **망** — 단말이 워커 호스트 `IP:7120/tcp` 에 닿아야 한다(방화벽·Wi-Fi/VPN). 단말이 먼저 붙으므로 워커 쪽 NAT 는 상관없다.
+| 항목 | 값 |
+|---|---|
+| 배포 | `cims-tester-worker` **0.1.32**(dep 8, 워커 이름 `media01`) · `oam-cims-tester` **0.1.35**(dep 7) · `oam` **0.2.177**(dep 1 — 콘솔 번들에 실기기 풀 화면) |
+| 계측기 주소(단말에 넣을 값) | **`121.161.164.48:7120`** (TLS, `0.0.0.0:7120` 수신) |
+| 연결 키 | **없음**(`Device.PairKey` 비움 — 아무 단말이나 붙는다). 쓰려면 워커 배포 설정에 넣고 재기동: `scripts/oam-deploy.py config 8 …` |
+| 워커 인증서 지문(TOFU) | `8ed1e6355b9fe729fcd380f1da9156734863f1a114fc0fdd28110b4bf8e96f86` — 자체 서명, `/opt/cims-agent/modules/cims-tester-worker/runtime/device.{crt,key}`(업그레이드·재기동에도 같다 — 재기동 뒤 같은 지문 확인) |
+| 확인 | 워커 health `devices.listening=true` · 컨트롤러 `GET /api/v1/tester/devices?topology=1` · 이 서버의 `cimsue-cli link 121.161.164.48:7120` 이 붙어 목록에 회선·등록 상태가 보였다 |
+| 토폴로지 | tb48 = id 1. `device` 풀은 아직 없다 — 시험할 번호가 정해지면 콘솔 토폴로지 편집기에서 실기기 풀을 놓고 "연결된 단말"에서 [추가] |
+
+- **망** — 단말이 `121.161.164.48:7120/tcp` 에 닿아야 한다(방화벽·Wi-Fi/VPN). 단말이 먼저 붙으므로 단말 쪽 NAT 는 상관없다.
+- **앱 없이 먼저** — Windows 나 .45 에서도 `cimsue-cli … link 121.161.164.48:7120` 로 같은 경로를 확인할 수 있다(앱과 같은 코어 링크).
 
 ### 4.2 단계별 시험
 

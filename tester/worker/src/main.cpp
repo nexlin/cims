@@ -13,6 +13,7 @@
 #include <string>
 #include <thread>
 #include <unistd.h>
+#include <sys/stat.h>
 
 #include "Json.h"
 #include "Worker.h"
@@ -123,11 +124,35 @@ int main(int argc, char** argv) {
                 if (access(cand.c_str(), R_OK) == 0) *p = cand;
             }
             if (cfg.realUeTlsCaFile.empty()) cfg.realUeTlsCaFile = cfg.tlsCaFile;   // 실단말 앵커 기본 = 같은 CA
-            // 계측 링크 수신점 인증서 — 기본 <모듈>/config/device.{crt,key}(없으면 워커가 자체 서명을 만든다). 상대 경로는 모듈 기준
+            // 계측 링크 수신점 인증서(ue_voice_quality.md §6.1) — 비면 워커가 자체 서명을 만든다. 단말이 지문을 고정하므로(TOFU) **업그레이드에
+            //   살아남는 자리**에 둔다: 배포 레이아웃(<모듈>/<버전>/<모듈>/ + <모듈>/current)이면 버전과 무관한 <모듈>/runtime/(없으면 만들고,
+            //   이 버전 디렉터리에 이미 만든 것이 있으면 옮겨 잇는다 — 오케스트레이터 DataDir 과 같은 규칙), 아니면(소스 트리) <모듈>/config/.
+            //   명시값의 상대 경로는 모듈 기준
             const std::string base = moduleDir.empty() ? std::string(".") : moduleDir;
-            if (cfg.deviceCertFile.empty()) cfg.deviceCertFile = base + "/config/device.crt";
+            std::string certDir = base + "/config";
+            if (!moduleDir.empty()) {
+                const std::string root = base + "/../..";
+                struct stat st{};
+                if (lstat((root + "/current").c_str(), &st) == 0) {
+                    const std::string rt = root + "/runtime";
+                    mkdir(rt.c_str(), 0755);
+                    if (access(rt.c_str(), W_OK) == 0) {
+                        certDir = rt;
+                        for (const char* f : { "/device.crt", "/device.key" }) {
+                            std::string dst = rt + f, src = base + "/config" + f;
+                            if (access(dst.c_str(), R_OK) != 0 && access(src.c_str(), R_OK) == 0) {
+                                std::ifstream in(src, std::ios::binary);
+                                std::ofstream out(dst, std::ios::binary);
+                                out << in.rdbuf();
+                                if (std::string(f) == "/device.key") chmod(dst.c_str(), 0600);
+                            }
+                        }
+                    }
+                }
+            }
+            if (cfg.deviceCertFile.empty()) cfg.deviceCertFile = certDir + "/device.crt";
             else if (cfg.deviceCertFile[0] != '/') cfg.deviceCertFile = base + "/" + cfg.deviceCertFile;
-            if (cfg.deviceKeyFile.empty()) cfg.deviceKeyFile = base + "/config/device.key";
+            if (cfg.deviceKeyFile.empty()) cfg.deviceKeyFile = certDir + "/device.key";
             else if (cfg.deviceKeyFile[0] != '/') cfg.deviceKeyFile = base + "/" + cfg.deviceKeyFile;
             cfg.realUeLogDir = c["RealUe"]["LogDir"].asString("");
             if (cfg.realUeLogDir.empty()) cfg.realUeLogDir = (moduleDir.empty() ? std::string("log") : moduleDir + "/log") + "/real-ue";

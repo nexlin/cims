@@ -236,7 +236,7 @@ Foreground Service 가 세션과 함께 든다(화면이 꺼져도 유지). Wind
 ### 6.1 워커
 
 - **`DeviceHub`**(`tester/worker/src/DeviceHub.{h,cpp}`) — 설정 `Device.Ip`(기본 `0.0.0.0`)·`Device.Port`(기본 **7120**, 0 = 끔)·`CertFile`/`KeyFile`
-  (비면 `<모듈>/config/device.{crt,key}` — 없으면 기동 때 자체 서명 EC P-256 을 만들어 두고 재기동에도 같은 지문)·`PairKey`·`MaxDevices`(32).
+  (비면 업그레이드에 살아남는 `<모듈>/runtime/device.{crt,key}` — 배포 레이아웃(`<모듈>/current`)에서 워커가 만든다, 소스 트리 실행은 `<모듈>/config/`. 없으면 기동 때 자체 서명 EC P-256 을 만들어 두고 재기동·업그레이드에도 같은 지문)·`PairKey`·`MaxDevices`(32).
   포트를 못 열어도 워커는 뜨고 health 가 알린다. 연결마다 입출력 스레드 하나(읽기·쓰기 큐·15 s ping·45 s 끊김), 핸드셰이크·hello 는 연결마다
   스레드라 느린 단말이 다른 단말의 수락을 막지 않는다. hello 검사 = `proto`·`pair_key`(틀리면 `bye{pair_key}`)·상한(`bye{full}`). **같은
   `device_id` 가 다시 붙으면 옛 연결을 닫고** 그 연결을 쓰던 풀에는 링크 끊김을 알린다.
