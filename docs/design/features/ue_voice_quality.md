@@ -301,6 +301,7 @@ SRTCP 보호/해제(RFC 3711 §3.4 — 수신 보고 블록도 해제해서 읽�
 | Q3 | 계측기 — `DeviceHub`·`DriveLink` · 컨트롤러 `DevicePool`·`GET /devices`·계획 미리보기 연결 확인·게이트·`device_*` · libcsim RTCP SR/RR·RTT·SRTCP · 동봉 시나리오 3종 · 콘솔(실기기 풀·연결된 단말) | `tester/worker` · `cspsim` · `ems/tester` |
 | Q4 | 앱 시험 모드 — Android core 공통(진입·설정·링크 서비스·오버레이·요약·이력·내보내기) + 앱 3종 · Windows 관제 앱 | `android/core` · 앱 · `windows/dispatch-desktop` |
 
+플랫폼 빌드 확인(Android·Windows)과 Q4 는 다른 개발 환경 몫 — 인계 [../../dev/ue_voice_quality_handoff.md](../../dev/ue_voice_quality_handoff.md).
 Q1·Q2·Q3 는 구현 반영 — 계측기 `real-ue` 는 cli 가 낸 `mos_cq`(RTT 실측·지터버퍼 폐기 포함)를 그대로 쓰고 `rtd_ms`·`real_rtd_ms` 를 기록한다. 링크는 워커 대역(파이썬 TLS 서버)으로 hello·welcome·`app_owned`·`media sample`·.48 경유 발신·ping·`callTerm`·quit·재접속·연결 키 거절·지문 불일치·CA 검증까지 확인했다.
 
 ## 9. 미해결 / 향후
