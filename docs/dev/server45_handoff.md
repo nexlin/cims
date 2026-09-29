@@ -107,7 +107,10 @@ IMEI 를 못 얻는 플랫폼(Windows 데스크톱 등)은 지금처럼 UUID URN
 | S9 | 하 | CSP ICB 목록 적재(`DbManager.cpp` ~433·643) | 사람의 `icb_identities` 가 PTT 회선에도 실려 non-MCPTT 1:1 INVITE 를 막고, CSC 는 전화 회선만 갱신해 PTT 쪽 복사본이 낡는다 | TS 24.611 (MMTel 부가서비스 — MCPTT 대상 아님) | PTT 회선에는 싣지 않는다 |
 | S10 | 문서 | 정본 R6·`ptt_flows.md` | "Floor Idle 에 Permission 0" — Floor Idle 메시지에는 그 필드가 없다(코드는 맞다) | TS 24.380 §8.2.8 | **이번에 문서 정정함** |
 
-**.48 반영(코드 — 빌드·S1 통과, 배포·라이브 실측 전)**:
+**.48 반영 — 배포(csp 0.2.163·cmp 0.2.102·csc 0.2.131)·실측 PASS**: tb48 `VOLTE-ICB-ALL` 5/5·`VOLTE-ICB-IDENTITY` 8/8(와이어 603 에 `Reason: SIP;cause=603`),
+`PTT-GROUP-CALL-BROADCAST` 9/9(CMP `broadcast initiator=…`·비개시자 Floor Request Deny #5), 회귀 `PTT-GROUP-CALL-BASIC` 11/11·`PTT-FLOOR-HANDOVER` 7/7·
+`PTT-GROUP-LISTEN` 7/7·`PTT-GROUP-LISTEN-ROSTER`(visible) 6/6·`PTT-GROUP-LISTEN-CONF-DENIED` 4/4. S1·S3·S5 의 가장자리(재합류 mc_granted·개시 실패·동시 개시)는
+계측기 시나리오가 없어 코드 경로만 확인했다. .45·.135 는 미반영.
 
 | # | 반영 |
 |---|---|
