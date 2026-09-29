@@ -150,7 +150,7 @@
   F1~F4 를 누르면 대상 화면이 별창이면 그 별창을, 아니면 주 창을 앞으로 가져와 결과가 보이게 하고, 별창의 [관제로 F1] 도 주 창을 앞으로 가져온다.
 - **⑤⑥ → 이력.** 흐름 패널 머리의 [이력에서 보기]는 종류(PTT/통화)를 맞춰 [이력]으로 넘어간다 — 오늘·진행 중은 ①②⑤⑥ 가 정본, 끝난 세션의 날짜 조회는 이력.
 - 개발 스위치: `--ui-preview --ui-preview-screen=history|groups|admin` = 로그인 없이 해당 화면(관리 화면은 범위 검사 생략, 목록은 "로그인 전"), `--ui-preview-canvas` = 관제
-  캔버스에 표본 채널·세션(멤버 그룹 4·청취 범위 3·진행 중 그룹콜/사설콜/애드혹·긴급 청취·VoLTE 통화 2)을 심어 카드 2/3줄·발언 바·② 섹션·③ 카드를 그려 본다(조작은 동작 안 함),
+  캔버스에 표본 채널·세션(멤버 그룹 4·청취 범위 3·진행 중 그룹콜/사설콜/애드혹·일제 통화 개시/수신·긴급 청취·VoLTE 통화 2)을 심어 카드 2/3줄·발언 바·② 섹션·③ 카드를 그려 본다(조작은 동작 안 함),
   `--ui-preview-shot=<png>` = 주 창을 WPF 로 렌더해 PNG 저장 후 종료(화면 잠금·원격 세션에서도 XAML 점검 — 팝오버는 별 HWND 라 안 찍힌다). `--ui-preview` 는 실제 앱과
   다른 단일 인스턴스 이름을 써 실행 중인 관제 앱 옆에서 띄울 수 있다.
 
@@ -182,7 +182,7 @@
   대기면 `마지막 세션 hh:mm · 길이 · 참가 n`. 상태 없음(관리 범위만)이면 `상태 없음 · 구독 범위 밖 · 소유자`. SDS 요약은 여기 넣지 않는다(④ 가 정본) —
   미읽음 SDS 는 1줄 배지 `✉ n`(클릭 → ④ 스레드).
 - **3줄(포커스 카드만)**: 로스터 칩(발언 중 녹색 · 나 점선 · `+n`, 청취 멤버는 `listenVisibility=visible` 일 때만) · 남은 발언 게이지(Granted Duration) ·
-  [로스터 전체 +n][긴급 호출][편집][이탈/종료]. 로스터 칩 클릭/우클릭 = 사람 메뉴(§4.1).
+  [로스터 전체 +n][일제 통화][긴급 호출][편집][이탈/종료]. 로스터 칩 클릭/우클릭 = 사람 메뉴(§4.1).
   **[로스터 전체]는 카드를 펼치지 않는다** — 3×2 격자는 카드 높이가 고정이라야 서고 큰 그룹 하나가 격자를 먹으면
   «화면 한 장»(§1)이 깨진다. 접힌 `+n` 이 있을 때만 뜨고, 누르면 **[PTT 그룹] 화면 상세**(§4.7 — 전 멤버 ×
   발언 중·참여·미참가)로 간다. 밖에서 그룹을 지목하므로 그 화면의 필터·검색을 [전체]로 되돌린 뒤 고른다 —
@@ -194,6 +194,12 @@
 - **조작 버튼**은 호버 때 보이고, 세션을 끝내는 것([종료]·[음소거]·[청취 중])만 상시.
 - **긴급**: `mcptt.emergency`/`imminentPeril` 세션은 카드 테두리 빨강/주황 + 전역 배너. 관제사 긴급 개시는 3줄 [긴급 호출](확인) —
   `GroupCallOptions.emergency`, 자격 없으면 403 사전 문구.
+- **일제 통화**(TS 24.379 §4.12 — 그룹 종류가 아니라 호 속성, [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §4.4 U6): 관제사 개시는 3줄 [일제 통화] —
+  멤버 편성 그룹에 진행 중 세션이 없을 때만 활성(진행 중이면 서버가 합류로만 받는다 — 그 문서 §3.2. chat 그룹은 서버가 broadcast-ind 를 무시해 비활성 — 그룹 종류는
+  관리 목록 `sessionType`). `GroupCallOptions.broadcast` → 개시 카드 자동 포커스 + 단일 발언 대상(애드혹 우선과 같은 규칙). 개시자만 발언하고 PTT 를 놓으면 코어가
+  호를 해제한다(발언 바 안내 "발언을 놓으면 통화가 끝납니다"). 일제 통화 카드는 1줄 배지 "일제"(①②) · ① 2줄 보조 "일제 통화 · 발언을 놓으면 종료 / 수신 전용".
+  판정은 서버가 알린 값 — 착신 mcptt-info `broadcast-ind` 또는 floor 메시지 B-bit(진행 중 일제 통화에 늦게 합류한 leg 은 B-bit 로만 안다). 수신 멤버(Taken·Idle
+  Permission 0)는 발언 대상 체크 불가. 서버가 일반 통화로 연 개시(첫 floor 메시지에 B-bit 없음)는 경고 토스트. ⑤ 에 개시·수신·종료 행.
 
 ### 4.1 ① 내 채널 (상단 왼쪽)
 
@@ -383,7 +389,7 @@ SIP transport 콤보는 **ANY** 를 포함한 넷(콘솔 라벨과 같다) — A
 **행 한 번 클릭 = 상세**: 머리(이름 · id · [멤버]·[세션 진행 중] 배지 · [편집](`canManage` 행만)) · 소유자(내 것은 "이름(나)", 나머지는 문서 GET 이 채움) · 소속 · 정책(우선순위·긴급 허용·세션 종류) ·
 청취 노출(은닉/투명) · 능력(SDS·FD·영상·암호화·affiliation) · "멤버 N / affiliation M" 과 멤버 목록(이름·번호·의장, 상태 = 발언 중/참여/미참가, 나) — 로스터·발언은 1초 틱으로 갱신 ·
 바닥 [삭제](`canManage` 행만) [채널로](관제 캔버스의 채널 카드로, 멤버 그룹이면 합류).
-**[편집]·[+ 새 그룹]·행 더블클릭 = 같은 카드 자리의 인라인 편집 폼**(`GroupEditView`, 별창 없음) — 왼쪽 속성 · 오른쪽 멤버(PTT 주소록 후보 ↔ 선택, 의장 토글) · 바닥 [취소][저장/그룹 만들기].
+**[편집]·[+ 새 그룹]·행 더블클릭 = 같은 카드 자리의 인라인 편집 폼**(`GroupEditView`, 별창 없음) — 왼쪽 속성(세션 종류 = prearranged/chat — 일제 통화는 호 속성이라 선택지에 없다) · 오른쪽 멤버(PTT 주소록 후보 ↔ 선택, 의장 토글) · 바닥 [취소][저장/그룹 만들기].
 편집 중엔 목록·[↻]·[+ 새 그룹]이 잠겨 편집 대상이 바뀌지 않는다(저장·취소로만 나온다). 저장 뒤 목록을 재조회하고 그 그룹(새 그룹이면 응답 uri 의 id)을 선택해 상세로 돌아온다.
 관제 캔버스 ② 범위 채널의 [편집]/[+ 새 채널]은 화면을 바꾸지 않고 같은 폼을 **드로어**로 연다(§4.2) — 두 진입이 `GroupEditViewModel` 하나를 공유한다.
 목록 원천 = `GET /provisioning/directory/groups`(**관리 범위 안(org_code) ∪ 내 소유 ∪ 관제 그룹 청취 범위(`ptt_listen`) ∪ 내 멤버 그룹**, 멤버가 아니어도) — 행의 `canManage`(관리 범위 안 또는 내 소유,
@@ -400,7 +406,7 @@ VoLTE 감청 하나 = 창 하나, PTT 청취는 ② 카드 토글이 기본이�
 | **VoLTE 감청** | ⑥ 행·③ 그룹원 띠 [청취] → `join(dlg)` → `CallInfo.listenOnly && joinedDialog≠""` | 제목 "감청 — A ↔ B" · 은닉/투명 배지(`listenVisibility`) · 경과 · 두 줄 `caller`/`callee`(RFC 5576 `label`) 각각 이름·**레벨 미터**·활성 점(`MediaSource.active/level` — U10 관측 API 후속 시 실시간, 그 전엔 `active`) · 라우트(기본 🎧) · [양쪽 ▾](표시용 — tap 모드는 서버 운용값) · [청취 종료] | [청취 종료]·창 닫기 = `hangup`. 원 통화 종료 → 서버 BYE → "통화 종료됨" 3초 후 자동 닫힘 |
 | **PTT 청취** | ② 카드 [청취] → `joinGroupCall(listenOnly)` — 기본은 카드 안 토글 표시(§4.2), 창은 [창으로] 를 눌렀을 때 | 제목 "청취 — 그룹명" · 배지 "청취 전용" · 발언자 이름·레벨·경과(`onFloor` Taken) · 참가자 수(`onRoster`) · 긴급 배지 · "발언 요청 불가(Permission=0)" 고정 문구 · 라우트(기본 🔊) · 음량 · [청취 종료] | [청취 종료]·창 닫기 = `leaveGroupCall`. 480 이면 창을 띄우지 않고 토스트 |
 
-- **창을 최소화해도 청취는 계속된다** — 상단 바 "감청 중 N" 칩이 열린 창을 나열하고 클릭 시 복원. 창 닫기(×)는 종료(설정 "닫기 전 확인").
+- **창을 최소화해도 청취는 계속된다** — 상단 바 "감청 중 N" 칩이 열린 창을 나열하고 클릭 시 복원. 창 닫기(×)는 종료(설정 "닫기 전 확인"). 앱 종료로 닫힐 때는 다시 묻지 않는다 — 주 창 종료 확인이 감청 창·진행 세션을 이미 세고(§6), Shutdown 중 취소는 무시되므로 두 번째 질문은 종료만 붙잡는다(`App.IsExiting`).
 - 감청 창은 포커스를 훔치지 않는다. 주 창의 착신·긴급 배너가 우선.
 - 여러 창의 소리는 라우트별로 섞인다 — 기본값이 VoLTE 감청 🎧 / PTT 청취 🔊 인 이유. 동시 청취 상한 기본 4(설정).
 - 앱은 감청 이력을 로컬 내역(⑤⑥ "청취 시작/종료" 행)에만 남기고 감사 정본은 서버(`E-AUD-016`).
@@ -520,6 +526,7 @@ VoLTE 감청 하나 = 창 하나, PTT 청취는 ② 카드 토글이 기본이�
 | 사설콜 | 404 / 480 / 486 | "상대를 찾을 수 없음 / 응답 없음 / 통화 중" | — |
 | 애드혹 | 403 | "애드혹 그룹통화 자격이 없거나 시스템에서 꺼져 있습니다" | mcptt_emergency_modes §6 |
 | 긴급 개시 | 403 | "긴급 호출 자격이 없습니다" | mcptt_emergency_modes §4.2·§7 |
+| 일제 통화 개시 | 403 | "그룹 멤버가 아닙니다"(PTT 참여와 같다) | mcptt_broadcast_group_call §3.1 |
 | MCData SDS | 403 / 413 / 404·408·503 | "그룹 문자 권한 없음 / 너무 긺(서버 한도) / 전송 실패 — 재전송" | mcdata §4·§5 |
 | SMS·LMS | 404 / 480 | "상대가 등록되어 있지 않습니다 / 응답 없음" | MESSAGE 1:1 전달 |
 | SMS·LMS | 413 | "문자가 너무 깁니다(서버 한도)" | `max_sds_size` |
@@ -559,7 +566,7 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
                                 자동 복귀 규칙(`ReturnIfSessionStarted`) · ⑤⑥ [이력에서 보기] · `SeedCanvasPreview`(개발 스위치)
     PttChannelsViewModel        ① — ChannelCard(멤버 그룹 전부 + 내가 건 사설콜·애드혹, 핀 순서 고정) · **포커스**(`Selected`, 같은 카드 재클릭 = 접힘, 애드혹 우선 자동 포커스) ·
                                 **발언 대상**(카드 `IsChecked` 집합 — `ToggleTarget`/`SetSingleTarget`/`ClearTargets`, `MaxTargets` = SDK 팬아웃 전 1, 세션 종료·전이중 전환 시 자동 해제) ·
-                                카드 2줄(`Line2` — 발언자·마지막 발언/애드혹 응답/사설콜 라우트·번호, 대기면 마지막 세션 — 로스터 관측 시작·종료로 기록) · 3줄(`RosterPreview` 10 + `+n`, `CanEdit`) ·
+                                카드 2줄(`Line2` — 발언자·마지막 발언/애드혹 응답/사설콜 라우트·번호, 대기면 마지막 세션 — 로스터 관측 시작·종료로 기록) · 3줄(`RosterPreview` 10 + `+n`, `CanEdit`, [일제 통화] `CanBroadcast` — 편성 그룹·진행 중 세션 없음) ·
                                 `Unread`(④ 미읽음 → ✉ n) · `SelectIndex`(Ctrl+n)·`ToggleIndex`(Ctrl+Shift+n) · 사람 메뉴·스레드·편집 요청 이벤트
     TalkBarViewModel            ① 발언 바 — 대상 칩(`TalkTargetChip`: 승인/요청/대기 n번째/거부·사유) · `PttDown/Up` = 대상 전부 floorRequest/Release · `PttText`(발언 중·n/m·요청 중·거부) ·
                                 `MinGauge`(승인된 대상 중 최소 남은 발언) · 잠금 발언(`LockTalkEnabled` 설정 + `IsLocked` — TalkLimit/Revoked 로 해제) · `MultiTalkSupported` 상수(false — §13)
@@ -582,12 +589,13 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
     MonitorWindowViewModel      감청 창 하나(join 호 또는 listenOnly 그룹콜) · MediaSource 미터
     DirectoryAdminViewModel     [관리] 화면(§4.5) — 조직 트리·구성원·편집 폼, `IsEditing`(메뉴 점 배지)
     GroupAdminViewModel         [PTT 그룹] 화면(§4.7) — 범위 안 그룹 목록·상세, `Editor`(GroupEditViewModel) = 인라인 편집 폼(GroupEditView) — 같은 Editor 를 관제 캔버스 드로어가 호스팅
-                                (`EditExternal`·`NewExternal`), `All`·`Loaded` 는 ② 의 관리 범위 소스
+                                (`EditExternal`·`NewExternal`), `All`·`Loaded` 는 ② 의 관리 범위 소스이자 ① 멤버 그룹 종류(`DispatchSession.NoteGroupTypes`)의 소스
     SessionHistoryViewModel     [이력] 화면(§4.6) — 하루 창 조회(`ShiftDate`)·녹취 세그먼트·재생 상태
     LoginViewModel · SettingsViewModel(잠금 발언 설정 포함)
   Models/  SessionKind: isMcptt&&listenOnly→PTT 청취(② 카드 토글/창) · isMcptt&&privateCall→사설콜(①) · groupId adhoc-→애드혹(①) · isMcptt→멤버 채널(①) ·
-           listenOnly&&joinedDialog→VoLTE 감청(창) · 그 외 VoLTE 통화(③). SessionItem·GroupInfo·DialogRow·Message/MessageThread·ActivityRow·Contact
-  Services/ DispatchSession(코어 투영 + 관제 동작 진입점 — Engine·CscClient 소유, Sessions/Groups/Dialogs, 등록 백오프, 오디오 적용.
+           listenOnly&&joinedDialog→VoLTE 감청(창) · 그 외 VoLTE 통화(③). SessionItem(일제 통화 `IsBroadcast` = 착신 broadcast-ind·floor B-bit)·GroupInfo(그룹 종류 `SessionType` — 관리 목록)·DialogRow·Message/MessageThread·ActivityRow·Contact
+  Services/ DispatchSession(코어 투영 + 관제 동작 진입점 — Engine·CscClient 소유, Sessions/Groups/Dialogs, 등록 백오프, 오디오 적용, 일제 통화 개시 `BroadcastCall`.
+                            등록 단말 속성 = User-Agent `CIMS-Dispatch/<앱 버전> (<OS>; <모델>)` · Contact `+sip.instance` 기기 고유 `urn:uuid:`(파사드 `DeviceIdentity` — mcptt_management_views.md §4.1)
                             계정 = PTT 서비스 전부 + **전화 계열은 SDK 가 고른 `Profile.PhoneService` 하나**(유선 voip 우선·이동 volte 폴백) — volte·voip 를 둘 다 등록하면 이동 번호까지 관제석에 포크되고 전화 계정 참조를 마지막 계정이 덮어쓴다) ·
             Notifications(토스트·배너) · SettingsStore(json — FollowChannelThread/FollowChannelEvents/LockTalk/ScopedManageExpanded 등) · LayoutStore(프리셋, 패널 집합 버전) ·
             MessageStore(SQLite: mcdata/sms) · ActivityLog(링 버퍼·CSV) · HotKeyMap · AudioPolicy(라우트 기본값) · AdhocIdFactory(adhoc-<나>-<epoch>) ·

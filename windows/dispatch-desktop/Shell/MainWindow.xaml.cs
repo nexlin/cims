@@ -282,7 +282,7 @@ public partial class MainWindow : Window
     private void OnClosing(object? sender, CancelEventArgs e)
     {
         PersistWindow();
-        if (_exitConfirmed) return;
+        if (_exitConfirmed || ((App)Application.Current).IsExiting) return;
         if (_vm.Session.Settings.Current.MinimizeToTray) { e.Cancel = true; WindowState = WindowState.Minimized; ShowInTaskbar = true; return; }
         if (!ConfirmLeave("종료")) { e.Cancel = true; return; }
         _exitConfirmed = true;

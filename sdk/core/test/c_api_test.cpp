@@ -96,6 +96,15 @@ TEST(CApi, ConfigDefaultsFollowCxx) {
     dlg.call_id = "abc@host"; dlg.local_tag = "L1"; dlg.remote_tag = "R1";
     cimsue_dialog_info_join_header(&dlg, buf, sizeof buf);
     EXPECT_EQ(std::string(buf), "abc@host;to-tag=R1;from-tag=L1");
+
+    // 단말 속성 헬퍼(types.h 자유 함수) — 코어 규칙 그대로(mcptt_management_views.md §4.1)
+    cimsue_user_agent_of("CIMS-Dispatch", "0.1.0", "Windows 11", "Standard PC (Q35)", buf, sizeof buf);
+    EXPECT_EQ(std::string(buf), userAgentOf("CIMS-Dispatch", "0.1.0", "Windows 11", "Standard PC (Q35)"));
+    EXPECT_EQ(cimsue_user_agent_of("P", nullptr, nullptr, nullptr, buf, sizeof buf), 1);   // NULL = 빈 값
+    EXPECT_EQ(std::string(buf), "P");
+    cimsue_imei_urn("490154203237518", buf, sizeof buf);
+    EXPECT_EQ(std::string(buf), "urn:gsma:imei:49015420-323751-8");
+    EXPECT_EQ(cimsue_imei_urn("490154203237517", buf, sizeof buf), 0);
 }
 
 // ── 프로파일 평탄화 — 중첩 배열(services/transports/security)·dispatch·to_account ──

@@ -102,7 +102,8 @@ struct AccountConfig {
 std::string imeiUrn(const std::string& imei);
 
 /** REGISTER `User-Agent`(RFC 3261 §20.41) 규약 — `<제품>/<앱 버전> (<OS>; <모델>)` (mcptt_management_views.md §4.1).
- *  예: `CIMS-PTT/1.4.2 (Android 15; SM-S921N)`. 빈 os·model 은 괄호 안에서 빠진다. */
+ *  예: `CIMS-PTT/1.4.2 (Android 15; SM-S921N)`. 빈 os·model 은 괄호 안에서 빠진다. os·model 은 comment 규칙으로 정리한다 —
+ *  괄호·역슬래시는 빼고 공백·제어 문자는 공백 하나로, os 의 `;`(OS·모델 구분자)도 뺀다(기기 문자열 `Standard PC (Q35 …)` 등). */
 std::string userAgentOf(const std::string& product, const std::string& version, const std::string& os,
                         const std::string& model);
 

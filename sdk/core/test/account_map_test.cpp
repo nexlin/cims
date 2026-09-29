@@ -107,6 +107,11 @@ TEST(Helpers, ImeiUrnAndUserAgent) {
     EXPECT_EQ(userAgentOf("CIMS-PTT", "1.4.2", "Android 15", "SM-S921N"), "CIMS-PTT/1.4.2 (Android 15; SM-S921N)");
     EXPECT_EQ(userAgentOf("CIMS-Dispatch", "0.3", "Windows 11", ""), "CIMS-Dispatch/0.3 (Windows 11)");
     EXPECT_EQ(userAgentOf("cimsue-cli", "", "", ""), "cimsue-cli");
+    // comment 정리 — 괄호·역슬래시 제거, 공백·제어 문자 접기, OS 의 `;`(구분자) 제거. 비면 괄호째 빠진다
+    EXPECT_EQ(userAgentOf("CIMS-Dispatch", "0.1.0", "Windows 11 25H2", "Standard PC (Q35 + ICH9, 2009)"),
+              "CIMS-Dispatch/0.1.0 (Windows 11 25H2; Standard PC Q35 + ICH9, 2009)");
+    EXPECT_EQ(userAgentOf("P", "1", "  Linux;\tx86  ", " a\x5C" "b\n"), "P/1 (Linux x86; ab)");
+    EXPECT_EQ(userAgentOf("P", "1", "()", " "), "P/1");
 }
 
 TEST(Helpers, TargetAndHeaders) {

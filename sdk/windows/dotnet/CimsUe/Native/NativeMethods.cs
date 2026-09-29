@@ -100,6 +100,8 @@ internal static unsafe class NativeMethods
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_account_config_digest_username(cimsue_account_config_t* cfg, byte* @out, int cap);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_account_config_is_complete(cimsue_account_config_t* cfg);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_dialog_info_join_header(cimsue_dialog_info_t* d, byte* @out, int cap);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_user_agent_of([MarshalAs(U8)] string product, [MarshalAs(U8)] string version, [MarshalAs(U8)] string os, [MarshalAs(U8)] string model, byte* @out, int cap);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_imei_urn([MarshalAs(U8)] string imei, byte* @out, int cap);
 
     // ── CSC 설정 평면 ──
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern void cimsue_csc_endpoint_default(cimsue_csc_endpoint_t* ep);

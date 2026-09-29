@@ -1,4 +1,4 @@
-// Windows 접점 — 핫키 표기·자격 저장 왕복·엔드포인트 열거·이름 대응. 레지스트리(AutoStart)는 시험에서 쓰지 않는다.
+// Windows 접점 — 핫키 표기·자격 저장 왕복·엔드포인트 열거·이름 대응·단말 속성. 레지스트리 쓰기(AutoStart)는 시험에서 쓰지 않는다(DeviceIdentity 는 읽기만).
 using CimsUe.Platform;
 using Xunit;
 
@@ -83,5 +83,23 @@ public class PlatformTests
         using var second = new SingleInstance(name, context: null);
         Assert.False(second.IsFirst);
         Assert.True(activated.Wait(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
+    public void DeviceIdentityUsesCoreFormat()
+    {
+        // 형식 규칙은 코어 하나(userAgentOf·imeiUrn) — 파사드는 Windows 기기 값만 채운다(mcptt_management_views.md §4.1)
+        Assert.Equal("CIMS-Dispatch/0.1.0 (Windows 11 25H2; Standard PC Q35)", Engine.UserAgentOf("CIMS-Dispatch", "0.1.0", "Windows 11 25H2", "Standard PC (Q35)"));
+        Assert.Equal("urn:gsma:imei:49015420-323751-8", Engine.ImeiUrn("490154203237518"));
+        Assert.Equal("", Engine.ImeiUrn("490154203237517"));
+        string ua = DeviceIdentity.UserAgent("CIMS-Dispatch", "0.1.0");
+        Assert.StartsWith("CIMS-Dispatch/0.1.0 (Windows 1", ua);
+        Assert.EndsWith(")", ua);
+        // Android DeviceIdentity 와 같은 이름 기반 UUID v3 — Java UUID.nameUUIDFromBytes("cims-ue:abc")
+        Assert.Equal("7386511e-f079-3e86-bcee-617db3eb6685", DeviceIdentity.NameUuid("cims-ue:abc"));
+        string? urn = DeviceIdentity.InstanceUrn();
+        Assert.NotNull(urn);
+        Assert.Matches("^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-3[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", urn);
+        Assert.Equal(urn, DeviceIdentity.InstanceUrn());           // 기기 고유 — 다시 불러도 같다
     }
 }

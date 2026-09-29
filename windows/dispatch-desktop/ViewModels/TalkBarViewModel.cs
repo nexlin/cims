@@ -61,8 +61,10 @@ public sealed partial class TalkBarViewModel : ObservableObject
     public bool IsPartial => IsSpeaking && GrantedCount < Targets.Count;
     public bool IsRequesting => !IsSpeaking && Targets.Any(t => t.IsRequesting || t.IsQueued);
     public bool IsEmergency => Targets.Any(t => t.IsEmergency);
+    /// <summary>대상에 내가 연 일제 통화가 있다 — 발언을 놓으면 코어가 호를 해제한다(TS 24.380 §6.2.4.6.4).</summary>
+    public bool IsBroadcast => Targets.Any(t => t.Card.IsBroadcastInitiator);
     public bool CanPtt => HasTargets;
-    public string Hint => HasTargets ? (Targets.Count > 1 ? $"동시 발언 {Targets.Count}채널" : "발언 대상 1 · 내 채널") : "내 채널 카드의 체크로 고르세요";
+    public string Hint => HasTargets ? (IsBroadcast ? "일제 통화 · 발언을 놓으면 통화가 끝납니다" : Targets.Count > 1 ? $"동시 발언 {Targets.Count}채널" : "발언 대상 1 · 내 채널") : "내 채널 카드의 체크로 고르세요";
     public string PttText => IsSpeaking ? (IsPartial ? $"발언 {GrantedCount}/{Targets.Count}" : "발언 중") : IsRequesting ? "요청 중" : AllDeniedFlash ? "거부" : IsLocked ? "잠금" : "PTT";
     /// <summary>남은 발언 게이지 — 승인된 대상 중 최소값.</summary>
     public double MinGauge => IsSpeaking ? Targets.Where(t => t.IsGranted).Min(t => t.Card.TalkGauge) : 0;
@@ -83,7 +85,7 @@ public sealed partial class TalkBarViewModel : ObservableObject
     {
         foreach (var t in Targets) t.Refresh();
         foreach (var p in new[] { nameof(TargetCount), nameof(HasTargets), nameof(TargetNames), nameof(GrantedCount), nameof(IsSpeaking), nameof(IsPartial), nameof(IsRequesting),
-                                  nameof(IsEmergency), nameof(CanPtt), nameof(Hint), nameof(PttText), nameof(MinGauge), nameof(TalkLimitNear), nameof(SpeakerElapsed), nameof(HotKeyText) })
+                                  nameof(IsEmergency), nameof(IsBroadcast), nameof(CanPtt), nameof(Hint), nameof(PttText), nameof(MinGauge), nameof(TalkLimitNear), nameof(SpeakerElapsed), nameof(HotKeyText) })
             OnPropertyChanged(p);
     }
 

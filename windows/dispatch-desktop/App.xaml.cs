@@ -22,6 +22,10 @@ public partial class App : Application
     private MainViewModel? _mainVm;
     private bool _started;
 
+    /// <summary>종료가 정해졌다(ExitApp·개발 스위치) — 창들의 Closing 은 다시 묻지 않는다. Shutdown 중 WPF 는 취소를 무시하므로 물어도 창은 닫히고
+    /// 모달 질문은 종료만 붙잡는다. 진행 중 세션·감청 창은 주 창 [종료] 확인(ConfirmLeave)이 이미 센다.</summary>
+    public bool IsExiting { get; private set; }
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -113,6 +117,7 @@ public partial class App : Application
                         _log?.Info($"preview shot {pw}x{ph} → {shot}");
                     }
                     catch (Exception ex) { _log?.Error("preview shot", ex); }
+                    IsExiting = true;                       // 표본 세션·감청 창의 종료 확인을 띄우지 않는다. ExitApp(Logout)은 저장된 로그인을 지우므로 쓰지 않는다
                     Shutdown(0);
                 };
                 t.Start();
@@ -199,6 +204,7 @@ public partial class App : Application
 
     public void ExitApp()
     {
+        IsExiting = true;
         _tick?.Stop();
         try { _session?.Logout(); } catch (Exception ex) { _log?.Warn("logout on exit: " + ex.Message); }
         Shutdown(0);

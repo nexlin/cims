@@ -21,6 +21,7 @@ dotnet/
 | `CredentialStore` | DPAPI(`ProtectedData`) 로 PKCE 토큰·H(A1) 저장 | `CscClient` 토큰 · `AccountConfig.Ha1` |
 | `SingleInstance` | 명명 Mutex + 두 번째 실행 시 창 활성화 | — |
 | `AutoStart` | `HKCU\...\Run` 등록 | — |
+| `DeviceIdentity` | 단말 속성 — OS 판(빌드·DisplayVersion)·BIOS 모델로 REGISTER `User-Agent`, `MachineGuid` 이름 기반 UUID v3 로 `+sip.instance`(Windows 는 IMEI 없음 — mcptt_management_views.md §4.1) | `Engine.UserAgentOf`(코어 `userAgentOf`) · `AccountConfig.InstanceId` |
 
 콜백은 코어 **이벤트 스레드**에서 온다(`cimsue_listener_t` — ue_sdk.md §6.4, 콜백 인자 문자열은 콜백 동안만 유효하므로 파사드가
 관리 문자열로 복사한다). 파사드가 `SynchronizationContext.Post` 로 앱 스레드에 넘기며, WPF `Dispatcher` 는 앱(`windows/dispatch-desktop`)만
@@ -30,5 +31,6 @@ dotnet/
 DLL 을 열어 `EntryPointNotFound`). 빌드 출력·NuGet 패키지 모두 `runtimes/win-x64/native/`(cimsue.dll + OpenSSL 런타임 둘)에 두고, `NativeLoader` 가
 `CIMSUE_NATIVE_DIR` → `runtimes/win-x64/native` → 앱 디렉터리 순으로 찾는다. 원본은 `Directory.Build.props` 의 `CimsUeNativeDir`(기본 `build-win/sdk/bin`).
 
-**시험**: `dotnet test CimsUe.Tests` — 50건(ABI 레이아웃 27 구조체 대조 `cimsue_struct_size`·헤드리스 엔진 수명·SynchronizationContext 마샬링·프로파일 파싱·
-접점). xunit 은 `SynchronizationContext.Current` 를 두므로 "이벤트 스레드 직접 수신" 시험은 컨텍스트를 명시적으로 비운다.
+**시험**: `dotnet test CimsUe.Tests` — 60건(ABI 레이아웃 27 구조체 대조 `cimsue_struct_size`·헤드리스 엔진 수명·SynchronizationContext 마샬링·프로파일 파싱·
+그룹 문서 왕복·접점·단말 속성). xunit 은 `SynchronizationContext.Current` 를 두므로 "이벤트 스레드 직접 수신" 시험은 컨텍스트를 명시적으로 비운다.
+floor Indicator 상수(`FloorIndicator`)는 `scripts/gen_floor_defs.py --check`(S1-UE-FLOOR-CODEC)가 정본 테이블과 대조한다.

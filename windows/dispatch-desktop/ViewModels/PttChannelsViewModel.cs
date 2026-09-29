@@ -66,7 +66,17 @@ public sealed partial class ChannelCard : ObservableObject
     public bool IsAdhoc => Kind == CardKind.Adhoc;
     public bool IsFullDuplex => Session?.IsFullDuplex == true;
     /// <summary>발언 대상이 될 수 있는가 — 참여 중 + 반이중(전이중은 항상 열린 마이크 → [음소거]).</summary>
-    public bool CanCheck => Session is not null && Session.IsLive && !IsFullDuplex;
+    /// <summary>발언 대상 체크 가능 — 참여 중인 반이중 세션이고 발언 요청이 가능할 때(남이 연 일제 통화의 수신 멤버는 아니다 — Permission 0).</summary>
+    public bool CanCheck => Session is not null && Session.IsLive && !IsFullDuplex && Session.CanRequestFloor;
+    public string CheckTip => Session is { IsBroadcast: true } && !Session.CanRequestFloor ? "일제 통화 — 개시자만 발언합니다(수신 전용)" : "발언 대상(PTT 를 누르면 여기로 요청)";
+    /// <summary>일제 통화(TS 24.379 §4.12) — 서버가 알린 호 속성(SessionItem.IsBroadcast).</summary>
+    public bool IsBroadcast => Session?.IsBroadcast == true;
+    public bool IsBroadcastInitiator => Session?.IsBroadcastInitiator == true;
+    /// <summary>3줄 [일제 통화] — 멤버 편성 그룹에 진행 중 세션이 없을 때만(있으면 서버가 합류로만 받는다 — mcptt_broadcast_group_call.md §3.2).</summary>
+    public bool CanBroadcast => IsMember && !IsJoined && Group?.HasSession != true && Group?.IsChat != true;
+    public string BroadcastTip => Group?.IsChat == true ? "채팅 그룹 — 일제 통화는 편성 그룹만"
+                                : IsJoined || Group?.HasSession == true ? "진행 중인 그룹 통화가 있습니다 — 끝난 뒤 개시"
+                                : "일제 통화 개시 — 개시자(나)만 발언하고, 발언을 놓으면 통화가 끝납니다";
     public string MemberText => Kind == CardKind.Member ? $"멤버 {Group!.MemberCount}" : "";
     public bool IsJoined => Session is not null && Session.IsLive;
     public bool IsActive => Session?.IsActive == true;
@@ -96,6 +106,7 @@ public sealed partial class ChannelCard : ObservableObject
     {
         CardKind.Adhoc => $"응답 {AdhocAnswered}/{Session!.AdhocMembers.Count}",
         CardKind.Private => $"{(RouteIsSpeaker ? "스피커" : "헤드셋")} · PTT {ShortNumber(Session!.PeerNumber)} · {(Session.Info.Dir == CallDir.Incoming ? "착신" : "발신")} {Session.StartedAt:HH:mm}",
+        _ when IsBroadcast => IsBroadcastInitiator ? "일제 통화 · 발언을 놓으면 종료" : "일제 통화 · 수신 전용",
         _ => LastSpeaker.Length > 0 && LastSpeakerAt is DateTime t ? $"마지막 발언 {LastSpeaker} {t:HH:mm}" : $"참가 {Participants}",
     };
     private static string ShortNumber(string n) => n.Length > 4 ? "…" + n[^4..] : n;
@@ -120,7 +131,8 @@ public sealed partial class ChannelCard : ObservableObject
                                   nameof(Speaker), nameof(HasSpeaker), nameof(SpeakerElapsed), nameof(Elapsed), nameof(IsEmergency), nameof(IsImminentPeril), nameof(IsSpeaking),
                                   nameof(IsRequesting), nameof(IsQueued), nameof(TalkGauge), nameof(TalkLimitNear), nameof(FloorNote), nameof(RouteIsSpeaker),
                                   nameof(CanToggleRoute), nameof(IsMuted), nameof(Roster), nameof(AdhocChips), nameof(MemberText), nameof(IsFullDuplex), nameof(Duplex),
-                                  nameof(Line2), nameof(LastSessionText), nameof(RosterPreview), nameof(RosterMore), nameof(HasRosterMore), nameof(CanEdit) })
+                                  nameof(Line2), nameof(LastSessionText), nameof(RosterPreview), nameof(RosterMore), nameof(HasRosterMore), nameof(CanEdit),
+                                  nameof(CheckTip), nameof(IsBroadcast), nameof(IsBroadcastInitiator), nameof(CanBroadcast), nameof(BroadcastTip) })
             OnPropertyChanged(p);
         if (HasSpeaker && Speaker != LastSpeaker) { LastSpeaker = Speaker; LastSpeakerAt = DateTime.Now; }
         else if (HasSpeaker) LastSpeakerAt ??= DateTime.Now;
@@ -138,6 +150,7 @@ public sealed partial class ChannelCard : ObservableObject
     [RelayCommand] private void ToggleRoute() { if (Session is not null) _s.ToggleRoute(Session); }
     [RelayCommand] private void ToggleMute() { if (Session is not null) _s.ToggleMute(Session); }
     [RelayCommand] private void Emergency() { if (Group is not null) _s.EmergencyCall(Group); }
+    [RelayCommand] private void Broadcast() { if (Group is not null && CanBroadcast) _s.BroadcastCall(Group); }
     [RelayCommand] private void CancelQueue() { if (Session is not null) _s.FloorQueueCancel(Session); }
 
     /// <summary>발언 바가 대상마다 부른다.</summary>
@@ -221,6 +234,8 @@ public sealed partial class PttChannelsViewModel : ObservableObject
                 {
                     if (!added) { card.RecordSessionEnd(item.Elapsed, Math.Max(card.Participants, card.LastParticipants)); if (card.IsChecked) SetChecked(card, false); }
                     card.Session = added ? item : null;
+                    // 일제 통화 개시 — 곧 말하려는 채널: 포커스 + 단일 발언 대상("애드혹 우선"과 같은 규칙)
+                    if (added && item.Operation == Operation.Broadcast) { Select(card, collapseSame: false); SetSingleTarget(card); }
                 }
                 break;
             case SessionKind.PttPrivate:
@@ -276,6 +291,7 @@ public sealed partial class PttChannelsViewModel : ObservableObject
         if (c is null) return;
         c.Refresh();
         if (ev.Kind == FloorEventKind.Denied) { c.DeniedFlash = true; _ = Task.Delay(1000).ContinueWith(_ => c.DeniedFlash = false, TaskScheduler.FromCurrentSynchronizationContext()); }
+        if (c.IsChecked && !c.CanCheck) SetChecked(c, false);        // Permission 0(일제 통화 수신)이 오면 발언 대상에서 뺀다
         TargetsChanged?.Invoke(this, EventArgs.Empty);
     }
 

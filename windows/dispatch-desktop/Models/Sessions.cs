@@ -25,7 +25,7 @@ public enum SessionKind
 }
 
 /// <summary>세션을 만든 관제 동작 — 종료 코드의 문구 사전(§9) 선택에 쓴다.</summary>
-public enum Operation { Incoming, Dial, Pickup, Join, Transfer, PttJoin, PttListen, PttPrivate, PttAdhoc, Emergency }
+public enum Operation { Incoming, Dial, Pickup, Join, Transfer, PttJoin, PttListen, PttPrivate, PttAdhoc, Emergency, Broadcast }
 
 public static class SessionKinds
 {
@@ -98,11 +98,19 @@ public sealed partial class SessionItem : ObservableObject
     public bool IsLive => Info.IsLive;
     public bool IsEmergency => Info.Mcptt.Emergency;
     public bool IsImminentPeril => Info.Mcptt.ImminentPeril;
+    /// <summary>일제 통화 개시를 요청한 내 발신 호(mcptt-info broadcast-ind, TS 24.379 §6.2.8.2) — 서버가 받아들였는지는 <see cref="IsBroadcast"/>.</summary>
+    public bool IsBroadcastRequest => Info.Dir == CallDir.Outgoing && Info.Mcptt.Broadcast;
+    /// <summary>서버가 일제 통화(TS 24.379 §4.12, 호 속성)로 알린 호 — fan-out 착신 INVITE 의 broadcast-ind 또는 floor 메시지의 B-bit
+    /// (TS 24.380 §8.2.3.15). 개시자와 진행 중 일제 통화에 늦게 합류한 leg 은 B-bit 로만 안다.</summary>
+    public bool IsBroadcast => (Info.Dir == CallDir.Incoming && Info.Mcptt.Broadcast) || (Floor.Indicator & FloorIndicator.BroadcastGroup) != 0;
+    /// <summary>내가 연 일제 통화 — 발언을 놓으면 코어가 호를 해제한다(TS 24.380 §6.2.4.6.4). 남이 연 일제 통화에 합류한 leg 은 Permission 0 이라 아니다.</summary>
+    public bool IsBroadcastInitiator => IsBroadcastRequest && IsBroadcast && Floor.CanRequest;
     public bool IsFullDuplex => Info.Mcptt.NoFloorCtrl || (Info.IsMcptt && !Info.HalfDuplex);
     public bool IsSpeaking => Floor.State == FloorState.Speaking;
     public bool IsRequesting => Floor.State == FloorState.Requesting;
     public bool IsQueued => Floor.State == FloorState.Queued;
-    public bool CanRequestFloor => Floor.CanRequest && !Info.ListenOnly;
+    /// <summary>발언 요청 가능 — 서버 Permission(Taken·Idle 의 0 = 불가) · 청취 전용 leg 아님 · 남이 연 일제 통화가 아님(개시자만 발언 — R5).</summary>
+    public bool CanRequestFloor => Floor.CanRequest && !Info.ListenOnly && !(IsBroadcast && !IsBroadcastRequest);
     public int Route => Info.PlaybackRoute;
     public bool RouteIsSpeaker => Info.PlaybackRoute != 0;
     public string StateText => Info.State switch
@@ -122,6 +130,7 @@ public sealed partial class SessionItem : ObservableObject
         OnPropertyChanged(nameof(IsIncoming)); OnPropertyChanged(nameof(IsActive)); OnPropertyChanged(nameof(IsHeld));
         OnPropertyChanged(nameof(IsOutgoing)); OnPropertyChanged(nameof(IsLive)); OnPropertyChanged(nameof(IsEmergency));
         OnPropertyChanged(nameof(IsImminentPeril)); OnPropertyChanged(nameof(IsFullDuplex)); OnPropertyChanged(nameof(Route));
+        OnPropertyChanged(nameof(IsBroadcastRequest)); OnPropertyChanged(nameof(IsBroadcast)); OnPropertyChanged(nameof(IsBroadcastInitiator));
         OnPropertyChanged(nameof(RouteIsSpeaker)); OnPropertyChanged(nameof(StateText)); OnPropertyChanged(nameof(CanRequestFloor));
         if (value.State == CallState.Active && ConnectedAt is null) ConnectedAt = DateTime.Now;
     }
@@ -129,7 +138,7 @@ public sealed partial class SessionItem : ObservableObject
     partial void OnFloorChanged(FloorInfo value)
     {
         OnPropertyChanged(nameof(IsSpeaking)); OnPropertyChanged(nameof(IsRequesting)); OnPropertyChanged(nameof(IsQueued));
-        OnPropertyChanged(nameof(CanRequestFloor));
+        OnPropertyChanged(nameof(CanRequestFloor)); OnPropertyChanged(nameof(IsBroadcast)); OnPropertyChanged(nameof(IsBroadcastInitiator));
     }
 
     public void Tick(DateTime now)
@@ -159,6 +168,8 @@ public sealed partial class GroupInfo : ObservableObject
     [ObservableProperty] private bool _isOwner;
     /// <summary>GMS 목록의 문서 ETag — 편집 PUT 의 If-Match.</summary>
     [ObservableProperty] private string _etag = "";
+    /// <summary>그룹 종류 prearranged | chat(TS 24.481 on-network-invite-members) — GMS 목록엔 없어 관리 목록에서 옮겨 온다. 빈 값 = 모름.</summary>
+    [ObservableProperty] private string _sessionType = "";
     [ObservableProperty] private IReadOnlyList<RosterEntry> _roster = Array.Empty<RosterEntry>();
     [ObservableProperty] private DateTime? _rosterAt;
     /// <summary>로스터에 접속 참가자가 생긴 시각(세션 관측 시작) — 없으면 null. ② 진행 중 행의 경과.</summary>
@@ -168,6 +179,9 @@ public sealed partial class GroupInfo : ObservableObject
     {
         Id = id; Uri = uri; _name = name; _memberCount = memberCount;
     }
+
+    public bool IsChat => SessionType == "chat";
+    partial void OnSessionTypeChanged(string value) => OnPropertyChanged(nameof(IsChat));
 
     public int ConnectedCount => Roster.Count(r => r.Status == "connected");
     /// <summary>진행 중 세션이 있는가(로스터에 접속 참가자) — ② 진행 중 행.</summary>

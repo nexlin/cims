@@ -133,8 +133,11 @@ REGISTER ─► CSP CscfModule  200 OK 뒤 _NoteDeviceSeen ─► CCallDir::Devi
   | 단말 | `User-Agent` | `+sip.instance` |
   |---|---|---|
   | Android PTT·VoLTE(`android/core` `DeviceIdentity`) | `CIMS-PTT/<버전> (Android <판>; <모델>)` · `CIMS-VoLTE/…` | `urn:uuid:` — ANDROID_ID 이름 기반 UUID(RFC 4122 v3). 일반 앱은 Android 10 부터 IMEI 를 못 읽는다(READ_PRIVILEGED_PHONE_STATE). ANDROID_ID 는 서명 키·사용자·기기 단위라 같은 기기의 PTT·VoLTE 가 같은 값 |
-  | libcimsue 앱(관제 태블릿·Windows 관제·cimsue-cli) | 앱이 `EngineConfig.userAgent` 를 `userAgentOf()` 형식으로 채운다 | 앱이 `AccountConfig.instanceId` 를 채운다 — IMEI 를 알면 `imeiUrn()`, 모르면 설치 고유 UUID URN. 비우면 pjsip 기본값(호스트명 해시 — 기기마다 같을 수 있다) |
+  | Windows 관제(`windows/dispatch-desktop`) | `CIMS-Dispatch/<버전> (Windows 11 25H2; <BIOS 모델>)` — .NET `Platform.DeviceIdentity.UserAgent`(OS = 빌드·표시 판, 모델 = BIOS `SystemProductName`, 형식은 코어 `userAgentOf`) | `urn:uuid:` — 기기 GUID(`MachineGuid`) 이름 기반 UUID v3, Android 와 같은 `cims-ue:` 규칙(`DeviceIdentity.InstanceUrn`). 재설치해도 같고 PTT·전화 계정이 같은 값 |
+  | libcimsue 앱(관제 태블릿·cimsue-cli) | 앱이 `EngineConfig.userAgent` 를 `userAgentOf()` 형식으로 채운다 | 앱이 `AccountConfig.instanceId` 를 채운다 — IMEI 를 알면 `imeiUrn()`, 모르면 설치 고유 UUID URN. 비우면 pjsip 기본값(호스트명 해시 — 기기마다 같을 수 있다) |
 
+  `userAgentOf` 는 괄호 안 값을 comment 규칙(RFC 3261 §25.1)으로 정리한다 — 괄호·역슬래시를 빼고 공백·제어 문자를 하나로 접으며, OS 의 `;` 도 뺀다
+  (수집 쪽 `parse_user_agent` 는 OS 에 `;`·`)`, 모델에 `)` 가 없다고 본다 — 기기 문자열 `Standard PC (Q35 …)` 같은 값이 모델을 자르지 않게).
   TCP/TLS 등록은 RFC 5626 outbound 경로가 `reg-id` 와 함께, UDP 등록은 REGISTER Contact 에 직접 싣는다.
   수집 쪽은 URN 종류로 IMEI 칸을 채운다(`urn:gsma:imei:` 만 IMEI, `urn:uuid:` 는 빈 칸).
 - IMEI 는 개인 식별 정보다 — 서버가 가운데를 가려 보내고(`3512…7890`, `imei_masked`), 원문은 콘솔 `admin` 역할에만 준다(`raw_imei`).

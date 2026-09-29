@@ -269,6 +269,27 @@ public sealed unsafe class Engine : IDisposable
     public static string ToText(FloorState s) => Utf8.Str(cimsue_floor_state_str((int)s));
     public static string ToText(FloorEventKind k) => Utf8.Str(cimsue_floor_kind_str((int)k));
 
+    /// <summary>REGISTER User-Agent 규약 `&lt;제품&gt;/&lt;앱 버전&gt; (&lt;OS&gt;; &lt;모델&gt;)`(mcptt_management_views.md §4.1) — 코어 userAgentOf
+    /// (괄호·역슬래시·제어 문자 정리 포함). Windows 기기 값을 채운 결과는 <see cref="Platform.DeviceIdentity.UserAgent"/>.</summary>
+    public static string UserAgentOf(string product, string version, string os, string model) =>
+        CopyOutString((p, cap) => cimsue_user_agent_of(product, version, os, model, p, cap));
+    /// <summary>IMEI(15자리) → RFC 7254 instance URN(`urn:gsma:imei:…`) — 자릿수·Luhn 검사 숫자가 틀리면 빈 문자열.</summary>
+    public static string ImeiUrn(string imei) => CopyOutString((p, cap) => cimsue_imei_urn(imei, p, cap));
+
+    private delegate int CopyOutFn(byte* buf, int cap);
+    /// <summary>문자열 산출 헬퍼 규약(길이만 → 버퍼) 공통.</summary>
+    private static string CopyOutString(CopyOutFn fn)
+    {
+        int need = fn(null, 0);
+        if (need <= 0) return "";
+        byte[] buf = new byte[need + 1];
+        fixed (byte* p = buf)
+        {
+            int got = fn(p, buf.Length);
+            return System.Text.Encoding.UTF8.GetString(buf, 0, Math.Min(got, need));
+        }
+    }
+
     // ── 내부 공통 ──
 
     internal static int B(bool b) => b ? 1 : 0;

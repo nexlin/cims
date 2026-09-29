@@ -2,7 +2,7 @@
 """MCPTT floor 정의 테이블(docs/design/features/mcptt_floor_defs.yaml) → 생성·대조.
 
   gen_floor_defs.py            sdk/core/src/floor/floor_defs.h 생성(정본 테이블에서)
-  gen_floor_defs.py --check    생성물이 최신인지 + cmp/PMcpttGroup.h · android FloorControl.kt ·
+  gen_floor_defs.py --check    생성물이 최신인지 + cmp/PMcpttGroup.h · android FloorControl.kt · .NET 파사드 Types.cs ·
                                scripts/mcptt_floor_policy_probe.py 의 상수가 테이블과 같은지 대조 (S1 게이트)
 
 PyYAML 없이 동작한다(테이블은 단순 매핑만 쓰므로 자체 파서). 의도적으로 외부 의존이 없다.
@@ -16,6 +16,7 @@ YAML = os.path.join(ROOT, "docs/design/features/mcptt_floor_defs.yaml")
 OUT_H = os.path.join(ROOT, "sdk/core/src/floor/floor_defs.h")
 CMP_H = os.path.join(ROOT, "cmp/PMcpttGroup.h")
 KT = os.path.join(ROOT, "android/ptt-client/src/main/java/com/cims/ue/ptt/floor/FloorControl.kt")
+CS = os.path.join(ROOT, "sdk/windows/dotnet/CimsUe/Types.cs")
 PROBE = os.path.join(ROOT, "scripts/mcptt_floor_policy_probe.py")
 
 
@@ -198,6 +199,15 @@ def check(t):
         if k_all.get("ACK_REQUIRED_BIT") != t["rtcp"]["ack_required_bit"]:
             fails.append("FloorControl.kt ACK_REQUIRED_BIT ≠ 테이블")
 
+    # 3b) .NET 파사드 — Windows 관제 앱이 floor B-bit 로 일제 통화를 판정한다(mcptt_broadcast_group_call.md §4.4). 이름은 PascalCase
+    if os.path.exists(CS):
+        txt = open(CS, encoding="utf-8").read()
+        blk = re.search(r"public static class FloorIndicator\s*\{(.*?)\n\}", txt, re.S)
+        if blk:
+            k_cs = _grep_consts(blk.group(1), r"public const int ([A-Za-z]+)\s*=\s*(0x[0-9A-Fa-f]+|\d+)")
+            cmp("CimsUe Types.cs FloorIndicator", t["indicator"], k_cs,
+                {k: "".join(w.capitalize() for w in k.split("_")) for k in t["indicator"]})
+
     # 4) Python probe
     if os.path.exists(PROBE):
         txt = "\n".join(l.split("#", 1)[0].rstrip() for l in open(PROBE, encoding="utf-8"))   # 주석 제거
@@ -231,7 +241,7 @@ def check(t):
     for f in fails:
         print("FAIL:", f)
     if not fails:
-        print("floor defs OK — 생성물 최신, cmp/android/probe 상수 일치")
+        print("floor defs OK — 생성물 최신, cmp/android/.NET/probe 상수 일치")
     return 0 if not fails else 1
 
 

@@ -7,8 +7,8 @@
 >
 > 근거 규격 판본: TS 24.379 V18.13.0 · TS 24.380 V18.7.0 · TS 24.481 V18.3.0 (Release 18).
 >
-> **구현 상태** — 서버(CSP·CMP·CSC·DB·콘솔)·검증(cspsim·계측기·S3)·단말 코어(SDK·Android PTT — §4.4 U1~U5)는 반영됐다(§2).
-> 남은 것은 관제 앱(U6 — Windows 데스크톱·Android 태블릿)·최소 affiliation 인원 해제(R10 ③)다(§7).
+> **구현 상태** — 서버(CSP·CMP·CSC·DB·콘솔)·검증(cspsim·계측기·S3)·단말 코어(SDK·Android PTT — §4.4 U1~U5)·관제 앱 Windows 데스크톱(U6)은
+> 반영됐다(§2). 남은 것은 관제 앱 Android 태블릿(U6)·최소 affiliation 인원 해제(R10 ③)다(§7).
 
 ---
 
@@ -47,7 +47,8 @@
 | R12 | Floor Indicator = tier 비트 OR broadcast 비트, 비개시자 긴급 요청도 Deny #5 | `cmp/PMcpttGroup.cpp` | ✅ |
 
 **요약**: 서버(CSP·CMP·CSC)는 규격대로다 — 발언권 평면, 호 단위 일제 표식, 개시자 고정, 해제 정책(최소 affiliation 인원 제외).
-단말 코어도 일제 통화 발신·B-bit Floor Request·발언 종료 후 호 해제(R1·R8·R9)·그룹 종류 판정(R4 짝 U5)을 한다(§4.4). 관제 앱 동작(U6)이 남아 있다.
+단말 코어도 일제 통화 발신·B-bit Floor Request·발언 종료 후 호 해제(R1·R8·R9)·그룹 종류 판정(R4 짝 U5)을 한다(§4.4). 관제 앱 동작(U6)은
+Windows 데스크톱이 하고 Android 태블릿이 남아 있다.
 
 ## 3. 동작
 
@@ -136,7 +137,7 @@
 | U3 | 개시 단말: Floor Release 뒤 B-bit Floor Idle → 호 해제(BYE) (R9) — 채널은 남긴다(Android 는 `leaveGroup` 이 아니라 hangup) | 같은 파일 · 엔진 `onBroadcastEnd` · `PttController` | ✅ |
 | U4 | 수신 단말: B-bit → "일제 통화" 표시, Permission 0 → PTT 비활성. SDK 는 `FloorEvent.indicator`·`permission`·`FloorInfo.canRequest`·`McpttInfo.broadcast` 로 앱에 준다(표시는 앱 몫) | Android `ui/MainChannelScreen.kt`(발언 줄 "일제 통화 ·")·`PttController` | ✅ |
 | U5 | 그룹 종류 판정을 `<on-network-invite-members>` 로 (G1 짝) — 없는 옛 문서만 session-type 폴백 | `sdk/core/src/csc/group_doc.cpp`, Android `csc/CscModels.kt`·`mcptt/McpttXml.kt` | ✅ |
-| U6 | 관제 앱 — "일제 통화" 동작(선택한 그룹에 U1 로 발신)과 PTT 그룹 편집의 유형 선택지 정리(`broadcast` 제거 — 서버는 이 유형을 받지 않는다) | `windows/dispatch-desktop`(`GroupEditViewModel.SessionTypes`·`GroupAdminViewModel.SessionTypeText`), `android/dispatch-tablet`(`PttPlane.joinGroupCall`·`PttGroupsViewModel.SESSION_TYPES`) | 미구현 |
+| U6 | 관제 앱 — "일제 통화" 동작(선택한 그룹에 U1 로 발신)과 PTT 그룹 편집의 유형 선택지 정리(`broadcast` 제거 — 서버는 이 유형을 받지 않는다). Windows: ① 포커스 카드 3줄 [일제 통화] — 멤버 편성 그룹에 진행 중 세션이 없을 때만(있으면 서버가 합류로만 받는다 §3.2, chat 은 broadcast-ind 무시라 제외 — 그룹 종류는 관리 목록 `sessionType`) → `JoinGroupCall(Broadcast)`·개시 카드 자동 포커스·단일 발언 대상. 일제 통화 판정 = 착신 mcptt-info broadcast-ind 또는 floor B-bit(.NET `FloorIndicator.BroadcastGroup` — 늦게 합류한 leg 은 B-bit 로만 안다), 수신 멤버(Permission 0)는 발언 대상 체크 불가, 서버가 일반 통화로 연 개시(첫 floor 메시지에 B-bit 없음)는 경고 — 화면 규약 [dispatch_desktop_ui.md](dispatch_desktop_ui.md) §4 | `windows/dispatch-desktop`(`DispatchSession.BroadcastCall`·`SessionItem.IsBroadcast`·`ChannelCard.CanBroadcast`·`GroupEditViewModel.SessionTypes`), `android/dispatch-tablet`(`PttPlane.joinGroupCall`·`PttGroupsViewModel.SESSION_TYPES`) | Windows ✅ · 태블릿 미구현 |
 
 ### 4.5 CSP↔CMP 계약 ([cmp_media_api.md](../../api/cmp_media_api.md))
 
@@ -167,8 +168,8 @@ S3 `S3-SCN-PTT-BROADCAST`(`verify/lib/items/stage3/scn_ptt_broadcast.py` — csp
 
 ## 7. 남은 과제
 
-- **관제 앱(U6)** — Windows 데스크톱·Android 태블릿 모두 일제 통화 동작이 없고, PTT 그룹 편집 유형 선택지에 `broadcast` 가 남아 있다
-  (선택해도 서버는 invite-members 로만 그룹 종류를 읽으므로 편성 그룹이 된다). 두 앱은 Windows 개발 환경에서 빌드한다.
+- **관제 앱 Android 태블릿(U6)** — 일제 통화 동작이 없고, PTT 그룹 편집 유형 선택지에 `broadcast` 가 남아 있다(선택해도 서버는
+  invite-members 로만 그룹 종류를 읽으므로 편성 그룹이 된다). Windows 데스크톱과 같은 규약(§4.4 U6)으로 둔다. 두 앱은 Windows 개발 환경에서 빌드한다.
 - **최소 affiliation 인원 미달 해제**(R10 ③, TS 24.379 §6.3.8.1 4)) — 그룹 문서 `<on-network-minimum-number-of-affiliated-members>` 와 함께.
 - **전환기 종료** — CMP 의 `group_type:"broadcast"` 해석(§4.5)은 모든 사이트의 CSP 가 `broadcast` 필드를 싣는 판으로 올라간 뒤 제거한다.
   단말(SDK `GroupDoc`·Android `CscModels`)의 옛 문서 `<mcpttgi:session-type>` 폴백은 옛 서버와의 호환용이다.

@@ -41,6 +41,7 @@
                             <Border Style="{StaticResource Badge.Member}" Visibility="{Binding IsOwner, Converter={StaticResource BoolToVis}}"><TextBlock Text="내 소유" /></Border>
                             <Border Style="{StaticResource Badge.Emg}" Visibility="{Binding IsEmergency, Converter={StaticResource BoolToVis}}"><TextBlock Text="긴급" /></Border>
                             <Border Style="{StaticResource Badge.Pilot}" Visibility="{Binding IsImminentPeril, Converter={StaticResource BoolToVis}}"><TextBlock Text="임박" /></Border>
+                            <Border Style="{StaticResource Badge.Mon}" Visibility="{Binding IsBroadcast, Converter={StaticResource BoolToVis}}" ToolTip="일제 통화 — 개시자만 발언하고 나머지는 듣습니다"><TextBlock Text="일제" /></Border>
                         </StackPanel>
                     </DockPanel>
                     <StackPanel Orientation="Horizontal" Margin="16,3,0,0">

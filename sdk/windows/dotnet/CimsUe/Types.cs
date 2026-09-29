@@ -24,6 +24,22 @@ public enum FloorEventKind
     Other = 10,
 }
 
+/// <summary>Floor Indicator 비트(TS 24.380 §8.2.3.15) — <see cref="FloorEvent.Indicator"/>·<see cref="FloorInfo.Indicator"/> 해석용.
+/// 정본 = docs/design/features/mcptt_floor_defs.yaml `indicator` — scripts/gen_floor_defs.py --check 가 이 값을 대조한다.</summary>
+public static class FloorIndicator
+{
+    public const int Normal = 0x8000;
+    /// <summary>B-bit — 일제 통화(TS 24.379 §4.12). 서버가 이 세션의 floor 메시지 전부에 싣는다 — 늦게 합류한 leg 도 이것으로 안다.</summary>
+    public const int BroadcastGroup = 0x4000;
+    public const int System = 0x2000;
+    public const int Emergency = 0x1000;
+    public const int ImminentPeril = 0x0800;
+    public const int Queueing = 0x0400;
+    public const int DualFloor = 0x0200;
+    public const int TemporaryGroup = 0x0100;
+    public const int MultiTalker = 0x0080;
+}
+
 /// <summary>명령의 즉시 결과(C++ Result). 0 = 성공, 음수 = 코어 오류, 양수 = pjsua/HTTP 상태. 프로토콜 결과는 이벤트로 온다.</summary>
 public readonly record struct Result(int Code, string Reason)
 {

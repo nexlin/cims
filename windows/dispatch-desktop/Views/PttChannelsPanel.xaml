@@ -158,7 +158,7 @@
                                                 <TextBlock x:Name="Elapsed" Style="{StaticResource MonoMuted}" Text="{Binding ElapsedText}" FontSize="12.5" VerticalAlignment="Center" MinWidth="40" TextAlignment="Right" />
                                             </StackPanel>
                                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                                <CheckBox Style="{StaticResource Check.Talk}" IsChecked="{Binding IsChecked, Mode=OneWay}" IsEnabled="{Binding CanCheck}" VerticalAlignment="Center" Margin="0,0,6,0" ToolTip="발언 대상(PTT 를 누르면 여기로 요청)"
+                                                <CheckBox Style="{StaticResource Check.Talk}" IsChecked="{Binding IsChecked, Mode=OneWay}" IsEnabled="{Binding CanCheck}" VerticalAlignment="Center" Margin="0,0,6,0" ToolTip="{Binding CheckTip}" ToolTipService.ShowOnDisabled="True"
                                                           Command="{Binding DataContext.PttChannels.ToggleTargetCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" />
                                                 <Ellipse x:Name="Dot" Style="{StaticResource StateDot}" />
                                                 <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="13.5" VerticalAlignment="Center" Margin="0,0,8,0" TextTrimming="CharacterEllipsis" MaxWidth="240" />
@@ -167,6 +167,7 @@
                                                 <Border Style="{StaticResource Badge.Temp}" Visibility="{Binding IsAdhoc, Converter={StaticResource BoolToVis}}"><TextBlock Text="임시" /></Border>
                                                 <Border Style="{StaticResource Badge.Emg}" Visibility="{Binding IsEmergency, Converter={StaticResource BoolToVis}}"><TextBlock Text="긴급" /></Border>
                                                 <Border Style="{StaticResource Badge.Pilot}" Visibility="{Binding IsImminentPeril, Converter={StaticResource BoolToVis}}"><TextBlock Text="임박" /></Border>
+                                                <Border Style="{StaticResource Badge.Mon}" Visibility="{Binding IsBroadcast, Converter={StaticResource BoolToVis}}" ToolTip="일제 통화 — 개시자만 발언하고 나머지는 듣습니다"><TextBlock Text="일제" /></Border>
                                                 <Button Style="{StaticResource Btn.Xs}" Height="20" Padding="6,0" Visibility="{Binding HasUnread, Converter={StaticResource BoolToVis}}" ToolTip="미읽음 SDS — ④ 스레드로"
                                                         Command="{Binding DataContext.PttChannels.OpenThreadCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">
                                                     <StackPanel Orientation="Horizontal" TextElement.Foreground="{DynamicResource Brush.Ring}"><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Mail}" Width="12" Height="12" Margin="0,0,4,0" /><TextBlock Text="{Binding Unread, Mode=OneWay}" FontWeight="Bold" /></StackPanel>
@@ -232,6 +233,8 @@
                                                         </Button.Style>
                                                     </Button>
                                                     <Button Style="{StaticResource Btn.Xs}" Content="음소거" Command="{Binding ToggleMuteCommand}" Margin="0,0,4,0" Visibility="{Binding IsFullDuplex, Converter={StaticResource BoolToVis}}" />
+                                                    <Button Style="{StaticResource Btn.Xs}" Content="일제 통화" Command="{Binding BroadcastCommand}" IsEnabled="{Binding CanBroadcast}" Margin="0,0,4,0" Visibility="{Binding IsMember, Converter={StaticResource BoolToVis}}"
+                                                            ToolTip="{Binding BroadcastTip}" ToolTipService.ShowOnDisabled="True" />
                                                     <Button Style="{StaticResource Btn.Xs.Danger}" Content="긴급 호출" Command="{Binding EmergencyCommand}" Margin="0,0,4,0" Visibility="{Binding IsMember, Converter={StaticResource BoolToVis}}" ToolTip="이 그룹에 긴급 그룹콜 개시(자격 필요)" />
                                                     <Button Style="{StaticResource Btn.Xs}" Content="편집" Margin="0,0,4,0" Visibility="{Binding CanEdit, Converter={StaticResource BoolToVis}}"
                                                             Command="{Binding DataContext.PttChannels.EditGroupCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" />

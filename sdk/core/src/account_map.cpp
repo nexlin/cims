@@ -109,11 +109,26 @@ std::string imeiUrn(const std::string& imei) {
     return "urn:gsma:imei:" + imei.substr(0, 8) + "-" + imei.substr(8, 6) + "-" + imei.substr(14, 1);
 }
 
+// User-Agent comment 에 넣을 값 정리(RFC 3261 §25.1 — comment 안 ctext 는 괄호·역슬래시·제어 문자를 못 쓴다). 괄호·역슬래시는 빼고,
+// 공백·제어 문자는 공백 하나로 접는다. dropSemicolon = OS 칸 — `;` 는 이 형식에서 OS·모델 구분자다(수집 쪽 파서와 짝).
+static std::string commentPart(const std::string& s, bool dropSemicolon) {
+    std::string out;
+    bool pendingSpace = false;
+    for (unsigned char ch : s) {
+        if (ch == 0x28 || ch == 0x29 || ch == 0x5C || (dropSemicolon && ch == ';')) continue;   // ( ) 역슬래시
+        if (ch <= 0x20 || ch == 0x7F) { pendingSpace = !out.empty(); continue; }
+        if (pendingSpace) { out += ' '; pendingSpace = false; }
+        out += (char)ch;
+    }
+    return out;
+}
+
 std::string userAgentOf(const std::string& product, const std::string& version, const std::string& os,
                         const std::string& model) {
     std::string ua = product + (version.empty() ? std::string() : "/" + version);
-    std::string cm = os;
-    if (!model.empty()) cm += (cm.empty() ? "" : "; ") + model;
+    std::string cm = commentPart(os, true);
+    std::string md = commentPart(model, false);
+    if (!md.empty()) cm += (cm.empty() ? "" : "; ") + md;
     if (!cm.empty()) ua += " (" + cm + ")";
     return ua;
 }

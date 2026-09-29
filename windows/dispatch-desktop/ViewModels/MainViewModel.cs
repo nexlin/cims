@@ -83,6 +83,8 @@ public sealed partial class MainViewModel : ObservableObject
         GroupsScreen = new GroupAdminViewModel(session);
         AdminScreen = new DirectoryAdminViewModel(session);
         Scoped = new ScopedChannelsViewModel(session, GroupsScreen);
+        // 그룹 종류(prearranged|chat)는 GMS 목록에 없다 — 관리 목록이 적재될 때 멤버 그룹에 옮긴다(① [일제 통화]는 편성 그룹만)
+        GroupsScreen.Loaded += (_, _) => session.NoteGroupTypes(GroupsScreen.All.Select(m => (m.Id, m.SessionType)));
         People = new PersonActionsViewModel(session);
         Summary = new DispatchSummaryViewModel(session, PttChannels, TalkBar, CallDesk, Desk, Sms);
         AdminScreen.PropertyChanged += (_, e) => { if (e.PropertyName is nameof(DirectoryAdminViewModel.IsDirty)) OnPropertyChanged(nameof(AdminEditing)); };
@@ -301,9 +303,10 @@ public sealed partial class MainViewModel : ObservableObject
     public void SeedCanvasPreview()
     {
         var s = Session;
-        CimsUe.CallInfo Ci(int id, CimsUe.CallState st, string remote, bool mcptt, string group, bool priv = false, bool half = true, bool emg = false, bool listen = false, CimsUe.CallDir dir = CimsUe.CallDir.Outgoing) =>
+        CimsUe.CallInfo Ci(int id, CimsUe.CallState st, string remote, bool mcptt, string group, bool priv = false, bool half = true, bool emg = false, bool listen = false,
+                           CimsUe.CallDir dir = CimsUe.CallDir.Outgoing, bool bcast = false, string caller = "tel:1001") =>
             new(id, 1, dir, st, remote, "", false, true, false, true, 0, 0, "", Array.Empty<CimsUe.MediaSource>(), mcptt, group,
-                new CimsUe.McpttInfo(mcptt, priv ? "private" : "prearranged", "", "tel:1001", group, emg, false, priv, !half), half, listen, "");
+                new CimsUe.McpttInfo(mcptt, priv ? "private" : "prearranged", "", caller, group, emg, false, priv, !half, bcast), half, listen, "");
         GroupInfo G(string id, string name, int members, bool member, params (string, string)[] roster)
         {
             var g = new GroupInfo(id, "tel:" + id, name, members) { IsMember = member, IsOwner = id == "g-ops" };
@@ -325,7 +328,14 @@ public sealed partial class MainViewModel : ObservableObject
         var night = new SessionItem(Ci(15, CimsUe.CallState.Active, "sip:g-night@ptt", true, "g-night", emg: true, listen: true), AccountKind.Ptt, Operation.PttListen) { Title = "야간", Speaker = "박경장", SpeakerSince = now.AddSeconds(-14), ConnectedAt = now.AddMinutes(-18) };
         var volte = new SessionItem(Ci(16, CimsUe.CallState.Active, "tel:+82233334444", false, "", dir: CimsUe.CallDir.Incoming), AccountKind.Volte, Operation.Incoming) { Title = "02-333-4444", ConnectedAt = now.AddMinutes(-2) };
         var held = new SessionItem(Ci(17, CimsUe.CallState.Held, "tel:1006", false, "", dir: CimsUe.CallDir.Incoming), AccountKind.Volte, Operation.Incoming) { Title = "1006 박경장", ConnectedAt = now.AddMinutes(-5) };
-        foreach (var x in new[] { patrol, ops, adhoc, priv, night, volte, held }) { x.Tick(now); s.Sessions.Add(x); }
+        // 일제 통화(§4.1) — 교통1 = 내가 연 일제 통화(발언 전 Idle·B-bit), 순찰2 = 관제2석이 연 일제 통화 수신(Taken·B-bit·Permission 0)
+        var bcOut = new SessionItem(Ci(18, CimsUe.CallState.Active, "sip:g-traffic@ptt", true, "g-traffic", bcast: true), AccountKind.Ptt, Operation.Broadcast) { Title = "교통1", ConnectedAt = now.AddSeconds(-4) };
+        bcOut.Floor = new CimsUe.FloorInfo(CimsUe.FloorState.Idle, Array.Empty<CimsUe.Talker>(), true, CimsUe.FloorIndicator.BroadcastGroup, -1, 0, "", 0, 0, 0, 0);
+        var bcIn = new SessionItem(Ci(19, CimsUe.CallState.Active, "sip:g-patrol2@ptt", true, "g-patrol2", dir: CimsUe.CallDir.Incoming, bcast: true, caller: "tel:1002"), AccountKind.Ptt, Operation.Incoming)
+                   { Title = "순찰2", Speaker = "관제2석", SpeakerSince = now.AddSeconds(-6), ConnectedAt = now.AddSeconds(-7) };
+        bcIn.Floor = new CimsUe.FloorInfo(CimsUe.FloorState.Listening, new[] { new CimsUe.Talker("tel:1002", 0, false) }, false, CimsUe.FloorIndicator.BroadcastGroup, -1, 0, "", 0, 0, 1, 0);
+        foreach (var x in new[] { patrol, ops, adhoc, priv, night, volte, held, bcOut, bcIn }) { x.Tick(now); s.Sessions.Add(x); }
+        s.Activity.Add(ActivityPanel.Ptt, ActivityKind.SessionStart, "순찰2 일제 통화", "관제2석");
         s.Activity.Add(ActivityPanel.Ptt, ActivityKind.Talk, "순찰1 김순경 발언 12초");
         s.Activity.Add(ActivityPanel.Ptt, ActivityKind.Sds, "순찰1 SDS 박경장", "\"교대 인원 2명…\"");
         s.Activity.Add(ActivityPanel.Ptt, ActivityKind.Member, "순찰1 정경장 합류", "12명");

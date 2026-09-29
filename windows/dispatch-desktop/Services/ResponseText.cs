@@ -17,6 +17,7 @@ public static class ResponseText
         Operation.PttPrivate => Area.PttPrivate,
         Operation.PttAdhoc => Area.PttAdhoc,
         Operation.Emergency => Area.Emergency,
+        Operation.Broadcast => Area.PttJoin,                   // 개시 거절은 일반 그룹 통화와 같다(비멤버 403 — mcptt_broadcast_group_call.md §3.1)
         _ => Area.Call,
     };
 

@@ -886,6 +886,13 @@ int32_t CIMSUE_CALL cimsue_account_config_is_complete(const cimsue_account_confi
 int32_t CIMSUE_CALL cimsue_dialog_info_join_header(const cimsue_dialog_info_t* d, char* out, int32_t cap) {
     return copyOut(toCxx(d).joinHeader(), out, cap);
 }
+int32_t CIMSUE_CALL cimsue_user_agent_of(const char* product, const char* version, const char* os, const char* model,
+                                         char* out, int32_t cap) {
+    return copyOut(userAgentOf(S(product), S(version), S(os), S(model)), out, cap);
+}
+int32_t CIMSUE_CALL cimsue_imei_urn(const char* imei, char* out, int32_t cap) {
+    return copyOut(imeiUrn(S(imei)), out, cap);
+}
 
 // ── CSC ──
 

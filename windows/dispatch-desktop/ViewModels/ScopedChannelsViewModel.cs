@@ -34,6 +34,8 @@ public sealed partial class ScopedCard : ObservableObject
     public bool HasSession => Group?.HasSession == true || IsListening;
     public bool IsEmergency => Listen?.IsEmergency == true;
     public bool IsImminentPeril => Listen?.IsImminentPeril == true;
+    /// <summary>청취 중인 세션이 일제 통화(floor B-bit — TS 24.380 §8.2.3.15).</summary>
+    public bool IsBroadcast => Listen?.IsBroadcast == true;
     public int Participants => Group?.ConnectedCount ?? 0;
     public string Speaker => Listen?.Speaker ?? "";
     public bool HasSpeaker => Speaker.Length > 0;
@@ -55,7 +57,7 @@ public sealed partial class ScopedCard : ObservableObject
 
     public void Refresh()
     {
-        foreach (var p in new[] { nameof(Title), nameof(IsListening), nameof(HasSession), nameof(IsEmergency), nameof(IsImminentPeril), nameof(Participants), nameof(Speaker), nameof(HasSpeaker),
+        foreach (var p in new[] { nameof(Title), nameof(IsListening), nameof(HasSession), nameof(IsEmergency), nameof(IsImminentPeril), nameof(IsBroadcast), nameof(Participants), nameof(Speaker), nameof(HasSpeaker),
                                   nameof(SpeakerElapsed), nameof(Elapsed), nameof(ElapsedText), nameof(CanListen), nameof(ListenTip), nameof(CanEdit), nameof(RouteIsSpeaker), nameof(Line2) })
             OnPropertyChanged(p);
     }

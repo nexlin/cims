@@ -26,7 +26,7 @@ public sealed partial class GroupAdminRow : ObservableObject
     public bool IsMemberRelation => G.IsMember;
     /// <summary>소유자 열 — 목록엔 소유 여부만 있어 내 것은 "이름(나)", 나머지는 상세(문서 GET)가 채운다.</summary>
     [ObservableProperty] private string _ownerText = "";
-    public string SessionTypeText => G.SessionType switch { "chat" => "채팅", "broadcast" => "방송", _ => "사전편성" };
+    public string SessionTypeText => G.SessionType == "chat" ? "채팅" : "사전편성";
     /// <summary>GroupEditViewModel 이 받는 항목 — 목록 ETag 는 편집 폼이 문서 GET 으로 다시 받는다.</summary>
     public GroupInfo ToGroupInfo() => new(G.Id, G.Uri, G.Name, G.MemberCount) { IsOwner = G.IsOwner, Etag = G.ETag };
 }

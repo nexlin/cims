@@ -33,6 +33,10 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     private readonly Dictionary<int, AccountKind> _accountKinds = new();
     private readonly Dictionary<int, Operation> _pendingOps = new();
     private readonly Dictionary<int, SessionItem> _pendingConsult = new();
+    /// <summary>일제 통화로 연 호 중 서버 floor 메시지를 아직 못 받은 것 — 첫 메시지에 B-bit 가 없으면 서버가 일반 통화로 연 것이다(§3.2 합류).</summary>
+    private readonly HashSet<int> _broadcastPending = new();
+    /// <summary>그룹 종류(id → prearranged|chat) — 관리 목록에서 받아 두고 새로 생기는 GroupInfo 에도 붙인다.</summary>
+    private readonly Dictionary<string, string> _groupTypes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<int, DateTime> _regRetryAt = new();
     private readonly Dictionary<int, int> _regBackoff = new();
     private readonly HashSet<string> _watched = new(StringComparer.OrdinalIgnoreCase);
@@ -389,13 +393,19 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     {
         if (Profile is null) return Result.Fail(-1, "프로파일 없음");
         var s = Settings.Current;
+        // 단말 속성(mcptt_management_views.md §4.1) — REGISTER User-Agent `CIMS-Dispatch/<앱 버전> (<OS>; <모델>)`(제품명 = 서버 단말 유형 dispatch 판정 키)
+        // · Contact +sip.instance = 기기 고유 urn:uuid(Windows 는 IMEI 가 없다). 형식 규칙은 코어, 기기 값은 파사드 DeviceIdentity.
+        var ver = typeof(DispatchSession).Assembly.GetName().Version ?? new Version(0, 0, 0);
+        string userAgent = DeviceIdentity.UserAgent("CIMS-Dispatch", $"{ver.Major}.{ver.Minor}.{Math.Max(0, ver.Build)}");
+        string? instanceId = DeviceIdentity.InstanceUrn();
         if (!Engine.IsRunning)
         {
             var r = Engine.Start(new EngineConfig
             {
-                UserAgent = "CIMS-Dispatch/0.1", LogLevel = s.LogLevel, TlsCaPem = ReadPem(s.TlsCaPemPath), TlsVerifyServer = s.CscVerifyServer,
+                UserAgent = userAgent, LogLevel = s.LogLevel, TlsCaPem = ReadPem(s.TlsCaPemPath), TlsVerifyServer = s.CscVerifyServer,
             });
             if (!r.Ok) return r;
+            Log.Info($"device user-agent=\"{userAgent}\" instance={instanceId ?? "(pjsip 기본)"}");
         }
         ApplyAudioSettings();
 
@@ -408,6 +418,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         {
             var cfg = sp.ToAccountConfig(_loginPw.Length > 0 ? _loginPw : null);
             cfg.DisplayName = Profile.DisplayName;
+            cfg.InstanceId = instanceId;                      // PTT·전화 계정이 같은 기기 값(RFC 5626 — 한 UA 인스턴스)
             cfg.AutoAnswerMcptt = sp.Kind == "ptt";           // 그룹콜 자동 수락(사설콜 분리는 §13 코어 과제)
             var a = Engine.AddAccount(cfg);
             if (!a.Ok) { Log.Warn($"addAccount {sp.Kind}: {a}"); Notify.Error($"{sp.Kind.ToUpperInvariant()} 계정 추가 실패", a.ToString()); continue; }
@@ -537,7 +548,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             if (gi is not null && !gi.IsMember) { Groups.Remove(gi); gi = null; }   // 청취 범위 → 멤버 승격
             if (gi is null)
             {
-                gi = new GroupInfo(id, g.Uri, name, g.MemberCount) { IsOwner = g.IsOwner, Etag = g.ETag };
+                gi = new GroupInfo(id, g.Uri, name, g.MemberCount) { IsOwner = g.IsOwner, Etag = g.ETag, SessionType = _groupTypes.GetValueOrDefault(id, "") };
                 Groups.Add(gi);
                 gi.Affiliated = ptt.Affiliate(id, true).Ok;
                 var sc = ptt.SubscribeConference(id, true);
@@ -633,6 +644,13 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     /// <summary>새 그룹 uri — XCAP 은 클라이언트가 문서를 명명한다. 정규형 `tel:g-&lt;소문자 hex 8&gt;`(mcptt_api.md §2; `adhoc-`/`priv-` 예약).</summary>
     public string NewGroupUri() => "tel:g-" + Guid.NewGuid().ToString("N")[..8];
 
+    /// <summary>그룹 종류(prearranged|chat) 반영 — GMS 목록엔 없어 관리 목록(/provisioning/directory/groups)에서 받는다. ① [일제 통화] 판정(편성 그룹만).</summary>
+    public void NoteGroupTypes(IEnumerable<(string Id, string SessionType)> types)
+    {
+        foreach (var (id, t) in types) if (id.Length > 0 && t.Length > 0) _groupTypes[id] = t;
+        foreach (var g in Groups) if (_groupTypes.TryGetValue(g.Id, out var t)) g.SessionType = t;
+    }
+
     public async Task<Result<GroupDoc>> GetGroupAsync(GroupInfo g, CancellationToken ct = default)
     {
         if (_csc is null || _tokens is null) return Result<GroupDoc>.Fail(-1, "로그인 전");
@@ -727,6 +745,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         CredentialWarning = false;
         Volte = null; Ptt = null; Profile = null;
         _accountKinds.Clear(); _watched.Clear(); _pendingOps.Clear(); _pendingConsult.Clear(); _adhocMembers.Clear(); _regRetryAt.Clear(); _regBackoff.Clear();
+        _broadcastPending.Clear(); _groupTypes.Clear();
         Sessions.Clear(); Groups.Clear(); Dialogs.Clear();
         VolteReg = RegInfo.Empty; PttReg = RegInfo.Empty;
         _nextDispatchPoll = DateTime.MaxValue; _profileEtag = "";
@@ -891,6 +910,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             case SessionKind.PttAdhoc: Activity.Add(ActivityPanel.Ptt, ActivityKind.Adhoc, $"애드혹 {s.Title}", $"{s.AdhocMembers.Count}명"); break;
             case SessionKind.PttListen: Activity.Add(ActivityPanel.Ptt, ActivityKind.ListenStart, $"청취 시작 {s.Title}"); break;
             case SessionKind.VolteMonitor: Activity.Add(ActivityPanel.Call, ActivityKind.ListenStart, $"청취 시작 {s.Title}"); break;
+            case SessionKind.PttChannel when op == Operation.Broadcast: Activity.Add(ActivityPanel.Ptt, ActivityKind.SessionStart, $"{s.Title} 일제 통화 개시"); break;
+            case SessionKind.PttChannel when s.IsBroadcast: Activity.Add(ActivityPanel.Ptt, ActivityKind.SessionStart, $"{s.Title} 일제 통화", Directory.Label(ci.Mcptt.CallingUserId)); break;
         }
         SessionAdded?.Invoke(this, s);
         return s;
@@ -910,6 +931,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     private void End(SessionItem s)
     {
         Sessions.Remove(s);
+        _broadcastPending.Remove(s.CallId);
         if (Notify.BannerOf(s) is { } b) Notify.RemoveBanner(b);
         var ci = s.Info;
         string dur = s.ConnectedAt is null ? "" : $" · {Fmt(DateTime.Now - s.ConnectedAt.Value)}";
@@ -947,6 +969,9 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
                 break;
             case SessionKind.PttAdhoc:
                 Activity.Add(ActivityPanel.Ptt, ActivityKind.SessionEnd, $"애드혹 종료 {s.Title}", $"{dur.Trim(' ', '·')} · 참가 {s.AdhocMembers.Count}");
+                break;
+            case SessionKind.PttChannel when s.IsBroadcast:
+                Activity.Add(ActivityPanel.Ptt, ActivityKind.SessionEnd, $"{s.Title} 일제 통화 종료", dur.Trim(' ', '·'));
                 break;
             case SessionKind.PttChannel:
                 Activity.Add(ActivityPanel.Ptt, ActivityKind.SessionEnd, $"{s.Title} 세션 종료", dur.Trim(' ', '·'));
@@ -990,6 +1015,10 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         if (s is null) return;
         s.Floor = Engine.GetCall(ev.CallId).FloorInfo;
         s.LastFloor = ev;
+        // 일제 통화로 연 호의 첫 서버 floor 메시지에 B-bit 가 없다 = 서버가 일반 통화로 열었다(진행 중 통화 합류 — §3.2). 로컬 이벤트(시간 초과 등)는 보지 않는다
+        if ((ev.Kind is FloorEventKind.Granted or FloorEventKind.Taken or FloorEventKind.Idle or FloorEventKind.Denied or FloorEventKind.Revoked)
+            && _broadcastPending.Remove(ev.CallId) && !s.IsBroadcast)
+            Notify.Warn($"{s.Title} — 일제 통화로 열리지 않았습니다", "진행 중인 그룹 통화에 합류했거나 편성 그룹이 아닙니다. 일반 그룹 통화로 이어집니다.");
         var now = DateTime.Now;
         switch (ev.Kind)
         {
@@ -1239,6 +1268,19 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     {
         if (Ptt is null) return Fail("PTT 계정 없음");
         return Track(Ptt.JoinGroupCall(g.Id, new GroupCallOptions { Emergency = true }), Operation.Emergency);
+    }
+
+    /// <summary>일제 통화 개시(TS 24.379 §4.12, mcptt_broadcast_group_call.md §3) — 편성 그룹에 prearranged + broadcast-ind 로 새 세션을 연다.
+    /// 개시자(나)만 발언하고, 발언을 놓은 뒤 서버의 Floor Idle(B-bit)을 받으면 코어가 호를 해제한다. 진행 중 세션이 있으면 서버는 합류로만
+    /// 받으므로(§3.2) 여기서 막고, chat 그룹은 서버가 broadcast-ind 를 무시하므로 막는다.</summary>
+    public Result BroadcastCall(GroupInfo g)
+    {
+        if (Ptt is null) return Fail("PTT 계정 없음");
+        if (SessionOfGroup(g.Id) is not null || g.HasSession) return Fail($"{g.Name} — 진행 중인 그룹 통화가 있어 일제 통화를 열 수 없습니다");
+        if (g.IsChat) return Fail($"{g.Name} — 채팅 그룹은 일제 통화를 열 수 없습니다(편성 그룹만)");
+        var r = Ptt.JoinGroupCall(g.Id, new GroupCallOptions { Broadcast = true });
+        if (r.Ok) _broadcastPending.Add(r.Value.Id);
+        return Track(r, Operation.Broadcast);
     }
 
     public Result StartPrivateCall(string peer, bool fullDuplex, bool emergency)

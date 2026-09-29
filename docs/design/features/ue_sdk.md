@@ -172,10 +172,13 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   B-bit Floor Idle 을 받으면 **코어가 호를 해제**한다(TS 24.380 §6.2.4.6.4, 앱 조작 없음). 수신 멤버의 표시는 앱 몫이다
   (`McpttInfo.broadcast`·`FloorEvent.indicator` B-bit·Taken `permission` 0 → `FloorInfo.canRequest=false`).
 - **단말 속성**([mcptt_management_views.md](mcptt_management_views.md) §4.1). `EngineConfig.userAgent` 는
-  `userAgentOf(제품, 앱 버전, OS, 모델)` 형식(`CIMS-PTT/1.4.2 (Android 15; SM-S921N)`)으로 앱이 채운다.
+  `userAgentOf(제품, 앱 버전, OS, 모델)` 형식(`CIMS-PTT/1.4.2 (Android 15; SM-S921N)`)으로 앱이 채운다. `userAgentOf` 는 OS·모델을
+  comment 규칙(RFC 3261 §25.1)으로 정리한다 — 괄호·역슬래시 제거, 공백·제어 문자 접기, OS 의 `;`(OS·모델 구분자) 제거.
   `AccountConfig.instanceId` = REGISTER Contact `+sip.instance` URN — IMEI 를 아는 단말은 `imeiUrn(imei)`(RFC 7254, Luhn 검사),
   모르면 기기(설치) 고유 `urn:uuid:…`. TCP/TLS 는 RFC 5626 outbound 경로(`reg-id` 와 함께), UDP 는 REGISTER Contact 에 직접
   싣는다. 비우면 pjsip 기본값(호스트명 해시 — 기기마다 같을 수 있다, [registration_binding_set.md](registration_binding_set.md) §8).
+  두 헬퍼는 C API `cimsue_user_agent_of`·`cimsue_imei_urn`, .NET `Engine.UserAgentOf`·`ImeiUrn` 으로도 노출된다(규칙은 코어 하나).
+  Windows 기기 값(OS 판·BIOS 모델·`MachineGuid` 이름 기반 `urn:uuid:` — Android 와 같은 `cims-ue:` 규칙)은 .NET `Platform.DeviceIdentity` 가 모은다.
 
 ### 4.3 스레딩·수명 규칙
 
@@ -220,8 +223,8 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
 [mcptt_ue_multitalker_media.md](mcptt_ue_multitalker_media.md) §6 의 결론. 정본 테이블은
 `docs/design/features/mcptt_floor_defs.yaml`(opcode·field id·indicator 비트·source/permission/queued purpose·cause 문구)
 이고 `scripts/gen_floor_defs.py` 가 코어 헤더 `sdk/core/src/floor/floor_defs.h` 를 생성한다(CMake 가 테이블 변경 시 재생성).
-`gen_floor_defs.py --check` 는 생성물 최신성과 `cmp/PMcpttGroup.h`·android `FloorControl.kt`·
-`scripts/mcptt_floor_policy_probe.py` 의 상수를 테이블과 대조한다(CMP·Kotlin 은 생성물이 아니라 대조 대상 — 값이
+`gen_floor_defs.py --check` 는 생성물 최신성과 `cmp/PMcpttGroup.h`·android `FloorControl.kt`·.NET 파사드 `FloorIndicator`(`Types.cs`)·
+`scripts/mcptt_floor_policy_probe.py` 의 상수를 테이블과 대조한다(CMP·Kotlin·.NET 은 생성물이 아니라 대조 대상 — 값이
 어긋나면 S1 이 막는다). 알고리즘 드리프트는 `cimsue_test` 의 교차 검증이 잡는다 — 코어 빌더 출력을 CMP
 `ParseFloorMessage` 로, CMP `BuildFloorMessage` 출력(Granted ack-요구·Taken 리스트·Deny·Queue)을 코어 `decode` 로.
 
@@ -401,7 +404,7 @@ Android 앱은 아직 이 코어 위로 이행하지 않아(pjsua2 직접) 같�
 |---|---|---|
 | C API `cimsue_c.h` | `sdk/core/include/cimsue/cimsue_c.h`, 구현 `sdk/core/src/c_api.cpp` — `cimsue.dll` 이 export (`CIMSUE_API` + `extern "C"`, x64 `__cdecl`). 프로토콜 로직이 없는 평탄화 층 — 타입 변환과 수명 규약만 둔다 | 불투명 핸들(`cimsue_engine_t*`·`cimsue_csc_t*`), 계정·호·라우트는 코어와 같은 정수 id. 명령은 동기 `cimsue_status_t`(0=성공, 그 외 = C++ `Result::code` 그대로 — 음수 코어·양수 pjsua/HTTP), 사유는 스레드별 `cimsue_last_error()`; id 반환 함수는 -1 이 실패. 상태·이벤트는 **콜백 구조체 한 벌**(`cimsue_listener_t` — `Listener` 가상함수 1:1, `void* user`, NULL 은 무시; `start()` 가 복사하고 기동 중에는 교체하지 않는다) 로 코어 **이벤트 스레드**에서 호출. 문자열은 UTF-8 `const char*` — 코어 소유 문자열·배열은 콜백 인자면 그 콜백 동안, 조회(getter) 산출이면 같은 스레드의 다음 조회까지(스레드별 스냅샷; CSC 산출은 그 핸들의 다음 호출까지) 유효. 구조체(`CallInfo`·`FloorEvent`·`Profile` 등)는 POD 로 평탄화, 배열은 `(ptr, count)`, 참/거짓은 `int32_t`, 열거형 값은 C++ 과 같은 정수. 입력 설정은 `cimsue_*_default()` 로 채운 뒤 덮어쓴다(문자열 NULL = C++ 기본값 유지, 빈 문자열 = 지움). 모든 함수가 `Engine`/`Listener`/`CscClient` 헤더와 같은 이름·순서. 단위시험 `test/c_api_test.cpp`(S1-UE-UNIT — Windows 는 DLL 이 export 하지 않는 내부 심볼까지 시험하므로 `cimsue_test` 가 DLL 대신 코어 오브젝트(`cimsue_objs`)를 직접 링크) |
 | .NET 파사드 `CimsUe.dll` | `sdk/windows/dotnet/CimsUe/` (C# 클래스 라이브러리, `net10.0-windows`, `AllowUnsafeBlocks`) | `NativeMethods`(`[DllImport("cimsue")]`·`LibraryImport` 소스 생성)는 internal. 공개면은 Kotlin 파사드와 같은 모델 — `Engine`·`Account`·`Call`·`Group`·`Subscriptions`·`CscClient` 클래스 + `IObservable`/이벤트, 콜백은 `SynchronizationContext.Post` 로 앱 스레드에 마샬링(WPF `Dispatcher` 를 참조하지 않는다). 네이티브 핸들은 `SafeHandle` 로 수명 관리, 콜백 델리게이트는 `GCHandle` 로 고정 |
-| Windows 접점 (파사드 안) | `CimsUe/Platform/` | `AudioEndpoints`(`IMMDeviceEnumerator`·`IMMNotificationClient` COM interop) · `HotKeys`(`RegisterHotKey` + 메시지 전용 HWND) · `CredentialStore`(`ProtectedData` DPAPI) · `SingleInstance`(명명 Mutex + 창 활성화) · `AutoStart`(`HKCU\...\Run`). 프로토콜·SIP·RTP 는 이 층에 없다(§1 경계 규칙 3) |
+| Windows 접점 (파사드 안) | `CimsUe/Platform/` | `AudioEndpoints`(`IMMDeviceEnumerator`·`IMMNotificationClient` COM interop) · `HotKeys`(`RegisterHotKey` + 메시지 전용 HWND) · `CredentialStore`(`ProtectedData` DPAPI) · `SingleInstance`(명명 Mutex + 창 활성화) · `AutoStart`(`HKCU\...\Run`) · `DeviceIdentity`(단말 속성 §4.2 — OS 판·BIOS 모델·`MachineGuid` 이름 기반 `urn:uuid:`). 프로토콜·SIP·RTP 는 이 층에 없다(§1 경계 규칙 3) |
 | 앱 | `windows/dispatch-desktop/` (WPF, MVVM) | `CimsUe.dll` 만 참조. 배포는 self-contained 폴더 게시 zip(`windows/dispatch-desktop/publish.ps1` — MSVC CRT·서명 dotnet 뮤서 진입점 동봉, dispatch_desktop_ui.md §11 "배포"; MSIX·코드 서명은 향후), `cimsue.dll` 은 `CimsUe` 패키지의 `runtimes/win-x64/native/` 로 동봉 |
 
 ---
@@ -455,7 +458,7 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 
 | stage | 항목 | 내용 |
 |---|---|---|
-| S1 | `S1-UE-FLOOR-CODEC` | `scripts/gen_floor_defs.py --check`(정의 테이블 ↔ 생성물·CMP·Kotlin·probe 상수) + `cimsue_test` 의 `FloorXCheck`(코어 빌더 ↔ CMP `ParseFloorMessage`, CMP `BuildFloorMessage` ↔ 코어 decode) |
+| S1 | `S1-UE-FLOOR-CODEC` | `scripts/gen_floor_defs.py --check`(정의 테이블 ↔ 생성물·CMP·Kotlin·.NET·probe 상수) + `cimsue_test` 의 `FloorXCheck`(코어 빌더 ↔ CMP `ParseFloorMessage`, CMP `BuildFloorMessage` ↔ 코어 decode) |
 | S1 | `S1-UE-UNIT` | `build/bin/cimsue_test`(googletest) — config→pjsua2 매핑(IMPI·realm `*`·H(A1)/AKA 우선·TLS 게이트 SRTP·sec-agree 헤더·proxies lr)·대상 정규화·헤더 파싱·재생 라우트 수명(null 장치 엔진 기동 → 라우트 추가/제거 → 종료 순서). 확장: SDP 협상·floor 상태머신·SDS TLV·MSRP·PKCE |
 | S3 | `S3-UE-CLI-*` | `cimsue-cli` 로 등록(UDP/TLS/AKA)·1:1(평문·TLS+SRTP)·그룹콜(affiliation PUBLISH ETag·multipart INVITE·로스터 NOTIFY·floor Request→Granted/Taken·발언 RTP 수신·Idle)·SDS 송수신·관제(dialog 구독 early→confirmed→terminated, Join 200 + 감청 RTP + caller/callee SSRC 라벨, 그룹 픽업 `**`, REFER blind 전달 후 전달 대상 RTP)·PTT 청취 — 기존 `S3-SCN-*` 의 cspsim 축과 같은 판정(누적 RTP delta·403/489). 수동 절차는 VERIFICATION_MANUAL 부록, cims-verify 항목 등록은 후속 |
 | 실기기 | Android | 태블릿·UNIWA 에서 감청 SSRC 2개 귀속 표시·PTT 청취 버튼 비활성·대표번호 착신 — 와이어 실측 |

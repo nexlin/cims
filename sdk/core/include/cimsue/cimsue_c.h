@@ -437,7 +437,7 @@ CIMSUE_API const char* CIMSUE_CALL cimsue_transport_str(cimsue_transport_t t);
 CIMSUE_API const char* CIMSUE_CALL cimsue_floor_state_str(cimsue_floor_state_t s);
 CIMSUE_API const char* CIMSUE_CALL cimsue_floor_kind_str(cimsue_floor_kind_t k);
 
-/* ── 문자열 산출 헬퍼 (C++ 인라인 멤버 1:1) ──
+/* ── 문자열 산출 헬퍼 (C++ 인라인 멤버·types.h 자유 함수 1:1) ──
  * 공통 규약: out 에 최대 cap 바이트(NUL 포함)를 NUL 종료로 기록하고, NUL 을 제외한 실제 길이를 반환한다.
  * 반환값이 cap 이상이면 잘린 것이다. out=NULL·cap=0 이면 필요한 길이만 계산한다. */
 CIMSUE_API int32_t CIMSUE_CALL cimsue_account_config_aor(const cimsue_account_config_t* cfg, char* out, int32_t cap);
@@ -449,6 +449,11 @@ CIMSUE_API int32_t CIMSUE_CALL cimsue_account_config_digest_username(const cimsu
 CIMSUE_API int32_t CIMSUE_CALL cimsue_account_config_is_complete(const cimsue_account_config_t* cfg);
 /** Join 헤더 값 — <call-id>;to-tag=<remote-tag>;from-tag=<local-tag>. */
 CIMSUE_API int32_t CIMSUE_CALL cimsue_dialog_info_join_header(const cimsue_dialog_info_t* d, char* out, int32_t cap);
+/** REGISTER User-Agent 규약 `<제품>/<앱 버전> (<OS>; <모델>)` — userAgentOf(types.h, comment 정리 포함). NULL 인자 = 빈 값. */
+CIMSUE_API int32_t CIMSUE_CALL cimsue_user_agent_of(const char* product, const char* version, const char* os,
+                                                    const char* model, char* out, int32_t cap);
+/** IMEI(15자리) → RFC 7254 instance URN — imeiUrn(types.h). 자릿수·검사 숫자가 틀리면 빈 문자열(반환 0). */
+CIMSUE_API int32_t CIMSUE_CALL cimsue_imei_urn(const char* imei, char* out, int32_t cap);
 
 /* ── CSC 설정 평면 (csc.h) ──
  * 산출 구조체(토큰·프로파일·그룹·XCAP 문서)의 문자열·배열은 같은 핸들에 다음 호출을 할 때까지 유효하다. */
