@@ -12,6 +12,7 @@
 
 #include <pjsua2.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <ctime>
@@ -152,13 +153,55 @@ class PjAccount;
 class PjCall;
 class PjLog;
 
+/** 이벤트 fan-out — 주 리스너(start 인자) 뒤에 관찰자들(addObserver — 구동 세션·계측 링크, ue_voice_quality.md §5.3)에게 같은
+ *  이벤트를 같은 이벤트 스레드에서 차례로 준다. 재진입 락이라 콜백 안에서 관찰자를 빼도 된다. removeObserver 는 진행 중 전달이
+ *  끝날 때까지 기다리므로, 돌아온 뒤에는 그 관찰자가 다시 불리지 않는다. */
+class FanoutListener : public Listener {
+public:
+    Listener* primary = nullptr;
+    void add(Listener* l) { std::lock_guard<std::recursive_mutex> lk(m_); if (l) obs_.push_back(l); }
+    void remove(Listener* l) {
+        std::lock_guard<std::recursive_mutex> lk(m_);
+        for (auto it = obs_.begin(); it != obs_.end();) it = *it == l ? obs_.erase(it) : it + 1;
+    }
+    void onLog(int level, const std::string& msg) override { each([&](Listener* l) { l->onLog(level, msg); }); }
+    void onRegState(const RegInfo& i) override { each([&](Listener* l) { l->onRegState(i); }); }
+    void onIncomingCall(const CallInfo& i) override { each([&](Listener* l) { l->onIncomingCall(i); }); }
+    void onCallState(const CallInfo& i) override { each([&](Listener* l) { l->onCallState(i); }); }
+    void onCallMedia(const CallInfo& i) override { each([&](Listener* l) { l->onCallMedia(i); }); }
+    void onFloor(const FloorEvent& e) override { each([&](Listener* l) { l->onFloor(e); }); }
+    void onRoster(int a, const std::string& g, const std::vector<RosterEntry>& u, bool f) override {
+        each([&](Listener* l) { l->onRoster(a, g, u, f); });
+    }
+    void onDialogInfo(const DialogInfo& d) override { each([&](Listener* l) { l->onDialogInfo(d); }); }
+    void onSds(const SdsMessage& m) override { each([&](Listener* l) { l->onSds(m); }); }
+    void onRequestResult(const RequestResult& r) override { each([&](Listener* l) { l->onRequestResult(r); }); }
+    void onMessage(int a, const std::string& f, const std::string& ct, const std::string& b) override {
+        each([&](Listener* l) { l->onMessage(a, f, ct, b); });
+    }
+    void onEngineStopped() override { each([&](Listener* l) { l->onEngineStopped(); }); }
+
+private:
+    template <class F> void each(F fn) {
+        std::lock_guard<std::recursive_mutex> lk(m_);
+        if (primary) fn(primary);
+        std::vector<Listener*> snap = obs_;              // 콜백 안의 remove 가 순회를 깨지 않게
+        for (Listener* l : snap) {
+            if (std::find(obs_.begin(), obs_.end(), l) != obs_.end()) fn(l);
+        }
+    }
+    std::recursive_mutex m_;
+    std::vector<Listener*> obs_;
+};
+
 }  // namespace
 
 // ─────────────────────────────────────────────────────────────────────────────
 
 struct Engine::Impl {
     EngineConfig cfg;
-    Listener* listener = nullptr;
+    Listener* listener = nullptr;     // = &fanout (start 가 연결) — emit 은 이것만 부른다
+    FanoutListener fanout;
     std::atomic<bool> running{false};
 
     Worker ctl;                 // ue-ctl — pjsua2 전용
@@ -173,6 +216,7 @@ struct Engine::Impl {
     std::map<int, std::unique_ptr<pj::Call>> calls;        // pjsua call id → Call
     /** 추가 재생 라우트(routeId ≥ 1) — 재생 전용 ExtraAudioDevice. 라우트 0 은 기본 재생 장치. */
     std::map<int, std::unique_ptr<pj::ExtraAudioDevice>> routes;
+    std::unique_ptr<pj::AudioMediaPlayer> txPlayer;       // 송출 원천 = WAV 반복 재생(setTxSource) — 없으면 마이크
     int nextRouteId = 1;
     int nextAccountId = 0;
     std::atomic<int64_t> nextToken{1};
@@ -801,6 +845,9 @@ void Engine::Impl::wireMedia(PjCall* call, int callId) {
     pj::AudDevManager& adm = ep->audDevManager();
     pj::AudioMedia& spk = adm.getPlaybackDevMedia();
     pj::AudioMedia& mic = adm.getCaptureDevMedia();
+    // 송출 원천 — 마이크 또는 기준 음원 재생기(setTxSource, ue_voice_quality.md §4.2). 재생기를 쓰는 동안 마이크는 호에서 뗀다.
+    pj::AudioMedia& src = txPlayer ? static_cast<pj::AudioMedia&>(*txPlayer) : mic;
+    if (txPlayer) mic.stopTransmit(*aud);
     // 재생 sink — 라우트 0 = 기본 재생 장치, 그 외 = 추가 재생 라우트. 선택되지 않은 sink 와의 결선은 끊는다
     // (미결선 쌍의 disconnect 는 no-op). 라우트가 사라졌으면 기본 장치로 폴백.
     pj::AudioMedia* sink = &spk;
@@ -812,7 +859,7 @@ void Engine::Impl::wireMedia(PjCall* call, int callId) {
     bool micOn;
     if (call->mcptt) micOn = !call->mcptt->listenOnly && (call->mcptt->fullDuplex || call->mcptt->micOpen);
     else micOn = !snap.muted && !call->recvOnly;
-    if (micOn) mic.startTransmit(*aud); else mic.stopTransmit(*aud);
+    if (micOn) src.startTransmit(*aud); else src.stopTransmit(*aud);
 }
 
 int64_t Engine::Impl::doSendRequest(int accountId, const std::string& method, const std::string& targetUri,
@@ -855,7 +902,8 @@ bool Engine::running() const { return impl_->running; }
 Result Engine::start(const EngineConfig& cfg, Listener* listener) {
     if (impl_->running) return Result::fail(-1, "already running");
     impl_->cfg = cfg;
-    impl_->listener = listener;
+    impl_->fanout.primary = listener;
+    impl_->listener = &impl_->fanout;
     impl_->evt.start();
     impl_->ctl.start();
     Result r = impl_->ctl.runSync([this]() -> Result {
@@ -912,6 +960,7 @@ void Engine::stop() {
     impl_->ctl.runSync([this] {
         Impl* o = impl_.get();
         o->calls.clear();                        // ~Call → hangup, floor participant close
+        o->txPlayer.reset();                     // ~AudioMediaPlayer → bridge 포트 해제 (libDestroy 전)
         o->routes.clear();                       // ~ExtraAudioDevice → close (libDestroy 전)
         o->accounts.clear();                     // ~Account → shutdown
         try { o->ep->libDestroy(); } catch (...) {}               // LogWriter 도 여기서 pjsua2 가 delete
@@ -927,6 +976,7 @@ void Engine::stop() {
     impl_->regInfos.clear();
     impl_->callInfos.clear();
     impl_->finalStats.clear();
+    impl_->finalQuality.clear();
     impl_->publishPending.clear();
     impl_->publishEtag.clear();
 }
@@ -1143,6 +1193,38 @@ StreamStats Engine::streamStats(int callId) const {
             if (!o->activeAudio(c, &idx)) return finalOf();
             return Impl::fromPj(c->getStreamStat(idx));
         } catch (...) { return finalOf(); }
+    });
+}
+
+void Engine::addObserver(Listener* l) { impl_->fanout.add(l); }
+void Engine::removeObserver(Listener* l) { impl_->fanout.remove(l); }
+
+Result Engine::setTxSource(const std::string& wavPath) {
+    if (!impl_->running) return Result::fail(-1, "not running");
+    return impl_->ctl.runSync([this, wavPath]() -> Result {
+        Impl* o = impl_.get();
+        std::unique_ptr<pj::AudioMediaPlayer> next;
+        if (!wavPath.empty()) {
+            try {
+                next.reset(new pj::AudioMediaPlayer());
+                next->createPlayer(wavPath, 0);              // 0 = 끝나면 처음부터 반복
+            } catch (pj::Error& e) { return Result::fail(-1, "tx source: " + e.info(false)); }
+        }
+        // 지금 원천을 모든 호에서 떼고 바꾼 뒤 다시 결선한다(마이크 ↔ 재생기).
+        pj::AudioMedia& mic = o->ep->audDevManager().getCaptureDevMedia();
+        for (auto& kv : o->calls) {
+            PjCall* c = static_cast<PjCall*>(kv.second.get());
+            pj::AudioMedia* aud = nullptr;
+            try { aud = o->activeAudio(c); } catch (...) {}
+            if (!aud) continue;
+            try { if (o->txPlayer) o->txPlayer->stopTransmit(*aud); else mic.stopTransmit(*aud); } catch (pj::Error&) {}
+        }
+        o->txPlayer = std::move(next);
+        for (auto& kv : o->calls) {
+            try { o->wireMedia(static_cast<PjCall*>(kv.second.get()), kv.first); } catch (pj::Error&) {}
+        }
+        o->log(3, wavPath.empty() ? "tx source: microphone" : "tx source: " + wavPath);
+        return Result::success();
     });
 }
 

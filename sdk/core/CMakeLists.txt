@@ -82,6 +82,9 @@ add_library(cimsue_objs OBJECT
     src/csc/group_doc.cpp
     src/c_api.cpp
     src/quality/call_quality.cpp
+    src/net/tls_stream.cpp
+    src/drive/drive_session.cpp
+    src/drive/device_link.cpp
     ${FLOOR_DEFS_H}
 )
 # 사용 요구(include·매크로·옵션·pj 링크)는 INTERFACE 타깃 하나에 모아 오브젝트·라이브러리·시험이 같은 것을 본다.
@@ -151,7 +154,8 @@ if(DEFINED GTEST_DIR)
         test/csc_test.cpp
         test/engine_route_test.cpp
         test/c_api_test.cpp
-        test/quality_test.cpp)
+        test/quality_test.cpp
+        test/drive_test.cpp)
     target_include_directories(cimsue_test PRIVATE ${GTEST_INC} ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_link_directories(cimsue_test PRIVATE ${GTEST_LIB_PATH} ${GTEST_DIR}/lib)   # 설치 산출물은 lib/ (루트 변수 lib64 는 구 경로)
     if(WIN32)

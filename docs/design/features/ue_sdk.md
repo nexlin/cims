@@ -118,6 +118,11 @@ sdk/core/
                         octet-stream·group 지정 시 서버 게이트, `downloadFd` = FILEURL 의 경로만 취해 자기 CSC 로 — Bearer 를 다른 호스트로
                         보내지 않음). 공개 헤더 `cimsue/csc.h` — Engine 과 독립, 동기 호출, 자체 JSON 파서(pjlib 비의존)
     http/               https_client — ITransport(주입 가능) + OpenSSL 기본 구현(HTTP/1.1, chunked, 신뢰 앵커 PEM)
+    net/                tls_stream — TCP(+TLS) 클라이언트 스트림(소켓·핸드셰이크·IP/DNS SAN 검증·leaf 지문) — https_client·계측 링크 공용
+    quality/            emodel.h(G.107/G.107.1 단일 정의 — 계측기 워커와 공용) · call_quality(pjmedia RTCP·XR → CallQuality) — ue_voice_quality.md §3
+    drive/              drive_session(구동 줄 프로토콜 — cimsue-cli drive·계측 링크 공용, Engine 관찰자) · device_link(시험 모드 TLS 계측 링크)
+                        — 공개 cimsue/drive.h, ue_voice_quality.md §5
+    util/               json_lite — 최소 JSON 파서(CSC 클라이언트·계측 링크)
     csc/                OAuth2 PKCE(IdMS) · XCAP(GMS 그룹·CMS user-profile/service-config, ETag) ·
                         `/provisioning/me` · `/provisioning/directory` · FD 스토어 — HTTP 전송은 인터페이스(§4.4)
     domain/             UE 세션 모델(등록·호 목록·그룹/채널·affiliation·긴급/경보·데스크) → 상태 스냅샷 + 이벤트
@@ -267,18 +272,23 @@ cimsue-cli --csc-host H --user U --pw P --from-profile volte|ptt [--server IP --
 
 **구동 모드 `drive`** — 계측기 `real-ue` 풀([test_instrument.md §3.3](test_instrument.md))이 프로세스를 가상 단말처럼 단계별로 구동하는 접점. 엔진을 띄운 채
 (등록은 자동으로 하지 않는다) stdin 한 줄 = 명령 하나(공백 토큰), stdout 한 줄 = JSON 이벤트 하나. 명령마다 동기 결과 `result{op,ok,call,code,reason}` 하나를 내고
-(dial/group_call/pickup 은 `call` id), 진행은 이벤트로 온다. 시각은 프로세스 안에서 잔다(`rrd_ms`·`srd_ms`·`sdd_ms`·floor `t_us`).
+(dial/group_call/pickup 은 `call` id), 진행은 이벤트로 온다. 시각은 프로세스 안에서 잔다(`rrd_ms`·`srd_ms`·`sdd_ms`·floor `t_us`). 해석기는 코어의
+`DriveSession`(공개 `cimsue/drive.h` — Engine 관찰자로 이벤트를 받는다)이고 명령·이벤트 정의도 그 헤더 하나다 — 앱 시험 모드의 계측 링크(`DeviceLink`,
+[ue_voice_quality.md §5](ue_voice_quality.md))가 같은 해석기를 TLS 소켓으로 쓴다.
 ```
-cimsue-cli [계정] drive
-  명령: register | unregister | dial <번호|URI> [video] | answer <call> [video] | reject <call> [code] | hangup <call> | hold <call> | resume <call>
-        dtmf <call> <digits> | transfer <call> <대상> | group_call <group> [listen] [emergency] [broadcast] | floor_request <call> | floor_release <call>
-        affiliate <group> on|off | pickup <code> [number] | stats [call] | quit
-  이벤트: ready{version,aor} · reg{state,code,reason,expires,rrd_ms} · incoming{call,from,called,video,mcptt,group}
-        · call{call,dir,state outgoing|incoming|active|held|disconnected,code,reason,media,mcptt,video,by_us,group,srd_ms|sdd_ms,rx_pkts,tx_pkts,rx_loss,rx_bytes,jitter_us}
+cimsue-cli [계정] drive [--sample-file WAV] [--service volte|voip|ptt]
+  명령: register | unregister | use <service> | dial <번호|URI> [video] | answer <call> [video] | reject <call> [code] | hangup <call> | hold <call>
+        resume <call> | dtmf <call> <digits> | transfer <call> <대상> | group_call <group> [listen] [emergency] [broadcast] | floor_request <call>
+        floor_release <call> | affiliate <group> on|off | pickup <code> [number] | media mic|sample [<wav>] | stats [call] | quality <call> | quit
+  이벤트: ready{version,aor} · reg{service,state,code,reason,expires,rrd_ms} · incoming{call,from,called,video,mcptt,group}
+        · call{call,dir,state outgoing|incoming|active|held|disconnected,code,reason,media,mcptt,video,by_us,group,srd_ms|sdd_ms,(disconnected: 통계 + 품질)}
         · floor{call,kind,subtype(TS 24.380 §8.2),t_us,cause,queue_position,duration} · request{method,op,on,code,reason,ms,token}(affiliate PUBLISH)
-        · stats{call,rx_pkts,tx_pkts,rx_loss,rx_bytes,jitter_us + 품질}(활성 호마다 1 초) · roster · dialog · sds · engine_stopped · exit
-  품질(call disconnected·stats·명령형 결과 JSON) = codec·discard·loss_pct·discard_pct·jitter_max_ms·remote_loss_pct·remote_jitter_ms·rtd_ms·esd_ms·
+        · stats{call,통계 + 품질}(활성 호마다 1 초) · quality{call,kind:callTerm|snapshot,품질} · roster · dialog · sds · engine_stopped · exit
+  통계 = rx_pkts·tx_pkts·rx_loss·rx_bytes·jitter_us·stats_valid
+  품질(call disconnected·stats·quality·명령형 결과 JSON) = codec·discard·loss_pct·discard_pct·jitter_max_ms·remote_loss_pct·remote_jitter_ms·rtd_ms·esd_ms·
         one_way_ms·r_lq·r_cq·mos_lq·mos_cq — Engine::callQuality(ue_voice_quality.md §3), 값 없음 = -1
+cimsue-cli [계정] link HOST[:PORT] [--pair-key K] [--link-ca PEM | --link-pin FILE] [--sample-file WAV] [--service S] [--duration S]
+  등록 뒤 계측기 워커(Device.Listen)에 TLS 로 붙어 hello → 워커 명령을 같은 해석기로 실행(register 는 app_owned 거절). stdout = link{state,detail}
 ```
 MCPTT 착신은 코어가 자동응답(`autoAnswerMcptt`)하므로 `incoming{mcptt:true}` 뒤 `call{dir:in,state:active}` 가 합류 신호다. `disconnected` 이벤트는 그 호의
 최종 통계를 함께 싣는다(우리가 끊었으면 `by_us` + `sdd_ms`). 1xx 는 이벤트로 내지 않는다(코어 `onCallState` 는 상태 전이만).
@@ -377,7 +387,7 @@ sdk/windows/
 
 코어는 pjlib 추상(`pj_sock_*`·`pj_thread_register`) 위에 있어 대부분 그대로 컴파일된다. 플랫폼 분기는 다음 네 곳이 전부다.
 
-- `src/http/https_client.cpp` — BSD 소켓/winsock 차이를 소켓 층(`sock_t`·`closeSock`·`setTimeout`·`WSAStartup`)에서만 흡수. HTTP·TLS 는 공통.
+- `src/net/tls_stream.cpp` — BSD 소켓/winsock 차이를 소켓 층(`sock_t`·`closeSock`·`setTimeout`·`WSAStartup`·poll)에서만 흡수. 그 위 TLS·HTTP(`src/http/https_client.cpp`)·계측 링크는 공통.
 - `cli/main.cpp` — SIGSEGV 백트레이스(glibc `execinfo`)는 `#ifndef _WIN32`.
 - 64비트 정수 — `SdsMessage.timeSec/fileSize`·SDS 5옥텟 시각·요청 token(`affiliate`/`sendRequest` 반환, `RequestResult.token`)은
   `int64_t`(Windows `long` 은 32비트 — `long` 은 공개 헤더에 두지 않는다). floor 소켓 핸들은 `intptr_t`(Win64 `SOCKET`).
@@ -529,7 +539,7 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 - **호 전달 후 누적 통계** — 전달로 미디어 스트림이 재생성되면 마지막 소멸 스트림의 통계만 남는다(스트림별 누적 합산은 후속).
 - **remote-init ambient listening·barge-in** — 서버 §10 과제와 함께 코어 API 확장.
 - **음성 품질 측정·시험 모드 계측기 링크** — 코어 `quality/`(RTCP-XR·G.107/G.107.1 E-model·`callQuality`)·drive 루프의 코어 이전
-  (`drive/` `DriveSession` — stdin/stdout 과 TLS 계측 링크 공용)·`cimsue-cli --link` 는 [ue_voice_quality.md](ue_voice_quality.md) 가 정본(측정 Q1 구현 반영, 링크 Q2~ 미구현).
+  (`drive/` `DriveSession` — stdin/stdout 과 TLS 계측 링크 공용)·`cimsue-cli --link` 는 [ue_voice_quality.md](ue_voice_quality.md) 가 정본(측정 Q1·코어 링크 Q2 구현 반영, 앱 바인딩 Q4 미구현).
 - **cspsim 과 `cimsue-cli` 의 역할 분담 장기안** — 시뮬레이터 축(부하·다중 단말)과 실스택 축(정합)의 S3 항목 배분.
 
 ## 12. 문서 갱신 대상 (구현과 같은 변경에서)

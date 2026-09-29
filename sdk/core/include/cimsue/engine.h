@@ -61,6 +61,15 @@ public:
     StreamStats streamStats(int callId) const;
     /** 호 품질(손실·폐기·지터·RTD·E-model MOS — ue_voice_quality.md §3). 동기 조회, 종료된 호는 마지막 값. 오디오가 없으면 valid=false. */
     CallQuality callQuality(int callId) const;
+    /** 송출 원천 — 빈 문자열 = 마이크, 경로 = WAV(PCM 16-bit) 반복 재생을 마이크 대신 모든 호로(시험 모드 기준 음원, ue_voice_quality.md §4.2).
+     *  진행 중 호에도 즉시 적용된다. 음소거·floor 게이트는 원천과 무관하게 그대로다. */
+    Result setTxSource(const std::string& wavPath);
+
+    // ── 관찰자 ──
+    /** 주 리스너(start 인자) 뒤에 같은 이벤트를 받는 관찰자 — 구동 세션·계측 링크(ue_voice_quality.md §5.3). 이벤트 스레드에서 불린다.
+     *  removeObserver 는 진행 중 전달이 끝날 때까지 기다린다(이벤트 콜백 안에서 불러도 된다). */
+    void addObserver(Listener* observer);
+    void removeObserver(Listener* observer);
 
     // ── MCPTT 그룹콜·사설콜 (TS 24.379) ──
     /** 그룹콜 참여(발신 INVITE, multipart mcptt-info[+resource-lists], SDP m=application floor).

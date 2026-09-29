@@ -2,6 +2,7 @@
 #pragma once
 
 #include "cimsue/csc.h"
+#include "cimsue/drive.h"
 #include "cimsue/engine.h"
 #include "cimsue/listener.h"
 #include "cimsue/types.h"

@@ -184,35 +184,50 @@ Foreground Service 가 세션과 함께 든다(화면이 꺼져도 유지). Wind
 
 ### 5.1 전송
 
-- TCP + **TLS 1.2 이상**, 워커가 서버(`Device.Listen`, 기본 `0.0.0.0:7110`), 단말이 클라이언트.
-- 워커 인증서 = `Device.CertFile/KeyFile`(비면 기동 때 자체 서명을 만들어 `DataDir` 에 둔다 — 단말은 TOFU 로 지문을 고정).
-- 줄 단위(UTF-8, `\n`), 한 줄 최대 64 KiB. 양방향 15 초 무통신이면 `ping`/`pong`, 45 초면 끊는다.
+- TCP + **TLS 1.2 이상**, 워커가 서버(`Device.Listen`, 기본 `0.0.0.0:7110`), 단말이 클라이언트(먼저 연결).
+- 워커 인증서 = `Device.CertFile/KeyFile`(비면 기동 때 자체 서명을 만들어 `DataDir` 에 둔다). 단말은 두 방식 중 하나로 확인한다 —
+  **검증**(`verifyServer` + 앵커 PEM — 체인과 접속 주소의 IP/DNS SAN) 또는 **최초 지문 고정**(TOFU — 첫 연결의 leaf SHA-256 을 `pinFile` 에
+  적고 이후 다르면 `Refused(pin_mismatch)`). 둘 다 끄면 암호화만 한다.
+- 줄 단위(UTF-8, `\n`), 한 줄 최대 64 KiB. 15 초 동안 받은 것이 없으면 단말이 `{"event":"ping"}` 을 보내고(워커 응답 = 줄 `pong`), 워커가
+  보낸 줄 `ping` 에는 단말이 `{"event":"pong"}` 으로 답한다. 45 초 동안 받은 것이 없으면 끊는다.
+- 끊기면 단말은 이 링크가 만들거나 받은 호만 끊고 1·2·4 … 초(상한 `reconnectMaxSec`, 기본 30) 백오프로 다시 붙는다. 60 초 넘게 붙어 있었으면
+  백오프를 처음부터. 연결 키 거절·지문 불일치(`Refused`)는 다시 붙지 않는다.
 
 ### 5.2 프로토콜
 
-`drive` 구동 모드([ue_sdk.md §4.7](ue_sdk.md))의 명령·이벤트를 **그대로** 쓴다. 링크가 더하는 것만 적는다.
+`drive` 구동 모드([ue_sdk.md §4.7](ue_sdk.md))의 명령·이벤트를 **그대로** 쓴다 — 정의는 공개 헤더 `cimsue/drive.h` 한 곳. 링크가 더하는 것:
 
 | 방향 | 줄 | 뜻 |
 |---|---|---|
-| 단말 → 워커 | `hello{proto:1, device_id, app, version, platform, model, pair_key, accounts:[{service, aor, msisdn, registered}], test_mode:true}` | 연결 직후 한 번. `device_id` = 설치 고유 id(`+sip.instance` 와 같은 원천) |
-| 워커 → 단말 | `welcome{worker, accepted}` / `bye{reason}` | 연결 키가 틀리면 `bye{pair_key}` 후 닫음 |
-| 워커 → 단말 | `use <service>` | 이후 명령이 쓸 회선. 호 명령은 이 회선의 계정으로 |
-| 워커 → 단말 | `media mic\|sample [<id>]` | 다음 호부터 송출 원천. `sample` 기본 = 동봉 기준 음원 |
-| 워커 → 단말 | `quality <call>` | 즉시 `quality` 이벤트 |
-| 단말 → 워커 | `quality{call, kind: interval\|callTerm, …CallQuality}` | `callTerm` = 호 종료 직후(최종 통계), `interval` = `stats` 와 같은 1 초 주기 |
-| 단말 → 워커 | `reg{service, state, …}` | 앱이 가진 등록의 변화(앱이 등록을 소유하므로 알림만) |
+| 단말 → 워커 | `hello{proto:1, device_id, app, version, platform, model, pair_key, accounts:[{service, aor, msisdn, registered}], test_mode:true, engine}` | 연결 직후 한 번. `device_id` = 설치 고유 id(`+sip.instance` 와 같은 원천) |
+| 워커 → 단말 | `welcome{worker, accepted:true}` / `bye{reason}` | 10 초 안에 와야 한다. 연결 키가 틀리면 `bye{reason:"pair_key"}` → 단말 `Refused` |
+| 워커 → 단말 | `use <service>` | 이후 명령이 쓸 회선(기본 = hello 의 첫 회선). 없으면 `no_account` |
+| 워커 → 단말 | `media mic\|sample [<wav>]` | 송출 원천 — 마이크 / WAV 반복 재생(`Engine::setTxSource`, 진행 중 호에도 즉시). `sample` 기본 = 앱 동봉 기준 음원 |
+| 워커 → 단말 | `quality <call>` | 즉시 `quality{kind:"snapshot"}` |
+| 단말 → 워커 | `quality{call, kind:"callTerm"\|"snapshot", 품질}` | `callTerm` = 호 종료 직후(`call disconnected` 바로 뒤, 최종 값). 진행 중 품질은 1 초 `stats` 에 같은 필드로 실린다 |
+| 단말 → 워커 | `reg{service, state, …}` | 등록 변화(앱이 등록을 소유하므로 알림만) |
+| 워커 → 단말 | `quit` | 워커가 단말을 놓는다 — 단말은 링크를 유지한 채 구동 호를 정리하고 새 세션으로 대기 |
 
 - **등록은 앱 소유** — 링크에서 `register`/`unregister` 는 거절한다(`result{ok:false, reason:"app_owned"}`). 워커는 `hello.accounts[].registered`
   와 `reg` 이벤트로 상태를 본다.
 - **자동 응답** — 링크가 연결된 동안 앱은 착신을 사람에게 알리되, 계측기가 `answer <call>` 을 보내면 그 호를 받는다. 계측기가 모르는 착신
   (예: 실제 사람이 건 호)은 계측기 단계와 맞지 않으므로 워커가 응답하지 않는다 — 사람이 받는다.
-- `stats`·`call(disconnected)` 이벤트는 `rtd_ms`·`esd_ms`·`discard`·`mos_lq`·`mos_cq`·`r_lq` 필드를 더한다(§3.3 과 같은 이름). `cimsue-cli drive` 도 같다.
+- `request` 이벤트는 이 세션이 낸 요청(`affiliate`)의 결과만 싣는다 — 앱이 스스로 낸 PUBLISH 등은 링크로 나가지 않는다.
 
-### 5.3 코어 `drive/`
+### 5.3 코어 구성
 
-`cimsue-cli` 의 drive 루프를 코어 `sdk/core/src/drive/` 의 **구동 세션**(`DriveSession` — 명령 해석·이벤트 직렬화)으로 옮기고, 줄 입출력만
-인터페이스(`ILineIo`)로 둔다 — `cimsue-cli` = stdin/stdout, 앱 = TLS 소켓(`drive/tls_link` — 코어의 OpenSSL). 앱은 `DeviceLink.connect(host, port,
-pairKey, verify)` 한 번과 상태 콜백만 쓴다. 프로토콜 정의가 한 곳이라 `real-ue` 와 `device` 가 어긋나지 않는다.
+| 부분 | 위치 | 역할 |
+|---|---|---|
+| `DriveSession` | 공개 `cimsue/drive.h` · `src/drive/drive_session.cpp` | 명령 해석·이벤트 직렬화. Engine **관찰자**(`Engine::addObserver`)로 이벤트를 받는다 — 앱의 주 리스너와 나란히. 줄 출력은 `LineSink` |
+| `DeviceLink` | 공개 `cimsue/drive.h` · `src/drive/device_link.cpp` | 링크 스레드 하나가 연결·hello·읽기·쓰기 큐·ping·재접속을 한다(OpenSSL SSL 객체는 동시 읽기·쓰기에 안전하지 않아 다른 스레드의 줄은 큐로) |
+| TCP/TLS 스트림 | `src/net/tls_stream.{h,cpp}` | 소켓·핸드셰이크·검증(IP/DNS SAN)·leaf 지문 — HTTPS 전송(`http/https_client`)과 공용 |
+| JSON 파서 | `src/util/json_lite.h` | CSC 클라이언트와 공용(welcome/bye 해석) |
+| 송출 원천 | `Engine::setTxSource(wav)` | `wireMedia` 에서 마이크 대신 `AudioMediaPlayer`(반복)를 호로 결선. 음소거·floor 게이트는 그대로 |
+
+- `cimsue-cli drive` 는 `DriveSession` + stdout(`ready` 이벤트 포함, stop 때 모든 호 정리), `cimsue-cli link HOST[:PORT] [--pair-key K] [--link-ca PEM |
+  --link-pin FILE] [--sample-file WAV] [--service S] [--duration S]` 는 등록 뒤 `DeviceLink`(stdout = `link{state,detail}` 줄) — 앱 시험 모드와 같은 경로라
+  앱 없이 워커 쪽(Q3)을 끝까지 검증한다.
+- 앱 바인딩(C API·.NET·SWIG 의 `DeviceLink`)은 앱 시험 모드(Q4)와 함께 낸다.
 
 ## 6. 계측기 — `device` 풀
 
@@ -241,20 +256,20 @@ pairKey, verify)` 한 번과 상태 콜백만 쓴다. 프로토콜 정의가 한
 
 | 항목 | 내용 |
 |---|---|
-| `S1-UNIT-UE`(코어) | E-model 기준값(기본값 R 93.2 → MOS 4.41, 손실·지연 표 벡터) · 광대역 척도 변환 · `DriveSession` 명령/이벤트 왕복 · 링크 `hello`/연결 키/`app_owned` |
+| `S1-UNIT-UE`(코어) | E-model 기준값(기본값 R 93.2 → MOS 4.41, 손실·지연 표 벡터) · 광대역 척도 변환 · `DriveSession` 명령/결과 줄·`app_owned`·`use`·`media`·`quality` · `DeviceLink` 설정 거절 |
 | `S1-UNIT` 계측기 | `tester_emodel_test` 가 공용 헤더로 · libcsim RTCP 송신 · `DeviceHub`(파이썬 스텁 단말이 TLS 로 붙어 hello·명령·이벤트·끊김) · 컨트롤러 `test_device_pool`(컴파일·배치·게이트) |
-| 계측기 | `VOLTE-CALL-DEVICE-*` 를 링크 모드 `cimsue-cli`(`--link host:port` — 앱과 같은 TLS 링크)로 먼저, 이어 실단말로 |
+| 계측기 | `VOLTE-CALL-DEVICE-*` 를 링크 모드 `cimsue-cli link`(앱과 같은 TLS 링크)로 먼저, 이어 실단말로 |
 
 ## 8. 이행
 
 | WP | 내용 | 걸리는 곳 |
 |---|---|---|
 | Q1 | 코어 측정 — RTCP-XR 빌드 켬(3 플랫폼) · `quality/` · 공용 E-model · `callQuality` · `cimsue-cli` stats 확장 · 바인딩 | `ext/pjproject` config_site · `sdk/core` · `sdk/android` · `sdk/windows` · `tester/worker`(EModel 공용화) |
-| Q2 | 코어 `drive/` — `DriveSession`·`ILineIo` 로 drive 루프 이전 · TLS 링크 · `hello`/`use`/`media`/`quality` · `cimsue-cli --link` · 기준 음원 송출 | `sdk/core` |
+| Q2 | 코어 `drive/` — `DriveSession`(관찰자)·`LineSink` 로 drive 루프 이전 · `DeviceLink` TLS 링크(TOFU·ping·재접속) · `hello`/`use`/`media`/`quality` · `cimsue-cli link` · `Engine::setTxSource` 기준 음원 | `sdk/core` |
 | Q3 | 계측기 — `DeviceHub`·`K_DEVICE` · 컨트롤러 `DevicePool`·`GET /devices`·배치·게이트·`device_*`·KPI 요약 · libcsim RTCP 송신 · 동봉 시나리오 · 콘솔(연결된 단말 목록·풀 속성) | `tester/worker` · `cspsim` · `ems/tester` |
 | Q4 | 앱 시험 모드 — Android core 공통(진입·설정·링크 서비스·오버레이·요약·이력·내보내기) + 앱 3종 · Windows 관제 앱 | `android/core` · 앱 · `windows/dispatch-desktop` |
 
-Q1 은 구현 반영 — 계측기 `real-ue` 는 cli 가 낸 `mos_cq`(RTT 실측·지터버퍼 폐기 포함)를 그대로 쓰고 `rtd_ms`·`real_rtd_ms` 를 기록한다. Q2·Q3 뒤에는 앱 없이 링크 모드 `cimsue-cli` 로 `device` 풀을 끝까지 검증할 수 있다.
+Q1·Q2 는 구현 반영 — 계측기 `real-ue` 는 cli 가 낸 `mos_cq`(RTT 실측·지터버퍼 폐기 포함)를 그대로 쓰고 `rtd_ms`·`real_rtd_ms` 를 기록한다. 링크는 워커 대역(파이썬 TLS 서버)으로 hello·welcome·`app_owned`·`media sample`·.48 경유 발신·ping·`callTerm`·quit·재접속·연결 키 거절·지문 불일치·CA 검증까지 확인했다. Q2·Q3 뒤에는 앱 없이 링크 모드 `cimsue-cli` 로 `device` 풀을 끝까지 검증할 수 있다.
 
 ## 9. 미해결 / 향후
 
