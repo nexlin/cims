@@ -154,7 +154,7 @@
                             </Border>
                         </StackPanel>
                         <!-- Ctrl+K -->
-                        <Button Style="{StaticResource Btn.Sm}" Margin="10,0,0,0" ToolTip="통합 검색 — 사람·그룹 → 개인 통화·임시 그룹·통화·문자·SDS (Ctrl+K)" Command="{Binding ToggleSearchCommand}">
+                        <Button Style="{StaticResource Btn.Sm}" Margin="10,0,0,0" ToolTip="통합 검색 — 사람·그룹 → 개별 통화·애드혹 그룹·통화·문자·SDS (Ctrl+K)" Command="{Binding ToggleSearchCommand}">
                             <StackPanel Orientation="Horizontal"><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Search}" Width="13" Height="13" Margin="0,0,5,0" /><TextBlock Text="검색" /><Border Style="{StaticResource NavKey}"><TextBlock Text="Ctrl+K" /></Border></StackPanel>
                         </Button>
                     </StackPanel>
@@ -281,7 +281,7 @@
                                 <TextBox x:Name="SearchBox" Style="{StaticResource Field}" Height="32" FontSize="14" Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}" KeyDown="SearchBox_KeyDown" ToolTip="이름 · 내선 · PTT 번호 · 그룹" />
                             </DockPanel>
                         </Border>
-                        <TextBlock DockPanel.Dock="Bottom" Style="{StaticResource Hint}" Margin="12,6,12,8" Text="↑↓ 이동 · Enter 첫 행동(개인 통화/통화/채널로) · 사람 행 = 소속 · PTT 상태 · 내선 상태" />
+                        <TextBlock DockPanel.Dock="Bottom" Style="{StaticResource Hint}" Margin="12,6,12,8" Text="↑↓ 이동 · Enter 첫 행동(개별 통화/통화/채널로) · 사람 행 = 소속 · PTT 상태 · 내선 상태" />
                         <ListBox Style="{StaticResource SelectList}" ItemsSource="{Binding Results}" SelectedIndex="{Binding SelectedIndex, Mode=TwoWay}" MaxHeight="420" Margin="4">
                             <ListBox.Resources>
                                 <DataTemplate DataType="{x:Type vm:PersonEntry}">
@@ -289,8 +289,8 @@
                                         <DockPanel>
                                             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                                                 <StackPanel.Resources><Style TargetType="Button" BasedOn="{StaticResource Btn.Xs}"><Setter Property="Margin" Value="4,0,0,0" /><Setter Property="Focusable" Value="False" /></Style></StackPanel.Resources>
-                                                <Button Content="개인 통화" Command="{Binding DataContext.PrivateCallCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}" IsEnabled="{Binding HasPtt}" />
-                                                <Button Content="임시 그룹에 추가" Command="{Binding DataContext.AddToAdhocCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}" IsEnabled="{Binding HasPtt}" />
+                                                <Button Content="개별 통화" Command="{Binding DataContext.PrivateCallCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}" IsEnabled="{Binding HasPtt}" />
+                                                <Button Content="애드혹에 추가" Command="{Binding DataContext.AddToAdhocCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}" IsEnabled="{Binding HasPtt}" />
                                                 <Button Content="SDS" Command="{Binding DataContext.SdsCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}" IsEnabled="{Binding HasPtt}" />
                                                 <Button Content="통화" Command="{Binding DataContext.CallCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}" IsEnabled="{Binding HasLine}" />
                                                 <Button Content="문자" Command="{Binding DataContext.SmsCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}" IsEnabled="{Binding HasLine}" />
@@ -334,8 +334,8 @@
                         <TextBlock Text="{Binding Head}" FontWeight="SemiBold" Margin="10,6,10,0" />
                         <TextBlock Style="{StaticResource Hint}" Text="{Binding Sub}" Margin="10,0,10,4" Visibility="{Binding Sub, Converter={StaticResource StrToVis}}" />
                         <Border Height="1" Background="{DynamicResource Brush.Border}" Margin="6,2" />
-                        <Button Style="{StaticResource DropItem}" Content="개인 통화" IsEnabled="{Binding HasPtt}" Command="{Binding DataContext.PrivateCallCommand, RelativeSource={RelativeSource AncestorType=Popup}}" CommandParameter="{Binding}" />
-                        <Button Style="{StaticResource DropItem}" Content="임시 그룹에 추가" IsEnabled="{Binding HasPtt}" Command="{Binding DataContext.AddToAdhocCommand, RelativeSource={RelativeSource AncestorType=Popup}}" CommandParameter="{Binding}" />
+                        <Button Style="{StaticResource DropItem}" Content="개별 통화" IsEnabled="{Binding HasPtt}" Command="{Binding DataContext.PrivateCallCommand, RelativeSource={RelativeSource AncestorType=Popup}}" CommandParameter="{Binding}" />
+                        <Button Style="{StaticResource DropItem}" Content="애드혹에 추가" IsEnabled="{Binding HasPtt}" Command="{Binding DataContext.AddToAdhocCommand, RelativeSource={RelativeSource AncestorType=Popup}}" CommandParameter="{Binding}" />
                         <Button Style="{StaticResource DropItem}" Content="SDS 메시지" IsEnabled="{Binding HasPtt}" Command="{Binding DataContext.SdsCommand, RelativeSource={RelativeSource AncestorType=Popup}}" CommandParameter="{Binding}" />
                         <Border Height="1" Background="{DynamicResource Brush.Border}" Margin="6,2" />
                         <Button Style="{StaticResource DropItem}" IsEnabled="{Binding HasLine}" Command="{Binding DataContext.CallCommand, RelativeSource={RelativeSource AncestorType=Popup}}" CommandParameter="{Binding}">

@@ -1,5 +1,5 @@
 // ① 내 채널 — 카드 클릭 = 포커스(버튼·체크 위 클릭은 제외), 발언 바 PTT press/release(마우스·터치, 포인터가 벗어나도 release 를 놓치지 않는다),
-// 빠른 발신 줄 Enter = 개인 통화 발신(반이중 — 팝오버 모드와 무관) · 포커스 잃으면 제안 접기.
+// 빠른 발신 줄 Enter = 개별 통화 발신(반이중 — 팝오버 모드와 무관) · 포커스 잃으면 제안 접기.
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;

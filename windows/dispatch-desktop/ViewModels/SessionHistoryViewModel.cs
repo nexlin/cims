@@ -85,7 +85,7 @@ public sealed class HistoryRow
             string g = s.Groups.FirstOrDefault(x => string.Equals(x.Uri, e.Group, StringComparison.OrdinalIgnoreCase))?.Name
                        ?? (e.GroupName.Length > 0 ? e.GroupName : UserPartConverter.UserPart(e.Group));
             var peers = e.People.Where(p => !SessionHistoryViewModel.SameUser(p, e.From)).ToList();
-            SessionKindText = e.SessionKind switch { "private" => "1:1", "adhoc" => "임시", "" or "group" => "그룹", _ => "미상" };
+            SessionKindText = e.SessionKind switch { "private" => "1:1", "adhoc" => "애드혹", "" or "group" => "그룹", _ => "미상" };
             TargetText = e.SessionKind switch
             {
                 "private" => peers.Count > 0 ? $"{who(e.From)} ↔ {string.Join(", ", peers.Select(who))}" : who(e.From),

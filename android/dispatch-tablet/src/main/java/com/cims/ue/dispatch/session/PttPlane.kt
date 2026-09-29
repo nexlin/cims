@@ -233,7 +233,7 @@ internal fun DispatchSession.applyFloor(ev: FloorEvent) {
     if (ev.rawType in BROADCAST_JUDGE_OPS && broadcastPending.remove(ev.callId) &&
         (ev.indicator and FLOOR_IND_BROADCAST) == 0) {
         addActivity(s.info.groupId, gname,
-            if (s.kind == SessionKind.PTT_ADHOC) "일제 통화로 열리지 않았습니다 — 서버가 임시 그룹 일제 통화를 받지 않아 일반 임시 그룹 통화로 이어집니다"
+            if (s.kind == SessionKind.PTT_ADHOC) "일제 통화로 열리지 않았습니다 — 서버가 애드혹 일제 통화를 받지 않아 일반 애드혹 그룹 통화로 이어집니다"
             else "일제 통화로 열리지 않았습니다 — 진행 중 통화에 합류했거나 편성 그룹이 아닙니다(일반 그룹 통화로 이어집니다)",
             ActivityKind.ERROR, s.isEmergency)
     }
@@ -386,10 +386,10 @@ suspend fun DispatchSession.deleteGroup(groupUri: String): CimsResult<Unit> {
 fun telUri(number: String): String =
     if (number.contains(':')) number else "tel:${number.trim()}"
 
-// ── 개인 통화·임시 그룹 통화(§4.1) ──────────────────────────────────────────
+// ── 개별 통화·애드혹 그룹 통화(§4.1) ──────────────────────────────────────────
 
 /**
- * 임시 그룹(ad hoc) id — `adhoc-<내 PTT 번호>-<epoch초>`.
+ * 애드혹(ad hoc) 그룹 id — `adhoc-<내 PTT 번호>-<epoch초>`.
  *
  * 규약은 [mcptt_emergency_modes.md](mcptt_emergency_modes.md) §6 이고 `adhoc-`·`priv-` 는 편성 그룹
  * 예약어다. **앱이 만든다** — 서버에 없는 임시 세션이라 채널 영속·affiliation·로스터 구독 대상이 아니다.
@@ -406,7 +406,7 @@ internal fun adhocIdOf(myPttId: String, nowSec: Long = System.currentTimeMillis(
 internal fun isAdhocId(groupId: String): Boolean = groupId.startsWith(SessionKind.ADHOC_PREFIX)
 
 /**
- * 개인 통화 발신 — PTT 사용자 1명과 1:1(TS 24.379 private call).
+ * 개별 통화 발신 — PTT 사용자 1명과 1:1(TS 24.379 private call).
  *
  * 반이중(floor)이 기본이다. 전이중(`fullDuplex` = `mc_no_floor_ctrl`)은 마이크가 늘 열려 있어
  * 발언 대상 체크가 비활성되고 카드의 [음소거]로 다룬다(§4.1).
@@ -421,9 +421,9 @@ suspend fun DispatchSession.startPrivateCall(peer: String, fullDuplex: Boolean =
 }
 
 /**
- * 임시 그룹 통화 개설 — PTT 사용자 N명(최소 1).
+ * 애드혹 그룹 통화 개설 — PTT 사용자 N명(최소 1).
  *
- * 참가자는 `resource-lists` 로 싣는다. 서버가 그 목록으로 초대하며, 임시 그룹이라 목록을 **앱이
+ * 참가자는 `resource-lists` 로 싣는다. 서버가 그 목록으로 초대하며, 서버에 편성이 없는 그룹이라 목록을 **앱이
  * 기억한다** — 로스터 구독 대상이 아니라 카드에 몇 명인지 보이려면 여기밖에 없다.
  */
 suspend fun DispatchSession.startAdhoc(members: List<String>,
@@ -434,8 +434,8 @@ suspend fun DispatchSession.startAdhoc(members: List<String>,
 }
 
 /**
- * 임시 그룹 일제 통화(TS 24.379 §17.2.2.1.1 9) "broadcast adhoc group call") — 고른 사람들에게만 일제 통화. 채널 머리의
- * [일제 통화] 와 같은 한 버튼이라 개시 INVITE 가 암묵적 발언 요청이다. 서버가 ad hoc 의 broadcast-ind 를 받지 않으면 일반 임시
+ * 애드혹 일제 통화(TS 24.379 §17.2.2.1.1 9) "broadcast adhoc group call") — 고른 사람들에게만 일제 통화. 채널 머리의
+ * [일제 통화] 와 같은 한 버튼이라 개시 INVITE 가 암묵적 발언 요청이다. 서버가 ad hoc 의 broadcast-ind 를 받지 않으면 일반 애드혹
  * 그룹 통화로 열린다(`applyFloor` 가 ⑤ 에 알린다). 반환 = 개시한 호 id. 끝은 [releaseBroadcast].
  */
 suspend fun DispatchSession.startAdhocBroadcast(members: List<String>): CimsResult<Int> {
@@ -444,7 +444,7 @@ suspend fun DispatchSession.startAdhocBroadcast(members: List<String>): CimsResu
     return r
 }
 
-/** 임시 그룹 id 로 참가자 목록을 실어 연다 — 반환 = 호 id. */
+/** 애드혹 그룹 id 로 참가자 목록을 실어 연다 — 반환 = 호 id. */
 private suspend fun DispatchSession.joinAdhoc(members: List<String>, opts: GroupCallOptions,
                                               op: Operation): CimsResult<Int> {
     val ptt = pttAccount ?: return CimsResult.fail(-1, "PTT 계정 없음")

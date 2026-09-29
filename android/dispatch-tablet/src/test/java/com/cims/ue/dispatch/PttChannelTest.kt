@@ -72,7 +72,7 @@ class PttChannelTest {
         assertFalse(card(g = GroupInfo("g001", "tel:g001", "순찰1")).canCheck)
     }
 
-    @Test fun `전이중 개인 통화는 발언 대상이 될 수 없다`() {
+    @Test fun `전이중 개별 통화는 발언 대상이 될 수 없다`() {
         // 마이크가 늘 열려 있어 floor 가 없다 — 음소거로 다룬다.
         val s = session(call(privateCall = true, noFloorCtrl = true))
         assertFalse(card(CardKind.PRIVATE, s).canCheck)
@@ -197,7 +197,7 @@ class PttChannelTest {
 }
 
 /**
- * 개인·임시 통화(§4.1) — 임시 그룹 id 규약과 대상 후보.
+ * 개별·애드혹 통화(§4.1) — 애드혹 그룹 id 규약과 대상 후보.
  *
  * `adhoc-`·`priv-` 는 편성 그룹 **예약어**다(mcptt_emergency_modes.md §6). id 를 앱이 만드는 이유는
  * 서버에 편성이 없는 임시 세션이기 때문이고, 그래서 규약을 어기면 편성 그룹과 충돌한다.
@@ -215,7 +215,7 @@ class AdhocIdTest {
             com.cims.ue.dispatch.session.adhocIdOf("TEL:5001;phone-context=x", 1_700_000_000))
     }
 
-    @Test fun `만든 id 는 임시 그룹으로 인식된다 — 세션 종류 판정과 같은 접두사`() {
+    @Test fun `만든 id 는 애드혹으로 인식된다 — 세션 종류 판정과 같은 접두사`() {
         val id = com.cims.ue.dispatch.session.adhocIdOf("tel:5001", 1)
         assertTrue(com.cims.ue.dispatch.session.isAdhocId(id))
         assertTrue(id.startsWith(com.cims.ue.dispatch.session.SessionKind.ADHOC_PREFIX))

@@ -33,7 +33,7 @@ public sealed partial class MainViewModel : ObservableObject
     public HotKeyMap HotKeys { get; }
 
     // ── 팝오버 상태(§4.4 공통 규칙: 비모달, Esc·바깥 클릭 닫힘, 세션이 성립하면 자동 닫힘) ──
-    /// <summary>① [개인 ▾]/[임시 ▾] 팝오버(PttOriginateView).</summary>
+    /// <summary>① [개별 ▾]/[애드혹 ▾] 팝오버(PttOriginateView).</summary>
     [ObservableProperty] private bool _pttOriginateOpen;
     /// <summary>③ [▦ ▾] 팝오버(CallOriginateView — 다이얼패드|주소록|최근).</summary>
     [ObservableProperty] private bool _callOriginateOpen;
@@ -225,7 +225,7 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>별창이 닫혔다 — 주 창 화면으로 되돌아온다.</summary>
     public void OnScreenWindowClosed(AppScreen s) => PoppedOut.Remove(s);
 
-    /// <summary>자동 복귀 규칙(§3.4): 세션을 만드는 조작(응답·당겨받기·발신·개인 통화·임시 그룹 통화)은 관제로 돌아온다 — 보류·전달·종료 버튼이 거기 있다.
+    /// <summary>자동 복귀 규칙(§3.4): 세션을 만드는 조작(응답·당겨받기·발신·개별 통화·애드혹 그룹 통화)은 관제로 돌아온다 — 보류·전달·종료 버튼이 거기 있다.
     /// 착신(링잉)·멤버 채널 합류·감청 창은 배너/칩만 띄우고 화면을 바꾸지 않는다.</summary>
     private void ReturnIfSessionStarted(SessionItem s)
     {
@@ -233,7 +233,7 @@ public sealed partial class MainViewModel : ObservableObject
         if (s.IsActive || s.IsOutgoing) Screen = AppScreen.Dispatch;
     }
 
-    /// <summary>팝오버 공통 규칙 — 세션이 성립하면 자동 닫힘(발신·개인 통화·임시 그룹 통화).</summary>
+    /// <summary>팝오버 공통 규칙 — 세션이 성립하면 자동 닫힘(발신·개별 통화·애드혹 그룹 통화).</summary>
     private void ClosePopoversFor(SessionItem s)
     {
         if (s.Info.Dir != CimsUe.CallDir.Outgoing) return;
@@ -242,7 +242,7 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     // ── 팝오버·드로어 ──
-    /// <summary>① [개인 ▾]/[임시 ▾] — 같은 모드로 다시 누르면 닫힌다, 다른 모드면 바꿔 연다.</summary>
+    /// <summary>① [개별 ▾]/[애드혹 ▾] — 같은 모드로 다시 누르면 닫힌다, 다른 모드면 바꿔 연다.</summary>
     [RelayCommand] private void OpenPttOriginate(string mode)
     {
         if (PttOriginateOpen && PttOriginate.Mode == mode) { PttOriginateOpen = false; return; }
@@ -298,7 +298,7 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand] private void DismissToast(Toast t) => Notify.Dismiss(t);
     [RelayCommand] private void ToggleToastDetail(Toast t) => t.ShowDetail = !t.ShowDetail;
 
-    /// <summary>--ui-preview-canvas: 서버 없이 관제 캔버스에 표본(멤버 그룹 4·청취 범위 2·진행 중 그룹콜·개인 통화·임시 그룹 통화·VoLTE 통화)을 심어 카드 2/3줄·발언 바·② 섹션을 그려 본다.
+    /// <summary>--ui-preview-canvas: 서버 없이 관제 캔버스에 표본(멤버 그룹 4·청취 범위 2·진행 중 그룹콜·개별 통화·애드혹 그룹 통화·VoLTE 통화)을 심어 카드 2/3줄·발언 바·② 섹션을 그려 본다.
     /// 코어 세션이 아니라 스냅샷 모델만 채우므로 조작 버튼은 동작하지 않는다.</summary>
     public void SeedCanvasPreview()
     {
@@ -313,7 +313,7 @@ public sealed partial class MainViewModel : ObservableObject
             g.Roster = roster.Select(r => new CimsUe.RosterEntry(r.Item1, r.Item2)).ToList();
             return g;
         }
-        // PTT 전화번호부(service=ptt) 표본 — 카드·로스터 칩 이름과 ① [개인 ▾]/[임시 ▾] 팝오버 주소록 행(--ui-preview-popover)
+        // PTT 전화번호부(service=ptt) 표본 — 카드·로스터 칩 이름과 ① [개별 ▾]/[애드혹 ▾] 팝오버 주소록 행(--ui-preview-popover)
         s.Directory.SeedPreview("ptt", """
             {"orgs":[{"code":"p1","name":"순찰대"},{"code":"hq","name":"상황실"}],
              "entries":[{"msisdn":"1001","name":"최순경","org":"p1"},{"msisdn":"1003","name":"이순경","org":"p1"},{"msisdn":"1004","name":"정경장","org":"p1"},
@@ -329,7 +329,7 @@ public sealed partial class MainViewModel : ObservableObject
         var now = DateTime.Now;
         var patrol = new SessionItem(Ci(11, CimsUe.CallState.Active, "sip:g-patrol1@ptt", true, "g-patrol1"), AccountKind.Ptt, Operation.PttJoin) { Title = "순찰1", Speaker = "김순경", SpeakerSince = now.AddSeconds(-8), ConnectedAt = now.AddMinutes(-2) };
         var ops = new SessionItem(Ci(12, CimsUe.CallState.Active, "sip:g-ops@ptt", true, "g-ops"), AccountKind.Ptt, Operation.PttJoin) { Title = "상황실", ConnectedAt = now.AddMinutes(-14) };
-        var adhoc = new SessionItem(Ci(13, CimsUe.CallState.Active, "sip:adhoc-1002-1@ptt", true, "adhoc-1002-1"), AccountKind.Ptt, Operation.PttAdhoc) { Title = "임시", AdhocMembers = new[] { "tel:1003", "tel:1008", "tel:1009" }, Speaker = "최순경", SpeakerSince = now.AddSeconds(-3), ConnectedAt = now.AddSeconds(-25) };
+        var adhoc = new SessionItem(Ci(13, CimsUe.CallState.Active, "sip:adhoc-1002-1@ptt", true, "adhoc-1002-1"), AccountKind.Ptt, Operation.PttAdhoc) { Title = "애드혹", AdhocMembers = new[] { "tel:1003", "tel:1008", "tel:1009" }, Speaker = "최순경", SpeakerSince = now.AddSeconds(-3), ConnectedAt = now.AddSeconds(-25) };
         var priv = new SessionItem(Ci(14, CimsUe.CallState.Active, "tel:1008", true, "", priv: true, half: false), AccountKind.Ptt, Operation.PttPrivate) { Title = "윤순경", ConnectedAt = now.AddMinutes(-1) };
         var night = new SessionItem(Ci(15, CimsUe.CallState.Active, "sip:g-night@ptt", true, "g-night", emg: true, listen: true), AccountKind.Ptt, Operation.PttListen) { Title = "야간", Speaker = "박경장", SpeakerSince = now.AddSeconds(-14), ConnectedAt = now.AddMinutes(-18) };
         var volte = new SessionItem(Ci(16, CimsUe.CallState.Active, "tel:+82233334444", false, "", dir: CimsUe.CallDir.Incoming), AccountKind.Volte, Operation.Incoming) { Title = "02-333-4444", ConnectedAt = now.AddMinutes(-2) };

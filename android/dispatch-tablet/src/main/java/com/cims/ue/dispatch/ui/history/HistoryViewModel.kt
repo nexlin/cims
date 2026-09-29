@@ -380,7 +380,7 @@ class HistoryViewModel(
         fun sessionKindText(k: String): String = when (k) {
             "group" -> "그룹"
             "private" -> "1:1"
-            "adhoc" -> "임시"
+            "adhoc" -> "애드혹"
             else -> k
         }
 

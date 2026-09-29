@@ -1,4 +1,4 @@
-# 관제 앱(Windows) 이어서 할 일 — 개인/임시 발신 분리 · 명칭 · 일제 통화 한 버튼
+# 관제 앱(Windows) 이어서 할 일 — 개별/애드혹 발신 분리 · 명칭 · 일제 통화 한 버튼
 
 사용자 요청(관제 앱 실사용 피드백)과 지금까지 확인한 사실·설계를 모은 인계 문서다. Claude Code 터미널에서 이 문서를 읽고
 §3 순서대로 이어서 한다. **원칙: VoLTE·MCPTT 규격 절을 먼저 확인하고 그대로 따른다(CLAUDE.md 설계 우선순위 1).**
@@ -7,7 +7,8 @@
 
 1. "PTT 메시지 파일 전송 · 여러 그룹 지정 그룹통화(다중 채널 동시 발언) · 일제 통화가 관제 앱에 아직 반영되지 않은 것 같다" — 확인해 달라.
 2. "사설콜과 애드혹이 모두 애드혹으로 동작한다" — 고쳐 달라.
-3. 명칭: **사설콜 → 개인**, **애드혹 → 임시**.
+3. 명칭: **사설콜 → 개별**(개별 통화), **애드혹은 애드혹**(최종 사용자 결정). 규격에 한글 명칭은 없다(3GPP 영문·TTA 영문 채택). private call 은 TRS·재난망
+   관행 «개별통화», «임시» 는 3GPP temporary group(regroup — TS 24.481 `<on-network-temporary>`)과 겹쳐 쓰지 않는다.
 4. 일제 통화를 **버튼 하나로 한 번에**(누르면 개시와 동시에 말하고, 놓으면 끝).
 
 ## 2. 확인 결과
@@ -29,7 +30,7 @@
 
 - `windows/dispatch-desktop/Views/PttOriginateView.xaml` 사용자 행(~129-151)에 모드와 무관하게 [싱글][멀티][문자] + **애드혹 체크박스**가 함께 있다.
 - 체크박스 → `PttOriginateViewModel.ToggleAdhoc`(~198)가 **`Mode = "adhoc"` 로 조용히 바꾼다** → 상단 버튼이 "애드혹 발신 (1명)"이 되고
-  `StartAdhoc` 로 나간다. [사설콜 ▾]로 열어 사람을 체크해 고르면 임시 그룹 통화가 된다.
+  `StartAdhoc` 로 나간다. [사설콜 ▾]로 열어 사람을 체크해 고르면 애드혹 그룹 통화가 된다(고친 결함).
 - "싱글/멀티" 표기는 반이중/전이중인데 뜻이 드러나지 않는다.
 - 앱의 발신 분기 자체는 맞다(`Start` → `StartPrivateCall` / `StartAdhoc`, `DispatchSession.cs` ~1296·~1303), 코어도 사설콜에 `privateCall` 을 싣는다
   (`sdk/core/src/engine.cpp` `projectMcptt`). 세션 판정 `SessionKinds.Of`(`Models/Sessions.cs`)도 맞다.
@@ -48,30 +49,21 @@
 - 단말 절차: 호 성립 때 암묵 요청이면 T101 + 'U: pending Request'(§6.2.4.2.2 4.), answer 의 `mc_granted` 또는 Floor Granted 로 'U: has permission'(§6.2.4.4.2),
   그 뒤 Floor Granted 가 또 와도 머문다(§6.2.4.5.5). 이어지는 offer 에는 `mc_granted` 금지(§14.5).
 - **진행 중 그룹 호는 일제 통화로 바꿀 수 없다** — TS 24.379 §10.1.1.3.1.1 15)(진행 중)는 합류이고 broadcast 단계가 없다(긴급은 15)f) 로 격상 가능).
-- **임시 그룹(ad hoc) 일제 통화**는 규격에 있다(TS 24.379 §17.2.2.1.1 9)) — CIMS 미구현(CSP 가 ad hoc 의 broadcast-ind 무시).
+- **애드혹(ad hoc) 일제 통화**는 규격에 있다(TS 24.379 §17.2.2.1.1 9)) — CIMS 미구현(CSP 가 ad hoc 의 broadcast-ind 무시).
 - 구현 상태: **SDK 반영**(`GroupCallOptions.implicitFloorRequest` — offer `mc_queueing;mc_implicit_request;mc_granted`, answer 판정, 호 성립 전 놓음 처리 —
-  정본 `mcptt_broadcast_group_call.md` R14·U7). **CSP 편차는 .48 로 넘김**(`server45_handoff.md` §8 — offer `mc_granted` 를 요청으로 읽음,
+  정본 `mcptt_broadcast_group_call.md` R14·U7). **CSP 편차는 .48 로 넘김**([`server_todo_mcptt_floor_broadcast.md`](server_todo_mcptt_floor_broadcast.md) P1 — offer `mc_granted` 를 요청으로 읽음,
   `mc_implicit_request` 미해석, answer 에 되돌리지 않음). SDK 가 두 속성을 함께 실어 지금 CSP 에서도 동작한다. CMP 는 바꿀 것 없음.
 - 발언 해제 뒤 호 종료는 이미 구현(개시 단말: pending Release 중 B-bit Floor Idle → BYE, §6.2.4.6.4 · 짧은 탭의 늦은 Granted 무시 §6.2.4.6.8 — bc2e499d).
 
 ## 3. 할 일(권장 순서)
 
-### 3.1 발신 팝오버 모드 분리 + 명칭(개인/임시) — 앱만 · **반영함**
+### 3.1 발신 팝오버 모드 분리 + 명칭(개별/애드혹) — 앱만 · **반영함**
 
-- 반영: 모드 = 세그먼트·① 버튼·사람 메뉴로만(행 조작·패드·빠른 발신 Enter 는 안 바꿈), 개인 행 [반이중][전이중][문자]·행 클릭 = 대상 선택·[개인 통화 발신],
-  임시 행 ☐+[문자]·행 클릭 = 체크, 다이얼패드는 개인 모드만, 행 [전이중] 이 팝오버 선택을 바꾸던 부작용 제거. 화면 문자열 전부 개인/임시, 문서
-  `dispatch_desktop_ui.md`·CLAUDE.md 개요. 렌더 점검 스위치 `--ui-preview-popover=private|adhoc`. 남은 것 = 태블릿 명칭(사용자 확인), 실기.
-
-- **모드는 명시 조작으로만 바뀐다**: 세그먼트 [개인|임시]·① 버튼 [개인 ▾]/[임시 ▾]·사람 메뉴 [임시 그룹에 추가]. 행 조작이 모드를 바꾸지 않는다.
-- 개인 모드: 사용자 행 = [반이중 발신][전이중 발신](또는 발신 1개 + 위 반이중/전이중 선택) + [문자], **체크박스 숨김**. 행 클릭 = 대상 선택.
-- 임시 모드: 사용자 행 = 체크박스(행 클릭 = 토글) + [문자], 반이중/전이중 버튼 숨김. 상단 [임시 그룹 발신 (n명)].
-- 명칭(화면 문자열만 — 내부 식별자 `PttPrivate`/`PttAdhoc`·`adhoc-` 그룹 id·`Operation` 은 그대로): 사설콜 → **개인**(개인 통화, TS 24.379 private call),
-  애드혹 → **임시**(임시 그룹 통화, ad hoc group call). 대상 파일(grep "사설콜|애드혹"):
-  `Views/PttChannelsPanel.xaml`(빠른 발신 줄 버튼·툴팁·힌트·카드 배지 ~166) · `Views/PttOriginateView.xaml` · `ViewModels/PttOriginateViewModel.cs`(StartText 등) ·
-  `ViewModels/PttChannelsViewModel.cs`(Title "애드혹 · …", Badge "사설콜") · `Services/DispatchSession.cs`(⑤ 활동 문구 ~910·~969, 배너 "PTT 사설콜 착신" ~853,
-  이력 라벨 ~523·~925) · `Models/Activity.cs` · `Services/ResponseText.cs`(Area.PttPrivate/PttAdhoc 문구) · `Shell/MainWindow.xaml`(Ctrl+K·사람 메뉴) ·
-  `Shell/SettingsWindow.xaml` · `ViewModels/PersonActionsViewModel.cs` · `ViewModels/ScopedChannelsViewModel.cs`(OthersHint) · `Views/ScopedChannelsPanel.xaml`.
-- 문서: `docs/design/features/dispatch_desktop_ui.md`(§2 작업표·§4.1 발신 팝오버·사람 메뉴·§9 문구 표) — 태블릿(`android_dispatch_tablet.md`)도 같은 명칭으로 맞출지 사용자 확인.
+- 반영: 모드 = 세그먼트·① 버튼·사람 메뉴로만(행 조작·패드·빠른 발신 Enter 는 안 바꿈), 개별 행 [반이중][전이중][문자]·행 클릭 = 대상 선택·[개별 통화 발신],
+  애드혹 행 ☐+[문자]·행 클릭 = 체크, 다이얼패드는 개별 모드만, 행 [전이중] 이 팝오버 선택을 바꾸던 부작용 제거. 화면 문자열 전부 개별/애드혹, 문서
+  `dispatch_desktop_ui.md`·CLAUDE.md 개요. 렌더 점검 스위치 `--ui-preview-popover=private|adhoc`. 남은 것 = 실기.
+- 명칭은 화면 문자열·주석만 바꿨다 — 내부 식별자(`PttPrivate`/`PttAdhoc`·`adhoc-` 그룹 id·`Operation`·모드 값 `private`/`adhoc`)는 그대로다.
+  애드혹을 «임시» 로 적던 옛 화면 문자열(카드 배지·이력 라벨)도 «애드혹» 으로 맞췄다. 서버 쪽 설계 문서의 «사설콜» 은 그대로 둔다(앱 명칭 결정).
 
 ### 3.2 일제 통화 한 버튼(누르고 있는 동안 개시+발언, 놓으면 종료) — SDK·CSP·앱 · **SDK·앱 반영 · CSP 인계**
 
@@ -111,15 +103,17 @@ powershell -ExecutionPolicy Bypass -File windows\dispatch-desktop\publish.ps1 [-
 
 ## 5. Android 관제 태블릿 — Android 빌드 환경에서 확인할 것
 
-Windows 와 같은 변경을 `android/dispatch-tablet` 에 코드로 반영했다. 이 PC 는 Android 를 빌드하지 못해 **컴파일·JVM 시험·실기가 안 됐다.**
+**사용자 결정: 태블릿 관제 앱은 Windows 관제 앱 안정화 이후 진행한다.** 그때까지 아래 확인·실기는 보류한다(태블릿 추가 개발도 그때).
+Windows 와 같은 변경(개별/애드혹 명칭 포함)을 `android/dispatch-tablet` 에 코드로 반영해 두었다. 이 PC 는 Android 를 빌드하지 못해
+**컴파일·JVM 시험·실기가 안 됐다.**
 
 | # | 확인 | 파일 |
 |---|---|---|
 | T1 | 컴파일 — `startBroadcast`·`startAdhocBroadcast`·`releaseBroadcast`·`joinAdhoc`(`GroupCallOptions.copy`)·`BROADCAST_JUDGE_OPS` | `session/PttPlane.kt` |
 | T2 | `SessionItem.isBroadcast/isBroadcastInitiator`·`FLOOR_IND_BROADCAST`·`GroupInfo.sessionType`·`broadcastPending` | `session/Models.kt`·`DispatchSession.kt` |
 | T3 | VM 일제 통화 상태(`_broadcastHeld`·`bcCallId` 는 `cards` 의 Eagerly onEach 가 읽으므로 **그보다 먼저 선언**해 두었다)·`canBroadcast`·`canCheck`(Permission 0 제외) | `ui/ptt/PttChannelsViewModel.kt` |
-| T4 | 한 버튼 제스처(`BroadcastHoldButton` — `rememberUpdatedState`, 개시 뒤 `joined` 가 돼도 뗄 때까지 남는지)·발신 시트 [임시] 의 [일제 통화](누르는 동안 시트·탭·대상 잠김, 놓으면 닫힘, 실패면 남음)·씨앗(`LaunchedEffect(seed)`) | `ui/ptt/ChannelScreen.kt`·`OriginateSheet.kt` |
+| T4 | 한 버튼 제스처(`BroadcastHoldButton` — `rememberUpdatedState`, 개시 뒤 `joined` 가 돼도 뗄 때까지 남는지)·발신 시트 [애드혹] 의 [일제 통화](누르는 동안 시트·탭·대상 잠김, 놓으면 닫힘, 실패면 남음)·씨앗(`LaunchedEffect(seed)`) | `ui/ptt/ChannelScreen.kt`·`OriginateSheet.kt` |
 | T5 | JVM 시험 `PttChannelTest` — 일제 통화 3건(`canBroadcast` 조건·수신 멤버 발언 대상 제외·B-bit 판정) + 기존 전부 | `src/test/.../PttChannelTest.kt` |
-| T6 | 실기 — 채널 머리 [일제 통화] 누름·뗌(성립 전 CANCEL / 뒤 BYE), 잠금 발언 토글, 진행 중 통화·채팅 그룹 비활성, 수신 단말 «일제»·발언 대상 불가, [임시] 일제 통화(서버 §9 전에는 «일제 통화로 열리지 않았습니다» 가 정상) | — |
+| T6 | 실기 — 채널 머리 [일제 통화] 누름·뗌(성립 전 CANCEL / 뒤 BYE), 잠금 발언 토글, 진행 중 통화·채팅 그룹 비활성, 수신 단말 «일제»·발언 대상 불가, [애드혹] 일제 통화(서버 과제 P2 전에는 «일제 통화로 열리지 않았습니다» 가 정상) | — |
 
-명칭(개인/임시)은 Windows 와 같다. 명칭이 바뀌면 두 앱·두 문서를 함께 바꾼다.
+명칭(개별/애드혹)은 Windows 와 같다. 명칭이 바뀌면 두 앱·두 문서를 함께 바꾼다.

@@ -40,7 +40,7 @@ public sealed record HistoryEntry(string Id, DateTime Time, HistoryKind Kind, st
     /// <summary>single | dual | multi (TS 24.380 동시 발언 정책).</summary>
     public string FloorPolicy { get; init; } = "";
     public int MaxTalkers { get; init; }
-    /// <summary>참여자(발언 안 한 참가자 포함) — 1:1·임시는 개시자를 뺀 나머지가 상대.</summary>
+    /// <summary>참여자(발언 안 한 참가자 포함) — 1:1·애드혹은 개시자를 뺀 나머지가 상대.</summary>
     public IReadOnlyList<string> People { get; init; } = Array.Empty<string>();
 
     /// <summary>시간대 밴드·필터 축 — 통화는 INVITE, PTT 는 세션 시작(서버 hours 와 같은 규칙), 없으면 항목 시각.</summary>

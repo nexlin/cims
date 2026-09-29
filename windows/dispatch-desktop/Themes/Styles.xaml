@@ -260,7 +260,7 @@
     <Style TargetType="Border" x:Key="Badge.Own" BasedOn="{StaticResource Badge}">
         <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Text}" />
     </Style>
-    <!-- .badge.temp — 임시(임시 그룹 통화, ad hoc) -->
+    <!-- .badge.temp — 애드혹(애드혹 그룹 통화, ad hoc group call) -->
     <Style TargetType="Border" x:Key="Badge.Temp" BasedOn="{StaticResource Badge}">
         <Setter Property="Background" Value="{DynamicResource Brush.HeldSoft}" />
         <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Held}" />
@@ -481,7 +481,7 @@
         <Setter Property="Foreground" Value="{DynamicResource Brush.Muted}" />
         <Setter Property="Margin" Value="2,6,0,4" />
     </Style>
-    <!-- 채널 카드 상태 점(§4 공통) — 대기 빈 원 · 진행 녹색 · 개인 통화 청록 · 긴급 빨강. 카드 DataTemplate 트리거가 Fill 을 바꾼다 -->
+    <!-- 채널 카드 상태 점(§4 공통) — 대기 빈 원 · 진행 녹색 · 개별 통화 청록 · 긴급 빨강. 카드 DataTemplate 트리거가 Fill 을 바꾼다 -->
     <Style TargetType="Ellipse" x:Key="StateDot">
         <Setter Property="Width" Value="10" />
         <Setter Property="Height" Value="10" />

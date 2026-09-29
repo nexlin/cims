@@ -16,9 +16,9 @@ public enum SessionKind
     VolteMonitor,
     /// <summary>① 멤버 채널 카드 — 그룹콜.</summary>
     PttChannel,
-    /// <summary>① 개인 통화 카드(TS 24.379 private call).</summary>
+    /// <summary>① 개별 통화 카드(TS 24.379 private call).</summary>
     PttPrivate,
-    /// <summary>① 임시 그룹 통화 카드(ad hoc group call).</summary>
+    /// <summary>① 애드혹 그룹 통화 카드(ad hoc group call).</summary>
     PttAdhoc,
     /// <summary>청취 창 — 그룹콜 recvonly.</summary>
     PttListen,
@@ -74,7 +74,7 @@ public sealed partial class SessionItem : ObservableObject
     [ObservableProperty] private SessionItem? _consultFor;
     /// <summary>전달 진행 표시("전달 중 → 1003").</summary>
     [ObservableProperty] private string _transferNote = "";
-    /// <summary>임시 그룹 멤버 칩(응답 상태는 로스터).</summary>
+    /// <summary>애드혹 멤버 칩(응답 상태는 로스터).</summary>
     public IReadOnlyList<string> AdhocMembers { get; set; } = Array.Empty<string>();
 
     public SessionItem(CallInfo info, AccountKind account, Operation op)

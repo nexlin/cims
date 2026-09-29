@@ -1,4 +1,4 @@
-// 임시 그룹(ad hoc group call) id — adhoc-<내 PTT 번호>-<epoch초> (mcptt_emergency_modes.md §6). adhoc-/priv- 는 편성 그룹 예약어.
+// 애드혹(ad hoc group call) 그룹 id — adhoc-<내 PTT 번호>-<epoch초> (mcptt_emergency_modes.md §6). adhoc-/priv- 는 편성 그룹 예약어.
 namespace DispatchDesktop.Services;
 
 public static class AdhocIdFactory

@@ -139,8 +139,8 @@ private fun PersonRow(p: PersonEntry, onPick: (PersonAction, String) -> Unit) {
         }
         // 가진 회선에 있는 행동만 — 비활성 버튼을 늘어놓지 않는다(사람 메뉴와 같은 규칙).
         if (p.hasPtt) {
-            Small("개인 통화") { onPick(PersonAction.PRIVATE_CALL, p.pttNumber) }
-            Small("임시 그룹") { onPick(PersonAction.ADHOC_ADD, p.pttNumber) }
+            Small("개별 통화") { onPick(PersonAction.PRIVATE_CALL, p.pttNumber) }
+            Small("애드혹 그룹") { onPick(PersonAction.ADHOC_ADD, p.pttNumber) }
             Small("SDS") { onPick(PersonAction.SDS, p.pttNumber) }
         }
         if (p.hasLine) Small("통화") { onPick(PersonAction.CALL, p.extension) }

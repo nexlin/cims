@@ -36,13 +36,13 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-/** ① 카드의 종류 — 멤버 그룹은 항상 서 있고, 개인 통화·임시 그룹 통화는 세션이 있을 때만 선다. */
+/** ① 카드의 종류 — 멤버 그룹은 항상 서 있고, 개별 통화·애드혹 그룹 통화는 세션이 있을 때만 선다. */
 enum class CardKind { MEMBER, PRIVATE, ADHOC }
 
 /**
  * ① 내 채널 카드 하나.
  *
- * 멤버 그룹 카드는 **세션이 없어도 선다**(참여하지 않은 채널도 보여야 한다). 개인 통화·임시 그룹 통화는
+ * 멤버 그룹 카드는 **세션이 없어도 선다**(참여하지 않은 채널도 보여야 한다). 개별 통화·애드혹 그룹 통화는
  * 내가 건 세션 자체가 카드다.
  */
 data class ChannelCard(
@@ -57,7 +57,7 @@ data class ChannelCard(
     val index: Int = 0,
 ) {
     val badge: String get() = when (kind) {
-        CardKind.MEMBER -> "멤버"; CardKind.PRIVATE -> "개인"; CardKind.ADHOC -> "임시"
+        CardKind.MEMBER -> "멤버"; CardKind.PRIVATE -> "개별"; CardKind.ADHOC -> "애드혹"
     }
     val joined: Boolean get() = session?.isLive == true
     val active: Boolean get() = session?.isActive == true
@@ -75,7 +75,7 @@ data class ChannelCard(
 
     /**
      * 발언 대상이 될 수 있는가 — **참여 중 + 반이중 + 발언 요청 가능**.
-     * 전이중 개인 통화는 마이크가 늘 열려 있어 floor 가 없다(음소거로 다룬다). 남이 연 일제 통화의 수신 멤버는
+     * 전이중 개별 통화는 마이크가 늘 열려 있어 floor 가 없다(음소거로 다룬다). 남이 연 일제 통화의 수신 멤버는
      * Floor Taken 의 Permission 0 이라 요청할 수 없다(TS 24.380 §6.3.4.4.2 3d).
      */
     val canCheck: Boolean get() = joined && session?.isFullDuplex != true && session?.canRequestFloor != false
@@ -178,7 +178,7 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
      */
     private var pendingTargetId: String? = null
 
-    /** 지금 누르고 있는 일제 통화(아래 «일제 통화 한 버튼») — 카드 id, 임시 그룹 일제 통화면 [ADHOC_BROADCAST]. null = 없음.
+    /** 지금 누르고 있는 일제 통화(아래 «일제 통화 한 버튼») — 카드 id, 애드혹 일제 통화면 [ADHOC_BROADCAST]. null = 없음.
      *  [cards] 의 onEach 가 읽으므로 그보다 먼저 선언한다(생성 중 Eagerly 수집이 초기화 전 값을 읽지 않게). */
     private val _broadcastHeld = MutableStateFlow<String?>(null)
     val broadcastHeld: StateFlow<String?> = _broadcastHeld.asStateFlow()
@@ -188,8 +188,8 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
     private var bcSeen = false
 
     /**
-     * ① 카드 목록 — **멤버 그룹 전부 + 내가 건 개인 통화·임시 그룹 통화**. 항상 전부 보인다(필터는 ② 에만 있다).
-     * 순서: 멤버 그룹(이름) → 개인·임시(시작 순).
+     * ① 카드 목록 — **멤버 그룹 전부 + 내가 건 개별 통화·애드혹 그룹 통화**. 항상 전부 보인다(필터는 ② 에만 있다).
+     * 순서: 멤버 그룹(이름) → 개별·애드혹(시작 순).
      */
     val cards: StateFlow<List<ChannelCard>> =
         combine(s.groups, s.sessions, s.messages) { groups, sessions, messages ->
@@ -278,7 +278,7 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
      * 상한([maxTargets])을 넘으면 가장 오래된 것을 밀어낸다(팬아웃 전에는 1개라 교체가 된다).
      */
     /**
-     * 사람 메뉴의 «임시 그룹에 추가» 가 심어 두는 상대 — 발신 시트가 열릴 때 미리 골라 둔다.
+     * 사람 메뉴의 «애드혹에 추가» 가 심어 두는 상대 — 발신 시트가 열릴 때 미리 골라 둔다.
      *
      * 시트를 직접 열지 않고 씨앗만 두는 이유: 시트는 ① 패널이 소유하는 화면 상태라 다른 탭(③ 일반통화)에서
      * 직접 띄울 수 없다. 데스크톱은 `PttOriginate.AddAdhoc(n)` + `PttOriginateOpen = true` 로 같은 일을 한다.
@@ -411,7 +411,7 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
         beginBroadcast(card.id) { s.startBroadcast(g.id) }
     }
 
-    /** 발신 시트 [임시] 의 [일제 통화] 누름 — 고른 사람들에게(TS 24.379 §17.2.2.1.1 9)). */
+    /** 발신 시트 [애드혹] 의 [일제 통화] 누름 — 고른 사람들에게(TS 24.379 §17.2.2.1.1 9)). */
     fun broadcastAdhocDown(members: List<String>) {
         _broadcastHeld.value?.let { held -> if (lockTalk && held == ADHOC_BROADCAST) broadcastEnd(); return }
         if (members.isEmpty()) return
@@ -457,9 +457,9 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
 
     // ── 세션 조작 ──
     /** 참여 — 포커스를 옮기고, 세션이 서면 발언 대상이 된다(위 [pendingTargetId]). */
-    // ── 개인 통화·임시 그룹 통화(§4.1) ──────────────────────────────────────
+    // ── 개별 통화·애드혹 그룹 통화(§4.1) ──────────────────────────────────────
 
-    /** PTT 주소록 — 개인·임시 대상 후보. 세션이 로그인 때 받아 둔 것을 본다. */
+    /** PTT 주소록 — 개별·애드혹 대상 후보. 세션이 로그인 때 받아 둔 것을 본다. */
     val pttBook: StateFlow<DirectoryBook> = s.pttBook
 
     /** 내 PTT 번호 — 로스터 칩의 «나» 표시. */
@@ -490,7 +490,7 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
     fun clearOriginError() { _originError.value = null }
 
     /**
-     * 개인 통화 발신. 성공하면 [onDone] — 시트를 닫는다.
+     * 개별 통화 발신. 성공하면 [onDone] — 시트를 닫는다.
      *
      * 반이중이 기본이다. 전이중은 마이크가 늘 열려 있어 발언 대상이 되지 못한다(카드 [음소거]로 다룬다).
      */
@@ -501,7 +501,7 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
         }
     }
 
-    /** 임시 그룹 통화 개설 — 대상 N명(최소 1). */
+    /** 애드혹 그룹 통화 개설 — 대상 N명(최소 1). */
     fun startAdhoc(members: List<String>, emergency: Boolean, onDone: () -> Unit) {
         scope.launch {
             val r = s.startAdhoc(members, emergency)
@@ -529,7 +529,7 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
     companion object {
         /** 코어에 발언 대상 집합 API 가 들어오면 true 로 바꾼다 — 그것 하나로 다중 발언이 열린다. */
         const val MULTI_TALK_SUPPORTED = false
-        /** [broadcastHeld] 의 임시 그룹 일제 통화 값 — 카드 id 와 겹치지 않는다(카드 id 는 그룹 id·adhoc-·call-). */
+        /** [broadcastHeld] 의 애드혹 일제 통화 값 — 카드 id 와 겹치지 않는다(카드 id 는 그룹 id·adhoc-·call-). */
         const val ADHOC_BROADCAST = "#adhoc-broadcast"
     }
 }

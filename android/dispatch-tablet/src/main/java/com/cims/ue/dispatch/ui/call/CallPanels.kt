@@ -52,7 +52,7 @@ private fun fmt(ms: Long): String {
 /**
  * [통화] 메뉴 — **VM 을 붙이는 껍데기**.
  *
- * @param onPerson 사람 메뉴가 고른 행동. **여기서 처리하지 않고 올린다** — 개인·임시 통화·SDS 는 [무전] 의
+ * @param onPerson 사람 메뉴가 고른 행동. **여기서 처리하지 않고 올린다** — 개별·애드혹 통화·SDS 는 [무전] 의
  *   상태를 건드리므로 둘을 다 아는 곳(`MainViewModel`)이 이어야 한다(데스크톱도 `MainViewModel` 이 잇는다).
  */
 @Composable

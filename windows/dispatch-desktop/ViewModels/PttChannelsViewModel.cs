@@ -1,4 +1,4 @@
-// ① 내 채널 — 멤버 그룹 전부 + 내가 건 개인 통화·임시 그룹 통화의 채널 카드(§4.1). 카드 = 코어 세션·그룹 로스터의 투영.
+// ① 내 채널 — 멤버 그룹 전부 + 내가 건 개별 통화·애드혹 그룹 통화의 채널 카드(§4.1). 카드 = 코어 세션·그룹 로스터의 투영.
 // 포커스(보는 채널, 카드 하나·테두리 Primary) ≠ 발언 대상(말하는 채널, 카드 왼쪽 체크 집합 — 발언 바 TalkBarViewModel 이 투영).
 // 정렬은 핀 순서 고정(Ctrl+n 근육 기억) — 진행 중이라고 위로 올리지 않는다. 필터·검색 없음(항상 전부).
 using System.Collections.ObjectModel;
@@ -58,8 +58,8 @@ public sealed partial class ChannelCard : ObservableObject
     }
 
     public string Id => Group?.Id ?? Session?.Info.GroupId ?? Session?.CallId.ToString() ?? "";
-    public string Title => Kind == CardKind.Member ? Group!.Name : Kind == CardKind.Adhoc ? "임시 · " + string.Join(", ", AdhocChips.Take(3)) + (AdhocChips.Count > 3 ? $" +{AdhocChips.Count - 3}" : "") : Session?.Title ?? "";
-    public string Badge => Kind switch { CardKind.Member => "멤버", CardKind.Private => "개인", _ => "임시" };
+    public string Title => Kind == CardKind.Member ? Group!.Name : Kind == CardKind.Adhoc ? "애드혹 · " + string.Join(", ", AdhocChips.Take(3)) + (AdhocChips.Count > 3 ? $" +{AdhocChips.Count - 3}" : "") : Session?.Title ?? "";
+    public string Badge => Kind switch { CardKind.Member => "멤버", CardKind.Private => "개별", _ => "애드혹" };
     public string Duplex => Kind == CardKind.Private ? (Session?.IsFullDuplex == true ? "전이중" : "반이중") : "";
     public bool IsMember => Kind == CardKind.Member;
     public bool IsPrivate => Kind == CardKind.Private;
@@ -108,7 +108,7 @@ public sealed partial class ChannelCard : ObservableObject
     public bool CanToggleRoute => Session is not null && _s.Audio.HasSpeaker;
     public bool IsMuted => Session?.Info.Muted == true;
     public bool HasUnread => Unread > 0;
-    /// <summary>2줄 — 진행 중: [발언 없음 ·] 보조(① 마지막 발언·시각 / 임시 그룹 응답 n/m / 개인 통화 라우트·번호·발신 시각). 대기: 마지막 세션.</summary>
+    /// <summary>2줄 — 진행 중: [발언 없음 ·] 보조(① 마지막 발언·시각 / 애드혹 응답 n/m / 개별 통화 라우트·번호·발신 시각). 대기: 마지막 세션.</summary>
     public string Line2 => IsJoined ? string.Join(" · ", new[] { HasSpeaker ? "" : "발언 없음", Aux() }.Where(x => x.Length > 0)) : Group is null ? "" : LastSessionText;
     private string Aux() => Kind switch
     {
@@ -118,7 +118,7 @@ public sealed partial class ChannelCard : ObservableObject
         _ => LastSpeaker.Length > 0 && LastSpeakerAt is DateTime t ? $"마지막 발언 {LastSpeaker} {t:HH:mm}" : $"참가 {Participants}",
     };
     private static string ShortNumber(string n) => n.Length > 4 ? "…" + n[^4..] : n;
-    /// <summary>임시 그룹 응답 수 — 로스터가 없어 세션 상대(connected) 대신 그룹 로스터를 못 쓴다; 참여자 수는 코어 CallInfo 가 주지 않아 멤버 수로 상한.</summary>
+    /// <summary>애드혹 응답 수 — 로스터가 없어 세션 상대(connected) 대신 그룹 로스터를 못 쓴다; 참여자 수는 코어 CallInfo 가 주지 않아 멤버 수로 상한.</summary>
     private int AdhocAnswered => Session is null ? 0 : Math.Min(Session.AdhocMembers.Count, _s.Groups.FirstOrDefault(g => g.Id == Session.Info.GroupId)?.ConnectedCount ?? 0);
     public string LastSessionText => LastSessionEnd is DateTime e ? $"마지막 세션 {e:HH:mm} · {DispatchSession.Fmt(LastSessionLength)} · 참가 {LastParticipants}"
                                      : Group?.HasSession == true ? $"세션 진행 중 · 참가 {Participants} · 미참여" : "세션 없음";
@@ -255,7 +255,7 @@ public sealed partial class PttChannelsViewModel : ObservableObject
                     var c = new ChannelCard(_s, item);
                     Cards.Add(c);
                     Renumber();
-                    // "내가 건 호 우선" 규칙 — 내가 건 임시 그룹 통화·반이중 개인 통화는 자동 포커스 + 단일 발언 대상(발신자가 곧 말하려는 채널)
+                    // "내가 건 호 우선" 규칙 — 내가 건 애드혹 그룹 통화·반이중 개별 통화는 자동 포커스 + 단일 발언 대상(발신자가 곧 말하려는 채널)
                     if (c.IsAdhoc || !c.IsFullDuplex)
                     {
                         _previousSelection = Selected; Select(c, collapseSame: false);

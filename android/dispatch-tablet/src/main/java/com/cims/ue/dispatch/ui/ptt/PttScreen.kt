@@ -57,7 +57,7 @@ fun PttScreen(
     val listenText by scoped.listenText.collectAsStateWithLifecycle()
 
     var sheet by remember { mutableStateOf(false) }
-    // 사람 메뉴의 «임시 그룹에 추가» 가 심어 둔 씨앗이 있으면 시트를 연다(§6.2f). 씨앗은 시트가 소비한다.
+    // 사람 메뉴의 «애드혹에 추가» 가 심어 둔 씨앗이 있으면 시트를 연다(§6.2f). 씨앗은 시트가 소비한다.
     val seed by channels.adhocSeed.collectAsStateWithLifecycle()
     LaunchedEffect(seed) { if (seed.isNotBlank()) sheet = true }
     if (sheet) OriginateSheet(channels) { sheet = false }
@@ -104,7 +104,7 @@ fun PttScreenContent(
     LazyColumn(modifier.fillMaxSize()) {
         item(key = "h-mine") {
             SectionHeader("내 채널 ${mine.size}") {
-                TextButton(onClick = onOriginate) { Text("개인·임시", fontSize = Type.meta) }
+                TextButton(onClick = onOriginate) { Text("개별·애드혹", fontSize = Type.meta) }
             }
         }
         if (mine.isEmpty()) item(key = "e-mine") { EmptyLine("참여할 채널이 없습니다") }

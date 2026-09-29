@@ -19,9 +19,9 @@ enum class SessionKind {
     PHONE_MONITOR,
     /** ① 멤버 채널 카드 — 그룹콜. */
     PTT_CHANNEL,
-    /** ① 개인 통화 카드(TS 24.379 private call). */
+    /** ① 개별 통화 카드(TS 24.379 private call). */
     PTT_PRIVATE,
-    /** ① 임시 그룹 통화 카드(ad hoc group call). */
+    /** ① 애드혹 그룹 통화 카드(ad hoc group call). */
     PTT_ADHOC,
     /** 청취 시트 — 그룹콜 recvonly. */
     PTT_LISTEN;
@@ -72,7 +72,7 @@ data class SessionItem(
     val floorNote: String = "",
     /** 표시 이름(그룹명·상대 이름). */
     val title: String = "",
-    /** 임시 그룹 멤버(응답 상태는 로스터가 준다). */
+    /** 애드혹 멤버(응답 상태는 로스터가 준다). */
     val adhocMembers: List<String> = emptyList(),
 ) {
     val kind: SessionKind get() = SessionKind.of(info)
@@ -80,7 +80,7 @@ data class SessionItem(
     val isActive: Boolean get() = info.state == CallState.ACTIVE
     val isEmergency: Boolean get() = info.mcptt.emergency
     val isImminentPeril: Boolean get() = info.mcptt.imminentPeril
-    /** 전이중 개인 통화 — floor 가 없어 마이크가 늘 열려 있다(발언 대상이 될 수 없다). */
+    /** 전이중 개별 통화 — floor 가 없어 마이크가 늘 열려 있다(발언 대상이 될 수 없다). */
     val isFullDuplex: Boolean get() = info.mcptt.noFloorCtrl
 
     val isSpeaking: Boolean get() = floor?.state == FloorState.SPEAKING

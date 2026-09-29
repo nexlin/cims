@@ -98,7 +98,7 @@ public partial class App : Application
             if (e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-zoom=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] is { Length: > 0 } zoomArg && _mainVm is not null
                 && double.TryParse(zoomArg, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double z))
                 _mainVm.HistoryScreen.TalkZoom = Math.Clamp(z, 1, ViewModels.SessionHistoryViewModel.TalkZoomMax);
-            // --ui-preview-popover=private|adhoc: ① 발신 팝오버를 그 모드로 채워(임시 = 주소록 두 명 체크) --ui-preview-shot 옆 <png>.popover.png 로도 그린다 —
+            // --ui-preview-popover=private|adhoc: ① 발신 팝오버를 그 모드로 채워(애드혹 = 주소록 두 명 체크) --ui-preview-shot 옆 <png>.popover.png 로도 그린다 —
             //   Popup 은 별도 창이라 주 창 렌더에 찍히지 않는다. 주소록은 --ui-preview-canvas 표본.
             string? popoverMode = e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-popover=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1];
             if (popoverMode is "private" or "adhoc" && _mainVm is not null)

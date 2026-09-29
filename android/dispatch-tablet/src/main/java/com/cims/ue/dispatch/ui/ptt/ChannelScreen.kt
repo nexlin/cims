@@ -32,7 +32,7 @@ import com.cims.ue.dispatch.ui.Tag
 import com.cims.ue.dispatch.ui.Type
 
 /**
- * @param id  [무전] 목록에서 연 채널 id — 내 채널(그룹·개인 통화·임시 그룹 통화) 또는 범위 채널.
+ * @param id  [무전] 목록에서 연 채널 id — 내 채널(그룹·개별 통화·애드혹 그룹 통화) 또는 범위 채널.
  * @param onShowRoster 편성 전원 보기 — [PTT 그룹] 화면 상세로(§6.12).
  */
 @Composable

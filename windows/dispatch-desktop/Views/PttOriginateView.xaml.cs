@@ -11,13 +11,13 @@ public partial class PttOriginateView : UserControl
 {
     public PttOriginateView() { InitializeComponent(); }
 
-    /// <summary>대상 필드 Enter = 개인 통화 발신(옆 [개인 통화 발신]·패드 📞 와 같은 동작 — 반이중/전이중 선택을 따른다).</summary>
+    /// <summary>대상 필드 Enter = 개별 통화 발신(옆 [개별 통화 발신]·패드 📞 와 같은 동작 — 반이중/전이중 선택을 따른다).</summary>
     private void Target_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter && DataContext is PttOriginateViewModel vm && vm.CanStart) { vm.StartCommand.Execute(null); e.Handled = true; }
     }
 
-    // [일제 통화](임시 모드) — 누름 = 개시+발언, 뗌 = 끝(캡처로 포인터가 벗어나도 뗌을 받는다). 잠금 발언이면 ViewModel 이 뗌을 무시한다.
+    // [일제 통화](애드혹 모드) — 누름 = 개시+발언, 뗌 = 끝(캡처로 포인터가 벗어나도 뗌을 받는다). 잠금 발언이면 ViewModel 이 뗌을 무시한다.
     private bool _bcPressed;
     private void Broadcast_Down(object sender, MouseButtonEventArgs e)
     {

@@ -95,7 +95,7 @@ private val MINE = listOf(
     ChannelRowUi("g2", "2. 상황실", "발언 없음", "05:02", 3, active = true, canTarget = true),
     ChannelRowUi("g3", "3. 교통1", "멤버 12", "대기"),
     ChannelRowUi("p1", "4. 김반장", "발언 없음", "02:14", active = true, canTarget = true),
-    ChannelRowUi("a1", "5. 임시 3인", "발언 없음", "00:48", 3, active = true, canTarget = true),
+    ChannelRowUi("a1", "5. 애드혹 3인", "발언 없음", "00:48", 3, active = true, canTarget = true),
 )
 
 private val SCOPED = listOf(
@@ -103,7 +103,7 @@ private val SCOPED = listOf(
         active = true, speaking = true, listening = true),
     ChannelRowUi("s2", "정비반", "세션 진행 중 · 참가 2", "진행 중", 2, active = true, listening = false),
     ChannelRowUi("s3", "외곽경비", "마지막 세션", "대기", listening = false),
-    ChannelRowUi("s4", "타인 개인 통화 · 이당직", "세션 진행 중 · 참가 2", "진행 중", 2,
+    ChannelRowUi("s4", "타인 개별 통화 · 이당직", "세션 진행 중 · 참가 2", "진행 중", 2,
         active = true, listening = false),
 )
 

@@ -60,7 +60,7 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 |---|---|---|
 | **Private call (1:1)** — on-demand | TS 24.379 §11.1 | ✓ 구현 — mcptt-info `session-type=private` INVITE(상대 MCPTT ID 직접, affiliation 불요) → CSP 가 2인 세션(`private:<from>-<to>`)을 CMP `PTT_GROUP_ADD group_type:"private"` + `floor_control`(on/off — fmtp `mc_no_floor_ctrl`)로 세운다([mcptt_csp_cmp_roadmap_contract.md](mcptt_csp_cmp_roadmap_contract.md) §A.1). 착신 미등록 480 |
 | **Broadcast group call** — 호 단위 개시(`<broadcast-ind>`)·개시자 고정·개시자 발언 종료 후 호 해제 | TS 24.379 §4.12·§6.2.8.2, TS 24.380 §6.2.4.6.4 | ✓ 서버(C7·C8)·단말 코어(SDK·Android PTT — 일제 통화 발신·B-bit Floor Request·발언 종료 후 호 해제)·관제 앱 Windows(U6)·Android 태블릿(코드 반영, 빌드 미확인 — [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §7) |
-| **Broadcast adhoc group call** — 임시 그룹(ad hoc) 호에 `<broadcast-ind>` | TS 24.379 §17.2.2.1.1 9)·§17.1 | △ 단말(SDK)·관제 앱 반영 — CSP 는 ad hoc 그룹의 `<broadcast-ind>` 를 무시한다(`IsOnDemandGroupCall`, [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) R13, 인계 server45_handoff §9) |
+| **Broadcast adhoc group call** — 애드혹(ad hoc) 호에 `<broadcast-ind>` | TS 24.379 §17.2.2.1.1 9)·§17.1 | △ 단말(SDK)·관제 앱 반영 — CSP 는 ad hoc 그룹의 `<broadcast-ind>` 를 무시한다(`IsOnDemandGroupCall`, [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) R13, 서버 과제 [server_todo_mcptt_floor_broadcast.md](../../dev/server_todo_mcptt_floor_broadcast.md) P2) |
 | **그룹 호 세션 해제 정책** — T4(Inactivity) 만료·참가자 1명 이하·TNG3 | TS 24.379 §6.3.8.1 / TS 24.380 §6.3.4.3.5 | ✓ 편성 그룹 호 — T4 = 그룹 `hang_timer_sec`(CMP `PTT_FLOOR_INACTIVITY`)·TNG3 = `max_duration_sec`. 최소 affiliation 인원 미달 해제는 미구현 |
 | **Private call — pre-established session** | TS 24.379 §11.2 | ✗ |
 | **Private call call-back** (요청/취소) | TS 24.379 §11.3 | ✗ |
@@ -370,7 +370,7 @@ affiliation-command 를 보낸다) → ③구형 제거.
   `PTT_JOIN.granted` 로 넘긴다. 규격에서 offer 의 `mc_granted` 는 200 OK 승인 표시를 받을 수 있다는 능력이고("*does not indicate an actual request for
   the floor*", §12.1.2.2 NOTE 2) 요청은 `mc_implicit_request` 다 — CSP 는 이것을 읽지 않고, 받아들였다는 응답(`mc_implicit_request`)·승인(`mc_granted`)을
   answer 에 싣지 않으며, answer 의 `mc_priority=3` 은 offer 와 무관하다(§14.3.1). 규격대로 `mc_granted` 를 싣는 3rd-party 단말은 요청 없이 발언권을 받는다.
-  고칠 방향은 [../../dev/server45_handoff.md](../../dev/server45_handoff.md) §8, 단말(SDK)은 두 속성을 함께 실어 양쪽에서 동작한다
+  고칠 방향은 [../../dev/server_todo_mcptt_floor_broadcast.md](../../dev/server_todo_mcptt_floor_broadcast.md) P1, 단말(SDK)은 두 속성을 함께 실어 양쪽에서 동작한다
   ([mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) R14).
 - **역방향(멤버 SDP → CMP)**: 멤버가 광고한 `a=fmtp:MCPTT` 는 CSP 가 파싱해 `PTT_JOIN` 의
   `queueing`/`max_priority`/`granted` 로 전달한다 (U14 서버 절반 —

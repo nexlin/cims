@@ -420,7 +420,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             var cfg = sp.ToAccountConfig(_loginPw.Length > 0 ? _loginPw : null);
             cfg.DisplayName = Profile.DisplayName;
             cfg.InstanceId = instanceId;                      // PTT·전화 계정이 같은 기기 값(RFC 5626 — 한 UA 인스턴스)
-            cfg.AutoAnswerMcptt = sp.Kind == "ptt";           // 그룹콜 자동 수락(개인 통화 분리는 §13 코어 과제)
+            cfg.AutoAnswerMcptt = sp.Kind == "ptt";           // 그룹콜 자동 수락(개별 통화 분리는 §13 코어 과제)
             var a = Engine.AddAccount(cfg);
             if (!a.Ok) { Log.Warn($"addAccount {sp.Kind}: {a}"); Notify.Error($"{sp.Kind.ToUpperInvariant()} 계정 추가 실패", a.ToString()); continue; }
             var kind = sp.Kind == "ptt" ? AccountKind.Ptt : AccountKind.Volte;
@@ -520,7 +520,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     private static string HistoryEventText(string ev) => ev switch
     {
         "call.answered" => "응답", "call.ended" => "종료", "call.missed" => "부재", "call.noanswer" => "무응답", "call.transferred" => "전달", "call.pickup" => "당겨받기",
-        "ptt.talk" => "발언", "ptt.session.start" => "세션 시작", "ptt.session.end" => "세션 종료", "ptt.emergency" => "긴급", "ptt.private" => "개인 통화", "ptt.adhoc" => "임시 그룹 통화",
+        "ptt.talk" => "발언", "ptt.session.start" => "세션 시작", "ptt.session.end" => "세션 종료", "ptt.emergency" => "긴급", "ptt.private" => "개별 통화", "ptt.adhoc" => "애드혹 그룹 통화",
         _ => ev,
     };
 
@@ -850,7 +850,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             string title = kind switch
             {
                 BannerKind.PilotIncoming => $"대표번호 {UserPartConverter.UserPart(ci.CalledParty)} 착신",
-                BannerKind.PttPrivateIncoming => "PTT 개인 통화 착신",
+                BannerKind.PttPrivateIncoming => "PTT 개별 통화 착신",
                 _ => "착신",
             };
             Notify.ShowBanner(new Banner { Kind = kind, Title = title, Subtitle = who, Session = s });
@@ -907,8 +907,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         Log.Info($"session + #{ci.CallId} {s.Kind} {op} {ci.RemoteUri} group={ci.GroupId}");
         switch (s.Kind)
         {
-            case SessionKind.PttPrivate: Activity.Add(ActivityPanel.Ptt, ActivityKind.Private, $"개인 통화 {s.Title}", ci.Dir == CallDir.Incoming ? "착신" : "발신"); break;
-            case SessionKind.PttAdhoc: Activity.Add(ActivityPanel.Ptt, ActivityKind.Adhoc, $"임시 그룹 {s.Title}", $"{s.AdhocMembers.Count}명"); break;
+            case SessionKind.PttPrivate: Activity.Add(ActivityPanel.Ptt, ActivityKind.Private, $"개별 통화 {s.Title}", ci.Dir == CallDir.Incoming ? "착신" : "발신"); break;
+            case SessionKind.PttAdhoc: Activity.Add(ActivityPanel.Ptt, ActivityKind.Adhoc, $"애드혹 그룹 {s.Title}", $"{s.AdhocMembers.Count}명"); break;
             case SessionKind.PttListen: Activity.Add(ActivityPanel.Ptt, ActivityKind.ListenStart, $"청취 시작 {s.Title}"); break;
             case SessionKind.VolteMonitor: Activity.Add(ActivityPanel.Call, ActivityKind.ListenStart, $"청취 시작 {s.Title}"); break;
             case SessionKind.PttChannel when op == Operation.Broadcast: Activity.Add(ActivityPanel.Ptt, ActivityKind.SessionStart, $"{s.Title} 일제 통화 개시"); break;
@@ -922,7 +922,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     {
         if (ci.IsMcptt && !ci.Mcptt.PrivateCall)
         {
-            if (AdhocIdFactory.IsAdhoc(ci.GroupId)) return "임시 그룹";
+            if (AdhocIdFactory.IsAdhoc(ci.GroupId)) return "애드혹 그룹";
             return Groups.FirstOrDefault(g => g.Id == ci.GroupId)?.Name ?? ci.GroupId;
         }
         string label = Directory.Label(ci.RemoteUri);
@@ -966,10 +966,10 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
                 Activity.Add(ActivityPanel.Ptt, ActivityKind.ListenEnd, $"청취 종료 {s.Title}", dur.Trim(' ', '·'));
                 break;
             case SessionKind.PttPrivate:
-                Activity.Add(ActivityPanel.Ptt, ActivityKind.Private, $"개인 통화 종료 {s.Title}", s.ConnectedAt is null ? Fail(s) : dur.Trim(' ', '·'));
+                Activity.Add(ActivityPanel.Ptt, ActivityKind.Private, $"개별 통화 종료 {s.Title}", s.ConnectedAt is null ? Fail(s) : dur.Trim(' ', '·'));
                 break;
             case SessionKind.PttAdhoc:
-                Activity.Add(ActivityPanel.Ptt, ActivityKind.SessionEnd, $"임시 그룹 종료 {s.Title}", $"{dur.Trim(' ', '·')} · 참가 {s.AdhocMembers.Count}");
+                Activity.Add(ActivityPanel.Ptt, ActivityKind.SessionEnd, $"애드혹 종료 {s.Title}", $"{dur.Trim(' ', '·')} · 참가 {s.AdhocMembers.Count}");
                 break;
             case SessionKind.PttChannel when s.IsBroadcast:
                 Activity.Add(ActivityPanel.Ptt, ActivityKind.SessionEnd, $"{s.Title} 일제 통화 종료", dur.Trim(' ', '·'));
@@ -1022,7 +1022,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         if (ev.RawType >= 0 && (ev.Kind is FloorEventKind.Granted or FloorEventKind.Taken or FloorEventKind.Idle or FloorEventKind.Denied or FloorEventKind.Revoked)
             && _broadcastPending.Remove(ev.CallId) && !s.IsBroadcast && (ev.Indicator & FloorIndicator.BroadcastGroup) == 0)
             Notify.Warn($"{s.Title} — 일제 통화로 열리지 않았습니다", s.Kind == SessionKind.PttAdhoc
-                ? "서버가 임시 그룹 일제 통화를 받지 않았습니다. 일반 임시 그룹 통화로 이어집니다."
+                ? "서버가 애드혹 일제 통화를 받지 않았습니다. 일반 애드혹 그룹 통화로 이어집니다."
                 : "진행 중인 그룹 통화에 합류했거나 편성 그룹이 아닙니다. 일반 그룹 통화로 이어집니다.");
         var now = DateTime.Now;
         switch (ev.Kind)
@@ -1323,9 +1323,9 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         return Track(JoinAdhoc(members, new GroupCallOptions { Emergency = emergency }), Operation.PttAdhoc);
     }
 
-    /// <summary>임시 그룹 일제 통화(TS 24.379 §17.2.2.1.1 9) "broadcast adhoc group call") — 고른 사람들에게만 일제 통화. 그룹 카드 [일제 통화] 와 같은
+    /// <summary>애드혹 일제 통화(TS 24.379 §17.2.2.1.1 9) "broadcast adhoc group call") — 고른 사람들에게만 일제 통화. 그룹 카드 [일제 통화] 와 같은
     /// 한 버튼이라 개시 INVITE 가 암묵적 발언 요청이다(TS 24.380 §14.2.5). 끝은 <see cref="ReleaseBroadcast"/>. 서버가 ad hoc 의 broadcast-ind 를
-    /// 받지 않으면 일반 임시 그룹 통화로 열린다(첫 서버 floor 메시지에 B-bit 없음 → 경고). 반환 = 호 id(실패 -1, 알림은 여기서).</summary>
+    /// 받지 않으면 일반 애드혹 그룹 통화로 열린다(첫 서버 floor 메시지에 B-bit 없음 → 경고). 반환 = 호 id(실패 -1, 알림은 여기서).</summary>
     public int StartAdhocBroadcast(IReadOnlyList<string> members)
     {
         if (Ptt is null) { Fail("PTT 계정 없음"); return -1; }
@@ -1335,7 +1335,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         return Track(r, Operation.PttAdhoc).Ok ? r.Value.Id : -1;
     }
 
-    /// <summary>임시 그룹 id(adhoc-<내 PTT 번호>-<epoch초>)로 참가자 목록(resource-lists)을 실어 연다.</summary>
+    /// <summary>애드혹 그룹 id(adhoc-<내 PTT 번호>-<epoch초>)로 참가자 목록(resource-lists)을 실어 연다.</summary>
     private Result<Call> JoinAdhoc(IReadOnlyList<string> members, GroupCallOptions opts)
     {
         string id = AdhocIdFactory.Create(MyPttNumber);
