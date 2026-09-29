@@ -17,6 +17,34 @@ public partial class PttOriginateView : UserControl
         if (e.Key == Key.Enter && DataContext is PttOriginateViewModel vm && vm.CanStart) { vm.StartCommand.Execute(null); e.Handled = true; }
     }
 
+    // [일제 통화](임시 모드) — 누름 = 개시+발언, 뗌 = 끝(캡처로 포인터가 벗어나도 뗌을 받는다). 잠금 발언이면 ViewModel 이 뗌을 무시한다.
+    private bool _bcPressed;
+    private void Broadcast_Down(object sender, MouseButtonEventArgs e)
+    {
+        if (DataContext is not PttOriginateViewModel vm || sender is not UIElement u) return;
+        _bcPressed = true;
+        u.CaptureMouse();
+        vm.BroadcastDown();
+        e.Handled = true;
+    }
+    private void Broadcast_Up(object sender, MouseButtonEventArgs e) { BroadcastRelease(sender); e.Handled = true; }
+    private void Broadcast_LostCapture(object sender, MouseEventArgs e) => BroadcastRelease(sender);
+    private void Broadcast_TouchDown(object sender, TouchEventArgs e)
+    {
+        if (DataContext is not PttOriginateViewModel vm) return;
+        _bcPressed = true;
+        vm.BroadcastDown();
+        e.Handled = true;
+    }
+    private void Broadcast_TouchUp(object sender, TouchEventArgs e) { BroadcastRelease(sender); e.Handled = true; }
+    private void BroadcastRelease(object sender)
+    {
+        if (!_bcPressed) return;
+        _bcPressed = false;
+        if (sender is UIElement u && u.IsMouseCaptured) u.ReleaseMouseCapture();
+        (DataContext as PttOriginateViewModel)?.BroadcastUp();
+    }
+
     /// <summary>주소록 사용자 행 클릭 — 모드별 행동(RowCommand). 버튼·체크 위 클릭은 그 컨트롤 몫이라 건너뛴다.</summary>
     private void UserRow_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {

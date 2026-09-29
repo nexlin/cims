@@ -34,12 +34,13 @@ class PttChannelTest {
         privateCall: Boolean = false, groupId: String = "g001",
         joinedDialog: String = "", state: CallState = CallState.ACTIVE,
         noFloorCtrl: Boolean = false, emergency: Boolean = false,
+        broadcast: Boolean = false, dir: CallDir = CallDir.OUTGOING,
     ) = CallInfo(
-        callId = id, accountId = 0, dir = CallDir.OUTGOING, state = state,
+        callId = id, accountId = 0, dir = dir, state = state,
         remoteUri = "sip:x@d", calledParty = "", video = false, mediaActive = true,
         muted = false, listen = true, playbackRoute = 0, lastCode = 0, lastReason = "",
         sources = emptyList(), isMcptt = mcptt, groupId = groupId,
-        mcptt = McpttInfo(mcptt, "", "", "", "", emergency, false, privateCall, noFloorCtrl),
+        mcptt = McpttInfo(mcptt, "", "", "", "", emergency, false, privateCall, noFloorCtrl, broadcast),
         halfDuplex = !noFloorCtrl, listenOnly = listenOnly, joinedDialog = joinedDialog)
 
     @Test fun `세션 종류가 화면 배치를 정한다`() {
@@ -71,10 +72,42 @@ class PttChannelTest {
         assertFalse(card(g = GroupInfo("g001", "tel:g001", "순찰1")).canCheck)
     }
 
-    @Test fun `전이중 사설콜은 발언 대상이 될 수 없다`() {
+    @Test fun `전이중 개인 통화는 발언 대상이 될 수 없다`() {
         // 마이크가 늘 열려 있어 floor 가 없다 — 음소거로 다룬다.
         val s = session(call(privateCall = true, noFloorCtrl = true))
         assertFalse(card(CardKind.PRIVATE, s).canCheck)
+    }
+
+    // ── 일제 통화(TS 24.379 §4.12 — 호 속성) ──
+    private fun floorOf(canRequest: Boolean, indicator: Int = 0, state: FloorState = FloorState.IDLE) =
+        FloorInfo(state, emptyList(), canRequest, indicator, -1, 0, "", 0, 0, 0, 0)
+
+    @Test fun `일제 통화 버튼은 진행 중 통화가 없는 멤버 편성 그룹에서만 켜진다`() {
+        // 진행 중 호는 일제 통화로 바꿀 수 없다(TS 24.379 §10.1.1.3.1.1 15) — 합류가 된다). 채팅 그룹은 서버가 broadcast-ind 를 무시한다.
+        val idle = GroupInfo("g001", "tel:g001", "전원 일제")
+        assertTrue(card(g = idle).canBroadcast)
+        assertTrue(card(g = idle.copy(sessionType = "prearranged")).canBroadcast)
+        assertFalse(card(g = idle.copy(sessionType = "chat")).canBroadcast)
+        assertFalse(card(g = idle.withRoster(listOf(RosterEntry("tel:1001", "connected")))).canBroadcast)
+        assertFalse(card(s = session(call()), g = idle).canBroadcast)
+        assertFalse(card(CardKind.ADHOC, session(call(groupId = "adhoc-me-1"))).canBroadcast)
+    }
+
+    @Test fun `남이 연 일제 통화의 수신 멤버는 발언 대상이 될 수 없다`() {
+        // Floor Taken 의 Permission 0(TS 24.380 §6.3.4.4.2 3d) — 체크하면 요청이 Deny #5 로만 돌아온다.
+        val s = session(call(broadcast = true, dir = CallDir.INCOMING), floorOf(canRequest = false, indicator = 0x4000,
+                                                                                state = FloorState.LISTENING))
+        assertTrue(s.isBroadcast)
+        assertFalse(s.isBroadcastInitiator)
+        assertFalse(card(s = s, g = GroupInfo("g001", "tel:g001", "순찰1")).canCheck)
+    }
+
+    @Test fun `내가 연 일제 통화는 서버가 B-bit 로 알려야 일제 통화다`() {
+        val asked = session(call(broadcast = true), floorOf(canRequest = true))
+        assertFalse(asked.isBroadcast)                       // 서버가 일반 통화로 열었다(합류 등) — 일제가 아니다
+        val opened = session(call(broadcast = true), floorOf(canRequest = true, indicator = 0x4000))
+        assertTrue(opened.isBroadcast)
+        assertTrue(opened.isBroadcastInitiator)
     }
 
     @Test fun `참여 중 반이중이면 발언 대상이 된다`() {
@@ -164,7 +197,7 @@ class PttChannelTest {
 }
 
 /**
- * 사설콜·애드혹(§4.1) — 임시 그룹 id 규약과 대상 후보.
+ * 개인·임시 통화(§4.1) — 임시 그룹 id 규약과 대상 후보.
  *
  * `adhoc-`·`priv-` 는 편성 그룹 **예약어**다(mcptt_emergency_modes.md §6). id 를 앱이 만드는 이유는
  * 서버에 편성이 없는 임시 세션이기 때문이고, 그래서 규약을 어기면 편성 그룹과 충돌한다.
@@ -182,7 +215,7 @@ class AdhocIdTest {
             com.cims.ue.dispatch.session.adhocIdOf("TEL:5001;phone-context=x", 1_700_000_000))
     }
 
-    @Test fun `만든 id 는 애드혹으로 인식된다 — 세션 종류 판정과 같은 접두사`() {
+    @Test fun `만든 id 는 임시 그룹으로 인식된다 — 세션 종류 판정과 같은 접두사`() {
         val id = com.cims.ue.dispatch.session.adhocIdOf("tel:5001", 1)
         assertTrue(com.cims.ue.dispatch.session.isAdhocId(id))
         assertTrue(id.startsWith(com.cims.ue.dispatch.session.SessionKind.ADHOC_PREFIX))

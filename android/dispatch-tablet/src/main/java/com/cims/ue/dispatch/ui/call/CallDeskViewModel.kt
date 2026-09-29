@@ -397,7 +397,7 @@ class CallDeskViewModel(private val s: DispatchSession) : ScreenViewModel() {
     /**
      * 사람 메뉴가 쓰는 사람 목록 — 두 주소록을 사람 단위로 묶은 것(`mergePeople`).
      *
-     * **내 회선은 뺀다.** 나에게 사설콜·통화를 거는 항목이 목록에 있으면 안 된다.
+     * **내 회선은 뺀다.** 나에게 개인 통화·통화를 거는 항목이 목록에 있으면 안 된다.
      */
     val people: StateFlow<List<PersonEntry>> =
         combine(s.phoneBook, s.pttBook) { phone, ptt ->

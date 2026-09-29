@@ -1021,7 +1021,9 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         //   B-bit 는 그 메시지의 Floor Indicator 로 본다 — 서버의 Deny(참가자 1명 등)도 B-bit 를 싣는다(TS 24.380 §8.2.3.15).
         if (ev.RawType >= 0 && (ev.Kind is FloorEventKind.Granted or FloorEventKind.Taken or FloorEventKind.Idle or FloorEventKind.Denied or FloorEventKind.Revoked)
             && _broadcastPending.Remove(ev.CallId) && !s.IsBroadcast && (ev.Indicator & FloorIndicator.BroadcastGroup) == 0)
-            Notify.Warn($"{s.Title} — 일제 통화로 열리지 않았습니다", "진행 중인 그룹 통화에 합류했거나 편성 그룹이 아닙니다. 일반 그룹 통화로 이어집니다.");
+            Notify.Warn($"{s.Title} — 일제 통화로 열리지 않았습니다", s.Kind == SessionKind.PttAdhoc
+                ? "서버가 임시 그룹 일제 통화를 받지 않았습니다. 일반 임시 그룹 통화로 이어집니다."
+                : "진행 중인 그룹 통화에 합류했거나 편성 그룹이 아닙니다. 일반 그룹 통화로 이어집니다.");
         var now = DateTime.Now;
         switch (ev.Kind)
         {
@@ -1318,11 +1320,30 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     {
         if (Ptt is null) return Fail("PTT 계정 없음");
         if (members.Count == 0) return Fail("대상을 고르세요");
+        return Track(JoinAdhoc(members, new GroupCallOptions { Emergency = emergency }), Operation.PttAdhoc);
+    }
+
+    /// <summary>임시 그룹 일제 통화(TS 24.379 §17.2.2.1.1 9) "broadcast adhoc group call") — 고른 사람들에게만 일제 통화. 그룹 카드 [일제 통화] 와 같은
+    /// 한 버튼이라 개시 INVITE 가 암묵적 발언 요청이다(TS 24.380 §14.2.5). 끝은 <see cref="ReleaseBroadcast"/>. 서버가 ad hoc 의 broadcast-ind 를
+    /// 받지 않으면 일반 임시 그룹 통화로 열린다(첫 서버 floor 메시지에 B-bit 없음 → 경고). 반환 = 호 id(실패 -1, 알림은 여기서).</summary>
+    public int StartAdhocBroadcast(IReadOnlyList<string> members)
+    {
+        if (Ptt is null) { Fail("PTT 계정 없음"); return -1; }
+        if (members.Count == 0) { Fail("대상을 고르세요"); return -1; }
+        var r = JoinAdhoc(members, new GroupCallOptions { Broadcast = true, ImplicitFloorRequest = true });
+        if (r.Ok) _broadcastPending.Add(r.Value.Id);
+        return Track(r, Operation.PttAdhoc).Ok ? r.Value.Id : -1;
+    }
+
+    /// <summary>임시 그룹 id(adhoc-<내 PTT 번호>-<epoch초>)로 참가자 목록(resource-lists)을 실어 연다.</summary>
+    private Result<Call> JoinAdhoc(IReadOnlyList<string> members, GroupCallOptions opts)
+    {
         string id = AdhocIdFactory.Create(MyPttNumber);
         var tels = members.Select(ToTelUri).ToList();
-        var r = Ptt.JoinGroupCall(id, new GroupCallOptions { Members = tels, Emergency = emergency });
+        opts.Members = tels;
+        var r = Ptt!.JoinGroupCall(id, opts);
         if (r.Ok) _adhocMembers[r.Value.Id] = tels;
-        return Track(r, Operation.PttAdhoc);
+        return r;
     }
     private readonly Dictionary<int, List<string>> _adhocMembers = new();
     public IReadOnlyList<string> AdhocMembersOf(int callId) => _adhocMembers.TryGetValue(callId, out var m) ? m : Array.Empty<string>();

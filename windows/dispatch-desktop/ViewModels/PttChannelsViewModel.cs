@@ -112,7 +112,7 @@ public sealed partial class ChannelCard : ObservableObject
     public string Line2 => IsJoined ? string.Join(" · ", new[] { HasSpeaker ? "" : "발언 없음", Aux() }.Where(x => x.Length > 0)) : Group is null ? "" : LastSessionText;
     private string Aux() => Kind switch
     {
-        CardKind.Adhoc => $"응답 {AdhocAnswered}/{Session!.AdhocMembers.Count}",
+        CardKind.Adhoc => (IsBroadcast ? (IsBroadcastInitiator ? "일제 통화 · 발언을 놓으면 종료 · " : "일제 통화 · 수신 전용 · ") : "") + $"응답 {AdhocAnswered}/{Session!.AdhocMembers.Count}",
         CardKind.Private => $"{(RouteIsSpeaker ? "스피커" : "헤드셋")} · PTT {ShortNumber(Session!.PeerNumber)} · {(Session.Info.Dir == CallDir.Incoming ? "착신" : "발신")} {Session.StartedAt:HH:mm}",
         _ when IsBroadcast => IsBroadcastInitiator ? "일제 통화 · 발언을 놓으면 종료" : "일제 통화 · 수신 전용",
         _ => LastSpeaker.Length > 0 && LastSpeakerAt is DateTime t ? $"마지막 발언 {LastSpeaker} {t:HH:mm}" : $"참가 {Participants}",

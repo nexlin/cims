@@ -11,7 +11,10 @@
 package com.cims.ue.dispatch.ui.ptt
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -20,6 +23,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -28,7 +32,7 @@ import com.cims.ue.dispatch.ui.Tag
 import com.cims.ue.dispatch.ui.Type
 
 /**
- * @param id  [무전] 목록에서 연 채널 id — 내 채널(그룹·사설콜·애드혹) 또는 범위 채널.
+ * @param id  [무전] 목록에서 연 채널 id — 내 채널(그룹·개인 통화·임시 그룹 통화) 또는 범위 채널.
  * @param onShowRoster 편성 전원 보기 — [PTT 그룹] 화면 상세로(§6.12).
  */
 @Composable
@@ -43,11 +47,13 @@ fun ChannelScreen(
     val mineCards by channels.cards.collectAsStateWithLifecycle()
     val scopedCards by scoped.cards.collectAsStateWithLifecycle()
     val targets by channels.targetIds.collectAsStateWithLifecycle()
+    val bcHeld by channels.broadcastHeld.collectAsStateWithLifecycle()
     val mine = mineCards.firstOrNull { it.id == id }
     val range = scopedCards.firstOrNull { it.id == id }
 
     ChannelScreenContent(
-        head = channelHead(id, mine, range, targeted = mine != null && mine.id in targets),
+        head = channelHead(id, mine, range, targeted = mine != null && mine.id in targets,
+                           broadcastHeld = mine != null && bcHeld == mine.id),
         onBack = onBack,
         onShowRoster = onShowRoster,
         onJoin = { mine?.let(channels::join) },
@@ -55,6 +61,8 @@ fun ChannelScreen(
         onLeave = { mine?.let(channels::leave) },
         onToggleTarget = { mine?.let { channels.toggleTarget(it.id) } },
         onToggleListen = { range?.let(scoped::toggleListen) },
+        onBroadcastDown = { mine?.let(channels::broadcastGroupDown) },
+        onBroadcastUp = channels::broadcastUp,
         roster = (mine?.group ?: range?.group)?.roster.orEmpty(),
         speaker = mine?.speaker ?: range?.speaker.orEmpty(),
         me = channels.myPttNumber,
@@ -80,6 +88,12 @@ data class ChannelHeadUi(
     val isMemberGroup: Boolean = false,
     val canTarget: Boolean = false,
     val targeted: Boolean = false,
+    /** [일제 통화] — 멤버 편성 그룹에 진행 중 통화가 없을 때만([ChannelCard.canBroadcast]). */
+    val canBroadcast: Boolean = false,
+    /** [일제 통화] 를 누르고 있다(잠금 발언이면 켜 두었다) — 개시되면 [joined] 가 되지만 버튼은 뗄 때까지 남는다. */
+    val broadcastHeld: Boolean = false,
+    /** 일제 통화 세션 — 머리 배지 «일제». */
+    val broadcast: Boolean = false,
     val unread: Int = 0,
     /** 범위 채널 — 청취 중인가. null = 내 채널. */
     val listening: Boolean? = null,
@@ -92,6 +106,7 @@ internal fun channelHead(
     mine: ChannelCard?,
     range: ScopedCard?,
     targeted: Boolean,
+    broadcastHeld: Boolean = false,
 ): ChannelHeadUi = when {
     mine != null -> ChannelHeadUi(
         id = id, title = mine.title, badge = mine.badge,
@@ -101,7 +116,9 @@ internal fun channelHead(
             mine.stateText).joinToString(" · "),
         emergency = mine.emergency, groupId = mine.group?.id,
         joined = mine.joined, isMemberGroup = mine.kind == CardKind.MEMBER,
-        canTarget = mine.canCheck, targeted = targeted, unread = mine.unread)
+        canTarget = mine.canCheck, targeted = targeted,
+        canBroadcast = mine.canBroadcast, broadcastHeld = broadcastHeld, broadcast = mine.isBroadcast,
+        unread = mine.unread)
     range != null -> ChannelHeadUi(
         id = id, title = range.title, badge = "범위",
         subtitle = listOfNotNull(
@@ -122,6 +139,8 @@ fun ChannelScreenContent(
     onLeave: () -> Unit = {},
     onToggleTarget: () -> Unit = {},
     onToggleListen: () -> Unit = {},
+    onBroadcastDown: () -> Unit = {},
+    onBroadcastUp: () -> Unit = {},
     roster: List<com.cims.ue.sdk.RosterEntry> = emptyList(),
     speaker: String = "",
     me: String = "",
@@ -139,6 +158,7 @@ fun ChannelScreenContent(
                     }
                     Text(head.title, fontSize = Type.title,
                         fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.weight(1f))
+                    if (head.broadcast) Tag("일제")
                     if (head.badge.isNotEmpty()) Tag(head.badge)
                 }
                 if (head.subtitle.isNotEmpty()) Text(head.subtitle, fontSize = Type.meta,
@@ -148,12 +168,17 @@ fun ChannelScreenContent(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     when {
-                        head.joined == true -> TextButton(onClick = onLeave) { Text("나가기") }
+                        head.joined == true && !head.broadcastHeld -> TextButton(onClick = onLeave) { Text("나가기") }
                         head.joined == false && head.isMemberGroup -> {
                             Button(onClick = onJoin) { Text("참여") }
                             TextButton(onClick = onJoinEmergency) { Text("긴급") }
                         }
                     }
+                    // [일제 통화] — 누르는 동안 개시+발언, 놓으면 끝. 개시되면 joined 가 되지만 뗄 때까지 같은 자리에 남긴다
+                    //   (버튼이 사라지면 제스처가 취소돼 즉시 끝난다).
+                    if (head.isMemberGroup && (head.joined == false || head.broadcastHeld))
+                        BroadcastHoldButton(enabled = head.canBroadcast || head.broadcastHeld, held = head.broadcastHeld,
+                                            onDown = onBroadcastDown, onUp = onBroadcastUp)
                     if (head.canTarget) FilterChip(
                         selected = head.targeted,
                         onClick = onToggleTarget,
@@ -186,6 +211,37 @@ fun ChannelScreenContent(
         //   두 곳에 두면 «어느 쪽이 지금 채널 것인가» 가 흐려진다.
         RosterPage(roster = roster, speaker = speaker, me = me, nameOf = nameOf,
             modifier = Modifier.weight(1f))
+    }
+}
+
+/**
+ * [일제 통화] 한 버튼 — 누르고 있는 동안 개시하고 말하며, 놓으면 끝(잠금 발언이면 VM 이 뗌을 무시한다).
+ *
+ * 발언 바 [PttButton] 과 같은 제스처다 — 취소(화면 이탈·제스처 무효화)에도 `finally` 가 반드시 뗌을 보낸다.
+ * 진행 중 통화가 있으면 비활성(진행 중 호는 일제 통화로 바꿀 수 없다 — TS 24.379 §10.1.1.3.1.1 15)).
+ */
+@Composable
+internal fun BroadcastHoldButton(enabled: Boolean, held: Boolean, onDown: () -> Unit, onUp: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    // 제스처(pointerInput)는 한 번 걸리므로 재구성 뒤의 최신 콜백을 읽는다 — 옛 카드로 개시하지 않게.
+    val down by rememberUpdatedState(onDown)
+    val up by rememberUpdatedState(onUp)
+    Surface(
+        color = when { !enabled -> scheme.surfaceVariant; held -> scheme.primary; else -> scheme.secondaryContainer },
+        contentColor = when { !enabled -> scheme.onSurfaceVariant; held -> scheme.onPrimary; else -> scheme.onSecondaryContainer },
+        shape = RoundedCornerShape(20.dp),
+        border = if (enabled) null else BorderStroke(1.dp, scheme.outline),
+        modifier = Modifier.heightIn(min = 40.dp).then(
+            if (!enabled) Modifier
+            else Modifier.pointerInput(Unit) {
+                detectTapGestures(onPress = {
+                    down()
+                    try { tryAwaitRelease() } finally { up() }
+                })
+            }),
+    ) {
+        Text(if (held) "일제 통화 중" else "일제 통화", fontSize = Type.strong, fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
     }
 }
 

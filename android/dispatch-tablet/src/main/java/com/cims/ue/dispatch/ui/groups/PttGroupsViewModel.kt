@@ -427,7 +427,10 @@ class PttGroupsViewModel(private val s: DispatchSession) : ScreenViewModel() {
     }
 
     companion object {
-        val SESSION_TYPES = listOf("prearranged", "chat", "broadcast")
+        /** 그룹 종류(TS 24.481 `<on-network-invite-members>` — true = 편성, false = 채팅). 일제 통화는 그룹 종류가 아니라
+         *  호 속성이라(TS 24.379 §4.12 — 편성 그룹에서 통화마다 broadcast-ind) 없다. 일제 통화용 그룹은 그룹 이름으로 알린다
+         *  (mcptt_broadcast_group_call.md §5). */
+        val SESSION_TYPES = listOf("prearranged", "chat")
 
         /** 후보 계산 — 순수 함수(시험 대상). */
         internal fun candidatesOf(book: DirectoryBook, f: EditForm?):

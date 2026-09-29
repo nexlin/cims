@@ -31,7 +31,7 @@ import com.cims.ue.dispatch.session.reject
 import com.cims.ue.dispatch.ui.ptt.fmtElapsed
 import kotlinx.coroutines.launch
 
-/** 착신 종류별 색(§3.2) — 대표번호 주황 · 직접 파랑 · 사설콜 청록. */
+/** 착신 종류별 색(§3.2) — 대표번호 주황 · 직접 파랑 · 개인 통화 청록. */
 private fun bannerColor(s: SessionItem, isPilot: Boolean): Color = when {
     s.kind == SessionKind.PTT_PRIVATE -> Color(0xFF14B8A6)
     isPilot -> Color(0xFFF59E0B)
@@ -91,7 +91,7 @@ private fun Banner(
                 Text(
                     buildString {
                         append(if (pilot) "대표번호 ${session.dispatch.pilotId} 착신" else "착신")
-                        if (call.kind == SessionKind.PTT_PRIVATE) append(" · 사설콜")
+                        if (call.kind == SessionKind.PTT_PRIVATE) append(" · 개인 통화")
                     },
                     fontSize = Type.body, color = color, fontWeight = FontWeight.Bold)
                 Text(session.displayLabel(call.info.remoteUri),

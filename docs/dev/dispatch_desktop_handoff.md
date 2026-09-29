@@ -108,3 +108,18 @@ powershell -ExecutionPolicy Bypass -File windows\dispatch-desktop\publish.ps1 [-
 - `ext/pjproject` 가 바뀌면 `build-win\pjproject-prefix\src\pjproject-stamp\Release\pjproject-{build,install,done}` 을 지우고 빌드(EP 가 스스로 재빌드하지 않음).
 - Android 코드(`android/ptt-client` `FloorClient.kt`·`android/core` `SipController.kt`, bc2e499d)는 이 PC 에서 빌드 불가 — Android 빌드 환경에서 확인.
 - 서버(CSP·CMP·CSC)는 .48 이 소스 서버 — 서버 몫은 .48 에서 반영·배포(인계는 `docs/dev/server45_handoff.md` 형식).
+
+## 5. Android 관제 태블릿 — Android 빌드 환경에서 확인할 것
+
+Windows 와 같은 변경을 `android/dispatch-tablet` 에 코드로 반영했다. 이 PC 는 Android 를 빌드하지 못해 **컴파일·JVM 시험·실기가 안 됐다.**
+
+| # | 확인 | 파일 |
+|---|---|---|
+| T1 | 컴파일 — `startBroadcast`·`startAdhocBroadcast`·`releaseBroadcast`·`joinAdhoc`(`GroupCallOptions.copy`)·`BROADCAST_JUDGE_OPS` | `session/PttPlane.kt` |
+| T2 | `SessionItem.isBroadcast/isBroadcastInitiator`·`FLOOR_IND_BROADCAST`·`GroupInfo.sessionType`·`broadcastPending` | `session/Models.kt`·`DispatchSession.kt` |
+| T3 | VM 일제 통화 상태(`_broadcastHeld`·`bcCallId` 는 `cards` 의 Eagerly onEach 가 읽으므로 **그보다 먼저 선언**해 두었다)·`canBroadcast`·`canCheck`(Permission 0 제외) | `ui/ptt/PttChannelsViewModel.kt` |
+| T4 | 한 버튼 제스처(`BroadcastHoldButton` — `rememberUpdatedState`, 개시 뒤 `joined` 가 돼도 뗄 때까지 남는지)·발신 시트 [임시] 의 [일제 통화](누르는 동안 시트·탭·대상 잠김, 놓으면 닫힘, 실패면 남음)·씨앗(`LaunchedEffect(seed)`) | `ui/ptt/ChannelScreen.kt`·`OriginateSheet.kt` |
+| T5 | JVM 시험 `PttChannelTest` — 일제 통화 3건(`canBroadcast` 조건·수신 멤버 발언 대상 제외·B-bit 판정) + 기존 전부 | `src/test/.../PttChannelTest.kt` |
+| T6 | 실기 — 채널 머리 [일제 통화] 누름·뗌(성립 전 CANCEL / 뒤 BYE), 잠금 발언 토글, 진행 중 통화·채팅 그룹 비활성, 수신 단말 «일제»·발언 대상 불가, [임시] 일제 통화(서버 §9 전에는 «일제 통화로 열리지 않았습니다» 가 정상) | — |
+
+명칭(개인/임시)은 Windows 와 같다. 명칭이 바뀌면 두 앱·두 문서를 함께 바꾼다.

@@ -19,9 +19,9 @@ enum class SessionKind {
     PHONE_MONITOR,
     /** ① 멤버 채널 카드 — 그룹콜. */
     PTT_CHANNEL,
-    /** ① 사설콜 카드. */
+    /** ① 개인 통화 카드(TS 24.379 private call). */
     PTT_PRIVATE,
-    /** ① 애드혹 카드. */
+    /** ① 임시 그룹 통화 카드(ad hoc group call). */
     PTT_ADHOC,
     /** 청취 시트 — 그룹콜 recvonly. */
     PTT_LISTEN;
@@ -44,6 +44,9 @@ enum class SessionKind {
         }
     }
 }
+
+/** Floor Indicator B-bit "Broadcast group call"(TS 24.380 §8.2.3.15) — 코어 `floor::indicator::BROADCAST_GROUP` 과 같은 값. */
+const val FLOOR_IND_BROADCAST = 0x4000
 
 /** 세션을 만든 관제 동작 — 종료 코드의 문구 사전(dispatch_desktop_ui.md §9) 선택에 쓴다. */
 enum class Operation { INCOMING, DIAL, PICKUP, JOIN, TRANSFER, PTT_JOIN, PTT_LISTEN, PTT_PRIVATE, PTT_ADHOC, EMERGENCY }
@@ -69,7 +72,7 @@ data class SessionItem(
     val floorNote: String = "",
     /** 표시 이름(그룹명·상대 이름). */
     val title: String = "",
-    /** 애드혹 멤버(응답 상태는 로스터가 준다). */
+    /** 임시 그룹 멤버(응답 상태는 로스터가 준다). */
     val adhocMembers: List<String> = emptyList(),
 ) {
     val kind: SessionKind get() = SessionKind.of(info)
@@ -77,7 +80,7 @@ data class SessionItem(
     val isActive: Boolean get() = info.state == CallState.ACTIVE
     val isEmergency: Boolean get() = info.mcptt.emergency
     val isImminentPeril: Boolean get() = info.mcptt.imminentPeril
-    /** 전이중 사설콜 — floor 가 없어 마이크가 늘 열려 있다(발언 대상이 될 수 없다). */
+    /** 전이중 개인 통화 — floor 가 없어 마이크가 늘 열려 있다(발언 대상이 될 수 없다). */
     val isFullDuplex: Boolean get() = info.mcptt.noFloorCtrl
 
     val isSpeaking: Boolean get() = floor?.state == FloorState.SPEAKING
@@ -85,6 +88,18 @@ data class SessionItem(
     val isQueued: Boolean get() = floor?.state == FloorState.QUEUED
     /** 청취 중 발언 버튼 비활성의 근거 — Floor Taken 의 `Permission to Request the Floor`(TS 24.380). */
     val canRequestFloor: Boolean get() = floor?.canRequest != false
+
+    /**
+     * 일제 통화(TS 24.379 §4.12 — 그룹 종류가 아니라 **호 속성**)인가 — 서버가 알린 값으로 본다: 착신 mcptt-info
+     * `broadcast-ind` 또는 floor 메시지의 B-bit(TS 24.380 §8.2.3.15 — 진행 중 일제 통화에 늦게 합류한 leg 은 이것으로만 안다).
+     */
+    val isBroadcast: Boolean get() =
+        (info.dir == com.cims.ue.sdk.CallDir.INCOMING && info.mcptt.broadcast) ||
+            ((floor?.indicator ?: 0) and FLOOR_IND_BROADCAST) != 0 ||
+            ((lastFloor?.indicator ?: 0) and FLOOR_IND_BROADCAST) != 0
+    /** 내가 연 일제 통화 — 개시 INVITE 에 broadcast-ind 를 실었고 서버가 일제로 열었다(개시자만 발언 요청 가능). */
+    val isBroadcastInitiator: Boolean get() =
+        info.dir == com.cims.ue.sdk.CallDir.OUTGOING && info.mcptt.broadcast && isBroadcast && canRequestFloor
 
     val elapsedMs: Long get() = System.currentTimeMillis() - (connectedAtMs ?: startedAtMs)
     val speakerElapsedMs: Long get() = speakerSinceMs?.let { System.currentTimeMillis() - it } ?: 0L
@@ -112,6 +127,11 @@ data class GroupInfo(
     /** 내가 소유(authorized user)한 그룹 — 편집·삭제 가능(GMS 목록 `is_owner`). */
     val isOwner: Boolean = false,
     val etag: String = "",
+    /**
+     * 그룹 종류 — `prearranged`(편성)/`chat`(TS 24.481 `<on-network-invite-members>`). GMS 목록에 없어 모르면 빈 값이고,
+     * 일제 통화 개시 때 그룹 문서로 확인해 채운다(채팅 그룹은 서버가 broadcast-ind 를 무시한다).
+     */
+    val sessionType: String = "",
     val affiliated: Boolean = false,
     val roster: List<RosterEntry> = emptyList(),
     /** 로스터에 접속 참가자가 생긴 시각 — ② 진행 중 카드의 경과. */

@@ -39,6 +39,19 @@
                 </DockPanel>
                 <DockPanel Visibility="{Binding IsAdhoc, Converter={StaticResource BoolToVis}}">
                     <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Pri}" Content="{Binding StartText}" Command="{Binding StartCommand}" IsEnabled="{Binding CanStart}" Margin="6,0,0,0" />
+                    <!-- [일제 통화] = 고른 사람들에게 임시 그룹 일제 통화(TS 24.379 §17.2.2.1.1 9)) — 누르는 동안 개시+발언, 놓으면 끝(그룹 카드와 같은 한 버튼) -->
+                    <Button DockPanel.Dock="Right" Content="{Binding BroadcastText}" IsEnabled="{Binding CanPressBroadcast}" Margin="6,0,0,0"
+                            PreviewMouseLeftButtonDown="Broadcast_Down" PreviewMouseLeftButtonUp="Broadcast_Up" LostMouseCapture="Broadcast_LostCapture"
+                            TouchDown="Broadcast_TouchDown" TouchUp="Broadcast_TouchUp" ToolTip="{Binding BroadcastTip}" ToolTipService.ShowOnDisabled="True">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource Btn}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsBroadcastHeld}" Value="True"><Setter Property="Background" Value="{DynamicResource Brush.Primary}" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /><Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" /></DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
                     <ItemsControl ItemsSource="{Binding AdhocSelection}" MinHeight="30">
                         <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>

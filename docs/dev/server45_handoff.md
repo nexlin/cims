@@ -169,3 +169,22 @@ Windows 관제 앱의 일제 통화 한 버튼(누르는 동안 개시하고 말
   answer 에 `mc_implicit_request`, 놓은 뒤 `broadcast_released:true`. 진행 중 세션에 같은 명령 → answer 에 `mc_implicit_request` 없음 → 단말이 명시 Floor Request.
 - **참고 — 임시 그룹(ad hoc) 일제 통화**(TS 24.379 §17.2.2.1.1 9), 정본 R13): CSP 는 ad hoc 그룹의 `<broadcast-ind>` 를 무시한다(`IsOnDemandGroupCall`). 규격에 있는
   기능이라 할지는 사용자 결정 뒤 따로 넘긴다.
+
+## 9. 임시 그룹(ad hoc) 일제 통화 — CSP (.48 몫)
+
+규격에 있는 기능이라 지원한다(사용자 결정). 단말·관제 앱은 반영했다 — SDK 는 ad hoc INVITE(resource-lists)에 `<broadcast-ind>true` 를 이미 싣고
+(`GroupCallOptions{members, broadcast}`), Windows 관제 앱 발신 팝오버 [임시] 모드의 [일제 통화](누르는 동안 개시+발언 — §8 암묵 요청)가 쓴다.
+지금 CSP 는 ad hoc 의 `<broadcast-ind>` 를 무시해 일반 임시 그룹 통화로 열리고, 앱은 첫 서버 floor 메시지에 B-bit 가 없어 "일제 통화로 열리지
+않았습니다" 경고를 낸다. 원문 = TS 24.379 V18.14.0 §17.2.2.1.1 9)("*broadcast adhoc group call*")·§17.1·§6.3.8.1·§10.1.3.4.1.
+
+| # | 위치 | 지금 | 규격 | 고칠 방향 |
+|---|---|---|---|---|
+| B1 | CSP `ProcessGroupCall` 세션 속성(`GroupCallService.cpp` ~498) | `bBroadcast = bBroadcastInd && IsOnDemandGroupCall(clsGroup)` — `IsOnDemandGroupCall` 이 `_isAdhoc` 를 뺀다(INFO "편성 그룹 호 아님") | §17.2.2.1.1 9) — ad hoc 그룹 통화 INVITE 의 `<broadcast-ind>` | 일제 가능 = 편성 on-demand **또는 ad hoc**(`_isAdhoc && _groupType != "private"` — 개인 호 제외). 도우미 하나로(`IsOnDemandGroupCall` 의 다른 쓰임 — T4·해제 — 은 그대로) |
+| B2 | CSP `CheckConferenceSubscribe`(~2292) | ad hoc 가지(`CanObserveEphemeral`)가 일제 480/105 검사보다 먼저 return | §10.1.3.4.1 — "*a group call initiated as a broadcast group call*"(ad hoc 포함) | `IsBroadcastInProgress` 검사를 ad hoc 가지 앞으로(`bAuthzOnly` 규칙 그대로) |
+| B3 | 세션 해제 | ad hoc T4 = 0(`CmpSessionOf` 는 편성 그룹만 hang-timer) — 개시자가 BYE 해도 수신자가 둘 이상이면 세션이 남는다(TNG3 까지) | §6.3.8.1 1) T4 는 ad hoc 에도, 3) "*the initiator of the group call leaves*" = 로컬 정책 해제(편성·ad hoc) | 일제 세션은 **개시자 이탈 시 해제**(3) 로컬 정책 — 일제 통화는 개시자 송출이 끝나면 호도 끝, §4.12). 편성 그룹 일제에도 같이 걸면 수신자가 T4 를 기다리지 않는다. 대안 = ad hoc T4 를 TS 24.484 `<adhoc-group-call>/<hang-time>` 로 |
+| B4 | 인가 | 추가 인가 없음 — ad hoc 은 기존 `allow_adhoc_call`·`Setup.PttAdhocEnabled` 만 | 일제 통화 개시 인가는 stage 3 에 없다(TS 24.379 §4.12, TS 24.484 에 요소 없음) | **그대로**(사용자 결정 — 서버는 멤버·참가자 누구나. 운영 통제는 그룹 편성·관제 앱 버튼 배치) |
+| B5 | CMP | 개시 ADD 의 `broadcast:1`·`initiator_id` 로 개시자 고정·비개시자 Deny #5·B-bit·Taken Permission 0 — 그룹 종류와 무관 | §6.3.5.3.4 | 변경 없음 예상 — ad hoc 세션에서 확인만 |
+| B6 | 검증 | 없음 | — | 계측기 시나리오(ad hoc `group_call` + `payload: broadcast` — `PTT-GROUP-CALL-BROADCAST` 의 ad hoc 판), S3 `S3-SCN-PTT-BROADCAST` 에 ad hoc 경우 |
+
+- 참고 — CIMS ad hoc 은 규격과 두 가지가 다르다(이번 범위 밖, 정본 [mcptt_emergency_modes.md](../design/features/mcptt_emergency_modes.md) §6): 그룹 ID 를 단말이
+  만든다(`adhoc-<번호>-<epoch>` — 규격은 서버가 준다, §17.1), mcptt-info `session-type` 이 `prearranged` 다(규격 값 `adhoc`, Annex F.1).

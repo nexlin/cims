@@ -248,7 +248,7 @@ private fun Shell(vm: MainViewModel, onShutdown: () -> Unit) {
 /**
  * 세션 메뉴 — 로그아웃·앱 종료·설정.
  *
- * 데스크톱의 «사람 메뉴»(`PersonActionsViewModel` — 주소록의 한 사람에게 사설콜·SDS·통화를 거는 메뉴)와
+ * 데스크톱의 «사람 메뉴»(`PersonActionsViewModel` — 주소록의 한 사람에게 개인 통화·SDS·통화를 거는 메뉴)와
  * 다른 것이다. 이름이 겹치지 않게 «세션 메뉴» 로 부른다.
  *
  * 둘은 다르다. **로그아웃**은 등록을 풀고 자격을 지우지만 서비스는 남는다(다른 사람이 이어 쓴다).

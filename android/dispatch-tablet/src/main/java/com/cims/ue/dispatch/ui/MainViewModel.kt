@@ -230,7 +230,7 @@ class MainViewModel : ViewModel() {
      * **왜 여기인가.** 행동마다 가는 화면이 다르다(무전·통화·그 안의 면). 메뉴를 띄운 패널은 다른 화면의
      * 상태를 모르므로, 전부를 아는 이 VM 이 잇는다.
      *
-     * **세션을 만드는 조작은 관제로 돌아간다**(dispatch_desktop_ui.md §3.4) — 사설콜을 걸어 놓고 [이력]
+     * **세션을 만드는 조작은 관제로 돌아간다**(dispatch_desktop_ui.md §3.4) — 개인 통화를 걸어 놓고 [이력]
      * 화면에 남아 있으면 끊을 방법이 없다.
      */
     fun runPersonAction(action: PersonAction, number: String) {

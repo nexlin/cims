@@ -14,8 +14,12 @@ import com.cims.ue.dispatch.ui.resolvePerson
 import com.cims.ue.dispatch.ui.ScreenViewModel
 import com.cims.ue.dispatch.session.DirectoryBook
 import com.cims.ue.dispatch.session.DispatchSession
+import com.cims.ue.dispatch.session.releaseBroadcast
 import com.cims.ue.dispatch.session.startAdhoc
+import com.cims.ue.dispatch.session.startAdhocBroadcast
+import com.cims.ue.dispatch.session.startBroadcast
 import com.cims.ue.dispatch.session.startPrivateCall
+import com.cims.ue.sdk.CimsResult
 import com.cims.ue.dispatch.session.GroupInfo
 import com.cims.ue.dispatch.session.SessionItem
 import com.cims.ue.dispatch.session.SessionKind
@@ -32,13 +36,13 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-/** ① 카드의 종류 — 멤버 그룹은 항상 서 있고, 사설콜·애드혹은 세션이 있을 때만 선다. */
+/** ① 카드의 종류 — 멤버 그룹은 항상 서 있고, 개인 통화·임시 그룹 통화는 세션이 있을 때만 선다. */
 enum class CardKind { MEMBER, PRIVATE, ADHOC }
 
 /**
  * ① 내 채널 카드 하나.
  *
- * 멤버 그룹 카드는 **세션이 없어도 선다**(참여하지 않은 채널도 보여야 한다). 사설콜·애드혹은
+ * 멤버 그룹 카드는 **세션이 없어도 선다**(참여하지 않은 채널도 보여야 한다). 개인 통화·임시 그룹 통화는
  * 내가 건 세션 자체가 카드다.
  */
 data class ChannelCard(
@@ -53,7 +57,7 @@ data class ChannelCard(
     val index: Int = 0,
 ) {
     val badge: String get() = when (kind) {
-        CardKind.MEMBER -> "멤버"; CardKind.PRIVATE -> "사설콜"; CardKind.ADHOC -> "임시"
+        CardKind.MEMBER -> "멤버"; CardKind.PRIVATE -> "개인"; CardKind.ADHOC -> "임시"
     }
     val joined: Boolean get() = session?.isLive == true
     val active: Boolean get() = session?.isActive == true
@@ -70,10 +74,22 @@ data class ChannelCard(
     val memberCount: Int get() = group?.memberCount ?: 0
 
     /**
-     * 발언 대상이 될 수 있는가 — **참여 중 + 반이중**.
-     * 전이중 사설콜은 마이크가 늘 열려 있어 floor 가 없다(음소거로 다룬다).
+     * 발언 대상이 될 수 있는가 — **참여 중 + 반이중 + 발언 요청 가능**.
+     * 전이중 개인 통화는 마이크가 늘 열려 있어 floor 가 없다(음소거로 다룬다). 남이 연 일제 통화의 수신 멤버는
+     * Floor Taken 의 Permission 0 이라 요청할 수 없다(TS 24.380 §6.3.4.4.2 3d).
      */
-    val canCheck: Boolean get() = joined && session?.isFullDuplex != true
+    val canCheck: Boolean get() = joined && session?.isFullDuplex != true && session?.canRequestFloor != false
+
+    /** 일제 통화(TS 24.379 §4.12) — 서버가 알린 호 속성. */
+    val isBroadcast: Boolean get() = session?.isBroadcast == true
+    val isBroadcastInitiator: Boolean get() = session?.isBroadcastInitiator == true
+
+    /**
+     * 채널 머리 [일제 통화] — 멤버 편성 그룹에 **진행 중 통화가 없을 때만**. 일제 통화는 새 호를 여는 INVITE 로만 정해지고
+     * 진행 중 호는 일제로 바꿀 수 없다(TS 24.379 §10.1.1.3.1.1 15) — 합류가 된다). 채팅 그룹은 서버가 broadcast-ind 를 무시한다.
+     */
+    val canBroadcast: Boolean get() =
+        kind == CardKind.MEMBER && !joined && group?.hasSession != true && group?.sessionType != "chat"
 
     /** 1줄 오른쪽 — 진행 중이면 경과, 아니면 상태. */
     val stateText: String get() = when {
@@ -82,13 +98,18 @@ data class ChannelCard(
         else -> "대기"
     }
 
-    /** 2줄 — 발언자·사유. 대기 중이면 멤버 수. */
-    val line2: String get() = when {
-        speaker.isNotEmpty() -> "발언 $speaker" + fmtSpeaker()
-        joined && floorNote.isNotEmpty() -> floorNote
-        joined -> "발언 없음"
-        kind == CardKind.MEMBER -> "멤버 $memberCount"
-        else -> ""
+    /** 2줄 — 발언자·사유. 대기 중이면 멤버 수. 일제 통화면 앞에 «일제 통화 · 발언을 놓으면 종료 / 수신 전용». */
+    val line2: String get() {
+        val base = when {
+            speaker.isNotEmpty() -> "발언 $speaker" + fmtSpeaker()
+            joined && floorNote.isNotEmpty() -> floorNote
+            joined -> "발언 없음"
+            kind == CardKind.MEMBER -> "멤버 $memberCount"
+            else -> ""
+        }
+        if (!isBroadcast) return base
+        val bc = if (isBroadcastInitiator) "일제 통화 · 발언을 놓으면 종료" else "일제 통화 · 수신 전용"
+        return if (base.isEmpty()) bc else "$bc · $base"
     }
 
     private fun fmtSpeaker(): String =
@@ -157,9 +178,18 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
      */
     private var pendingTargetId: String? = null
 
+    /** 지금 누르고 있는 일제 통화(아래 «일제 통화 한 버튼») — 카드 id, 임시 그룹 일제 통화면 [ADHOC_BROADCAST]. null = 없음.
+     *  [cards] 의 onEach 가 읽으므로 그보다 먼저 선언한다(생성 중 Eagerly 수집이 초기화 전 값을 읽지 않게). */
+    private val _broadcastHeld = MutableStateFlow<String?>(null)
+    val broadcastHeld: StateFlow<String?> = _broadcastHeld.asStateFlow()
+    private var bcCallId = -1
+    private var bcReleased = false
+    /** 개시한 호를 세션 목록에서 한 번이라도 봤나 — 개시 직후 이벤트가 오기 전의 «없음» 을 종료로 읽지 않게. */
+    private var bcSeen = false
+
     /**
-     * ① 카드 목록 — **멤버 그룹 전부 + 내가 건 사설콜·애드혹**. 항상 전부 보인다(필터는 ② 에만 있다).
-     * 순서: 멤버 그룹(이름) → 사설콜·애드혹(시작 순).
+     * ① 카드 목록 — **멤버 그룹 전부 + 내가 건 개인 통화·임시 그룹 통화**. 항상 전부 보인다(필터는 ② 에만 있다).
+     * 순서: 멤버 그룹(이름) → 개인·임시(시작 순).
      */
     val cards: StateFlow<List<ChannelCard>> =
         combine(s.groups, s.sessions, s.messages) { groups, sessions, messages ->
@@ -189,6 +219,12 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
                     setSingleTarget(id)
                     pendingTargetId = null
                 }
+            }
+            // 일제 통화 한 버튼으로 연 호가 끝났다(서버·코어가 먼저 끝냄) — 누름 상태를 푼다. 목록에 오르기 전(개시 직후)은 끝이 아니다
+            //   — 그걸 끝으로 읽으면 뗌이 해제를 보내지 않아 마이크가 열린 채 남는다.
+            if (bcCallId >= 0) {
+                if (s.sessions.value.any { it.callId == bcCallId }) bcSeen = true
+                else if (bcSeen) clearBroadcastHold()
             }
             // 세션이 끝났거나 전이중으로 바뀐 대상은 스스로 빠진다 — 없는 세션에 floor 를 걸지 않게.
             val ok = list.filter { it.canCheck }.map { it.id }.toSet()
@@ -242,7 +278,7 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
      * 상한([maxTargets])을 넘으면 가장 오래된 것을 밀어낸다(팬아웃 전에는 1개라 교체가 된다).
      */
     /**
-     * 사람 메뉴의 «애드혹에 추가» 가 심어 두는 상대 — 발신 시트가 열릴 때 미리 골라 둔다.
+     * 사람 메뉴의 «임시 그룹에 추가» 가 심어 두는 상대 — 발신 시트가 열릴 때 미리 골라 둔다.
      *
      * 시트를 직접 열지 않고 씨앗만 두는 이유: 시트는 ① 패널이 소유하는 화면 상태라 다른 탭(③ 일반통화)에서
      * 직접 띄울 수 없다. 데스크톱은 `PttOriginate.AddAdhoc(n)` + `PttOriginateOpen = true` 로 같은 일을 한다.
@@ -359,11 +395,71 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
         super.close()
     }
 
+    // ── 일제 통화 한 버튼(dispatch_desktop_ui.md §4.1 · mcptt_broadcast_group_call.md U6) ──
+    //   누르는 동안 개시하고 말하며 놓으면 끝(잠금 발언이면 누를 때마다 켜고 끈다). 개시 INVITE 가 암묵적 발언 요청이라
+    //   (TS 24.380 §14.2.5) PTT 를 따로 누르지 않는다. 한 번에 하나. 놓으면 호 성립 전 = CANCEL, 뒤 = Floor Release(→ 코어가 호 해제).
+    //   개시 전(그룹 종류 조회 중)에 놓으면 개시 직후 끝낸다.
+
+
+    private val lockTalk: Boolean get() = s.settingsSnapshot().lockTalk
+
+    /** 채널 머리 [일제 통화] 누름. */
+    fun broadcastGroupDown(card: ChannelCard) {
+        _broadcastHeld.value?.let { held -> if (lockTalk && held == card.id) broadcastEnd(); return }
+        val g = card.group ?: return
+        if (!card.canBroadcast) return
+        beginBroadcast(card.id) { s.startBroadcast(g.id) }
+    }
+
+    /** 발신 시트 [임시] 의 [일제 통화] 누름 — 고른 사람들에게(TS 24.379 §17.2.2.1.1 9)). */
+    fun broadcastAdhocDown(members: List<String>) {
+        _broadcastHeld.value?.let { held -> if (lockTalk && held == ADHOC_BROADCAST) broadcastEnd(); return }
+        if (members.isEmpty()) return
+        beginBroadcast(ADHOC_BROADCAST) { s.startAdhocBroadcast(members) }
+    }
+
+    /** 뗌 — 잠금 발언이면 무시(다음 누름이 끝낸다). */
+    fun broadcastUp() { if (!lockTalk) broadcastEnd() }
+
+    private fun beginBroadcast(key: String, start: suspend () -> CimsResult<Int>) {
+        _broadcastHeld.value = key
+        bcCallId = -1
+        bcReleased = false
+        bcSeen = false
+        scope.launch {
+            val r = start()
+            if (_broadcastHeld.value != key) return@launch
+            if (!r.ok) { _originError.value = r.reason; clearBroadcastHold(); return@launch }
+            bcCallId = r.value!!
+            if (bcReleased) finishBroadcast()
+        }
+    }
+
+    private fun broadcastEnd() {
+        if (_broadcastHeld.value == null) return
+        bcReleased = true
+        if (bcCallId >= 0) finishBroadcast()
+    }
+
+    private fun finishBroadcast() {
+        val id = bcCallId
+        clearBroadcastHold()
+        speakingCallIds = speakingCallIds - id
+        s.scopeLaunch { s.releaseBroadcast(id) }        // 세션 스코프 — 화면이 사라져도 끝까지 간다
+    }
+
+    private fun clearBroadcastHold() {
+        _broadcastHeld.value = null
+        bcCallId = -1
+        bcReleased = false
+        bcSeen = false
+    }
+
     // ── 세션 조작 ──
     /** 참여 — 포커스를 옮기고, 세션이 서면 발언 대상이 된다(위 [pendingTargetId]). */
-    // ── 사설콜·애드혹(§4.1) ──────────────────────────────────────────────────
+    // ── 개인 통화·임시 그룹 통화(§4.1) ──────────────────────────────────────
 
-    /** PTT 주소록 — 사설콜·애드혹 대상 후보. 세션이 로그인 때 받아 둔 것을 본다. */
+    /** PTT 주소록 — 개인·임시 대상 후보. 세션이 로그인 때 받아 둔 것을 본다. */
     val pttBook: StateFlow<DirectoryBook> = s.pttBook
 
     /** 내 PTT 번호 — 로스터 칩의 «나» 표시. */
@@ -394,7 +490,7 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
     fun clearOriginError() { _originError.value = null }
 
     /**
-     * 사설콜 발신. 성공하면 [onDone] — 시트를 닫는다.
+     * 개인 통화 발신. 성공하면 [onDone] — 시트를 닫는다.
      *
      * 반이중이 기본이다. 전이중은 마이크가 늘 열려 있어 발언 대상이 되지 못한다(카드 [음소거]로 다룬다).
      */
@@ -405,7 +501,7 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
         }
     }
 
-    /** 애드혹 개설 — 대상 N명(최소 1). */
+    /** 임시 그룹 통화 개설 — 대상 N명(최소 1). */
     fun startAdhoc(members: List<String>, emergency: Boolean, onDone: () -> Unit) {
         scope.launch {
             val r = s.startAdhoc(members, emergency)
@@ -433,5 +529,7 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
     companion object {
         /** 코어에 발언 대상 집합 API 가 들어오면 true 로 바꾼다 — 그것 하나로 다중 발언이 열린다. */
         const val MULTI_TALK_SUPPORTED = false
+        /** [broadcastHeld] 의 임시 그룹 일제 통화 값 — 카드 id 와 겹치지 않는다(카드 id 는 그룹 id·adhoc-·call-). */
+        const val ADHOC_BROADCAST = "#adhoc-broadcast"
     }
 }

@@ -237,7 +237,7 @@ public sealed partial class MainViewModel : ObservableObject
     private void ClosePopoversFor(SessionItem s)
     {
         if (s.Info.Dir != CimsUe.CallDir.Outgoing) return;
-        if (s.Kind is SessionKind.PttPrivate or SessionKind.PttAdhoc) PttOriginateOpen = false;
+        if (s.Kind is SessionKind.PttPrivate or SessionKind.PttAdhoc && !PttOriginate.IsBroadcastHeld) PttOriginateOpen = false;   // 일제 통화 한 버튼은 놓을 때 닫는다
         if (s.Kind == SessionKind.VolteCall) CallOriginateOpen = false;
     }
 

@@ -68,6 +68,44 @@ suspend fun DispatchSession.refreshGroups(): CimsResult<Unit> {
     return CimsResult.ok(Unit)
 }
 
+/**
+ * 일제 통화 개시(TS 24.379 §4.12 — 편성 그룹에 prearranged + `broadcast-ind`, mcptt_broadcast_group_call.md) — 채널 머리의
+ * [일제 통화] 한 버튼. 누르는 동안 개시하고 말하므로 개시 INVITE 가 암묵적 발언 요청이다(TS 24.380 §14.2.5 — `implicitFloorRequest`).
+ * 진행 중인 호는 일제 통화로 바꿀 수 없고(TS 24.379 §10.1.1.3.1.1 15) — 합류가 된다) 채팅 그룹은 서버가 broadcast-ind 를 무시하므로
+ * 여기서 막는다. 그룹 종류를 모르면 GMS 그룹 문서(`on-network-invite-members`)로 먼저 확인한다. 반환 = 개시한 호 id. 끝은 [releaseBroadcast].
+ */
+suspend fun DispatchSession.startBroadcast(groupId: String): CimsResult<Int> {
+    val ptt = pttAccount ?: return CimsResult.fail(-1, "PTT 계정 없음")
+    val g = groups.value.firstOrNull { it.id == groupId && it.isMember } ?: return CimsResult.fail(-1, "멤버 그룹이 아닙니다")
+    fun ongoing() = groups.value.firstOrNull { it.id == groupId }?.hasSession == true ||
+        sessions.value.any { it.kind == SessionKind.PTT_CHANNEL && it.info.groupId == groupId }
+    if (ongoing()) return CimsResult.fail(-1, "${g.name} — 진행 중인 그룹 통화가 있어 일제 통화를 열 수 없습니다")
+    var type = g.sessionType
+    if (type.isEmpty()) {
+        val d = getGroupDoc(g.uri)
+        if (d.ok) { type = d.value!!.sessionType; updateGroup(groupId) { it.copy(sessionType = type) } }
+    }
+    if (type == "chat") return CimsResult.fail(-1, "${g.name} — 채팅 그룹은 일제 통화를 열 수 없습니다(편성 그룹만)")
+    if (ongoing()) return CimsResult.fail(-1, "${g.name} — 일제 통화를 열 수 없습니다")      // 조회하는 사이 바뀜
+    val r = ptt.joinGroupCall(groupId, GroupCallOptions(broadcast = true, implicitFloorRequest = true))
+    if (!r.ok) return CimsResult.fail(r.code, r.reason)
+    val id = r.value!!.id
+    noteOperation(id, Operation.PTT_JOIN)
+    broadcastPending.add(id)
+    return CimsResult.ok(id)
+}
+
+/**
+ * 일제 통화 한 버튼을 놓았다 — 호 성립 전이면 호 취소(CANCEL — 말하지 않은 일제 통화는 열지 않는다), 성립 뒤면 Floor Release.
+ * 승인 전에 놓아도 코어가 발언권을 돌려주고, 서버의 B-bit Floor Idle 에 코어가 호를 해제한다(TS 24.380 §6.2.4.6.4).
+ */
+suspend fun DispatchSession.releaseBroadcast(callId: Int) {
+    val ue = engineOrNull() ?: return
+    val s = sessionOf(callId)
+    if (s != null && !s.isLive) return
+    if (s == null || !s.isActive) ue.call(callId).hangup() else ue.call(callId).floorRelease()
+}
+
 /** 그룹콜 참여 — ① 카드의 [참여]. 이미 세션이 있으면 코어가 그 호를 돌려준다. */
 suspend fun DispatchSession.joinGroup(groupId: String, emergency: Boolean = false): CimsResult<Unit> {
     val ptt = pttAccount ?: return CimsResult.fail(-1, "PTT 계정 없음")
@@ -190,8 +228,21 @@ internal fun DispatchSession.applyFloor(ev: FloorEvent) {
     if (ev.causeText.isNotEmpty() && ev.state != FloorState.SPEAKING)
         addActivity(s.info.groupId, gname, ev.causeText, ActivityKind.ERROR, s.isEmergency)
 
+    // 일제 통화로 연 호의 첫 서버 floor 메시지에 B-bit 가 없다 = 서버가 일반 통화로 열었다(mcptt_broadcast_group_call.md §3.2·R13).
+    //   서버 메시지만 본다 — 코어 타이머 이벤트와 200 OK 의 승인 표시(`mc_granted`)는 rawType -1 이다.
+    if (ev.rawType in BROADCAST_JUDGE_OPS && broadcastPending.remove(ev.callId) &&
+        (ev.indicator and FLOOR_IND_BROADCAST) == 0) {
+        addActivity(s.info.groupId, gname,
+            if (s.kind == SessionKind.PTT_ADHOC) "일제 통화로 열리지 않았습니다 — 서버가 임시 그룹 일제 통화를 받지 않아 일반 임시 그룹 통화로 이어집니다"
+            else "일제 통화로 열리지 않았습니다 — 진행 중 통화에 합류했거나 편성 그룹이 아닙니다(일반 그룹 통화로 이어집니다)",
+            ActivityKind.ERROR, s.isEmergency)
+    }
+
     pullFloor(ev.callId)          // 권위 있는 스냅샷으로 덮는다
 }
+
+/** 일제 통화 판정에 쓰는 서버 floor 메시지(TS 24.380 §8.2.2) — Granted·Taken·Deny·Idle·Revoke. 서버는 여기에 Floor Indicator 를 싣는다. */
+private val BROADCAST_JUDGE_OPS = setOf(0x01, 0x02, 0x03, 0x05, 0x06)
 
 /** 로스터 NOTIFY → 그룹 참가자·진행 여부. 참여하지 않은 청취 범위 그룹도 이걸로 안다. */
 internal fun DispatchSession.applyRoster(u: RosterUpdate) {
@@ -335,10 +386,10 @@ suspend fun DispatchSession.deleteGroup(groupUri: String): CimsResult<Unit> {
 fun telUri(number: String): String =
     if (number.contains(':')) number else "tel:${number.trim()}"
 
-// ── 사설콜·애드혹(§4.1) ──────────────────────────────────────────────────────
+// ── 개인 통화·임시 그룹 통화(§4.1) ──────────────────────────────────────────
 
 /**
- * 애드혹 임시 그룹 id — `adhoc-<내 PTT 번호>-<epoch초>`.
+ * 임시 그룹(ad hoc) id — `adhoc-<내 PTT 번호>-<epoch초>`.
  *
  * 규약은 [mcptt_emergency_modes.md](mcptt_emergency_modes.md) §6 이고 `adhoc-`·`priv-` 는 편성 그룹
  * 예약어다. **앱이 만든다** — 서버에 없는 임시 세션이라 채널 영속·affiliation·로스터 구독 대상이 아니다.
@@ -355,7 +406,7 @@ internal fun adhocIdOf(myPttId: String, nowSec: Long = System.currentTimeMillis(
 internal fun isAdhocId(groupId: String): Boolean = groupId.startsWith(SessionKind.ADHOC_PREFIX)
 
 /**
- * 사설콜 발신 — PTT 사용자 1명과 1:1.
+ * 개인 통화 발신 — PTT 사용자 1명과 1:1(TS 24.379 private call).
  *
  * 반이중(floor)이 기본이다. 전이중(`fullDuplex` = `mc_no_floor_ctrl`)은 마이크가 늘 열려 있어
  * 발언 대상 체크가 비활성되고 카드의 [음소거]로 다룬다(§4.1).
@@ -370,20 +421,40 @@ suspend fun DispatchSession.startPrivateCall(peer: String, fullDuplex: Boolean =
 }
 
 /**
- * 애드혹 세션 개설 — PTT 사용자 N명(최소 1).
+ * 임시 그룹 통화 개설 — PTT 사용자 N명(최소 1).
  *
  * 참가자는 `resource-lists` 로 싣는다. 서버가 그 목록으로 초대하며, 임시 그룹이라 목록을 **앱이
  * 기억한다** — 로스터 구독 대상이 아니라 카드에 몇 명인지 보이려면 여기밖에 없다.
  */
 suspend fun DispatchSession.startAdhoc(members: List<String>,
                                        emergency: Boolean = false): CimsResult<Unit> {
+    val r = joinAdhoc(members, GroupCallOptions(emergency = emergency),
+                      if (emergency) Operation.EMERGENCY else Operation.PTT_ADHOC)
+    return if (r.ok) CimsResult.ok(Unit) else CimsResult.fail(r.code, r.reason)
+}
+
+/**
+ * 임시 그룹 일제 통화(TS 24.379 §17.2.2.1.1 9) "broadcast adhoc group call") — 고른 사람들에게만 일제 통화. 채널 머리의
+ * [일제 통화] 와 같은 한 버튼이라 개시 INVITE 가 암묵적 발언 요청이다. 서버가 ad hoc 의 broadcast-ind 를 받지 않으면 일반 임시
+ * 그룹 통화로 열린다(`applyFloor` 가 ⑤ 에 알린다). 반환 = 개시한 호 id. 끝은 [releaseBroadcast].
+ */
+suspend fun DispatchSession.startAdhocBroadcast(members: List<String>): CimsResult<Int> {
+    val r = joinAdhoc(members, GroupCallOptions(broadcast = true, implicitFloorRequest = true), Operation.PTT_ADHOC)
+    if (r.ok) broadcastPending.add(r.value!!)
+    return r
+}
+
+/** 임시 그룹 id 로 참가자 목록을 실어 연다 — 반환 = 호 id. */
+private suspend fun DispatchSession.joinAdhoc(members: List<String>, opts: GroupCallOptions,
+                                              op: Operation): CimsResult<Int> {
     val ptt = pttAccount ?: return CimsResult.fail(-1, "PTT 계정 없음")
     val tels = members.map { telUri(userPart(it)) }.filter { it != "tel:" }.distinct()
     if (tels.isEmpty()) return CimsResult.fail(-1, "대상을 고르세요")
     val id = adhocIdOf(myPttId)
-    val r = ptt.joinGroupCall(id, GroupCallOptions(emergency = emergency, members = tels))
+    val r = ptt.joinGroupCall(id, opts.copy(members = tels))
     if (!r.ok) return CimsResult.fail(r.code, r.reason)
-    noteOperation(r.value!!.id, if (emergency) Operation.EMERGENCY else Operation.PTT_ADHOC)
-    rememberAdhocMembers(r.value!!.id, tels)
-    return CimsResult.ok(Unit)
+    val callId = r.value!!.id
+    noteOperation(callId, op)
+    rememberAdhocMembers(callId, tels)
+    return CimsResult.ok(callId)
 }

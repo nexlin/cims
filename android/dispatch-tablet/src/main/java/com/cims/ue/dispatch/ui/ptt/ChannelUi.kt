@@ -29,6 +29,8 @@ data class ChannelRowUi(
     val active: Boolean = false,
     val speaking: Boolean = false,
     val emergency: Boolean = false,
+    /** 일제 통화 세션(TS 24.379 §4.12) — 1줄 «일제» 태그. */
+    val broadcast: Boolean = false,
     /** 발언 대상이 될 수 있는가(참여 중 + 반이중). 범위 채널은 늘 false. */
     val canTarget: Boolean = false,
     val targeted: Boolean = false,
@@ -47,6 +49,7 @@ internal fun ChannelCard.toRowUi(targeted: Boolean): ChannelRowUi = ChannelRowUi
     active = hasSession,
     speaking = speaking,
     emergency = emergency,
+    broadcast = isBroadcast,
     canTarget = canCheck,
     targeted = targeted,
     listening = null)

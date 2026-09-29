@@ -1,7 +1,7 @@
 // 사람 메뉴 계약 시험 — JVM, 기기 불필요 (android_dispatch_tablet.md §9)
 //
 // 노리는 것은 **엉뚱한 사람에게 걸게 되는** 자리다. 서버 전화번호부는 사람이 아니라 회선을 주므로,
-// 묶는 규칙이 한 칸만 어긋나도 A 의 칩에서 B 에게 사설콜이 나간다.
+// 묶는 규칙이 한 칸만 어긋나도 A 의 칩에서 B 에게 개인 통화가 나간다.
 package com.cims.ue.dispatch
 
 import com.cims.ue.dispatch.session.userPart

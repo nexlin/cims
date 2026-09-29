@@ -2,10 +2,10 @@
 //
 // 데스크톱 `PersonActionsViewModel` 의 이식이다. 노리는 것 하나 — **서버 전화번호부는 사람이 아니라
 // 회선을 준다.** 같은 사람이 PTT 번호와 내선을 따로 갖고 두 축(`phoneBook`/`pttBook`)에 나뉘어 들어오므로,
-// 칩 하나를 눌렀을 때 «이 사람에게 사설콜도 통화도 걸 수 있다» 를 보이려면 먼저 사람 단위로 묶어야 한다.
+// 칩 하나를 눌렀을 때 «이 사람에게 개인 통화도 통화도 걸 수 있다» 를 보이려면 먼저 사람 단위로 묶어야 한다.
 //
 // **이 메뉴가 주소록의 기본 동작이다.** 행을 누르면 바로 걸지 않고 이 메뉴가 뜬다 — 휴대폰 연락처와 같다.
-// 한 사람에게 할 수 있는 일이 다섯인데(통화·문자·사설콜·애드혹·기록) 탭 하나를 발신에 고정해 버리면
+// 한 사람에게 할 수 있는 일이 다섯인데(통화·문자·개인·임시 통화·기록) 탭 하나를 발신에 고정해 버리면
 // 나머지 넷은 롱프레스를 아는 사람만 쓰게 되고, 잘못 눌러 걸리는 사고도 난다.
 package com.cims.ue.dispatch.ui
 
@@ -66,7 +66,7 @@ private fun Hint(text: String) {
  * 같은 조직에 있거나 한 사람이 회선을 셋 이상 가진 경우인데, 둘을 구별할 근거가 이름·조직뿐이라 합치면
  * 엉뚱한 사람에게 걸게 된다. 나누면 목록에 두 줄이 보일 뿐이다.
  *
- * @param exclude 정규형 번호 집합 — 내 회선. 나에게 사설콜·통화를 거는 항목이 목록에 있으면 안 된다.
+ * @param exclude 정규형 번호 집합 — 내 회선. 나에게 개인 통화·통화를 거는 항목이 목록에 있으면 안 된다.
  */
 internal fun mergePeople(
     phone: DirectoryBook,
@@ -144,7 +144,7 @@ enum class PersonAction { PRIVATE_CALL, ADHOC_ADD, SDS, CALL, SMS, HISTORY }
 /**
  * 드롭다운 본체. 가진 회선에 있는 행동만 그린다.
  *
- * `onPick` 은 행동과 **그 행동이 쓸 번호**를 함께 준다 — 사설콜·SDS 는 PTT 번호로, 통화는 내선으로 가야
+ * `onPick` 은 행동과 **그 행동이 쓸 번호**를 함께 준다 — 개인 통화·SDS 는 PTT 번호로, 통화는 내선으로 가야
  * 하는데 호출부가 다시 고르게 하면 같은 판정이 두 곳에 생긴다.
  */
 @Composable
@@ -177,7 +177,7 @@ fun PersonMenu(
         if (person.hasPtt) {
             if (person.hasLine) HorizontalDivider()
             DropdownMenuItem(
-                text = { Text("사설콜") }, leadingIcon = { Text("🎙") },
+                text = { Text("개인 통화") }, leadingIcon = { Text("🎙") },
                 trailingIcon = { Hint(person.pttNumber) },
                 onClick = { onPick(PersonAction.PRIVATE_CALL, person.pttNumber); onDismiss() })
             DropdownMenuItem(
@@ -185,7 +185,7 @@ fun PersonMenu(
                 trailingIcon = { Hint("SDS") },
                 onClick = { onPick(PersonAction.SDS, person.pttNumber); onDismiss() })
             DropdownMenuItem(
-                text = { Text("애드혹에 추가") }, leadingIcon = { Text("＋") },
+                text = { Text("임시 그룹에 추가") }, leadingIcon = { Text("＋") },
                 onClick = { onPick(PersonAction.ADHOC_ADD, person.pttNumber); onDismiss() })
         }
         // 기록은 **전화 회선이 있을 때만** — 통화 내역은 전화 축의 것이고, 무전 이력은 [이력] 메뉴가 받는다.

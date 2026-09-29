@@ -63,6 +63,7 @@ public sealed partial class PttOriginateViewModel : ObservableObject
         s.SessionAdded += (_, _) => RefreshStatus();
         s.SessionEnded += (_, _) => RefreshStatus();
         s.ProfileApplied += (_, _) => OnPropertyChanged(nameof(CanCreateGroups));
+        s.SessionEnded += (_, item) => { if (IsBroadcastHeld && item.CallId == _bcCall) { IsBroadcastHeld = false; _bcCall = -1; } };   // 서버·코어가 먼저 끝냈다
         s.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(DispatchSession.CanCreateGroups)) OnPropertyChanged(nameof(CanCreateGroups)); };
         Reload();
     }
@@ -77,12 +78,13 @@ public sealed partial class PttOriginateViewModel : ObservableObject
     public bool IsGroups => Book == "groups";
     public bool IsPadBook => Book == "pad";
     public string StartText => IsPrivate ? "개인 통화 발신" : $"임시 그룹 발신 ({AdhocSelection.Count}명)";
-    public bool CanStart => IsPrivate ? Target.Trim().Length > 0 : AdhocSelection.Count > 0;
+    public bool CanStart => IsPrivate ? Target.Trim().Length > 0 : AdhocSelection.Count > 0 && !IsBroadcastHeld;
     public string UserCount => $"{Users.Count}명";
     public string GroupCount => $"{Groups.Count}개";
 
     partial void OnModeChanged(string value)
     {
+        OnPropertyChanged(nameof(CanPressBroadcast));
         if (value == "adhoc" && IsPadBook) Book = "users";         // 다이얼패드는 개인 통화 대상 입력 — 임시 모드엔 없다
         OnPropertyChanged(nameof(IsPrivate)); OnPropertyChanged(nameof(IsAdhoc)); OnPropertyChanged(nameof(StartText)); OnPropertyChanged(nameof(CanStart));
         UpdateSuggestions();
@@ -197,6 +199,7 @@ public sealed partial class PttOriginateViewModel : ObservableObject
     /// <summary>팝오버 [취소] — 임시 그룹 구성 중엔 바깥 클릭으로 닫히지 않으므로 여기서만 닫는다. 선택은 비운다.</summary>
     [RelayCommand] private void Close()
     {
+        if (IsBroadcastHeld) { BroadcastEnd(); return; }             // 잠금 발언으로 켜 둔 일제 통화 — [취소] 는 끝내고 닫는다(BroadcastEnd 가 닫는다)
         foreach (var u in AdhocSelection.ToList()) u.Checked = false;
         AdhocSelection.Clear(); OnPropertyChanged(nameof(StartText)); OnPropertyChanged(nameof(CanStart));
         CloseRequested?.Invoke(this, EventArgs.Empty);
@@ -214,9 +217,43 @@ public sealed partial class PttOriginateViewModel : ObservableObject
     [RelayCommand]
     private void ToggleAdhoc(PttUserRow u)
     {
+        if (IsBroadcastHeld) return;                                  // 일제 통화 중엔 대상이 고정이다
         if (AdhocSelection.Contains(u)) { AdhocSelection.Remove(u); u.Checked = false; }
         else { AdhocSelection.Add(u); u.Checked = true; }
-        OnPropertyChanged(nameof(StartText)); OnPropertyChanged(nameof(CanStart));
+        OnPropertyChanged(nameof(StartText)); OnPropertyChanged(nameof(CanStart)); OnPropertyChanged(nameof(CanPressBroadcast));
+    }
+
+    // ── 임시 그룹 일제 통화 한 버튼(TS 24.379 §17.2.2.1.1 9)) — 그룹 카드 [일제 통화] 와 같은 규칙: 누르는 동안 개시+발언, 놓으면 끝
+    //   (성립 전 CANCEL / 뒤 Floor Release, 잠금 발언 = 클릭 토글). 누르는 동안은 세션이 성립해도 팝오버를 닫지 않는다(버튼이 사라지면 뗌을 잃는다).
+    [ObservableProperty] private bool _isBroadcastHeld;
+    private int _bcCall = -1;
+    public bool CanPressBroadcast => IsAdhoc && (AdhocSelection.Count > 0 || IsBroadcastHeld);
+    public string BroadcastText => IsBroadcastHeld ? "일제 통화 중" : "일제 통화";
+    public string BroadcastTip => IsBroadcastHeld ? (_s.Settings.Current.LockTalk ? "일제 통화 중 — 다시 누르면 끝납니다" : "일제 통화 중 — 놓으면 끝납니다")
+                                : _s.Settings.Current.LockTalk ? "고른 사람들에게 일제 통화 — 누르면 개시하고 바로 말합니다(나만 발언). 다시 누르면 끝납니다"
+                                : "고른 사람들에게 일제 통화 — 누르고 있는 동안 개시하고 말합니다(나만 발언). 놓으면 끝납니다";
+    partial void OnIsBroadcastHeldChanged(bool value) { OnPropertyChanged(nameof(CanPressBroadcast)); OnPropertyChanged(nameof(BroadcastText)); OnPropertyChanged(nameof(BroadcastTip)); OnPropertyChanged(nameof(CanStart)); }
+
+    public void BroadcastDown()
+    {
+        if (IsBroadcastHeld) { if (_s.Settings.Current.LockTalk) BroadcastEnd(); return; }
+        if (!IsAdhoc || AdhocSelection.Count == 0) return;
+        int id = _s.StartAdhocBroadcast(AdhocSelection.Select(u => u.Number).ToList());
+        if (id < 0) return;
+        _bcCall = id;
+        IsBroadcastHeld = true;
+    }
+    public void BroadcastUp() { if (!_s.Settings.Current.LockTalk) BroadcastEnd(); }
+    private void BroadcastEnd()
+    {
+        if (!IsBroadcastHeld) return;
+        int id = _bcCall;
+        IsBroadcastHeld = false; _bcCall = -1;
+        _s.ReleaseBroadcast(id);
+        foreach (var u in AdhocSelection.ToList()) u.Checked = false;
+        AdhocSelection.Clear(); Emergency = false;
+        OnPropertyChanged(nameof(StartText)); OnPropertyChanged(nameof(CanStart)); OnPropertyChanged(nameof(CanPressBroadcast));
+        CloseRequested?.Invoke(this, EventArgs.Empty);                // 누르는 동안 미룬 "세션 성립 → 팝오버 닫힘"
     }
     [RelayCommand] private void RemoveAdhoc(PttUserRow u) { if (u.Checked) ToggleAdhoc(u); }
     [RelayCommand] private void MessageUser(PttUserRow u) => MessageUserRequested?.Invoke(this, u.Number);

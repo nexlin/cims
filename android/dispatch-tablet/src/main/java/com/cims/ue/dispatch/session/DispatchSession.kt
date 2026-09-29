@@ -222,7 +222,7 @@ class DispatchSession(
      */
     val incoming: StateFlow<List<SessionItem>> =
         _sessions.map { list ->
-            // 사설콜도 같은 배너를 쓴다(§3.2 청록). 지금은 코어가 MCPTT 를 자동 수락해 거의 뜨지 않지만,
+            // 개인 통화도 같은 배너를 쓴다(§3.2 청록). 지금은 코어가 MCPTT 를 자동 수락해 거의 뜨지 않지만,
             // 자동 수락 플래그가 갈라지면(§11) 조건 하나 없이 그대로 동작한다.
             list.filter {
                 (it.kind == SessionKind.PHONE_CALL || it.kind == SessionKind.PTT_PRIVATE) &&
@@ -240,7 +240,7 @@ class DispatchSession(
     private val _phoneBook = MutableStateFlow(DirectoryBook())
     val phoneBook: StateFlow<DirectoryBook> = _phoneBook.asStateFlow()
 
-    /** **PTT 주소록** — 사설콜·그룹 멤버 후보. 전화 발신에는 쓰지 않는다. */
+    /** **PTT 주소록** — 개인 통화·그룹 멤버 후보. 전화 발신에는 쓰지 않는다. */
     private val _pttBook = MutableStateFlow(DirectoryBook())
     val pttBook: StateFlow<DirectoryBook> = _pttBook.asStateFlow()
 
@@ -467,7 +467,7 @@ class DispatchSession(
 
     /**
      * 프로파일의 접속서비스 하나 → 계정 설정.
-     * MCPTT 자동 수락은 PTT 계정만 — 관제석은 그룹콜 자동·사설콜 수동이 맞지만 코어 플래그가 아직
+     * MCPTT 자동 수락은 PTT 계정만 — 관제석은 그룹콜 자동·개인 통화 수동이 맞지만 코어 플래그가 아직
      * 공통이라(§11) 우선 PTT 전체를 자동으로 둔다.
      */
     private fun accountConfig(sp: ServiceProfile, displayName: String, kind: AccountKind): AccountConfig =
@@ -585,7 +585,7 @@ class DispatchSession(
     /**
      * 내 회선의 비교 정규형 집합 — 사람 목록에서 나를 빼는 데 쓴다.
      *
-     * 전화 계열과 PTT 를 모두 넣는다. 한쪽만 빼면 다른 축의 주소록에서 «나» 가 남아, 자기에게 사설콜을
+     * 전화 계열과 PTT 를 모두 넣는다. 한쪽만 빼면 다른 축의 주소록에서 «나» 가 남아, 자기에게 개인 통화를
      * 거는 항목이 목록에 보인다.
      */
     fun myLineKeys(): Set<String> {
@@ -637,12 +637,19 @@ class DispatchSession(
     internal fun removeSession(callId: Int) {
         _sessions.value = _sessions.value.filterNot { it.callId == callId }
         adhocMembers.remove(callId)
+        broadcastPending.remove(callId)
     }
 
     internal fun noteOperation(callId: Int, op: Operation) { operations[callId] = op }
 
     /**
-     * 애드혹 참가자 — **앱이 기억한다**.
+     * 일제 통화로 연 내 호 — 첫 서버 floor 메시지가 B-bit 를 싣는지 본다(`applyFloor`). 없으면 서버가 일반 통화로 연 것이다
+     * (진행 중 통화 합류 · 서버가 이 호 종류의 일제 통화를 받지 않음). 이벤트 스레드와 화면 스레드가 함께 쓴다.
+     */
+    internal val broadcastPending: MutableSet<Int> = java.util.Collections.synchronizedSet(HashSet())
+
+    /**
+     * 임시 그룹 참가자 — **앱이 기억한다**.
      *
      * 임시 그룹이라 서버에 편성이 없고 로스터 구독 대상도 아니다. 카드에 «3명» 을 적으려면 개설할 때
      * 실어 보낸 목록밖에 근거가 없다. 호가 끝나면 지운다.
@@ -983,6 +990,7 @@ class DispatchSession(
         _registrations.value = emptyMap()
         operations.clear()
         adhocMembers.clear()
+        broadcastPending.clear()
         _error.value = null
         _state.value = SessionState.LOGGED_OUT
     }
