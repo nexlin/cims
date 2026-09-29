@@ -763,6 +763,8 @@ struct SubscriptionInfo {
 핸들러 몫이다. **부여 Expires** = min(요청, `SUBSCRIBE_MAX_EXPIRES_SEC`=3600) — RFC 6665 §4.2.1.1 대로 notifier 가 짧게
 부여하고 2xx 의 `Expires` 가 부여값이다. 요청에 없으면 기본값 3600(`SUBSCRIBE_DEFAULT_EXPIRES_SEC`), `0` 은 해지,
 형식 오류(비숫자·2^32 초과)는 **400 Bad Request**(RFC 3261 §21.4.1). 제휴 PUBLISH 도 같은 규칙(RFC 3903 §4.1).
+
+**제휴 PUBLISH 는 두 형태를 받는다** — 규격형 `Event: presence`(TS 24.379 §9.2.2.2.3: R-URI=참여 기능 PSI, 본문 `application/pidf+xml` 이 제휴 그룹 **집합 전체** → 목록에 없는 그룹은 해제)와 구형 `Event: mcptt`(R-URI=그룹, 본문 affiliation-command+xml — 전환기 한시). 그 외 Event 는 489. 자세한 것은 [mcptt_standard_conformance.md](../features/mcptt_standard_conformance.md) C1.
 REGISTER 는 `GetRegisterExpires` 로 Contact `;expires` 를 Expires 헤더보다 우선해 읽고(§10.2.1.1), 둘 다 없으면
 `REGISTER_DEFAULT_EXPIRES_SEC`=3600(§10.2.4 — 없음은 해제가 아니다), 요청값은 그대로 수락하되 내부 표현(int 초)의
 범위로만 자른다(운영 상한은 별도 정책). 종전의 int + `-1`(미지정) 표지 구조는 `4294967295` 같은 값이 -1 로 넘쳐

@@ -1527,20 +1527,15 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
         CLog::Print( LOG_INFO, "PUBLISH from unregistered %s accepted by Digest identity", strFromId.c_str() );
     }
 
-    // F-05: Event 헤더 검증 — TS 24.379 §9는 "mcptt" 요구, 불일치 시 489 Bad Event
+    // Event 헤더 검증 — 두 형태를 받는다(전환기).
+    //   규격형 "presence" = TS 24.379 §9.2.2.2.3 (R-URI=참여 기능 PSI, 본문 pidf+xml 이 제휴 그룹 집합 전체).
+    //   구형   "mcptt"    = 우리 자체 규약 (R-URI=그룹, 본문 affiliation-command+xml). 우리 SDK·앱이 아직 이 형태다.
+    //   그 외는 RFC 6665 §8.2.1 대로 489 Bad Event.
     CSipHeader *pclsEventHdr = pclsMessage->GetHeader( "Event" );
-    if ( pclsEventHdr == NULL || pclsEventHdr->m_strValue != "mcptt" ) {
-        CLog::Print( LOG_ERROR, "PUBLISH Rejected: invalid or missing Event header (got '%s')",
-                     pclsEventHdr ? pclsEventHdr->m_strValue.c_str() : "" );
+    const std::string strEvent = pclsEventHdr ? pclsEventHdr->m_strValue : std::string();
+    if ( pclsEventHdr == NULL || ( strEvent != "mcptt" && strEvent != "presence" ) ) {
+        CLog::Print( LOG_ERROR, "PUBLISH Rejected: invalid or missing Event header (got '%s')", strEvent.c_str() );
         SendResponse( pclsMessage, 489 );
-        return true;
-    }
-
-    std::string strReqUriUser = pclsMessage->m_clsReqUri.m_strUser;
-    bool bAffiliation = !strReqUriUser.empty() && gclsGroupMap.Contains( strReqUriUser.c_str() );
-    if ( !bAffiliation ) {
-        // affiliation 대상(그룹) 아님 — 상태 없이 200 수용
-        SendResponse( pclsMessage, 200 );
         return true;
     }
 
@@ -1551,6 +1546,17 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
         strContactUri = szC;
     } else {
         strContactUri = szFromBuf;
+    }
+
+    // 규격형(Event: presence)은 R-URI 가 그룹이 아니라 참여 기능 PSI 라 아래 그룹 기반 경로를 탈 수 없다.
+    if ( strEvent == "presence" ) return RecvPublishAffiliationPidf( pclsMessage, strFromId, strContactUri );
+
+    std::string strReqUriUser = pclsMessage->m_clsReqUri.m_strUser;
+    bool bAffiliation = !strReqUriUser.empty() && gclsGroupMap.Contains( strReqUriUser.c_str() );
+    if ( !bAffiliation ) {
+        // affiliation 대상(그룹) 아님 — 상태 없이 200 수용
+        SendResponse( pclsMessage, 200 );
+        return true;
     }
 
     // ── C1: Content-Type 검증 + affiliation-command XML 파싱 (TS 24.379 §9) ──
@@ -1674,6 +1680,135 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
     if ( pclsResponse ) {
         pclsResponse->AddHeader( "SIP-ETag", szEtag );
         pclsResponse->AddHeader( "Expires", iExpires > 0 ? iExpires : 3600 );
+        gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
+    }
+    return true;
+}
+
+/**
+ * 규격형 제휴 PUBLISH — TS 24.379 §9.2.2.2.3 (Receiving affiliation status change from MCPTT client).
+ *
+ * 구형(Event: mcptt)과의 차이:
+ *   - Request-URI 가 참여 MCPTT 기능의 PSI 다(그룹이 아니다). 그래서 대상 그룹은 본문에서 읽는다.
+ *   - 본문 application/pidf+xml 이 **그 클라이언트의 제휴 그룹 집합 전체**를 싣는다(§9.3.1.2).
+ *     증분이 아니라 교체다 — 목록에 없어진 그룹은 해제한다(§9.2.2.2.3 14)a)ii).
+ *   - Expires:0 이면 그 클라이언트의 제휴를 전부 해제한다.
+ *
+ * 의도적 완화 두 가지(규격보다 관대하게 받는다 — 규격 클라이언트는 그대로 통과한다):
+ *   - §9.2.2.2.3 5) 는 Expires 가 4294967295 미만이면 423 을 요구하지만, 우리는 받아들이고
+ *     RFC 3903 §6 대로 서버가 짧게 부여한다(min(요청, SUBSCRIBE_MAX_EXPIRES_SEC)). 짧은 주기를
+ *     거절해서 얻을 것이 없고, 거절하면 멀쩡히 동작할 클라이언트를 막는다.
+ *   - N2(MaxAffiliationsN2) 상한은 적용하지 않는다. 우리 인가 축은 그룹 멤버십이다.
+ */
+bool CCscfModule::RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const std::string &strFromId,
+                                              const std::string &strContactUri ) {
+    // 부여 Expires — 형식 오류는 400 (RFC 3261 §21.4.1).
+    uint32_t uiReqExpires = 0;
+    const ESipExpiresResult eReqExpires = pclsMessage->GetExpires( uiReqExpires );
+    if ( eReqExpires == E_SIP_EXPIRES_INVALID ) return SendResponse( pclsMessage, SIP_BAD_REQUEST );
+    const bool bGiven = ( eReqExpires == E_SIP_EXPIRES_VALID );
+    const int iExpires =
+        bGiven ? ( uiReqExpires > (uint32_t)SUBSCRIBE_MAX_EXPIRES_SEC ? SUBSCRIBE_MAX_EXPIRES_SEC : (int)uiReqExpires )
+               : SUBSCRIBE_DEFAULT_EXPIRES_SEC;
+
+    const CMcpttPidfAffiliation clsPidf = ParsePidfAffiliation( pclsMessage->m_strBody );
+
+    // Expires:0 = 그 사용자의 제휴 전부 해제 (본문 유무 무관 — RFC 3903 의 remove).
+    if ( iExpires == 0 ) {
+        if ( gclsDbManager.IsConnected() ) {
+            gclsDbManager.RemoveAffiliationsByUser( strFromId );
+            _EmitAffiliationChanged( "", "de-affiliate", strFromId );
+            SendAffiliationNotify( strFromId );
+        }
+        CLog::Print( LOG_INFO, "[Affiliation/PUBLISH:pidf] de-affiliate ALL user=%s", strFromId.c_str() );
+        std::string strEtagKey = strFromId + ":#pidf";
+        {
+            std::unique_lock<std::mutex> lock( s_etagMutex );
+            s_mapEtag.erase( strEtagKey );
+        }
+        return SendResponse( pclsMessage, 200 );
+    }
+
+    // 본문이 pidf 가 아니면 이 절차를 수행할 수 없다(§9.2.2.2.3 조건 5).
+    if ( !clsPidf.bValid ) {
+        CLog::Print( LOG_ERROR, "[Affiliation/PUBLISH:pidf] 415: Event=presence 인데 pidf 본문 없음 user=%s (ct=%s/%s)",
+                     strFromId.c_str(), pclsMessage->m_clsContentType.m_strType.c_str(),
+                     pclsMessage->m_clsContentType.m_strSubType.c_str() );
+        return SendResponse( pclsMessage, 415 );
+    }
+
+    // §9.2.2.2.3 9) entity 가 처리 대상 MCPTT ID 와 다르면 이후 단계를 수행하지 않는다(200 은 준다).
+    if ( !clsPidf.strEntity.empty() && McpttBareId( clsPidf.strEntity ) != strFromId ) {
+        CLog::Print( LOG_INFO, "[Affiliation/PUBLISH:pidf] entity=%s ≠ 요청자 %s — 상태 변경 없이 200",
+                     clsPidf.strEntity.c_str(), strFromId.c_str() );
+        return SendResponse( pclsMessage, 200 );
+    }
+
+    // 원하는 제휴 집합(그룹 식별자) — URI 형(sip:g@d)·평문(g) 모두 수용.
+    std::vector<std::string> vecWant;
+    for ( const auto &strUri : clsPidf.vecGroups ) {
+        const std::string strId = McpttBareId( strUri );
+        if ( !strId.empty() && std::find( vecWant.begin(), vecWant.end(), strId ) == vecWant.end() )
+            vecWant.push_back( strId );
+    }
+
+    // 이 사용자가 멤버인 그룹 전체를 훑어 집합을 맞춘다 — 목록에 있으면 제휴, 없으면 해제.
+    //   (제휴는 멤버인 그룹에만 가능하므로 멤버 그룹 집합이 곧 해제 후보 집합이다.)
+    std::vector<std::string> vecMemberOf;
+    gclsGroupMap.IterateInternal( [&]( const CspPttGroup &clsGroup ) {
+        for ( const auto &pUser : clsGroup._pusers ) {
+            if ( pUser && ( pUser->_id == strFromId || McpttBareId( pUser->_mcpttId ) == strFromId ) ) {
+                vecMemberOf.push_back( clsGroup._id );
+                break;
+            }
+        }
+    } );
+
+    int iAff = 0, iDeaff = 0;
+    if ( gclsDbManager.IsConnected() ) {
+        for ( const auto &strGroup : vecMemberOf ) {
+            const bool bWanted = ( std::find( vecWant.begin(), vecWant.end(), strGroup ) != vecWant.end() );
+            if ( bWanted ) {
+                if ( gclsDbManager.InsertAffiliation( strGroup, strFromId, strContactUri, iExpires ) ) {
+                    _EmitAffiliationChanged( strGroup, "affiliate", strFromId );
+                    iAff++;
+                } else {
+                    CLog::Print( LOG_ERROR, "[Affiliation/PUBLISH:pidf] affiliate 미기록 user=%s group=%s",
+                                 strFromId.c_str(), strGroup.c_str() );
+                }
+            } else if ( gclsDbManager.IsAffiliated( strGroup, strFromId ) ) {
+                gclsDbManager.RemoveAffiliation( strGroup, strFromId, strContactUri );
+                _EmitAffiliationChanged( strGroup, "de-affiliate", strFromId );
+                iDeaff++;
+            }
+        }
+        SendAffiliationNotify( strFromId );
+    }
+
+    // 멤버가 아닌 그룹을 요청했으면 남긴다 — 요청 전체를 거절하지는 않는다(나머지는 정상 처리).
+    for ( const auto &strGroup : vecWant ) {
+        if ( std::find( vecMemberOf.begin(), vecMemberOf.end(), strGroup ) == vecMemberOf.end() )
+            CLog::Print( LOG_INFO, "[Affiliation/PUBLISH:pidf] skip: user=%s 는 group=%s 의 멤버가 아니다",
+                         strFromId.c_str(), strGroup.c_str() );
+    }
+    CLog::Print( LOG_INFO, "[Affiliation/PUBLISH:pidf] user=%s client=%s 요청 %d개 → 제휴 %d · 해제 %d (expires=%d)",
+                 strFromId.c_str(), clsPidf.strClientId.c_str(), (int)vecWant.size(), iAff, iDeaff, iExpires );
+
+    // SIP-ETag — 규격형 publication 은 그룹이 아니라 클라이언트 단위라 키를 따로 쓴다.
+    struct timespec ts;
+    clock_gettime( CLOCK_REALTIME, &ts );
+    char szEtag[64];
+    snprintf( szEtag, sizeof( szEtag ), "aff-%llx%08x",
+              (unsigned long long)ts.tv_sec * 1000ULL + (unsigned long long)ts.tv_nsec / 1000000ULL,
+              (unsigned)( ts.tv_nsec ^ (uintptr_t)pclsMessage ) );
+    {
+        std::unique_lock<std::mutex> lock( s_etagMutex );
+        s_mapEtag[strFromId + ":#pidf"] = szEtag;
+    }
+    CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( 200 );
+    if ( pclsResponse ) {
+        pclsResponse->AddHeader( "SIP-ETag", szEtag );
+        pclsResponse->AddHeader( "Expires", iExpires );
         gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
     }
     return true;

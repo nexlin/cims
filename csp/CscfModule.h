@@ -76,6 +76,10 @@ private:
     bool RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage );
     bool RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage );
     bool RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage );
+    /** 규격형 제휴 PUBLISH (Event: presence + application/pidf+xml, TS 24.379 §9.2.2.2.3).
+     *  pidf 가 그 클라이언트의 제휴 그룹 **집합 전체**를 싣는다 — 목록에 없는 기존 그룹은 해제한다. */
+    bool RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const std::string &strFromId,
+                                     const std::string &strContactUri );
 
     bool SendResponse( CSipMessage *pclsMessage, int iStatusCode );
     static bool SendResponseStatic( CSipMessage *pclsMessage, int iStatusCode );

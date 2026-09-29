@@ -27,7 +27,7 @@
 | F4 | floor 상태머신(T1/T2/T3/T7/T8/T20, pending Floor Revoke, 재요청·큐 안정성) | CMP | TS 24.380 §6.3.4 | ✅ 정합 |
 | F5 | 멤버 프로파일(MCPTT ID·mc_queueing·mc_granted)·Unicast Media Flow Control·Queued Floor Requests | CMP | TS 24.380 §6.3.5, §8.2.15~8.2.16 | ✅ 정합 |
 | F6 | floor SRTCP — 유니캐스트 leg 별 클라이언트 키(CSK) | CMP | TS 33.180 §9.4 / TS 24.380 §13.3.2 | ✅ 정합 (키 배포는 CSC KMS 연동 대기) |
-| C1 | affiliation PUBLISH = affiliation-command XML 파싱 + Content-Type | CSP | TS 24.379 §9 | ✅ 정합 |
+| C1 | affiliation PUBLISH — 규격형(Event: presence + pidf 집합 교체) + 구형(Event: mcptt + affiliation-command) 양립 | CSP | TS 24.379 §9.2.2.2.3, §9.3.1.2 | ✅ 정합 (구형은 전환기 한시) |
 | C2 | affiliation-info SUBSCRIBE/NOTIFY (presence) | CSP | TS 24.379 §9.3 | ✅ 정합 |
 | C3 | Resource-Priority namespace 정규화(단일값) | CSP | RFC 4412 | ✅ 정합 |
 | C4 | floor SDP `m=application` + `mcptt-floor-request-uri` | CSP | TS 24.380 §12 | ✅ 정합 |
@@ -314,14 +314,37 @@ Floor 코덱은 `cmp/PFloorCodec.cpp` 에 분리되어 있고(단말 `ptt-client
 근거: `csp/CscfModule.cpp`(affiliation/REGISTER/SUBSCRIBE), `csp/GroupCallService.cpp`(group call/SDP),
 `csp/CspServer.cpp`(NOTIFY), `csp/McpttInfo.h`(MCPTT 본문 파서).
 
-### C1. affiliation PUBLISH = affiliation-command XML 파싱
+### C1. affiliation PUBLISH — 규격형·구형 양립
 
-- **Event 헤더** `mcptt` 검증(불일치 489 Bad Event, `CscfModule.cpp` RecvRequestPublish).
-- **Content-Type** 강제: 본문이 있으면 `application/vnd.3gpp.mcptt-affiliation-command+xml` 아닌 경우 415.
-- **본문 파싱**: `ParseAffiliationCommand`(`McpttInfo.h`)가 `<actions>` 안의 `<affiliate>`/`<de-affiliate>`
-  **액션 요소**(시작태그 앵커)와 `group` 속성을 추출 — 텍스트 substring 이 아닌 요소 기반 판정. Expires:0
-  또는 de-affiliate 액션 → 해제. group 속성은 Req-URI 그룹과 교차검증.
-- 보존: 멤버십 게이트(비멤버 affiliate 403), REGISTER Expires:0 시 affiliation 정리.
+`Event` 헤더로 두 형태를 가른다(`CscfModule.cpp` `RecvRequestPublish`). 그 외 값은 489 Bad Event(RFC 6665 §8.2.1).
+
+**규격형 `Event: presence`** (TS 24.379 §9.2.2.2.3, `RecvPublishAffiliationPidf`) — Request-URI 는 참여 MCPTT
+기능의 PSI 라 대상 그룹을 본문에서 읽는다. 본문 `application/pidf+xml`(§9.3.1.2)은 **그 클라이언트의 제휴 그룹
+집합 전체**를 싣는다 — 증분이 아니라 **교체**다.
+
+- 파싱 `ParsePidfAffiliation`(`McpttInfo.h`): `<presence entity>`=MCPTT ID · `<tuple id>`=MCPTT client ID ·
+  `<affiliation group>` 집합. namespace prefix 무관, 태그·속성 경계를 확인해 유사 이름(`<affiliationX>`,
+  `groupStatus=`)과 종료태그를 배제한다(외부 XML 파서 비의존).
+- 적용: 멤버인 그룹을 훑어 목록에 있으면 제휴, 없으면 해제. `Expires: 0` 은 그 사용자의 제휴 전부 해제.
+  `entity` 가 요청자와 다르면 상태를 바꾸지 않고 200(§9.2.2.2.3 9). pidf 본문이 없으면 415.
+- **의도적 완화 둘** — 규격 클라이언트는 그대로 통과하고, 받아들이는 범위만 넓힌다:
+  §9.2.2.2.3 5) 의 "Expires 가 4294967295 미만이면 423" 을 적용하지 않고 RFC 3903 §6 대로 서버가 짧게
+  부여한다(min(요청, 상한)). N2(`MaxAffiliationsN2`) 상한도 적용하지 않는다 — 우리 인가 축은 그룹 멤버십이다.
+
+**구형 `Event: mcptt`** — 규격에 없는 자체 규약이며 **전환기 한시**다. Request-URI 가 그룹이고 본문은
+`application/vnd.3gpp.mcptt-affiliation-command+xml`(아니면 415). `ParseAffiliationCommand` 가 `<actions>` 안의
+`<affiliate>`/`<de-affiliate>` **액션 요소**(시작태그 앵커)와 `group` 속성을 추출한다. Expires:0 또는
+de-affiliate 액션 → 해제, group 속성은 Req-URI 그룹과 교차검증.
+
+> `application/vnd.3gpp.mcptt-affiliation-command+xml` 은 규격상 **다른 절차**의 본문이다(§9.2.1.4·§9.2.1.5 —
+> 협상 모드로 *타인*의 제휴를 바꾸라고 보내는 SIP MESSAGE, Annex F.4). 구형이 이 이름을 빌려 쓰고 있으므로,
+> 그 절차를 구현하기 전에 구형을 제거해야 한다.
+
+**이행 순서**: ①서버 양립(완료) → ②우리 SDK·앱을 규격형으로(`sdk/core/src/engine.cpp` 가 `Event: mcptt` +
+affiliation-command 를 보낸다) → ③구형 제거.
+
+- 보존: 멤버십 게이트(비멤버 affiliate 거절 — 규격형은 건너뛰고 로그, 구형은 403), REGISTER Expires:0 시 affiliation 정리.
+- 검증: `tests/csp_pidf_affiliation_test.cpp`(S1-UNIT-CSP).
 
 ### C2. affiliation-info SUBSCRIBE/NOTIFY (presence)
 

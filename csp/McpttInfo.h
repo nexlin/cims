@@ -105,6 +105,115 @@ inline CMcpttAffiliation ParseAffiliationCommand( const std::string &body ) {
     return out;
 }
 
+// ── per-user affiliation pidf 파싱 (application/pidf+xml, TS 24.379 §9.2.2.2.3 / §9.3.1.2) ──
+//  규격형 제휴 PUBLISH(Event: presence)의 본문. 구형 affiliation-command 와 달리 **그 클라이언트의
+//  제휴 그룹 집합 전체**를 싣는다 — 증분이 아니라 교체다(목록에 없는 기존 그룹은 해제 대상).
+//
+//  <presence xmlns="urn:ietf:params:xml:ns:pidf" entity="sip:user@domain">
+//    <tuple id="<MCPTT client ID>">
+//      <status>
+//        <affiliation xmlns="urn:3gpp:ns:mcpttPresInfo:1.0" group="sip:g001@domain"/>
+//        <affiliation group="sip:g002@domain"/>
+//      </status>
+//    </tuple>
+//  </presence>
+//
+//  entity = MCPTT ID, tuple@id = MCPTT client ID, affiliation@group = 그룹 URI.
+//  namespace prefix(mcpttPI10: 등) 무관 — 시작태그 이름을 경계까지 확인해 매칭한다.
+struct CMcpttPidfAffiliation {
+    bool bValid = false;                 // <presence> 루트를 찾음
+    std::string strEntity;               // <presence entity="...">  = MCPTT ID
+    std::string strClientId;             // <tuple id="...">         = MCPTT client ID
+    std::vector<std::string> vecGroups;  // <affiliation group="..."> 전체 (원하는 제휴 집합)
+};
+
+/** prefix 무관 시작태그 검색 — "<name" 또는 "<ns:name". 반환 = '<' 위치(없으면 npos).
+ *  종료태그("</name")와 접두가 겹치는 다른 이름("<affiliationX")은 배제한다. */
+inline size_t _McpttFindStartTag( const std::string &body, size_t from, const char *name ) {
+    const std::string n = name;
+    size_t p = from;
+    while ( ( p = body.find( n, p ) ) != std::string::npos ) {
+        const size_t after = p + n.size();
+        // 태그 이름의 끝 경계여야 한다 (속성 구분 공백 · '>' · 빈 요소 '/')
+        if ( after < body.size() && !( body[after] == ' ' || body[after] == '>' || body[after] == '/' ||
+                                       body[after] == '\t' || body[after] == '\r' || body[after] == '\n' ) ) {
+            p = after;
+            continue;
+        }
+        // 앞쪽은 '<' 이거나 "<prefix:" 여야 한다 (종료태그 '</' 는 배제된다)
+        size_t q = p;
+        while ( q > 0 && ( std::isalnum( (unsigned char)body[q - 1] ) || body[q - 1] == '_' || body[q - 1] == '-' ||
+                           body[q - 1] == '.' || body[q - 1] == ':' ) )
+            q--;
+        if ( q > 0 && body[q - 1] == '<' ) return q - 1;
+        p = after;
+    }
+    return std::string::npos;
+}
+
+/** 시작태그 구간(tagStart='<' 위치)에서 attr="value" 추출. attr 앞은 공백·뒤는 '=' 를 요구해
+ *  접두가 겹치는 다른 속성(group vs groupStatus)을 오매칭하지 않는다. 작은따옴표도 수용. */
+inline std::string _McpttTagAttr( const std::string &body, size_t tagStart, const char *attr ) {
+    size_t gt = body.find( '>', tagStart );
+    if ( gt == std::string::npos ) return "";
+    const std::string tag = body.substr( tagStart, gt - tagStart );
+    const std::string name = attr;
+    size_t p = 0;
+    while ( ( p = tag.find( name, p ) ) != std::string::npos ) {
+        const bool bLeftOk =
+            ( p > 0 && ( tag[p - 1] == ' ' || tag[p - 1] == '\t' || tag[p - 1] == '\r' || tag[p - 1] == '\n' ) );
+        size_t q = p + name.size();
+        while ( q < tag.size() && ( tag[q] == ' ' || tag[q] == '\t' ) ) q++;
+        if ( bLeftOk && q < tag.size() && tag[q] == '=' ) {
+            size_t q1 = tag.find_first_of( "\"'", q );
+            if ( q1 == std::string::npos ) return "";
+            const char cQuote = tag[q1];
+            size_t q2 = tag.find( cQuote, q1 + 1 );
+            if ( q2 == std::string::npos ) return "";
+            return tag.substr( q1 + 1, q2 - q1 - 1 );
+        }
+        p += name.size();
+    }
+    return "";
+}
+
+inline CMcpttPidfAffiliation ParsePidfAffiliation( const std::string &body ) {
+    CMcpttPidfAffiliation out;
+    if ( body.empty() ) return out;
+    const size_t pres = _McpttFindStartTag( body, 0, "presence" );
+    if ( pres == std::string::npos ) return out;
+    out.bValid = true;
+    out.strEntity = _McpttTagAttr( body, pres, "entity" );
+    const size_t tup = _McpttFindStartTag( body, pres, "tuple" );
+    if ( tup != std::string::npos ) out.strClientId = _McpttTagAttr( body, tup, "id" );
+    size_t p = pres;
+    while ( ( p = _McpttFindStartTag( body, p, "affiliation" ) ) != std::string::npos ) {
+        const std::string g = _McpttTagAttr( body, p, "group" );
+        if ( !g.empty() && std::find( out.vecGroups.begin(), out.vecGroups.end(), g ) == out.vecGroups.end() )
+            out.vecGroups.push_back( g );
+        p += 12;  // strlen("affiliation") + 1 — 같은 태그 재매칭 방지
+    }
+    return out;
+}
+
+/** 그룹/사용자 URI 에서 식별자(user part)만 뽑는다 — "sip:g001@d"·"tel:+8250…"·"g001" 모두 수용. */
+inline std::string McpttBareId( const std::string &uri ) {
+    std::string s = uri;
+    const size_t a = s.find_first_not_of( " \t\r\n<" );
+    if ( a != std::string::npos ) s = s.substr( a );
+    const size_t z = s.find_last_not_of( " \t\r\n>" );
+    if ( z != std::string::npos ) s = s.substr( 0, z + 1 );
+    const size_t c = s.find( ':' );
+    if ( c != std::string::npos &&
+         ( s.compare( 0, 4, "sip:" ) == 0 || s.compare( 0, 5, "sips:" ) == 0 || s.compare( 0, 4, "tel:" ) == 0 ) )
+        s = s.substr( c + 1 );
+    const size_t at = s.find( '@' );
+    if ( at != std::string::npos ) s = s.substr( 0, at );
+    const size_t sc = s.find( ';' );
+    if ( sc != std::string::npos ) s = s.substr( 0, sc );
+    return s;
+}
+
 // 멀티파트 바디의 resource-lists+xml part 에서 멤버 식별자(tel: 뒤 숫자/+) 추출.
 //  ad hoc 그룹콜(TS 22.179 Rel-18): 개시자가 INVITE 에 동적 멤버 목록을 실어 보냄.
 //  mcptt-info part 의 tel: 는 제외(resource-lists 구간만 스캔).

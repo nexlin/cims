@@ -7,6 +7,8 @@
                                    첫 전환 index=1/1.1 mp=1 cause=302 · 연쇄 · 수신 값 이어 붙이기 · 전환 수(cause 항목) · 항목 분리 · URI 조립
   · tests/csp_call_dir_test.cpp    통화·세션 기록 경로(csp/CallDir.h — site_directory_layout.md): 녹취·상태·통계 영역 분리 ·
                                    영역 키가 비었을 때 단일 루트 규칙(include/SiteLayout.h)
+  · tests/csp_pidf_affiliation_test.cpp  규격형 제휴 PUBLISH 의 pidf 본문 파싱(csp/McpttInfo.h — TS 24.379 §9.3.1.2):
+      entity·tuple@id·affiliation@group 집합 추출, prefix 무관 매칭, 유사 이름/속성 오매칭 배제.
   · tests/csp_rule_field_test.cpp  Rule field `<원천>.<부분>`(csp/CspRuleField.cpp — sip_service_model.md §2-5, RFC 3261 §7.3 ·
                                    §19.1.4 · §20.10, RFC 3325): 헤더 이름 대소문자·compact form · 여러 값 · host 대소문자 ·
                                    user %xx · 믿지 않는 원천의 PAI 무시 · 옛 이름 종전 값
@@ -34,6 +36,8 @@ _TESTS = {
     "tests/csp_call_dir_test.cpp": ([], ["libSipPlatform.a"]),
     # Rule field 해석 — psip 파서로 만든 메시지에서 헤더·부분을 꺼낸다 (in_range 는 CspDialPlan)
     "tests/csp_rule_field_test.cpp": (["csp/CspRuleField.cpp", "csp/CspDialPlan.cpp"], ["libSipParser.a", "libSipPlatform.a"]),
+    # 제휴 pidf 파싱 — 헤더 전용(McpttInfo.h inline), 링크 대상 없음
+    "tests/csp_pidf_affiliation_test.cpp": ([], []),
 }
 _INCS = ["csp", "include", "ext/psip/SipParser", "ext/psip/SipPlatform"]
 
