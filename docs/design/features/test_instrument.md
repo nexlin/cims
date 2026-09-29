@@ -125,6 +125,7 @@ cspsim/                   libcsim(SimSession·RtpThread 추출) + cspsim CLI(전
 | `ue` | 가입자(DB `*_subscriptions` 또는 creds JSONL — cspsim `-db`/`-creds` 승계) | REGISTER (Digest/AKA, sec-agree, IPsec, TLS) | UE 마다 포트 | RTP/SRTP 송수신·측정 | 접속 서비스 시험·부하 |
 | `peer` | 도메인 하나 + 가상 신원 범위(DID/내선/E.164) | 없음(고정 IP) 또는 트렁크 REGISTER(PBX 프로파일) | **풀당 하나**(CSP `remote_nodes` 가 가리키는 ip:port:protocol) | 신원별 RTP | IBCF·PBX·MGCF 시뮬레이션 |
 | `real-ue` | 가입자(creds JSONL 또는 DB — `ue` 와 같은 원천, Digest 만) | REGISTER (프로세스가 낸다) | 프로세스당 1(pjsua 임의 포트) | pjsua2 실코덱·지터버퍼·SRTP | 정합 표본 검사(소수 — 워커 `RealUe.MaxProcesses`) |
+| `device` (설계) | 시험 모드를 켠 **실단말**(번호 목록) | 앱 소유(단말 자신) | 단말 자신 — 워커와는 단말이 먼저 붙는 TLS 계측 링크(`Device.Listen`) | 단말 실스택 — 품질은 링크 `quality` 이벤트 | 현장 실단말 표본 — `real-ue` 와 같은 drive 프로토콜로 단계 구동, 정본 [ue_voice_quality.md](ue_voice_quality.md) §5·§6 |
 
 ### 3.1 `ue` 풀
 

@@ -526,6 +526,8 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
   — pjproject 에 U10 서브스트림 관측 API(SSRC 별 수신 활성·레벨)를 추가해야 `MediaSources.active/level` 이 채워진다.
 - **호 전달 후 누적 통계** — 전달로 미디어 스트림이 재생성되면 마지막 소멸 스트림의 통계만 남는다(스트림별 누적 합산은 후속).
 - **remote-init ambient listening·barge-in** — 서버 §10 과제와 함께 코어 API 확장.
+- **음성 품질 측정·시험 모드 계측기 링크** — 코어 `quality/`(RTCP-XR·G.107/G.107.1 E-model·`callQuality`)·drive 루프의 코어 이전
+  (`drive/` `DriveSession` — stdin/stdout 과 TLS 계측 링크 공용)·`cimsue-cli --link` 는 [ue_voice_quality.md](ue_voice_quality.md) 가 정본(설계, 미구현).
 - **cspsim 과 `cimsue-cli` 의 역할 분담 장기안** — 시뮬레이터 축(부하·다중 단말)과 실스택 축(정합)의 S3 항목 배분.
 
 ## 12. 문서 갱신 대상 (구현과 같은 변경에서)
